@@ -1,0 +1,68 @@
+#
+# systemd-Unit für die autonome KI-Trading-Firma
+#
+# Installation:
+#   sudo cp deploy/ai-trading-firm.service /etc/systemd/system/
+#   sudo nano /etc/systemd/system/ai-trading-firm.service   # User + Pfade anpassen!
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ai-trading-firm
+#
+# Logs:
+#   journalctl -u ai-trading-firm -f
+#
+[Unit]
+Description=Autonome KI-Trading-Firma (Paper-Trading)
+Documentation=file:///home/DEIN_USER/ai-trading-firm/docs/HANDBUCH.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Bei Variante A läuft Ollama lokal — dann diese Zeile aktivieren:
+# After=ollama.service
+
+[Service]
+Type=simple
+
+# ---- ANPASSEN ----
+User=DEIN_USER
+Group=DEIN_USER
+WorkingDirectory=/home/DEIN_USER/ai-trading-firm
+# ------------------
+
+EnvironmentFile=/home/DEIN_USER/ai-trading-firm/.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+ExecStart=/usr/bin/npm run start
+
+# Neustartverhalten: der Dienst soll hartnäckig sein, aber nicht in einer
+# Absturzschleife den Rechner belasten.
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Sauberes Herunterfahren, damit offene DB-Transaktionen abschließen können.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# ---- Härtung ----
+# Der Dienst braucht kein Root, keine fremden Verzeichnisse und keine neuen Rechte.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/DEIN_USER/ai-trading-firm
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# Speicherbremse: verhindert, dass ein Leck den N150 in den Swap treibt.
+MemoryMax=2G
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trading-firm
+
+[Install]
+WantedBy=multi-user.target
