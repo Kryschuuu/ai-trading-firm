@@ -1,39 +1,80 @@
 /**
- * Lokaler LLM-Client für Ollama.
+ * LLM-Schicht der Trading-Firma.
  *
- * Hält die KI-Schicht vollständig lokal und open source: keine Cloud, keine API-Keys,
- * kein Datenabfluss. Ist Ollama (oder das gewünschte Modell) nicht erreichbar, greift
- * eine deterministische Regel-Engine, damit die komplette Orchestrierungs- und
- * Guardrail-Pipeline auch ohne GPU/Modell nachvollziehbar bleibt.
+ * Diese Datei ist die Kompatibilitäts- und Orchestrierungsschicht über der
+ * Provider-Abstraktion in `src/lib/llmProvider.ts`:
+ *
+ *   llmProvider.ts   → Client-Bau, Retries, Provider-Kette, Kosten (neu)
+ *   ollama.ts        → Entscheidungs-Schema, Temperatur pro Rolle,
+ *                      Regel-Engine-Fallback, Status-Cache (API stabil)
+ *
+ * Unterstützte Provider (konfigurierbar via .env):
+ *   ollama    → nativer Ollama-Server (Standard, Variante A und B-CPU)
+ *   openai    → jeder OpenAI-kompatible Endpunkt: llama.cpp `llama-server`,
+ *               LM Studio, vLLM, LocalAI — oder ein Cloud-Anbieter
+ *   gemini    → Google Gemini (GEMINI_API_KEY)
+ *   anthropic → Anthropic Claude (ANTHROPIC_API_KEY)
+ *
+ * Fallback-Kette primär + Fallbacks: LLM_PROVIDER + LLM_FALLBACK_PROVIDERS.
+ * Ist kein Provider erreichbar, greift die deterministische Regel-Engine,
+ * damit die komplette Orchestrierungs- und Guardrail-Pipeline auch ohne
+ * GPU/Modell nachvollziehbar bleibt.
  */
+import {
+  chatLlm,
+  createLlmClient,
+  resolveProviderChain,
+  type LlmChatRequest,
+  type LlmMessage,
+  type LlmProviderName,
+  type LlmUsage,
+} from "./llmProvider";
 
+export type { LlmProviderName, LlmUsage } from "./llmProvider";
+
+/** @deprecated Nur noch Abwärtskompatibilität — bitte LlmProviderName nutzen. */
 export type LlmProvider = "ollama" | "openai";
 
 /**
- * Provider-Wahl:
- *   ollama  → nativer Ollama-Server (Standard, Variante A und B-CPU)
- *   openai  → jeder OpenAI-kompatible Endpunkt: llama.cpp `llama-server`,
- *             LM Studio, vLLM, LocalAI — nötig für die RX 480 per Vulkan,
- *             und zugleich der Weg für einen optionalen Cloud-Fallback.
+ * Provider-Wahl (Abwärtskompatibel): liefert "openai", wenn der aktive
+ * Provider der OpenAI-kompatible ist, sonst "ollama".
  */
 export function getProvider(): LlmProvider {
-  return (process.env.LLM_PROVIDER || "ollama").toLowerCase() === "openai" ? "openai" : "ollama";
+  const active = resolveProviderChain()[0];
+  return active === "openai" ? "openai" : "ollama";
 }
 
 export function getBaseUrl(): string {
-  if (getProvider() === "openai") {
-    return process.env.LLM_BASE_URL || "http://127.0.0.1:8080/v1";
+  return configBaseUrl(resolveProviderChain()[0]);
+}
+
+/** Basis-URL des aktiven Providers (fürs Dashboard/Logs). */
+export function getActiveBaseUrl(): string {
+  return configBaseUrl(resolveProviderChain()[0]);
+}
+
+function configBaseUrl(provider: LlmProviderName): string {
+  switch (provider) {
+    case "ollama":
+      return process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+    case "openai":
+      return process.env.LLM_BASE_URL || "http://127.0.0.1:8080/v1";
+    case "gemini":
+      return process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
+    case "anthropic":
+      return process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com/v1";
   }
-  return process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 }
 
 export type OllamaStatus = {
   available: boolean;
-  provider: LlmProvider;
+  provider: LlmProviderName;
   baseUrl: string;
   models: string[];
   error?: string;
   checkedAt: string;
+  /** Provider-Kette (primär → Fallbacks) fürs Dashboard. */
+  chain: LlmProviderName[];
 };
 
 const GLOBAL = globalThis as typeof globalThis & {
@@ -43,6 +84,7 @@ const GLOBAL = globalThis as typeof globalThis & {
 /** Statuscache, damit das Dashboard nicht bei jedem Poll blockiert. */
 const CACHE_TTL_MS = 15_000;
 
+/** Prüft den aktiven Provider (Modelle auflisten) und cachet das Ergebnis. */
 export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
   const cached = GLOBAL.__ollamaCache;
   if (
@@ -53,30 +95,15 @@ export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
     return cached;
   }
 
-  const provider = getProvider();
-  const baseUrl = getBaseUrl();
+  const chain = resolveProviderChain();
+  // KORRIGIERT (Peer-Review v1.3.0): listModels wirft jetzt bei Fehlern
+  // (eigener Timeout im Client) — "available" wird nur noch bei echtem Erfolg
+  // true, nie mehr stillschweigend mit leerer Modellliste.
+  const provider = chain[0];
+  const baseUrl = configBaseUrl(provider);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2500);
-    const url = provider === "openai" ? `${baseUrl}/models` : `${baseUrl}/api/tags`;
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      cache: "no-store",
-      headers: process.env.LLM_API_KEY
-        ? { Authorization: `Bearer ${process.env.LLM_API_KEY}` }
-        : undefined,
-    });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = (await res.json()) as {
-      models?: { name: string }[];
-      data?: { id: string }[];
-    };
-    const models =
-      provider === "openai"
-        ? (data.data ?? []).map((m) => m.id)
-        : (data.models ?? []).map((m) => m.name);
+    const client = createLlmClient(provider);
+    const models = await client.listModels();
 
     const status: OllamaStatus = {
       available: true,
@@ -84,6 +111,7 @@ export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
       baseUrl,
       models,
       checkedAt: new Date().toISOString(),
+      chain,
     };
     GLOBAL.__ollamaCache = status;
     return status;
@@ -95,13 +123,14 @@ export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
       models: [],
       error: e instanceof Error ? e.message : "unknown",
       checkedAt: new Date().toISOString(),
+      chain,
     };
     GLOBAL.__ollamaCache = status;
     return status;
   }
 }
 
-export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type ChatMessage = LlmMessage;
 
 /** Findet einen installierten Tag, auch wenn nur die Modellfamilie angegeben wurde. */
 export function resolveModelTag(models: string[], wanted: string): string | null {
@@ -110,84 +139,31 @@ export function resolveModelTag(models: string[], wanted: string): string | null
   return models.find((m) => m === family || m.startsWith(`${family}:`)) ?? null;
 }
 
+/**
+ * Legacy-Wrapper: direkter Chat mit dem aktiven LLM-Provider ohne Kette.
+ * Neuer Code nutzt `chatLlm` (siehe llmProvider.ts).
+ */
 export async function ollamaChat(opts: {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
   numCtx?: number;
   json?: boolean;
-  /** JSON-Schema für Structured Outputs (Ollama ≥0.5 bzw. OpenAI-kompatibel). */
   schema?: Record<string, unknown>;
   timeoutMs?: number;
 }): Promise<string> {
-  const provider = getProvider();
-  const baseUrl = getBaseUrl();
-  const wantJson = opts.json !== false;
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(
-    () => ctrl.abort(),
-    opts.timeoutMs ?? Number(process.env.LLM_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT_MS || 180_000)
-  );
-
-  try {
-    if (provider === "openai") {
-      // llama.cpp `llama-server`, LM Studio, vLLM, LocalAI oder Cloud-Fallback.
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(process.env.LLM_API_KEY
-            ? { Authorization: `Bearer ${process.env.LLM_API_KEY}` }
-            : {}),
-        },
-        body: JSON.stringify({
-          model: opts.model,
-          messages: opts.messages,
-          temperature: opts.temperature ?? 0.2,
-          stream: false,
-          ...(wantJson
-            ? {
-                response_format: opts.schema
-                  ? { type: "json_schema", json_schema: { name: "decision", schema: opts.schema } }
-                  : { type: "json_object" },
-              }
-            : {}),
-        }),
-        signal: ctrl.signal,
-      });
-      if (!res.ok) throw new Error(`LLM chat failed: HTTP ${res.status}`);
-      const data = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      return data.choices?.[0]?.message?.content ?? "";
-    }
-
-    const body: Record<string, unknown> = {
-      model: opts.model,
-      messages: opts.messages,
-      stream: false,
-      options: {
-        temperature: opts.temperature ?? 0.2,
-        num_ctx: opts.numCtx ?? Number(process.env.OLLAMA_NUM_CTX || 4096),
-      },
-    };
-    // Structured Outputs: Schema erzwingt gültiges JSON auf Sampling-Ebene —
-    // der wichtigste Zuverlässigkeitshebel bei kleinen Modellen.
-    if (wantJson) body.format = opts.schema ?? "json";
-
-    const res = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`Ollama chat failed: HTTP ${res.status}`);
-    const data = (await res.json()) as { message?: { content?: string } };
-    return data.message?.content ?? "";
-  } finally {
-    clearTimeout(timer);
-  }
+  const provider = resolveProviderChain()[0];
+  const client = createLlmClient(provider);
+  const req: LlmChatRequest = {
+    model: opts.model,
+    messages: opts.messages,
+    temperature: opts.temperature,
+    json: opts.json,
+    schema: opts.schema,
+    timeoutMs: opts.timeoutMs,
+  };
+  const result = await client.chat(req);
+  return result.content;
 }
 
 export type ReasonResult = {
@@ -195,6 +171,11 @@ export type ReasonResult = {
   source: "ollama" | "fallback";
   model: string;
   latencyMs: number;
+  /** Verbrauchte Tokens (falls Provider sie liefert) — für Kosten/Performance. */
+  usage?: LlmUsage;
+  /** Geschätzte Kosten in USD (0 bei lokalen Providern). */
+  costUsd?: number;
+  provider?: LlmProviderName;
 };
 
 /** Entscheidungs-Schema für Structured Outputs — gilt für alle Rollen. */
@@ -228,8 +209,12 @@ function temperatureForRole(role: string): number {
 }
 
 /**
- * Das „lokale Gehirn“ der Agenten. Nutzt Ollama wenn verfügbar, sonst die
- * deterministische Regel-Engine.
+ * Das „lokale Gehirn“ der Agenten. Nutzt die Provider-Kette (primär + Fallbacks)
+ * mit Retry; scheitert alles, greift die deterministische Regel-Engine.
+ *
+ * Cost/Performance: LLM_MAX_TOKENS begrenzt jeden Aufruf (Standard 512),
+ * LLM_MAX_ATTEMPTS steuert die Retry-Kosten, die Provider-Reihenfolge in
+ * LLM_FALLBACK_PROVIDERS erlaubt billige/lokale zuerst.
  */
 export async function localReason(
   model: string,
@@ -239,17 +224,13 @@ export async function localReason(
   opts?: { schema?: Record<string, unknown>; temperature?: number }
 ): Promise<ReasonResult> {
   const started = Date.now();
+  const env = process.env;
+  const chain = resolveProviderChain(env);
+
+  // Schneller Weg: nur ein Provider konfiguriert UND nicht erreichbar →
+  // sofort Regel-Engine, ohne einen zweiten (langen) Timeout zu riskieren.
   const status = await getOllamaStatus();
-
-  // Bei OpenAI-kompatiblen Servern (llama.cpp/LM Studio) heißt das Modell oft anders
-  // als der Ollama-Tag → explizites LLM_MODEL oder das erste angebotene Modell nutzen.
-  const tag = !status.available
-    ? null
-    : status.provider === "openai"
-      ? process.env.LLM_MODEL || resolveModelTag(status.models, model) || status.models[0] || model
-      : resolveModelTag(status.models, model);
-
-  if (!status.available || !tag) {
+  if (!status.available && chain.length <= 1) {
     return {
       raw: fallbackReason(role, userPrompt),
       source: "fallback",
@@ -259,8 +240,8 @@ export async function localReason(
   }
 
   try {
-    const raw = await ollamaChat({
-      model: tag,
+    const req: LlmChatRequest = {
+      model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -269,14 +250,25 @@ export async function localReason(
       // Eigenes Schema (z. B. Analysten) hat Vorrang vor dem Entscheidungsschema.
       schema: opts?.schema ?? DECISION_SCHEMA,
       temperature: opts?.temperature ?? temperatureForRole(role),
-    });
-    return { raw, source: "ollama", model: tag, latencyMs: Date.now() - started };
+      maxTokens: Number(env.LLM_MAX_TOKENS || 512),
+      timeoutMs: Number(env.LLM_TIMEOUT_MS || env.OLLAMA_TIMEOUT_MS || 180_000),
+    };
+    const result = await chatLlm(req, { env });
+    return {
+      raw: result.content,
+      source: "ollama",
+      model: result.model,
+      latencyMs: Date.now() - started,
+      usage: result.usage,
+      costUsd: result.costUsd,
+      provider: result.provider,
+    };
   } catch (e) {
     console.warn("[localReason] LLM-Aufruf fehlgeschlagen, nutze Regel-Engine:", e);
     return {
       raw: fallbackReason(role, userPrompt),
       source: "fallback",
-      model: `${tag} (Fehler → Regel-Engine)`,
+      model: `${model} (Fehler → Regel-Engine)`,
       latencyMs: Date.now() - started,
     };
   }
