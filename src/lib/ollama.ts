@@ -116,6 +116,8 @@ export async function ollamaChat(opts: {
   temperature?: number;
   numCtx?: number;
   json?: boolean;
+  /** JSON-Schema für Structured Outputs (Ollama ≥0.5 bzw. OpenAI-kompatibel). */
+  schema?: Record<string, unknown>;
   timeoutMs?: number;
 }): Promise<string> {
   const provider = getProvider();
@@ -144,7 +146,13 @@ export async function ollamaChat(opts: {
           messages: opts.messages,
           temperature: opts.temperature ?? 0.2,
           stream: false,
-          ...(wantJson ? { response_format: { type: "json_object" } } : {}),
+          ...(wantJson
+            ? {
+                response_format: opts.schema
+                  ? { type: "json_schema", json_schema: { name: "decision", schema: opts.schema } }
+                  : { type: "json_object" },
+              }
+            : {}),
         }),
         signal: ctrl.signal,
       });
@@ -164,8 +172,9 @@ export async function ollamaChat(opts: {
         num_ctx: opts.numCtx ?? Number(process.env.OLLAMA_NUM_CTX || 4096),
       },
     };
-    // Erzwingt valides JSON — der wichtigste Zuverlässigkeitshebel bei kleinen Modellen.
-    if (wantJson) body.format = "json";
+    // Structured Outputs: Schema erzwingt gültiges JSON auf Sampling-Ebene —
+    // der wichtigste Zuverlässigkeitshebel bei kleinen Modellen.
+    if (wantJson) body.format = opts.schema ?? "json";
 
     const res = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -188,6 +197,36 @@ export type ReasonResult = {
   latencyMs: number;
 };
 
+/** Entscheidungs-Schema für Structured Outputs — gilt für alle Rollen. */
+export const DECISION_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    type: { type: "string", enum: ["TRADE", "HOLD", "REPORT", "APPROVE", "REJECT", "KILL"] },
+    symbol: { type: "string" },
+    side: { type: "string", enum: ["LONG", "SHORT"] },
+    stopLossPct: { type: "number" },
+    reason: { type: "string" },
+    riskScore: { type: "number" },
+  },
+  required: ["type", "reason"],
+};
+
+/**
+ * Temperature pro Rolle: Ausführende/prüfende Rollen müssen deterministisch
+ * arbeiten (0.1), CEO und Research dürfen etwas mehr abwägen (0.3).
+ */
+function temperatureForRole(role: string): number {
+  switch (role.toUpperCase()) {
+    case "EXECUTOR":
+    case "RISK_MANAGER":
+    case "APPROVER":
+    case "BACKTEST":
+      return 0.1;
+    default:
+      return 0.3;
+  }
+}
+
 /**
  * Das „lokale Gehirn“ der Agenten. Nutzt Ollama wenn verfügbar, sonst die
  * deterministische Regel-Engine.
@@ -196,7 +235,8 @@ export async function localReason(
   model: string,
   systemPrompt: string,
   userPrompt: string,
-  role: string
+  role: string,
+  opts?: { schema?: Record<string, unknown>; temperature?: number }
 ): Promise<ReasonResult> {
   const started = Date.now();
   const status = await getOllamaStatus();
@@ -226,6 +266,9 @@ export async function localReason(
         { role: "user", content: userPrompt },
       ],
       json: true,
+      // Eigenes Schema (z. B. Analysten) hat Vorrang vor dem Entscheidungsschema.
+      schema: opts?.schema ?? DECISION_SCHEMA,
+      temperature: opts?.temperature ?? temperatureForRole(role),
     });
     return { raw, source: "ollama", model: tag, latencyMs: Date.now() - started };
   } catch (e) {

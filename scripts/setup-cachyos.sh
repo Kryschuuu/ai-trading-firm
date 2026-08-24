@@ -196,10 +196,51 @@ fi
 # -------------------------------------------------------- 5. Abhängigkeiten
 info "Schritt 5/6 — Abhängigkeiten und Datenbankschema"
 run npm install
-run npx drizzle-kit push
-TABLES="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';")"
-(( TABLES >= 7 )) || die "Es wurden nur ${TABLES} Tabellen angelegt — erwartet: 8."
+
+# ---- Workaround: Schema-Push auf die richtige Datenbank sicherstellen ----
+#
+# Problem (tritt bei Variante B und bei frischen Installationen auf):
+#   Frühere Versionen nutzten drizzle.config.json mit einer hardcodierten URL
+#   (postgresql://postgres:postgres@127.0.0.1:5432/app_db). Auf dem N150 mit
+#   anderer DB-Konfiguration zeigte der Push auf die falsche Datenbank — die
+#   Tabellen wurden dort angelegt, nicht in der echten trading_firm-DB.
+#   Ergebnis: "relation 'positions' does not exist" beim ersten Start.
+#
+# Lösung: Das Projekt nutzt jetzt drizzle.config.ts, das DATABASE_URL aus .env
+#   liest. Als Absicherung übergeben wir die URL zusätzlich explizit über die
+#   Umgebungsvariable, damit auch ein etwaiges altes .json-File keine Chance hat.
+#
+echo "    ${C_BOLD}\$ DATABASE_URL=${DATABASE_URL} npx drizzle-kit push --force${C_RESET}"
+DATABASE_URL="${DATABASE_URL}" npx drizzle-kit push --force
+
+# Verifizieren (mit Retry, weil PostgreSQL kurz brauchen kann)
+TABLES=""
+for attempt in 1 2 3; do
+  sleep 1
+  TABLES="$(psql "$DATABASE_URL" -tAc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo 0)"
+  (( TABLES >= 7 )) && break
+  warn "Versuch ${attempt}/3: Tabellen noch nicht vollständig (${TABLES} vorhanden)…"
+done
+(( TABLES >= 7 )) || die \
+  "Nur ${TABLES} Tabellen angelegt (erwartet: 8). Prüfe DATABASE_URL in .env.\n" \
+  "  Mögliche Ursache: PostgreSQL läuft nicht, falsches Passwort, oder Netzwerk.\n" \
+  "  Debug: psql \"${DATABASE_URL}\" -c '\\dt'"
+
 ok "${TABLES} Tabellen vorhanden."
+
+# stop_loss-Spalte explizit prüfen (war in älteren Versionen nicht im Schema)
+STOPLOSS_COL="$(psql "$DATABASE_URL" -tAc \
+  "SELECT count(*) FROM information_schema.columns
+   WHERE table_name='positions' AND column_name='stop_loss';" 2>/dev/null || echo 0)"
+if (( STOPLOSS_COL < 1 )); then
+  warn "Spalte 'stop_loss' fehlt in 'positions' — Schema veraltet."
+  warn "Führe nochmals 'npx drizzle-kit push --force' aus."
+  DATABASE_URL="${DATABASE_URL}" npx drizzle-kit push --force
+  ok "Schema erneut angewendet."
+else
+  ok "Spalte 'stop_loss' vorhanden."
+fi
 
 # ------------------------------------------------------------------ 6. Build
 info "Schritt 6/6 — Anwendung bauen"

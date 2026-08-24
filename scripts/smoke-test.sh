@@ -9,6 +9,12 @@
 set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:3000}"
+# Optional: FIRM_API_TOKEN aus .env lesen, wenn vorhanden
+if [[ -z "${FIRM_API_TOKEN:-}" && -f ".env" ]]; then
+  FIRM_API_TOKEN="$(grep -E '^FIRM_API_TOKEN=' .env | cut -d= -f2- | tr -d '"' || true)"
+fi
+AUTH=()
+[[ -n "${FIRM_API_TOKEN:-}" ]] && AUTH=(-H "x-firm-token: ${FIRM_API_TOKEN}")
 PASS=0; FAIL=0
 
 C_RESET=$'\e[0m'; C_BOLD=$'\e[1m'; C_GREEN=$'\e[32m'
@@ -34,6 +40,30 @@ command -v jq >/dev/null || { echo "${C_RED}jq wird benötigt: sudo pacman -S jq
 # ------------------------------------------------------------- 1. Erreichbar
 echo "${C_CYAN}1. Dienst${C_RESET}"
 check "Healthcheck antwortet" curl -sf --max-time 5 "${BASE_URL}/api/health"
+
+HEALTH="$(curl -s --max-time 5 "${BASE_URL}/api/health" 2>/dev/null)"
+HEALTH_STATUS="$(jq -r '.status // "UNKNOWN"' <<<"${HEALTH:-{}}" 2>/dev/null)"
+
+if [[ "$HEALTH_STATUS" == "SCHEMA_MISSING" ]]; then
+  echo
+  echo "${C_RED}╔══════════════════════════════════════════════════════════╗${C_RESET}"
+  echo "${C_RED}║  SETUP ERFORDERLICH: Datenbanktabellen fehlen            ║${C_RESET}"
+  echo "${C_RED}╚══════════════════════════════════════════════════════════╝${C_RESET}"
+  echo
+  echo "  Fehlende Tabellen:"
+  jq -r '.missingTables[]? | "    - \(.)"' <<<"$HEALTH"
+  echo
+  echo "  Lösung (im Projektstamm ausführen):"
+  echo
+  echo "    ${C_BOLD}npx drizzle-kit push${C_RESET}"
+  echo
+  echo "  Dann den Dienst neu starten und diesen Test erneut ausführen."
+  echo
+  echo "  Häufige Ursache bei Variante B: .env noch nicht angelegt oder"
+  echo "  DATABASE_URL zeigt auf die falsche Datenbank."
+  exit 1
+fi
+
 check "Firmenzustand abrufbar" curl -sf --max-time 10 "${BASE_URL}/api/firm"
 
 STATE="$(curl -s --max-time 10 "${BASE_URL}/api/firm" 2>/dev/null)"
@@ -46,7 +76,7 @@ fi
 # ------------------------------------------------------------------ 2. Seed
 echo
 echo "${C_CYAN}2. Stammdaten${C_RESET}"
-curl -sf -X POST "${BASE_URL}/api/seed" >/dev/null 2>&1
+curl -sf -X POST "${BASE_URL}/api/seed" "${AUTH[@]}" >/dev/null 2>&1
 STATE="$(curl -s "${BASE_URL}/api/firm")"
 
 AGENTS="$(jq '.agents | length'   <<<"$STATE")"
@@ -88,13 +118,13 @@ MISSION="$(jq -r '.missions[0].id' <<<"$STATE")"
 
 if [[ "$(jq -r '.killSwitchArmed' <<<"$STATE")" == "true" ]]; then
   note "Not-Halt ist aktiv — wird für den Test entschärft."
-  curl -s -X POST "${BASE_URL}/api/firm/kill" \
+  curl -s -X POST "${BASE_URL}/api/firm/kill" "${AUTH[@]}" \
     -H 'Content-Type: application/json' -d '{"arm":false}' >/dev/null
 fi
 
 note "Läuft… (Variante A kann einige Minuten dauern)"
 START=$(date +%s)
-RESULT="$(curl -s --max-time 900 -X POST "${BASE_URL}/api/firm/run" \
+RESULT="$(curl -s --max-time 900 -X POST "${BASE_URL}/api/firm/run" "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"${MISSION}\",\"pipeline\":true}")"
 ELAPSED=$(( $(date +%s) - START ))
@@ -109,13 +139,13 @@ fi
 # -------------------------------------------------------------- 6. Not-Halt
 echo
 echo "${C_CYAN}6. Not-Halt${C_RESET}"
-KILL="$(curl -s -X POST "${BASE_URL}/api/firm/kill" \
+KILL="$(curl -s -X POST "${BASE_URL}/api/firm/kill" "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"arm":true,"flatten":true,"reason":"smoke-test"}')"
 check "Kill-Switch lässt sich ziehen" test "$(jq -r '.killSwitchArmed' <<<"$KILL")" == "true"
 note "Dabei glattgestellt: $(jq -r '.closedPositions' <<<"$KILL") Position(en)"
 
-BLOCKED="$(curl -s --max-time 300 -X POST "${BASE_URL}/api/firm/run" \
+BLOCKED="$(curl -s --max-time 300 -X POST "${BASE_URL}/api/firm/run" "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"${MISSION}\",\"pipeline\":true}")"
 if jq -e '.pipeline[]?.result.status | select(. == "EXECUTED")' <<<"$BLOCKED" >/dev/null 2>&1; then
@@ -124,9 +154,50 @@ else
   echo "  ${C_GREEN}✓${C_RESET} Orders werden bei aktivem Not-Halt blockiert"; ((PASS++))
 fi
 
-curl -s -X POST "${BASE_URL}/api/firm/kill" \
+curl -s -X POST "${BASE_URL}/api/firm/kill" "${AUTH[@]}" \
   -H 'Content-Type: application/json' -d '{"arm":false}' >/dev/null
 note "Not-Halt wieder entschärft."
+
+
+# ------------------------------------------- 7. Reports, Kurve, Sicherheit
+echo
+echo "${C_CYAN}7. Reports, Equity-Kurve & Sicherheit${C_RESET}"
+
+check "Report-API (Tag)"     curl -sf --max-time 15 "${BASE_URL}/api/firm/report?period=day"
+check "Report-API (Woche)"   curl -sf --max-time 15 "${BASE_URL}/api/firm/report?period=week"
+check "Equity-Kurve (Tag)"   curl -sf --max-time 15 "${BASE_URL}/api/firm/equity?range=day"
+check "Protokoll-API"        curl -sf --max-time 15 "${BASE_URL}/api/firm/log?limit=5"
+
+SNAP_N="$(curl -s "${BASE_URL}/api/firm/equity?range=all" | jq '.series | length')"
+check "Snapshots vorhanden (${SNAP_N})" test "${SNAP_N}" -ge 1
+
+# Konfigurations-Klemmung: 0.9 muss auf das Code-Maximum 0.5 geklemmt werden
+CLAMP="$(curl -s -X PUT "${BASE_URL}/api/firm/config" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"key":"maxPositionPct","value":0.9}')"
+if [[ "$(jq -r '.effective' <<<"$CLAMP")" == "0.5" ]]; then
+  echo "  ${C_GREEN}✓${C_RESET} Ceiling-Klemmung aktiv (0.9 → 0.5)"; ((PASS++))
+else
+  echo "  ${C_RED}✗${C_RESET} Ceiling-Klemmung FEHLERHAFT: $(jq -c . <<<"$CLAMP")"; ((FAIL++))
+fi
+# Wert zurücksetzen
+curl -s -X PUT "${BASE_URL}/api/firm/config" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"key":"maxPositionPct","value":0.25}' >/dev/null
+
+# Token-Schutz prüfen (nur wenn konfiguriert)
+if [[ -n "${FIRM_API_TOKEN:-}" ]]; then
+  CODE_NO_AUTH="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/api/firm/tick")"
+  if [[ "$CODE_NO_AUTH" == "401" ]]; then
+    echo "  ${C_GREEN}✓${C_RESET} POST ohne Token wird abgewiesen (401)"; ((PASS++))
+  else
+    echo "  ${C_RED}✗${C_RESET} SCHWERWIEGEND: POST ohne Token ergab ${CODE_NO_AUTH}, erwartet 401!"; ((FAIL++))
+  fi
+else
+  note "Kein FIRM_API_TOKEN gesetzt — offener Lokalbetrieb (Server lauscht auf 127.0.0.1)."
+fi
+
+# Analysten im Team?
+ANALYSTS="$(jq '[.agents[] | select(.role == "TECHNICAL_ANALYST" or .role == "MACRO_ANALYST" or .role == "NEWS_ANALYST" or .role == "SWING_RESEARCHER" or .role == "SCOUT" or .role == "DILIGENCE")] | length' <<<"$STATE")"
+check "Analysten-Team angelegt (gefunden: ${ANALYSTS}/6)" test "$ANALYSTS" -ge 6
 
 # ------------------------------------------------------------------ Ergebnis
 echo

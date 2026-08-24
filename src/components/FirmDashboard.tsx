@@ -2,6 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+type ConfigEntry = {
+  key: string;
+  label: string;
+  unit: "%" | "x" | "count" | "bool" | "rr";
+  description: string;
+  value: number | boolean;
+  min: number;
+  max: number;
+  locked: boolean;
+  defaultValue: number | boolean;
+};
+
 type FirmData = {
   agents: any[];
   missions: any[];
@@ -9,10 +21,13 @@ type FirmData = {
   proposals: any[];
   auditLog: any[];
   riskLimits: Record<string, any>;
-  riskConfig: Record<string, string>;
+  riskDefaults: Record<string, any>;
+  riskCeilings: Record<string, [number, number]>;
+  riskConfig: ConfigEntry[];
   killSwitchArmed: boolean;
   killSwitches: any[];
   ollama: { available: boolean; baseUrl: string; models: string[]; error?: string };
+  scheduler: { enabled: boolean; lastTickAt: string | null };
   account: {
     equity: number;
     startingEquity: number;
@@ -30,8 +45,10 @@ type FirmData = {
 
 const defaultData: FirmData = {
   agents: [], missions: [], positions: [], proposals: [],
-  auditLog: [], riskLimits: {}, riskConfig: {}, killSwitchArmed: false,
+  auditLog: [], riskLimits: {}, riskDefaults: {}, riskCeilings: {}, riskConfig: [],
+  killSwitchArmed: false,
   killSwitches: [], ollama: { available: false, baseUrl: "", models: [] },
+  scheduler: { enabled: false, lastTickAt: null },
   account: {
     equity: 0, startingEquity: 0, freeCash: 0, drawdownPct: 0,
     openPositions: 0, broker: "PAPER", paperMode: true, livePositions: [],
@@ -41,7 +58,18 @@ const defaultData: FirmData = {
   timestamp: "",
 };
 
-type Tab = "overview" | "agents" | "risk" | "architecture";
+type Tab = "overview" | "reports" | "protocol" | "agents" | "risk" | "architecture";
+
+/** Fetch-Wrapper: hängt den API-Token an, wenn im Browser hinterlegt. */
+function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+  const token =
+    typeof window !== "undefined" ? window.localStorage.getItem("firmToken") ?? "" : "";
+  const headers = new Headers(opts.headers ?? {});
+  if (token && ["POST", "PUT", "DELETE"].includes((opts.method ?? "GET").toUpperCase())) {
+    headers.set("x-firm-token", token);
+  }
+  return fetch(url, { ...opts, headers });
+}
 
 export default function FirmDashboard() {
   const [data, setData] = useState<FirmData>(defaultData);
@@ -49,6 +77,25 @@ export default function FirmDashboard() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [needToken, setNeedToken] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState("");
+
+  /** Zeigt nach einer 401 die Token-Eingabe und bricht die Aktion ab. */
+  async function ensureAuth(res: Response): Promise<boolean> {
+    if (res.status === 401) {
+      setNeedToken(true);
+      setNotice("🔒 Diese Aktion braucht den API-Token (FIRM_API_TOKEN).");
+      return false;
+    }
+    return true;
+  }
+
+  function saveToken() {
+    window.localStorage.setItem("firmToken", tokenDraft.trim());
+    setTokenDraft("");
+    setNeedToken(false);
+    setNotice("Token gespeichert — Aktion bitte erneut ausführen.");
+  }
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +120,7 @@ export default function FirmDashboard() {
   }, [load, data.missions]);
 
   async function seed() {
-    await fetch("/api/seed", { method: "POST" });
+    await apiFetch("/api/seed", { method: "POST" });
     setNotice("Firm seeded with default team + mission.");
     load();
   }
@@ -86,11 +133,12 @@ export default function FirmDashboard() {
     }
     setRunning(agentId);
     setNotice("");
-    const res = await fetch("/api/firm/run", {
+    const res = await apiFetch("/api/firm/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agentId, missionId: mission.id }),
     });
+    if (!(await ensureAuth(res))) { setRunning(null); return; }
     const json = await res.json();
     setRunning(null);
     if (json.ok) {
@@ -109,11 +157,12 @@ export default function FirmDashboard() {
     }
     setRunning("pipeline");
     setNotice("Pipeline läuft: CEO → Research → Backtest → Risk → Approver → Executor …");
-    const res = await fetch("/api/firm/run", {
+    const res = await apiFetch("/api/firm/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ missionId: mission.id, pipeline: true }),
     });
+    if (!(await ensureAuth(res))) { setRunning(null); return; }
     const json = await res.json();
     setRunning(null);
     if (json.ok) {
@@ -128,16 +177,34 @@ export default function FirmDashboard() {
   }
 
   async function kill(arm: boolean) {
-    await fetch("/api/firm/kill", {
+    const res = await apiFetch("/api/firm/kill", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ arm, reason: "OPERATOR_DASHBOARD", flatten: arm }),
     });
+    if (!(await ensureAuth(res))) return;
     setNotice(
       arm
         ? "🔴 NOT-HALT AKTIV — alle Orders blockiert, offene Positionen glattgestellt."
         : "Kill-Switch entschärft. Missionen stehen wieder auf PENDING."
     );
+    load();
+  }
+
+  async function runTick() {
+    setRunning("tick");
+    const res = await apiFetch("/api/firm/tick", { method: "POST" });
+    if (!(await ensureAuth(res))) { setRunning(null); return; }
+    const json = await res.json();
+    setRunning(null);
+    if (json.ok) {
+      const stops = json.stopsTriggered?.length ?? 0;
+      setNotice(
+        `Tick fertig — ${json.quotesRefreshed} Kurse aktualisiert, ${stops} SL/TP-Auslösungen${json.marketScan ? ", Marktscan geschrieben" : ""}${json.dailyLossKill ? ", ⚠️ Tagesverlust-Limit → Kill-Switch!" : ""}`
+      );
+    } else {
+      setNotice(`Tick fehlgeschlagen: ${json.error ?? "unbekannt"}`);
+    }
     load();
   }
 
@@ -166,6 +233,13 @@ export default function FirmDashboard() {
           >
             📖 Doku &amp; Installation
           </a>
+          <button
+            onClick={() => runTick()}
+            disabled={running !== null}
+            className="rounded-lg border border-sky-700/50 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-50"
+          >
+            {running === "tick" ? "Tick läuft…" : "⟳ Markt-Tick"}
+          </button>
           <button
             onClick={() => runPipeline()}
             disabled={running !== null}
@@ -200,6 +274,24 @@ export default function FirmDashboard() {
       {notice && (
         <div className="mb-6 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-200">
           {notice}
+          {needToken && (
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="password"
+                placeholder="API-Token (FIRM_API_TOKEN)"
+                value={tokenDraft}
+                onChange={(e) => setTokenDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveToken()}
+                className="w-72 rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+              />
+              <button
+                onClick={saveToken}
+                className="rounded bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500"
+              >
+                Speichern
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -217,6 +309,17 @@ export default function FirmDashboard() {
           label="Not-Halt"
           value={data.killSwitchArmed ? "AKTIV" : "sicher"}
           danger={data.killSwitchArmed}
+        />
+        <Stat
+          label="Monitor"
+          value={
+            !data.scheduler.enabled
+              ? "aus"
+              : data.scheduler.lastTickAt
+                ? `Tick ${new Date(data.scheduler.lastTickAt).toLocaleTimeString("de-DE")}`
+                : "wartet"
+          }
+          danger={!data.scheduler.enabled}
         />
         <Stat
           label="Lokales LLM"
@@ -249,8 +352,10 @@ export default function FirmDashboard() {
           {tab === "overview" && (
             <OverviewTab data={data} openPositions={openPositions} />
           )}
+          {tab === "reports" && <ReportsTab />}
+          {tab === "protocol" && <ProtocolTab />}
           {tab === "agents" && <AgentsTab data={data} running={running} onRun={runAgent} />}
-          {tab === "risk" && <RiskTab data={data} />}
+          {tab === "risk" && <RiskTab data={data} onChanged={load} />}
           {tab === "architecture" && <ArchitectureTab />}
         </>
       )}
@@ -260,6 +365,8 @@ export default function FirmDashboard() {
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "overview", label: "Firm Overview" },
+  { id: "reports", label: "📊 Reports" },
+  { id: "protocol", label: "📋 Protokoll" },
   { id: "agents", label: "Agents ↗ Orchestrator" },
   { id: "risk", label: "Risk & Guardrails" },
   { id: "architecture", label: "Design Decisions / Guide" },
@@ -274,7 +381,7 @@ function Stat({ label, value, danger }: { label: string; value: string; danger?:
   );
 }
 
-function Table({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
+function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
       <table className="w-full text-left text-sm">
@@ -317,21 +424,30 @@ function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: a
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Open Positions (Paper)</h2>
-        {openPositions.length === 0 ? (
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Positionen</h2>
+        {data.positions.length === 0 ? (
           <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">
-            No open positions. Run an Executor agent against an active mission.
+            Keine Positionen. Pipeline oder Executor gegen eine aktive Mission laufen lassen.
           </p>
         ) : (
           <Table
-            head={["Symbol", "Side", "Qty", "Entry", "Broker", "Status"]}
-            rows={openPositions.map((p) => [
+            head={["Status", "Symbol", "Side", "Qty", "Entry", "SL", "TP", "Kurs", "PnL", "Exit-Grund"]}
+            rows={data.positions.slice(0, 15).map((p) => [
+              p.status,
               p.symbol,
               p.side,
               p.qty,
               p.entryPrice,
-              p.broker,
-              p.status,
+              p.stopLoss ?? "—",
+              p.takeProfit ?? "—",
+              p.lastPrice ?? "—",
+              <span
+                key={p.id}
+                className={(Number(p.unrealizedPnl) >= 0 ? "text-emerald-400" : "text-red-400") + " font-semibold"}
+              >
+                {(Number(p.unrealizedPnl) >= 0 ? "+" : "") + Number(p.unrealizedPnl).toFixed(2)}
+              </span>,
+              p.exitReason ?? "—",
             ])}
           />
         )}
@@ -359,6 +475,516 @@ function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: a
             a.level,
             JSON.stringify(a.detail ?? {}).slice(0, 70),
           ])}
+        />
+      </section>
+    </div>
+  );
+}
+
+const BLOCK_REASONS: Record<string, string> = {
+  KILL_SWITCH_ARMED:
+    "Not-Halt aktiv — keine Orders, bis ein Mensch entschärft. Absichtlich hart.",
+  ROLE_NOT_ALLOWED_TO_TRADE:
+    "Rollen-Mandat: Nur Research/Executor handeln. Der Block ist korrekt — die Pipeline gibt die Idee an die zuständige Rolle weiter.",
+  NO_QUOTE:
+    "Kein Kurs für das Symbol verfügbar (auch nicht als Fallback). Sicherer Abbruch statt Raten.",
+  POSITION_ALREADY_OPEN:
+    "In diesem Symbol ist schon eine Position offen; Nachkauf ist gesperrt, damit Läufe sich nicht gegenseitig aufblähen.",
+  INSUFFICIENT_CASH:
+    "Zu wenig freies Kapital für die Ordergröße (Hebel verboten).",
+  DAILY_LOSS_LIMIT:
+    "Tagesverlust-Limit erreicht — Neueröffnungen heute gestoppt. Schützt vor Rachetrades.",
+  COOLDOWN_AFTER_LOSSES:
+    "Verlustserie → Cooldown. Das System pausiert statt Verlusten hinterherzulaufen.",
+  SHORT_DISABLED:
+    "Shorts sind in der Risikokonfiguration deaktiviert.",
+  STOP_LOSS_HIT:
+    "Der Stop-Loss wurde ausgelöst — Position automatisch glattgestellt. Normaler Teil des Handels.",
+  TAKE_PROFIT_HIT:
+    "Das Take-Profit-Ziel wurde erreicht — Gewinn genommen.",
+};
+
+function explainGuardrail(g?: string | null): string | null {
+  if (!g) return null;
+  const upper = g.toUpperCase();
+  for (const key of Object.keys(BLOCK_REASONS)) {
+    if (upper.includes(key)) return BLOCK_REASONS[key];
+  }
+  if (/max-\d+%/.test(g)) return "Positionsgröße hätte das Positions-Limit überschritten.";
+  if (/stop-loss/i.test(g)) return "Order ohne Pflicht-Stop-Loss abgelehnt.";
+  if (/concurrency/i.test(g)) return "Maximale Anzahl offener Positionen erreicht.";
+  return null;
+}
+
+// ───────────────────────── Reports (Boss-Sicht) ─────────────────────────────
+
+type EquityPoint = { ts: string; equity: number; trigger?: string };
+type ReportData = {
+  ok: boolean;
+  period: string;
+  since: string;
+  kpis: {
+    trades: number;
+    realizedPnl: number;
+    winRate: number | null;
+    profitFactor: number | null;
+    bestTrade: { symbol: string; pnl: number } | null;
+    worstTrade: { symbol: string; pnl: number } | null;
+    maxDrawdownPct: number;
+    stopLossHits: number;
+    takeProfitHits: number;
+  };
+  symbols: { symbol: string; trades: number; wins: number; pnl: number }[];
+  turnsByRole: Record<string, number>;
+  decisionsByType: Record<string, number>;
+  blocks: { reason: string; count: number; explanation: string | null }[];
+  notableEvents: { at: string; event: string; level: string; detail: any }[];
+  recommendations: {
+    at: string; role: string; symbol: string; side: string;
+    horizon?: string; thesis?: string; confidence?: number;
+    entryZone?: string; stopLoss?: string; target?: string; riskFlags?: string[];
+    fresh?: boolean;
+  }[];
+  summary: string[];
+};
+
+/** Handgeschriebene SVG-Equity-Kurve — keine Chart-Dependency. */
+function EquityChart({
+  series,
+  height = 220,
+}: {
+  series: EquityPoint[];
+  height?: number;
+}) {
+  if (series.length < 2) {
+    return (
+      <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-8 text-center text-sm text-slate-400">
+        Noch zu wenig Historie für die Kurve — der Monitor schreibt bei jedem Tick einen Punkt.
+      </p>
+    );
+  }
+  const W = 1000;
+  const PAD_Y = 18;
+  const values = series.map((p) => p.equity);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const x = (i: number) => (i / (series.length - 1)) * W;
+  const y = (v: number) => PAD_Y + (1 - (v - min) / span) * (height - 2 * PAD_Y);
+  const points = series.map((p, i) => `${x(i).toFixed(1)},${y(p.equity).toFixed(1)}`).join(" ");
+  const areaPoints = `0,${height} ${points} ${W},${height}`;
+  const up = values[values.length - 1] >= values[0];
+  const stroke = up ? "#34d399" : "#f87171";
+  const last = values[values.length - 1];
+
+  return (
+    <div className="relative rounded-xl border border-slate-800 bg-slate-900/50 p-2">
+      <svg viewBox={`0 0 ${W} ${height}`} className="w-full" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {/* Startwert-Baseline */}
+        <line
+          x1="0" x2={W}
+          y1={y(values[0])} y2={y(values[0])}
+          stroke="#64748b" strokeDasharray="4 4" strokeWidth="1"
+        />
+        <polygon points={areaPoints} fill="url(#eqfill)" />
+        <polyline points={points} fill="none" stroke={stroke} strokeWidth="2" />
+      </svg>
+      <div className="pointer-events-none absolute inset-x-3 top-1 flex justify-between text-[11px] text-slate-500">
+        <span>{new Date(series[0].ts).toLocaleDateString("de-DE")} · Start {values[0].toFixed(0)}</span>
+        <span style={{ color: stroke }} className="font-bold">
+          {last.toFixed(2)} ({last >= values[0] ? "+" : ""}{(last - values[0]).toFixed(2)})
+        </span>
+        <span>{new Date(series[series.length - 1].ts).toLocaleTimeString("de-DE")}</span>
+      </div>
+    </div>
+  );
+}
+
+function KpiTile({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wider text-slate-400">{label}</p>
+      <p className={`mt-1 text-lg font-bold ${
+        tone === "good" ? "text-emerald-400" : tone === "bad" ? "text-red-400" : "text-slate-100"
+      }`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ReportsTab() {
+  const [period, setPeriod] = useState<"day" | "week" | "month">("day");
+  const [report, setReport] = useState<ReportData | null>(null);
+  const [equitySeries, setEquitySeries] = useState<EquityPoint[]>([]);
+  const [loadingRep, setLoadingRep] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    // async booten (kein synchrones setState im Effect)
+    const t = setTimeout(async () => {
+      try {
+        const [r1, r2] = await Promise.all([
+          fetch(`/api/firm/report?period=${period}`),
+          fetch(`/api/firm/equity?range=${period === "day" ? "day" : period}`),
+        ]);
+        const j1 = await r1.json();
+        const j2 = await r2.json();
+        if (!alive) return;
+        setReport(j1);
+        setEquitySeries(j2.series ?? []);
+      } catch {
+        /* ignore */
+      } finally {
+        if (alive) setLoadingRep(false);
+      }
+    }, 0);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [period, setLoadingRep]);
+
+  const k = report?.kpis;
+  // "fresh" kommt serverseitig aus der Report-API (kein Date.now() im Render).
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2">
+        {(["day", "week", "month"] as const).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${
+              period === p ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            {p === "day" ? "Heute" : p === "week" ? "Diese Woche" : "Dieser Monat"}
+          </button>
+        ))}
+        {report && (
+          <span className="ml-auto self-center text-xs text-slate-500">
+            ab {new Date(report.since).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+          </span>
+        )}
+      </div>
+
+      {/* Boss-Zusammenfassung */}
+      {report && report.summary.length > 0 && (
+        <section className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-5">
+          <h2 className="mb-2 text-sm font-bold uppercase tracking-wider text-emerald-300">📌 Lagebild für die Führung</h2>
+          <ul className="ml-4 list-disc space-y-1 text-sm text-emerald-50/90">
+            {report.summary.map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </section>
+      )}
+
+      {/* KPI-Kacheln */}
+      {k && (
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          <KpiTile label="Trades" value={String(k.trades)} />
+          <KpiTile
+            label="Realisiertes P&L"
+            value={`${k.realizedPnl >= 0 ? "+" : ""}${k.realizedPnl.toFixed(2)}`}
+            tone={k.realizedPnl > 0 ? "good" : k.realizedPnl < 0 ? "bad" : undefined}
+          />
+          <KpiTile label="Win-Rate" value={k.winRate != null ? `${k.winRate} %` : "—"} />
+          <KpiTile
+            label="Profit-Faktor"
+            value={k.profitFactor != null ? (k.profitFactor === Infinity ? "∞" : k.profitFactor.toFixed(2)) : "—"}
+          />
+          <KpiTile
+            label="Max Drawdown"
+            value={`${k.maxDrawdownPct.toFixed(1)} %`}
+            tone={k.maxDrawdownPct > 10 ? "bad" : undefined}
+          />
+          <KpiTile label="Stops ausgelöst" value={String(k.stopLossHits)} tone={k.stopLossHits > 0 ? "bad" : undefined} />
+          <KpiTile label="TPs erreicht" value={String(k.takeProfitHits)} tone={k.takeProfitHits > 0 ? "good" : undefined} />
+        </section>
+      )}
+
+      {/* Equity-Kurve */}
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">📈 Equity-Kurve</h2>
+        {loadingRep ? (
+          <p className="text-sm text-slate-400">Lade Kurve…</p>
+        ) : (
+          <EquityChart series={equitySeries} />
+        )}
+      </section>
+
+      {/* Empfehlungen des Hauses */}
+      {report && report.recommendations.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            💡 Empfehlungen des Hauses
+          </h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {(report?.recommendations ?? []).map((r, i) => {
+              return (
+                <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-100">{r.symbol}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                      r.side === "LONG" ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                    }`}>
+                      {r.side}
+                    </span>
+                    {r.horizon && <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-300">{r.horizon}</span>}
+                    {!r.fresh && <span className="text-[10px] text-amber-400">⚠️ älter als 24 h</span>}
+                    <span className="ml-auto text-[11px] text-slate-500">{r.role}</span>
+                  </div>
+                  {r.thesis && <p className="mt-1 text-xs text-slate-300">{r.thesis}</p>}
+                  <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-400">
+                    {r.entryZone && <span>Einstieg: <b className="text-slate-200">{r.entryZone}</b></span>}
+                    {r.stopLoss && <span>Stop: <b className="text-red-300">{r.stopLoss}</b></span>}
+                    {r.target && <span>Ziel: <b className="text-emerald-300">{r.target}</b></span>}
+                    {typeof r.confidence === "number" && <span>Konfidenz: {(r.confidence * 100).toFixed(0)} %</span>}
+                  </div>
+                  {r.riskFlags && r.riskFlags.length > 0 && (
+                    <p className="mt-1 text-[11px] text-amber-400">⚠️ Risiken: {r.riskFlags.join(", ")}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Symbol-Breakdown + Blocks */}
+      {report && (
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Pro Symbol</h2>
+            <Table
+              head={["Symbol", "Trades", "Gewinner", "P&L"]}
+              rows={report.symbols.map((s) => [
+                s.symbol,
+                s.trades,
+                `${s.wins}/${s.trades}`,
+                <span key={s.symbol} className={(s.pnl >= 0 ? "text-emerald-400" : "text-red-400") + " font-semibold"}>
+                  {(s.pnl >= 0 ? "+" : "") + s.pnl.toFixed(2)}
+                </span>,
+              ])}
+            />
+            {report.symbols.length === 0 && (
+              <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 text-xs text-slate-500">
+                Keine geschlossenen Trades im Zeitraum.
+              </p>
+            )}
+          </div>
+          <div>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Blöcke & Gründe</h2>
+            <Table
+              head={["Grund", "Anzahl", "Bedeutung"]}
+              rows={report.blocks.map((b) => [
+                <code key={b.reason} className="font-mono text-[11px] text-amber-300">{b.reason}</code>,
+                b.count,
+                b.explanation ?? "—",
+              ])}
+            />
+            {report.blocks.length === 0 && (
+              <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 text-xs text-slate-500">
+                Keine blockierten Orders im Zeitraum.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Bemerkenswerte Ereignisse */}
+      {report && report.notableEvents.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Wichtige Ereignisse (SL/TP, Kill-Switch, Konfiguration)
+          </h2>
+          <Table
+            head={["Zeit", "Ereignis", "Level", "Detail"]}
+            rows={report.notableEvents.map((e, i) => [
+              new Date(e.at).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" }),
+              e.event,
+              e.level,
+              <code key={i} className="font-mono text-[11px] text-slate-400">
+                {JSON.stringify(e.detail ?? {}).slice(0, 110)}
+              </code>,
+            ])}
+          />
+        </section>
+      )}
+    </div>
+  );
+}
+
+type TurnRow = {
+  id: string;
+  at: string;
+  agent: string;
+  role: string;
+  decision: any;
+  source: string;
+  model: string;
+  latencyMs: number;
+  prompt: string | null;
+  rawResponse: string | null;
+};
+
+function ProtocolTab() {
+  const [turns, setTurns] = useState<TurnRow[]>([]);
+  const [audit, setAudit] = useState<any[]>([]);
+  const [levelFilter, setLevelFilter] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [loadingLog, setLoadingLog] = useState(true);
+
+  const loadLog = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/firm/log?limit=80${levelFilter ? `&level=${levelFilter}` : ""}`);
+      const json = await res.json();
+      setTurns(json.turns ?? []);
+      setAudit(json.audit ?? []);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingLog(false);
+    }
+  }, [levelFilter]);
+
+  useEffect(() => {
+    let alive = true;
+    // asynchron starten, damit der erste Fetch kein synchrones setState im Effect auslöst
+    const boot = setTimeout(() => {
+      if (alive) loadLog();
+    }, 0);
+    const id = setInterval(loadLog, 12000);
+    return () => {
+      alive = false;
+      clearTimeout(boot);
+      clearInterval(id);
+    };
+  }, [loadLog]);
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Agenten-Turns — vollständige Entscheidungskette
+          </h2>
+          <span className="text-xs text-slate-500">{turns.length} Einträge · Auto-Refresh 12 s</span>
+        </div>
+        {loadingLog ? (
+          <p className="text-sm text-slate-400">Lade Protokoll…</p>
+        ) : (
+          <div className="space-y-2">
+            {turns.map((t) => {
+              const isOpen = expanded === t.id;
+              const status = t.decision?.type ?? "?";
+              return (
+                <div key={t.id} className="rounded-xl border border-slate-800 bg-slate-900/50">
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : t.id)}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-left"
+                  >
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                      status === "TRADE" ? "bg-emerald-500/20 text-emerald-300"
+                      : status === "HOLD" ? "bg-slate-600/40 text-slate-300"
+                      : status === "KILL" ? "bg-red-500/30 text-red-300"
+                      : "bg-sky-500/20 text-sky-300"
+                    }`}>
+                      {status}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-200">{t.agent}</span>
+                    <span className="text-xs text-slate-500">{t.role}</span>
+                    <span className="ml-auto text-xs text-slate-500">
+                      {new Date(t.at).toLocaleString("de-DE")} · {t.source} · {(Number(t.latencyMs) / 1000).toFixed(1)} s
+                    </span>
+                    <span className="ml-3 text-slate-500">{isOpen ? "▾" : "▸"}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="space-y-3 border-t border-slate-800 px-4 py-3 text-xs">
+                      <div>
+                        <p className="mb-1 font-semibold text-slate-400">Entscheidung (geparst)</p>
+                        <pre className="overflow-x-auto rounded bg-slate-950/60 p-2 font-mono text-emerald-300">
+                          {JSON.stringify(t.decision, null, 2)}
+                        </pre>
+                      </div>
+                      {t.rawResponse && (
+                        <div>
+                          <p className="mb-1 font-semibold text-slate-400">Rohergebnis des Modells ({t.model})</p>
+                          <pre className="max-h-40 overflow-auto rounded bg-slate-950/60 p-2 font-mono text-slate-400">
+                            {t.rawResponse}
+                          </pre>
+                        </div>
+                      )}
+                      {t.prompt && (
+                        <details>
+                          <summary className="cursor-pointer font-semibold text-slate-400">Vollständiger Prompt</summary>
+                          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-2 font-mono text-slate-400">
+                            {t.prompt}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {turns.length === 0 && (
+              <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">
+                Noch keine Turns. Pipeline starten oder einen Agenten einzeln laufen lassen.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Audit-Trail</h2>
+          <select
+            value={levelFilter}
+            onChange={(e) => setLevelFilter(e.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200"
+          >
+            <option value="">Alle Level</option>
+            <option value="INFO">INFO</option>
+            <option value="WARN">WARN</option>
+            <option value="CRITICAL">CRITICAL</option>
+          </select>
+        </div>
+        <Table
+          head={["Zeit", "Event", "Level", "Detail"]}
+          rows={audit.map((a) => {
+            const detail = JSON.stringify(a.detail ?? {});
+            const explanation =
+              explainGuardrail(String(a.detail?.reason ?? "")) ??
+              explainGuardrail(detail.slice(0, 120));
+            return [
+              new Date(a.createdAt).toLocaleTimeString("de-DE"),
+              a.event,
+              <span
+                key={a.id}
+                className={
+                  a.level === "CRITICAL" ? "font-bold text-red-400"
+                  : a.level === "WARN" ? "text-amber-300"
+                  : "text-slate-400"
+                }
+              >
+                {a.level}
+              </span>,
+              <span key={a.id + "d"}>
+                <code className="font-mono text-[11px] text-slate-400">{detail.slice(0, 90)}</code>
+                {explanation && (
+                  <span className="mt-0.5 block text-[11px] text-sky-300">ℹ️ {explanation}</span>
+                )}
+              </span>,
+            ];
+          })}
         />
       </section>
     </div>
@@ -408,24 +1034,134 @@ function AgentsTab({
   );
 }
 
-function RiskTab({ data }: { data: FirmData }) {
-  const limits = data.riskLimits as Record<string, any>;
-  const rows: [string, string][] = [];
-  for (const k in limits) {
-    if (typeof limits[k] === "boolean" || typeof limits[k] === "number") {
-      rows.push([fancy(k), String(limits[k])]);
+function RiskTab({ data, onChanged }: { data: FirmData; onChanged: () => void }) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+
+  async function save(key: string, rawValue: string) {
+    setSaving(key);
+    setMsg("");
+    const entry = data.riskConfig.find((c) => c.key === key);
+    const num =
+      entry?.unit === "bool" ? (rawValue === "true" || rawValue === "1" ? 1 : 0) : Number(rawValue.replace(",", "."));
+    const res = await apiFetch("/api/firm/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value: num }),
+    });
+    if (res.status === 401) {
+      setMsg("🔒 Aktion blockiert: FIRM_API_TOKEN ist aktiv und der Browser hat keinen gültigen Token (erst im Haupt-Tab oben hinterlegen).");
+      setSaving(null);
+      return;
+    }
+    const json = await res.json();
+    setSaving(null);
+    if (json.ok) {
+      setMsg(`${key} gesetzt auf ${json.effective}${json.effective !== num ? ` (Eingabe ${num} wurde vom Code-Fenster geklemmt)` : ""}`);
+      setDrafts((d) => ({ ...d, [key]: "" }));
+      onChanged();
+    } else {
+      setMsg(`Fehler bei ${key}: ${json.error}`);
     }
   }
+
   return (
     <div className="space-y-6">
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
-          Hard-coded guardrails (code, not instructions)
+          Risikokonfiguration — zur Laufzeit änderbar, im Code begrenzt
         </h2>
-        <Table head={["Limit", "Value"]} rows={rows} />
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
+                <th className="px-4 py-2 font-semibold">Limit</th>
+                <th className="px-4 py-2 font-semibold">Wirksam</th>
+                <th className="px-4 py-2 font-semibold">Erlaubtes Fenster</th>
+                <th className="px-4 py-2 font-semibold">Ändern</th>
+                <th className="px-4 py-2 font-semibold">Bedeutung</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.riskConfig.map((c) => {
+                const isPct = c.unit === "%";
+                const fmtVal = typeof c.value === "boolean"
+                  ? (c.value ? "ja" : "nein")
+                  : isPct
+                    ? `${(Number(c.value) * 100).toFixed(1)} %`
+                    : String(c.value);
+                const fmtBound = (v: number) => (isPct ? `${v * 100}%` : v);
+                const draft = drafts[c.key] ?? "";
+                return (
+                  <tr key={c.key} className="border-b border-slate-800/60 last:border-0">
+                    <td className="px-4 py-2 font-medium text-slate-200">{c.label}</td>
+                    <td className="px-4 py-2 font-bold text-emerald-300">{fmtVal}</td>
+                    <td className="px-4 py-2 text-xs text-slate-500">
+                      {fmtBound(c.min)} – {fmtBound(c.max)}
+                    </td>
+                    <td className="px-4 py-2">
+                      {c.locked ? (
+                        <span className="text-xs text-slate-500">🔒 gesperrt</span>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          {c.unit === "bool" ? (
+                            <select
+                              value={String(c.value)}
+                              onChange={(e) => save(c.key, e.target.value)}
+                              disabled={saving === c.key}
+                              className="w-24 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-slate-200"
+                            >
+                              <option value={typeof c.value === "boolean" ? String(c.value) : String(Number(c.value) >= 0.5)}>
+                                aktuell
+                              </option>
+                              <option value="1">an</option>
+                              <option value="0">aus</option>
+                            </select>
+                          ) : (
+                            <>
+                              <input
+                                type="number"
+                                step="any"
+                                placeholder={String(typeof c.value === "number" && isPct ? (Number(c.value) * 100).toFixed(1) : c.value)}
+                                value={draft}
+                                onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
+                                onKeyDown={(e) => e.key === "Enter" && draft !== "" && save(c.key, draft)}
+                                className={`w-28 rounded border bg-slate-800 px-2 py-1 text-xs text-slate-200 ${
+                                  draft !== "" && Number(draft.replace(",", ".")) > (isPct ? c.max * 100 : c.max)
+                                    ? "border-red-600"
+                                    : "border-slate-700"
+                                }`}
+                              />
+                              {isPct && <span className="text-xs text-slate-500">%</span>}
+                              <button
+                                onClick={() => draft !== "" && save(c.key, draft)}
+                                disabled={saving === c.key || draft === ""}
+                                className="rounded bg-emerald-600/80 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
+                              >
+                                ✓
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-400">{c.description}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {msg && (
+          <p className="mt-2 rounded-lg border border-sky-700/50 bg-sky-950/30 px-3 py-2 text-xs text-sky-300">{msg}</p>
+        )}
         <p className="mt-3 rounded-lg border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-300">
-          These limits are enforced in <code className="font-mono">src/lib/riskGuard.ts</code> — outside
-          the agent layer. No prompt, instruction, or agent output can change them at runtime.
+          Werte wirken ab dem nächsten Turn/Tick ohne Neustart. Jede Änderung landet revisionssicher
+          im Audit-Log (<code className="font-mono">CONFIG_CHANGED</code>). Die absoluten Grenzen
+          (<code className="font-mono">LIMIT_CEILINGS</code> in <code className="font-mono">riskGuard.ts</code>)
+          bleiben im kompilierten Code — auch eine kompromittierte Datenbank kann sie nicht aufweichen.
+          Prozentwerte werden als Zahl eingegeben (z. B. 30 für 30 %).
         </p>
       </section>
 
@@ -463,14 +1199,6 @@ function RiskTab({ data }: { data: FirmData }) {
       </section>
     </div>
   );
-}
-
-function fancy(k: string) {
-  return k
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (s) => s.toUpperCase())
-    .replace(/pct/g, "%")
-    .replace(/max/g, "Max");
 }
 
 function ArchitectureTab() {

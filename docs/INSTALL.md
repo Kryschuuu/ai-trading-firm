@@ -226,14 +226,41 @@ MODEL_EXECUTOR=qwen2.5:7b-instruct-q4_K_M
 npx drizzle-kit push
 ```
 
+> **Wichtig für Variante B (und bei allen frischen Installationen):**  
+> Das Projekt nutzt `drizzle.config.ts` statt einer `drizzle.config.json`.
+> Die `.ts`-Konfiguration liest `DATABASE_URL` aus der `.env` — sie zeigt damit
+> immer auf die richtige Datenbank, egal auf welchem Rechner du den Befehl ausführst.
+>
+> Falls du auf deinem System noch eine alte `drizzle.config.json` mit einer
+> hardcodierten URL findest: Diese Datei löschen. Drizzle bevorzugt `.ts` automatisch.
+>
+> Als zusätzliche Absicherung kannst du die URL auch explizit übergeben:
+>
+> ```bash
+> DATABASE_URL="$(grep DATABASE_URL .env | cut -d= -f2-)" npx drizzle-kit push --force
+> ```
+
 Erwartet: `[✓] Changes applied`. Kontrolle:
 
 ```bash
 psql "$DATABASE_URL" -c "\dt"
 ```
 
-Es müssen sieben Tabellen erscheinen: `agents`, `agent_messages`, `audit_log`,
-`kill_switches`, `missions`, `positions`, `proposals`, `risk_config`.
+Es müssen **acht** Tabellen erscheinen:
+
+```
+ agents          agent_messages   audit_log        kill_switches
+ missions        positions        proposals        risk_config
+```
+
+Fehlt eine Tabelle — insbesondere `positions` — hast du das Symptom aus dem
+Original-Fehlerbericht: Der Dienst startet, schlägt aber beim ersten Request mit
+`relation "positions" does not exist` fehl. Lösung: erneut `npx drizzle-kit push`.
+
+```bash
+# Spalten der positions-Tabelle prüfen (stop_loss muss da sein)
+psql "$DATABASE_URL" -c "\d positions"
+```
 
 ### 5.3 Bauen und starten
 
@@ -522,6 +549,12 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 
 | Symptom | Ursache | Lösung |
 | --- | --- | --- |
+| **`relation "positions" does not exist`** | `drizzle-kit push` lief nicht oder auf falsche DB | `npx drizzle-kit push` im Projektstamm; sicherstellen dass `.env` mit `DATABASE_URL` existiert |
+| **Setup-Seite statt Dashboard beim ersten Start** | Schema fehlt | `npx drizzle-kit push`, dann Browser neu laden |
+| **`/api/health` liefert HTTP 503 + `SCHEMA_MISSING`** | Tabellen fehlen | `npx drizzle-kit push` ausführen |
+| Push läuft durch, aber Tabellen fehlen trotzdem | alte `drizzle.config.json` mit hardcodierter URL überschreibt `.env` | `rm drizzle.config.json` — das Projekt nutzt `drizzle.config.ts` |
+| Push schlägt mit `password authentication failed` fehl | `DATABASE_URL` in `.env` ≠ DB-Passwort | Passwort in `.env` korrigieren; explizit testen: `psql "$DATABASE_URL" -c "SELECT 1"` |
+| Spalte `stop_loss` fehlt in `positions` | veraltetes Schema aus einem früheren Commit | `npx drizzle-kit push --force` |
 | `DATABASE_URL is required` | `.env` fehlt oder wurde nicht geladen | `.env` im Projektstamm anlegen, Dienst neu starten |
 | `ECONNREFUSED 127.0.0.1:5432` | PostgreSQL läuft nicht | `sudo systemctl start postgresql` |
 | `password authentication failed` | Passwort in `.env` ≠ DB-Passwort | `ALTER USER trader WITH PASSWORD '…';` |

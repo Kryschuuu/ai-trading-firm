@@ -1,0 +1,21 @@
+# Abhängigkeiten
+/node_modules
+
+# Next.js
+/.next
+/out
+next-env.d.ts
+
+# Zugangsdaten — NIEMALS committen
+.env
+.env.local
+.env.*.local
+
+# Betrieb
+*.log
+/backups
+/models
+*.gguf
+
+# System
+.DS_Store

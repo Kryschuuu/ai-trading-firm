@@ -7,6 +7,7 @@
  * einhängen, damit die Agenten-Schicht venue-unabhängig bleibt.
  */
 import { killSwitch, validateOrder, RISK_LIMITS } from "./riskGuard";
+import { STATIC_PRICES, getQuoteSync } from "./marketData";
 
 export type BrokerName = "PAPER" | "ALPACA" | "IBKR" | "BINANCE" | "KRAKEN" | "DYDX";
 
@@ -20,6 +21,8 @@ export type Order = {
   limitPrice?: number;
   /** Stop-Loss als absoluter Preis. Pflicht (RISK_LIMITS.requireStopLoss). */
   stopLoss?: number;
+  /** Take-Profit als absoluter Preis (optional, wird vom Monitor überwacht). */
+  takeProfit?: number;
   /** Notional (qty * Preis) in Kontowährung — Basis der Guardrail-Prüfung. */
   riskNotional: number;
 };
@@ -31,6 +34,7 @@ export type Fill = {
   qty: number;
   fillPrice: number;
   stopLoss: number | null;
+  takeProfit: number | null;
   status: "FILLED" | "REJECTED";
   reason?: string;
 };
@@ -41,25 +45,17 @@ export type HydratePosition = {
   qty: number;
   entryPrice: number;
   stopLoss?: number | null;
+  takeProfit?: number | null;
 };
 
 /**
- * Paper-Kursbuch. Für den echten Betrieb hier eine Quote-Quelle einhängen
- * (yfinance, ccxt, Alpaca Market Data) — siehe docs/HANDBUCH.md, Kapitel 8.
+ * Kursquelle: live (Binance/Yahoo, siehe marketData.ts) mit Cache und
+ * statischem Fallback-Buch. Für den Hot-Path synchron lesbar.
  */
-const paperPrices: Record<string, number> = {
-  BTC: 67000,
-  ETH: 3200,
-  SOL: 150,
-  SPY: 510,
-  QQQ: 440,
-  NVDA: 125,
-  AAPL: 185,
-  MSFT: 415,
-};
+const paperPrices: Record<string, number> = STATIC_PRICES;
 
 export function paperQuote(symbol: string): number | null {
-  return paperPrices[symbol.toUpperCase()] ?? null;
+  return getQuoteSync(symbol) ?? paperPrices[symbol.toUpperCase()] ?? null;
 }
 
 export class PaperBroker {
@@ -68,7 +64,7 @@ export class PaperBroker {
   private readonly startEquity: number;
   private positions = new Map<
     string,
-    { qty: number; side: OrderSide; entryPrice: number; stopLoss: number | null }
+    { qty: number; side: OrderSide; entryPrice: number; stopLoss: number | null; takeProfit: number | null }
   >();
 
   constructor(startEquity = 10000) {
@@ -107,6 +103,12 @@ export class PaperBroker {
     return paperQuote(symbol);
   }
 
+  getPosition(symbol: string) {
+    const pos = this.positions.get(symbol.toUpperCase());
+    if (!pos) return null;
+    return { ...pos, symbol: symbol.toUpperCase() };
+  }
+
   listPositions() {
     return [...this.positions.entries()].map(([symbol, p]) => ({
       symbol,
@@ -114,8 +116,10 @@ export class PaperBroker {
       qty: p.qty,
       entryPrice: p.entryPrice,
       stopLoss: p.stopLoss,
+      takeProfit: p.takeProfit,
       lastPrice: paperQuote(symbol) ?? p.entryPrice,
-      unrealizedPnl: p.qty * ((paperQuote(symbol) ?? p.entryPrice) - p.entryPrice),
+      unrealizedPnl:
+        (p.side === "LONG" ? 1 : -1) * p.qty * ((paperQuote(symbol) ?? p.entryPrice) - p.entryPrice),
     }));
   }
 
@@ -132,6 +136,7 @@ export class PaperBroker {
         side: r.side,
         entryPrice: r.entryPrice,
         stopLoss: r.stopLoss ?? null,
+        takeProfit: r.takeProfit ?? null,
       });
       this.cash -= r.qty * r.entryPrice;
     }
@@ -188,6 +193,7 @@ export class PaperBroker {
       side: order.side,
       entryPrice: fillPrice,
       stopLoss: order.stopLoss ?? null,
+      takeProfit: order.takeProfit ?? null,
     });
     this.cash -= order.qty * fillPrice;
 
@@ -198,18 +204,24 @@ export class PaperBroker {
       qty: order.qty,
       fillPrice,
       stopLoss: order.stopLoss ?? null,
+      takeProfit: order.takeProfit ?? null,
       status: "FILLED",
     };
   }
 
-  /** Position glattstellen (Runbook: „alles flatten“). */
-  close(symbol: string): Fill | null {
+  /**
+   * Position glattstellen. `reason` dokumentiert WARUß geschlossen wurde
+   * (STOP_LOSS, TAKE_PROFIT, MANUAL_FLATTEN, AGENT_CLOSE).
+   */
+  close(symbol: string, reason = "AGENT_CLOSE"): (Fill & { realizedPnl: number }) | null {
     const key = symbol.toUpperCase();
     const pos = this.positions.get(key);
     if (!pos) return null;
     const price = paperQuote(key) ?? pos.entryPrice;
     this.cash += pos.qty * price;
     this.positions.delete(key);
+    const pnl =
+      (pos.side === "LONG" ? 1 : -1) * pos.qty * (price - pos.entryPrice);
     return {
       orderId: `CLS-${Date.now().toString(36).toUpperCase()}`,
       symbol: key,
@@ -217,14 +229,17 @@ export class PaperBroker {
       qty: pos.qty,
       fillPrice: price,
       stopLoss: pos.stopLoss,
+      takeProfit: pos.takeProfit,
       status: "FILLED",
+      realizedPnl: Number(pnl.toFixed(2)),
+      reason,
     };
   }
 
-  closeAll(): Fill[] {
-    const fills: Fill[] = [];
+  closeAll(reason = "MANUAL_FLATTEN"): (Fill & { realizedPnl: number })[] {
+    const fills: (Fill & { realizedPnl: number })[] = [];
     for (const symbol of [...this.positions.keys()]) {
-      const f = this.close(symbol);
+      const f = this.close(symbol, reason);
       if (f) fills.push(f);
     }
     return fills;
@@ -239,6 +254,7 @@ function reject(order: Order, reason: string): Fill {
     qty: order.qty,
     fillPrice: 0,
     stopLoss: order.stopLoss ?? null,
+    takeProfit: order.takeProfit ?? null,
     status: "REJECTED",
     reason,
   };

@@ -42,7 +42,12 @@ export async function GET(req: Request) {
   }
 
   try {
-    const content = await readFile(path.join(process.cwd(), entry.file), "utf8");
+    // turbopackIgnore: true — verhindert das Tracen des gesamten Projektverzeichnisses.
+    // Die Whitelist oben stellt sicher dass nur die drei Doku-Dateien lesbar sind.
+    const content = await readFile(
+      path.join(/* turbopackIgnore: true */ process.cwd(), entry.file),
+      "utf8"
+    );
     return NextResponse.json({ slug: name, ...entry, content });
   } catch {
     return NextResponse.json(

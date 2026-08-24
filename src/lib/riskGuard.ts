@@ -5,29 +5,110 @@
  * overridden by an agent's instructions, a prompt injection, or a hallucinating
  * model. Agents operate inside this sandbox; the guardrail refuses anything outside it.
  *
- * Think of this file as the physical firewall between the AI and the broker.
+ * RUNTIME-TUNING MIT DECKELN: Werte dürfen zur Laufzeit aus der DB (risk_config,
+ * änderbar übers Dashboard) geladen werden — ABER nur innerhalb der absoluten
+ * Code-Grenzen (LIMIT_CEILINGS). Selbst eine kompromittierte Datenbank kann die
+ * Grenzen nicht über das Code-Maximum hinaus aufweichen.
  */
 
-export const RISK_LIMITS = {
-  /** Max fraction of total account equity a single position may consume. */
+export type RiskLimits = {
+  maxPositionPct: number;
+  maxRiskPerTrade: number;
+  maxNotionalPerOrder: number;
+  maxConcurrentPositions: number;
+  allowShort: boolean;
+  maxLeverage: number;
+  requireStopLoss: boolean;
+  defaultStopLossPct: number;
+  maxEquityDrawdownPct: number;
+  /** Neu: max. Tagesverlust in % des Startkapitals — danach Auto-Kill für den Tag. */
+  dailyLossLimitPct: number;
+  /** Neun: Take-Profit als Vielfaches des Stop-Abstands (Reward:Risk). */
+  takeProfitRR: number;
+  /** Neu: Stop-Loss = ATR × diesem Faktor, wenn der Agent keinen Stop nennt. */
+  atrStopMultiplier: number;
+};
+
+/** Werks-/Standardwerte = zugleich Untergrenzen der Vernunft. */
+export const DEFAULT_LIMITS: RiskLimits = {
   maxPositionPct: 0.25,
-  /** Max fraction of total account equity at risk on a single trade. */
   maxRiskPerTrade: 0.02,
-  /** Absolute notional cap (in quote currency) per order. 0 = disabled, use % only. */
   maxNotionalPerOrder: 0,
-  /** Maximum number of concurrent open positions. */
   maxConcurrentPositions: 5,
-  /** Short positions forbidden unless explicit flag. */
   allowShort: false,
-  /** Leverage cap. 1 = no leverage. */
   maxLeverage: 1,
-  /** Stop-loss requirement: an order is refused if no stop-loss is attached. */
   requireStopLoss: true,
-  /** Default stop-loss distance in %, enforced if proposal omits one. */
   defaultStopLossPct: 0.05,
-  /** Kill-switch hysteresis: panics if equity drawdown exceeds this %. */
   maxEquityDrawdownPct: 0.15,
+  dailyLossLimitPct: 0.05,
+  takeProfitRR: 1.5,
+  atrStopMultiplier: 2,
 } as const;
+
+/**
+ * ABSOLUTE CODE-CEILINGS. Ein DB-Wert außerhalb dieses Fensters wird geklemmt.
+ * Diese Tabelle ist bewusst NICHT zur Laufzeit änderbar — sie definiert den
+ * Sandbox-Rahmen, in dem sich das System selbst konfigurieren darf.
+ */
+export const LIMIT_CEILINGS: Record<keyof RiskLimits, [min: number, max: number]> = {
+  maxPositionPct: [0.01, 0.5],
+  maxRiskPerTrade: [0.002, 0.05],
+  maxNotionalPerOrder: [0, 1_000_000],
+  maxConcurrentPositions: [1, 10],
+  allowShort: [0, 1],
+  maxLeverage: [1, 3],
+  requireStopLoss: [1, 1], // Pflicht bleibt Pflicht — nicht abschaltbar.
+  defaultStopLossPct: [0.005, 0.2],
+  maxEquityDrawdownPct: [0.03, 0.5],
+  dailyLossLimitPct: [0.01, 0.25],
+  takeProfitRR: [0.5, 5],
+  atrStopMultiplier: [0.5, 6],
+};
+
+/** Die aktuell wirksamen Limits (Start: DEFAULT, dann DB-Overlay, immer geklemmt). */
+let currentLimits: RiskLimits = { ...DEFAULT_LIMITS };
+
+export function getLimits(): Readonly<RiskLimits> {
+  return currentLimits;
+}
+
+/**
+ * Setzt Laufzeit-Limits. Jeder Wert wird gegen LIMIT_CEILINGS geklemmt —
+ * genau hier liegt die "Code entscheidet"-Garantie des Runtime-Tunings.
+ */
+export function applyRuntimeLimits(raw: Partial<RiskLimits>) {
+  const next: RiskLimits = { ...currentLimits };
+  for (const key of Object.keys(DEFAULT_LIMITS) as (keyof RiskLimits)[]) {
+    const v = raw[key];
+    if (v === undefined || v === null) continue;
+    if (typeof DEFAULT_LIMITS[key] === "boolean") {
+      const val = typeof v === "boolean" ? v : Number(v) >= 0.5;
+      // requireStopLoss ist absichtlich unveränderlich — der Boolean-Zweig
+      // umgeht die numerischen Ceilings nicht.
+      (next[key] as boolean) = key === "requireStopLoss" ? true : val;
+      continue;
+    }
+    const num = Number(v);
+    if (!Number.isFinite(num)) continue;
+    const [min, max] = LIMIT_CEILINGS[key];
+    (next[key] as number) = Math.min(Math.max(num, min), max);
+  }
+  currentLimits = next;
+  return currentLimits;
+}
+
+/** Zurück auf Werkseinstellung. */
+export function resetRuntimeLimits() {
+  currentLimits = { ...DEFAULT_LIMITS };
+  return currentLimits;
+}
+
+// Rückwärtskompatibel: bisheriger Zugriffspunkt im Code.
+export const RISK_LIMITS = new Proxy({} as RiskLimits, {
+  get(_t, prop: string) {
+    return (currentLimits as unknown as Record<string, unknown>)[prop];
+  },
+});
 
 export type ValidateContext = {
   notional: number;

@@ -1,0 +1,91 @@
+/**
+ * Next.js-Instrumentation: startet beim Server-Boot alle Hintergrundleufwerke.
+ *
+ * 1) Markt-Tick (Standard 60 s):
+ *    Kurse aktualisieren → SL/TP prüfen → Tageslimit bewachen → Equity-Snapshot
+ *
+ * 2) Analystenzyklus (ANALYST_INTERVAL_MIN, Standard 30 Min):
+ *    Technical-, Macro- und News-Analyst, sequenziell (CPU-Schonung)
+ *
+ * 3) Tägliche Tiefenforschung nach US-Börsenschluss (PENNY_RUN_HOUR_BERLIN,
+ *    Standard 23 Uhr Berliner Zeit): Penny-Team (Scout+Diligence) und danach
+ *    der Swing-Researcher — genau einmal pro Tag.
+ */
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  if (process.env.SCHEDULER_ENABLED === "false") return;
+
+  const G = globalThis as typeof globalThis & { __firmSchedulerStarted?: boolean };
+  if (G.__firmSchedulerStarted) return;
+  G.__firmSchedulerStarted = true;
+
+  const intervalMs = Math.max(15_000, Number(process.env.TICK_INTERVAL_MS || 60_000));
+  const analystIntervalMs = Math.max(10 * 60_000, Number(process.env.ANALYST_INTERVAL_MIN || 30) * 60_000);
+  const pennyHour = Math.min(23, Math.max(0, Number(process.env.PENNY_RUN_HOUR_BERLIN ?? 23)));
+
+  setTimeout(async () => {
+    try {
+      const monitorMod = await import("@/lib/monitor");
+      const analystsMod = await import("@/lib/analysts");
+      const { berlinDayKey } = await import("@/lib/time");
+
+      // ── 1) Markt-Tick ──
+      const runTick = async () => {
+        try {
+          const r = await monitorMod.tick();
+          if (r.stopsTriggered.length > 0 || r.errors.length > 0) {
+            console.log(`[scheduler] tick: ${r.stopsTriggered.length} SL/TP-Auslösungen, ${r.errors.length} Fehler`);
+          }
+        } catch (e) {
+          console.warn("[scheduler] Tick fehlgeschlagen:", e instanceof Error ? e.message : e);
+        }
+      };
+      await runTick();
+      setInterval(runTick, intervalMs);
+
+      // ── 2) Analystenzyklus ──
+      let lastAnalystKey = "";
+      const runAnalysts = async () => {
+        try {
+          await analystsMod.runTechnicalAnalyst("BTC");
+          await analystsMod.runMacroAnalyst();
+          await analystsMod.runNewsAnalyst(["BTC", "SPY"]);
+        } catch (e) {
+          console.warn("[scheduler] Analystenzyklus fehlgeschlagen:", e instanceof Error ? e.message : e);
+        }
+      };
+      setInterval(() => {
+        const key = `${berlinDayKey()}:${new Date().getHours()}:${Math.floor(new Date().getMinutes() / 30)}`;
+        if (key === lastAnalystKey) return; // Doppelstart-Schutz über Slotted-Key
+        lastAnalystKey = key;
+        void runAnalysts();
+      }, 60_000);
+
+      // ── 3) Täglich nach US-Schluss: Penny-Team + Swing-Research ──
+      let lastDeepRunDay = "";
+      setInterval(async () => {
+        try {
+          const nowBerlin = new Intl.DateTimeFormat("de-DE", {
+            timeZone: "Europe/Berlin", hour: "numeric", hour12: false,
+          }).format(new Date());
+          const day = berlinDayKey();
+          if (Number(nowBerlin) === pennyHour && lastDeepRunDay !== day) {
+            lastDeepRunDay = day;
+            console.log("[scheduler] Tägliche Tiefenforschung läuft (Penny-Team + Swing) …");
+            await analystsMod.runPennyTeam();
+            await analystsMod.runSwingResearch();
+            console.log("[scheduler] Tiefenforschung abgeschlossen.");
+          }
+        } catch (e) {
+          console.warn("[scheduler] Tiefenforschung fehlgeschlagen:", e instanceof Error ? e.message : e);
+        }
+      }, 60_000);
+
+      console.log(
+        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin`
+      );
+    } catch (e) {
+      console.warn("[scheduler] Start fehlgeschlagen:", e instanceof Error ? e.message : e);
+    }
+  }, 3000);
+}

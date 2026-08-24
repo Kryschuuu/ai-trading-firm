@@ -4,6 +4,7 @@ import {
   boolean,
   timestamp,
   numeric,
+  integer,
   jsonb,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -60,6 +61,11 @@ export const positions = pgTable("positions", {
   entryPrice: numeric("entry_price").notNull(),
   currentPrice: numeric("current_price"),
   stopLoss: numeric("stop_loss"),
+  takeProfit: numeric("take_profit"),
+  exitPrice: numeric("exit_price"),
+  realizedPnl: numeric("realized_pnl"),
+  /** STOP_LOSS | TAKE_PROFIT | MANUAL_FLATTEN | AGENT_CLOSE | null bei offen */
+  exitReason: text("exit_reason"),
   broker: text("broker").notNull(),
   status: text("status").notNull().default("OPEN"), // OPEN | CLOSED
   missionId: uuid("mission_id").references(() => missions.id),
@@ -110,4 +116,20 @@ export const killSwitches = pgTable("kill_switches", {
   triggeredBy: text("triggered_by").notNull(),
   armed: boolean("armed").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Equity-Kurve: ein Snapshot pro Monitor-Tick und pro ausgeführtem Trade.
+ * Basis für die Kurve und die Tages-/Wochen-/Monatsreports.
+ */
+export const equitySnapshots = pgTable("equity_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+  equity: numeric("equity").notNull(),
+  cash: numeric("cash").notNull(),
+  openPositions: integer("open_positions").notNull().default(0),
+  /** Realisiertes P&L des laufenden Berliner Tages (Summe geschlossener Trades). */
+  realizedPnlToday: numeric("realized_pnl_today").notNull().default("0"),
+  /** Auslöser des Snapshots: TICK | TRADE | CLOSE | FLATTEN | BOOT */
+  trigger: text("trigger").notNull().default("TICK"),
 });
