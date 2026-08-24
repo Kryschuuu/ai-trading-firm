@@ -22,6 +22,19 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET(req: Request) {
-  return POST(req);
+/**
+ * KORRIGIERT (v1.1.0): GET löst KEINEN Tick mehr aus. Der alte Handler hat
+ * über die HTTP-VERB-Methode Zustand verändert (Positionen schließen!).
+ * Monitoring-Tools, Browser-Prefetches und Link-Checker senden GETs — die
+ * dürfen niemals einen Trade/Zyklus auslösen.
+ */
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        "Nur POST erlaubt — ein Tick kann Positionen schließen und ist deshalb ein schreibender Aufruf.",
+    },
+    { status: 405 }
+  );
 }

@@ -43,6 +43,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, pipeline: results });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      // KORRIGIERT (v1.1.0): laufende Pipeline → 409 statt 500 (kein CRITICAL
+      // Audit-Eintrag für einen erwartbaren Konflikt).
+      if (message === "PIPELINE_ALREADY_RUNNING") {
+        return NextResponse.json(
+          { ok: false, error: "Eine Pipeline läuft bereits in diesem Prozess." },
+          { status: 409 }
+        );
+      }
       await db.insert(auditLog).values({
         event: "ERROR",
         level: "CRITICAL",

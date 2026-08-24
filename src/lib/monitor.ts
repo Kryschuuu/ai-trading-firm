@@ -27,6 +27,8 @@ const GLOBAL = globalThis as typeof globalThis & {
   __lastTickAt?: number;
   __tickCount?: number;
   __scanCount?: number;
+  /** Single-Flight-Schutz: verhindert überlappende Monitor-Zyklen. */
+  __tickLock?: Promise<TickResult> | null;
 };
 
 const SCAN_EVERY_TICKS = 15; // alle 15 Minuten ein Marktbericht
@@ -41,8 +43,24 @@ export type TickResult = {
   errors: string[];
 };
 
-/** Ein voller Monitor-Zyklus. Idempotent und gegen Doppelstart geschützt. */
-export async function tick(forceScan = false): Promise<TickResult> {
+/**
+ * Ein voller Monitor-Zyklus. Idempotent und gegen Doppelstart geschützt.
+ *
+ * KORRIGIERT (v1.1.0): Single-Flight-Schutz. Läuft ein Zyklus (Scheduler +
+ * manueller POST /tick überlappen z. B.), bekommt der zweite Aufrufer das
+ * Ergebnis des laufenden Zyklus, statt einen zweiten parallel zu starten
+ * (doppelte Snapshots, konkurrierende DB-Updates).
+ */
+export function tick(forceScan = false): Promise<TickResult> {
+  if (GLOBAL.__tickLock) return GLOBAL.__tickLock;
+  const run = doTick(forceScan).finally(() => {
+    GLOBAL.__tickLock = null;
+  });
+  GLOBAL.__tickLock = run;
+  return run;
+}
+
+async function doTick(forceScan: boolean): Promise<TickResult> {
   await refreshRuntimeLimits();
   const limits = getLimits();
   const broker = await getBroker();

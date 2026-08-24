@@ -42,9 +42,11 @@ echo "${C_CYAN}1. Dienst${C_RESET}"
 check "Healthcheck antwortet" curl -sf --max-time 5 "${BASE_URL}/api/health"
 
 HEALTH="$(curl -s --max-time 5 "${BASE_URL}/api/health" 2>/dev/null)"
-HEALTH_STATUS="$(jq -r '.status // "UNKNOWN"' <<<"${HEALTH:-{}}" 2>/dev/null)"
+# KORRIGIERT (v1.1.0): Die Health-API liefert 'schemaReady' (bool), nicht
+# 'status' — der alte Abgleich auf SCHEMA_MISSING war toter Code.
+SCHEMA_READY="$(jq -r '.schemaReady // "UNKNOWN"' <<<"${HEALTH:-{}}" 2>/dev/null)"
 
-if [[ "$HEALTH_STATUS" == "SCHEMA_MISSING" ]]; then
+if [[ "$SCHEMA_READY" == "false" ]]; then
   echo
   echo "${C_RED}╔══════════════════════════════════════════════════════════╗${C_RESET}"
   echo "${C_RED}║  SETUP ERFORDERLICH: Datenbanktabellen fehlen            ║${C_RESET}"

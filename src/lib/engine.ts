@@ -18,6 +18,7 @@ import {
   agentMessages,
   agents as agentTable,
   auditLog,
+  equitySnapshots,
   killSwitches,
   missions,
   positions,
@@ -27,11 +28,12 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { RISK_LIMITS, getLimits, killSwitch, riskAdjustedSize, type RiskLimits } from "./riskGuard";
 import { PaperBroker } from "./broker";
 import { localReason } from "./ollama";
-import { getCandles, getQuote } from "./marketData";
+import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { getHouseView } from "./analysts";
 import { writeEquitySnapshot } from "./equity";
+import { startOfBerlinDay } from "./time";
 
 const G = globalThis as typeof globalThis & {
   __firmBroker?: PaperBroker;
@@ -57,13 +59,32 @@ export async function getBroker(): Promise<PaperBroker> {
         .select()
         .from(positions)
         .where(eq(positions.status, "OPEN"));
+
+      // KORRIGIERT (v1.1.0): Cash aus dem letzten persistenten Equity-Snapshot
+      // übernehmen, statt ihn aus startEquity − Einstiegs-Notional zu rechnen.
+      // Sonst gehen realisierte P&L und alle Gewinne/Verluste geschlossener
+      // Trades bei einem Neustart (systemd, Deploy, Stromausfall) verloren.
+      let cashHint: number | undefined;
+      try {
+        const latestSnap = await db
+          .select({ cash: equitySnapshots.cash })
+          .from(equitySnapshots)
+          .orderBy(desc(equitySnapshots.ts))
+          .limit(1);
+        const cashNum = Number(latestSnap[0]?.cash);
+        if (latestSnap[0] && Number.isFinite(cashNum) && cashNum >= 0) cashHint = cashNum;
+      } catch {
+        /* Snapshot-Tabelle fehlt/leer → Fallback auf alte Berechnung */
+      }
+
       G.__firmBroker.hydrate(
         openRows.map((r) => ({
           symbol: r.symbol,
           side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
           qty: Number(r.qty),
           entryPrice: Number(r.entryPrice),
-        }))
+        })),
+        { cashHint }
       );
 
       const lastKill = await db
@@ -203,6 +224,8 @@ export const BLOCK_EXPLANATIONS: Record<string, string> = {
     "Verlustserie erreicht — Cooldown aktiv. Das System macht Pause, statt Verlusten hinterherzuhandeln.",
   APPROVAL_REQUIRED:
     "REQUIRE_HUMAN_APPROVAL=true: Der Vorschlag wartet auf menschliche Freigabe.",
+  INVALID_SYMBOL:
+    "Das vom Modell gelieferte Symbol entspricht nicht dem erlaubten Format (A–Z, 0–9, max. 12 Zeichen, optional .XYZ bzw. =X). Abgelehnt statt geraten.",
 };
 
 /** Führt genau einen Agenten-Turn gegen eine Mission aus. */
@@ -230,14 +253,13 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
     await logAudit("KILL_SWITCH", "CRITICAL", { drawdownPct: broker.drawdownPct }, missionId, agentId);
   }
 
-  const symbolHint = (mission.symbol ?? "SPY").toUpperCase();
+  const symbolHint = sanitizeSymbol(mission.symbol ?? "SPY") ?? "SPY";
 
   // --- Markt-Kontext: Indikatoren für das Missionssymbol + Multi-Market-Blick ---
   let marketContext = "";
   let snap: MarketSnapshot | null = null;
   try {
-    const interval = /^(BTC|ETH|SOL)/.test(symbolHint) ? "15m" : "15m";
-    const candles = await getCandles(symbolHint, interval, 120);
+    const candles = await getCandles(symbolHint, "15m", 120);
     snap = snapshot(symbolHint, candles);
     if (snap) {
       trace.push(step("MARKET_DATA", true, `Kurs ${snap.price}, RSI ${snap.rsi14}, Trend ${snap.trend}${snap.atrPercent != null ? `, ATR ${snap.atrPercent}%` : ""}`));
@@ -267,8 +289,9 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
   const totalPnl = pnls.reduce((a, b) => a + b, 0);
 
   // --- Tagesverlust & Verlustserie-Cooldowen ---
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // KORRIGIERT (v1.1.0): Berliner Tagesgrenze statt Server-Localtime — konsistent
+  // zu monitor.tick() und equity.realizedPnlToday() (systemd läuft oft mit UTC).
+  const todayStart = startOfBerlinDay();
   const todaysClosed = await db
     .select()
     .from(positions)
@@ -392,7 +415,16 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
       }
       trace.push(step("TAGESVERLUSS/COOLDOWN", true, `Tag ${dayPnl.toFixed(2)}, Serie ${consecLosses}`));
 
-      const symbol = (decision.symbol ?? symbolHint).toUpperCase();
+      // KORRIGIERT (v1.1.0): Symbol-Whitelist — Modell-Output darf keine
+      // Sonderzeichen (URL/Query/SQL/Prompt-Injection) einschleusen.
+      const symbol = sanitizeSymbol(decision.symbol ?? symbolHint);
+      if (!symbol) {
+        await logAudit("ORDER_REJECTED", "WARN", { reason: "INVALID_SYMBOL", raw: String(decision.symbol).slice(0, 40) }, missionId, agentId);
+        trace.push(step("SYMBOL-PRÜFUNG", false, `Ungültiges Symbol: ${String(decision.symbol).slice(0, 40)}`));
+        return { ...base, status: "BLOCKED", guardrail: "INVALID_SYMBOL", trace };
+      }
+      trace.push(step("SYMBOL-PRÜFUNG", true, symbol));
+
       let price = broker.quote(symbol);
       if (price === null) {
         try {
@@ -410,8 +442,11 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
       trace.push(step("KURS", true, `${symbol} @ ${price}`));
 
       // Stop-Loss: Agent-Angabe → sonst dynamisch aus ATR (Volatilitäts-basiert).
-      const modelStopPct = decision.stopLossPct != null
-        ? clamp(decision.stopLossPct, 0.5, 50)
+      // KORRIGIERT (v1.1.0): nicht-zahlfähige Werte (NaN/„abc") gelten als
+      // „keine Angabe" → ATR-/Default-Fallback statt kaputter NaN-Order.
+      const rawModelStop = Number(decision.stopLossPct);
+      const modelStopPct = Number.isFinite(rawModelStop)
+        ? clamp(rawModelStop, 0.5, 50)
         : null;
       const atrStop = snap?.atrPercent != null ? snap.atrPercent * limits.atrStopMultiplier : null;
       const stopPctPrelim = modelStopPct ?? atrStop ?? limits.defaultStopLossPct * 100;
@@ -446,6 +481,12 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
 
       // --- Approver-Stufe: erst ein Vorschlag, dann (ggf.) die Ausführung ---
       const requireApproval = process.env.REQUIRE_HUMAN_APPROVAL === "true";
+      // KORRIGIERT (v1.1.0): riskScore auf [0,1] normalisieren — Strings oder
+      // Objekte aus dem Modell-Output sprechen sonst die numeric-Spalte.
+      const rawRisk = Number(decision.riskScore);
+      const riskScore = Number.isFinite(rawRisk)
+        ? Math.min(Math.max(rawRisk, 0), 1)
+        : 0.5;
       const [proposal] = await db
         .insert(proposals)
         .values({
@@ -453,7 +494,7 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
           agentId,
           action: "OPEN",
           proposedDetail: { ...order, stopLossPct: stopPct, reason: decision.reason ?? "" },
-          riskScore: String(decision.riskScore ?? 0.5),
+          riskScore: String(riskScore),
           status: requireApproval ? "PENDING" : "APPROVED",
           reviewedAt: requireApproval ? null : new Date(),
         })
@@ -531,23 +572,40 @@ export async function flattenAll(reason: string) {
   return fills;
 }
 
-/** Führt alle Agenten einer Mission in fester Reihenfolge aus (sequenzielle Pipeline). */
-export async function runPipeline(missionId: string) {
-  const order = ["CEO", "RESEARCH", "BACKTEST", "RISK_MANAGER", "APPROVER", "EXECUTOR"];
-  const team = await db.select().from(agentTable);
-  const sorted = team
-    .filter((a) => order.includes(a.role))
-    .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
+const PIPELINE_G = globalThis as typeof globalThis & { __pipelineBusy?: boolean };
 
-  const results: { agent: string; role: string; result: TurnResult }[] = [];
-  for (const agent of sorted) {
-    // Nach einem Not-Halt bricht die Pipeline sofort ab.
-    if (killSwitch.isArmed()) break;
-    const result = await runAgentTurn(agent.id, missionId);
-    results.push({ agent: agent.name, role: agent.role, result });
-    if (result.status === "EXECUTED" || result.status === "KILLED") break;
+/**
+ * Führt alle Agenten einer Mission in fester Reihenfolge aus (sequenzielle Pipeline).
+ *
+ * KORRIGIERT (v1.1.0): Single-Flight-Schutz — zwei gleichzeitig eintreffende
+ * Pipeline-Requests (Doppelklick im Dashboard, Cron + manuell) liefen vorher
+ * parallel und erzeugten doppelte Vorschläge/Audit-Einträge. Der zweite Aufruf
+ * wirft jetzt PIPELINE_ALREADY_RUNNING (API → HTTP 409).
+ */
+export async function runPipeline(missionId: string) {
+  if (PIPELINE_G.__pipelineBusy) {
+    throw new Error("PIPELINE_ALREADY_RUNNING");
   }
-  return results;
+  PIPELINE_G.__pipelineBusy = true;
+  try {
+    const order = ["CEO", "RESEARCH", "BACKTEST", "RISK_MANAGER", "APPROVER", "EXECUTOR"];
+    const team = await db.select().from(agentTable);
+    const sorted = team
+      .filter((a) => order.includes(a.role))
+      .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
+
+    const results: { agent: string; role: string; result: TurnResult }[] = [];
+    for (const agent of sorted) {
+      // Nach einem Not-Halt bricht die Pipeline sofort ab.
+      if (killSwitch.isArmed()) break;
+      const result = await runAgentTurn(agent.id, missionId);
+      results.push({ agent: agent.name, role: agent.role, result });
+      if (result.status === "EXECUTED" || result.status === "KILLED") break;
+    }
+    return results;
+  } finally {
+    PIPELINE_G.__pipelineBusy = false;
+  }
 }
 
 function clamp(value: number, min: number, max: number) {

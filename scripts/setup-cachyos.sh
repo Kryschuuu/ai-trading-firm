@@ -214,16 +214,17 @@ echo "    ${C_BOLD}\$ DATABASE_URL=${DATABASE_URL} npx drizzle-kit push --force$
 DATABASE_URL="${DATABASE_URL}" npx drizzle-kit push --force
 
 # Verifizieren (mit Retry, weil PostgreSQL kurz brauchen kann)
+# KORRIGIERT (v1.1.0): erwartet 9 Tabellen — equity_snapshots fehlte im Check.
 TABLES=""
 for attempt in 1 2 3; do
   sleep 1
   TABLES="$(psql "$DATABASE_URL" -tAc \
     "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo 0)"
-  (( TABLES >= 7 )) && break
+  (( TABLES >= 9 )) && break
   warn "Versuch ${attempt}/3: Tabellen noch nicht vollständig (${TABLES} vorhanden)…"
 done
-(( TABLES >= 7 )) || die \
-  "Nur ${TABLES} Tabellen angelegt (erwartet: 8). Prüfe DATABASE_URL in .env.\n" \
+(( TABLES >= 9 )) || die \
+  "Nur ${TABLES} Tabellen angelegt (erwartet: 9). Prüfe DATABASE_URL in .env.\n" \
   "  Mögliche Ursache: PostgreSQL läuft nicht, falsches Passwort, oder Netzwerk.\n" \
   "  Debug: psql \"${DATABASE_URL}\" -c '\\dt'"
 

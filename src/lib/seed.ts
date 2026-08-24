@@ -8,9 +8,12 @@ import { DEFAULT_LIMITS } from "./riskGuard";
  * Gibt eine diagnostische Meldung aus wenn Tabellen fehlen.
  */
 export async function checkSchema(): Promise<{ ok: boolean; missingTables: string[] }> {
+  // KORRIGIERT (v1.1.0): equity_snapshots fehlte — der Healthcheck meldete
+  // "schemaReady" obwohl die Equity-Kurve/Monitor-Snapshots nicht funktionieren.
   const required = [
     "agents", "agent_messages", "audit_log", "kill_switches",
     "missions", "positions", "proposals", "risk_config",
+    "equity_snapshots",
   ];
   try {
     const result = await db.execute<{ table_name: string }>(

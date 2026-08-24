@@ -14,7 +14,12 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? 60), 200);
+  // KORRIGIERT (v1.1.0): Limit robust klemmen — NaN bzw. negative Werte
+  // verursachten vorher einen SQL-Fehler (limit(NaN)/negative LIMIT → 500).
+  const rawLimit = Number(url.searchParams.get("limit") ?? 60);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(Math.trunc(rawLimit), 1), 200)
+    : 60;
   const level = url.searchParams.get("level");
   const event = url.searchParams.get("event");
 
