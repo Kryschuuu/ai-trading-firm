@@ -18,6 +18,7 @@ import { BROKER_REGISTRY } from "@/lib/broker";
 import { lastTickAt } from "@/lib/monitor";
 import { getQuoteSync } from "@/lib/marketData";
 import type { RiskLimits } from "@/lib/riskGuard";
+import { APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ export async function GET() {
   });
 
   return NextResponse.json({
+    version: APP_VERSION,
     agents: agentRows,
     missions: missionRows,
     positions: enrichedPositions,

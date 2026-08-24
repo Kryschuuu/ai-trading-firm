@@ -4,10 +4,13 @@ import path from "node:path";
 
 export const dynamic = "force-dynamic";
 
-/** Whitelist — es dürfen nur diese Dateien gelesen werden (kein Path-Traversal). */
+/**
+ * Whitelist — es dürfen nur diese Dateien gelesen werden (kein Path-Traversal).
+ * KORRIGIERT (v1.3.0): Alle Markdown-Dateien liegen jetzt in docs/.
+ */
 const DOCS: Record<string, { file: string; title: string; subtitle: string }> = {
   readme: {
-    file: "README.md",
+    file: "docs/README.md",
     title: "README",
     subtitle: "Überblick, Architektur und Schnellstart",
   },
@@ -20,6 +23,21 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     file: "docs/HANDBUCH.md",
     title: "Handbuch",
     subtitle: "Bedienung, Beispiele, Runbooks und Troubleshooting",
+  },
+  changelog: {
+    file: "docs/CHANGELOG.md",
+    title: "Changelog",
+    subtitle: "Versionen, Bugfixes und Änderungen je Release",
+  },
+  security: {
+    file: "docs/SECURITY_AUDIT.md",
+    title: "Security-Audit",
+    subtitle: "Findings, Schweregrad, Fixes und Peer-Review",
+  },
+  provider: {
+    file: "docs/PROVIDER_INTEGRATION.md",
+    title: "LLM-Provider",
+    subtitle: "Ollama · OpenAI · Gemini · Claude — Konfiguration und Kosten",
   },
 };
 
@@ -43,7 +61,7 @@ export async function GET(req: Request) {
 
   try {
     // turbopackIgnore: true — verhindert das Tracen des gesamten Projektverzeichnisses.
-    // Die Whitelist oben stellt sicher dass nur die drei Doku-Dateien lesbar sind.
+    // Die Whitelist oben stellt sicher, dass nur die Doku-Dateien lesbar sind.
     const content = await readFile(
       path.join(/* turbopackIgnore: true */ process.cwd(), entry.file),
       "utf8"
@@ -51,7 +69,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ slug: name, ...entry, content });
   } catch {
     return NextResponse.json(
-      { error: `Datei ${entry.file} nicht gefunden. Liegt sie im Projektstamm?` },
+      { error: `Datei ${entry.file} nicht gefunden. Liegt sie unter docs/?` },
       { status: 404 }
     );
   }

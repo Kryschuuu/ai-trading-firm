@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -13,14 +13,16 @@ export default function DocsPage() {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  // Ladelogik in stabile Callbacks — der Effekt selbst ruft kein setState auf
+  // (react-hooks/set-state-in-effect); er startet nur asynchrones Laden.
+  const loadDocs = useCallback(() => {
     fetch("/api/docs")
       .then((r) => r.json())
       .then((d) => setDocs(d.docs ?? []))
       .catch(() => setDocs([]));
   }, []);
 
-  useEffect(() => {
+  const loadContent = useCallback(() => {
     setLoading(true);
     fetch(`/api/docs?name=${active}`)
       .then((r) => r.json())
@@ -28,6 +30,16 @@ export default function DocsPage() {
       .catch(() => setContent("> Dokument konnte nicht geladen werden."))
       .finally(() => setLoading(false));
   }, [active]);
+
+  useEffect(() => {
+    const id = window.setTimeout(loadDocs, 0);
+    return () => window.clearTimeout(id);
+  }, [loadDocs]);
+
+  useEffect(() => {
+    const id = window.setTimeout(loadContent, 0);
+    return () => window.clearTimeout(id);
+  }, [loadContent]);
 
   return (
     <main className="min-h-screen bg-slate-950">
@@ -72,9 +84,10 @@ export default function DocsPage() {
               </button>
             ))}
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-[11px] leading-relaxed text-slate-500">
-              Die Dateien liegen im Projekt unter <code>README.md</code>,{" "}
-              <code>docs/INSTALL.md</code> und <code>docs/HANDBUCH.md</code> — sie sind also auch
-              offline im Repo lesbar.
+              Die Dateien liegen im Projekt unter <code>docs/README.md</code>,{" "}
+              <code>docs/INSTALL.md</code>, <code>docs/HANDBUCH.md</code>,{" "}
+              <code>docs/CHANGELOG.md</code> und <code>docs/SECURITY_AUDIT.md</code> — sie
+              sind also auch offline im Repo lesbar.
             </div>
           </nav>
 

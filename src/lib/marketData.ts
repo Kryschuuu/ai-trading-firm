@@ -38,6 +38,26 @@ export const STATIC_PRICES: Record<string, number> = {
 const QUOTE_TTL_MS = 30_000;
 const CANDLE_TTL_MS = 120_000;
 
+/**
+ * Erlaubtes Symbolformat: 1–12 Großbuchstaben/Ziffern, optional Suffix
+ * `.XYZ` (z. B. BRK.B) oder `=X` (z. B. EURUSD=X). Verhindert, dass
+ * Modell-Output (oder manipulierte DB-Zeilen) Sonderzeichen wie `&`, `?`, `#`
+ * in externe URLs, SQL-Abfragen oder Prompts schmuggeln.
+ */
+const SYMBOL_RE = /^[A-Z0-9]{1,12}(?:[.=][A-Z0-9]{1,5})?$/;
+
+/** Normalisiert ein Symbol oder liefert null, wenn es nicht erlaubt ist. */
+export function sanitizeSymbol(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().toUpperCase();
+  return SYMBOL_RE.test(s) ? s : null;
+}
+
+/** true, wenn das Symbol dem erlaubten Format entspricht. */
+export function isValidSymbol(raw: string | null | undefined): boolean {
+  return sanitizeSymbol(raw) !== null;
+}
+
 function isCrypto(symbol: string): boolean {
   return /^(BTC|ETH|SOL|XRP|BNB|ADA|DOGE|AVAX|LINK|DOT)$/i.test(symbol);
 }
@@ -60,7 +80,7 @@ async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T> {
 
 async function binancePrice(symbol: string): Promise<number> {
   const data = await fetchJson<{ price: string }>(
-    `https://api.binance.com/api/v3/ticker/price?symbol=${binancePair(symbol)}`
+    `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(binancePair(symbol))}`
   );
   const p = Number(data.price);
   if (!Number.isFinite(p) || p <= 0) throw new Error("Binance: ungültiger Preis");
@@ -78,7 +98,7 @@ async function yahooPrice(symbol: string): Promise<number> {
 
 async function binanceCandles(symbol: string, interval: string, limit: number): Promise<Candle[]> {
   const raw = await fetchJson<unknown[][]>(
-    `https://api.binance.com/api/v3/klines?symbol=${binancePair(symbol)}&interval=${interval}&limit=${limit}`
+    `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binancePair(symbol))}&interval=${interval}&limit=${limit}`
   );
   return raw.map((r) => ({
     time: Number(r[0]), open: Number(r[1]), high: Number(r[2]),
@@ -122,7 +142,8 @@ async function yahooCandles(symbol: string, interval: string, limit: number): Pr
  * passende Quelle; schlägt die fehl, fällt er auf Cache → statisches Buch zurück.
  */
 export async function getQuote(symbolRaw: string): Promise<Quote> {
-  const symbol = symbolRaw.toUpperCase();
+  const symbol = sanitizeSymbol(symbolRaw);
+  if (!symbol) throw new Error(`Ungültiges Symbol: ${String(symbolRaw).slice(0, 40)}`);
   const cached = quoteCache.get(symbol);
 
   if (cached && Date.now() - cached.ts < QUOTE_TTL_MS) {
@@ -149,7 +170,8 @@ export async function getQuote(symbolRaw: string): Promise<Quote> {
 
 /** Synchroner Lesezugriff auf den Cache (für Broker-Hot-Path). */
 export function getQuoteSync(symbolRaw: string): number | null {
-  const symbol = symbolRaw.toUpperCase();
+  const symbol = sanitizeSymbol(symbolRaw);
+  if (!symbol) return null;
   const cached = quoteCache.get(symbol);
   if (cached) return cached.price;
   return STATIC_PRICES[symbol] ?? null;
@@ -174,7 +196,8 @@ export async function getCandles(
   interval = "5m",
   limit = 120
 ): Promise<Candle[]> {
-  const symbol = symbolRaw.toUpperCase();
+  const symbol = sanitizeSymbol(symbolRaw);
+  if (!symbol) return [];
   const key = `${symbol}:${interval}:${limit}`;
   const cached = candleCache.get(key);
   if (cached && Date.now() - cached.ts < CANDLE_TTL_MS) return cached.candles;

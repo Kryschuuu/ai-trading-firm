@@ -123,6 +123,11 @@ systemctl status ollama --no-pager    # oder: ollama --version
 curl -s http://127.0.0.1:11434/api/tags | jq '.models[].name'
 ```
 
+> **Kein Ollama nötig?** Seit v1.3.0 kannst du alternativ einen OpenAI-kompatiblen
+> Server, Google Gemini oder Anthropic Claude als Modellquelle wählen — siehe
+> [PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md). Für Variante A bleibt Ollama
+> die empfohlene Wahl (0 €, kein Datenabfluss).
+
 ### 4.1 Modellwahl für Variante A (N150, 16 GB, reine CPU) `[A]`
 
 Der N150 hat **vier Effizienzkerne und Single-Channel-RAM**. Der begrenzende Faktor ist

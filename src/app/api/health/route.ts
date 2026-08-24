@@ -1,4 +1,5 @@
 import { checkSchema } from "@/lib/seed";
+import { APP_NAME, APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ export async function GET() {
     const schema = await checkSchema();
     return Response.json({
       ok: true,
+      app: APP_NAME,
+      version: APP_VERSION,
       schemaReady: schema.ok,
       missingTables: schema.ok ? [] : schema.missingTables,
       fix: schema.ok ? null : "npx drizzle-kit push",
@@ -31,6 +34,8 @@ export async function GET() {
     // nicht als crash gilt. Der Fehler ist in den Logs sichtbar.
     return Response.json({
       ok: true,
+      app: APP_NAME,
+      version: APP_VERSION,
       schemaReady: false,
       error: e instanceof Error ? e.message : String(e),
       fix: "PostgreSQL läuft? DATABASE_URL korrekt?",

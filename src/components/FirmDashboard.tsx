@@ -109,8 +109,12 @@ export default function FirmDashboard() {
     }
   }, []);
 
+  // Kein synchrones setState im Effekt (react-hooks/set-state-in-effect):
+  // Das initiale Laden wird um einen Tick verschoben, der Effekt selbst ruft
+  // keine Setter auf.
   useEffect(() => {
-    load();
+    const id = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(id);
   }, [load]);
 
   // auto-refresh every 8s while running, else 15s
@@ -1217,9 +1221,9 @@ function Guide() {
         <h2 className="mb-1 text-lg font-bold text-slate-50">1 · Framework & Orchestration</h2>
         <p className="mb-3 text-sm text-slate-400">Paperclip-Ersatz für autonome Trading-Agenten auf eigener Hardware:</p>
         <ul className="ml-5 list-disc space-y-2 text-sm">
-          <li><b className="text-emerald-400">LangGraph</b> — bester Kandidat für Trading. Zustandsmaschine mit expliziten Übergängen (research → risk → approve → execute), Checkpointing/Context-Persistenz zwischen Läufen reaktiv, feinkörnige Kontrolle über jeden Schritt. Steilere Lernkurve, aber genau das, was als "institutionelles Wissen" über Sessions hinweg gefordert wird.</li>
+          <li><b className="text-emerald-400">LangGraph</b> — bester Kandidat für Trading. Zustandsmaschine mit expliziten Übergängen (research → risk → approve → execute), Checkpointing/Context-Persistenz zwischen Läufen reaktiv, feinkörnige Kontrolle über jeden Schritt. Steilere Lernkurve, aber genau das, was als &quot;institutionelles Wissen&quot; über Sessions hinweg gefordert wird.</li>
           <li><b className="text-emerald-400">AutoGen (Microsoft)</b> — conversation-driven, aber das freie Agenten-Gespräch ist riskant für Geld-Operationen; State-Management über alles hinweg schwieriger. Gut für Exploration, nicht als harte Pipeline.</li>
-          <li><b className="text-emerald-400">CrewAI</b> — niedrige Einstiegshürde, schöne Rollen ("crew = CEO + workers"), aber die magische Orchestrierung macht Kontrolle über Schritte und Reproduzierbarkeit schwerer.</li>
+          <li><b className="text-emerald-400">CrewAI</b> — niedrige Einstiegshürde, schöne Rollen (&quot;crew = CEO + workers&quot;), aber die magische Orchestrierung macht Kontrolle über Schritte und Reproduzierbarkeit schwerer.</li>
           <li><b className="text-emerald-400">Pickleball nebenbei</b> — dieser Code hier liefert einen minimalen, selbstgeschriebenen Orchestrator (Engine-Layer) extra. Eine Agenten-Schleife reicht für Paper-Trading völlig.</li>
         </ul>
         <p className="mt-3 text-sm">
@@ -1291,7 +1295,7 @@ function Guide() {
           <li><b>Alpaca</b> (API-First, US-Equities) — beste Paper-Trading-First-API, gebührenfrei Paper, elegante Orders, OAuth; ideal zum Start.</li>
           <li><b>Interactive Brokers</b> — vollwertiger Broker, globale Märkte, aber CLI + TWS-API ist sperrig und nutzt 32-Bit-Gateway — auf der N150 machbar, aber Bureaucratie.</li>
           <li><b>Binance/Kraken/KuCoin</b> — Crypto-Spot (und Futures), API einfach via <b>ccxt</b>; Paper-Feeds fehlen teils, daher Alpaca für Demo plausibler.</li>
-          <li><b>dYdX</b> — dezentrale Perpetuals, komplett open-source, Self-Custody; für einen "open-source First"-Ansatz thematisch passend, aber Margin/Risiko zusätzlich.</li>
+          <li><b>dYdX</b> — dezentrale Perpetuals, komplett open-source, Self-Custody; für einen &quot;open-source First&quot;-Ansatz thematisch passend, aber Margin/Risiko zusätzlich.</li>
         </ul>
         <p className="mt-2 text-sm text-slate-400">Dieses Repo bringt die PAPER-Broker-Abstraktion mit; Alpaca/ccxt-Adapter sprechen dieselbe Schnittstelle an.</p>
       </section>
@@ -1303,7 +1307,7 @@ function Guide() {
           <li>Welche maximale Drawdown-Toleranz hast du, bevor der Kill-Switch automatisch zieht? (Wert in % setzen)</li>
           <li>Wie viel Zeit kannst du realistisch pro Woche für Prompt-/Template-Wartung aufwenden? (beeinflusst Komplexität des Orchestrators)</li>
           <li>Welche Genauigkeit brauchst du bei Backtests, bevor du einem Setup vertraust? (das hier ist bewusst nur minimal)</li>
-          <li>Stimmst du dem "small round-trips, no shorts, no leverage"-Start zu, oder willst du schon early Trades mit Margin?</li>
+          <li>Stimmst du dem &quot;small round-trips, no shorts, no leverage&quot;-Start zu, oder willst du schon early Trades mit Margin?</li>
           <li>Welche Assets willst du wirklich handeln — Equities (→ Alpaca) oder Crypto (→ ccxt/Binance)?</li>
           <li>Hältst du einen hybriden Fallback sicher genug, um in Produktion je eine Cloud-API zu erlauben? (für Paper-Trading unnötig)</li>
         </ul>

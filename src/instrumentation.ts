@@ -54,8 +54,16 @@ export async function register() {
           console.warn("[scheduler] Analystenzyklus fehlgeschlagen:", e instanceof Error ? e.message : e);
         }
       };
+      // KORRIGIERT (v1.1.0): Slot-Key in Berliner Zeit statt Server-Localtime —
+      // auf UTC-Servern (systemd) griff der Doppelstart-Schutz sonst nie richtig.
       setInterval(() => {
-        const key = `${berlinDayKey()}:${new Date().getHours()}:${Math.floor(new Date().getMinutes() / 30)}`;
+        const nowBerlin = new Intl.DateTimeFormat("de-DE", {
+          timeZone: "Europe/Berlin",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date());
+        const key = `${berlinDayKey()}:${nowBerlin}`;
         if (key === lastAnalystKey) return; // Doppelstart-Schutz über Slotted-Key
         lastAnalystKey = key;
         void runAnalysts();

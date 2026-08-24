@@ -7,7 +7,7 @@
  * einhängen, damit die Agenten-Schicht venue-unabhängig bleibt.
  */
 import { killSwitch, validateOrder, RISK_LIMITS } from "./riskGuard";
-import { STATIC_PRICES, getQuoteSync } from "./marketData";
+import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
 
 export type BrokerName = "PAPER" | "ALPACA" | "IBKR" | "BINANCE" | "KRAKEN" | "DYDX";
 
@@ -126,11 +126,38 @@ export class PaperBroker {
   /**
    * Zustand aus der Datenbank wiederherstellen. Nötig, weil der Prozess (systemd
    * Restart, Deploy) neu startet, die Positionen aber in PostgreSQL persistent sind.
+   *
+   * KORRIGIERT (v1.1.0): Ohne `cashHint` wurde `this.cash = startEquity` gesetzt und
+   * nur das Einstiegs-Notional offener Positionen abgezogen. Realisierte P&L aus
+   * bereits GESCHLOSSENEN Trades (die in der DB stehen) ging dabei verloren — nach
+   * einem Neustart zeigte das Depot wieder 10.000 € statt 10.200 €.
+   *
+   * Lösung: Der Aufrufer (engine.getBroker) übergibt den zuletzt persistenten
+   * Cash-Stand aus equity_snapshots als `cashHint`. Fehlt er (frische DB, keine
+   * Snapshots), wird auf die alte Berechnung zurückgefallen — konservativ, aber
+   * korrekt für den Erststart.
    */
-  hydrate(rows: HydratePosition[]) {
+  hydrate(rows: HydratePosition[], opts?: { cashHint?: number }): void {
+    // Nur plausible Zeilen übernehmen (defensive DB-Validierung).
+    const valid = rows.filter(
+      (r) =>
+        Number.isFinite(r.qty) && r.qty > 0 &&
+        Number.isFinite(r.entryPrice) && r.entryPrice > 0 &&
+        (r.side === "LONG" || r.side === "SHORT")
+    );
+
     this.positions.clear();
-    this.cash = this.startEquity;
-    for (const r of rows) {
+    const hasCashHint =
+      typeof opts?.cashHint === "number" &&
+      Number.isFinite(opts.cashHint) &&
+      opts.cashHint >= 0;
+    if (hasCashHint) {
+      this.cash = opts?.cashHint as number;
+    } else {
+      this.cash = this.startEquity;
+      for (const r of valid) this.cash -= r.qty * r.entryPrice;
+    }
+    for (const r of valid) {
       this.positions.set(r.symbol.toUpperCase(), {
         qty: r.qty,
         side: r.side,
@@ -138,7 +165,6 @@ export class PaperBroker {
         stopLoss: r.stopLoss ?? null,
         takeProfit: r.takeProfit ?? null,
       });
-      this.cash -= r.qty * r.entryPrice;
     }
   }
 
@@ -147,15 +173,35 @@ export class PaperBroker {
    * Guardrails. Kein Agent, kein Prompt und kein Modell-Output kann das umgehen.
    */
   submit(order: Order): Fill {
+    // 0) Input-Validierung: kein Modell-Output und keine DB-Zeile darf hier
+    //    ungültige Zahlen oder Symbole durchreichen.
+    const symbol = sanitizeSymbol(order.symbol);
+    if (!symbol) {
+      return reject(order, `INVALID_SYMBOL:${String(order.symbol).slice(0, 40)}`);
+    }
+    if (!Number.isFinite(order.qty) || order.qty <= 0) {
+      return reject(order, `INVALID_QTY:${String(order.qty)}`);
+    }
+    if (!Number.isFinite(order.riskNotional) || order.riskNotional <= 0) {
+      return reject(order, `INVALID_NOTIONAL:${String(order.riskNotional)}`);
+    }
+    // Stop-Loss muss, wenn angegeben, ein positiver endlicher Kurs sein —
+    // negative/NaN-Stops würden die SL-Überwachung des Monitors entwerten.
+    const hasStopLoss =
+      order.stopLoss !== undefined && order.stopLoss !== null;
+    if (hasStopLoss && (!Number.isFinite(order.stopLoss as number) || (order.stopLoss as number) <= 0)) {
+      return reject(order, `INVALID_STOP_LOSS:${String(order.stopLoss)}`);
+    }
+
     // 1) Globale Notbremse.
     if (killSwitch.isArmed()) {
       return reject(order, "KILL_SWITCH_ARMED");
     }
 
     // 2) Kurs vorhanden?
-    const price = paperQuote(order.symbol);
+    const price = paperQuote(symbol);
     if (price === null) {
-      return reject(order, `NO_QUOTE:${order.symbol}`);
+      return reject(order, `NO_QUOTE:${symbol}`);
     }
 
     // 3) Harte, im Code verankerte Guardrails.
@@ -165,8 +211,8 @@ export class PaperBroker {
       openPositions: this.positions.size,
       side: order.side,
       leverage: 1,
-      hasStopLoss: order.stopLoss !== undefined && order.stopLoss !== null,
-      symbol: order.symbol,
+      hasStopLoss,
+      symbol,
     });
     if (!guard.allowed) {
       return reject(order, guard.reason);
@@ -175,8 +221,8 @@ export class PaperBroker {
     // 4) Kein Nachkauf: für ein Symbol darf nur eine Position offen sein.
     //    Verhindert, dass wiederholte Agenten-Turns dieselbe Position immer weiter
     //    aufstocken und dabei unbemerkt das gesamte Kapital binden.
-    if (this.positions.has(order.symbol.toUpperCase())) {
-      return reject(order, `POSITION_ALREADY_OPEN:${order.symbol.toUpperCase()} (kein Nachkauf erlaubt)`);
+    if (this.positions.has(symbol)) {
+      return reject(order, `POSITION_ALREADY_OPEN:${symbol} (kein Nachkauf erlaubt)`);
     }
 
     // 5) Genug Cash? (Kein Leverage erlaubt.)
@@ -186,7 +232,6 @@ export class PaperBroker {
 
     // 6) Paper-Fill mit moderatem Slippage.
     const fillPrice = order.side === "LONG" ? price * 1.001 : price * 0.999;
-    const symbol = order.symbol.toUpperCase();
 
     this.positions.set(symbol, {
       qty: order.qty,
