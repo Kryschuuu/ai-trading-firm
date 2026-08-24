@@ -583,6 +583,13 @@ psql "$DATABASE_URL" -c "UPDATE agents SET model='qwen2.5:3b-instruct-q4_K_M';"
 
 Kein Neustart nötig — beim nächsten Turn gilt das neue Modell.
 
+> **Provider wechseln (v1.3.0).** Neben Ollama unterstützt die Provider-Schicht jeden
+> OpenAI-kompatiblen Endpunkt (`LLM_PROVIDER=openai`), Google Gemini
+> (`LLM_PROVIDER=gemini` + `GEMINI_API_KEY`) und Anthropic Claude
+> (`LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`). Optional mit Fallback-Kette
+> `LLM_FALLBACK_PROVIDERS=gemini,anthropic`. Details, Retries und Kostenrechnung:
+> **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)**.
+
 ### 7.2 Empfehlung nach Rolle
 
 | Rolle | `[A]` Solo-Node | `[B]` Split-Node | Begründung |

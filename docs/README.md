@@ -2,8 +2,9 @@
 
 Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, Research,
 Backtest, Risk, Approver, Executor), das ein Handelsziel autonom bearbeitet — komplett
-auf eigener Hardware, mit **Ollama** oder **llama.cpp** als lokalem Modell-Server,
-**PostgreSQL** als institutionellem Gedächtnis und **harten Risikogrenzen im Code**.
+auf eigener Hardware, mit einer **abstrakten LLM-Provider-Schicht** (Ollama, jeder
+OpenAI-kompatible Endpunkt wie `llama.cpp`/LM Studio/vLLM, Google Gemini, Anthropic
+Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogrenzen im Code**.
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen
 > Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so
@@ -15,11 +16,15 @@ auf eigener Hardware, mit **Ollama** oder **llama.cpp** als lokalem Modell-Serve
 
 | Dokument | Zweck |
 | --- | --- |
-| **README.md** (diese Datei) | Überblick, Architektur, Varianten A/B, Schnellstart |
-| **[docs/INSTALL.md](docs/INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
-| **[docs/HANDBUCH.md](docs/HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting |
+| **README.md** (diese Datei, `docs/README.md`) | Überblick, Architektur, Varianten A/B, Schnellstart |
+| **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
+| **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting |
+| **[CHANGELOG.md](CHANGELOG.md)** | Versionen, Bugfixes und Änderungen je Release |
+| **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
+| **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 
-Alle drei Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
+**Version:** `v1.3.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
 
@@ -64,10 +69,12 @@ Die Ablehnung landet revisionssicher im `audit_log`. Nichts wird stillschweigend
 ├──────────────────────────────────────────────────────────────────────┤
 │  HARTE GRENZEN    src/lib/riskGuard.ts     ← hier steht die Wahrheit │
 │  Broker-Schleuse  src/lib/broker.ts        ← prüft ein zweites Mal   │
-│  Modell-Client    src/lib/ollama.ts        ← Ollama | OpenAI-kompat. │
+│  Provider-Schicht src/lib/llmProvider.ts   ← Ollama · OpenAI · Gemini│
+│                    src/lib/ollama.ts       ← Schema, Retry, Fallback │
 ├──────────────────────────────────────────────────────────────────────┤
 │  PostgreSQL + Drizzle    agents · missions · positions · proposals   │
 │                          agent_messages · audit_log · kill_switches  │
+│                          risk_config · equity_snapshots              │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -138,7 +145,7 @@ Modellinstallation, kein Umbau.
 
 ## 4. Schnellstart
 
-Ausführlich in **[docs/INSTALL.md](docs/INSTALL.md)**. Die Kurzfassung:
+Ausführlich in **[INSTALL.md](INSTALL.md)**. Die Kurzfassung:
 
 ```bash
 # 1. Abhängigkeiten
@@ -171,10 +178,13 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
 ## 5. Projektstruktur
 
 ```
-├── README.md                     ← diese Datei
 ├── docs/
+│   ├── README.md                 ← diese Datei (Überblick, Architektur)
 │   ├── INSTALL.md                ← Installation A + B
-│   └── HANDBUCH.md               ← Bedienung, Beispiele, Runbooks
+│   ├── HANDBUCH.md               ← Bedienung, Beispiele, Runbooks
+│   ├── CHANGELOG.md              ← Versionen & Bugfixes
+│   ├── SECURITY_AUDIT.md         ← Audit-Ergebnis & Peer-Review
+│   └── PROVIDER_INTEGRATION.md   ← LLM-Provider, Kosten, Retries
 ├── deploy/
 │   ├── ai-trading-firm.service   ← systemd-Unit für den Dienst
 │   └── ollama-lan.conf           ← Ollama im LAN freigeben (Variante B)
@@ -192,14 +202,22 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
     │       └── firm/
     │           ├── route.ts      ← kompletter Firmenzustand (GET)
     │           ├── run/          ← Agent-Turn oder ganze Pipeline (POST)
-    │           └── kill/         ← Not-Halt ziehen/entschärfen (POST)
+    │           ├── kill/         ← Not-Halt ziehen/entschärfen (POST)
+    │           ├── config/       ← Laufzeit-Limits (PUT, geklemmt)
+    │           ├── tick/         ← Monitor-Zyklus (POST)
+    │           ├── report/       ← KPI-Report (GET)
+    │           ├── equity/       ← Equity-Kurve (GET)
+    │           └── log/          ← Protokoll/Audit (GET)
     ├── db/schema.ts              ← Drizzle-Tabellen
     ├── components/FirmDashboard.tsx
     └── lib/
         ├── riskGuard.ts          ← HARTE LIMITS — die wichtigste Datei
         ├── broker.ts             ← Broker-Abstraktion + Paper-Broker
+        ├── llmProvider.ts        ← Provider-Abstraktion (Ollama/OpenAI/Gemini/Claude)
+        ├── ollama.ts             ← Schema, Retry, Regel-Engine-Fallback
         ├── engine.ts             ← Orchestrierung, Turns, Pipeline
-        └── ollama.ts             ← Modell-Client (Ollama / OpenAI-kompatibel)
+        ├── monitor.ts            ← SL/TP-Überwachung, Tageslimit, Retention
+        └── marketData.ts         ← Binance/Yahoo-Kurse, Screener, Symbol-Whitelist
 ```
 
 ---
@@ -225,14 +243,22 @@ Absicht: eine Sicherheitsgrenze, die man im laufenden Betrieb per Klick ändern 
 
 | Methode | Pfad | Zweck |
 | --- | --- | --- |
-| `GET` | `/api/health` | Healthcheck (systemd, Monitoring) |
-| `GET` | `/api/firm` | kompletter Zustand: Agenten, Missionen, Positionen, Audit |
+| `GET` | `/api/health` | Healthcheck inkl. Version, Schema-Status (systemd, Monitoring) |
+| `GET` | `/api/firm` | kompletter Zustand: Agenten, Missionen, Positionen, Audit, Limits |
 | `POST` | `/api/seed` | Team + Missionen anlegen (idempotent) |
 | `POST` | `/api/firm/run` | `{agentId, missionId}` oder `{missionId, pipeline:true}` |
 | `POST` | `/api/firm/kill` | `{arm:true, flatten:true}` / `{arm:false}` |
+| `POST` | `/api/firm/tick` | Monitor-Zyklus (Kurse, SL/TP, Tageslimit) — **schreibend** |
+| `GET` | `/api/firm/report?period=day\|week\|month` | KPI-Report |
+| `GET` | `/api/firm/equity?range=day\|week\|month\|all` | Equity-Kurve |
+| `GET` | `/api/firm/log?limit=50&level=WARN` | Turns + Audit-Protokoll |
+| `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (wird auf Code-Ceilings geklemmt) |
 | `GET` | `/api/docs?name=install` | Markdown-Doku als JSON |
 
-Beispiele mit `curl` im **[Handbuch, Kapitel 4](docs/HANDBUCH.md)**.
+Schreibende Endpunkte (`POST`/`PUT`) werden per `x-firm-token` geschützt, sobald
+`FIRM_API_TOKEN` gesetzt ist (siehe `.env.example`).
+
+Beispiele mit `curl` im **[Handbuch, Kapitel 4](HANDBUCH.md)**.
 
 ---
 
@@ -245,6 +271,9 @@ Beispiele mit `curl` im **[Handbuch, Kapitel 4](docs/HANDBUCH.md)**.
 * **Kleine Modelle sind keine Analysten.** 3B–14B lokal ersetzen keine echte Recherche.
   Sie sind gut darin, klar definierte Aufgaben in stabiles JSON zu gießen — und genau
   dafür werden sie hier eingesetzt.
+* **Cloud-Anbieter kosten Geld und geben Daten ab.** Die Provider-Schicht kann Gemini/Claude
+  als Fallback nutzen (`LLM_FALLBACK_PROVIDERS`) — die Kostenrechnung im Dashboard
+  (`estimateCostUsd`) ist eine Schätzung auf Referenzpreisen, keine Abrechnung.
 * **Sequenziell ist gewollt.** Auf dieser Hardware bringt Parallelität kaum Durchsatz,
   aber sehr wohl Race-Conditions an der Broker-Schnittstelle.
 * **Kein Kursrisiko-Modell.** Es gibt keine Korrelations-, Volatilitäts- oder

@@ -1,6 +1,12 @@
 {
-  "name": "nextjs-postgresql-template",
+  "name": "ai-trading-firm",
+  "version": "1.3.0",
+  "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
+  "license": "MIT",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
