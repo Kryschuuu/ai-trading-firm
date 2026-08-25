@@ -132,11 +132,18 @@ export type AgentDecision = {
   riskScore?: number;
 };
 
-/** Robustes Parsen: kleine Modelle liefern gern Prosa um das JSON herum. */
-export function parseDecision(raw: string): AgentDecision {
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Extrahiert das erste JSON-Objekt aus Modell-Prosa (Fences, umschließender Text).
+ * Kopiert nur eigene, ungefährliche Schlüssel — kein Object-Spread untrusted JSON
+ * (Prototype-Pollution, Extra-Felder in Orders/DB).
+ * Analysten nutzen diese Funktion, weil ihre Payloads (view/thesis/…) über
+ * AgentDecision hinausgehen.
+ */
+export function extractJsonObject(raw: string): Record<string, unknown> | null {
   const text = (raw ?? "").trim();
   const candidates: string[] = [];
-
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced) candidates.push(fenced[1]);
   const braced = text.match(/\{[\s\S]*\}/);
@@ -145,27 +152,50 @@ export function parseDecision(raw: string): AgentDecision {
 
   for (const c of candidates) {
     try {
-      const parsed = JSON.parse(c) as Partial<AgentDecision>;
-      if (parsed && typeof parsed === "object") {
-        const type = String(parsed.type ?? "").toUpperCase();
-        const known: AgentDecision["type"][] = [
-          "TRADE", "KILL", "HOLD", "REPORT", "APPROVE", "REJECT",
-        ];
-        return {
-          ...parsed,
-          type: (known as string[]).includes(type)
-            ? (type as AgentDecision["type"])
-            : parsed.symbol && parsed.side
-              ? "TRADE"
-              : "HOLD",
-        } as AgentDecision;
+      const parsed: unknown = JSON.parse(c);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(parsed as object)) {
+        if (DANGEROUS_KEYS.has(key)) continue;
+        out[key] = (parsed as Record<string, unknown>)[key];
       }
+      return out;
     } catch {
       /* nächsten Kandidaten probieren */
     }
   }
-  // Nicht parsebar = keine Aktion. Niemals raten, wenn Geld im Spiel ist.
-  return { type: "HOLD", reason: "Antwort des Modells war kein gültiges JSON." };
+  return null;
+}
+
+/** Robustes Parsen: kleine Modelle liefern gern Prosa um das JSON herum. */
+export function parseDecision(raw: string): AgentDecision {
+  const parsed = extractJsonObject(raw);
+  if (!parsed) {
+    return { type: "HOLD", reason: "Antwort des Modells war kein gültiges JSON." };
+  }
+  const typeRaw = String(parsed.type ?? "").toUpperCase();
+  const known: AgentDecision["type"][] = [
+    "TRADE", "KILL", "HOLD", "REPORT", "APPROVE", "REJECT",
+  ];
+  const symbol = typeof parsed.symbol === "string" ? parsed.symbol : undefined;
+  const side =
+    parsed.side === "SHORT" || parsed.side === "LONG"
+      ? parsed.side
+      : undefined;
+  const type: AgentDecision["type"] = known.includes(typeRaw as AgentDecision["type"])
+    ? (typeRaw as AgentDecision["type"])
+    : symbol && side
+      ? "TRADE"
+      : "HOLD";
+  const stopLossPct = Number(parsed.stopLossPct);
+  const riskScore = Number(parsed.riskScore);
+  const decision: AgentDecision = { type };
+  if (symbol) decision.symbol = symbol;
+  if (side) decision.side = side;
+  if (Number.isFinite(stopLossPct)) decision.stopLossPct = stopLossPct;
+  if (typeof parsed.reason === "string") decision.reason = parsed.reason;
+  if (Number.isFinite(riskScore)) decision.riskScore = riskScore;
+  return decision;
 }
 
 export async function logAudit(
@@ -350,7 +380,17 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
     missionId,
     type: "REPORT",
     content: decision.reason ?? brain.raw.slice(0, 500),
-    meta: { decision, source: brain.source, model: brain.model, latencyMs: brain.latencyMs, prompt: userPrompt, rawResponse: brain.raw.slice(0, 2000) },
+    meta: {
+      decision,
+      source: brain.source,
+      model: brain.model,
+      latencyMs: brain.latencyMs,
+      prompt: userPrompt,
+      rawResponse: brain.raw.slice(0, 2000),
+      provider: brain.provider,
+      usage: brain.usage,
+      costUsd: brain.costUsd,
+    },
   });
   await logAudit(
     "AGENT_DECISION",

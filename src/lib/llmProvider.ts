@@ -17,6 +17,8 @@
  *   - Netzwerkfehler, HTTP 429 und 5xx gelten als retryable; 4xx nicht.
  */
 
+import { publicErrorMessage } from "./secrets";
+
 export type LlmProviderName = "ollama" | "openai" | "gemini" | "anthropic";
 
 export type LlmMessage = {
@@ -89,7 +91,7 @@ export type LlmClientConfig = {
 
 export type LlmClient = {
   readonly name: LlmProviderName;
-  chat(req: LlmChatRequest): Promise<LlmChatResult>;
+  chat(req: LlmChatRequest, attempt?: number): Promise<LlmChatResult>;
   listModels(): Promise<string[]>;
 };
 
@@ -159,14 +161,35 @@ export function providerConfigFromEnv(
           : "LLM_BASE_URL";
   return {
     provider,
-    baseUrl: (env[baseEnv] ?? DEFAULT_BASE_URLS[provider]).replace(/\/+$/, ""),
+    baseUrl: sanitizeBaseUrl(env[baseEnv] ?? DEFAULT_BASE_URLS[provider], DEFAULT_BASE_URLS[provider]),
     apiKey: env[API_KEY_ENV[provider]] || undefined,
-    model: provider === "openai" ? env.LLM_MODEL || undefined : undefined,
+    // KORRIGIERT (v1.4.0): LLM_MODEL gilt für alle Cloud-/kompatiblen Provider,
+    // nicht nur openai — sonst ignorieren Gemini/Claude den konfigurierten Tag.
+    model: provider === "ollama" ? undefined : env.LLM_MODEL || undefined,
     numCtx: Number(env.OLLAMA_NUM_CTX || 4096),
     keepAlive: env.OLLAMA_KEEP_ALIVE || undefined,
     maxTokens: resolveMaxTokens({ model: "", messages: [] }, env),
     fetchFn: undefined,
   };
+}
+
+/**
+ * Nur http/https, keine Userinfo (Credentials in der URL würden in Logs/Fehler
+ * und in `new URL().href` landen). Ungültige Werte fallen auf den Default zurück.
+ */
+export function sanitizeBaseUrl(raw: string, fallback: string): string {
+  const tryParse = (value: string): string | null => {
+    try {
+      const u = new URL(value);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+      if (u.username || u.password) return null;
+      const path = u.pathname === "/" ? "" : u.pathname.replace(/\/+$/, "");
+      return `${u.protocol}//${u.host}${path}`;
+    } catch {
+      return null;
+    }
+  };
+  return tryParse(raw) ?? tryParse(fallback) ?? "http://127.0.0.1:11434";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,6 +209,10 @@ export function buildOllamaBody(
   req: LlmChatRequest,
   cfg: LlmClientConfig
 ): Record<string, unknown> {
+  // KORRIGIERT (v1.4.0): keep_alive ist ein Top-Level-Feld der Ollama-API,
+  // nicht options.keep_alive (wurde stillschweigend ignoriert).
+  // Token-Limit kommt aus dem Request (req.maxTokens / LLM_MAX_TOKENS), nicht
+  // aus einem bei Client-Erzeugung eingefrorenen cfg.maxTokens.
   return {
     model: req.model,
     messages: req.messages,
@@ -193,30 +220,43 @@ export function buildOllamaBody(
     options: {
       temperature: req.temperature ?? 0.2,
       num_ctx: cfg.numCtx ?? Number(process.env.OLLAMA_NUM_CTX || 4096),
-      num_predict: cfg.maxTokens ?? resolveMaxTokens(req, process.env),
-      ...(cfg.keepAlive ? { keep_alive: cfg.keepAlive } : {}),
+      num_predict: resolveMaxTokens(req, process.env),
     },
+    ...(cfg.keepAlive ? { keep_alive: cfg.keepAlive } : {}),
     ...(req.json !== false ? { format: req.schema ?? "json" } : {}),
   };
 }
 
 export function parseOllamaResponse(data: unknown): { content: string; usage: LlmUsage } {
-  const d = data as { message?: { content?: string } };
+  const d = data as {
+    message?: { content?: string };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const prompt = d.prompt_eval_count;
+  const completion = d.eval_count;
+  const hasUsage = Number.isFinite(prompt) || Number.isFinite(completion);
   return {
     content: d.message?.content ?? "",
-    usage: {},
+    usage: hasUsage
+      ? {
+          promptTokens: Number.isFinite(prompt) ? prompt : undefined,
+          completionTokens: Number.isFinite(completion) ? completion : undefined,
+          totalTokens: (Number(prompt) || 0) + (Number(completion) || 0),
+        }
+      : {},
   };
 }
 
 export function buildOpenaiBody(
   req: LlmChatRequest,
-  cfg: LlmClientConfig
+  _cfg: LlmClientConfig
 ): Record<string, unknown> {
   const base: Record<string, unknown> = {
     model: req.model,
     messages: req.messages,
     temperature: req.temperature ?? 0.2,
-    max_tokens: cfg.maxTokens ?? resolveMaxTokens(req, process.env),
+    max_tokens: resolveMaxTokens(req, process.env),
     stream: false,
   };
   if (req.json !== false) {
@@ -247,7 +287,7 @@ export function parseOpenaiResponse(data: unknown): { content: string; usage: Ll
 
 export function buildGeminiBody(
   req: LlmChatRequest,
-  cfg: LlmClientConfig
+  _cfg: LlmClientConfig
 ): Record<string, unknown> {
   const { system, rest } = systemAndMessages(req.messages);
   const contents = rest.map((m) => ({
@@ -256,7 +296,7 @@ export function buildGeminiBody(
   }));
   const generationConfig: Record<string, unknown> = {
     temperature: req.temperature ?? 0.2,
-    maxOutputTokens: cfg.maxTokens ?? resolveMaxTokens(req, process.env),
+    maxOutputTokens: resolveMaxTokens(req, process.env),
   };
   if (req.json !== false) generationConfig.responseMimeType = "application/json";
   if (req.json !== false && req.schema) generationConfig.responseSchema = req.schema;
@@ -293,14 +333,14 @@ export function parseGeminiResponse(data: unknown): { content: string; usage: Ll
 
 export function buildAnthropicBody(
   req: LlmChatRequest,
-  cfg: LlmClientConfig
+  _cfg: LlmClientConfig
 ): Record<string, unknown> {
   const { system, rest } = systemAndMessages(req.messages);
   return {
     model: req.model,
     ...(system ? { system } : {}),
     messages: rest,
-    max_tokens: cfg.maxTokens ?? resolveMaxTokens(req, process.env),
+    max_tokens: resolveMaxTokens(req, process.env),
     temperature: req.temperature ?? 0.2,
   };
 }
@@ -321,6 +361,36 @@ export function parseAnthropicResponse(data: unknown): { content: string; usage:
       ? { promptTokens: u.input_tokens, completionTokens: u.output_tokens }
       : {},
   };
+}
+
+/**
+ * Normalisiert Modelllisten aller Provider.
+ * Gemini liefert `name: "models/gemini-2.0-flash"` — Prefix muss weg, sonst
+ * wird `/models/models/gemini-…:generateContent` aufgerufen.
+ * Anthropic nutzt wie OpenAI `{ data: [{ id }] }`, nicht `{ models: [{ name }] }`.
+ */
+export function parseModelList(provider: LlmProviderName, data: unknown): string[] {
+  const d = (data ?? {}) as {
+    models?: { name?: string; id?: string }[];
+    data?: { id?: string; name?: string }[];
+  };
+  const stripGemini = (name: string) => name.replace(/^models\//, "");
+  if (provider === "openai" || provider === "anthropic") {
+    return (d.data ?? d.models ?? [])
+      .map((m) => String(m.id ?? m.name ?? "").trim())
+      .filter(Boolean);
+  }
+  if (provider === "gemini") {
+    return (d.models ?? d.data ?? [])
+      .map((m) => stripGemini(String(m.name ?? m.id ?? "").trim()))
+      .filter(Boolean);
+  }
+  return (d.models ?? []).map((m) => String(m.name ?? "").trim()).filter(Boolean);
+}
+
+/** Gemini-Auth ausschließlich per Header — Keys gehören nicht in die URL. */
+export function geminiAuthHeaders(apiKey?: string): Record<string, string> {
+  return apiKey ? { "x-goog-api-key": apiKey } : {};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -350,7 +420,7 @@ async function doFetch(
   } catch (e) {
     // Netzwerkfehler (refused, timeout, DNS) sind immer retryable.
     throw new LlmProviderError(
-      `Netzwerkfehler bei ${cfg.provider}: ${e instanceof Error ? e.message : String(e)}`,
+      `Netzwerkfehler bei ${cfg.provider}: ${publicErrorMessage(e, "Netzwerkfehler")}`,
       cfg.provider,
       { retryable: true }
     );
@@ -409,7 +479,7 @@ async function listModels(cfg: LlmClientConfig, timeoutMs = 2500): Promise<strin
   const urls: Record<LlmProviderName, string> = {
     ollama: `${cfg.baseUrl}/api/tags`,
     openai: `${cfg.baseUrl}/models`,
-    gemini: `${cfg.baseUrl}/models?key=${encodeURIComponent(cfg.apiKey ?? "")}`,
+    gemini: `${cfg.baseUrl}/models`,
     anthropic: `${cfg.baseUrl}/models`,
   };
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -417,7 +487,9 @@ async function listModels(cfg: LlmClientConfig, timeoutMs = 2500): Promise<strin
     if (cfg.provider === "anthropic") {
       headers["x-api-key"] = cfg.apiKey;
       headers["anthropic-version"] = "2023-06-01";
-    } else if (cfg.provider !== "gemini") {
+    } else if (cfg.provider === "gemini") {
+      headers["x-goog-api-key"] = cfg.apiKey;
+    } else {
       headers.Authorization = `Bearer ${cfg.apiKey}`;
     }
   }
@@ -426,17 +498,11 @@ async function listModels(cfg: LlmClientConfig, timeoutMs = 2500): Promise<strin
   try {
     const res = await fetchFn(urls[cfg.provider], { headers, cache: "no-store", signal: ctrl.signal });
     if (!res.ok) throw new LlmProviderError(`list models: HTTP ${res.status}`, cfg.provider);
-    const data = (await res.json()) as {
-      models?: { name: string }[];
-      data?: { id: string }[];
-    };
-    return cfg.provider === "openai"
-      ? (data.data ?? []).map((m) => m.id)
-      : (data.models ?? []).map((m) => m.name);
+    return parseModelList(cfg.provider, await res.json());
   } catch (e) {
     if (e instanceof LlmProviderError) throw e;
     throw new LlmProviderError(
-      `list models: ${e instanceof Error ? e.message : String(e)}`,
+      `list models: ${publicErrorMessage(e, "unbekannt")}`,
       cfg.provider,
       { retryable: true }
     );
@@ -542,8 +608,8 @@ export function createLlmClient(
       case "gemini":
         return doChat(
           cfg,
-          `${cfg.baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(cfg.apiKey ?? "")}`,
-          {},
+          `${cfg.baseUrl}/models/${encodeURIComponent(model)}:generateContent`,
+          geminiAuthHeaders(cfg.apiKey),
           buildGeminiBody(effective, cfg),
           parseGeminiResponse,
           effective,
@@ -567,7 +633,7 @@ export function createLlmClient(
 
   return {
     name,
-    chat: (req) => chat(req, 1),
+    chat: (req, attempt = 1) => chat(req, attempt),
     // Wirft bei Fehler — getOllamaStatus entscheidet über available/fallback.
     listModels: () => listModels(cfg),
   };
@@ -713,14 +779,14 @@ export async function chatLlm(
   for (const provider of providers) {
     try {
       const client = createLlmClient(provider, { env, fetchFn: opts.fetchFn });
-      return await withRetry((attempt) => client.chat({ ...req, maxTokens: resolveMaxTokens(req, env) }), {
+      return await withRetry((attempt) => client.chat({ ...req, maxTokens: resolveMaxTokens(req, env) }, attempt), {
         maxAttempts: effectiveMaxAttempts,
         baseDelayMs: opts.baseDelayMs ?? 250,
         sleep,
         onRetry: (attempt, error, delay) => {
           console.warn(
             `[llm] ${provider} Versuch ${attempt} fehlgeschlagen, Retry in ${delay}ms:`,
-            error instanceof Error ? error.message : error
+            publicErrorMessage(error)
           );
         },
       });
@@ -728,7 +794,7 @@ export async function chatLlm(
       lastError = e;
       console.warn(
         `[llm] Provider ${provider} nicht verfügbar:`,
-        e instanceof Error ? e.message : String(e)
+        publicErrorMessage(e)
       );
     }
   }

@@ -6,6 +6,8 @@
  * Anweisungen, sondern sind reine Daten.
  */
 
+import { sanitizeSymbol } from "./marketData";
+
 export type NewsItem = {
   source: string;
   title: string;
@@ -26,11 +28,13 @@ export const NEWS_FEEDS: { id: string; url: string; label: string }[] = [
 
 /** Ticker-spezifischer Finviz-Feed (Aktien/ETFs; Krypto-Symbole werden gefiltert). */
 export function finvizFeed(symbol: string): { id: string; url: string; label: string } | null {
-  if (/^(BTC|ETH|SOL|XRP|BNB|ADA|DOGE|AVAX|LINK|DOT|EURUSD=X)$/i.test(symbol)) return null;
+  const clean = sanitizeSymbol(symbol);
+  if (!clean) return null;
+  if (/^(BTC|ETH|SOL|XRP|BNB|ADA|DOGE|AVAX|LINK|DOT|EURUSD=X)$/i.test(clean)) return null;
   return {
-    id: `finviz:${symbol.toUpperCase()}`,
-    url: `https://finviz.com/rss.ashx?t=${encodeURIComponent(symbol.toUpperCase())}`,
-    label: `Finviz ${symbol.toUpperCase()}`,
+    id: `finviz:${clean}`,
+    url: `https://finviz.com/rss.ashx?t=${encodeURIComponent(clean)}`,
+    label: `Finviz ${clean}`,
   };
 }
 

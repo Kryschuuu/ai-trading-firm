@@ -20,12 +20,14 @@ export async function GET(req: Request) {
   const limit = Number.isFinite(rawLimit)
     ? Math.min(Math.max(Math.trunc(rawLimit), 1), 200)
     : 60;
-  const level = url.searchParams.get("level");
-  const event = url.searchParams.get("event");
+  const levelRaw = (url.searchParams.get("level") ?? "").toUpperCase();
+  const eventRaw = (url.searchParams.get("event") ?? "").toUpperCase();
+  const level = ["INFO", "WARN", "CRITICAL"].includes(levelRaw) ? levelRaw : null;
+  const event = /^[A-Z][A-Z0-9_]{0,39}$/.test(eventRaw) ? eventRaw : null;
 
   let auditQuery = db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit).$dynamic();
-  if (level) auditQuery = auditQuery.where(eq(auditLog.level, level.toUpperCase()));
-  if (event) auditQuery = auditQuery.where(eq(auditLog.event, event.toUpperCase()));
+  if (level) auditQuery = auditQuery.where(eq(auditLog.level, level));
+  if (event) auditQuery = auditQuery.where(eq(auditLog.event, event));
 
   const [turnRows, auditRows, agentRows] = await Promise.all([
     db.select().from(agentMessages).orderBy(desc(agentMessages.createdAt)).limit(limit),
@@ -51,6 +53,9 @@ export async function GET(req: Request) {
         latencyMs: meta.latencyMs,
         prompt: typeof meta.prompt === "string" ? meta.prompt : null,
         rawResponse: typeof meta.rawResponse === "string" ? meta.rawResponse : null,
+        provider: typeof meta.provider === "string" ? meta.provider : null,
+        usage: meta.usage ?? null,
+        costUsd: typeof meta.costUsd === "number" ? meta.costUsd : null,
       };
     }),
     audit: auditRows,

@@ -15,9 +15,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const rangeRaw = (url.searchParams.get("range") ?? "week").toLowerCase();
-  const range: Period | "all" = (["day", "week", "month"] as const).includes(rangeRaw as Period)
-    ? (rangeRaw as Period)
-    : "all";
+  const allowed = ["day", "week", "month", "all"] as const;
+  const range: Period | "all" = (allowed as readonly string[]).includes(rangeRaw)
+    ? (rangeRaw as Period | "all")
+    : "week";
 
   const since =
     range === "all"

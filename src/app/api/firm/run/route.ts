@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { agents as agentTable, auditLog, missions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { runAgentTurn, runPipeline } from "@/lib/engine";
-import { checkApiToken } from "@/lib/apiAuth";
+import { guardWrite } from "@/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -13,7 +13,7 @@ export const maxDuration = 300;
  * oder die komplette sequenzielle Pipeline → { missionId, pipeline: true }
  */
 export async function POST(req: Request) {
-  const denied = checkApiToken(req);
+  const denied = guardWrite(req);
   if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as {
     agentId?: string;

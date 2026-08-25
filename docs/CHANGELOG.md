@@ -20,7 +20,70 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [1.3.0] — 2026-08-24 (aktuell)
+## [1.4.0] — 2026-08-25 (aktuell)
+
+Security-Härtung, Provider-Korrektheit und Scheduler-Fix. Kein Schema-Bruch,
+keine neuen Pflicht-Env-Variablen. Nach `git pull`: `npm ci && npm run build`
+und Dienst neu starten.
+
+### Added
+- **Schreib-Rate-Limit** für POST/PUT (`guardWrite`): Standard 60 Anfragen / 60 s,
+  abschaltbar via `FIRM_RATE_LIMIT=0`. Antwort 429 + `Retry-After`.
+- **Secret-Redaktion** (`src/lib/secrets.ts`): Connection-Strings, Bearer-Tokens
+  und API-Keys werden aus Health-Fehlern, LLM-Logs und öffentlichen Error-Strings
+  entfernt.
+- **`extractJsonObject()`**: sicherer JSON-Extractor für Analysten-Payloads
+  (view/thesis/recommendation), ohne Prototype-Pollution.
+- **`envInt()`**: NaN-feste Env-Zahlen mit Clamp — `TICK_INTERVAL_MS=abc` startet
+  den Scheduler nicht mehr mit `setInterval(NaN)`.
+- Neue Tests: `tests/hardening.test.ts` (Secrets, Token, Rate-Limit, Intervalle,
+  parseDecision-Allowlist, Broker-Reject) plus Erweiterungen in `llmProvider.test.ts`.
+
+### Changed
+- `package.json` Version **1.4.0**.
+- Gemini-Auth: Key ausschließlich im Header `x-goog-api-key` (nicht mehr als
+  Query-Parameter — Keys gehören nicht in Access-Logs/Referrer).
+- `LLM_MODEL` gilt jetzt für Gemini **und** Anthropic, nicht nur OpenAI-kompatibel.
+- Ollama `keep_alive` ist Top-Level (API-konform); Usage (`prompt_eval_count` /
+  `eval_count`) wird geparst.
+- Token-Limit der Builder folgt `req.maxTokens` (nicht dem bei Client-Erzeugung
+  eingefrorenen Wert).
+- `parseDecision` kopiert nur Allowlist-Felder (`type/symbol/side/stopLossPct/reason/riskScore`).
+- Audit-Log-Filter (`level`/`event`) und Equity-`range` sind gewhitelistet.
+- Agenten-Meta speichert `provider`, `usage`, `costUsd`.
+
+### Fixed
+- **Gemini-API-Key in der URL** (High): Query `?key=` entfernte den Key in Logs.
+- **Gemini-Modellliste** `models/gemini-…` wurde 1:1 in den Pfad gesetzt →
+  `/models/models/…`. Prefix wird jetzt gestrippt.
+- **Anthropic `listModels`** las `models[].name` statt `data[].id` → leere Liste.
+- **Retry-`attempt`** war immer 1, weil `client.chat` den Zähler verwarf.
+- **Analysten-Intervall**: `ANALYST_INTERVAL_MIN` wurde nur geloggt; der Slot-Key
+  `HH:MM` ließ die Analysten **jede Minute** laufen. Jetzt echter Abstand
+  (Default 30 min, Minimum 10).
+- **Broker-Cash nach Slippage**: Prüfung gegen Pre-Slippage-Notional konnte das
+  Konto um 0,1 % negativ machen. Jetzt Fill-Kosten.
+- **`reject()` crashte** bei nicht-string `symbol` (`toUpperCase` auf Number).
+- **`hydrate()`** übernahm unsanitized DB-Symbole in die Position-Map.
+- **Kerzen-Intervalle und Yahoo-Screener-IDs** ohne Whitelist (URL-Injection).
+- **Health-500** konnte `DATABASE_URL` in `error` durchreichen.
+- **Provider-Base-URL**: `file:` / Userinfo (`user:pass@host`) werden abgelehnt.
+
+### Security
+- Timing-sicherer Token-Vergleich mit Längen-Padding (kein Length-Oracle).
+- `npm audit`: Ziel 0 Vulnerabilities (siehe SECURITY_AUDIT.md).
+
+### Tests
+- Bisherige 67 Tests bleiben; neu ~25 Härte-/Provider-Tests. `npm test` muss
+  vollständig grün sein.
+
+### Anmerkung Migration
+Kein DB-Schema-Change. `.env` optional um `FIRM_RATE_LIMIT` ergänzen.
+Wer Gemini nutzt: Header-Auth ist transparent, keine Key-Änderung nötig.
+
+---
+
+## [1.3.0] — 2026-08-24
 
 ### Added
 - **LLM-Provider-Abstraktion** (`src/lib/llmProvider.ts`) mit vier konfigurierbaren
@@ -134,7 +197,7 @@ Guardrails, Monitor, Analysten, Dashboard und erster Test-Suite (26 Tests).
 
 | Thema | Grund |
 | --- | --- |
-| Rate-Limiting der API (Localhost-only) | Auslieferungszustand lauscht nur auf 127.0.0.1; bei LAN-Exposition `FIRM_API_TOKEN` setzen |
+| Multi-Node Rate-Limit / Scheduler-Locks | v1.4.0 limiter ist prozess-lokal; Cluster bräuchte Redis/DB |
 | Auto-Upgrade der Abhängigkeiten | Versions-Pins sind bewusst stabil; `npm audit` als Teil des Deploy-Checks |
 | Live-Broker-Adapter (Alpaca/ccxt) | bewusst außerhalb des Paper-only-Scopes (Handbuch Kapitel 8) |
 | Persistente Scheduler-Locks über Prozesse hinweg | aktuell prozess-lokal (Single-Node-Betrieb); Multi-Node bräuchte DB-Locks |

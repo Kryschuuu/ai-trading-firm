@@ -1,6 +1,6 @@
 # Security-Audit & Peer-Review — Autonome KI-Trading-Firma
 
-**Audit-Stand:** 2026-08-24 · **Release:** v1.1.0 Fixes (enthalten in v1.3.0)
+**Audit-Stand:** 2026-08-25 · **Release:** v1.4.0 (enthält v1.1.0–v1.3.0)
 **Scope:** gesamter Quellcode (`src/`, `scripts/`, `deploy/`, Konfiguration),
 **Methode:** manuelle Code-Review + `npm audit` + statische Analyse (TS strict, ESLint)
 + Regressionstests.
@@ -90,7 +90,21 @@
 * Review: Entitäten gemäß React-Rule ersetzt; Effekt-Ladevorgänge via `useCallback` + verschobener Start — kein synchrones setState, keine Behavior-Änderung.
 
 **S-14 Scheduler**
-* Review: `berlinDayKey()` + `nowBerlin` ergeben stabilen 30-Min-Slot auch bei UTC-Servern; Double-Run-Schutz wirkt.
+* Review: `berlinDayKey()` + `nowBerlin` ergeben stabilen 30-Min-Slot auch bei UTC-Servern; Double-Run-Schutz wirkt. **Nachtrag v1.4.0 (S-18):** der Slot-Key war minutengranular — Analysten liefen jede Minute. Fix: Zeitstempel-Abstand `ANALYST_INTERVAL_MIN`.
+
+**S-15 Gemini-Key**
+* Warum: Query-Parameter stehen in Access-Logs, Browser-History, `Referer`, manchen Error-Objekten.
+* Was: `x-goog-api-key` Header; `listModels` ohne `?key=`.
+* Review: Offizielle Gemini-API akzeptiert den Header. Tests prüfen, dass die Chat-URL kein `key=` enthält. Keys in Headers können weiterhin in Debug-Dumps landen — `redactSecrets` greift in Logs/Health.
+
+**S-18 Analysten-Intervall**
+* Review: Erstlauf nach ≤60 s (setInterval), danach echter Abstand ≥10 min. Penny/Swing-Pfad unverändert (Berlin-Stunde). `analystIntervalMs` war zuvor tot (nur Log-String).
+
+**S-20 parseDecision-Allowlist**
+* Review: Analysten dürfen Extra-Felder **nicht** verlieren — deshalb `extractJsonObject` als eigene API, `runOneAnalyst` umgestellt. Engine-Pfad sieht nur Allowlist. Prototype-Keys werden verworfen. Gegentest in `hardening.test.ts` + bestehender Pollution-Test.
+
+**S-19 Slippage-Cash**
+* Review: Nur der Fill-Zweig; Reject-Pfad unverändert. Bestehende Fill-Tests (0.1 BTC / 0.5 ETH) haben genug Cash-Puffer — keine Regression. Extremer Rand (Cash ≈ Notional) kann jetzt `INSUFFICIENT_CASH` statt leicht negativem Cash liefern — gewollt konservativ.
 
 ---
 
@@ -105,7 +119,8 @@
 | **Broker (Neu)** Hydration, Guardrails, Validierung | 10 | ✅ |
 | **LLM-Provider (Neu)** Builder/Parser/Retry/Kosten/Chain | 21 | ✅ |
 | **Security (Neu)** Symbole, Fallback, Kette | 6 | ✅ |
-| **Gesamt** | **67** | ✅ 67/67 |
+| **Härte v1.4.0** Secrets, Token, Rate-Limit, Intervalle, Allowlist | 18 | ✅ |
+| **Gesamt** | **85** | ✅ 85/85 |
 
 Zusätzliche Verifikation (jede Release): `npm run typecheck` ✅ · `npm run lint` ✅ (0 Fehler) ·
 `npm run build` ✅ · `npm audit` → 0 Vulnerabilities ✅.
@@ -117,5 +132,5 @@ Zusätzliche Verifikation (jede Release): `npm run typecheck` ✅ · `npm run li
 1. **`FIRM_API_TOKEN` aktivieren**, sobald der Dienst außerhalb von 127.0.0.1 erreichbar ist (LAN/Cloud) — der Token-Schutz existiert, ist aber nur optional.
 2. **Regelmäßiges `npm audit`** in die Deploy-Checkliste aufnehmen (`CI`-Job empfohlen).
 3. **Live-Broker erst nach** Sicherheits-Checkliste (HANDBUCH Kapitel 11); kein Adapter im Auslieferungszustand.
-4. **Rate-Limiting** nur bei Netzwerk-Exposition nötig (Backlog).
+4. **Rate-Limiting** ist seit v1.4.0 prozess-lokal aktiv (60/min); hinter einem Proxy `x-forwarded-for` nicht als Sicherheitsgrenze behandeln.
 5. **DB-gestützte Scheduler-Locks** bei Multi-Node-Betrieb (aktuell Single-Node).
