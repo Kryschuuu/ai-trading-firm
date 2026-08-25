@@ -4,6 +4,7 @@ import { agents as agentTable, auditLog, missions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { runAgentTurn, runPipeline } from "@/lib/engine";
 import { guardWrite } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -57,7 +58,11 @@ export async function POST(req: Request) {
         detail: { message, scope: "pipeline" },
         missionId: body.missionId,
       });
-      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+      // FIX (v1.5.1): raw error → redacted. Verhindert Leak von DB-Strings.
+      return NextResponse.json(
+        { ok: false, error: publicErrorMessage(e) },
+        { status: 500 }
+      );
     }
   }
 
@@ -90,6 +95,10 @@ export async function POST(req: Request) {
       .update(agentTable)
       .set({ status: "STOPPED", updatedAt: new Date() })
       .where(eq(agentTable.id, body.agentId));
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    // FIX (v1.5.1): raw error → redacted.
+    return NextResponse.json(
+      { ok: false, error: publicErrorMessage(e) },
+      { status: 500 }
+    );
   }
 }

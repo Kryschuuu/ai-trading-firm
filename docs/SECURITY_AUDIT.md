@@ -37,6 +37,9 @@
 | S-12 | Low | `scripts/smoke-test.sh` | Prüfte Health-Feld `status`/`SCHEMA_MISSING`, das die API nie liefert → Setup-Fehlerzweig tot | ✅ gefixt (v1.1.0) |
 | S-13 | Low | `src/components/FirmDashboard.tsx`, `src/app/docs/page.tsx` | 10 Lint-Fehler (unescaped Entitäten, setState im Effekt) — Qualitäts-/Wartbarkeitsrisiko | ✅ gefixt (v1.1.0) |
 | S-14 | Low | `src/instrumentation.ts` | Analysten-Slot-Key in Server-Localtime → Doppelstart-Schutz auf UTC-Servern unzuverlässig | ✅ gefixt (v1.1.0) |
+| S-21 | Medium | `src/app/api/firm/run/route.ts`, `src/app/api/firm/tick/route.ts` | Rohe Fehlermeldungen in catch-Blöcken an Client zurückgegeben — DB-Connection-Strings und interne Stack-Traces konnten in HTTP-Responses landen | ✅ gefixt (v1.5.1) |
+| S-22 | Low | `src/app/api/firm/route.ts` → `GET()` | Kein try/catch um die DB-Queries — unhandled exception bei DB-Ausfall mit potenziellem Stack-Trace-Leak | ✅ gefixt (v1.5.1) |
+| S-23 | Low | `src/db/index.ts` → `new Pool(...)` | Connection-Pool ohne `max`-Grenze und Timeouts — potenzieller Ressourcenverbrauch unter Last | ✅ gefixt (v1.5.1) |
 | I-01 | Info | `package-lock.json` | `npm audit`: **0 Vulnerabilities** (prod + dev) | ✅ geprüft |
 | I-02 | Info | `src/lib/apiAuth.ts` | Timing-sicherer Token-Vergleich (`crypto.timingSafeEqual`), leere Token ≠ aktiv | ✅ geprüft |
 | I-03 | Info | gesamte `src/` | Kein `eval`, kein `child_process`/`exec`/`spawn`, kein `dangerouslySetInnerHTML`; SQL nur via Drizzle (parametrisiert) | ✅ geprüft |
@@ -106,6 +109,21 @@
 **S-19 Slippage-Cash**
 * Review: Nur der Fill-Zweig; Reject-Pfad unverändert. Bestehende Fill-Tests (0.1 BTC / 0.5 ETH) haben genug Cash-Puffer — keine Regression. Extremer Rand (Cash ≈ Notional) kann jetzt `INSUFFICIENT_CASH` statt leicht negativem Cash liefern — gewollt konservativ.
 
+**S-21 Error-Leakage in API-Routen**
+* Warum: Datenbankfehler (z.B. `pg` Connection-String in `err.message`) flossen 1:1 in HTTP-Responses. Ein Angreifer mit API-Zugang könnte so interne Infrastruktur-Details erfahren.
+* Was: `publicErrorMessage(e)` in allen catch-Blöcken von `firm/run`, `firm/tick` und `firm` (GET).
+* Review: `publicErrorMessage` nutzt `redactSecrets()` (Regex-basierte Pattern-Erkennung für postgresql://, Bearer, API-Keys) und kürzt auf 240 Zeichen. Audit-Log speichert weiterhin den vollen Fehler für Debugging. Bestehende Tests prüfen `redactSecrets` und `publicErrorMessage`.
+
+**S-22 GET /api/firm ohne Fehlerbehandlung**
+* Warum: 7 parallele DB-Queries ohne try/catch. Bei DB-Ausfall wirft Next.js einen 500 mit potenziell sensitivem Stack-Trace.
+* Was: try/catch um den gesamten GET-Handler mit 503 und redacted Error.
+* Review: Konsistent mit den anderen Routen (`missions/route.ts`, `agents/route.ts`), die bereits `publicErrorMessage` nutzen.
+
+**S-23 DB-Pool-Konfiguration**
+* Warum: Standard-pg-Pool hat max=20 Connections ohne Timeout. Unter Last (parallele Dashboard-Requests + Scheduler) könnten alle Pool-Slots belegt werden und der Service blockiert.
+* Was: `max: 10`, `connectionTimeoutMillis: 5000`, `idleTimeoutMillis: 30000`.
+* Review: 10 Connections reichen für Single-Node-Betrieb (max 4-5 parallele Queries). 5s Timeout verhindert ewiges Warten. Neue Tests prüfen die Konfiguration.
+
 ---
 
 ## 4. Testabdeckung nach Fixes
@@ -116,11 +134,12 @@
 | Risiko-Guardrails & Ceilings | 7 | ✅ |
 | `parseDecision` (inkl. Injection/Pollution) | 9 | ✅ |
 | Berliner Zeit & DST | 8 | ✅ |
-| **Broker (Neu)** Hydration, Guardrails, Validierung | 10 | ✅ |
-| **LLM-Provider (Neu)** Builder/Parser/Retry/Kosten/Chain | 21 | ✅ |
-| **Security (Neu)** Symbole, Fallback, Kette | 6 | ✅ |
-| **Härte v1.4.0** Secrets, Token, Rate-Limit, Intervalle, Allowlist | 18 | ✅ |
-| **Gesamt** | **85** | ✅ 85/85 |
+| **Broker** Hydration, Guardrails, Validierung | 10 | ✅ |
+| **LLM-Provider** Builder/Parser/Retry/Kosten/Chain | 21 | ✅ |
+| **Security** Symbole, Fallback, Kette | 6 | ✅ |
+| **Härte** Secrets, Token, Rate-Limit, Intervalle, Allowlist | 18 | ✅ |
+| **DB-Konfiguration (Neu v1.5.1)** Pool, Config, Header, Error-Leaks | 12 | ✅ |
+| **Gesamt** | **116** | ✅ 116/116 |
 
 Zusätzliche Verifikation (jede Release): `npm run typecheck` ✅ · `npm run lint` ✅ (0 Fehler) ·
 `npm run build` ✅ · `npm audit` → 0 Vulnerabilities ✅.
