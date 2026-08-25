@@ -105,6 +105,27 @@ test("Regression v1.1.0: hydrate MIT cashHint erhält realisiertes P&L (Neustart
   assert.ok(Math.abs(equity - (4000 + 0.1 * 67000)) < 1e-6, `equity=${equity}`);
 });
 
+test("Regression v1.5.2: hydrate erhält stopLoss/takeProfit (Dashboard-Wahrheit nach Neustart)", () => {
+  // Vor dem Fix schmiss getBroker SL/TP beim Hydrat-Mapping weg — das Dashboard
+  // zeigte nach jedem Neustart "kein Stop-Loss", obwohl die DB ihn hat.
+  const b = new PaperBroker(10000);
+  b.hydrate(
+    [
+      { symbol: "BTC", side: "LONG", qty: 0.1, entryPrice: 60000, stopLoss: 57000, takeProfit: 72000 },
+      // Ungültige SL/TP-Werte (NaN/negativ) dürfen nicht durchsickern → null.
+      { symbol: "ETH", side: "LONG", qty: 1, entryPrice: 3000, stopLoss: NaN, takeProfit: -5 },
+    ],
+    { cashHint: 4000 },
+  );
+  const btc = b.listPositions().find((p) => p.symbol === "BTC");
+  assert.ok(btc, "BTC-Position muss hydratiert sein");
+  assert.equal(btc?.stopLoss, 57000, "stopLoss muss nach Hydration erhalten sein");
+  assert.equal(btc?.takeProfit, 72000, "takeProfit muss nach Hydration erhalten sein");
+  const eth = b.listPositions().find((p) => p.symbol === "ETH");
+  assert.equal(eth?.stopLoss ?? null, null, "NaN-stopLoss → null");
+  assert.equal(eth?.takeProfit ?? null, null, "negativer takeProfit → null");
+});
+
 test("Broker: hydrate ignoriert kaputte Zeilen (qty<=0, NaN, falsche Side)", () => {
   const b = new PaperBroker(10000);
   b.hydrate(

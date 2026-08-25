@@ -13,6 +13,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 
 // ── drizzle.config.ts: keine Hardcodierung ──────────────────────────────────
 
@@ -135,6 +137,19 @@ test("src/db/index.ts: kein hardcodiertes Passwort", () => {
   );
 });
 
+test("src/db/index.ts: Pool hat 'error'-Listener (kein uncaughtException bei DB-Neustart)", () => {
+  const dbIndex = readFileSync(
+    resolve(process.cwd(), "src/db/index.ts"),
+    "utf8"
+  );
+  // Fällt PostgreSQL während idle Connections weg (57P01), emittiert der Pool
+  // ein async 'error'-Event. Ohne Listener → uncaughtException + Objekt-Dump.
+  assert.ok(
+    dbIndex.includes('pool.on("error"'),
+    "Pool muss einen 'error'-Handler registriert haben"
+  );
+});
+
 // ── systemd-Unit: Sicherheitshärtung ────────────────────────────────────────
 
 test("deploy/ai-trading-firm.service: Sicherheitsdirektiven vorhanden", () => {
@@ -158,7 +173,6 @@ test("deploy/ai-trading-firm.service: Sicherheitsdirektiven vorhanden", () => {
 });
 
 // ── Setup-Script: sichere DB-Erstellung ─────────────────────────────────────
-
 test("scripts/setup-cachyos.sh: erstellt DB-User mit Passwort-Abfrage", () => {
   const script = readFileSync(
     resolve(process.cwd(), "scripts/setup-cachyos.sh"),
@@ -178,6 +192,150 @@ test("scripts/setup-cachyos.sh: erstellt DB-User mit Passwort-Abfrage", () => {
   assert.ok(
     script.includes("DATABASE_URL=") && script.includes("drizzle-kit push"),
     "Setup-Script muss DATABASE_URL explizit an drizzle-kit push übergeben"
+  );
+});
+
+// KORRIGIERT (v1.5.2): Regressionen für den Produktionsvorfall
+// „could not open file global/pg_filenode.map“ + ECONNREFUSED während des Push.
+test("scripts/setup-cachyos.sh: wartet auf echte PostgreSQL-Bereitschaft", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  // 'sleep 1' + systemctl is-active meldet Type=forking-Dienste als aktiv,
+  // BEVOR der Server Connections annimmt — bei einem defekten Cluster crasht
+  // der Server sogar in einer Restart-Schleife und bleibt trotzdem 'active'.
+  assert.ok(
+    script.includes("pg_isready"),
+    "Setup-Script muss mit pg_isready auf echte Bereitschaft warten"
+  );
+  assert.ok(
+    !script.includes("sleep 1\nsystemctl is-active"),
+    "Das blinde sleep-1-plus-is-active-Muster darf nicht zurückkommen"
+  );
+});
+
+test("scripts/setup-cachyos.sh: prüft Cluster-Vollständigkeit vor dem Start", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  // Halb initialisierte Cluster (fehlender global/pg_filenode.map) müssen
+  // erkannt und repariert werden, bevor der Dienst startet.
+  assert.ok(
+    script.includes("pg_filenode.map"),
+    "Cluster-Check muss global/pg_filenode.map prüfen (Originalfehlerbild)"
+  );
+  assert.ok(
+    script.includes("pg_control") && script.includes("PG_VERSION"),
+    "Cluster-Check muss PG_VERSION und global/pg_control einbeziehen"
+  );
+});
+
+test("scripts/setup-cachyos.sh: initdb mit Auth-Flags und Prüfsummen", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  // Ohne -A setzt initdb lokale Verbindungen auf 'trust' (Warnung des Users).
+  assert.ok(
+    script.includes("--auth-local=peer") &&
+      script.includes("--auth-host=scram-sha-256"),
+    "initdb muss peer/scram-sha-256 als Authentifizierung setzen"
+  );
+  assert.ok(
+    script.includes("--data-checksums"),
+    "initdb soll Data-Checksummen aktivieren (Korruption früh erkennen)"
+  );
+});
+
+test("scripts/setup-cachyos.sh: Passwort-Interpolation ist quote-/injection-sicher", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  // Alt (verwundbar): PASSWORD '${DB_PASS}' — ein ' im Passwort brach das SQL.
+  // Neu: psql-Variablen mit :'var' maskieren kontextsicher.
+  assert.ok(
+    script.includes(":'db_pass'"),
+    "CREATE USER muss das Passwort via psql-Variable (:'db_pass') interpolieren"
+  );
+  assert.ok(
+    !script.includes("PASSWORD '${DB_PASS}'"),
+    "Rohes '${DB_PASS}' im SQL-String ist verboten (Quote-Bug)"
+  );
+  // Identifikatoren dürfen nicht beliebig sein (sie gehen in SQL ein).
+  assert.ok(
+    script.includes("DB_USER\" =~ ^[a-z_]") || script.includes('DB_USER" =~ '),
+    "DB_USER muss per Regex validiert werden"
+  );
+});
+
+// ── src/db/index.ts: Lazy-Init (v1.5.2) ─────────────────────────────────────
+
+test("src/db/index.ts: Import OHNE DATABASE_URL wirft nicht (next-build-fähig)", () => {
+  // Vor v1.5.2 warf src/db/index.ts beim Import, wenn DATABASE_URL fehlte —
+  // und riss damit `next build` während der Page-Data-Collection ab, sobald
+  // eine Route "@/db" importierte (frischer Clone ohne .env = kaputter Build).
+  const entry = pathToFileURL(
+    resolve(process.cwd(), "src/db/index.ts")
+  ).href;
+  const r = spawnSync(
+    process.execPath,
+    [
+      "--import", "tsx",
+      "--eval",
+      `import(${JSON.stringify(entry)})` +
+        `.then(() => process.exit(0))` +
+        `.catch((e) => { console.error(e && e.message ? e.message : e); process.exit(1); });`,
+    ],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_URL: "" },
+      encoding: "utf8",
+      timeout: 60_000,
+    }
+  );
+  assert.equal(
+    r.status,
+    0,
+    `Import ohne DATABASE_URL muss durchgehen. stderr: ${r.stderr}`
+  );
+});
+
+test("src/db/index.ts: erste Nutzung OHNE DATABASE_URL wirft actionable Fehler", () => {
+  const entry = pathToFileURL(
+    resolve(process.cwd(), "src/db/index.ts")
+  ).href;
+  const r = spawnSync(
+    process.execPath,
+    [
+      "--import", "tsx",
+      "--eval",
+      `import(${JSON.stringify(entry)}).then(async (m) => {` +
+        `  try { await m.db.execute("select 1"); process.exit(0); }` +
+        `  catch (e) { console.error(String(e && e.message)); process.exit(2); }` +
+        `});`,
+    ],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_URL: "" },
+      encoding: "utf8",
+      timeout: 60_000,
+    }
+  );
+  assert.equal(r.status, 2, "DB-Nutzung ohne DATABASE_URL muss werfen");
+  assert.ok(
+    r.stderr.includes("DATABASE_URL"),
+    "Fehlermeldung muss DATABASE_URL nennen"
+  );
+  assert.ok(
+    r.stderr.includes(".env.example") || r.stderr.includes("HANDBUCH"),
+    "Fehlermeldung muss auf die Lösung führen (.env.example / Handbuch)"
+  );
+  assert.ok(
+    !/postgresql:\/\/\S+:\S+@/.test(r.stderr),
+    "Fehlermeldung darf keine Credentials enthalten"
   );
 });
 

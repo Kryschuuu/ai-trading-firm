@@ -979,6 +979,70 @@ SQL
 sudo systemctl restart ai-trading-firm
 ```
 
+### 10.6 PostgreSQL-Cluster defekt — `global/pg_filenode.map` fehlt
+
+**Symptom (Kettenreaktion):**
+
+```
+psql: FATAL:  could not open file "global/pg_filenode.map": No such file or directory
+```
+
+danach im Dienst-Log (`journalctl -u ai-trading-firm`) laufend:
+
+```
+[scheduler] Tick fehlgeschlagen: Failed query: select … from "positions" …
+[getBroker] Hydration fehlgeschlagen: Failed query: …
+```
+
+und im Dashboard die Seite **„Setup erforderlich"**. `npx drizzle-kit push`
+scheitert zusätzlich mit `ECONNREFUSED 127.0.0.1:5432`.
+
+**Ursache:** Das Datenverzeichnis `/var/lib/postgres/data` ist unvollständig —
+initdb wurde abgebrochen oder lief, während `postgresql.service` schon lief bzw.
+in einer Restart-Schleife hing. Der Server startet dann scheinbar normal
+(`systemctl` meldet *active*), crasht aber bei jeder Abfrage in Recovery.
+**Ein `npx drizzle-kit push` kann das nicht heilen — der Server selbst ist kaputt.**
+
+**Diagnose (30 Sekunden):**
+
+```bash
+systemctl is-active postgresql                 # meldet fälschlich 'active'
+sudo journalctl -u postgresql -n 20 --no-pager # zeigt die FATAL-Zeile oben
+ls /var/lib/postgres/data/global/pg_filenode.map  # → Datei fehlt
+```
+
+**Reparatur (Datenverzeichnis neu initialisieren — Trading-Daten gehen dabei
+verloren, die Firma ist danach über „Seed / Reset" sofort wieder einsatzfähig):**
+
+```bash
+sudo systemctl stop postgresql
+sudo rm -rf /var/lib/postgres/data
+sudo -u postgres initdb -D /var/lib/postgres/data --locale=C.UTF-8 --encoding=UTF8 \
+  --data-checksums --auth-local=peer --auth-host=scram-sha-256
+sudo systemctl enable --now postgresql
+
+# Warten bis wirklich bereit — NICHT blind 'sleep' (seit v1.5.2 macht das
+# setup-cachyos.sh automatisch):
+pg_isready          # wiederholt aufrufen, bis: 'accepting connections'
+
+# Benutzer + Datenbank neu anlegen (Passwort wie in .env!)
+sudo -u postgres psql -v ON_ERROR_STOP=1 \
+  -v db_user=trader -v db_name=trading_firm -v db_pass='DEIN_PASSWORT' <<'SQL'
+CREATE USER :"db_user" WITH PASSWORD :'db_pass';
+CREATE DATABASE :"db_name" OWNER :"db_user";
+GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
+SQL
+
+# Schema anlegen und Dienst neu starten
+npx drizzle-kit push
+sudo systemctl restart ai-trading-firm
+```
+
+Alternativ einfach `./scripts/setup-cachyos.sh --variant a` erneut ausführen —
+seit v1.5.2 erkennt es genau diesen defekten Zustand, stoppt den Dienst,
+initialisiert neu und wartet mit `pg_isready` auf echte Bereitschaft, bevor es
+weitermacht.
+
 ---
 
 ## 11. Sicherheits-Checkliste vor echtem Geld

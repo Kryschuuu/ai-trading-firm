@@ -58,6 +58,16 @@ export function paperQuote(symbol: string): number | null {
   return getQuoteSync(symbol) ?? paperPrices[symbol.toUpperCase()] ?? null;
 }
 
+/**
+ * Schutzebene (SL/TP) aus einer DB-Zeile sanitizen: null/NaN/≤0 → null.
+ * Eine kaputte Schutzebene darf niemals still in den Broker-Zustand wandern.
+ */
+function sanitizeLevel(value: number | null | undefined): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export class PaperBroker {
   readonly name: BrokerName = "PAPER";
   private cash: number;
@@ -165,8 +175,12 @@ export class PaperBroker {
         qty: r.qty,
         side: r.side,
         entryPrice: r.entryPrice,
-        stopLoss: r.stopLoss ?? null,
-        takeProfit: r.takeProfit ?? null,
+        // KORRIGIERT (v1.5.2): SL/TP werden gesanitized übernommen (null/NaN/
+        // ≤0 → null), damit der Broker-Zustand nach einem Neustart dieselbe
+        // Wahrheit zeigt wie die Datenbank und keine kaputten Schutzebenen
+        // still weitergereicht werden.
+        stopLoss: sanitizeLevel(r.stopLoss),
+        takeProfit: sanitizeLevel(r.takeProfit),
       });
     }
   }
