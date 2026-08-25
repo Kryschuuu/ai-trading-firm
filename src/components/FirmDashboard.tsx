@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/apiClient";
+import type { AgentRow, MissionRow } from "@/lib/types";
+import WorkshopTab from "./workshop/WorkshopTab";
 
 type ConfigEntry = {
   key: string;
@@ -15,8 +18,8 @@ type ConfigEntry = {
 };
 
 type FirmData = {
-  agents: any[];
-  missions: any[];
+  agents: AgentRow[];
+  missions: MissionRow[];
   positions: any[];
   proposals: any[];
   auditLog: any[];
@@ -26,6 +29,7 @@ type FirmData = {
   riskConfig: ConfigEntry[];
   killSwitchArmed: boolean;
   killSwitches: any[];
+  messages: any[];
   ollama: { available: boolean; baseUrl: string; models: string[]; error?: string };
   scheduler: { enabled: boolean; lastTickAt: string | null };
   account: {
@@ -47,7 +51,7 @@ const defaultData: FirmData = {
   agents: [], missions: [], positions: [], proposals: [],
   auditLog: [], riskLimits: {}, riskDefaults: {}, riskCeilings: {}, riskConfig: [],
   killSwitchArmed: false,
-  killSwitches: [], ollama: { available: false, baseUrl: "", models: [] },
+  killSwitches: [], messages: [], ollama: { available: false, baseUrl: "", models: [] },
   scheduler: { enabled: false, lastTickAt: null },
   account: {
     equity: 0, startingEquity: 0, freeCash: 0, drawdownPct: 0,
@@ -58,18 +62,8 @@ const defaultData: FirmData = {
   timestamp: "",
 };
 
-type Tab = "overview" | "reports" | "protocol" | "agents" | "risk" | "architecture";
+type Tab = "overview" | "reports" | "protocol" | "agents" | "workshop" | "risk" | "architecture";
 
-/** Fetch-Wrapper: hängt den API-Token an, wenn im Browser hinterlegt. */
-function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
-  const token =
-    typeof window !== "undefined" ? window.localStorage.getItem("firmToken") ?? "" : "";
-  const headers = new Headers(opts.headers ?? {});
-  if (token && ["POST", "PUT", "DELETE"].includes((opts.method ?? "GET").toUpperCase())) {
-    headers.set("x-firm-token", token);
-  }
-  return fetch(url, { ...opts, headers });
-}
 
 export default function FirmDashboard() {
   const [data, setData] = useState<FirmData>(defaultData);
@@ -359,6 +353,18 @@ export default function FirmDashboard() {
           {tab === "reports" && <ReportsTab />}
           {tab === "protocol" && <ProtocolTab />}
           {tab === "agents" && <AgentsTab data={data} running={running} onRun={runAgent} />}
+          {tab === "workshop" && (
+            <WorkshopTab
+              agents={data.agents}
+              missions={data.missions}
+              onChanged={load}
+              onUnauthorized={() => {
+                setNeedToken(true);
+                setNotice("🔒 Diese Aktion braucht den API-Token (FIRM_API_TOKEN).");
+              }}
+              onOpenProtocol={() => setTab("protocol")}
+            />
+          )}
           {tab === "risk" && <RiskTab data={data} onChanged={load} />}
           {tab === "architecture" && <ArchitectureTab />}
         </>
@@ -372,6 +378,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "reports", label: "📊 Reports" },
   { id: "protocol", label: "📋 Protokoll" },
   { id: "agents", label: "Agents ↗ Orchestrator" },
+  { id: "workshop", label: "🛠 Workshop" },
   { id: "risk", label: "Risk & Guardrails" },
   { id: "architecture", label: "Design Decisions / Guide" },
 ];
