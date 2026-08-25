@@ -1,0 +1,12 @@
+# .ignore - Beispiel für Ihr ai-trading-firm Projekt
+/node_modules/
+/dist/
+/.next/
+/package-lock.json
+/tsconfig.tsbuildinfo
+*.log
+
+# Sensible oder große Ordner ausblenden
+/tests/
+/deploy/
+/scripts/
