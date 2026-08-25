@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import WorkshopTab from "./workshop/WorkshopTab";
+import ThemeSwitcher from "./ThemeSwitcher";
 
 type ConfigEntry = {
   key: string;
@@ -225,6 +226,7 @@ export default function FirmDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ThemeSwitcher />
           <a
             href="/docs"
             className="rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"

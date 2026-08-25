@@ -29,7 +29,7 @@ WorkingDirectory=/home/DEIN_USER/ai-trading-firm
 
 EnvironmentFile=/home/DEIN_USER/ai-trading-firm/.env
 Environment=NODE_ENV=production
-Environment=PORT=3000
+Environment=PORT=3369
 
 ExecStart=/usr/bin/npm run start
 

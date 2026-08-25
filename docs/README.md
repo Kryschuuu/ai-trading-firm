@@ -96,7 +96,7 @@ Alles läuft auf dem **Intel N150 / 16 GB**: PostgreSQL, Next.js-Dienst und Olla
 
 ```
 ┌─────────────── N150, 16 GB, CachyOS ───────────────┐
-│  PostgreSQL  ·  Next.js :3000  ·  Ollama :11434    │
+│  PostgreSQL  ·  Next.js :3369  ·  Ollama :11434    │
 │  Modell: qwen2.5:3b-instruct-q4_K_M (CPU)          │
 └────────────────────────────────────────────────────┘
 ```
@@ -112,7 +112,7 @@ Der N150 bleibt der **immer laufende Dienst**, der Desktop wird zum **Inferenz-K
 ```
 ┌── N150 (24/7) ──────────┐        LAN        ┌── Desktop 48 GB + RX 480 ──┐
 │  PostgreSQL             │  ───────────────► │  Ollama :11434   (CPU)      │
-│  Next.js :3000          │   HTTP            │  oder llama-server :8080    │
+│  Next.js :3369          │   HTTP            │  oder llama-server :8080    │
 │  keine Modelle          │                   │       (Vulkan, RX 480)      │
 └─────────────────────────┘                   └─────────────────────────────┘
 ```
@@ -167,7 +167,7 @@ ollama pull qwen2.5:3b-instruct-q4_K_M
 npm run build && npm run start
 ```
 
-Dann `http://localhost:3000` öffnen → **„Seed / Reset"** klicken → **„▶▶ Ganze Pipeline"**.
+Dann `http://localhost:3369` öffnen → **„Seed / Reset"** klicken → **„▶▶ Ganze Pipeline"**.
 
 **Ohne Modell funktioniert es trotzdem:** Ist kein LLM erreichbar, schaltet das System auf
 eine deterministische Regel-Engine um und zeigt „Regel-Engine" in der Statusleiste. Die

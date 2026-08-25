@@ -1,2 +1,208 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+/* ============================================================
+   THEMES — umschaltbar über das Attribut  data-theme  auf <html>.
+
+   Strategie: Tailwind v4 definiert jede Farbe als CSS-Variable
+   (--color-slate-950, --color-emerald-300, …) und die Utilities
+   referenzieren diese Variablen. Indem wir die Variablen pro
+   [data-theme] neu belegen, wird die GESAMTE Oberfläche mitgethemet —
+   ohne auch nur eine einzige Komponenten-Klasse anzufassen.
+
+   Ein neues Theme hinzufügen = ein weiterer  :root[data-theme="…"]-
+   Block weiter unten. Die Theme-Auswahl selbst liegt in
+   src/components/ThemeSwitcher.tsx.
+
+   Verfügbare Themes (alle auf langes, fokussiertes Arbeiten
+   ausgelegt):
+     dark     – Slate-Standard, OLED-freundlich (Default)
+     light    – hell, für helle Büros / Tageslicht
+     sepia    – warmes „Papier", reduziert Blaulicht
+     midnight – tiefes Blauschwarz, minimaler Glare nachts
+     nord     – weiche Arktis-Palette, entspannter Kontrast
+     forest   – grün getönt, beruhigend
+   ============================================================ */
+
+/* ---- DARK (Default) ---------------------------------------------------
+   Entspricht den Tailwind-Defaults; hier nur zur expliziten
+   Rücksetzbarkeit + nativem color-scheme. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* ---- LIGHT ------------------------------------------------------------
+   Neutrale Flächen werden „gefaltet": tiefe Stufen (50–400) werden zu
+   dunklen Textfarben, mittlere (500/600) bleiben kräftig für Buttons,
+   hohe Stufen (700–950) werden zu hellen Tints/Rändern. Statusfarben
+   teilen sich Light & Sepia (siehe unten). */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-slate-50: #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #334155;
+  --color-slate-400: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-600: #94a3b8;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+  --color-slate-950: #f8fafc;
+}
+
+/* ---- SEPIA ------------------------------------------------------------
+   Warmes, papierähnliches Neutral-Weiß. Statusfarben = Light-Faltung
+   (unten gemeinsam definiert). */
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --color-slate-50: #1c160f;
+  --color-slate-100: #2b2218;
+  --color-slate-200: #3a2f21;
+  --color-slate-300: #4a3c2a;
+  --color-slate-400: #5e4d36;
+  --color-slate-500: #8c7350;
+  --color-slate-600: #b39b6b;
+  --color-slate-700: #cdb98c;
+  --color-slate-800: #e0d2b0;
+  --color-slate-900: #ece0c4;
+  --color-slate-950: #f4ecd8;
+}
+
+/* ---- MIDNIGHT ---------------------------------------------------------
+   Noch dunkler als Dark, mit dezentem Blau-Stich und weicherem Grau.
+   Statusfarben bleiben Default (knallen gut auf Schwarz). */
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --color-slate-50: #f5f7fb;
+  --color-slate-100: #e6eaf2;
+  --color-slate-200: #c2cad8;
+  --color-slate-300: #97a2b5;
+  --color-slate-400: #6b7689;
+  --color-slate-500: #4a5468;
+  --color-slate-600: #353d4f;
+  --color-slate-700: #232a39;
+  --color-slate-800: #161b27;
+  --color-slate-900: #0c1019;
+  --color-slate-950: #05070d;
+}
+
+/* ---- NORD -------------------------------------------------------------
+   Arktis-Palette (Polar-Night + Snow-Storm). Statusfarben = Default. */
+:root[data-theme="nord"] {
+  color-scheme: dark;
+  --color-slate-50: #eceff4;
+  --color-slate-100: #e5e9f0;
+  --color-slate-200: #d8dee9;
+  --color-slate-300: #c0c8d6;
+  --color-slate-400: #9aa4b8;
+  --color-slate-500: #7b8499;
+  --color-slate-600: #5c6577;
+  --color-slate-700: #434c5e;
+  --color-slate-800: #3b4252;
+  --color-slate-900: #333a47;
+  --color-slate-950: #2e3440;
+}
+
+/* ---- FOREST -----------------------------------------------------------
+   Dunkelgrün getönt, beruhigend für lange Sessions. Status = Default. */
+:root[data-theme="forest"] {
+  color-scheme: dark;
+  --color-slate-50: #eafff4;
+  --color-slate-100: #d6f0e2;
+  --color-slate-200: #a9d6c0;
+  --color-slate-300: #7fb89c;
+  --color-slate-400: #57896f;
+  --color-slate-500: #3f6b54;
+  --color-slate-600: #2e5140;
+  --color-slate-700: #213c30;
+  --color-slate-800: #162a21;
+  --color-slate-900: #0d1c15;
+  --color-slate-950: #061410;
+}
+
+/* ---- Statusfarben für LIGHT & SEPIA (geteilte Faltung) ----------------
+   Tiefe Stufen = dunkler Text, Mitte = kräftige Buttons,
+   hohe Stufen = helle Tints. So bleiben Buttons kräftig und
+   Hinweistexte lesbar auf hellem Grund. */
+:root[data-theme="light"],
+:root[data-theme="sepia"] {
+  /* emerald */
+  --color-emerald-50: #022c22;
+  --color-emerald-100: #064e3b;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #34d399;
+  --color-emerald-800: #6ee7b7;
+  --color-emerald-900: #a7f3d0;
+  --color-emerald-950: #ecfdf5;
+
+  /* sky */
+  --color-sky-50: #082f49;
+  --color-sky-100: #0c4a6e;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0284c7;
+  --color-sky-500: #0ea5e9;
+  --color-sky-600: #0284c7;
+  --color-sky-700: #38bdf8;
+  --color-sky-800: #7dd3fc;
+  --color-sky-900: #bae6fd;
+  --color-sky-950: #f0f9ff;
+
+  /* amber */
+  --color-amber-50: #451a03;
+  --color-amber-100: #78350f;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #fbbf24;
+  --color-amber-800: #fcd34d;
+  --color-amber-900: #fde68a;
+  --color-amber-950: #fffbeb;
+
+  /* red */
+  --color-red-50: #450a0a;
+  --color-red-100: #7f1d1d;
+  --color-red-200: #991b1b;
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #f87171;
+  --color-red-800: #fca5a5;
+  --color-red-900: #fecaca;
+  --color-red-950: #fef2f2;
+}
+
+/* ---- Typografie (prose) an das aktive Theme koppeln -------------------
+   Die @tailwindcss/typography setzt --tw-prose-* auf dem .prose-Element.
+   Diese Regel (höhere Spezifität) lenkt die Variablen auf die
+   bereits mitthemeten --color-* um, sodass der Guide in JEDEM Theme
+   lesbar bleibt (sonst wäre prose-invert in Light/Septa unsichtbar). */
+:root[data-theme] .prose,
+:root[data-theme] .prose-invert {
+  --tw-prose-body: var(--color-slate-300);
+  --tw-prose-headings: var(--color-slate-50);
+  --tw-prose-lead: var(--color-slate-400);
+  --tw-prose-links: var(--color-emerald-400);
+  --tw-prose-bold: var(--color-slate-100);
+  --tw-prose-counters: var(--color-slate-500);
+  --tw-prose-bullets: var(--color-slate-700);
+  --tw-prose-li-bullets: var(--color-slate-700);
+  --tw-prose-hr: var(--color-slate-800);
+  --tw-prose-quotes: var(--color-slate-300);
+  --tw-prose-quote-borders: var(--color-slate-700);
+  --tw-prose-captions: var(--color-slate-400);
+  --tw-prose-code: var(--color-emerald-300);
+  --tw-prose-pre-code: var(--color-slate-200);
+  --tw-prose-pre-bg: var(--color-slate-950);
+  --tw-prose-th-borders: var(--color-slate-700);
+  --tw-prose-td-borders: var(--color-slate-800);
+  --tw-prose-kbd: var(--color-slate-200);
+}

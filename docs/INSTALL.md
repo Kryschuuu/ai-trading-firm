@@ -271,7 +271,7 @@ psql "$DATABASE_URL" -c "\d positions"
 
 ```bash
 npm run build
-npm run start          # läuft auf http://localhost:3000
+npm run start          # läuft auf http://localhost:3369
 ```
 
 Im Browser öffnen → **„Seed / Reset"** → **„▶▶ Ganze Pipeline"**.
@@ -284,13 +284,13 @@ Im zweiten Terminal:
 
 ```bash
 # 1. Lebt der Dienst?
-curl -s http://localhost:3000/api/health | jq
+curl -s http://localhost:3369/api/health | jq
 
 # 2. Team und Missionen anlegen (idempotent)
-curl -s -X POST http://localhost:3000/api/seed | jq
+curl -s -X POST http://localhost:3369/api/seed | jq
 
 # 3. Zustand ansehen
-curl -s http://localhost:3000/api/firm | jq '{
+curl -s http://localhost:3369/api/firm | jq '{
   llm: .ollama.provider, verfuegbar: .ollama.available, modelle: .ollama.models,
   equity: .account.equity, notHalt: .killSwitchArmed,
   agenten: [.agents[] | "\(.role): \(.model)"]
@@ -303,8 +303,8 @@ Pipeline funktioniert trotzdem, nur ohne echtes Modell. Prüfe dann `OLLAMA_BASE
 Kompletter Durchlauf:
 
 ```bash
-MISSION=$(curl -s http://localhost:3000/api/firm | jq -r '.missions[0].id')
-curl -s -X POST http://localhost:3000/api/firm/run \
+MISSION=$(curl -s http://localhost:3369/api/firm | jq -r '.missions[0].id')
+curl -s -X POST http://localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" | jq '.pipeline[] | {rolle:.role, status:.result.status, quelle:.result.source, ms:.result.latencyMs}'
 ```
@@ -344,16 +344,16 @@ sudo systemctl enable --now ai-trading-firm
 ```bash
 systemctl status ai-trading-firm --no-pager
 journalctl -u ai-trading-firm -f          # Live-Log, mit Strg+C beenden
-curl -s http://localhost:3000/api/health
+curl -s http://localhost:3369/api/health
 ```
 
 ### 7.3 Im Heimnetz erreichbar machen (optional)
 
 ```bash
 # Firewall öffnen — nur wenn du weißt, wer im Netz ist
-sudo firewall-cmd --add-port=3000/tcp --permanent && sudo firewall-cmd --reload
+sudo firewall-cmd --add-port=3369/tcp --permanent && sudo firewall-cmd --reload
 # oder bei ufw:
-sudo ufw allow from 192.168.1.0/24 to any port 3000
+sudo ufw allow from 192.168.1.0/24 to any port 3369
 ```
 
 > **Nicht ins offene Internet stellen.** Es gibt keine Authentifizierung. Wenn du von
@@ -537,10 +537,10 @@ Hake diese Liste ab, bevor du weitermachst:
 
 - [ ] `systemctl status postgresql` → `active (running)`
 - [ ] `psql "$DATABASE_URL" -c "\dt"` zeigt acht Tabellen
-- [ ] `curl -s localhost:3000/api/health` antwortet
+- [ ] `curl -s localhost:3369/api/health` antwortet
 - [ ] Dashboard erreichbar, Statusleiste zeigt Equity 10.000
 - [ ] „Seed / Reset" legt sechs Agenten und zwei Missionen an
-- [ ] `curl -s localhost:3000/api/firm | jq .ollama` → `available: true`
+- [ ] `curl -s localhost:3369/api/firm | jq .ollama` → `available: true`
 - [ ] Eine Pipeline läuft durch und erzeugt eine Position
 - [ ] Not-Halt-Knopf blockiert weitere Orders (Audit-Log prüfen)
 - [ ] `systemctl restart ai-trading-firm` → Positionen sind danach noch da
@@ -570,7 +570,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | Ollama nutzt die GPU nicht | gfx803 ist von ROCm nicht unterstützt | erwartetes Verhalten → Kapitel 8.3 (Vulkan) |
 | Modell antwortet mit Prosa statt JSON | zu kleines Modell / weicher Prompt | Handbuch Kapitel 6, oder eine Stufe größer wählen |
 | Position verschwindet nach Neustart | Positionen stehen auf `CLOSED` | `psql -c "SELECT status, count(*) FROM positions GROUP BY 1;"` |
-| Port 3000 belegt | anderer Dienst läuft | `PORT=3100 npm run start` |
+| Port 3369 belegt | anderer Dienst läuft | `PORT=3100 npm run start` |
 
 Weitere Diagnose im **[Handbuch, Kapitel 12](HANDBUCH.md)**.
 
