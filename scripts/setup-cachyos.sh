@@ -96,8 +96,22 @@ ok "Node.js $(node --version)"
 
 # ------------------------------------------------------------ 2. PostgreSQL
 info "Schritt 2/6 — PostgreSQL"
-if [[ ! -d /var/lib/postgres/data/base ]]; then
-  warn "Datenverzeichnis ist nicht initialisiert."
+if [[ -f /var/lib/postgres/data/PG_VERSION ]]; then
+  ok "PostgreSQL-Datenverzeichnis bereits initialisiert."
+else
+  if [[ ! -d /var/lib/postgres/data ]]; then
+    warn "Datenverzeichnis /var/lib/postgres/data existiert nicht."
+  elif [[ -z "$(ls -A /var/lib/postgres/data 2>/dev/null)" ]]; then
+    warn "Datenverzeichnis ist leer — nicht initialisiert."
+  else
+    warn "Datenverzeichnis existiert, ist aber nicht initialisiert (kein PG_VERSION)."
+    warn "Verzeichnis enthält:"
+    ls -1 /var/lib/postgres/data 2>/dev/null | sed 's/^/  /'
+    warn "Dies kann passieren, wenn das postgresql-Paket ein leeres Datenverzeichnis vorgelegt hat."
+    if ask "Verzeichnis aufräumen und neu initialisieren?"; then
+      run sudo rm -rf /var/lib/postgres/data/*
+    fi
+  fi
   if ask "Jetzt initdb ausführen?"; then
     run sudo -u postgres initdb -D /var/lib/postgres/data --locale=C.UTF-8 --encoding=UTF8
   else
