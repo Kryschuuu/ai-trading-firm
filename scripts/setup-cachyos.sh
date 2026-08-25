@@ -252,7 +252,7 @@ cat <<EOF
 
 ${C_GREEN}${C_BOLD}Fertig.${C_RESET}
 
-  Starten:        npm run start        → http://localhost:3000
+  Starten:        npm run start        → http://localhost:3369
   Prüfen:         ./scripts/smoke-test.sh
   Als Dienst:     docs/INSTALL.md, Kapitel 7
 $([[ "$VARIANT" == b ]] && echo "  RX 480 nutzen:  docs/INSTALL.md, Kapitel 8.3 (Vulkan)")

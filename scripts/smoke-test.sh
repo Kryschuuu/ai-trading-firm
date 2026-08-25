@@ -4,11 +4,11 @@
 # Prüft Dienst, Datenbank, Modellserver, Guardrails und Not-Halt.
 #
 #   ./scripts/smoke-test.sh
-#   BASE_URL=http://192.168.1.42:3000 ./scripts/smoke-test.sh
+#   BASE_URL=http://192.168.1.42:3369 ./scripts/smoke-test.sh
 #
 set -uo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:3000}"
+BASE_URL="${BASE_URL:-http://localhost:3369}"
 # Optional: FIRM_API_TOKEN aus .env lesen, wenn vorhanden
 if [[ -z "${FIRM_API_TOKEN:-}" && -f ".env" ]]; then
   FIRM_API_TOKEN="$(grep -E '^FIRM_API_TOKEN=' .env | cut -d= -f2- | tr -d '"' || true)"

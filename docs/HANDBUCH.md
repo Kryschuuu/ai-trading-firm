@@ -90,7 +90,7 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 
 ## 2. Das Dashboard
 
-`http://localhost:3000`
+`http://localhost:3369`
 
 ### 2.1 Statusleiste
 
@@ -136,7 +136,7 @@ Minuten Wartezeit, bei Variante B mit unter einer Minute.
 ### Schritt 1 — Grundzustand prüfen
 
 ```bash
-curl -s localhost:3000/api/firm | jq '{
+curl -s localhost:3369/api/firm | jq '{
   equity: .account.equity,
   cash: .account.freeCash,
   positionen: .account.openPositions,
@@ -158,7 +158,7 @@ curl -s localhost:3000/api/firm | jq '{
 ### Schritt 2 — Mission auswählen
 
 ```bash
-curl -s localhost:3000/api/firm | jq -r '.missions[] | "\(.id)  \(.status)  \(.title)"'
+curl -s localhost:3369/api/firm | jq -r '.missions[] | "\(.id)  \(.status)  \(.title)"'
 ```
 
 ```
@@ -167,13 +167,13 @@ b21c…  PENDING  Beobachtungsmandat: SPY
 ```
 
 ```bash
-MISSION=$(curl -s localhost:3000/api/firm | jq -r '.missions[0].id')
+MISSION=$(curl -s localhost:3369/api/firm | jq -r '.missions[0].id')
 ```
 
 ### Schritt 3 — Pipeline starten
 
 ```bash
-curl -s -X POST localhost:3000/api/firm/run \
+curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" \
 | jq '.pipeline[] | {rolle: .role, status: .result.status, quelle: .result.source, ms: .result.latencyMs, grund: .result.decision.reason}'
@@ -199,7 +199,7 @@ curl -s -X POST localhost:3000/api/firm/run \
 ### Schritt 4 — Was ist rechnerisch passiert?
 
 ```bash
-curl -s localhost:3000/api/firm | jq '.account'
+curl -s localhost:3369/api/firm | jq '.account'
 ```
 
 ```json
@@ -247,7 +247,7 @@ Agent davon wusste oder zustimmen musste.
 ### Schritt 5 — Protokoll lesen
 
 ```bash
-curl -s localhost:3000/api/firm | jq -r '.auditLog[] | "\(.level)  \(.event)"' | head -8
+curl -s localhost:3369/api/firm | jq -r '.auditLog[] | "\(.level)  \(.event)"' | head -8
 ```
 
 ```
@@ -268,11 +268,11 @@ psql "$DATABASE_URL" -c "UPDATE missions SET risk_budget='0.90' WHERE id='$MISSI
 psql "$DATABASE_URL" -c "UPDATE positions SET status='CLOSED' WHERE status='OPEN';"
 sudo systemctl restart ai-trading-firm    # oder Dienst neu starten
 
-curl -s -X POST localhost:3000/api/firm/run \
+curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" >/dev/null
 
-curl -s localhost:3000/api/firm | jq '.account.livePositions[0] | {qty, entryPrice}'
+curl -s localhost:3369/api/firm | jq '.account.livePositions[0] | {qty, entryPrice}'
 ```
 
 Ergebnis: **exakt dieselbe Positionsgröße wie vorher** (0,037313 BTC). Die Mission durfte
@@ -294,7 +294,7 @@ psql "$DATABASE_URL" -c "UPDATE missions SET risk_budget='0.02' WHERE id='$MISSI
 **6b — Zweimal dieselbe Position eröffnen.** Lass die Pipeline direkt ein zweites Mal laufen:
 
 ```bash
-curl -s -X POST localhost:3000/api/firm/run \
+curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" \
 | jq '.pipeline[] | {rolle: .role, status: .result.status, grund: .result.guardrail}'
@@ -330,8 +330,8 @@ sudo systemctl restart ai-trading-firm
 eine Handelsentscheidung:
 
 ```bash
-CEO=$(curl -s localhost:3000/api/firm | jq -r '.agents[] | select(.role=="CEO") | .id')
-curl -s -X POST localhost:3000/api/firm/run \
+CEO=$(curl -s localhost:3369/api/firm | jq -r '.agents[] | select(.role=="CEO") | .id')
+curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"agentId\":\"$CEO\",\"missionId\":\"$MISSION\"}" | jq '.result.guardrail'
 ```
@@ -348,7 +348,7 @@ Ein Modellwechsel, ein neuer Prompt oder ein manipulierter Missionstext ändern 
 ### Schritt 7 — Not-Halt üben
 
 ```bash
-curl -s -X POST localhost:3000/api/firm/kill \
+curl -s -X POST localhost:3369/api/firm/kill \
   -H 'Content-Type: application/json' \
   -d '{"arm":true,"flatten":true,"reason":"Übung"}' | jq
 ```
@@ -366,7 +366,7 @@ Jeder weitere Versuch:
 Entschärfen:
 
 ```bash
-curl -s -X POST localhost:3000/api/firm/kill \
+curl -s -X POST localhost:3369/api/firm/kill \
   -H 'Content-Type: application/json' -d '{"arm":false}' | jq
 ```
 
@@ -401,16 +401,16 @@ curl -s -X POST localhost:3000/api/firm/kill \
 **Nur die Agentenliste mit Modellen:**
 
 ```bash
-curl -s localhost:3000/api/firm | jq -r '.agents[] | "\(.role)\t\(.model)\t\(.status)"' | column -t
+curl -s localhost:3369/api/firm | jq -r '.agents[] | "\(.role)\t\(.model)\t\(.status)"' | column -t
 ```
 
 **Einzelnen Agenten starten (zum Prompt-Debuggen):**
 
 ```bash
-AGENT=$(curl -s localhost:3000/api/firm | jq -r '.agents[] | select(.role=="RESEARCH") | .id')
-MISSION=$(curl -s localhost:3000/api/firm | jq -r '.missions[0].id')
+AGENT=$(curl -s localhost:3369/api/firm | jq -r '.agents[] | select(.role=="RESEARCH") | .id')
+MISSION=$(curl -s localhost:3369/api/firm | jq -r '.missions[0].id')
 
-curl -s -X POST localhost:3000/api/firm/run \
+curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"agentId\":\"$AGENT\",\"missionId\":\"$MISSION\"}" | jq '.result'
 ```
@@ -519,7 +519,7 @@ Paper-Preisliste) ergänzen — nach dem Neu bauen kennt sie die UI automatisch.
 **Abkürzung zum Nachschlagen über das Terminal:**
 
 ```bash
-curl -s localhost:3000/api/firm/missions | jq -r '.symbols[]'
+curl -s localhost:3369/api/firm/missions | jq -r '.symbols[]'
 ```
 
 ---
@@ -612,7 +612,7 @@ verlinken ins Protokoll-Tab.
 
 ```bash
 for i in $(seq 1 10); do
-  curl -s -X POST localhost:3000/api/firm/run \
+  curl -s -X POST localhost:3369/api/firm/run \
     -H 'Content-Type: application/json' \
     -d "{\"agentId\":\"$AGENT\",\"missionId\":\"$MISSION\"}" \
   | jq -r '.result.decision.type'
@@ -857,7 +857,7 @@ npm run build
 sudo systemctl restart ai-trading-firm
 
 # Nachprüfen, dass wirklich der neue Wert gilt
-curl -s localhost:3000/api/firm | jq '.riskLimits'
+curl -s localhost:3369/api/firm | jq '.riskLimits'
 ```
 
 **Dass ein Neubau nötig ist, ist das Merkmal, nicht der Fehler.** Eine Risikogrenze, die
@@ -904,7 +904,7 @@ die Firma *tun würde*, ohne dass sie es tut.
 ### 10.1 Sofortstopp
 
 ```bash
-curl -s -X POST localhost:3000/api/firm/kill \
+curl -s -X POST localhost:3369/api/firm/kill \
   -H 'Content-Type: application/json' \
   -d '{"arm":true,"flatten":true,"reason":"Notfall"}'
 ```
@@ -951,7 +951,7 @@ sudo systemctl restart ollama
 Wenn du in dieser Zeit gar nicht handeln willst — was vertretbar ist:
 
 ```bash
-curl -s -X POST localhost:3000/api/firm/kill \
+curl -s -X POST localhost:3369/api/firm/kill \
   -H 'Content-Type: application/json' -d '{"arm":true,"reason":"LLM offline"}'
 ```
 
@@ -1030,7 +1030,7 @@ curl -s --max-time 5 http://127.0.0.1:11434/api/tags | jq '.models | length'
 curl -s --max-time 5 http://192.168.1.50:11434/api/tags | jq '.models | length'
 
 # Was sagt die Anwendung selbst?
-curl -s localhost:3000/api/firm | jq '{llm: .ollama, konto: .account}'
+curl -s localhost:3369/api/firm | jq '{llm: .ollama, konto: .account}'
 ```
 
 ### 12.2 Modellgeschwindigkeit messen

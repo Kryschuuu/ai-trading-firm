@@ -8,12 +8,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "PORT=${PORT:-3369} next dev",
     "build": "next build",
-    "start": "next start -H 127.0.0.1",
+    "start": "PORT=${PORT:-3369} next start -H 0.0.0.0",
+    "stop": "bash scripts/stop.sh",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "DATABASE_URL=postgresql://test:test@127.0.0.1:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/*.test.ts'"
+    "test": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/*.test.ts'"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",
