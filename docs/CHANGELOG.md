@@ -20,7 +20,38 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [1.5.0] — 2026-08-25 (aktuell)
+## [1.5.1] — 2026-08-25 (aktuell)
+
+**Sicherheits-Härtung und DB-Konfigurationsdiagnose.** Peer-Review-Fixes für
+Fehlerbehandlung in API-Routen und gehärtete Datenbank-Pool-Konfiguration.
+
+### Behoben (Sicherheit)
+
+- **S-21 (Medium)**: API-Routen `firm/run`, `firm/tick`, `firm` (GET) gaben rohe
+  Fehlermeldungen an den Client zurück. Datenbank-Connection-Strings und interne
+  Details konnten in HTTP-Responses landen. Fix: `publicErrorMessage()` in allen
+  betroffenen catch-Blöcken.
+- **S-22 (Low)**: `GET /api/firm` hatte keinen try/catch — DB-Ausfall führte zu
+  unhandled exceptions mit potenziellem Stack-Trace-Leak. Fix: 503 mit redacted
+  Error und Fix-Hinweis.
+- **S-23 (Low)**: DB-Connection-Pool hatte keine `max`-Grenze und keine Timeouts.
+  Fix: `max: 10`, `connectionTimeoutMillis: 5000`, `idleTimeoutMillis: 30000`.
+
+### Hinzugefügt
+
+- **12 neue Tests** (`tests/dbConfig.test.ts`): Validierung der DB-Konfiguration,
+  Sicherheitsdirektiven und Fehlerbehandlung. Prüft drizzle.config.ts auf
+  Hardcodierung, Pool-Sicherheit, Security-Header und API-Error-Redaktion.
+
+### Diagnose
+
+- Der Datenbankfehler `password authentication failed for user "trader"` ist
+  ein Konfigurationsproblem — das Setup-Script `scripts/setup-cachyos.sh` legt
+  den User korrekt an, muss aber ausgeführt werden. Siehe `docs/INSTALL.md`.
+
+---
+
+## [1.5.0] — 2026-08-25
 
 **Workshop: Handbuch-Kapitel 5 und 6 ohne Terminal.** Neuer Dashboard-Reiter
 🛠 Workshop mit vier Schritten (Mission anlegen → Agent ausführen → Prompt

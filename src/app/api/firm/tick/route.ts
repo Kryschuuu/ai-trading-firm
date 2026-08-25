@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { tick } from "@/lib/monitor";
 import { guardWrite } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,9 @@ export async function POST(req: Request) {
     const result = await tick();
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
+    // FIX (v1.5.1): redact secrets from error message (DB connection strings etc.)
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { ok: false, error: publicErrorMessage(e) },
       { status: 500 }
     );
   }
