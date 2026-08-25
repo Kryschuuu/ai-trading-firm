@@ -20,7 +20,70 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [1.4.0] — 2026-08-25 (aktuell)
+## [1.5.0] — 2026-08-25 (aktuell)
+
+**Workshop: Handbuch-Kapitel 5 und 6 ohne Terminal.** Neuer Dashboard-Reiter
+🛠 Workshop mit vier Schritten (Mission anlegen → Agent ausführen → Prompt
+iterieren → Trefferquote messen), dazu die passenden API-Routen. Kein
+Schema-Bruch, keine neuen Pflicht-Env-Variablen. Nach `git pull`:
+`npm ci && npm run build` und Dienst neu starten.
+
+### Added
+- **Reiter „🛠 Workshop“** (`src/components/workshop/`):
+  - **1 · Mission anlegen/bearbeiten** (5.1–5.3): Formular mit Titel, Ziel,
+    Symbol-Autocomplete (aus `GET /api/firm/missions` → Broker-Liste),
+    Risikobudget % und max. Position %; Nachschlagkasten mit Faustregel
+    („nicht per SQL prüfbar → zu vage“) und der Schlecht/Besser-Tabelle aus 5.2.
+  - **2 · Agent ausführen** (6.2): Agent + Mission wählen, ein Turn; Ergebnis
+    formatiert (`type`/`side`/`stopLossPct`/`riskScore`/`reason` mit
+    Hover-Erklärungen), Guardrail-Kette aufklappbar, Rohdaten-Anzeige; rechts
+    die letzten 3 Agenten-Nachrichten mit Quelle und Latenz.
+  - **3 · Prompt iterieren** (6.3): `system_prompt`-Editor mit sofortiger
+    Wirkung (DB, kein Neubau), JSON-Sollformat + vollständiges Beispiel,
+    Feld-Hilfen zu `type`/`side`/`stopLossPct`/`riskScore`, „Beispiel an Prompt
+    anhängen“-Knopf, grünes Speicher-Bestätigungsfeld. Bewusst **ohne**
+    Guardrail-Regler (weiche vs. harte Schicht).
+  - **4 · Trefferquote** (6.4): sequenzielle Testschleife (1–20 Läufe, Standard
+    10) mit Live-Balken (TRADE / HOLD / HOLD·kaputtes JSON / ERROR / ANDERE),
+    automatischen Debug-Tipps ab 2 JSON-Fällen bzw. 20 % Anteil, Fehlerliste
+    mit Sprung ins Protokoll-Tab; Stop-Knopf; sauberes 429-Handling.
+- **Hover-/Tastatur-Hilfe überall**: `InfoTip`-Komponente (i-Symbol) auf jedem
+  Feld und Fachbegriff — Tooltip bei Hover UND Focus, `title`-Fallback,
+  `aria-label` + sr-only-Text für Screen Reader.
+- **API-Routen**: `GET/POST/PUT /api/firm/missions` und `PUT /api/firm/agents`
+  (nur `system_prompt`). Budgets werden gegen `LIMIT_CEILINGS` validiert (90 %
+  Risiko → 400 statt Broker-Block), Symbole gegen die Paper-Broker-Liste,
+  Prompts auf Länge; Audit-Einträge `MISSION_CREATED`/`MISSION_UPDATED`/
+  `AGENT_PROMPT_UPDATED`.
+- **`src/lib/workshop.ts`**: reine Validierungs-/Klassifikationslogik
+  (`validateMissionInput`, `validatePromptInput`, `classifyTurnOutcome`,
+  `aggregateOutcomes`), von Routen und Tests geteilt.
+- **Typsicherheit**: `src/lib/types.ts` (AgentRow, MissionRow, TurnResultDto,
+  Response-Interfaces) — `FirmData.agents/missions` typisiert statt `any`.
+- **`src/lib/apiClient.ts`**: geteilter `apiFetch` (Token-Header) +
+  `readJson`-Fehlerwrapper für aussagekräftige API-Fehlermeldungen.
+- `GET /api/firm/log` liefert jetzt auch `content` (Kurzform der Nachricht) —
+  Grundlage für die „letzten 3 Nachrichten“-Anzeige.
+- Neue Tests: `tests/workshop.test.ts` (Validierungs-Edge-Cases: leere
+  Eingaben, 90-%-Budget, unbekannte Symbole, Prompt-Grenzen, Warnungen;
+  Klassifikation TRADE/HOLD/INVALID_JSON/ERROR; Aggregation inkl. Tipps-
+    Schwelle und Division durch 0).
+
+### Changed
+- `package.json` Version **1.5.0**.
+- Handbuch 2.3/4.1/5.1–5.3/6.1–6.4: UI-Weg jeweils vorangestellt, Terminal als
+  Alternative belassen; API-Tabelle um die Workshop-Routen ergänzt.
+
+### Security
+- Missions-/Prompt-Endpunkte hängen am bestehenden `guardWrite` (Token +
+  Rate-Limit); DB-Fehler werden als 503 mit redaktierter Meldung
+  (`publicErrorMessage`) zurückgegeben statt als undurchsichtiger 500-Crash.
+- Missions-Budgets werden **serverseitig** gegen die Code-Deckel geprüft —
+  die UI ist nur Anzeige, nicht Kontrollinstanz.
+
+---
+
+## [1.4.0] — 2026-08-25
 
 Security-Härtung, Provider-Korrektheit und Scheduler-Fix. Kein Schema-Bruch,
 keine neuen Pflicht-Env-Variablen. Nach `git pull`: `npm ci && npm run build`
