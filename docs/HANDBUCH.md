@@ -119,6 +119,10 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 
 * **Firm Overview** — Missionen, Positionen, Freigabe-Warteschlange, Audit-Verlauf.
 * **Agents** — je Agent Rolle, Modell, Status, System-Prompt, Einzelstart.
+* **🛠 Workshop** — Missionen anlegen/bearbeiten, einen Agenten einzeln ausführen,
+  Prompt iterieren, Trefferquote messen. Das UI-Pendant zu Kapitel 5 und 6 —
+  alle vier Schritte ohne Terminal. Jedes Feld hat ein **i**-Symbol mit Kurz-
+  Erklärung (auch per Tastatur erreichbar).
 * **Risk & Guardrails** — die harten Limits, LLM-Status, Not-Halt-Historie.
 * **Design Decisions** — die Architekturbegründungen in Kurzform.
 
@@ -380,7 +384,17 @@ curl -s -X POST localhost:3000/api/firm/kill \
 | `POST` | `/api/firm/run` | `{agentId, missionId}` | `{ok, result}` |
 | `POST` | `/api/firm/run` | `{missionId, pipeline:true}` | `{ok, pipeline:[…]}` |
 | `POST` | `/api/firm/kill` | `{arm, flatten?, reason?}` | `{ok, killSwitchArmed}` |
+| `GET` | `/api/firm/missions` | – | `{ok, missions, symbols, limits}` |
+| `POST` | `/api/firm/missions` | `{title, objective, symbol, riskBudget, maxPositionPct, status?}` | `{ok, mission, warnings?}` |
+| `PUT` | `/api/firm/missions` | `{id, …felder wie POST}` | `{ok, mission, warnings?}` |
+| `PUT` | `/api/firm/agents` | `{agentId, systemPrompt}` | `{ok, agent, warnings?}` |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
+
+> **Workshop-Endpunkte:** Die drei Missions-/Agenten-Routen sind die Grundlage
+> des Workshop-Tabs. `riskBudget`/`maxPositionPct` werden gegen die
+> Code-Grenzen (`LIMIT_CEILINGS`) validiert — 90 % Risiko wird mit 400
+> abgelehnt, nicht erst vom Broker blockiert. `PUT /api/firm/agents` ändert
+> **nur** den Prompt: Guardrails bleiben über die API unantastbar.
 
 ### 4.2 Nützliche Abfragen
 
@@ -449,7 +463,22 @@ FROM proposals WHERE status='PENDING' ORDER BY created_at DESC;"
 Eine Mission ist der Auftrag an die Firma. Sie ist der wichtigste Hebel, den du hast — **noch
 vor** der Modellwahl.
 
+> **Der Weg über die UI (empfohlen):** Dashboard → Reiter **🛠 Workshop** →
+> *1 · Mission anlegen*. Formular ausfüllen, speichern, fertig — das i-Symbol
+> an jedem Feld erklärt Bedeutung und erlaubte Werte. Das Terminal braucht es
+> dafür nicht mehr.
+
 ### 5.1 Anlegen
+
+**Über die Oberfläche (Workshop):** Titel, Ziel, Symbol (Autocomplete aus der
+Broker-Liste), Risikobudget in Prozent und maximale Positionsgröße in Prozent
+eingeben und „Mission anlegen“ klicken. Der Server prüft alles noch einmal:
+ungültige Symbole, Budgets außerhalb der Code-Grenzen und leere Titel werden
+mit einer klaren Fehlermeldung zurückgewiesen, vage Zieltexte („Maximiere …“)
+mindestens markiert. Bearbeiten geht über „Bearbeiten“ in der Missionsliste —
+Speichern läuft dann als `PUT` auf denselben Eintrag.
+
+**Alternative über das Terminal:**
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
@@ -466,6 +495,9 @@ SQL
 
 ### 5.2 Was eine gute Mission ausmacht
 
+Die Beispieltabelle steht auch direkt im Workshop neben dem Formular — dort
+samt Faustregel als Nachschlagkasten mit Hover-Erklärungen.
+
 | Schlecht | Warum | Besser |
 | --- | --- | --- |
 | „Maximiere den Gewinn" | kein Abbruchkriterium, lädt zum Zocken ein | „Maximal ein Trade pro Tag, Stop 5 %" |
@@ -479,7 +511,16 @@ wurde, ist sie zu vage formuliert.**
 ### 5.3 Verfügbare Symbole
 
 Der Paper-Broker kennt: `BTC`, `ETH`, `SOL`, `SPY`, `QQQ`, `NVDA`, `AAPL`, `MSFT`.
-Weitere in `src/lib/broker.ts` unter `paperPrices` ergänzen (danach neu bauen).
+Das Workshop-Formular bezieht seine Autocomplete-Liste direkt vom Server
+(`GET /api/firm/missions` → `symbols`) und akzeptiert nur diese Symbole.
+Weitere Symbole in `STATIC_PRICES` (`src/lib/marketData.ts`, dort liegt die
+Paper-Preisliste) ergänzen — nach dem Neu bauen kennt sie die UI automatisch.
+
+**Abkürzung zum Nachschlagen über das Terminal:**
+
+```bash
+curl -s localhost:3000/api/firm/missions | jq -r '.symbols[]'
+```
 
 ---
 
@@ -487,6 +528,11 @@ Weitere in `src/lib/broker.ts` unter `paperPrices` ergänzen (danach neu bauen).
 
 Der Rat aus dem Video — *präzise Instruktionen statt Vertrauen in die KI* — ist hier die
 zentrale Arbeit. So gehst du systematisch vor.
+
+> **Der Weg über die UI (empfohlen):** Der Reiter **🛠 Workshop** bildet die
+> komplette Schleife aus 6.1 als vier Schritte ab — *Agent ausführen* (6.2),
+> *Prompt iterieren* (6.3), *Trefferquote* (6.4). Die Reihenfolge bleibt
+> gleich: **ein Agent pro Test, eine Änderung pro Iteration.**
 
 ### 6.1 Die Schleife
 
@@ -500,6 +546,15 @@ zentrale Arbeit. So gehst du systematisch vor.
 
 ### 6.2 Rohantwort eines Agenten ansehen
 
+**Über die Oberfläche (Workshop → „2 · Agent ausführen“):** Agent und Mission
+auswählen, „Turn starten“ klicken. Rechts erscheinen die **letzten drei
+Agenten-Nachrichten** mit Name, Rolle, Quelle („Modell“ bzw. „Regel-Engine“)
+und Latenz; aufklappbar bis zur Roherentwort des Modells. Links steht die
+geparste Entscheidung mit Hover-Erklärungen zu `type`, `side`, `stopLossPct`,
+`riskScore` — plus der kompletten Guardrail-Kette des Turns.
+
+**Alternative über das Terminal:**
+
 ```bash
 psql "$DATABASE_URL" -c "
 SELECT a.name, m.content, m.meta->>'source' AS quelle, m.meta->>'latencyMs' AS ms
@@ -508,6 +563,16 @@ ORDER BY m.created_at DESC LIMIT 3;"
 ```
 
 ### 6.3 Prompt ändern
+
+**Über die Oberfläche (Workshop → „3 · Prompt iterieren“):** Agent auswählen —
+der Editor lädt den aktuellen `system_prompt` aus der Datenbank. Der Kasten
+rechts zeigt das Soll-JSON-Format mit vollständigem Beispiel und
+Feld-für-Feld-Erklärungen (`type`, `side`, `stopLossPct`, `riskScore` …); per
+Knopf hängt du das Beispiel an den Prompt an. Nach dem Speichern bestätigt ein
+grüner Kasten den Datenbankstand — und der Server warnt, wenn der Prompt
+„JSON“ oder ein Beispiel-Objekt nicht mehr erwähnt.
+
+**Alternative über das Terminal:**
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
@@ -529,9 +594,21 @@ SQL
 
 Änderungen wirken **sofort** — kein Neubau nötig, weil Prompts in der Datenbank stehen.
 (Guardrails dagegen brauchen einen Neubau. Das ist der Unterschied zwischen weicher und
-harter Schicht.)
+harter Schicht. Genau deshalb bietet der Workshop bewusst **nur** den Prompt-Editor und
+keine Guardrail-Regler.)
 
 ### 6.4 Trefferquote messen
+
+**Über die Oberfläche (Workshop → „4 · Trefferquote“):** Agent und Mission
+auswählen, Durchläufe (1–20, Standard 10) einstellen, starten. Die Schleife
+läuft sequenziell — jeder Turn wird sofort klassifiziert und das
+Balkendiagramm (**TRADE / HOLD / HOLD · kaputtes JSON / ERROR / ANDERE**)
+aktualisiert sich live. Taucht „kaputtes JSON“ gehäuft auf (ab 2 Fällen und
+mindestens 20 %), blendet das Panel automatisch die vier Debug-Tipps von unten
+ein; fehlgeschlagene Läufe stehen rot markiert in der Liste darunter und
+verlinken ins Protokoll-Tab.
+
+**Alternative über das Terminal:**
 
 ```bash
 for i in $(seq 1 10); do
@@ -546,6 +623,10 @@ done | sort | uniq -c
       8 TRADE
       2 HOLD
 ```
+
+> **Hinweis zum Rate-Limit:** Schreib-Requests sind auf 60/60 s begrenzt
+> (`FIRM_RATE_LIMIT`). 20 Läufe plus ein paar Speicherungen passen in ein
+> Fenster; wer mehr messen will, erhöht das Limit oder misst in Etappen.
 
 Erscheint häufig `HOLD` mit der Begründung *„Antwort des Modells war kein gültiges JSON"*,
 liefert dein Modell kaputtes JSON. Dann:

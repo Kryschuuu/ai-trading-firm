@@ -23,7 +23,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 
-**Version:** `v1.4.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.5.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -204,12 +204,15 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
     │           ├── run/          ← Agent-Turn oder ganze Pipeline (POST)
     │           ├── kill/         ← Not-Halt ziehen/entschärfen (POST)
     │           ├── config/       ← Laufzeit-Limits (PUT, geklemmt)
+    │           ├── missions/     ← Missionen anlegen/bearbeiten (Workshop)
+    │           ├── agents/       ← system_prompt ändern (Workshop, PUT)
     │           ├── tick/         ← Monitor-Zyklus (POST)
     │           ├── report/       ← KPI-Report (GET)
     │           ├── equity/       ← Equity-Kurve (GET)
     │           └── log/          ← Protokoll/Audit (GET)
     ├── db/schema.ts              ← Drizzle-Tabellen
     ├── components/FirmDashboard.tsx
+    ├── components/workshop/      ← Workshop-Tab: Missionen, Turns, Prompts, Trefferquote
     └── lib/
         ├── riskGuard.ts          ← HARTE LIMITS — die wichtigste Datei
         ├── broker.ts             ← Broker-Abstraktion + Paper-Broker
@@ -217,7 +220,8 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
         ├── ollama.ts             ← Schema, Retry, Regel-Engine-Fallback
         ├── engine.ts             ← Orchestrierung, Turns, Pipeline
         ├── monitor.ts            ← SL/TP-Überwachung, Tageslimit, Retention
-        └── marketData.ts         ← Binance/Yahoo-Kurse, Screener, Symbol-Whitelist
+        ├── marketData.ts         ← Binance/Yahoo-Kurse, Screener, Symbol-Whitelist
+        └── workshop.ts           ← Workshop-Validierung: Missionen/Prompts, Trefferquote
 ```
 
 ---
@@ -253,6 +257,8 @@ Absicht: eine Sicherheitsgrenze, die man im laufenden Betrieb per Klick ändern 
 | `GET` | `/api/firm/equity?range=day\|week\|month\|all` | Equity-Kurve |
 | `GET` | `/api/firm/log?limit=50&level=WARN` | Turns + Audit-Protokoll |
 | `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (wird auf Code-Ceilings geklemmt) |
+| `GET/POST/PUT` | `/api/firm/missions` | Missionen lesen/anlegen/bearbeiten (Workshop; Budgets gegen Code-Ceilings) |
+| `PUT` | `/api/firm/agents` | `system_prompt` eines Agenten ändern — wirken sofort, Guardrails unberührt |
 | `GET` | `/api/docs?name=install` | Markdown-Doku als JSON |
 
 Schreibende Endpunkte (`POST`/`PUT`) werden per `x-firm-token` geschützt, sobald

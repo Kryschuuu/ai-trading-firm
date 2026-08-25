@@ -47,6 +47,7 @@ export async function GET(req: Request) {
         agent: agentMap.get(t.agentId ?? "")?.name ?? "unbekannt",
         role: agentMap.get(t.agentId ?? "")?.role ?? "?",
         missionId: t.missionId,
+        content: t.content,
         decision: meta.decision,
         source: meta.source,
         model: meta.model,
