@@ -19,9 +19,12 @@ export async function register() {
   if (G.__firmSchedulerStarted) return;
   G.__firmSchedulerStarted = true;
 
-  const intervalMs = Math.max(15_000, Number(process.env.TICK_INTERVAL_MS || 60_000));
-  const analystIntervalMs = Math.max(10 * 60_000, Number(process.env.ANALYST_INTERVAL_MIN || 30) * 60_000);
-  const pennyHour = Math.min(23, Math.max(0, Number(process.env.PENNY_RUN_HOUR_BERLIN ?? 23)));
+  const { envInt } = await import("@/lib/env");
+  const intervalMs = envInt("TICK_INTERVAL_MS", 60_000, 15_000, 600_000);
+  // KORRIGIERT (v1.4.0): ANALYST_INTERVAL_MIN wurde nur geloggt, Analysten
+  // liefen tatsächlich jede Minute (Slot-Key = HH:MM). Jetzt echter Abstand.
+  const analystIntervalMs = envInt("ANALYST_INTERVAL_MIN", 30, 10, 24 * 60) * 60_000;
+  const pennyHour = envInt("PENNY_RUN_HOUR_BERLIN", 23, 0, 23);
 
   setTimeout(async () => {
     try {

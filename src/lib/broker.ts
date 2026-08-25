@@ -141,6 +141,7 @@ export class PaperBroker {
     // Nur plausible Zeilen übernehmen (defensive DB-Validierung).
     const valid = rows.filter(
       (r) =>
+        sanitizeSymbol(r.symbol) !== null &&
         Number.isFinite(r.qty) && r.qty > 0 &&
         Number.isFinite(r.entryPrice) && r.entryPrice > 0 &&
         (r.side === "LONG" || r.side === "SHORT")
@@ -158,7 +159,9 @@ export class PaperBroker {
       for (const r of valid) this.cash -= r.qty * r.entryPrice;
     }
     for (const r of valid) {
-      this.positions.set(r.symbol.toUpperCase(), {
+      const symbol = sanitizeSymbol(r.symbol);
+      if (!symbol) continue;
+      this.positions.set(symbol, {
         qty: r.qty,
         side: r.side,
         entryPrice: r.entryPrice,
@@ -292,9 +295,11 @@ export class PaperBroker {
 }
 
 function reject(order: Order, reason: string): Fill {
+  const symbol =
+    typeof order.symbol === "string" ? order.symbol.toUpperCase().slice(0, 40) : "INVALID";
   return {
     orderId: `REJ-${Date.now().toString(36).toUpperCase()}`,
-    symbol: order.symbol.toUpperCase(),
+    symbol,
     side: order.side,
     qty: order.qty,
     fillPrice: 0,

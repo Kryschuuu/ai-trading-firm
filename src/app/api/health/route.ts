@@ -1,5 +1,6 @@
 import { checkSchema } from "@/lib/seed";
 import { APP_NAME, APP_VERSION } from "@/lib/version";
+import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export async function GET() {
       app: APP_NAME,
       version: APP_VERSION,
       schemaReady: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: publicErrorMessage(e, "Datenbank nicht erreichbar"),
       fix: "PostgreSQL läuft? DATABASE_URL korrekt?",
       timestamp: new Date().toISOString(),
     });

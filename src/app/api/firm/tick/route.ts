@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { tick } from "@/lib/monitor";
-import { checkApiToken } from "@/lib/apiAuth";
+import { guardWrite } from "@/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * Kurse aktualisieren, SL/TP prüfen, Tageslimit prüfen, optional Marktscan.
  */
 export async function POST(req: Request) {
-  const denied = checkApiToken(req);
+  const denied = guardWrite(req);
   if (denied) return denied;
   try {
     const result = await tick();

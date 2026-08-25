@@ -38,6 +38,16 @@ export const STATIC_PRICES: Record<string, number> = {
 const QUOTE_TTL_MS = 30_000;
 const CANDLE_TTL_MS = 120_000;
 
+/** Whitelist für Kerzen-Intervalle (Binance + Yahoo). Verhindert URL-Injection. */
+export const ALLOWED_INTERVALS = new Set([
+  "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w",
+]);
+
+export function sanitizeInterval(raw: string | null | undefined, fallback = "15m"): string {
+  if (typeof raw !== "string") return fallback;
+  return ALLOWED_INTERVALS.has(raw) ? raw : fallback;
+}
+
 /**
  * Erlaubtes Symbolformat: 1–12 Großbuchstaben/Ziffern, optional Suffix
  * `.XYZ` (z. B. BRK.B) oder `=X` (z. B. EURUSD=X). Verhindert, dass
@@ -193,11 +203,15 @@ export async function refreshQuotes(symbols: string[]): Promise<Quote[]> {
 /** Kerzen für Indikatorenberechnung, mit Cache. */
 export async function getCandles(
   symbolRaw: string,
-  interval = "5m",
-  limit = 120
+  intervalRaw = "5m",
+  limitRaw = 120
 ): Promise<Candle[]> {
   const symbol = sanitizeSymbol(symbolRaw);
   if (!symbol) return [];
+  const interval = sanitizeInterval(intervalRaw, "5m");
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(Math.trunc(limitRaw), 1), 1000)
+    : 120;
   const key = `${symbol}:${interval}:${limit}`;
   const cached = candleCache.get(key);
   if (cached && Date.now() - cached.ts < CANDLE_TTL_MS) return cached.candles;
@@ -236,10 +250,18 @@ const SCREENER_TTL_MS = 30 * 60_000; // 30 Min — Screener-Daten sind nicht eil
  * Für den Penny-Scout filtern wir anschließend auf Preis < maxPrice.
  */
 export async function yahooScreener(
-  scrId: string,
-  maxPrice = 5,
-  count = 25
+  scrIdRaw: string,
+  maxPriceRaw = 5,
+  countRaw = 25
 ): Promise<ScreenerCandidate[]> {
+  if (typeof scrIdRaw !== "string" || !/^[a-z][a-z0-9_]{2,40}$/i.test(scrIdRaw)) {
+    throw new Error("Ungültiger Screener-Identifier");
+  }
+  const scrId = scrIdRaw;
+  const maxPrice = Number.isFinite(maxPriceRaw) && maxPriceRaw > 0 ? maxPriceRaw : 5;
+  const count = Number.isFinite(countRaw)
+    ? Math.min(Math.max(Math.trunc(countRaw), 1), 50)
+    : 25;
   const cacheKey = `${scrId}:${maxPrice}`;
   const cached = screenerCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SCREENER_TTL_MS) return cached.items;

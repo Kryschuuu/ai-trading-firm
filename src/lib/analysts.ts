@@ -20,7 +20,7 @@ import { db } from "@/db";
 import { agentMessages, agents as agentTable } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { localReason } from "./ollama";
-import { parseDecision } from "./engine";
+import { extractJsonObject } from "./engine";
 import { getCandles, yahooScreener, type ScreenerCandidate } from "./marketData";
 import { snapshot, ema, rsi } from "./indicators";
 import { fetchMarketNews } from "./news";
@@ -113,7 +113,9 @@ async function runOneAnalyst(
       schema: analysisSchema(),
       temperature: 0.2,
     });
-    const parsed = parseDecision(brain.raw);
+    // KORRIGIERT (v1.4.0): Analysten-Payloads (view/thesis/recommendation) sind
+    // kein AgentDecision — parseDecision würde Extra-Felder verwerfen.
+    const parsed = extractJsonObject(brain.raw) ?? {};
     return { raw: brain.raw, parsed };
   } catch {
     return null;

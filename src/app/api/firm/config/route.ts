@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { effectiveConfigView, refreshRuntimeLimits, setConfigValue } from "@/lib/riskConfigService";
-import { checkApiToken } from "@/lib/apiAuth";
+import { guardWrite } from "@/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export async function GET() {
  * Jede Änderung wird validiert, geklemmt und ins Audit-Log geschrieben.
  */
 export async function PUT(req: Request) {
-  const denied = checkApiToken(req);
+  const denied = guardWrite(req);
   if (denied) return denied;
   let body: { key?: string; value?: unknown };
   try {

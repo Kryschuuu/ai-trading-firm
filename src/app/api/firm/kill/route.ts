@@ -4,7 +4,7 @@ import { killSwitches, missions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { killSwitch } from "@/lib/riskGuard";
 import { flattenAll, invalidateBrokerCache, logAudit } from "@/lib/engine";
-import { checkApiToken } from "@/lib/apiAuth";
+import { guardWrite } from "@/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  *   { "arm": false }                   → entschärfen, Missionen wieder aktivierbar
  */
 export async function POST(req: Request) {
-  const denied = checkApiToken(req);
+  const denied = guardWrite(req);
   if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as {
     arm?: boolean;

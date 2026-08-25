@@ -121,5 +121,12 @@ Token-Verbrauch und Kosten je Agenten-Aufruf werden in `agent_messages.meta`
 * **Cloud = Datenabfluss**: System-Prompts, Marktdaten und Agentenentscheidungen
   verlassen die Maschine. Nur für Paper-Trading und mit bewusster Entscheidung.
 * **Symbol-Whitelist** gilt providerunabhängig: Modell-Output kann keine URLs/Queries
-  des LLM-Adapters beeinflussen (kein SSRF über `LLM_BASE_URL` — Env-only).
+  des LLM-Adapters beeinflussen.
+* **Base-URL-Sanitizer** (v1.4.0): nur `http`/`https`, keine Userinfo in der URL.
+  `file:`, `gopher:` und `http://user:pass@host` fallen auf den Default zurück.
+* **Gemini-Key im Header** (`x-goog-api-key`), niemals als `?key=` — sonst landet
+  der Schlüssel in Access-Logs, Proxies und Fehlermeldungen.
+* **LLM_MODEL** gilt für OpenAI-kompatibel, Gemini und Anthropic (nicht Ollama:
+  dort entscheidet der Agenten-Tag / die installierte Modellfamilie).
 * Retry-Zähler pro Aufruf begrenzt Kosten-Shock bei Ausfällen.
+* Logs/Health redaktieren Connection-Strings und Keys (`redactSecrets`).

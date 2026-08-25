@@ -16,8 +16,11 @@ import {
   parseGeminiResponse,
   parseOllamaResponse,
   parseOpenaiResponse,
+  parseModelList,
+  providerConfigFromEnv,
   resolveMaxTokens,
   resolveProviderChain,
+  sanitizeBaseUrl,
   withRetry,
   clearModelListCache,
   type LlmChatRequest,
@@ -70,7 +73,8 @@ test("Ollama-Body: num_predict als Token-Limit, format=json mit Schema", () => {
   assert.equal(body.stream, false);
   assert.equal(body.options.num_predict, 512);
   assert.equal(body.options.num_ctx, 4096);
-  assert.equal(body.options.keep_alive, "30m");
+  assert.equal(body.keep_alive, "30m");
+  assert.equal(body.options.keep_alive, undefined);
   assert.equal(body.format, REQ.schema);
 });
 
@@ -107,6 +111,12 @@ test("Anthropic-Body: system getrennt, max_tokens Pflicht", () => {
 
 test("Parser: Ollama/OpenAI/Gemini/Anthropic liefern Inhalt + Usage", () => {
   assert.equal(parseOllamaResponse({ message: { content: "A" } }).content, "A");
+  const olUsage = parseOllamaResponse({
+    message: { content: "A" },
+    prompt_eval_count: 11,
+    eval_count: 7,
+  });
+  assert.deepEqual(olUsage.usage, { promptTokens: 11, completionTokens: 7, totalTokens: 18 });
   const oa = parseOpenaiResponse({
     choices: [{ message: { content: "B" } }],
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
@@ -345,6 +355,66 @@ test("chatLlm: wirft Fehler, wenn alle Provider scheitern", async () => {
     }),
     (e: unknown) => e instanceof LlmProviderError
   );
+});
+
+test("Gemini-Client: API-Key im Header, nie in der URL (v1.4.0)", async () => {
+  const { fn, calls } = fakeFetch([
+    new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "ok" }] } }],
+    }), { status: 200 }),
+  ]);
+  const client = createLlmClient("gemini", {
+    env: { GEMINI_API_KEY: "AIza-secret-key", LLM_MODEL: "gemini-2.0-flash" },
+    fetchFn: fn,
+  });
+  await client.chat(REQ);
+  assert.equal(calls.length, 1);
+  assert.doesNotMatch(calls[0].url, /key=/);
+  assert.match(calls[0].url, /\/models\/gemini-2\.0-flash:generateContent$/);
+  const headers = calls[0].init?.headers as Record<string, string>;
+  assert.equal(headers["x-goog-api-key"], "AIza-secret-key");
+});
+
+test("Gemini/Anthropic: LLM_MODEL hat Vorrang vor dem Agenten-Tag (v1.4.0)", () => {
+  const g = providerConfigFromEnv("gemini", { LLM_MODEL: "gemini-2.0-flash", GEMINI_API_KEY: "x" });
+  assert.equal(g.model, "gemini-2.0-flash");
+  const a = providerConfigFromEnv("anthropic", { LLM_MODEL: "claude-3-5-haiku-latest" });
+  assert.equal(a.model, "claude-3-5-haiku-latest");
+  const o = providerConfigFromEnv("ollama", { LLM_MODEL: "should-ignore" });
+  assert.equal(o.model, undefined);
+});
+
+test("parseModelList: Gemini-Prefix models/ wird entfernt, Anthropic nutzt data[].id", () => {
+  assert.deepEqual(
+    parseModelList("gemini", { models: [{ name: "models/gemini-2.0-flash" }, { name: "models/gemini-pro" }] }),
+    ["gemini-2.0-flash", "gemini-pro"]
+  );
+  assert.deepEqual(
+    parseModelList("anthropic", { data: [{ id: "claude-3-5-haiku-latest" }] }),
+    ["claude-3-5-haiku-latest"]
+  );
+  assert.deepEqual(
+    parseModelList("ollama", { models: [{ name: "qwen2.5:3b" }] }),
+    ["qwen2.5:3b"]
+  );
+});
+
+test("sanitizeBaseUrl: nur http(s), keine Credentials, Fallback bei Müll", () => {
+  assert.equal(sanitizeBaseUrl("http://192.168.1.50:11434/", "http://127.0.0.1:11434"), "http://192.168.1.50:11434");
+  assert.equal(sanitizeBaseUrl("file:///etc/passwd", "http://127.0.0.1:11434"), "http://127.0.0.1:11434");
+  assert.equal(
+    sanitizeBaseUrl("http://user:pass@evil.example/v1", "http://127.0.0.1:8080/v1"),
+    "http://127.0.0.1:8080/v1"
+  );
+  assert.equal(sanitizeBaseUrl("not a url", "https://api.anthropic.com/v1"), "https://api.anthropic.com/v1");
+});
+
+test("Request-maxTokens sticht eingefrorenes cfg.maxTokens (v1.4.0)", () => {
+  const body = buildOpenaiBody(
+    { ...REQ, maxTokens: 42 },
+    { provider: "openai", baseUrl: "http://x", maxTokens: 999 }
+  ) as { max_tokens: number };
+  assert.equal(body.max_tokens, 42);
 });
 
 test("chatLlm: Netzwerkfehler sind retryable und werden nach maxAttempts geworfen", async () => {
