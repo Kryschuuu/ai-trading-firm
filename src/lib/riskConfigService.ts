@@ -39,6 +39,25 @@ export const CONFIG_KEYS: {
 
 let loadPromise: Promise<void> | null = null;
 
+/**
+ * DB-sichere Darstellung: Die Spalte `risk_config.value` ist NUMERIC.
+ * Boolesche Limits (z. B. allowShort) werden daher als 0/1 persistiert —
+ * `String(true)` = "true" würde PostgreSQL verweigern (22P02: invalid
+ * input syntax for type numeric). KORRIGIERT (v1.6.1).
+ */
+const toDbValue = (v: number | boolean): string =>
+  String(typeof v === "boolean" ? (v ? 1 : 0) : v);
+
+/** Robuste Lese-Seite: akzeptiert 0/1 sowie (Legacy) "true"/"false". */
+const fromDbValue = (v: unknown): number | null => {
+  const s = String(v ?? "").trim();
+  if (s === "") return null;
+  if (s === "true" || s === "1") return 1;
+  if (s === "false" || s === "0") return 0;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
 /** Aus der DB laden und wirksam setzen (mit kurzem Cache gegen Hot-Looping). */
 export async function refreshRuntimeLimits(force = false): Promise<void> {
   if (!force && GLOBAL.__riskCfgLoadedAt && Date.now() - GLOBAL.__riskCfgLoadedAt < RELOAD_TTL_MS) return;
@@ -48,8 +67,8 @@ export async function refreshRuntimeLimits(force = false): Promise<void> {
     const rows = await db.select().from(riskConfig);
     const raw: Record<string, number> = {};
     for (const r of rows) {
-      const n = Number(r.value);
-      if (Number.isFinite(n)) raw[r.key] = n;
+      const n = fromDbValue(r.value);
+      if (n !== null) raw[r.key] = n;
     }
     applyRuntimeLimits(raw as Partial<RiskLimits>);
     GLOBAL.__riskCfgLoadedAt = Date.now();
@@ -97,12 +116,14 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
   const after = getLimits()[known.key];
   GLOBAL.__riskCfgLoadedAt = Date.now();
 
+  // KORRIGIERT (v1.6.1): Boolesche Limits als 0/1 statt "true"/"false"
+  // persistieren — value ist eine NUMERIC-Spalte (Postgres-Fehler 22P02).
   await db
     .insert(riskConfig)
-    .values({ key, value: String(after), description: known.description })
+    .values({ key, value: toDbValue(after), description: known.description })
     .onConflictDoUpdate({
       target: riskConfig.key,
-      set: { value: String(after), updatedAt: new Date() },
+      set: { value: toDbValue(after), updatedAt: new Date() },
     });
 
   if (String(before) !== String(after)) {
