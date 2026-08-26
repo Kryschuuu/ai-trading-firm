@@ -220,15 +220,58 @@ test("scripts/setup-cachyos.sh: prüft Cluster-Vollständigkeit vor dem Start", 
     resolve(process.cwd(), "scripts/setup-cachyos.sh"),
     "utf8"
   );
+  const helper = readFileSync(
+    resolve(process.cwd(), "scripts/lib/pg-cluster.sh"),
+    "utf8"
+  );
   // Halb initialisierte Cluster (fehlender global/pg_filenode.map) müssen
-  // erkannt und repariert werden, bevor der Dienst startet.
+  // erkannt und repariert werden, bevor der Dienst startet. Die Prüfung lebt
+  // seit v1.5.4 in scripts/lib/pg-cluster.sh (versionstolerant) und wird vom
+  // Skript über pg_cluster_ok aufgerufen.
   assert.ok(
-    script.includes("pg_filenode.map"),
-    "Cluster-Check muss global/pg_filenode.map prüfen (Originalfehlerbild)"
+    helper.includes("pg_filenode.map"),
+    "Cluster-Helfer muss global/pg_filenode.map prüfen (Originalfehlerbild)"
   );
   assert.ok(
-    script.includes("pg_control") && script.includes("PG_VERSION"),
-    "Cluster-Check muss PG_VERSION und global/pg_control einbeziehen"
+    helper.includes("pg_control") && helper.includes("PG_VERSION"),
+    "Cluster-Helfer muss PG_VERSION und global/pg_control einbeziehen"
+  );
+  assert.ok(
+    script.includes("pg_cluster_ok \"$PGDATA\""),
+    "Setup-Skript muss die Helper-Prüfung nutzen"
+  );
+  // v1.5.4: versionstolerant — künftige PG-Versionen ohne Relmap dürfen nicht
+  // fälschlich als defekt gelten.
+  assert.ok(
+    helper.includes("pg_relmap_required"),
+    "Relmap-Prüfung muss versionstolerant sein (pg_relmap_required)"
+  );
+});
+
+test("scripts/setup-cachyos.sh: Cluster-Checks laufen als postgres-Benutzer (v1.5.4)", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  const helper = readFileSync(
+    resolve(process.cwd(), "scripts/lib/pg-cluster.sh"),
+    "utf8"
+  );
+  // Der zweite Vorfall: initdb OK, aber Check "unvollständig", weil das
+  // 0700-postgres-Verzeichnis für den aufrufenden Benutzer unsichtbar war.
+  assert.ok(
+    script.includes("PG_SUDO_USER"),
+    "Setup-Skript muss den Cluster-Benutzer konfigurieren"
+  );
+  assert.ok(
+    helper.includes("pg_as_postgres") && helper.includes("sudo -u"),
+    "Alle Cluster-Checks müssen als postgres laufen (kein EACCES-Fehlalarm)"
+  );
+  // Datenschutz: Versions-Mismatch → Abbruch mit pg_upgrade-Hinweis statt
+  // automatischem (datenzerstörendem) initdb.
+  assert.ok(
+    script.includes("pg_version_mismatch") && script.includes("pg_upgrade"),
+    "Major-Mismatch muss abbrechen statt Daten zu löschen"
   );
 });
 

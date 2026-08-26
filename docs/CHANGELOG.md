@@ -20,7 +20,80 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [1.5.3] — 2026-08-26 (aktuell)
+## [1.5.4] — 2026-08-26 (aktuell)
+
+**Setup-Schritt 2 repariert: `initdb`-Erfolg wurde fälschlich als „Cluster
+unvollständig“ gemeldet (Rechte-Fehlalarm); umfassende Fehlerdiagnose und
+Sofort-Hilfe-Anleitung ergänzt.**
+
+### Ursache (Vorfall Nr. 2)
+
+`initdb` läuft durch („Erfolg“), das Skript meldet trotzdem
+`✗ Cluster nach initdb weiterhin unvollständig`. Grund: `initdb` setzt
+`/var/lib/postgres` und `/var/lib/postgres/data` auf **0700 postgres:postgres**.
+Die Cluster-Checks (`test -f PG_VERSION`, `global/pg_control`,
+`global/pg_filenode.map`) liefen aber als **aufrufender Benutzer** →
+`Permission denied` → falsch negativ. Dieselbe Ursache hatte die irreführende
+Meldung „Datenverzeichnis existiert nicht oder ist leer“. Folge: Das Skript
+hielt einen **vollständigen** Cluster für defekt und bot eine (datenzerstörende)
+Neuinitialisierung an.
+
+### Behoben
+
+- **`scripts/lib/pg-cluster.sh` (neu):** Alle Prüfungen am Datenverzeichnis
+  laufen als Cluster-Benutzer (`sudo -u postgres`, per `PG_SUDO_USER`
+  übersteuerbar; Root/User selbst ohne sudo). Enthält:
+  - Grundgerüst-Check (`PG_VERSION`, `global/pg_control`, `base/`) + optionaler
+    Relmap-Marker **versionstolerant** (PG ≤ 18 verlangt `global/pg_filenode.map`,
+    PG ≥ 19/unbekannt nur noch Warnpfad — künftige Major-Versionen brechen
+    nicht mehr fälschlich ab);
+  - **Versionsabgleich** Cluster ↔ Server (`PG_VERSION` + `pg_controldata`):
+    Major-Mismatch ⇒ **Abbruch mit pg_upgrade/pg_dumpall-Anleitung statt
+    automatischem, datenzerstörendem initdb**;
+  - `pg_controldata`-Validierung (Version + Cluster-State) statt Datei-Raten;
+  - ausführliche Diagnose (Owner/Rechte, Inhalt, PG_VERSION ↔ Server,
+    pg_control, freier Platz, laufende Prozesse) — alles als postgres-Benutzer.
+- **`scripts/setup-cachyos.sh` (Schritt 2):**
+  - Preflight: sudo vorhanden? `postgres`-User existiert? sudoers-Mitgliedschaft?
+  - Cluster-Check über den neuen Helper; Fehldiagnose „existiert nicht“ nur
+    noch, wenn das Verzeichnis wirklich fehlt (sonst „Rechte nicht lesbar“);
+  - nach `initdb`: erneute Verifikation mit Diagnose + **manuellem Fahrplan**
+    (exakte Kommandos, inkl. „Nicht als root, nicht als normaler User —
+    sondern `sudo -u postgres pg_ctl …` bzw. `sudo systemctl start postgresql`“);
+  - Postgres-Dienststart: Port-/Fremdinstanz-Erkennung (fremder Prozess auf
+    5432 ⇒ Abbruch; eigener, manuell gestarteter `pg_ctl`-Prozess auf
+    demselben Cluster ⇒ Wiederverwendung mit Warnung);
+  - veraltete `postmaster.pid` wird erkannt und (wenn der Prozess tot ist)
+    entfernt; wartet nach `systemctl stop` auf echten Stop;
+  - Cluster-Benutzergruppe dynamisch (`id -gn`), Locale-Fallback `C.UTF-8 → C`.
+- **Neue Anleitung `docs/SETUP_PG_TROUBLESHOOTING.md`** (auch im Dashboard:
+  `/api/docs?name=pgsetup`): Schritt-für-Schritt-Soforthilfe für den aktuellen
+  Zustand, alle Fehlerfälle (Rechte, Version-Mismatch, postmaster.pid,
+  Port-Konflikt, sudo/Benutzer, Logs) und eine Entscheidungstabelle.
+- INSTALL.md Kap. 9/11 und HANDBUCH 10.6 verweisen auf die neue Anleitung.
+
+### Getestet (Peer-Review)
+
+- 149 Unit-Tests grün (`npm test`; +9: 8 neue in `tests/setupCluster.test.ts`
+  plus 1 neuer Rechte-Regressionstest in `tests/dbConfig.test.ts`).
+  Die Regressionstests stellen den Vorfall **mit echten Rechten** nach:
+  Cluster-Verzeichnis gehört `nobody` und hat Mode 0700 — `test -f` als
+  Aufrufer scheitert (EACCES), der neue Helper erkennt den Cluster trotzdem.
+  Zusätzlich: Ablehnung unvollständiger PG-18-Cluster, Toleranz für
+  künftige Layouts (PG 19 ohne Relmap), Versions-Mismatch,
+  pg_controldata-Parser, set -e-Sicherheit.
+- `npm run typecheck` + `npm run lint` sauber, `npm audit`: 0 Schwachstellen.
+- **End-to-End** (Mock-systemd + Mock-initdb + echtes `sudo -u nobody` +
+  PGlite-wire-Postgres):
+  - Leeres Verzeichnis → `initdb` → Cluster wird als vollständig erkannt
+    (vorher: „weiterhin unvollständig“) → Benutzer/DB → `drizzle-kit push`
+    (9 Tabellen) → `next build` ✓;
+  - **Datenschutz-Test:** vollständiger 0700-Cluster mit Sentinel-Datei →
+    kein Neuinitialisierungs-Dialog, Sentinel überlebt, Setup läuft durch.
+
+---
+
+## [1.5.3] — 2026-08-26
 
 **Setup-Installation läuft wieder durch: `${PGROOT}`-False-Positive behoben;
 außerdem Passwort-URL-Encoding, echter `ANALYST_INTERVAL_MIN`-Zyklus und

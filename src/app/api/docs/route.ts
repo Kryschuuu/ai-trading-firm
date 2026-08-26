@@ -39,6 +39,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "LLM-Provider",
     subtitle: "Ollama · OpenAI · Gemini · Claude — Konfiguration und Kosten",
   },
+  pgsetup: {
+    file: "docs/SETUP_PG_TROUBLESHOOTING.md",
+    title: "PostgreSQL-Setup-Hilfe",
+    subtitle: "Sofort-Hilfe & Fehlersuche für Setup-Schritt 2 (v1.5.4)",
+  },
 };
 
 export async function GET(req: Request) {

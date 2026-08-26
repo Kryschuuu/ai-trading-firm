@@ -543,6 +543,11 @@ chmod +x scripts/setup-cachyos.sh
 Das Skript ist absichtlich gesprächig: es zeigt jeden Befehl an, fragt vor
 Systemänderungen nach und bricht bei Fehlern ab. Lies mit, statt blind zu bestätigen.
 
+**Hängt das Setup bei „Schritt 2 — PostgreSQL“ oder meldet es einen
+Cluster-Fehler:** Sofort-Hilfe und alle Fehlerfälle stehen in
+**[docs/SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** — und
+im Dashboard unter `/api/docs?name=pgsetup`.
+
 ---
 
 ## Kapitel 10 — Installation überprüfen `[A+B]`
@@ -573,6 +578,8 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **`/api/health` liefert `schemaReady: false` (HTTP 200)** | Tabellen fehlen | `npx drizzle-kit push` ausführen; Details im Feld `missingTables` |
 | **`could not open file "global/pg_filenode.map"`** | Cluster halb initialisiert (abgebrochenes initdb, Konflikt mit systemd-Dienst); Server crasht in Restart-Schleife | Handbuch Kapitel 10.6 — oder `./scripts/setup-cachyos.sh` erneut ausführen (repariert seit v1.5.2 selbstständig) |
 | **Setup-Skript: `nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'`** (v1.5.2 und älter) | systemd liefert `${PGROOT}` in `ExecStart` unexpandiert — der Gurt hält die eigene Arch-Unit fälschlich für einen fremden Drop-in | seit v1.5.3 behoben (Expansion der Unit-Environment in `scripts/lib/pg-service.sh`); Update ziehen und Setup erneut ausführen |
+| **`initdb` läuft durch, aber „Cluster nach initdb weiterhin unvollständig“** (v1.5.3 und älter) | Datenverzeichnis ist nach initdb `0700 postgres:postgres` — die alten Checks liefen als aufrufender Benutzer → EACCES → falsch „unvollständig“ (und falsches „existiert nicht“) | seit v1.5.4 behoben: alle Cluster-Checks laufen als postgres. **Nichts löschen!** → `sudo systemctl enable --now postgresql`, `pg_isready`, dann Setup erneut ausführen. Ausführlich: **docs/SETUP_PG_TROUBLESHOOTING.md** |
+| `pg_ctl …` als User: *„Keine Berechtigung"*, als `sudo pg_ctl`: *„can't run as root"* | postgres-Serverprozess darf nur als postgres-Benutzer laufen | `sudo -u postgres pg_ctl -D /var/lib/postgres/data -l …/postgres.log start` — oder einfach `sudo systemctl start postgresql` |
 | Push läuft durch, aber Tabellen fehlen trotzdem | alte `drizzle.config.json` mit hardcodierter URL überschreibt `.env` | `rm drizzle.config.json` — das Projekt nutzt `drizzle.config.ts` |
 | Push schlägt mit `password authentication failed` fehl | `DATABASE_URL` in `.env` ≠ DB-Passwort | Passwort in `.env` korrigieren; explizit testen: `psql "$DATABASE_URL" -c "SELECT 1"` |
 | Spalte `stop_loss` fehlt in `positions` | veraltetes Schema aus einem früheren Commit | `npx drizzle-kit push --force` |
