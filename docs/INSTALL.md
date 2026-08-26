@@ -572,6 +572,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **Setup-Seite statt Dashboard beim ersten Start** | Schema fehlt (oder DB defekt/nicht erreichbar) | erst `pg_isready`, dann `npx drizzle-kit push`, dann Browser neu laden |
 | **`/api/health` liefert `schemaReady: false` (HTTP 200)** | Tabellen fehlen | `npx drizzle-kit push` ausführen; Details im Feld `missingTables` |
 | **`could not open file "global/pg_filenode.map"`** | Cluster halb initialisiert (abgebrochenes initdb, Konflikt mit systemd-Dienst); Server crasht in Restart-Schleife | Handbuch Kapitel 10.6 — oder `./scripts/setup-cachyos.sh` erneut ausführen (repariert seit v1.5.2 selbstständig) |
+| **Setup-Skript: `nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'`** (v1.5.2 und älter) | systemd liefert `${PGROOT}` in `ExecStart` unexpandiert — der Gurt hält die eigene Arch-Unit fälschlich für einen fremden Drop-in | seit v1.5.3 behoben (Expansion der Unit-Environment in `scripts/lib/pg-service.sh`); Update ziehen und Setup erneut ausführen |
 | Push läuft durch, aber Tabellen fehlen trotzdem | alte `drizzle.config.json` mit hardcodierter URL überschreibt `.env` | `rm drizzle.config.json` — das Projekt nutzt `drizzle.config.ts` |
 | Push schlägt mit `password authentication failed` fehl | `DATABASE_URL` in `.env` ≠ DB-Passwort | Passwort in `.env` korrigieren; explizit testen: `psql "$DATABASE_URL" -c "SELECT 1"` |
 | Spalte `stop_loss` fehlt in `positions` | veraltetes Schema aus einem früheren Commit | `npx drizzle-kit push --force` |

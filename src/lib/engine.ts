@@ -25,7 +25,7 @@ import {
   proposals,
 } from "@/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
-import { RISK_LIMITS, getLimits, killSwitch, riskAdjustedSize, type RiskLimits } from "./riskGuard";
+import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
 import { PaperBroker } from "./broker";
 import { localReason } from "./ollama";
 import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
@@ -504,8 +504,23 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
       const stopPctPrelim = modelStopPct ?? atrStop ?? limits.defaultStopLossPct * 100;
       const stopPct = clamp(stopPctPrelim, 0.5, 50) / 100;
 
+      // KORRIGIERT (v1.5.3): missionsspezifisches maxPositionPct wird jetzt
+      // HART durchgesetzt (vorher stand es nur im Prompt; die PENNY-Mission
+      // „max 5 %“ konnte real 25 % des Kapitals binden). Die Mission kann die
+      // Code-Ceilings nie überschreiten (Sandbox-Prinzip).
       const missionRisk = Number(mission.riskBudget) || limits.maxRiskPerTrade;
-      const notional = riskAdjustedSize(broker.accountEquity, stopPct, Math.min(missionRisk, limits.maxRiskPerTrade));
+      const missionMaxPos = Number(mission.maxPositionPct);
+      const effectiveMissionCapPct =
+        Number.isFinite(missionMaxPos) && missionMaxPos > 0
+          ? Math.min(missionMaxPos, limits.maxPositionPct)
+          : limits.maxPositionPct;
+      const notional = missionSizedNotional(
+        broker.accountEquity,
+        stopPct,
+        Math.min(missionRisk, limits.maxRiskPerTrade),
+        missionMaxPos,
+        limits.maxPositionPct
+      );
       const qty = Number((notional / price).toFixed(6));
       const stopLossPrice =
         side === "LONG"
@@ -519,7 +534,7 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
 
       trace.push(
         step("POSITION-SIZING", true,
-          `Stop ${(stopPct * 100).toFixed(1)}% (${modelStopPct != null ? "Agent" : atrStop != null ? "ATR×" + limits.atrStopMultiplier : "Default"}) → Notional ${notional.toFixed(2)}, TP bei ${takeProfitPrice}`)
+          `Stop ${(stopPct * 100).toFixed(1)}% (${modelStopPct != null ? "Agent" : atrStop != null ? "ATR×" + limits.atrStopMultiplier : "Default"}) → Notional ${notional.toFixed(2)} (Cap ${(effectiveMissionCapPct * 100).toFixed(0)}%), TP bei ${takeProfitPrice}`)
       );
 
       const order = {

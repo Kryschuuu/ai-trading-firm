@@ -20,7 +20,61 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [1.5.2] — 2026-08-26 (aktuell)
+## [1.5.3] — 2026-08-26 (aktuell)
+
+**Setup-Installation läuft wieder durch: `${PGROOT}`-False-Positive behoben;
+außerdem Passwort-URL-Encoding, echter `ANALYST_INTERVAL_MIN`-Zyklus und
+durchgesetzte Missions-Positionsgrenzen.**
+
+### Behoben
+
+- **Setup-Skript (Schritt 2) — der gemeldete Installationsabbruch:**
+  `systemctl show -p ExecStart --value postgresql.service` liefert die
+  Arch-Unit-Zeile **unexpandiert** (`-D ${PGROOT}/data`). Der Datadir-Sicherheitsgurt
+  verglich diesen Literalstring mit `/var/lib/postgres/data` und brach fälschlich ab:
+  `✗ postgresql.service nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'`.
+  **Fix:** neues Modul `scripts/lib/pg-service.sh` — liest die
+  Unit-Environment (`systemctl show -p Environment`, inkl. `EnvironmentFile`/Drop-ins)
+  und expandiert `${VAR}`/`$VAR` im `-D`-Pfad, **bevor** verglichen wird. Versteht
+  zusätzlich die systemd-Ausgabeformate `{ path=… ; argv[]=… }`, gequotete
+  argv-Tokens und fällt bei fehlendem Bus auf `systemctl cat` zurück
+  (Haupt-Unit + Drop-ins, letzte Definition gewinnt). Regressionstests simulieren
+  die exakte Nutzer-Unit mit gemockter `systemctl`-Binary
+  (`tests/setupPgService.test.ts`).
+- **Setup-Skript: Passwort-URL-Encoding** — Zeichen wie `@ : / % + #` im
+  DB-Passwort brachen die `DATABASE_URL` (psql, node-postgres, drizzle-kit).
+  **Fix:** `jq '@uri'` vor dem URL-Bau; zusätzlich wird auch im
+  „Benutzer existiert bereits“-Zweig ein leeres Passwort abgewiesen.
+- **Scheduler:** `ANALYST_INTERVAL_MIN` wurde nur geloggt — der Analystenzyklus
+  lief tatsächlich **jede Minute** (der v1.4.0-Kommentar versprach „echter Abstand“,
+  der Code hielt es nicht). **Fix:** Slot-Key aus Berliner Tag + Intervallfenster
+  (`Math.floor(Date.now() / analystIntervalMs)`), Overlap-Schutz gegen lange Läufe.
+- **Missions-Cap wird durchgesetzt (Risiko-Entschärfung):** `missions.maxPositionPct`
+  stand nur im Prompt — die PENNY-Mission („max 5 %“) konnte real **25 %** des
+  Kapitals binden. **Fix:** `missionSizedNotional()` in `riskGuard.ts`
+  (min(Missions-Cap, Code-Maximum), Sandbox-Prinzip), von der Engine verwendet;
+  der Trace zeigt jetzt die wirksame Obergrenze.
+- **Setup-Skript Konsistenz (Variante A):** `MODEL_EXECUTOR` wurde als 3b
+  geschrieben, `.env.example`/Docs sagen 1.5b für den N150 — jetzt 1.5b.
+
+### Getestet (Peer-Review)
+
+- 138 Unit-Tests, alle grün (`npm test`) — inkl. neuer Regressionstests für
+  `${PGROOT}`-Expansion, systemd-Formate, URL-Encoding, Missions-Sizing und
+  Analysten-Intervall.
+- `npm run typecheck` und `npm run lint` fehlerfrei; `npm audit`: 0 Schwachstellen.
+- End-to-End gegen einen echten TCP-Postgres (PGlite-wire): kompletter
+  `./scripts/setup-cachyos.sh --variant a`-Durchlauf mit der **exakten
+  Arch-Unit des Nutzers** als Mock — Datadir-Check `✓`, hostile password
+  `O'Brien@x:y/z p+q#%` angelegt und URL-encodet, `drizzle-kit push` → 9 Tabellen,
+  `next build` ✓; zweiter Lauf (Idempotenz) ✓.
+- Produktionsstart + `scripts/smoke-test.sh`: **18/18 Checks bestanden**
+  (Pipeline → Paper-Trade → Kill-Switch → Flatten → Report/Kurve/Log →
+  Ceiling-Klemmung). PENNY-Mission: Position ≈ 500 € statt 2.500 €.
+
+---
+
+## [1.5.2] — 2026-08-26
 
 **Setup-/PostgreSQL-Robustheit: `global/pg_filenode.map`, ECONNREFUSED und
 `next build` ohne `.env` behoben.** Ursachenanalyse und Fixes für den

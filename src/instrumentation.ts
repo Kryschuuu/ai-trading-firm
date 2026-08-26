@@ -47,30 +47,34 @@ export async function register() {
       setInterval(runTick, intervalMs);
 
       // ── 2) Analystenzyklus ──
+      // KORRIGIERT (v1.5.3): ANALYST_INTERVAL_MIN wurde nur geloggt, der
+      // Zyklus lief tatsächlich jede Minute (Slot-Key = HH:MM) — der
+      // v1.4.0-Kommentar versprach „echter Abstand“, der Code hielt es nicht.
+      // Jetzt: genau ein Zyklus pro Intervallfenster (Berliner Tag + Slotschlüssel
+      // aus dem Intervall), plus Overlap-Schutz, falls ein Lauf länger dauert.
       let lastAnalystKey = "";
+      let analystRunning = false;
       const runAnalysts = async () => {
+        if (analystRunning) return;
+        analystRunning = true;
         try {
           await analystsMod.runTechnicalAnalyst("BTC");
           await analystsMod.runMacroAnalyst();
           await analystsMod.runNewsAnalyst(["BTC", "SPY"]);
         } catch (e) {
           console.warn("[scheduler] Analystenzyklus fehlgeschlagen:", e instanceof Error ? e.message : e);
+        } finally {
+          analystRunning = false;
         }
       };
-      // KORRIGIERT (v1.1.0): Slot-Key in Berliner Zeit statt Server-Localtime —
-      // auf UTC-Servern (systemd) griff der Doppelstart-Schutz sonst nie richtig.
       setInterval(() => {
-        const nowBerlin = new Intl.DateTimeFormat("de-DE", {
-          timeZone: "Europe/Berlin",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        }).format(new Date());
-        const key = `${berlinDayKey()}:${nowBerlin}`;
+        // Berliner Tag + Index des Intervallfensters (epoch-basiert) → der
+        // Key wechselt genau alle ANALYST_INTERVAL_MIN Minuten, nie öfter.
+        const key = `${berlinDayKey()}:${Math.floor(Date.now() / analystIntervalMs)}`;
         if (key === lastAnalystKey) return; // Doppelstart-Schutz über Slotted-Key
         lastAnalystKey = key;
         void runAnalysts();
-      }, 60_000);
+      }, Math.min(60_000, analystIntervalMs));
 
       // ── 3) Täglich nach US-Schluss: Penny-Team + Swing-Research ──
       let lastDeepRunDay = "";
