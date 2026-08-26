@@ -393,6 +393,9 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
     type: "REPORT",
     content: decision.reason ?? brain.raw.slice(0, 500),
     meta: {
+      // Audit-Snapshot: das Protokoll bleibt lesbar, auch wenn ein Agent später
+      // umbenannt oder aus der Stammdatentabelle entfernt wird.
+      actor: { name: agent.name, role: agent.role },
       decision,
       source: brain.source,
       model: brain.model,

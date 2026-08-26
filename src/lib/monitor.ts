@@ -187,7 +187,14 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
       await db.insert(agentMessages).values({
         type: "MARKET_SCAN",
         content: `[MARKTSCAN ${new Date().toISOString()}]\n${lines.join("\n")}`,
-        meta: { source: "monitor", watchlist: DEFAULT_WATCHLIST },
+        // Explizite System-Attribution statt agentId=null ohne Kontext. Der
+        // Protokoll-Normalisierer kann historische Markt-Scans damit lesbar
+        // von Agenten-Turns unterscheiden.
+        meta: {
+          actor: { name: "Marktmonitor", role: "SYSTEM" },
+          source: "monitor",
+          watchlist: DEFAULT_WATCHLIST,
+        },
       });
       marketScan = true;
       GLOBAL.__scanCount = (GLOBAL.__scanCount ?? 0) + 1;

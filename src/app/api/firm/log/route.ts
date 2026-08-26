@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { agentMessages, agents, auditLog } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import {
+  isProtocolTurn,
+  normalizeProtocolMessage,
+  toTurnLogEntry,
+  type ProtocolAgentLookup,
+} from "@/lib/protocol";
 
 export const dynamic = "force-dynamic";
 
@@ -29,36 +35,29 @@ export async function GET(req: Request) {
   if (level) auditQuery = auditQuery.where(eq(auditLog.level, level));
   if (event) auditQuery = auditQuery.where(eq(auditLog.event, event));
 
-  const [turnRows, auditRows, agentRows] = await Promise.all([
-    db.select().from(agentMessages).orderBy(desc(agentMessages.createdAt)).limit(limit),
+  // Für die Timeline reichen `limit` Zeilen. Für die rückwärtskompatible
+  // Turn-Liste lesen wir etwas weiter zurück: zwischen Analysten-/Systemmeldungen
+  // sollen im Workshop trotzdem die letzten echten Entscheidungen erscheinen.
+  const messageFetchLimit = Math.min(limit * 4, 800);
+  const [messageRows, auditRows, agentRows] = await Promise.all([
+    db.select().from(agentMessages).orderBy(desc(agentMessages.createdAt)).limit(messageFetchLimit),
     auditQuery,
     db.select({ id: agents.id, name: agents.name, role: agents.role }).from(agents),
   ]);
 
-  const agentMap = new Map(agentRows.map((a) => [a.id, a]));
+  const agentMap = new Map<string, ProtocolAgentLookup>(
+    agentRows.map((agent): [string, ProtocolAgentLookup] => [agent.id, agent])
+  );
+  const normalized = messageRows.map((message) => normalizeProtocolMessage(message, agentMap));
 
   return NextResponse.json({
     ok: true,
-    turns: turnRows.map((t) => {
-      const meta = (t.meta ?? {}) as Record<string, unknown>;
-      return {
-        id: t.id,
-        at: t.createdAt,
-        agent: agentMap.get(t.agentId ?? "")?.name ?? "unbekannt",
-        role: agentMap.get(t.agentId ?? "")?.role ?? "?",
-        missionId: t.missionId,
-        content: t.content,
-        decision: meta.decision,
-        source: meta.source,
-        model: meta.model,
-        latencyMs: meta.latencyMs,
-        prompt: typeof meta.prompt === "string" ? meta.prompt : null,
-        rawResponse: typeof meta.rawResponse === "string" ? meta.rawResponse : null,
-        provider: typeof meta.provider === "string" ? meta.provider : null,
-        usage: meta.usage ?? null,
-        costUsd: typeof meta.costUsd === "number" ? meta.costUsd : null,
-      };
-    }),
+    // Vollständige, heterogene Timeline für den Protokoll-Tab. Jede Zeile hat
+    // einen expliziten kind statt impliziter (und oft falscher) Entscheidung.
+    entries: normalized.slice(0, limit),
+    // Bestehende Clients erwarten unter `turns` echte Agentenentscheidungen.
+    // Analystenberichte und Markt-Scans werden absichtlich nicht hineingemischt.
+    turns: normalized.filter(isProtocolTurn).slice(0, limit).map(toTurnLogEntry),
     audit: auditRows,
     agents: agentRows,
   });

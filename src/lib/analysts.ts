@@ -19,7 +19,7 @@
 import { db } from "@/db";
 import { agentMessages, agents as agentTable } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { localReason } from "./ollama";
+import { localReason, type ReasonResult } from "./ollama";
 import { extractJsonObject } from "./engine";
 import { getCandles, yahooScreener, type ScreenerCandidate } from "./marketData";
 import { snapshot, ema, rsi } from "./indicators";
@@ -32,25 +32,81 @@ const GLOBAL = globalThis as typeof globalThis & {
   __lastPennyRun?: string;
 };
 
-type AgentRowLite = { id: string; name: string; model: string };
+type AgentRowLite = { id: string; name: string; role: string; model: string };
+
+type AnalystRun = ReasonResult & {
+  /** Vollständiger Nutzerprompt, damit ein Bericht später reproduzierbar bleibt. */
+  prompt: string;
+  /** Analysten-Schema (view/confidence/thesis), bewusst keine Trade-Decision. */
+  parsed: Record<string, unknown>;
+};
 
 async function findAgentByRole(role: string): Promise<AgentRowLite | null> {
   const rows = await db.select().from(agentTable).where(eq(agentTable.role, role)).limit(1);
   return rows[0] ?? null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function finiteConfidence(value: unknown, fallback = 0.5): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : fallback;
+}
+
+/**
+ * Persistiert einen Analystenbericht inklusive LLM-Trace und Actor-Snapshot.
+ *
+ * So sind Analysten-Nachrichten dieselben auditierbaren Erstklass-Ereignisse
+ * wie Kern-Turns, aber semantisch weiterhin ANALYSIS/RECOMMENDATION — sie
+ * werden im Protokoll nie als Trade-Entscheidung fehlinterpretiert.
+ */
 async function recordAnalysis(
   agent: AgentRowLite | null,
+  role: string,
   missionId: string | undefined,
   content: string,
-  meta: Record<string, unknown>
+  meta: Record<string, unknown>,
+  run?: AnalystRun | null
 ): Promise<void> {
+  const viewRaw = typeof meta.view === "string" ? meta.view.toUpperCase() : "NEUTRAL";
+  const view = ["BULLISH", "BEARISH", "NEUTRAL"].includes(viewRaw) ? viewRaw : "NEUTRAL";
+  const thesis = typeof meta.thesis === "string" ? meta.thesis.trim() : "";
+  const trace = run
+    ? {
+        source: run.source,
+        model: run.model,
+        latencyMs: Number.isFinite(run.latencyMs) && run.latencyMs >= 0 ? run.latencyMs : undefined,
+        prompt: run.prompt,
+        rawResponse: run.raw.slice(0, 2000),
+        provider: run.provider,
+        usage: run.usage,
+        costUsd: Number.isFinite(run.costUsd) && (run.costUsd ?? 0) >= 0 ? run.costUsd : undefined,
+      }
+    : {};
+
   await db.insert(agentMessages).values({
     agentId: agent?.id ?? null,
     missionId: missionId ?? null,
-    type: "ANALYSIS",
+    type: typeof meta.kind === "string" ? meta.kind : "ANALYSIS",
     content: content.slice(0, 4000),
-    meta,
+    meta: {
+      ...meta,
+      // Fallback für eine später gelöschte/umbenannte Agentenzeile.
+      actor: {
+        name: agent?.name ?? role.replaceAll("_", " "),
+        role: agent?.role ?? role,
+      },
+      // Kanonische, verschachtelte Form; flache Felder bleiben für bestehende
+      // Reports und House-View rückwärtskompatibel erhalten.
+      analysis: {
+        view,
+        confidence: finiteConfidence(meta.confidence),
+        thesis,
+      },
+      ...trace,
+    },
   });
 }
 
@@ -91,11 +147,16 @@ const TYPE_TO_VIEW: Record<string, string> = {
 };
 
 /** Normalisiert Modellantwort auf view/confidence/thesis — egal welche Keys kommen. */
-function normalizeAnalysis(p: any): { view: string; confidence: number; thesis: string } {
+function normalizeAnalysis(p: Record<string, unknown>): { view: "BULLISH" | "BEARISH" | "NEUTRAL"; confidence: number; thesis: string } {
+  const rawView = String(p.view ?? TYPE_TO_VIEW[String(p.type ?? "")] ?? "NEUTRAL").toUpperCase();
   return {
-    view: String(p.view ?? TYPE_TO_VIEW[String(p.type ?? "")] ?? "NEUTRAL").toUpperCase(),
-    confidence: Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.5,
-    thesis: String(p.thesis ?? p.reason ?? ""),
+    view: rawView === "BULLISH" || rawView === "BEARISH" || rawView === "NEUTRAL" ? rawView : "NEUTRAL",
+    confidence: finiteConfidence(p.confidence),
+    thesis: typeof p.thesis === "string"
+      ? p.thesis.trim()
+      : typeof p.reason === "string"
+        ? p.reason.trim()
+        : "",
   };
 }
 
@@ -104,7 +165,7 @@ async function runOneAnalyst(
   fallbackModel: string,
   systemPrompt: string,
   userPrompt: string
-): Promise<{ raw: string; parsed: any } | null> {
+): Promise<AnalystRun | null> {
   const agent = await findAgentByRole(role);
   const model = agent?.model ?? fallbackModel;
   try {
@@ -116,7 +177,7 @@ async function runOneAnalyst(
     // KORRIGIERT (v1.4.0): Analysten-Payloads (view/thesis/recommendation) sind
     // kein AgentDecision — parseDecision würde Extra-Felder verwerfen.
     const parsed = extractJsonObject(brain.raw) ?? {};
-    return { raw: brain.raw, parsed };
+    return { ...brain, prompt: userPrompt, parsed };
   } catch {
     return null;
   }
@@ -158,9 +219,10 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
   );
   if (!result) return;
   const a = normalizeAnalysis(result.parsed);
-  await recordAnalysis(await findAgentByRole("TECHNICAL_ANALYST"), undefined,
+  await recordAnalysis(await findAgentByRole("TECHNICAL_ANALYST"), "TECHNICAL_ANALYST", undefined,
     `[TECH ${symbol} ${new Date().toISOString()}]\n${lines.join("\n")}\n→ ${a.view}: ${a.thesis}`.trim(),
-    { kind: "ANALYSIS", view: a.view, confidence: a.confidence, thesis: a.thesis, data: lines }
+    { kind: "ANALYSIS", view: a.view, confidence: a.confidence, thesis: a.thesis, data: lines },
+    result
   );
 }
 
@@ -203,9 +265,10 @@ export async function runMacroAnalyst(): Promise<void> {
   );
   if (!result) return;
   const m = normalizeAnalysis(result.parsed);
-  await recordAnalysis(await findAgentByRole("MACRO_ANALYST"), undefined,
+  await recordAnalysis(await findAgentByRole("MACRO_ANALYST"), "MACRO_ANALYST", undefined,
     `[MACRO ${new Date().toISOString()}] ${m.view}: ${m.thesis}`.trim(),
-    { kind: "ANALYSIS", view: m.view, confidence: m.confidence, thesis: m.thesis, data: lines }
+    { kind: "ANALYSIS", view: m.view, confidence: m.confidence, thesis: m.thesis, data: lines },
+    result
   );
 }
 
@@ -241,9 +304,10 @@ export async function runNewsAnalyst(focusSymbols: string[] = []): Promise<void>
   );
   if (!result) return;
   const n = normalizeAnalysis(result.parsed);
-  await recordAnalysis(await findAgentByRole("NEWS_ANALYST"), undefined,
+  await recordAnalysis(await findAgentByRole("NEWS_ANALYST"), "NEWS_ANALYST", undefined,
     `[NEWS ${new Date().toISOString()}] ${n.view}: ${n.thesis}`.trim(),
-    { kind: "ANALYSIS", view: n.view, confidence: n.confidence, thesis: n.thesis, headlines: items.slice(0, 14).map((x) => x.title) }
+    { kind: "ANALYSIS", view: n.view, confidence: n.confidence, thesis: n.thesis, headlines: items.slice(0, 14).map((x) => x.title) },
+    result
   );
 }
 
@@ -332,17 +396,20 @@ export async function runSwingResearch(): Promise<void> {
 
   const agent = await findAgentByRole("SWING_RESEARCHER");
   const p = result?.parsed ?? {};
-  await recordAnalysis(agent, undefined,
-    `[SWING ${new Date().toISOString()}] Kandidaten: ${candidates.map((c) => c.symbol).join(", ") || "keine"}\n→ ${String(p.reason ?? "")}`.trim(),
+  const analysis = normalizeAnalysis(p);
+  await recordAnalysis(agent, "SWING_RESEARCHER", undefined,
+    `[SWING ${new Date().toISOString()}] Kandidaten: ${candidates.map((c) => c.symbol).join(", ") || "keine"}\n→ ${analysis.thesis}`.trim(),
     {
       kind: candidates.length > 0 ? "RECOMMENDATION" : "ANALYSIS",
       symbol: candidates[0]?.symbol ?? "MARKT",
       side: "LONG",
       horizon: "swing",
-      thesis: String(p.thesis ?? ""),
-      confidence: Number(p.confidence ?? 0.4),
+      view: analysis.view,
+      thesis: analysis.thesis,
+      confidence: analysis.confidence,
       candidates: candidates.slice(0, 8),
-    }
+    },
+    result
   );
 }
 
@@ -420,21 +487,32 @@ async function runPennyScout(): Promise<ScreenerCandidate[]> {
     userPrompt
   );
   const p = result?.parsed ?? {};
-  await recordAnalysis(await findAgentByRole("SCOUT"), undefined,
-    `[PENNY-SCOUT ${new Date().toISOString()}]\nScreen:\n${lines.join("\n")}\n→ ${String(p.thesis ?? "")}`.trim(),
+  const analysis = normalizeAnalysis(p);
+  const recommendation = isRecord(p.recommendation) ? p.recommendation : {};
+  const recommendedSymbol =
+    typeof recommendation.symbol === "string" && recommendation.symbol.trim()
+      ? recommendation.symbol.trim()
+      : pool[0]?.symbol ?? "MARKT";
+  const riskFlags = Array.isArray(recommendation.riskFlags)
+    ? recommendation.riskFlags.filter((flag): flag is string => typeof flag === "string").slice(0, 5)
+    : [];
+  await recordAnalysis(await findAgentByRole("SCOUT"), "SCOUT", undefined,
+    `[PENNY-SCOUT ${new Date().toISOString()}]\nScreen:\n${lines.join("\n")}\n→ ${analysis.thesis}`.trim(),
     {
       kind: "RECOMMENDATION",
-      symbol: String(p.recommendation?.symbol ?? pool[0]?.symbol ?? "?"),
+      symbol: recommendedSymbol,
       side: "LONG",
       horizon: "position",
-      thesis: String(p.thesis ?? ""),
-      confidence: Number(p.confidence ?? 0.3),
-      entryZone: p.recommendation?.entryZone,
-      stopLoss: p.recommendation?.stopLoss,
-      target: p.recommendation?.target,
-      riskFlags: Array.isArray(p.recommendation?.riskFlags) ? p.recommendation.riskFlags.slice(0,5) : [],
+      view: analysis.view,
+      thesis: analysis.thesis,
+      confidence: analysis.confidence,
+      entryZone: typeof recommendation.entryZone === "string" ? recommendation.entryZone : undefined,
+      stopLoss: typeof recommendation.stopLoss === "string" ? recommendation.stopLoss : undefined,
+      target: typeof recommendation.target === "string" ? recommendation.target : undefined,
+      riskFlags,
       candidates: pool,
-    }
+    },
+    result
   );
   return pool;
 }
@@ -500,20 +578,23 @@ async function runPennyDiligence(): Promise<void> {
     userPrompt
   );
   const p = result?.parsed ?? {};
-  const txt = `${p.view ?? p.type ?? ""} ${p.thesis ?? ""}`;
+  const analysis = normalizeAnalysis(p);
+  const txt = `${analysis.view} ${analysis.thesis}`;
   const verdict = /bearish|reject|shell|no recent|kein/i.test(txt) ? "REJECT" : /bullish|approve|watchlist/i.test(txt) ? "WATCHLIST" : "HOLD";
-  await recordAnalysis(agent, undefined,
-    `[PENNY-DILIGENCE ${new Date().toISOString()}] Pick: ${topSymbol}\nSEC: ${secNote}\n→ Urteil: ${verdict} — ${String(p.reason ?? "")}`.trim(),
+  await recordAnalysis(agent, "DILIGENCE", undefined,
+    `[PENNY-DILIGENCE ${new Date().toISOString()}] Pick: ${topSymbol}\nSEC: ${secNote}\n→ Urteil: ${verdict} — ${analysis.thesis}`.trim(),
     {
       kind: verdict === "WATCHLIST" ? "RECOMMENDATION" : "ANALYSIS",
       symbol: topSymbol,
       side: "LONG",
       horizon: "position",
       verdict,
-      thesis: String(p.thesis ?? ""),
-      confidence: Number(p.confidence ?? 0.3),
+      view: analysis.view,
+      thesis: analysis.thesis,
+      confidence: analysis.confidence,
       secNote,
-    }
+    },
+    result
   );
 }
 

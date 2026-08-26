@@ -71,26 +71,109 @@ export interface RunTurnResponse {
   error?: string;
 }
 
-/** Ein Turn aus GET /api/firm/log (letzte Agenten-Nachrichten). */
+/**
+ * Protokoll-DTOs aus GET /api/firm/log.
+ *
+ * `agent_messages` enthält absichtlich mehrere Nachrichtensorten: ausführbare
+ * Agenten-Turns, Analystenberichte und Systemmeldungen. Diese sind keine
+ * Varianten derselben Entscheidung. Der API-Vertrag bildet sie deshalb als
+ * diskriminierte Union ab — so kann die UI nie einen Analystenbericht als
+ * Trade-Entscheidung oder eine fehlende Latenz als `NaN s` darstellen.
+ */
+export type ProtocolEntryKind = "turn" | "analysis" | "system" | "message";
+
+export interface ProtocolActorDto {
+  /** Menschlich lesbarer, nie leerer Anzeigename. */
+  name: string;
+  /** Rolle bzw. klarer System-/Archivstatus, nie das Platzhalterzeichen `?`. */
+  role: string;
+  /** Woher die Attribution stammt (Live-Agent, gespeicherter Snapshot, System). */
+  source: "agent" | "snapshot" | "system" | "orphaned";
+}
+
+/** LLM-/Ausführungsdaten. Fehlende Alt-Daten werden explizit als null geliefert. */
+export interface ProtocolTraceDto {
+  source: string | null;
+  model: string | null;
+  latencyMs: number | null;
+  prompt: string | null;
+  rawResponse: string | null;
+  provider: string | null;
+  usage: unknown | null;
+  costUsd: number | null;
+}
+
+export interface ProtocolAnalysisDto {
+  view: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
+  /** Normalisierte Konfidenz im geschlossenen Intervall [0, 1]. */
+  confidence: number | null;
+  thesis: string | null;
+}
+
+export interface ProtocolEntryBaseDto {
+  id: string;
+  at: string;
+  /** Ursprünglicher agent_messages.type, z. B. REPORT oder MARKET_SCAN. */
+  messageType: string;
+  missionId: string | null;
+  actor: ProtocolActorDto;
+  content: string;
+  trace: ProtocolTraceDto;
+}
+
+export interface ProtocolTurnEntryDto extends ProtocolEntryBaseDto {
+  kind: "turn";
+  decision: AgentDecisionDto;
+}
+
+export interface ProtocolAnalysisEntryDto extends ProtocolEntryBaseDto {
+  kind: "analysis";
+  analysis: ProtocolAnalysisDto;
+}
+
+export interface ProtocolSystemEntryDto extends ProtocolEntryBaseDto {
+  kind: "system";
+}
+
+export interface ProtocolMessageEntryDto extends ProtocolEntryBaseDto {
+  kind: "message";
+}
+
+export type ProtocolEntryDto =
+  | ProtocolTurnEntryDto
+  | ProtocolAnalysisEntryDto
+  | ProtocolSystemEntryDto
+  | ProtocolMessageEntryDto;
+
+/**
+ * Rückwärtskompatible, auf echte Entscheidungen gefilterte Ansicht. Sie wird
+ * vom Workshop für „letzte Agenten-Turns“ benutzt; Analystenberichte stehen in
+ * `entries` und werden im Protokoll separat und lesbar dargestellt.
+ */
 export interface TurnLogEntryDto {
   id: string;
   at: string;
   agent: string;
   role: string;
   missionId: string | null;
-  decision: AgentDecisionDto | null;
-  source?: string;
-  model?: string;
-  latencyMs?: number;
+  decision: AgentDecisionDto;
+  source: string | null;
+  model: string | null;
+  latencyMs: number | null;
   /** Kurzform der Nachricht (agent_messages.content). */
-  content?: string;
+  content: string;
   prompt: string | null;
   rawResponse: string | null;
-  provider?: string | null;
+  provider: string | null;
+  usage: unknown | null;
+  costUsd: number | null;
 }
 
 export interface LogResponse {
   ok: boolean;
+  /** Gemischte, chronologische Protokollansicht (Turn, Analyse, System, Nachricht). */
+  entries: ProtocolEntryDto[];
+  /** Nur echte Agentenentscheidungen, für bestehende Workshop-Clients. */
   turns: TurnLogEntryDto[];
 }
 
