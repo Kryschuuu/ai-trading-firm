@@ -49,6 +49,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Architektur: Makro/Mikro-Zyklen",
     subtitle: "Event-Driven-Blaupause — Regeln, Latenz, Skalierung, Security (v1.6)",
   },
+  liveReview: {
+    file: "docs/PEER_REVIEW_LIVE_TRADING.md",
+    title: "Peer-Review: Live-/Paper-Trading",
+    subtitle: "Bottlenecks der 6-Agenten-Pipeline, Code-Review, Tests und Handlungsplan",
+  },
 };
 
 export async function GET(req: Request) {
