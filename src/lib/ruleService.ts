@@ -120,7 +120,8 @@ export type UpsertResult = {
  */
 export async function upsertRuleSpec(
   spec: RuleSpec,
-  sourceAgentId?: string | null
+  sourceAgentId?: string | null,
+  sourceMode: "SIGMA" | "FALLBACK" | "MANUAL" = "SIGMA"
 ): Promise<UpsertResult> {
   const signature = ruleSignature(spec);
   const active = await db
@@ -159,6 +160,7 @@ export async function upsertRuleSpec(
       rationale: spec.rationale || null,
       sourceRole: spec.sourceRole,
       sourceAgentId: sourceAgentId ?? null,
+      sourceMode,
       riskScore: String(spec.riskScore),
       previousVersionId: active[0]?.id ?? null,
     })
@@ -174,6 +176,7 @@ export async function upsertRuleSpec(
       symbol: row.symbol,
       signature,
       sourceRole: row.sourceRole,
+      sourceMode: row.sourceMode,
       previousVersionId: row.previousVersionId,
     },
     spec.missionId,
