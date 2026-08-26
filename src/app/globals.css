@@ -180,6 +180,30 @@
   --color-red-950: #fef2f2;
 }
 
+/* ---- Pipeline-Statusleiste: pulsierender Glow während eines Laufs -----
+   Bewusst auf der CSS-Seite (Tailwind kann box-shadow-Animationen nicht
+   deklarativ ausdrücken). color-mix auf den themeten --color-Emerald,
+   damit der Glow in JEDEM Theme (auch Light/Sepia) stimmig bleibt. */
+@keyframes pipeline-glow-frames {
+  0%, 100% {
+    box-shadow: 0 0 6px 0 color-mix(in srgb, var(--color-emerald-500) 20%, transparent);
+    border-color: color-mix(in srgb, var(--color-emerald-500) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 26px 2px color-mix(in srgb, var(--color-emerald-500) 45%, transparent);
+    border-color: var(--color-emerald-500);
+  }
+}
+.pipeline-glow {
+  animation: pipeline-glow-frames 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-glow {
+    animation: none;
+    box-shadow: 0 0 14px 0 color-mix(in srgb, var(--color-emerald-500) 30%, transparent);
+  }
+}
+
 /* ---- Typografie (prose) an das aktive Theme koppeln -------------------
    Die @tailwindcss/typography setzt --tw-prose-* auf dem .prose-Element.
    Diese Regel (höhere Spezifität) lenkt die Variablen auf die

@@ -20,6 +20,51 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.6.1] — 2026-08-26
+
+**Bugfix-Release: `drizzle-kit push` bricht ab (42601), Risiko-Config-Save
+crasht (22P02), Versionsnummer + Pipeline-Statusleiste.**
+
+### Behoben
+
+- **`drizzle-kit push` — syntax error 42601 beim Index `trade_rules_active_symbol_unique`.**
+  Die Indexdefinition lag als eine SQL-Zeile mit Tuple
+  `("symbol", COALESCE("mission_id", ''))` an. Drizzle-Kit rendert daraus
+  `USING btree (("symbol", …))` — ein Row-Constructor im btree-Index, den
+  PostgreSQL verweigert; der Push brach genau dort ab (Position 95).
+  Zusätzlich war `''` als COALESCE-Platzhalter für die UUID-Spalte
+  `mission_id` ungültig (22P02). Jetzt: zwei Indexspalten
+  (`symbol`, `COALESCE(mission_id, NULL-UUID)`), partiell auf
+  `status = 'ACTIVE'`. Semantik unverändert (pro Symbol/Mandat höchstens
+  eine aktive Regel — jetzt auch erstmals *erzwingbar*). Beide Spalten sind
+  SQL-Chunks, damit der Push-Diff den Index nicht bei jedem Lauf als
+  geändert erkennt (Drizzle-Kit markiert Mixed-Index-Spalten beim
+  Introspektieren auf Index-Ebene als Expression → DROP/CREATE-Drift).
+- **`risk_config` — Crash bei `allowShort` (22P02: invalid input syntax
+  for type numeric: "true").** Die Spalte `value` ist `numeric`,
+  `setConfigValue()` persistierte aber `String(true)`/`String(false)`.
+  Boolesche Limits werden jetzt als 0/1 gespeichert (konsistent mit dem
+  Seed); die Lese-Seite akzeptiert zusätzlich Legacy-"true"/"false".
+
+### Neu
+
+- **Versionsnummer in der Fußzeile** des Dashboards (aus `package.json`,
+  einziger Wahrheitsort `src/lib/version.ts` — derselbe Wert wie
+  `/api/health` → `"version"`).
+- **Pipeline-Statusleiste:** „Pipeline gestartet — läuft“ erscheint als
+  pulsierender Emerald-Block mit Glow + Spinner (auch bei Neustart),
+  danach grün „Pipeline fertig“ (löst sich nach 20 s), bei Fehler rot und
+  bleibend. Der „▶▶ Ganze Pipeline“-Button leuchtet während des Laufs.
+  `prefers-reduced-motion` wird respektiert.
+
+### Migrationshinweis
+
+`npx drizzle-kit push` legt den korrigierten Index
+`trade_rules_active_symbol_unique` an (frühere Push-Läufe haben ihn nie
+erzeugt — der Abbruch geschah genau an dieser Stelle). Keine Datenänderung.
+
+---
+
 ## [1.6.0] — 2026-08-26
 
 **Event-Driven Multi-Zyklen-Architektur: Makro (LLM, 1×/h) und Mikro

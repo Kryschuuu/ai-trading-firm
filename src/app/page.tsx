@@ -1,5 +1,6 @@
 import FirmDashboard from "@/components/FirmDashboard";
 import { ensureSeeded, checkSchema } from "@/lib/seed";
+import { APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +91,10 @@ sudo systemctl restart ai-trading-firm   # Produktion (systemd)`}
       <footer className="mx-auto max-w-7xl px-4 pb-10 pt-4 text-center text-xs text-slate-600">
         Lokale autonome Trading-Firma · Next.js + Drizzle + PostgreSQL + Ollama ·
         Ausschließlich Paper-Trading — es ist zu keiner Zeit echtes Kapital im Spiel.
+        {/* Versionsnummer aus package.json (einziger Wahrheitsort: src/lib/version.ts) */}
+        <span className="ml-2 rounded-md border border-slate-800 bg-slate-900/60 px-1.5 py-0.5 font-mono text-slate-500">
+          v{APP_VERSION}
+        </span>
       </footer>
     </main>
   );

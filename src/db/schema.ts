@@ -105,10 +105,24 @@ export const tradeRules = pgTable("trade_rules", {
    * Partielle UNIQUE-Indizes: pro Regel (ruleKey) und pro Symbol/Mandat
    * höchstens EINE aktive Version — die Aktivierung ist damit atomar,
    * egal wie viele Prozessinstanzen gleichzeitig aktivieren.
+   *
+   * KORRIGIERT (v1.6.1):
+   * 1) Der Index lag als EINE SQL-Zeile mit Tuple `("symbol", COALESCE(...))`
+   *    an. Drizzle-Kit rendert daraus `USING btree (("symbol", ...))` — ein
+   *    Row-Constructor im btree-Index, den PostgreSQL verweigert (syntax
+   *    error 42601, `drizzle-kit push` brach ab).
+   * 2) `mission_id` ist UUID → Platzhalter ist die NULL-UUID, nicht ''
+   *    (invalid input syntax for type uuid).
+   * 3) Beide Spalten werden als SQL-Chunks angegeben: Drizzle-Kit markiert
+   *    Mixed-Index (Spalte + Expression) beim Introspektieren auf
+   *    Index-Ebene als "expression index", was beim Push diff zu
+   *    DROP/CREATE-Drift auf jedem Lauf führte. Zwei reine SQL-Chunks
+   *    squashen auf beiden Seiten identisch → stabiler Push.
+   *    Semantik: pro (Symbol, Mandat) höchstens EINE ACTIVE-Regel.
    */
   uniqueIndex("trade_rules_active_unique").on(t.ruleKey).where(sql`${t.status} = 'ACTIVE'`),
   uniqueIndex("trade_rules_active_symbol_unique")
-    .on(sql`(${t.symbol}, COALESCE(${t.missionId}, ''))`)
+    .on(sql`"symbol"`, sql`COALESCE(${t.missionId}, '00000000-0000-0000-0000-000000000000'::uuid)`)
     .where(sql`${t.status} = 'ACTIVE'`),
 ]);
 

@@ -74,6 +74,11 @@ export default function FirmDashboard() {
   const [notice, setNotice] = useState("");
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
+  /** Pipeline-Statusleiste: läuft / fertig / fehlgeschlagen (optisch hervorgehoben). */
+  const [pipeline, setPipeline] = useState<{
+    phase: "running" | "done" | "failed";
+    detail?: string;
+  } | null>(null);
 
   /** Zeigt nach einer 401 die Token-Eingabe und bricht die Aktion ab. */
   async function ensureAuth(res: Response): Promise<boolean> {
@@ -118,6 +123,14 @@ export default function FirmDashboard() {
     return () => clearInterval(id);
   }, [load, data.missions]);
 
+  // „Pipeline fertig“ löst sich nach 20 s von selbst — „fehlgeschlagen“
+  // bleibt sichtbar, bis die nächste Aktion kommt (Fehler nicht übersehen).
+  useEffect(() => {
+    if (pipeline?.phase !== "done") return;
+    const id = window.setTimeout(() => setPipeline(null), 20_000);
+    return () => window.clearTimeout(id);
+  }, [pipeline]);
+
   async function seed() {
     await apiFetch("/api/seed", { method: "POST" });
     setNotice("Firm seeded with default team + mission.");
@@ -155,22 +168,25 @@ export default function FirmDashboard() {
       return;
     }
     setRunning("pipeline");
-    setNotice("Pipeline läuft: CEO → Research → Backtest → Risk → Approver → Executor …");
+    setNotice("");
+    // Statusleiste: „Pipeline gestartet“ — pulsierend hervorgehoben,
+    // auch bei Neustart (setzt den Zustand zurück auf running).
+    setPipeline({ phase: "running" });
     const res = await apiFetch("/api/firm/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ missionId: mission.id, pipeline: true }),
     });
-    if (!(await ensureAuth(res))) { setRunning(null); return; }
+    if (!(await ensureAuth(res))) { setRunning(null); setPipeline(null); return; }
     const json = await res.json();
     setRunning(null);
     if (json.ok) {
       const steps = (json.pipeline ?? [])
         .map((s: any) => `${s.role}:${s.result.status}`)
         .join(" → ");
-      setNotice(`Pipeline fertig — ${steps || "keine Schritte"}`);
+      setPipeline({ phase: "done", detail: steps || "keine Schritte" });
     } else {
-      setNotice(`Pipeline fehlgeschlagen: ${json.error ?? "unbekannt"}`);
+      setPipeline({ phase: "failed", detail: json.error ?? "unbekannt" });
     }
     load();
   }
@@ -243,7 +259,11 @@ export default function FirmDashboard() {
           <button
             onClick={() => runPipeline()}
             disabled={running !== null}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+            className={`rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-60 ${
+              running === "pipeline"
+                ? "animate-pulse border-emerald-500/80 bg-emerald-500/20 text-emerald-300"
+                : "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
+            }`}
           >
             {running === "pipeline" ? "Pipeline läuft…" : "▶▶ Ganze Pipeline"}
           </button>
@@ -270,6 +290,51 @@ export default function FirmDashboard() {
           )}
         </div>
       </header>
+
+      {/* Pipeline-Statusleiste — bei laufender/neu gestarteter Pipeline
+          pulsierender Emerald-Block mit Glow; nach Abschluss grün (20 s),
+          bei Fehler rot und bleibend. */}
+      {pipeline && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`mb-6 flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
+            pipeline.phase === "failed"
+              ? "border-red-500/70 bg-red-500/15 shadow-[0_0_20px_-6px_var(--color-red-500)]"
+              : pipeline.phase === "running"
+                ? "pipeline-glow border-emerald-500/70 bg-emerald-500/10"
+                : "border-emerald-500/70 bg-emerald-500/15 shadow-[0_0_20px_-6px_var(--color-emerald-500)]"
+          }`}
+        >
+          {pipeline.phase === "running" ? (
+            <span className="inline-block h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
+          ) : pipeline.phase === "done" ? (
+            <span className="shrink-0 text-lg leading-none text-emerald-400">✓</span>
+          ) : (
+            <span className="shrink-0 text-lg leading-none text-red-400">✗</span>
+          )}
+          <div className="min-w-0">
+            <p
+              className={`text-sm font-bold tracking-wide ${
+                pipeline.phase === "failed" ? "text-red-300" : "text-emerald-300"
+              }`}
+            >
+              {pipeline.phase === "running" && "⚡ Pipeline gestartet — läuft"}
+              {pipeline.phase === "done" && "Pipeline fertig"}
+              {pipeline.phase === "failed" && "Pipeline fehlgeschlagen"}
+            </p>
+            <p
+              className={`mt-0.5 truncate text-xs ${
+                pipeline.phase === "failed" ? "text-red-200/80" : "text-emerald-200/70"
+              }`}
+            >
+              {pipeline.phase === "running"
+                ? "CEO → Research → Backtest → Risk → Approver → Executor …"
+                : pipeline.detail}
+            </p>
+          </div>
+        </div>
+      )}
 
       {notice && (
         <div className="mb-6 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-200">
