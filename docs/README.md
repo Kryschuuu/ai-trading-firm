@@ -17,13 +17,14 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | Dokument | Zweck |
 | --- | --- |
 | **README.md** (diese Datei, `docs/README.md`) | Überblick, Architektur, Varianten A/B, Schnellstart |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Blaupause: Event-Driven **Makro-/Mikro-Zyklen**, Regelformat, Latenz, Skalierung, Security |
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
-| **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting |
+| **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting, Agenten-Register |
 | **[CHANGELOG.md](CHANGELOG.md)** | Versionen, Bugfixes und Änderungen je Release |
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 
-**Version:** `v1.5.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.6.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -62,10 +63,14 @@ Die Ablehnung landet revisionssicher im `audit_log`. Nichts wird stillschweigend
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Next.js (App Router)          Dashboard · /docs · REST-API          │
 ├──────────────────────────────────────────────────────────────────────┤
-│  Orchestrierung   src/lib/engine.ts                                  │
-│     runAgentTurn()   ein Agent, ein Zug                              │
-│     runPipeline()    CEO → Research → Backtest → Risk → Approver →   │
-│                      Executor, strikt sequenziell                    │
+│  MAKRO-ZYKLUS (langsam, LLM im Hintergrund)                          │
+│     macroCycle.ts   CEO + Research → Regeln, 1×/h (Scheduler)        │
+│     engine.ts       klassische Pipeline (manuell/Workshop)           │
+├──────────────────────────────────────────────────────────────────────┤
+│  MIKRO-ZYKLUS (schnell, KEIN LLM) — eigener Prozess `npm run micro`  │
+│     microExecutor.ts  WebSocket-Tick → Rolling-Serie → kompilierte   │
+│                        Regel (RAM) → Paper-Fill; ~20–100 µs          │
+│     ruleEngine.ts      Whitelist-DSL · Validierung · Backtest        │
 ├──────────────────────────────────────────────────────────────────────┤
 │  HARTE GRENZEN    src/lib/riskGuard.ts     ← hier steht die Wahrheit │
 │  Broker-Schleuse  src/lib/broker.ts        ← prüft ein zweites Mal   │
@@ -75,8 +80,15 @@ Die Ablehnung landet revisionssicher im `audit_log`. Nichts wird stillschweigend
 │  PostgreSQL + Drizzle    agents · missions · positions · proposals   │
 │                          agent_messages · audit_log · kill_switches  │
 │                          risk_config · equity_snapshots              │
+│                          trade_rules · rule_executions               │
+│                          rule_backtests (v1.6)                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+**Die Kernidee (v1.6):** Die LLMs rechnen **vor** (Makro: 1×/h), nicht **mit**
+(Mikro: jeder Tick). Verbunden nur über ein versioniertes, validiertes
+Regelwerk in `trade_rules` — keine lineare Pipeline, keine LLM-Latenz im
+Ausführungspfad. Details: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 **Institutionelles Gedächtnis** = `agent_messages` + `audit_log` + `proposals` in
 PostgreSQL. Nach einem Neustart (systemd, Stromausfall, Deploy) stellt
@@ -165,13 +177,20 @@ ollama pull qwen2.5:3b-instruct-q4_K_M
 
 # 5. Bauen und starten
 npm run build && npm run start
+
+# 6. (optional, v1.6) Mikro-Zyklus als eigener Prozess — ohne LLM, pro Tick
+npm run micro        # Binance-Feed; MICRO_FEED=sim für Offline-Demo
 ```
 
 Dann `http://localhost:3369` öffnen → **„Seed / Reset"** klicken → **„▶▶ Ganze Pipeline"**.
+Für den event-getriebenen Regelbetrieb: `POST /api/firm/macro` (erzeugt die erste
+Regel) — danach übernimmt der Mikro-Executor automatisch (siehe
+[HANDBUCH, Kap. 15](HANDBUCH.md)).
 
 **Ohne Modell funktioniert es trotzdem:** Ist kein LLM erreichbar, schaltet das System auf
 eine deterministische Regel-Engine um und zeigt „Regel-Engine" in der Statusleiste. Die
-komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
+komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen — auch
+der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FALLBACK`).
 
 ---
 
@@ -180,15 +199,18 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
 ```
 ├── docs/
 │   ├── README.md                 ← diese Datei (Überblick, Architektur)
+│   ├── ARCHITECTURE.md           ← Makro/Mikro-Blaupause (v1.6, neu)
 │   ├── INSTALL.md                ← Installation A + B
-│   ├── HANDBUCH.md               ← Bedienung, Beispiele, Runbooks
+│   ├── HANDBUCH.md               ← Bedienung, Beispiele, Runbooks, Agenten-Register
 │   ├── CHANGELOG.md              ← Versionen & Bugfixes
 │   ├── SECURITY_AUDIT.md         ← Audit-Ergebnis & Peer-Review
 │   └── PROVIDER_INTEGRATION.md   ← LLM-Provider, Kosten, Retries
 ├── deploy/
 │   ├── ai-trading-firm.service   ← systemd-Unit für den Dienst
+│   ├── micro-executor.service    ← systemd-Unit für den Mikro-Zyklus (neu)
 │   └── ollama-lan.conf           ← Ollama im LAN freigeben (Variante B)
 ├── scripts/
+│   ├── micro-executor.ts         ← Standalone-Mikro-Zyklus: npm run micro (neu)
 │   ├── setup-cachyos.sh          ← geführte Installation (--variant a|b)
 │   └── smoke-test.sh             ← prüft, ob alles läuft
 └── src/
@@ -207,10 +229,15 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
     │           ├── missions/     ← Missionen anlegen/bearbeiten (Workshop)
     │           ├── agents/       ← system_prompt ändern (Workshop, PUT)
     │           ├── tick/         ← Monitor-Zyklus (POST)
+    │           ├── macro/        ← Makro-Zyklus (CEO+Research) (neu)
+    │           ├── micro/        ← Mikro-Executor-Status (neu)
+    │           ├── rules/        ← Regelwerk: Liste/Anlage (neu)
+    │           ├── rules/[id]/   ← activate/pause/rollback/… (neu)
+    │           ├── rules/[id]/backtest ← Historie-Backtest (neu)
     │           ├── report/       ← KPI-Report (GET)
     │           ├── equity/       ← Equity-Kurve (GET)
     │           └── log/          ← Protokoll/Audit (GET)
-    ├── db/schema.ts              ← Drizzle-Tabellen
+    ├── db/schema.ts              ← Drizzle-Tabellen (inkl. trade_rules, v1.6)
     ├── components/FirmDashboard.tsx
     ├── components/workshop/      ← Workshop-Tab: Missionen, Turns, Prompts, Trefferquote
     └── lib/
@@ -221,8 +248,17 @@ komplette Orchestrierung samt Guardrails lässt sich so ohne GPU nachvollziehen.
         ├── engine.ts             ← Orchestrierung, Turns, Pipeline
         ├── monitor.ts            ← SL/TP-Überwachung, Tageslimit, Retention
         ├── marketData.ts         ← Binance/Yahoo-Kurse, Screener, Symbol-Whitelist
+        ├── ruleEngine.ts         ← Regel-DSL, Whitelist, Klemmung, Backtest (neu, LLM-frei)
+        ├── ruleService.ts        ← Regel-Persistenz, Versionierung, Rollback (neu, LLM-frei)
+        ├── microExecutor.ts      ← Mikro-Zyklus: Feeds, Cache, Hot-Path (neu, LLM-frei)
+        ├── macroCycle.ts         ← Makro-Zyklus: CEO+Research erzeugen Regeln (neu)
         └── workshop.ts           ← Workshop-Validierung: Missionen/Prompts, Trefferquote
 ```
+
+**Die zwölf Agenten** (von `seed.ts`): Kern-Pipeline Lex (CEO), Rhea
+(Research), Milo (Backtest), Rigel (Risk), Vega (Approver), Nova (Executor) —
+plus Analysten Kepler (Technical), Cassini (Macro), Hubble (News), Sagan
+(Swing), Voyager (Scout), Curie (Diligence). Beschreibungen: **[HANDBUCH, Kap. 16](HANDBUCH.md)**.
 
 ---
 
@@ -259,6 +295,11 @@ Absicht: eine Sicherheitsgrenze, die man im laufenden Betrieb per Klick ändern 
 | `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (wird auf Code-Ceilings geklemmt) |
 | `GET/POST/PUT` | `/api/firm/missions` | Missionen lesen/anlegen/bearbeiten (Workshop; Budgets gegen Code-Ceilings) |
 | `PUT` | `/api/firm/agents` | `system_prompt` eines Agenten ändern — wirken sofort, Guardrails unberührt |
+| `GET/POST` | `/api/firm/rules` | Regelwerk (alle Versionen + Feedback) lesen bzw. validierte Regel anlegen (DRAFT) |
+| `POST` | `/api/firm/rules/[id]` | `activate` / `pause` / `archive` / `rollback` / `reject` einer Regel-Version |
+| `POST` | `/api/firm/rules/[id]/backtest` | deterministischer Historie-Backtest (ohne LLM), Ergebnis in `rule_backtests` |
+| `POST/GET` | `/api/firm/macro` | Makro-Zyklus (CEO + Research) jetzt ausführen / Status |
+| `GET` | `/api/firm/micro` | Status des Mikro-Executor-Prozesses + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=install` | Markdown-Doku als JSON |
 
 Schreibende Endpunkte (`POST`/`PUT`) werden per `x-firm-token` geschützt, sobald
@@ -280,8 +321,14 @@ Beispiele mit `curl` im **[Handbuch, Kapitel 4](HANDBUCH.md)**.
 * **Cloud-Anbieter kosten Geld und geben Daten ab.** Die Provider-Schicht kann Gemini/Claude
   als Fallback nutzen (`LLM_FALLBACK_PROVIDERS`) — die Kostenrechnung im Dashboard
   (`estimateCostUsd`) ist eine Schätzung auf Referenzpreisen, keine Abrechnung.
-* **Sequenziell ist gewollt.** Auf dieser Hardware bringt Parallelität kaum Durchsatz,
-  aber sehr wohl Race-Conditions an der Broker-Schnittstelle.
+* **Makro ist sequenziell, Mikro ist event-getrieben.** Die klassische Pipeline bleibt
+  bewusst sequenziell (keine Race-Conditions an der Broker-Schnittstelle); schnelle
+  Ausführung läuft seit v1.6 ausschließlich über den LLM-freien Mikro-Zyklus
+  (WebSocket → kompilierte Regel → Fill, ~20–100 µs).
+* **Der Mikro-Zyklus ist im Paper-Modus Single-Instance.** Der interne PaperBroker ist
+  ein In-Memory-Ledger; die Multi-Instanz-Primitive (Advisory-Lock, UNIQUE-Indizes)
+  sind implementiert und greifen, sobald ein echter Broker-Adapter (Alpaca/ccxt) als
+  geteilte Zustandsquelle angebunden ist — Details in ARCHITECTURE.md §5.
 * **Kein Kursrisiko-Modell.** Es gibt keine Korrelations-, Volatilitäts- oder
   Portfoliooptimierung. Die Guardrails sind absichtlich stumpf und deshalb verlässlich.
 

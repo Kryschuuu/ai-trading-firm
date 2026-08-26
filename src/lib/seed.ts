@@ -10,10 +10,11 @@ import { DEFAULT_LIMITS } from "./riskGuard";
 export async function checkSchema(): Promise<{ ok: boolean; missingTables: string[] }> {
   // KORRIGIERT (v1.1.0): equity_snapshots fehlte — der Healthcheck meldete
   // "schemaReady" obwohl die Equity-Kurve/Monitor-Snapshots nicht funktionieren.
+  // v1.6.0: trade_rules / rule_executions / rule_backtests (Makro/Mikro-Zyklen).
   const required = [
     "agents", "agent_messages", "audit_log", "kill_switches",
     "missions", "positions", "proposals", "risk_config",
-    "equity_snapshots",
+    "equity_snapshots", "trade_rules", "rule_executions", "rule_backtests",
   ];
   try {
     const result = await db.execute<{ table_name: string }>(

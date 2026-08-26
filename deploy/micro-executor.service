@@ -1,0 +1,28 @@
+[Unit]
+Description=AI Trading Firm — Micro-Executor (LLM-frei, WebSocket-gesteuert)
+Documentation=https://github.com/Kryschuuu/ai-trading-firm/blob/main/docs/HANDBUCH.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/opt/ai-trading-firm
+EnvironmentFile=/opt/ai-trading-firm/.env
+# Der Mikro-Zyklus ist bewusst ein eigener, schlanker Prozess: kein Next.js,
+# keine LLM-Calls — nur Feed → Regelauswertung → Broker.
+ExecStart=/usr/bin/node --import tsx scripts/micro-executor.ts
+Restart=on-failure
+RestartSec=5
+# Hartes Laufzeitfenster für den Executor-Prozess (Feed-Reconnect-Leaks).
+# Nach dem Neustart hydriert er den Broker-Zustand wieder aus der DB.
+RuntimeMaxSec=0
+# Ressourcen: niedrig halten — der Prozess ist auf Latenz, nicht auf CPU gebaut.
+MemoryMax=512M
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-trading-firm-micro
+
+[Install]
+WantedBy=multi-user.target

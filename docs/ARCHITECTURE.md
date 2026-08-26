@@ -1,0 +1,443 @@
+# Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.6)
+
+**Detailliertes Architektur- und Implementierungskonzept** für eine
+Trading-Firma, die strategische Intelligenz (LLM) von
+Ausführungsgeschwindigkeit (kein LLM) trennt.
+
+> Kernidee in einem Satz: **Die LLMs entscheiden langsam im Hintergrund,
+> ein reines Skript handelt sofort — verbunden über eine versionierte,
+> validierte Regel in der Datenbank, nie über eine lineare Pipeline.**
+
+---
+
+## 0. Warum nicht die lineare Pipeline optimieren?
+
+Die bisherige Pipeline (`CEO → Research → Backtest → Risk → Approver →
+Executor`) ruft pro Durchlauf **6 LLMs sequenziell** auf. Auf dem N150
+bedeutet das 2–6 Minuten Latenz pro Entscheidungskette — und jeder
+Markt-Tick, der in dieser Zeit kommt, ist veraltet. Die Grenze ist
+strukturell: **LLM-Latenz multipliziert mit Pipeline-Länge**.
+
+Lineare Optimierung (kleinere Modelle, Parallelität, Streaming) reduziert
+nur den Faktor, beseitigt aber nicht den Konflikt. Die Lösung ist
+*kausale Entkopplung*:
+
+| Ebene | Zyklus | Takt | Enthält LLM? | Ergebnis |
+| --- | --- | --- | --- | --- |
+| **Makro** (CEO + Research) | 1× pro Stunde/Tag | Minuten | **ja** | statisches, validiertes Regelwerk in `trade_rules` |
+| **Mikro** (Executor) | jeder Preis-Tick | **Millisekunden** | **nein** | Trade, wenn Regel erfüllt |
+
+Der LLM rechnet nicht mehr *mit*, er rechnet *vor*.
+
+---
+
+## 1. Systemarchitektur
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  MAKRO-EBENE · langsam · LLM · N150 (oder Desktop bei Variante B)       │
+│                                                                         │
+│  ┌──────────┐   ┌──────────────┐   ┌──────────────────────────────┐    │
+│  │  CEO     │   │ RESEARCH     │   │  Ausführungs-Feedback        │    │
+│  │ (Lex)    │◄──│ (Rhea)       │◄──│  rule_executions, positions  │    │
+│  └────┬─────┘   └──────┬───────┘   └──────────────────────────────┘    │
+│       │  PRÜFEN/REVIDIEREN      │  ERZEUGEN                            │
+│       └───────────┬─────────────┘                                      │
+│                   ▼                                                    │
+│      softes Gate: sanitizeRuleSpec() (Whitelist) + Klemmung            │
+│      hartes Gate: riskGateRule() (Risk-Score, Limits)                  │
+│                   ▼                                                    │
+│      trade_rules (versioniert, immutable: v1 → v2 → v3 …)              │
+│      status: DRAFT → ACTIVE → SUPERSEDED | PAUSED | ARCHIVED           │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │ SELECT … WHERE status='ACTIVE' (Poll 30 s
+                               │ bzw. Invalidation im selben Prozess)
+┌──────────────────────────────▼──────────────────────────────────────────┐
+│  MIKRO-EBENE · schnell · 0 LLM-Calls · eigener Prozess (Node)           │
+│                                                                         │
+│  WebSocket-Feed (Binance @trade + @kline_1m   oder Simulator)           │
+│      │  ms-genaue Preis-/Volumen-Ticks                                  │
+│      ▼                                                                  │
+│  RollingTimeframeSeries  (1m→5m/15m/30m/1h, REST-Seed, RAM only)        │
+│      ▼  ~10–100 µs                                                      │
+│  RuleSnapshot (RSI, EMA9/21/50, ATR, Volumen, Volume-Ratio, …)          │
+│      ▼  ~1 µs pro Regel                                                 │
+│  RuleCache.match()  —— kompilierte ACTIVE-Regeln im RAM                 │
+│      │     Fenster offen? Cooldown? Tageslimit? Mission aktiv?          │
+│      ▼                                                                  │
+│  RuleExecutionAdapter (Paper):                                          │
+│     Advisory-Lock pro Symbol → DB-Wahrheit → Guardrails → Fill          │
+│      │                                                                  │
+│      ▼                                                                  │
+│  positions (+ rule_id) → rule_executions (Feedback) → audit_log         │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Komponenten
+
+| Komponente | Datei | Verantwortung | Skaliert |
+| --- | --- | --- | --- |
+| Makro-Zyklus | `src/lib/macroCycle.ts` | CEO + Research: Regel erzeugen, prüfen, revidieren; Feedback-Kontext; Audit | vertikal (1 Prozess reicht; CPU ist N150-tauglich) |
+| Regel-Engine | `src/lib/ruleEngine.ts` | DSL, Whitelist-Validierung, Klemmung, Kompilierung, Snapshot, Backtest — **pure, testbar, kein IO** | — (Bibliothek) |
+| Regel-Persistenz | `src/lib/ruleService.ts` | Versionierung, Lebenszyklus, Rollback, Feedback-Aggregation — **LLM-frei** | vertikal |
+| Regel-Cache | `src/lib/microExecutor.ts` (`RuleCache`) | ACTIVE-Regeln kompilieren & im RAM halten; Poll + Invalidation | pro Instanz |
+| Mikro-Executor | `src/lib/microExecutor.ts` (`MicroExecutor`) | Hot-Path: Tick → Snapshot → Match → Adapter; Latenz-Metriken | **horizontal** (N Instanzen, s. u.) |
+| Feeds | `BinanceTradeFeed`, `SimulatedFeed`, `SequenceFeed` | WebSocket-/Sim-Datenquellen | pro Instanz |
+| Paper-Adapter | `createPaperRuleAdapter()` | Kill-Switch, Positions-Sperre, Guardrails, Fill, Feedback | horizontal-safe (Advisory-Lock) |
+| Standalone-Prozess | `scripts/micro-executor.ts` | `npm run micro` + Health-HTTP (Port 3380) | 1+ Instanzen |
+
+### Kommunikationswege
+
+1. **Makro → Mikro (Regeln):** ausschließlich über PostgreSQL
+   (`trade_rules`). Read-modell: `status='ACTIVE'` — der Cache pollt alle
+   `MICRO_RULE_REFRESH_MS` (30 s) und invalidiert im selben Prozess sofort.
+   **Kein Redis, keine Queue nötig** für Korrektheit: die DB ist der
+   Zustand, RAM ist nur der Beschleuniger. Redis/Event-Bus (z. B.
+   `NOTIFY trade_rules_changed`) ist eine reine Latenz-Optimierung für
+   große CLuster — siehe §5.
+2. **Mikro → Makro (Feedback):** `rule_executions` (Trigger/Block/Fehler +
+   Latenz), `positions.rule_id` (realisiertes P&L je Regel) und
+   `audit_log`. Der Makro-Zyklus liest diese als „Marktrealität“ in seinen
+   Prompt — das ist der Lern-Loop (§4).
+3. **Mikro → Broker:** `PaperBroker` (in-process), bei echtem Geld ein
+   Broker-Adapter hinter demselben Interface.
+
+### Warum Redis/Event-Streaming nur optional ist
+
+Best Practice für *sehr* viele Instanzen ist ein Pub/Sub (Redis
+`PUBLISH rule-updated` oder Postgres `LISTEN/NOTIFY`), damit der
+Cache-Invalidations-Lag von 30 s auf ~1 ms sinkt. Für ein lokales
+Paper-System ist die DB selbst der Bus (eine Tabelle, ein Index) —
+einfacher, ausfallender, auditierbar. Redis ist **kein Single Point of
+Truth** für Regeln, nur ein Cache-Beschleuniger.
+
+---
+
+## 2. Regelformat & Persistierung
+
+### 2.1 Schema (`trade_rules`)
+
+```
+id            uuid PK                ← eine Zeile = EINE unveränderliche Version
+rule_key      uuid                   ← logische Regel-Identität (v1, v2, …)
+version       int                    ← 1, 2, 3, …
+status        DRAFT|ACTIVE|SUPERSEDED|PAUSED|ARCHIVED|REJECTED
+symbol        text                   ← sanitized (A-Z0-9, max 12)
+mission_id    uuid → missions
+condition     jsonb                  ← RuleCondition  (Whitelist-DSL)
+action        jsonb                  ← RuleAction     (hart geklemmt)
+window        jsonb                  ← RuleWindow     (timeframe, cooldown, Fenster)
+signature     text                   ← FNV-1a über symbol+condition+action (Idempotenz)
+source_role   CEO|RESEARCH|MANUAL
+source_mode   SIGMA|FALLBACK         ← LLM oder deterministischer Generat
+previous_version_id / superseded_by_id  ← Versionskette (Rollback)
+```
+
+### 2.2 Bedingungs-DSL (serialisiert, nie ausführbar)
+
+```json
+{
+  "logic": "all",
+  "conditions": [
+    { "field": "rsi14",        "op": "lt",    "value": 30 },
+    { "field": "volumeRatio",  "op": "gt",    "value": 1.2 }
+  ]
+}
+```
+
+* **Felder (Whitelist):** `price, rsi14, ema9, ema21, ema50, trend,
+  atrPct, volume, volumeMa20, volumeRatio, changePct24h,
+  priceVsEma21Pct, priceVsEma50Pct`.
+* **Operatoren:** `lt, lte, gt, gte, eq, between, in`.
+* **Action:** `side` (nur `LONG`), `stopLossPct`, `takeProfitRR`,
+  `riskBudgetPct`, `maxPositionPct` — jeder Wert wird gegen
+  `RULE_CEILINGS` (abgeleitet aus `LIMIT_CEILINGS` der Guardrails)
+  geklemmt. Eine Regel kann **nie mehr Risiko fordern als der Code.**
+
+### 2.3 Validierung — die eigentliche Sicherheitsgrenze
+
+`sanitizeRuleSpec()` ist ein **Normalisierer mit Whitelist**:
+
+* unbekannte Keys (auch `__proto__`, `constructor`) werden verworfen,
+* Felder werden case-insensitiv auf die Whitelist gemappt,
+* Zahlen müssen endlich sein; Strings werden nie als Zahlen akzeptiert,
+* Out-of-Bounds-Werte werden **geklemmt**, nicht abgelehnt (Fail-safe:
+  eine zu aggressive Regel wird konservativ, nie „weicher“),
+* ungültige Symbole/Operatoren/Seiten → harte Ablehnung (422).
+
+Konsequenz: Auch ein **bösartig** prompt-injiziertes Research-Modell kann
+nur einen Ausdruck aus der Whitelist erzeugen. „Code entscheidet“ bleibt
+wahr.
+
+### 2.4 Versionierung & Rollback
+
+* **Aktivieren** (`POST /api/firm/rules/:id`, `action:activate`):
+  Transaktion setzt alle anderen ACTIVE-Versionen desselben Symbols auf
+  `SUPERSEDED` und die neue auf `ACTIVE` (+ `activatedAt`). Doppelte
+  Aktivierung ist durch partielle UNIQUE-Indizes
+  (`trade_rules_active_unique`, `trade_rules_active_symbol_unique`)
+  **auf DB-Ebene atomar** — unabhängig von der Prozessanzahl.
+* **Rollback** (`action:rollback`): Reihenfolge wird über
+  `previous_version_id` zurückgespult; die alte Version wird wieder
+  ACTIVE, die aktuelle SUPERSEDED. Jeder Schritt landet in `audit_log`
+  (`RULE_ACTIVATED`, `RULE_ROLLED_BACK`, …).
+* **Wie der Mikro-Executor „die aktuelle“ Version bekommt:** Er kennt
+  Versionen gar nicht — er lädt `WHERE status='ACTIVE'`. Die DB-Wahrheit
+  wandert per Poll/Invalidation in den RAM. Dadurch ist er nach einem
+  Rollback automatisch wieder auf der alten Regel (spätestens nach
+  `RULE_REFRESH_MS`, im selben Prozess sofort).
+
+---
+
+## 3. Mikro-Zyklus: Implementierung & Latenz
+
+### 3.1 Event-Listener (Pseudocode = echter Code in `microExecutor.ts`)
+
+```ts
+feed.start((tick) => {                 // jeder WebSocket-Tick
+  if (cache.candidatesBySymbol(tick.symbol).length === 0) return; // Zero-Cost-Tick
+  const series = seriesFor(tick.symbol, rule.timeframe);
+  series.touch(tick.price, tick.ts, tick.qty);   // RAM only
+  const snap = series.snapshot();                // 10–100 µs
+  const t0 = performance.now();
+  const matched = cache.match(snap);             // kompilierte Closures
+  const evalMicros = (performance.now() - t0) * 1000;
+  for (const rule of matched) adapter.execute({ rule, snap, evalMicros });
+});
+```
+
+### 3.2 Latenzbudget & Optimierungen (Sub-Millisekunde)
+
+| Schritt | Kosten | Optimierung |
+| --- | --- | --- |
+| Tick-Delegation | < 1 µs | `candidatesBySymbol()` Map; ohne Regel: **kein weiterer Schritt** |
+| Rolling-Serie | 5–50 µs | 1m-Buckets, finale Kerzen, History-Cap 160; Indikatoren aus ~100 Kerzen (kein Fetch) |
+| Snapshot | 10–60 µs | EMA/RSI/ATR sind O(n), n ≤ 160; keine IO |
+| Regel-Match | 0,5–2 µs/Regel | **Compile einmalig beim Cache-Load** → durchschnittlich null JSON-Parse im Tick |
+| Fenster/Cooldown | < 0,1 µs | in-Memory `firedAt`, Tageszähler im RAM (DB nur beim Load) |
+| **Summe (ohne Fill)** | **~20–100 µs** | gemessen & getestet (`tests/microExecutor.test.ts`, Grenze < 5 ms p95, real ~2 Magnituden darunter) |
+
+Weitere Hebel (dokumentiert, nicht alle eingeschaltet):
+
+* **Kein DB-Call im Tick** — die einzige DB-Berührung ist der Match
+  (und das ist gewollt: der Fill ist der seltene Fall).
+* **JIT-freundliche Closures** statt Interpreter; Feldzugriffe über
+  switch-Accessoren, keine String-Property-Lookups.
+* **Batching:** Trade-Streams auf 10–100 ms aggregieren, wenn die
+  Bedingung ohnehin kerzenbasiert ist (beim reinen Preis-Trigger nicht).
+* **Warm-Start:** REST-Seed beim Boot, damit Indikatoren sofort
+  aussagekräftig sind (kein 25-Kerzen-Kaltstart).
+* **Gültige Indikatoren nur bei Update:** RSI/EMA/Volumen-MA ändern sich
+  pro Tick nur marginal; eine Cache-Generation pro (Symbol, Timeframe)
+  reicht.
+
+### 3.3 Rule-Caching
+
+* In-Memory `Map<symbol, CachedRule[]>`; `CachedRule` enthält den **fertig
+  kompilierten Evaluator** + `firedAt`/Cooldown + Tageszähler.
+* Refresh: Poll `MICRO_RULE_REFRESH_MS` (Default 30 s) + `invalidate()`
+  für Aktivierungen im selben Prozess.
+* Fallback bei DB-Störung: **alte Regeln bleiben aktiv** (Fail-safe:
+  weiterhandeln mit dem letzten bekannten Stand, nie „stumm abstürzen“),
+  Fehler wird geloggt. Bei Kill-Switch zieht ohnehin die in-process Bremse.
+* Redis wäre eine reine Invalidation-Beschleunigung (§1).
+
+---
+
+## 4. Fehlerbehandlung & Feedback-Loop
+
+### 4.1 Ausführungsergebnisse
+
+Der Adapter schreibt für **jeden** Match ein Ereignis:
+
+* `TRIGGERED` — Fill-Details, Order-ID, Snapshot, ausgewertete
+  Bedingungen, `latency_micros` (Bewertungszeit),
+* `BLOCKED` — Grund (`KILL_SWITCH_ARMED`, `POSITION_ALREADY_OPEN`,
+  `GUARDRAIL:…`, `MISSION_KILLED`, `MAX_EXECUTIONS`),
+* `ERROR` — Ausnahme (defensiv, nie stillschweigend).
+
+Positionen werden mit `rule_id` verknüpft → realisiertes P&L ist der
+Regel direkt zurechenbar.
+
+### 4.2 Wie der CEO lernt („Marktrealität“)
+
+`ruleFeedback()` aggregiert je Regel: Trigger/Blöcke/Fehler (24 h),
+geschlossene Trades, realisiertes P&L, Win-Rate. Der Makro-Zyklus gibt
+diese Zahlen **in den Prompt** des Research- und CEO-Agenten:
+
+```
+Recent rule feedback (24h):
+a1b2c3d4… ACTIVE: 24h 3T/1B, geschlossen 2, PnL +412.53, WinRate 0.5
+```
+
+Damit entsteht der echte Lern-Loop: **Regel → Execution → P&L → nächste
+Regel** — ohne dass je ein LLM in der Ausführungskette hängt. Zusätzlich
+landet das Ergebnis als `RECOMMENDATION`/`RULE_REVIEW` im
+institutionellen Gedächtnis (`agent_messages`) mit Prompt/Raw-Trace für
+spätere Analyse.
+
+### 4.3 Fehlerverhalten
+
+* **Feed weg:** exponentieller Reconnect (1 s → 30 s), Regeln bleiben
+  geladen, keine Trades ohne Daten.
+* **DB weg zur Laufzeit:** Executor läuft weiter (RAM-Cache), Match-Fill
+  schlägt fehl → `ERROR` in Log + Feedback (beim nächsten DB-Zugriff).
+* **Kill-Switch:** vor jedem Match in-process geprüft + im Lock nochmal
+  aus der DB (frische Wahrheit bei mehreren Prozessen).
+* **Doppel-Fill:** Advisory-Lock pro Symbol + Fresh-Read der offenen
+  Position + `POSITION_ALREADY_OPEN`-Block.
+
+---
+
+## 5. Deployment & Skalierung
+
+### 5.1 Unabhängige Deploys
+
+```
+Makro: Next.js-Dienst (systemd ai-trading-firm.service)
+       + Scheduler-Takt MACRO_CYCLE_INTERVAL_MIN (Default 60 min)
+Mikro: eigener Prozess (systemd micro-executor.service)
+       `npm run micro` — kein Next.js, kein LLM-Code geladen
+```
+
+Beide teilen sich nur PostgreSQL. Der Mikro-Prozess kann auf dem
+**gleichen** N150 laufen (er ist ~1 % CPU) oder auf einem eigenen
+Rechner/Container neben der Datenquelle.
+
+### 5.2 Horizontale Skalierung des Mikro-Zyklus ohne Regel-Konflikte
+
+| Mechanismus | Wirkung |
+| --- | --- |
+| **Eine ACTIVE-Regel pro Symbol** | partieller UNIQUE-Index — konkurrierende Aktivierungen sind atomar |
+| **Advisory-Lock `pg_advisory_lock('rule:'+symbol)`** | kritischer Abschnitt Check→Fill ist pro Symbol serialisiert — zwei Instanzen können denselben Trade nie doppelt eröffnen |
+| **Positions-Sperre aus der DB** | `POSITION_ALREADY_OPEN` wird im Lock frisch geprüft, nicht aus dem RAM |
+| **Shard-Key** | `MICRO_SYMBOLS=BTC,ETH` je Instanz — empfohlene Verteilung ohne Lock-Contention |
+
+**Einschränkung ehrlich benannt:** Der interne `PaperBroker` ist ein
+In-Memory-Ledger. Im Paper-Modus soll deshalb **genau eine**
+Executor-Instanz laufen (Single-Writer) — die Guardrail- und
+Sperrprimitive für Multi-Instanz sind bereits implementiert, aber erst ein
+echter Broker-Adapter (Alpaca/ccxt, staatsextern) macht N-Instanzen zu
+einem Normalbetrieb. Bis dahin: „1 Mikro-Instanz“ = korrekt und
+ausdrücklich so dokumentiert.
+
+### 5.3 Sizing
+
+* Makro: 2 LLM-Calls/h (Research + CEO) — auf dem N150 sind das ~2 min
+  Rechenzeit pro Stunde, Rest idle.
+* Mikro: ein V8-Prozess, <100 MB RSS, <5 % eines Kerns (Feed + Indikatoren).
+* DB: `rule_executions` schreibt nur bei **Matches** (Trigger/Block/Fehler),
+  nie pro Tick — keine Write-Skalierungsfalle.
+
+---
+
+## 6. Konkretes, lauffähiges Beispiel
+
+Siehe `scripts/micro-executor.ts` (Produktion) und
+`tests/microExecutor.test.ts` (kommentiertes Minimalprogramm). Das
+kompakte Kernstück:
+
+```ts
+// 1. Makro (LLM) erzeugt die Regel — 1×/h, dauert Minuten:
+const spec = { symbol: "BTC",
+  condition: { logic: "all", conditions: [
+    { field: "rsi14", op: "lt", value: 30 },
+    { field: "volumeRatio", op: "gt", value: 1.2 } ] },
+  action: { side: "LONG", stopLossPct: 5, takeProfitRR: 1.5,
+            riskBudgetPct: 0.02, maxPositionPct: 0.25 },
+  window: { timeframe: "15m", maxExecutionsPerDay: 3,
+            cooldownMinutes: 120, volumeWindow: 20 } };
+
+// 2. Validieren & aktivieren (ohne LLM, ohne Pipeline):
+const { spec: safe } = sanitizeRuleSpec(spec, "RESEARCH"); // Whitelist + Klemmung
+await upsertRuleSpec(safe);                                 // DRAFT, versioniert
+await activateRule(ruleId, "MACRO_CYCLE");                  // atomar, auditiert
+
+// 3. Mikro (kein LLM): jeder WebSocket-Tick
+feed.start((tick) => {
+  series.touch(tick.price, tick.ts, tick.qty);
+  const snap = series.snapshot();            // ~10–100 µs
+  const matched = cache.match(snap);         // kompilierte Regeln, RAM only
+  for (const rule of matched) adapter.execute({ rule, snap });
+});
+```
+
+Start des Mikro-Executors:
+
+```bash
+npm run micro                    # Binance-Feed, Health auf :3380
+MICRO_FEED=sim npm run micro     # Offline-Demo (deterministisch)
+```
+
+---
+
+## 7. Testing & Security
+
+### 7.1 Backtest vor Live
+
+`POST /api/firm/rules/:id/backtest` simuliert die Regel deterministisch
+über historische Kerzen (Signal am Kerzenschluss, Einstieg Schlusskurs,
+Stop/Target, Stop-Vorrang bei Gleichzeitigkeit, Position-Sizing über
+`riskAdjustedSize`). Ergebnis (Trades, P&L, Profit-Faktor, Max-Drawdown,
+Exposure) wird in `rule_backtests` gespeichert.
+
+**Freigabe-Reihenfolge (Empfehlung):** 1) Backtest > 60 Trades und
+Profit-Faktor ≥ 1,1 → 2) 10–20 Paper-Durchläufe mit `REQUIRE_HUMAN_APPROVAL`
+→ 3) Rollback-Regel dokumentieren → 4) erst dann automatisierte
+Aktivierung. Kein Auto-Gate im Code — ein Mensch bleibt das Review-Gate.
+
+### 7.2 Automatisierte Tests
+
+* `tests/ruleEngine.test.ts` — Whitelist, Klemmung, Prototype-Pollution,
+  Kompilierung, Snapshot-Determinismus, Signatur, Backtest-Szenarien.
+* `tests/microExecutor.test.ts` — **Import-Graph-Guard** (kein
+  `ollama`/`llmProvider`/`engine` im Mikro-Pfad), Rolling-Serie,
+  Cooldown-/Tageslimit-Logik, End-to-End-Tick→Match→Adapter ohne DB,
+  Latenz-Grenzen.
+* Gesamtlauf: `npm test` (alle 181 Tests), `npm run typecheck`,
+  `npm run lint`, `npm run build`.
+
+### 7.3 Security-Audit & Peer-Review vor GitHub
+
+1. **Dependency-Audit:** `npm audit` (aktuell: 0 Schwachstellen).
+2. **Rule-Injection-Review:** jede Änderung an `sanitizeRuleSpec`,
+   `RULE_FIELDS`, `RULE_CEILINGS`, `backtestRule` ist eine
+   Sicherheitsgrenze → Peer-Review Pflicht; Tests decken jede neue
+   Feld-/Op-Erweiterung ab.
+3. **Prompt-Injection-Rehearsal:** Research/CEO-Prompts behandeln
+   Marktdaten als DATA; News/Headlines der Analysten bekommen die
+   Anti-Injection-Zeile. Regel-Entwürfe, die „NO TRADE TODAY“ oder
+   nicht-feuernde Bedingungen enthalten (z. B. `rsi14 < 0`), sind das
+   dokumentierte Sicherheitsmuster.
+4. **DB-Angriffsfläche:** Regeln sind **JSON-Werte**, die nur der
+   Whitelist-Parser interpretiert — kein `eval`, kein dynamischer SQL.
+   `symbol` wird gegen die Symbol-Regex geprüft.
+5. **Multi-Instance-Audit:** Advisory-Lock- & UNIQUE-Index-Tests vor
+   jedem horizontalen Ausbau.
+6. **GitHub-Hygiene:** Secrets nie committen (`FIRM_API_TOKEN`,
+   `DATABASE_URL`); `.env` ist in `.gitignore`; PRs mit Test-Lauf +
+   `npm audit` im Checklisten-Header.
+
+### 7.4 Fehlerhafte/bösartige Regeln in Produktion verhindern
+
+| Schicht | Mechanismus |
+| --- | --- |
+| Erzeugung | Whitelist-DSL, Klemmung, Risk-Gate (Score ≤ 0,9), CEO-Review |
+| Persistenz | nur über `upsertRuleSpec` (normalisiert); kein Direkt-UPDATE möglich ohne API-Gate |
+| Aktivierung | explizit (menschlich oder `REQUIRE_HUMAN_APPROVAL`), auditiert, versioniert, Rollback-fähig |
+| Ausführung | kompilierte Closures auf Zahlen — keine dynamische Codeausführung |
+| Broker | Guardrails + Kill-Switch als letzte Instanz — eine Regel kann nie über die Code-Limits hinaus |
+
+---
+
+## 8. Glossar (Kurz)
+
+| Begriff | Bedeutung |
+| --- | --- |
+| Makro-Zyklus | CEO/Research, LLM, 1×/h, schreibt `trade_rules` |
+| Mikro-Zyklus | Executor ohne LLM, pro Tick, liest ACTIVE-Regeln aus dem RAM |
+| RuleKey/Version | logische Regel & unveränderliche Version für Rollback |
+| RuleCache | kompilierte ACTIVE-Regeln im RAM |
+| Rolling-Serie | in-Memory-Kerzen (1m-Aggregation) für Indikatoren |
+| `latency_micros` | Bewertungszeit des Hot-Paths (ohne Fill) |
+| Feedback-Loop | `rule_executions` + `positions.rule_id` → CEO-Prompt |

@@ -44,6 +44,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "PostgreSQL-Setup-Hilfe",
     subtitle: "Sofort-Hilfe & Fehlersuche für Setup-Schritt 2 (v1.5.4)",
   },
+  architecture: {
+    file: "docs/ARCHITECTURE.md",
+    title: "Architektur: Makro/Mikro-Zyklen",
+    subtitle: "Event-Driven-Blaupause — Regeln, Latenz, Skalierung, Security (v1.6)",
+  },
 };
 
 export async function GET(req: Request) {
