@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
-import type { AgentRow, MissionRow } from "@/lib/types";
+import type { AgentRow, MissionRow, ProtocolEntryDto } from "@/lib/types";
 import WorkshopTab from "./workshop/WorkshopTab";
 import ThemeSwitcher from "./ThemeSwitcher";
 
@@ -834,22 +834,186 @@ function ReportsTab() {
   );
 }
 
-type TurnRow = {
+type AuditRow = {
   id: string;
-  at: string;
-  agent: string;
-  role: string;
-  decision: any;
-  source: string;
-  model: string;
-  latencyMs: number;
-  prompt: string | null;
-  rawResponse: string | null;
+  createdAt: string;
+  event: string;
+  level: string;
+  detail?: unknown;
 };
 
+const PROTOCOL_SOURCE_LABEL: Record<string, string> = {
+  ollama: "Modell",
+  fallback: "Regel-Engine",
+  monitor: "Marktmonitor",
+};
+
+function protocolDate(at: string): string {
+  const date = new Date(at);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" })
+    : "Zeit unbekannt";
+}
+
+function protocolLatency(latencyMs: number | null): string | null {
+  if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0) return null;
+  return `${(latencyMs / 1000).toFixed(1)} s`;
+}
+
+function protocolActorText(value: string | undefined, fallback: string): string {
+  const text = value?.trim();
+  return text && !["?", "unknown", "unbekannt"].includes(text.toLowerCase()) ? text : fallback;
+}
+
+function protocolActorName(entry: ProtocolEntryDto): string {
+  return protocolActorText(entry.actor?.name, "System");
+}
+
+function protocolActorRole(entry: ProtocolEntryDto): string {
+  return protocolActorText(entry.actor?.role, "SYSTEM");
+}
+
+function protocolHeaderMeta(entry: ProtocolEntryDto): string {
+  const source = entry.trace?.source
+    ? (PROTOCOL_SOURCE_LABEL[entry.trace.source] ?? entry.trace.source)
+    : null;
+  const latency = protocolLatency(entry.trace?.latencyMs ?? null);
+  return [protocolDate(entry.at), source, latency].filter((part): part is string => Boolean(part)).join(" · ");
+}
+
+function protocolLabel(entry: ProtocolEntryDto): string {
+  if (entry.kind === "turn") return entry.decision.type;
+  if (entry.kind === "analysis") return "ANALYSE";
+  if (entry.kind === "system") return "SYSTEM";
+  return "NACHRICHT";
+}
+
+function protocolBadgeClass(entry: ProtocolEntryDto): string {
+  if (entry.kind === "turn") {
+    if (entry.decision.type === "TRADE") return "bg-emerald-500/20 text-emerald-300";
+    if (entry.decision.type === "HOLD") return "bg-slate-600/40 text-slate-300";
+    if (entry.decision.type === "KILL") return "bg-red-500/30 text-red-300";
+    return "bg-sky-500/20 text-sky-300";
+  }
+  if (entry.kind === "analysis") return "bg-violet-500/20 text-violet-300";
+  if (entry.kind === "system") return "bg-amber-500/20 text-amber-300";
+  return "bg-slate-600/40 text-slate-300";
+}
+
+function analysisViewClass(view: "BULLISH" | "BEARISH" | "NEUTRAL" | null): string {
+  if (view === "BULLISH") return "bg-emerald-500/20 text-emerald-300";
+  if (view === "BEARISH") return "bg-red-500/20 text-red-300";
+  return "bg-slate-700/70 text-slate-300";
+}
+
+function protocolContent(entry: ProtocolEntryDto): string {
+  return entry.content.trim() || "Für diesen historischen Eintrag ist kein Text gespeichert.";
+}
+
+function ProtocolEntryCard({
+  entry,
+  isOpen,
+  onToggle,
+}: {
+  entry: ProtocolEntryDto;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const label = protocolLabel(entry);
+  const trace = entry.trace;
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/50">
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center gap-3 px-4 py-2 text-left"
+        aria-expanded={isOpen}
+      >
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${protocolBadgeClass(entry)}`}>
+          {label}
+        </span>
+        <span className="text-xs font-semibold text-slate-200">{protocolActorName(entry)}</span>
+        <span className="text-xs text-slate-500">{protocolActorRole(entry)}</span>
+        <span className="ml-auto text-xs text-slate-500">{protocolHeaderMeta(entry)}</span>
+        <span className="ml-3 text-slate-500">{isOpen ? "▾" : "▸"}</span>
+      </button>
+
+      {isOpen && (
+        <div className="space-y-3 border-t border-slate-800 px-4 py-3 text-xs">
+          {entry.kind === "turn" && (
+            <div>
+              <p className="mb-1 font-semibold text-slate-400">Entscheidung (geparst)</p>
+              <pre className="overflow-x-auto rounded bg-slate-950/60 p-2 font-mono text-emerald-300">
+                {JSON.stringify(entry.decision, null, 2)}
+              </pre>
+              {entry.content && entry.content !== entry.decision.reason && (
+                <p className="mt-2 whitespace-pre-wrap text-slate-300">{protocolContent(entry)}</p>
+              )}
+            </div>
+          )}
+
+          {entry.kind === "analysis" && (
+            <div className="space-y-2">
+              <p className="font-semibold text-slate-400">Analystenbericht</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${analysisViewClass(entry.analysis.view)}`}>
+                  {entry.analysis.view ?? "OHNE EINSTUFUNG"}
+                </span>
+                <span className="text-slate-400">
+                  Konfidenz: {entry.analysis.confidence != null
+                    ? `${(entry.analysis.confidence * 100).toFixed(0)} %`
+                    : "nicht protokolliert"}
+                </span>
+              </div>
+              {entry.analysis.thesis && (
+                <p className="rounded bg-slate-950/60 p-2 text-slate-200">{entry.analysis.thesis}</p>
+              )}
+              <p className="whitespace-pre-wrap rounded bg-slate-950/40 p-2 text-slate-300">{protocolContent(entry)}</p>
+            </div>
+          )}
+
+          {entry.kind === "system" && (
+            <div>
+              <p className="mb-1 font-semibold text-slate-400">Systemmeldung ({entry.messageType})</p>
+              <p className="whitespace-pre-wrap rounded bg-slate-950/40 p-2 text-slate-300">{protocolContent(entry)}</p>
+            </div>
+          )}
+
+          {entry.kind === "message" && (
+            <div>
+              <p className="mb-1 font-semibold text-slate-400">Nachricht ({entry.messageType})</p>
+              <p className="whitespace-pre-wrap rounded bg-slate-950/40 p-2 text-slate-300">{protocolContent(entry)}</p>
+            </div>
+          )}
+
+          {trace.rawResponse && (
+            <div>
+              <p className="mb-1 font-semibold text-slate-400">
+                Rohergebnis des Modells ({trace.model ?? "Modell nicht protokolliert"})
+              </p>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-2 font-mono text-slate-400">
+                {trace.rawResponse}
+              </pre>
+            </div>
+          )}
+
+          {trace.prompt && (
+            <details>
+              <summary className="cursor-pointer font-semibold text-slate-400">Vollständiger Prompt</summary>
+              <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-2 font-mono text-slate-400">
+                {trace.prompt}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProtocolTab() {
-  const [turns, setTurns] = useState<TurnRow[]>([]);
-  const [audit, setAudit] = useState<any[]>([]);
+  const [entries, setEntries] = useState<ProtocolEntryDto[]>([]);
+  const [audit, setAudit] = useState<AuditRow[]>([]);
   const [levelFilter, setLevelFilter] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loadingLog, setLoadingLog] = useState(true);
@@ -857,11 +1021,11 @@ function ProtocolTab() {
   const loadLog = useCallback(async () => {
     try {
       const res = await fetch(`/api/firm/log?limit=80${levelFilter ? `&level=${levelFilter}` : ""}`);
-      const json = await res.json();
-      setTurns(json.turns ?? []);
-      setAudit(json.audit ?? []);
+      const json = (await res.json()) as { entries?: ProtocolEntryDto[]; audit?: AuditRow[] };
+      setEntries(Array.isArray(json.entries) ? json.entries : []);
+      setAudit(Array.isArray(json.audit) ? json.audit : []);
     } catch {
-      /* ignore */
+      /* Protokoll ist optional; bestehende Einträge bleiben sichtbar. */
     } finally {
       setLoadingLog(false);
     }
@@ -886,70 +1050,25 @@ function ProtocolTab() {
       <section>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Agenten-Turns — vollständige Entscheidungskette
+            Protokoll — Turns, Analystenberichte und Systemmeldungen
           </h2>
-          <span className="text-xs text-slate-500">{turns.length} Einträge · Auto-Refresh 12 s</span>
+          <span className="text-xs text-slate-500">{entries.length} Einträge · Auto-Refresh 12 s</span>
         </div>
         {loadingLog ? (
           <p className="text-sm text-slate-400">Lade Protokoll…</p>
         ) : (
           <div className="space-y-2">
-            {turns.map((t) => {
-              const isOpen = expanded === t.id;
-              const status = t.decision?.type ?? "?";
-              return (
-                <div key={t.id} className="rounded-xl border border-slate-800 bg-slate-900/50">
-                  <button
-                    onClick={() => setExpanded(isOpen ? null : t.id)}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-left"
-                  >
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                      status === "TRADE" ? "bg-emerald-500/20 text-emerald-300"
-                      : status === "HOLD" ? "bg-slate-600/40 text-slate-300"
-                      : status === "KILL" ? "bg-red-500/30 text-red-300"
-                      : "bg-sky-500/20 text-sky-300"
-                    }`}>
-                      {status}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-200">{t.agent}</span>
-                    <span className="text-xs text-slate-500">{t.role}</span>
-                    <span className="ml-auto text-xs text-slate-500">
-                      {new Date(t.at).toLocaleString("de-DE")} · {t.source} · {(Number(t.latencyMs) / 1000).toFixed(1)} s
-                    </span>
-                    <span className="ml-3 text-slate-500">{isOpen ? "▾" : "▸"}</span>
-                  </button>
-                  {isOpen && (
-                    <div className="space-y-3 border-t border-slate-800 px-4 py-3 text-xs">
-                      <div>
-                        <p className="mb-1 font-semibold text-slate-400">Entscheidung (geparst)</p>
-                        <pre className="overflow-x-auto rounded bg-slate-950/60 p-2 font-mono text-emerald-300">
-                          {JSON.stringify(t.decision, null, 2)}
-                        </pre>
-                      </div>
-                      {t.rawResponse && (
-                        <div>
-                          <p className="mb-1 font-semibold text-slate-400">Rohergebnis des Modells ({t.model})</p>
-                          <pre className="max-h-40 overflow-auto rounded bg-slate-950/60 p-2 font-mono text-slate-400">
-                            {t.rawResponse}
-                          </pre>
-                        </div>
-                      )}
-                      {t.prompt && (
-                        <details>
-                          <summary className="cursor-pointer font-semibold text-slate-400">Vollständiger Prompt</summary>
-                          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-2 font-mono text-slate-400">
-                            {t.prompt}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {turns.length === 0 && (
+            {entries.map((entry) => (
+              <ProtocolEntryCard
+                key={entry.id}
+                entry={entry}
+                isOpen={expanded === entry.id}
+                onToggle={() => setExpanded(expanded === entry.id ? null : entry.id)}
+              />
+            ))}
+            {entries.length === 0 && (
               <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">
-                Noch keine Turns. Pipeline starten oder einen Agenten einzeln laufen lassen.
+                Noch keine Protokolleinträge. Pipeline, Markt-Tick oder Analystenzyklus starten.
               </p>
             )}
           </div>
@@ -974,11 +1093,15 @@ function ProtocolTab() {
           head={["Zeit", "Event", "Level", "Detail"]}
           rows={audit.map((a) => {
             const detail = JSON.stringify(a.detail ?? {});
+            const auditDetail = a.detail && typeof a.detail === "object" && !Array.isArray(a.detail)
+              ? a.detail as Record<string, unknown>
+              : {};
+            const reason = typeof auditDetail.reason === "string" ? auditDetail.reason : "";
             const explanation =
-              explainGuardrail(String(a.detail?.reason ?? "")) ??
+              explainGuardrail(reason) ??
               explainGuardrail(detail.slice(0, 120));
             return [
-              new Date(a.createdAt).toLocaleTimeString("de-DE"),
+              protocolDate(a.createdAt),
               a.event,
               <span
                 key={a.id}

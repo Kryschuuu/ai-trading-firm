@@ -20,6 +20,27 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [Unreleased]
+
+### Behoben
+
+- **Protokoll-Typen sauber getrennt:** `agent_messages` enthält nicht nur
+  Agentenentscheidungen, sondern auch `ANALYSIS`/`RECOMMENDATION` und
+  `MARKET_SCAN`. `GET /api/firm/log` liefert deshalb jetzt eine diskriminierte
+  `entries`-Timeline. Das Dashboard stellt Analystenberichte (z. B. Cassini,
+  Hubble) als Analyse mit Einschätzung/These dar und Systemmeldungen als solche
+  — nie mehr als leere „Entscheidung (geparst)“ mit `?` oder `NaN s`.
+- **Altbestand kompatibel:** fehlende historische Latenz/Quelle wird explizit
+  als `null` normalisiert und im UI ausgelassen; verwaiste Agenten und
+  Markt-Scans erhalten lesbare System-/Archiv-Attribution statt Platzhaltern.
+  Neue Kern- und Analysten-Einträge speichern zusätzlich einen Actor-Snapshot
+  sowie LLM-Trace (Quelle, Modell, Latenz, Prompt, Rohergebnis).
+- **API-Kompatibilität:** Das bestehende Feld `turns` bleibt erhalten, enthält
+  jetzt bewusst nur echte Agentenentscheidungen (z. B. für den Workshop).
+  Die vollständige gemischte Chronologie steht additiv in `entries`.
+
+---
+
 ## [1.5.4] — 2026-08-26 (aktuell)
 
 **Setup-Schritt 2 repariert: `initdb`-Erfolg wurde fälschlich als „Cluster

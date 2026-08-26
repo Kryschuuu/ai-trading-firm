@@ -15,14 +15,22 @@ import type {
 /**
  * Schritt 2 (Handbuch 6.2): EINEN Agenten gegen EINE Mission laufen lassen
  * und die Antwort prüfen — ersetzt das psql-SELECT auf agent_messages.
- * Zeigt das geparste Decision-JSON formatiert plus die letzten 3
- * Agenten-Nachrichten mit Quelle und Latenz.
+ * Zeigt das geparste Decision-JSON formatiert plus die letzten 3 echten
+ * Agenten-Turns mit Quelle und Latenz. Analysten- und Systemmeldungen stehen
+ * bewusst separat und lesbar im Protokoll-Tab.
  */
 
 const SOURCE_LABEL: Record<string, string> = {
   ollama: "Modell (ollama-kompatibel)",
   fallback: "Regel-Engine (Fallback)",
 };
+
+/** API normalisiert Latenzen auf Zahl|null; defensiv bleibt die UI trotzdem NaN-frei. */
+function formatLatency(latencyMs: number | null | undefined): string {
+  return typeof latencyMs === "number" && Number.isFinite(latencyMs) && latencyMs >= 0
+    ? `${(latencyMs / 1000).toFixed(1)} s`
+    : "—";
+}
 
 function DecisionField({
   name,
@@ -216,7 +224,7 @@ export default function AgentRunPanel({
                   {result.status}
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  {SOURCE_LABEL[result.source] ?? result.source} · Modell <code className="font-mono">{result.model}</code> · {(result.latencyMs / 1000).toFixed(1)} s
+                  {SOURCE_LABEL[result.source] ?? result.source} · Modell <code className="font-mono">{result.model}</code> · {formatLatency(result.latencyMs)}
                 </span>
                 {result.guardrail && (
                   <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
@@ -279,14 +287,14 @@ export default function AgentRunPanel({
         </div>
       </section>
 
-      {/* ── Letzte 3 Nachrichten ─────────────────────────────────── */}
+      {/* ── Letzte 3 echte Agenten-Turns ─────────────────────────── */}
       <section aria-labelledby="run-msgs-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
         <div className="mb-1 flex items-center">
-          <h3 id="run-msgs-title" className="text-sm font-bold text-slate-100">Letzte 3 Agenten-Nachrichten</h3>
+          <h3 id="run-msgs-title" className="text-sm font-bold text-slate-100">Letzte 3 Agenten-Turns</h3>
           <InfoTip
             id="run-msgs-title"
-            label="Letzte Agenten-Nachrichten"
-            text="Die drei neuesten Einträge aus agent_messages (Handbuch 6.2) — Name, Inhalt, Quelle und Latenz, automatisch formatiert."
+            label="Letzte Agenten-Turns"
+            text="Die drei neuesten echten Entscheidungen aus agent_messages (Handbuch 6.2) — Name, Inhalt, Quelle und Latenz, automatisch formatiert. Analystenberichte stehen im Protokoll als eigene Kategorie."
           />
         </div>
         <p className="mb-4 text-xs text-slate-500">Quelle „Regel-Engine“ heißt: Es antwortet gerade kein Modell — du testest die Pipeline, nicht die KI.</p>
@@ -317,8 +325,7 @@ export default function AgentRunPanel({
                   <span className="text-xs font-semibold text-slate-200">{t.agent}</span>
                   <span className="text-[11px] text-slate-500">{t.role}</span>
                   <span className="ml-auto text-[11px] text-slate-500">
-                    {new Date(t.at).toLocaleTimeString("de-DE")} · {SOURCE_LABEL[t.source ?? ""] ?? t.source ?? "—"} ·{" "}
-                    {t.latencyMs != null ? `${(Number(t.latencyMs) / 1000).toFixed(1)} s` : "—"}
+                    {new Date(t.at).toLocaleTimeString("de-DE")} · {SOURCE_LABEL[t.source ?? ""] ?? t.source ?? "—"} · {formatLatency(t.latencyMs)}
                   </span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-300">{t.content ?? t.decision?.reason ?? "(leere Nachricht)"}</p>
@@ -334,7 +341,7 @@ export default function AgentRunPanel({
                     </pre>
                     {t.rawResponse && (
                       <>
-                        <p className="mt-1.5 text-[11px] font-semibold text-slate-500">Rohergebnis des Modells ({t.model ?? "?"}):</p>
+                        <p className="mt-1.5 text-[11px] font-semibold text-slate-500">Rohergebnis des Modells ({t.model ?? "Modell nicht protokolliert"}):</p>
                         <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-slate-950 p-2 font-mono text-[11px] text-slate-400">
                           {t.rawResponse}
                         </pre>
