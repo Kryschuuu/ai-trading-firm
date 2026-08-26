@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyRuntimeLimits,
   getLimits,
+  missionSizedNotional,
   resetRuntimeLimits,
   RISK_LIMITS,
   validateOrder,
@@ -74,4 +75,33 @@ test("allowShort=false blockt Shorts; freigeschaltet laufen sie durch", () => {
   });
   assert.equal(shortOk.allowed, true);
   applyRuntimeLimits({ allowShort: false });
+});
+
+// ── Mission-spezifische Positionsgröße (v1.5.3) ─────────────────────────────
+
+test("Regression v1.5.3: missionsspezifisches maxPositionPct wird durchgesetzt", () => {
+  resetRuntimeLimits();
+  // 10.000 €, 5 % Stop, 2 % Risiko → Risikoformel will 4.000 € Notional,
+  // globales Code-Maximum (25 %) kappt auf 2.500 €. Die PENNY-Mission mit
+  // maxPositionPct=0.05 muss trotzdem auf 500 € begrenzt bleiben.
+  const equity = 10_000;
+  const withoutMissionCap = missionSizedNotional(equity, 0.05, 0.02, undefined, 0.5);
+  assert.equal(withoutMissionCap, 2_500, "ohne Missions-Cap zählt Risikoformel + globales Maximum");
+
+  const penny = missionSizedNotional(equity, 0.05, 0.02, 0.05, 0.5);
+  assert.equal(penny, equity * 0.05, "Missions-Cap 5 % muss die Obergrenze sein (500 €)");
+
+  const wideMission = missionSizedNotional(equity, 0.05, 0.02, 0.9, 0.5);
+  assert.equal(wideMission, 2_500, "Mission über Code-Ceiling wird auf das Code-Maximum geklemmt");
+
+  const broken = missionSizedNotional(equity, 0.05, 0.02, Number.NaN, 0.5);
+  assert.equal(broken, 2_500, "NaN-Cap fällt auf das globale Maximum zurück");
+});
+
+test("Regression v1.5.3: Riskformel kann die Mission überschreiten, Mission gewinnt", () => {
+  resetRuntimeLimits();
+  // 5 % Risiko + 5 % Stop → 10.000 € Notional; aber Missions-Cap 0.2 und
+  // globales Maximum 0.25 → effektiv 2.000 € (Mission gewinnt, Code bleibt Sandbox).
+  const n = missionSizedNotional(10_000, 0.05, 0.05, 0.2, 0.5);
+  assert.equal(n, 2_000);
 });

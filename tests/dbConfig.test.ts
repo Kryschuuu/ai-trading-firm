@@ -271,6 +271,65 @@ test("scripts/setup-cachyos.sh: Passwort-Interpolation ist quote-/injection-sich
   );
 });
 
+// ── v1.5.3: systemd-${PGROOT}-Vorfall + URL-Encoded-Passwort ────────────────
+
+test("scripts/setup-cachyos.sh: expandiert ${PGROOT} in ExecStart statt rohem String", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  // Der alte Vergleich verglich den UNEXPANDIERTEN ExecStart-String ('${PGROOT}/data')
+  // gegen /var/lib/postgres/data — die Ursache des Originalfehlers.
+  assert.ok(
+    script.includes("lib/pg-service.sh"),
+    "Setup-Script muss den systemd-Helfer einbinden"
+  );
+  assert.ok(
+    script.includes("pg_svc_datadir"),
+    "Setup-Script muss den Helper pg_svc_datadir nutzen"
+  );
+  assert.ok(
+    !/grep -oP -- '\(\?<=-D \)/.test(script),
+    "Der alte unexpandierte grep-Parser darf nicht zurückkommen"
+  );
+});
+
+test("scripts/setup-cachyos.sh: DATABASE_URL-URL-Encoded Passwort (Sonderzeichen)", () => {
+  const script = readFileSync(
+    resolve(process.cwd(), "scripts/setup-cachyos.sh"),
+    "utf8"
+  );
+  // @ : / % im Passwort brachen sonst die Connection-URI in psql/pg/drizzle.
+  assert.ok(
+    script.includes("DB_PASS_ENC"),
+    "Das Passwort muss vor dem URL-Bau encodiert werden"
+  );
+  assert.ok(
+    script.includes("@uri"),
+    "Die Encodierung muss via jq @uri erfolgen (jq-Pflichtpaket aus Schritt 1)"
+  );
+  assert.ok(
+    !script.includes("DATABASE_URL=\"postgresql://${DB_USER}:${DB_PASS}@"),
+    "Die rohe (nicht encodierte) Passwort-Interpolation ist verboten"
+  );
+});
+
+test("src/instrumentation.ts: ANALYST_INTERVAL_MIN steuert das Zyklusfenster", () => {
+  const ts = readFileSync(
+    resolve(process.cwd(), "src/instrumentation.ts"),
+    "utf8"
+  );
+  // v1.5.3: ANALYST_INTERVAL_MIN wurde nur geloggt — der Zyklus lief jede Minute.
+  assert.ok(
+    ts.includes("Math.floor(Date.now() / analystIntervalMs)"),
+    "Slot-Key muss aus dem Analysten-Intervall abgeleitet werden"
+  );
+  assert.ok(
+    ts.includes("Math.min(60_000, analystIntervalMs)"),
+    "Analysten-Ticker muss an ANALYST_INTERVAL_MIN gekoppelt sein"
+  );
+});
+
 // ── src/db/index.ts: Lazy-Init (v1.5.2) ─────────────────────────────────────
 
 test("src/db/index.ts: Import OHNE DATABASE_URL wirft nicht (next-build-fähig)", () => {

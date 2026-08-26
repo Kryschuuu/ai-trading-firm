@@ -10,6 +10,13 @@
 #
 set -euo pipefail
 
+# systemd-Helfer (Expansion von ${PGROOT} in ExecStart, Datadir-Auflösung).
+# KORRIGIERT (v1.5.3): ohne Expansion meldete der Sicherheitsgurt fälschlich
+#   „postgresql.service nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'“.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/pg-service.sh
+source "$SCRIPT_DIR/lib/pg-service.sh"
+
 VARIANT=""
 LLM_HOST="127.0.0.1"
 DB_NAME="trading_firm"
@@ -124,16 +131,20 @@ pg_dienst_stoppen() {
 
 # Sicherheitsgurt: Prüfen, ob der systemd-Dienst überhaupt in $PGDATA läuft.
 # Bei einem Drop-in mit eigenem PGDATA würde sonst der falsche Cluster geprüft.
-SVC_PGDATA="$(systemctl show -p ExecStart --value "$PG_SVC" 2>/dev/null \
-  | grep -oP -- '(?<=-D )\S+' | head -1 || true)"
+#
+# KORRIGIERT (v1.5.3): systemd liefert Umgebungsvariablen in ExecStart
+# UNEXPANDIERT — die Arch-Unit nutzt `-D ${PGROOT}/data`, `systemctl show`
+# gibt genau diesen String zurück. Der alte Vergleich gegen `/var/lib/
+# postgres/data` schlug deshalb fälschlich fehl. Jetzt wird die Unit-
+# Environment eingesammelt und der Pfad expandiert, bevor verglichen wird.
+SVC_PGDATA="$(pg_svc_datadir "$PG_SVC")"
 if [[ -z "$SVC_PGDATA" ]]; then
-  # Manche systemd-Versionen quoten die argv-Tokens ("-D" "/pfad").
-  SVC_PGDATA="$(systemctl show -p ExecStart --value "$PG_SVC" 2>/dev/null \
-    | grep -oP -- '(?<=-D ")[^"]+' | head -1 || true)"
-fi
-if [[ -n "$SVC_PGDATA" && "$SVC_PGDATA" != "$PGDATA" ]]; then
+  warn "Datenverzeichnis von $PG_SVC nicht ermittelbar — Sicherheitsgurt wird übersprungen."
+elif [[ "$(pg_norm_path "$SVC_PGDATA")" != "$(pg_norm_path "$PGDATA")" ]]; then
   warn "postgresql.service nutzt ein anderes Datenverzeichnis: '$SVC_PGDATA'"
   die "Erwartet war '$PGDATA' (Arch-Standard). Drop-in klären (systemctl cat $PG_SVC), dann erneut ausführen."
+else
+  ok "$PG_SVC läuft im erwarteten Datenverzeichnis $PGDATA."
 fi
 
 if pg_cluster_ok; then
@@ -194,6 +205,9 @@ fi
 if sudo -u postgres psql -X -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
   ok "Benutzer '${DB_USER}' existiert bereits."
   read -r -s -p "  Passwort von '${DB_USER}' für die .env: " DB_PASS; echo
+  # Auch hier nicht leer lassen: sonst entstünde eine DATABASE_URL ohne
+  # Passwort und psql/pg scheiterten später mit kryptischem Fehler.
+  [[ -n "$DB_PASS" ]] || die "Passwort für die .env darf nicht leer sein."
 else
   read -r -s -p "  Neues Passwort für '${DB_USER}': " DB_PASS; echo
   [[ -n "$DB_PASS" ]] || die "Leeres Passwort ist keine gute Idee."
@@ -209,7 +223,14 @@ SQL
   ok "Benutzer und Datenbank angelegt."
 fi
 
-DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}"
+# KORRIGIERT (v1.5.3): Passwort URL-encoden, bevor es in die Connection-URI
+# wandert. Zeichen wie @ : / % + & brechen sonst die DATABASE_URL in psql,
+# node-postgres und drizzle-kit (SQL-Quoting allein reicht für URLs nicht).
+# jq ist Pflichtpaket aus Schritt 1; Fallback bei fehlendem jq wäre ein
+# unencodeter String — deshalb bricht das Skript unten lieber klar ab.
+command -v jq >/dev/null || die "jq fehlt (Schritt 1 hat es installiert — bitte erneut ausführen)."
+DB_PASS_ENC="$(jq -rn --arg v "$DB_PASS" '$v | @uri')"
+DATABASE_URL="postgresql://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:5432/${DB_NAME}"
 psql "$DATABASE_URL" -c "SELECT 1;" &>/dev/null || die "Verbindung zur Datenbank schlägt fehl."
 ok "Datenbankverbindung steht."
 
@@ -250,9 +271,13 @@ else
   if [[ "$VARIANT" == "a" ]]; then
     M_BIG="qwen2.5:3b-instruct-q4_K_M"; M_SML="qwen2.5:3b-instruct-q4_K_M"
     M_COD="qwen2.5:3b-instruct-q4_K_M"; CTX=4096
+    # KORRIGIERT (v1.5.3): Executor = Schlankstes Modell (deckt sich mit
+    # .env.example; vorher wurde auch hier 3b verwendet).
+    M_EXEC="qwen2.5:1.5b-instruct-q4_K_M"
   else
     M_BIG="qwen2.5:14b-instruct-q4_K_M"; M_SML="qwen2.5:7b-instruct-q4_K_M"
     M_COD="qwen2.5-coder:7b";            CTX=8192
+    M_EXEC="qwen2.5:7b-instruct-q4_K_M"
   fi
 
   cat > .env <<ENV
@@ -272,7 +297,7 @@ MODEL_RESEARCH=${M_SML}
 MODEL_BACKTEST=${M_COD}
 MODEL_RISK=${M_SML}
 MODEL_APPROVER=${M_SML}
-MODEL_EXECUTOR=${M_SML}
+MODEL_EXECUTOR=${M_EXEC}
 ENV
   chmod 600 .env
   ok ".env geschrieben (Rechte 600)."

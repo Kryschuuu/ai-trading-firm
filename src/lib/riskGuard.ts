@@ -190,6 +190,34 @@ export function riskAdjustedSize(
   return Math.min(size, sizeCap);
 }
 
+/**
+ * KORRIGIERT (v1.5.3): Positionsgröße unter Berücksichtigung des
+ * MISSIONSSPEZIFISCHEN Positions-Caps.
+ *
+ * Vorher wurde nur `riskAdjustedSize()` (globales Code-Maximum) verwendet —
+ * `missions.maxPositionPct` stand lediglich im Prompt. Eine Mission, die
+ * „max 5 %“ fordert (PENNY-DESK), konnte so real 25 % des Kapitals binden.
+ *
+ * Sandbox-Prinzip: Die Mission darf NIE über das globale Code-Ceiling hinaus —
+ * effektive Obergrenze = min(Missions-Cap, globales Maximum). Ein fehlender/
+ * ungültiger Missionswert fällt auf das globale Maximum zurück.
+ */
+export function missionSizedNotional(
+  equity: number,
+  stopDistPct: number,
+  riskBudgetPct: number,
+  missionMaxPositionPct: number | null | undefined,
+  globalMaxPositionPct: number = RISK_LIMITS.maxPositionPct
+): number {
+  const riskSized = riskAdjustedSize(equity, stopDistPct, riskBudgetPct);
+  const mission = Number(missionMaxPositionPct);
+  const effectiveCapPct =
+    Number.isFinite(mission) && mission > 0
+      ? Math.min(mission, globalMaxPositionPct)
+      : globalMaxPositionPct;
+  return Math.min(riskSized, equity * effectiveCapPct);
+}
+
 /** True if the global kill switch is armed (in-memory circuit breaker). */
 let killSwitchArmed = false;
 export const killSwitch = {
