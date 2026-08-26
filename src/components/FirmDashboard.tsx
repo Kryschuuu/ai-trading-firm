@@ -9,13 +9,47 @@ import ThemeSwitcher from "./ThemeSwitcher";
 type ConfigEntry = {
   key: string;
   label: string;
-  unit: "%" | "x" | "count" | "bool" | "rr";
+  unit: "%" | "x" | "count" | "bool" | "rr" | "idx";
   description: string;
   value: number | boolean;
   min: number;
   max: number;
   locked: boolean;
   defaultValue: number | boolean;
+};
+
+/** Zustand des adaptiven Risk-Limit-Systems (GET /api/firm/risk/volatility). */
+type AdaptiveRiskStatus = {
+  regime: "NORMAL" | "ELEVATED" | "EXTREME";
+  enabled: boolean;
+  factor: number;
+  baseMaxRiskPerTrade: number;
+  effectiveMaxRiskPerTrade: number;
+  lastUpdate: string | null;
+  lastChange: string | null;
+  lastError: string | null;
+  stale: boolean;
+  reason: string;
+  indicators: {
+    name: string;
+    label: string;
+    value: number | null;
+    threshold: number;
+    available: boolean;
+    triggered: boolean;
+  }[];
+  events: {
+    at: string;
+    prevRegime: string;
+    regime: string;
+    factor: number;
+    baseMaxRiskPerTrade: number;
+    effectiveMaxRiskPerTrade: number;
+    triggered: string[];
+    reason: string;
+  }[];
+  config: Record<string, number | boolean>;
+  bounds: Record<string, [number, number]>;
 };
 
 type FirmData = {
@@ -28,6 +62,8 @@ type FirmData = {
   riskDefaults: Record<string, any>;
   riskCeilings: Record<string, [number, number]>;
   riskConfig: ConfigEntry[];
+  volatilityConfig: ConfigEntry[];
+  adaptiveRisk: AdaptiveRiskStatus | null;
   killSwitchArmed: boolean;
   killSwitches: any[];
   messages: any[];
@@ -51,6 +87,7 @@ type FirmData = {
 const defaultData: FirmData = {
   agents: [], missions: [], positions: [], proposals: [],
   auditLog: [], riskLimits: {}, riskDefaults: {}, riskCeilings: {}, riskConfig: [],
+  volatilityConfig: [], adaptiveRisk: null,
   killSwitchArmed: false,
   killSwitches: [], messages: [], ollama: { available: false, baseUrl: "", models: [] },
   scheduler: { enabled: false, lastTickAt: null },
@@ -1235,15 +1272,242 @@ function AgentsTab({
   );
 }
 
+function AdaptiveRiskPanel({ data }: { data: FirmData }) {
+  const a = data.adaptiveRisk;
+  const regimeStyle: Record<string, string> = {
+    NORMAL: "bg-emerald-500/20 text-emerald-300 border-emerald-700/50",
+    ELEVATED: "bg-amber-500/20 text-amber-300 border-amber-700/50",
+    EXTREME: "bg-red-500/20 text-red-300 border-red-700/50",
+  };
+  const regimeLabel: Record<string, string> = {
+    NORMAL: "Normal",
+    ELEVATED: "Erhöhte Volatilität",
+    EXTREME: "Extreme Volatilität",
+  };
+
+  return (
+    <section>
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+        Adaptives Risiko — volatilitätsgetriebene Limit-Anpassung
+      </h2>
+      {!a ? (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <p className="text-sm text-slate-400">
+            Noch keine Bewertung. Der nächste Monitor-Tick (≈60 s) startet das adaptive
+            System automatisch — oder löse manuell aus via{" "}
+            <code className="rounded bg-slate-800 px-1 py-0.5 text-xs text-slate-200">
+              POST /api/firm/risk/volatility
+            </code>
+            .
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {/* Regime + wirksames Limit */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${regimeStyle[a.regime] ?? regimeStyle.NORMAL}`}>
+                {regimeLabel[a.regime] ?? a.regime}
+              </span>
+              {a.stale && (
+                <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">stale</span>
+              )}
+            </div>
+            <div className="space-y-1 text-sm">
+              <p className="text-slate-400">
+                maxRiskPerTrade:{" "}
+                <span className="font-mono text-slate-500 line-through">
+                  {(a.baseMaxRiskPerTrade * 100).toFixed(2)} %
+                </span>{" "}
+                → <span className="font-mono font-bold text-emerald-300">{(a.effectiveMaxRiskPerTrade * 100).toFixed(2)} %</span>
+              </p>
+              <p className="text-xs text-slate-500">Faktor {a.factor} · Basis {a.baseMaxRiskPerTrade}</p>
+              <p className="text-xs text-slate-400">{a.reason}</p>
+              {a.lastUpdate && (
+                <p className="pt-1 text-[11px] text-slate-500">
+                  Aktualisiert {new Date(a.lastUpdate).toLocaleTimeString()}
+                  {a.lastChange && a.lastChange !== a.lastUpdate ? ` · letzte Änderung ${new Date(a.lastChange).toLocaleTimeString()}` : ""}
+                </p>
+              )}
+              {a.lastError && <p className="text-[11px] text-amber-400">Quelle: {a.lastError}</p>}
+            </div>
+          </div>
+
+          {/* Indikatoren */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Indikatoren</h3>
+            <table className="w-full text-left text-xs">
+              <tbody>
+                {a.indicators.map((ind) => (
+                  <tr key={ind.name} className="border-b border-slate-800/60 last:border-0">
+                    <td className="py-1.5 pr-2 font-medium text-slate-300">{ind.name}</td>
+                    <td className="py-1.5 pr-2 font-mono text-slate-400">
+                      {ind.value != null
+                        ? ind.name === "VIX" ? ind.value.toFixed(1) : `${(ind.value * 100).toFixed(2)} %`
+                        : "n/v"}
+                    </td>
+                    <td className="py-1.5 pr-2 font-mono text-slate-600">
+                      {ind.name === "VIX" ? ind.threshold : `${(ind.threshold * 100).toFixed(2)} %`}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {!ind.available ? (
+                        <span className="text-slate-600">—</span>
+                      ) : ind.triggered ? (
+                        <span className="font-bold text-amber-300">⚠ triggered</span>
+                      ) : (
+                        <span className="text-emerald-400">✓</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Letztes Event */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Letztes Trigger-Event</h3>
+            {a.events.length === 0 ? (
+              <p className="text-xs text-slate-500">Keine Ereignisse seit Prozessstart.</p>
+            ) : (
+              (() => {
+                const e = a.events[0];
+                return (
+                  <div className="space-y-1 text-xs text-slate-400">
+                    <p>
+                      <span className="font-mono text-slate-500">{e.prevRegime}</span> →{" "}
+                      <span className="font-bold text-slate-200">{e.regime}</span>{" "}
+                      <span className="font-mono">
+                        ({(e.baseMaxRiskPerTrade * 100).toFixed(2)} % → {(e.effectiveMaxRiskPerTrade * 100).toFixed(2)} %)
+                      </span>
+                    </p>
+                    <p className="text-slate-300">{e.reason}</p>
+                    <p className="text-slate-600">
+                      {new Date(e.at).toLocaleString()}
+                      {e.triggered.length > 0 && ` · Trigger: ${e.triggered.join(", ")}`}
+                    </p>
+                  </div>
+                );
+              })()
+            )}
+            <p className="mt-3 text-[11px] text-slate-600">
+              Vollständige Historie: <code className="text-slate-500">GET /api/firm/risk/volatility</code> und
+              Audit-Log <code className="text-slate-500">RISK_ADAPTIVE</code>.
+            </p>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+type VolSectionProps = {
+  data: FirmData;
+  drafts: Record<string, string>;
+  setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  saving: string | null;
+  save: (key: string, raw: string) => void;
+};
+
+function VolatilityConfigSection(props: VolSectionProps) {
+  const { data, drafts, setDrafts, saving, save } = props;
+  const rows = data.volatilityConfig ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <section>
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+        Volatilitäts-Schwellwerte &amp; Faktoren — zur Laufzeit änderbar
+      </h2>
+      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
+              <th className="px-4 py-2 font-semibold">Parameter</th>
+              <th className="px-4 py-2 font-semibold">Wirksam</th>
+              <th className="px-4 py-2 font-semibold">Fenster</th>
+              <th className="px-4 py-2 font-semibold">Ändern</th>
+              <th className="px-4 py-2 font-semibold">Bedeutung</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => {
+              const isPct = c.unit === "%";
+              const isBool = c.unit === "bool";
+              const fmtVal = isBool
+                ? (c.value ? "an" : "aus")
+                : isPct
+                  ? `${(Number(c.value) * 100).toFixed(2)} %`
+                  : String(c.value);
+              const fmtBound = (v: number) => (isPct ? `${v * 100}%` : String(v));
+              const draft = drafts[c.key] ?? "";
+              return (
+                <tr key={c.key} className="border-b border-slate-800/60 last:border-0">
+                  <td className="px-4 py-2 font-medium text-slate-200">{c.label}</td>
+                  <td className="px-4 py-2 font-bold text-emerald-300">{fmtVal}</td>
+                  <td className="px-4 py-2 text-xs text-slate-500">
+                    {fmtBound(c.min)} – {fmtBound(c.max)}
+                  </td>
+                  <td className="px-4 py-2">
+                    {isBool ? (
+                      <select
+                        value={String(Number(c.value) >= 0.5)}
+                        onChange={(e) => save(c.key, e.target.value)}
+                        disabled={saving === c.key}
+                        className="w-20 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-slate-200"
+                      >
+                        <option value="1">an</option>
+                        <option value="0">aus</option>
+                      </select>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder={String(isPct ? (Number(c.value) * 100).toFixed(2) : c.value)}
+                          value={draft}
+                          onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
+                          onKeyDown={(e) => e.key === "Enter" && draft !== "" && save(c.key, draft)}
+                          className="w-24 rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200"
+                        />
+                        {isPct && <span className="text-xs text-slate-500">%</span>}
+                        <button
+                          onClick={() => draft !== "" && save(c.key, draft)}
+                          disabled={saving === c.key || draft === ""}
+                          className="rounded bg-emerald-600/80 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-400">{c.description}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 rounded-lg border border-sky-700/50 bg-sky-950/30 px-4 py-3 text-xs text-sky-300">
+        Diese Parameter steuern das adaptive Risiko (Regime NORMAL/ELEVATED/EXTREME) und wirken ab dem
+        nächsten Tick (≈60 s) bzw. sofort bei Neubewertung — ohne Neustart. Jede Änderung wird im
+        Audit-Log als <code className="font-mono">CONFIG_CHANGED</code> (Namespace{" "}
+        <code className="font-mono">volatility</code>) protokolliert. Prozentwerte als Zahl eingeben
+        (z. B. 1 = 1 %).
+      </p>
+    </section>
+  );
+}
+
 function RiskTab({ data, onChanged }: { data: FirmData; onChanged: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const allConfig = [...data.riskConfig, ...(data.volatilityConfig ?? [])];
 
   async function save(key: string, rawValue: string) {
     setSaving(key);
     setMsg("");
-    const entry = data.riskConfig.find((c) => c.key === key);
+    const entry = allConfig.find((c) => c.key === key);
     const num =
       entry?.unit === "bool" ? (rawValue === "true" || rawValue === "1" ? 1 : 0) : Number(rawValue.replace(",", "."));
     const res = await apiFetch("/api/firm/config", {
@@ -1365,6 +1629,10 @@ function RiskTab({ data, onChanged }: { data: FirmData; onChanged: () => void })
           Prozentwerte werden als Zahl eingegeben (z. B. 30 für 30 %).
         </p>
       </section>
+
+      <AdaptiveRiskPanel data={data} />
+
+      <VolatilityConfigSection data={data} drafts={drafts} setDrafts={setDrafts} saving={saving} save={save} />
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">

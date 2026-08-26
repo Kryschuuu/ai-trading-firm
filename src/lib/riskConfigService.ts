@@ -12,8 +12,17 @@
  */
 import { db } from "@/db";
 import { riskConfig } from "@/db/schema";
-import { applyRuntimeLimits, getLimits, DEFAULT_LIMITS, LIMIT_CEILINGS, type RiskLimits } from "./riskGuard";
+import { applyRuntimeLimits, getBaseLimits, getLimits, DEFAULT_LIMITS, LIMIT_CEILINGS, type RiskLimits } from "./riskGuard";
 import { logAudit } from "./engine";
+import {
+  DEFAULT_VOLATILITY_CONFIG,
+  VOLATILITY_CONFIG_BOUNDS,
+  VOLATILITY_KEYS,
+  applyVolatilityConfig,
+  currentVolatilityConfig,
+  updateAdaptiveRisk,
+  type VolatilityConfig,
+} from "./adaptiveRisk";
 
 const GLOBAL = globalThis as typeof globalThis & { __riskCfgLoadedAt?: number };
 const RELOAD_TTL_MS = 10_000;
@@ -83,10 +92,26 @@ export async function refreshRuntimeLimits(force = false): Promise<void> {
   }
 }
 
-/** Effektive Limits + Ceiling-Fenster für das Dashboard. */
-export function effectiveConfigView() {
+export type ConfigEntryView = {
+  key: string;
+  label: string;
+  unit: "%" | "x" | "count" | "bool" | "rr" | "idx";
+  description: string;
+  value: number | boolean;
+  min: number;
+  max: number;
+  locked: boolean;
+  defaultValue: number | boolean;
+};
+
+/**
+ * Effektive Limits + Ceiling-Fenster für das Dashboard. Zwei Namensräume:
+ * `limits` (klassische Risk-Limits) und `volatility` (adaptives
+ * Volatilitäts-System, Keys `adp.*`).
+ */
+export function effectiveConfigView(): { limits: ConfigEntryView[]; volatility: ConfigEntryView[] } {
   const limits = getLimits();
-  return CONFIG_KEYS.map(({ key, label, unit, description }) => ({
+  const limitsView: ConfigEntryView[] = CONFIG_KEYS.map(({ key, label, unit, description }) => ({
     key,
     label,
     unit,
@@ -97,44 +122,112 @@ export function effectiveConfigView() {
     locked: key === "requireStopLoss",
     defaultValue: DEFAULT_LIMITS[key],
   }));
+
+  const cfg = currentVolatilityConfig();
+  const volView: ConfigEntryView[] = VOLATILITY_KEYS.map(({ key, field, label, unit, description }) => ({
+    key,
+    label,
+    unit,
+    description,
+    value: cfg[field],
+    min: VOLATILITY_CONFIG_BOUNDS[field][0],
+    max: VOLATILITY_CONFIG_BOUNDS[field][1],
+    locked: false,
+    defaultValue: DEFAULT_VOLATILITY_CONFIG[field],
+  }));
+
+  return { limits: limitsView, volatility: volView };
 }
 
 /**
- * Ändert einen Wert (Dashboard/API). Validiert gegen die Ceilings — außerhalb
- * des Fensters wird geklemmt statt abgelehnt, damit der Operator nie einen
- * halben Zustand hinterlässt. Jede Änderung landet revisionssicher im Audit-Log.
+ * KORRIGIERT (v1.7.0): Prozent-Units normalisieren. Das Dashboard sendet
+ * für Unit "%" die PROZENTZahl (Eingabe 30 = 30 %), die internen Limits
+ * speichern aber Bruchzahlen (0.30). Vorher fehlte die Division — eine
+ * Eingabe von 30 wurde auf das Code-Ceiling geklemmt und damit stumm
+ * verfälscht (z. B. maxPositionPct 30 → 0.5 statt 0.3).
+ */
+const asFraction = (num: number, unit: string): number => (unit === "%" ? num / 100 : num);
+
+/**
+ * Ändert einen Wert (Dashboard/API). Gültig für beide Namensräume:
+ *   - klassische Risk-Limits (Ceilings: LIMIT_CEILINGS in riskGuard.ts)
+ *   - Volatilitäts-System (Keys `adp.*`, Fenster: VOLATILITY_CONFIG_BOUNDS)
+ * Außerhalb des Fensters wird geklemmt statt abgelehnt, damit der Operator
+ * nie einen halben Zustand hinterlässt. Jede Änderung landet
+ * revisionssicher im Audit-Log.
  */
 export async function setConfigValue(key: string, value: number): Promise<{ ok: boolean; effective?: unknown; error?: string }> {
-  const known = CONFIG_KEYS.find((k) => k.key === key);
-  if (!known) return { ok: false, error: `Unbekannter Konfigurationsschlüssel: ${key}` };
-
   const num = Number(value);
   if (!Number.isFinite(num)) return { ok: false, error: "Wert ist keine Zahl" };
 
-  const before = getLimits()[known.key];
-  applyRuntimeLimits({ [key]: num } as Partial<RiskLimits>);
-  const after = getLimits()[known.key];
-  GLOBAL.__riskCfgLoadedAt = Date.now();
+  // ── Namensraum 1: klassische Risk-Limits ──
+  const known = CONFIG_KEYS.find((k) => k.key === key);
+  if (known) {
+    const fraction = asFraction(num, known.unit);
+    const before = getBaseLimits()[known.key];
+    applyRuntimeLimits({ [key]: fraction } as Partial<RiskLimits>);
+    const baseAfter = getBaseLimits()[known.key];
+    const after = getLimits()[known.key]; // ggf. weiter adaptiv reduziert
 
-  // KORRIGIERT (v1.6.1): Boolesche Limits als 0/1 statt "true"/"false"
-  // persistieren — value ist eine NUMERIC-Spalte (Postgres-Fehler 22P02).
-  await db
-    .insert(riskConfig)
-    .values({ key, value: toDbValue(after), description: known.description })
-    .onConflictDoUpdate({
-      target: riskConfig.key,
-      set: { value: toDbValue(after), updatedAt: new Date() },
-    });
+    await db
+      .insert(riskConfig)
+      .values({ key, value: toDbValue(baseAfter), description: known.description })
+      .onConflictDoUpdate({
+        target: riskConfig.key,
+        set: { value: toDbValue(baseAfter), updatedAt: new Date() },
+      });
+    GLOBAL.__riskCfgLoadedAt = Date.now();
 
-  if (String(before) !== String(after)) {
-    await logAudit("CONFIG_CHANGED", "WARN", {
-      key,
-      before,
-      after,
-      clamped: String(num) !== String(after),
-      requested: num,
-      source: "dashboard",
-    });
+    if (String(before) !== String(baseAfter)) {
+      await logAudit("CONFIG_CHANGED", "WARN", {
+        key,
+        before,
+        after: baseAfter,
+        effective: after,
+        clamped: String(fraction) !== String(baseAfter),
+        requested: num,
+        namespace: "limits",
+        source: "dashboard",
+      });
+    }
+    return { ok: true, effective: after };
   }
-  return { ok: true, effective: after };
+
+  // ── Namensraum 2: adaptives Volatilitäts-System (adp.*) ──
+  const volKey = VOLATILITY_KEYS.find((k) => k.key === key);
+  if (volKey) {
+    const fraction = asFraction(num, volKey.unit);
+    const before = currentVolatilityConfig()[volKey.field];
+    applyVolatilityConfig({ [volKey.field]: fraction } as Partial<Record<keyof VolatilityConfig, number | boolean>>);
+    const cfgAfter = currentVolatilityConfig();
+    const after = cfgAfter[volKey.field];
+
+    await db
+      .insert(riskConfig)
+      .values({ key, value: toDbValue(after), description: volKey.description })
+      .onConflictDoUpdate({
+        target: riskConfig.key,
+        set: { value: toDbValue(after), updatedAt: new Date() },
+      });
+    GLOBAL.__riskCfgLoadedAt = Date.now();
+
+    if (String(before) !== String(after)) {
+      await logAudit("CONFIG_CHANGED", "WARN", {
+        key,
+        before,
+        after,
+        clamped: String(fraction) !== String(after),
+        requested: num,
+        namespace: "volatility",
+        source: "dashboard",
+      });
+    }
+
+    // Mit der neuen Konfiguration sofort neu bewerten (Best-Effort; bei
+    // Netzwerk-Problem greift der nächste Tick innerhalb von 60 s).
+    void updateAdaptiveRisk({ force: true }).catch(() => {});
+    return { ok: true, effective: after };
+  }
+
+  return { ok: false, error: `Unbekannter Konfigurationsschlüssel: ${key}` };
 }

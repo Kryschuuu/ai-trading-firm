@@ -14,6 +14,7 @@ import { getOllamaStatus } from "@/lib/ollama";
 import { getBroker } from "@/lib/engine";
 import { getLimits, LIMIT_CEILINGS, DEFAULT_LIMITS, killSwitch } from "@/lib/riskGuard";
 import { effectiveConfigView, refreshRuntimeLimits } from "@/lib/riskConfigService";
+import { getAdaptiveRiskStatus } from "@/lib/adaptiveRisk";
 import { BROKER_REGISTRY } from "@/lib/broker";
 import { lastTickAt } from "@/lib/monitor";
 import { getQuoteSync } from "@/lib/marketData";
@@ -68,7 +69,12 @@ export async function GET() {
       riskLimits: getLimits(),
       riskDefaults: DEFAULT_LIMITS,
       riskCeilings: LIMIT_CEILINGS,
-      riskConfig: effectiveConfigView(),
+      riskConfig: effectiveConfigView().limits,
+      volatilityConfig: effectiveConfigView().volatility,
+      // Adaptives Risk-Limit-System: Regime, wirksames maxRiskPerTrade,
+      // Indikatorwerte + Trigger-Event-Historie (Details:
+      // GET /api/firm/risk/volatility).
+      adaptiveRisk: getAdaptiveRiskStatus(),
       killSwitchArmed: killSwitch.isArmed(),
       killSwitches: ksRows,
       ollama,

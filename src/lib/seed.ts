@@ -231,6 +231,18 @@ export async function ensureSeeded(): Promise<{ ok: boolean; reason?: string }> 
     ["dailyLossLimitPct", String(DEFAULT_LIMITS.dailyLossLimitPct), "Tagesverlust-Limit — Auto-Kill für den Tag"],
     ["takeProfitRR", String(DEFAULT_LIMITS.takeProfitRR), "Take-Profit als Vielfaches des Stop-Risikos"],
     ["atrStopMultiplier", String(DEFAULT_LIMITS.atrStopMultiplier), "ATR-Faktor für dynamische Stops"],
+    // Adaptives Risk-Limit-System (v1.7.0): Volatilitätsgetriebene
+    // Senkung von maxRiskPerTrade. Alle Schwellwerte/Faktoren zur Laufzeit
+    // änderbar (Dashboard/API), Fenster in adaptiveRisk.ts begrenzt.
+    ["adp.enabled", "1", "Adaptive Risikoreduktion an/aus (0/1)"],
+    ["adp.vixHigh", "30", "VIX-Schwelle für ELEVATED (primärer Trigger)"],
+    ["adp.vixExtreme", "40", "VIX-Schwelle für EXTREME"],
+    ["adp.atrHighPct", "0.01", "ATR-Schwelle (15-min) als Bruchteil des Kurses (0.01 = 1 %)"],
+    ["adp.bbwHighPct", "0.05", "Bollinger-Band-Breiten-Schwelle (20, 2σ) (0.05 = 5 %)"],
+    ["adp.retStdDevHighPct", "0.01", "Return-StdDev-Schwelle (20×15-min) pro Kerze (0.01 = 1 %)"],
+    ["adp.elevatedFactor", "0.5", "Faktor für maxRiskPerTrade im ELEVATED-Regime"],
+    ["adp.extremeFactor", "0.25", "Faktor für maxRiskPerTrade im EXTREME-Regime"],
+    ["adp.deescalateAfter", "3", "Anzahl ruhiger Ticks bis zur De-Eskalation"],
   ];
   for (const [key, value, description] of cfgRows) {
     const existing = await db.select().from(riskConfig).where(eq(riskConfig.key, key));

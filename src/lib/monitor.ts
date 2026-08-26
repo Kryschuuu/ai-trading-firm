@@ -21,6 +21,7 @@ import { getLimits, killSwitch } from "./riskGuard";
 import { DEFAULT_WATCHLIST, getQuote, refreshQuotes, getCandles } from "./marketData";
 import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
+import { updateAdaptiveRisk } from "./adaptiveRisk";
 import { realizedPnlToday, writeEquitySnapshot, pruneEquitySnapshots } from "./equity";
 
 const GLOBAL = globalThis as typeof globalThis & {
@@ -41,6 +42,14 @@ export type TickResult = {
   dailyLossKill: boolean;
   marketScan: boolean;
   errors: string[];
+  /** Zustand des adaptiven Risk-Systems nach diesem Tick (v1.7.0). */
+  adaptiveRisk: {
+    regime: "NORMAL" | "ELEVATED" | "EXTREME";
+    factor: number;
+    baseMaxRiskPerTrade: number;
+    effectiveMaxRiskPerTrade: number;
+    reason: string;
+  } | null;
 };
 
 /**
@@ -62,9 +71,27 @@ export function tick(forceScan = false): Promise<TickResult> {
 
 async function doTick(forceScan: boolean): Promise<TickResult> {
   await refreshRuntimeLimits();
+  const errors: string[] = [];
+
+  // Adaptives Risk-Limit: Volatilität bewerten und maxRiskPerTrade ggf.
+  // senken — vor der Positions-Prüfung, damit offene Orders gegen das
+  // frisch reduzierte Limit laufen. Fehler bleiben lokal (Fail-Safe).
+  let adaptiveRisk: TickResult["adaptiveRisk"] = null;
+  try {
+    const st = await updateAdaptiveRisk();
+    adaptiveRisk = {
+      regime: st.regime,
+      factor: st.factor,
+      baseMaxRiskPerTrade: st.baseMaxRiskPerTrade,
+      effectiveMaxRiskPerTrade: st.effectiveMaxRiskPerTrade,
+      reason: st.reason,
+    };
+  } catch (e) {
+    errors.push(`Adaptives-Risiko fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
+  }
+
   const limits = getLimits();
   const broker = await getBroker();
-  const errors: string[] = [];
   const stopsTriggered: TickResult["stopsTriggered"] = [];
 
   // --- 1) Kurse: offene Positionen zuerst, dann Watchlist ---
@@ -211,6 +238,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     dailyLossKill,
     marketScan,
     errors,
+    adaptiveRisk,
   };
 }
 

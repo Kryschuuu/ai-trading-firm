@@ -4,14 +4,19 @@ import { guardWrite } from "@/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
 
-/** Effektive Limits + das Code-Fenster, in dem sie änderbar sind. */
+/**
+ * Effektive Werte + das Code-Fenster, in dem sie änderbar sind.
+ * Zwei Namensräume:
+ *   config.limits     — klassische Risk-Limits (Ceilings: riskGuard.ts)
+ *   config.volatility — adaptives Volatilitäts-System (Keys `adp.*`)
+ */
 export async function GET() {
   await refreshRuntimeLimits(true);
   return NextResponse.json({
     ok: true,
     config: effectiveConfigView(),
     note:
-      "Werte sind zur Laufzeit änderbar, werden aber vom Code (LIMIT_CEILINGS in riskGuard.ts) geklemmt. requireStopLoss ist absichtlich gesperrt.",
+      "Werte sind zur Laufzeit änderbar, werden aber vom Code (LIMIT_CEILINGS in riskGuard.ts bzw. VOLATILITY_CONFIG_BOUNDS in adaptiveRisk.ts) geklemmt. requireStopLoss ist absichtlich gesperrt. Prozent-Units: Eingabe als Prozentzahl (30 = 30 %).",
   });
 }
 
