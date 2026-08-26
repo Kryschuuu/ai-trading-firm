@@ -27,6 +27,8 @@ import {
 import { and, eq, gte, sql } from "drizzle-orm";
 import { PaperBroker } from "./broker";
 import {
+  ADAPTIVE_STATE_MAX_AGE_MS,
+  applyAdaptiveRisk,
   getLimits,
   killSwitch,
   validateOrder,
@@ -452,11 +454,35 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
   try {
     const rows = await db.select().from(riskConfig);
     const raw: Record<string, number> = {};
+    let activeFactor: number | null = null;
+    let activeAtMs: number | null = null;
     for (const r of rows) {
       const n = Number(r.value);
-      if (Number.isFinite(n)) raw[r.key] = n;
+      if (!Number.isFinite(n)) continue;
+      if (r.key === "adp.activeFactor") activeFactor = n;
+      else if (r.key === "adp.activeAt") activeAtMs = n * 1000;
+      else raw[r.key] = n;
     }
     applyRuntimeLimits(raw as Partial<RiskLimits>);
+
+    // Adaptives Risk-Limit (v1.7.0): Der Main-Prozess persistiert den aktiven
+    // Volatilitäts-Faktor (adp.activeFactor / adp.activeAt). Ist er frisch,
+    // übernimmt der Mikro-Prozess die Reduktion, ohne selbst Märkte abfragen
+    // zu müssen (LLM- und netzwerk-freier Pfad bleibt erhalten). Abgelaufen
+    // (ADAPTIVE_STATE_MAX_AGE_MS) → Basis-Limit, kein uralter Faktor.
+    if (activeFactor != null && activeAtMs != null && activeFactor > 0 && activeFactor < 1) {
+      if (Date.now() - activeAtMs < ADAPTIVE_STATE_MAX_AGE_MS) {
+        applyAdaptiveRisk({
+          regime: "PERSISTED",
+          factor: activeFactor,
+          reason: "persistierter Faktor des Main-Prozesses (Volatilitäts-Engine)",
+          at: new Date(activeAtMs).toISOString(),
+          indicators: {},
+        });
+      } else {
+        applyAdaptiveRisk(null);
+      }
+    }
     G.__microLimitsLoadedAt = Date.now();
   } catch {
     /* DB nicht bereit → Code-Defaults bleiben wirksam */

@@ -1,4 +1,4 @@
-# Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.6)
+# Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine
 Trading-Firma, die strategische Intelligenz (LLM) von
@@ -430,7 +430,91 @@ Aktivierung. Kein Auto-Gate im Code — ein Mensch bleibt das Review-Gate.
 
 ---
 
-## 8. Glossar (Kurz)
+## 8. Adaptives Risk-Limit (v1.7.0): volatilitätsgetriebene Limit-Anpassung
+
+### 8.1 Problem
+
+`maxRiskPerTrade` war ein statischer Wert (2 %). In hochvolatilen Phasen
+(VIX-Spike, Bandbreiten-Expansion) trägt dieselbe Prozentzahl ein deutlich
+größeres absolutes Risiko. Die Anpassung musste vor jeder Re-Deployment
+manuell passieren — zu langsam und unsichtbar für die Agenten.
+
+### 8.2 Kaskade (Sandbox-Prinzip bleibt intact)
+
+```
+LIMIT_CEILINGS (hartkodiert, Rebuild)          ← absolutes Fenster [0.002 … 0.05]
+   └─ risk_config.maxRiskPerTrade (Basis)      ← Operator, Laufzeit, geklemmt
+        └─ adaptiver Faktor (adaptiveRisk.ts)  ← Markt, automatisch, ∈ (0,1]
+             → getLimits().maxRiskPerTrade     ← alle Order-Pfade (Engine,
+                                                   Mikro-Executor, Sizing)
+```
+
+Wichtige Invarianten (je eine Regressionstest-Gruppe):
+
+- **Nur senkend:** der Faktor wird auf (0, 1] geklemmt — Marktzustand kann
+  das Limit nie über das konfigurierte Basis-Limit anheben.
+- **Keine Kumulation:** Basis und Faktor sind getrennt gespeichert
+  (`baseLimits` vs. `adaptiveState`); jede DB-Neuladung rechnet
+  Basis × Faktor, nie reduzierte-Werte × Faktor.
+- **Fail-Open bei Datenfehlern:** Indikator ohne Daten triggert nie; bei
+  Gesamtfehlern bleibt der zuletzt wirksame Zustand (Risiko kann weder
+  wachsen noch „kaputt“ werden).
+- **Code-Boden gewinnt:** `maxRiskPerTrade` unterläuft nie
+  `LIMIT_CEILINGS.maxRiskPerTrade[0]` (0.002).
+
+### 8.3 Datenfluss pro Bewertung (≈60 s, Monitor-Tick)
+
+```
+Yahoo ^VIX (5-Min-Cache, 2 Hosts, stale-Fallback)
+Binance/Yahoo 15-min-Kerzen: SPY, QQQ, BTC  → ATR(14), BBW(20,2σ), Return-StdDev(20)
+        │  Korb-Indikatoren: Spitzenwert (max) über den Korb
+        ▼
+assessRegime(readings, cfg)            ← reine Funktion, unit-getestet
+        │  NORMAL | ELEVATED | EXTREME (deterministische Matrix, s. 8.4)
+        ▼
+RegimeStateMachine.update(candidate)   ← Hysterese: Eskalation sofort,
+        │                                  De-Eskalation nach N ruhigen Ticks
+        ▼
+riskGuard.applyAdaptiveRisk(state)     ← currentLimits = base × factor (geklemmt)
+        ▼
+Event (Ring-Buffer 50) + audit_log RISK_ADAPTIVE + Persistenz adp.activeFactor/At
+```
+
+Einträge in `runAgentTurn` halten den Zustand frische
+(`ensureAdaptiveRiskFresh`, Single-Flight, Min-Interval 45 s) und legen die
+Schicht „ADAPTIVES-RISIKO“ in den Turn-Trace.
+
+### 8.4 Regime-Matrix (Defaults)
+
+| VIX | ATR>1 % | BBW>5 % | StdDev>1 % | Regime | Faktor |
+| --- | --- | --- | --- | --- | --- |
+| < 30 | 0–1 triggern | … | … | NORMAL | 1.0 |
+| < 30 | ≥ 1 triggert | | | ELEVATED | 0.5 |
+| < 30 | 3 triggern | | | EXTREME | 0.25 |
+| ≥ 30 | 0 | | | ELEVATED | 0.5 |
+| ≥ 30 | ≥ 1 | | | EXTREME (belegt) | 0.25 |
+| ≥ 40 | egal | | | EXTREME (direkt) | 0.25 |
+
+Alle Schwellwerte/Faktoren = `adp.*` in `risk_config`, geklemmt gegen
+`VOLATILITY_CONFIG_BOUNDS`, änderbar via Dashboard/`PUT /api/firm/config`
+— Neubewertung erfolgt automatisch (nächster Tick) bzw. sofort per
+`POST /api/firm/risk/volatility`.
+
+### 8.5 Multi-Prozess & Observability
+
+- **Mikro-Executor (`npm run micro`):** konsumiert den persistierten Faktor
+  (`adp.activeFactor` + `adp.activeAt`, Frischegrenze 15 min) — bleibt damit
+  LLM- und netzwerk-frei.
+- **API:** `GET /api/firm/risk/volatility` (Regime, Basis/effectives Limit,
+  Faktor, Indikatorwerte mit Schwellen/Trigger-Status, Event-Ring-Buffer,
+  Config + Bounds, `lastUpdate`/`lastChange`/`stale`),
+  `POST …/risk/volatility` (Forced-Update), `GET /api/firm → adaptiveRisk`.
+- **Persistenz:** `audit_log`-Events `RISK_ADAPTIVE` (dauerhaft) neben dem
+  In-Memory-Buffer (50 Events, prozesslokal).
+
+---
+
+## 9. Glossar (Kurz)
 
 | Begriff | Bedeutung |
 | --- | --- |
@@ -441,3 +525,7 @@ Aktivierung. Kein Auto-Gate im Code — ein Mensch bleibt das Review-Gate.
 | Rolling-Serie | in-Memory-Kerzen (1m-Aggregation) für Indikatoren |
 | `latency_micros` | Bewertungszeit des Hot-Paths (ohne Fill) |
 | Feedback-Loop | `rule_executions` + `positions.rule_id` → CEO-Prompt |
+| Adaptiver Faktor | ∈ (0,1]-Multiplikator auf `maxRiskPerTrade` (NUR senkend), aus dem Volatilitäts-Regime |
+| Regime (NORMAL/ELEVATED/EXTREME) | Klassifizierung der Marktvolatilität (VIX/ATR/BBW/StdDev) |
+| Hysterese / Anti-Flapping | Eskalation sofort, De-Eskalation erst nach N ruhigen Ticks |
+| Fail-Open (Daten) | Indikator ohne Daten triggert nie — Risiko kann nie steigen |

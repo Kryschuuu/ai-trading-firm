@@ -864,36 +864,26 @@ ALPACA_BASE_URL=https://paper-api.alpaca.markets     # niemals versehentlich liv
 
 ## 9. Guardrails ändern
 
-Die harten Limits stehen in `src/lib/riskGuard.ts`.
+Risikolimits folgen einer **dreistufigen Kaskade** — nur die äußere Schicht
+erfordert einen Rebuild:
 
-```ts
-export const RISK_LIMITS = {
-  maxPositionPct: 0.25,
-  maxRiskPerTrade: 0.02,
-  maxNotionalPerOrder: 0,        // 0 = aus; sonst harte Obergrenze in Kontowährung
-  maxConcurrentPositions: 5,
-  allowShort: false,
-  maxLeverage: 1,
-  requireStopLoss: true,
-  defaultStopLossPct: 0.05,
-  maxEquityDrawdownPct: 0.15,
-} as const;
-```
-
-Ablauf einer Änderung:
+| Schicht | Ort | Änderung | Sinn |
+| --- | --- | --- | --- |
+| **1. Code-Ceilings** | `LIMIT_CEILINGS` in `src/lib/riskGuard.ts` | **Neubau + Neustart** | absolutes Fenster (z. B. `maxRiskPerTrade` ∈ [0.002, 0.05]), `requireStopLoss` nicht abschaltbar — auch eine kompromittierte DB kann es nicht aufweichen |
+| **2. Basis-Limits** | DB `risk_config` (Dashboard Risk-Tab / `PUT /api/firm/config`) | **zur Laufzeit, ohne Neustart** | z. B. `maxRiskPerTrade` 0.02 (2 %) — geklemmt auf Schicht 1, jede Änderung im Audit-Log |
+| **3. Adaptiver Marktfaktor** | `src/lib/adaptiveRisk.ts` (auto, VIX/ATR/BBW/StdDev) | **automatisch, Schwellwerte zur Laufzeit** | multipliziert das Basis-Limit mit Faktor ∈ (0, 1] — kann nur senken, nie erhöhen (Kap. 9.3) |
 
 ```bash
-nano src/lib/riskGuard.ts
-npm run build
-sudo systemctl restart ai-trading-firm
+# Wirksame Limits (Schicht 2 × 3) + Basis + Fenster auf einen Blick
+curl -s localhost:3369/api/firm | jq '{riskLimits, adaptiveRisk}'
 
-# Nachprüfen, dass wirklich der neue Wert gilt
-curl -s localhost:3369/api/firm | jq '.riskLimits'
+# Adaptives System im Detail (Indikatoren, Trigger-Events, Konfiguration)
+curl -s localhost:3369/api/firm/risk/volatility | jq '.adaptive'
 ```
 
-**Dass ein Neubau nötig ist, ist das Merkmal, nicht der Fehler.** Eine Risikogrenze, die
-sich zur Laufzeit per Klick oder SQL ändern lässt, kann auch von einem fehlgeleiteten
-Prozess geändert werden. Der Kompilierschritt ist deine Zwangspause zum Nachdenken.
+**Was trotzdem ein Neubau bleibt:** die Ceilings der Schicht 1. Eine
+Sicherheitsgrenze, die im laufenden Betrieb aufgeweicht werden könnte, ist
+keine — der Kompilierschritt ist deine Zwangspause zum Nachdenken.
 
 ### 9.1 Sinnvolle Verschärfungen für den Anfang
 
@@ -927,6 +917,75 @@ WHERE id='<proposal-id>';"
 
 Für den Einstieg ist dieser Modus die ehrlichste Variante: Du siehst eine Woche lang, was
 die Firma *tun würde*, ohne dass sie es tut.
+
+### 9.3 Adaptives Risk-Limit (v1.7.0): Volatilitätsgetriebene Limit-Anpassung
+
+`maxRiskPerTrade` ist **nicht mehr eine feste Zahl**. Ein eigener Bewertungszyklus
+(läuft mit jedem Monitor-Tick, ≈60 s) misst die Marktvolatilität und senkt das
+wirksame Limit automatisch, sobald die Schwellwerte überschritten werden —
+**ohne Rebuild, ohne Neustart, und es kann nur nach unten wirken.**
+
+**Indikatoren & Standard-Schwellwerte** (alle änderbar, Keys `adp.*`):
+
+| Indikator | Quelle | Standard-Schwelle | Bedeutung |
+| --- | --- | --- | --- |
+| **VIX** (primär) | Yahoo `^VIX`, 5-Min-Cache | ≥ 30 → ELEVATED, ≥ 40 → EXTREME | etablierter Angst-Index der Aktienmärkte |
+| **ATR (14)** | 15-min-Kerzen, Korb SPY/QQQ/BTC (Spitzenwert) | > 1 % des Kurses | durchschnittliche wahre Kerzenweite |
+| **Bollinger Band Width (20, 2σ)** | dito | > 5 % Bandbreite | „Bands aufgeplatzt“-Signal |
+| **Return-StdDev (20×15-min)** | dito | > 1 % pro Kerze | rohe Kursschwingung, schnellste Reaktion |
+
+**Regime & Faktoren:**
+
+| Regime | Bedingung | Faktor (Standard) | Wirkung bei Basis 2 % |
+| --- | --- | --- | --- |
+| NORMAL | keine Schwelle überschritten | 1.0 | 2.00 % |
+| ELEVATED | VIX ≥ 30 oder ≥ 1 Korb-Indikator | 0.5 | 1.00 % |
+| EXTREME | VIX ≥ 40 oder (VIX ≥ 30 + ≥ 1 Korb-Indikator) oder alle 3 Korb-Indikatoren | 0.25 | 0.50 % |
+
+**Verhalten, das man kennen sollte:**
+
+- **Eskalation sofort, De-Eskalation gedämpft:** nach `adp.deescalateAfter`
+  konsekutiven ruhigen Ticks (Standard 3) kehrt das Limit zum Basiswert zurück —
+  schnelles Hin-und-Her-Wackeln des Limits (Flapping) ist damit ausgeschlossen.
+- **Fehlende Daten = Fail-Open:** VIX-Quellen-Ausfall oder leere Kerzen
+  triggern nie; das zuletzt wirksame (ggf. reduzierte) Limit bleibt bestehen.
+  Fehlende Daten können das Risiko also nie erhöhen.
+- **Mikro-Executor-Prozess:** der Main-Prozess persistiert den aktiven Faktor
+  (`adp.activeFactor`/`adp.activeAt`); der separate `npm run micro`-Prozess
+  übernimmt ihn, solange er jünger als 15 Minuten ist.
+
+**Beobachten (Agenten & Monitoring):**
+
+```bash
+# Status, Indikatorwerte, Trigger-Event-Historie, Konfiguration
+curl -s localhost:3369/api/firm/risk/volatility | jq '.adaptive'
+
+# Sofortige Neubewertung erzwingen (z. B. nach Schwellwert-Änderung)
+curl -s -X POST localhost:3369/api/firm/risk/volatility \
+  -H 'Content-Type: application/json' -d '{"force":true}' | jq '.adaptive'
+
+# Dauerhafte Historie: Audit-Log-Events RISK_ADAPTIVE (wann/warum geändertes Limit)
+psql "$DATABASE_URL" -c "SELECT created_at, level, detail FROM audit_log WHERE event='RISK_ADAPTIVE' ORDER BY created_at DESC LIMIT 10;"
+```
+
+`GET /api/firm` liefert zusätzlich `adaptiveRisk` (kurzer Status inkl.
+`effectiveMaxRiskPerTrade`), und jeder Agenten-Turn zeigt die Schicht
+„ADAPTIVES-RISIKO“ mit Regime, wirksamem Limit und Begründung im Protokoll.
+
+**Schwellwerte/Faktoren zur Laufzeit ändern** (wirken ab dem nächsten Tick):
+
+```bash
+# VIX-Schwelle auf 35 anheben, ELEVATED-Faktor auf 0.4 (40 % statt 50 % Reduktion)
+curl -s -X PUT localhost:3369/api/firm/config \
+  -H 'Content-Type: application/json' -d '{"key":"adp.vixHigh","value":35}'
+curl -s -X PUT localhost:3369/api/firm/config \
+  -H 'Content-Type: application/json' -d '{"key":"adp.elevatedFactor","value":0.4}'
+```
+
+Alle `adp.*`-Werte werden gegen `VOLATILITY_CONFIG_BOUNDS` geklemmt
+(z. B. Faktoren ≥ 0.02, `vixHigh` ∈ [5, 80]) und im Audit-Log als
+`CONFIG_CHANGED` (Namespace `volatility`) protokolliert. Im Dashboard:
+Reiter **Risiko** → Panels „Adaptives Risiko“ und „Volatilitäts-Schwellwerte“.
 
 ---
 

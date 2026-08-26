@@ -31,6 +31,7 @@ import { localReason } from "./ollama";
 import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
+import { ensureAdaptiveRiskFresh, getAdaptiveRiskStatus } from "./adaptiveRisk";
 import { getHouseView } from "./analysts";
 import { writeEquitySnapshot } from "./equity";
 import { startOfBerlinDay } from "./time";
@@ -279,8 +280,31 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
 
   // Laufzeit-Limits frisch aus der DB (geklemmt auf Code-Ceilings).
   await refreshRuntimeLimits(true);
+
+  // Adaptives Risk-Limit (v1.7.0): Volatilitäts-Bewertung frische halten.
+  // Normalerweise hat der Monitor-Tick (60 s) sie gerade aktualisiert; bei
+  // Staleness/Erststart folgt hier eine sofortige Neubewertung (Single-Flight,
+  // Fehler bleiben lokal — letzter Zustand bleibt wirksam).
+  let adaptiveState: ReturnType<typeof getAdaptiveRiskStatus>;
+  try {
+    await ensureAdaptiveRiskFresh();
+    adaptiveState = getAdaptiveRiskStatus();
+  } catch (e) {
+    adaptiveState = getAdaptiveRiskStatus();
+    console.warn("[engine] Adaptives-Risiko-Update fehlgeschlagen:", e instanceof Error ? e.message : e);
+  }
+
   const limits: RiskLimits = getLimits();
-  const trace: TraceStep[] = [step("CONFIG", true, `Limits geladen (maxPos=${(limits.maxPositionPct * 100).toFixed(0)}%, dailyLoss=${(limits.dailyLossLimitPct * 100).toFixed(1)}%, shorts=${limits.allowShort ? "an" : "aus"})`)];
+  const trace: TraceStep[] = [
+    step("CONFIG", true, `Limits geladen (maxPos=${(limits.maxPositionPct * 100).toFixed(0)}%, dailyLoss=${(limits.dailyLossLimitPct * 100).toFixed(1)}%, shorts=${limits.allowShort ? "an" : "aus"})`),
+    step(
+      "ADAPTIVES-RISIKO",
+      adaptiveState ? adaptiveState.regime !== "EXTREME" : true,
+      adaptiveState
+        ? `Regime ${adaptiveState.regime} → maxRiskPerTrade ${(adaptiveState.effectiveMaxRiskPerTrade * 100).toFixed(2)} % (Basis ${(adaptiveState.baseMaxRiskPerTrade * 100).toFixed(2)} % × ${adaptiveState.factor}) — ${adaptiveState.reason}`
+        : "Keine Bewertung vorhanden — Basis-Limit aktiv (Fail-Open)"
+    ),
+  ];
 
   const broker = await getBroker();
 

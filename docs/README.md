@@ -263,20 +263,35 @@ plus Analysten Kepler (Technical), Cassini (Macro), Hubble (News), Sagan
 
 ---
 
-## 6. Die harten Grenzen (Auslieferungszustand)
+## 6. Die harten Grenzen (dreistufige Kaskade)
 
-Aus `src/lib/riskGuard.ts` — Änderungen erfordern **Neubau und Neustart**, und das ist
-Absicht: eine Sicherheitsgrenze, die man im laufenden Betrieb per Klick ändern kann, ist keine.
+Risikolimits folgen einer **Kaskade** (`src/lib/riskGuard.ts` +
+`src/lib/adaptiveRisk.ts`) — nur die äußere Schicht ist hart im Code:
 
-| Grenze | Wert | Bedeutung |
-| --- | --- | --- |
-| `maxPositionPct` | 0.25 | max. 25 % des Kapitals in einer Position |
-| `maxRiskPerTrade` | 0.02 | max. 2 % Kapitalrisiko pro Trade |
-| `maxConcurrentPositions` | 5 | nie mehr als 5 offene Positionen |
-| `allowShort` | false | Leerverkäufe komplett gesperrt |
-| `maxLeverage` | 1 | kein Hebel |
-| `requireStopLoss` | true | Order ohne Stop-Loss wird abgelehnt |
-| `maxEquityDrawdownPct` | 0.15 | ab 15 % Drawdown zieht der Kill-Switch automatisch |
+```
+1. Code-Ceilings (hartkodiert, Rebuild nötig)   ← LIMIT_CEILINGS: absolutes Fenster
+   2. Basis-Limits (runtime, Dashboard/API)      ← risk_config, z. B. maxRiskPerTrade 0.02
+      3. adaptiver Marktfaktor (runtime, auto)   ← Volatilität: VIX/ATR/BBW/StdDev → Faktor ∈ (0, 1]
+           → wirksames maxRiskPerTrade (alle Order-Pfade)
+```
+
+- **Ceilings/Floors** (z. B. `maxRiskPerTrade` ∈ [0.002, 0.05],
+  `requireStopLoss` immer an) bleiben bewusst im Code — auch eine
+  kompromittierte DB kann sie nicht aufweichen.
+- **Basis-Limits** (Auslieferungszustand): `maxPositionPct` 0.25,
+  `maxRiskPerTrade` 0.02, `maxConcurrentPositions` 5, `allowShort` false,
+  `maxLeverage` 1, `requireStopLoss` true, `maxEquityDrawdownPct` 0.15 —
+  zur Laufzeit änderbar im Risk-Tab / via `PUT /api/firm/config`
+  (geklemmt, audit-protokolliert, **ohne Neustart**).
+- **Adaptives Risk-Limit (v1.7.0):** Das wirksame `maxRiskPerTrade` senkt
+  sich automatisch in hochvolatilen Phasen — Regime NORMAL/ELEVATED/EXTREME
+  aus **VIX (≥ 30 / ≥ 40, primärer Trigger)**, **ATR % (15-min, > 1 %)**,
+  **Bollinger Band Width (> 5 %)** und **Return-StdDev (> 1 %/Kerze)**;
+  Standard-Faktoren 0.5 bzw. 0.25 (2 % → 1 % → 0.5 %). Schwellwerte/Faktoren
+  (`adp.*`) sind zur Laufzeit konfigurierbar, De-Eskalation mit Hysterese
+  gegen Flapping, fehlende Daten sind Fail-Open (Risiko steigt nie).
+  Status/Trigger-Events für Agenten & Monitoring:
+  `GET /api/firm/risk/volatility` (Details in [HANDBUCH, Kap. 9](HANDBUCH.md)).
 
 ---
 
@@ -293,7 +308,9 @@ Absicht: eine Sicherheitsgrenze, die man im laufenden Betrieb per Klick ändern 
 | `GET` | `/api/firm/report?period=day\|week\|month` | KPI-Report |
 | `GET` | `/api/firm/equity?range=day\|week\|month\|all` | Equity-Kurve |
 | `GET` | `/api/firm/log?limit=50&level=WARN` | Lesbare Protokoll-Timeline (`entries`: Turns, Analystenberichte, Systemmeldungen) + gefilterte Turn-Liste (`turns`) + Audit |
-| `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (wird auf Code-Ceilings geklemmt) |
+| `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (Limits + Volatilitäts-Parameter `adp.*`, geklemmt) |
+| `GET` | `/api/firm/risk/volatility` | Adaptives Risk-System: Regime, wirksames maxRiskPerTrade, Indikatoren, Trigger-Event-Historie |
+| `POST` | `/api/firm/risk/volatility` | `{force:true}` — Volatilitäts-Neubewertung sofort erzwingen |
 | `GET/POST/PUT` | `/api/firm/missions` | Missionen lesen/anlegen/bearbeiten (Workshop; Budgets gegen Code-Ceilings) |
 | `PUT` | `/api/firm/agents` | `system_prompt` eines Agenten ändern — wirken sofort, Guardrails unberührt |
 | `GET/POST` | `/api/firm/rules` | Regelwerk (alle Versionen + Feedback) lesen bzw. validierte Regel anlegen (DRAFT) |

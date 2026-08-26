@@ -9,6 +9,12 @@
  * änderbar übers Dashboard) geladen werden — ABER nur innerhalb der absoluten
  * Code-Grenzen (LIMIT_CEILINGS). Selbst eine kompromittierte Datenbank kann die
  * Grenzen nicht über das Code-Maximum hinaus aufweichen.
+ *
+ * ADAPTIVER ÜBERLAGERUNGSSCHICHT (v1.7.0): maxRiskPerTrade ist zusätzlich
+ * volatilitätsgetrieben anpassbar — src/lib/adaptiveRisk.ts multipliziert das
+ * konfigurierte BASIS-Limit mit einem Faktor ∈ (0, 1] (can only lower, never
+ * raise). Die dreistufige Kaskade bleibt die Sandbox:
+ *   Code-Ceilings → Basis-Limit (DB/Dashboard) → adaptiver Marktfaktor.
  */
 
 export type RiskLimits = {
@@ -65,11 +71,88 @@ export const LIMIT_CEILINGS: Record<keyof RiskLimits, [min: number, max: number]
   atrStopMultiplier: [0.5, 6],
 };
 
-/** Die aktuell wirksamen Limits (Start: DEFAULT, dann DB-Overlay, immer geklemmt). */
-let currentLimits: RiskLimits = { ...DEFAULT_LIMITS };
+/**
+ * ADAPTIVE-RISK-ÜBERLAGERUNG (v1.7.0)
+ *
+ * Das wirksame maxRiskPerTrade = Basis-Limit × adaptiver Faktor.
+ * - BASIS-LIMIT: DEFAULT → DB/Dashboard (applyRuntimeLimits), immer geklemmt.
+ *   Der Wert 0.02 ist damit nur noch STARTWERT, keine harte Code-Grenze.
+ * - ADAPTIVER FAKTOR: von src/lib/adaptiveRisk.ts gesetzt (Volatilitäts-
+ *   Regime). Darf NUR senken (Faktor ∈ (0, 1]) — das Risiko kann durch
+ *   Marktzustand nie über das konfigurierte Basis-Limit steigen.
+ *
+ * Die Trennung in baseLimits/currentLimits verhindert Kumulation:
+ * Jede DB-Neuladung rechnet die Reduktion aus dem FRESCHEN Basiswert,
+ * nie aus dem bereits reduzierten Wert.
+ */
+export type AdaptiveRegime = "NORMAL" | "ELEVATED" | "EXTREME" | "PERSISTED";
 
+/**
+ * `PERSISTED` = Zustand aus der DB übernommen (Mikro-Executor-Prozess ohne
+ * eigenen Marktzugriff). Für die Berechnung zählt dort nur der Faktor.
+ */
+export type AdaptiveRiskState = {
+  regime: AdaptiveRegime;
+  /** 0 < factor ≤ 1 — Multiplikator auf das Basis-Limit maxRiskPerTrade. */
+  factor: number;
+  reason: string;
+  at: string;
+  indicators: Record<string, number | null>;
+};
+
+/** Max. Alter eines persistierten adaptiven Faktors (Micro-Prozess-Sicht). */
+export const ADAPTIVE_STATE_MAX_AGE_MS = 15 * 60_000;
+
+let baseLimits: RiskLimits = { ...DEFAULT_LIMITS };
+let currentLimits: RiskLimits = { ...DEFAULT_LIMITS };
+let adaptiveState: AdaptiveRiskState | null = null;
+
+/** maxRiskPerTrade nach Anwendung des adaptiven Faktors (Boden = Code-Minimum). */
+function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
+  const floor = LIMIT_CEILINGS.maxRiskPerTrade[0];
+  // Faktor > 1 wäre risikosteigernd — das System darf per Marktzustand
+  // nie über das konfigurierte Basis-Limit hinaus wirken.
+  const f = Number.isFinite(factor) ? Math.min(Math.max(factor, 0), 1) : 1;
+  return { ...limits, maxRiskPerTrade: Math.max(limits.maxRiskPerTrade * f, floor) };
+}
+
+/** currentLimits = baseLimits + (ggf.) aktive adaptive Reduktion. */
+function recomputeCurrent(): RiskLimits {
+  currentLimits = adaptiveState
+    ? applyFactorToRisk(baseLimits, adaptiveState.factor)
+    : { ...baseLimits };
+  return currentLimits;
+}
+
+/** Die konfigurierten Basis-Limits (ohne adaptive Marktreduktion). */
+export function getBaseLimits(): Readonly<RiskLimits> {
+  return baseLimits;
+}
+
+/**
+ * Die aktuell wirksamen Limits (Basis + adaptive Reduktion). Alle
+ * Order-Pfade (Engine, Mikro-Executor, Guardrails, Sizing) lesen von hier.
+ */
 export function getLimits(): Readonly<RiskLimits> {
   return currentLimits;
+}
+
+/**
+ * Wendet den aktiven Volatilitäts-Faktor an (von adaptiveRisk.ts aufgerufen).
+ * `null` hebt die Reduktion auf. Boden bleibt das absolute Code-Minimum
+ * aus LIMIT_CEILINGS. Liefert die wirksamen Limits.
+ */
+export function applyAdaptiveRisk(state: AdaptiveRiskState | null): RiskLimits {
+  adaptiveState =
+    state != null && Number.isFinite(state.factor) && state.factor > 0
+      ? { ...state, factor: Math.min(state.factor, 1) }
+      : null;
+  return recomputeCurrent();
+}
+
+/** Aktive adaptive Reduktion (oder null), z. B. für Observability. */
+export function getAdaptiveRiskState(): Readonly<AdaptiveRiskState> | null {
+  return adaptiveState ? { ...adaptiveState } : null;
 }
 
 /**
@@ -77,7 +160,7 @@ export function getLimits(): Readonly<RiskLimits> {
  * genau hier liegt die "Code entscheidet"-Garantie des Runtime-Tunings.
  */
 export function applyRuntimeLimits(raw: Partial<RiskLimits>) {
-  const next: RiskLimits = { ...currentLimits };
+  const next: RiskLimits = { ...baseLimits };
   for (const key of Object.keys(DEFAULT_LIMITS) as (keyof RiskLimits)[]) {
     const v = raw[key];
     if (v === undefined || v === null) continue;
@@ -93,14 +176,18 @@ export function applyRuntimeLimits(raw: Partial<RiskLimits>) {
     const [min, max] = LIMIT_CEILINGS[key];
     (next[key] as number) = Math.min(Math.max(num, min), max);
   }
-  currentLimits = next;
-  return currentLimits;
+  baseLimits = next;
+  return recomputeCurrent();
 }
 
-/** Zurück auf Werkseinstellung. */
+/**
+ * Zurück auf Werkseinstellung (Basis). Die aktive adaptive Marktreduktion
+ * bleibt bewusst erhalten — sie beschreibt den Marktzustand, keine
+ * Operator-Einstellung.
+ */
 export function resetRuntimeLimits() {
-  currentLimits = { ...DEFAULT_LIMITS };
-  return currentLimits;
+  baseLimits = { ...DEFAULT_LIMITS };
+  return recomputeCurrent();
 }
 
 // Rückwärtskompatibel: bisheriger Zugriffspunkt im Code.

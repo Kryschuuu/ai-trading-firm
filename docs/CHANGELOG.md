@@ -20,6 +20,110 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.7.0] — 2026-08-26
+
+**Adaptives Risk-Limit-System: `maxRiskPerTrade` senkt sich automatisch in
+hochvolatilen Marktphasen — ohne Rebuild, ohne Neustart, zur Laufzeit
+konfigurierbar und für Agenten/Monitoring beobachtbar.**
+
+### Neu: `src/lib/adaptiveRisk.ts` (Kernmodul)
+
+- **Vier Volatilitätsindikatoren** mit klaren, zur Laufzeit änderbaren
+  Schwellwerten (Keys `adp.*` in `risk_config`):
+  1. **VIX** (primärer Trigger, Yahoo `^VIX`, 5-Min-Cache): ≥ 30 → ELEVATED,
+     ≥ 40 → EXTREME;
+  2. **ATR (14)** auf 15-min-Kerzen, Korb-Spitzenwert über
+     SPY/QQQ/BTC — Standard > 1 % des Kurses;
+  3. **Bollinger Band Width (20, 2σ)** — Standard > 5 % Bandbreite;
+  4. **Return-Standardabweichung (20 × 15-min)** — Standard > 1 % pro Kerze.
+  Die beiden neuen Indikator-Funktionen (`bollingerBandWidthPct`,
+  `returnStdDevPct`) sind reine, unit-getestete Funktionen in `indicators.ts`.
+- **Dreistufige Regime-Logik** (deterministisch, `assessRegime()`):
+  EXTREME, wenn VIX ≥ 40 **oder** (VIX ≥ 30 **und** ≥ 1 Korb-Indikator)
+  **oder** alle drei Korb-Indikatoren; ELEVATED, wenn VIX ≥ 30 **oder**
+  ≥ 1 Korb-Indikator; sonst NORMAL.
+- **Dynamische Anpassung ohne Rebuild:** das wirksame
+  `maxRiskPerTrade` = konfiguriertes Basis-Limit × Regime-Faktor
+  (Standard: ELEVATED 0.5 → 2 % auf 1 %, EXTREME 0.25 → 0.5 %). Der Faktor
+  liegt immer in (0, 1] — das System kann per Marktzustand **nur senken**,
+  nie erhöhen. Der Boden bleibt das absolute Code-Minimum (0.002).
+- **Anti-Flapping (schnelle Volatilitätswechsel):** Eskalation sofort
+  (sichere Richtung), De-Eskalation erst nach `adp.deescalateAfter`
+  konsekutiven ruhigen Bewertungen (Standard 3 ≈ 3 min). Implementiert als
+  reine, getestete `RegimeStateMachine`.
+- **Fehlende Daten (Fail-Open):** ein Indikator ohne Daten triggert nie
+  (VIX-Timeout, leere Kerzen, NaN) — Reduktionen können ausbleiben, Risiko
+  kann nie steigen. Der letzte wirksame Zustand bleibt bei Fehler bestehen.
+- **Laufzeit-Konfiguration ohne Neustart:** alle Schwellwerte und Faktoren
+  sind im Risk-Tab des Dashboards bzw. via `PUT /api/firm/config`
+  (Keys `adp.*`) änderbar; Klemmung gegen `VOLATILITY_CONFIG_BOUNDS`.
+- **Multi-Prozess:** der aktive Faktor wird persistiert
+  (`adp.activeFactor` / `adp.activeAt`, Frische 15 min), damit der separate
+  Mikro-Executor-Prozess (`npm run micro`) die Reduktion ohne eigenen
+  Marktzugriff übernimmt.
+
+### Neu: Observability für Agenten & Monitoring
+
+- **`GET /api/firm/risk/volatility`** — Regime, Basis-/effektives
+  `maxRiskPerTrade`, Faktor, alle Indikatorwerte mit Schwellen und
+  Trigger-Status, Ring-Buffer der letzten 50 Trigger-Events (wann/warum),
+  aktive Konfiguration + erlaubtes Fenster, `lastUpdate`/`lastChange`/`stale`.
+- **`POST /api/firm/risk/volatility`** — sofortige Neubewertung erzwingen
+  (Token + Rate-Limit wie die anderen Schreib-Endpunkte).
+- **Audit-Log:** Event `RISK_ADAPTIVE` (WARN bei EXTREME) bei jeder
+  Regime-/Limit-Änderung — dauerhafte Historie neben dem In-Memory-Buffer.
+- **`GET /api/firm`** liefert zusätzlich `adaptiveRisk` (Status) und
+  `volatilityConfig` (Parameter + Fenster); `GET /api/firm/config` ist
+  nun namespace-getrennt (`config.limits` / `config.volatility`).
+- **Agenten-Turn-Trace:** neue Schicht „ADAPTIVES-RISIKO“ zeigt pro Turn
+  Regime, wirksames Limit und Begründung im Protokoll.
+- **Monitor-Tick** bewertet bei jedem Durchlauf (60 s) die Volatilität;
+  `TickResult` enthält jetzt den `adaptiveRisk`-Zustand.
+- **Dashboard:** Risk-Tab zeigt Regime-Badge (grün/gelb/rot), Basis-→
+  wirksames Limit, Indikator-Tabelle und letztes Trigger-Event; neue
+  Sektion „Volatilitäts-Schwellwerte & Faktoren“ (laufzeitänderbar).
+
+### Behoben
+
+- **Prozent-Eingaben im Config-API wurden verfälscht:** `PUT /api/firm/config`
+  nahm für Unit `%` die Prozentzahl (Eingabe 30) als Bruchteil (30.0) an und
+  klemmte sie auf das Code-Ceiling — z. B. `maxPositionPct` 30 % → 0.5 statt
+  0.3. Jetzt wird Unit `%` korrekt mit ÷ 100 normalisiert (regressionstestbar).
+
+### Architektur (Sandbox-Prinzip, dreistufige Kaskade)
+
+```
+Code-Ceilings (LIMIT_CEILINGS, hartkodiert)
+  └─ Basis-Limit (risk_config, Dashboard/API — Operator)
+       └─ adaptiver Marktfaktor (adaptiveRisk.ts — VIX/ATR/BBW/StdDev)
+            → wirksames maxRiskPerTrade (getLimits(), alle Order-Pfade)
+```
+
+`0.02` ist damit nur noch STARTWERT des konfigurierten Basis-Limits; die
+harten Grenzen (Ceilings/Floors) bleiben bewusst im Code.
+
+### Getestet
+
+- **43 neue Tests** (`npm test` → 235 grün): Unit-Tests je Indikator
+  (exakte Werte, Monotonie, unzureichende Daten, NaN/negative Werte),
+  komplette Regime-Entscheidungs-Matrix, Hysterese-Sequenzen (inkl.
+  schneller Wechsel/Flapping-Schutz), Misskonfigurations-Schutz
+  (vixExtreme < vixHigh), Faktor-Klemmung (nie > 1, Code-Boden),
+  DB-Neulade-Kumulations-Regression, Integrationstests mit simulierten
+  Marktlagen (VIX 35 → 0.01, VIX 45 → 0.005, Korb-Sturm, VIX-Timeout
+  Fail-Open, leere Kerzen, Laufzeit-Schwellwertwechsel ohne Neustart,
+  Min-Interval/Single-Flight, Observability-Status + Event-Historie).
+- `npm run typecheck`, `npm run lint` und `npm run build` fehlerfrei.
+
+### Migrationshinweis
+
+Kein Schema-Bruch — `risk_config` wird nur um `adp.*`-Zeilen ergänzt
+(Seed-`POST /api/seed` rüstet nach; `drizzle-kit push` bleibt no-op).
+Neu in der DB: `adp.activeFactor` / `adp.activeAt` (werden automatisch
+vom System geschrieben — nicht manuell bearbeiten).
+
+---
+
 ## [1.6.1] — 2026-08-26
 
 **Bugfix-Release: `drizzle-kit push` bricht ab (42601), Risiko-Config-Save

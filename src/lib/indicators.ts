@@ -42,6 +42,56 @@ export function rsi(values: number[], period = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
+/**
+ * Bollinger-Band-Breite (Bandwidth) als Anteil des mittleren Kurses:
+ * (Oberband − Unterband) / SMA = 2 × mult × σ / SMA.
+ *
+ * Die Bandbreite misst, wie breit das Preisband ist — ein etablierter
+ * "Volatility Squeeze"/-Expansion-Indikator: enge Bänder → niedrige
+ * Volatilität, aufgerissene Bänder → hoch. Liefert null, wenn zu wenig
+ * Daten oder der Mittelkurs nicht sinnvoll (> 0) ist.
+ */
+export function bollingerBandWidthPct(
+  closes: number[],
+  period = 20,
+  mult = 2
+): number | null {
+  if (!Array.isArray(closes) || closes.length < period || period < 2 || mult <= 0) return null;
+  const slice = closes.slice(-period);
+  const mean = slice.reduce((a, b) => a + b, 0) / period;
+  if (!Number.isFinite(mean) || mean <= 0) return null;
+  // Populations-Standardabweichung (÷ n) — konsistent, deterministisch,
+  // und bei Bands um den SMA die übliche Konvention.
+  const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+  const sd = Math.sqrt(Math.max(variance, 0));
+  const width = (2 * mult * sd) / mean;
+  return Number.isFinite(width) && width >= 0 ? width : null;
+}
+
+/**
+ * Standardabweichung der Perioden-Returns der letzten N Perioden
+ * (als Dezimalzahl pro Periode, z. B. 0.01 = 1 % pro Kerze).
+ *
+ * Direkte Maßzahl der Kursschwingung ohne Glättung — reagiert schneller
+ * als ATR, weil jede Periode direkt eingeht. null bei unzureichender
+ * Historie oder nicht-sinnvollen Kursen (≤ 0).
+ */
+export function returnStdDevPct(closes: number[], n = 20): number | null {
+  if (!Array.isArray(closes) || closes.length < n + 1 || n < 2) return null;
+  const slice = closes.slice(-(n + 1));
+  const returns: number[] = [];
+  for (let i = 1; i < slice.length; i++) {
+    const prev = slice[i - 1];
+    const cur = slice[i];
+    if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0) return null;
+    returns.push((cur - prev) / prev);
+  }
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
+  const sd = Math.sqrt(Math.max(variance, 0));
+  return Number.isFinite(sd) ? sd : null;
+}
+
 /** Average True Range in Prozent des letzten Kurses. */
 export function atrPct(candles: Candle[], period = 14): number | null {
   if (candles.length < period + 1) return null;
