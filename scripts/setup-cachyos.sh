@@ -96,44 +96,115 @@ ok "Node.js $(node --version)"
 
 # ------------------------------------------------------------ 2. PostgreSQL
 info "Schritt 2/6 — PostgreSQL"
-if [[ -f /var/lib/postgres/data/PG_VERSION ]]; then
-  ok "PostgreSQL-Datenverzeichnis bereits initialisiert."
-else
-  if [[ ! -d /var/lib/postgres/data ]]; then
-    warn "Datenverzeichnis /var/lib/postgres/data existiert nicht."
-  elif [[ -z "$(ls -A /var/lib/postgres/data 2>/dev/null)" ]]; then
-    warn "Datenverzeichnis ist leer — nicht initialisiert."
-  else
-    warn "Datenverzeichnis existiert, ist aber nicht initialisiert (kein PG_VERSION)."
-    warn "Verzeichnis enthält:"
-    ls -1 /var/lib/postgres/data 2>/dev/null | sed 's/^/  /'
-    warn "Dies kann passieren, wenn das postgresql-Paket ein leeres Datenverzeichnis vorgelegt hat."
-    if ask "Verzeichnis aufräumen und neu initialisieren?"; then
-      run sudo rm -rf /var/lib/postgres/data/*
-    fi
+
+PGDATA="/var/lib/postgres/data"
+PG_SVC="postgresql.service"
+
+# Bezeichner hart validieren — sie landen als psql-Variablen (:\"var\") in SQL
+# und dürfen deshalb nur aus sicheren Zeichen bestehen.
+[[ "$DB_USER" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || die "Ungültiger DB-Benutzername: '$DB_USER' (erlaubt: a-z, 0-9, _, beginnt mit Buchstabe oder _)."
+[[ "$DB_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$ ]] || die "Ungültiger DB-Name: '$DB_NAME' (erlaubt: a-zA-Z, 0-9, _, beginnt mit Buchstabe oder _)."
+
+# Ein Cluster ist erst brauchbar, wenn die globalen Katalogdateien existieren.
+# Genau der fehlende pg_filenode.map erzeugt den bekannten Fehler:
+#   FATAL: could not open file "global/pg_filenode.map": No such file or directory
+pg_cluster_ok() {
+  [[ -f "$PGDATA/PG_VERSION" && -f "$PGDATA/global/pg_control" && -f "$PGDATA/global/pg_filenode.map" ]]
+}
+
+pg_dienst_stoppen() {
+  # 'activating' abfangen: systemd-Auto-Restart-Schleifen (Restart=on-failure)
+  # laufen als ActiveState=activating, nicht als active.
+  local state
+  state="$(systemctl show -p ActiveState --value "$PG_SVC" 2>/dev/null || true)"
+  if [[ "$state" == "active" || "$state" == "activating" || "$state" == "reloading" ]]; then
+    run sudo systemctl stop "$PG_SVC" || true
   fi
-  if ask "Jetzt initdb ausführen?"; then
-    run sudo -u postgres initdb -D /var/lib/postgres/data --locale=C.UTF-8 --encoding=UTF8
+}
+
+# Sicherheitsgurt: Prüfen, ob der systemd-Dienst überhaupt in $PGDATA läuft.
+# Bei einem Drop-in mit eigenem PGDATA würde sonst der falsche Cluster geprüft.
+SVC_PGDATA="$(systemctl show -p ExecStart --value "$PG_SVC" 2>/dev/null \
+  | grep -oP -- '(?<=-D )\S+' | head -1 || true)"
+if [[ -z "$SVC_PGDATA" ]]; then
+  # Manche systemd-Versionen quoten die argv-Tokens ("-D" "/pfad").
+  SVC_PGDATA="$(systemctl show -p ExecStart --value "$PG_SVC" 2>/dev/null \
+    | grep -oP -- '(?<=-D ")[^"]+' | head -1 || true)"
+fi
+if [[ -n "$SVC_PGDATA" && "$SVC_PGDATA" != "$PGDATA" ]]; then
+  warn "postgresql.service nutzt ein anderes Datenverzeichnis: '$SVC_PGDATA'"
+  die "Erwartet war '$PGDATA' (Arch-Standard). Drop-in klären (systemctl cat $PG_SVC), dann erneut ausführen."
+fi
+
+if pg_cluster_ok; then
+  ok "PostgreSQL-Cluster unter $PGDATA vollständig."
+else
+  if [[ -d "$PGDATA" && -n "$(ls -A "$PGDATA" 2>/dev/null)" ]]; then
+    warn "Datenverzeichnis $PGDATA ist UNVOLLSTÄNDIG (kein global/pg_filenode.map)."
+    warn "Das ist die Ursache für: could not open file \"global/pg_filenode.map\"."
+    warn "Inhalt:"
+    ls -1A "$PGDATA" 2>/dev/null | sed 's/^/      /'
   else
-    die "Ohne initialisierte Datenbank geht es nicht weiter."
+    warn "Datenverzeichnis $PGDATA existiert nicht oder ist leer."
+  fi
+  # WICHTIG: Dienst zuerst stoppen. Ein aktiver/restartender postgresql.service
+  # (Restart=on-failure) kann sonst genau WÄHREND initdb starten und einen halb
+  # initialisierten Cluster als lauffähig ansehen — die Ursache des Originalfehlers.
+  pg_dienst_stoppen
+  if ask "Cluster neu initialisieren? (Vorhandene Daten in $PGDATA gehen verloren)"; then
+    run sudo install -d -o postgres -g postgres "$(dirname "$PGDATA")"
+    run sudo find "$PGDATA" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    run sudo -u postgres mkdir -p "$PGDATA"
+    run sudo -u postgres initdb -D "$PGDATA" --locale=C.UTF-8 --encoding=UTF8 \
+      --data-checksums --auth-local=peer --auth-host=scram-sha-256
+  else
+    die "Ohne vollständig initialisiertes Cluster geht es nicht weiter."
   fi
 fi
 
-systemctl is-active --quiet postgresql || run sudo systemctl enable --now postgresql
-sleep 1
-systemctl is-active --quiet postgresql || die "PostgreSQL startet nicht — 'journalctl -u postgresql' prüfen."
-ok "PostgreSQL läuft."
+pg_cluster_ok || die "Cluster nach initdb weiterhin unvollständig (PG_VERSION/global/*). initdb fehlgeschlagen?"
 
-if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
+# Dienst starten — und WIRKLICH auf Bereitschaft warten (pg_isready),
+# nicht bloß 'sleep 1' + is-active: systemd meldet Type=forking-Dienste
+# lange als 'active', bevor der Server Connections annimmt.
+if ! systemctl is-active --quiet "$PG_SVC"; then
+  run sudo systemctl enable --now "$PG_SVC" || die "systemctl start fehlgeschlagen — 'journalctl -u $PG_SVC' prüfen."
+fi
+info "Warte auf PostgreSQL-Bereitschaft (max. 30 s)…"
+PG_READY=0
+for _ in $(seq 1 30); do
+  if pg_isready -q -t 1 || pg_isready -q -t 1 -h 127.0.0.1; then PG_READY=1; break; fi
+  sleep 1
+done
+if (( ! PG_READY )); then
+  warn "PostgreSQL nimmt nach 30 s keine Verbindungen an. Letzte Logzeilen:"
+  sudo journalctl -u "$PG_SVC" -n 15 --no-pager 2>/dev/null | sed 's/^/      /' || true
+  die "PostgreSQL nicht bereit. Logs oben prüfen, dann dieses Skript erneut ausführen — es erkennt und repariert halb initialisierte Cluster jetzt selbst."
+fi
+ok "PostgreSQL läuft und nimmt Verbindungen an."
+
+# Harte SQL-Verifikation als Superuser, BEVOR Benutzer/Datenbank angelegt werden.
+# (Vorher verschluckte ein if/grep den psql-Fehler und das Skript fragte munter
+#  weiter Passwörter ab, obwohl gar kein Server erreichbar war.)
+if ! sudo -u postgres psql -X -tAc "SELECT 1" &>/dev/null; then
+  die "Superuser-Verbindung scheitert (sudo -u postgres psql). \
+'journalctl -u $PG_SVC -n 50' prüfen; bei defektem Cluster dieses Skript erneut ausführen."
+fi
+
+if sudo -u postgres psql -X -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
   ok "Benutzer '${DB_USER}' existiert bereits."
   read -r -s -p "  Passwort von '${DB_USER}' für die .env: " DB_PASS; echo
 else
   read -r -s -p "  Neues Passwort für '${DB_USER}': " DB_PASS; echo
   [[ -n "$DB_PASS" ]] || die "Leeres Passwort ist keine gute Idee."
-  sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
-CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';
-CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
-GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
+  # Injection-/Quote-sicher: Werte gehen als psql-Variablen rein, :\"var\"/
+  # :'var' macht daraus korrekt maskierte Identifier bzw. Literale. Ein '
+  # im Passwort bricht damit nichts mehr.
+  sudo -u postgres psql -X -v ON_ERROR_STOP=1 \
+    -v db_user="$DB_USER" -v db_name="$DB_NAME" -v db_pass="$DB_PASS" <<'SQL'
+CREATE USER :"db_user" WITH PASSWORD :'db_pass';
+CREATE DATABASE :"db_name" OWNER :"db_user";
+GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
 SQL
   ok "Benutzer und Datenbank angelegt."
 fi

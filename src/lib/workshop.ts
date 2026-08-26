@@ -104,7 +104,10 @@ export function validateMissionInput(raw: unknown): ValidationResult<MissionInpu
   if (!Number.isFinite(riskBudget) || riskBudget < riskMin || riskBudget > riskMax) {
     return {
       ok: false,
-      error: `Risikobudget: Wert zwischen ${(riskMin * 100).toFixed(1)} % und ${(riskMax * 100).toFixed(1)} % erwartet (LIMIT_CEILINGS.maxRiskPerTrade).`,
+      // API-Vertrag ist ein Bruchteil (0.02 = 2 %); das Dashboard-Formular
+      // rechnet Prozent → Bruchteil. Die Meldung nennt beides, damit ein
+      // direkter API-Aufruf mit „2“ nicht rätselt.
+      error: `Risikobudget: Bruchteil zwischen ${riskMin} und ${riskMax} erwartet (entspricht ${(riskMin * 100).toFixed(1)}–${(riskMax * 100).toFixed(1)} %; Prozent zuerst durch 100 teilen).`,
     };
   }
 
@@ -113,7 +116,7 @@ export function validateMissionInput(raw: unknown): ValidationResult<MissionInpu
   if (!Number.isFinite(maxPositionPct) || maxPositionPct < posMin || maxPositionPct > posMax) {
     return {
       ok: false,
-      error: `Max. Positionsgröße: Wert zwischen ${(posMin * 100).toFixed(0)} % und ${(posMax * 100).toFixed(0)} % erwartet (LIMIT_CEILINGS.maxPositionPct).`,
+      error: `Max. Positionsgröße: Bruchteil zwischen ${posMin} und ${posMax} erwartet (entspricht ${(posMin * 100).toFixed(0)}–${(posMax * 100).toFixed(0)} %; Prozent zuerst durch 100 teilen).`,
     };
   }
 

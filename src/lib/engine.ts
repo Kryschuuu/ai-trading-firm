@@ -83,6 +83,18 @@ export async function getBroker(): Promise<PaperBroker> {
           side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
           qty: Number(r.qty),
           entryPrice: Number(r.entryPrice),
+          // KORRIGIERT (v1.5.2): SL/TP mithydratieren — sonst zeigt das
+          // Dashboard nach einem Neustart „kein Stop-Loss", obwohl die
+          // Schutzebenen (Monitor) weiterhin aus der DB prüfen. Der Broker-
+          // Zustand soll dieselbe Wahrheit zeigen wie die Datenbank.
+          stopLoss:
+            r.stopLoss != null && Number.isFinite(Number(r.stopLoss))
+              ? Number(r.stopLoss)
+              : null,
+          takeProfit:
+            r.takeProfit != null && Number.isFinite(Number(r.takeProfit))
+              ? Number(r.takeProfit)
+              : null,
         })),
         { cashHint }
       );

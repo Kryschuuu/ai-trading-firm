@@ -83,13 +83,27 @@ nvm alias default 22
 sudo pacman -S --needed postgresql
 
 # Datenverzeichnis initialisieren (nur beim allerersten Mal!)
-sudo -u postgres initdb -D /var/lib/postgres/data --locale=C.UTF-8 --encoding=UTF8
+# Prüfsummen + harte Auth-Defaults: peer (Lokal) / scram-sha-256 (TCP).
+sudo -u postgres initdb -D /var/lib/postgres/data --locale=C.UTF-8 --encoding=UTF8 \
+  --data-checksums --auth-local=peer --auth-host=scram-sha-256
 
 sudo systemctl enable --now postgresql
+
+# WICHTIG: auf echte Bereitschaft warten — systemctl meldet den Dienst
+# manchmal schon als 'active', während der Server noch startet (oder bei
+# defektem Cluster in einer Restart-Schleife hängt und trotzdem 'active'
+# erscheint). pg_isready prüft das wirklich:
+pg_isready   # → 'accepting connections' abwarten
 systemctl status postgresql --no-pager
 ```
 
-Erwartet: `Active: active (running)`.
+Erwartet: `Active: active (running)` und `pg_isready` meldet *accepting connections*.
+
+> **Halb initialisiertes Cluster?** Meldet psql
+> `could not open file "global/pg_filenode.map"`, ist das Datenverzeichnis
+> defekt (abgebrochenes initdb / Konflikt mit dem systemd-Dienst).
+> `./scripts/setup-cachyos.sh` erkennt und repariert das seit v1.5.2 automatisch;
+> manuell: Handbuch, Kapitel 10.6.
 
 ### 3.2 Benutzer und Datenbank anlegen
 
@@ -555,13 +569,14 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | Symptom | Ursache | Lösung |
 | --- | --- | --- |
 | **`relation "positions" does not exist`** | `drizzle-kit push` lief nicht oder auf falsche DB | `npx drizzle-kit push` im Projektstamm; sicherstellen dass `.env` mit `DATABASE_URL` existiert |
-| **Setup-Seite statt Dashboard beim ersten Start** | Schema fehlt | `npx drizzle-kit push`, dann Browser neu laden |
-| **`/api/health` liefert HTTP 503 + `SCHEMA_MISSING`** | Tabellen fehlen | `npx drizzle-kit push` ausführen |
+| **Setup-Seite statt Dashboard beim ersten Start** | Schema fehlt (oder DB defekt/nicht erreichbar) | erst `pg_isready`, dann `npx drizzle-kit push`, dann Browser neu laden |
+| **`/api/health` liefert `schemaReady: false` (HTTP 200)** | Tabellen fehlen | `npx drizzle-kit push` ausführen; Details im Feld `missingTables` |
+| **`could not open file "global/pg_filenode.map"`** | Cluster halb initialisiert (abgebrochenes initdb, Konflikt mit systemd-Dienst); Server crasht in Restart-Schleife | Handbuch Kapitel 10.6 — oder `./scripts/setup-cachyos.sh` erneut ausführen (repariert seit v1.5.2 selbstständig) |
 | Push läuft durch, aber Tabellen fehlen trotzdem | alte `drizzle.config.json` mit hardcodierter URL überschreibt `.env` | `rm drizzle.config.json` — das Projekt nutzt `drizzle.config.ts` |
 | Push schlägt mit `password authentication failed` fehl | `DATABASE_URL` in `.env` ≠ DB-Passwort | Passwort in `.env` korrigieren; explizit testen: `psql "$DATABASE_URL" -c "SELECT 1"` |
 | Spalte `stop_loss` fehlt in `positions` | veraltetes Schema aus einem früheren Commit | `npx drizzle-kit push --force` |
-| `DATABASE_URL is required` | `.env` fehlt oder wurde nicht geladen | `.env` im Projektstamm anlegen, Dienst neu starten |
-| `ECONNREFUSED 127.0.0.1:5432` | PostgreSQL läuft nicht | `sudo systemctl start postgresql` |
+| `DATABASE_URL ist nicht gesetzt` | `.env` fehlt oder wurde nicht geladen | `.env` im Projektstamm anlegen (Vorlage `.env.example`), Dienst neu starten. `next build` funktioniert auch ohne `.env` (Lazy-DB-Init seit v1.5.2) |
+| `ECONNREFUSED 127.0.0.1:5432` | PostgreSQL läuft nicht (oder läuft mit defektem Cluster) | `pg_isready` → schlägt fehl: `sudo systemctl start postgresql` bzw. Handbuch 10.6 |
 | `password authentication failed` | Passwort in `.env` ≠ DB-Passwort | `ALTER USER trader WITH PASSWORD '…';` |
 | Statusleiste zeigt „Regel-Engine" | Ollama nicht erreichbar | `curl $OLLAMA_BASE_URL/api/tags`, Firewall und IP prüfen |
 | Statusleiste OK, aber `source: fallback` | Modelltag existiert nicht | `ollama list` und Tags in `.env` abgleichen |

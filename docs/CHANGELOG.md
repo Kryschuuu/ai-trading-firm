@@ -20,7 +20,90 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [1.5.1] — 2026-08-25 (aktuell)
+## [1.5.2] — 2026-08-26 (aktuell)
+
+**Setup-/PostgreSQL-Robustheit: `global/pg_filenode.map`, ECONNREFUSED und
+`next build` ohne `.env` behoben.** Ursachenanalyse und Fixes für den
+Produktionsvorfall „Installation bricht bei Schritt 2 ab, danach schlagen alle
+DB-Queries fehl“.
+
+### Behoben
+
+- **Setup-Skript (Schritt 2):** `sleep 1` + `systemctl is-active` meldete
+  PostgreSQL fälschlich als „läuft“, obwohl ein halb initialisierter Cluster
+  (fehlender `global/pg_filenode.map`) in einer Restart-Schleife crashte. Die
+  Folge: `psql`-Fehler, danach fragte das Skript trotzdem nach dem
+  Datenbank-Passwort und starb mit demselben Fehler. Neu:
+  - Cluster-Vollständigkeit (`PG_VERSION`, `global/pg_control`,
+    `global/pg_filenode.map`) wird **vor** dem Dienststart geprüft;
+  - der Dienst wird vor einer Neuinitialisierung **gestoppt** (kein Race gegen
+    systemd-Auto-Restart mehr);
+  - echte Bereitschafts-Wartung mit `pg_isready` (30 s Timeout, Logauszug aus
+    `journalctl` bei Fehlschlag) statt blindem Sleep;
+  - harte SQL-Verifikation als Superuser, **bevor** Benutzer/Passwort abgefragt
+    werden — der Fehler wird nicht mehr vom `if/grep` verschluckt;
+  - Abgleich des systemd-Datenverzeichnisses gegen das erwartete
+    `/var/lib/postgres/data` (Drop-in-Erkennung).
+- **Quote-/Injection-Bug im Setup-Skript:** `CREATE USER … PASSWORD
+  '${DB_PASS}'` brach bei einem `'` im Passwort das SQL. Neu: psql-Variablen
+  (`-v db_pass=…` + `:'db_pass'`), kontextsicher maskiert; DB-User/DB-Name
+  werden per Regex validiert. Gegen echte PostgreSQL 16/18 mit feindlichem
+  Passwort (`O'Brien"; DROP SCHEMA public; --`) getestet.
+- **`initdb`-Defaults:** `--data-checksums --auth-local=peer
+  --auth-host=scram-sha-256` — keine „trust“-Warnung mehr, Korruption wird
+  erkannt, TCP-Logins laufen über scram-sha-256.
+- **`next build` ohne `.env` (frischer Clone):** `src/db/index.ts` warf beim
+  Modul-Import ohne `DATABASE_URL` und riss damit den Build während der
+  Next.js-Page-Data-Collection ab (`Failed to collect page data for
+  /api/firm/agents`). Neu: Pool/Drizzle werden **lazy** beim ersten Zugriff
+  erzeugt (Proxy-Facade); der Import ist ohne Konfiguration harmlos, die erste
+  echte Nutzung wirft eine präzise, actionabel Fehlermeldung. Build und Tests
+  funktionieren damit auch ohne `.env`.
+- **`uncaughtException` bei PostgreSQL-Ausfall:** Fällt PostgreSQL weg, während
+  Pool-Verbindungen idle sind (SIGTERM → `57P01`), emittierte node-postgres ein
+  `'error'`-Event ohne Listener → uncaughtException mit riesigem Objekt-Dump im
+  Journal. Fix: Pool-`'error'`-Handler (`[db] Pool-Fehler (idle client): …`);
+  die App degradiert kompakt und erholt sich nach DB-Rückkehr ohne Neustart
+  (end-to-end verifiziert).
+- **SL/TP gingen bei der Broker-Hydration verloren:** `getBroker` reichte
+  `stop_loss`/`take_profit` beim Wiederherstellen aus der DB nicht an den
+  Paper-Broker weiter — das Dashboard zeigte nach jedem Neustart „kein
+  Stop-Loss", obwohl die DB ihn hat (die Absicherung via Monitor blieb intakt,
+  die Anzeige log). Fix: SL/TP werden mithydratiert und in `hydrate()`
+  zusätzlich gesanitized (null/NaN/≤0 → null).
+- **Missions-API-Fehlermeldung mehrdeutig:** `POST /api/firm/missions` erwartet
+  Bruchteile (0.02 = 2 %), die Meldung nannte nur Prozent („zwischen 0.2 % und
+  5.0 %"). Neu: Meldung nennt Bruchteil **und** Prozent mit Umrechnungshinweis.
+
+### Hinzugefügt
+
+- **8 Regressionstests** (`tests/dbConfig.test.ts`, `tests/broker.test.ts`):
+  pg_isready-Wartung, Cluster-Vollständigkeitsprüfung, initdb-Auth-Flags,
+  injection-sichere Passwort-Interpolation, Import ohne `DATABASE_URL`
+  (Subprozess), actionable Fehlermeldung bei Nutzung ohne `DATABASE_URL`,
+  Pool-`'error'`-Handler sowie Erhalt/Sanitizing von SL/TP bei der Hydration.
+- **Handbuch-Runbook 10.6 „PostgreSQL-Cluster defekt“** — Diagnose und
+  Reparatur des `pg_filenode.map`-Zustands inkl. der kettenreaktionsartigen
+  Symptome (Scheduler-/Hydration-Fehler, Setup-Seite, `ECONNREFUSED` beim Push).
+- INSTALL.md: gehärtete initdb-Zeile, `pg_isready`-Schritt, aktualisierte
+  Fehlertabelle (u. a. entfernte, veraltete `SCHEMA_MISSING`/HTTP-503-Zeile).
+
+### Diagnose
+
+- Der Vorfall ist vollständig reproduziert und verifiziert: Ein Cluster mit
+  fehlender `global/pg_filenode.map` startet laut `pg_ctl status`/systemd
+  normal („running“/„active“), nimmt aber keine Verbindungen an
+  (`pg_isready` → *rejecting*) und wirft exakt
+  `FATAL: could not open file "global/pg_filenode.map"`.
+- End-to-End gegen echte PostgreSQL-18-/16-Cluster geprüft: Setup-Kette
+  (initdb → User/DB mit feindlichem Passwort → `drizzle-kit push` → Seed →
+  Pipeline-Run → Position/Equity/Audit), Deprecation-freier Build mit und ohne
+  `.env`, DB-Ausfall mitten im Betrieb (kompakte Degradation) und
+  Wiederanlauf ohne Dienstneustart.
+
+---
+
+## [1.5.1] — 2026-08-25
 
 **Sicherheits-Härtung und DB-Konfigurationsdiagnose.** Peer-Review-Fixes für
 Fehlerbehandlung in API-Routen und gehärtete Datenbank-Pool-Konfiguration.
