@@ -152,4 +152,28 @@ Zusätzliche Verifikation (jede Release): `npm run typecheck` ✅ · `npm run li
 2. **Regelmäßiges `npm audit`** in die Deploy-Checkliste aufnehmen (`CI`-Job empfohlen).
 3. **Live-Broker erst nach** Sicherheits-Checkliste (HANDBUCH Kapitel 11); kein Adapter im Auslieferungszustand.
 4. **Rate-Limiting** ist seit v1.4.0 prozess-lokal aktiv (60/min); hinter einem Proxy `x-forwarded-for` nicht als Sicherheitsgrenze behandeln.
-5. **DB-gestützte Scheduler-Locks** bei Multi-Node-Betrieb (aktuell Single-Node).
+5. **DB-gestützte Scheduler-Locks** bei Multi-Node-Betrieb (aktuell Single-Node; der Mikro-Executor nutzt bereits Advisory-Locks pro Symbol).
+
+---
+
+## 6. Audit-Ergänzung v1.6: Regelwerk (Makro/Mikro)
+
+**Neue Angriffsfläche:** LLM-generierte Regeln (`trade_rules.condition`) sind
+Daten, die die Ausführungsebene (Mikro-Zyklus) interpretiert. Bewertung:
+
+| Prinzip | Umsetzung | Status |
+| --- | --- | --- |
+| Whitelist statt Interpreter | `RULE_FIELDS`/`RULE_OPS` in `ruleEngine.ts` — nur 13 Felder, 7 Operatoren; unbekannte Keys werden **verworfen** (auch `__proto__`, `constructor`) | ✅ |
+| Klemmung statt Ermessen | `RULE_CEILINGS` = abgeleitet aus `LIMIT_CEILINGS` (Code) — eine Regel kann nie mehr Risiko fordern als die Guardrails | ✅ |
+| Kein dynamischer Code | Regeln werden zu **Closures kompiliert** (Zahlenvergleiche), kein `eval`, kein SQL aus Regelfeldern; `symbol` läuft durch die Symbol-Regex | ✅ |
+| Auditierter Lebenszyklus | DRAFT → ACTIVE → SUPERSEDED/…, jede Transition in `audit_log`; Rollback atomar | ✅ |
+| Review-Pflicht | Backtest-API + Review-Checkliste (HANDBUCH Kap. 18); `REQUIRE_HUMAN_APPROVAL=true` hält Regeln im DRAFT | ✅ |
+| Ausführungs-Härtung | Advisory-Lock pro Symbol, DB-Wahrheitsprüfung im Lock (Kill-Switch/Position/Mission), Guardrails + Broker-Schleuse als letzte Instanz | ✅ |
+| LLM-Freiheit | Import-Graph-Guard-Test: `ruleEngine`/`microExecutor`/`ruleService`/`scripts/micro-executor` dürfen `ollama`/`llmProvider`/`engine`/`analysts` **nicht importieren** | ✅ |
+
+**Verbleibende Restrisiken (dokumentiert, bewusst):** (1) Der interne
+`PaperBroker` ist ein In-Memory-Ledger → im Paper-Modus genau **eine**
+Executor-Instanz; (2) Makro-Prompts verarbeiten Marktdaten — die
+Anti-Injection-Zeile ist ein weicher Schutz, die harte Grenze bleibt die
+Whitelist; (3) `REQUIRE_HUMAN_APPROVAL=false` aktiviert Regeln automatisch
+— erst nach Backtest + Paper-Phase umstellen.

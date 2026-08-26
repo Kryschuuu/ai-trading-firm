@@ -96,8 +96,35 @@ export async function register() {
         }
       }, 60_000);
 
+      // ── 4) MAKRO-ZYKLUS: CEO + Research erzeugen das Regelwerk ──
+      // Bewusst im Takt von MACRO_CYCLE_INTERVAL_MIN (Standard 1 h), niemals
+      // pro Tick. Die Ausführung macht der separate Mikro-Executor-Prozess
+      // (`npm run micro`) — hier entsteht nur die Strategie.
+      const macroIntervalMs =
+        envInt("MACRO_CYCLE_INTERVAL_MIN", 60, 10, 24 * 60) * 60_000;
+      let macroBusy = false;
+      const runMacro = async () => {
+        if (macroBusy) return;
+        macroBusy = true;
+        try {
+          const macroMod = await import("@/lib/macroCycle");
+          const result = await macroMod.runMacroCycle();
+          console.log(
+            `[scheduler] Makro-Zyklus: ${result.ok ? "OK" : "FEHLER"} → ${
+              result.rule ? `${result.rule.name} (v${result.rule.version}, ${result.rule.status})` : result.error ?? "ohne Ergebnis"
+            }`
+          );
+        } catch (e) {
+          console.warn("[scheduler] Makro-Zyklus fehlgeschlagen:", e instanceof Error ? e.message : e);
+        } finally {
+          macroBusy = false;
+        }
+      };
+      setTimeout(() => void runMacro(), 15_000);
+      setInterval(() => void runMacro(), macroIntervalMs);
+
       console.log(
-        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin`
+        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin · Makro-Zyklus ${macroIntervalMs / 60000 | 0}min`
       );
     } catch (e) {
       console.warn("[scheduler] Start fehlgeschlagen:", e instanceof Error ? e.message : e);

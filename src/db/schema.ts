@@ -7,7 +7,10 @@ import {
   integer,
   jsonb,
   uuid,
+  index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Risikoparameter zur Anzeige/Dokumentation.
@@ -52,6 +55,109 @@ export const missions = pgTable("missions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Regelwerk des Makro-Zyklus (CEO/Research) — die einzige Brücke zur
+ * Ausführungsebene. Jede Zeile ist IMMUTABLE (eine Version); Aktivierung und
+ * Superseding werden über Status + Zeiger abgebildet. Der Mikro-Executor
+ * lädt ausschließlich `status='ACTIVE'`-Zeilen und liest sie in den RAM-Cache.
+ *
+ * Sicherheitsmodell: Das Feld `condition`/`action` ist ein JSONB-Objekt, aber
+ * der Mikro-Executor wertet es NUR über die strikte, im Code verankerte
+ * Whitelist aus `src/lib/ruleEngine.ts` aus. Unbekannte Felder/Operatoren
+ * werden dort verworfen — eine manipulierte oder bösartige Regel kann nie
+ * mehr auslösen, als die Code-Whitelist erlaubt.
+ */
+export const tradeRules = pgTable("trade_rules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Logische Regel-Identität über alle Versionen hinweg (v1 → v2 → …). */
+  ruleKey: uuid("rule_key").notNull(),
+  version: integer("version").notNull().default(1),
+  /** DRAFT | ACTIVE | SUPERSEDED | PAUSED | ARCHIVED | REJECTED */
+  status: text("status").notNull().default("DRAFT"),
+  name: text("name").notNull(),
+  symbol: text("symbol").notNull(),
+  missionId: uuid("mission_id").references(() => missions.id),
+  /** Normalisiertes, validiertes JSON (siehe ruleEngine.ts RuleCondition). */
+  condition: jsonb("condition").notNull(),
+  /** Normalisiertes, geklemmtes JSON (RuleAction). */
+  action: jsonb("action").notNull(),
+  /** Normalisiertes JSON (RuleWindow: timeframe, cooldown, maxExecutions …). */
+  window: jsonb("window").notNull(),
+  /** Kanonischer Hash über symbol+condition+action (Idempotenz + Diff). */
+  signature: text("signature").notNull(),
+  rationale: text("rationale"),
+  /** CEO | RESEARCH | MANUAL */
+  sourceRole: text("source_role").notNull().default("MANUAL"),
+  sourceAgentId: uuid("source_agent_id").references(() => agents.id),
+  /** SIGMA=LLM, FALLBACK=deterministische Regel-Engine. */
+  sourceMode: text("source_mode").notNull().default("SIGMA"),
+  // Selbstreferenzierende Versionierung bewusst OHNE DB-FK (TS-Zirkularität;
+  // Integrität wird in ruleService in Transaktionen erzwungen).
+  previousVersionId: uuid("previous_version_id"),
+  supersededById: uuid("superseded_by_id"),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+  deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+  riskScore: numeric("risk_score").notNull().default("0.5"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  /**
+   * Partielle UNIQUE-Indizes: pro Regel (ruleKey) und pro Symbol/Mandat
+   * höchstens EINE aktive Version — die Aktivierung ist damit atomar,
+   * egal wie viele Prozessinstanzen gleichzeitig aktivieren.
+   */
+  uniqueIndex("trade_rules_active_unique").on(t.ruleKey).where(sql`${t.status} = 'ACTIVE'`),
+  uniqueIndex("trade_rules_active_symbol_unique")
+    .on(sql`(${t.symbol}, COALESCE(${t.missionId}, ''))`)
+    .where(sql`${t.status} = 'ACTIVE'`),
+]);
+
+/**
+ * Ausführungs-Feedback des Mikro-Zyklus: jede Trigger-Entscheidung, jeder
+ * Block und jeder Fehler — die Grundlage für den Lern-Loop des CEO.
+ * Bewusst NUR bei relevanten Ereignissen geschrieben (Trigger/Block/Fehler),
+ * nie bei jedem Tick, sonst füllt der Hot-Path die Datenbank.
+ */
+export const ruleExecutions = pgTable("rule_executions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ruleId: uuid("rule_id").notNull().references(() => tradeRules.id),
+  missionId: uuid("mission_id").references(() => missions.id),
+  symbol: text("symbol").notNull(),
+  /** TRIGGERED | BLOCKED | ERROR | EXPIRED */
+  status: text("status").notNull(),
+  triggerPrice: numeric("trigger_price"),
+  triggerVolume: numeric("trigger_volume"),
+  snapshot: jsonb("snapshot"),
+  /** Ausgewertete Bedingungen (Feld → tatsächlicher Wert) fürs Audit. */
+  evaluated: jsonb("evaluated"),
+  /** Order-/Fill-Informationen bei TRIGGERED, sonst der Block-Grund. */
+  fill: jsonb("fill"),
+  orderId: text("order_id"),
+  /** Hot-Path-Latenz: reine Bewertungszeit in Mikrosekunden (ohne Fill). */
+  latencyMicros: integer("latency_micros"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("rule_executions_rule_idx").on(t.ruleId, t.createdAt)]);
+
+/** Backtest-Läufe einer Regel gegen historische Kerzen (deterministisch). */
+export const ruleBacktests = pgTable("rule_backtests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ruleId: uuid("rule_id").notNull().references(() => tradeRules.id),
+  missionId: uuid("mission_id").references(() => missions.id),
+  symbol: text("symbol").notNull(),
+  timeframe: text("timeframe").notNull(),
+  from: timestamp("from", { withTimezone: true }).notNull(),
+  to: timestamp("to", { withTimezone: true }).notNull(),
+  trades: integer("trades").notNull().default(0),
+  wins: integer("wins").notNull().default(0),
+  pnl: numeric("pnl").notNull().default("0"),
+  profitFactor: numeric("profit_factor"),
+  maxDrawdownPct: numeric("max_drawdown_pct"),
+  /** Vollständige Turn-Liste für die Prüfung im Detail. */
+  detail: jsonb("detail").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("rule_backtests_rule_idx").on(t.ruleId, t.createdAt)]);
+
 /** Position (Paper oder real, je nach Broker-Adapter). */
 export const positions = pgTable("positions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -64,11 +170,13 @@ export const positions = pgTable("positions", {
   takeProfit: numeric("take_profit"),
   exitPrice: numeric("exit_price"),
   realizedPnl: numeric("realized_pnl"),
-  /** STOP_LOSS | TAKE_PROFIT | MANUAL_FLATTEN | AGENT_CLOSE | null bei offen */
+  /** STOP_LOSS | TAKE_PROFIT | MANUAL_FLATTEN | AGENT_CLOSE | RULE_EXECUTION | null bei offen */
   exitReason: text("exit_reason"),
   broker: text("broker").notNull(),
   status: text("status").notNull().default("OPEN"), // OPEN | CLOSED
   missionId: uuid("mission_id").references(() => missions.id),
+  /** Regel (trade_rules) aus dem Mikro-Zyklus, die diese Position eröffnet hat. */
+  ruleId: uuid("rule_id").references(() => tradeRules.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

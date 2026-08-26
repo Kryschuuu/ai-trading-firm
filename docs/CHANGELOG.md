@@ -20,7 +20,49 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
-## [Unreleased]
+## [1.6.0] — 2026-08-26
+
+**Event-Driven Multi-Zyklen-Architektur: Makro (LLM, 1×/h) und Mikro
+(kein LLM, pro Preis-Tick) vollständig entkoppelt — die alte lineare
+Pipeline bleibt als Referenz/Workshop-Pfad erhalten.**
+
+### Neu: Regelwerk & Regel-Engine (LLM-frei)
+
+- **`src/lib/ruleEngine.ts`** — deterministische Regel-DSL: Whitelist-Felder
+  (`rsi14`, `volumeRatio`, `ema9/21/50`, `trend`, `atrPct`, …), Operatoren
+  (`lt/lte/gt/gte/eq/between/in`), `sanitizeRuleSpec()` (Normalisierung +
+  Klemmung gegen Code-Ceilings — auch `__proto__`-Schutz), Kompilierung zu
+  schnellen Closures, Snapshot-Berechnung, deterministischer Backtest.
+- **`src/lib/ruleService.ts`** — Persistenz & Versionierung: `trade_rules`
+  (immutable Versionen, DRAFT → ACTIVE → SUPERSEDED/PAUSED/ARCHIVED/REJECTED),
+  idempotentes Upsert über Signatur, atomares Aktivieren mit partiellen
+  UNIQUE-Indizes, **Rollback** über `previous_version_id`, Feedback-Aggregation
+  (`rule_executions` + `positions.rule_id` → P&L/Win-Rate je Regel).
+- **`src/lib/microExecutor.ts`** — Mikro-Zyklus als reiner TS-Pfad **ohne
+  jeden LLM-Import** (per Test abgesichert): Binance-WebSocket-Feed
+  (`@trade` + `@kline_1m`, Reconnect mit Backoff), `RollingTimeframeSeries`
+  (1m→5m/15m/30m/1h, REST-Seed, RAM only), `RuleCache` (kompilierte
+  ACTIVE-Regeln, Cooldown/Tageslimit in-Memory, Poll + Invalidation),
+  `MicroExecutor` (Hot-Path-Metrik `latencyMicros`), Paper-Adapter mit
+  **Postgres-Advisory-Lock pro Symbol** und DB-Wahrheitsprüfung
+  (Kill-Switch, Positionssperre, Mission-Status) sowie determinstische
+  `SimulatedFeed`/`SequenceFeed`.
+- **`src/lib/macroCycle.ts`** — Makro-Zyklus: Research erzeugt den
+  Regel-Entwurf (LLM, JSON-Schema erzwungen), CEO prüft/revidiert
+  (APPROVE/REVISE/REJECT), hartes Risk-Gate, Upsert + Aktivierung;
+  ohne LLM deterministischer Fallback (`sourceMode: FALLBACK`). Läuft im
+  Scheduler-Takt `MACRO_CYCLE_INTERVAL_MIN` (Default 60 min).
+- **`scripts/micro-executor.ts`** + **`deploy/micro-executor.service`** —
+  eigenständiger Executor-Prozess (`npm run micro`) mit Health-HTTP
+  (`MICRO_HEALTH_PORT`, Default 3380).
+- **Neue API:** `GET/POST /api/firm/rules`, `POST /api/firm/rules/[id]`
+  (activate/pause/archive/rollback/reject), `POST /api/firm/rules/[id]/backtest`,
+  `POST/GET /api/firm/macro`, `GET /api/firm/micro`.
+- **Neue DB-Tabellen:** `trade_rules`, `rule_executions`, `rule_backtests`;
+  `positions.rule_id` für die P&L-Zuordnung; `checkSchema()` erweitert.
+- **Doku:** neue Blaupause [ARCHITECTURE.md](ARCHITECTURE.md); HANDBUCH
+  Kap. 15 (Makro/Mikro), 16 (Agenten-Register: **alle zwölf Rollen**),
+  17 (Regel-API), 18 (Review-/Security-Checkliste); README aktualisiert.
 
 ### Behoben
 
@@ -39,9 +81,23 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
   jetzt bewusst nur echte Agentenentscheidungen (z. B. für den Workshop).
   Die vollständige gemischte Chronologie steht additiv in `entries`.
 
+### Getestet (Peer-Review)
+
+- **181 Unit-Tests grün** (`npm test`; +32 neue: `tests/ruleEngine.test.ts` und
+  `tests/microExecutor.test.ts`). Neue Abdeckung: Whitelist/Klemmung/
+  Prototype-Pollution, Kompilierung, Snapshot-Determinismus, Backtest-
+  Szenarien (Dip-Gewinn, Stop-Vorrang, keine Fehlsignale), **Import-Graph-
+  Guard** (kein `ollama`/`llmProvider`/`engine` im Mikro-Pfad), Cooldown/
+  Tageslimit/Fenster, Tick→Match→Adapter-E2E ohne DB, Latenz-Grenzen.
+- `npm run typecheck` + `npm run lint` sauber; `npm run build` inkl. neuer
+  Routen erfolgreich; `npm audit`: 0 Schwachstellen.
+- Standalone-Smoke: `npm run micro` startet mit Sim- und Binance-Feed,
+  Health-Endpunkt antwortet; ohne DB bleibt der Prozess am Leben
+  (RAM-Cache, Fail-safe).
+
 ---
 
-## [1.5.4] — 2026-08-26 (aktuell)
+## [1.5.4] — 2026-08-26
 
 **Setup-Schritt 2 repariert: `initdb`-Erfolg wurde fälschlich als „Cluster
 unvollständig“ gemeldet (Rechte-Fehlalarm); umfassende Fehlerdiagnose und

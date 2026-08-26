@@ -265,11 +265,12 @@ Erwartet: `[✓] Changes applied`. Kontrolle:
 psql "$DATABASE_URL" -c "\dt"
 ```
 
-Es müssen **acht** Tabellen erscheinen:
+Es müssen **zwölf** Tabellen erscheinen (v1.6):
 
 ```
- agents          agent_messages   audit_log        kill_switches
- missions        positions        proposals        risk_config
+ agents            agent_messages   audit_log        kill_switches
+ missions          positions        proposals        risk_config
+ equity_snapshots  trade_rules      rule_executions  rule_backtests
 ```
 
 Fehlt eine Tabelle — insbesondere `positions` — hast du das Symptom aus dem
@@ -289,6 +290,22 @@ npm run start          # läuft auf http://localhost:3369
 ```
 
 Im Browser öffnen → **„Seed / Reset"** → **„▶▶ Ganze Pipeline"**.
+
+**Optional (v1.6): Mikro-Zyklus starten** — die LLM-freie Ausführungsebene
+(regelbasiert, pro Preis-Tick). Einmal die erste Regel erzeugen:
+
+```bash
+curl -s -X POST localhost:3369/api/firm/macro | jq '.cycle.rule.status'
+```
+
+Dann als eigener Prozess bzw. Dienst (Kapitel 7.1):
+
+```bash
+npm run micro                      # Vordergrund / Smoke
+# oder:
+sudo cp deploy/micro-executor.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now micro-executor
+```
 
 ---
 
@@ -353,12 +370,25 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ai-trading-firm
 ```
 
+**Mikro-Executor (zweite Unit, v1.6):**
+
+```bash
+sudo cp deploy/micro-executor.service /etc/systemd/system/
+sudo nano /etc/systemd/system/micro-executor.service   # User + Pfade anpassen
+sudo systemctl daemon-reload
+sudo systemctl enable --now micro-executor
+```
+
 ### 7.2 Kontrolle
 
 ```bash
 systemctl status ai-trading-firm --no-pager
 journalctl -u ai-trading-firm -f          # Live-Log, mit Strg+C beenden
 curl -s http://localhost:3369/api/health
+
+# Mikro-Zyklus
+systemctl status micro-executor --no-pager
+curl -s http://localhost:3380/health | jq '.feed.connected, .cache.activeRules'
 ```
 
 ### 7.3 Im Heimnetz erreichbar machen (optional)
