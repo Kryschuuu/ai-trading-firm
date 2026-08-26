@@ -981,6 +981,14 @@ sudo systemctl restart ai-trading-firm
 
 ### 10.6 PostgreSQL-Cluster defekt — `global/pg_filenode.map` fehlt
 
+> **Seit v1.5.4:** Alle Cluster-Prüfungen des Setup-Skripts laufen als
+> postgres-Benutzer. Falls das Skript vorher bei *erfolgreichem* `initdb`
+> „Cluster weiterhin unvollständig“ meldete, war das ein Rechte-Fehlalarm
+> (Verzeichnis `0700 postgres:postgres`) — **nichts löschen**, den Cluster
+> einfach starten: `sudo systemctl enable --now postgresql`, dann
+> `./scripts/setup-cachyos.sh --variant a`. Die vollständige Anleitung:
+> **docs/SETUP_PG_TROUBLESHOOTING.md**.
+
 **Symptom (Kettenreaktion):**
 
 ```
