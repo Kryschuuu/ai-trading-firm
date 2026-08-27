@@ -27,6 +27,7 @@ import {
 import { PaperBroker } from "../lib/broker";
 import { recordBrokerFactoryCall } from "./audit";
 import { REQUIRED_CAPABILITY_BY_MODE, VENUE_CAPABILITIES } from "./capabilities";
+import { BitunixBrokerAdapter } from "./bitunix";
 import { PaperBrokerAdapter } from "./paper";
 import { StubBrokerAdapter } from "./stubs";
 
@@ -70,6 +71,9 @@ export function createAdapter(
 ): BrokerAdapter {
   if (venue === "PAPER") {
     return new PaperBrokerAdapter(paperBrokerLedger(), mode);
+  }
+  if (venue === "BITUNIX") {
+    return new BitunixBrokerAdapter(mode);
   }
   return new StubBrokerAdapter(venue, mode);
 }

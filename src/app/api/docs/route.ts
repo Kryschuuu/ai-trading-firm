@@ -69,6 +69,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Peer-Review: Live-/Paper-Trading",
     subtitle: "Bottlenecks der 6-Agenten-Pipeline, Code-Review, Tests und Handlungsplan",
   },
+  bitunix: {
+    file: "docs/BITUNIX.md",
+    title: "Bitunix-Adapter",
+    subtitle: "7. Venue — Public REST/WS, Signing, Paper-Modus B, Live-Gate (v1.15)",
+  },
 };
 
 export async function GET(req: Request) {

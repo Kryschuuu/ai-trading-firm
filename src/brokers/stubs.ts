@@ -39,7 +39,7 @@ import {
 } from "../contracts/broker";
 import type { BrokerAccount } from "../contracts/broker";
 
-export type StubVenueId = Exclude<BrokerVenueId, "PAPER">;
+export type StubVenueId = Exclude<BrokerVenueId, "PAPER" | "BITUNIX">;
 
 /** Klare Markierung für noch offene Adapter-Entwicklung (Task-Planung). */
 const DISCOVERY_TODO_HINT =

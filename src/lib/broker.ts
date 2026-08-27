@@ -501,6 +501,13 @@ const REGISTRY_BASE: Record<
     openSource: true,
     note: "Voll open source und self-custody, aber Perps = Hebel. Passt zur Philosophie, nicht zum Risikoprofil eines Einstiegs.",
   },
+  BITUNIX: {
+    label: "Bitunix Futures",
+    assets: "Krypto-Perpetuals (USDT-M)",
+    paperApi: false,
+    openSource: false,
+    note: "Task 07: Public REST/WS + Paper gegen echte Kurse. Kein dokumentiertes Testnet. Live-Capability ja, Ausführung bis task-11 immer LiveTradingGateError. SL/TP am Venue (stopAtVenue).",
+  },
 };
 
 /**
@@ -514,4 +521,5 @@ export const BROKER_REGISTRY: Record<BrokerName, BrokerRegistryEntry> = {
   BINANCE: { ...REGISTRY_BASE.BINANCE, ...projectCapabilityFlags(VENUE_CAPABILITIES.BINANCE) },
   KRAKEN: { ...REGISTRY_BASE.KRAKEN, ...projectCapabilityFlags(VENUE_CAPABILITIES.KRAKEN) },
   DYDX: { ...REGISTRY_BASE.DYDX, ...projectCapabilityFlags(VENUE_CAPABILITIES.DYDX) },
+  BITUNIX: { ...REGISTRY_BASE.BITUNIX, ...projectCapabilityFlags(VENUE_CAPABILITIES.BITUNIX) },
 };

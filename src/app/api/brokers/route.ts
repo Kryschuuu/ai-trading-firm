@@ -1,7 +1,7 @@
 /**
  * `GET /api/brokers` — Broker-Übersicht (Task 02).
  *
- * Liefert für jedes der 6 Venues: id, label/assets, Capabilities (Single
+ * Liefert für jedes der 7 Venues: id, label/assets, Capabilities (Single
  * Source of Truth = Adapter), projizierte Registry-Flags (paperAvailable/
  * liveAvailable), verfügbare Execution-Modi und den (lokalen) Health-Status.
  *
@@ -16,7 +16,7 @@
  * Antwort 200:
  * ```json
  * {
- *   "ok": true, "count": 6,
+ *   "ok": true, "count": 7,
  *   "brokers": [{
  *     "id": "PAPER", "label": "Interner Paper-Broker", "assets": "…",
  *     "capabilities": { "discovery": true, … "stopAtVenue": false },

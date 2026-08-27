@@ -126,7 +126,7 @@ export function parseBaseQuote(symbol: string): { base: string | null; quote: st
 
 /** Leitet den Markttyp aus Venue und Symbol ab, wenn er nicht angegeben ist. */
 export function inferMarketType(venue: string, symbol: string): MarketType {
-  if (venue === "DYDX") return "perpetual";
+  if (venue === "DYDX" || venue === "BITUNIX") return "perpetual";
   if (/-(PERP|SWAP)$/.test(symbol)) return "perpetual";
   return "spot";
 }
