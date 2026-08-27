@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "description": "Deterministischer Markt-Scanner (Task 04): Faktor-Parameter, Score-Gewichte, Regime-Schwellen, Trichtergrößen und Filterregeln. Kein LLM, kein Netzwerk.",
+  "weights": {
+    "liquidity": 0.25,
+    "volatility": 0.15,
+    "trend": 0.15,
+    "momentum": 0.1,
+    "spread": 0.1,
+    "volume": 0.1,
+    "correlation": 0.05,
+    "news": 0.05,
+    "execution": 0.05
+  },
+  "factors": {
+    "liquidity": { "minVolume24h": 100000, "maxVolume24h": 10000000000 },
+    "spread": { "bestSpread": 0.0001, "worstSpread": 0.005 },
+    "atr": { "period": 14, "floorPct": 0.002, "idealLowPct": 0.01, "idealHighPct": 0.04, "ceilingPct": 0.12 },
+    "volatility": {
+      "lookback": 30,
+      "periodsPerYear": 365,
+      "floor": 0.05,
+      "idealLow": 0.2,
+      "idealHigh": 0.8,
+      "ceiling": 2.5
+    },
+    "momentum": {
+      "lookbacks": [5, 20, 60],
+      "lookbackWeights": [0.2, 0.3, 0.5],
+      "scale": 0.3,
+      "mode": "absolute"
+    },
+    "trend": { "fastPeriod": 9, "midPeriod": 21, "slowPeriod": 50, "scale": 0.1 },
+    "volumeRatio": { "recentPeriods": 5, "basePeriods": 20, "minRatio": 0.5, "maxRatio": 2 },
+    "rsi": { "period": 14, "neutralBand": 20, "extremeBand": 50 },
+    "drawdown": { "lookback": 60, "maxDrawdown": 0.5 },
+    "correlation": { "lookback": 30, "method": "pearson", "benchmarkInstrumentId": "BINANCE:BTCUSDT" },
+    "news": {
+      "weightEvents24h": 0.08,
+      "weightEvents7d": 0.02,
+      "weightHighImpact": 0.2,
+      "weightScheduled": 0.3,
+      "scheduledHorizonHours": 48,
+      "stalenessHours": 48,
+      "weightStaleness": 0.2,
+      "neutralRisk": 0.25
+    },
+    "funding": { "defaultIntervalsPerYear": 1095, "maxAnnualized": 0.5, "spotValue": 1 },
+    "openInterest": { "minOpenInterest": 100000, "maxOpenInterest": 5000000000, "neutralValue": 0.5 },
+    "execution": { "feeMode": "taker", "includeSpread": true, "bestCost": 0.0005, "worstCost": 0.005 }
+  },
+  "regime": { "low": 0.25, "normal": 0.6, "high": 1.2 },
+  "funnel": {
+    "eligibleMax": 2000,
+    "interestingMax": 500,
+    "interestingMinScore": 55,
+    "dailyMax": 100,
+    "deepMin": 20,
+    "deepMax": 40,
+    "maxPerAssetClass": 8
+  },
+  "filters": {
+    "requireStatusActive": true,
+    "requirePaperAvailable": true,
+    "allowedMarketTypes": ["spot", "perpetual", "future"],
+    "allowedAssetClasses": ["crypto", "equity", "etf", "fx", "commodity", "index"],
+    "minVolume24h": 1000000,
+    "maxSpread": 0.005,
+    "minCandles": 30,
+    "maxDrawdown": 0.8,
+    "maxExecutionCost": 0.006,
+    "excludeExtremeRegime": true
+  },
+  "weekly": {
+    "coreMinScore": 70,
+    "coreMinVolume24h": 50000000,
+    "coreMinPersistence": 1,
+    "rotationMinScore": 55,
+    "discoveryMinScore": 40,
+    "liquidityDropPct": 0.5,
+    "feeIncreasePct": 0.5,
+    "clusterCorrelation": 0.9
+  }
+}
