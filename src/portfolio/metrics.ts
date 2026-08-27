@@ -124,7 +124,8 @@ export function logReturnsFromSimpleReturns(returns: readonly number[], field = 
 }
 
 /**
- * Validiert eine bereits logarithmische Renditereihe (nur Prüfung, keine Änderung).
+ * Prüft eine bereits logarithmische Renditereihe auf Endlichkeit (nur Prüfung,
+ * keine Änderung der Werte).
  *
  * @throws PortfolioError `INVALID_INPUT` bei NaN/±∞, `INSUFFICIENT_DATA` bei leerer Reihe.
  */
@@ -498,7 +499,10 @@ export function resolveLogReturns(series: SeriesInput): number[] {
  * Kombiniert {@link realizedVolatility}, {@link sharpeRatio},
  * {@link sortinoRatio}, {@link maxDrawdown}, {@link profitFactor},
  * {@link averageTrueRange} (falls Kerzen vorhanden) und
- * {@link classifyVolatilityRegime}. Alle Ausgaben werden auf
+ * {@link classifyVolatilityRegime}.
+ *
+ * Verfahren: jede Kennzahl wird aus derselben validierten Renditereihe einzeln
+ * berechnet, danach werden alle Ausgaben auf
  * {@link OUTPUT_DECIMALS} Dezimalen gerundet ⇒ byte-identische JSON-Antworten.
  */
 export function computeMetrics(series: SeriesInput, options: MetricsOptions = {}): MetricSet {

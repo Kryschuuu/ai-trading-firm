@@ -27,6 +27,19 @@ export const PERIODS = 750;
 /** Zeitbudget in Millisekunden für den gesamten Durchlauf. */
 export const BUDGET_MS = 30_000;
 
+/**
+ * Faktor für Läufe mit Coverage-Instrumentierung.
+ *
+ * `--experimental-test-coverage` instrumentiert jeden Zweig und macht reine
+ * Rechenloops etwa 10× langsamer — gemessen würde dann die Instrumentierung,
+ * nicht die Bibliothek. Das Budget wird in diesem Fall entsprechend skaliert
+ * (Referenz: 5,8 s ohne, 59 s mit Instrumentierung).
+ */
+const COVERAGE_FACTOR = process.env.NODE_V8_COVERAGE ? 20 : 1;
+
+/** Wirksames Budget dieses Laufs. */
+const effectiveBudgetMs = BUDGET_MS * COVERAGE_FACTOR;
+
 /** Misst eine synchrone Operation in Millisekunden. */
 function measure<T>(fn: () => T): { value: T; ms: number } {
   const start = process.hrtime.bigint();
@@ -35,7 +48,7 @@ function measure<T>(fn: () => T): { value: T; ms: number } {
   return { value, ms };
 }
 
-test(`Benchmark: ${ASSETS} Assets × ${PERIODS} Perioden bleiben im Budget (${BUDGET_MS} ms)`, () => {
+test(`Benchmark: ${ASSETS} Assets × ${PERIODS} Perioden bleiben im Budget (${effectiveBudgetMs} ms)`, () => {
   assert.ok(ASSETS * PERIODS <= PORTFOLIO_LIMITS.maxCovarianceSamples, "Benchmark verletzt die eigenen Limits");
 
   // Block-Faktormodell: 50 Cluster à 10 Assets ⇒ realistische Cluster-Struktur.
@@ -96,14 +109,17 @@ test(`Benchmark: ${ASSETS} Assets × ${PERIODS} Perioden bleiben im Budget (${BU
 
   const total = Object.values(timings).reduce((a, b) => a + b, 0);
   timings.total = total;
-  // eslint-disable-next-line no-console
   console.log(
-    `[portfolio-benchmark] ${ASSETS} Assets × ${PERIODS} Perioden: ` +
+    `[portfolio-benchmark] ${ASSETS} Assets × ${PERIODS} Perioden` +
+      `${COVERAGE_FACTOR > 1 ? ` (Coverage-Instrumentierung, Faktor ${COVERAGE_FACTOR})` : ""}: ` +
       Object.entries(timings)
         .map(([key, ms]) => `${key} ${ms.toFixed(0)} ms`)
         .join(" · ")
   );
-  assert.ok(total < BUDGET_MS, `Budget überschritten: ${total.toFixed(0)} ms > ${BUDGET_MS} ms`);
+  assert.ok(
+    total < effectiveBudgetMs,
+    `Budget überschritten: ${total.toFixed(0)} ms > ${effectiveBudgetMs} ms`
+  );
 });
 
 test("Benchmark: Größenlimit lehnt größere Anfragen ab, statt sie zu rechnen", () => {

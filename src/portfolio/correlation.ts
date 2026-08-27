@@ -420,6 +420,9 @@ export function returnsMatrix(
 
 /**
  * Kovarianz als {@link Matrix} (Float64Array) — Eingabe für den Optimierer.
+ *
+ * Wandelt die zeilenweise Darstellung `rows[i][j]` in ein row-major
+ * `Float64Array` der Länge `n²` um (ohne Kopie der Werte, `Σ_ij = rows[i][j]`).
  */
 export function covarianceAsMatrix(estimate: CovarianceEstimate): Matrix {
   return fromRows(estimate.rows, "covariance");

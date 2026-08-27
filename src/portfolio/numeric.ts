@@ -14,7 +14,7 @@
  */
 
 import { DEFAULT_RCOND, DEFAULT_RIDGE_FACTOR } from "./config";
-import { PortfolioError } from "./errors";
+import { PortfolioError, describe } from "./errors";
 import type { SingularMatrixPolicy } from "./types";
 
 /** Symmetrische quadratische Matrix in row-major-Darstellung. */
@@ -207,7 +207,11 @@ export function trace(m: Matrix): number {
   return t;
 }
 
-/** Maximale Betrag eines Matrixeintrags (Skalierung für relative Toleranzen). */
+/**
+ * Maximaler Betrag eines Matrixeintrags `‖A‖_max = max_ij |A_ij|`.
+ *
+ * Dient als Skalenreferenz für relative Toleranzen (Cholesky-Pivot, Regularisierung).
+ */
 export function maxAbsEntry(m: Matrix): number {
   let best = 0;
   for (let i = 0; i < m.data.length; i++) best = Math.max(best, Math.abs(m.data[i]));
@@ -238,6 +242,16 @@ export function submatrix(m: Matrix, indices: readonly number[]): Matrix {
 }
 
 /**
+ * Relative Pivot-Schwelle der Cholesky-Zerlegung.
+ *
+ * Eine Kovarianzmatrix zweier perfekt korrelierter Assets hat Determinante 0,
+ * liefert in Gleitkomma aber oft ein Pivot von ~1e-19 statt exakt 0 — die
+ * Zerlegung „gelingt" und produziert danach Unsinn. Deshalb gilt ein Pivot
+ * unterhalb `1e-12 · max(Aᵢᵢ)` als singulär.
+ */
+export const MIN_RELATIVE_PIVOT = 1e-12;
+
+/**
  * Cholesky-Zerlegung `A = L·Lᵀ` einer symmetrisch positiv definiten Matrix.
  *
  * Formel:
@@ -245,11 +259,21 @@ export function submatrix(m: Matrix, indices: readonly number[]): Matrix {
  * `Lᵢⱼ = (Aᵢⱼ − Σ_{k<j} Lᵢₖ·Lⱼₖ) / Lⱼⱼ` für `i > j`.
  *
  * @returns Untere Dreiecksmatrix `L` (row-major, `n × n`).
- * @throws PortfolioError `SINGULAR_MATRIX` wenn ein Diagonalelement ≤ 0 wird —
- *         das ist der definierte Fehlerfall für singuläre Kovarianzmatrizen.
+ * @throws PortfolioError `SINGULAR_MATRIX` wenn ein Pivot ≤ 0 wird **oder**
+ *         unter die relative Schwelle {@link MIN_RELATIVE_PIVOT} fällt — das
+ *         ist der definierte Fehlerfall für singuläre Kovarianzmatrizen
+ *         (niemals ein still falsches Ergebnis).
  */
-export function cholesky(m: Matrix, field = "covariance"): Float64Array {
+export function cholesky(
+  m: Matrix,
+  field = "covariance",
+  options?: { minRelativePivot?: number }
+): Float64Array {
   const { n, data } = m;
+  const minRelativePivot = options?.minRelativePivot ?? MIN_RELATIVE_PIVOT;
+  let maxDiagonal = 0;
+  for (let i = 0; i < n; i++) maxDiagonal = Math.max(maxDiagonal, Math.abs(data[i * n + i]));
+  const minPivot = minRelativePivot * (maxDiagonal > 0 ? maxDiagonal : 1);
   const L = new Float64Array(n * n);
   for (let j = 0; j < n; j++) {
     let sum = data[j * n + j];
@@ -257,7 +281,7 @@ export function cholesky(m: Matrix, field = "covariance"): Float64Array {
       const l = L[j * n + k];
       sum -= l * l;
     }
-    if (!(sum > 0)) {
+    if (!(sum > minPivot)) {
       throw new PortfolioError(
         "SINGULAR_MATRIX",
         `Cholesky fehlgeschlagen bei Index ${j} (Diagonalelement ${sum}) — Matrix ist singulär oder nicht positiv definit`,
@@ -299,7 +323,8 @@ export function choleskySolve(L: Float64Array, n: number, b: VectorLike): Float6
 }
 
 /**
- * Inverse einer symmetrisch positiv definiten Matrix über Cholesky.
+ * Inverse einer symmetrisch positiv definiten Matrix über Cholesky:
+ * `A⁻¹` mit `A = L·Lᵀ` (Rückwärtseinsetzen für jede Einheitsspalte).
  *
  * @throws PortfolioError `SINGULAR_MATRIX` wenn die Matrix nicht invertierbar ist.
  */
@@ -473,6 +498,18 @@ export function regularizeCovariance(
 ): RegularizationResult {
   const ridgeFactor = options?.ridgeFactor ?? DEFAULT_RIDGE_FACTOR;
   const rcond = options?.rcond ?? DEFAULT_RCOND;
+  // Eine negative Varianz ist keine Kovarianzmatrix: eigener Fehlercode, damit
+  // ein Datenaustausch-Fehler nicht als „singulär" missverstanden wird.
+  for (let i = 0; i < m.n; i++) {
+    const diagonal = m.data[i * m.n + i];
+    if (diagonal < 0) {
+      throw new PortfolioError(
+        "NOT_POSITIVE_DEFINITE",
+        `Diagonalelement [${i}][${i}] ist negativ (${describe(diagonal)}) — keine gültige Kovarianzmatrix`,
+        { field: "covariance", details: { index: i } }
+      );
+    }
+  }
   try {
     cholesky(m);
     return { matrix: m, applied: "none", ridge: 0, minEigenvalue: null };
@@ -509,7 +546,7 @@ export function regularizeCovariance(
   );
 }
 
-/** Addiert einen Skalar auf die Diagonale (Ridge-Regularisierung). */
+/** Addiert einen Skalar auf die Diagonale: `A + τ·I` (Ridge-Regularisierung). */
 export function addDiagonal(m: Matrix, value: number): Matrix {
   const data = Float64Array.from(m.data);
   for (let i = 0; i < m.n; i++) data[i * m.n + i] += value;
@@ -547,7 +584,8 @@ export function estimateMaxEigenvalue(m: Matrix, iterations = 60): number {
 }
 
 /**
- * Kleinster Eigenwert über inverse Power-Iteration mit Cholesky (nur für
+ * Kleinster Eigenwert `λ_min ≈ 1/‖A⁻¹v‖` über inverse Power-Iteration mit
+ * Cholesky (nur für
  * kleine Matrizen; dient der Konditions-Diagnose).
  *
  * @throws PortfolioError `SINGULAR_MATRIX` wenn die Matrix nicht invertierbar ist.

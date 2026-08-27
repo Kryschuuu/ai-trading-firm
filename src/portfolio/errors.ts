@@ -24,8 +24,10 @@ export type PortfolioErrorCode =
   | "LENGTH_MISMATCH"
   /** Preis ≤ 0 (Logarithmus undefiniert). */
   | "NON_POSITIVE_PRICE"
-  /** Kovarianzmatrix ist singulär bzw. nicht positiv definit. */
+  /** Kovarianzmatrix ist singulär (Rang < n, Determinante ≈ 0). */
   | "SINGULAR_MATRIX"
+  /** Matrix ist nicht positiv definit (z. B. negative Varianz auf der Diagonale). */
+  | "NOT_POSITIVE_DEFINITE"
   /** Numerisches Verfahren (Cholesky, Newton) ist fehlgeschlagen. */
   | "NUMERIC_FAILURE"
   /** Iterationslimit erreicht, ohne die Toleranz zu unterschreiten. */

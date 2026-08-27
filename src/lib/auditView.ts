@@ -1867,6 +1867,76 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
         : [];
     },
   },
+  PORTFOLIO_RISK_GUARD: {
+    label: "Portfolio-Risk-Guard-Entscheidung",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Jede Entscheidung der Portfolio-Risk-Guard (Task 05). Gewichte entstehen ausschließlich im " +
+      "deterministischen Optimizer und laufen danach durch die feste Kette Portfolio Optimizer → " +
+      "Risk Guard → Position Limits → Correlation Limits. Dieses Ereignis dokumentiert eine einzelne " +
+      "Maßnahme (Kappung, Entfernen, Umverteilung, Cluster-Skalierung) oder den Abschluss eines Laufs — " +
+      "inklusive Maschine-lesbarem Code, der wirksamen Grenze und den Werten vor/nach der Maßnahme.",
+    headline: (d) => {
+      const stage = text(d.stage) ?? "risk-guard";
+      const code = text(d.code) ?? "RISK_GUARD_SUMMARY";
+      const before = num(d.before);
+      const after = num(d.after);
+      const delta =
+        before !== null && after !== null ? `: ${(before * 100).toFixed(2)} % → ${(after * 100).toFixed(2)} %` : "";
+      return `${stage} · ${code}${delta}`;
+    },
+    sections: (d) => [
+      {
+        title: "Guard-Entscheidung",
+        facts: [
+          { label: "Stufe der Kette", value: text(d.stage) ?? "—" },
+          { label: "Maßnahme", value: text(d.action) ?? "—" },
+          { label: "Code", value: text(d.code) ?? "—", mono: true },
+          { label: "Optimizer-Modus", value: text(d.mode) ?? "—", mono: true },
+          { label: "Wirksame Grenze", value: num(d.limit) !== null ? `${((num(d.limit) ?? 0) * 100).toFixed(2)} %` : "—" },
+          { label: "Vorher", value: num(d.before) !== null ? `${((num(d.before) ?? 0) * 100).toFixed(2)} %` : "—" },
+          { label: "Nachher", value: num(d.after) !== null ? `${((num(d.after) ?? 0) * 100).toFixed(2)} %` : "—" },
+          { label: "Betroffene Symbole", value: formatKnownValue("symbols", d.symbols), mono: true },
+          { label: "Gründe", value: formatKnownValue("reasons", d.reasons) },
+          { label: "Herkunft", value: text(d.source) ?? "—" },
+          { label: "Zeitpunkt", value: text(d.timestamp) ? formatTimestampUtc(text(d.timestamp)) : "—" },
+        ],
+      },
+      ...(num(d.iterations) !== null
+        ? [
+            {
+              title: "Solver",
+              facts: [
+                { label: "Konvergiert", value: d.converged === false ? "nein" : "ja" },
+                { label: "Iterationen", value: String(num(d.iterations) ?? 0) },
+              ],
+            },
+          ]
+        : []),
+    ],
+    check: (d) => {
+      const findings: { severity: "warn"; title: string; detail: string }[] = [];
+      if (d.converged === false) {
+        findings.push({
+          severity: "warn",
+          title: "Optimizer nicht konvergiert",
+          detail:
+            "Das Iterationslimit wurde erreicht, bevor die Toleranz (1e-9) unterschritten war. Das Ergebnis ist numerisch nicht abgesichert — Grenzen prüfen, Iterationslimit erhöhen oder Kovarianzschätzung verbessern.",
+        });
+      }
+      const code = text(d.code) ?? "";
+      if (code.endsWith("_INFEASIBLE") || code === "RISK_GUARD_REJECTION") {
+        findings.push({
+          severity: "warn",
+          title: "Portfolio verworfen",
+          detail:
+            "Die Limits lassen sich nicht erfüllen — es wurden keine Gewichte freigegeben. Limits anpassen, mehr Instrumente zulassen oder Cash-Rest erlauben.",
+        });
+      }
+      return findings;
+    },
+  },
   BROKER_FACTORY: {
     label: "Broker-Factory-Aufruf",
     category: "system",

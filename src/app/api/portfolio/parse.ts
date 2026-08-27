@@ -53,7 +53,14 @@ export function statusForCode(code: string): number {
   }
 }
 
-/** Einheitliche Fehlerantwort (redigierte Meldung, stabiler Code). */
+/**
+ * Einheitliche Fehlerantwort (stabiler Code, redigierte Meldung).
+ *
+ * Nur {@link PortfolioError}-Meldungen sind für Clients formuliert und werden
+ * ausgegeben. Jede andere Ausnahme (Bug, Infrastruktur) liefert die generische
+ * Meldung „Interner Fehler" — interne Details gehören ins Server-Log, nicht in
+ * eine HTTP-Antwort.
+ */
 export function errorResponse(err: unknown): Response {
   const code = err instanceof PortfolioError ? err.code : "INTERNAL_ERROR";
   const status = statusForCode(code);
@@ -61,7 +68,7 @@ export function errorResponse(err: unknown): Response {
     {
       ok: false,
       error: code,
-      message: publicPortfolioErrorMessage(err),
+      message: err instanceof PortfolioError ? publicPortfolioErrorMessage(err) : "Interner Fehler",
       ...(err instanceof PortfolioError && err.field ? { field: err.field } : {}),
     },
     { status }

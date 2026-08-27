@@ -157,7 +157,7 @@ export function riskContributions(weights: readonly number[], covariance: Matrix
   return out;
 }
 
-/** Erwartete Portfoliorendite `μ'w` (pro Periode). */
+/** Erwartete Portfoliorendite `μᵀw` (pro Periode). */
 export function expectedPortfolioReturn(weights: readonly number[], expectedReturns: readonly number[]): number {
   let acc = 0;
   for (let i = 0; i < weights.length; i++) acc += weights[i] * expectedReturns[i];
@@ -629,6 +629,10 @@ function solveRiskParity(
 
 /**
  * Führt eine Portfolio-Optimierung aus.
+ *
+ * Verfahren je Modus: `min_variance` minimiert `wᵀΣw`, `max_sharpe` maximiert
+ * `(μᵀw − r_f)/√(wᵀΣw)`, `risk_parity` erzwingt `w_i(Σw)_i = (1/n)·wᵀΣw` —
+ * jeweils unter `Σw = 1` und den Bounds.
  *
  * Das Ergebnis ist ein {@link RawOptimizationResult} — **ungeprüft** und damit
  * ausdrücklich nicht handelbar. Es muss durch die Risk-Guard-Kette
