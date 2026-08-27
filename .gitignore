@@ -30,3 +30,7 @@ next-env.d.ts
 # Historical Store (Task 03): append-only OHLCV, läuft lokal, nicht versioniert
 /data/history
 /data/history/*.tmp
+
+# Scanner-Artefakte (Task 04): taegliche Universe-Snapshots werden lokal
+# erzeugt und sind aus Registry + Historie reproduzierbar — nicht versioniert.
+/artifacts

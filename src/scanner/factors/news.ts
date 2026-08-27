@@ -4,6 +4,8 @@
  * **Kein LLM.** Bewertet wird ausschließlich die *Struktur* des Nachrichtenflusses
  * (Zähler eines Feeds) plus die Frische der Registry-Daten:
  *
+ * Formel:
+ *
  * ```text
  * risiko = w24  × events24h
  *        + w7d  × events7d
@@ -11,8 +13,10 @@
  *        + wSched (falls ein Termin ≤ scheduledHorizonHours ansteht)
  *        + wStale (falls lastSeen älter als stalenessHours)
  * raw       = min(risiko, 1)
- * normalized = 1 − raw          (wenig Nachrichtenrisiko ⇒ hoher Score)
  * ```
+ *
+ * Normalisierung: `normalized = 1 − raw` — wenig Nachrichtenrisiko ergibt einen
+ * hohen Score; das Risiko selbst ist auf `[0, 1]` geklemmt.
  *
  * Ohne News-Kontext wird `neutralRisk` (Default 0.25) angesetzt — bewusst nicht
  * 0, weil „keine Daten“ nicht „kein Risiko“ heißt. Die inhaltliche Bewertung

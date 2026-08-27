@@ -84,9 +84,15 @@ export function growthSeries(start: number, growth: number, count: number): numb
   return Array.from({ length: count }, (_, i) => start * growth ** i);
 }
 
-/** Ein „gesundes“ Instrument mit ausreichender Historie für alle Faktoren. */
+/**
+ * Ein „gesundes“ Kursbild mit ausreichender Historie für alle Faktoren:
+ * gleichmäßiger Aufwärtstrend plus eine deterministische Schwankung von 1,5 %
+ * im Wechsel — damit liegt die realisierte Volatilität im NORMAL-Regime
+ * (reiner Wachstumspfad hätte σ = 0).
+ */
 export function healthyCandles(count = 80): MarketCandle[] {
-  return candlesFromCloses(growthSeries(100, 1.004, count), { wickPct: 0.01, volume: 1000 });
+  const closes = growthSeries(100, 1.004, count).map((c, i) => (i % 2 === 0 ? c : c * 1.015));
+  return candlesFromCloses(closes, { wickPct: 0.01, volume: 1000 });
 }
 
 /** Deterministische synthetische Instrumente für Benchmark-/Trichter-Tests. */
