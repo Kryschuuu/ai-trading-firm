@@ -15,6 +15,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { FACTOR_IDS } from "../src/scanner/types";
+
 const SCANNER_DIR = path.join(process.cwd(), "src/scanner");
 const API_DIR = path.join(process.cwd(), "src/app/api/universe");
 
@@ -110,4 +112,59 @@ test("Architektur: je Faktor genau eine Datei mit TSDoc-Formelblock", () => {
     assert.match(source, /Normalisierung:/, `${file}: Normalisierung nicht dokumentiert`);
     assert.match(source, /Datenbedarf:/, `${file}: Datenbedarf nicht dokumentiert`);
   }
+});
+
+test("Doku: scanner.help.json deckt alle Faktoren im 3-Ebenen-Schema ab", () => {
+  const help = JSON.parse(readFileSync(path.join(process.cwd(), "docs/help/scanner.help.json"), "utf8")) as {
+    id: string;
+    version: number;
+    fields: Record<string, { kurzinfo?: string; technischeInfo?: string; risiko?: string }>;
+  };
+  assert.equal(help.id, "scanner");
+  assert.equal(typeof help.version, "number");
+
+  for (const id of FACTOR_IDS) {
+    assert.ok(help.fields[id], `Hilfetext für Faktor ${id} fehlt`);
+  }
+  for (const key of [
+    "marketScore",
+    "funnelEligible",
+    "funnelInteresting",
+    "funnelDaily",
+    "funnelDeep",
+    "regime",
+    "classCORE",
+    "classROTATION",
+    "classDISCOVERY",
+    "classEXCLUDED",
+  ]) {
+    assert.ok(help.fields[key], `Hilfetext für ${key} fehlt`);
+  }
+  for (const [key, entry] of Object.entries(help.fields)) {
+    for (const level of ["kurzinfo", "technischeInfo", "risiko"] as const) {
+      const text = entry[level];
+      assert.equal(typeof text, "string", `${key}.${level} fehlt`);
+      assert.ok((text ?? "").length >= 40, `${key}.${level} ist zu knapp`);
+    }
+  }
+});
+
+test("Doku: DAILY_WEEKLY_RESEARCH.md nennt alle Faktoren, Gewichte und Filterregeln", () => {
+  const doc = readFileSync(path.join(process.cwd(), "docs/DAILY_WEEKLY_RESEARCH.md"), "utf8");
+  for (const id of FACTOR_IDS) assert.match(doc, new RegExp(`\`${id}\``), `Faktor ${id} nicht dokumentiert`);
+  for (const rule of [
+    "status-active",
+    "paper-available",
+    "market-type",
+    "asset-class",
+    "min-candles",
+    "min-volume",
+    "max-spread",
+    "max-execution-cost",
+    "max-drawdown",
+    "regime-extreme",
+  ]) {
+    assert.match(doc, new RegExp(rule), `Filterregel ${rule} nicht dokumentiert`);
+  }
+  for (const regime of ["LOW", "NORMAL", "HIGH", "EXTREME"]) assert.match(doc, new RegExp(regime));
 });
