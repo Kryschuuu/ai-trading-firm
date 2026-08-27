@@ -99,8 +99,10 @@ Der LLM rechnet nicht mehr *mit*, er rechnet *vor*.
    Latenz), `positions.rule_id` (realisiertes P&L je Regel) und
    `audit_log`. Der Makro-Zyklus liest diese als „Marktrealität“ in seinen
    Prompt — das ist der Lern-Loop (§4).
-3. **Mikro → Broker:** `PaperBroker` (in-process), bei echtem Geld ein
-   Broker-Adapter hinter demselben Interface.
+3. **Mikro → Broker:** ausschließlich über die **Broker-Factory**
+   (`src/brokers/factory.ts`, Task 02) — heute der in-process `PaperBroker`
+   hinter `PaperBrokerAdapter`, später Venue-Adapter hinter demselben
+   `BrokerAdapter`-Interface (Capability-Gating + Live-Gate, s. §10).
 
 ### Warum Redis/Event-Streaming nur optional ist
 
@@ -600,7 +602,65 @@ Details, Feldkatalog und API-Beispiele: **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.m
 
 ---
 
-## 10. Glossar (Kurz)
+## 10. Broker Capability-Modell (v1.10.0, Task 02)
+
+Die Plattform ist von einer statischen Paper-Broker-Architektur zu einer
+broker-unabhängigen Infrastruktur umgebaut: `BROKER_REGISTRY` war reine
+Capability-Dokumentation, `getBroker()` erzeugte ausnahmslos einen
+`PaperBroker`. Seit Task 02 ist das Capability-Modell **ausführbar** —
+ohne Live-Trading zu aktivieren.
+
+### 10.1 Schichten
+
+```
+Kern (engine, risk, agents, API)
+  │  kennt NUR das Interface
+  ▼
+BrokerAdapter  (src/contracts/broker.ts)     ← Contracts + Fehlerklassen
+  │  Factory = einziger Erzeugungspunkt
+  ▼
+getBroker(venue, mode)  (src/brokers/factory.ts)
+  │  1. Whitelist → 2. Live-Gate (IMMER LGTE) → 3. Capability-Gating → 4. Cache
+  ▼
+PAPER-Adapter (voll) · ALPACA/IBKR/BINANCE/KRAKEN/DYDX (sichere Stubs)
+  │  delegiert
+  ▼
+PaperBroker + marketData + Universe-Registry   (bestehende Bestandteile)
+```
+
+### 10.2 Execution Modes (erstklassiges Konzept)
+
+| Modus | Kurs | Order |
+| --- | --- | --- |
+| `backtest` | historisch | simuliert |
+| `paper` | real | simuliert |
+| `testnet` | real (Testnet) | Broker-Order |
+| `live` | real | reale Order — **hart gesperrt** (`LiveTradingGateError`, bis Live-Gate-Task) |
+
+Gating: `backtest`/`paper` → Capability `paper`, `testnet` → `testnet`,
+`live` → immer `LiveTradingGateError` (vor jeder Capability-Prüfung).
+Niemals stiller Fallback — jede Abweisung ist ein lauter, auditierter Fehler.
+
+### 10.3 Capability-Single-Source-of-Truth & Registry-Projektion
+
+`VENUE_CAPABILITIES` (src/brokers/capabilities.ts) ist die Wahrheit; die
+Adapter deklariert sie, die Factory gated nach ihr, und `BROKER_REGISTRY`
+projiziert `paperAvailable`/`liveAvailable` daraus (`projectCapabilityFlags`).
+Venue-Angebote (z. B. „Binance: Testnet vorhanden“) bleiben Doku-Felder —
+keine zweite Quelle. Capability-Matrix (Ist/Soll) und `stopAtVenue`
+(Ausbaupfad Bitunix): **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)**.
+
+### 10.4 Audit & API
+
+* Jeder Factory-Aufruf mit `mode != "paper"` → `audit_log` (Event
+  `BROKER_FACTORY`) + In-Memory-Ring (best-effort DB, Fail-Safe).
+* `GET /api/brokers` (Übersicht: id, capabilities, Health, projizierte
+  Flags) und `GET /api/brokers/{venue}/health` (read-only; Remote-Check nur
+  mit `BROKER_HEALTHCHECK_REMOTE=true`, Default OFF, credential-frei).
+
+---
+
+## 11. Glossar (Kurz)
 
 | Begriff | Bedeutung |
 | --- | --- |
@@ -619,3 +679,8 @@ Details, Feldkatalog und API-Beispiele: **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.m
 | Asset | venue-unabhängiger Ticker (z. B. `BTC`) |
 | Underlying | ökonomische Exposure hinter einem Instrument — Aggregationsebene für Klumpenrisiko |
 | Registry | deterministischer Speicher aller Instrumente (`src/universe/`, NDJSON) |
+| `BrokerAdapter` | venue-unabhängiges Interface der Broker-Schicht (Task 02) — die einzige Grenze zwischen Kern und Markt |
+| `ExecutionMode` | `backtest`/`paper`/`testnet`/`live` mit fester Semantik (Kurs × Order) |
+| Capability-Gating | Modus-Prüfung der Factory: `backtest`/`paper`→`paper`, `testnet`→`testnet`, `live`→hartes Gate |
+| `LiveTradingGateError` | permanente Sperre des Live-Pfads bis zum Live-Gate-Task — kein stiller Fallback |
+| Capability-Projektion | Registry-Flags `paperAvailable`/`liveAvailable` = Ableitung der Adapter-Capabilities (SSoT = Adapter) |
