@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "MIT",
   "private": true,
@@ -15,7 +15,9 @@
     "micro": "node --import tsx scripts/micro-executor.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/*.test.ts'"
+    "test": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/*.test.ts'",
+    "universe:seed": "node --import tsx scripts/seed-universe.ts",
+    "test:coverage": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/universe/**' 'tests/*.test.ts'"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",

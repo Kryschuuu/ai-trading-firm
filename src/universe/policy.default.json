@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "description": "Ausschlussregeln des Instrument-Universums. Rein deterministisch, ohne Netzwerk. Reihenfolge = Auswertungsreihenfolge; die erste greifende Regel entscheidet.",
+  "maxSymbolLength": 32,
+  "rules": [
+    {
+      "id": "leveraged-token",
+      "reason": "Gehebelte Token (3L/3S/5L/5S/UP/DOWN/BULL/BEAR) bilden ihren Basiswert wegen taeglichem Rebalancing nicht linear ab.",
+      "field": "symbol",
+      "pattern": "^[A-Z]{2,10}(?:3L|3S|5L|5S|UP|DOWN|BULL|BEAR)(?:USDT|USDC|USD|BUSD)?$"
+    },
+    {
+      "id": "test-symbol",
+      "reason": "Test- und Sandbox-Symbole der Venues gehoeren nicht ins Handelsuniversum.",
+      "field": "symbol",
+      "pattern": "^(?:TEST|DEMO|SANDBOX)[A-Z0-9/._=-]*$"
+    }
+  ],
+  "excludeVenues": [],
+  "excludeQuotes": []
+}

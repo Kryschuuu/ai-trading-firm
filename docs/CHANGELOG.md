@@ -20,6 +20,85 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.8.0] — 2026-08-27
+
+**Market Universe (Task 01): Die Plattform kennt jetzt Märkte statt Strings.
+Eine broker-unabhängige Instrumenten-Registry löst die hart kodierte
+`DEFAULT_WATCHLIST` als Marktdefinition ab.**
+
+### Neu: `src/universe/` (deterministischer Kern — kein LLM, kein Netzwerk)
+
+- **Datenmodell `MarketInstrument`** mit 20 fachlichen Pflichtfeldern plus
+  kanonischer ID (`VENUE:SYMBOL`): Identität, Handelsbedingungen
+  (`minQuantity`, `priceStep`, `quantityStep`, `makerFee`, `takerFee`),
+  Capability-Flags (`leverageAvailable`, `shortAvailable`, `paperAvailable`,
+  `liveAvailable`) und laufende Metriken (`volume24h`, `spread`, `volatility` —
+  initial `null`, gefüllt durch spätere Tasks).
+- **Symbol ≠ Markt:** strikte Trennung von `Instrument` (venue-gebunden),
+  `Asset` (venue-unabhängig) und `Underlying` (ökonomische Exposure).
+  `BINANCE:BTCUSDT`, `KRAKEN:BTC/USD` und `BITUNIX:BTCUSDT` sind drei
+  Instrumente mit einem Underlying — per Golden-Test verifiziert.
+- **Registry-Layer** (`registry.ts`): `upsert`, `upsertMany` (max. 5000/Batch),
+  `query` mit 15 Filtern, Pagination (max. **500**/Seite, Default 100),
+  `remove`, `groupByVenue`, `underlyings`. Deterministisch: stabile Sortierung
+  nach `id`, Merge-Upsert ohne Default-Rücksetzer, `null`-Metriken überschreiben
+  keine Bestandswerte.
+- **Persistenz** als versionierbare NDJSON-Datei
+  (`data/universe/instruments.ndjson`, atomar via `tmp`+`rename`) — reviewbar im
+  Git-Diff und ohne laufende Datenbank nutzbar. Verzeichnis via
+  `UNIVERSE_DATA_DIR` konfigurierbar.
+- **Normalisierung & Policy** (`normalization.ts`, `policy.ts`,
+  `policy.default.json`): venue-native Symbole → kanonische ID, base/quote-,
+  Anlageklassen- und Markttyp-Ableitung; konfigurierbare Ausschlussregeln
+  (Leveraged Tokens, Test-Symbole, gesperrte Venues/Quotes) mit Validierung der
+  Policy-Datei; Override via `UNIVERSE_POLICY_FILE`.
+- **Audit** (`audit.ts`): jede Mutation erzeugt genau einen Eintrag
+  (`actor: system`, `source`, `action`, `changed`, `created`, `updated`,
+  `rejected`, `ids`, `timestamp`) in `data/universe/audit-log.ndjson`;
+  mit `UNIVERSE_AUDIT_DB=1` zusätzlich als `UNIVERSE_MUTATION` in `audit_log`.
+
+### Neu: API
+
+- `GET /api/markets` → `{ ok, venue, count, lastSync, instruments[], groups[],
+  page, pageSize, total, hasMore }`, nach Venue gruppiert und über 15 Parameter
+  filterbar; strikte Eingabevalidierung, Fehler-Contract
+  `{ ok:false, error, message, details? }` (400/500).
+- `GET /api/markets/{venue}/{symbol}` → Instrument inkl. `assetId`/`underlyingId`
+  und `related` (gleiches Underlying an anderen Venues); 400/404/500 nach
+  demselben Contract. Symbole mit `/` als `%2F` oder `~` adressierbar.
+
+### Migration (kein Breaking Change)
+
+- Die 9 Watchlist-Symbole wurden zu **26 Seed-Instrumenten** migriert:
+  BTC/ETH/SOL → BINANCE + KRAKEN, SPY/QQQ/NVDA/AAPL/MSFT → ALPACA + IBKR,
+  EURUSD=X → `IBKR:EUR.USD` (FX) sowie je ein `PAPER:*`-Spiegel, damit der
+  bestehende Paper-Broker-Pfad unverändert läuft.
+  Regenerierbar mit `npm run universe:seed` (byte-identisches Ergebnis).
+- `DEFAULT_WATCHLIST` bleibt exportiert, ist aber **`@deprecated`** und leitet
+  sich aus `UI_WATCHLIST_PREFERENCE` (`src/universe/watchlist.ts`) ab — einer
+  Liste von Instrument-ID-Referenzen. Die Watchlist ist damit reine UI-Präferenz.
+
+### Tests & Doku
+
+- 66 neue Tests (Registry-CRUD, Upsert-Konflikte, alle Filter, Pagination-Limits,
+  stabile Sortierung, Policy, Golden-Normalisierung, API-Contract,
+  Persistenz-Reload, Seed-Fixture); Gesamtsuite **301 grün**.
+  Coverage `src/universe/**`: **97,4 % Zeilen / 90,6 % Branches / 91,3 % Funktionen**
+  (`npm run test:coverage`).
+- Neu: `docs/MARKET_UNIVERSE.md`, `docs/help/market-universe.help.json`
+  (3-Ebenen-Hilfetexte für alle Felder, Tooltip-Quelle für das Operations Center);
+  aktualisiert: `docs/ARCHITECTURE.md` (§9 Universum-Pipeline),
+  `docs/SECURITY_AUDIT.md` (Kapitel „Security Audit — Task 01“).
+
+### Migrationshinweise
+
+- Keine DB-Migration nötig; kein neues Paket (0 neue Dependencies).
+- `data/universe/instruments.ndjson` ist versioniert und wird beim ersten Start
+  automatisch geseedet, falls sie fehlt. `data/universe/audit-log.ndjson` ist
+  bewusst **nicht** versioniert (`.gitignore`).
+
+---
+
 ## [1.7.0] — 2026-08-26
 
 **Adaptives Risk-Limit-System: `maxRiskPerTrade` senkt sich automatisch in
