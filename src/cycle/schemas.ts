@@ -44,13 +44,21 @@ export function validateMacroOutput(input: unknown): { valid: boolean; data?: Ma
   }
   const obj = input as Record<string, unknown>;
 
-  const view = typeof obj.view === "string" && ["BULLISH", "BEARISH", "NEUTRAL"].includes(obj.view.toUpperCase())
-    ? (obj.view.toUpperCase() as MacroStepOutput["view"])
-    : "NEUTRAL";
+  if (typeof obj.view !== "string" || typeof obj.regime !== "string") {
+    return { valid: false, error: "Macro output: view and regime are required string properties" };
+  }
 
-  const regime = typeof obj.regime === "string" && ["RISK_ON", "RISK_OFF", "MIXED"].includes(obj.regime.toUpperCase())
-    ? (obj.regime.toUpperCase() as MacroStepOutput["regime"])
-    : "MIXED";
+  const viewRaw = obj.view.toUpperCase();
+  if (!["BULLISH", "BEARISH", "NEUTRAL"].includes(viewRaw)) {
+    return { valid: false, error: `Macro output: invalid view "${obj.view}"` };
+  }
+  const view = viewRaw as MacroStepOutput["view"];
+
+  const regimeRaw = obj.regime.toUpperCase();
+  if (!["RISK_ON", "RISK_OFF", "MIXED"].includes(regimeRaw)) {
+    return { valid: false, error: `Macro output: invalid regime "${obj.regime}"` };
+  }
+  const regime = regimeRaw as MacroStepOutput["regime"];
 
   const volatilityRegime =
     typeof obj.volatilityRegime === "string" &&
@@ -117,7 +125,10 @@ export function validateSelectionOutput(input: unknown): { valid: boolean; data?
     return { valid: false, error: "Selection output must be an object" };
   }
   const obj = input as Record<string, unknown>;
-  const rawList = Array.isArray(obj.candidates) ? obj.candidates : [];
+  if (!Array.isArray(obj.candidates)) {
+    return { valid: false, error: "Selection output: candidates must be an array" };
+  }
+  const rawList = obj.candidates;
 
   const candidates: DailyCandidate[] = [];
   for (let i = 0; i < rawList.length && i < MAX_SHORTLIST_LIMIT; i++) {
@@ -171,7 +182,10 @@ export function validateTechnicalOutput(input: unknown): { valid: boolean; data?
     return { valid: false, error: "Technical output must be an object" };
   }
   const obj = input as Record<string, unknown>;
-  const rawList = Array.isArray(obj.analyses) ? obj.analyses : [];
+  if (!Array.isArray(obj.analyses)) {
+    return { valid: false, error: "Technical output: analyses must be an array" };
+  }
+  const rawList = obj.analyses;
 
   const analyses: InstrumentTechnicalAnalysis[] = [];
   for (let i = 0; i < rawList.length && i < MAX_SHORTLIST_LIMIT; i++) {
@@ -236,7 +250,10 @@ export function validateNewsOutput(input: unknown): { valid: boolean; data?: New
     return { valid: false, error: "News output must be an object" };
   }
   const obj = input as Record<string, unknown>;
-  const rawList = Array.isArray(obj.analyses) ? obj.analyses : [];
+  if (!Array.isArray(obj.analyses)) {
+    return { valid: false, error: "News output: analyses must be an array" };
+  }
+  const rawList = obj.analyses;
 
   const analyses: InstrumentNewsAnalysis[] = [];
   for (let i = 0; i < rawList.length && i < MAX_SHORTLIST_LIMIT; i++) {
@@ -370,7 +387,10 @@ export function validateResearchOutput(input: unknown): { valid: boolean; data?:
     return { valid: false, error: "Research output must be an object" };
   }
   const obj = input as Record<string, unknown>;
-  const rawList = Array.isArray(obj.setups) ? obj.setups : [];
+  if (!Array.isArray(obj.setups)) {
+    return { valid: false, error: "Research output: setups must be an array" };
+  }
+  const rawList = obj.setups;
 
   const setups: TradeSetupProposal[] = [];
   for (let i = 0; i < rawList.length && i < MAX_SHORTLIST_LIMIT; i++) {
@@ -441,7 +461,10 @@ export function validateBacktestOutput(input: unknown): { valid: boolean; data?:
     return { valid: false, error: "Backtest output must be an object" };
   }
   const obj = input as Record<string, unknown>;
-  const rawList = Array.isArray(obj.verifiedSetups) ? obj.verifiedSetups : [];
+  if (!Array.isArray(obj.verifiedSetups)) {
+    return { valid: false, error: "Backtest output: verifiedSetups must be an array" };
+  }
+  const rawList = obj.verifiedSetups;
 
   const verifiedSetups: VerifiedSetupResult[] = [];
   let passedCount = 0;
