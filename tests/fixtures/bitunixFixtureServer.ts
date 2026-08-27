@@ -1,0 +1,197 @@
+/**
+ * Lokaler Bitunix-REST-Fixture-Server (Task 07).
+ *
+ * Bindet ausschließlich 127.0.0.1. Private Endpunkte zählen Calls und
+ * prüfen die Signatur — Paper-Tests dürfen sie nie treffen.
+ */
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { BITUNIX_PATHS } from "../../src/brokers/bitunix/config";
+import { encodeQueryParams, verifyBitunixSign } from "../../src/brokers/bitunix/signing";
+
+export class BitunixFixtureServer {
+  apiKey = "fixture-api-key";
+  apiSecret = "fixture-api-secret";
+  privateCalls = 0;
+  publicCalls = 0;
+  requests: { method: string; path: string; signed: boolean }[] = [];
+  failPublic = false;
+  httpStatus?: number;
+  private server: http.Server | null = null;
+
+  async start(): Promise<string> {
+    this.server = http.createServer((req, res) => this.handle(req, res));
+    await new Promise<void>((resolve) => this.server!.listen(0, "127.0.0.1", resolve));
+    const addr = this.server.address() as AddressInfo;
+    return `http://127.0.0.1:${addr.port}`;
+  }
+
+  async stop(): Promise<void> {
+    if (!this.server) return;
+    await new Promise<void>((resolve) => this.server!.close(() => resolve()));
+    this.server = null;
+  }
+
+  private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const path = url.pathname;
+    const signed = Boolean(req.headers.sign);
+    this.requests.push({ method: req.method ?? "GET", path, signed });
+
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c as Buffer));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      try {
+        this.route(req, res, path, url, body, signed);
+      } catch {
+        json(res, 500, { code: 1, msg: "fixture error", data: null });
+      }
+    });
+  }
+
+  private route(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    path: string,
+    url: URL,
+    body: string,
+    signed: boolean
+  ): void {
+    if (this.httpStatus) {
+      json(res, this.httpStatus, { code: this.httpStatus, msg: "forced", data: null });
+      return;
+    }
+    const isPrivate =
+      path === BITUNIX_PATHS.account ||
+      path === BITUNIX_PATHS.positions ||
+      path === BITUNIX_PATHS.placeOrder;
+    if (isPrivate) {
+      this.privateCalls += 1;
+      if (!this.validSign(req, url, body)) {
+        json(res, 401, { code: 10007, msg: "Signature Error", data: null });
+        return;
+      }
+      if (path === BITUNIX_PATHS.account) {
+        json(res, 200, {
+          code: 0,
+          data: [{ marginCoin: "USDT", available: "10000", crossUnrealizedPNL: "0", isolationUnrealizedPNL: "0" }],
+        });
+        return;
+      }
+      if (path === BITUNIX_PATHS.positions) {
+        json(res, 200, {
+          code: 0,
+          data: [
+            { symbol: "BTCUSDT", qty: "0.01", side: "LONG", avgOpenPrice: "65000", unrealizedPNL: "12.5" },
+          ],
+        });
+        return;
+      }
+      json(res, 200, { code: 0, data: { orderId: "BX-1", clientId: "c1" } });
+      return;
+    }
+
+    this.publicCalls += 1;
+    if (this.failPublic) {
+      json(res, 503, { code: 1, msg: "maintenance", data: null });
+      return;
+    }
+    if (path === BITUNIX_PATHS.tradingPairs) {
+      json(res, 200, {
+        code: 0,
+        data: [
+          {
+            symbol: "BTCUSDT",
+            base: "BTC",
+            quote: "USDT",
+            minTradeVolume: "0.001",
+            basePrecision: 3,
+            quotePrecision: 1,
+            maxLeverage: 125,
+            symbolStatus: "OPEN",
+            mysteryField: "ignore-me",
+          },
+          {
+            symbol: "ETHUSDT",
+            base: "ETH",
+            quote: "USDT",
+            minTradeVolume: "0.01",
+            basePrecision: 2,
+            quotePrecision: 2,
+            maxLeverage: 50,
+            symbolStatus: "CANCEL_ONLY",
+          },
+          { symbol: "??", base: "X", quote: "Y" },
+        ],
+      });
+      return;
+    }
+    if (path === BITUNIX_PATHS.tickers) {
+      json(res, 200, {
+        code: 0,
+        data: [
+          {
+            symbol: "BTCUSDT",
+            lastPrice: "65000.5",
+            markPrice: "65001",
+            quoteVol: "120000000",
+            baseVol: "1846",
+            high: "66100",
+            low: "64000",
+          },
+        ],
+      });
+      return;
+    }
+    if (path === BITUNIX_PATHS.kline) {
+      json(res, 200, {
+        code: 0,
+        data: [
+          { time: 1_700_000_000_000, open: "64000", high: "66100", low: "63900", close: "65000", baseVol: "10" },
+          { time: 1_700_000_060_000, open: "65000", high: "65200", low: "64900", close: "65100", baseVol: "8" },
+        ],
+      });
+      return;
+    }
+    if (path === BITUNIX_PATHS.depth) {
+      json(res, 200, {
+        code: 0,
+        data: {
+          bids: [["64999", "1.2"], ["64998", "0.5"]],
+          asks: [["65001", "0.8"], ["65002", "2"]],
+        },
+      });
+      return;
+    }
+    void signed;
+    json(res, 404, { code: 1, msg: "not found", data: null });
+  }
+
+  private validSign(req: http.IncomingMessage, url: URL, body: string): boolean {
+    const nonce = String(req.headers.nonce ?? "");
+    const timestamp = String(req.headers.timestamp ?? "");
+    const apiKey = String(req.headers["api-key"] ?? "");
+    const sign = String(req.headers.sign ?? "");
+    const query: Record<string, string> = {};
+    url.searchParams.forEach((v, k) => {
+      query[k] = v;
+    });
+    return verifyBitunixSign(
+      {
+        nonce,
+        timestamp,
+        apiKey,
+        secret: this.apiSecret,
+        queryParams: encodeQueryParams(query),
+        body: req.method === "POST" ? body : "",
+      },
+      sign
+    ) && apiKey === this.apiKey;
+  }
+}
+
+function json(res: http.ServerResponse, status: number, payload: unknown): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(payload));
+}

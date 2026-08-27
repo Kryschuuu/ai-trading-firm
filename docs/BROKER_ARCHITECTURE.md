@@ -1,6 +1,6 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.10.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`,
+**Stand:** v1.15.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`,
 `src/lib/broker.ts` (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
 `GET /api/brokers`, `GET /api/brokers/{venue}/health`.
 
@@ -51,24 +51,24 @@ Die Flags beschreiben, was der **Adapter-Code dieses Repos** aktuell
 ausführt — nicht, was der Broker-Anbieter bewirbt (Venue-Angebote bleiben
 als Doku in `BROKER_REGISTRY`: `label`, `assets`, `paperApi`, `note`).
 
-| Capability | PAPER | ALPACA | IBKR | BINANCE | KRAKEN | DYDX |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| `discovery` | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) |
-| `marketData` | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) |
-| `trading` | ✅ (simuliert) | ❌ (Soll: ✅ testnet→live) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) |
-| `paper` | ✅ | ❌ (Soll: ✅, Venue bietet Paper-API) | ❌ (Soll: ✅) | ❌ | ❌ | ❌ (Venue ohne Paper) |
-| `testnet` | ❌ | ❌ | ❌ | ❌ (Soll: ✅, Venue hat Testnet) | ❌ (Soll: ✅, Futures-Demo) | ❌ |
-| `live` | ❌ (simuliert, nie live) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) |
-| `instrumentTypes.spot` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| `instrumentTypes.perpetual` | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| `instrumentTypes.future` | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ |
-| `instrumentTypes.option` | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| `stopAtVenue` (SL/TP am Order-Aufruf) | ❌ (SL/TP intern via Monitor) | ❌ (Soll: ✅ Bracket-Orders) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (**Soll: ✅ — wichtig für Bitunix**) |
+| Capability | PAPER | ALPACA | IBKR | BINANCE | KRAKEN | DYDX | BITUNIX |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `discovery` | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ |
+| `marketData` | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ |
+| `trading` | ✅ (simuliert) | ❌ (Soll: ✅ testnet→live) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ (Paper; Live gesperrt) |
+| `paper` | ✅ | ❌ (Soll: ✅, Venue bietet Paper-API) | ❌ (Soll: ✅) | ❌ | ❌ | ❌ (Venue ohne Paper) | ✅ (Modus B, echte Kurse) |
+| `testnet` | ❌ | ❌ | ❌ | ❌ (Soll: ✅, Venue hat Testnet) | ❌ (Soll: ✅, Futures-Demo) | ❌ | ❌ (kein dokumentiertes Testnet) |
+| `live` | ❌ (simuliert, nie live) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ✅ Capability / ❌ Ausführung (LGTE bis task-11) |
+| `instrumentTypes.spot` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `instrumentTypes.perpetual` | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `instrumentTypes.future` | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `instrumentTypes.option` | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `stopAtVenue` (SL/TP am Order-Aufruf) | ❌ (SL/TP intern via Monitor) | ❌ (Soll: ✅ Bracket-Orders) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ (`slPrice`/`tpPrice` im Place-Order) |
 
-`stopAtVenue` ist der Ausbaupfad für den späteren **Bitunix-Adapter**:
-Perpetuals mit Funding brauchen Stops, die am Venue platziert werden, nicht
-nur lokal überwacht. Das Flag ist Teil des Contracts, damit der neue Adapter
-von Anfang an kompatibel ist.
+`stopAtVenue` ist für **Bitunix** wahr: Perpetuals mit Funding brauchen Stops,
+die am Venue platziert werden, nicht nur lokal überwacht. Der Paper-Pfad merkt
+SL/TP am Fill an, sendet sie aber nicht (keine Private-API). Details:
+[BITUNIX.md](BITUNIX.md).
 
 ---
 
@@ -77,7 +77,7 @@ von Anfang an kompatibel ist.
 ```
 getBroker(venue, mode = "paper")                     src/brokers/factory.ts
   │
-  ├─ 1) Whitelist-Validierung (6 Venues, Groß/Trim)
+  ├─ 1) Whitelist-Validierung (7 Venues, Groß/Trim)
   │      └─ unbekannt → UnknownVenueError  ──► Audit (DENIED, UNKNOWN_VENUE)
   │
   ├─ 2) mode === "live"?
@@ -88,6 +88,7 @@ getBroker(venue, mode = "paper")                     src/brokers/factory.ts
   │
   └─ 4) OK → Adapter aus Cache (je venue:mode) oder frisch erzeugen
          PAPER: teilt den Prozess-Singleton-Ledger (paperBrokerLedger())
+         BITUNIX: BitunixBrokerAdapter (Paper gegen Public-Kurse)
          ──► Audit (OK) nur bei mode != "paper"
 ```
 
@@ -101,7 +102,7 @@ Kill-Switch) — unverändert aus v1.1.0/v1.5.2.
 `paperAvailable = capabilities.paper` und `liveAvailable = capabilities.live`
 über `projectCapabilityFlags()` ab. **Single Source of Truth = Adapter**;
 die Registry ist eine Projektion. `tests/brokerFactory.test.ts`
-("Registry-Projektion") bezeugt die Spiegelung für alle 6 Venues.
+("Registry-Projektion") bezeugt die Spiegelung für alle 7 Venues.
 Das alte Feld `paperApi` bleibt als **Venue-Angebot** (Vendor-Fakt, Doku) —
 es ist kein Ausführungsversprechen.
 
@@ -138,8 +139,8 @@ den Contract in der Meldung.
 
 Eintrag: `{ venue, mode, outcome: OK|DENIED, capability, errorCode, at }` —
 nur diese Felder (keine Order-Daten, keine Kurse). Geprüft in
-`tests/brokerFactory.test.ts`: 18 Einträge für die 18 nicht-Paper-Aufrufe
-der Matrix, paper-Modus **ohne** Eintrag, alle Live-Ablehnungen auditiert.
+`tests/brokerFactory.test.ts`: 21 Einträge für die 21 nicht-Paper-Aufrufe
+der 28er-Matrix, paper-Modus **ohne** Eintrag, alle Live-Ablehnungen auditiert.
 
 ---
 
@@ -147,7 +148,7 @@ der Matrix, paper-Modus **ohne** Eintrag, alle Live-Ablehnungen auditiert.
 
 | Endpunkt | Antwort |
 | --- | --- |
-| `GET /api/brokers` | 6 Venues: `id`, `label`, `assets`, `capabilities`, `paperAvailable`/`liveAvailable` (Projektion), `executionModes`, `health` (lokal); `remoteHealthCheck.enabled` (Default false) |
+| `GET /api/brokers` | 7 Venues: `id`, `label`, `assets`, `capabilities`, `paperAvailable`/`liveAvailable` (Projektion), `executionModes`, `health` (lokal); `remoteHealthCheck.enabled` (Default false) |
 | `GET /api/brokers/{venue}/health` | `health` (lokal bzw. remote je Flag), `capabilities`, `executionModes`, `remoteHealthCheck` |
 
 Kein API-Token (konsistent mit den übrigen GET-Endpunkten), Fehler-Contract
@@ -159,15 +160,16 @@ Kein API-Token (konsistent mit den übrigen GET-Endpunkten), Fehler-Contract
 ## 8. Health-Checks & Remote-Flag
 
 - **Lokal (Default):** PAPER → `online` (in-process, deterministisch);
-  Stubs → `offline` + Grund `implemented:false` (ehrliche Ist-Lage — der
-  Stub behauptet nicht, erreichbar zu sein).
+  BITUNIX → `offline` solange `BITUNIX_ENABLED` nicht `"true"` (sonst `online`,
+  Remote optional Public-Tickers); Stubs → `offline` + Grund `implemented:false`
+  (ehrliche Ist-Lage — der Stub behauptet nicht, erreichbar zu sein).
 - **Remote (nur `BROKER_HEALTHCHECK_REMOTE=true`):** read-only,
   credential-frei, 4 s Timeout. Implementiert: Binance Public `ping`,
-  Kraken Public `Time`. **Bewusst NICHT** implementiert (melden `degraded`
-  mit Grund): ALPACA (`CREDENTIALS_REQUIRED`), IBKR (`GATEWAY_REQUIRED`),
-  DYDX (`REMOTE_CHECK_NOT_IMPLEMENTED`) — kein Venue ohne verifizierten
-  read-only Public-Endpunkt wird gecallt; ohne Credentials wird **nie**
-  ein Request gestellt (getestet).
+  Kraken Public `Time`, Bitunix Public `tickers`. **Bewusst NICHT** implementiert
+  (melden `degraded` mit Grund): ALPACA (`CREDENTIALS_REQUIRED`), IBKR
+  (`GATEWAY_REQUIRED`), DYDX (`REMOTE_CHECK_NOT_IMPLEMENTED`) — kein Venue ohne
+  verifizierten read-only Public-Endpunkt wird gecallt; ohne Credentials wird
+  **nie** ein Request gestellt (getestet).
 - Fehler werden redigiert zurückgeliefert (kein Host-/Credential-Leak).
 
 ---
@@ -178,11 +180,12 @@ Kein API-Token (konsistent mit den übrigen GET-Endpunkten), Fehler-Contract
 | --- | --- |
 | Adapter-Ausbau (03+) | Venue-Adapter ersetzen die Stubs: Discovery (TODO(task-02/07)), Marktdaten, Trading; Capabilities schrittweise auf true — Gating/Factory/Audit bleiben unverändert |
 | Live-Trading-Gate | State-Machine + Hard-Gates; öffnet `mode="live"` **erst** nach Freigabe; `LiveTradingGateError` wird dann durch die Gate-Prüfung ersetzt |
-| Bitunix-Adapter | nutzt `stopAtVenue: true` (SL/TP am Order-Aufruf) + `perpetual: true`; neue Venue = neuer Capability-Eintrag + Adapter |
+| Bitunix-Adapter (Task 07) | **umgesetzt:** `src/brokers/bitunix/`, `stopAtVenue: true`, Paper-Modus B; Live bleibt LGTE bis task-11. Doku: [BITUNIX.md](BITUNIX.md) |
 
 ## 10. Verweise
 
 - Contracts: `src/contracts/broker.ts` · Factory: `src/brokers/factory.ts`
 - Capability-SSoT: `src/brokers/capabilities.ts` · Audit: `src/brokers/audit.ts`
-- Security: `docs/SECURITY_AUDIT.md` (Kapitel "Security Audit — Task 02")
+- Security: `docs/SECURITY_AUDIT.md` (Kapitel "Security Audit — Task 02" / Task 07)
 - Universum: `docs/MARKET_UNIVERSE.md` (Task 01) · `MarketInstrument`-Contract: `src/universe/types.ts`
+- Bitunix: `docs/BITUNIX.md`

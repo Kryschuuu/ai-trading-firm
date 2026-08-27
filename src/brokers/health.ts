@@ -74,6 +74,14 @@ export const REMOTE_HEALTH_CHECKERS: Partial<
       ? { status: "online", details: { endpoint: "public-time", httpStatus: res.status } }
       : { status: "degraded", details: { reason: "UNEXPECTED_RESPONSE", httpStatus: res.status } };
   },
+  /** Bitunix Public REST — tickers, kein Key. */
+  BITUNIX: async () => {
+    const res = await fetchReadOnly("https://fapi.bitunix.com/api/v1/futures/market/tickers?symbols=BTCUSDT");
+    if (res.ok) {
+      return { status: "online", details: { endpoint: "public-tickers", httpStatus: res.status } };
+    }
+    return { status: "degraded", details: { httpStatus: res.status } };
+  },
 };
 
 /**

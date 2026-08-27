@@ -20,6 +20,56 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.15.0] — 2026-08-27
+
+**Bitunix-Adapter als 7. Venue (Task 07): Public REST/WS für USDT-M-Perpetuals,
+offizielle Doppel-SHA256-Signatur, Paper-Modus B gegen echte Kurse, Live-Pfad
+weiterhin hart `LiveTradingGateError` (`TODO(task-11)`). Kein dokumentiertes
+Testnet, keine echten Private-Calls in Tests.**
+
+### Neu: `src/brokers/bitunix/`
+
+- **Public REST:** `trading_pairs` → `MarketInstrument` (`marketType=perpetual`,
+  Registry-Upsert `source=discovery:bitunix`), Ticker (`lastPrice`/`markPrice`/
+  `quoteVol`/`baseVol`/`high`/`low`), Klines, Orderbuch.
+- **Public WS:** Channels `ticker` und `market_kline_*` mit Reconnect, exponentiellem
+  Backoff und Resubscribe; Ticker = Full-Replace, Kline = Delta gleicher `time`.
+- **Signing:** `SHA256(SHA256(nonce+timestamp+api-key+queryParams+body)+secret)`,
+  UTF-8, Hex lower-case; Query ASCII-sortiert ohne Trenner; Body kompakt.
+  Golden-Tests (inkl. offiziellem Doku-Beispiel).
+- **Private REST vorbereitet:** Account, Pending-Positions, Place-Order inkl.
+  `slPrice`/`tpPrice` (`stopAtVenue=true`). Der Adapter-Live-Pfad sendet **nie**.
+- **Gates:** `BITUNIX_ENABLED` / `BITUNIX_LIVE_ENABLED` / `LIVE_TRADING_ENABLED`
+  Default aus; `REQUIRE_HUMAN_APPROVAL` für Live nur bei exakt `"false"` offen.
+  16 Flag-Kombinationen → immer `LiveTradingGateError`.
+- **Secrets:** `SecretStore` + Env-Fallback `BITUNIX_API_KEY`/`BITUNIX_API_SECRET`
+  (`TODO(task-08)`). Redactor maskiert Keys, Header und Hex-Signaturen.
+- **SSRF/TLS/Rate-Limit:** Host-Allowlist `fapi.bitunix.com`, TLS erzwungen,
+  Token-Bucket 8 req/s, Timeout/Retry nur für 429/5xx.
+- **Paper (Modus B):** echte Public-Kurse, lokales Ledger, 0 Private-Calls.
+
+### Geändert
+
+- `BROKER_VENUE_IDS` und Factory-Matrix: 6→**7** Venues, 24er→**28er**.
+- `GET /api/brokers` `count=7`; BITUNIX `paperAvailable=true`, `liveAvailable=true`
+  (Capability; Ausführung gesperrt). Health lokal `offline` solange Flag aus.
+- `inferMarketType("BITUNIX")` → `perpetual`.
+- Audit-Katalog: Event `BITUNIX_PRIVATE_CALL` (Methode/Pfad/Outcome, keine Secrets).
+
+### Tests & Doku
+
+- `tests/bitunix.*.test.ts` + Fixture-Server; Factory/Contracts/API auf 7 Venues.
+- `docs/BITUNIX.md`, Update BROKER_ARCHITECTURE / MARKET_UNIVERSE / ARCHITECTURE §10.1,
+  SECURITY_AUDIT Task 07, `docs/help/brokers.help.json`, `.env.example`.
+- `npm run test:coverage:bitunix`.
+
+### Migrationshinweise
+
+Kein Schema-Bruch. Optional in `.env`: `BITUNIX_ENABLED=false` (Default). Live bleibt
+gesperrt, auch wenn alle Flags gesetzt werden.
+
+---
+
 ## [1.14.0] — 2026-08-27
 
 **Daily & Weekly Agent Cycle mit Shortlist-Limits und Artefakten (Task 06):

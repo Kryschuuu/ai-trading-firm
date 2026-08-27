@@ -54,6 +54,17 @@ test("runRemoteHealthCheck: Flag AN, Venue ohne Checker => null", async () => {
   assert.equal(await runRemoteHealthCheck("PAPER", { BROKER_HEALTHCHECK_REMOTE: "true" }), null);
 });
 
+test("runRemoteHealthCheck: Flag AN, BITUNIX public tickers (gestubbt)", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    assert.match(String(input), /fapi\.bitunix\.com\/api\/v1\/futures\/market\/tickers/);
+    return new Response("ok", { status: 200 });
+  }) as typeof fetch;
+  const res = await runRemoteHealthCheck("BITUNIX", { BROKER_HEALTHCHECK_REMOTE: "true" });
+  assert.ok(res);
+  assert.equal(res.status, "online");
+  assert.equal(res.details.endpoint, "public-tickers");
+});
+
 test("runRemoteHealthCheck: Flag AN, BINANCE online (gestubbt)", async () => {
   globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch;
   const res = await runRemoteHealthCheck("BINANCE", { BROKER_HEALTHCHECK_REMOTE: "true" });

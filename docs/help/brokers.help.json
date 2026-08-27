@@ -43,7 +43,7 @@
     },
     "capabilities.paper": {
       "kurzinfo": "Betreibt der Adapter ein simuliertes Depot (simulierte Orders)?",
-      "technischeInfo": "Gate für die Modi backtest und paper. Nur PAPER ist true. Die projizierte Registry-Flag paperAvailable wird direkt daraus abgeleitet (Single Source of Truth = Adapter).",
+      "technischeInfo": "Gate für die Modi backtest und paper. PAPER und BITUNIX sind true (BITUNIX: echte Public-Kurse, lokales Ledger, keine Private-API). Die projizierte Registry-Flag paperAvailable wird direkt daraus abgeleitet (Single Source of Truth = Adapter).",
       "risiko": "Simulation idealisiert: keine echten Gebühren, keine Liquiditätstiefe. Ergebnisse sind Entscheidungsgrundlage, keine Zusicherung."
     },
     "capabilities.testnet": {
@@ -53,7 +53,7 @@
     },
     "capabilities.live": {
       "kurzinfo": "Kann der Adapter technisch reale Orders senden?",
-      "technischeInfo": "Projektions-Basis für liveAvailable. Selbst wenn ein Adapter später live=true deklariert, öffnet das nichts: Die Factory wirft bis zum Live-Trading-Gate-Task immer LiveTradingGateError. Capability ist Möglichkeit, keine Freigabe.",
+      "technischeInfo": "Projektions-Basis für liveAvailable. BITUNIX deklariert live=true (Signing und Place-Order-Serialisierung existieren), alle anderen Venues false. Das öffnet nichts: Factory und Adapter werfen bis zum Live-Trading-Gate-Task immer LiveTradingGateError. Capability ist Möglichkeit, keine Freigabe.",
       "risiko": "Das Flag darf nie als Freigabe missverstanden werden. Live-Handel erfordert Credentials, Hard-Gates, State-Machine und ein eigenes Peer-Review."
     },
     "capabilities.stopAtVenue": {
@@ -88,8 +88,28 @@
     },
     "liveAvailable": {
       "kurzinfo": "Kann diese Venue technisch Live-Orders ausführen?",
-      "technischeInfo": "Projektion aus der Adapter-Capability live. Heute für alle Venues false. Selbst bei future true: Die Factory sperrt den live-Modus bis zum Live-Gate-Task — das Flag ist keine Freigabe.",
+      "technischeInfo": "Projektion aus der Adapter-Capability live. BITUNIX ist true (technische Fähigkeit), alle anderen Venues false. Die Factory sperrt den live-Modus bis zum Live-Gate-Task — das Flag ist keine Freigabe.",
       "risiko": "liveAvailable darf niemals als Erlaubnis gelesen werden. Es beschreibt eine technische Fähigkeit des Adapters; die Freigabe ist eine separate, menschliche Entscheidung mit Hard-Gates."
+    },
+    "venue.BITUNIX": {
+      "kurzinfo": "Siebtes Venue: Bitunix USDT-M-Perpetuals. Public REST/WS und Paper gegen echte Kurse; Live gesperrt.",
+      "technischeInfo": "Adapter src/brokers/bitunix/. Capabilities: discovery/marketData/trading/paper/live/stopAtVenue true, testnet false. Paper (Modus B) nutzt Public-Ticker und ein lokales Ledger — 0 Private-Calls. Live-placeOrder serialisiert SL/TP (slPrice/tpPrice) und wirft immer LiveTradingGateError (TODO task-11).",
+      "risiko": "Perpetuals mit Hebel: Funding und Liquidation. Venue-Stops (stopAtVenue) sind für Live vorgesehen, im Paper nur vermerkt. Keys nie ins Frontend; BITUNIX_ENABLED default aus."
+    },
+    "BITUNIX_ENABLED": {
+      "kurzinfo": "Schaltet den Bitunix-Adapter (Market-Data/Paper) ein. Nur exakt true; Default aus.",
+      "technischeInfo": "Ohne BITUNIX_ENABLED=true werfen Discovery, Ticker, Kerzen, Orderbuch, Account, Positions und Paper-Orders BitunixDisabledError. Health lokal offline mit reason BITUNIX_DISABLED. Allein reicht das Flag nicht für Live.",
+      "risiko": "Einschalten erzeugt Public-Netzverkehr zu fapi.bitunix.com. Private-API wird im Paper-Pfad trotzdem nicht aufgerufen."
+    },
+    "BITUNIX_LIVE_ENABLED": {
+      "kurzinfo": "Venue-Live-Teilbedingung. Allein wirkungslos — Live bleibt bis task-11 immer gesperrt.",
+      "technischeInfo": "Eine Live-Order bräuchte BITUNIX_ENABLED, BITUNIX_LIVE_ENABLED, LIVE_TRADING_ENABLED, REQUIRE_HUMAN_APPROVAL=false und den Live-Gate-Service (existiert nicht). Alle 16 Flag-Kombinationen werfen LiveTradingGateError.",
+      "risiko": "Niemals als Freigabe lesen. Ein gesetztes Flag ohne Gate-Service ändert nichts am Versandverbot."
+    },
+    "bitunix.signing": {
+      "kurzinfo": "Doppel-SHA256: digest = SHA256(nonce+ts+api-key+query+body), sign = SHA256(digest+secret).",
+      "technischeInfo": "Query ASCII-sortiert als key+value ohne Trenner, Body kompakt JSON. Header api-key, nonce, timestamp, sign. Goldens in tests/bitunix.unit.test.ts inkl. offiziellem Doku-Beispiel.",
+      "risiko": "Signaturen und Keys werden vom Redactor maskiert und nie ins Audit geschrieben. Falsche Signatur → 401 ohne Retry."
     }
   }
 }

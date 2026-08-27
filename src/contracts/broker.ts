@@ -35,9 +35,8 @@ export const EXECUTION_MODES: readonly ExecutionMode[] = [
 
 /**
  * Venue-IDs, für die diese Plattform Adapter kennt. `PAPER` ist der interne
- * Simulator; die übrigen five Venues sind Stubs bis deren Adapter implementiert
- * sind (Folge-Tasks). Neue Venues (z. B. `BITUNIX`) werden durch Hinzufügen
- * eines Adapters + Capability-Eintrags aufgenommen.
+ * Simulator; ALPACA/IBKR/BINANCE/KRAKEN/DYDX sind Stubs; `BITUNIX` ist der
+ * siebte Adapter (Task 07, Live hart gesperrt).
  */
 export type BrokerVenueId =
   | "PAPER"
@@ -45,7 +44,8 @@ export type BrokerVenueId =
   | "IBKR"
   | "BINANCE"
   | "KRAKEN"
-  | "DYDX";
+  | "DYDX"
+  | "BITUNIX";
 
 /** Alle Adapter-Venues (Single Source of Truth: Capability-Table). */
 export const BROKER_VENUE_IDS: readonly BrokerVenueId[] = [
@@ -55,6 +55,7 @@ export const BROKER_VENUE_IDS: readonly BrokerVenueId[] = [
   "BINANCE",
   "KRAKEN",
   "DYDX",
+  "BITUNIX",
 ];
 
 /**
@@ -118,9 +119,33 @@ export interface BrokerHealth {
 export interface MarketTicker {
   symbol: string;
   price: number;
-  /** "binance" | "yahoo" | "cache" | "static" | … (je Quelle). */
+  /** "binance" | "yahoo" | "cache" | "static" | "bitunix" | … (je Quelle). */
   source: string;
   /** Unix-Epoch (ms) des Kurs-Zeitpunkts. */
+  ts: number;
+  /** Mark-Preis (Futures); optional, venue-spezifisch. */
+  markPrice?: number;
+  /** 24h-Volumen in Quote. */
+  quoteVol?: number;
+  /** 24h-Volumen in Base. */
+  baseVol?: number;
+  /** 24h-Hoch. */
+  high?: number;
+  /** 24h-Tief. */
+  low?: number;
+}
+
+/** Eine Ebene eines Orderbuchs (Preis, Menge). */
+export interface MarketOrderBookLevel {
+  price: number;
+  qty: number;
+}
+
+/** Orderbuch-Snapshot (optional auf Adaptern mit marketData). */
+export interface MarketOrderBook {
+  symbol: string;
+  bids: MarketOrderBookLevel[];
+  asks: MarketOrderBookLevel[];
   ts: number;
 }
 
@@ -214,6 +239,7 @@ export interface BrokerAdapter {
   discoverInstruments?(): Promise<import("../universe/types").MarketInstrument[]>;
   getTicker?(symbol: string): Promise<MarketTicker>;
   getCandles?(symbol: string, timeframe: string): Promise<MarketCandle[]>;
+  getOrderBook?(symbol: string): Promise<MarketOrderBook>;
   getAccount?(): Promise<BrokerAccount>;
   placeOrder?(req: BrokerOrderRequest): Promise<BrokerOrderResult>;
   getPositions?(): Promise<BrokerPosition[]>;
@@ -238,13 +264,14 @@ export class BrokerError extends Error {
  * Hard-Gates) geöffnet. Es gibt keinen impliziten Fallback auf Paper.
  */
 export class LiveTradingGateError extends BrokerError {
-  constructor(venue: string) {
+  constructor(venue: string, extra?: string) {
     super(
       "LIVE_TRADING_GATE",
       `LIVE-Trading für "${venue}" ist gesperrt: Der Live-Pfad wird erst durch ` +
         `den Live-Trading-Gate-Task (State-Machine + Hard-Gates) geöffnet. ` +
         `Es gibt keinen impliziten Fallback auf Paper — bitte moduskonform ` +
-        `backtest | paper | testnet verwenden. Details: docs/BROKER_ARCHITECTURE.md`
+        `backtest | paper | testnet verwenden. Details: docs/BROKER_ARCHITECTURE.md` +
+        (extra ? ` ${extra}` : "")
     );
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Contract-Tests (Task 02): ALLE 6 Adapter gegen EINE gemeinsame
+ * Contract-Tests (Task 02/07): ALLE 7 Adapter gegen EINE gemeinsame
  * Interface-Suite.
  *
  * Abgedeckt:
@@ -17,6 +17,8 @@ import assert from "node:assert/strict";
 import { createAdapter } from "../src/brokers/factory";
 import { PaperBrokerAdapter } from "../src/brokers/paper";
 import { StubBrokerAdapter } from "../src/brokers/stubs";
+import { BitunixBrokerAdapter } from "../src/brokers/bitunix";
+import { BitunixDisabledError } from "../src/brokers/bitunix/errors";
 import {
   BROKER_VENUE_IDS,
   NotSupportedCapabilityError,
@@ -85,7 +87,7 @@ async function expectNse(
   );
 }
 
-/** Gemeinsame Interface-Suite für alle 6 Adapter. */
+/** Gemeinsame Interface-Suite für alle 7 Adapter. */
 for (const venue of BROKER_VENUE_IDS) {
   const adapter: BrokerAdapter = createAdapter(venue, "paper");
 
@@ -95,6 +97,8 @@ for (const venue of BROKER_VENUE_IDS) {
     assert.ok(isCapabilities(adapter.capabilities), `${venue}: capabilities-Form`);
     if (venue === "PAPER") {
       assert.ok(adapter instanceof PaperBrokerAdapter, "PAPER-Adapter-Typ");
+    } else if (venue === "BITUNIX") {
+      assert.ok(adapter instanceof BitunixBrokerAdapter, "Bitunix-Adapter-Typ");
     } else {
       assert.ok(adapter instanceof StubBrokerAdapter, "Stub-Adapter-Typ");
     }
@@ -123,6 +127,13 @@ for (const venue of BROKER_VENUE_IDS) {
       await expectNse(Promise.resolve().then(() => adapter.placeOrder!(req)), venue, "trading");
       await expectNse(adapter.getAccount!(), venue, "trading");
       await expectNse(adapter.getPositions!(), venue, "trading");
+      return;
+    }
+    if (venue === "BITUNIX") {
+      // Flag Default OFF → BitunixDisabledError (kein Netz, kein Fill).
+      await assert.rejects(() => adapter.placeOrder!(req), BitunixDisabledError);
+      await assert.rejects(() => adapter.getAccount!(), BitunixDisabledError);
+      await assert.rejects(() => adapter.getPositions!(), BitunixDisabledError);
       return;
     }
     // PAPER: echte simulierte Ausführung (Guardrails bleiben wirksam).
@@ -161,6 +172,11 @@ for (const venue of BROKER_VENUE_IDS) {
       await expectNse(adapter.getCandles!("BTC", "15m"), venue, "marketData");
       return;
     }
+    if (venue === "BITUNIX") {
+      await assert.rejects(() => adapter.getTicker!("BTCUSDT"), BitunixDisabledError);
+      await assert.rejects(() => adapter.getCandles!("BTCUSDT", "15m"), BitunixDisabledError);
+      return;
+    }
     // PAPER: offline über das statische Fallback-Buch (fetch gestubt).
     const t = await adapter.getTicker!("BTC");
     assert.equal(t.symbol, "BTC");
@@ -181,6 +197,10 @@ for (const venue of BROKER_VENUE_IDS) {
         assertNoLeak(msg);
         return true;
       });
+      return;
+    }
+    if (venue === "BITUNIX") {
+      await assert.rejects(() => adapter.discoverInstruments!(), BitunixDisabledError);
       return;
     }
     // PAPER: Discovery aus der lokalen Universe-Registry (offline, deterministisch).
@@ -209,6 +229,11 @@ for (const venue of BROKER_VENUE_IDS) {
         await call();
       } catch (e) {
         threw++;
+        if (venue === "BITUNIX") {
+          assert.ok(e instanceof BitunixDisabledError, `${venue}/${method}: BitunixDisabledError, got ${e}`);
+          assertNoLeak((e as Error).message);
+          continue;
+        }
         assert.ok(e instanceof NotSupportedCapabilityError, `${venue}/${method}: NSE erwartet, got ${e}`);
         assert.equal((e as NotSupportedCapabilityError).capability, cap, `${venue}/${method}: capability=${cap}`);
         assertNoLeak((e as Error).message);

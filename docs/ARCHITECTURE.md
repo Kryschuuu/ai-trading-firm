@@ -622,7 +622,7 @@ BrokerAdapter  (src/contracts/broker.ts)     ← Contracts + Fehlerklassen
 getBroker(venue, mode)  (src/brokers/factory.ts)
   │  1. Whitelist → 2. Live-Gate (IMMER LGTE) → 3. Capability-Gating → 4. Cache
   ▼
-PAPER-Adapter (voll) · ALPACA/IBKR/BINANCE/KRAKEN/DYDX (sichere Stubs)
+PAPER-Adapter (voll) · BITUNIX (Public REST/WS + Paper, Live gesperrt) · ALPACA/IBKR/BINANCE/KRAKEN/DYDX (sichere Stubs)
   │  delegiert
   ▼
 PaperBroker + marketData + Universe-Registry   (bestehende Bestandteile)

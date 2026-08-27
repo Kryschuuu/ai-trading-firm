@@ -79,6 +79,7 @@ test("Golden: Anlageklasse und Markttyp werden konservativ abgeleitet", () => {
   assert.equal(inferAssetClass("EUR.USD", "EUR", "USD"), "fx");
   assert.equal(inferAssetClass("SPY", null, "USD"), "equity");
   assert.equal(inferMarketType("DYDX", "BTC-USD"), "perpetual");
+  assert.equal(inferMarketType("BITUNIX", "BTCUSDT"), "perpetual");
   assert.equal(inferMarketType("BINANCE", "ETH-PERP"), "perpetual");
   assert.equal(inferMarketType("ALPACA", "SPY"), "spot");
 });

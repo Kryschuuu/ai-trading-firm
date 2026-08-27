@@ -1980,6 +1980,32 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       return [];
     },
   },
+  BITUNIX_PRIVATE_CALL: {
+    label: "Bitunix-Privat-API",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Privater, signierter REST-Aufruf an Bitunix (Account, Positionen oder Place-Order). " +
+      "Der Live-Adapter sendet Place-Order nie (LiveTradingGateError bis task-11). " +
+      "Protokolliert werden nur Methode, Pfad und Ergebnis — niemals Body, Query, Key oder Signatur.",
+    headline: (d) => {
+      const method = text(d.method) ?? "—";
+      const path = text(d.path) ?? "—";
+      const outcome = text(d.outcome) ?? "—";
+      return `${method} ${path} → ${outcome}`;
+    },
+    sections: (d) => [
+      {
+        title: "Privater Call",
+        facts: [
+          { label: "Methode", value: text(d.method) ?? "—", mono: true },
+          { label: "Pfad", value: text(d.path) ?? "—", mono: true },
+          { label: "Ergebnis", value: text(d.outcome) ?? "—" },
+          { label: "Fehlercode", value: text(d.errorCode) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
 };
 
 /** Fallback für unbekannte Events — nie leer, nie abgeschnitten. */

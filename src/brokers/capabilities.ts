@@ -93,6 +93,24 @@ export const VENUE_CAPABILITIES: Record<BrokerVenueId, BrokerCapabilities> = {
     instrumentTypes: { spot: false, perpetual: true, future: false, option: false },
     stopAtVenue: false,
   },
+  /**
+   * Bitunix Futures (Task 07).
+   * live=true beschreibt die technische Fähigkeit des Adapters (Order-
+   * Serialisierung, Signing) — NICHT die Freigabe. Factory + placeOrder
+   * werfen bis task-11 immer LiveTradingGateError.
+   * testnet=false: die offizielle Futures-Doku weist kein Testnet aus.
+   * paper=true: lokale Simulation gegen echte Bitunix-Kurse (Modus B).
+   */
+  BITUNIX: {
+    discovery: true,
+    marketData: true,
+    trading: true,
+    paper: true,
+    testnet: false,
+    live: true,
+    instrumentTypes: { spot: false, perpetual: true, future: false, option: false },
+    stopAtVenue: true,
+  },
 };
 
 /**

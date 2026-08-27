@@ -475,3 +475,35 @@ skaliert, weil sonst die Instrumentierung gemessen würde, nicht die Bibliothek)
 
 **Keine kritischen oder hohen Sicherheitsbefunde.** Das Cycle-Modul setzt das Prinzip der minimalen Privilegien strikt um: LLM-Aufrufe sind auf freigegebene Schritte und maximal 40 Instrumente beschränkt; Scanner und Backtest-Verifikation laufen ohne Sprachmodelle. Externe Einflüsse werden isoliert behandelt. Die Code-Coverage liegt bei **> 93 %** der neuen Module.
 
+---
+
+## Security Audit — Task 07: Bitunix-Adapter (v1.15.0)
+
+**Stand:** 2026-08-27 · **Modul:** `src/brokers/bitunix/` · **API:** unverändert read-only `/api/brokers*`
+**Status:** 7. Venue hinter `BrokerAdapter`. Public REST/WS und Paper (Modus B).
+Live-Ausführung **immer** `LiveTradingGateError` (`TODO(task-11)`).
+
+### Checkliste
+
+| Kriterium | Status | Nachweis |
+| --- | :---: | --- |
+| **Kein erreichbarer Live-Pfad** | ✅ | `assertLiveOrderAllowed` wirft in allen 16 Flag-Kombinationen, auch wenn Flags vollständig wären. Factory `getBroker(_, "live")` bleibt LGTE. Adapter-`placeOrder("live")` serialisiert, sendet nie. |
+| **Keine Private-Calls im Paper-Pfad** | ✅ | Paper-E2E gegen Fixture: `privateCalls === 0`, keine `sign`-Header. Credentials dürfen gesetzt sein. |
+| **Secrets nie loggen / nie Frontend** | ✅ | Redactor (Header-Muster, Hex ≥ 32, Klartext-Secrets). `credentialStatus()` ohne Key. Audit `BITUNIX_PRIVATE_CALL` nur method/path/outcome/errorCode. Secret-Scan der Quellen. |
+| **SSRF-Allowlist + TLS** | ✅ | `assertUrlAllowed` / WS-URL: Host-Allowlist, kein Userinfo, `https`/`wss` Pflicht, Loopback-http nur mit explizitem Flag. `redirect: "error"`. |
+| **Signing golden-testbar** | ✅ | Fünf Goldens inkl. offiziellem Doku-Beispiel; Verifikation timing-safe. |
+| **Gate-Defaults sicher** | ✅ | `BITUNIX_ENABLED`/`BITUNIX_LIVE_ENABLED`/`LIVE_TRADING_ENABLED` nur bei exakt `"true"`. Human-Approval fehlend = true. |
+| **Kein Testnet-Fake** | ✅ | `testnet=false` mit dokumentierter Begründung; Modus testnet → NSE. |
+| **Kein LLM** | ✅ | Adapter-Tree importiert keine Provider. |
+
+### Befunde
+
+| ID | Severity | Datei | Problem | Status |
+| --- | --- | --- | --- | --- |
+| X-01 | Info | `src/brokers/bitunix/audit.ts` | DB-Senke best-effort | ✅ by design (Muster Factory/Universe) |
+| X-02 | Info | `src/brokers/bitunix/secrets.ts` | Env-Klartext bis task-08 | ✅ dokumentiert; Dateirechte 600 in `.env.example` |
+| X-03 | Info | `mapping.ts` Fees | API liefert keine Fees → VIP0-Defaults statt `null` | ✅ `MarketInstrument` erlaubt kein null; Abweichung in BITUNIX.md |
+
+Fazit: **kein High/Critical-Befund.** Der Adapter erweitert Public-Marktdaten und
+eine lokale Paper-Simulation. Die Vertrauensgrenze Live bleibt geschlossen.
+
