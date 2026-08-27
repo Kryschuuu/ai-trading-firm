@@ -255,6 +255,12 @@ export interface OptimizationDiagnostics {
   regularization: { applied: "none" | "ridge" | "pseudo-inverse"; ridge: number };
   /** War der Active-Set-Polish erfolgreich? (nur `min_variance`) */
   polished: boolean | null;
+  /**
+   * Maschinenlesbare Hinweise des Laufs, z. B. `NOT_CONVERGED`,
+   * `COVARIANCE_REGULARIZED:ridge`, `BOUNDS_PROJECTED`. Keine Maßnahme der
+   * Numerik-Schicht bleibt unkommentiert.
+   */
+  notes: string[];
 }
 
 /**
