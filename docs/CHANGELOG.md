@@ -20,6 +20,97 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.12.0] — 2026-08-27
+
+**Deterministischer Markt-Scanner, Market Score und Trichter (Task 04): Aus bis
+zu 10.000 Instrumenten wird täglich eine begründete Liste von 100 Rotations- und
+20–40 Deep-Kandidaten. 14 Faktor-Module, neun gewichtete Score-Komponenten,
+Volatilitätsregime, Weekly Universe Review, versionierte Tagesartefakte und drei
+read-only API-Endpunkte. Kein LLM, kein Netzwerk, kein Zufall — gleiche Eingabe
+ergibt byte-identische Ausgabe.**
+
+### Neu: `src/scanner/` (deterministische Analyseschicht — kein LLM)
+
+- **14 Faktor-Module** mit einheitlichem Interface `Factor { id, compute() }` →
+  `FactorValue { raw, normalized ∈ [0,1], available, detail }`:
+  `liquidity`, `spread`, `atr`, `volatility`, `momentum`, `trend`,
+  `volumeRatio`, `rsi`, `drawdown`, `correlation`, `news`, `funding`,
+  `openInterest`, `executionCost`. Jede Datei dokumentiert Formel,
+  Normalisierung und Datenbedarf im TSDoc (per Architekturtest erzwungen).
+- **News-Risiko ohne Sprachmodell**: reine Zählheuristik über Ereigniszahlen,
+  High-Impact-Flag, anstehende Termine und die Frische der Registry-Daten.
+- **Market Score 0–100** (`ranker.ts`) aus neun Komponenten mit exakten
+  Gewichten **Liquidity 25 · Volatility 15 · Trend 15 · Momentum 10 · Spread 10 ·
+  Volume 10 · Correlation 5 · News 5 · Execution 5** (Summe 100 %, per Test
+  erzwungen). Jeder Score trägt sein **Breakdown**: Faktor → Rohwert → normiert →
+  Gewicht → Beitrag.
+- **Volatilitätsregime** (`regime.ts`) auf annualisierter realisierter
+  Volatilität: `LOW < 0.25 ≤ NORMAL < 0.60 ≤ HIGH < 1.20 ≤ EXTREME`
+  (Schwellen konfigurierbar, fehlende Werte ⇒ `NORMAL`).
+- **Trichter** (`filters.ts`, `funnel.ts`): 10.000 → **2.000** (10 Eignungs- und
+  Risikoregeln, erste greifende Regel gewinnt und wird protokolliert) → **500**
+  (Score ≥ 55) → **100** Daily Rotation → **20–40 Deep-Kandidaten** mit
+  Diversifikationsregel (max. 8 je Anlageklasse, kontrollierte Lockerung).
+- **Versionierte Konfiguration** `src/scanner/scanner.config.json` (`version: 1`)
+  mit Validierung aller Bereiche und Summen; Override über `SCANNER_CONFIG_FILE`.
+- **Faktor-Cache** (`cache.ts`) je `(instrumentId, factorId, Datenfingerprint)` —
+  warmer Lauf ≈ 5× schneller.
+
+### Neu: Weekly Universe Review & Artefakte
+
+- **`classifyWeekly()`** stuft jedes Instrument deterministisch als
+  `CORE` / `ROTATION` / `DISCOVERY` / `EXCLUDED` ein und liefert validiertes JSON
+  `{ instrumentId, class, reasons[], score, asOf }` (`validateWeeklyEntry`,
+  `WeeklyValidationError`). Erkannte Änderungen: Neulistings, Delistings,
+  Liquiditätseinbrüche (> 50 %), Gebührensprünge (> 50 %), fehlende
+  Broker-Verfügbarkeit, Regimewechsel, Korrelationscluster (|r| ≥ 0.9).
+  Die **LLM-Synthese** des Reviews ist bewusst **nicht** Teil dieses Tasks.
+- **Tagesartefakte** `artifacts/JJJJ-MM-TT/universe.json` (+ `weekly.json`)
+  inklusive Score-Breakdowns, Gewichten, Trichtergrößen und Ablehnungsstatistik.
+  Atomar geschrieben (tmp + rename), **byte-identisch reproduzierbar**;
+  Verzeichnis über `SCANNER_ARTIFACTS_DIR`, nicht versioniert.
+
+### Neu: read-only API `/api/universe/*`
+
+- **`GET /api/universe/daily`** — Ebenen `deep|daily|interesting|eligible`,
+  Pagination (`pageSize` max. **200**, Default 50), optionales `breakdown`.
+- **`GET /api/universe/weekly`** — Filter `class` (CSV), gleiche Pagination,
+  Antwort inklusive `summary` und `changes`.
+- **`GET /api/universe/score/{instrumentId}`** — vollständiges Breakdown
+  (9 Komponenten), alle 14 Faktorwerte, Trichter-Zugehörigkeit und ggf. die
+  greifende Ablehnungsregel; `404` für unbekannte IDs.
+- Alle Endpunkte sind lesend, ohne Token-Pflicht (wie die übrigen GET-Routen),
+  mit harten Query-Limits und redigierten 500er-Meldungen.
+
+### Neu: Kommandos
+
+- **`npm run scan`** — Scan aus Registry + Historical Store, schreibt die
+  Tagesartefakte (`-- --dry` rechnet nur). **`npm run test:coverage:scanner`.**
+
+### Performance
+
+- Benchmark (`tests/scanner.benchmark.test.ts`): **10.000 synthetische
+  Instrumente in 0,68 s** (~14.700 Instrumente/s) gegen ein Budget von 15 Minuten;
+  Artefakt + Weekly zusätzlich 35 ms. Der Test scheitert bei Budget-Überschreitung.
+
+### Tests & Doku
+
+- **123 neue Tests** (Gesamt 576, alle grün): Golden-Werte und Edge Cases je
+  Faktor, Score-/Gewichts-/Regime-/Trichter-/Weekly-/API-Contract, Determinismus
+  und Byte-Identität, Architekturtest „kein LLM/Netzwerk/DB/Zufall im Scanner",
+  Benchmark. **Coverage der neuen Module 97,3 % (Zeilen).**
+- Neu: [`docs/DAILY_WEEKLY_RESEARCH.md`](./DAILY_WEEKLY_RESEARCH.md) (Pipeline,
+  Faktor-Katalog, Gewichte, Trichter, Regime, API-Referenz, Benchmark),
+  `docs/help/scanner.help.json` (3-Ebenen-Hilfe), Kapitel „Security Audit —
+  Task 04" in `SECURITY_AUDIT.md`, Abschnitt 10 in `MARKET_UNIVERSE.md`.
+
+### Nicht enthalten (bewusst)
+
+- Kein Live-Trading-Bezug, keine Orderentscheidung, keine Änderung an Guardrails,
+  Broker oder Ledger. Der Scanner liest nur und schreibt ausschließlich Artefakte.
+
+---
+
 ## [1.11.0] — 2026-08-27
 
 **Paper-Market-Data & deterministische Execution-Simulation (Task 03): Die
