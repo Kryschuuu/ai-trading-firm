@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/apiClient";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
 import WorkshopTab from "./workshop/WorkshopTab";
+import BrokersPanel from "./control-plane/BrokersPanel";
 import ThemeSwitcher from "./ThemeSwitcher";
 import AuditTrailPanel from "./common/AuditTrailPanel";
 import ProtocolPanel from "./common/ProtocolPanel";
@@ -108,7 +109,7 @@ const defaultData: FirmData = {
   timestamp: "",
 };
 
-type Tab = "overview" | "reports" | "protocol" | "agents" | "workshop" | "risk" | "architecture";
+type Tab = "overview" | "reports" | "protocol" | "agents" | "workshop" | "brokers" | "risk" | "architecture";
 
 
 export default function FirmDashboard() {
@@ -477,6 +478,14 @@ export default function FirmDashboard() {
               onOpenProtocol={() => setTab("protocol")}
             />
           )}
+          {tab === "brokers" && (
+            <BrokersPanel
+              onUnauthorized={() => {
+                setNeedToken(true);
+                setNotice("🔒 Diese Aktion braucht den API-Token (FIRM_API_TOKEN/FIRM_ADMIN_TOKEN).");
+              }}
+            />
+          )}
           {tab === "risk" && <RiskTab data={data} onChanged={load} />}
           {tab === "architecture" && <ArchitectureTab />}
         </>
@@ -491,6 +500,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "protocol", label: "📋 Protokoll" },
   { id: "agents", label: "Agents ↗ Orchestrator" },
   { id: "workshop", label: "🛠 Workshop" },
+  { id: "brokers", label: "🌐 Brokers & Venues" },
   { id: "risk", label: "Risk & Guardrails" },
   { id: "architecture", label: "Design Decisions / Guide" },
 ];
