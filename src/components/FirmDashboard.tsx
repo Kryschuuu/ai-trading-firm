@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
-import type { AgentRow, MissionRow, ProtocolEntryDto } from "@/lib/types";
+import type { AgentRow, MissionRow } from "@/lib/types";
+import { describeAuditEntry, firstSentence } from "@/lib/auditView";
 import WorkshopTab from "./workshop/WorkshopTab";
 import ThemeSwitcher from "./ThemeSwitcher";
+import AuditTrailPanel from "./common/AuditTrailPanel";
+import ProtocolPanel from "./common/ProtocolPanel";
 
 type ConfigEntry = {
   key: string;
@@ -57,6 +60,11 @@ type FirmData = {
   missions: MissionRow[];
   positions: any[];
   proposals: any[];
+  /**
+   * Letzten Audit-Zeilen aus GET /api/firm. Die Übersicht rendert inzwischen
+   * den gepagten Audit-Trail über GET /api/firm/log (AuditTrailPanel) — das
+   * Feld bleibt Teil des API-Vertrags für andere Clients.
+   */
   auditLog: any[];
   riskLimits: Record<string, any>;
   riskDefaults: Record<string, any>;
@@ -527,12 +535,15 @@ function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: a
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Missions</h2>
         <Table
-          head={["Title", "Objective", "Symbol", "Risk Budget", "Status"]}
+          head={["Titel", "Ziel", "Symbol", "Risikobudget", "Status"]}
           rows={data.missions.map((m) => [
-            m.title,
-            m.objective.slice(0, 60) + (m.objective.length > 60 ? "…" : ""),
+            <span key={m.id} className="font-semibold text-slate-200">{m.title}</span>,
+            // Auf Wortgrenze gekürzt, vollständiger Text im Tooltip — kein harter Schnitt mitten im Wort.
+            <span key={`${m.id}-objective`} title={m.objective} className="block max-w-xl">
+              {firstSentence(m.objective, 120)}
+            </span>,
             m.symbol ?? "—",
-            `${(Number(m.riskBudget) * 100).toFixed(0)}%`,
+            `${(Number(m.riskBudget) * 100).toFixed(0)} %`,
             m.status,
           ])}
         />
@@ -571,64 +582,40 @@ function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: a
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Approval Queue</h2>
         <Table
-          head={["Action", "Detail", "Risk Score", "Status"]}
-          rows={data.proposals.map((p) => [
-            p.action,
-            JSON.stringify(p.proposedDetail).slice(0, 60),
-            p.riskScore,
-            p.status,
-          ])}
+          head={["Aktion", "Vorgeschlagene Order", "Risiko-Score", "Status"]}
+          rows={data.proposals.map((p) => {
+            const detail = p.proposedDetail ?? {};
+            const summary = [
+              detail.symbol ? String(detail.symbol) : null,
+              detail.side ? String(detail.side).toUpperCase() : null,
+              detail.reason ? String(detail.reason) : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(" · ");
+            return [
+              p.action,
+              <details key={p.id} className="max-w-xl">
+                <summary className="cursor-pointer text-slate-300">
+                  {summary || "Details anzeigen"}
+                </summary>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-2 font-mono text-[11px] text-slate-300">
+                  {JSON.stringify(detail, null, 2)}
+                </pre>
+              </details>,
+              p.riskScore,
+              p.status,
+            ];
+          })}
         />
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Audit Trail</h2>
-        <Table
-          head={["Event", "Level", "Detail"]}
-          rows={data.auditLog.map((a) => [
-            a.event,
-            a.level,
-            JSON.stringify(a.detail ?? {}).slice(0, 70),
-          ])}
-        />
-      </section>
+      {/* Audit-Trail: aufklappbar, vollständig geparst, mit Paging (20/50/100/200). */}
+      <AuditTrailPanel
+        title="Audit Trail"
+        hint="Alle revisionssicheren Ereignisse — aufklappbar mit lesbaren Details, logischer Bewertung und Rohdaten."
+      />
     </div>
   );
-}
-
-const BLOCK_REASONS: Record<string, string> = {
-  KILL_SWITCH_ARMED:
-    "Not-Halt aktiv — keine Orders, bis ein Mensch entschärft. Absichtlich hart.",
-  ROLE_NOT_ALLOWED_TO_TRADE:
-    "Rollen-Mandat: Nur Research/Executor handeln. Der Block ist korrekt — die Pipeline gibt die Idee an die zuständige Rolle weiter.",
-  NO_QUOTE:
-    "Kein Kurs für das Symbol verfügbar (auch nicht als Fallback). Sicherer Abbruch statt Raten.",
-  POSITION_ALREADY_OPEN:
-    "In diesem Symbol ist schon eine Position offen; Nachkauf ist gesperrt, damit Läufe sich nicht gegenseitig aufblähen.",
-  INSUFFICIENT_CASH:
-    "Zu wenig freies Kapital für die Ordergröße (Hebel verboten).",
-  DAILY_LOSS_LIMIT:
-    "Tagesverlust-Limit erreicht — Neueröffnungen heute gestoppt. Schützt vor Rachetrades.",
-  COOLDOWN_AFTER_LOSSES:
-    "Verlustserie → Cooldown. Das System pausiert statt Verlusten hinterherzulaufen.",
-  SHORT_DISABLED:
-    "Shorts sind in der Risikokonfiguration deaktiviert.",
-  STOP_LOSS_HIT:
-    "Der Stop-Loss wurde ausgelöst — Position automatisch glattgestellt. Normaler Teil des Handels.",
-  TAKE_PROFIT_HIT:
-    "Das Take-Profit-Ziel wurde erreicht — Gewinn genommen.",
-};
-
-function explainGuardrail(g?: string | null): string | null {
-  if (!g) return null;
-  const upper = g.toUpperCase();
-  for (const key of Object.keys(BLOCK_REASONS)) {
-    if (upper.includes(key)) return BLOCK_REASONS[key];
-  }
-  if (/max-\d+%/.test(g)) return "Positionsgröße hätte das Positions-Limit überschritten.";
-  if (/stop-loss/i.test(g)) return "Order ohne Pflicht-Stop-Loss abgelehnt.";
-  if (/concurrency/i.test(g)) return "Maximale Anzahl offener Positionen erreicht.";
-  return null;
 }
 
 // ───────────────────────── Reports (Boss-Sicht) ─────────────────────────────
@@ -920,15 +907,45 @@ function ReportsTab() {
             Wichtige Ereignisse (SL/TP, Kill-Switch, Konfiguration)
           </h2>
           <Table
-            head={["Zeit", "Ereignis", "Level", "Detail"]}
-            rows={report.notableEvents.map((e, i) => [
-              new Date(e.at).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" }),
-              e.event,
-              e.level,
-              <code key={i} className="font-mono text-[11px] text-slate-400">
-                {JSON.stringify(e.detail ?? {}).slice(0, 110)}
-              </code>,
-            ])}
+            head={["Zeit", "Ereignis", "Stufe", "Was ist passiert?"]}
+            rows={report.notableEvents.map((e) => {
+              // Derselbe Aufbereiter wie im Audit-Trail — keine abgeschnittene JSON.
+              const view = describeAuditEntry({
+                id: `${e.event}-${e.at}`,
+                createdAt: e.at,
+                event: e.event,
+                level: e.level,
+                detail: e.detail,
+              });
+              return [
+                <span key={`${e.event}-${e.at}-at`} className="whitespace-nowrap tabular-nums">
+                  {view.atLabel}
+                </span>,
+                <span key={`${e.event}-${e.at}-event`}>
+                  <span className="block font-semibold text-slate-200">{view.eventLabel}</span>
+                  <code className="text-[11px] text-slate-500">{e.event}</code>
+                </span>,
+                <span
+                  key={`${e.event}-${e.at}-level`}
+                  className={
+                    view.tone === "critical"
+                      ? "font-bold text-red-400"
+                      : view.tone === "warn"
+                        ? "text-amber-300"
+                        : "text-emerald-300"
+                  }
+                >
+                  {view.levelLabel}
+                </span>,
+                <details key={`${e.event}-${e.at}-detail`} className="max-w-xl">
+                  <summary className="cursor-pointer text-slate-300">{view.headline}</summary>
+                  <p className="mt-1 text-[11px] text-slate-400">{view.explanation}</p>
+                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-2 font-mono text-[11px] text-slate-300">
+                    {view.raw}
+                  </pre>
+                </details>,
+              ];
+            })}
           />
         </section>
       )}
@@ -936,295 +953,22 @@ function ReportsTab() {
   );
 }
 
-type AuditRow = {
-  id: string;
-  createdAt: string;
-  event: string;
-  level: string;
-  detail?: unknown;
-};
-
-const PROTOCOL_SOURCE_LABEL: Record<string, string> = {
-  ollama: "Modell",
-  fallback: "Regel-Engine",
-  monitor: "Marktmonitor",
-};
-
-function protocolDate(at: string): string {
-  const date = new Date(at);
-  return Number.isFinite(date.getTime())
-    ? date.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" })
-    : "Zeit unbekannt";
-}
-
-function protocolLatency(latencyMs: number | null): string | null {
-  if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0) return null;
-  return `${(latencyMs / 1000).toFixed(1)} s`;
-}
-
-function protocolActorText(value: string | undefined, fallback: string): string {
-  const text = value?.trim();
-  return text && !["?", "unknown", "unbekannt"].includes(text.toLowerCase()) ? text : fallback;
-}
-
-function protocolActorName(entry: ProtocolEntryDto): string {
-  return protocolActorText(entry.actor?.name, "System");
-}
-
-function protocolActorRole(entry: ProtocolEntryDto): string {
-  return protocolActorText(entry.actor?.role, "SYSTEM");
-}
-
-function protocolHeaderMeta(entry: ProtocolEntryDto): string {
-  const source = entry.trace?.source
-    ? (PROTOCOL_SOURCE_LABEL[entry.trace.source] ?? entry.trace.source)
-    : null;
-  const latency = protocolLatency(entry.trace?.latencyMs ?? null);
-  return [protocolDate(entry.at), source, latency].filter((part): part is string => Boolean(part)).join(" · ");
-}
-
-function protocolLabel(entry: ProtocolEntryDto): string {
-  if (entry.kind === "turn") return entry.decision.type;
-  if (entry.kind === "analysis") return "ANALYSE";
-  if (entry.kind === "system") return "SYSTEM";
-  return "NACHRICHT";
-}
-
-function protocolBadgeClass(entry: ProtocolEntryDto): string {
-  if (entry.kind === "turn") {
-    if (entry.decision.type === "TRADE") return "bg-emerald-500/20 text-emerald-300";
-    if (entry.decision.type === "HOLD") return "bg-slate-600/40 text-slate-300";
-    if (entry.decision.type === "KILL") return "bg-red-500/30 text-red-300";
-    return "bg-sky-500/20 text-sky-300";
-  }
-  if (entry.kind === "analysis") return "bg-violet-500/20 text-violet-300";
-  if (entry.kind === "system") return "bg-amber-500/20 text-amber-300";
-  return "bg-slate-600/40 text-slate-300";
-}
-
-function analysisViewClass(view: "BULLISH" | "BEARISH" | "NEUTRAL" | null): string {
-  if (view === "BULLISH") return "bg-emerald-500/20 text-emerald-300";
-  if (view === "BEARISH") return "bg-red-500/20 text-red-300";
-  return "bg-slate-700/70 text-slate-300";
-}
-
-function protocolContent(entry: ProtocolEntryDto): string {
-  return entry.content.trim() || "Für diesen historischen Eintrag ist kein Text gespeichert.";
-}
-
-function ProtocolEntryCard({
-  entry,
-  isOpen,
-  onToggle,
-}: {
-  entry: ProtocolEntryDto;
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
-  const label = protocolLabel(entry);
-  const trace = entry.trace;
-
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/50">
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center gap-3 px-4 py-2 text-left"
-        aria-expanded={isOpen}
-      >
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${protocolBadgeClass(entry)}`}>
-          {label}
-        </span>
-        <span className="text-xs font-semibold text-slate-200">{protocolActorName(entry)}</span>
-        <span className="text-xs text-slate-500">{protocolActorRole(entry)}</span>
-        <span className="ml-auto text-xs text-slate-500">{protocolHeaderMeta(entry)}</span>
-        <span className="ml-3 text-slate-500">{isOpen ? "▾" : "▸"}</span>
-      </button>
-
-      {isOpen && (
-        <div className="space-y-3 border-t border-slate-800 px-4 py-3 text-xs">
-          {entry.kind === "turn" && (
-            <div>
-              <p className="mb-1 font-semibold text-slate-400">Entscheidung (geparst)</p>
-              <pre className="overflow-x-auto rounded bg-slate-950/60 p-2 font-mono text-emerald-300">
-                {JSON.stringify(entry.decision, null, 2)}
-              </pre>
-              {entry.content && entry.content !== entry.decision.reason && (
-                <p className="mt-2 whitespace-pre-wrap text-slate-300">{protocolContent(entry)}</p>
-              )}
-            </div>
-          )}
-
-          {entry.kind === "analysis" && (
-            <div className="space-y-2">
-              <p className="font-semibold text-slate-400">Analystenbericht</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${analysisViewClass(entry.analysis.view)}`}>
-                  {entry.analysis.view ?? "OHNE EINSTUFUNG"}
-                </span>
-                <span className="text-slate-400">
-                  Konfidenz: {entry.analysis.confidence != null
-                    ? `${(entry.analysis.confidence * 100).toFixed(0)} %`
-                    : "nicht protokolliert"}
-                </span>
-              </div>
-              {entry.analysis.thesis && (
-                <p className="rounded bg-slate-950/60 p-2 text-slate-200">{entry.analysis.thesis}</p>
-              )}
-              <p className="whitespace-pre-wrap rounded bg-slate-950/40 p-2 text-slate-300">{protocolContent(entry)}</p>
-            </div>
-          )}
-
-          {entry.kind === "system" && (
-            <div>
-              <p className="mb-1 font-semibold text-slate-400">Systemmeldung ({entry.messageType})</p>
-              <p className="whitespace-pre-wrap rounded bg-slate-950/40 p-2 text-slate-300">{protocolContent(entry)}</p>
-            </div>
-          )}
-
-          {entry.kind === "message" && (
-            <div>
-              <p className="mb-1 font-semibold text-slate-400">Nachricht ({entry.messageType})</p>
-              <p className="whitespace-pre-wrap rounded bg-slate-950/40 p-2 text-slate-300">{protocolContent(entry)}</p>
-            </div>
-          )}
-
-          {trace.rawResponse && (
-            <div>
-              <p className="mb-1 font-semibold text-slate-400">
-                Rohergebnis des Modells ({trace.model ?? "Modell nicht protokolliert"})
-              </p>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-2 font-mono text-slate-400">
-                {trace.rawResponse}
-              </pre>
-            </div>
-          )}
-
-          {trace.prompt && (
-            <details>
-              <summary className="cursor-pointer font-semibold text-slate-400">Vollständiger Prompt</summary>
-              <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-2 font-mono text-slate-400">
-                {trace.prompt}
-              </pre>
-            </details>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
+/**
+ * Protokoll-Tab: Zwei unabhängige, aber identisch aufgebaute Bereiche.
+ *
+ * Beide nutzen dasselbe Paging-System (20/50/100/200 pro Seite, Default 20),
+ * dieselbe aufklappbare Kartenstruktur und denselben „Rohdaten"-Reiter.
+ * Die komplette Aufbereitung (deutsche Titel, Feldlabels, Plausibilitätsprüfung)
+ * liegt in src/lib/auditView.ts — server- und clientseitig identisch.
+ */
 function ProtocolTab() {
-  const [entries, setEntries] = useState<ProtocolEntryDto[]>([]);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [levelFilter, setLevelFilter] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [loadingLog, setLoadingLog] = useState(true);
-
-  const loadLog = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/firm/log?limit=80${levelFilter ? `&level=${levelFilter}` : ""}`);
-      const json = (await res.json()) as { entries?: ProtocolEntryDto[]; audit?: AuditRow[] };
-      setEntries(Array.isArray(json.entries) ? json.entries : []);
-      setAudit(Array.isArray(json.audit) ? json.audit : []);
-    } catch {
-      /* Protokoll ist optional; bestehende Einträge bleiben sichtbar. */
-    } finally {
-      setLoadingLog(false);
-    }
-  }, [levelFilter]);
-
-  useEffect(() => {
-    let alive = true;
-    // asynchron starten, damit der erste Fetch kein synchrones setState im Effect auslöst
-    const boot = setTimeout(() => {
-      if (alive) loadLog();
-    }, 0);
-    const id = setInterval(loadLog, 12000);
-    return () => {
-      alive = false;
-      clearTimeout(boot);
-      clearInterval(id);
-    };
-  }, [loadLog]);
-
   return (
-    <div className="space-y-6">
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Protokoll — Turns, Analystenberichte und Systemmeldungen
-          </h2>
-          <span className="text-xs text-slate-500">{entries.length} Einträge · Auto-Refresh 12 s</span>
-        </div>
-        {loadingLog ? (
-          <p className="text-sm text-slate-400">Lade Protokoll…</p>
-        ) : (
-          <div className="space-y-2">
-            {entries.map((entry) => (
-              <ProtocolEntryCard
-                key={entry.id}
-                entry={entry}
-                isOpen={expanded === entry.id}
-                onToggle={() => setExpanded(expanded === entry.id ? null : entry.id)}
-              />
-            ))}
-            {entries.length === 0 && (
-              <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">
-                Noch keine Protokolleinträge. Pipeline, Markt-Tick oder Analystenzyklus starten.
-              </p>
-            )}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Audit-Trail</h2>
-          <select
-            value={levelFilter}
-            onChange={(e) => setLevelFilter(e.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200"
-          >
-            <option value="">Alle Level</option>
-            <option value="INFO">INFO</option>
-            <option value="WARN">WARN</option>
-            <option value="CRITICAL">CRITICAL</option>
-          </select>
-        </div>
-        <Table
-          head={["Zeit", "Event", "Level", "Detail"]}
-          rows={audit.map((a) => {
-            const detail = JSON.stringify(a.detail ?? {});
-            const auditDetail = a.detail && typeof a.detail === "object" && !Array.isArray(a.detail)
-              ? a.detail as Record<string, unknown>
-              : {};
-            const reason = typeof auditDetail.reason === "string" ? auditDetail.reason : "";
-            const explanation =
-              explainGuardrail(reason) ??
-              explainGuardrail(detail.slice(0, 120));
-            return [
-              protocolDate(a.createdAt),
-              a.event,
-              <span
-                key={a.id}
-                className={
-                  a.level === "CRITICAL" ? "font-bold text-red-400"
-                  : a.level === "WARN" ? "text-amber-300"
-                  : "text-slate-400"
-                }
-              >
-                {a.level}
-              </span>,
-              <span key={a.id + "d"}>
-                <code className="font-mono text-[11px] text-slate-400">{detail.slice(0, 90)}</code>
-                {explanation && (
-                  <span className="mt-0.5 block text-[11px] text-sky-300">ℹ️ {explanation}</span>
-                )}
-              </span>,
-            ];
-          })}
-        />
-      </section>
+    <div className="space-y-8">
+      <ProtocolPanel />
+      <AuditTrailPanel
+        title="Audit-Trail"
+        hint="Revisionssichere Ereignisse: jede Order, jede Entscheidung, jede Risiko- und Regeländerung."
+      />
     </div>
   );
 }

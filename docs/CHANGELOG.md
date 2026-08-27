@@ -20,6 +20,72 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.9.0] — 2026-08-27
+
+**Lesbarer Audit-Trail und lesbares Protokoll: Aufklappbare Einträge mit
+deutschen Erklärungen, Rohdaten-Reiter, logischer Bewertung und Paging
+(20/50/100/200) — identisch in „Firm Overview" und „Protokoll".**
+
+### Problem (gemeldet)
+
+- Der Audit-Trail zeigte `JSON.stringify(detail).slice(0, 70)`: abgeschnittene,
+  aneinanderhängende Roh-JSON ohne Beschriftung (`ceoRaw`, `fill`, `via`).
+- Nicht erkennbar, ob eine `ORDER_REJECTED`-Meldung ein **Fehler** oder
+  **korrektes Systemverhalten** ist.
+- Kein Paging — die Liste war nicht navigierbar.
+
+### Neu: `src/lib/auditView.ts` (reiner Aufbereiter, kein DB-/React-Import)
+
+- **Event-Katalog** mit deutschen Titeln und fachlicher Erklärung für alle 28
+  Events, die der Code schreibt (`AGENT_DECISION` → „Agent-Entscheidung",
+  `ORDER_REJECTED` → „Order abgelehnt", `TAKE_PROFIT_HIT` → „Take-Profit
+  erreicht", `RULE_MACRO_REJECTED` → „Makro-Regel abgelehnt", `RISK_ADAPTIVE`
+  → „Risiko angepasst", …).
+- **Feld-Wörterbuch**: `ceoRaw` → „CEO-Entscheidung (Rohantwort)", `via` →
+  „Quelle der Änderung", `latencyMs` → „Antwortzeit", inkl. Einheiten
+  („14,34402 Stück", „104,36426 USD", „1,3 s", „2 %").
+- **Logische Prüfung** pro Eintrag und über die Sequenz: Widersprüche
+  (`ORDER_SENT` mit `status: REJECTED`, Take-Profit unter Einstieg bei LONG,
+  adaptiver Faktor > 1, `ROLE_NOT_ALLOWED_TO_TRADE` für EXECUTOR/RESEARCH)
+  werden als ⛔ gekennzeichnet; korrektes Verhalten („Rollen-Mandat",
+  „Pyramiding-Sperre", „Fail-safe REJECT") wird als ℹ️ eingeordnet.
+- **Abgeschnittene Modellantworten** werden erkannt und benannt: Die Engine
+  speichert `ceoRaw` mit 500 und `rawResponse` mit 2.000 Zeichen
+  (`src/lib/macroCycle.ts`, `src/lib/engine.ts`). Verdikt und Begründung werden
+  trotzdem aus der gekürzten Antwort extrahiert.
+- **Zeitstempel eindeutig in UTC**: „27.08.2026, 14:56:14 UTC" + „vor 4 Minuten".
+
+### Neu: `src/lib/paging.ts` + `src/components/common/`
+
+- Paging-Kern (Default **20**, wählbar **20/50/100/200**) — server- und
+  clientseitig dieselbe Logik, Seitengrößen geklemmt.
+- `AuditTrailList` / `ProtocolList`: aufklappbare Karten mit Kurzfassung,
+  „Lesbare Details" (gruppierte, beschriftete Sektionen für `fill`, `order`,
+  `decision`) und **„Rohdaten (DB-Eintrag)"**-Reiter mit vollständiger Zeile.
+- `AuditTrailPanel` / `ProtocolPanel`: Level-/Event-Filter, Suche, Auto-Refresh
+  — in „Firm Overview" und „Protokoll" dieselbe Komponente.
+- Farben: INFO grün, WARN gelb, CRITICAL rot; Widersprüche zusätzlich markiert.
+
+### API
+
+- `GET /api/firm/log` unterstützt `page` (1-basiert, alternativ `offset`),
+  liefert `meta` (`page`, `pageSize`, `pages`, `auditTotal`, `entryTotal`) und
+  pro Protokolleintrag die originale DB-Zeile unter `raw`. `limit` bleibt
+  auf 1–200 geklemmt (Fix aus v1.1.0 unverändert).
+- Abwärtskompatibel: `entries`, `turns`, `audit`, `agents` bleiben erhalten.
+
+### Tests
+
+- `tests/auditView.test.ts` (23): Katalog, Feldlabels, Widerspruchserkennung,
+  gekürzte CEO-Antwort, Muster über mehrere Einträge, Zeitstempel.
+- `tests/paging.test.ts` (5): Seitengrößen, Schnitt, Fenster, Klemmung.
+- `tests/auditUi.render.test.ts` (3): rendert die echten Komponenten und prüft,
+  dass nichts abgeschnitten ankommt und das Paging 20/50/100/200 anbietet.
+- Regressionsschutz: Findet der Code ein Audit-Event ohne Katalogeintrag,
+  schlägt der Test fehl.
+
+---
+
 ## [1.8.0] — 2026-08-27
 
 **Market Universe (Task 01): Die Plattform kennt jetzt Märkte statt Strings.

@@ -110,6 +110,21 @@ export interface ProtocolAnalysisDto {
   thesis: string | null;
 }
 
+/**
+ * Unveränderte Zeile aus `agent_messages`. Wird zusätzlich zum normalisierten
+ * Eintrag ausgeliefert, damit die UI einen echten „Rohdaten"-Reiter anbieten
+ * kann, statt die normalisierte Sicht als Original auszugeben.
+ */
+export interface ProtocolRawRowDto {
+  id: string;
+  createdAt: string | null;
+  agentId: string | null;
+  missionId: string | null;
+  type: string | null;
+  content: string | null;
+  meta: unknown;
+}
+
 export interface ProtocolEntryBaseDto {
   id: string;
   at: string;
@@ -119,6 +134,8 @@ export interface ProtocolEntryBaseDto {
   actor: ProtocolActorDto;
   content: string;
   trace: ProtocolTraceDto;
+  /** Originale DB-Zeile — Basis des „Rohdaten"-Reiters im Protokoll. */
+  raw?: ProtocolRawRowDto;
 }
 
 export interface ProtocolTurnEntryDto extends ProtocolEntryBaseDto {
@@ -169,12 +186,37 @@ export interface TurnLogEntryDto {
   costUsd: number | null;
 }
 
+/** Zeile aus `audit_log`, wie sie das Dashboard rendert. */
+export interface AuditLogRowDto {
+  id: string;
+  createdAt: string;
+  event: string;
+  level: string;
+  detail: unknown;
+  missionId: string | null;
+  agentId: string | null;
+}
+
+/** Paging-Metadaten für beide Listen (Audit-Trail und Protokoll). */
+export interface ListPageMetaDto {
+  page: number;
+  pageSize: number;
+  pages: number;
+  /** Gesamtzahl passender Zeilen — unabhängig von der aktuellen Seite. */
+  auditTotal: number;
+  entryTotal: number;
+}
+
 export interface LogResponse {
   ok: boolean;
   /** Gemischte, chronologische Protokollansicht (Turn, Analyse, System, Nachricht). */
   entries: ProtocolEntryDto[];
   /** Nur echte Agentenentscheidungen, für bestehende Workshop-Clients. */
   turns: TurnLogEntryDto[];
+  /** Audit-Trail der aktuellen Seite. */
+  audit?: AuditLogRowDto[];
+  /** Paging-Informationen (Seite, Seitengröße, Gesamtzahlen). */
+  meta?: ListPageMetaDto;
 }
 
 /** Response von GET /api/firm/missions. */
