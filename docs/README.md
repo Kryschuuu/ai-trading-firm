@@ -21,13 +21,14 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[PEER_REVIEW_LIVE_TRADING.md](PEER_REVIEW_LIVE_TRADING.md)** | Peer-Review: Bottlenecks der 6-Agenten-Pipeline, Live-/Paper-Readiness, Code-Review, Tests und Handlungsplan |
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)** | Broker-Capability-Modell (Task 02): Adapter-Vertrag, Capability-Matrix, Execution Modes, Factory, Live-Gate, Health-API |
+| **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data (Task 03): Modi A/B/C, deterministischer Fill-Simulator, Failover-Kette, Replay, Historical Store, `/api/marketdata/*` |
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
 | **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting, Agenten-Register |
 | **[CHANGELOG.md](CHANGELOG.md)** | Versionen, Bugfixes und Änderungen je Release |
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 
-**Version:** `v1.6.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.11.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---

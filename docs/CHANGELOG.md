@@ -20,6 +20,107 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.11.0] — 2026-08-27
+
+**Paper-Market-Data & deterministische Execution-Simulation (Task 03): Die
+Plattform läuft standardmäßig mit echten Kursen (Modus B) statt statischem
+Preisbuch. Drei Paper-Modi, broker-unabhängige Feed-Abstraktion, Normalisierung
+mit Anomalie-Erkennung, append-only Historical Store, deterministischer
+Fill-Simulator (Gebühren/Spread/Slippage/Latenz/Partial Fills), auditiertes
+Failover. Live bleibt gesperrt, kein Breaking Change.**
+
+### Neu: `src/lib/marketdata/` (deterministische Schicht — kein LLM)
+
+- **`MarketFeed`-Abstraktion** (`types.ts`): `getTicker`, `getCandles`,
+  optional `getOrderBook`/`subscribe`. Implementierungen in `feeds/`:
+  `BinanceFeed` (Bid/Ask via `bookTicker`, 24h-Volumen), `YahooFeed`
+  (Aktien/ETF/FX, Spread aus Registry), `BrokerFeed` (delegiert an
+  `BrokerAdapter`, vgl. Task 02), `SyntheticFeed` (seeded, deterministisch,
+  NUR Modus A/expliziter Fallback), `ReplayFeed` (spielt Historical Store ab).
+- **`MarketSnapshot { instrumentId, bid, ask, last, ts, source, venue, feed,
+  spread, volume24h }`** über `normalization.ts`: NaN/≤0, Sprung über
+  `PAPER_ANOMALY_MAX_JUMP_PCT`, staler Timestamp und kaputter Spread werden
+  **verworfen und geloggt** (`ANOMALOUS_SNAPSHOT`) — nie gehandelt.
+- **Historical Store** (`historicalStore.ts`): append-only **NDJSON**
+  (`data/history/candles.ndjson`) mit Provenienz (venue, feed, ts, fetchedAt).
+- **Failover-Kette** (`failover.ts`): Broker-Feed → unabhängiger Feed →
+  Synthetic (nur bei `PAPER_ALLOW_SYNTHETIC_FALLBACK=true`). Jeder Wechsel +
+  jede Anomalie → `audit_log` (`FEED_FAILOVER`/`ANOMALOUS_SNAPSHOT`) +
+  In-Memory-Ring. **Kein stiller Kursquellwechsel.**
+- **`MarketDataManager`** (`manager.ts`): Instrument-Auflösung, Kette je
+  Paper-Mode, Cache, Status. **`production.ts`** verdrahtet Factory ↔ Manager
+  ↔ Ledger (Import-Zyklen-frei).
+- **Shared HTTP** (`http.ts`): Timeout, Retry/Backoff (hart begrenzt),
+  **SSRF-Allowlist**, read-only, keine Credentials.
+
+### Neu: Fill-Simulator (`simulator.ts`) — lokal & deterministisch
+
+- Modelliert **Gebühren** (Registry-Felder `makerFee`/`takerFee`, vgl. Task 01),
+  **Spread** (Snapshot-Bid/Ask), **Slippage** (linear wachsend mit Ordergröße
+  relativ zum 24h-Volumen), **Latenz** (ms) und **Partial Fills**
+  (konfigurierbar). Seed-basiert → bit-identisch reproduzierbar (100-Fall-Test).
+- Alle Parameter + Defaults dokumentiert (Tabelle in `docs/PAPER_TRADING.md`).
+
+### Paper-Modi (`paperMode`)
+
+- **`synthetic`** (A): Synthetic-Feed, deterministisch, perfekt für Tests.
+- **`broker-market-data`** (B, **Default**): echte Kurse über Broker-Feed →
+  Binance/Yahoo, Ausführung lokal simuliert.
+- **`broker-paper-api`** (C): Broker-Paper-/Testnet-API — nur mit
+  Venue-Capability + `PAPER_MODE_C_ENABLED=true`; heute nicht wählbar
+  (klarer `PaperConfigError` statt stiller Fallback).
+- Statisches Preisbuch (`STATIC_PRICES`) ist **`@deprecated`** und nur noch
+  expliziter Offline-Fallback hinter `PAPER_STATIC_FALLBACK=true` (Default aus).
+
+### API (read-only, ohne Token)
+
+- `GET /api/marketdata/snapshot?instrument=…` → normalisierter Snapshot.
+- `GET /api/marketdata/status` → aktive Quelle, Cache-TTL, letzter Failover.
+
+### Integration (kein Breaking Change)
+
+- `PaperBroker` erhält optionale `PaperExecutionAdapter` (`setExecution`):
+  Modus-B-Fills laufen über den deterministischen Simulator (echte Kurse +
+  Gebühren). Rohe `new PaperBroker()`-Instanzen bleiben bytekompatibel.
+- `engine.getBroker()` injiziert den Ausführungs-Adapter einmalig und wärmt
+  den Snapshot-Cache vor jedem Submit; ohne Kurs → `NO_QUOTE` (nie raten).
+- Live-Pfad bleibt hart gesperrt (`LiveTradingGateError`).
+
+### Getestet
+
+- **53 neue Tests** (`npm test` → **453 grün**, alle 400 Bestands-Tests
+  unverändert): deterministischer Simulator (100 Fälle), Slippage-/Partial-
+  Fill-Grenzfälle, Gebühren aus Registry-Feldern, Replay-/Golden-Test
+  (Backtest 2× → byte-identisch), Integration Modus B gegen lokalen
+  **Fixture-HTTP-Server** (echter Kursfluss, kein Netz), Failover + Audit,
+  Stale-Kurs-Verwerfen, Negative-Tests (Modus C ohne Capability, Synthetic
+  ohne Flag), Feed-Tests (Yahoo/Binance/Broker/Synthetic), API-Contract.
+- **Coverage `src/lib/marketdata/**` + `src/app/api/marketdata/**`:** Zeilen
+  **95,6 %** (≥ 90 %). `npm run typecheck`, `npm run lint` fehlerfrei.
+- Kein echter Netzwerkverkehr in der CI-Suite (alles über lokale Fixture-
+  Server mit `PAPER_FEED_ALLOWED_HOSTS=127.0.0.1`).
+
+### Doku
+
+- NEU `docs/PAPER_TRADING.md`: Modi A/B/C (Vergleichstabelle), Simulator-
+  Parameter-Tabelle, Failover-Kette, Replay-Determinismus, MARKET-DATA-LAYER-
+  Diagramm.
+- UPDATE `docs/ARCHITECTURE.md` (§10.5 Paper-Modi & Market-Data-Layer,
+  Execution-Mode-Tabelle verdrahtet), `docs/SECURITY_AUDIT.md` (Kapitel
+  „Security Audit — Task 03“), `docs/README.md` (Doku-Index).
+- NEU `docs/help/paper-trading.help.json`: 3-Ebenen-Hilfe (kurzinfo /
+  technischeInfo / risiko) für paperMode, Slippage, Partial Fill, Latenz,
+  Spread, Failover, Replay.
+- NEU `docs/task-03-IMPLEMENTATION_PLAN.md` (Plan + RECON-Abweichungen).
+
+### Migrationshinweise
+
+- Kein Schema-Bruch, keine neuen Dependencies. `PAPER_MODE` (Default
+  `broker-market-data`) und die `PAPER_*`-Knobs sind optional; der statische
+  Fallback ist standardmäßig **aus** (`PAPER_STATIC_FALLBACK=false`).
+
+---
+
 ## [1.10.0] — 2026-08-27
 
 **Broker Capability-Modell (Task 02): Die Plattform ist jetzt

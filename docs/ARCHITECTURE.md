@@ -658,6 +658,33 @@ keine zweite Quelle. Capability-Matrix (Ist/Soll) und `stopAtVenue`
   Flags) und `GET /api/brokers/{venue}/health` (read-only; Remote-Check nur
   mit `BROKER_HEALTHCHECK_REMOTE=true`, Default OFF, credential-frei).
 
+### 10.5 Paper-Modi & Market-Data-Layer (v1.11.0, Task 03)
+
+Die Execution-Mode-Tabelle oben wird durch die **Paper-Modi** des
+Market-Data-Layers verdrahtet (`paperMode`, siehe
+**[PAPER_TRADING.md](PAPER_TRADING.md)**):
+
+| Execution-Modus | Paper-Mode (`paperMode`) | Kursquelle | Order |
+| --- | --- | --- | --- |
+| `backtest` | `synthetic`/Replay | **Historical Store** (`ReplayFeed`) | simuliert (deterministisch) |
+| `paper` (Default) | `broker-market-data` (Default) | echte Venue-Marktdaten (Broker-Feed → Binance/Yahoo) | simuliert (deterministischer Fill-Simulator) |
+| `paper` (optional) | `synthetic` | Synthetic-Feed (seeded) | simuliert |
+| `paper` (Capability-gated) | `broker-paper-api` | Venue-Paper-/Testnet-API | **Broker-Paper-API** |
+| `testnet` | — | real (Testnet) | Broker-Order |
+| `live` | — | real | reale Order — **hart gesperrt** |
+
+Die Market-Data-Schicht (`src/lib/marketdata/`) ist rein deterministisch (kein
+LLM): Feeds → Normalisierung (`MarketSnapshot` mit Bid/Ask/Last + Provenienz,
+Anomalie-Erkennung) → Historical Store (append-only OHLCV-NDJSON) →
+Screener/Agents → Paper-Broker → **simulierter Fill**. Failover:
+Broker-Feed → unabhängiger Feed → Synthetic (nur explizit); jeder Wechsel und
+jede verworfene Anomalie → `audit_log` (`FEED_FAILOVER`/`ANOMALOUS_SNAPSHOT`).
+Der `PaperBroker`-Ledger nutzt einen Ausführungs-Adapter (echte Kurse +
+deterministischer Simulator mit Gebühren/Spread/Slippage/Latenz/Partial Fills).
+Statisches Preisbuch nur noch hinter `PAPER_STATIC_FALLBACK=true` (Default aus).
+Neue read-only-Endpunkte: `GET /api/marketdata/snapshot?instrument=…` und
+`GET /api/marketdata/status`.
+
 ---
 
 ## 11. Glossar (Kurz)

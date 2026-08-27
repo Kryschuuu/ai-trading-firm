@@ -290,3 +290,42 @@ hart und reproduzierbar gesperrt, Fehlermeldungen sind leak-frei, das
 Audit ist vollständig, und Remote-Checks sind default OFF. Der Paper-
 Betrieb bleibt unverändert (334 Bestands-Tests grün); 66 neue Tests
 sichern das Modell. 0 neue Dependencies, `npm audit` ohne Befund.
+
+---
+
+## Security Audit — Task 03 (Paper Market Data & Execution-Simulation, v1.11.0)
+
+**Scope:** `src/lib/marketdata/` (Feeds, Normalisierung, Historical Store,
+Failover, Simulator, Manager, http, config, production),
+`src/app/api/marketdata/` (snapshot, status), Integration in `broker.ts` /
+`engine.ts`.
+
+### Checkliste (Pflichtkriterien)
+
+| Kriterium | Status | Nachweis |
+| --- | --- | --- |
+| **SSRF-Allowlist** | ✅ | `http.ts` → `assertHostAllowed()`: Jeder Feed-Request wird vor dem Absenden gegen die Allowlist geprüft (Default `api.binance.com`, Yahoo-Hosts; konfigurierbar via `PAPER_FEED_ALLOWED_HOSTS`). Fremde Hosts → `FeedHttpError(BLOCKED)`, kein Request. Test: `marketdata.integration.test.ts` + Fixture-Allowlist. |
+| **Timeout Pflicht** | ✅ | `httpGetJson` erzwingt `timeoutMs` (Default 8000) via AbortController; `redirect: "error"` (kein Redirect-Abfluss an Fremd-Hosts). |
+| **Retry nur mit Backoff + hartem Limit** | ✅ | `maxRetries` (Default 2, Env `PAPER_FEED_RETRY_MAX`, geklemmt 1–6) mit exponentiellem Backoff (`baseBackoffMs * 2^attempt`). Kein ungebremster Retry. |
+| **Feeds read-only** | ✅ | Nur `GET` mit `cache: "no-store"`; keine Zustandsmutation außerhalb des deterministischen Local-Simulators/Stores. |
+| **Audit-Log-Failover** | ✅ | Jeder Feed-Wechsel → `FEED_FAILOVER`, jede verworfene Anomalie → `ANOMALOUS_SNAPSHOT` in `audit_log` + In-Memory-Ring (best-effort, Fail-Safe). `failover.ts`. |
+| **Kein stiller Kursquellwechsel** | ✅ | Synthetic nur bei `PAPER_ALLOW_SYNTHETIC_FALLBACK=true`; statisches Preisbuch nur bei `PAPER_STATIC_FALLBACK=true` (Default aus). Ohne erlaubten Fallback → `NO_QUOTE`-Ablehnung, nie raten. |
+| **Kein Secret-Bedarf** | ✅ | Feeds sind Public-Endpunkte (kein API-Key); nirgends Credentials. Kein neuer Netzwerk-Import in Unit-/CI-Tests (Fixture-Server, `127.0.0.1`). |
+| **Kein LLM-Zugriff** | ✅ | Market-Data-Schicht ist rein deterministisch; kein Import von `ollama`/`llmProvider` (Import-Graph frei davon). |
+| **Live unangetastet** | ✅ | Live-Pfad weiterhin hart gesperrt (`LiveTradingGateError`); Modus C ist heute nicht wählbar (klarer `PaperConfigError`). |
+| **Anomalie-Normalisierung** | ✅ | `normalization.ts`: NaN/≤0, Sprung > `PAPER_ANOMALY_MAX_JUMP_PCT`, staler Timestamp, kaputter Spread → verworfen + loggt, nie gehandelt. |
+
+### Befunde
+
+| ID | Severity | Datei (Funktion) | Problem | Status |
+| --- | --- | --- | --- | --- |
+| P-01 | Info | `src/lib/marketdata/failover.ts` → `recordFailover()` | DB-Senke ist best-effort (dynamischer Import, try/catch); ohne PostgreSQL nur In-Memory-Ring | ✅ by design (Muster des Universe-/Broker-Audits); der Ring bleibt Wahrheit und wird im Audit-Log gespiegelt, sobald die DB steht |
+| P-02 | Info | `src/lib/marketdata/manager.ts` → `getSnapshot()` | `Date.now()` für Cache-TTL/`ts` — nicht Teil des deterministischen Replay-/Backtest-Pfads (der nutzt Store-Timestamps); für Modus B realtime gewollt | ✅ by design; Determinismus gilt für Simulator/Replay/Synthetic |
+| P-03 | Info | `src/app/api/marketdata/**` | Read-only-Endpunkte ohne Token | ✅ konsistent mit den übrigen GET-Endpunkten; keine Zustandsmutation, kein Schreibpfad |
+
+Fazit: **kein High/Critical-Befund.** Die Marktdaten-Schicht erweitert das
+System um echte Kurse, ohne die Vertrauensgrenze zu verschieben: Feeds sind
+read-only und SSRF-geschützt, Failover ist laut und auditiert, anomale Kurse
+werden nie gehandelt, und der Live-Pfad bleibt gesperrt. 0 neue Dependencies,
+`npm audit` ohne Befund; 53 neue Tests, Coverage der neuen Module **95,6 %**
+(Zeilen), kein echter Netzwerkverkehr in der CI-Suite.
