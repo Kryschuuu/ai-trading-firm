@@ -49,6 +49,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Architektur: Makro/Mikro-Zyklen",
     subtitle: "Event-Driven-Blaupause — Regeln, Latenz, Skalierung, Security (v1.6)",
   },
+  universe: {
+    file: "docs/MARKET_UNIVERSE.md",
+    title: "Market Universe",
+    subtitle: "Broker-unabhängige Instrumenten-Registry — Datenmodell, Normalisierung, API (v1.8)",
+  },
   liveReview: {
     file: "docs/PEER_REVIEW_LIVE_TRADING.md",
     title: "Peer-Review: Live-/Paper-Trading",

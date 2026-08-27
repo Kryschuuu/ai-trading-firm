@@ -514,7 +514,93 @@ Alle Schwellwerte/Faktoren = `adp.*` in `risk_config`, geklemmt gegen
 
 ---
 
-## 9. Glossar (Kurz)
+## 9. Market Universe: vom Broker zur Agenten-Analyse (v1.8.0, Task 01)
+
+Bis v1.7 war die **Watchlist** (`DEFAULT_WATCHLIST`, 9 Strings in
+`src/lib/marketData.ts`) die faktische Marktdefinition. Ab Task 01 ist die
+**Instrument-Registry** (`src/universe/`) die Quelle der Wahrheit; die
+Watchlist ist zu einer reinen UI-Präferenz mit Referenzen auf Instrument-IDs
+degradiert.
+
+### 9.1 Die Universum-Pipeline
+
+```
+┌───────────┐   Instrumentenlisten (REST/CSV, ausserhalb des Kerns)
+│  BROKER   │   BINANCE · KRAKEN · ALPACA · IBKR · DYDX · BITUNIX · PAPER
+└─────┬─────┘
+      │  roh, venue-nativ ("btcusdt", "BTC/USD", "SPY", "EURUSD=X")
+      ▼
+┌──────────────────────┐  Adapter je Venue (Task 2+): holen, mappen, batchen
+│ INSTRUMENT DISCOVERY │  ── einziger Ort mit Netzwerkzugriff ──
+└─────────┬────────────┘
+          │  InstrumentInput[]  (upsertMany, max. 5000/Batch)
+          ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ INSTRUMENT REGISTRY   src/universe/   deterministisch · kein LLM     │
+│   Normalisierung  →  Validierung  →  Ausschluss-Policy  →  Upsert    │
+│   ID = VENUE:SYMBOL · stabile Sortierung · NDJSON-Persistenz         │
+│   jede Mutation → audit_log (actor=system, source, changed, ts)      │
+└─────────┬────────────────────────────────────────────────────────────┘
+          │  query({ status, venue, assetClass, … })
+          ▼
+┌──────────────────┐   volume24h, spread  → dünne Märkte raus
+│ LIQUIDITY FILTER │   (Task 2+; Metriken sind hier initial null)
+└─────────┬────────┘
+          ▼
+┌───────────────────┐  status=active · paperAvailable/liveAvailable ·
+│ TRADABILITY FILTER│  minQuantity/priceStep gegen Kontogröße
+└─────────┬─────────┘
+          ▼
+┌──────────────┐  volatility · Hebel/Short-Flags · Klumpenrisiko je Underlying
+│ RISK FILTER  │  (riskGuard.ts bleibt die harte Schranke im Code)
+└─────────┬────┘
+          ▼
+┌────────────────┐  Score aus Liquidität, Kosten (maker/taker + spread),
+│ MARKET RANKING │  Volatilität und Trendqualität
+└─────────┬──────┘
+          ▼
+┌────────────────────────┐  Top-N je Anlageklasse, versioniert und auditiert
+│ DAILY / WEEKLY UNIVERSE│  = das, worauf die Firma an diesem Tag schaut
+└─────────┬──────────────┘
+          ▼
+┌────────────────┐  CEO/Research (Makro-Zyklus) bekommen Instrument-IDs,
+│ AGENT ANALYSIS │  keine losen Strings — Regeln referenzieren VENUE:SYMBOL
+└────────────────┘
+```
+
+Umgesetzt in Task 01 sind **Registry** (inkl. Normalisierung, Policy,
+Persistenz, Audit) und die Lesepfade `GET /api/markets` sowie
+`GET /api/markets/{venue}/{symbol}`. Discovery, die Filterstufen, Ranking und
+die Tages-/Wochen-Auswahl sind vorbereitet (Contract + Metrikfelder), aber
+bewusst noch nicht implementiert — sie sind eigene Tasks.
+
+### 9.2 Symbol ≠ Markt
+
+```
+Underlying  BTC ─┬─ Asset BTC ─┬─ BINANCE:BTCUSDT   spot        (Gebühren, Ticks je Venue)
+                 │             ├─ KRAKEN:BTC/USD    spot
+                 │             └─ BITUNIX:BTCUSDT   perpetual   (Funding, Liquidation)
+```
+
+Drei handelbare Instrumente, ein Asset, ein ökonomisches Underlying. Der
+Risk-Layer muss deshalb pro **Underlying** aggregieren, nicht pro Symbol —
+sonst wird dreifach dieselbe Wette eröffnet.
+
+### 9.3 Einordnung in die bestehende Architektur
+
+| Ebene | Kennt das Universum als | Kopplung |
+| --- | --- | --- |
+| Discovery-Adapter (Task 2+) | Schreibpfad (`upsertMany`) | einziger Netzwerkzugriff |
+| Registry (`src/universe/`) | Wahrheit | keine DB-Pflicht, keine LLM, kein Netz |
+| Makro-Zyklus (CEO/Research) | Kandidatenliste je Zyklus | liest über `query()` |
+| Mikro-Executor | Handelsbedingungen (Ticks, Mindestmengen) | RAM-Cache, kein Hot-Path-IO |
+| Dashboard/Operations Center | `GET /api/markets` + `docs/help/market-universe.help.json` | rein lesend |
+
+Details, Feldkatalog und API-Beispiele: **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)**.
+
+---
+
+## 10. Glossar (Kurz)
 
 | Begriff | Bedeutung |
 | --- | --- |
@@ -529,3 +615,7 @@ Alle Schwellwerte/Faktoren = `adp.*` in `risk_config`, geklemmt gegen
 | Regime (NORMAL/ELEVATED/EXTREME) | Klassifizierung der Marktvolatilität (VIX/ATR/BBW/StdDev) |
 | Hysterese / Anti-Flapping | Eskalation sofort, De-Eskalation erst nach N ruhigen Ticks |
 | Fail-Open (Daten) | Indikator ohne Daten triggert nie — Risiko kann nie steigen |
+| Instrument | handelbarer Kontrakt an genau einer Venue, ID `VENUE:SYMBOL` |
+| Asset | venue-unabhängiger Ticker (z. B. `BTC`) |
+| Underlying | ökonomische Exposure hinter einem Instrument — Aggregationsebene für Klumpenrisiko |
+| Registry | deterministischer Speicher aller Instrumente (`src/universe/`, NDJSON) |

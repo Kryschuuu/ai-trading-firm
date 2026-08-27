@@ -1,0 +1,115 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "market-universe",
+  "version": 1,
+  "title": "Instrument-Universum — Feldhilfe",
+  "description": "Hilfetexte zu allen Feldern eines MarketInstrument im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Wird vom Operations Center (Task 10) als Tooltip gerendert.",
+  "source": "src/universe/types.ts",
+  "fields": {
+    "id": {
+      "kurzinfo": "Eindeutige Kennung eines handelbaren Instruments im Format VENUE:SYMBOL, zum Beispiel BINANCE:BTCUSDT.",
+      "technischeInfo": "Wird immer aus venue und symbol erzeugt und nie frei gesetzt; die Registry sortiert stabil nach dieser ID.",
+      "risiko": "Zwei Instrumente mit gleichem Basiswert, aber unterschiedlicher ID sind getrennte Positionen — Verwechslung führt zu ungewollter Doppelbelegung des Risikobudgets."
+    },
+    "venue": {
+      "kurzinfo": "Handelsplatz, an dem das Instrument gehandelt wird, zum Beispiel BINANCE, KRAKEN oder PAPER.",
+      "technischeInfo": "Freier Großbuchstaben-String (Muster ^[A-Z][A-Z0-9_]{1,15}$), damit neue Venues ohne Kernänderung aufgenommen werden können.",
+      "risiko": "Gebühren, Ausführungsqualität und Ausfallrisiko unterscheiden sich je Venue erheblich; dieselbe Strategie kann an einer anderen Venue unrentabel sein."
+    },
+    "symbol": {
+      "kurzinfo": "Das Symbol in der Schreibweise der jeweiligen Venue, zum Beispiel BTCUSDT, BTC/USD oder SPY.",
+      "technischeInfo": "Normalisiert auf Großbuchstaben ohne Leerzeichen; venue-typische Trennzeichen bleiben erhalten, weil sie Teil der Identität sind.",
+      "risiko": "Ein an der falschen Venue interpretiertes Symbol kann eine völlig andere Position eröffnen — Orders daher immer über die vollständige Instrument-ID adressieren."
+    },
+    "base": {
+      "kurzinfo": "Das Basis-Asset eines Handelspaars, zum Beispiel BTC in BTCUSDT. Bei Einzelwerten wie Aktien ist das Feld leer.",
+      "technischeInfo": "Aus dem Symbol abgeleitet (FX-Suffix, Trennzeichen oder bekanntes Quote-Suffix) oder explizit gesetzt; Muster ^[A-Z0-9]{1,12}$.",
+      "risiko": "Das Basis-Asset bestimmt die eigentliche Marktexposure; mehrere Instrumente mit gleicher Basis häufen dasselbe Risiko an."
+    },
+    "quote": {
+      "kurzinfo": "Die Währung, in der Preis und Gegenwert ausgedrückt werden, zum Beispiel USDT oder USD.",
+      "technischeInfo": "Wird aus dem Symbol geparst oder explizit gesetzt; Standard ist USD, wenn keine Quote erkennbar ist.",
+      "risiko": "Eine abweichende Quote-Währung bringt zusätzliches Währungs- beziehungsweise Stablecoin-Risiko in die Position."
+    },
+    "assetClass": {
+      "kurzinfo": "Anlageklasse des Instruments: crypto, equity, etf, fx, commodity, index oder other.",
+      "technischeInfo": "Konservativ abgeleitet aus Symbol, Basis und Quote; eine explizite Angabe schlägt jede Ableitung.",
+      "risiko": "Anlageklassen haben unterschiedliche Handelszeiten, Liquiditätsprofile und Gap-Risiken; Positionsgrößen sollten je Klasse unterschiedlich bemessen werden."
+    },
+    "marketType": {
+      "kurzinfo": "Kontraktart: spot, perpetual, future, option oder cfd.",
+      "technischeInfo": "Abgeleitet aus Venue und Symbol-Suffix (zum Beispiel -PERP) oder explizit gesetzt; Spot ist der Standard.",
+      "risiko": "Derivate bringen Funding-, Verfalls- und Liquidationsrisiken mit, die es bei Spot nicht gibt — gleicher Basiswert bedeutet nicht gleiches Risiko."
+    },
+    "status": {
+      "kurzinfo": "Handelbarkeitszustand: active, halted, delisted oder preview.",
+      "technischeInfo": "Reiner Registry-Zustand; er wird von Discovery-Läufen fortgeschrieben und nicht von der Börse live abgefragt.",
+      "risiko": "Ein veralteter Status kann Orders in ausgesetzte oder delistete Märkte schicken; vor Ausführung immer zusätzlich die Kursquelle prüfen."
+    },
+    "minQuantity": {
+      "kurzinfo": "Kleinste Menge, die an dieser Venue handelbar ist.",
+      "technischeInfo": "Positiver Zahlenwert in Einheiten des Basis-Assets beziehungsweise Kontrakten; Orders unterhalb dieser Menge werden von der Venue abgelehnt.",
+      "risiko": "Bei kleinem Konto kann die Mindestmenge größer sein als die risikokonforme Positionsgröße — dann ist das Instrument faktisch nicht handelbar."
+    },
+    "priceStep": {
+      "kurzinfo": "Kleinste zulässige Preisänderung (Tick-Größe) des Instruments.",
+      "technischeInfo": "Positiver Zahlenwert; Limit-, Stop- und Take-Profit-Preise müssen ein Vielfaches davon sein.",
+      "risiko": "Auf den Tick gerundete Stops liegen leicht anders als berechnet; bei großen Ticks weicht das reale Risiko spürbar vom Plan ab."
+    },
+    "quantityStep": {
+      "kurzinfo": "Kleinste zulässige Mengenänderung (Lot-Schritt) des Instruments.",
+      "technischeInfo": "Positiver Zahlenwert; die Ordermenge wird auf ein Vielfaches abgerundet.",
+      "risiko": "Abrunden verkleinert die Position gegenüber der Planung; bei groben Schritten verändert das Risiko-Ertrags-Verhältnis sich merklich."
+    },
+    "makerFee": {
+      "kurzinfo": "Gebühr für Orders, die Liquidität ins Buch legen, als Dezimalanteil (0.001 = 0,1 %).",
+      "technischeInfo": "Rabatte dürfen negativ sein; der Betrag ist auf 0.1 begrenzt, größere Werte gelten als Datenfehler.",
+      "risiko": "Gebühren wirken auf jede Ein- und Ausstiegsseite; bei kurzfristigen Strategien können sie den Erwartungswert vollständig aufzehren."
+    },
+    "takerFee": {
+      "kurzinfo": "Gebühr für Orders, die sofort gegen das Buch ausgeführt werden, als Dezimalanteil.",
+      "technischeInfo": "Gleiche Wertebereiche wie makerFee; Market-Orders lösen in der Regel die Taker-Gebühr aus.",
+      "risiko": "Taker-Gebühren sind meist höher als Maker-Gebühren und addieren sich mit dem Spread zu den realen Ausführungskosten."
+    },
+    "leverageAvailable": {
+      "kurzinfo": "Gibt an, ob dieses Instrument an dieser Venue mit Hebel handelbar ist.",
+      "technischeInfo": "Reines Fähigkeits-Flag der Registry; es aktiviert nichts und sagt nichts über die konfigurierten Risikogrenzen aus.",
+      "risiko": "Hebel vergrößert Gewinn und Verlust gleichermaßen und führt Liquidationsrisiko ein; die Guardrails im Code bleiben davon unberührt."
+    },
+    "shortAvailable": {
+      "kurzinfo": "Gibt an, ob Short-Positionen in diesem Instrument möglich sind.",
+      "technischeInfo": "Fähigkeits-Flag; ob die Firma tatsächlich short gehen darf, entscheidet ausschließlich riskGuard.ts.",
+      "risiko": "Der Verlust einer Short-Position ist theoretisch unbegrenzt, zusätzlich können Leihkosten und Short-Squeezes auftreten."
+    },
+    "paperAvailable": {
+      "kurzinfo": "Gibt an, ob das Instrument im Paper-Modus simuliert werden kann.",
+      "technischeInfo": "Setzt voraus, dass eine Kursquelle vorhanden ist; Standardwert für neu aufgenommene Instrumente ist true.",
+      "risiko": "Paper-Fills unterstellen idealisierte Ausführung; reale Slippage und Teilausführungen fehlen und schönen das Ergebnis."
+    },
+    "liveAvailable": {
+      "kurzinfo": "Gibt an, ob das Instrument grundsätzlich live handelbar wäre.",
+      "technischeInfo": "Reine Fähigkeitsangabe des Datensatzes — kein Schalter; das System liefert weiterhin ausschließlich Paper-Trading aus.",
+      "risiko": "Das Flag darf nie als Freigabe missverstanden werden; Live-Handel erfordert Credentials, Freigaben und ein eigenes Peer-Review."
+    },
+    "volume24h": {
+      "kurzinfo": "Handelsvolumen der letzten 24 Stunden in Quote-Währung. Null bedeutet unbekannt, nicht null Umsatz.",
+      "technischeInfo": "Wird von späteren Discovery- und Liquiditäts-Tasks gefüllt; Filter auf Mindestvolumen schließen unbekannte Werte grundsätzlich aus.",
+      "risiko": "Geringes Volumen bedeutet schlechte Ausführung und schwierige Ausstiege; in dünnen Märkten kann eine normale Positionsgröße den Kurs selbst bewegen."
+    },
+    "spread": {
+      "kurzinfo": "Relativer Abstand zwischen Geld- und Briefkurs (0.0004 entspricht 4 Basispunkten).",
+      "technischeInfo": "Als Dezimalanteil gespeichert und von späteren Tasks aus Orderbuch-Snapshots berechnet; null bedeutet unbekannt.",
+      "risiko": "Der Spread ist ein sofort anfallender Kostenblock bei jedem Ein- und Ausstieg und weitet sich in Stressphasen typischerweise stark aus."
+    },
+    "volatility": {
+      "kurzinfo": "Annualisierte historische Schwankungsintensität. Hohe Volatilität bedeutet nicht automatisch ein gutes Handelssignal.",
+      "technischeInfo": "Berechnung aus logarithmischen Renditen bzw. ATR.",
+      "risiko": "Hohe Volatilität reduziert bei konstantem Risikobudget typischerweise die zulässige Positionsgröße."
+    },
+    "lastSeen": {
+      "kurzinfo": "Zeitpunkt, zu dem das Instrument zuletzt von einer Quelle bestätigt wurde (ISO-8601 UTC).",
+      "technischeInfo": "Wird bei jedem Upsert fortgeschrieben; der jüngste Wert über alle Instrumente bildet den lastSync-Stand der Registry.",
+      "risiko": "Ein alter Zeitstempel deutet auf ein eingefrorenes Universum hin — Handelsbedingungen und Status können dann längst veraltet sein."
+    }
+  }
+}

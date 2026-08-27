@@ -177,3 +177,62 @@ Executor-Instanz; (2) Makro-Prompts verarbeiten Marktdaten — die
 Anti-Injection-Zeile ist ein weicher Schutz, die harte Grenze bleibt die
 Whitelist; (3) `REQUIRE_HUMAN_APPROVAL=false` aktiviert Regeln automatisch
 — erst nach Backtest + Paper-Phase umstellen.
+
+
+---
+
+## Security Audit — Task 01 (Market Universe, v1.8.0)
+
+**Audit-Stand:** 2026-08-27 · **Scope:** `src/universe/**`,
+`src/app/api/markets/**`, `scripts/seed-universe.ts`, `data/universe/**`,
+Änderung an `src/lib/marketData.ts` (Deprecation der Watchlist).
+**Methode:** manuelle Code-Review, Threat-Walkthrough der neuen Eingabepfade,
+`npm audit`, TS-strict + ESLint, 301 Tests inkl. Injection-Fällen.
+
+### Checkliste
+
+- [x] **Input-Validierung** — Venue (`^[A-Z][A-Z0-9_]{1,15}$`), Symbol
+  (`^[A-Z0-9]{1,20}(?:[/.\-_=][A-Z0-9]{1,10}){0,2}$`), ID-Konsistenz
+  (`VENUE:SYMBOL`), Enum-Whitelists für `assetClass`/`marketType`/`status`,
+  Zahlenbereiche für alle Handelsbedingungen und Metriken, ISO-8601-Prüfung für
+  `lastSeen`. Fremdfelder werden verworfen, nicht durchgereicht.
+- [x] **Größen-/Mengenlimits** — Batch ≤ 5000 Sätze, Seitengröße ≤ 500,
+  Query-Parameter ≤ 200 Zeichen, ≤ 20 Werte je Mehrfachparameter,
+  Freitextsuche ≤ 64 Zeichen, Policy ≤ 50 Regeln à ≤ 120 Zeichen.
+- [x] **Parametrisierte Queries** — kein SQL im neuen Code; die optionale
+  DB-Audit-Senke nutzt ausschließlich Drizzle-Inserts (parametrisiert).
+  Die Freitextsuche ist ein `String.includes` auf der ID, **kein** Regex aus
+  Benutzereingabe.
+- [x] **Audit-Log** — jede Mutation (`UPSERT`, `BATCH_UPSERT`, `SEED`, `REMOVE`)
+  erzeugt genau einen Eintrag mit `actor=system`, `source`, geänderter Anzahl und
+  UTC-Zeitstempel; Dateisenke immer, DB-Senke (`audit_log`, Event
+  `UNIVERSE_MUTATION`) über `UNIVERSE_AUDIT_DB=1`.
+- [x] **Keine Secrets** — kein Credential, kein Token, kein API-Key in Code,
+  Config, Seed-Daten oder Logs. Audit-Einträge enthalten nur IDs und Zähler;
+  HTTP-Fehler laufen durch `publicErrorMessage()` (Redaktion).
+- [x] **Neue Dependencies geprüft** — **keine** hinzugefügt (0 neue Pakete);
+  `npm audit`: 0 Vulnerabilities. Nur Node-Kernmodule (`fs`, `path`, `os`).
+- [x] **Keine Live-Trading-Funktion** — `liveAvailable` ist ein reines
+  Datenfeld; es existiert kein Codepfad, der daraus eine Order ableitet.
+  `riskGuard.ts` und `PaperBroker` sind unverändert.
+- [x] **Kein Netzwerk, kein LLM im Kern** — die Registry nutzt ausschließlich
+  lokale Dateien; Tests laufen offline mit committeten Fixtures.
+
+### Befunde
+
+| ID | Severity | Datei (Funktion) | Problem | Status |
+| --- | --- | --- | --- | --- |
+| U-01 | Medium | `src/universe/policy.ts` → `loadPolicy()` | Reguläre Ausdrücke aus einer Override-Datei (`UNIVERSE_POLICY_FILE`) könnten katastrophales Backtracking verursachen (ReDoS) | ✅ mitigiert: Muster nur aus Betreiber-Config (nie HTTP), ≤ 50 Regeln, ≤ 120 Zeichen, Kompilierung einmalig, Auswertung nur gegen validierte Symbole ≤ 32 Zeichen; Restrisiko akzeptiert und dokumentiert |
+| U-02 | Medium | `src/universe/registry.ts` → `upsertMany()` | Unbegrenzte Batches könnten Speicher und Dateigröße sprengen | ✅ gefixt: harte Grenze `MAX_BATCH_SIZE = 5000`, Verstoß wirft `UniverseValidationError` |
+| U-03 | Medium | `src/app/api/markets/route.ts` → `GET()` | Unbegrenzte `pageSize` hätte das gesamte Universum in eine Antwort gezogen | ✅ gefixt: Klemmung auf 500 (Registry-seitig, nicht nur in der Route) |
+| U-04 | Low | `src/universe/store.ts` → `save()` | Absturz während des Schreibens hätte eine halbe NDJSON-Datei hinterlassen | ✅ gefixt: atomarer Write (`tmp` + `rename`), Audit-Datei mit Modus `0600` |
+| U-05 | Low | `src/universe/store.ts` → `load()` | Manipulierte/kaputte Zeilen in der Datendatei | ✅ gefixt: jede Zeile durchläuft `validateInstrument()`; ungültige Zeilen werden gezählt (`skippedLines`), nie geladen |
+| U-06 | Low | `src/app/api/markets/[venue]/[symbol]/route.ts` | Pfadparameter könnten Traversal-Zeichen enthalten | ✅ gefixt: Decodierung + Muster-Validierung vor jedem Zugriff; die ID ist ein Map-Key, kein Dateipfad |
+| U-07 | Low | `src/universe/audit.ts` → `sanitizeSource()` | Freie `source`-Angaben könnten Log-Injection/Flooding erlauben | ✅ gefixt: Whitelist-Zeichen, max. 40 Zeichen, Default `unknown` |
+| U-08 | Info | `src/universe/audit.ts` → `writeDbAudit()` | DB-Senke standardmäßig aus; Ausfall darf Mutation nicht abbrechen | ✅ geprüft: dynamischer Import, `try/catch`, redigierte Warnung |
+| U-09 | Info | `data/universe/*` | Versionierte Instrumentendatei im Repo | ✅ geprüft: enthält ausschließlich öffentliche Marktmetadaten; das Audit-Log ist per `.gitignore` ausgeschlossen |
+| U-10 | Info | `src/lib/marketData.ts` | Deprecation der `DEFAULT_WATCHLIST` | ✅ geprüft: identische Werte/Reihenfolge, keine Verhaltensänderung für Monitor, Broker und Workshop |
+
+Fazit: **kein High/Critical-Befund.** Der neue Code erweitert keine
+Vertrauensgrenze — er liest und schreibt ausschließlich lokale, validierte
+Konfigurationsdaten und stellt zwei rein lesende Endpunkte bereit.
