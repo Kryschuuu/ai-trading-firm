@@ -10,6 +10,7 @@ import { killSwitch, validateOrder, RISK_LIMITS } from "./riskGuard";
 import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import type { BrokerCapabilities, BrokerVenueId } from "../contracts/broker";
+import type { MarketInstrument } from "../universe/types";
 
 /** Broker-Name = Adapter-Venue-ID (Task 02: dieselbe Whitelist, kein zweites Set). */
 export type BrokerName = BrokerVenueId;
@@ -40,7 +41,40 @@ export type Fill = {
   takeProfit: number | null;
   status: "FILLED" | "REJECTED";
   reason?: string;
+  /** Abgezogene Gebühren in Kontowährung (Task 03, Fill-Simulator). */
+  fees?: number;
+  /** true, wenn der Fill nur teilweise ausgeführt wurde (Task 03). */
+  partial?: boolean;
 };
+
+/** Ein Level-1-Quote (Bid/Ask) für die Ausführungs-Simulation. */
+export interface LiveQuote {
+  bid: number;
+  ask: number;
+  last: number;
+  /** Relativer Spread (0.0004 = 4 bp). */
+  spread: number;
+  volume24h: number | null;
+}
+
+/** Ergebnis der Ausführungs-Simulation. */
+export interface ExecutedFill {
+  filledQty: number;
+  fillPrice: number;
+  fees: number;
+  status: "FILLED" | "PARTIALLY_FILLED" | "REJECTED";
+  reason?: string;
+}
+
+/**
+ * Ausführungs-Adapter (Task 03). Wird vom Produktivpfad injiziert, damit
+ * Fills aus echten Kursen (Modus B) durch den deterministischen Simulator
+ * gehen (Gebühren, Spread, Slippage, Latenz, Partial Fills).
+ */
+export interface PaperExecutionAdapter {
+  quoteProvider(symbol: string): LiveQuote | null;
+  execute(order: Order, quote: LiveQuote): ExecutedFill;
+}
 
 export type HydratePosition = {
   symbol: string;
@@ -79,10 +113,22 @@ export class PaperBroker {
     string,
     { qty: number; side: OrderSide; entryPrice: number; stopLoss: number | null; takeProfit: number | null }
   >();
+  private execution?: PaperExecutionAdapter;
 
-  constructor(startEquity = 10000) {
+  constructor(startEquity = 10000, execution?: PaperExecutionAdapter) {
     this.cash = startEquity;
     this.startEquity = startEquity;
+    this.execution = execution;
+  }
+
+  /** Injiziert den Ausführungs-Adapter (Task 03) — idempotent. */
+  setExecution(execution?: PaperExecutionAdapter): void {
+    this.execution = execution;
+  }
+
+  /** true, wenn ein Ausführungs-Adapter gesetzt ist. */
+  hasExecution(): boolean {
+    return this.execution !== undefined;
   }
 
   get openPositions(): number {
@@ -250,7 +296,44 @@ export class PaperBroker {
       return reject(order, `INSUFFICIENT_CASH: benötigt ${order.riskNotional.toFixed(2)}, verfügbar ${this.cash.toFixed(2)}`);
     }
 
-    // 6) Paper-Fill mit moderatem Slippage.
+    // 6) Fill.
+    // 6a) Modus B/Simulator: echte Kurse über den Ausführungs-Adapter
+    //     (Gebühren, Spread, Slippage, Latenz, Partial Fills).
+    if (this.execution) {
+      const quote = this.execution.quoteProvider(symbol);
+      if (!quote) {
+        return reject(order, `NO_QUOTE:${symbol}`);
+      }
+      const executed = this.execution.execute(order, quote);
+      if (executed.status === "REJECTED" || executed.filledQty <= 0) {
+        return reject(order, executed.reason ?? "SIM_REJECTED");
+      }
+      const filledQty = executed.filledQty;
+      const fillPrice = executed.fillPrice;
+      this.positions.set(symbol, {
+        qty: filledQty,
+        side: order.side,
+        entryPrice: fillPrice,
+        stopLoss: order.stopLoss ?? null,
+        takeProfit: order.takeProfit ?? null,
+      });
+      this.cash -= filledQty * fillPrice + executed.fees;
+
+      return {
+        orderId: `PAP-${Date.now().toString(36).toUpperCase()}`,
+        symbol,
+        side: order.side,
+        qty: filledQty,
+        fillPrice,
+        stopLoss: order.stopLoss ?? null,
+        takeProfit: order.takeProfit ?? null,
+        status: "FILLED",
+        fees: executed.fees,
+        partial: executed.status === "PARTIALLY_FILLED",
+      };
+    }
+
+    // 6b) Legacy-Paper-Fill mit moderatem Slippage (rohe PaperBroker-Instanz).
     const fillPrice = order.side === "LONG" ? price * 1.001 : price * 0.999;
 
     this.positions.set(symbol, {
