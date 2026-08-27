@@ -22,13 +22,14 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)** | Broker-Capability-Modell (Task 02): Adapter-Vertrag, Capability-Matrix, Execution Modes, Factory, Live-Gate, Health-API |
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data (Task 03): Modi A/B/C, deterministischer Fill-Simulator, Failover-Kette, Replay, Historical Store, `/api/marketdata/*` |
+| **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics (Task 05): Formelkatalog, Kovarianz/Korrelation, drei Optimizer-Modi, Risk-Guard-Kette, `/api/portfolio/*` |
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
 | **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting, Agenten-Register |
 | **[CHANGELOG.md](CHANGELOG.md)** | Versionen, Bugfixes und Änderungen je Release |
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 
-**Version:** `v1.11.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.13.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -350,8 +351,11 @@ Beispiele mit `curl` im **[Handbuch, Kapitel 4](HANDBUCH.md)**.
   ein In-Memory-Ledger; die Multi-Instanz-Primitive (Advisory-Lock, UNIQUE-Indizes)
   sind implementiert und greifen, sobald ein echter Broker-Adapter (Alpaca/ccxt) als
   geteilte Zustandsquelle angebunden ist — Details in ARCHITECTURE.md §5.
-* **Kein Kursrisiko-Modell.** Es gibt keine Korrelations-, Volatilitäts- oder
-  Portfoliooptimierung. Die Guardrails sind absichtlich stumpf und deshalb verlässlich.
+* **Kein Kursrisiko-Modell auf Order-Ebene.** Seit v1.13 gibt es eine deterministische
+  Portfolio-Ebene (`src/portfolio/`: Volatilität, Korrelation/Cluster, drei Optimizer-Modi,
+  Risk-Guard-Kette — siehe [PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)). Die
+  **Order-Guardrails** (`src/lib/riskGuard.ts`) bleiben davon unberührt absichtlich stumpf
+  und deshalb verlässlich; die Portfolio-Analytics erzeugen Gewichte, aber keine Orders.
 
 ---
 

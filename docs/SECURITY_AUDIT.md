@@ -377,3 +377,67 @@ Datenbank, keine Secrets, kein Schreibpfad außerhalb des Artefaktordners. Die
 einzige Zustandsänderung des Systems sind reproduzierbare JSON-Dateien. Die
 neuen HTTP-Endpunkte sind lesend und gegen unbegrenzte Ergebnismengen
 abgesichert; der Live-Pfad bleibt unangetastet und gesperrt.
+
+---
+
+## Security Audit — Task 05 (Portfolio-Analytics, Optimizer & Risk-Guard-Kette, v1.13.0)
+
+**Scope:** `src/portfolio/**` (12 Dateien), `src/app/api/portfolio/**`
+(3 Routen + Parser), `tests/portfolio.*.test.ts` (7 Suiten).
+**Methode:** manuelle Review + statischer Architektur-Scan als Test
+(`tests/portfolio.architecture.test.ts`: Import-, Dateisystem-, Uhr-, Zufalls- und
+Env-Verbote) + TS strict + ESLint + 130 Modultests (8 Suiten) + Coverage-Messung.
+**Vertrauensgrenze:** Das Portfolio-Modul ist eine **reine Analyseschicht**. Es
+erzeugt Kennzahlen, Matrizen und Gewichte **plus Risk-Guard-Report** und verändert
+**keinen** Portfolio-, Positions-, Order-, Ledger- oder Live-Zustand. Der einzige
+optionale Schreibpfad ist die append-only Audit-Datei.
+
+### Checkliste (Pflichtkriterien)
+
+| Kriterium | Status | Nachweis |
+| --- | --- | --- |
+| **Read-only** | ✅ | Alle drei Routen exportieren `POST` und ein `GET`, das `405` liefert (Architekturtest prüft beides je Route). Keine Order-, Positions-, Ledger- oder Broker-Aufrufe im Modul (Scan). `optimizeWithGuard()` ist der einzige öffentliche Weg zu Gewichten; die Route ruft den rohen Optimizer nicht. |
+| **Größenlimits / DoS-Schutz** | ✅ | `PORTFOLIO_LIMITS`: max. **1000 Serien** (Spezifikationsdefault), max. 2000 Punkte je Serie, max. **400.000** Stichproben (`Serien × Länge`, bremst `O(T·n²)`), Body ≤ **16 MiB**. Überschreitung ⇒ `413 LIMIT_EXCEEDED` **vor** jeder Berechnung (getestet mit 501 × 800). Keine Rekursion über Nutzereingaben, keine regulären Ausdrücke auf Nutzertext. |
+| **Determinismus** | ✅ | Kein `Math.random`, kein `Date.now`, kein `new Date()` im Kern (Architekturtest). Solver-Starts sind fest (`1/n`, gleichverteilt, drei fixe Starts bei `max_sharpe`), Ausgabe auf 12 Dezimalen gerundet, `Σw` exakt 1. Zeitstempel kommen ausschließlich per injizierter `now()`-Funktion in Audit-Ereignisse. Test „identische Anfragen ⇒ identische Antworten" vergleicht zwei Antworten byte-genau. |
+| **Kein LLM-Import** | ✅ | Architekturtest scannt jede Datei unter `src/portfolio/**` und `src/app/api/portfolio/**` gegen Import-/`require`-/dynamische `import()`-Regex für Ollama, OpenAI, Anthropic/Claude, Gemini, `llmProvider`, Prompts, Analysten, Langchain. `getAnalysisContext()` liefert nur fertige Ergebnisse und enthält keine Gewichte. |
+| **Kein Netzwerk / keine DB** | ✅ | `fetch(`, `node:http(s)`, `node:net`, `node:child_process`, `ws`, Broker-SDKs und `drizzle`/`@/db` sind im Modul verboten (Test). `dbAuditSink` ist vorbereitet, aber nicht aktiv — das Modul läuft ohne Datenbank. |
+| **Numerische Robustheit** | ✅ | `NaN`/`±Infinity` in Eingaben ⇒ definierter Fehler (`INVALID_INPUT`, `NUMERIC_FAILURE`, `DIVISION_BY_ZERO`, `NOT_POSITIVE_DEFINITE`); `JSON.parse("1e999")` ⇒ `Infinity` wird abgelehnt (getestet). Singuläre Kovarianz ⇒ `SINGULAR_MATRIX` oder **konfigurierbare** `ridge`/`pseudo-inverse`, Ergebnis immer in `diagnostics.regularization` dokumentiert. Nullvarianz in der Korrelation ⇒ definiert 0, nie `NaN`. |
+| **Kein stiller Fallback** | ✅ | Cholesky erklärt Pivots unter `1e-12 · max(diag)` für singulär (zwei perfekt korrelierte Assets liefern sonst ein Pivot ~1e-19 und danach Unsinn). Nichtkonvergenz ⇒ `converged: false` **und** `notes: ["NOT_CONVERGED:iterations=…"]`. Bounds-Projektion ⇒ `BOUNDS_PROJECTED:violations=n`. |
+| **Autoritätskette erzwungen** | ✅ | `AUTHORITY_CHAIN` als Konstante, `assertAuthorityChain()` prüft Präfix **und** Vollständigkeit (`!rejected` ⇒ alle vier Stationen). `applyRiskGuard` lehnt Eingaben ohne `authority = "portfolio-optimizer"` ab (`INVALID_INPUT`). Architekturtest verankert beide Muster im Quelltext. |
+| **Audit je Entscheidung** | ✅ | Invariante `auditEvents.length === decisions.length + 1` (je Entscheidung ein Eintrag plus Summary), in `optimizeWithGuard` zusätzlich das Optimizer-Ereignis ⇒ `audit.length === 2 + decisions.length`. Tests zählen die Einträge bei Kappung, Verwurf und unverändertem Portfolio (0 Entscheidungen ⇒ genau ein `RISK_GUARD_PASS`). |
+| **Keine Secrets** | ✅ | Kein Credential im Code, keine Secrets in Antworten; `publicErrorMessage`-Muster der übrigen Routen übernommen, 500er ohne interne Details. `process.env` nur für `PORTFOLIO_AUDIT`, `PORTFOLIO_AUDIT_DIR`, `PORTFOLIO_AUDIT_DB` (Test-Whitelist). |
+| **Keine Datenflut ins Audit** | ✅ | Audit-Ereignisse führen max. 25 Symbole (`maxSymbolsPerAuditEvent`) und keine Renditereihen — nur Zahlenwerte und Gründe. |
+| **Path-Traversal** | ✅ | Der Audit-Dateiname wird gegen `^[A-Za-z0-9._-]{1,64}$` validiert (`AUDIT_FILE_RE`), Verzeichnisse werden nicht aus dem Request übernommen; Schreiben atomar über tmp + `rename`, Modus 0644 (getestet, inkl. Ablehnung von `../../etc/passwd`). |
+| **Log-Injection** | ✅ | Symbole werden getrimmt, uppercased und gegen `^[A-Z0-9][A-Z0-9:./\-_=]{0,63}$` geprüft — kein Zeilenumbruch, kein Leerzeichen, kein Steuerzeichen in Log- oder Audit-Zeilen. |
+| **Eingabevalidierung** | ✅ | Typisierte Parser für Body, Symbol, Serie, Kerzen (`high ≥ low`), Modi, Kovarianz-Methode, Bounds und Limits; Bereichs- und Ganzzahligkeitsprüfungen; fehlende Datenquelle ⇒ `400`; Kerzenanzahl/Periodenlänge gegen `PORTFOLIO_LIMITS`. |
+| **Konfiguration validiert** | ✅ | `resolveSolverOptions`/`resolveGuardConfig` prüfen jeden Wert einzeln; fehlerhafte Konfiguration ⇒ `INVALID_CONFIG` (nicht `INVALID_INPUT`), niemals stille Defaults. |
+| **Kein Live-Trading-Bezug** | ✅ | Keine Order- oder Broker-Aufrufe, kein `killSwitch`, keine Positionsmutation. Die Order-Guardrails (`src/lib/riskGuard.ts`) bleiben unangetastet. |
+
+### Befunde
+
+| ID | Severity | Datei (Funktion) | Problem | Status |
+| --- | --- | --- | --- | --- |
+| R-01 | Info | `src/app/api/portfolio/**` | Read-only-Endpunkte ohne Token, wie alle übrigen API-Routen des Projekts | ✅ by design (vgl. P-03/Q-01): keine Zustandsmutation, harte Größenlimits, redigierte Fehler. Die Datei-Audit-Senke ist opt-in und schreibt append-only. |
+| R-02 | Info | `src/portfolio/auditFile.ts` → `now()` in der Route | Audit-Zeitstempel entstehen per `() => new Date()` in der **Route**, nicht im Kern | ✅ by design: Der Kern bleibt deterministisch (Architekturtest verbietet `new Date()` unter `src/portfolio/**`); Audit-Zeit ist notwendigerweise Echtzeit. |
+| R-03 | Info | `src/portfolio/optimize.ts` → `max_sharpe` | Drei deterministische Starts statt garantierter Globaloptimum-Suche; die Zielfunktion ist unter Bounds nicht konvex | ✅ dokumentiert (PORTFOLIO_ANALYTICS.md §2): bestes der drei Ergebnisse gewinnt, Konvergenz wird berichtet. Kein Zufall, damit reproduzierbar. |
+| R-04 | Low | `src/portfolio/correlation.ts` → `covarianceMatrix` | Sample-Kovarianz ohne Shrinkage ist für `n ≫ T` schlecht konditioniert; `ridge`/`pseudo-inverse` sind Notlösungen | ⚠️ bekannt und dokumentiert (§9): Ledoit-Wolf ist der richtige nächste Schritt, aber bewusst nicht Teil dieses Tasks. Ohne Konfiguration wird ein Fehler geworfen, nie ein still falsches Ergebnis. |
+| R-05 | Low | `src/portfolio/riskGuard.ts` → Cluster | Single-Linkage-Clustering ist transitiv; A~B und B~C verbindet A und C auch bei moderatem `ρ_AC` | ✅ bewusste Entscheidung: größere Cluster ⇒ strengere Limits (konservativ). Schwelle konfigurierbar. |
+| R-06 | Info | `src/app/api/portfolio/parse.ts` → `statusForCode` | Enthält einen `INVALID_JSON`-Zweig, der aktuell nie geworfen wird (Parse-Fehler laufen als `INVALID_INPUT`) | ✅ harmlos; bleibt als Mapping-Vollständigkeit, getestet über `statusForCode`. |
+| R-07 | Info | `src/scanner/factors/correlation.ts` | Zweite Pearson/Spearman-Implementierung außerhalb des Portfolio-Moduls | ✅ bekannt (Q-03 aus Task 04): Task 05 existiert jetzt; der Umzug ist als Folgeschritt dokumentiert, der Scanner bleibt unverändert lauffähig. |
+| R-08 | Low | `src/app/api/portfolio/parse.ts` → `errorResponse()` | Ursprünglich wurde die Meldung **jeder** Ausnahme (redigiert) an den Client geschickt — interne Fehlerdetails (Pfade, Treiber-Meldungen) wären sichtbar geworden | ✅ **behoben** in diesem Task: nur `PortfolioError`-Meldungen werden ausgegeben, sonst „Interner Fehler"; Test „Fehlerantwort enthält nie interne Details" |
+| R-09 | Low | `src/portfolio/numeric.ts` → `regularizeCovariance()` | Der Fehlercode `NOT_POSITIVE_DEFINITE` war im Mapping der API definiert, wurde aber nirgends geworfen — eine negative Varianz erschien als `SINGULAR_MATRIX` | ✅ **behoben**: negative Diagonalelemente werfen jetzt `NOT_POSITIVE_DEFINITE` (`422`), der Code ist im Typ `PortfolioErrorCode` verankert und getestet |
+
+### Fazit
+
+**Kein Critical/High/Medium-Befund.** Das Portfolio-Modul vergrößert die
+Angriffsfläche minimal: 0 neue Dependencies, kein Netzwerk, keine Datenbank, keine
+Secrets, kein Zufall, keine Uhr im Kern und genau ein opt-in Schreibpfad
+(append-only Audit-Datei mit validiertem Namen). Die entscheidende Sicherheit
+ist architektonisch, nicht prozedural: **Gewichte entstehen ausschließlich im
+Optimizer, jedes Ergebnis läuft durch die Risk Guard, und jede Entscheidung ist
+auditiert.** Ein manipuliertes LLM kann diese Kette nicht umgehen — es bekommt
+fertige Zahlen und kann sie nur interpretieren. 113 Tests, Coverage der Bibliothek
+**96,41 %** Zeilen / 91,60 % Branches / 95,91 % Funktionen
+(`npm run test:coverage:portfolio`), Benchmark 500 × 750 in 5,8 s von 30 s Budget
+(unter Coverage-Instrumentierung 60 s — das Budget wird dort bewusst um Faktor 20
+skaliert, weil sonst die Instrumentierung gemessen würde, nicht die Bibliothek).

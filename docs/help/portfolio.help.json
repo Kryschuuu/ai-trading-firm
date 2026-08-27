@@ -1,0 +1,60 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "portfolio",
+  "version": 1,
+  "title": "Portfolio-Analytics, Optimizer und Risk Guard — Feldhilfe",
+  "description": "Hilfetexte zu Volatilität, Korrelation, Sharpe, Sortino, Max Drawdown, Profit Factor, den drei Optimizer-Modi und der Risk Guard im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Alle Werte entstehen in src/portfolio/ deterministisch und ohne LLM; Gewichte berechnet ausschließlich die Kette Portfolio Optimizer → Risk Guard → Position Limits → Correlation Limits. Wird vom Operations Center (Task 10) als Tooltip gerendert.",
+  "source": "src/portfolio/",
+  "fields": {
+    "volatilitaet": {
+      "kurzinfo": "Volatilität misst, wie stark ein Kurs im Jahresmaßstab schwankt. Hohe Volatilität ist nicht automatisch ein gutes Handelssignal — sie bestimmt die zulässige Positionsgröße.",
+      "technischeInfo": "Logarithmische Renditen r_t = ln(P_t/P_t-1), Standardabweichung mit ddof = 1 (Stichproben-σ, konfigurierbar auf ddof = 0), multipliziert mit der Wurzel aus dem Annualisierungsfaktor: Krypto 365, Aktien/ETF/Indizes/FX/Rohstoffe 252. Beide Werte sind je Aufruf überschreibbar. Der Scanner (Task 04) rechnet mit Populations-σ — bei 30 Beobachtungen unterscheiden sich die Werte um rund 1,7 Prozent.",
+      "risiko": "Die √T-Skalierung gilt nur, wenn die Renditen unabhängig sind. Bei Volatilitätsclustering unterschätzt sie lange Horizonte deutlich, bei Mean-Reversion überschätzt sie sie. Historische Volatilität sagt nichts über den nächsten Sprung — die zulässige Positionsgröße muss deshalb zusätzlich an der ATR und am Max Drawdown geprüft werden."
+    },
+    "korrelation": {
+      "kurzinfo": "Korrelation zeigt, wie gleich zwei Märkte sich bewegen. Nahe 1 heißt: beide fallen zusammen, Diversifikation findet nicht statt.",
+      "technischeInfo": "Pearson: ρ = Σ(x-x̄)(y-ȳ) / sqrt(Σ(x-x̄)² · Σ(y-ȳ)²) auf logarithmischen Renditen. Spearman: Pearson auf Rängen, Gleichstände erhalten den Durchschnittsrang. Cluster entstehen per Union-Find über alle Paare mit |ρ| ≥ Schwellwert (Default 0,8, konfigurierbar). Eine Serie ohne Varianz ist mathematisch undefiniert und wird definiert als 0 (neutral) ausgegeben, niemals als NaN.",
+      "risiko": "Pearson misst nur lineare Zusammenhänge — ρ = 0 heißt nicht unabhängig. In Stressphasen laufen Korrelationen gegen 1, genau dann, wenn Diversifikation gebraucht wird; Cluster aus Vergangenheitsdaten sind in der Krise oft wertlos. Single-Linkage-Cluster sind transitiv und deshalb konservativ groß."
+    },
+    "sharpe": {
+      "kurzinfo": "Rendite pro Einheit Gesamtrisiko. Der Sharpe beantwortet: Lohnt sich die Schwankung, die ich dafür in Kauf nehme?",
+      "technischeInfo": "Sharpe = (r̄ − r_f/A) / σ je Periode, annualisiert mit √A. Der risikofreie Zins wird je Periode abgezogen, damit er nicht versehentlich annualisiert doppelt zählt. σ = 0 ist ein definierter Fehler (DIVISION_BY_ZERO), kein Infinity.",
+      "risiko": "Der Sharpe setzt normalverteilte, symmetrische Renditen voraus und überschätzt Strategien mit negativem Skew systematisch — etwa Optionsverkauf oder Carry-Trades, die lange ruhig laufen und dann springen. Ein hoher Sharpe auf 30 Beobachtungen ist statistisch kaum belastbar."
+    },
+    "sortino": {
+      "kurzinfo": "Wie der Sharpe, zählt aber nur Verluste als Risiko. Gewinn-Schwankungen werden nicht bestraft.",
+      "technischeInfo": "Sortino = (r̄ − r_f/A) / σ_down mit Downside-Deviation σ_down = sqrt(1/(T−ddof) · Σ min(r_t − m, 0)²) und Target m (Default r_f/A). Es wird durch alle T − ddof Beobachtungen geteilt, nicht nur durch die Verlustperioden — sonst wären kurze Serien massiv überschätzt. σ_down = 0 (keine Periode unter Target) ist ein definierter Fehler.",
+      "risiko": "In Serien ohne einzige Verlustperiode ist der Sortino undefiniert oder riesig — beides kein Qualitätssignal. Sortino ignoriert Aufwärtsvolatilität; wer die Kennzahl isoliert liest, übersieht, dass eine Strategie auch nach oben unberechenbar sein kann."
+    },
+    "maxDrawdown": {
+      "kurzinfo": "Der tiefste Absturz vom bisherigen Höchststand bis zum Tiefpunkt. Die Zahl, an der Konten und Nerven scheitern.",
+      "technischeInfo": "Aus den kumulierten logarithmischen Renditen wird eine Indexreihe P_t = exp(Σ r_s) mit Start 1 gebildet; MDD = max_t (Peak_t − P_t)/Peak_t mit Peak_t = max über alle Vorperioden. Zusätzlich berichtet werden peakIndex, troughIndex, recoveryIndex, durationPeriods (Erholung minus Peak, ohne Erholung bis Serienende) und peakToTrough.",
+      "risiko": "Der Max Drawdown ist ein Pfadmaß: derselbe Wert kann in drei Tagen oder in drei Jahren entstehen — deshalb immer die Dauer mitlesen. Er beschreibt die Vergangenheit; der nächste Drawdown ist nicht durch ihn begrenzt. Wer die Positionsgröße so wählt, dass der historische Max Drawdown gerade noch erträglich war, hat keinen Puffer für einen tieferen."
+    },
+    "profitFactor": {
+      "kurzinfo": "Bruttogewinne geteilt durch Bruttoverluste. Über 1 heißt: Die Strategie hat im betrachteten Zeitraum Geld verdient.",
+      "technischeInfo": "PF = Σ(r_t > 0) / |Σ(r_t < 0)|. Sind alle Perioden Gewinne, ist der Profit Factor Infinity (definiert, kein Fehler); sind alle Verluste, ist er 0. Gezählt werden Perioden, nicht Trades — ein Backtest-Profit-Factor je Trade ist eine andere Größe.",
+      "risiko": "Ein Profit Factor nahe 1 ist innerhalb der Streuung kaum von Zufall zu unterscheiden, besonders bei wenigen Beobachtungen. Die Kennzahl ignoriert die Reihenfolge: Dieselbe Serie kann ruinös sein, wenn die Verluste früh und groß kommen."
+    },
+    "minVariance": {
+      "kurzinfo": "Das Portfolio mit der kleinstmöglichen Schwankung. Keine Renditeprognose nötig — deshalb der robusteste Modus.",
+      "technischeInfo": "Zielfunktion min wᵀΣw unter Σw = 1 und w zwischen den Bounds (Default long-only). Gelöst mit FISTA (beschleunigtes projiziertes Gradientenverfahren), Neustart beim Funktionswert und Active-Set-Polish über das KKT-System mit Cholesky-Zerlegung. Für zwei Assets deckungsgleich mit der analytischen Lösung w₁ = (σ₂² − σ₁₂)/(σ₁² + σ₂² − 2σ₁₂), die als Golden-Test auf 1e-12 geprüft wird. Toleranz 1e-9, Iterationslimit 2000, beide konfigurierbar.",
+      "risiko": "Minimale Varianz konzentriert sich auf die Assets mit der geringsten historischen Schwankung und lädt damit Klumpenrisiko ein — oft genau die Märkte, die gerade als sicher gelten. Ohne Korrelationslimits entsteht ein Portfolio aus fünf Varianten desselben Risikos; deshalb läuft jedes Ergebnis durch die Risk Guard."
+    },
+    "maxSharpe": {
+      "kurzinfo": "Das Portfolio mit dem besten Verhältnis von Überrendite zu Schwankung — das Tangentialportfolio.",
+      "technischeInfo": "max (μᵀw − r_f)/sqrt(wᵀΣw) unter Σw = 1 und Bounds, gelöst mit monotonem projiziertem Aufstieg und drei festen, deterministischen Starts (gleichverteilt, 1/σ², 1/σ); das beste Ergebnis gewinnt. Ohne Bounds identisch zur geschlossenen Lösung w ∝ Σ⁻¹(μ − r_f). Konvergenz wird über die ∞-Norm des projizierten Gradienten relativ zur Skala gemessen.",
+      "risiko": "Dieser Modus ist der empfindlichste von allen: Er braucht erwartete Renditen μ, und μ ist die am schlechtesten schätzbare Größe überhaupt. Kleine Änderungen in μ kippen die Gewichte stark (Error-Maximization); auf historischen Mittelwerten optimiert man gegen Rauschen. Ohne Bounds entstehen extreme Hebel auf scheinbar sichere Assets."
+    },
+    "riskParity": {
+      "kurzinfo": "Jedes Asset trägt gleich viel zum Gesamtrisiko bei. Nicht gleich viel Geld — gleich viel Risiko.",
+      "technischeInfo": "Gesucht sind w mit w_i·(Σw)_i = (1/n)·wᵀΣw für alle i. Gelöst per Newton-Verfahren auf der Spinu-Formulierung min ½wᵀΣw − (1/n)·Σ ln w_i mit H = Σ + diag(1/(n·w_i²)) und Halbierungs-Liniensuche; Start immer w = 1/n (deterministisch). Die Eigenschaftstests prüfen |RC_i − RC_j| < 1e-4. Bounds werden per Projektion erzwungen, weil das analytische Risk-Parity-Gewicht sie sonst bricht.",
+      "risiko": "Risk Parity gewichtet Assets mit niedriger Volatilität stark hoch — in ruhigen Phasen ist das oft Anleihe- oder Low-Vol-Konzentration. Der Modus braucht keine Renditeerwartung, ignoriert aber Renditen vollständig: ein Asset mit schlechter erwarteter Rendite bekommt denselben Risikoanteil wie ein gutes. Leverage wird hier bewusst nicht eingesetzt; ohne Hebel bleibt die erwartete Rendite niedrig."
+    },
+    "riskGuard": {
+      "kurzinfo": "Die Kontrollinstanz hinter dem Optimizer. Sie prüft jedes Ergebnis gegen Positions- und Korrelationslimits, kappt, verteilt um oder verwirft — und schreibt jede Entscheidung ins Audit-Log.",
+      "technischeInfo": "Feste Kette: Portfolio Optimizer → Risk Guard → Position Limits → Correlation Limits → Ausgabe, als Konstante AUTHORITY_CHAIN im Code erzwungen (assertAuthorityChain prüft Präfix und Vollständigkeit). applyRiskGuard akzeptiert nur Eingaben mit authority = 'portfolio-optimizer'. Positionslimits: maxWeightPerInstrument (Default 20 %), maxPositions, minWeight (0,1 % — Splitter werden entfernt, frei gewordenes Gewicht neu verteilt). Korrelationslimits: Cluster aus |ρ| ≥ 0,8, maxClusterExposure (Default 50 %). Ergebnis: { rejected, adjusted, reasons[], decisions[], clusterExposures[] } mit genau einem Audit-Eintrag je Entscheidung plus Summary. Verwirft die Guard, antwortet die API mit 422 RISK_GUARD_REJECTION.",
+      "risiko": "Die Guard ist eine harte Grenze, kein Vorschlag — ein verworfenes Portfolio ist ein korrektes Ergebnis, kein Fehler. Wer Limits lockert (maxWeightPerInstrument auf 1, maxClusterExposure auf 1), hat die Kontrolle abgeschaltet, nicht das Problem gelöst. Sind die Limits unerfüllbar, bleibt Kapital liegen (CASH_RESIDUAL) oder das Portfolio wird verworfen; beides ist dokumentiert. Die Guard schützt vor Konzentration, nicht vor einem fallenden Gesamtmarkt."
+    }
+  }
+}
