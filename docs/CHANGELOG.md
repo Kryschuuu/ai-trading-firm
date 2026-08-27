@@ -20,6 +20,65 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.14.0] — 2026-08-27
+
+**Daily & Weekly Agent Cycle mit Shortlist-Limits und Artefakten (Task 06):
+Ein neues Modul `src/cycle/` orchestriert die strukturierte Tages- und Wochenroutine
+der 12 Agenten-Rollen. Massenverarbeitung (Scanner, Backtest) läuft ohne Sprachmodell;
+LLM-Analysen erfolgen ausschließlich auf gerankten Shortlists mit strikt im Code
+erzwungenen Obergrenzen (max. 40 Instrumente an Technical Analyst und News Analyst).
+Vollständiger Prompt-Injection-Schutz über strikte Datentrennung, versionierte
+Artefakte mit konfigurierbarer Retention, Vorbereitung für LLM-Eskalationen
+(`MODEL_ESCALATION_REQUEST`), injizierbare Uhr für Zeitraffer-Tests und vier neue
+read-only REST-Endpunkte unter `/api/analysis/*`.**
+
+### Neu: `src/cycle/` (Agent-Orchestrierung & Zyklus-Engine)
+
+- **8-stufige Tagesroutine** (`daily.ts`, `steps/`):
+  1. `00:00–06:00` **Market Scanner**: Deterministischer Scan ohne LLM (`llmAllowed: false`).
+  2. `06:00–07:00` **Macro Analyst**: Cross-Market-Blick auf BTC, ETH, DXY, SPX, Nasdaq, Gold, Bonds + Volatilitätsregime.
+  3. `07:00–08:00` **Market Selection**: Filtert und rankt die Daily Candidate List (max. 40 Instrumente).
+  4. `08:00–09:00` **Technical Analyst**: Multi-Timeframe-TA, **Code-Limit: max. 40 Instrumente** (`assertShortlistLimit`).
+  5. `09:00–10:00` **News Analyst**: News-Sentiment & systemisches Risiko, **Code-Limit: max. 40 Instrumente**, Prompt-Injection-Schutz.
+  6. `10:00–11:00` **Risk Manager**: Korrelationscluster & Portfolio-Exposure-Bewertung über Task 05 (`AnalyticsPort`).
+  7. **danach** **Research**: Konkrete Trade-Setups mit Entry/SL/TP — verbindlich als Vorschläge markiert (`isProposal: true`, keine Orders).
+  8. **danach** **Backtest-Verifikation**: Deterministische Verifikation historischer Kennzahlen (Max Drawdown, Profit Factor, Sharpe, Sortino, Regime-Robustheit) ohne LLM.
+- **Weekly Universe Review** (`weekly.ts`):
+  - 1× wöchentlich (konfigurierbarer Wochentag, Standard: Sonntag).
+  - Bewertet neue Listings, Delistings, Liquiditäts- und Gebührenschnittstellen, Regimewechsel und Broker-Verfügbarkeit.
+  - Erzeugt verbindliche Klassifikation `CORE` / `ROTATION` / `DISCOVERY` / `EXCLUDED` je Instrument mit bis zu 20 `reasons[]`.
+- **Step-Engine & Scheduler** (`engine.ts`, `scheduler.ts`, `clock.ts`):
+  - Injizierbare Uhr (`SimulatedClock`) ermöglicht das Durchspielen ganzer Tage/Wochen in Millisekunden.
+  - Laufzeit-Gate sperrt LLM-Aufrufe bei `llmAllowed: false`.
+  - Konfigurierbare `RetryPolicy` je Schritt mit exponentiellem Backoff.
+  - Kontrollierter Abbruch bei Fehlschlägen (`status: "FAILED"`, Audit-Eintrag, bestehende Artefakte bleiben integer).
+- **Prompt-Injection-Schutz & Schemavalidierung** (`security.ts`, `schemas.ts`):
+  - Externe Inhalte (RSS-Feeds, Marktdaten) werden über `wrapUntrustedData` strikt als Daten gekapselt.
+  - Nicht-konforme Antworten werden verworfen und durch deterministische Fallbacks ersetzt.
+- **Modell-Eskalations-Event** (`MODEL_ESCALATION_REQUEST`):
+  - Schritte dürfen ein Eskalations-Event emittieren; ohne Task-09 fällt das System transparent auf die Provider-Fallback-Kette zurück.
+- **Artefakt- & Speicherverwaltung** (`artifacts.ts`):
+  - `artifacts/YYYY-MM-DD/daily/*.json` (je Step eine Datei + `daily-summary.json`).
+  - `artifacts/YYYY-Www/weekly/*.json` (`weekly-review.json` + `universe-classification.json`).
+  - `artifacts/index.json` (globales Manifest aller Läufe).
+  - Konfigurierbare Retention (`retentionDays`, `retentionWeeks`, `pruneArtifacts()`).
+
+### Neu: Read-only API (`/api/analysis/*`)
+
+- `GET /api/analysis/daily/latest`: Jüngster Tageslauf inklusive Zusammenfassung und Step-Outputs.
+- `GET /api/analysis/daily/{date}`: Tageslauf für ein konkretes Datum `YYYY-MM-DD` (validiert).
+- `GET /api/analysis/weekly/latest`: Jüngster wöchentlicher Universe Review.
+- `GET /api/analysis/runs`: Paginierte Historie aller Zyklen (`type=daily|weekly|all`, `status`, `page`, `pageSize`).
+
+### Dokumentation & Feldhilfe
+
+- `docs/DAILY_WEEKLY_RESEARCH.md`: Umfassendes Kapitel 13 zur Tages- und Wochenroutine.
+- `docs/HANDBUCH.md`: Neues Kapitel 19 „Tagesroutine der Mitarbeiter (Agenten-Zyklus)“.
+- `docs/help/cycle.help.json`: 3-Ebenen-Hilfe (kurzinfo, technischeInfo, risiko) für alle Zyklus-Konzepte.
+- `docs/SECURITY_AUDIT.md`: Kapitel „Security Audit — Task 06“.
+
+---
+
 ## [1.13.0] — 2026-08-27
 
 **Deterministische Portfolio-Analytics, Optimizer und Risk-Guard-Kette (Task 05):

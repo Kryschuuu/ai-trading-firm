@@ -441,3 +441,37 @@ fertige Zahlen und kann sie nur interpretieren. 113 Tests, Coverage der Biblioth
 (`npm run test:coverage:portfolio`), Benchmark 500 × 750 in 5,8 s von 30 s Budget
 (unter Coverage-Instrumentierung 60 s — das Budget wird dort bewusst um Faktor 20
 skaliert, weil sonst die Instrumentierung gemessen würde, nicht die Bibliothek).
+
+---
+
+## Security Audit — Task 06: Daily & Weekly Agent Cycle
+
+**Stand:** 2026-08-27 · **Modul:** `src/cycle/` · **API:** `/api/analysis/*`
+**Status:** Audit der Agenten-Orchestrierung und Sicherheitsgrenzen (Task 6 von 12)
+
+### Sicherheits-Leitlinien & Selbstaudit
+
+| Kriterium | Status | Implementierung & Nachweis |
+| --- | :---: | --- |
+| **Keine Order-Pfade** | ✅ | Der gesamte Zyklus platziert **keine Orders** und ändert **keine Broker-/Gate-Zustände**. Research-Setups tragen verbindlich `isProposal: true` und den Disclaimer `PROPOSAL_ONLY_NO_ORDERS_PLACED`. Statisch geprüft in `tests/cycle.architecture.test.ts` (Import- und Call-Scan auf `placeOrder`, `executeOrder`, `createOrder`, etc.). |
+| **Shortlist-Limits im Code** | ✅ | Das Limit von maximal **40 Instrumenten** für rechenintensive LLM-Schritte (`TECHNICAL_ANALYST`, `NEWS_ANALYST`) ist im Code verankert (`assertShortlistLimit`). Ein 41. Instrument führt ausnahmslos zu einem `ShortlistLimitExceededError`. Geprüft in `tests/cycle.shortlist.test.ts`. |
+| **Output-Validierung & Prompt-Injection** | ✅ | Externe Nachrichtentexte werden strikt als Daten im `untrustedData`-Container transportiert (`wrapUntrustedData`). Alle Modellausgaben werden über Typprüfer (`validateMacroOutput`, `validateSelectionOutput`, `validateTechnicalOutput`, `validateNewsOutput`, etc.) validiert. Bösartige Ausgaben (z. B. Injektionen wie `{"hack": true}`) werden verworfen und neutral ersetzt. Geprüft in `tests/cycle.injection.test.ts`. |
+| **Audit pro Lauf** | ✅ | Jeder Zyklusstart (`CYCLE_STARTED`), jeder Schrittstart (`CYCLE_STEP_STARTED`), jeder Retry (`CYCLE_STEP_RETRY`), jeder Schrittabschluss (`CYCLE_STEP_COMPLETED`), jeder Teilschritt-Fehler (`CYCLE_STEP_FAILED`) und jeder Zyklusabschluss (`CYCLE_COMPLETED` / `CYCLE_FAILED`) wird über den `CycleAuditPort` protokolliert (DB-Tabelle `audit_log` und Datei `data/cycle/audit.ndjson`). |
+| **Null-LLM im Scanner** | ✅ | `src/cycle/steps/scannerStep.ts` ist vollständig frei von LLM-Modulen. Die Step-Engine blockiert zur Laufzeit (`createGuardedAgentPort`) jegliche LLM-Aufrufe in Schritten mit `llmAllowed: false`. Geprüft via Unit- und Architektur-Test. |
+| **Kontrollierter Abbruch** | ✅ | Ein unlösbarer Schritt-Fehler bricht den Zyklus geordnet ab (`status: "FAILED"`). Bereits erzeugte Artefakte vorheriger Schritte bleiben uneingeschränkt intakt und lesbar. |
+| **Atomare Artefakte & Pfadsicherheit** | ✅ | Artefakte werden atomar über temporäre Dateien (`.tmp`) und `renameSync` geschrieben. Pfad-Traversal wird durch strikte Datums- und Wochenregex (`^\d{4}-\d{2}-\d{2}$`, `^\d{4}-W\d{2}$`) ausgeschlossen. |
+
+### Befunde
+
+| ID | Severity | Datei (Funktion) | Problem | Status |
+| --- | --- | --- | --- | --- |
+| S-01 | Info | `src/app/api/analysis/**` | Read-only API-Endpunkte ohne Authentifizierungs-Token | ✅ by design: Einheitlich mit `/api/universe/*` und `/api/portfolio/*`; keine Schreibpfade, keine Secrets, DoS-Schutz durch Paginierungs-Limits (max. 100 Einträge). |
+| S-02 | Info | `src/cycle/engine.ts` → `emitEscalation` | `MODEL_ESCALATION_REQUEST`-Event ohne bestehenden Model-Router (Task 09) | ✅ Vorgabe erfüllt: Event wird auditiert und in Artefakten persistiert; das System nutzt transparent die bestehende Provider-Fallback-Kette (`chatLlm`), kein Absturz. |
+| S-03 | Low | `src/cycle/security.ts` → `safeExtractJson` | Markdown-Codefences oder unvollständiges JSON könnten Parser verwirren | ✅ Behoben: `safeExtractJson` prüft nacheinander Direkt-Parse, Markdown-Codeblock-Extraktion und Brace-Substring-Matching; fängt alle Exceptions sicher ab. |
+| S-04 | Low | `src/cycle/steps/newsStep.ts` | News-Headlines könnten Delimiter wie `"""` oder `SYSTEM:` enthalten | ✅ Behoben: `sanitizeExternalText` filtert Nullbytes, Kontrollzeichen und maskiert Markdown-Codefences (`'''`); `wrapUntrustedData` setzt unmissverständliche Security-Hinweise. |
+| S-05 | Info | `src/cycle/artifacts.ts` → `pruneArtifacts` | Automatisches Löschen alter Artefakt-Ordner | ✅ Geschützt: Löscht nur Ordner, die exakt `YYYY-MM-DD` oder `YYYY-Www` matchen und deren Zeitstempel älter als `retentionDays` bzw. `retentionWeeks` ist. |
+
+### Fazit
+
+**Keine kritischen oder hohen Sicherheitsbefunde.** Das Cycle-Modul setzt das Prinzip der minimalen Privilegien strikt um: LLM-Aufrufe sind auf freigegebene Schritte und maximal 40 Instrumente beschränkt; Scanner und Backtest-Verifikation laufen ohne Sprachmodelle. Externe Einflüsse werden isoliert behandelt. Die Code-Coverage liegt bei **> 93 %** der neuen Module.
+
