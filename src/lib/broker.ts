@@ -8,8 +8,11 @@
  */
 import { killSwitch, validateOrder, RISK_LIMITS } from "./riskGuard";
 import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
+import { VENUE_CAPABILITIES } from "../brokers/capabilities";
+import type { BrokerCapabilities, BrokerVenueId } from "../contracts/broker";
 
-export type BrokerName = "PAPER" | "ALPACA" | "IBKR" | "BINANCE" | "KRAKEN" | "DYDX";
+/** Broker-Name = Adapter-Venue-ID (Task 02: dieselbe Whitelist, kein zweites Set). */
+export type BrokerName = BrokerVenueId;
 
 export type OrderSide = "LONG" | "SHORT";
 
@@ -325,13 +328,53 @@ function reject(order: Order, reason: string): Fill {
 }
 
 /**
- * Broker-Registry. Für echtes Paper-/Live-Trading hier Adapter ergänzen
- * (Alpaca für Aktien, ccxt für Krypto) — gated über Env-Secrets.
- * Details und Vergleich: docs/HANDBUCH.md, Kapitel 8.
+ * Broker-Registry (Task 02: Capability-Projektion).
+ *
+ * WICHTIG — Zwei Arten von „Paper/Live-Flags“:
+ *   `paperApi`        = VENUE-ANGEBOT (Vendor-Fakt, Doku): Der Broker-Anbieter
+ *                       betreibt eine Paper-/Testumgebung.
+ *   `paperAvailable`  = PROJEKTION der Adapter-Capabilities: Der Adapter in
+ *                       diesem Repo kann Paper-Ausführung tatsächlich betreiben.
+ *   `liveAvailable`   = PROJEKTION der Adapter-Capabilities: Der Adapter kann
+ *                       technisch Live-Ausführung betreiben. (Selbst wenn
+ *                       einmal true: Die Factory sperrt `live` bis zum
+ *                       Live-Trading-Gate-Task — Capability ≠ Freigabe.)
+ *
+ * Single Source of Truth = Adapter-Capabilities (src/brokers/capabilities.ts);
+ * die Registry ist nur eine Projektion davon. Der Test in
+ * `tests/brokerFactory.test.ts` („Registry-Projektion“) belegt die Spiegelung.
+ *
+ * Für echtes Paper-/Live-Trading hier Adapter ergänzen (Alpaca für Aktien,
+ * ccxt für Krypto) — gated über Env-Secrets. Details und Vergleich:
+ * docs/HANDBUCH.md Kapitel 8, docs/BROKER_ARCHITECTURE.md.
  */
-export const BROKER_REGISTRY: Record<
+
+/**
+ * Projektion: Registry-Flags aus Adapter-Capabilities ableiten.
+ * SOLL (Task 02): die Registry ist keine zweite Wahrheit mehr.
+ */
+export function projectCapabilityFlags(caps: BrokerCapabilities): {
+  paperAvailable: boolean;
+  liveAvailable: boolean;
+} {
+  return { paperAvailable: caps.paper, liveAvailable: caps.live };
+}
+
+export type BrokerRegistryEntry = {
+  label: string;
+  assets: string;
+  /** Venue-Angebot (Vendor-Fakt, Doku — keine Ausführungsversprechen). */
+  paperApi: boolean;
+  openSource: boolean;
+  note: string;
+  /** PROJEKTION aus Adapter-Capabilities (SSoT = Adapter). */
+  paperAvailable: boolean;
+  liveAvailable: boolean;
+};
+
+const REGISTRY_BASE: Record<
   BrokerName,
-  { label: string; assets: string; paperApi: boolean; openSource: boolean; note: string }
+  Omit<BrokerRegistryEntry, "paperAvailable" | "liveAvailable">
 > = {
   PAPER: {
     label: "Interner Paper-Broker",
@@ -375,4 +418,17 @@ export const BROKER_REGISTRY: Record<
     openSource: true,
     note: "Voll open source und self-custody, aber Perps = Hebel. Passt zur Philosophie, nicht zum Risikoprofil eines Einstiegs.",
   },
+};
+
+/**
+ * Die Registry — Basisdaten + Capability-Projektion. Für JEDES Venue
+ * `paperAvailable === VENUE_CAPABILITIES[v].paper` (Test belegt es).
+ */
+export const BROKER_REGISTRY: Record<BrokerName, BrokerRegistryEntry> = {
+  PAPER: { ...REGISTRY_BASE.PAPER, ...projectCapabilityFlags(VENUE_CAPABILITIES.PAPER) },
+  ALPACA: { ...REGISTRY_BASE.ALPACA, ...projectCapabilityFlags(VENUE_CAPABILITIES.ALPACA) },
+  IBKR: { ...REGISTRY_BASE.IBKR, ...projectCapabilityFlags(VENUE_CAPABILITIES.IBKR) },
+  BINANCE: { ...REGISTRY_BASE.BINANCE, ...projectCapabilityFlags(VENUE_CAPABILITIES.BINANCE) },
+  KRAKEN: { ...REGISTRY_BASE.KRAKEN, ...projectCapabilityFlags(VENUE_CAPABILITIES.KRAKEN) },
+  DYDX: { ...REGISTRY_BASE.DYDX, ...projectCapabilityFlags(VENUE_CAPABILITIES.DYDX) },
 };

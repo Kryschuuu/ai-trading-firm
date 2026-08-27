@@ -27,6 +27,8 @@ import {
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
 import { PaperBroker } from "./broker";
+import { PaperBrokerAdapter } from "../brokers/paper";
+import { getBroker as createBroker } from "../brokers/factory";
 import { localReason } from "./ollama";
 import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
@@ -37,7 +39,6 @@ import { writeEquitySnapshot } from "./equity";
 import { startOfBerlinDay } from "./time";
 
 const G = globalThis as typeof globalThis & {
-  __firmBroker?: PaperBroker;
   __firmHydrated?: boolean;
 };
 
@@ -46,13 +47,26 @@ const G = globalThis as typeof globalThis & {
  * den Zustand aus PostgreSQL wieder her (offene Positionen + Kill-Switch-Status).
  * Nötig, weil systemd den Dienst neu starten kann, die Buchhaltung aber persistent ist.
  *
+ * TASK 02 (Broker-Capability-Modell): Die Engine erzeugt keinen Broker mehr
+ * selbst — der Adapter kommt ausschließlich aus der Broker-Factory
+ * (`getBroker("PAPER", "paper")` in src/brokers/factory.ts). Der Ledger ist
+ * dort ein Prozess-Singleton; die Hydration aus PostgreSQL bleibt in der
+ * Engine (DB-Wahrheit). Das Rückgabetyp bleibt `PaperBroker` — alle
+ * bestehenden Aufrufer (Monitor, API, runAgentTurn, flattenAll) sind
+ * bytekompatibel.
+ *
  * FEHLERBEHANDLUNG: Fehlen die Tabellen (relation does not exist), weil
  * `drizzle-kit push` noch nicht lief, startet der Broker trotzdem mit leerem
  * Zustand. Der Fehler wird im Audit-Log protokolliert und die App zeigt eine
  * Setup-Warnung — sie stürzt nicht ab.
  */
 export async function getBroker(): Promise<PaperBroker> {
-  G.__firmBroker ??= new PaperBroker(Number(process.env.STARTING_EQUITY || 10000));
+  const adapter = await createBroker("PAPER", "paper");
+  if (!(adapter instanceof PaperBrokerAdapter)) {
+    // Unerreicht: Die Factory liefert für "PAPER" garantiert den PAPER-Adapter.
+    throw new Error("UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet");
+  }
+  const broker = adapter.paperBroker;
 
   if (!G.__firmHydrated) {
     try {
@@ -78,7 +92,7 @@ export async function getBroker(): Promise<PaperBroker> {
         /* Snapshot-Tabelle fehlt/leer → Fallback auf alte Berechnung */
       }
 
-      G.__firmBroker.hydrate(
+      broker.hydrate(
         openRows.map((r) => ({
           symbol: r.symbol,
           side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
@@ -128,7 +142,7 @@ export async function getBroker(): Promise<PaperBroker> {
     }
   }
 
-  return G.__firmBroker;
+  return broker;
 }
 
 /** Erzwingt beim nächsten Zugriff ein erneutes Laden aus der DB. */
