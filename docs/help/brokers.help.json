@@ -110,6 +110,71 @@
       "kurzinfo": "Doppel-SHA256: digest = SHA256(nonce+ts+api-key+query+body), sign = SHA256(digest+secret).",
       "technischeInfo": "Query ASCII-sortiert als key+value ohne Trenner, Body kompakt JSON. Header api-key, nonce, timestamp, sign. Goldens in tests/bitunix.unit.test.ts inkl. offiziellem Doku-Beispiel.",
       "risiko": "Signaturen und Keys werden vom Redactor maskiert und nie ins Audit geschrieben. Falsche Signatur → 401 ohne Retry."
+    },
+    "controlPlane.connection": {
+      "kurzinfo": "Verbindungsebene der Broker Control Plane: off, active (read-only Probe ok) oder error (Probe/Test fehlgeschlagen).",
+      "technischeInfo": "Entsteht ausschließlich über die definierten Aktionen save (Credential speichern + Probe) bzw. test (Verbindungstest). Kein anderer Übergang ist möglich — Missbrauch endet mit 409/422 und klarem Fehlercode.",
+      "risiko": "active heißt 'read-only erreichbar' — nicht 'Trading erlaubt'. Berechtigungen zeigt die permissions-Ebene; eine error-Ebene blockiert alle weiteren Aktionen (discover) bis zum erfolgreichen Retest."
+    },
+    "controlPlane.marketDiscovery": {
+      "kurzinfo": "Discovery-Ebene: off (keine Capability), pending (bereit), active (Märkte geladen) oder error.",
+      "technischeInfo": "Aktion discover nur nach aktiver Verbindung und nur bei capabilities.discovery=true. PAPER nutzt die lokale Universe-Registry (offline); echte Venue-Discovery folgt mit den Adapter-Aufgaben (bis dahin 422 DISCOVERY_NOT_IMPLEMENTED).",
+      "risiko": "Veraltete Discovery bedeutet Orders auf dünnen/nicht existierenden Märkten. Der Zähler (count) stammt immer aus der letzten erfolgreichen Synchronisation (lastSync)."
+    },
+    "controlPlane.permissions": {
+      "kurzinfo": "Berechtigungsebene: permissions[] (READ, TRADE), abgeleitet aus der read-only Account-Probe.",
+      "technischeInfo": "Nach dem Speichern und bei jedem Test läuft genau EIN read-only Check (PAPER: echter getAccount; andere Venues: lokaler Mock-Adapter, kein Netzwerk). TRADE nur bei capabilities.trading (Single Source of Truth).",
+      "risiko": "Ein Probe-Fehler erzeugt eine SAFE-Meldung ohne Secret-Inhalte und setzt die connection-Ebene auf error — es wird nie geraten, nie gehandelt."
+    },
+    "controlPlane.paper": {
+      "kurzinfo": "Paper-Ebene: ob das Venue im Paper-Modus ausgeführt werden kann (Capability-basiert).",
+      "technischeInfo": "active sobald capabilities.paper=true und die Verbindung aktiv ist; off bei fehlender Capability (NOT_SUPPORTED_CAPABILITY:paper); pending wartet auf die Verbindung.",
+      "risiko": "Paper bleibt Simulation — Gebühren, Liquiditätstiefe und Stress-Slippage sind idealisiert. active ist keine Zusicherung für reale Ausführung."
+    },
+    "controlPlane.testnet": {
+      "kurzinfo": "Testnet-Ebene: Broker-Orders in einer Testumgebung (Capability-basiert).",
+      "technischeInfo": "Heute für alle Venues off (kein implementierter Testnet-Adapter). Eine echte Testnet-Freigabe bräuchte capabilities.testnet=true und eine aktive Verbindung.",
+      "risiko": "Testnet-Infrastruktur kann ausfallen und vom Live-Markt abweichen; Verwechslung mit dem Live-Konto ist der typische Betriebsfehler und wird durch die strikte Modus-Trennung verhindert."
+    },
+    "controlPlane.live": {
+      "kurzinfo": "Live-Ebene: IMMER off und liveEnabled IMMER false — Live-Trading bleibt gesperrt.",
+      "technischeInfo": "Es gibt kein live=true-Flag und keinen Schalter. Die Anzeige kommt ausschließlich aus der Gate-Service-Meldung (readGateState), die bis zum Live-Trading-Gate-Task (task-11) hart gesperrt ist (LIVE_GATE_LOCKED).",
+      "risiko": "Die Sperre ist die Sicherheitsgrenze selbst: kein Konfigurationsfehler, kein Prompt und kein Aufrufer kann hier echten Handel auslösen. Nie 'reparieren' — erst der Gate-Task öffnet den Pfad."
+    },
+    "controlPlane.liveEnabled": {
+      "kurzinfo": "Reine Anzeige aus der Gate-Service-Meldung — in diesem Stadium immer false.",
+      "technischeInfo": "liveEnabled wird ausschließlich von readGateState() geliefert und nirgends gesetzt. Das Settings-Panel zeigt den Wert mit einem deutlichen 'gesperrt'-Zustand.",
+      "risiko": "Ein liveEnabled=true ohne Gate-Service wäre ein schwerer Befund (Audit-Katalog meldet das als Widerspruch). liveAvailable (Capability) ist keine Freigabe."
+    },
+    "controlPlane.maskedForm": {
+      "kurzinfo": "Maskiertes Credential-Formular: Passwort-Felder, die das Secret nie anzeigen.",
+      "technischeInfo": "type=\"password\", autoComplete=\"new-password\" (kein Passwort-Manager), noValidate (Validierung im Backend), State wird nach dem Submit sofort geleert. Kein localStorage/sessionStorage, keine URL-Parameter, kein console.log.",
+      "risiko": "Ein 'Auge'-Toggle oder Klartext-Feld würde das Secret an Bildschirm-Beobachter/Screenshots verraten — deshalb existiert beides bewusst nicht."
+    },
+    "controlPlane.secretStore": {
+      "kurzinfo": "AES-256-GCM-Store: Credentials existieren nur verschlüsselt (AAD = Venue-ID).",
+      "technischeInfo": "Schlüssel ausschließlich aus Env/KMS (SECRET_STORE_KEY, KMS-Hook vorbereitet). Envelope {v, alg, iv, tag, ct} in DB (broker_credentials) bzw. Datei-Fallback (data/secrets, chmod 600). Falscher Schlüssel, Tampering oder eine fremde Venue scheitern am Auth-Tag.",
+      "risiko": "Es gibt keinen Lesepfad zurück ins Frontend — löschen (mit Bestätigung + Audit) ist die einzige sichtbare Operation. Ein Datenbank-Dump ohne Env-Key ist wertlos."
+    },
+    "controlPlane.rbac": {
+      "kurzinfo": "Alle Credential-/Connection-Operationen nur für die Admin-Rolle.",
+      "technischeInfo": "Minimaler Admin-Guard (FIRM_ADMIN_TOKEN → x-admin-token, timing-sicher, 403 FORBIDDEN), Fallback auf den Operator-Token, sonst offener Lokalbetrieb. TODO(task-10): zentrales Session-/Rollensystem.",
+      "risiko": "Der Platzhalter ist bewusst sichtbar markiert — bis zur Zentralisierung gilt: wer den Token nicht hat, darf keine Credentials verwalten."
+    },
+    "controlPlane.csrf": {
+      "kurzinfo": "CSRF-Schutz: mutierende Control-Plane-Endpoints verlangen den Header x-csrf-token.",
+      "technischeInfo": "Wert = Admin-/Operator-Token bzw. 'local' im Offen-Betrieb. Cross-Site-Formulare können Custom-Header nicht setzen; die API nutzt keine Cookies (kein SameSite-Vektor). Fehlt der Header → 403 CSRF_INVALID.",
+      "risiko": "Ohne den Schutz könnte eine fremde Webseite den lokalen Dienst zu Credential-Löschungen bewegen (Clickjacking-Kette). X-Frame-Options/CSP bleiben zusätzlich aktiv."
+    },
+    "controlPlane.rateLimit": {
+      "kurzinfo": "Rate-Limit für Credential-Versuche: 5 pro Minute und IP (Default).",
+      "technischeInfo": "Eigener Sliding-Window-Bucket (BROKER_CREDENTIAL_RATE_LIMIT, 0 = aus), 429 + Retry-After bei Überschreitung, unabhängig vom allgemeinen Schreib-Limit.",
+      "risiko": "Begrenzt Brute-Force/Flood gegen die Credential-Endpoints. Single-Node-Prozesslokal (wie der Bestands-Limiter) — hinter einem Proxy zählt der gesetzte X-Forwarded-For/X-Real-IP-Header."
+    },
+    "controlPlane.audit": {
+      "kurzinfo": "Jedes Control-Plane-Ereignis (Speichern/Löschen/Test/Probe/Zustandswechsel) landet im Audit-Log.",
+      "technischeInfo": "Event BROKER_CONTROL_PLANE mit actor, venue, Aktion, Ergebnis und Zeitstempel — ohne Secrets. Zweistufig: In-Memory-Ring + best-effort audit_log (DB-Ausfall bricht den Pfad nie).",
+      "risiko": "Das Audit ist die einzige lückenlose Spur für 'wer hat wann welche Verbindung verändert' — Fehlen von Einträgen bei Credential-Operationen wäre ein Incident-Indikator."
     }
   }
 }

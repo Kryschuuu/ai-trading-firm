@@ -1,8 +1,10 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.15.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`,
-`src/lib/broker.ts` (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
-`GET /api/brokers`, `GET /api/brokers/{venue}/health`.
+**Stand:** v1.16.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+(inkl. `control-plane/` seit Task 08), `src/lib/broker.ts`
+(Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
+`GET /api/brokers`, `GET /api/brokers/{venue}/health`,
+`/api/brokers/{venue}/(credentials|status|test|discover)` (Task 08).
 
 Dieses Dokument ist der verbindliche Vertrag für alle Broker-Adapter der
 Plattform. Es ersetzt die reine Capability-Dokumentation der alten
@@ -174,18 +176,44 @@ Kein API-Token (konsistent mit den übrigen GET-Endpunkten), Fehler-Contract
 
 ---
 
-## 9. Ausbaupfad (Folge-Tasks)
+## 9. Control Plane (Task 08): Credentials, Status, Zustandsebenen
+
+Die Broker Control Plane (`src/brokers/control-plane/`) verwaltet
+Broker-Credentials und liefert dem Frontend ausschließlich Status.
+Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
+
+- **Secret-Store:** AES-256-GCM mit **AAD = Venue-ID**, Schlüssel nur aus
+  Env/KMS (`SECRET_STORE_KEY`, KMS-Hook vorbereitet). Backends: DB
+  (`broker_credentials`, verschlüsselte Envelopes) → Datei-Fallback →
+  Memory (Tests). Task-07-Bridge `createVenueBackedNamedStore` bedient das
+  task-07-`SecretStore`-Interface.
+- **API (status-only):** `POST/DELETE /api/brokers/{venue}/credentials`,
+  `GET /api/brokers/{venue}/status`, `POST …/test`, `POST …/discover`.
+  Antworten enthalten NIE Secrets, keinen `keyHint`, keine Maskierung.
+- **Zustandsmodell:** 6 Ebenen (connection, marketDiscovery, permissions,
+  paper, testnet, live) × off/pending/active/error; Übergänge nur über
+  `save|test|discover|disable`, Missbrauch → 409/422.
+  **Live bleibt immer off** — `liveEnabled` kommt ausschließlich aus der
+  Gate-Service-Meldung (`readGateState()`), bis task-11 hart `false`.
+- **Sicherheit:** Admin-Guard (RBAC-Platzhalter, TODO(task-10)), CSRF
+  (`x-csrf-token`), Credential-Rate-Limit (5/min/IP), Audit je Ereignis
+  (`BROKER_CONTROL_PLANE`), Response-/Bundle-Secret-Scanner in CI.
+
+## 10. Ausbaupfad (Folge-Tasks)
 
 | Task | Inhalt |
 | --- | --- |
 | Adapter-Ausbau (03+) | Venue-Adapter ersetzen die Stubs: Discovery (TODO(task-02/07)), Marktdaten, Trading; Capabilities schrittweise auf true — Gating/Factory/Audit bleiben unverändert |
-| Live-Trading-Gate | State-Machine + Hard-Gates; öffnet `mode="live"` **erst** nach Freigabe; `LiveTradingGateError` wird dann durch die Gate-Prüfung ersetzt |
+| Control Plane (Task 08) | **umgesetzt:** Credential-Manager + verschlüsselter Secret-Store + „Brokers & Venues"-UI; Live bleibt LGTE. Doku: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md) |
+| RBAC-Zentralisierung (Task 10) | Session-/Rollensystem ersetzt den minimalen Admin-Guard der Control Plane (`TODO(task-10)` in `src/brokers/control-plane/guard.ts`) |
+| Live-Trading-Gate | State-Machine + Hard-Gates; öffnet `mode="live"` **erst** nach Freigabe; `LiveTradingGateError` wird dann durch die Gate-Prüfung ersetzt; ab dann liefert `readGateState()` der Control Plane die echte Live-Anzeige |
 | Bitunix-Adapter (Task 07) | **umgesetzt:** `src/brokers/bitunix/`, `stopAtVenue: true`, Paper-Modus B; Live bleibt LGTE bis task-11. Doku: [BITUNIX.md](BITUNIX.md) |
 
-## 10. Verweise
+## 11. Verweise
 
 - Contracts: `src/contracts/broker.ts` · Factory: `src/brokers/factory.ts`
 - Capability-SSoT: `src/brokers/capabilities.ts` · Audit: `src/brokers/audit.ts`
-- Security: `docs/SECURITY_AUDIT.md` (Kapitel "Security Audit — Task 02" / Task 07)
+- Control Plane: `src/brokers/control-plane/` · `docs/FRONTEND_CONTROL_PLANE.md`
+- Security: `docs/SECURITY_AUDIT.md` (Kapitel "Security Audit — Task 02" / Task 07 / Task 08)
 - Universum: `docs/MARKET_UNIVERSE.md` (Task 01) · `MarketInstrument`-Contract: `src/universe/types.ts`
 - Bitunix: `docs/BITUNIX.md`

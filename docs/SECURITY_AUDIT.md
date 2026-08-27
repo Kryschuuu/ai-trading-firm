@@ -507,3 +507,64 @@ Live-Ausführung **immer** `LiveTradingGateError` (`TODO(task-11)`).
 Fazit: **kein High/Critical-Befund.** Der Adapter erweitert Public-Marktdaten und
 eine lokale Paper-Simulation. Die Vertrauensgrenze Live bleibt geschlossen.
 
+## Security Audit — Task 08 (Broker Control Plane, v1.16.0)
+
+**Stand:** 2026-08-28 · **Modul:** `src/brokers/control-plane/**` ·
+**API:** neu `/api/brokers/{venue}/(credentials|status|test|discover)` ·
+**UI:** „Brokers & Venues" (Dashboard-Tab + `/brokers`).
+**Status:** ERHÖHT (Secrets-Handling, WebApp-Härtung) — Threat Model +
+Red-Team-Checkliste + Scanner-Ergebnis.
+
+### Threat Model
+
+| # | Bedrohung | Angriffsweg | Gegenmaßnahme | Restrisiko |
+| --- | --- | --- | --- | --- |
+| T1 | Secret-Leak via API | Credential-Endpoint antwortet mit Secret/Maskierung | Status-only-Vertrag (kein `secret`, kein `keyHint`, keine `****`-Replik); Contract-Test + Response-Scanner über ALLE Broker-API-Responses | None (Scanner in CI) |
+| T2 | Secret-Leak via Bundle | Secret-Literal/Muster im Client-Bundle oder Sourcemap | Frontend kennt keine Secret-Werte; Bundle-Scanner (`npm run scan:secrets`) über `.next/static` — Ergebnis leer | Framework-Rauschen (Scanner unit-getestet) |
+| T3 | Secret-Leak via Logs | Error-Stack/Env in Antwort oder Audit | `publicErrorMessage` (Redaktion), SAFE-Probe-Meldungen, Audit ohne Secret-Felder (nur actor/venue/action/result/errorCode) | DB-Fehlermeldungen (redigiert) |
+| T4 | Secret im Storage (at rest) | DB-/Datei-Dump | AES-256-GCM, AAD=Venue, Auth-Tag; Datei-Backend chmod 600 + gitignored | Key in Env (dokumentiert; KMS-Hook vorbereitet) |
+| T5 | CSRF | Cross-Site-Formular gegen lokale API | Custom-Header `x-csrf-token` Pflicht auf allen mutierenden CP-Endpoints; API ohne Cookies | Lokaler Offen-Betrieb akzeptiert `local` (Single-User, 127.0.0.1) |
+| T6 | RBAC-Umgehung | Unauthentifizierter Credential-Zugriff | Admin-Guard (`FIRM_ADMIN_TOKEN` → 403), Fallback Operator-Token (401); timing-sicher | Bis task-10 kein zentrales Rollenmodell (TODO markiert) |
+| T7 | Rate-Limit (Brute-Force/Flood) | Massenhaft Credential-Versuche | Eigener Bucket 5/min/IP → 429 + Retry-After; unabhängig vom Firm-Schreib-Limit | Single-Node-InMemory (Prozess-lokal, wie Bestand) |
+| T8 | Tampering (Ciphertext/Key) | Datensatz manipulieren, falscher Key | Auth-Tag-Prüfung; AAD-Bindung (fremde Venue → AUTH_FAILED); generische Fehlermeldung (kein Padding-Orakel) | None (Unit-getestet) |
+| T9 | Live-Freigabe via Backdoor | Flag/Env/Parameter setzt `liveEnabled` | Kein Schalter existiert; `readGateState()` IMMER false (task-11); Live-Ebene nie ≠ off; Audit-Katalog prüft `live=active` als Widerspruch | None bis Gate-Task |
+| T10 | XSS in der CP-UI | Fremddaten via innerHTML | Kein `dangerouslySetInnerHTML`/`innerHTML` in `src/components/control-plane` (Statik-Test); CSP bleibt aktiv | None |
+| T11 | Zustands-Missbrauch | Übergang außerhalb save/test/discover/disable | Zustandsmaschinen-Light: StateTransitionError → 409/422 mit klarem Code | None (Unit-getestet) |
+
+### Red-Team-Checkliste (je Punkt geprüft)
+
+| Kriterium | Status | Nachweis |
+| --- | :---: | --- |
+| **Kein Secret in API-Responsen** | ✅ | `tests/controlPlane.security.test.ts`: Response-Scanner über 15+ Antworten (Erfolg + Fehler) → 0 Funde; Textsuche auf eingereichte Secrets → 0 Treffer. |
+| **Kein Secret im Bundle** | ✅ | `npm run scan:secrets` nach `next build` → leer; Test überspringt nur ohne Bundle, CI erzwingt via `BROKER_REQUIRE_BUNDLE=1`. |
+| **Kein keyHint/Maskierung** | ✅ | Contract-Test: erlaubte Top-Level-Felder enum-meriert; `keyHint`/`****` explizit negiert. |
+| **CSRF abgelehnt** | ✅ | POST/DELETE ohne `x-csrf-token` → 403 `CSRF_INVALID` (auch bei korrektem Admin-Token). |
+| **RBAC abgelehnt** | ✅ | `FIRM_ADMIN_TOKEN` gesetzt: ohne/falscher Token → 403 `FORBIDDEN`; Operator-Fallback → 401. |
+| **Rate-Limit greift** | ✅ | 6. Versuch in 60 s → 429 `RATE_LIMITED` + `Retry-After` (Limit 5/min/IP). |
+| **Tampering/Wrong-Key** | ✅ | `tests/secretStore.test.ts`: Bit-Flip im Ciphertext, falscher Key, fremde Venue (AAD) → `AUTH_FAILED`. |
+| **Memory-Hygiene** | ✅ | `zeroize()`-Pfad + Test; Probe verwirft Credential (`disposeCredential`); kein Client-Speicher (Statik-Test: kein `localStorage.setItem`). |
+| **Live nirgends setzbar** | ✅ | Kein Flag/Env/Parameter; `readGateState()` konstant false; E2E + States-Tests; Audit-Katalog-Widerspruchsprüfung. |
+| **Audit je Ereignis ohne Secrets** | ✅ | Integration/E2E: saved/changed/deleted/test/probe/transition im Ring + `audit_log`; Scanner über Audit-JSON leer. |
+| **Zustands-Missbrauch 409/422** | ✅ | ALREADY_CONNECTED/NOT_CONFIGURED/CONNECTION_REQUIRED/NO_CREDENTIALS/PROBE_MISSING/UNKNOWN_ACTION getestet. |
+| **Kein Netzwerk mit echten Brokern** | ✅ | Probe = PAPER-Ledger (in-process) bzw. Mock-Client; Discovery non-PAPER → 422 DISCOVERY_NOT_IMPLEMENTED. |
+
+### Scanner-Ergebnis (verbindlich)
+
+| Scan | Umfang | Ergebnis |
+| --- | --- | --- |
+| Response-Scanner (Test) | ALLE Broker-API-Responsen (list, health, status, credentials, test, discover, Fehlerpfade) | **0 Funde** |
+| Bundle-Scanner (CI) | `.next/static` nach `next build` (`npm run scan:secrets`) | **0 Funde** |
+| Audit-Scanner | Control-Plane-Audit-Ring (Integration + E2E) | **0 Funde** |
+
+### Befunde
+
+| ID | Severity | Datei | Problem | Status |
+| --- | --- | --- | --- | --- |
+| CP-01 | Info | `guard.ts` | RBAC-Platzhalter (Token, kein Rollenmodell) | ✅ `TODO(task-10)` markiert + in Docs |
+| CP-02 | Info | `probe.ts` | Mock-API-Client für nicht implementierte Adapter | ✅ Unabhängigkeitsklausel; PAPER real; Doku |
+| CP-03 | Info | `secretStore.ts` | Env-Key statt KMS | ✅ KMS-Hook vorbereitet; fail-closed bei Endpoint |
+| CP-04 | Info | `guard.ts` | Rate-Limit in-memory (Single-Node) | ✅ konsistent mit Bestands-Limiter; 0 = aus dokumentiert |
+
+Fazit: **kein High/Critical-Befund.** Secrets existieren außerhalb des
+Backend-Speichers nicht; die einzige echte Trust-Grenze (Live) bleibt
+geschlossen; alle Pflicht-Scanner sind grün und in CI verankert.
