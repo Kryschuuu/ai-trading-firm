@@ -15,6 +15,8 @@ export async function checkSchema(): Promise<{ ok: boolean; missingTables: strin
     "agents", "agent_messages", "audit_log", "kill_switches",
     "missions", "positions", "proposals", "risk_config",
     "equity_snapshots", "trade_rules", "rule_executions", "rule_backtests",
+    // Task 08: verschluesselter Broker-Credential-Store der Control Plane.
+    "broker_credentials",
   ];
   try {
     const result = await db.execute<{ table_name: string }>(

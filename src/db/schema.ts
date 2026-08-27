@@ -217,6 +217,22 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Broker-Credentials der Control Plane (Task 08) — IMMER verschluesselt.
+ *
+ * `envelope` enthaelt NIE Klartext: AES-256-GCM-Envelope (Version, IV,
+ * Auth-Tag, Ciphertext, Base64) mit AAD = Venue-ID. Schluessel ausschliesslich
+ * aus Env/KMS (SECRET_STORE_KEY). Kein keyHint, kein Feldname, der einen
+ * Schluessel verraet — die Antworten der Credential-API sind status-only.
+ * Migration: `npx drizzle-kit push` (siehe CHANGELOG 1.16.0).
+ */
+export const brokerCredentials = pgTable("broker_credentials", {
+  venue: text("venue").primaryKey(),
+  envelope: text("envelope").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Vorschläge, die auf Freigabe warten (Approver-Workflow). */
 export const proposals = pgTable("proposals", {
   id: uuid("id").primaryKey().defaultRandom(),
