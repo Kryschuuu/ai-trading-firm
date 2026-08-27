@@ -28,6 +28,7 @@ N150) und **Variante B** (N150 + Desktop als Modellserver). Unterschiede sind mi
 16. [Agenten-Register: alle zwölf Rollen](#16-agenten-register-alle-zwölf-rollen)
 17. [Regelwerk-API (Rules, Macro, Micro, Backtest)](#17-regelwerk-api-rules-macro-micro-backtest)
 18. [Review- & Security-Checkliste für neue Regeln](#18-review--security-checkliste-für-neue-regeln)
+19. [Tagesroutine der Mitarbeiter (Agenten-Zyklus)](#19-tagesroutine-der-mitarbeiter-agenten-zyklus)
 
 ---
 
@@ -1634,3 +1635,60 @@ Vor jeder Änderung an der Regel-Engine oder vor jeder Live-Aktivierung:
 - [ ] Prompt-Injection-Rehearsal: Marktdaten/News im Prompt als DATA markiert.
 - [ ] Multi-Instance-Hinweis beachtet: Paper-Modus = 1 Executor-Instanz (Kap. 15.6).
 - [ ] PR-Beschreibung enthält Latenz- und Testzahlen (p95-µs, Testanzahl).
+
+---
+
+## 19. Tagesroutine der Mitarbeiter (Agenten-Zyklus)
+
+Die Firma orchestriert die Zusammenarbeit ihrer Spezialisten über eine feste,
+tägliche und wöchentliche Routine (`src/cycle/`). Massenverarbeitung läuft
+vollständig maschinell ohne Sprachmodelle; rechenintensive LLM-Analysen
+erfolgen ausschließlich auf gerankten Shortlists mit strikten Code-Limits.
+
+### 19.1 Der Tagesablauf im Überblick
+
+| Uhrzeit (UTC) | Schritt / Station | Beteiligte Rolle | Arbeitsweise & Sicherheitsgrenzen |
+| --- | --- | --- | --- |
+| **00:00–06:00** | **Market Scanner** | `MARKET_SCANNER` | **Kein LLM** (`llmAllowed: false`). Deterministischer 14-Faktoren-Scan über das gesamte Universum (10.000 → 2.000 Eligible → 500 Interesting → 100 Daily → 40 Deep). |
+| **06:00–07:00** | **Macro Analyst** | `MACRO_ANALYST` (Cassini) | Cross-Market-Blick über die 7 Pflicht-Assets: BTC, ETH, DXY, SPX, Nasdaq, Gold, Bonds. Bestimmt das Makro-Regime (`RISK_ON`, `RISK_OFF`, `MIXED`) und die Volatilität. |
+| **07:00–08:00** | **Market Selection** | `MARKET_SELECTION` | Synthetisiert die Scanner-Ergebnisse mit dem Makro-Regime und filtert die **Daily Candidate List** (maximal 40 Instrumente). |
+| **08:00–09:00** | **Technical Analyst** | `TECHNICAL_ANALYST` (Kepler) | **Harte Code-Grenze: NUR Top-40.** Analysiert Multi-Timeframe-Charts (15m/1h/4h), Indikatoren (RSI, ATR, Trend) und Unterstützungs-/Widerstandszonen. Ein 41. Instrument wird per Code abgewiesen. |
+| **09:00–10:00** | **News Analyst** | `NEWS_ANALYST` (Hubble) | **Harte Code-Grenze: NUR Top-40.** Externe Schlagzeilen sind reine Daten (`untrustedData` — Prompt-Injection-Schutz). Bewertet Sentiment, Impact und systemische Risiken. |
+| **10:00–11:00** | **Risk Manager** | `RISK_MANAGER` (Rigel) | Prüft Korrelationscluster und Portfolio Exposure über die Portfolio-Analytics-Engine (Task 05). Weist überkorrelierte oder toxische Instrumente ab; beachtet harte Obergrenzen (`maxPositionPct ≤ 25 %`, `riskBudget ≤ 2 %`). |
+| **danach** | **Research** | `RESEARCH` (Rhea) | Formuliert konkrete Trade-Setups (Entry, Stop Loss, Take Profit, Zeithorizont, These). **Sicherheits-Garantie:** Alle Setups sind rein informative Vorschläge (`isProposal: true`) — es werden KEINE Orders platziert. |
+| **danach** | **Backtest-Verifikation** | `BACKTEST_VERIFICATION` (Milo) | **Kein LLM** (`llmAllowed: false`). Prüft vorgeschlagene Setups rein rechnerisch gegen historische Kerzen: Max Drawdown, Profit Factor, Sharpe Ratio, Sortino Ratio und Regime-Robustheit. |
+
+### 19.2 Weekly Universe Review (Sonntag 00:00 UTC)
+
+Einmal pro Woche (konfigurierbar via `weeklyReviewDay`, Standard: Sonntag) führt der Zyklus den **Weekly Universe Review** durch.
+Aus eingehenden Marktsignalen (neue Listings, Delistings, Liquiditätssprünge, Gebührenanpassungen, Regimewechsel, Broker-Verfügbarkeiten) entsteht die verbindliche Klassifikation aller Instrumente:
+
+- **`CORE`:** Hochliquide Basiswerte (Score ≥ 70, Volumen ≥ 50 Mio., Persistenz ≥ 1 Woche).
+- **`ROTATION`:** Taktische Beimischungen mit solidem Score (Score ≥ 55).
+- **`DISCOVERY`:** Aufstrebende Werte und Neulistings (Score ≥ 40).
+- **`EXCLUDED`:** Nicht handelbare Werte (Filterverletzung, Delisting, Broker nicht erreichbar).
+
+Jeder Eintrag trägt bis zu 20 nachvollziehbare Gründe (`reasons[]`). Ein Lead Universe Strategist fasst die Wochentrends in einer Executive Summary zusammen.
+
+### 19.3 Artefakte und Versionierung
+
+Jeder Lauf erzeugt datierte und atomar geschriebene Artefakt-Dateien:
+- Tagesabzug: `artifacts/YYYY-MM-DD/daily/*.json` (je Step eine Datei + `daily-summary.json`)
+- Wochenabzug: `artifacts/YYYY-Www/weekly/*.json` (`weekly-review.json` + `universe-classification.json`)
+- Manifest: `artifacts/index.json` (führt Buch über alle Tages- und Wochenläufe)
+- Retention: Veraltete Ordner werden über `pruneArtifacts()` nach konfigurierbaren Fristen (z. B. 30 Tage, 12 Wochen) automatisch bereinigt.
+
+### 19.4 Fehlertoleranz und Auditierung
+
+1. **Step-Retries:** Tritt bei einem Schritt ein Fehler auf, greift die Schritt-spezifische Retry-Policy (z. B. 2 Versuche mit exponentiellem Backoff).
+2. **Kontrollierter Abbruch:** Kann ein Fehler nicht behoben werden, stoppt der Zyklus geordnet (`status: "FAILED"`). Bereits erzeugte Artefakte vorheriger Schritte bleiben erhalten.
+3. **Audit-Log:** Jeder Start, jeder Retry, jeder Teilschritt und jeder Abbruch wird als `CycleAuditEvent` im reinen Audit-Log (`data/cycle/audit.ndjson` bzw. DB-Tabelle `audit_log`) protokolliert.
+4. **Modell-Eskalation:** Erkennt ein Agent eine Ausnahmesituation (z. B. geopolitischer Schock), emittiert er ein `MODEL_ESCALATION_REQUEST`-Event. Bis zum Einbau des Model-Routers (Task 09) wird dieses Event auditiert und die bestehende Provider-Fallback-Kette genutzt.
+
+### 19.5 Verweis auf Hilfedateien
+
+Ausführliche Feldbeschreibungen, Formeln und Risikohinweise im 3-Ebenen-Schema (`kurzinfo`, `technischeInfo`, `risiko`):
+- **`docs/help/cycle.help.json`**: Daily Candidate List, Deep Analysis, Shortlist-Limits, Weekly-Klassen (CORE/ROTATION/DISCOVERY/EXCLUDED), Backtest-Kennzahlen.
+- **`docs/help/scanner.help.json`**: Die 14 Faktoren des deterministischen Markt-Scanners und der 5-Stufen-Trichter.
+- **`docs/help/portfolio.help.json`**: Kovarianz, Korrelationen, Sharpe, Sortino, Drawdown und Portfolio-Guardrails.
+

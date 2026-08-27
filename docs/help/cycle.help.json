@@ -1,0 +1,70 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "cycle",
+  "version": 1,
+  "title": "Daily & Weekly Agent Cycle — Feldhilfe",
+  "description": "Hilfetexte zur Daily Candidate List, Deep Analysis, Shortlist-Limits, Weekly-Klassen (CORE, ROTATION, DISCOVERY, EXCLUDED) und Backtest-Verifikationskennzahlen im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Erläutert die Arbeitsweise der autonomen Agenten-Routine (Task 06).",
+  "source": "src/cycle/",
+  "fields": {
+    "dailyCandidateList": {
+      "kurzinfo": "Die Daily Candidate List ist die fokussierte Auswahlliste der bis zu 40 besten Marktchancen des Tages für die Deep-Analyse.",
+      "technischeInfo": "Entsteht um 07:00 UTC im Schritt 3 (Market Selection Agent) durch Synthese aus dem deterministischen Tagesscan (Task 04, Trichterstufen Deep/Daily) und dem Makro-Regime (Step 2, Macro Analyst). Enthält maximal 40 Instrumente, geordnet nach Relevanz-Score und Diversifikationskriterien.",
+      "risiko": "Eine zu enge Auswahl kann lukrative Nischenchancen übersehen; eine unkritische Übernahme ohne Makro-Filter birgt Klumpenrisiken bei plötzlichen Regimebrüchen (z. B. Risk-Off Schocks)."
+    },
+    "deepAnalysis": {
+      "kurzinfo": "Die Deep Analysis ist die intensive Multi-Perspektiven-Untersuchung (Technical, News, Risk) der Top-40-Kandidaten.",
+      "technischeInfo": "Läuft von 08:00 bis 11:00 UTC über drei spezialisierte Agentenrollen: Technical Analyst (Multi-Timeframe-TA, Indikatoren, Support/Resistance), News Analyst (RSS/Feeds, Sentiment, systemische Risiken) und Risk Manager (Korrelationsmatrix, Cluster, Portfolio Exposure).",
+      "risiko": "LLM-Halluzinationen bei Kennzahlen oder Chartmustern. Schutz: Alle externen Nachrichten sind reine Payloads (Prompt-Injection-Schutz), und alle Outputs werden gegen strikte JSON-Schemas validiert."
+    },
+    "shortlistLimit": {
+      "kurzinfo": "Das Shortlist-Limit ist eine nicht aufweichbare Code-Grenze von maximal 40 Instrumenten für rechenintensive LLM-Analysen.",
+      "technischeInfo": "Implementiert via assertShortlistLimit(items, 40) und ShortlistLimitExceededError in src/cycle/security.ts. Wird an den Schnittstellen von Technical Analyst und News Analyst vor der LLM-Übergabe erzwungen. Ein 41. Instrument führt zum sofortigen Validierungsfehler.",
+      "risiko": "Ohne harte Code-Limits könnten ausufernde Kandidatenlisten API-Kosten explodieren lassen, Token-Limits sprengen und die Latenz der Tagesroutine unzulässig verzögern."
+    },
+    "classCORE": {
+      "kurzinfo": "CORE umfasst dauerhaft etablierte, hochliquide Basiswerte mit nachgewiesener Qualität und Stabilität.",
+      "technischeInfo": "Bedingung: Market Score ≥ 70, 24h-Volumen ≥ 50 Mio. USD, Mindestpersistenz ≥ 1 (bereits Vorwoche nicht EXCLUDED), Regime ungleich EXTREME. Bildet das Fundament des Portfolios mit den höchsten Allokationsgrenzen.",
+      "risiko": "Trügerische Scheinsicherheit: Auch CORE-Assets können in systemischen Krisen dramatische Drawdowns erleiden. Sie unterliegen weiterhin den Stop-Loss- und Risk-Guard-Regeln."
+    },
+    "classROTATION": {
+      "kurzinfo": "ROTATION enthält liquide, chancenreiche Märkte mit solider Dynamik, die taktisch beigemischt werden.",
+      "technischeInfo": "Bedingung: Market Score ≥ 55, ausreichende Historie und Erfüllung aller Eignungsfilter. Instrumente verweilen typischerweise mehrere Wochen in dieser Klasse, bis Score-Verschiebungen eintreffen.",
+      "risiko": "Höhere Volatilität und wechselhafte Korrelationen gegenüber CORE-Werten. Erfordert engmaschigere Überwachung der Volatilitätsregime."
+    },
+    "classDISCOVERY": {
+      "kurzinfo": "DISCOVERY beobachtet junge, neu gelistete oder dynamisch aufstrebende Märkte mit erhöhtem Potenzial.",
+      "technischeInfo": "Bedingung: Neulistings oder Market Score ≥ 40. Dient als Pipeline für spätere Aufsteiger nach ROTATION oder CORE. Geringere Positionsgrößen und strengere Stop-Abstände.",
+      "risiko": "Geringere Liquidität, anfällig für Slippage, Pump-and-Dump-Muster oder frühe Delisting-Gefahr. Maximal 1% Risk-Budget pro Position."
+    },
+    "classEXCLUDED": {
+      "kurzinfo": "EXCLUDED markiert Instrumente, die wegen Regelverletzung, Illiquidität oder Risiken nicht handelbar sind.",
+      "technischeInfo": "Wird zugewiesen bei: Riss eines Eignungsfilters (Status inaktiv, Paper nicht verfügbar, Min-Volumen unterschritten, Spread > 0.5%, Drawdown > 80%), Delisting, Broker-Ausfall oder Score < 40.",
+      "risiko": "Ein Handel auf EXCLUDED-Instrumenten ist im Code blockiert. Verhindert toxische Fills, Ausführungsfallen und Gebührensprünge."
+    },
+    "sharpeRatio": {
+      "kurzinfo": "Die Sharpe Ratio misst die risikoadjustierte Überschussrendite pro Einheit Gesamtschwankung.",
+      "technischeInfo": "Berechnet als (r̄ − r_f/A) / σ, annualisiert mit der Wurzel des Zeitfaktors (z. B. √252 oder √365). Berechnet deterministisch in src/portfolio/metrics.ts. Mindestschwelle für Backtest-Freigabe: ≥ 0.2.",
+      "risiko": "Bestraft auch positive Volatilität und setzt Normalverteilung voraus. Ein isoliert hoher Sharpe schützt nicht vor seltenen extremen Verlusttagen (Fat Tails)."
+    },
+    "sortinoRatio": {
+      "kurzinfo": "Die Sortino Ratio misst die Rendite im Verhältnis zur reinen Verlustvolatilität (Downside Deviation).",
+      "technischeInfo": "Berechnet als (r̄ − r_f/A) / σ_down, wobei σ_down nur Renditen unterhalb der Zielrendite (Target) berücksichtigt. Vorteil gegenüber Sharpe: Gewinnsprünge werden nicht fälschlich als Risiko gewertet.",
+      "risiko": "Bei extrem kurzen Historien ohne Verlustperioden kann die Kennzahl mathematisch explodieren. Erfordert mindestens 10-20 Handelsperioden für verlässliche Aussagekraft."
+    },
+    "maxDrawdown": {
+      "kurzinfo": "Der maximale prozentuale Wertverlust vom Allzeithoch bis zum tiefsten Punkt der Kurve.",
+      "technischeInfo": "Berechnet als Peak-to-Trough-Verlust: max((Peak_t − Equity_t) / Peak_t) * 100. Backtest-Kriterium: Setups mit historischem Max Drawdown > 35% werden als instabil abgewiesen.",
+      "risiko": "Ein in der Historie erlebter Max Drawdown ist nur die Untergrenze dessen, was in Zukunft eintreffen kann. Marktschocks können frühere Tiefpunkte jederzeit übertreffen."
+    },
+    "profitFactor": {
+      "kurzinfo": "Das Verhältnis von Bruttogewinnen zu Bruttoverlusten einer Strategie.",
+      "technischeInfo": "Formel: Bruttogewinn / Bruttoverlust. Ein Wert > 1.0 bedeutet profitable Historie; Backtest-Verifikation verlangt Profit Factor ≥ 1.0 (idealerweise ≥ 1.3).",
+      "risiko": "Sehr anfällig für einzelne Ausreißer: Ein einziger riesiger Gewinntrade kann einen ansonsten dauerhaft verlierenden Ansatz profitabel erscheinen lassen."
+    },
+    "regimeRobustness": {
+      "kurzinfo": "Kennzahl für die Stabilität und Profitabilität eines Setups über wechselnde Marktregimes hinweg.",
+      "technischeInfo": "Bewertet die Beständigkeit der Strategie über verschiedene Volatilitätsregimes (LOW, NORMAL, HIGH, EXTREME) und Trendphasen. Wert liegt im Intervall [0, 1].",
+      "risiko": "Strategien, die nur in Bullenmärkten funktionieren, scheitern in Seitwärts- oder Bärenmärkten. Eine niedrige Robustheit führt zur Ablehnung des Setups in der Verifikation."
+    }
+  }
+}

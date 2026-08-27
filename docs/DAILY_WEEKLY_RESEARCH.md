@@ -378,3 +378,109 @@ Weitere Grenzen: `MAX_SCAN_INSTRUMENTS = 250 000` (Pipeline),
    validierte JSON ist die Schnittstelle dorthin.
 5. **Regime auf Marktebene** (Gesamtmarkt statt Instrument) fehlt noch — heute
    wird je Instrument klassifiziert.
+
+---
+
+## 13. Daily & Weekly Agent Cycle (Task 06)
+
+**Stand:** 2026-08-27 · **Modul:** `src/cycle/` · **API:** `/api/analysis/*`
+**Status:** Orchestrierung der Agenten-Routine (Task 6 von 12)
+
+### 13.1 Zeitplan-Tabelle der Tagesroutine
+
+Die Tagesroutine läuft in einer festen, exakten Reihenfolge. Alles Massenhafte läuft rein maschinell ohne LLM; LLM-Analysen erfolgen ausschließlich auf gerankten Shortlists (max. 40 Instrumente).
+
+| Zeitfenster (UTC) | Schritt | Rolle / Agent | LLM-Erlaubnis | Input-Contract | Output-Contract & Code-Limits |
+| --- | --- | --- | --- | --- | --- |
+| **00:00–06:00** | Market Scanner | `MARKET_SCANNER` | **NEIN** (`llmAllowed: false`) | Universum (Registry) + OHLCV-Kerzen | `DailyUniverseArtifact` (Trichter: 10.000 → 2.000 → 500 → 100 Daily → 40 Deep) |
+| **06:00–07:00** | Macro Analyst | `MACRO_ANALYST` (Cassini) | **JA** (`llmAllowed: true`) | Snapshot der 7 Pflicht-Assets: BTC, ETH, DXY, SPX, Nasdaq, Gold, Bonds | `MacroStepOutput`: Regime (`RISK_ON\|RISK_OFF\|MIXED`), Volatilität (`LOW\|NORMAL\|HIGH\|EXTREME`), Thesis |
+| **07:00–08:00** | Market Selection | `MARKET_SELECTION` | **JA** (`llmAllowed: true`) | Scanner-Levels (Daily/Deep) + Macro-Regime | `SelectionStepOutput`: Daily Candidate List, **hart gedeckelt auf ≤ 40 Instrumente** |
+| **08:00–09:00** | Technical Analyst | `TECHNICAL_ANALYST` (Kepler) | **JA** (`llmAllowed: true`) | Daily Candidate List (**Code-Limit: max. 40**) | `TechnicalStepOutput`: Multi-Timeframe-TA (15m/1h/4h), Bias, Scores, Key-Levels, Thesis |
+| **09:00–10:00** | News Analyst | `NEWS_ANALYST` (Hubble) | **JA** (`llmAllowed: true`) | Top-40 Instrumente + Systemische News (**Payload-Trennung**) | `NewsStepOutput`: Sentiment, Impact-Score, Risk-Flags, Systemic Risk Level |
+| **10:00–11:00** | Risk Manager | `RISK_MANAGER` (Rigel) | **JA** (`llmAllowed: true`) | Top-40 TA + News + Korrelationsmatrix (Task 05) | `RiskStepOutput`: `approvedCandidates`, `rejectedCandidates` mit Gründen, Klumpenrisiko-Warnungen |
+| **danach** | Research | `RESEARCH` (Rhea) | **JA** (`llmAllowed: true`) | Freigegebene Kandidaten des Risk Managers | `ResearchStepOutput`: Konkrete Setups (Entry/SL/TP/Thesis) — **AUSSCHLIESSLICH VORSCHLÄGE (`isProposal: true`)** |
+| **danach** | Backtest-Verifikation | `BACKTEST_VERIFICATION` (Milo) | **NEIN** (`llmAllowed: false`) | Research-Setups + Historische Kerzen | `BacktestStepOutput`: Max Drawdown, Profit Factor, Sharpe Ratio, Sortino Ratio, Regime-Robustheit |
+
+### 13.2 Shortlist-Limits als harte Code-Schranken
+
+- Das Limit von maximal **40 Instrumenten** für rechenintensive LLM-Schritte (`TECHNICAL_ANALYST`, `NEWS_ANALYST`) ist eine **nicht aufweichbare Code-Schranke** (`MAX_SHORTLIST_LIMIT = 40`).
+- Bei Übergabe von mehr als 40 Instrumenten (z. B. 41) wirft `assertShortlistLimit()` einen `ShortlistLimitExceededError`. Die Validierung bricht sofort ab; kein Modellaufruf wird gestartet.
+- Der Market Selection Agent klemmt jede Kandidatenliste im Code via `assertShortlistLimit` auf höchstens 40 Einträge.
+
+### 13.3 Prompt-Injection-Schutz & Datentrennung
+
+- Externe Daten (RSS-Nachrichten, Kurse, Broker-Meldungen) werden niemals als Prompt-Anweisungen interpretiert.
+- Sie werden ausschließlich in strukturierter Form über `wrapUntrustedData()` in einen expliziten Sicherheits-Container (`type: "untrusted_external_data"`) verpackt.
+- Alle Agent-Outputs werden gegen strenge TypeScript- und JSON-Schemas validiert (`validateMacroOutput`, `validateSelectionOutput`, `validateTechnicalOutput`, `validateNewsOutput`, etc.).
+- Nicht-konforme oder bösartige Modellausgaben (z. B. Injektionen wie `"hack": true` oder fremde Schlüssel) werden sofort verworfen, geloggt und durch einen sicheren, deterministischen Fallback ersetzt.
+
+### 13.4 Weekly Universe Review (1× wöchentlich)
+
+Der wöchentliche Review (`src/cycle/weekly.ts`) bewertet das gesamte Universum an einem konfigurierbaren Wochentag (Standard: Sonntag 00:00 UTC):
+- **Eingaben:** Neue Listings, Delistings, Liquiditätsrückgänge (> 50 %), Gebührenerhöhungen (> 50 %), Broker-Verfügbarkeiten, Regimewechsel, Korrelations- und Volatilitätscluster, strukturelle Nachrichten.
+- **Output-Schema:** Strikt validiertes JSON (`WeeklyReview` und `WeeklyClassificationEntry`):
+  - `instrumentId`: Kanonische ID
+  - `class`: `CORE` | `ROTATION` | `DISCOVERY` | `EXCLUDED`
+  - `reasons`: Bis zu 20 nachvollziehbare Begründungen (`reasons[]`)
+  - `score`: Market Score
+  - `asOf`: ISO-8601-Zeitstempel
+- **LLM-Synthese:** Ein `WEEKLY_REVIEW`-Agent fasst die Verschiebungen in einer Executive Summary und wöchentlichen Themenschwerpunkten zusammen.
+
+### 13.5 Fehlertoleranz & Kontrollierter Abbruch
+
+- **Step-Ebene:** Jeder Schritt besitzt eine konfigurierbare `RetryPolicy` (`maxAttempts`, `backoffMs`, exponentieller Multiplikator).
+- **Zyklus-Ebene:** Scheitert ein Schritt nach Ausschöpfung aller Retries, bricht der Zyklus kontrolliert ab:
+  - Der Zyklusstatus wechselt auf `FAILED`.
+  - Ein kritischer Eintrag wird in das `audit_log` geschrieben (`CYCLE_STEP_FAILED`, `CYCLE_FAILED`).
+  - **Bereits geschriebene Artefakte vorheriger Schritte bleiben uneingeschränkt gültig und integer.**
+  - Nachfolgende Schritte werden nicht mehr ausgeführt.
+
+### 13.6 Vorbereitung für LLM-Eskalation (`MODEL_ESCALATION_REQUEST`)
+
+- Schritte dürfen bei komplexen Lagen ein Eskalations-Event emittieren:
+  ```ts
+  interface ModelEscalationRequest {
+    agent: string;
+    reason: string;
+    complexity: "low" | "medium" | "high" | "critical";
+    confidence?: number;
+    timestamp: string;
+  }
+  ```
+- **Fallback ohne Task-09:** Da der Model-Router (Task 09) noch nicht existiert, wird das Event im `audit_log` und in den Lauf-Metadaten protokolliert. Der Zyklus nutzt transparent die bestehende Provider-Fallback-Kette (`chatLlm`) — es kommt zu keinem Fehlverhalten.
+
+### 13.7 Artefakt-Layout & Index-Manifest
+
+```text
+artifacts/
+├── index.json                                     # Index-Manifest aller Daily- und Weekly-Läufe
+├── YYYY-MM-DD/
+│   └── daily/
+│       ├── 01-market-scanner.json                 # Scan-Result & Trichter-Ebenen
+│       ├── 02-macro-analyst.json                  # Cross-Market Regime & Assets
+│       ├── 03-market-selection.json               # Daily Candidate List (max. 40)
+│       ├── 04-technical-analyst.json              # Multi-Timeframe TA
+│       ├── 05-news-analyst.json                   # News Sentiment & Systemic Risk
+│       ├── 06-risk-manager.json                   # Korrelationen, Exposure & Allokation
+│       ├── 07-research.json                       # Konkrete Setups (Vorschläge)
+│       ├── 08-backtest-verification.json          # Verifikationskennzahlen (Sharpe, Sortino, etc.)
+│       └── daily-summary.json                     # Gesamtzusammenfassung des Tageslaufs
+└── YYYY-Www/
+    └── weekly/
+        ├── weekly-review.json                     # Vollständiger Review mit Changes & Context
+        ├── universe-classification.json           # Kompakte Klassifikationsliste mit reasons[]
+        └── weekly-summary.json                    # Zusammenfassung des Wochenlaufs
+```
+
+- **Atomares Schreiben:** Atomar via temporäre Dateien (`.tmp`) und anschließendes `renameSync`.
+- **Retention:** Pruning alter Artefakte über `pruneArtifacts({ retentionDays, retentionWeeks })` mit automatischer Aktualisierung von `index.json`.
+
+### 13.8 Read-only REST-API
+
+| Endpunkt | Methode | Beschreibung |
+| --- | --- | --- |
+| `/api/analysis/daily/latest` | `GET` | Liefert den jüngsten Tageslauf inkl. Summary und Step-Artefakten |
+| `/api/analysis/daily/{date}` | `GET` | Liefert den Tageslauf für ein bestimmtes Datum `YYYY-MM-DD` |
+| `/api/analysis/weekly/latest`| `GET` | Liefert das jüngste wöchentliche Universe Review |
+| `/api/analysis/runs`         | `GET` | Paginierte Historie aller Zyklen (`type=daily\|weekly\|all`, `status`, `page`, `pageSize`) |
+

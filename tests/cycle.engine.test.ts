@@ -240,3 +240,36 @@ test("Engine: erfasst und auditiert MODEL_ESCALATION_REQUEST-Events", async () =
   const auditEvents = await testPorts.audit.getEvents("test-cycle-escalation");
   assert.ok(auditEvents.some((e) => e.event === "MODEL_ESCALATION_REQUEST"));
 });
+
+test("Security: assertShortlistLimit Typ-Prüfung und validateContract", () => {
+  const { assertShortlistLimit, validateContract, sanitizeExternalText } = require("../src/cycle/security");
+  assert.throws(() => assertShortlistLimit("not-an-array" as unknown as unknown[]), TypeError);
+
+  const valid = validateContract({ count: 5 }, (v: unknown) => ({ valid: true, data: v }), "test");
+  assert.deepEqual(valid, { count: 5 });
+
+  assert.throws(
+    () => validateContract({ count: 5 }, () => ({ valid: false, error: "Fehler" }), "test-fail"),
+    /Schema-Verletzung/
+  );
+
+  assert.equal(sanitizeExternalText(123 as unknown as string), "");
+});
+
+test("Service: runDaily und runWeekly über CycleService", async () => {
+  const { CycleService } = require("../src/cycle/service");
+  const clock = new SimulatedClock("2026-08-27T00:00:00.000Z");
+  const testPorts = createTestPorts();
+
+  const service = new CycleService({ ports: testPorts, clock });
+  assert.equal(service.getClock(), clock);
+  assert.equal(service.getPorts(), testPorts);
+
+  const dailyResult = await service.runDaily();
+  assert.equal(dailyResult.record.status, "COMPLETED");
+  assert.ok(dailyResult.artifactsDir.length > 0);
+
+  clock.setTime("2026-08-30T00:00:00.000Z");
+  const weeklyResult = await service.runWeekly();
+  assert.equal(weeklyResult.record.status, "COMPLETED");
+});

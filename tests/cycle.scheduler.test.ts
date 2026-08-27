@@ -42,6 +42,22 @@ test("Clock: isInTimeWindow prüft Zeitfenster korrekt", () => {
   assert.equal(isInTimeWindow("03:00", "23:00-02:00"), false);
 });
 
+test("Clock: advanceMinutes, advanceDays, formatHHMM und Fehlerabfangung", () => {
+  const clock = new SimulatedClock("2026-08-27T00:00:00.000Z");
+  assert.throws(() => new SimulatedClock("invalid"), /Ungültige Initialzeit/);
+  assert.throws(() => clock.setTime("invalid"), /Ungültige Zeit für setTime/);
+  assert.throws(() => clock.advanceMs(-10), /advanceMs erwartet nicht-negative Zahl/);
+
+  clock.advanceMinutes(15);
+  assert.equal(clock.toISOString(), "2026-08-27T00:15:00.000Z");
+
+  clock.advanceDays(2);
+  assert.equal(clock.toISOString(), "2026-08-29T00:15:00.000Z");
+
+  const { formatHHMM } = require("../src/cycle/clock");
+  assert.equal(formatHHMM(clock.now()), "00:15");
+});
+
 test("Scheduler: Zeitraffer-Ausführung von Daily und Weekly", async () => {
   const clock = new SimulatedClock("2026-08-27T00:00:00.000Z"); // Donnerstag
   const testPorts = createTestPorts();
