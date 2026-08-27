@@ -308,7 +308,7 @@ Risikolimits folgen einer **Kaskade** (`src/lib/riskGuard.ts` +
 | `POST` | `/api/firm/tick` | Monitor-Zyklus (Kurse, SL/TP, Tageslimit) — **schreibend** |
 | `GET` | `/api/firm/report?period=day\|week\|month` | KPI-Report |
 | `GET` | `/api/firm/equity?range=day\|week\|month\|all` | Equity-Kurve |
-| `GET` | `/api/firm/log?limit=50&level=WARN` | Lesbare Protokoll-Timeline (`entries`: Turns, Analystenberichte, Systemmeldungen) + gefilterte Turn-Liste (`turns`) + Audit |
+| `GET` | `/api/firm/log?limit=20&page=2&level=WARN&event=ORDER_REJECTED` | Lesbare Protokoll-Timeline (`entries` inkl. `raw`-DB-Zeile) + gefilterte Turn-Liste (`turns`) + gepagter `audit` + `meta` (Seite, Gesamtzahlen) |
 | `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (Limits + Volatilitäts-Parameter `adp.*`, geklemmt) |
 | `GET` | `/api/firm/risk/volatility` | Adaptives Risk-System: Regime, wirksames maxRiskPerTrade, Indikatoren, Trigger-Event-Historie |
 | `POST` | `/api/firm/risk/volatility` | `{force:true}` — Volatilitäts-Neubewertung sofort erzwingen |
