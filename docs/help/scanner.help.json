@@ -1,0 +1,140 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "scanner",
+  "version": 1,
+  "title": "Markt-Scanner, Market Score und Trichter — Feldhilfe",
+  "description": "Hilfetexte zu allen 14 Faktoren, den neun Score-Komponenten, den vier Trichterebenen, den Volatilitätsregimen und den Weekly-Klassen im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Wird vom Operations Center (Task 10) als Tooltip gerendert. Der Scanner arbeitet vollständig deterministisch und ohne LLM.",
+  "source": "src/scanner/",
+  "fields": {
+    "liquidity": {
+      "kurzinfo": "Wie viel Geld an einem Tag in diesem Markt umgesetzt wird — je mehr, desto leichter kommt man rein und wieder raus.",
+      "technischeInfo": "raw = volume24h aus der Instrument-Registry (ersatzweise volume mal close der letzten Kerze). Normalisierung logarithmisch: log10(v/minVolume24h) geteilt durch log10(maxVolume24h/minVolume24h), Defaults 100.000 bis 10.000.000.000. Score-Gewicht 25 Prozent.",
+      "risiko": "In dünnen Märkten bewegt schon die eigene Order den Kurs; der reale Ausstiegspreis kann weit unter dem angezeigten liegen, gerade in Stressphasen."
+    },
+    "spread": {
+      "kurzinfo": "Abstand zwischen Kauf- und Verkaufspreis. Diese Spanne zahlt man sofort beim Einstieg.",
+      "technischeInfo": "raw = relativer Spread (ask minus bid geteilt durch mid). Invers linear normalisiert: bestSpread 0,0001 ergibt 1, worstSpread 0,005 ergibt 0. Ein unbekannter Spread gilt als nicht verfügbar mit Neutralwert 0, nie als eng. Score-Gewicht 10 Prozent.",
+      "risiko": "Ein breiter Spread frisst kleine Gewinne auf und verzerrt Backtests, die mit Mittelkursen rechnen; bei Nachrichten weitet er sich zusätzlich aus."
+    },
+    "atr": {
+      "kurzinfo": "Durchschnittliche Tagesschwankung in Prozent des Kurses — die Grundlage für sinnvolle Stop-Abstände.",
+      "technischeInfo": "True Range je Kerze, geglättet als Wilder-RMA über 14 Perioden, geteilt durch den letzten Close. Trapez-Normalisierung: floorPct 0,002, Sweet Spot 0,01 bis 0,04, ceilingPct 0,12. Diagnose-Faktor ohne eigenes Score-Gewicht.",
+      "risiko": "Ein zu enger Stop im Verhältnis zur ATR wird von normalem Rauschen ausgelöst; ein zu weiter Stop macht das Positionsrisiko unbezahlbar."
+    },
+    "volatility": {
+      "kurzinfo": "Wie stark der Kurs im Jahresmaßstab schwankt — die Kennzahl hinter dem Marktregime.",
+      "technischeInfo": "Logarithmische Renditen, Populations-Standardabweichung über die letzten 30 Renditen, multipliziert mit der Wurzel aus periodsPerYear (Default 365). Trapez-Normalisierung mit floor 0,05, ideal 0,2 bis 0,8, ceiling 2,5. Score-Gewicht 15 Prozent.",
+      "risiko": "Zu wenig Volatilität bedeutet keine Chance, zu viel bedeutet unkalkulierbare Verluste; historische Volatilität sagt nichts über den nächsten Sprung."
+    },
+    "momentum": {
+      "kurzinfo": "Stärke der jüngsten Kursbewegung über mehrere Zeitfenster hinweg.",
+      "technischeInfo": "Rate of Change über 5, 20 und 60 Perioden, gewichtet mit 0,2 / 0,3 / 0,5. Normalisierung im Modus absolute: Betrag geteilt durch scale 0,3, geklemmt auf 0 bis 1. Die Richtung steht separat in detail.direction. Score-Gewicht 10 Prozent.",
+      "risiko": "Momentum kehrt sich abrupt um; ein hoher Wert misst Vergangenheit, keine Fortsetzung, und lockt besonders am Ende einer Bewegung."
+    },
+    "trend": {
+      "kurzinfo": "Wie sauber die gleitenden Durchschnitte gestaffelt sind — ein Maß für Trendqualität statt Trendrichtung.",
+      "technischeInfo": "EMA 9, 21 und 50 auf Schlusskursen. raw = (EMA_fast minus EMA_slow) geteilt durch EMA_slow. strength = Betrag geteilt durch scale 0,1, geklemmt. Bei strenger Staffelung normalized = 0,5 plus 0,5 mal strength, sonst 0,5 mal strength. Score-Gewicht 15 Prozent.",
+      "risiko": "In Seitwärtsmärkten wechselt die Staffelung ständig; ein hoher Trendwert kurz vor einer Erschöpfung führt zu Einstiegen genau am Wendepunkt."
+    },
+    "volumeRatio": {
+      "kurzinfo": "Ob gerade mehr gehandelt wird als üblich — Hinweis auf frisches Interesse.",
+      "technischeInfo": "Durchschnittsvolumen der letzten 5 Perioden geteilt durch das der letzten 20 Perioden. Linear normalisiert von minRatio 0,5 auf 0 bis maxRatio 2,0 auf 1. Score-Gewicht 10 Prozent (Komponente volume).",
+      "risiko": "Volumenspitzen entstehen auch durch Liquidationen, Index-Umstellungen oder Wash-Trading und bedeuten nicht automatisch handelbare Qualität."
+    },
+    "rsi": {
+      "kurzinfo": "Überkauft- oder Überverkauft-Anzeige zwischen 0 und 100; 50 ist neutral.",
+      "technischeInfo": "Wilder-RSI über 14 Perioden. Normalisiert als Überhitzungsfilter: 1 minus clamp((Betrag von RSI minus 50, minus neutralBand 20) geteilt durch (extremeBand 50 minus neutralBand 20)). RSI zwischen 30 und 70 ergibt 1. Diagnose-Faktor ohne Score-Gewicht.",
+      "risiko": "Ein extremer RSI kann in starken Trends wochenlang extrem bleiben; als alleiniges Umkehrsignal ist er unzuverlässig."
+    },
+    "drawdown": {
+      "kurzinfo": "Größter Rückgang vom letzten Hoch innerhalb des Betrachtungsfensters.",
+      "technischeInfo": "Laufendes Maximum über die letzten 60 Schlusskurse, dd = (peak minus close) geteilt durch peak, raw = Maximum. Invers linear: 0 ergibt 1, maxDrawdown 0,5 ergibt 0. Diagnose-Faktor, zugleich harter Filter bei mehr als 80 Prozent Drawdown.",
+      "risiko": "Ein tiefer Drawdown zeigt bereits realisierten Kapitalverlust; Erholung ist nicht garantiert, und die nötige Gegenbewegung wächst überproportional."
+    },
+    "correlation": {
+      "kurzinfo": "Wie stark sich das Instrument im Gleichschritt mit dem Referenzmarkt bewegt.",
+      "technischeInfo": "Pearson-Korrelation (Spearman optional über die Ränge) der letzten 30 gemeinsamen logarithmischen Renditen gegen benchmarkInstrumentId (Default BINANCE:BTCUSDT). normalized = 1 minus Betrag von r, belohnt also Diversifikationsnutzen. Score-Gewicht 5 Prozent.",
+      "risiko": "Korrelationen springen in Krisen gegen 1 — die geglaubte Streuung verschwindet genau dann, wenn sie gebraucht wird."
+    },
+    "news": {
+      "kurzinfo": "Grobe Einschätzung, wie viel Nachrichtenrisiko gerade an diesem Markt hängt.",
+      "technischeInfo": "Rein deterministische Zählheuristik ohne LLM: 0,08 je Ereignis in 24 Stunden, 0,02 je Ereignis in 7 Tagen, 0,2 je High-Impact-Ereignis, 0,3 für einen Termin innerhalb von 48 Stunden, 0,2 für veraltete Registry-Daten. raw ist auf 1 geklemmt, normalized = 1 minus raw, Neutralwert 0,25 Risiko. Score-Gewicht 5 Prozent.",
+      "risiko": "Die Heuristik zählt Ereignisse, sie versteht sie nicht: eine einzige unerwartete Meldung kann ein als ruhig eingestuftes Instrument sofort unhandelbar machen."
+    },
+    "funding": {
+      "kurzinfo": "Laufende Haltekosten bei Perpetual-Kontrakten, hochgerechnet aufs Jahr.",
+      "technischeInfo": "annualisiert = Betrag der fundingRate mal Intervalle pro Jahr (8760 geteilt durch fundingIntervalHours, sonst 1095). Invers linear: 0 ergibt 1, maxAnnualized 0,5 ergibt 0. Spot, Aktien und ETF erhalten spotValue 1. Diagnose-Faktor ohne Score-Gewicht.",
+      "risiko": "Hohe Funding-Raten fressen eine Position auch dann auf, wenn der Kurs sich gar nicht bewegt, und drehen sich bei Stimmungswechseln schlagartig."
+    },
+    "openInterest": {
+      "kurzinfo": "Wie viel Kapital insgesamt in offenen Derivate-Kontrakten steckt.",
+      "technischeInfo": "raw = openInterest in Quote-Währung, logarithmisch normalisiert von minOpenInterest 100.000 auf 0 bis maxOpenInterest 5.000.000.000 auf 1. Märkte ohne OI-Begriff erhalten neutralValue 0,5. Diagnose-Faktor ohne Score-Gewicht.",
+      "risiko": "Sehr hohes offenes Interesse erhöht die Gefahr von Liquidationskaskaden; sehr niedriges bedeutet, dass Stops kaum gefüllt werden können."
+    },
+    "executionCost": {
+      "kurzinfo": "Was ein vollständiger Roundturn kostet — Gebühren plus Spread.",
+      "technischeInfo": "feeMode taker (Default) ergibt 2 mal takerFee, maker 2 mal makerFee, blend maker plus taker; dazu der Spread, falls includeSpread aktiv ist. Gebühren stammen aus der Registry. Invers linear: bestCost 0,0005 ergibt 1, worstCost 0,005 ergibt 0. Score-Gewicht 5 Prozent (Komponente execution).",
+      "risiko": "Kosten sind der einzige sichere Teil eines Trades; bei kurzen Haltedauern entscheiden sie allein über Gewinn oder Verlust."
+    },
+    "marketScore": {
+      "kurzinfo": "Gesamtnote eines Instruments von 0 bis 100, zusammengesetzt aus neun gewichteten Komponenten.",
+      "technischeInfo": "Gewichte aus scanner.config.json: Liquidity 25, Volatility 15, Trend 15, Momentum 10, Spread 10, Volume 10, Correlation 5, News 5, Execution 5 Prozent — Summe exakt 100, per Test erzwungen. contribution = weight mal normalized mal 100, auf 10 Nachkommastellen gerundet; score = Summe. Jeder Score trägt ein vollständiges Breakdown mit Rohwert, normiertem Wert, Gewicht und Beitrag.",
+      "risiko": "Ein hoher Score ist eine Handelbarkeits-, keine Gewinnprognose. Er sagt, dass ein Markt sauber handelbar aussieht, nicht dass eine Position sich lohnt."
+    },
+    "funnelEligible": {
+      "kurzinfo": "Erste Trichterstufe: alles, was die harten Eignungs- und Risikofilter überlebt (bis zu 2.000 Instrumente).",
+      "technischeInfo": "Reihenfolge der Regeln: status-active, paper-available, market-type, asset-class, min-candles (30), min-volume (1 Mio.), max-spread (0,005), max-execution-cost (0,006), max-drawdown (0,8), regime-extreme. Die erste greifende Regel gewinnt und wird protokolliert; unbekannte Werte führen zur Ablehnung, außer beim Drawdown.",
+      "risiko": "Zu strenge Filter blenden legitime Chancen aus, zu lockere lassen unhandelbare Instrumente in den Score — die Schwellen gehören regelmäßig überprüft."
+    },
+    "funnelInteresting": {
+      "kurzinfo": "Zweite Stufe: die bis zu 500 Instrumente mit einem Market Score ab 55.",
+      "technischeInfo": "Sortierung absteigend nach Score, bei Gleichstand aufsteigend nach instrumentId — dadurch ist die Auswahl vollständig deterministisch. Schwelle interestingMinScore und Größe interestingMax sind in scanner.config.json versioniert.",
+      "risiko": "Die Schwelle ist eine Konvention, keine Naturkonstante; ein Instrument bei 54,9 unterscheidet sich praktisch nicht von einem bei 55,1."
+    },
+    "funnelDaily": {
+      "kurzinfo": "Dritte Stufe: die 100 Instrumente der täglichen Rotation.",
+      "technischeInfo": "Top 100 aus der Interesting-Liste, gleiche deterministische Sortierung. Diese Liste ist die Arbeitsgrundlage der nachgelagerten Analyse-Tasks und wird im Tagesartefakt inklusive Score-Breakdown gespeichert.",
+      "risiko": "Eine tägliche Rotation erzeugt Wechselkosten: zu häufiger Austausch führt zu Strategie-Hopping ohne statistisch belastbare Stichprobe."
+    },
+    "funnelDeep": {
+      "kurzinfo": "Vierte Stufe: 20 bis 40 Kandidaten für die vertiefte Analyse, mit Streuung über Anlageklassen.",
+      "technischeInfo": "Aus der Daily-Liste, begrenzt auf maxPerAssetClass 8 je Anlageklasse. Wird deepMin 20 dadurch nicht erreicht, wird das Klassenlimit schrittweise um 1 gelockert und das Ergebnis mit diversificationRelaxed true markiert. Obergrenze deepMax 40.",
+      "risiko": "Auch diversifizierte Kandidaten können am selben Makro-Treiber hängen; die Regel begrenzt Klassen-, nicht Faktorkonzentration."
+    },
+    "regime": {
+      "kurzinfo": "Einordnung der Marktlage in LOW, NORMAL, HIGH oder EXTREME anhand der Volatilität.",
+      "technischeInfo": "Grundlage ist die annualisierte realisierte Volatilität: kleiner 0,25 LOW, kleiner 0,60 NORMAL, kleiner 1,20 HIGH, darüber EXTREME. Fehlende oder ungültige Werte ergeben NORMAL. Schwellen liegen in scanner.config.json unter regime.",
+      "risiko": "Regimewechsel werden erst erkannt, wenn sie in den Daten stehen — der Sprung von NORMAL nach EXTREME passiert in der Realität schneller als im Lookback-Fenster."
+    },
+    "classCORE": {
+      "kurzinfo": "Weekly-Klasse für die dauerhaft tragfähigen Märkte des Universums.",
+      "technischeInfo": "Bedingungen: Score ab coreMinScore 70, volume24h ab 50 Mio. und Persistenz ab coreMinPersistence 1 aufeinanderfolgenden Reviews im Universum. Jede Einstufung trägt maschinenlesbare reasons.",
+      "risiko": "CORE suggeriert Stabilität; auch Kernmärkte verlieren Liquidität, ändern Gebühren oder werden delistet — die Klasse ersetzt keine laufende Überwachung."
+    },
+    "classROTATION": {
+      "kurzinfo": "Weekly-Klasse für gute, aber noch nicht dauerhaft bestätigte Märkte.",
+      "technischeInfo": "Score ab rotationMinScore 55, ohne die CORE-Zusatzbedingungen zu erfüllen. Typischer Aufstiegspfad DISCOVERY nach ROTATION nach CORE über wachsende Persistenz.",
+      "risiko": "Rotationskandidaten fallen häufiger heraus als Kernmärkte; Positionsgrößen sollten das kürzere Erfahrungsfenster berücksichtigen."
+    },
+    "classDISCOVERY": {
+      "kurzinfo": "Weekly-Klasse für Neuzugänge und Beobachtungsfälle.",
+      "technischeInfo": "Score ab discoveryMinScore 40 oder Neulistung seit dem letzten Review. Dient als Vorstufe mit reduziertem Vertrauen; Persistenz wächst mit jedem Review, in dem das Instrument nicht EXCLUDED ist.",
+      "risiko": "Neue Märkte haben kurze Historie, unsaubere Daten und oft künstlich wirkende Liquidität — Fehleinschätzungen sind hier am wahrscheinlichsten."
+    },
+    "classEXCLUDED": {
+      "kurzinfo": "Weekly-Klasse für alles, was aktuell nicht ins Universum gehört.",
+      "technischeInfo": "Ergibt sich aus Filterablehnung, zu niedrigem Score, Delisting, Liquiditätseinbruch über liquidityDropPct 50 Prozent, Gebührenerhöhung über feeIncreasePct 50 Prozent oder fehlender Broker-Verfügbarkeit. Die reasons nennen jeweils die auslösende Regel.",
+      "risiko": "Ein Ausschluss ist eine Momentaufnahme der Datenlage; falsche oder fehlende Marktdaten können ein handelbares Instrument unbemerkt aussperren."
+    },
+    "persistence": {
+      "kurzinfo": "Anzahl aufeinanderfolgender Weekly-Reviews, in denen ein Instrument im Universum geblieben ist.",
+      "technischeInfo": "Zählt jede Klasse außer EXCLUDED. Wird aus dem Vorwochen-Review übernommen und um 1 erhöht, bei Ausschluss auf 0 zurückgesetzt. Steuert den CORE-Aufstieg über coreMinPersistence.",
+      "risiko": "Lange Persistenz ist Vergangenheitsstabilität und kein Schutz vor plötzlichen Struktur- oder Regelwechseln an der Venue."
+    },
+    "artifact": {
+      "kurzinfo": "Der Tagesabzug des Universums unter artifacts/JJJJ-MM-TT/universe.json.",
+      "technischeInfo": "Enthält schemaVersion, configVersion, asOf, Gewichte, Trichtergrößen, die Ebenen deep und daily inklusive Score-Breakdown, interesting und eligible als ID-Listen sowie die Ablehnungsstatistik. Atomar geschrieben (tmp plus rename, Modus 0644), JSON mit zwei Leerzeichen Einrückung — wiederholte Läufe erzeugen byte-identische Dateien.",
+      "risiko": "Artefakte sind Entscheidungsgrundlage für spätere Auswertungen: werden sie nachträglich verändert oder mit abweichender Konfigurationsversion vermischt, sind Vergleiche über die Zeit wertlos."
+    }
+  }
+}

@@ -54,6 +54,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Market Universe",
     subtitle: "Broker-unabhängige Instrumenten-Registry — Datenmodell, Normalisierung, API (v1.8)",
   },
+  scanner: {
+    file: "docs/DAILY_WEEKLY_RESEARCH.md",
+    title: "Daily & Weekly Research",
+    subtitle: "Deterministischer Markt-Scanner — 14 Faktoren, Market Score, Trichter, API (v1.12)",
+  },
   liveReview: {
     file: "docs/PEER_REVIEW_LIVE_TRADING.md",
     title: "Peer-Review: Live-/Paper-Trading",

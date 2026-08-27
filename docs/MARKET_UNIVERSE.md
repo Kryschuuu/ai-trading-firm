@@ -342,3 +342,26 @@ Kommandos: `npm run universe:seed` (deterministisch), `npm test`,
 4. **Symbol-Alias-Tabelle**: `KRAKEN:XBT/USD` ↔ `BTC` ist noch nicht abgebildet; heute wird die venue-native Schreibweise 1:1 übernommen.
 5. **UI-Anbindung**: Das Operations Center (Task 10) rendert `docs/help/market-universe.help.json` als Tooltips; die Watchlist-Präferenz soll dort editierbar werden.
 6. **Monitor/Marktscan** liest weiterhin `DEFAULT_WATCHLIST` (Legacy-Alias). Umstellung auf `registry.query()` ist für den Ranking-Task vorgesehen.
+
+---
+
+## 10. Anschluss: Markt-Scanner (Task 04)
+
+Der Scanner (`src/scanner/`, Doku: [`DAILY_WEEKLY_RESEARCH.md`](./DAILY_WEEKLY_RESEARCH.md))
+ist der erste produktive Konsument der Registry und arbeitet strikt **lesend**:
+
+* Er lädt Instrumente ausschließlich über `getRegistry().query()` (seitenweise,
+  stabil nach `id` sortiert) und schreibt nie zurück.
+* Punkt 2 der offenen Liste oben ist damit teilweise beantwortet:
+  `volume24h` und `spread` werden jetzt aktiv ausgewertet — fehlen sie, lehnt der
+  Trichter das Instrument über die Regeln `min-volume` bzw. `max-spread` ab,
+  statt Unwissen als „gut“ zu werten.
+* `makerFee`/`takerFee` speisen den Faktor `executionCost`, die Capability-Flags
+  `status`/`paperAvailable` die ersten beiden Filterregeln, `assetClass` die
+  Diversifikationsregel der Deep-Liste.
+* Ergebnisse liegen unter `GET /api/universe/daily|weekly|score/{instrumentId}`
+  und als Tagesartefakt in `artifacts/JJJJ-MM-TT/universe.json`.
+
+Registry-Feldqualität ist damit direkt scan-wirksam: ein fehlender Spread oder
+eine veraltete `lastSeen`-Marke kostet ein Instrument messbar Score
+(News-Faktor: Staleness) oder wirft es ganz aus dem Universum.

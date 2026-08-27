@@ -329,3 +329,51 @@ read-only und SSRF-geschützt, Failover ist laut und auditiert, anomale Kurse
 werden nie gehandelt, und der Live-Pfad bleibt gesperrt. 0 neue Dependencies,
 `npm audit` ohne Befund; 53 neue Tests, Coverage der neuen Module **95,6 %**
 (Zeilen), kein echter Netzwerkverkehr in der CI-Suite.
+
+---
+
+## Security Audit — Task 04 (Markt-Scanner, Market Score & Trichter, v1.12.0)
+
+**Scope:** `src/scanner/**` (19 Dateien), `src/app/api/universe/**` (3 Routen),
+`scripts/run-scan.ts`, `src/scanner/scanner.config.json`.
+**Methode:** manuelle Review + statischer Architektur-Import-Scan als Test
+(`tests/scanner.architecture.test.ts`) + TS strict + ESLint + 123 Modultests.
+**Vertrauensgrenze:** Der Scanner ist eine **read-only Analyseschicht**. Er
+konsumiert Registry (Task 01) und Historical Store (Task 03) und schreibt
+ausschließlich Artefakt-Dateien. Kein Ordner-, Order-, Ledger- oder Live-Pfad
+wird berührt.
+
+### Checkliste (Pflichtkriterien)
+
+| Kriterium | Status | Nachweis |
+| --- | --- | --- |
+| **Kein LLM im Scanner** | ✅ | Architekturtest scannt jede Datei unter `src/scanner/**` und `src/app/api/universe/**` gegen Import-Regex für Ollama/OpenAI/Gemini/Claude/`llmProvider`/Prompts/Analysten. Das News-Risiko ist eine reine Zählheuristik (`factors/news.ts`). |
+| **Kein Netzwerk** | ✅ | Verbotene Muster `fetch(`, `node:http(s)`, `ws`, Broker-SDKs — im Test erzwungen. Daten kommen ausschließlich über injizierte Provider. |
+| **Kein ungeseedeter Zufall** | ✅ | `Math.random` im Scanner verboten (Test). Synthetische Benchmark-Daten nutzen `createRng()` (mulberry32) mit festem Seed. |
+| **Zeit injizierbar** | ✅ | `Date.now()` ist im Kern verboten, `new Date()` nur in `service.ts` erlaubt (Test). `scanUniverse()` bekommt `asOf` übergeben ⇒ reproduzierbare Läufe. |
+| **Byte-identische Reproduzierbarkeit** | ✅ | Alle Ausgabewerte gerundet, stabile Sortierung (Score desc, `instrumentId` asc), JSON mit fester Formatierung. Test vergleicht zwei Läufe byte-genau. |
+| **Schreibpfade minimiert** | ✅ | `writeFileSync`/`renameSync`/`rmSync` nur in `artifacts.ts` (Test). Schreiben atomar über tmp + rename, Modus 0644, Zielverzeichnis über `SCANNER_ARTIFACTS_DIR`, Datumsordner gegen `ARTIFACT_DATE_RE` validiert ⇒ kein Path-Traversal. |
+| **API read-only** | ✅ | Nur `GET`-Handler, keine Mutation, `dynamic = "force-dynamic"`. Konsistent mit den übrigen GET-Routen ohne Token-Pflicht (P-03 aus Task 03). |
+| **DoS-Grenzen** | ✅ | `pageSize` max. **200** (Default 50), `page` max. 100.000, `class`-Filter max. 100 Zeichen/4 Werte, `instrumentId` max. 64 Zeichen, `MAX_SCAN_INSTRUMENTS = 250.000`, `MAX_SERVICE_INSTRUMENTS = 50.000`. Ungültige Parameter ⇒ `400 VALIDATION_ERROR`, nie Silent-Clamping auf teure Werte. |
+| **Keine Fehler-Leaks** | ✅ | Alle 500er laufen durch `publicErrorMessage()`; Ablehnungsgründe enthalten nur Regel-ID und Schwellwert, keine Rohdaten. |
+| **Keine Secrets / keine DB** | ✅ | Kein Credential, kein `process.env` außer `SCANNER_CONFIG_FILE` und `SCANNER_ARTIFACTS_DIR` (Test-Whitelist); kein `drizzle`/`pg`-Import. |
+| **Kein Live-Trading-Bezug** | ✅ | Keine Order-, Broker- oder Ledger-Aufrufe; `liveAvailable` wird nicht einmal gelesen. Der Trichter verlangt umgekehrt `paperAvailable`. |
+| **Konfiguration validiert** | ✅ | `loadScannerConfig()` prüft Typen, Bereiche, Reihenfolge der Schwellen und die Gewichtssumme (1.0 ± 1e-9); Override-Dateien laufen durch dieselbe Validierung. Fehlerhafte Konfiguration ⇒ Abbruch, nie stille Defaults. |
+| **Unwissen wird nicht belohnt** | ✅ | Fehlende Werte ⇒ `available: false` mit dokumentiertem Neutralwert (i. d. R. 0); fehlender Spread/Volumen führt zur Ablehnung im Trichter statt zu einem guten Score. |
+
+### Befunde
+
+| ID | Severity | Datei (Funktion) | Problem | Status |
+| --- | --- | --- | --- | --- |
+| Q-01 | Info | `src/app/api/universe/**` | Read-only-Endpunkte ohne Token, wie alle GET-Routen | ✅ by design; keine Mutation, harte Query-Limits, redigierte Fehler |
+| Q-02 | Info | `src/scanner/service.ts` → `ScannerService` | `new Date()` und ein prozessweiter Cache; einziger nichtdeterministischer Punkt | ✅ by design und bewusst isoliert — Kern und Tests injizieren `asOf`; Architekturtest hält die Ausnahme auf diese Datei begrenzt |
+| Q-03 | Info | `src/scanner/factors/correlation.ts` | Korrelationsmathematik liegt lokal statt in einem geteilten Analytics-Modul | ✅ akzeptiert: Task 05 (Portfolio Analytics) existiert im Repo nicht; Umzug ist im TSDoc als Folgeschritt markiert |
+| Q-04 | Info | `artifacts/` | Tagesartefakte enthalten vollständige Score-Breakdowns und liegen unversioniert auf der Platte | ✅ by design: keine personenbezogenen Daten, keine Secrets, jederzeit aus Registry + Historie reproduzierbar; `.gitignore` verhindert versehentliches Committen |
+| Q-05 | Low | `factors/news.ts` | Heuristik bewertet nur Ereignis*zahlen*; ein einzelnes schweres Ereignis kann unterschätzt werden | ⚠️ bekannt und dokumentiert (Hilfetext „risiko", Doku Abschnitt 3); der Faktor trägt bewusst nur 5 % Gewicht |
+
+Fazit: **kein Critical/High/Medium-Befund.** Der Scanner vergrößert die
+Angriffsfläche praktisch nicht: keine neue Dependency, kein Netzwerk, keine
+Datenbank, keine Secrets, kein Schreibpfad außerhalb des Artefaktordners. Die
+einzige Zustandsänderung des Systems sind reproduzierbare JSON-Dateien. Die
+neuen HTTP-Endpunkte sind lesend und gegen unbegrenzte Ergebnismengen
+abgesichert; der Live-Pfad bleibt unangetastet und gesperrt.

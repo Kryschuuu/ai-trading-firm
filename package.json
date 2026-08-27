@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "MIT",
   "private": true,
@@ -19,6 +19,8 @@
     "universe:seed": "node --import tsx scripts/seed-universe.ts",
     "test:coverage": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/universe/**' 'tests/*.test.ts'",
     "test:coverage:brokers": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/brokers/**' --test-coverage-include='src/contracts/**' 'tests/broker*.test.ts'",
+    "test:coverage:scanner": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/scanner/**' --test-coverage-include='src/app/api/universe/**' 'tests/scanner.*.test.ts'",
+    "scan": "node --import tsx scripts/run-scan.ts",
     "test:coverage:marketdata": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/lib/marketdata/**' --test-coverage-include='src/app/api/marketdata/**' 'tests/marketdata.*.test.ts'"
   },
   "dependencies": {
