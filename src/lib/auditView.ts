@@ -1867,6 +1867,49 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
         : [];
     },
   },
+  BROKER_FACTORY: {
+    label: "Broker-Factory-Aufruf",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Aufruf der Broker-Factory in einem Modus ungleich „paper“ (Task 02, " +
+      "Broker-Capability-Modell). Jeder nicht-Paper-Zugriff auf einen Broker " +
+      "ist ein Sicherheitsrelevantes Ereignis und wird lückenlos protokolliert: " +
+      "Venue, Modus, Ergebnis (OK = Adapter geliefert / DENIED = abgewiesen) " +
+      "und bei Ablehnung die fehlende Capability bzw. den Fehlercode.",
+    headline: (d) => {
+      const venue = text(d.venue) ?? "—";
+      const mode = text(d.mode) ?? "—";
+      const outcome = text(d.outcome) ?? "—";
+      return `${venue} · ${mode} → ${outcome === "OK" ? "Adapter geliefert" : "abgewiesen"}`;
+    },
+    sections: (d) => [
+      {
+        title: "Factory-Entscheidung",
+        facts: [
+          { label: "Venue", value: text(d.venue) ?? "—", mono: true },
+          { label: "Modus", value: text(d.mode) ?? "—", mono: true },
+          { label: "Ergebnis", value: text(d.outcome) ?? "—" },
+          { label: "Fehlende Capability", value: text(d.capability) ?? "—" },
+          { label: "Fehlercode", value: text(d.errorCode) ?? "—", mono: true },
+        ],
+      },
+    ],
+    check: (d) => {
+      const outcome = text(d.outcome) ?? "";
+      if (outcome === "OK" && (d.capability != null || d.errorCode != null)) {
+        return [
+          {
+            severity: "warn",
+            title: "Widersprüchlicher Factory-Eintrag",
+            detail:
+              "outcome=OK, aber capability/errorCode ist hinterlegt — die Factory-Audit-Logik sollte nur bei Ablehnung diese Felder setzen.",
+          },
+        ];
+      }
+      return [];
+    },
+  },
 };
 
 /** Fallback für unbekannte Events — nie leer, nie abgeschnitten. */

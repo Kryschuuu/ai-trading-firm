@@ -20,6 +20,129 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.10.0] — 2026-08-27
+
+**Broker Capability-Modell (Task 02): Die Plattform ist jetzt
+broker-unabhängig — 6 Adapter hinter einem Interface, Execution Modes als
+erstklassiges Konzept, Live-Pfad hart und auditierbar gesperrt. Kein Live-
+Trading, keine Credentials, kein Netzwerkverkehr (Remote-Health default
+OFF).**
+
+### Neu: `src/contracts/broker.ts` (geteilte Contracts)
+
+- **`ExecutionMode = "backtest" | "paper" | "testnet" | "live"`** mit
+  fester Semantik: Backtest = historischer Kurs + simulierte Order,
+  Paper-Realtime = realer Kurs + simulierte Order, Testnet = realer
+  (Testnet-)Kurs + Broker-Order, Live = realer Kurs + reale Order.
+- **`BrokerCapabilities`** (discovery, marketData, trading, paper,
+  testnet, live, instrumentTypes, `stopAtVenue` — letzteres der
+  Ausbaupfad für den späteren Bitunix-Adapter) und **`BrokerAdapter`**
+  (healthCheck, optionale capability-geprüfte Methoden).
+- **Fehlerklassen:** `LiveTradingGateError`, `NotSupportedCapabilityError`,
+  `UnknownVenueError` (alle mit maschinenlesbarem Code, informativ,
+  leak-frei — getestet).
+- `MarketInstrument` wird **nicht dupliziert**, sondern aus Task 01
+  (`src/universe/types.ts`) wiederverwendet (Unabhängigkeitsklausel nicht
+  greifend, weil Task 01 gemerged ist).
+
+### Neu: `src/brokers/` (ausführbares Capability-Modell)
+
+- **`capabilities.ts`** — `VENUE_CAPABILITIES` für die 6 Venues (Single
+  Source of Truth) + Gating-Table `REQUIRED_CAPABILITY_BY_MODE`
+  (backtest/paper → `paper`, testnet → `testnet`, live → hartes Gate).
+  Die Flags beschreiben, was der Adapter-CODE ausführt — Venue-Angebote
+  bleiben Doku in der Registry.
+- **`paper.ts`** — `PaperBrokerAdapter`: delegiert Orders/Guardrails auf
+  den bestehenden `PaperBroker`, Marktdaten auf `marketData.ts`, Discovery
+  auf die lokale Universe-Registry. Einziger vollständig ausführbarer
+  Broker.
+- **`stubs.ts`** — ALPACA, IBKR, BINANCE, KRAKEN, DYDX als sichere Stubs:
+  ehrliche Capability-Declarations (Exec-Flags false), alle Methoden
+  werfen deterministisch und informativ `NotSupportedCapabilityError`
+  (Discovery mit klar markiertem `TODO(task-02/07)` + Contract-Referenz),
+  Trading im (unerrreichbaren) live-Kontext zusätzlich
+  `LiveTradingGateError` (Defense in Depth). Kein Netzwerk, keine
+  Credentials, keine Broker-SDKs.
+- **`factory.ts`** — `getBroker(venue, mode)` als **einziges Erzeugungs-
+  punkt**: Whitelist-Validierung → Live-Gate (IMMER `LiveTradingGateError`)
+  → Capability-Gating (`NotSupportedCapabilityError`) → Cache. Niemals
+  stiller Fallback. PAPER-Ledger als Prozess-Singleton (backtest/paper
+  teilen denselben, von der Engine hydratierten Ledger).
+- **`audit.ts`** — jeder Factory-Aufruf mit `mode != "paper"` (plus alle
+  Unknown-Venue-Ablehnungen) landet im Audit: In-Memory-Ring (200, immer)
+  + best-effort `audit_log` (Event `BROKER_FACTORY`; DB-Ausfall bricht den
+  Pfad nie ab).
+- **`health.ts`** — `BROKER_HEALTHCHECK_REMOTE` (Default **false** = OFF):
+  read-only, credential-freie Public-Checks (Binance `ping`, Kraken `Time`,
+  4 s Timeout). ALPACA/IBKR/DYDX führen bewusst keinen Remote-Check aus
+  (`degraded` + Grund: CREDENTIALS_REQUIRED / GATEWAY_REQUIRED /
+  REMOTE_CHECK_NOT_IMPLEMENTED) — ohne Credentials wird nie gecallt.
+
+### Geändert: Engine, Registry, Audit-View, API
+
+- **`engine.ts`:** Hardcode-Erzeugung entfernt — `getBroker()` nutzt die
+  Factory (kein `new PaperBroker` mehr in der Engine); Hydration aus
+  PostgreSQL bleibt in der Engine. Rückgabetyp `PaperBroker` und Verhalten
+  **bytekompatibel** (alle 334 bestehenden Tests unverändert grün).
+- **`BROKER_REGISTRY` (lib/broker.ts):** neue Projektions-Flags
+  `paperAvailable`/`liveAvailable` = `projectCapabilityFlags(caps)` —
+  Single Source of Truth = Adapter, Registry = Projektion (Test belegt es).
+  `paperApi` bleibt als Venue-Angebot (Doku).
+- **`auditView.ts`:** Katalogeintrag für das neue Audit-Event
+  `BROKER_FACTORY` (deutsche Beschreibung, Sektionen, Widerspruchs-Check).
+
+- **Neue API (read-only, ohne Token wie die übrigen GETs):**
+  - `GET /api/brokers` → 6 Venues: id, label, assets, capabilities,
+    paperAvailable/liveAvailable (Projektion), executionModes, Health
+    (lokal); `remoteHealthCheck.enabled` (Default false).
+  - `GET /api/brokers/{venue}/health` → Health (lokal bzw. remote je Flag),
+    capabilities, executionModes; 404 `UNKNOWN_VENUE`, Fehler redigiert.
+- **`.env.example`:** neue Sektion "Broker" mit
+  `BROKER_HEALTHCHECK_REMOTE=false` (Doku, Default OFF).
+
+### Getestet (Peer-Review)
+
+- **66 neue Tests** (`npm test` → **400 grün**, alle 334 Bestands-Tests
+  unverändert bytekompatibel):
+  - `tests/brokerFactory.test.ts` — **DIE 24er-Matrix** (6 Venues × 4
+    Modes) mit expliziter Erwartungstabelle: PAPER ✓/✓/NSE(testnet)/LGTE,
+    Stubs NSE/NSE/NSE/LGTE; Capability-Gating; Fehlerklassen; kein
+    stiller Fallback; Registry-Projektion (Test belegt die Spiegelung);
+    Audit-Vollständigkeit (18 Einträge, paper NICHT auditiert);
+    PAPER-Singleton; Ring-Overflow; Defense in Depth.
+  - `tests/brokerContracts.test.ts` — gemeinsame Interface-Suite für alle
+    6 Adapter (inkl. „Trading wirft sicher und informativ“), offline-
+    deterministisch (fetch gestubbt), Leak-Schutz der Meldungen.
+  - `tests/brokerApi.test.ts` — beide Endpunkte (Shape, 404,
+    Normalisierung), Remote-Checks offline mit simuliertem fetch.
+  - `tests/brokerHealth.test.ts` — Flag-Semantik (Default OFF, nur
+    exakt "true"), null-Pfade des Remote-Check-Kerns, Leak-Schutz.
+- **Coverage neu** (`npm run test:coverage:brokers`): Zeilen 98,3 %,
+  Funktionen 95,6 % (>= 90 % Zielerreichung); Branches 89,6 % — die
+  systematisch offene Branch ist der Erfolgspfad der DB-Senke (kein
+  PostgreSQL in der Testumgebung; by design best-effort/Fail-Safe).
+- `npm run typecheck`, `npm run lint` fehlerfrei; `npm run build`
+  inklusive neuer Routen erfolgreich.
+
+### Doku
+
+- NEU `docs/BROKER_ARCHITECTURE.md`: Adapter-Vertrag, Capability-Matrix
+  (Ist/Soll), Execution-Mode-Tabelle, Factory-Fluss, Fehlerklassen,
+  Audit, API, Health/Remote-Flag, Ausbaupfad (inkl. Bitunix-`stopAtVenue`).
+- UPDATE `docs/ARCHITECTURE.md` (neues Kapitel 10 + Diagramm,
+  Kommunikationsweg Mikro-Broker, Glossar), `docs/SECURITY_AUDIT.md`
+  (Kapitel "Security Audit — Task 02"), `docs/README.md` (Doku-Index).
+- NEU `docs/help/brokers.help.json`: 3-Ebenen-Hilfe (kurzinfo /
+  technischeInfo / risiko) für Execution Modes, Capability-Flags,
+  Health-Status, `LiveTradingGateError` und Projektions-Flags.
+
+### Migrationshinweise
+
+- Kein Schema-Bruch, keine neuen Dependencies. Optional:
+  `BROKER_HEALTHCHECK_REMOTE` in `.env` (Default OFF).
+
+---
+
 ## [1.9.0] — 2026-08-27
 
 **Lesbarer Audit-Trail und lesbares Protokoll: Aufklappbare Einträge mit

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "brokers",
+  "version": 1,
+  "title": "Broker-Capability-Modell — Feldhilfe",
+  "description": "Hilfetexte zu Execution Modes, Capability-Flags, Health-Status und LiveTradingGateError im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Wird vom Operations Center (Task 10) als Tooltip gerendert.",
+  "source": "src/contracts/broker.ts + src/brokers/capabilities.ts",
+  "fields": {
+    "executionMode.backtest": {
+      "kurzinfo": "Rückwärts-Modus: alte Kurse, simulierte Orders. Kein echtes Geld, keine echten Aufträge.",
+      "technischeInfo": "Historischer Kurs (z. B. Regel-Backtest über Kerzen) plus simulierte Order im internen Paper-Ledger. Die Factory verlangt dafür die Capability 'paper' (Simulation).",
+      "risiko": "Backtest-Ergebnisse unterstellen idealisierte Ausführung (Slippage, Teilausführungen, Liquidität). Ein guter Backtest garantiert keinen guten Live-Ertrag."
+    },
+    "executionMode.paper": {
+      "kurzinfo": "Normalbetrieb der Firma: echte Kurse in Echtzeit, aber simulierte Orders.",
+      "technischeInfo": "Realzeit-Kurs (Binance/Yahoo mit Cache und statischem Fallback) plus simulierte Order im PaperBroker inklusive Slippage, Guardrails und Kill-Switch. Das ist der einzige heute ausgeführte Handelspfad.",
+      "risiko": "Paper-Fills sind konservativ, aber keine Garantie für reale Ausführung. Gebühren, Teilausführungen und Stress-Slippage fehlen — Ergebnisse können im Live-Betrieb schlechter ausfallen."
+    },
+    "executionMode.testnet": {
+      "kurzinfo": "Broker-Orders in einer Testumgebung des Brokers mit echten (Testnet-)Kursen.",
+      "technischeInfo": "Realer Kurs aus einer Testnet-Umgebung plus echte Broker-Order. Die Factory erlaubt den Modus nur, wenn capabilities.testnet true ist. Heute ist kein Adapter auf true geschaltet, daher wird der Modus abgewiesen (NotSupportedCapabilityError).",
+      "risiko": "Testnet-Infrastruktur kann ausfallen, Kurse können vom Live-Markt abweichen und Orders bleiben im Testbuch — Verwechslung mit dem Live-Konto ist der typische Betriebsfehler und muss in jedem Adapter strikt verhindert werden."
+    },
+    "executionMode.live": {
+      "kurzinfo": "Reale Orders mit echtem Geld. In diesem System hart gesperrt.",
+      "technischeInfo": "getBroker(venue, 'live') wirft unabhängig von Flags und Env-Variablen immer LiveTradingGateError. Der Pfad wird erst durch den Live-Trading-Gate-Task (State-Machine plus Hard-Gates) geöffnet. Es gibt keinen impliziten Fallback auf Paper.",
+      "risiko": "Live-Handel verliert echtes Geld. Die Sperre ist eine bewusste Sicherheitsgrenze: Capability live=true wäre später nur eine technische Möglichkeit, niemals eine Freigabe."
+    },
+    "capabilities.discovery": {
+      "kurzinfo": "Kann der Adapter Instrumente von dieser Venue entdecken?",
+      "technischeInfo": "discoverInstruments() liefert MarketInstrument[] (Contract aus Task 01). Beim PAPER-Adapter aus der lokalen Universe-Registry (offline). Stubs verweigern mit klar markiertem TODO(task-02/07) plus Contract-Referenz.",
+      "risiko": "Fehlende oder veraltete Discovery führt zu Orders auf nicht existierenden oder dünnen Märkten; Metriken (Volumen, Spread) bleiben unbefüllt und Filterungen werden unvollständig."
+    },
+    "capabilities.marketData": {
+      "kurzinfo": "Kann der Adapter Kurse und Kerzen liefern?",
+      "technischeInfo": "getTicker()/getCandles() liefern MarketTicker/MarketCandle. PAPER nutzt die Multi-Market-Datenquelle (live mit Cache, Fallback statisches Buch). Stubs verweigern mit NotSupportedCapabilityError.",
+      "risiko": "Ohne Kursquelle werden Orders abgelehnt (NO_QUOTE) statt geraten — sicher, aber ohne Marktdaten keine Strategiebewertung möglich."
+    },
+    "capabilities.trading": {
+      "kurzinfo": "Kann der Adapter Orders ausführen (simuliert oder real)?",
+      "technischeInfo": "placeOrder()/getAccount()/getPositions(). PAPER: simulierte Ausführung durch die vollständige Schutzkette (Kill-Switch, Guardrails, Cash-Check). Stubs: deterministische, informative Verweigerung — nie eine echte Order, nie ein stiller Fallback.",
+      "risiko": "Jeder Trading-Pfad läuft trotzdem durch die harten Guardrails; das Capability-Flag beschreibt nur, ob der Adapter ausführen kann, nicht, ob eine Order erlaubt ist."
+    },
+    "capabilities.paper": {
+      "kurzinfo": "Betreibt der Adapter ein simuliertes Depot (simulierte Orders)?",
+      "technischeInfo": "Gate für die Modi backtest und paper. Nur PAPER ist true. Die projizierte Registry-Flag paperAvailable wird direkt daraus abgeleitet (Single Source of Truth = Adapter).",
+      "risiko": "Simulation idealisiert: keine echten Gebühren, keine Liquiditätstiefe. Ergebnisse sind Entscheidungsgrundlage, keine Zusicherung."
+    },
+    "capabilities.testnet": {
+      "kurzinfo": "Kann der Adapter Broker-Orders in einer Testnet-Umgebung ausführen?",
+      "technischeInfo": "Gate für den Modus testnet. Heute für alle Venues false; die Venue-Angebote (z. B. Binance-Testnet, Kraken-Futures-Demo) bleiben als Doku in der Registry (label/note/paperApi).",
+      "risiko": "Testnet-Fähigkeit des Brokers ist nicht dasselbe wie eine implementierte Adapter-Fähigkeit — nur letztere zählt für das Gating."
+    },
+    "capabilities.live": {
+      "kurzinfo": "Kann der Adapter technisch reale Orders senden?",
+      "technischeInfo": "Projektions-Basis für liveAvailable. Selbst wenn ein Adapter später live=true deklariert, öffnet das nichts: Die Factory wirft bis zum Live-Trading-Gate-Task immer LiveTradingGateError. Capability ist Möglichkeit, keine Freigabe.",
+      "risiko": "Das Flag darf nie als Freigabe missverstanden werden. Live-Handel erfordert Credentials, Hard-Gates, State-Machine und ein eigenes Peer-Review."
+    },
+    "capabilities.stopAtVenue": {
+      "kurzinfo": "Können Stop-Loss/Take-Profit direkt beim Venue am Order-Aufruf platziert werden?",
+      "technischeInfo": "true bedeutet Bracket/Stop-Orders beim Broker (z. B. Bitunix-Perpetuals, später Alpaca/IBKR). PAPER ist false: SL/TP verwaltet der interne Monitor aus der DB. Wichtiger Ausbaupfad für den Bitunix-Adapter (Funding + Liquidation brauchen venue-seitige Stops).",
+      "risiko": "Nur lokal überwachte Stops sind im Broker-Ausfall oder bei Netzwerklatenz verletzbar — bei Hebelprodukten ein Liquidationsrisiko. Das Flag macht die Schutzstufe pro Adapter sichtbar."
+    },
+    "health.online": {
+      "kurzinfo": "Broker (bzw. dessen Testumgebung) erreichbar und funktionsfähig.",
+      "technischeInfo": "PAPER: lokaler in-process Check (immer online, solange der Prozess läuft). Remote-Venues (nur mit BROKER_HEALTHCHECK_REMOTE=true): read-only Public-Endpunkt (Binance ping, Kraken Time) mit 4 s Timeout erfolgreich.",
+      "risiko": "online heißt: der Check-Endpunkt antwortet — nicht, dass Orders garantiert ausgeführt werden. Ausführungsgrenzen (Guardrails) bleiben unabhängig davon wirksam."
+    },
+    "health.degraded": {
+      "kurzinfo": "Erreichbar, aber eingeschränkt oder unvollständig prüfbar.",
+      "technischeInfo": "Entsteht z. B. wenn der Remote-Check aktiv ist, aber das Venue ohne Credentials/Gateway nicht prüfbar ist (ALPACA: CREDENTIALS_REQUIRED, IBKR: GATEWAY_REQUIRED) oder die Antwort unüblich war (UNEXPECTED_RESPONSE).",
+      "risiko": "degraded bedeutet: Zustand unklar. Nicht als online behandeln; Trading-Entscheidungen, die vom Broker-Zustand abhängen, zurückhalten."
+    },
+    "health.offline": {
+      "kurzinfo": "Nicht erreichbar oder nicht implementiert.",
+      "technischeInfo": "Stubs melden offline mit implemented:false (Adapter in diesem Stadium nicht implementiert — ehrliche Ist-Lage statt Fake-Grün). Remote-Checks melden offline bei Netzwerkfehler (REMOTE_CHECK_FAILED) mit redigierter Fehlermeldung.",
+      "risiko": "offline ist der sicherste Zustand: nichts wird ausgeführt, nichts wird behauptet. Ein plötzliches online ohne Implementierung wäre gefährlicher als dauerhaft offline."
+    },
+    "LiveTradingGateError": {
+      "kurzinfo": "Dauerhafter Fehler: Live-Trading ist gesperrt — und zwar absichtlich.",
+      "technischeInfo": "getBroker(venue, 'live') wirft diesen Fehler standardmäßig immer (Code: LIVE_TRADING_GATE), unabhängig von Capability-Flags, Env-Variablen oder Credentials. Jeder Aufruf landet im Audit-Log (BROKER_FACTORY, DENIED). Die Öffnung erfolgt ausschließlich über den Live-Trading-Gate-Task (State-Machine + Hard-Gates).",
+      "risiko": "Der Fehler ist die Sicherheitsgrenze selbst: Er verhindert, dass ein Konfigurationsfehler, ein Prompt oder ein fehlerhafter Aufrufer versehentlich echten Handel auslöst. Nie 'reparieren', indem man auf Paper fällt zurück — der Modus muss explizit gewählt werden."
+    },
+    "paperAvailable": {
+      "kurzinfo": "Kann diese Venue in der Plattform im Paper-Modus ausgeführt werden?",
+      "technischeInfo": "Projektion aus der Adapter-Capability paper (projectCapabilityFlags). Nicht zu verwechseln mit paperApi: paperApi beschreibt das Angebot des Brokers (Vendor-Fakt), paperAvailable die tatsächliche Ausführbarkeit in diesem Repository.",
+      "risiko": "paperApi=true plus paperAvailable=false ist kein Widerspruch, sondern der normale Ist-Zustand der Stubs: Der Broker bietet Paper an, der Adapter ist noch nicht implementiert."
+    },
+    "liveAvailable": {
+      "kurzinfo": "Kann diese Venue technisch Live-Orders ausführen?",
+      "technischeInfo": "Projektion aus der Adapter-Capability live. Heute für alle Venues false. Selbst bei future true: Die Factory sperrt den live-Modus bis zum Live-Gate-Task — das Flag ist keine Freigabe.",
+      "risiko": "liveAvailable darf niemals als Erlaubnis gelesen werden. Es beschreibt eine technische Fähigkeit des Adapters; die Freigabe ist eine separate, menschliche Entscheidung mit Hard-Gates."
+    }
+  }
+}

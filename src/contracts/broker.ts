@@ -1,0 +1,280 @@
+/**
+ * Broker-Contracts (Task 02 — Broker-Capability-Modell).
+ *
+ * Gemeinsame, venue-unabhängige Schicht zwischen Kern (engine, risk, agents,
+ * API) und den Broker-Adaptern. Der Kern kennt NUR diese Interfaces —
+ * broker-spezifische Details (REST-Formate, Auth, Symbole) existieren
+ * ausschließlich im jeweiligen Adapter (Decoupling-Regel 1).
+ *
+ * Execution-Modi (erstklassiges Konzept, Regel 2):
+ *   backtest  = historischer Kurs, simulierte Order
+ *   paper     = realer Kurs,        simulierte Order
+ *   testnet   = realer (Testnet-)Kurs, Broker-Order
+ *   live      = realer Kurs,        reale Order
+ *
+ * Fail-Safe (Regel 3): Der Live-Pfad wird in diesem Stadium durch
+ * `LiveTradingGateError` hart gesperrt. Es gibt bewusst KEINEN stillschweigenden
+ * Fallback auf Paper — jede Abweisung ist ein lauter, auditierter Fehler.
+ */
+
+// shared contract, vgl. task-01 — Task 01 (Market Universe) ist gemerged;
+// `MarketInstrument` wird hier NICHT dupliziert, sondern aus dem
+// Universum-Contract wiederverwendet (Single Source of Truth).
+export type { MarketInstrument } from "../universe/types";
+
+/** Die vier Ausführungsmodi mit fester Semantik (siehe Header). */
+export type ExecutionMode = "backtest" | "paper" | "testnet" | "live";
+
+/** Alle gültigen Execution-Modi (Validierung, Doku, Tests). */
+export const EXECUTION_MODES: readonly ExecutionMode[] = [
+  "backtest",
+  "paper",
+  "testnet",
+  "live",
+];
+
+/**
+ * Venue-IDs, für die diese Plattform Adapter kennt. `PAPER` ist der interne
+ * Simulator; die übrigen five Venues sind Stubs bis deren Adapter implementiert
+ * sind (Folge-Tasks). Neue Venues (z. B. `BITUNIX`) werden durch Hinzufügen
+ * eines Adapters + Capability-Eintrags aufgenommen.
+ */
+export type BrokerVenueId =
+  | "PAPER"
+  | "ALPACA"
+  | "IBKR"
+  | "BINANCE"
+  | "KRAKEN"
+  | "DYDX";
+
+/** Alle Adapter-Venues (Single Source of Truth: Capability-Table). */
+export const BROKER_VENUE_IDS: readonly BrokerVenueId[] = [
+  "PAPER",
+  "ALPACA",
+  "IBKR",
+  "BINANCE",
+  "KRAKEN",
+  "DYDX",
+];
+
+/**
+ * Was ein Broker-Adapter KANN.
+ *
+ * WICHTIG: Die Flags beschreiben, was der **Adapter-Code dieses Repos** aktuell
+ * ausführen kann (ehrliche Ist-Lage), nicht, was der Broker-Anbieter als
+ * Angebot bewirbt. Das Venue-Angebot (z. B. „Alpaca bietet Paper-API“) bleibt
+ * als Doku-Feld in `BROKER_REGISTRY` (label/note/paperApi).
+ *
+ * `paper`   = der Adapter betreibt ein simuliertes Depot (simulierte Orders).
+ *             Dient zugleich als Gate für `backtest` (simulierte Orders gegen
+ *             historische Kurse).
+ * `live`    = der Adapter KANN reale Orders senden. Selbst wenn `live` einmal
+ *             true wird, öffnet das NICHTS: Die Factory wirft bis zum
+ *             Live-Trading-Gate-Task immer `LiveTradingGateError`.
+ */
+export interface BrokerCapabilities {
+  /** Instrumente vom Venue (oder einer lokalen Quelle) entdecken. */
+  discovery: boolean;
+  /** Kurse/Kerzen liefern. */
+  marketData: boolean;
+  /** Orders ausführen (simuliert oder real, je nach Modus). */
+  trading: boolean;
+  /** Simuliertes Depot betreiben (Gate für backtest + paper). */
+  paper: boolean;
+  /** Broker-Testnet als Ausführungsziel betreiben. */
+  testnet: boolean;
+  /** Reale Order-Ausführung technisch möglich (Gate-Task schließt weiter auf). */
+  live: boolean;
+  /** Welche Markttypen der Adapter abdeckt. */
+  instrumentTypes: {
+    spot: boolean;
+    perpetual: boolean;
+    future: boolean;
+    option: boolean;
+  };
+  /**
+   * SL/TP kann direkt am Order-Aufruf beim Venue platziert werden
+   * (Bracket/Stop-Orders). Wichtig für den späteren Bitunix-Adapter; der
+   * interne Paper-Broker verwaltet SL/TP intern (Monitor), daher `false`.
+   */
+  stopAtVenue: boolean;
+}
+
+/** Health-Status eines Brokers. */
+export type BrokerHealthStatus = "online" | "degraded" | "offline";
+
+export interface BrokerHealth {
+  status: BrokerHealthStatus;
+  /** Antwortzeit des Checks in ms (lokale Checks ≈ 0). */
+  latencyMs: number;
+  /**
+   * Freies Detail-Objekt. Enthielt **nie** Credentials, Connection-Strings oder
+   * interne Infrastruktur-Details (Security-Regel).
+   */
+  details: Record<string, unknown>;
+}
+
+/** Ein aktueller Kurs. */
+export interface MarketTicker {
+  symbol: string;
+  price: number;
+  /** "binance" | "yahoo" | "cache" | "static" | … (je Quelle). */
+  source: string;
+  /** Unix-Epoch (ms) des Kurs-Zeitpunkts. */
+  ts: number;
+}
+
+/** Eine Kerze (OHLCV), epoch-ms. */
+export interface MarketCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/** Kontozustand eines Brokers (simuliert oder real). */
+export interface BrokerAccount {
+  /** Mark-to-Market-Equity in Kontowährung. */
+  equity: number;
+  /** Freies Cash in Kontowährung. */
+  cash: number;
+  /** Anzahl offener Positionen. */
+  openPositions: number;
+  /** Startkapital (Basis für Drawdown). */
+  startingEquity: number;
+  /** Drawdown vs. Startkapital (0.12 = 12 % im Minus). */
+  drawdownPct: number;
+}
+
+/** Order-Request im broker-unabhängigen Format. */
+export interface BrokerOrderRequest {
+  /** Sanitisiertes Venue-Symbol (Whitelist, siehe marketData.sanitizeSymbol). */
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  limitPrice?: number;
+  /** Absoluter Stop-Loss-Preis. */
+  stopLoss?: number;
+  /** Absoluter Take-Profit-Preis. */
+  takeProfit?: number;
+  /** Notional (qty × Preis) in Kontowährung — Basis der Guardrail-Prüfung. */
+  riskNotional: number;
+}
+
+export type BrokerOrderStatus = "FILLED" | "REJECTED";
+
+/** Order-Ergebnis (simuliert oder real). */
+export interface BrokerOrderResult {
+  orderId: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  /** Fill-Preis; 0 bei REJECTED. */
+  fillPrice: number;
+  status: BrokerOrderStatus;
+  /** Maschinenlesbarer Ablehnungsgrund (z. B. KILL_SWITCH_ARMED). */
+  reason?: string;
+  stopLoss: number | null;
+  takeProfit: number | null;
+}
+
+/** Offene Position aus Sicht des Brokers. */
+export interface BrokerPosition {
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  entryPrice: number;
+  lastPrice: number;
+  unrealizedPnl: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+}
+
+/**
+ * Das Broker-Interface — die EINE GRENZE, über die der Kern mit dem Markt
+ * spricht. Alle Methoden außer `healthCheck` sind optional; Aufrufer müssen
+ * die Capability prüfen und auf `NotSupportedCapabilityError` reagieren
+ * (die Adapter werfen selbst, wenn capability=false — defensive Tiefe).
+ */
+export interface BrokerAdapter {
+  /** Venue-ID dieses Adapters. */
+  readonly id: BrokerVenueId;
+  /** Execution-Modus, in dem die Factory-Instanz erzeugt wurde. */
+  readonly mode: ExecutionMode;
+  /** Fähigkeitsdeklaration (Single Source of Truth für Gating/Projektion). */
+  readonly capabilities: BrokerCapabilities;
+  /**
+   * Read-only Health-Check. `opts.remote=true` erlaubt einen echten
+   * read-only Remote-Check — nur wenn der Adapter das kann UND der
+   * Betreiber `BROKER_HEALTHCHECK_REMOTE=true` gesetzt hat (Default OFF).
+   */
+  healthCheck(opts?: { remote?: boolean }): Promise<BrokerHealth>;
+  discoverInstruments?(): Promise<import("../universe/types").MarketInstrument[]>;
+  getTicker?(symbol: string): Promise<MarketTicker>;
+  getCandles?(symbol: string, timeframe: string): Promise<MarketCandle[]>;
+  getAccount?(): Promise<BrokerAccount>;
+  placeOrder?(req: BrokerOrderRequest): Promise<BrokerOrderResult>;
+  getPositions?(): Promise<BrokerPosition[]>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fehlerklassen — laut, explizit, auditierbar. Niemals stiller Fallback.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Basis aller Broker-Fehler mit maschinenlesbarem Code. */
+export class BrokerError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/**
+ * LIVE-Trading ist gesperrt. `getBroker(venue, "live")` wirft diesen Fehler
+ * **immer** — standardmäßig, unabhängig von Capability-Flags oder Env-Variablen.
+ * Der Live-Pfad wird erst durch den Live-Trading-Gate-Task (State-Machine +
+ * Hard-Gates) geöffnet. Es gibt keinen impliziten Fallback auf Paper.
+ */
+export class LiveTradingGateError extends BrokerError {
+  constructor(venue: string) {
+    super(
+      "LIVE_TRADING_GATE",
+      `LIVE-Trading für "${venue}" ist gesperrt: Der Live-Pfad wird erst durch ` +
+        `den Live-Trading-Gate-Task (State-Machine + Hard-Gates) geöffnet. ` +
+        `Es gibt keinen impliziten Fallback auf Paper — bitte moduskonform ` +
+        `backtest | paper | testnet verwenden. Details: docs/BROKER_ARCHITECTURE.md`
+    );
+  }
+}
+
+/**
+ * Der Adapter unterstützt die geforderte Capability nicht. Entsteht bei
+ * fehlendem Capability-Flag (Factory-Gating) und bei Aufrufen capability-
+ * geprüfter Adapter-Methoden ohne Capability.
+ */
+export class NotSupportedCapabilityError extends BrokerError {
+  constructor(
+    readonly venue: string,
+    readonly capability: string,
+    method: string,
+    hint?: string
+  ) {
+    super(
+      "NOT_SUPPORTED_CAPABILITY",
+      `${venue}: Methode "${method}" nicht verfügbar — Capability "${capability}" ` +
+        `ist in diesem Stadium nicht vorhanden${hint ? ` (${hint})` : ""}.`
+    );
+  }
+}
+
+/** Unbekannte Venue — Input-Validierung vor jeder Capability-Prüfung. */
+export class UnknownVenueError extends BrokerError {
+  constructor(venue: string) {
+    super(
+      "UNKNOWN_VENUE",
+      `Unbekanntes Venue: "${venue}". Erlaubt: ${BROKER_VENUE_IDS.join(", ")}.`
+    );
+  }
+}

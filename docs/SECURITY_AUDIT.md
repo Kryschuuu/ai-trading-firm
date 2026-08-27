@@ -236,3 +236,57 @@ Whitelist; (3) `REQUIRE_HUMAN_APPROVAL=false` aktiviert Regeln automatisch
 Fazit: **kein High/Critical-Befund.** Der neue Code erweitert keine
 Vertrauensgrenze — er liest und schreibt ausschließlich lokale, validierte
 Konfigurationsdaten und stellt zwei rein lesende Endpunkte bereit.
+
+---
+
+## Security Audit — Task 02 (Broker Capability-Modell, v1.10.0)
+
+**Audit-Stand:** 2026-08-27 · **Scope:** src/contracts/broker.ts,
+src/brokers/**, src/lib/broker.ts, src/lib/engine.ts,
+src/app/api/brokers/**, 66 neue Tests (400 gesamt, alle grün).
+**Methode:** Code-Review, Threat-Walkthrough der neuen Pfade,
+Testauswertung (Offline-Suite mit simuliertem fetch), npm audit.
+
+### Nachweise (Pflichtkriterien Task 02)
+- **1. Kein erreichbarer Live-Pfad:** `getBroker(venue, "live")` wirft
+  für alle 6 Venues `LiveTradingGateError` (24er-Matrix + reproduzierbar
+  getestet); Stubs verweigern Trading im live-Kontext zusätzlich (Defense
+  in Depth, getestet). Kein Codepfad leitet aus Capability-Flags, Credentials
+  oder Env-Variablen eine reale Order ab. `riskGuard.ts` und `PaperBroker`
+  sind unverändert (alle 334 Bestands-Tests bytekompatibel).
+
+- **2. Fehlermeldungen ohne Leaks:** Alle Fehlerklassen tragen nur
+  Venue/Method/Capability/Code; Fremd-Venues werden auf 40 Zeichen
+  gekürzt (Injection-Versuch getestet). HTTP-Antworten laufen durch
+  `publicErrorMessage` (Redaktion). Remote-Fehlermeldungen werden mit
+  simuliertem fetch gegen Credential-Pattern geprüft (postgresql://,
+  User:Pass, Hosts, Keys) — kein Treffer.
+
+- **3. Audit-Log vollständig:** Jeder Factory-Aufruf mit
+  `mode != "paper"` erzeugt genau einen Eintrag (Venue, Modus,
+  Ergebnis, UTC-Zeitstempel) — in der Matrix sind das 18 von 18
+  (6x LGTE, 11x NSE, 1x OK). Unknown-Venue-Ablehnungen werden
+  auditiert (Vollständigkeit). Senken: In-Memory-Ring (200, immer)
+  + best-effort `audit_log` (Event `BROKER_FACTORY`) — DB-Ausfall
+  bricht den Pfad nie ab (Fail-Safe, Test: Factory wirft korrekt,
+  Ring bleibt wahr).
+
+- **4. Remote-Health default OFF:** `BROKER_HEALTHCHECK_REMOTE`
+  ist false, wenn nicht exakt "true". Remote-Checks sind read-only,
+  credential-frei (Public-Endpunkte: Binance ping, Kraken Time, 4 s
+  Timeout). ALPACA/IBKR/DYDX stellen ohne Credentials/Gateway
+  keinerlei Netzwerk-Request (getestet: 0 fetch-Calls).
+
+### Befunde
+
+| ID | Severity | Datei (Funktion) | Problem | Status |
+| --- | --- | --- | --- | --- |
+| B-01 | Info | src/brokers/audit.ts → recordBrokerFactoryCall() | DB-Senke ist best-effort (dynamischer Import, try/catch); ohne PostgreSQL wird nur der In-Memory-Ring geführt | ✅ by design (Muster des Universe-Audits); der Pfad bleibt korrekt und auditierbar im Ring |
+| B-02 | Info | src/app/api/brokers/** | Health-Endpunkte sind read-only ohne Token | ✅ konsistent mit den übrigen GET-Endpunkten; keine Zustandsmutation, kein Schreibpfad |
+
+Fazit: **kein High/Critical-Befund.** Task 02 macht das Capability-Modell
+ausführbar, ohne die Vertrauensgrenze zu verschieben: Der Live-Pfad ist
+hart und reproduzierbar gesperrt, Fehlermeldungen sind leak-frei, das
+Audit ist vollständig, und Remote-Checks sind default OFF. Der Paper-
+Betrieb bleibt unverändert (334 Bestands-Tests grün); 66 neue Tests
+sichern das Modell. 0 neue Dependencies, `npm audit` ohne Befund.
