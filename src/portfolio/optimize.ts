@@ -513,6 +513,35 @@ function solveRiskParity(
     for (let i = 0; i < n; i++) value -= Math.log(x[i]) / n;
     return value;
   };
+  /**
+   * ∞-Norm des Gradienten `∇F = Σw − (1/n)·w⁻²`, relativ zur Skala von `Σw`.
+   * Das ist das eigentliche Stationaritätsmaß: am Optimum ist `∇F = 0` und
+   * damit `wᵢ(Σw)ᵢ = 1/n` für alle `i`.
+   */
+  const gradientNormOf = (x: readonly number[]): { norm: number; scale: number; sw: Float64Array } => {
+    const sw = matVec(covariance, x);
+    let norm = 0;
+    let scale = 0;
+    for (let i = 0; i < n; i++) {
+      norm = Math.max(norm, Math.abs(sw[i] - 1 / (n * x[i])));
+      scale = Math.max(scale, Math.abs(sw[i]));
+    }
+    return { norm, scale, sw };
+  };
+  /** Spread der Risk Contributions — die Zielgröße der Eigenschaftstests. */
+  const spreadOf = (x: readonly number[], sw: Float64Array): number => {
+    const total = quadForm(covariance, x);
+    if (!(total > 0)) return Infinity;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const rc = (x[i] * sw[i]) / total;
+      lo = Math.min(lo, rc);
+      hi = Math.max(hi, rc);
+    }
+    return hi - lo;
+  };
+
   let objective = objectiveOf(w);
   let iterations = 0;
   let converged = false;
@@ -520,26 +549,26 @@ function solveRiskParity(
 
   for (let iter = 1; iter <= options.maxIterations; iter++) {
     iterations = iter;
-    const sw = matVec(covariance, w);
-    const grad = new Float64Array(n);
-    const hessDiag = new Float64Array(n);
-    for (let i = 0; i < n; i++) {
-      grad[i] = sw[i] - 1 / (n * w[i]);
-      hessDiag[i] = 1 / (n * w[i] * w[i]);
+    const { norm, scale, sw } = gradientNormOf(w);
+    spread = spreadOf(w, sw);
+    if (norm <= options.tolerance * Math.max(1, scale)) {
+      converged = true;
+      break;
     }
-    // H = Σ + diag(hessDiag) — immer positiv definit, Cholesky bricht nie ab.
+
     const hess = { n, data: Float64Array.from(covariance.data) };
-    for (let i = 0; i < n; i++) hess.data[i * n + i] += hessDiag[i];
+    const negGrad = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      negGrad[i] = -(sw[i] - 1 / (n * w[i]));
+      hess.data[i * n + i] += 1 / (n * w[i] * w[i]);
+    }
     let L: Float64Array;
     try {
       L = cholesky(hess, "hesse[risk-parity]");
     } catch {
       break;
     }
-    const negGrad = new Float64Array(n);
-    for (let i = 0; i < n; i++) negGrad[i] = -grad[i];
     const direction = choleskySolve(L, n, negGrad);
-
     let stepNorm = 0;
     for (let i = 0; i < n; i++) stepNorm = Math.max(stepNorm, Math.abs(direction[i]));
 
@@ -567,25 +596,21 @@ function solveRiskParity(
       }
       t /= 2;
     }
-    if (!accepted) break;
+    if (!accepted) {
+      // Die Liniensuche findet keine Verbesserung mehr ⇒ numerisch stationär.
+      // Ob das „konvergiert" heißt, entscheidet das Stationaritätsmaß, nicht
+      // die Schrittweite (Gleitkommagenauigkeit begrenzt den Fortschritt).
+      const rest = gradientNormOf(w);
+      converged = rest.norm <= options.tolerance * Math.max(1, rest.scale);
+      spread = spreadOf(w, rest.sw);
+      break;
+    }
     w = accepted;
     objective = acceptedValue;
-
-    // Konvergenzmaß: Spread der Risk Contributions (die eigentliche Zielgröße).
-    const sw2 = matVec(covariance, w);
-    const total = quadForm(covariance, w);
-    if (total > 0) {
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (let i = 0; i < n; i++) {
-        const rc = (w[i] * sw2[i]) / total;
-        lo = Math.min(lo, rc);
-        hi = Math.max(hi, rc);
-      }
-      spread = hi - lo;
-    }
-    if (stepNorm <= options.tolerance && spread <= options.tolerance * 10) {
-      converged = true;
+    if (stepNorm <= options.tolerance) {
+      const rest = gradientNormOf(w);
+      spread = spreadOf(w, rest.sw);
+      converged = rest.norm <= options.tolerance * Math.max(1, rest.scale);
       break;
     }
   }

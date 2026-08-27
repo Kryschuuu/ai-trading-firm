@@ -50,6 +50,29 @@ export function factorReturns(assets: number, periods: number, seed = 20260827):
   return columns;
 }
 
+/**
+ * Block-Faktormodell: `blocks` Gruppen mit je `perBlock` Assets.
+ *
+ * Innerhalb einer Gruppe teilen sich die Assets einen Faktor (`|ρ| ≈ 0.98`),
+ * über die Gruppen hinweg sind die Serien unkorreliert (`|ρ| ≈ 0`). Damit
+ * entstehen genau `blocks` Korrelationscluster — die Grundlage für
+ * realistische Risk-Guard-Tests (Cluster-Limits erfüllbar).
+ */
+export function blockReturns(blocks: number, perBlock: number, periods: number, seed = 99): number[][] {
+  const rng = createRng(seed);
+  const factors = Array.from({ length: blocks }, () =>
+    Array.from({ length: periods }, () => (rng() - 0.5) * 0.03)
+  );
+  const columns: number[][] = [];
+  for (let b = 0; b < blocks; b++) {
+    for (let i = 0; i < perBlock; i++) {
+      const beta = 0.8 + 0.4 * rng();
+      columns.push(factors[b].map((f) => beta * f + (rng() - 0.5) * 0.004));
+    }
+  }
+  return columns;
+}
+
 /** Deterministische Symbolnamen (`A0 … A{n−1}`). */
 export function symbols(n: number, prefix = "A"): string[] {
   return Array.from({ length: n }, (_, i) => `${prefix}${i}`);
