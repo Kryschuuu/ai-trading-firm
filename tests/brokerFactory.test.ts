@@ -1,5 +1,5 @@
 /**
- * Factory-Tests (Task 02): DIE 24er-Matrix (6 Venues × 4 Modes) mit
+ * Factory-Tests (Task 02/07): DIE 28er-Matrix (7 Venues × 4 Modes) mit
  * expliziter Erwartungstabelle, Capability-Gating, Fehlerklassen,
  * Registry-Projektion, Audit-Vollständigkeit und Singleton-Semantik.
  *
@@ -15,6 +15,7 @@ import {
 } from "../src/brokers/factory";
 import { PaperBrokerAdapter } from "../src/brokers/paper";
 import { StubBrokerAdapter } from "../src/brokers/stubs";
+import { BitunixBrokerAdapter } from "../src/brokers/bitunix";
 import { VENUE_CAPABILITIES, REQUIRED_CAPABILITY_BY_MODE } from "../src/brokers/capabilities";
 import {
   clearBrokerFactoryAuditForTests,
@@ -39,18 +40,19 @@ beforeEach(() => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DIE ERWARTUNGSTABELLE: 6 Venues × 4 Modes = 24 Fälle
+// DIE ERWARTUNGSTABELLE: 7 Venues × 4 Modes = 28 Fälle
 //
 //   PAPER   : backtest ✓ · paper ✓ · testnet ✗(NSE testnet) · live ✗(LGTE)
+//   BITUNIX : backtest ✓ · paper ✓ · testnet ✗(NSE testnet) · live ✗(LGTE)
 //   ALPACA  : backtest ✗(NSE paper) · paper ✗(NSE paper) · testnet ✗(NSE testnet) · live ✗(LGTE)
 //   IBKR    : wie ALPACA
 //   BINANCE : wie ALPACA
 //   KRAKEN  : wie ALPACA
 //   DYDX    : wie ALPACA
 //
-// Begründung: Stubs deklarieren alle Exec-Capabilities ehrlich false, weil
-// der Adapter-Code in diesem Stadium noch nichts ausführt. `live` ist für
-// JEDES Venue hart gesperrt (LiveTradingGateError) — unabhängig von Flags.
+// Begründung: Stubs deklarieren alle Exec-Capabilities ehrlich false.
+// BITUNIX kann Paper/Backtest (Modus B). `live` ist für JEDES Venue
+// hart gesperrt (LiveTradingGateError) — unabhängig von Flags.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Expectation =
@@ -77,13 +79,19 @@ const MATRIX: Record<BrokerVenueId, Record<ExecutionMode, Expectation>> = {
   BINANCE: stubRow("BINANCE"),
   KRAKEN: stubRow("KRAKEN"),
   DYDX: stubRow("DYDX"),
+  BITUNIX: {
+    backtest: { ok: true },
+    paper: { ok: true },
+    testnet: { ok: false, error: "NOT_SUPPORTED_CAPABILITY", capability: "testnet" },
+    live: { ok: false, error: "LIVE_TRADING_GATE" },
+  },
 };
 
-test("Matrix-Vollständigkeit: exakt 6 Venues × 4 Modes = 24 Einträge", () => {
+test("Matrix-Vollständigkeit: exakt 7 Venues × 4 Modes = 28 Einträge", () => {
   assert.deepEqual(
     Object.keys(MATRIX).sort(),
     [...BROKER_VENUE_IDS].sort(),
-    "Die Matrix muss genau die 6 Adapter-Venues abdecken"
+    "Die Matrix muss genau die 7 Adapter-Venues abdecken"
   );
   for (const venue of BROKER_VENUE_IDS) {
     assert.deepEqual(
@@ -92,10 +100,10 @@ test("Matrix-Vollständigkeit: exakt 6 Venues × 4 Modes = 24 Einträge", () => 
       `${venue}: alle 4 Modes vorhanden`
     );
   }
-  assert.equal(Object.keys(MATRIX).length * EXECUTION_MODES.length, 24);
+  assert.equal(Object.keys(MATRIX).length * EXECUTION_MODES.length, 28);
 });
 
-test("24er-Factory-Matrix: jeder Fall entspricht der Erwartungstabelle", async () => {
+test("28er-Factory-Matrix: jeder Fall entspricht der Erwartungstabelle", async () => {
   for (const venue of BROKER_VENUE_IDS) {
     for (const mode of EXECUTION_MODES) {
       const expected = MATRIX[venue][mode];
@@ -111,6 +119,8 @@ test("24er-Factory-Matrix: jeder Fall entspricht der Erwartungstabelle", async (
         );
         if (venue === "PAPER") {
           assert.ok(adapter instanceof PaperBrokerAdapter, `${venue}/${mode}: PAPER-Adapter`);
+        } else if (venue === "BITUNIX") {
+          assert.ok(adapter instanceof BitunixBrokerAdapter, `${venue}/${mode}: Bitunix-Adapter`);
         } else {
           assert.ok(adapter instanceof StubBrokerAdapter, `${venue}/${mode}: Stub-Adapter`);
         }
@@ -156,7 +166,7 @@ test("Kein stiller Fallback: abgewiesene Kombinationen werfen reproduzierbar", a
 
 test("Unbekannte Venues: UnknownVenueError (Input-Validierung zuerst)", async () => {
   const cases: unknown[] = [
-    "BITUNIX", // bekannt aus dem Universum, aber kein Adapter in diesem Stadium
+    "COINBASE",
     "alpaca&x=1", // Injection-Versuch
     "PAPER; DROP TABLE positions",
     "",
@@ -200,7 +210,7 @@ test("Registry-Projektion: paperAvailable/liveAvailable = Adapter-Capabilities (
   assert.deepEqual(
     Object.keys(BROKER_REGISTRY).sort(),
     [...BROKER_VENUE_IDS].sort(),
-    "Registry deckt alle 6 Venues ab"
+    "Registry deckt alle 7 Venues ab"
   );
   for (const venue of BROKER_VENUE_IDS) {
     const caps = VENUE_CAPABILITIES[venue];
@@ -208,12 +218,16 @@ test("Registry-Projektion: paperAvailable/liveAvailable = Adapter-Capabilities (
     // Projektion aus der Capability-Table:
     assert.equal(entry.paperAvailable, caps.paper, `${venue}: paperAvailable = caps.paper`);
     assert.equal(entry.liveAvailable, caps.live, `${venue}: liveAvailable = caps.live`);
-    // Und aus den lebenden Adaptern (Factory erzeugt sie aus derselben Table):
-    assert.equal(entry.paperAvailable, caps.paper, `${venue}: Adapter-Projektion`);
-    // Ist-Zustand: kein Venue ist live verfügbar (Adapter + Gate).
-    assert.equal(entry.liveAvailable, false, `${venue}: liveAvailable=false (Stadium)`);
-    // PAPER ist das einzige paper-verfügbare Venue.
-    assert.equal(entry.paperAvailable, venue === "PAPER");
+    if (venue === "BITUNIX") {
+      assert.equal(entry.liveAvailable, true, "BITUNIX: live-Capability ja, Ausführung nein");
+      assert.equal(entry.paperAvailable, true);
+    } else if (venue === "PAPER") {
+      assert.equal(entry.liveAvailable, false);
+      assert.equal(entry.paperAvailable, true);
+    } else {
+      assert.equal(entry.liveAvailable, false, `${venue}: liveAvailable=false (Stub)`);
+      assert.equal(entry.paperAvailable, false);
+    }
   }
 });
 
@@ -231,10 +245,10 @@ test("Audit-Vollständigkeit: jeder Aufruf mit mode != 'paper' landet im Log", a
       }
     }
   }
-  assert.equal(nonPaperCalls, 18, "18 nicht-Paper-Aufrufe in der Matrix");
+  assert.equal(nonPaperCalls, 21, "21 nicht-Paper-Aufrufe in der Matrix");
 
   const entries = readBrokerFactoryAudit(200);
-  assert.equal(entries.length, 18, "genau 18 Audit-Einträge (neueste zuerst)");
+  assert.equal(entries.length, 21, "genau 21 Audit-Einträge (neueste zuerst)");
   for (const e of entries) {
     assert.ok(BROKER_VENUE_IDS.includes(e.venue as BrokerVenueId), `venue: ${e.venue}`);
     assert.ok(EXECUTION_MODES.includes(e.mode), `mode: ${e.mode}`);
@@ -244,18 +258,18 @@ test("Audit-Vollständigkeit: jeder Aufruf mit mode != 'paper' landet im Log", a
     if (e.outcome === "OK") {
       assert.equal(e.errorCode, null, "OK-Eintrag ohne Fehlercode");
       assert.equal(e.capability, null, "OK-Eintrag ohne Capability");
-      assert.equal(e.venue, "PAPER", "OK nur für PAPER");
+      assert.ok(e.venue === "PAPER" || e.venue === "BITUNIX", `OK-Venue: ${e.venue}`);
       assert.equal(e.mode, "backtest", "OK nur für backtest (paper wird nicht auditiert)");
     } else {
       assert.ok(e.errorCode, "DENIED-Eintrag mit Fehlercode");
     }
   }
   const okCount = entries.filter((e) => e.outcome === "OK").length;
-  assert.equal(okCount, 1, "genau ein OK-Eintrag (PAPER/backtest)");
+  assert.equal(okCount, 2, "genau zwei OK-Einträge (PAPER/backtest + BITUNIX/backtest)");
   const liveDenied = entries.filter((e) => e.errorCode === "LIVE_TRADING_GATE").length;
-  assert.equal(liveDenied, 6, "alle 6 Live-Aufrufe auditiert");
+  assert.equal(liveDenied, 7, "alle 7 Live-Aufrufe auditiert");
   const capDenied = entries.filter((e) => e.errorCode === "NOT_SUPPORTED_CAPABILITY").length;
-  assert.equal(capDenied, 11, "11 Capability-Ablehnungen auditiert");
+  assert.equal(capDenied, 12, "12 Capability-Ablehnungen auditiert");
 });
 
 test("Audit: paper-Modus wird NICHT protokolliert (Regel: nur mode != 'paper')", async () => {
@@ -266,10 +280,10 @@ test("Audit: paper-Modus wird NICHT protokolliert (Regel: nur mode != 'paper')",
 
 test("Audit: unbekannte Venues werden zusätzlich protokolliert (Vollständigkeit)", async () => {
   clearBrokerFactoryAuditForTests();
-  await assert.rejects(() => getBroker("BITUNIX", "paper"));
+  await assert.rejects(() => getBroker("COINBASE", "paper"));
   const entries = readBrokerFactoryAudit();
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].venue, "BITUNIX");
+  assert.equal(entries[0].venue, "COINBASE");
   assert.equal(entries[0].outcome, "DENIED");
   assert.equal(entries[0].errorCode, "UNKNOWN_VENUE");
 });
@@ -318,7 +332,9 @@ test("normalizeVenue: Whitelist-Normalisierung (Großbuchstaben, Trim)", () => {
   assert.equal(normalizeVenue("kraken"), "KRAKEN");
   assert.equal(normalizeVenue("IBKR"), "IBKR");
   assert.equal(normalizeVenue("dydx"), "DYDX");
-  assert.equal(normalizeVenue("BITUNIX"), null);
+  assert.equal(normalizeVenue("BITUNIX"), "BITUNIX");
+  assert.equal(normalizeVenue("bitunix"), "BITUNIX");
+  assert.equal(normalizeVenue("COINBASE"), null);
   assert.equal(normalizeVenue("PAPER; DROP"), null);
   assert.equal(normalizeVenue(""), null);
   assert.equal(normalizeVenue(null), null);

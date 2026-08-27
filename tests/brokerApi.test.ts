@@ -26,6 +26,7 @@ before(async () => {
 after(() => {
   globalThis.fetch = realFetch;
   delete process.env.BROKER_HEALTHCHECK_REMOTE;
+  delete process.env.BITUNIX_ENABLED;
 });
 
 async function health(venue: string): Promise<Response> {
@@ -35,7 +36,7 @@ async function health(venue: string): Promise<Response> {
   );
 }
 
-test("API: GET /api/brokers liefert 6 Broker mit capabilities + health", async () => {
+test("API: GET /api/brokers liefert 7 Broker mit capabilities + health", async () => {
   const res = await GET_LIST(new Request("http://localhost/api/brokers"));
   assert.equal(res.status, 200);
   const body = (await res.json()) as unknown as {
@@ -54,7 +55,7 @@ test("API: GET /api/brokers liefert 6 Broker mit capabilities + health", async (
     remoteHealthCheck: { enabled: boolean; flag: string };
   };
   assert.equal(body.ok, true);
-  assert.equal(body.count, 6);
+  assert.equal(body.count, 7);
   assert.deepEqual(body.brokers.map((b) => b.id).sort(), [...BROKER_VENUE_IDS].sort());
   for (const b of body.brokers) {
     // capabilities-Form:
@@ -67,14 +68,14 @@ test("API: GET /api/brokers liefert 6 Broker mit capabilities + health", async (
     }
     // Registry-Projektion in der Antwort:
     assert.equal(typeof b.paperAvailable, "boolean");
-    assert.equal(b.liveAvailable, false, `${b.id}: liveAvailable=false (Stadium)`);
-    assert.equal(b.paperAvailable, b.id === "PAPER");
+    assert.equal(b.liveAvailable, b.id === "BITUNIX", `${b.id}: liveAvailable (Capability)`);
+    assert.equal(b.paperAvailable, b.id === "PAPER" || b.id === "BITUNIX");
     // Health-Form:
     assert.ok(["online", "degraded", "offline"].includes(b.health.status), `${b.id}: health-Enum`);
     assert.equal(typeof b.health.latencyMs, "number");
     // PAPER online (lokale Simulation), Stubs offline (ehrliche Ist-Lage):
     if (b.id === "PAPER") assert.equal(b.health.status, "online");
-    else assert.equal(b.health.status, "offline");
+    else assert.equal(b.health.status, "offline", `${b.id}: lokal offline (Stub bzw. BITUNIX_ENABLED=false)`);
     // Execution-Modi: live ist prinzipiell nie verfügbar:
     assert.equal(b.executionModes.live.available, false, `${b.id}: live gesperrt`);
   }
@@ -99,6 +100,20 @@ test("API: GET /api/brokers/PAPER/health → 200, online (lokal)", async () => {
   assert.equal(body.remoteHealthCheck.enabled, false);
 });
 
+test("API: GET /api/brokers/BITUNIX/health → 200, offline (Flag Default OFF)", async () => {
+  const res = await health("BITUNIX");
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    ok: boolean;
+    venue: string;
+    health: { status: string; details: Record<string, unknown> };
+  };
+  assert.equal(body.ok, true);
+  assert.equal(body.venue, "BITUNIX");
+  assert.equal(body.health.status, "offline");
+  assert.equal(body.health.details.reason, "BITUNIX_DISABLED");
+});
+
 test("API: GET /api/brokers/ALPACA/health → 200, offline + Grund (Remote default OFF)", async () => {
   const res = await health("ALPACA");
   assert.equal(res.status, 200);
@@ -119,7 +134,7 @@ test("API: Venue-Normalisierung (kleinschreibung) + Unbekannte Venues → 404", 
   assert.equal(lower.status, 200);
   assert.equal(((await lower.json()) as { venue: string }).venue, "PAPER");
 
-  for (const bad of ["BITUNIX", "NOPE", "PAPER%20X", ".."]) {
+  for (const bad of ["COINBASE", "NOPE", "PAPER%20X", ".."]) {
     const res = await health(bad.replace("%20", " "));
     assert.equal(res.status, 404, `${bad}: 404 erwartet`);
     const body = (await res.json()) as { ok: boolean; error: string };
@@ -131,6 +146,32 @@ test("API: Venue-Normalisierung (kleinschreibung) + Unbekannte Venues → 404", 
 // ─────────────────────────────────────────────────────────────────────────────
 // Remote-Checks (Flag AN, gestubter fetch — kein echtes Netzwerk)
 // ─────────────────────────────────────────────────────────────────────────────
+
+
+test("API: Remote-Check AN: BITUNIX public tickers → online (gestubbt)", async () => {
+  process.env.BROKER_HEALTHCHECK_REMOTE = "true";
+  process.env.BITUNIX_ENABLED = "true";
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ code: 0, data: [{ symbol: "BTCUSDT", lastPrice: "1" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const res = await health("BITUNIX");
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    ok: boolean;
+    health: { status: string; details: Record<string, unknown> };
+  };
+  assert.equal(body.ok, true);
+  assert.equal(body.health.status, "online");
+  assert.ok(calls.length >= 1, "mindestens ein public tickers-Call");
+  assert.match(calls[0], /fapi\.bitunix\.com\/api\/v1\/futures\/market\/tickers/);
+  delete process.env.BITUNIX_ENABLED;
+});
 
 test("API: Remote-Check AN: BINANCE public ping → online (gestubbt)", async () => {
   process.env.BROKER_HEALTHCHECK_REMOTE = "true";
