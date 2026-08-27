@@ -20,6 +20,126 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.13.0] — 2026-08-27
+
+**Deterministische Portfolio-Analytics, Optimizer und Risk-Guard-Kette (Task 05):
+ein neues Modul `src/portfolio/` berechnet Kennzahlen, Korrelations- und
+Kovarianzmatrizen sowie Portfoliogewichte in drei Modi — und jedes Ergebnis läuft
+durch eine feste Kontrollkette: Portfolio Optimizer → Risk Guard → Position Limits →
+Correlation Limits. Reine Funktionen, keine I/O, kein LLM, kein Zufall, keine Uhr.
+Gleiche Eingabe ergibt byte-identische Ausgabe; jede Guard-Entscheidung wird
+auditiert.**
+
+### Neu: `src/portfolio/` (deterministische Rechenschicht — kein LLM)
+
+- **Kennzahl-Bibliothek** (`metrics.ts`, reine Funktionen, Formel im TSDoc jeder
+  Funktion): logarithmische Renditen, realisierte Volatilität
+  (`σ · √A`, Annualisierungsfaktor je Anlageklasse konfigurierbar — Krypto 365,
+  Aktien/ETF/Indizes/FX/Rohstoffe 252), ATR mit Wilder-RMA (Default-Periode 14),
+  Sharpe `(r̄ − r_f/A)/σ`, Sortino mit Downside-Deviation, Max Drawdown inkl.
+  `peakIndex`/`troughIndex`/`recoveryIndex`/Dauer, Profit Factor, annualisierte
+  Rendite und Volatilitätsregime `LOW/NORMAL/HIGH/EXTREME` (Schwellen 0,25/0,60/1,20,
+  überschreibbar). Freiheitsgrade `ddof ∈ {0,1}` konfigurierbar (Default 1).
+- **Korrelation & Kovarianz** (`correlation.ts`): Pearson **und** Spearman
+  (Durchschnittsränge bei Gleichständen) als Matrix, Sample-Kovarianz (`ddof = 1`)
+  und optional EWMA (Default `λ = 0,94`), Korrelationscluster per Union-Find über
+  `|ρ| ≥ 0,8` (Schwellwert konfigurierbar). Nullvarianz ist definiert 0, nie `NaN`.
+- **Optimizer, drei Modi** (`optimize.ts`): `min_variance` (`min wᵀΣw`, FISTA +
+  Active-Set-Polish über das KKT-System), `max_sharpe` (monotoner projizierter
+  Aufstieg, drei deterministische Starts), `risk_parity` (Newton auf der
+  Spinu-Formulierung, gleichmäßige Risikobeiträge `w_i(Σw)_i`). Nebenbedingungen
+  `Σw = 1` und konfigurierbare Bounds (Default long-only). Toleranz 1e-9
+  (enger als die geforderte 1e-6), Iterationslimit 2000, beides konfigurierbar;
+  Konvergenz wird explizit berichtet (`converged`, `iterations`,
+  `notes: ["NOT_CONVERGED:iterations=…"]`).
+- **Risk-Guard-Kette** (`riskGuard.ts`, `pipeline.ts`): Positions-Limits
+  (Default 20 % je Instrument, `maxPositions`, `minWeight` 0,1 %) und
+  Korrelations-Limits (max. 50 % je Cluster). Ergebnis
+  `{ rejected, adjusted, reasons[], decisions[], clusterExposures[] }`, jeder
+  Schritt ein strukturierter Audit-Eintrag. Die Kette ist als Konstante
+  `AUTHORITY_CHAIN` im Code erzwungen — `applyRiskGuard` akzeptiert ausschließlich
+  Eingaben des Optimizers, `optimizeWithGuard()` ist der einzige öffentliche Weg
+  zu Gewichten.
+- **Numerische Robustheit** (`numeric.ts`): Cholesky, Jacobi-Eigenzerlegung,
+  Pseudo-Inverse, Ridge-Regularisierung, Vektor-/Matrix-Operationen. Singuläre
+  Matrizen sind **konfigurierbar**: `error` (Default), `ridge` oder
+  `pseudo-inverse` — nie ein still falsches Ergebnis, immer dokumentiert in
+  `diagnostics.regularization` und `notes[]`. Zusätzlich erklärt die Cholesky-
+  Zerlegung Pivots unter `1e-12 · max(diag)` für singulär (zwei perfekt korrelierte
+  Assets liefern in Gleitkomma sonst ein Pivot von ~1e-19). `NaN`/`±Infinity` in
+  Eingaben sind definierte Fehler.
+- **Agenten-Schnittstelle** `getAnalysisContext(returns, symbols)`
+  (`context.ts`): liefert ausschließlich **fertige** Kennzahlen, Matrizen, Cluster
+  und Limits an die Interpretations-Ebene — keine Gewichte, kein Rechenauftrag —
+  und trägt die Leitplanke (`llmMay`/`llmMustNot`) direkt im Payload.
+- **Audit-Senke** (`audit.ts`, `auditFile.ts`): `AuditSink`-Interface mit
+  Memory-Senke (Standard, Ereignisse stehen in der API-Antwort) und
+  NDJSON-Datei-Senke (opt-in über `PORTFOLIO_AUDIT_DIR`, atomar über tmp+rename,
+  Dateiname gegen Path-Traversal validiert) — `// vgl. task-01/06` für die zentrale
+  `audit_log`-Integration.
+
+### Neu: read-only API `/api/portfolio/*`
+
+- `POST /api/portfolio/metrics` — Kennzahlen je Serie (Preise, Renditen oder
+  Log-Renditen, optional Kerzen für die ATR).
+- `POST /api/portfolio/correlation` — Korrelationsmatrix (Pearson/Spearman) plus
+  Cluster.
+- `POST /api/portfolio/optimize` — Modus, Bounds, Kovarianz-Methode und Limits;
+  antwortet mit Gewichten **und vollständigem Risk-Guard-Report** inklusive
+  `audit[]`. Ein Guard-Verwurf ist `422 RISK_GUARD_REJECTION`, nie `200` mit
+  falschen Gewichten.
+- Alle drei Endpunkte: `GET` ⇒ `405`, einheitliches Fehlerformat
+  `{ ok: false, error, message }`, Größenlimits (max. 1000 Serien, max. 2000
+  Punkte je Serie, max. 400.000 Stichproben, Body ≤ 16 MiB) ⇒ `413 LIMIT_EXCEEDED`,
+  Symbole werden normalisiert und gegen eine strikte Zeichenklasse geprüft
+  (Log-Injection-Schutz).
+
+### Tests & Doku
+
+- **8 Testsuiten, 130 Tests** (`tests/portfolio.*.test.ts`): Golden-Tests gegen
+  unabhängig in Python berechnete Referenzwerte (Toleranz 1e-6, Kovarianz/
+  Optimizer bis 1e-12), analytische 2-Asset-Minimum-Varianz, Property-Tests
+  (Risk-Parity-Spread `< 1e-4`, `Σw = 1`, Bounds, min-variance ≤ Gleichgewichtung,
+  max-Sharpe ≥ Gleichgewichtung), Robustheit (singulär, `NaN`/`Infinity`,
+  Iterationslimit), Risk-Guard-Tests (Kappung, Cluster-Verwurf, ein Audit-Eintrag
+  je Entscheidung), API-Contract-Tests und Determinismus-Check.
+- **Architekturtest** (`tests/portfolio.architecture.test.ts`): erzwingt per
+  Quelltext-Scan, dass `src/portfolio/` kein LLM, kein Netzwerk, keine Datenbank,
+  keinen Zufall, keine Uhr und keinen Dateizugriff importiert (einzige Ausnahme:
+  `auditFile.ts`), dass jede exportierte Rechenfunktion eine Formel dokumentiert,
+  dass die API ausschließlich über die Guard-Kette geht und dass Doku,
+  Hilfe-JSON, README-Index, `/api/docs`-Whitelist und Security-Audit vollständig sind.
+- **Unit-Tests der Infrastruktur** (`tests/portfolio.unit.test.ts`): Numerik-Primitives
+  (Cholesky, Eigenzerlegung, Pseudo-Inverse, Regularisierung), Fehlercodes,
+  Konfigurationsvalidierung, Audit-Senken inkl. Datei-Schreibfehler und DB-No-op,
+  Request-Parser und Fehlerformat. Coverage der neuen Module: **96,41 %** Zeilen
+  (`npm run test:coverage:portfolio`).
+- **Benchmark** (`tests/portfolio.benchmark.test.ts`): 500 Assets × 750 Perioden
+  (375.000 Stichproben) — Kovarianz 0,21 s, min_variance 0,45 s, max_sharpe 3,7 s,
+  risk_parity 0,52 s, vollständige Pipeline 1,0 s ⇒ **5,8 s von 30 s Budget**.
+- **Doku**: `docs/PORTFOLIO_ANALYTICS.md` (Formelkatalog mit Annahmen und Grenzen,
+  Optimizer-Modi, Guard-Ketten-Diagramm, Konvergenz-/Numerikregeln, API-Referenz mit
+  Beispielen, Abschnitt „Warum das LLM keine Gewichte berechnet"),
+  `docs/help/portfolio.help.json` (10 Begriffe × 3 Ebenen), README-Index,
+  `/api/docs`-Eintrag `portfolio`, `## Security Audit — Task 05`.
+- Neues Kommando: `npm run test:coverage:portfolio`.
+
+### Nicht enthalten (bewusst)
+
+- **Keine Order- oder Portfolio-Mutation.** Das Modul erzeugt Gewichte und Reports;
+  nichts davon wird ausgeführt, kein Portfolio-, Positions- oder Orderzustand wird
+  verändert. Die Order-Guardrails in `src/lib/riskGuard.ts` bleiben unberührt.
+- **Keine Kovarianz-Shrinkage** (Ledoit-Wolf) und kein Faktor-Modell — `ridge` und
+  `pseudo-inverse` sind dokumentierte Notlösungen für singuläre Matrizen.
+- **Keine Transaktionskosten, keine Steuern, kein Rebalancing, kein Leverage.**
+- **Keine LLM-Beteiligung an der Berechnung.** Das Modell interpretiert fertige
+  Zahlen; Gewichte entstehen ausschließlich im Optimizer.
+- **`src/scanner/factors/correlation.ts`** (Task 04) behält vorerst seine eigene
+  Pearson/Spearman-Implementierung — der Umzug auf `src/portfolio` ist dokumentiert,
+  der Scanner bleibt unverändert lauffähig.
+
+---
+
 ## [1.12.0] — 2026-08-27
 
 **Deterministischer Markt-Scanner, Market Score und Trichter (Task 04): Aus bis

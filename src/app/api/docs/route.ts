@@ -59,6 +59,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Daily & Weekly Research",
     subtitle: "Deterministischer Markt-Scanner — 14 Faktoren, Market Score, Trichter, API (v1.12)",
   },
+  portfolio: {
+    file: "docs/PORTFOLIO_ANALYTICS.md",
+    title: "Portfolio-Analytics & Risk Guard",
+    subtitle: "Kennzahlen, Kovarianz, drei Optimizer-Modi, Risk-Guard-Kette, API (v1.13)",
+  },
   liveReview: {
     file: "docs/PEER_REVIEW_LIVE_TRADING.md",
     title: "Peer-Review: Live-/Paper-Trading",
