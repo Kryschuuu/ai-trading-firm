@@ -1,0 +1,45 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "paper-trading",
+  "version": 1,
+  "title": "Paper-Trading — Market Data & Execution-Simulation",
+  "description": "Hilfetexte zu den Paper-Modi, Fill-Simulator-Parametern (Slippage, Partial Fill, Latenz, Spread), Failover-Kette und Replay im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Wird vom Operations Center (Task 10) als Tooltip gerendert.",
+  "source": "src/lib/marketdata/ (types, config, simulator, failover, historicalStore, manager)",
+  "fields": {
+    "paperMode": {
+      "kurzinfo": "Welcher Paper-Modus die Kursbeschaffung und Orderausführung bestimmt: synthetic, broker-market-data (Default) oder broker-paper-api.",
+      "technischeInfo": "PAPER_MODE=broker-market-data (Default) nutzt echte Kurse über Broker-Feed → Binance/Yahoo und simuliert lokal. synthetic (Modus A) nutzt den Seed-deterministischen SyntheticFeed (Tests/Replay). broker-paper-api (Modus C) erfordert Venue-Capability + PAPER_MODE_C_ENABLED=true; heute nicht wählbar.",
+      "risiko": "Falsche Kombinationen (z. B. Modus C ohne Capability/Flag) enden in einem klaren PaperConfigError — nie in einem stillen Fallback. Modus B verweigert Orders ohne echten Kurs (NO_QUOTE) statt zu raten."
+    },
+    "slippage": {
+      "kurzinfo": "Zusätzlicher Ausführungspreisaufschlag, der mit der Ordergröße relativ zum 24h-Volumen wächst.",
+      "technischeInfo": "Slippage (Basispunkte) = PAPER_SIM_SLIPPAGE_BPS_BASE + participation × PAPER_SIM_SLIPPAGE_PER_PARTICIPATION, mit participation = Notional / 24h-Volumen. LONG füllt am Ask + Slippage, SHORT am Bid − Slippage. Optional deterministische Streuung (Seed) via PAPER_SIM_SLIPPAGE_JITTER_BPS (Default 0).",
+      "risiko": "Hohe Ordergrößen relativ zum 24h-Volumen führen zu deutlich schlechteren Fills. Der Simulator bildet Liquidität realistischer ab als ein statischer Kurs — Backtests bleiben konservativ."
+    },
+    "partialFill": {
+      "kurzinfo": "Ob eine Order nur teilweise ausgeführt werden darf, statt immer vollständig.",
+      "technischeInfo": "PAPER_SIM_PARTIAL_FILL (Default false). PAPER_SIM_PARTIAL_MAX_FRACTION (Default 1) begrenzt den gefüllten Anteil; ein deterministischer Liquiditätsfaktor (Seed) entscheidet zwischen FILLED und PARTIALLY_FILLED. Die gefüllte Menge landet im Paperbuch.",
+      "risiko": "Ein Partial Fill bindet weniger Kapital als gewünscht und verändert die Positionsgröße. Strategien, die volle Fills annehmen, können dadurch im Live-Betrieb abweichen."
+    },
+    "latency": {
+      "kurzinfo": "Simulierte Ausführungslatenz in Millisekunden zwischen Order und Fill.",
+      "technischeInfo": "PAPER_SIM_LATENCY_MS (Default 25 ms). Wird im Fill als latencyMs ausgewiesen. Ist ein reiner Simulationsparameter — die reale Marktlatenz des Venue ist davon unabhängig.",
+      "risiko": "Eine hohe konfigurierte Latenz verzögert Fills nur im simulierten Buch; echte Broker-Latenz (Netz, Ausführung) kommt bei Live-Betrieb zusätzlich hinzu."
+    },
+    "spread": {
+      "kurzinfo": "Differenz zwischen bestem Ask und bestem Bid eines Kurses — Grundlage für die Fill-Berechnung.",
+      "technischeInfo": "Kommende Kurse werden als MarketSnapshot mit bid/ask/last normalisiert; der relative Spread ist (ask−bid)/mid. Binance liefert echtes Bid/Ask (bookTicker); Yahoo/Broker leiten es aus dem Registry-Feld spread bzw. einem Default ab.",
+      "risiko": "Ein verkehrter oder extrem breiter Spread wird als Anomalie verworfen (nie gehandelt). Fills am Ask/Bid inklusive Spread können schlechter sein als der zuletzt gesehene Kurs."
+    },
+    "failover": {
+      "kurzinfo": "Automatische Kursquellen-Kette: Broker-Feed → unabhängiger Feed → Synthetic (nur explizit erlaubt).",
+      "technischeInfo": "Jeder Feed-Wechsel und jede verworfene Kurs-Anomalie erzeugt einen Audit-Eintrag (FEED_FAILOVER / ANOMALOUS_SNAPSHOT in audit_log + In-Memory-Ring). Synthetic-Fallback nur bei PAPER_ALLOW_SYNTHETIC_FALLBACK=true; statisches Preisbuch nur bei PAPER_STATIC_FALLBACK=true.",
+      "risiko": "Failover ist immer laut und auditiert — es gibt keinen stillen Quellenwechsel. Ohne erlaubte Fallbacks wird eine Order bei fehlendem Kurs abgelehnt (NO_QUOTE) statt mit einem unsicheren Kurs gefüllt."
+    },
+    "replay": {
+      "kurzinfo": "Backtest-Modus, der Kurse ausschließlich aus dem append-only Historical Store abspielt.",
+      "technischeInfo": "ReplayFeed liest Kerzen aus data/history/candles.ndjson in stabiler ts-Reihenfolge (last = close). Gleicher Seed + gleicher Store-Stand → identische Fills und byte-identische Ergebnisdateien (Golden-Test).",
+      "risiko": "Backtests unterstellen ideale Daten und Ausführung. Replay ist deterministisch, aber keine Garantie für Live-Ergebnisse — Liquidität, Slippage und Teilausführungen sind modelliert, nicht garantiert."
+    }
+  }
+}

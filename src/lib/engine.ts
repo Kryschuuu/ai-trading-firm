@@ -31,6 +31,7 @@ import { PaperBrokerAdapter } from "../brokers/paper";
 import { getBroker as createBroker } from "../brokers/factory";
 import { localReason } from "./ollama";
 import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
+import { getProductionMarketDataManager, wirePaperExecution } from "./marketdata/production";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { ensureAdaptiveRiskFresh, getAdaptiveRiskStatus } from "./adaptiveRisk";
@@ -67,6 +68,9 @@ export async function getBroker(): Promise<PaperBroker> {
     throw new Error("UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet");
   }
   const broker = adapter.paperBroker;
+  // TASK 03: Modus-B-Ausführungs-Adapter (echte Kurse + deterministischer
+  // Fill-Simulator) einmal in den Ledger injizieren. Idempotent.
+  wirePaperExecution(broker);
 
   if (!G.__firmHydrated) {
     try {
@@ -616,6 +620,14 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
       trace.push(step("APPROVAL", true, "Automatisch freigegeben (REQUIRE_HUMAN_APPROVAL=false)"));
 
       // --- Schicht 3–5: Guardrails + Broker-Schleuse ---
+      // TASK 03: Modus-B-Kurs vor dem Fill warmlaufen lassen (Snapshot-Cache
+      // des MarketDataManagers), damit der deterministische Simulator einen
+      // echten Kurs nutzt. Best-effort — fehlt der Kurs, lehnt der Broker ab.
+      try {
+        await getProductionMarketDataManager().getSnapshot(symbol);
+      } catch {
+        /* kein Kurs verfügbar → Broker verwirft die Order (NO_QUOTE) */
+      }
       const fill = broker.submit(order);
       await logAudit(fill.status === "FILLED" ? "ORDER_SENT" : "ORDER_REJECTED",
         fill.status === "FILLED" ? "INFO" : "WARN", { order, fill }, missionId, agentId);

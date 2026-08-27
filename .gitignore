@@ -26,3 +26,7 @@ next-env.d.ts
 # Universe-Registry: Instrumentendatei ist versioniert, das Audit-Log nicht
 /data/universe/audit-log.ndjson
 /data/universe/*.tmp
+
+# Historical Store (Task 03): append-only OHLCV, läuft lokal, nicht versioniert
+/data/history
+/data/history/*.tmp

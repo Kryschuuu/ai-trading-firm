@@ -47,7 +47,15 @@ export type Quote = { symbol: string; price: number; source: "binance" | "yahoo"
  */
 export const DEFAULT_WATCHLIST: string[] = [...WATCHLIST_DISPLAY_SYMBOLS];
 
-/** Statisches Fallback-Buch (Original des Paper-Brokers). */
+/**
+ * @deprecated Statisches Preisbuch (Task 03).
+ *
+ * Als Default DEAKTIVIERT — nur noch expliziter Offline-Fallback hinter
+ * `PAPER_STATIC_FALLBACK=true` (Default false). Verwendung im Produktivpfad
+ * erfolgt ausschließlich über den MarketDataManager; die rohe `PaperBroker`-
+ * Instanz (Unit-Tests/Kompatibilität) nutzt sie weiterhin. Kein stiller
+ * Kursquellwechsel — jeder Statik-Fallback wird auditiert.
+ */
 export const STATIC_PRICES: Record<string, number> = {
   BTC: 67000, ETH: 3200, SOL: 150,
   SPY: 510, QQQ: 440, NVDA: 125, AAPL: 185, MSFT: 415,
