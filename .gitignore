@@ -22,3 +22,7 @@ next-env.d.ts
 
 # Build-Kompilat
 *.tsbuildinfo
+
+# Universe-Registry: Instrumentendatei ist versioniert, das Audit-Log nicht
+/data/universe/audit-log.ndjson
+/data/universe/*.tmp
