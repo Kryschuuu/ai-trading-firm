@@ -21,6 +21,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[PEER_REVIEW_LIVE_TRADING.md](PEER_REVIEW_LIVE_TRADING.md)** | Peer-Review: Bottlenecks der 6-Agenten-Pipeline, Live-/Paper-Readiness, Code-Review, Tests und Handlungsplan |
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)** | Broker-Capability-Modell (Task 02): Adapter-Vertrag, Capability-Matrix, Execution Modes, Factory, Live-Gate, Health-API |
+| **[BITUNIX.md](BITUNIX.md)** | Bitunix-Adapter (Task 07): 7. Venue, Public REST/WS, Signing, Paper-Modus B, Live-Gate |
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data (Task 03): Modi A/B/C, deterministischer Fill-Simulator, Failover-Kette, Replay, Historical Store, `/api/marketdata/*` |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics (Task 05): Formelkatalog, Kovarianz/Korrelation, drei Optimizer-Modi, Risk-Guard-Kette, `/api/portfolio/*` |
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
@@ -29,7 +30,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 
-**Version:** `v1.13.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.15.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
