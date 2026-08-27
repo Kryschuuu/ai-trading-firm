@@ -11,6 +11,8 @@
  * die Kurse sind dann eben nur nicht live.
  */
 
+import { WATCHLIST_DISPLAY_SYMBOLS } from "../universe/watchlist";
+
 const GLOBAL = globalThis as typeof globalThis & {
   __mktQuoteCache?: Map<string, { price: number; ts: number; source: string }>;
   __mktCandleCache?: Map<string, { candles: Candle[]; ts: number }>;
@@ -23,11 +25,27 @@ export type Candle = { time: number; open: number; high: number; low: number; cl
 
 export type Quote = { symbol: string; price: number; source: "binance" | "yahoo" | "static" | "cache"; ts: number };
 
-export const DEFAULT_WATCHLIST = [
-  "BTC", "ETH", "SOL",
-  "SPY", "QQQ", "NVDA", "AAPL", "MSFT",
-  "EURUSD=X",
-];
+/**
+ * @deprecated seit Task 01 (Market Universe).
+ *
+ * Diese Liste war früher die faktische **Marktdefinition** der Plattform.
+ * Seit der Einführung der Instrument-Registry (`src/universe/`) ist sie zur
+ * reinen **UI-Präferenz** degradiert: Sie leitet sich aus
+ * `UI_WATCHLIST_PREFERENCE` ab, deren Einträge auf Instrument-IDs
+ * (`PAPER:BTC`, `PAPER:SPY`, …) verweisen.
+ *
+ * Neuer Code fragt das Universum:
+ * ```ts
+ * import { getRegistry } from "@/universe";
+ * const active = getRegistry().query({ status: "active", paperAvailable: true });
+ * ```
+ * Für die Anzeigereihenfolge im Dashboard:
+ * `import { UI_WATCHLIST_PREFERENCE } from "@/universe/watchlist";`
+ *
+ * Der Export bleibt aus Kompatibilitätsgründen erhalten (Monitor-Marktscan,
+ * Kurs-Refresh) und wird in einem späteren Task entfernt.
+ */
+export const DEFAULT_WATCHLIST: string[] = [...WATCHLIST_DISPLAY_SYMBOLS];
 
 /** Statisches Fallback-Buch (Original des Paper-Brokers). */
 export const STATIC_PRICES: Record<string, number> = {
