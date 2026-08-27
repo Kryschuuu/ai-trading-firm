@@ -156,7 +156,7 @@ Verzeichnis überschreibbar via `UNIVERSE_DATA_DIR` (absolut oder relativ zum Pr
 | ID | Immer `VENUE:SYMBOL`. Eine mitgelieferte, abweichende `id` ist ein Validierungsfehler. |
 | base/quote | 1) FX-Suffix `=X` (`EURUSD=X` → EUR/USD) → 2) expliziter Trenner (`BTC/USD`, `BTC-USD`, `EUR.USD`; `-PERP`/`-SWAP` → Quote `USD`) → 3) bekanntes Quote-Suffix (`BTCUSDT` → BTC/USDT) → 4) kein Paar (`SPY`, `BRK.B`). |
 | `assetClass` | FX-Suffix oder Fiat/Fiat → `fx`; Krypto-Quote (`USDT/USDC/TUSD/FDUSD/BUSD/BTC/ETH`) oder Nicht-Fiat-Basis gegen `USD` → `crypto`; sonst `equity`. Explizite Angabe schlägt jede Ableitung. |
-| `marketType` | Venue `DYDX` oder Symbol-Suffix `-PERP`/`-SWAP` → `perpetual`, sonst `spot`. Explizite Angabe schlägt die Ableitung. |
+| `marketType` | Venue `DYDX` oder `BITUNIX` oder Symbol-Suffix `-PERP`/`-SWAP` → `perpetual`, sonst `spot`. Explizite Angabe schlägt die Ableitung. |
 | Defaults | Konservativ: `status: active`, `paperAvailable: true`, `liveAvailable: false`, `leverageAvailable: false`, `shortAvailable: false`, Metriken `null`. |
 
 ### 4.1 Ausschluss-Policy
