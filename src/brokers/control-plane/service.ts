@@ -150,6 +150,16 @@ function readState(venue: BrokerVenueId): VenueControlState {
   return state;
 }
 
+/**
+ * Öffentlicher, SYNCHRONER Lesezugriff auf den in-memory Control-Plane-Zustand
+ * (Task 11: Live-Gate-Bridge prüft „Venue aktiv"). Unbekannte Venue => frischer
+ * Initialzustand (alles off => nicht aktiv).
+ */
+export function readVenueControlStatePublic(venueRaw: string): VenueControlState {
+  const venue = normalizeVenue(venueRaw) ?? (String(venueRaw ?? "").toUpperCase().slice(0, 40) as BrokerVenueId);
+  return readState(venue);
+}
+
 function writeState(state: VenueControlState): void {
   stateMap().set(state.venue, state);
 }
