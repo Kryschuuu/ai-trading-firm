@@ -20,6 +20,82 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.16.0] — 2026-08-28
+
+**Broker Control Plane (Task 08): Backend-Credential-Manager mit
+verschlüsseltem Secret-Store und das Frontend „Brokers & Venues".**
+Datenfluss verbindlich: Frontend (masked credential form) → Backend →
+verschlüsselter Secret-Store → Broker-Adapter; Frontend erhält NUR Status.
+Live bleibt überall OFF (`liveEnabled:false`, einzige Quelle =
+Gate-Service-Meldung bis task-11).
+
+### Neu: `src/brokers/control-plane/`
+
+- **Secret-Store:** AES-256-GCM mit **AAD = Venue-ID** (Auth-Tag bindet den
+  Datensatz an die Venue), frischer IV je `put`, Buffer-Nullung (zeroize).
+  Key ausschließlich aus Env/KMS (`SECRET_STORE_KEY`; KMS-Hook
+  `SECRET_STORE_KMS_ENDPOINT` vorbereitet, fail-safe). Backends: DB
+  (`broker_credentials`, verschlüsselte Envelopes) → Datei-Fallback
+  (`data/secrets/*.enc`, 600, gitignored) → Memory (Tests). Interface
+  `put/get/delete/exists`; Task-07-Bridge `createVenueBackedNamedStore`.
+- **Credential-API:** `POST|DELETE /api/brokers/{venue}/credentials`,
+  `GET …/status`, `POST …/test` (healthCheck + read-only Probe →
+  `permissions[]`), `POST …/discover`. Antworten **status-only**
+  (configured/connected/permissions[]/liveEnabled) — kein Echo, kein
+  `keyHint`, keine Maskierung. Fehler 403/404/409/422/429/503 mit SAFE-Meldungen.
+- **Zustandsmodell:** 6 Ebenen (connection, marketDiscovery, permissions,
+  paper, testnet, live) × off/pending/active/error; Übergänge nur über
+  `save|test|discover|disable`, Missbrauch → 409/422. **Live immer off.**
+- **Permission-Probe (read-only):** PAPER real gegen den Ledger; andere
+  Venues über lokalen Mock-Adapter (Unabhängigkeitsklausel, kein Netzwerk);
+  Fehler → Ebene `error` mit SAFE-Meldung.
+- **Sicherheit:** Admin-Guard (RBAC-Platzhalter, `FIRM_ADMIN_TOKEN`,
+  TODO(task-10)), CSRF (`x-csrf-token`), Credential-Rate-Limit
+  (5/min/IP, `BROKER_CREDENTIAL_RATE_LIMIT`), Audit je Ereignis
+  (`BROKER_CONTROL_PLANE`: actor, venue, Aktion, Ergebnis, timestamp —
+  ohne Secrets), Response-/Bundle-Secret-Scanner (`npm run scan:secrets`).
+
+### Neu: Frontend „Brokers & Venues"
+
+- Karten je Broker: Status-LED, Markets-Anzahl, Spot/Perpetual/Futures-Flags,
+  Buttons [Verbinden] [Test] [Einstellungen], 6 Zustands-Chips je Ebene,
+  Permissions-Badges, Loading-/Error-/Empty-States.
+- Masked credential form (`type="password"`,
+  `autoComplete="new-password"`, `noValidate`, State wird nach Submit
+  geleert; kein Client-Speicher). Settings = read-only Flags inkl.
+  `liveEnabled` mit deutlichem „gesperrt"-Zustand; Bestätigungsdialog vor
+  Credential-Löschen.
+- Neuer Dashboard-Tab „🌐 Brokers & Venues" + eigenständige Seite
+  `/brokers` (ohne Firm-DB, Control-Plane-REST-Contract only).
+
+### Geändert
+
+- `src/db/schema.ts`: neue Tabelle `broker_credentials` (venue PK,
+  verschlüsseltes Envelope) → `npx drizzle-kit push` erforderlich.
+- `src/lib/seed.ts`: `broker_credentials` in der Schema-Prüfung.
+- `src/lib/auditView.ts`: Katalog-Eintrag `BROKER_CONTROL_PLANE`.
+- `.env.example`: `SECRET_STORE_KEY`, `SECRET_STORE_KMS_ENDPOINT`,
+  `BROKER_SECRET_BACKEND`, `BROKER_SECRET_DIR`, `FIRM_ADMIN_TOKEN`,
+  `BROKER_CREDENTIAL_RATE_LIMIT`.
+- `package.json`: v1.16.0, Scripts `scan:secrets`,
+  `test:coverage:controlplane`.
+
+### Tests & Doku
+
+- Neu: `tests/secretStore.test.ts` (Roundtrip, Wrong-Key, Tampering →
+  Auth-Tag, AAD-Bindung, Zeroize, Backends, Task-07-Bridge),
+  `tests/controlPlane.{states,api,integration,security,e2e}.test.ts`
+  (Zustandsmaschine, RBAC/CSRF/Rate-Limit, Response-Scanner über ALLE
+  Broker-API-Responses, Bundle-Scanner, Connect-Flow, Audit je Aktion,
+  E2E Connect → Test → Status → Disconnect).
+- Neu: `docs/FRONTEND_CONTROL_PLANE.md` (Datenfluss, API-Referenz,
+  Zustandsmodell, Sicherheitskonzept, „Warum das Secret nie anzeigbar ist").
+- Update: `docs/BROKER_ARCHITECTURE.md` (Control-Plane-Abschnitt),
+  `docs/help/brokers.help.json` (3-Ebenen-Hilfe), `docs/SECURITY_AUDIT.md`
+  (Kapitel „Security Audit — Task 08").
+
+---
+
 ## [1.15.0] — 2026-08-27
 
 **Bitunix-Adapter als 7. Venue (Task 07): Public REST/WS für USDT-M-Perpetuals,

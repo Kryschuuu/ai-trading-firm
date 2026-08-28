@@ -1980,6 +1980,50 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       return [];
     },
   },
+  BROKER_CONTROL_PLANE: {
+    label: "Broker-Control-Plane",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Ereignis der Broker Control Plane (Task 08): Credentials gespeichert/geaendert/geloescht, " +
+      "Verbindungstests, Permission-Proben und Zustandsuebergaenge der 6 Ebenen " +
+      "(connection, marketDiscovery, permissions, paper, testnet, live). " +
+      "Protokolliert werden nur actor, venue, action, result und errorCode — niemals Secrets.",
+    headline: (d) => {
+      const venue = text(d.venue) ?? "—";
+      const action = text(d.action) ?? "—";
+      const result = text(d.result) ?? "—";
+      return `${venue} · ${action} → ${result === "OK" ? "erfolgreich" : "abgewiesen/fehlgeschlagen"}`;
+    },
+    sections: (d) => [
+      {
+        title: "Control-Plane-Aktion",
+        facts: [
+          { label: "Akteur", value: text(d.actor) ?? "—", mono: true },
+          { label: "Venue", value: text(d.venue) ?? "—", mono: true },
+          { label: "Aktion", value: text(d.action) ?? "—", mono: true },
+          { label: "Ergebnis", value: text(d.result) ?? "—" },
+          { label: "Fehlercode", value: text(d.errorCode) ?? "—", mono: true },
+        ],
+      },
+    ],
+    check: (d) => {
+      // Live darf in der Control Plane nie aktiv werden — jede Meldung mit
+      // liveEnabled=true waere ein Widerspruch zum Hard-Gate.
+      const meta = record(d.meta);
+      if (meta.liveEnabled === true || meta.live === "active") {
+        return [
+          {
+            severity: "error",
+            title: "Live-Ebene aktiv in Control-Plane-Audit",
+            detail:
+              "Die Live-Ebene der Control Plane darf bis zum Gate-Task (task-11) niemals aktiv sein — Eintrag pruefen.",
+          },
+        ];
+      }
+      return [];
+    },
+  },
   BITUNIX_PRIVATE_CALL: {
     label: "Bitunix-Privat-API",
     category: "system",
