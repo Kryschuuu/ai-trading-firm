@@ -1,7 +1,10 @@
 /**
- * Permission-Katalog und Rollenmatrix (Task 10).
+ * Permission-Katalog und Rollenmatrix (Task 10, erweitert in Task 11).
  *
- * `live.gate` ist bewusst in keiner Rolle — die Freigabe ist Task 11.
+ * `live.gate` ist SEIT Task 11 ausschließlich der ADMIN-Rolle gewährt — die
+ * Permission erlaubt nur die Bedienung der Live-Gate-State-Machine
+ * (Transitions-Anträge, Human-Gate-Bestätigung, Kill). Sie schaltet KEIN Live
+ * ein: Der Enforcer verlangt zusätzlich State=ENABLED + Flags + Suite + CI.
  */
 import type { Permission, Role } from "./types";
 
@@ -24,7 +27,9 @@ const ADMIN_PERMISSIONS: readonly Permission[] = [
   ...OPERATOR_PERMISSIONS,
   "broker.credentials",
   "routing.modes.write",
-  // live.gate absichtlich nicht.
+  // Task 11: Live-Gate-Bedienung NUR für Admin — Human-Gate bleibt
+  // strukturell Teil der State-Machine (Cooldown, 4-Augen, Audit).
+  "live.gate",
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {

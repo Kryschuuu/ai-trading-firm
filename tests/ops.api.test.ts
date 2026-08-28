@@ -32,7 +32,9 @@ test("GET /api/auth/me: local-open → 200 Admin, keine Token-Felder", async () 
   assert.equal(body.ok, true);
   assert.equal(body.actor.role, "admin");
   assert.equal(body.actor.source, "local-open");
-  assert.equal(body.actor.permissions.includes("live.gate"), false);
+  // Task 11: live.gate ist Admin (local-open) exklusiv gewährt — die harte
+  // Live-Sperre liegt im Enforcer, nicht in der Permission.
+  assert.equal(body.actor.permissions.includes("live.gate"), true);
   assert.ok(!text.toLowerCase().includes("token-wert"));
   assert.deepEqual(scanTextForSecrets(text), []);
 });

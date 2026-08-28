@@ -38,6 +38,12 @@ next-env.d.ts
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
 
+# Live-Gate (Task 11): State-Files, Audit-Hash-Kette, Kill-Failsafe-Datei
+# und Security-Suite-Stamp sind Laufzeit-/Deployment-Artefakte (aus CI),
+# niemals versioniert.
+/data/live-gate
+/data/live-gate-test
+
 # Scanner-Artefakte (Task 04): taegliche Universe-Snapshots werden lokal
 # erzeugt und sind aus Registry + Historie reproduzierbar — nicht versioniert.
 /artifacts

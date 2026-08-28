@@ -10,14 +10,14 @@
  *   discover (Market Discovery), disable (trennen + zuruecksetzen).
  * Jeder andere Uebergang ist Missbrauch → StateTransitionError (409/422).
  *
- * LIVE (hart, Regel 5): Die Live-Ebene ist IMMER `off` und `liveEnabled`
- * IMMER `false`. Es gibt kein "live = true"-Flag — die Anzeige kommt
- * ausschliesslich aus dem Gate-Service (`readGateState`), der bis task-11
- * hart gesperrt ist. Kein Aufrufer, kein Env-Wert, keine API kann das
- * aendern.
+ * LIVE (hart, Regel 5): Die Live-Ebene bleibt `off` als Anzeige-Ebene; das
+ * zentrale Live-Gate (Task 11) projiziert `liveEnabled` über readGateState().
+ * Default bleibt false (State DISCONNECTED, Flags off, kein Suite-Stamp) —
+ * KEIN Aufrufer, kein Env-Wert, keine UI kann das ohne kompletten,
+ * auditierbaren Machine-Durchlauf (inkl. Human-Gate) ändern.
  */
 import { BrokerError } from "@/contracts/broker";
-import { LIVE_GATE_LOCKED_REASON } from "./config";
+import { evaluateLiveOrder } from "../../live-gate/enforcer";
 
 export const CONTROL_LAYER_IDS = [
   "connection",
@@ -55,8 +55,8 @@ export interface VenueControlState {
   /** Projiziert aus connection/permissions (kein eigenes Flag). */
   connected: boolean;
   permissions: string[];
-  /** IMMER false — einzige Quelle: readGateState(). */
-  liveEnabled: false;
+  /** Projektion aus readGateState() (Enforcer) — kein eigenes Flag. */
+  liveEnabled: boolean;
   liveReason: string;
   updatedAt: string | null;
 }
@@ -72,31 +72,53 @@ export class StateTransitionError extends BrokerError {
 /**
  * Gate-Service-Meldung (einzige erlaubte Live-Quelle).
  *
- * TODO(task-11): Sobald der Live-Trading-Gate-Service existiert, wird hier
- * dessen Meldung gelesen. Bis dahin ist liveEnabled IMMER false — es gibt
- * keinen Parameter, der das aendern kann.
+ * Seit Task 11 liest diese Funktion den ZENTRALEN Live-Gate-Enforcer
+ * (src/live-gate): `liveEnabled` ist genau dann true, wenn der Enforcer eine
+ * Live-Order erlauben würde (State LIVE_ENABLED + Flags + Suite + Control
+ * Plane + kein Kill). Default nach Task 11 bleibt false — die Anzeige ist
+ * reine Projektion, es gibt keinen Parameter, der sie ohne Machine-Durchlauf
+ * ändern kann.
  */
 export interface GateState {
-  liveEnabled: false;
+  liveEnabled: boolean;
   reason: string;
-  source: "control-plane";
+  source: "live-gate";
+  /** Machine-Zustand des Venues (DISCONNECTED, …, LIVE_ENABLED). */
+  state: string | null;
+  /** Konkreter Deny-/Allow-Code des Enforcers. */
+  code: string;
 }
 
-export function readGateState(): GateState {
-  return {
-    liveEnabled: false,
-    reason: LIVE_GATE_LOCKED_REASON,
-    source: "control-plane",
-  };
+export function readGateState(venue = "BITUNIX"): GateState {
+  try {
+    // Statischer Import ist sicher: live-gate/enforcer importiert die
+    // Control Plane NICHT (Provider-Pattern), es gibt keinen Import-Kreis.
+    const decision = evaluateLiveOrder(venue, { audit: false });
+    return {
+      liveEnabled: decision.allowed,
+      reason: decision.reason,
+      source: "live-gate",
+      state: decision.state,
+      code: decision.code,
+    };
+  } catch (err) {
+    return {
+      liveEnabled: false,
+      reason: `LIVE_GATE_LOCKED: Enforcer nicht bewertbar (${(err as Error).message}) — fail-safe deny.`,
+      source: "live-gate",
+      state: null,
+      code: "ENFORCER_ERROR",
+    };
+  }
 }
 
 function layer(state: LayerStateValue, at: string | null, detail?: string | null): ControlLayer {
   return { state, at, detail: detail ?? null };
 }
 
-/** Initialzustand einer Venue: alles off, Live hart gesperrt. */
+/** Initialzustand einer Venue: alles off, Live-Projektion aus dem Gate. */
 export function createInitialControlState(venue: string): VenueControlState {
-  const gate = readGateState();
+  const gate = readGateState(venue);
   return {
     venue,
     layers: {
@@ -110,7 +132,7 @@ export function createInitialControlState(venue: string): VenueControlState {
     discovery: { state: "off", count: 0, lastSync: null },
     connected: false,
     permissions: [],
-    liveEnabled: false,
+    liveEnabled: gate.liveEnabled,
     liveReason: gate.reason,
     updatedAt: null,
   };
@@ -199,7 +221,7 @@ export function applyAction(
         : layer("off", now, "NOT_SUPPORTED_CAPABILITY:discovery");
 
       // Live bleibt IMMER off — Gate-Service-Meldung, keine Aenderung moeglich.
-      layers.live = layer("off", now, readGateState().reason);
+      layers.live = layer("off", now, readGateState(state.venue).reason);
 
       return {
         venue: state.venue,
@@ -207,8 +229,8 @@ export function applyAction(
         discovery,
         connected: layers.connection.state === "active",
         permissions: probe.permissions,
-        liveEnabled: false,
-        liveReason: readGateState().reason,
+        liveEnabled: readGateState(state.venue).liveEnabled,
+        liveReason: readGateState(state.venue).reason,
         updatedAt: now,
       };
     }
@@ -242,7 +264,7 @@ export function applyAction(
           : layer("error", now, probe.errorCode ?? "CONNECTION_TEST_FAILED")
         : layers.paper;
 
-      layers.live = layer("off", now, readGateState().reason);
+      layers.live = layer("off", now, readGateState(state.venue).reason);
 
       return {
         venue: state.venue,
@@ -250,8 +272,8 @@ export function applyAction(
         discovery,
         connected: layers.connection.state === "active",
         permissions: probe.permissions,
-        liveEnabled: false,
-        liveReason: readGateState().reason,
+        liveEnabled: readGateState(state.venue).liveEnabled,
+        liveReason: readGateState(state.venue).reason,
         updatedAt: now,
       };
     }
@@ -279,15 +301,15 @@ export function applyAction(
         discovery.count = count;
         discovery.lastSync = now;
       }
-      layers.live = layer("off", now, readGateState().reason);
+      layers.live = layer("off", now, readGateState(state.venue).reason);
       return {
         venue: state.venue,
         layers,
         discovery,
         connected: state.connected,
         permissions: state.permissions,
-        liveEnabled: false,
-        liveReason: readGateState().reason,
+        liveEnabled: readGateState(state.venue).liveEnabled,
+        liveReason: readGateState(state.venue).reason,
         updatedAt: now,
       };
     }

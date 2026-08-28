@@ -10,8 +10,11 @@
  *
  * Connect-Flow = masked credential form (CredentialForm.tsx). PAPER ist der
  * interne Simulator ohne Credentials — Verbinden = reiner Verbindungstest.
- * Der Live-Chip zeigt immer "gesperrt/off" (liveEnabled nur aus
- * Gate-Meldung).
+ * Der Live-Chip zeigt den Live-Gate-Zustand (Task 11): liveEnabled ist die
+ * reine Projektion des zentralen Enforcers (readGateState) — Default
+ * "gesperrt/off" (DISCONNECTED, Flags aus, kein Suite-Stamp); "active" erst
+ * nach vollständigem auditierbarem Durchlauf der State-Machine. Die UI kann
+ * den Zustand niemals direkt setzen (nur Kill über LiveGatePanel).
  */
 import { useState } from "react";
 import {

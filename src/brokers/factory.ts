@@ -3,8 +3,9 @@
  *
  * Fail-Safe-Reihenfolge (laut, auditiert, NIEMALS stiller Fallback):
  *   1. Unbekanntes Venue          → UnknownVenueError
- *   2. mode = 'live'              → LiveTradingGateError (IMMER, bis der
- *                                    Live-Trading-Gate-Task öffnet)
+ *   2. mode = 'live'              → Live-Gate-Enforcer (Task 11): Default
+ *                                    weiter LiveTradingGateError; erlaubt nur
+ *                                    bei LIVE_ENABLED + Flags + Suite + CI
  *   3. Fehlende Capability        → NotSupportedCapabilityError
  *                                    (Gating-Table: REQUIRED_CAPABILITY_BY_MODE)
  *   4. OK                         → Adapter (cache je venue:mode)
@@ -30,6 +31,7 @@ import { REQUIRED_CAPABILITY_BY_MODE, VENUE_CAPABILITIES } from "./capabilities"
 import { BitunixBrokerAdapter } from "./bitunix";
 import { PaperBrokerAdapter } from "./paper";
 import { StubBrokerAdapter } from "./stubs";
+import { assertLiveOrderAllowed } from "../live-gate/enforcer";
 
 const G = globalThis as typeof globalThis & {
   __brokerAdapters?: Map<string, BrokerAdapter>;
@@ -110,18 +112,28 @@ export async function getBroker(
     throw err;
   }
 
-  // 2) LIVE-SPERRUNG: vor jeder Capability-Prüfung, für JEDES Venue,
-  //    standardmäßig und permanent, bis der Live-Gate-Task öffnet.
+  // 2) LIVE-GATE (Task 11): der zentrale Enforcer (Single Point of
+  //    Enforcement) entscheidet. Default (State DISCONNECTED, Flags false,
+  //    kein Suite-Stamp) bleibt exakt wie bisher: LiveTradingGateError.
+  //    Erlaubt ist ein Live-Adapter nur nach komplettem, auditierbarem
+  //    Durchlauf der Live-Gate-State-Machine inkl. Human-Gate + Suite + CI.
   if (mode === "live") {
-    const err = new LiveTradingGateError(venue);
-    await recordBrokerFactoryCall({
-      venue,
-      mode,
-      outcome: "DENIED",
-      capability: null,
-      errorCode: err.code,
-    });
-    throw err;
+    try {
+      assertLiveOrderAllowed(venue);
+    } catch (err) {
+      const gateErr =
+        err instanceof LiveTradingGateError
+          ? err
+          : new LiveTradingGateError(venue, (err as Error).message);
+      await recordBrokerFactoryCall({
+        venue,
+        mode,
+        outcome: "DENIED",
+        capability: null,
+        errorCode: gateErr.code,
+      });
+      throw gateErr;
+    }
   }
 
   // 3) Capability-Gating: der Modus verlangt eine Capability, die der

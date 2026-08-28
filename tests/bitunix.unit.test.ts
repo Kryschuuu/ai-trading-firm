@@ -5,6 +5,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   compactJson,
   encodeQueryParams,
@@ -22,6 +25,23 @@ import { createBitunixLogger, redactBitunix, safeErrorMessage } from "../src/bro
 import { loadBitunixConfig } from "../src/brokers/bitunix/config";
 import { EnvSecretStore, createDefaultBitunixSecretStore, loadBitunixCredentials } from "../src/brokers/bitunix/secrets";
 import { BitunixPaperLedger } from "../src/brokers/bitunix/paper";
+
+const gateDirs: string[] = [];
+/** Hermetischer Live-Gate-State-Speicher je Flag-Kombination (Task 11). */
+function tmpGateDir(): string {
+  const d = mkdtempSync(path.join(tmpdir(), "bitunix-live-gate-"));
+  gateDirs.push(d);
+  return d;
+}
+process.on("exit", () => {
+  for (const d of gateDirs) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* Cleanup best-effort. */
+    }
+  }
+});
 import { LiveTradingGateError } from "../src/contracts/broker";
 import { BITUNIX_DEFAULT_MAKER_FEE, BITUNIX_DEFAULT_TAKER_FEE } from "../src/brokers/bitunix/config";
 import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
@@ -223,7 +243,7 @@ test("Orders: LONG MARKET mit SL/TP, SHORT LIMIT, Validierung", () => {
   assert.throws(() => serializePlaceOrder({ symbol: "BTCUSDT", side: "LONG", qty: 0, riskNotional: 1 }), OrderSerializationError);
 });
 
-test("Gates: 16 Flag-Kombinationen werfen immer LiveTradingGateError", () => {
+test("Gates: 16 Flag-Kombinationen — Enforcer (Task 11) denied ohne State-Machine", () => {
   const flags = ["BITUNIX_ENABLED", "BITUNIX_LIVE_ENABLED", "LIVE_TRADING_ENABLED", "REQUIRE_HUMAN_APPROVAL"] as const;
   let threw = 0;
   for (let mask = 0; mask < 16; mask++) {
@@ -232,6 +252,8 @@ test("Gates: 16 Flag-Kombinationen werfen immer LiveTradingGateError", () => {
     env.BITUNIX_LIVE_ENABLED = mask & 2 ? "true" : "false";
     env.LIVE_TRADING_ENABLED = mask & 4 ? "true" : "false";
     env.REQUIRE_HUMAN_APPROVAL = mask & 8 ? "false" : "true";
+    // Hermetischer Gate-State-Speicher (kein State-File => DISCONNECTED).
+    env.LIVE_GATE_DATA_DIR = tmpGateDir();
     const snap = snapshotLiveGate(env);
     const wouldAllow =
       env.BITUNIX_ENABLED === "true" &&
@@ -239,7 +261,9 @@ test("Gates: 16 Flag-Kombinationen werfen immer LiveTradingGateError", () => {
       env.LIVE_TRADING_ENABLED === "true" &&
       env.REQUIRE_HUMAN_APPROVAL === "false";
     assert.equal(snap.flagsWouldAllow, wouldAllow, flags.join("+"));
-    assert.equal(snap.liveGateServiceEnabled, false);
+    // Seit Task 11 ist der zentrale Enforcer aktiv:
+    assert.equal(snap.liveGateServiceEnabled, true);
+    assert.equal(snap.decision.code, "STATE_NOT_LIVE_ENABLED", flags.join("+"));
     assert.throws(() => assertLiveOrderAllowed("BITUNIX", env), LiveTradingGateError);
     threw++;
   }
@@ -249,13 +273,15 @@ test("Gates: 16 Flag-Kombinationen werfen immer LiveTradingGateError", () => {
     BITUNIX_LIVE_ENABLED: "true",
     LIVE_TRADING_ENABLED: "true",
     REQUIRE_HUMAN_APPROVAL: "false",
+    LIVE_GATE_DATA_DIR: tmpGateDir(),
   };
   try {
     assertLiveOrderAllowed("BITUNIX", complete);
     assert.fail("sollte werfen");
   } catch (e) {
     assert.ok(e instanceof LiveTradingGateError);
-    assert.match((e as Error).message, /TODO\(task-11\)/);
+    // Flags allein genügen NICHT: State-Machine + Suite + Control Plane fehlen.
+    assert.match((e as Error).message, /STATE_NOT_LIVE_ENABLED|SECURITY_SUITE|CONTROL_PLANE/);
   }
 });
 

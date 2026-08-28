@@ -681,3 +681,87 @@ keine ungedeckelte Cloud-Nutzung.
 
 Fazit: **kein High/Critical-Befund.** Phase 1 verschiebt die Trust-Grenze nicht:
 Live bleibt zu, Secrets bleiben im Store, neue Endpunkte sind lesend und leak-frei.
+
+---
+
+## Security Audit — Task 11 (Live Trading Gate, v1.19.0)
+
+**Stand:** 2026-08-28 · **Modul:** `src/live-gate/**` ·
+**API:** `GET /api/live/state`, `POST /api/live/transition`, `POST /api/live/kill` ·
+**Integration:** Broker-Factory, Bitunix-Gates, Control-Plane-`readGateState`,
+RBAC (`live.gate`), Ops-Center · **CI:** Job `security-live-gate`
+(merge-blockierend, Coverage-Tor ≥ 95 % Zeilen auf `src/live-gate/**`).
+**Status:** ERHÖHT — der Live-Pfad ist jetzt eine auditierte, mehrfach
+gesicherte State-Machine statt eines blinden Throws. **Live bleibt OFF.**
+
+### Architektur-Kurzbeschreibung
+
+9 Zustände (`DISCONNECTED → … → LIVE_ENABLED`), exakt 8 legale Übergänge
+mit objektiven Checks (`BrokerGatePort`, read-only/simuliert), Human-Gate
+mit Cooldown (24 h) und optionalem 4-Augen-Modus, Single-Point-Enforcer mit
+10-stufiger Fail-Safe-Prüfung, Kill-Switch mit persistenter Failsafe-Datei,
+append-only Audit mit SHA-256-Hash-Kette, CI-Suite-Stamp als Enforcer-
+Bedingung. Details: [LIVE_TRADING.md](LIVE_TRADING.md).
+
+### Threat Model
+
+| # | Bedrohung | Angriffsweg | Gegenmaßnahme | Restrisiko |
+| --- | --- | --- | --- | --- |
+| T1 | **Zustands-Sprung** (Human-Gate umgehen) | `PAPER_APPROVED → LIVE_ENABLED` direkt anfragen; State-File manuell auf `LIVE_ENABLED` setzen | Matrix erlaubt nur die 8 Kanten (81 Kombinationen getestet, 0 Durchlässe); LIVE_ENABLED-Übergang verlangt Flags+Suite+Control Plane; jedes Öffnen ist Admin-Aktion mit Grund + Audit | State-File-Manipulation allein würde genügen, WENN Flags+Suite+CP zusätzlich stimmen — physischer/FS-Zugriff vorausgesetzt; Kill-Datei dominiert (getestet); Hash-Kette macht Manipulation sichtbar |
+| T2 | **Flag-Missbrauch** | Alle Env-Flags auf true drehen (ohne Machine-Durchlauf) | Enforcer verlangt State=LIVE_ENABLED **und** Flags **und** Suite **und** CP; Testmatrix 9 States × 16 Flag-Kombis: 0 falsche Allows; Flags sind read-only im Code (Architekturtest) | Keins (Flags allein öffnen nichts) |
+| T3 | **UI-/Prompt-Bypass** | Agent/UI behauptet „live erlaubt"; UI-Flag setzen | Zustandsänderungen nur über `POST /api/live/*` (Permission `live.gate`, CSRF, Rate-Limit) bzw. CLI; Enforcer liest ausschließlich persistierte Quellen, nie UI/Agent-Aussagen (Architekturtest: keine UI-Imports) | Keins |
+| T4 | **Audit-Manipulation** | Audit-Log nachträglich editieren/einfügen/kürzen | SHA-256-Hash-Kette (jeder Eintrag enthält Vorgänger-Hash); `verifyAuditChain` erkennt Verändern/Einfügen/Entfernen; Truncation über Kettenkopf im State-File; `GET /api/live/state` zeigt Integrität | Angreifer mit FS-Zugriff könnte Kette komplett neu berechnen — dann stimmen aber State-File-Köpfe nicht mehr; Offline-Verifikation gegen Kopie empfohlen (Betriebshandbuch) |
+| T5 | **Crash-Inkonsistenz** | Absturz mitten in einer Transition → halboffener Zustand | Intent-Protokoll (pendingTransition persistiert); Lese-Pfad verwirft Intents und auditiert `crash-recovery/ABORTED`; atomare Writes (tmp+fsync+rename); korrupte Files → DISCONNECTED | Keins (getestet inkl. Restart-Simulation) |
+| T6 | **Kill-Switch versagt** | DB/Netz/Store ausgefallen, Notfall-Kill nötig | Kill wirkt über Memory (sofort) + lokale Datei (persistent, ohne Infrastruktur); Reihenfolge Datei-VOR-State-Reset; Kill-Drill aus allen 9 Zuständen inkl. read-only-Dir | Keins im Single-Node; Multi-Instanz bräuchte gemeinsame Ablage (dokumentiert) |
+| T7 | **Enforcer-Umgehung** (Adapter direkt, ohne Factory) | `new BitunixBrokerAdapter("live")` + `placeOrder` | Adapter ruft `assertLiveOrderAllowed` in jedem Live-Pfad selbst (Architekturtest + Red-Team-Test); `placeSerializedOrder` existiert nur im Adapter | Keins für Bitunix; künftige Live-Adapter MÜSSEN das Muster übernehmen (Peer-Review-Checkliste) |
+| T8 | **Self-Approval / Cooldown umgehen** | Admin bestätigt sofort selbst; zweiter Account = derselbe Mensch | Cooldown serverseitig erzwungen (retryAt im Deny); Begründungs-, Confirm- und Approver-Pflicht; 4-Augen-Modus vergleicht Approver-Namen | 4-Augen identifiziert keine Token-Identität (ein Admin-Token im RBAC) — Task-12-Follow-up dokumentiert |
+| T9 | **CI-Suite umgehen** | PR mergen, obwohl Security-Suite rot | Required Check `security-live-gate` (Branch Protection) + Enforcer verlangt Suite-Stamp (passed, runId, Max-Alter 7 d) | Branch Protection muss einmalig vom Repo-Admin eingerichtet werden (im PR beschrieben); Stamp-Datei ist Deployment-Artefakt |
+| T10 | **Secret-Leak über Live-Gate-API** | Token/Credentials in State-/Audit-/Status-Ausgaben | Audit enthält nur strukturierte Felder; API zeigt gekürzte Hashes (Secret-Scanner über Responses grün); keine Credentials im Modul | Keins (Scanner in CI) |
+| T11 | **DoS über Gate-API** | Transition/Kill flooden | Derselbe Sliding-Window-Limiter wie Credentials (5/min/IP) + CSRF + Permission-Guard; Deny-Audit ist schlank (Ring 500) | Prozess-lokaler Limiter (Single-Node, dokumentiert) |
+| T12 | **PAPER als Live-Venue missbraucht** | `getBroker("PAPER","live")` | Capability `live=false` → `VENUE_NOT_LIVE_CAPABLE` vor allen Flags (getestet) | Keins |
+
+### Red-Team-Checkliste (je Punkt geprüft)
+
+| Kriterium | ✓ | Nachweis |
+| --- | :---: | --- |
+| Transitionsmatrix komplett, 0 Durchlässe | ✅ | `tests/liveGate.states.test.ts`: 8 legale Übergänge grün; alle 73 illegalen Kombinationen `ILLEGAL_TRANSITION` + Audit-DENY |
+| Sprung LIVE_PENDING → LIVE_ENABLED | ✅ | deny + Zustand unverändert (Red-Team-Test) |
+| Flag-Manipulation (Flags an, kein State) | ✅ | `STATE_NOT_LIVE_ENABLED` deny + Audit (`liveGate.enforcement.test.ts`) |
+| Enforcement-Matrix vs. Oracle | ✅ | 9 States × 16 Flag-Kombis × Suite × CP: 0 falseAllows, 0 falseDenies |
+| Nur exakt erlaubte Konstellation erlaubt | ✅ | `allowEnv` + LIVE_ENABLED + Suite + CP = einziger Allow-Pfad; Assert + Evaluate konsistent |
+| Adapter-Order ohne Factory | ✅ | direkt konstruierter Live-Adapter wirft in placeOrder/getAccount/getPositions |
+| Audit-Manipulation erkannt | ✅ | Verändern (Hash-Abweichung seq 2), Entfernen (seq-Bruch 3), Einfügen (prevHash-Bruch), Truncation (head-Abgleich) |
+| Kill-Drill aus allen 9 Zuständen | ✅ | je Zustand: Memory+Datei+DISCONNECTED+KILLED-Audit; Live-Order danach verweigert |
+| Kill bei Store-Ausfall | ✅ | read-only-Dir: `failsafeFileWritten:false` gemeldet, Memory-Sperre verweigert weiter |
+| Kill nicht „rückgängig" ohne Neudurchlauf | ✅ | nach Clear: LIVE_ENABLED-Sofortversuch → `ILLEGAL_TRANSITION` |
+| Cooldown vor Ablauf | ✅ | `COOLDOWN_ACTIVE` + retryAt; Zustand unverändert; Deny auditiert |
+| 4-Augen | ✅ | erste Bestätigung `FOUR_EYES_PENDING` (auditiert), gleicher Approver deny, anderer Approver Übergang |
+| Crash/Neustart-Konsistenz | ✅ | Persistenz über Runtime-Neustart; halboffene Transition → `crash-recovery/ABORTED` |
+| Keine echten Orders in CI | ✅ | alle Venue-Zugriffe über zählende Mock-Ports (`liveGateTestUtil`), Architekturtest verbietet Credentials in Suite; Default-Port `placeTestOrder` verweigert immer |
+| Secret-Scan negativ | ✅ | `scripts/scan-live-gate-secrets.ts` (27 Dateien, 0 Funde) + Response-Scanner-Tests |
+| Admin-Guard/CSRF/Rate-Limit | ✅ | `tests/liveGate.api.test.ts`: 403/401, `CSRF_INVALID`, 429, Kill-Phrase-Contract |
+| Single-Point-Enforcement statisch | ✅ | `tests/liveGate.architecture.test.ts` (Factory-Routing, Adapter-Live-Pfade, kein zweiter Order-Pfad, keine Flag-Writes, keine UI-Imports) |
+
+### Ergebnisprotokoll (Ausführung 2026-08-28)
+
+| Suite | Ergebnis |
+| --- | --- |
+| `npm test` (Gesamt) | **1065/1065 grün** (987 Bestand + 78 neu) |
+| `npm run security:live-gate` | **78 Tests grün**, Coverage **95,81 % Zeilen** auf `src/live-gate/**` (Tor 95 %), Exit 0 |
+| `npm run typecheck` / `npm run lint` | grün / 0 Fehler |
+| `node --import tsx scripts/scan-live-gate-secrets.ts` | 27 Dateien, **0 Funde** |
+| Live-Status nach Merge | **OFF** (kein State-File, Flags false, kein Suite-Stamp im Betrieb) |
+
+### Befunde
+
+| ID | Severity | Datei | Problem | Status |
+| --- | --- | --- | --- | --- |
+| LG-01 | Info | `src/live-gate/service.ts` (4-Augen) | Approver-Vergleich über Namen, nicht Token-Identität (ein Admin-Token im RBAC-Kern) | ✅ dokumentiert; echte 2-Personen-Identität → Task 12 |
+| LG-02 | Info | `src/live-gate/checks.ts` | ORDER_TEST_OK/PAPER_APPROVED ohne registrierte Provider unerreichbar (bewusst fail-closed) | ✅ gewollt; Venue-Testnet-Anbindung ist Folgeaufgabe |
+| LG-03 | Info | CI-Job-Installation | Job-Quelle liegt bei `docs/ci/security-live-gate.workflow.yml`; Kopie nach `.github/workflows/` + Branch-Protection (Required Check) muss der Repo-Owner einmalig einrichten (Arena-Bot darf keine Workflow-Dateien schreiben) | ✅ im PR + LIVE_TRADING.md (Abschnitt CI) beschrieben; Enforcer verlangt zusätzlich Suite-Stamp |
+| LG-04 | Info | `package.json` (security:live-gate) | Coverage-Tor auf Zeilen ≥ 95 % (Funktionendeckung unter tsx durch Phantom-CJS/ESM-Duplikate verzerrt) | ✅ dokumentiert; Branches/Funktionen werden berichtet |
+
+Fazit: **kein High/Critical-Befund.** Die Trust-Grenze Live ist jetzt eine
+prozessual erzwingbare, auditierbare Kette: Checks → Paper-Evidence →
+Antrag → 24 h Bedenkzeit → menschliche Freigabe → CI-Suite → Flags →
+Control Plane — und ein Kill-Switch, der aus jedem Zustand sofort greift.

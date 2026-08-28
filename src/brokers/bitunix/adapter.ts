@@ -4,7 +4,9 @@
  * Capabilities: discovery, marketData, trading, paper, live (Capability JA),
  * stopAtVenue. testnet=false (kein dokumentiertes Testnet).
  *
- * Live-Ausführung: IMMER `LiveTradingGateError` (TODO(task-11)).
+ * Live-Ausführung: durch den zentralen Live-Gate-Enforcer (Task 11) —
+ * Default weiter `LiveTradingGateError`, bis die State-Machine LIVE_ENABLED
+ * + Flags + Suite + Control Plane freigibt (docs/LIVE_TRADING.md).
  * Paper: echte Public-Kurse, lokales Ledger, keine Private-API.
  */
 import { VENUE_CAPABILITIES } from "../capabilities";
@@ -200,7 +202,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
 
   /**
    * Paper/backtest: lokale Simulation gegen Bitunix-Ticker.
-   * live: IMMER LiveTradingGateError (TODO(task-11)).
+   * live: Live-Gate-Enforcer (Task 11) entscheidet — Default deny.
    * testnet: NotSupportedCapabilityError.
    *
    * Order-Serialisierung (SL/TP am Venue-Body) wird vorbereitet, aber im

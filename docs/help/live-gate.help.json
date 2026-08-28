@@ -1,0 +1,58 @@
+{
+  "$schema": "./help-schema.json",
+  "id": "live-gate",
+  "version": "v1.19.0",
+  "title": "Live-Trading-Gate — State-Machine, Enforcement, Kill-Switch (Task 11)",
+  "description": "Selbsterklärende Referenz des Live-Trading-Gates: 9 Zustände, 8 legale Übergänge mit objektiven Checks, Human-Gate mit 24 h Cooldown und 4-Augen-Modus, Single-Point-Enforcer vor jeder Venue-Order, Kill-Switch mit persistenter Failsafe-Datei, append-only Audit mit SHA-256-Hash-Kette, CI-Job security-live-gate (merge-blockierend). Dieser Task aktiviert KEIN Live-Trading — der Default bleibt DISCONNECTED/off, jede Live-Order wird weiterhin verweigert.",
+  "source": "docs/LIVE_TRADING.md",
+  "fields": {
+    "states": {
+      "kurzinfo": "Die 9 Zustände der Machine: DISCONNECTED, CONNECTED, MARKET_DATA_OK, ACCOUNT_READ_OK, ORDER_TEST_OK, PAPER_APPROVED, LIVE_PENDING, HUMAN_APPROVED, LIVE_ENABLED.",
+      "technischeInfo": "DISCONNECTED → CONNECTED → MARKET_DATA_OK → ACCOUNT_READ_OK → ORDER_TEST_OK → PAPER_APPROVED → LIVE_PENDING → HUMAN_APPROVED → LIVE_ENABLED. Ein Venue ist genau im Zustand LIVE_ENABLED live-fähig — und selbst dann entscheidet der Enforcer zusätzlich über Flags, Suite-Stamp, Control Plane und Kill-Switch. Persistiert in data/live-gate/venue-{VENUE}.json (atomar, gitignored)."
+    },
+    "transitions": {
+      "kurzinfo": "Exakt 8 legale Übergänge (LIVE_GATE_TRANSITIONS) — Sprünge, Rückwärts und Selbst-Übergänge sind immer ILLEGAL_TRANSITION.",
+      "technischeInfo": "Jede andere (from, to)-Kombination wird abgelehnt und auditiert (Matrix-Test: 81 Kombinationen, 8 erlaubt, 73 abgelehnt, 0 Durchlässe). Downgrades laufen ausschließlich über die Admin-Aktion disable oder den Kill-Switch — beide auditiert. Unbekannte Zustände → UNKNOWN_STATE."
+    },
+    "transitionChecks": {
+      "kurzinfo": "Objektive Checks je Übergang: connectivity (Health), marketData (Public-Ticker), accountRead (Control-Plane-Probe), orderTest (nur simuliert/Mock — Default verweigert), paperCriteria (≥ 50 fehlerfreie Paper-Orders, LIVE_GATE_PAPER_MIN_ORDERS).",
+      "technischeInfo": "Die Checks laufen über den BrokerGatePort des Venues (read-only bzw. simuliert). Fehlgeschlagene Checks blockieren den Übergang; ein werfender Port wird fail-closed als CHECK_FAILED behandelt. Der Service ist die einzige Instanz, die den Zustand ändert — Client-Behauptungen zählen nicht."
+    },
+    "humanGate": {
+      "kurzinfo": "Schritt 7 (LIVE_PENDING → HUMAN_APPROVED): Admin-Antrag mit Grund, dann 24 h Bedenkzeit (LIVE_GATE_COOLDOWN_MS), Freigabe nur mit confirm:true, Grund und Approver-Name.",
+      "technischeInfo": "Cooldown serverseitig erzwungen (Deny COOLDOWN_ACTIVE mit retryAt); 0 schaltet den Cooldown aus (max 30 d). LIVE_GATE_FOUR_EYES=true verlangt zwei verschiedene Approver: erste Bestätigung wird als four-eyes-first auditiert (kein Zustandswechsel), gleicher Approver wird abgelehnt. REQUIRE_HUMAN_APPROVAL steuert nur die Enforcer-Alternativklausel — die Matrix-Kante ist strukturell nicht überspringbar."
+    },
+    "enforcer": {
+      "kurzinfo": "assertLiveOrderAllowed(venue) in src/live-gate/enforcer.ts — der einzige Torwächter vor jeder Venue-Order im Live-Pfad (Factory-Routing, Adapter placeOrder/getAccount/getPositions, Control-Plane-Anzeige, Ops-Center).",
+      "technischeInfo": "Prüfreihenfolge: Venue-Whitelist → Capability live → Kill-Switch (Memory + Failsafe-Datei) → State LIVE_ENABLED → VENUE_ENABLED → LIVE_TRADING_ENABLED → VENUE_LIVE_ENABLED → Human-Approval-Klausel → Security-Suite-Stamp (passed, runId, ≤ 7 d) → Control-Plane-Venue aktiv. Jeder Deny trägt einen Code (STATE_NOT_LIVE_ENABLED, PLATFORM_FLAG_MISSING, VENUE_FLAG_MISSING, VENUE_LIVE_FLAG_MISSING, HUMAN_APPROVAL_REQUIRED, SECURITY_SUITE_INVALID, KILL_SWITCH_ACTIVE, CONTROL_PLANE_UNKNOWN, CONTROL_PLANE_INACTIVE, VENUE_NOT_LIVE_CAPABLE, UNKNOWN_VENUE) und wird auditiert. Testmatrix: 9 States × 16 Flag-Kombinationen × Suite × Control Plane gegen Referenz-Oracle — 0 falsche Allows."
+    },
+    "killSwitch": {
+      "kurzinfo": "Kill aus JEDEM Zustand, sofort: Memory-Sperre + persistente Failsafe-Datei (kill-switch.json) + State-Reset + Audit; wirkt auch bei DB-/Netz-/Store-Ausfall.",
+      "technischeInfo": "Auslöser: UI (Phrase 'KILL'), POST /api/live/kill (Admin + CSRF + Phrase) oder CLI npm run live:kill (Notfall ohne HTTP). Scope ein Venue oder systemweit ('*'). Der Enforcer liest die Kill-Datei bei jeder Order-Entscheidung — sie dominiert selbst ein manipuliertes State-File. clear (Phrase 'CLEAR_KILL') entfernt die Sperre auditiert, öffnet aber kein Live: Zustand bleibt DISCONNECTED, der komplette Durchlauf inkl. 24 h Cooldown ist erneut nötig."
+    },
+    "audit": {
+      "kurzinfo": "Append-only Audit-Log (audit-log.ndjson) als SHA-256-Hash-Kette: jeder Übergang, Deny, Kill und jede Enforce-Entscheidung mit ts, actor, venue, from, to, result, reason, policyVersion.",
+      "technischeInfo": "hash = sha256 über kanonisches JSON (Feld-Reihenfolge fix), Genesis prevHash = 64 Nullen. verifyAuditChain() erkennt Verändern (Hash-Abweichung), Einfügen/Entfernen (seq-/prevHash-Bruch) und Truncation (Kettenkopf im State-File). Sichtbarkeit: GET /api/live/state (Kettenkopf, Integrität, letzte Einträge — Hashes gekürzt), DB audit_log (Event LIVE_GATE, best-effort), UI-Katalog LIVE_GATE (Task-08-Audit-View)."
+    },
+    "suiteStamp": {
+      "kurzinfo": "CI-Stamp der Security-Suite (data/live-gate/security-suite.json): Enforcer-Bedingung vor jeder Live-Order.",
+      "technischeInfo": "Job security-live-gate schreibt den Stamp (passed:true, runId, Commit-SHA, Alter ≤ LIVE_GATE_SUITE_MAX_AGE_MS, Default 7 Tage) und lädt ihn als Artefakt. npm run live:stamp schreibt manuell (--source=manual ist im Stamp sichtbar). Fehlt/ist zu alt/ist korrupt → SECURITY_SUITE_INVALID (fail-closed)."
+    },
+    "crashRecovery": {
+      "kurzinfo": "Atomares Schreiben (tmp + fsync + rename) und Intent-Protokoll: halboffene Transitionen nach Crash gelten als fehlgeschlagen (crash-recovery/ABORTED auditiert).",
+      "technischeInfo": "Der Zustand bleibt beim from-Zustand; korrupte State-Files führen fail-safe zu DISCONNECTED (Kopie als .corrupt-<ts> konserviert). Restart-Persistenz und Manipulationsfälle sind getestet (liveGate.persistence.test.ts)."
+    },
+    "api": {
+      "kurzinfo": "GET /api/live/state (read-only: Zustände, Flags, Cooldown, Suite, Kill, Audit-Kopf), POST /api/live/transition, POST /api/live/kill — Mutationen mit Permission live.gate, CSRF und 5/min/IP.",
+      "technischeInfo": "Fehlercodes: ILLEGAL_TRANSITION (409), UNKNOWN_STATE (422), COOLDOWN_ACTIVE (409), KILL_SWITCH_ACTIVE (409), STATE_NOT_LIVE_ENABLED (409), CONFIRM_REQUIRED (422), CSRF_INVALID (403), GATE_RATE_LIMITED (429). Kill-Phrase 'KILL' bzw. 'CLEAR_KILL' (422 CONFIRM_REQUIRED bei Abweichung)."
+    },
+    "ci": {
+      "kurzinfo": "GitHub-Actions-Job security-live-gate auf jedem PR/Push: typecheck, lint, Security-Suite (Matrix, Enforcement, Kill-Drill, Red-Team, Persistenz, E2E), Coverage-Tor ≥ 95 % Zeilen auf src/live-gate/**, Secret-Scan, Suite-Stamp-Artefakt.",
+      "technischeInfo": "Merge-blockierend, sobald der Check in der Branch-Protection von main als Required eingetragen ist (Einrichtung durch Repo-Admin, im PR beschrieben). Keine echten Orders in CI: Venue-Zugriffe laufen über zählende Mock-Ports; der Default-Test-Order-Port verweigert immer."
+    },
+    "limits": {
+      "kurzinfo": "Bekannte Grenzen (ehrlich): 4-Augen vergleicht Approver-Namen (keine zweite Token-Identität im RBAC-Kern), ORDER_TEST_OK/PAPER_APPROVED brauchen registrierte Provider (sonst unerreichbar, bewusst fail-closed), State/Kill-Datei sind Single-Node.",
+      "technischeInfo": "Follow-ups sind als Befunde LG-01…LG-04 im Security-Audit (docs/SECURITY_AUDIT.md, Kapitel Task 11) und in docs/PEER_REVIEW_LIVE_TRADING.md dokumentiert."
+    }
+  }
+}

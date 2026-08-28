@@ -8,9 +8,8 @@
  *   Status-Objekte: configured/connected/permissions[]/liveEnabled —
  *   NIE ein Secret, NIE ein keyHint (empfohlen: gar nicht — so umgesetzt).
  *
- * Live bleibt in diesem Task ueberall OFF: `liveEnabled` ist immer false
- * und stammt ausschliesslich aus readGateState() (Gate-Service-Meldung,
- * bis task-11 hart gesperrt). Es gibt keinen Schalter.
+ * Live: `liveEnabled` ist eine reine Projektion des zentralen Live-Gate-
+ * Enforcers (Task 11, readGateState) — Default false, kein Schalter hier.
  *
  * Zustandsmaschine: Uebergaenge nur via save/test/discover/disable —
  * Missbrauch wirft StateTransitionError (→ 409/422 mit klarem Fehler).
@@ -58,7 +57,7 @@ export interface StatusDto {
   configured: boolean;
   connected: boolean;
   permissions: string[];
-  liveEnabled: false;
+  liveEnabled: boolean;
   liveReason: string;
   discovery: { state: LayerStateValue; count: number; lastSync: string | null };
   health: {
@@ -76,7 +75,7 @@ export interface SaveResultDto {
   configured: true;
   connected: boolean;
   permissions: string[];
-  liveEnabled: false;
+  liveEnabled: boolean;
   probe: {
     state: "ok" | "error";
     at: string;
@@ -92,7 +91,7 @@ export interface TestResultDto {
   configured: boolean;
   connected: boolean;
   permissions: string[];
-  liveEnabled: false;
+  liveEnabled: boolean;
   health: { status: string; latencyMs: number; details: Record<string, unknown> };
 }
 
@@ -102,7 +101,7 @@ export interface DeleteResultDto {
   configured: false;
   connected: false;
   permissions: [];
-  liveEnabled: false;
+  liveEnabled: boolean;
 }
 
 export interface DiscoverResultDto {
@@ -148,6 +147,16 @@ function readState(venue: BrokerVenueId): VenueControlState {
     map.set(venue, state);
   }
   return state;
+}
+
+/**
+ * Öffentlicher, SYNCHRONER Lesezugriff auf den in-memory Control-Plane-Zustand
+ * (Task 11: Live-Gate-Bridge prüft „Venue aktiv"). Unbekannte Venue => frischer
+ * Initialzustand (alles off => nicht aktiv).
+ */
+export function readVenueControlStatePublic(venueRaw: string): VenueControlState {
+  const venue = normalizeVenue(venueRaw) ?? (String(venueRaw ?? "").toUpperCase().slice(0, 40) as BrokerVenueId);
+  return readState(venue);
 }
 
 function writeState(state: VenueControlState): void {
@@ -253,7 +262,7 @@ export class ControlPlaneService {
       configured: true,
       connected: next.connected,
       permissions: next.permissions,
-      liveEnabled: false,
+      liveEnabled: next.liveEnabled,
       probe: {
         state: probe.ok ? "ok" : "error",
         at: this.now(),
@@ -290,7 +299,7 @@ export class ControlPlaneService {
       configured: false,
       connected: false,
       permissions: [],
-      liveEnabled: false,
+      liveEnabled: next.liveEnabled,
     };
   }
 
@@ -300,7 +309,7 @@ export class ControlPlaneService {
     const store = this.store();
     const state = readState(venue);
     const configured = await store.exists(venue);
-    const gate = readGateState();
+    const gate = readGateState(venue);
     return {
       ok: true,
       venue,
@@ -374,7 +383,7 @@ export class ControlPlaneService {
       configured,
       connected: probe.connected,
       permissions: probe.permissions,
-      liveEnabled: false,
+      liveEnabled: next.liveEnabled,
       health: await this.safeHealth(venue),
     };
   }

@@ -22,9 +22,8 @@
       "risiko": "Admin ist nicht Live-Freigabe. live.gate bleibt leer bis Task 11."
     },
     "live.gate": {
-      "kurzinfo": "Permission, die niemand hat — Live bleibt gesperrt.",
-      "technischeInfo": "Katalogeintrag ohne Rollenzuweisung. requirePermission('live.gate') liefert immer 403. GET /api/ops.liveEnabled ist hart false.",
-      "risiko": "Eine Rolle mit live.gate vor Task 11 wäre ein Incident. Der Architekturtest prüft die Matrix."
+      "kurzinfo": "Permission für Live-Gate-Transitionen und Kill (Task 11): Admin-Rolle, CSRF-Pflicht, 5 Anfragen/min/IP.",
+      "technischeInfo": "POST /api/live/transition und POST /api/live/kill verlangen live.gate (heute Admin-Token FIRM_ADMIN_TOKEN) plus x-csrf-token (CSRF_INVALID bei Fehlen) plus Kill-Phrase ('KILL' bzw. 'CLEAR_KILL'). GET /api/live/state ist read-only und frei lesbar. Rate-Limit wie Credentials: 5/min/IP (429 GATE_RATE_LIMITED). Jede Aktion landet in der Audit-Hash-Kette."
     },
     "ops.modules": {
       "kurzinfo": "Karten im Operations Center: bereit, Phase 3 oder gesperrt.",

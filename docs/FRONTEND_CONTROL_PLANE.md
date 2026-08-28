@@ -44,8 +44,13 @@ Zustandsmodell und das Sicherheitskonzept der Broker Control Plane.
 3. Das Secret erscheint **niemals** in: API-Responses, Frontend-Bundle,
    Sourcemaps, LocalStorage/SessionStorage, URL-Parametern, Logs, Audit.
 4. **Live bleibt überall OFF.** `liveEnabled` ist die reine Anzeige der
-   Gate-Service-Meldung (`readGateState()`) und bis task-11 immer `false`.
-   Es gibt keinen Schalter, keine Env, keinen Endpoint, der das ändert.
+   Gate-Service-Meldung (`readGateState(venue)`) — seit Task 11 die Projektion
+   des zentralen Live-Gate-Enforcers (persistierte State-Machine, Default
+   `false`). Es gibt keinen Schalter, keine Env, keinen Endpoint der UI, der
+   das ändert; der **Live-Chip zeigt den Gate-Zustand** (LiveGatePanel im
+   Brokers-Tab: `GET /api/live/state` — Zustand je Venue, Flags, Suite-Stamp,
+   Kill-Status, Audit-Kettenkopf). Einzige UI-Mutation: der Kill-Switch
+   (Confirm-Dialog mit Phrase `KILL`, serverseitig geprüft).
 
 ---
 

@@ -69,6 +69,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Peer-Review: Live-/Paper-Trading",
     subtitle: "Bottlenecks der 6-Agenten-Pipeline, Code-Review, Tests und Handlungsplan",
   },
+  liveTrading: {
+    file: "docs/LIVE_TRADING.md",
+    title: "Live-Trading-Gate (Task 11)",
+    subtitle: "Auditierte State-Machine, Enforcement, Kill-Switch, Audit-Kette, CI (v1.19)",
+  },
   bitunix: {
     file: "docs/BITUNIX.md",
     title: "Bitunix-Adapter",
