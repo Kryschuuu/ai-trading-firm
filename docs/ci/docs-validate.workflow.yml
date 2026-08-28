@@ -1,0 +1,50 @@
+# CI-Job `docs-validate` (Task 12) — Docs-as-Code-Waechter.
+#
+# Verpflichtend fuer jeden PR (Basis-Level Security). Fuehrt `npm run docs:validate`
+# aus, das scripts/docs-validate.ts ruft:
+#   - Hilfe-Schema-Validierung aller docs/help/*.help.json gegen
+#     docs/help/help.schema.json (3-Ebenen-Systematik kurzinfo/technischeInfo/risiko),
+#   - relativer Link-Check innerhalb docs/ (0 tote relative Links/Anker),
+#   - Markdown-Lint (repo-konform: Code-Fences, ATX-Header, Trailing-Whitespace),
+#   - Secret-Scan ueber Docs (0 API-Keys/Tokens/private Schluessel/interne Hosts/PPI),
+#   - Konsistenz-Checks gegen den Code:
+#       Env-Flag-Namen in INSTALL.md == Flags im Code,
+#       API-Routen in docs/ == registrierte Routen (src/app/api),
+#       Zustandsnamen LIVE_TRADING.md == Live-Gate-Enum (src/live-gate/states.ts).
+#
+# MERGE-BLOCKADE: In der Branch-Protection von `main` als Required Status Check
+# `docs-validate` eintragen. Docs und Code werden im selben PR geaendert — nie
+# auseinander mergen.
+name: docs-validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-validate:
+    name: docs-validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22 + npm-Cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Abhaengigkeiten
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Docs-Validierung (Schema, Links, Lint, Secrets, Konsistenz)
+        run: npm run docs:validate
