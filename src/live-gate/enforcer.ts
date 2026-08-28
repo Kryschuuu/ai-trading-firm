@@ -122,13 +122,16 @@ export function evaluateLiveOrder(
   const config = liveGateConfig(env);
   const actor = opts.actor ?? "system";
 
+  // Flags werden IMMER aus der Env projiziert (auch bei frühen Denys —
+  // die Statusanzeige zeigt echte Flag-Lage, keine Nullen).
+  const flags = {
+    venueEnabled: false,
+    platformLive: platformLiveFromEnv(env),
+    venueLiveFlag: false,
+    requireHumanApproval: humanApprovalRequired(env),
+  };
   const base = {
-    flags: {
-      venueEnabled: false,
-      platformLive: platformLiveFromEnv(env),
-      venueLiveFlag: false,
-      requireHumanApproval: humanApprovalRequired(env),
-    },
+    flags,
     suite: null as LiveOrderDecision["suite"],
     controlPlaneActive: null as boolean | null,
     killed: false,
@@ -175,31 +178,27 @@ export function evaluateLiveOrder(
   // 2) Capability live (PAPER: false → kann nie live)
   const caps = VENUE_CAPABILITIES[venue];
   if (!caps || caps.live !== true) {
-    return finish(false, "VENUE_NOT_LIVE_CAPABLE", `Adapter-Capability live=false für ${venue}.`, venue, null);
+    return finish(false, "VENUE_NOT_LIVE_CAPABLE", `Adapter-Capability live=false für ${venue}.`, venue, null, { flags });
   }
 
   // 3) Kill-Switch (Memory + persistente Failsafe-Datei)
   const kill = runtime.isKilled(venue);
   if (kill) {
-    return finish(false, "KILL_SWITCH_ACTIVE", `Kill-Switch aktiv (scope ${kill.scope}, ${kill.at}, actor ${kill.actor}): ${kill.reason}`, venue, null, { killed: true });
+    return finish(false, "KILL_SWITCH_ACTIVE", `Kill-Switch aktiv (scope ${kill.scope}, ${kill.at}, actor ${kill.actor}): ${kill.reason}`, venue, null, { killed: true, flags });
   }
 
   // 4) Machine-State (persistiert; Lese-Fehler → DISCONNECTED → deny)
   const record = runtime.store.read(venue);
   const state = record.state;
+  flags.venueEnabled = venueEnabledFromEnv(venue, env);
+  flags.venueLiveFlag = venueLiveFlagFromEnv(venue, env);
+
   if (!opts.skipStateCheck && state !== "LIVE_ENABLED") {
-    return finish(false, "STATE_NOT_LIVE_ENABLED", `Live-Gate-State ist ${state}, nicht LIVE_ENABLED — kompletter Durchlauf der State-Machine erforderlich.`, venue, state);
+    return finish(false, "STATE_NOT_LIVE_ENABLED", `Live-Gate-State ist ${state}, nicht LIVE_ENABLED — kompletter Durchlauf der State-Machine erforderlich.`, venue, state, { flags });
   }
   if (opts.skipStateCheck && state !== "HUMAN_APPROVED" && state !== "LIVE_ENABLED") {
-    return finish(false, "STATE_NOT_LIVE_ENABLED", `Enablement-Voraussetzung verlangt State HUMAN_APPROVED/LIVE_ENABLED, ist aber ${state}.`, venue, state);
+    return finish(false, "STATE_NOT_LIVE_ENABLED", `Enablement-Voraussetzung verlangt State HUMAN_APPROVED/LIVE_ENABLED, ist aber ${state}.`, venue, state, { flags });
   }
-
-  const flags = {
-    venueEnabled: venueEnabledFromEnv(venue, env),
-    platformLive: platformLiveFromEnv(env),
-    venueLiveFlag: venueLiveFlagFromEnv(venue, env),
-    requireHumanApproval: humanApprovalRequired(env),
-  };
 
   // 5) Venue-Adapter-Flag
   if (!flags.venueEnabled) {

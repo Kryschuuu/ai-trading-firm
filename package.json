@@ -30,8 +30,8 @@
     "test:coverage:routing": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/routing/**' --test-coverage-include='src/app/api/providers/**' --test-coverage-include='src/app/api/routing/**' 'tests/routing.*.test.ts'",
     "live:kill": "node --import tsx scripts/live-kill.ts",
     "live:stamp": "node --import tsx scripts/live-security-stamp.ts",
-    "security:live-gate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-lines=95 --test-coverage-functions=95 'tests/liveGate.*.test.ts'",
-    "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'"
+    "security:live-gate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
+    "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",

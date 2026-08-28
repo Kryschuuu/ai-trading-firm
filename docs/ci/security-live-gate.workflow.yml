@@ -1,0 +1,80 @@
+# CI-Job `security-live-gate` (Task 11) — merge-blockierend.
+#
+# Führt die Security-Test-Suite des Live-Trading-Gates aus:
+#   - vollständige Transitionsmatrix (9 Zustaende x 8 legale Uebergaenge,
+#     alle illegalen Kombinationen abgelehnt),
+#   - Enforcement-Matrix (9 States x Flags x Suite x Control Plane — nur die
+#     exakt erlaubte Konstellation laesst eine Live-Order zu),
+#   - Kill-Switch-Drill aus allen 9 Zustaenden inkl. Failsafe-Datei,
+#   - Crash-/Persistenz- und Audit-Ketten-Integritaetstests,
+#   - Red-Team-Regressionen (Bypass, Flag-Manipulation, Audit-Manipulation),
+#   - Coverage-Tor: >= 95 % Zeilen auf src/live-gate/**
+#     (Funktionendeckung wird berichtet; unter tsx zaehlen Phantom-Module
+#     (CJS/ESM-Duplikate) in die Funktionenquote — Zeilen sind das Tor),
+#   - keine echten Orders: alle Venue-Zugriffe laufen ueber Mock-Ports.
+#
+# MERGE-BLOCKADE: Dieser Job muss in der Branch-Protection von `main` als
+# Required Status Check `security-live-gate` eingetragen werden (siehe
+# docs/LIVE_TRADING.md, Abschnitt CI). Kein PR mit Live-Trading-Code wird
+# gemerged, solange dieser Job nicht gruen ist.
+#
+# Nach grüner Suite schreibt der Job den Security-Suite-Stamp
+# (data/live-gate/security-suite.json) und laedt ihn als Artefakt hoch —
+# der Enforcer verlangt einen gueltigen Stamp vor jeder Live-Order.
+name: security-live-gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  security-live-gate:
+    name: security-live-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://test:test@0.0.0.0:5432/test
+      STARTING_EQUITY: "10000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22 + npm-Cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Abhaengigkeiten
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Security-Suite Live-Gate (Matrix, Kill-Drill, Red-Team, Coverage >= 95 %)
+        run: npm run security:live-gate
+
+      - name: Secret-Scan (Quellcode-Muster)
+        run: node --import tsx scripts/scan-live-gate-secrets.ts
+
+      - name: Security-Suite-Stamp schreiben (Deployment-Artefakt)
+        run: |
+          node --import tsx scripts/live-security-stamp.ts \
+            --run-id="gha-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --sha="${{ github.sha }}" \
+            --source=ci
+
+      - name: Suite-Stamp als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-gate-security-suite
+          path: data/live-gate/security-suite.json
+          if-no-files-found: error
+          retention-days: 90

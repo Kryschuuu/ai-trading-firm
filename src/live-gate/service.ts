@@ -121,7 +121,12 @@ export interface LiveGateOverview {
   audit: {
     head: { seq: number; hash: string } | null;
     integrity: { ok: boolean; entries: number; firstBrokenSeq: number | null; problem: string | null };
-    recent: LiveGateAuditEntry[];
+    recent: Array<
+      Pick<LiveGateAuditEntry, "seq" | "ts" | "actor" | "venue" | "from" | "to" | "action" | "result" | "reason"> & {
+        /** Gekürzt (12 Zeichen) — volle Hashes nur in der NDJSON-Datei. */
+        hash: string;
+      }
+    >;
   };
 }
 
@@ -395,14 +400,9 @@ export class LiveGateService {
     if (from === "LIVE_PENDING" && to !== "LIVE_PENDING") commit.livePendingAt = null;
     commit.history.transitions += 1;
     commit.history.lastTransitionAt = commit.updatedAt;
-    commit.auditHead = this.runtime.audit.chainHead();
-    try {
-      this.runtime.store.write(venue, commit);
-    } catch (err) {
-      this.auditDeny({ actor, venue, from, to, code: "STATE_WRITE_FAILED", detail: `Commit nicht persistierbar: ${(err as Error).message}` });
-      throw new LiveGateError("STATE_WRITE_FAILED", "Transition-Commit konnte nicht persistiert werden — Transition gilt als fehlgeschlagen (fail-safe).");
-    }
-
+    // Audit-VOR-Commit (besser ein verwaistes OK als eine unaudierte
+    // Zustandsänderung); der Kettenkopf inkl. des OK-Eintrags wird im
+    // State-File dokumentiert (Truncation-Erkennung des Audits).
     this.runtime.audit.append({
       actor,
       venue,
@@ -415,6 +415,13 @@ export class LiveGateService {
           ? `Checks bestanden: ${checks.map((c) => `${c.id}=ok`).join(", ")}`
           : (input.reason ?? "").trim().slice(0, 200) || "Admin-Aktion (Policy-Übergang).",
     });
+    commit.auditHead = this.runtime.audit.chainHead();
+    try {
+      this.runtime.store.write(venue, commit);
+    } catch (err) {
+      this.auditDeny({ actor, venue, from, to, code: "STATE_WRITE_FAILED", detail: `Commit nicht persistierbar: ${(err as Error).message}` });
+      throw new LiveGateError("STATE_WRITE_FAILED", "Transition-Commit konnte nicht persistiert werden — Transition gilt als fehlgeschlagen (fail-safe).");
+    }
 
     return { ok: true, venue, from, to, checks, at: commit.updatedAt as string };
   }
@@ -646,14 +653,30 @@ export class LiveGateService {
       },
       venues: [...BROKER_VENUE_IDS].map((v) => this.snapshot(v)),
       audit: {
-        head: this.runtime.audit.chainHead(),
+        head: (() => {
+          const head = this.runtime.audit.chainHead();
+          // Gekürzter Hash in der API (Secret-Scanner-freundlich, schlanke
+          // Antwort); die volle Kette steht in der NDJSON-Datei.
+          return head ? { seq: head.seq, hash: `${head.hash.slice(0, 12)}…` } : null;
+        })(),
         integrity: {
           ok: verification.ok,
           entries: verification.entries,
           firstBrokenSeq: verification.firstBrokenSeq,
           problem: verification.problem,
         },
-        recent: this.runtime.audit.recent(20),
+        recent: this.runtime.audit.recent(20).map((e) => ({
+          seq: e.seq,
+          ts: e.ts,
+          actor: e.actor,
+          venue: e.venue,
+          from: e.from,
+          to: e.to,
+          action: e.action,
+          result: e.result,
+          reason: e.reason,
+          hash: `${e.hash.slice(0, 12)}…`,
+        })),
       },
     };
   }

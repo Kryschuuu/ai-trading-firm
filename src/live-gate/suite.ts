@@ -5,7 +5,9 @@
  * Der Enforcer verlangt vor jeder Live-Order einen GÜLTIGEN Stamp:
  *   { schemaVersion, passed: true, runId, sha, at, source: "ci" | "manual" }
  *
- * Wer schreibt den Stamp? Der CI-Job `.github/workflows/security-live-gate.yml`
+ * Wer schreibt den Stamp? Der CI-Job `security-live-gate` (Quelle:
+ * docs/ci/security-live-gate.workflow.yml → .github/workflows/; Installation
+ * durch den Repo-Owner, siehe docs/LIVE_TRADING.md Abschnitt CI)
  * nach grüner Suite (`npm run live:stamp -- --run-id=… --sha=… --source=ci`).
  * Der Stamp ist ein DEPLOYMENT-ARTEFAKT (data/live-gate/security-suite.json),
  * kein Repo-File — er muss mit dem Release ausgeliefert werden. Ein lokal
