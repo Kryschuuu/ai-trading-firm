@@ -12,7 +12,17 @@
 
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { chatLlm, type LlmChatRequest } from "@/lib/llmProvider";
+import { chatLlm } from "@/lib/llmProvider";
+import {
+  escalationFromRuntime,
+  getModelRouter,
+  routeChat,
+  routingMeta,
+  type ModelRouter,
+  type RoutedChatResult,
+  type RoutedChatSpec,
+} from "@/routing";
+import type { RoutingTask } from "@/routing/types";
 import {
   type AnalysisAgentPort,
   type AnalyticsPort,
@@ -231,10 +241,50 @@ export class StubAnalyticsPort implements AnalyticsPort {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Standard-Agent-Port unter Nutzung von chatLlm (src/lib/llmProvider.ts).
- * Erzwingt strukturierte Datentrennung und JSON-Schema-Validierung.
+ * Zuordnung Agentenrolle → Routing-Task (Whitelist des Model Routers).
+ *
+ * WICHTIG (Task 09, Regel 1): Der Task ist eine **vom Code vergebene** ID.
+ * Sie stammt nie aus Prompt-Inhalten, sondern aus der Rolle des Schritts.
+ */
+export const ROLE_TASK_MAP: Readonly<Record<string, RoutingTask>> = {
+  MARKET_SCANNER: "market_ranking",
+  MACRO_ANALYST: "regime_analysis",
+  MARKET_SELECTION: "market_selection",
+  TECHNICAL_ANALYST: "technical_analysis_standard",
+  NEWS_ANALYST: "news_categorization",
+  RISK_MANAGER: "simple_risk_decision",
+  RESEARCH: "research",
+  BACKTEST_VERIFICATION: "json_classification",
+  WEEKLY_REVIEW: "weekly_report",
+};
+
+/** Routing-Task einer Rolle (unbekannte Rollen → "default"). */
+export function roleToRoutingTask(role: string): RoutingTask {
+  return ROLE_TASK_MAP[role.toUpperCase()] ?? "default";
+}
+
+/**
+ * Standard-Agent-Port (Task 09): Der LLM-Pfad läuft über den MODEL_ROUTER.
+ *
+ *   invokeAgent() → routeChat() → router.resolve() → chatLlm(Kette)
+ *
+ * Der Agent bestimmt das Modell NICHT selbst: `MODEL_*`-Environment-Werte
+ * werden ignoriert (Governance), die Entscheidung kommt ausschliesslich aus der
+ * versionierten Policy. Externe Daten bleiben strikt getrennt (Payload-Hülle),
+ * Ausgaben werden gegen das Schema validiert.
  */
 export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
+  /**
+   * Injektionen für Tests: `chatFn` ersetzt den echten Provider-Aufruf,
+   * `router` den Router-Singleton. Im Produktivbetrieb bleiben beide leer.
+   */
+  constructor(
+    private readonly deps: {
+      chatFn?: typeof chatLlm;
+      router?: ModelRouter;
+    } = {}
+  ) {}
+
   async invokeAgent<T>(spec: AgentInvocationSpec<T>): Promise<AgentInvocationResult<T>> {
     let payloadPrompt = spec.userPrompt;
     if (spec.untrustedData !== undefined) {
@@ -246,10 +296,17 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
       )}\n=== END UNTRUSTED MARKET DATA ===\n`;
     }
 
-    const req: LlmChatRequest = {
-      model: process.env[`MODEL_${spec.role}`] || process.env.LLM_MODEL || "qwen2.5:3b-instruct-q4_K_M",
+    const routedSpec: RoutedChatSpec = {
+      agent: spec.role,
+      task: roleToRoutingTask(spec.role),
+      complexity: spec.complexity ?? "medium",
+      // Analyse-Schritte platzieren keine Orders ⇒ Risikostufe "low".
+      risk: "low",
       messages: [
-        { role: "system", content: `${spec.systemPrompt}\nRespond strictly with valid JSON conforming to the requested schema.` },
+        {
+          role: "system",
+          content: `${spec.systemPrompt}\nRespond strictly with valid JSON conforming to the requested schema.`,
+        },
         { role: "user", content: payloadPrompt },
       ],
       json: true,
@@ -257,46 +314,14 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
     };
 
     try {
-      const result = await chatLlm(req);
-      const rawText = result.content;
-      const parsedJson = safeExtractJson<unknown>(rawText);
-
-      let escalation: ModelEscalationRequest | undefined;
-      if (spec.escalationCheck) {
-        const esc = spec.escalationCheck(rawText, parsedJson.data);
-        if (esc) {
-          escalation = { ...esc, timestamp: new Date().toISOString() };
-        }
-      }
-
-      if (!parsedJson.ok || parsedJson.data === undefined) {
-        return {
-          output: spec.fallback,
-          rawText,
-          usedFallback: true,
-          modelUsed: result.model,
-          escalation,
-        };
-      }
-
-      const validated = spec.schemaValidator(parsedJson.data);
-      if (!validated.valid || validated.data === undefined) {
-        return {
-          output: spec.fallback,
-          rawText,
-          usedFallback: true,
-          modelUsed: result.model,
-          escalation,
-        };
-      }
-
-      return {
-        output: validated.data,
-        rawText,
-        usedFallback: false,
-        modelUsed: result.model,
-        escalation,
-      };
+      const routed = await routeChat(routedSpec, {
+        ...(this.deps.router ? { router: this.deps.router } : {}),
+        ...(this.deps.chatFn ? { chatFn: this.deps.chatFn } : {}),
+      });
+      return this.finishInvocation<T>(spec, routed.content, routed.model, {
+        usedFallback: routed.usedFallback,
+        routing: routed,
+      });
     } catch {
       return {
         output: spec.fallback,
@@ -305,6 +330,130 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
         modelUsed: "fallback",
       };
     }
+  }
+
+  /**
+   * Gemeinsame Nachbearbeitung: JSON-Extraktion, Schema-Validierung und
+   * EskalationsprÜfung. Eine Eskalation wird **nur vom Router** entschieden —
+   * bei Genehmigung folgt genau EIN erneuter Aufruf mit dem eskalierten Modell.
+   */
+  private async finishInvocation<T>(
+    spec: AgentInvocationSpec<T>,
+    rawText: string,
+    modelUsed: string,
+    opts: { usedFallback: boolean; routing?: RoutedChatResult }
+  ): Promise<AgentInvocationResult<T>> {
+    const parsedJson = safeExtractJson<unknown>(rawText);
+
+    let escalation: ModelEscalationRequest | undefined;
+    if (spec.escalationCheck) {
+      const esc = spec.escalationCheck(rawText, parsedJson.data);
+      if (esc) {
+        escalation = { ...esc, timestamp: new Date().toISOString() };
+      }
+    }
+
+    const routingMetaOut = opts.routing ? routingMeta(opts.routing) : {};
+
+    if (!parsedJson.ok || parsedJson.data === undefined) {
+      return {
+        output: spec.fallback,
+        rawText,
+        usedFallback: true,
+        modelUsed,
+        escalation,
+        routing: routingMetaOut,
+      };
+    }
+
+    const validated = spec.schemaValidator(parsedJson.data);
+    if (!validated.valid || validated.data === undefined) {
+      return {
+        output: spec.fallback,
+        rawText,
+        usedFallback: true,
+        modelUsed,
+        escalation,
+        routing: routingMetaOut,
+      };
+    }
+
+    // Eskalation: der Agent beantragt, der ROUTER entscheidet (Regel 1).
+    if (escalation) {
+      const outcome = await this.requestEscalation(spec, escalation);
+      if (outcome) return outcome;
+    }
+
+    return {
+      output: validated.data,
+      rawText,
+      usedFallback: false,
+      modelUsed,
+      escalation,
+      routing: routingMetaOut,
+    };
+  }
+
+  /** Fragt den Router; bei Genehmigung folgt maximal EIN erneuter Aufruf. */
+  private async requestEscalation<T>(
+    spec: AgentInvocationSpec<T>,
+    escalation: ModelEscalationRequest
+  ): Promise<AgentInvocationResult<T> | null> {
+    const router = this.deps.router ?? getModelRouter();
+    const escalationDecision = router.requestEscalation(
+      escalationFromRuntime({
+        agent: spec.role,
+        task: roleToRoutingTask(spec.role),
+        complexity: escalation.complexity,
+        confidence: escalation.confidence,
+        currentModel: escalation.currentModel,
+        currentClass: escalation.currentClass,
+        requestedClass: escalation.requestedClass,
+        tokenOvershoot: escalation.tokenOvershoot,
+        latencyViolation: escalation.latencyViolation,
+        reason: escalation.reason,
+      })
+    );
+
+    if (!escalationDecision.approved || !escalationDecision.decision) {
+      return null; // denied ⇒ Agent läuft mit dem aktuellen Modell weiter
+    }
+
+    // Genehmigt: EIN erneuter Aufruf mit dem eskalierten Modell.
+    const routed = await routeChat(
+      {
+        agent: spec.role,
+        task: roleToRoutingTask(spec.role),
+        complexity: escalation.complexity,
+        risk: "low",
+        messages: [
+          { role: "system", content: spec.systemPrompt },
+          { role: "user", content: spec.userPrompt },
+        ],
+        json: true,
+        temperature: 0.1,
+      },
+      {
+        forcedDecision: escalationDecision.decision,
+        ...(this.deps.router ? { router: this.deps.router } : {}),
+        ...(this.deps.chatFn ? { chatFn: this.deps.chatFn } : {}),
+      }
+    );
+
+    const parsed = safeExtractJson<unknown>(routed.content);
+    const validated = parsed.ok && parsed.data !== undefined ? spec.schemaValidator(parsed.data) : null;
+    return {
+      output: validated && validated.valid && validated.data !== undefined ? validated.data : spec.fallback,
+      rawText: routed.content,
+      usedFallback: routed.usedFallback || !validated?.valid,
+      modelUsed: routed.model,
+      escalation,
+      routing: {
+        ...routingMeta(routed),
+        escalationApproved: true,
+        escalationTrigger: escalationDecision.trigger,
+      },
+    };
   }
 }
 
