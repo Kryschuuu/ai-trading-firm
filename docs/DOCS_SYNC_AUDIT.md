@@ -11,7 +11,7 @@
 
 ## Zusammenfassung
 
-- **Geprüfte Behauptungen:** 60 (Stichprobe über alle Zieldokumente + Root-Docs).
+- **Geprüfte Behauptungen:** 99 (Stichprobe über alle Zieldokumente + Root-Docs).
 - **Diskrepanzen gefunden:** 13 → **alle behoben** (Fix in Docs/Help bzw. Validator-Präzisierung).
 - **0 offene Diskrepanzen** zum Stand 2026-08-28.
 - **Secret-Scan über Docs:** 0 Funde (echte Keys/Secrets).
@@ -221,7 +221,7 @@
 ## Restrisiken
 
 1. **Funktional unverifizierte Tiefen-Behauptungen:** Der Audit stützt sich auf
-   repräsentative Code-Stichproben (60 Claims) + automatisierte Konsistenz-Checks.
+   repräsentative Code-Stichproben (99 Claims) + automatisierte Konsistenz-Checks.
    Einzelne tief verschachtelte Formel-Details in den Modul-Docs wurden nicht
    zeilenweise neu berechnet (dort sichern bestehende `*.architecture.test.ts`
    die Übereinstimmung, z. B. `scanner/portfolio/cycle`).

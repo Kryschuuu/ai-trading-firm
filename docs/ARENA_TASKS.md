@@ -59,7 +59,7 @@ Kill-Switch (task-11) — aktiviert kein Live`.
 - CI-Job `docs-validate` (`docs/ci/docs-validate.workflow.yml`, `scripts/docs-validate.ts`,
   npm-Skript `docs:validate`): Schema, Link-Check, Markdown-Lint, Secret-Scan,
   Konsistenz-Checks (Env-Flags / API-Routen / State-Enum).
-- Audit-Report `docs/DOCS_SYNC_AUDIT.md`: 60 verifizierte Behauptungen,
+- Audit-Report `docs/DOCS_SYNC_AUDIT.md`: 99 verifizierte Behauptungen,
   13 Diskrepanzen → 0 offen.
 - Security-Kapitel Task 12 in `SECURITY_AUDIT.md`.
 
