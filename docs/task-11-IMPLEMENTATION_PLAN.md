@@ -75,7 +75,7 @@ Audit. PAPER kann nie live (Capability false).
 - `POST /api/live/transition` (Permission `live.gate`, CSRF, Rate-Limit 5/min).
 - `POST /api/live/kill` (Admin + Confirm-Phrase `KILL` serverseitig; `action:"clear"` + `CLEAR_KILL`).
 - CLI: `npm run live:kill -- --venue=BITunix [--scope=all] [--reason=…] [--clear]`.
-- CI: `.github/workflows/security-live-gate.yml` → Typecheck, Lint,
+- CI: Job-Quelle `docs/ci/security-live-gate.workflow.yml` (Kopie nach `.github/workflows/` durch Owner) → Typecheck, Lint,
   `npm run security:live-gate` (Matrix-/Kill-Drill-/Red-Team-/E2E-Tests +
   Coverage-Tor ≥ 95 % Zeilen auf `src/live-gate/**`), Secret-Scan, Suite-Stamp.
   Merge-Blockade über Required-Check `security-live-gate` (Branch Protection).

@@ -34,7 +34,7 @@ export default function BrokersPage() {
         <BrokersPanel />
         <footer className="mt-10 text-center text-xs text-slate-600">
           Broker Control Plane · Ausschliesslich Paper-Trading — Live bleibt
-          gesperrt (Gate-Service: task-11).
+          gesperrt (Live-Gate-State-Machine, Task 11 — Default DISCONNECTED).
         </footer>
       </div>
     </main>

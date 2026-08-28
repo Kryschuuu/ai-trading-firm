@@ -20,6 +20,121 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.19.0] — 2026-08-28
+
+**Live-Trading-Gate — auditierte State-Machine (Task 11):** 9 Zustände, 8
+legale Übergänge mit objektiven Checks, Human-Gate mit 24 h Cooldown und
+4-Augen-Modus, Single-Point-Enforcer vor jeder Venue-Order, Kill-Switch mit
+persistenter Failsafe-Datei, append-only Audit mit SHA-256-Hash-Kette,
+merge-blockierender CI-Job `security-live-gate`. **Dieser Task aktiviert
+KEIN Live-Trading** — der Default bleibt DISCONNECTED/off, jede Live-Order
+wird weiterhin verweigert (jetzt mit konkretem Deny-Code statt blindem
+Throw). Kein Task 12.
+
+### Neu: `src/live-gate/` (State-Machine + Enforcement)
+
+- **Zustände:** `DISCONNECTED → CONNECTED → MARKET_DATA_OK →
+  ACCOUNT_READ_OK → ORDER_TEST_OK → PAPER_APPROVED → LIVE_PENDING →
+  HUMAN_APPROVED → LIVE_ENABLED`; exakt 8 legale Übergänge
+  (`LIVE_GATE_TRANSITIONS`), jede andere Kombination → `ILLEGAL_TRANSITION`
+  + Audit. Matrix-Test: 81 Kombinationen, 8 erlaubt, 73 abgelehnt,
+  0 Durchlässe.
+- **Checks je Übergang** (objektiv über `BrokerGatePort`, read-only bzw.
+  simuliert): Health, Public-Ticker, Control-Plane-Probe, Test-Order
+  (nur simuliert — Default-Port verweigert bewusst, kein Bitunix-Testnet
+  dokumentiert), Paper-Kriterium (≥ `LIVE_GATE_PAPER_MIN_ORDERS`, Default
+  50, fehlerfrei). Werfender Port → fail-closed `CHECK_FAILED`.
+- **Human-Gate:** Admin-Antrag (`LIVE_PENDING`) → Cooldown 24 h
+  (`LIVE_GATE_COOLDOWN_MS`, 0 = aus, max 30 d, Deny mit `retryAt`) →
+  Freigabe nur mit `confirm:true` + Grund + Approver;
+  `LIVE_GATE_FOUR_EYES=true` verlangt zwei verschiedene Approver.
+- **Enforcer (Single Point of Enforcement):** `assertLiveOrderAllowed(venue)`
+  entscheidet vor jeder Venue-Order im Live-Pfad (Factory-Routing,
+  Bitunix-Adapter placeOrder/getAccount/getPositions, Control-Plane-Anzeige,
+  Ops-Center): Kill-Switch → State → 3 Flags → Human-Klausel → Suite-Stamp →
+  Control Plane. Jeder Deny mit maschinenlesbarem Code + Audit. Testmatrix
+  9 States × 16 Flag-Kombis × Suite × CP gegen Referenz-Oracle: 0 falsche
+  Allows. PAPER kann nie live (`VENUE_NOT_LIVE_CAPABLE`).
+- **Kill-Switch:** aus jedem Zustand sofort; Memory-Sperre + persistente
+  Failsafe-Datei `data/live-gate/kill-switch.json` + State-Reset + Audit;
+  wirkt bei DB-/Netz-/Store-Ausfall. Scope je Venue oder systemweit. Clear
+  (`CLEAR_KILL`) auditiert, öffnet aber kein Live — kompletter Neudurchlauf
+  nötig. UI-Confirm mit Phrase `KILL`.
+- **Audit-Hash-Kette:** `data/live-gate/audit-log.ndjson`, kanonisches JSON,
+  `prevHash`+`sha256`; `verifyAuditChain()` erkennt Verändern, Einfügen,
+  Entfernen, Truncation. Sichtbar in `/api/live/state`, DB `audit_log`
+  (Event `LIVE_GATE`), UI-Katalog `LIVE_GATE`.
+- **Persistenz/Recovery:** atomares Schreiben (tmp+fsync+rename),
+  Intent-Protokoll: halboffene Transitionen nach Crash → `crash-recovery/
+  ABORTED` auditiert, Zustand bleibt konsistent; korrupte Files →
+  fail-safe DISCONNECTED.
+- **Security-Suite-Stamp:** Enforcer verlangt gültigen CI-Stamp (passed,
+  runId, ≤ `LIVE_GATE_SUITE_MAX_AGE_MS`, Default 7 Tage).
+
+### Neu: API + UI + CLI
+
+- `GET /api/live/state` (read-only: Zustand je Venue, Flags, Cooldown-Rest,
+  Suite, Kill-Status, Audit-Kopf + Integrität; Hashes gekürzt).
+- `POST /api/live/transition` / `POST /api/live/kill`: Permission `live.gate`
+  (Admin), CSRF-Pflicht, Rate-Limit 5/min/IP; Kill-Phrase-Contract.
+- UI: LiveGatePanel im Brokers-Tab (Zustandssteine, Flags, Suite, Kill mit
+  Confirm-Dialog); BrokerCard-Live-Chip zeigt jetzt den Gate-Zustand.
+- CLI: `npm run live:kill` (Notfall-Kill ohne HTTP), `npm run live:stamp`
+  (manueller Suite-Stamp, `--source=manual` sichtbar).
+
+### Neu: Security-Test-Suite + CI (merge-blockierend)
+
+- 8 Suite-Dateien, 78 Tests: Transitionsmatrix (0 Durchlässe),
+  Enforcement-Matrix vs. Oracle, Kill-Drill aus allen 9 Zuständen,
+  Crash-/Persistenz-, Audit-Manipulations- (4 Fälle) und E2E-Tests,
+  API-Guards (Admin/CSRF/Rate-Limit), statische Red-Team-Architektur-
+  Regressionen, Unit-Kanten; alle Venue-Zugriffe über zählende Mock-Ports —
+  **keine echten Orders in CI**.
+- `npm run security:live-gate`: Suite + Coverage-Tor **≥ 95 % Zeilen** auf
+  `src/live-gate/**` (erreicht: 95,81 %).
+- CI-Job `security-live-gate` auf jedem PR/Push (typecheck, lint, Suite,
+  Secret-Scan `scripts/scan-live-gate-secrets.ts`, Stamp-Artefakt). Die
+  Job-Quelle liegt bei `docs/ci/security-live-gate.workflow.yml` (das
+  Arena-Bot-Token darf keine Workflow-Dateien schreiben). **Einrichtung
+  nötig (Owner, einmalig):** Datei nach `.github/workflows/` kopieren +
+  Check `security-live-gate` als Required Status Check in der
+  Branch-Protection von `main` eintragen (Anleitung in der Job-Datei).
+
+### Neu: Dokumentation
+
+- `docs/LIVE_TRADING.md` (neu): Zustands-Diagramm, Bedingungen, Human-Gate,
+  Enforcement, Kill-Runbook, Audit-Format, API/CLI, CI, Grenzen.
+- `docs/SECURITY_AUDIT.md`: Kapitel Task 11 (Threat Model T1–T12,
+  Red-Team-Checkliste, Ergebnisprotokoll, Befunde LG-01…04 — kein
+  High/Critical).
+- `docs/PEER_REVIEW_LIVE_TRADING.md`: versionierte Review-Vorlage v1
+  (Abschnitte A–G, Unterschriftenfelder).
+- `docs/help/live-gate.help.json` (neu), `brokers.help.json` +
+  `ops.help.json` aktualisiert; `docs/ARENA_TASKS.md` (neu) dokumentiert
+  alle Arena-Tasks 01–11; `docs/README.md`-Index ergänzt; Docs-API-Whitelist
+  `liveTrading` ergänzt.
+
+### Geändert
+
+- Broker-Factory `getBroker(venue, "live")`: entscheidet jetzt der
+  Live-Gate-Enforcer (statt blindem Throw) — Default unverändert deny.
+- Bitunix-Adapter: ruft `assertLiveOrderAllowed` in jedem Live-Pfad;
+  `readGateState()` liefert Enforcer-Projektion.
+- `package.json`: Skripte `security:live-gate`, `test:coverage:livegate`,
+  `live:kill`, `live:stamp`; `.env.example`: Task-11-Sektion;
+  `.gitignore`: `/data/live-gate`.
+
+### Upgrade-Hinweise
+
+- Keine DB-Migration, keine neuen Pflicht-Env-Variablen. Verhalten für
+  Bestandsnutzer unverändert (Live bleibt off).
+- Neue optionale Env-Variablen: `LIVE_GATE_DATA_DIR` (Default
+  `data/live-gate`), `LIVE_GATE_COOLDOWN_MS` (86400000),
+  `LIVE_GATE_FOUR_EYES` (false), `LIVE_GATE_PAPER_MIN_ORDERS` (50),
+  `LIVE_GATE_SUITE_MAX_AGE_MS` (604800000).
+
+---
+
 ## [1.18.0] — 2026-08-28
 
 **Operations Center + RBAC-Kern (Task 10, Phase 1):** Rollen

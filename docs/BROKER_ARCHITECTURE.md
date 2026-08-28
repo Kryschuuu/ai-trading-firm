@@ -20,10 +20,13 @@ Plattform. Es ersetzt die reine Capability-Dokumentation der alten
    agents, API) kennt nur `BrokerAdapter` aus `src/contracts/broker.ts`.
 2. **Execution Modes als erstklassiges Konzept** — feste Semantik (s. §2),
    kein implizites Verhalten.
-3. **Fail-Safe:** `getBroker(venue, "live")` wirft standardmäßig **IMMER**
-   `LiveTradingGateError`. Es gibt keinen stillschweigenden Fallback auf
-   Paper. Der Live-Pfad wird erst durch den Live-Trading-Gate-Task
-   (State-Machine + Hard-Gates) geöffnet.
+3. **Fail-Safe:** `getBroker(venue, "live")` wird seit Task 11 durch den
+   **zentralen Live-Gate-Enforcer** entschieden (`src/live-gate/enforcer.ts`):
+   Default bleibt `LiveTradingGateError` (State DISCONNECTED, Flags aus,
+   kein Suite-Stamp). Erlaubt ist ein Live-Adapter nur nach komplettem,
+   auditierbarem Durchlauf der Live-Gate-State-Machine — siehe
+   [LIVE_TRADING.md](LIVE_TRADING.md). Es gibt keinen stillschweigenden
+   Fallback auf Paper.
 4. **Kein Netzwerkverkehr zu echten Brokern** in dieser Stufe — ausnahme:
    read-only Health-Checks hinter `BROKER_HEALTHCHECK_REMOTE` (Default OFF).
 5. **Audit:** Jeder Factory-Aufruf mit `mode != "paper"` landet im Audit-Log
@@ -42,7 +45,8 @@ Plattform. Es ersetzt die reine Capability-Dokumentation der alten
 
 Gating: `backtest`/`paper` verlangen `capabilities.paper` (simulierte Order),
 `testnet` verlangt `capabilities.testnet`, `live` wird **vor** jeder
-Capability-Prüfung durch `LiveTradingGateError` gestoppt (Tabelle in
+Capability-Prüfung durch den Live-Gate-Enforcer entschieden (State-Machine +
+Flags + Suite + Control Plane, Task 11; Tabelle in
 `src/brokers/capabilities.ts` → `REQUIRED_CAPABILITY_BY_MODE`).
 
 ---
@@ -83,7 +87,9 @@ getBroker(venue, mode = "paper")                     src/brokers/factory.ts
   │      └─ unbekannt → UnknownVenueError  ──► Audit (DENIED, UNKNOWN_VENUE)
   │
   ├─ 2) mode === "live"?
-  │      └─ JA → LiveTradingGateError (IMMER)  ──► Audit (DENIED, LIVE_TRADING_GATE)
+  │      └─ JA → Live-Gate-Enforcer (Task 11): State=ENABLED + Flags +
+  │               Suite + Control Plane + kein Kill — sonst
+  │               LiveTradingGateError  ──► Audit (DENIED, LIVE_TRADING_GATE)
   │
   ├─ 3) Capability-Gating: REQUIRED_CAPABILITY_BY_MODE[mode]
   │      └─ fehlt → NotSupportedCapabilityError  ──► Audit (DENIED, NOT_SUPPORTED_CAPABILITY)
@@ -114,7 +120,7 @@ es ist kein Ausführungsversprechen.
 
 | Klasse | Code | Trigger | Verhalten |
 | --- | --- | --- | --- |
-| `LiveTradingGateError` | `LIVE_TRADING_GATE` | `mode === "live"` (jedes Venue) | wird immer geworfen; laut, auditierbar; **kein Fallback** |
+| `LiveTradingGateError` | `LIVE_TRADING_GATE` | `mode === "live"` ohne bestandene Live-Gate-Prüfung (Task 11) | wird geworfen mit konkretem Deny-Code (State/Flags/Suite/Kill); laut, auditierbar; **kein Fallback** |
 | `NotSupportedCapabilityError` | `NOT_SUPPORTED_CAPABILITY` | fehlende Capability (Factory) oder capability=false (Adapter-Methode) | enthält Venue, Capability, Methode, optionalen Hinweis |
 | `UnknownVenueError` | `UNKNOWN_VENUE` | Venue außerhalb der Whitelist | Input-Validierung; Fremd-Input wird auf 40 Zeichen gekürzt |
 
@@ -193,8 +199,9 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
 - **Zustandsmodell:** 6 Ebenen (connection, marketDiscovery, permissions,
   paper, testnet, live) × off/pending/active/error; Übergänge nur über
   `save|test|discover|disable`, Missbrauch → 409/422.
-  **Live bleibt immer off** — `liveEnabled` kommt ausschließlich aus der
-  Gate-Service-Meldung (`readGateState()`), bis task-11 hart `false`.
+  **Live ist reine Gate-Projektion** — `liveEnabled` kommt ausschließlich
+  aus `readGateState(venue)` (Task 11: Enforcer-Entscheid über die
+  persistierte State-Machine; Default `false`).
 - **Sicherheit:** RBAC (`src/auth`, Permission `broker.credentials`), CSRF
   (`x-csrf-token`), Credential-Rate-Limit (5/min/IP), Audit je Ereignis
   (`BROKER_CONTROL_PLANE`), Response-/Bundle-Secret-Scanner in CI.

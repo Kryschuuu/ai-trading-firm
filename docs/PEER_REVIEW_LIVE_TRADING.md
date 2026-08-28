@@ -315,3 +315,100 @@ Für **Paper-Trading** ist die Codebasis bereits überdurchschnittlich robust, s
 5. p95/p99-Metriken und Runbooks für Feed-/DB-/Broker-Ausfälle.
 
 Die vorhandene v1.6-Architektur zeigt bereits in die richtige Richtung. Die nächsten Arbeiten sollten nicht in „schnellere Agenten“ fließen, sondern in **Entkopplung, Idempotenz, Observability und getestete Concurrency**.
+
+---
+
+# Peer-Review-Vorlage — Live-Trading-Gate (Task 11), v1
+
+**Anleitung:** Dieses Template ist vom Reviewer je Zeile mit ✓/✗/N/A, Befund
+und Schweregrad (Critical/High/Medium/Low/Info) auszufüllen. **Der PR darf nur
+gemerged werden, wenn die Checkliste komplett ✓/N/A ist** (DoD: ≥ 2 Approvals,
+davon 1 Security-Fokus-Review anhand dieser Liste). Versioniert: Bei
+Änderungen am Gate eine neue Template-Version (v2 …) anlegen und die
+ausgefüllte Version im PR archivieren.
+
+**Review-Gegenstand:** PR `feat(live-gate): auditierte Live-Trading-State-Machine + Enforcement + Kill-Switch (task-11) — aktiviert kein Live` ·
+Modul `src/live-gate/**` · Doku `docs/LIVE_TRADING.md` ·
+Security-Audit-Kapitel „Task 11" in `docs/SECURITY_AUDIT.md`.
+
+**Reviewer 1 (Security-Fokus):** ______________________  Datum: ____________
+**Reviewer 2 (Backend):** ______________________  Datum: ____________
+
+## A. State-Machine & Transitionsmatrix
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| A1 | 9 Zustände + exakt 8 legale Übergänge im Code (`LIVE_GATE_TRANSITIONS`) verankert | ☐ | |
+| A2 | Matrix-Test vollständig: alle legalen Übergänge grün, ALLE illegalen Kombinationen (inkl. Sprünge, Rückwärts, Selbst) abgelehnt — 0 Durchlässe | ☐ | |
+| A3 | Jeder Übergang hat objektive, automatisch verifizierte Bedingungen (TransitionCheck) ODER dokumentierte Admin-Policy | ☐ | |
+| A4 | Halboffene Transitionen (Crash) werden als FEHLGESCHLAGEN auditiert; Zustand bleibt konsistent | ☐ | |
+| A5 | Downgrades nur über disable/kill (auditiert); kein stiller Rückwärts-Sprung | ☐ | |
+
+## B. Enforcement (Single Point)
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| B1 | `assertLiveOrderAllowed` ist der einzige Torwächter; Factory UND Bitunix-Live-Pfad(e) rufen ihn | ☐ | |
+| B2 | Order-Versuch je Zustand (9) × Flags getestet — nur die exakt erlaubte Konstellation lässt durch; alle anderen `LiveTradingGateError` + Audit | ☐ | |
+| B3 | Fail-Safe: fehlt/ist unklar irgendetwas (Suite, Control Plane, State, Kill) → deny | ☐ | |
+| B4 | **Bypass-Freiheit bestätigt**: kein zweiter Order-Pfad (`placeSerializedOrder` nur im Adapter), kein UI-/Agent-Flag fließt in den Enforcer, keine Flag-Writes im Code | ☐ | |
+| B5 | PAPER kann nie live (Capability-Check vor Flags) | ☐ | |
+| B6 | Suite-Stamp ist CI-Kennung (passed/runId/Max-Alter) und wird persistent geprüft | ☐ | |
+
+## C. Kill-Switch-Drill
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| C1 | Kill aus ALLEN 9 Zuständen getestet: sofort gesperrt + Audit + Failsafe-Datei | ☐ | |
+| C2 | Kill wirkt bei DB-/Store-Ausfall (Memory + lokale Datei), Reihenfolge Datei-vor-Reset | ☐ | |
+| C3 | Nach Kill: Live-Order systemweit/venue-scoped verweigert bis kompletter Neudurchlauf | ☐ | |
+| C4 | Clear ist auditiert und öffnet KEIN Live (Zustand bleibt DISCONNECTED) | ☐ | |
+| C5 | UI-Confirm (Phrase), API (Admin+CSRF) und CLI-Pfad vorhanden | ☐ | |
+
+## D. Human Gate
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| D1 | LIVE_PENDING → HUMAN_APPROVED nur durch Admin-Aktion mit confirm + Pflicht-Begründung + Approver | ☐ | |
+| D2 | Cooldown (Default 24 h) serverseitig erzwungen, inkl. retryAt im Deny; 0 = aus dokumentiert | ☐ | |
+| D3 | 4-Augen-Modus: zwei verschiedene Approver, erste Bestätigung auditiert | ☐ | |
+| D4 | `REQUIRE_HUMAN_APPROVAL=true` kann strukturell nicht umgangen werden (keine Matrix-Kante) | ☐ | |
+
+## E. Audit-Kette
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| E1 | Jeder Übergang/Deny/Kill/Enforce hat einen Eintrag mit {ts, actor, venue, from, to, result, reason, policyVersion} | ☐ | |
+| E2 | Hash-Kette (prevHash + sha256) über kanonisches JSON; Manipulation/Einfügen/Entfernen/Truncation erkannt (Tests) | ☐ | |
+| E3 | Audit-Datei append-only; Ring + DB-Senke werfen nie | ☐ | |
+| E4 | Keine Secrets/Order-Daten in Audit-Einträgen (Scanner grün) | ☐ | |
+
+## F. CI & Betrieb
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| F1 | Job `security-live-gate` führt die komplette Security-Suite aus und ist als Required Check eingetragen (Branch Protection) | ☐ | |
+| F2 | Coverage-Tor ≥ 95 % kritischer Code (`src/live-gate/**`) aktiv | ☐ | |
+| F3 | KEINE echten Orders in CI/Tests (Mock-Ports; Default-Test-Order-Port verweigert) | ☐ | |
+| F4 | Secret-Scan über Gate-Quellen + API-Responses negativ | ☐ | |
+| F5 | „Dieser Task aktiviert kein Live": nach Merge State DISCONNECTED, Flags false, kein Suite-Stamp im Betrieb | ☐ | |
+
+## G. Doku
+
+| # | Prüfpunkt | ✓/✗ | Befund |
+| --- | --- | :---: | --- |
+| G1 | `docs/LIVE_TRADING.md`: Diagramm, Bedingungen, Human-Gate, Enforcement, Kill, Audit, API/CLI, CI, Grenzen | ☐ | |
+| G2 | SECURITY_AUDIT Task 11 (Threat Model + Red-Team-Liste + Ergebnisprotokoll) | ☐ | |
+| G3 | help-JSONs (Live-Ebenen), CHANGELOG, FRONTEND_CONTROL_PLANE (Live-Chip ← Gate), BROKER_ARCHITECTURE | ☐ | |
+
+## Ergebnis
+
+- [ ] **Bypass-Freiheit des Enforcers ausdrücklich bestätigt** (B4) — Unterschrift Reviewer 1: __________
+- [ ] Alle Punkte ✓/N/A, keine offenen High/Critical-Befunde
+- [ ] Approval erteilt (GitHub Review: Approve)
+- [ ] Anmerkungen/Follow-ups (z. B. LG-01 4-Augen-Identität, LG-02 Testnet-Anbindung): ______________________
+
+**Ausgefüllt durch (Selbstaudit-Vorabcheck, kein Ersatz für Review):**
+`npm run security:live-gate` → 78 Tests grün, 95,81 % Zeilen; Matrix 0
+Durchlässe; Kill-Drill 9/9; Audit-Manipulation 4/4 erkannt (Protokoll im
+SECURITY_AUDIT-Kapitel Task 11).

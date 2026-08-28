@@ -92,8 +92,9 @@ export default function BrokersPanel({
           Verbindungsstatus, Berechtigungen und Modus-Ebenen je Venue. Zugangsdaten
           werden genau einmal entgegengenommen, im Backend mit AES-256-GCM
           verschluesselt (AAD = Venue-ID) und danach nie wieder angezeigt.
-          Live-Trading bleibt ueberall <strong className="text-red-300">gesperrt</strong> —
-          die Anzeige kommt ausschliesslich aus der Gate-Service-Meldung.
+          Live-Trading bleibt <strong className="text-red-300">gesperrt</strong>, bis
+          die Live-Gate-State-Machine (Task 11) vollstaendig durchlaufen ist —
+          die Anzeige kommt ausschliesslich aus der Enforcer-Projektion.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <button

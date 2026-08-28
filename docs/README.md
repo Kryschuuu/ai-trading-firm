@@ -19,6 +19,8 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **README.md** (diese Datei, `docs/README.md`) | Überblick, Architektur, Varianten A/B, Schnellstart |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Blaupause: Event-Driven **Makro-/Mikro-Zyklen**, Regelformat, Latenz, Skalierung, Security |
 | **[PEER_REVIEW_LIVE_TRADING.md](PEER_REVIEW_LIVE_TRADING.md)** | Peer-Review: Bottlenecks der 6-Agenten-Pipeline, Live-/Paper-Readiness, Code-Review, Tests und Handlungsplan |
+| **[LIVE_TRADING.md](LIVE_TRADING.md)** | Live-Trading-Gate (Task 11): auditierte State-Machine, Enforcement, Kill-Switch, Audit-Kette, CI (v1.19) |
+| **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang und Merge-Status |
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)** | Broker-Capability-Modell (Task 02): Adapter-Vertrag, Capability-Matrix, Execution Modes, Factory, Live-Gate, Health-API |
 | **[BITUNIX.md](BITUNIX.md)** | Bitunix-Adapter (Task 07): 7. Venue, Public REST/WS, Signing, Paper-Modus B, Live-Gate |
