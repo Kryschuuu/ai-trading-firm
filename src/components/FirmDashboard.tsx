@@ -1510,9 +1510,11 @@ function Guide() {
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="mb-1 text-lg font-bold text-slate-50">6 · Broker (Ist)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
-          <li><b>7 Venues</b> hinter <code className="font-mono">BrokerAdapter</code>: PAPER (vollständig), BITUNIX (Public REST/WS + Paper-Modus B), ALPACA/IBKR/BINANCE/KRAKEN/DYDX als ehrliche Stubs.</li>
+          <li><b>7 Venues registriert</b> hinter <code className="font-mono">BrokerAdapter</code>: PAPER (interner Simulator, vollständig), BITUNIX (Public REST/WS + Paper-Modus B), ALPACA/IBKR/BINANCE/KRAKEN/DYDX als ehrliche Stubs. <b>Registriert ≠ abgedeckt:</b> das Operations Center trennt registrierte Venues von tatsächlicher Discovery-/Market-Data-/Paper-/Testnet-/Live-Coverage (<code className="font-mono">GET /api/brokers/coverage</code>).</li>
+          <li><b>Coverage (extern):</b> 1 Venue mit vollständiger Discovery, 1 Venue mit Paper-Market-Data, 0 Venues mit aktiviertem Live-Trading — differenziert im Coverage-Dashboard des Brokers-Tabs.</li>
           <li><b>Control Plane:</b> Credentials einmal Form → AES-256-GCM-Store. Frontend erhält nur Status (configured / connected / permissions / liveEnabled:false).</li>
           <li><b>Factory:</b> <code className="font-mono">getBroker(venue, &quot;live&quot;)</code> wirft immer <code className="font-mono">LiveTradingGateError</code>. Kein stiller Fallback auf Paper.</li>
+          <li><b>Paper vereinheitlicht:</b> Der Bitunix-Paper-Ledger nutzt denselben zentralen <code className="font-mono">FillSimulator</code> wie die generische Paper-Execution (Spread, Slippage, Gebühren, Latenz, Partial Fills) — keine separate Simulationslogik mehr.</li>
         </ul>
       </section>
 

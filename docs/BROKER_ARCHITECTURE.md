@@ -1,10 +1,12 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.20.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+**Stand:** v1.21.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
 (inkl. `control-plane/` seit Task 08), `src/lib/broker.ts`
 (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
-`GET /api/brokers`, `GET /api/brokers/{venue}/health`,
-`/api/brokers/{venue}/(credentials|status|test|discover)` (Task 08).
+`GET /api/brokers`, `GET /api/brokers/coverage`,
+`GET /api/brokers/{venue}/health`,
+`/api/brokers/{venue}/(credentials|status|test|discover)` (Task 08),
+`src/brokers/coverage.ts` (Coverage-Projektion, v1.21.0).
 
 Dieses Dokument ist der verbindliche Vertrag für alle Broker-Adapter der
 Plattform. Es ersetzt die reine Capability-Dokumentation der alten
@@ -112,6 +114,46 @@ Konzepte strikt unterschieden:
 abwärtskompatibler Spiegel erhalten (deprecated; von der Normalisierung aus
 `liveTradable` synchron gehalten).
 
+### 3.2 „Registriert“ ≠ „abgedeckt“ — Coverage-Modell (v1.21.0)
+
+Eine reine Zählung wie „7 Broker“ ist **irreführend**: Dass ein Adapter
+*registriert* ist (das Repo kennt ihn), sagt nichts darüber aus, welche
+Fähigkeiten er *tatsächlich abdeckt*. Das Operations Center trennt deshalb
+strikt zwei Achsen:
+
+- **registriert** — ein Adapter existiert für dieses Venue (heute: 7).
+- **abgedeckt** — der Adapter-Code führt die Capability tatsächlich aus.
+
+Das Modul `src/brokers/coverage.ts` (`computeBrokerCoverage`) projiziert die
+ehrliche Ist-Lage aus der Capability-SSoT + dem Live-Gate-Enforcer. Es liefert
+die differenzierten Headline-Kennzahlen (statt „7 Broker“):
+
+```
+7 Venues registriert
+1 Venue mit vollständiger Discovery      (extern: BITUNIX)
+1 Venue mit Paper-Market-Data            (extern: BITUNIX)
+0 Venues mit aktiviertem Live Trading
+```
+
+sowie fünf Coverage-Metriken über alle registrierten Venues:
+
+| Metrik | Kriterium (Capability / Gate) |
+| --- | --- |
+| Discovery Coverage | `discovery=true` |
+| Market Data Coverage | `marketData=true` |
+| Paper Execution Coverage | `paper=true` |
+| Testnet Execution Coverage | `testnet=true` |
+| Live Execution Coverage | Live-Gate erlaubt reale Orders (`evaluateLiveOrder().allowed`) |
+
+**Headline vs. Metrik:** Die Headline-Zahlen (`fullDiscoveryVenues`,
+`paperMarketDataVenues`) zählen bewusst nur **reale externe** Venues — der
+interne `PAPER`-Simulator (`INTERNAL_VENUE`) hat zwar dieselben Capabilities,
+verfälscht die Aussage über reale Venue-Integration aber. In der Coverage-
+Metrik und der Detailtabelle erscheint PAPER transparent als *intern*.
+Bereitstellung: `GET /api/brokers/coverage` (§7), UI:
+`src/components/control-plane/CoveragePanel.tsx`. Belege:
+`tests/brokerCoverage.test.ts`, `tests/brokerCoverage.api.test.ts`.
+
 ---
 
 ## 4. Factory-Fluss
@@ -193,6 +235,7 @@ der 28er-Matrix, paper-Modus **ohne** Eintrag, alle Live-Ablehnungen auditiert.
 | Endpunkt | Antwort |
 | --- | --- |
 | `GET /api/brokers` | 7 Venues: `id`, `label`, `assets`, `capabilities`, `paperAvailable`/`liveAvailable` (Projektion), `executionModes`, `health` (lokal); `remoteHealthCheck.enabled` (Default false) |
+| `GET /api/brokers/coverage` | Coverage-Übersicht: `registeredVenues`/`internalVenues`/`externalVenues`, Headline (`fullDiscoveryVenues`, `paperMarketDataVenues`, `liveEnabledVenues`), `metrics[]` (5 Coverage-Kennzahlen) und `rows[]` (Detailtabelle je Venue). Reine Projektion (§3.2) — kein Netzwerk, keine Secrets |
 | `GET /api/brokers/{venue}/health` | `health` (lokal bzw. remote je Flag), `capabilities`, `executionModes`, `remoteHealthCheck` |
 
 Kein API-Token (konsistent mit den übrigen GET-Endpunkten), Fehler-Contract

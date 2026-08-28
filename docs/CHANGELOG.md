@@ -20,6 +20,55 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.21.0] — 2026-08-29
+
+**Coverage-Trennung („registriert“ ≠ „abgedeckt“) + vereinheitlichte
+Paper-Execution.**
+
+### Added
+
+- **Coverage-Modell** `src/brokers/coverage.ts` (`computeBrokerCoverage`):
+  differenzierte Sicht auf registrierte vs. tatsächlich abgedeckte Venues.
+  Headline: `registeredVenues` / `fullDiscoveryVenues` / `paperMarketDataVenues`
+  / `liveEnabledVenues`; fünf Coverage-Metriken (Discovery / Market Data / Paper
+  / Testnet / Live Execution) plus Detailtabelle je Venue. Reine Projektion aus
+  der Capability-SSoT (`VENUE_CAPABILITIES`) + Live-Gate-Enforcer — kein
+  Netzwerk, keine Secrets.
+- **API** `GET /api/brokers/coverage` (read-only, tokenfrei; Fehler-Contract
+  `{ ok:false, error, message }`).
+- **UI** `src/components/control-plane/CoveragePanel.tsx` im Brokers-&-Venues-Tab:
+  Headline-Kacheln, Coverage-Balken, Detailtabelle (intern/extern, Live-Fähigkeit
+  vs. Live-Freigabe getrennt). Ersetzt die irreführende Anzeige „7 Broker“ durch
+  „7 Venues registriert · 1 mit vollständiger Discovery · 1 mit Paper-Market-Data
+  · 0 mit aktiviertem Live Trading“.
+- **Snapshot-Builder** `src/lib/marketdata/snapshot.ts` (`snapshotFromLastPrice`,
+  `fallbackInstrument`): normalisiert einen reinen Last-Preis-Ticker zu einem
+  `MarketSnapshot` (Bid/Ask symmetrisch aus synthetischem Spread).
+- **Env** `PAPER_SIM_SYNTHETIC_SPREAD_BPS` (Default `2` bp) für ticker-basierte
+  Paper-Fills.
+- Tests (+24): `brokerCoverage.test.ts`, `brokerCoverage.api.test.ts`,
+  `bitunix.paper.unified.test.ts`, `marketdata.snapshot.test.ts`.
+
+### Changed / Fixed
+
+- **Vereinheitlichte Paper-Execution:** Der Bitunix-Paper-Ledger
+  (`src/brokers/bitunix/paper.ts`) nutzt jetzt denselben zentralen
+  `FillSimulator` wie die generische Paper-Execution. Die frühere separate,
+  vereinfachte Simulation mit festen Faktoren (LONG → `price·1.0001`,
+  SHORT → `price·0.9999`) ist entfernt. Ergebnis: `Generic Paper === Bitunix
+  Paper` (Spread, Slippage, Gebühren, Latenz, Partial Fills identisch).
+- `BitunixPaperLedger` erhält optional Simulator-Konfiguration/Registry
+  (Gebühren aus `makerFee`/`takerFee` mit Fallback).
+- Frontend-Terminologie in `FirmDashboard` und der Brokers-Seite auf „Venues
+  registriert“ + Coverage umgestellt.
+
+### Keine Breaking Changes
+
+- Reject-Pfade, Guardrails, Kill-Switch, Discovery und der harte Live-Pfad
+  (`LiveTradingGateError`) unverändert. Bestehende Paper-Order-Pfade laufen weiter.
+
+---
+
 ## [1.20.0] — 2026-08-28
 
 **Bitunix-Ausführungs-Refactor — Paper und Broker vollständig getrennt

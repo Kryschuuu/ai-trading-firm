@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.20.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter`
+**Stand:** v1.21.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter`
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -126,8 +126,9 @@ ExecutionMode
   selben Body, `stopAtVenue`). **Niemals** über das Paper-Ledger.
 - `getAccount`/`getPositions` im **Live**-Modus liefern **echte Venue-Daten**
   (signierte Private-API), nie Paper-Daten.
-- `paper`/`backtest` → `PaperExecutionEngine` gegen das lokale Ledger (unverändert,
-  Modus B).
+- `paper`/`backtest` → `PaperExecutionEngine` gegen das lokale Ledger
+  (Modus B). Das Ledger nutzt seit v1.21.0 den **zentralen** `FillSimulator`
+  (siehe §6), nicht mehr eine eigene, vereinfachte Simulationslogik.
 
 Eine Live-Order ist **nur** möglich, wenn **alle** gelten (zentraler Enforcer):
 
@@ -153,6 +154,31 @@ Echte Public-Kurse (Ticker), lokales Ledger, Guardrails + Kill-Switch.
 SL/TP werden am Fill **vermerkt** (Venue-Semantik vorbereitet), die Ausführung
 bleibt lokal. Credentials dürfen gesetzt sein — der Paper-Pfad stellt trotzdem
 **keinen** signierten Request.
+
+**Vereinheitlichte Fill-Engine (v1.21.0):** Das `BitunixPaperLedger`
+(`src/brokers/bitunix/paper.ts`) verwendet **denselben** zentralen
+`FillSimulator` (`src/lib/marketdata/simulator.ts`) wie die generische
+Paper-Execution — es gibt **keine** separate, vereinfachte Simulationslogik mehr.
+Früher rechnete das Ledger mit festen Faktoren (LONG → `price·1.0001`,
+SHORT → `price·0.9999`); das wich von der zentralen Engine ab
+(`Generic Paper ≠ Bitunix Paper`). Heute gilt `Generic Paper === Bitunix Paper`:
+
+```
+Bitunix-Ticker (Last-Preis)
+        │  snapshotFromLastPrice()  (Bid/Ask symmetrisch aus synthet. Spread)
+        ▼
+normalisierter MarketSnapshot
+        │  FillSimulator.simulate()  (Spread · Slippage · Gebühren · Latenz · Partial Fills)
+        ▼
+lokaler Fill im Ledger  (Guardrails + Kill-Switch unverändert)
+```
+
+Der synthetische Spread wird über `PAPER_SIM_SYNTHETIC_SPREAD_BPS` (Default 2 bp)
+gesteuert; Gebühren stammen aus den Registry-Feldern des Instruments
+(`makerFee`/`takerFee`) mit Fallback aus der Simulator-Konfiguration. Damit füllt
+das Ledger LONG am Ask (+Slippage) und SHORT am Bid (−Slippage) — identisch zum
+generischen Simulator. Details der Simulator-Parameter:
+[PAPER_TRADING.md](PAPER_TRADING.md) §5.
 
 Discovery schreibt in eine **injizierte** Registry (`source=discovery:bitunix`).
 Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeichnis

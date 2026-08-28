@@ -94,7 +94,11 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
         bucket: new TokenBucket(this.cfg.publicRatePerSec, this.cfg.publicRatePerSec),
       });
     this.registry = deps.registry;
-    this.paper = deps.paper ?? new BitunixPaperLedger(envInt("STARTING_EQUITY", 10_000, 1, 1e12, this.env));
+    this.paper =
+      deps.paper ??
+      new BitunixPaperLedger(envInt("STARTING_EQUITY", 10_000, 1, 1e12, this.env), {
+        registry: this.registry,
+      });
     this.now = deps.now ?? (() => new Date());
     this.privateClientOverride = deps.privateClient;
   }

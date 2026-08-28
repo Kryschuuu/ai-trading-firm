@@ -88,6 +88,50 @@ export interface BrokerListResponse {
   remoteHealthCheck: { enabled: boolean; flag: string };
 }
 
+/** IDs der fünf Coverage-Kennzahlen (Operations Center). */
+export type CoverageMetricId =
+  | "discovery"
+  | "marketData"
+  | "paperExecution"
+  | "testnetExecution"
+  | "liveExecution";
+
+/** Eine Coverage-Kennzahl: wie viele Venues die Capability abdecken. */
+export interface CoverageMetricDto {
+  id: CoverageMetricId;
+  label: string;
+  covered: number;
+  total: number;
+  venues: string[];
+}
+
+/** Eine Zeile der Coverage-Detailtabelle (ein Venue). */
+export interface VenueCoverageRowDto {
+  venue: string;
+  label: string;
+  internal: boolean;
+  discovery: boolean;
+  marketData: boolean;
+  paperExecution: boolean;
+  testnetExecution: boolean;
+  liveCapable: boolean;
+  liveEnabled: boolean;
+  liveReason: string;
+}
+
+/** GET /api/brokers/coverage — Antwort-Contract. */
+export interface BrokerCoverageResponse {
+  ok: boolean;
+  registeredVenues: number;
+  internalVenues: number;
+  externalVenues: number;
+  fullDiscoveryVenues: number;
+  paperMarketDataVenues: number;
+  liveEnabledVenues: number;
+  metrics: CoverageMetricDto[];
+  rows: VenueCoverageRowDto[];
+}
+
 type ApiError = { ok?: boolean; error?: string; message?: string; hint?: string };
 
 export interface ApiResult<T> {
@@ -162,6 +206,11 @@ async function request<T>(
 /** GET /api/brokers — Karten-Basis (Capabilities, Flags, Health). */
 export function fetchBrokerList(): Promise<ApiResult<BrokerListResponse>> {
   return request<BrokerListResponse>("/api/brokers", "GET");
+}
+
+/** GET /api/brokers/coverage — Coverage-Übersicht (Operations Center). */
+export function fetchBrokerCoverage(): Promise<ApiResult<BrokerCoverageResponse>> {
+  return request<BrokerCoverageResponse>("/api/brokers/coverage", "GET");
 }
 
 /** GET /api/brokers/{venue}/status — Status-Objekt (nie Secret-Inhalte). */

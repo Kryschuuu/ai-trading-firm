@@ -27,7 +27,8 @@ export default function BrokersPage() {
           </h1>
           <p className="mt-1 text-xs text-slate-500">
             Broker Control Plane (Task 08) — Status, Berechtigungen und
-            Modus-Ebenen je Venue. Zugangsdaten bleiben im Backend
+            Modus-Ebenen je Venue, plus Coverage-Dashboard (registrierte vs.
+            tatsaechlich abgedeckte Venues). Zugangsdaten bleiben im Backend
             (AES-256-GCM); Live-Trading ist ueberall gesperrt.
           </p>
         </header>
