@@ -79,17 +79,33 @@ Output JSON schema:
       untrustedData: context.input?.externalMacroData ?? { coveredAssets: MACRO_REQUIRED_ASSETS },
       schemaValidator: validateMacroOutput,
       fallback,
-      escalationCheck(raw, parsed) {
-        const text = String(raw).toLowerCase();
-        if (text.includes("geopolitical crisis") || text.includes("black swan") || text.includes("market crash")) {
-          return {
-            agent: "MACRO_ANALYST",
-            reason: "Extremes Makro-Risiko oder Black-Swan-Ereignis erkannt",
-            complexity: "critical",
-            confidence: 0.3,
-          };
-        }
-        return null;
+      /**
+       * KORRIGIERT (task-09, Governance-Regel 1): Der Eskalationstrigger kommt
+       * aus den **validierten Strukturfeldern**, nicht aus Freitext. Sonst
+       * könnte eine News-Schlagzeile („black swan", „market crash") eine
+       * Eskalation — und damit Cloud-Kosten — auslösen. Erlaubt sind nur
+       * Runtime-Metriken: Regime, Volatilitätsregime, Confidence.
+       */
+      escalationCheck(_raw, parsed) {
+        const data = (parsed ?? {}) as {
+          regime?: unknown;
+          volatilityRegime?: unknown;
+          confidence?: unknown;
+        };
+        const regime = String(data.regime ?? "").toUpperCase();
+        const vola = String(data.volatilityRegime ?? "").toUpperCase();
+        const confidence = Number(data.confidence);
+        const critical = vola === "EXTREME" || regime === "RISK_OFF";
+        const unsure = Number.isFinite(confidence) && confidence < 0.4;
+        if (!critical && !unsure) return null;
+        return {
+          agent: "MACRO_ANALYST",
+          reason: critical
+            ? "Extremes Volatilitäts-/Risiko-Regime laut strukturierter Makro-Analyse"
+            : "Geringe Confidence der strukturierten Makro-Analyse",
+          complexity: "critical",
+          confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0.3,
+        };
       },
     });
 

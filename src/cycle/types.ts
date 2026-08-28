@@ -35,9 +35,12 @@ export type StepStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "SKIPP
 export type EscalationComplexity = "low" | "medium" | "high" | "critical";
 
 /**
- * Event für Modell-Eskalation.
- * Vorbereitung für Task-09 (Model Router). Falls kein Router existiert,
- * wird das Event protokolliert und die bestehende Provider-Fallback-Kette genutzt.
+ * Event für Modell-Eskalation (`MODEL_ESCALATION_REQUEST`).
+ *
+ * Task-09: Der Antrag geht ausschliesslich an den MODEL_ROUTER — der Agent
+ * entscheidet NIE selbst. Trigger sind nur Runtime-Metriken (complexity,
+ * confidence, tokenOvershoot, latencyViolation); Prompt-Inhalte Dritter
+ * (News-Texte, Modellausgaben) sind als Auslöser unzulässig.
  */
 export interface ModelEscalationRequest {
   agent: string;
@@ -45,6 +48,18 @@ export interface ModelEscalationRequest {
   complexity: EscalationComplexity;
   confidence?: number;
   timestamp: string;
+  /** Task-09: Aufgaben-ID des Routers (Whitelist). */
+  task?: string;
+  /** Task-09: aktuell genutztes Modell (Audit). */
+  currentModel?: string;
+  /** Task-09: aktuell genutzte Modell-Klasse. */
+  currentClass?: "MODEL_A" | "MODEL_B" | "MODEL_C";
+  /** Task-09: beantragte Zielklasse. */
+  requestedClass?: "MODEL_A" | "MODEL_B" | "MODEL_C";
+  /** Task-09: Runtime-Trigger Token-Überschuss. */
+  tokenOvershoot?: boolean;
+  /** Task-09: Runtime-Trigger Latenzverletzung. */
+  latencyViolation?: boolean;
 }
 
 /** Konfigurierbare Retry-Policy je Step */
@@ -187,6 +202,8 @@ export interface AgentInvocationSpec<TOutput> {
   role: CycleStepRole;
   systemPrompt: string;
   userPrompt: string;
+  /** Task-09: Komplexität der Aufgabe (Input des Model Routers). */
+  complexity?: "low" | "medium" | "high" | "critical";
   /** Strukturierte externe Nutzdaten (Prompt-Injection-Schutz) */
   untrustedData?: unknown;
   /** JSON-Schema-Validierer für die Ausgabe */
@@ -204,6 +221,8 @@ export interface AgentInvocationResult<TOutput> {
   usedFallback: boolean;
   modelUsed: string;
   escalation?: ModelEscalationRequest;
+  /** Task-09: Routing-Trace (Entscheidung, Klasse, Trigger, Kette). */
+  routing?: Record<string, unknown>;
 }
 
 /** Port für LLM-Agenten-Ausführung */
