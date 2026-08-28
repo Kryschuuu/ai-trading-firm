@@ -19,6 +19,7 @@ import {
   type BrokerStatusDto,
 } from "@/lib/controlPlane";
 import BrokerCard from "./BrokerCard";
+import LiveGatePanel from "./LiveGatePanel";
 
 type StatusMap = Record<string, { status: BrokerStatusDto | null; error: string }>;
 
@@ -107,6 +108,8 @@ export default function BrokersPanel({
           </p>
         </div>
       </div>
+
+      <LiveGatePanel onUnauthorized={onUnauthorized} />
 
       {loading && entries === null && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
