@@ -23,6 +23,7 @@
     "test:coverage:scanner": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/scanner/**' --test-coverage-include='src/app/api/universe/**' 'tests/scanner.*.test.ts'",
     "scan": "node --import tsx scripts/run-scan.ts",
     "scan:secrets": "node --import tsx scripts/scan-secrets.ts",
+    "docs:validate": "node --import tsx scripts/docs-validate.ts",
     "test:coverage:controlplane": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/brokers/control-plane/**' --test-coverage-include='src/app/api/brokers/**' 'tests/secretStore.test.ts' 'tests/controlPlane.*.test.ts'",
     "test:coverage:marketdata": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/lib/marketdata/**' --test-coverage-include='src/app/api/marketdata/**' 'tests/marketdata.*.test.ts'",
     "test:coverage:portfolio": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/portfolio/**' --test-coverage-include='src/app/api/portfolio/**' 'tests/portfolio.*.test.ts'",
