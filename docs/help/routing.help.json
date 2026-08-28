@@ -1,0 +1,95 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "routing",
+  "version": 1,
+  "title": "Modell-Routing (MODEL_ROUTER) — Feldhilfe",
+  "description": "Hilfetexte zu Modell-Klassen (MODEL_A/B/C, CLOUD, FALLBACK), Routing-Modi (manual/automatic/hybrid), Eskalationsanträgen, Token-Budgets, Fallback-Ketten und dem Operations-Center-Endpunkt /api/providers im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Erläutert die Governance-Rolle MODEL_ROUTER (Task 09).",
+  "source": "src/routing/",
+  "fields": {
+    "modelRouter": {
+      "kurzinfo": "Der MODEL_ROUTER ist eine Systemrolle, die für jeden Agenten-Aufruf die Modellklasse festlegt — nicht der Agent selbst.",
+      "technischeInfo": "Implementiert in src/routing/router.ts. Eingaben sind ausschliesslich die 9 strukturierten Routing-Inputs (task, complexity, risk, latencyRequirementMs, tokenBudget, providerHealth, requiredCapabilities, maxCostUsd, contextSize). Entscheidungsgrundlage ist eine versionierte, schema-validierte Policy (src/routing/policy.ts, Default-Version 1.0.0, Überschreibung via ROUTING_POLICY_PATH). Ergebnis: MODEL_A, MODEL_B, MODEL_C, CLOUD oder FALLBACK.",
+      "risiko": "Würde man Agenten die Modellwahl überlassen, entstünden unkontrollierte Cloud-Kosten, Datenabfluss und nicht reproduzierbare Entscheidungen. Der Router ist die einzige Instanz, die Nutzen gegen Budget und Policy abwägt — jede Entscheidung ist auditiert."
+    },
+    "modelClassA": {
+      "kurzinfo": "MODEL_A ist die kleine lokale Klasse (1–8B Parameter) für Standardaufgaben wie JSON-Klassifikation, Ranking, Zusammenfassung, Standard-Technische-Analyse, News-Kategorisierung und einfache Risikoentscheidungen.",
+      "technischeInfo": "Provider-Reihenfolge: ollama (qwen2.5:3b-instruct-q4_K_M) → openai-kompatibel. Die Klasse ist in der Policy auf lokale Provider festgenagelt (deployment: local) — ein Cloud-Einsatz ist für MODEL_A nicht vorgesehen. Kontextfenster und Kosten stammen aus der Provider-Registry (lokal: 0 USD).",
+      "risiko": "Kleine Modelle halluzinieren bei mehrstufiger Synthese und widersprüchlicher Evidenz. Aufgaben mit Querverweisen (Technik + News, Regimebruch, Strategie) gehören nicht in diese Klasse — der Router hebt sie über Task-/Complexity-Floors automatisch an."
+    },
+    "modelClassB": {
+      "kurzinfo": "MODEL_B ist die mittlere lokale Klasse (7–30B Parameter) für Research-Aufgaben mit mehrstufiger Argumentation.",
+      "technischeInfo": "Provider-Reihenfolge: ollama (qwen2.5:7b-instruct-q4_K_M) → openai-kompatibel. Wird über den Task research bzw. den Complexity-Floor medium erreicht. Höhere Latenzen und RAM-Bedarf als MODEL_A, aber weiterhin lokal und kostenneutral.",
+      "risiko": "Auf langen Kontexten und bei widersprüchlicher Evidenz stossen auch 7–14B-Modelle an Grenzen. Bei hoher Komplexität oder Kapitalwirkung hebt der Router auf MODEL_C an; ein Agent kann diese Höherstufung beantragen, aber nie selbst vollziehen."
+    },
+    "modelClassC": {
+      "kurzinfo": "MODEL_C ist die grosse Klasse (30B+ bzw. Cloud) für Synthese, Marktselektion, Portfolioanalyse, komplexe Research, Regimeanalyse, widersprüchliche Evidenz, Strategieentwicklung und Wochenberichte.",
+      "technischeInfo": "Provider-Reihenfolge: ollama (qwen2.5:14b-instruct-q4_K_M) → gemini (gemini-2.0-flash) → anthropic (claude-3-5-haiku-latest). Cloud-Provider sind immer budgetgedeckelt (tokensPerDay > 0 ist Pflicht in der Policy-Validierung) und nur für freigegebene Agenten erlaubt (allowCloud).",
+      "risiko": "Cloud-Aufrufe verlassen die Maschine (System-Prompts, Marktdaten, Agentenentscheidungen) und kosten Geld. Deshalb greifen hier doppelte Sicherungen: Budget-Deckel je Provider/Agent/Tag, Tageslimit für Eskalationen und Audit-Pflicht je Wechsel."
+    },
+    "decisionCLOUD": {
+      "kurzinfo": "CLOUD bedeutet: die gewählte Modellklasse wird von einem externen Provider (Gemini/Anthropic) bedient.",
+      "technischeInfo": "Der Router liefert CLOUD statt MODEL_A/B/C, sobald der gewählte Provider deployment: cloud hat. Voraussetzungen: Agent-Freigabe allowCloud, Health nicht offline, Restkontingent ≥ 5 %, Budget nicht erschöpft und kein Kostendeckel-Verstoss.",
+      "risiko": "Jeder Cloud-Aufruf ist ein Datenabfluss und eine Ausgabe. Ohne Deckel (in der Policy verboten) könnte ein einziger fehlgeschlagener Retry-Loop das Tagesbudget aufbrauchen — deshalb erzwingt die Policy-Validierung für Cloud-Provider zwingend ein Tageslimit."
+    },
+    "decisionFALLBACK": {
+      "kurzinfo": "FALLBACK bedeutet: kein Modell ist nutzbar — die deterministische Regel-Engine antwortet.",
+      "technischeInfo": "Tritt ein, wenn alle Provider der Klasse und der gesamten Fallback-Kette ausfallen (Health offline, Quota < 5 %, Budget erschöpft, Kontext zu klein, Latenzanforderung verletzt). Die Entscheidung trägt provider: none und model: rule-engine und wird als outcome: fallback auditiert.",
+      "risiko": "Die Regel-Engine ist bewusst konservativ (HOLD/REPORT). Sie ersetzt keine Analyse, verhindert aber Blindflug: ohne Modell wird nicht gehandelt, sondern protokolliert."
+    },
+    "routingModeManual": {
+      "kurzinfo": "Im Modus manual läuft der Agent auf einem fest angepinnten Modell; der Router erzwingt nur Budget und Health.",
+      "technischeInfo": "pinnedModel in der Policy legt den Modell-Tag fest (Wert none bedeutet: kein LLM, rein deterministisch — z. B. MARKET_SCANNER und EXECUTOR). Complexity-/Task-Floors heben die Klasse im manual-Modus NICHT an; Budget-Deckel greifen trotzdem, ausser bei expliziter Admin-Freigabe budgetExempt.",
+      "risiko": "Ein festes Modell kann für eine plötzlich komplexe Aufgabe zu klein sein — der Ausweg ist der Eskalationsantrag, nicht der Selbstwechsel. Umgekehrt verhindert manual, dass ein Agent unbemerkt teure Cloud-Modelle zieht."
+    },
+    "routingModeAutomatic": {
+      "kurzinfo": "Im Modus automatic entscheidet der Router frei: Tabellenklasse, Task-Override, Komplexität und Risiko bestimmen die Klasse, geklemmt auf den Agenten-Deckel.",
+      "technischeInfo": "Untergrenze = max(Tabellenklasse, Task-Override, complexityFloor, riskFloor). complexityFloor: low→MODEL_A, medium→MODEL_B, high/critical→MODEL_C. riskFloor: low→MODEL_A, medium→MODEL_B, high→MODEL_C. Danach Provider-Wahl in fester Policy-Reihenfolge (Health, Cloud-Freigabe, Quota, Kontext, Fähigkeiten, Latenz, Budget, Kosten).",
+      "risiko": "Automatische Höherstufung kann Cloud-Kosten erzeugen. Begrenzt wird sie durch allowCloud, classCeiling, die Tagesbudgets und das Eskalations-Tageslimit — jeder Wechsel ist auditiert."
+    },
+    "routingModeHybrid": {
+      "kurzinfo": "Im Modus hybrid ist die Klasse aus der Routing-Tabelle bindend; der Router wählt nur den Provider innerhalb dieser Klasse.",
+      "technischeInfo": " TECHNICAL/NEWS bleiben damit auf MODEL_A, RISK/PORTFOLIO auf MODEL_B — auch bei hoher Komplexität. Eskalationen über die Klassengrenze hinaus werden mit HYBRID_CLASS_BOUND abgelehnt (auditiert).",
+      "risiko": "Schützt vor unerwarteten Cloud-Kosten durch Komplexitäts-Spitzen. Preis: eine objektiv nötige Höherstufung muss ein Admin über den Modus oder die Policy freigeben."
+    },
+    "escalationRequest": {
+      "kurzinfo": "Ein Agent kann eine Höherstufung BEANTRAGEN (MODEL_ESCALATION_REQUEST) — die Entscheidung trifft ausschliesslich der Router.",
+      "technischeInfo": "Antrag: { agent, task, complexity, reason, currentModel, requestedClass, confidence }. Prüfkette: Klasse höher? → Zielklasse erlaubt? → Agenten-Deckel? → hybrid-Grenze? → Komplexität bzw. Runtime-Trigger (Token-Überschuss/Latenzverletzung)? → Confidence ≤ 0.75? → Tageslimit (12)? → Zielklasse verfügbar (Budget/Health)? Ergebnis ist approved (erneuter Aufruf mit grossem Modell) oder denied (kein Wechsel) — beides mit Audit-Eintrag.",
+      "risiko": "Wäre der Antrag durch Prompt-Inhalte auslösbar, könnte eine News-Schlagzeile Cloud-Kosten und Datenabfluss erzwingen. Deshalb sind nur Runtime-Metriken Trigger; der Freitext reason wird protokolliert, aber nie ausgewertet."
+    },
+    "escalationGoldenCase": {
+      "kurzinfo": "Referenzfall: kleines lokales Modell, Confidence 0.58, Komplexität HIGH ⇒ genehmigt ⇒ grosses Modell (Confidence im Test 0.87).",
+      "technischeInfo": "Komplexität HIGH erreicht die Schwelle (minComplexity: high) und Confidence 0.58 liegt unter maxConfidenceToApprove (0.75) ⇒ approved. Gegenfall: Confidence 0.95 bei LOW ⇒ denied (COMPLEXITY_BELOW_THRESHOLD) — kein zweiter Aufruf, kein Modellwechsel, aber ein Audit-Eintrag.",
+      "risiko": "Genehmigungen sind begrenzt (12 je Agent und Tag) und werden gezählt. Ohne Tageslimit könnte ein Agent im Dauerlauf jeden Schritt auf die teuerste Klasse heben."
+    },
+    "tokenBudget": {
+      "kurzinfo": "Token-Budgets begrenzen die Nutzung je Provider und Agent pro Tag — Überschreitung erzwingt die Rückstufung auf ein lokales Modell.",
+      "technischeInfo": "Konfiguration in policy.budgets (providers.<id>.tokensPerDay/costUsdPerDay, agents.<AGENT>.tokensPerDay, global). Umsetzung in src/routing/budget.ts mit Tageswechsel über die injizierte Uhr. Deckel 0 bedeutet bei lokalen Providern 'kein Deckel'; Cloud-Provider MÜSSEN einen Deckel > 0 haben (Policy-Validierung). Verbrauch wird nach jedem Aufruf gebucht und erscheint in /api/providers als Tokens %.",
+      "risiko": "Ohne Deckel sind Cloud-Kosten durch Retry-Loops oder Prompt-Wachstum unbegrenzt. Achtung: die Zähler sind prozess-lokal — bei Mehrinstanzen-Betrieb braucht es eine geteilte Zustandsquelle."
+    },
+    "fallbackChain": {
+      "kurzinfo": "Fallback-Ketten legen fest, wohin ein Aufruf geht, wenn der Zielprovider ausfällt (Timeout, Quota, Health).",
+      "technischeInfo": "policy.fallbackChains, Schlüssel '<trigger>:<provider>' (timeout · quota · offline) plus 'default'. Defaults: ollama-timeout → gemini → anthropic; gemini-/anthropic-quota < 5 % → ollama; offline-Ketten je Provider. Der Schweller quotaMinPercent liegt bei 5 %.",
+      "risiko": "Eine Kette, die auf Cloud zeigt, kann Kosten und Datenabfluss auslösen. Sie greift nur bei echten Störungen und wird als outcome: fallback auditiert — inklusive des Grundes (Trigger-Code)."
+    },
+    "providerHealth": {
+      "kurzinfo": "Der Health-Poller prüft die Provider in konfigurierbarem Intervall und pflegt Status, Modellliste, Kontextgrösse und Latenz.",
+      "technischeInfo": "Intervall aus policy.healthPollerIntervalMs bzw. ROUTING_HEALTH_POLL_MS (0 = aus). ROUTING_HEALTH_PROBE steuert den Umfang: local (Default, nur lokale Provider remote), all (auch Cloud, read-only Modellliste), off. Timeout je Prüfung: ROUTING_HEALTH_TIMEOUT_MS (1500 ms). Ollama liefert zusätzlich Modelle (/api/tags) und Kontextgrösse (/api/show).",
+      "risiko": "Ohne ROUTING_HEALTH_PROBE=all ist der Cloud-Status key-basiert ('Key vorhanden ⇒ nutzbar'). Der erste echte Aufruf kann dann trotzdem scheitern — die Fallback-Kette fängt das ab."
+    },
+    "routingAudit": {
+      "kurzinfo": "Jeder Modellwechsel — genehmigt, abgelehnt, Fallback oder budgeterzwungen — wird im Audit-Log protokolliert.",
+      "technischeInfo": "Format: { ts, agent, from, to, reason, trigger, policyVersion, outcome } mit outcome ∈ resolved · approved · denied · fallback · budget_blocked · admin. Senken: In-Memory-Ring, NDJSON (data/routing/audit.ndjson) und audit_log (Event MODEL_ROUTING, best-effort). Nachweis: 100 % der Wechsel haben einen Audit-Eintrag (tests/routing.integration.test.ts).",
+      "risiko": "Ein unvollständiges Audit macht Kosten- und Governance-Fragen unklärbar ('wer hat wann Cloud benutzt?'). Deshalb auditiert der Router auch Ablehnungen — von == to, aber mit Grund."
+    },
+    "apiProviders": {
+      "kurzinfo": "GET /api/providers liefert die Karten-Daten des Operations Centers: Status, Modell, Kontext, Latenz, Kosten und Token-Verbrauch je Provider.",
+      "technischeInfo": "Je Provider: id, label, deployment, status (ONLINE/DEGRADED/OFFLINE), model, models[], contextSize, latencyMs, costPer1kIn/Out, costPerMTokIn/Out, tokens {used, budget, percent}, costUsdToday, quotaRestPercent, capabilities, classes[], lastCheckedAt, error. Zusätzlich Routing-Block (Policy-Version, Modi, globales Budget, letzte Entscheidungen) und Audit-Auszug. ?refresh=1 erzwingt eine Health-Prüfung.",
+      "risiko": "Die Antwort enthält bewusst KEINE Secrets (Basis-URLs, Keys, Connection-Strings). Ein Secret-Scanner über die API-Response ist Teil der Tests; Verbrauchswerte können jedoch Rückschlüsse auf Arbeitslast erlauben — der Endpunkt ist lesend und gehört nicht ins öffentliche Netz."
+    },
+    "routingModesApi": {
+      "kurzinfo": "PUT /api/routing/modes ändert den Routing-Modus eines Agenten — nur für Admins und nur mit Audit.",
+      "technischeInfo": "Body: { modes: { AGENT: 'manual'|'automatic'|'hybrid' }, actor }. Guard: FIRM_ADMIN_TOKEN → x-admin-token (timing-safe, sonst 403 FORBIDDEN) plus x-csrf-token (sonst 403 CSRF_INVALID). Ungültige Modi ⇒ 422 INVALID_MODES mit Fehlerliste; gültige Einträge derselben Anfrage werden trotzdem übernommen. Persistenz: data/routing/modes.json (chmod 600, best-effort).",
+      "risiko": "Ohne Admin-Guard könnte ein kompromittierter Client jeden Agenten auf automatic + Cloud stellen. Jede Änderung erzeugt einen Audit-Eintrag (outcome: admin, from mode:<alt> → to mode:<neu>) — inklusive Actor."
+    }
+  }
+}

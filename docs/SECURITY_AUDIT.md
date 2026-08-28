@@ -568,3 +568,73 @@ Red-Team-Checkliste + Scanner-Ergebnis.
 Fazit: **kein High/Critical-Befund.** Secrets existieren außerhalb des
 Backend-Speichers nicht; die einzige echte Trust-Grenze (Live) bleibt
 geschlossen; alle Pflicht-Scanner sind grün und in CI verankert.
+
+---
+
+## Security Audit — Task 09 (Model Router, v1.17.0)
+
+**Stand:** 2026-08-28 · **Modul:** `src/routing/**` ·
+**API:** neu `/api/providers`, `/api/routing`, `/api/routing/modes` ·
+**Integration:** `src/cycle/ports.ts` (DefaultAnalysisAgentPort),
+`src/cycle/steps/macroStep.ts`.
+**Status:** ERHÖHT (Governance, Injection-Resistenz, Budget-Deckel) — Threat
+Model + Red-Team-Checkliste + Coverage-Nachweis.
+
+### Threat Model
+
+| # | Bedrohung | Angriffsweg | Gegenmaßnahme | Restrisiko |
+| --- | --- | --- | --- | --- |
+| T1 | Agent wählt selbst das teure Modell | Prompt/Code des Agenten setzt Modell | Einziger Weg ist `router.resolve()`/`requestEscalation()`; `MODEL_*`-Env wird im Agentenpfad ignoriert; Architekturtest belegt Routing-Pflicht | `localReason()` (Legacy-Pfad, engine/analysts) bleibt ungeroutet — dokumentiert, Follow-up |
+| T2 | Injection erzwingt Eskalation | News-Headline/Modell-Output enthält „escalate to MODEL_C" | `toRoutingContext()`-Whitelist verwirft Freitext; Trigger nur Runtime-Metriken; `reason` wird protokolliert, nie ausgewertet; 6 Payloads × 5 Szenarien getestet | Keins (nur strukturierte Eingaben wirken) |
+| T3 | Kostenexplosion / unbegrenzte Cloud | Dauerhafte Höherstufung, Retry-Loops | Budget-Deckel je Provider/Agent/Tag, Eskalations-Tageslimit (12), `classCeiling`, `allowCloud`; Policy-Validierung erzwingt Cloud-Deckel > 0 | Zähler prozess-lokal (Single-Node) |
+| T4 | Policy-Manipulation | Policy-Datei/Modi ohne Autorisierung ändern | Schema-Validierung mit Startverweigerung; `PUT /api/routing/modes` nur mit Admin-Token (timing-safe) + CSRF; Modi-Datei chmod 600; jede Änderung auditiert (`outcome: admin`) | Bis task-10 kein Rollenmodell (Token-Platzhalter, TODO markiert) |
+| T5 | Audit-Lücke | Wechsel ohne Protokoll (z. B. in-class Provider-Tausch) | `finish()` auditiert jeden Wechsel (Klasse/Provider/Modell) sowie Fallback/Budget; seitwärts/rückwärts ⇒ `outcome: fallback`; Assertion-Test: 100 % der Wechsel haben Audit-Eintrag | DB-Senke best-effort (Ring + Datei bleiben Wahrheit) |
+| T6 | Secret-Leak über die Provider-API | `/api/providers` spiegelt Registry inkl. Keys/URLs | Antwort enthält nur Status/Modell/Kosten/Zähler — keine Keys, keine Basis-URLs; Secret-Scanner über die Response im Test | None (Scanner in CI) |
+| T7 | Cloud-Nutzung trotz lokalem Gebot | Agent mit `allowCloud:false` landet in der Cloud | Doppelte Sperre: `allowCloud` je Agent **und** `classes[*].deployment: local`; Testmatrix prüft 108 Fälle gegen Cloud-Verstoss | None |
+| T8 | Fallback-Kette als Schleichweg in die Cloud | Quota-/Timeout-Kette überschreibt die Agenten-Freigabe | `fallbackChainFor()` filtert Cloud bei `allowCloud:false`; Kette ist konfigurierbar und auditiert | None (Unit-getestet) |
+| T9 | Router als Trading-Agent missverstanden | Router erzeugt Entscheidungen/Orders | Router ist read-only bzgl. Markt/Orders: kein DB-Schreibzugriff ausser Audit, kein Broker-Import, keine Symbol-Logik (Statik-Test) | None |
+| T10 | Health-Prüfung als SSRF/DoT | Manipulierte Basis-URL/Timeout | Nur `http(s)`-URLs aus `providerConfigFromEnv` (bestehender Sanitizer), hartes Abort-Timeout (1500 ms), read-only Modelllisten, Fehler → `offline` | Lokale URLs aus `.env` (Operator-vertrauenswürdig) |
+
+### Red-Team-Checkliste (je Punkt geprüft)
+
+| Kriterium | Status | Nachweis |
+| --- | :---: | --- |
+| **Kein Agenten-Selbstwechsel** | ✅ | `tests/routing.integration.test.ts`: `MODEL_RESEARCH=evil-model` wird ignoriert; Modell kommt aus der Routing-Entscheidung. `tests/routing.injection.test.ts`: Felder wie `model`/`force`/`requestedClass` im Kontext bleiben wirkungslos. |
+| **Injection-Resistenz** | ✅ | 6 bösartige Payloads × Prompt/Kontext/Eskalations-Reason/Modell-Output/untrustedData ⇒ identische Entscheidungen; `toRoutingContext()` reduziert auf die 9 Whitelist-Felder. |
+| **Budget-Deckel** | ✅ | Provider-/Agenten-/Tagesdeckel erzwungen; Zwangsrückstufung + `budget_blocked`-Audit; Deckel greift auch im `manual`-Modus; `budgetExempt` nur als auditierte Admin-Ausnahme. |
+| **Admin-Guard für Policy/Modi** | ✅ | `PUT /api/routing/modes`: ohne Admin-Token → 403 `FORBIDDEN`; ohne CSRF → 403 `CSRF_INVALID`; ungültige Modi → 422 `INVALID_MODES`; Änderung ⇒ Audit-Eintrag mit Actor. |
+| **Audit-Vollständigkeit** | ✅ | Assertion-Test über 6 Wechsel-Szenarien: jeder Wechsel hat einen Eintrag mit korrektem `to`, Pflichtfeldern und Policy-Version; Wiederholung ohne Wechsel erzeugt keinen Eintrag (kein Spam). |
+| **Fallback-Ketten** | ✅ | Ollama-Timeout → Gemini, Gemini-Quota 4 % → Ollama, Anthropic offline → Ollama, Komplettausfall → Regel-Engine; je ein Audit-Eintrag (`fallback`). |
+| **Cloud-Deckel erzwungen** | ✅ | Policy-Validierung: `budgets.providers.{gemini,anthropic}.tokensPerDay <= 0` ⇒ Policy ungültig ⇒ Startverweigerung. |
+| **Keine Secrets in der API** | ✅ | `scanTextForSecrets()` über alle `/api/providers`- und `/api/routing`-Responsen → 0 Funde. |
+| **Kein Cloud-Zwang ohne Freigabe** | ✅ | 108-Fall-Matrix: kein Agent mit `allowCloud:false` erhält einen Cloud-Provider. |
+| **Determinismus** | ✅ | 108-Fall-Matrix ruft jeden Fall zweimal auf ⇒ byte-identische Entscheidungen. |
+
+### Statik-Prüfungen (Architektur)
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| `src/routing/**` importiert keine Markt-/Broker-/Order-Module | ✅ (kein Import von `src/brokers/**`, `src/portfolio/**`, `src/scanner/**`) |
+| Router schreibt nie Orders/Positionen | ✅ (DB-Zugriff ausschliesslich `audit_log`, best-effort) |
+| Kein `Math.random()`/`Date.now()` im Entscheidungspfad | ✅ (Uhr injiziert; `grep`-geprüft) |
+| Kein `dangerouslySetInnerHTML`/`innerHTML` in Routing-Code | ✅ (kein UI-Code im Modul) |
+
+### Coverage
+
+`npm run test:coverage:routing` → **96,1 % Zeilen / 85,3 % Branches** über
+`src/routing/**`, `src/app/api/providers/**`, `src/app/api/routing/**`
+(79 Tests, alle grün; Gesamtsuite 944 Tests grün).
+
+### Befunde
+
+| ID | Severity | Datei | Problem | Status |
+| --- | --- | --- | --- | --- |
+| RT-01 | Medium | `src/lib/ollama.ts` (`localReason`) | Legacy-Pfad (engine/macroCycle/analysts) ruft weiterhin direkt `chatLlm()` ohne Router | ✅ Offen dokumentiert: Router-Pflicht gilt für die Agenten-Laufzeit (`src/cycle/ports.ts`); Migration des Legacy-Pfads ist Folgeaufgabe |
+| RT-02 | Info | `src/routing/registry.ts` | Cloud-Health ohne `ROUTING_HEALTH_PROBE=all` key-basiert | ✅ Dokumentiert + Fallback-Kette fängt Fehlannahmen ab |
+| RT-03 | Info | `src/routing/budget.ts` | Zähler prozess-lokal (Single-Node) | ✅ konsistent mit dem bestehenden Rate-Limiter; Mehrinstanzen-Betrieb braucht geteilte Zustandsquelle |
+| RT-04 | Info | `src/app/api/routing/modes/route.ts` | Admin-Guard ist token-basiert (kein Rollenmodell) | ✅ `TODO(task-10)`, timing-safe, auditiert |
+| RT-05 | Info | `src/routing/audit.ts` | DB-Senke best-effort | ✅ Ring + NDJSON-Datei bleiben Wahrheit; Audit-Pfad wirft nie |
+
+Fazit: **kein High/Critical-Befund.** Die drei Governance-Ziele sind erreicht und
+messbar belegt: kein Agenten-Selbstwechsel, keine Injection-basierte Eskalation,
+keine ungedeckelte Cloud-Nutzung.

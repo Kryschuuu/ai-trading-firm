@@ -20,6 +20,103 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.17.0] — 2026-08-28
+
+**Deterministischer Model Router (Task 09): der MODEL_ROUTER als Systemrolle.**
+Kein Agent wählt sein Modell selbst — die einzige Instanz, die Modellklasse,
+Provider und Modell bestimmt, ist der Router auf Basis einer versionierten,
+schema-validierten Policy. Eskalationen dürfen Agenten nur **beantragen**;
+genehmigt oder abgelehnt wird ausschliesslich vom Router, beides mit Audit.
+
+### Neu: `src/routing/`
+
+- **Policy** (`policy.ts`): versionierte Konfiguration (`1.0.0`), JSON-ladbar via
+  `ROUTING_POLICY_PATH`, vollständige Schema-Validierung — **ungültige Policy ⇒
+  Startverweigerung** (`RoutingPolicyError`). Enthält Agenten-Tabelle, Klassen
+  (`MODEL_A`/`MODEL_B`/`MODEL_C`), Task-Overrides, Complexity-/Risk-Floors,
+  Eskalationsregeln, Budgets und Fallback-Ketten. Cloud-Provider **müssen**
+  gedeckelt sein (Validierung lehnt `tokensPerDay <= 0` ab).
+- **Router** (`router.ts`): `resolve(RoutingContext) → RoutingDecision` über die
+  9 Routing-Inputs (task, complexity, risk, latency, tokenBudget, providerHealth,
+  capabilities, maxCostUsd, contextSize). Ergebnisraum
+  `MODEL_A | MODEL_B | MODEL_C | CLOUD | FALLBACK`. Deterministisch: keine
+  Zufallswerte, injizierbare Uhr, feste Policy-Reihenfolgen.
+- **Provider-Registry** (`registry.ts`): Karten mit `models[]`, `capabilities[]`,
+  `contextSize`, `costPer1kIn/Out`, `healthStatus`, `latencyEma`,
+  `tokenBudgetToday`, `tokensUsedToday`, `quotaRest`. Health-Poller mit
+  konfigurierbarem Intervall (`ROUTING_HEALTH_POLL_MS`, `0` = aus,
+  `ROUTING_HEALTH_PROBE=off|local|all`); Ollama liefert zusätzlich Modellliste
+  und Kontextgrösse (`/api/tags`, `/api/show`).
+- **Budget** (`budget.ts`): harte Deckel je Provider, Agent und Tag plus
+  Tageslimit für Eskalationen (12). Überschreitung ⇒ Zwangsrückstufung auf ein
+  lokales Modell + Audit (`outcome: budget_blocked`) — gilt **auch** im
+  `manual`-Modus (Ausnahme: auditierte Admin-Freigabe `budgetExempt`).
+- **Eskalation**: `requestEscalation()` mit dokumentierter Prüfkette E1–E8
+  (Klasse höher, Zielklasse erlaubt, Agenten-Deckel, hybrid-Grenze,
+  Komplexität/Runtime-Trigger, Confidence ≤ 0.75, Tageslimit, Verfügbarkeit).
+  Trigger sind ausschliesslich Runtime-Metriken — **kein** Prompt-Inhalt.
+- **Audit** (`audit.ts`): `AuditSink`-Interface mit Memory-, Datei-
+  (`data/routing/audit.ndjson`) und `audit_log`-Senke (Event `MODEL_ROUTING`).
+  Format `{ts, agent, from, to, reason, trigger, policyVersion, outcome}`;
+  jeder Wechsel — inkl. Fallback und **denied** — wird protokolliert.
+- **Adapter** (`adapter.ts`): `routeChat()` bündelt Router-Entscheidung,
+  Provider-Kette und Verbrauchsbuchung für alle `chat()`-Pfade.
+
+### Default-Routing-Tabelle (implementiert + getestet)
+
+| Agent | Modus | Klasse |
+| --- | :---: | --- |
+| `CEO` | automatic | frei (Router) |
+| `RESEARCH` | automatic | large (`MODEL_C`) |
+| `TECHNICAL*` / `NEWS*` | automatic | local-small (`MODEL_A`) |
+| `RISK*` / `PORTFOLIO*` | automatic | local-medium (`MODEL_B`) |
+
+Modi `manual` (festes Modell, Eskalation möglich), `automatic` (Router frei),
+`hybrid` (Klasse aus der Tabelle ist bindend) — je Agent über
+`PUT /api/routing/modes` (Admin-Token + CSRF + Audit).
+
+### Neu: API
+
+| Methode | Pfad | Zweck |
+| --- | --- | --- |
+| `GET` | `/api/providers` | Karten-Daten: Status, Modell(e), Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen (`?refresh=1` erzwingt Health-Prüfung) |
+| `GET` | `/api/routing` | Policy, Modi, Provider, Budgets, letzte Entscheidungen, Audit |
+| `GET`/`PUT` | `/api/routing/modes` | Modi lesen / ändern (Admin + CSRF + Audit) |
+
+### Geändert
+
+- `src/cycle/ports.ts`: `DefaultAnalysisAgentPort` läuft über `routeChat()` —
+  `MODEL_*`-Environment-Werte bestimmen kein Agentenmodell mehr, nur noch
+  Registry-Defaults. Genehmigte Eskalationen führen zu genau einem erneuten
+  Aufruf; der Routing-Trace landet in `agent_messages.meta.routing`.
+- `src/cycle/steps/macroStep.ts`: der Eskalationstrigger stammt jetzt aus den
+  **validierten Strukturfeldern** (Regime, Volatilität, Confidence) statt aus
+  Freitext — sonst könnte eine News-Schlagzeile eine Eskalation auslösen.
+- `src/cycle/types.ts`: `ModelEscalationRequest` um die Task-09-Felder
+  (`task`, `currentModel`, `currentClass`, `requestedClass`, `tokenOvershoot`,
+  `latencyViolation`) erweitert; `AgentInvocationSpec.complexity` und
+  `AgentInvocationResult.routing` ergänzt.
+
+### Tests (neu)
+
+`tests/routing.policy.test.ts` (108 Tabellenfälle + Modi + Schema-Matrix),
+`routing.escalation.test.ts` (Golden 0.58/HIGH ⇒ approved, 0.95/LOW ⇒ denied),
+`routing.fallback.test.ts` (Timeout-/Quota-/Health-Ketten),
+`routing.budget.test.ts`, `routing.injection.test.ts`,
+`routing.registry.test.ts`, `routing.api.test.ts`,
+`routing.integration.test.ts` (100 % der Wechsel auditiert).
+Coverage des neuen Codes: **96 % Zeilen** (`npm run test:coverage:routing`).
+
+### Dokumentation
+
+Neu: **[LLM_ROUTING.md](LLM_ROUTING.md)** (Rollenbild, 9 Inputs, Ergebnisraum,
+Default-Tabelle, Modi, Eskalationsdiagramm, Fallback-Ketten, Budget-Deckel,
+Audit-Format, Governance-Begründung) und `docs/help/routing.help.json`
+(3-Ebenen-Hilfe, 17 Felder). Aktualisiert: PROVIDER_INTEGRATION.md
+(Registry-Felder, Health, Budget), SECURITY_AUDIT.md (`## Security Audit — Task 09`).
+
+---
+
 ## [1.16.0] — 2026-08-28
 
 **Broker Control Plane (Task 08): Backend-Credential-Manager mit
