@@ -20,6 +20,49 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.18.0] — 2026-08-28
+
+**Operations Center + RBAC-Kern (Task 10, Phase 1):** Rollen
+`viewer` / `operator` / `admin`, leerer Operations-Center-Tab, vier
+Dokumentations-/Code-Drifts behoben. Live bleibt gesperrt. Kein Task 11/12.
+
+### Neu: `src/auth/`
+
+- Rollenmatrix und Permission-Katalog. `live.gate` existiert, wird **keiner**
+  Rolle gewährt.
+- `resolveActor` / `requirePermission`: Token-Header `x-admin-token`,
+  `x-firm-token`, `x-viewer-token`, `Authorization: Bearer`. Timing-safe.
+  Local-open (kein Token) = Admin. Operator ohne `FIRM_ADMIN_TOKEN` erbt
+  Admin-Rechte (Single-Admin, Control-Plane-kompatibel: 403 vs 401).
+- `GET /api/auth/me` — Actor ohne Token-Echo.
+- `GET /api/ops` — Cockpit-Hülle, `liveEnabled: false` hart.
+- Dashboard-Tab **🖥 Operations Center** (Rolle, Live-Chip, Modul-Karten).
+
+### Geändert
+
+- Control-Plane-Guard ist Fassade über `requirePermission("broker.credentials")`.
+  Audit-Actor kommt aus dem RBAC-Kern statt hart `"admin"`.
+- Bitunix-Default-Store: `createVenueBackedNamedStore` + Env-Fallback.
+  `TODO(task-08)` entfernt.
+- Architecture-Tab: Ist-Stand (Makro/Mikro, 12 Tasks, Paper B, Broker,
+  Router, RBAC) — kein LangGraph/AutoGen.
+- HANDBUCH Kap. 8: Paper-Modus B als Default, Control Plane, Bitunix.
+  Kap. 19.4: MODEL_ROUTER ist v1.17.0 (nicht „bis Task 09“).
+- `apiFetch` sendet den gespeicherten Token auch auf GET.
+
+### Tests & Doku
+
+- `tests/rbac.test.ts`, `tests/ops.api.test.ts`, `tests/task10.architecture.test.ts`.
+- Plan: [task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md).
+- SECURITY_AUDIT Task 10, `docs/help/ops.help.json`, `.env.example` RBAC.
+
+### Nicht enthalten (bewusst)
+
+- Keine Sessions, keine Widget-Aggregation (Phase 3), Firm-Schreib-APIs
+  bleiben `guardWrite`. Live-Gate = Task 11.
+
+---
+
 ## [1.17.0] — 2026-08-28
 
 **Deterministischer Model Router (Task 09): der MODEL_ROUTER als Systemrolle.**

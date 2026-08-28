@@ -13,9 +13,10 @@
  *                permissions:[], liveEnabled:false }
  *   Fehler  { ok:false, error, message } (SAFE, redigiert) — 403/404/409/422/429/503.
  *
- * Sicherheit: Admin-Guard (RBAC-Platzhalter, TODO(task-10)), CSRF
+ * Sicherheit: RBAC (`broker.credentials`, Task 10), CSRF
  * (x-csrf-token), Rate-Limit auf Credential-Versuche (5/min/IP).
  */
+import { actorAuditId } from "@/auth";
 import { getControlPlaneService } from "@/brokers/control-plane/service";
 import { guardCredentialEndpoint } from "@/brokers/control-plane/guard";
 import { mapControlPlaneError, readJsonBody } from "@/brokers/control-plane/http";
@@ -33,7 +34,7 @@ export async function POST(req: Request, ctx: RouteContext): Promise<Response> {
     const body = await readJsonBody(req);
     const service = await getControlPlaneService();
     const result = await service.saveCredentials(
-      "admin",
+      actorAuditId(req),
       decodeURIComponent(venue ?? ""),
       body
     );
@@ -51,7 +52,7 @@ export async function DELETE(req: Request, ctx: RouteContext): Promise<Response>
     const { venue } = await ctx.params;
     const service = await getControlPlaneService();
     const result = await service.deleteCredentials(
-      "admin",
+      actorAuditId(req),
       decodeURIComponent(venue ?? "")
     );
     return Response.json(result, { status: 200 });

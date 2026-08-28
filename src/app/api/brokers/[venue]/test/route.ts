@@ -11,6 +11,7 @@
  * Sicherheit: Admin-Guard, CSRF, Credential-Rate-Limit (wie alle
  * mutierenden Control-Plane-Endpoints).
  */
+import { actorAuditId } from "@/auth";
 import { getControlPlaneService } from "@/brokers/control-plane/service";
 import { guardCredentialEndpoint } from "@/brokers/control-plane/guard";
 import { mapControlPlaneError } from "@/brokers/control-plane/http";
@@ -27,7 +28,7 @@ export async function POST(req: Request, ctx: RouteContext): Promise<Response> {
     const { venue } = await ctx.params;
     const service = await getControlPlaneService();
     const result = await service.testConnection(
-      "admin",
+      actorAuditId(req),
       decodeURIComponent(venue ?? "")
     );
     return Response.json(result, { status: 200 });

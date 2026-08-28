@@ -1,57 +1,36 @@
 /**
- * Guards der Broker Control Plane (Task 08, Regeln 3 + Security):
+ * Guards der Broker Control Plane (Task 08 + Task 10):
  *
- *   1. RBAC (minimaler Admin-Guard): Alle Credential-/Connection-Operationen
- *      sind NUR fuer die Admin-Rolle. Es existiert noch kein Session-/
- *      Rollensystem → der Guard ist ein Token-basierter Platzhalter.
- *      Modell:
- *        - FIRM_ADMIN_TOKEN gesetzt  → Header `x-admin-token` (timing-safe)
- *          ODER `x-firm-token` muss matchen, sonst 403 FORBIDDEN.
- *        - nur FIRM_API_TOKEN gesetzt → bestehender Operator-Token-Guard
- *          (x-firm-token, 401) wirkt als Admin-Ersatz (Single-Admin-Modell).
- *        - beides ungesetzt          → lokaler Offen-Betrieb (Standard,
- *          Single-User, Dienst lauscht nur lokal).
- *      TODO(task-10): zentrale RBAC/Sessions ersetzen diesen Guard.
+ *   1. RBAC: Credential-/Connection-Operationen brauchen
+ *      `broker.credentials` (Admin, bzw. Operator im Single-Admin-Modell
+ *      wenn FIRM_ADMIN_TOKEN ungesetzt ist). Quelle: `src/auth/`.
+ *      HTTP-Status bleibt kompatibel: Admin-Token gesetzt → 403,
+ *      nur Operator-Token → 401, Offen-Betrieb → durch.
  *
  *   2. CSRF: Alle mutierenden Control-Plane-Endpoints verlangen den
  *      Custom-Header `x-csrf-token` mit dem Wert des Admin-/API-Tokens
  *      (Offen-Betrieb: Konstante "local"). Cross-Site-Formulare koennen
- *      Custom-Header nicht setzen (kein CORS, kein SameSite-Cookie-Fallback
- *      noetig — die API nutzt bewusst KEINE Cookies). Fehlt der Header →
- *      403 CSRF_INVALID.
+ *      Custom-Header nicht setzen. Fehlt der Header → 403 CSRF_INVALID.
  *
  *   3. Rate-Limit auf Credential-Versuche: eigener Sliding-Window-Bucket,
  *      Default 5/min/IP (BROKER_CREDENTIAL_RATE_LIMIT, 0 = aus) → 429.
  *
  * Reihenfolge: Auth → CSRF → Rate-Limit.
  */
-import { timingSafeEqual } from "node:crypto";
-import { checkApiToken } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
+import { tokenEquals } from "@/lib/apiAuth";
 import {
-  ADMIN_HEADER,
-  ADMIN_TOKEN_FLAG,
   CREDENTIAL_RATE_LIMIT_WINDOW_MS,
   CSRF_HEADER,
   CSRF_LOCAL_VALUE,
   credentialRateLimitMax,
 } from "./config";
 
-export function adminTokenConfigured(): boolean {
-  return Boolean(process.env.FIRM_ADMIN_TOKEN);
-}
+export { adminTokenConfigured } from "@/auth";
 
-/** Timing-sicherer Vergleich inkl. Laengen-Padding. */
+/** Timing-sicherer Vergleich inkl. Laengen-Padding (Alias auf apiAuth). */
 export function tokenEqualsSafe(got: string, expected: string): boolean {
-  const a = Buffer.from(got, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  const n = Math.max(a.length, b.length, 1);
-  const pa = Buffer.alloc(n);
-  const pb = Buffer.alloc(n);
-  a.copy(pa);
-  b.copy(pb);
-  const lengthOk = a.length === b.length && b.length > 0;
-  const bodyOk = timingSafeEqual(pa, pb);
-  return lengthOk && bodyOk;
+  return tokenEquals(got, expected);
 }
 
 function forbidden(code: string, hint: string): Response {
@@ -59,24 +38,11 @@ function forbidden(code: string, hint: string): Response {
 }
 
 /**
- * Admin-Guard (RBAC-Platzhalter). Liefert `null` = erlaubt,
+ * Admin-Guard über den RBAC-Kern. Liefert `null` = erlaubt,
  * sonst eine 401/403-Response.
  */
 export function checkAdminGuard(req: Request): Response | null {
-  const adminToken = process.env[ADMIN_TOKEN_FLAG];
-  if (adminToken) {
-    const gotAdmin = req.headers.get(ADMIN_HEADER) ?? "";
-    const gotFirm = req.headers.get("x-firm-token") ?? "";
-    if (tokenEqualsSafe(gotAdmin, adminToken) || tokenEqualsSafe(gotFirm, adminToken)) {
-      return null;
-    }
-    return forbidden(
-      "FORBIDDEN",
-      "Credential-/Connection-Operationen sind nur fuer die Admin-Rolle erlaubt (x-admin-token)."
-    );
-  }
-  // Fallback auf den bestehenden Operator-Token-Guard (Single-Admin-Modell).
-  return checkApiToken(req);
+  return requirePermission(req, "broker.credentials");
 }
 
 /** Erwarteter CSRF-Wert: Admin-Token → Operator-Token → Offen-Konstante. */

@@ -6,6 +6,7 @@ import type { AgentRow, MissionRow } from "@/lib/types";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
 import WorkshopTab from "./workshop/WorkshopTab";
 import BrokersPanel from "./control-plane/BrokersPanel";
+import OperationsCenterPanel from "./ops/OperationsCenterPanel";
 import ThemeSwitcher from "./ThemeSwitcher";
 import AuditTrailPanel from "./common/AuditTrailPanel";
 import ProtocolPanel from "./common/ProtocolPanel";
@@ -109,7 +110,7 @@ const defaultData: FirmData = {
   timestamp: "",
 };
 
-type Tab = "overview" | "reports" | "protocol" | "agents" | "workshop" | "brokers" | "risk" | "architecture";
+type Tab = "overview" | "reports" | "protocol" | "agents" | "workshop" | "ops" | "brokers" | "risk" | "architecture";
 
 
 export default function FirmDashboard() {
@@ -466,6 +467,9 @@ export default function FirmDashboard() {
           {tab === "reports" && <ReportsTab />}
           {tab === "protocol" && <ProtocolTab />}
           {tab === "agents" && <AgentsTab data={data} running={running} onRun={runAgent} />}
+          {tab === "ops" && (
+            <OperationsCenterPanel onOpenBrokers={() => setTab("brokers")} />
+          )}
           {tab === "workshop" && (
             <WorkshopTab
               agents={data.agents}
@@ -1435,88 +1439,81 @@ function ArchitectureTab() {
 function Guide() {
   return (
     <div className="space-y-8 text-slate-300">
-      {/* Framework & orchestration */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="mb-1 text-lg font-bold text-slate-50">1 · Framework & Orchestration</h2>
-        <p className="mb-3 text-sm text-slate-400">Paperclip-Ersatz für autonome Trading-Agenten auf eigener Hardware:</p>
-        <ul className="ml-5 list-disc space-y-2 text-sm">
-          <li><b className="text-emerald-400">LangGraph</b> — bester Kandidat für Trading. Zustandsmaschine mit expliziten Übergängen (research → risk → approve → execute), Checkpointing/Context-Persistenz zwischen Läufen reaktiv, feinkörnige Kontrolle über jeden Schritt. Steilere Lernkurve, aber genau das, was als &quot;institutionelles Wissen&quot; über Sessions hinweg gefordert wird.</li>
-          <li><b className="text-emerald-400">AutoGen (Microsoft)</b> — conversation-driven, aber das freie Agenten-Gespräch ist riskant für Geld-Operationen; State-Management über alles hinweg schwieriger. Gut für Exploration, nicht als harte Pipeline.</li>
-          <li><b className="text-emerald-400">CrewAI</b> — niedrige Einstiegshürde, schöne Rollen (&quot;crew = CEO + workers&quot;), aber die magische Orchestrierung macht Kontrolle über Schritte und Reproduzierbarkeit schwerer.</li>
-          <li><b className="text-emerald-400">Pickleball nebenbei</b> — dieser Code hier liefert einen minimalen, selbstgeschriebenen Orchestrator (Engine-Layer) extra. Eine Agenten-Schleife reicht für Paper-Trading völlig.</li>
-        </ul>
-        <p className="mt-3 text-sm">
-          <b>Parallel oder sequenziell?</b> Deine N150 (16 GB) lädt höchstens <b>2 kleine Modelle gleichzeitig</b> in den RAM. Für NLP-Aufgaben pro Turn mit &lt;4k tokens dominiert ohnehin die Einzellatenz. Starte <b>sequenziell geordnet</b> (jeder Agent, wenn der vorherige fertig ist) — für Paper-Trading ist das instant genug und nutzt die Knappheit als Feature: weniger Race-Conditions an der Brokerschicht.
+        <h2 className="mb-1 text-lg font-bold text-slate-50">1 · Grundprinzip (Ist-Stand)</h2>
+        <p className="mb-3 text-sm text-slate-400">
+          Die KI schlägt vor — der Code entscheidet. Orchestrierung ist ein
+          eigener Engine-Layer (`src/lib/engine.ts`, `src/cycle/`) mit harten
+          Grenzen in kompiliertem TypeScript — keine fremde Agenten-Runtime.
         </p>
+        <ul className="ml-5 list-disc space-y-2 text-sm">
+          <li><b className="text-emerald-400">Makro-Zyklus</b> — CEO + Research, LLM im Hintergrund, erzeugt versionierte Regeln (`trade_rules`).</li>
+          <li><b className="text-emerald-400">Mikro-Zyklus</b> — eigener Prozess (`npm run micro`), kein LLM, WebSocket-Tick → kompilierte Regel → Paper-Fill.</li>
+          <li><b className="text-emerald-400">Workshop-Pipeline</b> — sequenziell CEO → Research → Backtest → Risk → Approver → Executor; Race-Conditions an der Brokerschicht werden so vermieden.</li>
+          <li><b className="text-emerald-400">MODEL_ROUTER</b> — kein Agent wählt sein Modell selbst (Task 09). Eskalationen nur als Antrag.</li>
+        </ul>
       </section>
 
-      {/* Model selection */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="mb-1 text-lg font-bold text-slate-50">2 · Modellauswahl & Kompromisse</h2>
-        <p className="mb-3 text-sm text-slate-400">Empfehlungen basierend auf N150 / 48GB-RAM-Desktop / RX-480 (8GB):</p>
+        <h2 className="mb-1 text-lg font-bold text-slate-50">2 · 12-Aufgaben-Programm</h2>
+        <p className="mb-3 text-sm text-slate-400">Was bereits im Code liegt — nicht was irgendwann geplant war:</p>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead><tr className="border-b border-slate-700 text-slate-400 text-[11px] uppercase"><th className="py-1 pr-3">Rolle</th><th className="py-1 pr-3">Modell (Ollama-Tag)</th><th className="py-1">Warum</th></tr></thead>
+            <thead>
+              <tr className="border-b border-slate-700 text-[11px] uppercase text-slate-400">
+                <th className="py-1 pr-3">Task</th>
+                <th className="py-1 pr-3">Thema</th>
+                <th className="py-1">Status</th>
+              </tr>
+            </thead>
             <tbody className="text-slate-300">
-              <tr className="border-b border-slate-800"><td className="py-1 pr-3">CEO / Orchestrator</td><td className="py-1 pr-3">qwen2.5:14b-instruct-q4</td><td className="py-1">gutes Instruktionsfolgen, grosse Community</td></tr>
-              <tr className="border-b border-slate-800"><td className="py-1 pr-3">Research</td><td className="py-1 pr-3">llama3.1:8b-instruct-q4</td><td className="py-1">schnell, zusammenfasst Analysen</td></tr>
-              <tr className="border-b border-slate-800"><td className="py-1 pr-3">Backtest-Assistenz</td><td className="py-1 pr-3">deepseek-coder:6.7b / qwen2.5-coder</td><td className="py-1">Code-Skelette für Tests, nicht für Disposition</td></tr>
-              <tr><td className="py-1 pr-3">Risk / Approver</td><td className="py-1 pr-3">qwen2.5:7b-instruct-q4</td><td className="py-1">schauen kritisch & deterministisch gegen Härtelogik</td></tr>
+              <tr className="border-b border-slate-800"><td className="py-1 pr-3">01–06</td><td className="py-1 pr-3">Universum, Broker-Contract, Paper-Market-Data, Scanner, Portfolio, Zyklus</td><td className="py-1">geliefert</td></tr>
+              <tr className="border-b border-slate-800"><td className="py-1 pr-3">07–09</td><td className="py-1 pr-3">Bitunix, Control Plane, MODEL_ROUTER</td><td className="py-1">geliefert</td></tr>
+              <tr className="border-b border-slate-800"><td className="py-1 pr-3">10</td><td className="py-1 pr-3">Operations Center + RBAC (dieser Stand: Kern + leerer Tab)</td><td className="py-1">in Arbeit</td></tr>
+              <tr><td className="py-1 pr-3">11</td><td className="py-1 pr-3">Live-Trading-Gate</td><td className="py-1">gesperrt — `LiveTradingGateError`</td></tr>
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-sm">
-          <b>DeepSeek Coder?</b> Für <b>Code-Generierung</b> (Backtest-Skripte, Adapter) ja. Als <b>Orchestrator</b> nein — es ist auf Fülltext/Code trainiert, nicht auf strukturierte Instruktionsausführung wie Qwen/Llama. Nutze Coder für Toolings, Qwen für Koordination.
-        </p>
-        <p className="mt-2 text-sm">
-          <b>Kompromisse vs. Claude:</b> lokale Modelle (a) brauchen <b>strikteres Prompt-Design</b> (JSON-Only, weniger Prosa), (b) haben <b>kleinere effektive Kontext-Fenster</b> (~8–32k), (c) hallucinieren öfter. Dafür: 0 Kosten, volle Datenkontrolle, CPU+GPU offline.
-        </p>
-        <p className="mt-2 text-sm">
-          <b>Hybrid-Empfehlung:</b> lokal abwickeln (Research, Routinen, Approver-Vorprüfung, strukturierte Daten). <b>Nur für schwerwiegende, seltene, komplexe Entscheidungen</b> (z. B. missionales Strategic-Review) optional ein größeres Modell per API nutzen — aber primär menschlicher Review, nicht Cloud-LLM. Für Paper-Trading kannst du in reiner Lokalität bleiben.
-        </p>
       </section>
 
-      {/* Security & risk */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="mb-1 text-lg font-bold text-slate-50">3 · Sicherheit & Risikokontrolle</h2>
-        <p className="mb-3 text-sm text-slate-400">Defense-in-Depth — mehrschichtige, in Code verankerte Kontrolle:</p>
+        <h2 className="mb-1 text-lg font-bold text-slate-50">3 · Sicherheit &amp; Risikokontrolle</h2>
+        <p className="mb-3 text-sm text-slate-400">Defense-in-Depth — mehrschichtig, in Code verankert:</p>
         <ol className="ml-5 list-decimal space-y-2 text-sm">
-          <li><b>Mehrschichtig statt nur Instruktionen:</b> diesem Repo liegt die Pipeline bei — Engine validiert, dann <code className="font-mono">riskGuard.ts</code> (hart), dann Broker nochmal (hart). Ein Agent-Output kann keine der harten Schichten ändern.</li>
-          <li><b>Approver-Workflow:</b> Executor erzeugt nur einen <b>Vorschlag</b>; der Approver (Vega) prüft und setzt im Prod-Fall einen Status auf APPROVED, ehe der Order die Brokerschicht erreicht. Im Demo ist der Status zur Vereinfachung vorbeifüllt.</li>
-          <li><b>Kill-Switch:</b> oberster Schalter wirkt als Circuit-Breaker in-memory; sobald aktiv, wird <em>jeder</em> ordre in der Broker.execute abgelehnt — auch wenn ein Agent (oder ein injizierter Prompt) ihn umgehen will.</li>
+          <li><b>Guardrails:</b> Engine validiert, dann <code className="font-mono">riskGuard.ts</code> (hart), dann Broker-Schleuse nochmal. Ein Agent-Output kann keine Schicht ändern.</li>
+          <li><b>RBAC (Task 10):</b> Rollen viewer / operator / admin. Credentials und Routing-Modi nur Admin. Permission <code className="font-mono">live.gate</code> hat niemand.</li>
+          <li><b>Kill-Switch:</b> Circuit-Breaker, DB-persistent. Jede Order in <code className="font-mono">submit</code> wird abgelehnt, sobald er scharf ist.</li>
+          <li><b>Secrets:</b> Control Plane AES-256-GCM (AAD = Venue-ID). Das Frontend sieht nur Status, nie Keys.</li>
         </ol>
       </section>
 
-      {/* MVP & scaling */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="mb-1 text-lg font-bold text-slate-50">4 · Minimales Setup & Skalierung</h2>
+        <h2 className="mb-1 text-lg font-bold text-slate-50">4 · Paper-Trading (Ist)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
-          <li><b>Start mit 2 Agenten:</b> Research + Executor in einer Engpass-Pipeline, ein Approver-Prozess als Gegenleser. Das ist dein MVP — iteriere auf Instruktionen/Templates, nicht auf Agentenzahl.</li>
-          <li><b>Iteration:</b> ändere je Lauf <em>ein</em> Prompt-Attribut (z. B. Format-JSON-Only, Symbol-Restriktion), logge das Audit-Trail, lest Entscheidungen am nächsten Tag. Das hier tut genau das.</li>
-          <li><b>Wann wird Hardware Bottleneck?</b> wenn (a) Turn-Latenz &gt; dein Decision-Horizont wird, (b) Kontext &gt; effektives Fenster (über 8k tokens pro Turn), (c) zwei Modelle gleichzeitig laufen und RAM kollidiert, oder (d) viele parallele Läufe die Disk-IO von Ollama saturieren. Messen: Ollama zeigt tokens/s + native RAM-Nutzung in <code className="font-mono">ollama ps</code>.</li>
+          <li><b>Default-Modus B</b> (<code className="font-mono">broker-market-data</code>): echte Kurse (Broker-Feed → Binance/Yahoo), Fills lokal im Simulator. Kein statisches Kursbuch — das ist nur noch <code className="font-mono">PAPER_STATIC_FALLBACK=true</code>.</li>
+          <li><b>Modus A</b> (<code className="font-mono">synthetic</code>): seeded, deterministisch, für Tests.</li>
+          <li><b>Modus C</b> (Broker-Paper-API): nur mit Venue-Capability + Flag; heute nicht wählbar (klarer Fehler, kein stiller Fallback).</li>
+          <li><b>Live</b> bleibt unabhängig von Flags <code className="font-mono">LiveTradingGateError</code> (Task 11).</li>
         </ul>
       </section>
 
-      {/* Hardware limits */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="mb-1 text-lg font-bold text-slate-50">5 · Praktische Grenzen deiner Hardware</h2>
+        <h2 className="mb-1 text-lg font-bold text-slate-50">5 · Hardware (Variante A / B)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
-          <li><b>8 GB VRAM (RX-480):</b> taugt für Modelle bis ~7–8B in 4-bit (ein Rechenkern). Zur RX-480 fehlen moderne Features (BF16/FP8/FlashAttention), viele Backends nutzen sie nicht voll. Für kontinuierliche Läufe empfohlen: <b>primary CPU+RAM</b> (dein 48GB-Desktop) mit CUDA-nahen offeneren Modellen via Ollama-CPU, oder die 8GB-GPU nur für die grösste Modellklasse verwenden.</li>
-          <li><b>Quantisierung:</b> 4-bit vs 8-bit für strukturierte, klar vorgegebene Aufgaben (Risiko/Approver) ist fast egal — das sind im Kern Skript-Durchläufe + Matching. Qualität leidet erst bei freier, nuancenlastiger Kreativität (Strategie-Ideation). Nimm Q4 für die Pipeline, Q5–Q6 nur für den CEO, wenn Latenz es hergibt.</li>
-          <li><b>Empfehlung als Start-Modell:</b> <code className="font-mono">qwen2.5:7b-instruct-q4_K_M</code> — klein genug für deine Hardware, gut genug für Instruktionen; es beweist den Stack ohne zu hohe Latenz. Danach skalieren auf 14B nur wenn du es stabil brauchst.</li>
+          <li><b>Variante A — Solo-Node:</b> N150, 16 GB, alles lokal. 3B-Q4, Pipeline 2–6 min. Empfohlener Start.</li>
+          <li><b>Variante B — Split-Node:</b> N150 24/7 + Desktop als Inferenz. 7B–14B, Pipeline 20–60 s.</li>
+          <li><b>Quantisierung:</b> Q4_K_M ist der Standard — die Agenten füllen JSON, die Rechenarbeit liegt im Code. Q5 nur für den CEO, wenn Latenz es hergibt.</li>
+          <li>Messen: <code className="font-mono">ollama ps</code> (RAM, tok/s). Zwei Modelle gleichzeitig auf 16 GB sind die harte Grenze — deshalb bleibt die Pipeline sequenziell.</li>
         </ul>
       </section>
 
-      {/* Brokers */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="mb-1 text-lg font-bold text-slate-50">6 · Broker für späteres Paper- & Live-Trading</h2>
+        <h2 className="mb-1 text-lg font-bold text-slate-50">6 · Broker (Ist)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
-          <li><b>Alpaca</b> (API-First, US-Equities) — beste Paper-Trading-First-API, gebührenfrei Paper, elegante Orders, OAuth; ideal zum Start.</li>
-          <li><b>Interactive Brokers</b> — vollwertiger Broker, globale Märkte, aber CLI + TWS-API ist sperrig und nutzt 32-Bit-Gateway — auf der N150 machbar, aber Bureaucratie.</li>
-          <li><b>Binance/Kraken/KuCoin</b> — Crypto-Spot (und Futures), API einfach via <b>ccxt</b>; Paper-Feeds fehlen teils, daher Alpaca für Demo plausibler.</li>
-          <li><b>dYdX</b> — dezentrale Perpetuals, komplett open-source, Self-Custody; für einen &quot;open-source First&quot;-Ansatz thematisch passend, aber Margin/Risiko zusätzlich.</li>
+          <li><b>7 Venues</b> hinter <code className="font-mono">BrokerAdapter</code>: PAPER (vollständig), BITUNIX (Public REST/WS + Paper-Modus B), ALPACA/IBKR/BINANCE/KRAKEN/DYDX als ehrliche Stubs.</li>
+          <li><b>Control Plane:</b> Credentials einmal Form → AES-256-GCM-Store. Frontend erhält nur Status (configured / connected / permissions / liveEnabled:false).</li>
+          <li><b>Factory:</b> <code className="font-mono">getBroker(venue, &quot;live&quot;)</code> wirft immer <code className="font-mono">LiveTradingGateError</code>. Kein stiller Fallback auf Paper.</li>
         </ul>
-        <p className="mt-2 text-sm text-slate-400">Dieses Repo bringt die PAPER-Broker-Abstraktion mit; Alpaca/ccxt-Adapter sprechen dieselbe Schnittstelle an.</p>
       </section>
 
       {/* Questions to ask */}

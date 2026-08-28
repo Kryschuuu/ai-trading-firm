@@ -150,8 +150,14 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
   Prompt iterieren, Trefferquote messen. Das UI-Pendant zu Kapitel 5 und 6 —
   alle vier Schritte ohne Terminal. Jedes Feld hat ein **i**-Symbol mit Kurz-
   Erklärung (auch per Tastatur erreichbar).
+* **🖥 Operations Center** — Rolle (viewer/operator/admin), Live-Sperre und
+  Modul-Karten (Phase-1-Hülle, Task 10). Die Kacheln Universum/Scanner/Portfolio
+  folgen in späteren Phasen.
+* **🌐 Brokers & Venues** — Control Plane: Status, Credentials (maskiert),
+  sechs Zustandsebenen. Secrets nie im Frontend.
 * **Risk & Guardrails** — die harten Limits, LLM-Status, Not-Halt-Historie.
-* **Design Decisions** — die Architekturbegründungen in Kurzform.
+* **Design Decisions / Guide** — Ist-Architektur (Makro/Mikro, Paper, Broker,
+  Router, RBAC), nicht der ursprüngliche Entwurfs-Essay.
 
 ---
 
@@ -421,6 +427,8 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen / Status |
 | `GET` | `/api/firm/micro` | – | Executor-Prozess-Status + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
+| `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions; 401 wenn Token gesetzt und fehlt) |
+| `GET` | `/api/ops` | – | Operations-Center-Hülle (`liveEnabled: false`, Modul-Karten) |
 
 > **Workshop-Endpunkte:** Die drei Missions-/Agenten-Routen sind die Grundlage
 > des Workshop-Tabs. `riskBudget`/`maxPositionPct` werden gegen die
@@ -542,11 +550,13 @@ wurde, ist sie zu vage formuliert.**
 
 ### 5.3 Verfügbare Symbole
 
-Der Paper-Broker kennt: `BTC`, `ETH`, `SOL`, `SPY`, `QQQ`, `NVDA`, `AAPL`, `MSFT`.
-Das Workshop-Formular bezieht seine Autocomplete-Liste direkt vom Server
-(`GET /api/firm/missions` → `symbols`) und akzeptiert nur diese Symbole.
-Weitere Symbole in `STATIC_PRICES` (`src/lib/marketData.ts`, dort liegt die
-Paper-Preisliste) ergänzen — nach dem Neu bauen kennt sie die UI automatisch.
+Der Paper-Broker kennt die Symbole der Universe-Registry bzw. der Watchlist-
+Präferenz (`BTC`, `ETH`, `SOL`, `SPY`, `QQQ`, `NVDA`, `AAPL`, `MSFT` und ihre
+Venue-Spiegel). Das Workshop-Formular bezieht seine Autocomplete-Liste direkt
+vom Server (`GET /api/firm/missions` → `symbols`). Weitere Märkte gehören in
+die Registry (`src/universe/`, `npm run universe:seed`) — nicht in ein
+statisches Kursbuch. Kurse kommen im Default aus dem Market-Data-Layer
+(Kapitel 8).
 
 **Abkürzung zum Nachschlagen über das Terminal:**
 
@@ -769,97 +779,79 @@ der am häufigsten läuft und am wenigsten Intelligenz braucht.
 
 ## 8. Broker anbinden
 
-Der Auslieferungszustand nutzt den internen Paper-Broker mit statischem Kursbuch. Für
-realistischere Tests brauchst du echte Kurse.
+Der Auslieferungszustand handelt **Paper** mit **echten Kursen** (Modus B,
+`PAPER_MODE=broker-market-data`): der Market-Data-Layer holt Public-Feeds
+(Binance/Yahoo bzw. Broker-Feed), der Fill-Simulator führt lokal aus.
+Das statische Kursbuch (`STATIC_PRICES`) ist **veraltet** und nur noch
+expliziter Offline-Fallback hinter `PAPER_STATIC_FALLBACK=true` (Default aus).
+Live-Orders sind unabhängig von Flags immer `LiveTradingGateError` (Task 11).
 
-### 8.1 Vergleich
+Details: [PAPER_TRADING.md](PAPER_TRADING.md), [BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md),
+[FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md), [BITUNIX.md](BITUNIX.md).
 
-| Broker | Anlagen | Paper-Konto | Aufwand | Bewertung für dieses Projekt |
+### 8.1 Venues (Ist)
+
+Sieben Adapter hinter `BrokerAdapter` / `getBroker(venue, mode)`:
+
+| Venue | Anlagen | Paper in dieser Plattform | Live | Bewertung |
 | --- | --- | --- | --- | --- |
-| **Alpaca** | US-Aktien, ETFs, Krypto | ja, kostenlos, unbegrenzt | gering | **Erste Wahl.** REST + Market Data, Paper und Live identisch. |
-| **Interactive Brokers** | global, alles | ja | hoch | Vollbroker, aber TWS/IB-Gateway muss dauerhaft laufen — auf dem N150 spürbar. |
-| **Kraken** | Krypto | Futures-Demo | mittel | EU-freundlich, gut über `ccxt` erreichbar. |
-| **Binance** | Krypto | Testnet | mittel | Größte Liquidität, regulatorisch in der EU prüfen. |
-| **dYdX v4** | Perpetuals, dezentral | nein | hoch | Vollständig Open Source und self-custody — passt zur Philosophie, aber Perps bedeuten Hebel, und Hebel widerspricht `maxLeverage = 1`. |
+| **PAPER** | Watchlist / Registry | vollständig (Ledger + Guardrails) | gesperrt | Default-Ausführung |
+| **BITUNIX** | USDT-M-Perpetuals | Modus B: echte Public-Kurse, lokales Ledger, 0 Private-Calls | Capability ja, Ausführung gesperrt | 7. Venue, Task 07 |
+| **Alpaca** | US-Aktien, ETFs, Krypto | Stub (`NotSupportedCapabilityError`) | gesperrt | Venue-Angebot dokumentiert; Adapter folgt |
+| **IBKR** | global | Stub | gesperrt | Gateway-Aufwand, N150 spürbar |
+| **Binance** | Krypto | Stub (Public-Feed für Paper-Kurse: ja) | gesperrt | Feed-Quelle für Modus B |
+| **Kraken** | Krypto | Stub | gesperrt | EU-freundlich |
+| **dYdX** | Perpetuals, dezentral | Stub | gesperrt | Hebel widerspricht `maxLeverage = 1` |
 
-**Empfehlung:** Alpaca Paper zuerst. Kostenlos, keine Einzahlung, echte Kurse, und der
-Wechsel auf Live ist später nur ein anderer Endpunkt — was zugleich die Gefahr ist, also
-siehe Kapitel 11.
+Factory: `getBroker(_, "live")` wirft **immer** `LiveTradingGateError`.
+Kein stiller Fallback auf Paper. Credentials gehören **nicht** in `.env` für
+die Control Plane — siehe 8.3.
 
-### 8.2 Nur Kurse holen (kleinster sinnvoller Schritt)
+### 8.2 Kurse (Market-Data-Layer, nicht selbst bauen)
 
-Ersetze in `src/lib/broker.ts` das statische Kursbuch durch echte Quotes:
+Seit Task 03 liegt die Kursquelle in `src/lib/marketdata/`:
 
-```ts
-// src/lib/quotes.ts  (neu anlegen)
-const cache = new Map<string, { price: number; ts: number }>();
+- Failover **laut und auditiert**: Broker-Feed → unabhängiger Feed → Synthetic
+  nur bei `PAPER_ALLOW_SYNTHETIC_FALLBACK=true`.
+- Anomalien (NaN, Sprung, stale, kaputter Spread) werden verworfen (`NO_QUOTE`),
+  nie gehandelt.
+- Status: `GET /api/marketdata/status`, Snapshot: `GET /api/marketdata/snapshot`.
 
-export async function liveQuote(symbol: string): Promise<number | null> {
-  const hit = cache.get(symbol);
-  if (hit && Date.now() - hit.ts < 60_000) return hit.price;   // 1 Minute Cache
+Kein eigenes `quotes.ts` anlegen und nicht `PaperBroker` um eine Alpaca-URL
+biegen — der Layer ist die Single Source of Truth.
 
-  const res = await fetch(
-    `https://data.alpaca.markets/v2/stocks/${symbol}/quotes/latest`,
-    {
-      headers: {
-        "APCA-API-KEY-ID": process.env.ALPACA_KEY_ID ?? "",
-        "APCA-API-SECRET-KEY": process.env.ALPACA_SECRET_KEY ?? "",
-      },
-    }
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  const price = data?.quote?.ap ?? null;          // Ask-Preis
-  if (price) cache.set(symbol, { price, ts: Date.now() });
-  return price;
-}
+### 8.3 Credentials & Control Plane
+
+Zugangsdaten fließen **einmal** Formular → Backend → AES-256-GCM-Store
+(AAD = Venue-ID). Das Frontend sieht nur Status
+(`configured` / `connected` / `permissions[]` / `liveEnabled: false`) —
+kein Echo, kein `keyHint`, keine Maskierung.
+
+Dashboard-Tab **🌐 Brokers & Venues** oder:
+
+```bash
+# Status (ohne Secret)
+curl -s localhost:3369/api/brokers/BITUNIX/status | jq '{configured, connected, liveEnabled, permissions}'
+
+# Speichern (Admin-Token + CSRF; SECRET_STORE_KEY muss gesetzt sein)
+curl -s -X POST localhost:3369/api/brokers/BITUNIX/credentials \
+  -H 'content-type: application/json' \
+  -H "x-admin-token: $FIRM_ADMIN_TOKEN" \
+  -H "x-csrf-token: $FIRM_ADMIN_TOKEN" \
+  -d '{"apiKey":"…","apiSecret":"…"}'
 ```
 
-Der Cache ist wichtig: Ohne ihn fragt jeder Agenten-Turn erneut ab und du läufst in
-Ratenlimits.
+Rollen (Task 10): nur **Admin** darf Credentials schreiben. Ist
+`FIRM_ADMIN_TOKEN` ungesetzt, wirkt `FIRM_API_TOKEN` als Single-Admin.
+Bitunix liest den Store (Env-Fallback `BITUNIX_API_KEY` /
+`BITUNIX_API_SECRET`, falls der Store leer ist).
 
-### 8.3 Echte Paper-Orders (erst wenn 8.2 stabil läuft)
+`ALPACA_*` in `.env` ist Legacy-Dokumentation für einen künftigen Adapter —
+nicht der empfohlene Weg, Keys ins Frontend oder in Klartext-Dateien zu legen.
 
-Ein Adapter muss **dasselbe Interface** wie `PaperBroker` bedienen — insbesondere die
-Reihenfolge Kill-Switch → `validateOrder()` → Ausführung. Kopiere die Struktur aus
-`submit()` und tausche nur den letzten Block:
-
-```ts
-// Skizze
-async submit(order: Order): Promise<Fill> {
-  if (killSwitch.isArmed()) return reject(order, "KILL_SWITCH_ARMED");
-
-  const guard = validateOrder({ /* … identisch zum PaperBroker … */ });
-  if (!guard.allowed) return reject(order, guard.reason);
-
-  const res = await fetch("https://paper-api.alpaca.markets/v2/orders", {
-    method: "POST",
-    headers: { /* Keys aus process.env */ },
-    body: JSON.stringify({
-      symbol: order.symbol,
-      qty: order.qty,
-      side: "buy",
-      type: "market",
-      time_in_force: "day",
-      order_class: "bracket",
-      stop_loss: { stop_price: order.stopLoss },   // Stop serverseitig platzieren!
-    }),
-  });
-  // … Antwort in Fill übersetzen …
-}
-```
-
-> **Wichtigster Punkt:** Der Stop-Loss gehört **zum Broker**, nicht in die eigene Logik.
-> Wenn dein Dienst abstürzt, muss der Stop trotzdem greifen. Deshalb `order_class:
-> "bracket"` — der Stop lebt dann beim Broker, unabhängig von deinem N150.
-
-Nötige Umgebungsvariablen:
-
-```ini
-ALPACA_KEY_ID=…
-ALPACA_SECRET_KEY=…
-ALPACA_BASE_URL=https://paper-api.alpaca.markets     # niemals versehentlich live!
-```
+> **Stop-Loss beim Venue:** Sobald ein Adapter `stopAtVenue=true` live ausführt
+> (heute: keine Live-Ausführung), gehören SL/TP in denselben Order-Aufruf.
+> Im Paper überwacht der Monitor die Stops aus der Datenbank.
 
 ---
 
@@ -1683,12 +1675,20 @@ Jeder Lauf erzeugt datierte und atomar geschriebene Artefakt-Dateien:
 1. **Step-Retries:** Tritt bei einem Schritt ein Fehler auf, greift die Schritt-spezifische Retry-Policy (z. B. 2 Versuche mit exponentiellem Backoff).
 2. **Kontrollierter Abbruch:** Kann ein Fehler nicht behoben werden, stoppt der Zyklus geordnet (`status: "FAILED"`). Bereits erzeugte Artefakte vorheriger Schritte bleiben erhalten.
 3. **Audit-Log:** Jeder Start, jeder Retry, jeder Teilschritt und jeder Abbruch wird als `CycleAuditEvent` im reinen Audit-Log (`data/cycle/audit.ndjson` bzw. DB-Tabelle `audit_log`) protokolliert.
-4. **Modell-Eskalation:** Erkennt ein Agent eine Ausnahmesituation (z. B. geopolitischer Schock), emittiert er ein `MODEL_ESCALATION_REQUEST`-Event. Bis zum Einbau des Model-Routers (Task 09) wird dieses Event auditiert und die bestehende Provider-Fallback-Kette genutzt.
+4. **Modell-Eskalation:** Erkennt ein Schritt eine Ausnahmesituation, stellt er
+   einen `MODEL_ESCALATION_REQUEST`. **Genehmigt oder abgelehnt wird ausschließlich
+   der MODEL_ROUTER** (`src/routing/`, v1.17.0) über `requestEscalation()` —
+   Trigger sind Runtime-Metriken, kein Prompt-Inhalt. Beides wird auditiert.
+   Der Legacy-Pfad `localReason()` in `src/lib/ollama.ts` (engine/analysts) ist
+   noch ungeroutet (SECURITY_AUDIT RT-01) und fällt auf die Provider-Kette zurück.
 
 ### 19.5 Verweis auf Hilfedateien
 
 Ausführliche Feldbeschreibungen, Formeln und Risikohinweise im 3-Ebenen-Schema (`kurzinfo`, `technischeInfo`, `risiko`):
 - **`docs/help/cycle.help.json`**: Daily Candidate List, Deep Analysis, Shortlist-Limits, Weekly-Klassen (CORE/ROTATION/DISCOVERY/EXCLUDED), Backtest-Kennzahlen.
 - **`docs/help/scanner.help.json`**: Die 14 Faktoren des deterministischen Markt-Scanners und der 5-Stufen-Trichter.
+- **`docs/help/portfolio.help.json`**: Kovarianz, Korrelationen, Sharpe, Sortino, Drawdown und Portfolio-Guardrails.
+
+en-Trichter.
 - **`docs/help/portfolio.help.json`**: Kovarianz, Korrelationen, Sharpe, Sortino, Drawdown und Portfolio-Guardrails.
 

@@ -144,7 +144,7 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 
 | Thema | Regel |
 | --- | --- |
-| Secrets | `SecretStore.get()`; Dev-Fallback `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` (`TODO(task-08)`). Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert nur `connected`/`permissions`/`liveEnabled:false`. |
+| Secrets | Default: Control-Plane-Store (`createVenueBackedNamedStore`, AES-256-GCM, AAD=`BITUNIX`) mit Env-Fallback `BITUNIX_API_KEY` / `BITUNIX_API_SECRET`. Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert nur `connected`/`permissions`/`liveEnabled:false`. |
 | SSRF | Host-Allowlist (`fapi.bitunix.com` + optionale `BITUNIX_ALLOWED_HOSTS`). Kein Userinfo. `https` Pflicht; `http`/`ws` nur Loopback + Insecure-Flag. `redirect: "error"`. |
 | TLS | Node-Default-Zertifikatsprüfung (an). |
 | Rate-Limit | Token-Bucket, konservativ 8 req/s (Doku: 10/s). |

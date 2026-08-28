@@ -30,8 +30,9 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
+| **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan |
 
-**Version:** `v1.17.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.18.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -335,8 +336,9 @@ Beispiele mit `curl` im **[Handbuch, Kapitel 4](HANDBUCH.md)**.
 
 ## 8. Ehrliche Grenzen dieses Setups
 
-* **Kein Live-Trading.** Der Paper-Broker nutzt ein statisches Kursbuch. Für echte Kurse
-  und Orders braucht es einen Adapter (Alpaca, ccxt) — Kapitel 8 im Handbuch beschreibt ihn.
+* **Kein Live-Trading.** Paper läuft im Default mit echten Kursen (Modus B) und
+  lokalem Fill-Simulator. Live bleibt `LiveTradingGateError` (Task 11).
+  Broker-Anbindung: HANDBUCH Kapitel 8 und [BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md).
 * **Kein ernsthaftes Backtesting.** Bewusst weggelassen, weil zuerst Paper-Trading zählt.
   Der Backtest-Agent ist als nicht blockierender Platzhalter verdrahtet.
 * **Kleine Modelle sind keine Analysten.** 3B–14B lokal ersetzen keine echte Recherche.

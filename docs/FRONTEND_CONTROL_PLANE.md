@@ -52,7 +52,7 @@ Zustandsmodell und das Sicherheitskonzept der Broker Control Plane.
 ## 2. API-Referenz
 
 Alle Credential-/Connection-Endpoints sind **admin-guarded** (RBAC-Platzhalter,
-TODO(task-10)), **CSRF-geschützt** und **rate-limitiert** (5 Credential-Versuche/min/IP).
+RBAC Task 10), **CSRF-geschützt** und **rate-limitiert** (5 Credential-Versuche/min/IP).
 GET-Endpoints bleiben lesbar (konsistent mit den übrigen Broker-Endpoints).
 
 ### `POST /api/brokers/{venue}/credentials`
@@ -193,7 +193,7 @@ Nach dem Speichern (und bei jedem Test) läuft **ein** read-only Check:
 
 | Ebene | Mechanismus | Nachweis |
 | --- | --- | --- |
-| **RBAC** | Alle Credential-/Connection-Operationen nur Admin: `FIRM_ADMIN_TOKEN` gesetzt → Header `x-admin-token` (oder `x-firm-token` mit gleichem Wert) Pflicht, sonst **403 FORBIDDEN**; Fallback `FIRM_API_TOKEN` (401); beides unset → lokaler Offen-Betrieb. Timing-sicherer Vergleich. **TODO(task-10):** zentrale RBAC/Sessions ersetzen den Platzhalter. | `tests/controlPlane.api.test.ts` (RBAC), `…security.test.ts` |
+| **RBAC** | Alle Credential-/Connection-Operationen nur mit Permission `broker.credentials` (Admin; Operator nur im Single-Admin-Modell). `FIRM_ADMIN_TOKEN` gesetzt → Header `x-admin-token` (oder `x-firm-token` mit gleichem Wert), sonst **403 FORBIDDEN**; Fallback `FIRM_API_TOKEN` (401); ungesetzt → lokaler Offen-Betrieb. Timing-sicherer Vergleich. Kern: `src/auth/`. | `tests/controlPlane.api.test.ts` (RBAC), `tests/rbac.test.ts` |
 | **CSRF** | Alle mutierenden Control-Plane-Endpoints verlangen den Custom-Header `x-csrf-token` (Wert = Admin-/Operator-Token bzw. `local`), sonst **403 CSRF_INVALID**. Cross-Site-Formulare können Custom-Header nicht setzen; die API nutzt keine Cookies (kein SameSite-Angriffsvektor). | `tests/controlPlane.api.test.ts` (CSRF) |
 | **Rate-Limit** | Eigener Sliding-Window-Bucket `BROKER_CREDENTIAL_RATE_LIMIT` (Default **5/min/IP**, 0 = aus) auf allen Credential-Endpoints → **429** + `Retry-After`. | `tests/controlPlane.api.test.ts` (Rate-Limit) |
 | **Response-Contract** | Credential-Endpoints antworten ausschließlich mit Status-Objekten (`configured`, `connected`, `permissions[]`, `liveEnabled`, Ebenen) — kein `secret`, kein `keyHint`, keine Maskierungs-Replik. Contract-Test mit Response-Scanner erzwingt das. | `tests/controlPlane.security.test.ts` (Response-Scanner) |

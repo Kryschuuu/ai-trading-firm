@@ -7,7 +7,7 @@
  *                Zustandsmaschine (6 Ebenen), Audit, status-only-Vertrag
  *   states:      Zustandsmaschinen-Light (off/pending/active/error)
  *   probe:       Read-only Permission-Probe (PAPER real, sonst Mock-Adapter)
- *   guard:       Admin-RBAC (TODO task-10), CSRF, Credential-Rate-Limit
+ *   guard:       RBAC (src/auth, Task 10), CSRF, Credential-Rate-Limit
  *   audit:       Ring + best-effort audit_log (BROKER_CONTROL_PLANE)
  *   http:        Fehler-Mapping auf den { ok, error, message }-Contract
  */

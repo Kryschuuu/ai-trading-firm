@@ -158,8 +158,8 @@
     },
     "controlPlane.rbac": {
       "kurzinfo": "Alle Credential-/Connection-Operationen nur für die Admin-Rolle.",
-      "technischeInfo": "Minimaler Admin-Guard (FIRM_ADMIN_TOKEN → x-admin-token, timing-sicher, 403 FORBIDDEN), Fallback auf den Operator-Token, sonst offener Lokalbetrieb. TODO(task-10): zentrales Session-/Rollensystem.",
-      "risiko": "Der Platzhalter ist bewusst sichtbar markiert — bis zur Zentralisierung gilt: wer den Token nicht hat, darf keine Credentials verwalten."
+      "technischeInfo": "RBAC-Kern (src/auth, Task 10): Rollen viewer/operator/admin. Credential-Write braucht Permission broker.credentials (Admin; Operator nur im Single-Admin-Modell ohne FIRM_ADMIN_TOKEN). Header x-admin-token / x-firm-token, timing-sicher, 403/401 wie bisher.",
+      "risiko": "Wer den Admin-Token nicht hat, darf keine Credentials verwalten. live.gate ist keiner Rolle zugeordnet — Live bleibt bis Task 11 gesperrt."
     },
     "controlPlane.csrf": {
       "kurzinfo": "CSRF-Schutz: mutierende Control-Plane-Endpoints verlangen den Header x-csrf-token.",
