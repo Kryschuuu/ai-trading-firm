@@ -765,3 +765,61 @@ Fazit: **kein High/Critical-Befund.** Die Trust-Grenze Live ist jetzt eine
 prozessual erzwingbare, auditierbare Kette: Checks → Paper-Evidence →
 Antrag → 24 h Bedenkzeit → menschliche Freigabe → CI-Suite → Flags →
 Control Plane — und ein Kill-Switch, der aus jedem Zustand sofort greift.
+
+---
+
+## Security Audit — Task 12 (Dokumentation, v1.19.0)
+
+**Scope:** Alle Docs-Änderungen des Task 12: `docs/help/*.help.json`,
+`docs/help/help.schema.json`, Root-Docs (`README.md`, `INSTALL.md`,
+`CHANGELOG.md`), `docs/DOCS_SYNC_AUDIT.md`, `docs/ARENA_TASKS.md`,
+`docs/ARCHITECTURE.md`, `docs/SECURITY_AUDIT.md`, `docs/ci/docs-validate.workflow.yml`,
+`scripts/docs-validate.ts`, `package.json` (npm-Skript `docs:validate`).
+**Keine funktionalen Code-Änderungen** (nur neues Validator-Skript + npm-Skript).
+
+### Checkliste
+
+| Pflicht | Status | Nachweis |
+| --- | --- | --- |
+| Secret-Scan über Docs (0 Funde) | ✅ | `npm run docs:validate` → Secret-Scan; Skript `scripts/docs-validate.ts` |
+| Keine internen Hostnamen / keine PPI in Docs | ✅ | manueller Review + Secret-Scan-Patterns (interne IPs/PPI) |
+| Sicherheitsbeschreibungen korrekt (Mechanismen, nie Zugangsdaten) | ✅ | alle Beispiele nutzen Platzhalter/Env-Refs (`$FIRM_ADMIN_TOKEN`, `sk-…`, `bitte-hier-aendern`) |
+| Keine echten Keys/Secrets in Docs | ✅ | keine Treffer für API-Key-/Token-/PrivKey-Patterns |
+| Konsistenz-Checks gegen Code | ✅ | Env-Flags, API-Routen, Live-State-Enum (Validator) |
+| Hilfe-Systematik 3-Ebenen schema-konform | ✅ | alle 9 `*.help.json` gegen `help.schema.json` |
+| kein nicht-implementiertes Feature als fertig beschrieben | ✅ | Status-Header `Implementiert/Teilweise/Geplant + Task NN`; Features ohne Codebefund als „Geplant“ |
+
+### Befunde
+
+| ID | Severity | Problem | Status |
+| --- | --- | --- | --- |
+| D-01 | Info | `docs/help/help.schema.json` fehlte, obwohl Hilfe-Dateien darauf verwiesen (`https://ai-trading-firm.local/schemas/help-3-ebenen.json`) | ✅ behoben: Schema neu erstellt, `$schema`-Referenzen vereinheitlicht |
+| D-02 | Info | `live-gate.help.json` `version` als String (`"v1.19.0"`) statt Zahl | ✅ behoben |
+| D-03 | Info | 21 Hilfe-Felder (brokers 8, live-gate 12, ops 1) ohne `risiko`-Ebene — Verstoß gegen 3-Ebenen-Systematik | ✅ behoben: `risiko` ergänzt |
+| D-04 | Info | 3 Markdown-Trailing-Whitespace-Stellen | ✅ behoben |
+| D-05 | Info | Root `README.md`/`INSTALL.md`/`CHANGELOG.md` fehlten (nur in `docs/`) | ✅ behoben |
+
+Fazit: **keine Secrets, keine internen Hostnamen, keine PPI** in den Docs.
+Alle Befunde sind Dokumentations-Fehler (Severity Info) und behoben. Der
+CI-Job `docs-validate` erzwingt künftig die Docs-as-Code-Regeln
+(Schema, Links, Lint, Secret-Scan, Konsistenz) merge-blockierend.
+
+## Konsolidierung der Task-Audit-Kapitel 1–12
+
+Alle Sicherheits-Audits je Task sind als eigene Kapitel oben in dieser Datei
+vorhanden und werden hier gebündelt verlinkt:
+
+| Task | Kapitel | Niveau |
+| --- | --- | --- |
+| 01 Market Universe | [Security Audit — Task 01](#security-audit--task-01-market-universe-v180) | Standard |
+| 02 Broker-Capability-Modell | [Security Audit — Task 02](#security-audit--task-02-broker-capability-modell-v1100) | Standard |
+| 03 Paper Market Data | [Security Audit — Task 03](#security-audit--task-03-paper-market-data--execution-simulation-v1110) | Standard |
+| 04 Markt-Scanner | [Security Audit — Task 04](#security-audit--task-04-markt-scanner-market-score--trichter-v1120) | Standard |
+| 05 Portfolio-Analytics | [Security Audit — Task 05](#security-audit--task-05-portfolio-analytics-optimizer--risk-guard-kette-v1130) | Standard |
+| 06 Daily & Weekly Agent Cycle | [Security Audit — Task 06](#security-audit--task-06-daily--weekly-agent-cycle) | Standard |
+| 07 Bitunix-Adapter | [Security Audit — Task 07](#security-audit--task-07-bitunix-adapter-v1150) | Erhöht |
+| 08 Broker Control Plane | [Security Audit — Task 08](#security-audit--task-08-broker-control-plane-v1160) | Erhöht |
+| 09 Model Router | [Security Audit — Task 09](#security-audit--task-09-model-router-v1170) | Erhöht |
+| 10 Operations Center + RBAC | [Security Audit — Task 10](#security-audit--task-10-operations-center--rbac-v1180-phase-1) | Erhöht |
+| 11 Live-Trading-Gate | [Security Audit — Task 11](#security-audit--task-11-live-trading-gate-v1190) | Maximal |
+| 12 Dokumentation | [Security Audit — Task 12](#security-audit--task-12-dokumentation-v1190) | Standard |

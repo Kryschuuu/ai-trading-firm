@@ -1,5 +1,9 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
+> **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
+> Dokumentationsstand **2026-08-28** · Code-Version **1.19.0**
+> Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§12](#12-wie-docs-hier-gepflegt-werden-docs-as-code))
+
 **Detailliertes Architektur- und Implementierungskonzept** für eine
 Trading-Firma, die strategische Intelligenz (LLM) von
 Ausführungsgeschwindigkeit (kein LLM) trennt.
@@ -711,3 +715,46 @@ Neue read-only-Endpunkte: `GET /api/marketdata/snapshot?instrument=…` und
 | Capability-Gating | Modus-Prüfung der Factory: `backtest`/`paper`→`paper`, `testnet`→`testnet`, `live`→hartes Gate |
 | `LiveTradingGateError` | permanente Sperre des Live-Pfads bis zum Live-Gate-Task — kein stiller Fallback |
 | Capability-Projektion | Registry-Flags `paperAvailable`/`liveAvailable` = Ableitung der Adapter-Capabilities (SSoT = Adapter) |
+
+---
+
+## 12. Wie Docs hier gepflegt werden (Docs-as-Code)
+
+Dieser Abschnitt ist die **verbindliche Pflege-Anleitung** für alle Markdown-
+Dateien in `docs/` (Task 12). Sie gelten für jede zukünftige Änderung.
+
+### Grundsatz: Docs und Code im selben PR
+
+Docs und Code werden **nie getrennt gemergt**. Jeder PR, der Verhalten ändert,
+ändert im selben PR die betroffenen Docs (`docs/*.md`), Hilfe-Dateien
+(`docs/help/*.help.json`) und — bei Verhaltens-Änderungen — den Changelog
+(`docs/CHANGELOG.md`).
+
+### Docs-as-Code-Regeln
+
+1. **Jede Behauptung ist gegen den Code verifiziert** (Datei/Zeile/Contract).
+   Unverifizierbares wird als **„Geplant (Task NN)“** markiert, nie erfunden.
+2. **Keine Secrets**: keine API-Keys, Tokens, Zugangsdaten, internen Hostnamen,
+   personenbezogenen Daten in Docs. Sicherheitsdokumente beschreiben
+   **Mechanismen**, niemals Zugangsdaten.
+3. **Status-Header-Pflicht**: Jede Doc trägt oben einen Status-Header
+   (`Implementiert` / `Teilweise` / `Geplant` + zugehöriger Task). Nichts
+   Unimplementiertes wird als fertig beschrieben.
+4. **Terminologie-Konsistenz**: Fachbegriffe gemäß Glossar in [§11](#11-glossar-kurz)
+   (Asset vs. Instrument vs. Underlying; Execution Modes `backtest/paper/testnet/live`;
+   Paper-Modi A/B/C; Modell-Klassen `small/medium/large`; Live-State-Namen).
+
+### Hilfe-Systematik (3-Ebenen)
+
+Jede `docs/help/*.help.json` folgt dem Schema `docs/help/help.schema.json` mit
+den Pflicht-Ebenen `{ kurzinfo, technischeInfo, risiko }`. Neue Fachbegriffe
+werden nur mit allen drei Ebenen aufgenommen.
+
+### CI-Job `docs-validate`
+
+Der Job `docs-validate` (`docs/ci/docs-validate.workflow.yml`, Skript
+`scripts/docs-validate.ts`, `npm run docs:validate`) erzwingt: Hilfe-Schema,
+relativer Link-Check (0 tote Links), Markdown-Lint, Secret-Scan über Docs und
+Konsistenz-Checks (Env-Flags in INSTALL.md == Code; API-Routen in Docs == Code;
+Live-State-Namen == Code-Enum). Er ist merge-blockierend in der
+Branch-Protection zu hinterlegen.
