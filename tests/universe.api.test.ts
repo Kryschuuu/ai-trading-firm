@@ -172,6 +172,7 @@ test("Persistenz: Prozessneustart verliert kein Feld", async () => {
         leverageAvailable: true,
         shortAvailable: true,
         paperAvailable: true,
+        liveTradable: false,
         liveAvailable: false,
         volume24h: 123456.78,
         spread: 0.00012,

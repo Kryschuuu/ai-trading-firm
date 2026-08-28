@@ -20,7 +20,7 @@ const spy: MarketInstrument = {
   id: "PAPER:SPY", venue: "PAPER", symbol: "SPY", base: null, quote: "USD",
   assetClass: "etf", marketType: "spot", status: "active", minQuantity: 0.001,
   priceStep: 0.01, quantityStep: 0.001, makerFee: 0, takerFee: 0,
-  leverageAvailable: false, shortAvailable: true, paperAvailable: true, liveAvailable: false,
+  leverageAvailable: false, shortAvailable: true, paperAvailable: true, liveTradable: false, liveAvailable: false,
   volume24h: null, spread: null, volatility: null, lastSeen: "2026-08-27T00:00:00.000Z",
 };
 
@@ -28,7 +28,7 @@ const btc: MarketInstrument = {
   id: "PAPER:BTC", venue: "PAPER", symbol: "BTC", base: "BTC", quote: "USD",
   assetClass: "crypto", marketType: "spot", status: "active", minQuantity: 0.00001,
   priceStep: 0.01, quantityStep: 0.00001, makerFee: 0.0004, takerFee: 0.001,
-  leverageAvailable: false, shortAvailable: false, paperAvailable: true, liveAvailable: false,
+  leverageAvailable: false, shortAvailable: false, paperAvailable: true, liveTradable: false, liveAvailable: false,
   volume24h: 2_000_000_000, spread: 0.0004, volatility: null, lastSeen: "2026-08-27T00:00:00.000Z",
 };
 

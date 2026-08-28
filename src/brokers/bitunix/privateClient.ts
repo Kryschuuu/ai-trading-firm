@@ -1,9 +1,11 @@
 /**
- * Privater REST-Client (signiert). Bereitet Account/Positions/Place-Order vor.
+ * Privater REST-Client (signiert) für Account/Positions/Place-Order.
  *
- * Wird vom Live-Pfad NICHT ausgeführt — `placeOrder` am Adapter wirft
- * immer LiveTradingGateError. Die Methoden existieren für Serialisierung,
- * Mock-Verifikation und den späteren Gate-Task.
+ * Wird vom Live-Pfad des Adapters über die `BrokerExecutionEngine`
+ * (src/brokers/bitunix/execution.ts) aufgerufen — und zwar NUR nach bestandener
+ * Live-Gate-Prüfung (Task 11). Ohne Freigabe wirft `placeOrder` am Adapter
+ * weiterhin `LiveTradingGateError`, sodass dieser Client dann nie erreicht wird.
+ * Paper/backtest stellen nie einen signierten Request (PaperExecutionEngine).
  */
 import type { BrokerAccount, BrokerPosition } from "../../contracts/broker";
 import { BITUNIX_PATHS } from "./config";
@@ -143,8 +145,9 @@ export class BitunixPrivateClient {
   }
 
   /**
-   * Sendet eine bereits serialisierte Order. Vom Adapter-Live-Pfad
-   * NICHT aufgerufen.
+   * Sendet eine bereits serialisierte Order an die Venue.
+   * Wird vom Adapter-Live-Pfad über `BrokerExecutionEngine.submit` aufgerufen,
+   * ausschließlich nach bestandener Live-Gate-Prüfung.
    */
   async placeSerializedOrder(body: BitunixPlaceOrderBody): Promise<{ orderId: string; clientId?: string }> {
     const json = JSON.stringify(body);

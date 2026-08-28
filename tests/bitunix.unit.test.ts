@@ -188,6 +188,9 @@ test("Mapping: trading_pairs → MarketInstrument (perpetual, Fees, Status)", ()
   assert.equal(mapped.status, "active");
   assert.equal(mapped.leverageAvailable, true);
   assert.equal(mapped.shortAvailable, true);
+  // liveTradable = Instrument ist beim Broker live-handelbar (Fähigkeit),
+  // liveAvailable = systemseitige Freigabe (bleibt false) — getrennte Konzepte.
+  assert.equal(mapped.liveTradable, true);
   assert.equal(mapped.liveAvailable, false);
   assert.equal(mapped.makerFee, BITUNIX_DEFAULT_MAKER_FEE);
   assert.equal(mapped.takerFee, BITUNIX_DEFAULT_TAKER_FEE);

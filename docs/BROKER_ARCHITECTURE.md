@@ -1,6 +1,6 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.16.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+**Stand:** v1.20.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
 (inkl. `control-plane/` seit Task 08), `src/lib/broker.ts`
 (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
 `GET /api/brokers`, `GET /api/brokers/{venue}/health`,
@@ -49,6 +49,25 @@ Capability-Prüfung durch den Live-Gate-Enforcer entschieden (State-Machine +
 Flags + Suite + Control Plane, Task 11; Tabelle in
 `src/brokers/capabilities.ts` → `REQUIRED_CAPABILITY_BY_MODE`).
 
+### 2.1 Ausführungs-Engines (ExecutionPort) — v1.20.0
+
+Innerhalb eines Adapters wird die Ausführung über einen **`ExecutionPort`**
+getrennt: Paper-Ledger und echter Broker-Executor sind zwei Implementierungen
+**derselben Schnittstelle** und niemals vermischt (Bitunix:
+`src/brokers/bitunix/execution.ts`).
+
+```
+ExecutionMode
+ ├── paper / backtest ─► PaperExecutionEngine    (lokales Ledger, 0 Private-Calls)
+ └── testnet / live   ─► BrokerExecutionEngine   (echte Venue-API, signiert)
+                           └── live: LiveGate → BitunixPrivateClient
+```
+
+Konsequenz (Sicherheitsgarantie): Ein freigeschalteter Live-Pfad greift **nie**
+auf das Paper-Ledger zu — weder für Orders noch für Account-/Positions-Daten.
+Ohne bestandene Live-Gate-Prüfung bleibt der Live-Pfad gesperrt
+(`LiveTradingGateError`, kein stiller Fallback auf Paper).
+
 ---
 
 ## 3. Capability-Matrix (Ist / Soll)
@@ -75,6 +94,23 @@ als Doku in `BROKER_REGISTRY`: `label`, `assets`, `paperApi`, `note`).
 die am Venue platziert werden, nicht nur lokal überwacht. Der Paper-Pfad merkt
 SL/TP am Fill an, sendet sie aber nicht (keine Private-API). Details:
 [BITUNIX.md](BITUNIX.md).
+
+### 3.1 Vier getrennte „Live“-Konzepte (v1.20.0)
+
+Um semantische Mehrdeutigkeit zu vermeiden, werden **vier** eigenständige
+Konzepte strikt unterschieden:
+
+| Konzept | Quelle | Bedeutung |
+| --- | --- | --- |
+| `adapterCapabilities.live` | `VENUE_CAPABILITIES[venue].live` | Adapter-CODE kann Live-Orders serialisieren/senden |
+| `instrumentCapabilities.liveTradable` | `MarketInstrument.liveTradable` | Instrument ist beim Broker grundsätzlich live-handelbar |
+| `venueControl.liveEnabled` | Control-Plane-Readiness (Provider) | Venue ist aktuell verbunden/aktiv |
+| `liveGate.state` | persistierte State-Machine (`src/live-gate/`) | öffnet erst die eigentliche Live-Ausführung |
+
+`liveTradable=true` bedeutet **nicht** `liveEnabled=true` und schon gar nicht
+„LIVE ORDER ALLOWED“. `liveAvailable` am Instrument bleibt als
+abwärtskompatibler Spiegel erhalten (deprecated; von der Normalisierung aus
+`liveTradable` synchron gehalten).
 
 ---
 

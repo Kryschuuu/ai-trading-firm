@@ -4,9 +4,15 @@
  * Capabilities: discovery, marketData, trading, paper, live (Capability JA),
  * stopAtVenue. testnet=false (kein dokumentiertes Testnet).
  *
- * Live-Ausführung: durch den zentralen Live-Gate-Enforcer (Task 11) —
- * Default weiter `LiveTradingGateError`, bis die State-Machine LIVE_ENABLED
- * + Flags + Suite + Control Plane freigibt (docs/LIVE_TRADING.md).
+ * Ausführungsarchitektur (Task-11-Refactor): Der Adapter besitzt EINE `ExecutionPort`
+ * je Modus — `PaperExecutionEngine` (paper/backtest) bzw. `BrokerExecutionEngine`
+ * (live). Live führt NIE über das Paper-Ledger: Der Live-Pfad prüft das zentrale
+ * Live-Gate (Task 11) und delegiert danach ausschließlich an die Broker-Engine
+ * → `BitunixPrivateClient.placeSerializedOrder` / echte Account-/Positions-Daten.
+ *
+ * Live-Freigabe: durch den zentralen Live-Gate-Enforcer (Task 11) — Default weiter
+ * `LiveTradingGateError`, bis die State-Machine LIVE_ENABLED + Flags + Suite +
+ * Control Plane freigibt (docs/LIVE_TRADING.md).
  * Paper: echte Public-Kurse, lokales Ledger, keine Private-API.
  */
 import { VENUE_CAPABILITIES } from "../capabilities";
@@ -35,7 +41,7 @@ import { assertBitunixEnabled, assertLiveOrderAllowed } from "./gates";
 import { BitunixPublicClient } from "./publicClient";
 import { BitunixPrivateClient } from "./privateClient";
 import { BitunixPaperLedger } from "./paper";
-import { serializePlaceOrder } from "./orders";
+import { BrokerExecutionEngine, PaperExecutionEngine, type ExecutionPort } from "./execution";
 import { createDefaultBitunixSecretStore, loadBitunixCredentials, type SecretStore } from "./secrets";
 import { createBitunixLogger, type BitunixLogger } from "./redactor";
 import { BitunixPublicWs } from "./ws";
@@ -71,6 +77,8 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
   private lastTicker = new Map<string, MarketTicker>();
   private ws: BitunixPublicWs | null = null;
   private privateClientOverride?: BitunixPrivateClient;
+  /** Cache der Modus-spezifischen Ausführungs-Engine (Paper- oder Broker-Port). */
+  private brokerEngine: BrokerExecutionEngine | null = null;
 
   constructor(mode: ExecutionMode = "paper", deps: BitunixAdapterDeps = {}) {
     this.mode = mode;
@@ -179,46 +187,40 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
   async getAccount(): Promise<BrokerAccount> {
     this.require("trading", "getAccount");
     assertBitunixEnabled(this.env);
-    if (this.mode === "live") {
-      assertLiveOrderAllowed(this.id, this.env);
-    }
     if (this.mode === "testnet") {
       throw new NotSupportedCapabilityError(this.id, "testnet", "getAccount", "Kein Bitunix-Testnet dokumentiert.");
     }
-    return this.paper.getAccount((s) => this.lastTicker.get(s)?.price ?? null);
+    // Live-Gate VOR jedem Broker-Zugriff — kein Paper-Ledger im Live-Pfad.
+    // (Gate vor Engine-Aufbau: auch ohne Credentials bleibt der Deny dominant.)
+    if (this.mode === "live") {
+      assertLiveOrderAllowed(this.id, this.env);
+    }
+    const engine = await this.execution();
+    return engine.getAccount((s) => this.lastTicker.get(s)?.price ?? null);
   }
 
   async getPositions(): Promise<BrokerPosition[]> {
     this.require("trading", "getPositions");
     assertBitunixEnabled(this.env);
-    if (this.mode === "live") {
-      assertLiveOrderAllowed(this.id, this.env);
-    }
     if (this.mode === "testnet") {
       throw new NotSupportedCapabilityError(this.id, "testnet", "getPositions", "Kein Bitunix-Testnet dokumentiert.");
     }
-    return this.paper.listPositions((s) => this.lastTicker.get(s)?.price ?? null);
+    if (this.mode === "live") {
+      assertLiveOrderAllowed(this.id, this.env);
+    }
+    const engine = await this.execution();
+    return engine.listPositions((s) => this.lastTicker.get(s)?.price ?? null);
   }
 
   /**
-   * Paper/backtest: lokale Simulation gegen Bitunix-Ticker.
-   * live: Live-Gate-Enforcer (Task 11) entscheidet — Default deny.
+   * Paper/backtest: PaperExecutionEngine (lokales Ledger gegen Bitunix-Ticker).
+   * live: Live-Gate-Enforcer (Task 11) → BrokerExecutionEngine
+   *       → `BitunixPrivateClient.placeSerializedOrder` (echte Venue-Order).
+   *       NIE Paper-Ledger im Live-Pfad.
    * testnet: NotSupportedCapabilityError.
-   *
-   * Order-Serialisierung (SL/TP am Venue-Body) wird vorbereitet, aber im
-   * Live-Pfad nie gesendet.
    */
   async placeOrder(req: BrokerOrderRequest): Promise<BrokerOrderResult> {
     this.require("trading", "placeOrder");
-    if (this.mode === "live") {
-      // Serialisierung bewusst ausgeführt (Vorbereitung) — Versand nie.
-      try {
-        serializePlaceOrder(req);
-      } catch {
-        /* Serialisierungsfehler ändert nichts am Gate. */
-      }
-      assertLiveOrderAllowed(this.id, this.env);
-    }
     if (this.mode === "testnet") {
       throw new NotSupportedCapabilityError(
         this.id,
@@ -228,13 +230,18 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
       );
     }
     assertBitunixEnabled(this.env);
+    if (this.mode === "live") {
+      // Gate zuerst — erst nach bestandener Gesamtprüfung wird gesendet.
+      assertLiveOrderAllowed(this.id, this.env);
+    }
+    const engine = await this.execution();
     const ticker = this.lastTicker.get(req.symbol.toUpperCase()) ?? (await this.getTicker(req.symbol));
-    return this.paper.submit(req, ticker);
+    return engine.submit(req, ticker);
   }
 
   /**
-   * Private-Client (Account/Positions/Place) — nur für Tests/Vorbereitung.
-   * Live-Adapter ruft placeSerializedOrder niemals auf.
+   * Private-Client (Account/Positions/Place) — Basis der Broker-Engine.
+   * Bei fehlenden Credentials laut `NotSupportedCapabilityError` (fail-safe).
    */
   async privateClient(): Promise<BitunixPrivateClient> {
     if (this.privateClientOverride) return this.privateClientOverride;
@@ -247,6 +254,22 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
       credentials: creds,
       logger: this.logger,
     });
+  }
+
+  /**
+   * Liefert die modus-spezifische Ausführungs-Engine.
+   *
+   * paper/backtest → PaperExecutionEngine (lokales Ledger)
+   * live           → BrokerExecutionEngine (echte Venue-API)
+   * testnet        → wird hier nicht erreicht (wirft in den Aufrufern).
+   *
+   * Der Live-Pfad berührt den Paper-Ledger NIE — die Modus-Separation ist die
+   * eigentliche Sicherheitsgarantie gegen „Live-Daten aus Paper“.
+   */
+  private async execution(): Promise<ExecutionPort> {
+    if (this.mode !== "live") return new PaperExecutionEngine(this.paper);
+    this.brokerEngine ??= new BrokerExecutionEngine(await this.privateClient());
+    return this.brokerEngine;
   }
 
   /** WS-Client (Ticker/Kline) mit Reconnect. */

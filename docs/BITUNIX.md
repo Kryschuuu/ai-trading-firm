@@ -1,8 +1,10 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.15.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter`
-**Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung **immer**
-`LiveTradingGateError` (`TODO(task-11)`). Kein dokumentiertes Futures-Testnet.
+**Stand:** v1.20.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter`
+**Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
+zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
+(s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
+Kein dokumentiertes Futures-Testnet.
 
 Dieses Dokument ist die verbindliche Spezifikation des Bitunix-Adapters. Der Kern
 (engine, risk, agents, API) kennt weiterhin **nur** `BrokerAdapter` — Venue-Details
@@ -27,7 +29,8 @@ ausschließlich **USDT-margined Perpetual Futures** (`marketType = perpetual`).
 | `instrumentTypes.perpetual` | true | Spot/Future/Option = false |
 
 Factory: `getBroker("BITUNIX", "paper"|"backtest")` liefert `BitunixBrokerAdapter`.
-`testnet` → `NotSupportedCapabilityError`. `live` → **immer** `LiveTradingGateError`.
+`testnet` → `NotSupportedCapabilityError`. `live` → **immer** `LiveTradingGateError`,
+solange die Live-Gate-State-Machine nicht `LIVE_ENABLED` erreicht hat.
 
 ---
 
@@ -103,25 +106,42 @@ reproduzierbar und wird nicht als Golden verwendet.
 
 ---
 
-## 5. Private API & Live-Gate
+## 5. Ausführung (ExecutionPort) & Live-Gate
 
-Account/Positions/Place-Order sind im `BitunixPrivateClient` serialisiert und
-signiert. Der **Adapter-Live-Pfad ruft sie nie auf.** `placeOrder` im Modus
-`live` serialisiert den Body (SL/TP inklusive) und wirft danach immer
-`LiveTradingGateError` mit `TODO(task-11)`.
+**Ausführungs-Architektur (v1.20.0, Peer-Review):** Der Adapter bedient jede
+Execution über einen `ExecutionPort` (`src/brokers/bitunix/execution.ts`) mit
+**zwei getrennten Implementierungen** — Paper-Ledger und echter Broker-Executor
+sind nie vermischt:
 
-Eine Live-Order wäre **nur** möglich, wenn **alle** gelten:
+```
+ExecutionMode
+ ├── paper / backtest ─► PaperExecutionEngine   (lokales Ledger, 0 Private-Calls)
+ └── live              ─► BrokerExecutionEngine (echte Venue-API, signiert)
+                            └── LiveGate (Task 11) → BitunixPrivateClient
+```
+
+- `placeOrder` im **Live**-Modus: Live-Gate-Enforcer (Task 11) prüft zuerst; bei
+  bestandener Prüfung sendet die `BrokerExecutionEngine` die Order über
+  `BitunixPrivateClient.placeSerializedOrder` (SL/TP als `slPrice`/`tpPrice` im
+  selben Body, `stopAtVenue`). **Niemals** über das Paper-Ledger.
+- `getAccount`/`getPositions` im **Live**-Modus liefern **echte Venue-Daten**
+  (signierte Private-API), nie Paper-Daten.
+- `paper`/`backtest` → `PaperExecutionEngine` gegen das lokale Ledger (unverändert,
+  Modus B).
+
+Eine Live-Order ist **nur** möglich, wenn **alle** gelten (zentraler Enforcer):
 
 1. `BITUNIX_ENABLED=true`
 2. `BITUNIX_LIVE_ENABLED=true`
 3. `LIVE_TRADING_ENABLED=true`
 4. `REQUIRE_HUMAN_APPROVAL=false` (nur exakt dieser String hebt die Teilbedingung)
-5. Live-Gate-Service im Zustand `LIVE_ENABLED` — **existiert nicht** (task-11)
+5. Live-Gate-State-Machine = `LIVE_ENABLED` (persistiert, inkl. Human-Gate + Suite + Control-Plane)
 
-Punkt 5 fehlt → der Pfad wirft **in allen 16 Flag-Kombinationen**. Es gibt keinen
-stillen Fallback auf Paper.
+Ohne bestandene Gesamtprüfung wirft der Live-Pfad `LiveTradingGateError` — es gibt
+keinen stillen Fallback auf Paper. `testnet` → `NotSupportedCapabilityError`
+(kein Bitunix-Testnet dokumentiert).
 
-Private Calls (wenn Tests den Client direkt ansprechen) landen als Event
+Private Calls (nur im Live-Pfad nach Gate-Freigabe bzw. in Tests) landen als Event
 `BITUNIX_PRIVATE_CALL` (Methode, Pfad, Outcome, errorCode — **kein** Body, keine
 Query, kein Key, keine Signatur).
 
@@ -180,9 +200,15 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | `minTradeVolume` | `minQuantity` |
 | `basePrecision` / `quotePrecision` | `quantityStep` / `priceStep` = 10^(−p) |
 | `maxLeverage` | `leverageAvailable = maxLeverage > 1` |
-| — | `shortAvailable=true`, `paperAvailable=true`, `liveAvailable=false` |
+| — | `shortAvailable=true`, `paperAvailable=true`, `liveTradable=true` (Fähigkeit), `liveAvailable=false` (Freigabe) |
 | — | Fees = VIP0-Defaults (§2) |
 | `lastSeen` | ISO-UTC jetzt |
+
+**Semantik-Trennung (v1.20.0):** `liveTradable` beschreibt die Fähigkeit des
+Instruments am Broker (perpetual ist beim Venue live-handelbar), `liveAvailable`
+ist der abwärtskompatible Spiegel und bleibt `false` (keine systemseitige Freigabe).
+Die eigentliche Freigabe entscheidet allein der Live-Gate-Zustand + `venueControl`
+— siehe `docs/BROKER_ARCHITECTURE.md`.
 
 ---
 

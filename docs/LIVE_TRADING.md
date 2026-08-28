@@ -111,6 +111,13 @@ State-Machine-API (admin-guarded, CSRF, Rate-Limit) bzw. CLI. Der Enforcer
 liest nur persistierte Quellen (State-Files, Env-Flags, Suite-Stamp,
 Kill-Datei) — niemals UI-Flags oder Agenten-Aussagen.
 
+**Nach bestandener Prüfung (v1.20.0):** Der Bitunix-Live-Pfad delegiert die
+Ausführung an die `BrokerExecutionEngine` (`src/brokers/bitunix/execution.ts`),
+die ausschließlich den signierten `BitunixPrivateClient` nutzt — Orders über
+`placeSerializedOrder`, Account/Positions über die echte Private-API. Es wird
+**niemals** das lokale Paper-Ledger als Live-Daten zurückgegeben. Details:
+[BITUNIX.md](BITUNIX.md) §5 und [BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md) §2.1.
+
 ## 5. Kill-Switch
 
 - **Auslöser:** UI-Button (Confirm-Dialog mit getippter Phrase `KILL`),

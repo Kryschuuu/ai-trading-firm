@@ -20,6 +20,45 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.20.0] — 2026-08-28
+
+**Bitunix-Ausführungs-Refactor — Paper und Broker vollständig getrennt
+(Peer-Review umgesetzt).**
+
+**Kritischer Bugfix:** Der Bitunix-Adapter hat im Live-Modus weiterhin das lokale
+Paper-Ledger verwendet (`paper.submit()`, `paper.getAccount`, `paper.listPositions`),
+obwohl der Live-Gate-Enforcer bereits durchgeschaltet hätte. Das ist semantisch
+falsch und gefährlich: Ein Live-System darf nie Paper-Daten als Live-Daten melden.
+
+Umgesetzt über einen neuen Ausführungs-Port:
+
+- **`ExecutionPort`** (`src/brokers/bitunix/execution.ts`) mit zwei
+  Implementierungen derselben Schnittstelle:
+  - `PaperExecutionEngine` — lokales `BitunixPaperLedger` (paper/backtest,
+    0 Private-Calls).
+  - `BrokerExecutionEngine` — signierter `BitunixPrivateClient` (live,
+    echte Venue-Orders + echte Account-/Positions-Daten).
+- **Adapter** (`src/brokers/bitunix/adapter.ts`): Der Modus wählt die Engine.
+  Live-Methoden prüfen zuerst das zentrale Live-Gate (Task 11) und delegieren
+  danach ausschließlich an die Broker-Engine. Ohne bestandene Gate-Prüfung bleibt
+  `LiveTradingGateError` (kein Verhalten geändert); Testnet unverändert
+  `NotSupportedCapabilityError`.
+- **Semantik-Trennung der Live-Konzepte** (`src/universe/types.ts`):
+  - `MarketInstrument.liveTradable` — NEU: Instrument ist beim Broker
+    grundsätzlich live-handelbar (Fähigkeit).
+  - `adapterCapabilities.live` — Adapter kann Live-Orders serialisieren.
+  - `venueControl.liveEnabled` — globale Freigabe der Control Plane.
+  - `liveGate.state` — persistierter Gate-Zustand, öffnet erst die Ausführung.
+  - `liveAvailable` bleibt als abwärtskompatibler Spiegel (deprecated).
+- Bitunix-Mapping: `liveTradable=true`, `liveAvailable=false`.
+- Doku aktualisiert: `docs/BITUNIX.md`, `docs/BROKER_ARCHITECTURE.md`,
+  `docs/LIVE_TRADING.md`, `docs/PAPER_TRADING.md`, `docs/MARKET_UNIVERSE.md`,
+  neues Peer-Review-Dokument `docs/PEER_REVIEW_BITUNIX_EXECUTION.md`.
+- **Tests:** Live-Gate-OPEN → Broker-Engine statt Paper; ExecutionPort-Separation;
+  Semantik-Trennung der vier Live-Konzepte. Alle betroffenen Suiten grün.
+
+---
+
 ## [1.19.0] — 2026-08-28
 
 **Live-Trading-Gate — auditierte State-Machine (Task 11):** 9 Zustände, 8

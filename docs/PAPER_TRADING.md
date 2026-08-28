@@ -14,6 +14,12 @@ Normalisierung und Fill-Simulation enthalten **keinen LLM-Zugriff**.
 Deterministische Teile (Simulator, Replay, Synthetic) sind Seed-basiert und
 bit-identisch reproduzierbar.
 
+**Trennung Paper ⇄ Live (v1.20.0):** Broker-Adapter bedienen Paper über eine
+eigene `PaperExecutionEngine` (`ExecutionPort`), die strikt vom echten
+Broker-Executor getrennt ist. Paper-Orders/-Positionen sind rein lokal
+(0 Private-Calls) und werden im Live-Pfad **nie** als Live-Daten zurückgegeben.
+Details: [BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md) §2.1.
+
 ---
 
 ## 1. Market-Data-Layer (Übersicht)

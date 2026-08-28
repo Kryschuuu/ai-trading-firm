@@ -98,6 +98,7 @@ test("Normalisierung: Defaults sind konservativ (kein Hebel, kein Live, Metriken
   assert.equal(i.id, "BINANCE:SOLUSDT");
   assert.equal(i.leverageAvailable, false);
   assert.equal(i.shortAvailable, false);
+  assert.equal(i.liveTradable, false);
   assert.equal(i.liveAvailable, false);
   assert.equal(i.paperAvailable, true);
   assert.equal(i.status, "active");

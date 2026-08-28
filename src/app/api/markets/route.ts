@@ -112,6 +112,7 @@ export function parseMarketQuery(url: URL): InstrumentQuery {
     marketType: readEnum<MarketType>(p, "marketType", MARKET_TYPES) ?? undefined,
     status: readEnum<InstrumentStatus>(p, "status", INSTRUMENT_STATUSES) ?? undefined,
     paperAvailable: readBoolean(p, "paperAvailable"),
+    liveTradable: readBoolean(p, "liveTradable"),
     liveAvailable: readBoolean(p, "liveAvailable"),
     leverageAvailable: readBoolean(p, "leverageAvailable"),
     shortAvailable: readBoolean(p, "shortAvailable"),

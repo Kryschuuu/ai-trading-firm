@@ -32,6 +32,7 @@ const instrument: MarketInstrument = {
   leverageAvailable: false,
   shortAvailable: false,
   paperAvailable: true,
+  liveTradable: false,
   liveAvailable: false,
   volume24h: 2_000_000_000,
   spread: 0.0004,

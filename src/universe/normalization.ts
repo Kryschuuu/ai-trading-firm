@@ -172,7 +172,10 @@ export function normalizeInstrument(input: InstrumentInput, now: Date = new Date
     leverageAvailable: input.leverageAvailable ?? false,
     shortAvailable: input.shortAvailable ?? false,
     paperAvailable: input.paperAvailable ?? true,
-    liveAvailable: input.liveAvailable ?? false,
+    // liveTradable = Instrument ist am Broker live-handelbar (Fähigkeit).
+    // Fallback auf liveAvailable hält das alte Feld abwärtskompatibel synchron.
+    liveTradable: input.liveTradable ?? input.liveAvailable ?? false,
+    liveAvailable: input.liveAvailable ?? input.liveTradable ?? false,
     volume24h: input.volume24h ?? null,
     spread: input.spread ?? null,
     volatility: input.volatility ?? null,
