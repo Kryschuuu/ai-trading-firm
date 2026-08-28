@@ -1980,6 +1980,53 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       return [];
     },
   },
+  LIVE_GATE: {
+    label: "Live-Trading-Gate",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Ereignis der zentralen Live-Trading-State-Machine (Task 11): jeder " +
+      "Übergang (advance), jeder Deny, jeder Kill-Switch-Griff, jeder " +
+      "Enforce-Entscheid des Enforcers sowie Crash-Recovery. Die Einträge " +
+      "sind hash-verkettet (prevHash/hash) — Manipulation wird über die " +
+      "Kettenprüfung sichtbar. Details: docs/LIVE_TRADING.md.",
+    headline: (d) => {
+      const venue = text(d.venue) ?? "—";
+      const action = text(d.action) ?? "—";
+      const result = text(d.result) ?? "—";
+      const fromTo = [text(d.from), text(d.to)].filter(Boolean).join("→");
+      return `Live-Gate ${venue} · ${action} ${fromTo ? `(${fromTo}) ` : ""}→ ${result}`;
+    },
+    sections: (d) => [
+      {
+        title: "Gate-Entscheidung",
+        facts: [
+          { label: "Venue/Scope", value: text(d.venue) ?? "—", mono: true },
+          { label: "Aktion", value: text(d.action) ?? "—", mono: true },
+          { label: "Ergebnis", value: text(d.result) ?? "—" },
+          { label: "Von → Nach", value: [text(d.from), text(d.to)].filter(Boolean).join(" → ") || "—" },
+          { label: "Actor", value: text(d.actor) ?? "—", mono: true },
+          { label: "Policy", value: text(d.policyVersion) ?? "—", mono: true },
+          { label: "Audit-Seq", value: text(d.seq) ?? "—" },
+          { label: "Hash", value: text(d.hash) ?? "—", mono: true },
+        ],
+      },
+    ],
+    check: (d) => {
+      const result = text(d.result) ?? "";
+      if (result === "KILLED") {
+        return [
+          {
+            severity: "warn",
+            title: "Kill-Switch aktiv",
+            detail:
+              "Kill-Griff protokolliert — Live ist systemweit bzw. venue-scoped gesperrt; Freigabe nur über kompletten Neudurchlauf der State-Machine.",
+          },
+        ];
+      }
+      return [];
+    },
+  },
   BROKER_CONTROL_PLANE: {
     label: "Broker-Control-Plane",
     category: "system",

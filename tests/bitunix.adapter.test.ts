@@ -129,7 +129,7 @@ test("BITUNIX_ENABLED=false: Market-Data/Trading/Discovery werfen BitunixDisable
   assert.deepEqual(JSON.stringify(creds).includes("secret"), false);
 });
 
-test("Live-placeOrder: IMMER LiveTradingGateError, Private-Client unberührt", async () => {
+test("Live-placeOrder: LiveTradingGateError bis der Live-Gate-Enforcer erlaubt (Task 11)", async () => {
   let hits = 0;
   const fake = {
     placeSerializedOrder: async () => {
@@ -142,6 +142,9 @@ test("Live-placeOrder: IMMER LiveTradingGateError, Private-Client unberührt", a
     BITUNIX_LIVE_ENABLED: "true",
     LIVE_TRADING_ENABLED: "true",
     REQUIRE_HUMAN_APPROVAL: "false",
+    // Hermetischer Live-Gate-State-Speicher: State DISCONNECTED (kein
+    // State-File) => Enforcer denied mit STATE_NOT_LIVE_ENABLED.
+    LIVE_GATE_DATA_DIR: tmp(),
   };
   const adapter = new BitunixBrokerAdapter("live", {
     env,
@@ -157,7 +160,8 @@ test("Live-placeOrder: IMMER LiveTradingGateError, Private-Client unberührt", a
         riskNotional: 650,
         stopLoss: 60000,
       }),
-    (e: unknown) => e instanceof LiveTradingGateError && /TODO\(task-11\)/.test((e as Error).message)
+    (e: unknown) =>
+      e instanceof LiveTradingGateError && /STATE_NOT_LIVE_ENABLED/.test((e as Error).message)
   );
   await assert.rejects(() => adapter.getAccount(), LiveTradingGateError);
   await assert.rejects(() => adapter.getPositions(), LiveTradingGateError);

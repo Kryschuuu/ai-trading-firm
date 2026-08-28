@@ -4,7 +4,7 @@
  * 6 Ebenen × off/pending/active/error; Uebergaenge NUR ueber definierte
  * Aktionen (save/test/discover/disable); Missbrauch → StateTransitionError
  * (409/422). Live bleibt IMMER off — liveEnabled kommt ausschliesslich aus
- * readGateState() (bis task-11 hart gesperrt).
+ * readGateState() (seit task-11: Enforcer-Projektion, Default false).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -271,9 +271,13 @@ test("Missbrauch: Aktion ohne Probe → PROBE_MISSING; unbekannte Aktion → UNK
   );
 });
 
-test("readGateState: einzige Live-Quelle — IMMER false, kein Parameter aendert das", () => {
+test("readGateState: einzige Live-Quelle — Enforcer-Projektion (Task 11), Default deny", () => {
   const gate = readGateState();
   assert.equal(gate.liveEnabled, false);
-  assert.equal(gate.source, "control-plane");
-  assert.match(gate.reason, /task-11/);
+  assert.equal(gate.source, "live-gate");
+  assert.match(gate.reason, /LIVE_GATE_LOCKED/);
+  assert.match(gate.reason, /task-11|LIVE_TRADING|State/i);
+  // Venue-Parameter ändert nichts am Default (DISCONNECTED, Flags off).
+  assert.equal(readGateState("BITUNIX").liveEnabled, false);
+  assert.equal(readGateState("KRAKEN").liveEnabled, false);
 });

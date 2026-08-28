@@ -10,7 +10,7 @@
  *   - authentifiziert ohne Permission → 403 FORBIDDEN
  */
 import { tokenEquals } from "@/lib/apiAuth";
-import { liveGateGranted, permissionsForRole } from "./permissions";
+import { permissionsForRole } from "./permissions";
 import type {
   Actor,
   AuthResolution,
@@ -69,9 +69,9 @@ function buildActor(
   const elevated = role === "operator" && !adminTokenConfigured(env);
   const effectiveRole: Role = elevated ? "admin" : role;
   const permissions = permissionsForRole(effectiveRole);
-  // Defense in Depth: live.gate darf selbst durch einen Programmierfehler
-  // nicht in der wirksamen Menge landen.
-  const safe = permissions.filter((p) => p !== "live.gate");
+  // Defense in Depth: live.gate (Task 11) darf ausschließlich über die
+  // Admin-Rolle in die wirksame Menge gelangen — nie über viewer/operator.
+  const safe = effectiveRole === "admin" ? permissions : permissions.filter((p) => p !== "live.gate");
   return {
     role,
     effectiveRole,
@@ -156,13 +156,10 @@ export function requirePermission(
 ): Response | null {
   const resolution = resolveAuth(req, env);
   if (!resolution.ok) return denialResponse(resolution);
-  // live.gate ist bis Task 11 grundsätzlich verweigert — auch wenn die
-  // Matrix je manipuliert würde.
-  if (permission === "live.gate" || liveGateGranted(resolution.actor.permissions)) {
-    if (permission === "live.gate") {
-      return forbidden("LIVE_GATE_LOCKED: Live-Freigabe ist bis Task 11 gesperrt.");
-    }
-  }
+  // Task 11: live.gate ist eine normale Admin-Permission (Matrix). Die
+  // harte Live-Sperre selbst liegt IM ENFORCER (State-Machine + Flags +
+  // Suite) — nicht in der Permission-Schicht. Defense in Depth bleibt:
+  // buildActor streicht live.gate aus jeder Nicht-Admin-Rolle.
   if (!resolution.actor.permissions.includes(permission)) {
     return forbidden(`Permission "${permission}" ist fuer Rolle ${resolution.actor.role} nicht erteilt.`);
   }

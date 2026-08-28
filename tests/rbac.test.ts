@@ -34,10 +34,11 @@ beforeEach(() => {
   delete process.env.FIRM_VIEWER_TOKEN;
 });
 
-test("Matrix: live.gate ist in keiner Rolle", () => {
+test("Matrix: live.gate ist NUR der Admin-Rolle gewährt (Task 11)", () => {
   for (const role of ALL_ROLES) {
-    assert.equal(liveGateGranted(permissionsForRole(role)), false, role);
-    assert.equal(hasPermission(ROLE_PERMISSIONS[role], "live.gate"), false, role);
+    const expected = role === "admin";
+    assert.equal(liveGateGranted(permissionsForRole(role)), expected, role);
+    assert.equal(hasPermission(ROLE_PERMISSIONS[role], "live.gate"), expected, role);
   }
 });
 
@@ -56,7 +57,9 @@ test("Matrix: viewer liest, schreibt nicht; admin hat Credentials", () => {
   const admin = permissionsForRole("admin");
   assert.equal(hasPermission(admin, "broker.credentials"), true);
   assert.equal(hasPermission(admin, "routing.modes.write"), true);
-  assert.equal(hasPermission(admin, "live.gate"), false);
+  // Task 11: Admin darf das Gate BEDIENEN (Transition/Kill) — Live selbst
+  // bleibt vom Enforcer gesperrt (State-Machine + Flags + Suite).
+  assert.equal(hasPermission(admin, "live.gate"), true);
 });
 
 test("resolveActor: kein Token konfiguriert → local-open Admin", () => {
@@ -67,7 +70,7 @@ test("resolveActor: kein Token konfiguriert → local-open Admin", () => {
   assert.equal(actor.auditId, "admin");
   assert.equal(actor.elevated, false);
   assert.equal(hasPermission(actor.permissions, "broker.credentials"), true);
-  assert.equal(liveGateGranted(actor.permissions), false);
+  assert.equal(liveGateGranted(actor.permissions), true);
 });
 
 test("resolveActor: Admin-Token match über x-admin-token und x-firm-token", () => {
@@ -161,10 +164,16 @@ test("requirePermission: Operator mit Admin-Token-Konfig darf KEINE Credentials"
   assert.equal(denied.status, 403);
 });
 
-test("requirePermission: live.gate immer 403, auch als local-open Admin", async () => {
-  const denied = requirePermission(req(), "live.gate", ENV_CLEAN);
-  assert.ok(denied);
-  assert.equal(denied.status, 403);
+test("requirePermission: live.gate nur Admin (Task 11) — viewer/operator 403", async () => {
+  // local-open/Admin darf bedienen …
+  assert.equal(requirePermission(req(), "live.gate", ENV_CLEAN), null);
+  // … echte Rollen ohne Admin-Permission nicht:
+  const env = { ...ENV_CLEAN, FIRM_ADMIN_TOKEN: "admin-secret-token-123456", FIRM_VIEWER_TOKEN: "viewer-token-abcdef" };
+  const viewerDenied = requirePermission(req({ "x-viewer-token": "viewer-token-abcdef" }), "live.gate", env);
+  assert.ok(viewerDenied);
+  assert.equal(viewerDenied.status, 403);
+  const operatorDenied = requirePermission(req({ "x-firm-token": "unknown-token" }), "live.gate", env);
+  assert.ok(operatorDenied);
 });
 
 test("resolveAuth: falscher Token trifft nicht per Prefix", () => {
