@@ -24,7 +24,8 @@
     "executionMode.live": {
       "kurzinfo": "Reale Orders mit echtem Geld — nur nach vollständigem Live-Gate-Durchlauf (Task 11).",
       "technischeInfo": "getBroker(venue, 'live') entscheidet der zentrale Live-Gate-Enforcer (src/live-gate/enforcer.ts): State-Machine LIVE_ENABLED + {VENUE}_ENABLED + {VENUE}_LIVE_ENABLED + LIVE_TRADING_ENABLED + gültiger CI-Suite-Stamp + aktive Control-Plane-Venue + kein Kill-Switch. Default (State DISCONNECTED, Flags aus, kein Stamp) bleibt LiveTradingGateError. Der Pfad ist auditierbar (Hash-Kette), nicht per Flag allein öffnbar. Details: docs/LIVE_TRADING.md.",
-      "wichtig": "Dieser Pfad aktiviert sich nie von selbst — jeder Schritt (Checks, Paper-Evidence, Antrag, 24 h Cooldown, Human-Gate, CI-Suite, Flags) ist eine eigene, auditierte Entscheidung."
+      "wichtig": "Dieser Pfad aktiviert sich nie von selbst — jeder Schritt (Checks, Paper-Evidence, Antrag, 24 h Cooldown, Human-Gate, CI-Suite, Flags) ist eine eigene, auditierte Entscheidung.",
+      "risiko": "Jede echte Order bewegt echtes Kapital und ist nicht rueckgaengig. Der Weg dorthin ist bewusst lang und mehrfach abgesichert — das Gate ersetzt aber keine taegliche, menschliche Aufsicht."
     },
     "capabilities.discovery": {
       "kurzinfo": "Kann der Adapter Instrumente von dieser Venue entdecken?",
@@ -53,7 +54,8 @@
     },
     "capabilities.live": {
       "kurzinfo": "Kann der Adapter technisch reale Orders senden?",
-      "technischeInfo": "Projektions-Basis für liveAvailable. BITUNIX deklariert live=true (Signing und Place-Order-Serialisierung existieren). Capability allein öffnet nichts: Der Live-Gate-Enforcer (Task 11) verlangt zusätzlich State, Flags, Suite-Stamp und Control-Plane — PAPER ist live=false und kann nie live gehen (VENUE_NOT_LIVE_CAPABLE)."
+      "technischeInfo": "Projektions-Basis für liveAvailable. BITUNIX deklariert live=true (Signing und Place-Order-Serialisierung existieren). Capability allein öffnet nichts: Der Live-Gate-Enforcer (Task 11) verlangt zusätzlich State, Flags, Suite-Stamp und Control-Plane — PAPER ist live=false und kann nie live gehen (VENUE_NOT_LIVE_CAPABLE).",
+      "risiko": "Technische Live-Faehigkeit allein ist keine Freischaltung. Erst die Kombination aus State-Machine, Flags, Suite-Stamp und aktiver Control-Plane erlaubt eine Live-Order."
     },
     "capabilities.stopAtVenue": {
       "kurzinfo": "Können Stop-Loss/Take-Profit direkt beim Venue am Order-Aufruf platziert werden?",
@@ -77,7 +79,8 @@
     },
     "LiveTradingGateError": {
       "kurzinfo": "Live-Order verweigert — mit konkretem Grund (Deny-Code) aus dem Live-Gate-Enforcer.",
-      "technischeInfo": "getBroker(venue, 'live') und jeder Live-Pfad des Adapters werfen diesen Fehler, sobald eine der Enforcer-Bedingungen fehlt: STATE_NOT_LIVE_ENABLED, PLATFORM_FLAG_MISSING, VENUE_FLAG_MISSING, VENUE_LIVE_FLAG_MISSING, HUMAN_APPROVAL_REQUIRED, SECURITY_SUITE_INVALID, KILL_SWITCH_ACTIVE, CONTROL_PLANE_UNKNOWN/INACTIVE, VENUE_NOT_LIVE_CAPABLE. Jeder Deny ist auditiert (LIVE_TRADING_GATE); kein Fallback auf Paper. Die Matrix der Zustände und Übergänge: docs/LIVE_TRADING.md."
+      "technischeInfo": "getBroker(venue, 'live') und jeder Live-Pfad des Adapters werfen diesen Fehler, sobald eine der Enforcer-Bedingungen fehlt: STATE_NOT_LIVE_ENABLED, PLATFORM_FLAG_MISSING, VENUE_FLAG_MISSING, VENUE_LIVE_FLAG_MISSING, HUMAN_APPROVAL_REQUIRED, SECURITY_SUITE_INVALID, KILL_SWITCH_ACTIVE, CONTROL_PLANE_UNKNOWN/INACTIVE, VENUE_NOT_LIVE_CAPABLE. Jeder Deny ist auditiert (LIVE_TRADING_GATE); kein Fallback auf Paper. Die Matrix der Zustände und Übergänge: docs/LIVE_TRADING.md.",
+      "risiko": "Der Fehler ist der gewollte, sichere Default: Ohne vollstaendige, auditiert erreichte Live-Bereitschaft wird jede Live-Order abgelehnt. Ein Deny-Code ist keine Stoerung, sondern Schutz."
     },
     "paperAvailable": {
       "kurzinfo": "Kann diese Venue in der Plattform im Paper-Modus ausgeführt werden?",
@@ -86,7 +89,8 @@
     },
     "liveAvailable": {
       "kurzinfo": "Kann diese Venue technisch Live-Orders ausführen?",
-      "technischeInfo": "Projektion aus der Adapter-Capability live. BITUNIX ist true (technische Fähigkeit), alle anderen Venues false. Die Freischaltung ist an die Live-Gate-State-Machine (Task 11) gebunden: Erst LIVE_ENABLED + Flags + Suite + Control Plane erlauben eine Live-Order — liveAvailable bleibt davon unberührt reine Capability-Anzeige."
+      "technischeInfo": "Projektion aus der Adapter-Capability live. BITUNIX ist true (technische Fähigkeit), alle anderen Venues false. Die Freischaltung ist an die Live-Gate-State-Machine (Task 11) gebunden: Erst LIVE_ENABLED + Flags + Suite + Control Plane erlauben eine Live-Order — liveAvailable bleibt davon unberührt reine Capability-Anzeige.",
+      "risiko": "liveAvailable zeigt nur die technische Faehigkeit an. Eine hier als true markierte Venue bleibt solange gesperrt, bis die Live-State-Machine vollstaendig durchlaufen ist."
     },
     "venue.BITUNIX": {
       "kurzinfo": "Siebtes Venue: Bitunix USDT-M-Perpetuals. Public REST/WS und Paper gegen echte Kurse; Live gesperrt.",
@@ -100,7 +104,8 @@
     },
     "BITUNIX_LIVE_ENABLED": {
       "kurzinfo": "Venue-Live-Teilbedingung. Allein wirkungslos — der Enforcer verlangt den kompletten Durchlauf.",
-      "technischeInfo": "Eine Live-Order bräuchte BITUNIX_ENABLED, BITUNIX_LIVE_ENABLED, LIVE_TRADING_ENABLED, REQUIRE_HUMAN_APPROVAL-Regelung über die State-Machine (Human-Gate ist strukturell: LIVE_PENDING → HUMAN_APPROVED), den Zustand LIVE_ENABLED aus dem Gate-Durchlauf sowie einen gültigen Security-Suite-Stamp. Flags zu setzen, ohne die State-Machine zu durchlaufen, bleibt wirkungslos (STATE_NOT_LIVE_ENABLED)."
+      "technischeInfo": "Eine Live-Order bräuchte BITUNIX_ENABLED, BITUNIX_LIVE_ENABLED, LIVE_TRADING_ENABLED, REQUIRE_HUMAN_APPROVAL-Regelung über die State-Machine (Human-Gate ist strukturell: LIVE_PENDING → HUMAN_APPROVED), den Zustand LIVE_ENABLED aus dem Gate-Durchlauf sowie einen gültigen Security-Suite-Stamp. Flags zu setzen, ohne die State-Machine zu durchlaufen, bleibt wirkungslos (STATE_NOT_LIVE_ENABLED).",
+      "risiko": "Das Flag allein schaltet nichts frei — der Enforcer verlangt zusaetzlich Live-Status, Plattform-Flag, Suite-Stamp und aktive Control-Plane. Ohne sie bleibt jede Live-Order verweigert."
     },
     "bitunix.signing": {
       "kurzinfo": "Doppel-SHA256: digest = SHA256(nonce+ts+api-key+query+body), sign = SHA256(digest+secret).",
@@ -134,11 +139,13 @@
     },
     "controlPlane.live": {
       "kurzinfo": "Live-Ebene: Zustand aus der Live-Gate-State-Machine (Task 11) — Default DISCONNECTED/OFF.",
-      "technischeInfo": "Es gibt kein live=true-Flag und keinen UI-Schalter. Die Anzeige kommt aus GET /api/live/state (read-only): Zustand je Venue (9 States), Flags, Cooldown-Rest, Suite-Stamp, Kill-Status, Audit-Kettenkopf. Mutationen nur über POST /api/live/transition (Permission live.gate + CSRF) und POST /api/live/kill (Phrase 'KILL')."
+      "technischeInfo": "Es gibt kein live=true-Flag und keinen UI-Schalter. Die Anzeige kommt aus GET /api/live/state (read-only): Zustand je Venue (9 States), Flags, Cooldown-Rest, Suite-Stamp, Kill-Status, Audit-Kettenkopf. Mutationen nur über POST /api/live/transition (Permission live.gate + CSRF) und POST /api/live/kill (Phrase 'KILL').",
+      "risiko": "Ein hier aktivierter Live-Modus ist erst nach vollstaendigem Gate-Durchlauf wirksam. Voreiliges Aktivieren aendert nichts an der Enforcer-Entscheidung, kann aber das Ops-Team irrefuehren."
     },
     "controlPlane.liveEnabled": {
       "kurzinfo": "Reine Anzeige aus der Gate-Service-Meldung — true erst nach vollständigem auditierten Durchlauf.",
-      "technischeInfo": "liveEnabled wird ausschließlich von readGateState(venue) geliefert (Enforcer-Entscheidung, Task 11) und nirgends von der UI gesetzt. Der Wert ist true genau dann, wenn State=LIVE_ENABLED, alle Flags stimmen, der Suite-Stamp gültig, die Control-Plane-Venue aktiv und kein Kill-Switch gesetzt ist — alles persistiert und auditiert. Ausstehende Zustände (z. B. LIVE_PENDING im 24 h Cooldown) zeigen ihn nicht."
+      "technischeInfo": "liveEnabled wird ausschließlich von readGateState(venue) geliefert (Enforcer-Entscheidung, Task 11) und nirgends von der UI gesetzt. Der Wert ist true genau dann, wenn State=LIVE_ENABLED, alle Flags stimmen, der Suite-Stamp gültig, die Control-Plane-Venue aktiv und kein Kill-Switch gesetzt ist — alles persistiert und auditiert. Ausstehende Zustände (z. B. LIVE_PENDING im 24 h Cooldown) zeigen ihn nicht.",
+      "risiko": "Das Frontend-Flag ist ein Statusanzeiger, keine Freischaltung. Nur der zentrale Enforcer entscheidet ueber Live-Orders — UI-Eingaben koennen den Schutz nicht aushebeln."
     },
     "controlPlane.maskedForm": {
       "kurzinfo": "Maskiertes Credential-Formular: Passwort-Felder, die das Secret nie anzeigen.",
@@ -172,7 +179,8 @@
     },
     "liveGate": {
       "kurzinfo": "Live-Trading-Gate (Task 11): auditierte State-Machine mit 9 Zuständen, 8 legalen Übergängen, Human-Gate mit 24 h Cooldown, Kill-Switch und Hash-Ketten-Audit.",
-      "technischeInfo": "Modul src/live-gate/**; API GET /api/live/state, POST /api/live/transition, POST /api/live/kill; CLI npm run live:kill; CI-Job security-live-gate (merge-blockierend, Coverage ≥ 95 % Zeilen auf src/live-gate/**). Jede Venue-Order im Live-Pfad läuft durch assertLiveOrderAllowed(venue) — Fail-Safe: bei jedem Zweifel deny + Audit. Details: docs/LIVE_TRADING.md."
+      "technischeInfo": "Modul src/live-gate/**; API GET /api/live/state, POST /api/live/transition, POST /api/live/kill; CLI npm run live:kill; CI-Job security-live-gate (merge-blockierend, Coverage ≥ 95 % Zeilen auf src/live-gate/**). Jede Venue-Order im Live-Pfad läuft durch assertLiveOrderAllowed(venue) — Fail-Safe: bei jedem Zweifel deny + Audit. Details: docs/LIVE_TRADING.md.",
+      "risiko": "Das Live-Gate ist die letzte und strengste Schutzebene. Ein Durchlauf ist zeit- und pruefaufwendig — das ist beabsichtigt, um Fehlentscheidungen mit echtem Geld zu verhindern."
     }
   }
 }

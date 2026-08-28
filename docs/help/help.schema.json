@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "title": "3-Ebenen-Hilfe-Systematik (help-3-ebenen)",
+  "description": "Kanonisches JSON-Schema fuer alle docs/help/*.help.json Dateien der Autonomen KI-Trading-Firma. Jeder Fachbegriff (Key) traegt genau drei Pflicht-Ebenen: kurzinfo (1-2 Saetze, Nutzersicht), technischeInfo (Berechnung/Modul/Referenz), risiko (Risiko-Hinweis). Zusaetzliche Ebenen (z. B. 'wichtig') sind erlaubt, die drei Pflichtebenen nie entfernen.",
+  "type": "object",
+  "required": ["id", "version", "title", "description", "source", "fields"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "type": "string",
+      "description": "Eindeutige ID der Hilfe-Datei (z. B. 'scanner'). Muss dem Dateinamen <id>.help.json entsprechen.",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version dieser Hilfe-Datei; wird bei inhaltlicher Aenderung inkrementiert."
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "string",
+      "description": "Quell-Referenzen (Module/Dateien), zu denen die Hilfetexte gehoeren."
+    },
+    "fields": {
+      "type": "object",
+      "description": "Map von Fachbegriff-Key auf die 3-Ebenen-Hilfe.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kurzinfo", "technischeInfo", "risiko"],
+        "properties": {
+          "kurzinfo": {
+            "type": "string",
+            "minLength": 20,
+            "description": "Ebene 1: knappe Nutzererklaerung (1-2 Saetze)."
+          },
+          "technischeInfo": {
+            "type": "string",
+            "minLength": 20,
+            "description": "Ebene 2: Berechnung, Modul, Formel oder Code-Referenz."
+          },
+          "risiko": {
+            "type": "string",
+            "minLength": 20,
+            "description": "Ebene 3: Risiko- und Vorsichtshinweis."
+          }
+        },
+        "additionalProperties": {
+          "type": "string",
+          "description": "Optionale weitere Ebenen (z. B. 'wichtig') als Freitext."
+        }
+      }
+    }
+  }
+}
