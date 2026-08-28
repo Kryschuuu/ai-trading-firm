@@ -74,6 +74,11 @@ const DOCS: Record<string, { file: string; title: string; subtitle: string }> = 
     title: "Bitunix-Adapter",
     subtitle: "7. Venue — Public REST/WS, Signing, Paper-Modus B, Live-Gate (v1.15)",
   },
+  routing: {
+    file: "docs/LLM_ROUTING.md",
+    title: "LLM-Modell-Routing (MODEL_ROUTER)",
+    subtitle: "Deterministische Modellwahl, Eskalations-Policy, Budget-Deckel, Audit (v1.17)",
+  },
 };
 
 export async function GET(req: Request) {

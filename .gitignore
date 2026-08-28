@@ -35,6 +35,9 @@ next-env.d.ts
 /data/history
 /data/history/*.tmp
 
+# Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
+/data/routing
+
 # Scanner-Artefakte (Task 04): taegliche Universe-Snapshots werden lokal
 # erzeugt und sind aus Registry + Historie reproduzierbar — nicht versioniert.
 /artifacts
