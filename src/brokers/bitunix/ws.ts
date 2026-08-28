@@ -286,7 +286,6 @@ function bind(
 
 function defaultOpen(url: string): WsLike {
   // `ws` ist Dependency; Tests injizieren `open` und berühren diesen Pfad nicht.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { WebSocket: NodeWebSocket } = require("ws") as typeof import("ws");
   return new NodeWebSocket(url) as unknown as WsLike;
 }

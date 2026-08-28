@@ -16,6 +16,28 @@
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
 
+## [1.20.0] — 2026-08-28 · Bitunix-Ausführungs-Refactor (Paper/Broker getrennt)
+
+**Kritischer Bugfix + Architektur-Trennung (Peer-Review umgesetzt):** Der
+Bitunix-Live-Pfad handelt **niemals mehr über das lokale Paper-Ledger**.
+
+- **`ExecutionPort`** (`src/brokers/bitunix/execution.ts`): `PaperExecutionEngine`
+  (paper/backtest, lokales Ledger) und `BrokerExecutionEngine` (live, echte
+  Private-API) sind zwei getrennte Implementierungen desselben Ports.
+- **Adapter-Fix:** `placeOrder`, `getAccount`, `getPositions` im Live-Modus
+  delegieren nach bestandener Live-Gate-Prüfung an die **Broker-Engine**
+  (`BitunixPrivateClient.placeSerializedOrder` / echte Venue-Daten) — nicht mehr
+  an `paper.submit()` / Paper-Account. Kein stiller Fallback.
+- **Semantik-Trennung** (Fehler 3): neues Instrument-Feld `liveTradable`
+  (Fähigkeit des Instruments am Broker) klar getrennt von `adapterCapabilities.live`,
+  `venueControl.liveEnabled` und `liveGate.state`. `liveAvailable` bleibt als
+  abwärtskompatibler Spiegel. Bitunix-Mapping: `liveTradable=true`,
+  `liveAvailable=false`.
+- **Keine Breaking Changes:** Paper-Trading & Testnet-Verhalten unverändert;
+  Live bleibt ohne bestandene Gate-Prüfung `LiveTradingGateError`.
+- Neue Tests: Live-Gate-OPEN → Broker-Engine (nicht Paper), ExecutionPort-Separation,
+  Semantik-Trennung der vier Live-Konzepte.
+
 ## [1.19.0] — 2026-08-28 · Task 11 (Live-Trading-Gate)
 
 - Auditierte Live-Trading-State-Machine: 9 Zustände, exakt 8 legale Übergänge.

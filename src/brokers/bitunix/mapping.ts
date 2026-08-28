@@ -77,6 +77,12 @@ export function mapTradingPair(
     leverageAvailable: maxLeverage > 1,
     shortAvailable: true,
     paperAvailable: true,
+    // liveTradable: Bitunix-Perpetuals sind beim Broker grundsätzlich live
+    // handelbar (Fähigkeit) — ABER das öffnet NICHTS: die Ausführung hängt vom
+    // Live-Gate (liveGate.state) + venueControl.liveEnabled ab, nicht von diesem
+    // Instrument-Flag. liveAvailable bleibt als Kompatibilitäts-Spiegel false
+    // (keine systemseitige Freigabe), siehe src/universe/types.ts.
+    liveTradable: true,
     liveAvailable: false,
     volume24h: null,
     spread: null,

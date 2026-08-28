@@ -13,18 +13,92 @@ import { loadBitunixConfig } from "../src/brokers/bitunix/config";
 import { BitunixDisabledError } from "../src/brokers/bitunix/errors";
 import { EnvSecretStore } from "../src/brokers/bitunix/secrets";
 import { BitunixPrivateClient } from "../src/brokers/bitunix/privateClient";
+import { BitunixPaperLedger } from "../src/brokers/bitunix/paper";
+import { BrokerExecutionEngine, PaperExecutionEngine } from "../src/brokers/bitunix/execution";
+import { mapTradingPair } from "../src/brokers/bitunix/mapping";
 import { InstrumentRegistry } from "../src/universe/registry";
 import { LiveTradingGateError, NotSupportedCapabilityError } from "../src/contracts/broker";
 import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
+import {
+  allowEnv,
+  mockPort,
+  seedState,
+  resetLiveGateTestGlobals,
+} from "./fixtures/liveGateTestUtil";
+import {
+  getLiveGateRuntime,
+  registerGatePort,
+  setVenueReadinessProvider,
+  writeSuiteStamp,
+} from "../src/live-gate";
 
 const dirs: string[] = [];
 const servers: BitunixFixtureServer[] = [];
 after(async () => {
   resetRuntimeLimits();
   killSwitch.disarm();
+  resetLiveGateTestGlobals();
   await Promise.all(servers.map((s) => s.stop()));
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
+
+/**
+ * Öffnet das Live-Gate hermetisch (State LIVE_ENABLED + Suite-Stamp + Readiness
+ * + Mock-Port) für einen env-Namen. Liefert das selbe env zurück — der Adapter
+ * muss es als `env` bekommen, damit `assertLiveOrderAllowed` dieselbe Quelle liest.
+ */
+function openLiveGate(env: Record<string, string>): void {
+  seedState(env, "BITUNIX", "LIVE_ENABLED");
+  writeSuiteStamp(getLiveGateRuntime(env).dir, {
+    passed: true,
+    runId: "suite-live-ok",
+    sha: "deadbeef",
+    source: "ci",
+  });
+  setVenueReadinessProvider(() => ({ active: true }));
+  registerGatePort("BITUNIX", mockPort());
+}
+
+/** Fake Private-Client mit Zählern — dokumentiert, welche Methoden live laufen. */
+function spyPrivateClient(): {
+  client: BitunixPrivateClient;
+  calls: { place: number; getAccount: number; getPositions: number };
+} {
+  const calls = { place: 0, getAccount: 0, getPositions: 0 };
+  const client = {
+    placeSerializedOrder: async (body: { symbol: string }) => {
+      calls.place += 1;
+      assert.equal(body.symbol, "BTCUSDT");
+      return { orderId: "BX-LIVE-1", clientId: "c1" };
+    },
+    getAccount: async () => {
+      calls.getAccount += 1;
+      return {
+        equity: 99999,
+        cash: 88888,
+        openPositions: 0,
+        startingEquity: 99999,
+        drawdownPct: 0,
+      };
+    },
+    getPositions: async () => {
+      calls.getPositions += 1;
+      return [
+        {
+          symbol: "BTCUSDT",
+          side: "LONG" as const,
+          qty: 0.05,
+          entryPrice: 60000,
+          lastPrice: 61000,
+          unrealizedPnl: 50,
+          stopLoss: null,
+          takeProfit: null,
+        },
+      ];
+    },
+  } as unknown as BitunixPrivateClient;
+  return { client, calls };
+}
 
 function tmp(): string {
   const d = mkdtempSync(path.join(tmpdir(), "bitunix-reg-"));
@@ -166,6 +240,114 @@ test("Live-placeOrder: LiveTradingGateError bis der Live-Gate-Enforcer erlaubt (
   await assert.rejects(() => adapter.getAccount(), LiveTradingGateError);
   await assert.rejects(() => adapter.getPositions(), LiveTradingGateError);
   assert.equal(hits, 0);
+});
+
+test("Live-Gate OFFEN: placeOrder/getAccount/getPositions nutzen die Broker-Engine (Private-Client), NICHT das Paper-Ledger", async () => {
+  resetLiveGateTestGlobals();
+  const fx = new BitunixFixtureServer();
+  const base = await fx.start();
+  servers.push(fx);
+  // Flags + hermetischer Gate-State + Suite + Readiness + Mock-Port = Gate OFFEN.
+  const env = {
+    ...allowEnv(),
+    BITUNIX_BASE_URL: base,
+    BITUNIX_ALLOW_INSECURE_HTTP: "true",
+    BITUNIX_RETRY_MAX: "1",
+  };
+  openLiveGate(env);
+  const { client, calls } = spyPrivateClient();
+  const adapter = new BitunixBrokerAdapter("live", {
+    env,
+    config: loadBitunixConfig(env),
+    privateClient: client,
+    secretStore: new EnvSecretStore(env),
+  });
+
+  const fill = await adapter.placeOrder({
+    symbol: "BTCUSDT",
+    side: "LONG",
+    qty: 0.05,
+    riskNotional: 3000,
+    stopLoss: 50000,
+    takeProfit: 70000,
+  });
+  assert.equal(calls.place, 1, "Live-Order muss den Private-Client treffen");
+  assert.equal(fill.orderId, "BX-LIVE-1", "OrderId muss vom Broker stammen, nicht vom Paper-Ledger");
+  assert.equal(fill.status, "FILLED");
+
+  const acct = await adapter.getAccount();
+  assert.equal(acct.equity, 99999, "Live-Account muss Broker-Daten liefern, nicht Paper-Equity 10000");
+  assert.equal(calls.getAccount, 1, "Live-Account muss den Private-Client treffen");
+
+  const pos = await adapter.getPositions();
+  assert.equal(pos.length, 1);
+  assert.equal(pos[0].qty, 0.05, "Live-Positionen müssen vom Broker stammen");
+  // BrokerEngine.getAccount ruft intern getPositions (openPositions) — daher >= 1.
+  assert.ok(calls.getPositions >= 1, "Live-Positionen müssen den Private-Client treffen");
+
+  // Gegenprobe: das Paper-Ledger des Modus 'paper' ist NICHT berührt (eigenes Depot).
+  const paper = new BitunixBrokerAdapter("paper", {
+    env,
+    config: loadBitunixConfig(env),
+    secretStore: new EnvSecretStore(env),
+  });
+  const paperAcct = await paper.getAccount();
+  assert.equal(paperAcct.startingEquity, 10000, "Paper-Ledger bleibt unabhängig vom Live-Pfad");
+
+  // Fixture hat keine signierten Private-Calls erhalten — der Live-Pfad lief über
+  // den injizierten (Fake-)Private-Client, nicht über das echte Ledger.
+  assert.equal(fx.privateCalls, 0);
+  resetLiveGateTestGlobals();
+});
+
+test("ExecutionPort-Separation: PaperExecutionEngine vs. BrokerExecutionEngine sind verschiedene Implementierungen", async () => {
+  const ledger = new BitunixPaperLedger(10000);
+  const paperEngine = new PaperExecutionEngine(ledger);
+  const { client: fake, calls } = spyPrivateClient();
+  const brokerEngine = new BrokerExecutionEngine(fake);
+
+  assert.equal(paperEngine.mode, "paper");
+  assert.equal(brokerEngine.mode, "live");
+
+  // Gleicher Request, gleicher Ticker → Paper simuliert lokal, Broker sendet echt.
+  const req = { symbol: "BTCUSDT", side: "LONG" as const, qty: 0.01, riskNotional: 650, stopLoss: 60000 };
+  const ticker = { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 };
+  const paperFill = await paperEngine.submit(req, ticker);
+  assert.equal(paperFill.orderId.startsWith("PAP-BX-"), true, "Paper liefert lokale Ledger-OrderId");
+  const brokerFill = await brokerEngine.submit(req, ticker);
+  assert.equal(brokerFill.orderId, "BX-LIVE-1", "Broker liefert Venue-OrderId");
+  assert.equal(calls.place, 1);
+
+  // Paper-Konto reflektiert den lokalen Fill; Broker-Konto kommt aus der API.
+  const paperAcct = await paperEngine.getAccount(() => 65000);
+  assert.equal(paperAcct.openPositions, 1);
+  const brokerAcct = await brokerEngine.getAccount();
+  assert.equal(brokerAcct.equity, 99999);
+});
+
+test("Semantik-Trennung: adapter.live ≠ instrument.liveTradable ≠ liveAvailable ≠ gate.state", async () => {
+  // 1) Adapter-Capability: Bitunix KANN Live-Orders serialisieren.
+  const caps = new BitunixBrokerAdapter("paper").capabilities;
+  assert.equal(caps.live, true);
+
+  // 2) Instrument-Capability: liveTradable (beim Broker live-handelbar) …
+  const mapped = mapTradingPair({ symbol: "BTCUSDT", symbolStatus: "OPEN" });
+  assert.ok(mapped);
+  assert.equal(mapped.liveTradable, true);
+
+  // 3) … ist NICHT dasselbe wie die systemseitige Freigabe liveAvailable=false.
+  assert.equal(mapped.liveAvailable, false);
+
+  // 4) Selbst bei offener Capability ist der Default-Gate-Zustand geschlossen:
+  //    placeOrder im live-Modus wirft weiterhin LiveTradingGateError.
+  const closed = new BitunixBrokerAdapter("live", {
+    env: { ...allowEnv() }, // Flags an, aber State nicht LIVE_ENABLED → deny
+    config: loadBitunixConfig(allowEnv()),
+  });
+  await assert.rejects(
+    () => closed.placeOrder({ symbol: "BTCUSDT", side: "LONG", qty: 0.01, riskNotional: 650, stopLoss: 60000 }),
+    LiveTradingGateError
+  );
 });
 
 test("testnet: NotSupportedCapabilityError, kein stiller Fallback", async () => {

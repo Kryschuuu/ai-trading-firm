@@ -95,9 +95,12 @@ export const VENUE_CAPABILITIES: Record<BrokerVenueId, BrokerCapabilities> = {
   },
   /**
    * Bitunix Futures (Task 07).
-   * live=true beschreibt die technische Fähigkeit des Adapters (Order-
-   * Serialisierung, Signing) — NICHT die Freigabe. Factory + placeOrder
-   * werfen bis task-11 immer LiveTradingGateError.
+   * live=true beschreibt die FÄHIGKEIT des Adapters (Order-Serialisierung,
+   * Signing) — NICHT die Freigabe. Die Freigabe entscheidet allein der
+   * Live-Gate-Zustand (liveGate.state) + Control Plane; Factory + Live-Pfad
+   * werfen ohne bestandene Prüfung LiveTradingGateError. Der Live-Pfad nutzt
+   * nach Freigabe die BrokerExecutionEngine (Private-API), nie das Paper-Ledger
+   * (src/brokers/bitunix/execution.ts).
    * testnet=false: die offizielle Futures-Doku weist kein Testnet aus.
    * paper=true: lokale Simulation gegen echte Bitunix-Kurse (Modus B).
    */

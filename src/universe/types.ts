@@ -100,7 +100,23 @@ export interface MarketInstrument {
   shortAvailable: boolean;
   /** Im Paper-Modus handelbar (Kurse/Simulation vorhanden)? */
   paperAvailable: boolean;
-  /** Live handelbar (nur Fähigkeitsangabe — dieser Task aktiviert nichts). */
+  /**
+   * Live handelbar an dieser Venue (reine FÄHIGKEITS-Angabe des Instruments —
+   * das Instrument ist beim Broker für reale Orders zulässig). BEWUSST getrennt von:
+   *   - `adapterCapabilities.live`  (Broker-Adapter kann Live-Orders serialisieren)
+   *   - `venueControl.liveEnabled`  (globale Freigabe durch die Control Plane)
+   *   - `liveGate.state`            (persistierter Gate-Zustand, öffnet erst die Ausführung)
+   * `liveTradable=true` bedeutet NICHT, dass Live-Orders aktuell erlaubt sind.
+   */
+  liveTradable: boolean;
+  /**
+   * @deprecated Mehrdeutig (Fähigkeit vs. Freigabe). Behalte Feld für
+   * Abwärtskompatibilität; neue Verwendungen sollen `liveTradable` nutzen.
+   * Gibt NICHT an, ob Live-Trading freigegeben ist (das entscheidet `liveGate.state`
+   * + `venueControl.liveEnabled`), sondern nur, ob das Instrument grundsätzlich
+   * live-gehandelt werden kann. Wird von der Normalisierung aus `liveTradable`
+   * (bzw. Eingabe) synchron gehalten.
+   */
   liveAvailable: boolean;
   /** 24-h-Volumen in Quote-Währung; `null` bis ein späterer Task es füllt. */
   volume24h: number | null;
@@ -130,6 +146,7 @@ export const INSTRUMENT_FIELDS: readonly (keyof MarketInstrument)[] = [
   "leverageAvailable",
   "shortAvailable",
   "paperAvailable",
+  "liveTradable",
   "liveAvailable",
   "volume24h",
   "spread",
@@ -194,7 +211,9 @@ export interface InstrumentQuery {
   status?: InstrumentStatus | InstrumentStatus[];
   /** Nur Instrumente mit `paperAvailable === true|false`. */
   paperAvailable?: boolean;
-  /** Nur Instrumente mit `liveAvailable === true|false`. */
+  /** Nur Instrumente mit `liveTradable === true|false` (Fähigkeit am Broker). */
+  liveTradable?: boolean;
+  /** Nur Instrumente mit `liveAvailable === true|false` (Kompatibilitäts-Spiegel). */
   liveAvailable?: boolean;
   /** Nur Instrumente mit Hebel-Verfügbarkeit. */
   leverageAvailable?: boolean;

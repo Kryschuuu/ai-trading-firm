@@ -420,8 +420,14 @@ function reject(order: Order, reason: string): Fill {
  *                       diesem Repo kann Paper-Ausführung tatsächlich betreiben.
  *   `liveAvailable`   = PROJEKTION der Adapter-Capabilities: Der Adapter kann
  *                       technisch Live-Ausführung betreiben. (Selbst wenn
- *                       einmal true: Die Factory sperrt `live` bis zum
- *                       Live-Trading-Gate-Task — Capability ≠ Freigabe.)
+ *                       einmal true: Die Factory sperrt `live` bis zur
+ *                       bestandenen Live-Gate-Prüfung — Capability ≠ Freigabe.)
+ *
+ *   Vier getrennte Live-Konzepte (v1.20.0, docs/BROKER_ARCHITECTURE.md §3.1):
+ *     - adapterCapabilities.live       (dieses Feld: Adapter kann Live senden)
+ *     - MarketInstrument.liveTradable  (Instrument beim Broker live-handelbar)
+ *     - venueControl.liveEnabled       (Venue aktuell aktiv)
+ *     - liveGate.state                 (öffnet erst die Live-Ausführung)
  *
  * Single Source of Truth = Adapter-Capabilities (src/brokers/capabilities.ts);
  * die Registry ist nur eine Projektion davon. Der Test in

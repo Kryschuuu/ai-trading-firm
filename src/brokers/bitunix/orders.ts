@@ -6,8 +6,10 @@
  * `POST /api/v1/futures/trade/place_order`-Aufruf. Ein nur lokaler Monitor
  * würde bei Netzausfall/Liquidation nicht greifen.
  *
- * Dieses Modul sendet NICHTS — es serialisiert nur. Der Live-Pfad darf
- * das Ergebnis nicht absetzen (Gate).
+ * Dieses Modul sendet NICHTS — es serialisiert nur. Im Live-Pfad wird das
+ * Ergebnis von der `BrokerExecutionEngine` nach bestandener Live-Gate-Prüfung
+ * über `BitunixPrivateClient.placeSerializedOrder` abgesetzt (v1.20.0); der
+ * Paper-Pfad serialisiert nicht (keine Private-API).
  */
 import type { BrokerOrderRequest } from "../../contracts/broker";
 import type { BitunixPlaceOrderBody } from "./types";

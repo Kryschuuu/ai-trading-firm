@@ -30,5 +30,7 @@ export { BitunixPublicWs, klineChannel, backoffMs } from "./ws";
 export { BitunixPublicClient, mapTicker, mapInterval } from "./publicClient";
 export { BitunixPrivateClient } from "./privateClient";
 export { BitunixPaperLedger } from "./paper";
+export { PaperExecutionEngine, BrokerExecutionEngine } from "./execution";
+export type { ExecutionPort, MarkPriceFn } from "./execution";
 export { BitunixHttp, TokenBucket, assertUrlAllowed } from "./http";
 export { recordBitunixPrivateCall, readBitunixPrivateAudit, clearBitunixPrivateAuditForTests } from "./audit";

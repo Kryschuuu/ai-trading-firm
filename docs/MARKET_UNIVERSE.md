@@ -22,7 +22,7 @@ Drei Prinzipien, die den Rest der Umbau-Serie tragen:
 | Prinzip | Bedeutung |
 | --- | --- |
 | **Symbol ≠ Markt** | `BTC` ist ein Asset. `BINANCE:BTCUSDT` (Spot), `KRAKEN:BTC/USD` (Spot) und `BITUNIX:BTCUSDT` (Perpetual) sind **drei Instrumente** mit **einem** ökonomischen Underlying (`BTC`). |
-| **Broker-Unabhängigkeit** | Der Kern kennt kein Broker-SDK, keine Venue-Sonderlogik, keine Credentials — nur das Schema unten und Capability-Flags (`paperAvailable`, `liveAvailable`, `leverageAvailable`, `shortAvailable`). |
+| **Broker-Unabhängigkeit** | Der Kern kennt kein Broker-SDK, keine Venue-Sonderlogik, keine Credentials — nur das Schema unten und Capability-Flags (`paperAvailable`, `liveTradable`, `liveAvailable`, `leverageAvailable`, `shortAvailable`). |
 | **Determinismus** | Kein LLM, kein Netzwerk-Call, keine Zufallswerte im Kernlayer. Gleiche Eingabe ⇒ gleiche Datei, stabile Sortierung nach `id`. |
 
 ### Abgrenzung — was dieser Task *nicht* tut
@@ -77,7 +77,8 @@ in der Persistenz.
 | 13 | `leverageAvailable` | `boolean` | Hebel an dieser Venue für dieses Instrument verfügbar. |
 | 14 | `shortAvailable` | `boolean` | Short-Verkauf möglich. |
 | 15 | `paperAvailable` | `boolean` | Im Paper-Modus simulierbar (Kursquelle vorhanden). |
-| 16 | `liveAvailable` | `boolean` | Live handelbar — reine Fähigkeitsangabe, **kein** Freigabeschalter. |
+| 16 | `liveTradable` | `boolean` | Instrument ist beim Broker grundsätzlich live-handelbar (Fähigkeit). **Kein** Freigabeschalter — die Freigabe entscheidet `liveGate.state`/`venueControl`. |
+| 17 | `liveAvailable` | `boolean` | **Deprecated** Kompatibilitäts-Spiegel von `liveTradable`; nicht als Freigabe verwenden. |
 | 17 | `volume24h` | `number \| null` | 24-h-Volumen in Quote-Währung; `null` = unbekannt (nicht 0!). |
 | 18 | `spread` | `number \| null` | Relativer Spread (`0.0004` = 4 bp); `null` = unbekannt. |
 | 19 | `volatility` | `number \| null` | Annualisierte Volatilität als Dezimalanteil; `null` = unbekannt. |
@@ -124,9 +125,9 @@ optimistisch als 0 zu behandeln.
 ### 3.2 Filter und Pagination
 
 `venue`, `assetClass`, `marketType`, `status` (je Einzelwert oder Liste),
-`paperAvailable`, `liveAvailable`, `leverageAvailable`, `shortAvailable`,
-`base`, `quote`, `underlying`, `minVolume24h`, `maxSpread`, `maxVolatility`,
-`search` (Teilstring auf der ID, **kein** Regex).
+`paperAvailable`, `liveTradable`, `liveAvailable`, `leverageAvailable`,
+`shortAvailable`, `base`, `quote`, `underlying`, `minVolume24h`, `maxSpread`,
+`maxVolatility`, `search` (Teilstring auf der ID, **kein** Regex).
 
 Pagination: `page` (1-basiert, ≥ 1) und `pageSize` (1…**500**, Default 100).
 Überschreitungen werden **geklemmt**, nicht abgelehnt — ein zu großer Wert soll
@@ -157,7 +158,7 @@ Verzeichnis überschreibbar via `UNIVERSE_DATA_DIR` (absolut oder relativ zum Pr
 | base/quote | 1) FX-Suffix `=X` (`EURUSD=X` → EUR/USD) → 2) expliziter Trenner (`BTC/USD`, `BTC-USD`, `EUR.USD`; `-PERP`/`-SWAP` → Quote `USD`) → 3) bekanntes Quote-Suffix (`BTCUSDT` → BTC/USDT) → 4) kein Paar (`SPY`, `BRK.B`). |
 | `assetClass` | FX-Suffix oder Fiat/Fiat → `fx`; Krypto-Quote (`USDT/USDC/TUSD/FDUSD/BUSD/BTC/ETH`) oder Nicht-Fiat-Basis gegen `USD` → `crypto`; sonst `equity`. Explizite Angabe schlägt jede Ableitung. |
 | `marketType` | Venue `DYDX` oder `BITUNIX` oder Symbol-Suffix `-PERP`/`-SWAP` → `perpetual`, sonst `spot`. Explizite Angabe schlägt die Ableitung. |
-| Defaults | Konservativ: `status: active`, `paperAvailable: true`, `liveAvailable: false`, `leverageAvailable: false`, `shortAvailable: false`, Metriken `null`. |
+| Defaults | Konservativ: `status: active`, `paperAvailable: true`, `liveTradable: false`, `liveAvailable: false` (Spiegel), `leverageAvailable: false`, `shortAvailable: false`, Metriken `null`. |
 
 ### 4.1 Ausschluss-Policy
 
@@ -227,7 +228,7 @@ Query-Parameter (alle optional, UND-verknüpft, Mehrfachwerte kommasepariert):
 | `assetClass` | `crypto`, `equity`, `etf`, `fx`, `commodity`, `index`, `other` |
 | `marketType` | `spot`, `perpetual`, `future`, `option`, `cfd` |
 | `status` | `active`, `halted`, `delisted`, `preview` |
-| `paperAvailable`, `liveAvailable`, `leverageAvailable`, `shortAvailable` | `true` \| `false` |
+| `paperAvailable`, `liveTradable`, `liveAvailable`, `leverageAvailable`, `shortAvailable` | `true` \| `false` |
 | `base`, `quote`, `underlying` | Ticker (`^[A-Z0-9]{1,12}$`) |
 | `minVolume24h`, `maxSpread`, `maxVolatility` | Zahl ≥ 0 |
 | `q` | Teilstring auf der ID, max. 64 Zeichen |

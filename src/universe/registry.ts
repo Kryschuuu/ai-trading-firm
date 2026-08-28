@@ -278,6 +278,7 @@ export class InstrumentRegistry {
       if (types && !types.includes(i.marketType)) continue;
       if (statuses && !statuses.includes(i.status)) continue;
       if (q.paperAvailable !== undefined && i.paperAvailable !== q.paperAvailable) continue;
+      if (q.liveTradable !== undefined && i.liveTradable !== q.liveTradable) continue;
       if (q.liveAvailable !== undefined && i.liveAvailable !== q.liveAvailable) continue;
       if (q.leverageAvailable !== undefined && i.leverageAvailable !== q.leverageAvailable) continue;
       if (q.shortAvailable !== undefined && i.shortAvailable !== q.shortAvailable) continue;

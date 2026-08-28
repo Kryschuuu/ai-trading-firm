@@ -37,6 +37,7 @@ export function instrument(overrides: Partial<MarketInstrument> = {}): MarketIns
     leverageAvailable: false,
     shortAvailable: false,
     paperAvailable: true,
+    liveTradable: false,
     liveAvailable: false,
     volume24h: 1_000_000_000,
     spread: 0.0002,

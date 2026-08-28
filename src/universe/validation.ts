@@ -194,6 +194,7 @@ export function validateInstrument(raw: unknown): MarketInstrument {
     leverageAvailable: requireBoolean("leverageAvailable", o.leverageAvailable),
     shortAvailable: requireBoolean("shortAvailable", o.shortAvailable),
     paperAvailable: requireBoolean("paperAvailable", o.paperAvailable),
+    liveTradable: requireBoolean("liveTradable", o.liveTradable),
     liveAvailable: requireBoolean("liveAvailable", o.liveAvailable),
     volume24h: optionalMetric("volume24h", o.volume24h),
     spread: optionalMetric("spread", o.spread, 1),
