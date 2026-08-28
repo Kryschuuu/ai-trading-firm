@@ -11,6 +11,7 @@
  * Endpunkt fuer nicht implementierte Venues mit
  * 422 DISCOVERY_NOT_IMPLEMENTED ab (ehrlich statt Fake).
  */
+import { actorAuditId } from "@/auth";
 import { getControlPlaneService } from "@/brokers/control-plane/service";
 import { guardCredentialEndpoint } from "@/brokers/control-plane/guard";
 import { mapControlPlaneError } from "@/brokers/control-plane/http";

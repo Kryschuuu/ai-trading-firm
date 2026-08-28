@@ -38,7 +38,7 @@ export const ADMIN_TOKEN_FLAG = "FIRM_ADMIN_TOKEN";
 /** Fester CSRF-Wert im Offen-Betrieb (kein Token konfiguriert). */
 export const CSRF_LOCAL_VALUE = "local";
 
-/** Header fuer den minimalen Admin-Guard (TODO(task-10): zentrale RBAC). */
+/** Header fuer den Admin-Token (RBAC-Kern: src/auth, Task 10). */
 export const ADMIN_HEADER = "x-admin-token";
 export const CSRF_HEADER = "x-csrf-token";
 

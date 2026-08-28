@@ -1,13 +1,13 @@
 /**
- * Fetch-Wrapper für das Browser-Dashboard: hängt den API-Token an mutierende
- * Requests, wenn er in localStorage liegt (FIRM_API_TOKEN-Betrieb, siehe
- * src/lib/apiAuth.ts). Von FirmDashboard und allen Workshop-Panels geteilt.
+ * Fetch-Wrapper für das Browser-Dashboard: hängt den API-Token an Requests,
+ * wenn er in localStorage liegt (RBAC: x-firm-token, siehe src/auth).
+ * Von FirmDashboard, Workshop und Operations Center geteilt.
  */
 export function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
   const token =
     typeof window !== "undefined" ? window.localStorage.getItem("firmToken") ?? "" : "";
   const headers = new Headers(opts.headers ?? {});
-  if (token && ["POST", "PUT", "DELETE"].includes((opts.method ?? "GET").toUpperCase())) {
+  if (token) {
     headers.set("x-firm-token", token);
   }
   return fetch(url, { ...opts, headers });

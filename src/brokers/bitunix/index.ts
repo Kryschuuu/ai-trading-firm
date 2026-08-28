@@ -18,7 +18,12 @@ export { mapTradingPair, mapTradingPairs } from "./mapping";
 export { serializePlaceOrder, serializePlaceOrderJson, OrderSerializationError } from "./orders";
 export { snapshotLiveGate, assertLiveOrderAllowed, assertBitunixEnabled } from "./gates";
 export { loadBitunixConfig, BITUNIX_PATHS, BITUNIX_REST_HOST } from "./config";
-export { EnvSecretStore, loadBitunixCredentials, type SecretStore } from "./secrets";
+export {
+  EnvSecretStore,
+  createDefaultBitunixSecretStore,
+  loadBitunixCredentials,
+  type SecretStore,
+} from "./secrets";
 export { redactBitunix, createBitunixLogger, safeErrorMessage } from "./redactor";
 export { BitunixApiError, BitunixDisabledError, classifyBitunixFailure, safeSnippet } from "./errors";
 export { BitunixPublicWs, klineChannel, backoffMs } from "./ws";

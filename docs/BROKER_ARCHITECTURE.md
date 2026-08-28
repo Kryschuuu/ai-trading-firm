@@ -195,7 +195,7 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
   `save|test|discover|disable`, Missbrauch → 409/422.
   **Live bleibt immer off** — `liveEnabled` kommt ausschließlich aus der
   Gate-Service-Meldung (`readGateState()`), bis task-11 hart `false`.
-- **Sicherheit:** Admin-Guard (RBAC-Platzhalter, TODO(task-10)), CSRF
+- **Sicherheit:** RBAC (`src/auth`, Permission `broker.credentials`), CSRF
   (`x-csrf-token`), Credential-Rate-Limit (5/min/IP), Audit je Ereignis
   (`BROKER_CONTROL_PLANE`), Response-/Bundle-Secret-Scanner in CI.
 
@@ -205,7 +205,7 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
 | --- | --- |
 | Adapter-Ausbau (03+) | Venue-Adapter ersetzen die Stubs: Discovery (TODO(task-02/07)), Marktdaten, Trading; Capabilities schrittweise auf true — Gating/Factory/Audit bleiben unverändert |
 | Control Plane (Task 08) | **umgesetzt:** Credential-Manager + verschlüsselter Secret-Store + „Brokers & Venues"-UI; Live bleibt LGTE. Doku: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md) |
-| RBAC-Zentralisierung (Task 10) | Session-/Rollensystem ersetzt den minimalen Admin-Guard der Control Plane (`TODO(task-10)` in `src/brokers/control-plane/guard.ts`) |
+| RBAC-Zentralisierung (Task 10) | **Phase 1 umgesetzt:** Kern in `src/auth/` (viewer/operator/admin). Control-Plane-Guard ist Fassade über `requirePermission("broker.credentials")`. Sessions = spätere Phase. |
 | Live-Trading-Gate | State-Machine + Hard-Gates; öffnet `mode="live"` **erst** nach Freigabe; `LiveTradingGateError` wird dann durch die Gate-Prüfung ersetzt; ab dann liefert `readGateState()` der Control Plane die echte Live-Anzeige |
 | Bitunix-Adapter (Task 07) | **umgesetzt:** `src/brokers/bitunix/`, `stopAtVenue: true`, Paper-Modus B; Live bleibt LGTE bis task-11. Doku: [BITUNIX.md](BITUNIX.md) |
 

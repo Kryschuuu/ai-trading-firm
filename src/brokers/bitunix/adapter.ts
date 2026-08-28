@@ -34,7 +34,7 @@ import { BitunixPublicClient } from "./publicClient";
 import { BitunixPrivateClient } from "./privateClient";
 import { BitunixPaperLedger } from "./paper";
 import { serializePlaceOrder } from "./orders";
-import { EnvSecretStore, loadBitunixCredentials, type SecretStore } from "./secrets";
+import { createDefaultBitunixSecretStore, loadBitunixCredentials, type SecretStore } from "./secrets";
 import { createBitunixLogger, type BitunixLogger } from "./redactor";
 import { BitunixPublicWs } from "./ws";
 import type { BitunixCredentialStatus } from "./types";
@@ -74,7 +74,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     this.mode = mode;
     this.env = deps.env ?? process.env;
     this.cfg = deps.config ?? loadBitunixConfig(this.env);
-    this.secrets = deps.secretStore ?? new EnvSecretStore(this.env);
+    this.secrets = deps.secretStore ?? createDefaultBitunixSecretStore(this.env);
     this.logger = deps.logger ?? createBitunixLogger(asyncSecrets(this.secrets));
     this.public =
       deps.publicClient ??

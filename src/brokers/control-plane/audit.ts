@@ -10,9 +10,9 @@
  *   2. `audit_log` (Event `BROKER_CONTROL_PLANE`) — best-effort; ein
  *      DB-Ausfall bricht den Control-Plane-Pfad NIE ab (Fail-Safe).
  *
- * actor: es existiert noch kein Session-/Rollensystem → konstant "admin"
- * (minimaler Admin-Guard, siehe src/brokers/control-plane/guard.ts).
- * TODO(task-10): echte Actor-ID/Rolle aus dem zentralen RBAC-System.
+ * actor: Audit-ID aus dem RBAC-Kern (`src/auth`, Task 10) —
+ * local-open und Admin-Token → "admin", Operator → "operator",
+ * Viewer → "viewer". Niemals Token-Werte.
  */
 export type ControlPlaneAction =
   | "credential.saved"

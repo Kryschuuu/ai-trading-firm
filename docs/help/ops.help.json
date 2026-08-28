@@ -1,0 +1,35 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "ops",
+  "version": 1,
+  "title": "Operations Center & RBAC — Feldhilfe",
+  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und dem leeren Operations-Center-Tab (Task 10, Phase 1) im 3-Ebenen-Schema.",
+  "source": "src/auth/",
+  "fields": {
+    "role.viewer": {
+      "kurzinfo": "Viewer darf den Status lesen, nichts schreiben.",
+      "technischeInfo": "Permissions: firm.read, ops.view, broker.status, routing.read. Token: FIRM_VIEWER_TOKEN → x-viewer-token.",
+      "risiko": "Ein Viewer mit Schreibzugriff wäre ein RBAC-Bruch — GET-Routen bleiben bewusst tokenfrei, Mutationen nicht."
+    },
+    "role.operator": {
+      "kurzinfo": "Operator darf Pipeline, Kill-Switch und Config, aber keine Broker-Secrets.",
+      "technischeInfo": "Zusätzlich firm.write/kill/config und broker.test. Token: FIRM_API_TOKEN. Ohne FIRM_ADMIN_TOKEN erbt der Operator Admin-Rechte (Single-Admin).",
+      "risiko": "Elevation ist Absicht für den Solo-Betrieb. Sobald ein Admin-Token existiert, verliert der Operator broker.credentials und routing.modes.write."
+    },
+    "role.admin": {
+      "kurzinfo": "Admin verwaltet Credentials und Routing-Modi.",
+      "technischeInfo": "Alle Operator-Rechte plus broker.credentials und routing.modes.write. Token: FIRM_ADMIN_TOKEN. Local-open (kein Token) gilt als Admin.",
+      "risiko": "Admin ist nicht Live-Freigabe. live.gate bleibt leer bis Task 11."
+    },
+    "live.gate": {
+      "kurzinfo": "Permission, die niemand hat — Live bleibt gesperrt.",
+      "technischeInfo": "Katalogeintrag ohne Rollenzuweisung. requirePermission('live.gate') liefert immer 403. GET /api/ops.liveEnabled ist hart false.",
+      "risiko": "Eine Rolle mit live.gate vor Task 11 wäre ein Incident. Der Architekturtest prüft die Matrix."
+    },
+    "ops.modules": {
+      "kurzinfo": "Karten im Operations Center: bereit, Phase 3 oder gesperrt.",
+      "technischeInfo": "GET /api/ops liefert die Hülle ohne Widget-Daten. Tab brokers ist 'ready' und verlinkt den bestehenden Control-Plane-Tab.",
+      "risiko": "Die Hülle aggregiert keine Secrets. Phase-3-Kacheln bleiben read-only GETs."
+    }
+  }
+}

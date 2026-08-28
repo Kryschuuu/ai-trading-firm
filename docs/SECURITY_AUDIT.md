@@ -560,7 +560,7 @@ Red-Team-Checkliste + Scanner-Ergebnis.
 
 | ID | Severity | Datei | Problem | Status |
 | --- | --- | --- | --- | --- |
-| CP-01 | Info | `guard.ts` | RBAC-Platzhalter (Token, kein Rollenmodell) | ✅ `TODO(task-10)` markiert + in Docs |
+| CP-01 | Info | `guard.ts` | RBAC-Platzhalter (Token, kein Rollenmodell) | ✅ Task 10: Fassade über `src/auth` (`broker.credentials`) |
 | CP-02 | Info | `probe.ts` | Mock-API-Client für nicht implementierte Adapter | ✅ Unabhängigkeitsklausel; PAPER real; Doku |
 | CP-03 | Info | `secretStore.ts` | Env-Key statt KMS | ✅ KMS-Hook vorbereitet; fail-closed bei Endpoint |
 | CP-04 | Info | `guard.ts` | Rate-Limit in-memory (Single-Node) | ✅ konsistent mit Bestands-Limiter; 0 = aus dokumentiert |
@@ -638,3 +638,46 @@ Model + Red-Team-Checkliste + Coverage-Nachweis.
 Fazit: **kein High/Critical-Befund.** Die drei Governance-Ziele sind erreicht und
 messbar belegt: kein Agenten-Selbstwechsel, keine Injection-basierte Eskalation,
 keine ungedeckelte Cloud-Nutzung.
+
+---
+
+## Security Audit — Task 10 (Operations Center + RBAC, v1.18.0, Phase 1)
+
+**Stand:** 2026-08-28 · **Modul:** `src/auth/` ·
+**API:** neu `GET /api/auth/me`, `GET /api/ops` ·
+**UI:** Dashboard-Tab Operations Center (Hülle).
+**Status:** ERHÖHT (Rollen, Token-Mapping) — Threat Model + Checkliste.
+
+### Threat Model
+
+| # | Bedrohung | Angriffsweg | Gegenmaßnahme | Restrisiko |
+| --- | --- | --- | --- | --- |
+| T1 | Operator schreibt Broker-Secrets | x-firm-token gegen Credential-API | `broker.credentials` nur Admin; wenn Admin-Token gesetzt, Operator → 403 | Single-Admin (kein Admin-Token) erbt bewusst |
+| T2 | Viewer mutiert | Viewer-Token auf POST | Viewer-Permissions ohne write; Firm-Routen weiter `guardWrite` (Operator-Token) | Firm-APIs noch nicht auf RBAC umgestellt (Phase 4) |
+| T3 | Token-Echo | `/api/auth/me` / `/api/ops` | PublicActor ohne Token-Werte; Secret-Scanner in Tests | None |
+| T4 | Live-Freigabe über Rolle | Permission `live.gate` | In keiner Rolle; `requirePermission("live.gate")` immer 403; `/api/ops.liveEnabled` hart false | None bis Task 11 |
+| T5 | Timing-Oracle | Token-Vergleich | `tokenEquals` (Längen-Padding, timing-safe) | None |
+| T6 | CSRF | Cross-Site gegen Credentials | unverändert: `x-csrf-token` Pflicht | Offen-Betrieb akzeptiert `local` (Single-User) |
+
+### Checkliste
+
+| Kriterium | Status | Nachweis |
+| --- | :---: | --- |
+| **Kein live.gate** | ✅ | Matrix-Test + `liveGateGranted` |
+| **401/403-Kompatibilität** | ✅ | Bestand `tests/controlPlane.api.test.ts` |
+| **Kein Token in Responses** | ✅ | `tests/ops.api.test.ts` Secret-Scanner |
+| **GET ohne Token ladbar** | ✅ | `/api/ops` 200 im Offen-Betrieb |
+| **Architecture-Tab ohne Framework-Essay** | ✅ | `tests/task10.architecture.test.ts` |
+| **Bitunix-Store an Control Plane** | ✅ | Default `createDefaultBitunixSecretStore`, Env-Fallback |
+
+### Befunde
+
+| ID | Severity | Datei | Problem | Status |
+| --- | --- | --- | --- | --- |
+| RB-01 | Info | `src/lib/apiAuth.ts` | Firm-Schreib-APIs noch `FIRM_API_TOKEN` statt Permission-Guard | ✅ Phase 4; Operator-Token bleibt wirksam |
+| RB-02 | Info | `src/auth/resolve.ts` | Keine Sessions | ✅ Phase 4 |
+| CP-01 | Info | `guard.ts` | war RBAC-Platzhalter | ✅ behoben: Fassade über `src/auth` |
+| RT-04 | Info | `routing/modes` | war Token-Platzhalter | ✅ derselbe Admin-Guard, jetzt RBAC |
+
+Fazit: **kein High/Critical-Befund.** Phase 1 verschiebt die Trust-Grenze nicht:
+Live bleibt zu, Secrets bleiben im Store, neue Endpunkte sind lesend und leak-frei.

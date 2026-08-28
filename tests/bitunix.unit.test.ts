@@ -20,7 +20,7 @@ import { assertBitunixEnabled, assertLiveOrderAllowed, snapshotLiveGate } from "
 import { BitunixDisabledError, classifyBitunixFailure, safeSnippet } from "../src/brokers/bitunix/errors";
 import { createBitunixLogger, redactBitunix, safeErrorMessage } from "../src/brokers/bitunix/redactor";
 import { loadBitunixConfig } from "../src/brokers/bitunix/config";
-import { EnvSecretStore, loadBitunixCredentials } from "../src/brokers/bitunix/secrets";
+import { EnvSecretStore, createDefaultBitunixSecretStore, loadBitunixCredentials } from "../src/brokers/bitunix/secrets";
 import { BitunixPaperLedger } from "../src/brokers/bitunix/paper";
 import { LiveTradingGateError } from "../src/contracts/broker";
 import { BITUNIX_DEFAULT_MAKER_FEE, BITUNIX_DEFAULT_TAKER_FEE } from "../src/brokers/bitunix/config";
@@ -329,6 +329,24 @@ test("Secrets: Env-Fallback, nie Throw mit Klartext", async () => {
   assert.equal(missing, null);
   const empty = await loadBitunixCredentials(new EnvSecretStore({ BITUNIX_API_KEY: " ", BITUNIX_API_SECRET: "x" }));
   assert.equal(empty, null);
+});
+
+test("Secrets: Default-Store ohne SECRET_STORE_KEY fällt auf Env zurück", async () => {
+  const prev = process.env.SECRET_STORE_KEY;
+  delete process.env.SECRET_STORE_KEY;
+  try {
+    const store = createDefaultBitunixSecretStore({
+      BITUNIX_API_KEY: "env-key-abcdef01234567",
+      BITUNIX_API_SECRET: "env-secret-abcdef0123",
+    });
+    const creds = await loadBitunixCredentials(store);
+    assert.deepEqual(creds, {
+      apiKey: "env-key-abcdef01234567",
+      apiSecret: "env-secret-abcdef0123",
+    });
+  } finally {
+    if (prev !== undefined) process.env.SECRET_STORE_KEY = prev;
+  }
 });
 
 test("Mapping: base/quote-Inferenz aus Suffix, Fees-Default, Precision-Fallback", () => {

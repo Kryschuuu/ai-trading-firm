@@ -7,7 +7,8 @@
  *
  * SICHERHEIT (Regel 2 + 4):
  *   - `PUT` ist eine Policy-Änderung ⇒ **nur Admin**: `checkAdminGuard()`
- *     (`x-admin-token`, timing-safe) + CSRF (`x-csrf-token`).
+ *     (RBAC `routing.modes.write` / `broker.credentials`-äquivalent über
+ *     den Admin-Guard, timing-safe) + CSRF (`x-csrf-token`).
  *   - Jede Änderung wird auditiert (`MODEL_ROUTING`, outcome `admin`,
  *     from `mode:<alt>` → to `mode:<neu>`, inkl. Actor).
  *   - Unbekannte Modi werden mit 422 abgewiesen; gültige Einträge derselben
