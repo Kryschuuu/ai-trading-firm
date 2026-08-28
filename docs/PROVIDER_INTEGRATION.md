@@ -4,6 +4,12 @@ Die Agenten der Trading-Firma sprechen **nicht** direkt mit einem Modellserver,
 sondern mit einer abstrakten Schnittstelle (`src/lib/llmProvider.ts`). Darunter
 liegen vier austauschbare Provider-Adapter — Wechsel ist reine `.env`-Konfiguration.
 
+> **WICHTIG (seit v1.17.0, Task 09):** Die *Modellwahl* treffen die Agenten **nicht**
+> selbst. Sie läuft über den **MODEL_ROUTER** (`src/routing/**`), einer Systemrolle
+> mit versionierter Policy, Budget-Deckeln und Audit-Pflicht. Details:
+> **[LLM_ROUTING.md](LLM_ROUTING.md)**. Dieses Dokument beschreibt die
+> Transportschicht darunter — Provider, Registry-Felder, Health, Budgets, Kosten.
+
 ```
 Agent (engine.ts)                Standardisierter Call               Adapter
 ┌──────────────┐   LlmChatRequest   ┌───────────────────────┐
@@ -107,13 +113,59 @@ laufende Tarife prüfen; die Werte sind keine Abrechnung.
 Token-Verbrauch und Kosten je Agenten-Aufruf werden in `agent_messages.meta`
 (`usage`, `costUsd`) und Audit-Log (`AGENT_DECISION`) protokolliert.
 
+## 4b. Provider-Registry, Health und Budget (Task 09)
+
+Seit v1.17.0 führt `src/routing/registry.ts` eine **Provider-Registry** mit
+Laufzeitzustand. Der Router trifft seine Entscheidungen ausschliesslich auf diesen
+Karten — Provider-Details (URLs, Keys, Modell-Tags) bleiben in
+`src/lib/llmProvider.ts`.
+
+```ts
+type ProviderDescriptor = {
+  id: "ollama" | "openai" | "gemini" | "anthropic";
+  label: string;
+  deployment: "local" | "cloud";
+  models: string[];              // Ollama: live vom Server (/api/tags)
+  defaultModel: string;
+  capabilities: ("chat"|"json"|"schema"|"long-context"|"tools"|"vision"|"embedding")[];
+  contextSize: number;           // Ollama: /api/show → model_info.context_length
+  costPer1kIn: number;           // USD je 1k Input-Tokens (lokal: 0)
+  costPer1kOut: number;          // USD je 1k Output-Tokens (lokal: 0)
+  healthStatus: "online" | "degraded" | "offline";
+  latencyEma: number;            // geglättete Antwortzeit (EMA, ms)
+  tokenBudgetToday: number;      // Tages-Deckel in Tokens
+  tokensUsedToday: number;       // Verbrauch heute
+  quotaRest: number;             // Restkontingent des Anbieters in % (0–100)
+  lastCheckedAt?: string; error?: string;   // Fehlertext ist redigiert, nie Keys
+};
+```
+
+| Aspekt | Umsetzung |
+| --- | --- |
+| **Health-Poller** | Intervall `policy.healthPollerIntervalMs` (Default 60 s, `ROUTING_HEALTH_POLL_MS`, `0` = aus); Timer ist `unref()`ed; Fehler brechen nie den Routing-Pfad |
+| **Prüfumfang** | `ROUTING_HEALTH_PROBE=local` (Default): nur lokale Provider remote; Cloud gilt mit Key als nutzbar. `=all` prüft auch Cloud (read-only Modellliste), `=off` prüft nichts |
+| **Timeout** | `ROUTING_HEALTH_TIMEOUT_MS` (Default 1500 ms) je Prüfung |
+| **Ollama-Sonderfall** | Modellliste **und** Kontextgrösse werden gelesen (`/api/tags`, `/api/show`) |
+| **Budget** | `tokenBudgetToday` (Deckel) vs. `tokensUsedToday`; `quotaRest` leitet sich ab. Erschöpfter Deckel ⇒ Zwangsrückstufung auf lokale Provider + Audit (`budget_blocked`) |
+| **Kosten** | `costPer1kIn/Out` aus `LLM_COST_*_PER_MTOK` (siehe Kapitel 4) |
+| **Tests** | `createFakeProviderRegistry()` — Health/Quota/Latenz/Timeout injizierbar, kein Netzwerk |
+
+Karten-Daten für das Operations Center: **`GET /api/providers`** (Status, Modell,
+Modelle, Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen).
+
 ## 5. Einen neuen Provider hinzufügen
 
-1. `LlmProviderName` um den Namen erweitern (`src/lib/llmProvider.ts`).
+1. `LlmProviderName` um den Namen erweitern (`src/lib/llmProvider.ts`) **und**
+   `ProviderId` in `src/routing/types.ts` (Router kennt sonst den Provider nicht).
 2. Adapter in `createLlmClient` implementieren — Pflicht: `chat()`, optional `listModels()`.
 3. Request-Builder + Response-Parser als **reine Funktionen** mit Unit-Tests.
 4. URL/Key in `providerConfigFromEnv` + `DEFAULT_BASE_URLS`/`API_KEY_ENV` registrieren.
-5. `.env.example` + diese Datei ergänzen; `tests/llmProvider.test.ts` erweitern.
+5. Startkarte in `buildProviderDescriptor()` (`src/routing/registry.ts`) ergänzen:
+   Kontextgrösse, Kosten, Capabilities, Default-Modell.
+6. Policy ergänzen: `classes.*.providers`, `budgets.providers.<id>` (**Cloud braucht
+   zwingend einen Deckel > 0**) und `fallbackChains`.
+7. `.env.example` + diese Datei ergänzen; `tests/llmProvider.test.ts` und
+   `tests/routing.registry.test.ts` erweitern.
 
 ## 6. Sicherheit
 
@@ -130,3 +182,10 @@ Token-Verbrauch und Kosten je Agenten-Aufruf werden in `agent_messages.meta`
   dort entscheidet der Agenten-Tag / die installierte Modellfamilie).
 * Retry-Zähler pro Aufruf begrenzt Kosten-Shock bei Ausfällen.
 * Logs/Health redaktieren Connection-Strings und Keys (`redactSecrets`).
+* **Budget-Deckel (v1.17.0):** Token-/Kostenbudgets je Provider, Agent und Tag
+  werden im Router durchgesetzt (`src/routing/budget.ts`). Cloud ist **immer**
+  gedeckelt — die Policy-Validierung lehnt Cloud-Provider ohne Deckel ab.
+* **Kein Agenten-Selbstwechsel (v1.17.0):** `MODEL_*`-Environment-Werte legen nur
+  noch Registry-Defaults fest; die Modellwahl je Aufgabe trifft ausschliesslich
+  der Router. Änderungen an Routing-Modi laufen über `PUT /api/routing/modes`
+  (Admin-Token + CSRF + Audit).
