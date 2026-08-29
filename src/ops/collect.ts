@@ -272,13 +272,33 @@ function collectMarketUniverse(): Draft {
 
 function collectScanner(): Draft {
   const scan = getScannerService().getScan();
-  const { funnel } = scan;
+  const { funnel, readiness } = scan;
   const top = funnel.daily.slice(0, MAX_SECTION_ITEMS);
+
+  // Readiness explizit ausweisen (OPS-009): trennt Infrastruktur (Warmup/Fehler)
+  // von Fachlogik. Der Sollwert wird aus der Faktor-Konfiguration abgeleitet.
+  const warmed = readiness.status === "ERROR" ? 0 : readiness.warmed;
+  const readinessTone: OpsTone =
+    readiness.status === "READY" ? "good" : readiness.status === "WARMING" ? "warn" : "bad";
+  const candlesValue =
+    readiness.status === "ERROR"
+      ? "Datenfehler"
+      : `${warmed} / ${readiness.instruments} · ${readiness.requiredCandles} Kerzen`;
+
   return {
     status: funnel.scanned > 0 ? (funnel.daily.length > 0 ? "ready" : "empty") : "empty",
     asOf: scan.asOf,
     metrics: [
       { label: "Gescannt", value: num(funnel.scanned, 0) },
+      { label: "Readiness", value: readiness.status, tone: readinessTone },
+      {
+        label: "Warmup (gewärmt / benötigt)",
+        value: candlesValue,
+        tone: readinessTone,
+        hint:
+          "Geladene vs. benoetigte Kerzen je Instrument. Der Sollwert wird aus der " +
+          "Faktor-Konfiguration abgeleitet und aendert sich automatisch mit ihr.",
+      },
       { label: "Eligible", value: num(funnel.eligible.length, 0) },
       { label: "Interesting", value: num(funnel.interesting.length, 0) },
       { label: "Daily-Rotation", value: num(funnel.daily.length, 0) },
@@ -293,11 +313,16 @@ function collectScanner(): Draft {
       tone: s.regime === "EXTREME" ? "bad" : s.regime === "HIGH" ? "warn" : "good",
     })),
     note:
-      funnel.diversificationRelaxed
-        ? "Diversifikationsregel gelockert — zu wenige Anlageklassen im Trichter."
-        : funnel.scanned > 0 && funnel.eligible.length === 0
-          ? "Trichter leer: keine Kerzenhistorie (data/history) oder die Eignungsfilter greifen."
-          : null,
+      readiness.status === "ERROR"
+        ? `Marktdaten-Fehler: ${readiness.error} (Infrastruktur, kein Marktausschluss).`
+        : readiness.status === "WARMING"
+          ? `Warmup unvollständig: ${readiness.missing} Instrument(e) < ${readiness.requiredCandles} Kerzen — ` +
+            "Behebung: npm run market-sync (Datenverfügbarkeit, kein Marktausschluss)."
+          : funnel.diversificationRelaxed
+            ? "Diversifikationsregel gelockert — zu wenige Anlageklassen im Trichter."
+            : funnel.scanned > 0 && funnel.eligible.length === 0
+              ? "Trichter leer: die Eignungsfilter greifen (Markt/Kosten), Historie ist vollständig geladen."
+              : null,
   };
 }
 

@@ -52,7 +52,7 @@ test("Service: loadAllInstruments liest die Registry seitenweise und stabil sort
 
 test("Service: historicalStoreProvider gruppiert Kerzen je Instrument und liefert den Benchmark", () => {
   const store = new HistoricalStore(historyDir);
-  const closes = growthSeries(100, 1.004, 40);
+  const closes = growthSeries(100, 1.004, 80);
   const candles = closes.map((close, i) => ({
     time: AS_OF_MS - (closes.length - 1 - i) * DAY_MS,
     open: close,
@@ -66,7 +66,7 @@ test("Service: historicalStoreProvider gruppiert Kerzen je Instrument und liefer
 
   const provider = service.historicalStoreProvider(store, "BINANCE:BTCUSDT");
   const btc = provider.candles({ id: "BINANCE:BTCUSDT" } as never);
-  assert.equal(btc.length, 40);
+  assert.equal(btc.length, 80);
   assert.deepEqual(
     btc.map((c) => c.time),
     [...btc.map((c) => c.time)].sort((a, b) => a - b),
@@ -74,7 +74,7 @@ test("Service: historicalStoreProvider gruppiert Kerzen je Instrument und liefer
   );
   assert.equal(provider.candles({ id: "BINANCE:UNBEKANNT" } as never).length, 0);
   assert.equal(provider.benchmarkCandles?.({ id: "BINANCE:BTCUSDT" } as never), null);
-  assert.equal(provider.benchmarkCandles?.({ id: "BINANCE:ETHUSDT" } as never)?.length, 40);
+  assert.equal(provider.benchmarkCandles?.({ id: "BINANCE:ETHUSDT" } as never)?.length, 80);
 });
 
 test("Service: Produktivpfad Registry + Store liefert ein vollständiges Scan-Ergebnis", () => {

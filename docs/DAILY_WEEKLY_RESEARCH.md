@@ -205,7 +205,7 @@ schrittweise um 1 erhöht; das Ergebnis trägt dann `diversificationRelaxed: tru
 | 2 | `paper-available` | `paperAvailable` = false | `requirePaperAvailable` |
 | 3 | `market-type` | Markttyp nicht erlaubt | `spot`, `perpetual`, `future` |
 | 4 | `asset-class` | Anlageklasse nicht erlaubt | 6 Klassen |
-| 5 | `min-candles` | zu wenig Historie | 30 |
+| 5 | `min-candles` | zu wenig Historie | abgeleitet aus Faktorsatz (Default 61) |
 | 6 | `min-volume` | `volume24h` zu klein/unbekannt | 1 000 000 |
 | 7 | `max-spread` | Spread zu breit/unbekannt | 0.005 |
 | 8 | `max-execution-cost` | Roundturn zu teuer | 0.006 |
@@ -217,6 +217,12 @@ Es gewinnt immer die **erste** greifende Regel; sie landet als
 aggregiert in `scan.rejectionsByRule` (`dataQuality` seit v1.25.2,
 nachgearbeitet zu PR #35). Unbekannte Werte führen zur Ablehnung
 (Ausnahme: Drawdown ohne Historie wird bereits von `min-candles` erfasst).
+
+Die `min-candles`-Schwelle wird **seit v1.25.3 (OPS-009)** aus dem Faktorsatz
+abgeleitet (`requiredWarmupCandles`, Default 61) statt hartcodiert; zusätzlich
+liefert der Scan einen expliziten Readiness-Zustand `READY | WARMING | ERROR`
+(`scan.readiness`, `scan.requiredCandles`). Details:
+`docs/MARKET_DATA_PIPELINE.md` §6.
 
 `dataQuality: true` markiert Ablehnungen wegen **nicht geladener Daten**
 (`min-candles`, `min-volume`, `max-spread`, `max-execution-cost`) — sie sind

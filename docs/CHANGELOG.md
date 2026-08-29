@@ -20,6 +20,84 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.25.3] — 2026-08-29 · Deterministischer Warmup-Bedarf + expliziter Scanner-Readiness-Zustand (OPS-009)
+
+**Fix (P1, CODE-REVIEW-SCANNER Kap. 6/21):** `filters.minCandles = 30` war
+inkonsistent zum konfigurierten Faktorsatz (EMA50 → 50 Kerzen,
+Momentum-Lookback 60 → 61 Kerzen). Instrumente passierten den `min-candles`-Filter
+mit 30 Kerzen, die Faktoren lieferten danach jedoch unvollständige bzw. implizit
+gepaddete Scores — ein **stiller Datenqualitätsfehler**, der Ranking und Routing
+verfälscht. Zusätzlich war „keine Historie geladen“ (Infrastruktur) nicht von
+„Markt ungeeignet“ (Fachlogik) unterscheidbar.
+
+### Added
+
+* **`src/scanner/warmup.ts`** — `requiredWarmupCandles(config)`: die **einzige**
+  Quelle der Warmup-Wahrheit, abgeleitet aus dem Faktorsatz
+  (`max(trend.slowPeriod, …momentum.lookbacks, drawdown.lookback,
+  volatility.lookback + 1, volumeRatio.basePeriods) + 1`, aktuell **61**). Kein
+  hartcodierter Wert — wer einen Lookback erhöht, erhöht automatisch den
+  Warmup-Bedarf. Zusätzlich auf `MAX_WARMUP_CANDLES = 1000` gedeckelt
+  (Security: kein Massen-Fetching bei fehlerhafter Config).
+* **`src/scanner/warmup.ts`** — `assessDataReadiness(...)`: **reine** Funktion
+  (kein I/O, keine Uhr, keine Mutation) mit den Regeln
+  `dataErrors ≠ ∅ → ERROR` (Infrastruktur schlägt Fachlogik), sonst
+  `warmed === instruments.length ? READY : WARMING`. `worstOffenders`
+  deterministisch sortiert (candles asc, dann instrumentId asc), auf 10
+  begrenzt.
+* **`src/scanner/readiness.ts`** — Typen `ScannerReadiness =
+  READY | WARMING | ERROR` (+ `ReadinessOffender`, `ReadinessFailure`).
+* **`ScanResult.readiness`** + **`ScanResult.requiredCandles`**: der Funnel wird
+  unverändert weiter berechnet (kein Routing-Verhalten geändert); Readiness ist
+  eine zusätzliche, getrennte Information. `scanUniverse` akzeptiert optional
+  `dataErrors` (aus MDERR-006).
+* Ops-Sektion Scanner (`src/ops/collect.ts`): neue Kennzahlen `Readiness` und
+  `Warmup (gewärmt / benötigt)` inkl. erklärendem Tooltip; Notiz unterscheidet
+  Warmup/Datenfehler von leerem Trichter.
+* CLI (`scripts/run-scan.ts`): meldet den Readiness-Zustand zuerst, inkl.
+  worstOffenders bzw. Datenfehler.
+* Tests: `tests/scanner.warmup.test.ts`, `tests/scanner.readiness.test.ts`
+  (Herleitung, Reaktion auf Config-Änderungen, Max-über-Faktoren, Grenzfälle
+  n = 61/60, ERROR-Dominanz, Determinismus/Kappung der worstOffenders, Purity
+  via `Object.freeze`, keine sensiblen Pfade), zusätzliche Config- und
+  Pipeline-/Snapshot-Tests.
+
+### Changed
+
+* **`filters.minCandles` ist jetzt optional.** Ohne expliziten Wert wird der
+  Warmup-Bedarf aus dem Faktorsatz abgeleitet
+  (`minCandles ?? requiredWarmupCandles(config)`). `scanner.config.json` und
+  `DEFAULT_SCANNER_CONFIG` setzen den Wert nicht mehr hart auf `30`.
+* **Config-Validierung** (`validateScannerConfig(raw, { strict?, onWarn? })`):
+  ein explizit gesetzter `minCandles < requiredWarmupCandles` erzeugt eine
+  **Warnung** (Strict-Modus: Fehler) mit Handlungsempfehlung, statt still
+  schwächere Regeln zu aktivieren. Lookbacks werden weiterhin auf positive
+  Ganzzahlen validiert (negative/NaN → Startup-Fehler).
+* **`checkEligibility(candidate, config)`** nimmt jetzt die vollständige
+  `ScannerConfig` (statt nur `FilterConfig`), um Schwellwert **und** erklärende
+  Message aus dem Faktorsatz abzuleiten. Die `min-candles`-Rejection nennt jetzt
+  die Herkunft des Schwellwerts und ist explizit als Datenverfügbarkeits-, kein
+  Marktqualitätsproblem markiert (`dataQuality: true` bleibt).
+
+### Security
+
+* `requiredWarmupCandles` ist auf `MAX_WARMUP_CANDLES = 1000` gedeckelt, damit
+  eine fehlerhafte Config keinen candleLimit-Massen-Fetch auslösen kann.
+* Faktor-Lookbacks werden auf `Number.isInteger` und positive Range geprüft.
+* Die Readiness-Ausgabe redigiert URLs und Pfade aus Fehlerbegründungen (keine
+  Hostnamen/Secrets).
+
+### Docs
+
+* `docs/MARKET_DATA_PIPELINE.md` Kap. 6 (Readiness) auf den abgeleiteten
+  Warmup-Bedarf und den `READY | WARMING | ERROR`-Zustand umgestellt; §8
+  Data-Quality-Tabelle aktualisiert.
+* `docs/DAILY_WEEKLY_RESEARCH.md` Filtertabelle: `min-candles`-Schwelle jetzt
+  „abgeleitet (61)“.
+* Doku-Stand auf 1.25.3 aktualisiert.
+
+---
+
 ## [1.25.2] — 2026-08-29 · Instrument-Enrichment: volume24h + Orderbook-Spread (PR #35 nachgearbeitet)
 
 **Nacharbeit zu FEHLER-3 (P0, CODE-REVIEW-SCANNER §4/§5):** Discovery

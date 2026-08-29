@@ -83,7 +83,7 @@
     },
     "funnelEligible": {
       "kurzinfo": "Erste Trichterstufe: alles, was die harten Eignungs- und Risikofilter überlebt (bis zu 2.000 Instrumente).",
-      "technischeInfo": "Reihenfolge der Regeln: status-active, paper-available, market-type, asset-class, min-candles (30), min-volume (1 Mio.), max-spread (0,005), max-execution-cost (0,006), max-drawdown (0,8), regime-extreme. Die erste greifende Regel gewinnt und wird protokolliert; unbekannte Werte führen zur Ablehnung, außer beim Drawdown.",
+      "technischeInfo": "Reihenfolge der Regeln: status-active, paper-available, market-type, asset-class, min-candles (aus Faktorsatz abgeleitet, Default 61), min-volume (1 Mio.), max-spread (0,005), max-execution-cost (0,006), max-drawdown (0,8), regime-extreme. Die erste greifende Regel gewinnt und wird protokolliert; unbekannte Werte führen zur Ablehnung, außer beim Drawdown.",
       "risiko": "Zu strenge Filter blenden legitime Chancen aus, zu lockere lassen unhandelbare Instrumente in den Score — die Schwellen gehören regelmäßig überprüft."
     },
     "funnelInteresting": {

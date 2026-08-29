@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.25.2**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.25.3**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,27 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.25.3] — 2026-08-29 · Deterministischer Warmup-Bedarf + Scanner-Readiness (OPS-009)
+
+**Fix (P1, CODE-REVIEW-SCANNER Kap. 6/21):** `filters.minCandles=30` war
+inkonsistent zum konfigurierten Faktorsatz (EMA50 → 50 Kerzen,
+Momentum-Lookback 60 → 61 Kerzen) und erzeugte still unvollständige
+Faktor-Scores. Zusätzlich war „keine Historie“ nicht von „Markt ungeeignet“
+unterscheidbar.
+
+* `requiredWarmupCandles(config)` — abgeleiteter Warmup-Bedarf (aktuell 61),
+  kein Hardcoding, gedeckelt auf 1000 (Security).
+* `filters.minCandles` fällt per Default auf `requiredWarmupCandles` zurück;
+  Config-Validierung warnt bei zu niedrigem expliziten Wert (Strict: Fehler).
+* `ScannerReadiness` = `READY | WARMING | ERROR` + `assessDataReadiness()`
+  (reine Funktion); `ScanResult.readiness` + `.requiredCandles`, Funnel
+  verhaltensgleich.
+* `min-candles`-Rejection erklärt jetzt die Herkunft des Schwellwerts; Ops-
+  Sektion + CLI weisen Readiness getrennt aus.
+* Tests: `tests/scanner.warmup.test.ts`, `tests/scanner.readiness.test.ts` (+
+  Config-/Pipeline-/Snapshot-Tests). Doku: `docs/MARKET_DATA_PIPELINE.md` Kap. 6,
+  `docs/DAILY_WEEKLY_RESEARCH.md`.
 
 ## [1.25.2] — 2026-08-29 · Instrument-Enrichment: volume24h + Orderbook-Spread (nachträglich PR #35)
 

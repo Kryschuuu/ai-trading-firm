@@ -64,6 +64,27 @@ console.log(
     `interessant ${scan.funnel.interesting.length} · daily ${scan.funnel.daily.length} · ` +
     `deep ${scan.funnel.deep.length} · ${scan.stats.durationMs.toFixed(0)} ms`
 );
+
+// Readiness ZUERST — trennt Infrastruktur (Warmup/Datenfehler) von Fachlogik.
+const { readiness } = scan;
+if (readiness.status === "READY") {
+  console.log(`[scanner] Readiness: READY · ${readiness.warmed}/${readiness.instruments} gewärmt (≥ ${readiness.requiredCandles} Kerzen)`);
+} else if (readiness.status === "WARMING") {
+  console.log(
+    `[scanner] Readiness: WARMING · ${readiness.warmed}/${readiness.instruments} gewärmt, ` +
+      `${readiness.missing} ohne genügend Historie (benötigt ${readiness.requiredCandles} Kerzen). ` +
+      `Behebung: npm run market-sync`
+  );
+  for (const o of readiness.worstOffenders) {
+    console.log(`[scanner]   warmup fehlt: ${o.instrumentId} — ${o.candles}/${readiness.requiredCandles} Kerzen`);
+  }
+} else {
+  console.log(`[scanner] Readiness: ERROR · ${readiness.error}`);
+  for (const f of readiness.failures.slice(0, 10)) {
+    console.log(`[scanner]   datenfehler: ${f.instrumentId} — ${f.reason}`);
+  }
+}
+
 for (const [rule, count] of Object.entries(scan.rejectionsByRule).sort()) {
   console.log(`[scanner]   abgelehnt (${rule}): ${count}`);
 }

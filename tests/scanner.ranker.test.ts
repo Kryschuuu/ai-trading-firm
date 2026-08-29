@@ -89,6 +89,37 @@ test("Konfiguration: unbekannte Schlüssel werden ignoriert (kein Schmuggelpfad)
   assert.equal(cfg.funnel.dailyMax, 42);
 });
 
+// ── OPS-009: abgeleiteter Warmup-Bedarf & Readiness ──────────────────────────
+
+test("Konfiguration: filters.minCandles ist per Default nicht gesetzt (abgeleitet)", () => {
+  assert.equal(DEFAULT_SCANNER_CONFIG.filters.minCandles, undefined);
+  const cfg = validateScannerConfig({});
+  assert.equal(cfg.filters.minCandles, undefined);
+});
+
+test("config validation warns when minCandles < requiredWarmupCandles", () => {
+  const warnings: string[] = [];
+  const cfg = validateScannerConfig({ filters: { minCandles: 30 } }, { onWarn: (m) => warnings.push(m) });
+  assert.equal(cfg.filters.minCandles, 30, "der explizite Wert bleibt erhalten");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /minCandles=30/);
+  assert.match(warnings[0], /requiredWarmupCandles=61/);
+});
+
+test("config validation: strict mode escalates a too-small minCandles to an error", () => {
+  assert.throws(
+    () => validateScannerConfig({ filters: { minCandles: 10 } }, { strict: true }),
+    ScannerConfigError,
+  );
+});
+
+test("config validation: an explicit minCandles >= required is accepted silently", () => {
+  const warnings: string[] = [];
+  const cfg = validateScannerConfig({ filters: { minCandles: 200 } }, { onWarn: (m) => warnings.push(m) });
+  assert.equal(cfg.filters.minCandles, 200);
+  assert.equal(warnings.length, 0);
+});
+
 // ── Score & Breakdown ────────────────────────────────────────────────────────
 
 test("Score: Summe der Beiträge entspricht dem Endscore", () => {
