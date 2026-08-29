@@ -116,6 +116,68 @@ test("Filter: unbekanntes Volumen/Spread wird abgelehnt (null heißt unbekannt)"
   assert.equal(checkEligibility(candidate({ spread: null }), config.filters)?.ruleId, "max-spread");
 });
 
+// ── FEHLER-3: Data-Quality- vs. Fachablehnung ────────────────────────────────
+
+test("FEHLER-3: unbekannter Spread ⇒ max-spread als Data-Quality-Rejection („nicht geladen“)", () => {
+  // Hohes Volumen ⇒ der Liquiditäts-Fallback ist irrelevant, nur der Spread fehlt
+  // (Orderbook-Enrichment im Sync nicht gelaufen).
+  const rejection = checkEligibility(
+    candidate({ volume24h: 2_000_000_000, spread: null }),
+    config.filters
+  );
+  assert.equal(rejection?.ruleId, "max-spread");
+  assert.equal(rejection?.dataQuality, true, "fehlende Daten ≠ fachliche Marktablehnung");
+  assert.match(rejection!.message, /Spread wurde nicht geladen/);
+  assert.doesNotMatch(rejection!.message, /bp >/, "keine Fach-Begründung bei fehlenden Daten");
+});
+
+test("FEHLER-3: zu breiter Spread bleibt eine Fachablehnung (dataQuality=false)", () => {
+  const rejection = checkEligibility(candidate({ volume24h: 2_000_000_000, spread: 0.02 }), config.filters);
+  assert.equal(rejection?.ruleId, "max-spread");
+  assert.equal(rejection?.dataQuality, false);
+  assert.match(rejection!.message, /bp >/, "Fach-Begründung nennt bp-Grenze");
+});
+
+test("FEHLER-3: fehlende Metriken tragen dataQuality=true, echte Marktgründe nicht", () => {
+  const base = candidate({ volume24h: 2_000_000_000 });
+  const withoutLiquidity = {
+    ...base,
+    factors: { ...base.factors, liquidity: { ...base.factors.liquidity, available: false, raw: null } },
+  };
+  const withoutCost = {
+    ...base,
+    factors: { ...base.factors, executionCost: { ...base.factors.executionCost, available: false, raw: null } },
+  };
+
+  const dataQualityCases = [
+    candidate({}, healthyCandles(10)), // min-candles: Historie nicht geladen
+    withoutLiquidity, // min-volume: Ticker + Kerzen-Fallback ohne Daten
+    candidate({ volume24h: 2_000_000_000, spread: null }), // max-spread: kein Orderbook
+    withoutCost, // max-execution-cost: ohne Spread nicht bezifferbar
+  ];
+  for (const c of dataQualityCases) {
+    const r = checkEligibility(c, config.filters);
+    assert.ok(r, "Ablehnung erwartet");
+    assert.equal(r!.dataQuality, true, `${r!.ruleId} muss Data-Quality sein: ${r!.message}`);
+    assert.match(r!.message, /nicht geladen|nicht bezifferbar/);
+  }
+
+  const businessCases = [
+    candidate({ status: "delisted" }),
+    candidate({ paperAvailable: false }),
+    candidate({ marketType: "option" }),
+    candidate({ assetClass: "other" }),
+    candidate({ volume24h: 10_000 }),
+    candidate({ spread: 0.02 }),
+    candidate({ takerFee: 0.01 }),
+  ];
+  for (const c of businessCases) {
+    const r = checkEligibility(c, config.filters);
+    assert.ok(r, "Ablehnung erwartet");
+    assert.equal(r!.dataQuality, false, `${r!.ruleId} ist eine Fachablehnung: ${r!.message}`);
+  }
+});
+
 test("Filter: Drawdown und EXTREME-Regime greifen als Risikoschranken", () => {
   const crash = candlesFromCloses([...growthSeries(100, 1.001, 40), ...growthSeries(100, 0.9, 40)]);
   const rejection = checkEligibility(candidate({}, crash), config.filters);

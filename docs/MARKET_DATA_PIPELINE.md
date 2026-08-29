@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.24.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.24.1** · Modul `src/marketdata/` · CLI `npm run market-sync`
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -53,6 +53,42 @@ Nach Discovery reichert der Service jedes Instrument mit 24h-Volumen an:
 der Wert `null` (unbekannt, nicht 0). `lastSeen` wird auf den Sync-Zeitpunkt
 gesetzt. Quelle des Upserts: `sync:<VENUE>`.
 
+**Symbol-Guard:** Ein per-Symbol-Ticker wird nur übernommen, wenn
+`ticker.symbol` exakt (case-insensitiv) dem Instrument entspricht. Fällt ein
+Venue-Client auf eine fremde Zeile zurück, bleibt `volume24h` lieber `null`,
+als dass ein fremdes Volumen geschrieben wird — der Fall landet in
+`SyncResult.errors` (`stage: "ticker"`).
+
+### Enrichment-Datenfluss (Ende-zu-Ende)
+
+```
+GET /trading_pairs                       (1× — Discovery)
+   │  symbol, base, quote, minTradeVolume, basePrecision,
+   │  quotePrecision, maxLeverage, symbolStatus, isApiSupported
+   │  └─ statische HANDELSPARAMETER — keine Liquiditäts-/Preismetriken
+   ▼
+registry instruments  (id = "VENUE:SYMBOL", volume24h = null, spread = null)
+   │
+   ├─ GET /tickers?symbols=…             (1× Batch; Fallback N× getTicker)
+   │     quoteVol ─────────────────────────────────► volume24h  (null wenn absent)
+   │
+   ├─ GET /depth?symbol=…                (N× — 1 Call je Instrument)
+   │     bids[0].price, asks[0].price
+   │        └─ calculateRelativeSpread(bid, ask)
+   │             (ask − bid) / mid ,  mid = (ask + bid) / 2
+   │             └──────────────────────────────────► spread     (null wenn Book leer)
+   │
+   ▼
+registry.upsert({ ...instrument, volume24h, spread, lastSeen }, "sync:<VENUE>")
+   │
+   ├─ GET /kline?symbol=…&interval=…     (N × 4 Timeframes)
+   │        └──────────────────────────────────────► HistoricalStore.append(...)
+   ▼
+Scanner (pure) ── liquidity-Faktor ── volume24h ?? (letzte Kerze volume × close)
+              └── spread-Faktor ───── spread (KEIN Fallback)
+                     └─ checkEligibility(): min-volume / max-spread
+```
+
 ## 3. Orderbook enrichment
 
 Pro Instrument **1 × depth** (`getOrderBook`). Der relative Spread
@@ -64,6 +100,18 @@ Pro Instrument **1 × depth** (`getOrderBook`). Der relative Spread
 kommt aus `calculateRelativeSpread(book.bids[0]?.price, book.asks[0]?.price)`.
 Fehlt `bids[0]` oder `asks[0]`, ist der Spread `null` — kein Crash, kein
 optimistisches 0.
+
+**Warum dieser Call nötig ist:** Die Ticker-API liefert das 24h-Volumen, aber
+**keine** Bid/Ask-Spanne. Der Spread kann nur aus dem Orderbook berechnet
+werden, also kostet jedes Instrument einen zusätzlichen `/depth`-Request
+(bei 180 Instrumenten 180 Requests — über den Token-Bucket gedrosselt, §9).
+
+**`spread = null` ist kein 0.** `null` bedeutet „nicht geladen“ und ist im
+Eligibility-Filter ausdrücklich von einem (fachlich verdächtigen) Spread von 0
+unterschieden. `checkEligibility()` lehnt solche Instrumente als
+**Data-Quality-Rejection** ab (`ruleId: "max-spread"`, `dataQuality: true`,
+Meldung „Spread wurde nicht geladen …“) — das ist ein Hinweis auf fehlenden
+Warmup, kein Marktausschluss (§8).
 
 ## 4. Historical backfill
 
@@ -127,11 +175,30 @@ Gleiche Eingabe → gleiches Artefakt.
 | Leere Discovery | `SyncResult` mit Zählern 0, Exit 0 |
 | `getTicker` / `getOrderBook` / `getCandles` wirft | Fehler in `SyncResult.errors`, **Instrument isoliert**, Lauf geht weiter |
 | Upsert per Policy abgelehnt | Registry-`rejected`; Sync bricht nicht ab |
+| Ticker-Symbol ≠ Instrument | `volume24h` bleibt `null`, Eintrag in `errors` (`stage: "ticker"`) |
 | Discovery selbst wirft | Lauf bricht ab (ohne Instrumente gibt es nichts zu isolieren) |
 
 CLI loggt nur aggregierte Zähler (`discovery`, `tickers enriched`,
 `orderbooks enriched`, `5m candles: N/N`, `errors: K`). Keine Symbole, keine
 URLs, keine Secrets.
+
+### Data-Quality- vs. Fachablehnung im Scanner
+
+Fehlende Metriken sind **behebbarer Datenmangel**, kein Markturteil. Der
+Eignungsfilter markiert sie deshalb explizit (`FilterRejection.dataQuality`):
+
+| Ablehnung | `ruleId` | `dataQuality` | Meldung | Behebung |
+| --- | --- | :---: | --- | --- |
+| Historie fehlt | `min-candles` | **true** | „Historie nicht geladen (N < 30 Kerzen) …“ | `npm run market-sync` |
+| Volumen unbekannt | `min-volume` | **true** | „24h-Volumen wurde nicht geladen …“ | `npm run market-sync` (tickers) |
+| Spread unbekannt | `max-spread` | **true** | „Spread wurde nicht geladen (kein Orderbook-Snapshot) …“ | `npm run market-sync` (depth) |
+| Kosten nicht bezifferbar | `max-execution-cost` | **true** | „Handelskosten nicht bezifferbar — Spread wurde nicht geladen“ | `npm run market-sync` (depth) |
+| Volumen zu klein / Spread zu breit / Kosten zu hoch / Status / Markttyp / Drawdown / Regime | entsprechend | false | fachliche Begründung (bp-, %- bzw. Status-Wert) | — |
+
+Der `liquidity`-Faktor besitzt einen Kerzen-Fallback
+(`volume24h ?? letzte Kerze volume × close`), der `spread`-Faktor **nicht**.
+Candle-Seeding allein reicht daher nicht: ohne `/depth`-Enrichment scheitern
+auch kerzengesättigte Instrumente an `max-spread` (§3).
 
 ## 9. Rate limiting
 
@@ -184,6 +251,10 @@ nicht in `/api/markets`). Der Scanner ändert sich nicht.
   API-Keys/Secrets werden im Discovery/Enrichment-Pfad nicht referenziert.
 - Kein `BitunixPrivateClient`, keine signierten Requests im Sync-Pfad
   (Integrationstest zählt `privateCalls === 0`).
+- Public-Calls (`trading_pairs` / `tickers` / `depth` / `kline`) senden **keine
+  Credential-Header**: Tests prüfen je Request, dass `sign`, `api-key`,
+  `nonce`, `timestamp` und `authorization` abwesend sind — unnötige
+  Credential-Exposition auf einem Public-Endpoint wird damit ausgeschlossen.
 - Der Scanner (`src/scanner/`) importiert keinen konkreten Adapter — er kennt
   ausschließlich `InstrumentRegistry` und `HistoricalStore`.
 - SSRF-Allowlist und TLS-Zwang des bestehenden HTTP-Clients gelten unverändert.

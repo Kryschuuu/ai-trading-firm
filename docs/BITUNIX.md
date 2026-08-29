@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.24.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
+**Stand:** v1.24.1 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -55,6 +55,42 @@ Scanner. Details: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md).
 | **Private trading API** | `account`, `positions`, `place_order` (signiert) | `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` | **Weiterhin nur für Order-Ausführung** — nie im Sync/Discovery/Enrichment-Pfad |
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger, echte Public-Kurse) | keine signierten Requests | verfügbar (`getBroker("BITUNIX", "paper")`) |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert, nur nach Live-Gate | gesperrt (Task 11, Default `LiveTradingGateError`) |
+
+### 1.2 Spread kommt aus dem Orderbuch, nicht aus dem Ticker (FEHLER-3)
+
+**Spread wird NICHT direkt von der Ticker-API geliefert, sondern aus dem
+Orderbook (bestBid/bestAsk) berechnet. Dies erfordert einen zusätzlichen
+`/depth`-Call pro Instrument.**
+
+| Metrik | Endpunkt | Feld | Bemerkung |
+| --- | --- | --- | --- |
+| 24h-Volumen | `GET /tickers` | `quoteVol` → `volume24h` | 1× Batch-Call für alle Symbole möglich |
+| Spread | `GET /depth` | `bids[0].price` / `asks[0].price` → `spread` | **1 Call je Instrument**, kein Batch-Äquivalent |
+
+Berechnung (`src/marketdata/spread.ts` → `calculateRelativeSpread`):
+
+```
+spread = (ask − bid) / mid        mid = (ask + bid) / 2
+```
+
+`0.0004` entspricht 4 bp. Ungültige/fehlende Book-Daten (leere Seite, `≤ 0`,
+invertiertes Buch `bid > ask`, `NaN`) liefern **`null`** — niemals `0`, niemals
+`NaN`, niemals eine Exception. `null` heißt „nicht geladen“ und ist bewusst von
+einem (fachlich verdächtigen) Spread von 0 unterscheidbar.
+
+Folgen für den Sync- und Scanner-Pfad:
+
+* Kosten: N Instrumente ⇒ N zusätzliche `/depth`-Requests (z. B. 180
+  Instrumente ⇒ 180 Calls). Sie laufen sequenziell durch den Token-Bucket
+  (8 req/s, §2) — kein Sekunden-Burst.
+* Der `spread`-Faktor des Scanners hat (anders als `liquidity`, das auf
+  `Kerze.volume × close` zurückfällt) **keinen** Fallback. Ohne
+  Orderbook-Enrichment scheitert deshalb jedes Instrument an der
+  `max-spread`-Regel — als **Data-Quality-Rejection**
+  (`dataQuality: true`, Meldung „Spread wurde nicht geladen“), nicht als
+  fachliche Marktablehnung.
+* Details zum Gesamtfluss: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)
+  §2–§3 und §8.
 
 Garantien des Sync-Kontexts (durch Tests abgesichert):
 
@@ -279,7 +315,9 @@ Die eigentliche Freigabe entscheidet allein der Live-Gate-Zustand + `venueContro
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
-- `tests/bitunix.marketdata.test.ts` — `MarketDataAdapter`-Konformität (Compile-Time), AdapterRegistry, `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials), 429-Retry/Backoff-Regression
+- `tests/bitunix.marketdata.test.ts` — `MarketDataAdapter`-Konformität (Compile-Time), AdapterRegistry, `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
+- `src/marketdata/__tests__/spread.test.ts` — `calculateRelativeSpread` (Golden 100/100.02 ≈ 0.00019998, Edge Cases: fehlend/invertiert/`0`/`NaN`/`null` ⇒ `null`)
+- `src/marketdata/__tests__/sync.test.ts` — `volume24h`-Enrichment, Orderbook-Spread-Upsert, Batch-Tickers, `quoteVol`-Fehlend-Fallback, Rate-Limiter-Zählung bei 180 Instrumenten
 - Factory 28er-Matrix, Contract-Suite, `GET /api/brokers` count=7
 
 ```bash

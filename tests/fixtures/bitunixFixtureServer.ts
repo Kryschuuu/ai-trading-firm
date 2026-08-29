@@ -14,7 +14,13 @@ export class BitunixFixtureServer {
   apiSecret = "fixture-api-secret";
   privateCalls = 0;
   publicCalls = 0;
-  requests: { method: string; path: string; signed: boolean }[] = [];
+  /**
+   * `credentialHeaders` listet die am Request beobachteten Auth-Header
+   * (`sign`, `api-key`, `nonce`, `timestamp`, `authorization`). Public-Calls
+   * (Discovery/Ticker/Depth/Kline) müssen hier **leer** sein — der Sync-Pfad
+   * darf keine Credentials exponieren.
+   */
+  requests: { method: string; path: string; signed: boolean; credentialHeaders: string[] }[] = [];
   failPublic = false;
   httpStatus?: number;
   private server: http.Server | null = null;
@@ -36,7 +42,10 @@ export class BitunixFixtureServer {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const path = url.pathname;
     const signed = Boolean(req.headers.sign);
-    this.requests.push({ method: req.method ?? "GET", path, signed });
+    const credentialHeaders = ["sign", "api-key", "nonce", "timestamp", "authorization"].filter(
+      (h) => req.headers[h] !== undefined,
+    );
+    this.requests.push({ method: req.method ?? "GET", path, signed, credentialHeaders });
 
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c as Buffer));

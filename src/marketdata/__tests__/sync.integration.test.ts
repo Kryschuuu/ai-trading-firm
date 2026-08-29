@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { BitunixFixtureServer } from "../../../tests/fixtures/bitunixFixtureServer";
+import { BITUNIX_PATHS } from "../../brokers/bitunix/config";
 import { HistoricalStore } from "../../lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../universe/registry";
 import { createAdapterRegistry } from "../adapterRegistry";
@@ -78,9 +79,19 @@ test("Integration: syncVenue(\"BITUNIX\") via AdapterRegistry füllt Registry un
   const btc = registry.get("BITUNIX:BTCUSDT");
   assert.ok(btc, "BTCUSDT muss in der Registry stehen");
   assert.equal(btc!.venue, "BITUNIX");
-  assert.ok(btc!.volume24h === 120_000_000 || btc!.volume24h === null || typeof btc!.volume24h === "number");
-  assert.ok(btc!.spread === null || (typeof btc!.spread === "number" && btc!.spread > 0));
   assert.equal(btc!.lastSeen, "2026-08-29T12:00:00.000Z");
+
+  // FEHLER-3: Nach dem Sync muss mindestens ein Instrument BEIDE dynamischen
+  // Metriken tragen — 24h-Volumen (Ticker) UND Orderbook-Spread (`/depth`).
+  // `spread !== null` ist hier die eigentliche Funnel-Garantie: ohne sie
+  // scheitert jedes Instrument an der `max-spread`-Regel.
+  const enriched = registry.query().items.filter((i) => (i.volume24h ?? 0) > 0 && i.spread !== null);
+  assert.ok(enriched.length >= 1, "mind. ein Instrument mit volume24h > 0 UND spread !== null erwartet");
+  assert.ok((btc!.volume24h ?? 0) > 0, `volume24h erwartet > 0, war ${btc!.volume24h}`);
+  assert.equal(btc!.volume24h, 120_000_000, "volume24h stammt aus ticker.quoteVol des Fixtures");
+  assert.ok(btc!.spread !== null, "spread muss aus dem /depth-Snapshot berechnet sein");
+  // Fixture-Book 64999/65001 → (65001 − 64999) / 65000
+  assert.ok(Math.abs(btc!.spread! - 2 / 65_000) < 1e-12, `unerwarteter Spread ${btc!.spread}`);
 
   assert.ok(history.count() > 0, "HistoricalStore muss Kerzen enthalten");
   const hour = history.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" });
@@ -98,6 +109,19 @@ test("Integration: syncVenue(\"BITUNIX\") via AdapterRegistry füllt Registry un
   assert.ok(
     fx.requests.every((r) => !r.signed),
     "kein signierter Request im Sync-Pfad",
+  );
+  // Security Audit: Public-Endpoints (Discovery/Ticker/Depth/Kline) brauchen
+  // keine Credentials — es darf kein Auth-Header mitgesendet werden.
+  assert.ok(
+    fx.requests.every((r) => r.credentialHeaders.length === 0),
+    `Public-Calls senden Credentials: ${JSON.stringify(
+      fx.requests.filter((r) => r.credentialHeaders.length > 0).map((r) => [r.path, r.credentialHeaders]),
+    )}`,
+  );
+  const depthCalls = fx.requests.filter((r) => r.path === BITUNIX_PATHS.depth);
+  assert.ok(
+    depthCalls.length >= result.instrumentsDiscovered,
+    `1 depth-Call je Instrument erwartet, war ${depthCalls.length}`,
   );
   assert.ok(fx.publicCalls > 0);
 });
