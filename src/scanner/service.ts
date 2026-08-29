@@ -39,22 +39,53 @@ export function loadAllInstruments(limit = MAX_SERVICE_INSTRUMENTS): MarketInstr
 }
 
 /**
+ * Timeframe the scanner prefers after a market-data warmup.
+ * Shorter intervals stay in the store for other consumers; mixing them here
+ * would corrupt lookbacks (trend/drawdown periods assume a single interval).
+ */
+export const SCANNER_CANDLE_TIMEFRAME = "1h";
+
+const TIMEFRAME_PREFERENCE = ["1h", "30m", "15m", "5m"] as const;
+
+/**
  * Datenanbindung auf Basis des Historical Store: die NDJSON-Datei wird
  * **einmal** gelesen und nach Instrument gruppiert (O(n) statt O(n²)).
+ *
+ * Der Scanner ruft niemals den Sync-Service auf — er liest
+ * ausschließlich die (ggf. zuvor vom Sync-Job befüllte) lokale Datei.
+ * Kein Netzwerk, keine DB, kein LLM.
  */
 export function historicalStoreProvider(store: HistoricalStore, benchmarkInstrumentId: string): ScanDataProvider {
-  const byInstrument = new Map<string, MarketCandle[]>();
+  const raw = new Map<string, { timeframe?: string; candle: MarketCandle }[]>();
   for (const e of store.query()) {
-    const list = byInstrument.get(e.instrumentId) ?? [];
-    list.push({ time: e.ts, open: e.open, high: e.high, low: e.low, close: e.close, volume: e.volume });
-    byInstrument.set(e.instrumentId, list);
+    const list = raw.get(e.instrumentId) ?? [];
+    list.push({
+      timeframe: e.timeframe,
+      candle: { time: e.ts, open: e.open, high: e.high, low: e.low, close: e.close, volume: e.volume },
+    });
+    raw.set(e.instrumentId, list);
   }
-  for (const list of byInstrument.values()) list.sort((a, b) => a.time - b.time);
+  const byInstrument = new Map<string, MarketCandle[]>();
+  for (const [id, rows] of raw) {
+    const candles = pickTimeframe(rows);
+    candles.sort((a, b) => a.time - b.time);
+    byInstrument.set(id, candles);
+  }
   const benchmark = byInstrument.get(benchmarkInstrumentId) ?? null;
   return {
     candles: (instrument) => byInstrument.get(instrument.id) ?? [],
     benchmarkCandles: (instrument) => (instrument.id === benchmarkInstrumentId ? null : benchmark),
   };
+}
+
+function pickTimeframe(
+  rows: { timeframe?: string; candle: MarketCandle }[],
+): MarketCandle[] {
+  for (const tf of TIMEFRAME_PREFERENCE) {
+    const subset = rows.filter((r) => r.timeframe === tf).map((r) => r.candle);
+    if (subset.length) return subset;
+  }
+  return rows.filter((r) => !r.timeframe).map((r) => r.candle);
 }
 
 /** Optionen einer Service-Instanz (alles injizierbar ⇒ testbar). */

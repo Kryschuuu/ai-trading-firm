@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.23.0 (2026-08-29) · Vollständige
+> **Dokumentationsstand:** v1.24.0 (2026-08-29) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md).
@@ -32,8 +32,12 @@ CachyOS, Variante A/B) und [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung).
 
 ## Architektur in Kürze
 
-Broker-unabhängige Infrastruktur mit dynamischem Instrument-Universe:
-**Brokers → Instrument Discovery → MARKET UNIVERSE → deterministischer Scanner
+Broker-unabhängige Infrastruktur mit dynamischem Instrument-Universe.
+Market Discovery and historical warmup are performed by the
+MarketDataSyncService before the deterministic scanner runs.
+The scanner itself never performs network I/O.
+
+**MARKET UNIVERSE → deterministischer Scanner
 (Liquidität/Volatilität/Korrelation) → MARKET RANKER → DAILY/WEEKLY → AGENT
 ANALYSIS (Technical/News/Macro) → RESEARCH → RISK MANAGER → PORTFOLIO ENGINE →
 APPROVAL LAYER → RULE ENGINE → PAPER/LIVE.**
@@ -47,6 +51,7 @@ Glossar: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | Dokument | Inhalt |
 | --- | --- |
 | `docs/ARCHITECTURE.md` | Zielbild, Decoupling, Execution Modes, Glossar, Docs-Pflege |
+| `docs/MARKET_DATA_PIPELINE.md` | Discovery, Enrichment, Candle-Backfill, Scanner-Grenze |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
 | `docs/CHANGELOG.md` | Versionen und Änderungen (Keep a Changelog) |
@@ -55,7 +60,7 @@ Glossar: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |
 | `docs/help/*.help.json` | 3-Ebenen-Hilfe-Systematik (Schema: `docs/help/help.schema.json`) |
 
-Weitere Module: `MARKET_UNIVERSE`, `BROKER_ARCHITECTURE`, `BITUNIX`,
+Weitere Module: `MARKET_UNIVERSE`, `MARKET_DATA_PIPELINE`, `BROKER_ARCHITECTURE`, `BITUNIX`,
 `PAPER_TRADING`, `PORTFOLIO_ANALYTICS`, `DAILY_WEEKLY_RESEARCH`, `LLM_ROUTING`,
 `PROVIDER_INTEGRATION`, `FRONTEND_CONTROL_PLANE`, `LIVE_TRADING`,
 `PEER_REVIEW_LIVE_TRADING`.

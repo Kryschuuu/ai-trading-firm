@@ -25,6 +25,11 @@ export interface HistoricalCandleEntry {
   volume: number;
   /** Provenienz-Timestamp (wann geschrieben, ISO-UTC). */
   fetchedAt: string;
+  /**
+   * Optionales Intervall (`5m`/`15m`/`30m`/`1h`), gesetzt vom
+   * MarketDataSyncService. Altbestand ohne Feld bleibt gültig.
+   */
+  timeframe?: string;
 }
 
 export interface Provenance {
@@ -37,6 +42,8 @@ export interface StoreQuery {
   from?: number;
   to?: number;
   limit?: number;
+  /** Optional: nur Kerzen dieses Intervalls (Einträge ohne `timeframe` matchen nicht). */
+  timeframe?: string;
 }
 
 /** Sortiert nach ts aufsteigend (stabil). */
@@ -55,18 +62,33 @@ export class HistoricalStore {
     this.filePath = path.join(this.dir, "candles.ndjson");
   }
 
-  /** Append-only: hängt Kerzen an (nie bestehende Daten neu schreiben). */
+  /**
+   * Append-only: hängt Kerzen an (nie bestehende Daten neu schreiben).
+   *
+   * Abwärtskompatibel: 4. Parameter darf `Date` (bisheriges API) oder
+   * Timeframe-String sein. `MarketDataSyncService` ruft
+   * `append(candles, id, provenance, timeframe, now)` auf.
+   */
   append(
     candles: { time: number; open: number; high: number; low: number; close: number; volume: number }[],
     instrumentId: string,
     provenance: Provenance,
-    now: Date = new Date()
+    timeframeOrNow: string | Date = new Date(),
+    now?: Date
   ): number {
     if (!candles.length) return 0;
     mkdirSync(this.dir, { recursive: true });
-    const fetchedAt = now.toISOString();
-    const lines = candles.map((c) =>
-      JSON.stringify({
+    let timeframe: string | undefined;
+    let fetched: Date;
+    if (timeframeOrNow instanceof Date) {
+      fetched = timeframeOrNow;
+    } else {
+      timeframe = timeframeOrNow;
+      fetched = now instanceof Date ? now : new Date();
+    }
+    const fetchedAt = fetched.toISOString();
+    const lines = candles.map((c) => {
+      const entry: HistoricalCandleEntry = {
         instrumentId,
         venue: provenance.venue,
         feed: provenance.feed,
@@ -77,8 +99,10 @@ export class HistoricalStore {
         close: c.close,
         volume: c.volume,
         fetchedAt,
-      } satisfies HistoricalCandleEntry)
-    );
+      };
+      if (timeframe) entry.timeframe = timeframe;
+      return JSON.stringify(entry);
+    });
     appendFileSync(this.filePath, lines.join("\n") + "\n", { encoding: "utf8", mode: 0o600 });
     return lines.length;
   }
@@ -98,6 +122,7 @@ export class HistoricalStore {
     }
     let out = entries;
     if (q.instrumentId) out = out.filter((e) => e.instrumentId === q.instrumentId);
+    if (q.timeframe) out = out.filter((e) => e.timeframe === q.timeframe);
     if (q.from !== undefined) out = out.filter((e) => e.ts >= (q.from as number));
     if (q.to !== undefined) out = out.filter((e) => e.ts <= (q.to as number));
     out = sortEntries(out);

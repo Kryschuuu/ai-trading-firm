@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.23.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.24.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,14 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.24.0] — 2026-08-29 · Persistenter Venue-Market-Data-Sync
+
+**Haupt-Task:** `MarketDataSyncService` orchestriert Discovery → Ticker- und
+Orderbook-Enrichment → Candle-Backfill (5m/15m/30m/1h) in Registry und
+Historical Store. Der Scanner bleibt deterministisch und netzwerkfrei.
+CLI: `npm run market-sync`, `npm run scan -- --sync-first`. Doku:
+`docs/MARKET_DATA_PIPELINE.md`.
 
 ## [1.23.0] — 2026-08-29 · Operations Center vollständig integriert (Task 10)
 

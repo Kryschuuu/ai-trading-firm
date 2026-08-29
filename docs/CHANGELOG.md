@@ -20,6 +20,38 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.24.0] — 2026-08-29
+
+**Persistenter Venue-Market-Data-Sync.** Der Scanner las bisher ausschließlich
+die lokale, oft leere Historie (`data/history/candles.ndjson` → `[]`) — 26
+Seed-Instrumente × 0 Kerzen, Trichter leer. `MarketDataSyncService` schließt
+diese Lücke, ohne die Reinheit von `scanUniverse()` aufzugeben.
+
+### Added
+
+* **`src/marketdata/`** — `MarketDataAdapter`, `MarketDataSyncService`,
+  `UnsupportedVenueError`, `calculateRelativeSpread`, Bitunix-Public-Adapter.
+* **CLI** `npm run market-sync` und `npm run scan -- --sync-first`.
+* **Doku** [`docs/MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md)
+  (Discovery, Enrichment, Backfill, Persistence, Readiness, Scanner,
+  Failure semantics, Rate limiting, Venue-Matrix).
+* **Tests** `src/marketdata/__tests__/sync.test.ts` und
+  `sync.integration.test.ts` (Mock-Adapter + Bitunix-Fixture-HTTP, 0 Private-Calls).
+
+### Changed
+
+* `HistoricalStore.append` akzeptiert optional `timeframe` (abwärtskompatibel).
+* `historicalStoreProvider` bevorzugt `1h`-Kerzen nach einem Sync.
+* README: Scanner führt kein Netzwerk-I/O aus; Warmup liegt im Sync-Service.
+
+### Security
+
+* Sync-Pfad verwendet ausschließlich Public-REST (kein PrivateClient, keine Keys).
+* Token-Bucket 8 req/s (dokumentiert 10 req/s/IP).
+* CLI-Logs nur aggregierte Zähler.
+
+---
+
 ## [1.23.0] — 2026-08-29
 
 **Operations Center vollständig integriert (Task 10).** Der Tab war eine
