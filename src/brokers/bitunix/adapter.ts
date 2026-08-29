@@ -32,13 +32,14 @@ import {
 } from "../../contracts/broker";
 import type { MarketInstrument } from "../../universe/types";
 import { getRegistry, type InstrumentRegistry } from "../../universe";
+import type { MarketDataAdapter } from "../../marketdata/sync";
 import {
   type BitunixRuntimeConfig,
   type EnvLike,
   loadBitunixConfig,
 } from "./config";
 import { assertBitunixEnabled, assertLiveOrderAllowed } from "./gates";
-import { BitunixPublicClient } from "./publicClient";
+import { BitunixPublicClient, mapTicker } from "./publicClient";
 import { BitunixPrivateClient } from "./privateClient";
 import { BitunixPaperLedger } from "./paper";
 import { BrokerExecutionEngine, PaperExecutionEngine, type ExecutionPort } from "./execution";
@@ -61,7 +62,15 @@ export interface BitunixAdapterDeps {
   now?: () => Date;
 }
 
-export class BitunixBrokerAdapter implements BrokerAdapter {
+/**
+ * Zusätzlich zum `BrokerAdapter`-Contract implementiert der Adapter das
+ * `MarketDataAdapter`-Interface (`src/marketdata/sync.ts`) — die
+ * venue-agnostische Public-Market-Data-Grenze, über die
+ * `MarketDataSyncService` Discovery → Enrichment → Backfill orchestriert.
+ * Nur `discoverInstruments` / `getTicker(s)` / `getOrderBook` / `getCandles`
+ * (Public-Client) sind Sync-relevant; Order-/Account-Pfade bleiben getrennt.
+ */
+export class BitunixBrokerAdapter implements BrokerAdapter, MarketDataAdapter {
   readonly id = "BITUNIX" as const;
   readonly mode: ExecutionMode;
   readonly capabilities: BrokerCapabilities = VENUE_CAPABILITIES.BITUNIX;
@@ -176,10 +185,26 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     return t;
   }
 
-  async getCandles(symbol: string, timeframe: string): Promise<MarketCandle[]> {
+  /**
+   * 1 × tickers (Batch) — `MarketDataAdapter.getTickers`. Bitunix liefert
+   * ohne Symbolfilter den vollen Public-Ticker-Satz; damit spart sich
+   * `MarketDataSyncService` N per-Symbol-Calls. Public-Client, keine
+   * Credentials.
+   */
+  async getTickers(symbols?: string[]): Promise<MarketTicker[]> {
+    this.require("marketData", "getTickers");
+    assertBitunixEnabled(this.env);
+    const query = symbols && symbols.length > 0 ? symbols.join(",") : undefined;
+    const rows = await this.public.fetchTickers(query);
+    const tickers = rows.map(mapTicker);
+    for (const t of tickers) this.lastTicker.set(t.symbol, t);
+    return tickers;
+  }
+
+  async getCandles(symbol: string, timeframe: string, limit = 120): Promise<MarketCandle[]> {
     this.require("marketData", "getCandles");
     assertBitunixEnabled(this.env);
-    return this.public.fetchKlines(symbol.toUpperCase(), timeframe, 120);
+    return this.public.fetchKlines(symbol.toUpperCase(), timeframe, limit);
   }
 
   async getOrderBook(symbol: string): Promise<MarketOrderBook> {

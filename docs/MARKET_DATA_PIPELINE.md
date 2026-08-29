@@ -8,8 +8,9 @@ Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
 (`scanUniverse()`) führt weiterhin **keinen** Netzwerk-Call aus.
 
 ```
-Venue Adapters (Bitunix, Binance, Bitfinex, …)
-         │
+AdapterRegistry (src/marketdata/adapterRegistry.ts)
+  └─ konkrete MarketDataAdapter-Instanzen (einzige Instanzierungsstelle)
+         │  BITUNIX → BitunixBrokerAdapter (Modus "paper", Public-Client)
 Discovery / Enrichment
          ▼
 MarketDataSyncService (instruments, ticker, orderbook, candles)
@@ -134,8 +135,11 @@ URLs, keine Secrets.
 
 ## 9. Rate limiting
 
-Alle produktiven Bitunix-Calls laufen durch den Token-Bucket in
-`src/brokers/bitunix/http.ts`:
+Der Token-Bucket sitzt am `BitunixHttp`-Transport
+(`src/brokers/bitunix/http.ts`) des Adapter-Public-Clients — die
+`AdapterRegistry` erzeugt den Adapter ohne zusätzlichen Limiter (ein zweiter
+auf Orchestrier-Ebene würde Tokens doppelt verrechnen). Alle produktiven
+Bitunix-Calls laufen dadurch durch den Bucket:
 
 - Dokumentiertes Limit: **10 req/s/IP**
 - Code-Limit: **8 req/s** (`BITUNIX_PUBLIC_RATE_PER_SEC`) — konservativ, vor
@@ -155,21 +159,32 @@ Sync verwendet ausschließlich den **Public**-Client.
 
 | Venue | Adapter | Discovery | Tickers (Batch) | Orderbuch | Kerzen 5m/15m/30m/1h | Private/Keys im Sync |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| BITUNIX | `BitunixMarketDataAdapter` | ja (public REST) | ja | ja | ja | **nein** |
+| BITUNIX | `BitunixBrokerAdapter` (Modus `paper`, Public-Pfad) | ja (public REST) | ja | ja | ja | **nein** |
 | BINANCE | — (Feed in `src/lib/marketdata/feeds`, kein Sync-Adapter) | geplant | — | — | — | nein |
 | BITFINEX | — | geplant | — | — | — | nein |
 | KRAKEN | — | geplant | — | — | — | nein |
 | ALPACA / IBKR | — | geplant | — | — | — | nein |
 | PAPER | Seed-Registry, kein REST | n/a | n/a | n/a | n/a | n/a |
 
-Neue Venues: `MarketDataAdapter` implementieren, in die `adapters`-Map unter
-dem Venue-Kürzel einhängen. Der Scanner ändert sich nicht.
+**Bitunix-Status (v1.24.0):** Discovery: ✓ · MarketData: ✓ (nach diesem Fix) ·
+Trading: über `BitunixPrivateClient` getrennt (niemals im Sync-Pfad).
+
+Neue Venues: `MarketDataAdapter` implementieren und in
+`src/marketdata/adapterRegistry.ts` unter dem Venue-Kürzel registrieren — die
+**einzige** Stelle, die konkrete Adapter-Klassen instanziiert (nicht im Scanner,
+nicht in `/api/markets`). Der Scanner ändert sich nicht.
 
 ---
 
 ## Sicherheit
 
-- Kein `BitunixPrivateClient`, keine API-Keys, keine signierten Requests im
-  Sync-Pfad (Integrationstest zählt `privateCalls === 0`).
+- `AdapterRegistry` (`src/marketdata/adapterRegistry.ts`) ist die **einzige**
+  Stelle, die konkrete Adapter-Klassen instanziiert. Sie erzeugt den
+  `BitunixBrokerAdapter` **immer im Modus `"paper"` und ohne PrivateClient** —
+  API-Keys/Secrets werden im Discovery/Enrichment-Pfad nicht referenziert.
+- Kein `BitunixPrivateClient`, keine signierten Requests im Sync-Pfad
+  (Integrationstest zählt `privateCalls === 0`).
+- Der Scanner (`src/scanner/`) importiert keinen konkreten Adapter — er kennt
+  ausschließlich `InstrumentRegistry` und `HistoricalStore`.
 - SSRF-Allowlist und TLS-Zwang des bestehenden HTTP-Clients gelten unverändert.
 - `/api/markets` triggert keinen Sync (kein Schreibpfad über die Leseschnittstelle).

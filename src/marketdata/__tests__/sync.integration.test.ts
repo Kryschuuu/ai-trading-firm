@@ -1,7 +1,11 @@
 /**
- * Integration: kompletter Sync-Durchlauf gegen den lokalen Bitunix-Fixture-HTTP-Server.
+ * Integration: kompletter Sync-Durchlauf über `AdapterRegistry` gegen den
+ * lokalen Bitunix-Fixture-HTTP-Server.
  *
- * Kein echtes Netz, 0 Private-Calls, 0 Signaturen.
+ * `MarketDataSyncService.syncVenue("BITUNIX")` — mit der zentralen
+ * AdapterRegistry (einzige Adapter-Instanzierungsstelle) und Mock-HTTP-Layer.
+ * Assertion: befüllte Registry + HistoricalStore. Kein echtes Netz,
+ * 0 Private-Calls, 0 Signaturen.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -12,8 +16,8 @@ import path from "node:path";
 import { BitunixFixtureServer } from "../../../tests/fixtures/bitunixFixtureServer";
 import { HistoricalStore } from "../../lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../universe/registry";
+import { createAdapterRegistry } from "../adapterRegistry";
 import { MarketDataSyncService } from "../sync";
-import { BitunixMarketDataAdapter, mockBitunixPublicClient } from "../adapters/bitunix";
 import { SYNC_TIMEFRAMES } from "../types";
 import { historicalStoreProvider } from "../../scanner/service";
 
@@ -30,13 +34,21 @@ function tmp(): string {
   return d;
 }
 
-test("Integration: mockBitunixPublicClient() füllt Registry und HistoricalStore", async () => {
+/** Env, der den Adapter-Private-Pfad auf den lokalen Fixture-Server zeigt. */
+function fixtureEnv(base: string): Record<string, string> {
+  return {
+    BITUNIX_ENABLED: "true",
+    BITUNIX_BASE_URL: base,
+    BITUNIX_ALLOW_INSECURE_HTTP: "true",
+    BITUNIX_ALLOWED_HOSTS: "127.0.0.1,localhost",
+    BITUNIX_TIMEOUT_MS: "2000",
+  };
+}
+
+test("Integration: syncVenue(\"BITUNIX\") via AdapterRegistry füllt Registry und HistoricalStore", async () => {
   const fx = new BitunixFixtureServer();
   const base = await fx.start();
   servers.push(fx);
-
-  const client = mockBitunixPublicClient({ baseUrl: base });
-  const adapter = new BitunixMarketDataAdapter(client);
 
   const dir = tmp();
   const registry = new InstrumentRegistry({
@@ -45,7 +57,12 @@ test("Integration: mockBitunixPublicClient() füllt Registry und HistoricalStore
     now: () => new Date("2026-08-29T12:00:00.000Z"),
   });
   const history = new HistoricalStore(path.join(dir, "history"));
-  const service = new MarketDataSyncService(registry, history, new Map([["BITUNIX", adapter]]), {
+
+  // Einzige Instanzierungsstelle: AdapterRegistry (paper, public-only).
+  const adapters = createAdapterRegistry({ registry, env: fixtureEnv(base) });
+  assert.ok(adapters.has("BITUNIX"), "BITUNIX muss in der Registry registriert sein");
+
+  const service = new MarketDataSyncService(registry, history, adapters.entries, {
     now: () => new Date("2026-08-29T12:00:00.000Z"),
   });
 

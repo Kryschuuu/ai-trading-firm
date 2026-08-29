@@ -1,10 +1,13 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.21.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter`
+**Stand:** v1.24.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
-Kein dokumentiertes Futures-Testnet.
+Kein dokumentiertes Futures-Testnet. Seit v1.24.0 ist die **Public-Market-Data in die
+Scanner-Pipeline verdrahtet** (§1.1): `BitunixBrokerAdapter` implementiert
+`MarketDataAdapter` und wird von der zentralen `AdapterRegistry` für
+`MarketDataSyncService` registriert.
 
 Dieses Dokument ist die verbindliche Spezifikation des Bitunix-Adapters. Der Kern
 (engine, risk, agents, API) kennt weiterhin **nur** `BrokerAdapter` — Venue-Details
@@ -31,6 +34,38 @@ ausschließlich **USDT-margined Perpetual Futures** (`marketType = perpetual`).
 Factory: `getBroker("BITUNIX", "paper"|"backtest")` liefert `BitunixBrokerAdapter`.
 `testnet` → `NotSupportedCapabilityError`. `live` → **immer** `LiveTradingGateError`,
 solange die Live-Gate-State-Machine nicht `LIVE_ENABLED` erreicht hat.
+
+### 1.1 Public Market Data im Scanner-Pipeline (v1.24.0)
+
+Der Adapter implementiert neben `BrokerAdapter` explizit das
+`MarketDataAdapter`-Interface (`src/marketdata/sync.ts`). Die zentrale
+`AdapterRegistry` (`src/marketdata/adapterRegistry.ts` — die **einzige** Stelle,
+die konkrete Adapter-Klassen instanziiert) registriert ihn unter dem Venue-Key
+`"BITUNIX"`; `MarketDataSyncService` / `npm run market-sync` nutzen nur die
+Public-Methoden `discoverInstruments()`, `getTicker(s)()`, `getOrderBook()` und
+`getCandles()` — Discovery → Ticker/Orderbook-Enrichment → Candle-Backfill füllt
+damit `InstrumentRegistry` und `HistoricalStore` **vor** dem deterministischen
+Scanner. Details: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md).
+
+**Klare Trennung der vier Ebenen:**
+
+| Ebene | Pfad | Credentials | Status |
+| --- | --- | --- | --- |
+| **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** (Public-Client, Token-Bucket 8 req/s) | **Jetzt an Scanner-Pipeline angebunden** (Sync vor dem Scan) |
+| **Private trading API** | `account`, `positions`, `place_order` (signiert) | `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` | **Weiterhin nur für Order-Ausführung** — nie im Sync/Discovery/Enrichment-Pfad |
+| **Paper execution** | `PaperExecutionEngine` (lokales Ledger, echte Public-Kurse) | keine signierten Requests | verfügbar (`getBroker("BITUNIX", "paper")`) |
+| **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert, nur nach Live-Gate | gesperrt (Task 11, Default `LiveTradingGateError`) |
+
+Garantien des Sync-Kontexts (durch Tests abgesichert):
+
+- `adapterRegistry.ts` erzeugt den Adapter **immer im Modus `"paper"` und ohne
+  PrivateClient** — API-Key/Secret werden im Discovery/Enrichment-Pfad nicht
+  referenziert, es laufen keine signierten Requests (Integrationstest zählt
+  `privateCalls === 0`).
+- Der Scanner (`src/scanner/`) importiert **keinen** konkreten Adapter — er
+  kennt ausschließlich `InstrumentRegistry` und `HistoricalStore`.
+- Order-Ausführung bleibt vollständig über `getBroker()` (Factory) und den
+  Private-Client getrennt (§5).
 
 ---
 
@@ -244,6 +279,7 @@ Die eigentliche Freigabe entscheidet allein der Live-Gate-Zustand + `venueContro
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
+- `tests/bitunix.marketdata.test.ts` — `MarketDataAdapter`-Konformität (Compile-Time), AdapterRegistry, `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials), 429-Retry/Backoff-Regression
 - Factory 28er-Matrix, Contract-Suite, `GET /api/brokers` count=7
 
 ```bash
@@ -259,5 +295,7 @@ Live-Enable in der Suite.
 
 - Contract: `src/contracts/broker.ts` · Factory: `src/brokers/factory.ts`
 - Capabilities: `src/brokers/capabilities.ts`
+- Market-Data-Sync: `src/marketdata/adapterRegistry.ts` (einzige Adapter-Instanzierungsstelle) + `src/marketdata/sync.ts` (`MarketDataAdapter`, `MarketDataSyncService`)
 - Architektur: [BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md) · Universum: [MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)
+- Market-Data-Pipeline: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)
 - Security: [SECURITY_AUDIT.md](SECURITY_AUDIT.md) (Kapitel Task 07)

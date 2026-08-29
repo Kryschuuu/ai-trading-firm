@@ -27,7 +27,8 @@ export {
   type SyncTimeframe,
 } from "./types";
 export {
-  BitunixMarketDataAdapter,
-  createBitunixMarketDataAdapter,
-  mockBitunixPublicClient,
-} from "./adapters/bitunix";
+  AdapterRegistry,
+  createAdapterRegistry,
+  BITUNIX_VENUE,
+  type AdapterRegistryOptions,
+} from "./adapterRegistry";
