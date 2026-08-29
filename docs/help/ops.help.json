@@ -1,10 +1,10 @@
 {
   "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
   "id": "ops",
-  "version": 1,
+  "version": 2,
   "title": "Operations Center & RBAC — Feldhilfe",
-  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und dem leeren Operations-Center-Tab (Task 10, Phase 1) im 3-Ebenen-Schema.",
-  "source": "src/auth/",
+  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) im 3-Ebenen-Schema.",
+  "source": "src/auth/ · src/ops/ · src/components/ops/OperationsCenterPanel.tsx",
   "fields": {
     "role.viewer": {
       "kurzinfo": "Viewer darf den Status lesen, nichts schreiben.",
@@ -26,10 +26,60 @@
       "technischeInfo": "POST /api/live/transition und POST /api/live/kill verlangen live.gate (heute Admin-Token FIRM_ADMIN_TOKEN) plus x-csrf-token (CSRF_INVALID bei Fehlen) plus Kill-Phrase ('KILL' bzw. 'CLEAR_KILL'). GET /api/live/state ist read-only und frei lesbar. Rate-Limit wie Credentials: 5/min/IP (429 GATE_RATE_LIMITED). Jede Aktion landet in der Audit-Hash-Kette.",
       "risiko": "Der Status live ist rein informativ und immer fail-closed, bis die Live-State-Machine vollstaendig durchlaufen ist. Ihn als Freigabe zu deuten, ist ein Missverstaendnis."
     },
-    "ops.modules": {
-      "kurzinfo": "Karten im Operations Center: bereit, Phase 3 oder gesperrt.",
-      "technischeInfo": "GET /api/ops liefert die Hülle ohne Widget-Daten. Tab brokers ist 'ready' und verlinkt den bestehenden Control-Plane-Tab.",
-      "risiko": "Die Hülle aggregiert keine Secrets. Phase-3-Kacheln bleiben read-only GETs."
+    "ops.sections": {
+      "kurzinfo": "Zehn Sektionen im Operations Center, jede mit echten Werten aus einem bestehenden Modul.",
+      "technischeInfo": "GET /api/ops liefert Katalog und Ist-Daten in einem Payload: sections[] (id, title, summary, sources, status, asOf, metrics[], items[], note, error) plus health (Zähler je Zustand). Die Kollektoren in src/ops/collect.ts lesen Universum, Scanner, Portfolio, Zyklen, Broker, Router, Agenten, Risk, Audit und Hilfe — es entsteht keine zweite Fachlogik.",
+      "risiko": "Der Payload aggregiert keine Secrets und keine Credentials. Ein Fehlerzustand wird immer als eigener Status gezeigt (leer/eingeschränkt/gesperrt/nicht verfügbar), niemals als grüner Wert."
+    },
+    "section.marketUniverse": {
+      "kurzinfo": "Bestand des Instrumenten-Universums je Venue, Datenstand und Ausschluss-Policy.",
+      "technischeInfo": "Quelle: src/universe (InstrumentRegistry) — size, countByVenue(), lastSync, policy.version, skippedLines.",
+      "risiko": "Ein leeres Universum ist kein Fehler des Cockpits, sondern ein Setup-Thema: npm run universe:seed ausführen."
+    },
+    "section.scanner": {
+      "kurzinfo": "Trichter und Tagesrotation des deterministischen Markt-Scanners.",
+      "technischeInfo": "Quelle: src/scanner (getScannerService().getScan()) — funnel {scanned, eligible, interesting, daily, deep}, config.version, Top-Scores mit Regime.",
+      "risiko": "Ohne Kerzenhistorie unter data/history bleibt der Trichter leer. Das ist ein Datenstand, keine Scan-Panne — der Hinweis steht in der Sektion."
+    },
+    "section.portfolio": {
+      "kurzinfo": "Offene Positionen, Exposure, Eigenkapital und Tagesergebnis.",
+      "technischeInfo": "Quelle: Datenbank (positions, equity_snapshots) + src/portfolio (PORTFOLIO_CONFIG_VERSION). Gewichte und Kennzahlen rechnet ausschließlich das Portfolio-Modul — das Cockpit zeigt nur Ergebnisse.",
+      "risiko": "Ohne Datenbankverbindung ist die Sektion 'nicht verfügbar'. Positionen ohne Stop-Loss werden als Hinweis markiert, nicht stillschweigend übergangen."
+    },
+    "section.research": {
+      "kurzinfo": "Status und Verlauf der Tages- und Wochenzyklen.",
+      "technischeInfo": "Quelle: src/cycle (getCycleService()) — getRuns(), getDailyLatest(), getWeeklyLatest() inkl. Weekly-Klassen CORE/ROTATION/DISCOVERY.",
+      "risiko": "Fehlgeschlagene Läufe bleiben sichtbar (Status FAILED). Ein 'letzter Lauf: COMPLETED' ersetzt keine Prüfung der Artefakte."
+    },
+    "section.brokers": {
+      "kurzinfo": "Sieben Venues mit Capabilities, Execution-Modi und lokalem Health-Status.",
+      "technischeInfo": "Quelle: GET /api/brokers (BROKER_REGISTRY, availableExecutionModes, createAdapter(id,'paper').healthCheck()). Remote-Checks sind Default aus (BROKER_HEALTHCHECK_REMOTE).",
+      "risiko": "Health ist lokal und sagt nichts über Live-Fähigkeit. Credentials und Live-Freigabe gehören in den Broker-Tab, nie ins Cockpit."
+    },
+    "section.llm": {
+      "kurzinfo": "MODEL_ROUTER im Betrieb: Policy, Modus, Provider-Health, Budget und letzte Entscheidungen.",
+      "technischeInfo": "Quelle: GET /api/routing (getModelRouter().snapshot()) plus Ollama-/Provider-Status aus GET /api/firm.",
+      "risiko": "Kein Provider erreichbar heißt: der Router fällt auf die Regel-Engine zurück. Das ist ein eingeschränkter Zustand und wird als solcher ausgewiesen."
+    },
+    "section.agents": {
+      "kurzinfo": "Belegschaft der Firma: Rollen, Status, Missionen und letzte Aktivität.",
+      "technischeInfo": "Quelle: Datenbank (agents, agent_messages, missions) über GET /api/firm.",
+      "risiko": "BLOCKED- oder STOPPED-Agenten sind ein Betriebszustand, kein Anzeigefehler — Ursache im Protokoll-Tab klären."
+    },
+    "section.risk": {
+      "kurzinfo": "Wirksame Limits, Volatilitäts-Regime, Kill-Switch und Live-Gate-Lage.",
+      "technischeInfo": "Quelle: src/lib/riskGuard (getLimits, killSwitch), src/lib/adaptiveRisk (getAdaptiveRiskStatus), src/live-gate (liveGateConfig).",
+      "risiko": "Kill-Switch scharf = Handel gesperrt (Status 'gesperrt'). Limits werden im Code geklemmt (LIMIT_CEILINGS) — ein Anzeigewert über dem Deckel ist ein Bug, kein Feature."
+    },
+    "section.audit": {
+      "kurzinfo": "Audit-Trail mit Warnungen, kritischen Ereignissen und Integrität der Live-Gate-Hash-Kette.",
+      "technischeInfo": "Quelle: Datenbank (audit_log, gezählt per level) plus verifyAuditChain() aus src/live-gate/audit (SHA-256-Kette, firstBrokenSeq).",
+      "risiko": "Eine gebrochene Hash-Kette ist ein Sicherheitsvorfall: Kette nicht 'reparieren', sondern Einträge sichern und Ursache klären."
+    },
+    "section.help": {
+      "kurzinfo": "Hilfe-Systematik und Dokumentationsportal direkt aus dem Cockpit.",
+      "technischeInfo": "Quelle: docs/help/*.help.json (Anzahl Dateien und Fachbegriffe, 3 Ebenen je Begriff) und src/lib/docsCatalog.ts (Whitelist von GET /api/docs).",
+      "risiko": "Die Hilfe liest nur die Whitelist — neue Dokumente erscheinen erst, wenn sie im Katalog stehen. Keine Pfade von außen."
     }
   }
 }

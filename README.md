@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.22.0 (2026-08-29) · Vollständige
+> **Dokumentationsstand:** v1.23.0 (2026-08-29) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md).
@@ -63,7 +63,7 @@ Weitere Module: `MARKET_UNIVERSE`, `BROKER_ARCHITECTURE`, `BITUNIX`,
 ## Testen & Validieren
 
 ```bash
-npm test                 # Unit/Integration (≈1148 Tests)
+npm test                 # Unit/Integration (≈1120 Tests)
 npm run typecheck        # tsc --noEmit
 npm run lint             # ESLint
 npm run docs:validate    # Docs-as-Code-Wächter (Task 12, CI-Job docs-validate)

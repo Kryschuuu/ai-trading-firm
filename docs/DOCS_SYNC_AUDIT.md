@@ -1,7 +1,7 @@
 # Docs-Code-Sync-Audit (Task 12)
 
-> **Status-Header:** **Implementiert** (Task 12) · **2026-08-28** ·
-> Code-Version **1.19.0**
+> **Status-Header:** **Implementiert** (Task 12) · **2026-08-29** ·
+> Code-Version **1.23.0**
 >
 > Systematisches Audit: **jede dokumentierte Behauptung gegen den Code geprüft**.
 > Diskrepanz → Fix (Priorität: Code anpassen, wenn Doku das Zielbild korrekt
@@ -11,9 +11,10 @@
 
 ## Zusammenfassung
 
-- **Geprüfte Behauptungen:** 99 (Stichprobe über alle Zieldokumente + Root-Docs).
-- **Diskrepanzen gefunden:** 13 → **alle behoben** (Fix in Docs/Help bzw. Validator-Präzisierung).
-- **0 offene Diskrepanzen** zum Stand 2026-08-28.
+- **Geprüfte Behauptungen:** 105 (Stichprobe über alle Zieldokumente + Root-Docs;
+  6 davon aus dem Nachaudit Task 10, v1.23.0).
+- **Diskrepanzen gefunden:** 14 → **alle behoben** (Fix in Code/Docs/Help bzw. Validator-Präzisierung).
+- **0 offene Diskrepanzen** zum Stand 2026-08-29.
 - **Secret-Scan über Docs:** 0 Funde (echte Keys/Secrets).
 - **Verifikationsweg:** `npm run docs:validate` grün; referenzierte Code-Stellen manuell geprüft.
 
@@ -29,7 +30,7 @@
 | A4 | Kill-Switch vor Match in-process geprüft | `src/lib/engine.ts` | ✅ |
 | A5 | Paper-Ledger nutzt Ausführungs-Adapter (echte Kurse + deterministischer Simulator) | `src/lib/marketdata/manager.ts`, `src/brokers/paper.ts` | ✅ |
 | A6 | **Fix:** Status-Header fehlte → ergänzt (`Implementiert`, Task 1–11) | `docs/ARCHITECTURE.md:1-5` | ✅ Doc-Fix |
-| A7 | **Fix:** Abschnitt „Wie Docs hier gepflegt werden“ (Docs-as-Code) fehlte → ergänzt | `docs/ARCHITECTURE.md §12` | ✅ Doc-Fix |
+| A7 | **Fix:** Abschnitt „Wie Docs hier gepflegt werden“ (Docs-as-Code) fehlte → ergänzt | `docs/ARCHITECTURE.md §13` | ✅ Doc-Fix |
 | A8 | Regime-Klassifizierung NORMAL/ELEVATED/EXTREME | `src/lib/adaptiveRisk.ts` | ✅ |
 
 ## 2. MARKET_UNIVERSE.md
@@ -198,6 +199,19 @@
 | R8 | **Fix:** `docs/help/help.schema.json` fehlte (Referenzen auf nicht-existente Schema-URL) → neu erstellt | `docs/help/help.schema.json` | ✅ Doc-Fix |
 | R9 | **Fix:** 3 Markdown-Trailing-Whitespace-Stellen bereinigt (INSTALL.md:248, PEER_REVIEW:3,4) | Docs | ✅ Doc-Fix |
 
+## 17. Operations Center (Nachaudit Task 10, v1.23.0)
+
+| # | Behauptung | Code-Referenz | Befund |
+| --- | --- | --- | --- |
+| C1 | Zehn Sektionen im Cockpit: Market Universe, Scanner, Portfolio Analytics, Research Operations, Broker Operations, LLM Operations, Agent Operations, Risk, Audit, Help | `src/auth/ops.ts` (OPS_SECTIONS), `src/ops/types.ts` (OPS_SECTION_IDS) | ✅ |
+| C2 | Jede Sektion nennt ihre Quellen und liefert Ist-Daten (status/metrics/items) | `src/ops/collect.ts`, `src/ops/types.ts` | ✅ |
+| C3 | Kein `stub`-Status mehr; stattdessen ready/degraded/empty/locked/unavailable | `src/ops/types.ts` (OPS_SECTION_STATUSES) | ✅ Code-Fix |
+| C4 | Aggregation über bestehende Module, keine zweite Fachlogik, kein Schreibpfad | `src/ops/collect.ts` (nur lesende Fassaden) | ✅ |
+| C5 | `GET /api/ops` beschreibt sich als Operations Center (nicht „Hülle“) und bleibt read-only/tokenfrei | `src/app/api/ops/route.ts` | ✅ Code-Fix |
+| C6 | **Fix:** Tracker wies Task 10 als „Implementiert“ aus, Code war Phase-1-Hülle → Phase 2–4 nachgezogen; HANDBUCH 2.3 und `ops.help.json` synchronisiert | `docs/ARENA_TASKS.md`, `docs/HANDBUCH.md`, `docs/help/ops.help.json` | ✅ Code-Fix + Doc-Fix |
+
+---
+
 ---
 
 ## Diskrepanz-Protokoll (alle behoben)
@@ -217,6 +231,7 @@
 | 11 | `INSTALL.md:248`, `PEER_REVIEW:3,4` Trailing-Whitespace | Markdown-Lint | Bereinigt | Docs |
 | 12 | CI-Job `docs-validate` fehlte | CI-Lücke | Validator + Workflow + npm-Skript | scripts/docs-validate.ts, docs/ci/ |
 | 13 | Help-Files unter standardisiertem 3-Ebenen-Schema nicht validierbar | Schema-Lücke | Kanonisches `help.schema.json` + Validator | help.schema.json, docs-validate.ts |
+| 14 | Task 10 als „Implementiert“ geführt, Code war eine Phase-1-Hülle (sieben Karten, fünf `stub`) | Doc-Code-Diskrepanz | Zehn Sektionen aggregiert; Katalog, Kollektoren, Route und Panel umgeschrieben; Terminologie bereinigt | src/ops/**, src/auth/ops.ts, src/app/api/ops/route.ts, src/components/ops/OperationsCenterPanel.tsx |
 
 ## Restrisiken
 
@@ -234,6 +249,6 @@
 ## Fazit
 
 Alle 15 Zieldokumente sind vorhanden, tragen einen Status-Header und sind mit
-dem Code synchron. Die 13 gefundenen Diskrepanzen sind behoben. Der
+dem Code synchron. Die 14 gefundenen Diskrepanzen sind behoben. Der
 CI-Job `docs-validate` erzwingt künftig Schema-Konformität, tote-Link-Freiheit,
 Markdown-Lint, Secret-Freiheit und Code-Konsistenz. **0 offene Diskrepanzen.**

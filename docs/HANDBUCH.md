@@ -150,9 +150,14 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
   Prompt iterieren, Trefferquote messen. Das UI-Pendant zu Kapitel 5 und 6 —
   alle vier Schritte ohne Terminal. Jedes Feld hat ein **i**-Symbol mit Kurz-
   Erklärung (auch per Tastatur erreichbar).
-* **🖥 Operations Center** — Rolle (viewer/operator/admin), Live-Sperre und
-  Modul-Karten (Phase-1-Hülle, Task 10). Die Kacheln Universum/Scanner/Portfolio
-  folgen in späteren Phasen.
+* **🧭 Operations Center** — die Control Plane der Firma: Rolle
+  (viewer/operator/admin), Live-Sperre und **zehn Sektionen mit echten Werten**
+  — Market Universe, Scanner, Portfolio Analytics, Research Operations, Broker
+  Operations, LLM Operations, Agent Operations, Risk, Audit, Help (Task 10).
+  Jede Sektion nennt ihre Quellen (`Quellen` unter der Karte); ist eine Quelle
+  nicht lesbar, steht dort ein begründeter Zustand (`leer`, `eingeschränkt`,
+  `gesperrt`, `nicht verfügbar`) statt einer leeren Karte. Der Live-Chip zeigt
+  die Sperre inklusive Grund (Tooltip).
 * **🌐 Brokers & Venues** — Control Plane: Status, Credentials (maskiert),
   sechs Zustandsebenen. Secrets nie im Frontend.
 * **Risk & Guardrails** — die harten Limits, LLM-Status, Not-Halt-Historie.
@@ -428,7 +433,7 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `GET` | `/api/firm/micro` | – | Executor-Prozess-Status + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
 | `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions; 401 wenn Token gesetzt und fehlt) |
-| `GET` | `/api/ops` | – | Operations-Center-Hülle (`liveEnabled: false`, Modul-Karten) |
+| `GET` | `/api/ops` | – | Operations Center: Rolle, `liveEnabled`, zehn Sektionen mit Status/Kennzahlen/Quellen |
 
 > **Workshop-Endpunkte:** Die drei Missions-/Agenten-Routen sind die Grundlage
 > des Workshop-Tabs. `riskBudget`/`maxPositionPct` werden gegen die

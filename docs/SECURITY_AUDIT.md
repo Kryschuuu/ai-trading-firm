@@ -643,9 +643,18 @@ keine ungedeckelte Cloud-Nutzung.
 
 ## Security Audit — Task 10 (Operations Center + RBAC, v1.18.0, Phase 1)
 
+> **Nachtrag v1.23.0 (2026-08-29):** Das Operations Center aggregiert jetzt zehn
+> Sektionen (`src/ops/`, Katalog in `src/auth/ops.ts`) statt sieben Karten mit
+> fünf Platzhaltern. Nachaudit: **kein neuer Befund.** Die Aggregation ist
+> strikt lesend (kein Schreibpfad, kein Order-Pfad, kein Secret im Payload),
+> jeder Fehlerzustand ist fail-soft und fail-closed (`unavailable` statt grünem
+> Wert). T3/T4 unten gelten unverändert auch für den erweiterten Payload;
+> der Secret-Scanner läuft über die vollständige Antwort
+> (`tests/ops.api.test.ts`).
+
 **Stand:** 2026-08-28 · **Modul:** `src/auth/` ·
 **API:** neu `GET /api/auth/me`, `GET /api/ops` ·
-**UI:** Dashboard-Tab Operations Center (Hülle).
+**UI:** Dashboard-Tab Operations Center.
 **Status:** ERHÖHT (Rollen, Token-Mapping) — Threat Model + Checkliste.
 
 ### Threat Model

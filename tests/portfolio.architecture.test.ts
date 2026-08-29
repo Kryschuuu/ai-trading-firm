@@ -236,8 +236,12 @@ test("Doku: PORTFOLIO_ANALYTICS.md enthält Formelkatalog, Kette und LLM-Abschni
 test("Doku: README-Index und /api/docs-Whitelist kennen das neue Dokument", () => {
   const readme = readFileSync(path.join(ROOT, "docs/README.md"), "utf8");
   assert.match(readme, /PORTFOLIO_ANALYTICS\.md/);
+  // Die Whitelist liegt seit v1.23.0 in src/lib/docsCatalog.ts (Single Source
+  // of Truth für GET /api/docs und die Help-Sektion des Operations Centers).
+  const catalog = readFileSync(path.join(ROOT, "src/lib/docsCatalog.ts"), "utf8");
+  assert.match(catalog, /docs\/PORTFOLIO_ANALYTICS\.md/);
   const docsRoute = readFileSync(path.join(ROOT, "src/app/api/docs/route.ts"), "utf8");
-  assert.match(docsRoute, /docs\/PORTFOLIO_ANALYTICS\.md/);
+  assert.match(docsRoute, /docsCatalog/, "GET /api/docs muss den Katalog nutzen");
 });
 
 test("Doku: Security-Audit-Kapitel für Task 05 existiert", () => {

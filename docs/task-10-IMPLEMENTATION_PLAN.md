@@ -1,7 +1,16 @@
 # Task 10 — Implementierungsplan: Operations Center + RBAC
 
-**Stand:** 2026-08-28 · **Release-Ziel:** v1.18.0 (Phase 1)
+**Stand:** 2026-08-29 · **Release-Ziel:** v1.18.0 (Phase 1)
 **Branch:** `arena/01a0495b-ai-trading-firm` (Session fest; Arbeit und PR nur hier)
+
+> **Nachtrag v1.23.0 (2026-08-29):** Phase 2 (3-Ebenen-Hilfe) und Phase 3
+> (read-only Kacheln) sind inzwischen umgesetzt — Branch
+> `arena/01a04cc9-ai-trading-firm`. Das Operations Center aggregiert die zehn
+> Sektionen Market Universe, Scanner, Portfolio Analytics, Research Operations,
+> Broker Operations, LLM Operations, Agent Operations, Risk, Audit und Help aus
+> den bestehenden Modulen (`src/ops/`, Katalog in `src/auth/ops.ts`). Phase 4
+> (Sessions, restliche Schreib-APIs auf Permission-Guards) bleibt offen.
+> Dieser Plan beschreibt **Phase 1** und wird nicht nachgezogen.
 
 **Diese Inkrement (Phase 1, analog Tasks 03–08):** RBAC-Kern + leerer
 Operations-Center-Tab + vier Dokumentations-/Code-Drifts. **Kein** Task 11

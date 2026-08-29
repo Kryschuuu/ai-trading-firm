@@ -1,8 +1,8 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-08-28** · Code-Version **1.19.0**
-> Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§12](#12-wie-docs-hier-gepflegt-werden-docs-as-code))
+> Dokumentationsstand **2026-08-29** · Code-Version **1.23.0**
+> Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine
 Trading-Firma, die strategische Intelligenz (LLM) von
@@ -691,7 +691,43 @@ Neue read-only-Endpunkte: `GET /api/marketdata/snapshot?instrument=…` und
 
 ---
 
-## 11. Glossar (Kurz)
+## 11. Operations Center: Aggregationsschicht (v1.23.0, Task 10)
+
+Das Operations Center ist die **Control Plane** des Systems — kein eigenes
+Fachmodul. Es führt vorhandene Module in einer read-only Sicht zusammen:
+
+```
+GET /api/ops
+   └─ src/ops/index.ts            buildOperationsCenter(actor)
+        ├─ src/ops/collect.ts     zehn Kollektoren, parallel, fail-soft
+        │    ├─ src/universe        Market Universe
+        │    ├─ src/scanner         Scanner
+        │    ├─ Datenbank           Portfolio Analytics / Agent Operations / Audit
+        │    ├─ src/cycle           Research Operations
+        │    ├─ src/brokers         Broker Operations
+        │    ├─ src/routing         LLM Operations
+        │    ├─ riskGuard/adaptive  Risk
+        │    └─ docs/help           Help
+        └─ src/auth/ops.ts        Katalog + Rolle + Live-Gate-Projektion
+```
+
+**Regeln:**
+
+1. **Keine zweite Fachlogik.** Gewichte, Scores, Limits und Kennzahlen werden
+   weiterhin in ihren Modulen berechnet. Das Cockpit zeigt nur Ergebnisse.
+2. **Kein Schreibpfad.** Kein Order-, Credential- oder Mutations-Aufruf.
+3. **Fail-soft, nie fail-open.** Ist eine Quelle nicht lesbar, wird nur ihre
+   Sektion `unavailable` (mit redigierter Meldung). Es gibt keinen
+   Platzhalter-Zustand: `ready | degraded | empty | locked | unavailable`.
+4. **Broker-Status getrennt.** Das Cockpit zeigt Capabilities und lokalen
+   Health in Papier-Ausführung. Credentials, Verbindungszustand und
+   Live-Freigabe bleiben im Broker-Tab (Control Plane).
+5. **Live bleibt zu.** `liveEnabled` ist die Projektion des Live-Gate-Enforcers
+   über alle Venues — im Auslieferungszustand `false`.
+
+---
+
+## 12. Glossar (Kurz)
 
 | Begriff | Bedeutung |
 | --- | --- |
@@ -718,7 +754,7 @@ Neue read-only-Endpunkte: `GET /api/marketdata/snapshot?instrument=…` und
 
 ---
 
-## 12. Wie Docs hier gepflegt werden (Docs-as-Code)
+## 13. Wie Docs hier gepflegt werden (Docs-as-Code)
 
 Dieser Abschnitt ist die **verbindliche Pflege-Anleitung** für alle Markdown-
 Dateien in `docs/` (Task 12). Sie gelten für jede zukünftige Änderung.
@@ -740,7 +776,7 @@ Docs und Code werden **nie getrennt gemergt**. Jeder PR, der Verhalten ändert,
 3. **Status-Header-Pflicht**: Jede Doc trägt oben einen Status-Header
    (`Implementiert` / `Teilweise` / `Geplant` + zugehöriger Task). Nichts
    Unimplementiertes wird als fertig beschrieben.
-4. **Terminologie-Konsistenz**: Fachbegriffe gemäß Glossar in [§11](#11-glossar-kurz)
+4. **Terminologie-Konsistenz**: Fachbegriffe gemäß Glossar in [§12](#12-glossar-kurz)
    (Asset vs. Instrument vs. Underlying; Execution Modes `backtest/paper/testnet/live`;
    Paper-Modi A/B/C; Modell-Klassen `small/medium/large`; Live-State-Namen).
 
