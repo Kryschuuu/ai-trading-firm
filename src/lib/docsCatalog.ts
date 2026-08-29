@@ -77,6 +77,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Historical Store",
     subtitle: "Kerzen-Schema v2, Timeframe-Schlüssel, Dedup und v1→v2-Migration (v1.26)",
   },
+  historyMigration: {
+    file: "docs/MIGRATION_TIMEFRAME_FIELD.md",
+    title: "Runbook: Timeframe-Migration (v1 → v2)",
+    subtitle: "Backup, Dry-Run/--apply, Neuaufbau statt Inline-Migration, Validierung, Rollback (v1.26.2)",
+  },
   scanner: {
     file: "docs/DAILY_WEEKLY_RESEARCH.md",
     title: "Daily & Weekly Research",

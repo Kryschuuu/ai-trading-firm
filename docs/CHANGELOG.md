@@ -20,6 +20,87 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.26.2] — 2026-08-29 · Nacharbeit: Versionierung, Changelogs & Migrations-Runbook (MDSYNC-001)
+
+**Nacharbeit zu v1.26.0 (PR #40, `fix(history): persist candle timeframe and
+deduplicate bars`).** Schema v2, Primärschlüssel `instrumentId + timeframe +
+ts` und Dedup-Regel bleiben unverändert. Dieser Release schließt die
+Doku-Lücken des Migrationspfads, härtet das Migrations-CLI ab und verankert
+die Versionierung in der CI (`npm run docs:validate`).
+
+### Added — Dokumentation & Nachweise
+
+* **Neu `docs/MIGRATION_TIMEFRAME_FIELD.md`** — Runbook für
+  Produktionsumgebungen: Wann es gilt, Fehlerbild, Entscheidungsmatrix
+  **Neuaufbau (empfohlen) vs. Inline-Migration**, Schritt 0 (Voraussetzungen,
+  `PAPER_HISTORY_DIR`), Schritt 1 (Schreiber stoppen — Next.js-App,
+  `market-sync`, `scan --sync-first`; MicroExecutor schreibt nicht),
+  Schritt 2 (Pflicht-Backup + Prüfsumme, `chmod 600`), Pfad A (Neuaufbau via
+  `npm run market-sync -- --venue=BITUNIX`), Pfad B (Dry-Run → `--apply`),
+  Bestimmung von `--assume-timeframe` über den Median der `ts`-Abstände
+  (nie raten), Validierung mit erwarteten Sollwerten, Nachlauf, Rollback,
+  Exit-Codes (`0` angewendet · `1` Abbruch/verworfene Zeilen · `2` nichts
+  angewendet) und Sicherheitsregeln.
+* **Task 14 in `docs/ARENA_TASKS.md`**: Timeframe-Dimension im Historical
+  Store (MDSYNC-001) mit Version (`1.26.0`, Nacharbeit `1.26.2`), PR #40,
+  Security- und Review-Spalte sowie Umsetzungs-/Nacharbeits-Detail.
+* **`tests/docsVersioning.test.ts`** (neu): package.json-Version gegen beide
+  Changelogs, Status-Header und `docs/README.md`; Runbook vorhanden, im
+  Katalog (`src/lib/docsCatalog.ts`) und aus `docs/HISTORY.md` +
+  `docs/MARKET_DATA_PIPELINE.md` verlinkt; `--apply`-Hinweis im
+  Migrations-CLI.
+* **`npm run docs:validate`**: neuer Check **Version-Konsistenz** —
+  `package.json` muss mit dem obersten Eintrag beider Changelogs, dem
+  Status-Header der `CHANGELOG.md` und der Versionszeile in `docs/README.md`
+  übereinstimmen.
+
+### Changed — Migrationspfad & Katalog
+
+* **`docs/MARKET_DATA_PIPELINE.md` §5.3 (neu):** „Empfohlener
+  Migrationspfad: Neuaufbau statt Inline-Migration“ — für den Bitunix-Feed
+  ist der Neuaufbau über `npm run market-sync` der empfohlene Weg (150 Bars
+  je Instrument und Timeframe, `5m/15m/30m/1h`, public REST, Timeframe aus
+  dem Backfill-Kontext statt aus einer Annahme). Die Inline-Migration bleibt
+  bewusst nur Sicherheitsnetz für Umgebungen ohne Netz-/Rate-Limit-Spielraum.
+* **`docs/MARKET_DATA_PIPELINE.md` §5.2** und **`docs/HISTORY.md` §6**:
+  CLI-Beispiele auf den neuen Dry-Run-Default umgestellt, Exit-Codes
+  dokumentiert, Link auf das Runbook.
+* **`docs/README.md` + `src/lib/docsCatalog.ts`:** `docs/HISTORY.md` und
+  `docs/MIGRATION_TIMEFRAME_FIELD.md` im Doku-Katalog (`GET /api/docs`)
+  registriert; Versionszeile aktualisiert.
+
+### Security — Migrationsskript
+
+* **`scripts/migrate-history-timeframe.ts`: Dry-Run ist der Default.**
+  Ohne das explizite Flag `--apply` wird **nichts** geschrieben und **kein**
+  Backup angelegt; der Lauf endet mit Exit-Code **2** und einem Hinweis auf
+  das Runbook. Damit ist der Audit-Punkt „Migrationsskript darf keine
+  Produktionsdaten ohne explizite Freigabe verändern“ erfüllt.
+* Der Kern (`src/history/migration.ts`, `migrateHistoryFile()`) ist
+  unverändert: Backup `0600` vor dem Schreiben, Abbruch bei
+  Backup-Fehlschlag, Idempotenz, Verlust-Invariante
+  `gelesen == geschrieben + dedupliziert + verworfen`.
+
+### Migration / Deployment
+
+* Für Umgebungen, die bereits Schema v2 nutzen: **keine** Datenmigration.
+* Für Altbestand (Zeilen ohne `timeframe`) gilt — zuerst **ohne** `--apply`
+  prüfen, dann anwenden:
+
+```bash
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m            # Dry-Run (Default)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m --apply    # schreibt, mit Backup
+```
+
+* Empfohlen bleibt der **Neuaufbau**: Backup → Altdatei entfernen →
+  `npm run market-sync -- --venue=BITUNIX` → validieren (Kap. 8 des
+  Runbooks).
+* `package.json` → **1.26.2**.
+
+---
+
 ## [1.26.1] — 2026-08-29 · Typisierte Marktdaten-Fehler statt stiller leerer Arrays (MDERR-006)
 
 **Fix (P1, Observability-/Sicherheitsdefekt):** `getCandles()` in

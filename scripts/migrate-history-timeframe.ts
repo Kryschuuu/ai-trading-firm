@@ -2,7 +2,14 @@
  * Migration: Historical Store v1 (ohne `timeframe`) → v2 (mit `timeframe`).
  *
  *   npm run history:migrate -- --file=data/history/candles.ndjson \
- *     --assume-timeframe=15m [--dry-run]
+ *     --assume-timeframe=15m            # Dry-Run (Default, schreibt nichts)
+ *   npm run history:migrate -- --file=data/history/candles.ndjson \
+ *     --assume-timeframe=15m --apply    # schreibt, mit Backup
+ *
+ * DRY-RUN IST DER DEFAULT (seit 1.26.2): Ohne `--apply` wird ausschließlich
+ * ein Report ausgegeben — keine Datei wird verändert, kein Backup angelegt,
+ * Exit-Code 2 weist darauf hin, dass `--apply` fehlt. Produktionsdaten werden
+ * damit nie durch einen versehentlichen Aufruf überschrieben.
  *
  * WARUM --assume-timeframe EXPLIZIT sein muss:
  *   Im alten Schema gibt es kein `timeframe`-Feld. 5m- und 1h-Kerzen desselben
@@ -16,7 +23,8 @@
  * dedup (jüngstes fetchedAt gewinnt) → sortieren (instrumentId, timeframe, ts)
  * → atomar schreiben. Idempotent: ein zweiter Lauf ändert nichts.
  *
- * Siehe docs/HISTORY.md (Schema, Schlüssel, Dedup-Regel, Rollback).
+ * Siehe docs/MIGRATION_TIMEFRAME_FIELD.md (Runbook: Backup, Dry-Run, Anwenden,
+ * Validierung, Rollback) und docs/HISTORY.md (Schema, Schlüssel, Dedup-Regel).
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -26,14 +34,17 @@ import { formatMigrationReport, migrateHistoryFile } from "../src/history/migrat
 const HELP = `history:migrate — Historical Store v1 → v2 (timeframe-Dimension)
 
 Verwendung:
-  npm run history:migrate -- --file=<pfad> --assume-timeframe=<tf> [--dry-run]
+  npm run history:migrate -- --file=<pfad> --assume-timeframe=<tf>           # Dry-Run
+  npm run history:migrate -- --file=<pfad> --assume-timeframe=<tf> --apply   # schreiben
 
 Optionen:
   --file=<pfad>            Pfad zur NDJSON-Datei (Default: data/history/candles.ndjson)
   --assume-timeframe=<tf>  Timeframe, der ALTEN Zeilen ohne timeframe zugewiesen
                            wird. Erlaubt: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 5d.
                            PFLICHT, sobald die Datei Legacy-Zeilen enthält.
-  --dry-run                Nur Report ausgeben, nichts schreiben, kein Backup.
+  --apply                  Schreibt die migrierte Datei (mit Backup). OHNE dieses
+                           Flag läuft der Dry-Run — es wird nichts verändert.
+  --dry-run                Expliziter Dry-Run (entspricht dem Default).
   --help                   Diese Hilfe.
 
 Warum --assume-timeframe explizit sein muss:
@@ -43,10 +54,20 @@ Warum --assume-timeframe explizit sein muss:
   fehlt.
 
 Sicherheit:
+  - Dry-Run ist der Default: ohne --apply wird nichts geschrieben.
   - Vor dem Schreiben wird ein Backup candles.ndjson.bak-<ISO> (chmod 600)
     angelegt; schlägt das fehl, wird abgebrochen (Original bleibt unverändert).
   - Die Migration ist idempotent: ein zweiter Lauf ändert nichts.
-  - Rollback: das Backup über die Zieldatei zurückspielen (siehe docs/HISTORY.md).
+  - Rollback: das Backup über die Zieldatei zurückspielen.
+
+Exit-Codes:
+  0  angewendet (oder nichts zu tun) bzw. Report ohne verworfene Zeilen
+  1  Abbruch (ungültige Option, Backup fehlgeschlagen, Invariante verletzt)
+     oder Zeilen verworfen
+  2  nichts angewendet — --assume-timeframe fehlt/ungültig oder --apply fehlt
+
+Runbook (Backup, Validierung, Rollback): docs/MIGRATION_TIMEFRAME_FIELD.md
+Schema, Schlüssel, Dedup-Regel: docs/HISTORY.md
 `;
 
 function main(): void {
@@ -58,7 +79,11 @@ function main(): void {
 
   const fileArg = args.find((a) => a.startsWith("--file="))?.slice("--file=".length);
   const tfArg = args.find((a) => a.startsWith("--assume-timeframe="))?.slice("--assume-timeframe=".length);
-  const dryRun = args.includes("--dry-run");
+  // SICHERHEIT: Dry-Run ist der Default. Geschrieben wird ausschließlich mit
+  // dem expliziten Flag --apply (Security-Audit: keine Produktionsdaten ohne
+  // bewusste Freigabe verändern).
+  const apply = args.includes("--apply");
+  const dryRun = args.includes("--dry-run") || !apply;
 
   const file = path.resolve(fileArg ?? path.join(process.cwd(), "data", "history", "candles.ndjson"));
 
@@ -82,6 +107,16 @@ function main(): void {
       dryRun,
     });
     for (const line of formatMigrationReport(report)) console.log(line);
+    if (!apply) {
+      // Kein --apply: es wurde nichts geschrieben. Explizit melden, damit ein
+      // automatisierter Lauf nicht „grün“ durchgeht, obwohl er nur las.
+      console.log(
+        "[history:migrate] NICHTS ANGEWENDET — Dry-Run ist der Default. Zum Schreiben --apply ergaenzen " +
+          "(Backup wird automatisch angelegt). Siehe docs/MIGRATION_TIMEFRAME_FIELD.md",
+      );
+      process.exitCode = 2;
+      return;
+    }
     if (report.rejected.length > 0) process.exitCode = 1;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -1,8 +1,11 @@
 # Historical Store — Schema, Schlüssel, Dedup & Migration
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.26.0** · Modul `src/lib/marketdata/historicalStore.ts` ·
+> Code-Version **1.26.2** · Modul `src/lib/marketdata/historicalStore.ts` ·
 > Migration `scripts/migrate-history-timeframe.ts` / `npm run history:migrate`
+>
+> **Für Betrieb/Deployment** (Backup, Dry-Run, Anwenden, Validierung,
+> Rollback): [MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md).
 
 Der Historical Store ist die append-only OHLCV-Senke des Systems
 (`data/history/candles.ndjson`). Scanner, Replay/Backtest und
@@ -88,7 +91,8 @@ Die Runtime-Fehlermeldung bei fehlendem Timeframe lautet:
 
 > `query({instrumentId}) ohne timeframe ist nicht zulaessig. Ein
 > Timeframe-freier Zugriff wuerde Kerzen unterschiedlicher Periodizitaet
-> mischen. Nutze z.B. query({ instrumentId, timeframe: "15m" }).`
+> mischen. Nutze z.B. query({ instrumentId, timeframe: "15m" }). Siehe
+> docs/MIGRATION_TIMEFRAME_FIELD.md.`
 
 ## 5. Legacy-Verhalten zur Laufzeit (v1 ohne `timeframe`)
 
@@ -106,16 +110,39 @@ alle Timeframes und wählt je Instrument deterministisch eine Reihe
 
 ## 6. Migration v1 → v2
 
+**Empfohlener Pfad in Produktion ist der Neuaufbau**, nicht die
+Inline-Migration: `candles.ndjson` entfernen (Backup vorher!) und
+`npm run market-sync` die Historie mit korrektem Timeframe neu aufbauen
+lassen (150 Bars je Instrument und Timeframe, Timeframes `5m`, `15m`,
+`30m`, `1h`). Der Bitunix-Feed ist public REST und in Minuten nachgezogen —
+damit ist die Etikettierung nachweislich korrekt statt angenommen. Der Pfad
+der Datei folgt `PAPER_HISTORY_DIR` (Default `data/history`). Details und
+Validierung: [MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md).
+
+Die Inline-Migration bleibt als Sicherheitsnetz für Fälle, in denen kein
+Re-Fetch möglich ist (Offline-Betrieb, ausgeschöpftes Rate-Limit):
+
 ```bash
+# 1. Dry-Run — das ist der Default, schreibt nichts, Exit-Code 2
 npm run history:migrate -- --file=data/history/candles.ndjson \
-  --assume-timeframe=15m [--dry-run]
+  --assume-timeframe=15m
+
+# 2. Anwenden — erst mit --apply wird geschrieben (Backup automatisch)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m --apply
 ```
+
+**Dry-Run ist der Default (seit 1.26.2):** Ohne `--apply` wird keine Datei
+verändert und kein Backup angelegt; der Lauf endet mit Exit-Code **2** und
+einem Hinweis. Exit-Codes: `0` angewendet · `1` Abbruch oder verworfene
+Zeilen · `2` nichts angewendet (`--apply` oder `--assume-timeframe` fehlt).
 
 Ablauf (`src/history/migration.ts`):
 
 1. **Backup** `candles.ndjson.bak-<ISO>` mit restriktiven Rechten (`0600`)
-   anlegen. Schlägt das Backup fehl, **bricht die Migration ab**, das
-   Original bleibt unverändert.
+   anlegen (nur bei `--apply` — im Dry-Run entsteht kein Backup). Schlägt
+   das Backup fehl, **bricht die Migration ab**, das Original bleibt
+   unverändert.
 2. Jede Zeile wird geparst (feldweise, kein Spread —
    Prototype-Pollution-sicher). Fehlt `timeframe`, wird
    `--assume-timeframe` zugewiesen. **Ohne dieses Flag bricht die Migration
@@ -126,8 +153,10 @@ Ablauf (`src/history/migration.ts`):
 4. **Sortierung** nach `instrumentId, timeframe, ts`.
 5. **Report:** gelesen / migriert / bereits v2 / dedupliziert / verworfen
    (mit Gründen) / geschrieben.
-6. `--dry-run` schreibt **nichts** und legt **kein Backup** an — nur der
-   Report wird ausgegeben.
+6. Ohne `--apply` (Default seit 1.26.2) schreibt die Migration **nichts**
+   und legt **kein Backup** an — nur der Report wird ausgegeben, der Lauf
+   endet mit Exit-Code **2**. `--dry-run` bleibt als explizites Flag
+   erlaubt.
 
 Die Migration ist **idempotent**: ein zweiter Lauf ändert nichts
 (alle Zeilen haben bereits ein gültiges `timeframe`, keine Duplikate).

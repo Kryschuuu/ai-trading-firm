@@ -246,6 +246,25 @@
 3. **Geplante (Task-NN) Features** sind nur als solche markiert; sobald sie
    gemerged sind, müssen Status-Header aktualisiert werden (Docs-as-Code-Pflicht).
 
+## Nachtrag v1.26.2 — Timeframe-Migration (MDSYNC-001) und Versions-Konsistenz
+
+| # | Behauptung | Code-Referenz | Befund |
+| --- | --- | --- | --- |
+| T1 | `HistoricalCandleEntry.timeframe` ist Pflicht; Primärschlüssel `instrumentId + timeframe + ts` | `src/lib/marketdata/historicalStore.ts` | ✅ |
+| T2 | `append()`/`query()` verlangen einen expliziten Timeframe (Compile- und Runtime-Guard) | `src/lib/marketdata/historicalStore.ts` | ✅ |
+| T3 | Dedup: jüngstes `fetchedAt` gewinnt, keine Duplikate je Composite-Key | `tests/history/historicalStore.test.ts` | ✅ |
+| T4 | **Fix:** Runbook für Produktionsumgebungen fehlte → `docs/MIGRATION_TIMEFRAME_FIELD.md` ergänzt und im Katalog registriert | `src/lib/docsCatalog.ts`, `docs/README.md` | ✅ Doc-Fix |
+| T5 | **Fix:** Empfohlener Pfad „Neuaufbau statt Inline-Migration“ war nicht dokumentiert → `docs/MARKET_DATA_PIPELINE.md` §5.3 | `src/marketdata/sync.ts` (150 Bars je Instrument und Timeframe) | ✅ Doc-Fix |
+| T6 | **Fix:** Migrations-CLI schrieb ohne explizite Freigabe → Dry-Run als Default, `--apply` erforderlich (Exit-Code 2 ohne Flag) | `scripts/migrate-history-timeframe.ts` | ✅ Code-Fix (Security) |
+| T7 | **Fix:** Versionsangaben konnten unbemerkt auseinanderlaufen → neuer Validator-Check „Version-Konsistenz“ + `tests/docsVersioning.test.ts` | `scripts/docs-validate.ts` | ✅ Code-Fix |
+| T8 | Task 14 (Timeframe-Dimension) fehlte im Tracker | `docs/ARENA_TASKS.md` | ✅ Doc-Fix |
+
+**Verifikation v1.26.2:** `npm run docs:validate` grün (8 Checks, 9
+Hilfe-Dateien), `npm run typecheck` grün, `npm run lint` grün, Testsuite
+grün (1256 Tests, davon 5 neu).
+
+---
+
 ## Fazit
 
 Alle 15 Zieldokumente sind vorhanden, tragen einen Status-Header und sind mit

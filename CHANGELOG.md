@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.26.1**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.26.2**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,45 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.26.2] — 2026-08-29 · Nacharbeit PR #40: Versionierung, Changelogs & Migrations-Runbook (Doku)
+
+**Nacharbeit zu PR #40 (`[HISTORY] Persist candle timeframe and deduplicate
+bars`, v1.26.0).** Das Datenmodell war bereits gemergt; es fehlten die
+Betriebs-Doku, der empfohlene Migrationspfad und ein Teil der konsolidierten
+Nachweise. Dieser Release schließt diese Lücken — **ohne fachliche Änderung**
+an Schema v2, Primärschlüssel `instrumentId + timeframe + ts` und Dedup-Regel.
+
+* Neu **`docs/MIGRATION_TIMEFRAME_FIELD.md`** — Schritt-für-Schritt-Runbook
+  für Produktionsumgebungen: Voraussetzungen, Schreiber stoppen,
+  Pflicht-Backup mit Prüfsumme, **Neuaufbau** (`npm run market-sync`) als
+  empfohlener Pfad, Inline-Migration als Sicherheitsnetz, Ermittlung von
+  `--assume-timeframe` über Median-`ts`-Abstände (nie raten), Validierung,
+  Nachlauf, Rollback, Exit-Codes und Sicherheitsregeln.
+* `docs/MARKET_DATA_PIPELINE.md` §5.3: **Neuaufbau statt Inline-Migration**
+  als empfohlener Pfad für den Bitunix-Feed explizit begründet (150 Bars je
+  Instrument und Timeframe, Timeframes `5m/15m/30m/1h`, public REST, kein
+  Etikettier-Fehler durch Annahmen) — wie im Ticket gefordert.
+* `docs/MARKET_DATA_PIPELINE.md` §5.2 und `docs/HISTORY.md` §6: CLI-Nutzung
+  auf den neuen **Dry-Run-Default** umgestellt und mit dem Runbook verlinkt.
+* Migrations-CLI `scripts/migrate-history-timeframe.ts` schreibt nur noch mit
+  **`--apply`**; ohne das Flag läuft es als Dry-Run (keine Dateiänderung, kein
+  Backup, Exit-Code **2**). Damit ist der Security-Audit-Punkt „Dry-Run als
+  Default“ erfüllt: Produktionsdaten werden nie durch einen versehentlichen
+  Aufruf überschrieben. Exit-Codes `0/1/2` sind dokumentiert.
+* `docs/README.md` + `src/lib/docsCatalog.ts`: `HISTORY.md` und das neue
+  Runbook im Doku-Katalog (`GET /api/docs`) registriert.
+* `docs/ARENA_TASKS.md`: Task 14 (Timeframe-Dimension, MDSYNC-001) mit
+  Version, PR, Security-Spalte und Nacharbeit aufgenommen.
+* `npm run docs:validate` prüft neu die **Versions-Konsistenz**:
+  `package.json` == oberster Eintrag in `CHANGELOG.md` **und**
+  `docs/CHANGELOG.md`, Status-Header der `CHANGELOG.md`, Versionszeile in
+  `docs/README.md` (neuer Check „Version-Konsistenz“).
+* Neu `tests/docsVersioning.test.ts`: Versionierung und Doku-Verlinkung sind
+  gegen Regressionen abgesichert.
+* Version 1.26.2.
+
+Refs: Code Review Scanner, Kap. 8, 20.
 
 ## [1.26.1] — 2026-08-29 · Typisierte Marktdaten-Fehler statt stiller leerer Arrays (P1, MDERR-006)
 
