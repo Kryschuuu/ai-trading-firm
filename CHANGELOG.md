@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.25.1**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.25.2**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,50 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.25.2] — 2026-08-29 · Instrument-Enrichment: volume24h + Orderbook-Spread (nachträglich PR #35)
+
+**Nacharbeit zu FEHLER-3 (P0, CODE-REVIEW-SCANNER §4/§5):** Discovery
+(`trading_pairs`) liefert nur statische Handelsparameter — ohne Enrichment ist
+`spread` für jedes Instrument `null`, und da der `spread`-Faktor (anders als
+`liquidity`) keinen Fallback besitzt, läuft der Trichter an der `max-spread`-Regel
+leer — auch nach einem Candle-Backfill. Der Funktionsumfang kam mit **PR #35**
+(dort selbst als 1.24.1 geführt); dieser Release konsolidiert Versionierung,
+Changelogs und Dokumentationsstand nachträglich — analog zur Nacharbeit zu
+PR #33 (1.25.0) und PR #34 (1.25.1).
+
+* `src/marketdata/spread.ts` — `calculateRelativeSpread(bid, ask) =
+  (ask − bid) / mid`; fehlende, nicht-positive, invertierte oder nicht-endliche
+  Werte ⇒ `null` („nicht geladen“) — nie `0`, nie `NaN`, nie eine Exception.
+* `src/marketdata/sync.ts` — feste Reihenfolge je Instrument: `getTicker` →
+  `volume24h`, `getOrderBook` → `calculateRelativeSpread(bids[0], asks[0])`,
+  **ein** `registry.upsert({ …, volume24h, spread, lastSeen }, "sync:<VENUE>")`,
+  danach Candle-Backfill. Ticker gebündelt (1× `getTickers`, Fallback per
+  Symbol), Depth pro Instrument über den Token-Bucket (8 req/s) — kein Fan-Out.
+* **Symbol-Guard:** Ein Ticker wird nur bei exakter Symbol-Übereinstimmung
+  übernommen — sonst bleibt `volume24h` unbekannt statt fremd (+ Eintrag in
+  `SyncResult.errors`, `stage: "ticker"`).
+* `src/scanner/filters.ts` — `FilterRejection.dataQuality` trennt Data-Quality-
+  von Fachablehnungen; die Meldungen nennen die fehlende Metrik explizit
+  („Spread wurde nicht geladen …“ statt „Instrument ungeeignet“).
+* Tests: `src/marketdata/__tests__/spread.test.ts` (Golden
+  `100/100.02 ≈ 0.00019998`, Toleranz 1e-8), Enrichment-, Batch-Ticker-,
+  Fallback- und Rate-Limiter-Tests in `sync.test.ts`, gehärtete Integration
+  (`volume24h > 0` **und** `spread !== null`, 0 Credential-Header),
+  Data-Quality-Tests in `tests/scanner.funnel.test.ts`.
+* Doku: `docs/BITUNIX.md` §1.2 (Spread aus dem Orderbuch, 1 zusätzlicher
+  `/depth`-Call je Instrument), `docs/MARKET_DATA_PIPELINE.md` §2–§3
+  (Ende-zu-Ende-Datenfluss) + §8 (Data-Quality-Tabelle),
+  `docs/DAILY_WEEKLY_RESEARCH.md` (Rejection-Shape mit `dataQuality`);
+  Doku-Stand auf 1.25.2 aktualisiert.
+
+**Sicherheit:** Public-Endpoints (`trading_pairs`, `tickers`, `depth`, `kline`)
+senden keine Credential-Header (`sign`, `api-key`, `nonce`, `timestamp`,
+`authorization`) — je Request getestet; `privateCalls === 0`. Die
+Rate-Limit-Eskalation bei N Instrumenten (z. B. 180 × `/depth`) läuft
+sequenziell durch den Token-Bucket (8 req/s) — kein Sekunden-Burst.
+
+---
 
 ## [1.25.1] — 2026-08-29 · Bitunix-Wiring in den Scanner-Warmup (nachträglich PR #34)
 
@@ -84,7 +128,7 @@ nur über `AdapterRegistry` im Modus `"paper"`; Integrationstests prüfen `priva
 
 ---
 
-## [1.24.1] — 2026-08-29 · Instrument-Enrichment: volume24h + Orderbook-Spread
+## [1.24.1] — 2026-08-29 · Instrument-Enrichment: volume24h + Orderbook-Spread (PR #35)
 
 **Nacharbeit zu 1.24.0 (CODE-REVIEW-SCANNER §4/§5):** `discoverInstruments()`
 liefert nur statische Handelsparameter (`symbol`, `base`, `quote`,

@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.25.1** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.25.2** · Modul `src/marketdata/` · CLI `npm run market-sync`
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -41,6 +41,10 @@ Unbekannte Venue → `UnsupportedVenueError` (`code: UNSUPPORTED_VENUE`), bevor
 irgendein Request startet.
 
 ## 2. Metadata enrichment
+
+**Seit v1.25.2 (nachgearbeitet zu PR #35):** Ticker- und Orderbook-Enrichment
+laufen vor dem Candle-Backfill — feste Reihenfolge je Instrument:
+`tickers → depth → ein Upsert → kline`.
 
 Nach Discovery reichert der Service jedes Instrument mit 24h-Volumen an:
 
@@ -91,7 +95,8 @@ Scanner (pure) ── liquidity-Faktor ── volume24h ?? (letzte Kerze volume 
 
 ## 3. Orderbook enrichment
 
-Pro Instrument **1 × depth** (`getOrderBook`). Der relative Spread
+**Seit v1.25.2 (nachgearbeitet zu PR #35).** Pro Instrument **1 × depth**
+(`getOrderBook`). Der relative Spread
 
 ```
 (ask − bid) / mid     mid = (ask + bid) / 2
@@ -184,7 +189,8 @@ URLs, keine Secrets.
 
 ### Data-Quality- vs. Fachablehnung im Scanner
 
-Fehlende Metriken sind **behebbarer Datenmangel**, kein Markturteil. Der
+**Seit v1.25.2 (nachgearbeitet zu PR #35).** Fehlende Metriken sind
+**behebbarer Datenmangel**, kein Markturteil. Der
 Eignungsfilter markiert sie deshalb explizit (`FilterRejection.dataQuality`):
 
 | Ablehnung | `ruleId` | `dataQuality` | Meldung | Behebung |
