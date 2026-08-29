@@ -39,6 +39,7 @@ import {
   type ModelClass,
   type ProviderDescriptor,
   type ProviderId,
+  type ProviderModelOverride,
   type ProviderRegistry,
   type RoutingAuditEntry,
   type RoutingContext,
@@ -177,8 +178,12 @@ export type ModelRouterOptions = {
   clock?: { now(): Date };
   /** Admin-Override der Routing-Modi (überschreibt die Policy-Tabelle). */
   modes?: Record<string, RoutingMode>;
+  /** Explizite Provider/Modell-Auswahl je Agent. */
+  overrides?: Record<string, ProviderModelOverride>;
   /** Persistenz der Modi (Default `data/routing/modes.json`, null = aus). */
   modesFile?: string | null;
+  /** Persistenz der Provider/Modell-Auswahl (Default `data/routing/overrides.json`). */
+  overridesFile?: string | null;
   /** Health-Poller beim Start anwerfen (Default: true, Intervall aus Policy). */
   autoStartPoller?: boolean;
   /** Environment (Policy-Pfad, Budget-Env, Poller-Intervall). */
@@ -203,9 +208,17 @@ export type RoutingModeUpdateResult = {
   audit: RoutingAuditEntry[];
 };
 
+export type RoutingOverrideUpdateResult = {
+  ok: boolean;
+  overrides: Record<string, ProviderModelOverride>;
+  errors: string[];
+  audit: RoutingAuditEntry[];
+};
+
 export type RouterSnapshot = {
   policyVersion: string;
   modes: Record<string, RoutingMode>;
+  overrides: Record<string, ProviderModelOverride>;
   policy: {
     defaultMode: RoutingMode;
     defaultClass: ModelClass;
@@ -242,8 +255,10 @@ export class ModelRouter {
   readonly budget: BudgetTracker;
   private readonly clock: { now(): Date };
   private readonly modesFile: string | null;
+  private readonly overridesFile: string | null;
   private readonly env: Record<string, string | undefined>;
   private modes: Record<string, RoutingMode>;
+  private overrides: Record<string, ProviderModelOverride>;
   private readonly lastDecisions = new Map<string, RoutingDecision>();
   private poller: HealthPollerHandle | null = null;
 
@@ -254,6 +269,7 @@ export class ModelRouter {
     this.audit = opts.audit ?? createRoutingAuditSink();
     this.clock = opts.clock ?? { now: () => new Date() };
     this.modesFile = opts.modesFile === undefined ? ROUTING_MODES_FILE : opts.modesFile;
+    this.overridesFile = opts.overridesFile === undefined ? "data/routing/overrides.json" : opts.overridesFile;
 
     this.budget = new BudgetTracker(this.policy.budgets, {
       clock: this.clock,
@@ -262,6 +278,7 @@ export class ModelRouter {
 
     // Modi: Policy-Tabelle → Datei → explizite Option (höchste Priorität).
     this.modes = { ...this.modesFromPolicy(), ...this.loadModes(), ...(opts.modes ?? {}) };
+    this.overrides = { ...this.loadOverrides(), ...(opts.overrides ?? {}) };
     // Registry-Budgets aus der Policy übernehmen (Karten-Daten = Policy-Wahrheit).
     this.syncRegistryBudgets();
 
@@ -306,6 +323,34 @@ export class ModelRouter {
     } catch {
       return {};
     }
+  }
+
+  private loadOverrides(): Record<string, ProviderModelOverride> {
+    if (!this.overridesFile) return {};
+    try {
+      const file = path.isAbsolute(this.overridesFile) ? this.overridesFile : path.join(process.cwd(), this.overridesFile);
+      if (!existsSync(file)) return {};
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+      if (!isRecord(parsed)) return {};
+      const out: Record<string, ProviderModelOverride> = {};
+      for (const [agent, value] of Object.entries(parsed)) {
+        if (!isRecord(value) || !PROVIDER_IDS.includes(value.provider as ProviderId) ||
+            typeof value.model !== "string" || value.model.trim().length === 0 ||
+            !ROUTING_MODES.includes(value.fallbackMode as RoutingMode)) continue;
+        out[normalizeAgentKey(agent)] = { provider: value.provider as ProviderId, model: value.model.trim().slice(0, 160), fallbackMode: value.fallbackMode as RoutingMode };
+      }
+      return out;
+    } catch { return {}; }
+  }
+
+  private persistOverrides(): void {
+    if (!this.overridesFile) return;
+    try {
+      const file = path.isAbsolute(this.overridesFile) ? this.overridesFile : path.join(process.cwd(), this.overridesFile);
+      const dir = path.dirname(file);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o755 });
+      writeFileSync(file, `${JSON.stringify(this.overrides, null, 2)}\n`, { mode: 0o600 });
+    } catch { /* best effort; memory remains authoritative */ }
   }
 
   private persistModes(): void {
@@ -368,6 +413,60 @@ export class ModelRouter {
 
     if (audit.length > 0) this.persistModes();
     return { ok: errors.length === 0, modes: this.getModes(), errors, audit };
+  }
+
+  getOverrides(): Record<string, ProviderModelOverride> {
+    return structuredClone(this.overrides);
+  }
+
+  /** Setzt explizite Provider/Model-Auswahlen. Ungültige Modelle werden nie aktiviert. */
+  setOverrides(patch: Record<string, unknown>, actor = "admin"): RoutingOverrideUpdateResult {
+    const errors: string[] = [];
+    const audit: RoutingAuditEntry[] = [];
+    const now = this.clock.now().toISOString();
+    for (const [rawAgent, raw] of Object.entries(patch ?? {})) {
+      const agent = normalizeAgentKey(rawAgent);
+      if (raw === null) {
+        const previous = this.overrides[agent];
+        if (previous) {
+          delete this.overrides[agent];
+          const entry: RoutingAuditEntry = { ts: now, agent,
+            from: `override:${previous.provider}:${previous.model}`, to: "override:none",
+            reason: `Provider/Modell-Override durch ${actor.slice(0, 64)} deaktiviert.`,
+            trigger: "ADMIN_OVERRIDE_CHANGE", policyVersion: this.policy.version, outcome: "admin",
+            detail: { actor: actor.slice(0, 64), cleared: true } };
+          audit.push(entry); void this.audit.write(entry);
+        }
+        continue;
+      }
+      if (!isRecord(raw) || !PROVIDER_IDS.includes(raw.provider as ProviderId) ||
+          typeof raw.model !== "string" || raw.model.trim().length === 0 ||
+          !ROUTING_MODES.includes(raw.fallbackMode as RoutingMode)) {
+        errors.push(`${agent}: Override erwartet provider, model und fallbackMode.`);
+        continue;
+      }
+      const provider = raw.provider as ProviderId;
+      const model = raw.model.trim().slice(0, 160);
+      const descriptor = this.registry.get(provider);
+      if (!descriptor || !descriptor.models.includes(model)) {
+        errors.push(`${agent}: Modell "${model}" ist für Provider ${provider} nicht registriert.`);
+        continue;
+      }
+      const next: ProviderModelOverride = { provider, model, fallbackMode: raw.fallbackMode as RoutingMode };
+      const previous = this.overrides[agent];
+      this.overrides[agent] = next;
+      const entry: RoutingAuditEntry = {
+        ts: now, agent,
+        from: previous ? `override:${previous.provider}:${previous.model}` : "override:none",
+        to: `override:${provider}:${model}`,
+        reason: `Admin-Override durch ${actor.slice(0, 64)} (Fallback: ${next.fallbackMode}).`,
+        trigger: "ADMIN_OVERRIDE_CHANGE", policyVersion: this.policy.version, outcome: "admin",
+        detail: { actor: actor.slice(0, 64), provider, model, fallbackMode: next.fallbackMode },
+      };
+      audit.push(entry); void this.audit.write(entry);
+    }
+    if (audit.length > 0) this.persistOverrides();
+    return { ok: errors.length === 0, overrides: this.getOverrides(), errors, audit };
   }
 
   /** Komfort-Wrapper für genau einen Agenten. */
@@ -455,11 +554,37 @@ export class ModelRouter {
   resolve(rawContext: unknown, options: ResolveOptions = {}): RoutingDecision {
     const ctx = toRoutingContext(rawContext);
     const agent = ctx.agent;
-    const mode = this.effectiveMode(agent);
+    let mode = this.effectiveMode(agent);
     const agentCfg = this.policy.agents[agent];
-    const ceiling = agentCfg?.classCeiling ?? "MODEL_C";
+    const activeOverride = this.overrides[agent];
     const allowCloud = agentCfg?.allowCloud !== false;
     const budgetExempt = agentCfg?.budgetExempt === true;
+
+    // Provider/Modell-Override ist eine explizite Admin-Auswahl, nicht Policy-Input.
+    // Sie wird vor der normalen Klassen-/Modusauswertung versucht; Health, Budget,
+    // Cloud-Freigabe und Kontext bleiben unverändert harte Router-Guardrails.
+    if (activeOverride && !options.forcedClass) {
+      const overrideClass = MODEL_CLASSES.find((candidate) =>
+        this.policy.classes[candidate].providers.some((p) =>
+          p.provider === activeOverride.provider && p.model === activeOverride.model
+        )
+      ) ?? agentCfg?.defaultClass ?? this.policy.defaultClass;
+      const overrideDef = this.policy.classes[overrideClass];
+      const picked = this.selectProvider({
+        ctx, targetClass: overrideClass, candidates: [activeOverride.provider],
+        allowCloud, budgetExempt, classDeployment: overrideDef.deployment,
+        modelOverride: activeOverride.model,
+      });
+      if (picked.ok) {
+        return this.finish({ ctx, mode: "manual", decision: picked.descriptor.deployment === "cloud" ? "CLOUD" : overrideClass,
+          modelClass: overrideClass, provider: picked.provider, model: picked.model,
+          reason: `Expliziter Provider/Modell-Override: ${picked.provider}/${picked.model}.`,
+          trigger: "PROVIDER_MODEL_OVERRIDE", auditOutcome: "resolved", chain: [], descriptor: picked.descriptor, options });
+      }
+      // Fallback automatic/configured: no override is passed into the normal path.
+      mode = activeOverride.fallbackMode;
+    }
+    const ceiling = agentCfg?.classCeiling ?? "MODEL_C";
 
     // 1) Klassen-Untergrenze: Agenten-Tabelle ∪ Task ∪ Komplexität ∪ Risiko
     const tableClass = agentCfg?.defaultClass ?? this.policy.defaultClass;
@@ -849,6 +974,7 @@ export class ModelRouter {
     return {
       policyVersion: this.policy.version,
       modes: this.getModes(),
+      overrides: this.getOverrides(),
       policy: {
         defaultMode: this.policy.defaultMode,
         defaultClass: this.policy.defaultClass,

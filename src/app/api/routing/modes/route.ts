@@ -9,8 +9,9 @@
  *   - `PUT` ist eine Policy-Änderung ⇒ **nur Admin**: `checkAdminGuard()`
  *     (RBAC `routing.modes.write` / `broker.credentials`-äquivalent über
  *     den Admin-Guard, timing-safe) + CSRF (`x-csrf-token`).
- *   - Jede Änderung wird auditiert (`MODEL_ROUTING`, outcome `admin`,
- *     from `mode:<alt>` → to `mode:<neu>`, inkl. Actor).
+ *   - Jede Änderung wird auditiert (`MODEL_ROUTING`, outcome `admin`). Die
+ *     Actor-ID kommt ausschließlich aus der authentifizierten Principal (`actorAuditId`).
+ *   - `overrides` erlaubt Provider/Modell/Fallback je Agent; ungültige Modelle werden abgewiesen.
  *   - Unbekannte Modi werden mit 422 abgewiesen; gültige Einträge derselben
  *     Anfrage werden trotzdem übernommen (teilweise Anwendung, Fehlerliste).
  *
@@ -21,6 +22,7 @@
  */
 import { publicErrorMessage } from "@/lib/secrets";
 import { checkAdminGuard, checkCsrfGuard } from "@/brokers/control-plane/guard";
+import { actorAuditId } from "@/auth";
 import { getModelRouter } from "@/routing";
 import { ROUTING_MODES } from "@/routing/types";
 
@@ -37,6 +39,7 @@ export async function GET(): Promise<Response> {
       ),
       policyVersion: router.policy.version,
       allowedModes: ROUTING_MODES,
+      overrides: router.getOverrides(),
     });
   } catch (e) {
     return Response.json(
@@ -62,33 +65,39 @@ export async function PUT(req: Request): Promise<Response> {
 
   const record = (body ?? {}) as Record<string, unknown>;
   const rawModes = record.modes;
+  const rawOverrides = record.overrides;
   const patch: Record<string, unknown> =
     rawModes && typeof rawModes === "object" && !Array.isArray(rawModes)
       ? (rawModes as Record<string, unknown>)
-      : record;
+      : (rawOverrides === undefined ? record : {});
+  const overridePatch: Record<string, unknown> =
+    rawOverrides && typeof rawOverrides === "object" && !Array.isArray(rawOverrides)
+      ? (rawOverrides as Record<string, unknown>) : {};
 
-  if (Object.keys(patch).length === 0) {
+  if (Object.keys(patch).length === 0 && Object.keys(overridePatch).length === 0) {
     return Response.json(
-      { ok: false, error: "INVALID_BODY", hint: "Mindestens ein Agenten-Modus erwartet." },
+      { ok: false, error: "INVALID_BODY", hint: "Mindestens ein Modus oder Provider/Modell-Override erwartet." },
       { status: 400 }
     );
   }
 
-  const actor = typeof record.actor === "string" && record.actor.trim().length > 0
-    ? record.actor.trim().slice(0, 64)
-    : "admin";
+  // Audit actor is always derived from the authenticated principal. Client JSON
+  // is deliberately not consulted (including a legacy `actor` field).
+  const actor = actorAuditId(req);
 
   try {
     const router = getModelRouter();
     const result = router.setModes(patch, actor);
-    if (!result.ok) {
+    const overrideResult = router.setOverrides(overridePatch, actor);
+    if (!result.ok || !overrideResult.ok) {
       return Response.json(
         {
           ok: false,
-          error: "INVALID_MODES",
-          errors: result.errors,
+          error: !result.ok ? "INVALID_MODES" : "INVALID_OVERRIDES",
+          errors: [...result.errors, ...overrideResult.errors],
           modes: result.modes,
-          hint: `Erlaubte Modi: ${ROUTING_MODES.join(", ")}.`,
+          overrides: overrideResult.overrides,
+          hint: `Erlaubte Modi: ${ROUTING_MODES.join(", ")}; Override: { provider, model, fallbackMode }.`,
         },
         { status: 422 }
       );
@@ -96,7 +105,8 @@ export async function PUT(req: Request): Promise<Response> {
     return Response.json({
       ok: true,
       modes: result.modes,
-      audit: result.audit,
+      overrides: overrideResult.overrides,
+      audit: [...result.audit, ...overrideResult.audit],
       policyVersion: router.policy.version,
     });
   } catch (e) {
