@@ -214,7 +214,8 @@ schrittweise um 1 erhöht; das Ergebnis trägt dann `diversificationRelaxed: tru
 
 Es gewinnt immer die **erste** greifende Regel; sie landet als
 `{ instrumentId, ruleId, message, dataQuality }` in `scan.rejections` und
-aggregiert in `scan.rejectionsByRule`. Unbekannte Werte führen zur Ablehnung
+aggregiert in `scan.rejectionsByRule` (`dataQuality` seit v1.25.2,
+nachgearbeitet zu PR #35). Unbekannte Werte führen zur Ablehnung
 (Ausnahme: Drawdown ohne Historie wird bereits von `min-candles` erfasst).
 
 `dataQuality: true` markiert Ablehnungen wegen **nicht geladener Daten**

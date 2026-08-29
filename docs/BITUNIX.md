@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.25.1 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
+**Stand:** v1.25.2 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -62,7 +62,7 @@ bündelt das Ticker-Enrichment zu einem Batch-Call.
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger, echte Public-Kurse) | keine signierten Requests | verfügbar (`getBroker("BITUNIX", "paper")`) |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert, nur nach Live-Gate | gesperrt (Task 11, Default `LiveTradingGateError`) |
 
-### 1.2 Spread kommt aus dem Orderbuch, nicht aus dem Ticker (FEHLER-3)
+### 1.2 Spread kommt aus dem Orderbuch, nicht aus dem Ticker (FEHLER-3 — seit v1.25.2, nachgearbeitet zu PR #35)
 
 **Spread wird NICHT direkt von der Ticker-API geliefert, sondern aus dem
 Orderbook (bestBid/bestAsk) berechnet. Dies erfordert einen zusätzlichen
