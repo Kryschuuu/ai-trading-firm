@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.26.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.26.1** · Modul `src/marketdata/` · CLI `npm run market-sync`
 > (Historien-Migration: `npm run history:migrate`)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
@@ -247,7 +247,13 @@ passieren würden.
 | --- | --- | --- |
 | `READY` | alle Instrumente haben ≥ `requiredCandles` Kerzen | scan-bereit |
 | `WARMING` | Historie fehlt (kein Fetch-Fehler) | `npm run market-sync` — Datenverfügbarkeit, kein Marktausschluss |
-| `ERROR` | ≥ 1 echter Fetch-/Infrastruktur-Fehler (MDERR-006) | Infrastruktur schlägt Fachlogik; Venue/Netz prüfen |
+| `ERROR` | ≥ 1 echter Fetch-/Infrastruktur-Fehler (MDERR-006, aus `dataErrors`/Manifest) | Infrastruktur schlägt Fachlogik; Venue/Netz prüfen — kein Marktausschluss |
+
+Seit v1.26.1 speist der Sync das **Fehler-Manifest**
+(`data/market-data-errors.json`, `src/marketdata/dataErrors.ts`) in den
+Scanner ein: betroffene Instrumente werden mit `data-unavailable` abgelehnt
+(`dataQuality: true`) statt mit `min-candles`; `min-candles` bleibt die
+behebbare Warnung für **genuin fehlende** Historie (`WARMING`).
 
 `assessDataReadiness(...)` ist eine **reine** Funktion (kein I/O, keine Uhr,
 keine Mutation). `worstOffenders` (nur im `WARMING`-Zustand) ist deterministisch
@@ -277,24 +283,57 @@ npm run scan                        # lokal, deterministisch, kein Netz
 npm run scan -- --sync-first        # Warmup, danach derselbe lokale Scan
 ```
 
+Seit v1.26.1 bricht `--sync-first` bei Sync-Fehlern **nicht** mehr ab: Die
+Fehler landen im Manifest, der Scan läuft mit `dataErrors` (Readiness
+`ERROR`, `data-unavailable`-Rejections), der Prozess beendet sich mit
+Exit-Code 1, damit CI/Automatisierung den Datenfehler sieht.
+
 `scanUniverse()` importiert `src/marketdata/sync.ts` **nicht**. Der Service
 `ScannerService` liest `HistoricalStore.query()` und `InstrumentRegistry.query()`.
 Gleiche Eingabe → gleiches Artefakt.
 
 ## 8. Failure semantics
 
+**Seit v1.26.1 (MDERR-006):** Abruf-Fehler sind typisiert, metrifiziert und
+für den Scanner als `DATA_UNAVAILABLE`/Readiness `ERROR` sichtbar — sie werden
+**nie** auf „leeres Array“ oder `min-candles` abgebildet. Details: Ursachen-
+Taxonomie (`MarketDataErrorReason`), Metrik, strukturierte Logs und
+Redaction in **[OBSERVABILITY.md](OBSERVABILITY.md)**.
+
 | Ereignis | Verhalten |
 | --- | --- |
 | Unbekannte Venue | `UnsupportedVenueError`, kein Partial-Write |
 | Leere Discovery | `SyncResult` mit Zählern 0, Exit 0 |
 | `getTicker` / `getOrderBook` / `getCandles` wirft | Fehler in `SyncResult.errors`, **Instrument isoliert**, Lauf geht weiter |
+| **Kerzen-Abruf wirft** (MDERR-006) | Fehler in `SyncResult.errors` **und** persistiertes Fehler-Manifest `data/market-data-errors.json` (klassifizierte `reason` je Instrument) → Scanner: `data-unavailable` + Readiness `ERROR` |
 | Upsert per Policy abgelehnt | Registry-`rejected`; Sync bricht nicht ab |
 | Ticker-Symbol ≠ Instrument | `volume24h` bleibt `null`, Eintrag in `errors` (`stage: "ticker"`) |
 | Discovery selbst wirft | Lauf bricht ab (ohne Instrumente gibt es nichts zu isolieren) |
 
 CLI loggt nur aggregierte Zähler (`discovery`, `tickers enriched`,
-`orderbooks enriched`, `5m candles: N/N`, `errors: K`). Keine Symbole, keine
+`orderbooks enriched`, `5m candles: N/N`, `errors: K`) plus
+`market_sync_fetch_failures` (venue, count, byStage). Keine Symbole, keine
 URLs, keine Secrets.
+
+### `getCandles()` (legacy REST-Cache-Pfad) — wirft statt `[]`
+
+Der REST-/Cache-Pfad in `src/lib/marketData.ts` wird von Analysten, Monitor,
+MicroExecutor-Warmstart und Backtest genutzt:
+
+- `getCandles()` wirft bei echten Fehlern `MarketDataFetchError`
+  (Klassifikation in `src/lib/marketDataErrors.ts`), inkl. Metrik
+  (`market_data_fetch_failures_total`) und strukturiertem Log
+  (`market_data_fetch_failed`). Das alte `catch { return cached?.candles ?? []; }`
+  ist **entfernt**.
+- **Leere Venue-Antwort** (`[]`, nachweislich keine Bars) wird **nicht**
+  geworfen — sie wird gecacht und zurückgegeben. Die Abgrenzung ist getestet.
+- `getCandlesWithFallback()` ist die **explizite** Stale-Cache-API (nur für
+  Aufrufer, die degradierten Betrieb bewusst erlauben, z. B. UI-Preview):
+  liefert `{ candles, source: "live"|"cache", stale, ageMs, error? }` und wirft
+  ohne Cache-Eintrag. Scanner-/Executor-Pfad nutzt sie **nicht**.
+- Mikro-Executor-Warmstart: Seed-Fehler werden gezählt (`status().seed`),
+  geloggt (`micro_executor_seed_fetch_failed`) und geloggt — die Live-Kerzen
+  wärmen die Serie weiter, aber der Fehler verschwindet nicht.
 
 ### Data-Quality- vs. Fachablehnung im Scanner
 

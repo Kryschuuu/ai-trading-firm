@@ -22,9 +22,11 @@ import { BROKER_VENUE_IDS } from "@/contracts/broker";
 import { getCycleService } from "@/cycle/service";
 import { db } from "@/db";
 import { agentMessages, agents, auditLog, equitySnapshots, missions, positions } from "@/db/schema";
+import { loadMarketDataErrors } from "@/marketdata/dataErrors";
 import { formatDuration, formatNumber, formatRelative, formatTimestampUtc } from "@/lib/auditView";
 import { BROKER_REGISTRY } from "@/lib/broker";
 import { listDocs } from "@/lib/docsCatalog";
+import { marketDataFailureSnapshot } from "@/lib/telemetry";
 import { getOllamaStatus } from "@/lib/ollama";
 import { publicErrorMessage } from "@/lib/secrets";
 import { getLimits, killSwitch } from "@/lib/riskGuard";
@@ -275,6 +277,12 @@ function collectScanner(): Draft {
   const { funnel, readiness } = scan;
   const top = funnel.daily.slice(0, MAX_SECTION_ITEMS);
 
+  // MDERR-006: Fehlgeschlagene Kerzenabrufe — Prozess-Counter (App) +
+  // persistiertes Sync-Manifest (separater Sync-Prozess). Kein symbol-Label.
+  const failures = marketDataFailureSnapshot();
+  const manifest = loadMarketDataErrors();
+  const totalFailures = failures.total + manifest.size;
+
   // Readiness explizit ausweisen (OPS-009): trennt Infrastruktur (Warmup/Fehler)
   // von Fachlogik. Der Sollwert wird aus der Faktor-Konfiguration abgeleitet.
   const warmed = readiness.status === "ERROR" ? 0 : readiness.warmed;
@@ -290,6 +298,14 @@ function collectScanner(): Draft {
     asOf: scan.asOf,
     metrics: [
       { label: "Gescannt", value: num(funnel.scanned, 0) },
+      {
+        label: "Marktdaten-Abruffehler (market_data_fetch_failures_total)",
+        value: num(totalFailures, 0),
+        tone: totalFailures > 0 ? "bad" : "good",
+        hint:
+          "Fehlgeschlagene Kerzenabrufe nach Ursache. Ein Anstieg bei RATE_LIMITED bedeutet, " +
+          "dass das Request-Budget zu aggressiv ist; UPSTREAM_5XX deutet auf ein Venue-Problem.",
+      },
       { label: "Readiness", value: readiness.status, tone: readinessTone },
       {
         label: "Warmup (gewärmt / benötigt)",

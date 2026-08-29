@@ -66,6 +66,11 @@
       "technischeInfo": "Quelle: Datenbank (agents, agent_messages, missions) über GET /api/firm.",
       "risiko": "BLOCKED- oder STOPPED-Agenten sind ein Betriebszustand, kein Anzeigefehler — Ursache im Protokoll-Tab klären."
     },
+    "metric.marketDataFailures": {
+      "kurzinfo": "„Marktdaten-Abruffehler“ zählt fehlgeschlagene Kerzenabrufe nach Ursache (MDERR-006).",
+      "technischeInfo": "Counter market_data_fetch_failures_total{venue,timeframe,reason} (src/lib/telemetry.ts) plus persistiertes Sync-Manifest data/market-data-errors.json (src/marketdata/dataErrors.ts). Labels bewusst ohne symbol (Kardinalität); das Symbol steht im strukturierten Log (market_data_fetch_failed).",
+      "risiko": "Ein Anstieg bei RATE_LIMITED bedeutet, dass das Request-Budget zu aggressiv ist; UPSTREAM_5XX deutet auf ein Venue-Problem. Fehler sind Infrastrukturzustand (Scanner: DATA_UNAVAILABLE / Readiness ERROR) — kein Marktausschluss, kein stilles leeres Array."
+    },
     "section.risk": {
       "kurzinfo": "Wirksame Limits, Volatilitäts-Regime, Kill-Switch und Live-Gate-Lage.",
       "technischeInfo": "Quelle: src/lib/riskGuard (getLimits, killSwitch), src/lib/adaptiveRisk (getAdaptiveRiskStatus), src/live-gate (liveGateConfig).",

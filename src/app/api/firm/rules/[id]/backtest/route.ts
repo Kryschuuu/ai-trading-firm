@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRule, rowToSpec, saveBacktest } from "@/lib/ruleService";
 import { backtestRule } from "@/lib/ruleEngine";
 import { getCandles, sanitizeInterval } from "@/lib/marketData";
+import { MarketDataFetchError } from "@/lib/marketDataErrors";
 import { guardWrite } from "@/lib/apiAuth";
 import { publicErrorMessage } from "@/lib/secrets";
 
@@ -64,6 +65,13 @@ export async function POST(
         "Keine Anlageberatung; vor Live-Aktivierung Peer-Review (siehe HANDBUCH Kap. 18).",
     });
   } catch (e) {
+    if (e instanceof MarketDataFetchError) {
+      // Typisierter, redigierter Fehler (toJSON: keine Stacktraces/Credentials).
+      return NextResponse.json(
+        { ok: false, error: "MARKET_DATA_UNAVAILABLE", reason: e.reason, ...e.toJSON() },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ ok: false, error: publicErrorMessage(e) }, { status: 500 });
   }
 }

@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.26.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.26.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,44 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.26.1] — 2026-08-29 · Typisierte Marktdaten-Fehler statt stiller leerer Arrays (P1, MDERR-006)
+
+**`[MARKETDATA] Stop swallowing fetch failures`** — `getCandles()` bildete
+HTTP 429/5xx, DNS-Fehler, ungültige Symbole, Schema-Abweichungen und TLS-Fehler
+alle auf `[]` ab. Downstream war das nicht von „0 Kerzen vorhanden“
+unterscheidbar und erschien als `min-candles`-Ablehnung — eine leere Serie kann
+Faktoren neutralisieren, statt eine Ausführung zu stoppen.
+
+* Neu `src/lib/marketDataErrors.ts`: `MarketDataFetchError` (venue/symbol/
+  timeframe/reason/retryable/httpStatus, redigiertes `toJSON()`),
+  `classifyMarketDataError()` (vollständige Ursachen-Taxonomie),
+  `MarketDataErrorReason` (11 Ursachen).
+* `getCandles()` wirft bei echten Fehlern; das stille
+  `catch { return cached?.candles ?? []; }` ist **entfernt**. Leere
+  Venue-Antworten (`[]`) bleiben gültig („nachweislich keine Bars“).
+* Neu `getCandlesWithFallback()`: expliziter, als `stale` markierter
+  Cache-Pfad mit `{ candles, source, stale, ageMs, error? }` — ohne Cache wird
+  geworfen. Scanner-/Executor-Pfad nutzt ihn nicht.
+* Telemetrie `src/lib/telemetry.ts`: Counter
+  `market_data_fetch_failures_total{venue,timeframe,reason}` (bewusst ohne
+  `symbol`-Label: Kardinalität).
+* Strukturiertes, redigiertes Logging `src/lib/logger.ts`
+  (`market_data_fetch_failed`, `market_data_unauthorized_public_endpoint`
+  bei 401/403, Retry-Warnungen; 512-Zeichen-Kappe, kein Stacktrace, keine
+  vollen URLs).
+* Begrenztes Retry-Budget (2 Versuche, Backoff 250 ms, nur retryable
+  Ursachen) — kein Endlos-Retry.
+* Scanner: Fehler werden als `dataErrors` gereicht → `data-unavailable`-
+  Rejection und Readiness `ERROR` statt `min-candles`; Sync persistiert ein
+  Fehler-Manifest (`data/market-data-errors.json`).
+* MicroExecutor-Warmstart: Seed-Fehler sichtbar (`status().seed`,
+  `micro_executor_seed_fetch_failed`).
+* Backtest-Route liefert 503 `MARKET_DATA_UNAVAILABLE` mit `reason`.
+* Doku: neu `docs/OBSERVABILITY.md`; `docs/MARKET_DATA_PIPELINE.md` Kap. 6–8.
+* Version 1.26.1.
+
+Refs: Code Review Scanner, Kap. 9, 21.
 
 ## [1.26.0] — 2026-08-29 · Timeframe-Dimension im HistoricalStore + Migration (P1, BREAKING)
 

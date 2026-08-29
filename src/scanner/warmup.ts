@@ -81,7 +81,7 @@ export interface DataReadinessInput {
   /** Warmup-Bedarf (aus {@link requiredWarmupCandles}). */
   requiredCandles: number;
   /** Echte Fetch-/Infrastruktur-Fehler je Instrument-ID (aus MDERR-006). */
-  dataErrors?: Map<string, string>;
+  dataErrors?: ReadonlyMap<string, string>;
 }
 
 /**

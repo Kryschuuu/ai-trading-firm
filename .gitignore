@@ -35,6 +35,11 @@ next-env.d.ts
 /data/history
 /data/history/*.tmp
 
+# Marktdaten-Fehler-Manifest (MDERR-006): Laufzeit-Artefakt des Sync-Jobs,
+# vom Scanner/Operations Center gelesen — nicht versioniert
+/data/market-data-errors.json
+/data/market-data-errors.json.tmp
+
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
 

@@ -6,12 +6,30 @@
  *   - Aktien/ETF:     Yahoo Finance Chart  → AAPL, NVDA, SPY, QQQ …
  *   - Devisen:        Yahoo Finance Chart  → EURUSD=X, USDJPY=X …
  *
- * Fällt eine Quelle aus, wird der letzte gecachte Kurs genutzt; fehlt auch der,
- * greift das statische Paper-Buch. Der Betrieb bleibt also immer möglich —
- * die Kurse sind dann eben nur nicht live.
+ * **Failure-Semantik (MDERR-006, P1):** `getCandles()` wirft bei echten
+ * Fehlern einen typisierten `MarketDataFetchError` (Ursache + retryable +
+ * httpStatus). Ein leeres Array bedeutet ausschließlich: „die Venue hat für
+ * dieses Symbol/Timeframe nachweislich keine Bars geliefert“ — niemals
+ * „Abruf fehlgeschlagen“. Wer bewusst degradiert (z. B. UI-Preview) nutzt
+ * `getCandlesWithFallback()` mit expliziter Staleness-Information. Der
+ * Scanner-/Executor-Pfad nutzt die Fallback-API **nicht**.
+ *
+ * Kurse (`getQuote`) behalten ihr Failover (Cache → Statisches Buch), da dort
+ * der Betrieb nicht von Indikatorenhistorie abhängt; das ist dokumentiert und
+ * durch `source` im Ergebnis sichtbar.
  */
 
 import { WATCHLIST_DISPLAY_SYMBOLS } from "../universe/watchlist";
+import {
+  MarketDataFetchError,
+  MarketDataHttpError,
+  MarketDataSchemaError,
+  MarketDataTimeoutError,
+  classifyMarketDataError,
+  type MarketDataErrorReason,
+} from "./marketDataErrors";
+import { structuredLog } from "./logger";
+import { telemetry } from "./telemetry";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __mktQuoteCache?: Map<string, { price: number; ts: number; source: string }>;
@@ -102,16 +120,78 @@ function binancePair(symbol: string): string {
   return `${symbol.toUpperCase()}USDT`;
 }
 
-async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+/**
+ * Retry-Budget des Kerzen-Abrufs (MDERR-006, Security-Audit):
+ * begrenzt und mit Backoff — niemals unbegrenzt. 1 Erstversuch + 1 Retry.
+ * Nur `retryable`-Ursachen (429/5xx/Timeout/Network) werden wiederholt.
+ */
+export const MARKET_DATA_FETCH_ATTEMPTS = 2;
+export const MARKET_DATA_RETRY_BACKOFF_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Nur der Host in Fehlermeldungen — nie die volle URL (Query-Strings). */
+function safeHost(url: string): string {
   try {
-    const res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status} von ${new URL(url).host}`);
-    return (await res.json()) as T;
+    return new URL(url).host;
+  } catch {
+    return "venue";
+  }
+}
+
+async function fetchJsonOnce<T>(url: string, timeoutMs = 8000): Promise<T> {
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, timeoutMs);
+  try {
+    let res: Response;
+    try {
+      res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+    } catch (err) {
+      if (timedOut) throw new MarketDataTimeoutError(`nach ${timeoutMs} ms`);
+      throw err;
+    }
+    if (!res.ok) {
+      // HTTP-Status bleibt maschinenlesbar (classifyMarketDataError).
+      throw new MarketDataHttpError(res.status, safeHost(url));
+    }
+    try {
+      return (await res.json()) as T;
+    } catch (err) {
+      throw new MarketDataSchemaError(
+        `Antwort ist kein gültiges JSON (${err instanceof Error ? err.message.slice(0, 80) : "unbekannt"})`,
+      );
+    }
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MARKET_DATA_FETCH_ATTEMPTS; attempt++) {
+    try {
+      return await fetchJsonOnce<T>(url, timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      const { reason, retryable, httpStatus } = classifyMarketDataError(err);
+      if (!retryable || attempt >= MARKET_DATA_FETCH_ATTEMPTS) throw err;
+      structuredLog("warn", "market_data_fetch_retry", {
+        reason,
+        httpStatus: httpStatus ?? null,
+        attempt,
+        maxAttempts: MARKET_DATA_FETCH_ATTEMPTS,
+        venue: safeHost(url),
+      });
+      await sleep(MARKET_DATA_RETRY_BACKOFF_MS * attempt);
+    }
+  }
+  throw lastErr;
 }
 
 async function binancePrice(symbol: string): Promise<number> {
@@ -133,13 +213,30 @@ async function yahooPrice(symbol: string): Promise<number> {
 }
 
 async function binanceCandles(symbol: string, interval: string, limit: number): Promise<Candle[]> {
-  const raw = await fetchJson<unknown[][]>(
+  const raw = await fetchJson<unknown>(
     `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binancePair(symbol))}&interval=${interval}&limit=${limit}`
   );
-  return raw.map((r) => ({
-    time: Number(r[0]), open: Number(r[1]), high: Number(r[2]),
-    low: Number(r[3]), close: Number(r[4]), volume: Number(r[5]),
-  }));
+  if (!Array.isArray(raw)) {
+    throw new MarketDataSchemaError("Binance klines: Antwort ist kein Array");
+  }
+  const out: Candle[] = [];
+  for (const r of raw) {
+    if (!Array.isArray(r) || r.length < 6) {
+      throw new MarketDataSchemaError("Binance klines: Zeile unvollständig");
+    }
+    const values = (r as unknown[]).slice(0, 6);
+    // Nur Zahl oder nicht-leerer String ist eine valide Binance-Zelle —
+    // null/"" würden durch Number() zu 0 und damit still falsche Kerzen.
+    if (values.some((v) => (typeof v !== "number" && typeof v !== "string") || (typeof v === "string" && v.trim() === ""))) {
+      throw new MarketDataSchemaError("Binance klines: ungültige Zelle");
+    }
+    const [time, open, high, low, close, volume] = values.map(Number);
+    if (![time, open, high, low, close, volume].every((v) => Number.isFinite(v))) {
+      throw new MarketDataSchemaError("Binance klines: nicht-numerische Werte");
+    }
+    out.push({ time, open, high, low, close, volume });
+  }
+  return out;
 }
 
 interface YahooChart {
@@ -157,15 +254,28 @@ async function yahooCandles(symbol: string, interval: string, limit: number): Pr
   const data = await fetchJson<YahooChart>(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`
   );
+  // Yahoo liefert für unbekannte/delistete Symbole oft HTTP 200 mit
+  // `chart.error` — das ist ein NOT_FOUND, kein Schema-Fehler.
+  const chartError = (data as { chart?: { error?: { code?: string; description?: string } } }).chart?.error;
+  if (data.chart && !data.chart.result) {
+    if (/(not found|no data)/i.test(chartError?.code ?? "") || /no data found/i.test(chartError?.description ?? "")) {
+      throw new MarketDataHttpError(404, symbol);
+    }
+    throw new MarketDataSchemaError("Yahoo: chart.result fehlt");
+  }
   const r = data.chart?.result?.[0];
   const q = r?.indicators?.quote?.[0];
-  if (!r?.timestamp || !q?.close) throw new Error("Yahoo: keine Kerzen");
+  if (!r?.timestamp || !Array.isArray(r.timestamp) || !q?.close || !Array.isArray(q.close)) {
+    throw new MarketDataSchemaError("Yahoo: keine gültigen Kerzen in der Antwort");
+  }
   const out: Candle[] = [];
   for (let i = 0; i < r.timestamp.length; i++) {
     const c = q.close[i];
     if (c == null) continue;
+    const t = Number(r.timestamp[i]) * 1000;
+    if (!Number.isFinite(t)) throw new MarketDataSchemaError("Yahoo: ungültiger Timestamp");
     out.push({
-      time: r.timestamp[i] * 1000,
+      time: t,
       open: q.open?.[i] ?? c, high: q.high?.[i] ?? c, low: q.low?.[i] ?? c,
       close: c, volume: q.volume?.[i] ?? 0,
     });
@@ -226,18 +336,61 @@ export async function refreshQuotes(symbols: string[]): Promise<Quote[]> {
   return out;
 }
 
-/** Kerzen für Indikatorenberechnung, mit Cache. */
+/** Normalisiert das Kerzen-Limit (1…1000, Default 120). */
+function resolveCandleLimit(limitRaw: number): number {
+  return Number.isFinite(limitRaw)
+    ? Math.min(Math.max(Math.trunc(limitRaw), 1), 1000)
+    : 120;
+}
+
+/** Venue-Bezeichnung für Metrik/Fehler (Identisch zur Quellenwahl). */
+function venueForSymbol(symbol: string | null): string {
+  return symbol && isCrypto(symbol) ? "binance" : "yahoo";
+}
+
+/**
+ * Kerzen für Indikatorenberechnung, mit Cache.
+ *
+ * **Failure-Semantik (MDERR-006):** Bei echten Fehlern (HTTP 429/5xx, DNS,
+ * TLS, Schema-Abweichung, ungültiges Symbol) wird ein typisierter
+ * `MarketDataFetchError` geworfen — nach Metrik-Inkrement und strukturiertem
+ * Log. Ein leeres Array ist ausschließlich die nachweisliche Venue-Antwort
+ * „keine Bars für dieses Symbol/Timeframe“ und wird **nicht** als Fehler
+ * behandelt.
+ */
 export async function getCandles(
   symbolRaw: string,
   intervalRaw = "5m",
   limitRaw = 120
 ): Promise<Candle[]> {
   const symbol = sanitizeSymbol(symbolRaw);
-  if (!symbol) return [];
   const interval = sanitizeInterval(intervalRaw, "5m");
-  const limit = Number.isFinite(limitRaw)
-    ? Math.min(Math.max(Math.trunc(limitRaw), 1), 1000)
-    : 120;
+  const limit = resolveCandleLimit(limitRaw);
+  const venue = venueForSymbol(symbol);
+
+  if (!symbol) {
+    // Ungültiges Symbol = Konfigurations-/Input-Fehler, niemals []. Ohne
+    // gültiges Symbol existiert kein Catchable-Fehler → direkt typisiert.
+    const reason: MarketDataErrorReason = "INVALID_SYMBOL";
+    telemetry.marketData.fetchFailures.inc({ venue: "unknown", timeframe: interval, reason });
+    structuredLog("error", "market_data_fetch_failed", {
+      venue: "unknown",
+      symbol: sanitizeLogLabel(symbolRaw),
+      timeframe: interval,
+      reason,
+      httpStatus: null,
+      retryable: false,
+    });
+    throw new MarketDataFetchError({
+      venue: "unknown",
+      symbol: sanitizeLogLabel(symbolRaw),
+      timeframe: interval,
+      reason,
+      retryable: false,
+      cause: new Error(`Ungültiges Symbol: ${sanitizeLogLabel(symbolRaw)}`),
+    });
+  }
+
   const key = `${symbol}:${interval}:${limit}`;
   const cached = candleCache.get(key);
   if (cached && Date.now() - cached.ts < CANDLE_TTL_MS) return cached.candles;
@@ -246,12 +399,115 @@ export async function getCandles(
     const candles = isCrypto(symbol)
       ? await binanceCandles(symbol, interval, limit)
       : await yahooCandles(symbol, interval, limit);
-    if (candles.length < 2) throw new Error("zu wenige Kerzen");
+    // WICHTIG (MDERR-006): Ein leeres Array ist eine GÜLTIGE Antwort („die
+    // Venue hat keine Bars geliefert“). Es wird bewusst gecacht und
+    // zurückgegeben — ein Abruf-Fehler wird darunter NICHT versteckt.
     candleCache.set(key, { candles, ts: Date.now() });
     return candles;
-  } catch {
-    return cached?.candles ?? [];
+  } catch (err) {
+    // ─────────────────────────────────────────────────────────────────────
+    // KEINE Degradation auf `cached?.candles ?? []`. Ein Netzwerk-/API-Fehler
+    // ist von „0 Kerzen vorhanden“ nur unterscheidbar, wenn er geworfen wird.
+    // Ein stilles [] würde im Scanner als `min-candles` erscheinen und
+    // Faktoren neutralisieren, statt die Ausführung zu stoppen. Bewusste
+    // Cache-Nutzung ist ausschließlich über getCandlesWithFallback() möglich.
+    // ─────────────────────────────────────────────────────────────────────
+    const { reason, retryable, httpStatus } = classifyMarketDataError(err);
+    // Metrik OHNE symbol-Label (Kardinalität/Speicher-DoS, siehe Security).
+    telemetry.marketData.fetchFailures.inc({ venue, timeframe: interval, reason });
+    structuredLog("error", "market_data_fetch_failed", {
+      venue,
+      symbol,
+      timeframe: interval,
+      reason,
+      httpStatus: httpStatus ?? null,
+      retryable,
+    });
+    if (reason === "UNAUTHORIZED") {
+      // Public-Endpunkt darf nie 401/403 liefern → Konfigurationsfehler laut
+      // alarmieren (versehentlicher Private-/Auth-Endpoint-Aufruf).
+      structuredLog("critical", "market_data_unauthorized_public_endpoint", {
+        venue,
+        symbol,
+        timeframe: interval,
+        httpStatus: httpStatus ?? null,
+        retryable,
+      });
+    }
+    throw new MarketDataFetchError({
+      venue,
+      symbol,
+      timeframe: interval,
+      reason,
+      retryable,
+      httpStatus,
+      cause: err,
+    });
   }
+}
+
+/** Kürzt/redigiert ein Symbol nur für Log-Felder (nie für Metriken). */
+function sanitizeLogLabel(value: unknown): string {
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 64);
+}
+
+/** Ergebnis des bewussten Cache-Fallbacks (MDERR-006). */
+export interface CandleFallbackResult {
+  candles: Candle[];
+  /** `live` = frischer Abruf/frischer Cache (< TTL); `cache` = bewusster Stale-Fallback. */
+  source: "live" | "cache";
+  /** `true`, wenn der Fallback einen veralteten Cache-Eintrag verwendet. */
+  stale: boolean;
+  /** Alter des Cache-Eintrags in ms (nur bei stale). */
+  ageMs: number | null;
+  /** Ursprünglicher Fehler, der den Fallback ausgelöst hat. */
+  error?: MarketDataFetchError;
+}
+
+/**
+ * Liefert Kerzen und macht Staleness explizit sichtbar. Aufrufer, die einen
+ * degradierten Betrieb erlauben duerfen (z. B. UI-Preview), nutzen diese
+ * Funktion bewusst. Der Scanner-/Executor-Pfad nutzt sie NICHT.
+ *
+ * Ohne Cache-Eintrag wird der `MarketDataFetchError` weitergereicht — ein
+ * leeres Array allein würde niemals „Abruf fehlgeschlagen“ verschleiern.
+ */
+export async function getCandlesWithFallback(
+  symbolRaw: string,
+  intervalRaw = "5m",
+  limitRaw = 120
+): Promise<CandleFallbackResult> {
+  try {
+    const candles = await getCandles(symbolRaw, intervalRaw, limitRaw);
+    return { candles, source: "live", stale: false, ageMs: null };
+  } catch (err) {
+    if (!(err instanceof MarketDataFetchError)) throw err;
+    const symbol = sanitizeSymbol(symbolRaw);
+    if (!symbol) throw err;
+    const key = `${symbol}:${sanitizeInterval(intervalRaw, "5m")}:${resolveCandleLimit(limitRaw)}`;
+    const cached = candleCache.get(key);
+    if (!cached) throw err;
+    structuredLog("warn", "market_data_cache_fallback_used", {
+      venue: venueForSymbol(symbol),
+      symbol,
+      timeframe: sanitizeInterval(intervalRaw, "5m"),
+      ageMs: Math.max(0, Date.now() - cached.ts),
+      reason: err.reason,
+    });
+    return {
+      candles: cached.candles,
+      source: "cache",
+      stale: true,
+      ageMs: Math.max(0, Date.now() - cached.ts),
+      error: err,
+    };
+  }
+}
+
+/** Nur für Tests: Cache-Schicht zurücksetzen (isolierte Testläufe). */
+export function resetMarketDataCachesForTests(): void {
+  candleCache.clear();
+  quoteCache.clear();
 }
 
 // ── Screener (Penny-Scout-Quelle) ────────────────────────────────────────────
