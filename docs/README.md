@@ -19,6 +19,8 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **README.md** (diese Datei, `docs/README.md`) | Überblick, Architektur, Varianten A/B, Schnellstart |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Blaupause: Event-Driven **Makro-/Mikro-Zyklen**, Regelformat, Latenz, Skalierung, Security |
 | **[PEER_REVIEW_LIVE_TRADING.md](PEER_REVIEW_LIVE_TRADING.md)** | Peer-Review: Bottlenecks der 6-Agenten-Pipeline, Live-/Paper-Readiness, Code-Review, Tests und Handlungsplan |
+| **[PEER_REVIEW_BITUNIX_EXECUTION.md](PEER_REVIEW_BITUNIX_EXECUTION.md)** | Peer-Review: Bitunix-Ausführungs-Refactor (Paper/Broker getrennt, v1.20) |
+| **[PEER_REVIEW_ROUTING_OVERRIDES.md](PEER_REVIEW_ROUTING_OVERRIDES.md)** | Peer-Review: Provider/Modell-Overrides, Audit-Härtung, Test-Isolation (v1.22) |
 | **[LIVE_TRADING.md](LIVE_TRADING.md)** | Live-Trading-Gate (Task 11): auditierte State-Machine, Enforcement, Kill-Switch, Audit-Kette, CI (v1.19) |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang und Merge-Status |
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
@@ -34,7 +36,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan |
 
-**Version:** `v1.18.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.22.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---

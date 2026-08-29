@@ -57,6 +57,7 @@ export function createTestRouter(opts: TestRouterOptions = {}): TestRouter {
     audit,
     clock,
     modesFile: null,
+    overridesFile: null,
     autoStartPoller: false,
     env: {},
     ...(opts.modes ? { modes: opts.modes } : {}),

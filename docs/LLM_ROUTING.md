@@ -1,8 +1,10 @@
 # LLM-Modell-Routing — der MODEL_ROUTER (Task 09)
 
-**Stand:** 2026-08-28 · **Modul:** `src/routing/**` · **API:** `/api/providers`,
-`/api/routing`, `/api/routing/modes` · **Version:** `1.17.0`
-**Status:** Governance-Baustein 9 von 12 — Modellwahl ist keine Agentenentscheidung mehr.
+**Stand:** 2026-08-29 · **Modul:** `src/routing/**` · **API:** `/api/providers`,
+`/api/routing`, `/api/routing/modes` · **Version:** `1.22.0`
+**Status:** Governance-Baustein 9 von 12 — Modellwahl ist keine Agentenentscheidung mehr;
+Administratoren können ab 1.22.0 pro Agent einen expliziten Provider/Modell-Override
+setzen, der vor der Policy-/Modusauswertung greift.
 
 ---
 
@@ -157,6 +159,57 @@ curl -s -X PUT http://127.0.0.1:3369/api/routing/modes \
 
 Die Modi werden zusätzlich unter `data/routing/modes.json` (chmod 600) best-effort
 persistiert; der Speicherzustand bleibt Autorität.
+
+### Provider/Modell-Overrides (ab v1.22.0)
+
+Zusätzlich zu den Modi kann pro Agent ein **explizites Provider/Modell-Paar**
+festgelegt werden. Das Override greift **vor** der normalen Policy-/Klassen-
+auswertung und dient dazu, einzelne Agenten gezielt auf ein bestimmtes
+providerseitiges Modell zu „pinnen" — unabhängig von der Default-Klasse.
+
+```jsonc
+// PUT /api/routing/modes
+{
+  "overrides": {
+    "TECHNICAL_ANALYST": {
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "fallbackMode": "automatic"
+    },
+    // Override deaktivieren:
+    "RESEARCH": null
+  }
+}
+```
+
+**Regeln**
+
+1. **Guardrails bleiben aktiv:** Health, Cloud-Freigabe (`allowCloud`),
+   Quota, Kontextgröße, Fähigkeiten, Latenz, Budget und Kostendeckel
+   werden exakt wie im normalen Pfad gegen das Override-Modell geprüft.
+2. **Validierung:** Das Modell muss in der Provider-Registry
+   registriert sein (sonst `422 INVALID_OVERRIDES`, Override wird
+   **nicht** gesetzt).
+3. **Fallback:** Ist der Override-Provider nicht nutzbar (offline,
+   Quota, Kontext zu klein, …), schaltet der Router transparent auf
+   den konfigurierten `fallbackMode` (`manual` | `automatic` |
+   `hybrid`) zurück. Im Beispiel `fallbackMode: "automatic"` wird die
+   normale Klassen-/Provider-Kette ausgeführt; der Agent bleibt also
+   nie ohne Antwort.
+4. **Deaktivierung:** `null` entfernt den Override; das Löschen wird
+   als `ADMIN_OVERRIDE_CHANGE` mit `from: override:<p>:<m>` →
+   `to: override:none` auditiert.
+5. **Persistenz:** Best-effort-Datei `data/routing/overrides.json`
+   (chmod 600, analog `modes.json`). Korrupte/fehlende Dateien werden
+   toleriert (kein Crash).
+6. **Entscheidungs-Trigger:** `PROVIDER_MODEL_OVERRIDE` in
+   `RoutingDecision.trigger`, wenn das Override erfolgreich war;
+   bei Fallback bleibt der Trigger der Fallback-Kette
+   (`FALLBACK_CHAIN`).
+
+Der `modes`-Abschnitt hat nach wie vor Vorrang bei der **Modus-Festlegung**;
+Overrides sind ein **additiver Mechanismus**, der in der ersten Phase der
+Entscheidung versucht wird.
 
 ---
 
