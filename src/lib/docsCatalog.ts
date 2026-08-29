@@ -67,6 +67,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Market-Data-Pipeline",
     subtitle: "Discovery, Enrichment und Candle-Backfill vor dem deterministischen Scanner (v1.24)",
   },
+  history: {
+    file: "docs/HISTORY.md",
+    title: "Historical Store",
+    subtitle: "Kerzen-Schema v2, Timeframe-Schlüssel, Dedup und v1→v2-Migration (v1.26)",
+  },
   scanner: {
     file: "docs/DAILY_WEEKLY_RESEARCH.md",
     title: "Daily & Weekly Research",

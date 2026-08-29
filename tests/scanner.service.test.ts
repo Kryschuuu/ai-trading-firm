@@ -61,8 +61,8 @@ test("Service: historicalStoreProvider gruppiert Kerzen je Instrument und liefer
     close,
     volume: 1000,
   }));
-  store.append([...candles].reverse(), "BINANCE:BTCUSDT", { venue: "BINANCE", feed: "test" });
-  store.append(candles, "BINANCE:ETHUSDT", { venue: "BINANCE", feed: "test" });
+  store.append([...candles].reverse(), "BINANCE:BTCUSDT", { venue: "BINANCE", feed: "test" }, "1h", new Date(AS_OF));
+  store.append(candles, "BINANCE:ETHUSDT", { venue: "BINANCE", feed: "test" }, "1h", new Date(AS_OF));
 
   const provider = service.historicalStoreProvider(store, "BINANCE:BTCUSDT");
   const btc = provider.candles({ id: "BINANCE:BTCUSDT" } as never);

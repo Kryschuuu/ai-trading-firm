@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.25.3**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.26.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,61 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.26.0] — 2026-08-29 · Timeframe-Dimension im HistoricalStore + Migration (P1, BREAKING)
+
+**`[HISTORY] Persist candle timeframe and deduplicate bars`** — Das
+persistente Kerzenformat `data/history/candles.ndjson` erhält eine
+**Timeframe-Dimension** (Schema **v2**). Bisher fehlte `timeframe` in
+`HistoricalCandleEntry`: Mehrere Periodizitäten desselben Instruments
+(`BITUNIX:BTCUSDT / 5m`, `/15m`, `/1h`) waren im Store nicht unterscheidbar
+und würden zu einer gemeinsamen Faktorreihe verschmelzen — EMA, Momentum und
+Volatilität wären unbemerkt falsch. Zusätzlich fehlte die deterministische
+Deduplizierung (doppelte Bars bei wiederholtem Backfill).
+
+**BREAKING CHANGE — Migration bestehender Daten erforderlich:**
+
+```bash
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m        # mit --dry-run erst trocken prüfen
+```
+
+* `HistoricalCandleEntry.timeframe: SupportedTimeframe` (Pflicht), Zeilen mit
+  `"v": 2`; logischer Schlüssel **instrumentId + timeframe + ts**.
+* `append(candles, id, provenance, timeframe, now): { written, deduplicated }`
+  — die alte 4-stellige Signatur wurde **entfernt** (kein optionaler
+  Parameter, der den Mix-Bug still reproduziert); TypeScript zwingt jeden
+  Aufrufer zur Migration.
+* `query({ instrumentId, timeframe, from?, to?, limit? })` mit
+  **Pflicht-Timeframe** (Compile + Runtime-Guard); `limit` liefert die
+  letzten N Bars (ts desc selektiert, asc zurück), `from`/`to` inklusiv.
+* Deterministische Dedup: jüngstes `fetchedAt` gewinnt, Gleichstand → zuletzt
+  gelesen; `maxBarsPerSeries` (Default 5000) mit Kompaktierung.
+* Legacy-Zeilen (ohne `timeframe`) werden als `LEGACY_UNKNOWN` markiert,
+  gezählt, über Timeframe-Queries nie ausgeliefert und erzeugen eine
+  einmalige Migrations-Warnung.
+* `scripts/migrate-history-timeframe.ts` (`npm run history:migrate`):
+  Backup `candles.ndjson.bak-<ISO>` (0600) vor dem Schreiben,
+  `--assume-timeframe` Pflicht bei Legacy (kein Raten), `--dry-run`,
+  Report (gelesen/migriert/dedupliziert/verworfen), **idempotent**,
+  Verlust-Invariante `gelesen = geschrieben + dedupliziert + verworfen`.
+* Streambasierter Loader (kein OOM), robuste Behandlung kaputter Zeilen,
+  atomares Schreiben (`tmp`+`rename`), Security-Härtung (kein Path-Traversal,
+  `JSON.stringify`-Zeilen, Werte-Validierung, feldweises Parsing ohne
+  Spread gegen Prototype-Pollution).
+* Aufrufstellen migriert: Sync-Service, MarketDataManager (Snapshot-Ticks
+  → `1m`), ReplayFeed (Default `1h`), Scanner-Provider (`readAll()` mit
+  Timeframe-Präferenz `1h→4h→30m→15m→5m`), Analytics-Port und Backtest-Step
+  (`1h`). Der MicroExecutor nutzt den Store nicht (eigene In-RAM-Serien) und
+  ist unberührt.
+* Tests: `tests/history/historicalStore.test.ts`,
+  `tests/history/migration.test.ts` (31 Tests); bestehende Tests migriert
+  (Gesamt: 1217 grün).
+* Doku: neu `docs/HISTORY.md` (Schema, Schlüssel, Dedup, Migration,
+  Rollback, Sicherheit); `docs/MARKET_DATA_PIPELINE.md` Kap. 4–5 aktualisiert.
+* Version 1.26.0; npm-Skript `history:migrate`; Test-Glob erweitert.
+
+Refs: Code Review Scanner, Kap. 8, 20.
 
 ## [1.25.3] — 2026-08-29 · Deterministischer Warmup-Bedarf + Scanner-Readiness (OPS-009)
 

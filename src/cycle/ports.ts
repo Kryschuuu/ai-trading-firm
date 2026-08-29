@@ -39,7 +39,7 @@ import type { DailyUniverseArtifact } from "@/scanner/artifacts";
 import { buildDailyArtifact } from "@/scanner/artifacts";
 import { loadScannerConfig } from "@/scanner/config";
 import { scanUniverse } from "@/scanner/pipeline";
-import { historicalStoreProvider, loadAllInstruments } from "@/scanner/service";
+import { historicalStoreProvider, loadAllInstruments, SCANNER_CANDLE_TIMEFRAME } from "@/scanner/service";
 import { HistoricalStore } from "@/lib/marketdata/historicalStore";
 import { computeCorrelation, computeAllMetrics, correlationClusters, classifyVolatilityRegime } from "@/portfolio";
 
@@ -151,7 +151,10 @@ export class DefaultAnalyticsPort implements AnalyticsPort {
     const regimes: Record<string, string> = {};
 
     for (const sym of symbols) {
-      const candles = store.query({ instrumentId: sym });
+      // Korrelation/Regime laufen auf EINER Periodizität (Analyse-Timeframe
+      // 1h) — ein Timeframe-freier Query würde 5m/15m/1h mischen und die
+      // Kennzahlen unbemerkt verfälschen.
+      const candles = store.query({ instrumentId: sym, timeframe: SCANNER_CANDLE_TIMEFRAME });
       const closes = candles.map((c: { close: number }) => c.close).filter((c: number): c is number => Number.isFinite(c) && c > 0);
       if (closes.length >= 5) {
         seriesMap.set(sym, closes);

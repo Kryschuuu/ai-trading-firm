@@ -11,7 +11,7 @@
 import type { StepDefinition, StepExecutionContext } from "../types";
 import { type BacktestStepOutput, type VerifiedSetupResult, validateBacktestOutput } from "../schemas";
 import type { ResearchStepOutput, TradeSetupProposal } from "../schemas";
-import { HistoricalStore } from "@/lib/marketdata/historicalStore";
+import { HistoricalStore, DEFAULT_ANALYSIS_TIMEFRAME } from "@/lib/marketdata/historicalStore";
 import { maxDrawdown, profitFactor, sharpeRatio, sortinoRatio } from "@/portfolio";
 
 export interface BacktestStepInput {
@@ -93,7 +93,10 @@ export const backtestStep: StepDefinition<BacktestStepInput, BacktestStepOutput>
     let failedCount = 0;
 
     for (const setup of setups) {
-      const history = store.query({ instrumentId: setup.instrumentId });
+      // Backtest läuft auf EINER Periodizität (Default-Analyse-Timeframe
+      // 1h): der Timeframe-Filter ist Pflicht, damit niemals Kerzen
+      // unterschiedlicher Intervalle in eine Equity-Kurve einfließen.
+      const history = store.query({ instrumentId: setup.instrumentId, timeframe: DEFAULT_ANALYSIS_TIMEFRAME });
       const candles = history.map((h) => ({ open: h.open, high: h.high, low: h.low, close: h.close }));
 
       const sim = evaluateSetupOnCandles(setup, candles);

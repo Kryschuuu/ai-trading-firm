@@ -20,6 +20,127 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.26.0] — 2026-08-29 · Timeframe-Dimension im Historical Store + v1→v2-Migration (MDSYNC-001)
+
+**Breaking Change (P1, Schema-/Architekturfehler mit Korruptionspotenzial):**
+`HistoricalCandleEntry` besaß kein `timeframe`-Feld. Sobald mehrere
+Periodizitäten desselben Instruments persistiert wurden
+(`BITUNIX:BTCUSDT / 5m`, `/15m`, `/1h`), waren die Bars im Store nicht mehr
+unterscheidbar. Der Loader hätte 5m- und 1h-Kerzen zu **einer** Faktorreihe
+vermischt — jede EMA, jedes Momentum, jede Volatilität wäre danach
+mathematisch bedeutungslos gewesen, ohne dass ein Test oder Filter Alarm
+schlägt. Zusätzlich fehlte eine deterministische Deduplizierung
+(wiederholter Backfill erzeugte doppelte Bars mit identischem `ts`).
+
+### Migration (PFLICHT für bestehende `candles.ndjson`)
+
+```bash
+# 1. trocken prüfen (schreibt nichts, kein Backup)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m --dry-run
+# 2. migrieren (Backup candles.ndjson.bak-<ISO>, chmod 600, idempotent)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m
+```
+
+`--assume-timeframe` ist Pflicht, sobald die Datei Legacy-Zeilen enthält:
+5m- und 1h-Bars sind im alten Schema ununterscheidbar, ein erratener Wert
+würde die Reihen dauerhaft falsch beschriften — das Skript rät nie.
+Rollback: das Backup über die Zieldatei zurückspielen
+(siehe [`docs/HISTORY.md`](HISTORY.md)).
+
+### Changed — Breaking
+
+* **`HistoricalCandleEntry`** führt `timeframe: SupportedTimeframe` als
+  Pflichtfeld; jede Zeile trägt die Schema-Version `"v": 2`.
+* **Logischer Primärschlüssel** ist jetzt `instrumentId + timeframe + ts`
+  (statt `instrumentId + ts`).
+* **`append()`** hat die Signatur
+  `append(candles, instrumentId, provenance, timeframe, now): AppendResult`
+  (`{ written, deduplicated }`). Die alte 4-stellige Signatur wurde
+  **entfernt, nicht überladen** — TypeScript zwingt jeden Aufrufer zur
+  Migration.
+* **`query()`** verlangt `timeframe` zwingend
+  (`{ instrumentId, timeframe, from?, to?, limit? }`); fehlt er, wirft die
+  Methode auch zur Laufzeit einen `HistoricalStoreError` (Runtime-Guard für
+  JS-Aufrufer).
+
+### Added
+
+* **Deterministische Deduplizierung:** Bei Schlüsselkollision gewinnt der
+  Eintrag mit dem jüngsten `fetchedAt`; bei Gleichstand der zuletzt
+  gelesene. `append()` liefert `{ written, deduplicated }`.
+* **`SupportedTimeframe`-Allowlist** (`1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h,
+  1d, 5d`); ungültige Werte werden beim Schreiben/Laden abgewiesen.
+* **Legacy-Behandlung zur Laufzeit:** Zeilen ohne `timeframe` werden als
+  `LEGACY_UNKNOWN` markiert, gezählt und über Timeframe-Queries **nie**
+  ausgeliefert; beim ersten Fund erscheint eine einmalige Warnung mit
+  Migrationshinweis.
+* **`readAll()`** für Scanner-Provider/Wartung (Querlesezugriff, Zeitreihen-
+  Auswahl mit Timeframe-Präferenz); `count(instrumentId?, timeframe?)`.
+* **`maxBarsPerSeries`** (Default 5000) mit Kompaktierung je Reihe.
+* **`scripts/migrate-history-timeframe.ts`** / `npm run history:migrate`
+  (`src/history/migration.ts`): Backup, `--dry-run`, Dedup, Sortierung
+  (`instrumentId, timeframe, ts`), Report
+  (gelesen/migriert/dedupliziert/verworfen mit Gründen), idempotent.
+* **Streambasierter Loader** (feste Lese-Chunks, kein OOM); kaputte
+  Teilzeilen werden geloggt und übersprungen; atomare Schreibvorgänge
+  (`tmp` + `rename`), Dateirechte `0600`.
+
+### Migration der Aufrufstellen
+
+* `MarketDataSyncService` (`src/marketdata/sync.ts`) schreibt mit
+  `timeframe` und verarbeitet `AppendResult`; die Timeframe-Optionen sind
+  auf die Allowlist typisiert.
+* `MarketDataManager` (`src/lib/marketdata/manager.ts`) markiert
+  Snapshot-Einzel-Tick-Kerzen als `"1m"`.
+* `ReplayFeed` (`src/lib/marketdata/feeds/replay.ts`) bekommt einen
+  optionalen `timeframe` (Default `DEFAULT_ANALYSIS_TIMEFRAME = "1h"`).
+* Scanner-Provider (`src/scanner/service.ts`) liest über `readAll()` und
+  wählt je Instrument deterministisch eine Reihe (Präferenz
+  `1h → 4h → 30m → 15m → 5m`, Legacy-Fallback zuletzt).
+* Analytics-Port (`src/cycle/ports.ts`) und Backtest-Step
+  (`src/cycle/steps/backtestStep.ts`) fragen den Analyse-Timeframe (`1h`)
+  explizit an.
+* Der **MicroExecutor** (`src/lib/microExecutor.ts`) nutzt den
+  HistoricalStore nicht (er bezieht Kerzen über den Live-/REST-Pfad
+  `getCandles()` und hält eigene `RollingTimeframeSeries` im RAM) und ist
+  von der Schema-Änderung nicht betroffen.
+
+### Tests
+
+* **`tests/history/historicalStore.test.ts`** (neu): Timeframe-Isolation,
+  Dedup, „jüngstes `fetchedAt` gewinnt", gleiche `ts` in verschiedenen
+  Timeframes, aufsteigende Sortierung, `limit`, inklusive `from`/`to`-
+  Grenzen, fehlende Datei, kaputte Zeilen, Legacy-Ausschluss, Idempotenz,
+  v2-Format, `maxBarsPerSeries`, Dateirechte `0600`, Prototype-Pollution,
+  Zeilen-Injection, Eingabevalidierung.
+* **`tests/history/migration.test.ts`** (neu): `timeframe`-Zuweisung,
+  Idempotenz, Pflicht-Flag `--assume-timeframe`, Backup vor dem Schreiben,
+  `--dry-run` ohne Dateiänderung (Hash), Verlust-Invariante
+  `gelesen = geschrieben + dedupliziert + verworfen`.
+* Bestehende Tests (`marketdata.replay`, `scanner.service`, Sync-Tests) auf
+  die 5-Argument-`append`-Signatur und Pflicht-`query`-Timeframe migriert.
+
+### Doku
+
+* Neu: **`docs/HISTORY.md`** (Schema, Schlüssel, Dedup-Regel,
+  Migrationsanleitung, Rollback, Sicherheit).
+* Aktualisiert: `docs/MARKET_DATA_PIPELINE.md` Kap. 4–5 (Backfill mit
+  Timeframe, Persistenz v2, Migration).
+* Version auf **1.26.0** gesetzt (`package.json`); `npm run history:migrate`
+  ergänzt; Test-Glob um `tests/history/*.test.ts` erweitert.
+
+### Sicherheit
+
+Kein Path-Traversal (Store schreibt ausschließlich in den konfigurierten
+Pfad); Zeilen per `JSON.stringify` (keine Zeilen-Injection); Validierung
+aller Werte (`Number.isFinite`, positive Ganzzahl-`ts`, Timeframe-Allowlist);
+feldweises Parsing ohne Spread (`__proto__`/`constructor` werden verworfen);
+Backups `0600`; streambasiertes Laden ohne unbegrenztes In-Memory-Wachstum.
+
+---
+
 ## [1.25.3] — 2026-08-29 · Deterministischer Warmup-Bedarf + expliziter Scanner-Readiness-Zustand (OPS-009)
 
 **Fix (P1, CODE-REVIEW-SCANNER Kap. 6/21):** `filters.minCandles = 30` war
