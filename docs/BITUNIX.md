@@ -1,13 +1,13 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.24.1 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
+**Stand:** v1.25.1 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
-Kein dokumentiertes Futures-Testnet. Seit v1.24.0 ist die **Public-Market-Data in die
-Scanner-Pipeline verdrahtet** (§1.1): `BitunixBrokerAdapter` implementiert
-`MarketDataAdapter` und wird von der zentralen `AdapterRegistry` für
-`MarketDataSyncService` registriert.
+Kein dokumentiertes Futures-Testnet. Seit v1.25.1 (nachgearbeitet zu PR #34) ist die
+**Public-Market-Data in die Scanner-Pipeline verdrahtet** (§1.1): `BitunixBrokerAdapter`
+implementiert `MarketDataAdapter` und wird von der zentralen `AdapterRegistry` für
+`MarketDataSyncService` registriert — ohne parallelen Wrapper.
 
 Dieses Dokument ist die verbindliche Spezifikation des Bitunix-Adapters. Der Kern
 (engine, risk, agents, API) kennt weiterhin **nur** `BrokerAdapter` — Venue-Details
@@ -35,7 +35,7 @@ Factory: `getBroker("BITUNIX", "paper"|"backtest")` liefert `BitunixBrokerAdapte
 `testnet` → `NotSupportedCapabilityError`. `live` → **immer** `LiveTradingGateError`,
 solange die Live-Gate-State-Machine nicht `LIVE_ENABLED` erreicht hat.
 
-### 1.1 Public Market Data im Scanner-Pipeline (v1.24.0)
+### 1.1 Public Market Data im Scanner-Pipeline (seit v1.25.1)
 
 Der Adapter implementiert neben `BrokerAdapter` explizit das
 `MarketDataAdapter`-Interface (`src/marketdata/sync.ts`). Die zentrale
@@ -46,6 +46,12 @@ Public-Methoden `discoverInstruments()`, `getTicker(s)()`, `getOrderBook()` und
 `getCandles()` — Discovery → Ticker/Orderbook-Enrichment → Candle-Backfill füllt
 damit `InstrumentRegistry` und `HistoricalStore` **vor** dem deterministischen
 Scanner. Details: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md).
+
+**Ende der Parallel-Implementierung (v1.25.1):** Der frühere Wrapper
+`src/marketdata/adapters/bitunix.ts` (`BitunixMarketDataAdapter`) ist entfernt —
+der echte `BitunixBrokerAdapter` ist die alleinige Market-Data-Quelle der
+Pipeline; `getCandles()` akzeptiert seither ein `limit`, und `getTickers()`
+bündelt das Ticker-Enrichment zu einem Batch-Call.
 
 **Klare Trennung der vier Ebenen:**
 

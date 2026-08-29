@@ -20,6 +20,79 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.25.1] — 2026-08-29 · Public Market Data in den Scanner-Warmup verdrahtet (PR #34 nachgearbeitet)
+
+**Nacharbeit zu FEHLER-2 (P0) aus CODE-REVIEW-SCANNER §2/§3:** Der
+`BitunixBrokerAdapter` besaß funktionsfähige Public-Pfade (Discovery, Ticker,
+Klines, Depth), wurde vom `MarketDataSyncService` aber nie aufgerufen — der
+Sync-Pfad nutzte ausschließlich den parallelen, redundanten
+`BitunixMarketDataAdapter`-Wrapper. Dieser Release verdrahtet den konkreten
+Adapter über die zentrale Registry in die Pipeline und entfernt den Wrapper.
+
+### Added
+
+* **`src/marketdata/adapterRegistry.ts`** — `AdapterRegistry`
+  (`createAdapterRegistry()`): die **einzige** Stelle, die konkrete
+  `MarketDataAdapter`-Implementierungen instanziiert. Registriert
+  `BitunixBrokerAdapter` unter `"BITUNIX"` (Modus `"paper"`, **ohne**
+  `PrivateClient`/Credentials); unbekannte Venues liefern `undefined`
+  (Normalisierung via `sanitizeVenue`, case-insensitiv). Mit
+  `registerVenues: false` registriert die Registry keine Venue (isolierte Tests).
+* **`BitunixBrokerAdapter.getTickers()`** — 1 × Batch-Call `GET /tickers`
+  (ohne Symbolfilter) für das Enrichment aller Instrumente; der Sync
+  bevorzugt den Batch, wenn der Adapter `getTickers` anbietet (Fallsfall:
+  N × `getTicker(symbol)`).
+* **Tests** — `tests/bitunix.marketdata.test.ts`: Interface-Konformität
+  (Compile-Time-Check `const _typeCheck: MarketDataAdapter = adapter`),
+  Registry-Mapping (`"BITUNIX"` → Instanz, `"UNKNOWN"` → `undefined`),
+  Orderbook-Mapping gegen das `/depth`-Schema, Edge Case (leeres
+  `trading_pairs` → `[]`, kein Crash im Sync-Service), Security-Audit
+  (statisch + dynamisch: kein PrivateClient/Keys im Discovery-Pfad,
+  `privateCalls === 0`, keine Credential-Header) und Rate-Limit-Regression
+  (429 → Retry mit Backoff 200/400 ms; persistente 429 →
+  `BitunixApiError(kind: "rate-limit")`). Fixture:
+  `tests/fixtures/bitunixMockClient.ts` (In-Process-Public-Mock, null-arg).
+
+### Changed
+
+* **`BitunixBrokerAdapter implements BrokerAdapter, MarketDataAdapter`** —
+  explizite Interface-Erfüllung statt paralleler Implementierung.
+* **`getCandles(symbol, timeframe, limit)`** — Signatur um `limit`
+  erweitert (Default 120); der Sync backfilled 150 Kerzen je Timeframe.
+* **`scripts/run-market-sync.ts`** — ruft produktiv `syncVenue("BITUNIX")`
+  über `createAdapterRegistry()` auf.
+* **`src/marketdata/index.ts`** — exportiert die Registry statt des Wrappers.
+* **Integrationstest** `src/marketdata/__tests__/sync.integration.test.ts`
+  läuft Ende-zu-Ende über Registry + Mock-HTTP-Layer → befüllte
+  `InstrumentRegistry` und `HistoricalStore`.
+* **Doku** — [`BITUNIX.md`](BITUNIX.md) §1.1: Vier-Ebenen-Trennung (Public
+  Market Data / Private Trading API / Paper Execution / Live Execution) mit
+  Credentials-Spalte; [`MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md):
+  Venue-Matrix mit `BitunixBrokerAdapter`-Zeile und `AdapterRegistry` im
+  Architektur-Diagramm. Doku-Stand auf 1.25.1 aktualisiert.
+
+### Removed
+
+* **`src/marketdata/adapters/bitunix.ts`** — redundanter
+  `BitunixMarketDataAdapter`-Wrapper. Keine zweite Implementierung der
+  Public-Pfade mehr; ein Adapter deckt Broker- und Market-Data-Contract ab.
+
+### Security
+
+* Im Sync-Pfad laufen ausschließlich **Public**-Client-Methoden
+  (`trading_pairs`, `tickers`, `depth`, `kline`) — `PrivateClient` bleibt für
+  die Order-Ausführung über `getBroker()` (Broker-Factory) getrennt.
+* Public-Requests senden keine Credential-Header (`sign`, `api-key`,
+  `nonce`, `timestamp`, `authorization`) — je Request getestet; unnötige
+  Credential-Exposition auf Public-Endpunkten ist ausgeschlossen.
+* `src/scanner/*` importiert keinen konkreten Adapter (statisch getestet) —
+  der Scanner bleibt netzwerkfrei.
+* 401/403/429/5xx-Handling des HTTP-Clients unverändert (die 48
+  existierenden Bitunix-Tests sind nicht regressiert); volle Suite
+  1140/1140 grün.
+
+---
+
 ## [1.25.0] — 2026-08-29 · Markt-Daten-Sync-Pfad (nachträglich PR #33)
 
 **Nacharbeit zur Architekturänderung (nachträglich für PR #33):** Der Scanner

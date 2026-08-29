@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.25.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.25.1** · Modul `src/marketdata/` · CLI `npm run market-sync`
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -233,7 +233,9 @@ Sync verwendet ausschließlich den **Public**-Client.
 | ALPACA / IBKR | — | geplant | — | — | — | nein |
 | PAPER | Seed-Registry, kein REST | n/a | n/a | n/a | n/a | n/a |
 
-**Bitunix-Status (v1.24.0):** Discovery: ✓ · MarketData: ✓ (nach diesem Fix) ·
+**Bitunix-Status (verdrahtet seit v1.25.1):** Discovery: ✓ · MarketData: ✓ —
+produktiv über `BitunixBrokerAdapter` + `AdapterRegistry` (der parallele
+`BitunixMarketDataAdapter`-Wrapper ist entfernt) ·
 Trading: über `BitunixPrivateClient` getrennt (niemals im Sync-Pfad).
 
 Neue Venues: `MarketDataAdapter` implementieren und in
