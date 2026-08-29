@@ -4,11 +4,17 @@
  *   npm run scan                      # Scan + Artefakte für heute
  *   npm run scan -- --date=2026-08-27 # Artefaktordner explizit setzen
  *   npm run scan -- --dry             # nur rechnen, nichts schreiben
+ *   npm run scan -- --sync-first      # MarketDataSyncService (Netzwerk) VOR dem Scan
  *
  * Liest Instrumente aus der Registry (Task 01) und Kerzen aus dem
  * Historical Store (Task 03) — **lokal, ohne Netzwerk, ohne LLM** — und legt
  * `artifacts/YYYY-MM-DD/universe.json` (+ `weekly.json`) ab.
+ *
+ * `--sync-first` ist der einzige Netzwerk-Schritt und lebt außerhalb von
+ * `scanUniverse()`. Ohne vorherigen Sync (`npm run market-sync`) bleibt der
+ * Historical Store leer und der Trichter lehnt alles mit `min-candles` ab.
  */
+import { spawnSync } from "node:child_process";
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
 import { loadScannerConfig } from "../src/scanner/config";
 import { scanUniverse } from "../src/scanner/pipeline";
@@ -25,10 +31,24 @@ import { historicalStoreProvider, loadAllInstruments } from "../src/scanner/serv
 
 const args = process.argv.slice(2);
 const dry = args.includes("--dry");
+const syncFirst = args.includes("--sync-first");
 const dateArg = args.find((a) => a.startsWith("--date="))?.slice("--date=".length);
+const venueArg = args.find((a) => a.startsWith("--venue="))?.slice("--venue=".length);
 if (dateArg && !ARTIFACT_DATE_RE.test(dateArg)) {
   console.error(`[scanner] --date erwartet YYYY-MM-DD, war "${dateArg.slice(0, 20)}"`);
   process.exit(1);
+}
+
+if (syncFirst) {
+  const venue = venueArg ? ["--venue=" + venueArg] : [];
+  const child = spawnSync(process.execPath, ["--import", "tsx", "scripts/run-market-sync.ts", ...venue], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (child.status !== 0) {
+    console.error("[scanner] --sync-first: market-sync fehlgeschlagen — Scan wird nicht gestartet");
+    process.exit(child.status ?? 1);
+  }
 }
 
 const config = loadScannerConfig();

@@ -62,6 +62,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Market Universe",
     subtitle: "Broker-unabhängige Instrumenten-Registry — Datenmodell, Normalisierung, API (v1.8)",
   },
+  marketPipeline: {
+    file: "docs/MARKET_DATA_PIPELINE.md",
+    title: "Market-Data-Pipeline",
+    subtitle: "Discovery, Enrichment und Candle-Backfill vor dem deterministischen Scanner (v1.24)",
+  },
   scanner: {
     file: "docs/DAILY_WEEKLY_RESEARCH.md",
     title: "Daily & Weekly Research",
