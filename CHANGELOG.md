@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.21.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.22.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,70 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.22.0] — 2026-08-29 · Provider/Modell-Overrides + Audit-Härtung + Test-Isolation
+
+**Administrative Provider/Modell-Auswahl je Agent (Haupt-Task):** Admins können
+jetzt pro Agent einen expliziten Provider und ein explizites Modell festlegen
+(Overrides), die vor der normalen Policy-/Modusauswertung greifen — mit
+best-effort-Persistenz, Fallback und vollständiger Auditierung.
+
+- **Neu `Provider/Modell-Override`** im Router (`setOverrides()`/`getOverrides()`):
+  pro Agent ein Tupel `{provider, model, fallbackMode}`. Override wird zuerst
+  versucht (Health, Cloud-Freigabe, Budget, Kontext, Fähigkeiten bleiben harte
+  Router-Guardrails); bei Fehlschlag (offline/Quota/Kontext/…) fällt der Router
+  transparent in den konfigurierten `fallbackMode` und die normale Kette läuft
+  weiter.
+- **Persistenz:** Overrides werden best-effort unter `data/routing/overrides.json`
+  (chmod 600) gespeichert und beim nächsten Start geladen — analog zu den
+  bereits vorhandenen Routing-Modi (`data/routing/modes.json`). Korrupte oder
+  fehlende Dateien werden toleriert (leerer Startzustand). Deaktivierung via
+  `null` (z. B. `{"TECHNICAL_ANALYST": null}`) entfernt einen Override.
+- **API-Erweiterung** `PUT /api/routing/modes`: akzeptiert jetzt zusätzlich
+  `overrides` im selben Request; Antwort enthält beide Audit-Logs. `GET
+  /api/routing/modes` liefert neben den Modi auch die aktuellen Overrides.
+  Ungültige Modelle werden abgewiesen (Modell muss in der Provider-Registry
+  registriert sein).
+- **Snapshot/Audit:** `RouterSnapshot.overrides` und der Routing-API-Snapshot
+  liefern die Overrides mit; jede Setzung/Deaktivierung wird als
+  `ADMIN_OVERRIDE_CHANGE` mit `from → override:provider:model → to` auditiert.
+- **Fallback-Verhalten:** Scheitert der Override-Provider (offline, Quota
+  erschöpft, Kontext zu klein, Fähigkeit fehlt, Kostendeckel, Agenten-Budget),
+  wird automatisch in den `fallbackMode` gewechselt — kein harter Fehler.
+  Jeder Fallback ist als `FALLBACK_CHAIN` auditiert.
+
+**Actor-Audit-Sicherheitsfix:**
+
+- **Client-geliefertes `actor`-Feld wird ignoriert.** Das betrifft
+  `PUT /api/routing/modes` (und war bereits für alle Control-Plane-Routen
+  unter `/api/brokers/*` umgesetzt): die Audit-ID wird ausschließlich aus der
+  authentifizierten Principal-Rolle nach RBAC/CSRF aufgelöst
+  (`actorAuditId(req)` → `admin`/`operator`/`viewer`). Ein Angreifer, der
+  Operator- oder Viewer-Token besitzt, kann keine Admin-Aktionen als
+ 另一 Benutzer im Audit unterschieben; lokaler Offen-Betrieb (kein Token
+  gesetzt) schreibt konsistent `admin`. TSDoc-Kommentare an den betroffenen
+  Routen verschärft, Regressions-Test für Routing-API vorhanden.
+
+**Weitere Änderungen:**
+
+- **Test-Fixture-Härtung:** `tests/fixtures/routingTestUtil.ts` setzte
+  `overridesFile: null` nicht, so dass On-Disk-Overrides zwischen Tests
+  leckten und einen Override-Validierungstest falsch negativ schlugen
+  (Reihenfolgenabhängigkeit). Behoben — beide Persistenz-Pfade (`modesFile`,
+  `overridesFile`) sind im Test-Modus jetzt `null`.
+- **Neue Routing-Tests (+5, total 1148):** Override-Deaktivierung (Null),
+  Persistenz (Write → Reload), Malformed-JSON-Toleranz, Fallback-Kette bei
+  Offline-Override, Snapshot-Invarianten. `tests/routing.*.test.ts` jetzt
+  **107 grün**.
+- **Doku-Aktualisierungen:** `docs/LLM_ROUTING.md` auf Version 1.22.0
+  aktualisiert (Overrides, Persistenz, Deaktivierung, Fallback-Verhalten,
+  Authentifizierung und Audit-Identität, Peer-Review-Checkliste ergänzt),
+  `docs/PROVIDER_INTEGRATION.md` und `README.md` auf 1.22.0 nachgezogen.
+  Neues Peer-Review-Dokument `docs/PEER_REVIEW_ROUTING_OVERRIDES.md`.
+- **Keine Breaking Changes:** Bestehende Modi (`manual`/`automatic`/`hybrid`),
+  Policy-Datei, API-Responses (additive Felder) und Env-Variablen bleiben
+  kompatibel. Weder `putCredentials`-Arbeitsfluss noch Live-Gate oder
+  Broker-Coverage werden berührt.
 
 ## [1.21.0] — 2026-08-29 · Coverage-Trennung + vereinheitlichte Paper-Execution
 
@@ -126,11 +190,14 @@ Bitunix-Live-Pfad handelt **niemals mehr über das lokale Paper-Ledger**.
   Security-Härtung (Secret-Store, Guard, Audit-View). Ausführliche Einträge:
   `docs/CHANGELOG.md`.
 
-## Unreleased — Task 12 (Dokumentation)
+## Unreleased / Backlog
 
 - Vollständige, code-synchronisierte Docs (15/15 Zieldateien mit Status-Header),
-  Root-Docs (`README.md`, `INSTALL.md`, dieser Changelog).
+  Root-Docs (`README.md`, `INSTALL.md`, dieser Changelog) — seit 1.22.0
+  durchgehend versioniert.
 - Hilfe-Systematik: `docs/help/help.schema.json` + alle `*.help.json` schema-valid.
 - CI-Job `docs-validate` (Schema, Link-Check, Markdown-Lint, Secret-Scan, Konsistenz).
 - Audit-Report `docs/DOCS_SYNC_AUDIT.md`; Task-Tracker `docs/ARENA_TASKS.md`
   (Tasks 1–12); SECURITY_AUDIT-Kapitel Task 12.
+- Multi-Node Rate-Limit/Scheduler-Locks (prozess-lokale Limits im Single-Node-Betrieb).
+- Persistente Scheduler-Locks über Prozesse hinweg (siehe docs/CHANGELOG.md Backlog-Tabelle).

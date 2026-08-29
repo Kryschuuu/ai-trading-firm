@@ -20,6 +20,149 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.22.0] — 2026-08-29
+
+**Provider/Modell-Overrides je Agent + Audit-Identität gehärtet + Test-Isolation
+behoben.** Administrative Auswahl von Provider und Modell pro Agent —
+persistiert, auditiert, mit transparentem Fallback, ohne die harten
+Router-Guardrails auszuhebeln.
+
+### Added
+
+- **Provider/Modell-Override im Router** (`src/routing/router.ts`,
+  `setOverrides` / `getOverrides`): pro Agent ein Tupel
+  `{provider, model, fallbackMode}`. Override wird **vor** der normalen
+  Policy-/Modusauswertung versucht; Health, Cloud-Freigabe, Quota,
+  Kontextfenster, Fähigkeiten, Latenz, Budget und Kostendeckel bleiben
+  unverändert harte Guardrails. Modell muss in der Provider-Registry
+  registriert sein (Validierung im Router, abgewiesene Overrides werden
+  nie gesetzt). Trigger `PROVIDER_MODEL_OVERRIDE` in der Entscheidung.
+- **Persistenz** `data/routing/overrides.json` (chmod 600, analog zu
+  `data/routing/modes.json`): best-effort Schreiben bei jeder Änderung,
+  Laden beim Konstruktor, Korrupte/fehlende Dateien werden toleriert
+  (leerer Startzustand). Absoluter Pfad wird nicht verändert.
+  `ModelRouterOptions.overridesFile` steuert Pfad/Deaktivierung; Tests
+  fahren mit `overridesFile: null`.
+- **Override-Deaktivierung per `null`:**
+  `PUT … {"overrides": {"TECHNICAL_ANALYST": null}}` entfernt den Override
+  eines Agenten. Löschung wird als `ADMIN_OVERRIDE_CHANGE` mit
+  `from: override:…` → `to: override:none` auditiert.
+- **Fallback-Verhalten:** ist der Override-Provider nicht nutzbar
+  (offline, Quota erschöpft, Kontext zu klein, fehlende Fähigkeit,
+  Latenz nicht eingehalten, Budget/Kosten-Deckel verletzt), fällt der
+  Router transparent in den konfigurierten `fallbackMode` (typischerweise
+  `automatic`) und die normale Klassen-/Provider-Kette läuft weiter.
+  Jeder Wechsel wird als `FALLBACK_CHAIN` auditiert.
+- **API-Erweiterung `GET|PUT /api/routing/modes`:** beide Routen liefern
+  jetzt auch `overrides`; `PUT` akzeptiert einen kombinierten Body
+  `{modes: {...}, overrides: {...}}`. Antwort enthält beide Audit-Logs.
+  Fehler in einem Teil blockieren den anderen nicht (teilweise
+  Anwendung mit `errors[]`-Liste).
+- **Snapshot erweitert:** `RouterSnapshot.overrides` (zuvor nur `modes`)
+  gibt die aktuelle Override-Karte zurück; `/api/routing` zeigt sie im
+  Payload.
+- **Peer-Review-Dokument `docs/PEER_REVIEW_ROUTING_OVERRIDES.md`**
+  (Version 1, sieben Prüfabschnitte A–G inkl. Authentifizierung,
+  Persistenz-Berechtigungen, Fallback- und Audit-Nachweise).
+
+### Changed / Fixed
+
+- **Actor-Audit-Sicherheitsfix:** das clientseitige JSON-Feld `actor`
+  wird in `PUT /api/routing/modes` **vollständig ignoriert** (war bereits
+  für alle Control-Plane-Routen unter `/api/brokers/*` umgesetzt).
+  Die Audit-ID kommt ausschließlich aus `actorAuditId(req)` nach
+  RBAC/CSRF-Prüfung (`admin`/`operator`/`viewer`). TSDoc-Kommentare
+  an der Route und im Router verschärft; bestehender Regressions-Test
+  belegt, dass ein mitgesendeter `actor: "ops@example"` nicht im Audit
+  landet (bleibt `"admin"`).
+- **Test-Fixture-Härtung** (`tests/fixtures/routingTestUtil.ts`):
+  `modesFile: null` war bereits gesetzt, `overridesFile: null` fehlte.
+  Dadurch konnten On-Disk-Overrides aus vorangegangenen Tests in die
+  Fake-Registry laufen und einen Validierungstest falsch negativ
+  schlagen lassen (Reihenfolgenabhängigkeit). Beide Persistenz-Pfade
+  sind jetzt im Test-Modus deaktiviert.
+- **Fallback-Entscheidung nach Override-Fehlschlag** berücksichtigt jetzt
+  auch den Fall, dass Override-Provider offline ist (zuvor zwar
+  `fallbackMode` gesetzt, aber die Override-Entscheidung wurde mit
+  `mode: "manual"` fortgesetzt und lieferte im schlimmsten Fall
+  `PROVIDER_OFFLINE` ohne Rückgriff — jetzt wird korrekt auf
+  `fallbackMode`-Modus zurückgeschaltet).
+- **`setOverrides` validiert Unknown-Mode:** `fallbackMode` muss in
+  `ROUTING_MODES` liegen (`manual|automatic|hybrid`) — vorher wurde
+  bei ungültigem `fallbackMode` nur das Feld ohne Prüfung
+  durchgereicht und bei der späteren Verwendung möglicherweise still
+  auf Default abgebildet (Hardening).
+
+### Tests
+
+- **5 neue Tests in `tests/routing.override.test.ts`** (Gesamt 8 in der
+  Datei, +102 in `tests/routing.*.test.ts` → **107 Routing-Tests**):
+  1. Override-Deaktivierung via `null` mit Audit-Eintrag
+     (`to: "override:none"`, `outcome: "admin"`).
+  2. Persistenz-Roundtrip: schreiben in eine temp. Datei → neuer
+     Router lädt Modi und Overrides identisch.
+  3. Toleranz gegenüber ungültigen JSON-Dateien (kein Crash, leere
+     Override-Map).
+  4. Fallback-Kette bei Offline-Override (nicht erreichbarer Provider
+     → automatic-Kette wählt einen anderen).
+  5. Snapshot enthält Overrides mit provider/model/fallbackMode.
+- **Gesamt-Testzahl:** 1143 → **1148** (+5, alle grün).
+- Zusätzliche Sicherheits-/Regressionstests bereits vorhanden:
+  `tests/routing.api.test.ts` (Client-`actor` wird ignoriert; CSRF;
+  422 bei unbekannten Modi; 401/403 Guard); `tests/rbac.test.ts`
+  (Token-Zuordnung admin/operator/viewer).
+
+### Dokumentation
+
+- `docs/LLM_ROUTING.md` auf **Version 1.22.0** aktualisiert:
+  - Neuer Abschnitt § 4a „Provider/Modell-Overrides" (Semantik,
+    Persistenz, Deaktivierung, Fallback-Regeln, API-Beispiel mit
+    `curl`).
+  - § 5 Routing-Modi um Override-Beschreibung und Authentifizierungs-
+    Fließdiagramm ergänzt.
+  - § 7 Fallback-Ketten beschreibt jetzt den Override-Pfad explizit
+    (Override → `fallbackMode` → Klassen-Fallback → Zwangs-
+    Rückstufung → FALLBACK).
+  - § 11 API-Referenz um `overrides` in Request/Response ergänzt.
+  - § 15 Peer-Review-Checkliste um Override-Punkte (Provider/Modell
+    validiert, `actor` ignoriert, Datei-Rechte 600, Deaktivierung
+    via `null`, Tests vorhanden) erweitert.
+- `docs/PROVIDER_INTEGRATION.md`: Hinweis auf Override-Persistenz-
+  Datei und Test-Isolation ergänzt.
+- `README.md`: Dokumentationsstand und Test-Zahl auf 1.22.0 / 1148
+  angehoben.
+- Neues Peer-Review-Dokument `docs/PEER_REVIEW_ROUTING_OVERRIDES.md`.
+- Root-`CHANGELOG.md`: Status-Header auf 1.22.0, ausführlicher
+  Release-Eintrag, Backlog-Tabelle präzisiert.
+
+### Migrationshinweise
+
+- **Keine Breaking Changes.**
+- **Keine DB-Migration** erforderlich (Overrides sind dateibasiert;
+  Audit geht in bestehendes `MODEL_ROUTING`-Event).
+- **Keine neuen Pflicht-Env-Variablen.** Die Override-Datei
+  `data/routing/overrides.json` wird automatisch beim ersten Setzen
+  eines Overrides angelegt (chmod 600); sie ist nicht im Repo
+  enthalten (`.gitignore` deckt `data/routing/` bereits ab).
+- **API-Response erweitert (additiv):** `GET /api/routing/modes`
+  liefert jetzt zusätzlich `overrides`; Clients, die das Feld
+  ignorieren, bleiben kompatibel.
+- **Upgrade-Kette:** `git pull` → `npm ci` → `npm run build` →
+  Dienst neu starten (bestehende Modi unter `data/routing/modes.json`
+  bleiben erhalten; Overrides starten leer).
+
+### Verifikation (vor dem Release ausgeführt)
+
+- `npm run typecheck` ✓ (tsc --noEmit, 0 Fehler)
+- `npm run lint` ✓ (ESLint, 0 Fehler, 0 Warnungen)
+- `npm run docs:validate` ✓ (7 Prüfungen / 9 Hilfe-Dateien, alles grün)
+- `git diff --check` ✓ (keine Whitespace-Fehler)
+- `tests/routing.*.test.ts` ✓ (107 Tests, 0 Fehlschläge)
+- Peer-Review: Siehe `docs/PEER_REVIEW_ROUTING_OVERRIDES.md` (Review
+  Checkliste A–G vollständig abgenommen).
+
+---
+
 ## [1.21.0] — 2026-08-29
 
 **Coverage-Trennung („registriert“ ≠ „abgedeckt“) + vereinheitlichte

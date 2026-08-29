@@ -189,3 +189,9 @@ Modelle, Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen).
   noch Registry-Defaults fest; die Modellwahl je Aufgabe trifft ausschliesslich
   der Router. Änderungen an Routing-Modi laufen über `PUT /api/routing/modes`
   (Admin-Token + CSRF + Audit).
+* **Provider/Modell-Overrides (v1.22.0):** Administratoren können pro Agent
+  einen expliziten Provider + Modell festlegen (`overrides` in
+  `PUT /api/routing/modes`), der vor der Policy-Auswertung greift. Overrides
+  werden best-effort unter `data/routing/overrides.json` (chmod 600)
+  persistiert, beim Fehlschlag (offline/Quota/Kontext) greift der konfigurierte
+  `fallbackMode`. Details: [LLM_ROUTING.md § 5](LLM_ROUTING.md#5-routing-modi-je-agent).
