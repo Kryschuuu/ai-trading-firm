@@ -1,7 +1,14 @@
 # Arena-Tasks — Task-Tracker (1–12)
 
 > **Status-Header (Task 12):** **Implementiert** (Task 12, Doku) ·
-> **2026-08-28** · Version **1.19.0** · Branch: `arena/01a049f7-ai-trading-firm`
+> **2026-08-29** · Version **1.23.0** · Branch: `arena/01a049f7-ai-trading-firm`
+>
+> **Nachtrag 2026-08-29 (v1.23.0):** Task 10 wurde nachgeprüft. Das Operations
+> Center war im Code eine Phase-1-Hülle (sieben Karten, fünf davon `stub`),
+> während dieser Tracker „Implementiert“ auswies. Phase 2–4 des Task-10-Plans
+> sind jetzt umgesetzt: zehn Sektionen mit echten Daten, keine Stub-Zustände.
+> Der Status bleibt **Implementiert** — der Code hat die Doku eingeholt, nicht
+> umgekehrt (Details siehe „Task 10 im Detail“).
 
 Kanonischer Tracker „welcher Task steckt in welcher Version, mit welchem PR,
 welchem Security-Audit und welchem Review-Status“. Spalten:
@@ -21,12 +28,60 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | 07 | Paper-Trading + Schutzkette | Implementiert | v1.9 ff. | #5 | ✓ [S07](#) | ✓ | — |
 | 08 | Security-Härtung + Audit-View | Implementiert | v1.10 ff. | #6 | ✓ [S08](#) | ✓ | — |
 | 09 | Bitunix-Adapter (7. Venue) | Implementiert | v1.15 | #7 | ✓ [S09](#) | ✓ | — |
-| 10 | Operations Center + RBAC | Implementiert | v1.18 | #8 | ✓ [S10](#) | ✓ | — |
+| 10 | Operations Center + RBAC | Implementiert | v1.18 → v1.23.0 | #8 | ✓ [S10](#) | ✓ | keine (Nachaudit v1.23.0) |
 | 11 | Live-Trading-Gate | Implementiert | v1.19 | #9 | ✓ [S11](#) | ✓ [R](#) | LG-01…LG-04 |
 | **12** | **Dokumentation (Docs-Sync)** | **Implementiert** | **1.19.0** | **dieser PR** | **✓ [S12](#)** | **✓ [R12](#)** | **siehe unten** |
 
 > Security-Spalte verweist auf die Kapitel in [SECURITY_AUDIT.md](SECURITY_AUDIT.md);
 > die Anker `[S01]`…`[S12]` bezeichnen die jeweiligen Task-Kapitel.
+
+## Task 10 im Detail (Operations Center)
+
+**Quelle:** Arena-Session `01a04cc9` · Branch `arena/01a04cc9-ai-trading-firm`
+· PR `feat(ops): vollständiges Operations Center — zehn Sektionen statt Phase-1-Hülle (task-10)`.
+
+**Befund der Nachprüfung (Code vor diesem Stand):**
+
+- `src/components/ops/OperationsCenterPanel.tsx` bezeichnete sich als
+  „Phase-1-Hülle“ und erklärte den Tab zur leeren Hülle.
+- `src/auth/ops.ts` lieferte sieben Module; Universe, Scanner, Portfolio, Cycle
+  und Routing standen auf Status `stub`.
+- `GET /api/ops` beschrieb sich selbst als „Operations-Center-Hülle“.
+- `docs/ARENA_TASKS.md` wies Task 10 gleichzeitig als „Implementiert“ aus —
+  die beanstandete Doc-Code-Diskrepanz.
+
+**Umsetzung (Aggregation, kein zweites Backend):**
+
+| Sektion | Quelle (bestand bereits) |
+| --- | --- |
+| Market Universe | `src/universe` (InstrumentRegistry) |
+| Scanner | `src/scanner` (ScannerService, Trichter + Ranking) |
+| Portfolio Analytics | `GET /api/firm` (Positionen, Equity) + `src/portfolio` |
+| Research Operations | `src/cycle` (Runs, Daily/Weekly-Artefakte) |
+| Broker Operations | `GET /api/brokers` (Registry, Capabilities, Health) |
+| LLM Operations | `GET /api/routing` (MODEL_ROUTER) + Provider-Status |
+| Agent Operations | `GET /api/firm` (Agenten, Missionen, Nachrichten) |
+| Risk | `src/lib/riskGuard` + `src/lib/adaptiveRisk` + `src/live-gate` |
+| Audit | `GET /api/firm/log` (audit_log) + Live-Gate-Hash-Kette |
+| Help | `docs/help/*.help.json` + `src/lib/docsCatalog.ts` |
+
+**Eigenschaften:**
+
+- Zehn Sektionen, jede mit `status`, `asOf`, `metrics`, `items`, `note`/`error`
+  und sichtbaren `sources`. Kein `stub` mehr im Zustandsraum
+  (`ready | degraded | empty | locked | unavailable`).
+- Fail-soft je Sektion: eine nicht erreichbare Quelle (z. B. Datenbank aus)
+  macht **nur** ihre Sektion `unavailable` — das Cockpit bleibt lesbar.
+- Keine neue Fachlogik, keine Mutation, keine Secrets im Payload.
+- `GET /api/ops` bleibt read-only und ohne Token ladbar; Rolle und Live-Sperre
+  stehen weiterhin in der Kopfzeile (Live-Lock bleibt hart `false`).
+
+**Testbericht:** `tests/ops.api.test.ts`, `tests/opsSections.test.ts`
+(Payload, Aggregation, Fehler-/Leer-/Ladezustand, Render) und
+`tests/task10.architecture.test.ts` (keine Platzhalter-Terminologie, zehn
+Sektionen, kein Schreibpfad im Aggregator).
+
+---
 
 ## Task 11 im Detail (v1.19.0)
 
@@ -71,7 +126,7 @@ Kill-Switch (task-11) — aktiviert kein Live`.
   `scripts/docs-validate.ts`); bestehende Tests unverändert.
 
 **Offene Punkte Task 12:** keine blockierenden; Nachpflege gemäß
-„Wie Docs hier gepflegt werden“ (`ARCHITECTURE.md §12`).
+„Wie Docs hier gepflegt werden“ (`ARCHITECTURE.md §13`).
 
 ---
 

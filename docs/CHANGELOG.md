@@ -20,6 +20,57 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.23.0] — 2026-08-29
+
+**Operations Center vollständig integriert (Task 10).** Der Tab war eine
+Phase-1-Hülle (sieben Modul-Karten, fünf davon `stub`), während der
+Task-Tracker „Implementiert“ auswies. Jetzt zeigt das Cockpit zehn Sektionen
+mit echten Werten aus bestehenden Modulen.
+
+### Added
+
+* **Zehn Sektionen im Operations Center:** Market Universe, Scanner, Portfolio
+  Analytics, Research Operations, Broker Operations, LLM Operations, Agent
+  Operations, Risk, Audit, Help — jede mit Status, Datenstand, Kennzahlen,
+  Detailzeilen, Hinweisen und sichtbaren Quellen.
+* **Neues Aggregationsmodul `src/ops/`** (`types.ts`, `collect.ts`, `index.ts`):
+  liest ausschließlich bestehende Fassaden (Universum, Scanner, Zyklen, Broker,
+  Router, Risk Guard, Live-Gate, Datenbank, `docs/`). Keine Mutation, kein
+  Secret, keine zweite Fachlogik.
+* **Sektionszustände statt Platzhalter:** `ready | degraded | empty | locked |
+  unavailable`. `stub` ist aus dem Zustandsraum entfernt.
+* **Fail-soft je Sektion:** eine nicht erreichbare Quelle markiert nur ihre
+  Sektion (`error` ist redigiert), das Cockpit bleibt lesbar.
+* **Health-Zähler** im Payload (`health`) und in der Kopfzeile
+  („n/10 Sektionen bereit“).
+* **`src/lib/docsCatalog.ts`** als Single Source of Truth der
+  Dokumentations-Whitelist (neu auch `brokers` → `BROKER_ARCHITECTURE.md`);
+  `GET /api/docs` liest sie jetzt von dort.
+* **Reiter „🧭 Operations Center“** im Dashboard sichtbar (war im Code
+  vorhanden, aber ohne Reiter erreichbar).
+* **Tests:** `tests/opsSections.test.ts` (Payload, Aggregation, Render,
+  Fehler-/Leer-/Ladezustand), erweiterte `tests/ops.api.test.ts` und
+  `tests/task10.architecture.test.ts`.
+
+### Changed
+
+* `GET /api/ops` liefert `sections[]` statt `modules[]`; die Antwort beschreibt
+  sich als „Operations Center“ statt „Operations-Center-Hülle“.
+* `src/auth/ops.ts`: `OPS_MODULES` → `OPS_SECTIONS` (zehn Einträge, jede mit
+  `sources`, `href`, `helpKey`); `buildOpsPayload(actor, data)` führt Katalog
+  und Ist-Daten zusammen.
+* `src/components/ops/OperationsCenterPanel.tsx`: Container (`GET /api/ops`)
+  plus reine `OperationsCenterView` — testbar ohne Netz und Datenbank.
+* `docs/help/ops.help.json` auf Version 2: Felder für alle zehn Sektionen im
+  3-Ebenen-Schema, „Phase 1“-Formulierungen entfernt.
+
+### Fixed
+
+* Doc-Code-Diskrepanz Task 10: Tracker „Implementiert“ vs. Code „Hülle“ — der
+  Code hat die Doku eingeholt, nicht umgekehrt.
+* HANDBUCH 2.3 beschreibt das Operations Center nicht mehr als
+  „Phase-1-Hülle“ mit späteren Kacheln.
+
 ## [1.22.0] — 2026-08-29
 
 **Provider/Modell-Overrides je Agent + Audit-Identität gehärtet + Test-Isolation

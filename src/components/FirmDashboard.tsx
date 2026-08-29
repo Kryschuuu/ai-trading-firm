@@ -119,6 +119,7 @@ export default function FirmDashboard() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [firmError, setFirmError] = useState("");
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
   /** Pipeline-Statusleiste: läuft / fertig / fehlgeschlagen (optisch hervorgehoben). */
@@ -148,9 +149,24 @@ export default function FirmDashboard() {
     try {
       const res = await fetch("/api/firm");
       const json = await res.json();
+      // FIX (v1.23.0): Ein 503 (z. B. PostgreSQL nicht erreichbar) liefert
+      // einen Fehlerkörper statt des Firm-Zustands. Der wurde früher ungeprüft
+      // in den State geschrieben und hat das Dashboard beim nächsten Rendern
+      // zerschossen (`data.positions.filter` auf undefined). Jetzt bleibt der
+      // letzte gültige Zustand stehen und die Meldung erscheint als Hinweis —
+      // die modulbasierten Tabs (Operations Center, Brokers) bleiben nutzbar.
+      if (!json || json.ok === false || !Array.isArray(json.positions) || !Array.isArray(json.missions)) {
+        setFirmError(
+          typeof json?.error === "string" && json.error
+            ? json.error
+            : `Unerwartete Antwort von GET /api/firm (HTTP ${res.status}).`
+        );
+        return;
+      }
+      setFirmError("");
       setData(json);
     } catch {
-      /* ignore */
+      setFirmError("Netzwerkfehler — /api/firm nicht erreichbar.");
     } finally {
       setLoading(false);
     }
@@ -457,6 +473,21 @@ export default function FirmDashboard() {
         ))}
       </nav>
 
+      {firmError && (
+        <div className="mb-4 rounded-xl border border-amber-800/60 bg-amber-950/30 px-4 py-3 text-xs leading-relaxed text-amber-200">
+          <p className="font-bold text-amber-100">Firm-Status nicht verfügbar (Datenbank).</p>
+          <p className="mt-1">
+            {firmError} Die Modul-Tabs (Operations Center, Brokers & Venues) funktionieren weiter —
+            ihre Quellen sind lokal.
+          </p>
+          {data.positions.length === 0 && (
+            <p className="mt-1 text-amber-300/80">
+              Prüfen: PostgreSQL gestartet? `DATABASE_URL` gesetzt? `npx drizzle-kit push` ausgeführt?
+            </p>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <p className="py-16 text-center text-slate-400">Loading firm state…</p>
       ) : (
@@ -468,7 +499,7 @@ export default function FirmDashboard() {
           {tab === "protocol" && <ProtocolTab />}
           {tab === "agents" && <AgentsTab data={data} running={running} onRun={runAgent} />}
           {tab === "ops" && (
-            <OperationsCenterPanel onOpenBrokers={() => setTab("brokers")} />
+            <OperationsCenterPanel onOpenTab={(target) => setTab(target as Tab)} />
           )}
           {tab === "workshop" && (
             <WorkshopTab
@@ -504,6 +535,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "protocol", label: "📋 Protokoll" },
   { id: "agents", label: "Agents ↗ Orchestrator" },
   { id: "workshop", label: "🛠 Workshop" },
+  { id: "ops", label: "🧭 Operations Center" },
   { id: "brokers", label: "🌐 Brokers & Venues" },
   { id: "risk", label: "Risk & Guardrails" },
   { id: "architecture", label: "Design Decisions / Guide" },

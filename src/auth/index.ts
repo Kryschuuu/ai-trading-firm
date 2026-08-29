@@ -3,7 +3,7 @@
  *
  *   permissions: Rollenmatrix, live.gate nie gewährt
  *   resolve:     Token → Actor, requirePermission
- *   ops:         Cockpit-Hülle für GET /api/ops
+ *   ops:         Operations-Center-Katalog + RBAC-Projektion (GET /api/ops)
  */
 export {
   PERMISSIONS,
@@ -41,9 +41,25 @@ export {
   resolveAuth,
 } from "./resolve";
 export {
-  OPS_MODULES,
+  OPS_SECTIONS,
+  OPS_SECTION_BY_ID,
+  aggregateLiveGateStatus,
   buildOpsPayload,
-  type OpsModule,
-  type OpsModuleStatus,
-  type OpsPayload,
+  summarizeSections,
+  type OpsSectionDefinition,
 } from "./ops";
+
+export {
+  OPS_SECTION_IDS,
+  OPS_SECTION_STATUSES,
+  isOpsSectionId,
+  type OpsHealth,
+  type OpsItem,
+  type OpsMetric,
+  type OpsPayload,
+  type OpsSection,
+  type OpsSectionData,
+  type OpsSectionId,
+  type OpsSectionStatus,
+  type OpsTone,
+} from "@/ops/types";

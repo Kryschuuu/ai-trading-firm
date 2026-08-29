@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.22.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.23.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,57 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.23.0] — 2026-08-29 · Operations Center vollständig integriert (Task 10)
+
+**Haupt-Task:** Das Operations Center ist keine Phase-1-Hülle mehr. Der Tab
+zeigt zehn Sektionen mit echten Werten aus bestehenden Modulen — statt sieben
+Karten, von denen fünf auf `stub` standen.
+
+**Ausgangslage (Beanstandung aus dem Review):** `docs/ARENA_TASKS.md` wies Task
+10 als „Implementiert“ aus, während Code und API sich selbst als
+„Operations-Center-Hülle“ bezeichneten und der Tab textlich erklärte, er sei
+„bewusst die leere Hülle“. Korrektur: **Code an Doku angeglichen** (nicht die
+Doku herabgestuft).
+
+**Neu — zehn Sektionen, jede mit Quellen und Ist-Daten:**
+
+- **Market Universe** — Bestand je Venue, Datenstand, Policy-Version (`src/universe`).
+- **Scanner** — Trichter scanned→eligible→interesting→daily→deep, Top-Scores mit
+  Regime (`src/scanner`).
+- **Portfolio Analytics** — offene Positionen, Exposure, Eigenkapital,
+  Tagesergebnis; Gewichte/Kennzahlen bleiben Sache des Portfolio-Moduls.
+- **Research Operations** — Tages-/Wochenläufe, Status, Dauer, Weekly-Klassen
+  (`src/cycle`).
+- **Broker Operations** — sieben Venues mit Capabilities, Execution-Modi und
+  lokalem Health (`GET /api/brokers`).
+- **LLM Operations** — Routing-Policy, Modus, Provider-Health, Tagesbudget,
+  letzte Entscheidungen (`GET /api/routing`).
+- **Agent Operations** — Agenten, Rollen, Missionen, letzte Aktivität.
+- **Risk** — Limits, Volatilitäts-Regime, Kill-Switch, Live-Gate-Lage.
+- **Audit** — Ereignisse/Warnungen/kritische Treffer plus Integrität der
+  Live-Gate-Hash-Kette.
+- **Help** — Hilfe-Dateien, Fachbegriffe und der Dokumentationskatalog.
+
+**Architektur:** Neues Modul `src/ops/` (`types.ts`, `collect.ts`, `index.ts`)
+aggregiert ausschließlich bestehende Fassaden. Keine zweite Fachlogik, keine
+Mutation, kein Secret im Payload. `src/auth/ops.ts` hält weiterhin Katalog und
+RBAC-Projektion (Rolle, Live-Sperre); `buildOpsPayload()` führt Katalog und
+Ist-Daten zusammen.
+
+**Robustheit:** Jede Sektion ist fail-soft. Eine nicht erreichbare Quelle
+(z. B. PostgreSQL aus, `docs/`-Ordner fehlt) macht nur ihre Sektion
+`unavailable` mit redigierter Meldung — das Cockpit bleibt lesbar. Der
+Zustandsraum `ready | degraded | empty | locked | unavailable` ersetzt `stub`.
+
+**Bedienung:** Der Reiter „🧭 Operations Center“ ist jetzt im Dashboard
+sichtbar (vorher nur im Code vorhanden). Karten mit Ziel-Tab (Brokers, Risk,
+Protokoll) springen direkt dorthin; jede Karte nennt unter „Quellen“ ihre
+Datenherkunft.
+
+**Getrennt/Sauber:** `src/lib/docsCatalog.ts` ist die neue Single Source of
+Truth für die Dokumentations-Whitelist — `GET /api/docs` und die Help-Sektion
+lesen dieselbe Liste (vorher nur in der Route).
 
 ## [1.22.0] — 2026-08-29 · Provider/Modell-Overrides + Audit-Härtung + Test-Isolation
 
