@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.24.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.24.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,34 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.24.1] — 2026-08-29 · Instrument-Enrichment: volume24h + Orderbook-Spread
+
+**Nacharbeit zu 1.24.0 (CODE-REVIEW-SCANNER §4/§5):** `discoverInstruments()`
+liefert nur statische Handelsparameter (`symbol`, `base`, `quote`,
+`minTradeVolume`, Präzisionen, `maxLeverage`, `symbolStatus`, `isApiSupported`) —
+**keine** Liquiditäts- oder Preismetriken. Ohne Enrichment ist `spread` für
+jedes Instrument `null`, der `spread`-Faktor hat (anders als `liquidity`)
+keinen Fallback, und der Trichter läuft an der `max-spread`-Regel leer — auch
+nach einem Candle-Backfill.
+
+* **Enrichment-Pfad** `trading_pairs → tickers → volume24h → depth →
+  bestBid/bestAsk/spread → kline → HistoricalStore → Scanner`:
+  `MarketDataSyncService.syncVenue()` ruft je Instrument `getTicker()` (bzw.
+  1× `getTickers()` als Batch) und `getOrderBook()` auf und schreibt
+  `volume24h` + berechneten relativen Spread mit `lastSeen` in die Registry.
+* **`calculateRelativeSpread()`** (`src/marketdata/spread.ts`):
+  `(ask − bid) / mid`; fehlende/invertierte/nicht-positive/`NaN`-Werte ⇒
+  `null` („nicht geladen“), niemals `0` und niemals eine Exception.
+* **Data-Quality-Rejections:** `FilterRejection.dataQuality` trennt fehlende
+  Daten (`min-candles`, `min-volume`, `max-spread`, `max-execution-cost`) von
+  fachlichen Marktgründen; Meldungen sagen „… wurde nicht geladen“ statt eines
+  generischen „Instrument ungeeignet“.
+* **Symbol-Guard:** Ein Ticker wird nur übernommen, wenn sein `symbol` exakt
+  zum Instrument passt — sonst bleibt `volume24h` unbekannt statt fremd.
+* **Doku:** `docs/MARKET_DATA_PIPELINE.md` (Enrichment-Datenfluss,
+  Data-Quality-Tabelle) und `docs/BITUNIX.md` §1.2 (Spread kommt aus
+  `/depth`, nicht aus dem Ticker; 1 zusätzlicher Call je Instrument).
 
 ## [1.24.0] — 2026-08-29 · Persistenter Venue-Market-Data-Sync
 

@@ -213,9 +213,17 @@ schrittweise um 1 erhöht; das Ergebnis trägt dann `diversificationRelaxed: tru
 | 10 | `regime-extreme` | Regime `EXTREME` | `excludeExtremeRegime` |
 
 Es gewinnt immer die **erste** greifende Regel; sie landet als
-`{ instrumentId, ruleId, message }` in `scan.rejections` und aggregiert in
-`scan.rejectionsByRule`. Unbekannte Werte führen zur Ablehnung (Ausnahme:
-Drawdown ohne Historie wird bereits von `min-candles` erfasst).
+`{ instrumentId, ruleId, message, dataQuality }` in `scan.rejections` und
+aggregiert in `scan.rejectionsByRule`. Unbekannte Werte führen zur Ablehnung
+(Ausnahme: Drawdown ohne Historie wird bereits von `min-candles` erfasst).
+
+`dataQuality: true` markiert Ablehnungen wegen **nicht geladener Daten**
+(`min-candles`, `min-volume`, `max-spread`, `max-execution-cost`) — sie sind
+mit einem Warmup-Lauf (`npm run market-sync`) behebbar und kein fachlicher
+Marktausschluss; die Meldung nennt die fehlende Metrik („Spread wurde nicht
+geladen …“). `false` ⇒ fachliche Ablehnung (Regeln 1–4 sowie zu kleines
+Volumen, zu breiter Spread, zu hohe Kosten, Drawdown, Extrem-Regime).
+Hintergrund: `docs/MARKET_DATA_PIPELINE.md` §3 und §8.
 
 ---
 
@@ -325,7 +333,8 @@ mit `items[]` = validierte Weekly-Einträge.
 * Antwort `{ ok, asOf, configVersion, weights, score, levels, rejection }` —
   `score.breakdown` hat 9 Einträge, `score.factors` alle 14 Faktorwerte,
   `levels` sagt, in welchen Trichterstufen das Instrument steht,
-  `rejection` nennt bei Ausschluss die greifende Regel.
+  `rejection` nennt bei Ausschluss die greifende Regel (`ruleId`, `message`
+  und `dataQuality` — fehlende Daten vs. fachlicher Ausschluss).
 * Unbekannte ID ⇒ `404 { ok: false, error: "NOT_FOUND" }`, ungültige ⇒ `400`.
 
 ---

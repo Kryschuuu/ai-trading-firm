@@ -39,6 +39,18 @@ export interface FilterRejection {
   ruleId: FilterRuleId;
   /** Begründung ohne Secrets/Rohdaten. */
   message: string;
+  /**
+   * `true` ⇒ **Data-Quality-Rejection**: Das Instrument scheitert, weil eine
+   * Marktdaten-Metrik nicht geladen wurde (keine Kerzenhistorie, kein Ticker,
+   * kein Orderbook-Snapshot) — nicht, weil der Markt fachlich unattraktiv wäre.
+   *
+   * Betriebsbedeutung: Solche Ablehnungen sind mit einem Warmup-Lauf
+   * (`npm run market-sync` → `MarketDataSyncService.syncVenue`) behebbar und
+   * dürfen nicht als dauerhaftes „Instrument ungeeignet“ interpretiert werden.
+   * `false` ⇒ fachliche Ablehnung (Status, Markttyp, Volumen zu klein,
+   * Spread zu breit, Kosten zu hoch, Drawdown, Extrem-Regime).
+   */
+  dataQuality: boolean;
 }
 
 /** Eingabe der Filterprüfung (bereits berechnete Faktoren). */
@@ -60,14 +72,27 @@ function raw(value: FactorValue): number | null {
 /**
  * Prüft ein Instrument gegen alle Eignungsregeln.
  *
+ * **Data-Quality- vs. Fachablehnung (FEHLER-3, Review-Punkt 5):** Fehlt eine
+ * Metrik (`candleCount < minCandles`, `volume24h`/`spread` unbekannt), ist das
+ * eine **Data-Quality-Rejection** — die Daten wurden nicht geladen, nicht der
+ * Markt für unattraktiv befunden. Diese Fälle tragen `dataQuality: true` und
+ * eine Meldung, die das explizit sagt („… wurde nicht geladen“), statt eines
+ * generischen „Instrument ungeeignet“. Grund: Der Liquiditätsfaktor besitzt
+ * einen Kerzen-Fallback (`volume24h ?? letzte Kerze volume × close`), der
+ * Spread-Faktor aber **nicht** — ohne Orderbook-Enrichment
+ * (`MarketDataSyncService` → `getOrderBook` → `calculateRelativeSpread`)
+ * scheitern deshalb selbst kerzengesättigte Instrumente an `max-spread`.
+ * Datenfluss: `docs/MARKET_DATA_PIPELINE.md` §2–§3.
+ *
  * @returns `null`, wenn das Instrument geeignet ist, sonst die Ablehnung.
  */
 export function checkEligibility(candidate: FilterCandidate, config: FilterConfig): FilterRejection | null {
   const { instrument, factors, candleCount, regime } = candidate;
-  const reject = (ruleId: FilterRuleId, message: string): FilterRejection => ({
+  const reject = (ruleId: FilterRuleId, message: string, dataQuality = false): FilterRejection => ({
     instrumentId: instrument.id,
     ruleId,
     message,
+    dataQuality,
   });
 
   if (config.requireStatusActive && instrument.status !== "active") {
@@ -83,23 +108,40 @@ export function checkEligibility(candidate: FilterCandidate, config: FilterConfi
     return reject("asset-class", `Anlageklasse ${instrument.assetClass} ist nicht freigegeben`);
   }
   if (candleCount < config.minCandles) {
-    return reject("min-candles", `zu wenig Historie (${candleCount} < ${config.minCandles} Kerzen)`);
+    return reject(
+      "min-candles",
+      `Historie nicht geladen (${candleCount} < ${config.minCandles} Kerzen) — Warmup nötig, kein Marktausschluss`,
+      true,
+    );
   }
 
   const volume = raw(factors.liquidity);
-  if (volume === null) return reject("min-volume", "24h-Volumen unbekannt");
+  // Data-Quality: weder `volume24h` (Ticker-Enrichment) noch der Kerzen-Fallback
+  // (`letzte Kerze volume × close`) lieferte ein Volumen.
+  if (volume === null) {
+    return reject("min-volume", "24h-Volumen wurde nicht geladen (kein Ticker, keine Kerze)", true);
+  }
   if (volume < config.minVolume24h) {
     return reject("min-volume", `24h-Volumen ${volume.toFixed(0)} < ${config.minVolume24h}`);
   }
 
   const spread = raw(factors.spread);
-  if (spread === null) return reject("max-spread", "Spread unbekannt");
+  // Data-Quality: `spread === null` heißt „Orderbook nicht geladen“ und NICHT
+  // „Spread = 0“. Der Spread-Faktor hat (anders als `liquidity`) keinen
+  // Kerzen-Fallback — ohne `/depth`-Enrichment im Sync scheitert jedes
+  // Instrument hier. Kein 0-Mapping, keine optimistische Annahme.
+  if (spread === null) {
+    return reject("max-spread", "Spread wurde nicht geladen (kein Orderbook-Snapshot) — Warmup nötig", true);
+  }
   if (spread > config.maxSpread) {
     return reject("max-spread", `Spread ${(spread * 10_000).toFixed(2)} bp > ${(config.maxSpread * 10_000).toFixed(2)} bp`);
   }
 
   const cost = raw(factors.executionCost);
-  if (cost === null) return reject("max-execution-cost", "Handelskosten unbekannt");
+  // Folgt dem Spread: ohne Spread sind die Roundturn-Kosten nicht bezifferbar.
+  if (cost === null) {
+    return reject("max-execution-cost", "Handelskosten nicht bezifferbar — Spread wurde nicht geladen", true);
+  }
   if (cost > config.maxExecutionCost) {
     return reject(
       "max-execution-cost",

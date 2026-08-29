@@ -86,6 +86,8 @@ export interface MockBitunixFetchOptions {
 export interface MockBitunixCall {
   path: string;
   query: Record<string, string>;
+  /** Gesendete Request-Header (Lowercase-Keys) — für Credential-Audits. */
+  headers: Record<string, string>;
 }
 
 /**
@@ -102,9 +104,20 @@ export function createMockBitunixFetch(
       { status, headers: { "content-type": "application/json" } }
     );
 
-  const fetchImpl: typeof fetch = async (input) => {
+  const fetchImpl: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
-    calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams) });
+    const headers: Record<string, string> = {};
+    const rawHeaders = init?.headers as unknown;
+    if (rawHeaders && typeof (rawHeaders as Headers).forEach === "function") {
+      (rawHeaders as Headers).forEach((value, key) => {
+        headers[key.toLowerCase()] = value;
+      });
+    } else if (rawHeaders && typeof rawHeaders === "object") {
+      for (const [k, v] of Object.entries(rawHeaders as Record<string, string>)) {
+        headers[k.toLowerCase()] = String(v);
+      }
+    }
+    calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), headers });
 
     if (url.pathname === BITUNIX_PATHS.tradingPairs) {
       return ok(200, opts.emptyTradingPairs ? [] : TRADING_PAIRS);

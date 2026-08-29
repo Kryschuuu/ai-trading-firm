@@ -11,10 +11,14 @@ import path from "node:path";
 
 import { HistoricalStore } from "../../lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../universe/registry";
-import { MarketDataSyncService, type MarketDataAdapter } from "../sync";
+import { MarketDataSyncService, type MarketDataAdapter, type MarketDataSyncOptions } from "../sync";
 import { UnsupportedVenueError } from "../errors";
 import { calculateRelativeSpread } from "../spread";
-import { SYNC_TIMEFRAMES, type MarketCandle, type MarketInstrument, type MarketOrderBook, type MarketTicker } from "../types";
+import { SYNC_TIMEFRAMES, type MarketCandle, type MarketInstrument, type MarketOrderBook, type RateLimiter, type MarketTicker } from "../types";
+import { DEFAULT_SCANNER_CONFIG } from "../../scanner/config";
+import { liquidityFactor } from "../../scanner/factors/liquidity";
+import { spreadFactor } from "../../scanner/factors/spread";
+import type { MarketCandle as ScannerCandle } from "../../lib/marketdata/types";
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -81,48 +85,82 @@ interface CallLog {
   ticker: string[];
   book: string[];
   candles: { symbol: string; timeframe: string; limit: number }[];
+  /** Aufgerufene `getTickers`-Batches (Symbol-Listen). */
+  tickerBatches: (string[] | undefined)[];
+  /** Maximale beobachtete Parallelität über alle Adapter-Aufrufe. */
+  maxConcurrency: number;
 }
 
 function mockAdapter(opts: {
   instruments?: MarketInstrument[];
   ticker?: (symbol: string) => Promise<MarketTicker>;
+  /** Optionaler Batch-Pfad (`getTickers`) — sonst per-Symbol-Fallback. */
+  batchTickers?: (symbols?: string[]) => Promise<MarketTicker[]>;
   book?: (symbol: string) => Promise<MarketOrderBook>;
   candles?: (symbol: string, tf: string, limit: number) => Promise<MarketCandle[]>;
   failCandles?: boolean;
 }): { adapter: MarketDataAdapter; calls: CallLog } {
-  const calls: CallLog = { discover: 0, ticker: [], book: [], candles: [] };
+  const calls: CallLog = { discover: 0, ticker: [], book: [], candles: [], tickerBatches: [], maxConcurrency: 0 };
   const instruments = opts.instruments ?? [instrument("BTCUSDT"), instrument("ETHUSDT")];
+  let active = 0;
+  // Misst die Parallelität: ein Burst (Promise.all über N Instrumente) würde
+  // hier sofort auffallen — der Sync-Orchestrator arbeitet strikt sequenziell.
+  const guard = async <T,>(run: () => Promise<T>): Promise<T> => {
+    active += 1;
+    calls.maxConcurrency = Math.max(calls.maxConcurrency, active);
+    try {
+      return await run();
+    } finally {
+      active -= 1;
+    }
+  };
   const adapter: MarketDataAdapter = {
     async discoverInstruments() {
-      calls.discover += 1;
-      return instruments;
+      return guard(async () => {
+        calls.discover += 1;
+        return instruments;
+      });
     },
     async getTicker(symbol) {
-      calls.ticker.push(symbol);
-      if (opts.ticker) return opts.ticker(symbol);
-      return ticker(symbol);
+      return guard(async () => {
+        calls.ticker.push(symbol);
+        if (opts.ticker) return opts.ticker(symbol);
+        return ticker(symbol);
+      });
     },
     async getOrderBook(symbol) {
-      calls.book.push(symbol);
-      if (opts.book) return opts.book(symbol);
-      return book();
+      return guard(async () => {
+        calls.book.push(symbol);
+        if (opts.book) return opts.book(symbol);
+        return book();
+      });
     },
     async getCandles(symbol, timeframe, limit) {
-      calls.candles.push({ symbol, timeframe, limit });
-      if (opts.failCandles) throw new Error("kline down");
-      if (opts.candles) return opts.candles(symbol, timeframe, limit);
-      return [candle(0), candle(1)];
+      return guard(async () => {
+        calls.candles.push({ symbol, timeframe, limit });
+        if (opts.failCandles) throw new Error("kline down");
+        if (opts.candles) return opts.candles(symbol, timeframe, limit);
+        return [candle(0), candle(1)];
+      });
     },
   };
+  if (opts.batchTickers) {
+    adapter.getTickers = async (symbols?: string[]) =>
+      guard(async () => {
+        calls.tickerBatches.push(symbols ? [...symbols] : undefined);
+        return opts.batchTickers!(symbols);
+      });
+  }
   return { adapter, calls };
 }
 
-function harness(adapter: MarketDataAdapter, venue = "BITUNIX") {
+function harness(adapter: MarketDataAdapter, venue = "BITUNIX", options: MarketDataSyncOptions = {}) {
   const dir = tmp();
   const registry = new InstrumentRegistry({ dir, autoSave: true, now: () => new Date("2026-08-29T00:00:00.000Z") });
   const history = new HistoricalStore(path.join(dir, "history"));
   const service = new MarketDataSyncService(registry, history, new Map([[venue, adapter]]), {
     now: () => new Date("2026-08-29T00:00:00.000Z"),
+    ...options,
   });
   return { registry, history, service, dir };
 }
@@ -234,6 +272,165 @@ test("Ticker-Fehler isoliert: Orderbuch und Kerzen laufen weiter", async () => {
   assert.equal(result.orderbooksEnriched, 1);
   assert.ok(result.errors.some((e) => e.stage === "ticker"));
   assert.ok(history.count() > 0);
+});
+
+// ── FEHLER-3: Enrichment (volume24h + orderbook-spread) ──────────────────────
+
+test("market sync enriches 24h volume", async () => {
+  const { adapter } = mockAdapter({ instruments: [instrument("BTCUSDT")] });
+  const { service, registry } = harness(adapter);
+
+  await service.syncVenue("BITUNIX");
+
+  const btc = registry.get("BITUNIX:BTCUSDT");
+  assert.ok(btc);
+  assert.ok((btc!.volume24h ?? 0) > 0, `volume24h erwartet > 0, war ${btc!.volume24h}`);
+  assert.equal(btc!.volume24h, 1_000_000, "volume24h kommt aus ticker.quoteVol");
+  assert.equal(btc!.lastSeen, "2026-08-29T00:00:00.000Z", "lastSeen wird beim Upsert gestempelt");
+});
+
+test("market sync writes orderbook-derived spread into the registry", async () => {
+  const { adapter } = mockAdapter({
+    instruments: [instrument("BTCUSDT")],
+    book: async () => book(100, 100.02),
+  });
+  const { service, registry } = harness(adapter);
+
+  await service.syncVenue("BITUNIX");
+
+  const btc = registry.get("BITUNIX:BTCUSDT");
+  assert.ok(btc);
+  assert.ok(btc!.spread !== null, "spread muss aus bestBid/bestAsk gefüllt sein");
+  assert.ok(Math.abs(btc!.spread! - calculateRelativeSpread(100, 100.02)!) < 1e-12);
+  assert.ok(Math.abs(btc!.spread! - 0.00019998) < 1e-6, `≈2 bp erwartet, war ${btc!.spread}`);
+});
+
+test("Batch-Tickers: 1× getTickers(symbols) für alle Instrumente, kein per-Symbol-getTicker", async () => {
+  const instruments = [instrument("BTCUSDT"), instrument("ETHUSDT"), instrument("SOLUSDT")];
+  const { adapter, calls } = mockAdapter({
+    instruments,
+    batchTickers: async (symbols) =>
+      (symbols ?? instruments.map((i) => i.symbol)).map((s) => ticker(s, 2_500_000)),
+  });
+  const { service, registry } = harness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  assert.equal(calls.tickerBatches.length, 1, "genau EIN Batch-Call");
+  assert.deepEqual(calls.tickerBatches[0], ["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
+  assert.deepEqual(calls.ticker, [], "kein Fallback-getTicker, wenn der Batch vollständig ist");
+  assert.equal(result.tickersEnriched, 3);
+  for (const id of ["BITUNIX:BTCUSDT", "BITUNIX:ETHUSDT", "BITUNIX:SOLUSDT"]) {
+    assert.equal(registry.get(id)?.volume24h, 2_500_000);
+  }
+});
+
+test("Batch-Tickers unvollständig → per-Symbol-getTicker ergänzt nur die Lücken", async () => {
+  const instruments = [instrument("BTCUSDT"), instrument("ETHUSDT")];
+  const { adapter, calls } = mockAdapter({
+    instruments,
+    batchTickers: async () => [ticker("BTCUSDT", 5_000_000)],
+  });
+  const { service, registry } = harness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  assert.deepEqual(calls.ticker, ["ETHUSDT"], "nur das fehlende Symbol wird einzeln geholt");
+  assert.equal(registry.get("BITUNIX:BTCUSDT")?.volume24h, 5_000_000);
+  assert.equal(registry.get("BITUNIX:ETHUSDT")?.volume24h, 1_000_000, "Fallback-Ticker greift");
+  assert.equal(result.tickersEnriched, 2);
+});
+
+test("Ticker-Symbol weicht ab → volume24h bleibt null (kein Fremd-Volumen)", async () => {
+  const { adapter } = mockAdapter({
+    instruments: [instrument("ETHUSDT")],
+    // Venue-Client fällt auf eine fremde Zeile zurück (Symbol nicht in der Antwort).
+    ticker: async () => ticker("BTCUSDT", 9_000_000),
+  });
+  const { service, registry } = harness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  const eth = registry.get("BITUNIX:ETHUSDT");
+  assert.ok(eth);
+  assert.equal(eth!.volume24h, null, "fremdes quoteVol darf nicht übernommen werden");
+  assert.equal(result.tickersEnriched, 0);
+  assert.ok(
+    result.errors.some((e) => e.stage === "ticker" && /Symbol/.test(e.message)),
+    "Abweichung muss als Sync-Fehler sichtbar sein",
+  );
+});
+
+test("Ticker ohne quoteVol → volume24h bleibt null, Liquiditäts-Faktor fällt auf Kerze.volume × close zurück", async () => {
+  const { adapter } = mockAdapter({
+    instruments: [instrument("BTCUSDT")],
+    // Ticker-API ohne quoteVol (z. B. illiquides/neues Listing).
+    ticker: async (symbol) => ({ symbol, price: 100, source: "mock", ts: 1 }),
+    candles: async () => [candle(0)], // volume 10 × close 1.5 = 15
+  });
+  const { service, registry, history } = harness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+  assert.equal(result.tickersEnriched, 1);
+
+  const btc = registry.get("BITUNIX:BTCUSDT");
+  assert.ok(btc);
+  assert.equal(btc!.volume24h, null, "unbekannt bleibt null — kein 0-Mapping");
+
+  // Review-Punkt 5: Der Liquiditätsfaktor hat einen Kerzen-Fallback …
+  const stored: ScannerCandle[] = history
+    .query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" })
+    .map((e) => ({ time: e.ts, open: e.open, high: e.high, low: e.low, close: e.close, volume: e.volume }));
+  assert.ok(stored.length > 0, "Kerzen müssen nach dem Sync lesbar sein");
+  const liquidity = liquidityFactor.compute({
+    instrument: btc!,
+    candles: stored,
+    asOf: Date.parse("2026-08-29T00:00:00.000Z"),
+    config: DEFAULT_SCANNER_CONFIG,
+  });
+  assert.equal(liquidity.available, true, "Fallback macht den Faktor verfügbar");
+  assert.equal(liquidity.detail.source, "candle");
+  assert.equal(liquidity.raw, 15, "10 (volume) × 1.5 (close) = 15");
+
+  // … der Spread-Faktor aber NICHT: ohne Orderbook bleibt er unavailable.
+  const noBook = spreadFactor.compute({
+    instrument: { ...btc!, spread: null },
+    candles: stored,
+    asOf: Date.parse("2026-08-29T00:00:00.000Z"),
+    config: DEFAULT_SCANNER_CONFIG,
+  });
+  assert.equal(noBook.available, false, "Spread-Faktor hat keinen Fallback");
+});
+
+test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, strikt sequenziell (kein Burst)", async () => {
+  const N = 180;
+  const instruments = Array.from({ length: N }, (_, i) => instrument(`SYM${i}USDT`));
+  const { adapter, calls } = mockAdapter({ instruments });
+
+  let takes = 0;
+  const limiter: RateLimiter = {
+    async take() {
+      takes += 1;
+    },
+  };
+  const dir = tmp();
+  const registry = new InstrumentRegistry({ dir, autoSave: false, now: () => new Date("2026-08-29T00:00:00.000Z") });
+  const history = new HistoricalStore(path.join(dir, "history"));
+  const service = new MarketDataSyncService(registry, history, new Map([["BITUNIX", adapter]]), {
+    now: () => new Date("2026-08-29T00:00:00.000Z"),
+    rateLimiter: limiter,
+  });
+
+  const result = await service.syncVenue("BITUNIX");
+
+  // 1 × discovery + N × (1 ticker + 1 depth + 4 timeframe-candles)
+  const expected = 1 + N * (1 + 1 + SYNC_TIMEFRAMES.length);
+  assert.equal(takes, expected, `Limiter-Takes: erwartet ${expected}, war ${takes}`);
+  assert.equal(calls.book.length, N, "1 depth-Call je Instrument (N × depth)");
+  assert.equal(calls.ticker.length, N, "per-Symbol-Ticker, da kein Batch-Adapter");
+  assert.equal(calls.maxConcurrency, 1, "keine parallelen Request-Bursts");
+  assert.equal(result.orderbooksEnriched, N);
+  assert.equal(registry.size, N);
 });
 
 test("Architektur: src/marketdata importiert keinen PrivateClient und loggt keine Secrets", () => {

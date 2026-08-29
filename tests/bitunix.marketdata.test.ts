@@ -18,6 +18,7 @@ import path from "node:path";
 import { BitunixBrokerAdapter } from "../src/brokers/bitunix/adapter";
 import { BITUNIX_PATHS } from "../src/brokers/bitunix/config";
 import { BitunixApiError } from "../src/brokers/bitunix/errors";
+import { TokenBucket } from "../src/brokers/bitunix/http";
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../src/universe/registry";
 import { createAdapterRegistry } from "../src/marketdata/adapterRegistry";
@@ -171,6 +172,58 @@ test("Sync-Kontext-Sicherheit: AdapterRegistry referenziert keine Private-Creden
   const registry = createAdapterRegistry({ registry: tmpRegistry(), env: { ...ENABLED } });
   assert.equal((registry.get("BITUNIX") as BitunixBrokerAdapter).mode, "paper");
   assert.equal(process.env.BITUNIX_API_KEY, undefined, "Test-Env trägt ohnehin keine Key");
+});
+
+test("Security Audit: /depth (Public) sendet keine Credential-Header", async () => {
+  const { fetchImpl, calls } = createMockBitunixFetch();
+  const client = mockBitunixPublicClient({ fetchImpl });
+
+  await client.fetchOrderBook("BTCUSDT");
+  await client.fetchTickers("BTCUSDT");
+
+  const publicCalls = calls.filter(
+    (c) => c.path === BITUNIX_PATHS.depth || c.path === BITUNIX_PATHS.tickers,
+  );
+  assert.ok(publicCalls.length >= 2, "depth + tickers aufgerufen");
+  for (const call of publicCalls) {
+    for (const forbidden of ["sign", "api-key", "apikey", "nonce", "timestamp", "authorization", "x-api-key"]) {
+      assert.equal(
+        call.headers[forbidden],
+        undefined,
+        `${call.path} darf "${forbidden}" nicht senden — Public-Endpoint ohne Credentials`,
+      );
+    }
+  }
+});
+
+test("Rate-Limit-Eskalation: N Depth-Calls laufen über den Token-Bucket (8 req/s), nicht als Burst", async () => {
+  const { fetchImpl, calls } = createMockBitunixFetch();
+  // Produktions-Default: TokenBucket(publicRatePerSec = 8, burst = 8).
+  const client = mockBitunixPublicClient({ fetchImpl });
+
+  const t0 = Date.now();
+  for (let i = 0; i < 12; i += 1) await client.fetchOrderBook("BTCUSDT");
+  const elapsed = Date.now() - t0;
+
+  assert.equal(
+    calls.filter((c) => c.path === BITUNIX_PATHS.depth).length,
+    12,
+    "alle Depth-Calls kamen an",
+  );
+  // burst 8 sofort, danach 4 × 125 ms ⇒ ≥ 500 ms; konservativ 400 ms Schwelle.
+  assert.ok(elapsed >= 400, `Drosselung fehlt: 12 Calls in ${elapsed} ms (erwartet ≥ 400 ms)`);
+});
+
+test("TokenBucket: Burst wird respektiert, danach greift die Rate", async () => {
+  const bucket = new TokenBucket(8, 8);
+  const burstStart = Date.now();
+  for (let i = 0; i < 8; i += 1) await bucket.take();
+  const burstMs = Date.now() - burstStart;
+  assert.ok(burstMs < 100, `Burst von 8 muss sofort durchgehen (war ${burstMs} ms)`);
+
+  const throttled = Date.now();
+  await bucket.take();
+  assert.ok(Date.now() - throttled >= 100, "das 9. Token kostet ~125 ms");
 });
 
 test("Rate-Limit-Regression: 429 → Retry mit Backoff bleibt erhalten", async () => {

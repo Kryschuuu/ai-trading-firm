@@ -20,6 +20,58 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.24.1] — 2026-08-29
+
+**Instrument-Enrichment: 24h-Volumen und Orderbook-Spread.** Discovery
+(`trading_pairs`) liefert ausschließlich statische Handelsparameter — keine
+Liquiditäts- oder Preismetriken. Ohne Enrichment ist `spread` für jedes
+Instrument `null`; der `spread`-Faktor besitzt keinen Fallback, also scheitern
+**alle** Instrumente an der `max-spread`-Regel, selbst nach einem
+Candle-Backfill. Dieser Release schließt den zweiten Funnel-Blocker.
+
+### Added
+
+* **`src/marketdata/spread.ts`** — `calculateRelativeSpread(bid, ask)`:
+  `(ask − bid) / mid`, `mid = (ask + bid) / 2`. Fehlende, nicht-positive,
+  invertierte (`bid > ask`) oder nicht-endliche Werte liefern `null`
+  („nicht geladen“) — nie `0`, nie `NaN`, nie eine Exception.
+* **`FilterRejection.dataQuality`** — kennzeichnet Ablehnungen wegen
+  fehlender Daten (`min-candles`, `min-volume`, `max-spread`,
+  `max-execution-cost`) gegenüber fachlichen Marktgründen; die Meldungen
+  nennen die fehlende Metrik explizit („Spread wurde nicht geladen …“).
+* **Tests** — `src/marketdata/__tests__/spread.test.ts` (Golden
+  `100/100.02 ≈ 0.00019998`, Toleranz 1e-8, Edge Cases), Enrichment-,
+  Batch-Ticker-, Fallback- und Rate-Limiter-Tests in `sync.test.ts`,
+  gehärtete Integration (`volume24h > 0` **und** `spread !== null`),
+  Data-Quality-Tests in `tests/scanner.funnel.test.ts`.
+
+### Changed
+
+* **`MarketDataSyncService.syncVenue()`** — feste Reihenfolge je Instrument:
+  `getTicker` (bzw. 1× `getTickers`-Batch) → `volume24h`, `getOrderBook` →
+  `calculateRelativeSpread` → **ein** `registry.upsert` mit
+  `{ ...instrument, volume24h, spread, lastSeen }`, danach der Candle-Backfill.
+* **Symbol-Guard** im Sync: Ein per-Symbol-Ticker wird nur bei exakter
+  Symbol-Übereinstimmung übernommen (sonst `volume24h: null` +
+  `SyncResult.errors`), damit kein fremdes Volumen geschrieben wird.
+* **Doku** — [`MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md) §2–§3 mit
+  Ende-zu-Ende-Datenfluss (`trading_pairs → tickers → volume24h → depth →
+  spread → kline → HistoricalStore → Scanner`) und §8 mit der
+  Data-Quality-Tabelle; [`BITUNIX.md`](BITUNIX.md) §1.2: Der Spread kommt
+  **nicht** aus der Ticker-API, sondern aus dem Orderbuch — 1 zusätzlicher
+  `/depth`-Call je Instrument.
+
+### Security
+
+* Public-Endpoints (`trading_pairs`, `tickers`, `depth`, `kline`) senden keine
+  Credential-Header (`sign`, `api-key`, `nonce`, `timestamp`, `authorization`) —
+  je Request getestet; unnötige Credential-Exposition bleibt ausgeschlossen.
+* Rate-Limit-Eskalation bei N Instrumenten (z. B. 180 × `depth`) läuft
+  sequenziell durch den Token-Bucket (8 req/s) — kein Sekunden-Burst
+  (Limiter-Zählung und Maximal-Parallelität 1 sind getestet).
+
+---
+
 ## [1.24.0] — 2026-08-29
 
 **Persistenter Venue-Market-Data-Sync.** Der Scanner las bisher ausschließlich

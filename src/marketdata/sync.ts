@@ -92,6 +92,14 @@ export class MarketDataSyncService {
     let tickersEnriched = 0;
     let orderbooksEnriched = 0;
 
+    // Enrichment-Reihenfolge je Instrument (fix, getestet):
+    //   1. getTicker(symbol)   → volume24h = ticker.quoteVol ?? null
+    //   2. getOrderBook(symbol)→ spread = calculateRelativeSpread(bids[0], asks[0])
+    //   3. registry.upsert({ ...instrument, volume24h, spread, lastSeen }, "sync:<VENUE>")
+    // Danach erst der Candle-Backfill. Reihenfolge 1→2 ist bewusst vor dem
+    // Upsert: die Registry bekommt pro Instrument genau EINEN Satz aus
+    // Discovery + Ticker + Orderbook — nie einen Zwischenstand mit
+    // `spread: null` aus Discovery.
     for (const instrument of instruments) {
       const symbol = typeof instrument.symbol === "string" ? instrument.symbol : "";
       const instrumentId =
@@ -107,8 +115,23 @@ export class MarketDataSyncService {
       if (!ticker) {
         try {
           await this.limit();
-          ticker = await adapter.getTicker(symbol);
-          if (ticker?.symbol) tickerBySymbol.set(String(ticker.symbol).toUpperCase(), ticker);
+          const fetched = await adapter.getTicker(symbol);
+          if (fetched?.symbol) tickerBySymbol.set(String(fetched.symbol).toUpperCase(), fetched);
+          // Symbol-Guard: Ein Venue-Client kann auf eine fremde Zeile
+          // zurückfallen, wenn das angefragte Symbol fehlt (Batch-Antwort
+          // ohne Treffer). Dessen `quoteVol` einem anderen Instrument
+          // zuzuschreiben wäre schlimmer als „unbekannt“ — deshalb wird der
+          // Ticker nur bei exakter Symbol-Übereinstimmung übernommen.
+          if (String(fetched?.symbol ?? "").toUpperCase() === symbol.toUpperCase()) {
+            ticker = fetched;
+          } else {
+            errors.push({
+              stage: "ticker",
+              instrumentId,
+              symbol,
+              message: "Ticker-Symbol weicht vom Instrument ab — volume24h bleibt unbekannt",
+            });
+          }
         } catch (e) {
           errors.push({
             stage: "ticker",
@@ -124,6 +147,10 @@ export class MarketDataSyncService {
       try {
         await this.limit();
         const book = await adapter.getOrderBook(symbol);
+        // Ticker-API liefert KEINEN Spread — er entsteht hier aus dem
+        // Orderbook-Snapshot (`/depth`). `null` = „nicht geladen/ungültig“
+        // (Data-Quality) und wird bewusst NICHT auf 0 gemappt: 0 bp wäre
+        // fachlich verdächtig und würde den `max-spread`-Filter täuschen.
         spread = calculateRelativeSpread(book.bids[0]?.price, book.asks[0]?.price);
         orderbooksEnriched += 1;
       } catch (e) {
