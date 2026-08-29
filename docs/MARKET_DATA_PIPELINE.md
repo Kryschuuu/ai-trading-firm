@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.26.1** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.26.2** · Modul `src/marketdata/` · CLI `npm run market-sync`
 > (Historien-Migration: `npm run history:migrate`)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
@@ -192,19 +192,47 @@ Timeframe-Queries **nie** ausgeliefert. Beim ersten Fund gibt es eine
 scheinfrei, sichert vorher und ist idempotent:
 
 ```bash
-# 1. trocken prüfen (schreibt nichts, kein Backup)
-npm run history:migrate -- --file=data/history/candles.ndjson \
-  --assume-timeframe=15m --dry-run
-
-# 2. migrieren (Backup candles.ndjson.bak-<ISO>, chmod 600)
+# 1. trocken prüfen — Dry-Run ist der Default (schreibt nichts, kein Backup,
+#    Exit-Code 2 weist auf das fehlende --apply hin)
 npm run history:migrate -- --file=data/history/candles.ndjson \
   --assume-timeframe=15m
+
+# 2. migrieren — erst --apply schreibt (Backup candles.ndjson.bak-<ISO>, chmod 600)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m --apply
 ```
 
 `--assume-timeframe` ist **Pflicht**, sobald die Datei Legacy-Zeilen enthält:
 5m- und 1h-Bars sind im alten Schema ununterscheidbar, ein erratener Wert
 würde die Reihen dauerhaft falsch beschriften. Das Skript rät nie.
 Vollständige Schema-/Schlüssel-/Rollback-Doku: [`docs/HISTORY.md`](HISTORY.md).
+
+### 5.3 Empfohlener Migrationspfad: Neuaufbau statt Inline-Migration
+
+Für den **Bitunix-Feed ist der Neuaufbau der empfohlene Weg** — nicht die
+Inline-Migration des Altbestands:
+
+```bash
+# 1. Schreiber stoppen, 2. Backup (siehe Runbook), dann:
+mv data/history/candles.ndjson data/history/candles.ndjson.pre-v2
+npm run market-sync -- --venue=BITUNIX
+```
+
+| Grund | Erläuterung |
+| --- | --- |
+| Datenvolumen gering | 150 Bars je Instrument und Timeframe, vier Timeframes (`5m`, `15m`, `30m`, `1h`) — ein Sync-Lauf genügt |
+| Kein Rate-Limit-Problem | öffentliche REST-Schnittstelle, 4 Requests je Instrument |
+| Keine Rate-Fehler möglich | der Timeframe stammt aus dem Backfill-Kontext statt aus einer Annahme |
+| Prüfbar | Sync-Report nennt `written` je Instrument und Timeframe |
+
+Die Inline-Migration (`npm run history:migrate`) ist bewusst nur das
+**Sicherheitsnetz** für Umgebungen ohne Netz-/Rate-Limit-Spielraum. Sie
+schreibt seit 1.26.2 **nur mit explizitem `--apply`** — ohne das Flag läuft
+sie als Dry-Run (kein Schreiben, kein Backup, Exit-Code 2).
+
+Schritt-für-Schritt-Anleitung für Produktionsumgebungen (Backup, Dry-Run,
+Anwenden, Validierung, Rollback):
+[`docs/MIGRATION_TIMEFRAME_FIELD.md`](MIGRATION_TIMEFRAME_FIELD.md).
 
 ## 6. Readiness
 

@@ -19,6 +19,8 @@
  *      - API-Routen in docs/ existieren als registrierte Routen (src/app/api).
  *      - Zustandsnamen in LIVE_TRADING.md == Live-Gate-Enum (src/live-gate/states.ts).
  *      - Alle docs/help/*.help.json erfuellen die 3-Ebenen-Pflicht (via A).
+ *   F) Versions-Konsistenz: package.json == oberster Eintrag in CHANGELOG.md
+ *      und docs/CHANGELOG.md == Status-Header == docs/README.md.
  */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -321,6 +323,62 @@ function checkStates() {
 }
 
 // ---------------------------------------------------------------------------
+// F) Versions-Konsistenz (package.json <-> Changelogs <-> Doku)
+// ---------------------------------------------------------------------------
+/**
+ * Die Version ist die einzige Zahl, die an vier Stellen gleichzeitig steht:
+ * `package.json` (ausgeliefert von `/api/health` und `/api/firm`), der
+ * Status-Header von `CHANGELOG.md`, der oberste Eintrag von `CHANGELOG.md`
+ * bzw. `docs/CHANGELOG.md` und die Versionszeile in `docs/README.md`. Weicht
+ * eine Stelle ab, ist fuer Betrieb und Deployment unklar, welcher Stand
+ * laeuft. Der Check macht diese Drift zum CI-Fehler.
+ */
+function checkVersionConsistency() {
+  const issues: string[] = [];
+  const pkgPath = path.join(ROOT, "package.json");
+  let version = "";
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: unknown };
+    version = typeof pkg.version === "string" ? pkg.version.trim() : "";
+  } catch (e) {
+    issues.push(`package.json nicht lesbar: ${String(e)}`);
+  }
+  if (!/^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(version)) {
+    issues.push(`package.json: Version '${version || "(leer)"}' ist nicht semver-lesbar`);
+    report("Version-Konsistenz", false, issues.join(" | "));
+    return;
+  }
+
+  // Oberster Release-Eintrag einer Changelog-Datei ("## [x.y.z] — …").
+  const latestEntry = (file: string): string | null => {
+    if (!existsSync(file)) return null;
+    const m = readFileSync(file, "utf8").match(/^## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]/m);
+    return m ? m[1] : null;
+  };
+
+  for (const rel of ["CHANGELOG.md", "docs/CHANGELOG.md"]) {
+    const v = latestEntry(path.join(ROOT, rel));
+    if (v === null) issues.push(`${rel}: kein Release-Eintrag '## [x.y.z]' gefunden`);
+    else if (v !== version)
+      issues.push(`${rel}: oberster Eintrag [${v}] != package.json (${version})`);
+  }
+
+  const top = existsSync(path.join(ROOT, "CHANGELOG.md"))
+    ? readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8")
+    : "";
+  if (!top.includes(`Code-Version **${version}**`))
+    issues.push(`CHANGELOG.md: Status-Header nennt nicht 'Code-Version **${version}**'`);
+
+  const docsReadme = existsSync(path.join(DOCS, "README.md"))
+    ? readFileSync(path.join(DOCS, "README.md"), "utf8")
+    : "";
+  if (!docsReadme.includes(`**Version:** \`v${version}\``))
+    issues.push(`docs/README.md: Versionszeile nennt nicht 'v${version}'`);
+
+  report("Version-Konsistenz", issues.length === 0, issues.join(" | "));
+}
+
+// ---------------------------------------------------------------------------
 // Ausfuehrung
 // ---------------------------------------------------------------------------
 function main() {
@@ -336,6 +394,7 @@ function main() {
   checkEnvFlags();
   checkRoutes();
   checkStates();
+  checkVersionConsistency();
 
   console.log(`[docs-validate] ${checksRun} Checks, ${helpFiles.length} Hilfe-Dateien.`);
   if (failures.length === 0) {

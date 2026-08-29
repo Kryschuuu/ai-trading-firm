@@ -32,7 +32,16 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | 11 | Live-Trading-Gate | Implementiert | v1.19 | #9 | ✓ [S11](#) | ✓ [R](#) | LG-01…LG-04 |
 | **12** | **Dokumentation (Docs-Sync)** | **Implementiert** | **1.19.0** | **dieser PR** | **✓ [S12](#)** | **✓ [R12](#)** | **siehe unten** |
 | **13** | **Marktdaten-Fehler-Observability** | **Implementiert** | **1.26.1** | **dieser PR** | **✓ MDERR-006** | **✓** | **—** |
+| **14** | **Timeframe-Dimension im Historical Store (MDSYNC-001)** | **Implementiert** | **1.26.0** (Nacharbeit **1.26.2**) | **PR #40** + Nacharbeit | **✓** | **✓** | **—** |
 
+> **Nachtrag 2026-08-29 (v1.26.0 / v1.26.2):** Task 14 (Timeframe-Dimension
+> im Historical Store, MDSYNC-001) ist mit **PR #40** implementiert
+> (`timeframe` als Pflichtfeld, Primärschlüssel
+> `instrumentId + timeframe + ts`, dry-run-first-Migration). Die Nacharbeit
+> in **v1.26.2** ergänzt die Betriebs-Doku
+> (`docs/MIGRATION_TIMEFRAME_FIELD.md`, empfohlener Neuaufbau statt
+> Inline-Migration) und den Dry-Run-Default des Migrations-CLIs.
+>
 > Security-Spalte verweist auf die Kapitel in [SECURITY_AUDIT.md](SECURITY_AUDIT.md);
 > die Anker `[S01]`…`[S12]` bezeichnen die jeweiligen Task-Kapitel.
 
@@ -159,6 +168,62 @@ ohne Alarmierung (P1, Observability-/Sicherheitsdefekt).
 **Testbericht:** `tests/marketDataErrors.test.ts`,
 `tests/marketData.test.ts`, Scanner-/MicroExecutor-Erweiterungen;
 `npm run typecheck` und `npm run docs:validate` grün.
+
+---
+
+## Task 14 im Detail (Timeframe-Dimension im Historical Store, MDSYNC-001)
+
+**Quelle:** Arena-Session `01a04f46` · Branch
+`arena/01a04f46-ai-trading-firm` ·
+PR `fix(history): persist candle timeframe and deduplicate bars` (#40).
+**Nacharbeit:** v1.26.2 (Versionierung, Changelogs, Betriebs-Doku,
+Dry-Run-Default des Migrations-CLIs).
+
+**Problem (P1, Datenkorruption):** `HistoricalCandleEntry` besaß kein
+`timeframe`-Feld. Sobald mehrere Periodizitäten desselben Instruments
+persistiert wurden (`BITUNIX:BTCUSDT / 5m`, `/15m`, `/1h`), waren die Bars
+im Store **nicht unterscheidbar** — der Loader hätte sie zu einer
+Faktorreihe vermischt (EMA/Momentum/Volatilität mathematisch
+bedeutungslos), ohne dass ein Test oder Filter Alarm schlägt. Zusätzlich
+fehlte die deterministische Deduplizierung.
+
+**Umsetzung (PR #40, v1.26.0):**
+
+- `HistoricalCandleEntry.timeframe: SupportedTimeframe` (Pflicht), Zeilen mit
+  `"v": 2`; Primärschlüssel `instrumentId + timeframe + ts`.
+- `append(candles, instrumentId, provenance, timeframe, now)` (5-stellig,
+  alte Signatur entfernt), `query({ instrumentId, timeframe, from?, to?,
+  limit? })` mit Pflicht-Timeframe (Compile + Runtime-Guard).
+- Dedup: jüngstes `fetchedAt` gewinnt; `maxBarsPerSeries` (Default 5000).
+- Legacy-Zeilen werden als `LEGACY_UNKNOWN` markiert, gezählt und über
+  `query()` nie ausgeliefert (einmalige Migrations-Warnung).
+- `src/history/migration.ts` + `npm run history:migrate`: Backup `0600`,
+  `--assume-timeframe` Pflicht (kein Raten), Dedup, Sortierung, Report,
+  Verlust-Invariante, idempotent.
+- Aufrufstellen migriert: Sync-Service, MarketDataManager (`1m`), ReplayFeed
+  (`1h`), Scanner-Provider (`readAll()` mit Präferenz `1h → 4h → 30m → 15m
+  → 5m`), Analytics-Port und Backtest-Step (`1h`). Der MicroExecutor nutzt
+  den Store nicht.
+
+**Nacharbeit (v1.26.2, dieser PR):**
+
+- Neu **`docs/MIGRATION_TIMEFRAME_FIELD.md`** — Runbook für
+  Produktionsumgebungen: Backup, Dry-Run, Anwenden, Validierung, Rollback,
+  Exit-Codes; Entscheidungsmatrix **Neuaufbau (empfohlen) vs.
+  Inline-Migration**.
+- `docs/MARKET_DATA_PIPELINE.md` §5.3: empfohlener Migrationspfad
+  (Neuaufbau via `npm run market-sync`, weil das Bitunix-Datenvolumen klein
+  und public erreichbar ist — 150 Bars je Instrument und Timeframe).
+- Migrations-CLI schreibt nur noch mit **`--apply`**; ohne das Flag läuft es
+  als Dry-Run (kein Schreiben, kein Backup, Exit-Code 2) — damit ist der
+  Security-Audit-Punkt „Dry-Run als Default“ erfüllt.
+- Neue Doku im Katalog (`src/lib/docsCatalog.ts`, `docs/README.md`) und
+  Version-Konsistenzprüfung in `npm run docs:validate`.
+
+**Testbericht:** `tests/history/historicalStore.test.ts` (19),
+`tests/history/migration.test.ts` (12), `tests/docsVersioning.test.ts` (neu,
+Versionierung/Doku-Verlinkung); `npm run typecheck`, `npm run lint` und
+`npm run docs:validate` grün.
 
 ---
 

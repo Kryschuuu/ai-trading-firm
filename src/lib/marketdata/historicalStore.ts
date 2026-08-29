@@ -417,7 +417,7 @@ export class HistoricalStore {
         "QUERY_REQUIRES_TIMEFRAME",
         'query({instrumentId}) ohne timeframe ist nicht zulaessig. Ein Timeframe-freier Zugriff ' +
           "wuerde Kerzen unterschiedlicher Periodizitaet mischen. Nutze z.B. " +
-          'query({ instrumentId, timeframe: "15m" }).',
+          'query({ instrumentId, timeframe: "15m" }). Siehe docs/MIGRATION_TIMEFRAME_FIELD.md.',
       );
     }
     const { entries } = this.loadAll();
