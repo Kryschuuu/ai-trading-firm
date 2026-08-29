@@ -119,13 +119,17 @@ Unbekannte Agenten fallen auf `defaultMode: automatic` + `defaultClass: MODEL_A`
 **Entscheidungsalgorithmus** (deterministisch, dokumentierte Reihenfolge):
 
 1. Untergrenze = `max(Tabellenklasse, Task-Override, Complexity-Floor, Risk-Floor)`.
-2. Modus-Filter: `manual` ⇒ Tabellenklasse (Fix-Pinning) · `hybrid` ⇒ Tabellenklasse
+2. **Provider/Modell-Override** (falls für den Agenten aktiv): die explizite
+   Auswahl wird zuerst versucht. Health, Berechtigungen, Kontext und Budget bleiben
+   harte Router-Guardrails. Scheitert die Auswahl, greift der konfigurierte
+   `fallbackMode` (typischerweise `automatic`) und die normale Kette läuft weiter.
+3. Modus-Filter: `manual` ⇒ Tabellenklasse (Fix-Pinning) · `hybrid` ⇒ Tabellenklasse
    ist hart · `automatic` ⇒ freie Wahl nach (1), geklemmt auf `classCeiling`.
-3. Provider-Wahl in **Policy-Reihenfolge**: Health, Cloud-Freigabe, Quota
+4. Provider-Wahl in **Policy-Reihenfolge**: Health, Cloud-Freigabe, Quota
    (`quotaMinPercent`), Kontext, Fähigkeiten, Latenz, Budget, Kostendeckel.
-4. Kein Treffer ⇒ **Fallback-Kette** des letzten Providers (`timeout`/`quota`/`offline`).
-5. Danach ⇒ **Zwangs-Rückstufung** Klasse für Klasse abwärts (nur lokal).
-6. Immer noch nichts ⇒ `FALLBACK` (deterministische Regel-Engine).
+5. Kein Treffer ⇒ **Fallback-Kette** des letzten Providers (`timeout`/`quota`/`offline`).
+6. Danach ⇒ **Zwangs-Rückstufung** Klasse für Klasse abwärts (nur lokal).
+7. Immer noch nichts ⇒ `FALLBACK` (deterministische Regel-Engine).
 
 ---
 
@@ -144,8 +148,10 @@ curl -s http://127.0.0.1:3369/api/routing/modes
 curl -s -X PUT http://127.0.0.1:3369/api/routing/modes \
   -H 'content-type: application/json' \
   -H "x-admin-token: $FIRM_ADMIN_TOKEN" -H "x-csrf-token: $FIRM_ADMIN_TOKEN" \
-  -d '{"modes":{"RESEARCH":"hybrid"},"actor":"ops"}'
-# 200 { ok:true, modes:{…}, audit:[{ from:"mode:automatic", to:"mode:hybrid", … }] }
+  -d '{"modes":{"RESEARCH":"hybrid"},"overrides":{"TECHNICAL_ANALYST":{"provider":"ollama","model":"qwen3:8b","fallbackMode":"automatic"}}}'
+# 200 { ok:true, modes:{…}, overrides:{…}, audit:[{ … }] }
+# Override löschen: {"overrides":{"TECHNICAL_ANALYST":null}}
+# `actor` im JSON wird ignoriert; Audit verwendet die authentifizierte Principal-Rolle.
 # 422 { ok:false, error:"INVALID_MODES", errors:[…] } · 401/403 Guard · 403 CSRF_INVALID
 ```
 
@@ -153,6 +159,18 @@ Die Modi werden zusätzlich unter `data/routing/modes.json` (chmod 600) best-eff
 persistiert; der Speicherzustand bleibt Autorität.
 
 ---
+
+### Authentifizierung und Audit-Identität
+
+`PUT /api/routing/modes` wird zuerst durch RBAC/Admin-Guard und CSRF geschützt.
+Danach löst `actorAuditId(req)` den Actor aus dem authentifizierten Token bzw.
+der lokalen Auth-Principal auf (`admin`, `operator` oder `viewer`). Ein eventuell
+mitgesendetes JSON-Feld `actor` wird vollständig ignoriert und niemals an den
+Router weitergereicht:
+
+```text
+Authenticated Principal → RBAC → actorAuditId(req) → router.setModes()
+```
 
 ## 6. Eskalationsfluss
 
@@ -314,8 +332,8 @@ Jeder Wechsel (inkl. Fallback und abgelehnter Eskalation) erzeugt einen Eintrag:
 | `GET` | `/api/providers` | Karten-Daten: Status, Modell(e), Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen |
 | `GET` | `/api/providers?refresh=1` | erzwingt eine Health-Prüfung |
 | `GET` | `/api/routing` | Policy (Version, Klassen, Eskalation, Budgets, Ketten), Modi, Provider, Budget, Audit |
-| `GET` | `/api/routing/modes` | Routing-Modi je Agent |
-| `PUT` | `/api/routing/modes` | Admin-Änderung (Token + CSRF, auditiert) |
+| `GET` | `/api/routing/modes` | Routing-Modi und Provider/Modell-Overrides je Agent |
+| `PUT` | `/api/routing/modes` | Admin-Änderung (Token + CSRF, auditiert); akzeptiert `modes` und `overrides` |
 
 ---
 
@@ -380,7 +398,18 @@ npm run test:coverage:routing
 
 ---
 
-## 15. Grenzen
+## 15. Peer-Review-Checkliste
+
+- [x] Override wird vor der normalen Policy-/Modusauswahl versucht.
+- [x] Provider, Modell, Health, Kontext, Cloud-Freigabe und Budget bleiben Router-Guardrails.
+- [x] Override-Fallback verwendet den konfigurierten `fallbackMode`; bestehende Modi bleiben unverändert.
+- [x] Override-Zustand wird getrennt und mit Dateirechten `0600` persistiert; Deaktivierung via `null` ist möglich.
+- [x] `actor` aus Client-JSON wird ignoriert; Audit-ID kommt aus `actorAuditId(req)` nach Admin/RBAC/CSRF.
+- [x] Override-Priorität, Fallback und Registry-Validierung sind durch Unit-Tests abgedeckt.
+- [x] Routing-Test-Suite, Typecheck und Dokumentationsprüfung laufen erfolgreich.
+- [ ] Vor dem Merge: vollständige CI-Suite inklusive Integration gegen die Zielumgebung ausführen.
+
+## 16. Grenzen
 
 * Cloud-Health ist ohne `ROUTING_HEALTH_PROBE=all` **key-basiert** („Key vorhanden
   ⇒ nutzbar") — kein Fern-Check. Der erste echte Aufruf kann dennoch scheitern;

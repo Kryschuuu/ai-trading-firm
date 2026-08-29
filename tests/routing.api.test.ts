@@ -228,7 +228,8 @@ test("API: PUT /api/routing/modes ändert mit Admin+CSRF und auditiert", async (
   assert.equal(audit[0].outcome, "admin");
   assert.equal(audit[0].from, "mode:automatic");
   assert.equal(audit[0].to, "mode:hybrid");
-  assert.equal((audit[0].detail as Record<string, unknown>).actor, "ops@example");
+  // Client-provided actor is ignored; local-open authenticated principal is admin.
+  assert.equal((audit[0].detail as Record<string, unknown>).actor, "admin");
 });
 
 test("API: PUT /api/routing/modes weist unbekannte Modi mit 422 ab", async () => {

@@ -81,6 +81,7 @@ export {
   type ResolveOptions,
   type RouterSnapshot,
   type RoutingModeUpdateResult,
+  type RoutingOverrideUpdateResult,
 } from "./router";
 export {
   escalationFromRuntime,

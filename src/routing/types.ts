@@ -33,6 +33,14 @@ export type RoutingOutcome = "MODEL_A" | "MODEL_B" | "MODEL_C" | "CLOUD" | "FALL
 /** Routing-Modus eines Agenten. */
 export type RoutingMode = "manual" | "automatic" | "hybrid";
 
+/** Explizite Laufzeit-Auswahl je Agent. Der Router bleibt auch hier Autorität. */
+export type ProviderModelOverride = {
+  provider: ProviderId;
+  model: string;
+  /** Modus, der verwendet wird, wenn Provider/Modell nicht nutzbar sind. */
+  fallbackMode: RoutingMode;
+};
+
 export const MODEL_CLASSES: readonly ModelClass[] = ["MODEL_A", "MODEL_B", "MODEL_C"];
 export const ROUTING_OUTCOMES: readonly RoutingOutcome[] = [
   "MODEL_A",
@@ -284,6 +292,7 @@ export type RoutingTrigger =
   | "COMPLEXITY_FLOOR"
   | "RISK_FLOOR"
   | "MANUAL_PINNED"
+  | "PROVIDER_MODEL_OVERRIDE"
   | "HYBRID_BOUND"
   | "LATENCY_REQUIREMENT"
   | "CONTEXT_TOO_SMALL"
