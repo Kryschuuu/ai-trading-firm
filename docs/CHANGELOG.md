@@ -20,6 +20,42 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.25.0] — 2026-08-29 · Markt-Daten-Sync-Pfad (nachträglich PR #33)
+
+**Nacharbeit zur Architekturänderung (nachträglich für PR #33):** Der Scanner
+(`scanUniverse()`) las bisher nur die lokale, oft leere Historie
+(`data/history/candles.ndjson`). Ohne einen vorherigen Warmup-Lauf war der
+Trichter leer. Dafür gibt es jetzt einen **eigenen Sync-Pfad** vor dem Scan —
+deterministisch, ohne den Scanner zu verändern.
+
+**Architektur (nach PR #33):**
+
+```
+Venue-Adapter (public REST) → MarketDataSyncService → Registry + HistoricalStore
+                                                      → Scanner (weiterhin ohne Netz)
+```
+
+* `MarketDataAdapter.discoverInstruments()` (1×) → Registry
+* `MarketDataSyncService.syncVenue()` (1× Batch-Ticker, N× Depth, N× 4 Timeframes)
+* `scanUniverse()` bleibt deterministisch und netzwerkfrei; `/api/markets` bleibt read-only.
+
+**Neu / bestätigt (nachträglich):**
+
+* `src/marketdata/` — `MarketDataAdapter`, `MarketDataSyncService`, `Spread`,
+  `UnsupportedVenueError`, `Bitunix-Public-Adapter` (Public-Client, keine Keys).
+* CLI-Befehle: `npm run market-sync` und `npm run scan -- --sync-first`.
+* Dokumentation: `docs/MARKET_DATA_PIPELINE.md` (Discovery, Enrichment,
+  Backfill 5m/15m/30m/1h mit 150 Kerzen, Persistence, Readiness, Scanner,
+  Failure-Semantics, Rate-Limiting 8 req/s, Venue-Matrix, Sicherheit).
+* Verhalten: Fehler pro Instrument isoliert (kein Full-Abort); Token-Bucket
+  8 req/s nur Public-Client; CLI loggt nur aggregierte Zähler.
+* Doku-Stand auf 1.25.0 aktualisiert.
+
+**Sicherheit:** Keine Private-API, keine Credentials im Sync-Pfad; Adapter-Instanzierung
+nur über `AdapterRegistry` im Modus `"paper"`; Integrationstests prüfen `privateCalls === 0`.
+
+---
+
 ## [1.24.1] — 2026-08-29
 
 **Instrument-Enrichment: 24h-Volumen und Orderbook-Spread.** Discovery
