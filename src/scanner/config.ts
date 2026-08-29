@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import { ASSET_CLASSES, MARKET_TYPES, type AssetClass, type MarketType } from "@/universe/types";
 import { SCORE_COMPONENTS, type ScoreComponent } from "./types";
+import { requiredWarmupCandles } from "./warmup";
 
 /** Fehler einer ungültigen Scanner-Konfiguration (Meldung ohne Secrets). */
 export class ScannerConfigError extends Error {
@@ -24,6 +25,19 @@ export class ScannerConfigError extends Error {
     super(`Scanner-Konfiguration ungültig: ${message}`);
     this.name = "ScannerConfigError";
   }
+}
+
+/**
+ * Sammelt nicht-fatale Validierungswarnungen (OPS-009). Wird der Callback
+ * gesetzt, meldet {@link validateScannerConfig} z. B. einen zu kleinen
+ * `filters.minCandles`, statt still weiterzulaufen. Im Strict-Modus
+ * (`strict: true`) wird stattdessen hart abgebrochen.
+ */
+export interface ValidateScannerConfigOptions {
+  /** `true` ⇒ Warnungen werden zu {@link ScannerConfigError} eskaliert. */
+  strict?: boolean;
+  /** Empfänger nicht-fataler Warnungen (Default: `console.warn`). */
+  onWarn?: (message: string) => void;
 }
 
 /** Gewichte der neun Score-Komponenten (Summe exakt 1). */
@@ -233,8 +247,17 @@ export interface FilterConfig {
   minVolume24h: number;
   /** Maximaler relativer Spread. */
   maxSpread: number;
-  /** Mindestanzahl Kerzen für belastbare Faktoren. */
-  minCandles: number;
+  /**
+   * Mindestanzahl Kerzen für belastbare Faktoren.
+   *
+   * **Optional (OPS-009):** Ohne expliziten Wert wird der Warmup-Bedarf aus dem
+   * Faktorsatz abgeleitet ({@link requiredWarmupCandles}) — die einzige Quelle
+   * der Warmup-Wahrheit. Ein explizit gesetzter, kleinerer Wert erzeugt bei der
+   * Validierung eine Warnung (im Strict-Modus einen Fehler), weil Instrumente
+   * den Filter dann passieren, aber unvollständige Faktor-Scores liefern würden.
+   * Der effektive Wert ist stets `minCandles ?? requiredWarmupCandles(config)`.
+   */
+  minCandles?: number;
   /** Maximaler Drawdown im Lookback. */
   maxDrawdown: number;
   /** Maximale Roundturn-Handelskosten. */
@@ -369,7 +392,12 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
     allowedAssetClasses: ["crypto", "equity", "etf", "fx", "commodity", "index"],
     minVolume24h: 1_000_000,
     maxSpread: 0.005,
-    minCandles: 30,
+    // `minCandles` ist bewusst NICHT gesetzt (OPS-009): ohne expliziten Wert
+    // wird der Warmup-Bedarf aus dem Faktorsatz abgeleitet
+    // (`requiredWarmupCandles`, aktuell 61). So bleibt der Schwellwert die
+    // einzige Quelle der Warmup-Wahrheit und wandert automatisch mit der
+    // Faktor-Konfiguration mit. Ein expliziter, zu kleiner Wert erzeugt eine
+    // Validierungswarnung (Strict-Modus: Fehler).
     maxDrawdown: 0.8,
     maxExecutionCost: 0.006,
     excludeExtremeRegime: true,
@@ -434,8 +462,18 @@ function ordered(values: number[], path: string): void {
  * @throws {ScannerConfigError} bei Strukturfehlern, unplausiblen Schwellen oder
  *   einer Gewichtssumme ≠ 1.
  */
-export function validateScannerConfig(raw: unknown): ScannerConfig {
+export function validateScannerConfig(raw: unknown, options: ValidateScannerConfigOptions = {}): ScannerConfig {
   if (!isPlainObject(raw)) throw new ScannerConfigError("erwartet Objekt");
+  const warn = (message: string): void => {
+    if (options.strict) throw new ScannerConfigError(message);
+    (options.onWarn ?? ((m: string) => console.warn(`[scanner-config] ${m}`)))(message);
+  };
+  // `deepMerge` startet von den Defaults, in denen `filters.minCandles` bewusst
+  // fehlt. Damit ein explizit gesetzter Wert nicht durch den Merge verloren geht
+  // und ein *fehlender* Wert wirklich als „nicht gesetzt“ erkannt wird, merken
+  // wir uns, ob der Aufrufer `minCandles` überhaupt angegeben hat.
+  const rawFilters = isPlainObject(raw.filters) ? raw.filters : undefined;
+  const minCandlesProvided = rawFilters !== undefined && "minCandles" in rawFilters;
   const cfg = deepMerge(structuredClone(DEFAULT_SCANNER_CONFIG), raw);
 
   cfg.version = num(cfg.version, "version", { min: 1, int: true });
@@ -590,7 +628,28 @@ export function validateScannerConfig(raw: unknown): ScannerConfig {
   fl.allowedAssetClasses = uniqueEnum(fl.allowedAssetClasses, ASSET_CLASSES, "filters.allowedAssetClasses");
   fl.minVolume24h = num(fl.minVolume24h, "filters.minVolume24h", { min: 0 });
   fl.maxSpread = num(fl.maxSpread, "filters.maxSpread", { min: 0, max: 1 });
-  fl.minCandles = num(fl.minCandles, "filters.minCandles", { min: 0, max: 100_000, int: true });
+  // `minCandles` ist optional (OPS-009): ohne expliziten Wert bleibt das Feld
+  // `undefined` und der Warmup-Bedarf wird zur Laufzeit aus dem Faktorsatz
+  // abgeleitet (`requiredWarmupCandles`). Ein explizit gesetzter Wert wird
+  // validiert; liegt er unter dem abgeleiteten Bedarf, warnt die Validierung
+  // (Strict-Modus: Fehler), weil Instrumente den Filter dann passieren, aber
+  // unvollständige Faktor-Scores erzeugen würden.
+  if (minCandlesProvided) {
+    // `deepMerge` überträgt nur Schlüssel, die bereits in den Defaults liegen.
+    // Da `minCandles` dort bewusst fehlt, holen wir den Rohwert direkt aus der
+    // eingehenden Konfiguration.
+    fl.minCandles = num(rawFilters!.minCandles, "filters.minCandles", { min: 0, max: 100_000, int: true });
+    const required = requiredWarmupCandles(cfg);
+    if (fl.minCandles < required) {
+      warn(
+        `filters.minCandles=${fl.minCandles} liegt unter requiredWarmupCandles=${required}. ` +
+          `Instrumente wuerden den Filter passieren, aber unvollstaendige Faktor-Scores erzeugen. ` +
+          `Empfehlung: minCandles entfernen (wird dann automatisch abgeleitet).`,
+      );
+    }
+  } else {
+    delete fl.minCandles;
+  }
   fl.maxDrawdown = num(fl.maxDrawdown, "filters.maxDrawdown", { min: 0, max: 1 });
   fl.maxExecutionCost = num(fl.maxExecutionCost, "filters.maxExecutionCost", { min: 0, max: 1 });
 

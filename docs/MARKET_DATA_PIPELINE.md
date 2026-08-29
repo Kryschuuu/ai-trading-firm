@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.25.2** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.25.3** · Modul `src/marketdata/` · CLI `npm run market-sync`
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -146,18 +146,65 @@ und triggert `syncVenue()` nicht.
 
 ## 6. Readiness
 
-Ein Universum gilt als scan-bereit, wenn:
+**Seit v1.25.3 (OPS-009).** Der Scanner rechnet einen expliziten,
+deterministischen Readiness-Zustand **vor** der Funnel-Auswertung und weist ihn
+getrennt aus (`ScanResult.readiness`, Typ `READY | WARMING | ERROR`). Damit
+lässt sich Infrastruktur (fehlende/fehlerhafte Daten) von Fachlogik (Markt
+ungeeignet) unterscheiden.
 
-1. `MarketDataSyncService.syncVenue(venue)` durchgelaufen ist (CLI oder
+### Abgeleiteter Warmup-Bedarf (`requiredWarmupCandles`)
+
+Der Schwellwert wird **nicht** hartcodiert, sondern aus dem konfigurierten
+Faktorsatz abgeleitet — die einzige Quelle der Warmup-Wahrheit
+(`src/scanner/warmup.ts`):
+
+```ts
+requiredWarmupCandles(config) = Math.min(
+  Math.max(
+    factors.trend.slowPeriod,        // EMA50 → 50
+    ...factors.momentum.lookbacks,   // 60 → braucht 61 (n+1)
+    factors.drawdown.lookback,       // 60
+    factors.volatility.lookback + 1, // 30 + 1 (Returns brauchen eine Kerze mehr)
+    factors.volumeRatio.basePeriods, // 20
+  ) + 1,
+  MAX_WARMUP_CANDLES,                // 1000 (Security-Kappe)
+)
+// Default: max(50, 60, 60, 31, 20) + 1 = 61
+```
+
+Wer einen Faktor-Lookback erhöht, erhöht damit automatisch den Warmup-Bedarf.
+`filters.minCandles` ist **optional**: ohne expliziten Wert gilt der abgeleitete
+Bedarf (`minCandles ?? requiredWarmupCandles(config)`). Ein explizit gesetzter,
+kleinerer Wert erzeugt bei der Config-Validierung eine Warnung (Strict-Modus:
+Fehler), weil Instrumente den Filter sonst mit unvollständigen Faktor-Scores
+passieren würden.
+
+### Zustände
+
+| Status | Bedingung | Bedeutung / Behebung |
+| --- | --- | --- |
+| `READY` | alle Instrumente haben ≥ `requiredCandles` Kerzen | scan-bereit |
+| `WARMING` | Historie fehlt (kein Fetch-Fehler) | `npm run market-sync` — Datenverfügbarkeit, kein Marktausschluss |
+| `ERROR` | ≥ 1 echter Fetch-/Infrastruktur-Fehler (MDERR-006) | Infrastruktur schlägt Fachlogik; Venue/Netz prüfen |
+
+`assessDataReadiness(...)` ist eine **reine** Funktion (kein I/O, keine Uhr,
+keine Mutation). `worstOffenders` (nur im `WARMING`-Zustand) ist deterministisch
+sortiert (candles asc, dann instrumentId asc) und auf 10 Einträge begrenzt.
+Fehlerbegründungen im `ERROR`-Zustand werden redigiert (keine URLs/Pfade).
+
+Voraussetzungen für `READY`:
+
+1. `MarketDataSyncService.syncVenue(venue)` ist durchgelaufen (CLI oder
    `npm run scan -- --sync-first`).
-2. Die Registry Instrumente mit frischem `lastSeen` und — soweit die Venue
-   lieferte — `volume24h` / `spread` enthält.
-3. Der Historical Store je aktivem Instrument ≥ `filters.minCandles` (Default 30)
-   Kerzen des Scanner-Timeframes (`1h`) hat.
+2. Die Registry enthält Instrumente mit frischem `lastSeen` und — soweit die
+   Venue lieferte — `volume24h` / `spread`.
+3. Der Historical Store hat je aktivem Instrument ≥ `requiredWarmupCandles`
+   (Default 61) Kerzen des Scanner-Timeframes (`1h`).
 
-Ohne Warmup: 26 Seed-Instrumente × 0 Kerzen → alle `min-candles` → Eligible =
-Interesting = Daily = Deep = 0. Das ist kein Scanner-Bug, sondern fehlende
-Historie.
+Ohne Warmup: 26 Seed-Instrumente × 0 Kerzen → Readiness `WARMING` (missing = 26)
+→ alle `min-candles` → Eligible = Interesting = Daily = Deep = 0. Das ist kein
+Scanner-Bug, sondern fehlende Historie — und wird jetzt explizit als solche
+gemeldet statt als generische Ablehnung.
 
 ## 7. Scanner execution
 
@@ -195,7 +242,7 @@ Eignungsfilter markiert sie deshalb explizit (`FilterRejection.dataQuality`):
 
 | Ablehnung | `ruleId` | `dataQuality` | Meldung | Behebung |
 | --- | --- | :---: | --- | --- |
-| Historie fehlt | `min-candles` | **true** | „Historie nicht geladen (N < 30 Kerzen) …“ | `npm run market-sync` |
+| Historie fehlt | `min-candles` | **true** | „min-candles: N/61 Kerzen. Benoetigt werden 61 Kerzen, weil der konfigurierte Faktorsatz … Datenverfuegbarkeits-, kein Marktqualitaetsproblem.“ (Schwelle abgeleitet aus dem Faktorsatz, §6) | `npm run market-sync` |
 | Volumen unbekannt | `min-volume` | **true** | „24h-Volumen wurde nicht geladen …“ | `npm run market-sync` (tickers) |
 | Spread unbekannt | `max-spread` | **true** | „Spread wurde nicht geladen (kein Orderbook-Snapshot) …“ | `npm run market-sync` (depth) |
 | Kosten nicht bezifferbar | `max-execution-cost` | **true** | „Handelskosten nicht bezifferbar — Spread wurde nicht geladen“ | `npm run market-sync` (depth) |

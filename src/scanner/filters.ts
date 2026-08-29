@@ -10,9 +10,10 @@
  * optimistischen Annahme.
  */
 
-import type { FilterConfig } from "./config";
+import type { ScannerConfig } from "./config";
 import type { FactorId, FactorValue, VolatilityRegime } from "./types";
 import type { MarketInstrument } from "@/universe/types";
+import { minCandlesRejectionMessage, requiredWarmupCandles } from "./warmup";
 
 /** Stabile IDs aller Filterregeln in Auswertungsreihenfolge. */
 export const FILTER_RULE_IDS = [
@@ -72,6 +73,16 @@ function raw(value: FactorValue): number | null {
 /**
  * Prüft ein Instrument gegen alle Eignungsregeln.
  *
+ * **Warmup-Schwelle (OPS-009):** Der `min-candles`-Schwellwert wird **nicht**
+ * hartcodiert, sondern aus dem Faktorsatz abgeleitet
+ * (`requiredWarmupCandles(config)`). Ein explizit gesetzter
+ * `config.filters.minCandles` hat Vorrang; ohne ihn gilt der abgeleitete
+ * Warmup-Bedarf (Default 61). So passieren Instrumente den Filter erst, wenn
+ * **alle** Faktoren vollständig (ohne Padding) berechnet werden können. Die
+ * Ablehnungs-Message nennt die Herkunft des Schwellwerts (Momentum-Lookback +
+ * EMA), damit ein Betreiber Datenverfügbarkeit von Marktqualität unterscheiden
+ * kann.
+ *
  * **Data-Quality- vs. Fachablehnung (FEHLER-3, Review-Punkt 5):** Fehlt eine
  * Metrik (`candleCount < minCandles`, `volume24h`/`spread` unbekannt), ist das
  * eine **Data-Quality-Rejection** — die Daten wurden nicht geladen, nicht der
@@ -84,10 +95,14 @@ function raw(value: FactorValue): number | null {
  * scheitern deshalb selbst kerzengesättigte Instrumente an `max-spread`.
  * Datenfluss: `docs/MARKET_DATA_PIPELINE.md` §2–§3.
  *
+ * @param candidate Instrument samt Faktoren, Kerzenzahl und Regime.
+ * @param config Vollständige Scanner-Konfiguration (für Filterregeln **und**
+ *   den abgeleiteten Warmup-Bedarf).
  * @returns `null`, wenn das Instrument geeignet ist, sonst die Ablehnung.
  */
-export function checkEligibility(candidate: FilterCandidate, config: FilterConfig): FilterRejection | null {
+export function checkEligibility(candidate: FilterCandidate, config: ScannerConfig): FilterRejection | null {
   const { instrument, factors, candleCount, regime } = candidate;
+  const filters = config.filters;
   const reject = (ruleId: FilterRuleId, message: string, dataQuality = false): FilterRejection => ({
     instrumentId: instrument.id,
     ruleId,
@@ -95,24 +110,24 @@ export function checkEligibility(candidate: FilterCandidate, config: FilterConfi
     dataQuality,
   });
 
-  if (config.requireStatusActive && instrument.status !== "active") {
+  if (filters.requireStatusActive && instrument.status !== "active") {
     return reject("status-active", `Status ${instrument.status} ist nicht handelbar`);
   }
-  if (config.requirePaperAvailable && !instrument.paperAvailable) {
+  if (filters.requirePaperAvailable && !instrument.paperAvailable) {
     return reject("paper-available", "im Paper-Modus nicht handelbar");
   }
-  if (!config.allowedMarketTypes.includes(instrument.marketType)) {
+  if (!filters.allowedMarketTypes.includes(instrument.marketType)) {
     return reject("market-type", `Markttyp ${instrument.marketType} ist nicht freigegeben`);
   }
-  if (!config.allowedAssetClasses.includes(instrument.assetClass)) {
+  if (!filters.allowedAssetClasses.includes(instrument.assetClass)) {
     return reject("asset-class", `Anlageklasse ${instrument.assetClass} ist nicht freigegeben`);
   }
-  if (candleCount < config.minCandles) {
-    return reject(
-      "min-candles",
-      `Historie nicht geladen (${candleCount} < ${config.minCandles} Kerzen) — Warmup nötig, kein Marktausschluss`,
-      true,
-    );
+  // Abgeleiteter Warmup-Bedarf ist die Quelle der Wahrheit; ein explizit
+  // gesetzter `minCandles` überschreibt ihn (die Config-Validierung warnt, wenn
+  // dieser kleiner als der abgeleitete Bedarf ist).
+  const requiredCandles = filters.minCandles ?? requiredWarmupCandles(config);
+  if (candleCount < requiredCandles) {
+    return reject("min-candles", minCandlesRejectionMessage(candleCount, config), true);
   }
 
   const volume = raw(factors.liquidity);
@@ -121,8 +136,8 @@ export function checkEligibility(candidate: FilterCandidate, config: FilterConfi
   if (volume === null) {
     return reject("min-volume", "24h-Volumen wurde nicht geladen (kein Ticker, keine Kerze)", true);
   }
-  if (volume < config.minVolume24h) {
-    return reject("min-volume", `24h-Volumen ${volume.toFixed(0)} < ${config.minVolume24h}`);
+  if (volume < filters.minVolume24h) {
+    return reject("min-volume", `24h-Volumen ${volume.toFixed(0)} < ${filters.minVolume24h}`);
   }
 
   const spread = raw(factors.spread);
@@ -133,8 +148,8 @@ export function checkEligibility(candidate: FilterCandidate, config: FilterConfi
   if (spread === null) {
     return reject("max-spread", "Spread wurde nicht geladen (kein Orderbook-Snapshot) — Warmup nötig", true);
   }
-  if (spread > config.maxSpread) {
-    return reject("max-spread", `Spread ${(spread * 10_000).toFixed(2)} bp > ${(config.maxSpread * 10_000).toFixed(2)} bp`);
+  if (spread > filters.maxSpread) {
+    return reject("max-spread", `Spread ${(spread * 10_000).toFixed(2)} bp > ${(filters.maxSpread * 10_000).toFixed(2)} bp`);
   }
 
   const cost = raw(factors.executionCost);
@@ -142,19 +157,19 @@ export function checkEligibility(candidate: FilterCandidate, config: FilterConfi
   if (cost === null) {
     return reject("max-execution-cost", "Handelskosten nicht bezifferbar — Spread wurde nicht geladen", true);
   }
-  if (cost > config.maxExecutionCost) {
+  if (cost > filters.maxExecutionCost) {
     return reject(
       "max-execution-cost",
-      `Roundturn-Kosten ${(cost * 10_000).toFixed(2)} bp > ${(config.maxExecutionCost * 10_000).toFixed(2)} bp`
+      `Roundturn-Kosten ${(cost * 10_000).toFixed(2)} bp > ${(filters.maxExecutionCost * 10_000).toFixed(2)} bp`
     );
   }
 
   const drawdown = raw(factors.drawdown);
-  if (drawdown !== null && drawdown > config.maxDrawdown) {
-    return reject("max-drawdown", `Drawdown ${(drawdown * 100).toFixed(1)} % > ${(config.maxDrawdown * 100).toFixed(1)} %`);
+  if (drawdown !== null && drawdown > filters.maxDrawdown) {
+    return reject("max-drawdown", `Drawdown ${(drawdown * 100).toFixed(1)} % > ${(filters.maxDrawdown * 100).toFixed(1)} %`);
   }
 
-  if (config.excludeExtremeRegime && regime === "EXTREME") {
+  if (filters.excludeExtremeRegime && regime === "EXTREME") {
     return reject("regime-extreme", "Volatilitäts-Regime EXTREME");
   }
 

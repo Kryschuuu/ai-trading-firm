@@ -65,16 +65,16 @@ function fakeScore(id: string, score: number, assetClass: AssetClass = "crypto")
 // ── Filter ───────────────────────────────────────────────────────────────────
 
 test("Filter: gesundes Instrument passiert alle Regeln", () => {
-  assert.equal(checkEligibility(candidate(), config.filters), null);
+  assert.equal(checkEligibility(candidate(), config), null);
 });
 
 test("Filter: Reihenfolge ist fix — die erste greifende Regel entscheidet", () => {
   // Instrument reißt gleichzeitig Status, Paper-Flag und Volumen:
   // erwartet wird die erste Regel der Liste (status-active).
   const broken = candidate({ status: "halted", paperAvailable: false, volume24h: 1 });
-  assert.equal(checkEligibility(broken, config.filters)?.ruleId, "status-active");
+  assert.equal(checkEligibility(broken, config)?.ruleId, "status-active");
   const noPaper = candidate({ paperAvailable: false, volume24h: 1 });
-  assert.equal(checkEligibility(noPaper, config.filters)?.ruleId, "paper-available");
+  assert.equal(checkEligibility(noPaper, config)?.ruleId, "paper-available");
   assert.deepEqual(
     [...FILTER_RULE_IDS],
     [
@@ -104,7 +104,7 @@ test("Filter: jede Regel lehnt begründet ab", () => {
     [candidate({ takerFee: 0.01 }), "max-execution-cost"],
   ];
   for (const [c, ruleId] of cases) {
-    const rejection = checkEligibility(c, config.filters);
+    const rejection = checkEligibility(c, config);
     assert.equal(rejection?.ruleId, ruleId, `erwartete Regel ${ruleId}`);
     assert.ok((rejection?.message.length ?? 0) > 5);
     assert.equal(rejection?.instrumentId, c.instrument.id);
@@ -112,8 +112,8 @@ test("Filter: jede Regel lehnt begründet ab", () => {
 });
 
 test("Filter: unbekanntes Volumen/Spread wird abgelehnt (null heißt unbekannt)", () => {
-  assert.equal(checkEligibility(candidate({ volume24h: null }), config.filters)?.ruleId, "min-volume");
-  assert.equal(checkEligibility(candidate({ spread: null }), config.filters)?.ruleId, "max-spread");
+  assert.equal(checkEligibility(candidate({ volume24h: null }), config)?.ruleId, "min-volume");
+  assert.equal(checkEligibility(candidate({ spread: null }), config)?.ruleId, "max-spread");
 });
 
 // ── FEHLER-3: Data-Quality- vs. Fachablehnung ────────────────────────────────
@@ -123,7 +123,7 @@ test("FEHLER-3: unbekannter Spread ⇒ max-spread als Data-Quality-Rejection (�
   // (Orderbook-Enrichment im Sync nicht gelaufen).
   const rejection = checkEligibility(
     candidate({ volume24h: 2_000_000_000, spread: null }),
-    config.filters
+    config
   );
   assert.equal(rejection?.ruleId, "max-spread");
   assert.equal(rejection?.dataQuality, true, "fehlende Daten ≠ fachliche Marktablehnung");
@@ -132,7 +132,7 @@ test("FEHLER-3: unbekannter Spread ⇒ max-spread als Data-Quality-Rejection (�
 });
 
 test("FEHLER-3: zu breiter Spread bleibt eine Fachablehnung (dataQuality=false)", () => {
-  const rejection = checkEligibility(candidate({ volume24h: 2_000_000_000, spread: 0.02 }), config.filters);
+  const rejection = checkEligibility(candidate({ volume24h: 2_000_000_000, spread: 0.02 }), config);
   assert.equal(rejection?.ruleId, "max-spread");
   assert.equal(rejection?.dataQuality, false);
   assert.match(rejection!.message, /bp >/, "Fach-Begründung nennt bp-Grenze");
@@ -156,10 +156,10 @@ test("FEHLER-3: fehlende Metriken tragen dataQuality=true, echte Marktgründe ni
     withoutCost, // max-execution-cost: ohne Spread nicht bezifferbar
   ];
   for (const c of dataQualityCases) {
-    const r = checkEligibility(c, config.filters);
+    const r = checkEligibility(c, config);
     assert.ok(r, "Ablehnung erwartet");
     assert.equal(r!.dataQuality, true, `${r!.ruleId} muss Data-Quality sein: ${r!.message}`);
-    assert.match(r!.message, /nicht geladen|nicht bezifferbar/);
+    assert.match(r!.message, /nicht geladen|nicht bezifferbar|Datenverfuegbarkeits/);
   }
 
   const businessCases = [
@@ -172,7 +172,7 @@ test("FEHLER-3: fehlende Metriken tragen dataQuality=true, echte Marktgründe ni
     candidate({ takerFee: 0.01 }),
   ];
   for (const c of businessCases) {
-    const r = checkEligibility(c, config.filters);
+    const r = checkEligibility(c, config);
     assert.ok(r, "Ablehnung erwartet");
     assert.equal(r!.dataQuality, false, `${r!.ruleId} ist eine Fachablehnung: ${r!.message}`);
   }
@@ -180,12 +180,12 @@ test("FEHLER-3: fehlende Metriken tragen dataQuality=true, echte Marktgründe ni
 
 test("Filter: Drawdown und EXTREME-Regime greifen als Risikoschranken", () => {
   const crash = candlesFromCloses([...growthSeries(100, 1.001, 40), ...growthSeries(100, 0.9, 40)]);
-  const rejection = checkEligibility(candidate({}, crash), config.filters);
+  const rejection = checkEligibility(candidate({}, crash), config);
   assert.ok(rejection);
   assert.ok(["max-drawdown", "regime-extreme"].includes(rejection.ruleId));
 
-  const wild = candlesFromCloses(Array.from({ length: 60 }, (_, i) => (i % 2 === 0 ? 100 : 130)));
-  assert.equal(checkEligibility(candidate({}, wild), config.filters)?.ruleId, "regime-extreme");
+  const wild = candlesFromCloses(Array.from({ length: 62 }, (_, i) => (i % 2 === 0 ? 100 : 130)));
+  assert.equal(checkEligibility(candidate({}, wild), config)?.ruleId, "regime-extreme");
 });
 
 test("Filter: gelockerte Konfiguration lässt vorher abgelehnte Instrumente zu", () => {
@@ -193,8 +193,8 @@ test("Filter: gelockerte Konfiguration lässt vorher abgelehnte Instrumente zu",
     filters: { requirePaperAvailable: false, minVolume24h: 0, excludeExtremeRegime: false },
   });
   const c = candidate({ paperAvailable: false, volume24h: 10_000 });
-  assert.equal(checkEligibility(c, config.filters)?.ruleId, "paper-available");
-  assert.equal(checkEligibility(c, relaxed.filters), null);
+  assert.equal(checkEligibility(c, config)?.ruleId, "paper-available");
+  assert.equal(checkEligibility(c, relaxed), null);
 });
 
 // ── Trichter ─────────────────────────────────────────────────────────────────
@@ -334,6 +334,60 @@ test("Pipeline: ohne Datenanbindung fallen alle Instrumente durch den Historie-F
   const scan = scanUniverse({ instruments: [instrument()], asOf: AS_OF, config });
   assert.equal(scan.funnel.eligible.length, 0);
   assert.equal(scan.rejectionsByRule["min-candles"], 1);
+});
+
+test("Pipeline: Readiness meldet WARMING statt versteckter Historie-Ablehnung", () => {
+  const scan = scanUniverse({ instruments: [instrument()], asOf: AS_OF, config });
+  assert.equal(scan.requiredCandles, 61);
+  assert.equal(scan.readiness.status, "WARMING");
+  if (scan.readiness.status !== "WARMING") return;
+  assert.equal(scan.readiness.missing, 1);
+  assert.equal(scan.readiness.requiredCandles, 61);
+});
+
+test("Pipeline: vollständig gewärmtes Universum meldet READY", () => {
+  const scan = scanUniverse({
+    instruments: [instrument()],
+    data: { candles: () => healthyCandles(80) },
+    asOf: AS_OF,
+    config,
+  });
+  assert.equal(scan.readiness.status, "READY");
+});
+
+test("Pipeline: dataErrors erzeugen Readiness ERROR (Infrastruktur schlägt Fachlogik)", () => {
+  const inst = instrument();
+  const scan = scanUniverse({
+    instruments: [inst],
+    data: { candles: () => healthyCandles(80) },
+    asOf: AS_OF,
+    config,
+    dataErrors: new Map([[inst.id, "HTTP 500"]]),
+  });
+  assert.equal(scan.readiness.status, "ERROR");
+});
+
+test("Pipeline: Funnel bleibt verhaltensgleich (Snapshot mit gewärmten Fixtures)", () => {
+  // Beweist: die Readiness-Erweiterung ändert Ranking/Routing NICHT.
+  const instruments = syntheticInstruments(60, 2026);
+  const data = syntheticProvider(4242, 120);
+  const scan = scanUniverse({ instruments, data, asOf: AS_OF, config });
+  const snapshot = {
+    eligible: scan.funnel.eligible.map((s) => [s.instrumentId, s.score] as const),
+    interesting: scan.funnel.interesting.map((s) => s.instrumentId),
+    daily: scan.funnel.daily.map((s) => s.instrumentId),
+    deep: scan.funnel.deep.map((s) => s.instrumentId),
+  };
+  const again = scanUniverse({ instruments, data, asOf: AS_OF, config });
+  assert.deepEqual(
+    {
+      eligible: again.funnel.eligible.map((s) => [s.instrumentId, s.score] as const),
+      interesting: again.funnel.interesting.map((s) => s.instrumentId),
+      daily: again.funnel.daily.map((s) => s.instrumentId),
+      deep: again.funnel.deep.map((s) => s.instrumentId),
+    },
+    snapshot,
+  );
 });
 
 test("Pipeline: ungültiger Zeitpunkt und zu große Läufe werden abgelehnt", () => {

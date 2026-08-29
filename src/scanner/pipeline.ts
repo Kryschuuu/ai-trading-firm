@@ -24,6 +24,8 @@ import { buildFunnel, type FunnelResult } from "./funnel";
 import { classifyRegime } from "./regime";
 import { rankByScore, scoreFromFactors } from "./ranker";
 import type { DerivativeContext, FactorInput, InstrumentScore, NewsRiskContext } from "./types";
+import type { ScannerReadiness } from "./readiness";
+import { assessDataReadiness, requiredWarmupCandles } from "./warmup";
 
 /** Harte Obergrenze eines Scan-Laufs (Speicher-/DoS-Schutz). */
 export const MAX_SCAN_INSTRUMENTS = 250_000;
@@ -56,6 +58,12 @@ export interface ScanOptions {
   config?: ScannerConfig;
   /** Faktor-Cache; Default: frischer Cache je Lauf. */
   cache?: FactorCache;
+  /**
+   * Echte Fetch-/Infrastruktur-Fehler je Instrument-ID (aus MDERR-006). Wenn
+   * gesetzt und nicht leer, ist der Readiness-Zustand `ERROR`. Rein optional —
+   * ohne Angabe wird nur zwischen `READY` und `WARMING` unterschieden.
+   */
+  dataErrors?: Map<string, string>;
 }
 
 /** Kennzahlen eines Laufs (nicht Teil der Artefakte — Laufzeit ist nicht deterministisch). */
@@ -82,6 +90,15 @@ export interface ScanResult {
   config: ScannerConfig;
   /** Trichter-Ebenen. */
   funnel: FunnelResult;
+  /**
+   * Expliziter, deterministischer Readiness-Zustand (OPS-009), berechnet **vor**
+   * der Funnel-Auswertung. Trennt Infrastruktur (`WARMING`/`ERROR`) von
+   * Fachlogik. Der Funnel bleibt verhaltensgleich; die Readiness ist eine
+   * zusätzliche, getrennte Information.
+   */
+  readiness: ScannerReadiness;
+  /** Abgeleiteter Warmup-Bedarf des Faktorsatzes (Quelle der Warmup-Wahrheit). */
+  requiredCandles: number;
   /** Alle bewerteten Instrumente, nach Score sortiert. */
   scores: InstrumentScore[];
   /** Index für den Einzelabruf `GET /api/universe/score/{instrumentId}`. */
@@ -124,15 +141,19 @@ export function scanUniverse(options: ScanOptions): ScanResult {
   }
   const cache = options.cache ?? new FactorCache();
   const data = options.data;
+  const requiredCandles = requiredWarmupCandles(config);
 
   const scores: InstrumentScore[] = [];
   const eligibleScores: InstrumentScore[] = [];
   const rejections: FilterRejection[] = [];
   const rejectionsByRule: Record<string, number> = {};
   const byId = new Map<string, InstrumentScore>();
+  // Kerzenlänge je Instrument für die Readiness-Bewertung (kein zweiter Fetch).
+  const historyByInstrument = new Map<string, readonly MarketCandle[]>();
 
   for (const instrument of instruments) {
     const candles = data?.candles(instrument) ?? [];
+    historyByInstrument.set(instrument.id, candles);
     const input: FactorInput = {
       instrument,
       candles,
@@ -151,7 +172,7 @@ export function scanUniverse(options: ScanOptions): ScanResult {
 
     const rejection = checkEligibility(
       { instrument, factors, candleCount: candles.length, regime },
-      config.filters
+      config
     );
     if (rejection) {
       rejections.push(rejection);
@@ -163,11 +184,20 @@ export function scanUniverse(options: ScanOptions): ScanResult {
 
   const funnel = buildFunnel(instruments.length, eligibleScores, config.funnel);
 
+  const readiness = assessDataReadiness({
+    instruments,
+    historyByInstrument,
+    requiredCandles,
+    dataErrors: options.dataErrors,
+  });
+
   return {
     asOf: new Date(asOfMs).toISOString(),
     asOfMs,
     config,
     funnel,
+    readiness,
+    requiredCandles,
     scores: rankByScore(scores),
     byId,
     rejections,
