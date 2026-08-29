@@ -82,6 +82,7 @@ test("Filter: Reihenfolge ist fix — die erste greifende Regel entscheidet", ()
       "paper-available",
       "market-type",
       "asset-class",
+      "data-unavailable",
       "min-candles",
       "min-volume",
       "max-spread",
@@ -90,6 +91,20 @@ test("Filter: Reihenfolge ist fix — die erste greifende Regel entscheidet", ()
       "regime-extreme",
     ]
   );
+});
+
+test("Filter: echter Fetch-Fehler → data-unavailable, nie min-candles (MDERR-006)", () => {
+  // 0 Kerzen + Datenfehler: data-unavailable gewinnt, min-candles kommt nie.
+  const c = candidate({}, healthyCandles(0));
+  const withError = { ...c, dataError: "RATE_LIMITED" };
+  const rejection = checkEligibility(withError, config);
+  assert.equal(rejection?.ruleId, "data-unavailable");
+  assert.equal(rejection?.dataQuality, true);
+  assert.match(rejection!.message, /DATA_UNAVAILABLE/);
+  assert.doesNotMatch(rejection!.message, /min-candles/);
+  // Ohne Datenfehler (aber ohne Historie) bleibt es die behebbare Warnung min-candles.
+  const plain = checkEligibility(c, config);
+  assert.equal(plain?.ruleId, "min-candles");
 });
 
 test("Filter: jede Regel lehnt begründet ab", () => {

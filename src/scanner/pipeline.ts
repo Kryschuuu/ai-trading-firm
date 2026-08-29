@@ -60,10 +60,12 @@ export interface ScanOptions {
   cache?: FactorCache;
   /**
    * Echte Fetch-/Infrastruktur-Fehler je Instrument-ID (aus MDERR-006). Wenn
-   * gesetzt und nicht leer, ist der Readiness-Zustand `ERROR`. Rein optional —
-   * ohne Angabe wird nur zwischen `READY` und `WARMING` unterschieden.
+   * gesetzt und nicht leer, ist der Readiness-Zustand `ERROR` und betroffene
+   * Instrumente werden mit `data-unavailable` (nie `min-candles`) abgelehnt.
+   * Rein optional — ohne Angabe wird nur zwischen `READY` und `WARMING`
+   * unterschieden.
    */
-  dataErrors?: Map<string, string>;
+  dataErrors?: ReadonlyMap<string, string>;
 }
 
 /** Kennzahlen eines Laufs (nicht Teil der Artefakte — Laufzeit ist nicht deterministisch). */
@@ -170,8 +172,16 @@ export function scanUniverse(options: ScanOptions): ScanResult {
     scores.push(score);
     byId.set(score.instrumentId, score);
 
+    // MDERR-006: Datenfehler → DATA_UNAVAILABLE (nie min-candles); die
+    // Readiness wird unten über `dataErrors` zusätzlich auf ERROR gesetzt.
     const rejection = checkEligibility(
-      { instrument, factors, candleCount: candles.length, regime },
+      {
+        instrument,
+        factors,
+        candleCount: candles.length,
+        regime,
+        dataError: options.dataErrors?.get(instrument.id) ?? undefined,
+      },
       config
     );
     if (rejection) {

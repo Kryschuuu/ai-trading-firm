@@ -31,6 +31,7 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | 10 | Operations Center + RBAC | Implementiert | v1.18 → v1.23.0 | #8 | ✓ [S10](#) | ✓ | keine (Nachaudit v1.23.0) |
 | 11 | Live-Trading-Gate | Implementiert | v1.19 | #9 | ✓ [S11](#) | ✓ [R](#) | LG-01…LG-04 |
 | **12** | **Dokumentation (Docs-Sync)** | **Implementiert** | **1.19.0** | **dieser PR** | **✓ [S12](#)** | **✓ [R12](#)** | **siehe unten** |
+| **13** | **Marktdaten-Fehler-Observability** | **Implementiert** | **1.26.1** | **dieser PR** | **✓ MDERR-006** | **✓** | **—** |
 
 > Security-Spalte verweist auf die Kapitel in [SECURITY_AUDIT.md](SECURITY_AUDIT.md);
 > die Anker `[S01]`…`[S12]` bezeichnen die jeweiligen Task-Kapitel.
@@ -127,6 +128,37 @@ Kill-Switch (task-11) — aktiviert kein Live`.
 
 **Offene Punkte Task 12:** keine blockierenden; Nachpflege gemäß
 „Wie Docs hier gepflegt werden“ (`ARCHITECTURE.md §13`).
+
+## Task 13 im Detail (Typisierte Marktdaten-Fehler, v1.26.1)
+
+**Quelle:** Arena-Session `01a04f91` · Branch
+`arena/01a04f91-ai-trading-firm` ·
+PR `fix(marketdata): stop swallowing fetch failures (mderr-006)`.
+
+**Problem:** `getCandles()` mappte HTTP 429/5xx, DNS-Fehler, ungültige
+Symbole, Schema-Abweichungen und TLS-Fehler alle auf `[]` — nicht von
+„0 Kerzen vorhanden“ unterscheidbar, im Scanner als `min-candles` sichtbar,
+ohne Alarmierung (P1, Observability-/Sicherheitsdefekt).
+
+**Umsetzung:**
+
+- `src/lib/marketDataErrors.ts`: `MarketDataFetchError`,
+  `classifyMarketDataError()`, `MarketDataErrorReason` (11 Ursachen,
+  retryable-Flags), redigiertes `toJSON()`.
+- `src/lib/marketData.ts`: `getCandles()` wirft (stilles `?? []` entfernt);
+  leere Venue-Antwort bleibt gültig; `getCandlesWithFallback()` als explizite
+  Stale-Cache-API.
+- `src/lib/telemetry.ts` + `src/lib/logger.ts`: Counter
+  `market_data_fetch_failures_total{venue,timeframe,reason}` (ohne
+  symbol-Label), strukturierte Events mit Redaction/512-Kappe.
+- Scanner: `data-unavailable`-Rejection + Readiness `ERROR`; Sync-Fehler als
+  Manifest (`src/marketdata/dataErrors.ts`), MicroExecutor-Warmstart sichtbar.
+- Doku: `docs/OBSERVABILITY.md` (neu), `docs/MARKET_DATA_PIPELINE.md` Kap. 6–8,
+  Changelogs; Version **1.26.1**.
+
+**Testbericht:** `tests/marketDataErrors.test.ts`,
+`tests/marketData.test.ts`, Scanner-/MicroExecutor-Erweiterungen;
+`npm run typecheck` und `npm run docs:validate` grün.
 
 ---
 

@@ -19,6 +19,7 @@ import { PaperBrokerAdapter } from "../src/brokers/paper";
 import { StubBrokerAdapter } from "../src/brokers/stubs";
 import { BitunixBrokerAdapter } from "../src/brokers/bitunix";
 import { BitunixDisabledError } from "../src/brokers/bitunix/errors";
+import { MarketDataFetchError } from "../src/lib/marketDataErrors";
 import {
   BROKER_VENUE_IDS,
   NotSupportedCapabilityError,
@@ -182,8 +183,18 @@ for (const venue of BROKER_VENUE_IDS) {
     assert.equal(t.symbol, "BTC");
     assert.ok(t.price > 0, "Kurs positiv (Fallback-Buch)");
     assert.ok(typeof t.source === "string" && t.source.length > 0);
-    const candles = await adapter.getCandles!("BTC", "15m");
-    assert.ok(Array.isArray(candles), "Kerzen als Array");
+    // MDERR-006: Kerzen-Abruf wirft typisiert, wenn kein Cache existiert
+    // (kein stilles []) — der Paper-Betrieb darf nur über den expliziten,
+    // stale-markierten Fallback degradieren.
+    try {
+      const candles = await adapter.getCandles!("BTC", "15m");
+      assert.ok(Array.isArray(candles), "Kerzen als Array");
+    } catch (e) {
+      assert.ok(e instanceof MarketDataFetchError, `PAPER/getCandles: MarketDataFetchError erwartet, got ${e}`);
+      assert.ok((e as MarketDataFetchError).reason.length > 0);
+      assert.ok(typeof (e as MarketDataFetchError).retryable === "boolean");
+      assertNoLeak((e as Error).message);
+    }
   });
 
   test(`Contract ${venue}: Discovery (capability=${adapter.capabilities.discovery})`, async () => {
@@ -231,6 +242,15 @@ for (const venue of BROKER_VENUE_IDS) {
         threw++;
         if (venue === "BITUNIX") {
           assert.ok(e instanceof BitunixDisabledError, `${venue}/${method}: BitunixDisabledError, got ${e}`);
+          assertNoLeak((e as Error).message);
+          continue;
+        }
+        // MDERR-006: PAPER nutzt die explizite Stale-Fallback-API; ohne
+        // Cache wird der typisierte Marktdatenfehler geworfen (nie ein
+        // stilles leeres Array).
+        if (e instanceof MarketDataFetchError) {
+          assert.equal(venue, "PAPER", `${venue}/${method}: MarketDataFetchError nur für PAPER erwartet`);
+          assert.ok((e as MarketDataFetchError).reason.length > 0, `${venue}/${method}: reason gesetzt`);
           assertNoLeak((e as Error).message);
           continue;
         }

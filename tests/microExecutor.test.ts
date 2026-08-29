@@ -280,4 +280,32 @@ test("SimulatedFeed: erzeugt Ticks und ist stoßbar", async () => {
   assert.equal(feed.status().connected, false);
 });
 
+// ── 4b) Warmstart-Fehler sind beobachtbar (MDERR-006) ───────────────────────
+
+test("MicroExecutor: Warmstart-Fehler werden gezählt/geloggt, nicht still verschluckt", async () => {
+  const spec = makeSpec();
+  const cache = new RuleCache();
+  cache._seedForTest([cachedRule(spec, "rule-seed")]);
+  const adapter = new RecordingAdapter();
+  // seedCandles: true (Default) — der Seed trifft den gemockten 429-Fehler.
+  const executor = new MicroExecutor({ cache, adapter });
+  executor.addSymbol("BTC", "15m"); // ohne injizierte Historie → Seed nötig
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (() => {
+    throw Object.assign(new Error("HTTP 429 rate limit"), { httpStatus: 429 });
+  }) as typeof fetch;
+  try {
+    await executor.start();
+    const s = executor.status();
+    assert.equal(s.seed.requested, 1);
+    assert.equal(s.seed.failed, 1, "Warmstart-Fehler müssen im Status sichtbar sein");
+    assert.ok(s.seed.lastError?.includes("RATE_LIMITED"), "letzter Seed-Fehler nennt die Ursache");
+    assert.equal(s.running, true, "Live-Kerzen wärmen trotz Seed-Fehler weiter auf");
+  } finally {
+    globalThis.fetch = realFetch;
+    await executor.stop();
+  }
+});
+
 // ── 5) Fenster/Backtest-Integration über die Engine ist in ruleEngine.test.ts ─

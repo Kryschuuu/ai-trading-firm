@@ -3,7 +3,9 @@
  *
  * Delegiert auf den Bestand, statt ihn zu duplizieren:
  *   Orders/Guardrails/Kill-Switch → `PaperBroker` (src/lib/broker.ts)
- *   Kurse/Kerzen                  → marketData.ts (live + Cache + Fallback)
+ *   Kurse/Kerzen                  → marketData.ts (Kurse: Cache + Statik;
+ *                                    Kerzen: explizite Stale-Fallback-API,
+ *                                    Fehler werfen — MDERR-006)
  *   Instrument-Discovery          → lokale Universe-Registry (src/universe,
  *                                    deterministisch, kein Netzwerk)
  *
@@ -13,7 +15,7 @@
  * es entsteht nie eine zweite, unhydratierte Buchhaltung.
  */
 import { PaperBroker, type Fill, type Order } from "../lib/broker";
-import { getCandles, getQuote } from "../lib/marketData";
+import { getCandlesWithFallback, getQuote } from "../lib/marketData";
 import { getRegistry } from "../universe";
 import type { MarketInstrument } from "../universe/types";
 import { VENUE_CAPABILITIES } from "./capabilities";
@@ -79,9 +81,17 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     return { symbol: q.symbol, price: q.price, source: q.source, ts: q.ts };
   }
 
-  /** Kerzen für Indikatoren/Backtests (Cache, max. 120). */
+  /**
+   * Kerzen für Indikatoren/Backtests (max. 120).
+   *
+   * MDERR-006: bewusst die **explizite** Fallback-API — der Paper-Betrieb
+   * erlaubt degradierte (stale) Daten. Der Fehler bleibt trotzdem sichtbar
+   * (Metrik + Log + `result.error`); ohne Cache-Eintrag wird geworfen —
+   * niemals ein stilles leeres Array.
+   */
   async getCandles(symbol: string, timeframe: string): Promise<MarketCandle[]> {
-    return getCandles(symbol, timeframe, 120);
+    const result = await getCandlesWithFallback(symbol, timeframe, 120);
+    return result.candles;
   }
 
   async getAccount(): Promise<BrokerAccount> {

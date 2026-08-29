@@ -37,6 +37,8 @@ import {
   type RiskLimits,
 } from "./riskGuard";
 import { getCandles, sanitizeSymbol } from "./marketData";
+import { MarketDataFetchError } from "./marketDataErrors";
+import { structuredLog } from "./logger";
 import { writeEquitySnapshot } from "./equity";
 import {
   buildSnapshotFromCandles,
@@ -769,6 +771,8 @@ export type MicroStatus = {
   p95EvalMicros: number | null;
   series: { symbol: string; timeframe: string; candles: number }[];
   lastError: string | null;
+  /** Warmstart (REST-Historie): Fehler sind sichtbar, nicht still verschluckt (MDERR-006). */
+  seed: { requested: number; failed: number; lastError: string | null };
 };
 
 export class MicroExecutor {
@@ -786,6 +790,9 @@ export class MicroExecutor {
   private evalSamples: number[] = [];
   private lastError: string | null = null;
   private startedAt: number | null = null;
+  private seedRequested = 0;
+  private seedFailed = 0;
+  private seedLastError: string | null = null;
   private readonly options: MicroExecutorOptions;
 
   constructor(opts?: {
@@ -830,16 +837,33 @@ export class MicroExecutor {
       for (const [key, series] of this.series) {
         if (series.size() > 0) continue;
         const [symbol, timeframe] = key.split(":");
+        this.seedRequested++;
         try {
           const candles = await getCandles(symbol, timeframe, 150);
+          // WICHTIG (MDERR-006): Ein leeres Array ist keine Fehlermeldung —
+          // die Venue hat nachweislich keine Bars geliefert. Ein
+          // MarketDataFetchError dagegen ist ein echter Infrastrukturfehler
+          // und wird unten protokolliert/gezählt — er darf nicht als
+          // „offline, alles ok“ verschwinden. Live-Kerzen wärmen die Serie
+          // trotzdem weiter auf, aber der Fehler bleibt beobachtbar.
           if (candles.length > 0) {
             this.series.set(
               key,
               new RollingTimeframeSeries(symbol, timeframe, candles)
             );
           }
-        } catch {
-          /* offline → Live-Kerzen wärmen die Serie auf */
+        } catch (err) {
+          this.seedFailed++;
+          const reason = err instanceof MarketDataFetchError ? err.reason : "UNKNOWN";
+          this.seedLastError =
+            err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+          structuredLog("error", "micro_executor_seed_fetch_failed", {
+            symbol,
+            timeframe,
+            reason,
+            retryable: err instanceof MarketDataFetchError ? err.retryable : false,
+            httpStatus: err instanceof MarketDataFetchError ? (err.httpStatus ?? null) : null,
+          });
         }
       }
     }
@@ -941,6 +965,11 @@ export class MicroExecutor {
         candles: s.size(),
       })),
       lastError: this.lastError,
+      seed: {
+        requested: this.seedRequested,
+        failed: this.seedFailed,
+        lastError: this.seedLastError,
+      },
     };
   }
 }

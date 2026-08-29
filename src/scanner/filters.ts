@@ -13,6 +13,7 @@
 import type { ScannerConfig } from "./config";
 import type { FactorId, FactorValue, VolatilityRegime } from "./types";
 import type { MarketInstrument } from "@/universe/types";
+import { isMarketDataErrorReason } from "@/lib/marketDataErrors";
 import { minCandlesRejectionMessage, requiredWarmupCandles } from "./warmup";
 
 /** Stabile IDs aller Filterregeln in Auswertungsreihenfolge. */
@@ -21,6 +22,7 @@ export const FILTER_RULE_IDS = [
   "paper-available",
   "market-type",
   "asset-class",
+  "data-unavailable",
   "min-candles",
   "min-volume",
   "max-spread",
@@ -64,6 +66,17 @@ export interface FilterCandidate {
   candleCount: number;
   /** Volatilitäts-Regime. */
   regime: VolatilityRegime;
+  /**
+   * Echter Fetch-/Infrastruktur-Fehler (MDERR-006), z. B. `RATE_LIMITED`.
+   * Wenn gesetzt, greift `data-unavailable` — niemals `min-candles`: ein
+   * Abruf-Fehler ist kein „keine Historie vorhanden“.
+   */
+  dataError?: string;
+}
+
+/** Nur die stabile Ursachen-Taxonomie in die Rejection-Message (sonst UNKNOWN). */
+function safeReasonLabel(value: string): string {
+  return isMarketDataErrorReason(value) ? value : "UNKNOWN";
 }
 
 function raw(value: FactorValue): number | null {
@@ -101,7 +114,7 @@ function raw(value: FactorValue): number | null {
  * @returns `null`, wenn das Instrument geeignet ist, sonst die Ablehnung.
  */
 export function checkEligibility(candidate: FilterCandidate, config: ScannerConfig): FilterRejection | null {
-  const { instrument, factors, candleCount, regime } = candidate;
+  const { instrument, factors, candleCount, regime, dataError } = candidate;
   const filters = config.filters;
   const reject = (ruleId: FilterRuleId, message: string, dataQuality = false): FilterRejection => ({
     instrumentId: instrument.id,
@@ -109,6 +122,18 @@ export function checkEligibility(candidate: FilterCandidate, config: ScannerConf
     message,
     dataQuality,
   });
+
+  // MDERR-006: Ein echter Abruf-Fehler wird NIE als `min-candles` gemeldet.
+  // DATA_UNAVAILABLE ist ein Infrastrukturzustand (Readiness → ERROR) und
+  // behebbar — keine Aussage über „0 Kerzen vorhanden“ oder Marktqualität.
+  if (dataError) {
+    return reject(
+      "data-unavailable",
+      `DATA_UNAVAILABLE: Marktdaten-Abruf fehlgeschlagen (${safeReasonLabel(dataError)}) — ` +
+        `Infrastrukturfehler, KEIN Marktausschluss und KEINE fehlende Historie. Venue/Netz prüfen.`,
+      true,
+    );
+  }
 
   if (filters.requireStatusActive && instrument.status !== "active") {
     return reject("status-active", `Status ${instrument.status} ist nicht handelbar`);

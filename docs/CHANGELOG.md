@@ -20,6 +20,90 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.26.1] — 2026-08-29 · Typisierte Marktdaten-Fehler statt stiller leerer Arrays (MDERR-006)
+
+**Fix (P1, Observability-/Sicherheitsdefekt):** `getCandles()` in
+`src/lib/marketData.ts` bildete HTTP 429/5xx, DNS-Fehler, ungültige Symbole,
+Schema-Abweichungen und TLS-Fehler alle auf `[]` ab
+(`catch { return cached?.candles ?? []; }`). Downstream erschien das als
+`min-candles`-Ablehnung — „Netzwerkfehler“ war nicht von „0 Kerzen vorhanden“
+unterscheidbar. In einem Trading-System ist das zusätzlich ein Risikoproblem:
+eine leere Serie kann Faktoren neutralisieren, statt eine Ausführung zu
+stoppen.
+
+### Changed — Sicherheit / Fehlerbehandlung
+
+* **Neu `src/lib/marketDataErrors.ts`:**
+  * `MarketDataFetchError` mit `venue`/`symbol`/`timeframe`/`reason`/
+    `retryable`/`httpStatus`/`cause` und **redigiertem** `toJSON()` (kein
+    Stacktrace, kein `cause`-Text, keine vollen URLs).
+  * `classifyMarketDataError()`: vollständige Ursachen-Taxonomie
+    (`MarketDataErrorReason`: RATE_LIMITED, UPSTREAM_5XX, UNAUTHORIZED,
+    NOT_FOUND, INVALID_SYMBOL, SCHEMA_MISMATCH, TIMEOUT, NETWORK, TLS,
+    ABORTED, UNKNOWN) mit `retryable`-Flags.
+  * Fehler-Message-Template macht explizit: „Infrastrukturfehler, KEIN
+    ‚keine Historie vorhanden‘ — der Scanner meldet dafür DATA_UNAVAILABLE.“
+* **`getCandles()` wirft** bei echten Fehlern; das stille Cache-Fallback
+  `?? []` ist entfernt. Leere Venue-Antworten (`[]`) bleiben gültig und
+  werden gecacht („nachweislich keine Bars“) — die Abgrenzung ist getestet.
+* **Neu `getCandlesWithFallback()`**: bewusste Degradations-API für z. B.
+  UI-Preview mit expliziter Staleness — `{ candles, source: "live"|"cache",
+  stale, ageMs, error? }`; ohne Cache-Eintrag wird geworfen.
+* **Neu `src/lib/telemetry.ts`**: Counter
+  `market_data_fetch_failures_total{venue,timeframe,reason}` — bewusst
+  **ohne `symbol`-Label** (Kardinalität/Speicher-DoS), Symbol nur im Log.
+  Prometheus-Text-Exposition für späteres Scraping.
+* **Neu `src/lib/logger.ts`**: strukturierte JSON-Logs mit Redaction
+  (`redactSecrets`), Einzeilen-Normalisierung und 512-Zeichen-Kappe —
+  Events `market_data_fetch_failed`, `market_data_fetch_retry`,
+  `market_data_unauthorized_public_endpoint` (`critical`: Public-Pfad mit
+  401/403 = Konfigurationsfehler).
+* **Retry-Budget:** `MARKET_DATA_FETCH_ATTEMPTS = 2` mit Backoff
+  (250 ms × Versuch), nur retryable Ursachen (429/5xx/Timeout/Netzwerk) —
+  kein Endlos-Retry, nicht-retryable Fehler werden sofort geworfen.
+* **Scanner (Readiness/Routing):**
+  * Sync-Fehler werden als persistentes Manifest
+    (`data/market-data-errors.json`, `src/marketdata/dataErrors.ts`,
+    gitignored) in `dataErrors: Map<instrumentId, reason>`
+    übersetzt und an `assessDataReadiness()` gereicht → Status `ERROR`.
+  * Neue Filterregel **`data-unavailable`** (vor `min-candles`): ein
+    Abruf-Fehler wird nie als `min-candles` gemeldet.
+  * `ScannerService` liest das Manifest standardmäßig; `run-scan`-CLI mutiert
+    bei Sync-Fehlern nicht mehr den Ablauf — Readiness `ERROR` + Exit-Code 1.
+* **MicroExecutor-Warmstart:** Seed-Fehler werden gezählt und geloggt
+  (`status().seed`, Event `micro_executor_seed_fetch_failed`); Live-Kerzen
+  wärmen weiter, aber der Fehler bleibt beobachtbar (kein „offline, alles ok“).
+* **Backtest-Route:** `MarketDataFetchError` → HTTP 503
+  `MARKET_DATA_UNAVAILABLE` mit `reason` (redigiert, kein Stacktrace).
+
+### Added — Beobachtbarkeit
+
+* Operations Center (Scanner-Sektion): Metrik
+  „Marktdaten-Abruffehler (`market_data_fetch_failures_total`)“ inkl.
+  Ops-Tooltip (RATE_LIMITED → Budget, UPSTREAM_5XX → Venue).
+* Hilfe-Eintrag `metric.marketDataFailures` in `docs/help/ops.help.json`.
+* Neu **`docs/OBSERVABILITY.md`** (Taxonomie, Metriken, Logs, Redaction,
+  Sicherheits-Audit), registriert im Doku-Katalog (`src/lib/docsCatalog.ts`)
+  und in `docs/README.md`.
+
+### Tests
+
+* Neu `tests/marketDataErrors.test.ts` (32 Assertions): Äquivalenzklassen
+  der Klassifizierung, Template, Serialisierung/Redaction, Log-Injection.
+* Neu `tests/marketData.test.ts`: Beobachtbarkeit, leere-Array-Abgrenzung,
+  Metrik-/Log-Emission, `getCandlesWithFallback` (stale + Fehler sichtbar),
+  Scanner-`DATA_UNAVAILABLE`, Readiness `ERROR`, Retry-Budget, Manifest.
+* `tests/scanner.funnel.test.ts`: Filterregel `data-unavailable`.
+* `tests/microExecutor.test.ts`: Warmstart-Fehler sichtbar.
+* `npm run typecheck` und `npm run docs:validate` grün.
+
+### Migration / Deployment
+
+* Keine DB-Migration. `package.json` → **1.26.1**.
+* Neu gitignored: `data/market-data-errors.json*` (Laufzeit-Artefakt).
+
+---
+
 ## [1.26.0] — 2026-08-29 · Timeframe-Dimension im Historical Store + v1→v2-Migration (MDSYNC-001)
 
 **Breaking Change (P1, Schema-/Architekturfehler mit Korruptionspotenzial):**

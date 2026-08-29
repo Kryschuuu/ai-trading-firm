@@ -11,32 +11,39 @@
  * Der Sync-Pfad berührt nie die Private-API. Logs aggregated counters only —
  * no symbols, no secrets.
  *
+ * MDERR-006: Fehler werden NICHT mehr nur gezählt, sondern zusätzlich als
+ * persistentes Datenfehler-Manifest (`data/market-data-errors.json`)
+ * geschrieben — der Scanner/Operations-Center liest es und meldet
+ * `DATA_UNAVAILABLE` / Readiness ERROR statt `min-candles`.
+ *
  * See docs/MARKET_DATA_PIPELINE.md.
  */
-import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
-import { getRegistry } from "../src/universe";
-import { MarketDataSyncService, formatSyncLog } from "../src/marketdata";
-import { createAdapterRegistry } from "../src/marketdata/adapterRegistry";
+import { clearMarketDataErrors, saveMarketDataErrors } from "../src/marketdata/dataErrors";
+import { structuredLog } from "../src/lib/logger";
+import { runMarketSync } from "./lib/market-sync";
 
 const args = process.argv.slice(2);
 const venueArg = args.find((a) => a.startsWith("--venue="))?.slice("--venue=".length);
 const venue = (venueArg || "BITUNIX").trim().toUpperCase();
 
 async function main(): Promise<void> {
-  const registry = getRegistry();
-  const history = new HistoricalStore();
+  const result = await runMarketSync(venue);
 
-  // Einzige Instanzierungsstelle: AdapterRegistry (public-only, paper-Modus).
-  // Der Token-Bucket (8 req/s) sitzt am Public-Client des Adapters — ein
-  // zweiter Limiter auf Orchestrier-Ebene würde Tokens doppelt verrechnen.
-  const adapters = createAdapterRegistry({ registry });
-
-  const sync = new MarketDataSyncService(registry, history, adapters.entries);
-
-  const result = await sync.syncVenue(venue);
-  for (const line of formatSyncLog(result)) console.log(line);
-  if (result.errors.length > 0) {
+  const errorCount = result.errors.length;
+  if (errorCount > 0) {
+    // Persistiertes Manifest: Ursachen je Instrument → Scanner-Readiness ERROR.
+    saveMarketDataErrors(result.errors);
+    const byStage: Record<string, number> = {};
+    for (const e of result.errors) byStage[e.stage] = (byStage[e.stage] ?? 0) + 1;
+    structuredLog("error", "market_sync_fetch_failures", {
+      venue: result.venue,
+      count: errorCount,
+      byStage,
+    });
+    console.error(`[market-sync] ${errorCount} Marktdaten-Fehler — Manifest geschrieben (data/market-data-errors.json)`);
     process.exitCode = 1;
+  } else {
+    clearMarketDataErrors();
   }
 }
 

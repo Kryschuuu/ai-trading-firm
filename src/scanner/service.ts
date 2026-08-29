@@ -21,6 +21,7 @@ import {
   type SupportedTimeframe,
 } from "@/lib/marketdata/historicalStore";
 import type { MarketCandle } from "@/lib/marketdata/types";
+import { loadMarketDataErrors } from "@/marketdata/dataErrors";
 import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
 import { loadScannerConfig, type ScannerConfig } from "./config";
@@ -116,6 +117,12 @@ export interface ScannerServiceOptions {
   instruments?: () => MarketInstrument[];
   /** Datenanbindung; Default: Historical Store. */
   data?: ScanDataProvider;
+  /**
+   * Echte Fetch-/Infrastruktur-Fehler (MDERR-006). Default: das persistente
+   * Manifest `data/market-data-errors.json` (vom Sync-Job geschrieben), damit
+   * auch über Prozessgrenzen die Readiness `ERROR` wird.
+   */
+  dataErrors?: () => ReadonlyMap<string, string> | null;
   /** Instrumentenstand der Vorwoche (Weekly-Änderungssignale). */
   previousInstruments?: () => MarketInstrument[] | null;
   /** Vorheriger Weekly-Review. */
@@ -164,7 +171,16 @@ export class ScannerService {
     const data =
       this.options.data ?? historicalStoreProvider(new HistoricalStore(), config.factors.correlation.benchmarkInstrumentId);
     const now = this.options.now ?? (() => new Date());
-    this.scan = scanUniverse({ instruments, data, asOf: now(), config });
+    // MDERR-006: Datenfehler-Manifest (Sync-Prozess) → Readiness ERROR statt
+    // stiller min-candles-Aussortierung.
+    const dataErrors = this.options.dataErrors?.() ?? loadMarketDataErrors();
+    this.scan = scanUniverse({
+      instruments,
+      data,
+      asOf: now(),
+      config,
+      ...(dataErrors.size > 0 ? { dataErrors } : {}),
+    });
     this.weekly = null;
     return this.scan;
   }

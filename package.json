@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.26.0",
+  "version": "1.26.1",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "MIT",
   "private": true,
