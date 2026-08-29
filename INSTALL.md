@@ -94,6 +94,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `PAPER_SIM_PARTIAL_MAX_FRACTION` | — | Obergrenze Partial Fill |
 | `PAPER_SIM_SLIPPAGE_BPS_BASE` / `..._JITTER_BPS` / `..._PER_PARTICIPATION` | — | Slippage-Modell |
 | `PAPER_SIM_VOLUME_FALLBACK` | — | Volumen-Fallback |
+| `PAPER_SIM_SYNTHETIC_SPREAD_BPS` | `2` | Bid/Ask-Spread für ticker-basierte Paper-Fills (z. B. Bitunix Modus B) |
 | `PAPER_STALE_AFTER_MS` | — | Staleness-Schwelle |
 | `PAPER_STATIC_FALLBACK` | `false` | statisches Preisbuch nur explizit |
 | `PAPER_ALLOW_SYNTHETIC_FALLBACK` | — | Synthetic als Fallback erlauben |

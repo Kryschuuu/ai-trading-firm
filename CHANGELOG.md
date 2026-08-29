@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-28** ·
-> Code-Version **1.19.0**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
+> Code-Version **1.21.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,42 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.21.0] — 2026-08-29 · Coverage-Trennung + vereinheitlichte Paper-Execution
+
+**Terminologie & Broker-Status-Tracking getrennt (Haupt-Task):** „gescannte“
+bzw. registrierte Venues sind jetzt klar von der tatsächlichen Capability-
+Abdeckung getrennt.
+
+- **Neu `src/brokers/coverage.ts`** (`computeBrokerCoverage`): reine Projektion
+  aus der Capability-SSoT + Live-Gate-Enforcer. Liefert Headline-Kennzahlen
+  („7 Venues registriert · 1 mit vollständiger Discovery · 1 mit Paper-Market-Data
+  · 0 mit aktiviertem Live Trading“) und fünf Coverage-Metriken (Discovery /
+  Market Data / Paper / Testnet / Live Execution).
+- **Neu `GET /api/brokers/coverage`** (read-only, tokenfrei, keine Secrets).
+- **Neu `CoveragePanel`** im Brokers-&-Venues-Tab: differenzierte Headline,
+  fünf Coverage-Balken und eine Detailtabelle je Venue (intern/extern, Live-
+  Fähigkeit vs. Live-Freigabe getrennt). Ersetzt die irreführende Zählung
+  „7 Broker“.
+- **Headline extern gezählt:** Der interne `PAPER`-Simulator wird transparent
+  als *intern* markiert; die Headline misst reale externe Venue-Integration.
+
+**Paper-Execution vereinheitlicht (Sekundär-Task):** Der Bitunix-Paper-Ledger
+verwendet **keine** separate, vereinfachte Simulation mehr.
+
+- **Fix `src/brokers/bitunix/paper.ts`:** statt fester Faktoren
+  (LONG → `price·1.0001`, SHORT → `price·0.9999`) läuft jeder Fill jetzt durch
+  den **zentralen** `FillSimulator` (Spread, Slippage, Gebühren, Latenz,
+  Partial Fills). `Generic Paper === Bitunix Paper`.
+- **Neu `src/lib/marketdata/snapshot.ts`** (`snapshotFromLastPrice`,
+  `fallbackInstrument`): wandelt einen reinen Last-Preis-Ticker in einen
+  normalisierten `MarketSnapshot` (Bid/Ask symmetrisch aus synthetischem
+  Spread), damit ticker-basierte Venues dieselbe Fill-Engine nutzen.
+- **Neuer Env-Knopf** `PAPER_SIM_SYNTHETIC_SPREAD_BPS` (Default 2 bp).
+- **Keine Breaking Changes:** Reject-Pfade, Guardrails, Kill-Switch und der
+  Live-Pfad (weiterhin `LiveTradingGateError`) unverändert.
+- **Neue Tests (+24):** `brokerCoverage.test.ts`, `brokerCoverage.api.test.ts`,
+  `bitunix.paper.unified.test.ts`, `marketdata.snapshot.test.ts`.
 
 ## [1.20.0] — 2026-08-28 · Bitunix-Ausführungs-Refactor (Paper/Broker getrennt)
 

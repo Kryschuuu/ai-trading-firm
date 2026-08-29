@@ -4,8 +4,24 @@
  * Echte Bitunix-Kurse, simulierte Fills, keine Private-API.
  * SL/TP werden am Fill vermerkt (Venue-Semantik vorbereitet), die
  * Ausführung selbst bleibt lokal.
+ *
+ * VEREINHEITLICHTE AUSFÜHRUNG (v1.21.0): Dieses Ledger verwendet NICHT mehr
+ * eine eigene, vereinfachte Fill-Logik (früher: LONG → price·1.0001,
+ * SHORT → price·0.9999). Stattdessen läuft JEDER Fill durch denselben
+ * zentralen `FillSimulator` (`src/lib/marketdata/simulator.ts`) wie die
+ * generische Paper-Execution — inklusive Spread, Slippage, Gebühren, Latenz und
+ * Partial Fills. Der Bitunix-Ticker (nur Last-Preis) wird dazu über
+ * `snapshotFromLastPrice` in einen normalisierten `MarketSnapshot` überführt.
+ *
+ * Ergebnis: Generic Paper === Bitunix Paper (dieselbe Ausführungs-Engine,
+ * keine zweite Simulationslogik mehr).
  */
 import { killSwitch, validateOrder } from "../../lib/riskGuard";
+import { FillSimulator } from "../../lib/marketdata/simulator";
+import { loadSimulatorConfig, type FillSimulatorConfig } from "../../lib/marketdata/config";
+import { snapshotFromLastPrice, fallbackInstrument } from "../../lib/marketdata/snapshot";
+import type { InstrumentRegistry } from "../../universe";
+import type { MarketInstrument } from "../../universe/types";
 import type {
   BrokerAccount,
   BrokerOrderRequest,
@@ -22,15 +38,31 @@ interface Pos {
   takeProfit: number | null;
 }
 
+/** Konstruktions-Abhängigkeiten (injizierbar für deterministische Tests). */
+export interface BitunixPaperLedgerDeps {
+  /** Zentrale Simulator-Konfiguration (Default: aus Env). */
+  simulatorConfig?: FillSimulatorConfig;
+  /** Vorgefertigter Simulator (Vorrang vor `simulatorConfig`). */
+  simulator?: FillSimulator;
+  /** Registry zur Instrument-Auflösung (Gebühren-Felder); optional. */
+  registry?: InstrumentRegistry;
+}
+
 export class BitunixPaperLedger {
   private cash: number;
   private readonly start: number;
   private readonly positions = new Map<string, Pos>();
   private seq = 0;
+  private readonly config: FillSimulatorConfig;
+  private readonly simulator: FillSimulator;
+  private readonly registry?: InstrumentRegistry;
 
-  constructor(startEquity = 10_000) {
+  constructor(startEquity = 10_000, deps: BitunixPaperLedgerDeps = {}) {
     this.cash = startEquity;
     this.start = startEquity;
+    this.config = deps.simulatorConfig ?? loadSimulatorConfig();
+    this.simulator = deps.simulator ?? new FillSimulator(this.config);
+    this.registry = deps.registry;
   }
 
   getAccount(mark?: (symbol: string) => number | null): BrokerAccount {
@@ -63,6 +95,16 @@ export class BitunixPaperLedger {
         takeProfit: p.takeProfit,
       };
     });
+  }
+
+  /**
+   * Löst das Instrument (für die Gebühren-Felder des Simulators) aus der
+   * Registry auf; fällt auf ein neutrales Fallback-Instrument zurück
+   * (Gebühren dann aus der Simulator-Fallback-Konfiguration).
+   */
+  private resolveInstrument(symbol: string): MarketInstrument {
+    const found = this.registry?.find("BITUNIX", symbol) ?? null;
+    return found ?? fallbackInstrument("BITUNIX", symbol);
   }
 
   submit(req: BrokerOrderRequest, ticker: MarketTicker): BrokerOrderResult {
@@ -101,12 +143,38 @@ export class BitunixPaperLedger {
     });
     if (!guard.allowed) return reject(guard.reason);
 
-    const fillPrice = req.side === "LONG" ? ticker.price * 1.0001 : ticker.price * 0.9999;
-    const cost = req.qty * fillPrice;
+    // Vereinheitlichte Ausführung: Ticker → normalisierter Snapshot → zentraler
+    // Fill-Simulator (Spread, Slippage, Gebühren, Latenz, Partial Fills).
+    const instrument = this.resolveInstrument(symbol);
+    const snapshot = snapshotFromLastPrice({
+      symbol,
+      last: ticker.price,
+      spread: this.config.syntheticSpreadBps / 10_000,
+      volume24h: ticker.quoteVol ?? instrument.volume24h ?? null,
+      venue: "BITUNIX",
+      base: instrument.base,
+      quote: instrument.quote,
+      instrumentId: instrument.id,
+      ts: ticker.ts,
+      source: "broker",
+      feed: "bitunix",
+    });
+    const sim = this.simulator.simulate(
+      { symbol, side: req.side, qty: req.qty },
+      snapshot,
+      instrument
+    );
+    if (sim.status === "REJECTED" || sim.filledQty <= 0) {
+      return reject(sim.reason ?? "SIM_REJECTED");
+    }
+
+    const filledQty = sim.filledQty;
+    const fillPrice = sim.fillPrice;
+    const cost = filledQty * fillPrice + sim.fees;
     if (cost > this.cash + 1e-9) return reject("INSUFFICIENT_CASH");
 
     this.positions.set(symbol, {
-      qty: req.qty,
+      qty: filledQty,
       side: req.side,
       entryPrice: fillPrice,
       stopLoss: req.stopLoss ?? null,
@@ -117,7 +185,7 @@ export class BitunixPaperLedger {
       orderId: `PAP-BX-${Date.now().toString(36).toUpperCase()}-${this.seq++}`,
       symbol,
       side: req.side,
-      qty: req.qty,
+      qty: filledQty,
       fillPrice,
       status: "FILLED",
       stopLoss: req.stopLoss ?? null,

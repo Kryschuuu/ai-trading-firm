@@ -27,6 +27,31 @@
       "wichtig": "Dieser Pfad aktiviert sich nie von selbst — jeder Schritt (Checks, Paper-Evidence, Antrag, 24 h Cooldown, Human-Gate, CI-Suite, Flags) ist eine eigene, auditierte Entscheidung.",
       "risiko": "Jede echte Order bewegt echtes Kapital und ist nicht rueckgaengig. Der Weg dorthin ist bewusst lang und mehrfach abgesichert — das Gate ersetzt aber keine taegliche, menschliche Aufsicht."
     },
+    "coverage.registeredVenues": {
+      "kurzinfo": "Anzahl registrierter Venues: für so viele Venues kennt das Repo einen Broker-Adapter (heute 7).",
+      "technischeInfo": "Projektion aus BROKER_VENUE_IDS (Single Source of Truth). 'Registriert' bedeutet nur: ein Adapter existiert — es sagt nichts über die tatsächliche Capability-Abdeckung aus. Quelle: src/brokers/coverage.ts (computeBrokerCoverage), API GET /api/brokers/coverage.",
+      "risiko": "Die reine Zahl der registrierten Venues ist irreführend, wenn sie mit echter Handelsbereitschaft verwechselt wird. Ein Stub ist registriert, aber deckt keine Discovery, Market-Data oder Ausführung ab."
+    },
+    "coverage.fullDiscoveryVenues": {
+      "kurzinfo": "Wie viele reale externe Venues vollständige Discovery UND Market-Data abdecken (heute 1: Bitunix).",
+      "technischeInfo": "Zählt externe Venues (alles außer dem internen PAPER-Simulator) mit capabilities.discovery=true UND marketData=true. Der interne Simulator wird bewusst ausgeklammert, damit die Kennzahl reale Venue-Integration misst. Quelle: src/brokers/coverage.ts.",
+      "risiko": "Fehlende Discovery-Abdeckung bedeutet, dass Instrumente/Metriken einer Venue nicht automatisch aktuell gehalten werden — Orders könnten auf dünnen oder veralteten Märkten landen."
+    },
+    "coverage.paperMarketDataVenues": {
+      "kurzinfo": "Wie viele reale externe Venues Paper-Ausführung gegen echte Marktdaten bieten (heute 1: Bitunix).",
+      "technischeInfo": "Zählt externe Venues mit capabilities.paper=true UND marketData=true (Modus B: echte Kurse, lokale Simulation). Der Bitunix-Paper-Ledger nutzt seit v1.21.0 denselben zentralen FillSimulator wie die generische Paper-Execution. Quelle: src/brokers/coverage.ts.",
+      "risiko": "Paper bleibt Simulation: idealisierte Gebühren/Liquidität. Abgedeckte Paper-Market-Data ist Entscheidungsgrundlage, keine Zusicherung realer Ausführung."
+    },
+    "coverage.liveEnabledVenues": {
+      "kurzinfo": "Wie viele Venues aktuell für reale Orders freigegeben sind (Default 0 — Live ist gesperrt).",
+      "technischeInfo": "Zählt Venues, für die der zentrale Live-Gate-Enforcer (evaluateLiveOrder().allowed) eine Live-Order erlauben würde. Default nach Task 11: 0 (State DISCONNECTED, Flags aus, kein Suite-Stamp). 'Live-Fähigkeit' des Adapters (capabilities.live) ist strikt davon getrennt.",
+      "risiko": "Solange dieser Wert 0 ist, bewegt das System kein echtes Kapital. Ein Wert > 0 bedeutet, dass mindestens eine Venue den vollständigen, auditierten Gate-Durchlauf bestanden hat — tägliche menschliche Aufsicht bleibt Pflicht."
+    },
+    "coverage.metrics": {
+      "kurzinfo": "Fünf Coverage-Balken: Discovery, Market Data, Paper, Testnet und Live Execution über alle registrierten Venues.",
+      "technischeInfo": "Jede Metrik zählt covered/total Venues, die das Kriterium erfüllen (Capability-Flag bzw. Live-Gate-Entscheidung). Reine Projektion ohne Netzwerk/Secrets. Anzeige im CoveragePanel (src/components/control-plane/CoveragePanel.tsx), Daten aus GET /api/brokers/coverage.",
+      "risiko": "Die Metriken beschreiben ausschließlich den Ist-Stand des Adapter-Codes dieses Repos, nicht das Vendor-Angebot der Venue. Sie mit beworbenen Broker-Fähigkeiten zu verwechseln, führt zu falschen Betriebsannahmen."
+    },
     "capabilities.discovery": {
       "kurzinfo": "Kann der Adapter Instrumente von dieser Venue entdecken?",
       "technischeInfo": "discoverInstruments() liefert MarketInstrument[] (Contract aus Task 01). Beim PAPER-Adapter aus der lokalen Universe-Registry (offline). Stubs verweigern mit klar markiertem TODO(task-02/07) plus Contract-Referenz.",

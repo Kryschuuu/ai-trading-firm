@@ -136,6 +136,15 @@ export interface FillSimulatorConfig {
   seed: number;
   /** 24h-Volumen-Fallback (Quote-Währung), falls Registry-Feld null. */
   volume24hFallback: number;
+  /**
+   * Synthetischer relativer Spread (Basispunkte) für Snapshots, die nur einen
+   * Last-Preis liefern (z. B. Broker-Ticker ohne Level-1-Orderbuch). Der
+   * Simulator selbst nutzt diesen Wert NICHT — er wird von den Snapshot-Buildern
+   * (`snapshotFromLastPrice`) verwendet, um Bid/Ask symmetrisch um den
+   * Last-Preis zu erzeugen, damit auch ticker-basierte Paper-Pfade (Bitunix
+   * Modus B) durch DIESELBE Fill-Engine laufen.
+   */
+  syntheticSpreadBps: number;
 }
 
 /** Lädt die Simulator-Konfiguration aus Env (mit dokumentierten Defaults). */
@@ -157,6 +166,7 @@ export function loadSimulatorConfig(env: EnvLike = process.env): FillSimulatorCo
     partialFillMaxFraction: num(env, ENV.PAPER_SIM_PARTIAL_MAX_FRACTION, 1, 0, 1),
     seed: normalizeSeed(env[ENV.PAPER_SIM_SEED]),
     volume24hFallback: num(env, "PAPER_SIM_VOLUME_FALLBACK", 10_000_000, 1, 1e15),
+    syntheticSpreadBps: num(env, "PAPER_SIM_SYNTHETIC_SPREAD_BPS", 2, 0, 10_000),
   };
 }
 

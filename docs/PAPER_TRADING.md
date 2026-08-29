@@ -115,6 +115,7 @@ Task 01); ein Market-Fill nutzt die **Taker-Gebühr**.
 | Max. Fill-Anteil | `PAPER_SIM_PARTIAL_MAX_FRACTION` | `1` (100 %) | Obergrenze der gefüllten Menge |
 | Seed | `PAPER_SIM_SEED` | `0` | deterministischer Zufall (Streuung/Liquidität) |
 | 24h-Volumen-Fallback | `PAPER_SIM_VOLUME_FALLBACK` | `10_000_000` | falls Registry-`volume24h` fehlt |
+| Synthetischer Spread | `PAPER_SIM_SYNTHETIC_SPREAD_BPS` | `2` bp | Bid/Ask-Spread für ticker-basierte Snapshots (nur Last-Preis, z. B. Bitunix Modus B) |
 
 **Slippage-Modell** (linear wachsend mit Ordergröße relativ zum 24h-Volumen):
 
@@ -224,3 +225,25 @@ curl 'http://localhost:3369/api/marketdata/status'
   Order wird mit `NO_QUOTE` abgelehnt — es wird **nie geraten**.
 - **Kein Breaking Change:** bestehende Paper-Order-Pfade funktionieren weiter;
   der Live-Pfad bleibt hart gesperrt (`LiveTradingGateError`).
+
+### 8.1 Eine Fill-Engine für alle Paper-Pfade (v1.21.0)
+
+Es gibt **genau einen** Fill-Simulator. Adapter, die nur einen Last-Preis
+liefern (z. B. der Bitunix-Ticker in Modus B), wandeln diesen über
+`snapshotFromLastPrice` (`src/lib/marketdata/snapshot.ts`) in einen
+normalisierten `MarketSnapshot` (Bid/Ask symmetrisch aus dem synthetischen
+Spread) und schicken ihn durch **denselben** `FillSimulator`:
+
+```
+echte Broker-/Marktdaten
+        ↓  (normalisierter Ticker/Snapshot)
+normalisierte Marktdaten
+        ↓  (FillSimulator: Spread · Slippage · Gebühren · Latenz · Partial Fills)
+lokale Simulation
+```
+
+Damit ist der frühere Sonderfall beseitigt, bei dem der Bitunix-Paper-Ledger
+eine **separate**, vereinfachte Simulation mit festen Faktoren
+(LONG → `price·1.0001`, SHORT → `price·0.9999`) verwendete. Heute gilt:
+`Generic Paper === Bitunix Paper`. Belege: `tests/bitunix.paper.unified.test.ts`
+und `tests/marketdata.snapshot.test.ts`.
