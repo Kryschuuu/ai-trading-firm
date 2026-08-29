@@ -68,7 +68,7 @@ Weitere Module: `MARKET_UNIVERSE`, `MARKET_DATA_PIPELINE`, `BROKER_ARCHITECTURE`
 ## Testen & Validieren
 
 ```bash
-npm test                 # Unit/Integration (≈1120 Tests)
+npm test                 # Unit/Integration (≈1160 Tests)
 npm run typecheck        # tsc --noEmit
 npm run lint             # ESLint
 npm run docs:validate    # Docs-as-Code-Wächter (Task 12, CI-Job docs-validate)

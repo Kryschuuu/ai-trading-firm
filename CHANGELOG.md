@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.25.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.25.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,38 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.25.1] — 2026-08-29 · Bitunix-Wiring in den Scanner-Warmup (nachträglich PR #34)
+
+**Nacharbeit zu FEHLER-2 (P0, CODE-REVIEW-SCANNER §2/§3):** Der Sync-Pfad existierte
+seit 1.25.0, aber der funktionsfähige Adapter war nie angeschlossen — die Pipeline
+nutzte nur den parallelen `BitunixMarketDataAdapter`-Wrapper. Das ist gelöst:
+Verdrahtung über die zentrale Registry, redundanter Wrapper entfernt.
+
+* `BitunixBrokerAdapter` implementiert explizit `MarketDataAdapter`
+  (`implements BrokerAdapter, MarketDataAdapter`); `getCandles()` mit `limit`-
+  Parameter, neu `getTickers()` (1× Batch-Ticker-Call).
+* `src/marketdata/adapterRegistry.ts` (NEU) — die **einzige** Stelle, die konkrete
+  Adapter-Klassen instanziiert; registriert `"BITUNIX"` im Modus `paper`, **ohne**
+  PrivateClient/Credentials.
+* `scripts/run-market-sync.ts` ruft produktiv `syncVenue("BITUNIX")` über
+  `createAdapterRegistry()` auf.
+* Redundanter Wrapper `src/marketdata/adapters/bitunix.ts` entfernt — keine
+  parallele zweite Implementierung der Public-Pfade.
+* Tests: `tests/bitunix.marketdata.test.ts` (Interface, Registry, Orderbook,
+  Edge Cases, Security-Audit, 429-Retry/Backoff) und Fixture
+  `tests/fixtures/bitunixMockClient.ts`; Integration läuft über Registry +
+  Mock-HTTP-Layer. Volle Suite grün (1140/1140).
+* Doku: `docs/BITUNIX.md` §1.1 (Vier-Ebenen-Trennung: public data / private
+  trading / paper / live), `docs/MARKET_DATA_PIPELINE.md` (Venue-Matrix,
+  `AdapterRegistry` im Architektur-Diagramm); Doku-Stand auf 1.25.1 aktualisiert.
+
+**Sicherheit:** Im Sync-Pfad laufen ausschließlich Public-Client-Methoden
+(`trading_pairs`, `tickers`, `depth`, `kline`) — keine Credential-Header
+(je Request getestet), `privateCalls === 0`. `PrivateClient` bleibt für die
+Order-Ausführung über die Broker-Factory getrennt.
+
+---
 
 ## [1.25.0] — 2026-08-29 · Markt-Daten-Sync-Pfad (nachträglich PR #33)
 
