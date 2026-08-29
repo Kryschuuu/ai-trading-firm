@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.24.1** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.25.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
