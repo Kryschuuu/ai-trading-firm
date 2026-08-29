@@ -41,15 +41,14 @@ const instrument: MarketInstrument = {
 
 function seedStore(store: HistoricalStore): void {
   let close = 60_000;
+  const bars = [];
   for (let i = 0; i < 50; i++) {
     close = Math.round(close * (1 + (i % 5 === 0 ? 0.001 : -0.0004)));
-    store.append(
-      [{ time: 1_700_000_000_000 + i * 60_000, open: close, high: close + 10, low: close - 10, close, volume: 1000 }],
-      instrument.id,
-      { venue: "PAPER", feed: "replay-seed" },
-      new Date("2026-08-20T00:00:00.000Z")
-    );
+    bars.push({ time: 1_700_000_000_000 + i * 3_600_000, open: close, high: close + 10, low: close - 10, close, volume: 1000 });
   }
+  // Replay/Backtest läuft auf dem Analyse-Timeframe (1h) — die Bars werden
+  // explizit als 1h persistiert (Pflicht-Parameter).
+  store.append(bars, instrument.id, { venue: "PAPER", feed: "replay-seed" }, "1h", new Date("2026-08-20T00:00:00.000Z"));
 }
 
 /**
@@ -59,7 +58,7 @@ function seedStore(store: HistoricalStore): void {
 function runBacktest(store: HistoricalStore, seed: number, over: Record<string, unknown> = {}): string {
   const sim = new FillSimulator({ ...loadSimulatorConfig({}), seed, ...over });
   const lines: string[] = [];
-  const candles = store.query({ instrumentId: instrument.id });
+  const candles = store.query({ instrumentId: instrument.id, timeframe: "1h" });
   for (const c of candles) {
     const spread = 0.0004;
     const half = spread / 2;

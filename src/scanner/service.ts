@@ -14,7 +14,12 @@
  * ein Ergebnis über {@link setScannerResultForTests}.
  */
 
-import { HistoricalStore } from "@/lib/marketdata/historicalStore";
+import {
+  DEFAULT_ANALYSIS_TIMEFRAME,
+  HistoricalStore,
+  LEGACY_UNKNOWN,
+  type SupportedTimeframe,
+} from "@/lib/marketdata/historicalStore";
 import type { MarketCandle } from "@/lib/marketdata/types";
 import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
@@ -43,9 +48,9 @@ export function loadAllInstruments(limit = MAX_SERVICE_INSTRUMENTS): MarketInstr
  * Shorter intervals stay in the store for other consumers; mixing them here
  * would corrupt lookbacks (trend/drawdown periods assume a single interval).
  */
-export const SCANNER_CANDLE_TIMEFRAME = "1h";
+export const SCANNER_CANDLE_TIMEFRAME: SupportedTimeframe = DEFAULT_ANALYSIS_TIMEFRAME;
 
-const TIMEFRAME_PREFERENCE = ["1h", "30m", "15m", "5m"] as const;
+const TIMEFRAME_PREFERENCE: readonly SupportedTimeframe[] = ["1h", "4h", "30m", "15m", "5m"];
 
 /**
  * Datenanbindung auf Basis des Historical Store: die NDJSON-Datei wird
@@ -54,10 +59,15 @@ const TIMEFRAME_PREFERENCE = ["1h", "30m", "15m", "5m"] as const;
  * Der Scanner ruft niemals den Sync-Service auf — er liest
  * ausschließlich die (ggf. zuvor vom Sync-Job befüllte) lokale Datei.
  * Kein Netzwerk, keine DB, kein LLM.
+ *
+ * Über `readAll()` (Wartungs-/Scanner-Zugriff) werden ALLE Timeframes
+ * geladen; je Instrument wird deterministisch eine Reihe ausgewählt
+ * (längste bevorzugte Periodizität, danach Legacy-Fallback). Bereits im
+ * Store deduplizierte Einträge sind hier eindeutig.
  */
 export function historicalStoreProvider(store: HistoricalStore, benchmarkInstrumentId: string): ScanDataProvider {
-  const raw = new Map<string, { timeframe?: string; candle: MarketCandle }[]>();
-  for (const e of store.query()) {
+  const raw = new Map<string, { timeframe: SupportedTimeframe | typeof LEGACY_UNKNOWN; candle: MarketCandle }[]>();
+  for (const e of store.readAll()) {
     const list = raw.get(e.instrumentId) ?? [];
     list.push({
       timeframe: e.timeframe,
@@ -79,13 +89,21 @@ export function historicalStoreProvider(store: HistoricalStore, benchmarkInstrum
 }
 
 function pickTimeframe(
-  rows: { timeframe?: string; candle: MarketCandle }[],
+  rows: { timeframe: SupportedTimeframe | typeof LEGACY_UNKNOWN; candle: MarketCandle }[],
 ): MarketCandle[] {
   for (const tf of TIMEFRAME_PREFERENCE) {
     const subset = rows.filter((r) => r.timeframe === tf).map((r) => r.candle);
     if (subset.length) return subset;
   }
-  return rows.filter((r) => !r.timeframe).map((r) => r.candle);
+  // Letzter Ausweg: gemischte andere Timeframes nach Präferenz, dann Legacy.
+  const tagged = rows.filter((r) => r.timeframe !== LEGACY_UNKNOWN);
+  if (tagged.length) {
+    for (const r of tagged) {
+      const subset = rows.filter((x) => x.timeframe === r.timeframe).map((x) => x.candle);
+      if (subset.length) return subset;
+    }
+  }
+  return rows.filter((r) => r.timeframe === LEGACY_UNKNOWN).map((r) => r.candle);
 }
 
 /** Optionen einer Service-Instanz (alles injizierbar ⇒ testbar). */

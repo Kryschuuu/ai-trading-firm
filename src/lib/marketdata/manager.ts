@@ -175,11 +175,15 @@ export class MarketDataManager {
 
     this.activeSource = result.activeFeed;
     this.cache.set(instrument.id, result.snapshot);
-    // Append-only in den Historical Store (Provenienz = Feed).
+    // Append-only in den Historical Store (Provenienz = Feed). Snapshot-Kerzen
+    // sind Einzel-Ticks (keine Aggregationsstufe) → als "1m" markiert; die
+    // timeframe ist Teil des logischen Schlüssels und Pflicht-Parameter.
     this.store.append(
       [candleFromSnapshot(result.snapshot)],
       instrument.id,
-      { venue: result.snapshot.venue, feed: result.snapshot.feed }
+      { venue: result.snapshot.venue, feed: result.snapshot.feed },
+      "1m",
+      new Date(result.snapshot.ts),
     );
     return result.snapshot;
   }

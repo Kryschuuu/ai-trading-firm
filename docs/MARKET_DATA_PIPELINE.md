@@ -1,7 +1,8 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.25.3** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> Code-Version **1.26.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> (Historien-Migration: `npm run history:migrate`)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -129,20 +130,81 @@ Pro Instrument und Timeframe **N × candle**:
 | `30m` | 150 |
 | `1h` | 150 |
 
-Kerzen landen append-only in `data/history/candles.ndjson` mit Provenienz
-`{ venue, feed: "<VENUE>:rest" }` und Feld `timeframe`. Der Scanner liest
-danach bevorzugt `1h` (sonst 30m → 15m → 5m → untagged Altbestand).
+Kerzen landen in `data/history/candles.ndjson` mit Provenienz
+`{ venue, feed: "<VENUE>:rest" }` und **verpflichtendem** Feld `timeframe`.
+Seit Schema-Version **v2** (1.26.0) ist `timeframe` Teil des logischen
+Primärschlüssels (`instrumentId + timeframe + ts`); der Store dedupliziert
+deterministisch (jüngstes `fetchedAt` gewinnt). Der Scanner liest danach
+bevorzugt `1h` (Präferenz `1h → 4h → 30m → 15m → 5m`, danach Legacy-Fallback).
 
 ## 5. Persistence
 
 | Senke | Datei | Mutation |
 | --- | --- | --- |
 | Instrument-Registry | `data/universe/instruments.ndjson` | `registry.upsert(..., "sync:<VENUE>")` |
-| Historical Store | `data/history/candles.ndjson` | `history.append(..., timeframe, now)` |
+| Historical Store | `data/history/candles.ndjson` | `history.append(candles, id, provenance, timeframe, now)` |
 | Universe-Audit | `data/universe/audit-log.ndjson` | ein Eintrag je mutierendem Upsert |
 
 Keine PostgreSQL-Pflicht. Kein Private-Ledger. `/api/markets` bleibt **read-only**
 und triggert `syncVenue()` nicht.
+
+### 5.1 Historical-Store-Schema (v2, seit 1.26.0)
+
+Jede Zeile ist ein NDJSON-Datensatz mit Schema-Version `"v": 2`:
+
+```json
+{"v":2,"instrumentId":"BITUNIX:BTCUSDT","venue":"BITUNIX","feed":"BITUNIX:rest",
+ "timeframe":"1h","ts":1700000000000,"open":100,"high":101,"low":99,
+ "close":100.5,"volume":1234,"fetchedAt":"2026-08-29T00:00:00.000Z"}
+```
+
+* **Logischer Primärschlüssel:** `instrumentId + timeframe + ts`.
+* **`timeframe` ist Pflicht** — in `HistoricalCandleEntry`, im
+  `append(candles, instrumentId, provenance, timeframe, now)`-Aufruf und im
+  `query({ instrumentId, timeframe, from?, to?, limit? })`-Filter. Ein
+  Timeframe-freier Zugriff wirft (Compile + Runtime-Guard), weil er Kerzen
+  unterschiedlicher Periodizität mischen und jede EMA/Momentum/Volatilität
+  unbemerkt verfälschen würde.
+* **Deduplizierung:** Bei Schlüsselkollision gewinnt der Eintrag mit dem
+  **jüngsten `fetchedAt`**; bei Gleichstand der zuletzt gelesene.
+  `append()` liefert `{ written, deduplicated }`.
+* **Ergebnisreihenfolge:** `ts` aufsteigend; `limit` liefert die letzten N
+  Bars (jüngste), wieder aufsteigend sortiert. `from`/`to` sind inklusiv.
+* **Größenkontrolle:** optionales `maxBarsPerSeries` (Default **5000**),
+  Kompaktierung behält je Reihe die jüngsten Bars.
+* **Robustheit:** Der Loader arbeitet puffer-/streambasiert (kein OOM bei
+  großen Historien); kaputte Teilzeilen werden geloggt und übersprungen
+  (kein Prozessabbruch). Schreibvorgänge laufen atomar über
+  `tmp` + `rename`, Dateirechte `0600`.
+* **Sicherheit:** `instrumentId`/`timeframe`/`feed` werden nie in Dateipfade
+  interpoliert (Store schreibt ausschließlich in den konfigurierten Pfad);
+  Zeilen entstehen per `JSON.stringify` (keine Zeilen-Injection); Werte werden
+  validiert (`Number.isFinite` für OHLCV, `ts` positive Ganzzahl, Timeframe
+  gegen Allowlist); geparste Zeilen werden feldweise gemappt (kein Spread,
+  `__proto__`/`constructor` werden verworfen).
+
+### 5.2 Legacy-Schema (v1) und Migration
+
+Zeilen **ohne** `timeframe` (Altbestand vor 1.26.0) werden im Runtime-Loader
+mit dem Marker `LEGACY_UNKNOWN` versehen, **gezählt** und über
+Timeframe-Queries **nie** ausgeliefert. Beim ersten Fund gibt es eine
+**einmalige Warnung** mit Migrationshinweis. Die Migration ist destruktiv
+scheinfrei, sichert vorher und ist idempotent:
+
+```bash
+# 1. trocken prüfen (schreibt nichts, kein Backup)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m --dry-run
+
+# 2. migrieren (Backup candles.ndjson.bak-<ISO>, chmod 600)
+npm run history:migrate -- --file=data/history/candles.ndjson \
+  --assume-timeframe=15m
+```
+
+`--assume-timeframe` ist **Pflicht**, sobald die Datei Legacy-Zeilen enthält:
+5m- und 1h-Bars sind im alten Schema ununterscheidbar, ein erratener Wert
+würde die Reihen dauerhaft falsch beschriften. Das Skript rät nie.
+Vollständige Schema-/Schlüssel-/Rollback-Doku: [`docs/HISTORY.md`](HISTORY.md).
 
 ## 6. Readiness
 

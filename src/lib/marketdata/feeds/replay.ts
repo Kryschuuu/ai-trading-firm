@@ -9,19 +9,31 @@
  * Gleicher Store-Stand → identische Kursfolge → identische Fills (Golden-Test).
  */
 import type { MarketInstrument } from "../../../universe/types";
-import type { HistoricalCandleEntry, HistoricalStore } from "../historicalStore";
+import {
+  DEFAULT_ANALYSIS_TIMEFRAME,
+  type HistoricalCandleEntry,
+  type HistoricalStore,
+  type SupportedTimeframe,
+} from "../historicalStore";
 import { FeedNotSupportedError, type MarketCandle, type MarketDataSource, type MarketFeed, type MarketSnapshot } from "../types";
 import { normalizeSnapshot, type RawSnapshotInput } from "../normalization";
 
 export interface ReplayFeedOptions {
   /** Relativer Default-Spread für Bid/Ask-Ableitung. */
   defaultSpread?: number;
+  /**
+   * Abzuspielende Periodizität (Pflicht-Query gegen den Store). Default: der
+   * Analyse-Timeframe (`1h`), damit Replay/Backtest niemals Timeframes
+   * mischen.
+   */
+  timeframe?: SupportedTimeframe;
 }
 
 export class ReplayFeed implements MarketFeed {
   readonly id = "replay";
   readonly source: MarketDataSource = "replay";
   private readonly defaultSpread: number;
+  private readonly timeframe: SupportedTimeframe;
   private readonly cursors = new Map<string, number>();
 
   constructor(
@@ -29,10 +41,11 @@ export class ReplayFeed implements MarketFeed {
     opts: ReplayFeedOptions = {}
   ) {
     this.defaultSpread = opts.defaultSpread ?? 0.0004;
+    this.timeframe = opts.timeframe ?? DEFAULT_ANALYSIS_TIMEFRAME;
   }
 
   private entriesFor(instrument: MarketInstrument): HistoricalCandleEntry[] {
-    return this.store.query({ instrumentId: instrument.id });
+    return this.store.query({ instrumentId: instrument.id, timeframe: this.timeframe });
   }
 
   /**

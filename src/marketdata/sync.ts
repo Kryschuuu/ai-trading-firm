@@ -7,7 +7,11 @@
  * pure function over already-persisted local data.
  */
 
-import type { HistoricalStore } from "../lib/marketdata/historicalStore";
+import {
+  isSupportedTimeframe,
+  type HistoricalStore,
+  type SupportedTimeframe,
+} from "../lib/marketdata/historicalStore";
 import type { InstrumentRegistry } from "../universe/registry";
 import { sanitizeSyncErrorMessage, sanitizeVenue, UnsupportedVenueError } from "./errors";
 import { calculateRelativeSpread } from "./spread";
@@ -49,14 +53,15 @@ export interface MarketDataSyncOptions {
   now?: () => Date;
   rateLimiter?: RateLimiter;
   candleLimit?: number;
-  timeframes?: readonly string[];
+  /** Zu backfillende Periodizitäten; alle Werte müssen in der Timeframe-Allowlist sein. */
+  timeframes?: readonly SupportedTimeframe[];
 }
 
 export class MarketDataSyncService {
   private readonly now: () => Date;
   private readonly rateLimiter?: RateLimiter;
   private readonly candleLimit: number;
-  private readonly timeframes: readonly string[];
+  private readonly timeframes: readonly SupportedTimeframe[];
 
   constructor(
     private readonly registry: InstrumentRegistry,
@@ -67,7 +72,16 @@ export class MarketDataSyncService {
     this.now = options.now ?? (() => new Date());
     this.rateLimiter = options.rateLimiter;
     this.candleLimit = options.candleLimit ?? SYNC_CANDLE_LIMIT;
-    this.timeframes = options.timeframes ?? SYNC_TIMEFRAMES;
+    const tfs = (options.timeframes ?? SYNC_TIMEFRAMES) as readonly string[];
+    for (const tf of tfs) {
+      if (!isSupportedTimeframe(tf)) {
+        throw new Error(
+          `MarketDataSyncService: timeframe "${tf}" ist nicht in der Allowlist ` +
+            `(5m, 15m, 30m, 1h, ...). Ein ungültiger Timeframe würde Reihen mischen.`,
+        );
+      }
+    }
+    this.timeframes = tfs as readonly SupportedTimeframe[];
   }
 
   // Orchestriert Discovery → Enrichment → Backfill für eine Venue.
@@ -188,14 +202,14 @@ export class MarketDataSyncService {
           await this.limit();
           const candles = await adapter.getCandles(symbol, timeframe, this.candleLimit);
           const rows = Array.isArray(candles) ? candles : [];
-          const written = this.history.append(
+          const result = this.history.append(
             rows,
             instrumentId ?? `${key}:${symbol}`,
             { venue: key, feed: `${key}:rest` },
             timeframe,
             this.now(),
           );
-          candlesByTimeframe[timeframe] = (candlesByTimeframe[timeframe] ?? 0) + written;
+          candlesByTimeframe[timeframe] = (candlesByTimeframe[timeframe] ?? 0) + result.written;
         } catch (e) {
           errors.push({
             stage: "candles",

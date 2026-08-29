@@ -1,0 +1,93 @@
+/**
+ * Migration: Historical Store v1 (ohne `timeframe`) → v2 (mit `timeframe`).
+ *
+ *   npm run history:migrate -- --file=data/history/candles.ndjson \
+ *     --assume-timeframe=15m [--dry-run]
+ *
+ * WARUM --assume-timeframe EXPLIZIT sein muss:
+ *   Im alten Schema gibt es kein `timeframe`-Feld. 5m- und 1h-Kerzen desselben
+ *   Instruments sind in der Datei ununterscheidbar. Würde das Skript raten
+ *   (z.B. "immer 15m"), bekämen echte 5m-Reihen den falschen Schlüssel und
+ *   würden jede EMA/Momentum/Volatilität unbemerkt verfälschen. Deshalb wird
+ *   der Timeframe für Altbestand bewusst vom Bediener verlangt — abgebrochen
+ *   wird, sobald eine Legacy-Zeile ohne das Flag gefunden wird.
+ *
+ * Ablauf: Backup (candles.ndjson.bak-<ISO>) → parsen → timeframe zuweisen →
+ * dedup (jüngstes fetchedAt gewinnt) → sortieren (instrumentId, timeframe, ts)
+ * → atomar schreiben. Idempotent: ein zweiter Lauf ändert nichts.
+ *
+ * Siehe docs/HISTORY.md (Schema, Schlüssel, Dedup-Regel, Rollback).
+ */
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { isSupportedTimeframe } from "../src/lib/marketdata/historicalStore";
+import { formatMigrationReport, migrateHistoryFile } from "../src/history/migration";
+
+const HELP = `history:migrate — Historical Store v1 → v2 (timeframe-Dimension)
+
+Verwendung:
+  npm run history:migrate -- --file=<pfad> --assume-timeframe=<tf> [--dry-run]
+
+Optionen:
+  --file=<pfad>            Pfad zur NDJSON-Datei (Default: data/history/candles.ndjson)
+  --assume-timeframe=<tf>  Timeframe, der ALTEN Zeilen ohne timeframe zugewiesen
+                           wird. Erlaubt: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 5d.
+                           PFLICHT, sobald die Datei Legacy-Zeilen enthält.
+  --dry-run                Nur Report ausgeben, nichts schreiben, kein Backup.
+  --help                   Diese Hilfe.
+
+Warum --assume-timeframe explizit sein muss:
+  Alte Zeilen tragen kein timeframe-Feld. 5m- und 1h-Bars sind in der Datei
+  ununterscheidbar; ein erratener Wert würde die Reihen dauerhaft falsch
+  beschriften. Das Skript rät nie — es bricht mit Erklärung ab, wenn das Flag
+  fehlt.
+
+Sicherheit:
+  - Vor dem Schreiben wird ein Backup candles.ndjson.bak-<ISO> (chmod 600)
+    angelegt; schlägt das fehl, wird abgebrochen (Original bleibt unverändert).
+  - Die Migration ist idempotent: ein zweiter Lauf ändert nichts.
+  - Rollback: das Backup über die Zieldatei zurückspielen (siehe docs/HISTORY.md).
+`;
+
+function main(): void {
+  const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stdout.write(HELP);
+    return;
+  }
+
+  const fileArg = args.find((a) => a.startsWith("--file="))?.slice("--file=".length);
+  const tfArg = args.find((a) => a.startsWith("--assume-timeframe="))?.slice("--assume-timeframe=".length);
+  const dryRun = args.includes("--dry-run");
+
+  const file = path.resolve(fileArg ?? path.join(process.cwd(), "data", "history", "candles.ndjson"));
+
+  if (!existsSync(file)) {
+    console.error(`[history:migrate] Datei nicht gefunden: ${file}`);
+    console.error("[history:migrate] Nichts zu migrieren (es wurde keine Datei verändert).");
+    process.exit(0);
+  }
+
+  if (tfArg !== undefined && !isSupportedTimeframe(tfArg)) {
+    console.error(
+      `[history:migrate] --assume-timeframe "${tfArg}" ist ungültig. Erlaubt: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 5d.`,
+    );
+    process.exit(2);
+  }
+
+  try {
+    const report = migrateHistoryFile({
+      file,
+      assumeTimeframe: tfArg as never,
+      dryRun,
+    });
+    for (const line of formatMigrationReport(report)) console.log(line);
+    if (report.rejected.length > 0) process.exitCode = 1;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[history:migrate] abgebrochen: ${msg}`);
+    process.exit(1);
+  }
+}
+
+main();
