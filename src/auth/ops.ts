@@ -18,6 +18,8 @@
 import { BROKER_VENUE_IDS } from "@/contracts/broker";
 import { evaluateLiveOrder } from "@/live-gate/enforcer";
 import { APP_VERSION } from "@/lib/version";
+import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
+import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
 import {
   type OpsHealth,
   type OpsPayload,
@@ -182,12 +184,28 @@ export function summarizeSections(sections: readonly OpsSection[]): OpsHealth {
 }
 
 /**
+ * Additive Payload-Erweiterungen (OPS-010, v1.27.0).
+ *
+ * Optionaler dritter Parameter von {@link buildOpsPayload}: Aufrufer mit zwei
+ * Argumenten (bestehende Konsumenten/Tests) verhalten sich exakt wie zuvor —
+ * das Funnel-/Sektions-Format bleibt unverändert, die Felder fehlen dann als
+ * `null` (JSON: explizit `null`, nicht weggelassen).
+ */
+export interface OpsPayloadExtras {
+  /** Market-Data-Readiness-Report (`null` bei fail-soft-Fehlschlag der Aggregation). */
+  marketDataReadiness?: MarketDataReadinessReport | null;
+  /** Eligibility-Diagnose (gedeckelt; `total` zählt voll). */
+  eligibilityDiagnostics?: EligibilityDiagnosticsSummary | null;
+}
+
+/**
  * Setzt Katalog und Ist-Daten zum Antwort-Payload zusammen.
  * Rein und synchron — Testbarkeit ohne Datenbank/Netzwerk.
  */
 export function buildOpsPayload(
   actor: Actor | null,
-  data: Readonly<Partial<Record<OpsSectionId, OpsSectionData>>> = {}
+  data: Readonly<Partial<Record<OpsSectionId, OpsSectionData>>> = {},
+  extras: OpsPayloadExtras = {}
 ): OpsPayload {
   const live = aggregateLiveGateStatus();
   const sections: OpsSection[] = OPS_SECTIONS.map((definition) => {
@@ -212,5 +230,7 @@ export function buildOpsPayload(
     actor: actor ? toPublicActor(actor) : null,
     sections,
     health: summarizeSections(sections),
+    marketDataReadiness: extras.marketDataReadiness ?? null,
+    eligibilityDiagnostics: extras.eligibilityDiagnostics ?? null,
   };
 }

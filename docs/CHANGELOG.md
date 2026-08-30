@@ -20,6 +20,103 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.27.0] — 2026-08-30 · feat(operations): strukturierte Market-Data-Readiness-Diagnose (OPS-010)
+
+**Nacharbeit zum Code-Review (CODE-REVIEW-SCANNER, Sections 14, 22, 26).**
+Das Operations Center diagnostizierte den Backend-Zustand korrekt, zeigte
+aber nur den **Endzustand** des Scanner-Funnels („Gescannt 26, Eligible 0“)
+— nicht die granulare Pipeline-Diagnose entlang Discovery → Enrichment →
+Backfill → Readiness. P2 (Diagnose-Erschwernis, kein funktionaler Bug).
+Rein additive Änderung: bestehende Sektionen, Funnel-Metriken und das
+„erste Regel gewinnt“-Routing des Eignungsfilters bleiben unverändert.
+
+### Added — Backend/Aggregation
+
+* **Neu `src/ops/marketDataReadiness.ts`** — `MarketDataReadinessReport`
+  (`venue`, `registryCount`, `discoveredCount`, `dataReadyCount`,
+  `warmingCount`, `candlesLoaded`, `candlesRequired`, `tickerReadyCount`,
+  `spreadReadyCount`, `scannerReady`) und `collectMarketDataReadiness()`:
+  reine Aggregation aus Instrument-Registry (`size`, `lastSeen`,
+  `volume24h`, `spread`), Historical Store (Kerzenzahlen im
+  Scanner-Timeframe über denselben Provider-Pfad wie der Scan) und
+  `requiredWarmupCandles(config)`. **Kein Netzwerk-I/O.**
+  - `discoveredCount`: `lastSeen` ≤ 24 h (`DISCOVERY_FRESHNESS_WINDOW_MS`).
+  - `dataReadyCount`: Kerzen ≥ Bedarf (Grenzwert = ready) UND Ticker UND
+    Spread bekannt; `warmingCount = registryCount − dataReadyCount`;
+    `scannerReady = dataReadyCount > 0`.
+  - Test-Hook `setMarketDataReadinessStoreForTests()` (Muster wie
+    `setScannerServiceForTests`) für hermetische Integrationstests.
+* **Neu `src/scanner/eligibilityDiagnostics.ts`** —
+  `buildEligibilityDiagnostics()`: reichert `ScanResult.rejections` mit dem
+  vollständigen Datenzustand (`candles`, `volume24h`, `spread`) an
+  (Review Punkt 22). Aus „Instrument ungeeignet (`max-spread`)“ wird die
+  Data-Quality-Aussage „Spread wurde nicht geladen“. Dateikopf fixiert:
+  ausschließlich Monitoring/Debugging; Routing unverändert. Ausgabe auf
+  `MAX_ELIGIBILITY_DIAGNOSTICS = 50` gedeckelt, `total` vollzählig +
+  `truncated`-Flag (DoS-Schutz).
+* **`src/ops/collect.ts`** — `collectMarketDataExtras()` als Erweiterung von
+  `collectScanner()` (gleiche Scan-Config wie der angezeigte Funnel;
+  fail-soft `null` bei Aggregationsfehler).
+* **`src/auth/ops.ts`** — `buildOpsPayload(actor, data, extras?)`: optionaler
+  dritter Parameter; 2-Argument-Aufrufe verhalten sich exakt wie zuvor.
+
+### Added — API & UI (kein Breaking Change)
+
+* `GET /api/ops`: neue optionale Felder `marketDataReadiness` und
+  `eligibilityDiagnostics` (jeweils `null` bei fail-soft-Fehlschlag).
+  Sektionen/Funnel unverändert (Integrationstest wacht über
+  Metrik-Labels und Sektions-IDs).
+* `src/components/ops/OperationsCenterPanel.tsx`: neue Karte **Market Data**
+  direkt neben der Scanner-Karte — Zeilenformat exakt nach Review
+  (Registry / Discovered / Data-ready / Warming / Candles X/Y /
+  Ticker-ready / Spread-ready / Scanner-ready YES|NO) inkl. der
+  vorgegebenen Tooltips („Scanner-ready: NO“, „Candles 0/61“) und
+  einklappbarer Ablehnungs-Diagnose (Regel, Data-Quality-Kennzeichnung,
+  Datenzustand je Instrument).
+
+### Added — Dokumentation
+
+* **Neu `docs/OPERATIONS_CENTER.md`** — Walkthrough „Wie diagnostiziere ich
+  einen leeren Scanner-Funnel?“ (Registry → Discovered → Candles →
+  Ticker-/Spread-ready → Scanner-ready), Diagnose-Lesart, API-Vertrag,
+  Security/Performance; im Doku-Katalog (`src/lib/docsCatalog.ts`) und in
+  `docs/README.md` registriert.
+* `docs/MARKET_DATA_PIPELINE.md` §6 — Feldtabelle des
+  `MarketDataReadinessReport` (exakte Zählregeln) + Diagnose-Format.
+* `docs/help/ops.help.json` v3 — Feldhilfe `section.marketDataReadiness`
+  (3-Ebenen-Schema).
+
+### Tests
+
+* **Unit (`tests/marketDataReadiness.test.ts`, 11 Tests):** leere Registry
+  (alle Zähler 0, `scannerReady: false`); Regression Review-Ist-Zustand
+  (26 Instrumente, 0 Kerzen → `registryCount 26, dataReadyCount 0,
+  warmingCount 26, candlesLoaded 0, candlesRequired 61, scannerReady
+  false`); Ziel-Zustand (180 Instrumente mit 150 Kerzen → `scannerReady
+  true`, Summen korrekt); Boundary (`candleCount ===
+  requiredWarmupCandles(config)` gilt als ready, −1 als warming);
+  Frische-Fenster; Diagnose `spread: null` → `{ rule: "max-spread",
+  data: { candles 150, volume24h 2840000000, spread: null } }` im
+  Review-Format; Data-Quality ≠ fachlich; DoS-Deckel; Additivität von
+  `buildOpsPayload`; SSR-Render der Market-Data-Karte.
+* **Integration (`tests/opsReadiness.integration.test.ts`):** simulierter
+  Sync-Durchlauf (Registry-Upsert + Historical-Store-Backfill wie
+  `syncVenue`) → `GET /api/ops` → Report konsistent mit
+  Registry-/HistoricalStore-Zustand, Funnel-Format unverändert, Diagnose
+  deckt die 26 Seed-Ablehnungen (`min-candles`, Data-Quality), Idempotenz,
+  Secret-Scan über den Payload.
+
+### Security
+
+* Report enthält nur aggregierte Zähler; Diagnose nur Instrument-IDs und
+  öffentliche Marktmetriken — keine API-Keys, keine Adapter-Konfiguration,
+  keine Pfade/Hostnamen (Payload-Secret-Scan im Integrationstest).
+* Kein Netzwerk-I/O in der Aggregation; lineare Kosten, Antwort gedeckelt
+  (`MAX_SERVICE_INSTRUMENTS`, `MAX_ELIGIBILITY_DIAGNOSTICS`) — keine
+  DoS-Angriffsfläche.
+
+**Refs:** CODE-REVIEW-SCANNER.md Sections 14, 22, 26 · **Version 1.27.0**.
+
 ## [1.26.3] — 2026-08-30 · Nacharbeit: Marktdaten-Fehler-Doku & Sync-Klassifikation (MDERR-006)
 
 **Nacharbeit zu v1.26.1 (`fix(marketdata): stop swallowing fetch failures`).**

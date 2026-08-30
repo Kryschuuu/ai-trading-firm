@@ -35,10 +35,17 @@ import { verifyAuditChain } from "@/live-gate/audit";
 import { liveGateConfig } from "@/live-gate/config";
 import { PORTFOLIO_CONFIG_VERSION } from "@/portfolio/config";
 import { getModelRouter } from "@/routing";
-import { getScannerService } from "@/scanner/service";
+import { buildEligibilityDiagnostics, type EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
+import { getScannerService, loadAllInstruments } from "@/scanner/service";
 import { getRegistry } from "@/universe";
 import { eq, desc, sql } from "drizzle-orm";
 
+import {
+  collectMarketDataReadiness,
+  marketDataReadinessStore,
+  scannerCandleCounts,
+  type MarketDataReadinessReport,
+} from "./marketDataReadiness";
 import {
   OPS_SECTION_IDS,
   type OpsItem,
@@ -340,6 +347,63 @@ function collectScanner(): Draft {
               ? "Trichter leer: die Eignungsfilter greifen (Markt/Kosten), Historie ist vollständig geladen."
               : null,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2a. Market Data Readiness + Eligibility-Diagnose (OPS-010) — Erweiterung
+//     von collectScanner() um die Pipeline-Stufen-Diagnose
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Additive Ops-Extras neben dem (unveränderten) Funnel der Scanner-Sektion. */
+export interface OpsMarketDataExtras {
+  /** Strukturierter Readiness-Report (Registry → … → Scanner-ready). */
+  report: MarketDataReadinessReport;
+  /** Ablehnungs-Diagnose mit vollständigem Datenzustand (gedeckelt). */
+  diagnostics: EligibilityDiagnosticsSummary;
+}
+
+/**
+ * Aggregiert die Market-Data-Diagnose aus **vorhandenen** Zuständen —
+ * Instrument-Registry, Historical Store und der Konfiguration des letzten
+ * Scans. Kein Netzwerk-I/O: ein Sync wird hier weder angestoßen noch
+ * bewertet; sichtbar wird nur, was Discovery/Enrichment/Backfill zuvor
+ * persistiert haben.
+ *
+ * Fehlerverhalten identisch zu den Sektions-Kollektoren: fail-soft. Bei einem
+ * Lesefehler wird `null` geliefert — das Cockpit bleibt vollständig lesbar,
+ * der Readiness-Bereich erscheint dann nicht (explizit als `null` im Payload,
+ * nicht als „grün“).
+ */
+export function collectMarketDataExtras(): OpsMarketDataExtras | null {
+  try {
+    const scan = getScannerService().getScan();
+    const config = scan.config; // exakt die Faktor-Konfiguration des angezeigten Scans
+    const registry = getRegistry();
+    const instruments = loadAllInstruments(); // gekappt (MAX_SERVICE_INSTRUMENTS) — DoS-Schutz
+    const candleCounts = scannerCandleCounts(
+      marketDataReadinessStore(),
+      instruments,
+      config.factors.correlation.benchmarkInstrumentId,
+    );
+    const report = collectMarketDataReadiness({
+      instruments,
+      candleCounts,
+      config,
+      registrySize: registry.size,
+    });
+    const byId = new Map(instruments.map((instrument) => [instrument.id, instrument] as const));
+    const diagnostics = buildEligibilityDiagnostics(scan.rejections, (instrumentId) => {
+      const instrument = byId.get(instrumentId);
+      return {
+        candles: candleCounts.get(instrumentId) ?? 0,
+        volume24h: instrument?.volume24h ?? null,
+        spread: instrument?.spread ?? null,
+      };
+    });
+    return { report, diagnostics };
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

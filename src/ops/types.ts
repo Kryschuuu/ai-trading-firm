@@ -14,6 +14,8 @@
  *   `unavailable` — Quelle nicht erreichbar (DB/Dateisystem/Provider)
  */
 import type { PublicActor } from "@/auth/types";
+import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
+import type { MarketDataReadinessReport } from "./marketDataReadiness";
 
 /** Die zehn Sektionen des Operations Centers (Reihenfolge = Anzeige). */
 export const OPS_SECTION_IDS = [
@@ -117,6 +119,19 @@ export type OpsPayload = {
   actor: PublicActor | null;
   sections: OpsSection[];
   health: OpsHealth;
+  /**
+   * Additiv seit v1.27.0 (OPS-010): strukturierter Market-Data-Readiness-Report
+   * (Registry/Discovered/Data-ready/Warming/Candles/Ticker/Spread/Scanner-ready).
+   * `null`, wenn die Aggregation fail-soft fehlschlug — das Funnel-Format der
+   * Sektionen bleibt davon unberührt (kein Breaking Change).
+   */
+  marketDataReadiness?: MarketDataReadinessReport | null;
+  /**
+   * Additiv seit v1.27.0 (OPS-010): Eligibility-Diagnose je abgelehntem
+   * Instrument mit vollständigem Datenzustand (Monitoring; das
+   * „erste Regel gewinnt“-Routing ist unverändert). Gedeckelt, `total` zählt voll.
+   */
+  eligibilityDiagnostics?: EligibilityDiagnosticsSummary | null;
 };
 
 /** Typwächter für die zehn Sektions-IDs. */

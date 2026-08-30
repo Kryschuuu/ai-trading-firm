@@ -25,6 +25,7 @@ export * from "./regime";
 export * from "./factors";
 export * from "./ranker";
 export * from "./filters";
+export * from "./eligibilityDiagnostics";
 export * from "./funnel";
 export * from "./pipeline";
 export * from "./weekly";

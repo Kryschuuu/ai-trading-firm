@@ -18,7 +18,7 @@
 import { buildOpsPayload } from "@/auth/ops";
 import type { Actor } from "@/auth/types";
 
-import { collectSectionData, MAX_SECTION_ITEMS } from "./collect";
+import { collectMarketDataExtras, collectSectionData, MAX_SECTION_ITEMS } from "./collect";
 import { isOpsSectionId, OPS_SECTION_IDS, OPS_SECTION_STATUSES } from "./types";
 import type { OpsPayload } from "./types";
 
@@ -36,15 +36,30 @@ export type {
 } from "./types";
 
 export { OPS_SECTION_IDS, OPS_SECTION_STATUSES, isOpsSectionId };
-export { collectSectionData, MAX_SECTION_ITEMS };
+export { collectMarketDataExtras, collectSectionData, MAX_SECTION_ITEMS };
+export type { OpsMarketDataExtras } from "./collect";
+export {
+  collectMarketDataReadiness,
+  DISCOVERY_FRESHNESS_WINDOW_MS,
+  MULTI_VENUE_LABEL,
+  type MarketDataReadinessInput,
+  type MarketDataReadinessReport,
+} from "./marketDataReadiness";
+export type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 
 /**
  * Baut den vollständigen Operations-Center-Payload.
  *
  * Reihenfolge: erst alle Kollektoren parallel (fail-soft je Sektion), dann
- * Zusammenführen mit dem Katalog aus `src/auth/ops`.
+ * Zusammenführen mit dem Katalog aus `src/auth/ops`. Die Market-Data-Readiness
+ * wird additiv angehängt (OPS-010): schlägt ihre Aggregation fehl, steht
+ * `null` im Payload — Sektionen und Funnel bleiben unverändert lesbar.
  */
 export async function buildOperationsCenter(actor: Actor | null): Promise<OpsPayload> {
   const data = await collectSectionData();
-  return buildOpsPayload(actor, data);
+  const extras = collectMarketDataExtras();
+  return buildOpsPayload(actor, data, {
+    marketDataReadiness: extras?.report ?? null,
+    eligibilityDiagnostics: extras?.diagnostics ?? null,
+  });
 }

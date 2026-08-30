@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.26.2** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-30** ·
+> Code-Version **1.27.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
 > (Historien-Migration: `npm run history:migrate`)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
@@ -301,6 +301,63 @@ Ohne Warmup: 26 Seed-Instrumente × 0 Kerzen → Readiness `WARMING` (missing = 
 → alle `min-candles` → Eligible = Interesting = Daily = Deep = 0. Das ist kein
 Scanner-Bug, sondern fehlende Historie — und wird jetzt explizit als solche
 gemeldet statt als generische Ablehnung.
+
+### Market-Data-Readiness-Report (Operations Center, v1.27.0 / OPS-010)
+
+Der Readiness-**Zustand** (oben) bewertet nur die Kerzen-Stufe. Für die
+Root-Cause-Diagnose aggregiert das Operations Center zusätzlich den
+Zustand **entlang aller Pipeline-Stufen** (Discovery → Enrichment →
+Backfill → Readiness): `collectMarketDataReadiness()`
+(`src/ops/marketDataReadiness.ts`) berechnet aus Instrument-Registry,
+Historical Store und der Konfiguration des letzten Scans — **ohne
+Netzwerk-I/O**, reine Aggregation vorhandener Zustände — den strukturierten
+`MarketDataReadinessReport`, der als additives Feld `marketDataReadiness`
+in der Antwort von `GET /api/ops` erscheint:
+
+| Feld | Quelle / Regel |
+| --- | --- |
+| `venue` | exakt eine Venue im Bestand, sonst `"ALL"` |
+| `registryCount` | `registry.size` (Gesamtbestand) |
+| `discoveredCount` | `lastSeen` innerhalb von 24 h (`DISCOVERY_FRESHNESS_WINDOW_MS`) |
+| `dataReadyCount` | Kerzen **≥** `requiredWarmupCandles(config)` (Grenzwert gilt als ready) UND `volume24h !== null` UND `spread !== null` |
+| `warmingCount` | `registryCount − dataReadyCount` |
+| `candlesLoaded` | Summe der geladenen Kerzen über alle Registry-Instrumente (Scanner-Timeframe, dieselbe Zeitreihen-Auswahl wie der Scan); `0` ⇒ kein/fehlgeschlagener Sync |
+| `candlesRequired` | Referenzwert **je Instrument** aus `requiredWarmupCandles(config)` (Default 61) |
+| `tickerReadyCount` | `volume24h !== null` (Schritt „tickers“ gelaufen) |
+| `spreadReadyCount` | `spread !== null` (Schritt „depth“ gelaufen) |
+| `scannerReady` | `dataReadyCount > 0` |
+
+Damit ist der Engpass ohne Log-Lektüre ablesbar: `Registry 26, Discovered 26,
+Candles 0/61, Ticker-ready 0, Spread-ready 0` ⇒ Discovery lief, aber weder
+Enrichment noch Backfill → `npm run market-sync` (bzw. dessen Fehler-Manifest
+§8) prüfen. Der Schritt-für-Schritt-Walkthrough steht in
+[`docs/OPERATIONS_CENTER.md`](OPERATIONS_CENTER.md).
+
+### Eligibility-Ablehnungs-Diagnose (v1.27.0 / OPS-010)
+
+Zusätzlich wird jede Ablehnung des Eignungsfilters mit dem **vollständigen
+Datenzustand** des Instruments angereichert (`src/scanner/eligibilityDiagnostics.ts`,
+Payload-Feld `eligibilityDiagnostics`, auf 50 Einträge gedeckelt — `total`
+zählt voll). Aus „BITUNIX:BTCUSDT ist ungeeignet (`max-spread`)“ wird damit
+eine Data-Quality-Aussage mit Kontext:
+
+```json
+{
+  "instrument": "BITUNIX:BTCUSDT",
+  "eligibility": {
+    "status": "rejected",
+    "rule": "max-spread",
+    "dataQuality": true,
+    "data": { "candles": 150, "volume24h": 2840000000, "spread": null }
+  }
+}
+```
+
+Kerzen reichlich (150 ≥ 61), Volumen bekannt — aber `spread: null`: die
+Ablehnung bedeutet „**Spread wurde nicht geladen**“ (depth-Enrichment fehlt,
+§3), nicht „Markt zu teuer“. Das diagnostische Modul ändert das
+„erste Regel gewinnt“-Routing des Filters ausdrücklich **nicht** — es dient
+ausschließlich Monitoring/Debugging (siehe Dateikopf des Moduls).
 
 ## 7. Scanner execution
 
