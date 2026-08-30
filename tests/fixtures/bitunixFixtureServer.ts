@@ -23,6 +23,8 @@ export class BitunixFixtureServer {
   requests: { method: string; path: string; signed: boolean; credentialHeaders: string[] }[] = [];
   failPublic = false;
   httpStatus?: number;
+  /** Optionaler HTTP-Status nur für `/api/v1/kline` (z. B. 429 Rate-Limit-Test). */
+  klineStatus?: number;
   private server: http.Server | null = null;
 
   async start(): Promise<string> {
@@ -151,6 +153,10 @@ export class BitunixFixtureServer {
           },
         ],
       });
+      return;
+    }
+    if (path === BITUNIX_PATHS.kline && this.klineStatus) {
+      json(res, this.klineStatus, { code: this.klineStatus, msg: "rate limited", data: null });
       return;
     }
     if (path === BITUNIX_PATHS.kline) {

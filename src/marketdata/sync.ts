@@ -13,6 +13,7 @@ import {
   type SupportedTimeframe,
 } from "../lib/marketdata/historicalStore";
 import type { InstrumentRegistry } from "../universe/registry";
+import { classifyMarketDataError } from "../lib/marketDataErrors";
 import { sanitizeSyncErrorMessage, sanitizeVenue, UnsupportedVenueError } from "./errors";
 import { calculateRelativeSpread } from "./spread";
 import {
@@ -147,12 +148,7 @@ export class MarketDataSyncService {
             });
           }
         } catch (e) {
-          errors.push({
-            stage: "ticker",
-            instrumentId,
-            symbol,
-            message: sanitizeSyncErrorMessage(e),
-          });
+          errors.push(this.toSyncError("ticker", e, { instrumentId, symbol }));
         }
       }
       if (ticker) tickersEnriched += 1;
@@ -168,12 +164,7 @@ export class MarketDataSyncService {
         spread = calculateRelativeSpread(book.bids[0]?.price, book.asks[0]?.price);
         orderbooksEnriched += 1;
       } catch (e) {
-        errors.push({
-          stage: "orderbook",
-          instrumentId,
-          symbol,
-          message: sanitizeSyncErrorMessage(e),
-        });
+        errors.push(this.toSyncError("orderbook", e, { instrumentId, symbol }));
       }
 
       try {
@@ -189,12 +180,7 @@ export class MarketDataSyncService {
           `sync:${key}`,
         );
       } catch (e) {
-        errors.push({
-          stage: "upsert",
-          instrumentId,
-          symbol,
-          message: sanitizeSyncErrorMessage(e),
-        });
+        errors.push(this.toSyncError("upsert", e, { instrumentId, symbol }));
       }
 
       for (const timeframe of this.timeframes) {
@@ -211,13 +197,7 @@ export class MarketDataSyncService {
           );
           candlesByTimeframe[timeframe] = (candlesByTimeframe[timeframe] ?? 0) + result.written;
         } catch (e) {
-          errors.push({
-            stage: "candles",
-            instrumentId,
-            symbol,
-            timeframe,
-            message: sanitizeSyncErrorMessage(e),
-          });
+          errors.push(this.toSyncError("candles", e, { instrumentId, symbol, timeframe }));
         }
       }
     }
@@ -231,6 +211,32 @@ export class MarketDataSyncService {
       errors,
       durationMs: performance.now() - started,
     };
+  }
+
+  /**
+   * Isolierter Sync-Fehler mit klassifizierter Ursache (MDERR-006). Der
+   * Grund wird schon beim Abfangen bestimmt — nicht erst später aus einer
+   * redigierten Meldung rekonstruiert. Damit bleibt ein HTTP-429/5xx von
+   * `BitunixApiError.httpStatus` auch nach der Serialisierung als
+   * `RATE_LIMITED`/`UPSTREAM_5XX` erhalten.
+   */
+  private toSyncError(
+    stage: SyncError["stage"],
+    cause: unknown,
+    ctx: { instrumentId?: string; symbol?: string; timeframe?: string } = {},
+  ): SyncError {
+    const { reason, retryable, httpStatus } = classifyMarketDataError(cause);
+    const error: SyncError = {
+      stage,
+      ...(ctx.instrumentId ? { instrumentId: ctx.instrumentId } : {}),
+      ...(ctx.symbol ? { symbol: ctx.symbol } : {}),
+      ...(ctx.timeframe ? { timeframe: ctx.timeframe } : {}),
+      message: sanitizeSyncErrorMessage(cause),
+      reason,
+      retryable,
+      ...(httpStatus !== undefined ? { httpStatus } : {}),
+    };
+    return error;
   }
 
   /**
@@ -251,7 +257,7 @@ export class MarketDataSyncService {
         if (t?.symbol) out.set(String(t.symbol).toUpperCase(), t);
       }
     } catch (e) {
-      errors.push({ stage: "ticker", message: sanitizeSyncErrorMessage(e) });
+      errors.push(this.toSyncError("ticker", e));
     }
     return out;
   }

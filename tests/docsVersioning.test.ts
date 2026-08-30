@@ -98,3 +98,32 @@ test("Migrations-CLI schreibt nur mit --apply (Dry-Run als Default)", () => {
   assert.match(cli, /const dryRun = args\.includes\("--dry-run"\) \|\| !apply/, "ohne --apply muss der Dry-Run greifen");
   assert.ok(cli.includes("docs/MIGRATION_TIMEFRAME_FIELD.md"), "CLI-Hilfe muss auf das Runbook verweisen");
 });
+
+test("Marktdaten-Fehler-Entscheidungsbaum ist vorhanden, katalogisiert und verlinkt", () => {
+  const doc = "docs/ERROR_HANDLING_MARKETDATA.md";
+  const content = read(doc);
+
+  // Inhaltliche Pflichtpunkte laut Ticket (Entscheidungsbaum,
+  // Fehlertaxonomie, Sync-/Ops-Behandlung).
+  for (const needle of [
+    "MarketDataFetchError",
+    "RATE_LIMITED",
+    "UPSTREAM_5XX",
+    "SCHEMA_MISMATCH",
+    "DATA_UNAVAILABLE",
+    "getCandlesWithFallback",
+    "using stale cache due to fetch error",
+    "Token-Bucket",
+  ]) {
+    assert.ok(content.includes(needle), `${doc} muss '${needle}' enthalten`);
+  }
+
+  // Katalog (GET /api/docs) und Doku-Übersicht.
+  const catalog = read("src/lib/docsCatalog.ts");
+  assert.match(catalog, /file:\s*"docs\/ERROR_HANDLING_MARKETDATA\.md"/, "Entscheidungsbaum muss im docsCatalog stehen");
+  assert.ok(read("docs/README.md").includes("ERROR_HANDLING_MARKETDATA.md"), "Entscheidungsbaum muss in docs/README.md verlinkt sein");
+
+  // Erreichbarkeit aus Memory-Docs.
+  assert.ok(read("docs/MARKET_DATA_PIPELINE.md").includes("ERROR_HANDLING_MARKETDATA.md"), "Pipeline-Doku muss verlinken");
+  assert.ok(read("docs/OBSERVABILITY.md").includes("ERROR_HANDLING_MARKETDATA.md"), "Observability-Doku muss verlinken");
+});

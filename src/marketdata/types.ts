@@ -72,6 +72,12 @@ export interface SyncError {
   timeframe?: string;
   /** Redacted, truncated human-readable reason. */
   message: string;
+  /** Klassifizierte Ursachen-Taxonomie (MDERR-006) — bleibt auch bei entfernten Fehlerobjekten maschinenlesbar. */
+  reason?: import("../lib/marketDataErrors").MarketDataErrorReason;
+  /** Ob ein Retry sinnvoll wäre (429/5xx/Timeout/Netzwerk). */
+  retryable?: boolean;
+  /** Original-HTTP-Status, falls vorhanden (z. B. 429, 503). */
+  httpStatus?: number;
 }
 
 /**

@@ -21,7 +21,9 @@ import { agentMessages, agents as agentTable } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { localReason, type ReasonResult } from "./ollama";
 import { extractJsonObject } from "./engine";
-import { getCandles, yahooScreener, type ScreenerCandidate } from "./marketData";
+import { getCandles, yahooScreener, type Candle, type ScreenerCandidate } from "./marketData";
+import { MarketDataFetchError } from "./marketDataErrors";
+import { structuredLog } from "./logger";
 import { snapshot, ema, rsi } from "./indicators";
 import { fetchMarketNews } from "./news";
 
@@ -190,12 +192,25 @@ async function runOneAnalyst(
 export async function runTechnicalAnalyst(symbol: string): Promise<void> {
   const lines: string[] = [];
   for (const tf of ["15m", "1h", "4h"] as const) {
-    const candles = await getCandles(symbol, tf, 120);
-    const snap = snapshot(symbol, candles);
-    if (!snap) continue;
-    lines.push(
-      `${tf}: ${snapshotLineOf(snap)}`
-    );
+    try {
+      const candles = await getCandles(symbol, tf, 120);
+      const snap = snapshot(symbol, candles);
+      if (!snap) continue;
+      lines.push(
+        `${tf}: ${snapshotLineOf(snap)}`
+      );
+    } catch (e) {
+      // Ein einzelner Timeframe darf die ganze TA nicht abbrechen. Der
+      // MarketDataFetchError bleibt in Telemetrie + strukturiertem Log
+      // sichtbar; hier wird nur die Rolle/Zeitachse ergänzt.
+      const reason = e instanceof MarketDataFetchError ? e.reason : "UNKNOWN";
+      structuredLog("warn", "market_data_analyst_fetch_failed", {
+        role: "TECHNICAL_ANALYST",
+        symbol,
+        timeframe: tf,
+        reason,
+      });
+    }
   }
   if (lines.length === 0) return;
 
@@ -240,9 +255,20 @@ const MACRO_SET = ["BTC", "SPY", "QQQ", "EURUSD=X"];
 export async function runMacroAnalyst(): Promise<void> {
   const lines: string[] = [];
   for (const sym of MACRO_SET) {
-    const candles = await getCandles(sym, "1h", 100);
-    const snap = snapshot(sym, candles);
-    if (snap) lines.push(snapshotLineOf(snap));
+    try {
+      const candles = await getCandles(sym, "1h", 100);
+      const snap = snapshot(sym, candles);
+      if (snap) lines.push(snapshotLineOf(snap));
+    } catch (e) {
+      // Ein einzelnes Markt-Regime darf die MACRO-Analyse nicht abbrechen.
+      const reason = e instanceof MarketDataFetchError ? e.reason : "UNKNOWN";
+      structuredLog("warn", "market_data_analyst_fetch_failed", {
+        role: "MACRO_ANALYST",
+        symbol: sym,
+        timeframe: "1h",
+        reason,
+      });
+    }
   }
   if (lines.length === 0) return;
 
@@ -336,7 +362,22 @@ interface SwingCandidate {
 export async function computeSwingCandidates(): Promise<SwingCandidate[]> {
   const out: SwingCandidate[] = [];
   for (const sym of SWING_UNIVERSE) {
-    const candles = await getCandles(sym, "1d", 200);
+    let candles: Candle[];
+    try {
+      candles = await getCandles(sym, "1d", 200);
+    } catch (e) {
+      // Ein Symbol mit Abruf-/API-Fehler wird übersprungen, NICHT wie
+      // „keine Historie“ behandelt und nicht als stilles []; der
+      // MarketDataFetchError bleibt in Telemetrie/Log sichtbar.
+      const reason = e instanceof MarketDataFetchError ? e.reason : "UNKNOWN";
+      structuredLog("warn", "market_data_analyst_fetch_failed", {
+        role: "SWING_RESEARCHER",
+        symbol: sym,
+        timeframe: "1d",
+        reason,
+      });
+      continue;
+    }
     if (candles.length < 60) continue;
     const closes = candles.map((c) => c.close);
     const price = closes[closes.length - 1];

@@ -59,6 +59,17 @@ test("classify: Zod/Schema-Fehler → SCHEMA_MISMATCH, nicht retryable", () => {
   const own = classifyMarketDataError(new MarketDataSchemaError("Antwort ist kein Array"));
   assert.equal(own.reason, "SCHEMA_MISMATCH");
   assert.equal(own.retryable, false);
+  // JSON.parse wirft SyntaxError/TypeError mit "Unexpected token..." — das ist
+  // ein Schema-/Veraltete-API-Fehler, kein Netzwerkfehler.
+  for (const jsonErr of [
+    Object.assign(new TypeError("Unexpected token 'x' in JSON at position 1"), { name: "TypeError" }),
+    Object.assign(new SyntaxError("Unexpected end of JSON input"), { name: "SyntaxError" }),
+    new Error("Response is not valid JSON"),
+  ]) {
+    const parsed = classifyMarketDataError(jsonErr);
+    assert.equal(parsed.reason, "SCHEMA_MISMATCH", `JSON-Fehler: ${(jsonErr as Error).message}`);
+    assert.equal(parsed.retryable, false);
+  }
 });
 
 test("classify: AbortError (Timeout) → TIMEOUT, retryable", () => {

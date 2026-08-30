@@ -20,6 +20,81 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.26.3] — 2026-08-30 · Nacharbeit: Marktdaten-Fehler-Doku & Sync-Klassifikation (MDERR-006)
+
+**Nacharbeit zu v1.26.1 (`fix(marketdata): stop swallowing fetch failures`).**
+Die Fehlertaxonomie und Telemetrie bleiben unverändert; ergänzt werden die
+Sync-Klassifikation am Abfangen, die explizite Aufrufer-Behandlung und der
+Betriebs-Entscheidungsbaum.
+
+### Added — Betriebsdokumentation
+
+* **Neu `docs/ERROR_HANDLING_MARKETDATA.md`** — Entscheidungsbaum:
+  „Wann wird geworfen vs. wann Cache vs. wann `DATA_UNAVAILABLE`“,
+  vollständige Fehlertaxonomie (`RATE_LIMITED`/`UPSTREAM_5XX`/
+  `UNAUTHORIZED`/`NOT_FOUND`/`INVALID_SYMBOL`/`SCHEMA_MISMATCH`/`TIMEOUT`/
+  `NETWORK`/`TLS`/`ABORTED`/`UNKNOWN`) mit Zuordnung zu den generischen
+  Ticket-Klassen (`SERVER_ERROR`/`NETWORK_ERROR`/`SCHEMA_ERROR`/…),
+  Sync- und Operations-Center-Behandlung, Log-/Telemetrie-Regeln und
+  Security-Audit (sanitized `cause`, kein Retry-Sturm bei 429).
+* Doku-Katalog (`src/lib/docsCatalog.ts`) + `docs/README.md`: neues Dokument
+  registriert und verlinkt.
+
+### Changed — Fehlerbehandlung & Sync
+
+* **`src/marketdata/sync.ts` + `src/marketdata/types.ts`:** `SyncError` trägt
+  `reason`/`retryable`/`httpStatus`; Fehler werden direkt beim Abfangen
+  klassifiziert (`classifyMarketDataError`), damit z. B.
+  `BitunixApiError.httpStatus=429` unverfälscht als `RATE_LIMITED` in
+  `SyncResult.errors` und im Manifest landet. Fehler bleiben pro Instrument/
+  Timeframe isoliert (kein globaler Abbruch).
+* **`src/marketdata/dataErrors.ts`:** Manifest/Map übernehmen nur echte
+  Fetch-/Infrastrukturfehler (`reason` gesetzt, `stage != "upsert"`).
+  Datenqualitäts-Warnungen (z. B. Ticker-Symbol-Abweichung) maskieren keine
+  echten 429/5xx-Fehler mehr.
+* **`src/lib/marketDataErrors.ts`:** `classifyMarketDataError()` erkennt
+  JSON-Parse-/Syntax-Fehler (`SyntaxError`/`TypeError` mit JSON-Marker) als
+  `SCHEMA_MISMATCH`; Inline-Kommentar zur Bedeutung der Klassifikation.
+* **`src/lib/marketData.ts`:** strukturierte Log-Meldung mit explizitem
+  `message`-Feld `[market-data] FETCH FAILED … infrastructure/API error … See
+  docs/ERROR_HANDLING_MARKETDATA.md`.
+* **`src/lib/analysts.ts` / `src/lib/monitor.ts`:** `getCandles()`-Aufrufer
+  fangen `MarketDataFetchError` pro Symbol/Timeframe (TA, Macro, Swing,
+  Marktmonitor) — ein Fehler bricht keine Loop ab und wird nie als „keine
+  Daten“ normalisiert.
+* **`docs/MARKET_DATA_PIPELINE.md`** §8: vollständige Fehlertaxonomie mit
+  Behandlung durch Sync-Service und Operations Center.
+* **`docs/OBSERVABILITY.md`:** Status auf v1.26.3; Verweis auf den
+  Entscheidungsbaum; `message`-Feld im Log-Event.
+
+### Tests
+
+* `classifyMarketDataError()`: JSON-Parse (`SyntaxError`/`TypeError`) →
+  `SCHEMA_MISMATCH`.
+* `marketData.test.ts`: `market_data_fetch_failed` enthält den
+  `FETCH FAILED`-Infrastrukturtext und den Doku-Verweis.
+* `sync.test.ts`: `SyncError` behält `reason`/`httpStatus` bei 429,
+  verbleibendes Instrument wird trotzdem synchronisiert.
+* `sync.integration.test.ts`: voller Sync-Lauf mit 429 im Mock-HTTP-Kline-Pfad
+  → `SyncResult.errors` (klassifiziert), übrige Instrumente weiter syncen,
+  kein Private-Call.
+
+### Security
+
+* `cause` wird weiterhin nur als `{ name, code }` serialisiert — kein
+  Stacktrace, keine Header/Query-Secrets.
+* Metrik bleibt ohne `symbol`-Label (Kardinalität); `syncErrorsToDataErrors`
+  und `saveMarketDataErrors` schreiben nur stabile Felder.
+* 429 → begrenzter Retry + Token-Bucket/Backoff; kein Retry-Sturm bei
+  systematischem Rate-Limiting.
+
+### Migration / Deployment
+
+* `package.json` → **1.26.3**.
+* Keine Datenmigration, keine Env-Änderung.
+
+Refs: CODE-REVIEW-SCANNER.md Section 9 · MDERR-006.
+
 ## [1.26.2] — 2026-08-29 · Nacharbeit: Versionierung, Changelogs & Migrations-Runbook (MDSYNC-001)
 
 **Nacharbeit zu v1.26.0 (PR #40, `fix(history): persist candle timeframe and

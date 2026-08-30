@@ -1,7 +1,7 @@
 # Observability — Marktdaten-Fehler, Metriken und strukturierte Logs
 
-> **Status-Header:** **Implementiert** (MDERR-006) · **2026-08-29** ·
-> Code-Version **1.26.1** · Module `src/lib/marketDataErrors.ts`,
+> **Status-Header:** **Implementiert** (MDERR-006, Nacharbeit) · **2026-08-30** ·
+> Code-Version **1.26.3** · Module `src/lib/marketDataErrors.ts`,
 > `src/lib/telemetry.ts`, `src/lib/logger.ts`,
 > `src/marketdata/dataErrors.ts`
 
@@ -10,6 +10,10 @@ macht. Das ist die Antwort auf den P1-Defekt „stille leere Arrays“: `getCand
 bildete HTTP 429/5xx, DNS-Fehler, ungültige Symbole, Schema-Abweichungen und
 TLS-Fehler alle auf `[]` ab — nicht unterscheidbar von „0 Kerzen vorhanden“,
 im Scanner als `min-candles` sichtbar und ohne jede Alarmierung.
+
+Die operative Entscheidung „Werfen vs. Cache vs. `DATA_UNAVAILABLE`“ ist im
+[**ERROR_HANDLING_MARKETDATA.md**](ERROR_HANDLING_MARKETDATA.md)
+(Entscheidungsbaum) dokumentiert.
 
 ## 1. Grundsatz
 
@@ -75,7 +79,7 @@ market_data_fetch_failures_total{venue="binance",timeframe="15m",reason="RATE_LI
 
 | Event | level | Felder |
 | --- | --- | --- |
-| `market_data_fetch_failed` | `error` | venue, symbol, timeframe, reason, httpStatus, retryable |
+| `market_data_fetch_failed` | `error` | venue, symbol, timeframe, reason, httpStatus, retryable, message (`[market-data] FETCH FAILED …`, Verweis auf `ERROR_HANDLING_MARKETDATA.md`) |
 | `market_data_unauthorized_public_endpoint` | `critical` | venue, symbol, timeframe, httpStatus |
 | `market_data_fetch_retry` | `warn` | reason, httpStatus, attempt, maxAttempts, venue |
 | `micro_executor_seed_fetch_failed` | `error` | symbol, timeframe, reason, retryable, httpStatus |

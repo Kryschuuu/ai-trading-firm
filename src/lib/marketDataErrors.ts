@@ -157,8 +157,25 @@ function codesOf(err: unknown): string[] {
   return out;
 }
 
+/** JSON-Parse- bzw. Syntaxfehler, die auf ein unerwartetes Response-Schema hindeuten. */
+const JSON_SCHEMA_MARKERS =
+  /JSON|Unexpected token|Unexpected end of JSON|is not valid JSON|not valid JSON|unterminated (?:string|array|object)|at position/i;
+
+function isJsonParseError(err: unknown): boolean {
+  if (err instanceof SyntaxError) return true;
+  if (err && typeof err === "object") {
+    const e = err as { name?: unknown; message?: unknown };
+    if (e.name === "SyntaxError") return true;
+    if (typeof e.message === "string" && JSON_SCHEMA_MARKERS.test(e.message)) return true;
+  }
+  if (typeof err === "string" && JSON_SCHEMA_MARKERS.test(err)) return true;
+  return false;
+}
+
 /**
- * Klassifiziert einen beliebigen Fehler in die Marktdaten-Taxonomie.
+ * Diese Klassifikation ist NICHT nur kosmetisch — sie entscheidet,
+ * ob ein Fehler als transient (Retry sinnvoll) oder permanent
+ * (Instrument-Konfigurationsfehler) behandelt wird.
  *
  * Priorität: expliziter HTTP-Status (inkl. `BitunixApiError.httpStatus`) →
  * Fehler-Codes/Names (inkl. `.cause`-Kette) → `UNKNOWN`.
@@ -180,6 +197,11 @@ export function classifyMarketDataError(err: unknown): {
   const codes = codesOf(err);
   const names = codes.map((c) => c.toUpperCase());
 
+  // JSON.parse() wirft SyntaxError/TypeError — das ist keine Netzwerkursache,
+  // sondern ein unerwartetes/Veraltetes Response-Schema (SCHEMA_MISMATCH).
+  if (isJsonParseError(err)) {
+    return { reason: "SCHEMA_MISMATCH", retryable: false, httpStatus };
+  }
   if (codes.includes("SCHEMA_MISMATCH") || names.includes("ZODERROR")) {
     return { reason: "SCHEMA_MISMATCH", retryable: false, httpStatus };
   }

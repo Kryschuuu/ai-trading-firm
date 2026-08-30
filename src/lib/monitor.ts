@@ -19,6 +19,7 @@ import { eq } from "drizzle-orm";
 import { getBroker, logAudit } from "./engine";
 import { getLimits, killSwitch } from "./riskGuard";
 import { DEFAULT_WATCHLIST, getQuote, refreshQuotes, getCandles } from "./marketData";
+import { MarketDataFetchError } from "./marketDataErrors";
 import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
@@ -207,9 +208,19 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     try {
       const lines: string[] = [];
       for (const s of DEFAULT_WATCHLIST) {
-        const candles = await getCandles(s, isCryptoLike(s) ? "15m" : "15m", 120);
-        const snap = snapshot(s, candles);
-        lines.push(snap ? snapshotLine(snap) : `${s}: keine Daten`);
+        try {
+          const candles = await getCandles(s, isCryptoLike(s) ? "15m" : "15m", 120);
+          const snap = snapshot(s, candles);
+          lines.push(snap ? snapshotLine(snap) : `${s}: keine Daten`);
+        } catch (e) {
+          // Ein einzelnes Symbol mit Fetch-/Infrastrukturfehler darf den
+          // Marktscan nicht abbrechen. Der Fehler bleibt über Telemetrie und
+          // strukturiertes Log sichtbar; hier wird die Ursache explizit in
+          // den Monitor-Errors übernommen (nie als „keine Daten“).
+          const reason = e instanceof MarketDataFetchError ? e.reason : "UNKNOWN";
+          errors.push(`Marktscan-Datenfehler ${s}: ${reason}`);
+          lines.push(`${s}: Datenfehler (${reason})`);
+        }
       }
       await db.insert(agentMessages).values({
         type: "MARKET_SCAN",

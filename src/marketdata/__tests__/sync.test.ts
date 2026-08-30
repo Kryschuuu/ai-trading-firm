@@ -11,6 +11,7 @@ import path from "node:path";
 
 import { HistoricalStore } from "../../lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../universe/registry";
+import { syncErrorsToDataErrors } from "../dataErrors";
 import { MarketDataSyncService, type MarketDataAdapter, type MarketDataSyncOptions } from "../sync";
 import { UnsupportedVenueError } from "../errors";
 import { calculateRelativeSpread } from "../spread";
@@ -216,6 +217,34 @@ test("Adapter-Fehler in getCandles() landen in SyncResult.errors — kein Full-A
   assert.ok(result.errors.every((e) => e.stage === "candles"));
   assert.equal(calls.discover, 1);
   assert.ok(registry.size >= 1, "Registry bleibt trotz Candle-Fehlern befüllt");
+});
+
+test("SyncError behält klassifizierte reason/httpStatus (429) pro Instrument, Rest-Sync läuft weiter", async () => {
+  const { adapter, calls } = mockAdapter({
+    instruments: [instrument("BTCUSDT"), instrument("ETHUSDT")],
+    candles: async (symbol, _tf, _limit) => {
+      if (symbol === "BTCUSDT") {
+        throw Object.assign(new Error("HTTP 429 rate limit"), { httpStatus: 429 });
+      }
+      return [candle(0)];
+    },
+  });
+  const { service, registry } = harness(adapter);
+  const result = await service.syncVenue("BITUNIX");
+
+  const btcCandleErrors = result.errors.filter(
+    (e) => e.stage === "candles" && e.instrumentId === "BITUNIX:BTCUSDT",
+  );
+  assert.equal(btcCandleErrors.length, SYNC_TIMEFRAMES.length);
+  assert.equal(btcCandleErrors[0].reason, "RATE_LIMITED");
+  assert.equal(btcCandleErrors[0].httpStatus, 429);
+  assert.equal(btcCandleErrors[0].retryable, true);
+
+  // Das verbleibende Instrument wird trotzdem synchronisiert.
+  assert.ok(result.candlesByTimeframe["1h"] >= 1, "ETHUSDT-Kerzen müssen geschrieben werden");
+  assert.ok(registry.get("BITUNIX:ETHUSDT"));
+  assert.equal(calls.discover, 1);
+  assert.equal(syncErrorsToDataErrors(result.errors).get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
 });
 
 test("leeres discoverInstruments() → instrumentsDiscovered: 0, kein Crash", async () => {

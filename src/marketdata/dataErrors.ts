@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { classifyMarketDataError, type MarketDataErrorReason } from "../lib/marketDataErrors";
+import type { MarketDataErrorReason } from "../lib/marketDataErrors";
 import type { SyncError } from "./types";
 
 /** Ablage des Manifests (gitignored, siehe .gitignore). */
@@ -43,16 +43,20 @@ export interface MarketDataErrorManifest {
 }
 
 /**
- * Übersetzt `SyncError[]` (Stage `candles` + ticker/orderbook mit
- * instrumentId) in eine `Map<instrumentId, reason>` — die Eingabe von
- * `assessDataReadiness()`/`scanUniverse()`.
+ * Aus `SyncResult.errors` die Instrumente mit echten Fetch-/Infrastrukturfehlern.
+ *
+ * Bewusst **keine** Zustands-Warnungen (z. B. „Ticker-Symbol weicht ab“) und
+ * keine `upsert`-Persistenzfehler: diese dürfen den Scanner nicht als
+ * `DATA_UNAVAILABLE` ausfallen lassen. Nur Fehler mit klassifizierter `reason`
+ * (vom `MarketDataSyncService` gesetzt) signalisieren einen Abruffehler.
  */
 export function syncErrorsToDataErrors(errors: readonly SyncError[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const error of errors) {
     if (!error.instrumentId) continue; // Batch-Fehler ohne Instrument → keinem Instrument zuordenbar
-    const { reason } = classifyMarketDataError(error.message);
-    if (!out.has(error.instrumentId)) out.set(error.instrumentId, reason);
+    if (error.stage === "upsert") continue; // Persistenzfehler, kein Marktdaten-Fetch-Fehler
+    if (typeof error.reason !== "string") continue; // reine Datenqualitäts-Warnung ohne Fehlerobjekt
+    if (!out.has(error.instrumentId)) out.set(error.instrumentId, error.reason);
   }
   return out;
 }
@@ -69,10 +73,10 @@ export function saveMarketDataErrors(
   const manifest: MarketDataErrorManifest = {
     writtenAt: now.toISOString(),
     errors: errors
-      .filter((e) => e.instrumentId)
+      .filter((e) => e.instrumentId && e.stage !== "upsert" && typeof e.reason === "string")
       .map((e) => ({
         instrumentId: String(e.instrumentId).slice(0, 128),
-        reason: classifyMarketDataError(e.message).reason,
+        reason: e.reason as MarketDataErrorReason,
         stage: e.stage,
         timeframe: e.timeframe ? String(e.timeframe).slice(0, 16) : undefined,
         at: now.toISOString(),

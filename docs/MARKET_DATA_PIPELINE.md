@@ -326,7 +326,29 @@ Gleiche Eingabe → gleiches Artefakt.
 für den Scanner als `DATA_UNAVAILABLE`/Readiness `ERROR` sichtbar — sie werden
 **nie** auf „leeres Array“ oder `min-candles` abgebildet. Details: Ursachen-
 Taxonomie (`MarketDataErrorReason`), Metrik, strukturierte Logs und
-Redaction in **[OBSERVABILITY.md](OBSERVABILITY.md)**.
+Redaction in **[OBSERVABILITY.md](OBSERVABILITY.md)**. Die operative
+Antwort auf „werfen vs. Cache vs. `DATA_UNAVAILABLE`“ steht im
+**Entscheidungsbaum [ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)**.
+
+### Vollständige Fehlertaxonomie und Behandlung
+
+| `reason` | Auslöser | `retryable` | Sync-Service | Scanner / Operations Center |
+| --- | --- | :---: | --- | --- |
+| `RATE_LIMITED` | HTTP 429 / Venue `code=10001` | ja | Fehler isoliert, Manifest `RATE_LIMITED` | `data-unavailable`, Readiness `ERROR`; Token-Bucket/Backoff prüfen |
+| `UPSTREAM_5XX` | HTTP 5xx | ja | Fehler isoliert, Manifest `UPSTREAM_5XX` | `data-unavailable`, Readiness `ERROR`; Venue-Status prüfen |
+| `UNAUTHORIZED` | HTTP 401/403 im Public-Pfad | nein | Fehler isoliert, Manifest `UNAUTHORIZED`, Critical-Alarm | Konfigurationsfehler (versehentlicher Auth-Endpunkt) |
+| `NOT_FOUND` | HTTP 404 / unbekanntes Symbol | nein | Fehler isoliert, Manifest `NOT_FOUND` | Instrument nicht (mehr) handelbar; Registry prüfen |
+| `INVALID_SYMBOL` | Symbolformat verletzt Whitelist | nein | Fehler isoliert, Manifest `INVALID_SYMBOL` | Eingabe-/Config-Fehler; Registry prüfen |
+| `SCHEMA_MISMATCH` | JSON-Parse / unerwartetes Schema | nein | Fehler isoliert, Manifest `SCHEMA_MISMATCH` | Venue-API geändert; Adapter/Normalisierung anpassen |
+| `TIMEOUT` | Timeout-Timer / `AbortError` | ja | Fehler isoliert | Netz/Latenz; prod. Monitoring |
+| `NETWORK` | `ENOTFOUND`, `ECONNREFUSED`, `ECONNRESET` … | ja | Fehler isoliert | Netz/Infrastruktur prüfen |
+| `TLS` | `ERR_TLS_*`, Zertifikat/Hostname | nein | Fehler isoliert | Zertifikat/Deployment sofort prüfen (MitM?) |
+| `ABORTED` | expliziter Abbruch | nein | Fehler isoliert | Aufrufer-Abbruch |
+| `UNKNOWN` | alles andere | nein | Fehler isoliert | Doku/Log analysieren |
+
+Diese Klassen werden **nie** als „keine Daten vorhanden“ interpretiert. Nur
+eine tatsächliche leere Venue-Antwort (`[]`) wird als fehlende Historie
+behandelt (`min-candles` → `WARMING`).
 
 | Ereignis | Verhalten |
 | --- | --- |
@@ -351,8 +373,10 @@ MicroExecutor-Warmstart und Backtest genutzt:
 - `getCandles()` wirft bei echten Fehlern `MarketDataFetchError`
   (Klassifikation in `src/lib/marketDataErrors.ts`), inkl. Metrik
   (`market_data_fetch_failures_total`) und strukturiertem Log
-  (`market_data_fetch_failed`). Das alte `catch { return cached?.candles ?? []; }`
-  ist **entfernt**.
+  (`market_data_fetch_failed`, inkl. explizitem
+  „FETCH FAILED … infrastructure/API error“-Text mit Verweis auf
+  `docs/ERROR_HANDLING_MARKETDATA.md`). Das alte
+  `catch { return cached?.candles ?? []; }` ist **entfernt**.
 - **Leere Venue-Antwort** (`[]`, nachweislich keine Bars) wird **nicht**
   geworfen — sie wird gecacht und zurückgegeben. Die Abgrenzung ist getestet.
 - `getCandlesWithFallback()` ist die **explizite** Stale-Cache-API (nur für
