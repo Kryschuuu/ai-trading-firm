@@ -31,7 +31,7 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | 10 | Operations Center + RBAC | Implementiert | v1.18 → v1.23.0 | #8 | ✓ [S10](#) | ✓ | keine (Nachaudit v1.23.0) |
 | 11 | Live-Trading-Gate | Implementiert | v1.19 | #9 | ✓ [S11](#) | ✓ [R](#) | LG-01…LG-04 |
 | **12** | **Dokumentation (Docs-Sync)** | **Implementiert** | **1.19.0** | **dieser PR** | **✓ [S12](#)** | **✓ [R12](#)** | **siehe unten** |
-| **13** | **Marktdaten-Fehler-Observability** | **Implementiert** | **1.26.1** | **dieser PR** | **✓ MDERR-006** | **✓** | **—** |
+| **13** | **Marktdaten-Fehler-Observability** | **Implementiert** | **1.26.1** (Nacharbeit **1.26.3**) | **dieser PR** | **✓ MDERR-006** | **✓** | **—** |
 | **14** | **Timeframe-Dimension im Historical Store (MDSYNC-001)** | **Implementiert** | **1.26.0** (Nacharbeit **1.26.2**) | **PR #40** + Nacharbeit | **✓** | **✓** | **—** |
 
 > **Nachtrag 2026-08-29 (v1.26.0 / v1.26.2):** Task 14 (Timeframe-Dimension
@@ -165,8 +165,19 @@ ohne Alarmierung (P1, Observability-/Sicherheitsdefekt).
 - Doku: `docs/OBSERVABILITY.md` (neu), `docs/MARKET_DATA_PIPELINE.md` Kap. 6–8,
   Changelogs; Version **1.26.1**.
 
+**Nacharbeit v1.26.3 (PR #43):** Sync-Fehler werden bereits beim Abfangen
+klassifiziert (`SyncError.reason`/`retryable`/`httpStatus`), das Fehler-Manifest
+übernimmt nur echte Fetch-/Infrastrukturfehler, `classifyMarketDataError()`
+erkennt JSON-Parse-Fehler als `SCHEMA_MISMATCH`, strukturierte Logs enthalten
+den expliziten `[market-data] FETCH FAILED …`-Verweis, Analysten/Monitor
+isolieren Fehler pro Symbol/Timeframe, und der Betreiber-Entscheidungsbaum
+`docs/ERROR_HANDLING_MARKETDATA.md` ist neu. Doku: `MARKET_DATA_PIPELINE.md` §8,
+`OBSERVABILITY.md`, Doku-Katalog, Changelogs.
+
 **Testbericht:** `tests/marketDataErrors.test.ts`,
-`tests/marketData.test.ts`, Scanner-/MicroExecutor-Erweiterungen;
+`tests/marketData.test.ts`, `src/marketdata/__tests__/sync*.test.ts`
+(inkl. Integrationstest 429 im Mock-HTTP-Kline-Pfad),
+Scanner-/MicroExecutor-Erweiterungen;
 `npm run typecheck` und `npm run docs:validate` grün.
 
 ---

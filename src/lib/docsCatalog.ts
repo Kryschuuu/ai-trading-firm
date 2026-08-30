@@ -70,7 +70,12 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   observability: {
     file: "docs/OBSERVABILITY.md",
     title: "Observability: Marktdaten-Fehler",
-    subtitle: "Typisierte Fehler, Metriken, strukturierte Logs und Alerting (v1.26.1)",
+    subtitle: "Typisierte Fehler, Metriken, strukturierte Logs und Alerting (v1.26.3)",
+  },
+  marketDataErrorHandling: {
+    file: "docs/ERROR_HANDLING_MARKETDATA.md",
+    title: "Fehlerbehandlung Marktdaten (Entscheidungsbaum)",
+    subtitle: "Werfen vs. Cache vs. DATA_UNAVAILABLE — Fehlertaxonomie, Sync- und Ops-Behandlung (v1.26.3)",
   },
   history: {
     file: "docs/HISTORY.md",

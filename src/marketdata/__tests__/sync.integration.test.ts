@@ -18,6 +18,7 @@ import { BITUNIX_PATHS } from "../../brokers/bitunix/config";
 import { HistoricalStore } from "../../lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../universe/registry";
 import { createAdapterRegistry } from "../adapterRegistry";
+import { syncErrorsToDataErrors } from "../dataErrors";
 import { MarketDataSyncService } from "../sync";
 import { SYNC_TIMEFRAMES } from "../types";
 import { historicalStoreProvider } from "../../scanner/service";
@@ -124,4 +125,52 @@ test("Integration: syncVenue(\"BITUNIX\") via AdapterRegistry füllt Registry un
     `1 depth-Call je Instrument erwartet, war ${depthCalls.length}`,
   );
   assert.ok(fx.publicCalls > 0);
+});
+
+test("Integration: 429 im Mock-HTTP-Kline-Pfad → SyncResult.errors, Rest-Sync läuft weiter", async () => {
+  const fx = new BitunixFixtureServer();
+  const base = await fx.start();
+  servers.push(fx);
+  // Nur der Kline-Endpunkt wird rate-limited — Discovery/Ticker/Depth bleiben
+  // erreichbar, damit der übrige Sync beobachtbar weiterläuft.
+  fx.klineStatus = 429;
+
+  const dir = tmp();
+  const registry = new InstrumentRegistry({
+    dir,
+    autoSave: true,
+    now: () => new Date("2026-08-29T12:00:00.000Z"),
+  });
+  const history = new HistoricalStore(path.join(dir, "history"));
+  const adapters = createAdapterRegistry({ registry, env: fixtureEnv(base) });
+  const service = new MarketDataSyncService(registry, history, adapters.entries, {
+    now: () => new Date("2026-08-29T12:00:00.000Z"),
+  });
+
+  const result = await service.syncVenue("BITUNIX");
+
+  // FEHLER-1: Ein einzelner API-Fehler isoliert pro Instrument/Timeframe in
+  // SyncResult.errors — kein globaler Abbruch.
+  assert.ok(result.errors.length > 0, "429 muss als Sync-Fehler sichtbar sein");
+  assert.ok(
+    result.errors.some((e) => e.stage === "candles" && e.reason === "RATE_LIMITED" && e.httpStatus === 429),
+    `erwartet einen klassifizierten Candle-429-Fehler: ${JSON.stringify(result.errors.slice(0, 2))}`,
+  );
+  const dataErrors = syncErrorsToDataErrors(result.errors);
+  assert.equal(dataErrors.get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
+  assert.equal(dataErrors.get("BITUNIX:ETHUSDT"), "RATE_LIMITED");
+
+  // Restlicher Sync bleibt vollständig: Enrichment + Registry laufen weiter.
+  assert.ok(result.tickersEnriched >= 1);
+  assert.ok(result.orderbooksEnriched >= 1);
+  assert.ok(registry.get("BITUNIX:BTCUSDT"), "BTCUSDT bleibt in der Registry");
+  assert.ok(registry.get("BITUNIX:ETHUSDT"), "ETHUSDT bleibt in der Registry");
+  for (const tf of SYNC_TIMEFRAMES) {
+    assert.equal(result.candlesByTimeframe[tf], 0, `${tf} darf bei 429 nicht als Erfolg gezählt werden`);
+  }
+  assert.ok(
+    fx.requests.some((r) => r.path === BITUNIX_PATHS.kline),
+    "Kline-Pfad wurde aufgerufen",
+  );
+  assert.equal(fx.privateCalls, 0);
 });

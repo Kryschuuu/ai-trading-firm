@@ -21,7 +21,7 @@ import {
 } from "../src/lib/marketData";
 import { MarketDataFetchError } from "../src/lib/marketDataErrors";
 import { setStructuredLogSinkForTests, type StructuredLogEntry } from "../src/lib/logger";
-import { resetTelemetryForTests, marketDataFailureSnapshot } from "../src/lib/telemetry";
+import { resetTelemetryForTests, marketDataFailureSnapshot, telemetry } from "../src/lib/telemetry";
 import { saveMarketDataErrors, loadMarketDataErrors } from "../src/marketdata/dataErrors";
 import { scanUniverse } from "../src/scanner/pipeline";
 import { DEFAULT_SCANNER_CONFIG } from "../src/scanner/config";
@@ -94,6 +94,25 @@ test("3: failure increments telemetry counter with classified reason", async () 
   assert.ok(!JSON.stringify(snap).includes("BTCUSDT"), "Metrik enthält kein Symbol (Kardinalität)");
 });
 
+test("3b: telemetry counter is incremented exactly once per failure with stable labels", async () => {
+  const originalInc = telemetry.marketData.fetchFailures.inc;
+  const calls: Array<Record<string, string>> = [];
+  telemetry.marketData.fetchFailures.inc = ((labels: Record<string, string>) => {
+    calls.push(labels);
+  }) as typeof originalInc;
+  try {
+    mockFetchOnce(() => httpResponse(429, {}));
+    await assert.rejects(() => getCandles("BTC", "15m", 150), MarketDataFetchError);
+    assert.equal(calls.length, 1, "genau ein Counter-Inkrement pro Fehler");
+    assert.equal(calls[0].venue, "binance");
+    assert.equal(calls[0].timeframe, "15m");
+    assert.equal(calls[0].reason, "RATE_LIMITED");
+    assert.ok(!("symbol" in calls[0]), "Metrik-Labels ohne symbol (Kardinalität/Speicher-DoS)");
+  } finally {
+    telemetry.marketData.fetchFailures.inc = originalInc;
+  }
+});
+
 test("4: failure emits structured log with venue/symbol/timeframe/reason", async () => {
   setStructuredLogSinkForTests((entry) => logs.push(entry));
   mockFetchOnce(() => httpResponse(503, {}));
@@ -106,6 +125,13 @@ test("4: failure emits structured log with venue/symbol/timeframe/reason", async
   assert.equal(entry!.fields.timeframe, "1h");
   assert.equal(entry!.fields.reason, "UPSTREAM_5XX");
   assert.equal(entry!.fields.httpStatus, 503);
+  assert.ok(
+    typeof entry!.fields.message === "string" &&
+      /\[market-data\] FETCH FAILED/.test(entry!.fields.message as string),
+    "Log-Meldung muss den Infrastrukturfehler explizit benennen",
+  );
+  assert.match(entry!.fields.message as string, /NOT an indication of missing market history/);
+  assert.match(entry!.fields.message as string, /docs\/ERROR_HANDLING_MARKETDATA\.md/);
 });
 
 test("4b: UNAUTHORIZED im Public-Pfad wird als Konfigurationsfehler alarmiert", async () => {
@@ -287,12 +313,17 @@ test("Manifest: Sync-Fehler werden klassifiziert persistiert und gelesen", () =>
           symbol: "BTCUSDT",
           timeframe: "15m",
           message: "HTTP 429 rate limit",
+          reason: "RATE_LIMITED" as const,
+          retryable: true,
+          httpStatus: 429,
         },
         {
           stage: "ticker" as const,
           instrumentId: "BITUNIX:ETHUSDT",
           symbol: "ETHUSDT",
           message: "connect ECONNREFUSED",
+          reason: "NETWORK" as const,
+          retryable: true,
         },
       ],
       file,

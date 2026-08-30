@@ -373,13 +373,15 @@ export async function getCandles(
     // gültiges Symbol existiert kein Catchable-Fehler → direkt typisiert.
     const reason: MarketDataErrorReason = "INVALID_SYMBOL";
     telemetry.marketData.fetchFailures.inc({ venue: "unknown", timeframe: interval, reason });
+    const logSymbol = sanitizeLogLabel(symbolRaw);
     structuredLog("error", "market_data_fetch_failed", {
       venue: "unknown",
-      symbol: sanitizeLogLabel(symbolRaw),
+      symbol: logSymbol,
       timeframe: interval,
       reason,
       httpStatus: null,
       retryable: false,
+      message: fetchFailedLogMessage("unknown", logSymbol, interval, reason),
     });
     throw new MarketDataFetchError({
       venue: "unknown",
@@ -422,6 +424,7 @@ export async function getCandles(
       reason,
       httpStatus: httpStatus ?? null,
       retryable,
+      message: fetchFailedLogMessage(venue, symbol, interval, reason),
     });
     if (reason === "UNAUTHORIZED") {
       // Public-Endpunkt darf nie 401/403 liefern → Konfigurationsfehler laut
@@ -449,6 +452,25 @@ export async function getCandles(
 /** Kürzt/redigiert ein Symbol nur für Log-Felder (nie für Metriken). */
 function sanitizeLogLabel(value: unknown): string {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 64);
+}
+
+/**
+ * Menschlich lesbare, einzeilige Fehlerzeile im strukturierten Log. Sie macht
+ * explizit, dass ein `MarketDataFetchError` ein Infrastruktur-/API-Fehler ist
+ * — KEIN Hinweis auf fehlende Markthistorie. Siehe
+ * docs/ERROR_HANDLING_MARKETDATA.md für den Entscheidungsbaum.
+ */
+function fetchFailedLogMessage(
+  venue: string,
+  symbol: string,
+  timeframe: string,
+  reason: string,
+): string {
+  return (
+    `[market-data] FETCH FAILED venue=${venue} symbol=${symbol} timeframe=${timeframe} reason=${reason} ` +
+    `— this is an infrastructure/API error, NOT an indication of missing market history. ` +
+    `See docs/ERROR_HANDLING_MARKETDATA.md`
+  );
 }
 
 /** Ergebnis des bewussten Cache-Fallbacks (MDERR-006). */

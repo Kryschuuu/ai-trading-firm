@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-29** ·
-> Code-Version **1.26.2**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
+> Code-Version **1.26.3**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,51 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.26.3] — 2026-08-30 · Nacharbeit PR: Marktdaten-Fehler-Doku & Sync-Klassifikation (MDERR-006)
+
+**Nacharbeit zu PR (v1.26.1, `fix(marketdata): stop swallowing fetch
+failures`).** Die Typisierung/Telemetrie aus v1.26.1 wird vervollständigt:
+Der Sync kategorisiert Fehler bereits im Abfangen (statt erst aus einer
+redigierten Textmeldung), der Entscheidungsbaum für Betrieb wird als eigenes
+Dokument ergänzt, und die verbliebenen Aufrufer behandeln
+`MarketDataFetchError` explizit pro Symbol/Timeframe.
+
+* `src/marketdata/sync.ts` + `src/marketdata/types.ts`: `SyncError` trägt
+  jetzt klassifizierte `reason`/`retryable`/`httpStatus`; Fehler werden beim
+  Abfangen über `classifyMarketDataError()` gesetzt (Per-Instrument-Isolation,
+  kein globaler Abbruch). `BitunixApiError.httpStatus=429` bleibt so als
+  `RATE_LIMITED` erhalten.
+* `src/marketdata/dataErrors.ts`: Das Fehler-Manifest übernimmt nur echte
+  Fetch-/Infrastrukturfehler (mit `reason`, `stage != "upsert"`). Reine
+  Datenqualitäts-Warnungen (z. B. Ticker-Symbol-Abweichung) lösen kein
+  `DATA_UNAVAILABLE` mehr aus und maskieren so keine echten 429-Fehler.
+* `src/lib/marketDataErrors.ts`: `classifyMarketDataError()` erkennt
+  JSON-Parse-/Syntax-Fehler jetzt als `SCHEMA_MISMATCH` und trägt den
+  geforderten Inline-Kommentar „Diese Klassifikation ist NICHT nur
+  kosmetisch …“.
+* `src/lib/marketData.ts`: strukturiertes Log `market_data_fetch_failed`
+  enthält das explizite `message`-Feld
+  `[market-data] FETCH FAILED … infrastructure/API error … See
+  docs/ERROR_HANDLING_MARKETDATA.md`.
+* Analysten (`src/lib/analysts.ts`) und Monitor
+  (`src/lib/monitor.ts`): `getCandles()`-Aufrufer fangen
+  `MarketDataFetchError` jetzt pro Symbol/Timeframe und isolieren Fehler —
+  ein Netzwerkfehler bricht keine TA/Macro/Swing-/Marktscan-Schleife ab.
+* Tests: `classifyMarketDataError()` JSON-Parse → `SCHEMA_MISMATCH`,
+  Marktdaten-Log mit `FETCH FAILED`-Text, Sync-Fehler-Retention
+  (429 → `RATE_LIMITED`, Rest-Sync läuft), Integrationstest 429 im
+  Mock-HTTP-Kline-Pfad.
+* Neu **`docs/ERROR_HANDLING_MARKETDATA.md`** (Entscheidungsbaum: werfen vs.
+  Cache vs. `DATA_UNAVAILABLE`), registriert im Doku-Katalog
+  (`src/lib/docsCatalog.ts`) und in `docs/README.md`.
+* `docs/MARKET_DATA_PIPELINE.md` §8: vollständige Fehlertaxonomie + Behandlung
+  je `reason` durch Sync-Service und Operations Center.
+* `docs/OBSERVABILITY.md`: Status/v1.26.3, Verweis auf Entscheidungsbaum,
+  `message`-Feld im Log-Event.
+* Version **1.26.3**.
+
+Refs: CODE-REVIEW-SCANNER.md Section 9 · MDERR-006.
 
 ## [1.26.2] — 2026-08-29 · Nacharbeit PR #40: Versionierung, Changelogs & Migrations-Runbook (Doku)
 
