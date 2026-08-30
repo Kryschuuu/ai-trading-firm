@@ -20,6 +20,59 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.28.1] — 2026-08-30 · fix(universe): liveAvailable als Laufzeitprojektion (CAP-008)
+
+**Fix (P1, sicherheitsrelevant im UI/API-Sinn):** Nach v1.26.4 wurden beide
+Live-Flags aus der Capability-Matrix abgeleitet (`liveAvailable` ← `marketData`,
+`liveTradable` ← `trading`). Das vermischte Produktabsicht mit technischer
+Verfügbarkeit: PAPER erschien `liveTradable=true`, Stub-Venues konnten nicht
+fachlich als live-vorgesehen markiert werden, und `liveAvailable` spiegelte
+Marktdaten statt „jetzt live handelbar“.
+
+### Added
+
+* **`src/universe/capabilityProjection.ts`:** einzige Schreibstelle für
+  `liveAvailable`. Konjunktion aus (1) `instrument.liveTradable`,
+  (2) `capabilities[venue].trading`, (3) registrierter Nicht-Stub-Adapter und
+  `capabilities.live`, (4) `venueEnabledFromEnv` (`${VENUE}_ENABLED`),
+  (5) `evaluateLiveOrder(venue, { audit: false }).allowed`. Fail-closed;
+  `reasons[]` nur symbolische Codes.
+* **`src/brokers/adapterCatalog.ts`:** statisches Factory-Wissen (Stub vs. echt),
+  ohne Adapter-Instanziierung.
+* Startup-Check `assertTradingVenuesHaveRealAdapters()` in
+  `src/instrumentation.ts`.
+* API-Metadaten: `liveAvailabilityReasons`, `liveUnavailableBadge`, Tooltips.
+* Ops-Sektion Market Universe: Kennzahlen + Badges für fachlich live-handelbare,
+  technisch nicht verfügbare Instrumente.
+
+### Changed / Fixed
+
+* Seed: `liveTradable` persistiert (PAPER false, reale Venues true);
+  `liveAvailable` bleibt Schema-Fehler im Seed.
+* `NdjsonStore` persistiert `liveTradable`, nie `liveAvailable`.
+* `resolveInstrumentCapabilities()` delegiert an den Projektor (Default
+  `liveTradable=false` ⇒ fail-closed).
+* Bitunix-Mapping nutzt `applyAvailabilityProjection({ liveTradable: true })`.
+* Hilfe `docs/help/market-universe.help.json`: liveTradable ≠ Adapter existiert;
+  liveAvailable ≠ Live-Trading aktiviert.
+
+### Tests / Security
+
+* `tests/capabilityProjection.test.ts`: fünf Bedingungen, Stub, PAPER, unknown
+  Venue, Seed-Verbot, Startup-Check, Invariante `liveAvailable ⇒ trading`.
+* Registry-Filter: 17 `liveTradable=true`, 0 `liveAvailable=true` (Gate zu).
+* `/api/markets?venue=KRAKEN` → `liveTradable:true`, `liveAvailable:false`.
+* Store-Serialisierung persistiert `liveTradable`, nicht `liveAvailable`.
+* Live-Gate-Enforcement unverändert; dieser Fix öffnet keine Orders.
+
+### Migration / Deployment
+
+* `package.json` → **1.28.1**.
+* Keine DB-Migration. Optional `npm run universe:seed` (schreibt `liveTradable`
+  in die NDJSON, lässt `liveAvailable` weg).
+
+Refs: CAP-008.
+
 ## [1.28.0] — 2026-08-30 · feat(symbols): zentrale, venue-aware Symbol-Normalisierung (SYM-007)
 
 **Priorität P1** (abhängigkeitsfrei; vor MDSYNC-001 zu mergen, damit

@@ -28,6 +28,12 @@
  */
 
 import { getRegistry } from "@/universe";
+import {
+  LIVE_AVAILABLE_TOOLTIP,
+  LIVE_TRADABLE_TOOLTIP,
+  formatLiveUnavailableBadge,
+  projectInstrumentAvailability,
+} from "@/universe/capabilityProjection";
 import { MAX_PAGE_SIZE, clampPage, clampPageSize, isValidVenue } from "@/universe/validation";
 import { ASSET_CLASSES, INSTRUMENT_STATUSES, MARKET_TYPES } from "@/universe/types";
 import type { AssetClass, InstrumentQuery, InstrumentStatus, MarketType } from "@/universe/types";
@@ -92,6 +98,23 @@ function readTicker(params: URLSearchParams, key: string): string | undefined {
   return v;
 }
 
+function withAvailabilityMeta<T extends { venue: string; symbol?: string; id?: string; liveTradable?: boolean; paperAvailable?: boolean }>(
+  instrument: T,
+) {
+  const projected = projectInstrumentAvailability(instrument);
+  return {
+    ...instrument,
+    liveTradable: projected.liveTradable,
+    liveAvailable: projected.liveAvailable,
+    liveAvailabilityReasons: projected.reasons,
+    liveUnavailableBadge: projected.liveAvailable
+      ? null
+      : formatLiveUnavailableBadge(projected.reasons, instrument.venue),
+    liveTradableTooltip: LIVE_TRADABLE_TOOLTIP,
+    liveAvailableTooltip: LIVE_AVAILABLE_TOOLTIP,
+  };
+}
+
 /** Baut aus der URL eine validierte `InstrumentQuery`. */
 export function parseMarketQuery(url: URL): InstrumentQuery {
   const p = url.searchParams;
@@ -139,7 +162,11 @@ export async function GET(req: Request): Promise<Response> {
   try {
     const registry = getRegistry();
     const result = registry.query(query);
-    const groups = registry.groupByVenue(result.items);
+    const instruments = result.items.map(withAvailabilityMeta);
+    const groups = registry.groupByVenue(result.items).map((group) => ({
+      ...group,
+      instruments: group.instruments.map(withAvailabilityMeta),
+    }));
     const venueFilter = Array.isArray(query.venue) ? query.venue : query.venue ? [query.venue] : [];
 
     return Response.json({
@@ -149,7 +176,7 @@ export async function GET(req: Request): Promise<Response> {
       venue: venueFilter.length === 1 ? venueFilter[0] : venueFilter.length > 1 ? venueFilter.join(",") : "ALL",
       count: result.items.length,
       lastSync: registry.lastSync,
-      instruments: result.items,
+      instruments,
       groups,
       page: result.page,
       pageSize: result.pageSize,

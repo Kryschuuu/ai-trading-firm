@@ -253,10 +253,10 @@ test("Filter: status", () => {
 test("Filter: paperAvailable, liveTradable und liveAvailable", () => {
   const r = seeded();
   assert.equal(r.query({ paperAvailable: true }).total, 26);
-  assert.equal(r.query({ liveTradable: true }).total, 9);
-  assert.equal(r.query({ liveTradable: false }).total, 17);
-  assert.equal(r.query({ liveAvailable: true }).total, 9);
-  assert.equal(r.query({ liveAvailable: false }).total, 17);
+  assert.equal(r.query({ liveTradable: true }).total, 17);
+  assert.equal(r.query({ liveTradable: false }).total, 9);
+  assert.equal(r.query({ liveAvailable: true }).total, 0);
+  assert.equal(r.query({ liveAvailable: false }).total, 26);
 });
 
 test("Filter: leverageAvailable und shortAvailable", () => {

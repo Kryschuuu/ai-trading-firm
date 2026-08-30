@@ -87,14 +87,14 @@
       "risiko": "Paper-Fills unterstellen idealisierte Ausführung; reale Slippage und Teilausführungen fehlen und schönen das Ergebnis."
     },
     "liveTradable": {
-      "kurzinfo": "Abgeleitete Anzeige, ob der Adapter für diese Venue Orders ausführen kann.",
-      "technischeInfo": "Wird zur Laufzeit aus capabilityMatrix[venue].trading über resolveInstrumentCapabilities() berechnet; der Seed darf dieses Feld nicht enthalten.",
-      "risiko": "Live-Handel ist für diese Venue derzeit nicht verfügbar, da die Integration noch nicht produktionsreif ist (Adapter-Status: Stub)."
+      "kurzinfo": "Fachlich für Live-Handel vorgesehen (Produkt-/Risikoentscheidung). Sagt nichts darüber aus, ob aktuell ein funktionsfähiger Broker-Adapter existiert.",
+      "technischeInfo": "Stammdaten-Feld. PAPER = false, reale Venues = true. Wird in der NDJSON persistiert. Ist NICHT die Aussage „Adapter existiert“ und NICHT die Live-Freigabe.",
+      "risiko": "liveTradable=true bedeutet nicht, dass Live-Orders erlaubt sind. Die Ausführung hängt von Adapter, Capability, Feature-Flag und Live-Gate ab."
     },
     "liveAvailable": {
-      "kurzinfo": "Abgeleitete Anzeige, ob der Adapter für diese Venue Live-Marktdaten liefern kann.",
-      "technischeInfo": "Wird zur Laufzeit aus capabilityMatrix[venue].marketData über resolveInstrumentCapabilities() berechnet; der Seed darf dieses Feld nicht enthalten und kann es nicht auf true setzen.",
-      "risiko": "Live-Handel ist für diese Venue derzeit nicht verfügbar, da die Integration noch nicht produktionsreif ist (Adapter-Status: Stub)."
+      "kurzinfo": "Technisch jetzt live handelbar. Das ist nicht dasselbe wie „Live-Trading ist aktiviert“.",
+      "technischeInfo": "Laufzeitprojektion über projectInstrumentAvailability(): Konjunktion aus liveTradable, capabilities[venue].trading, registriertem Nicht-Stub-Adapter mit capabilities.live, ${VENUE}_ENABLED und evaluateLiveOrder().allowed. Niemals ein Seed-Wert. Fail-closed.",
+      "risiko": "liveAvailable=true ist eine Anzeige, kein Schalter. Orders laufen weiter durch den Live-Gate-Enforcer. Ein true für einen Stub wäre ein Sicherheitsdefekt."
     },
     "volume24h": {
       "kurzinfo": "Handelsvolumen der letzten 24 Stunden in Quote-Währung. Null bedeutet unbekannt, nicht null Umsatz.",

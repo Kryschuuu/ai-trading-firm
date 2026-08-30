@@ -11,6 +11,7 @@
  * Rein deterministisch, kein IO.
  */
 import type { MarketInstrument } from "../../universe/types";
+import { applyAvailabilityProjection } from "../../universe/capabilityProjection";
 import type { MarketSnapshot, MarketDataSource } from "./types";
 
 export interface LastPriceSnapshotInput {
@@ -99,7 +100,12 @@ export function fallbackInstrument(
     shortAvailable: false,
     paperAvailable: true,
     liveTradable: false,
-    liveAvailable: false,
+    liveAvailable: applyAvailabilityProjection({
+      venue: v,
+      symbol: s,
+      liveTradable: false,
+      paperAvailable: true,
+    }).liveAvailable,
     volume24h: null,
     spread: null,
     volatility: null,

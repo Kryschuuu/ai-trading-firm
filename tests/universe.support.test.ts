@@ -104,7 +104,8 @@ test("Store: Serialisierung persistiert nur statische Felder", () => {
   const parsed = JSON.parse(serializeInstrument(i)) as Record<string, unknown>;
   const keys = Object.keys(parsed);
   assert.deepEqual(keys, [...PERSISTED_INSTRUMENT_FIELDS]);
-  assert.equal("liveTradable" in parsed, false);
+  assert.equal("liveTradable" in parsed, true);
+  assert.equal(parsed.liveTradable, false);
   assert.equal("liveAvailable" in parsed, false);
 });
 

@@ -211,9 +211,9 @@ export interface InstrumentQuery {
   status?: InstrumentStatus | InstrumentStatus[];
   /** Nur Instrumente mit `paperAvailable === true|false`. */
   paperAvailable?: boolean;
-  /** Nur Instrumente mit `liveTradable === true|false` (Fähigkeit am Broker). */
+  /** Nur Instrumente mit `liveTradable === true|false` (fachliche Freigabe). */
   liveTradable?: boolean;
-  /** Nur Instrumente mit `liveAvailable === true|false` (Kompatibilitäts-Spiegel). */
+  /** Nur Instrumente mit `liveAvailable === true|false` (Laufzeitprojektion). */
   liveAvailable?: boolean;
   /** Nur Instrumente mit Hebel-Verfügbarkeit. */
   leverageAvailable?: boolean;

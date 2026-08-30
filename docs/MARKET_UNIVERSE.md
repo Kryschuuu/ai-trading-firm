@@ -1,7 +1,7 @@
 # Market Universe — broker-unabhängige Instrumenten-Registry (Task 01)
 
-**Stand:** v1.26.4 · **Modul:** `src/universe/` + `src/capabilities/` · **API:** `/api/markets`
-**Status:** Fundament-Umbau 1 von 12 — ersetzt die Watchlist als Marktdefinition; Live-Flags werden aus der Capability-SSoT projiziert.
+**Stand:** v1.28.1 · **Modul:** `src/universe/` + `src/capabilities/` · **API:** `/api/markets`
+**Status:** Fundament-Umbau 1 von 12 — ersetzt die Watchlist als Marktdefinition; `liveAvailable` ist Laufzeitprojektion (CAP-008), `liveTradable` ist Stammdaten.
 
 ---
 
@@ -22,12 +22,12 @@ Drei Prinzipien, die den Rest der Umbau-Serie tragen:
 | Prinzip | Bedeutung |
 | --- | --- |
 | **Symbol ≠ Markt** | `BTC` ist ein Asset. `BINANCE:BTCUSDT` (Spot), `KRAKEN:BTC/USD` (Spot) und `BITUNIX:BTCUSDT` (Perpetual) sind **drei Instrumente** mit **einem** ökonomischen Underlying (`BTC`). |
-| **Broker-Unabhängigkeit** | Der Kern kennt kein Broker-SDK, keine Venue-Sonderlogik, keine Credentials — nur das Schema unten. `liveTradable`/`liveAvailable` sind Laufzeit-Projektionen aus der Capability-Matrix, nicht Seed-Daten. |
+| **Broker-Unabhängigkeit** | Der Kern kennt kein Broker-SDK, keine Venue-Sonderlogik, keine Credentials — nur das Schema unten. `liveTradable` ist die fachliche Produktentscheidung (Seed/Stammdaten); `liveAvailable` ist eine Laufzeit-Projektion, nie ein Seed-Wert. |
 | **Determinismus** | Kein LLM, kein Netzwerk-Call, keine Zufallswerte im Kernlayer. Gleiche Eingabe ⇒ gleiche Datei, stabile Sortierung nach `id`. |
 
 ### Abgrenzung — was dieser Task *nicht* tut
 
-* Keine Live-Trading-Funktion. `liveAvailable` ist eine **abgeleitete Adapter-/Market-Data-Projektion**, kein Schalter.
+* Keine Live-Trading-Funktion. `liveAvailable` ist eine **Laufzeit-Konjunktion** (Adapter + Capability + Feature-Flag + Live-Gate), kein Schalter.
 * Kein Marktdaten-Abruf. `volume24h`, `spread`, `volatility` starten auf `null`;
   gefüllt werden sie von späteren Tasks (Liquidity-/Ranking-Layer).
 * Keine Änderung an Guardrails, Broker oder Order-Pfad — `PaperBroker` läuft unverändert.
@@ -77,8 +77,8 @@ in der Persistenz.
 | 13 | `leverageAvailable` | `boolean` | Hebel an dieser Venue für dieses Instrument verfügbar. |
 | 14 | `shortAvailable` | `boolean` | Short-Verkauf möglich. |
 | 15 | `paperAvailable` | `boolean` | Im Paper-Modus simulierbar (Kursquelle vorhanden). |
-| 16 | `liveTradable` | `boolean` | **Abgeleitet** aus `capabilityMatrix[venue].trading`. **Kein** Freigabeschalter — die Freigabe entscheidet `liveGate.state`/`venueControl`. |
-| 17 | `liveAvailable` | `boolean` | **Abgeleitet** aus `capabilityMatrix[venue].marketData`. Nicht im Seed persistiert und nicht als Order-Freigabe verwenden. |
+| 16 | `liveTradable` | `boolean` | Fachlich für Live-Handel vorgesehen (Stammdaten). PAPER = false, reale Venues = true. Sagt **nicht**, dass ein Adapter existiert. Persistiert. |
+| 17 | `liveAvailable` | `boolean` | Technisch **jetzt** live handelbar. **Nie** im Seed. Einzige Schreibstelle: `projectInstrumentAvailability()`. Nicht als Order-Freigabe verwenden. |
 | 18 | `volume24h` | `number \| null` | 24-h-Volumen in Quote-Währung; `null` = unbekannt (nicht 0!). |
 | 18 | `spread` | `number \| null` | Relativer Spread (`0.0004` = 4 bp); `null` = unbekannt. |
 | 19 | `volatility` | `number \| null` | Annualisierte Volatilität als Dezimalanteil; `null` = unbekannt. |
@@ -137,9 +137,10 @@ keinen Job abbrechen, aber auch nie das ganze Universum in eine Antwort ziehen.
 
 `data/universe/instruments.ndjson` — eine Zeile je Instrument, stabile
 Feldreihenfolge, sortiert nach `id`, atomar geschrieben (`tmp` + `rename`).
-Die Datei enthält nur statische Instrumentdaten; `liveTradable` und
-`liveAvailable` sind bewusst ausgeschlossen und werden beim Laden/Antworten aus
-`src/capabilities/resolveCapabilities.ts` projiziert.
+Die Datei enthält statische Instrumentdaten inklusive `liveTradable`.
+`liveAvailable` ist bewusst ausgeschlossen und wird beim Laden/Antworten über
+`projectInstrumentAvailability()` projiziert
+(`src/universe/capabilityProjection.ts`). Siehe [CAPABILITIES.md](CAPABILITIES.md).
 
 Warum NDJSON und nicht PostgreSQL?
 
@@ -161,7 +162,7 @@ Verzeichnis überschreibbar via `UNIVERSE_DATA_DIR` (absolut oder relativ zum Pr
 | base/quote | 1) FX-Suffix `=X` (`EURUSD=X` → EUR/USD) → 2) expliziter Trenner (`BTC/USD`, `BTC-USD`, `EUR.USD`; `-PERP`/`-SWAP` → Quote `USD`) → 3) bekanntes Quote-Suffix (`BTCUSDT` → BTC/USDT) → 4) kein Paar (`SPY`, `BRK.B`). |
 | `assetClass` | FX-Suffix oder Fiat/Fiat → `fx`; Krypto-Quote (`USDT/USDC/TUSD/FDUSD/BUSD/BTC/ETH`) oder Nicht-Fiat-Basis gegen `USD` → `crypto`; sonst `equity`. Explizite Angabe schlägt jede Ableitung. |
 | `marketType` | Venue `DYDX` oder `BITUNIX` oder Symbol-Suffix `-PERP`/`-SWAP` → `perpetual`, sonst `spot`. Explizite Angabe schlägt die Ableitung. |
-| Defaults | Konservativ: `status: active`, `paperAvailable: true`, `leverageAvailable: false`, `shortAvailable: false`, Metriken `null`. `liveTradable`/`liveAvailable` werden ausschließlich per `resolveInstrumentCapabilities()` projiziert. |
+| Defaults | Konservativ: `status: active`, `paperAvailable: true`, `leverageAvailable: false`, `shortAvailable: false`, `liveTradable: false`, Metriken `null`. `liveAvailable` wird ausschließlich per `projectInstrumentAvailability()` projiziert. |
 
 ### 4.1 Ausschluss-Policy
 
@@ -210,10 +211,10 @@ Die neun Symbole der alten `DEFAULT_WATCHLIST` wurden zu **26 Seed-Instrumenten*
 von **Instrument-ID-Referenzen** mit Anzeigenamen. Reihenfolge und Inhalt sind
 byte-identisch zur alten Liste; kein bestehender Aufrufer bricht.
 
-Seit v1.26.4 enthält der Seed keine `liveAvailable`-/`liveTradable`-Felder mehr.
-Für die realen Stub-Venues `BINANCE`, `KRAKEN`, `ALPACA` und `IBKR` projiziert
-die Capability-Matrix solange `false/false`, wie `marketData=false` und
-`trading=false` bleiben. Siehe [CAPABILITIES.md](CAPABILITIES.md).
+Seit v1.28.1 (CAP-008) enthält der Seed `liveTradable` (PAPER = false, reale
+Venues = true) und **kein** `liveAvailable`. Stub-Venues bleiben
+`liveAvailable=false`, auch wenn sie fachlich `liveTradable=true` sind.
+Siehe [CAPABILITIES.md](CAPABILITIES.md).
 
 ```ts
 export const UI_WATCHLIST_PREFERENCE = [
@@ -264,7 +265,7 @@ GET /api/markets?venue=BINANCE&assetClass=crypto&pageSize=2
       "minQuantity": 0.00001, "priceStep": 0.01, "quantityStep": 0.00001,
       "makerFee": 0.001, "takerFee": 0.001,
       "leverageAvailable": false, "shortAvailable": false,
-      "paperAvailable": true, "liveAvailable": false, "liveTradable": false,
+      "paperAvailable": true, "liveAvailable": false, "liveTradable": true,
       "volume24h": null, "spread": null, "volatility": null,
       "lastSeen": "2026-08-27T00:00:00.000Z"
     },

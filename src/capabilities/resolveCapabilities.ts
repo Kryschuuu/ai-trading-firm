@@ -1,23 +1,31 @@
+/**
+ * @deprecated CAP-008: Nutze `projectInstrumentAvailability` aus
+ * `src/universe/capabilityProjection.ts`. Diese Fassade bleibt für bestehende
+ * Importe und delegiert 1:1 an den Projektor (fail-closed).
+ *
+ * liveTradable kommt aus den Stammdaten (Default false). liveAvailable ist
+ * niemals ein Seed-Wert.
+ */
 import type { CapabilityMatrix } from "./matrix";
+import {
+  currentProjectionContext,
+  projectInstrumentAvailability,
+  type AvailabilityProjection,
+} from "../universe/capabilityProjection";
 
 export type ResolvedInstrumentCapabilities = {
   liveAvailable: boolean;
   liveTradable: boolean;
 };
 
-// SICHERHEITSRELEVANT: Diese Funktion ist die EINZIGE Quelle der Wahrheit für
-// live-Handelsfähigkeit auf Instrument-Anzeige-/API-Ebene. Ein UI/API-Konsument,
-// der liveAvailable=true für einen tatsächlichen Adapter-Stub anzeigt, kann
-// einen Nutzer zu einem fehlschlagenden oder unvorhersehbaren Live-Trade-Versuch
-// verleiten.
 export function resolveInstrumentCapabilities(
   venue: string,
   capabilityMatrix: CapabilityMatrix,
+  liveTradable = false,
 ): ResolvedInstrumentCapabilities {
-  const cap = capabilityMatrix[venue];
-  if (!cap) return { liveAvailable: false, liveTradable: false };
-  return {
-    liveAvailable: cap.marketData === true,
-    liveTradable: cap.trading === true,
-  };
+  const projected: AvailabilityProjection = projectInstrumentAvailability(
+    { venue, liveTradable, paperAvailable: true },
+    { ...currentProjectionContext(), capabilities: capabilityMatrix },
+  );
+  return { liveAvailable: projected.liveAvailable, liveTradable: projected.liveTradable };
 }
