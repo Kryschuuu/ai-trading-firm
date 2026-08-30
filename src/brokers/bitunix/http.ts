@@ -9,6 +9,7 @@
  *   - redirect: error
  */
 import { BitunixApiError, classifyBitunixFailure, safeSnippet } from "./errors";
+import { BITUNIX_MAX_RESPONSE_BYTES } from "./config";
 import type { BitunixRuntimeConfig } from "./config";
 import type { BitunixLogger } from "./redactor";
 import { createBitunixLogger, redactBitunix } from "./redactor";
@@ -165,7 +166,7 @@ export class BitunixHttp {
           cache: "no-store",
           redirect: "error",
         });
-        const text = await res.text();
+        const text = await readCapped(res, BITUNIX_MAX_RESPONSE_BYTES);
         let json: unknown = null;
         try {
           json = text ? JSON.parse(text) : null;
@@ -240,3 +241,41 @@ function readMsg(json: unknown): string | null {
 }
 
 export { buildUrl };
+
+/**
+ * Liest den Response-Text mit harter Byte-Kappe.
+ *
+ * `content-length` dient als Vorabfilter (spart die Übertragung klar zu großer
+ * Antworten); die Kappe selbst wird am Stream durchgesetzt, damit eine
+ * Chunked-Response sie nicht umgeht. Überschreitung ist kein Retry-Kandidat —
+ * sonst würde ein über großer Payload die Venue dauerhaft blockieren.
+ */
+async function readCapped(res: Response, maxBytes: number): Promise<string> {
+  const declared = Number(res.headers?.get?.("content-length") ?? Number.NaN);
+  if (Number.isFinite(declared) && maxBytes > 0 && declared > maxBytes) {
+    // `payload` ist bewusst KEIN Retry-Kind: eine zu große Antwort bleibt zu
+    // groß und würde die Venue sonst dauerhaft blockieren.
+    throw new BitunixApiError("payload", `Antwortgröße ${declared} Bytes über der Kappe von ${maxBytes} Bytes`);
+  }
+  if (!res.body || !(maxBytes > 0)) return await res.text();
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* Stream bereits geschlossen */
+      }
+      throw new BitunixApiError("payload", `Antwortgröße überschreitet die Kappe von ${maxBytes} Bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength))).toString("utf8");
+}

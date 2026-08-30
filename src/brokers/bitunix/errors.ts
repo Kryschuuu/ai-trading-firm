@@ -14,6 +14,8 @@ export type BitunixErrorKind =
   | "maintenance"
   | "disabled"
   | "ssrf"
+  /** Antwort über der Payload-Kappe — niemals erneut anfragen. */
+  | "payload"
   | "unknown";
 
 const KIND_CODE: Record<BitunixErrorKind, string> = {
@@ -23,6 +25,7 @@ const KIND_CODE: Record<BitunixErrorKind, string> = {
   maintenance: "BITUNIX_MAINTENANCE",
   disabled: "BITUNIX_DISABLED",
   ssrf: "BITUNIX_SSRF",
+  payload: "BITUNIX_PAYLOAD",
   unknown: "BITUNIX_UNKNOWN",
 };
 

@@ -26,7 +26,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[SYMBOLS.md](SYMBOLS.md)** | Zentrale, venue-aware Symbol-Normalisierung: Kanon ↔ Nativ, Profile, ID-Migration (SYM-007, v1.28.0) |
 | **[CAPABILITIES.md](CAPABILITIES.md)** | Capability-SSoT: `discovery`, `marketData`, `trading`; `liveTradable` (Stammdaten) vs. `liveAvailable` (Laufzeit, CAP-008, v1.28.1) |
-| **[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)** | MarketDataSyncService: Discovery, Enrichment, Candle-Backfill vor dem Scanner (v1.24) |
+| **[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)** | MarketDataSyncService + `npm run market:sync`: Discovery, Enrichment, Candle-Backfill vor dem Scanner, Gates, Limits, Exit-Codes (v1.24, CLI v1.29) |
 | **[OPERATIONS_CENTER.md](OPERATIONS_CENTER.md)** | Operations Center: Market-Data-Readiness-Diagnose — leeren Scanner-Funnel Schritt für Schritt eingrenzen (v1.27) |
 | **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup-Regel, v1→v2-Migration (v1.26) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Runbook Produktion: Timeframe-Feld nachziehen — Backup, Dry-Run/--apply, Neuaufbau, Validierung, Rollback (v1.26.2) |
@@ -44,7 +44,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.28.1` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.29.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---

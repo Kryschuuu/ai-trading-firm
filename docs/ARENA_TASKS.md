@@ -34,7 +34,15 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | **13** | **Marktdaten-Fehler-Observability** | **Implementiert** | **1.26.1** (Nacharbeit **1.26.3**) | **dieser PR** | **✓ MDERR-006** | **✓** | **—** |
 | **14** | **Timeframe-Dimension im Historical Store (MDSYNC-001)** | **Implementiert** | **1.26.0** (Nacharbeit **1.26.2**) | **PR #40** + Nacharbeit | **✓** | **✓** | **—** |
 | **15** | **Zentrale, venue-aware Symbol-Normalisierung (SYM-007)** | **Implementiert** | **1.28.0** | **dieser PR** | **✓ SYM-007** | **✓** | **—** |
+| **16** | **Persistenter Marktdaten-Warmup + Sync-CLI (MDSYNC-001)** | **Implementiert** | **1.29.0** | **dieser PR** | **✓ (Pipeline-Doku, Sicherheit)** | **✓** | **—** |
 
+> **Nachtrag 2026-08-30 (v1.29.0):** Task 16 (persistenter Marktdaten-Warmup,
+> MDSYNC-001) ist implementiert: `npm run market:sync` befüllt
+> `InstrumentRegistry` + `HistoricalStore` **vor** dem Scanner, der Sync-Service
+> ist venue-agnostisch und feature-flag-gated, der Scanner bleibt rein
+> (kein Netzwerk). Code-Map, CLI-Referenz und die Abweichungen vom Ticket
+> stehen in [`MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md) §0, §12, §13.
+>
 > **Nachtrag 2026-08-29 (v1.26.0 / v1.26.2):** Task 14 (Timeframe-Dimension
 > im Historical Store, MDSYNC-001) ist mit **PR #40** implementiert
 > (`timeframe` als Pflichtfeld, Primärschlüssel
@@ -281,3 +289,65 @@ Bereitschaftshaken für MDSYNC-001: Instrument-IDs ab jetzt kanonisch.
   durch Repo-Admin einrichten (LG-03).
 - Geplante (Task NN) Features bei Merge in `docs/` von „Geplant“ auf
   „Implementiert“ stellen.
+
+---
+
+## Task 16 im Detail (Persistenter Marktdaten-Warmup + Sync-CLI, MDSYNC-001, v1.29.0)
+
+**Quelle:** Arena-Session `01a05352` · Branch `arena/01a05352-ai-trading-firm`.
+
+**Problem (P1, Produktkette).** `data/history/candles.ndjson` existierte, wurde
+aber von keinem Prozess befüllt. `scanUniverse()` las `candles.length === 0`,
+lehnte jedes Instrument mit `min-candles` ab und meldete das als Eignungsbefund
+(`readiness: WARMING` existierte, wurde aber als „Markt ungeeignet“ gelesen).
+Der Warmup passierte ausschließlich prozesslokal im MicroExecutor — nach jedem
+Neustart verloren.
+
+**Umsetzung.**
+
+* **Sync als eigener, persistenter Schritt vor dem Scan:**
+  `src/marketdata/sync.ts` (`MarketDataSyncService`) führt Discovery →
+  Ticker/Orderbook-Enrichment → Candle-Backfill aus und schreibt
+  `InstrumentRegistry` + `HistoricalStore`. Der Scanner bleibt unverändert rein
+  (kein I/O, kein LLM) und liest ausschließlich, was auf Disk liegt.
+* **Feature-Flags statt hartverdrahteter Venue:**
+  `src/marketdata/registerAdapters.ts` ist die einzige Instanzierungsstelle;
+  `MARKET_SYNC_ENABLED` (Kill-Switch) → `MARKET_SYNC_VENUES` (Allowlist) →
+  `<VENUE>_ENABLED` (`BITUNIX_ENABLED`). Aus = gemeldeter Grund + Exit 2 mit
+  Behebung, nie „0 Instrumente“ ohne Erklärung.
+* **CLI:** `scripts/market-sync.ts` (`npm run market:sync`), Validierung vor
+  dem ersten Request, `--dry-run` mit echtem Budget und temporären Senken,
+  `--json`, `--no-manifest`, Exit-Codes 0/1/2; `run-scan --sync` vor dem Scan.
+* **Betriebssichere Zahlen:** `SyncResult` ist deckungsgleich
+  (`discovered = synced + skipped`), die Zählerzeilen sind exakt
+  `formatSyncLog(result)`, ein Teilbackfill steht als `A/B bars` da (nie als
+  „fertig“), `degraded` ist gesetzt, wenn auch nur ein isolierter Fehler auftrat.
+* **Belastungsgrenzen:** Parallelität ≤ 8 innerhalb des Public-Token-Buckets
+  (8 req/s), `candle-limit` ≥ `requiredWarmupCandles` (61) und ≤ 2000,
+  Discovery-/Ticker-/Kerzen-Caps pro Response, Payload-Kappe 5 MiB am
+  Transport ohne Retry.
+* **Persistenz-I/O:** `HistoricalStore.appendSeries()` schreibt einen Lauf in
+  einer Datei-Revision (vorher: eine Revision je Instrument × Timeframe).
+  Idempotent über Prozessgrenzen — der zweite Lauf schreibt 0 neue Bars.
+* **Status ohne Netz:** `npm run market:sync:status` (auch
+  `market-sync:status`) liest die Warmup-Readiness über dieselbe Aggregation
+  wie das Operations Center und ist per Exit-Code automatisierbar
+  (0 = bereit, 1 = Warmup fehlt). Read-only: kein Request, kein Schreibpfad.
+
+**Sicherheit (in dieser Session geprüft, nicht neu erfunden):** Public-only-Pfad
+(kein `PrivateClient`, keine API-Key-Lektüre, 0 Credential-Header auf Public-
+Routen — Fixture-Server zählt), Symbol-Allowlist vor URL-Bau (Log-Antwort ohne
+Echo des Rohsymbols), Venue-/Meldungs-Sanitizer gegen Log-Injection
+(`[url]`, 160 Zeichen, Kontrollzeichen entfernt), keine Pfad-Interpolation aus
+Fremdinput, `/api/markets` bleibt GET-only.
+
+**Testbericht:** 58 neue Tests — `test/marketdata/{spread:10,sync:21,security:12,
+cli:12}.test.ts` und `test/integration/{warm-scanner:2,cli-sync-e2e:1}.test.ts`;
+die drei bestehenden Suite-Dateien unter `src/marketdata/__tests__/` (30) auf das
+neue `SyncResult` migriert; `tests/history/*` (31) gegen den geänderten
+Schreibpfad unkorruptiert grün. Gesamtsuite **1389/1389**.
+`npm run typecheck`, `npm run lint`, `npm run build`, `npm run docs:validate`
+grün; Coverage-Gate `npm run test:coverage:marketsync` ≥ 90 % Linien.
+Manueller Dry-Run gegen einen lokalen Mock der Bitunix-Public-Routen: 12
+Instrumente, 4 Timeframes, **62 Requests** (1 `trading_pairs` + 1 `tickers` +
+12 `depth` + 48 `kline`) und 0 Schreibzugriffe auf `data/`.

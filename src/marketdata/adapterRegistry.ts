@@ -1,9 +1,10 @@
 /**
- * Adapter-Registry — zentrale Venue→MarketDataAdapter-Mapping.
+ * Adapter-Registry — dünner Wrapper um {@link registerAdapters}.
  *
- * Diese Registry ist die einzige Stelle, die konkrete
- * MarketDataAdapter-Implementierungen instanziiert. Neue Venues (Binance,
- * Bitfinex, ...) werden hier registriert, NICHT im Scanner oder in /api/markets.
+ * Die Fabrik selbst (welche Venues existieren, welche Feature-Flags gelten)
+ * lebt in `./registerAdapters.ts`. Diese Klasse hält die daraus entstandene
+ * Venue→Adapter-Map als objekttragenden Zugriff für CLI und Tests; sie
+ * instanziiert selbst keine Adapter.
  *
  * Architektur-Trennung:
  * - `MarketDataSyncService` konsumiert nur das venue-agnostische
@@ -12,43 +13,61 @@
  *   und `HistoricalStore` — er importiert keine Adapter-Klasse.
  * - Order-Ausführung läuft über `getBroker()` (`src/brokers/factory.ts`)
  *   und ist von diesem Sync-Pfad komplett getrennt.
- *
- * Sicherheit (Sync-Kontext): `BitunixBrokerAdapter` wird hier immer im
- * Modus `"paper"` und **ohne** PrivateClient/credentials erzeugt. Discovery
- * und Enrichment nutzen ausschließlich den internen Public-Client
- * (trading_pairs / tickers / depth / kline) — niemals signierte Requests.
  */
-import { BitunixBrokerAdapter } from "../brokers/bitunix/adapter";
+
+import {
+  KNOWN_SYNC_VENUES,
+  registerAdapters,
+  type RegisterAdaptersResult,
+  type SkippedAdapter,
+} from "./registerAdapters";
 import type { EnvLike } from "../brokers/bitunix/config";
 import type { InstrumentRegistry } from "../universe/registry";
 import { sanitizeVenue } from "./errors";
 import type { MarketDataAdapter } from "./sync";
 
-/** Venue-Key unter dem Bitunix registriert ist. */
-export const BITUNIX_VENUE = "BITUNIX" as const;
+export { BITUNIX_VENUE, KNOWN_SYNC_VENUES } from "./registerAdapters";
+export type { SkippedAdapter } from "./registerAdapters";
 
 export interface AdapterRegistryOptions {
   /** Registry, in die Discovery-Ergebnisse beim Sync upsertet werden. */
   registry?: InstrumentRegistry;
-  /** Env für die Adapter-Instanz (Default: `process.env`). */
+  /** Env für die Adapter-Instanzen und das Feature-Gating (Default: `process.env`). */
   env?: EnvLike;
   /** `false` → keine Venues registrieren (isolierte Tests). */
   registerVenues?: boolean;
+  /** Explizite Venues (CLI `--venue`), sonst alle bekannten. */
+  venues?: readonly string[];
+  /** Ignore Env-Gates (Mock-Adapter in Tests). */
+  ignoreEnvGates?: boolean;
 }
 
 export class AdapterRegistry {
-  private readonly adapters = new Map<string, MarketDataAdapter>();
+  private readonly adapters: Map<string, MarketDataAdapter>;
+  /** Venues, die bewusst NICHT registriert wurden — mit symbolischem Grund. */
+  readonly skipped: readonly SkippedAdapter[];
 
   constructor(options: AdapterRegistryOptions = {}) {
-    if (options.registerVenues === false) return;
-    this.adapters.set(BITUNIX_VENUE, this.createBitunixAdapter(options));
+    const result: RegisterAdaptersResult =
+      options.registerVenues === false
+        ? { adapters: new Map(), skipped: [] }
+        : registerAdapters({
+            env: options.env,
+            registry: options.registry,
+            venues: options.venues,
+            ignoreEnvGates: options.ignoreEnvGates,
+          });
+    this.adapters = result.adapters;
+    this.skipped = result.skipped;
   }
 
   /**
    * Die Venue→Adapter-Map, die `MarketDataSyncService` direkt konsumiert:
    * `new MarketDataSyncService(registry, history, adapters.entries)`.
    */
-  readonly entries: Map<string, MarketDataAdapter> = this.adapters;
+  get entries(): Map<string, MarketDataAdapter> {
+    return this.adapters;
+  }
 
   /** Adapter für eine Venue (venue-Key wird normalisiert, case-insensitiv). */
   get(venue: string): MarketDataAdapter | undefined {
@@ -65,16 +84,9 @@ export class AdapterRegistry {
     return [...this.adapters.keys()].sort();
   }
 
-  /**
-   * Bitunix im Sync-Kontext: Modus `"paper"`, kein PrivateClient, keine
-   * Credentials. Der interne Public-Client trägt den Token-Bucket
-   * (8 req/s) — ein zweiter Limiter auf Orchestrier-Ebene wäre doppelt.
-   */
-  private createBitunixAdapter(options: AdapterRegistryOptions): MarketDataAdapter {
-    return new BitunixBrokerAdapter("paper", {
-      env: options.env ?? process.env,
-      registry: options.registry,
-    });
+  /** Bekannte Sync-Venues unabhängig vom Gate (Diagnose/Help-Text). */
+  known(): readonly string[] {
+    return KNOWN_SYNC_VENUES;
   }
 }
 

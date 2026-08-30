@@ -183,6 +183,79 @@ test("HTTP: ungültige URL, 5xx-Retry, leere Envelope, fehlender Ticker", async 
   assert.equal(pos.length, 1);
 });
 
+test("Payload-Kappe: zu große Antwort wird abgebrochen, nicht erneut angefragt", async () => {
+  const cfgCap = loadBitunixConfig({
+    BITUNIX_ENABLED: "true",
+    BITUNIX_ALLOW_INSECURE_HTTP: "true",
+    BITUNIX_BASE_URL: "http://127.0.0.1:9",
+    BITUNIX_RETRY_MAX: "3",
+    BITUNIX_TIMEOUT_MS: "4000",
+  });
+  const { BitunixHttp } = await import("../src/brokers/bitunix/http");
+  const isPayloadError = (e: unknown) =>
+    e instanceof BitunixApiError && e.kind === "payload" && e.code === "BITUNIX_PAYLOAD";
+
+  // 1) content-length-Vorabfilter: die Bytes werden nie gelesen.
+  let declaredHits = 0;
+  // Synthetische Response: undicis `new Response()` setzt content-length selbst,
+  // der Vorabfilter ist daher nur mit einem manuellen Header-Objekt prüfbar.
+  const declared = new BitunixHttp({
+    config: cfgCap,
+    fetchImpl: (async () => {
+      declaredHits += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-length": String(6 * 1024 * 1024) }),
+        body: null,
+        text: async () => "{}",
+      } as unknown as Response;
+    }) as typeof fetch,
+  });
+  await assert.rejects(
+    () => declared.request({ method: "GET", path: BITUNIX_PATHS.tickers }),
+    isPayloadError,
+    "content-length über der Kappe muss abbrechen"
+  );
+  assert.equal(declaredHits, 1, "kein Retry gegen eine zu große Antwort");
+
+  // 2) Chunked Response ohne content-length: die Kappe greift am Stream.
+  let streamHits = 0;
+  const chunked = new BitunixHttp({
+    config: cfgCap,
+    fetchImpl: (async () => {
+      streamHits += 1;
+      let sent = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          // 3 × 2 MB ohne content-length — über der 5-MB-Kappe.
+          if (sent >= 3) {
+            controller.close();
+            return;
+          }
+          sent += 1;
+          controller.enqueue(new Uint8Array(2 * 1024 * 1024));
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as typeof fetch,
+  });
+  await assert.rejects(
+    () => chunked.request({ method: "GET", path: BITUNIX_PATHS.tickers }),
+    isPayloadError,
+    "Stream-Volumen über der Kappe muss abbrechen"
+  );
+  assert.equal(streamHits, 1, "auch hier: kein Retry");
+
+  // 3) Kleine Antworten bleiben unangetastet.
+  const small = new BitunixHttp({
+    config: cfgCap,
+    fetchImpl: (async () => new Response(JSON.stringify({ code: 0, data: [] }), { status: 200 })) as typeof fetch,
+  });
+  const smallRes = await small.request({ method: "GET", path: BITUNIX_PATHS.tickers });
+  assert.deepEqual(smallRes.json, { code: 0, data: [] }, "kleine Antwort bleibt vollständig lesbar");
+});
+
 test("Pfade sind die offiziellen Futures-Endpunkte", () => {
   assert.equal(BITUNIX_PATHS.tradingPairs, "/api/v1/futures/market/trading_pairs");
   assert.equal(BITUNIX_PATHS.tickers, "/api/v1/futures/market/tickers");

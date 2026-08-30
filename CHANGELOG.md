@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
-> Code-Version **1.28.1**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.29.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,37 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.29.0] — 2026-08-30 · feat(marketdata): persistenter Warmup + Sync-CLI (MDSYNC-001)
+
+**P1, Produktkette.** Kein Prozess befüllte `data/history/candles.ndjson`:
+`scanUniverse()` las 0 Kerzen, lehnte **alle** Instrumente mit `min-candles` ab
+und der Trichter wirkte wie „Markt ungeeignet“. Neu: der Sync ist ein eigener
+persistenter Schritt **vor** dem Scan — der Scanner bleibt rein (kein I/O).
+
+* Neu `npm run market:sync` (Alias `market-sync`) mit `--venue`,
+  `--timeframes`, `--symbols`, `--candle-limit`, `--max-instruments`,
+  `--concurrency`, `--strict`, `--dry-run`, `--json`, `--no-manifest`,
+  `--status`, `--help`; Exit-Codes 0/1/2, `run-scan --sync` nutzt denselben
+  Pfad, `npm run market:sync:status` liest nur die Warmup-Readiness.
+* Neu `src/marketdata/registerAdapters.ts` als einzige Instanzierungsstelle,
+  fail-closed über `MARKET_SYNC_ENABLED` · `MARKET_SYNC_VENUES` ·
+  `<VENUE>_ENABLED`; nicht freigeschaltete Venues melden symbolische Gründe.
+* `SyncResult` mit deckungsgleichen Zählern und `formatSyncLog()`;
+  `HistoricalStore.appendSeries()` schreibt einen Lauf in **einer**
+  Datei-Revision statt N × M (Semantik je Reihe identisch).
+* Harte Grenzen: Parallelität ≤ 8, `candleLimit ≤ 2000`,
+  `candleLimit ≥ requiredWarmupCandles` (sonst Exit 2, vor dem ersten Request),
+  Payload-Kappe 5 MiB am Transport (`BITUNIX_PAYLOAD`, kein Retry).
+* Security: Public-only (kein PrivateClient, keine Credential-Header),
+  Symbol-Allowlist vor URL-Bau, Log-Injection- und Pfad-Interpolations-Schutz,
+  `/api/markets` bleibt GET-only.
+* Doku: `MARKET_DATA_PIPELINE.md` §0 Code-Map, §12 CLI, §13 Abweichungen;
+  `docs/INSTALL.md` §6.1; `.env.example`.
+* Tests: `test/marketdata/*` + `test/integration/*` (Goldentest mit
+  Warmup-Kontrast, Request-Budget, Architektur-Greps),
+  `npm run test:coverage:marketsync` ≥ 90 %. Gesamtsuite **1389/1389 grün**.
+* Version **1.29.0**. Keine Schema- oder Datenmigration.
 
 ## [1.28.1] — 2026-08-30 · fix(universe): liveAvailable als Laufzeitprojektion (CAP-008)
 

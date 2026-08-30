@@ -1,19 +1,20 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-30** ·
-> Code-Version **1.28.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
-> (Historien-Migration: `npm run history:migrate` · ID-Normalisierung:
-> `npm run symbols:normalize`)
+> Code-Version **1.29.0** · Modul `src/marketdata/` · CLI
+> `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
+> `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize`)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
 (`scanUniverse()`) führt weiterhin **keinen** Netzwerk-Call aus.
 
 ```
-AdapterRegistry (src/marketdata/adapterRegistry.ts)
-  └─ konkrete MarketDataAdapter-Instanzen (einzige Instanzierungsstelle)
-         │  BITUNIX → BitunixBrokerAdapter (Modus "paper", Public-Client)
-Discovery / Enrichment
+registerAdapters() (src/marketdata/registerAdapters.ts)  ← Feature-Gates
+  │   MARKET_SYNC_ENABLED · MARKET_SYNC_VENUES · <VENUE>_ENABLED
+  └─ Venue→Adapter-Map (einzige Instanzierungsstelle, Modus "paper")
+         │  BITUNIX → BitunixBrokerAdapter (PublicClient, ohne PrivateClient)
+Discovery / Enrichment / Backfill
          ▼
 MarketDataSyncService (instruments, ticker, orderbook, candles)
          │
@@ -26,6 +27,24 @@ ScannerService (PURE: kein Netzwerk, kein DB-I/O, kein LLM)
          ▼
 Funnel
 ```
+
+---
+
+## 0. Code-Map (Anforderungsname → realer Pfad)
+
+Die Anforderung MDSYNC-001 nennt Module, die im Repository anders liegen bzw.
+heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.29.0):
+
+| Anforderung nennt | Realer Pfad | Anmerkung |
+| --- | --- | --- |
+| `ScannerService` (`src/scanner/service.ts`) | `src/scanner/service.ts` | unverändert; Export `scanUniverse()` aus `src/scanner/pipeline.ts` |
+| `HistoricalStore` (`src/history/` oder `src/scanner/historicalStore.ts`) | `src/lib/marketdata/historicalStore.ts` | Datei `data/history/candles.ndjson`, Schema v2 |
+| `InstrumentRegistry` (`src/universe/registry.ts`) | `src/universe/registry.ts` | Ablage `data/universe/instruments.ndjson` |
+| `BitunixBrokerAdapter` (`src/brokers/bitunix/`) | `src/brokers/bitunix/adapter.ts` | erfüllt `MarketDataAdapter` UND `BrokerAdapter` |
+| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | vierte Methode heisst `fetchOrderBook` (nicht `fetchDepth`) |
+| Sync-CLI (`scripts/run-scan.ts`) | `scripts/market-sync.ts` (+ `scripts/lib/market-sync.ts`), `scripts/run-scan.ts --sync` | `run-market-sync.ts` ist ein Delegate auf ersteres |
+| Rate-Limit „8 req/s dokumentiert“ | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Bitunix-Doku nennt 10 req/s/IP, Code bleibt konservativ bei 8 |
+| Adapter-Registry | `src/marketdata/registerAdapters.ts` (Kern) + `src/marketdata/adapterRegistry.ts` (Wrapper) | zwei Dateien statt einer — Begründung §13 |
 
 ---
 
@@ -122,14 +141,22 @@ Warmup, kein Marktausschluss (§8).
 
 ## 4. Historical backfill
 
-Pro Instrument und Timeframe **N × candle**:
+Pro Instrument × Timeframe **N × M** Requests (`M` = Anzahl Timeframes). Das
+Limit je Timeframe ist nicht hartcodiert, sondern abgeleitet:
 
-| Timeframe | Limit |
-| --- | ---: |
-| `5m` | 150 |
-| `15m` | 150 |
-| `30m` | 150 |
-| `1h` | 150 |
+```
+candleLimit = max(SYNC_CANDLE_LIMIT /* 150 */, requiredWarmupCandles(config) /* 61 */)
+```
+
+`requiredWarmupCandles` ist die höchste Kerzenzahl, die ein Faktor braucht
+(EMA50 → 50, Momentum-Lookback 60 → 61, …). Ein `--candle-limit` darunter ist
+ein Bedienfehler (Exit 2) und geht vor dem ersten Request weg — sonst
+entsteht ein Store, der für immer `WARMING` meldet (§6). Hartes Maximum:
+`MAX_CANDLE_LIMIT = 2000` (Payload-Schutz), Parallelität `≤ 8`.
+
+Die geprüften Bars eines Laufs werden **gepuffert** und am Stück geschrieben
+(`appendSeries`, §5) — ein Append je Instrument × Timeframe würde die
+NDJSON-Datei N × M mal komplett atomar umschreiben (quadratische I/O).
 
 Kerzen landen in `data/history/candles.ndjson` mit Provenienz
 `{ venue, feed: "<VENUE>:rest" }` und **verpflichtendem** Feld `timeframe`.
@@ -143,7 +170,7 @@ bevorzugt `1h` (Präferenz `1h → 4h → 30m → 15m → 5m`, danach Legacy-Fal
 | Senke | Datei | Mutation |
 | --- | --- | --- |
 | Instrument-Registry | `data/universe/instruments.ndjson` | `registry.upsert(..., "sync:<VENUE>")` |
-| Historical Store | `data/history/candles.ndjson` | `history.append(candles, id, provenance, timeframe, now)` |
+| Historical Store | `data/history/candles.ndjson` | `history.appendSeries(groups, now)` je Lauf (identische Semantik zu `history.append(...)` je Reihe) |
 | Universe-Audit | `data/universe/audit-log.ndjson` | ein Eintrag je mutierendem Upsert |
 
 Keine PostgreSQL-Pflicht. Kein Private-Ledger. `/api/markets` bleibt **read-only**
@@ -476,15 +503,23 @@ Bitunix-Calls laufen dadurch durch den Bucket:
 - Code-Limit: **8 req/s** (`BITUNIX_PUBLIC_RATE_PER_SEC`) — konservativ, vor
   jedem Rollout gegen die Live-API zu verifizieren
 
-Bündelung pro Lauf:
+Bündelung pro Lauf und Venue (`N` = synchronisierte Instrumente, `M` = Timeframes):
 
-1. 1 × `trading_pairs`
-2. 1 × `tickers` (Batch, falls der Adapter `getTickers` anbietet)
-3. N × `depth`
-4. N × 4 `kline` (Instrument × Timeframe)
+1. 1 × `trading_pairs` (Discovery)
+2. 1 × `tickers` (Batch, wenn der Adapter `getTickers` anbietet)
+3. +1 × `tickers` **je Lücke**: fehlt ein Symbol im Batch, holt der Sync den
+   Einzel-Ticker — der Batch spart Requests, er ersetzt sie nicht
+4. N × `depth`
+5. N × M × `kline`
 
-Kein paralleles Fan-Out. Retry nur für 429/5xx (bestehender HTTP-Client).
-Sync verwendet ausschließlich den **Public**-Client.
+Beispiel 200 Instrumente, 4 Timeframes: `1 + 1 + 200·depth + 800·kline = 1002`
+Requests (Integrationstest zählt genau diese Zahl). Der Sync läuft mit begrenzter
+Parallelität (`concurrency ≤ 8`) **innerhalb** des Buckets — Parallelität
+erzeugt Requests, kein Recht auf mehr; autoritativ bleibt der Bucket.
+
+Retry nur für 429/5xx (bestehender HTTP-Client). Eine Antwort über
+`BITUNIX_MAX_RESPONSE_BYTES` (5 MiB) bricht als `BITUNIX_PAYLOAD` ab und wird
+**nicht** erneut angefragt. Sync verwendet ausschließlich den **Public**-Client.
 
 ## 10. Venue capability matrix
 
@@ -503,9 +538,25 @@ produktiv über `BitunixBrokerAdapter` + `AdapterRegistry` (der parallele
 Trading: über `BitunixPrivateClient` getrennt (niemals im Sync-Pfad).
 
 Neue Venues: `MarketDataAdapter` implementieren und in
-`src/marketdata/adapterRegistry.ts` unter dem Venue-Kürzel registrieren — die
+`src/marketdata/registerAdapters.ts` unter dem Venue-Kürzel registrieren — die
 **einzige** Stelle, die konkrete Adapter-Klassen instanziiert (nicht im Scanner,
-nicht in `/api/markets`). Der Scanner ändert sich nicht.
+nicht in `/api/markets`). Der Scanner ändert sich nicht. Pro Venue gelten drei
+Gates (Reihenfolge: Kill-Switch → Allowlist → Venue-Flag):
+
+| Flag | Wirkung | Default |
+| --- | --- | --- |
+| `MARKET_SYNC_ENABLED` | globaler Kill-Switch; **nur** der exakte Wert `"false"` schaltet ab | an |
+| `MARKET_SYNC_VENUES` | Kommagetrennte Venue-Allowlist (Großbuchstaben); leer = alle bekannten | leer |
+| `BITUNIX_ENABLED` | Venue-Flag; nur der exakte Wert `"true"` schaltet an (geteilt mit dem Trading-Adapter) | aus |
+
+Das CLI-Flag `--venue` überschreibt die Env-Allowlist (genau eine Venue), das
+Pro-Venue-Flag bleibt davon unberührt Pflicht — „`--venue=BITUNIX`“ allein
+schaltet nichts an.
+
+Ein Gate-Treffer wird **gemeldet**, nicht verschluckt: `registerAdapters()` gibt
+`skipped: [{ venue, reason }]` zurück (KILL_SWITCH · NOT_IN_ALLOWLIST ·
+VENUE_DISABLED · UNKNOWN_VENUE · INVALID_VENUE_KEY), das CLI antwortet mit
+Behebungshinweis und Exit 2.
 
 ## 11. Symbol-Normalisierung und Instrument-IDs (SYM-007, v1.28.0)
 
@@ -546,4 +597,102 @@ sichtbaren Verhaltensänderungen: **[SYMBOLS.md](SYMBOLS.md)**.
 - Der Scanner (`src/scanner/`) importiert keinen konkreten Adapter — er kennt
   ausschließlich `InstrumentRegistry` und `HistoricalStore`.
 - SSRF-Allowlist und TLS-Zwang des bestehenden HTTP-Clients gelten unverändert.
-- `/api/markets` triggert keinen Sync (kein Schreibpfad über die Leseschnittstelle).
+- `/api/markets` triggert keinen Sync (kein Schreibpfad über die Leseschnittstelle);
+  die Route ist GET-only und antwortet auf andere Verfahren mit 405.
+- **Response-Kappe**: `BITUNIX_MAX_RESPONSE_BYTES` (5 MiB) wird am Stream
+  durchgesetzt (`content-length` nur als Vorabfilter) — ein über großer Payload
+  puffert nie im Prozess und löst keinen Retry aus.
+- **Symbol-Allowlist vor der URL**: `normalizeSyncSymbol` lässt nur
+  `[A-Z0-9]` plus `/.-=_` (max. 32 Zeichen) zu. Discovery-Zeilen und
+  `--symbols`-Werte, die das verletzen, werden verworfen, bevor eine Anfrage
+  möglich ist; die Ablehnung wird ohne Echo des Rohsymbols geloggt.
+- **Kein Log-Injection**: Venues werden auf `[A-Z0-9_-]{1,32}` normalisiert,
+  Fehlermeldungen auf 160 Zeichen gekürzt und Zeilenumbrüche/Kontrollzeichen
+  entfernt; URLs werden zu `[url]` anonymisiert.
+- **Kein Pfad aus Fremdinput**: `HistoricalStore` schreibt ausschließlich unter
+  seinem konfigurierten Verzeichnis; `instrumentId`/`timeframe`/`feed` werden
+  nie in Pfade interpoliert.
+- Secrets redigiert der bestehende `redactBitunix`-Logger; der Sync-Pfad baut
+  ohnehin keinen PrivateClient und liest keine API-Key-Variablen.
+
+---
+
+## 12. Synchronisations-CLI (MDSYNC-001, v1.29.0)
+
+```bash
+npm run market:sync                                                     # BITUNIX, Default-Profile
+npm run market:sync -- --venue=BITUNIX --timeframes=5m,15m,30m,1h
+npm run market:sync -- --symbols=BTCUSDT,ETHUSDT --candle-limit=200
+npm run market:sync -- --dry-run --json                                  # volles Budget, keine Persistenz
+npm run market:sync:status                                               # Warmup lesen (nur lesen, kein Request)
+npm run scan -- --sync-first                                             # Sync + Scan in einem Prozess
+```
+
+| Flag | Bedeutung | Fehlerfall |
+| --- | --- | --- |
+| `--venue=NAME` | Venue-Key `[A-Z0-9][A-Z0-9_-]{0,31}`, Default `BITUNIX` | Format/unkannte Venue ⇒ Exit 2 |
+| `--timeframes=A,B` | nur `SUPPORTED_TIMEFRAMES`; keine Duplikate | ungültig/Duplikat ⇒ Exit 2 |
+| `--candle-limit=N` | `requiredWarmupCandles ≤ N ≤ 2000`, Default `max(150, Bedarf)` | zu klein ⇒ Exit 2, vor dem ersten Request |
+| `--max-instruments=N` | Cap je Venue, Default 250, hartes Maximum 1000 | > Maximum ⇒ Exit 2 |
+| `--symbols=A,B` | Allowlist venue-nativer Symbole (normalisiert) | Allowlist-Verstoß ⇒ Exit 2 |
+| `--concurrency=N` | Parallelität, Default 4, hart ≤ 8 | > 8 ⇒ Exit 2 |
+| `--strict` | Abbruch beim ersten Fehler statt degradiertem Lauf | — |
+| `--dry-run` | echte Requests, Registry/Store in temporärem Verzeichnis | — |
+| `--json` | `SyncResult` auf stdout, Zählerzeilen entfallen | — |
+| `--no-manifest` | `data/market-data-errors.json` nicht schreiben | — |
+| `--status` | Readiness des Warmups abfragen (nur lesen, kein Request); nicht mit Sync-Flags kombinierbar | 0 bereit · 1 Warmup fehlt |
+| `--help`, `-h` | Hilfe inkl. Exit-Code-Legende | — |
+
+**Exit-Codes:** 0 sauberer Lauf (auch mit übersprungenen Instrumenten) ·
+1 degradierter Lauf (mindestens ein isolierter Fehler, Teilpersistenz bleibt) ·
+2 Bedienfehler (Parsing, Gate, Warmup) — es ging kein Request raus.
+Im `--status`-Modus: 0 = Scanner bereit, 1 = Warmup fehlt (cron-/deploy-tauglich).
+
+**Status ohne Seiteneffekt.** `runMarketSyncStatus()` liest Registry und Store
+read-only (`autoSave: false`, kein Seed-Schreibpfad) und nutzt dieselbe
+Aggregation wie das Operations Center (`collectMarketDataReadiness`) — CLI und UI
+können nicht zwei Meinungen über „gewärmt“ haben.
+
+**Fehlerbehandlung.** `SyncResult.failures` ist der einzige Fehlpfad; der Lauf
+bricht nicht beim ersten Fehler ab (`continueOnError` ist Default). Jeder Eintrag
+trägt `stage`, `instrumentId`/`symbol`/`timeframe` (wo sinnvoll), eine gekürzte
+meldung und `reason` aus der Taxonomie MDERR-006 (`classifyMarketDataError`).
+Bei Fehlern schreibt das CLI das Manifest `data/market-data-errors.json`
+(`{ writtenAt, errors: [{ instrumentId, reason, stage, timeframe?, at }] }`,
+atomar tmp+rename, `mode 0600`, gedeckelt auf `MAX_MANIFEST_ENTRIES`; Zeilen ohne
+`instrumentId` und `upsert`-Fehler bleiben bewusst draußen, weil sie dem Scanner
+keinen Datenfehler signalisieren dürfen). Ohne Fehler wird das Manifest geleert.
+Die vollständigen Lauf-Zähler stehen nur im `SyncResult` (`--json`).
+`--strict` wirft `SyncPartialFailureError` (mit `failureCount` und Vorschau von
+max. 10 Fehlern) — Exit 1, persistierte Daten bleiben erhalten, weil Append und
+Dedup idempotent sind.
+
+**Logformat** (Zeilenanzahl = `formatSyncLog(result).length`, Zähler deckungsgleich):
+
+```
+[market-sync] BITUNIX discovery: 4 instruments
+[market-sync] tickers enriched: 4
+[market-sync] orderbooks enriched: 4
+[market-sync] 5m candles: 4/4 (600/600 bars)
+[market-sync] duration: 107 ms
+```
+
+Ein unvollständiger Backfill steht **nie** als „fertig“ im Log: `A/B bars`
+beziffert die Lücke gegen `candleLimit × Instrumente`, und eine
+`spreadsUnknown`-Zeile sowie die `DEGRADED`-Zeile nennen Regel und Anzahl
+(`rule="max-spread"`), ohne Symbol-URLs.
+
+## 13. Bekannte Abweichungen vom Ticket (MDSYNC-001)
+
+| Punkt | Ticket | Umsetzung | Warum |
+| --- | --- | --- | --- |
+| Tests | `test/marketdata/`, `test/integration/` | zusätzlich dort, **und** Migration der drei bestehenden Dateien unter `src/marketdata/__tests__/` | der Repo-Test-Glob läuft über `tests/` + `src/**/*.test.ts`; beide Pfade müssen grün sein |
+| Adapter-Registry | eine Datei `src/marketdata/adapterRegistry.ts` | Kern in `registerAdapters.ts`, `adapterRegistry.ts` als Wrapper | Testbarkeit der Gates ohne Singleton; der Name des Tickets bleibt als Importpfad erhalten |
+| Skript | `npm run market-sync` | `market:sync` **und** `market-sync` (Alias) | der bestehende `market-sync`-Aufruf im Betrieb soll nicht brechen |
+| Kerzenfeld | `ts` | `MarketCandle.time` (Store schreibt `ts`) | `time` ist im ganzen Repo Setter (Scanner, MicroExecutor); Umbenennung wäre eine Repositories-ändernde Aktion gewesen. Lesend normalisiert `candleTimeMs()` beide Formen |
+| Orderbuch-Level | `size` | `qty` (pflicht) + `size` (optional, Alias) | `qty` ist im Repo Pflichtfeld; `size` bleibt für Konsumenten lesbar |
+| Tickerfeld | `last` | `price` (+ `last?` alias) | analog, Adapter-Mapping liefert `price` |
+| Service-Konstruktor | `(registry, history, adapters, { clock, logger })` | Signatur bleibt, `clock`/`logger` im Optionen-Bag | 15 Aufrufer im Repo hätten sonst mitgezogen werden müssen |
+| Store-Schreiben | ein `append` je Instrument × Timeframe | `appendSeries` je Lauf (eine Revision) | `append` lädt und schreibt die ganze Datei; N × M Aufrufe = quadratische I/O. Zähler/Semantik je Reihe sind identisch, `append` bleibt öffentliche API |
+| `skipped` | „nur übersprungene Instrumente“ | `discovered − synced` (Allowlist, Cap, unbrauchbare Zeilen) | sonst wäre die Deckungsgleichheit `discovered = synced + skipped` nicht prüfbar |
+| Response-Größe | „5 MiB Cap empfohlen“ | im Bitunix-HTTP-Layer umgesetzt (`BITUNIX_MAX_RESPONSE_BYTES`) | die Kappe gehört an den Transport, nicht in den Sync — sonst gilt sie nur für einen Aufrufer |

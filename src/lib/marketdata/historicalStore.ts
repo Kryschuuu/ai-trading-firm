@@ -131,6 +131,26 @@ export interface AppendResult {
   invalid: number;
 }
 
+/** Ergebnis eines Batch-Appends über mehrere Reihen (eine Datei-Revision). */
+export interface AppendSeriesResult extends AppendResult {
+  /** Anzahl verarbeiteter Gruppen. */
+  groups: number;
+  /** Zähler je Gruppe, in Eingabereihenfolge. */
+  perGroup: AppendResult[];
+}
+
+/**
+ * Eine backzufügende Reihe: Kerzen EINES Instruments EINES Timeframes.
+ * Mit {@link HistoricalStore.appendSeries} gebündelt, ohne die
+ * Pflichtfelder aus `append` zu umgehen.
+ */
+export interface CandleSeriesGroup {
+  candles: readonly MarketCandle[];
+  instrumentId: string;
+  provenance: Provenance;
+  timeframe: SupportedTimeframe;
+}
+
 /** Ergebnis einer Lade-Operation (für Diagnose/Migration). */
 export interface LoadStats {
   total: number;
@@ -158,6 +178,60 @@ export function isSupportedTimeframe(value: unknown): value is SupportedTimefram
 /** Logischer Schlüssel einer Kerze. */
 function seriesKey(instrumentId: string, timeframe: string): string {
   return `${instrumentId}\u0000${timeframe}`;
+}
+
+/**
+ * Voller Dedup-Schlüssel einer Kerze: `instrumentId + timeframe + ts`.
+ * Der Index in {@link HistoricalStore.appendSeries} bildet darauf die
+ * logische Identität ab — identisch zur linearen Suche des alten `append`.
+ */
+function candleKey(entry: { instrumentId: string; timeframe: string; ts: number }): string {
+  return `${seriesKey(entry.instrumentId, entry.timeframe)}\u0000${entry.ts}`;
+}
+
+/**
+ * Validierende Umwandlung einer Adapter-Kerze in einen Store-Eintrag.
+ * `null` bei unbrauchbaren Werten (Preis ≤ 0, nicht endlich, Volumen < 0,
+ * kein ganzzahliger Zeitstempel) — der Aufrufer zählt sie als `invalid`,
+ * ein einzelner Ausschuss bricht niemals den ganzen Lauf ab.
+ */
+function buildCandleEntry(
+  candle: MarketCandle | undefined | null,
+  group: CandleSeriesGroup,
+  fetchedAt: string,
+): HistoricalCandleEntry | null {
+  const c = candle as MarketCandle | undefined;
+  if (!c) return null;
+  if (
+    !isFiniteNumber(c.time) ||
+    !Number.isInteger(c.time) ||
+    c.time <= 0 ||
+    !isFiniteNumber(c.open) ||
+    c.open <= 0 ||
+    !isFiniteNumber(c.high) ||
+    c.high <= 0 ||
+    !isFiniteNumber(c.low) ||
+    c.low <= 0 ||
+    !isFiniteNumber(c.close) ||
+    c.close <= 0 ||
+    !isFiniteNumber(c.volume) ||
+    c.volume < 0
+  ) {
+    return null;
+  }
+  return {
+    instrumentId: group.instrumentId,
+    venue: group.provenance.venue,
+    feed: group.provenance.feed,
+    timeframe: group.timeframe,
+    ts: c.time,
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+    volume: c.volume,
+    fetchedAt,
+  };
 }
 
 /**
@@ -287,94 +361,95 @@ export class HistoricalStore {
     now: Date,
   ): AppendResult {
     if (!Array.isArray(candles) || candles.length === 0) return { written: 0, deduplicated: 0, invalid: 0 };
-    if (!isNonEmptyString(instrumentId)) {
-      throw new HistoricalStoreError("INVALID_INSTRUMENT", "append: instrumentId muss ein nicht-leerer String sein.");
-    }
-    if (!isSupportedTimeframe(timeframe)) {
-      throw new HistoricalStoreError(
-        "INVALID_TIMEFRAME",
-        `append: timeframe "${String(timeframe)}" ist nicht in der Allowlist ` +
-          `(${SUPPORTED_TIMEFRAMES.join(", ")}). Ein ungültiger Timeframe würde Reihen unbemerkt mischen.`,
-      );
-    }
-    const fetchedAt = now.toISOString();
-
-    // 1. Bestand laden (strom-/pufferbasiert; Legacy bleibt unangetastet).
-    const { entries } = this.loadAll();
-
-    // 2. Neue Kerzen validieren + dedup-merge gegen den Bestand.
-    let written = 0;
-    let deduplicated = 0;
-    let invalid = 0;
-    for (const c of candles) {
-      if (
-        !c ||
-        !isFiniteNumber(c.time) ||
-        !Number.isInteger(c.time) ||
-        c.time <= 0 ||
-        !isFiniteNumber(c.open) ||
-        c.open <= 0 ||
-        !isFiniteNumber(c.high) ||
-        c.high <= 0 ||
-        !isFiniteNumber(c.low) ||
-        c.low <= 0 ||
-        !isFiniteNumber(c.close) ||
-        c.close <= 0 ||
-        !isFiniteNumber(c.volume) ||
-        c.volume < 0
-      ) {
-        // Ungültige Eingabe-Strippe: zählen, nicht schreiben (kein Abbruch).
-        invalid += 1;
-        continue;
-      }
-      const entry: HistoricalCandleEntry = {
-        instrumentId,
-        venue: provenance.venue,
-        feed: provenance.feed,
-        timeframe,
-        ts: c.time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume,
-        fetchedAt,
-      };
-      const merged = this.mergeEntry(entries, entry);
-      if (merged === "written") written += 1;
-      else deduplicated += 1;
-    }
-
-    // 3. Kompaktierung je Reihe (älteste Bars außerhalb der Grenze entfernen).
-    this.compact(entries);
-
-    // 4. Atomar schreiben (tmp + rename), restriktive Dateirechte (0600).
-    this.writeAll(entries);
-
-    return { written, deduplicated, invalid };
+    const batch = this.appendSeries([{ candles, instrumentId, provenance, timeframe }], now);
+    return batch.perGroup[0] ?? { written: 0, deduplicated: 0, invalid: 0 };
   }
 
   /**
-   * Führt eine neue Kerze gegen den geladenen Bestand ein.
-   * Schlüssel `instrumentId+timeframe+ts`; jüngstes `fetchedAt` gewinnt,
-   * bei Gleichstand der Neue (zuletzt gelesen).
+   * Batch-Append über mehrere Reihen mit GENAU EINEM Lese-/Schreibzyklus.
+   *
+   * WARUM es das gibt: `append` lädt, merged und schreibt die Datei komplett.
+   * Ein Market-Data-Sync befüllt bis zu 250 Instrumente × 4 Timeframes — ein
+   * Append je Gruppe würde die wachsende Datei 1000× atomar umschreiben
+   * (O(n²) I/O, im Betrieb Minuten und Gigabytes an Schreibvorgängen). Diese
+   * Methode führt alle Gruppen in EINER Revision zusammen.
+   *
+   * Die Semantik ist bewusst identisch zu {@link append}: Schlüssel
+   * `instrumentId + timeframe + ts`, jüngstes `fetchedAt` gewinnt,
+   * Kompaktierung auf `maxBarsPerSeries`, atomares `tmp` + `rename`,
+   * ungültige Bars werden gezählt statt den Lauf abzubrechen. Deduplizierung
+   * läuft über einen Index statt über eine lineare Bestandssuche — bei
+   * zehntausenden Zeilen sonst quadratisch.
+   *
+   * @throws {HistoricalStoreError} bei fehlendem `instrumentId` oder einem
+   *   Timeframe außerhalb der Allowlist (Gruppe wird numbered gemeldet).
    */
-  private mergeEntry(entries: HistoricalCandleEntry[], next: HistoricalCandleEntry): "written" | "duplicate" {
-    // Legacy-Einträge nehmen an diesem Schlüssel nicht teil (anderer
-    // Timeframe-Marker) — sie bleiben unverändert.
-    const key = seriesKey(next.instrumentId, next.timeframe);
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
-      if (e.ts !== next.ts) continue;
-      if (seriesKey(e.instrumentId, e.timeframe) !== key) continue;
-      // Kollision: jüngeres fetchedAt gewinnt; Gleichstand → zuletzt gelesen.
-      if (next.fetchedAt >= e.fetchedAt) {
-        entries[i] = next;
-      }
-      return "duplicate";
+  appendSeries(groups: readonly CandleSeriesGroup[], now: Date): AppendSeriesResult {
+    const list = Array.isArray(groups) ? groups : [];
+    if (list.length === 0) {
+      return { written: 0, deduplicated: 0, invalid: 0, groups: 0, perGroup: [] };
     }
-    entries.push(next);
-    return "written";
+    for (let i = 0; i < list.length; i++) {
+      const group = list[i];
+      if (!isNonEmptyString(group.instrumentId)) {
+        throw new HistoricalStoreError(
+          "INVALID_INSTRUMENT",
+          `appendSeries: Gruppe ${i} hat kein nicht-leeres instrumentId.`,
+        );
+      }
+      if (!isSupportedTimeframe(group.timeframe)) {
+        throw new HistoricalStoreError(
+          "INVALID_TIMEFRAME",
+          `appendSeries: Gruppe ${i} timeframe "${String(group.timeframe)}" ist nicht in der Allowlist ` +
+            `(${SUPPORTED_TIMEFRAMES.join(", ")}). Ein ungültiger Timeframe würde Reihen unbemerkt mischen.`,
+        );
+      }
+    }
+
+    const fetchedAt = now.toISOString();
+    // 1. Bestand EINMAL laden (strombasiert; Legacy bleibt unangetastet).
+    const { entries } = this.loadAll();
+    // 2. Index über den Bestand: (instrumentId, timeframe, ts) → Position.
+    const index = new Map<string, number>();
+    for (let i = 0; i < entries.length; i++) index.set(candleKey(entries[i]), i);
+
+    const perGroup: AppendResult[] = [];
+    let written = 0;
+    let deduplicated = 0;
+    let invalid = 0;
+
+    for (const group of list) {
+      const stats: AppendResult = { written: 0, deduplicated: 0, invalid: 0 };
+      for (const candle of group.candles ?? []) {
+        const entry = buildCandleEntry(candle, group, fetchedAt);
+        if (!entry) {
+          // Ungültige Eingabe-Kerze: zählen, nicht schreiben (kein Abbruch).
+          stats.invalid += 1;
+          continue;
+        }
+        const key = candleKey(entry);
+        const at = index.get(key);
+        if (at === undefined) {
+          index.set(key, entries.length);
+          entries.push(entry);
+          stats.written += 1;
+        } else {
+          // Kollision: jüngeres fetchedAt gewinnt; Gleichstand → zuletzt gelesen.
+          if (entry.fetchedAt >= entries[at].fetchedAt) entries[at] = entry;
+          stats.deduplicated += 1;
+        }
+      }
+      perGroup.push(stats);
+      written += stats.written;
+      deduplicated += stats.deduplicated;
+      invalid += stats.invalid;
+    }
+
+    // 3. Kompaktierung je Reihe, dann 4. EIN atomarer Schreibvorgang.
+    this.compact(entries);
+    this.writeAll(entries);
+
+    return { written, deduplicated, invalid, groups: list.length, perGroup };
   }
 
   /** Kappt je Reihe die ältesten Bars über `maxBarsPerSeries`. */
