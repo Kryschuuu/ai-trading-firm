@@ -253,10 +253,10 @@ test("Filter: status", () => {
 test("Filter: paperAvailable, liveTradable und liveAvailable", () => {
   const r = seeded();
   assert.equal(r.query({ paperAvailable: true }).total, 26);
-  assert.equal(r.query({ liveTradable: true }).total, 17);
-  assert.equal(r.query({ liveTradable: false }).total, 9);
-  assert.equal(r.query({ liveAvailable: true }).total, 17);
-  assert.equal(r.query({ liveAvailable: false }).total, 9);
+  assert.equal(r.query({ liveTradable: true }).total, 9);
+  assert.equal(r.query({ liveTradable: false }).total, 17);
+  assert.equal(r.query({ liveAvailable: true }).total, 9);
+  assert.equal(r.query({ liveAvailable: false }).total, 17);
 });
 
 test("Filter: leverageAvailable und shortAvailable", () => {
@@ -286,7 +286,7 @@ test("Filter: search greift auf die ID, kombinierte Filter sind UND-verknüpft",
   const r = seeded();
   assert.equal(r.query({ search: "btc" }).total, 3);
   assert.equal(r.query({ search: "BTC", venue: "KRAKEN" }).total, 1);
-  assert.equal(r.query({ venue: "PAPER", assetClass: "crypto", liveAvailable: true }).total, 0);
+  assert.equal(r.query({ venue: "BINANCE", assetClass: "crypto", liveAvailable: false }).total, 3);
 });
 
 // ── 25–28: Pagination und Sortierung ────────────────────────────────────────

@@ -19,8 +19,7 @@ import {
   splitInstrumentId,
 } from "../src/universe/validation";
 import { buildAuditEntry, sanitizeSource, writeDbAudit } from "../src/universe/audit";
-import { NdjsonStore, resolveDataDir, serializeInstrument } from "../src/universe/store";
-import { INSTRUMENT_FIELDS } from "../src/universe/types";
+import { NdjsonStore, PERSISTED_INSTRUMENT_FIELDS, resolveDataDir, serializeInstrument } from "../src/universe/store";
 import { normalizeInstrument } from "../src/universe/normalization";
 import { loadPolicy, DEFAULT_POLICY } from "../src/universe/policy";
 
@@ -100,10 +99,13 @@ test("Audit: DB-Senke bleibt ohne UNIVERSE_AUDIT_DB=1 inaktiv (kein DB-Zugriff)"
   await writeDbAudit(buildAuditEntry({ source: "test", action: "UPSERT", created: 1 }));
 });
 
-test("Store: Serialisierung nutzt die kanonische Feldreihenfolge", () => {
+test("Store: Serialisierung persistiert nur statische Felder", () => {
   const i = normalizeInstrument({ venue: "BINANCE", symbol: "BTCUSDT" }, new Date("2026-08-27T00:00:00.000Z"));
-  const keys = Object.keys(JSON.parse(serializeInstrument(i)));
-  assert.deepEqual(keys, [...INSTRUMENT_FIELDS]);
+  const parsed = JSON.parse(serializeInstrument(i)) as Record<string, unknown>;
+  const keys = Object.keys(parsed);
+  assert.deepEqual(keys, [...PERSISTED_INSTRUMENT_FIELDS]);
+  assert.equal("liveTradable" in parsed, false);
+  assert.equal("liveAvailable" in parsed, false);
 });
 
 test("Store: leeres Verzeichnis liefert existed=false, Audit-Log ist zunächst leer", () => {

@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
-> Code-Version **1.26.3**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.26.4**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,32 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.26.4] — 2026-08-30 · Capability-SSoT für Instrument-Live-Flags (CODE-REVIEW-SCANNER §17)
+
+**Fix (P1, sicherheitsrelevant im UI/API-Sinn):** Der statische Universe-Seed
+enthielt `liveAvailable: true`/`liveTradable: true` für reale Venues wie
+Binance, Kraken, Alpaca und IBKR, obwohl deren Adapter in dieser Codebasis nur
+Stubs sind. Der Seed ist nun keine Capability-Wahrheit mehr.
+
+* `src/universe/seed.ts` und die versionierten NDJSON-Seeds enthalten nur noch
+  statische Instrumentdaten; `liveAvailable`/`liveTradable` sind entfernt.
+* Neu `src/capabilities/resolveCapabilities.ts` und
+  `src/capabilities/matrix.ts`: `resolveInstrumentCapabilities(venue, matrix)`
+  projiziert `liveAvailable` aus `marketData` und `liveTradable` aus `trading`,
+  unbekannte Venues fail-closed auf `false/false`.
+* Registry, Normalisierung, Validierung, Persistenz und `/api/markets` liefern
+  Live-Flags nur noch aus der Capability-Matrix. Alte persistierte Werte können
+  die Projektion nicht mehr auf `true` manipulieren.
+* Tests: Resolver-Stubs, Bitunix-Matrix-Spiegelung, Unknown-Venue-Fallback,
+  Seed-Strukturtest gegen beide Live-Felder, Regression für Nicht-PAPER-
+  Stub-Venues und API-Test für Kraken `liveAvailable=false`.
+* Doku: Neu `docs/CAPABILITIES.md`; `docs/MARKET_UNIVERSE.md`,
+  `docs/BITUNIX.md`, `docs/README.md` und Doku-Katalog aktualisiert.
+* Version **1.26.4**. Keine DB-Migration, keine Env-Änderung. Live-Gate-
+  Logik unverändert.
+
+Refs: CODE-REVIEW-SCANNER.md Section 17.
 
 ## [1.26.3] — 2026-08-30 · Nacharbeit PR: Marktdaten-Fehler-Doku & Sync-Klassifikation (MDERR-006)
 

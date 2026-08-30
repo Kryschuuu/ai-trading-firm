@@ -70,6 +70,17 @@ test("API: Venue-Filter gruppiert und beschriftet den Ausschnitt", async () => {
   assert.equal(multi.count, 6);
 });
 
+test("API: Kraken-Stub-Instrument projiziert liveAvailable=false", async () => {
+  const body = (await json(await call("?venue=KRAKEN&pageSize=1"))) as unknown as {
+    instruments: Array<{ venue: string; liveAvailable: boolean; liveTradable: boolean }>;
+    groups: Array<{ instruments: Array<{ venue: string; liveAvailable: boolean; liveTradable: boolean }> }>;
+  };
+  assert.equal(body.instruments[0].venue, "KRAKEN");
+  assert.equal(body.instruments[0].liveAvailable, false);
+  assert.equal(body.instruments[0].liveTradable, false);
+  assert.equal(body.groups[0].instruments[0].liveAvailable, false);
+});
+
 test("API: Filterkombination und Pagination-Metadaten", async () => {
   const body = (await json(
     await call("?assetClass=crypto&paperAvailable=true&pageSize=2&page=2"),

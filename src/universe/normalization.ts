@@ -14,6 +14,8 @@
  * | (FX)     | `EURUSD=X`       | `<VENUE>:EURUSD=X`     | EUR/USD    |
  */
 
+import { capabilityMatrix } from "../capabilities/matrix";
+import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
 import {
   MAX_SYMBOL_LENGTH,
   MAX_VENUE_LENGTH,
@@ -172,10 +174,7 @@ export function normalizeInstrument(input: InstrumentInput, now: Date = new Date
     leverageAvailable: input.leverageAvailable ?? false,
     shortAvailable: input.shortAvailable ?? false,
     paperAvailable: input.paperAvailable ?? true,
-    // liveTradable = Instrument ist am Broker live-handelbar (Fähigkeit).
-    // Fallback auf liveAvailable hält das alte Feld abwärtskompatibel synchron.
-    liveTradable: input.liveTradable ?? input.liveAvailable ?? false,
-    liveAvailable: input.liveAvailable ?? input.liveTradable ?? false,
+    ...resolveInstrumentCapabilities(venue, capabilityMatrix),
     volume24h: input.volume24h ?? null,
     spread: input.spread ?? null,
     volatility: input.volatility ?? null,

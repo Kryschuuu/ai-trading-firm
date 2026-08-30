@@ -6,6 +6,8 @@
  * Ungültige Sätze werden mit Code + Begründung abgelehnt, nie repariert.
  */
 
+import { capabilityMatrix } from "../capabilities/matrix";
+import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
 import {
   ASSET_CLASSES,
   INSTRUMENT_STATUSES,
@@ -177,6 +179,8 @@ export function validateInstrument(raw: unknown): MarketInstrument {
     throw new UniverseValidationError("lastSeen", "erwartet ISO-8601-Zeitstempel (UTC)");
   }
 
+  const projectedCapabilities = resolveInstrumentCapabilities(venue, capabilityMatrix);
+
   return {
     id,
     venue,
@@ -194,8 +198,8 @@ export function validateInstrument(raw: unknown): MarketInstrument {
     leverageAvailable: requireBoolean("leverageAvailable", o.leverageAvailable),
     shortAvailable: requireBoolean("shortAvailable", o.shortAvailable),
     paperAvailable: requireBoolean("paperAvailable", o.paperAvailable),
-    liveTradable: requireBoolean("liveTradable", o.liveTradable),
-    liveAvailable: requireBoolean("liveAvailable", o.liveAvailable),
+    liveTradable: projectedCapabilities.liveTradable,
+    liveAvailable: projectedCapabilities.liveAvailable,
     volume24h: optionalMetric("volume24h", o.volume24h),
     spread: optionalMetric("spread", o.spread, 1),
     volatility: optionalMetric("volatility", o.volatility, 100),
