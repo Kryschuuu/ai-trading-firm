@@ -1,9 +1,9 @@
 {
   "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
   "id": "ops",
-  "version": 2,
+  "version": 3,
   "title": "Operations Center & RBAC — Feldhilfe",
-  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) im 3-Ebenen-Schema.",
+  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) sowie der Market-Data-Readiness-Diagnose (v1.27) im 3-Ebenen-Schema.",
   "source": "src/auth/ · src/ops/ · src/components/ops/OperationsCenterPanel.tsx",
   "fields": {
     "role.viewer": {
@@ -40,6 +40,11 @@
       "kurzinfo": "Trichter und Tagesrotation des deterministischen Markt-Scanners.",
       "technischeInfo": "Quelle: src/scanner (getScannerService().getScan()) — funnel {scanned, eligible, interesting, daily, deep}, config.version, Top-Scores mit Regime.",
       "risiko": "Ohne Kerzenhistorie unter data/history bleibt der Trichter leer. Das ist ein Datenstand, keine Scan-Panne — der Hinweis steht in der Sektion."
+    },
+    "section.marketDataReadiness": {
+      "kurzinfo": "Pipeline-Diagnose des Marktdaten-Feeds: Registry, Discovered, Data-ready, Warming, Candles, Ticker-/Spread-ready, Scanner-ready.",
+      "technischeInfo": "Quelle: src/ops/marketDataReadiness.ts (collectMarketDataReadiness) — reine Aggregation aus InstrumentRegistry + HistoricalStore + ScannerConfig, kein Netzwerk. Kerzen-Soll je Instrument aus requiredWarmupCandles(); Ablehnungs-Diagnose aus src/scanner/eligibilityDiagnostics.ts (vollständiger Datenzustand je Rejection, gekappt).",
+      "risiko": "Scanner-ready NO heißt: kein Instrument hat Kerzen ≥ Mindestanzahl UND Volumen UND Spread. Das ist ein Datenstand (Warmup/Sync fehlt oder ist fehlgeschlagen), kein Marktausschluss — Ursache entlang Candles/Ticker-ready/Spread-ready eingrenzen, siehe docs/OPERATIONS_CENTER.md."
     },
     "section.portfolio": {
       "kurzinfo": "Offene Positionen, Exposure, Eigenkapital und Tagesergebnis.",

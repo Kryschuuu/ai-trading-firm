@@ -1,6 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
+> Code-Version **1.27.0**. Vollständige, detaillierte Einträge je Release stehen
 > Code-Version **1.26.4**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
@@ -16,6 +17,44 @@
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
 
+## [1.27.0] — 2026-08-30 · feat(operations): strukturierte Market-Data-Readiness-Diagnose (OPS-010)
+
+**Review-Nacharbeit (CODE-REVIEW-SCANNER, Sections 14, 22, 26).** Das
+Operations Center zeigte nur den Endzustand des Scanner-Funnels
+(„Gescannt 26, Eligible 0, …“) — nicht, **ob** und **wo** die Datenpipeline
+(Discovery → Enrichment → Backfill) steckt. Neu: ein strukturierter
+Market-Data-Readiness-Report plus eine Ablehnungs-Diagnose mit vollständigem
+Datenzustand je Instrument — beides rein aggregiert aus Registry +
+Historical Store + Scanner-Config, **ohne Netzwerk-I/O**.
+
+* Neu `src/ops/marketDataReadiness.ts`: `MarketDataReadinessReport`
+  (Registry / Discovered ≤ 24 h / Data-ready / Warming / Candles geladen vs.
+  benötigt / Ticker-ready / Spread-ready / Scanner-ready) und
+  `collectMarketDataReadiness()` — Grenzwert `candleCount ===
+  requiredWarmupCandles(config)` gilt als ready (Boundary getestet).
+* Neu `src/scanner/eligibilityDiagnostics.ts`: pro Rejection Regel **plus**
+  Datenzustand (`candles`, `volume24h`, `spread`) — macht „Spread wurde
+  nicht geladen“ (Data-Quality) von „Markt ungeeignet“ (fachlich)
+  unterscheidbar. „Erste Regel gewinnt“-Routing unverändert, Modul ist
+  ausdrücklich nur Monitoring (Inline-Kommentar im Dateikopf); Ausgabe auf
+  50 Einträge gedeckelt, `total` zählt voll (DoS-Schutz).
+* `GET /api/ops`: additive Payload-Felder `marketDataReadiness` und
+  `eligibilityDiagnostics` — **kein Breaking Change**: Sektionen und
+  Funnel-Format unverändert (2-Argument-`buildOpsPayload` kompatibel,
+  fail-soft `null` bei Aggregationsfehler).
+* UI: neue Karte **Market Data** neben der Scanner-Karte exakt im
+  Review-Zeilenformat, inkl. Pflicht-Tooltips („Scanner-ready NO“,
+  „Candles 0/61“) und einklappbarer Ablehnungs-Diagnose.
+* Tests: Unit (leere Registry; Regression Review-Ist-Zustand 26×0; Ziel-Zustand
+  180 ready; Boundary; Diagnose `spread: null` → `max-spread`; DoS-Deckel;
+  Additivität) + Integration (simulierter Sync-Durchlauf → `GET /api/ops`
+  konsistent mit Registry-/HistoricalStore-Zustand, Secret-Scan).
+* Neu **`docs/OPERATIONS_CENTER.md`** („Wie diagnostiziere ich einen leeren
+  Scanner-Funnel?“, Walkthrough Registry → … → Scanner-ready), registriert im
+  Doku-Katalog und in `docs/README.md`; `docs/MARKET_DATA_PIPELINE.md` §6 um
+  Report-Feldtabelle und Diagnose-Format erweitert; Hilfe
+  `ops.help.json` v3 (`section.marketDataReadiness`).
+* Version **1.27.0**.
 ## [1.26.4] — 2026-08-30 · Capability-SSoT für Instrument-Live-Flags (CODE-REVIEW-SCANNER §17)
 
 **Fix (P1, sicherheitsrelevant im UI/API-Sinn):** Der statische Universe-Seed

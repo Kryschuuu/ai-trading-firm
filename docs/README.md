@@ -26,6 +26,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[CAPABILITIES.md](CAPABILITIES.md)** | Capability-SSoT: `discovery`, `marketData`, `trading` und abgeleitete Instrument-Live-Flags (v1.26.4) |
 | **[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)** | MarketDataSyncService: Discovery, Enrichment, Candle-Backfill vor dem Scanner (v1.24) |
+| **[OPERATIONS_CENTER.md](OPERATIONS_CENTER.md)** | Operations Center: Market-Data-Readiness-Diagnose — leeren Scanner-Funnel Schritt für Schritt eingrenzen (v1.27) |
 | **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup-Regel, v1→v2-Migration (v1.26) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Runbook Produktion: Timeframe-Feld nachziehen — Backup, Dry-Run/--apply, Neuaufbau, Validierung, Rollback (v1.26.2) |
 | **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler: Taxonomie, Metriken, strukturierte Logs, Redaction (v1.26.3) |
@@ -42,7 +43,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.26.4` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.27.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---

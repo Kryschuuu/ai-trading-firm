@@ -72,6 +72,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Market-Data-Pipeline",
     subtitle: "Discovery, Enrichment und Candle-Backfill vor dem deterministischen Scanner (v1.24)",
   },
+  operationsCenter: {
+    file: "docs/OPERATIONS_CENTER.md",
+    title: "Operations Center",
+    subtitle: "Market-Data-Readiness-Diagnose: leerer Scanner-Funnel Schritt für Schritt eingrenzen (v1.27)",
+  },
   observability: {
     file: "docs/OBSERVABILITY.md",
     title: "Observability: Marktdaten-Fehler",

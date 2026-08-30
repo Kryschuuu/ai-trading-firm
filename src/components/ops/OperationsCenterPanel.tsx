@@ -18,7 +18,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, readJson } from "@/lib/apiClient";
+import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
 import type { OpsItem, OpsMetric, OpsPayload, OpsSection, OpsSectionStatus, OpsTone } from "@/ops/types";
+import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -237,11 +239,43 @@ export function OperationsCenterView({
       {sections.length > 0 && (
         <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {ordered.map((section) => (
-            <SectionCard key={section.id} section={section} onOpenTab={onOpenTab} />
+            <FragmentWithMarketData
+              key={section.id}
+              section={section}
+              payload={payload}
+              onOpenTab={onOpenTab}
+            />
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Rendert eine Sektionskarte und hängt direkt an die Scanner-Karte die
+ * Market-Data-Readiness-Karte an (OPS-010): Die Pipeline-Diagnose gehört
+ * optisch zum Funnel, lebt aber als eigenes, additives Payload-Feld.
+ */
+function FragmentWithMarketData({
+  section,
+  payload,
+  onOpenTab,
+}: {
+  section: OpsSection;
+  payload: OpsPayload | null;
+  onOpenTab?: (tab: string) => void;
+}) {
+  return (
+    <>
+      <SectionCard section={section} onOpenTab={onOpenTab} />
+      {section.id === "scanner" && payload?.marketDataReadiness && (
+        <MarketDataReadinessCard
+          report={payload.marketDataReadiness}
+          diagnostics={payload.eligibilityDiagnostics ?? null}
+        />
+      )}
+    </>
   );
 }
 
@@ -321,6 +355,193 @@ function SectionCard({
           </ul>
         </details>
       </div>
+    </article>
+  );
+}
+
+/** Pflicht-Tooltip (Review) für die Scanner-ready-Zeile. */
+const SCANNER_READY_HINT =
+  "Der Scanner benötigt mindestens ein Instrument mit vollständigen Daten " +
+  "(Kerzen >= Mindestanzahl, Volumen bekannt, Spread bekannt). Prüfen Sie " +
+  "'Candles X/Y', 'Ticker-ready' und 'Spread-ready' um die Ursache einzugrenzen.";
+
+/** Pflicht-Tooltip (Review) für die Candles-Zeile; der Sollwert ist dynamisch. */
+function candlesHint(required: number): string {
+  return (
+    `${required} Kerzen sind die dynamisch aus der Faktor-Konfiguration abgeleitete ` +
+    `Mindestanzahl je Instrument (EMA50, Momentum60, siehe requiredWarmupCandles()); ` +
+    `links steht die Summe der geladenen Kerzen über alle Registry-Instrumente. ` +
+    `Ein Wert von 0 bedeutet: Es wurde noch kein Market-Data-Sync durchgeführt ` +
+    `oder er ist fehlgeschlagen.`
+  );
+}
+
+/**
+ * Market Data (OPS-010) — strukturierte Pipeline-Diagnose entlang der
+ * Datenstufen Discovery → Enrichment → Backfill → Readiness. Zeigt exakt das
+ * im Review vorgegebene Zeilenformat:
+ *
+ *   Registry / Discovered / Data-ready / Warming / Candles X/Y /
+ *   Ticker-ready / Spread-ready / Scanner-ready
+ *
+ * Darunter (einklappbar) die Eligibility-Diagnose: je abgelehntem Instrument
+ * Regel + vollständiger Datenzustand — macht „Spread nicht geladen“
+ * (Data-Quality) von „Markt ungeeignet“ (fachlich) unterscheidbar.
+ */
+export function MarketDataReadinessCard({
+  report,
+  diagnostics,
+}: {
+  report: MarketDataReadinessReport;
+  diagnostics?: EligibilityDiagnosticsSummary | null;
+}) {
+  const total = report.registryCount;
+  const readyTone = (count: number): OpsTone =>
+    total === 0 || count === 0 ? (count === 0 ? "bad" : "neutral") : count >= total ? "good" : "warn";
+  const scannerTone: OpsTone = report.scannerReady ? "good" : "bad";
+  const rows: { label: string; value: string; tone?: OpsTone; hint: string }[] = [
+    {
+      label: "Registry",
+      value: String(report.registryCount),
+      hint: "Instrumente in der Registry (Single Source of Truth des Universums).",
+    },
+    {
+      label: "Discovered",
+      value: String(report.discoveredCount),
+      tone: report.registryCount > 0 && report.discoveredCount < report.registryCount ? "warn" : "neutral",
+      hint:
+        "Instrumente mit frischem Discovery-Zeitstempel (lastSeen ≤ 24 h). " +
+        "Ein Rückstand bedeutet: Die Discovery lief länger nicht — Markt-Sync prüfen.",
+    },
+    {
+      label: "Data-ready",
+      value: String(report.dataReadyCount),
+      tone: report.dataReadyCount > 0 ? "good" : report.registryCount > 0 ? "bad" : "neutral",
+      hint:
+        "Instrumente mit vollständigen Daten: Kerzen ≥ Mindestanzahl UND " +
+        "24h-Volumen bekannt UND Spread bekannt.",
+    },
+    {
+      label: "Warming",
+      value: String(report.warmingCount),
+      tone: report.warmingCount > 0 ? "warn" : "neutral",
+      hint:
+        "Registry minus Data-ready — Instrumente, deren Datenpipeline noch " +
+        "läuft oder nie lief (npm run market-sync).",
+    },
+    {
+      label: "Candles",
+      value: `${report.candlesLoaded} / ${report.candlesRequired}`,
+      tone: report.candlesLoaded === 0 ? "bad" : report.scannerReady ? "good" : "warn",
+      hint: candlesHint(report.candlesRequired),
+    },
+    {
+      label: "Ticker-ready",
+      value: String(report.tickerReadyCount),
+      tone: readyTone(report.tickerReadyCount),
+      hint:
+        "Instrumente mit bekanntem 24h-Volumen (Ticker-Enrichment). " +
+        "0 bedeutet: Ticker-Enrichment lief nie oder ist fehlgeschlagen.",
+    },
+    {
+      label: "Spread-ready",
+      value: String(report.spreadReadyCount),
+      tone: readyTone(report.spreadReadyCount),
+      hint:
+        "Instrumente mit bekanntem Spread (Orderbook-/depth-Enrichment). " +
+        "0 bedeutet: depth-Enrichment lief nie oder ist fehlgeschlagen — " +
+        "ohne Spread scheitert jedes Instrument am max-spread-Filter.",
+    },
+    {
+      label: "Scanner-ready",
+      value: report.scannerReady ? "YES" : "NO",
+      tone: scannerTone,
+      hint: SCANNER_READY_HINT,
+    },
+  ];
+
+  return (
+    <article className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <h3 className="text-sm font-bold text-slate-100">Market Data</h3>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+            report.scannerReady ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"
+          }`}
+        >
+          {report.scannerReady ? "bereit" : "warm-up"}
+        </span>
+      </div>
+      <p className="text-xs leading-relaxed text-slate-400">
+        Pipeline-Zustand des Marktdaten-Feeds entlang Discovery → Enrichment → Backfill → Readiness
+        (Venue {report.venue}; Quelle: Registry + Historical Store, kein Netzwerk).
+      </p>
+
+      <dl className="mt-3 space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-3">
+            <dt className="text-[11px] uppercase tracking-wider text-slate-500" title={row.hint}>
+              {row.label}
+            </dt>
+            <dd
+              className={`font-mono text-xs font-semibold ${TONE_CLASS[row.tone ?? "neutral"]}`}
+              title={row.hint}
+            >
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      {!report.scannerReady && (
+        <p className="mt-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+          Scanner nicht bereit: kein Instrument mit vollständigen Daten. Ursache entlang der Zeilen
+          oben eingrenzen (Discovery → Candles → Ticker/Spread) — Walkthrough:
+          docs/OPERATIONS_CENTER.md.
+        </p>
+      )}
+
+      {diagnostics && diagnostics.total > 0 && (
+        <details className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+          <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-200">
+            Ablehnungs-Diagnose ({diagnostics.total}
+            {diagnostics.truncated ? `, erste ${diagnostics.items.length}` : ""})
+          </summary>
+          <ul className="mt-2 space-y-1.5">
+            {diagnostics.items.map((item) => (
+              <li key={item.instrument} className="text-[11px]">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 truncate text-slate-300" title={item.instrument}>
+                    {item.instrument}
+                  </span>
+                  <span
+                    className={`shrink-0 font-semibold ${
+                      item.eligibility.dataQuality ? "text-amber-300" : "text-slate-300"
+                    }`}
+                  >
+                    {item.eligibility.rule}
+                    {item.eligibility.dataQuality ? " · Datenqualität" : " · fachlich"}
+                  </span>
+                </div>
+                <div className="truncate text-slate-500">
+                  Kerzen {item.eligibility.data.candles}
+                  {" · Volumen "}
+                  {item.eligibility.data.volume24h === null
+                    ? "nicht geladen"
+                    : item.eligibility.data.volume24h.toLocaleString("de-DE")}
+                  {" · Spread "}
+                  {item.eligibility.data.spread === null ? "nicht geladen" : item.eligibility.data.spread.toLocaleString("de-DE")}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {diagnostics.truncated && (
+            <p className="mt-2 text-[10px] text-slate-500">
+              … und {diagnostics.total - diagnostics.items.length} weitere (Ausgabe gedeckelt).
+            </p>
+          )}
+        </details>
+      )}
     </article>
   );
 }
