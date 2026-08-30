@@ -156,7 +156,7 @@ Verzeichnis überschreibbar via `UNIVERSE_DATA_DIR` (absolut oder relativ zum Pr
 | Schritt | Regel |
 | --- | --- |
 | Venue | Trim → Uppercase; Muster `^[A-Z][A-Z0-9_]{1,15}$`. |
-| Symbol | Trim → Uppercase → Leerzeichen entfernt; Muster `^[A-Z0-9]{1,20}(?:[/.\-_=][A-Z0-9]{1,10}){0,2}$`. Die venue-typische Schreibweise (`/` bei Kraken, keine Trenner bei Binance) bleibt erhalten — sie ist Teil der Identität. |
+| Symbol | Trim → Uppercase → Leerzeichen entfernt; Muster `^[A-Z0-9]{1,20}(?:[/.\-_=][A-Z0-9]{1,10}){0,2}$`. Die venue-typische Schreibweise (`/` bei Kraken, keine Trenner bei Binance) bleibt erhalten — sie ist Teil der Identität (**Speicherform**). Seit v1.28.0 (SYM-007) ist dieses Muster ein Alias auf `STORAGE_SYMBOL_RE` aus der zentralen SSoT `src/symbols/`; Kanon ↔ Venue-Nativ, Profile und Aliase: [SYMBOLS.md](SYMBOLS.md). |
 | ID | Immer `VENUE:SYMBOL`. Eine mitgelieferte, abweichende `id` ist ein Validierungsfehler. |
 | base/quote | 1) FX-Suffix `=X` (`EURUSD=X` → EUR/USD) → 2) expliziter Trenner (`BTC/USD`, `BTC-USD`, `EUR.USD`; `-PERP`/`-SWAP` → Quote `USD`) → 3) bekanntes Quote-Suffix (`BTCUSDT` → BTC/USDT) → 4) kein Paar (`SPY`, `BRK.B`). |
 | `assetClass` | FX-Suffix oder Fiat/Fiat → `fx`; Krypto-Quote (`USDT/USDC/TUSD/FDUSD/BUSD/BTC/ETH`) oder Nicht-Fiat-Basis gegen `USD` → `crypto`; sonst `equity`. Explizite Angabe schlägt jede Ableitung. |
@@ -348,7 +348,7 @@ Kommandos: `npm run universe:seed` (deterministisch), `npm test`,
 1. **Discovery-Adapter** (Task 2+): Venue-seitige Instrumentenlisten holen und via `upsertMany` einspeisen — die Registry bleibt dabei netzwerkfrei, der Adapter liegt außerhalb.
 2. **Metriken füllen**: `volume24h`, `spread`, `volatility` sind bis dahin `null`; Liquidity-/Risk-Filter brauchen sie.
 3. **Delisting-Lifecycle**: aktuell nur Statuswechsel; Aufräumregeln (Retention, automatisches `halted` bei fehlendem `lastSeen`) fehlen bewusst.
-4. **Symbol-Alias-Tabelle**: `KRAKEN:XBT/USD` ↔ `BTC` ist noch nicht abgebildet; heute wird die venue-native Schreibweise 1:1 übernommen.
+4. ~~**Symbol-Alias-Tabelle**~~ — **erledigt (v1.28.0, SYM-007):** Venue-Aliase wie `KRAKEN:XBT/USD` ↔ `BTC` sind deklarativ in den Venue-Profilen (`src/symbols/venueProfiles.ts`) abgebildet; Details in [SYMBOLS.md](SYMBOLS.md) §3.
 5. **UI-Anbindung**: Das Operations Center (Task 10) rendert `docs/help/market-universe.help.json` als Tooltips; die Watchlist-Präferenz soll dort editierbar werden.
 6. **Monitor/Marktscan** liest weiterhin `DEFAULT_WATCHLIST` (Legacy-Alias). Umstellung auf `registry.query()` ist für den Ranking-Task vorgesehen.
 

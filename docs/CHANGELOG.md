@@ -70,7 +70,10 @@ normalizeVenueSymbol("KRAKEN", "xbt-usd");
 - **Docs:** `docs/SYMBOLS.md` (Befund-Tabelle „Regex → Datei →
   akzeptiert/abgelehnt“, verbindliche Kanonisierungsregeln, Verhaltens-
   änderungen), `README.md` (Abschnitt „Symbol-Notation“),
-  `docs/MARKET_DATA_PIPELINE.md` (§11 Referenz).
+  `docs/MARKET_DATA_PIPELINE.md` (§11 Referenz), `docs/MARKET_UNIVERSE.md`
+  (§4 Cross-Ref zur SSoT; §9 „Symbol-Alias-Tabelle“ als erledigt geführt),
+  `docs/HISTORY.md` (Instrument-ID = Speicherform, Verweis auf §4) und
+  `docs/ARENA_TASKS.md` (Task 15).
 - **Tests:** Golden (`tests/symbols/normalize.test.ts`), Property-basiert
   (`tests/symbols/normalize.property.test.ts` — deterministischer PRNG:
   wirft nie / Idempotenz / Kanon↔Nativ-Roundtrip / Injection-Invariante /

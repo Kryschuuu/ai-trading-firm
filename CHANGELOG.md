@@ -46,7 +46,9 @@ unangetastet (Ticket §3.3).
   überspringt Unparsebares und Zielkollisionen, idempotent.
 * Docs: neu `docs/SYMBOLS.md` (Befund-Tabelle der Alt-Regexe, Regeln,
   Verhaltensänderungen), Referenzen in `README.md` und
-  `docs/MARKET_DATA_PIPELINE.md` (§11).
+  `docs/MARKET_DATA_PIPELINE.md` (§11), Abgleich in
+  `docs/MARKET_UNIVERSE.md` (§4, §9) und `docs/HISTORY.md`
+  (Speicherform-Verweis), Task-Board `docs/ARENA_TASKS.md` (Task 15).
 * Tests: Golden-Suite (`tests/symbols/normalize.test.ts`), Property-Tests mit
   deterministischem PRNG (`normalize.property.test.ts`: nie werfen, Idempotenz,
   Kanon↔Nativ-Roundtrip, Injection-Invariante, ReDoS-Probe),
