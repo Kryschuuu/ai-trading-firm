@@ -14,12 +14,12 @@
  * die Registry erfindet keine Marktdaten.
  *
  * Dieser Seed enthält AUSSCHLIESSLICH statische Instrumentendaten.
- * liveAvailable/liveTradable werden NIEMALS hier definiert, sondern ausschließlich
- * zur Laufzeit aus der Capability-Matrix projiziert (siehe
- * src/capabilities/resolveCapabilities.ts). Ein Seed-Eintrag mit diesen Feldern
- * ist ein Bug.
+ * `liveAvailable` ist im Seed VERBOTEN (Laufzeitzustand, siehe
+ * src/universe/capabilityProjection.ts). `liveTradable` ist die fachliche
+ * Produktentscheidung: PAPER = false, reale Venues = true.
  */
 
+import { assertSeedRecordHasNoLiveAvailable } from "./capabilityProjection";
 import type { InstrumentInput } from "./types";
 import { UI_WATCHLIST_PREFERENCE } from "./watchlist";
 
@@ -73,6 +73,7 @@ function paperInstrument(symbol: string, assetClass: InstrumentInput["assetClass
     leverageAvailable: false,
     shortAvailable: false,
     paperAvailable: true,
+    liveTradable: false,
     volume24h: null,
     spread: null,
     volatility: null,
@@ -113,6 +114,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
       leverageAvailable: false,
       shortAvailable: false,
       paperAvailable: true,
+      liveTradable: true,
       volume24h: null,
       spread: null,
       volatility: null,
@@ -134,6 +136,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
       leverageAvailable: false,
       shortAvailable: false,
       paperAvailable: true,
+      liveTradable: true,
       volume24h: null,
       spread: null,
       volatility: null,
@@ -160,6 +163,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
         leverageAvailable: false,
         shortAvailable: true,
         paperAvailable: true,
+        liveTradable: true,
         volume24h: null,
         spread: null,
         volatility: null,
@@ -185,12 +189,14 @@ export function buildSeedInstruments(): InstrumentInput[] {
     leverageAvailable: true,
     shortAvailable: true,
     paperAvailable: true,
+    liveTradable: true,
     volume24h: null,
     spread: null,
     volatility: null,
     lastSeen: SEED_TIMESTAMP,
   });
 
+  for (const record of out) assertSeedRecordHasNoLiveAvailable(record);
   return out;
 }
 

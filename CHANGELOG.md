@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
-> Code-Version **1.28.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.28.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,24 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.28.1] — 2026-08-30 · fix(universe): liveAvailable als Laufzeitprojektion (CAP-008)
+
+**P1, sicherheitsrelevant im UI/API-Sinn.** `liveTradable` ist die fachliche
+Produktentscheidung (Seed/Stammdaten: PAPER = false, reale Venues = true).
+`liveAvailable` ist **niemals** ein Seed-Wert — es ist die Konjunktion aus
+(1) `liveTradable`, (2) `capabilities[venue].trading`, (3) registriertem
+Nicht-Stub-Adapter mit `capabilities.live`, (4) `${VENUE}_ENABLED`,
+(5) `evaluateLiveOrder().allowed`. Fail-closed; `reasons[]` nur symbolische
+Codes. Startup: `trading:true` verlangt einen echten Adapter.
+
+* Neu `src/universe/capabilityProjection.ts` + `src/brokers/adapterCatalog.ts`
+  (statisch, keine Adapter-Instanziierung).
+* Seed persistiert `liveTradable`, verbietet `liveAvailable`.
+* `/api/markets` liefert `liveAvailabilityReasons` und Tooltips.
+* Ops-Sektion Market Universe: Badges „live unavailable“.
+* Doku: `docs/CAPABILITIES.md`, `MARKET_UNIVERSE.md`, `BITUNIX.md`.
+* Version **1.28.1**. Live-Gate-Enforcement unverändert.
 
 ## [1.28.0] — 2026-08-30 · feat(symbols): zentrale, venue-aware Symbol-Normalisierung (SYM-007)
 

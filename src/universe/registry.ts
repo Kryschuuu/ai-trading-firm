@@ -18,8 +18,10 @@
  * ```
  */
 
-import { capabilityMatrix } from "../capabilities/matrix";
-import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
+import {
+  applyAvailabilityProjection,
+  projectInstrumentAvailability,
+} from "./capabilityProjection";
 import { CompiledPolicy, DEFAULT_POLICY, loadPolicy, type UniversePolicy } from "./policy";
 import { NdjsonStore } from "./store";
 import { buildAuditEntry, fileAuditSink, sanitizeSource, writeDbAudit, type AuditSink, type UniverseAuditEntry } from "./audit";
@@ -79,10 +81,7 @@ function byId(a: MarketInstrument, b: MarketInstrument): number {
 }
 
 function withProjectedCapabilities(instrument: MarketInstrument): MarketInstrument {
-  return {
-    ...instrument,
-    ...resolveInstrumentCapabilities(instrument.venue, capabilityMatrix),
-  };
+  return applyAvailabilityProjection(instrument);
 }
 
 /** In-Memory-Registry mit NDJSON-Persistenz. */
@@ -153,7 +152,8 @@ export class InstrumentRegistry {
   /** Liefert ein Instrument per kanonischer ID oder `null`. */
   get(id: string): MarketInstrument | null {
     if (typeof id !== "string") return null;
-    return this.items.get(id.trim().toUpperCase()) ?? null;
+    const found = this.items.get(id.trim().toUpperCase());
+    return found ? withProjectedCapabilities(found) : null;
   }
 
   /** Liefert ein Instrument per Venue + venue-nativem Symbol oder `null`. */
@@ -289,9 +289,9 @@ export class InstrumentRegistry {
       if (types && !types.includes(i.marketType)) continue;
       if (statuses && !statuses.includes(i.status)) continue;
       if (q.paperAvailable !== undefined && i.paperAvailable !== q.paperAvailable) continue;
-      const projectedCapabilities = resolveInstrumentCapabilities(i.venue, capabilityMatrix);
-      if (q.liveTradable !== undefined && projectedCapabilities.liveTradable !== q.liveTradable) continue;
-      if (q.liveAvailable !== undefined && projectedCapabilities.liveAvailable !== q.liveAvailable) continue;
+      const projected = projectInstrumentAvailability(i);
+      if (q.liveTradable !== undefined && projected.liveTradable !== q.liveTradable) continue;
+      if (q.liveAvailable !== undefined && projected.liveAvailable !== q.liveAvailable) continue;
       if (q.leverageAvailable !== undefined && i.leverageAvailable !== q.leverageAvailable) continue;
       if (q.shortAvailable !== undefined && i.shortAvailable !== q.shortAvailable) continue;
       if (base && i.base !== base) continue;
@@ -301,7 +301,7 @@ export class InstrumentRegistry {
       if (q.maxSpread !== undefined && (i.spread === null || i.spread > q.maxSpread)) continue;
       if (q.maxVolatility !== undefined && (i.volatility === null || i.volatility > q.maxVolatility)) continue;
       if (search && !i.id.includes(search)) continue;
-      matched.push(i);
+      matched.push(withProjectedCapabilities(i));
     }
 
     matched.sort(byId);

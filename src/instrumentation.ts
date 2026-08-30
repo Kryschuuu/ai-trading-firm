@@ -13,6 +13,10 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  const { assertTradingVenuesHaveRealAdapters } = await import("@/universe/capabilityProjection");
+  assertTradingVenuesHaveRealAdapters();
+
   if (process.env.SCHEDULER_ENABLED === "false") return;
 
   const G = globalThis as typeof globalThis & { __firmSchedulerStarted?: boolean };

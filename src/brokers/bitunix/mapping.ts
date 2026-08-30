@@ -8,6 +8,7 @@
  * marketType ist immer `perpetual` (Bitunix-Futures-API).
  */
 import type { MarketInstrument } from "../../universe/types";
+import { applyAvailabilityProjection } from "../../universe/capabilityProjection";
 import { isValidVenueNativeSymbol } from "../../symbols/normalize";
 import { BITUNIX_DEFAULT_MAKER_FEE, BITUNIX_DEFAULT_TAKER_FEE } from "./config";
 import type { BitunixTradingPair } from "./types";
@@ -80,13 +81,16 @@ export function mapTradingPair(
     leverageAvailable: maxLeverage > 1,
     shortAvailable: true,
     paperAvailable: true,
-    // liveTradable: Bitunix-Perpetuals sind beim Broker grundsätzlich live
-    // handelbar (Fähigkeit) — ABER das öffnet NICHTS: die Ausführung hängt vom
-    // Live-Gate (liveGate.state) + venueControl.liveEnabled ab, nicht von diesem
-    // Instrument-Flag. liveAvailable bleibt als Kompatibilitäts-Spiegel false
-    // (keine systemseitige Freigabe), siehe src/universe/types.ts.
+    // liveTradable: fachliche Freigabe (Bitunix-Perpetuals sind für Live vorgesehen).
+    // liveAvailable kommt ausschließlich aus projectInstrumentAvailability()
+    // (Adapter + Capability + Feature-Flag + Live-Gate) — Gate geschlossen ⇒ false.
     liveTradable: true,
-    liveAvailable: false,
+    liveAvailable: applyAvailabilityProjection({
+      venue: "BITUNIX",
+      symbol,
+      liveTradable: true,
+      paperAvailable: true,
+    }).liveAvailable,
     volume24h: null,
     spread: null,
     volatility: null,

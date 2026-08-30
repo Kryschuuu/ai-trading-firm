@@ -110,10 +110,12 @@ Konzepte strikt unterschieden:
 | `liveGate.state` | persistierte State-Machine (`src/live-gate/`) | öffnet erst die eigentliche Live-Ausführung |
 
 `liveTradable=true` bedeutet **nicht** `liveEnabled=true` und schon gar nicht
-„LIVE ORDER ALLOWED“. Seit v1.26.4 kommen `MarketInstrument.liveTradable` und
-`MarketInstrument.liveAvailable` nicht mehr aus dem Seed, sondern werden über
-`resolveInstrumentCapabilities()` aus der Capability-Matrix projiziert
-(`trading` bzw. `marketData`). Details: [CAPABILITIES.md](CAPABILITIES.md).
+„LIVE ORDER ALLOWED“. Seit v1.28.1 (CAP-008) ist `liveTradable` die fachliche
+Stammdaten-Entscheidung (Seed persistiert) und `liveAvailable` die
+Laufzeit-Konjunktion aus Stammdaten, `capabilities.trading`, registriertem
+Nicht-Stub-Adapter mit `capabilities.live`, Feature-Flag und
+`evaluateLiveOrder()`. Die ältere Fassade `resolveInstrumentCapabilities()`
+delegiert an denselben Projektor. Details: [CAPABILITIES.md](CAPABILITIES.md).
 
 ### 3.2 „Registriert“ ≠ „abgedeckt“ — Coverage-Modell (v1.21.0)
 

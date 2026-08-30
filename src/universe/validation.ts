@@ -6,13 +6,12 @@
  * Ungültige Sätze werden mit Code + Begründung abgelehnt, nie repariert.
  */
 
-import { capabilityMatrix } from "../capabilities/matrix";
-import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
 import {
   STORAGE_MAX_SYMBOL_LENGTH,
   STORAGE_SYMBOL_RE,
   isValidStorageSymbol,
 } from "../symbols/normalize";
+import { applyAvailabilityProjection } from "./capabilityProjection";
 import { MAX_VENUE_LENGTH, VENUE_RE } from "../symbols/venueProfiles";
 import {
   ASSET_CLASSES,
@@ -195,7 +194,15 @@ export function validateInstrument(raw: unknown): MarketInstrument {
     throw new UniverseValidationError("lastSeen", "erwartet ISO-8601-Zeitstempel (UTC)");
   }
 
-  const projectedCapabilities = resolveInstrumentCapabilities(venue, capabilityMatrix);
+  const paperAvailable = requireBoolean("paperAvailable", o.paperAvailable);
+  const liveTradable = requireBoolean("liveTradable", o.liveTradable === undefined ? false : o.liveTradable);
+  const projected = applyAvailabilityProjection({
+    id,
+    venue,
+    symbol,
+    paperAvailable,
+    liveTradable,
+  });
 
   return {
     id,
@@ -213,9 +220,9 @@ export function validateInstrument(raw: unknown): MarketInstrument {
     takerFee: requireFee("takerFee", o.takerFee),
     leverageAvailable: requireBoolean("leverageAvailable", o.leverageAvailable),
     shortAvailable: requireBoolean("shortAvailable", o.shortAvailable),
-    paperAvailable: requireBoolean("paperAvailable", o.paperAvailable),
-    liveTradable: projectedCapabilities.liveTradable,
-    liveAvailable: projectedCapabilities.liveAvailable,
+    paperAvailable: projected.paperAvailable,
+    liveTradable: projected.liveTradable,
+    liveAvailable: projected.liveAvailable,
     volume24h: optionalMetric("volume24h", o.volume24h),
     spread: optionalMetric("spread", o.spread, 1),
     volatility: optionalMetric("volatility", o.volatility, 100),

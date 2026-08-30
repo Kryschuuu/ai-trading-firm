@@ -37,7 +37,7 @@ import { PORTFOLIO_CONFIG_VERSION } from "@/portfolio/config";
 import { getModelRouter } from "@/routing";
 import { buildEligibilityDiagnostics, type EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 import { getScannerService, loadAllInstruments } from "@/scanner/service";
-import { getRegistry } from "@/universe";
+import { formatLiveUnavailableBadge, getRegistry, projectInstrumentAvailability } from "@/universe";
 import { eq, desc, sql } from "drizzle-orm";
 
 import {
@@ -258,20 +258,45 @@ function collectMarketUniverse(): Draft {
   const byVenue = registry.countByVenue();
   const venues = Object.entries(byVenue).sort((a, b) => b[1] - a[1]);
   const skipped = registry.skippedLines;
+  const page = registry.query({ pageSize: 500 });
+  const liveAvailableCount = page.items.filter((i) => i.liveAvailable).length;
+  const liveTradableCount = page.items.filter((i) => i.liveTradable).length;
+  const unavailable = page.items.filter((i) => i.liveTradable && !i.liveAvailable);
+  const badgeByVenue = new Map<string, string>();
+  for (const instrument of unavailable) {
+    if (badgeByVenue.has(instrument.venue)) continue;
+    const projected = projectInstrumentAvailability(instrument);
+    badgeByVenue.set(instrument.venue, formatLiveUnavailableBadge(projected.reasons, instrument.venue));
+  }
+  const badges = [...badgeByVenue.entries()].map(([venue, badge]) => ({
+    label: venue,
+    value: "live unavailable",
+    meta: badge,
+    tone: "warn" as const,
+  }));
   return {
     status: registry.size > 0 ? "ready" : "empty",
     asOf: registry.lastSync,
     metrics: [
       { label: "Instrumente", value: num(registry.size, 0) },
       { label: "Venues", value: num(venues.length, 0) },
+      { label: "Live-handelbar (fachlich)", value: num(liveTradableCount, 0), hint: "liveTradable — Produktentscheidung, kein Adapter-Nachweis." },
+      {
+        label: "Live verfügbar (technisch)",
+        value: `${num(liveAvailableCount, 0)} / ${num(page.items.length, 0)}`,
+        hint: "liveAvailable — Konjunktion aus Adapter, Capability, Feature-Flag und Live-Gate. Kein Schalter.",
+        tone: liveAvailableCount > 0 ? "warn" : "neutral",
+      },
       { label: "Stand", value: registry.lastSync ? formatTimestampUtc(registry.lastSync) : "unbekannt" },
       { label: "Policy", value: `v${registry.policy.version}` },
     ],
-    items: venues.map(([venue, count]) => ({ label: venue, value: num(count, 0) })),
+    items: [...venues.map(([venue, count]) => ({ label: venue, value: num(count, 0) })), ...badges],
     note:
       skipped > 0
         ? `${countLabel(skipped, "Zeile")} beim Laden übersprungen (beschädigt) — Registry-Audit prüfen.`
-        : null,
+        : unavailable.length > 0
+          ? `${countLabel(unavailable.length, "Instrument")} fachlich live-handelbar, aber technisch nicht live verfügbar.`
+          : null,
   };
 }
 

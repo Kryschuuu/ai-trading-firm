@@ -20,6 +20,7 @@ export * from "./audit";
 export * from "./registry";
 export * from "./seed";
 export * from "./watchlist";
+export * from "./capabilityProjection";
 
 import { InstrumentRegistry, type RegistryOptions } from "./registry";
 import { SEED_INSTRUMENTS } from "./seed";

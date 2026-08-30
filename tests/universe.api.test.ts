@@ -72,13 +72,20 @@ test("API: Venue-Filter gruppiert und beschriftet den Ausschnitt", async () => {
 
 test("API: Kraken-Stub-Instrument projiziert liveAvailable=false", async () => {
   const body = (await json(await call("?venue=KRAKEN&pageSize=1"))) as unknown as {
-    instruments: Array<{ venue: string; liveAvailable: boolean; liveTradable: boolean }>;
+    instruments: Array<{
+      venue: string;
+      liveAvailable: boolean;
+      liveTradable: boolean;
+      liveAvailabilityReasons: string[];
+    }>;
     groups: Array<{ instruments: Array<{ venue: string; liveAvailable: boolean; liveTradable: boolean }> }>;
   };
   assert.equal(body.instruments[0].venue, "KRAKEN");
   assert.equal(body.instruments[0].liveAvailable, false);
-  assert.equal(body.instruments[0].liveTradable, false);
+  assert.equal(body.instruments[0].liveTradable, true);
   assert.equal(body.groups[0].instruments[0].liveAvailable, false);
+  assert.ok(Array.isArray(body.instruments[0].liveAvailabilityReasons));
+  assert.ok(body.instruments[0].liveAvailabilityReasons.length > 0);
 });
 
 test("API: Filterkombination und Pagination-Metadaten", async () => {

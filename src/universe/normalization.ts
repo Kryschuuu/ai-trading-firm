@@ -14,8 +14,6 @@
  * | (FX)     | `EURUSD=X`       | `<VENUE>:EURUSD=X`     | EUR/USD    |
  */
 
-import { capabilityMatrix } from "../capabilities/matrix";
-import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
 import {
   MAX_SYMBOL_LENGTH,
   MAX_VENUE_LENGTH,
@@ -174,7 +172,8 @@ export function normalizeInstrument(input: InstrumentInput, now: Date = new Date
     leverageAvailable: input.leverageAvailable ?? false,
     shortAvailable: input.shortAvailable ?? false,
     paperAvailable: input.paperAvailable ?? true,
-    ...resolveInstrumentCapabilities(venue, capabilityMatrix),
+    liveTradable: input.liveTradable === true,
+    liveAvailable: false,
     volume24h: input.volume24h ?? null,
     spread: input.spread ?? null,
     volatility: input.volatility ?? null,

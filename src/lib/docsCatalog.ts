@@ -70,7 +70,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   capabilities: {
     file: "docs/CAPABILITIES.md",
     title: "Capabilities & Instrument-Projektion",
-    subtitle: "SSoT für discovery, marketData, trading und abgeleitete Live-Flags (v1.26.4)",
+    subtitle: "SSoT für discovery, marketData, trading; liveAvailable-Laufzeitprojektion (v1.28.1)",
   },
   marketPipeline: {
     file: "docs/MARKET_DATA_PIPELINE.md",
