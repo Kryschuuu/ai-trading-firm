@@ -24,6 +24,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LIVE_TRADING.md](LIVE_TRADING.md)** | Live-Trading-Gate (Task 11): auditierte State-Machine, Enforcement, Kill-Switch, Audit-Kette, CI (v1.19) |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang und Merge-Status |
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
+| **[CAPABILITIES.md](CAPABILITIES.md)** | Capability-SSoT: `discovery`, `marketData`, `trading` und abgeleitete Instrument-Live-Flags (v1.26.4) |
 | **[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)** | MarketDataSyncService: Discovery, Enrichment, Candle-Backfill vor dem Scanner (v1.24) |
 | **[OPERATIONS_CENTER.md](OPERATIONS_CENTER.md)** | Operations Center: Market-Data-Readiness-Diagnose — leeren Scanner-Funnel Schritt für Schritt eingrenzen (v1.27) |
 | **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup-Regel, v1→v2-Migration (v1.26) |

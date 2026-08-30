@@ -18,6 +18,8 @@
  * ```
  */
 
+import { capabilityMatrix } from "../capabilities/matrix";
+import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
 import { CompiledPolicy, DEFAULT_POLICY, loadPolicy, type UniversePolicy } from "./policy";
 import { NdjsonStore } from "./store";
 import { buildAuditEntry, fileAuditSink, sanitizeSource, writeDbAudit, type AuditSink, type UniverseAuditEntry } from "./audit";
@@ -76,6 +78,13 @@ function byId(a: MarketInstrument, b: MarketInstrument): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+function withProjectedCapabilities(instrument: MarketInstrument): MarketInstrument {
+  return {
+    ...instrument,
+    ...resolveInstrumentCapabilities(instrument.venue, capabilityMatrix),
+  };
+}
+
 /** In-Memory-Registry mit NDJSON-Persistenz. */
 export class InstrumentRegistry {
   private readonly items = new Map<string, MarketInstrument>();
@@ -129,7 +138,7 @@ export class InstrumentRegistry {
     if (this.loaded && !force) return this;
     const result = this.store.load();
     this.items.clear();
-    for (const i of result.instruments) this.items.set(i.id, i);
+    for (const i of result.instruments) this.items.set(i.id, withProjectedCapabilities(i));
     this.skippedOnLoad = result.skipped;
     this.loaded = true;
     return this;
@@ -222,6 +231,8 @@ export class InstrumentRegistry {
         continue;
       }
 
+      candidate = withProjectedCapabilities(candidate);
+
       const before = this.items.get(candidate.id);
       if (!before) {
         this.items.set(candidate.id, candidate);
@@ -278,8 +289,9 @@ export class InstrumentRegistry {
       if (types && !types.includes(i.marketType)) continue;
       if (statuses && !statuses.includes(i.status)) continue;
       if (q.paperAvailable !== undefined && i.paperAvailable !== q.paperAvailable) continue;
-      if (q.liveTradable !== undefined && i.liveTradable !== q.liveTradable) continue;
-      if (q.liveAvailable !== undefined && i.liveAvailable !== q.liveAvailable) continue;
+      const projectedCapabilities = resolveInstrumentCapabilities(i.venue, capabilityMatrix);
+      if (q.liveTradable !== undefined && projectedCapabilities.liveTradable !== q.liveTradable) continue;
+      if (q.liveAvailable !== undefined && projectedCapabilities.liveAvailable !== q.liveAvailable) continue;
       if (q.leverageAvailable !== undefined && i.leverageAvailable !== q.leverageAvailable) continue;
       if (q.shortAvailable !== undefined && i.shortAvailable !== q.shortAvailable) continue;
       if (base && i.base !== base) continue;

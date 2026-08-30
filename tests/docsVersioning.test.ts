@@ -99,6 +99,26 @@ test("Migrations-CLI schreibt nur mit --apply (Dry-Run als Default)", () => {
   assert.ok(cli.includes("docs/MIGRATION_TIMEFRAME_FIELD.md"), "CLI-Hilfe muss auf das Runbook verweisen");
 });
 
+test("Capability-Dokumentation ist vorhanden, katalogisiert und verlinkt", () => {
+  const doc = "docs/CAPABILITIES.md";
+  const content = read(doc);
+  for (const needle of [
+    "discovery",
+    "marketData",
+    "trading",
+    "liveAvailable",
+    "liveTradable",
+    "resolveInstrumentCapabilities",
+    "fail-closed",
+  ]) {
+    assert.ok(content.includes(needle), `${doc} muss '${needle}' enthalten`);
+  }
+  const catalog = read("src/lib/docsCatalog.ts");
+  assert.match(catalog, /file:\s*"docs\/CAPABILITIES\.md"/, "Capabilities-Doku muss im docsCatalog stehen");
+  assert.ok(read("docs/README.md").includes("CAPABILITIES.md"), "Capabilities-Doku muss in docs/README.md verlinkt sein");
+  assert.ok(read("docs/MARKET_UNIVERSE.md").includes("CAPABILITIES.md"), "Market-Universe-Doku muss die Capability-SSoT verlinken");
+});
+
 test("Marktdaten-Fehler-Entscheidungsbaum ist vorhanden, katalogisiert und verlinkt", () => {
   const doc = "docs/ERROR_HANDLING_MARKETDATA.md";
   const content = read(doc);

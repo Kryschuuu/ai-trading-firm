@@ -42,9 +42,13 @@ export function resolveDataDir(dir?: string): string {
 }
 
 /** Serialisiert ein Instrument mit stabiler Feldreihenfolge (deterministische Diffs). */
+export const PERSISTED_INSTRUMENT_FIELDS: readonly (keyof MarketInstrument)[] = INSTRUMENT_FIELDS.filter(
+  (field) => field !== "liveTradable" && field !== "liveAvailable",
+);
+
 export function serializeInstrument(instrument: MarketInstrument): string {
   const ordered: Record<string, unknown> = {};
-  for (const field of INSTRUMENT_FIELDS) ordered[field] = instrument[field];
+  for (const field of PERSISTED_INSTRUMENT_FIELDS) ordered[field] = instrument[field];
   return JSON.stringify(ordered);
 }
 

@@ -62,6 +62,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Market Universe",
     subtitle: "Broker-unabhängige Instrumenten-Registry — Datenmodell, Normalisierung, API (v1.8)",
   },
+  capabilities: {
+    file: "docs/CAPABILITIES.md",
+    title: "Capabilities & Instrument-Projektion",
+    subtitle: "SSoT für discovery, marketData, trading und abgeleitete Live-Flags (v1.26.4)",
+  },
   marketPipeline: {
     file: "docs/MARKET_DATA_PIPELINE.md",
     title: "Market-Data-Pipeline",

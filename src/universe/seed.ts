@@ -12,6 +12,12 @@
  * aus öffentlichen Gebühren-/Tick-Tabellen der Venues und werden von späteren
  * Discovery-Tasks überschrieben. Metriken starten bewusst auf `null`:
  * die Registry erfindet keine Marktdaten.
+ *
+ * Dieser Seed enthält AUSSCHLIESSLICH statische Instrumentendaten.
+ * liveAvailable/liveTradable werden NIEMALS hier definiert, sondern ausschließlich
+ * zur Laufzeit aus der Capability-Matrix projiziert (siehe
+ * src/capabilities/resolveCapabilities.ts). Ein Seed-Eintrag mit diesen Feldern
+ * ist ein Bug.
  */
 
 import type { InstrumentInput } from "./types";
@@ -67,8 +73,6 @@ function paperInstrument(symbol: string, assetClass: InstrumentInput["assetClass
     leverageAvailable: false,
     shortAvailable: false,
     paperAvailable: true,
-    liveTradable: false,
-    liveAvailable: false,
     volume24h: null,
     spread: null,
     volatility: null,
@@ -109,8 +113,6 @@ export function buildSeedInstruments(): InstrumentInput[] {
       leverageAvailable: false,
       shortAvailable: false,
       paperAvailable: true,
-      liveTradable: true,
-    liveAvailable: true,
       volume24h: null,
       spread: null,
       volatility: null,
@@ -132,8 +134,6 @@ export function buildSeedInstruments(): InstrumentInput[] {
       leverageAvailable: false,
       shortAvailable: false,
       paperAvailable: true,
-      liveTradable: true,
-    liveAvailable: true,
       volume24h: null,
       spread: null,
       volatility: null,
@@ -160,8 +160,6 @@ export function buildSeedInstruments(): InstrumentInput[] {
         leverageAvailable: false,
         shortAvailable: true,
         paperAvailable: true,
-        liveTradable: true,
-    liveAvailable: true,
         volume24h: null,
         spread: null,
         volatility: null,
@@ -187,8 +185,6 @@ export function buildSeedInstruments(): InstrumentInput[] {
     leverageAvailable: true,
     shortAvailable: true,
     paperAvailable: true,
-    liveTradable: true,
-    liveAvailable: true,
     volume24h: null,
     spread: null,
     volatility: null,
