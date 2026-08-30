@@ -12,9 +12,8 @@
  * Paper-Pfad serialisiert nicht (keine Private-API).
  */
 import type { BrokerOrderRequest } from "../../contracts/broker";
+import { isValidVenueNativeSymbol } from "../../symbols/normalize";
 import type { BitunixPlaceOrderBody } from "./types";
-
-const SYMBOL_RE = /^[A-Z0-9]{2,20}$/;
 
 export class OrderSerializationError extends Error {
   readonly code = "BITUNIX_ORDER_SERIALIZE";
@@ -36,7 +35,9 @@ function finitePositive(n: unknown): n is number {
  */
 export function serializePlaceOrder(req: BrokerOrderRequest): BitunixPlaceOrderBody {
   const symbol = typeof req.symbol === "string" ? req.symbol.trim().toUpperCase() : "";
-  if (!SYMBOL_RE.test(symbol)) {
+  // Zentrale Symbol-SSoT (SYM-007): venue-native Byte-Identität (z. B. BTCUSDT)
+  // statt lokalem Regex — die Venue sieht ausschließlich ihre eigene Form.
+  if (!isValidVenueNativeSymbol("BITUNIX", symbol)) {
     throw new OrderSerializationError(`Ungültiges Symbol (${String(req.symbol).slice(0, 24)})`);
   }
   if (!finitePositive(req.qty)) {

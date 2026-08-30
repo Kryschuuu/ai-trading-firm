@@ -62,6 +62,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Market Universe",
     subtitle: "Broker-unabhängige Instrumenten-Registry — Datenmodell, Normalisierung, API (v1.8)",
   },
+  symbols: {
+    file: "docs/SYMBOLS.md",
+    title: "Symbol-Normalisierung (SYM-007)",
+    subtitle: "Zentrale venue-aware Symbol-SSoT — Kanon ↔ Nativ, Profile, ID-Migration (v1.28)",
+  },
   capabilities: {
     file: "docs/CAPABILITIES.md",
     title: "Capabilities & Instrument-Projektion",

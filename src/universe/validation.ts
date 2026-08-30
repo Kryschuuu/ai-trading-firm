@@ -9,6 +9,12 @@
 import { capabilityMatrix } from "../capabilities/matrix";
 import { resolveInstrumentCapabilities } from "../capabilities/resolveCapabilities";
 import {
+  STORAGE_MAX_SYMBOL_LENGTH,
+  STORAGE_SYMBOL_RE,
+  isValidStorageSymbol,
+} from "../symbols/normalize";
+import { MAX_VENUE_LENGTH, VENUE_RE } from "../symbols/venueProfiles";
+import {
   ASSET_CLASSES,
   INSTRUMENT_STATUSES,
   MARKET_TYPES,
@@ -19,9 +25,9 @@ import {
 } from "./types";
 
 /** Maximale Länge eines Venue-Namens. */
-export const MAX_VENUE_LENGTH = 16;
+export { MAX_VENUE_LENGTH };
 /** Maximale Länge eines venue-nativen Symbols. */
-export const MAX_SYMBOL_LENGTH = 32;
+export const MAX_SYMBOL_LENGTH = STORAGE_MAX_SYMBOL_LENGTH;
 /** Maximale Länge einer Instrument-ID (`VENUE:SYMBOL`). */
 export const MAX_ID_LENGTH = MAX_VENUE_LENGTH + 1 + MAX_SYMBOL_LENGTH;
 /** Harte Obergrenze für Batch-Upserts (DoS-Schutz). */
@@ -31,16 +37,26 @@ export const MAX_PAGE_SIZE = 500;
 /** Standard-Seitengröße, wenn der Aufrufer nichts angibt. */
 export const DEFAULT_PAGE_SIZE = 100;
 
-/** Erlaubtes Venue-Format: 2–16 Großbuchstaben/Ziffern/Unterstrich, Start alphabetisch. */
-export const VENUE_RE = /^[A-Z][A-Z0-9_]{1,15}$/;
+/**
+ * Erlaubtes Venue-Format: 2–16 Großbuchstaben/Ziffern/Unterstrich, Start
+ * alphabetisch. Seit SYM-007 re-exportiert aus der zentralen Symbol-SSoT
+ * (`src/symbols/venueProfiles.ts`) — ein Muster, eine Stelle.
+ */
+export { VENUE_RE };
 
 /**
- * Erlaubtes Symbolformat: Großbuchstaben/Ziffern, optional bis zu zwei
- * Segmente getrennt durch `/ . - _ =` (deckt `BTC/USD`, `EUR.USD`,
- * `BTC-PERP`, `EURUSD=X`, `BRK.B` ab). Keine Leer-/Sonderzeichen,
+ * Erlaubtes Symbolformat im Registry-Speicher: Großbuchstaben/Ziffern,
+ * optional bis zu zwei Segmente getrennt durch `/ . - _ =` (deckt `BTC/USD`,
+ * `EUR.USD`, `BTC-PERP`, `EURUSD=X`, `BRK.B` ab). Keine Leer-/Sonderzeichen,
  * damit nichts in URLs, Dateinamen oder Queries eskalieren kann.
+ *
+ * Seit SYM-007 Alias auf `STORAGE_SYMBOL_RE` aus `src/symbols/normalize.ts`.
+ * Die Registry speichert bewusst venue-NATIVE Schreibweisen (z. B.
+ * `IBKR:EUR.USD`); die kanonische Form (`IBKR:EUR/USD`) liefert die
+ * zentrale Normalisierung (`tryNormalizeVenueSymbol`). Beide erfüllen dieses
+ * Speichermuster.
  */
-export const SYMBOL_RE = /^[A-Z0-9]{1,20}(?:[/.\-_=][A-Z0-9]{1,10}){0,2}$/;
+export const SYMBOL_RE = STORAGE_SYMBOL_RE;
 
 /** Erlaubtes Format für Asset-/Quote-Ticker. */
 export const TICKER_RE = /^[A-Z0-9]{1,12}$/;
@@ -71,9 +87,9 @@ export function isValidVenue(raw: unknown): raw is string {
   return typeof raw === "string" && raw.length <= MAX_VENUE_LENGTH && VENUE_RE.test(raw);
 }
 
-/** Prüft ein venue-natives Symbol gegen `SYMBOL_RE`. */
+/** Prüft ein venue-natives Symbol gegen `SYMBOL_RE` (= zentrales Speichermuster, SYM-007). */
 export function isValidSymbol(raw: unknown): raw is string {
-  return typeof raw === "string" && raw.length <= MAX_SYMBOL_LENGTH && SYMBOL_RE.test(raw);
+  return isValidStorageSymbol(raw);
 }
 
 /** Prüft eine Instrument-ID auf Format `VENUE:SYMBOL`. */

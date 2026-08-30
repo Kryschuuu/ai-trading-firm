@@ -175,7 +175,11 @@ export interface BrokerAccount {
 
 /** Order-Request im broker-unabhängigen Format. */
 export interface BrokerOrderRequest {
-  /** Sanitisiertes Venue-Symbol (Whitelist, siehe marketData.sanitizeSymbol). */
+  /**
+   * Sanitisiertes Venue-Symbol. PAPER-Orders tragen kanonische Symbole
+   * (`marketData.sanitizeSymbol` → `src/symbols`-SSoT, SYM-007); Live-Adapter
+   * verlangen die venue-native Form (`isValidVenueNativeSymbol`).
+   */
   symbol: string;
   side: "LONG" | "SHORT";
   qty: number;
