@@ -104,8 +104,9 @@ function mockAdapter(opts: {
   const calls: CallLog = { discover: 0, ticker: [], book: [], candles: [], tickerBatches: [], maxConcurrency: 0 };
   const instruments = opts.instruments ?? [instrument("BTCUSDT"), instrument("ETHUSDT")];
   let active = 0;
-  // Misst die Parallelität: ein Burst (Promise.all über N Instrumente) würde
-  // hier sofort auffallen — der Sync-Orchestrator arbeitet strikt sequenziell.
+  // Misst die Parallelität: ein unbegrenzter Burst (Promise.all über N
+  // Instrumente) würde hier sofort auffallen — der Sync-Orchestrator arbeitet
+  // mit konfigurierbarer, hart auf ≤ 8 begrenzter Nebenläufigkeit.
   const guard = async <T,>(run: () => Promise<T>): Promise<T> => {
     active += 1;
     calls.maxConcurrency = Math.max(calls.maxConcurrency, active);
@@ -196,11 +197,11 @@ test("für jedes Instrument: getTicker, getOrderBook, getCandles × 4 Timeframes
   for (const tf of SYNC_TIMEFRAMES) {
     assert.equal(calls.candles.filter((c) => c.timeframe === tf).length, 2);
     assert.ok(calls.candles.every((c) => c.limit === 150));
-    assert.equal(result.candlesByTimeframe[tf], 4); // 2 instruments × 2 candles
+    assert.equal(result.candlesByTimeframe[tf]?.bars, 4); // 2 instruments × 2 candles
   }
   assert.equal(result.tickersEnriched, 2);
   assert.equal(result.orderbooksEnriched, 2);
-  assert.equal(result.instrumentsDiscovered, 2);
+  assert.equal(result.discovered, 2);
 });
 
 test("Adapter-Fehler in getCandles() landen in SyncResult.errors — kein Full-Abort", async () => {
@@ -210,11 +211,11 @@ test("Adapter-Fehler in getCandles() landen in SyncResult.errors — kein Full-A
   });
   const { service, registry } = harness(adapter);
   const result = await service.syncVenue("BITUNIX");
-  assert.equal(result.instrumentsDiscovered, 2);
+  assert.equal(result.discovered, 2);
   assert.equal(result.tickersEnriched, 2);
   assert.equal(result.orderbooksEnriched, 2);
-  assert.ok(result.errors.length >= 8, `erwartet 2×4 Candle-Fehler, war ${result.errors.length}`);
-  assert.ok(result.errors.every((e) => e.stage === "candles"));
+  assert.ok(result.failures.length >= 8, `erwartet 2×4 Candle-Fehler, war ${result.failures.length}`);
+  assert.ok(result.failures.every((e) => e.stage === "candles"));
   assert.equal(calls.discover, 1);
   assert.ok(registry.size >= 1, "Registry bleibt trotz Candle-Fehlern befüllt");
 });
@@ -232,7 +233,7 @@ test("SyncError behält klassifizierte reason/httpStatus (429) pro Instrument, R
   const { service, registry } = harness(adapter);
   const result = await service.syncVenue("BITUNIX");
 
-  const btcCandleErrors = result.errors.filter(
+  const btcCandleErrors = result.failures.filter(
     (e) => e.stage === "candles" && e.instrumentId === "BITUNIX:BTCUSDT",
   );
   assert.equal(btcCandleErrors.length, SYNC_TIMEFRAMES.length);
@@ -241,20 +242,20 @@ test("SyncError behält klassifizierte reason/httpStatus (429) pro Instrument, R
   assert.equal(btcCandleErrors[0].retryable, true);
 
   // Das verbleibende Instrument wird trotzdem synchronisiert.
-  assert.ok(result.candlesByTimeframe["1h"] >= 1, "ETHUSDT-Kerzen müssen geschrieben werden");
+  assert.ok(result.candlesByTimeframe["1h"]!.bars >= 1, "ETHUSDT-Kerzen müssen geschrieben werden");
   assert.ok(registry.get("BITUNIX:ETHUSDT"));
   assert.equal(calls.discover, 1);
-  assert.equal(syncErrorsToDataErrors(result.errors).get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
+  assert.equal(syncErrorsToDataErrors(result.failures).get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
 });
 
 test("leeres discoverInstruments() → instrumentsDiscovered: 0, kein Crash", async () => {
   const { adapter, calls } = mockAdapter({ instruments: [] });
   const { service, registry, history } = harness(adapter);
   const result = await service.syncVenue("BITUNIX");
-  assert.equal(result.instrumentsDiscovered, 0);
+  assert.equal(result.discovered, 0);
   assert.equal(result.tickersEnriched, 0);
   assert.equal(result.orderbooksEnriched, 0);
-  assert.equal(result.errors.length, 0);
+  assert.equal(result.failures.length, 0);
   assert.equal(registry.size, 0);
   assert.equal(history.count(), 0);
   assert.equal(calls.ticker.length, 0);
@@ -282,7 +283,7 @@ test("leeres Orderbuch (bids[0]/asks[0] undefined) bricht den Sync nicht ab", as
   const { service, registry } = harness(adapter);
   const result = await service.syncVenue("BITUNIX");
   assert.equal(result.orderbooksEnriched, 1);
-  assert.equal(result.errors.length, 0);
+  assert.equal(result.failures.length, 0);
   const stored = registry.get("BITUNIX:BTCUSDT");
   assert.ok(stored);
   assert.equal(stored!.spread, null);
@@ -299,7 +300,7 @@ test("Ticker-Fehler isoliert: Orderbuch und Kerzen laufen weiter", async () => {
   const result = await service.syncVenue("BITUNIX");
   assert.equal(result.tickersEnriched, 0);
   assert.equal(result.orderbooksEnriched, 1);
-  assert.ok(result.errors.some((e) => e.stage === "ticker"));
+  assert.ok(result.failures.some((e) => e.stage === "ticker"));
   assert.ok(history.count() > 0);
 });
 
@@ -385,7 +386,7 @@ test("Ticker-Symbol weicht ab → volume24h bleibt null (kein Fremd-Volumen)", a
   assert.equal(eth!.volume24h, null, "fremdes quoteVol darf nicht übernommen werden");
   assert.equal(result.tickersEnriched, 0);
   assert.ok(
-    result.errors.some((e) => e.stage === "ticker" && /Symbol/.test(e.message)),
+    result.failures.some((e) => e.stage === "ticker" && /Symbol/.test(e.message)),
     "Abweichung muss als Sync-Fehler sichtbar sein",
   );
 });
@@ -431,7 +432,7 @@ test("Ticker ohne quoteVol → volume24h bleibt null, Liquiditäts-Faktor fällt
   assert.equal(noBook.available, false, "Spread-Faktor hat keinen Fallback");
 });
 
-test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, strikt sequenziell (kein Burst)", async () => {
+test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, Parallelität ≤ 8 (kein unbegrenzter Burst)", async () => {
   const N = 180;
   const instruments = Array.from({ length: N }, (_, i) => instrument(`SYM${i}USDT`));
   const { adapter, calls } = mockAdapter({ instruments });
@@ -452,12 +453,15 @@ test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, strikt
 
   const result = await service.syncVenue("BITUNIX");
 
-  // 1 × discovery + N × (1 ticker + 1 depth + 4 timeframe-candles)
+  // 1 × discovery + N × (1 ticker-Fallback + 1 depth + 4 timeframe-candles)
   const expected = 1 + N * (1 + 1 + SYNC_TIMEFRAMES.length);
   assert.equal(takes, expected, `Limiter-Takes: erwartet ${expected}, war ${takes}`);
   assert.equal(calls.book.length, N, "1 depth-Call je Instrument (N × depth)");
   assert.equal(calls.ticker.length, N, "per-Symbol-Ticker, da kein Batch-Adapter");
-  assert.equal(calls.maxConcurrency, 1, "keine parallelen Request-Bursts");
+  assert.ok(
+    calls.maxConcurrency <= 8,
+    `Concurrency hart auf ≤ 8 begrenzt, war ${calls.maxConcurrency}`
+  );
   assert.equal(result.orderbooksEnriched, N);
   assert.equal(registry.size, N);
 });

@@ -355,6 +355,50 @@ Oder bequemer mit dem mitgelieferten Skript:
 ./scripts/smoke-test.sh
 ```
 
+### 6.1 Marktdaten-Warmup vor dem ersten Scan `[A+B]`
+
+Der deterministische Scanner (`npm run scan`) führt **keine** Netzwerk-Requests
+aus — er liest nur, was der Sync vorher persistiert hat. Ohne Warmup meldet er
+`WARMING` und lehnt alle Instrumente mit `min-candles` ab. Also zuerst:
+
+```bash
+# 1. trocken prüfen: echte Requests, aber nichts wird nach data/ geschrieben
+npm run market:sync -- --dry-run
+
+# 2. wirklich synchronisieren (Registry + data/history/candles.ndjson)
+BITUNIX_ENABLED=true npm run market:sync
+
+# 3. danach der Scan — jetzt mit Historie
+npm run scan -- --json | jq '.readiness, .funnel.scanned'
+```
+
+Erwartung nach Schritt 2 (Zählerzeilen, keine Symbole/URLs):
+
+```
+[market-sync] BITUNIX discovery: 26 instruments
+[market-sync] tickers enriched: 26
+[market-sync] orderbooks enriched: 26
+[market-sync] 1h candles: 26/26 (3900/3900 bars)
+[market-sync] duration: 8123 ms
+```
+
+Der Status des Warmups lässt sich ohne jeden Request abfragen (Exit 1 = Warmup
+fehlt — genau der Befund, der den leeren Trichter erzeugt):
+
+```bash
+npm run market:sync:status
+# [market-sync] status: ALL · Registry 26 · Discovery (24h) 26
+# [market-sync] Warmup: 26/26 bereit · 0 im Warmup · 3900 Kerzen geladen (≥ 61 je Instrument)
+# [market-sync] Enrichment: tickers 26/26 · orderbooks 26/26
+# [market-sync] Scanner bereit: ja
+```
+
+Exit-Codes: `0` sauberer Lauf · `1` degradierter Lauf (mindestens ein isolierter
+Fehler, Teilpersistenz bleibt — Details in `data/market-data-errors.json`) ·
+`2` Bedienfehler (unbekannte Option, Venue nicht freigeschaltet,
+`--candle-limit` unter dem Warmup-Bedarf) — da geht kein Request raus.
+Flags, Gates und Limits: [`MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md) §12.
+
 ---
 
 ## Kapitel 7 — Als Dienst einrichten (systemd) `[A+B]`

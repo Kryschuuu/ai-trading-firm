@@ -70,11 +70,11 @@ test("Integration: syncVenue(\"BITUNIX\") via AdapterRegistry füllt Registry un
 
   const result = await service.syncVenue("BITUNIX");
 
-  assert.ok(result.instrumentsDiscovered >= 2, `discovery: ${result.instrumentsDiscovered}`);
+  assert.ok(result.discovered >= 2, `discovery: ${result.discovered}`);
   assert.ok(result.tickersEnriched >= 1);
   assert.ok(result.orderbooksEnriched >= 1);
   for (const tf of SYNC_TIMEFRAMES) {
-    assert.ok((result.candlesByTimeframe[tf] ?? 0) > 0, `${tf} candles missing`);
+    assert.ok((result.candlesByTimeframe[tf]?.bars ?? 0) > 0, `${tf} candles missing`);
   }
 
   const btc = registry.get("BITUNIX:BTCUSDT");
@@ -121,7 +121,7 @@ test("Integration: syncVenue(\"BITUNIX\") via AdapterRegistry füllt Registry un
   );
   const depthCalls = fx.requests.filter((r) => r.path === BITUNIX_PATHS.depth);
   assert.ok(
-    depthCalls.length >= result.instrumentsDiscovered,
+    depthCalls.length >= result.discovered,
     `1 depth-Call je Instrument erwartet, war ${depthCalls.length}`,
   );
   assert.ok(fx.publicCalls > 0);
@@ -151,12 +151,12 @@ test("Integration: 429 im Mock-HTTP-Kline-Pfad → SyncResult.errors, Rest-Sync 
 
   // FEHLER-1: Ein einzelner API-Fehler isoliert pro Instrument/Timeframe in
   // SyncResult.errors — kein globaler Abbruch.
-  assert.ok(result.errors.length > 0, "429 muss als Sync-Fehler sichtbar sein");
+  assert.ok(result.failures.length > 0, "429 muss als Sync-Fehler sichtbar sein");
   assert.ok(
-    result.errors.some((e) => e.stage === "candles" && e.reason === "RATE_LIMITED" && e.httpStatus === 429),
-    `erwartet einen klassifizierten Candle-429-Fehler: ${JSON.stringify(result.errors.slice(0, 2))}`,
+    result.failures.some((e) => e.stage === "candles" && e.reason === "RATE_LIMITED" && e.httpStatus === 429),
+    `erwartet einen klassifizierten Candle-429-Fehler: ${JSON.stringify(result.failures.slice(0, 2))}`,
   );
-  const dataErrors = syncErrorsToDataErrors(result.errors);
+  const dataErrors = syncErrorsToDataErrors(result.failures);
   assert.equal(dataErrors.get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
   assert.equal(dataErrors.get("BITUNIX:ETHUSDT"), "RATE_LIMITED");
 
@@ -166,7 +166,7 @@ test("Integration: 429 im Mock-HTTP-Kline-Pfad → SyncResult.errors, Rest-Sync 
   assert.ok(registry.get("BITUNIX:BTCUSDT"), "BTCUSDT bleibt in der Registry");
   assert.ok(registry.get("BITUNIX:ETHUSDT"), "ETHUSDT bleibt in der Registry");
   for (const tf of SYNC_TIMEFRAMES) {
-    assert.equal(result.candlesByTimeframe[tf], 0, `${tf} darf bei 429 nicht als Erfolg gezählt werden`);
+    assert.equal(result.candlesByTimeframe[tf]?.bars, 0, `${tf} darf bei 429 nicht als Erfolg gezählt werden`);
   }
   assert.ok(
     fx.requests.some((r) => r.path === BITUNIX_PATHS.kline),

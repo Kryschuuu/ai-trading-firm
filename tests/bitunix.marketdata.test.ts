@@ -79,7 +79,9 @@ test("BitunixBrokerAdapter erfüllt das MarketDataAdapter-Interface (Compile-Tim
 });
 
 test("adapterRegistry: get(\"BITUNIX\") liefert Instanz, get(\"UNKNOWN\") undefined", () => {
-  const registry = createAdapterRegistry();
+  // Gate ist die ENV-Flag `BITUNIX_ENABLED` (nicht Credentials) — hier
+  // explizit gesetzt, damit der Test nicht vom ambienten Prozess-Env abhängt.
+  const registry = createAdapterRegistry({ venues: ["BITUNIX"], ignoreEnvGates: true });
 
   const adapter = registry.get("BITUNIX");
   assert.ok(adapter, "BITUNIX muss registriert sein");
@@ -90,6 +92,8 @@ test("adapterRegistry: get(\"BITUNIX\") liefert Instanz, get(\"UNKNOWN\") undefi
   assert.ok(!registry.has("NOPE"));
   assert.ok(registry.has("bitunix"), "Venue-Keys sind case-insensitiv");
   assert.deepEqual(registry.list(), ["BITUNIX"]);
+  assert.deepEqual(registry.known(), ["BITUNIX"]);
+  assert.deepEqual(registry.skipped, []);
 });
 
 test("getOrderBook() liefert korrekt strukturiertes MarketOrderBook (bids/asks) gegen /depth-Schema", async () => {
@@ -125,10 +129,10 @@ test("Edge Case: leeres trading_pairs-Array → discoverInstruments() liefert []
     now: () => new Date("2026-08-29T00:00:00.000Z"),
   });
   const result = await service.syncVenue("BITUNIX");
-  assert.equal(result.instrumentsDiscovered, 0);
+  assert.equal(result.discovered, 0);
   assert.equal(result.tickersEnriched, 0);
   assert.equal(result.orderbooksEnriched, 0);
-  assert.equal(result.errors.length, 0);
+  assert.equal(result.failures.length, 0);
   assert.equal(registry.size, 0);
   assert.equal(history.count(), 0);
 });

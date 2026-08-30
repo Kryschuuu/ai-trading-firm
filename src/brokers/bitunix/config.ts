@@ -115,6 +115,15 @@ export function loadBitunixConfig(env: EnvLike = process.env): BitunixRuntimeCon
   };
 }
 
+/**
+ * Kappe für die Größe EINER REST-Antwort (Bytes, am Stream durchgesetzt).
+ *
+ * `fetchImpl` ist injectbar (Tests/Mocks) — deshalb gilt die Kappe auch dort:
+ * ein zu großer Payload wird abgebrochen, bevor er im Prozess puffert. Selbst
+ * `limit=2000` Kerzen (≈ 2000 × ~120 Bytes) bleiben deutlich darunter.
+ */
+export const BITUNIX_MAX_RESPONSE_BYTES = 5_242_880;
+
 /** REST-Pfade (Single Source of Truth für Client + Mock + Doku). */
 export const BITUNIX_PATHS = {
   tradingPairs: "/api/v1/futures/market/trading_pairs",

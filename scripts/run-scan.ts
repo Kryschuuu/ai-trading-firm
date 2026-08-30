@@ -4,15 +4,22 @@
  *   npm run scan                      # Scan + Artefakte für heute
  *   npm run scan -- --date=2026-08-27 # Artefaktordner explizit setzen
  *   npm run scan -- --dry             # nur rechnen, nichts schreiben
- *   npm run scan -- --sync-first      # MarketDataSyncService (Netzwerk) VOR dem Scan
+ *   npm run scan -- --sync            # MarketDataSyncService (Netzwerk) VOR dem Scan
+ *   npm run scan -- --sync --timeframes=5m,15m --candle-limit=200
+ *
+ * `--sync` (Alias: `--sync-first`) ist voreingestellt AUS: ohne ihn ist dieser
+ * Aufruf rein lokal. Der Sync bleibt damit ein expliziter, separater Schritt.
  *
  * Liest Instrumente aus der Registry (Task 01) und Kerzen aus dem
  * Historical Store (Task 03) — **lokal, ohne Netzwerk, ohne LLM** — und legt
  * `artifacts/YYYY-MM-DD/universe.json` (+ `weekly.json`) ab.
  *
- * `--sync-first` ist der einzige Netzwerk-Schritt und lebt außerhalb von
- * `scanUniverse()`. Ohne vorherigen Sync (`npm run market-sync`) bleibt der
- * Historical Store leer und der Trichter lehnt alles mit `min-candles` ab.
+ * Ohne vorherigen Sync (`npm run market:sync`) bleibt der Historical Store leer
+ * und der Trichter lehnt alles mit `min-candles` ab — genau der Defekt, den der
+ * persistent Sync behebt (docs/MARKET_DATA_PIPELINE.md).
+ *
+ * `--sync` ist der einzige Netzwerkschritt dieses Skripts und liegt AUSSERHALB
+ * von `scanUniverse()` — der Scanner selbst führt niemals Netzwerk-I/O aus.
  *
  * MDERR-006: Sync-Fehler werden als Datenfehler-Manifest persistiert und in
  * `scanUniverse()` als `dataErrors` gereicht → Readiness `ERROR` und
@@ -38,7 +45,18 @@ import { runMarketSync } from "./lib/market-sync";
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dry = args.includes("--dry");
-  const syncFirst = args.includes("--sync-first");
+  // `--sync` ist der Ticket-Name, `--sync-first` der bestehende — beide akzeptiert.
+  const syncFirst = args.includes("--sync") || args.includes("--sync-first");
+  const valueOf = (name: string): string | undefined =>
+    args.find((a) => a.startsWith(`--${name}=`))?.slice(`--${name}=`.length);
+  const syncOptions = {
+    ...(valueOf("timeframes")
+      ? { timeframes: valueOf("timeframes")!.split(",").map((t) => t.trim()).filter(Boolean) as never[] }
+      : {}),
+    ...(valueOf("candle-limit") ? { candleLimit: Number(valueOf("candle-limit")) } : {}),
+    ...(valueOf("max-instruments") ? { maxInstruments: Number(valueOf("max-instruments")) } : {}),
+    ...(valueOf("concurrency") ? { concurrency: Number(valueOf("concurrency")) } : {}),
+  };
   const dateArg = args.find((a) => a.startsWith("--date="))?.slice("--date=".length);
   const venueArg = args.find((a) => a.startsWith("--venue="))?.slice("--venue=".length);
   if (dateArg && !ARTIFACT_DATE_RE.test(dateArg)) {
@@ -49,15 +67,15 @@ async function main(): Promise<void> {
   let syncErrorCount = 0;
   if (syncFirst) {
     const venue = (venueArg ?? "BITUNIX").trim().toUpperCase();
-    const result = await runMarketSync(venue);
-    syncErrorCount = result.errors.length;
+    const result = await runMarketSync(venue, syncOptions);
+    syncErrorCount = result.failures.length;
     if (syncErrorCount > 0) {
       // MDERR-006: Fehler manifestieren und Scan TROTZDEM ausführen — der
       // Scanner übersetzt sie in DATA_UNAVAILABLE/Readiness ERROR statt in
       // eine stille min-candles-Aussortierung (Exit-Code unten = 1).
-      saveMarketDataErrors(result.errors);
+      saveMarketDataErrors(result.failures);
       console.error(
-        `[scanner] --sync-first: ${syncErrorCount} Marktdaten-Fehler — ` +
+        `[scanner] --sync: ${syncErrorCount} Marktdaten-Fehler — ` +
           `Manifest geschrieben, Scan läuft mit Readiness ERROR (kein Marktausschluss).`
       );
     } else {

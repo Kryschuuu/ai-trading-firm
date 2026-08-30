@@ -20,6 +20,93 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.29.0] — 2026-08-30 · feat(marketdata): persistenter Marktdaten-Warmup und Sync-CLI (MDSYNC-001)
+
+**P1, Produktkette.** `data/history/candles.ndjson` wurde von keinem Prozess
+befüllt: `scanUniverse()` las `candles.length === 0`, lehnte **alle**
+Instrumente mit `min-candles` ab und der Trichter meldete „Markt ungeeignet“,
+obwohl die Infrastruktur keinen Warmup hatte. Der Sync ist jetzt ein eigener,
+persistenter Schritt **vor** dem Scan — der Scanner bleibt rein.
+
+### Added
+
+* **`npm run market:sync`** (`scripts/market-sync.ts`, Alias
+  `npm run market-sync`; geteilte Schicht `scripts/lib/market-sync.ts`):
+  `--venue`, `--timeframes`, `--symbols`, `--candle-limit`,
+  `--max-instruments`, `--concurrency`, `--strict`, `--dry-run`, `--json`,
+  `--no-manifest`, `--status`, `--help`/`-h`. Exit-Codes 0/1/2 (2 =
+  Bedienfehler, es geht kein Request raus). `--status` liest ausschließlich:
+  Readiness des Warmups über dieselbe Aggregation wie das Operations Center
+  (`collectMarketDataReadiness`), Exit 0 = bereit, Exit 1 = Warmup fehlt.
+  `scripts/run-scan.ts --sync|--sync-first` nutzt denselben Pfad;
+  `npm run market:sync:status` (Alias `market-sync:status`) ist das Status-Kommando.
+* **`src/marketdata/registerAdapters.ts`** — einzige Instanzierungsstelle
+  konkreter Sync-Adapter, fail-closed gated: `MARKET_SYNC_ENABLED`
+  (Kill-Switch), `MARKET_SYNC_VENUES` (Allowlist), `<VENUE>_ENABLED`
+  (`BITUNIX_ENABLED`, nur exakt `"true"`). Nicht registrierte Venues melden
+  `skipped: [{ venue, reason }]` mit Behebungshinweis im CLI.
+  `adapterRegistry.ts` ist der objekttragende Wrapper darumherum.
+* **`SyncResult`** mit deckungsgleichen Zählern
+  (`discovered = synced + skipped`, `tickersEnriched`, `orderbooksEnriched`,
+  `spreadsUnknown`, `policyExcluded`, `candlesByTimeframe[tf] =
+  { instruments, bars }`, `failures[]`, `degraded`, `durationMs`) und
+  `formatSyncLog()` — Logzeilen und Zähler sind dieselbe Zahl.
+* **`HistoricalStore.appendSeries(groups, now)`**: ein Lade-, Kompaktier- und
+  Schreibvorgang über alle Reihen eines Laufs statt `append` je
+  Instrument × Timeframe (quadratische I/O). Semantik je Reihe identisch
+  (Dedup: jüngstes `fetchedAt` gewinnt), `append` bleibt öffentliche API.
+* **Harte Limits** in `src/marketdata/sync.ts`: `MAX_CONCURRENCY = 8`,
+  `MAX_CANDLE_LIMIT = 2000`, Discovery-Zeilen- und Ticker-Cap,
+  `InsufficientCandleLimitError` (`candleLimit < requiredWarmupCandles`,
+  Default `max(150, Bedarf)`), `SyncPartialFailureError` bei `--strict`.
+* **Payload-Kappe am Transport**: `BITUNIX_MAX_RESPONSE_BYTES` (5 MiB), am
+  Stream durchgesetzt (`content-length` nur Vorabfilter), Fehlerkind
+  `payload` → `BITUNIX_PAYLOAD`, kein Retry.
+* Doku: `docs/MARKET_DATA_PIPELINE.md` §0 (Code-Map Anforderung ↔ Pfad), §12
+  (CLI, Gates, Exit-Codes, Logformat), §13 (Abweichungen vom Ticket);
+  `docs/INSTALL.md` §6.1 (Warmup vor dem ersten Scan); `.env.example`
+  (MARKET_SYNC_*); Readme-Verlinkungen.
+
+### Changed / Fixed
+
+* `runMarketSyncDetailed()` läuft über `resolveSyncOptions()` **vor** dem
+  ersten Request — ein Timeframe-/Limit-Tippfehler schreibt nichts halbfertig.
+* Ticker: Batch-Antwort plus **Lücken-Fallback** (`+1 × tickers` je fehlendem
+  Symbol); ein Ticker mit fremdem Symbol wird nicht übernommen (Symbol-Guard),
+  `volume24h` bleibt `null` und der Lauf wird degradiert gemeldet.
+* `skipped` zählt jede Discovery-Zeile, die nicht synchronisiert wurde
+  (Allowlist, Cap, unbrauchbar, Duplikat) — nur so ist die Deckungsgleichheit
+  prüfbar; unbrauchbare Zeilen erscheinen zusätzlich als Warnung.
+* Historien-Schreibpfad des Syncs puffert Bars und ruft `appendSeries` einmal
+  pro Lauf auf (Verhalten, Persistenz und Zähler unverändert).
+
+### Tests / Security
+
+* Neu `test/marketdata/{spread,sync,security,cli}.test.ts`,
+  `test/integration/{warm-scanner,cli-sync-e2e}.test.ts` und ein
+  Shared-Fixture-Layer (`test/marketdata/fixtures.ts`, Fake-Adapter mit
+  Request-Zählern, deterministische Kerzen, deterministische Uhr).
+* Goldentest: Fake-Adapter → `syncVenue("FAKE")` → `scanUniverse()` liefert
+  `funnel.scanned === 3` und ≥ 1 Eignungskandidat; derselbe Scan mit leerem
+  Store lehnt mit `min-candles` (Kontrast ist Teil des Tests). Zweiter Test:
+  Warmup überlebt „Neustart“ (neue Store-/Registry-Instanzen) und dupliziert
+  im zweiten Lauf keine Bars.
+* Architektur-Greps: kein `PrivateClient`/`apiKey` im Sync-Pfad, keine
+  Credential-Header auf Public-Routen (`privateCalls === 0` gegen den
+  Fixture-Server), `/api/markets` GET-only, keine Pfad-Interpolation aus
+  `instrumentId`/`timeframe`, keine URLs/Kontrollzeichen in Fehlermeldungen.
+* Request-Budget gemessen: 200 Instrumente × 4 Timeframes = exakt
+  `1 + 1 + 200 + 800` Requests, Parallelität ≤ 8, sustained < 10 req/s.
+* `npm run test:coverage:marketsync` (≥ 90 % Linien über `src/marketdata/**`).
+  Gesamtsuite 1389/1389 grün; `npm run typecheck`, `npm run lint`,
+  `npm run build`, `npm run docs:validate` grün.
+
+### Migration
+
+* Keine Schema-Änderung, keine Datenmigration. `npm run market:sync` ist
+  optional, aber vor dem ersten Scan nach einem Deploy sinnvoll — ohne Warmup
+  bleibt der Trichter leer (das ist der dokumentierte Zustand, nicht ein Fehler).
+
 ## [1.28.1] — 2026-08-30 · fix(universe): liveAvailable als Laufzeitprojektion (CAP-008)
 
 **Fix (P1, sicherheitsrelevant im UI/API-Sinn):** Nach v1.26.4 wurden beide

@@ -23,6 +23,10 @@ cp .env.example .env        # Pflicht-Flags setzen (DATABASE_URL)
 npm ci
 npx drizzle-kit push        # Schema einspielen
 npm run universe:seed       # Instrument-Universum seeden
+npm run market:sync -- --dry-run   # Marktdaten-Warmup prüfen (MDSYNC-001)
+BITUNIX_ENABLED=true npm run market:sync   # Registry + Historie persistent füllen
+npm run scan -- --sync-first       # deterministischer Scan auf dem Warmup
+npm run market:sync:status         # Warmup-Readiness prüfen (nur lesen; Exit 1 = fehlt)
 npm run build
 npm run start               # http://0.0.0.0:3369
 ```
@@ -82,7 +86,8 @@ Weitere Module: `MARKET_UNIVERSE`, `MARKET_DATA_PIPELINE`, `BROKER_ARCHITECTURE`
 ## Testen & Validieren
 
 ```bash
-npm test                 # Unit/Integration (≈1160 Tests)
+npm test                 # Unit/Integration (1389 Tests)
+npm run test:coverage:marketsync   # Sync/Adapter: Coverage-Gate ≥90 % Linien
 npm run typecheck        # tsc --noEmit
 npm run lint             # ESLint
 npm run docs:validate    # Docs-as-Code-Wächter (Task 12, CI-Job docs-validate)
