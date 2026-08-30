@@ -86,10 +86,15 @@
       "technischeInfo": "Setzt voraus, dass eine Kursquelle vorhanden ist; Standardwert für neu aufgenommene Instrumente ist true.",
       "risiko": "Paper-Fills unterstellen idealisierte Ausführung; reale Slippage und Teilausführungen fehlen und schönen das Ergebnis."
     },
+    "liveTradable": {
+      "kurzinfo": "Abgeleitete Anzeige, ob der Adapter für diese Venue Orders ausführen kann.",
+      "technischeInfo": "Wird zur Laufzeit aus capabilityMatrix[venue].trading über resolveInstrumentCapabilities() berechnet; der Seed darf dieses Feld nicht enthalten.",
+      "risiko": "Live-Handel ist für diese Venue derzeit nicht verfügbar, da die Integration noch nicht produktionsreif ist (Adapter-Status: Stub)."
+    },
     "liveAvailable": {
-      "kurzinfo": "Gibt an, ob das Instrument grundsätzlich live handelbar wäre.",
-      "technischeInfo": "Reine Fähigkeitsangabe des Datensatzes — kein Schalter; das System liefert weiterhin ausschließlich Paper-Trading aus.",
-      "risiko": "Das Flag darf nie als Freigabe missverstanden werden; Live-Handel erfordert Credentials, Freigaben und ein eigenes Peer-Review."
+      "kurzinfo": "Abgeleitete Anzeige, ob der Adapter für diese Venue Live-Marktdaten liefern kann.",
+      "technischeInfo": "Wird zur Laufzeit aus capabilityMatrix[venue].marketData über resolveInstrumentCapabilities() berechnet; der Seed darf dieses Feld nicht enthalten und kann es nicht auf true setzen.",
+      "risiko": "Live-Handel ist für diese Venue derzeit nicht verfügbar, da die Integration noch nicht produktionsreif ist (Adapter-Status: Stub)."
     },
     "volume24h": {
       "kurzinfo": "Handelsvolumen der letzten 24 Stunden in Quote-Währung. Null bedeutet unbekannt, nicht null Umsatz.",

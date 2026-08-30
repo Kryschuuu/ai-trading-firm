@@ -20,6 +20,70 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.26.4] — 2026-08-30 · Capability-SSoT für Instrument-Live-Flags (CODE-REVIEW-SCANNER §17)
+
+**Fix (P1, sicherheitsrelevant im UI/API-Sinn):** Der statische Instrument-Seed
+war eine zweite, falsche Quelle für `liveAvailable`/`liveTradable`. Mehrere
+reale Venues (`BINANCE`, `KRAKEN`, `ALPACA`, `IBKR`) trugen im Seed
+`liveAvailable: true`, obwohl die Adapter-Capability-Matrix für diese Venues
+`discovery=false`, `marketData=false`, `trading=false` ausweist.
+
+### Added
+
+* **Neu `src/capabilities/resolveCapabilities.ts`:**
+  `resolveInstrumentCapabilities(venue, capabilityMatrix)` ist der einzige
+  Projektionspunkt für Instrument-Live-Flags. `liveAvailable` wird aus
+  `marketData`, `liveTradable` aus `trading` abgeleitet; unbekannte Venues
+  fallen sicher auf `{ liveAvailable:false, liveTradable:false }` zurück.
+* **Neu `src/capabilities/matrix.ts`:** stabile Import-Fassade zur Capability-
+  SSoT (`VENUE_CAPABILITIES`).
+* **Neu `docs/CAPABILITIES.md`:** Definition von `discovery`, `marketData`,
+  `trading` sowie der abgeleiteten Felder `liveAvailable` und `liveTradable`.
+
+### Changed / Fixed
+
+* `src/universe/seed.ts`: Header-Warnung ergänzt und alle
+  `liveAvailable`-/`liveTradable`-Felder aus den Seed-Einträgen entfernt.
+* `data/universe/instruments.ndjson` und
+  `tests/fixtures/universe-instruments.ndjson`: versionierte Seeds enthalten
+  keine Live-Projektionsfelder mehr.
+* `normalizeInstrument()` und `validateInstrument()` ignorieren eingehende
+  Live-Felder und projizieren sie aus der Capability-Matrix. Damit können auch
+  alte NDJSON-Dateien mit falschen `true`-Werten die API nicht mehr täuschen.
+* `NdjsonStore.serializeInstrument()` schreibt nur statische Felder; die
+  Registry hält zur Laufzeit weiterhin vollständige `MarketInstrument`-Objekte
+  für API-Kompatibilität.
+* `InstrumentRegistry.query()` filtert `liveAvailable`/`liveTradable` über die
+  Projektionsfunktion, nicht über persistierte Werte.
+* `/api/markets` gibt für Kraken/Binance/Alpaca/IBKR-Instrumente
+  `liveAvailable:false`/`liveTradable:false` aus, solange die Matrix deren
+  `marketData`/`trading` auf `false` hält.
+* `docs/MARKET_UNIVERSE.md`, `docs/BITUNIX.md`, `docs/README.md` und
+  `src/lib/docsCatalog.ts` auf die neue SSoT-Dokumentation aktualisiert.
+
+### Tests / Security
+
+* Resolver-Tests: `BINANCE` → `false/false`, `BITUNIX` spiegelt die Matrix,
+  unbekannte Venue → `false/false`.
+* Strukturtest: kein `SEED_INSTRUMENTS`-Eintrag und keine versionierte
+  Seed-NDJSON-Zeile enthält `liveAvailable` oder `liveTradable`.
+* Regression: jede Nicht-PAPER-Stub-Venue im Seed projiziert
+  `liveAvailable:false`.
+* Integration: `/api/markets?venue=KRAKEN` liefert `liveAvailable:false`.
+* Live-Trading-Gate und tatsächliche Order-Enforcement-Logik bleiben
+  unverändert; dieser Fix betrifft ausschließlich Anzeige-/API-Projektion.
+
+### Migration / Deployment
+
+* `package.json` → **1.26.4**.
+* Keine DB-Migration, keine neuen Pflicht-Env-Variablen.
+* Optional: `npm run universe:seed`, falls lokale Seed-Dateien neu erzeugt
+  werden sollen; die Serialisierung lässt Live-Projektionsfelder weg.
+
+Refs: CODE-REVIEW-SCANNER.md Section 17.
+
+---
+
 ## [1.26.3] — 2026-08-30 · Nacharbeit: Marktdaten-Fehler-Doku & Sync-Klassifikation (MDERR-006)
 
 **Nacharbeit zu v1.26.1 (`fix(marketdata): stop swallowing fetch failures`).**

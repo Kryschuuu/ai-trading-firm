@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.25.2 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
+**Stand:** v1.26.4 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -303,15 +303,20 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | `minTradeVolume` | `minQuantity` |
 | `basePrecision` / `quotePrecision` | `quantityStep` / `priceStep` = 10^(−p) |
 | `maxLeverage` | `leverageAvailable = maxLeverage > 1` |
-| — | `shortAvailable=true`, `paperAvailable=true`, `liveTradable=true` (Fähigkeit), `liveAvailable=false` (Freigabe) |
+| — | `shortAvailable=true`, `paperAvailable=true`; `liveTradable`/`liveAvailable` werden bei Registry-/API-Ausgabe aus der Capability-Matrix projiziert |
 | — | Fees = VIP0-Defaults (§2) |
 | `lastSeen` | ISO-UTC jetzt |
 
-**Semantik-Trennung (v1.20.0):** `liveTradable` beschreibt die Fähigkeit des
-Instruments am Broker (perpetual ist beim Venue live-handelbar), `liveAvailable`
-ist der abwärtskompatible Spiegel und bleibt `false` (keine systemseitige Freigabe).
-Die eigentliche Freigabe entscheidet allein der Live-Gate-Zustand + `venueControl`
-— siehe `docs/BROKER_ARCHITECTURE.md`.
+**Semantik-Trennung (v1.26.4):** Der Bitunix-Mapping-Code hatte bereits das
+richtige Sicherheitsmuster gegen eine Scheinfähigkeit etabliert:
+`liveTradable=true`, aber `liveAvailable=false`, solange die systemseitige
+Freigabe fehlt. Diese Unterscheidung bleibt als Vorbild für neue Venue-
+Integrationen dokumentiert: Instrument-/Adapter-Fähigkeit ist nicht dasselbe wie
+Live-Freigabe. Für Seed- und Registry-Daten ist der Seed seit v1.26.4 jedoch
+keine Capability-Quelle mehr; `liveAvailable`/`liveTradable` werden über
+`resolveInstrumentCapabilities()` aus der Capability-Matrix projiziert. Die
+eigentliche Order-Freigabe entscheidet weiterhin allein der Live-Gate-Zustand +
+`venueControl` — siehe `docs/BROKER_ARCHITECTURE.md` und `docs/CAPABILITIES.md`.
 
 ---
 
