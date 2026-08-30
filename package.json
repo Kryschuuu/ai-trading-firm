@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.27.0",
+  "version": "1.28.0",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "MIT",
   "private": true,
@@ -15,7 +15,7 @@
     "micro": "node --import tsx scripts/micro-executor.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/*.test.ts' 'tests/history/*.test.ts' 'src/marketdata/__tests__/*.test.ts'",
+    "test": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/*.test.ts' 'tests/history/*.test.ts' 'tests/symbols/*.test.ts' 'src/marketdata/__tests__/*.test.ts'",
     "universe:seed": "node --import tsx scripts/seed-universe.ts",
     "test:coverage": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/universe/**' 'tests/*.test.ts'",
     "test:coverage:brokers": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/brokers/**' --test-coverage-include='src/contracts/**' 'tests/broker*.test.ts'",
@@ -35,7 +35,8 @@
     "live:stamp": "node --import tsx scripts/live-security-stamp.ts",
     "security:live-gate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
     "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'",
-    "history:migrate": "node --import tsx scripts/migrate-history-timeframe.ts"
+    "history:migrate": "node --import tsx scripts/migrate-history-timeframe.ts",
+    "symbols:normalize": "node --import tsx scripts/normalize-instrument-ids.ts"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",

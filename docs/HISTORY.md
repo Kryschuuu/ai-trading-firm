@@ -48,7 +48,7 @@ trägt die Schema-Version `"v": 2`:
 | Feld | Typ | Bedeutung |
 | --- | --- | --- |
 | `v` | `2` | Schema-Version der Zeile. |
-| `instrumentId` | `string` | Kanonische Instrument-ID `"<VENUE>:<SYMBOL>"`. |
+| `instrumentId` | `string` | Instrument-ID `"<VENUE>:<SYMBOL>"` in **Speicherform** (venue-nativ bleibt erhalten; Kanon ↔ Nativ seit v1.28.0 in [SYMBOLS.md](SYMBOLS.md) §4). Bestandszeilen migriert `npm run symbols:normalize` (Dry-Run Default). |
 | `venue` | `string` | Venue der Provenienz (z. B. `BITUNIX`). |
 | `feed` | `string` | Feed-ID (z. B. `BITUNIX:rest`). |
 | `timeframe` | `SupportedTimeframe` | Periodizität (Allowlist, s. u.). |

@@ -1,8 +1,9 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-30** ·
-> Code-Version **1.27.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
-> (Historien-Migration: `npm run history:migrate`)
+> Code-Version **1.28.0** · Modul `src/marketdata/` · CLI `npm run market-sync`
+> (Historien-Migration: `npm run history:migrate` · ID-Normalisierung:
+> `npm run symbols:normalize`)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -505,6 +506,28 @@ Neue Venues: `MarketDataAdapter` implementieren und in
 `src/marketdata/adapterRegistry.ts` unter dem Venue-Kürzel registrieren — die
 **einzige** Stelle, die konkrete Adapter-Klassen instanziiert (nicht im Scanner,
 nicht in `/api/markets`). Der Scanner ändert sich nicht.
+
+## 11. Symbol-Normalisierung und Instrument-IDs (SYM-007, v1.28.0)
+
+Symbolsemantik ist seit v1.28.0 **zentralisiert**: `src/symbols/`
+(`normalizeVenueSymbol` / `tryNormalizeVenueSymbol`) ist die Single Source of
+Truth und ersetzt die vier historisch auseinandergelaufenen Regex-Muster
+(Universe / `marketData` / `ruleEngine` / Bitunix-Adapter). Verbindlich:
+
+- **Kanonische ID** `${VENUE}:${canonical}` (`KRAKEN:BTC/USD`) — deterministisch
+  aus jedem gespeicherten Symbol ableitbar, die ID für neue Konsumenten.
+- **Speicherform** der Registry/bleibt die venue-native Schreibweise
+  (`IBKR:EUR.USD`, `BINANCE:BTCUSDT`) — bestehende Bestände werden **nicht**
+  umgeschrieben; `isValidInstrumentId` akzeptiert beide Formen.
+- Der Legacy-Datenpfad (`src/lib/marketData.ts`) kanonisiert über das
+  `PAPER`/Default-Profil und routet danach: Fiat/Fiat-Paar → Yahoo
+  (`EURUSD=X`-Form), Krypto-Paar/-Basis → Binance (`BTCUSDT`-Konvention).
+- Bestands-Normalisierung: `npm run symbols:normalize` (Dry-Run ist Default,
+  `--apply` mit Backup) — repariert nur strukturelle Korruption, meldet
+  Alt-Notationen als Hinweis, überspringt Unparsebares (§3.4).
+
+Alle Regeln, die Venue-Profile, das Befund-Tableau der Alt-Regexe und die
+sichtbaren Verhaltensänderungen: **[SYMBOLS.md](SYMBOLS.md)**.
 
 ---
 

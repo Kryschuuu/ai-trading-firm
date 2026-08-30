@@ -1,8 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
-> Code-Version **1.27.0**. Vollständige, detaillierte Einträge je Release stehen
-> Code-Version **1.26.4**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.28.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -16,6 +15,44 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.28.0] — 2026-08-30 · feat(symbols): zentrale, venue-aware Symbol-Normalisierung (SYM-007)
+
+**P1.** Vier unabhängige Symbol-Regexe (Universe, `marketData`, `ruleEngine`,
+Bitunix) mit leicht unterschiedlicher Semantik validierten dasselbe Konzept —
+das in der Registry gültige Instrument `KRAKEN:BTC/USD` wurde im
+Laufzeit-/Regelpfad still verworfen. Neu: **eine** venue-aware
+Normalisierungsschicht (`src/symbols/`) als Single Source of Truth. Die
+Rule-Engine-Sicherheitsgrenzen (nur LONG, Operatoren, Ceilings) bleiben
+unangetastet (Ticket §3.3).
+
+* Neu `src/symbols/`: `normalizeVenueSymbol()` / `tryNormalizeVenueSymbol()` /
+  `isValidInstrumentId()`; deklarative Venue-Profile (Kraken-Alias `XBT↔BTC`,
+  native Formen `XBTUSD`/`BTCUSDT`/`BTC-USD`/`EUR.USD`); typisierte Fehler.
+* Kanonisierung (§3.2): NFKC, Zero-Width-Entfernung, Trim, Uppercase;
+  akzeptiert `BTCUSDT`, `BTC/USD`, `BTC-USD`, `BTC_USD`, `EUR.USD`, `EURUSD=X`
+  und `VENUE:`-Präfixe; Paare kanonisch mit `/`, Einzelwerte ohne Trenner;
+  `instrumentId = ${VENUE}:${canonical}`.
+* Unbekannte Venue: Abfragepfad = striktes Default-Profil +
+  `UnknownVenueProfileWarning` (kein Wurf); Sync-/Registrierungspfad =
+  `UnknownVenueProfileError` (`profilePolicy: "strict"`).
+* Ersetzt: lokale Regexe in `src/lib/marketData.ts` (Routing jetzt
+  kanonisch-aware: Fiat/Fiat → Yahoo `=X`, Krypto → Binance),
+  `src/lib/ruleEngine.ts`, `src/universe/validation.ts` (Re-Exports der SSoT),
+  `src/brokers/bitunix/orders.ts` + `mapping.ts` (venue-native Byte-Identität).
+* Migration (§3.4): `npm run symbols:normalize` — Dry-Run ist Default,
+  `--apply` mit automatischem Backup; repariert nur strukturelle Korruption
+  (`id ≠ venue:symbol`, Venue-Case), meldet Alt-Notationen als Hinweis,
+  überspringt Unparsebares und Zielkollisionen, idempotent.
+* Docs: neu `docs/SYMBOLS.md` (Befund-Tabelle der Alt-Regexe, Regeln,
+  Verhaltensänderungen), Referenzen in `README.md` und
+  `docs/MARKET_DATA_PIPELINE.md` (§11), Abgleich in
+  `docs/MARKET_UNIVERSE.md` (§4, §9) und `docs/HISTORY.md`
+  (Speicherform-Verweis), Task-Board `docs/ARENA_TASKS.md` (Task 15).
+* Tests: Golden-Suite (`tests/symbols/normalize.test.ts`), Property-Tests mit
+  deterministischem PRNG (`normalize.property.test.ts`: nie werfen, Idempotenz,
+  Kanon↔Nativ-Roundtrip, Injection-Invariante, ReDoS-Probe),
+  Migrations-Tests (`idMigration.test.ts`).
 
 ## [1.27.0] — 2026-08-30 · feat(operations): strukturierte Market-Data-Readiness-Diagnose (OPS-010)
 

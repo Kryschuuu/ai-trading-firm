@@ -7,6 +7,7 @@
  */
 
 import { sanitizeSymbol } from "./marketData";
+import { CRYPTO_BASES, parseCanonicalSymbol } from "../symbols/venueProfiles";
 
 export type NewsItem = {
   source: string;
@@ -26,11 +27,19 @@ export const NEWS_FEEDS: { id: string; url: string; label: string }[] = [
   { id: "cointelegraph", url: "https://cointelegraph.com/rss", label: "Cointelegraph" },
 ];
 
-/** Ticker-spezifischer Finviz-Feed (Aktien/ETFs; Krypto-Symbole werden gefiltert). */
+/** Ticker-spezifischer Finviz-Feed (Aktien/ETFs; Krypto-/FX-Symbole werden gefiltert). */
 export function finvizFeed(symbol: string): { id: string; url: string; label: string } | null {
   const clean = sanitizeSymbol(symbol);
   if (!clean) return null;
-  if (/^(BTC|ETH|SOL|XRP|BNB|ADA|DOGE|AVAX|LINK|DOT|EURUSD=X)$/i.test(clean)) return null;
+  // Kanonisch filtern (SYM-007): Krypto-Basen/-Paare und FX-Paare haben auf
+  // Finviz kein Aktien-Feed. Äquivalent zur früheren Regex, jetzt paar-aware.
+  const parsed = parseCanonicalSymbol(clean);
+  if (parsed.ok) {
+    if (parsed.parsed.kind === "pair") {
+      return null; // jedes kanonische Paar (Krypto oder FX) hat kein Finviz-Feed
+    }
+    if (parsed.parsed.fxSuffix || CRYPTO_BASES.has(parsed.parsed.ticker)) return null;
+  }
   return {
     id: `finviz:${clean}`,
     url: `https://finviz.com/rss.ashx?t=${encodeURIComponent(clean)}`,

@@ -33,6 +33,7 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | **12** | **Dokumentation (Docs-Sync)** | **Implementiert** | **1.19.0** | **dieser PR** | **✓ [S12](#)** | **✓ [R12](#)** | **siehe unten** |
 | **13** | **Marktdaten-Fehler-Observability** | **Implementiert** | **1.26.1** (Nacharbeit **1.26.3**) | **dieser PR** | **✓ MDERR-006** | **✓** | **—** |
 | **14** | **Timeframe-Dimension im Historical Store (MDSYNC-001)** | **Implementiert** | **1.26.0** (Nacharbeit **1.26.2**) | **PR #40** + Nacharbeit | **✓** | **✓** | **—** |
+| **15** | **Zentrale, venue-aware Symbol-Normalisierung (SYM-007)** | **Implementiert** | **1.28.0** | **dieser PR** | **✓ SYM-007** | **✓** | **—** |
 
 > **Nachtrag 2026-08-29 (v1.26.0 / v1.26.2):** Task 14 (Timeframe-Dimension
 > im Historical Store, MDSYNC-001) ist mit **PR #40** implementiert
@@ -235,6 +236,42 @@ fehlte die deterministische Deduplizierung.
 `tests/history/migration.test.ts` (12), `tests/docsVersioning.test.ts` (neu,
 Versionierung/Doku-Verlinkung); `npm run typecheck`, `npm run lint` und
 `npm run docs:validate` grün.
+
+---
+
+## Task 15 im Detail (Zentrale Symbol-Normalisierung, SYM-007, v1.28.0)
+
+**P1.** Das in der Registry gültige Instrument `KRAKEN:BTC/USD` wurde im
+Laufzeit-/Regelpfad still verworfen, weil ~5 lokale Symbol-Regexe mit
+abweichender Semantik (Universe, `marketData`, `ruleEngine`, Bitunix,
+Portfolio-Parse) dasselbe Konzept unterschiedlich streng prüften.
+
+- **Single Source of Truth:** `src/symbols/` (`normalize`, `venueProfiles`,
+  `errors`) — `CanonicalSymbol`, `normalizeVenueSymbol()` /
+  `tryNormalizeVenueSymbol()` / `isValidInstrumentId()`, deklarative
+  Venue-Profile (u. a. Kraken-Alias `XBT↔BTC`), ReDoS-sichere Muster,
+  NFKC + Zero-Width-Strip + Trim + Uppercase.
+- **Rollout:** Alle Alt-Regexe ersetzt (`marketData`, `ruleEngine`,
+  `universe/validation` als Re-Export, Bitunix-Adapter, `docs/`).
+  **Rule-Engine-Grenzen unverändert** (nur LONG; Operatoren `lt, lte, gt,
+  gte, eq, between, in`; Trend `eq, in`) — Ticket §3.3 per Diff geprüft.
+- **Unbekannte Venue:** Abfragepfad = striktes Default-Profil + Warning
+  (kein Wurf), Registrierungs-/Sync-Pfad = Wurf.
+- **Migration:** `npm run symbols:normalize` (Dry-Run Default, `--apply`
+  mit Backup, Rename-Report, idempotent, Exit-Codes 0/1/2) für Registry
+  und `data/history/candles.ndjson`. Gegen den committed Seed-Store:
+  0 Umbenennungen, 1 Hinweis (`PAPER:EURUSD=X`).
+- **Normative Doku:** [`SYMBOLS.md`](SYMBOLS.md); Querverweise in
+  `MARKET_UNIVERSE.md` (§4/§9), `HISTORY.md`, `MARKET_DATA_PIPELINE.md` (§11),
+  README; Katalog-Eintrag in `src/lib/docsCatalog.ts`.
+
+**Testbericht:** Golden `tests/symbols/normalize.test.ts` (21),
+Property-Tests `normalize.property.test.ts` (7 — wirft nie, Idempotenz,
+Kanon↔Nativ-Roundtrip, Injection nur innerhalb erlaubter Form, ReDoS),
+Migration `idMigration.test.ts` (9 — Backup, Dry-Run schreibt nicht,
+Idempotenz, Kollisionen ⇒ 0 Renames). Gesamtsuite **1317/1317 grün**,
+`npm run lint`, `npm run typecheck`, `npm run docs:validate` grün.
+Bereitschaftshaken für MDSYNC-001: Instrument-IDs ab jetzt kanonisch.
 
 ---
 

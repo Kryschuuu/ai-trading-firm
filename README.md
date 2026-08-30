@@ -46,11 +46,25 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung ·
 Risk Engine = Autorität · Sicherheit im Code.** Vollständiges Zielbild und
 Glossar: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Symbol-Notation
+
+Instrumente werden als `VENUE:SYMBOL` adressiert (z. B. `BINANCE:BTCUSDT`,
+`KRAKEN:BTC/USD`, `ALPACA:AAPL`). Seit v1.28.0 normalisiert die zentrale,
+venue-aware Symbolschicht (`src/symbols/`) alle historischen Schreibweisen
+(`BTCUSDT`, `BTC/USD`, `BTC-USD`, `BTC_USD`, `EUR.USD`, `EURUSD=X`) auf eine
+**kanonische Form** — Krypto-/FX-Paare mit `/` (`BTC/USD`), Einzelwerte ohne
+Trenner (`AAPL`) — und bildet sie auf die venue-native Form der API ab
+(`BTC/USD` → Kraken `XBTUSD`, Binance `BTCUSDT`, IBKR `EUR.USD`). Die
+Registry speichert weiterhin die venue-native Schreibweise; die kanonische ID
+ist daraus deterministisch ableitbar. Regeln, Profile und das
+Migrationsskript: [`docs/SYMBOLS.md`](docs/SYMBOLS.md).
+
 ## Dokumentation
 
 | Dokument | Inhalt |
 | --- | --- |
 | `docs/ARCHITECTURE.md` | Zielbild, Decoupling, Execution Modes, Glossar, Docs-Pflege |
+| `docs/SYMBOLS.md` | Zentrale, venue-aware Symbol-Normalisierung (SYM-007) |
 | `docs/MARKET_DATA_PIPELINE.md` | Discovery, Enrichment, Candle-Backfill, Scanner-Grenze |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |

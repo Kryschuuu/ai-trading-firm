@@ -30,6 +30,13 @@ import {
 } from "./marketDataErrors";
 import { structuredLog } from "./logger";
 import { telemetry } from "./telemetry";
+import { tryNormalizeVenueSymbol } from "../symbols/normalize";
+import {
+  CRYPTO_BASES,
+  FIAT_CODES,
+  parseCanonicalSymbol,
+  type ParsedSymbol,
+} from "../symbols/venueProfiles";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __mktQuoteCache?: Map<string, { price: number; ts: number; source: string }>;
@@ -93,18 +100,26 @@ export function sanitizeInterval(raw: string | null | undefined, fallback = "15m
 }
 
 /**
- * Erlaubtes Symbolformat: 1–12 Großbuchstaben/Ziffern, optional Suffix
- * `.XYZ` (z. B. BRK.B) oder `=X` (z. B. EURUSD=X). Verhindert, dass
- * Modell-Output (oder manipulierte DB-Zeilen) Sonderzeichen wie `&`, `?`, `#`
- * in externe URLs, SQL-Abfragen oder Prompts schmuggeln.
+ * Symbolnormalisierung über die zentrale, venue-aware SSoT (`src/symbols/`,
+ * SYM-007). Ersetzt das frühere lokale Regex
+ * `/^[A-Z0-9]{1,12}(?:[.=][A-Z0-9]{1,5})?$/`.
+ *
+ * Der Datenpfad ist venue-agnostisch (Binance/Yahoo als Quellen), daher
+ * Venue `PAPER` = striktes Default-Profil. Die Rückgabe ist die **kanonische
+ * Form** (`BTC/USD`, `EUR/USD`, `AAPL`) — Pair-Schreibweisen aller Legacy-
+ * Notationen erhalten so denselben Cache-Key; Injection-Zeichen (`& ? # ; " '`)
+ * wie auch Venue-Präfixe fremder Venues werden weiterhin verworfen, damit
+ * Modell-Output (oder manipulierte DB-Zeilen) nichts in externe URLs,
+ * SQL-Abfragen oder Prompts schmuggeln kann.
+ *
+ * Neu akzeptiert (Ticket §3.2): `BTC/USD`, `BTC-USD`, `BTC_USD`, `EUR.USD`,
+ * neben den bisherigen `BTCUSDT`, `EURUSD=X`, `BRK.B`. Konsumenten, die das
+ * alte Längenlimit (12+5) prüften, lesen in docs/SYMBOLS.md nach.
  */
-const SYMBOL_RE = /^[A-Z0-9]{1,12}(?:[.=][A-Z0-9]{1,5})?$/;
-
-/** Normalisiert ein Symbol oder liefert null, wenn es nicht erlaubt ist. */
 export function sanitizeSymbol(raw: string | null | undefined): string | null {
   if (typeof raw !== "string") return null;
-  const s = raw.trim().toUpperCase();
-  return SYMBOL_RE.test(s) ? s : null;
+  const res = tryNormalizeVenueSymbol("PAPER", raw);
+  return res.ok ? res.value.canonical : null;
 }
 
 /** true, wenn das Symbol dem erlaubten Format entspricht. */
@@ -112,12 +127,55 @@ export function isValidSymbol(raw: string | null | undefined): boolean {
   return sanitizeSymbol(raw) !== null;
 }
 
-function isCrypto(symbol: string): boolean {
-  return /^(BTC|ETH|SOL|XRP|BNB|ADA|DOGE|AVAX|LINK|DOT)$/i.test(symbol);
+/**
+ * Zerlegt ein KANONISCHES Symbol (sanitizeSymbol-Ausgabe) in seine Teile.
+ * Kann nur bei unsanitized Direktzugriff fehlschlagen — dann `null`
+ * (defensiv; die Aufrufer behandeln es als Yahoo-Passthrough wie historisch).
+ */
+function parseCanonical(canonical: string): ParsedSymbol | null {
+  const r = parseCanonicalSymbol(canonical);
+  return r.ok ? r.parsed : null;
 }
 
-function binancePair(symbol: string): string {
-  return `${symbol.toUpperCase()}USDT`;
+/**
+ * Quellen-Routing für ein kanonisches Symbol.
+ *
+ * - Fiat/Fiat-Paar (`EUR/USD`)        → Yahoo FX-Form `EURUSD=X` (legacy-URL).
+ * - Krypto-Paar (`BTC/USD`, `ETH/BTC`)→ Binance, USD-Quote auf `USDT` abgebildet
+ *   (Binance-Spot führt keine USD-Paare; Legacy-Konvention `BTC` → `BTCUSDT`).
+ * - Krypto-Einzelwert (`BTC`)         → Binance `<T>USDT` (unverändert).
+ * - Alles andere (`AAPL`, `BRK.B`, `JPY=X`) → Yahoo mit kanonischem String
+ *   (opake Yahoo-Formen wie `JPY=X` bleiben byte-identisch, wie bisher).
+ */
+export function routeForCanonicalSymbol(canonical: string): {
+  feed: "binance" | "yahoo";
+  venueSymbol: string;
+} {
+  const parsed = parseCanonical(canonical);
+  if (parsed?.kind === "pair") {
+    if (FIAT_CODES.has(parsed.base) && FIAT_CODES.has(parsed.quote)) {
+      return { feed: "yahoo", venueSymbol: `${parsed.base}${parsed.quote}=X` };
+    }
+    const binanceQuote = parsed.quote === "USD" ? "USDT" : parsed.quote;
+    return { feed: "binance", venueSymbol: `${parsed.base}${binanceQuote}` };
+  }
+  if (parsed?.kind === "single" && !parsed.fxSuffix && CRYPTO_BASES.has(parsed.ticker)) {
+    return { feed: "binance", venueSymbol: `${parsed.ticker}USDT` };
+  }
+  return { feed: "yahoo", venueSymbol: canonical };
+}
+
+function isCrypto(symbol: string): boolean {
+  return routeForCanonicalSymbol(symbol).feed === "binance";
+}
+
+/** Statischer Offline-Preis: direkter Treffer oder Basis eines kanonischen Paares. */
+function staticPriceFor(symbol: string): number | undefined {
+  const direct = STATIC_PRICES[symbol];
+  if (direct !== undefined) return direct;
+  const parsed = parseCanonical(symbol);
+  if (parsed?.kind === "pair") return STATIC_PRICES[parsed.base];
+  return undefined;
 }
 
 /**
@@ -194,9 +252,9 @@ async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T> {
   throw lastErr;
 }
 
-async function binancePrice(symbol: string): Promise<number> {
+async function binancePrice(venueSymbol: string): Promise<number> {
   const data = await fetchJson<{ price: string }>(
-    `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(binancePair(symbol))}`
+    `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(venueSymbol)}`
   );
   const p = Number(data.price);
   if (!Number.isFinite(p) || p <= 0) throw new Error("Binance: ungültiger Preis");
@@ -212,9 +270,9 @@ async function yahooPrice(symbol: string): Promise<number> {
   return p;
 }
 
-async function binanceCandles(symbol: string, interval: string, limit: number): Promise<Candle[]> {
+async function binanceCandles(venueSymbol: string, interval: string, limit: number): Promise<Candle[]> {
   const raw = await fetchJson<unknown>(
-    `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binancePair(symbol))}&interval=${interval}&limit=${limit}`
+    `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(venueSymbol)}&interval=${interval}&limit=${limit}`
   );
   if (!Array.isArray(raw)) {
     throw new MarketDataSchemaError("Binance klines: Antwort ist kein Array");
@@ -296,17 +354,17 @@ export async function getQuote(symbolRaw: string): Promise<Quote> {
     return { symbol, price: cached.price, source: "cache", ts: cached.ts };
   }
 
+  const route = routeForCanonicalSymbol(symbol);
   try {
-    const price = isCrypto(symbol)
-      ? await binancePrice(symbol)
-      : await yahooPrice(symbol);
+    const price =
+      route.feed === "binance" ? await binancePrice(route.venueSymbol) : await yahooPrice(route.venueSymbol);
     quoteCache.set(symbol, { price, ts: Date.now(), source: "live" });
-    return { symbol, price, source: isCrypto(symbol) ? "binance" : "yahoo", ts: Date.now() };
+    return { symbol, price, source: route.feed, ts: Date.now() };
   } catch {
     if (cached) {
       return { symbol, price: cached.price, source: "cache", ts: cached.ts };
     }
-    const fallback = STATIC_PRICES[symbol];
+    const fallback = staticPriceFor(symbol);
     if (fallback != null) {
       return { symbol, price: fallback, source: "static", ts: Date.now() };
     }
@@ -320,7 +378,7 @@ export function getQuoteSync(symbolRaw: string): number | null {
   if (!symbol) return null;
   const cached = quoteCache.get(symbol);
   if (cached) return cached.price;
-  return STATIC_PRICES[symbol] ?? null;
+  return staticPriceFor(symbol) ?? null;
 }
 
 /** Holt Kurse für eine ganze Liste (sequenziell, Fehler pro Symbol isoliert). */
@@ -397,10 +455,12 @@ export async function getCandles(
   const cached = candleCache.get(key);
   if (cached && Date.now() - cached.ts < CANDLE_TTL_MS) return cached.candles;
 
+  const route = routeForCanonicalSymbol(symbol);
   try {
-    const candles = isCrypto(symbol)
-      ? await binanceCandles(symbol, interval, limit)
-      : await yahooCandles(symbol, interval, limit);
+    const candles =
+      route.feed === "binance"
+        ? await binanceCandles(route.venueSymbol, interval, limit)
+        : await yahooCandles(route.venueSymbol, interval, limit);
     // WICHTIG (MDERR-006): Ein leeres Array ist eine GÜLTIGE Antwort („die
     // Venue hat keine Bars geliefert“). Es wird bewusst gecacht und
     // zurückgegeben — ein Abruf-Fehler wird darunter NICHT versteckt.

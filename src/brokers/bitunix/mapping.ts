@@ -8,6 +8,7 @@
  * marketType ist immer `perpetual` (Bitunix-Futures-API).
  */
 import type { MarketInstrument } from "../../universe/types";
+import { isValidVenueNativeSymbol } from "../../symbols/normalize";
 import { BITUNIX_DEFAULT_MAKER_FEE, BITUNIX_DEFAULT_TAKER_FEE } from "./config";
 import type { BitunixTradingPair } from "./types";
 
@@ -43,7 +44,9 @@ export function mapTradingPair(
 ): MarketInstrument | null {
   if (!raw || typeof raw !== "object") return null;
   const symbol = typeof raw.symbol === "string" ? raw.symbol.trim().toUpperCase() : "";
-  if (!symbol || !/^[A-Z0-9]{2,20}$/.test(symbol)) return null;
+  // Zentrale Symbol-SSoT (SYM-007): venue-native Byte-Identität für BITUNIX
+  // (2–20 Zeichen, A–Z0–9) — ersetzt das frühere lokale Inline-Regex.
+  if (!symbol || !isValidVenueNativeSymbol("BITUNIX", symbol)) return null;
 
   const base =
     typeof raw.base === "string" && raw.base.trim()

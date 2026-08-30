@@ -20,6 +20,105 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.28.0] — 2026-08-30 · feat(symbols): zentrale, venue-aware Symbol-Normalisierung (SYM-007)
+
+**Priorität P1** (abhängigkeitsfrei; vor MDSYNC-001 zu mergen, damit
+Instrument-IDs von Anfang an kanonisch sind).
+
+### Problem
+
+Mindestens vier unabhängige Symbol-Regexe (`universe/validation.ts`,
+`src/lib/marketData.ts`, `src/lib/ruleEngine.ts`, Bitunix-Adapter) existierten
+mit leicht unterschiedlicher Semantik. Die Universe-Registry definiert `/`
+explizit als gültige Notation (`KRAKEN:BTC/USD`), `marketData` und die
+RuleEngine akzeptierten dagegen nur `BTCUSDT`, `EUR.USD`, `EURUSD=X` —
+`BTC/USD` und `BTC-USD` wurden still abgelehnt. Folge: ein im Universum
+gültiges Instrument verschwand lautlos im Laufzeit-/Regelpfad.
+
+### Zielbild (umgesetzt)
+
+Eine einzige venue-aware Normalisierungsschicht als Single Source of Truth:
+
+```ts
+normalizeVenueSymbol("KRAKEN", "xbt-usd");
+// → { venue: "KRAKEN", canonical: "BTC/USD", venueNative: "XBTUSD",
+//     instrumentId: "KRAKEN:BTC/USD", assetClass: "CRYPTO" }
+```
+
+### Hinzugefügt
+
+- **`src/symbols/normalize.ts`** — Public API (`normalizeVenueSymbol`,
+  `tryNormalizeVenueSymbol`, `isValidInstrumentId`, `isValidStorageSymbol`,
+  `isValidVenueNativeSymbol`, `cleanRawSymbol`, injizierbare Warn-Senke).
+- **`src/symbols/venueProfiles.ts`** — deklarative Venue-Profile
+  (DEFAULT/PAPER/BINANCE/KRAKEN/BITUNIX/DYDX/ALPACA/IBKR), ReDoS-sichere
+  negierte Zeichenklassen, Paar-Parser (FX-Suffix → Trenner → Alias-Präfix →
+  Quote-Suffix → Einzelwert), Kraken-Alias `XBT ↔ BTC` (bijektiv),
+  Korruptionsschutz für konkatenierte native Formen (Paar-Grenze nur bei
+  bekannter Quote verlustfrei).
+- **`src/symbols/errors.ts`** — `SymbolNormalizationError` (maschinenlesbarer
+  Grund), `UnknownVenueProfileWarning` (Abfragepfad: Default-Profil +
+  strukturiertes Log, kein Wurf), `UnknownVenueProfileError`
+  (Registrierungspfad: `profilePolicy: "strict"`).
+- **`src/symbols/idMigration.ts`** + **`scripts/normalize-instrument-ids.ts`**
+  (`npm run symbols:normalize`, §3.4) — Dry-Run ist Default, `--apply` mit
+  Backup `<datei>.bak-<ISO>` (chmod 600). Repariert nur strukturelle
+  Korruption, meldet Alt-Notationen (`KRAKEN:BTC-USD`, `PAPER:EURUSD=X`) als
+  Hinweis ohne Änderung, überspringt Unparsebares und Zielkollisionen,
+  entfernt byte-identische Dubletten, idempotent. Exit-Codes 0/1/2 wie
+  `history:migrate`.
+- **Docs:** `docs/SYMBOLS.md` (Befund-Tabelle „Regex → Datei →
+  akzeptiert/abgelehnt“, verbindliche Kanonisierungsregeln, Verhaltens-
+  änderungen), `README.md` (Abschnitt „Symbol-Notation“),
+  `docs/MARKET_DATA_PIPELINE.md` (§11 Referenz), `docs/MARKET_UNIVERSE.md`
+  (§4 Cross-Ref zur SSoT; §9 „Symbol-Alias-Tabelle“ als erledigt geführt),
+  `docs/HISTORY.md` (Instrument-ID = Speicherform, Verweis auf §4) und
+  `docs/ARENA_TASKS.md` (Task 15).
+- **Tests:** Golden (`tests/symbols/normalize.test.ts`), Property-basiert
+  (`tests/symbols/normalize.property.test.ts` — deterministischer PRNG:
+  wirft nie / Idempotenz / Kanon↔Nativ-Roundtrip / Injection-Invariante /
+  ReDoS-Probe / Profil grenzen), Migration (`tests/symbols/idMigration.test.ts`).
+
+### Geändert
+
+- `src/lib/marketData.ts` — `sanitizeSymbol()` nutzt die SSoT (Venue `PAPER`)
+  und liefert die kanonische Form; Quellen-Routing kanonisch-aware: Fiat/Fiat
+  → Yahoo `<6 Buchstaben>=X` (externe URLs unverändert), Krypto → Binance
+  (USD-Quote → `USDT`-Konvention); `STATIC_PRICES`-Fallback zusätzlich über
+  die Krypto-Basis des Paares; Cache-Schlüssel kanonisch (dedupliziert
+  Schreibweisen).
+- `src/lib/ruleEngine.ts` — `sanitizeRuleSpec()` ersetzt ausschließlich das
+  Symbol-Regex durch `tryNormalizeVenueSymbol()`. **Sicherheitsgrenzen
+  unverändert** (§3.3): `RULE_ALLOWED_SIDE = "LONG"`, numerische Operatoren
+  `lt, lte, gt, gte, eq, between, in`, Trend-Operatoren `eq, in`, alle
+  Ceilings.
+- `src/universe/validation.ts` — `VENUE_RE`/`SYMBOL_RE` sind Re-Exporte der
+  SSoT (`STORAGE_SYMBOL_RE`, Storage-Semantik unverändert); bestehende
+  Registry-IDs bleiben bestehen (Speicherform venue-nativ, kanonische Form
+  daraus ableitbar).
+- `src/brokers/bitunix/orders.ts` + `src/brokers/bitunix/mapping.ts` —
+  `isValidVenueNativeSymbol("BITUNIX", …)` (venue-native Byte-Identität)
+  statt lokalem `^[A-Z0-9]{2,20}$`.
+- `src/lib/news.ts` — Finviz-Filter kanonisch-aware (jedes Paar/FX/Krypto
+  bleibt ohne Finviz-Feed).
+- `tests/security.test.ts` — Assertion auf kanonische FX-Form aktualisiert
+  (`EURUSD=X` → `EUR/USD`) plus Abdeckung der neu akzeptierten Notationen;
+  alle Injection-Ablehnungen unverändert grün.
+
+### Sichtbare Verhaltensänderungen
+
+| Aufruf | Vorher | Nachher |
+| --- | --- | --- |
+| `sanitizeSymbol("EURUSD=X")` | `"EURUSD=X"` | `"EUR/USD"` (Yahoo-Routing bildet weiter auf `EURUSD=X` ab) |
+| `sanitizeSymbol("BTC/USD")` / `("BTC-USD")` | `null` | `"BTC/USD"` |
+| `sanitizeSymbol("BTCUSDT")` | `"BTCUSDT"` | `"BTC/USDT"` |
+| `sanitizeRuleSpec(symbol: "BTC/USD")` | abgelehnt | akzeptiert (kanonisch) |
+| Längenlimit Abfragepfad | 12 (+5) | 24 gesamt, Einzel-Ticker ≤ 12 |
+
+Vollständige Tabelle und Regeln: `docs/SYMBOLS.md` §6.
+
+---
+
 ## [1.27.0] — 2026-08-30 · feat(operations): strukturierte Market-Data-Readiness-Diagnose (OPS-010)
 
 **Nacharbeit zum Code-Review (CODE-REVIEW-SCANNER, Sections 14, 22, 26).**

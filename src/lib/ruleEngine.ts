@@ -22,6 +22,7 @@
 
 import { ema, rsi, atrPct } from "./indicators";
 import { LIMIT_CEILINGS, riskAdjustedSize } from "./riskGuard";
+import { tryNormalizeVenueSymbol } from "../symbols/normalize";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typen
@@ -202,12 +203,24 @@ function clamp(v: number, [min, max]: readonly [number, number]): number {
   return Math.min(Math.max(v, min), max);
 }
 
-const SYMBOL_RE = /^[A-Z0-9]{1,12}(?:[.=][A-Z0-9]{1,5})?$/;
-
+/**
+ * Symbolnormalisierung über die zentrale, venue-aware SSoT (SYM-007).
+ *
+ * Regeln adressieren Ausführungssymbole des PAPER-Pfads — daher Venue
+ * `PAPER` (striktes Default-Profil, keine Venue-Native-Aliasregeln). Die
+ * Engine arbeitet danach ausschließlich mit der kanonischen Form (`BTC/USD`).
+ *
+ * WICHTIG (Ticket §3.3): Diese Änderung ersetzt NUR das frühere lokale
+ * Symbol-Regex durch `tryNormalizeVenueSymbol()`. Die Sicherheitsgrenzen —
+ * `RULE_ALLOWED_SIDE = "LONG"`, die numerischen Operatoren, die
+ * Trend-Operatoren und alle Ceilings — sind ausdrücklich unverändert.
+ * `BTC/USD` wird seither akzeptiert (vorher still verworfen); Injection-
+ * Zeichen wie `; & ? " '` werden weiterhin zuverlässig abgelehnt.
+ */
 function normalizeSymbol(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const s = raw.trim().toUpperCase();
-  return SYMBOL_RE.test(s) ? s : null;
+  const res = tryNormalizeVenueSymbol("PAPER", raw);
+  return res.ok ? res.value.canonical : null;
 }
 
 /** Stabile String-Vergleichsform für Dedup (keys sortiert, keine Reihung). */
