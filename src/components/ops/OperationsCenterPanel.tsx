@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, readJson } from "@/lib/apiClient";
+import MarketDataPanel from "@/components/ops/MarketDataPanel";
 import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
 import type { OpsItem, OpsMetric, OpsPayload, OpsSection, OpsSectionStatus, OpsTone } from "@/ops/types";
 import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
@@ -253,9 +254,12 @@ export function OperationsCenterView({
 }
 
 /**
- * Rendert eine Sektionskarte und hängt direkt an die Scanner-Karte die
- * Market-Data-Readiness-Karte an (OPS-010): Die Pipeline-Diagnose gehört
- * optisch zum Funnel, lebt aber als eigenes, additives Payload-Feld.
+ * Rendert eine Sektionskarte. An der Scanner-Karte hängt die Market-Data-
+ * Diagnose: **oberhalb** des Funnels das MarketDataPanel (OPS-011, Snapshot
+ * mit Venue-Sync-Status, worst offenders und kontextabhängigem Hinweis);
+ * fehlt der Snapshot (ältere Server-Antwort), fällt die Ansicht auf die
+ * Readiness-Karte (OPS-010) zurück. Der Funnel selbst bleibt in allen
+ * Zuständen unverändert sichtbar.
  */
 function FragmentWithMarketData({
   section,
@@ -266,10 +270,14 @@ function FragmentWithMarketData({
   payload: OpsPayload | null;
   onOpenTab?: (tab: string) => void;
 }) {
+  const snapshot = section.id === "scanner" ? payload?.marketData ?? null : null;
   return (
     <>
+      {snapshot && (
+        <MarketDataPanel snapshot={snapshot} diagnostics={payload?.eligibilityDiagnostics ?? null} />
+      )}
       <SectionCard section={section} onOpenTab={onOpenTab} />
-      {section.id === "scanner" && payload?.marketDataReadiness && (
+      {section.id === "scanner" && !snapshot && payload?.marketDataReadiness && (
         <MarketDataReadinessCard
           report={payload.marketDataReadiness}
           diagnostics={payload.eligibilityDiagnostics ?? null}

@@ -45,6 +45,19 @@ export {
   type MarketDataReadinessInput,
   type MarketDataReadinessReport,
 } from "./marketDataReadiness";
+export {
+  buildReadinessHint,
+  collectMarketDataReadiness as collectMarketDataSnapshot,
+  MAX_SNAPSHOT_OFFENDERS,
+  MAX_SNAPSHOT_VENUES,
+  type MarketDataSnapshotInput,
+} from "./collectMarketData";
+export type {
+  MarketDataOpsOffender,
+  MarketDataOpsSnapshot,
+  MarketDataOpsVenue,
+  MarketDataReadinessStatus,
+} from "./types";
 export type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 
 /**
@@ -54,6 +67,8 @@ export type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnos
  * Zusammenführen mit dem Katalog aus `src/auth/ops`. Die Market-Data-Readiness
  * wird additiv angehängt (OPS-010): schlägt ihre Aggregation fehl, steht
  * `null` im Payload — Sektionen und Funnel bleiben unverändert lesbar.
+ * Seit OPS-011 gehört dazu auch der Snapshot der Sektion „Market Data“
+ * (`marketData`, ebenfalls fail-soft `null`).
  */
 export async function buildOperationsCenter(actor: Actor | null): Promise<OpsPayload> {
   const data = await collectSectionData();
@@ -61,5 +76,6 @@ export async function buildOperationsCenter(actor: Actor | null): Promise<OpsPay
   return buildOpsPayload(actor, data, {
     marketDataReadiness: extras?.report ?? null,
     eligibilityDiagnostics: extras?.diagnostics ?? null,
+    marketData: extras?.snapshot ?? null,
   });
 }

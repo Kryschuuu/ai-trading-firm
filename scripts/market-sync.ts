@@ -36,6 +36,7 @@ import {
   type SyncResult,
 } from "../src/marketdata";
 import { clearMarketDataErrors, saveMarketDataErrors } from "../src/marketdata/dataErrors";
+import { saveVenueSyncStatus } from "../src/marketdata/syncStatus";
 import { loadScannerConfig } from "../src/scanner/config";
 import {
   collectMarketDataReadiness,
@@ -417,6 +418,9 @@ export async function runMarketSyncCli(
       lines.push(line);
       console.log(line);
     } else if (manifest) {
+      // OPS-011: kompakter Sync-Status je Venue (letzter Lauf, degraded,
+      // Fehler nach Ursache) — Quelle der Sektion „Market Data“ im Ops-Center.
+      saveVenueSyncStatus(result);
       if (result.failures.length > 0) {
         saveMarketDataErrors(result.failures);
         const line =

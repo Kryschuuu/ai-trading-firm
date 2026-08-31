@@ -21,6 +21,7 @@ import { APP_VERSION } from "@/lib/version";
 import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
 import {
+  type MarketDataOpsSnapshot,
   type OpsHealth,
   type OpsPayload,
   type OpsSection,
@@ -196,6 +197,8 @@ export interface OpsPayloadExtras {
   marketDataReadiness?: MarketDataReadinessReport | null;
   /** Eligibility-Diagnose (gedeckelt; `total` zählt voll). */
   eligibilityDiagnostics?: EligibilityDiagnosticsSummary | null;
+  /** Sektion „Market Data“ (OPS-011, v1.33.0): Snapshot oberhalb des Funnels. */
+  marketData?: MarketDataOpsSnapshot | null;
 }
 
 /**
@@ -232,5 +235,6 @@ export function buildOpsPayload(
     health: summarizeSections(sections),
     marketDataReadiness: extras.marketDataReadiness ?? null,
     eligibilityDiagnostics: extras.eligibilityDiagnostics ?? null,
+    marketData: extras.marketData ?? null,
   };
 }
