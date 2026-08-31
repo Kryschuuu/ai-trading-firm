@@ -41,12 +41,37 @@ export const agents = pgTable("agents", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Ein Handelsauftrag/Ziel für die Firma. */
+/**
+ * Ein Handelsauftrag/Ziel für die Firma.
+ *
+ * Seit v1.35.0 kennt eine Mission zwei Typen (`scope`):
+ *
+ *   * `SINGLE_SYMBOL` — ein Instrument (`symbol` Pflicht). Verhalten wie vor
+ *     v1.35.0; der Default-Wert hält Alt-Installationen unverändert lauffähig.
+ *   * `SCAN_UNIVERSE` — die Mission scannt ein **Marktsegment** (`segment`,
+ *     z. B. `INDICES`, `PENNY`, `ALL`). Die Kandidaten werden zur Laufzeit aus
+ *     der Instrument-Registry bestimmt (`src/lib/missionUniverse.ts`), stehen
+ *     also nie als kopierte Liste in der Datenbank.
+ *
+ * `templateId` dokumentiert, aus welcher Vorlage (`src/lib/missionTemplates.ts`)
+ * die Mission entstanden ist — reine Nachvollziehbarkeit, keine FK-Beziehung
+ * (der Vorlagenkatalog lebt im Code, nicht in der DB).
+ *
+ * Migration: `npx drizzle-kit push` ergänzt die drei Spalten mit Defaults;
+ * bestehende Zeilen bleiben unverändert (siehe CHANGELOG 1.35.0).
+ */
 export const missions = pgTable("missions", {
   id: uuid("id").primaryKey().defaultRandom(),
   title: text("title").notNull(),
   objective: text("objective").notNull(),
+  /** Einzel-Symbol bei `scope = SINGLE_SYMBOL`, sonst NULL. */
   symbol: text("symbol"),
+  /** SINGLE_SYMBOL | SCAN_UNIVERSE (Allowlist in src/lib/missionTemplates.ts). */
+  scope: text("scope").notNull().default("SINGLE_SYMBOL"),
+  /** Marktsegment bei `scope = SCAN_UNIVERSE` (z. B. ALL, INDICES, PENNY). */
+  segment: text("segment"),
+  /** Vorlagen-Slug, aus dem die Mission entstand (nullable, ohne FK). */
+  templateId: text("template_id"),
   riskBudget: numeric("risk_budget").notNull().default("0.02"),
   maxPositionPct: numeric("max_position_pct").notNull().default("0.25"),
   /** PENDING | ACTIVE | COMPLETED | KILLED */

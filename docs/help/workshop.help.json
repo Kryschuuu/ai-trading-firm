@@ -1,0 +1,90 @@
+{
+  "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
+  "id": "workshop",
+  "version": 1,
+  "title": "Workshop: Missionen, Markt-Scans und Vorlagen — Feldhilfe",
+  "description": "Hilfetexte im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko) für den Workshop-Schritt 1 „Mission anlegen“ (v1.35.0): Missions-Typen, neun Marktsegmente, wiederverwendbare Vorlagen, Risikoprofile und die Mandatsprüfung der Engine. Dieselben Texte stehen als Tooltips (i-Symbol) im Dashboard und in docs/MISSIONS.md.",
+  "source": "src/lib/missionTemplates.ts, src/lib/missionUniverse.ts, src/lib/workshop.ts, src/components/workshop/",
+  "fields": {
+    "missionScope": {
+      "kurzinfo": "Der Missions-Typ entscheidet, ob die Firma genau ein Instrument handelt oder ein ganzes Marktsegment scannt.",
+      "technischeInfo": "Spalte missions.scope, Werte SINGLE_SYMBOL (Symbol Pflicht) und SCAN_UNIVERSE (Segment Pflicht). Default SINGLE_SYMBOL, damit Alt-Installationen nach drizzle-kit push unverändert laufen. Allowlist: MISSION_SCOPES in src/lib/missionTemplates.ts.",
+      "risiko": "Ein Markt-Scan findet immer irgendetwas — die Qualität kommt aus den Regeln im Zieltext (Setups pro Tag, Stop-Band, Positionsanzahl), nicht aus der Breite der Kandidatenliste."
+    },
+    "missionSegment": {
+      "kurzinfo": "Das Marktsegment legt fest, welcher Teil des Universums gescannt wird — zum Beispiel alle Märkte, nur Indizes oder nur Penny Stocks.",
+      "technischeInfo": "Spalte missions.segment; neun IDs in MISSION_SEGMENT_IDS (ALL, INDICES, CRYPTO, EQUITIES, FX, COMMODITIES, PENNY, VOLATILE, LIQUID). Jedes Segment besteht aus einer InstrumentQuery für die Registry plus optionalem Zusatzfilter (src/lib/missionUniverse.ts). Die Zahl in der Auswahl zählt eindeutige Symbole, nicht Registry-Zeilen: Dasselbe Asset auf mehreren Venues (ALPACA, IBKR, PAPER) zählt einmal.",
+      "risiko": "Zeigt das Segment 0 Instrumente, fehlen Presets oder Metriken — nicht die Chancen. Abhilfe: npm run universe:seed:markets und npm run market:sync, sonst blockt die Engine jeden Trade (MISSION_SCOPE_EMPTY)."
+    },
+    "missionTemplate": {
+      "kurzinfo": "Eine Vorlage ist eine wiederverwendbare Blaupause: Sie füllt das Missionsformular voraus, gespeichert wird erst danach.",
+      "technischeInfo": "Katalog MISSION_TEMPLATES in src/lib/missionTemplates.ts (18 Einträge, 14 mit seeded: true). POST /api/firm/missions akzeptiert {\"templateId\":\"…\"}; applyMissionTemplate() füllt nur leere Felder, eigene Angaben gewinnen. Herkunft landet in missions.template_id.",
+      "risiko": "Eine übernommene Vorlage ist keine Freigabe: Titel, Zieltext und Budgets müssen zum eigenen Kapital und zur aktuellen Marktphase passen, bevor die Mission aktiv wird."
+    },
+    "missionObjective": {
+      "kurzinfo": "Der Zieltext ist der Auftrag an alle Agenten — prüfbare Regeln statt Absichten.",
+      "technischeInfo": "Spalte missions.objective, 10 bis 2000 Zeichen. validateMissionInput warnt bei vagem Beginn („Maximiere …“) und bei Scan-Missionen ohne Zahl im Text. Der Text wandert unverändert als MISSION-Zeile in den Agenten-Prompt (src/lib/engine.ts).",
+      "risiko": "Ein Zieltext ohne Abbruchkriterium macht Verlustserien unsichtbar: Ohne „maximal 3 Setups pro Tag“ oder „bei Unsicherheit HOLD“ gibt es keinen Maßstab, an dem die Firma scheitern könnte."
+    },
+    "missionRiskBudget": {
+      "kurzinfo": "Das Risikobudget ist der maximale Verlust pro Trade als Anteil des Kapitals.",
+      "technischeInfo": "Spalte missions.risk_budget als Bruchteil (0,01 = 1 %). Fenster aus LIMIT_CEILINGS.maxRiskPerTrade = 0,002 bis 0,05; die adaptive Risiko-Schicht (src/lib/adaptiveRisk.ts) kann das wirksame Limit nur senken. Positionsgröße rechnet missionSizedNotional() daraus.",
+      "risiko": "Das Budget gilt pro Trade, nicht pro Tag: Fünf offene Positionen mit 2 % Risiko sind 10 % Kontorisiko. Tagesverlust-Limit und Cooldown sind der eigentliche Schutz vor Verlustserien."
+    },
+    "missionMaxPositionPct": {
+      "kurzinfo": "Die maximale Positionsgröße begrenzt, wie viel Kapital eine einzelne Position binden darf.",
+      "technischeInfo": "Spalte missions.max_position_pct als Bruchteil. Fenster aus LIMIT_CEILINGS.maxPositionPct = 0,01 bis 0,5; die Engine klemmt missionspezifische Werte gegen das laufende Konfigurationslimit (min aus beiden).",
+      "risiko": "Eine große Position in einem illiquiden Markt ist doppelt riskant: Der Ausstieg verschiebt den Kurs, und der Stop greift erst zum nächsten verfügbaren Preis."
+    },
+    "missionRiskProfile": {
+      "kurzinfo": "Das Risikoprofil ordnet eine Vorlage grob ein — von Minimal über Defensiv bis Stresstest.",
+      "technischeInfo": "MISSION_RISK_PROFILE_LABELS in src/lib/missionTemplates.ts: MINIMAL (≤ 0,3 % Risiko), DEFENSIV (≤ 1 %), AUSGEWOGEN (1–2 %), OFFENSIV (spekulativ), STRESS (exakt an den Code-Deckeln). Reine Anzeige — erzwingen tut die Validierung nichts.",
+      "risiko": "Das Profil ersetzt keine eigene Rechnung: Wer von Defensiv auf Ausgewogen wechselt, verdoppelt das Einzelrisiko und sollte zuerst die Trefferquote im Workshop gemessen haben."
+    },
+    "successCriteria": {
+      "kurzinfo": "Das Erfolgskriterium einer Vorlage ist die SQL-Abfrage, mit der sich der Erfolg prüfen lässt.",
+      "technischeInfo": "Feld successCriteria je Vorlage. Es folgt der Faustregel aus Handbuch 5.2: „nicht in SQL prüfbar → zu vage“. Typische Prüfziele sind die Tabellen positions, proposals, agent_messages und audit_log.",
+      "risiko": "Ein Kriterium, das niemand ausführt, ist Dekoration. Ohne regelmäßige Prüfung (Tagesroutine, Kapitel 19) driftet das Verhalten der Firma unbemerkt vom Auftrag ab."
+    },
+    "segmentAll": {
+      "kurzinfo": "Das Segment „Alle Märkte“ scannt das komplette freigegebene Universum über alle Anlageklassen hinweg.",
+      "technischeInfo": "Filter: assetClass in crypto, equity, etf, index, fx, commodity mit status=active und paperAvailable=true. Kandidaten werden nach 24h-Volumen sortiert und auf 12 gekürzt (rankCandidateSymbols).",
+      "risiko": "Ohne harte Obergrenze für Setups pro Tag handelt die Firma quer durch alle Regimes gleichzeitig — Klumpenrisiko entsteht hier schneller als in einem engen Segment."
+    },
+    "segmentIndices": {
+      "kurzinfo": "Das Segment „Indizes & ETFs“ beschränkt die Mission auf breite Märkte wie S&P 500, Nasdaq oder DAX.",
+      "technischeInfo": "Filter: assetClass in index, etf. Indizes liegen als CFD/Future der Venue IBKR vor (Preset „Indizes“ aus src/universe/presets.ts), ETFs zusätzlich als PAPER-Spiegel.",
+      "risiko": "Index-CFDs sind Hebelprodukte der Venue; die Mission muss bei maxLeverage=1 bleiben. Fehlt das Preset, ist die Kandidatenliste leer und es wird nicht gehandelt."
+    },
+    "segmentPenny": {
+      "kurzinfo": "Das Segment „Penny Stocks“ bündelt spekulative US-Smallcaps unter 5 USD mit dem kleinsten Risikobudget aller Segmente.",
+      "technischeInfo": "Registry-Filter: assetClass=equity, marketType=spot, Venue ≠ IBKR. Die Preisgrenze unter 5 USD und die Volumenbestätigung prüft der Penny-Screener zur Laufzeit (src/lib/analysts.ts: runPennyScout, runPennyDiligence).",
+      "risiko": "Totalverluste sind in diesem Segment normal: dünne Orderbücher, Verwässerung und Pump-and-Dump. Positionsgröße 5 % und Risiko 0,5 % nicht anheben, Freigabepflicht aktiv lassen."
+    },
+    "segmentVolatile": {
+      "kurzinfo": "Das Segment „Hochvolatilität“ zeigt nur Märkte, die sich besonders stark bewegen.",
+      "technischeInfo": "Filter: volatility ≥ 0,60 (annualisiert). Die Metrik schreibt npm run market:sync in die Registry; ohne Sync ist sie null und das Segment leer. Vorschlag: 0,6 % Risiko, 8 % Positionsgröße.",
+      "risiko": "Hohe Volatilität bedeutet nicht hohe Rendite: Ohne verkleinertes Risiko und ATR-basierte Stops werden Positionen von normalem Rauschen ausgestoppt."
+    },
+    "segmentLiquid": {
+      "kurzinfo": "Das Segment „Top-Liquidität“ handelt nur Märkte mit hohem Tagesumsatz — dort ist der Ausstieg am zuverlässigsten.",
+      "technischeInfo": "Filter: InstrumentRegistry.query({ minVolume24h: 10000000 }). Instrumente ohne Volumenmetrik (null) fallen heraus, weil „unbekannt“ nicht mit „liquide“ verwechselt werden darf.",
+      "risiko": "Die Volumenmetrik ist ein Tageswert aus dem letzten Sync. In Stressphasen verschwindet Liquidität schneller, als die Zahl suggeriert."
+    },
+    "missionScopeViolation": {
+      "kurzinfo": "Diese Ablehnung bedeutet: Der Agent wollte ein Symbol handeln, das nicht zum Auftrag der Mission gehört.",
+      "technischeInfo": "Engine-Schritt MISSIONS-MANDAT nach der Symbol-Whitelist: isSymbolInMissionScope() vergleicht das kanonisierte Symbol mit der Kandidatenliste (src/lib/missionUniverse.ts). Ereignis ORDER_REJECTED mit reason MISSION_SCOPE_VIOLATION im audit_log.",
+      "risiko": "Häuft sich dieser Block, ist der Zieltext zu unklar oder der Prompt zu frei. Den Prompt zu lockern ist die falsche Abhilfe — die Mandatsgrenze bleibt im Code."
+    },
+    "missionScopeEmpty": {
+      "kurzinfo": "Diese Ablehnung bedeutet: Das Segment der Mission liefert aktuell keine Kandidaten, also wird bewusst nichts gehandelt.",
+      "technischeInfo": "Fail-closed-Pfad der Engine (MISSION_SCOPE_EMPTY). Ursache ist fast immer ein leeres Registry-Segment: Presets fehlen (npm run universe:seed:markets) oder Metriken fehlen (npm run market:sync).",
+      "risiko": "Nicht auf ein anderes Segment ausweichen, um „doch zu handeln“: Erst die Datenlücke schließen, sonst handelt die Firma auf Basis unbekannter Märkte."
+    },
+    "hitRate": {
+      "kurzinfo": "Die Trefferquote zählt, wie oft ein Agent TRADE, HOLD, kaputtes JSON oder einen Fehler liefert.",
+      "technischeInfo": "Workshop Schritt 4: ein Agent läuft mehrfach gegen dieselbe Mission; classifyTurnOutcome() und aggregateOutcomes() (src/lib/workshop.ts) zählen die Kategorien und zeigen Debug-Tipps ab 2 Fällen und 20 % INVALID_JSON.",
+      "risiko": "Eine hohe TRADE-Quote ist kein Erfolg: Ohne Mandats- und Guardrail-Prüfung bedeutet sie nur, dass das Modell selten „weiß ich nicht“ sagt."
+    }
+  }
+}

@@ -26,6 +26,8 @@ export async function POST(req: Request) {
     ok: result.ok,
     seeded: result.ok,
     error: result.reason,
+    /** Alt-Mandate, deren Missions-Typ nachgetragen wurde (v1.35.0). */
+    missionsMigrated: result.missionsMigrated ?? 0,
     killSwitchArmed: killSwitch.isArmed(),
   });
 }

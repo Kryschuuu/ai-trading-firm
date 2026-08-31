@@ -36,6 +36,7 @@ import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { ensureAdaptiveRiskFresh, getAdaptiveRiskStatus } from "./adaptiveRisk";
 import { getHouseView } from "./analysts";
+import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
 import { writeEquitySnapshot } from "./equity";
 import { startOfBerlinDay } from "./time";
 
@@ -337,7 +338,19 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
     await logAudit("KILL_SWITCH", "CRITICAL", { drawdownPct: broker.drawdownPct }, missionId, agentId);
   }
 
-  const symbolHint = sanitizeSymbol(mission.symbol ?? "SPY") ?? "SPY";
+  // ── Missions-Universum (v1.35.0) ─────────────────────────────────────────
+  // SINGLE_SYMBOL-Missionen verhalten sich wie bisher (mission.symbol ?? "SPY").
+  // SCAN_UNIVERSE-Missionen bekommen ihre Kandidaten aus der Instrument-
+  // Registry (src/lib/missionUniverse.ts): Das Mandat lautet dann „nur dieses
+  // Segment“, und die Engine blockt Trades außerhalb der Kandidatenliste.
+  const universe = await missionUniverseContext(
+    { symbol: mission.symbol, scope: mission.scope, segment: mission.segment },
+    { fallbackSymbol: "SPY" }
+  );
+  const symbolHint = universe.focusSymbol;
+  if (universe.warning) {
+    trace.push(step("MISSIONS-UNIVERSUM", false, universe.warning));
+  }
 
   // --- Markt-Kontext: Indikatoren für das Missionssymbol + Multi-Market-Blick ---
   let marketContext = "";
@@ -418,6 +431,9 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
     `KONTO: Equity ${broker.accountEquity.toFixed(2)}, freies Cash ${broker.freeCash.toFixed(2)}, offene Positionen ${broker.openPositions}/${limits.maxConcurrentPositions}.`,
     `RISIKOBUDGET: max ${(Number(mission.riskBudget) * 100).toFixed(1)} % Risiko pro Trade, max ${(Number(mission.maxPositionPct) * 100).toFixed(0)} % Positionsgröße.`,
     `HARTE REGELN (werden ohnehin im Code erzwungen): Stop-Loss verpflichtend, kein Hebel${limits.allowShort ? ", Long und Short erlaubt" : ", nur Long"}.`,
+    // Scan-Missionen: Kandidatenliste + Segment-Regel, Zeile für Zeile
+    // (bei SINGLE_SYMBOL ist das Array leer → der Prompt bleibt unverändert).
+    ...universe.promptLines,
     marketContext,
     kpiContext,
     houseContext,
@@ -521,6 +537,52 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
         return { ...base, status: "BLOCKED", guardrail: "INVALID_SYMBOL", trace };
       }
       trace.push(step("SYMBOL-PRÜFUNG", true, symbol));
+
+      // ── Missions-Mandat (v1.35.0): Der Trade muss zum Auftrag passen ──────
+      // Einzel-Symbol-Mission: genau dieses Symbol. Scan-Mission: ein Symbol
+      // aus der aufgelösten Kandidatenliste. Eine leere Kandidatenliste bei
+      // einer Scan-Mission blockt (fail-closed) — das Mandat „nur Indizes“
+      // ist nicht erfüllt, indem stattdessen irgendetwas anderes gekauft wird.
+      if (!isSymbolInMissionScope(universe, symbol)) {
+        const reason =
+          universe.scope === "SCAN_UNIVERSE" && universe.candidates.length === 0
+            ? "MISSION_SCOPE_EMPTY"
+            : "MISSION_SCOPE_VIOLATION";
+        await logAudit(
+          "ORDER_REJECTED",
+          "WARN",
+          {
+            reason,
+            symbol,
+            scope: universe.scope,
+            segment: universe.segmentId,
+            candidates: universe.candidates.slice(0, 12),
+          },
+          missionId,
+          agentId
+        );
+        trace.push(
+          step(
+            "MISSIONS-MANDAT",
+            false,
+            reason === "MISSION_SCOPE_EMPTY"
+              ? `Segment „${universe.segmentLabel}“ liefert keine Kandidaten — kein Trade`
+              : `${symbol} liegt außerhalb des Mandats (${universe.scopeLabel}${
+                  universe.segmentId ? `: ${universe.segmentLabel}` : ""
+                })`
+          )
+        );
+        return { ...base, status: "BLOCKED", guardrail: reason, trace };
+      }
+      trace.push(
+        step(
+          "MISSIONS-MANDAT",
+          true,
+          universe.scope === "SCAN_UNIVERSE"
+            ? `${symbol} ist Kandidat des Segments „${universe.segmentLabel}“`
+            : `${symbol} entspricht dem Missionssymbol`
+        )
+      );
 
       let price = broker.quote(symbol);
       if (price === null) {

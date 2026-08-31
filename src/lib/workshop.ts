@@ -10,6 +10,39 @@
  */
 import { LIMIT_CEILINGS } from "./riskGuard";
 import { sanitizeSymbol, STATIC_PRICES } from "./marketData";
+import {
+  MISSION_SCOPES,
+  MISSION_SEGMENT_IDS,
+  MISSION_TEMPLATE_IDS,
+  applyMissionTemplate,
+  findMissionSegment,
+  findMissionTemplate,
+  normalizeMissionScope,
+  type MissionScope,
+} from "./missionTemplates";
+
+export {
+  MISSION_SCOPES,
+  MISSION_SCOPE_LABELS,
+  MISSION_SEGMENTS,
+  MISSION_SEGMENT_IDS,
+  MISSION_TEMPLATES,
+  MISSION_TEMPLATE_CATEGORIES,
+  MISSION_TEMPLATE_CATEGORY_LABELS,
+  MISSION_RISK_PROFILE_LABELS,
+  missionSegmentDto,
+  missionTemplateDto,
+  seededMissionTemplates,
+  findMissionSegment,
+  findMissionTemplate,
+  templateToMissionDraft,
+  applyMissionTemplate,
+  type MissionScope,
+  type MissionSegment,
+  type MissionSegmentId,
+  type MissionTemplate,
+  type MissionTemplateDto,
+} from "./missionTemplates";
 
 /**
  * Symbole, die der Paper-Broker kennt (Handbuch 5.3).
@@ -39,7 +72,14 @@ export const PROMPT_LIMITS = {
 export type MissionInput = {
   title: string;
   objective: string;
-  symbol: string;
+  /** Einzel-Symbol (`SINGLE_SYMBOL`) oder `null` (`SCAN_UNIVERSE`). */
+  symbol: string | null;
+  /** Missions-Typ: ein Instrument oder ein gescanntes Marktsegment. */
+  scope: MissionScope;
+  /** Marktsegment (`SCAN_UNIVERSE`) oder `null`. */
+  segment: string | null;
+  /** Vorlagen-Slug, aus dem die Mission entstand (nullable). */
+  templateId: string | null;
   riskBudget: number;
   maxPositionPct: number;
   status: MissionStatus;
@@ -60,6 +100,20 @@ function parseNumber(raw: unknown): number {
  * Risiko- und Positions-Fenster kommen aus LIMIT_CEILINGS — dieselben Grenzen,
  * gegen die riskGuard zur Laufzeit klemmt. Eine Mission mit 90 % Risiko wird
  * hier abgelehnt und nicht erst vom Broker blockiert.
+ *
+ * Missions-Typ (`scope`, v1.35.0):
+ *   * `SINGLE_SYMBOL` (Default) → `symbol` ist Pflicht und muss in der
+ *     Paper-Broker-Liste stehen (Verhalten wie vor v1.35.0).
+ *   * `SCAN_UNIVERSE` → `segment` ist Pflicht (`MISSION_SEGMENT_IDS`), ein
+ *     Einzel-Symbol wird abgelehnt (ein Scan-Mandat hat per Definition keins).
+ *
+ * `templateId` ist optional; wird er angegeben, muss er im Vorlagenkatalog
+ * existieren. Das Vorausfüllen leerer Felder aus der Vorlage passiert davor in
+ * `applyMissionTemplate()` — diese Funktion sieht bereits den fertigen Body.
+ *
+ * Prüf-Reihenfolge (bewusst so, damit die erste Meldung die wahrscheinlichste
+ * Ursache nennt): Missions-Typ → Vorlage → Titel → Ziel → Symbol/Segment →
+ * Budgets → Status.
  */
 export function validateMissionInput(raw: unknown): ValidationResult<MissionInput> {
   if (!raw || typeof raw !== "object") {
@@ -67,6 +121,34 @@ export function validateMissionInput(raw: unknown): ValidationResult<MissionInpu
   }
   const body = raw as Record<string, unknown>;
   const warnings: string[] = [];
+
+  // ── Missions-Typ: ein Symbol oder ein gescanntes Marktsegment ──────────────
+  const scope = normalizeMissionScope(body.scope ?? "SINGLE_SYMBOL");
+  if (!scope) {
+    return {
+      ok: false,
+      error: `Missions-Typ: erlaubt sind ${MISSION_SCOPES.join(" | ")} (SINGLE_SYMBOL = ein Symbol, SCAN_UNIVERSE = Marktsegment scannen).`,
+    };
+  }
+
+  // ── Vorlage (optional, reine Herkunftsinformation) ────────────────────────
+  const templateIdValue = body.templateId;
+  const templateIdGiven =
+    templateIdValue !== undefined && templateIdValue !== null && String(templateIdValue).trim() !== "";
+  let templateId: string | null = null;
+  if (templateIdGiven) {
+    if (typeof templateIdValue !== "string") {
+      return { ok: false, error: "Vorlage: templateId muss der Slug einer Vorlage sein (String, z. B. „scan-all-markets“)." };
+    }
+    const template = findMissionTemplate(templateIdValue);
+    if (!template) {
+      return {
+        ok: false,
+        error: `Vorlage „${templateIdValue.trim().slice(0, 40)}“ ist unbekannt. Verfügbar: ${MISSION_TEMPLATE_IDS.join(", ")}.`,
+      };
+    }
+    templateId = template.id;
+  }
 
   const title = typeof body.title === "string" ? body.title.trim() : "";
   if (title.length < MISSION_TEXT_LIMITS.titleMin || title.length > MISSION_TEXT_LIMITS.titleMax) {
@@ -88,15 +170,42 @@ export function validateMissionInput(raw: unknown): ValidationResult<MissionInpu
     warnings.push("Das Ziel klingt vage („maximiere …“ / „handle clever …“). Besser: prüfbare Regeln wie „Nur Long über der 20-Tage-Linie, Stop 5 %“.");
   }
 
-  const symbol = sanitizeSymbol(typeof body.symbol === "string" ? body.symbol : null);
-  if (!symbol) {
-    return { ok: false, error: `Symbol: ungültiges Format. Erlaubt (Paper-Broker): ${MISSION_SYMBOLS.join(", ")}.` };
-  }
-  if (!MISSION_SYMBOLS.includes(symbol)) {
-    return {
-      ok: false,
-      error: `Symbol ${symbol} kennt der Paper-Broker nicht. Verfügbar: ${MISSION_SYMBOLS.join(", ")} (Handbuch 5.3).`,
-    };
+  // ── Symbol bzw. Segment (je nach Missions-Typ) ────────────────────────────
+  const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
+  let symbol: string | null = null;
+  let segment: string | null = null;
+
+  if (scope === "SINGLE_SYMBOL") {
+    symbol = sanitizeSymbol(rawSymbol);
+    if (!symbol) {
+      return { ok: false, error: `Symbol: ungültiges Format. Erlaubt (Paper-Broker): ${MISSION_SYMBOLS.join(", ")}.` };
+    }
+    if (!MISSION_SYMBOLS.includes(symbol)) {
+      return {
+        ok: false,
+        error: `Symbol ${symbol} kennt der Paper-Broker nicht. Verfügbar: ${MISSION_SYMBOLS.join(", ")} (Handbuch 5.3). Alternativ Missions-Typ „Markt-Scan“ wählen.`,
+      };
+    }
+  } else {
+    if (rawSymbol !== "") {
+      return {
+        ok: false,
+        error: "Markt-Scan: Bitte kein Einzel-Symbol setzen — die Kandidaten bestimmt das Segment. Feld Symbol leeren oder Missions-Typ „Einzel-Symbol“ wählen.",
+      };
+    }
+    const found = findMissionSegment(body.segment);
+    if (!found) {
+      return {
+        ok: false,
+        error: `Markt-Scan braucht ein Segment. Erlaubt: ${MISSION_SEGMENT_IDS.join(", ")} (z. B. ALL = alle Märkte, INDICES = Indizes & ETFs, PENNY = Penny Stocks).`,
+      };
+    }
+    segment = found.id;
+    // Weicher Hinweis: Ein Scan ohne Zahl im Zieltext ist fast immer zu vage
+    // („scanne alles“ liefert alles). Blockiert nicht — Handbuch 5.2.
+    if (!/\d/.test(objective)) {
+      warnings.push("Scan-Mission ohne Zahl im Zieltext. Besser: „höchstens 3 Setups pro Tag“, „Stop 3–6 %“, „maximal 2 offene Positionen“ — sonst ist der Auftrag nicht prüfbar.");
+    }
   }
 
   const [riskMin, riskMax] = LIMIT_CEILINGS.maxRiskPerTrade;
@@ -125,7 +234,21 @@ export function validateMissionInput(raw: unknown): ValidationResult<MissionInpu
     return { ok: false, error: `Status: erlaubt sind ${MISSION_STATUSES.join(", ")}.` };
   }
 
-  return { ok: true, value: { title, objective, symbol, riskBudget, maxPositionPct, status: statusRaw as MissionStatus }, warnings };
+  return {
+    ok: true,
+    value: {
+      title,
+      objective,
+      symbol,
+      scope,
+      segment,
+      templateId,
+      riskBudget,
+      maxPositionPct,
+      status: statusRaw as MissionStatus,
+    },
+    warnings,
+  };
 }
 
 /** Kanonische UUID (Drizzle `defaultRandom`). Verhindert, dass ungültige IDs

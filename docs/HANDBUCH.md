@@ -509,19 +509,45 @@ Eine Mission ist der Auftrag an die Firma. Sie ist der wichtigste Hebel, den du 
 vor** der Modellwahl.
 
 > **Der Weg über die UI (empfohlen):** Dashboard → Reiter **🛠 Workshop** →
-> *1 · Mission anlegen*. Formular ausfüllen, speichern, fertig — das i-Symbol
-> an jedem Feld erklärt Bedeutung und erlaubte Werte. Das Terminal braucht es
-> dafür nicht mehr.
+> *1 · Mission anlegen*. Vorlage übernehmen, Missions-Typ wählen, speichern —
+> das i-Symbol an jedem Feld erklärt Bedeutung und erlaubte Werte. Das Terminal
+> braucht es dafür nicht mehr.
+>
+> **Ausführliche Referenz:** [MISSIONS.md](MISSIONS.md) — Missions-Typen,
+> neun Marktsegmente, alle 18 Vorlagen, API, Migration, Fehlerbilder.
 
 ### 5.1 Anlegen
 
-**Über die Oberfläche (Workshop):** Titel, Ziel, Symbol (Autocomplete aus der
-Broker-Liste), Risikobudget in Prozent und maximale Positionsgröße in Prozent
-eingeben und „Mission anlegen“ klicken. Der Server prüft alles noch einmal:
-ungültige Symbole, Budgets außerhalb der Code-Grenzen und leere Titel werden
-mit einer klaren Fehlermeldung zurückgewiesen, vage Zieltexte („Maximiere …“)
-mindestens markiert. Bearbeiten geht über „Bearbeiten“ in der Missionsliste —
-Speichern läuft dann als `PUT` auf denselben Eintrag.
+**Über die Oberfläche (Workshop), vier Schritte:**
+
+1. **Vorlage wählen** — 18 Blaupausen, gruppiert nach *Einstieg & Einzelwerte*,
+   *Markt-Scans*, *Strategien* und *Diagnose & Tests*. 14 davon werden bei der
+   Installation angelegt (Schalter „nur mitinstallierte“).
+2. **„In Formular übernehmen“** — Titel, Ziel, Missions-Typ, Symbol bzw. Segment
+   und Budgets werden eingetragen. Gespeichert wird dabei noch nichts; jedes
+   Feld bleibt editierbar.
+3. **Missions-Typ prüfen** — *Einzel-Symbol* (ein Instrument) oder
+   *Markt-Scan (Segment)* (siehe 5.4). Das Formular zeigt genau das Feld, das
+   der gewählte Typ braucht.
+4. **„Mission anlegen“** — der Server prüft alles noch einmal: ungültige
+   Symbole, unbekannte Segmente, Budgets außerhalb der Code-Grenzen und leere
+   Titel werden mit einer klaren Fehlermeldung zurückgewiesen, vage Zieltexte
+   („Maximiere …“) mindestens markiert. Bearbeiten geht über „Bearbeiten“ in der
+   Missionsliste — Speichern läuft dann als `PUT` auf denselben Eintrag.
+
+**Direkt über die API (z. B. für Skripte):**
+
+```bash
+# Komplette Mission aus einer Vorlage anlegen:
+curl -s -X POST localhost:3369/api/firm/missions \
+  -H 'content-type: application/json' \
+  -d '{"templateId":"indices-trend-follow"}'
+
+# Vorlage + eigene Werte (eigene Angaben gewinnen):
+curl -s -X POST localhost:3369/api/firm/missions \
+  -H 'content-type: application/json' \
+  -d '{"templateId":"scan-all-markets","riskBudget":0.005}'
+```
 
 **Alternative über das Terminal:**
 
@@ -568,6 +594,56 @@ statisches Kursbuch. Kurse kommen im Default aus dem Market-Data-Layer
 ```bash
 curl -s localhost:3369/api/firm/missions | jq -r '.symbols[]'
 ```
+
+### 5.4 Markt-Scans: alle Märkte, nur Indizes, nur Penny Stocks
+
+Nicht jeder Auftrag passt auf ein Symbol. Seit v1.35.0 hat jede Mission deshalb
+einen **Missions-Typ** (`missions.scope`):
+
+| Missions-Typ | Pflichtfeld | Auftrag |
+| --- | --- | --- |
+| `SINGLE_SYMBOL` | Symbol | „Handle BTC“ — Verhalten wie vor v1.35.0. |
+| `SCAN_UNIVERSE` | Marktsegment | „Scanne alle Märkte“ / „nur Indizes“ / „nur Penny Stocks“. |
+
+Bei einem Markt-Scan bestimmt die **Instrument-Registry** zur Laufzeit, welche
+Märkte dazugehören — niemals eine kopierte Liste. Neun Segmente stehen zur Wahl:
+
+| Segment | Was gescannt wird |
+| --- | --- |
+| `ALL` | das komplette Universum (Krypto, Aktien, ETFs, Indizes, Devisen, Rohstoffe) |
+| `INDICES` | Indizes und Index-ETFs |
+| `CRYPTO` | Kryptowährungen (24/7) |
+| `EQUITIES` | US-Aktien (Large Caps) |
+| `FX` | große Währungspaare |
+| `COMMODITIES` | Rohstoff-Futures |
+| `PENNY` | spekulative US-Smallcaps < 5 USD (kleinstes Risikobudget) |
+| `VOLATILE` | Märkte mit annualisierter Volatilität ≥ 60 % |
+| `LIQUID` | nur Märkte mit 24h-Volumen ≥ 10 Mio. |
+
+Im Agenten-Prompt erscheinen die Kandidaten als eigene Zeile, und die Engine
+erzwingt das Mandat: Ein `TRADE` auf ein Symbol außerhalb der Kandidatenliste
+wird blockiert und als `ORDER_REJECTED` (`MISSION_SCOPE_VIOLATION`) auditiert.
+Liefert ein Segment keine Kandidaten, wird gar nicht gehandelt
+(`MISSION_SCOPE_EMPTY`, fail-closed) — dann fehlen meist die Presets
+(`npm run universe:seed:markets`) oder die Metriken (`npm run market:sync`).
+Die Kandidatenzahl steht im Workshop direkt am Segment.
+
+**Vorlagen wiederverwenden:** Jede Vorlage trägt Titel, prüfbaren Zieltext,
+Missions-Typ, Budgets, Risikoprofil, Erfolgskriterium (SQL-prüfbar) und eine
+Drei-Ebenen-Hilfe (Kurzinfo · Technik · Risiko). `POST /api/firm/missions`
+akzeptiert `{"templateId":"…"}` — die Vorlage füllt leere Felder, eigene Angaben
+gewinnen immer. Eine eigene Vorlage ergänzt du in
+`src/lib/missionTemplates.ts` (Array `MISSION_TEMPLATES`); `seeded: true` nimmt
+sie in die Installation auf. Details: [MISSIONS.md](MISSIONS.md).
+
+**Die 14 Missionen der Installation** decken ab: BTC-Einstieg, SPY-Beobachtung,
+Swing-Research (alle Märkte), Penny-Desk (Mini-Risiko), Markt-Scan „alle
+Märkte“ (max. 3 Setups/Tag), Indizes-Trendfolge, Krypto-Momentum,
+US-Large-Caps (1 Trade/Tag), Devisen-Mean-Reversion, Rohstoffe mit halbiertem
+Risiko, Hochvolatilität mit halbiertem Risiko, Liquiditäts-Mandat,
+ETH-Trendfolge (defensiv) und die HOLD-Baseline zur Prompt-Diagnose. Vier
+weitere Vorlagen (Guardrail-Stresstest, Research-only, Event-Schutz,
+Korrelations-Wächter) sind nur im Workshop auswählbar.
 
 ---
 

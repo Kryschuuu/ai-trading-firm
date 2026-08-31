@@ -270,3 +270,103 @@ test("JSON_DEBUG_TIPS: die vier Handbuch-Tipps sind vollständig", () => {
   assert.equal(JSON_TIPS_MIN_COUNT, 2);
   assert.equal(JSON_TIPS_MIN_SHARE, 0.2);
 });
+
+// ── Missions-Typ (Scope) & Marktsegmente — v1.35.0 ───────────────────────────
+
+const scanMission = {
+  title: "Markt-Scan: Indizes, defensiv",
+  objective:
+    "Nur Long auf Indizes und Index-ETFs, höchstens 2 Setups pro Tag, Stop-Loss 4–7 %. Bei Seitwärtsmarkt HOLD antworten.",
+  symbol: "",
+  scope: "SCAN_UNIVERSE",
+  segment: "INDICES",
+  riskBudget: 0.01,
+  maxPositionPct: 0.15,
+};
+
+test("validateMissionInput: Default bleibt SINGLE_SYMBOL (Abwärtskompatibilität)", () => {
+  const res = validateMissionInput(validMission);
+  assert.equal(res.ok, true);
+  if (res.ok) {
+    assert.equal(res.value.scope, "SINGLE_SYMBOL");
+    assert.equal(res.value.segment, null);
+    assert.equal(res.value.templateId, null);
+    assert.equal(res.value.symbol, "ETH");
+  }
+  // Auch ein expliziter scope-String wird normalisiert:
+  const explicit = validateMissionInput({ ...validMission, scope: " single_symbol " });
+  assert.equal(explicit.ok, true);
+});
+
+test("validateMissionInput: Markt-Scan braucht ein Segment und kein Symbol", () => {
+  const res = validateMissionInput(scanMission);
+  assert.equal(res.ok, true, res.ok ? "" : res.error);
+  if (res.ok) {
+    assert.equal(res.value.scope, "SCAN_UNIVERSE");
+    assert.equal(res.value.segment, "INDICES");
+    assert.equal(res.value.symbol, null, "Scan-Missionen haben kein Symbol");
+  }
+  assert.equal(res.warnings.length, 0);
+
+  // Segment fehlt → klare Fehlermeldung mit Allowlist:
+  const noSegment = validateMissionInput({ ...scanMission, segment: "" });
+  assert.equal(noSegment.ok, false);
+  if (!noSegment.ok) {
+    assert.match(noSegment.error, /Segment/);
+    assert.match(noSegment.error, /ALL/, "die Meldung nennt Beispiele der Allowlist");
+  }
+
+  // Unbekanntes Segment (auch Injection-Versuch) → abgelehnt:
+  for (const bad of ["GIBT_ES_NICHT", "ALLE", "'; DROP TABLE missions;--", null, 42]) {
+    const r = validateMissionInput({ ...scanMission, segment: bad });
+    assert.equal(r.ok, false, `Segment ${String(bad)} darf nicht durchgehen`);
+  }
+
+  // Segment + Symbol gleichzeitig ist ein Bedienfehler, kein gültiger Zustand:
+  const both = validateMissionInput({ ...scanMission, symbol: "BTC" });
+  assert.equal(both.ok, false);
+  if (!both.ok) assert.match(both.error, /kein Einzel-Symbol/);
+});
+
+test("validateMissionInput: Einzel-Symbol-Mission darf kein Segment tragen? (Segment wird ignoriert)", () => {
+  // Bewusst tolerant: Das Formular sendet bei Umschalten u. U. beide Felder.
+  // Entscheidend ist der Missions-Typ — das Segment wird verworfen.
+  const res = validateMissionInput({ ...validMission, scope: "SINGLE_SYMBOL", segment: "INDICES" });
+  assert.equal(res.ok, true);
+  if (res.ok) {
+    assert.equal(res.value.segment, null);
+    assert.equal(res.value.symbol, "ETH");
+  }
+});
+
+test("validateMissionInput: unbekannter Missions-Typ wird abgelehnt", () => {
+  const res = validateMissionInput({ ...validMission, scope: "ALLE_MAERKTE" });
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.match(res.error, /Missions-Typ/);
+    assert.match(res.error, /SINGLE_SYMBOL/);
+    assert.match(res.error, /SCAN_UNIVERSE/);
+  }
+  assert.equal(validateMissionInput({ ...validMission, scope: 42 }).ok, false);
+});
+
+test("validateMissionInput: templateId muss existieren und wird normalisiert", () => {
+  const res = validateMissionInput({ ...scanMission, templateId: "Indices-Trend-Follow" });
+  assert.equal(res.ok, true);
+  if (res.ok) assert.equal(res.value.templateId, "indices-trend-follow", "Slugs sind case-insensitiv");
+
+  const bad = validateMissionInput({ ...scanMission, templateId: "gibt-es-nicht" });
+  assert.equal(bad.ok, false);
+  if (!bad.ok) {
+    assert.match(bad.error, /Vorlage/);
+    assert.match(bad.error, /scan-all-markets/, "die Meldung listet verfügbare Vorlagen");
+  }
+  assert.equal(validateMissionInput({ ...scanMission, templateId: 42 }).ok, false);
+});
+
+test("validateMissionInput: Scan ohne Zahl im Zieltext warnt (blockt nicht)", () => {
+  const res = validateMissionInput({ ...scanMission, objective: "Scanne alle Märkte und finde gute Setups für uns." });
+  assert.equal(res.ok, true);
+  assert.equal(res.warnings.length, 1);
+  assert.match(res.warnings[0], /Scan-Mission ohne Zahl/);
+});

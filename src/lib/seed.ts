@@ -1,7 +1,8 @@
 import { db } from "@/db";
 import { agents, missions, riskConfig, killSwitches } from "@/db/schema";
-import { count, eq, sql } from "drizzle-orm";
+import { count, eq, isNull, sql } from "drizzle-orm";
 import { DEFAULT_LIMITS } from "./riskGuard";
+import { seededMissionTemplates } from "./missionTemplates";
 
 /**
  * Prüft ob das Datenbankschema bereits angelegt wurde.
@@ -140,51 +141,41 @@ const TEAM = () => [
   },
 ];
 
-/** Die Standard-Mandate der Firma. */
-const MISSIONS = () => [
-  {
-    title: "Erste Paper-Mission: BTC Long-Only",
-    objective:
-      "Nur Long in BTC. Maximal 25 % des Kapitals pro Position, Stop-Loss verpflichtend, " +
-      "kein Hebel, keine Shorts. Ziel ist das Validieren der Pipeline, nicht die Rendite.",
-    symbol: "BTC",
-    riskBudget: "0.02",
-    maxPositionPct: "0.25",
+/**
+ * Die Standard-Mandate der Firma — **abgeleitet aus dem Vorlagenkatalog**
+ * (`src/lib/missionTemplates.ts`, alle Einträge mit `seeded: true`).
+ *
+ * Seit v1.35.0 sind das 14 Missionen: die vier historischen Mandate (Titel
+ * unverändert, damit Alt-Installationen nichts doppelt bekommen) plus zehn
+ * Markt-Scans und Diagnosemandate („alle Märkte“, „nur Indizes“, „nur Penny
+ * Stocks“, „nur Krypto“, …).
+ *
+ * Der Seed hält damit keine eigenen Missionstexte mehr: Eine neue
+ * Standard-Mission wird ausschließlich im Vorlagenkatalog ergänzt und erscheint
+ * automatisch in Workshop-Auswahl, API und Seed.
+ *
+ * Exportiert als `defaultMissions()`, damit Tests den Installationszustand
+ * prüfen können, ohne eine Datenbank zu brauchen (`tests/missions.seed.test.ts`).
+ */
+export const defaultMissions = () =>
+  seededMissionTemplates().map((t) => ({
+    title: t.title,
+    objective: t.objective,
+    symbol: t.symbol,
+    scope: t.scope,
+    segment: t.segment,
+    templateId: t.id,
+    riskBudget: String(t.riskBudget),
+    maxPositionPct: String(t.maxPositionPct),
     status: "PENDING",
-  },
-  {
-    title: "Beobachtungsmandat: SPY",
-    objective:
-      "Beobachte SPY und melde Setups. Handle nur bei klarem Trendsignal, sonst HOLD. " +
-      "Gleiche harte Grenzen wie in der BTC-Mission.",
-    symbol: "SPY",
-    riskBudget: "0.01",
-    maxPositionPct: "0.20",
-    status: "PENDING",
-  },
-  {
-    title: "Swing-Research: Multi-Asset (Tage bis Wochen)",
-    objective:
-      "Swing-Setups über die Research-Universe identifizieren und dokumentieren. " +
-      "Ausführung nur über die normale Pipeline mit allen Guardrails.",
-    symbol: null,
-    riskBudget: "0.015",
-    maxPositionPct: "0.20",
-    status: "PENDING",
-  },
-  {
-    title: "⚠️ PENNY-DESK: Spekulative US-Smallcaps < $5 (MINI-RISIKO)",
-    objective:
-      "Penny-Kandidaten des Scout-Teams beobachten. EXTREM spekulativ: maximale Positionsgröße 5 %, " +
-      "Risiko pro Trade max 0,5 %. Nur mit Diligence-Freigabe und volumenbestätigtem Setup.",
-    symbol: null,
-    riskBudget: "0.005",
-    maxPositionPct: "0.05",
-    status: "PENDING",
-  },
-];
+  }));
 
-export async function ensureSeeded(): Promise<{ ok: boolean; reason?: string }> {
+export async function ensureSeeded(): Promise<{
+  ok: boolean;
+  reason?: string;
+  /** Anzahl Alt-Mandate, deren Missions-Typ nachgetragen wurde (v1.35.0). */
+  missionsMigrated?: number;
+}> {
   // Zuerst prüfen ob das Schema überhaupt existiert.
   // Wenn nicht: klare Fehlermeldung statt kryptischer Postgres-Fehler.
   const schema = await checkSchema();
@@ -210,13 +201,47 @@ export async function ensureSeeded(): Promise<{ ok: boolean; reason?: string }> 
 
   const missionCount = (await db.select({ c: count() }).from(missions))[0].c;
   if (missionCount === 0) {
-    await db.insert(missions).values(MISSIONS());
+    await db.insert(missions).values(defaultMissions());
   } else {
-    // Nachrüsten: neue Mandate (Swing, Penny-Desk) anhand Titel ergänzen.
-    for (const m of MISSIONS()) {
+    // Nachrüsten: fehlende Standard-Mandate anhand des Titels ergänzen
+    // (idempotent — bestehende Missionen samt eigener Änderungen bleiben).
+    for (const m of defaultMissions()) {
       const existing = await db.select().from(missions).where(eq(missions.title, m.title)).limit(1);
       if (existing.length === 0) await db.insert(missions).values(m);
     }
+  }
+
+  // ── Missions-Typ nachtragen (v1.35.0) ────────────────────────────────────
+  // Vor v1.35.0 gab es die Spalte `scope` nicht: Multi-Asset-Mandate standen
+  // mit symbol = NULL in der Tabelle und die Engine musste raten
+  // (`mission.symbol ?? "SPY"`). Der Backfill setzt bei genau diesen Zeilen
+  // den Missions-Typ SCAN_UNIVERSE + das zur Vorlage gehörende Segment.
+  //
+  // Idempotent und eng gefasst:
+  //   * nur Zeilen mit symbol IS NULL und scope = SINGLE_SYMBOL (Default),
+  //   * nur wenn der Titel einer Scan-Vorlage des Katalogs entspricht,
+  //   * Titel/Objective/Budgets werden NICHT angefasst (Operator-Änderungen
+  //     bleiben stehen — dieselbe Regel wie bei risk_config).
+  let missionsMigrated = 0;
+  const legacyRows = await db.select().from(missions).where(isNull(missions.symbol));
+  const scanTemplates = seededMissionTemplates().filter((t) => t.scope === "SCAN_UNIVERSE" && t.segment);
+  for (const row of legacyRows) {
+    if (row.scope !== "SINGLE_SYMBOL") continue;
+    const template = scanTemplates.find((t) => t.title === row.title);
+    if (!template?.segment) continue;
+    await db
+      .update(missions)
+      .set({
+        scope: "SCAN_UNIVERSE",
+        segment: template.segment,
+        templateId: row.templateId ?? template.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(missions.id, row.id));
+    missionsMigrated += 1;
+  }
+  if (missionsMigrated > 0) {
+    console.log(`[seed] Missions-Typ nachgetragen: ${missionsMigrated} Mandat(e) auf SCAN_UNIVERSE gesetzt.`);
   }
 
   // Konfigurationswerte anlegen, falls sie fehlen. Bewusst OHNE Update:
@@ -259,5 +284,5 @@ export async function ensureSeeded(): Promise<{ ok: boolean; reason?: string }> 
       armed: false,
     });
   }
-  return { ok: true };
+  return { ok: true, missionsMigrated };
 }

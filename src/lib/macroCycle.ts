@@ -42,6 +42,7 @@ import {
   ruleWithinRuntimeLimits,
 } from "./ruleService";
 import { startOfBerlinDay } from "./time";
+import { missionFocusSymbol } from "./missionUniverse";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __macroBusy?: boolean;
@@ -147,7 +148,15 @@ export async function runMacroCycle(opts?: { missionId?: string }): Promise<Macr
       mission =
         (await db.select().from(missions).orderBy(desc(missions.createdAt)).limit(1))[0] ?? null;
     }
-    const symbol = mission?.symbol ?? "BTC";
+    // Missions-Universum (v1.35.0): Einzel-Symbol-Missionen liefern ihr Symbol,
+    // Scan-Missionen das liquideste Segment-Mitglied als Fokus der Regel
+    // (der Makro-Zyklus erzeugt immer genau EIN Regelwerk pro Lauf).
+    const symbol = mission
+      ? await missionFocusSymbol(
+          { symbol: mission.symbol, scope: mission.scope, segment: mission.segment },
+          "BTC"
+        )
+      : "BTC";
     const missionId = mission?.id ?? null;
 
     // ── Kontext: Indikatoren + Ausführungs-Feedback ─────────────────────────

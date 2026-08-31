@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import InfoTip from "./InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
+import { missionScopeLabel } from "@/lib/missionTemplates";
 import type { AgentRow, MissionRow, RunTurnResponse, TurnResultDto } from "@/lib/types";
 import {
   aggregateOutcomes,
@@ -170,7 +171,7 @@ export default function HitRatePanel({
             >
               {runnable.length === 0 && <option value="">— keine lauffähige Mission —</option>}
               {runnable.map((m) => (
-                <option key={m.id} value={m.id}>{m.title} ({m.symbol ?? "—"})</option>
+                <option key={m.id} value={m.id}>{m.title} ({missionScopeLabel(m)})</option>
               ))}
             </select>
           </div>
