@@ -20,6 +20,117 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.32.0] — 2026-08-31 · feat(marketdata): enrich instruments with volume24h and orderbook spread (P1)
+
+**[MARKETDATA] Add ticker and orderbook enrichment to instrument discovery**
+
+`discoverInstruments()` rief ausschließlich `fetchTradingPairs()` auf. Die
+Trading-Pair-Response enthält Handelsparameter (`symbol, base, quote,
+minTradeVolume, basePrecision, quotePrecision, maxLeverage, symbolStatus,
+isApiSupported`), aber **nicht** die vom Scanner benötigten Metriken `volume24h`
+und `spread`.
+
+Der Produktionspfad muss lauten:
+
+```
+trading_pairs → registry instruments → tickers → volume24h
+              → depth → bestBid/bestAsk/spread → kline → HistoricalStore → Scanner
+```
+
+Implementiert war bisher nur `trading_pairs → registry`.
+
+**Kritische Nuance (Zweiter Funnel-Blocker):** Der Liquiditätsfaktor besitzt einen
+Fallback (`instrument.volume24h ?? letzteKerze.volume × letzteKerze.close`), der
+Spread-Faktor jedoch **nicht** (`if (spread === null ...) return unavailable(...)`)
+und der Eligibility-Filter lehnt unbekannten Spread explizit ab. Daher gilt:
+
+```
+Candle-History repariert → min-candles OK → liquidity evtl. OK → spread = null → max-spread reject
+```
+
+Ein reines Candle-Seeding erzeugt also **keinen** funktionierenden Funnel. Die
+Bitunix-Ticker-API liefert 24h-Volumen, aber keine Bid/Ask-Spanne — der Spread
+**muss** aus `/depth` berechnet werden.
+
+### Added
+
+- **`src/marketdata/enrichment.ts`** — neue, eigenständige Stages:
+  - `enrichWithTickers()`: **ein** Bulk-Call auf `/market/tickers` → `volume24h`
+    (Quote-Volumen, `ticker.quoteVol`). Fehlt ein Symbol → `null` + `missing`,
+    kein Throw. Plausibilität: `quoteVol` per `Number.isFinite()` geprüft.
+  - `enrichWithOrderBooks()`: `depthLimit=5`, N× `/market/depth` → relativer Spread
+    `calculateRelativeSpread(bids[0]?.price, asks[0]?.price)`. Pro Symbol Timeout
+    5 s, max. 1 Retry über bestehenden Backoff. Fehler → `null` + `failures`,
+    Sync läuft weiter. Plausibilität: leeres/gekreuztes Buch → `null`,
+    `spread > 0.5` (50 %) → `null` + Warnung (defektes Buch).
+  - `EnrichmentReport { attempted, succeeded, missing, failures }`.
+  - Security: Arrays gekappt (max. `depthLimit`), numerische Felder per
+    `Number.isFinite()`, `NaN`/`Infinity` → null, `maxInstruments` ≤1000 und
+    `concurrency` ≤8 hart gekappt (Schutz gegen self-DoS/IP-Ban), Timeouts,
+    Symbol-Allowlist + Encoding vor URL.
+- **Registry-Upsert** jetzt mit explizitem Quote-Volumen:
+  `registry.upsert({ ...instrument, volume24h: volumeBySymbol.get(symbol) ?? null,
+  spread: spreadBySymbol.get(symbol) ?? null, lastSeen }, `sync:${venue}`)`.
+  `volume24h` ist Quote-Volumen — dokumentiert als JSDoc im Registry-Typ.
+- **Eligibility-Rejection-Payload** mit Coverage-Diagnose (§6):
+  ```json
+  {
+    "instrument": "BITUNIX:BTCUSDT",
+    "eligibility": {
+      "status": "rejected",
+      "rule": "max-spread",
+      "data": { "candles": 150, "volume24h": 2840000000, "spread": null }
+    }
+  }
+  ```
+  Damit ist im Ops-Kontext sofort erkennbar: nicht „BTC ungeeignet“, sondern
+  „Spread wurde nicht geladen".
+- **Kontextabhängige Hilfe-Texte:**
+  - JSDoc `enrichWithOrderBooks`: „Die Bitunix-Ticker-API liefert kein Bid/Ask.
+    Der relative Spread wird deshalb aus dem Orderbook-Top-Level (`/market/depth`,
+    limit=5) berechnet. Das kostet N zusätzliche Requests und ist der teuerste
+    Teil des Syncs — daher Concurrency-Begrenzung und Token-Bucket."
+  - Registry-Feld-Tooltips: `volume24h` und `spread` mit Data-Quality-Hinweisen.
+  - Log-Warnung: `[market-sync] spread unavailable for 12/180 symbols — diese
+    Instrumente werden mit rule="max-spread" (data quality) abgelehnt, nicht
+    wegen zu hoher Kosten.`
+- **`test/marketdata/enrichment.test.ts`** — 12 Unit-Tests + Integration:
+  volume enrichment, spread calculation, missing ticker → null, depth failure
+  isoliert, empty/crossed/implausible spread → null, bulk once, concurrency
+  limit, unknown spread rejection, rejection payload context, quoteVol vs baseVol,
+  Fake-Adapter Integration (2 mit spread, 1 ohne).
+
+### Changed
+
+- **`src/marketdata/sync.ts`**: Refaktoriert auf zweistufige Stages —
+  Discovery → `enrichWithTickers()` (1× Bulk) → Ranking → `enrichWithOrderBooks()`
+  (N× Depth, limit=5, concurrency) → Upsert + Candle-Backfill. Rate-Limit:
+  jeder Depth-Call durch globalen Limiter, Concurrency ≤8. Neue Warnung für
+  `spread unavailable`. `volume24h` explizit Quote-Volumen.
+- **`src/marketdata/adapters/bitunix.ts`**: `mapDepthLevels` kappt Arrays auf
+  `depthLimit`, validiert per `Number.isFinite()`, `getOrderBook` nutzt limit=5
+  (Rate-Limit-schonend, teuerster Teil), JSDoc für Quote-Volumen und Spread.
+- **`src/universe/types.ts`**: JSDoc für `volume24h` („Quote-Volumen, null =
+  nicht geladen, Fallback letzte Kerze“) und `spread` („Orderbook-Top-Level,
+  null = nicht geladen, kein Fallback, Plausibilität >50% → null").
+- **`docs/MARKET_DATA_PIPELINE.md`**: Kap. 2 & 3 aktualisiert — neue Stages,
+  `EnrichmentReport`, Datenfluss-Diagramm, Registry-Upsert, Coverage-Diagnose,
+  Hilfe-Texte, Security-Audit-Checkliste, Log-Warnung.
+- **`docs/BITUNIX.md`**: §1.2 aktualisiert — P1-Enrichment-Stages, Interface,
+  Registry-Upsert, Coverage-Diagnose, Hilfe-Texte, Log-Warnung, Security-Audit.
+
+### Security Audit
+
+- [x] Depth-Response-Validierung: Arrays gekappt (max. `depthLimit` Levels),
+      numerische Felder per `Number.isFinite()` geprüft, `NaN`/`Infinity` → null
+- [x] Kein unbegrenztes Fan-out: `maxInstruments` und `concurrency` hart gekappt
+      (Schutz gegen self-inflicted DoS / IP-Ban durch die Venue)
+- [x] Timeouts auf jedem HTTP-Call (kein hängender Sync)
+- [x] Keine Symbol-Werte ungeprüft in URLs (Allowlist + Encoding)
+- [x] `spread`/`volume24h` fließen in Risikoentscheidungen → Plausibilitätsgrenzen
+      sind getestet und dokumentiert
+
+
 ## [1.31.0] — 2026-08-31 · fix(bitunix): Public Market Data in den Scanner-Warmstart verdrahten (P0)
 
 **P0, Productionspfad.** Der `BitunixBrokerAdapter` existierte funktionsfähig

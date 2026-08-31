@@ -1,10 +1,10 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.31.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.32.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
-Kein dokumentiertes Futures-Testnet. Seit v1.31.0 (P0-Verdrahtung) läuft die
+Kein dokumentiertes Futures-Testnet. Seit v1.32.0 (P0-Verdrahtung) läuft die
 **Public-Market-Data über den dünnen Marketdata-Wrapper**
 `src/marketdata/adapters/bitunix.ts` (Broker-PublicClient → `MarketDataAdapter`) und
 ist damit sauber von der Broker-Domäne entkoppelt (§1.1) — die Registry füllt sich
@@ -20,7 +20,7 @@ bleiben in diesem Ordner.
 ## 0. Code-Map (Anforderung → realer Pfad)
 
 Verifikationsschritt der P0-Verdrahtung — wo die beteiligten Bausteine wirklich
-leben (Stand v1.31.0):
+leben (Stand v1.32.0):
 
 | Baustein | Realer Pfad | Anmerkung |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Factory: `getBroker("BITUNIX", "paper"|"backtest")` liefert `BitunixBrokerAdapte
 `testnet` → `NotSupportedCapabilityError`. `live` → **immer** `LiveTradingGateError`,
 solange die Live-Gate-State-Machine nicht `LIVE_ENABLED` erreicht hat.
 
-### 1.1 Public Market Data in der Scanner-Pipeline (seit v1.31.0 über den Wrapper)
+### 1.1 Public Market Data in der Scanner-Pipeline (seit v1.32.0 über den Wrapper)
 
 Die Verdrahtung läuft über **drei Schichten** (Domänentrennung, keine
 Rückwärts-Abhängigkeit `src/brokers` → `src/marketdata`):
@@ -94,7 +94,7 @@ Fehlt das Flag (`BITUNIX_ENABLED != "true"`) oder meldet die Capability-Matrix
 
 **Historie:** v1.25.1 hatte den (damals parallelen) Wrapper entfernt und den
 `BitunixBrokerAdapter` selbst registrieren lassen — das koppelte die Broker-Domäne
-an `src/marketdata/sync.ts` zurück. v1.31.0 stellt den Wrapper als einzigen
+an `src/marketdata/sync.ts` zurück. v1.32.0 stellt den Wrapper als einzigen
 Kopplungspunkt wieder her: der Broker-Adapter implementiert das Interface nicht
 mehr selbst (bleibt aber strukturell kompatibel), die Registrierung instanziiert
 ausschließlich den credential-freien PublicClient.
@@ -108,7 +108,7 @@ ausschließlich den credential-freien PublicClient.
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger gegen echte Public-Kurse) | keine signierten Requests (liest nur Public-Ticker) | über Public-Bucket | `getBroker("BITUNIX", "paper")`, `BITUNIX_ENABLED=true` |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert (Private API) + komplette Live-Gate-State-Machine | Private-Bucket | `BITUNIX_LIVE_ENABLED` + `LIVE_TRADING_ENABLED` + `REQUIRE_HUMAN_APPROVAL=false` + Live-Gate `LIVE_ENABLED` (Default: `LiveTradingGateError`) |
 
-### 1.2 Spread kommt aus dem Orderbuch, nicht aus dem Ticker (FEHLER-3 — seit v1.25.2, nachgearbeitet zu PR #35)
+### 1.2 Spread kommt aus dem Orderbuch, nicht aus dem Ticker (P1 — seit v1.25.2, P1-Enrichment v1.32.0)
 
 **Spread wird NICHT direkt von der Ticker-API geliefert, sondern aus dem
 Orderbook (bestBid/bestAsk) berechnet. Dies erfordert einen zusätzlichen
@@ -116,8 +116,8 @@ Orderbook (bestBid/bestAsk) berechnet. Dies erfordert einen zusätzlichen
 
 | Metrik | Endpunkt | Feld | Bemerkung |
 | --- | --- | --- | --- |
-| 24h-Volumen | `GET /tickers` | `quoteVol` → `volume24h` | 1× Batch-Call für alle Symbole möglich |
-| Spread | `GET /depth` | `bids[0].price` / `asks[0].price` → `spread` | **1 Call je Instrument**, kein Batch-Äquivalent |
+| 24h-Volumen | `GET /tickers` | `quoteVol` → `volume24h` | 1× Batch-Call für alle Symbole möglich (Stage `enrichWithTickers`) |
+| Spread | `GET /depth` | `bids[0].price` / `asks[0].price` → `spread` | **1 Call je Instrument**, kein Batch-Äquivalent (Stage `enrichWithOrderBooks`, limit=5) |
 
 Berechnung (`src/marketdata/spread.ts` → `calculateRelativeSpread`):
 
@@ -126,23 +126,89 @@ spread = (ask − bid) / mid        mid = (ask + bid) / 2
 ```
 
 `0.0004` entspricht 4 bp. Ungültige/fehlende Book-Daten (leere Seite, `≤ 0`,
-invertiertes Buch `bid > ask`, `NaN`) liefern **`null`** — niemals `0`, niemals
-`NaN`, niemals eine Exception. `null` heißt „nicht geladen“ und ist bewusst von
-einem (fachlich verdächtigen) Spread von 0 unterscheidbar.
+invertiertes Buch `bid > ask`, `NaN`, `Infinity`, Spread >50 %) liefern **`null`**
+— niemals `0`, niemals `NaN`, niemals eine Exception. `null` heißt „nicht geladen“
+und ist bewusst von einem (fachlich verdächtigen) Spread von 0 unterscheidbar.
+
+**P1-Enrichment-Stages (src/marketdata/enrichment.ts):**
+
+```ts
+export interface EnrichmentReport {
+  attempted: number;
+  succeeded: number;
+  missing: string[];
+  failures: Array<{ symbol: string; reason: string }>;
+}
+
+export async function enrichWithTickers(
+  instruments: MarketInstrument[],
+  adapter: MarketDataAdapter,
+): Promise<{ volumeBySymbol: Map<string, number | null>; report: EnrichmentReport }>;
+
+export async function enrichWithOrderBooks(
+  instruments: MarketInstrument[],
+  adapter: MarketDataAdapter,
+  opts: { depthLimit: number; concurrency: number },
+): Promise<{ spreadBySymbol: Map<string, number | null>; report: EnrichmentReport }>;
+```
+
+- `enrichWithTickers()`: **ein** Bulk-Call, fehlendes Symbol → `null` + `missing` (kein Throw).
+  `volume24h` ist explizit **Quote-Volumen** (`ticker.quoteVol`) — Verwechslung mit Base-Volumen
+  verfälscht jeden `min-volume`-Filter um Größenordnungen.
+- `enrichWithOrderBooks()`: `depthLimit=5`, pro Symbol Timeout 5 s, max. 1 Retry,
+  Fehler → `null` + `failures`, Sync läuft weiter. Plausibilität: `spread > 0.5` → `null` + Warnung.
+- Unbekannte Werte bleiben `null` (Data-Quality), nicht fachliche Ablehnung.
+- Rate-Limit-schonend: 1× Bulk-Tickers, N× Depth mit `limit=5`, Concurrency ≤8,
+  `maxInstruments` ≤1000 (Schutz gegen self-DoS/IP-Ban).
+
+**Registry-Upsert (P1):**
+
+```ts
+registry.upsert({
+  ...instrument,
+  volume24h: volumeBySymbol.get(instrument.symbol) ?? null, // Quote-Volumen!
+  spread:    spreadBySymbol.get(instrument.symbol) ?? null, // relativer Spread aus Depth
+  lastSeen:  now.toISOString(),
+}, `sync:${venue}`);
+```
 
 Folgen für den Sync- und Scanner-Pfad:
 
 * Kosten: N Instrumente ⇒ N zusätzliche `/depth`-Requests (z. B. 180
-  Instrumente ⇒ 180 Calls). Sie laufen sequenziell durch den Token-Bucket
-  (8 req/s, §2) — kein Sekunden-Burst.
+  Instrumente ⇒ 180 Calls). Sie laufen durch den Token-Bucket (8 req/s, §2)
+  mit Concurrency-Begrenzung — kein Sekunden-Burst, kein unbegrenztes Fan-out.
 * Der `spread`-Faktor des Scanners hat (anders als `liquidity`, das auf
   `Kerze.volume × close` zurückfällt) **keinen** Fallback. Ohne
   Orderbook-Enrichment scheitert deshalb jedes Instrument an der
   `max-spread`-Regel — als **Data-Quality-Rejection**
   (`dataQuality: true`, Meldung „Spread wurde nicht geladen“), nicht als
   fachliche Marktablehnung.
+* Coverage-Diagnose: Rejection trägt jetzt `candles/volume24h/spread` als Kontext
+  (`eligibilityDiagnostics`), damit Ops sofort sieht: nicht „BTC ungeeignet“,
+  sondern „Spread wurde nicht geladen“.
 * Details zum Gesamtfluss: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)
   §2–§3 und §8.
+
+**JSDoc `enrichWithOrderBooks`:** „Die Bitunix-Ticker-API liefert kein Bid/Ask. Der
+relative Spread wird deshalb aus dem Orderbook-Top-Level (`/market/depth`, limit=5)
+berechnet. Das kostet N zusätzliche Requests und ist der teuerste Teil des Syncs —
+daher Concurrency-Begrenzung und Token-Bucket.“
+
+**Registry-Feld-Tooltips:**
+
+- `volume24h`: „24-Stunden-Handelsvolumen in Quote-Währung, geliefert vom
+  Ticker-Endpoint. `null` = nicht geladen. Der Liquiditätsfaktor nutzt dann den
+  Fallback aus der letzten Kerze (volume × close).“
+- `spread`: „Relativer Bid/Ask-Spread aus dem Orderbook-Top-Level.
+  `null` = nicht geladen. Es existiert **kein** Kerzen-Fallback; der Scanner lehnt
+  das Instrument mit `max-spread` als Datenqualitätsproblem ab.“
+
+**Log-Warnung (P1):**
+
+```
+[market-sync] spread unavailable for 12/180 symbols — diese Instrumente
+werden mit rule="max-spread" (data quality) abgelehnt, nicht wegen zu hoher Kosten.
+```
 
 Garantien des Sync-Kontexts (durch Tests abgesichert):
 
@@ -157,6 +223,9 @@ Garantien des Sync-Kontexts (durch Tests abgesichert):
   macht `run-scan.ts` **null** Netzwerk-Requests (Guard-Server-Test).
 - Order-Ausführung bleibt vollständig über `getBroker()` (Factory) und den
   Private-Client getrennt (§5).
+- Security Audit (P1): Depth-Response-Validierung (Arrays gekappt, `Number.isFinite()`,
+  `NaN`/`Infinity` → null), kein unbegrenztes Fan-out (`maxInstruments`/`concurrency`
+  hart gekappt), Timeouts auf jedem HTTP-Call, keine Symbol-Werte ungeprüft in URLs.
 
 ---
 

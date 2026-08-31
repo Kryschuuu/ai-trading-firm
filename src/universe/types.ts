@@ -118,9 +118,21 @@ export interface MarketInstrument {
    * (bzw. Eingabe) synchron gehalten.
    */
   liveAvailable: boolean;
-  /** 24-h-Volumen in Quote-Währung; `null` bis ein späterer Task es füllt. */
+  /**
+   * 24-Stunden-Handelsvolumen in Quote-Währung, geliefert vom Ticker-Endpoint.
+   * `null` = nicht geladen. Der Liquiditätsfaktor nutzt dann den Fallback
+   * aus der letzten Kerze (volume × close).
+   * WICHTIG: Quote-Volumen (z. B. USDT), nicht Base-Volumen — Verwechslung
+   * verfälscht jeden min-volume-Filter um Größenordnungen.
+   */
   volume24h: number | null;
-  /** Relativer Spread (0.0004 = 4 bp); `null` bis befüllt. */
+  /**
+   * Relativer Bid/Ask-Spread aus dem Orderbook-Top-Level.
+   * `null` = nicht geladen. Es existiert **kein** Kerzen-Fallback; der Scanner
+   * lehnt das Instrument mit `max-spread` als Datenqualitätsproblem ab.
+   * Formel: (ask - bid) / mid, mid = (ask + bid)/2. 0.0004 = 4 bp.
+   * Plausibilität: >50% wird als null behandelt (defektes/leeres Buch).
+   */
   spread: number | null;
   /** Annualisierte Volatilität als Dezimalanteil; `null` bis befüllt. */
   volatility: number | null;

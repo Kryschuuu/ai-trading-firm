@@ -201,13 +201,23 @@ export function mapInstrumentStatus(raw: BitunixTradingPair): InstrumentStatus {
   return "preview";
 }
 
-/** Depth-DTO → Orderbook-Levels (String/Number-Paare → endliche Zahlen). */
+/** Depth-DTO → Orderbook-Levels (String/Number-Paare → endliche Zahlen).
+ *
+ * P1-Enrichment (Security & Data-Quality):
+ *   - Arrays gekappt auf depthLimit (Default 5) — Schutz gegen Payload-Bombing.
+ *   - Numerische Felder per Number.isFinite() geprüft, NaN/Infinity → verworfen.
+ *   - Nur positive Preise und nicht-negative Mengen übernommen.
+ *   - Spread wird aus bestBid/bestAsk berechnet (Ticker liefert keinen Spread).
+ *   - Plausibilität: spread > 50% → null (defektes/leeres Buch).
+ */
 function mapDepthLevels(
-  rows: BitunixDepthRaw["bids"] | BitunixDepthRaw["asks"]
+  rows: BitunixDepthRaw["bids"] | BitunixDepthRaw["asks"],
+  depthLimit = 5
 ): MarketOrderBookLevel[] {
   if (!Array.isArray(rows)) return [];
+  const capped = rows.slice(0, Math.min(depthLimit, 50));
   const out: MarketOrderBookLevel[] = [];
-  for (const row of rows) {
+  for (const row of capped) {
     if (!Array.isArray(row)) continue;
     const price = Number(row[0]);
     const qty = Number(row[1]);
@@ -267,7 +277,14 @@ export function createBitunixMarketDataAdapter(deps: BitunixMarketAdapterDeps): 
       return client.fetchTicker(symbol.toUpperCase());
     },
 
-    /** 1 × tickers (Bulk) — ein Request für ALLE Symbole (kein N+1). */
+    /**
+     * 1 × tickers (Bulk) — ein Request für ALLE Symbole (kein N+1).
+     *
+     * P1: volume24h ist explizit Quote-Volumen (ticker.quoteVol) in Quote-Währung
+     * (z. B. USDT). Verwechslung mit Base-Volumen verfälscht min-volume-Filter
+     * um Größenordnungen. Dokumentiert im Registry-Typ als JSDoc.
+     * Unbekannte Werte bleiben null (Data-Quality), nicht 0.
+     */
     async getTickers(symbols?: string[]): Promise<MarketTicker[]> {
       const query = symbols?.map((s) => s.trim().toUpperCase()).filter(Boolean);
       const rows = await client.fetchTickers(query);
@@ -275,13 +292,15 @@ export function createBitunixMarketDataAdapter(deps: BitunixMarketAdapterDeps): 
     },
 
     async getOrderBook(symbol: string): Promise<MarketOrderBook> {
-      // limit=5 reicht für das Top-of-Book (Spread); depth ist der einzige
-      // Endpunkt ohne Bulk-Variante und wird N-mal pro Lauf gefragt.
+      // P1-Enrichment: Spread kommt NICHT aus Ticker, sondern aus Orderbook-Top-Level.
+      // limit=5 reicht für bestBid/bestAsk; depth ist der einzige Endpunkt ohne
+      // Bulk-Variante und wird N-mal pro Lauf gefragt (teuerster Teil des Syncs).
+      // Security: Symbol-Allowlist vor URL, Arrays gekappt, numerische Felder geprüft.
       const raw = await client.fetchDepth(symbol.toUpperCase(), 5);
       return {
         symbol: symbol.toUpperCase(),
-        bids: mapDepthLevels(raw.bids),
-        asks: mapDepthLevels(raw.asks),
+        bids: mapDepthLevels(raw.bids, 5),
+        asks: mapDepthLevels(raw.asks, 5),
         ts: Date.now(),
       };
     },

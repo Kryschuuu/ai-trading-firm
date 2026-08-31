@@ -38,6 +38,12 @@ export {
 } from "./errors";
 export { calculateRelativeSpread } from "./spread";
 export {
+  enrichWithTickers,
+  enrichWithOrderBooks,
+  type EnrichmentReport,
+  type EnrichOrderBooksOptions,
+} from "./enrichment";
+export {
   candleTimeMs,
   MARKET_SYNC_TIMEFRAMES,
   SYNC_CANDLE_LIMIT,

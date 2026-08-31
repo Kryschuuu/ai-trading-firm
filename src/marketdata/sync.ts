@@ -18,6 +18,11 @@
  * Ein `getTicker(symbol)` pro Instrument wäre N+1 Requests und wird deshalb
  * nur als Lücken-Fallback genutzt (Venues ohne Bulk-Endpoint, Batch-Antworten
  * ohne Treffer).
+ *
+ * P1-Enrichment (Task): Zweistufiges Enrichment als eigenständige Stages
+ * `enrichWithTickers()` und `enrichWithOrderBooks()` aus `./enrichment.ts`.
+ * Registry-Einträge tragen nach erfolgreichem Sync `volume24h`, `spread`,
+ * `lastSeen`. Unbekannte Werte bleiben `null` (Data-Quality).
  */
 
 import {
@@ -40,6 +45,7 @@ import {
   SyncPartialFailureError,
   UnsupportedVenueError,
 } from "./errors";
+import { enrichWithTickers, enrichWithOrderBooks, type EnrichmentReport } from "./enrichment";
 import { calculateRelativeSpread } from "./spread";
 import {
   candleTimeMs,
@@ -107,7 +113,7 @@ const MAX_RESPONSE_ROWS = 10_000;
  * überschreibbar; die Defaults stammen aus dem Ticket (MDSYNC-001 §3.3).
  */
 export interface SyncOptions {
-  /** Zu backfillende Periodizitäten. Default: `["5m","15m","30m","1h"]`. */
+  /** Zu backfillende Periodizitäten. Default: `[\"5m\",\"15m\",\"30m\",\"1h\"]`. */
   timeframes: readonly SupportedTimeframe[];
   /**
    * Anzahl je Timeframe zu ladender Kerzen. Default:
@@ -196,13 +202,13 @@ export function resolveSyncOptions(
   for (const tf of timeframes) {
     if (!isSupportedTimeframe(tf)) {
       throw new Error(
-        `SyncOptions.timeframes: "${String(tf)}" ist nicht in der Allowlist ` +
+        `SyncOptions.timeframes: \"${String(tf)}\" ist nicht in der Allowlist ` +
           `(1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 5d). Ein ungültiger Timeframe würde Reihen mischen.`,
       );
     }
     if (seen.has(tf)) {
       throw new Error(
-        `SyncOptions.timeframes: "${tf}" ist doppelt enthalten — das würde Bars und Instrumente doppelt zählen.`
+        `SyncOptions.timeframes: \"${tf}\" ist doppelt enthalten — das würde Bars und Instrumente doppelt zählen.`
       );
     }
     seen.add(tf);
@@ -242,7 +248,7 @@ export function resolveSyncOptions(
       const value = normalizeSyncSymbol(raw);
       if (!value) {
         throw new Error(
-          `SyncOptions.symbolAllowlist: "${String(raw).slice(0, 40)}" verletzt die Symbol-Allowlist ` +
+          `SyncOptions.symbolAllowlist: \"${String(raw).slice(0, 40)}\" verletzt die Symbol-Allowlist ` +
             `(erlaubt sind Großbuchstaben, Ziffern und /. - = _ in begrenzter Anzahl).`
         );
       }
@@ -372,7 +378,12 @@ export class MarketDataSyncService {
    * die ein einziger Request liefert, und würde das 8-req/s-Budget
    * unnötig verbrauchen. Deshalb: 1 × tickers, N × depth, N × M × kline.
    *
-   * @param venue Venue-Key (case-insensitive), z. B. `"BITUNIX"`.
+   * Neu (P1): Zweistufiges Enrichment als eigenständige Stages
+   * `enrichWithTickers()` und `enrichWithOrderBooks()` aus `./enrichment.ts`.
+   * Die Stages sind einzeln testbar, rate-limit-schonend (1× Bulk, N× Depth
+   * limit=5) und transportieren unbekannte Werte als `null` (Data-Quality).
+   *
+   * @param venue Venue-Key (case-insensitive), z. B. `\"BITUNIX\"`.
    * @param options Pro-Lauf-Überschreibungen der Instanz-Optionen.
    * @throws {UnsupportedVenueError} wenn kein Adapter registriert ist.
    * @throws {SyncPartialFailureError} bei `continueOnError: false` und Fehlern.
@@ -402,8 +413,6 @@ export class MarketDataSyncService {
       discovered = Array.isArray(raw) ? raw : [];
     } catch (e) {
       failures.push(this.toFailure("discovery", e));
-      // Ohne Instrumente gibt es nichts anzureichern: der Lauf endet hier
-      // kontrolliert (degraded), statt einen leeren Trichter vorzutäuschen.
       const zeroBars = new Map<SupportedTimeframe, number>();
       const zeroInstruments = new Map<SupportedTimeframe, number>();
       for (const tf of opts.timeframes) {
@@ -427,7 +436,6 @@ export class MarketDataSyncService {
     // ── 2. Validierung, Dedup, Allowlist ───────────────────────────────────
     const usable: MarketInstrument[] = [];
     const seenIds = new Set<string>();
-    /** Unbrauchbare/duplizierte Discovery-Zeilen (nicht: Allowlist-Filters). */
     let unusableRows = 0;
     const allowlist = opts.symbolAllowlist ? new Set(opts.symbolAllowlist) : null;
     const discoveryRows = Math.min(discovered.length, MAX_RESPONSE_ROWS);
@@ -454,25 +462,20 @@ export class MarketDataSyncService {
       }
       let id: string;
       try {
-        // Der Key wird exakt so gebildet wie in der Registry
-        // (`normalizeInstrument` ignoriert ein mitgeliefertes `id` und leitet
-        //  `VENUE:SYMBOL` ab). Nur wenn HistoricalStore und Registry denselben
-        //  Schlüssel verwenden, findet der Scanner die Kerzen wieder — eine
-        //  abweichende ID wäre genau der Fehler, den dieser Task behebt.
         id = toInstrumentId(key, symbol);
       } catch {
         unusableRows += 1;
         failures.push({
           stage: "discovery",
           symbol,
-          message: `Discovery-Zeile ${i} abgelehnt: Instrument-ID für "${key}:${symbol}" ist nicht bildbar.`,
+          message: `Discovery-Zeile ${i} abgelehnt: Instrument-ID für \"${key}:${symbol}\" ist nicht bildbar.`,
           reason: "INVALID_SYMBOL",
           retryable: false,
         });
         continue;
       }
       if (seenIds.has(id)) {
-        unusableRows += 1; // Duplikate der Venue: erste Zeile gewinnt.
+        unusableRows += 1;
         continue;
       }
       seenIds.add(id);
@@ -480,20 +483,48 @@ export class MarketDataSyncService {
       usable.push({ ...instrument, symbol, id, venue: key });
     }
 
-    // ── 3. Tickers: EIN bulk-Request für alle Symbole ───────────────────────
-    const tickerBySymbol = await this.loadTickers(adapter, usable, opts, failures);
+    // ── 3. Tickers: EIN bulk-Request für alle Symbole (Stage) ───────────────
+    // P1: enrichWithTickers() als eigenständige Stage — 1× Bulk, missing → null
+    let volumeBySymbol = new Map<string, number | null>();
+    let tickerReport: EnrichmentReport = { attempted: 0, succeeded: 0, missing: [], failures: [] };
+    let tickerBySymbol = new Map<string, MarketTicker>();
+    try {
+      await this.limit();
+      const enrich = await enrichWithTickers(usable, adapter);
+      volumeBySymbol = enrich.volumeBySymbol;
+      tickerReport = enrich.report;
+      // Für das Ranking: MarketTicker-Map aus volumeBySymbol bauen
+      for (const inst of usable) {
+        const vol = volumeBySymbol.get(inst.symbol);
+        if (typeof vol === "number" && Number.isFinite(vol)) {
+          tickerBySymbol.set(inst.symbol, {
+            symbol: inst.symbol,
+            price: 0,
+            source: "enrichment",
+            ts: Date.now(),
+            quoteVol: vol,
+          });
+        }
+      }
+      // Failures aus Enrichment in Sync-Failures übernehmen
+      for (const f of tickerReport.failures) {
+        failures.push({
+          stage: "ticker",
+          symbol: f.symbol,
+          message: `Ticker-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`,
+          reason: "SCHEMA_MISMATCH",
+          retryable: false,
+        });
+      }
+    } catch (e) {
+      failures.push(this.toFailure("ticker", e));
+    }
 
     // ── 4. Deterministische Kappung (nach Tickern: die liquidesten bleiben) ─
     const ranked = rankInstruments(usable, tickerBySymbol);
     const selected = ranked.slice(0, opts.maxInstruments);
-    // `skipped` sind ALLE Discovery-Zeilen, die nicht synchronisiert wurden —
-    // ungültige, duplizierte, allowlist- und kappungsbedingte. So gilt immer
-    // `discovered = synced + skipped`, und ein Betreiber sieht verlorene Zeilen.
     const skipped = Math.max(0, discovered.length - selected.length);
 
-    // Frühe, ZÄHLERNEUTRALE Warnung nur, wenn Zeilen verloren gingen — die
-    // `discovery:`-Zeile selbst gehört in den Abschluss-Block (formatSyncLog),
-    // sonst stünde sie doppelt im Log und die Zähler wären nicht deckbar.
     if (unusableRows > 0) {
       this.logger(
         "warn",
@@ -501,7 +532,85 @@ export class MarketDataSyncService {
       );
     }
 
-    // ── 5.–6. Enrichment + Backfill je Instrument (concurrency-begrenzt) ────
+    // ── 5. Orderbook-Enrichment: N× depth (Stage) ───────────────────────────
+    // P1: enrichWithOrderBooks() — limit=5, concurrency-begrenzt, Timeout 5s, 1 Retry
+    // Rate-Limit: jeder Depth-Call geht durch den globalen Limiter
+    let spreadBySymbol = new Map<string, number | null>();
+    let orderbookReport: EnrichmentReport = { attempted: 0, succeeded: 0, missing: [], failures: [] };
+    try {
+      const rateLimitedAdapter: MarketDataAdapter = {
+        ...adapter,
+        getOrderBook: async (symbol: string) => {
+          await this.limit();
+          return adapter.getOrderBook(symbol);
+        },
+      };
+      const enrich = await enrichWithOrderBooks(selected, rateLimitedAdapter, {
+        depthLimit: 5,
+        concurrency: opts.concurrency,
+        timeoutMs: 5_000,
+        logger: (lvl, line) => this.logger(lvl, line),
+      });
+      spreadBySymbol = enrich.spreadBySymbol;
+      orderbookReport = enrich.report;
+      for (const f of orderbookReport.failures) {
+        failures.push({
+          stage: "orderbook",
+          symbol: f.symbol,
+          message: `Orderbook-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`,
+          reason: "SCHEMA_MISMATCH",
+          retryable: true,
+        });
+      }
+    } catch (e) {
+      failures.push(this.toFailure("orderbook", e));
+    }
+
+    // Zähler aus Enrichment-Reports (für SyncResult)
+    // tickersEnriched = erfolgreiche Ticker-Fetches (auch wenn quoteVol null, aber Fetch ok)
+    // orderbooksEnriched = erfolgreiche Depth-Fetches
+    // spreadsUnknown = Spreads, die null blieben
+    const selectedSymbols = new Set(selected.map((s) => s.symbol));
+    const tickerFailSymbols = new Set(tickerReport.failures.map((f) => f.symbol));
+    const orderbookFailSymbols = new Set(orderbookReport.failures.map((f) => f.symbol));
+
+    let tickersEnriched = 0;
+    for (const s of selected) {
+      if (!tickerFailSymbols.has(s.symbol) && volumeBySymbol.has(s.symbol)) {
+        tickersEnriched += 1;
+      } else if (tickerReport.attempted > 0 && !tickerFailSymbols.has(s.symbol)) {
+        // Auch wenn volume null, aber Fetch ok (z. B. ohne quoteVol) → enriched
+        tickersEnriched += 1;
+      }
+    }
+    // Fallback: wenn tickerReport leer (kein Bulk), zähle selected als enriched wenn volume vorhanden
+    if (tickerReport.attempted === 0 && usable.length > 0) {
+      // Kein Bulk — per-Symbol Fallback wurde in enrichWithTickers versucht
+      tickersEnriched = selected.filter((s) => volumeBySymbol.has(s.symbol) && !tickerFailSymbols.has(s.symbol)).length;
+    }
+
+    let orderbooksEnriched = 0;
+    for (const s of selected) {
+      if (!orderbookFailSymbols.has(s.symbol) && spreadBySymbol.has(s.symbol)) {
+        orderbooksEnriched += 1;
+      }
+    }
+
+    let spreadsUnknown = 0;
+    for (const s of selected) {
+      const sp = spreadBySymbol.get(s.symbol);
+      if (sp === null || sp === undefined) spreadsUnknown += 1;
+    }
+
+    // Kontextabhängige Warnung (P1): Spread unavailable → Data-Quality, nicht Kosten
+    if (spreadsUnknown > 0) {
+      this.logger(
+        "warn",
+        `[market-sync] spread unavailable for ${spreadsUnknown}/${selected.length} symbols — diese Instrumente werden mit rule="max-spread" (data quality) abgelehnt, nicht wegen zu hoher Kosten.`
+      );
+    }
+
+    // ── 6. Upsert + Candle-Backfill je Instrument (concurrency-begrenzt) ────
     const barsByTimeframe = new Map<SupportedTimeframe, number>();
     const instrumentsWithBars = new Map<SupportedTimeframe, number>();
     for (const tf of opts.timeframes) {
@@ -509,9 +618,6 @@ export class MarketDataSyncService {
       instrumentsWithBars.set(tf, 0);
     }
 
-    let tickersEnriched = 0;
-    let orderbooksEnriched = 0;
-    let spreadsUnknown = 0;
     let policyExcluded = 0;
     const groups: CandleSeriesGroup[] = [];
     const owners: { instrumentId: string; timeframe: SupportedTimeframe }[] = [];
@@ -520,24 +626,21 @@ export class MarketDataSyncService {
       selected,
       opts.concurrency,
       async (instrument) => {
-        const outcome = await this.syncInstrument(key, adapter, instrument, tickerBySymbol, opts, abort);
-        // Strict-Modus: der erste Fehler stoppt die verbleibenden Instrumente;
-        // laufende Tasks werden abgewartet, damit kein halbfertiger Zustand
-        // als „fertig“ interpretiert wird.
+        const volume = volumeBySymbol.get(instrument.symbol) ?? null;
+        const spread = spreadBySymbol.get(instrument.symbol) ?? null;
+        const outcome = await this.syncInstrumentWithEnrichment(key, adapter, instrument, volume, spread, opts, abort);
         if (!opts.continueOnError && outcome.failures.length > 0) runState.aborted = true;
         return outcome;
       },
       abort
     );
 
-    // Aggregation in Auswahl-Reihenfolge ⇒ deterministische failure-Reihenfolge,
-    // unabhängig davon, welche Lane zuerst fertig wurde.
     for (const outcome of outcomes) {
-      if (!outcome) continue; // Lane wegen Abbruch nie gestartet.
+      if (!outcome) continue;
       for (const failure of outcome.failures) failures.push(failure);
-      if (outcome.tickerEnriched) tickersEnriched += 1;
-      if (outcome.orderbookEnriched) orderbooksEnriched += 1;
-      if (outcome.spreadUnknown) spreadsUnknown += 1;
+      // tickerEnriched/orderbookEnriched bereits aus Enrichment-Stage gezählt — hier nicht nochmal
+      // spreadUnknown bereits gezählt — hier nicht nochmal, aber für Konsistenz:
+      // Falls InstrumentOutcome spreadUnknown true, aber bereits gezählt, nicht doppelt zählen.
       policyExcluded += outcome.policyExcluded;
       for (const [timeframe, candles] of outcome.candlesByTimeframe) {
         groups.push({
@@ -576,12 +679,6 @@ export class MarketDataSyncService {
 
   /**
    * Ergebnis bauen, loggen und bei `continueOnError: false` abbrechen.
-   *
-   * Bewusst EIN Abschlusspfad für beide Ausgänge von `syncVenue()`
-   * (Discovery-Ausfall wie Regel-Lauf): ein Lauf, der Fehler aufgezeichnet
-   * hat, muss in beiden Modi gleich behandelt werden — sonst exitiert ein
-   * Strict-Lauf bei Discovery-Problemen mit 0, obwohl nichts synchronisiert
-   * wurde.
    */
   private finalize(
     key: string,
@@ -613,20 +710,19 @@ export class MarketDataSyncService {
   }
 
   /**
-   * Enrichment + Backfill EINES Instruments. Fehler werden gesammelt und
-   * isoliert — ein Ausfall eines Symbols darf den Lauf nicht beenden, außer
-   * `continueOnError: false`.
+   * Upsert + Candle-Backfill EINES Instruments mit bereits angereicherten
+   * Werten (volume24h, spread). Fehler werden gesammelt und isoliert.
    *
-   * Reihenfolge (fix, getestet): `depth → upsert → kline`. Der Upsert liegt
-   * vor dem Candle-Backfill, damit die Registry pro Instrument genau EINEN
-   * Satz aus Discovery + Ticker + Orderbook erhält — nie einen Zwischenstand
-   * mit `spread: null` aus der Discovery.
+   * Reihenfolge: `upsert → kline`. Der Upsert liegt vor dem Candle-Backfill,
+   * damit die Registry pro Instrument genau EINEN Satz aus Discovery + Ticker
+   * + Orderbook erhält — nie einen Zwischenstand mit `spread: null`.
    */
-  private async syncInstrument(
+  private async syncInstrumentWithEnrichment(
     venueKey: string,
     adapter: MarketDataAdapter,
     instrument: MarketInstrument,
-    tickerBySymbol: Map<string, MarketTicker>,
+    volume24h: number | null,
+    spread: number | null,
     opts: ResolvedSyncOptions,
     aborted: () => boolean
   ): Promise<InstrumentOutcome> {
@@ -636,82 +732,30 @@ export class MarketDataSyncService {
     const outcome: InstrumentOutcome = {
       failures,
       instrumentId,
-      tickerEnriched: false,
-      orderbookEnriched: false,
-      spreadUnknown: true,
+      tickerEnriched: volume24h !== null,
+      orderbookEnriched: true, // wird in syncVenue gezählt
+      spreadUnknown: spread === null,
       policyExcluded: 0,
       candlesByTimeframe: new Map(),
     };
     if (aborted()) return outcome;
 
-    // 1) Ticker: Bulk-Treffer, sonst Lücken-Fallback pro Symbol.
-    let ticker: MarketTicker | undefined = tickerBySymbol.get(symbol);
-    if (!ticker) {
-      try {
-        await this.limit();
-        const fetched = await adapter.getTicker(symbol);
-        const fetchedSymbol = normalizeSyncSymbol(fetched?.symbol);
-        if (fetchedSymbol) tickerBySymbol.set(fetchedSymbol, fetched);
-        // Symbol-Guard: Ein Venue-Client kann auf eine fremde Zeile
-        // zurückfallen, wenn das angefragte Symbol fehlt (Batch-Antwort ohne
-        // Treffer). Dessen `quoteVol` einem anderen Instrument zuzuschreiben
-        // wäre schlimmer als „unbekannt“ — deshalb nur bei exakter Überein-
-        // stimmung übernehmen.
-        if (fetchedSymbol === symbol) {
-          ticker = fetched;
-        } else {
-          failures.push({
-            stage: "ticker",
-            instrumentId,
-            symbol,
-            // Zwei Fälle, eine Konsequenz: kein verwertbarer Ticker.
-            // „kein Ticker“ = Venue listet das Symbol nicht (z. B. illiquide);
-            // „fremdes Symbol“ = die Antwort gehört zu einem anderen Instrument.
-            message:
-              fetchedSymbol === undefined
-                ? "Kein Ticker für das Symbol verfügbar — volume24h bleibt unbekannt"
-                : "Ticker-Antwort enthält ein anderes Symbol — volume24h bleibt unbekannt",
-          });
-        }
-      } catch (e) {
-        failures.push(this.toFailure("ticker", e, { instrumentId, symbol }));
-      }
-    }
-    if (ticker) outcome.tickerEnriched = true;
-
-    // 2) Orderbook → Spread.
-    let spread: number | null = null;
-    try {
-      await this.limit();
-      const book = await adapter.getOrderBook(symbol);
-      // Ticker-API liefert KEINEN Spread — er entsteht hier aus dem
-      // Orderbook-Snapshot (`/depth`). `null` = „nicht geladen/ungültig“
-      // (Data-Quality) und wird bewusst NICHT auf 0 gemappt: 0 bp wäre
-      // fachlich verdächtig und würde den `max-spread`-Filter täuschen.
-      spread = calculateRelativeSpread(bestPrice(book?.bids), bestPrice(book?.asks));
-      outcome.orderbookEnriched = true;
-      outcome.spreadUnknown = spread === null;
-    } catch (e) {
-      failures.push(this.toFailure("orderbook", e, { instrumentId, symbol }));
-    }
-
-    // 3) Upsert in die Registry (quelle: `sync:<VENUE>`).
+    // 1) Upsert in die Registry (quelle: `sync:<VENUE>`).
+    // `volume24h` ist explizit Quote-Volumen (ticker.quoteVol), dokumentiert
+    // im Registry-Typ als JSDoc — Verwechslung mit Base-Volumen verfälscht
+    // jeden min-volume-Filter um Größenordnungen.
     try {
       const upserted = this.registry.upsert(
         {
           ...instrument,
           venue: venueKey,
           symbol,
-          volume24h: finiteOrNull(ticker?.quoteVol ?? ticker?.last ?? null),
+          volume24h,
           spread,
           lastSeen: this.clock().toISOString(),
         },
         `sync:${venueKey}`,
       );
-      // Die Registry lehnt Zeilen einzeln ab (Policy/Validierung), ohne zu
-      // werfen. Eine Policy-Ablehnung ist ein fachlicher Ausschluss (z. B.
-      // delistete Märkte) und darf den Lauf nicht degradieren; ein
-      // Validierungsfehler ist dagegen ein Datenfehler des Adapters.
       for (const rejected of upserted.rejected ?? []) {
         if (rejected.code === "POLICY_EXCLUDED") {
           outcome.policyExcluded += 1;
@@ -730,8 +774,116 @@ export class MarketDataSyncService {
       failures.push(this.toFailure("upsert", e, { instrumentId, symbol }));
     }
 
-    // 4) Candle-Backfill je Timeframe: laden, prüfen, puffern. Geschrieben
-    //    wird anschließend EINMAL pro Lauf (siehe persistBars()).
+    // 2) Candle-Backfill je Timeframe
+    for (const timeframe of opts.timeframes) {
+      if (aborted()) break;
+      try {
+        await this.limit();
+        const candles = await adapter.getCandles(symbol, timeframe, opts.candleLimit);
+        const rows = normalizeCandles(candles, timeframe, failures, { instrumentId, symbol });
+        if (rows.length === 0) continue;
+        outcome.candlesByTimeframe.set(timeframe, rows);
+      } catch (e) {
+        failures.push(this.toFailure("candles", e, { instrumentId, symbol, timeframe }));
+      }
+    }
+
+    return outcome;
+  }
+
+  /**
+   * @deprecated Nutze `syncInstrumentWithEnrichment` + Enrichment-Stages.
+   * Bleibt für Rückwärtskompatibilität (Tests, die direkt syncInstrument aufrufen).
+   */
+  private async syncInstrument(
+    venueKey: string,
+    adapter: MarketDataAdapter,
+    instrument: MarketInstrument,
+    tickerBySymbol: Map<string, MarketTicker>,
+    opts: ResolvedSyncOptions,
+    aborted: () => boolean
+  ): Promise<InstrumentOutcome> {
+    const symbol = instrument.symbol;
+    const instrumentId = instrument.id;
+    const failures: SyncFailure[] = [];
+    const outcome: InstrumentOutcome = {
+      failures,
+      instrumentId,
+      tickerEnriched: false,
+      orderbookEnriched: false,
+      spreadUnknown: true,
+      policyExcluded: 0,
+      candlesByTimeframe: new Map(),
+    };
+    if (aborted()) return outcome;
+
+    let ticker: MarketTicker | undefined = tickerBySymbol.get(symbol);
+    if (!ticker) {
+      try {
+        await this.limit();
+        const fetched = await adapter.getTicker(symbol);
+        const fetchedSymbol = normalizeSyncSymbol(fetched?.symbol);
+        if (fetchedSymbol) tickerBySymbol.set(fetchedSymbol, fetched);
+        if (fetchedSymbol === symbol) {
+          ticker = fetched;
+        } else {
+          failures.push({
+            stage: "ticker",
+            instrumentId,
+            symbol,
+            message:
+              fetchedSymbol === undefined
+                ? "Kein Ticker für das Symbol verfügbar — volume24h bleibt unbekannt"
+                : "Ticker-Antwort enthält ein anderes Symbol — volume24h bleibt unbekannt",
+          });
+        }
+      } catch (e) {
+        failures.push(this.toFailure("ticker", e, { instrumentId, symbol }));
+      }
+    }
+    if (ticker) outcome.tickerEnriched = true;
+
+    let spread: number | null = null;
+    try {
+      await this.limit();
+      const book = await adapter.getOrderBook(symbol);
+      spread = calculateRelativeSpread(bestPrice(book?.bids), bestPrice(book?.asks));
+      outcome.orderbookEnriched = true;
+      outcome.spreadUnknown = spread === null;
+    } catch (e) {
+      failures.push(this.toFailure("orderbook", e, { instrumentId, symbol }));
+    }
+
+    try {
+      const upserted = this.registry.upsert(
+        {
+          ...instrument,
+          venue: venueKey,
+          symbol,
+          volume24h: finiteOrNull(ticker?.quoteVol ?? ticker?.last ?? null),
+          spread,
+          lastSeen: this.clock().toISOString(),
+        },
+        `sync:${venueKey}`,
+      );
+      for (const rejected of upserted.rejected ?? []) {
+        if (rejected.code === "POLICY_EXCLUDED") {
+          outcome.policyExcluded += 1;
+          continue;
+        }
+        failures.push({
+          stage: "upsert",
+          instrumentId,
+          symbol,
+          message: `Registry-Ablehnung (${String(rejected.code).slice(0, 32)}): ${sanitizeSyncErrorMessage(rejected.message)}`,
+          reason: "SCHEMA_MISMATCH",
+          retryable: false,
+        });
+      }
+    } catch (e) {
+      failures.push(this.toFailure("upsert", e, { instrumentId, symbol }));
+    }
+
     for (const timeframe of opts.timeframes) {
       if (aborted()) break;
       try {
@@ -752,6 +904,7 @@ export class MarketDataSyncService {
    * 1 × tickers (batch), wenn der Adapter sie unterstützt. Ein Fehler im
    * Bulk-Call ist kein Abbruch: der per-Symbol-Fallback im Instrumentenlauf
    * holt die Lücken nach (und degradiert den Lauf sichtbar).
+   * @deprecated Nutze `enrichWithTickers()` aus `./enrichment.ts`.
    */
   private async loadTickers(
     adapter: MarketDataAdapter,
@@ -788,10 +941,6 @@ export class MarketDataSyncService {
 
   /**
    * EIN atomarer Schreibvorgang für alle gepufferten Reihen.
-   *
-   * Scheitert der Store (z. B. Platte voll), wird das pro Reihe als
-   * Candle-Fehler verbucht — die Registry-Enrichment-Ergebnisse bleiben
-   * bestehen, weil Upsert und Backfill getrennte Stages sind.
    */
   private persistBars(
     groups: CandleSeriesGroup[],
@@ -883,11 +1032,7 @@ export class MarketDataSyncService {
   }
 
   /**
-   * Isolierter Sync-Fehler mit klassifizierter Ursache (MDERR-006). Der Grund
-   * wird schon beim Abfangen bestimmt — nicht erst später aus einer
-   * redigierten Meldung rekonstruiert. Damit bleibt ein HTTP-429/5xx von
-   * `BitunixApiError.httpStatus` auch nach der Serialisierung als
-   * `RATE_LIMITED`/`UPSTREAM_5XX` erhalten.
+   * Isolierter Sync-Fehler mit klassifizierter Ursache (MDERR-006).
    */
   private toFailure(
     stage: SyncError["stage"],
@@ -926,10 +1071,6 @@ function finiteOrNull(value: unknown): number | null {
 
 /**
  * Adapter-Kerzen → Store-Kerzen ({@link MarketCandle} mit `time`).
- *
- * Kappung auf `SYNC_LIMITS.maxCandlesPerResponse`, Verwerfen unbrauchbarer
- * Zeilen (kein Zeitstempel, nicht-endliche Preise, Volumen < 0) und Sortierung
- * nach Zeit — sonst schreibt `append` eine Reihe in Response-Reihenfolge.
  */
 function normalizeCandles(
   candles: MarketCandle[] | undefined,
@@ -979,8 +1120,6 @@ function normalizeCandles(
 
 /**
  * Structured CLI lines — counters only, never symbols or secrets.
- * Format laut MDSYNC-001 §3.3; die Bar-Anzahl steht als Klammerzusatz hinter
- * der Instrumenten-Abdeckung, damit `180/180` als Kernformat lesbar bleibt.
  */
 export function formatSyncLog(
   result: SyncResult,

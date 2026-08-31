@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
 > **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-31** ·
-> Code-Version **1.31.0** · Modul `src/marketdata/` · CLI
+> Code-Version **1.32.0** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize`)
 
@@ -36,7 +36,7 @@ Funnel
 ## 0. Code-Map (Anforderungsname → realer Pfad)
 
 Die Anforderung MDSYNC-001 nennt Module, die im Repository anders liegen bzw.
-heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.31.0):
+heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.32.0):
 
 | Anforderung nennt | Realer Pfad | Anmerkung |
 | --- | --- | --- |
@@ -65,30 +65,56 @@ ist gültig: `instrumentsDiscovered: 0`, kein Crash.
 Unbekannte Venue → `UnsupportedVenueError` (`code: UNSUPPORTED_VENUE`), bevor
 irgendein Request startet.
 
-## 2. Metadata enrichment
+## 2. Metadata enrichment (P1 — zweistufige Stages)
 
-**Seit v1.25.2 (nachgearbeitet zu PR #35):** Ticker- und Orderbook-Enrichment
-laufen vor dem Candle-Backfill — feste Reihenfolge je Instrument:
-`tickers → depth → ein Upsert → kline`.
+**Seit v1.25.2 (nachgearbeitet zu PR #35), P1-Enrichment seit v1.32.0:**
+Ticker- und Orderbook-Enrichment laufen als eigenständige, einzeln testbare
+Stages vor dem Candle-Backfill — feste Reihenfolge:
+`trading_pairs → tickers → depth → upsert → kline`.
 
-Nach Discovery reichert der Service jedes Instrument mit 24h-Volumen an:
+Die Stages leben in `src/marketdata/enrichment.ts`:
 
-- Bevorzugt **1 × tickers** (Batch), wenn `adapter.getTickers` existiert
-  (Bitunix: `GET /api/v1/futures/market/tickers` ohne Symbolfilter).
-- Sonst **N × getTicker(symbol)** — der Pfad, den Mock-Adapter in Unit-Tests
-  nutzen.
+```ts
+export interface EnrichmentReport {
+  attempted: number;
+  succeeded: number;
+  missing: string[];                 // instrumentIds ohne Wert
+  failures: Array<{ symbol: string; reason: string }>;
+}
 
-`volume24h` wird aus `ticker.quoteVol` geschrieben. Fehlt der Ticker, bleibt
-der Wert `null` (unbekannt, nicht 0). `lastSeen` wird auf den Sync-Zeitpunkt
-gesetzt. Quelle des Upserts: `sync:<VENUE>`.
+export async function enrichWithTickers(
+  instruments: MarketInstrument[],
+  adapter: MarketDataAdapter,
+): Promise<{ volumeBySymbol: Map<string, number | null>; report: EnrichmentReport }>;
+
+export async function enrichWithOrderBooks(
+  instruments: MarketInstrument[],
+  adapter: MarketDataAdapter,
+  opts: { depthLimit: number; concurrency: number },
+): Promise<{ spreadBySymbol: Map<string, number | null>; report: EnrichmentReport }>;
+```
+
+### Ticker-Stage `enrichWithTickers()`
+
+- **Ein Bulk-Call** (`adapter.getTickers(symbols)`) für alle Instrumente.
+  Fehlt ein Symbol in der Response → `null` + Eintrag in `report.missing`
+  (kein Throw).
+- `volume24h` ist explizit **Quote-Volumen** (`ticker.quoteVol`) in
+  Quote-Währung (z. B. USDT). Dokumentiert im Registry-Typ als JSDoc —
+  Verwechslung mit Base-Volumen verfälscht jeden `min-volume`-Filter um
+  Größenordnungen.
+- Fehlt der Ticker oder ist `quoteVol` nicht endlich (`NaN`/`Infinity`) → `null`.
+  Unbekannte Werte bleiben `null` (Data-Quality), nicht 0.
+- Fallback: Venues ohne Bulk-Endpoint nutzen per-Symbol `getTicker` (dokumentiert).
+- Security: `maxInstruments` hart auf 1000 gekappt, Symbol-Allowlist vor URL,
+  `quoteVol` per `Number.isFinite()` geprüft.
 
 **Symbol-Guard:** Ein per-Symbol-Ticker wird nur übernommen, wenn
-`ticker.symbol` exakt (case-insensitiv) dem Instrument entspricht. Fällt ein
-Venue-Client auf eine fremde Zeile zurück, bleibt `volume24h` lieber `null`,
-als dass ein fremdes Volumen geschrieben wird — der Fall landet in
-`SyncResult.errors` (`stage: "ticker"`).
+`ticker.symbol` exakt dem Instrument entspricht. Fällt ein Venue-Client auf eine
+fremde Zeile zurück, bleibt `volume24h` lieber `null`, als dass ein fremdes
+Volumen geschrieben wird — der Fall landet in `SyncResult.errors` (`stage: "ticker"`).
 
-### Enrichment-Datenfluss (Ende-zu-Ende)
+### Enrichment-Datenfluss (Ende-zu-Ende, P1)
 
 ```
 GET /trading_pairs                       (1× — Discovery)
@@ -98,17 +124,27 @@ GET /trading_pairs                       (1× — Discovery)
    ▼
 registry instruments  (id = "VENUE:SYMBOL", volume24h = null, spread = null)
    │
-   ├─ GET /tickers?symbols=…             (1× Batch; Fallback N× getTicker)
+   ├─ enrichWithTickers()                (1× Batch — src/marketdata/enrichment.ts)
+   │   GET /tickers?symbols=…  (Bulk)
    │     quoteVol ─────────────────────────────────► volume24h  (null wenn absent)
+   │     Report: attempted/succeeded/missing/failures
    │
-   ├─ GET /depth?symbol=…                (N× — 1 Call je Instrument)
+   ├─ enrichWithOrderBooks()             (N× Depth, limit=5, concurrency ≤8)
+   │   GET /depth?symbol=…&limit=5       (1 Call je Instrument, Timeout 5s, 1 Retry)
    │     bids[0].price, asks[0].price
    │        └─ calculateRelativeSpread(bid, ask)
    │             (ask − bid) / mid ,  mid = (ask + bid) / 2
+   │             Plausibilität: >50% → null + Warnung, leer/gekreuzt → null
    │             └──────────────────────────────────► spread     (null wenn Book leer)
+   │     Report: attempted/succeeded/missing/failures
    │
    ▼
-registry.upsert({ ...instrument, volume24h, spread, lastSeen }, "sync:<VENUE>")
+registry.upsert({
+  ...instrument,
+  volume24h: volumeBySymbol.get(symbol) ?? null,  // Quote-Volumen!
+  spread:    spreadBySymbol.get(symbol) ?? null,  // relativer Spread aus Depth
+  lastSeen:  now.toISOString(),
+}, `sync:${venue}`)
    │
    ├─ GET /kline?symbol=…&interval=…     (N × 4 Timeframes)
    │        └──────────────────────────────────────► HistoricalStore.append(...)
@@ -118,23 +154,41 @@ Scanner (pure) ── liquidity-Faktor ── volume24h ?? (letzte Kerze volume 
                      └─ checkEligibility(): min-volume / max-spread
 ```
 
-## 3. Orderbook enrichment
+Registry-Upsert (P1):
 
-**Seit v1.25.2 (nachgearbeitet zu PR #35).** Pro Instrument **1 × depth**
-(`getOrderBook`). Der relative Spread
-
+```ts
+registry.upsert({
+  ...instrument,
+  volume24h: volumeBySymbol.get(instrument.symbol) ?? null,
+  spread:    spreadBySymbol.get(instrument.symbol) ?? null,
+  lastSeen:  now.toISOString(),
+}, `sync:${venue}`);
 ```
-(ask − bid) / mid     mid = (ask + bid) / 2
-```
 
-kommt aus `calculateRelativeSpread(book.bids[0]?.price, book.asks[0]?.price)`.
-Fehlt `bids[0]` oder `asks[0]`, ist der Spread `null` — kein Crash, kein
-optimistisches 0.
+`volume24h` ist Quote-Volumen, dokumentiert als JSDoc im Registry-Typ.
+
+## 3. Orderbook enrichment (P1)
+
+**Seit v1.25.2 (nachgearbeitet zu PR #35), P1 seit v1.32.0:** Pro Instrument
+**1 × depth** (`getOrderBook`) mit `limit=5` — Top-of-Book reicht für Spread.
+Die Stage `enrichWithOrderBooks()` aus `src/marketdata/enrichment.ts` kapselt
+diesen Schritt:
+
+- `depthLimit = 5` (Rate-Limit-schonend, teuerster Teil des Syncs).
+- Pro Symbol Timeout (Default 5 s) und maximal 1 Retry über bestehenden Backoff.
+- Fehler → `null` + `report.failures`, Sync läuft weiter.
+- `spread = calculateRelativeSpread(bids[0]?.price, asks[0]?.price)`.
+- Plausibilitätsprüfung: `spread > 0.5` (50 %) → `null` + Warnung
+  (defektes/leeres Buch), damit kein Müllwert in Risikoentscheidungen fließt.
+- Leeres Buch (`bids[0]`/`asks[0]` undefined) → `null`, kein Crash.
+- Gekreuztes Buch (`ask < bid`) → `null` + Warnung (kein negativer Spread).
 
 **Warum dieser Call nötig ist:** Die Ticker-API liefert das 24h-Volumen, aber
-**keine** Bid/Ask-Spanne. Der Spread kann nur aus dem Orderbook berechnet
-werden, also kostet jedes Instrument einen zusätzlichen `/depth`-Request
-(bei 180 Instrumenten 180 Requests — über den Token-Bucket gedrosselt, §9).
+**keine** Bid/Ask-Spanne. Der Spread **muss** aus `/depth` berechnet werden.
+Die Bitunix-Ticker-API liefert kein Bid/Ask — der relative Spread wird deshalb
+aus dem Orderbook-Top-Level (`/market/depth`, limit=5) berechnet. Das kostet N
+zusätzliche Requests und ist der teuerste Teil des Syncs — daher
+Concurrency-Begrenzung und Token-Bucket.
 
 **`spread = null` ist kein 0.** `null` bedeutet „nicht geladen“ und ist im
 Eligibility-Filter ausdrücklich von einem (fachlich verdächtigen) Spread von 0
@@ -142,6 +196,54 @@ unterschieden. `checkEligibility()` lehnt solche Instrumente als
 **Data-Quality-Rejection** ab (`ruleId: "max-spread"`, `dataQuality: true`,
 Meldung „Spread wurde nicht geladen …“) — das ist ein Hinweis auf fehlenden
 Warmup, kein Marktausschluss (§8).
+
+**JSDoc `enrichWithOrderBooks`:** „Die Bitunix-Ticker-API liefert kein Bid/Ask.
+Der relative Spread wird deshalb aus dem Orderbook-Top-Level (`/market/depth`,
+limit=5) berechnet. Das kostet N zusätzliche Requests und ist der teuerste Teil
+des Syncs — daher Concurrency-Begrenzung und Token-Bucket.“
+
+**Registry-Feld-Tooltips (Ops-UI/JSON-Schema-description):**
+
+- `volume24h`: „24-Stunden-Handelsvolumen in Quote-Währung, geliefert vom
+  Ticker-Endpoint. `null` = nicht geladen. Der Liquiditätsfaktor nutzt dann den
+  Fallback aus der letzten Kerze (volume × close).“
+- `spread`: „Relativer Bid/Ask-Spread aus dem Orderbook-Top-Level.
+  `null` = nicht geladen. Es existiert **kein** Kerzen-Fallback; der Scanner lehnt
+  das Instrument mit `max-spread` als Datenqualitätsproblem ab.“
+
+**Log-Warnung (P1):**
+
+```
+[market-sync] spread unavailable for 12/180 symbols — diese Instrumente
+werden mit rule="max-spread" (data quality) abgelehnt, nicht wegen zu hoher Kosten.
+```
+
+Security Audit (P1):
+
+- [x] Depth-Response-Validierung: Arrays gekappt (max. `depthLimit` Levels),
+      numerische Felder per `Number.isFinite()` geprüft, `NaN`/`Infinity` → null
+- [x] Kein unbegrenztes Fan-out: `maxInstruments` und `concurrency` hart gekappt
+      (Schutz gegen self-inflicted DoS / IP-Ban durch die Venue)
+- [x] Timeouts auf jedem HTTP-Call (kein hängender Sync)
+- [x] Keine Symbol-Werte ungeprüft in URLs (Allowlist + Encoding)
+- [x] `spread`/`volume24h` fließen in Risikoentscheidungen → Plausibilitätsgrenzen
+      sind getestet und dokumentiert
+
+Coverage-Diagnose in der Eligibility-Rejection (P1, §6 Eligibility-Diagnose):
+
+```json
+{
+  "instrument": "BITUNIX:BTCUSDT",
+  "eligibility": {
+    "status": "rejected",
+    "rule": "max-spread",
+    "data": { "candles": 150, "volume24h": 2840000000, "spread": null }
+  }
+}
+```
+
+Damit ist im Ops-Kontext sofort erkennbar: nicht „BTC ist ungeeignet“, sondern
+„Spread wurde nicht geladen".
 
 ## 4. Historical backfill
 
@@ -538,7 +640,7 @@ Retry nur für 429/5xx (bestehender HTTP-Client). Eine Antwort über
 | ALPACA / IBKR | — | geplant | — | — | — | — | nein |
 | PAPER | Seed-Registry, kein REST | n/a | n/a | n/a | n/a | n/a | n/a |
 
-**Bitunix-Status (verdrahtet seit v1.25.1, seit v1.31.0 über den Wrapper):**
+**Bitunix-Status (verdrahtet seit v1.25.1, seit v1.32.0 über den Wrapper):**
 Discovery: ✓ · MarketData: ✓ — produktiv über
 `registerAdapters()` / `registerMarketDataAdapters(env)`
 (`src/marketdata/registerAdapters.ts`) → `createBitunixMarketDataAdapter()`
