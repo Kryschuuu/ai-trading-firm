@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.31.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.32.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,31 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.32.0] — 2026-08-31 · feat(marketdata): enrich instruments with volume24h and orderbook spread (P1)
+
+**[MARKETDATA] Add ticker and orderbook enrichment to instrument discovery**
+
+`discoverInstruments()` lieferte bisher nur Handelsparameter aus
+`/futures/market/trading_pairs`. Die scanner-relevanten Metriken `volume24h`
+und `spread` fehlten vollständig. Da der Spread-Faktor — anders als der
+Liquiditätsfaktor — keinen Kerzen-Fallback besitzt, hätte der Funnel
+auch nach dem Candle-Fix vollständig an `max-spread` abgelehnt.
+
+- `enrichWithTickers()`: ein Bulk-Call auf `/market/tickers` → `volume24h` (quote)
+- `enrichWithOrderBooks()`: `/market/depth` (limit=5) → relativer Spread
+- Plausibilitätsgrenzen: gekreuzte/leere Bücher und Spreads > 50% → null
+- Fehlende Werte bleiben null und werden als Data-Quality-Zustand
+  transportiert, nicht als fachliche Ablehnung
+- Eligibility-Rejection trägt jetzt `candles/volume24h/spread` als Kontext
+- Rate-Limit-schonend: 1× Bulk-Tickers, N× Depth mit `limit=5`, Concurrency ≤8
+- Security: Arrays gekappt, `Number.isFinite()`, Timeouts, Symbol-Allowlist,
+  `maxInstruments` ≤1000, kein unbegrenztes Fan-out
+
+Refs: Code Review Scanner, Kap. 4, 5, 22
+
+Details: [docs/CHANGELOG.md](docs/CHANGELOG.md#1320---2026-08-31--featmarketdata-enrich-instruments-with-volume24h-and-orderbook-spread-p1)
+
 
 ## [1.31.0] — 2026-08-31 · fix(bitunix): Public Market Data in den Scanner-Warmstart verdrahten (P0)
 
