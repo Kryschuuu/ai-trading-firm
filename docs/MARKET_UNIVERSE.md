@@ -1,6 +1,6 @@
 # Market Universe — broker-unabhängige Instrumenten-Registry (Task 01)
 
-**Stand:** v1.28.1 · **Modul:** `src/universe/` + `src/capabilities/` · **API:** `/api/markets`
+**Stand:** v1.30.0 · **Modul:** `src/universe/` + `src/capabilities/` · **API:** `/api/markets`
 **Status:** Fundament-Umbau 1 von 12 — ersetzt die Watchlist als Marktdefinition; `liveAvailable` ist Laufzeitprojektion (CAP-008), `liveTradable` ist Stammdaten.
 
 ---
@@ -223,6 +223,67 @@ export const UI_WATCHLIST_PREFERENCE = [
 ];
 ```
 
+### 5.1 Markt-Presets (v1.30.0)
+
+Die 26 Seed-Instrumente reichen für einen aussagekräftigen Scanner-Trichter
+nicht. `src/universe/presets.ts` ergänzt daher vier **kuratierte, deterministische**
+Presets — geschrieben von `scripts/seed-market-universe.ts`
+(`npm run universe:seed:markets`), nicht vom Basis-Seed.
+
+| Preset | Anzahl | Venue | `marketType` | `assetClass` | Hebel | Kurzverkauf |
+| --- | ---: | --- | --- | --- | --- | --- |
+| `PRESET_EQUITIES` | 50 | `ALPACA`, `IBKR` | `spot` | `equity` | nein | ja |
+| `PRESET_INDICES` | 50 | `IBKR` | `cfd` | `index` | ja | ja |
+| `PRESET_COMMODITIES` | 22 | `IBKR` | `future` | `commodity` | ja | ja |
+| `PRESET_CRYPTO` | 30 | `BINANCE` | `spot` | `crypto` | nein | nein (Spot) |
+
+Zusätzlich erzeugt `buildPresetInstruments()` je Asset einen `PAPER`-Spiegel
+(`marketType: "spot"`, `liveTradable: false`), damit der Paper-Broker-Pfad
+unverändert lauffähig bleibt:
+
+| Preset | Reale Venues | `PAPER`-Spiegel | Summe |
+| --- | ---: | ---: | ---: |
+| Aktien | 100 (50 × 2) | 50 | 150 |
+| Indizes | 50 | 50 | 100 |
+| Rohstoffe | 22 | 22 | 44 |
+| Krypto | 30 | 30 | 60 |
+| **Gesamt** | **202** | **152** | **354** |
+
+**Invarianten:**
+
+* `assertPresetContract()` erzwingt die Anzahlen aus `PRESET_COUNTS`, die
+  Duplikatfreiheit der `instrumentId` und die Kurzverkaufs-/Hebel-Semantik.
+  Ein still dünneres Universum ist damit unmöglich.
+* `PRESET_TIMESTAMP` ist ein fester ISO-Zeitstempel
+  (`2026-08-31T00:00:00.000Z`) — der Seed ist byte-stabil und wiederholbar.
+* `liveAvailable` wird **nie** gesetzt (CAP-008: Laufzeitprojektion, kein
+  Stammdatenfeld). `liveTradable` ist `false` für `PAPER`, sonst `true`.
+* Metriken (`volume24h`, `spread`, `volatility`) starten auf `null` und werden
+  von `npm run market:sync` gefüllt — die Registry erfindet keine Marktdaten.
+* Alle Symbole erfüllen `STORAGE_SYMBOL_RE` und `TICKER_RE`; Rohstoff-Futures
+  werden als `CL`/`GC`/`ZC` … auf Ticker `USX` geführt.
+* Die Ausschluss-Policy (§4.1) lehnt keinen Preset-Eintrag ab; der Seeder
+  beendet sich bei Rejections mit Exit 1 (fail-loud).
+
+**Kurzverkauf — zwei Ebenen, nicht vermischen:**
+
+* `shortAvailable` ist eine **Venue-Aussage**: BINANCE-Spot kann keine Shorts,
+  ALPACA/IBKR/PAPER können es.
+* Die **operative Freigabe** ist ausschließlich `riskLimits.allowShort`
+  (`risk_config`, `LIMIT_CEILINGS.allowShort = [0, 1]`). Seit v1.30.0 steht sie
+  im Setup-Default auf `1` (abschaltbar mit `--no-shorts` bzw. im Dashboard).
+* `src/lib/engine.ts` lehnt eine SHORT-Order ab, sobald `allowShort` nicht
+  gesetzt ist — unabhängig davon, was die Venue kann.
+
+```bash
+npm run universe:seed:markets                  # 354 Instrumente, idempotent
+npm run universe:seed:markets -- --dry-run     # nichts schreiben
+npm run universe:seed:markets -- --no-paper-mirror
+npm run universe:seed:markets -- --json        # maschinenlesbare Zusammenfassung
+```
+
+Tests: `tests/universe.presets.test.ts` (15 Tests).
+
 ---
 
 ## 6. API-Referenz
@@ -339,7 +400,9 @@ Protokolliert werden ausschließlich IDs und Zähler — niemals Payloads, Heade
 | `UNIVERSE_POLICY_FILE` | *(leer)* | Pfad zu einer Policy-Override-Datei |
 | `UNIVERSE_AUDIT_DB` | *(leer)* | `1` = Audit zusätzlich nach PostgreSQL |
 
-Kommandos: `npm run universe:seed` (deterministisch), `npm test`,
+Kommandos: `npm run universe:seed` (Basis-Seed, 26 Instrumente),
+`npm run universe:seed:markets` (Presets, 354 Instrumente — beide
+deterministisch und idempotent), `npm test`,
 `npm run test:coverage` (Coverage-Bericht für `src/universe/**`).
 
 ---
@@ -347,7 +410,7 @@ Kommandos: `npm run universe:seed` (deterministisch), `npm test`,
 ## 9. Offene Punkte
 
 1. **Discovery-Adapter** (Task 2+): Venue-seitige Instrumentenlisten holen und via `upsertMany` einspeisen — die Registry bleibt dabei netzwerkfrei, der Adapter liegt außerhalb.
-2. **Metriken füllen**: `volume24h`, `spread`, `volatility` sind bis dahin `null`; Liquidity-/Risk-Filter brauchen sie.
+2. **Metriken füllen**: `volume24h`, `spread`, `volatility` sind bis dahin `null`; Liquidity-/Risk-Filter brauchen sie. (Teilweise erledigt seit v1.29.0 durch `npm run market:sync`; die Presets aus §5.1 starten weiterhin bewusst auf `null`.)
 3. **Delisting-Lifecycle**: aktuell nur Statuswechsel; Aufräumregeln (Retention, automatisches `halted` bei fehlendem `lastSeen`) fehlen bewusst.
 4. ~~**Symbol-Alias-Tabelle**~~ — **erledigt (v1.28.0, SYM-007):** Venue-Aliase wie `KRAKEN:XBT/USD` ↔ `BTC` sind deklarativ in den Venue-Profilen (`src/symbols/venueProfiles.ts`) abgebildet; Details in [SYMBOLS.md](SYMBOLS.md) §3.
 5. **UI-Anbindung**: Das Operations Center (Task 10) rendert `docs/help/market-universe.help.json` als Tooltips; die Watchlist-Präferenz soll dort editierbar werden.

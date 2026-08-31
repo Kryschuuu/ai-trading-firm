@@ -15,6 +15,7 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePath } from "../lib/appPaths";
 import { validateInstrument } from "./validation";
 import { INSTRUMENT_FIELDS, type MarketInstrument } from "./types";
 
@@ -35,10 +36,17 @@ export interface LoadResult {
   existed: boolean;
 }
 
-/** Löst das Datenverzeichnis auf (`UNIVERSE_DATA_DIR` überschreibt den Default). */
+/**
+ * Löst das Datenverzeichnis auf (`UNIVERSE_DATA_DIR` überschreibt den Default).
+ *
+ * Die Auflösung läuft über `resolveRuntimePath()` (src/lib/appPaths.ts):
+ * identische Semantik wie früher `path.join(process.cwd(), raw)`, aber mit
+ * Path-Traversal-Schutz und ohne das Turbopack-Projekt-Tracing
+ * („Dynamic filesystem access causes tracing of the whole project").
+ */
 export function resolveDataDir(dir?: string): string {
   const raw = dir ?? process.env.UNIVERSE_DATA_DIR ?? DEFAULT_DATA_DIR;
-  return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+  return resolveRuntimePath(raw);
 }
 
 /** Serialisiert ein Instrument mit stabiler Feldreihenfolge (deterministische Diffs). */

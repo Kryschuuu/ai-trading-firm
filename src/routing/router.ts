@@ -20,6 +20,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePath } from "@/lib/appPaths";
 import {
   CLASS_ORDER,
   MODEL_CLASSES,
@@ -297,12 +298,13 @@ export class ModelRouter {
     return out;
   }
 
-  /** Absolute Pfade bleiben absolut (path.join würde sie relativ anhängen). */
+  /**
+   * Absolute Pfade bleiben absolut (path.join würde sie relativ anhängen).
+   * `resolveRuntimePath()` kapselt genau diese Regel — plus `..`-Schutz.
+   */
   private modesFilePath(): string | null {
     if (!this.modesFile) return null;
-    return path.isAbsolute(this.modesFile)
-      ? this.modesFile
-      : path.join(process.cwd(), this.modesFile);
+    return resolveRuntimePath(this.modesFile);
   }
 
   private loadModes(): Record<string, RoutingMode> {
@@ -325,10 +327,16 @@ export class ModelRouter {
     }
   }
 
+  private overridesFilePath(): string | null {
+    if (!this.overridesFile) return null;
+    return resolveRuntimePath(this.overridesFile);
+  }
+
   private loadOverrides(): Record<string, ProviderModelOverride> {
     if (!this.overridesFile) return {};
     try {
-      const file = path.isAbsolute(this.overridesFile) ? this.overridesFile : path.join(process.cwd(), this.overridesFile);
+      const file = this.overridesFilePath();
+      if (!file) return {};
       if (!existsSync(file)) return {};
       const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
       if (!isRecord(parsed)) return {};
@@ -346,7 +354,8 @@ export class ModelRouter {
   private persistOverrides(): void {
     if (!this.overridesFile) return;
     try {
-      const file = path.isAbsolute(this.overridesFile) ? this.overridesFile : path.join(process.cwd(), this.overridesFile);
+      const file = this.overridesFilePath();
+      if (!file) return;
       const dir = path.dirname(file);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o755 });
       writeFileSync(file, `${JSON.stringify(this.overrides, null, 2)}\n`, { mode: 0o600 });

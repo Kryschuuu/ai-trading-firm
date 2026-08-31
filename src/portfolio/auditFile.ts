@@ -17,6 +17,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { joinRuntimePath, resolveRuntimePath } from "../lib/appPaths";
 import { redactPortfolioMessage } from "./errors";
 import type { AuditSink, PortfolioAuditEvent } from "./audit";
 
@@ -64,11 +65,17 @@ export function serializeAuditEvent(event: PortfolioAuditEvent): string {
   );
 }
 
-/** Löst das Audit-Verzeichnis auf (`PORTFOLIO_AUDIT_DIR` überschreibt den Default). */
+/**
+ * Löst das Audit-Verzeichnis auf (`PORTFOLIO_AUDIT_DIR` überschreibt den Default).
+ *
+ * `resolveRuntimePath()` (src/lib/appPaths.ts) behält die bisherige Semantik
+ * (relativ ⇒ Projektstamm, absolut ⇒ übernommen) und ergänzt den
+ * Path-Traversal-Schutz. Gleichzeitig verschwindet die Turbopack-Warnung
+ * „Dynamic filesystem access causes tracing of the whole project".
+ */
 export function resolveAuditDir(dir?: string): string {
   const raw = dir ?? process.env.PORTFOLIO_AUDIT_DIR ?? DEFAULT_AUDIT_DIR;
-  const resolved = path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
-  return resolved;
+  return resolveRuntimePath(raw);
 }
 
 /** Optionen der Datei-Senke. */
@@ -95,7 +102,10 @@ export function fileAuditSink(options: FileAuditSinkOptions = {}): AuditSink {
   if (!AUDIT_FILE_RE.test(file)) {
     throw new Error(`audit file name invalid: ${redactPortfolioMessage(file, 40)}`);
   }
-  const target = path.join(dir, file);
+  // Über `joinRuntimePath()`: identisches Ergebnis wie `path.join(dir, file)`,
+  // aber die Pfadherkunft endet an der Modulgrenze von `@/lib/appPaths` —
+  // sonst meldet Turbopack hier weiterhin Projekt-Tracing.
+  const target = joinRuntimePath(dir, file);
   let prepared = false;
   const prepare = () => {
     if (prepared) return;

@@ -52,6 +52,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "PostgreSQL-Setup-Hilfe",
     subtitle: "Sofort-Hilfe & Fehlersuche für Setup-Schritt 2 (v1.5.4)",
   },
+  setupbugs: {
+    file: "docs/SETUP_BUGS.md",
+    title: "Setup-Bug-Register",
+    subtitle: "Befunde und Fixes des Setup-Pfads: PostgreSQL, Seed, Adapter, Build, Validierung (v1.30.0)",
+  },
   architecture: {
     file: "docs/ARCHITECTURE.md",
     title: "Architektur: Makro/Mikro-Zyklen",

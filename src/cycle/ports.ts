@@ -12,6 +12,7 @@
 
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePath } from "@/lib/appPaths";
 import { chatLlm } from "@/lib/llmProvider";
 import {
   escalationFromRuntime,
@@ -249,6 +250,15 @@ export class StubAnalyticsPort implements AnalyticsPort {
  * WICHTIG (Task 09, Regel 1): Der Task ist eine **vom Code vergebene** ID.
  * Sie stammt nie aus Prompt-Inhalten, sondern aus der Rolle des Schritts.
  */
+/**
+ * Erlaubte Dateinamen für das Zyklus-Audit-NDJSON.
+ *
+ * Bewusst dieselbe Form wie `AUDIT_FILE_RE` im Portfolio-Modul: nur ein
+ * einzelnes Pfadsegment aus `[A-Za-z0-9._-]`, damit ein konfigurierter
+ * Dateiname niemals als Pfad (Separator oder `..`) missbraucht werden kann.
+ */
+export const CYCLE_AUDIT_FILE_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
 export const ROLE_TASK_MAP: Readonly<Record<string, RoutingTask>> = {
   MARKET_SCANNER: "market_ranking",
   MACRO_ANALYST: "regime_analysis",
@@ -547,7 +557,14 @@ export class DefaultCycleAuditPort implements CycleAuditPort {
   private logFilePath: string;
 
   constructor(logDir = "data/cycle", fileName = "audit.ndjson") {
-    this.logFilePath = path.join(process.cwd(), logDir, fileName);
+    // Pfadsicher: `logDir`/`fileName` können aus Konfiguration kommen.
+    // `resolveRuntimePath()` verankert relativ im Projektstamm und wirft bei
+    // `..`-Ausbruch; der Dateiname wird zusätzlich auf ein erlaubtes Muster
+    // geprüft, damit nichts in fremde Verzeichnisse geschrieben wird.
+    if (!CYCLE_AUDIT_FILE_RE.test(fileName)) {
+      throw new Error(`cycle audit file name invalid: ${fileName.slice(0, 40)}`);
+    }
+    this.logFilePath = path.join(resolveRuntimePath(logDir), fileName);
   }
 
   async logEvent(event: CycleAuditEvent): Promise<void> {

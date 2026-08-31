@@ -14,6 +14,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePath, resolveStoredPath } from "@/lib/appPaths";
 import { formatDateYYYYMMDD, getIsoWeekString } from "./clock";
 import type { CycleRunRecord } from "./types";
 import type { WeeklyReview } from "@/scanner/weekly";
@@ -60,9 +61,16 @@ export interface ArtifactIndexManifest {
   weeklyRuns: WeeklyRunIndexEntry[];
 }
 
+/**
+ * Wurzelverzeichnis der Zyklus-Artefakte.
+ *
+ * `resolveRuntimePath()` (src/lib/appPaths.ts) ersetzt das frühere
+ * `path.join(process.cwd(), dir)`: gleiche Semantik, plus Path-Traversal-Schutz
+ * und ohne Turbopack-Projekt-Tracing.
+ */
 export function resolveArtifactsRoot(customDir?: string): string {
   const dir = customDir ?? process.env.CYCLE_ARTIFACTS_DIR ?? process.env.SCANNER_ARTIFACTS_DIR ?? DEFAULT_CYCLE_ARTIFACTS_DIR;
-  return path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir);
+  return resolveRuntimePath(dir);
 }
 
 export function writeJsonAtomic(targetPath: string, data: unknown): void {
@@ -346,9 +354,13 @@ export function getLatestWeeklyArtifact(rootDir?: string): WeeklyReview | null {
     const reviewPath = path.join(root, latestWeek, "weekly", "weekly-review.json");
     return readJsonSafe<WeeklyReview>(reviewPath);
   }
-  const reviewPath = path.isAbsolute(latestEntry.reviewPath)
-    ? latestEntry.reviewPath
-    : path.join(process.cwd(), latestEntry.reviewPath);
+  // `reviewPath` ist ein VON DIESEM MODUL persistierter Eintrag
+  // (`path.relative(process.cwd(), …)` beim Schreiben). Liegt das
+  // Artefakt-Verzeichnis außerhalb des Projekts, ist der Wert zwingend
+  // `../../../…` — `resolveStoredPath()` ist genau für diese app-eigenen
+  // Index-Werte da (siehe src/lib/appPaths.ts). Fremd-/HTTP-Eingaben laufen
+  // stattdessen über `resolveRuntimePath()` mit Ausbruch-Schutz.
+  const reviewPath = resolveStoredPath(latestEntry.reviewPath);
   return readJsonSafe<WeeklyReview>(reviewPath);
 }
 

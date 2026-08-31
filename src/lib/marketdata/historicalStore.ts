@@ -33,6 +33,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePath } from "../../lib/appPaths";
 import type { MarketCandle } from "./types";
 
 /**
@@ -328,9 +329,7 @@ export class HistoricalStore {
     // Der Pfad wird ausschließlich aus dem konfigurierten `dir` gebildet.
     // instrumentId/timeframe/feed werden NIE in Pfade interpoliert (kein
     // Path-Traversal).
-    this.dir = path.isAbsolute(dir ?? "data/history")
-      ? (dir as string)
-      : path.join(process.cwd(), dir ?? "data/history");
+    this.dir = resolveRuntimePath(dir ?? "data/history");
     this.filePath = path.join(this.dir, "candles.ndjson");
     this.maxBarsPerSeries = Math.max(1, Math.floor(opts.maxBarsPerSeries ?? 5000));
   }
