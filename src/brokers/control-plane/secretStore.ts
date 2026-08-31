@@ -38,6 +38,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePathSafe } from "@/lib/appPaths";
 
 /** Einmalig vom Frontend uebernommenes Credential-Paar (wird nie angezeigt). */
 export interface CredentialPayload {
@@ -452,8 +453,21 @@ export async function resolveSecretStorage(opts: {
   );
 }
 
+/**
+ * Ablageverzeichnis des Datei-Backends.
+ *
+ * `resolveRuntimePath()` (src/lib/appPaths.ts) ersetzt `path.resolve(
+ * process.cwd(), …)`: identisches Ergebnis für die Defaults `data/secrets`
+ * und für absolute Overrides, aber mit `..`-Schutz und ohne das
+ * Turbopack-Projekt-Tracing. Ein `..`-Ausbruch fällt auf den sicheren Default
+ * zurück (`resolveRuntimePathSafe`) — der Secret-Store darf nie an einen
+ * unkontrollierten Ort schreiben.
+ */
 function secretDirFromEnv(env: Record<string, string | undefined>): string {
-  return path.resolve(process.cwd(), env.BROKER_SECRET_DIR || "data/secrets");
+  return resolveRuntimePathSafe(
+    env.BROKER_SECRET_DIR || "data/secrets",
+    "data/secrets",
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

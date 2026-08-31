@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-30** ·
-> Code-Version **1.29.0**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
+> Code-Version **1.30.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,60 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.30.0] — 2026-08-31 · fix(setup): Setup-Pfad härten + Markt-Presets + Short-Selling-Default (SETUP-130)
+
+**P1, Produktkette + Sicherheit.** Der Setup-Pfad hatte fünf Befundgruppen,
+die eine Neuinstallation unbrauchbar oder unsicher machen konnten, und das
+handelbare Universum war mit 26 Instrumenten zu dünn für den Scanner-Trichter.
+Vollständiges Befund-/Fix-Register: [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md).
+
+* **B1 PostgreSQL:** alle Cluster-Checks laufen als `$PG_SUDO_USER`;
+  Versionsabgleich (`pg_version_mismatch` / `pg_control_major`) **vor** jedem
+  Eingriff; `pg_pick_locale()` mit Fallback `C.UTF-8` → `en_US.UTF-8` → `C`
+  bei `--encoding=UTF8`; `initdb` mit Fehlerbehandlung; Cluster-Reset nur als
+  bewusster Schritt (`pg_reset_cluster`, `--reset-cluster`).
+* **B2 Datenbank:** Tabellen-Verifikation gegen die 13 Pflicht-Tabellen aus
+  `checkSchema()`, Einzelprüfung von `agents`/`missions`/`risk_config`/
+  `kill_switches`/`positions`/`equity_snapshots`/`broker_credentials`,
+  UUID-Prüfung jeder Mission-ID — beendet
+  `invalid input syntax for type uuid: "null"`.
+* **B3 Broker:** der aktive Adapter wird über `/api/firm → account.broker`
+  verifiziert; `UNEXPECTED_BROKER_ADAPTER` ist damit sichtbar statt rätselhaft.
+* **B4 Build:** neu `src/lib/appPaths.ts` (`resolveRuntimePath`,
+  `resolveRuntimePathSafe`, `joinRuntimePath`, `resolveStoredPath`) ersetzt die
+  **12** `path.join(process.cwd(), <dynamisch>)`-Stellen in `secretStore.ts`,
+  `cycle/artifacts.ts`, `cycle/ports.ts`, `historicalStore.ts`,
+  `portfolio/auditFile.ts`, `routing/router.ts`, `scanner/artifacts.ts`,
+  `universe/store.ts` — `next build` ist warnungsfrei, zusätzlich mit
+  Path-Traversal-Schutz.
+* **B5 API:** `FIRM_API_TOKEN` wird erzeugt (`openssl rand -hex 32`), `.env`
+  bleibt `600`; offener `0.0.0.0`-Betrieb ohne Token wird als
+  Sicherheitswarnung quittiert. Die Ceiling-Klemmung wird mit **Prozent** (90)
+  statt Bruch (0.9) geprüft — der alte Test konnte seit v1.7.0 nie bestehen.
+* **B6 Validierung:** neu `scripts/validate-setup.sh` mit **18** deterministischen
+  Checks (bestanden ab `--min-pass`, Default 15), `--json`, dokumentierten
+  Ausnahmen und Behebungszeile je Fehlcheck.
+* **Feature Markt-Presets:** neu `src/universe/presets.ts` +
+  `npm run universe:seed:markets` — **50 Aktien** (ALPACA/IBKR),
+  **50 Indizes** (IBKR-CFD), **22 Rohstoffe** (IBKR-Futures),
+  **30 Kryptowährungen** (BINANCE-Spot), je Asset plus `PAPER`-Spiegel
+  = **354 Instrumente**. `assertPresetContract()` macht Abweichungen von den
+  dokumentierten Zahlen zum harten Fehler.
+* **Feature Short-Selling:** im Setup-Default **aktiviert**
+  (`risk_config.allowShort = 1`, abschaltbar mit `--no-shorts`). Die harten
+  Code-Grenzen bleiben unverändert (`maxLeverage = 1`, `requireStopLoss = true`
+  nicht abschaltbar, Kill-Switch, `LIMIT_CEILINGS`).
+* `scripts/setup-cachyos.sh` neu geschrieben: 10 Schritte, strukturiertes
+  Logging nach `data/setup/setup-<Zeitstempel>.log`, `--dry-run`,
+  `--non-interactive`, Secret-Maskierung in Anzeige **und** Log, ERR-Trap mit
+  Schritt-/Zeilenangabe, vollständig idempotent.
+* Tests: neu `tests/universe.presets.test.ts` (15 Tests). Bestehende
+  Setup-Regressionstests (`tests/dbConfig.test.ts`, `tests/setupCluster.test.ts`,
+  `tests/setupPgService.test.ts`) unverändert grün.
+* Doku: neu `docs/SETUP_BUGS.md`, aktualisiert `README.md`, `INSTALL.md`,
+  `docs/INSTALL.md`, `docs/MARKET_UNIVERSE.md`.
+* Version **1.30.0**. Kein Schema-Bruch, keine Datenmigration.
 
 ## [1.29.0] — 2026-08-30 · feat(marketdata): persistenter Warmup + Sync-CLI (MDSYNC-001)
 

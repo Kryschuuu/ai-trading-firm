@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
-> **Status-Header (Task 12):** **Implementiert** (Tasks 1–11) ·
-> Dokumentationsstand **2026-08-28** · Code-Version **1.19.0**
+> **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
+> Dokumentationsstand **2026-08-31** · Code-Version **1.30.0**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -12,22 +12,105 @@ tatsächlich im Code existiert.
 
 ## Voraussetzungen
 
+- **CachyOS** (Arch-basiert) — das Setup-Skript zielt auf CachyOS/Arch
 - **Node.js ≥ 20**, npm
 - **PostgreSQL** (lokal oder via `deploy/`-Skripte)
 - optional: Ollama (oder ein anderer LLM-Provider) für die Agenten
 
-## Schnellstart
+## Schnellstart (CachyOS)
+
+Ein Befehl, zehn Schritte, idempotent — wiederholbar ohne Datenverlust:
+
+```bash
+git clone https://github.com/Kryschuuu/ai-trading-firm.git
+cd ai-trading-firm
+./scripts/setup-cachyos.sh --variant a          # Variante A: alles auf einem Rechner
+# Variante B (Modellserver im LAN):
+./scripts/setup-cachyos.sh --variant b --llm-host 192.168.1.50
+```
+
+**Die zehn Schritte:** Preflight · Pakete · PostgreSQL-Cluster · Rolle/Datenbank
+· `.env` · Abhängigkeiten · Schema · Markt-Universum · Build · Seed +
+Short-Selling + 18-Check-Validierung.
+
+**Optionen:**
+
+| Option | Wirkung |
+| --- | --- |
+| `--variant a\|b` | Pflicht: Solo-Node oder Split-Node |
+| `--llm-host HOST` | Variante B: Modellserver-IP |
+| `--db-name`, `--db-user`, `--db-host`, `--db-port` | Datenbank-Ziel |
+| `--pgdata PFAD` | Datenverzeichnis (Default `/var/lib/postgres/data`) |
+| `--api-token TOKEN` / `--no-api-token` | API-Token setzen bzw. weglassen |
+| `--no-shorts` | Short-Selling deaktiviert lassen |
+| `--sync-markets` | Marktdaten-Warmup direkt ausführen |
+| `--skip-build`, `--skip-validate` | Schritte auslassen |
+| `--min-pass N` | Validierungs-Schwelle (Default 15 von 18) |
+| `--reset-cluster` | Cluster ohne Rückfrage neu initialisieren |
+| `--dry-run` | ausführbare Befehle nur anzeigen |
+| `--non-interactive`, `-y` | keine interaktiven Fragen |
+| `--log-file PFAD` | Log-Ziel (Default `data/setup/setup-<Zeitstempel>.log`) |
+
+Das Skript lässt sich jederzeit erneut ausführen: Es überschreibt `.env` nicht
+still (Sicherung als `.env.bak-<Zeitstempel>`), löscht keinen intakten
+Cluster und seedet idempotent. Bei einem Fehler nennt die `ERR`-Trap Schritt
+und Zeile; das vollständige Log liegt unter `data/setup/`.
+
+## Schnellstart (manuell, andere Distribution)
 
 ```bash
 cp .env.example .env            # Flags setzen (mind. DATABASE_URL)
 npm ci
 npx drizzle-kit push            # Schema in die DB schreiben
-npm run universe:seed           # Instrument-Universum (NDJSON) laden
+npm run universe:seed:markets   # 354 Preset-Instrumente (v1.30.0)
+npm run universe:seed           # Basis-Universum (NDJSON)
 npm run build
 npm run start                   # http://0.0.0.0:3369
+./scripts/validate-setup.sh     # 18 Checks, bestanden ab 15
 ```
 
 Die `.env`-Datei enthält Zugangsdaten → `chmod 600 .env`.
+**Achtung:** `npm run start` bindet `0.0.0.0`. Ohne `FIRM_API_TOKEN` sind alle
+`POST`/`PUT`-Routen im gesamten Netz offen — das Setup-Skript erzeugt deshalb
+immer eines.
+
+## Markt-Universum und Short-Selling (v1.30.0)
+
+`npm run universe:seed:markets` schreibt vier kuratierte Presets
+(`src/universe/presets.ts`):
+
+| Asset-Klasse | Anzahl | Venue | `marketType` | `shortAvailable` |
+| --- | ---: | --- | --- | --- |
+| Aktien | 50 | `ALPACA`, `IBKR` | `spot` | `true` |
+| Indizes | 50 | `IBKR` | `cfd` | `true` |
+| Rohstoffe | 22 | `IBKR` | `future` | `true` |
+| Kryptowährungen | 30 | `BINANCE` | `spot` | `false` (Spot) |
+
+Zusätzlich entsteht je Asset ein `PAPER`-Spiegel — **354 Instrumente**
+gesamt. Metriken starten auf `null`; `npm run market:sync` füllt sie.
+
+**Short-Selling ist per Default aktiviert** (`risk_config.allowShort = 1`).
+Das ist ein Runtime-Wert, kein Code-Default — abschalten geht im Dashboard
+oder per `allowShort = 0`. Unverändert hart im Code bleiben `maxLeverage = 1`,
+`requireStopLoss = true`, Kill-Switch und alle `LIMIT_CEILINGS`.
+`shortAvailable` ist eine Venue-Aussage; die operative Freigabe ist
+ausschließlich `riskLimits.allowShort`.
+
+## Validierung nach dem Setup
+
+```bash
+./scripts/validate-setup.sh                        # http://127.0.0.1:3369
+./scripts/validate-setup.sh --base-url http://127.0.0.1:3369 --min-pass 18
+./scripts/validate-setup.sh --expect-shorts false  # Short-Selling bewusst aus
+./scripts/validate-setup.sh --json                 # maschinenlesbar (stdout)
+```
+
+18 Checks in fünf Gruppen: Dienst/Schema (V01–V04), Stammdaten (V05–V07),
+Markt-Universum (V08–V11), Broker-Adapter und harte Grenzen (V12–V16),
+API-Sicherheit (V17–V18). Bestanden ab `--min-pass` (Default 15). Jeder
+Fehlcheck gibt eine konkrete Behebungszeile aus. Dokumentierte Ausnahmen und
+die Befund-Historie stehen in
+[`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md).
 
 ## Env-Flag-Referenz (sichere Defaults)
 
@@ -145,7 +228,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
 | `FIRM_ADMIN_TOKEN` | *(leer)* | Admin-Token (RBAC) |
-| `FIRM_API_TOKEN` | *(leer)* | API-Token |
+| `FIRM_API_TOKEN` | *(leer)* | API-Token für alle `POST`/`PUT`-Routen; `scripts/setup-cachyos.sh` erzeugt eines |
 | `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Token |
 | `FIRM_RATE_LIMIT` | — | Rate-Limit auf Firm-API |
 
@@ -183,5 +266,9 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 ## Migration & Deploy
 
 Empfohlene Deploy-Kette: `git pull` → `npm ci` → `npx drizzle-kit push` →
-`npm run build` → `sudo systemctl restart ai-trading-firm`. Migrationshinweise
-stehen im [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+`npm run universe:seed:markets` → `npm run build` →
+`sudo systemctl restart ai-trading-firm` → `./scripts/validate-setup.sh`.
+Migrationshinweise stehen im [`docs/CHANGELOG.md`](docs/CHANGELOG.md);
+Setup-Befunde und ihre Behebung in
+[`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), PostgreSQL-Soforthilfe in
+[`docs/SETUP_PG_TROUBLESHOOTING.md`](docs/SETUP_PG_TROUBLESHOOTING.md).

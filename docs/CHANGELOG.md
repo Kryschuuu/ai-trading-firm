@@ -20,6 +20,131 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.30.0] — 2026-08-31 · fix(setup): Setup-Pfad härten, Markt-Presets, Short-Selling-Default (SETUP-130)
+
+**P1, Produktkette + Sicherheit.** Eine Neuinstallation auf CachyOS konnte an
+fünf Stellen scheitern oder unsicher enden; das handelbare Universum war mit
+26 Instrumenten zu dünn für einen sinnvollen Scanner-Trichter. Vollständiges
+Befund-/Fix-Register mit Symptom, Ursache, Fix und Nachweis je Punkt:
+[`SETUP_BUGS.md`](SETUP_BUGS.md).
+
+### Added
+
+* **`scripts/validate-setup.sh`** — 18 deterministische Setup-Checks ohne
+  Pipeline-Lauf und ohne bleibende Zustandsänderung: Dienst/Schema (V01–V04),
+  Stammdaten inkl. UUID-Prüfung (V05–V07), Markt-Universum (V08–V11),
+  Broker-Adapter und harte Grenzen (V12–V16), API-Sicherheit (V17–V18).
+  Optionen `--base-url`, `--min-pass` (Default 15), `--expect-shorts`,
+  `--timeout`, `--json`, `-h`. Exit-Codes 0/1/2. Im `--json`-Modus geht der
+  Fortschritt auf `stderr`, `stdout` bleibt reines JSON.
+* **`src/universe/presets.ts`** — kuratierte, deterministische Markt-Presets:
+  50 Aktien, 50 Indizes, 22 Rohstoffe, 30 Kryptowährungen. Fester
+  `lastSeen`-Zeitstempel, kein `liveAvailable` (CAP-008), Metriken `null`.
+  `assertPresetContract()` erzwingt die dokumentierten Anzahlen und
+  Duplikatfreiheit.
+* **`scripts/seed-market-universe.ts`** / **`npm run universe:seed:markets`** mit
+  `--dry-run`, `--no-paper-mirror`, `--json`, `-h`. Idempotenter Upsert
+  (354 Instrumente), fail-loud bei abgelehnten Sätzen (Exit 1).
+* **`src/lib/appPaths.ts`** — zentrale, pfadsichere Auflösung von
+  Laufzeit-Datenverzeichnissen: `resolveRuntimePath()`,
+  `resolveRuntimePathSafe()`, `joinRuntimePath()`, `resolveStoredPath()` und
+  `PathTraversalError`.
+* **`docs/SETUP_BUGS.md`** — Setup-Bug-Register (B1–B6), im Doku-Katalog
+  (`GET /api/docs`, Slug `setupbugs`) registriert.
+* **`tests/universe.presets.test.ts`** — 15 Tests: Preset-Vertrag,
+  Seed-Invarianten, Short-/Hebel-Semantik, Policy-Konformität, Determinismus,
+  Registry-Idempotenz.
+* **`scripts/setup-cachyos.sh`** — neue Optionen: `--no-shorts`,
+  `--sync-markets`, `--api-token`, `--no-api-token`, `--skip-build`,
+  `--skip-validate`, `--min-pass`, `--reset-cluster`, `--dry-run`,
+  `--non-interactive`/`-y`, `--log-file`, `--db-host`, `--db-port`, `--pgdata`.
+
+### Changed
+
+* **Short-Selling ist im Setup-Default aktiviert** (`risk_config.allowShort = 1`).
+  Umsetzung über den bestehenden Runtime-Konfigurationspfad
+  (`LIMIT_CEILINGS.allowShort = [0, 1]`) als idempotenter SQL-Upsert — kein
+  Eingriff in die Code-Ceilings. Harte Grenzen unverändert: `maxLeverage = 1`,
+  `requireStopLoss = true` (nicht abschaltbar), Kill-Switch, Positions- und
+  Drawdown-Limits. `shortAvailable` bleibt eine Venue-Aussage: BINANCE-Spot
+  bleibt `false`, ALPACA/IBKR/PAPER sind `true`.
+* **`scripts/setup-cachyos.sh` neu strukturiert:** zehn benannte Schritte
+  (`step_01_preflight` … `step_10_validate`), strukturiertes Logging mit
+  Zeitstempel nach `data/setup/setup-<Zeitstempel>.log`, `ERR`-Trap mit Schritt-
+  und Zeilenangabe, Secret-Maskierung (`run_masked`) für `DATABASE_URL` in
+  Anzeige **und** Log, vollständige Idempotenz.
+* **Tabellen-Verifikation** nach `drizzle-kit push` erwartet ≥ 13 Tabellen
+  (abgeleitet aus `src/lib/seed.ts → checkSchema()`, vorher 9) und prüft
+  kritische Tabellen einzeln.
+* **`.env`-Behandlung:** eine vorhandene `.env` wird nie still überschrieben;
+  fehlende Schlüssel werden ergänzt, eine überschriebene Datei vorher als
+  `.env.bak-<Zeitstempel>` gesichert.
+* `resolveRuntimePath()` ersetzt die Inline-Pfadauflösung in
+  `src/universe/store.ts`, `src/scanner/artifacts.ts`, `src/cycle/artifacts.ts`,
+  `src/cycle/ports.ts`, `src/lib/marketdata/historicalStore.ts`,
+  `src/portfolio/auditFile.ts`, `src/routing/router.ts` und
+  `src/brokers/control-plane/secretStore.ts`. Semantik und Defaults bleiben
+  unverändert (`data/...` bzw. `artifacts`).
+* `DefaultCycleAuditPort` validiert den Dateinamen gegen
+  `CYCLE_AUDIT_FILE_RE` (`^[A-Za-z0-9._-]{1,64}$`) — derselbe Schutz wie im
+  Portfolio-Audit.
+
+### Fixed
+
+* **B1 PostgreSQL-Initialisierung:** Cluster-Checks laufen als
+  `$PG_SUDO_USER` (kein `EACCES`-Fehlalarm bei `0700`); Versionsabgleich
+  (`pg_version_mismatch`, `pg_control_major`) **vor** jedem Eingriff, bei
+  Major-Mismatch Abbruch mit `pg_upgrade`-Hinweis statt Datenlöschung;
+  `pg_pick_locale()` mit Fallback-Kette `C.UTF-8` → `en_US.UTF-8` → `C`
+  (behebt `initdb: error: locale "C.UTF-8" does not exist`); `initdb`-Fehler
+  werden abgefangen und mit Journal-Auszug plus manuellem Befehl quittiert;
+  Cluster-Reset ist ein eigener, zustimmungspflichtiger Schritt
+  (`pg_reset_cluster`).
+* **B2 `invalid input syntax for type uuid: "null"`:** Mission-IDs werden auf
+  UUID-Form geprüft, bevor sie in einen Request gehen; `agents`/`missions`
+  werden nach dem Seed gezählt und gemeldet.
+* **B3 `UNEXPECTED_BROKER_ADAPTER`:** der aktive Adapter wird über
+  `/api/firm → account.broker` verifiziert (Check V12).
+* **B4 Zwölf Turbopack-Warnungen** „Dynamic filesystem access causes tracing
+  of the whole project“ sind beseitigt — `npm run build` kompiliert
+  warnungsfrei. Schritt 09 wertet die Build-Ausgabe aus, damit sie nicht
+  unbemerkt zurückkommen.
+* **B5 Offener LAN-Betrieb:** `FIRM_API_TOKEN` wird beim Setup erzeugt;
+  `--no-api-token` erzeugt eine explizite Sicherheitswarnung. Die
+  Ceiling-Klemmung wird mit Prozent (90 → 0.5) statt Bruch (0.9) geprüft.
+* **B6 Fehlende Abnahme-Routine:** `scripts/validate-setup.sh` liefert ein
+  schnelles, reproduzierbares Setup-Urteil (18 Checks, Default-Schwelle 15).
+
+### Security
+
+* `FIRM_API_TOKEN`-Erzeugung mit `openssl rand -hex 32` (Fallback
+  `/dev/urandom` + `od`); `.env` bleibt `0600`; Token erscheint nie im Log
+  (`run_masked`).
+* Path-Traversal-Schutz für alle konfigurierten Datenverzeichnisse
+  (`UNIVERSE_DATA_DIR`, `SCANNER_ARTIFACTS_DIR`, `CYCLE_ARTIFACTS_DIR`,
+  `PORTFOLIO_AUDIT_DIR`, `BROKER_SECRET_DIR`, `PAPER_HISTORY_DIR`);
+  `..`-Ausbruch wirft `PathTraversalError`, der Secret-Store fällt auf den
+  sicheren Default zurück.
+* `--no-api-token` bleibt möglich, ist aber dokumentiert riskant: `npm run start`
+  bindet `0.0.0.0`.
+
+### Migration
+
+Kein Schema-Bruch, keine Datenmigration. Bestehende Installationen:
+
+```bash
+git pull
+npm ci
+npm run universe:seed:markets
+psql "$DATABASE_URL" -c "INSERT INTO risk_config (key, value, description) VALUES ('allowShort', '1', 'Short-Handel erlaubt? (0/1)') ON CONFLICT (key) DO UPDATE SET value = '1', updated_at = now();"
+npm run build
+sudo systemctl restart ai-trading-firm
+./scripts/validate-setup.sh
+```
+
+Wer Short-Selling nicht möchte, lässt das `UPDATE` weg bzw. setzt
+`allowShort` zurück auf `0` (Dashboard → Einstellungen).
+
 ## [1.29.0] — 2026-08-30 · feat(marketdata): persistenter Marktdaten-Warmup und Sync-CLI (MDSYNC-001)
 
 **P1, Produktkette.** `data/history/candles.ndjson` wurde von keinem Prozess

@@ -11,7 +11,8 @@ set -uo pipefail
 BASE_URL="${BASE_URL:-http://localhost:3369}"
 # Optional: FIRM_API_TOKEN aus .env lesen, wenn vorhanden
 if [[ -z "${FIRM_API_TOKEN:-}" && -f ".env" ]]; then
-  FIRM_API_TOKEN="$(grep -E '^FIRM_API_TOKEN=' .env | cut -d= -f2- | tr -d '"' || true)"
+  # Letzter Treffer gewinnt; \047 = Hochkomma, \r = CR (falls die .env CRLF hat).
+  FIRM_API_TOKEN="$(grep -E '^FIRM_API_TOKEN=' .env | tail -n 1 | cut -d= -f2- | tr -d $'"\047\r' || true)"
 fi
 AUTH=()
 [[ -n "${FIRM_API_TOKEN:-}" ]] && AUTH=(-H "x-firm-token: ${FIRM_API_TOKEN}")
@@ -83,7 +84,7 @@ STATE="$(curl -s "${BASE_URL}/api/firm")"
 
 AGENTS="$(jq '.agents | length'   <<<"$STATE")"
 MISSIONS="$(jq '.missions | length' <<<"$STATE")"
-check "Sechs Agenten angelegt (gefunden: ${AGENTS})" test "$AGENTS" -ge 6
+check "Agenten-Team vollständig (gefunden: ${AGENTS}, erwartet ≥ 12)" test "$AGENTS" -ge 12
 check "Mindestens eine Mission (gefunden: ${MISSIONS})" test "$MISSIONS" -ge 1
 
 jq -r '.agents[] | "      \(.role): \(.model)"' <<<"$STATE"
@@ -106,8 +107,14 @@ fi
 # ------------------------------------------------------------ 4. Guardrails
 echo
 echo "${C_CYAN}4. Harte Grenzen${C_RESET}"
+# Short-Selling ist seit v1.30.0 per Default AKTIVIERT. Der Check vergleicht
+# gegen einen Soll-Zustand (EXPECT_SHORTS=true|false), nicht gegen einen
+# hartcodierten Wert.
+EXPECT_SHORTS="${EXPECT_SHORTS:-true}"
+ALLOW_SHORT_IST="$(jq -r '.riskLimits.allowShort' <<<"$STATE")"
 check "maxPositionPct gesetzt"   test "$(jq -r '.riskLimits.maxPositionPct' <<<"$STATE")" != "null"
-check "Shorts gesperrt"          test "$(jq -r '.riskLimits.allowShort'     <<<"$STATE")" == "false"
+check "Short-Selling im Soll-Zustand (ist: ${ALLOW_SHORT_IST}, soll: ${EXPECT_SHORTS})" \
+  test "$ALLOW_SHORT_IST" == "$EXPECT_SHORTS"
 check "Kein Hebel"               test "$(jq -r '.riskLimits.maxLeverage'    <<<"$STATE")" == "1"
 check "Stop-Loss verpflichtend"  test "$(jq -r '.riskLimits.requireStopLoss' <<<"$STATE")" == "true"
 
@@ -116,7 +123,24 @@ jq -r '"      Position max \(.riskLimits.maxPositionPct*100)% · Risiko/Trade \(
 # -------------------------------------------------------------- 5. Pipeline
 echo
 echo "${C_CYAN}5. Pipeline-Durchlauf${C_RESET}"
-MISSION="$(jq -r '.missions[0].id' <<<"$STATE")"
+# Mission-ID lesen und auf UUID-Form pruefen. Ohne diese Pruefung landet der
+# String "null" im Request und PostgreSQL antwortet mit
+# "invalid input syntax for type uuid: \"null\"" -- die eigentliche Ursache
+# (fehlender Seed) bleibt dann unsichtbar. Siehe docs/SETUP_BUGS.md, Befund B2.
+MISSION="$(jq -r '.missions[0].id // empty' <<<"$STATE")"
+UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+if [[ -z "$MISSION" ]]; then
+  echo "  ${C_RED}✗${C_RESET} Keine Mission vorhanden — Pipeline-Schritt wird übersprungen"
+  note "Behebung: curl -s -X POST \"${BASE_URL}/api/seed\" ${AUTH[*]:-}"
+  ((FAIL++))
+elif [[ ! "$MISSION" =~ $UUID_RE ]]; then
+  echo "  ${C_RED}✗${C_RESET} Mission-ID ist keine gültige UUID — Pipeline-Schritt wird übersprungen"
+  note "Behebung: Datenbankbestand prüfen (docs/SETUP_BUGS.md, Befund B2)."
+  ((FAIL++))
+else
+  echo "  ${C_GREEN}✓${C_RESET} Mission-ID gültig (${MISSION})"; ((PASS++))
+fi
 
 if [[ "$(jq -r '.killSwitchArmed' <<<"$STATE")" == "true" ]]; then
   note "Not-Halt ist aktiv — wird für den Test entschärft."
@@ -124,12 +148,18 @@ if [[ "$(jq -r '.killSwitchArmed' <<<"$STATE")" == "true" ]]; then
     -H 'Content-Type: application/json' -d '{"arm":false}' >/dev/null
 fi
 
-note "Läuft… (Variante A kann einige Minuten dauern)"
-START=$(date +%s)
-RESULT="$(curl -s --max-time 900 -X POST "${BASE_URL}/api/firm/run" "${AUTH[@]}" \
-  -H 'Content-Type: application/json' \
-  -d "{\"missionId\":\"${MISSION}\",\"pipeline\":true}")"
-ELAPSED=$(( $(date +%s) - START ))
+if [[ ! "$MISSION" =~ $UUID_RE ]]; then
+  echo "  ${C_YELLOW}!${C_RESET} Pipeline-Durchlauf übersprungen (keine gültige Mission-ID)"
+  RESULT='{"ok":false,"error":"SKIP_NO_MISSION"}'
+  ELAPSED=0
+else
+  note "Läuft… (Variante A kann einige Minuten dauern)"
+  START=$(date +%s)
+  RESULT="$(curl -s --max-time 900 -X POST "${BASE_URL}/api/firm/run" "${AUTH[@]}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"missionId\":\"${MISSION}\",\"pipeline\":true}")"
+  ELAPSED=$(( $(date +%s) - START ))
+fi
 
 if [[ "$(jq -r '.ok' <<<"$RESULT")" == "true" ]]; then
   echo "  ${C_GREEN}✓${C_RESET} Pipeline durchgelaufen (${ELAPSED}s)"; ((PASS++))
@@ -173,17 +203,22 @@ check "Protokoll-API"        curl -sf --max-time 15 "${BASE_URL}/api/firm/log?li
 SNAP_N="$(curl -s "${BASE_URL}/api/firm/equity?range=all" | jq '.series | length')"
 check "Snapshots vorhanden (${SNAP_N})" test "${SNAP_N}" -ge 1
 
-# Konfigurations-Klemmung: 0.9 muss auf das Code-Maximum 0.5 geklemmt werden
+# Konfigurations-Klemmung: die API nimmt PROZENT (asFraction, v1.7.0), also
+# 90 = 90 %. Erwartet wird die Klemmung auf das Code-Ceiling 0.5.
+# (Der alte Test sendete den Bruch 0.9 → 0.009 → Klemmung auf 0.01 und
+# konnte deshalb nie bestehen. Siehe docs/SETUP_BUGS.md, Befund B5.)
+ORIG_PCT="$(jq -r '.riskLimits.maxPositionPct * 100 | floor' <<<"$STATE")"
+[[ "$ORIG_PCT" =~ ^[0-9]+$ ]] || ORIG_PCT=25
 CLAMP="$(curl -s -X PUT "${BASE_URL}/api/firm/config" "${AUTH[@]}" \
-  -H 'Content-Type: application/json' -d '{"key":"maxPositionPct","value":0.9}')"
+  -H 'Content-Type: application/json' -d '{"key":"maxPositionPct","value":90}')"
 if [[ "$(jq -r '.effective' <<<"$CLAMP")" == "0.5" ]]; then
-  echo "  ${C_GREEN}✓${C_RESET} Ceiling-Klemmung aktiv (0.9 → 0.5)"; ((PASS++))
+  echo "  ${C_GREEN}✓${C_RESET} Ceiling-Klemmung aktiv (90 % → 0.5)"; ((PASS++))
 else
   echo "  ${C_RED}✗${C_RESET} Ceiling-Klemmung FEHLERHAFT: $(jq -c . <<<"$CLAMP")"; ((FAIL++))
 fi
-# Wert zurücksetzen
+# Ursprungswert zurueckschreiben -- der Test veraendert die Konfiguration nicht.
 curl -s -X PUT "${BASE_URL}/api/firm/config" "${AUTH[@]}" \
-  -H 'Content-Type: application/json' -d '{"key":"maxPositionPct","value":0.25}' >/dev/null
+  -H 'Content-Type: application/json' -d "{\"key\":\"maxPositionPct\",\"value\":${ORIG_PCT}}" >/dev/null
 
 # Token-Schutz prüfen (nur wenn konfiguriert)
 if [[ -n "${FIRM_API_TOKEN:-}" ]]; then

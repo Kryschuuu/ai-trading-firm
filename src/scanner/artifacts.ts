@@ -20,6 +20,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { resolveRuntimePath } from "../lib/appPaths";
 import type { ScannerConfig, ScoreWeights } from "./config";
 import type { ScanResult } from "./pipeline";
 import type { InstrumentScore, ScoreBreakdownEntry } from "./types";
@@ -126,10 +127,18 @@ export function buildDailyArtifact(scan: ScanResult): DailyUniverseArtifact {
   };
 }
 
-/** Löst das Artefakt-Verzeichnis auf (`SCANNER_ARTIFACTS_DIR` überschreibt den Default). */
+/**
+ * Löst das Artefakt-Verzeichnis auf (`SCANNER_ARTIFACTS_DIR` überschreibt den
+ * Default).
+ *
+ * Auflösung über `resolveRuntimePath()` (src/lib/appPaths.ts): Semantik bleibt
+ * `path.join(process.cwd(), raw)`, zusätzlich mit Path-Traversal-Schutz. Der
+ * Umweg über das zentrale Modul entfernt die Turbopack-Warnung
+ * „Dynamic filesystem access causes tracing of the whole project".
+ */
 export function resolveArtifactsDir(dir?: string): string {
   const raw = dir ?? process.env.SCANNER_ARTIFACTS_DIR ?? DEFAULT_ARTIFACTS_DIR;
-  return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+  return resolveRuntimePath(raw);
 }
 
 /** Tagesordner `YYYY-MM-DD` aus einem ISO-Zeitstempel. */

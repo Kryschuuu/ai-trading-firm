@@ -49,6 +49,10 @@ next-env.d.ts
 /data/live-gate
 /data/live-gate-test
 
+# Setup-Protokolle (v1.30.0): scripts/setup-cachyos.sh schreibt jeden Lauf
+# nach data/setup/setup-<Zeitstempel>.log — Laufzeitartefakt, nie versioniert.
+/data/setup
+
 # Scanner-Artefakte (Task 04): taegliche Universe-Snapshots werden lokal
 # erzeugt und sind aus Registry + Historie reproduzierbar — nicht versioniert.
 /artifacts

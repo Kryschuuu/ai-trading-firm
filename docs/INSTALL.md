@@ -6,11 +6,12 @@ Sie ist für **beide Varianten** geschrieben:
 * **Variante A — Solo-Node:** alles auf dem Intel N150 (16 GB).
 * **Variante B — Split-Node:** N150 = Dienst + Datenbank, Desktop (48 GB, RX 480) = Modellserver.
 
-> **Lesehinweis:** Kapitel 1–7 gelten für **beide** Varianten. Kapitel 8 ist **nur für
+> **Lesehinweis:** Kapitel 0.5 ist der automatische Weg; Kapitel 1–7 sind dieselben
+> Schritte von Hand. Beide Wege gelten für **beide** Varianten. Kapitel 8 ist **nur für
 > Variante B**. Blöcke sind mit `[A]`, `[B]` oder `[A+B]` markiert.
 
-**Zeitbedarf:** Variante A ca. 45 Minuten. Variante B zusätzlich 1,5–2,5 Stunden
-(hauptsächlich der Vulkan-Build für die RX 480).
+**Zeitbedarf:** Kapitel 0.5 ca. 10–20 Minuten. Manuell: Variante A ca. 45 Minuten,
+Variante B zusätzlich 1,5–2,5 Stunden (hauptsächlich der Vulkan-Build für die RX 480).
 
 ---
 
@@ -24,6 +25,91 @@ Beantworte diese drei Fragen, bevor du tippst:
    eine Optimierung, kein Fundament — und sie ist der aufwendigste Teil (Kapitel 8.3).
 3. **Wie viel darf ein Pipeline-Durchlauf dauern?** Wenn 2–6 Minuten okay sind: Variante A
    reicht dauerhaft. Wenn du unter einer Minute brauchst: plane Variante B ein.
+
+---
+
+## Kapitel 0.5 — Automatische Installation (empfohlen) `[A+B]`
+
+Seit v1.30.0 erledigt `scripts/setup-cachyos.sh` die Kapitel 1–7 in einem
+Durchlauf. Das Skript ist idempotent: Es darf beliebig oft erneut laufen, ohne
+Daten zu verlieren oder `.env` still zu überschreiben.
+
+```bash
+# auf dem N150
+sudo pacman -S --needed git
+git clone https://github.com/Kryschuuu/ai-trading-firm.git
+cd ai-trading-firm
+
+# Variante A — alles auf dem N150
+./scripts/setup-cachyos.sh --variant a
+
+# Variante B — Modellserver auf dem Desktop im LAN
+./scripts/setup-cachyos.sh --variant b --llm-host 192.168.1.50
+```
+
+Zuerst trocken durchspielen ist jederzeit möglich:
+
+```bash
+./scripts/setup-cachyos.sh --variant a --dry-run
+```
+
+### Was die zehn Schritte tun
+
+| # | Schritt | Inhalt |
+| --- | --- | --- |
+| 01 | `step_01_preflight` | CachyOS/Arch prüfen, `sudo`, Werkzeugkasten, Port frei |
+| 02 | `step_02_packages` | `nodejs`, `npm`, `postgresql`, `openssl` über `pacman` |
+| 03 | `step_03_postgres` | Cluster prüfen, `initdb` mit UTF-8 und Fallback-Locale |
+| 04 | `step_04_database` | Rolle mit Passwort (SCRAM), Datenbank, `pg_isready` |
+| 05 | `step_05_env` | `.env` anlegen/ergänzen, `FIRM_API_TOKEN`, Recht `600` |
+| 06 | `step_06_dependencies` | `npm ci` |
+| 07 | `step_07_schema` | `drizzle-kit push`, ≥ 13 Pflicht-Tabellen verifizieren |
+| 08 | `step_08_universe` | `npm run universe:seed` + `npm run universe:seed:markets` |
+| 09 | `step_09_build` | `npm run build`, Build-Warnungen auswerten |
+| 10 | `step_10_validate` | Seed, Short-Selling-Default, `scripts/validate-setup.sh` |
+
+### Die wichtigsten Optionen
+
+```bash
+--variant a|b          Pflicht: Solo-Node oder Split-Node
+--llm-host HOST        Variante B: IP des Modellservers
+--db-name / --db-user / --db-host / --db-port
+--pgdata PFAD          Datenverzeichnis (Default /var/lib/postgres/data)
+--api-token TOKEN      API-Token vorgeben
+--no-api-token         kein Token (Sicherheitswarnung!)
+--no-shorts            Short-Selling deaktiviert lassen
+--sync-markets         Marktdaten-Warmup gleich mitfahren
+--skip-build / --skip-validate / --min-pass N
+--reset-cluster        Cluster ohne Rückfrage neu initialisieren
+--dry-run              nur anzeigen, nichts ausführen
+--non-interactive / -y keine Fragen
+--log-file PFAD        Default: data/setup/setup-<Zeitstempel>.log
+```
+
+### Fehlerbehandlung und Log
+
+* Jede Ausgabe läuft mit Zeitstempel nach `data/setup/setup-<Zeitstempel>.log`.
+* Die `ERR`-Trap nennt bei Abbruch **Schritt und Zeilennummer**.
+* `DATABASE_URL` und Passwörter werden in Anzeige **und** Log maskiert.
+* Exit-Codes: `0` erfolgreich · `1` Fehler · `2` Bedienfehler.
+
+### Abnahme
+
+Der letzte Schritt führt `scripts/validate-setup.sh` mit 18 Checks aus
+(bestanden ab 15). Separat wiederholbar:
+
+```bash
+./scripts/validate-setup.sh
+./scripts/validate-setup.sh --min-pass 18
+./scripts/validate-setup.sh --json
+```
+
+Befund-Historie, dokumentierte Ausnahmen und Behebungszeilen:
+[`SETUP_BUGS.md`](SETUP_BUGS.md). PostgreSQL-Soforthilfe:
+[`SETUP_PG_TROUBLESHOOTING.md`](SETUP_PG_TROUBLESHOOTING.md).
+
+> **Wer die Kapitel 1–7 von Hand durchgehen will**, liest ab hier einfach weiter —
+> sie beschreiben exakt dieselben Schritte.
 
 ---
 
@@ -605,22 +691,23 @@ mit deterministischen, konservativen Regeln. Genau das willst du bei einem Netzw
 
 ## Kapitel 9 — Geführtes Setup-Skript `[A+B]`
 
-Statt Kapitel 1–5 von Hand:
+Statt Kapitel 1–7 von Hand — **siehe [Kapitel 0.5](#kapitel-05--automatische-installation-empfohlen-ab)**,
+dort stehen Aufruf, zehn Schritte, alle Optionen, Log-Pfad und Exit-Codes.
 
 ```bash
-chmod +x scripts/setup-cachyos.sh
-
 ./scripts/setup-cachyos.sh --variant a                        # Solo-Node
 ./scripts/setup-cachyos.sh --variant b --llm-host 192.168.1.50  # Split-Node
 ```
 
 Das Skript ist absichtlich gesprächig: es zeigt jeden Befehl an, fragt vor
-Systemänderungen nach und bricht bei Fehlern ab. Lies mit, statt blind zu bestätigen.
+Systemänderungen nach und bricht bei Fehlern ab. Lies mit, statt blind zu
+bestätigen. Mit `--dry-run` zeigt es jeden Befehl, führt aber nichts aus.
 
-**Hängt das Setup bei „Schritt 2 — PostgreSQL“ oder meldet es einen
+**Hängt das Setup beim PostgreSQL-Schritt oder meldet es einen
 Cluster-Fehler:** Sofort-Hilfe und alle Fehlerfälle stehen in
 **[docs/SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** — und
-im Dashboard unter `/api/docs?name=pgsetup`.
+im Dashboard unter `/api/docs?name=pgsetup`. Die Befund-Historie des Setup-Pfads
+(B1–B6) steht in **[SETUP_BUGS.md](SETUP_BUGS.md)**.
 
 ---
 
@@ -628,12 +715,19 @@ im Dashboard unter `/api/docs?name=pgsetup`.
 
 Hake diese Liste ab, bevor du weitermachst:
 
+- [ ] `./scripts/validate-setup.sh` → `Validierung bestanden.` (18 Checks, ab 15)
 - [ ] `systemctl status postgresql` → `active (running)`
-- [ ] `psql "$DATABASE_URL" -c "\dt"` zeigt acht Tabellen
-- [ ] `curl -s localhost:3369/api/health` antwortet
+- [ ] `psql "$DATABASE_URL" -c "\dt"` zeigt mindestens 13 Tabellen
+- [ ] `curl -s localhost:3369/api/health` antwortet mit `schemaReady: true`
 - [ ] Dashboard erreichbar, Statusleiste zeigt Equity 10.000
-- [ ] „Seed / Reset" legt sechs Agenten und zwei Missionen an
+- [ ] Seed legt **12 Agenten** und **4 Missionen** an (idempotent)
+- [ ] `/api/firm` zeigt zwölf Agenten und mindestens eine Mission mit gültiger UUID
+- [ ] `/api/markets` meldet ≥ 50 Aktien, ≥ 50 Indizes, ≥ 20 Rohstoffe, ≥ 30 Krypto
+- [ ] `/api/firm | jq .account.broker` → `"PAPER"`
+- [ ] `/api/firm | jq .riskLimits.allowShort` → `true` (oder bewusst `false`)
+- [ ] `npm run build` kompiliert ohne Turbopack-Warnungen
 - [ ] `curl -s localhost:3369/api/firm | jq .ollama` → `available: true`
+- [ ] `POST` ohne `x-firm-token` antwortet mit `401`
 - [ ] Eine Pipeline läuft durch und erzeugt eine Position
 - [ ] Not-Halt-Knopf blockiert weitere Orders (Audit-Log prüfen)
 - [ ] `systemctl restart ai-trading-firm` → Positionen sind danach noch da
@@ -651,6 +745,12 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **Setup-Seite statt Dashboard beim ersten Start** | Schema fehlt (oder DB defekt/nicht erreichbar) | erst `pg_isready`, dann `npx drizzle-kit push`, dann Browser neu laden |
 | **`/api/health` liefert `schemaReady: false` (HTTP 200)** | Tabellen fehlen | `npx drizzle-kit push` ausführen; Details im Feld `missingTables` |
 | **`could not open file "global/pg_filenode.map"`** | Cluster halb initialisiert (abgebrochenes initdb, Konflikt mit systemd-Dienst); Server crasht in Restart-Schleife | Handbuch Kapitel 10.6 — oder `./scripts/setup-cachyos.sh` erneut ausführen (repariert seit v1.5.2 selbstständig) |
+| **`invalid input syntax for type uuid: "null"`** beim ersten Pipeline-Lauf | keine Mission vorhanden — der Smoke-Test postete den String `null` als `missionId` | `curl -s -X POST localhost:3369/api/seed`, dann `./scripts/validate-setup.sh` (Check V07 prüft die UUID-Form). Seit v1.30.0 behoben: Befund B2 in **[SETUP_BUGS.md](SETUP_BUGS.md)** |
+| **`UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet`** | die Broker-Factory liefert keinen Paper-Adapter — meist fehlendes `.env` oder `PAPER_MODE`-Fehlkonfiguration | `.env` und `PAPER_MODE` prüfen, Dienst neu starten; Check V12 verifiziert `/api/firm → account.broker`. Befund B3 in **[SETUP_BUGS.md](SETUP_BUGS.md)** |
+| **`initdb: error: locale "C.UTF-8" does not exist`** | Minimalinstallation ohne `C.UTF-8` | seit v1.30.0 behoben: `pg_pick_locale()` fällt auf `en_US.UTF-8` bzw. `C` zurück. Manuell: `initdb -D … --locale=en_US.UTF-8 --encoding=UTF8`. Befund B1 |
+| **Build meldet „Dynamic filesystem access“-Warnungen** | dynamische `path.join(process.cwd(), …)`-Stellen | seit v1.30.0 behoben über `src/lib/appPaths.ts`. Wiederkehrend? `npm run build` erneut prüfen — Setup-Schritt 09 meldet sie. Befund B4 |
+| **API im LAN offen beschreibbar** | `npm run start` bindet `0.0.0.0` und ohne `FIRM_API_TOKEN` sind `POST`/`PUT` ungeschützt | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befund B5 |
+| **Scanner-Funnel leer trotz großem Universum** | Marktdaten-Warmup fehlt — Kerzen fehlen | `npm run market:sync`, dann `npm run scan -- --sync-first`; `npm run market:sync:status` zeigt die Readiness |
 | **Setup-Skript: `nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'`** (v1.5.2 und älter) | systemd liefert `${PGROOT}` in `ExecStart` unexpandiert — der Gurt hält die eigene Arch-Unit fälschlich für einen fremden Drop-in | seit v1.5.3 behoben (Expansion der Unit-Environment in `scripts/lib/pg-service.sh`); Update ziehen und Setup erneut ausführen |
 | **`initdb` läuft durch, aber „Cluster nach initdb weiterhin unvollständig“** (v1.5.3 und älter) | Datenverzeichnis ist nach initdb `0700 postgres:postgres` — die alten Checks liefen als aufrufender Benutzer → EACCES → falsch „unvollständig“ (und falsches „existiert nicht“) | seit v1.5.4 behoben: alle Cluster-Checks laufen als postgres. **Nichts löschen!** → `sudo systemctl enable --now postgresql`, `pg_isready`, dann Setup erneut ausführen. Ausführlich: **docs/SETUP_PG_TROUBLESHOOTING.md** |
 | `pg_ctl …` als User: *„Keine Berechtigung"*, als `sudo pg_ctl`: *„can't run as root"* | postgres-Serverprozess darf nur als postgres-Benutzer laufen | `sudo -u postgres pg_ctl -D /var/lib/postgres/data -l …/postgres.log start` — oder einfach `sudo systemctl start postgresql` |
@@ -668,6 +768,9 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | Modell antwortet mit Prosa statt JSON | zu kleines Modell / weicher Prompt | Handbuch Kapitel 6, oder eine Stufe größer wählen |
 | Position verschwindet nach Neustart | Positionen stehen auf `CLOSED` | `psql -c "SELECT status, count(*) FROM positions GROUP BY 1;"` |
 | Port 3369 belegt | anderer Dienst läuft | `PORT=3100 npm run start` |
+| **Validierung meldet `V16` fehlgeschlagen** | Short-Selling ist aus, `--expect-shorts` erwartet aber `true` | `--expect-shorts false` — oder aktivieren: `allowShort = 1` im Dashboard bzw. `INSERT … ON CONFLICT (key) DO UPDATE` auf `risk_config` |
+| **Validierung meldet `V08`–`V11` fehlgeschlagen** | Preset-Universum nicht geseedet | `npm run universe:seed:markets` |
+| **Validierung meldet `V18` fehlgeschlagen** | kein `FIRM_API_TOKEN` konfiguriert | Token in `.env` setzen und Dienst neu starten — sonst ist die API im LAN offen |
 
 Weitere Diagnose im **[Handbuch, Kapitel 12](HANDBUCH.md)**.
 
