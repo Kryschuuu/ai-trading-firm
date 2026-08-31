@@ -1,0 +1,28 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "markPrice": "78183.2",
+      "lastPrice": "78183.2",
+      "open": "78118.7",
+      "last": "78163.9",
+      "quoteVol": "2019875040.71302",
+      "baseVol": "25800.1289",
+      "high": "79378.5",
+      "low": "76954.2"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "markPrice": "2438.35",
+      "lastPrice": "2438.35",
+      "open": "2454.76",
+      "last": "2437.96",
+      "quoteVol": "1862802368.9325",
+      "baseVol": "758366.914",
+      "high": "2534.24",
+      "low": "2385.38"
+    }
+  ],
+  "msg": "Success"
+}

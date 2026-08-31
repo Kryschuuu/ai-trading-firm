@@ -3,9 +3,11 @@
  * (`scripts/market-sync.ts`, `scripts/run-market-sync.ts`, `scripts/run-scan.ts --sync`).
  *
  * Einzige Instanzierungsstelle der Adapter ist `registerAdapters()`
- * (`src/marketdata/registerAdapters.ts`): public-only, Modus „paper“, ohne
- * Credentials, gated durch die Feature-Flags `MARKET_SYNC_ENABLED`,
- * `MARKET_SYNC_VENUES` und `<VENUE>_ENABLED`.
+ * (`src/marketdata/registerAdapters.ts`): public-only — es wird ausschließlich
+ * der credential-freie `BitunixPublicClient` (adaptiert über den Wrapper
+ * `src/marketdata/adapters/bitunix.ts`) erzeugt, gated durch die Feature-Flags
+ * `MARKET_SYNC_ENABLED`, `MARKET_SYNC_VENUES` und `<VENUE>_ENABLED` sowie die
+ * Capability-Matrix (`capabilities.<VENUE>.marketData === true`).
  *
  * Fehler werden im `SyncResult.failures` gesammelt und vom Aufrufer ins
  * Datenfehler-Manifest persistiert (`src/marketdata/dataErrors.ts`, MDERR-006).
@@ -105,7 +107,8 @@ export function gateMessage(venue: string, skipped: readonly SkippedAdapter[]): 
   const hints: Record<SkippedAdapter["reason"], string> = {
     KILL_SWITCH: `${MARKET_SYNC_ENABLED_FLAG} steht auf "false" — auf "true" setzen oder entfernen.`,
     NOT_IN_ALLOWLIST: `In ${MARKET_SYNC_VENUES_FLAG} fehlt "${venue}" — Liste ergänzen oder Flag leer lassen.`,
-    VENUE_DISABLED: `${venue}_ENABLED=true setzen (nur der exakte Wert "true" schaltet an).`,
+    VENUE_DISABLED: `${venue}_ENABLED=true setzen (nur der exakte Wert "true" schaltet an). Public Market Data benoetigt KEINE API-Credentials; Live-Trading bleibt weiterhin durch das Live-Gate gesperrt.`,
+    CAPABILITY_DISABLED: `capabilities.${venue}.marketData=false in der Capability-SSoT (src/brokers/capabilities.ts) — die Venue meldet keinen Public-Market-Data-Pfad.`,
     UNKNOWN_VENUE: `Für "${venue}" existiert kein MarketDataAdapter. Bekannte Venues: ${KNOWN_SYNC_VENUES.join(", ")}.`,
     INVALID_VENUE_KEY: "Venue-Key verletzt das erlaubte Format [A-Z0-9][A-Z0-9_-]{0,31}.",
   };

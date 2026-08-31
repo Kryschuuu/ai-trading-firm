@@ -9,6 +9,9 @@
  * Architektur-Trennung:
  * - `MarketDataSyncService` konsumiert nur das venue-agnostische
  *   `MarketDataAdapter`-Interface (`./sync.ts`) + diese Map.
+ * - Die registrierten Adapter sind dünne Wrapper um credential-freie
+ *   Public-Clients (Bitunix: `./adapters/bitunix.ts` um `BitunixPublicClient`)
+ *   — kein BrokerAdapter, kein PrivateClient, kein Ledger.
  * - Der Scanner (`src/scanner/`) kennt ausschließlich `InstrumentRegistry`
  *   und `HistoricalStore` — er importiert keine Adapter-Klasse.
  * - Order-Ausführung läuft über `getBroker()` (`src/brokers/factory.ts`)
@@ -30,7 +33,11 @@ export { BITUNIX_VENUE, KNOWN_SYNC_VENUES } from "./registerAdapters";
 export type { SkippedAdapter } from "./registerAdapters";
 
 export interface AdapterRegistryOptions {
-  /** Registry, in die Discovery-Ergebnisse beim Sync upsertet werden. */
+  /**
+   * Registry für Venue-Adapter mit eigener Persistenz. Der Bitunix-Wrapper
+   * nutzt sie nicht (Upsert liegt beim `MarketDataSyncService`); die Option
+   * bleibt im Contract für künftige Venues.
+   */
   registry?: InstrumentRegistry;
   /** Env für die Adapter-Instanzen und das Feature-Gating (Default: `process.env`). */
   env?: EnvLike;

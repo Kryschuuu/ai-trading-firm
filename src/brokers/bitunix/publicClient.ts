@@ -8,7 +8,7 @@ import { BITUNIX_PATHS, type BitunixRuntimeConfig } from "./config";
 import { BitunixApiError, classifyBitunixFailure } from "./errors";
 import { BitunixHttp, type BitunixHttpOptions } from "./http";
 import { mapTradingPairs } from "./mapping";
-import type { BitunixDepthRaw, BitunixEnvelope, BitunixKlineRaw, BitunixTickerRaw } from "./types";
+import type { BitunixDepthRaw, BitunixEnvelope, BitunixKlineRaw, BitunixTickerRaw, BitunixTradingPair } from "./types";
 import type { MarketInstrument } from "../../universe/types";
 
 function envelopeData<T>(json: unknown): T {
@@ -36,20 +36,47 @@ export class BitunixPublicClient {
   }
 
   async fetchTradingPairs(symbols?: string): Promise<MarketInstrument[]> {
+    return mapTradingPairs(await this.fetchTradingPairsRaw(symbols));
+  }
+
+  /**
+   * RAW-Zeilen von `GET /market/trading_pairs` (BitunixTradingPair-DTO).
+   *
+   * Das DTO→Domain-Mapping liegt bewusst beim Aufrufer: die Broker-Domäne
+   * mappt über `mapTradingPairs()` (src/brokers/bitunix/mapping.ts), die
+   * Marketdata-Domäne über den Wrapper
+   * `src/marketdata/adapters/bitunix.ts` (inkl. `normalizeVenueSymbol` und
+   * `symbolStatus`/`isApiSupported`-Status-Übernahme). Beide Pfade teilen
+   * sich denselben Transport (Token-Bucket, Retry, Payload-Kappe).
+   */
+  async fetchTradingPairsRaw(symbols?: string): Promise<BitunixTradingPair[]> {
     const res = await this.http.request({
       method: "GET",
       path: BITUNIX_PATHS.tradingPairs,
       query: symbols ? { symbols } : undefined,
     });
     const data = envelopeData<unknown>(res.json);
-    return mapTradingPairs(Array.isArray(data) ? data : []);
+    return Array.isArray(data) ? (data as BitunixTradingPair[]) : [];
   }
 
-  async fetchTickers(symbols?: string): Promise<BitunixTickerRaw[]> {
+  /**
+   * `GET /market/tickers` — Bulk-Ticker für alle angefragten Symbole.
+   *
+   * @param symbols Optionaler Filter. Akzeptiert werden ein Array
+   *                (`["BTCUSDT","ETHUSDT"]` → `symbols=BTCUSDT,ETHUSDT`,
+   *                leeres Array = kein Filter = alle Symbole) sowie der
+   *                vorformatierte Query-String (Abwärtskompatibilität).
+   */
+  async fetchTickers(symbols?: string[] | string): Promise<BitunixTickerRaw[]> {
+    const query = Array.isArray(symbols)
+      ? symbols.length > 0
+        ? symbols.join(",")
+        : undefined
+      : symbols;
     const res = await this.http.request({
       method: "GET",
       path: BITUNIX_PATHS.tickers,
-      query: symbols ? { symbols } : undefined,
+      query: query ? { symbols: query } : undefined,
     });
     const data = envelopeData<unknown>(res.json);
     return Array.isArray(data) ? (data as BitunixTickerRaw[]) : [];
@@ -78,13 +105,29 @@ export class BitunixPublicClient {
       .sort((a, b) => a.time - b.time);
   }
 
-  async fetchOrderBook(symbol: string, limit: "1" | "5" | "15" | "50" | "max" = "15"): Promise<MarketOrderBook> {
+  /**
+   * `GET /market/depth` — RAW-DTO (`BitunixDepthRaw`: bids/asks als
+   * `[price, qty]`-Paare in String/Number-Form, genau wie die Venue liefert).
+   *
+   * Das DTO→Domain-Mapping (Filterung nicht-endlicher Levels, `price`/`qty`)
+   * liegt beim Aufrufer — Broker-Domäne: `fetchOrderBook()`, Marketdata-Domäne:
+   * Wrapper `src/marketdata/adapters/bitunix.ts` (`getOrderBook`).
+   *
+   * @param limit Buchtiefe (`1` | `5` | `15` | `50`; Venue-Doku). Default 5 —
+   *              für den Spread reicht das Top-of-Book, und der Sync fragt
+   *              depth N-mal (ein Call je Instrument).
+   */
+  async fetchDepth(symbol: string, limit: number | string = 5): Promise<BitunixDepthRaw> {
     const res = await this.http.request({
       method: "GET",
       path: BITUNIX_PATHS.depth,
       query: { symbol, limit },
     });
-    const data = envelopeData<BitunixDepthRaw>(res.json) ?? {};
+    return envelopeData<BitunixDepthRaw>(res.json) ?? {};
+  }
+
+  async fetchOrderBook(symbol: string, limit: "1" | "5" | "15" | "50" | "max" = "15"): Promise<MarketOrderBook> {
+    const data = await this.fetchDepth(symbol, limit);
     const mapLevels = (rows: Array<[number | string, number | string]> | undefined) =>
       (rows ?? [])
         .map(([p, q]) => ({ price: Number(p), qty: Number(q) }))

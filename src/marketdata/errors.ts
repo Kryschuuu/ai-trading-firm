@@ -9,16 +9,63 @@
 import { isValidStorageSymbol } from "../symbols/normalize";
 import type { SyncFailure } from "./types";
 
-/** Thrown when `syncVenue()` is called for a venue without a registered adapter. */
+/**
+ * Thrown when `syncVenue()` is called for a venue without a registered adapter.
+ *
+ * Kontextabhängiger Hilfetext (P0-Verdrahtung): die zwei realen Ursachen —
+ * Capability-Matrix aus oder Feature-Flag aus — sind im Produktbetrieb nicht
+ * unterscheidbar, solange die Meldung nur „unsupported“ sagt. Der Text nennt
+ * deshalb beide Ursachen und den Behebungsschritt; er ist leak-frei (Venue
+ * läuft durch {@link sanitizeVenue}, keine URLs, keine Secrets) und darf
+ * unverändert geloggt bzw. dem CLI entnommen werden.
+ */
 export class UnsupportedVenueError extends Error {
   readonly code = "UNSUPPORTED_VENUE";
   readonly venue: string;
 
   constructor(venue: string) {
     const safe = sanitizeVenue(venue);
-    super(`Unsupported venue: "${safe}". No MarketDataAdapter is registered.`);
+    super(
+      `Venue "${safe}" ist nicht als Market-Data-Adapter registriert. Ursache: entweder ` +
+        `capabilities.${safe}.marketData=false oder ${safe}_ENABLED != "true". ` +
+        `Public Market Data benoetigt KEINE API-Credentials; setze ${safe}_ENABLED=true, um ` +
+        `Discovery und Candle-Backfill zu aktivieren. Live-Trading bleibt davon unberuehrt und ` +
+        `weiterhin durch das Live-Gate gesperrt.`
+    );
     this.name = "UnsupportedVenueError";
     this.venue = safe;
+  }
+}
+
+/**
+ * Thrown when an adapter is asked for a timeframe it cannot serve — either the
+ * value is outside the store allowlist (`SUPPORTED_TIMEFRAMES`) at all, or the
+ * venue documents no equivalent interval (explicit `null` in the venue's
+ * timeframe map).
+ *
+ * WARUM das ein Abbruch und kein stiller Fallback ist: ein ersatzlos
+ * gelieferter Nachbar-Timeframe (z. B. 5m statt 3m) würde Reihen verschiedener
+ * Länge mischen — genau der Defekt, den die Store-Allowlist verhindert. Der
+ * Fehler nennt Venue, Timeframe und die dokumentierte Lücke.
+ */
+export class UnsupportedTimeframeError extends Error {
+  readonly code = "UNSUPPORTED_TIMEFRAME";
+  readonly timeframe: string;
+  readonly venue?: string;
+
+  constructor(timeframe: unknown, venue?: string) {
+    const safeTimeframe =
+      typeof timeframe === "string" ? timeframe.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 16) : String(timeframe ?? "undefined");
+    const safeVenue = venue !== undefined ? `Venue "${sanitizeVenue(venue)}"` : "Diese Venue";
+    super(
+      `${safeVenue} bedient den Timeframe "${safeTimeframe}" nicht (entweder ausserhalb der ` +
+        `Store-Allowlist 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 5d oder ohne dokumentiertes ` +
+        `Venue-Aequivalent). Der Sync bricht ab, statt still einen Nachbar-Timeframe zu liefern ` +
+        `— das wuede Kerzenreihen verschiedener Periodizitaet mischen.`
+    );
+    this.name = "UnsupportedTimeframeError";
+    this.timeframe = safeTimeframe;
+    if (venue !== undefined) this.venue = sanitizeVenue(venue);
   }
 }
 

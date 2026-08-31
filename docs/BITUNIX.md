@@ -1,17 +1,42 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.28.1 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` + `MarketDataAdapter`
+**Stand:** v1.31.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
-Kein dokumentiertes Futures-Testnet. Seit v1.25.1 (nachgearbeitet zu PR #34) ist die
-**Public-Market-Data in die Scanner-Pipeline verdrahtet** (§1.1): `BitunixBrokerAdapter`
-implementiert `MarketDataAdapter` und wird von der zentralen `AdapterRegistry` für
-`MarketDataSyncService` registriert — ohne parallelen Wrapper.
+Kein dokumentiertes Futures-Testnet. Seit v1.31.0 (P0-Verdrahtung) läuft die
+**Public-Market-Data über den dünnen Marketdata-Wrapper**
+`src/marketdata/adapters/bitunix.ts` (Broker-PublicClient → `MarketDataAdapter`) und
+ist damit sauber von der Broker-Domäne entkoppelt (§1.1) — die Registry füllt sich
+seit MDSYNC-001 über `npm run market:sync` / `run-scan.ts --sync` statt über die
+statischen Seed-Instrumente.
 
 Dieses Dokument ist die verbindliche Spezifikation des Bitunix-Adapters. Der Kern
 (engine, risk, agents, API) kennt weiterhin **nur** `BrokerAdapter` — Venue-Details
 bleiben in diesem Ordner.
+
+---
+
+## 0. Code-Map (Anforderung → realer Pfad)
+
+Verifikationsschritt der P0-Verdrahtung — wo die beteiligten Bausteine wirklich
+leben (Stand v1.31.0):
+
+| Baustein | Realer Pfad | Anmerkung |
+| --- | --- | --- |
+| `BitunixBrokerAdapter` | `src/brokers/bitunix/adapter.ts` | implementiert nur `BrokerAdapter`; Public-Methoden (`discoverInstruments`, `getTicker(s)`, `getOrderBook`, `getCandles`) bleiben für Paper/Health/API erhalten |
+| `PublicClient` | `src/brokers/bitunix/publicClient.ts` (`BitunixPublicClient`) | credential-frei; `fetchTradingPairsRaw`, `fetchTickers` (Bulk, `string[] \| string`), `fetchTicker`, `fetchDepth` (RAW-DTO, Default `limit=5`), `fetchKlines` |
+| `PrivateClient` | `src/brokers/bitunix/privateClient.ts` (`BitunixPrivateClient`) | signierte Requests — **niemals** im Market-Data-Pfad instanziiert |
+| Broker-Factory `createAdapter()` | `src/brokers/factory.ts` | `createAdapter("BITUNIX", mode)` → `BitunixBrokerAdapter`; Live über zentralen Live-Gate-Enforcer |
+| Capability-SSoT | `src/brokers/capabilities.ts` (`VENUE_CAPABILITIES.BITUNIX`) | `discovery/marketData/trading/paper/live: true`, `testnet: false`, `stopAtVenue: true` |
+| Market-Data-Adapter-Wrapper | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | `BitunixPublicClient` → `MarketDataAdapter`; Timeframe-Map, DTO-Mapping, Symbol-SSoT |
+| Adapter-Registrierung | `src/marketdata/registerAdapters.ts` (`registerAdapters`, `registerMarketDataAdapters(env)`) | einzige Instanzierungsstelle; Capability- + Env-Gate; ein geteilter Token-Bucket pro Lauf |
+| `MarketDataSyncService` (MDSYNC-001) | `src/marketdata/sync.ts` | Discovery → Ticker/Depth-Enrichment → Candle-Backfill → Registry/HistoricalStore |
+| Sync-CLI | `scripts/market-sync.ts` + `scripts/lib/market-sync.ts` | `npm run market:sync -- --venue=BITUNIX` |
+| `run-scan.ts` | `scripts/run-scan.ts` | `--sync` (Default aus) = optionaler Warmstart VOR dem deterministischen Scan |
+| Env-Handling `BITUNIX_ENABLED` | `src/brokers/bitunix/config.ts` (`bitunixEnabled`, nur exakt `"true"`) | geteilt zwischen Trading-Adapter und Market-Data-Sync; `.env.example` § Bitunix/Market-Data-Sync |
+| Symbol-SSoT (SYM-007) | `src/symbols/normalize.ts` (`normalizeVenueSymbol`) | Instrument-ID in **venue-nativer Speicherform** `BITUNIX:BTCUSDT` (docs/SYMBOLS.md §4) |
+| Fixtures (echte API-Responses) | `test/fixtures/bitunix/*.json` | Snapshot 2026-08-31; Provenanz siehe `test/fixtures/bitunix/README.md` |
 
 ---
 
@@ -35,32 +60,53 @@ Factory: `getBroker("BITUNIX", "paper"|"backtest")` liefert `BitunixBrokerAdapte
 `testnet` → `NotSupportedCapabilityError`. `live` → **immer** `LiveTradingGateError`,
 solange die Live-Gate-State-Machine nicht `LIVE_ENABLED` erreicht hat.
 
-### 1.1 Public Market Data im Scanner-Pipeline (seit v1.25.1)
+### 1.1 Public Market Data in der Scanner-Pipeline (seit v1.31.0 über den Wrapper)
 
-Der Adapter implementiert neben `BrokerAdapter` explizit das
-`MarketDataAdapter`-Interface (`src/marketdata/sync.ts`). Die zentrale
-`AdapterRegistry` (`src/marketdata/adapterRegistry.ts` — die **einzige** Stelle,
-die konkrete Adapter-Klassen instanziiert) registriert ihn unter dem Venue-Key
-`"BITUNIX"`; `MarketDataSyncService` / `npm run market-sync` nutzen nur die
-Public-Methoden `discoverInstruments()`, `getTicker(s)()`, `getOrderBook()` und
-`getCandles()` — Discovery → Ticker/Orderbook-Enrichment → Candle-Backfill füllt
-damit `InstrumentRegistry` und `HistoricalStore` **vor** dem deterministischen
-Scanner. Details: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md).
+Die Verdrahtung läuft über **drei Schichten** (Domänentrennung, keine
+Rückwärts-Abhängigkeit `src/brokers` → `src/marketdata`):
 
-**Ende der Parallel-Implementierung (v1.25.1):** Der frühere Wrapper
-`src/marketdata/adapters/bitunix.ts` (`BitunixMarketDataAdapter`) ist entfernt —
-der echte `BitunixBrokerAdapter` ist die alleinige Market-Data-Quelle der
-Pipeline; `getCandles()` akzeptiert seither ein `limit`, und `getTickers()`
-bündelt das Ticker-Enrichment zu einem Batch-Call.
+```
+registerAdapters()/registerMarketDataAdapters(env)   (src/marketdata/registerAdapters.ts)
+   Gate: capabilities.BITUNIX.marketData === true  ∧  BITUNIX_ENABLED === "true"
+   (∧ MARKET_SYNC_ENABLED ≠ "false" ∧ MARKET_SYNC_VENUES erlaubt BITUNIX)
+        │  instanziiert NUR BitunixPublicClient (+ je Lauf EINEN Token-Bucket, 8 req/s)
+        ▼
+createBitunixMarketDataAdapter({ publicClient, symbolNormalizer })   (Wrapper)
+   DTO→Domain-Mapping · Instrument-ID über normalizeVenueSymbol (venue-native Form)
+   Timeframe-Map SupportedTimeframe → Bitunix-Interval (3m/5d = dokumentierte Lücke)
+        ▼
+MarketDataSyncService (src/marketdata/sync.ts)
+   Discovery → Ticker-Enrichment (1 × tickers bulk) → Depth-Enrichment (N × depth)
+   → Candle-Backfill (N × M × kline) → InstrumentRegistry + HistoricalStore
+        ▼
+npm run market:sync -- --venue=BITUNIX   bzw.   npm run scan -- --sync
+```
 
-**Klare Trennung der vier Ebenen:**
+Fehlt das Flag (`BITUNIX_ENABLED != "true"`) oder meldet die Capability-Matrix
+`marketData=false`, wird **kein** Adapter registriert und
+`syncVenue("BITUNIX")` wirft `UnsupportedVenueError` mit Behebungshinweis:
 
-| Ebene | Pfad | Credentials | Status |
-| --- | --- | --- | --- |
-| **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** (Public-Client, Token-Bucket 8 req/s) | **Jetzt an Scanner-Pipeline angebunden** (Sync vor dem Scan) |
-| **Private trading API** | `account`, `positions`, `place_order` (signiert) | `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` | **Weiterhin nur für Order-Ausführung** — nie im Sync/Discovery/Enrichment-Pfad |
-| **Paper execution** | `PaperExecutionEngine` (lokales Ledger, echte Public-Kurse) | keine signierten Requests | verfügbar (`getBroker("BITUNIX", "paper")`) |
-| **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert, nur nach Live-Gate | gesperrt (Task 11, Default `LiveTradingGateError`) |
+> `Venue "BITUNIX" ist nicht als Market-Data-Adapter registriert. Ursache: entweder
+> capabilities.BITUNIX.marketData=false oder BITUNIX_ENABLED != "true". Public Market
+> Data benoetigt KEINE API-Credentials; setze BITUNIX_ENABLED=true, um Discovery und
+> Candle-Backfill zu aktivieren. Live-Trading bleibt davon unberuehrt und weiterhin
+> durch das Live-Gate gesperrt.`
+
+**Historie:** v1.25.1 hatte den (damals parallelen) Wrapper entfernt und den
+`BitunixBrokerAdapter` selbst registrieren lassen — das koppelte die Broker-Domäne
+an `src/marketdata/sync.ts` zurück. v1.31.0 stellt den Wrapper als einzigen
+Kopplungspunkt wieder her: der Broker-Adapter implementiert das Interface nicht
+mehr selbst (bleibt aber strukturell kompatibel), die Registrierung instanziiert
+ausschließlich den credential-freien PublicClient.
+
+**Klare Trennung der vier Ebenen** (Auth-Anforderung · Rate-Limit · Aktivierung):
+
+| Ebene | Pfade | Auth-Anforderung | Rate-Limit | Aktivierungs-Flag |
+| --- | --- | --- | --- | --- |
+| **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** — credential-freier PublicClient, keine Signatur, kein Nonce | Token-Bucket **8 req/s/IP** (Doku: 10); ein **geteilter** Bucket je Sync-Lauf, Parallelität ≤ 8 | `BITUNIX_ENABLED=true` + `capabilities.BITUNIX.marketData` + `MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES` (Sync) |
+| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order` | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
+| **Paper execution** | `PaperExecutionEngine` (lokales Ledger gegen echte Public-Kurse) | keine signierten Requests (liest nur Public-Ticker) | über Public-Bucket | `getBroker("BITUNIX", "paper")`, `BITUNIX_ENABLED=true` |
+| **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert (Private API) + komplette Live-Gate-State-Machine | Private-Bucket | `BITUNIX_LIVE_ENABLED` + `LIVE_TRADING_ENABLED` + `REQUIRE_HUMAN_APPROVAL=false` + Live-Gate `LIVE_ENABLED` (Default: `LiveTradingGateError`) |
 
 ### 1.2 Spread kommt aus dem Orderbuch, nicht aus dem Ticker (FEHLER-3 — seit v1.25.2, nachgearbeitet zu PR #35)
 
@@ -100,12 +146,15 @@ Folgen für den Sync- und Scanner-Pfad:
 
 Garantien des Sync-Kontexts (durch Tests abgesichert):
 
-- `adapterRegistry.ts` erzeugt den Adapter **immer im Modus `"paper"` und ohne
-  PrivateClient** — API-Key/Secret werden im Discovery/Enrichment-Pfad nicht
-  referenziert, es laufen keine signierten Requests (Integrationstest zählt
-  `privateCalls === 0`).
+- `registerAdapters()` / `registerMarketDataAdapters(env)` erzeugen **nur den
+  `BitunixPublicClient`** (adaptiert über den Wrapper) — kein
+  `BitunixBrokerAdapter`, kein Paper-Ledger, kein Secret-Store, kein
+  PrivateClient. `BITUNIX_API_KEY`/`_SECRET` werden im Sync-Pfad nicht gelesen
+  (Env-Proxy-Test), API-Key/Secret im Env ändern nichts am Sync-Verhalten
+  (Laufzeit-Test mit Credentials im Env: 0 Credential-Header).
 - Der Scanner (`src/scanner/`) importiert **keinen** konkreten Adapter — er
-  kennt ausschließlich `InstrumentRegistry` und `HistoricalStore`.
+  kennt ausschließlich `InstrumentRegistry` und `HistoricalStore`; ohne `--sync`
+  macht `run-scan.ts` **null** Netzwerk-Requests (Guard-Server-Test).
 - Order-Ausführung bleibt vollständig über `getBroker()` (Factory) und den
   Private-Client getrennt (§5).
 
@@ -135,8 +184,25 @@ erlaubt kein `null` für Fees — der Adapter setzt die dokumentierten VIP0-Defa
 **0,02 % maker / 0,06 % taker** (`0.0002` / `0.0006`). Abweichung zur Formulierung
 „sonst null“ ist bewusst.
 
-**Status-Mapping:** `OPEN` → `active`; `CANCEL_ONLY`/`STOP` → `halted`; sonst `preview`.
-Unbekannte Felder werden ignoriert; kaputte Zeilen übersprungen.
+**Status-Mapping (Venue-Doku: „OPEN: trade normal · CANCEL_ONLY: cancel only ·
+STOP: can't open/close position“; `isApiSupported`: true/false — API Trading
+Enabled/Disabled):** `OPEN` → `active`; `CANCEL_ONLY`/`STOP` → `halted`;
+`OPEN` + `isApiSupported=false` → `halted` (Instrument existiert, API-Handel
+aus — wird übernommen, **nicht verworfen**); `DELISTED`/`DEL` → `delisted`
+(defensiv, von der Venue heute nicht dokumentiert); unbekannt/fehlend →
+`preview` (konservativ). Gilt identisch für Broker-Mapping
+(`src/brokers/bitunix/mapping.ts`) und Wrapper (`src/marketdata/adapters/bitunix.ts`,
+dort zusätzlich `isApiSupported`-Behandlung). Unbekannte Felder werden ignoriert;
+kaputte Zeilen übersprungen.
+
+**Kline-Intervalle (Timeframe-Map `BITUNIX_TIMEFRAME_MAP`):** Bitunix bedient
+`1m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M`. Die Store-Allowlist
+(`SUPPORTED_TIMEFRAMES`) ist ein Superset — `3m` und `5d` sind bei Bitunix
+**nicht verfügbar** und in der Map explizit `null` eingetragen; der Wrapper wirft
+dafür (wie für Werte außerhalb der Allowlist) `UnsupportedTimeframeError`, statt
+still einen Nachbar-Timeframe zu liefern (Reihen verschiedener Periodizität
+dürfen nie gemischt werden). `kline` liefert max. **200 Bars je Call**; ein
+höheres `candleLimit` erforderte Paging (out of scope, Sync-Default 150/100 ≤ 200).
 
 ---
 
@@ -294,18 +360,24 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 
 ## 9. Mapping `trading_pairs` → `MarketInstrument`
 
+Gilt spiegelbildlich für das Broker-Mapping (`src/brokers/bitunix/mapping.ts`,
+Discovery-Upsert `source=discovery:bitunix`) und den Marketdata-Wrapper
+(`src/marketdata/adapters/bitunix.ts` — dort geht die Instrument-ID zusätzlich
+**immer** über `normalizeVenueSymbol("BITUNIX", symbol)`, Ergebnis in
+venue-nativer Speicherform `BITUNIX:<SYMBOL>`, siehe docs/SYMBOLS.md §4):
+
 | Venue-Feld | Instrument |
 | --- | --- |
-| `symbol` | `id = BITUNIX:<SYMBOL>`, `symbol` upper |
-| `base` / `quote` | upper; Fallback Suffix-Inferenz |
+| `symbol` | `id = BITUNIX:<SYMBOL>` (Speicherform; Wrapper: via `normalizeVenueSymbol`), `symbol` upper |
+| `base` / `quote` | upper; Fallback Suffix-Inferenz (`inferBase`/`inferQuote`) |
 | — | `assetClass=crypto`, `marketType=perpetual` |
-| `symbolStatus` | s. §2 |
-| `minTradeVolume` | `minQuantity` |
-| `basePrecision` / `quotePrecision` | `quantityStep` / `priceStep` = 10^(−p) |
-| `maxLeverage` | `leverageAvailable = maxLeverage > 1` |
+| `symbolStatus` + `isApiSupported` | s. §2 (OPEN/CANCEL_ONLY/STOP/isApiSupported=false/DELISTED → active/halted/halted/halted/delisted, unbekannt → preview) |
+| `minTradeVolume` | `minQuantity` (ungültig/fehlend ⇒ `1e-8`) |
+| `basePrecision` / `quotePrecision` | `quantityStep` / `priceStep` = 10^(−p) (p außerhalb 0..12 ⇒ Defaults `1e-8`/`0.01`) |
+| `maxLeverage` | `leverageAvailable = maxLeverage > 1` (ungültig/fehlend ⇒ 1 ⇒ false) |
 | — | `shortAvailable=true`, `paperAvailable=true`; `liveTradable=true` (fachlich); `liveAvailable` kommt aus `projectInstrumentAvailability()` |
 | — | Fees = VIP0-Defaults (§2) |
-| `lastSeen` | ISO-UTC jetzt |
+| — | `lastSeen` = ISO-UTC jetzt (Wrapper: injizierbare Uhr) |
 
 **Semantik-Trennung (CAP-008 / v1.28.1):** `liveTradable=true` ist die fachliche
 Freigabe (Bitunix-Perpetuals sind für Live vorgesehen). `liveAvailable` kommt
@@ -323,7 +395,8 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
-- `tests/bitunix.marketdata.test.ts` — `MarketDataAdapter`-Konformität (Compile-Time), AdapterRegistry, `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
+- `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
+- `test/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`test/fixtures/bitunix/`)
 - `src/marketdata/__tests__/spread.test.ts` — `calculateRelativeSpread` (Golden 100/100.02 ≈ 0.00019998, Edge Cases: fehlend/invertiert/`0`/`NaN`/`null` ⇒ `null`)
 - `src/marketdata/__tests__/sync.test.ts` — `volume24h`-Enrichment, Orderbook-Spread-Upsert, Batch-Tickers, `quoteVol`-Fehlend-Fallback, Rate-Limiter-Zählung bei 180 Instrumenten
 - Factory 28er-Matrix, Contract-Suite, `GET /api/brokers` count=7
@@ -341,7 +414,7 @@ Live-Enable in der Suite.
 
 - Contract: `src/contracts/broker.ts` · Factory: `src/brokers/factory.ts`
 - Capabilities: `src/brokers/capabilities.ts`
-- Market-Data-Sync: `src/marketdata/adapterRegistry.ts` (einzige Adapter-Instanzierungsstelle) + `src/marketdata/sync.ts` (`MarketDataAdapter`, `MarketDataSyncService`)
+- Market-Data-Sync: `src/marketdata/registerAdapters.ts` (einzige Adapter-Instanzierungsstelle: `registerAdapters()` / `registerMarketDataAdapters(env)`) + `src/marketdata/adapters/bitunix.ts` (Wrapper) + `src/marketdata/sync.ts` (`MarketDataAdapter`, `MarketDataSyncService`)
 - Architektur: [BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md) · Universum: [MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)
 - Market-Data-Pipeline: [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)
 - Security: [SECURITY_AUDIT.md](SECURITY_AUDIT.md) (Kapitel Task 07)

@@ -32,7 +32,6 @@ import {
 } from "../../contracts/broker";
 import type { MarketInstrument } from "../../universe/types";
 import { getRegistry, type InstrumentRegistry } from "../../universe";
-import type { MarketDataAdapter } from "../../marketdata/sync";
 import {
   type BitunixRuntimeConfig,
   type EnvLike,
@@ -63,14 +62,18 @@ export interface BitunixAdapterDeps {
 }
 
 /**
- * Zusätzlich zum `BrokerAdapter`-Contract implementiert der Adapter das
- * `MarketDataAdapter`-Interface (`src/marketdata/sync.ts`) — die
- * venue-agnostische Public-Market-Data-Grenze, über die
- * `MarketDataSyncService` Discovery → Enrichment → Backfill orchestriert.
- * Nur `discoverInstruments` / `getTicker(s)` / `getOrderBook` / `getCandles`
- * (Public-Client) sind Sync-relevant; Order-/Account-Pfade bleiben getrennt.
+ * Zusätzlich zum `BrokerAdapter`-Contract bietet der Adapter die Public-
+ * Market-Data-Methoden `discoverInstruments()` / `getTicker(s)()` /
+ * `getOrderBook()` / `getCandles()` an. Die **Marketdata-Domäne** koppelt er
+ * bewusst NICHT mehr direkt ein (kein Import von `src/marketdata` — die
+ * Abhängigkeitsrichtung bleibt Broker ← Marketdata, nie umgekehrt): der
+ * dünne Wrapper `src/marketdata/adapters/bitunix.ts` adaptiert den
+ * `BitunixPublicClient` auf das `MarketDataAdapter`-Interface
+ * (`src/marketdata/sync.ts`) und ist die einzige Market-Data-Quelle des
+ * `MarketDataSyncService`. Die Methoden hier bleiben für Paper-Ausführung,
+ * Health-Check und die Broker-API Routen erhalten.
  */
-export class BitunixBrokerAdapter implements BrokerAdapter, MarketDataAdapter {
+export class BitunixBrokerAdapter implements BrokerAdapter {
   readonly id = "BITUNIX" as const;
   readonly mode: ExecutionMode;
   readonly capabilities: BrokerCapabilities = VENUE_CAPABILITIES.BITUNIX;
@@ -186,10 +189,10 @@ export class BitunixBrokerAdapter implements BrokerAdapter, MarketDataAdapter {
   }
 
   /**
-   * 1 × tickers (Batch) — `MarketDataAdapter.getTickers`. Bitunix liefert
-   * ohne Symbolfilter den vollen Public-Ticker-Satz; damit spart sich
-   * `MarketDataSyncService` N per-Symbol-Calls. Public-Client, keine
-   * Credentials.
+   * 1 × tickers (Batch) — Bulk-Variante der Public-Ticker. Bitunix liefert
+   * ohne Symbolfilter den vollen Public-Ticker-Satz; damit spart sich der
+   * Marketdata-Wrapper (`src/marketdata/adapters/bitunix.ts`) N per-Symbol-Calls.
+   * Public-Client, keine Credentials.
    */
   async getTickers(symbols?: string[]): Promise<MarketTicker[]> {
     this.require("marketData", "getTickers");

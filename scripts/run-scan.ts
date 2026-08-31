@@ -20,6 +20,9 @@
  *
  * `--sync` ist der einzige Netzwerkschritt dieses Skripts und liegt AUSSERHALB
  * von `scanUniverse()` — der Scanner selbst führt niemals Netzwerk-I/O aus.
+ * Ohne `--sync` geht null Netzwerk-Request ab (test-erzwungen:
+ * `test/marketdata/adapters/bitunix.test.ts` → „run-scan without --sync
+ * performs zero network calls“, Guard-Server-Subprozess).
  *
  * MDERR-006: Sync-Fehler werden als Datenfehler-Manifest persistiert und in
  * `scanUniverse()` als `dataErrors` gereicht → Readiness `ERROR` und

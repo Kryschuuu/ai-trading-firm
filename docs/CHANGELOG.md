@@ -20,6 +20,106 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.31.0] — 2026-08-31 · fix(bitunix): Public Market Data in den Scanner-Warmstart verdrahten (P0)
+
+**P0, Productionspfad.** Der `BitunixBrokerAdapter` existierte funktionsfähig
+(`discoverInstruments()`, `getTicker()`, `getCandles()`), wurde aber von keinem
+Produktionspfad aufgerufen — der Scanner ging weiter
+`Registry → HistoricalStore → scanUniverse()`, und die Registry blieb bei den
+26 statischen Seed-Instrumenten. Dieser Release verdrahtet den vorhandenen
+Public-Market-Data-Pfad über einen dünnen MarketDataAdapter-Wrapper mit dem
+`MarketDataSyncService` (MDSYNC-001) und trennt dabei die Broker-Domäne von der
+Marketdata-Domäne.
+
+### Added
+
+* **`src/marketdata/adapters/bitunix.ts`** — Wrapper
+  `createBitunixMarketDataAdapter({ publicClient, symbolNormalizer })`:
+  Broker-PublicClient → `MarketDataAdapter` (`venue = "BITUNIX"`).
+  DTO→Domain-Mapping vollständig dokumentiert (inkl. Nullable-Semantik);
+  Instrument-ID immer über `normalizeVenueSymbol("BITUNIX", raw)` in
+  venue-nativer Speicherform (`BITUNIX:BTCUSDT`, docs/SYMBOLS.md §4);
+  `symbolStatus`/`isApiSupported` → nicht handelbare Symbole werden mit
+  `status: "halted" | "delisted"` übernommen, nie still verworfen.
+* **`BITUNIX_TIMEFRAME_MAP` + `toBitunixInterval()`** — explizite, vollständige
+  Konstanten-Map `SupportedTimeframe → Bitunix-Interval`; dokumentierte
+  Venue-Lücken `3m`/`5d` sind `null`-Einträge. Unbekannte oder nicht bediente
+  Timeframes werfen neuen `UnsupportedTimeframeError` (kein stiller
+  Ersatztimeframe — Reihen verschiedener Periodizität dürfen nie gemischt
+  werden).
+* **`registerMarketDataAdapters(env)`** (`src/marketdata/registerAdapters.ts`)
+  — Ticket-Signatur der zentralen Registrierung. Gate:
+  `capabilities.BITUNIX.marketData === true` (neu, SSoT
+  `src/brokers/capabilities.ts`) **und** `BITUNIX_ENABLED === "true"` (plus
+  bestehende `MARKET_SYNC_*`-Flags). Die Registrierung instanziiert
+  ausschließlich den credential-freien `BitunixPublicClient` — kein
+  `BitunixBrokerAdapter`, kein `BitunixPrivateClient`, kein Secret-Store.
+* **PublicClient-Signatur-Ergänzungen** (`src/brokers/bitunix/publicClient.ts`):
+  `fetchTradingPairsRaw()` (RAW-DTO), `fetchTickers(symbols?: string[] | string)`
+  (Bulk-Filter als Array), `fetchDepth(symbol, limit = 5)` (RAW-DTO; `fetchOrderBook`
+  delegiert). `mapTicker`, `inferBase`/`inferQuote` für die Wiederverwendung
+  exportiert.
+* **`test/fixtures/bitunix/*.json`** — echte, am 2026-08-31 gezogene Responses
+  der öffentlichen API (trading_pairs, tickers, depth, kline; Subset, Felder
+  unverändert) plus schema-idente Edge-Status-Zeilen (STOP, CANCEL_ONLY,
+  `isApiSupported: false`, DELISTED, base/quote-Inferenz). Provenanz:
+  `test/fixtures/bitunix/README.md`.
+* **`test/marketdata/adapters/bitunix.test.ts`** — 20 Tests, u. a. alle neun
+  Pflicht-Tests des Tickets (Discovery-Upsert, „never instantiates private
+  client“, Env-/Capability-Gates, exhaustives Timeframe-Mapping,
+  `UnsupportedTimeframeError`, Symbol-Normalisierung je ID, HALTED-Übernahme,
+  „run-scan ohne `--sync` = null Netzwerk“ via Guard-Server-Subprozess,
+  401/403/429/5xx-Regression mit endlichem Retry-Budget) sowie Security-Audit
+  (Endpoint-Allowlist, Env-Proxy gegen `BITUNIX_API_KEY`/`_SECRET`-Reads,
+  Redaction, geteilter Token-Bucket).
+* **`UnsupportedVenueError`-Hilfetext** — nennt beide Ursachen
+  (Capability-Matrix / Env-Flag), die Behebung (`BITUNIX_ENABLED=true`, Public
+  Data braucht KEINE API-Credentials) und die Unberührtheit des Live-Gates.
+
+### Changed
+
+* **Domänentrennung:** `BitunixBrokerAdapter` implementiert das
+  `MarketDataAdapter`-Interface nicht mehr explizit (kein Import
+  `src/brokers → src/marketdata` mehr; strukturell bleibt er kompatibel). Die
+  einzige Kopplung ist der Wrapper in `src/marketdata/adapters/bitunix.ts` —
+  Abhängigkeitsrichtung ausschließlich Marketdata → Broker.
+* **Registrierung baut nur den PublicClient:** `registerAdapters()` erzeugt den
+  Sync-Adapter statt des Broker-Adapters im Paper-Modus und erstellt **einen
+  geteilten `TokenBucket(8, 8)` pro Lauf** — das dokumentierte IP-Budget
+  (10 req/s/IP, Code 8) bleibt autoritativ, auch bei künftiger paralleler
+  Registrierung mehrerer Venues.
+* **`skipped`-Reason `CAPABILITY_DISABLED`** in `registerAdapters()`-Ergebnis
+  und CLI-Behebungshinweis (`scripts/lib/market-sync.ts`).
+* `run-scan.ts --sync` ( unverändert Default `false`) dokumentiert jetzt
+  test-erzwungen, dass ohne `--sync` null Netzwerk-Requests abgehen.
+* Docs: `docs/BITUNIX.md` (neue §0 Code-Map, §1.1 Wrapper-Architektur,
+  Vier-Ebenen-Tabelle mit Auth/Rate-Limit/Aktivierung je Ebene, Status- und
+  Timeframe-Mapping), `docs/MARKET_DATA_PIPELINE.md` (§0 Code-Map, §9
+  Rate-Limit, §10 Venue Capability Matrix inkl. Capability-Gate und
+  Timeframe-Lücken-Spalte).
+
+### Security
+
+* grep-Nachweis per Test: `src/marketdata/**` importiert keinen `PrivateClient`,
+  keine Signatur-/HMAC-Funktion, keine Nonce-Erzeugung, instanziiert keinen
+  Broker-Adapter.
+* Endpoint-Allowlist per Test: ein vollständiger `syncVenue()` erzeugt
+  ausschließlich Requests auf `trading_pairs`, `tickers`, `depth`, `kline` und
+  trägt keine Credential-Header (Laufzeit-Test selbst mit
+  `BITUNIX_API_KEY`/`_SECRET` im Env).
+* Env-Proxy-Test: Zugriff auf `BITUNIX_API_KEY`/`BITUNIX_API_SECRET` während
+  Registrierung + `syncVenue()` lässt die Suite fehlschlagen — die Keys werden
+  im Sync-Pfad nicht gelesen.
+* Live-Gate unverändert; alle bestehenden Live-Gate-Tests bleiben ohne Anpassung
+  grün.
+
+### Links
+
+* Ticket: „BitunixBrokerAdapter in die Market-Data-Pipeline verdrahten (P0)“ ·
+  Refs: Code Review Scanner, Kap. 2, 3, 12, 18 · Pipeline:
+  [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md) · Adapter:
+  [BITUNIX.md](BITUNIX.md)
+
 ## [1.30.0] — 2026-08-31 · fix(setup): Setup-Pfad härten, Markt-Presets, Short-Selling-Default (SETUP-130)
 
 **P1, Produktkette + Sicherheit.** Eine Neuinstallation auf CachyOS konnte an

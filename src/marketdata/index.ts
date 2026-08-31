@@ -29,6 +29,7 @@ export {
 export {
   InsufficientCandleLimitError,
   SyncPartialFailureError,
+  UnsupportedTimeframeError,
   UnsupportedVenueError,
   isSyncableSymbol,
   normalizeSyncSymbol,
@@ -70,9 +71,20 @@ export {
   marketSyncEnabled,
   marketSyncVenueAllowlist,
   registerAdapters,
+  registerMarketDataAdapters,
   type RegisterAdaptersOptions,
   type RegisterAdaptersResult,
 } from "./registerAdapters";
+export {
+  BITUNIX_MARKET_DATA_VENUE,
+  BITUNIX_SUPPORTED_INTERVALS,
+  BITUNIX_TIMEFRAME_MAP,
+  createBitunixMarketDataAdapter,
+  mapInstrumentStatus,
+  mapTradingPairToInstrument,
+  toBitunixInterval,
+  type BitunixMarketAdapterDeps,
+} from "./adapters/bitunix";
 export {
   clearMarketDataErrors,
   loadMarketDataErrors,
