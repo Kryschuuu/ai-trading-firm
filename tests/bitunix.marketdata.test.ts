@@ -1,11 +1,12 @@
 /**
- * BitunixBrokerAdapter als `MarketDataAdapter` (FEHLER-2: Verdrahtung).
+ * Bitunix-Public-Market-Data (FEHLER-2: Verdrahtung; P0: Wrapper-Architektur).
  *
- * Prüft die konkrete Implementierung, die zentrale `AdapterRegistry`
- * (einzige Instanzierungsstelle), die Orderbook-Struktur gegen das
- * `/depth`-Schema, den leeren-Discovery-Edge-Case, die
- * Sync-Kontext-Sicherheit (0 Private-Credentials) und die
- * 429-Retry/Backoff-Regression.
+ * Prüft den Broker-Adapter als strukturelle Quelle der Public-Methoden, die
+ * zentrale `AdapterRegistry` (einzige Instanzierungsstelle — registriert den
+ * Wrapper `src/marketdata/adapters/bitunix.ts` um den `BitunixPublicClient`),
+ * die Orderbook-Struktur gegen das `/depth`-Schema, den
+ * leeren-Discovery-Edge-Case, die Sync-Kontext-Sicherheit (0
+ * Private-Credentials) und die 429-Retry/Backoff-Regression.
  *
  * Mock-Public-Client: 0 echtes Netz, 0 Credentials, 0 Signaturen.
  */
@@ -60,13 +61,15 @@ test("bitunix discovery upserts discovered instruments", async () => {
   assert.equal(registry.get("BITUNIX:??"), null);
 });
 
-test("BitunixBrokerAdapter erfüllt das MarketDataAdapter-Interface (Compile-Time-Check)", () => {
+test("BitunixBrokerAdapter bleibt strukturell MarketDataAdapter-kompatibel (Compile-Time-Check)", () => {
   const adapter = new BitunixBrokerAdapter("paper", {
     env: ENABLED,
     publicClient: mockBitunixPublicClient(),
     registry: tmpRegistry(),
   });
-  // Compile-Time-Check:
+  // Compile-Time-Check: Der Broker-Adapter implementiert das Interface nicht
+  // mehr explizit (Domänentrennung — der Wrapper `src/marketdata/adapters/
+  // bitunix.ts` ist die Sync-Quelle), ist aber weiter strukturell zuweisbar:
   const _typeCheck: MarketDataAdapter = adapter;
   assert.ok(typeof _typeCheck.discoverInstruments === "function");
   assert.ok(typeof _typeCheck.getTicker === "function");
@@ -78,15 +81,20 @@ test("BitunixBrokerAdapter erfüllt das MarketDataAdapter-Interface (Compile-Tim
   assert.equal(adapter.mode, "paper");
 });
 
-test("adapterRegistry: get(\"BITUNIX\") liefert Instanz, get(\"UNKNOWN\") undefined", () => {
+test("adapterRegistry: get(\"BITUNIX\") liefert den Public-only-Wrapper, get(\"UNKNOWN\") undefined", () => {
   // Gate ist die ENV-Flag `BITUNIX_ENABLED` (nicht Credentials) — hier
   // explizit gesetzt, damit der Test nicht vom ambienten Prozess-Env abhängt.
   const registry = createAdapterRegistry({ venues: ["BITUNIX"], ignoreEnvGates: true });
 
   const adapter = registry.get("BITUNIX");
   assert.ok(adapter, "BITUNIX muss registriert sein");
-  assert.ok(adapter instanceof BitunixBrokerAdapter);
-  assert.equal((adapter as BitunixBrokerAdapter).mode, "paper", "Sync-Kontext läuft IMMER paper");
+  // Seit der P0-Verdrahtung registriert die Registry den dünnen Wrapper um
+  // den credential-freien PublicClient — KEIN BrokerAdapter (kein Modus,
+  // keine Order-/Account-Methoden, kein Ledger).
+  assert.equal(adapter!.venue, "BITUNIX");
+  assert.equal("mode" in adapter!, false, "Sync-Adapter trägt keinen Ausführungsmodus");
+  assert.equal("placeOrder" in adapter!, false, "Sync-Adapter hat keine Order-Methode");
+  assert.equal(adapter instanceof BitunixBrokerAdapter, false, "Registry instanziiert keinen BrokerAdapter mehr");
 
   assert.equal(registry.get("UNKNOWN"), undefined);
   assert.ok(!registry.has("NOPE"));
@@ -174,7 +182,9 @@ test("Sync-Kontext-Sicherheit: AdapterRegistry referenziert keine Private-Creden
 
   // 3) Dynamisch: Discovery/Enrichment laufen ohne jegliche Credentials.
   const registry = createAdapterRegistry({ registry: tmpRegistry(), env: { ...ENABLED } });
-  assert.equal((registry.get("BITUNIX") as BitunixBrokerAdapter).mode, "paper");
+  const syncAdapter = registry.get("BITUNIX");
+  assert.ok(syncAdapter, "BITUNIX registriert");
+  assert.equal("mode" in syncAdapter!, false, "Sync-Adapter ist kein BrokerAdapter (Public-only-Wrapper)");
   assert.equal(process.env.BITUNIX_API_KEY, undefined, "Test-Env trägt ohnehin keine Key");
 });
 

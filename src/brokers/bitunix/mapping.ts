@@ -100,14 +100,25 @@ export function mapTradingPair(
 
 const QUOTES = ["USDT", "USDC", "USD", "BTC", "ETH"] as const;
 
-function inferQuote(symbol: string): string | null {
+/**
+ * Quote-Suffix eines konkatenierten Symbols ableiten („BTCUSDT“ → „USDT“).
+ *
+ * Exportiert für den Marketdata-Wrapper (`src/marketdata/adapters/bitunix.ts`),
+ * der dieselbe Fallback-Logik nutzt, wenn `trading_pairs` base/quote nicht
+ * liefert — eine zweite, abweichende Inferenz wäre eine zweite Wahrheit.
+ */
+export function inferQuote(symbol: string): string | null {
   for (const q of QUOTES) {
     if (symbol.endsWith(q) && symbol.length > q.length) return q;
   }
   return null;
 }
 
-function inferBase(symbol: string): string | null {
+/**
+ * Base-Suffix eines konkatenierten Symbols ableiten („BTCUSDT“ → „BTC“).
+ * Exportiert aus demselben Grund wie {@link inferQuote}.
+ */
+export function inferBase(symbol: string): string | null {
   const q = inferQuote(symbol);
   if (!q) return null;
   return symbol.slice(0, -q.length) || null;

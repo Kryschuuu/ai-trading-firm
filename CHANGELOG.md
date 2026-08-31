@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.30.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.31.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,22 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.31.0] — 2026-08-31 · fix(bitunix): Public Market Data in den Scanner-Warmstart verdrahten (P0)
+
+**P0, Productionspfad.** Der funktionsfähige Bitunix-Adapter war von keinem
+Produktionspfad aufgerufen — die Registry blieb bei den 26 statischen
+Seed-Instrumenten. Der Public-Market-Data-Pfad ist jetzt über einen dünnen
+`MarketDataAdapter`-Wrapper (`src/marketdata/adapters/bitunix.ts`) mit dem
+`MarketDataSyncService` verdrahtet; die Registrierung
+(`registerMarketDataAdapters(env)`) instanziiert ausschließlich den
+credential-freien PublicClient, gated über Capability-Matrix
+(`capabilities.BITUNIX.marketData`) **und** `BITUNIX_ENABLED`. Neue
+`UnsupportedTimeframeError`-Semantik (3m/5d sind dokumentierte Bitunix-Lücken),
+HALTED/DELISTED-Instrumente werden geflaggt statt verworfen, `run-scan` ohne
+`--sync` bleibt nachweislich netzwerkfrei (Guard-Server-Subprozess-Test).
+Broker- und Marketdata-Domäne entkoppelt: keine Rückwärts-Abhängigkeit mehr.
+Live-Gate unverändert. Details: [docs/CHANGELOG.md](docs/CHANGELOG.md#1310---2026-08-31--fixbitunix-public-market-data-in-den-scanner-warmstart-verdrahten-p0).
 
 ## [1.30.0] — 2026-08-31 · fix(setup): Setup-Pfad härten + Markt-Presets + Short-Selling-Default (SETUP-130)
 

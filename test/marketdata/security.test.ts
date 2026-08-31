@@ -64,10 +64,13 @@ test("Sync-Pfad kennt keinen PrivateClient, keine API-Keys und keine Signatur", 
     const src = code(file);
     assert.equal(forbidden.test(src), false, `${file} verweist auf Private-/Signing-Code`);
   }
-  // Die Factory erzeugt den Adapter ausschließlich im Paper-Modus.
+  // Die Factory erzeugt ausschließlich den credential-freien PublicClient
+  // (adaptiert über den Marketdata-Wrapper) — kein BrokerAdapter, kein
+  // PrivateClient, kein SecretStore.
   const registry = code("src/marketdata/registerAdapters.ts");
-  assert.match(registry, /new BitunixBrokerAdapter\("paper"/);
-  assert.doesNotMatch(registry, /privateClient|secretStore/i);
+  assert.match(registry, /new BitunixPublicClient\(/);
+  assert.match(registry, /createBitunixMarketDataAdapter\(/);
+  assert.doesNotMatch(registry, /privateClient|secretStore|new\s+BitunixBrokerAdapter/i);
 });
 
 // ── 2. Leak-freie Logs ───────────────────────────────────────────────────────

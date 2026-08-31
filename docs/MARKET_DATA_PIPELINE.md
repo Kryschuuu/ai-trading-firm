@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-30** ·
-> Code-Version **1.29.0** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-31** ·
+> Code-Version **1.31.0** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize`)
 
@@ -12,8 +12,11 @@ Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
 ```
 registerAdapters() (src/marketdata/registerAdapters.ts)  ← Feature-Gates
   │   MARKET_SYNC_ENABLED · MARKET_SYNC_VENUES · <VENUE>_ENABLED
-  └─ Venue→Adapter-Map (einzige Instanzierungsstelle, Modus "paper")
-         │  BITUNIX → BitunixBrokerAdapter (PublicClient, ohne PrivateClient)
+  │   + Capability-Gate: capabilities.<VENUE>.marketData === true
+  └─ Venue→Adapter-Map (einzige Instanzierungsstelle, NUR PublicClient,
+     je Lauf EIN geteilter Token-Bucket 8 req/s)
+         │  BITUNIX → Wrapper createBitunixMarketDataAdapter()
+         │           (src/marketdata/adapters/bitunix.ts) um BitunixPublicClient
 Discovery / Enrichment / Backfill
          ▼
 MarketDataSyncService (instruments, ticker, orderbook, candles)
@@ -33,18 +36,19 @@ Funnel
 ## 0. Code-Map (Anforderungsname → realer Pfad)
 
 Die Anforderung MDSYNC-001 nennt Module, die im Repository anders liegen bzw.
-heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.29.0):
+heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.31.0):
 
 | Anforderung nennt | Realer Pfad | Anmerkung |
 | --- | --- | --- |
 | `ScannerService` (`src/scanner/service.ts`) | `src/scanner/service.ts` | unverändert; Export `scanUniverse()` aus `src/scanner/pipeline.ts` |
 | `HistoricalStore` (`src/history/` oder `src/scanner/historicalStore.ts`) | `src/lib/marketdata/historicalStore.ts` | Datei `data/history/candles.ndjson`, Schema v2 |
 | `InstrumentRegistry` (`src/universe/registry.ts`) | `src/universe/registry.ts` | Ablage `data/universe/instruments.ndjson` |
-| `BitunixBrokerAdapter` (`src/brokers/bitunix/`) | `src/brokers/bitunix/adapter.ts` | erfüllt `MarketDataAdapter` UND `BrokerAdapter` |
-| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | vierte Methode heisst `fetchOrderBook` (nicht `fetchDepth`) |
+| `BitunixBrokerAdapter` (`src/brokers/bitunix/`) | `src/brokers/bitunix/adapter.ts` | erfüllt nur `BrokerAdapter`; Public-Methoden bleiben erhalten |
+| Market-Data-Adapter des Syncs | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | dünner Wrapper Broker-PublicClient → `MarketDataAdapter` (P0-Verdrahtung, Domänentrennung) |
+| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | RAW-Varianten `fetchTradingPairsRaw()` und `fetchDepth(symbol, limit=5)` ergänzt; `fetchTickers` nimmt Bulk-Arrays |
 | Sync-CLI (`scripts/run-scan.ts`) | `scripts/market-sync.ts` (+ `scripts/lib/market-sync.ts`), `scripts/run-scan.ts --sync` | `run-market-sync.ts` ist ein Delegate auf ersteres |
-| Rate-Limit „8 req/s dokumentiert“ | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Bitunix-Doku nennt 10 req/s/IP, Code bleibt konservativ bei 8 |
-| Adapter-Registry | `src/marketdata/registerAdapters.ts` (Kern) + `src/marketdata/adapterRegistry.ts` (Wrapper) | zwei Dateien statt einer — Begründung §13 |
+| Rate-Limit „8 req/s dokumentiert“ | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Bitunix-Doku nennt 10 req/s/IP, Code bleibt konservativ bei 8; **ein geteilter Bucket je Registrierungs-Lauf** |
+| Adapter-Registry | `src/marketdata/registerAdapters.ts` (Kern, inkl. `registerMarketDataAdapters(env)`) + `src/marketdata/adapterRegistry.ts` (Wrapper) | zwei Dateien statt einer — Begründung §13 |
 
 ---
 
@@ -495,9 +499,11 @@ auch kerzengesättigte Instrumente an `max-spread` (§3).
 
 Der Token-Bucket sitzt am `BitunixHttp`-Transport
 (`src/brokers/bitunix/http.ts`) des Adapter-Public-Clients — die
-`AdapterRegistry` erzeugt den Adapter ohne zusätzlichen Limiter (ein zweiter
-auf Orchestrier-Ebene würde Tokens doppelt verrechnen). Alle produktiven
-Bitunix-Calls laufen dadurch durch den Bucket:
+Registrierung (`registerAdapters()`) erzeugt **einen geteilten Bucket pro
+Lauf** und reicht ihn an alle PublicClients des Laufs durch (ein zweiter,
+unabhängiger Limiter je Venue würde das IP-Budget mit jeder zusätzlichen Venue
+multiplizieren). Alle produktiven Bitunix-Calls laufen dadurch durch denselben
+Bucket:
 
 - Dokumentiertes Limit: **10 req/s/IP**
 - Code-Limit: **8 req/s** (`BITUNIX_PUBLIC_RATE_PER_SEC`) — konservativ, vor
@@ -523,30 +529,37 @@ Retry nur für 429/5xx (bestehender HTTP-Client). Eine Antwort über
 
 ## 10. Venue capability matrix
 
-| Venue | Adapter | Discovery | Tickers (Batch) | Orderbuch | Kerzen 5m/15m/30m/1h | Private/Keys im Sync |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| BITUNIX | `BitunixBrokerAdapter` (Modus `paper`, Public-Pfad) | ja (public REST) | ja | ja | ja | **nein** |
-| BINANCE | — (Feed in `src/lib/marketdata/feeds`, kein Sync-Adapter) | geplant | — | — | — | nein |
-| BITFINEX | — | geplant | — | — | — | nein |
-| KRAKEN | — | geplant | — | — | — | nein |
-| ALPACA / IBKR | — | geplant | — | — | — | nein |
-| PAPER | Seed-Registry, kein REST | n/a | n/a | n/a | n/a | n/a |
+| Venue | Adapter | Discovery | Tickers (Batch) | Orderbuch | Kerzen 5m/15m/30m/1h | Timeframe-Lücken | Private/Keys im Sync |
+| --- | :---: | :---: | :---: | :---: | :---: | :--- | :---: |
+| BITUNIX | `createBitunixMarketDataAdapter` um `BitunixPublicClient` (nur Public) | ja (public REST) | ja | ja | ja | **3m, 5d** (`UnsupportedTimeframeError`, kein Ersatztimeframe) | **nein** |
+| BINANCE | — (Feed in `src/lib/marketdata/feeds`, kein Sync-Adapter) | geplant | — | — | — | — | nein |
+| BITFINEX | — | geplant | — | — | — | — | nein |
+| KRAKEN | — | geplant | — | — | — | — | nein |
+| ALPACA / IBKR | — | geplant | — | — | — | — | nein |
+| PAPER | Seed-Registry, kein REST | n/a | n/a | n/a | n/a | n/a | n/a |
 
-**Bitunix-Status (verdrahtet seit v1.25.1):** Discovery: ✓ · MarketData: ✓ —
-produktiv über `BitunixBrokerAdapter` + `AdapterRegistry` (der parallele
-`BitunixMarketDataAdapter`-Wrapper ist entfernt) ·
+**Bitunix-Status (verdrahtet seit v1.25.1, seit v1.31.0 über den Wrapper):**
+Discovery: ✓ · MarketData: ✓ — produktiv über
+`registerAdapters()` / `registerMarketDataAdapters(env)`
+(`src/marketdata/registerAdapters.ts`) → `createBitunixMarketDataAdapter()`
+(`src/marketdata/adapters/bitunix.ts`) um den credential-freien
+`BitunixPublicClient`. Der `BitunixBrokerAdapter` selbst implementiert das
+`MarketDataAdapter`-Interface nicht mehr (Domänentrennung: keine
+Rückwärts-Abhängigkeit `src/brokers` → `src/marketdata`) ·
 Trading: über `BitunixPrivateClient` getrennt (niemals im Sync-Pfad).
 
-Neue Venues: `MarketDataAdapter` implementieren und in
+Neue Venues: `MarketDataAdapter` implementieren (als Wrapper unter
+`src/marketdata/adapters/<venue>.ts`) und in
 `src/marketdata/registerAdapters.ts` unter dem Venue-Kürzel registrieren — die
-**einzige** Stelle, die konkrete Adapter-Klassen instanziiert (nicht im Scanner,
-nicht in `/api/markets`). Der Scanner ändert sich nicht. Pro Venue gelten drei
-Gates (Reihenfolge: Kill-Switch → Allowlist → Venue-Flag):
+**einzige** Stelle, die konkrete Adapter-Instanzen baut (nicht im Scanner,
+nicht in `/api/markets`). Der Scanner ändert sich nicht. Pro Venue gelten
+**vier** Gates (Reihenfolge: Kill-Switch → Allowlist → Capability → Venue-Flag):
 
-| Flag | Wirkung | Default |
+| Flag / Gate | Wirkung | Default |
 | --- | --- | --- |
 | `MARKET_SYNC_ENABLED` | globaler Kill-Switch; **nur** der exakte Wert `"false"` schaltet ab | an |
 | `MARKET_SYNC_VENUES` | Kommagetrennte Venue-Allowlist (Großbuchstaben); leer = alle bekannten | leer |
+| `capabilities.<VENUE>.marketData` | Capability-SSoT (`src/brokers/capabilities.ts`); `false` ⇒ kein Adapter, Grund `CAPABILITY_DISABLED` | Venue-abhängig (BITUNIX: true) |
 | `BITUNIX_ENABLED` | Venue-Flag; nur der exakte Wert `"true"` schaltet an (geteilt mit dem Trading-Adapter) | aus |
 
 Das CLI-Flag `--venue` überschreibt die Env-Allowlist (genau eine Venue), das
@@ -555,8 +568,18 @@ schaltet nichts an.
 
 Ein Gate-Treffer wird **gemeldet**, nicht verschluckt: `registerAdapters()` gibt
 `skipped: [{ venue, reason }]` zurück (KILL_SWITCH · NOT_IN_ALLOWLIST ·
-VENUE_DISABLED · UNKNOWN_VENUE · INVALID_VENUE_KEY), das CLI antwortet mit
-Behebungshinweis und Exit 2.
+VENUE_DISABLED · CAPABILITY_DISABLED · UNKNOWN_VENUE · INVALID_VENUE_KEY), das CLI
+antwortet mit Behebungshinweis und Exit 2. Wird `syncVenue()` dennoch aufgerufen
+(leere Map), wirft der Service `UnsupportedVenueError` mit dem Hilfetext, der
+beide Ursachen (Capability / Env-Flag) und die Behebung (`BITUNIX_ENABLED=true`,
+Public Data braucht KEINE Credentials, Live-Gate unberührt) nennt.
+
+**Rate-Limit bei mehreren Venues:** `registerAdapters()` erstellt **einen**
+geteilter `TokenBucket(8, 8)` pro Lauf und reicht ihn an jeden erzeugten
+PublicClient durch — das dokumentierte IP-Budget (10 req/s/IP, Code 8) bleibt
+damit autoritativ, auch wenn später mehrere Venues derselben API-Infrastruktur
+in einem Lauf registriert sind (Verhaltens-Test in
+`test/marketdata/adapters/bitunix.test.ts`).
 
 ## 11. Symbol-Normalisierung und Instrument-IDs (SYM-007, v1.28.0)
 
