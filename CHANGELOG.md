@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.33.1**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.34.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,15 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.34.0] — 2026-08-31 · feat(install): geführtes Windows-Setup mit PowerShell
+
+* **Windows-Installation:** `scripts/setup-windows.ps1` installiert per `winget`
+  Git, Node.js LTS, PostgreSQL und optional Ollama, richtet Datenbank und `.env`
+  ein, seedet das Universum und führt Typecheck, Lint, Build und Health-Check aus.
+* **Dokumentation:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) enthält
+  den One-Liner, Eingabeführung, Sicherheitsdefaults und konkrete Workarounds.
+* **Sicherheit:** Secrets werden nicht geloggt; Live-Trading bleibt deaktiviert.
 
 ## [1.33.1] — 2026-08-31 · fix(setup): PAPER-MODE-Default und WURZELURSACHE-Validierung (B7)
 
@@ -40,7 +49,7 @@ zehn stille Folgefehler (V05–V17). Befund B7:
 * **Doku:** `INSTALL.md` (Flag-Tabelle: `A`/`B`/`C` werden nicht akzeptiert),
   `docs/SETUP_BUGS.md` (B7), `docs/INSTALL.md` (Troubleshooting
   `EADDRINUSE 0.0.0.0:3369`).
-* Version **1.33.1**. Kein Schema-Bruch, keine Datenmigration.
+* Version **1.34.0**. Kein Schema-Bruch, keine Datenmigration.
 
 Details: [docs/CHANGELOG.md](docs/CHANGELOG.md#1331---2026-08-31--fixsetup-paper-mode-default-und-wurzelursache-validierung-b7)
 
@@ -901,3 +910,11 @@ Bitunix-Live-Pfad handelt **niemals mehr über das lokale Paper-Ledger**.
   (Tasks 1–12); SECURITY_AUDIT-Kapitel Task 12.
 - Multi-Node Rate-Limit/Scheduler-Locks (prozess-lokale Limits im Single-Node-Betrieb).
 - Persistente Scheduler-Locks über Prozesse hinweg (siehe docs/CHANGELOG.md Backlog-Tabelle).
+## [1.34.0] — 2026-08-31 · feat(install): geführtes Windows-Setup mit PowerShell
+
+* **Windows-Installation:** `scripts/setup-windows.ps1` installiert per `winget`
+  Git, Node.js LTS, PostgreSQL und optional Ollama, richtet Datenbank und `.env`
+  ein, seedet das Universum und führt Typecheck, Lint, Build und Health-Check aus.
+* **Dokumentation:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) enthält
+  den One-Liner, Eingabeführung, Sicherheitsdefaults und konkrete Workarounds.
+* **Sicherheit:** Secrets werden nicht geloggt; Live-Trading bleibt deaktiviert.

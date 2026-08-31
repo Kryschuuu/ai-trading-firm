@@ -55,7 +55,7 @@ npm run start               # http://0.0.0.0:3369
 ./scripts/validate-setup.sh        # 18 Checks, bestanden ab 15
 ```
 
-Details: [`INSTALL.md`](INSTALL.md) und [`docs/INSTALL.md`](docs/INSTALL.md)
+Details: [`INSTALL.md`](INSTALL.md) und [`docs/INSTALL.md`](docs/INSTALL.md) sowie [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) für Windows/PowerShell.
 (Schritt für Schritt auf CachyOS, Variante A/B),
 [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung) und
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B7).

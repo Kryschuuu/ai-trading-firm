@@ -6,9 +6,11 @@
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
 für CachyOS (Variante A: Solo-Node, Variante B: Split-Node) steht in
-[`docs/INSTALL.md`](docs/INSTALL.md). Diese Datei ist die verbindliche
-Flag-Referenz — der CI-Job `docs-validate` prüft, dass jedes dokumentierte Flag
-tatsächlich im Code existiert.
+[`docs/INSTALL.md`](docs/INSTALL.md). Für Windows 10/11 gibt es den geführten
+PowerShell-Installer mit One-Liner, PostgreSQL-, Node-, Ollama-Installation und
+Workarounds in [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md).
+Diese Datei ist die verbindliche Flag-Referenz — der CI-Job `docs-validate` prüft,
+dass jedes dokumentierte Flag tatsächlich im Code existiert.
 
 ## Voraussetzungen
 

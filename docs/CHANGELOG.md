@@ -20,6 +20,26 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+
+## [1.34.0] — 2026-08-31 · feat(install): geführtes Windows-Setup mit PowerShell
+
+### Added
+
+* `scripts/setup-windows.ps1`: idempotenter Windows-Installer mit `winget`-
+  Preflight, Node.js LTS, PostgreSQL-Dienst, Datenbank/Rolle, sicherer `.env`,
+  npm/Drizzle/Universe-Seeds, optionalem Ollama-Modell sowie Typecheck, Lint,
+  Build und Health-Check. Secrets werden weder auf der Konsole noch im Log
+  ausgegeben; bestehende `.env`-Dateien werden vor dem Ersetzen gesichert.
+* [`INSTALL-WINDOWS.md`](INSTALL-WINDOWS.md): vollständige Anleitung vom
+  One-Liner bis zu Workarounds für winget, PATH, PostgreSQL, npm, Ollama und
+  Health-Check.
+
+### Security
+
+* Neuinstallationen bleiben fail-closed: `PAPER_MODE=broker-market-data`,
+  `REQUIRE_HUMAN_APPROVAL=true`, `LIVE_TRADING_ENABLED=false` und
+  `BITUNIX_ENABLED=false`.
+
 ## [1.33.1] — 2026-08-31 · fix(setup): PAPER-MODE-Default und WURZELURSACHE-Validierung (B7)
 
 **P0, trifft jede Neuinstallation.** `scripts/setup-cachyos.sh` schrieb den
