@@ -20,6 +20,72 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.33.0] — 2026-08-31 · feat(ops): add market-data readiness panel to operations center
+
+**[OPS] Surface market-data readiness instead of six funnel zeros (OPS-011, P2)**
+
+Das Operations Center visualisierte ausschließlich den Scanner-Funnel. Bei
+fehlender Datenbasis konnte ein Betreiber sechs Nullen nicht unterscheiden
+zwischen „der Markt bietet nichts Geeignetes“ (fachlich korrekt), „wir haben
+keine Kerzen geladen“ (Warmup) und „der Ticker-/Depth-Abruf ist ausgefallen“
+(Infrastruktur) — mitursächlich dafür, dass der P0-Defekt lange als „Scanner
+zu restriktiv“ fehlinterpretiert wurde.
+
+### Added
+
+- **`src/ops/collectMarketData.ts`** — `collectMarketDataReadiness()`:
+  reine Lesefunktion (Registry-Query + Historical-Store-Zählung + Readiness +
+  zwischengespeicherte Sync-Ergebnisse). Kein Netzwerk-I/O, kein Sync-Trigger.
+  `buildReadinessHint()` liefert genau einen handlungsleitenden Hinweis je
+  dominierendem Blocker (ERROR → Infrastruktur · WARMING ohne Kerzen →
+  Sync-Kommando + Sollwert-Herleitung · WARMING ohne Spread → depth-Enrichment
+  · WARMING teilweise → fehlende Instrumente benannt · READY → leerer Funnel
+  ist eine fachliche Aussage).
+- **`MarketDataOpsSnapshot`** (`src/ops/types.ts`, Payload-Feld `marketData`
+  in `GET /api/ops`, additiv): `generatedAt`, `requiredCandles`, `registry`,
+  `discovered`, `dataReady`, `warming`, `tickerReady`, `spreadReady`,
+  `scannerReady` (⇔ `readinessStatus === "READY"`), `readinessStatus`
+  (`READY | WARMING | ERROR`), `venues[]`, `worstOffenders[]` (Top 10,
+  candles asc), `hint`.
+- **`src/marketdata/syncStatus.ts`** — persistenter Sync-Status je Venue
+  (`data/market-sync-status.json`, gitignored): letzter Sync, degraded-Flag,
+  Instrumente, Fehlerzähler nach **geschlossener** MDERR-006-Taxonomie.
+  Geschrieben von `scripts/market-sync.ts` und `scripts/run-scan.ts --sync`;
+  beim Laden strikt validiert (Venue-Whitelist, Reason-Enum, Kappung auf 10).
+- **`src/components/ops/MarketDataPanel.tsx`** — Sektion „Market Data“
+  **oberhalb** des Funnels: Ampel READY/WARMING/ERROR farb- **und**
+  textkodiert (`role="status"`), Tooltip je Kennzahl (Herkunft, Berechnung,
+  Sollwert), Venue-Sync-Liste, ausklappbare „worst offenders“-Tabelle,
+  Hinweis, dass Funnel-Nullen bei WARMING/ERROR datenbedingt sind.
+- **`docs/OPERATIONS.md`** — Runbook „Funnel ist leer“ mit Entscheidungsbaum
+  (Fehler-Counter > 0 → Venue-Incident | Candles 0 → Sync ausführen |
+  Spread-ready 0 → Depth-Abruf prüfen | alles ready → fachliche Bewertung).
+- Tests: `test/ops/collectMarketData.test.ts` (Zählregeln, Grenzwert,
+  Determinismus, fetch-Spy = 0, Hint-Table-Test, JSON-Stabilität,
+  Secret-Scan, Integration Fake-Sync 2/3 gewärmt) und
+  `test/ui/MarketDataPanel.test.tsx` (WARMING/READY/ERROR, Funnel bleibt
+  sichtbar, Accessibility).
+
+### Changed
+
+- `collectScanner()`-Note verweist bei WARMING/ERROR explizit darauf, dass
+  die Funnel-Nullen datenbedingt sind (Sektion „Market Data“). Der Funnel
+  selbst ist unverändert.
+- `docs/MARKET_DATA_PIPELINE.md` §6: Abschnitt „MarketDataOpsSnapshot“.
+
+### Security
+
+- Ops bleibt **read-only**: kein Sync-Trigger-Endpoint eingeführt.
+- Snapshot enthält keine Credentials, keine Env-Variablen, keine internen
+  Dateipfade, keine Stacktraces, keine rohen Upstream-Messages.
+- Fehler-Reasons sind eine geschlossene Aufzählung (`MarketDataErrorReason`);
+  unbekannte Schlüssel werden beim Laden verworfen.
+- `venues` und `worstOffenders` sind hart gekappt (kein Response-Wachstum).
+
+Refs: Code Review Scanner, Kap. 14, 26
+
+---
+
 ## [1.32.0] — 2026-08-31 · feat(marketdata): enrich instruments with volume24h and orderbook spread (P1)
 
 **[MARKETDATA] Add ticker and orderbook enrichment to instrument discovery**

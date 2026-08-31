@@ -87,6 +87,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Operations Center",
     subtitle: "Market-Data-Readiness-Diagnose: leerer Scanner-Funnel Schritt für Schritt eingrenzen (v1.27)",
   },
+  operations: {
+    file: "docs/OPERATIONS.md",
+    title: "Operations: Runbook „Funnel ist leer“",
+    subtitle: "Entscheidungsbaum + Sektion „Market Data“ oberhalb des Funnels (v1.33)",
+  },
   observability: {
     file: "docs/OBSERVABILITY.md",
     title: "Observability: Marktdaten-Fehler",

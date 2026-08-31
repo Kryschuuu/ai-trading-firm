@@ -40,6 +40,11 @@ next-env.d.ts
 /data/market-data-errors.json
 /data/market-data-errors.json.tmp
 
+# Sync-Status je Venue (OPS-011): Laufzeit-Artefakt des Sync-Jobs,
+# vom Operations Center gelesen — nicht versioniert
+/data/market-sync-status.json
+/data/market-sync-status.json.tmp
+
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
 

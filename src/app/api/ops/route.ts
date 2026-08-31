@@ -9,6 +9,11 @@
  * Jede Sektion ist fail-soft: ist ihre Quelle nicht lesbar, erscheint sie als
  * `unavailable` mit redigierter Meldung — die übrigen Sektionen bleiben
  * lesbar. Keine Secrets, keine Credentials, keine Orders, keine Mutation.
+ *
+ * OPS-011: Der Payload enthält zusätzlich `marketData` — den read-only
+ * Snapshot der Sektion „Market Data“ (Registry/Discovered/Data-ready/…,
+ * Venue-Sync-Status, worst offenders, Hinweistext). Die Route bleibt bewusst
+ * **read-only**: es gibt keinen Endpoint, der einen Sync auslöst.
  */
 import { resolveActor } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";

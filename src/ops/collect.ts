@@ -46,8 +46,11 @@ import {
   scannerCandleCounts,
   type MarketDataReadinessReport,
 } from "./marketDataReadiness";
+import { collectMarketDataReadiness as collectMarketDataSnapshot } from "./collectMarketData";
+import { loadVenueSyncStatuses } from "@/marketdata/syncStatus";
 import {
   OPS_SECTION_IDS,
+  type MarketDataOpsSnapshot,
   type OpsItem,
   type OpsMetric,
   type OpsSectionData,
@@ -362,10 +365,12 @@ function collectScanner(): Draft {
     })),
     note:
       readiness.status === "ERROR"
-        ? `Marktdaten-Fehler: ${readiness.error} (Infrastruktur, kein Marktausschluss).`
+        ? `Marktdaten-Fehler: ${readiness.error} (Infrastruktur, kein Marktausschluss). ` +
+          `Die Funnel-Nullen sind datenbedingt — Details in der Sektion »Market Data«.`
         : readiness.status === "WARMING"
           ? `Warmup unvollständig: ${readiness.missing} Instrument(e) < ${readiness.requiredCandles} Kerzen — ` +
-            "Behebung: npm run market-sync (Datenverfügbarkeit, kein Marktausschluss)."
+            "Behebung: npm run market-sync (Datenverfügbarkeit, kein Marktausschluss). " +
+            "Die Funnel-Nullen sind datenbedingt — Details in der Sektion »Market Data«."
           : funnel.diversificationRelaxed
             ? "Diversifikationsregel gelockert — zu wenige Anlageklassen im Trichter."
             : funnel.scanned > 0 && funnel.eligible.length === 0
@@ -385,6 +390,12 @@ export interface OpsMarketDataExtras {
   report: MarketDataReadinessReport;
   /** Ablehnungs-Diagnose mit vollständigem Datenzustand (gedeckelt). */
   diagnostics: EligibilityDiagnosticsSummary;
+  /**
+   * Snapshot der Sektion „Market Data“ (OPS-011): Registry/Discovered/
+   * Data-ready/Warming/Ticker/Spread/Scanner-ready + Venue-Sync-Status +
+   * worstOffenders + kontextabhängiger Hinweis (`buildReadinessHint`).
+   */
+  snapshot: MarketDataOpsSnapshot;
 }
 
 /**
@@ -416,6 +427,17 @@ export function collectMarketDataExtras(): OpsMarketDataExtras | null {
       config,
       registrySize: registry.size,
     });
+    // OPS-011: Snapshot der Sektion „Market Data“ — dieselben, bereits
+    // gelesenen Eingaben plus Fehler-Manifest (MDERR-006) und persistierter
+    // Sync-Status (MDSYNC-001). Reine Lese-Aggregation, kein Netzwerk-I/O.
+    const snapshot = collectMarketDataSnapshot({
+      instruments,
+      candleCounts,
+      config,
+      registrySize: registry.size,
+      dataErrors: loadMarketDataErrors(),
+      syncStatuses: loadVenueSyncStatuses(),
+    });
     const byId = new Map(instruments.map((instrument) => [instrument.id, instrument] as const));
     const diagnostics = buildEligibilityDiagnostics(scan.rejections, (instrumentId) => {
       const instrument = byId.get(instrumentId);
@@ -425,7 +447,7 @@ export function collectMarketDataExtras(): OpsMarketDataExtras | null {
         spread: instrument?.spread ?? null,
       };
     });
-    return { report, diagnostics };
+    return { report, diagnostics, snapshot };
   } catch {
     return null;
   }

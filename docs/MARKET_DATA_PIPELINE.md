@@ -493,6 +493,34 @@ Ablehnung bedeutet „**Spread wurde nicht geladen**“ (depth-Enrichment fehlt,
 „erste Regel gewinnt“-Routing des Filters ausdrücklich **nicht** — es dient
 ausschließlich Monitoring/Debugging (siehe Dateikopf des Moduls).
 
+### MarketDataOpsSnapshot — Sektion „Market Data“ (v1.33.0 / OPS-011)
+
+**Seit v1.33.0** liefert `GET /api/ops` zusätzlich das Feld `marketData`
+(`MarketDataOpsSnapshot`, Quelle `src/ops/collectMarketData.ts` →
+`collectMarketDataReadiness()`): der Datenstand für die Sektion **„Market
+Data“ oberhalb des Scanner-Funnels** im Operations Center. Der Snapshot ist
+eine **reine Lesefunktion** — Registry-Query, Historical-Store-Zählung,
+Readiness-Ableitung und zwischengespeicherte Sync-Ergebnisse. Kein
+Netzwerk-I/O, kein Sync-Trigger.
+
+Felder (zusätzlich zum Report oben):
+
+| Feld | Bedeutung |
+| --- | --- |
+| `readinessStatus` | Ampel: `ERROR` (Fehler-Manifest nicht leer) · `READY` (jedes Registry-Instrument hat Kerzen ≥ Sollwert **und** Volumen **und** Spread) · sonst `WARMING` |
+| `scannerReady` | `true` ⇔ `readinessStatus === "READY"` |
+| `dataReady` / `warming` | Instrumente mit ≥ `requiredCandles` Kerzen im Scanner-Timeframe / Rest |
+| `venues[]` | je Venue: `lastSyncAt`, `lastSyncDegraded`, Instrumente, `failuresByReason` (geschlossene MDERR-006-Taxonomie) — Quelle `data/market-sync-status.json` (`src/marketdata/syncStatus.ts`, vom Sync-CLI geschrieben) |
+| `worstOffenders[]` | bis zu 10 Instrumente mit den wenigsten Kerzen (candles asc, id asc) |
+| `hint` | kontextabhängiger, handlungsleitender Hinweis (`buildReadinessHint()`) je dominierendem Blocker: `ERROR` → Infrastruktur · `WARMING` ohne Kerzen → Sync-Kommando + Sollwert-Herleitung · `WARMING` ohne Spread → depth-Enrichment (`rule=max-spread`) · `WARMING` teilweise → fehlende Instrumente benannt · `READY` → leerer Funnel ist eine fachliche Aussage |
+
+Security: Der Snapshot enthält nur Zähler, ISO-Zeitstempel, Instrument-IDs
+und die geschlossene `reason`-Taxonomie — keine Credentials, keine
+Env-Variablen, keine internen Dateipfade, keine Stacktraces, keine rohen
+Upstream-Messages. `venues` und `worstOffenders` sind hart gekappt (je 10).
+Das zugehörige Betriebs-Runbook („Funnel ist leer“) steht in
+[`OPERATIONS.md`](OPERATIONS.md).
+
 ## 7. Scanner execution
 
 ```bash

@@ -31,6 +31,7 @@
  */
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
 import { loadMarketDataErrors, saveMarketDataErrors, clearMarketDataErrors } from "../src/marketdata/dataErrors";
+import { saveVenueSyncStatus } from "../src/marketdata/syncStatus";
 import { loadScannerConfig } from "../src/scanner/config";
 import { scanUniverse } from "../src/scanner/pipeline";
 import { classifyWeekly } from "../src/scanner/weekly";
@@ -72,6 +73,9 @@ async function main(): Promise<void> {
     const venue = (venueArg ?? "BITUNIX").trim().toUpperCase();
     const result = await runMarketSync(venue, syncOptions);
     syncErrorCount = result.failures.length;
+    // OPS-011: Sync-Status je Venue persistieren (Quelle der Ops-Sektion
+    // „Market Data“ — letzter Lauf, degraded-Flag, Fehler nach Ursache).
+    saveVenueSyncStatus(result);
     if (syncErrorCount > 0) {
       // MDERR-006: Fehler manifestieren und Scan TROTZDEM ausführen — der
       // Scanner übersetzt sie in DATA_UNAVAILABLE/Readiness ERROR statt in

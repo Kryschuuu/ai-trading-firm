@@ -175,6 +175,7 @@ Sektionen und Funnel-Metriken sind unverändert:
 
 ## Verwandte Dokumente
 
+* [OPERATIONS.md](OPERATIONS.md) — Runbook „Funnel ist leer“: Entscheidungsbaum + Sektion „Market Data“ oberhalb des Funnels (OPS-011, v1.33)
 * [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md) — Discovery/Enrichment/Backfill, Readiness-Zustände, `$ npm run market-sync`
 * [ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md) — Entscheidungsbaum bei Sync-Fehlern (`DATA_UNAVAILABLE`, Manifest)
 * [OBSERVABILITY.md](OBSERVABILITY.md) — Fehlertaxonomie, Metriken, strukturierte Logs

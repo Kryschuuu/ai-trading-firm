@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.32.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.33.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,34 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.33.0] — 2026-08-31 · feat(ops): add market-data readiness panel to operations center
+
+**[OPS] Surface market-data readiness instead of six funnel zeros**
+
+Das Operations Center visualisierte ausschliesslich den Scanner-Funnel.
+Bei fehlender Datenbasis waren sechs Nullen nicht von einer echten
+fachlichen Aussage unterscheidbar - der eigentliche P0-Defekt wurde
+dadurch lange als "Scanner zu restriktiv" fehlinterpretiert.
+
+- `collectMarketDataReadiness()`: reine Lesefunktion, kein Netzwerk-I/O
+- `MarketDataOpsSnapshot` mit Registry/Discovered/Data-ready/Warming/
+  Candles(n/required)/Ticker-ready/Spread-ready/Scanner-ready
+- Pro Venue: letzter Sync, degraded-Flag, Fehler nach Ursache
+  (`data/market-sync-status.json`, geschlossene MDERR-006-Taxonomie)
+- `worstOffenders` (Top 10 Instrumente mit zu wenig Historie)
+- `buildReadinessHint()`: kontextabhaengige, handlungsleitende Hinweise
+  je dominierendem Blocker
+- Neue UI-Sektion „Market Data" (`MarketDataPanel.tsx`) **oberhalb** des
+  Funnels; Ampel READY/WARMING/ERROR farb- UND textkodiert; Funnel bleibt
+  in allen Zustaenden sichtbar
+- Runbook "Funnel ist leer" in `docs/OPERATIONS.md`
+- Ops bleibt read-only: kein Sync-Trigger-Endpoint
+
+Refs: Code Review Scanner, Kap. 14, 26
+
+Details: [docs/CHANGELOG.md](docs/CHANGELOG.md#1330---2026-08-31--featops-add-market-data-readiness-panel-to-operations-center)
+
 
 ## [1.32.0] — 2026-08-31 · feat(marketdata): enrich instruments with volume24h and orderbook spread (P1)
 
