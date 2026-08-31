@@ -58,7 +58,7 @@ npm run start               # http://0.0.0.0:3369
 Details: [`INSTALL.md`](INSTALL.md) und [`docs/INSTALL.md`](docs/INSTALL.md)
 (Schritt für Schritt auf CachyOS, Variante A/B),
 [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung) und
-[`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B6).
+[`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B7).
 
 ## Markt-Konfiguration (v1.30.0)
 
@@ -123,7 +123,7 @@ Migrationsskript: [`docs/SYMBOLS.md`](docs/SYMBOLS.md).
 | `docs/SYMBOLS.md` | Zentrale, venue-aware Symbol-Normalisierung (SYM-007) |
 | `docs/MARKET_DATA_PIPELINE.md` | Discovery, Enrichment, Candle-Backfill, Scanner-Grenze |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
-| `docs/SETUP_BUGS.md` | Setup-Bug-Register: PostgreSQL-Init, Seed/UUID, Broker-Adapter, Build-Warnungen, API-Token, Validierung |
+| `docs/SETUP_BUGS.md` | Setup-Bug-Register: PostgreSQL-Init, Seed/UUID, Broker-Adapter, Build-Warnungen, API-Token, Validierung, PAPER_MODE-Default |
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
 | `docs/CHANGELOG.md` | Versionen und Änderungen (Keep a Changelog) |
 | `docs/SECURITY_AUDIT.md` | Konsolidierte Security-Architektur + Task-Audits |

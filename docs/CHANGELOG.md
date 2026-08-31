@@ -20,6 +20,68 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 
 ---
 
+## [1.33.1] — 2026-08-31 · fix(setup): PAPER-MODE-Default und WURZELURSACHE-Validierung (B7)
+
+**P0, trifft jede Neuinstallation.** `scripts/setup-cachyos.sh` schrieb den
+Alt-Wert `B` als `PAPER_MODE` in `.env` — ein Wert, den `parsePaperMode()`
+(`src/lib/marketdata/config.ts`) ablehnt (erlaubt: `synthetic |
+broker-market-data | broker-paper-api`). Die Engine warf beim Boot einen
+`PaperConfigError`, `GET /api/firm` antwortete 503 mit dem irreführenden
+Hinweis „PostgreSQL läuft?", und `validate-setup.sh` meldete zehn stille
+Folgefehler (V05–V17). Vollständiger Befund mit Symptom, Ursache, Fix und
+Nachweis: [`SETUP_BUGS.md`](SETUP_BUGS.md) (B7).
+
+### Fixed
+
+* **`scripts/setup-cachyos.sh`** — schreibt an beiden Stellen
+  `PAPER_MODE=broker-market-data` (Heredoc und `env_ensure_key`) statt des
+  Alt-Werts `B`. Bestehende `.env`-Dateien werden nicht still überschrieben
+  (`env_ensure_key` ergänzt nur fehlende Schlüssel). Reparatur einer
+  betroffenen Installation:
+  `sed -i 's/^PAPER_MODE=.*/PAPER_MODE=broker-market-data/' .env`, danach
+  Dienst neu starten.
+* **`scripts/validate-setup.sh`** — `.env`-Vorabprüfung für `PAPER_MODE`
+  **vor** jedem HTTP-Request: ungültiger Wert → lauter `WURZELURSACHE`-Block
+  (Exit 2). Zusätzlich erkennt die Validierung ein `{error, fix}`-Objekt von
+  `/api/firm` (503) und benennt die Ursache, statt V05–V17 als zehn stille
+  Folgefehler zu zählen; bei paperMode-Fehlern ersetzt sie den generischen
+  Route-Hinweis („PostgreSQL läuft?") durch die konkrete `.env`-Behebung.
+  Check V04 nennt `PAPER_MODE` als mögliche Ursache.
+
+### Changed
+
+* **`INSTALL.md`** — Flag-Tabelle `PAPER_MODE`: Default `broker-market-data`,
+  erlaubte Werte `synthetic`/`broker-market-data`/`broker-paper-api`;
+  `A`/`B`/`C` werden ausdrücklich als **nicht** akzeptiert dokumentiert.
+* **`docs/INSTALL.md`** — Troubleshooting-Zeile für
+  `EADDRINUSE 0.0.0.0:3369` (Port-Besitzer ermitteln, Prozess beenden,
+  Dienst neu starten).
+* **`docs/SETUP_BUGS.md`** — Befund B7; Übersichtstabelle und Status-Header
+  aktualisiert (B1–B7).
+* **`README.md` / `docs/README.md`** — Befund-Register-Verweise auf B1–B7
+  aktualisiert.
+
+### Migration
+
+Kein Schema-Bruch, keine Datenmigration. Bestehende Installationen, deren
+`.env` noch `PAPER_MODE=A|B|C` enthält, reparieren sich über einen erneuten
+Setup-Lauf **nicht** automatisch (der Wert ist bereits gesetzt) — einmalig:
+
+```bash
+sed -i 's/^PAPER_MODE=.*/PAPER_MODE=broker-market-data/' .env
+sudo systemctl restart ai-trading-firm
+./scripts/validate-setup.sh
+```
+
+Für Neuinstallationen gilt der korrigierte Default automatisch.
+
+### Links
+
+* Ticket: „Setup schreibt PAPER_MODE=B, den parsePaperMode() ablehnt (B7)“ ·
+  Befund: [SETUP_BUGS.md](SETUP_BUGS.md) · Referenz:
+  [PAPER_TRADING.md](PAPER_TRADING.md)
+
+
 ## [1.33.0] — 2026-08-31 · feat(ops): add market-data readiness panel to operations center
 
 **[OPS] Surface market-data readiness instead of six funnel zeros (OPS-011, P2)**

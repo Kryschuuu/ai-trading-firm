@@ -168,7 +168,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
-| `PAPER_MODE` | `B` | Paper-Modus `A` (synthetic) / `B` (echte Kurse) / `C` (broker-paper-api) |
+| `PAPER_MODE` | `broker-market-data` | Erlaubt: `synthetic` / `broker-market-data` / `broker-paper-api`. Die Kurzformen `A`/`B`/`C` werden **nicht** akzeptiert. |
 | `PAPER_MODE_C_ENABLED` | `false` | Schaltet Modus C frei (erfordert Venue-Capability) |
 | `PAPER_SIM_SEED` | deterministisch | Seed des Fill-Simulators |
 | `PAPER_SIM_LATENCY_MS` | — | simulierte Latenz |
