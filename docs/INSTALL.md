@@ -707,7 +707,7 @@ bestätigen. Mit `--dry-run` zeigt es jeden Befehl, führt aber nichts aus.
 Cluster-Fehler:** Sofort-Hilfe und alle Fehlerfälle stehen in
 **[docs/SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** — und
 im Dashboard unter `/api/docs?name=pgsetup`. Die Befund-Historie des Setup-Pfads
-(B1–B6) steht in **[SETUP_BUGS.md](SETUP_BUGS.md)**.
+(B1–B7) steht in **[SETUP_BUGS.md](SETUP_BUGS.md)**.
 
 ---
 
@@ -767,7 +767,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | Ollama nutzt die GPU nicht | gfx803 ist von ROCm nicht unterstützt | erwartetes Verhalten → Kapitel 8.3 (Vulkan) |
 | Modell antwortet mit Prosa statt JSON | zu kleines Modell / weicher Prompt | Handbuch Kapitel 6, oder eine Stufe größer wählen |
 | Position verschwindet nach Neustart | Positionen stehen auf `CLOSED` | `psql -c "SELECT status, count(*) FROM positions GROUP BY 1;"` |
-| Port 3369 belegt | anderer Dienst läuft | `PORT=3100 npm run start` |
+| Port 3369 belegt / **`EADDRINUSE 0.0.0.0:3369`** | ein anderer Prozess (z. B. ein manuell gestarteter Dienst) hält den Port | Besitzer ermitteln: `sudo ss -ltnp 'sport = :3369'`; den manuellen Prozess beenden (`sudo kill <PID>`) und `sudo systemctl restart ai-trading-firm` — oder bewusst einen anderen Port wählen: `PORT=3100 npm run start` |
 | **Validierung meldet `V16` fehlgeschlagen** | Short-Selling ist aus, `--expect-shorts` erwartet aber `true` | `--expect-shorts false` — oder aktivieren: `allowShort = 1` im Dashboard bzw. `INSERT … ON CONFLICT (key) DO UPDATE` auf `risk_config` |
 | **Validierung meldet `V08`–`V11` fehlgeschlagen** | Preset-Universum nicht geseedet | `npm run universe:seed:markets` |
 | **Validierung meldet `V18` fehlgeschlagen** | kein `FIRM_API_TOKEN` konfiguriert | Token in `.env` setzen und Dienst neu starten — sonst ist die API im LAN offen |

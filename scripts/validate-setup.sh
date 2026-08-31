@@ -37,6 +37,10 @@
 #   V17 Ceiling-Klemmung 90 % → 0.5               ← Fix: Prozent, nicht Bruch
 #   V18 API-Token-Schutz (401 ohne x-firm-token)
 #
+# Zusätzlich: eine .env-Vorabprüfung (PAPER_MODE) und ein WURZELURSACHE-Block
+# fangen Boot-Konfigurationsfehler ab, bevor sie als zehn stille Folgefehler
+# (V05–V17) erscheinen. Siehe docs/SETUP_BUGS.md, Befund B7.
+#
 # ── Bewertung ──────────────────────────────────────────────────────────────
 # Bestanden gilt ab `--min-pass` (Default 15) von 18. Einzelne Checks dürfen
 # aus dokumentierten Gründen fehlschlagen:
@@ -206,6 +210,21 @@ section() {
   printf '\n%s%s%s\n' "$C_CYAN" "$1" "$C_RESET" >&2
 }
 
+# ── WURZELURSACHE ───────────────────────────────────────────────────────────
+# Lauter, benannter Abbruch, wenn die Firm-API statt des Zustands ein
+# {error, fix}-Objekt liefert (z. B. ungültiger PAPER_MODE → PaperConfigError
+# beim Boot → 503). Ohne diesen Block wären V05–V17 zehn stille Folgefehler,
+# deren einzelne Behebungszeilen die Ursache verschleiern. Befund B7.
+wurzelursache() {
+  local error="${1:-}" fix="${2:-}"
+  printf '\n%s%sWURZELURSACHE%s\n' "$C_BOLD" "$C_RED" "$C_RESET" >&2
+  printf '  %s%s%s\n' "$C_RED" "$error" "$C_RESET" >&2
+  if [[ -n "$fix" ]]; then
+    printf '  %sBehebung:%s %s\n' "$C_DIM" "$C_RESET" "$fix" >&2
+  fi
+  printf '  %sV05–V17 sind Folgefehler und werden übersprungen, solange diese Ursache besteht.%s\n\n' "$C_DIM" "$C_RESET" >&2
+}
+
 # UUID-v4-Form (8-4-4-4-12 Hex). Genügt, um „null"/leer/Trümmer abzufangen —
 # die DB akzeptiert jede gültige UUID, der Fehler kam nie von der Version.
 looks_like_uuid() {
@@ -216,11 +235,49 @@ progress "$(printf '\n%sValidierung — %s%s' "$C_BOLD" "$BASE_URL" "$C_RESET")"
 progress "$(printf '  Soll: %s/18 Checks · Short-Selling erwartet: %s · Token: %s' \
   "$MIN_PASS" "$EXPECT_SHORTS" "$( [[ -n "${FIRM_API_TOKEN:-}" ]] && echo gesetzt || echo 'nicht gesetzt' )")"
 
+# ── .env-Vorabprüfung: PAPER_MODE (Befund B7) ──────────────────────────────
+# parsePaperMode() akzeptiert ausschließlich synthetic | broker-market-data |
+# broker-paper-api (src/lib/marketdata/config.ts). Ein Alt-Wert wie A/B/C
+# (v1.33.0 schrieb PAPER_MODE=B) lässt die Engine beim Boot werfen und
+# /api/firm mit 503 antworten — V05–V17 wären dann reine Folgefehler. Deshalb
+# hier der frühe, laute Abbruch mit WURZELURSACHE, noch vor jedem HTTP-Request.
+PAPER_MODE_VALID_RE='^(synthetic|broker-market-data|broker-paper-api)$'
+if [[ -f ".env" ]]; then
+  ENV_PAPER_MODE="$(sed -n 's/^PAPER_MODE=//p' .env | tail -1)"
+  ENV_PAPER_MODE="${ENV_PAPER_MODE%$'\r'}"
+  ENV_PAPER_MODE="${ENV_PAPER_MODE#\"}"; ENV_PAPER_MODE="${ENV_PAPER_MODE%\"}"
+  ENV_PAPER_MODE="${ENV_PAPER_MODE#\'}"; ENV_PAPER_MODE="${ENV_PAPER_MODE%\'}"
+  ENV_PAPER_MODE="$(printf '%s' "$ENV_PAPER_MODE" | tr -d '[:space:]')"
+  if [[ -n "$ENV_PAPER_MODE" ]] && [[ ! "${ENV_PAPER_MODE,,}" =~ $PAPER_MODE_VALID_RE ]]; then
+    wurzelursache \
+      "PAPER_MODE=${ENV_PAPER_MODE} wird von parsePaperMode() abgelehnt (erlaubt: synthetic | broker-market-data | broker-paper-api)." \
+      "sed -i 's/^PAPER_MODE=.*/PAPER_MODE=broker-market-data/' .env && sudo systemctl restart ai-trading-firm"
+    exit 2
+  fi
+fi
+
 # ── Zustandsdaten einmalig laden (ein Roundtrip statt 18) ───────────────────
 HEALTH="$(http_get "${BASE_URL}/api/health")"
 STATE="$(http_get "${BASE_URL}/api/firm")"
 BROKERS="$(http_get "${BASE_URL}/api/brokers")"
 LIVE="$(http_get "${BASE_URL}/api/live/state")"
+
+# ── WURZELURSACHE-Erkennung (Befund B7) ─────────────────────────────────────
+# /api/firm liefert bei einem Boot-Fehler (z. B. PAPER_MODE=A/B/C) statt des
+# Firmenzustands {ok:false, error, fix} mit HTTP 503. Die Folge-Checks
+# (V05–V17) wären dann nur Folgefehler. Hier wird die Ursache benannt und
+# abgebrochen, statt zehn stille Fehlchecks zu produzieren.
+FIRM_ERROR="$(jqr '.error // empty' "$STATE")"
+FIRM_FIX="$(jqr '.fix // empty' "$STATE")"
+if [[ -n "$FIRM_ERROR" && "$FIRM_ERROR" != "null" ]]; then
+  # paperMode-Fehler bekommen die konkrete .env-Behebung statt des generischen
+  # Route-Hinweises („PostgreSQL läuft?").
+  if [[ "$FIRM_ERROR" =~ paperMode|PAPER_MODE|broker-market-data|broker-paper-api ]]; then
+    FIRM_FIX="sed -i 's/^PAPER_MODE=.*/PAPER_MODE=broker-market-data/' .env && sudo systemctl restart ai-trading-firm"
+  fi
+  wurzelursache "$FIRM_ERROR" "$FIRM_FIX"
+  exit 2
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. Dienst & Schema"
@@ -247,7 +304,7 @@ check "V03" "Version konsistent (package.json ${PKG_VERSION:-?} = API ${APP_VERS
   version_matches
 
 check "V04" "Firmenzustand abrufbar (GET /api/firm)" \
-  "PostgreSQL erreichbar? DATABASE_URL in .env korrekt? Logs: journalctl -u ai-trading-firm -n 50" \
+  "PostgreSQL erreichbar? DATABASE_URL in .env korrekt? PAPER_MODE gültig (synthetic | broker-market-data | broker-paper-api)? Logs: journalctl -u ai-trading-firm -n 50" \
   http_get_ok "${BASE_URL}/api/firm"
 
 # ─────────────────────────────────────────────────────────────────────────────

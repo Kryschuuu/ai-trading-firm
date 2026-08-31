@@ -872,7 +872,9 @@ UNIVERSE_DATA_DIR=data/universe
 MARKET_SYNC_ENABLED=true
 
 # --- Paper-Trading ---------------------------------------------------------
-PAPER_MODE=B
+# Erlaubt: synthetic | broker-market-data | broker-paper-api (parsePaperMode()).
+# A/B/C werden NICHT akzeptiert (Befund B7 in docs/SETUP_BUGS.md).
+PAPER_MODE=broker-market-data
 PAPER_STATIC_FALLBACK=false
 ENV
     ok ".env neu geschrieben."
@@ -888,7 +890,7 @@ ENV
     env_ensure_key "OLLAMA_BASE_URL"   "http://${LLM_HOST}:11434"      "$env_file" && added=$((added+1))
     env_ensure_key "UNIVERSE_DATA_DIR" "data/universe"                 "$env_file" && added=$((added+1))
     env_ensure_key "MARKET_SYNC_ENABLED" "true"                        "$env_file" && added=$((added+1))
-    env_ensure_key "PAPER_MODE"        "B"                             "$env_file" && added=$((added+1))
+    env_ensure_key "PAPER_MODE"        "broker-market-data"            "$env_file" && added=$((added+1))
     if [[ -n "$API_TOKEN" ]]; then
       env_ensure_key "FIRM_API_TOKEN"  "$API_TOKEN"                    "$env_file" && added=$((added+1))
     fi

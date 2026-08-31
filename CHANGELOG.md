@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.33.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.33.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,35 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.33.1] — 2026-08-31 · fix(setup): PAPER-MODE-Default und WURZELURSACHE-Validierung (B7)
+
+**P0, trifft jede Neuinstallation.** `scripts/setup-cachyos.sh` schrieb
+`PAPER_MODE=B` in `.env` — ein Wert, den `parsePaperMode()` ablehnt
+(erlaubt: `synthetic | broker-market-data | broker-paper-api`). Die Engine
+warf beim Boot einen `PaperConfigError`, `/api/firm` antwortete 503 mit dem
+irreführenden Hinweis „PostgreSQL läuft?", und `validate-setup.sh` meldete
+zehn stille Folgefehler (V05–V17). Befund B7:
+[`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md).
+
+* **Setup:** `scripts/setup-cachyos.sh` schreibt an beiden Stellen
+  `broker-market-data` (dokumentierter Produktions-Default). Bestehende
+  `.env`-Dateien bleiben unangetastet (`env_ensure_key` ergänzt nur fehlende
+  Schlüssel).
+* **Validierung:** `scripts/validate-setup.sh` prüft `PAPER_MODE` aus
+  `./.env` **vor** jedem HTTP-Request und bricht bei ungültigem Wert mit
+  einem lauten `WURZELURSACHE`-Block ab (Exit 2). Zusätzlich erkennt es ein
+  `{error, fix}`-Objekt von `/api/firm` (503) und benennt die Ursache statt
+  zehn stille Fehlchecks; bei paperMode-Fehlern ersetzt es den generischen
+  Route-Hinweis durch die konkrete `.env`-Behebung. Check V04 nennt
+  `PAPER_MODE` als mögliche Ursache.
+* **Doku:** `INSTALL.md` (Flag-Tabelle: `A`/`B`/`C` werden nicht akzeptiert),
+  `docs/SETUP_BUGS.md` (B7), `docs/INSTALL.md` (Troubleshooting
+  `EADDRINUSE 0.0.0.0:3369`).
+* Version **1.33.1**. Kein Schema-Bruch, keine Datenmigration.
+
+Details: [docs/CHANGELOG.md](docs/CHANGELOG.md#1331---2026-08-31--fixsetup-paper-mode-default-und-wurzelursache-validierung-b7)
+
 
 ## [1.33.0] — 2026-08-31 · feat(ops): add market-data readiness panel to operations center
 

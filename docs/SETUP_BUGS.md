@@ -1,8 +1,9 @@
 # Setup-Bug-Register — `scripts/setup-cachyos.sh`
 
-**Stand:** v1.30.0 · **Datum:** 2026-08-31 · **Status:** alle Befunde behoben
+**Stand:** v1.33.1 · **Datum:** 2026-08-31 · **Status:** alle Befunde behoben (B1–B7)
 **Betroffene Dateien:** `scripts/setup-cachyos.sh`, `scripts/validate-setup.sh`,
-`src/lib/appPaths.ts`, `src/universe/presets.ts`
+`src/lib/appPaths.ts`, `src/universe/presets.ts`, `src/lib/marketdata/config.ts`
+(Referenz für die akzeptierten `PAPER_MODE`-Werte)
 
 Dieses Dokument ist die verbindliche Befund-/Fix-Liste des Setup-Pfads. Es
 ersetzt die formlose Notizsammlung „bugs start script.md“, die nie versioniert
@@ -24,6 +25,7 @@ ist).
 | B4 | Build | mittel | 12 Turbopack-Warnungen „Dynamic filesystem access" | behoben |
 | B5 | API-Sicherheit | hoch | offener LAN-Betrieb ohne Token; falsch geprüfte Ceiling-Klemmung | behoben |
 | B6 | Validierung | hoch | kein reproduzierbarer Abnahme-Check; Smoke-Test zu langsam | behoben |
+| B7 | PAPER_MODE-Default | kritisch | Setup schreibt `PAPER_MODE=B` → `parsePaperMode()` lehnt ab → `/api/firm` 503 mit irreführendem Hinweis; zehn stille Folgefehler | behoben |
 
 ---
 
@@ -308,7 +310,60 @@ Einzelne Checks dürfen aus nachvollziehbaren Gründen fehlschlagen:
 
 ---
 
-## 8. Neue Markt-Konfiguration (v1.30.0)
+## 8. B7 — `PAPER_MODE`-Default ungültig (Setup schreibt `B`)
+
+### Symptom
+
+* Frische Installation: `curl -s localhost:3369/api/firm` antwortet mit
+  HTTP 503 und `Dashboard-Daten nicht verfügbar: Ungültiger paperMode "b".
+  Erlaubt: synthetic | broker-market-data | broker-paper-api.` — dazu der
+  irreführende Hinweis `PostgreSQL läuft? DATABASE_URL korrekt?`, obwohl
+  PostgreSQL lief und das Schema bereit war.
+* `./scripts/validate-setup.sh` meldete **zehn stille Folgefehler**
+  (V05–V17), statt die eine Ursache zu benennen.
+* Betroffen: **jede Neuinstallation**, da der Setup-Default den Alt-Wert `B`
+  in `.env` schrieb.
+
+### Ursache
+
+`scripts/setup-cachyos.sh` schrieb an zwei Stellen den Alt-Wert `B`
+(`PAPER_MODE=B` im `.env`-Heredoc und `env_ensure_key "PAPER_MODE" "B"`).
+`parsePaperMode()` (`src/lib/marketdata/config.ts:75-76`) akzeptiert
+ausschließlich `synthetic | broker-market-data | broker-paper-api` und wirft
+bei `B` einen `PaperConfigError`. Der Fehler entsteht beim Boot in
+`getBroker()`; `GET /api/firm` fängt ihn als 503 mit generischem Hinweis ab —
+die eigentliche Ursache (ungültiger `PAPER_MODE`) blieb dadurch unsichtbar,
+und die Validierung zählte V05–V17 als unabhängige Fehler.
+
+### Fix
+
+* `scripts/setup-cachyos.sh` schreibt an beiden Stellen
+  `broker-market-data` (der dokumentierte Produktions-Default). Bestehende
+  `.env`-Dateien werden nicht still überschrieben — `env_ensure_key` ergänzt
+  nur fehlende Schlüssel. Reparatur einer betroffenen `.env`:
+  `sed -i 's/^PAPER_MODE=.*/PAPER_MODE=broker-market-data/' .env`, dann
+  Dienst neu starten.
+* `scripts/validate-setup.sh` prüft `PAPER_MODE` aus `./.env` **vor** jedem
+  HTTP-Request und bricht bei ungültigem Wert mit einem lauten
+  `WURZELURSACHE`-Block ab (Exit 2). Zusätzlich erkennt die Validierung ein
+  `{error, fix}`-Objekt von `/api/firm` (503) und benennt die Ursache, statt
+  V05–V17 als zehn stille Folgefehler zu zählen. Bei paperMode-Fehlern wird
+  der generische Route-Hinweis durch die konkrete `.env`-Behebung ersetzt.
+* Flag-Referenz `INSTALL.md` dokumentiert die erlaubten Werte und dass
+  `A`/`B`/`C` **nicht** akzeptiert werden.
+
+### Nachweis
+
+* `scripts/setup-cachyos.sh` enthält nur noch
+  `PAPER_MODE=broker-market-data` (2 Stellen); `bash -n` bleibt grün.
+* `validate-setup.sh` mit `PAPER_MODE=B` in `./.env` → Exit 2 mit
+  `WURZELURSACHE: PAPER_MODE=B wird von parsePaperMode() abgelehnt …`.
+* `tests/marketdata.modes.test.ts` bleibt grün (bestehende Coverage für
+  `parsePaperMode()`).
+
+---
+
+## 9. Neue Markt-Konfiguration (v1.30.0)
 
 `src/universe/presets.ts` definiert vier kuratierte, deterministische Presets;
 `scripts/seed-market-universe.ts` (`npm run universe:seed:markets`) schreibt sie
@@ -341,7 +396,7 @@ die operative Freigabe ist ausschließlich `riskLimits.allowShort`.
 
 ---
 
-## 9. Verwandte Dokumente
+## 10. Verwandte Dokumente
 
 * [`SETUP_PG_TROUBLESHOOTING.md`](SETUP_PG_TROUBLESHOOTING.md) —
   PostgreSQL-Soforthilfe (Abschnitte 1–6)
