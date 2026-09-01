@@ -277,7 +277,10 @@ test("Live-Gate OFFEN: placeOrder/getAccount/getPositions nutzen die Broker-Engi
 
   const acct = await adapter.getAccount();
   assert.equal(acct.equity, 99999, "Live-Account muss Broker-Daten liefern, nicht Paper-Equity 10000");
-  assert.equal(calls.getAccount, 1, "Live-Account muss den Private-Client treffen");
+  // >= 1: die Guardrail-Vorprüfung in BrokerExecutionEngine.submit ruft das
+  // Konto (Equity/Positionen) zusätzlich ab — geprüft bleibt, dass der
+  // Private-Client (nicht das Paper-Ledger) die Quelle ist.
+  assert.ok(calls.getAccount >= 1, "Live-Account muss den Private-Client treffen");
 
   const pos = await adapter.getPositions();
   assert.equal(pos.length, 1);

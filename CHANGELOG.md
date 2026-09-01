@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.35.0**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-01** ·
+> Code-Version **1.35.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,21 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.35.1] — 2026-09-01 · fix(broker): Sicherheits-Härtung des Bitunix-Live-Pfads
+
+Vier Lücken aus dem Broker-Audit geschlossen (Details: `docs/CHANGELOG.md`):
+Kill-Switch + Code-Guardrails jetzt **unmittelbar vor jeder Live-Order** in der
+`BrokerExecutionEngine` (fail-closed gegen die echte Konto-Equity); kein
+Transport-Retry mehr für den nicht-idempotenten `place_order`-POST
+(Doppel-Order-Gefahr, nur 429 bleibt Retry-fähig); der zentrale
+Live-Gate-Enforcer prüft zusätzlich den prozessweiten Not-Halt
+`/api/firm/kill` — der Firmen-Kill-Knopf stoppt damit auch Live-Orders;
+`credentialStatus()` meldet Rechte nur noch verifiziert
+(`configured`/`connected`/`permissionsVerified`, ohne `verify` keine
+Rechte-Behauptung) und die Logger-Redaction wird deterministisch mit dem
+Credential-Laden befüllt. 7 neue Regressionstests
+(`tests/bitunix.security.test.ts`).
 
 ## [1.35.0] — 2026-08-31 · feat(workshop): Missions-Baukasten — Markt-Scans, Segmente, Vorlagen
 

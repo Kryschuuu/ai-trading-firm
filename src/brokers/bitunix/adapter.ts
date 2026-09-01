@@ -42,7 +42,7 @@ import { BitunixPublicClient, mapTicker } from "./publicClient";
 import { BitunixPrivateClient } from "./privateClient";
 import { BitunixPaperLedger } from "./paper";
 import { BrokerExecutionEngine, PaperExecutionEngine, type ExecutionPort } from "./execution";
-import { createDefaultBitunixSecretStore, loadBitunixCredentials, type SecretStore } from "./secrets";
+import { createDefaultBitunixSecretStore, loadBitunixCredentials, type BitunixCredentials, type SecretStore } from "./secrets";
 import { createBitunixLogger, type BitunixLogger } from "./redactor";
 import { BitunixPublicWs } from "./ws";
 import type { BitunixCredentialStatus } from "./types";
@@ -91,13 +91,21 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
   private privateClientOverride?: BitunixPrivateClient;
   /** Cache der Modus-spezifischen Ausführungs-Engine (Paper- oder Broker-Port). */
   private brokerEngine: BrokerExecutionEngine | null = null;
+  /**
+   * Deterministische Redaction-Quelle des Loggers: Sobald Credentials über
+   * `loadCreds()` in den Prozess geladen werden, stehen sie SOFORT in dieser
+   * Maskierliste — kein Fire-and-Forget-Fenster, in dem nur die musterbasierte
+   * Redaction greift. Vor dem ersten Laden existieren die Klartexte im
+   * Adapter ohnehin nicht.
+   */
+  private readonly redactionSecrets: string[] = [];
 
   constructor(mode: ExecutionMode = "paper", deps: BitunixAdapterDeps = {}) {
     this.mode = mode;
     this.env = deps.env ?? process.env;
     this.cfg = deps.config ?? loadBitunixConfig(this.env);
     this.secrets = deps.secretStore ?? createDefaultBitunixSecretStore(this.env);
-    this.logger = deps.logger ?? createBitunixLogger(asyncSecrets(this.secrets));
+    this.logger = deps.logger ?? createBitunixLogger(() => this.redactionSecrets.filter(Boolean));
     this.public =
       deps.publicClient ??
       new BitunixPublicClient({
@@ -115,15 +123,53 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     this.privateClientOverride = deps.privateClient;
   }
 
-  /** Frontend-sichere Projektion — niemals Secrets. */
-  async credentialStatus(): Promise<BitunixCredentialStatus> {
+  /**
+   * Zentraler Credential-Lader: einziger Weg, auf dem Klartext-Credentials in
+   * den Adapter gelangen. Befüllt SYNCHRON mit dem Laden die Redaction-Liste
+   * des Loggers (deterministisch — kein Race gegen ein Fire-and-Forget-Promise).
+   */
+  private async loadCreds(): Promise<BitunixCredentials | null> {
     const creds = await loadBitunixCredentials(this.secrets);
-    return {
-      connected: Boolean(creds) && this.cfg.enabled,
-      permissions: creds ? ["READ", "TRADE"] : [],
+    if (creds) {
+      this.redactionSecrets[0] = creds.apiKey;
+      this.redactionSecrets[1] = creds.apiSecret;
+    }
+    return creds;
+  }
+
+  /**
+   * Frontend-sichere Projektion — niemals Secrets.
+   *
+   * Ehrliche Semantik (statt der früheren Behauptung `permissions:
+   * ["READ","TRADE"]` allein aus der Existenz von Credentials):
+   *   - `configured`            Credentials hinterlegt + Adapter aktiviert.
+   *   - `connected`             nur true, wenn `verify` einen echten
+   *                             (read-only) Konto-Abruf erfolgreich gemacht hat.
+   *   - `permissions`           nur belegte Rechte. Ohne `verify` leer; mit
+   *                             `verify` maximal READ — Bitunix' Account-
+   *                             Antwort weist keine Handelsberechtigung aus,
+   *                             TRADE ließe sich nur per echter Order beweisen.
+   *   - `permissionsVerified`   true = geprüft statt angenommen.
+   */
+  async credentialStatus(opts?: { verify?: boolean }): Promise<BitunixCredentialStatus> {
+    const creds = await this.loadCreds();
+    const base: BitunixCredentialStatus = {
+      configured: Boolean(creds) && this.cfg.enabled,
+      connected: false,
+      permissions: [],
+      permissionsVerified: false,
       liveEnabled: false,
       bitunixEnabled: this.cfg.enabled,
     };
+    if (!opts?.verify || !creds || !this.cfg.enabled) return base;
+    try {
+      const client = await this.privateClient();
+      await client.getAccount();
+      return { ...base, connected: true, permissions: ["READ"], permissionsVerified: true };
+    } catch {
+      // Fail-closed: kein Recht wird gemeldet, das nicht belegt ist.
+      return base;
+    }
   }
 
   async healthCheck(opts?: { remote?: boolean }): Promise<BrokerHealth> {
@@ -133,8 +179,10 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     const details: Record<string, unknown> = {
       implemented: true,
       bitunixEnabled: status.bitunixEnabled,
+      configured: status.configured,
       connected: status.connected,
       permissions: status.permissions,
+      permissionsVerified: status.permissionsVerified,
       liveEnabled: false,
       paperSimulated: true,
       stopAtVenue: true,
@@ -277,7 +325,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
    */
   async privateClient(): Promise<BitunixPrivateClient> {
     if (this.privateClientOverride) return this.privateClientOverride;
-    const creds = await loadBitunixCredentials(this.secrets);
+    const creds = await this.loadCreds();
     if (!creds) {
       throw new NotSupportedCapabilityError(this.id, "trading", "privateClient", "Keine Bitunix-Credentials (Env-Fallback).");
     }
@@ -333,15 +381,4 @@ function tryRegistry(): InstrumentRegistry | undefined {
   } catch {
     return undefined;
   }
-}
-
-function asyncSecrets(store: SecretStore): () => readonly string[] {
-  const cache: string[] = [];
-  void store.get("BITUNIX_API_KEY").then((v) => {
-    if (v) cache[0] = v;
-  });
-  void store.get("BITUNIX_API_SECRET").then((v) => {
-    if (v) cache[1] = v;
-  });
-  return () => cache.filter(Boolean);
 }
