@@ -16,7 +16,7 @@ import HitRatePanel from "./HitRatePanel";
 export type WorkshopStep = "missions" | "run" | "prompt" | "hitrate";
 
 const steps: { id: WorkshopStep; label: string; hint: string }[] = [
-  { id: "missions", label: "1 · Mission anlegen", hint: "Handbuch 5.1–5.3 — Auftrag definieren, bevor irgendein Agent läuft." },
+  { id: "missions", label: "1 · Mission anlegen", hint: "Handbuch 5.1–5.4 — Vorlage übernehmen, Missions-Typ wählen (Einzel-Symbol oder Markt-Scan), Auftrag definieren, bevor irgendein Agent läuft." },
   { id: "run", label: "2 · Agent ausführen", hint: "Handbuch 6.2 — einen Agenten einzeln laufen lassen und die Rohantwort prüfen." },
   { id: "prompt", label: "3 · Prompt iterieren", hint: "Handbuch 6.3 — genau eine Sache am Prompt ändern, wirkt sofort." },
   { id: "hitrate", label: "4 · Trefferquote", hint: "Handbuch 6.4 — Testschleife starten und die Verteilung zählen." },
@@ -46,8 +46,9 @@ export default function WorkshopTab({
       <div className="rounded-xl border border-sky-800/50 bg-sky-500/5 px-4 py-3">
         <h2 className="text-sm font-bold text-sky-300">🛠 Workshop — Missionen &amp; Prompts ohne Terminal</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-400">
-          Alles aus Handbuch Kapitel 5 und 6 als Oberfläche: Missionen anlegen, einen Agenten
-          einzeln prüfen, Prompts iterieren, Trefferquote messen. Die Schleife bleibt wie in 6.1:{" "}
+          Alles aus Handbuch Kapitel 5 und 6 als Oberfläche: Missionen aus Vorlagen anlegen
+          (Einzel-Symbol oder Markt-Scan über ein Segment), einen Agenten einzeln prüfen, Prompts
+          iterieren, Trefferquote messen. Die Schleife bleibt wie in 6.1:{" "}
           <span className="text-slate-200">ein Agent pro Test, eine Änderung pro Iteration.</span>{" "}
           Guardrails sind bewusst nicht von hier änderbar — sie leben im Code (Risk-&amp;-Guardrails-Tab).
         </p>

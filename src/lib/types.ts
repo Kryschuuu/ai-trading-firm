@@ -26,7 +26,19 @@ export interface MissionRow {
   id: string;
   title: string;
   objective: string;
+  /** Einzel-Symbol bei `scope = "SINGLE_SYMBOL"`, sonst `null`. */
   symbol: string | null;
+  /**
+   * Missions-Typ (v1.35.0): `"SINGLE_SYMBOL"` (ein Instrument) oder
+   * `"SCAN_UNIVERSE"` (ein Marktsegment wird gescannt). Alt-Zeilen liefern den
+   * DB-Default `"SINGLE_SYMBOL"`; ältere Frontends ohne das Feld behandeln es
+   * als `"SINGLE_SYMBOL"`.
+   */
+  scope?: string | null;
+  /** Marktsegment bei `scope = "SCAN_UNIVERSE"` (z. B. `ALL`, `INDICES`, `PENNY`). */
+  segment?: string | null;
+  /** Vorlagen-Slug, aus dem die Mission entstanden ist (reine Herkunft). */
+  templateId?: string | null;
   /** numeric → kommt als String aus Postgres. */
   riskBudget: string;
   maxPositionPct: string;
@@ -34,6 +46,61 @@ export interface MissionRow {
   status: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Missions-Typ in Klartext (GET /api/firm/missions → `scopes`). */
+export interface MissionScopeDto {
+  /** `SINGLE_SYMBOL` | `SCAN_UNIVERSE`. */
+  id: string;
+  /** Deutsche Bezeichnung für Auswahllisten. */
+  label: string;
+}
+
+/**
+ * Marktsegment in Klartext (GET /api/firm/missions → `segments`).
+ *
+ * Spiegel von `missionSegmentDto()` plus `instrumentCount`: die aktuell in der
+ * Instrument-Registry gefundenen Instrumente. `0` bedeutet „Daten fehlen“
+ * (`npm run universe:seed:markets` / `npm run market:sync`), nicht „keine
+ * Chance“ — die UI zeigt den Hinweis direkt am Segment.
+ */
+export interface MissionSegmentDto {
+  id: string;
+  label: string;
+  emoji: string;
+  short: string;
+  description: string;
+  rule: string;
+  maxCandidates: number;
+  suggestedRiskBudget: number;
+  suggestedMaxPositionPct: number;
+  runtimeFilterNote: string | null;
+  help: { kurzinfo: string; technischeInfo: string; risiko: string };
+  instrumentCount: number;
+}
+
+/** Wiederverwendbare Missions-Vorlage (GET /api/firm/missions → `templates`). */
+export interface MissionTemplateDto {
+  id: string;
+  name: string;
+  category: string;
+  categoryLabel: string;
+  scope: string;
+  scopeLabel: string;
+  segment: string | null;
+  segmentLabel: string | null;
+  symbol: string | null;
+  title: string;
+  objective: string;
+  riskBudget: number;
+  maxPositionPct: number;
+  riskProfile: string;
+  riskProfileLabel: string;
+  riskProfileHint: string;
+  seeded: boolean;
+  why: string;
+  successCriteria: string;
+  help: { kurzinfo: string; technischeInfo: string; risiko: string };
 }
 
 /** Entscheidung eines Agenten (engine.ts AgentDecision). */
@@ -223,11 +290,20 @@ export interface LogResponse {
 export interface MissionsIndexResponse {
   ok: boolean;
   missions: MissionRow[];
+  /** Handelsbare Einzel-Symbole des Paper-Brokers. */
   symbols: string[];
   limits: {
     riskBudget: [number, number];
     maxPositionPct: [number, number];
   };
+  /** Missions-Typen (v1.35.0). */
+  scopes?: MissionScopeDto[];
+  /** Marktsegmente inklusive aktueller Kandidatenzahl (v1.35.0). */
+  segments?: MissionSegmentDto[];
+  /** Allowlist der Segment-IDs (v1.35.0). */
+  segmentIds?: string[];
+  /** Wiederverwendbare Vorlagen (v1.35.0). */
+  templates?: MissionTemplateDto[];
 }
 
 /** Response von POST/PUT /api/firm/missions. */

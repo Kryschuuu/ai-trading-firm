@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
+import { missionScopeLabel } from "@/lib/missionTemplates";
 import WorkshopTab from "./workshop/WorkshopTab";
 import BrokersPanel from "./control-plane/BrokersPanel";
 import OperationsCenterPanel from "./ops/OperationsCenterPanel";
@@ -581,14 +582,17 @@ function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: a
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Missions</h2>
         <Table
-          head={["Titel", "Ziel", "Symbol", "Risikobudget", "Status"]}
+          head={["Titel", "Ziel", "Symbol / Segment", "Risikobudget", "Status"]}
           rows={data.missions.map((m) => [
             <span key={m.id} className="font-semibold text-slate-200">{m.title}</span>,
             // Auf Wortgrenze gekürzt, vollständiger Text im Tooltip — kein harter Schnitt mitten im Wort.
             <span key={`${m.id}-objective`} title={m.objective} className="block max-w-xl">
               {firstSentence(m.objective, 120)}
             </span>,
-            m.symbol ?? "—",
+            // Missions-Typ (v1.35.0): Einzel-Symbol oder „Markt-Scan: <Segment>“.
+            <span key={`${m.id}-scope`} title={m.symbol ?? missionScopeLabel(m)}>
+              {missionScopeLabel(m)}
+            </span>,
             `${(Number(m.riskBudget) * 100).toFixed(0)} %`,
             m.status,
           ])}

@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-08-31** ·
-> Code-Version **1.34.0**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.35.0**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,39 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.35.0] — 2026-08-31 · feat(workshop): Missions-Baukasten — Markt-Scans, Segmente, Vorlagen
+
+**Missionen können jetzt mehr als ein Symbol.** Aufträge wie „scanne alle
+Märkte“, „nur Penny Stocks“ oder „nur Indizes“ waren bisher nicht ausdrückbar:
+Multi-Asset-Mandate standen mit `symbol = NULL` in der Datenbank und die Engine
+riet (`mission.symbol ?? "SPY"`). Neu sind Missions-Typen, Marktsegmente,
+wiederverwendbare Vorlagen und eine Mandatsprüfung — plus 10 weitere
+Standard-Missionen (insgesamt **14** nach der Installation).
+
+* **Missions-Typ (`missions.scope`):** `SINGLE_SYMBOL` (ein Instrument, Verhalten
+  unverändert) oder `SCAN_UNIVERSE` (ein Marktsegment wird gescannt).
+* **Neun Marktsegmente (`missions.segment`):** `ALL`, `INDICES`, `CRYPTO`,
+  `EQUITIES`, `FX`, `COMMODITIES`, `PENNY`, `VOLATILE`, `LIQUID` — Kandidaten
+  kommen zur Laufzeit aus der Instrument-Registry (`src/lib/missionUniverse.ts`),
+  nie aus einer kopierten Liste.
+* **18 Vorlagen** (`src/lib/missionTemplates.ts`), davon 14 im Seed: Titel,
+  prüfbarer Zieltext, Budgets, Risikoprofil, SQL-prüfbares Erfolgskriterium und
+  Drei-Ebenen-Hilfe. `POST /api/firm/missions {"templateId":"…"}` legt eine
+  komplette Mission an; eigene Angaben gewinnen.
+* **Mandatsprüfung in der Engine:** `TRADE` außerhalb der Kandidatenliste →
+  `BLOCKED` + `ORDER_REJECTED`/`MISSION_SCOPE_VIOLATION`; leeres Segment →
+  `MISSION_SCOPE_EMPTY` (fail-closed). Beide Fälle erscheinen im Trace als
+  Schritt **MISSIONS-MANDAT**.
+* **Workshop-UI:** Vorlagen-Auswahl (gruppiert, mit Filter „nur mitinstallierte“),
+  Radiogruppe Missions-Typ, Segment-Auswahl mit live gezählten Kandidaten,
+  Drei-Ebenen-Hilfe als Tooltip und Aufklapper, Missionsliste mit Typ-Badge.
+* **Doku:** [`docs/MISSIONS.md`](docs/MISSIONS.md) (neu, im Doku-Katalog
+  registriert), Handbuch 5.1/5.4, `docs/help/workshop.help.json` (16 Begriffe),
+  Installations-Checkliste (14 Missionen).
+* **Migration:** `npx drizzle-kit push` ergänzt `missions.scope` (Default
+  `SINGLE_SYMBOL`), `.segment`, `.template_id`; `POST /api/seed` trägt bei
+  Alt-Mandaten ohne Symbol den Missions-Typ nach (`missionsMigrated`).
 
 ## [1.34.0] — 2026-08-31 · feat(install): geführtes Windows-Setup mit PowerShell
 

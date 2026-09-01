@@ -40,6 +40,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
 | **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)** | Vollständige Windows-Installation mit PowerShell-One-Liner, PostgreSQL, Ollama und Workarounds |
 | **[SETUP_BUGS.md](SETUP_BUGS.md)** | Setup-Bug-Register: PostgreSQL-Init, Seed/UUID, Broker-Adapter, Build-Warnungen, API-Token, 18-Check-Validierung, PAPER_MODE-Default (B1–B7) |
+| **[MISSIONS.md](MISSIONS.md)** | Missionen, Markt-Scans & Vorlagen: Missions-Typen, neun Marktsegmente, 18 Vorlagen (14 im Seed), Mandatsprüfung (v1.35.0) |
 | **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting, Agenten-Register |
 | **[CHANGELOG.md](CHANGELOG.md)** | Versionen, Bugfixes und Änderungen je Release |
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
@@ -47,7 +48,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.34.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.35.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -275,7 +276,9 @@ der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FAL
         ├── ruleService.ts        ← Regel-Persistenz, Versionierung, Rollback (neu, LLM-frei)
         ├── microExecutor.ts      ← Mikro-Zyklus: Feeds, Cache, Hot-Path (neu, LLM-frei)
         ├── macroCycle.ts         ← Makro-Zyklus: CEO+Research erzeugen Regeln (neu)
-        └── workshop.ts           ← Workshop-Validierung: Missionen/Prompts, Trefferquote
+        ├── workshop.ts           ← Workshop-Validierung: Missionen/Prompts, Trefferquote
+        ├── missionTemplates.ts   ← Missions-Typen, 9 Marktsegmente, 18 Vorlagen (v1.35)
+        └── missionUniverse.ts    ← Segment → Kandidaten aus der Registry, Mandatsprüfung (v1.35)
 ```
 
 **Die zwölf Agenten** (von `seed.ts`): Kern-Pipeline Lex (CEO), Rhea
@@ -333,7 +336,7 @@ Risikolimits folgen einer **Kaskade** (`src/lib/riskGuard.ts` +
 | `PUT` | `/api/firm/config` | Laufzeit-Limit ändern (Limits + Volatilitäts-Parameter `adp.*`, geklemmt) |
 | `GET` | `/api/firm/risk/volatility` | Adaptives Risk-System: Regime, wirksames maxRiskPerTrade, Indikatoren, Trigger-Event-Historie |
 | `POST` | `/api/firm/risk/volatility` | `{force:true}` — Volatilitäts-Neubewertung sofort erzwingen |
-| `GET/POST/PUT` | `/api/firm/missions` | Missionen lesen/anlegen/bearbeiten (Workshop; Budgets gegen Code-Ceilings) |
+| `GET/POST/PUT` | `/api/firm/missions` | Missionen lesen/anlegen/bearbeiten (Workshop; Missions-Typ + Segment + Vorlagen, Budgets gegen Code-Ceilings) |
 | `PUT` | `/api/firm/agents` | `system_prompt` eines Agenten ändern — wirken sofort, Guardrails unberührt |
 | `GET/POST` | `/api/firm/rules` | Regelwerk (alle Versionen + Feedback) lesen bzw. validierte Regel anlegen (DRAFT) |
 | `POST` | `/api/firm/rules/[id]` | `activate` / `pause` / `archive` / `rollback` / `reject` einer Regel-Version |

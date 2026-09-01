@@ -21,6 +21,128 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 ---
 
 
+## [1.35.0] — 2026-08-31 · feat(workshop): Missions-Baukasten — Markt-Scans, Segmente, Vorlagen
+
+**Ausgangslage.** Eine Mission hatte genau ein Symbol (`missions.symbol`).
+Aufträge wie „scanne alle Märkte“, „nur Penny Stocks“ oder „nur Indizes“ ließen
+sich nicht ausdrücken: Die beiden Multi-Asset-Mandate des Seeds standen mit
+`symbol = NULL` in der Datenbank, die Engine musste raten
+(`mission.symbol ?? "SPY"`), und die UI bot kein Feld dafür an. Es gab keine
+Vorlagen — jede Mission entstand als Freitext.
+
+### Added
+
+* **Missions-Typ (`MissionScope`)** — `src/lib/missionTemplates.ts`:
+  `SINGLE_SYMBOL` (Symbol Pflicht, Verhalten exakt wie vor 1.35.0) und
+  `SCAN_UNIVERSE` (Segment Pflicht). Persistiert in der neuen Spalte
+  `missions.scope` mit Default `SINGLE_SYMBOL`.
+* **Neun Marktsegmente** — `ALL`, `INDICES`, `CRYPTO`, `EQUITIES`, `FX`,
+  `COMMODITIES`, `PENNY`, `VOLATILE`, `LIQUID`. Jedes Segment besteht aus einer
+  `InstrumentQuery` für die Registry plus optionalem Zusatzfilter, einer
+  menschenlesbaren `rule` (identisch im Prompt), einer Kandidaten-Obergrenze
+  (8–12), Risikovorschlägen innerhalb der Code-Deckel und Drei-Ebenen-Hilfe.
+  Neue Spalte `missions.segment`.
+* **Missions-Universum** — `src/lib/missionUniverse.ts`:
+  `resolveSegmentInstruments()` (Registry-Query + Filter),
+  `rankCandidateSymbols()` (kanonisieren, Venue-Duplikate zusammenfassen mit
+  Vorrang für den PAPER-Spiegel, Sortierung nach 24h-Volumen, Kürzung),
+  `missionUniverseContext()` (Kandidaten, Fokus-Symbol, Prompt-Zeilen,
+  Diagnose), `isSymbolInMissionScope()`, `segmentCandidateCounts()`.
+* **Mandatsprüfung in der Engine** (`src/lib/engine.ts`): Nach der
+  Symbol-Whitelist prüft der neue Schritt **MISSIONS-MANDAT**, ob das Symbol vom
+  Auftrag gedeckt ist. `MISSION_SCOPE_VIOLATION` (Symbol außerhalb der
+  Kandidatenliste) und `MISSION_SCOPE_EMPTY` (Segment liefert keine Kandidaten)
+  führen zu `BLOCKED` und `ORDER_REJECTED` im `audit_log`. Scan-Missionen
+  erhalten vier zusätzliche Prompt-Zeilen (`UNIVERSUM`, `SEGMENT-REGEL`,
+  `KANDIDATEN`, Mandatsregel).
+* **18 Vorlagen** (`MISSION_TEMPLATES`), davon **14 mit `seeded: true`**:
+  BTC-Einstieg, SPY-Beobachtung, Swing-Research, Penny-Desk, Markt-Scan „alle
+  Märkte“ (max. 3 Setups/Tag), Indizes-Trendfolge, Krypto-Momentum 24/7,
+  US-Large-Caps (1 Trade/Tag), Devisen-Mean-Reversion, Rohstoffe mit halbiertem
+  Risiko, Hochvolatilität mit halbiertem Risiko, Liquiditäts-Mandat,
+  ETH-Trendfolge, HOLD-Baseline. Zusätzlich (nicht geseedet):
+  Guardrail-Stresstest, Research-only-Shortlist, Event-Schutz,
+  Korrelations-Wächter. Jede Vorlage trägt `successCriteria` (SQL-prüfbar) und
+  Drei-Ebenen-Hilfe.
+* **Workshop-UI** — neue Komponente `MissionTemplatePicker.tsx` (gruppierte
+  Auswahl, Filter „nur mitinstallierte“, Detailkarte mit Risikoprofil,
+  Erfolgskriterium und Hilfe-Aufklapper); `MissionsPanel.tsx` mit
+  Missions-Typ-Radiogruppe, Segment-Auswahl inkl. live gezählter Kandidaten
+  (`instrumentCount`), Filterregel, Laufzeithinweis, Drei-Ebenen-Hilfe und
+  Warnung bei `0` Instrumenten; Missionsliste mit Typ-Badge
+  (`missionScopeLabel`). `AgentRunPanel`/`HitRatePanel` zeigen Segment statt
+  Symbol. Alle neuen Felder tragen Tooltips (`InfoTip`, zusätzlich `sr-only`).
+* **API** — `GET /api/firm/missions` liefert zusätzlich `scopes`, `segments`
+  (mit `instrumentCount`), `segmentIds`, `templates`; `POST`/`PUT` persistieren
+  `scope`, `segment`, `template_id` und akzeptieren `{"templateId":"…"}`
+  (`applyMissionTemplate()` füllt nur leere Felder). `POST /api/seed` meldet
+  `missionsMigrated`.
+* **Doku** — [`MISSIONS.md`](MISSIONS.md) (neu: Missions-Typen, Segmente,
+  Vorlagen, API, Datenmodell, Migration, Fehlerbilder, Tests) und im
+  Doku-Katalog registriert; Handbuch 5.1 (vier Schritte) und neues 5.4
+  (Markt-Scans & Vorlagen); [`help/workshop.help.json`](help/workshop.help.json)
+  mit 16 Begriffen im Drei-Ebenen-Schema; `docs/README.md`-Index;
+  `docs/INSTALL.md`-Checkliste (14 Missionen).
+* **Tests (57 neu)** — `tests/missionTemplates.test.ts` (15),
+  `tests/missionUniverse.test.ts` (13), `tests/missions.api.test.ts` (9),
+  `tests/missionsUi.render.test.ts` (8), `tests/missions.seed.test.ts` (6) und
+  6 ergänzte Fälle in `tests/workshop.test.ts` (Scope-, Segment-,
+  Vorlagen-Regeln). Die Registry-Tests arbeiten gegen ein reales
+  Temp-Verzeichnis, die UI-Tests rendern die echten Komponenten.
+
+### Changed
+
+* **`validateMissionInput()`** (`src/lib/workshop.ts`): `MissionInput` trägt
+  jetzt `scope`, `segment`, `templateId` und `symbol: string | null`.
+  Prüf-Reihenfolge bewusst: Missions-Typ → Vorlage → Titel → Ziel →
+  Symbol/Segment → Budgets → Status, damit die erste Meldung die
+  wahrscheinlichste Ursache nennt. Neue weiche Warnung: Scan-Mission ohne Zahl
+  im Zieltext.
+* **Seed** (`src/lib/seed.ts`): `defaultMissions()` leitet die Standard-Mandate
+  aus dem Vorlagenkatalog ab (`seeded: true`) — 14 statt 4 Missionen. Die vier
+  historischen Titel bleiben unverändert, damit Alt-Installationen nichts
+  doppelt bekommen.
+* **Makro-Zyklus** (`src/lib/macroCycle.ts`): Das Fokus-Symbol einer
+  Scan-Mission ist jetzt der liquideste Segment-Kandidat
+  (`missionFocusSymbol()`), nicht mehr starr `BTC`.
+
+### Fixed
+
+* **Mandatsverletzungen wurden ausgeführt.** Vor 1.35.0 handelte die Engine ein
+  vom Modell vorgeschlagenes Symbol auch dann, wenn es nicht zur Mission gehörte
+  (z. B. `ETH` in einer BTC-Mission). Jetzt wird der Trade blockiert und
+  auditiert. **Verhaltensänderung**, bewusst: Die Mission ist ein Mandat.
+* **Vager Scan-Auftrag.** Der Zieltext der Vorlage `swing-multi-asset` erhielt
+  prüfbare Regeln (Haltedauer 3–15 Handelstage, max. 3 offene Positionen,
+  Stop 5–9 %). Bestehende Zeilen behalten ihre Fassung.
+
+### Migration
+
+```bash
+git pull && npm ci
+npx drizzle-kit push     # + missions.scope (DEFAULT 'SINGLE_SYMBOL'), .segment, .template_id
+npm run build && sudo systemctl restart ai-trading-firm
+curl -s -X POST localhost:3369/api/seed   # 14 Missionen, Missions-Typ nachtragen
+```
+
+* Bestehende Einzel-Symbol-Missionen laufen unverändert (`scope`-Default).
+* `POST /api/seed` trägt bei Alt-Mandaten mit `symbol IS NULL` und
+  `scope = 'SINGLE_SYMBOL'` den Missions-Typ `SCAN_UNIVERSE` plus das zur
+  Vorlage gehörende Segment nach — idempotent, nur bei Titelgleichheit mit
+  einer Scan-Vorlage, Budgets und Zieltexte bleiben unangetastet.
+* **Alt-Missionen ohne Symbol und ohne Vorlagen-Titel** behalten ihr bisheriges
+  Verhalten (Fokus `SPY`, keine Mandatsprüfung); der Kontext meldet das als
+  Warnung.
+* Scan-Segmente sind nur so gut wie die Registry: `npm run universe:seed:markets`
+  (354 Preset-Instrumente, Upsert) und `npm run market:sync`
+  (Volumen/Volatilität) füllen `INDICES`, `COMMODITIES`, `VOLATILE`, `LIQUID`.
+
+**Tests:** Gesamtsuite `npm test` **1511/1513 grün** (vorher 1454/1456) — die beiden Ausfälle
+(`test/integration/cli-sync-e2e.test.ts`, `test/marketdata/adapters/bitunix.test.ts`,
+beide Bitunix-Fixture-/Netz-abhängig) bestanden bereits vor dieser Änderung
+nicht. `npm run typecheck`, `npm run lint`, `npm run build` und
+`npm run docs:validate` (8 Checks, 10 Hilfe-Dateien) grün.
+
 ## [1.34.0] — 2026-08-31 · feat(install): geführtes Windows-Setup mit PowerShell
 
 ### Added

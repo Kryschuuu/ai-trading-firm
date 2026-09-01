@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import InfoTip from "./InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
+import { missionScopeLabel } from "@/lib/missionTemplates";
 import type {
   AgentDecisionDto,
   AgentRow,
@@ -171,7 +172,7 @@ export default function AgentRunPanel({
               <InfoTip
                 id="run-mission"
                 label="Mission"
-                text="Der Auftrag, dessen Ziel und Symbol dem Agenten als Kontext in den Prompt wandern. Gestoppte (KILLED) Missionen laufen nicht."
+                text="Der Auftrag, dessen Ziel und Universum dem Agenten als Kontext in den Prompt wandern: Einzel-Symbol oder Markt-Scan (Segment-Kandidaten). Gestoppte (KILLED) Missionen laufen nicht."
               />
             </label>
             <select
@@ -184,7 +185,7 @@ export default function AgentRunPanel({
               {runnable.length === 0 && <option value="">— keine lauffähige Mission —</option>}
               {runnable.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.title} ({m.symbol ?? "—"})
+                  {m.title} ({missionScopeLabel(m)})
                 </option>
               ))}
             </select>

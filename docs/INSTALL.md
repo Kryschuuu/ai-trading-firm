@@ -720,7 +720,7 @@ Hake diese Liste ab, bevor du weitermachst:
 - [ ] `psql "$DATABASE_URL" -c "\dt"` zeigt mindestens 13 Tabellen
 - [ ] `curl -s localhost:3369/api/health` antwortet mit `schemaReady: true`
 - [ ] Dashboard erreichbar, Statusleiste zeigt Equity 10.000
-- [ ] Seed legt **12 Agenten** und **4 Missionen** an (idempotent)
+- [ ] Seed legt **12 Agenten** und **14 Missionen** an (idempotent)
 - [ ] `/api/firm` zeigt zwölf Agenten und mindestens eine Mission mit gültiger UUID
 - [ ] `/api/markets` meldet ≥ 50 Aktien, ≥ 50 Indizes, ≥ 20 Rohstoffe, ≥ 30 Krypto
 - [ ] `/api/firm | jq .account.broker` → `"PAPER"`

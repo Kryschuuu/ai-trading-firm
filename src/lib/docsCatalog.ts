@@ -32,6 +32,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Handbuch",
     subtitle: "Bedienung, Beispiele, Runbooks und Troubleshooting",
   },
+  missions: {
+    file: "docs/MISSIONS.md",
+    title: "Missionen, Markt-Scans & Vorlagen",
+    subtitle: "Missions-Typen (Einzel-Symbol / Markt-Scan), Segmente, 18 Vorlagen, Mandatsprüfung (v1.35.0)",
+  },
   changelog: {
     file: "docs/CHANGELOG.md",
     title: "Changelog",
