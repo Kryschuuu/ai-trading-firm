@@ -114,8 +114,19 @@ export interface BitunixPositionRaw {
 
 /** Frontend-sichere Credential-Projektion — niemals Secrets. */
 export interface BitunixCredentialStatus {
+  /** Credentials sind hinterlegt (Env/Control-Plane) UND der Adapter ist aktiviert — KEINE Aussage über Gültigkeit. */
+  configured: boolean;
+  /** Ein echter (read-only) Konto-Abruf ist gelungen — nur nach `verify: true`, sonst false. */
   connected: boolean;
+  /**
+   * Nur durch einen echten API-Call belegte Rechte — nie angenommen.
+   * Ohne `verify` immer leer. Bitunix' Account-Antwort weist keine
+   * Handelsberechtigung aus, daher wird maximal READ gemeldet (TRADE ließe
+   * sich nur durch eine echte Order beweisen).
+   */
   permissions: Array<"READ" | "TRADE">;
+  /** true = `permissions` wurden verifiziert statt aus der bloßen Existenz von Credentials gefolgert. */
+  permissionsVerified: boolean;
   liveEnabled: false;
   bitunixEnabled: boolean;
 }

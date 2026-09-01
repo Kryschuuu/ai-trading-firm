@@ -23,6 +23,7 @@ import type {
   MarketTicker,
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
+import { killSwitch, validateOrder } from "../../lib/riskGuard";
 import { serializePlaceOrder } from "./orders";
 import type { BitunixPaperLedger } from "./paper";
 import type { BitunixPrivateClient } from "./privateClient";
@@ -77,13 +78,53 @@ export class PaperExecutionEngine implements ExecutionPort {
  *
  * Echte Venue-Daten: Account/Positions kommen von der Private-API, Orders werden
  * über `placeSerializedOrder` gesendet. Im Modus `live` prüft der Adapter VOR jedem
- * Call das Live-Gate; diese Engine selbst kennt das Gate nicht (reine Ausführung).
+ * Call das Live-Gate; diese Engine prüft zusätzlich UNMITTELBAR vor dem Senden den
+ * prozessweiten Kill-Switch und die Code-Guardrails (riskGuard) gegen die echte
+ * Konto-Equity — Defense in Depth am Engpass, fail-closed.
  */
 export class BrokerExecutionEngine implements ExecutionPort {
   readonly mode: ExecutionMode = "live";
+  private rejSeq = 1;
   constructor(private readonly privateClient: BitunixPrivateClient) {}
 
+  private reject(req: BrokerOrderRequest, reason: string): BrokerOrderResult {
+    return {
+      orderId: `REJ-BX-LIVE-${this.rejSeq++}`,
+      symbol: req.symbol.toUpperCase(),
+      side: req.side,
+      qty: req.qty,
+      fillPrice: 0,
+      status: "REJECTED",
+      reason,
+      stopLoss: req.stopLoss ?? null,
+      takeProfit: req.takeProfit ?? null,
+    };
+  }
+
   async submit(req: BrokerOrderRequest, ticker: MarketTicker): Promise<BrokerOrderResult> {
+    // HARTE SCHUTZKETTE VOR JEDER ECHTEN ORDER (Parität zum Paper-Ledger):
+    // 1. Prozessweiter Not-Halt (riskGuard.killSwitch, /api/firm/kill) — der
+    //    Live-Pfad darf NIE weniger geschützt sein als der Paper-Pfad.
+    if (killSwitch.isArmed()) {
+      return this.reject(req, "KILL_SWITCH_ARMED");
+    }
+    // 2. Guardrails gegen die ECHTE Konto-Equity und die ECHTEN offenen
+    //    Positionen der Venue. Fail-closed: scheitert der Abruf, wird die
+    //    Order NICHT gesendet (der Fehler propagiert laut nach oben).
+    const account = await this.getAccount();
+    const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
+    const guard = validateOrder({
+      notional: req.riskNotional,
+      equity: account.equity,
+      openPositions: account.openPositions,
+      side: req.side,
+      leverage: 1,
+      hasStopLoss,
+      symbol: req.symbol.toUpperCase(),
+    });
+    if (!guard.allowed) {
+      return this.reject(req, guard.reason);
+    }
     const body = serializePlaceOrder(req);
     const { orderId } = await this.privateClient.placeSerializedOrder(body);
     return {

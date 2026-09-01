@@ -333,9 +333,14 @@ ExecutionMode
 ```
 
 - `placeOrder` im **Live**-Modus: Live-Gate-Enforcer (Task 11) prüft zuerst; bei
-  bestandener Prüfung sendet die `BrokerExecutionEngine` die Order über
-  `BitunixPrivateClient.placeSerializedOrder` (SL/TP als `slPrice`/`tpPrice` im
-  selben Body, `stopAtVenue`). **Niemals** über das Paper-Ledger.
+  bestandener Prüfung durchläuft die `BrokerExecutionEngine` **unmittelbar vor
+  dem Senden** dieselbe Schutzkette wie das Paper-Ledger — prozessweiter
+  Kill-Switch (`riskGuard.killSwitch`, `/api/firm/kill`) und Code-Guardrails
+  (`validateOrder`) gegen die **echte** Konto-Equity und die echten offenen
+  Positionen (fail-closed: scheitert der Abruf, wird nicht gesendet). Erst dann
+  geht die Order über `BitunixPrivateClient.placeSerializedOrder` (SL/TP als
+  `slPrice`/`tpPrice` im selben Body, `stopAtVenue`, **kein Retry** bei
+  Timeout/Netz/5xx — siehe §7). **Niemals** über das Paper-Ledger.
 - `getAccount`/`getPositions` im **Live**-Modus liefern **echte Venue-Daten**
   (signierte Private-API), nie Paper-Daten.
 - `paper`/`backtest` → `PaperExecutionEngine` gegen das lokale Ledger
@@ -402,11 +407,11 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 
 | Thema | Regel |
 | --- | --- |
-| Secrets | Default: Control-Plane-Store (`createVenueBackedNamedStore`, AES-256-GCM, AAD=`BITUNIX`) mit Env-Fallback `BITUNIX_API_KEY` / `BITUNIX_API_SECRET`. Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert nur `connected`/`permissions`/`liveEnabled:false`. |
+| Secrets | Default: Control-Plane-Store (`createVenueBackedNamedStore`, AES-256-GCM, AAD=`BITUNIX`) mit Env-Fallback `BITUNIX_API_KEY` / `BITUNIX_API_SECRET`. Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert `configured`/`connected`/`permissions`/`permissionsVerified`/`liveEnabled:false` — Rechte werden **nie angenommen**: ohne `verify` bleibt `permissions` leer; mit `verify` belegt ein read-only Konto-Abruf maximal `READ` (TRADE wäre nur per echter Order beweisbar). |
 | SSRF | Host-Allowlist (`fapi.bitunix.com` + optionale `BITUNIX_ALLOWED_HOSTS`). Kein Userinfo. `https` Pflicht; `http`/`ws` nur Loopback + Insecure-Flag. `redirect: "error"`. |
 | TLS | Node-Default-Zertifikatsprüfung (an). |
 | Rate-Limit | Token-Bucket, konservativ 8 req/s (Doku: 10/s). |
-| Timeout / Retry | Default 8 s, max. 3 Versuche, nur 429/5xx/Netz — **nie** auth. |
+| Timeout / Retry | Default 8 s, max. 3 Versuche, nur 429/5xx/Netz — **nie** auth. Nicht-idempotente Requests (POST, insbesondere `place_order`) wiederholen bei Timeout/Netzwerkfehler/5xx **nicht** (Doppel-Order-Gefahr); nur 429 (definitiv nicht verarbeitet) bleibt Retry-fähig. |
 | Redactor | Maskiert Header-Muster, Hex-Tokens ≥ 32, injizierte Klartext-Secrets. Logger-Prefix `[bitunix]`. |
 
 ---

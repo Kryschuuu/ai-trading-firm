@@ -355,7 +355,7 @@ test("Batch-Tickers: 1× getTickers(symbols) für alle Instrumente, kein per-Sym
   }
 });
 
-test("Batch-Tickers unvollständig → fehlendes Symbol bleibt null (P1: kein per-Symbol-Fallback)", async () => {
+test("Batch-Tickers unvollständig → Lücken-Fallback per Einzel-Ticker (Symbol-Guard)", async () => {
   const instruments = [instrument("BTCUSDT"), instrument("ETHUSDT")];
   const { adapter, calls } = mockAdapter({
     instruments,
@@ -365,13 +365,38 @@ test("Batch-Tickers unvollständig → fehlendes Symbol bleibt null (P1: kein pe
 
   const result = await service.syncVenue("BITUNIX");
 
-  // P1: enrichWithTickers() markiert fehlende Symbole als null + missing, kein per-Symbol-Fallback
-  assert.deepEqual(calls.ticker, [], "P1: kein per-Symbol-Fallback bei unvollständigem Batch — missing bleibt null");
+  // Lücken-Fallback: das im Bulk fehlende Symbol wird genau EINMAL einzeln
+  // geholt (Symbol-Guard). Eine Lücke zählt nie still als „enriched" —
+  // entweder schließt der Fallback sie, oder sie wird als failure sichtbar.
+  assert.deepEqual(calls.ticker, ["ETHUSDT"], "genau ein Einzel-Ticker für die Bulk-Lücke");
   assert.equal(registry.get("BITUNIX:BTCUSDT")?.volume24h, 5_000_000);
-  assert.equal(registry.get("BITUNIX:ETHUSDT")?.volume24h, null, "fehlendes Symbol → null (Data-Quality)");
-  // tickersEnriched zählt erfolgreiche Fetches (auch wenn volume null) — hier 2 Instrumente versucht, 1 mit Volumen
+  assert.equal(registry.get("BITUNIX:ETHUSDT")?.volume24h, 1_000_000, "Lücke per Einzel-Ticker geschlossen");
   assert.equal(result.tickersEnriched, 2);
+  assert.equal(result.failures.filter((f) => f.stage === "ticker").length, 0);
   assert.ok(result.spreadsUnknown >= 0);
+});
+
+test("Batch-Lücke UND Einzel-Ticker-Fehlschlag → sichtbarer ticker-failure, nicht still 'enriched'", async () => {
+  const instruments = [instrument("BTCUSDT"), instrument("ETHUSDT")];
+  const { adapter, calls } = mockAdapter({
+    instruments,
+    batchTickers: async () => [ticker("BTCUSDT", 5_000_000)],
+    ticker: async () => {
+      throw new Error("ticker down");
+    },
+  });
+  const { service, registry } = harness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  assert.deepEqual(calls.ticker, ["ETHUSDT"], "Fallback wurde versucht");
+  assert.equal(registry.get("BITUNIX:BTCUSDT")?.volume24h, 5_000_000);
+  assert.equal(registry.get("BITUNIX:ETHUSDT")?.volume24h, null, "Lücke bleibt null (Data-Quality)");
+  assert.equal(result.tickersEnriched, 1, "die offene Lücke zählt nicht als enriched");
+  assert.ok(
+    result.failures.some((f) => f.stage === "ticker" && f.symbol === "ETHUSDT"),
+    "die Lücke muss als Sync-Fehler sichtbar sein",
+  );
 });
 
 test("Ticker-Symbol weicht ab → volume24h bleibt null (kein Fremd-Volumen)", async () => {

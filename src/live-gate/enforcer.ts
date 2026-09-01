@@ -36,6 +36,8 @@ import {
 import { getLiveGateRuntime } from "./runtime";
 import { readSuiteStamp, validateSuiteStamp } from "./suite";
 import { liveGateStateRank } from "./states";
+// riskGuard ist ein reines Leaf-Modul (keine Imports) — kein Zyklusrisiko.
+import { killSwitch } from "@/lib/riskGuard";
 
 export type LiveOrderDenyCode =
   | "UNKNOWN_VENUE"
@@ -181,7 +183,14 @@ export function evaluateLiveOrder(
     return finish(false, "VENUE_NOT_LIVE_CAPABLE", `Adapter-Capability live=false für ${venue}.`, venue, null, { flags });
   }
 
-  // 3) Kill-Switch (Memory + persistente Failsafe-Datei)
+  // 3) Kill-Switch (Memory + persistente Failsafe-Datei).
+  //    3a — prozesslokaler Not-Halt (riskGuard.killSwitch, /api/firm/kill):
+  //    Der Firmen-Kill-Knopf MUSS auch eine Live-Order stoppen, nicht nur
+  //    die Paper-Ledger. Vorher konsultierte der Enforcer nur die Kill-Datei.
+  if (killSwitch.isArmed()) {
+    return finish(false, "KILL_SWITCH_ACTIVE", "Prozessweiter Not-Halt (riskGuard.killSwitch) ist aktiv — ausgelöst über /api/firm/kill oder Auto-Kill (Drawdown/Tagesverlust).", venue, null, { killed: true, flags });
+  }
+  //    3b — persistente Failsafe-Datei (npm run live:kill / /api/live/kill):
   const kill = runtime.isKilled(venue);
   if (kill) {
     return finish(false, "KILL_SWITCH_ACTIVE", `Kill-Switch aktiv (scope ${kill.scope}, ${kill.at}, actor ${kill.actor}): ${kill.reason}`, venue, null, { killed: true, flags });

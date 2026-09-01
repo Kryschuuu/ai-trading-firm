@@ -21,6 +21,122 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 ---
 
 
+## [1.35.2] — 2026-09-01 · fix(marketdata): Ticker-Lücken-Fallback — Bulk-Lücken nie still als „enriched"
+
+**Ausgangslage.** Zwei Integrationstests (`test/integration/cli-sync-e2e.test.ts`,
+`test/marketdata/adapters/bitunix.test.ts`) schlugen fehl, weil sie eine
+Semantik kodieren, die `enrichWithTickers()` nicht implementierte: Fehlte ein
+Symbol in der Bulk-Ticker-Response, zählte der Sync es trotzdem als
+„enriched" (`tickersEnriched` = alle Instrumente), meldete keinen Fehler und
+der Lauf galt als sauber (`degraded: false`, Exit-Code 0) — die Datenlücke
+wurde kaschiert statt transportiert. Ein Unit-Test
+(`src/marketdata/__tests__/sync.test.ts`) schrieb diese alte Semantik sogar
+fest („P1: kein per-Symbol-Fallback"). Die Integrationstests beschreiben das
+ehrlichere Verhalten und decken sich mit der dokumentierten Philosophie
+(„Unbekannte Werte werden als Data-Quality-Zustand transportiert, nicht
+kaschiert") — deshalb wurde die Implementierung nachgezogen, nicht die Tests.
+
+### Fixed
+
+* **Lücken-Fallback in `enrichWithTickers()`** — `src/marketdata/enrichment.ts`:
+  Fehlt ein Symbol in der Bulk-Response, wird es genau **einmal** per
+  Einzel-Ticker versucht — mit demselben Symbol-Guard wie der No-Bulk-Pfad
+  (kein Fremd-Volumen). Schließt auch das die Lücke nicht, entsteht ein
+  sichtbarer `failure` (`stage: "ticker"`), der Lauf gilt als degradiert und
+  das CLI beendet mit Exit-Code 1. `tickersEnriched` zählt damit nur noch
+  Instrumente mit tatsächlich beschafftem Ticker.
+* Der gemeinsame Einzel-Ticker-Pfad (Symbol-Guard, Fehlerbehandlung) ist in
+  einen Helper zusammengeführt — Bulk-Lücken und No-Bulk-Venues verhalten
+  sich identisch.
+
+### Changed
+
+* **Zwei Unit-Tests an die ehrliche Semantik angepasst** (bewusst, mit
+  Begründung im Test): `sync.test.ts` („Batch unvollständig") erwartet jetzt
+  den Lücken-Fallback statt ihn zu verbieten — plus neuer Negativfall
+  (Fallback scheitert → sichtbarer failure, `tickersEnriched` zählt die Lücke
+  nicht); `test/marketdata/enrichment.test.ts` prüft beide Zweige
+  (Fallback schließt die Lücke / failure statt Exception).
+
+### Docs
+
+* `docs/MARKET_DATA_PIPELINE.md` (Ticker-Stage: Lücken-Fallback + degradierter
+  Lauf statt stiller Lücke).
+
+**Damit sind alle 1521 Tests grün** — inklusive der zwei zuvor fehlschlagenden
+Integrationstests, die in 1.35.1 als vorbestehend dokumentiert wurden.
+
+---
+
+
+## [1.35.1] — 2026-09-01 · fix(broker): Sicherheits-Härtung des Bitunix-Live-Pfads (Audit-Nacharbeit)
+
+**Ausgangslage.** Ein Audit der Broker-Anbindung fand vier Lücken im
+Bitunix-Live-Pfad: (1) `BrokerExecutionEngine.submit` importierte `riskGuard`
+überhaupt nicht — weder Kill-Switch noch Code-Guardrails standen vor einer
+echten Order; (2) der HTTP-Transport wiederholte bei Timeout/Netzwerkfehler/5xx
+unabhängig von der Methode — für den `place_order`-POST eine
+Doppel-Order-Gefahr; (3) es existierten zwei voneinander unabhängige Not-Halte
+(`riskGuard.killSwitch` via `/api/firm/kill` und die dateibasierte
+Live-Gate-Kill-Sperre) — der zentrale Enforcer prüfte nur die Datei, der
+Firmen-Not-Halt hätte eine Live-Order also nicht gestoppt; (4)
+`credentialStatus()` behauptete `permissions: ["READ","TRADE"]` allein aus der
+Existenz von Credentials, und die Redaction-Liste des Loggers wurde per
+Fire-and-Forget befüllt (Timing-Fenster, in dem nur musterbasierte Maskierung
+griff). Nichts davon war ausnutzbar, solange Live hart gesperrt ist — es sind
+aber genau die Sperren, die im Moment einer Live-Freischaltung greifen müssen.
+
+### Fixed
+
+* **Schutzkette vor jeder Live-Order** — `src/brokers/bitunix/execution.ts`:
+  `BrokerExecutionEngine.submit` prüft jetzt unmittelbar vor dem Senden den
+  prozessweiten `killSwitch` und `validateOrder` gegen die **echte**
+  Konto-Equity und die echten offenen Positionen der Venue. Fail-closed:
+  scheitert der Konto-Abruf, wird nicht gesendet. Parität zum Paper-Ledger.
+* **Kein Retry für `place_order`** — `src/brokers/bitunix/http.ts` +
+  `privateClient.ts`: neues `idempotent`-Flag im Transport (Default: GET
+  idempotent, POST nicht). Nicht-idempotente Requests brechen bei
+  Timeout/Netzwerkfehler/5xx laut ab statt eine zweite Order zu riskieren;
+  nur HTTP 429 (definitiv nicht verarbeitet) bleibt Retry-fähig.
+* **Kill-Switch-Zweiteilung geschlossen** — `src/live-gate/enforcer.ts`:
+  Bedingung 3 prüft jetzt wie dokumentiert **beide** Sperren — den
+  prozesslokalen `riskGuard.killSwitch` (`/api/firm/kill`, Auto-Kill bei
+  Drawdown/Tagesverlust) **und** die persistente Failsafe-Datei. Deny-Code
+  in beiden Fällen `KILL_SWITCH_ACTIVE`.
+* **`credentialStatus()` ehrlich gemacht** — `src/brokers/bitunix/adapter.ts` +
+  `types.ts`: drei getrennte Aussagen statt einer Behauptung — `configured`
+  (hinterlegt), `connected` (read-only Abruf gelang, nur mit `verify: true`),
+  `permissionsVerified` (geprüft statt angenommen). Ohne `verify` wird kein
+  Recht gemeldet; mit `verify` maximal `READ` — Bitunix' Account-Antwort weist
+  keine Handelsberechtigung aus, `TRADE` ließe sich nur per echter Order
+  belegen. Der Health-Check bleibt ohne `remote` netzwerkfrei.
+* **Deterministische Logger-Redaction** — `adapter.ts`: Fire-and-Forget-Befüllung
+  durch einen synchronen Credential-Cache ersetzt (`loadCreds()` ist der einzige
+  Weg, auf dem Klartext-Credentials in den Adapter gelangen, und befüllt im
+  selben Schritt die Maskierliste). Kein Timing-Fenster mehr.
+
+### Tests
+
+* Neu: `tests/bitunix.security.test.ts` — 7 Regressionen: Kill-Switch stoppt
+  die Live-Engine vor dem Senden; Guardrails rechnen gegen die echte Equity
+  (Positionsgröße, Pflicht-Stop); fail-closed bei scheiterndem Konto-Abruf;
+  kein Retry eines nicht-idempotenten POST bei 5xx/Netzwerkfehler (je exakt
+  1 Versuch), 429 und GET bleiben Retry-fähig; Enforcer verweigert mit
+  `KILL_SWITCH_ACTIVE` bei armiertem Firmen-Not-Halt; `credentialStatus`
+  meldet ohne Verifikation keine Rechte und maskiert Credentials deterministisch.
+* Angepasst (nicht überschrieben): `tests/bitunix.adapter.test.ts` zählte
+  `calls.getAccount === 1`; die Guardrail-Vorprüfung ruft das Konto legitim
+  zusätzlich ab → `>= 1` mit Begründung. Die geprüfte Aussage („Live nutzt den
+  Private-Client, nicht das Paper-Ledger") ist unverändert.
+
+### Docs
+
+* `docs/BITUNIX.md` §5/§7 (Schutzkette, Retry-Semantik, ehrliche
+  Credential-Projektion), `docs/LIVE_TRADING.md` §5 (beide Not-Halte).
+
+---
+
+
 ## [1.35.0] — 2026-08-31 · feat(workshop): Missions-Baukasten — Markt-Scans, Segmente, Vorlagen
 
 **Ausgangslage.** Eine Mission hatte genau ein Symbol (`missions.symbol`).

@@ -2,7 +2,8 @@
  * P1 Enrichment-Tests: ticker and orderbook enrichment for instrument discovery.
  *
  * Coverage:
- *  - enrichWithTickers(): bulk, missing → null, no exception, quoteVol
+ *  - enrichWithTickers(): bulk, Bulk-Lücke → Einzel-Ticker-Fallback (Symbol-
+ *    Guard), offene Lücke → failure statt Exception, quoteVol
  *  - enrichWithOrderBooks(): depth limit=5, concurrency, empty/crossed/implausible → null
  *  - market sync enriches volume24h and spread
  *  - eligibility rejects unknown spread explicitly
@@ -167,19 +168,38 @@ test("enrichWithOrderBooks calculates spread from best bid/ask", async () => {
   assert.ok(Math.abs(spread! - 0.00019998) < 1e-8);
 });
 
-// ── 3. missing ticker entry yields null volume, not an exception ─────────────
+// ── 3. missing ticker entry: Lücken-Fallback, sonst sichtbarer failure ───────
 
 test("missing ticker entry yields null volume, not an exception", async () => {
   const instruments = [instrument("BTCUSDT"), instrument("ETHUSDT")];
-  const { adapter } = mockAdapter({
+  const { adapter, calls } = mockAdapter({
     instruments,
     tickers: [ticker("BTCUSDT", 1_000_000)], // ETH missing
   });
   const { volumeBySymbol, report } = await enrichWithTickers(instruments, adapter);
   assert.equal(volumeBySymbol.get("BTCUSDT"), 1_000_000);
-  assert.equal(volumeBySymbol.get("ETHUSDT"), null);
-  assert.ok(report.missing.includes("BITUNIX:ETHUSDT") || report.missing.includes("ETHUSDT"));
-  assert.equal(report.failures.length, 0, "missing should not be a failure, just null");
+  // Bulk-Lücke → genau EIN Einzel-Ticker-Versuch (Symbol-Guard) schließt sie.
+  assert.deepEqual(calls.ticker, ["ETHUSDT"], "Lücken-Fallback per Einzel-Ticker");
+  assert.equal(volumeBySymbol.get("ETHUSDT"), 1_000_000, "Fallback schließt die Bulk-Lücke");
+  assert.equal(report.failures.length, 0);
+
+  // Scheitert auch der Fallback, bleibt der Wert null und die Lücke wird als
+  // failure sichtbar — weiterhin KEIN Throw (Sync läuft weiter).
+  const failing = mockAdapter({
+    instruments,
+    tickers: [ticker("BTCUSDT", 1_000_000)],
+    ticker: async () => {
+      throw new Error("ticker down");
+    },
+  });
+  const second = await enrichWithTickers(instruments, failing.adapter);
+  assert.equal(second.volumeBySymbol.get("BTCUSDT"), 1_000_000);
+  assert.equal(second.volumeBySymbol.get("ETHUSDT"), null);
+  assert.ok(second.report.missing.includes("BITUNIX:ETHUSDT") || second.report.missing.includes("ETHUSDT"));
+  assert.ok(
+    second.report.failures.some((f) => f.symbol === "ETHUSDT"),
+    "offene Lücke muss als failure sichtbar sein, nicht still als enriched zählen",
+  );
 });
 
 // ── 4. depth failure for one symbol does not abort enrichment ────────────────

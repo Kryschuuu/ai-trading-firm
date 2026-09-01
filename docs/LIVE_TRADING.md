@@ -131,6 +131,13 @@ die ausschließlich den signierten `BitunixPrivateClient` nutzt — Orders über
   3. State-Reset aller betroffenen Venues auf DISCONNECTED (best-effort),
   4. Audit-Eintrag `kill`/`KILLED` (Ring hält ihn auch bei Datei-/DB-Fehler).
 - **Scope:** `*` (systemweit, alle Venues) oder einzelnes Venue.
+- **Zweiter, unabhängiger Not-Halt:** `POST /api/firm/kill` armiert den
+  prozessweiten `riskGuard.killSwitch` (In-Memory, stoppt Engine/Paper-Ledger
+  und Auto-Kill bei Drawdown/Tagesverlust). Der zentrale Live-Gate-Enforcer
+  prüft **beide** Sperren (Bedingung 3: Memory **und** Failsafe-Datei);
+  zusätzlich prüft die `BrokerExecutionEngine` den prozesslokalen Schalter
+  unmittelbar vor jedem Senden. Der Firmen-Not-Halt stoppt damit auch eine
+  Live-Order — nicht nur die Paper-Pfade.
 - **Nicht rückgängig zu machen ohne vollständigen Neudurchlauf:**
   `action:"clear"` + Phrase `CLEAR_KILL` entfernt die Sperre (auditiert),
   der Zustand bleibt aber DISCONNECTED — alle 8 Übergänge inkl. Human-Gate

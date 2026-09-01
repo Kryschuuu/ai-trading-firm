@@ -131,8 +131,10 @@ async function runPool<T, R>(
  * Enrichment-Stage 1: 24h-Volumen aus Ticker-API.
  *
  * **Ein Bulk-Call** (`adapter.getTickers(symbols)`), wenn vorhanden.
- * Fehlt ein Symbol in der Response → `null` + Eintrag in `report.missing`
- * (kein Throw). Unbekannte Werte bleiben `null` (Data-Quality).
+ * Fehlt ein Symbol in der Bulk-Response → **ein** Einzel-Ticker-Versuch
+ * (Lücken-Fallback mit Symbol-Guard). Scheitert auch der, wird die Lücke als
+ * `failure` sichtbar (Stage `ticker`, Lauf degradiert) — sie zählt nie still
+ * als „enriched". Unbekannte Werte bleiben `null` (Data-Quality).
  *
  * `volume24h` ist explizit das **Quote-Volumen** (`ticker.quoteVol`) in
  * Quote-Währung (z. B. USDT). Eine Verwechslung mit Base-Volumen verfälscht
@@ -176,6 +178,27 @@ export async function enrichWithTickers(
 
   let tickerMap = new Map<string, { quoteVol?: number | null }>();
 
+  // Einzel-Ticker mit Symbol-Guard — genutzt vom No-Bulk-Pfad UND als
+  // Lücken-Fallback für Symbole, die im Bulk-Response fehlen. Nur exakte
+  // Symbol-Übereinstimmung wird übernommen (kein Fremd-Volumen); jede
+  // Abweichung oder ein Fehlschlag wird als failure sichtbar — nie kaschiert.
+  const fetchSingleWithGuard = async (inst: MarketInstrument): Promise<void> => {
+    try {
+      const t = await adapter.getTicker(inst.symbol);
+      const sym = safeSymbol((t as { symbol?: unknown })?.symbol as string);
+      if (sym && sym === inst.symbol) {
+        tickerMap.set(sym, { quoteVol: (t as { quoteVol?: unknown })?.quoteVol as number | null });
+      } else {
+        failures.push({
+          symbol: inst.symbol,
+          reason: sym ? `Ticker-Antwort enthält anderes Symbol ${sym} — volume24h bleibt unbekannt` : "Kein Ticker für das Symbol verfügbar — volume24h bleibt unbekannt",
+        });
+      }
+    } catch (e) {
+      failures.push({ symbol: inst.symbol, reason: e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80) });
+    }
+  };
+
   try {
     if (adapter.getTickers) {
       const symbols = validInstruments.map((i) => i.symbol);
@@ -202,25 +225,19 @@ export async function enrichWithTickers(
           tickerMap.set(sym, { quoteVol: (t as { quoteVol?: unknown })?.quoteVol as number | null });
         }
       }
+      // Lücken-Fallback: Symbole, die im Bulk fehlen, werden EINMAL per
+      // Einzel-Ticker versucht (Symbol-Guard). Scheitert auch das, ist die
+      // Lücke ein sichtbarer `ticker`-failure — der Lauf gilt als degradiert,
+      // statt die Lücke still als „enriched" zu zählen.
+      for (const inst of validInstruments) {
+        if (!tickerMap.has(inst.symbol)) {
+          await fetchSingleWithGuard(inst);
+        }
+      }
     } else {
       // Fallback für Venues ohne Bulk-Endpoint: per-Symbol (dokumentiert im Sync-Ergebnis)
       for (const inst of validInstruments) {
-        try {
-          const t = await adapter.getTicker(inst.symbol);
-          const sym = safeSymbol((t as { symbol?: unknown })?.symbol as string);
-          // Symbol-Guard: nur exakte Übereinstimmung übernehmen, sonst null (kein Fremd-Volumen)
-          if (sym && sym === inst.symbol) {
-            tickerMap.set(sym, { quoteVol: (t as { quoteVol?: unknown })?.quoteVol as number | null });
-          } else {
-            // Fremdes Symbol → als missing behandeln, aber als Data-Quality sichtbar
-            failures.push({
-              symbol: inst.symbol,
-              reason: sym ? `Ticker-Antwort enthält anderes Symbol ${sym} — volume24h bleibt unbekannt` : "Kein Ticker für das Symbol verfügbar — volume24h bleibt unbekannt",
-            });
-          }
-        } catch (e) {
-          failures.push({ symbol: inst.symbol, reason: e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80) });
-        }
+        await fetchSingleWithGuard(inst);
       }
     }
   } catch (e) {

@@ -62,7 +62,8 @@ export class BitunixPrivateClient {
     method: "GET" | "POST",
     path: string,
     query: Record<string, string | number | boolean | undefined> | undefined,
-    body: string
+    body: string,
+    opts?: { idempotent?: boolean }
   ) {
     const nonce = this.nonces.next();
     const timestamp = this.clock.next();
@@ -83,7 +84,15 @@ export class BitunixPrivateClient {
       language: "en-US",
     };
     try {
-      const res = await this.http.request({ method, path, query, body: method === "POST" ? body : undefined, headers, signed: true });
+      const res = await this.http.request({
+        method,
+        path,
+        query,
+        body: method === "POST" ? body : undefined,
+        headers,
+        signed: true,
+        idempotent: opts?.idempotent,
+      });
       await recordBitunixPrivateCall({ method, path, outcome: "OK", errorCode: null });
       return res;
     } catch (e) {
@@ -151,7 +160,9 @@ export class BitunixPrivateClient {
    */
   async placeSerializedOrder(body: BitunixPlaceOrderBody): Promise<{ orderId: string; clientId?: string }> {
     const json = JSON.stringify(body);
-    const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json);
+    // idempotent: false — place_order darf bei Timeout/Netzwerkfehler/5xx NIE
+    // wiederholt werden (Doppel-Order-Gefahr); nur 429 bleibt Retry-fähig.
+    const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });
     const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);
     return { orderId: String(data?.orderId ?? ""), clientId: data?.clientId };
   }
