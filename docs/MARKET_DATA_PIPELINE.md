@@ -97,15 +97,18 @@ export async function enrichWithOrderBooks(
 ### Ticker-Stage `enrichWithTickers()`
 
 - **Ein Bulk-Call** (`adapter.getTickers(symbols)`) für alle Instrumente.
-  Fehlt ein Symbol in der Response → `null` + Eintrag in `report.missing`
-  (kein Throw).
+  Fehlt ein Symbol in der Bulk-Response → **ein** Einzel-Ticker-Versuch
+  (Lücken-Fallback mit Symbol-Guard). Schließt auch der die Lücke nicht,
+  wird sie als `failure` (`stage: "ticker"`) sichtbar und der Lauf gilt als
+  degradiert — eine Lücke zählt nie still als „enriched" (kein Throw).
 - `volume24h` ist explizit **Quote-Volumen** (`ticker.quoteVol`) in
   Quote-Währung (z. B. USDT). Dokumentiert im Registry-Typ als JSDoc —
   Verwechslung mit Base-Volumen verfälscht jeden `min-volume`-Filter um
   Größenordnungen.
 - Fehlt der Ticker oder ist `quoteVol` nicht endlich (`NaN`/`Infinity`) → `null`.
   Unbekannte Werte bleiben `null` (Data-Quality), nicht 0.
-- Fallback: Venues ohne Bulk-Endpoint nutzen per-Symbol `getTicker` (dokumentiert).
+- Fallback: Venues ohne Bulk-Endpoint nutzen per-Symbol `getTicker` für alle
+  Instrumente; Venues **mit** Bulk-Endpoint nur für die Bulk-Lücken (dokumentiert).
 - Security: `maxInstruments` hart auf 1000 gekappt, Symbol-Allowlist vor URL,
   `quoteVol` per `Number.isFinite()` geprüft.
 

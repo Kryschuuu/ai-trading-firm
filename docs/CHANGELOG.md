@@ -21,6 +21,54 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 ---
 
 
+## [1.35.2] — 2026-09-01 · fix(marketdata): Ticker-Lücken-Fallback — Bulk-Lücken nie still als „enriched"
+
+**Ausgangslage.** Zwei Integrationstests (`test/integration/cli-sync-e2e.test.ts`,
+`test/marketdata/adapters/bitunix.test.ts`) schlugen fehl, weil sie eine
+Semantik kodieren, die `enrichWithTickers()` nicht implementierte: Fehlte ein
+Symbol in der Bulk-Ticker-Response, zählte der Sync es trotzdem als
+„enriched" (`tickersEnriched` = alle Instrumente), meldete keinen Fehler und
+der Lauf galt als sauber (`degraded: false`, Exit-Code 0) — die Datenlücke
+wurde kaschiert statt transportiert. Ein Unit-Test
+(`src/marketdata/__tests__/sync.test.ts`) schrieb diese alte Semantik sogar
+fest („P1: kein per-Symbol-Fallback"). Die Integrationstests beschreiben das
+ehrlichere Verhalten und decken sich mit der dokumentierten Philosophie
+(„Unbekannte Werte werden als Data-Quality-Zustand transportiert, nicht
+kaschiert") — deshalb wurde die Implementierung nachgezogen, nicht die Tests.
+
+### Fixed
+
+* **Lücken-Fallback in `enrichWithTickers()`** — `src/marketdata/enrichment.ts`:
+  Fehlt ein Symbol in der Bulk-Response, wird es genau **einmal** per
+  Einzel-Ticker versucht — mit demselben Symbol-Guard wie der No-Bulk-Pfad
+  (kein Fremd-Volumen). Schließt auch das die Lücke nicht, entsteht ein
+  sichtbarer `failure` (`stage: "ticker"`), der Lauf gilt als degradiert und
+  das CLI beendet mit Exit-Code 1. `tickersEnriched` zählt damit nur noch
+  Instrumente mit tatsächlich beschafftem Ticker.
+* Der gemeinsame Einzel-Ticker-Pfad (Symbol-Guard, Fehlerbehandlung) ist in
+  einen Helper zusammengeführt — Bulk-Lücken und No-Bulk-Venues verhalten
+  sich identisch.
+
+### Changed
+
+* **Zwei Unit-Tests an die ehrliche Semantik angepasst** (bewusst, mit
+  Begründung im Test): `sync.test.ts` („Batch unvollständig") erwartet jetzt
+  den Lücken-Fallback statt ihn zu verbieten — plus neuer Negativfall
+  (Fallback scheitert → sichtbarer failure, `tickersEnriched` zählt die Lücke
+  nicht); `test/marketdata/enrichment.test.ts` prüft beide Zweige
+  (Fallback schließt die Lücke / failure statt Exception).
+
+### Docs
+
+* `docs/MARKET_DATA_PIPELINE.md` (Ticker-Stage: Lücken-Fallback + degradierter
+  Lauf statt stiller Lücke).
+
+**Damit sind alle 1521 Tests grün** — inklusive der zwei zuvor fehlschlagenden
+Integrationstests, die in 1.35.1 als vorbestehend dokumentiert wurden.
+
+---
+
+
 ## [1.35.1] — 2026-09-01 · fix(broker): Sicherheits-Härtung des Bitunix-Live-Pfads (Audit-Nacharbeit)
 
 **Ausgangslage.** Ein Audit der Broker-Anbindung fand vier Lücken im

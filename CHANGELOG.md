@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-01** ·
-> Code-Version **1.35.1**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.35.2**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,17 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.35.2] — 2026-09-01 · fix(marketdata): Ticker-Lücken-Fallback — Bulk-Lücken nie still als „enriched"
+
+Die zwei in 1.35.1 als vorbestehend dokumentierten Testfehler sind behoben
+(Details: `docs/CHANGELOG.md`): Fehlt ein Symbol in der Bulk-Ticker-Response,
+versucht `enrichWithTickers()` jetzt genau einen Einzel-Ticker-Fallback mit
+Symbol-Guard; bleibt die Lücke offen, wird sie als `ticker`-failure sichtbar
+(degradierter Lauf, CLI-Exit 1) statt still als „enriched" zu zählen. Zwei
+Unit-Tests, die die alte, kaschierende Semantik festschrieben, wurden bewusst
+an die ehrliche Semantik der Integrationstests angepasst. **Alle 1521 Tests
+grün.**
 
 ## [1.35.1] — 2026-09-01 · fix(broker): Sicherheits-Härtung des Bitunix-Live-Pfads
 
