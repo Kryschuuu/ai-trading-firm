@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.30.0 (2026-08-31) · Vollständige
+> **Dokumentationsstand:** v1.36.1 (2026-09-02) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -50,6 +50,7 @@ npm run market:sync -- --dry-run   # Marktdaten-Warmup prüfen (MDSYNC-001)
 BITUNIX_ENABLED=true npm run market:sync   # Registry + Historie persistent füllen
 npm run scan -- --sync-first       # deterministischer Scan auf dem Warmup
 npm run market:sync:status         # Warmup-Readiness prüfen (nur lesen; Exit 1 = fehlt)
+rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm run build
 npm run start               # http://0.0.0.0:3369
 ./scripts/validate-setup.sh        # 18 Checks, bestanden ab 15

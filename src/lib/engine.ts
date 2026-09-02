@@ -27,7 +27,6 @@ import {
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
 import { PaperBroker } from "./broker";
-import { PaperBrokerAdapter } from "../brokers/paper";
 import { getBroker as createBroker } from "../brokers/factory";
 import { localReason } from "./ollama";
 import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
@@ -64,11 +63,17 @@ const G = globalThis as typeof globalThis & {
  */
 export async function getBroker(): Promise<PaperBroker> {
   const adapter = await createBroker("PAPER", "paper");
-  if (!(adapter instanceof PaperBrokerAdapter)) {
-    // Unerreicht: Die Factory liefert für "PAPER" garantiert den PAPER-Adapter.
-    throw new Error("UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet");
+  // Duck-Type statt instanceof: prüft, ob das PAPER-spezifische Feld
+  // vorhanden ist. Robuster gegen Build-Cache-Drift und Next.js-
+  // Modul-Recompilierung (klassisches Problem: nach v1.36.0 lieferte die
+  // Factory manchmal einen anderen Klassenmodul-Identifier, sodass
+  // instanceof false wurde — obwohl der Adapter technisch ein
+  // PaperBrokerAdapter war).
+  const adapterAny = adapter as unknown as { paperBroker?: PaperBroker };
+  if (!adapterAny || typeof adapterAny.paperBroker === "undefined") {
+    throw new Error("UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet (paperBroker fehlt)");
   }
-  const broker = adapter.paperBroker;
+  const broker = adapterAny.paperBroker;
   // TASK 03: Modus-B-Ausführungs-Adapter (echte Kurse + deterministischer
   // Fill-Simulator) einmal in den Ledger injizieren. Idempotent.
   wirePaperExecution(broker);

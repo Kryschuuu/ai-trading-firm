@@ -5,6 +5,85 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.1] — 2026-09-02 · fix(engine): robuster Duck-Type-Check für PAPER-Adapter
+
+Runtime-Bug auf dem Livesystem (192.168.0.10): Scheduler-Tick schlug fehl mit
+`UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet`. Ursache war ein
+`instanceof PaperBrokerAdapter`-Check in `src/lib/engine.ts`, der nach dem
+Alpaca-Volladapter (v1.36.0) durch Next.js-Modul-Recompilierung einen anderen
+Klassenmodul-Identifier lieferte — `instanceof` wurde `false`, obwohl der
+Adapter technisch ein `PaperBrokerAdapter` war.
+
+### Warum `instanceof` hier falsch war
+
+Der `instanceof`-Operator vergleicht die Prototyp-Kette eines Objekts mit dem
+`prototype`-Property einer **spezifischen Klassenreferenz**. In Next.js mit
+Turbopack/Webpack wird jedes Modul bei jedem Build neu kompiliert — die Klasse
+`PaperBrokerAdapter` in `src/brokers/paper.ts` bekommt jedes Mal eine neue
+Identität im Speicher. Die Factory `createBroker("PAPER", "paper")` instanziiert
+die Klasse aus dem gerade geladenen Modul, aber die `engine.ts` hält eine
+Referenz auf die Klasse aus ihrem eigenen Modul-Scope. Nach einem Hot-Reload
+oder wenn die Build-Caches driften, zeigen diese beiden Referenzen auf
+unterschiedliche `prototype`-Objekte — `instanceof` wird `false`, obwohl es sich
+um dieselbe Klasse handelt.
+
+Dieses Problem tritt besonders auf, wenn:
+- Neue Adapter-Module hinzukommen (wie v1.36.0 mit dem Alpaca-Adapter),
+- `BROKER_VENUE_IDS` erweitert wird,
+- Next.js den Build-Cache partially invalidiert und neu kompiliert,
+- Turbopack Module in anderer Reihenfolge lädt.
+
+### Warum Duck-Type besser ist
+
+Der Duck-Type-Check prüft nur, ob das Objekt die **Struktur** eines
+`PaperBrokerAdapter` hat — konkret das Feld `paperBroker`. Das ist:
+- **Build-Cache-resistent:** Die Feld-Namen ändern sich nicht bei der
+  Compilierung.
+- **Unabhängig von Modul-Identität:** Es spielt keine Rolle, aus welchem
+  Modul-Scope die Klasse stammt.
+- **Minimal-invasiv:** Kein neuer Typ, keine neue Abstraktion — nur eine
+  Typanpassung (`as unknown as { paperBroker?: PaperBroker }`).
+- **Typsicher:** TypeScript erzwingt weiterhin die Typsicherheit über
+  `PaperBroker`.
+
+Nachteil: Duck-Type ist weniger streng als `instanceof` — ein Objekt mit einem
+`paperBroker`-Feld, das kein echter `PaperBrokerAdapter` ist, würde den Check
+bestehen. In der Praxis ist das irrelevant, weil die Factory garantiert den
+richtigen Adapter liefert.
+
+### Fixed
+
+* **`src/lib/engine.ts`:** `instanceof PaperBrokerAdapter` ersetzt durch Duck-Type-
+  Check (`adapterAny.paperBroker !== undefined`). Fehlermeldung präzisiert:
+  `UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet (paperBroker fehlt)`.
+* **Import bereinigt:** `PaperBrokerAdapter`-Import aus `engine.ts` entfernt
+  (nicht mehr nötig).
+
+### Workaround für Betreiber
+
+**Vor jedem Update den Build-Cache löschen:**
+
+```bash
+rm -rf .next node_modules/.cache
+```
+
+Das beugt dem `instanceof`-Problem grundsätzlich vor — nicht nur für den
+PAPER-Adapter, sondern auch für andere Adapter (Bitunix, Alpaca), falls in der
+Zukunft ähnliche Checks hinzukommen. Das Update-Kapitel in `docs/INSTALL.md`
+(Kapitel 12) wurde entsprechend erweitert.
+
+### Changed
+
+* `src/lib/engine.ts` — `getBroker()` verwendet Duck-Type statt `instanceof`.
+* `package.json` — Version **1.36.1** (PATCH, abwärtskompatibel).
+* `docs/INSTALL.md` — Kapitel 12 (Updates) um Cache-Clear-Schritt erweitert.
+
+### Tests
+
+* Alle **1352 Tests** bleiben grün (typecheck, lint, build, docs:validate).
+* Keine neuen Tests nötig — der Bug war ein Runtime-Problem, kein Logik-Fehler.
+
+
 ## [1.36.0] — 2026-09-01 · feat(broker): Alpaca-Volladapter (8. Venue, US-Aktien/ETFs/Crypto)
 
 **Ausgangslage.** Das System kannte sieben Venues — Bitunix als realer
