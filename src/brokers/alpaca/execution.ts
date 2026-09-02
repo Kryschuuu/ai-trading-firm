@@ -19,7 +19,7 @@ import type {
   MarketTicker,
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
-import { killSwitch } from "../../lib/riskGuard";
+import { killSwitch, validateOrder } from "../../lib/riskGuard";
 import { serializePlaceOrder, clientOrderIdFor } from "./orders";
 import { mapAccount, mapOrderResult, mapPosition } from "./mapping";
 import { AlpacaPaperLedger } from "./paper";
@@ -69,10 +69,129 @@ export class BrokerExecutionEngine implements ExecutionPort {
   }
 
   async submit(req: BrokerOrderRequest, ticker: MarketTicker): Promise<BrokerOrderResult> {
-    // Defense in Depth: Kill-Switch unmittelbar vor der echten Order.
-    // (Order-Validierung entfällt hier, weil das lokale Read-Only-Ledger
-    // equity=0 hat — die Live-Broker-Engine validiert über das echte
-    // Broker-Konto, und für Paper/Backtest läuft die Engine NICHT hier.)
+    // H1 FIX: riskNotional nie vertrauen — server-seitig aus qty*Preis neu berechnen.
+    if (!Number.isFinite(req.qty) || req.qty <= 0) {
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: "INVALID_QTY",
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: "INVALID_QTY" });
+      return out;
+    }
+    if (!Number.isFinite(ticker.price) || ticker.price <= 0) {
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: `NO_QUOTE:${req.symbol.toUpperCase()}`,
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: "NO_QUOTE" });
+      return out;
+    }
+    if (!Number.isFinite(req.riskNotional) || req.riskNotional <= 0) {
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: "INVALID_NOTIONAL",
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: "INVALID_NOTIONAL" });
+      return out;
+    }
+    const estimatedNotional = req.qty * ticker.price;
+    if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0) {
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: "INVALID_ESTIMATED_NOTIONAL",
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: "INVALID_ESTIMATED_NOTIONAL" });
+      return out;
+    }
+    // Guardrails gegen echte Konto-Equity (vorher fehlte diese Prüfung komplett — H1)
+    let account: import("../../contracts/broker").BrokerAccount;
+    try {
+      account = await this.getAccount();
+    } catch (e) {
+      const code = e instanceof Error ? e.message.slice(0, 40) : "ACCOUNT_FETCH_FAILED";
+      const out: BrokerOrderResult = {
+        orderId: "ERROR",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: code,
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "ERROR", errorCode: code });
+      return out;
+    }
+    const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
+    const guard = validateOrder({
+      notional: estimatedNotional,
+      equity: account.equity,
+      openPositions: account.openPositions,
+      side: req.side,
+      leverage: 1,
+      hasStopLoss,
+      symbol: req.symbol.toUpperCase(),
+    });
+    if (!guard.allowed) {
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: guard.reason,
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: guard.reason.slice(0, 40) });
+      return out;
+    }
+    const requiredCashEstimate = estimatedNotional * 1.002;
+    if (requiredCashEstimate > account.cash + 1e-9) {
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason: "INSUFFICIENT_CASH",
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: "INSUFFICIENT_CASH" });
+      return out;
+    }
     if (killSwitch.isArmed()) {
       const out: BrokerOrderResult = {
         orderId: "KILLED",

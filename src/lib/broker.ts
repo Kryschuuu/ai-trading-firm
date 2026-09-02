@@ -270,9 +270,22 @@ export class PaperBroker {
       return reject(order, `NO_QUOTE:${symbol}`);
     }
 
-    // 3) Harte, im Code verankerte Guardrails.
+    // H1 FIX (CRITICAL 2026-09-02): Server-seitige Notional-/Cash-Berechnung.
+    // `order.riskNotional` wird validiert, aber NICHT für Sicherheitsentscheidungen vertraut.
+    // Ein manipulierter Client könnte `riskNotional=1` bei `qty=1000` senden und so
+    // den Cash-Guard umgehen; die tatsächlichen Kosten (qty*Fillpreis+Gebühren) wären
+    // dann um Größenordnungen höher. Wir berechnen daher einheitlich:
+    //   estimatedNotional = qty * price
+    //   requiredCash     = estimatedNotional + geschätzte Slippage + geschätzte Gebühren
+    // und prüfen Guardrails + Cash gegen diese server-seitige Größe.
+    const estimatedNotional = order.qty * price;
+    if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0) {
+      return reject(order, `INVALID_ESTIMATED_NOTIONAL:${String(estimatedNotional)}`);
+    }
+
+    // 3) Harte, im Code verankerte Guardrails — mit server-seitig berechnetem Notional.
     const guard = validateOrder({
-      notional: order.riskNotional,
+      notional: estimatedNotional,
       equity: this.accountEquity,
       openPositions: this.positions.size,
       side: order.side,
@@ -291,9 +304,19 @@ export class PaperBroker {
       return reject(order, `POSITION_ALREADY_OPEN:${symbol} (kein Nachkauf erlaubt)`);
     }
 
-    // 5) Genug Cash? (Kein Leverage erlaubt.)
-    if (order.riskNotional > this.cash * RISK_LIMITS.maxLeverage + 1e-9) {
-      return reject(order, `INSUFFICIENT_CASH: benötigt ${order.riskNotional.toFixed(2)}, verfügbar ${this.cash.toFixed(2)}`);
+    // 5) Vorab-Cash-Guard mit konservativer Schätzung (Slippage + Gebühren).
+    //    Der exakte, verbindliche Check erfolgt nach der Fill-Simulation (tatsächliche Kosten).
+    //    Hier wird bereits grob sichergestellt, dass selbst der Idealpreis ohne Slippage nicht
+    //    das verfügbare Cash übersteigt — fail-fast ohne Simulation.
+    //    Für die Schätzung: 0.1 % Slippage (Legacy) + 0 Gebühren; Simulator-Pfad prüft exakt nach.
+    const estimatedSlippage = estimatedNotional * 0.001;
+    const estimatedFees = 0;
+    const requiredCashEstimate = estimatedNotional + estimatedSlippage + estimatedFees;
+    if (requiredCashEstimate > this.cash * RISK_LIMITS.maxLeverage + 1e-9) {
+      return reject(
+        order,
+        `INSUFFICIENT_CASH: benötigt ${requiredCashEstimate.toFixed(2)} (inkl. Slippage/Gebühren, Notional ${estimatedNotional.toFixed(2)}), verfügbar ${this.cash.toFixed(2)}`
+      );
     }
 
     // 6) Fill.
@@ -304,12 +327,28 @@ export class PaperBroker {
       if (!quote) {
         return reject(order, `NO_QUOTE:${symbol}`);
       }
+      // Re-Berechnung mit Quote-Last für höchste Präzision (Spread-bereinigt).
+      const quoteEstimatedNotional = order.qty * quote.last;
+      if (!Number.isFinite(quoteEstimatedNotional) || quoteEstimatedNotional <= 0) {
+        return reject(order, `INVALID_ESTIMATED_NOTIONAL:${String(quoteEstimatedNotional)}`);
+      }
       const executed = this.execution.execute(order, quote);
       if (executed.status === "REJECTED" || executed.filledQty <= 0) {
         return reject(order, executed.reason ?? "SIM_REJECTED");
       }
       const filledQty = executed.filledQty;
       const fillPrice = executed.fillPrice;
+      const cost = filledQty * fillPrice + executed.fees;
+      if (!Number.isFinite(cost) || cost <= 0) {
+        return reject(order, `INVALID_COST:${String(cost)}`);
+      }
+      // Verbindlicher Cash-Check gegen tatsächliche Ausführungskosten (H1).
+      if (cost > this.cash * RISK_LIMITS.maxLeverage + 1e-9) {
+        return reject(
+          order,
+          `INSUFFICIENT_CASH: benötigt ${cost.toFixed(2)} (Fill ${filledQty}×${fillPrice.toFixed(2)} + Gebühren ${executed.fees.toFixed(2)}), verfügbar ${this.cash.toFixed(2)}`
+        );
+      }
       this.positions.set(symbol, {
         qty: filledQty,
         side: order.side,
@@ -317,7 +356,7 @@ export class PaperBroker {
         stopLoss: order.stopLoss ?? null,
         takeProfit: order.takeProfit ?? null,
       });
-      this.cash -= filledQty * fillPrice + executed.fees;
+      this.cash -= cost;
 
       return {
         orderId: `PAP-${Date.now().toString(36).toUpperCase()}`,
@@ -335,6 +374,17 @@ export class PaperBroker {
 
     // 6b) Legacy-Paper-Fill mit moderatem Slippage (rohe PaperBroker-Instanz).
     const fillPrice = order.side === "LONG" ? price * 1.001 : price * 0.999;
+    const cost = order.qty * fillPrice;
+    if (!Number.isFinite(cost) || cost <= 0) {
+      return reject(order, `INVALID_COST:${String(cost)}`);
+    }
+    // Verbindlicher Cash-Check gegen tatsächliche Kosten inkl. Slippage (H1).
+    if (cost > this.cash * RISK_LIMITS.maxLeverage + 1e-9) {
+      return reject(
+        order,
+        `INSUFFICIENT_CASH: benötigt ${cost.toFixed(2)} (inkl. 0.1% Slippage), verfügbar ${this.cash.toFixed(2)}`
+      );
+    }
 
     this.positions.set(symbol, {
       qty: order.qty,
@@ -343,7 +393,7 @@ export class PaperBroker {
       stopLoss: order.stopLoss ?? null,
       takeProfit: order.takeProfit ?? null,
     });
-    this.cash -= order.qty * fillPrice;
+    this.cash -= cost;
 
     return {
       orderId: `PAP-${Date.now().toString(36).toUpperCase()}`,

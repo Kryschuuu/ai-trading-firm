@@ -113,15 +113,20 @@ export class AlpacaPaperLedger {
     if (killSwitch.isArmed()) return reject("KILL_SWITCH_ARMED");
     if (!Number.isFinite(req.qty) || req.qty <= 0) return reject("INVALID_QTY");
     if (!Number.isFinite(ticker.price) || ticker.price <= 0) return reject(`NO_QUOTE:${ticker.symbol}`);
-
+    // H1 FIX: riskNotional wird validiert, aber nicht vertraut — server-seitig aus qty*Preis berechnen
+    if (!Number.isFinite(req.riskNotional) || req.riskNotional <= 0) return reject("INVALID_NOTIONAL");
     const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
     if (hasStopLoss && (!Number.isFinite(req.stopLoss as number) || (req.stopLoss as number) <= 0)) {
       return reject("INVALID_STOP_LOSS");
     }
 
+    // H1: Server-seitige Notional-Berechnung (qty * Preis)
+    const estimatedNotional = req.qty * ticker.price;
+    if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0) return reject("INVALID_ESTIMATED_NOTIONAL");
+
     const equity = this.getAccount(() => ticker.price).equity;
     const guard = validateOrder({
-      notional: req.riskNotional,
+      notional: estimatedNotional,
       equity,
       openPositions: this.positions.size,
       side: req.side,
@@ -130,6 +135,10 @@ export class AlpacaPaperLedger {
       symbol,
     });
     if (!guard.allowed) return reject(guard.reason);
+    // Vorab-Cash-Guard mit konservativer Schätzung (0.1% Slippage-Puffer)
+    const estimatedSlippage = estimatedNotional * 0.001;
+    const requiredCashEstimate = estimatedNotional + estimatedSlippage;
+    if (requiredCashEstimate > this.cash + 1e-9) return reject("INSUFFICIENT_CASH");
 
     // Zentrale Fill-Berechnung
     const inst = this.registry?.get(`ALPACA:${symbol}`) ?? fallbackInstrument("ALPACA", symbol);

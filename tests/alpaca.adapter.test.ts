@@ -247,7 +247,10 @@ test("Live-Gate OFFEN: placeOrder nutzt die Broker-Engine (Private-Client), NICH
   });
   assert.equal(fill.status, "FILLED");
   assert.equal(fill.orderId, "fixture-order-1", "OrderId muss vom Broker stammen");
-  assert.equal(fx.privateCalls, 1, "Live-Order muss genau einen Private-Call treffen");
+  // H1 FIX: Live-Engine prüft jetzt vor dem Senden Guardrails + Cash gegen echte Konto-Equity
+  // (getAccount + getPositions) — daher 3 Private-Calls (2 für Account/Positions, 1 für Order)
+  // statt früher 1. Papier-Pfad bleibt 0.
+  assert.equal(fx.privateCalls, 3, "Live-Order trifft Account + Positions + Order (H1 Guardrails)");
   resetLiveGateTestGlobals();
 });
 

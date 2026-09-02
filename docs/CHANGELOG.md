@@ -5,6 +5,94 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.2] — 2026-09-02 · fix(broker): H1 Risk-Notional ≠ tatsächliche Ausführungskosten (CRITICAL)
+
+**Schweregrad CRITICAL, gemeldet:** Handelslogik — `Order.riskNotional` (qty×Preis) wurde als
+vertrauenswürdige Eingabe für `validateOrder({ notional: riskNotional })` und den Cash-Guard
+(`riskNotional > cash*maxLeverage`) verwendet, während die tatsächliche Abbuchung
+`qty×Fillpreis + Gebühren` betrug (Legacy: `price*1.001` / `price*0.999`; Simulator:
+`FillSimulator` mit Spread, Slippage, Gebühren, Latenz, Partial Fills, vgl. `docs/PAPER_TRADING.md` §3).
+Ein manipulierter Client konnte `riskNotional=1` bei `qty=1000` senden, den Guard passieren und
+anschließend ein Vielfaches des geprüften Kapitals binden. Beispiel Report: `riskNotional=2500`,
+Fill +0.1% Slippage + Gebühren → tatsächliche Kosten >2500, Guard wird umgangen.
+
+### Fixed
+
+* **`src/lib/broker.ts` (`PaperBroker.submit`)** — vor allen Guardrails:
+  ```ts
+  const estimatedNotional = order.qty * price;
+  if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0)
+    return reject("INVALID_ESTIMATED_NOTIONAL");
+  ```
+  Guardrails nutzen ausschließlich `estimatedNotional`:
+  `validateOrder({ notional: estimatedNotional, equity, ... })`.
+  Vorab-Cash-Schätzung `requiredCash = estimatedNotional + 0.1% Slippage + Gebühren`
+  (Legacy: exakt `qty*fillPrice`; Simulator: konservativ 0.1%), fail-fast.
+  **Exakter, verbindlicher Cash-Check nach Simulation:**
+  * Simulator-Pfad: `cost = filledQty*fillPrice + fees` → `cost > cash*maxLeverage ? INSUFFICIENT_CASH`
+    (mit Detail `Fill qty×Preis + Gebühren`).
+  * Legacy-Pfad: `cost = qty*fillPrice` → analog, inkl. 0.1% Slippage.
+  Damit ist die gebundene Summe nie größer als geprüft; inkonsistentes `riskNotional`
+  (z. B. 1 bei 1000 Einheiten) führt zu `INVALID_ESTIMATED_NOTIONAL` bzw. Guard-Block.
+
+* **`src/brokers/bitunix/paper.ts` / `src/brokers/alpaca/paper.ts` (Paper-Ledger)** —
+  analog: `estimatedNotional = qty * ticker.price`, validiert, Guard mit
+  `estimatedNotional`, Vorab-Cash `requiredCash ≈ estimatedNotional+0.1%` (fail-fast),
+  exakter Check `cost = filledQty*fillPrice+fees > cash`.
+
+* **`src/brokers/bitunix/execution.ts` (`BrokerExecutionEngine`)** — Live-Pfad:
+  ```ts
+  const estimatedNotional = qty * ticker.price;
+  // Guard gegen echte Konto-Equity/Cash (Private-API), fail-closed
+  const guard = validateOrder({ notional: estimatedNotional, equity: account.equity, ... });
+  if (requiredCashEstimate > account.cash) reject(INSUFFICIENT_CASH);
+  ```
+  Zusätzlich Kill-Switch + `INVALID_*`-Validierung vor jeder Venue-Order; keine
+  Order erreicht die Venue ohne belegbare Equity.
+
+* **`src/brokers/alpaca/execution.ts` (`BrokerExecutionEngine`)** — zuvor fehlte
+  jegliche Guardrail-Prüfung im Live-Pfad (nur Kill-Switch). Jetzt identisch zu
+  Bitunix: server-seitige `estimatedNotional`-Berechnung, `validateOrder` gegen
+  echte Konto-Equity, Cash-Puffer 0.2% (Slippage+Gebühren), fail-closed bei
+  Konto-Abruf-Fehler. Import `validateOrder` ergänzt. Live-Order trifft nun
+  3 Private-Calls (Account+Positions+Order) statt 1 — im Test explizit erwartet.
+
+* **Keine Breaking Changes im API-Contract:** `BrokerOrderRequest.riskNotional`
+  bleibt Pflichtfeld (`finite>0`), ist aber nur Hinweis. Die Engine
+  (`src/lib/engine.ts`: `notional = missionSizedNotional(...)`, `qty = notional/price`)
+  erzeugt konsistente Paare, daher lauffähig ohne Änderung.
+
+### Tests
+
+* **`tests/broker.test.ts`** — H1-konsistente Orders: Default BTC qty `0.015` (≈1005,
+  <2500 Cap) statt `0.1` (6700 → wäre jetzt korrekterweise REJECTED); Oversized-Test
+  via `qty=0.5` (33500) statt nur `riskNotional`; `closeAll` mit konsistenten
+  `qty/riskNotional` je Symbol; Positions-Qty-Assertion angepasst.
+* **`tests/brokerContracts.test.ts`** — PAPER-Fill qty `0.015` (1005) statt `0.1`
+  (H1 Guard würde sonst REJECTED liefern).
+* **`tests/bitunix.security.test.ts`** — Oversized-Order via `qty=0.1` (6000) statt
+  nur `riskNotional` (H1: Guard ignoriert client-seitiges riskNotional).
+* **`tests/alpaca.adapter.test.ts`** — Live-Gate-OPEN: `privateCalls` 3 statt 1
+  (neue Guardrails gegen echte Cash/Equity brauchen Account+Positions).
+
+Alle **1352 Tests** grün; `typecheck`, `lint`, `build` grün; `docs:validate` grün.
+
+### Changed / Docs
+
+* `package.json` → **1.36.2** (PATCH).
+* `docs/PAPER_TRADING.md` §3: Hinweis, dass Notional server-seitig aus `qty*Preis`
+  neu berechnet wird und der Cash-Guard `requiredCash = Notional+Gebühren+Slippage`
+  prüft (H1).
+* `docs/BROKER_ARCHITECTURE.md` § „Ausführungsschleuse“ (Paper & Live): H1-Hinweis
+  — `riskNotional` ist nur Hinweis, Ausführungsschleuse nutzt `estimatedNotional`.
+* `docs/SECURITY_AUDIT.md`: neuer Eintrag H1 (CRITICAL, Ort, Beispiel, Fix).
+
+### Migration
+
+Kein Schema-Bruch, keine neuen Pflicht-Env-Variablen. Opt-in unverändert. Deploy:
+`git pull` → `npm ci` → `npx drizzle-kit push` (no-op) → `npm run build` →
+`sudo systemctl restart ai-trading-firm` → `rm -rf .next` (Build-Cache-Tipp aus 1.36.1).
+
 ## [1.36.1] — 2026-09-02 · fix(engine): robuster Duck-Type-Check für PAPER-Adapter
 
 Runtime-Bug auf dem Livesystem (192.168.0.10): Scheduler-Tick schlug fehl mit

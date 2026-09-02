@@ -4,11 +4,16 @@ import { PaperBroker } from "../src/lib/broker";
 import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
 
 function order(overrides: Partial<Parameters<PaperBroker["submit"]>[0]> = {}) {
+  // H1 FIX: riskNotional muss server-seitig aus qty*Preis neu berechnet werden.
+  // Alte Tests nutzten qty=0.1 => 6700 Notional > 25% Cap (2500) und verließen sich
+  // darauf, dass riskNotional=1000 den Guard passiert — genau der Bug (riskNotional ≠ Ausführungskosten).
+  // Neue Tests nutzen konsistente Werte: qty * Preis ≈ riskNotional und < maxPositionPct.
+  // BTC 67000 * 0.015 ≈ 1005 < 2500 (25% von 10k)
   return {
     symbol: "BTC",
     side: "LONG" as const,
-    qty: 0.1,
-    riskNotional: 1000,
+    qty: 0.015,
+    riskNotional: 1005,
     stopLoss: 60000,
     takeProfit: 70000,
     ...overrides,
@@ -27,7 +32,7 @@ test("Broker: saubere Order wird gefüllt, Position erscheint", () => {
   assert.ok(fill.fillPrice > 0);
   assert.equal(b.openPositions, 1);
   const pos = b.getPosition("BTC");
-  assert.equal(pos?.qty, 0.1);
+  assert.equal(pos?.qty, 0.015);
 });
 
 test("Broker: Kill-Switch blockt jede neue Order", () => {
@@ -67,7 +72,8 @@ test("Broker: ungültige Symbole und Zahlen werden abgelehnt, nicht geraten", ()
 
 test("Broker: Order weit über jede Grenze → Positions-Guardrail blockt (defense in depth)", () => {
   const b = new PaperBroker(10000);
-  const fill = b.submit(order({ riskNotional: 25_000 }));
+  // H1: Guard nutzt estimatedNotional = qty*Preis, nicht riskNotional — daher qty groß wählen
+  const fill = b.submit(order({ qty: 0.5, riskNotional: 25_000 }));
   assert.equal(fill.status, "REJECTED");
   assert.match(fill.reason ?? "", /position-size:max-25%-of-equity/);
 });
@@ -144,8 +150,9 @@ test("Broker: hydrate ignoriert kaputte Zeilen (qty<=0, NaN, falsche Side)", () 
 
 test("Broker: closeAll stellt alles glatt und liefert fills", () => {
   const b = new PaperBroker(10000);
-  b.submit(order({ symbol: "BTC", riskNotional: 1000 }));
-  b.submit(order({ symbol: "ETH", riskNotional: 1000 }));
+  // H1-konsistent: qty für BTC/ETH so wählen, dass qty*Preis < 2500
+  b.submit(order({ symbol: "BTC", qty: 0.015, riskNotional: 1005 }));
+  b.submit(order({ symbol: "ETH", qty: 0.5, riskNotional: 1600 }));
   const fills = b.closeAll("MANUAL_FLATTEN");
   assert.equal(fills.length, 2);
   assert.equal(b.openPositions, 0);

@@ -1,6 +1,6 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.36.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+**Stand:** v1.36.2 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
 (inkl. `control-plane/` seit Task 08, `src/brokers/alpaca/` seit v1.36.0),
 `src/lib/broker.ts` (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
 `GET /api/brokers`, `GET /api/brokers/coverage`,
@@ -52,6 +52,14 @@ Flags + Suite + Control Plane, Task 11; Tabelle in
 `src/brokers/capabilities.ts` → `REQUIRED_CAPABILITY_BY_MODE`).
 
 ### 2.1 Ausführungs-Engines (ExecutionPort) — v1.20.0
+
+> **H1 Fix (2026-09-02, CRITICAL):** `Order.riskNotional` ist **keine** vertrauenswürdige Eingabe.
+> Alle Paper-Ledger (`PaperBroker`, `BitunixPaperLedger`, `AlpacaPaperLedger`) und Live-Engines
+> (`BrokerExecutionEngine`) berechnen `estimatedNotional = qty * Preis` server-seitig und nutzen
+> ausschließlich diesen Wert für `validateOrder` + Cash-Guard (`requiredCash = Notional + Gebühren + Slippage`).
+> Exakter Check nach Simulation `cost = filledQty*fillPrice+fees > cash → INSUFFICIENT_CASH` verhindert,
+> dass Slippage/Gebühren den Guard umgehen (Bsp. 2500 → 2502.50 + Gebühren). `riskNotional` bleibt
+> Pflichtfeld, ist aber nur Hinweis. Details: `CHANGELOG.md` 1.36.2, `src/lib/broker.ts`.
 
 Innerhalb eines Adapters wird die Ausführung über einen **`ExecutionPort`**
 getrennt: Paper-Ledger und echter Broker-Executor sind zwei Implementierungen
