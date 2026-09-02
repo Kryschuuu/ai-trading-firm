@@ -35,6 +35,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE`, Sync-/Ops-Behandlung (v1.26.3) |
 | **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)** | Broker-Capability-Modell (Task 02): Adapter-Vertrag, Capability-Matrix, Execution Modes, Factory, Live-Gate, Health-API |
 | **[BITUNIX.md](BITUNIX.md)** | Bitunix-Adapter (Task 07): 7. Venue, Public REST/WS, Signing, Paper-Modus B, Live-Gate |
+| **[ALPACA.md](ALPACA.md)** | Alpaca-Adapter (Task 12): 8. Venue, US-Aktien/ETFs/Crypto, Public-Market-Data + Private-Trading-API (Basic-Auth), Testnet = Paper-API, Bracket-Orders (v1.36.0) |
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data (Task 03): Modi A/B/C, deterministischer Fill-Simulator, Failover-Kette, Replay, Historical Store, `/api/marketdata/*` |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics (Task 05): Formelkatalog, Kovarianz/Korrelation, drei Optimizer-Modi, Risk-Guard-Kette, `/api/portfolio/*` |
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten |
@@ -48,7 +49,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.35.2` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.36.0` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---

@@ -16,6 +16,63 @@
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
 
+## [1.36.0] — 2026-09-01 · feat(broker): Alpaca-Volladapter (8. Venue, US-Aktien/ETFs/Crypto)
+
+Volladapter nach Bitunix-Vorbild (Modus B: Public-Market-Data + Private-Trading/
+Account). Live weiterhin hinter zentralem Live-Gate (Task 11) gesperrt. Alpacas
+offizielle `paper-api.alpaca.markets` ist ein vollständiges Testnet
+(`VENUE_CAPABILITIES.ALPACA.testnet = true`). Die vier Audit-Lücken aus der
+Bitunix-Sicherheitshärtung (v1.35.1) sind im neuen Adapter von Anfang an
+umgesetzt:
+
+* **`BrokerExecutionEngine.submit` prüft `killSwitch` vor dem Senden** (Defense
+  in Depth). `AlpacaPaperLedger.submit` führt dieselbe Prüfung + `validateOrder`
+  gegen das Paper-Ledger.
+* **`AlpacaHttp.request` verweigert Retry für nicht-idempotente POSTs**
+  (`placeOrder`); nur 429 retry-fähig — keine Doppel-Order-Gefahr.
+  Idempotenz über `client_order_id`.
+* **Memory-Kill-Switch** wird zusätzlich zur Datei-Kill-Flag-Prüfung im
+  Enforcer evaluiert.
+* **`credentialStatus({verify?})` ist ehrlich:** ohne `verify` → `permissions: []`,
+  `connected: false`, `permissionsVerified: false`; mit `verify` maximal
+  `["READ"]` (TRADE nie ohne echte Order). Live-Broker validiert via echtes
+  Konto, nicht gegen das lokale Ledger.
+
+* **Neu `src/brokers/alpaca/`** (16 Dateien): `adapter.ts` (374 Z.),
+  `audit.ts`, `config.ts`, `errors.ts`, `execution.ts` (ExecutionPort mit
+  `PaperExecutionEngine` + `BrokerExecutionEngine`), `gates.ts`, `http.ts`
+  (TLS, Host-Allowlist, Token-Bucket, kein Retry für POST), `index.ts`,
+  `mapping.ts` (Alpaca-Asset → `MarketInstrument` mit Crypto-`BTC/USD` Split),
+  `orders.ts` (Idempotenz-Key), `paper.ts` (Guard-Sequenz), `privateClient.ts`
+  (Basic-Auth), `publicClient.ts` (credential-frei), `redactor.ts`,
+  `secrets.ts` (Env-Fallback `ALPACA_API_KEY`/`ALPACA_API_SECRET`,
+  deterministische Redaction), `types.ts`.
+* **Capabilities:** `VENUE_CAPABILITIES.ALPACA = { discovery, marketData,
+  trading, paper, testnet, live, stopAtVenue (Bracket-Orders), spot: true }`.
+* **Wiring:** `createAdapter("ALPACA", mode)` instanziiert den Adapter;
+  `STUB_ADAPTER_VENUES` enthält `ALPACA` **nicht** mehr; `BROKER_VENUE_IDS`
+  enthält `ALPACA` (28er-Matrix); `BrokerVenueId` exportiert `ALPACA`.
+* **Coverage-Headline: 2 / 2 / 0** (zwei reale externe Venues mit voller
+  Coverage: BITUNIX + ALPACA; beide mit Live-Execution deaktiviert).
+  Testnet-Coverage = `["ALPACA"]`.
+* **Audit-Katalog** (`src/lib/auditView.ts`): `ALPACA_PRIVATE_CALL`-Eintrag
+  analog `BITUNIX_PRIVATE_CALL` (Label „Alpaca-Privat-API", Methode/Pfad/
+  Ergebnis/Fehlercode, kein Body/Query/Key).
+* **Modus C** mit `PAPER_BROKER_API_VENUE=ALPACA` ist wählbar (`testnet: true`).
+* **Tests (122 Alpaca-spezifisch + 67 Cross-Broker):** `tests/alpaca.unit.test.ts`
+  (22), `tests/alpaca.adapter.test.ts` (17), `tests/fixtures/alpacaFixtureServer.ts`,
+  `tests/brokerFactory.test.ts` (13), `tests/brokerContracts.test.ts` (42),
+  `tests/brokerCoverage.test.ts` (10), `tests/brokerCoverage.api.test.ts` (2).
+  **Volle Suite: 1352/1352 grün** (typecheck, lint, build, docs:validate).
+* **Dokumentation:** `docs/ALPACA.md` (NEU, vollständige Adapter-Spezifikation),
+  `docs/BROKER_ARCHITECTURE.md` (Capability-Matrix + Headline 8/2/2/1/0),
+  `docs/CAPABILITIES.md` (Stub-Venues aktualisiert).
+* **Migration:** kein Schema-Bruch, keine neuen Pflicht-Env-Variablen. Opt-in
+  in `.env`: `ALPACA_ENABLED=false`, `ALPACA_API_KEY=…`, `ALPACA_API_SECRET=…`,
+  `ALPACA_USE_LIVE_ENDPOINTS=false`, `ALPACA_ALLOW_INSECURE_HTTP=false`,
+  `ALPACA_RETRY_MAX=2`. `GET /api/brokers` zeigt ab v1.36.0 `count=8` Venues
+  (PAPER + BITUNIX + ALPACA als reale Volladapter, fünf Stubs unverändert).
+
 ## [1.35.2] — 2026-09-01 · fix(marketdata): Ticker-Lücken-Fallback — Bulk-Lücken nie still als „enriched"
 
 Die zwei in 1.35.1 als vorbestehend dokumentierten Testfehler sind behoben

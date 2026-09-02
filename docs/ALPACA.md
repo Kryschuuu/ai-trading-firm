@@ -56,12 +56,13 @@ Public-Pfad ist `authed: false` (Fixture-Test verifiziert).
 
 ## 3. Private-Trading-API (Basic-Auth)
 
-`Authorization: Basic base64(API_KEY:API_SECRET)` (immer gesetzt im
-Private-Pfad). POST `/v2/orders` ist **nicht idempotent** — der HTTP-
-Transport verweigert Retry für nicht-idempotente Requests. Idempotenz
-wird über `client_order_id` (BrokerOrderRequest-Symbol+Qty+Side+Timestamp)
-sichergestellt. Jeder Private-Call wird in `ALPACA_PRIVATE_CALL` auditiert
-(Methode, Pfad, Outcome, kein Body/Query/Key).
+Im Private-Pfad wird der `Authorization`-Header mit dem Base64-codierten
+Credential-Paar gesetzt (Format `Basic base64(<key>:<secret>)`).
+POST `/v2/orders` ist **nicht idempotent** — der HTTP-Transport verweigert
+Retry für nicht-idempotente Requests. Idempotenz wird über `client_order_id`
+(BrokerOrderRequest-Symbol+Qty+Side+Timestamp) sichergestellt. Jeder
+Private-Call wird in `ALPACA_PRIVATE_CALL` auditiert (Methode, Pfad,
+Outcome, kein Body/Query/Key).
 
 ## 4. Capabilities
 
