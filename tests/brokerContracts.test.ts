@@ -119,11 +119,13 @@ for (const venue of BROKER_VENUE_IDS) {
   });
 
   test(`Contract ${venue}: Trading wirft sicher und informativ (capability=${adapter.capabilities.trading})`, async () => {
+    // H1 FIX: qty * Preis muss < 25% Equity (2500) sein — 0.1*67000=6700 würde mit H1 Guard REJECTED
+    // Daher qty 0.015 => 1005 <2500, konsistent mit riskNotional
     const req = {
       symbol: "BTC",
       side: "LONG" as const,
-      qty: 0.1,
-      riskNotional: 1000,
+      qty: 0.015,
+      riskNotional: 1005,
       stopLoss: 60000,
       takeProfit: 70000,
     };

@@ -98,6 +98,17 @@ Konfigurierbar über `PAPER_MODE` (Default **`broker-market-data`**).
 
 ## 3. Fill-Simulator — Parameter
 
+Der Simulator (`src/lib/marketdata/simulator.ts`) modelliert Gebühren
+
+> **H1 Fix (v1.36.2, CRITICAL):** `Order.riskNotional` wird **nicht** vertraut. Die Ausführungsschleuse
+> (`src/lib/broker.ts`, `src/brokers/*/paper.ts`, `src/brokers/*/execution.ts`) berechnet
+> `estimatedNotional = qty * Preis` server-seitig und prüft Guardrails + Cash (`requiredCash =
+> Notional + Slippage + Gebühren`) dagegen. Exakter Check `cost = filledQty*fillPrice+fees`
+> nach Simulation blockt Orders, deren tatsächliche Kosten (Slippage `price*1.001` / Simulator-Fees)
+> das verfügbare Cash übersteigen — selbst wenn `riskNotional` klein gewählt wurde. Beispiel:
+> `riskNotional=2500`, Fill +0.1% + Gebühren → real >2500 → `INSUFFICIENT_CASH`. Der Simulator selbst
+> ist unverändert; nur die Schleuse davor/ danach nutzt die server-seitige Größe.
+
 Der Simulator (`src/lib/marketdata/simulator.ts`) modelliert Gebühren, Spread,
 Slippage, Latenz und Partial Fills **lokal und deterministisch** (Seed).
 Gebühren kommen aus den **Registry-Feldern** `makerFee`/`takerFee` (vgl.

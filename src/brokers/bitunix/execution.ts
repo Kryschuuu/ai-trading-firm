@@ -108,13 +108,21 @@ export class BrokerExecutionEngine implements ExecutionPort {
     if (killSwitch.isArmed()) {
       return this.reject(req, "KILL_SWITCH_ARMED");
     }
+    // H1 FIX: riskNotional nicht vertrauen — server-seitig aus qty*Preis berechnen
+    if (!Number.isFinite(req.qty) || req.qty <= 0) return this.reject(req, "INVALID_QTY");
+    if (!Number.isFinite(ticker.price) || ticker.price <= 0) return this.reject(req, `NO_QUOTE:${req.symbol.toUpperCase()}`);
+    if (!Number.isFinite(req.riskNotional) || req.riskNotional <= 0) return this.reject(req, "INVALID_NOTIONAL");
+    const estimatedNotional = req.qty * ticker.price;
+    if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0) {
+      return this.reject(req, "INVALID_ESTIMATED_NOTIONAL");
+    }
     // 2. Guardrails gegen die ECHTE Konto-Equity und die ECHTEN offenen
     //    Positionen der Venue. Fail-closed: scheitert der Abruf, wird die
     //    Order NICHT gesendet (der Fehler propagiert laut nach oben).
     const account = await this.getAccount();
     const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
     const guard = validateOrder({
-      notional: req.riskNotional,
+      notional: estimatedNotional,
       equity: account.equity,
       openPositions: account.openPositions,
       side: req.side,
@@ -124,6 +132,11 @@ export class BrokerExecutionEngine implements ExecutionPort {
     });
     if (!guard.allowed) {
       return this.reject(req, guard.reason);
+    }
+    // Cash-Guard gegen tatsächliche Kosten (inkl. Gebühren/Slippage-Puffer 0.2%)
+    const requiredCashEstimate = estimatedNotional * 1.002;
+    if (requiredCashEstimate > account.cash + 1e-9) {
+      return this.reject(req, "INSUFFICIENT_CASH");
     }
     const body = serializePlaceOrder(req);
     const { orderId } = await this.privateClient.placeSerializedOrder(body);

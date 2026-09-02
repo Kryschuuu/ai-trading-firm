@@ -124,6 +124,8 @@ export class BitunixPaperLedger {
     if (killSwitch.isArmed()) return reject("KILL_SWITCH_ARMED");
     if (!Number.isFinite(req.qty) || req.qty <= 0) return reject("INVALID_QTY");
     if (!Number.isFinite(ticker.price) || ticker.price <= 0) return reject(`NO_QUOTE:${symbol}`);
+    // H1 FIX: riskNotional wird validiert, aber nicht vertraut — server-seitig aus qty*Preis berechnen
+    if (!Number.isFinite(req.riskNotional) || req.riskNotional <= 0) return reject("INVALID_NOTIONAL");
     if (this.positions.has(symbol)) return reject(`POSITION_ALREADY_OPEN:${symbol}`);
 
     const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
@@ -131,9 +133,15 @@ export class BitunixPaperLedger {
       return reject("INVALID_STOP_LOSS");
     }
 
+    // H1: Server-seitige Notional-Berechnung (qty * Preis)
+    const estimatedNotional = req.qty * ticker.price;
+    if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0) return reject("INVALID_ESTIMATED_NOTIONAL");
+    // Optional: Inkonsistenz zwischen client-seitigem riskNotional und server-seitigem estimatedNotional
+    // wird nicht hart abgelehnt, aber alle Sicherheitsprüfungen nutzen ausschließlich estimatedNotional.
+
     const equity = this.getAccount(() => ticker.price).equity;
     const guard = validateOrder({
-      notional: req.riskNotional,
+      notional: estimatedNotional,
       equity,
       openPositions: this.positions.size,
       side: req.side,
@@ -142,6 +150,10 @@ export class BitunixPaperLedger {
       symbol,
     });
     if (!guard.allowed) return reject(guard.reason);
+    // Vorab-Cash-Guard mit konservativer Schätzung (0.1% Slippage-Puffer)
+    const estimatedSlippage = estimatedNotional * 0.001;
+    const requiredCashEstimate = estimatedNotional + estimatedSlippage;
+    if (requiredCashEstimate > this.cash + 1e-9) return reject("INSUFFICIENT_CASH");
 
     // Vereinheitlichte Ausführung: Ticker → normalisierter Snapshot → zentraler
     // Fill-Simulator (Spread, Slippage, Gebühren, Latenz, Partial Fills).

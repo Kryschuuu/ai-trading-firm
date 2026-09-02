@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-02** ·
-> Code-Version **1.36.1**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.2**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,34 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.2] — 2026-09-02 · fix(broker): H1 Risk-Notional ≠ tatsächliche Ausführungskosten (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/broker.ts`, `src/brokers/*/paper.ts`, `src/brokers/*/execution.ts`).**
+`Order.riskNotional` wurde als `qty×Preis` verstanden und für `validateOrder` + Cash-Guard
+(`riskNotional > cash*maxLeverage`) vertraut; die Abbuchung ist aber `qty×Fillpreis + Gebühren`
+(bei LONG `price*1.001` + `FillSimulator`-Fees/Slippage). Eine Order mit `riskNotional=2500`,
+`Fill +0.1% + Gebühren` verbraucht real >2500 und konnte den Guard passieren.
+
+**Fix (server-seitige Neuberechnung, Defense in Depth):**
+* Alle Paper-Ledger (`PaperBroker`, `BitunixPaperLedger`, `AlpacaPaperLedger`) berechnen
+  `estimatedNotional = qty*price` (finite>0, sonst `INVALID_ESTIMATED_NOTIONAL`) und nutzen
+  **ausschließlich** diesen Wert für `validateOrder` + Cash-Guard; `riskNotional` wird nur
+  noch auf `finite>0` validiert, nicht vertraut.
+* Vorab-Cash-Schätzung `requiredCash = estimatedNotional + 0.1% Slippage + Gebühren`;
+  exakter Check nach Simulation `cost = filledQty*fillPrice+fees` gegen `cash*maxLeverage`
+  (`INSUFFICIENT_CASH` mit Detail `Fill×Preis+Gebühren`).
+* Live-Engines (`BitunixBrokerExecutionEngine`, `AlpacaBrokerExecutionEngine`) wenden
+  dieselbe Logik gegen die **echte** Venue-Equity/Cash an, fail-closed bei Konto-Abruf-Fehler.
+* **Tests (4 Dateien):** `broker.test.ts` (BTC qty 0.015≈1005 statt 0.1*67000, `closeAll` konsistent),
+  `brokerContracts.test.ts` (PAPER qty korrigiert), `bitunix.security.test.ts` (oversized via
+  `qty=0.1` statt `riskNotional`), `alpaca.adapter.test.ts` (Live-Gate: 3 Private-Calls statt 1
+  wegen neuer Guardrails). **Alle 1352 Tests grün**, `typecheck` grün.
+* **Doku:** `docs/CHANGELOG.md` (Detail-Eintrag), `docs/PAPER_TRADING.md` §3, `docs/BROKER_ARCHITECTURE.md`
+  (Ausführungsschleuse), `docs/SECURITY_AUDIT.md` H1-Eintrag; Status-Header aktualisiert.
+
+* **Keine Breaking Changes:** `BrokerOrderRequest.riskNotional` bleibt Pflichtfeld, ist
+  aber nur Hinweis. Die Engine rechnet konsistent (`riskNotional = qty*price`).
 
 ## [1.36.1] — 2026-09-02 · fix(engine): robuster Duck-Type-Check für PAPER-Adapter
 

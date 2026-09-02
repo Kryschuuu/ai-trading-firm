@@ -97,8 +97,10 @@ test("Live-Engine: Code-Guardrails rechnen gegen die ECHTE Konto-Equity", async 
   const { client, calls } = fakeClient();
   const engine = new BrokerExecutionEngine(client);
 
-  // Positionsgröße: 50 % der Live-Equity (10k) > 25-%-Cap → REJECT.
-  const oversized = await engine.submit({ ...ORDER, riskNotional: 5_000 }, TICKER);
+  // H1 FIX: Guard nutzt estimatedNotional = qty*Preis (nicht riskNotional).
+  // Daher qty groß wählen, um die 25-%-Cap (2500) zu reißen: 0.1 * 60000 = 6000 > 2500.
+  // riskNotional 5_000 ist irrelevant — server-seitig wird 6000 geprüft.
+  const oversized = await engine.submit({ ...ORDER, qty: 0.1, riskNotional: 6_000 }, TICKER);
   assert.equal(oversized.status, "REJECTED");
   assert.match(oversized.reason ?? "", /position-size/);
 
