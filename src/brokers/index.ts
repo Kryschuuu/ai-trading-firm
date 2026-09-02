@@ -36,3 +36,4 @@ export {
 export { PaperBrokerAdapter } from "./paper";
 export { StubBrokerAdapter, type StubVenueId } from "./stubs";
 export { BitunixBrokerAdapter } from "./bitunix";
+export { AlpacaBrokerAdapter } from "./alpaca";

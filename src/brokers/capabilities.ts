@@ -37,17 +37,34 @@ export const VENUE_CAPABILITIES: Record<BrokerVenueId, BrokerCapabilities> = {
     // SL/TP verwaltet der interne Monitor, nicht das "Venue".
     stopAtVenue: false,
   },
-  /** Stubs (Task 02): Adapter noch nicht implementiert → alles false. */
+  /**
+   * Alpaca (Task 12).
+   *   discovery:    Asset-Endpoint liefert vollständige Liste (US-Aktien, ETFs,
+   *                 Crypto).
+   *   marketData:   Public Data-API (Free-Tier IEX): Trades, Quotes, Bars,
+   *                 Snapshots — keine Order-Book-Endpoint.
+   *   trading:      Trade-API v2: Orders, Account, Positions.
+   *   paper:        Lokales Ledger (Modus B) gegen echte Alpaca-Kurse.
+   *   testnet:      Alpacas offizielle Paper-Trade-API (`paper-api.alpaca.markets`)
+   *                 ist ein vollständiges Testnet (eigener Endpoint, separate
+   *                 Credentials, eigenes virtuelles Geld). Wird vom Adapter
+   *                 unterstützt.
+   *   live:         reale Orders via `https://api.alpaca.markets`.
+   *   stopAtVenue:  Alpaca unterstützt Bracket-Orders (SL/TP als Legs) im
+   *                 Order-Body → `order_class: "bracket"`.
+   * Live-Freigabe: durch den zentralen Live-Gate-Enforcer (Task 11).
+   * Default bleibt `live=false` in der Capability-Table, bis der Live-Gate
+   * öffnet — analog zu Bitunix.
+   */
   ALPACA: {
-    discovery: false,
-    marketData: false,
-    trading: false,
-    paper: false,
-    testnet: false,
-    live: false,
-    // Venue-Angebot (Doku): US-Aktien, ETFs, Krypto — Spot.
+    discovery: true,
+    marketData: true,
+    trading: true,
+    paper: true,
+    testnet: true,
+    live: true,
     instrumentTypes: { spot: true, perpetual: false, future: false, option: false },
-    stopAtVenue: false,
+    stopAtVenue: true,
   },
   IBKR: {
     discovery: false,

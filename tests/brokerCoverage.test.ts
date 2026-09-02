@@ -34,11 +34,11 @@ test("Coverage: intern vs. extern (PAPER ist der einzige interne Simulator)", ()
   assert.equal(internalRow.venue, INTERNAL_VENUE);
 });
 
-test("Coverage: Headline-Zahlen entsprechen dem geforderten Bild (1/1/0)", () => {
+test("Coverage: Headline-Zahlen entsprechen dem geforderten Bild (2/2/0)", () => {
   const c = computeBrokerCoverage({ liveDecision: allLocked });
-  // Nur reale externe Venues zählen für die Headline: heute exakt BITUNIX.
-  assert.equal(c.fullDiscoveryVenues, 1, "1 externes Venue mit voller Discovery");
-  assert.equal(c.paperMarketDataVenues, 1, "1 externes Venue mit Paper-Market-Data");
+  // Reale externe Venues mit voller Coverage: BITUNIX + ALPACA (Task 12).
+  assert.equal(c.fullDiscoveryVenues, 2, "2 externe Venues mit voller Discovery");
+  assert.equal(c.paperMarketDataVenues, 2, "2 externe Venues mit Paper-Market-Data");
   assert.equal(c.liveEnabledVenues, 0, "0 Venues mit aktiviertem Live Trading");
 });
 
@@ -56,22 +56,24 @@ test("Coverage: alle fünf Metriken vorhanden und korrekt beschriftet", () => {
   }
 });
 
-test("Coverage: Discovery/Market-Data decken PAPER + BITUNIX ab (Capability-SSoT)", () => {
+test("Coverage: Discovery/Market-Data decken PAPER + BITUNIX + ALPACA ab (Capability-SSoT)", () => {
   const c = computeBrokerCoverage({ liveDecision: allLocked });
   const discovery = c.metrics.find((m) => m.id === "discovery");
   const marketData = c.metrics.find((m) => m.id === "marketData");
   const paper = c.metrics.find((m) => m.id === "paperExecution");
   assert.ok(discovery && marketData && paper);
-  assert.deepEqual([...discovery.venues].sort(), ["BITUNIX", "PAPER"]);
-  assert.deepEqual([...marketData.venues].sort(), ["BITUNIX", "PAPER"]);
-  assert.deepEqual([...paper.venues].sort(), ["BITUNIX", "PAPER"]);
+  assert.deepEqual([...discovery.venues].sort(), ["ALPACA", "BITUNIX", "PAPER"]);
+  assert.deepEqual([...marketData.venues].sort(), ["ALPACA", "BITUNIX", "PAPER"]);
+  assert.deepEqual([...paper.venues].sort(), ["ALPACA", "BITUNIX", "PAPER"]);
 });
 
-test("Coverage: Testnet ist heute nirgends abgedeckt", () => {
+test("Coverage: Testnet ist heute nur über ALPACA abgedeckt (Alpaca Paper-API)", () => {
   const c = computeBrokerCoverage({ liveDecision: allLocked });
   const testnet = c.metrics.find((m) => m.id === "testnetExecution");
   assert.ok(testnet);
-  assert.equal(testnet.covered, 0);
+  // Alpacas offizielle Paper-Trade-API ist ein vollständiges Testnet
+  // (paper-api.alpaca.markets) — daher abgedeckt (Task 12).
+  assert.deepEqual([...testnet.venues].sort(), ["ALPACA"]);
 });
 
 test("Coverage: Live-Execution folgt dem Gate — freigegebenes Venue erhöht die Zahl", () => {

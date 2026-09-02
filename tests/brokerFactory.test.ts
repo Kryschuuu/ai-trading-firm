@@ -16,6 +16,7 @@ import {
 import { PaperBrokerAdapter } from "../src/brokers/paper";
 import { StubBrokerAdapter } from "../src/brokers/stubs";
 import { BitunixBrokerAdapter } from "../src/brokers/bitunix";
+import { AlpacaBrokerAdapter } from "../src/brokers/alpaca";
 import { VENUE_CAPABILITIES, REQUIRED_CAPABILITY_BY_MODE } from "../src/brokers/capabilities";
 import {
   clearBrokerFactoryAuditForTests,
@@ -44,15 +45,16 @@ beforeEach(() => {
 //
 //   PAPER   : backtest ✓ · paper ✓ · testnet ✗(NSE testnet) · live ✗(LGTE)
 //   BITUNIX : backtest ✓ · paper ✓ · testnet ✗(NSE testnet) · live ✗(LGTE)
-//   ALPACA  : backtest ✗(NSE paper) · paper ✗(NSE paper) · testnet ✗(NSE testnet) · live ✗(LGTE)
-//   IBKR    : wie ALPACA
-//   BINANCE : wie ALPACA
-//   KRAKEN  : wie ALPACA
-//   DYDX    : wie ALPACA
+//   ALPACA  : backtest ✓ · paper ✓ · testnet ✓ · live ✗(LGTE)     (Task 12)
+//   IBKR    : backtest ✗ · paper ✗ · testnet ✗ · live ✗(LGTE)    (Stub)
+//   BINANCE : wie IBKR
+//   KRAKEN  : wie IBKR
+//   DYDX    : wie IBKR
 //
 // Begründung: Stubs deklarieren alle Exec-Capabilities ehrlich false.
-// BITUNIX kann Paper/Backtest (Modus B). `live` ist für JEDES Venue
-// hart gesperrt (LiveTradingGateError) — unabhängig von Flags.
+// BITUNIX kann Paper/Backtest (Modus B); ALPACA kann zusätzlich testnet
+// (Paper-Trade-API ist Alpacas offizielles Testnet). `live` ist für JEDES
+// Venue hart gesperrt (LiveTradingGateError) — unabhängig von Flags.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Expectation =
@@ -74,7 +76,12 @@ const MATRIX: Record<BrokerVenueId, Record<ExecutionMode, Expectation>> = {
     testnet: { ok: false, error: "NOT_SUPPORTED_CAPABILITY", capability: "testnet" },
     live: { ok: false, error: "LIVE_TRADING_GATE" },
   },
-  ALPACA: stubRow("ALPACA"),
+  ALPACA: {
+    backtest: { ok: true },
+    paper: { ok: true },
+    testnet: { ok: true },
+    live: { ok: false, error: "LIVE_TRADING_GATE" },
+  },
   IBKR: stubRow("IBKR"),
   BINANCE: stubRow("BINANCE"),
   KRAKEN: stubRow("KRAKEN"),
@@ -121,6 +128,8 @@ test("28er-Factory-Matrix: jeder Fall entspricht der Erwartungstabelle", async (
           assert.ok(adapter instanceof PaperBrokerAdapter, `${venue}/${mode}: PAPER-Adapter`);
         } else if (venue === "BITUNIX") {
           assert.ok(adapter instanceof BitunixBrokerAdapter, `${venue}/${mode}: Bitunix-Adapter`);
+        } else if (venue === "ALPACA") {
+          assert.ok(adapter instanceof AlpacaBrokerAdapter, `${venue}/${mode}: Alpaca-Adapter`);
         } else {
           assert.ok(adapter instanceof StubBrokerAdapter, `${venue}/${mode}: Stub-Adapter`);
         }
@@ -224,6 +233,9 @@ test("Registry-Projektion: paperAvailable/liveAvailable = Adapter-Capabilities (
     } else if (venue === "PAPER") {
       assert.equal(entry.liveAvailable, false);
       assert.equal(entry.paperAvailable, true);
+    } else if (venue === "ALPACA") {
+      assert.equal(entry.liveAvailable, true, "ALPACA: live-Capability ja, Ausführung nein");
+      assert.equal(entry.paperAvailable, true);
     } else {
       assert.equal(entry.liveAvailable, false, `${venue}: liveAvailable=false (Stub)`);
       assert.equal(entry.paperAvailable, false);
@@ -258,18 +270,21 @@ test("Audit-Vollständigkeit: jeder Aufruf mit mode != 'paper' landet im Log", a
     if (e.outcome === "OK") {
       assert.equal(e.errorCode, null, "OK-Eintrag ohne Fehlercode");
       assert.equal(e.capability, null, "OK-Eintrag ohne Capability");
-      assert.ok(e.venue === "PAPER" || e.venue === "BITUNIX", `OK-Venue: ${e.venue}`);
-      assert.equal(e.mode, "backtest", "OK nur für backtest (paper wird nicht auditiert)");
+      assert.ok(
+        e.venue === "PAPER" || e.venue === "BITUNIX" || e.venue === "ALPACA",
+        `OK-Venue: ${e.venue}`
+      );
+      assert.ok(e.mode === "backtest" || e.mode === "testnet", `OK-Mode: ${e.mode}`);
     } else {
       assert.ok(e.errorCode, "DENIED-Eintrag mit Fehlercode");
     }
   }
   const okCount = entries.filter((e) => e.outcome === "OK").length;
-  assert.equal(okCount, 2, "genau zwei OK-Einträge (PAPER/backtest + BITUNIX/backtest)");
+  assert.equal(okCount, 4, "genau vier OK-Einträge (PAPER/backtest + BITUNIX/backtest + ALPACA/backtest + ALPACA/testnet)");
   const liveDenied = entries.filter((e) => e.errorCode === "LIVE_TRADING_GATE").length;
   assert.equal(liveDenied, 7, "alle 7 Live-Aufrufe auditiert");
   const capDenied = entries.filter((e) => e.errorCode === "NOT_SUPPORTED_CAPABILITY").length;
-  assert.equal(capDenied, 12, "12 Capability-Ablehnungen auditiert");
+  assert.equal(capDenied, 10, "10 Capability-Ablehnungen auditiert (4 backtest-Stubs + 6 testnet-NSE)");
 });
 
 test("Audit: paper-Modus wird NICHT protokolliert (Regel: nur mode != 'paper')", async () => {

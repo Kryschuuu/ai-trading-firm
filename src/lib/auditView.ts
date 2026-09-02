@@ -2097,6 +2097,33 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       },
     ],
   },
+  ALPACA_PRIVATE_CALL: {
+    label: "Alpaca-Privat-API",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Privater, Basic-Auth-geschützter REST-Aufruf an Alpaca (Account, Positionen, " +
+      "Assets-Discovery oder Place-Order). Der Live-Adapter sendet Place-Order nie " +
+      "(LiveTradingGateError bis task-11 öffnet). Protokolliert werden nur Methode, Pfad " +
+      "und Ergebnis — niemals Body, Query, Key oder Secret.",
+    headline: (d) => {
+      const method = text(d.method) ?? "—";
+      const path = text(d.path) ?? "—";
+      const outcome = text(d.outcome) ?? "—";
+      return `${method} ${path} → ${outcome}`;
+    },
+    sections: (d) => [
+      {
+        title: "Privater Call",
+        facts: [
+          { label: "Methode", value: text(d.method) ?? "—", mono: true },
+          { label: "Pfad", value: text(d.path) ?? "—", mono: true },
+          { label: "Ergebnis", value: text(d.outcome) ?? "—" },
+          { label: "Fehlercode", value: text(d.errorCode) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
 };
 
 /** Fallback für unbekannte Events — nie leer, nie abgeschnitten. */
