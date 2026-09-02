@@ -18,7 +18,9 @@ import { createAdapter } from "../src/brokers/factory";
 import { PaperBrokerAdapter } from "../src/brokers/paper";
 import { StubBrokerAdapter } from "../src/brokers/stubs";
 import { BitunixBrokerAdapter } from "../src/brokers/bitunix";
+import { AlpacaBrokerAdapter } from "../src/brokers/alpaca";
 import { BitunixDisabledError } from "../src/brokers/bitunix/errors";
+import { AlpacaDisabledError } from "../src/brokers/alpaca/errors";
 import { MarketDataFetchError } from "../src/lib/marketDataErrors";
 import {
   BROKER_VENUE_IDS,
@@ -100,6 +102,8 @@ for (const venue of BROKER_VENUE_IDS) {
       assert.ok(adapter instanceof PaperBrokerAdapter, "PAPER-Adapter-Typ");
     } else if (venue === "BITUNIX") {
       assert.ok(adapter instanceof BitunixBrokerAdapter, "Bitunix-Adapter-Typ");
+    } else if (venue === "ALPACA") {
+      assert.ok(adapter instanceof AlpacaBrokerAdapter, "Alpaca-Adapter-Typ");
     } else {
       assert.ok(adapter instanceof StubBrokerAdapter, "Stub-Adapter-Typ");
     }
@@ -135,6 +139,13 @@ for (const venue of BROKER_VENUE_IDS) {
       await assert.rejects(() => adapter.placeOrder!(req), BitunixDisabledError);
       await assert.rejects(() => adapter.getAccount!(), BitunixDisabledError);
       await assert.rejects(() => adapter.getPositions!(), BitunixDisabledError);
+      return;
+    }
+    if (venue === "ALPACA") {
+      // Flag Default OFF → AlpacaDisabledError (kein Netz, kein Fill).
+      await assert.rejects(() => adapter.placeOrder!(req), AlpacaDisabledError);
+      await assert.rejects(() => adapter.getAccount!(), AlpacaDisabledError);
+      await assert.rejects(() => adapter.getPositions!(), AlpacaDisabledError);
       return;
     }
     // PAPER: echte simulierte Ausführung (Guardrails bleiben wirksam).
@@ -178,6 +189,11 @@ for (const venue of BROKER_VENUE_IDS) {
       await assert.rejects(() => adapter.getCandles!("BTCUSDT", "15m"), BitunixDisabledError);
       return;
     }
+    if (venue === "ALPACA") {
+      await assert.rejects(() => adapter.getTicker!("AAPL"), AlpacaDisabledError);
+      await assert.rejects(() => adapter.getCandles!("AAPL", "1Day"), AlpacaDisabledError);
+      return;
+    }
     // PAPER: offline über das statische Fallback-Buch (fetch gestubt).
     const t = await adapter.getTicker!("BTC");
     assert.equal(t.symbol, "BTC");
@@ -214,6 +230,10 @@ for (const venue of BROKER_VENUE_IDS) {
       await assert.rejects(() => adapter.discoverInstruments!(), BitunixDisabledError);
       return;
     }
+    if (venue === "ALPACA") {
+      await assert.rejects(() => adapter.discoverInstruments!(), AlpacaDisabledError);
+      return;
+    }
     // PAPER: Discovery aus der lokalen Universe-Registry (offline, deterministisch).
     const items = await adapter.discoverInstruments!();
     assert.ok(items.length >= 1, "mindestens ein PAPER-Instrument");
@@ -242,6 +262,11 @@ for (const venue of BROKER_VENUE_IDS) {
         threw++;
         if (venue === "BITUNIX") {
           assert.ok(e instanceof BitunixDisabledError, `${venue}/${method}: BitunixDisabledError, got ${e}`);
+          assertNoLeak((e as Error).message);
+          continue;
+        }
+        if (venue === "ALPACA") {
+          assert.ok(e instanceof AlpacaDisabledError, `${venue}/${method}: AlpacaDisabledError, got ${e}`);
           assertNoLeak((e as Error).message);
           continue;
         }

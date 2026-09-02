@@ -35,9 +35,10 @@ test("API: GET /api/brokers/coverage liefert Headline + Metriken + Rows", async 
   assert.equal(body.internalVenues, 1);
   assert.equal(body.externalVenues, BROKER_VENUE_IDS.length - 1);
 
-  // Geforderte Headline: 1 volle Discovery, 1 Paper-Market-Data, 0 Live.
-  assert.equal(body.fullDiscoveryVenues, 1);
-  assert.equal(body.paperMarketDataVenues, 1);
+  // Geforderte Headline: 2 volle Discovery, 2 Paper-Market-Data, 0 Live
+  // (BITUNIX + ALPACA als reale externe Venues mit voller Coverage, Task 12).
+  assert.equal(body.fullDiscoveryVenues, 2);
+  assert.equal(body.paperMarketDataVenues, 2);
   assert.equal(body.liveEnabledVenues, 0);
 
   assert.deepEqual(

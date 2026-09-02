@@ -68,14 +68,21 @@ test("API: GET /api/brokers liefert 7 Broker mit capabilities + health", async (
     }
     // Registry-Projektion in der Antwort:
     assert.equal(typeof b.paperAvailable, "boolean");
-    assert.equal(b.liveAvailable, b.id === "BITUNIX", `${b.id}: liveAvailable (Capability)`);
-    assert.equal(b.paperAvailable, b.id === "PAPER" || b.id === "BITUNIX");
+    assert.equal(
+      b.liveAvailable,
+      b.id === "BITUNIX" || b.id === "ALPACA",
+      `${b.id}: liveAvailable (Capability)`
+    );
+    assert.equal(
+      b.paperAvailable,
+      b.id === "PAPER" || b.id === "BITUNIX" || b.id === "ALPACA"
+    );
     // Health-Form:
     assert.ok(["online", "degraded", "offline"].includes(b.health.status), `${b.id}: health-Enum`);
     assert.equal(typeof b.health.latencyMs, "number");
     // PAPER online (lokale Simulation), Stubs offline (ehrliche Ist-Lage):
     if (b.id === "PAPER") assert.equal(b.health.status, "online");
-    else assert.equal(b.health.status, "offline", `${b.id}: lokal offline (Stub bzw. BITUNIX_ENABLED=false)`);
+    else assert.equal(b.health.status, "offline", `${b.id}: lokal offline (Stub bzw. BITUNIX_ENABLED=false bzw. ALPACA_ENABLED=false)`);
     // Execution-Modi: live ist prinzipiell nie verfügbar:
     assert.equal(b.executionModes.live.available, false, `${b.id}: live gesperrt`);
   }
@@ -114,7 +121,9 @@ test("API: GET /api/brokers/BITUNIX/health → 200, offline (Flag Default OFF)",
   assert.equal(body.health.details.reason, "BITUNIX_DISABLED");
 });
 
-test("API: GET /api/brokers/ALPACA/health → 200, offline + Grund (Remote default OFF)", async () => {
+test("API: GET /api/brokers/ALPACA/health → 200, offline + Grund (ALPACA_ENABLED Default OFF)", async () => {
+  // ALPACA_ENABLED ist im Test-Env nicht gesetzt → Adapter meldet offline + Grund.
+  delete process.env.ALPACA_ENABLED;
   const res = await health("ALPACA");
   assert.equal(res.status, 200);
   const body = (await res.json()) as {
@@ -125,8 +134,8 @@ test("API: GET /api/brokers/ALPACA/health → 200, offline + Grund (Remote defau
   assert.equal(body.ok, true);
   assert.equal(body.venue, "ALPACA");
   assert.equal(body.health.status, "offline");
-  assert.equal(body.health.details.implemented, false);
-  assert.match(String(body.health.details.remoteCheck), /deaktiviert/);
+  assert.equal(body.health.details.reason, "ALPACA_DISABLED");
+  assert.equal(body.health.details.alpacaEnabled, false);
 });
 
 test("API: Venue-Normalisierung (kleinschreibung) + Unbekannte Venues → 404", async () => {
@@ -210,6 +219,11 @@ test("API: Remote-Check AN: KRAKEN public Time → online (gestubbt)", async () 
 
 test("API: Remote-Check AN: ALPACA/IBKR/DYDX → degraded mit Grund, KEIN Netzwerk", async () => {
   process.env.BROKER_HEALTHCHECK_REMOTE = "true";
+  // ALPACA_ENABLED an, damit der Adapter die Remote-Snapshot-Abfrage starten
+  // würde — der Test stellt sicher, dass sie TROTZDEM nicht ausgeführt wird,
+  // weil keine Credentials hinterlegt sind (Alpaca-Snapshot ist nicht
+  // credential-frei, anders als die anderen Venues).
+  process.env.ALPACA_ENABLED = "true";
   let fetchCalls = 0;
   globalThis.fetch = (async () => {
     fetchCalls++;
@@ -229,6 +243,7 @@ test("API: Remote-Check AN: ALPACA/IBKR/DYDX → degraded mit Grund, KEIN Netzwe
   await expectReason("DYDX", "REMOTE_CHECK_NOT_IMPLEMENTED");
   // Credentials/Gateway-freie Venues stellen NIEMALS Requests:
   assert.equal(fetchCalls, 0, "ALPACA/IBKR/DYDX dürfen ohne Credentials kein Netzwerk nutzen");
+  delete process.env.ALPACA_ENABLED;
 });
 
 test("API: Remote-Check AN: Ausfall → offline mit redigierter Meldung", async () => {

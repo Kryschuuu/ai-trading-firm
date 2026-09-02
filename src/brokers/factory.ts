@@ -29,6 +29,7 @@ import { PaperBroker } from "../lib/broker";
 import { recordBrokerFactoryCall } from "./audit";
 import { REQUIRED_CAPABILITY_BY_MODE, VENUE_CAPABILITIES } from "./capabilities";
 import { BitunixBrokerAdapter } from "./bitunix";
+import { AlpacaBrokerAdapter } from "./alpaca";
 import { PaperBrokerAdapter } from "./paper";
 import { StubBrokerAdapter } from "./stubs";
 import { assertLiveOrderAllowed } from "../live-gate/enforcer";
@@ -76,6 +77,9 @@ export function createAdapter(
   }
   if (venue === "BITUNIX") {
     return new BitunixBrokerAdapter(mode);
+  }
+  if (venue === "ALPACA") {
+    return new AlpacaBrokerAdapter(mode);
   }
   return new StubBrokerAdapter(venue, mode);
 }

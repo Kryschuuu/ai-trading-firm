@@ -1,6 +1,6 @@
 # Capability-SSoT und Instrument-Projektion
 
-**Stand:** v1.28.1 · **Modul:** `src/universe/capabilityProjection.ts` · **SSoT:** `src/brokers/capabilities.ts`
+**Stand:** v1.36.0 · **Modul:** `src/universe/capabilityProjection.ts` · **SSoT:** `src/brokers/capabilities.ts`
 
 Dieses Dokument definiert die einzige Laufzeit-Wahrheit für Venue-Fähigkeiten und
 die Instrument-Verfügbarkeit. Der Universe-Seed enthält **statische** Instrumentdaten
@@ -66,9 +66,15 @@ Nutzer zu einem Live-Handelsversuch verleiten. Deshalb gilt:
 
 ## Aktuelle Stub-Venues
 
-Solange die Matrix für `BINANCE`, `KRAKEN`, `ALPACA` und `IBKR` jeweils
-`trading: false` / `live: false` ausweist und der Factory-Pfad ein Stub ist,
-projizieren alle entsprechenden Seed-Instrumente:
+`BITUNIX` (v1.15.0) und `ALPACA` (v1.36.0) sind die produktiven Integrationen:
+`discovery`, `marketData`, `trading` und `live` sind auf Adapter-Ebene `true`
+(zusätzlich `testnet: true` für ALPACA, weil die offizielle `paper-api.alpaca.markets`
+ein vollständiges Testnet ist); `liveAvailable` bleibt trotzdem `false`, bis
+Feature-Flag und Live-Gate offen sind.
+
+Solange die Matrix für `BINANCE`, `KRAKEN` und `IBKR` jeweils `trading: false` /
+`live: false` ausweist und der Factory-Pfad ein Stub ist, projizieren alle
+entsprechenden Seed-Instrumente:
 
 ```json
 { "liveAvailable": false, "liveTradable": true }
@@ -76,10 +82,6 @@ projizieren alle entsprechenden Seed-Instrumente:
 
 `liveTradable=true` ist hier die Produktabsicht, nicht die technische
 Verfügbarkeit.
-
-`BITUNIX` ist die produktivere Integration: `discovery`, `marketData`,
-`trading` und `live` sind auf Adapter-Ebene `true`; `liveAvailable` bleibt
-trotzdem `false`, bis Feature-Flag und Live-Gate offen sind.
 
 `PAPER` ist fachlich nicht live-handelbar (`liveTradable=false`,
 `capabilities.live=false`).

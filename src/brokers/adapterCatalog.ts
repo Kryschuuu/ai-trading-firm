@@ -14,7 +14,6 @@ import { BROKER_VENUE_IDS, type BrokerVenueId } from "../contracts/broker";
 
 /** Venues, deren Factory-Pfad `StubBrokerAdapter` liefert. */
 export const STUB_ADAPTER_VENUES: readonly BrokerVenueId[] = [
-  "ALPACA",
   "IBKR",
   "BINANCE",
   "KRAKEN",

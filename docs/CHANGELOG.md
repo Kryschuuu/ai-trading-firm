@@ -4,6 +4,203 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
 
+
+## [1.36.0] — 2026-09-01 · feat(broker): Alpaca-Volladapter (8. Venue, US-Aktien/ETFs/Crypto)
+
+**Ausgangslage.** Das System kannte sieben Venues — Bitunix als realer
+Volladapter (Perpetuals, Modus B), PAPER für Tests sowie fünf Stubs
+(ALPACA, IBKR, BINANCE, KRAKEN, DYDX). Für US-Aktien und ETFs gab es keine
+reale Anbindung; wer mit Alpaca handeln wollte, fand nur einen Stub, der
+ehrlich `NotSupportedCapabilityError` warf. Mit dem neuen Alpaca-Adapter
+rückt eine regulierte, vollständig dokumentierte Broker-API in den
+verfügbaren Venue-Pool — als zweiter realer Volladapter neben Bitunix,
+weiterhin hinter dem zentralen Live-Gate (Task 11) und mit derselben
+Audit-Lehre wie Bitunix 1.35.1: keine ungeprüften Schutzketten.
+
+### Added
+
+* **Volladapter `src/brokers/alpaca/`** (16 Dateien) — Pattern vollständig
+  analog zu Bitunix:
+  - `config.ts`: Public/Trade-Config-Loader mit `ALPACA_ENABLED`/
+    `ALPACA_LIVE_ENABLED`/`ALPACA_USE_LIVE_ENDPOINTS`/`ALPACA_RETRY_MAX`/
+    `ALPACA_ALLOW_INSECURE_HTTP`/`ALPACA_PAPER_DATA_HOST` u. a.; Default
+    zeigt auf die offizielle Paper-Endpoint-Gruppe.
+  - `http.ts`: `AlpacaHttp` + `TokenBucket` (Public- und Private-Endpoint,
+    getrennte Rate-Budgets), TLS erzwungen, Loopback-Ausnahme für Tests,
+    Host-Allowlist (SSRF), begrenzter Retry/Backoff, **kein Retry für
+    nicht-idempotente Requests** (POST `placeOrder`) — Idempotenz wird über
+    `client_order_id` aus BrokerOrderRequest-Symbol+Qty+Side+Timestamp
+    hergestellt.
+  - `publicClient.ts`: `fetchTicker`, `fetchCandles` (Bars v2) — bewusst
+    credential-frei (Auth-Header nur bei explizitem Bedarf, getestet).
+  - `privateClient.ts`: Basic-Auth, Account/Positions/Assets/Order; jeder
+    Private-Call auditiert (`ALPACA_PRIVATE_CALL`, Methode/Pfad/Outcome,
+    keine Keys/Body/Query).
+  - `secrets.ts`: `SecretStore` mit Env-Fallback (`ALPACA_API_KEY`/
+    `ALPACA_API_SECRET`), analog zu Bitunix, deterministische
+    Redaction-Befüllung im selben Schritt wie das Laden.
+  - `mapping.ts`: `mapAsset`/`mapAssets` (Alpaca-Asset → `MarketInstrument`,
+    `class="us_equity" → "equity"`, `class="crypto" → "crypto"`,
+    Crypto-Symbole `BTC/USD` mit Base/Quote-Split) plus `mapBar`/
+    `mapBars`, `mapOrderResult`, `mapPosition`, `mapAccount`.
+  - `orders.ts`: `serializePlaceOrder` + `makeClientOrderId` (Broker-Order
+    + Idempotenz-Key), `OrderSerializationError` mit klarem Code.
+  - `redactor.ts`: `createAlpacaLogger` + `redactAlpaca` (maskiert
+    `apiKey`/`apiSecret`/Header/Body-Quoting).
+  - `errors.ts`: `AlpacaApiError` (Code `auth|rate-limit|payload|...`),
+    `AlpacaDisabledError`, `safeSnippet`, `classifyAlpacaFailure`.
+  - `gates.ts`: `assertAlpacaEnabled(env)` (Default aus), `assertLiveOrderAllowed`
+    (delegiert an Live-Gate), `snapshotAlpacaLiveGate`.
+  - `paper.ts`: `AlpacaPaperLedger` mit `submit`/`getAccount`/`listPositions` —
+    vollständige Guard-Sequenz **vor** der Fill-Simulation:
+    `killSwitch` (prozessweit) → Input-Validierung → `validateOrder`
+    (Notional, Equity, Side, Leverage, Pflicht-Stop) → Fill-Simulator
+    (zentral, mit `filledQty`/Fees) → Cash-Check → Position-Update.
+    Reject-Pfade liefern maschinenlesbare Codes (`KILL_SWITCH_ARMED`,
+    `INVALID_QTY`, `NO_QUOTE:…`, `INVALID_STOP_LOSS`, Guardrail-Block).
+  - `execution.ts`: `ExecutionPort` mit `PaperExecutionEngine` (Ledger,
+    Modus `paper`) und `BrokerExecutionEngine` (signierter Private-Client,
+    Modus `live`); `submit` führt Kill-Switch-Prüfung **vor** dem Senden,
+    nutzt den privaten Account-Abruf nicht für Guardrails (Ledger-
+    Equity=0 würde Live-Orders blockieren — Live validiert via echtes
+    Konto).
+  - `audit.ts`: synchroner In-Memory-Ring (max. 200) für
+    `ALPACA_PRIVATE_CALL`, best-effort `audit_log`-Persistenz
+    (Event `ALPACA_PRIVATE_CALL`, kein Stacktrace/keine Secret-Header).
+  - `adapter.ts`: `AlpacaBrokerAdapter implements BrokerAdapter`
+    (`id = "ALPACA"`), `AlpacaAdapterDeps` mit `publicConfig`/`tradeConfig`/
+    `publicClient`/`privateClient`/`secretStore`/`logger`/`registry`/
+    `paper`/`now`. `credentialStatus({verify?})` ist ehrlich: ohne
+    `verify` → `permissions: []`, `connected: false`,
+    `permissionsVerified: false`; mit `verify` → erfolgreicher
+    Account-Abruf = `connected: true`, `permissions: ["READ"]`,
+    `permissionsVerified: true` (keine `["READ","TRADE"]`-Behauptung
+    ohne Beleg). `healthCheck({remote?})` ohne `remote` netzwerkfrei;
+    mit `remote` credential-frei nur auf Public-Endpoint.
+    `discoverInstruments()` nutzt den Private-Endpoint, upserted in die
+    Registry (`source: "discovery:alpaca"`). `execution()`-Pfad
+    prüft `tradeCfg.usePaperEndpoints` (nicht `publicCfg`) im Testnet,
+    um Live-Endpoint + Testnet-Modus-Kombination zu verbieten
+    (Defense in Depth).
+  - `index.ts`: vollständige Re-Exports.
+* **Capabilities** (`src/brokers/capabilities.ts`):
+  `VENUE_CAPABILITIES.ALPACA` = `{ discovery: true, marketData: true,
+  trading: true, paper: true, testnet: true, live: true,
+  instrumentTypes: { spot: true, perpetual: false, future: false,
+  option: false, cfd: false }, stopAtVenue: true }` — `testnet: true`,
+  weil Alpacas offizielle `paper-api.alpaca.markets` ein vollständiges
+  Testnet ist (eigener Endpoint, separate Credentials, eigenes
+  Geld-Limit). Bitunix bleibt ohne `testnet` (kein offizielles Testnet).
+* **Factory/Contracts/Adapter-Catalog**:
+  - `BROKER_VENUE_IDS` enthält `ALPACA` (28er-Matrix).
+  - `createAdapter("ALPACA", mode)` instanziiert den neuen Adapter;
+    `STUB_ADAPTER_VENUES` enthält ALPACA **nicht** mehr.
+  - `contracts/broker.ts` `BrokerVenueId` enthält `ALPACA`.
+  - `AlpacaBrokerAdapter` ist in `src/brokers/index.ts` re-exportiert.
+* **Live-Gate** (`src/live-gate/enforcer.ts`): zentral, Venue-Flag
+  `ALPACA_LIVE_ENABLED` (`venueLiveFlagName("ALPACA")`); Standard-Pfad
+  bleibt `LiveTradingGateError` bis Suite-Stamp + Flags + Control Plane
+  freigeben.
+* **Coverage** (`src/brokers/coverage.ts`): Headline jetzt **2 / 2 / 0**
+  (zwei reale externe Venues mit voller Coverage: BITUNIX + ALPACA; beide
+  mit Live-Execution deaktiviert). Testnet-Coverage = `["ALPACA"]`
+  (BITUNIX hat kein offizielles Testnet). `brokerCoverage.api.test.ts`
+  und `brokerCoverage.test.ts` mitgezogen.
+* **Tests (122 Alpaca-spezifisch, 13 Factory, 42 Cross-Broker-Contract,
+  10 Coverage, 2 Coverage-API)**:
+  - `tests/alpaca.unit.test.ts` (22) — Mapping (Asset/Crypto/Filter),
+    Orders (Idempotenz, Client-Order-Id, Serization), Errors
+    (Klassifikation, safeSnippet), Audit-Ring, Bar-Mapping (NaN-Filter,
+    Epoch-ms), `mapBars(null)`, `drawdownPct`-Logik.
+  - `tests/alpaca.adapter.test.ts` (17) — Paper-E2E (Discovery → Ticker →
+    Order, 0 Private-Calls, Modus B), `ALPACA_ENABLED=false` (alle
+    Capability-Methoden werfen `AlpacaDisabledError`), Live-Gate
+    `STATE_NOT_LIVE_ENABLED`, Live-Gate OFFEN nutzt Broker-Engine
+    (1 Private-Call, Venue-OrderId), Public-Client credential-frei,
+    `privateClient` ohne Credentials → `NotSupportedCapabilityError`,
+    Capabilities-Spiegel, `getOrderBook` nicht unterstützt,
+    `credentialStatus` ohne/mit verify (0/1 Private-Calls), Basic-Auth
+    Header korrekt gesetzt, Paper-Ledger Reject-Pfade
+    (`KILL_SWITCH_ARMED`, `INVALID_QTY`, `NO_QUOTE`, `INVALID_STOP_LOSS`,
+    Guardrail ohne Stop), ExecutionPort-Separation
+    (`PaperExecutionEngine` vs `BrokerExecutionEngine` mit Fake-Client),
+    `ALPACA_PRIVATE_CALL`-Audit, `basicAuthHeader`-Format, Secret-Scan
+    über `src/brokers/alpaca/**` (kein Klartext-Key in `console.*`),
+    Testnet-Mismatch-Schutz.
+  - `tests/brokerFactory.test.ts` (13) — 28er-Matrix (7×4), Capability-
+    Gating, Fehlerklassen, kein stiller Fallback, Audit-Vollständigkeit,
+    PAPER-Singleton, Defense in Depth.
+  - `tests/brokerContracts.test.ts` (42) — `ALPACA → AlpacaBrokerAdapter`,
+    `ALPACA → AlpacaDisabledError` (Trading/MarketData/Discovery/
+    Konsistenz), Audit-Katalog-Eintrag, parallele Verträge für alle
+    acht Venues.
+  - `tests/brokerCoverage.test.ts` (10) / `brokerCoverage.api.test.ts` (2)
+    — Headline 2/2/0, Discovery/MarketData/Paper = `["ALPACA","BITUNIX",
+    "PAPER"]`, Testnet = `["ALPACA"]`.
+* **Audit-Katalog** (`src/lib/auditView.ts`): `ALPACA_PRIVATE_CALL`-
+  Eintrag analog `BITUNIX_PRIVATE_CALL` (Label „Alpaca-Privat-API",
+  erwartetes Level INFO, deutsche Beschreibung, Sektion „Privater Call"
+  mit Methode/Pfad/Ergebnis/Fehlercode, niemals Body/Query/Key).
+* **Modus C** (`src/lib/marketdata/manager.ts` + `marketdata.modes.test.ts`):
+  `VENUE_CAPABILITIES.ALPACA.testnet = true` ⇒ `PAPER_MODE=broker-paper-api`
+  ist mit `PAPER_BROKER_API_VENUE=ALPACA` wählbar; Test „kein Venue
+  unterstützt Modus C" wurde auf den Negativ-Fall (z. B. IBKR) verengt
+  und um den Positiv-Test „ALPACA + Modus C ohne Fehler" ergänzt.
+
+### Changed
+
+* `src/lib/auditView.ts` — neuer Katalogeintrag `ALPACA_PRIVATE_CALL`
+  (analog `BITUNIX_PRIVATE_CALL`).
+* `tests/marketdata.modes.test.ts` — Modus-C-Test auf den korrekten
+  Negativ-Venue (IBKR) verengt + ALPACA-Positivfall.
+* `tests/brokerContracts.test.ts` — `ALPACA`-Branch in jedem
+  Vertragstest (Adapter-Instanz, `AlpacaDisabledError`).
+* `tests/brokerCoverage.test.ts` / `brokerCoverage.api.test.ts` —
+  Headline 2/2/0, Testnet-Liste enthält nur `ALPACA`.
+
+### Security
+
+* `credentialStatus` ohne `verify` meldet keine Rechte — die in 1.35.1
+  für Bitunix nachgezogene Lehre wird für Alpaca von Anfang an
+  umgesetzt.
+* `BrokerExecutionEngine.submit` prüft `killSwitch` vor dem Senden;
+  `AlpacaPaperLedger.submit` führt dieselbe Prüfung + `validateOrder`
+  gegen das Paper-Ledger. Live-Broker validiert via echtes Konto,
+  nicht gegen das lokale Ledger (Equity=0 würde sonst Live-Orders
+  blockieren).
+* `AlpacaHttp.request` verweigert Retry für nicht-idempotente POSTs
+  (`placeOrder`); nur 429 bleibt retry-fähig — keine Doppel-Order-Gefahr
+  bei Timeout/5xx.
+* Live-Pfad strikt hinter Live-Gate (`assertLiveOrderAllowed`); der
+  Testnet-Mismatch verhindert versehentliche Live-Endpoints im
+  Testnet-Modus.
+* `redactAlpaca` maskiert `apiKey`/`apiSecret`/Header/Body-Quoting;
+  Secret-Scan im Test (kein Klartext-Key in `console.*`).
+* Public-Client credential-frei, Auth nur wenn nötig (durch Tests
+  gegen Fixture-Server verifiziert: Public-Calls haben `authed: false`).
+* Audit-Einträge (`ALPACA_PRIVATE_CALL`): nur Methode, Pfad, Outcome,
+  Fehlercode — keine Body/Query/Key/Signatur.
+
+### Migration
+
+Kein Schema-Bruch, keine neuen Pflicht-Env-Variablen. Opt-in in `.env`:
+
+```bash
+ALPACA_ENABLED=false            # Default aus
+ALPACA_API_KEY=…                # aus https://app.alpaca.markets (Paper!)
+ALPACA_API_SECRET=…
+ALPACA_USE_LIVE_ENDPOINTS=false # Default: Paper-API
+ALPACA_ALLOW_INSECURE_HTTP=false # nur Loopback-Tests
+ALPACA_RETRY_MAX=2              # Default
+```
+
+`GET /api/brokers` zeigt ab v1.36.0 `count=8` Venues (PAPER + BITUNIX +
+ALPACA als reale Volladapter, fünf Stubs unverändert). Live bleibt
+überall gesperrt; `credentialStatus` ohne `verify` meldet keine Rechte.
+
+**Test-Stand:** `npm test` 1352/1352 grün; `npm run typecheck`, `npm run
+lint`, `npm run build`, `npm run docs:validate` grün.
+
 ## Versionierungsrichtlinie
 
 | Versionsstelle | Bedeutung | Beispiel |

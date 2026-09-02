@@ -53,6 +53,11 @@ test("runRemoteHealthCheck: Flag AN, Venue ohne Checker => null", async () => {
   assert.equal(await runRemoteHealthCheck("DYDX", { BROKER_HEALTHCHECK_REMOTE: "true" }), null);
   assert.equal(await runRemoteHealthCheck("PAPER", { BROKER_HEALTHCHECK_REMOTE: "true" }), null);
 });
+// Hinweis: ALPACA ist seit Task 12 ein voll implementierter Adapter; die
+// "venue ohne Checker"-Logik gilt für die `REMOTE_HEALTH_CHECKERS`-Map
+// weiterhin (sie enthält keinen ALPACA-Endpoint). Der Adapter selbst hat
+// einen eigenen `healthCheck({remote:true})`-Pfad, der ohne Credentials
+// "degraded" + CREDENTIALS_REQUIRED meldet. Beides ist kompatibel.
 
 test("runRemoteHealthCheck: Flag AN, BITUNIX public tickers (gestubbt)", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {

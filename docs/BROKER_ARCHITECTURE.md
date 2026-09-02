@@ -1,8 +1,8 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.21.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
-(inkl. `control-plane/` seit Task 08), `src/lib/broker.ts`
-(Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
+**Stand:** v1.36.0 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+(inkl. `control-plane/` seit Task 08, `src/brokers/alpaca/` seit v1.36.0),
+`src/lib/broker.ts` (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
 `GET /api/brokers`, `GET /api/brokers/coverage`,
 `GET /api/brokers/{venue}/health`,
 `/api/brokers/{venue}/(credentials|status|test|discover)` (Task 08),
@@ -80,22 +80,24 @@ als Doku in `BROKER_REGISTRY`: `label`, `assets`, `paperApi`, `note`).
 
 | Capability | PAPER | ALPACA | IBKR | BINANCE | KRAKEN | DYDX | BITUNIX |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| `discovery` | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ |
-| `marketData` | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ |
-| `trading` | ✅ (simuliert) | ❌ (Soll: ✅ testnet→live) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ (Paper; Live gesperrt) |
-| `paper` | ✅ | ❌ (Soll: ✅, Venue bietet Paper-API) | ❌ (Soll: ✅) | ❌ | ❌ | ❌ (Venue ohne Paper) | ✅ (Modus B, echte Kurse) |
-| `testnet` | ❌ | ❌ | ❌ | ❌ (Soll: ✅, Venue hat Testnet) | ❌ (Soll: ✅, Futures-Demo) | ❌ | ❌ (kein dokumentiertes Testnet) |
-| `live` | ❌ (simuliert, nie live) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ✅ Capability / ❌ Ausführung (LGTE bis task-11) |
+| `discovery` | ✅ | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ |
+| `marketData` | ✅ | ✅ | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ |
+| `trading` | ✅ (simuliert) | ✅ (Paper; Live gesperrt) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ (Paper; Live gesperrt) |
+| `paper` | ✅ | ✅ | ❌ (Soll: ✅) | ❌ | ❌ | ❌ (Venue ohne Paper) | ✅ (Modus B, echte Kurse) |
+| `testnet` | ❌ | ✅ (Alpaca Paper-API ist offizielles Testnet) | ❌ | ❌ (Soll: ✅, Venue hat Testnet) | ❌ (Soll: ✅, Futures-Demo) | ❌ | ❌ (kein dokumentiertes Testnet) |
+| `live` | ❌ (simuliert, nie live) | ✅ Capability / ❌ Ausführung (LGTE bis task-11) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ❌ (Soll: nach Gate-Task) | ✅ Capability / ❌ Ausführung (LGTE bis task-11) |
 | `instrumentTypes.spot` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | `instrumentTypes.perpetual` | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `instrumentTypes.future` | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | `instrumentTypes.option` | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| `stopAtVenue` (SL/TP am Order-Aufruf) | ❌ (SL/TP intern via Monitor) | ❌ (Soll: ✅ Bracket-Orders) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ (`slPrice`/`tpPrice` im Place-Order) |
+| `stopAtVenue` (SL/TP am Order-Aufruf) | ❌ (SL/TP intern via Monitor) | ✅ (Bracket-Orders: `order_class=bracket`) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ❌ (Soll: ✅) | ✅ (`slPrice`/`tpPrice` im Place-Order) |
 
-`stopAtVenue` ist für **Bitunix** wahr: Perpetuals mit Funding brauchen Stops,
-die am Venue platziert werden, nicht nur lokal überwacht. Der Paper-Pfad merkt
-SL/TP am Fill an, sendet sie aber nicht (keine Private-API). Details:
-[BITUNIX.md](BITUNIX.md).
+`stopAtVenue` ist für **Bitunix** und **Alpaca** wahr: Alpaca unterstützt
+Bracket-Orders (`order_class=bracket` mit `take_profit` und `stop_loss`).
+Bitunix-Perpetuals mit Funding brauchen Stops, die am Venue platziert werden,
+nicht nur lokal überwacht. Der Paper-Pfad merkt SL/TP am Fill an, sendet sie
+aber nicht (keine Private-API). Details: [BITUNIX.md](BITUNIX.md),
+[ALPACA.md](ALPACA.md).
 
 ### 3.1 Vier getrennte „Live“-Konzepte (v1.20.0)
 
@@ -132,9 +134,10 @@ ehrliche Ist-Lage aus der Capability-SSoT + dem Live-Gate-Enforcer. Es liefert
 die differenzierten Headline-Kennzahlen (statt „7 Broker“):
 
 ```
-7 Venues registriert
-1 Venue mit vollständiger Discovery      (extern: BITUNIX)
-1 Venue mit Paper-Market-Data            (extern: BITUNIX)
+8 Venues registriert
+2 Venues mit vollständiger Discovery      (extern: BITUNIX, ALPACA)
+2 Venues mit Paper-Market-Data            (extern: BITUNIX, ALPACA)
+1 Venue mit Testnet                       (extern: ALPACA)
 0 Venues mit aktiviertem Live Trading
 ```
 
@@ -256,10 +259,11 @@ Kein API-Token (konsistent mit den übrigen GET-Endpunkten), Fehler-Contract
 - **Remote (nur `BROKER_HEALTHCHECK_REMOTE=true`):** read-only,
   credential-frei, 4 s Timeout. Implementiert: Binance Public `ping`,
   Kraken Public `Time`, Bitunix Public `tickers`. **Bewusst NICHT** implementiert
-  (melden `degraded` mit Grund): ALPACA (`CREDENTIALS_REQUIRED`), IBKR
-  (`GATEWAY_REQUIRED`), DYDX (`REMOTE_CHECK_NOT_IMPLEMENTED`) — kein Venue ohne
-  verifizierten read-only Public-Endpunkt wird gecallt; ohne Credentials wird
-  **nie** ein Request gestellt (getestet).
+  (melden `degraded` mit Grund): ALPACA (`CREDENTIALS_REQUIRED` — Snapshot-
+  Endpoint verlangt Auth), IBKR (`GATEWAY_REQUIRED`), DYDX
+  (`REMOTE_CHECK_NOT_IMPLEMENTED`) — kein Venue ohne verifizierten read-only
+  Public-Endpunkt wird gecallt; ohne Credentials wird **nie** ein Request
+  gestellt (getestet).
 - Fehler werden redigiert zurückgeliefert (kein Host-/Credential-Leak).
 
 ---
@@ -297,6 +301,7 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
 | RBAC-Zentralisierung (Task 10) | **Phase 1 umgesetzt:** Kern in `src/auth/` (viewer/operator/admin). Control-Plane-Guard ist Fassade über `requirePermission("broker.credentials")`. Sessions = spätere Phase. |
 | Live-Trading-Gate | State-Machine + Hard-Gates; öffnet `mode="live"` **erst** nach Freigabe; `LiveTradingGateError` wird dann durch die Gate-Prüfung ersetzt; ab dann liefert `readGateState()` der Control Plane die echte Live-Anzeige |
 | Bitunix-Adapter (Task 07) | **umgesetzt:** `src/brokers/bitunix/`, `stopAtVenue: true`, Paper-Modus B; Live bleibt LGTE bis task-11. Doku: [BITUNIX.md](BITUNIX.md) |
+| Alpaca-Adapter (Task 12, v1.36.0) | **umgesetzt:** `src/brokers/alpaca/`, `testnet: true` (Paper-API ist offizielles Testnet), `stopAtVenue: true` (Bracket-Orders), Paper-Modus B, getrennte Paper-/Broker-Engines; Live bleibt LGTE. Doku: [ALPACA.md](ALPACA.md) |
 
 ## 11. Verweise
 
@@ -306,3 +311,4 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
 - Security: `docs/SECURITY_AUDIT.md` (Kapitel "Security Audit — Task 02" / Task 07 / Task 08)
 - Universum: `docs/MARKET_UNIVERSE.md` (Task 01) · `MarketInstrument`-Contract: `src/universe/types.ts`
 - Bitunix: `docs/BITUNIX.md`
+- Alpaca: `docs/ALPACA.md`
