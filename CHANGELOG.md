@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-01** ·
-> Code-Version **1.36.0**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-02** ·
+> Code-Version **1.36.1**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,27 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.1] — 2026-09-02 · fix(engine): robuster Duck-Type-Check für PAPER-Adapter
+
+Runtime-Bug auf dem Livesystem (192.168.0.10): Scheduler-Tick schlug fehl mit
+`UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet`. Ursache war ein
+`instanceof PaperBrokerAdapter`-Check in `src/lib/engine.ts`, der nach dem
+Alpaca-Volladapter (v1.36.0, neue `BROKER_VENUE_IDS`, zusätzliche Adapter-
+Module) durch Next.js-Modul-Recompilierung einen anderen Klassenmodul-Identifier
+lieferte — `instanceof` wurde `false`, obwohl der Adapter technisch ein
+`PaperBrokerAdapter` war. Klassisches Build-Cache-Drift-Problem.
+
+**Fix:** Der `instanceof`-Check wurde durch einen Duck-Type-Check ersetzt, der
+prüft, ob das Feld `paperBroker` auf dem Adapter-Objekt vorhanden ist. Das ist
+robuster gegen Build-Cache-Drift und Next.js-Modul-Recompilierung. Der Import
+von `PaperBrokerAdapter` in `engine.ts` wurde entfernt (nicht mehr nötig).
+
+* **Workaround für Betreiber:** Vor jedem Update `rm -rf .next node_modules/.cache`
+ausführen, um veraltete Build-Artefakte zu entfernen. Das Update-Kapitel in
+`docs/INSTALL.md` (Kapitel 12) wurde entsprechend erweitert.
+* **Keine Breaking Changes:** Das öffentliche API (`getBroker()`, `PaperBroker`)
+bleibt unverändert. Alle 1352 Tests bleiben grün.
 
 ## [1.36.0] — 2026-09-01 · feat(broker): Alpaca-Volladapter (8. Venue, US-Aktien/ETFs/Crypto)
 

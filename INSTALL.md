@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-08-31** · Code-Version **1.30.0**
+> Dokumentationsstand **2026-09-02** · Code-Version **1.36.1**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -66,6 +66,7 @@ npm ci
 npx drizzle-kit push            # Schema in die DB schreiben
 npm run universe:seed:markets   # 354 Preset-Instrumente (v1.30.0)
 npm run universe:seed           # Basis-Universum (NDJSON)
+rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm run build
 npm run start                   # http://0.0.0.0:3369
 ./scripts/validate-setup.sh     # 18 Checks, bestanden ab 15
@@ -267,9 +268,13 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 
 ## Migration & Deploy
 
-Empfohlene Deploy-Kette: `git pull` → `npm ci` → `npx drizzle-kit push` →
-`npm run universe:seed:markets` → `npm run build` →
-`sudo systemctl restart ai-trading-firm` → `./scripts/validate-setup.sh`.
+Empfohlene Deploy-Kette: `git pull` → `rm -rf .next node_modules/.cache` →
+`npm ci` → `npx drizzle-kit push` → `npm run universe:seed:markets` →
+`npm run build` → `sudo systemctl restart ai-trading-firm` →
+`./scripts/validate-setup.sh`. **Build-Cache vor jedem Update löschen**
+(verhindert `instanceof`-Drift bei Next.js-Modul-Recompilierung; v1.36.1
+verwendet Duck-Type statt `instanceof` — das Cache-Löschen beugt dem Problem
+auch für zukünftige Adapter-Checks vor).
 Migrationshinweise stehen im [`docs/CHANGELOG.md`](docs/CHANGELOG.md);
 Setup-Befunde und ihre Behebung in
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), PostgreSQL-Soforthilfe in

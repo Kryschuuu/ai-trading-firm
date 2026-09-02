@@ -782,11 +782,19 @@ Weitere Diagnose im **[Handbuch, Kapitel 12](HANDBUCH.md)**.
 # Update einspielen
 cd ~/ai-trading-firm
 git pull
+rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm install
 npx drizzle-kit push          # nur nötig, wenn sich das Schema geändert hat
 npm run build
 sudo systemctl restart ai-trading-firm
 ```
+
+**Wichtig:** Den Build-Cache (`rm -rf .next node_modules/.cache`) vor jedem
+Update löschen. Next.js kompiliert Module bei jedem Build neu — wenn alte
+Cache-Artefakte liegen bleiben, kann `instanceof`-Checks fehlschlagen
+(unterschiedliche Klassenmodul-Identifier). Der Duck-Type-Check in `engine.ts`
+(v1.36.1) ist robuster, aber das Cache-Löschen beugt dem Problem auch für
+zukünftige Adapter-Checks vor.
 
 Tägliche Sicherung der Entscheidungshistorie:
 
