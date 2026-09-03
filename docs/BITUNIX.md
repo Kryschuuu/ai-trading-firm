@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.32.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.36.10 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -389,6 +389,52 @@ keinen stillen Fallback auf Paper. `testnet` → `NotSupportedCapabilityError`
 Private Calls (nur im Live-Pfad nach Gate-Freigabe bzw. in Tests) landen als Event
 `BITUNIX_PRIVATE_CALL` (Methode, Pfad, Outcome, errorCode — **kein** Body, keine
 Query, kein Key, keine Signatur).
+
+### 5.1 Konto-Mapping `getAccount` (H8, seit v1.36.10)
+
+`GET /api/v1/futures/account?marginCoin=USDT` liefert pro Margin-Coin eine Zeile.
+`BitunixPrivateClient.getAccount()` bildet sie auf die **kanonische
+`BrokerAccount`-Zerlegung** ab (`src/contracts/broker.ts`); der Risk-Guard
+(`validateOrder` in `BrokerExecutionEngine.submit`) nutzt `equity` als
+Denominator, der Cash-Guard prüft `cash` (= freie Margin):
+
+| Venue-Feld (Zeile) | Bedeutung | Kanonisches Feld |
+| --- | --- | --- |
+| `walletBalance` | Kontostand ohne offene Positionen (falls geliefert) | `walletBalance` |
+| `available` | freie Margin (freies Cash) — **nicht** Equity | `cash` = `availableCash` |
+| `margin` (ggf. `usedMargin`) | durch Positionen gebundene Initial-Margin | `usedMargin` |
+| `frozen` | durch offene Orders gebundene Margin | (in `walletBalance`-Fallback) |
+| `crossUnrealizedPNL` | uPnL der Cross-Positionen | Teil von `unrealizedPnl` |
+| `isolationUnrealizedPNL` | uPnL der Isolated-Positionen | Teil von `unrealizedPnl` |
+| `maintenanceMargin` | Wartungsmargin (falls geliefert, sonst 0) | `maintenanceMargin` |
+| `realizedPnl` | realisiertes PnL (falls separat geliefert, sonst 0) | fließt in `equity` ein |
+
+Mapping-Regeln (H8):
+
+```text
+equity        = walletBalance + realizedPnl + unrealizedPnl
+unrealizedPnl = crossUnrealizedPNL + isolationUnrealizedPNL
+cash          = availableCash = available
+usedMargin    = usedMargin ?? row.margin ?? 0
+```
+
+- **`walletBalance`:** Wird direkt übernommen, wenn die Antwort das Feld führt.
+  Fehlt es **genuin** (undefined/null/leer — die dokumentierte Antwortversion
+  führt es nicht), wird es aus den venue-eigenen Komponenten zerlegt:
+  `available + frozen + margin` (freie Margin + Order-Margin + Positions-Margin).
+- **Niemals** wird `equity` aus `available` allein synthetisiert — die alte Formel
+  `equity = available + uPnL` ließ die gebundene Margin außen vor und war bei
+  offenen Positionen (`usedMargin > 0`) zu klein; es gilt dann `equity != available`.
+- Realisiertes PnL settled Bitunix laufend ins Wallet; die Account-Antwort führt
+  es regulär nicht — `realizedPnl` wird nur addiert, wenn die API es liefert.
+- Fehlen alle Felder (leere Antwort), ergibt die Abbildung fail-closed 0 —
+  `validateOrder` (H9) blockiert Orders dann hart.
+
+Alle übrigen Erzeuger (Paper-Ledger Alpaca/Bitunix, PAPER-Venue-Wrapper,
+Alpaca-Live-Mapping) liefern dieselbe kanonische Zerlegung; Paper/Cash-Konten
+sind voll besichert (`usedMargin = 0`, `availableCash = cash`,
+`walletBalance = equity − unrealizedPnl`). Tests:
+`tests/bitunix.accountEquity.test.ts`.
 
 ---
 

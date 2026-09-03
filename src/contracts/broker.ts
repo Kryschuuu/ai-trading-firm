@@ -159,12 +159,50 @@ export interface MarketCandle {
   volume: number;
 }
 
-/** Kontozustand eines Brokers (simuliert oder real). */
+/**
+ * Kontozustand eines Brokers (simuliert oder real).
+ *
+ * H8: Kanonische Zerlegung eines (Futures-)Kontos. Die Felder `equity` und
+ * `cash` sind der Legacy-Kern; `walletBalance`/`availableCash`/`usedMargin`/
+ * `maintenanceMargin`/`unrealizedPnl` sind die venue-unabhängige
+ * Dekomposition, auf die jeder Adapter seine echten Venue-Felder abbildet:
+ *
+ *     equity        = walletBalance + unrealizedPnl
+ *                     (+ realizedPnl, sofern das Venue realisiertes PnL
+ *                      separat führt — Bitunix settled es laufend ins
+ *                      Wallet, dort also 0)
+ *     cash          = availableCash   (Legacy-Alias, Cash-Guard)
+ *
+ * `available`/freie Margin ist NICHT die Equity: Bei offenen Positionen ist
+ * ein Teil des Kontos als Margin gebunden (`usedMargin`), gehört aber weiter
+ * zum Gesamtkapital. Equity ist der Risiko-Denominator (maxPositionPct,
+ * Sizing, Drawdown) und darf nie aus „available + uPnL“ synthetisiert werden.
+ */
 export interface BrokerAccount {
-  /** Mark-to-Market-Equity in Kontowährung. */
+  /** Mark-to-Market-Gesamtkapital (Equity) in Kontowährung. */
   equity: number;
-  /** Freies Cash in Kontowährung. */
+  /**
+   * Freies Cash in Kontowährung (Futures: freie Margin). Wird vom Cash-Guard
+   * geprüft; Legacy-Alias von `availableCash`. Nie `equity` als Cash
+   * verwenden (H8).
+   */
   cash: number;
+  /**
+   * H8: Kontostand (Wallet-Balance) in Kontowährung ohne offene Positionen —
+   * realisiertes PnL ist enthalten, unrealisiertes nicht.
+   */
+  walletBalance: number;
+  /** H8: Frei verfügbares Cash (Futures: freie Margin) — kanonisches Feld. */
+  availableCash: number;
+  /** H8: Aktuell gebundene Margin (Positionen + offene Orders); 0 ohne Margin-Konto. */
+  usedMargin: number;
+  /**
+   * H8: Maintenance-/Wartungsmargin (Liquidationsschwelle); 0, wenn das Venue
+   * sie nicht liefert.
+   */
+  maintenanceMargin: number;
+  /** H8: Summe der unrealisierten PnL aller offenen Positionen. */
+  unrealizedPnl: number;
   /** Anzahl offener Positionen. */
   openPositions: number;
   /** Startkapital (Basis für Drawdown). */

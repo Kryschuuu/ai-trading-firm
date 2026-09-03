@@ -101,6 +101,24 @@ export interface BitunixPrivateClientOptions extends BitunixHttpOptions {
   timestamp?: MonotonicTimestamp;
 }
 
+/**
+ * Liest ein numerisches Feld der Venue-Account-Zeile robust. Liefert NaN, wenn
+ * das Feld GENUIN fehlt (undefined/null/leer) oder nicht numerisch ist —
+ * Aufrufer entscheiden dann über den dokumentierten Fallback (H8).
+ */
+function accountRowNumber(row: BitunixAccountRaw | undefined, field: keyof BitunixAccountRaw): number {
+  if (!row || typeof row !== "object") return NaN;
+  const raw = row[field];
+  if (raw === undefined || raw === null || raw === "") return NaN;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/** NaN (Feld fehlt) → Fallback; endliche Werte unverändert. */
+function finiteOr(n: number, fallback: number): number {
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export class BitunixPrivateClient {
   private readonly http: BitunixHttp;
   private readonly creds: BitunixCredentials;
@@ -171,14 +189,50 @@ export class BitunixPrivateClient {
     const res = await this.signed("GET", BITUNIX_PATHS.account, { marginCoin }, "");
     const data = envelopeData<BitunixAccountRaw[] | BitunixAccountRaw>(res.json);
     const row = Array.isArray(data) ? data[0] : data;
-    const available = Number(row?.available ?? 0);
-    const upnl =
-      Number(row?.crossUnrealizedPNL ?? 0) + Number(row?.isolationUnrealizedPNL ?? 0);
-    const equity = (Number.isFinite(available) ? available : 0) + (Number.isFinite(upnl) ? upnl : 0);
+
+    // H8: KANONISCHE Kontozerlegung statt „equity = available + uPnL“.
+    // `available` ist die FREIE MARGIN (freies Cash), nicht die Equity: Bei
+    // offenen Positionen bindet das Venue Margin (`margin`, ggf. `usedMargin`)
+    // und Order-Margin (`frozen`) — beides gehört weiter zum Gesamtkapital.
+    // Equity ist der Risiko-Denominator (maxPositionPct, Sizing, Drawdown) und
+    // muss die gebundene Margin einschließen.
+    const available = finiteOr(accountRowNumber(row, "available"), 0); // freie Margin
+    const frozen = finiteOr(accountRowNumber(row, "frozen"), 0); // Order-Margin
+    const margin = finiteOr(accountRowNumber(row, "margin"), 0); // Positions-Margin
+    const unrealizedPnl =
+      finiteOr(accountRowNumber(row, "crossUnrealizedPNL"), 0) +
+      finiteOr(accountRowNumber(row, "isolationUnrealizedPNL"), 0);
+
+    // Wallet-Balance: Bitunix liefert `walletBalance` nicht in jeder
+    // Antwortversion. Fehlt das Feld (genuin absent), wird es aus den
+    // venue-eigenen Komponenten zerlegt — available + Order-Margin +
+    // Positions-Margin. Equity wird NIE aus `available` allein synthetisiert.
+    const walletBalanceRow = accountRowNumber(row, "walletBalance");
+    const walletBalance = Number.isFinite(walletBalanceRow)
+      ? walletBalanceRow
+      : available + frozen + margin;
+
+    // Realisiertes PnL: Bitunix settled es laufend ins Wallet — die
+    // Account-Antwort führt es regulär nicht; nur falls die API es doch
+    // liefert, wird es addiert (Fallback 0).
+    const realizedRow = accountRowNumber(row, "realizedPnl");
+    const realizedPnl = Number.isFinite(realizedRow) ? realizedRow : 0;
+
+    const usedMarginRow = accountRowNumber(row, "usedMargin");
+    const usedMargin = Number.isFinite(usedMarginRow) ? usedMarginRow : margin;
+    const maintenanceMarginRow = accountRowNumber(row, "maintenanceMargin");
+    const maintenanceMargin = Number.isFinite(maintenanceMarginRow) ? maintenanceMarginRow : 0;
+
+    const equity = walletBalance + realizedPnl + unrealizedPnl;
     return {
       equity,
-      cash: Number.isFinite(available) ? available : 0,
-      openPositions: 0,
+      cash: available,
+      walletBalance,
+      availableCash: available,
+      usedMargin,
+      maintenanceMargin,
+      unrealizedPnl,
+      openPositions: 0, // wird von der Execution-Engine aus getPositions gesetzt
       startingEquity: equity,
       drawdownPct: 0,
     };

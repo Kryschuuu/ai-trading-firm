@@ -67,14 +67,25 @@ export class BitunixPaperLedger {
 
   getAccount(mark?: (symbol: string) => number | null): BrokerAccount {
     let mv = 0;
+    let unrealizedPnl = 0;
     for (const [sym, p] of this.positions) {
       const px = mark?.(sym) ?? p.entryPrice;
       mv += p.qty * px;
+      unrealizedPnl += (p.side === "LONG" ? 1 : -1) * p.qty * (px - p.entryPrice);
     }
     const equity = this.cash + mv;
     return {
       equity,
       cash: this.cash,
+      // H8: Kanonische Zerlegung — Paper-Ledger ist ein voll besichertes
+      // Cash-Konto (kein Margin): walletBalance = Cash + Einstandswerte
+      // (= equity − unrealizedPnl; realisiertes PnL liegt im Cash), freie
+      // Cash = cash, gebundene Margin = 0.
+      walletBalance: equity - unrealizedPnl,
+      availableCash: this.cash,
+      usedMargin: 0,
+      maintenanceMargin: 0,
+      unrealizedPnl,
       openPositions: this.positions.size,
       startingEquity: this.start,
       drawdownPct: this.start > 0 ? Math.max(0, (this.start - equity) / this.start) : 0,

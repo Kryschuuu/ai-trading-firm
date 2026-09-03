@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.9**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.10**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,38 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.10] — 2026-09-03 · fix(broker): H8 Bitunix-Equity aus walletBalance + uPnL statt available + uPnL (HIGH)
+
+**HIGH, Brokers/Venues (`src/contracts/broker.ts`, `src/brokers/bitunix/privateClient.ts`).**
+`getAccount()` rechnete `equity = available + crossUnrealizedPNL + isolationUnrealizedPNL` und
+`cash = available`. Bei einem Futures-Konto ist `available` aber die **freie Margin**, nicht das
+Gesamtkapital: Mit offenen (isolierten/cross) Positionen blieb die gebundene Margin außen vor und
+der Risk-Denominator (maxPositionPct, Sizing, Drawdown) war falsch.
+
+**Fix:** `BrokerAccount` trägt jetzt die kanonische Zerlegung
+`walletBalance` / `availableCash` / `usedMargin` / `maintenanceMargin` / `unrealizedPnl` / `equity`
+(alle Adapter liefern sie, inkl. Paper-Ledger). `getAccount()` liest die echten Venue-Felder
+(`walletBalance`, `available`, `frozen`, `margin`, `crossUnrealizedPNL`, `isolationUnrealizedPNL`,
+optional `usedMargin`/`maintenanceMargin`/`realizedPnl`) und mappt:
+
+    equity        = walletBalance + realizedPnl + unrealizedPnl
+    availableCash = available
+    usedMargin    = usedMargin ?? row.margin ?? 0
+    unrealizedPnl = crossUnrealizedPNL + isolationUnrealizedPNL
+
+Fehlt `walletBalance` genuin (Bitunix-Doku führt es nicht in jeder Antwort), wird es aus den
+venue-eigenen Komponenten zerlegt (`available + frozen + margin`) — **nie** wird Equity aus
+`available` allein synthetisiert; leere/unplausible Felder bleiben fail-closed 0 (H9 blockt).
+`cash` bleibt `availableCash` (Cash-Guard); `equity` ist das echte Gesamtkapital — für ein Konto
+mit `usedMargin > 0` gilt damit `equity != available`.
+
+**Tests:** Neu `tests/bitunix.accountEquity.test.ts` (5 Fälle: Venue-Zeile mit walletBalance,
+Fallback-Zerlegung ohne walletBalance, leeres Konto als Regression, explizite
+usedMargin/maintenanceMargin/realizedPnl, fail-closed bei fehlenden Feldern). Mapping-Doku in
+`docs/BITUNIX.md`. Details: `docs/CHANGELOG.md` `[1.36.10]`.
+
+---
 
 ## [1.36.9] — 2026-09-03 · fix(api): Async Route-Params — Approve-Endpoint war zur Laufzeit tot + `next build` brach ab (CRITICAL)
 
