@@ -183,6 +183,12 @@ export interface BitunixPositionRaw {
   positionId?: string;
   symbol?: string;
   qty?: string;
+  /**
+   * Richtung der offenen Position — vom Venue dokumentiert: `LONG` | `SHORT`.
+   * Für geschlossene/Null-Mengen-Zeilen fehlt das Feld regelmäßig; solche
+   * Zeilen werden über die `qty`-Prüfung aussortiert, eine offene Zeile ohne
+   * verwertbare Seite wird verworfen (B2 — kein LONG-Fallback).
+   */
   side?: string;
   avgOpenPrice?: string;
   unrealizedPNL?: string;

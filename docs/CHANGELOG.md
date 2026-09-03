@@ -5,6 +5,102 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
+
+**MEDIUM, Brokers/Venues.** Befund B2 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): `BitunixPrivateClient.getPositions()`
+normalisierte die Venue-Richtung binär
+
+```ts
+const side = String(r.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG"; // FALSCH
+```
+
+Jeder andere Wert — `"LONG"`, aber eben auch `""`, `null`, `"SELL"`,
+abgeschnittener Müll — wurde zu `"LONG"`. Eine korrumpierte oder unvollständige
+Antwort war damit **unsichtbar**: Der Risk-Pfad (uPnL-Vorzeichen,
+SL/TP-Geometrie aus §5.2, Seitenlogik für Nachkauf/Reduce-Only) hätte eine
+Short-Position als Long behandelt.
+
+### Geändert
+
+- **`src/brokers/bitunix/privateClient.ts` (`getPositions`):** Zwei-Gate-Filterung
+  pro Zeile, in fester Reihenfolge, statt `map().filter()`:
+
+  ```ts
+  const qty = Number(r.qty);
+  if (!Number.isFinite(qty) || qty <= 0) continue;   // 1) geschlossen / Null-Menge
+  const side = parseBitunixPositionSide(r.side);     // 2) Richtung validieren, nicht raten
+  if (side === null) { recordBitunixPositionAnomaly({ symbol, rawSide, reason: "UNKNOWN_SIDE" }); continue; }
+  ```
+
+  - **Reihenfolge ist Teil der Spezifikation:** Das Venue liefert für
+    geschlossene/Null-Mengen-Zeilen regulär keine `side`. Sie scheiden über die
+    `qty`-Prüfung aus, **bevor** die Seite betrachtet wird — sonst würden sie
+    als Anomalien zählen und das Signal verwässern. Eine offene Position
+    (`qty > 0`) ohne verwertbare Seite bleibt dagegen sichtbar.
+  - **Kein Raten:** unbekannte Seite → Zeile raus. Ein `LONG`-Default wäre eine
+    Fehlklassifikation mit realen Folgen; das Weglassen ist für den lokalen View
+    beherrschbar (die Venue-Position bleibt bestehen und wird weiter über
+    Order-/Trade-Reconciliation erfasst) und ist als Zähler sichtbar.
+- **`src/brokers/bitunix/privateClient.ts` (neu, exportiert):**
+  `parseBitunixPositionSide(raw): "LONG" | "SHORT" | null` — trimmt und
+  normalisiert Groß-/Kleinschreibung (wohlwollend bei Formatvarianten des
+  Venues), akzeptiert aber ausschließlich `LONG`/`SHORT`. `BUY`/`SELL` sind
+  *Order*-Seiten desselben Venues und gehören nicht in eine Positionsantwort —
+  sie liefern bewusst `null`, statt sie umzudeuten.
+- **`src/brokers/bitunix/audit.ts`:** Positions-Anomalien als eigener,
+  secret-freier In-Memory-Ring (max. 50 Einträge: `symbol`, gekürzter `rawSide`,
+  `reason: "UNKNOWN_SIDE"`, `at`) plus kumulativer Zähler —
+  `recordBitunixPositionAnomaly`, `readBitunixPositionAnomalies`,
+  `readBitunixPositionAnomalyCount`, `clearBitunixPositionAnomaliesForTests`.
+  Bewusst **kein** DB-Audit-Event pro Zeile: der Zähler ist ein
+  Betriebs-Signal, kein Geschäftsereignis, und die Audit-Reliability-Debatte
+  (Befund S1) sollte nicht um zusätzliche Schreiblast erweitert werden.
+- **`src/brokers/bitunix/privateClient.ts` (Logger):** Der Private-Client nutzt
+  jetzt den `logger`, den der Adapter ihm ohnehin mitgibt (vorher nur an den
+  HTTP-Transport durchgereicht), und setzt pro Call **eine** zusammengefasste
+  Warnung ab, wenn Zeilen verworfen wurden — redaktiert, nie pro Zeile, nie bei
+  sauberer Antwort.
+- **`src/brokers/bitunix/index.ts`:** die neuen Audit-Zugriffe sind ab
+  `src/brokers/bitunix` exportiert (Ops-/Debug-Lesbarkeit).
+
+### Unverändert
+
+- `BitunixPositionRaw.side` bleibt `string | undefined` (venue-treu) — die
+  Validierung ist Laufzeitverhalten, kein Typversprechen über die API.
+- `BrokerExecutionEngine.listPositions` filtert weiterhin zusätzlich
+  `entryPrice > 0` (H3); `openPositions` in `getAccount()` zählt damit nur
+  übernehmbare Positionen — eine verworfene Zeile erhöht die Positionszahl nie.
+- `sideOf` (`BUY`/`SELL` → `LONG`/`SHORT`) für Orders und Trades bleibt: Dort ist
+  die BUY/SELL-Semantik die dokumentierte; Befund B2 betraf ausschließlich die
+  Positionsseite.
+
+### Docs
+
+- `docs/BITUNIX.md` §5.3 „Positionsseite: validieren statt raten (B2 — seit
+  v1.36.12)“, Ergänzung beim Positions-Endpunkt (§2) und beim
+  Private-Call-Audit (§5), neuer Punkt im Testkapitel (§10).
+- `audit-remediation/B2-side-fallback.md` und beide Audit-Indizes
+  (`audit-remediation/README.md`, `docs/AUDIT_REMEDIATION_2026-09.md`) auf
+  **gefixt (v1.36.12)** gestellt.
+
+### Tests
+
+`tests/bitunix.positions.test.ts` (neu, 7 Fälle) gegen den
+`BitunixFixtureServer` mit einstellbaren Positions-Zeilen (`positionRows`):
+Unit-Validierung von `parseBitunixPositionSide` (`LONG`/`SHORT` mit trim/Case;
+leer, Whitespace, `null`, `undefined`, `"WEIRD"`, `"0"`, `"both"`, `"N/A"`,
+`BUY`, `SELL` → `null`), Verwurf **und** Zählung bei `side=""` / `"WEIRD"` /
+fehlender Seite bei gleichzeitigem Erhalt beider legitimer Zeilen (inkl.
+negativer SHORT-uPnL), zusammengefasste Warnung mit Anzahl, Kumulation und
+Reset des Zählers über Calls, `qty <= 0`-Zeilen ohne `side` erzeugen **keine**
+Anomalie, saubere Default-Antwort unverändert.
+
+Typecheck, Lint und `npm run docs:validate` grün. `npm test` = **1609/1609**
+(1602 vorher + 7 neue B2-Fälle).
+
+---
+
 ## [1.36.11] — 2026-09-03 · fix(broker): B1 Bitunix SL/TP-Geometrie — semantisch falsche Stop/Take werden abgelehnt (HIGH)
 
 **HIGH, Brokers/Venues.** Befund B1 des Senior-Peer-Reviews

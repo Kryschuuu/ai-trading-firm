@@ -19,7 +19,11 @@ import {
   defaultNonceFactory,
   defaultTimestamp,
 } from "./signing";
-import { recordBitunixPrivateCall } from "./audit";
+import {
+  recordBitunixPrivateCall,
+  recordBitunixPositionAnomaly,
+} from "./audit";
+import { createBitunixLogger, type BitunixLogger } from "./redactor";
 import type { BitunixCredentials } from "./secrets";
 import type {
   BitunixAccountRaw,
@@ -83,6 +87,32 @@ export function mapBitunixOrderStatus(venueStatus: string): import("../../contra
   }
 }
 
+/**
+ * B2: Side-Rohwert einer **Positionszeile** → Richtung oder `null`.
+ *
+ * Das Venue dokumentiert für `position/get_pending_positions` exakt `LONG`
+ * und `SHORT`. Alles andere (leer, `null`, `SELL`, abgeschnittener Müll, aber
+ * auch Order-seitige Rohwerte wie `BUY`/`SELL`, die hier nicht hingehören)
+ * liefert `null` — der Aufrufer verwirft die Zeile, statt sie zu raten.
+ *
+ * Bewusst KEIN `!== "SHORT" → LONG`: ein stiller LONG-Fallback maskiert eine
+ * korrumpierte Antwort und lässt eine Short-Position als Long erscheinen
+ * (uPnL-Vorzeichen, Risk-Geometrie, Seitenlogik). Case/Whitespace-tolerant ist
+ * die Normalisierung dagegen wohlwollend, weil die Venue Felder je nach
+ * Antwortversion gemischt liefert.
+ */
+export function parseBitunixPositionSide(raw: unknown): "LONG" | "SHORT" | null {
+  const norm = String(raw ?? "").trim().toUpperCase();
+  if (norm === "LONG" || norm === "SHORT") return norm;
+  return null;
+}
+
+/** Rohwert einer Seitenangabe für Audit/Log (gekürzt, nie die ganze Zeile). */
+function sideSnippet(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  return s.length > 16 ? `${s.slice(0, 16)}…` : s;
+}
+
 function envelopeData<T>(json: unknown): T {
   if (!json || typeof json !== "object") {
     throw new BitunixApiError("unknown", "Bitunix: leere Antwort.");
@@ -124,6 +154,12 @@ export class BitunixPrivateClient {
   private readonly creds: BitunixCredentials;
   private readonly nonces: NonceFactory;
   private readonly clock: MonotonicTimestamp;
+  /**
+   * Redaktierter Logger für Betriebsmeldungen aus der Mapping-Schicht (B2).
+   * Ohne Zufuhr aus dem Adapter wird ein eigener, Secret-maskierender Logger
+   * erzeugt — Ausgaben gehen nie unredigiert nach außen.
+   */
+  private readonly logger: BitunixLogger;
 
   constructor(opts: BitunixPrivateClientOptions) {
     this.http = new BitunixHttp({
@@ -134,6 +170,8 @@ export class BitunixPrivateClient {
     this.creds = opts.credentials;
     this.nonces = opts.nonceFactory ?? defaultNonceFactory;
     this.clock = opts.timestamp ?? defaultTimestamp;
+    this.logger =
+      opts.logger ?? createBitunixLogger(() => [this.creds.apiKey, this.creds.apiSecret]);
   }
 
   private async signed(
@@ -238,6 +276,25 @@ export class BitunixPrivateClient {
     };
   }
 
+  /**
+   * Offene Venue-Positionen (`GET position/get_pending_positions`).
+   *
+   * Zwei-Gate-Filterung, Reihenfolge ist Absicht (B2):
+   *
+   *   1. `qty` muss endlich und > 0 sein. Das Venue liefert für
+   *      geschlossene/Null-Mengen-Zeilen regulär **keine** `side` — sie sind
+   *      keine offenen Positionen und scheiden hier aus, bevor die Seite
+   *      überhaupt geprüft wird (sonst würden sie als Anomalien zählen).
+   *   2. `side` muss `LONG` oder `SHORT` sein. Sonst wird die Zeile
+   *      verworfen und als Anomalie gezählt (`readBitunixPositionAnomalies`),
+   *      **niemals** als LONG interpretiert — raten wäre gefährlicher als
+   *      wegwerfen: eine falsch klassifizierte Short-Position würde im lokalen
+   *      View mit dem falschen uPnL-Vorzeichen und der falschen
+   *      SL/TP-Geometrie erscheinen.
+   *
+   * Eine verworfene Zeile ist ein Betriebsereignis (Venue-Antwort unplausibel)
+   * und wird deshalb pro Call einmal zusammengefasst geloggt.
+   */
   async getPositions(symbol?: string): Promise<BrokerPosition[]> {
     const res = await this.signed(
       "GET",
@@ -247,24 +304,40 @@ export class BitunixPrivateClient {
     );
     const data = envelopeData<BitunixPositionRaw[]>(res.json);
     const rows = Array.isArray(data) ? data : [];
-    return rows
-      .map((r): BrokerPosition | null => {
-        const qty = Number(r.qty);
-        const entry = Number(r.avgOpenPrice);
-        if (!Number.isFinite(qty) || qty <= 0) return null;
-        const side = String(r.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG";
-        return {
-          symbol: String(r.symbol ?? "").toUpperCase(),
-          side,
-          qty,
-          entryPrice: Number.isFinite(entry) ? entry : 0,
-          lastPrice: Number.isFinite(entry) ? entry : 0,
-          unrealizedPnl: Number(r.unrealizedPNL ?? 0) || 0,
-          stopLoss: null,
-          takeProfit: null,
-        };
-      })
-      .filter((p): p is BrokerPosition => p !== null);
+    const positions: BrokerPosition[] = [];
+    const anomalies: string[] = [];
+    for (const r of rows) {
+      const qty = Number(r.qty);
+      const entry = Number(r.avgOpenPrice);
+      // 1) geschlossene / 0-Mengen-Zeilen — vor der Seitenprüfung (B2, DO 2).
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      // 2) Richtung validieren, nicht raten (B2, DO 1).
+      const side = parseBitunixPositionSide(r.side);
+      if (side === null) {
+        const sym = String(r.symbol ?? "").trim().toUpperCase();
+        const snippet = sideSnippet(r.side);
+        recordBitunixPositionAnomaly({ symbol: sym, rawSide: snippet, reason: "UNKNOWN_SIDE" });
+        anomalies.push(sym ? `${sym} (side="${snippet}")` : `(side="${snippet}")`);
+        continue;
+      }
+      positions.push({
+        symbol: String(r.symbol ?? "").toUpperCase(),
+        side,
+        qty,
+        entryPrice: Number.isFinite(entry) ? entry : 0,
+        lastPrice: Number.isFinite(entry) ? entry : 0,
+        unrealizedPnl: Number(r.unrealizedPNL ?? 0) || 0,
+        stopLoss: null,
+        takeProfit: null,
+      });
+    }
+    if (anomalies.length > 0) {
+      this.logger.warn(
+        `getPositions: ${anomalies.length} Positionszeile(n) ohne verwertbare side verworfen ` +
+          `(kein LONG-Fallback, B2): ${anomalies.slice(0, 5).join(", ")}`
+      );
+    }
+    return positions;
   }
 
   /**

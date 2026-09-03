@@ -32,6 +32,13 @@ export class BitunixFixtureServer {
    */
   accountRow: Record<string, string> | null = null;
   /**
+   * B2: Optionale Positions-Zeilen (GET /futures/position/get_pending_positions).
+   * Ist das Array gesetzt (auch leer), wird es 1:1 als `data` ausgeliefert —
+   * damit lassen sich korrumpierte Antworten simulieren (`side: ""`, `side:
+   * "WEIRD"`, fehlende Seite bei 0-qty). Sonst die Default-Zeile (LONG BTCUSDT).
+   */
+  positionRows: Record<string, unknown>[] | null = null;
+  /**
    * H4: Am Fixture platzierte Orders, nach `clientId` (Wire-Feld des
    * clientOrderId) registriert — damit `get_order_detail?clientId=...`
    * (getOrderByClientId) eine bestehende Order findet (Idempotenz-Tests).
@@ -178,9 +185,10 @@ export class BitunixFixtureServer {
       if (path === BITUNIX_PATHS.positions) {
         json(res, 200, {
           code: 0,
-          data: [
-            { symbol: "BTCUSDT", qty: "0.01", side: "LONG", avgOpenPrice: "65000", unrealizedPNL: "12.5" },
-          ],
+          data:
+            this.positionRows ?? [
+              { symbol: "BTCUSDT", qty: "0.01", side: "LONG", avgOpenPrice: "65000", unrealizedPNL: "12.5" },
+            ],
         });
         return;
       }
