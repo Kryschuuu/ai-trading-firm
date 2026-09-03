@@ -16,16 +16,16 @@ Secret-Store-Schicht.
 ## Validierung (wichtig: Code ist bereits mehrfach gepatcht)
 
 Vor der Planung wurde jeder Befund gegen den **aktuellen** Code geprüft. Ergebnis: **H1 ist bereits
-in v1.36.2 gefixt** (serverseitige `estimatedNotional`-Berechnung). H2 ist teilweise adressiert
-(Singleton entfernt, aber keine verteilte Atomarität). Die übrigen 18 Befunde sind im aktuellen Code
-noch valide.
+in v1.36.2 gefixt** (serverseitige `estimatedNotional`-Berechnung), **H3 in v1.36.4** und **H4 in
+v1.36.5** (Order-Idempotenz). H2 ist teilweise adressiert (Singleton entfernt, aber keine verteilte
+Atomarität). Die übrigen 16 Befunde sind im aktuellen Code noch valide.
 
 | ID | Bereich | Severity | Status (validiert) | Prompt |
 |----|---------|----------|--------------------|--------|
 | H1 | Handelslogik | CRITICAL | ✅ bereits gefixt (v1.36.2) | [H1](../audit-remediation/H1-risk-notional.md) |
 | H2 | Handelslogik | CRITICAL | ⚠️ teilweise (keine verteilte Atomarität) | [H2](../audit-remediation/H2-atomicity.md) |
 | H3 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.4) | [H3](../audit-remediation/H3-order-status.md) |
-| H4 | Handelslogik/Broker | CRITICAL | ✅ valide | [H4](../audit-remediation/H4-idempotency.md) |
+| H4 | Handelslogik/Broker | CRITICAL | ✅ gefixt (v1.36.5) | [H4](../audit-remediation/H4-idempotency.md) |
 | H5 | Handelslogik | CRITICAL | ✅ valide | [H5](../audit-remediation/H5-pipeline-trading.md) |
 | H6 | Handelslogik | CRITICAL | ✅ valide | [H6](../audit-remediation/H6-approval-chain.md) |
 | H7 | Handelslogik/Control | HIGH | ✅ valide (arch.) | [H7](../audit-remediation/H7-live-kill.md) |
