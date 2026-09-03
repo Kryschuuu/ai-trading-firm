@@ -159,12 +159,50 @@ export interface MarketCandle {
   volume: number;
 }
 
-/** Kontozustand eines Brokers (simuliert oder real). */
+/**
+ * Kontozustand eines Brokers (simuliert oder real).
+ *
+ * H8: Kanonische Zerlegung eines (Futures-)Kontos. Die Felder `equity` und
+ * `cash` sind der Legacy-Kern; `walletBalance`/`availableCash`/`usedMargin`/
+ * `maintenanceMargin`/`unrealizedPnl` sind die venue-unabhängige
+ * Dekomposition, auf die jeder Adapter seine echten Venue-Felder abbildet:
+ *
+ *     equity        = walletBalance + unrealizedPnl
+ *                     (+ realizedPnl, sofern das Venue realisiertes PnL
+ *                      separat führt — Bitunix settled es laufend ins
+ *                      Wallet, dort also 0)
+ *     cash          = availableCash   (Legacy-Alias, Cash-Guard)
+ *
+ * `available`/freie Margin ist NICHT die Equity: Bei offenen Positionen ist
+ * ein Teil des Kontos als Margin gebunden (`usedMargin`), gehört aber weiter
+ * zum Gesamtkapital. Equity ist der Risiko-Denominator (maxPositionPct,
+ * Sizing, Drawdown) und darf nie aus „available + uPnL“ synthetisiert werden.
+ */
 export interface BrokerAccount {
-  /** Mark-to-Market-Equity in Kontowährung. */
+  /** Mark-to-Market-Gesamtkapital (Equity) in Kontowährung. */
   equity: number;
-  /** Freies Cash in Kontowährung. */
+  /**
+   * Freies Cash in Kontowährung (Futures: freie Margin). Wird vom Cash-Guard
+   * geprüft; Legacy-Alias von `availableCash`. Nie `equity` als Cash
+   * verwenden (H8).
+   */
   cash: number;
+  /**
+   * H8: Kontostand (Wallet-Balance) in Kontowährung ohne offene Positionen —
+   * realisiertes PnL ist enthalten, unrealisiertes nicht.
+   */
+  walletBalance: number;
+  /** H8: Frei verfügbares Cash (Futures: freie Margin) — kanonisches Feld. */
+  availableCash: number;
+  /** H8: Aktuell gebundene Margin (Positionen + offene Orders); 0 ohne Margin-Konto. */
+  usedMargin: number;
+  /**
+   * H8: Maintenance-/Wartungsmargin (Liquidationsschwelle); 0, wenn das Venue
+   * sie nicht liefert.
+   */
+  maintenanceMargin: number;
+  /** H8: Summe der unrealisierten PnL aller offenen Positionen. */
+  unrealizedPnl: number;
   /** Anzahl offener Positionen. */
   openPositions: number;
   /** Startkapital (Basis für Drawdown). */
@@ -184,6 +222,13 @@ export interface BrokerOrderRequest {
   side: "LONG" | "SHORT";
   qty: number;
   limitPrice?: number;
+  /**
+   * Mark-/Quote-Preis (Hinweis), wenn keine feste Limit-Preis-Order vorliegt.
+   * Markt-Order haben keinen festen Entry; die Adapter nutzen diesen Hinweis
+   * als Bezugspunkt, um die SL/TP-Geometrie (B1) zu validieren. Rein
+   * beratend — geht nie in den Wire-Body und nicht in die Order-Idempotenz ein.
+   */
+  markPriceHint?: number;
   /** Absoluter Stop-Loss-Preis. */
   stopLoss?: number;
   /** Absoluter Take-Profit-Preis. */
@@ -192,7 +237,52 @@ export interface BrokerOrderRequest {
   riskNotional: number;
 }
 
-export type BrokerOrderStatus = "FILLED" | "REJECTED";
+/**
+ * Order-Status (H3-FIX): Die reine AKZEPTANZ einer Live-Order durch das Venue
+ * ist KEIN Fill. Deshalb gibt es jetzt eine explizite Lifecycle-Kette:
+ *
+ *   NEW               = Order wurde vom Venue angenommen (ack), noch kein Fill.
+ *                       fillPrice ist 0 — es darf NICHTS eingebucht werden.
+ *   PARTIALLY_FILLED  = Teilfill; filledQty < qty, fillPrice = echter avgPrice.
+ *   FILLED            = vollständig gefüllt; fillPrice = echter avgPrice (>0).
+ *   CANCELED          = Gestrichen (ggf. mit Teilfills, siehe filledQty).
+ *   REJECTED          = Abgelehnt (Guardrails/Gate/Venue) — nie versendet.
+ *   UNKNOWN           = Status nicht zweifelsfrei ermittelbar (z. B.
+ *                       Timeout nach place_order, Order nicht auffindbar,
+ *                       Fill-Preis nicht belegbar). Fail-safe: wie kein Fill.
+ *
+ * Paper-/Backtest-Engines füllen synchron und liefern weiterhin "FILLED".
+ */
+export type BrokerOrderStatus =
+  | "NEW"
+  | "PARTIALLY_FILLED"
+  | "FILLED"
+  | "CANCELED"
+  | "REJECTED"
+  | "UNKNOWN";
+
+/** Status, die einen (ggf. teilweisen) echten Fill bedeuten. */
+export const FILLED_ORDER_STATUSES: readonly BrokerOrderStatus[] = [
+  "PARTIALLY_FILLED",
+  "FILLED",
+];
+
+/** true, wenn der Status einen echten Fill (mit avgPrice) bedeutet. */
+export function isFillStatus(status: BrokerOrderStatus): boolean {
+  return FILLED_ORDER_STATUSES.includes(status);
+}
+
+/**
+ * true, wenn ein Ergebnis mit diesem Status eine Position EINBUCHEN darf.
+ * Nur ein vollständig belegter Fill zählt — NEW/CANCELED/REJECTED/UNKNOWN und
+ * jeder Status mit fillPrice ≤ 0 bleiben draußen (H3: nie Entry-Preis 0).
+ */
+export function isBookableFill(result: {
+  status: BrokerOrderStatus;
+  fillPrice: number;
+}): boolean {
+  return result.status === "FILLED" && Number.isFinite(result.fillPrice) && result.fillPrice > 0;
+}
 
 /** Order-Ergebnis (simuliert oder real). */
 export interface BrokerOrderResult {
@@ -200,10 +290,18 @@ export interface BrokerOrderResult {
   symbol: string;
   side: "LONG" | "SHORT";
   qty: number;
-  /** Fill-Preis; 0 bei REJECTED. */
+  /**
+   * Tatsächlich gefüllte Menge. Bei synchronen Paper-Fills = qty; bei
+   * Live-Reconciliation die vom Venue gemeldete Trade-Menge (0 bei NEW).
+   */
+  filledQty?: number;
+  /**
+   * Durchschnittlicher Fill-Preis. 0 bedeutet „kein Fill“ (NEW/REJECTED/
+   * UNKNOWN) — eine Position darf NUR mit fillPrice > 0 eingebucht werden.
+   */
   fillPrice: number;
   status: BrokerOrderStatus;
-  /** Maschinenlesbarer Ablehnungsgrund (z. B. KILL_SWITCH_ARMED). */
+  /** Maschinenlesbarer Grund (Ablehnung z. B. KILL_SWITCH_ARMED oder Hinweis wie ORDER_ACCEPTED). */
   reason?: string;
   stopLoss: number | null;
   takeProfit: number | null;
@@ -246,6 +344,16 @@ export interface BrokerAdapter {
   getOrderBook?(symbol: string): Promise<MarketOrderBook>;
   getAccount?(): Promise<BrokerAccount>;
   placeOrder?(req: BrokerOrderRequest): Promise<BrokerOrderResult>;
+  /**
+   * H3: Fill-Reconciliation für Live-Orders. Nach `placeOrder` (das bei
+   * Live-Adaptern nur die AKZEPTANZ — Status NEW — zurückgibt) wird hier der
+   * echte Venue-Status abgefragt (Order-Detail + Ausführungen). Liefert einen
+   * BrokerOrderResult mit dem ECHTEN avgPrice/gefüllter Menge
+   * (NEW → PARTIALLY_FILLED → FILLED). Positionen werden erst gebucht, wenn
+   * das Ergebnis FILLED mit fillPrice > 0 ist — nie mit 0.
+   * Fehlt die Methode (Paper: synchroner Fill), ist keine Reconciliation nötig.
+   */
+  reconcileOrder?(orderId: string): Promise<BrokerOrderResult | null>;
   getPositions?(): Promise<BrokerPosition[]>;
 }
 

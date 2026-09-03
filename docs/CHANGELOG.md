@@ -5,6 +5,549 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
+
+**MEDIUM, Brokers/Venues.** Befund B2 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): `BitunixPrivateClient.getPositions()`
+normalisierte die Venue-Richtung binär
+
+```ts
+const side = String(r.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG"; // FALSCH
+```
+
+Jeder andere Wert — `"LONG"`, aber eben auch `""`, `null`, `"SELL"`,
+abgeschnittener Müll — wurde zu `"LONG"`. Eine korrumpierte oder unvollständige
+Antwort war damit **unsichtbar**: Der Risk-Pfad (uPnL-Vorzeichen,
+SL/TP-Geometrie aus §5.2, Seitenlogik für Nachkauf/Reduce-Only) hätte eine
+Short-Position als Long behandelt.
+
+### Geändert
+
+- **`src/brokers/bitunix/privateClient.ts` (`getPositions`):** Zwei-Gate-Filterung
+  pro Zeile, in fester Reihenfolge, statt `map().filter()`:
+
+  ```ts
+  const qty = Number(r.qty);
+  if (!Number.isFinite(qty) || qty <= 0) continue;   // 1) geschlossen / Null-Menge
+  const side = parseBitunixPositionSide(r.side);     // 2) Richtung validieren, nicht raten
+  if (side === null) { recordBitunixPositionAnomaly({ symbol, rawSide, reason: "UNKNOWN_SIDE" }); continue; }
+  ```
+
+  - **Reihenfolge ist Teil der Spezifikation:** Das Venue liefert für
+    geschlossene/Null-Mengen-Zeilen regulär keine `side`. Sie scheiden über die
+    `qty`-Prüfung aus, **bevor** die Seite betrachtet wird — sonst würden sie
+    als Anomalien zählen und das Signal verwässern. Eine offene Position
+    (`qty > 0`) ohne verwertbare Seite bleibt dagegen sichtbar.
+  - **Kein Raten:** unbekannte Seite → Zeile raus. Ein `LONG`-Default wäre eine
+    Fehlklassifikation mit realen Folgen; das Weglassen ist für den lokalen View
+    beherrschbar (die Venue-Position bleibt bestehen und wird weiter über
+    Order-/Trade-Reconciliation erfasst) und ist als Zähler sichtbar.
+- **`src/brokers/bitunix/privateClient.ts` (neu, exportiert):**
+  `parseBitunixPositionSide(raw): "LONG" | "SHORT" | null` — trimmt und
+  normalisiert Groß-/Kleinschreibung (wohlwollend bei Formatvarianten des
+  Venues), akzeptiert aber ausschließlich `LONG`/`SHORT`. `BUY`/`SELL` sind
+  *Order*-Seiten desselben Venues und gehören nicht in eine Positionsantwort —
+  sie liefern bewusst `null`, statt sie umzudeuten.
+- **`src/brokers/bitunix/audit.ts`:** Positions-Anomalien als eigener,
+  secret-freier In-Memory-Ring (max. 50 Einträge: `symbol`, gekürzter `rawSide`,
+  `reason: "UNKNOWN_SIDE"`, `at`) plus kumulativer Zähler —
+  `recordBitunixPositionAnomaly`, `readBitunixPositionAnomalies`,
+  `readBitunixPositionAnomalyCount`, `clearBitunixPositionAnomaliesForTests`.
+  Bewusst **kein** DB-Audit-Event pro Zeile: der Zähler ist ein
+  Betriebs-Signal, kein Geschäftsereignis, und die Audit-Reliability-Debatte
+  (Befund S1) sollte nicht um zusätzliche Schreiblast erweitert werden.
+- **`src/brokers/bitunix/privateClient.ts` (Logger):** Der Private-Client nutzt
+  jetzt den `logger`, den der Adapter ihm ohnehin mitgibt (vorher nur an den
+  HTTP-Transport durchgereicht), und setzt pro Call **eine** zusammengefasste
+  Warnung ab, wenn Zeilen verworfen wurden — redaktiert, nie pro Zeile, nie bei
+  sauberer Antwort.
+- **`src/brokers/bitunix/index.ts`:** die neuen Audit-Zugriffe sind ab
+  `src/brokers/bitunix` exportiert (Ops-/Debug-Lesbarkeit).
+
+### Unverändert
+
+- `BitunixPositionRaw.side` bleibt `string | undefined` (venue-treu) — die
+  Validierung ist Laufzeitverhalten, kein Typversprechen über die API.
+- `BrokerExecutionEngine.listPositions` filtert weiterhin zusätzlich
+  `entryPrice > 0` (H3); `openPositions` in `getAccount()` zählt damit nur
+  übernehmbare Positionen — eine verworfene Zeile erhöht die Positionszahl nie.
+- `sideOf` (`BUY`/`SELL` → `LONG`/`SHORT`) für Orders und Trades bleibt: Dort ist
+  die BUY/SELL-Semantik die dokumentierte; Befund B2 betraf ausschließlich die
+  Positionsseite.
+
+### Docs
+
+- `docs/BITUNIX.md` §5.3 „Positionsseite: validieren statt raten (B2 — seit
+  v1.36.12)“, Ergänzung beim Positions-Endpunkt (§2) und beim
+  Private-Call-Audit (§5), neuer Punkt im Testkapitel (§10).
+- `audit-remediation/B2-side-fallback.md` und beide Audit-Indizes
+  (`audit-remediation/README.md`, `docs/AUDIT_REMEDIATION_2026-09.md`) auf
+  **gefixt (v1.36.12)** gestellt.
+
+### Tests
+
+`tests/bitunix.positions.test.ts` (neu, 7 Fälle) gegen den
+`BitunixFixtureServer` mit einstellbaren Positions-Zeilen (`positionRows`):
+Unit-Validierung von `parseBitunixPositionSide` (`LONG`/`SHORT` mit trim/Case;
+leer, Whitespace, `null`, `undefined`, `"WEIRD"`, `"0"`, `"both"`, `"N/A"`,
+`BUY`, `SELL` → `null`), Verwurf **und** Zählung bei `side=""` / `"WEIRD"` /
+fehlender Seite bei gleichzeitigem Erhalt beider legitimer Zeilen (inkl.
+negativer SHORT-uPnL), zusammengefasste Warnung mit Anzahl, Kumulation und
+Reset des Zählers über Calls, `qty <= 0`-Zeilen ohne `side` erzeugen **keine**
+Anomalie, saubere Default-Antwort unverändert.
+
+Typecheck, Lint und `npm run docs:validate` grün. `npm test` = **1609/1609**
+(1602 vorher + 7 neue B2-Fälle).
+
+---
+
+## [1.36.11] — 2026-09-03 · fix(broker): B1 Bitunix SL/TP-Geometrie — semantisch falsche Stop/Take werden abgelehnt (HIGH)
+
+**HIGH, Brokers/Venues.** Befund B1 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): `serializePlaceOrder` validierte SL/TP nur
+numerisch (`finitePositive`), nicht geometrisch. Eine formal positive, aber semantisch
+unsinnige Staffelung (z. B. ein LONG-Stop oberhalb des Einstiegspreises) konnte so zur
+Venue gesendet werden.
+
+### Geändert
+
+- **`src/contracts/broker.ts`:** `BrokerOrderRequest` erhält das optionale Feld
+  `markPriceHint?: number` — der Mark-/Quote-Preis als Bezugspunkt, wenn keine feste
+  Limit-Order vorliegt. Reiner Validierungs-Hinweis (nie im Wire-Body, nie in der
+  `clientOrderId`).
+- **`src/brokers/bitunix/orders.ts` (`serializePlaceOrder`):** Geometrie-Check **vor**
+  dem Aufbau des Bodys.
+
+  ```ts
+  const entry = finitePositive(req.limitPrice) ? req.limitPrice
+    : finitePositive(req.markPriceHint) ? req.markPriceHint : undefined;
+  if (entry !== undefined) {
+    if (req.side === "LONG") {
+      if (req.stopLoss !== undefined && req.stopLoss >= entry) throw new OrderSerializationError("LONG stopLoss muss unter dem Entry liegen");
+      if (req.takeProfit !== undefined && req.takeProfit <= entry) throw new OrderSerializationError("LONG takeProfit muss über dem Entry liegen");
+    } else {
+      if (req.stopLoss !== undefined && req.stopLoss <= entry) throw new OrderSerializationError("SHORT stopLoss muss über dem Entry liegen");
+      if (req.takeProfit !== undefined && req.takeProfit >= entry) throw new OrderSerializationError("SHORT takeProfit muss unter dem Entry liegen");
+    }
+  }
+  ```
+
+  - **Entry-Bezugspunkt:** `LIMIT` = `limitPrice`; `MARKET` = `markPriceHint`; fehlt der
+    Hinweis, wird die Prüfung übersprungen (kein falscher Deny). Die Grenzfälle
+    `SL == entry` / `TP == entry` werden ebenfalls abgelehnt.
+  - Der Adapter vertraut damit nicht auf korrekte Caller — der Engine-Pfad (der aus der
+    Proposal korrekte Werte liefert) bleibt unverändert (Regression).
+
+### Unverändert
+
+- `clientOrderIdFor`: `markPriceHint` geht nicht in die Idempotenz-Identität ein
+  (nur `limitPrice`, SL/TP, side, qty, ts, rand).
+- Paper-Pfad: `serializePlaceOrder` wird dort nicht aufgerufen (Paper-Ledger faßt
+  direkt `ledger.submit`); die Geometrie-Prüfung greift nur im Broker-Live-Pfad.
+
+### Tests
+
+`tests/bitunix.unit.test.ts` — `Orders (B1): SL/TP-Geometrie …`: LONG `sl=entry+1` →
+Fehler, LONG `tp=entry-1` → Fehler, korrekte LONG-Geometrie → ok, SHORT gespiegelt,
+MARKET ohne Entry-Hinweis → übersprungen (Regression), MARKET mit `markPriceHint` →
+aktiv geprüft. Typecheck, Lint, Docs-Validierung. `npm test` = **1590/1590**.
+
+---
+
+## [1.36.10] — 2026-09-03 · fix(broker): H8 Bitunix-Equity korrekt aus walletBalance + uPnL statt available + uPnL (HIGH)
+
+**HIGH, Brokers/Venues.** Befund H8 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): `BitunixPrivateClient.getAccount()` berechnete
+
+```ts
+const equity = available + crossUnrealizedPNL + isolationUnrealizedPNL; // FALSCH
+```
+
+`available` ist bei einem USDT-margined-Futures-Konto die **freie Margin** (freies Cash), nicht
+das Gesamtkapital. Sobald Positionen offen sind (gebundene Positions-Margin `margin`, ggf.
+Order-Margin `frozen`), fehlte dieser Kontoanteil in der Equity — der Risk-Denominator für
+`maxPositionPct`, Order-Sizing und Drawdown war zu klein, und die Trennung von Equity und
+verfügbarem Cash ging verloren (`cash` soll die freie Margin für den Cash-Guard bleiben).
+
+### Geändert
+
+- **Contract (`src/contracts/broker.ts`):** `BrokerAccount` trägt jetzt die kanonische Zerlegung
+  mit Invariante `equity = walletBalance + unrealizedPnl` (+ `realizedPnl`, sofern ein Venue es
+  separat führt; Bitunix settled realisiertes PnL laufend ins Wallet):
+
+  | Feld | Bedeutung |
+  | --- | --- |
+  | `walletBalance` | Kontostand ohne offene Positionen (realisiertes PnL enthalten) |
+  | `availableCash` | frei verfügbares Cash (Futures: freie Margin) — kanonisch |
+  | `usedMargin` | aktuell gebundene Margin (Positionen + offene Orders) |
+  | `maintenanceMargin` | Wartungsmargin (Liquidationsschwelle); 0, wenn das Venue sie nicht liefert |
+  | `unrealizedPnl` | Summe der unrealisierten PnL aller offenen Positionen |
+  | `equity` | Mark-to-Market-Gesamtkapital (= walletBalance + unrealizedPnl) |
+  | `cash` | Legacy-Alias von `availableCash` (Cash-Guard) |
+
+- **Bitunix-Mapping (`src/brokers/bitunix/privateClient.ts`):** liest die echten Venue-Felder der
+  Account-Zeile (`GET /api/v1/futures/account`) und mappt:
+
+  ```ts
+  equity        = walletBalance + realizedPnl + unrealizedPnl
+  availableCash = available                       // = cash (Cash-Guard)
+  usedMargin    = usedMargin ?? row.margin ?? 0   // Positions-Margin des Venue
+  unrealizedPnl = crossUnrealizedPNL + isolationUnrealizedPNL
+  ```
+
+  - `walletBalance` wird direkt übernommen, wenn das Venue es liefert. Fehlt das Feld **genuin**
+    (die dokumentierte Antwort führt es nicht in jeder Version), wird es aus den venue-eigenen
+    Komponenten zerlegt: `available + frozen + margin` (freie Margin + Order-Margin +
+    Positions-Margin). Die Equity wird **nie** aus `available` allein synthetisiert;
+    `maintenanceMargin`/`realizedPnl` werden nur addiert, wenn die API sie tatsächlich liefert
+    (sonst 0). Leere/fehlende Felder ergeben fail-closed 0 — `validateOrder` (H9) blockt dann.
+  - `src/brokers/bitunix/types.ts`: `BitunixAccountRaw` um `walletBalance`, `usedMargin`,
+    `maintenanceMargin`, `realizedPnl` ergänzt (Feld-Doku).
+  - **Konsequenz für die Schutzkette:** `BrokerExecutionEngine.submit` prüft Guardrails weiterhin
+    gegen `account.equity` (jetzt das echte Gesamtkapital) und den Cash-Guard gegen
+    `account.cash` (= freie Margin) — exakt die H8-Trennung.
+
+- **Alle übrigen `BrokerAccount`-Erzeuger liefern die kanonische Zerlegung** (Paper/Cash-Konten,
+  kein Margin): Alpaca- und Bitunix-Paper-Ledger (`walletBalance = equity − unrealizedPnl` =
+  Cash + Einstandswerte, `availableCash = cash`, `usedMargin`/`maintenanceMargin` = 0),
+  PAPER-Venue-Wrapper (`src/brokers/paper.ts`) und Alpaca-Live-Mapping
+  (`src/brokers/alpaca/mapping.ts`, Account-Antwort ohne Margin-/uPnL-Dekomposition → ehrlicher
+  Fallback: `walletBalance = equity`, `unrealizedPnl = 0`).
+
+### Tests
+
+Neu `tests/bitunix.accountEquity.test.ts` (5 Fälle, gegen Bitunix-Fixture):
+
+- Venue-Zeile **mit** `walletBalance` und gebundener Margin (`available=8000, margin=1500,
+  uPnL=300`) → `equity = 9700 + 300 = 10.000`, `cash = 8000` → **`equity != available`
+  (usedMargin > 0)**; `usedMargin = 1500`.
+- Venue-Zeile **ohne** `walletBalance` (Bitunix-Doku-Fall) → Zerlegung `8000 + 200 + 1500 = 9700`,
+  `equity = 10.000`, nie gleich `available`.
+- Leeres Konto (Regression): `equity == cash == 10.000` wie bisher.
+- Explizite `usedMargin`/`maintenanceMargin`/`realizedPnl`-Felder werden addiert
+  (`equity = walletBalance + realizedPnl + unrealizedPnl`).
+- Genuin fehlende Felder → fail-closed 0.
+
+Verifiziert: `npm run typecheck`, `npm run lint`, `npm run docs:validate`, `npm test` =
+**1601/1601** Tests grün (davon 5 neue H8-Tests) sowie `npm run security:live-gate` grün.
+Mapping-Doku: `docs/BITUNIX.md` (Abschnitt 5), Status-Update in `docs/AUDIT_REMEDIATION_2026-09.md`
+und `audit-remediation/H8-bitunix-equity.md` („Gefixt v1.36.10“).
+
+---
+
+
+## [1.36.9] — 2026-09-03 · fix(api): Async Route-Params — Approve-Endpoint war zur Laufzeit tot + `next build` brach ab (CRITICAL)
+
+**Kritischer Nachzug zum H6-Fix (v1.36.7):**
+Der mit der Approval-Chain eingeführte Freigabe-Endpoint
+`POST /api/firm/proposals/{id}/approve` nutzte noch die **synchrone**
+Handler-Signatur aus der Next.js-14-Ära:
+
+```ts
+// VORHER — kaputt unter Next.js >= 15
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+  const proposalId = params.id; // ← zur Laufzeit undefined
+}
+```
+
+Seit **Next.js 15** sind dynamische Route-`params` asynchron
+(`params: Promise<{ id: string }>`), Next.js 15 hielt den synchronen Zugriff
+nur übergangsweise mit Deprecation-Warnung aufrecht. **Mit Next.js 16 ist der
+synchrone Zugriff vollständig entfernt** (Breaking Change
+„Sync `params`/`searchParams` props access“ — ebenso `cookies()`, `headers()`,
+`draftMode()`, `searchParams`). Das Projekt läuft auf `next@16.3.1`.
+
+Der Fehler wirkte **zweifach**:
+
+- **(a) Build-Bruch.** `next build` generiert Route-Validator-Typen unter
+  `.next/types/validator.ts`. Dort schlug der Build mit `TS2344` fehl —
+  `Type 'typeof import("…/approve/route")' does not satisfy the constraint
+  'RouteHandlerConfig<"/api/firm/proposals/[id]/approve">'`, weil
+  `Promise<{ id }>` nicht an `{ id }` zuweisbar ist. Ein Production-Deployment
+  war damit nicht möglich.
+- **(b) Toter Endpoint zur Laufzeit.** `params` war real ein Promise, der
+  Property-Zugriff `params.id` lieferte `undefined`. Next.js quittierte das im
+  Server-Log mit
+  `Error: Route "/api/firm/proposals/[id]/approve" used 'params.id'. 'params' is a Promise and must be unwrapped with 'await' or 'React.use()' before accessing its properties`,
+  der Handler fiel in seinen eigenen `if (!proposalId)`-Zweig und antwortete
+  auf **jeden** Aufruf deterministisch mit
+  `400 {"error":"proposal id missing"}`. Die menschliche Freigabe
+  (`PENDING → APPROVED`) war seit v1.36.7 **nicht funktionsfähig** — die
+  Approval-Chain selbst arbeitete korrekt fail-closed, es konnte ihr nur nie
+  jemand eine Freigabe erteilen.
+
+### Warum die CI den Fehler nicht gesehen hat
+
+Beide Workflows führen **kein `next build`** aus:
+
+| Workflow | Schritte |
+| --- | --- |
+| `docs-validate` (`.github/workflows/main.yml`) | `npm ci`, `npm run typecheck`, `npm run docs:validate` |
+| `security-live-gate` (`.github/workflows/main-security-live-gatte.yml`) | `npm ci`, `npm run typecheck`, `npm run lint`, `npm run security:live-gate`, Secret-Scan, Suite-Stamp |
+
+Die inkompatible Signatur steckt in den **von Next generierten** Typen unter
+`.next/`, die `tsc --noEmit` gegen den Quellcode nicht prüft — `tsc` sah den
+eigenen Handler als in sich konsistent an. Der Bruch wurde deshalb erst beim
+Production-Build sichtbar.
+
+### Geändert
+
+- **Handler auf die Repo-Konvention umgestellt** —
+  `src/app/api/firm/proposals/[id]/approve/route.ts`:
+
+  ```ts
+  type RouteContext = { params: Promise<{ id: string }> };
+
+  export async function POST(request: NextRequest, ctx: RouteContext) {
+    const { id } = await ctx.params;
+    // …
+  }
+  ```
+
+  Damit ist die Route konsistent mit allen übrigen dynamischen Segmenten des
+  Repos (`/api/brokers/[venue]/{credentials,discover,health,status,test}`,
+  `/api/firm/rules/[id]`, `/api/firm/rules/[id]/backtest`,
+  `/api/markets/[venue]/[symbol]`, `/api/analysis/daily/[date]`,
+  `/api/universe/score/[instrumentId]`) — die Approve-Route war der **einzige**
+  Rückstand im Projekt.
+- **Verhalten unverändert.** Alle Statuspfade bleiben identisch: `400` bei
+  fehlendem/leerem `approvedBy` bzw. fehlender ID, `404` bei unbekannter
+  Proposal, `409` bei `status !== "PENDING"`, `500` im Fehlerpfad; Audit-Event
+  `PROPOSAL_APPROVED` mit `proposalId`/`approvedBy`/`previousStatus` unverändert.
+  Der 400-Check auf `approvedBy` behält seine Vorrangstellung.
+
+### Tests
+
+- Neu **`tests/routes.asyncParams.test.ts`** (6 Tests) — schließt genau den
+  CI-Blindfleck, der den Befund ermöglicht hat:
+  - **Projektweiter Scan**: rekursiv alle Dateien in dynamischen Segmenten
+    (`[…]`) unter `src/app`, die `route.ts`/`route.tsx`/`page.tsx`/`layout.tsx`
+    heißen, werden auf synchrone Annotationen
+    (`params: {…}` / `searchParams: {…}` statt `Promise<…>`) geprüft. Der Test
+    meldet Datei **und Zeile** und gibt die Ziel-Signatur im Fehlertext aus.
+  - **Auspack-Nachweis**: jede Datei, die `params`/`searchParams` annotiert,
+    muss es per `await` oder React-`use()` auflösen.
+  - **Konventions-Check** der Approve-Route (`RouteContext`, `await ctx.params`,
+    und `doesNotMatch` auf die alte Signatur als harte Regressionssperre).
+  - **Verhaltenstest**: der Handler wird wie in `tests/brokerApi.test.ts` direkt
+    mit `{ params: Promise.resolve({ id }) }` aufgerufen; asserted wird, dass
+    **nicht** `"proposal id missing"` zurückkommt — unter der alten Signatur kam
+    exakt das.
+  - **400-Regression**: fehlender Actor liefert weiterhin
+    `400 approvedBy (actor) is required`.
+  - Gegen den **alten** Code schlagen 4 der 6 Tests fehl (Scan, Auspack-Nachweis,
+    Konvention, Verhaltenstest), gegen den Fix sind 6/6 grün.
+- **Verifikation:** `npm run build` vollständig grün (komplette Routentabelle
+  inkl. `/api/firm/proposals/[id]/approve`, kein `TS2344`);
+  `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün;
+  `npm test` = **1590 Tests, 1590 pass, 0 fail**.
+- **Laufzeit-A/B** am Dev-Server (`POST /api/firm/proposals/prop-abc-123/approve`
+  mit `{"approvedBy":"runtime-probe"}`): vorher
+  `400 {"error":"proposal id missing"}`, nachher Auflösung der ID bis zur
+  DB-Ebene (`500 DATABASE_URL ist nicht gesetzt` in der Sandbox ohne Postgres) —
+  der 400-Actor-Pfad bleibt unverändert.
+
+Abwärtskompatibel: reine Korrektur der Handler-Signatur, keine API-, Schema-
+oder Env-Änderung. Clients müssen nichts anpassen — sie bekommen jetzt
+allerdings erstmals die intended Antwort statt eines dauerhaften 400.
+
+### Betrieblicher Hinweis
+
+Weil `next build` in keiner Workflow-Datei vorkommt, sind Build-Breaks dieser
+Art weiterhin CI-blind. Der neue Scan-Test deckt die Async-Params-Klasse
+projektweit ab; ein zusätzliches `next build` in der CI wäre die
+vollständige Absicherung.
+
+---
+
+## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
+
+**Kritischer Befund H9 aus dem Senior-Peer-Review (Audit 2026-09-03):**
+`validateOrder()` rechnete mit `const equity = Math.max(ctx.equity, 1)` und
+später `if (ctx.leverage > RISK_LIMITS.maxLeverage)`. Vergleiche mit `NaN`
+sind **immer** `false` (`NaN > x === false`) und eine Division durch NaN/0
+ergibt NaN/Infinity — eine Guardrail, die auf einem ungültigen Zahlenwert
+rechnet, konnte damit **still übergangen** werden. Negatives/insolventes
+Equity wurde via `Math.max(equity, 1)` auf 1 geklemmt, statt den insolventen
+Zustand hart zu blockieren.
+
+### Geändert
+
+- **Fail-closed Eingangsvalidierung** — `src/lib/riskGuard.ts`:
+  - Neue Klasse `RiskValidationError extends Error` mit
+    `code = "RISK_VALIDATION"` und dem verletzten `field`-Namen.
+  - Neuer Helfer `requireFinitePositive(value, field)`: wandelt über
+    `Number(value)` um und wirft bei `!Number.isFinite(n) || n <= 0`
+    (NaN, ±Infinity, nicht-numerische Strings, 0, negativ).
+  - `validateOrder()` prüft am Eingang `equity`, `leverage` und `notional`
+    über diesen Helfer — **unbekannt ⇒ BLOCK (Throw), nie ALLOW**. Der
+    `Math.max(ctx.equity, 1)`-Clamp entfällt; insolventes Equity wirft.
+    Der bisherige notional-Fast-Path
+    (`!Number.isFinite(ctx.notional) || ctx.notional <= 0`) bleibt als
+    erster Check erhalten, routet aber über `requireFinitePositive`,
+    sodass NaN/≤0 einheitlich werfen.
+  - Der Nebenläufigkeits-Zähler (`openPositions`) wird ebenfalls
+    fail-closed gelesen: ein nicht-endlicher/negativer Wert blockiert die
+    Order (bisher: `NaN >= max` ist `false` → Schranke umgangen).
+  - Neuer Übersetzungs-Helfer `riskValidationReason(e)`:
+    `equity → INVALID_EQUITY`, `leverage → INVALID_LEVERAGE`,
+    `notional → INVALID_NOTIONAL`, sonst `RISK_VALIDATION:<field>`.
+- **Caller übersetzen den Wurf in REJECTED-Fills** — alle Order-Pfade
+  fangen `RiskValidationError` ab und lehnen mit stabilem Reason ab:
+  - `src/lib/broker.ts` (`PaperBroker.submit`) → `reject(order, …)`.
+  - `src/brokers/alpaca/paper.ts` (`AlpacaPaperLedger.submit`).
+  - `src/brokers/bitunix/paper.ts` (`BitunixPaperLedger.submit`).
+  - `src/brokers/alpaca/execution.ts` (`BrokerExecutionEngine.submit`,
+    live; inkl. Private-Call-Audit `DENIED`).
+  - `src/brokers/bitunix/execution.ts` (`BrokerExecutionEngine.submit`,
+    live — eine kaputte Venue-Equity darf eine echte Order nie zulassen).
+  - `src/lib/microExecutor.ts` → `status: "BLOCKED"` mit
+    `GUARDRAIL:INVALID_EQUITY` etc., bevor der Broker berührt wird.
+- **Audit-Event-Katalog nachgezogen** — `src/lib/auditView.ts`: die mit
+  H6 eingeführten Proposal-Events `PROPOSAL_CREATED`, `PROPOSAL_APPROVED`,
+  `PROPOSAL_NOT_APPROVED` und `PROPOSAL_NOT_FOUND` hatten keine
+  UI-Beschreibungen (Katalog-Test schlug fehl); alle vier sind jetzt mit
+  Label, Kategorie, Erwartungs-Level, Beschreibung und Fakten-Sektionen
+  hinterlegt.
+
+### Tests
+
+- `tests/riskGuard.test.ts` (H9-Suite):
+  - `requireFinitePositive` akzeptiert nur endliche positive Zahlen
+    (inkl. numerischer Strings); NaN/Infinity/0/negativ/`undefined`/
+    `null`/`""`/`"abc"`/Objekte werfen `RiskValidationError` mit dem
+    richtigen `field`.
+  - `RiskValidationError` trägt `code = "RISK_VALIDATION"`, `field`,
+    `name = "RiskValidationError"`.
+  - `riskValidationReason` mappt auf `INVALID_EQUITY`/`INVALID_LEVERAGE`/
+    `INVALID_NOTIONAL` bzw. `RISK_VALIDATION:<field>`.
+  - `validateOrder` wirft bei `equity=NaN`, `equity=-5/-0.01/0`,
+    `leverage=NaN/-1/Infinity`, `notional=NaN/0/-100/Infinity`; nur
+    endlich-positive Werte passieren.
+  - `PaperBroker.submit` mit Equity 0 (insolvent) → `status: "REJECTED"`,
+    `reason: "INVALID_EQUITY"` (kein stiller Clamp, kein Throw nach außen).
+
+Abwärtskompatibel: gültige Orders verhalten sich unverändert; die
+Ablehnung ungültiger Zahlen ist eine reine Härtung (fail-closed).
+
+---
+
+## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`, `src/app/api/firm/proposals/[id]/approve/route.ts`).**
+Der Executor führt keine Modellentscheidung mehr aus; er lädt ausschließlich die jüngste serverseitig `APPROVED` Proposal (`executeApprovedProposal`) und kopiert `proposedDetail` unverändert in `broker.submit`. PENDING-Proposals führen zur harten Ablehnung (`NO_APPROVED_PROPOSAL` / `PROPOSAL_NOT_APPROVED`). Neue `POST /api/firm/proposals/{id}/approve`-Endpoint ermöglicht explizite menschliche Freigabe (`PENDING → APPROVED`) mit Actor-Aufzeichnung. Audit verknüpft Fill mit `proposalId`.
+
+**Tests:** `tests/engine.pipeline-approval.test.ts` erweitert (H6-Hostile-Output-Test); Typecheck, Lint und Docs-Validierung.
+
+---
+
+## [1.36.6] — 2026-09-03 · fix(engine): H5 Pipeline-Ausführung strikt nach Approval (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`).** Nicht-EXECUTOR-Phasen erzeugen bei `TRADE` nur noch Proposals (`PENDING` bei erforderlicher Human-Freigabe, sonst `APPROVED`) und geben `PROPOSED` zurück. Die Pipeline läuft explizit durch CEO → Research → Backtest → Risk Manager → Approver; erst die Executor-Phase lädt die jüngste `APPROVED` Proposal und führt deren servervalidierte Orderdaten aus. Ein Defense-in-depth-Guard blockiert und auditiert jeden Broker-Zugriff einer anderen Rolle mit `ROLE_NOT_ALLOWED_TO_TRADE`.
+
+**Tests:** `tests/engine.pipeline-approval.test.ts`; Typecheck, Lint und Docs-Validierung. Der vollständige `npm test`-Lauf wurde auf ausdrücklichen Wunsch übersprungen.
+
+---
+
+## [1.36.5] — 2026-09-03 · fix(broker): H4 Order-Idempotenz — kein Doppel-Order bei Retry (CRITICAL)
+
+**Kritischer Befund H4 aus dem Senior-Peer-Review (Audit 2026-09-03):** Der
+Bitunix-HTTP-Transport wiederholte einen **nicht-idempotenten** place_order-POST
+bei HTTP 429 blind (die Code-Annahme „429 = definitiv nicht verarbeitet“ ist für
+einen Finanzclient unzulässig). Außerdem wurde keine `clientOrderId` generiert/
+gesendet — ein Retry konnte also nicht über einen stabilen Idempotenz-Key
+dedupliziert werden und konnte eine Doppelorder erzeugen.
+
+### Geändert
+
+- **Stabiler `clientOrderId`** — `src/brokers/bitunix/orders.ts` + `types.ts`:
+  `serializePlaceOrder` erzeugt deterministisch einen Venue-`clientId`
+  (Wire-Feld des `clientOrderId`) im Format `ATF-<sha256>` (kollisionsresistent,
+  venue-taugliche Länge, alphanumerisch) und setzt ihn in den Body. Der Wert wird
+  für einen Retry mit demselben Body wiederverwendet. Helper `clientOrderIdFor`.
+- **Retry-Vertrag im Transport** — `src/brokers/bitunix/http.ts`:
+  Nicht-idempotente Requests (POST, insbesondere `place_order`) werden bei
+  429/Timeout/Netzwerkfehler/5xx **nie** automatisch wiederholt; stattdessen wird
+  ein typisierter `BitunixAmbiguousError` (kind `ambiguous`) nach oben gereicht.
+  Definitive Ablehnungen (auth/permission/validation/payload, 4xx) bleiben klar
+  unterscheidbar. Idempotente GETs bleiben Retry-fähig.
+- **Query-by-clientOrderId** — `src/brokers/bitunix/privateClient.ts`:
+  neu `getOrderByClientId(clientOrderId)` (`GET get_order_detail?clientId=…`),
+  das `{ orderId, status }` oder `null` liefert.
+- **Kontrollierter Retry** — `placeSerializedOrder(body, opts?: { clientOrderId })`
+  fängt den ambivalenten Ausgang und fragt VOR jedem erneuten Senden per
+  `clientOrderId` den echten Status:
+    - Order gefunden → **bestehende Order** zurück (kein Duplikat).
+    - Order nicht gefunden → **genau ein** kontrollierter Retry mit demselben
+      `clientOrderId` (derselbe Body, kein Neu-Serialisieren).
+
+### Tests
+
+- `tests/bitunix.idempotency.test.ts`:
+  (a) 429 + Query liefert bestehende Order → exakt ein place_order-POST, keine
+  Doppelorder; (b) 429 + Query leer → exakt zwei POSTs mit **identischem**
+  `clientOrderId` (derselbe Body); Status-Query liegt zwischen den POSTs.
+- Zusätzlich: `BitunixAmbiguousError` bei nicht-idempotentem 429/5xx/Netz (kein
+  Auto-Retry), idempotenter GET bleibt Retry-fähig, `clientOrderIdFor`-Stabilität.
+- Bestehende Security-Suite auf den neuen (korrekten) 429-Vertrag umgestellt;
+  Fixture-Server unterstützt die `clientId`-Query für `get_order_detail`.
+
+Abwärtskompatibel: Paper-/Backtest-Pfad unverändert; die Live-Order-Akzeptanz
+(Status NEW) bleibt. Verhalten bei ambivalenten Ausgängen wird gehärtet.
+
+---
+
+## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order fälschlich als FILLED gemeldet (CRITICAL)
+
+**Kritischer Befund H3 aus dem Senior-Peer-Review (Audit 2026-09-03):**
+`BrokerExecutionEngine.submit` (Bitunix-Live-Pfad) meldete eine vom Venue nur
+**akzeptierte** Order synchron als `status: "FILLED"` mit `fillPrice: 0`. Eine
+Annahme (ACK) ist kein Fill — die nachgelagerte Buchhaltung hätte eine reale
+Position mit Entry-Preis **0** übernehmen können.
+
+### Geändert
+
+- **Status-Vertrag (`src/contracts/broker.ts`):**
+  `BrokerOrderStatus = "NEW" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" |
+  "REJECTED" | "UNKNOWN"` — plus Contract-Helfer `isFillStatus()` und
+  `isBookableFill()` (nur `FILLED` mit `fillPrice > 0` darf eine Position einbuchen).
+  `BrokerOrderResult.filledQty` ergänzt; `BrokerAdapter.reconcileOrder?()` im Interface.
+- **`submit()` live (`src/brokers/bitunix/execution.ts`):** liefert ausschließlich die
+  AKZEPTANZ — `status: "NEW", fillPrice: 0, reason: "ORDER_ACCEPTED"`. Versandte
+  Order-Kontexte (SL/TP/Menge) werden für die spätere Reconciliation vorgehalten.
+- **Fill-Reconciliation (H3-Kern):**
+  - `BitunixPrivateClient.getOrder(orderId)` → `GET /api/v1/futures/trade/get_order_detail`
+    (Status NEW/PART_FILLED/FILLED/CANCELED + tradeQty; `null`, wenn nicht auffindbar).
+  - `BitunixPrivateClient.getExecutions(symbol?, orderId?)` →
+    `GET /api/v1/futures/trade/get_history_trades` (echte Trades als `BitunixFill[]`).
+  - `BrokerExecutionEngine.reconcile(orderId)` baut aus Order-Detail **und** den Trades
+    das ECHTE Ergebnis: avgPrice = mengen-gewichteter Mittelwert der Trades; Status
+    NEW → PARTIALLY_FILLED → FILLED; CANCELED mit/ohne Teilfills; Order nicht
+    auffindbar oder Füllpreis nicht belegbar → **UNKNOWN** (fail-safe, nie FILLED/0).
+  - `BitunixBrokerAdapter.reconcileOrder(orderId)` mit denselben Gate/Capability-Prüfungen
+    wie `placeOrder`; Paper/Backtest liefern `null` (synchroner Fill).
+- **Position-Adoption (`listPositions`):** Venue-Positionen mit `entryPrice ≤ 0` oder
+  `qty ≤ 0` werden verworfen — eine Position entsteht nur mit echtem avgPrice.
+  Engine (`src/lib/engine.ts`) und Mikro-Executor (`src/lib/microExecutor.ts`) buchen
+  Positionen nur noch bei `status === "FILLED"` UND belegtem Preis > 0.
+- **Consumer per Switch über das neue Status-Ensemble:** Alpaca `mapOrderResult`
+  (akzeptierte Orders sind jetzt NEW statt REJECTED; partial/canceled/unknown),
+  Audit-Ansicht (`fillSection`: Töne good/bad/warn + erklärende Hinweise je Status).
+
+### Tests
+
+- `submit()` live → `status:"NEW"`, `fillPrice:0`, gültige `orderId`, `reason:"ORDER_ACCEPTED"`.
+- `reconcile()` mappt Venue `PART_FILLED` → `PARTIALLY_FILLED` mit echtem avgPrice (65000).
+- `reconcile()` NEW ohne Trades → NEW/0; FILLED ohne belegbaren Preis → UNKNOWN
+  (`FILL_PRICE_UNKNOWN`); Order fehlt → UNKNOWN (`ORDER_NOT_FOUND`); CANCELED mit Teilfills.
+- Adapter-Live-Pfad: `reconcileOrder` nach Gate-Freigabe; Paper → `null`.
+- Bestehende Live-Tests (Fixture-Server, Security-Suite) auf NEW/AKZEPTANZ umgestellt;
+  Fixture-Server bedient jetzt auch `get_order_detail`/`get_history_trades`.
+
+Abwärtskompatibel: Paper-/Backtest-Engines füllen synchron und liefern weiterhin `FILLED`.
+
+---
+
 ## [1.36.3] — 2026-09-03 · security(audit): Remediation-Plan Senior Peer-Review
 
 **Schweregrad-Mix:** 8× CRITICAL, 8× HIGH, 4× MEDIUM (20 Befunde). **H1 bereits in v1.36.2 gefixt.**

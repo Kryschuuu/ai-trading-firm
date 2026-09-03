@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.1 (2026-09-02) · Vollständige
+> **Dokumentationsstand:** v1.36.12 (2026-09-03) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -25,7 +25,7 @@ Risikogrenzen im Code**.
 git clone https://github.com/Kryschuuu/ai-trading-firm.git
 cd ai-trading-firm
 ./scripts/setup-cachyos.sh --variant a     # Variante A: alles auf einem Rechner
-./scripts/setup-cachyos.sh --variant b --llm-host 192.168.1.50
+./scripts/setup-cachyos.sh --variant b --llm-host 192.168.0.20
 ```
 
 Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt

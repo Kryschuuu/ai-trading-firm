@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.32.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.36.12 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -104,7 +104,7 @@ ausschließlich den credential-freien PublicClient.
 | Ebene | Pfade | Auth-Anforderung | Rate-Limit | Aktivierungs-Flag |
 | --- | --- | --- | --- | --- |
 | **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** — credential-freier PublicClient, keine Signatur, kein Nonce | Token-Bucket **8 req/s/IP** (Doku: 10); ein **geteilter** Bucket je Sync-Lauf, Parallelität ≤ 8 | `BITUNIX_ENABLED=true` + `capabilities.BITUNIX.marketData` + `MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES` (Sync) |
-| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order` | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
+| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order`, `trade/get_order_detail`, `trade/get_history_trades` (H3-Reconciliation) | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger gegen echte Public-Kurse) | keine signierten Requests (liest nur Public-Ticker) | über Public-Bucket | `getBroker("BITUNIX", "paper")`, `BITUNIX_ENABLED=true` |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert (Private API) + komplette Live-Gate-State-Machine | Private-Bucket | `BITUNIX_LIVE_ENABLED` + `LIVE_TRADING_ENABLED` + `REQUIRE_HUMAN_APPROVAL=false` + Live-Gate `LIVE_ENABLED` (Default: `LiveTradingGateError`) |
 
@@ -241,12 +241,36 @@ Basis: `https://fapi.bitunix.com` (Allowlist-Host). Schema `https` erzwungen;
 | Klines | `GET /api/v1/futures/market/kline` |
 | Orderbuch | `GET /api/v1/futures/market/depth` |
 | Account (privat) | `GET /api/v1/futures/account` |
-| Positionen (privat) | `GET /api/v1/futures/position/get_pending_positions` |
+| Positionen (privat) | `GET /api/v1/futures/position/get_pending_positions` (`side` **validiert**: nur `LONG`/`SHORT`, sonst Verwurf + Zähler — §5.3) |
 | Place-Order (privat) | `POST /api/v1/futures/trade/place_order` |
+| Order-Detail (privat, H3) | `GET /api/v1/futures/trade/get_order_detail` (per `orderId` **oder** `clientId` — H4-Idempotenz-Query) |
+| Ausführungen/Trades (privat, H3) | `GET /api/v1/futures/trade/get_history_trades` |
 | Public WS | `wss://fapi.bitunix.com/public/` |
+
+**H3 — Order-Status & Fill-Reconciliation (seit v1.36.4):** `place_order` liefert
+nur die AKZEPTANZ der Order (`BrokerOrderResult.status = "NEW"`, `fillPrice = 0`)
+— eine Annahme ist kein Fill. Der echte Fill wird asynchron abgeglichen:
+`get_order_detail` (Venue-Status `NEW`/`PART_FILLED`/`FILLED`/`CANCELED` +
+`tradeQty`) und `get_history_trades` (echte Trades) werden über
+`BrokerExecutionEngine.reconcile(orderId)` (bzw. `Adapter.reconcileOrder`) zum
+echten Ergebnis zusammengesetzt — der avgPrice ist der mengen-gewichtete
+Mittelwert der Trades. Status-Mapping: `NEW/INIT` → NEW, `PART_FILLED` →
+PARTIALLY_FILLED, `FILLED` → FILLED, `CANCELED/EXPIRED/PART_FILLED_CANCELED` →
+CANCELED, Unbekanntes/fehlende Order/nicht belegbarer Preis → UNKNOWN
+(fail-safe — eine Position wird NIE mit Entry-Preis 0 eingebucht).
 
 Envelope: `{ code: 0, data, msg }`. `code ≠ 0` wird taxonomisch klassifiziert
 (auth / permission / rate-limit / maintenance / unknown).
+
+**H4 — Order-Idempotenz (seit v1.36.5):** Jede Live-Order trägt einen stabilen
+`clientOrderId` (Wire-Feld `clientId`, Format `ATF-<sha256>`). Der HTTP-Transport
+wiederholt einen nicht-idempotenten place_order-POST bei 429/Timeout/Netz/5xx
+**nie automatisch**, sondern reicht einen `BitunixAmbiguousError` nach oben.
+`placeSerializedOrder` fragt dann VOR jedem erneuten Senden per
+`getOrderByClientId(clientOrderId)` (`GET get_order_detail?clientId=…`) den
+echten Status ab: Order gefunden → bestehende Order (kein Duplikat); nicht
+gefunden → genau **ein** kontrollierter Retry mit demselben `clientOrderId`
+(derselbe Body). Damit wird nachweislich kein Doppel-Order erzeugt.
 
 **Fees:** `trading_pairs` liefert keine maker/taker-Felder. `MarketInstrument`
 erlaubt kein `null` für Fees — der Adapter setzt die dokumentierten VIP0-Defaults
@@ -339,8 +363,11 @@ ExecutionMode
   (`validateOrder`) gegen die **echte** Konto-Equity und die echten offenen
   Positionen (fail-closed: scheitert der Abruf, wird nicht gesendet). Erst dann
   geht die Order über `BitunixPrivateClient.placeSerializedOrder` (SL/TP als
-  `slPrice`/`tpPrice` im selben Body, `stopAtVenue`, **kein Retry** bei
-  Timeout/Netz/5xx — siehe §7). **Niemals** über das Paper-Ledger.
+  `slPrice`/`tpPrice` im selben Body, `stopAtVenue`; **H4-Idempotenz**: stabiler
+  `clientOrderId` (`ATF-…`) wird gesetzt und bei einem kontrollierten Retry
+  wiederverwendet; ein nicht-idempotenter place_order-POST wird bei
+  Timeout/Netz/5xx/429 nie blind wiederholt, sondern erst per `clientOrderId`
+  abgefragt — siehe §7). **Niemals** über das Paper-Ledger.
 - `getAccount`/`getPositions` im **Live**-Modus liefern **echte Venue-Daten**
   (signierte Private-API), nie Paper-Daten.
 - `paper`/`backtest` → `PaperExecutionEngine` gegen das lokale Ledger
@@ -361,7 +388,132 @@ keinen stillen Fallback auf Paper. `testnet` → `NotSupportedCapabilityError`
 
 Private Calls (nur im Live-Pfad nach Gate-Freigabe bzw. in Tests) landen als Event
 `BITUNIX_PRIVATE_CALL` (Methode, Pfad, Outcome, errorCode — **kein** Body, keine
-Query, kein Key, keine Signatur).
+Query, kein Key, keine Signatur). Verworfene Positionszeilen zusätzlich im
+In-Memory-Ring `readBitunixPositionAnomalies()` plus Zähler (B2, §5.3).
+
+### 5.1 Konto-Mapping `getAccount` (H8, seit v1.36.10)
+
+`GET /api/v1/futures/account?marginCoin=USDT` liefert pro Margin-Coin eine Zeile.
+`BitunixPrivateClient.getAccount()` bildet sie auf die **kanonische
+`BrokerAccount`-Zerlegung** ab (`src/contracts/broker.ts`); der Risk-Guard
+(`validateOrder` in `BrokerExecutionEngine.submit`) nutzt `equity` als
+Denominator, der Cash-Guard prüft `cash` (= freie Margin):
+
+| Venue-Feld (Zeile) | Bedeutung | Kanonisches Feld |
+| --- | --- | --- |
+| `walletBalance` | Kontostand ohne offene Positionen (falls geliefert) | `walletBalance` |
+| `available` | freie Margin (freies Cash) — **nicht** Equity | `cash` = `availableCash` |
+| `margin` (ggf. `usedMargin`) | durch Positionen gebundene Initial-Margin | `usedMargin` |
+| `frozen` | durch offene Orders gebundene Margin | (in `walletBalance`-Fallback) |
+| `crossUnrealizedPNL` | uPnL der Cross-Positionen | Teil von `unrealizedPnl` |
+| `isolationUnrealizedPNL` | uPnL der Isolated-Positionen | Teil von `unrealizedPnl` |
+| `maintenanceMargin` | Wartungsmargin (falls geliefert, sonst 0) | `maintenanceMargin` |
+| `realizedPnl` | realisiertes PnL (falls separat geliefert, sonst 0) | fließt in `equity` ein |
+
+Mapping-Regeln (H8):
+
+```text
+equity        = walletBalance + realizedPnl + unrealizedPnl
+unrealizedPnl = crossUnrealizedPNL + isolationUnrealizedPNL
+cash          = availableCash = available
+usedMargin    = usedMargin ?? row.margin ?? 0
+```
+
+- **`walletBalance`:** Wird direkt übernommen, wenn die Antwort das Feld führt.
+  Fehlt es **genuin** (undefined/null/leer — die dokumentierte Antwortversion
+  führt es nicht), wird es aus den venue-eigenen Komponenten zerlegt:
+  `available + frozen + margin` (freie Margin + Order-Margin + Positions-Margin).
+- **Niemals** wird `equity` aus `available` allein synthetisiert — die alte Formel
+  `equity = available + uPnL` ließ die gebundene Margin außen vor und war bei
+  offenen Positionen (`usedMargin > 0`) zu klein; es gilt dann `equity != available`.
+- Realisiertes PnL settled Bitunix laufend ins Wallet; die Account-Antwort führt
+  es regulär nicht — `realizedPnl` wird nur addiert, wenn die API es liefert.
+- Fehlen alle Felder (leere Antwort), ergibt die Abbildung fail-closed 0 —
+  `validateOrder` (H9) blockiert Orders dann hart.
+
+Alle übrigen Erzeuger (Paper-Ledger Alpaca/Bitunix, PAPER-Venue-Wrapper,
+Alpaca-Live-Mapping) liefern dieselbe kanonische Zerlegung; Paper/Cash-Konten
+sind voll besichert (`usedMargin = 0`, `availableCash = cash`,
+`walletBalance = equity − unrealizedPnl`). Tests:
+`tests/bitunix.accountEquity.test.ts`.
+
+### 5.2 SL/TP-Geometrie (B1 — seit v1.36.11)
+
+`serializePlaceOrder` (`src/brokers/bitunix/orders.ts`) prüft **vor** dem Aufbau des
+Wire-Bodys, ob SL/TP auf der richtigen Seite des Entry liegen. Ohne diese Prüfung
+könnte eine formal positive, aber semantisch falsche Staffelung (z. B. ein
+LONG-Stop oberhalb des Einstiegspreises) zur Venue gehen — der Adapter vertraut
+**nicht** darauf, dass Caller korrekte Werte liefern.
+
+**Entry-Bezugspunkt** (`entry`):
+
+| Order-Typ | Entry | Geometrie-Prüfung |
+| --- | --- | --- |
+| `LIMIT` | `req.limitPrice` (fester Preis) | immer aktiv |
+| `MARKET` mit `req.markPriceHint` | `req.markPriceHint` (Mark-/Quote-Preis) | aktiv |
+| `MARKET` ohne Entry-Hinweis | — | **übersprungen** (kein falscher Deny) |
+
+`markPriceHint` ist ein reiner Validierungs-Bezugspunkt: Er geht **nie** in den
+Wire-Body und **nicht** in die Order-Idempotenz (`clientOrderId`) ein.
+
+**Regeln (Fehler = `OrderSerializationError`):**
+
+| Side | Bedingung | Meldung |
+| --- | --- | --- |
+| `LONG` | `stopLoss >= entry` | `LONG stopLoss muss unter dem Entry liegen` |
+| `LONG` | `takeProfit <= entry` | `LONG takeProfit muss über dem Entry liegen` |
+| `SHORT` | `stopLoss <= entry` | `SHORT stopLoss muss über dem Entry liegen` |
+| `SHORT` | `takeProfit >= entry` | `SHORT takeProfit muss unter dem Entry liegen` |
+
+Die Grenzfälle `SL == entry` bzw. `TP == entry` werden ebenfalls abgelehnt
+(streng kleiner/größer). Tests: `tests/bitunix.unit.test.ts`
+(`Orders (B1): SL/TP-Geometrie …`).
+
+### 5.3 Positionsseite: validieren statt raten (B2 — seit v1.36.12)
+
+`getPositions()` (`src/brokers/bitunix/privateClient.ts`) übernahm früher jede
+Zeile, deren `side` nicht exakt `"SHORT"` war, als **LONG** — auch `""`, `null`
+und offensichtlichen Müll. Eine korrumpierte Antwort war damit unsichtbar, und
+eine Short-Position wäre im lokalen View als Long erschienen (falsches
+uPnL-Vorzeichen, falsche SL/TP-Geometrie, falsche Seitenlogik im Risk-Pfad).
+
+Heute gilt eine **Zwei-Gate-Filterung in fester Reihenfolge**:
+
+| # | Prüfung | Outcome bei Fehlschlag |
+| --- | --- | --- |
+| 1 | `qty` endlich und `> 0` | Zeile verworfen (geschlossene/Null-Mengen-Zeile) — **keine** Anomalie |
+| 2 | `side` ∈ {`LONG`, `SHORT`} (getrimmt, case-insensitiv) | Zeile verworfen + als Anomalie gezählt |
+
+Reihenfolge ist Absicht: Das Venue liefert für bereits geschlossene Zeilen
+regulär keine `side`. Sie scheiden über die `qty`-Prüfung aus, bevor die Seite
+überhaupt betrachtet wird — die Seitenprüfung bleibt damit den **echten offenen
+Positionen** vorbehalten, wo Raten gefährlich ist.
+
+`parseBitunixPositionSide(raw)` ist der exportierte, pure Kern der Prüfung:
+akzeptiert nur `LONG`/`SHORT`, alles andere (inkl. `BUY`/`SELL`, die als
+*Order*-Seite nicht in eine Positionsantwort gehören) → `null`. Die
+Zweiwertigkeit ist venue-seitig dokumentiert — `get_pending_positions` weist
+`side` als `LONG`/`SHORT` aus
+(<https://www.bitunix.com/api-docs/futures/position/get_pending_positions.html>);
+ein dritter Wert ist deshalb kein „impliziter Long“, sondern eine unplausible
+Antwort.
+
+**Sichtbarkeit statt Stillschweigen:** jede verworfene Zeile landet im
+In-Memory-Audit-Ring `readBitunixPositionAnomalies(limit)` (Symbol, gekürzter
+Rohwert, `reason: "UNKNOWN_SIDE"`, Zeitstempel; maximal 50 Einträge) und erhöht
+`readBitunixPositionAnomalyCount()`. Pro Call wird zusätzlich **eine**
+zusammengefasste Warnung über den redaktierten Logger ausgegeben
+(`getPositions: N Positionszeile(n) ohne verwertbare side verworfen (kein
+LONG-Fallback, B2): …`) — nie unlimitiert pro Zeile, nie ohne Redaction.
+
+Der Zähler ist ein Betriebsignal: ein dauerhaft wachsender Wert bedeutet
+„Venue-Antwort unplausibel“, nicht „Position existiert mit unbekannter Seite“.
+Eine verworfene Position wird deshalb auch **nie** in `openPositions` der
+`BrokerAccount` gezählt (`BrokerExecutionEngine.getAccount` → `listPositions`).
+
+Tests: `tests/bitunix.positions.test.ts` (Unit der Seitenvalidierung, Verwurf +
+Zählung, Warnung, Kumulation über Calls, `qty`-vor-`side`-Reihenfolge,
+Regression der sauberen Antwort).
 
 ---
 
@@ -411,7 +563,7 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | SSRF | Host-Allowlist (`fapi.bitunix.com` + optionale `BITUNIX_ALLOWED_HOSTS`). Kein Userinfo. `https` Pflicht; `http`/`ws` nur Loopback + Insecure-Flag. `redirect: "error"`. |
 | TLS | Node-Default-Zertifikatsprüfung (an). |
 | Rate-Limit | Token-Bucket, konservativ 8 req/s (Doku: 10/s). |
-| Timeout / Retry | Default 8 s, max. 3 Versuche, nur 429/5xx/Netz — **nie** auth. Nicht-idempotente Requests (POST, insbesondere `place_order`) wiederholen bei Timeout/Netzwerkfehler/5xx **nicht** (Doppel-Order-Gefahr); nur 429 (definitiv nicht verarbeitet) bleibt Retry-fähig. |
+| Timeout / Retry | Default 8 s, max. 3 Versuche, nur 5xx/Netz — **nie** auth. **H4-Idempotenz:** Nicht-idempotente Requests (POST, insbesondere `place_order`) werden bei Timeout/Netzwerkfehler/5xx/**429** **nie automatisch** wiederholt — Doppel-Order-Gefahr. Der Transport reicht stattdessen einen `BitunixAmbiguousError` (kind `ambiguous`) nach oben; der Aufrufer (`placeSerializedOrder`) fragt VOR jedem erneuten Senden per `clientOrderId` den echten Status ab (`getOrderByClientId`) und wiederholt nur dann genau **einmal** mit demselben `clientOrderId`. Idempotente GETs bleiben weiterhin Retry-fähig. |
 | Redactor | Maskiert Header-Muster, Hex-Tokens ≥ 32, injizierte Klartext-Secrets. Logger-Prefix `[bitunix]`. |
 
 ---
@@ -465,8 +617,9 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 
 ## 10. Tests & Coverage
 
-- `tests/bitunix.unit.test.ts` — Signing-Goldens (≥5), Mapping, Orders, 16 Gates, Redactor, Config, Secrets
+- `tests/bitunix.unit.test.ts` — Signing-Goldens (≥5), Mapping, Orders (inkl. **B1 SL/TP-Geometrie**), 16 Gates, Redactor, Config, Secrets
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
+- `tests/bitunix.positions.test.ts` — B2: Positionsseite validiert (Verwurf + Zähler + Warnung), `qty`-vor-`side`-Reihenfolge, LONG/SHORT-Regression
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
 - `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
