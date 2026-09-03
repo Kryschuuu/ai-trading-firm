@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.7**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.8**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,16 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
+
+**HIGH, Handelslogik (`src/lib/riskGuard.ts`, `src/lib/broker.ts`, `src/lib/microExecutor.ts`, `src/brokers/alpaca/{paper,execution}.ts`, `src/brokers/bitunix/{paper,execution}.ts`).** `validateOrder()` rechnete mit `const equity = Math.max(ctx.equity, 1)` und `if (ctx.leverage > RISK_LIMITS.maxLeverage)`: Bei `NaN` sind alle Vergleiche `false`, sodass eine Guardrail still übergangen werden konnte; negatives/insolventes Equity wurde auf 1 geklemmt statt hart blockiert.
+
+**Fix:** Neuer Eingangs-Helfer `requireFinitePositive(value, field)` wirft eine `RiskValidationError` (`code = "RISK_VALIDATION"`) bei NaN/Infinity/nicht-numerischen Werten/≤0. `validateOrder` prüft damit `equity`, `leverage` und `notional` am Eingang (fail-closed: unbekannt ⇒ BLOCK); der `Math.max`-Clamp entfällt. Der Nebenläufigkeits-Zähler wird ebenfalls fail-closed gelesen (NaN ⇒ blockiert). Alle Aufrufer (`PaperBroker.submit`, `AlpacaPaperLedger.submit`, `BitunixPaperLedger.submit`, `AlpacaBrokerExecutionEngine.submit`, `BitunixBrokerExecutionEngine.submit`, Mikro-Executor) fangen den Fehler und übersetzen ihn in einen REJECTED-Fill mit stabilem Reason (`INVALID_EQUITY` / `INVALID_LEVERAGE` / `INVALID_NOTIONAL` via `riskValidationReason`). Zusätzlich nachgezogen: Audit-Event-Katalog für die H6-Proposal-Events (`PROPOSAL_CREATED`, `PROPOSAL_APPROVED`, `PROPOSAL_NOT_APPROVED`, `PROPOSAL_NOT_FOUND`) in `src/lib/auditView.ts`.
+
+**Tests:** `tests/riskGuard.test.ts` — NaN/Infinity/negativ/0 für equity, leverage, notional werfen `RiskValidationError`; nur endlich-positive Werte passieren; `PaperBroker.submit` mit Equity 0 → REJECTED/`INVALID_EQUITY`; `requireFinitePositive`/`riskValidationReason`-Unit-Tests. Typecheck, Lint, Docs-Validierung.
+
+---
 
 ## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
 

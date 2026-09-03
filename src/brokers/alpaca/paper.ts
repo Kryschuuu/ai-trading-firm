@@ -9,7 +9,7 @@
  * (`src/lib/marketdata/simulator.ts`) für die Fill-Berechnung. Damit sind
  * Alpaca Paper und Generic Paper (soweit Daten vorhanden) verhaltensgleich.
  */
-import { killSwitch, validateOrder } from "../../lib/riskGuard";
+import { killSwitch, validateOrder, riskValidationReason } from "../../lib/riskGuard";
 import { FillSimulator } from "../../lib/marketdata/simulator";
 import { loadSimulatorConfig, type FillSimulatorConfig } from "../../lib/marketdata/config";
 import { snapshotFromLastPrice, fallbackInstrument } from "../../lib/marketdata/snapshot";
@@ -125,15 +125,22 @@ export class AlpacaPaperLedger {
     if (!Number.isFinite(estimatedNotional) || estimatedNotional <= 0) return reject("INVALID_ESTIMATED_NOTIONAL");
 
     const equity = this.getAccount(() => ticker.price).equity;
-    const guard = validateOrder({
-      notional: estimatedNotional,
-      equity,
-      openPositions: this.positions.size,
-      side: req.side,
-      leverage: 1,
-      hasStopLoss,
-      symbol,
-    });
+    // H9: Ungültige Zahlen (NaN/Infinity/≤0) lassen validateOrder fail-closed
+    // werfen — übersetzen in einen REJECTED-Fill (INVALID_EQUITY etc.).
+    let guard;
+    try {
+      guard = validateOrder({
+        notional: estimatedNotional,
+        equity,
+        openPositions: this.positions.size,
+        side: req.side,
+        leverage: 1,
+        hasStopLoss,
+        symbol,
+      });
+    } catch (e) {
+      return reject(riskValidationReason(e));
+    }
     if (!guard.allowed) return reject(guard.reason);
     // Vorab-Cash-Guard mit konservativer Schätzung (0.1% Slippage-Puffer)
     const estimatedSlippage = estimatedNotional * 0.001;

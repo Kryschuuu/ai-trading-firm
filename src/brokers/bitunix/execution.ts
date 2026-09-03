@@ -25,7 +25,7 @@ import type {
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
 import { isBookableFill } from "../../contracts/broker";
-import { killSwitch, validateOrder } from "../../lib/riskGuard";
+import { killSwitch, validateOrder, riskValidationReason } from "../../lib/riskGuard";
 import { serializePlaceOrder } from "./orders";
 import type { BitunixPaperLedger } from "./paper";
 import { mapBitunixOrderStatus, type BitunixPrivateClient } from "./privateClient";
@@ -140,15 +140,22 @@ export class BrokerExecutionEngine implements ExecutionPort {
     //    Order NICHT gesendet (der Fehler propagiert laut nach oben).
     const account = await this.getAccount();
     const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
-    const guard = validateOrder({
-      notional: estimatedNotional,
-      equity: account.equity,
-      openPositions: account.openPositions,
-      side: req.side,
-      leverage: 1,
-      hasStopLoss,
-      symbol: req.symbol.toUpperCase(),
-    });
+    // H9: validateOrder wirft bei NaN/Infinity/≤0 fail-closed (RiskValidationError)
+    // — eine kaputte Venue-Equity darf eine echte Live-Order niemals zulassen.
+    let guard;
+    try {
+      guard = validateOrder({
+        notional: estimatedNotional,
+        equity: account.equity,
+        openPositions: account.openPositions,
+        side: req.side,
+        leverage: 1,
+        hasStopLoss,
+        symbol: req.symbol.toUpperCase(),
+      });
+    } catch (e) {
+      return this.reject(req, riskValidationReason(e));
+    }
     if (!guard.allowed) {
       return this.reject(req, guard.reason);
     }

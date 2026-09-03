@@ -5,6 +5,78 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
+
+**Kritischer Befund H9 aus dem Senior-Peer-Review (Audit 2026-09-03):**
+`validateOrder()` rechnete mit `const equity = Math.max(ctx.equity, 1)` und
+später `if (ctx.leverage > RISK_LIMITS.maxLeverage)`. Vergleiche mit `NaN`
+sind **immer** `false` (`NaN > x === false`) und eine Division durch NaN/0
+ergibt NaN/Infinity — eine Guardrail, die auf einem ungültigen Zahlenwert
+rechnet, konnte damit **still übergangen** werden. Negatives/insolventes
+Equity wurde via `Math.max(equity, 1)` auf 1 geklemmt, statt den insolventen
+Zustand hart zu blockieren.
+
+### Geändert
+
+- **Fail-closed Eingangsvalidierung** — `src/lib/riskGuard.ts`:
+  - Neue Klasse `RiskValidationError extends Error` mit
+    `code = "RISK_VALIDATION"` und dem verletzten `field`-Namen.
+  - Neuer Helfer `requireFinitePositive(value, field)`: wandelt über
+    `Number(value)` um und wirft bei `!Number.isFinite(n) || n <= 0`
+    (NaN, ±Infinity, nicht-numerische Strings, 0, negativ).
+  - `validateOrder()` prüft am Eingang `equity`, `leverage` und `notional`
+    über diesen Helfer — **unbekannt ⇒ BLOCK (Throw), nie ALLOW**. Der
+    `Math.max(ctx.equity, 1)`-Clamp entfällt; insolventes Equity wirft.
+    Der bisherige notional-Fast-Path
+    (`!Number.isFinite(ctx.notional) || ctx.notional <= 0`) bleibt als
+    erster Check erhalten, routet aber über `requireFinitePositive`,
+    sodass NaN/≤0 einheitlich werfen.
+  - Der Nebenläufigkeits-Zähler (`openPositions`) wird ebenfalls
+    fail-closed gelesen: ein nicht-endlicher/negativer Wert blockiert die
+    Order (bisher: `NaN >= max` ist `false` → Schranke umgangen).
+  - Neuer Übersetzungs-Helfer `riskValidationReason(e)`:
+    `equity → INVALID_EQUITY`, `leverage → INVALID_LEVERAGE`,
+    `notional → INVALID_NOTIONAL`, sonst `RISK_VALIDATION:<field>`.
+- **Caller übersetzen den Wurf in REJECTED-Fills** — alle Order-Pfade
+  fangen `RiskValidationError` ab und lehnen mit stabilem Reason ab:
+  - `src/lib/broker.ts` (`PaperBroker.submit`) → `reject(order, …)`.
+  - `src/brokers/alpaca/paper.ts` (`AlpacaPaperLedger.submit`).
+  - `src/brokers/bitunix/paper.ts` (`BitunixPaperLedger.submit`).
+  - `src/brokers/alpaca/execution.ts` (`BrokerExecutionEngine.submit`,
+    live; inkl. Private-Call-Audit `DENIED`).
+  - `src/brokers/bitunix/execution.ts` (`BrokerExecutionEngine.submit`,
+    live — eine kaputte Venue-Equity darf eine echte Order nie zulassen).
+  - `src/lib/microExecutor.ts` → `status: "BLOCKED"` mit
+    `GUARDRAIL:INVALID_EQUITY` etc., bevor der Broker berührt wird.
+- **Audit-Event-Katalog nachgezogen** — `src/lib/auditView.ts`: die mit
+  H6 eingeführten Proposal-Events `PROPOSAL_CREATED`, `PROPOSAL_APPROVED`,
+  `PROPOSAL_NOT_APPROVED` und `PROPOSAL_NOT_FOUND` hatten keine
+  UI-Beschreibungen (Katalog-Test schlug fehl); alle vier sind jetzt mit
+  Label, Kategorie, Erwartungs-Level, Beschreibung und Fakten-Sektionen
+  hinterlegt.
+
+### Tests
+
+- `tests/riskGuard.test.ts` (H9-Suite):
+  - `requireFinitePositive` akzeptiert nur endliche positive Zahlen
+    (inkl. numerischer Strings); NaN/Infinity/0/negativ/`undefined`/
+    `null`/`""`/`"abc"`/Objekte werfen `RiskValidationError` mit dem
+    richtigen `field`.
+  - `RiskValidationError` trägt `code = "RISK_VALIDATION"`, `field`,
+    `name = "RiskValidationError"`.
+  - `riskValidationReason` mappt auf `INVALID_EQUITY`/`INVALID_LEVERAGE`/
+    `INVALID_NOTIONAL` bzw. `RISK_VALIDATION:<field>`.
+  - `validateOrder` wirft bei `equity=NaN`, `equity=-5/-0.01/0`,
+    `leverage=NaN/-1/Infinity`, `notional=NaN/0/-100/Infinity`; nur
+    endlich-positive Werte passieren.
+  - `PaperBroker.submit` mit Equity 0 (insolvent) → `status: "REJECTED"`,
+    `reason: "INVALID_EQUITY"` (kein stiller Clamp, kein Throw nach außen).
+
+Abwärtskompatibel: gültige Orders verhalten sich unverändert; die
+Ablehnung ungültiger Zahlen ist eine reine Härtung (fail-closed).
+
+---
+
 ## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
 
 **CRITICAL, Handelslogik (`src/lib/engine.ts`, `src/app/api/firm/proposals/[id]/approve/route.ts`).**
