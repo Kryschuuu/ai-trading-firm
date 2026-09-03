@@ -111,9 +111,12 @@ test("Live-Engine: Code-Guardrails rechnen gegen die ECHTE Konto-Equity", async 
 
   assert.equal(calls.place, 0, "abgewiesene Orders erreichen die Venue nie");
 
-  // Regelkonforme Order passiert die Schutzkette und wird gesendet.
+  // Regelkonforme Order passiert die Schutzkette und wird gesendet — aber
+  // die Venue-Annahme ist KEIN Fill: Status NEW (H3), nicht FILLED.
   const ok = await engine.submit(ORDER, TICKER);
-  assert.equal(ok.status, "FILLED");
+  assert.equal(ok.status, "NEW", "akzeptierte Live-Order ist NEW, nicht FILLED");
+  assert.equal(ok.fillPrice, 0, "kein fiktiver Fill-Preis bei NEW");
+  assert.equal(ok.reason, "ORDER_ACCEPTED");
   assert.equal(calls.place, 1);
 });
 

@@ -145,8 +145,10 @@ export function mapBars(
 }
 
 /**
- * Mappt eine Alpaca-Order auf BrokerOrderResult. Setzt fillPrice=0 bei
- * nicht-FILLED-Status. SL/TP werden aus den Legs gezogen (Bracket).
+ * Mappt eine Alpaca-Order auf BrokerOrderResult (H3: volles Status-Spektrum).
+ * Eine angenommene, noch nicht gefüllte Order ist NEW (NICHT REJECTED);
+ * Teilfills → PARTIALLY_FILLED; Stornos → CANCELED; Unbekanntes → UNKNOWN.
+ * fillPrice ist nur > 0, wenn ein echter Füllpreis vorliegt.
  */
 export function mapOrderResult(
   raw: { id: string; symbol: string; side: string; qty?: string; filled_qty?: string; filled_avg_price?: string; status: string },
@@ -154,15 +156,50 @@ export function mapOrderResult(
 ): import("../../contracts/broker").BrokerOrderResult {
   const filledQty = asNumber(raw.filled_qty, 0);
   const fillPrice = asNumber(raw.filled_avg_price, 0);
-  const isFilled = raw.status === "filled";
+  const venueStatus = String(raw.status ?? "").toLowerCase();
+
+  // H3: expliziter Switch über den Venue-Status (kein binäres filled/rejected).
+  let status: import("../../contracts/broker").BrokerOrderStatus;
+  switch (venueStatus) {
+    case "filled":
+      status = "FILLED";
+      break;
+    case "partially_filled":
+      status = "PARTIALLY_FILLED";
+      break;
+    case "new":
+    case "accepted":
+    case "pending_new":
+    case "held":
+    case "accepted_for_bidding":
+      status = "NEW";
+      break;
+    case "canceled":
+    case "cancelled":
+    case "expired":
+    case "replaced":
+      status = "CANCELED";
+      break;
+    case "rejected":
+    case "stopped":
+    case "suspended":
+      status = "REJECTED";
+      break;
+    default:
+      status = "UNKNOWN";
+  }
+
+  // Füllpreis nur bei echtem (Teil-)Fill; 0 überall sonst (kein 0-Entry).
+  const hasFill = (status === "FILLED" || status === "PARTIALLY_FILLED") && filledQty > 0;
   return {
     orderId: raw.id,
     symbol: raw.symbol,
     side: raw.side === "buy" ? "LONG" : "SHORT",
     qty: filledQty > 0 ? filledQty : reqQty,
-    fillPrice: isFilled ? fillPrice : 0,
-    status: isFilled ? "FILLED" : "REJECTED",
-    reason: isFilled ? undefined : raw.status,
+    filledQty,
+    fillPrice: hasFill ? fillPrice : 0,
+    status,
+    reason: status === "FILLED" ? undefined : venueStatus,
     stopLoss: null,
     takeProfit: null,
   };

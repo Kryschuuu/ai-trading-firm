@@ -24,7 +24,7 @@ noch valide.
 |----|---------|----------|--------------------|--------|
 | H1 | Handelslogik | CRITICAL | ✅ bereits gefixt (v1.36.2) | [H1](../audit-remediation/H1-risk-notional.md) |
 | H2 | Handelslogik | CRITICAL | ⚠️ teilweise (keine verteilte Atomarität) | [H2](../audit-remediation/H2-atomicity.md) |
-| H3 | Handelslogik | CRITICAL | ✅ valide | [H3](../audit-remediation/H3-order-status.md) |
+| H3 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.4) | [H3](../audit-remediation/H3-order-status.md) |
 | H4 | Handelslogik/Broker | CRITICAL | ✅ valide | [H4](../audit-remediation/H4-idempotency.md) |
 | H5 | Handelslogik | CRITICAL | ✅ valide | [H5](../audit-remediation/H5-pipeline-trading.md) |
 | H6 | Handelslogik | CRITICAL | ✅ valide | [H6](../audit-remediation/H6-approval-chain.md) |

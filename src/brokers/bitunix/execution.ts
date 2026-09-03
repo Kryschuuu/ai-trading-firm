@@ -19,14 +19,16 @@ import type {
   BrokerAccount,
   BrokerOrderRequest,
   BrokerOrderResult,
+  BrokerOrderStatus,
   BrokerPosition,
   MarketTicker,
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
+import { isBookableFill } from "../../contracts/broker";
 import { killSwitch, validateOrder } from "../../lib/riskGuard";
 import { serializePlaceOrder } from "./orders";
 import type { BitunixPaperLedger } from "./paper";
-import type { BitunixPrivateClient } from "./privateClient";
+import { mapBitunixOrderStatus, type BitunixPrivateClient } from "./privateClient";
 
 /** Optionaler Mark-Preis-Lookup (Symbol → Preis) für das Paper-Ledger. */
 export type MarkPriceFn = (symbol: string) => number | null;
@@ -44,6 +46,13 @@ export interface ExecutionPort {
    * live: wird nicht für Fills, sondern nur als Kontext übergeben).
    */
   submit(req: BrokerOrderRequest, ticker: MarketTicker): Promise<BrokerOrderResult>;
+  /**
+   * H3: Fill-Reconciliation für Live-Orders. `submit` liefert live nur die
+   * AKZEPTANZ (Status NEW); hier wird danach der echte Venue-Status/Fill
+   * abgefragt. Liefert null, wenn die Engine keine Reconciliation kennt
+   * (Paper: synchroner Fill, nichts abzugleichen).
+   */
+  reconcile?(orderId: string): Promise<BrokerOrderResult | null>;
   /** Liefert den Kontozustand dieser Engine (paper: lokal, live: Venue). */
   getAccount(mark?: MarkPriceFn): Promise<BrokerAccount>;
   /** Liefert die offenen Positionen dieser Engine (paper: lokal, live: Venue). */
@@ -85,6 +94,16 @@ export class PaperExecutionEngine implements ExecutionPort {
 export class BrokerExecutionEngine implements ExecutionPort {
   readonly mode: ExecutionMode = "live";
   private rejSeq = 1;
+  /**
+   * H3: Kontext versendeter Orders (orderId → Anfrage), damit `reconcile`
+   * einen vollständigen BrokerOrderResult bauen kann. Das Venue-Detail trägt
+   * nicht alle Felder (SL/TP), und die Reconciliation darf raten nichts.
+   */
+  private readonly openOrders = new Map<
+    string,
+    { symbol: string; side: "LONG" | "SHORT"; qty: number; stopLoss: number | null; takeProfit: number | null }
+  >();
+
   constructor(private readonly privateClient: BitunixPrivateClient) {}
 
   private reject(req: BrokerOrderRequest, reason: string): BrokerOrderResult {
@@ -140,29 +159,147 @@ export class BrokerExecutionEngine implements ExecutionPort {
     }
     const body = serializePlaceOrder(req);
     const { orderId } = await this.privateClient.placeSerializedOrder(body);
+    // H3 FIX: Die Venue-Annahme ist KEIN Fill. Wir melden ausschließlich die
+    // AKZEPTANZ (Status NEW, fillPrice 0). Der echte Fill wird asynchron über
+    // reconcile() (getOrder + getExecutions) ermittelt — eine Position wird
+    // erst mit einem echten avgPrice (>0) eingebucht, nie mit Entry 0.
+    this.openOrders.set(orderId, {
+      symbol: req.symbol.toUpperCase(),
+      side: req.side,
+      qty: req.qty,
+      stopLoss: req.stopLoss ?? null,
+      takeProfit: req.takeProfit ?? null,
+    });
     return {
       orderId,
       symbol: req.symbol.toUpperCase(),
       side: req.side,
       qty: req.qty,
-      // Live-Fills werden asynchron (Positionen/Status) abgeglichen; der
-      // synchrone Rückgabe-Fill ist hier nicht verfügbar → 0, Status FILLED
-      // (Venue hat die Order akzeptiert). Kein Paper-Kurs wird als Fill gemeldet.
+      filledQty: 0,
       fillPrice: 0,
-      status: "FILLED",
+      status: "NEW",
+      reason: "ORDER_ACCEPTED",
       stopLoss: req.stopLoss ?? null,
       takeProfit: req.takeProfit ?? null,
     };
   }
 
+  /**
+   * H3: Fill-Reconciliation. Fragt Order-Detail UND Ausführungen (Trades) von
+   * der Venue ab und baut aus den ECHTEN Fills den BrokerOrderResult:
+   *
+   *   NEW              → keine Trades, fillPrice 0 (darf nichts einbuchen)
+   *   PARTIALLY_FILLED → Teilmenge gefüllt; avgPrice = mengen-gewichteter
+   *                      Mittelwert der Trades (>0)
+   *   FILLED           → vollständig gefüllt; avgPrice > 0
+   *   CANCELED         → storniert (ggf. Teilfills)
+   *   UNKNOWN          → Order nicht auffindbar oder Füllpreis nicht belegbar
+   *
+   * Fail-safe: ist kein echter avgPrice belegbar (keine Trades, Preis 0),
+   * wird nie FILLED mit fillPrice 0 gemeldet — dann UNKNOWN (kein Fill).
+   */
+  async reconcile(orderId: string): Promise<BrokerOrderResult | null> {
+    const ctx = this.openOrders.get(orderId);
+    const order = await this.privateClient.getOrder(orderId).catch(() => null);
+    // Order weder lokal noch beim Venue bekannt → nichts zu sagen.
+    if (!order && !ctx) return null;
+
+    const symbol = order?.symbol || ctx?.symbol || "";
+    const side: "LONG" | "SHORT" = order?.side ?? ctx?.side ?? "LONG";
+    const qty = order?.qty || ctx?.qty || 0;
+    const stopLoss = ctx?.stopLoss ?? null;
+    const takeProfit = ctx?.takeProfit ?? null;
+
+    const base: BrokerOrderResult = {
+      orderId,
+      symbol,
+      side,
+      qty,
+      filledQty: 0,
+      fillPrice: 0,
+      status: "UNKNOWN",
+      stopLoss,
+      takeProfit,
+    };
+
+    if (!order) {
+      // Order-ID versandt, aber beim Venue nicht (mehr) auffindbar (Timeout/
+      // Netz nach place_order). Status NICHT raten → UNKNOWN (fail-safe).
+      return { ...base, reason: "ORDER_NOT_FOUND" };
+    }
+
+    // Echte Trades holen (gefiltert auf Order). avgPrice wird IMMER aus den
+    // Trades belegt — niemals aus einem geratenen Limit-/Marktpreis.
+    const trades = await this.privateClient
+      .getExecutions(symbol || undefined, orderId)
+      .then((all) => all.filter((t) => t.orderId === orderId))
+      .catch(() => []);
+    const filledQty = trades.reduce((sum, t) => sum + t.qty, 0);
+    const notional = trades.reduce((sum, t) => sum + t.qty * t.price, 0);
+    const avgPrice = filledQty > 0 && notional > 0 ? notional / filledQty : order.avgPrice;
+
+    const status: BrokerOrderStatus = mapBitunixOrderStatus(order.status);
+
+    switch (status) {
+      case "NEW":
+        // Akzeptiert, noch keine Fills — nichts einbuchen.
+        return { ...base, filledQty: 0, fillPrice: 0, status: "NEW", reason: "ORDER_ACCEPTED" };
+      case "PARTIALLY_FILLED":
+      case "FILLED": {
+        // Ein Füllstatus OHNE belegbaren avgPrice ist unglaubwürdig → UNKNOWN.
+        if (!Number.isFinite(avgPrice) || avgPrice <= 0 || filledQty <= 0) {
+          return {
+            ...base,
+            filledQty: order.filledQty > 0 ? order.filledQty : filledQty,
+            status: "UNKNOWN",
+            reason: "FILL_PRICE_UNKNOWN",
+          };
+        }
+        return {
+          ...base,
+          // filledQty bevorzugt aus den Trades, sonst die Venue-Angabe.
+          filledQty: filledQty > 0 ? filledQty : order.filledQty,
+          fillPrice: avgPrice,
+          status,
+        };
+      }
+      case "CANCELED":
+        return {
+          ...base,
+          filledQty: filledQty > 0 ? filledQty : order.filledQty,
+          fillPrice: Number.isFinite(avgPrice) && avgPrice > 0 ? avgPrice : 0,
+          status: "CANCELED",
+          reason: "ORDER_CANCELED",
+        };
+      default:
+        return { ...base, status: "UNKNOWN", reason: `VENUE_STATUS:${order.status}` };
+    }
+  }
+
   async getAccount(): Promise<BrokerAccount> {
     const account = await this.privateClient.getAccount();
-    const positions = await this.privateClient.getPositions();
-    // openPositions aus der echten Venue-Positionen ableiten — niemals 0 raten.
+    // openPositions aus den übernehmbaren Venue-Positionen ableiten — über
+    // dieselbe H3-Filterung wie listPositions (keine 0-Entry-Scheinpositionen).
+    const positions = await this.listPositions();
     return { ...account, openPositions: positions.length };
   }
 
   async listPositions(): Promise<BrokerPosition[]> {
-    return this.privateClient.getPositions();
+    // H3: Positionen werden vom Venue übernommen — ABER nur mit einem echten
+    // Entry-Preis. Ein 0-Entry (Fill noch nicht gespiegelt) darf nie als
+    // Position eingebucht werden; solche Zeilen werden verworfen.
+    const positions = await this.privateClient.getPositions();
+    return positions.filter(
+      (p) => Number.isFinite(p.entryPrice) && p.entryPrice > 0 && Number.isFinite(p.qty) && p.qty > 0
+    );
   }
+}
+
+/**
+ * H3: Entscheidungs-Hilfe für Caller: Darf dieses Ergebnis eine Position
+ * einbuchen? Nur ein vollständig gefüllter Fill mit belegtem avgPrice > 0.
+ * (Dünne Kapselung des Contract-Helfers für die Broker-Schicht.)
+ */
+export function resultIsBookable(result: BrokerOrderResult): boolean {
+  return isBookableFill(result);
 }

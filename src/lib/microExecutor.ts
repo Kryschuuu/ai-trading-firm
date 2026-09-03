@@ -650,12 +650,14 @@ export function createPaperRuleAdapter(opts?: {
           stopLoss,
           takeProfit,
         });
-        if (fill.status !== "FILLED") {
+        // H3: Position nur buchen bei echtem Fill mit belegtem Preis (>0).
+        // NEW/REJECTED/UNKNOWN oder ein 0-Entry blockieren die Order.
+        if (fill.status !== "FILLED" || !Number.isFinite(fill.fillPrice) || fill.fillPrice <= 0) {
           return {
             status: "BLOCKED",
             ruleId: ctx.ruleId,
             symbol,
-            reason: `BROKER:${fill.reason ?? "rejected"}`,
+            reason: `BROKER:${fill.reason ?? fill.status ?? "rejected"}`,
             at: new Date().toISOString(),
           };
         }

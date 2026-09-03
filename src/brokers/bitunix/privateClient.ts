@@ -21,7 +21,67 @@ import {
 } from "./signing";
 import { recordBitunixPrivateCall } from "./audit";
 import type { BitunixCredentials } from "./secrets";
-import type { BitunixAccountRaw, BitunixEnvelope, BitunixPlaceOrderBody, BitunixPositionRaw } from "./types";
+import type {
+  BitunixAccountRaw,
+  BitunixEnvelope,
+  BitunixFill,
+  BitunixOrderRaw,
+  BitunixPlaceOrderBody,
+  BitunixPositionRaw,
+  BitunixTradeRaw,
+} from "./types";
+
+/**
+ * Normalisiertes Order-Detail (H3). Venue-Status bleibt venue-nah
+ * ("NEW" | "PART_FILLED" | "FILLED" | "CANCELED" | "INIT" | string) und wird
+ * erst in der Execution-Engine auf den BrokerOrderStatus-Contract gemappt.
+ * `avgPrice` ist 0, solange das Venue keinen Füllpreis meldet — die Engine
+ * berechnet den echten avgPrice dann aus getExecutions (Trades).
+ */
+export interface BitunixOrderDetail {
+  orderId: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  filledQty: number;
+  avgPrice: number;
+  status: string;
+}
+
+/** Normalisiert einen Venue-Status-String robust (case-insensitive). */
+function normStatus(s: unknown): string {
+  return String(s ?? "").trim().toUpperCase();
+}
+
+/** Side-Rohwert (BUY/SELL) → broker-unabhängige LONG/SHORT-Richtung. */
+function sideOf(raw: unknown): "LONG" | "SHORT" {
+  return normStatus(raw) === "SELL" ? "SHORT" : "LONG";
+}
+
+/**
+ * Mappt einen Venue-Order-Status auf den BrokerOrderStatus-Contract.
+ * Bitunix-Doku: INIT (prepare), NEW (pending), PART_FILLED (partiell),
+ * CANCELED, FILLED. Unbekannte Werte → UNKNOWN (fail-safe, kein Fill).
+ */
+export function mapBitunixOrderStatus(venueStatus: string): import("../../contracts/broker").BrokerOrderStatus {
+  switch (normStatus(venueStatus)) {
+    case "NEW":
+    case "INIT":
+      return "NEW";
+    case "PART_FILLED":
+    case "PARTIALLY_FILLED":
+      return "PARTIALLY_FILLED";
+    case "FILLED":
+      return "FILLED";
+    case "CANCELED":
+    case "CANCELLED":
+    case "EXPIRED":
+    case "PART_FILLED_CANCELED":
+      return "CANCELED";
+    default:
+      return "UNKNOWN";
+  }
+}
 
 function envelopeData<T>(json: unknown): T {
   if (!json || typeof json !== "object") {
@@ -165,5 +225,68 @@ export class BitunixPrivateClient {
     const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });
     const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);
     return { orderId: String(data?.orderId ?? ""), clientId: data?.clientId };
+  }
+
+  /**
+   * H3: Order-Detail abfragen (read-only, idempotent).
+   * Liefert `null`, wenn das Venue die Order nicht kennt (z. B. nach
+   * Timeout — Status dann UNKNOWN statt erraten).
+   */
+  async getOrder(orderId: string): Promise<BitunixOrderDetail | null> {
+    const res = await this.signed("GET", BITUNIX_PATHS.orderDetail, { orderId }, "");
+    const data = envelopeData<BitunixOrderRaw | BitunixOrderRaw[] | null>(res.json);
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row !== "object" || String(row.orderId ?? "").length === 0) {
+      return null;
+    }
+    const qty = Number(row.qty);
+    const filledQty = Number(row.tradeQty);
+    return {
+      orderId: String(row.orderId),
+      symbol: String(row.symbol ?? "").toUpperCase(),
+      side: sideOf(row.side),
+      qty: Number.isFinite(qty) ? qty : 0,
+      filledQty: Number.isFinite(filledQty) ? filledQty : 0,
+      // Das Venue-Detail kennt keinen avgPrice — der kommt aus getExecutions.
+      avgPrice: 0,
+      status: normStatus(row.status),
+    };
+  }
+
+  /**
+   * H3: Ausführungen (Trades) abfragen — die ECHTE Fill-Quelle.
+   * Optionaler Filter nach Symbol bzw. orderId (über die Venue-Query).
+   * Sortiert aufsteigend nach Zeit (für den avgPrice egal, für Caller lesbar).
+   */
+  async getExecutions(symbol?: string, orderId?: string): Promise<BitunixFill[]> {
+    const query: Record<string, string> = {};
+    if (symbol) query.symbol = symbol;
+    if (orderId) query.orderId = orderId;
+    const res = await this.signed(
+      "GET",
+      BITUNIX_PATHS.historyTrades,
+      Object.keys(query).length > 0 ? query : undefined,
+      ""
+    );
+    const data = envelopeData<{ tradeList?: BitunixTradeRaw[] } | BitunixTradeRaw[] | null>(res.json);
+    const rows = Array.isArray(data) ? data : data?.tradeList ?? [];
+    return rows
+      .map((t): BitunixFill | null => {
+        const qty = Number(t.qty);
+        const price = Number(t.price);
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) return null;
+        return {
+          tradeId: String(t.tradeId ?? ""),
+          orderId: String(t.orderId ?? ""),
+          symbol: String(t.symbol ?? "").toUpperCase(),
+          side: sideOf(t.side),
+          qty,
+          price,
+          fee: Number(t.fee) || 0,
+          ts: Number(t.ctime) || 0,
+        };
+      })
+      .filter((f): f is BitunixFill => f !== null)
+      .sort((a, b) => a.ts - b.ts);
   }
 }
