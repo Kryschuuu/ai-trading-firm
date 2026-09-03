@@ -35,6 +35,14 @@ EnvironmentFile=/home/DEIN_USER/ai-trading-firm/.env
 # Token: AUTH_MODE=local-open in .env — offen, aber ausdrücklich entschieden.
 Environment=NODE_ENV=production
 Environment=PORT=3369
+# Läuft ein Reverse Proxy (nginx/Traefik/Caddy) vor dem Dienst, gehört die
+# Rate-Limit-Identität in die .env: TRUSTED_PROXY_IPS=<Proxy-IP oder CIDR>
+# (Befund C2/v1.36.14). Der Proxy muss zusätzlich X-Verified-IP selbst setzen
+# und einen vom Client mitgebrachten Wert überschreiben, z. B. nginx:
+#   proxy_set_header X-Verified-IP $remote_addr;
+# Ohne diese Konfiguration ignoriert die App x-forwarded-for/x-real-ip und
+# bildet einen gemeinsamen Bucket ("local") — sicher, aber eng für Multi-User.
+# Kontrolle: curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity
 
 ExecStart=/usr/bin/npm run start
 

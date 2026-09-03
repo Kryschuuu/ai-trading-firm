@@ -50,7 +50,7 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.36.13` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.36.14` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -269,6 +269,7 @@ der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FAL
     ├── components/workshop/      ← Workshop-Tab: Missionen, Turns, Prompts, Trefferquote
     └── lib/
         ├── riskGuard.ts          ← HARTE LIMITS — die wichtigste Datei
+        ├── clientIp.ts           ← Rate-Limit-Identität: Trusted Proxys, nie spoofbare Header (v1.36.14)
         ├── broker.ts             ← Broker-Abstraktion + Paper-Broker
         ├── llmProvider.ts        ← Provider-Abstraktion (Ollama/OpenAI/Gemini/Claude)
         ├── ollama.ts             ← Schema, Retry, Regel-Engine-Fallback
@@ -352,6 +353,13 @@ Schreibende Endpunkte (`POST`/`PUT`) verlangen `x-firm-token`, sobald
 `FIRM_API_TOKEN` gesetzt ist; ist gar kein Token gesetzt, entscheidet der
 Auth-Modus `AUTH_MODE` (`local-open` nur außer Produktion bzw. ausdrücklich,
 sonst 401 — siehe `.env.example` und [INSTALL.md](INSTALL.md)).
+
+Rate-Limits (Schreib-API 60/min, Credential-Versuche 5/min, global 20/min)
+bilden ihre Client-Identität seit v1.36.14 aus `TRUSTED_PROXY_IPS` bzw. dem
+proxy-gesetzten `x-verified-ip` — `x-forwarded-for`/`x-real-ip` zählt nur noch
+hinter einem verifizierten Trusted-Proxy-Peer, weil der Client sie sonst selbst
+erfinden könnte (Befund C2). Wirksame Identität eines Aufrufs, ohne
+Secret-Werte: `GET /api/auth/me` → `rateLimitIdentity`.
 
 Beispiele mit `curl` im **[Handbuch, Kapitel 4](HANDBUCH.md)**.
 

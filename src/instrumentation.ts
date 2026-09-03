@@ -52,6 +52,10 @@ export async function register() {
       const decision = assertAuthConfigured();
       for (const line of authModeWarnings(decision)) console.warn(line);
       console.log(`[auth] ${describeAuthMode(decision)}`);
+      // C2/v1.36.14: Policy der Rate-Limit-Identität im Boot-Log (secret-frei).
+      const { clientIpPolicyWarnings, describeClientIpPolicy } = await import("@/lib/clientIp");
+      for (const line of clientIpPolicyWarnings()) console.warn(line);
+      console.log(`[client-ip] ${describeClientIpPolicy()}`);
     } catch (e) {
       if (!isConfigurationError(e)) throw e;
       // Next.js lässt den Prozess nach einem Instrumentations-Fehler weiterlaufen

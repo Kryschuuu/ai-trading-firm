@@ -22,12 +22,16 @@
  *   npm run boot:guard                            (manuelle Prüfung, z. B. im Deploy)
  */
 import { assertAuthConfigured, authModeWarnings, describeAuthMode } from "../src/auth/authMode";
+import { clientIpPolicyWarnings, describeClientIpPolicy } from "../src/lib/clientIp";
 
 function main(): void {
   try {
     const decision = assertAuthConfigured();
     for (const line of authModeWarnings(decision)) console.warn(line);
     console.log(`[auth] ${describeAuthMode(decision)} — Start erlaubt`);
+    // C2/v1.36.14: sichtbar machen, woraus die Rate-Limit-Identität kommt.
+    for (const line of clientIpPolicyWarnings()) console.warn(line);
+    console.log(`[client-ip] ${describeClientIpPolicy()}`);
   } catch (e) {
     const err = e as { name?: string; code?: string; message?: string; hint?: string };
     const fatal =

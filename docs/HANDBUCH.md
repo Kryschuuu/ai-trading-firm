@@ -748,8 +748,14 @@ done | sort | uniq -c
 ```
 
 > **Hinweis zum Rate-Limit:** Schreib-Requests sind auf 60/60 s begrenzt
-> (`FIRM_RATE_LIMIT`). 20 Läufe plus ein paar Speicherungen passen in ein
-> Fenster; wer mehr messen will, erhöht das Limit oder misst in Etappen.
+> (`FIRM_RATE_LIMIT`) — gezählt **pro Client-Identität**, nicht pro Header:
+> Seit v1.36.14 bestimmt `src/lib/clientIp.ts` die Identität, ein selbst
+> mitgeschicktes `X-Forwarded-For` erzeugt keinen neuen Bucket (Befund C2).
+> Ohne `TRUSTED_PROXY_IPS`/`x-verified-ip` teilen sich alle Clients hinter
+> einem Next.js-Server den Bucket `local`. 20 Läufe plus ein paar
+> Speicherungen passen in ein Fenster; wer mehr messen will, erhöht das Limit
+> oder misst in Etappen. Wirksame Identität anzeigen:
+> `curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity`.
 
 Erscheint häufig `HOLD` mit der Begründung *„Antwort des Modells war kein gültiges JSON"*,
 liefert dein Modell kaputtes JSON. Dann:

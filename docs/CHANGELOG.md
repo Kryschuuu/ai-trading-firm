@@ -5,6 +5,184 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.14] — 2026-09-03 · fix(security): C2 Rate-Limit-Identität — spoofbare Proxy-Headers zählen nicht mehr (MEDIUM/HIGH)
+
+**MEDIUM/HIGH, Control Panel / Security (`src/lib/clientIp.ts` neu, `src/lib/apiAuth.ts`,
+`src/brokers/control-plane/guard.ts`, `src/brokers/control-plane/config.ts`,
+`src/app/api/brokers/[venue]/credentials/route.ts`, `src/app/api/auth/me/route.ts`,
+`scripts/auth-boot-guard.ts`, `src/instrumentation.ts`).** Befund C2 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): Beide Rate-Limiter nahmen das **linkeste** Element aus
+`x-forwarded-for` (Ersatz: `x-real-ip`) als Client-Identität —
+
+```ts
+// src/lib/apiAuth.ts (clientKey) und src/brokers/control-plane/guard.ts
+// (credentialClientKey) — vor dem Fix, identisch dupliziert
+const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+const real = req.headers.get("x-real-ip")?.trim();
+return fwd || real || "local";
+```
+
+Beide Header setzt der **Client** selbst. Ein frisches `X-Forwarded-For: <zufällig>` pro Anfrage
+erzeugte einen frischen Bucket: Das per-IP-Limit (Schreib-API 60/min, Credential-Versuche 5/min)
+war damit nicht „umgangen", sondern faktisch **abgeschaltet** — Credential-Brute-Force lief
+ungedrosselt, und dieselbe unsichere Logik war an zwei Stellen dupliziert.
+
+### Hinzugefügt
+
+- **`src/lib/clientIp.ts` (neu, Blatt-Modul ohne Imports):** die einzige Quelle der
+  Rate-Limit-Identität. `resolveClientIp(req, opts)` liefert
+  `{ key, ip, source, peerIp, peerTrusted, trustedProxiesConfigured, ignoredHeaders }` und wirft
+  nie (Requestpfad). Eigenes, abhängigkeitsfreies IP-/CIDR-Parsing — IPv4, IPv6 inkl.
+  `::`-Kompression, IPv4-mapped (`::ffff:203.0.113.9` → IPv4, wie Node es auf Dual-Stack-Sockets
+  meldet), Zone-ID, RFC-5952-Kanonisierung, Ablehnung führender Nullen (Oktal-Mehrdeutigkeit =
+  Parser-Differenz zwischen Proxy und App). Gruppenbasiert statt `BigInt`, weil das Projekt auf
+  `target: ES2017` steht. Dazu `peerIpFromRequest()` (Socket/Connection, **kein** Header-Fallback),
+  `clientIpFromForwardedChain()`, `describeClientIpPolicy()` und `clientIpPolicyWarnings()`.
+- **`TRUSTED_PROXY_IPS`** (neu, `.env`): CIDR-Liste der Reverse Proxys, Komma/Semikolon/Whitespace
+  getrennt, plus die Aliase `loopback`, `private`, `link-local`. Der einzige Vertrauensanker.
+  Unparsebare Einträge werden verworfen **und** gemeldet; `0.0.0.0/0`/`::/0` erzeugt eine laute
+  Warnung (das wäre der C2-Rückfall: jeder Peer wäre „Proxy"). Ein `all`-Alias existiert bewusst
+  nicht.
+- **`x-verified-ip`** (neu): der Header, den **nur** der Reverse Proxy setzen darf
+  (nginx: `proxy_set_header X-Verified-IP $remote_addr;`) — und der einen vom Client mitgebrachten
+  Wert überschreiben muss. Mehrdeutige (mehrfacher Header ⇒ `, `-Join), kommaseparierte oder
+  unparsebare Werte werden verworfen: „der Proxy überschreibt nicht sauber" darf nie zu einer
+  freien Bucket-Wahl führen.
+- **`BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT`** (neu, Default **20/min**, 0 = aus): globales
+  Credential-Limit auf dem **festen** Bucket `global` — IP-unabhängig per Konstruktion
+  (`checkCredentialGlobalRateLimit`). Deckelt verteiltes Raten (Proxy-Wechsel, NAT, Botnet), das
+  die Identitäts-Ebene allein nicht sieht. 429-Code `CREDENTIAL_GLOBAL_RATE_LIMITED`.
+- **Exponentieller Backoff** (`credentialBackoffMs`, `CREDENTIAL_BACKOFF_CONFIG`): ab dem
+  **3.** Fehlversuch 2 s → 4 s → 8 s → …, Deckel **15 min**, Ruhe-Reset nach 15 min.
+  `recordCredentialFailure`/`recordCredentialSuccess`/`credentialBackoffState`/
+  `checkCredentialBackoff`; 429-Code `CREDENTIAL_BACKOFF`.
+- **`BROKER_CREDENTIAL_BACKOFF_BASE_MS` / `BROKER_CREDENTIAL_BACKOFF_MAX_MS`** (neu,
+  `credentialBackoffConfig`): Startwert und Deckel der Sperre per Env justierbar
+  (Basis `0` = Ebene aus, wie bei den anderen Limits) — derselbe Operator-Knob-Stil wie
+  `BROKER_CREDENTIAL_RATE_LIMIT`, und in Tests deterministisch statt wall-clock-abhängig.
+- **`GET /api/auth/me` → `rateLimitIdentity`:** `key`, `ip`, `source`
+  (`verified-header` | `trusted-forwarded-for` | `peer` | `local-fallback`), `peerAvailable`,
+  `trustedProxiesConfigured`, `ignoredHeaders`, `policy`. Secret-frei (höchstens die Adresse des
+  Aufrufers selbst) — ein falsch konfigurierter Proxy ist damit in einem `curl` sichtbar, statt
+  sich als wirkungsloses Rate-Limit zu tarnen.
+- **Boot-Log:** `scripts/auth-boot-guard.ts` und `src/instrumentation.ts` geben dieselbe Policy
+  aus (`[client-ip] client-ip=… trusted-proxies=N`) plus die Konfigurationswarnungen.
+- **Tests:** `tests/clientIp.test.ts` (26 Fälle) und `tests/controlPlane.bruteforce.test.ts`
+  (22 Fälle), siehe unten.
+
+### Geändert
+
+- **`src/lib/apiAuth.ts` (`clientKey`) und `src/brokers/control-plane/guard.ts`
+  (`credentialClientKey`):** beide rufen jetzt `clientRateLimitKey(req, { peerIp, env })` —
+  dieselbe Auflösung, keine zweite Eigenbau-Header-Logik mehr. `checkRateLimit` und
+  `checkCredentialRateLimit` akzeptieren `peerIp`, damit ein eigener Node-Server/Adapter die echte
+  Socket-Adresse durchreichen kann (im Next.js-App-Router ist sie am Web-`Request` nicht sichtbar).
+  `@/lib/apiAuth` exportiert `resolveClientIp`/`clientRateLimitKey` weiter.
+- **Header-Policy (`resolveClientIp`), in dieser Reihenfolge:**
+  1. `x-verified-ip`, wenn Proxy-Vertrauen wirksam ist: `TRUSTED_PROXY_IPS` gesetzt (Peer
+     unbekannt ⇒ die Konfiguration trägt das Vertrauen; Peer bekannt ⇒ er **muss** in der Liste
+     liegen) — oder ohne Konfiguration bei nachweislichem **Loopback**-Peer (Same-Host-Proxy).
+  2. `x-forwarded-for` **nur** bei gesetztem `TRUSTED_PROXY_IPS` **und** per Socket-Adresse
+     verifiziertem Trusted-Proxy-Peer; Auswertung **rightmost-untrusted** (von rechts alle
+     vertrauenswürdigen Proxys überspringen, erstes fremdes Element = Client). Eine vom Angreifer
+     vorgeschobene IP ist damit wertlos, weil der Proxy die echte Peer-Adresse anhängt.
+  3. `x-real-ip`: **nie** Identität — höchstens Eintrag in `ignoredHeaders`.
+  4. Server-seitiger Fallback: Socket-Remote-Adresse, sonst die Prozess-Konstante `local`
+     (alle Clients teilen sich **einen** Bucket — enger, nie weiter).
+- **`guardCredentialEndpoint` (Reihenfolge):** Auth → CSRF → **Backoff** → Limit (Identität) →
+  **Limit (global)**. Die globalen/Backoff-Ebenen liegen **hinter** der Identitäts-Ebene, damit
+  ein einzelner Flooder das globale Budget nicht füllen und legitime Admins aussperren kann
+  (DoS auf die Sicherheitsschicht).
+- **`POST /api/brokers/{venue}/credentials`:** meldet Fehlversuche für den Backoff —
+  422 (Validierung/`INVALID_ENVELOPE`) und eine von der Venue abgelehnte Probe
+  (`probe.state === "error"`, das eigentliche Brute-Force-Signal); Erfolg setzt die Zählung
+  zurück. **Nicht** gezählt werden 409-Zustandskonflikte (`ALREADY_CONNECTED`) und 5xx
+  (`SECRET_STORE_UNAVAILABLE`, `INTERNAL_ERROR`) — ein kaputter Store oder ein zweiter
+  Speicherversuch darf niemanden aussperren.
+- **Kill-Switch-Ausnahme (bewusst):** `POST /api/live/kill` und `POST /api/live/transition` rufen
+  weiterhin ausschließlich `checkCredentialRateLimit` (Identitäts-Ebene). Globales Limit und
+  Backoff wirken nur auf Credential-Endpoints — die Sicherheitsaktion darf nie durch einen
+  Credential-Flood blockierbar sein.
+
+### Bewusst strenger als der Audit-Prompt
+
+DO‑2 des Prompts erlaubt im `else`-Zweig (kein `TRUSTED_PROXY_IPS`) ein `x-verified-ip` ohne
+weitere Bedingung. Umgesetzt ist die sicherheitsrelevante Einschränkung: ohne Vertrauensanker wird
+der Header nur akzeptiert, wenn die Anfrage von **Loopback** kommt (Same-Host-Proxy — der Dienst
+bindet lokal 127.0.0.1) oder die Socket-Adresse nicht sichtbar ist **und** `TRUSTED_PROXY_IPS`
+gesetzt ist. Grund: `npm run start` bindet `0.0.0.0` — ein uneingeschränkt vertrautes
+`x-verified-ip` wäre exakt derselbe Fehler wie vorher, nur mit neuem Header-Namen. Das
+Akzeptanzkriterium („spoofed header is ignored by default") gilt damit für **beide** Header.
+
+### Docs
+
+- `.env.example`: `TRUSTED_PROXY_IPS`-Block (Policy, nginx-Zeile, Aliase, Beispiele) und
+  `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` inkl. Backoff-Erklärung.
+- `INSTALL.md`: neuer Abschnitt „Rate-Limit-Identität: `TRUSTED_PROXY_IPS` (C2, v1.36.14)" mit
+  Entscheidungstabelle, nginx-Snippet und `jq .rateLimitIdentity`-Diagnose; beide Flags in der
+  Referenz-Tabelle; Stand auf v1.36.14 gezogen.
+- `docs/INSTALL.md`: Sicherheitsblock in Kapitel 5.1 (inkl. nginx-`location`), Multi-User-Hinweis
+  in 7.3, vier neue Zeilen in Kapitel 11 (`429` mit `local`-Bucket, `CREDENTIAL_BACKOFF`,
+  `CREDENTIAL_GLOBAL_RATE_LIMITED`, `[client-ip]`-Warnung).
+- `docs/help/ops.help.json` (Version 5): neue Felder `auth.clientIp` und `rateLimit.credential` im
+  3-Ebenen-Schema, `live.gate` auf „5/min pro Client-Identität, ohne globales Limit/Backoff"
+  präzisiert.
+- `README.md` (neuer Abschnitt „Rate-Limits kennen keine erfundenen IPs"), `docs/README.md`
+  (Versionszeile, API-Hinweis, `clientIp.ts` im Quellbaum), `docs/SECURITY_AUDIT.md`
+  (Empfehlung 4 als Nachtrag erledigt, T7/T11/Red-Team-Zeile), `docs/FRONTEND_CONTROL_PLANE.md`
+  (drei Guard-Zeilen), `docs/BROKER_ARCHITECTURE.md`, `docs/LIVE_TRADING.md`, `docs/HANDBUCH.md`,
+  `deploy/ai-trading-firm.service` (Proxy-Hinweis an der Unit).
+- Audit-Tracking: `audit-remediation/C2-forwarded-ip.md` (Status, umgesetzte Fix-Spezifikation,
+  abgehakte Akzeptanzkriterien, Versions-Hinweis), `audit-remediation/README.md`,
+  `docs/AUDIT_REMEDIATION_2026-09.md` und der C2-Querverweis in `audit-remediation/C1-open-mode.md`
+  auf **gefixt v.1.36.14** gestellt.
+
+### Unverändert
+
+- `FIRM_RATE_LIMIT` (60/min), `BROKER_CREDENTIAL_RATE_LIMIT` (5/min), Backoff-Defaults
+  (Schwelle 3, Basis 2 s, Faktor 2, Deckel/Ruhe 15 min), Fenstergröße 60 s,
+  429-Contract `{ ok:false, error:"RATE_LIMITED", hint }` + `Retry-After` — ergänzt um `code`,
+  alle bestehenden Statuscodes und Tests bleiben gültig.
+- Guard-Reihenfolge Auth → CSRF → Rate-Limit, CSRF-Wert `local` im Offen-Betrieb,
+  Auth-Modus-Logik (C1, v1.36.13) und der Kill-Phrase-Contract.
+- Limiter bleiben prozess-lokal (Single-Node) — Mehrinstanzenbetrieb braucht weiterhin eine
+  geteilte Zustandsquelle (unveränderte, dokumentierte Grenze).
+
+### Tests
+
+`tests/clientIp.test.ts` (neu, 26 Fälle): Parsing-/CIDR-Matrix (IPv4, IPv6, IPv4-mapped, Zone-ID,
+führende Nullen, Müll), `clientIpFromForwardedChain` rightmost-untrusted (Spoof-Kette,
+Proxy-Kette, reine Proxy-Kette ⇒ leftmost), `peerIpFromRequest` (Socket ja, Header nein),
+**Akzeptanz**: `X-Forwarded-For: 1.2.3.4` ändert den Bucket nicht (zwei verschiedene Fake-IPs ⇒
+derselbe Schlüssel, rotierende Fake-Header ⇒ 429 im echten `checkRateLimit`), `x-real-ip` nie
+Identität, `TRUSTED_PROXY_IPS`-Matrix (vertrauenswürdiger/nicht vertrauenswürdiger/unbekannter
+Peer, CIDR-Pool, IPv6), `x-verified-ip`-Regeln (Loopback, fremder Peer, unbekannter Peer,
+Mehrdeutigkeit, IPv6-Kanonisierung), Diagnose über `/api/auth/me` (inkl. Secret-Scanner leer) und
+zwei statische Drift-Schutze (kein Modul außerhalb `clientIp.ts` liest die spoofbaren Header; der
+alte Dreizeiler darf nicht zurückkommen).
+
+`tests/controlPlane.bruteforce.test.ts` (neu, 22 Fälle): Konfiguration/Defaults
+(inkl. `credentialBackoffConfig`: Env-Override, `0` = aus, Klemmung bei Müll), `credentialBackoffMs`
+(Schwelle, Wachstum, Deckel, NaN/Infinity/negativ, kaputte Config ⇒ keine Dauersperre),
+Credential-Limiter mit derselben Identität (rotierende Header ⇒ 429; konfiguriertes Vertrauen
+trennt echte Clients wieder), globales Limit (deckelt verteilte Versuche, hängt an keinem Header,
+Fenster-Reset), Backoff (Schwelle, Wachstum, Ablaufen, Erfolgs-Reset, Ruhe-Reset, pro Identität
+getrennt), `guardCredentialEndpoint` (CSRF vor Limitern, globale Ebene greift) und die
+**Kill-Switch-Ausnahme** (global dicht + Backoff aktiv ⇒ `checkCredentialRateLimit` bleibt frei),
+plus vier Fälle über die echte Route `POST /api/brokers/{venue}/credentials`
+(3 × 422 ⇒ 429 `CREDENTIAL_BACKOFF` — mit per Env auf 600 s gestellter Backoff-Basis, damit die
+Aussage „die Route sperrt ab dem 3. Fehlversuch" nicht an einem Wall-Clock-Rennen unter paralleler
+Test-Last hängt; Erfolg setzt zurück, 409 zählt nicht, spoofbare Header kaufen keine Versuche).
+
+Typecheck, Lint und `npm run docs:validate` grün. `npm test` = **1687/1687**
+(1639 vorher + 48 neue C2-Fälle). Manuell verifiziert (echter Node-HTTP-Server, Socket-Peer
+sichtbar): spoofed `X-Forwarded-For`/`X-Real-IP` ⇒ Identität = Socket-Adresse, beide Header in
+`ignoredHeaders`; `x-verified-ip` von Loopback ⇒ übernommen; doppelt gesetztes `x-verified-ip` ⇒
+verworfen (fail-closed); mit `TRUSTED_PROXY_IPS=127.0.0.1` ⇒ Kette `1.2.3.4, 203.0.113.44` wird zu
+`203.0.113.44` (rightmost-untrusted, die Fake-IP zählt nicht).
+
+---
+
 ## [1.36.13] — 2026-09-03 · fix(auth): C1 Auth-Modus — Produktion ohne Token verweigert den Start, Offen-Betrieb nur explizit (HIGH)
 
 **HIGH, Control Panel / Auth (`src/auth/authMode.ts`, `src/auth/resolve.ts`,

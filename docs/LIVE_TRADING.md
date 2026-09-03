@@ -212,7 +212,7 @@ Jeder Übergang, jeder Deny, jeder Kill, jeder Enforce-Entscheid:
 | Endpoint | Guard | Beschreibung |
 | --- | --- | --- |
 | `GET /api/live/state` | — (read-only) | Zustand je Venue (9 States), Flags, Cooldown-Rest, Suite-Stamp, Kill-Status, Audit-Kettenkopf + Integrität |
-| `POST /api/live/transition` | Permission `live.gate` (Admin) + CSRF + 5/min/IP | Body `{venue, to, reason?, confirm?, approvedBy?}` → 200 bei legalem Übergang; 409 Matrix/Cooldown/Flags; 422 Validierung |
+| `POST /api/live/transition` | Permission `live.gate` (Admin) + CSRF + 5/min pro Client-Identität (kein globales Limit, kein Backoff — die Sicherheitsaktion bleibt immer ausführbar, C2/v1.36.14) | Body `{venue, to, reason?, confirm?, approvedBy?}` → 200 bei legalem Übergang; 409 Matrix/Cooldown/Flags; 422 Validierung |
 | `POST /api/live/kill` | Permission `live.gate` + CSRF + Rate-Limit | Body `{venue?|scope?, reason, confirm:"KILL"}` oder `{action:"clear", scope?, reason, confirm:"CLEAR_KILL"}` |
 
 ```bash

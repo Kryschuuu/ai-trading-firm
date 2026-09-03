@@ -57,7 +57,11 @@ Zustandsmodell und das Sicherheitskonzept der Broker Control Plane.
 ## 2. API-Referenz
 
 Alle Credential-/Connection-Endpoints sind **admin-guarded** (RBAC-Platzhalter,
-RBAC Task 10), **CSRF-geschützt** und **rate-limitiert** (5 Credential-Versuche/min/IP).
+RBAC Task 10), **CSRF-geschützt** und **rate-limitiert** — seit v1.36.14
+dreistufig: 5 Credential-Versuche/min **pro Client-Identität**, zusätzlich ein
+globales, IP-unabhängiges Limit (20/min) und ein exponentieller Backoff ab dem
+3. Fehlversuch. Die Identität stammt aus `src/lib/clientIp.ts` und ist ohne
+`TRUSTED_PROXY_IPS`/`x-verified-ip` nicht client-setzbar (Befund C2).
 GET-Endpoints bleiben lesbar (konsistent mit den übrigen Broker-Endpoints).
 
 ### `POST /api/brokers/{venue}/credentials`
@@ -200,7 +204,9 @@ Nach dem Speichern (und bei jedem Test) läuft **ein** read-only Check:
 | --- | --- | --- |
 | **RBAC** | Alle Credential-/Connection-Operationen nur mit Permission `broker.credentials` (Admin; Operator nur im Single-Admin-Modell). `FIRM_ADMIN_TOKEN` gesetzt → Header `x-admin-token` (oder `x-firm-token` mit gleichem Wert), sonst **403 FORBIDDEN**; Fallback `FIRM_API_TOKEN` (401); gar kein Token → Offen-Betrieb **nur** bei wirksamem `AUTH_MODE=local-open` (Dev-Default bzw. ausdrücklicher Opt-in), sonst 401 `AUTH_NOT_CONFIGURED` — und in Produktion verweigert der Boot-Guard den Start. Timing-sicherer Vergleich. Kern: `src/auth/` (Modus: `src/auth/authMode.ts`). | `tests/controlPlane.api.test.ts` (RBAC), `tests/rbac.test.ts` |
 | **CSRF** | Alle mutierenden Control-Plane-Endpoints verlangen den Custom-Header `x-csrf-token` (Wert = Admin-/Operator-Token bzw. `local`), sonst **403 CSRF_INVALID**. Cross-Site-Formulare können Custom-Header nicht setzen; die API nutzt keine Cookies (kein SameSite-Angriffsvektor). | `tests/controlPlane.api.test.ts` (CSRF) |
-| **Rate-Limit** | Eigener Sliding-Window-Bucket `BROKER_CREDENTIAL_RATE_LIMIT` (Default **5/min/IP**, 0 = aus) auf allen Credential-Endpoints → **429** + `Retry-After`. | `tests/controlPlane.api.test.ts` (Rate-Limit) |
+| **Rate-Limit (Identität)** | Eigener Sliding-Window-Bucket `BROKER_CREDENTIAL_RATE_LIMIT` (Default **5/min**, 0 = aus) auf allen Credential-Endpoints → **429** + `Retry-After`. Bucket-Schlüssel ist seit C2/v1.36.14 die geteilte `resolveClientIp()`-Auflösung: `x-verified-ip` nur bei Proxy-Vertrauen, `x-forwarded-for` nur hinter verifiziertem `TRUSTED_PROXY_IPS`-Peer (rightmost-untrusted), `x-real-ip` nie — sonst Socket-Adresse bzw. `local`. | `tests/clientIp.test.ts`, `tests/controlPlane.api.test.ts` (Rate-Limit) |
+| **Rate-Limit (global)** | `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` (Default **20/min**, 0 = aus): fester Bucket `global`, bewusst **ohne** Request-Identität — deckelt verteiltes Raten (Proxy-Wechsel, NAT, Botnet). Betrifft nur Credential-Endpoints, nie `/api/live/kill`. | `tests/controlPlane.bruteforce.test.ts` |
+| **Backoff** | Exponentielle Sperre ab dem 3. fehlgeschlagenen Credential-Versuch (2 s → 4 s → 8 s … max. 15 min), gemeldet von der Route (422 Validierung bzw. von der Venue abgelehnte Probe); Reset nach 15 min Ruhe oder Erfolg. 429-Code `CREDENTIAL_BACKOFF`. | `tests/controlPlane.bruteforce.test.ts` |
 | **Response-Contract** | Credential-Endpoints antworten ausschließlich mit Status-Objekten (`configured`, `connected`, `permissions[]`, `liveEnabled`, Ebenen) — kein `secret`, kein `keyHint`, keine Maskierungs-Replik. Contract-Test mit Response-Scanner erzwingt das. | `tests/controlPlane.security.test.ts` (Response-Scanner) |
 | **Bundle-Scanner** | `scripts/scan-secrets.ts` scannt `.next/static` (gebaute Frontend-Bundles) auf Secret-Muster (API-Key-/Secret-Formate, Länge/Entropie-Heuristik) — Ergebnis muss leer sein. CI: `npm run build && npm run scan:secrets`. | `npm run scan:secrets`, Test „Bundle" |
 | **Audit** | JEDES Ereignis (Credential gespeichert/geändert/gelöscht, Verbindungstest, Permission-Probe, Zustandswechsel) → Ring + `audit_log` (`BROKER_CONTROL_PLANE`): actor, venue, Aktion, Ergebnis, timestamp — **ohne Secrets**. | `tests/controlPlane.integration.test.ts` (Audit) |
