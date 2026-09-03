@@ -149,14 +149,32 @@ export interface BitunixFill {
 /** Account-Zeile GET /api/v1/futures/account. */
 export interface BitunixAccountRaw {
   marginCoin?: string;
+  /** Freie Margin (Futures: freies Cash in marginCoin). NICHT die Equity (H8). */
   available?: string;
+  /** Durch offene Orders gebundene Margin („locked quantity of orders“). */
   frozen?: string;
+  /** Durch offene Positionen gebundene (Initial-)Margin („locked quantity of positions“). */
   margin?: string;
   transfer?: string;
   positionMode?: string;
+  /** Unrealisiertes PnL der Cross-Positionen. */
   crossUnrealizedPNL?: string;
+  /** Unrealisiertes PnL der Isolated-Positionen. */
   isolationUnrealizedPNL?: string;
   bonus?: string;
+  /**
+   * H8: Wallet-Balance (Kontostand ohne unrealisiertes PnL). Die dokumentierte
+   * Account-Antwort führt das Feld nicht in jeder Version; fehlt es, wird es
+   * aus `available + frozen + margin` zerlegt (kein Synthetisieren der Equity
+   * aus `available` allein).
+   */
+  walletBalance?: string;
+  /** H8: Explizit gebundene Margin, sofern die API sie liefert (sonst row.margin). */
+  usedMargin?: string;
+  /** H8: Maintenance-Margin, sofern die API sie liefert (sonst 0). */
+  maintenanceMargin?: string;
+  /** H8: Realisiertes PnL, sofern separat geführt (Bitunix settled es ins Wallet → i. d. R. absent). */
+  realizedPnl?: string;
   [extra: string]: unknown;
 }
 

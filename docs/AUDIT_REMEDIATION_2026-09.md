@@ -18,7 +18,7 @@ Secret-Store-Schicht.
 Vor der Planung wurde jeder Befund gegen den **aktuellen** Code geprüft. Ergebnis: **H1 ist bereits
 in v1.36.2 gefixt** (serverseitige `estimatedNotional`-Berechnung), **H3 in v1.36.4** und **H4 in
 v1.36.5** (Order-Idempotenz). H2 ist teilweise adressiert (Singleton entfernt, aber keine verteilte
-Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Executor führt eine genehmigte Proposal aus). **H6 ist in v1.36.7 gefixt** (echte Approval-Chain; Executor führt nur noch server-validierte APPROVED Proposals aus; menschliche Freigabe via Endpoint). **H9 ist in v1.36.8 gefixt** (Guardrail-Numerik fail-closed: `requireFinitePositive` wirft `RiskValidationError` bei NaN/Infinity/≤0; negatives Equity wird blockiert statt geklemmt; alle Caller lehnen mit `INVALID_EQUITY`/`INVALID_LEVERAGE`/`INVALID_NOTIONAL` ab). Die übrigen Befunde bleiben wie ausgewiesen valide.
+Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Executor führt eine genehmigte Proposal aus). **H6 ist in v1.36.7 gefixt** (echte Approval-Chain; Executor führt nur noch server-validierte APPROVED Proposals aus; menschliche Freigabe via Endpoint). **H9 ist in v1.36.8 gefixt** (Guardrail-Numerik fail-closed: `requireFinitePositive` wirft `RiskValidationError` bei NaN/Infinity/≤0; negatives Equity wird blockiert statt geklemmt; alle Caller lehnen mit `INVALID_EQUITY`/`INVALID_LEVERAGE`/`INVALID_NOTIONAL` ab). **H8 ist in v1.36.10 gefixt** (kanonische `BrokerAccount`-Zerlegung walletBalance/availableCash/usedMargin/maintenanceMargin/unrealizedPnl; Bitunix-Equity = `walletBalance + realizedPnl + unrealizedPnl` statt `available + uPnL`). Die übrigen Befunde bleiben wie ausgewiesen valide.
 
 | ID | Bereich | Severity | Status (validiert) | Prompt |
 |----|---------|----------|--------------------|--------|
@@ -29,7 +29,7 @@ Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Execut
 | H5 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.6) | [H5](../audit-remediation/H5-pipeline-trading.md) |
 | H6 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.7) | [H6](../audit-remediation/H6-approval-chain.md) |
 | H7 | Handelslogik/Control | HIGH | ✅ valide (arch.) | [H7](../audit-remediation/H7-live-kill.md) |
-| H8 | Brokers/Venues | HIGH | ✅ valide | [H8](../audit-remediation/H8-bitunix-equity.md) |
+| H8 | Brokers/Venues | HIGH | ✅ gefixt (v1.36.10) | [H8](../audit-remediation/H8-bitunix-equity.md) |
 | H9 | Handelslogik | HIGH | ✅ gefixt (v1.36.8) | [H9](../audit-remediation/H9-finite-guardrails.md) |
 | H10 | Handelslogik | HIGH | ✅ valide | [H10](../audit-remediation/H10-adaptive-failopen.md) |
 | W1 | Workshop | HIGH | ✅ valide | [W1](../audit-remediation/W1-localstorage.md) |
@@ -46,20 +46,21 @@ Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Execut
 ## Empfohlene Abarbeitungsreihenfolge
 
 1. **Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9
-2. **Broker/Venue-Korrektheit:** H8, B1, B2
+2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1, B2
 3. **Control-Plane-Sicherheit:** C1, C2, C3, C4, S1
 4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
 5. **Workshop:** W1, W2
 
 Jeder Schritt ist unabhängig; H1 entfällt (bereits gefixt). Stand 2026-09-03 sind aus der
 Fail-closed-Gruppe H3 (v1.36.4), H4 (v1.36.5), H5 (v1.36.6), H6 (v1.36.7) und H9 (v1.36.8)
-abgeschlossen.
+abgeschlossen; aus der Broker/Venue-Korrektheit ist **H8 (v1.36.10)** abgeschlossen
+(B1 und B2 bleiben offen).
 
 ## Versionierung
 
 Tracking als PATCH-Serie (Security-Audit-Plan + Fixes): H1=v1.36.2, H3=v1.36.4, H4=v1.36.5,
-H5=v1.36.6, H6=v1.36.7, **H9=v1.36.8**. Siehe `CHANGELOG.md` und
-`docs/CHANGELOG.md` (`[1.36.8]`).
+H5=v1.36.6, H6=v1.36.7, H9=v1.36.8, **H8=v1.36.10**. Siehe `CHANGELOG.md` und
+`docs/CHANGELOG.md` (`[1.36.10]`).
 
 ## Verwandte Dokumente
 

@@ -19,7 +19,7 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 | H5 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.6) | [H5](./H5-pipeline-trading.md) |
 | H6 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.7) | [H6](./H6-approval-chain.md) |
 | H7 | Handelslogik/Control | HIGH | ✅ Valide (architektonisch) | [H7](./H7-live-kill.md) |
-| H8 | Brokers/Venues | HIGH | ✅ Valide | [H8](./H8-bitunix-equity.md) |
+| H8 | Brokers/Venues | HIGH | ✅ Gefixt (v1.36.10) | [H8](./H8-bitunix-equity.md) |
 | H9 | Handelslogik | HIGH | ✅ Gefixt (v1.36.8) | [H9](./H9-finite-guardrails.md) |
 | H10 | Handelslogik | HIGH | ✅ Valide | [H10](./H10-adaptive-failopen.md) |
 | W1 | Workshop | HIGH | ✅ Valide | [W1](./W1-localstorage.md) |
@@ -47,14 +47,15 @@ dass er direkt als Task an Arena (bzw. einen Coding-Agenten) übergeben werden k
 ## Versionierung
 
 Die Remediation wird als PATCH-Serie getrackt (Security-Audit-Plan + Fixes):
-H1=v1.36.2, H3=v1.36.4, H4=v1.36.5, H5=v1.36.6, H6=v1.36.7, **H9=v1.36.8**.
-Siehe `CHANGELOG.md` und `docs/CHANGELOG.md` (`[1.36.8]`). Jeder einzelne Fix ist als eigener
+H1=v1.36.2, H3=v1.36.4, H4=v1.36.5, H5=v1.36.6, H6=v1.36.7, H9=v1.36.8,
+**H8=v1.36.10**.
+Siehe `CHANGELOG.md` und `docs/CHANGELOG.md` (`[1.36.10]`). Jeder einzelne Fix ist als eigener
 Commit/Optional-eigener-PR denkbar; dieser Plan bündelt sie als nachvollziehbares Tracking-Dokument.
 
 ## Reihenfolge der Abarbeitung (Empfehlung)
 
 1. ~~**Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9~~ ✅ alle gefixt siehe v1.36.4 bis v1.36.8
-2. **Broker/Venue-Korrektheit:** H8, B1, B2
+2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1, B2
 3. **Control-Plane-Sicherheit:** C1, C2, C3, C4, S1
 4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
 5. **Workshop:** W1, W2
