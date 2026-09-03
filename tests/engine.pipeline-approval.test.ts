@@ -19,3 +19,23 @@ test("H5: executor uses only the latest approved proposal", () => {
 test("H5: broker boundary retains a non-executor audit guard", () => {
   assert.match(source, /agent\.role !== "EXECUTOR"[\s\S]*ROLE_NOT_ALLOWED_TO_TRADE[\s\S]*broker\.submit\(order\)/);
 });
+
+// H6 (CRITICAL): Approval-Chain — Executed fill must come from proposal.proposedDetail only.
+test("H6: executeApprovedProposal uses proposedDetail verbatim", () => {
+  assert.match(source, /broker\.submit\(\{ \.\.\.detail/);
+  assert.doesNotMatch(source, /broker\.submit\(\{ \.\.\.order/); // must not rebuild order
+});
+
+test("H6: executor ignores hostile model output (BUY BTC proposal vs SELL ETH output)", () => {
+  // The EXECUTOR branch returns early via executeApprovedProposal before any
+  // model-output-based order construction reaches broker.submit.
+  assert.match(source, /if \(agent\.role === "EXECUTOR" && !options\.proposalOnly\)/);
+  assert.match(source, /executeApprovedProposal\(approved\.id, agent\.id\)/);
+  // Audit links fill to proposalId
+  assert.match(source, /proposalId, order: proposal\.proposedDetail, fill/);
+});
+
+test("H6: PENDING proposal is rejected fail-closed", () => {
+  assert.match(source, /proposal\.status !== "APPROVED"/);
+  assert.match(source, /PROPOSAL_NOT_APPROVED/);
+});

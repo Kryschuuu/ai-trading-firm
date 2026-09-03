@@ -5,6 +5,15 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`, `src/app/api/firm/proposals/[id]/approve/route.ts`).**
+Der Executor führt keine Modellentscheidung mehr aus; er lädt ausschließlich die jüngste serverseitig `APPROVED` Proposal (`executeApprovedProposal`) und kopiert `proposedDetail` unverändert in `broker.submit`. PENDING-Proposals führen zur harten Ablehnung (`NO_APPROVED_PROPOSAL` / `PROPOSAL_NOT_APPROVED`). Neue `POST /api/firm/proposals/{id}/approve`-Endpoint ermöglicht explizite menschliche Freigabe (`PENDING → APPROVED`) mit Actor-Aufzeichnung. Audit verknüpft Fill mit `proposalId`.
+
+**Tests:** `tests/engine.pipeline-approval.test.ts` erweitert (H6-Hostile-Output-Test); Typecheck, Lint und Docs-Validierung.
+
+---
+
 ## [1.36.6] — 2026-09-03 · fix(engine): H5 Pipeline-Ausführung strikt nach Approval (CRITICAL)
 
 **CRITICAL, Handelslogik (`src/lib/engine.ts`).** Nicht-EXECUTOR-Phasen erzeugen bei `TRADE` nur noch Proposals (`PENDING` bei erforderlicher Human-Freigabe, sonst `APPROVED`) und geben `PROPOSED` zurück. Die Pipeline läuft explizit durch CEO → Research → Backtest → Risk Manager → Approver; erst die Executor-Phase lädt die jüngste `APPROVED` Proposal und führt deren servervalidierte Orderdaten aus. Ein Defense-in-depth-Guard blockiert und auditiert jeden Broker-Zugriff einer anderen Rolle mit `ROLE_NOT_ALLOWED_TO_TRADE`.

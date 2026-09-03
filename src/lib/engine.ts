@@ -511,6 +511,20 @@ export async function runAgentTurn(
       }
       trace.push(step("KILL-SWITCH", true, "Nicht aktiv"));
 
+      // H6 FIX: EXECUTOR darf niemals eine neue Modellentscheidung ausführen.
+      if (agent.role === "EXECUTOR" && !options.proposalOnly) {
+        const [approved] = await db.select().from(proposals)
+          .where(and(eq(proposals.missionId, missionId), eq(proposals.status, "APPROVED")))
+          .orderBy(desc(proposals.createdAt)).limit(1);
+        if (!approved) {
+          await logAudit("ORDER_REJECTED", "WARN", { reason: "NO_APPROVED_PROPOSAL", missionId, agentId }, missionId, agentId);
+          trace.push(step("EXECUTOR", false, "Keine genehmigte Proposal für Ausführung"));
+          return { ...base, status: "BLOCKED", guardrail: "NO_APPROVED_PROPOSAL", trace };
+        }
+        const execResult = await executeApprovedProposal(approved.id, agent.id);
+        return { ...execResult, trace: [...trace, step("EXECUTOR", true, `Genehmigte Proposal ${approved.id} ausgeführt`)] };
+      }
+
       const maySubmit = agent.role === "EXECUTOR" && !options.proposalOnly;
       trace.push(step(
         "ROLLEN-PRÜFUNG",
@@ -809,29 +823,21 @@ export async function executeApprovedProposal(
     return { ...base, status: "BLOCKED", guardrail: "KILL_SWITCH_ARMED" };
   }
 
-  // Runtime-Validierung verhindert, dass manipuliertes JSON die Broker-Grenze passiert.
+  // Runtime-Validierung: proposedDetail ist die einzige Quelle; keine Neubildung.
   const detail = proposal.proposedDetail as Record<string, unknown>;
-  const side = detail?.side;
-  const order = {
-    symbol: typeof detail?.symbol === "string" ? detail.symbol : "",
-    side: side === "LONG" || side === "SHORT" ? side : null,
-    qty: Number(detail?.qty),
-    riskNotional: Number(detail?.riskNotional),
-    stopLoss: Number(detail?.stopLoss),
-    takeProfit: Number(detail?.takeProfit),
-  };
-  if (!sanitizeSymbol(order.symbol) || !order.side ||
-      !Number.isFinite(order.qty) || order.qty <= 0 ||
-      !Number.isFinite(order.riskNotional) || order.riskNotional <= 0 ||
-      !Number.isFinite(order.stopLoss) || order.stopLoss <= 0 ||
-      !Number.isFinite(order.takeProfit) || order.takeProfit <= 0) {
-    await logAudit("ORDER_REJECTED", "CRITICAL", { reason: "INVALID_PROPOSAL_DETAIL", proposalId }, proposal.missionId ?? undefined, executorAgentId);
+  if (typeof detail?.symbol !== "string" || !sanitizeSymbol(detail.symbol) ||
+      (detail.side !== "LONG" && detail.side !== "SHORT") ||
+      !Number.isFinite(Number(detail?.qty)) || Number(detail.qty) <= 0 ||
+      !Number.isFinite(Number(detail?.riskNotional)) || Number(detail.riskNotional) <= 0 ||
+      !Number.isFinite(Number(detail?.stopLoss)) || Number(detail.stopLoss) <= 0 ||
+      !Number.isFinite(Number(detail?.takeProfit)) || Number(detail.takeProfit) <= 0) {
+    await logAudit("ORDER_REJECTED", "CRITICAL", { reason: "INVALID_PROPOSAL_DETAIL", proposalId, proposedDetail: detail }, proposal.missionId ?? undefined, executorAgentId);
     return { ...base, status: "BLOCKED", guardrail: "INVALID_PROPOSAL_DETAIL" };
   }
 
   const broker = await getBroker();
-  try { await getProductionMarketDataManager().getSnapshot(order.symbol); } catch { /* Broker lehnt fehlenden Kurs ab. */ }
-  const fill = broker.submit({ ...order, side: order.side as "LONG" | "SHORT" });
+  try { await getProductionMarketDataManager().getSnapshot(detail.symbol as string); } catch { /* Broker lehnt fehlenden Kurs ab. */ }
+  const fill = broker.submit({ ...detail, side: detail.side as "LONG" | "SHORT" } as any);
   const filled = fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
   await logAudit(filled ? "ORDER_SENT" : "ORDER_REJECTED", filled ? "INFO" : "WARN", {
     proposalId, order: proposal.proposedDetail, fill,

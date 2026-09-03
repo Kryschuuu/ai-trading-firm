@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.6**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.7**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,12 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`).** Der Executor führt keine Modellentscheidung mehr aus (`runAgentTurn` liefert früh zurück und ruft `executeApprovedProposal` auf); Orderparameter stammen zwingend aus `proposal.proposedDetail` (verbatim an `broker.submit`). PENDING/Unbekannte Proposals werden fail-closed abgelehnt. Neuer `POST /api/firm/proposals/{id}/approve`-Endpoint ermöglicht menschliche Freigabe mit Actor-Aufzeichnung. Audit verknüpft Fill mit `proposalId`.
+
+---
 
 ## [1.36.6] — 2026-09-03 · fix(engine): H5 Pipeline-Ausführung strikt nach Approval (CRITICAL)
 
