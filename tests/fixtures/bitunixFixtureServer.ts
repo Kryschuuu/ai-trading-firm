@@ -25,6 +25,12 @@ export class BitunixFixtureServer {
   httpStatus?: number;
   /** Optionaler HTTP-Status nur für `/api/v1/kline` (z. B. 429 Rate-Limit-Test). */
   klineStatus?: number;
+  /**
+   * H4: Am Fixture platzierte Orders, nach `clientId` (Wire-Feld des
+   * clientOrderId) registriert — damit `get_order_detail?clientId=...`
+   * (getOrderByClientId) eine bestehende Order findet (Idempotenz-Tests).
+   */
+  private ordersByClientId = new Map<string, { orderId: string; status: string }>();
   private server: http.Server | null = null;
 
   async start(): Promise<string> {
@@ -87,25 +93,43 @@ export class BitunixFixtureServer {
       }
       // H3: Order-Detail (Reconciliation). orderId=BX-1 liefert einen
       // vollständigen Fill mit tradeQty; unbekannte Order → leere Antwort.
+      // H4: auch per clientId abfragbar (clientOrderId-Idempotenz-Query).
       if (path === BITUNIX_PATHS.orderDetail) {
         const orderId = url.searchParams.get("orderId");
-        json(res, 200, {
-          code: 0,
-          data:
-            orderId === "BX-1" || orderId === "BX-LIVE-1"
-              ? {
-                  orderId,
-                  symbol: "BTCUSDT",
-                  qty: "0.01",
-                  tradeQty: "0.01",
-                  side: "BUY",
-                  orderType: "MARKET",
-                  status: "FILLED",
-                  ctime: 1700000000000,
-                  mtime: 1700000001000,
-                }
-              : null,
-        });
+        const clientId = url.searchParams.get("clientId");
+        const detail =
+          orderId === "BX-1" || orderId === "BX-LIVE-1"
+            ? {
+                orderId,
+                symbol: "BTCUSDT",
+                qty: "0.01",
+                tradeQty: "0.01",
+                side: "BUY",
+                orderType: "MARKET",
+                status: "FILLED",
+                ctime: 1700000000000,
+                mtime: 1700000001000,
+              }
+            : clientId
+              ? (() => {
+                  const found = this.ordersByClientId.get(clientId);
+                  return found
+                    ? {
+                        orderId: found.orderId,
+                        clientId,
+                        symbol: "BTCUSDT",
+                        qty: "0.01",
+                        tradeQty: "0",
+                        side: "BUY",
+                        orderType: "MARKET",
+                        status: found.status,
+                        ctime: 1700000000000,
+                        mtime: 1700000001000,
+                      }
+                    : null;
+                })()
+              : null;
+        json(res, 200, { code: 0, data: detail });
         return;
       }
       // H3: Ausführungen (Trades) — die echte Fill-Quelle (avgPrice).
@@ -147,7 +171,16 @@ export class BitunixFixtureServer {
         });
         return;
       }
-      json(res, 200, { code: 0, data: { orderId: "BX-1", clientId: "c1" } });
+      // H4: clientOrderId (Wire-Feld clientId) registrieren, damit
+      // get_order_detail?clientId=... die soeben platzierte Order findet.
+      let clientId: string | null = null;
+      try {
+        clientId = body ? String(JSON.parse(body)?.clientId ?? "") || null : null;
+      } catch {
+        clientId = null;
+      }
+      if (clientId) this.ordersByClientId.set(clientId, { orderId: "BX-1", status: "NEW" });
+      json(res, 200, { code: 0, data: { orderId: "BX-1", clientId: clientId ?? "c1" } });
       return;
     }
 

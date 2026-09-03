@@ -74,6 +74,13 @@ export interface BitunixPlaceOrderBody {
   orderType: "LIMIT" | "MARKET";
   price?: string;
   effect?: "IOC" | "FOK" | "GTC" | "POST_ONLY";
+  /**
+   * Venue-Client-Order-Id (`clientOrderId` im internen Sprachgebrauch, H4):
+   * stabiler Idempotenz-Key pro Order-Intent. Bitunix' Wire-Feld heißt
+   * `clientId` ("Customize order ID") und wird vom Adapter deterministisch
+   * erzeugt und bei jedem Retry mit demselben Wert wiederverwendet, damit
+   * ein nicht-idempotenter place_order-POST nie eine Doppelorder erzeugt.
+   */
   clientId?: string;
   reduceOnly?: boolean;
   tpPrice?: string;
