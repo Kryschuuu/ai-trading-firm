@@ -33,4 +33,13 @@ export { BitunixPaperLedger } from "./paper";
 export { PaperExecutionEngine, BrokerExecutionEngine } from "./execution";
 export type { ExecutionPort, MarkPriceFn } from "./execution";
 export { BitunixHttp, TokenBucket, assertUrlAllowed } from "./http";
-export { recordBitunixPrivateCall, readBitunixPrivateAudit, clearBitunixPrivateAuditForTests } from "./audit";
+export {
+  recordBitunixPrivateCall,
+  readBitunixPrivateAudit,
+  clearBitunixPrivateAuditForTests,
+  recordBitunixPositionAnomaly,
+  readBitunixPositionAnomalies,
+  readBitunixPositionAnomalyCount,
+  clearBitunixPositionAnomaliesForTests,
+  type BitunixPositionAnomalyEntry,
+} from "./audit";
