@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.11**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.12**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,31 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
+
+**MEDIUM, Brokers/Venues (`src/brokers/bitunix/privateClient.ts`, `src/brokers/bitunix/audit.ts`).**
+`getPositions()` bildete jede von `"SHORT"` verschiedene `side` auf `"LONG"` ab — auch `""`, `null`
+und offensichtlichen Müll. Eine korrumpierte Antwort war damit maskiert, und eine Short-Position
+hätte im lokalen View als Long erscheinen können (falsches uPnL-Vorzeichen, falsche SL/TP-Geometrie,
+falsche Seitenlogik im Risk-Pfad).
+
+**Fix:** Zwei-Gate-Filterung in fester Reihenfolge — (1) `qty` endlich und `> 0`, (2) `side` ∈
+{`LONG`, `SHORT`} (getrimmt, case-insensitiv, via neuem exportierten `parseBitunixPositionSide`).
+Zeile ohne verwertbare Seite wird **verworfen und gezählt**, nie geraten. Die `qty`-Prüfung läuft
+bewusst zuerst: Das Venue lässt bei geschlossenen/Null-Mengen-Zeilen die `side` weg — die dürfen
+nicht als Anomalie durchgehen, eine echte offene Position ohne Seite dagegen sehr. Verworfene
+Zeilen landen im In-Memory-Audit-Ring (`readBitunixPositionAnomalies` /
+`readBitunixPositionAnomalyCount`, secret-frei: Symbol + gekürzter Rohwert) plus einer
+zusammengefassten Warnung pro Call über den redaktierten Logger.
+
+**Tests:** Neu `tests/bitunix.positions.test.ts` (7 Fälle) — `side=""` / `"WEIRD"` / fehlende Seite
+→ verworfen und gezählt, `LONG`/`SHORT` bleiben inkl. negativer SHORT-uPnL erhalten,
+`qty<=0`-Zeilen zählen nicht als Anomalie, Warnung mit Anzahl, Zähler kumuliert und ist
+test-seitig rücksetzbar, saubere Antwort erzeugt keine Anomalie. Mapping-Doku in
+`docs/BITUNIX.md` (§5.3). Details: `docs/CHANGELOG.md` `[1.36.12]`.
+
+---
 
 ## [1.36.11] — 2026-09-03 · fix(broker): B1 Bitunix SL/TP-Geometrie — semantisch falsche Stop/Take werden abgelehnt (HIGH)
 

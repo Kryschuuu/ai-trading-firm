@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.36.11 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.36.12 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -241,7 +241,7 @@ Basis: `https://fapi.bitunix.com` (Allowlist-Host). Schema `https` erzwungen;
 | Klines | `GET /api/v1/futures/market/kline` |
 | Orderbuch | `GET /api/v1/futures/market/depth` |
 | Account (privat) | `GET /api/v1/futures/account` |
-| Positionen (privat) | `GET /api/v1/futures/position/get_pending_positions` |
+| Positionen (privat) | `GET /api/v1/futures/position/get_pending_positions` (`side` **validiert**: nur `LONG`/`SHORT`, sonst Verwurf + Zähler — §5.3) |
 | Place-Order (privat) | `POST /api/v1/futures/trade/place_order` |
 | Order-Detail (privat, H3) | `GET /api/v1/futures/trade/get_order_detail` (per `orderId` **oder** `clientId` — H4-Idempotenz-Query) |
 | Ausführungen/Trades (privat, H3) | `GET /api/v1/futures/trade/get_history_trades` |
@@ -388,7 +388,8 @@ keinen stillen Fallback auf Paper. `testnet` → `NotSupportedCapabilityError`
 
 Private Calls (nur im Live-Pfad nach Gate-Freigabe bzw. in Tests) landen als Event
 `BITUNIX_PRIVATE_CALL` (Methode, Pfad, Outcome, errorCode — **kein** Body, keine
-Query, kein Key, keine Signatur).
+Query, kein Key, keine Signatur). Verworfene Positionszeilen zusätzlich im
+In-Memory-Ring `readBitunixPositionAnomalies()` plus Zähler (B2, §5.3).
 
 ### 5.1 Konto-Mapping `getAccount` (H8, seit v1.36.10)
 
@@ -467,6 +468,52 @@ Wire-Body und **nicht** in die Order-Idempotenz (`clientOrderId`) ein.
 Die Grenzfälle `SL == entry` bzw. `TP == entry` werden ebenfalls abgelehnt
 (streng kleiner/größer). Tests: `tests/bitunix.unit.test.ts`
 (`Orders (B1): SL/TP-Geometrie …`).
+
+### 5.3 Positionsseite: validieren statt raten (B2 — seit v1.36.12)
+
+`getPositions()` (`src/brokers/bitunix/privateClient.ts`) übernahm früher jede
+Zeile, deren `side` nicht exakt `"SHORT"` war, als **LONG** — auch `""`, `null`
+und offensichtlichen Müll. Eine korrumpierte Antwort war damit unsichtbar, und
+eine Short-Position wäre im lokalen View als Long erschienen (falsches
+uPnL-Vorzeichen, falsche SL/TP-Geometrie, falsche Seitenlogik im Risk-Pfad).
+
+Heute gilt eine **Zwei-Gate-Filterung in fester Reihenfolge**:
+
+| # | Prüfung | Outcome bei Fehlschlag |
+| --- | --- | --- |
+| 1 | `qty` endlich und `> 0` | Zeile verworfen (geschlossene/Null-Mengen-Zeile) — **keine** Anomalie |
+| 2 | `side` ∈ {`LONG`, `SHORT`} (getrimmt, case-insensitiv) | Zeile verworfen + als Anomalie gezählt |
+
+Reihenfolge ist Absicht: Das Venue liefert für bereits geschlossene Zeilen
+regulär keine `side`. Sie scheiden über die `qty`-Prüfung aus, bevor die Seite
+überhaupt betrachtet wird — die Seitenprüfung bleibt damit den **echten offenen
+Positionen** vorbehalten, wo Raten gefährlich ist.
+
+`parseBitunixPositionSide(raw)` ist der exportierte, pure Kern der Prüfung:
+akzeptiert nur `LONG`/`SHORT`, alles andere (inkl. `BUY`/`SELL`, die als
+*Order*-Seite nicht in eine Positionsantwort gehören) → `null`. Die
+Zweiwertigkeit ist venue-seitig dokumentiert — `get_pending_positions` weist
+`side` als `LONG`/`SHORT` aus
+(<https://www.bitunix.com/api-docs/futures/position/get_pending_positions.html>);
+ein dritter Wert ist deshalb kein „impliziter Long“, sondern eine unplausible
+Antwort.
+
+**Sichtbarkeit statt Stillschweigen:** jede verworfene Zeile landet im
+In-Memory-Audit-Ring `readBitunixPositionAnomalies(limit)` (Symbol, gekürzter
+Rohwert, `reason: "UNKNOWN_SIDE"`, Zeitstempel; maximal 50 Einträge) und erhöht
+`readBitunixPositionAnomalyCount()`. Pro Call wird zusätzlich **eine**
+zusammengefasste Warnung über den redaktierten Logger ausgegeben
+(`getPositions: N Positionszeile(n) ohne verwertbare side verworfen (kein
+LONG-Fallback, B2): …`) — nie unlimitiert pro Zeile, nie ohne Redaction.
+
+Der Zähler ist ein Betriebsignal: ein dauerhaft wachsender Wert bedeutet
+„Venue-Antwort unplausibel“, nicht „Position existiert mit unbekannter Seite“.
+Eine verworfene Position wird deshalb auch **nie** in `openPositions` der
+`BrokerAccount` gezählt (`BrokerExecutionEngine.getAccount` → `listPositions`).
+
+Tests: `tests/bitunix.positions.test.ts` (Unit der Seitenvalidierung, Verwurf +
+Zählung, Warnung, Kumulation über Calls, `qty`-vor-`side`-Reihenfolge,
+Regression der sauberen Antwort).
 
 ---
 
@@ -572,6 +619,7 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 
 - `tests/bitunix.unit.test.ts` — Signing-Goldens (≥5), Mapping, Orders (inkl. **B1 SL/TP-Geometrie**), 16 Gates, Redactor, Config, Secrets
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
+- `tests/bitunix.positions.test.ts` — B2: Positionsseite validiert (Verwurf + Zähler + Warnung), `qty`-vor-`side`-Reihenfolge, LONG/SHORT-Regression
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
 - `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
