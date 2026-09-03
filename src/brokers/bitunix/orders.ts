@@ -81,6 +81,38 @@ export function serializePlaceOrder(
     throw new OrderSerializationError("side muss LONG oder SHORT sein");
   }
 
+  // B1 (HIGH): SL/TP-Geometrie relativ zum Entry validieren. Eine formal positive,
+  // aber semantisch falsche SL/TP-Staffelung (z. B. LONG-Stop oberhalb des Entry)
+  // darf nie zur Venue gehen — der Adapter vertraut nicht darauf, dass Caller
+  // korrekte Werte liefern.
+  //
+  // Entry-Bezugspunkt:
+  //   LIMIT  → req.limitPrice (fester Preis)
+  //   MARKET → req.markPriceHint (Mark-/Quote-Preis-Hinweis); fehlt er, ist keine
+  //            Geometrie-Prüfung möglich → überspringen (kein falscher Deny).
+  const entry = finitePositive(req.limitPrice)
+    ? req.limitPrice
+    : finitePositive(req.markPriceHint)
+      ? req.markPriceHint
+      : undefined;
+  if (entry !== undefined) {
+    if (req.side === "LONG") {
+      if (req.stopLoss !== undefined && req.stopLoss >= entry) {
+        throw new OrderSerializationError("LONG stopLoss muss unter dem Entry liegen");
+      }
+      if (req.takeProfit !== undefined && req.takeProfit <= entry) {
+        throw new OrderSerializationError("LONG takeProfit muss über dem Entry liegen");
+      }
+    } else {
+      if (req.stopLoss !== undefined && req.stopLoss <= entry) {
+        throw new OrderSerializationError("SHORT stopLoss muss über dem Entry liegen");
+      }
+      if (req.takeProfit !== undefined && req.takeProfit >= entry) {
+        throw new OrderSerializationError("SHORT takeProfit muss unter dem Entry liegen");
+      }
+    }
+  }
+
   const body: BitunixPlaceOrderBody = {
     symbol,
     qty: String(req.qty),

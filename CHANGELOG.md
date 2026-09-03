@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.10**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.11**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,31 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.11] — 2026-09-03 · fix(broker): B1 Bitunix SL/TP-Geometrie — semantisch falsche Stop/Take werden abgelehnt (HIGH)
+
+**HIGH, Brokers/Venues (`src/brokers/bitunix/orders.ts`, `src/contracts/broker.ts`).**
+`serializePlaceOrder` prüfte SL/TP nur auf `finitePositive` (zahl > 0) — nicht, ob sie
+auf der richtigen Seite des Entry liegen. Eine formal positive, aber semantisch falsche
+Staffelung (z. B. LONG-Stop oberhalb / TP unterhalb des Einstiegspreises) hätte zur Venue
+gehen können.
+
+**Fix:** Geometrie-Check relativ zum Entry **vor** dem Aufbau des Wire-Bodys. Entry =
+`req.limitPrice` (LIMIT) bzw. `req.markPriceHint` (MARKET). Fehlt bei einer MARKET-Order
+der Entry-Hinweis, wird die Prüfung übersprungen (kein falscher Deny). Abgelehnt wird
+(LONG) `stopLoss >= entry` / `takeProfit <= entry` und (SHORT) `stopLoss <= entry` /
+`takeProfit >= entry` — jeweils mit `OrderSerializationError` und Seiten-spezifischer
+Meldung. Der Adapter vertraut damit nicht auf korrekte Caller. `markPriceHint` ist als
+**optionales** Feld auf `BrokerOrderRequest` ergänzt; es geht nie in den Wire-Body und
+nicht in die `clientOrderId`-Idempotenz ein.
+
+**Tests:** Neu in `tests/bitunix.unit.test.ts` `Orders (B1): SL/TP-Geometrie …` —
+LONG `sl=entry+1` → Fehler, LONG `tp=entry-1` → Fehler, korrekte LONG-Geometrie → ok,
+SHORT gespiegelt, MARKET ohne Entry-Hinweis → übersprungen (Regression Engine-Pfad),
+MARKET mit `markPriceHint` → aktiv geprüft. Mapping-Doku in `docs/BITUNIX.md` (§5.2).
+Details: `docs/CHANGELOG.md` `[1.36.11]`.
+
+---
 
 ## [1.36.10] — 2026-09-03 · fix(broker): H8 Bitunix-Equity aus walletBalance + uPnL statt available + uPnL (HIGH)
 

@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.36.10 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.36.11 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -436,6 +436,38 @@ sind voll besichert (`usedMargin = 0`, `availableCash = cash`,
 `walletBalance = equity − unrealizedPnl`). Tests:
 `tests/bitunix.accountEquity.test.ts`.
 
+### 5.2 SL/TP-Geometrie (B1 — seit v1.36.11)
+
+`serializePlaceOrder` (`src/brokers/bitunix/orders.ts`) prüft **vor** dem Aufbau des
+Wire-Bodys, ob SL/TP auf der richtigen Seite des Entry liegen. Ohne diese Prüfung
+könnte eine formal positive, aber semantisch falsche Staffelung (z. B. ein
+LONG-Stop oberhalb des Einstiegspreises) zur Venue gehen — der Adapter vertraut
+**nicht** darauf, dass Caller korrekte Werte liefern.
+
+**Entry-Bezugspunkt** (`entry`):
+
+| Order-Typ | Entry | Geometrie-Prüfung |
+| --- | --- | --- |
+| `LIMIT` | `req.limitPrice` (fester Preis) | immer aktiv |
+| `MARKET` mit `req.markPriceHint` | `req.markPriceHint` (Mark-/Quote-Preis) | aktiv |
+| `MARKET` ohne Entry-Hinweis | — | **übersprungen** (kein falscher Deny) |
+
+`markPriceHint` ist ein reiner Validierungs-Bezugspunkt: Er geht **nie** in den
+Wire-Body und **nicht** in die Order-Idempotenz (`clientOrderId`) ein.
+
+**Regeln (Fehler = `OrderSerializationError`):**
+
+| Side | Bedingung | Meldung |
+| --- | --- | --- |
+| `LONG` | `stopLoss >= entry` | `LONG stopLoss muss unter dem Entry liegen` |
+| `LONG` | `takeProfit <= entry` | `LONG takeProfit muss über dem Entry liegen` |
+| `SHORT` | `stopLoss <= entry` | `SHORT stopLoss muss über dem Entry liegen` |
+| `SHORT` | `takeProfit >= entry` | `SHORT takeProfit muss unter dem Entry liegen` |
+
+Die Grenzfälle `SL == entry` bzw. `TP == entry` werden ebenfalls abgelehnt
+(streng kleiner/größer). Tests: `tests/bitunix.unit.test.ts`
+(`Orders (B1): SL/TP-Geometrie …`).
+
 ---
 
 ## 6. Paper (Modus B)
@@ -538,7 +570,7 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 
 ## 10. Tests & Coverage
 
-- `tests/bitunix.unit.test.ts` — Signing-Goldens (≥5), Mapping, Orders, 16 Gates, Redactor, Config, Secrets
+- `tests/bitunix.unit.test.ts` — Signing-Goldens (≥5), Mapping, Orders (inkl. **B1 SL/TP-Geometrie**), 16 Gates, Redactor, Config, Secrets
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
