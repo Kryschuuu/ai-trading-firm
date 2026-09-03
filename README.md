@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.8 (2026-09-03) · Vollständige
+> **Dokumentationsstand:** v1.36.9 (2026-09-03) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in

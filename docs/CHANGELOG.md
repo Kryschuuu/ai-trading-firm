@@ -5,6 +5,130 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.9] — 2026-09-03 · fix(api): Async Route-Params — Approve-Endpoint war zur Laufzeit tot + `next build` brach ab (CRITICAL)
+
+**Kritischer Nachzug zum H6-Fix (v1.36.7):**
+Der mit der Approval-Chain eingeführte Freigabe-Endpoint
+`POST /api/firm/proposals/{id}/approve` nutzte noch die **synchrone**
+Handler-Signatur aus der Next.js-14-Ära:
+
+```ts
+// VORHER — kaputt unter Next.js >= 15
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+  const proposalId = params.id; // ← zur Laufzeit undefined
+}
+```
+
+Seit **Next.js 15** sind dynamische Route-`params` asynchron
+(`params: Promise<{ id: string }>`), Next.js 15 hielt den synchronen Zugriff
+nur übergangsweise mit Deprecation-Warnung aufrecht. **Mit Next.js 16 ist der
+synchrone Zugriff vollständig entfernt** (Breaking Change
+„Sync `params`/`searchParams` props access“ — ebenso `cookies()`, `headers()`,
+`draftMode()`, `searchParams`). Das Projekt läuft auf `next@16.3.1`.
+
+Der Fehler wirkte **zweifach**:
+
+- **(a) Build-Bruch.** `next build` generiert Route-Validator-Typen unter
+  `.next/types/validator.ts`. Dort schlug der Build mit `TS2344` fehl —
+  `Type 'typeof import("…/approve/route")' does not satisfy the constraint
+  'RouteHandlerConfig<"/api/firm/proposals/[id]/approve">'`, weil
+  `Promise<{ id }>` nicht an `{ id }` zuweisbar ist. Ein Production-Deployment
+  war damit nicht möglich.
+- **(b) Toter Endpoint zur Laufzeit.** `params` war real ein Promise, der
+  Property-Zugriff `params.id` lieferte `undefined`. Next.js quittierte das im
+  Server-Log mit
+  `Error: Route "/api/firm/proposals/[id]/approve" used 'params.id'. 'params' is a Promise and must be unwrapped with 'await' or 'React.use()' before accessing its properties`,
+  der Handler fiel in seinen eigenen `if (!proposalId)`-Zweig und antwortete
+  auf **jeden** Aufruf deterministisch mit
+  `400 {"error":"proposal id missing"}`. Die menschliche Freigabe
+  (`PENDING → APPROVED`) war seit v1.36.7 **nicht funktionsfähig** — die
+  Approval-Chain selbst arbeitete korrekt fail-closed, es konnte ihr nur nie
+  jemand eine Freigabe erteilen.
+
+### Warum die CI den Fehler nicht gesehen hat
+
+Beide Workflows führen **kein `next build`** aus:
+
+| Workflow | Schritte |
+| --- | --- |
+| `docs-validate` (`.github/workflows/main.yml`) | `npm ci`, `npm run typecheck`, `npm run docs:validate` |
+| `security-live-gate` (`.github/workflows/main-security-live-gatte.yml`) | `npm ci`, `npm run typecheck`, `npm run lint`, `npm run security:live-gate`, Secret-Scan, Suite-Stamp |
+
+Die inkompatible Signatur steckt in den **von Next generierten** Typen unter
+`.next/`, die `tsc --noEmit` gegen den Quellcode nicht prüft — `tsc` sah den
+eigenen Handler als in sich konsistent an. Der Bruch wurde deshalb erst beim
+Production-Build sichtbar.
+
+### Geändert
+
+- **Handler auf die Repo-Konvention umgestellt** —
+  `src/app/api/firm/proposals/[id]/approve/route.ts`:
+
+  ```ts
+  type RouteContext = { params: Promise<{ id: string }> };
+
+  export async function POST(request: NextRequest, ctx: RouteContext) {
+    const { id } = await ctx.params;
+    // …
+  }
+  ```
+
+  Damit ist die Route konsistent mit allen übrigen dynamischen Segmenten des
+  Repos (`/api/brokers/[venue]/{credentials,discover,health,status,test}`,
+  `/api/firm/rules/[id]`, `/api/firm/rules/[id]/backtest`,
+  `/api/markets/[venue]/[symbol]`, `/api/analysis/daily/[date]`,
+  `/api/universe/score/[instrumentId]`) — die Approve-Route war der **einzige**
+  Rückstand im Projekt.
+- **Verhalten unverändert.** Alle Statuspfade bleiben identisch: `400` bei
+  fehlendem/leerem `approvedBy` bzw. fehlender ID, `404` bei unbekannter
+  Proposal, `409` bei `status !== "PENDING"`, `500` im Fehlerpfad; Audit-Event
+  `PROPOSAL_APPROVED` mit `proposalId`/`approvedBy`/`previousStatus` unverändert.
+  Der 400-Check auf `approvedBy` behält seine Vorrangstellung.
+
+### Tests
+
+- Neu **`tests/routes.asyncParams.test.ts`** (6 Tests) — schließt genau den
+  CI-Blindfleck, der den Befund ermöglicht hat:
+  - **Projektweiter Scan**: rekursiv alle Dateien in dynamischen Segmenten
+    (`[…]`) unter `src/app`, die `route.ts`/`route.tsx`/`page.tsx`/`layout.tsx`
+    heißen, werden auf synchrone Annotationen
+    (`params: {…}` / `searchParams: {…}` statt `Promise<…>`) geprüft. Der Test
+    meldet Datei **und Zeile** und gibt die Ziel-Signatur im Fehlertext aus.
+  - **Auspack-Nachweis**: jede Datei, die `params`/`searchParams` annotiert,
+    muss es per `await` oder React-`use()` auflösen.
+  - **Konventions-Check** der Approve-Route (`RouteContext`, `await ctx.params`,
+    und `doesNotMatch` auf die alte Signatur als harte Regressionssperre).
+  - **Verhaltenstest**: der Handler wird wie in `tests/brokerApi.test.ts` direkt
+    mit `{ params: Promise.resolve({ id }) }` aufgerufen; asserted wird, dass
+    **nicht** `"proposal id missing"` zurückkommt — unter der alten Signatur kam
+    exakt das.
+  - **400-Regression**: fehlender Actor liefert weiterhin
+    `400 approvedBy (actor) is required`.
+  - Gegen den **alten** Code schlagen 4 der 6 Tests fehl (Scan, Auspack-Nachweis,
+    Konvention, Verhaltenstest), gegen den Fix sind 6/6 grün.
+- **Verifikation:** `npm run build` vollständig grün (komplette Routentabelle
+  inkl. `/api/firm/proposals/[id]/approve`, kein `TS2344`);
+  `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün;
+  `npm test` = **1590 Tests, 1590 pass, 0 fail**.
+- **Laufzeit-A/B** am Dev-Server (`POST /api/firm/proposals/prop-abc-123/approve`
+  mit `{"approvedBy":"runtime-probe"}`): vorher
+  `400 {"error":"proposal id missing"}`, nachher Auflösung der ID bis zur
+  DB-Ebene (`500 DATABASE_URL ist nicht gesetzt` in der Sandbox ohne Postgres) —
+  der 400-Actor-Pfad bleibt unverändert.
+
+Abwärtskompatibel: reine Korrektur der Handler-Signatur, keine API-, Schema-
+oder Env-Änderung. Clients müssen nichts anpassen — sie bekommen jetzt
+allerdings erstmals die intended Antwort statt eines dauerhaften 400.
+
+### Betrieblicher Hinweis
+
+Weil `next build` in keiner Workflow-Datei vorkommt, sind Build-Breaks dieser
+Art weiterhin CI-blind. Der neue Scan-Test deckt die Async-Params-Klasse
+projektweit ab; ein zusätzliches `next build` in der CI wäre die
+vollständige Absicherung.
+
+---
+
 ## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
 
 **Kritischer Befund H9 aus dem Senior-Peer-Review (Audit 2026-09-03):**
