@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.4**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.5**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,36 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.5] — 2026-09-03 · fix(broker): H4 Order-Idempotenz — kein Doppel-Order bei Retry (CRITICAL)
+
+**CRITICAL, Handelslogik/Broker (`src/brokers/bitunix/http.ts`, `src/brokers/bitunix/privateClient.ts`, `src/brokers/bitunix/orders.ts`).**
+Der HTTP-Transport wiederholte einen **nicht-idempotenten** place_order-POST bei
+HTTP 429 blind (Annahme „429 = definitiv nicht verarbeitet“); außerdem wurde
+keine `clientOrderId` generiert/gesendet. Ein Retry konnte so nicht über einen
+stabilen Idempotenz-Key dedupliziert werden und konnte eine Doppelorder erzeugen.
+
+**Fix:**
+- **Stabiler `clientOrderId`** (`ATF-<sha256>`): `serializePlaceOrder` setzt ihn in
+  den Venue-Body (`clientId`); wird bei einem kontrollierten Retry mit demselben
+  Body wiederverwendet. Helper `clientOrderIdFor`.
+- **Transport-Retry-Vertrag (H4):** Nicht-idempotente Requests (POST, insbesondere
+  `place_order`) werden bei 429/Timeout/Netz/5xx nie automatisch wiederholt —
+  stattdessen `BitunixAmbiguousError` (kind `ambiguous`). Definitive Ablehnungen
+  (auth/validation/payload, 4xx) bleiben unterscheidbar; GETs bleiben Retry-fähig.
+- **Status-Query vor jedem erneuten Senden** (`getOrderByClientId`):
+  `placeSerializedOrder` fragt per `clientOrderId` den echten Status ab
+  (`get_order_detail?clientId=…`): Order gefunden → bestehende Order (kein
+  Duplikat); nicht gefunden → genau **ein** kontrollierter Retry mit demselben
+  `clientOrderId`.
+
+**Tests:** `tests/bitunix.idempotency.test.ts` — (a) 429 + Query findet bestehende
+Order → kein Duplikat; (b) 429 + Query leer → genau ein Retry mit identischem
+`clientOrderId`; `BitunixAmbiguousError` bei 429/5xx/Netz; idempotenter GET bleibt
+Retry-fähig; definitive 4xx → kein Query/Retry. Bestehende Security-Suite auf den
+korrekten 429-Vertrag umgestellt.
+
+---
 
 ## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order nicht mehr fälschlich als FILLED gemeldet (CRITICAL)
 
