@@ -62,9 +62,9 @@ if (res.status === 429 || res.status >= 500) {
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] `clientOrderId` wird erzeugt, gesendet und bei Retry wiederverwendet.
-- [ ] Bei 429/Timeout: erst `getOrderByClientId`, dann ggf. genau ein Retry.
-- [ ] Test belegt: kein Doppel-Order bei 429 + bereits existierender Order.
+- [x] `clientOrderId` wird erzeugt, gesendet und bei Retry wiederverwendet.
+- [x] Bei 429/Timeout: erst `getOrderByClientId`, dann ggf. genau ein Retry.
+- [x] Test belegt: kein Doppel-Order bei 429 + bereits existierender Order.
 
 ## Changelog-Blurb
 

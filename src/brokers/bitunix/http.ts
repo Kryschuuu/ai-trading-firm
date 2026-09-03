@@ -8,7 +8,7 @@
  *   - Token-Bucket Rate-Limiter
  *   - redirect: error
  */
-import { BitunixApiError, classifyBitunixFailure, safeSnippet } from "./errors";
+import { BitunixAmbiguousError, BitunixApiError, classifyBitunixFailure, safeSnippet } from "./errors";
 import { BITUNIX_MAX_RESPONSE_BYTES } from "./config";
 import type { BitunixRuntimeConfig } from "./config";
 import type { BitunixLogger } from "./redactor";
@@ -65,9 +65,11 @@ export interface BitunixHttpRequest {
   /**
    * Retry-Semantik. Default: GET = idempotent (Retry erlaubt), POST = NICHT
    * idempotent. Für nicht-idempotente Requests (z. B. place_order) wird bei
-   * Timeout, Netzwerkfehler oder 5xx NICHT wiederholt — die Venue könnte die
-   * Order bereits verarbeitet haben (Doppel-Order-Gefahr). Einzige Ausnahme:
-   * HTTP 429 (Rate-Limit) — die Anfrage wurde definitiv NICHT verarbeitet.
+   * jedem ambivalenten Ausgang (HTTP 429, Timeout, Netzwerkfehler, 5xx) NICHT
+   * automatisch wiederholt — die Venue könnte die Order bereits verarbeitet
+   * haben (Doppel-Order-Gefahr). Stattdessen wird ein `BitunixAmbiguousError`
+   * (kind "ambiguous") nach oben gereicht; der Aufrufer muss VOR einem
+   * erneuten Senden per `clientOrderId` den echten Status abfragen.
    */
   idempotent?: boolean;
 }
@@ -150,8 +152,10 @@ export class BitunixHttp {
   async request(req: BitunixHttpRequest): Promise<BitunixHttpResponse> {
     const url = buildUrl(this.cfg.restBaseUrl, req.path, req.query, this.cfg);
     // Nicht-idempotente Requests (Default für POST) dürfen bei ambivalenten
-    // Fehlern (Timeout/Netzwerk/5xx) NICHT wiederholt werden — Doppel-Order-
-    // Gefahr. Nur 429 (definitiv nicht verarbeitet) bleibt Retry-fähig.
+    // Fehlern (Timeout/Netzwerk/5xx/429) NICHT automatisch wiederholt werden —
+    // Doppel-Order-Gefahr. Stattdessen reicht der Transport einen
+    // `BitunixAmbiguousError` nach oben; der Aufrufer (privateClient) muss
+    // VOR einem erneuten Senden per clientOrderId den Status abfragen (H4).
     const idempotent = req.idempotent ?? req.method === "GET";
     const max = Math.max(1, this.cfg.retryMax);
     let last: BitunixApiError | null = null;
@@ -201,11 +205,16 @@ export class BitunixHttp {
             httpStatus: res.status,
             venueCode: readCode(json),
           });
-          // 429 = definitiv nicht verarbeitet → immer Retry-fähig.
-          // 5xx = ambivalent (Order kann serverseitig angekommen sein) →
-          // nur idempotente Requests dürfen wiederholen; sonst laut abbrechen.
-          if (res.status === 429 || idempotent) continue;
-          throw last;
+          // Idempotent (GET) → Retry. Nicht-idempotent (POST, place_order) →
+          // NIE blind wiederholen: die Anfrage KÖNNTE serverseitig angekommen
+          // sein. Stattdessen ambivalenten Fehler nach oben (privateClient
+          // muss vor einem erneuten Senden per clientOrderId den Status
+          // abfragen — H4-Idempotenz).
+          if (idempotent) continue;
+          throw new BitunixAmbiguousError(classified.message, {
+            httpStatus: res.status,
+            venueCode: readCode(json),
+          });
         }
         if (!res.ok) {
           const classified = classifyBitunixFailure({
@@ -221,24 +230,40 @@ export class BitunixHttp {
         return { status: res.status, json };
       } catch (e) {
         if (e instanceof BitunixApiError) {
-          if (e.kind === "auth" || e.kind === "permission" || e.kind === "ssrf") throw e;
+          if (e.kind === "auth" || e.kind === "permission" || e.kind === "ssrf" || e.kind === "payload") throw e;
           last = e;
-          // rate-limit: definitiv nicht verarbeitet → Retry auch für POST.
-          if (e.kind === "rate-limit") continue;
-          // maintenance/unknown sind ambivalent → nur idempotent wiederholen.
-          if ((e.kind === "maintenance" || e.kind === "unknown") && idempotent) continue;
-          throw e;
+          // Bereits als "ambiguous" markiert → direkt weiterreichen.
+          if (e.kind === "ambiguous") throw e;
+          // Idempotenter Pfad: rate-limit/maintenance/unknown wiederholen.
+          if (idempotent) {
+            if (e.kind === "rate-limit") continue;
+            if (e.kind === "maintenance" || e.kind === "unknown") continue;
+            throw e;
+          }
+          // Nicht-idempotenter Pfad: nur AMBIVALENTE Ausgänge (429/5xx/
+          // Timeout/Netz/maintenance/rate-limit) werden als "ambiguous"
+          // markiert. Definitiv abgelehnte 4xx (z. B. 400 Validierung) sind
+          // NICHT ambivalent — kein Status-Query, kein Retry.
+          if (e.httpStatus != null && e.httpStatus < 500 && e.httpStatus !== 429) {
+            throw e;
+          }
+          throw new BitunixAmbiguousError(e.message, {
+            httpStatus: e.httpStatus,
+            venueCode: e.venueCode,
+          });
         }
         if (e instanceof Error && e.name === "AbortError") {
           last = new BitunixApiError("unknown", `Bitunix-Timeout nach ${this.cfg.timeoutMs} ms.`);
-          // Timeout ist ambivalent — nicht-idempotente Requests brechen laut ab.
+          // Timeout ist ambivalent — nicht-idempotente Requests reichen einen
+          // "ambiguous"-Fehler nach oben (kein blindes erneutes Senden).
           if (idempotent) continue;
-          throw last;
+          throw new BitunixAmbiguousError(last.message, { httpStatus: null, venueCode: null });
         }
         const msg = redactBitunix(e instanceof Error ? e.message : String(e), this.secrets());
         last = new BitunixApiError("unknown", `Bitunix-Netzwerkfehler: ${msg.slice(0, 80)}`);
         // Netzwerkabbruch ist ambivalent — dito.
-        if (!idempotent) throw last;
+        if (idempotent) continue;
+        throw new BitunixAmbiguousError(last.message, { httpStatus: null, venueCode: null });
       } finally {
         clearTimeout(timer);
       }

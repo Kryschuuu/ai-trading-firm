@@ -127,7 +127,7 @@ test("Live-Engine: fail-closed — scheitert der Konto-Abruf, wird NICHT gesende
   assert.equal(calls.place, 0, "ohne belegbare Equity keine Order");
 });
 
-test("Transport: nicht-idempotenter POST (place_order) wird bei 5xx/Timeout NICHT wiederholt, bei 429 schon", async () => {
+test("Transport: nicht-idempotenter POST wird bei 5xx/Timeout/429 NICHT automatisch wiederholt (H4)", async () => {
   const cfg = loadBitunixConfig({
     BITUNIX_ENABLED: "true",
     BITUNIX_ALLOW_INSECURE_HTTP: "true",
@@ -136,8 +136,11 @@ test("Transport: nicht-idempotenter POST (place_order) wird bei 5xx/Timeout NICH
     BITUNIX_TIMEOUT_MS: "200",
   });
   const PATH = "/api/v1/futures/trade/place_order";
+  const isAmbiguous = (e: unknown) =>
+    e instanceof BitunixApiError && (e as BitunixApiError).kind === "ambiguous";
 
-  // 5xx: ambivalent (Order kann serverseitig angekommen sein) → exakt 1 Versuch.
+  // 5xx: ambivalent (Order kann serverseitig angekommen sein) → exakt 1 Versuch,
+  // aufgeschlüsselt als "ambiguous" (H4: Aufrufer muss per clientOrderId queryen).
   let hits5xx = 0;
   const http5xx = new BitunixHttp({
     config: cfg,
@@ -148,11 +151,11 @@ test("Transport: nicht-idempotenter POST (place_order) wird bei 5xx/Timeout NICH
   });
   await assert.rejects(
     () => http5xx.request({ method: "POST", path: PATH, body: "{}", idempotent: false }),
-    BitunixApiError
+    isAmbiguous
   );
-  assert.equal(hits5xx, 1, "kein Retry eines nicht-idempotenten POST bei 5xx");
+  assert.equal(hits5xx, 1, "kein Auto-Retry eines nicht-idempotenten POST bei 5xx");
 
-  // Netzwerkfehler: ebenso ambivalent → exakt 1 Versuch.
+  // Netzwerkfehler: ebenso ambivalent → exakt 1 Versuch, "ambiguous".
   let hitsNet = 0;
   const httpNet = new BitunixHttp({
     config: cfg,
@@ -163,11 +166,12 @@ test("Transport: nicht-idempotenter POST (place_order) wird bei 5xx/Timeout NICH
   });
   await assert.rejects(
     () => httpNet.request({ method: "POST", path: PATH, body: "{}", idempotent: false }),
-    BitunixApiError
+    isAmbiguous
   );
-  assert.equal(hitsNet, 1, "kein Retry eines nicht-idempotenten POST bei Netzwerkfehler");
+  assert.equal(hitsNet, 1, "kein Auto-Retry eines nicht-idempotenten POST bei Netzwerkfehler");
 
-  // 429: definitiv nicht verarbeitet → Retry bleibt erlaubt (retryMax greift).
+  // 429: NIE blind wiederholen (H4) — der Aufrufer entscheidet nach einem
+  // clientOrderId-Status-Query. Der Transport stellt nur "ambiguous" bereit.
   let hits429 = 0;
   const http429 = new BitunixHttp({
     config: cfg,
@@ -178,9 +182,9 @@ test("Transport: nicht-idempotenter POST (place_order) wird bei 5xx/Timeout NICH
   });
   await assert.rejects(
     () => http429.request({ method: "POST", path: PATH, body: "{}", idempotent: false }),
-    BitunixApiError
+    isAmbiguous
   );
-  assert.equal(hits429, 3, "429 bleibt Retry-fähig (definitiv nicht verarbeitet)");
+  assert.equal(hits429, 1, "kein Auto-Retry eines nicht-idempotenten POST bei 429");
 
   // Gegenprobe: idempotenter GET wiederholt bei 5xx weiterhin.
   let hitsGet = 0;
@@ -195,7 +199,7 @@ test("Transport: nicht-idempotenter POST (place_order) wird bei 5xx/Timeout NICH
     () => httpGet.request({ method: "GET", path: "/api/v1/futures/market/tickers" }),
     BitunixApiError
   );
-  assert.equal(hitsGet, 3, "GET bleibt Retry-fähig");
+  assert.equal(hitsGet, 3, "GET bleibt idempotent und Retry-fähig");
 });
 
 test("Enforcer: der prozessweite Not-Halt (/api/firm/kill) blockiert eine Live-Order", () => {
