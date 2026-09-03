@@ -34,6 +34,7 @@ import {
   validateOrder,
   missionSizedNotional,
   applyRuntimeLimits,
+  riskValidationReason,
   type RiskLimits,
 } from "./riskGuard";
 import { getCandles, sanitizeSymbol } from "./marketData";
@@ -623,15 +624,29 @@ export function createPaperRuleAdapter(opts?: {
         const tpDist = stopPct * Math.min(ctx.spec.action.takeProfitRR, limits.takeProfitRR);
         const takeProfit = Number((price * (1 + tpDist)).toFixed(price > 100 ? 2 : 6));
 
-        const guard = validateOrder({
-          notional,
-          equity,
-          openPositions: broker.openPositions,
-          side: "LONG",
-          leverage: 1,
-          hasStopLoss: true,
-          symbol,
-        });
+        // H9: validateOrder wirft bei NaN/Infinity/≤0 fail-closed
+        // (RiskValidationError) — der Mikro-Executor übersetzt das in einen
+        // BLOCKED-Result (INVALID_EQUITY etc.), bevor der Broker berührt wird.
+        let guard;
+        try {
+          guard = validateOrder({
+            notional,
+            equity,
+            openPositions: broker.openPositions,
+            side: "LONG",
+            leverage: 1,
+            hasStopLoss: true,
+            symbol,
+          });
+        } catch (e) {
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: `GUARDRAIL:${riskValidationReason(e)}`,
+            at: new Date().toISOString(),
+          };
+        }
         if (!guard.allowed) {
           return {
             status: "BLOCKED",
@@ -650,12 +665,14 @@ export function createPaperRuleAdapter(opts?: {
           stopLoss,
           takeProfit,
         });
-        if (fill.status !== "FILLED") {
+        // H3: Position nur buchen bei echtem Fill mit belegtem Preis (>0).
+        // NEW/REJECTED/UNKNOWN oder ein 0-Entry blockieren die Order.
+        if (fill.status !== "FILLED" || !Number.isFinite(fill.fillPrice) || fill.fillPrice <= 0) {
           return {
             status: "BLOCKED",
             ruleId: ctx.ruleId,
             symbol,
-            reason: `BROKER:${fill.reason ?? "rejected"}`,
+            reason: `BROKER:${fill.reason ?? fill.status ?? "rejected"}`,
             at: new Date().toISOString(),
           };
         }

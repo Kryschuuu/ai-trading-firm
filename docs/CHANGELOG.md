@@ -5,6 +5,194 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
+
+**Kritischer Befund H9 aus dem Senior-Peer-Review (Audit 2026-09-03):**
+`validateOrder()` rechnete mit `const equity = Math.max(ctx.equity, 1)` und
+später `if (ctx.leverage > RISK_LIMITS.maxLeverage)`. Vergleiche mit `NaN`
+sind **immer** `false` (`NaN > x === false`) und eine Division durch NaN/0
+ergibt NaN/Infinity — eine Guardrail, die auf einem ungültigen Zahlenwert
+rechnet, konnte damit **still übergangen** werden. Negatives/insolventes
+Equity wurde via `Math.max(equity, 1)` auf 1 geklemmt, statt den insolventen
+Zustand hart zu blockieren.
+
+### Geändert
+
+- **Fail-closed Eingangsvalidierung** — `src/lib/riskGuard.ts`:
+  - Neue Klasse `RiskValidationError extends Error` mit
+    `code = "RISK_VALIDATION"` und dem verletzten `field`-Namen.
+  - Neuer Helfer `requireFinitePositive(value, field)`: wandelt über
+    `Number(value)` um und wirft bei `!Number.isFinite(n) || n <= 0`
+    (NaN, ±Infinity, nicht-numerische Strings, 0, negativ).
+  - `validateOrder()` prüft am Eingang `equity`, `leverage` und `notional`
+    über diesen Helfer — **unbekannt ⇒ BLOCK (Throw), nie ALLOW**. Der
+    `Math.max(ctx.equity, 1)`-Clamp entfällt; insolventes Equity wirft.
+    Der bisherige notional-Fast-Path
+    (`!Number.isFinite(ctx.notional) || ctx.notional <= 0`) bleibt als
+    erster Check erhalten, routet aber über `requireFinitePositive`,
+    sodass NaN/≤0 einheitlich werfen.
+  - Der Nebenläufigkeits-Zähler (`openPositions`) wird ebenfalls
+    fail-closed gelesen: ein nicht-endlicher/negativer Wert blockiert die
+    Order (bisher: `NaN >= max` ist `false` → Schranke umgangen).
+  - Neuer Übersetzungs-Helfer `riskValidationReason(e)`:
+    `equity → INVALID_EQUITY`, `leverage → INVALID_LEVERAGE`,
+    `notional → INVALID_NOTIONAL`, sonst `RISK_VALIDATION:<field>`.
+- **Caller übersetzen den Wurf in REJECTED-Fills** — alle Order-Pfade
+  fangen `RiskValidationError` ab und lehnen mit stabilem Reason ab:
+  - `src/lib/broker.ts` (`PaperBroker.submit`) → `reject(order, …)`.
+  - `src/brokers/alpaca/paper.ts` (`AlpacaPaperLedger.submit`).
+  - `src/brokers/bitunix/paper.ts` (`BitunixPaperLedger.submit`).
+  - `src/brokers/alpaca/execution.ts` (`BrokerExecutionEngine.submit`,
+    live; inkl. Private-Call-Audit `DENIED`).
+  - `src/brokers/bitunix/execution.ts` (`BrokerExecutionEngine.submit`,
+    live — eine kaputte Venue-Equity darf eine echte Order nie zulassen).
+  - `src/lib/microExecutor.ts` → `status: "BLOCKED"` mit
+    `GUARDRAIL:INVALID_EQUITY` etc., bevor der Broker berührt wird.
+- **Audit-Event-Katalog nachgezogen** — `src/lib/auditView.ts`: die mit
+  H6 eingeführten Proposal-Events `PROPOSAL_CREATED`, `PROPOSAL_APPROVED`,
+  `PROPOSAL_NOT_APPROVED` und `PROPOSAL_NOT_FOUND` hatten keine
+  UI-Beschreibungen (Katalog-Test schlug fehl); alle vier sind jetzt mit
+  Label, Kategorie, Erwartungs-Level, Beschreibung und Fakten-Sektionen
+  hinterlegt.
+
+### Tests
+
+- `tests/riskGuard.test.ts` (H9-Suite):
+  - `requireFinitePositive` akzeptiert nur endliche positive Zahlen
+    (inkl. numerischer Strings); NaN/Infinity/0/negativ/`undefined`/
+    `null`/`""`/`"abc"`/Objekte werfen `RiskValidationError` mit dem
+    richtigen `field`.
+  - `RiskValidationError` trägt `code = "RISK_VALIDATION"`, `field`,
+    `name = "RiskValidationError"`.
+  - `riskValidationReason` mappt auf `INVALID_EQUITY`/`INVALID_LEVERAGE`/
+    `INVALID_NOTIONAL` bzw. `RISK_VALIDATION:<field>`.
+  - `validateOrder` wirft bei `equity=NaN`, `equity=-5/-0.01/0`,
+    `leverage=NaN/-1/Infinity`, `notional=NaN/0/-100/Infinity`; nur
+    endlich-positive Werte passieren.
+  - `PaperBroker.submit` mit Equity 0 (insolvent) → `status: "REJECTED"`,
+    `reason: "INVALID_EQUITY"` (kein stiller Clamp, kein Throw nach außen).
+
+Abwärtskompatibel: gültige Orders verhalten sich unverändert; die
+Ablehnung ungültiger Zahlen ist eine reine Härtung (fail-closed).
+
+---
+
+## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`, `src/app/api/firm/proposals/[id]/approve/route.ts`).**
+Der Executor führt keine Modellentscheidung mehr aus; er lädt ausschließlich die jüngste serverseitig `APPROVED` Proposal (`executeApprovedProposal`) und kopiert `proposedDetail` unverändert in `broker.submit`. PENDING-Proposals führen zur harten Ablehnung (`NO_APPROVED_PROPOSAL` / `PROPOSAL_NOT_APPROVED`). Neue `POST /api/firm/proposals/{id}/approve`-Endpoint ermöglicht explizite menschliche Freigabe (`PENDING → APPROVED`) mit Actor-Aufzeichnung. Audit verknüpft Fill mit `proposalId`.
+
+**Tests:** `tests/engine.pipeline-approval.test.ts` erweitert (H6-Hostile-Output-Test); Typecheck, Lint und Docs-Validierung.
+
+---
+
+## [1.36.6] — 2026-09-03 · fix(engine): H5 Pipeline-Ausführung strikt nach Approval (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`).** Nicht-EXECUTOR-Phasen erzeugen bei `TRADE` nur noch Proposals (`PENDING` bei erforderlicher Human-Freigabe, sonst `APPROVED`) und geben `PROPOSED` zurück. Die Pipeline läuft explizit durch CEO → Research → Backtest → Risk Manager → Approver; erst die Executor-Phase lädt die jüngste `APPROVED` Proposal und führt deren servervalidierte Orderdaten aus. Ein Defense-in-depth-Guard blockiert und auditiert jeden Broker-Zugriff einer anderen Rolle mit `ROLE_NOT_ALLOWED_TO_TRADE`.
+
+**Tests:** `tests/engine.pipeline-approval.test.ts`; Typecheck, Lint und Docs-Validierung. Der vollständige `npm test`-Lauf wurde auf ausdrücklichen Wunsch übersprungen.
+
+---
+
+## [1.36.5] — 2026-09-03 · fix(broker): H4 Order-Idempotenz — kein Doppel-Order bei Retry (CRITICAL)
+
+**Kritischer Befund H4 aus dem Senior-Peer-Review (Audit 2026-09-03):** Der
+Bitunix-HTTP-Transport wiederholte einen **nicht-idempotenten** place_order-POST
+bei HTTP 429 blind (die Code-Annahme „429 = definitiv nicht verarbeitet“ ist für
+einen Finanzclient unzulässig). Außerdem wurde keine `clientOrderId` generiert/
+gesendet — ein Retry konnte also nicht über einen stabilen Idempotenz-Key
+dedupliziert werden und konnte eine Doppelorder erzeugen.
+
+### Geändert
+
+- **Stabiler `clientOrderId`** — `src/brokers/bitunix/orders.ts` + `types.ts`:
+  `serializePlaceOrder` erzeugt deterministisch einen Venue-`clientId`
+  (Wire-Feld des `clientOrderId`) im Format `ATF-<sha256>` (kollisionsresistent,
+  venue-taugliche Länge, alphanumerisch) und setzt ihn in den Body. Der Wert wird
+  für einen Retry mit demselben Body wiederverwendet. Helper `clientOrderIdFor`.
+- **Retry-Vertrag im Transport** — `src/brokers/bitunix/http.ts`:
+  Nicht-idempotente Requests (POST, insbesondere `place_order`) werden bei
+  429/Timeout/Netzwerkfehler/5xx **nie** automatisch wiederholt; stattdessen wird
+  ein typisierter `BitunixAmbiguousError` (kind `ambiguous`) nach oben gereicht.
+  Definitive Ablehnungen (auth/permission/validation/payload, 4xx) bleiben klar
+  unterscheidbar. Idempotente GETs bleiben Retry-fähig.
+- **Query-by-clientOrderId** — `src/brokers/bitunix/privateClient.ts`:
+  neu `getOrderByClientId(clientOrderId)` (`GET get_order_detail?clientId=…`),
+  das `{ orderId, status }` oder `null` liefert.
+- **Kontrollierter Retry** — `placeSerializedOrder(body, opts?: { clientOrderId })`
+  fängt den ambivalenten Ausgang und fragt VOR jedem erneuten Senden per
+  `clientOrderId` den echten Status:
+    - Order gefunden → **bestehende Order** zurück (kein Duplikat).
+    - Order nicht gefunden → **genau ein** kontrollierter Retry mit demselben
+      `clientOrderId` (derselbe Body, kein Neu-Serialisieren).
+
+### Tests
+
+- `tests/bitunix.idempotency.test.ts`:
+  (a) 429 + Query liefert bestehende Order → exakt ein place_order-POST, keine
+  Doppelorder; (b) 429 + Query leer → exakt zwei POSTs mit **identischem**
+  `clientOrderId` (derselbe Body); Status-Query liegt zwischen den POSTs.
+- Zusätzlich: `BitunixAmbiguousError` bei nicht-idempotentem 429/5xx/Netz (kein
+  Auto-Retry), idempotenter GET bleibt Retry-fähig, `clientOrderIdFor`-Stabilität.
+- Bestehende Security-Suite auf den neuen (korrekten) 429-Vertrag umgestellt;
+  Fixture-Server unterstützt die `clientId`-Query für `get_order_detail`.
+
+Abwärtskompatibel: Paper-/Backtest-Pfad unverändert; die Live-Order-Akzeptanz
+(Status NEW) bleibt. Verhalten bei ambivalenten Ausgängen wird gehärtet.
+
+---
+
+## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order fälschlich als FILLED gemeldet (CRITICAL)
+
+**Kritischer Befund H3 aus dem Senior-Peer-Review (Audit 2026-09-03):**
+`BrokerExecutionEngine.submit` (Bitunix-Live-Pfad) meldete eine vom Venue nur
+**akzeptierte** Order synchron als `status: "FILLED"` mit `fillPrice: 0`. Eine
+Annahme (ACK) ist kein Fill — die nachgelagerte Buchhaltung hätte eine reale
+Position mit Entry-Preis **0** übernehmen können.
+
+### Geändert
+
+- **Status-Vertrag (`src/contracts/broker.ts`):**
+  `BrokerOrderStatus = "NEW" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" |
+  "REJECTED" | "UNKNOWN"` — plus Contract-Helfer `isFillStatus()` und
+  `isBookableFill()` (nur `FILLED` mit `fillPrice > 0` darf eine Position einbuchen).
+  `BrokerOrderResult.filledQty` ergänzt; `BrokerAdapter.reconcileOrder?()` im Interface.
+- **`submit()` live (`src/brokers/bitunix/execution.ts`):** liefert ausschließlich die
+  AKZEPTANZ — `status: "NEW", fillPrice: 0, reason: "ORDER_ACCEPTED"`. Versandte
+  Order-Kontexte (SL/TP/Menge) werden für die spätere Reconciliation vorgehalten.
+- **Fill-Reconciliation (H3-Kern):**
+  - `BitunixPrivateClient.getOrder(orderId)` → `GET /api/v1/futures/trade/get_order_detail`
+    (Status NEW/PART_FILLED/FILLED/CANCELED + tradeQty; `null`, wenn nicht auffindbar).
+  - `BitunixPrivateClient.getExecutions(symbol?, orderId?)` →
+    `GET /api/v1/futures/trade/get_history_trades` (echte Trades als `BitunixFill[]`).
+  - `BrokerExecutionEngine.reconcile(orderId)` baut aus Order-Detail **und** den Trades
+    das ECHTE Ergebnis: avgPrice = mengen-gewichteter Mittelwert der Trades; Status
+    NEW → PARTIALLY_FILLED → FILLED; CANCELED mit/ohne Teilfills; Order nicht
+    auffindbar oder Füllpreis nicht belegbar → **UNKNOWN** (fail-safe, nie FILLED/0).
+  - `BitunixBrokerAdapter.reconcileOrder(orderId)` mit denselben Gate/Capability-Prüfungen
+    wie `placeOrder`; Paper/Backtest liefern `null` (synchroner Fill).
+- **Position-Adoption (`listPositions`):** Venue-Positionen mit `entryPrice ≤ 0` oder
+  `qty ≤ 0` werden verworfen — eine Position entsteht nur mit echtem avgPrice.
+  Engine (`src/lib/engine.ts`) und Mikro-Executor (`src/lib/microExecutor.ts`) buchen
+  Positionen nur noch bei `status === "FILLED"` UND belegtem Preis > 0.
+- **Consumer per Switch über das neue Status-Ensemble:** Alpaca `mapOrderResult`
+  (akzeptierte Orders sind jetzt NEW statt REJECTED; partial/canceled/unknown),
+  Audit-Ansicht (`fillSection`: Töne good/bad/warn + erklärende Hinweise je Status).
+
+### Tests
+
+- `submit()` live → `status:"NEW"`, `fillPrice:0`, gültige `orderId`, `reason:"ORDER_ACCEPTED"`.
+- `reconcile()` mappt Venue `PART_FILLED` → `PARTIALLY_FILLED` mit echtem avgPrice (65000).
+- `reconcile()` NEW ohne Trades → NEW/0; FILLED ohne belegbaren Preis → UNKNOWN
+  (`FILL_PRICE_UNKNOWN`); Order fehlt → UNKNOWN (`ORDER_NOT_FOUND`); CANCELED mit Teilfills.
+- Adapter-Live-Pfad: `reconcileOrder` nach Gate-Freigabe; Paper → `null`.
+- Bestehende Live-Tests (Fixture-Server, Security-Suite) auf NEW/AKZEPTANZ umgestellt;
+  Fixture-Server bedient jetzt auch `get_order_detail`/`get_history_trades`.
+
+Abwärtskompatibel: Paper-/Backtest-Engines füllen synchron und liefern weiterhin `FILLED`.
+
+---
+
 ## [1.36.3] — 2026-09-03 · security(audit): Remediation-Plan Senior Peer-Review
 
 **Schweregrad-Mix:** 8× CRITICAL, 8× HIGH, 4× MEDIUM (20 Befunde). **H1 bereits in v1.36.2 gefixt.**

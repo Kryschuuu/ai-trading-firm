@@ -16,21 +16,21 @@ Secret-Store-Schicht.
 ## Validierung (wichtig: Code ist bereits mehrfach gepatcht)
 
 Vor der Planung wurde jeder Befund gegen den **aktuellen** Code geprüft. Ergebnis: **H1 ist bereits
-in v1.36.2 gefixt** (serverseitige `estimatedNotional`-Berechnung). H2 ist teilweise adressiert
-(Singleton entfernt, aber keine verteilte Atomarität). Die übrigen 18 Befunde sind im aktuellen Code
-noch valide.
+in v1.36.2 gefixt** (serverseitige `estimatedNotional`-Berechnung), **H3 in v1.36.4** und **H4 in
+v1.36.5** (Order-Idempotenz). H2 ist teilweise adressiert (Singleton entfernt, aber keine verteilte
+Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Executor führt eine genehmigte Proposal aus). **H6 ist in v1.36.7 gefixt** (echte Approval-Chain; Executor führt nur noch server-validierte APPROVED Proposals aus; menschliche Freigabe via Endpoint). **H9 ist in v1.36.8 gefixt** (Guardrail-Numerik fail-closed: `requireFinitePositive` wirft `RiskValidationError` bei NaN/Infinity/≤0; negatives Equity wird blockiert statt geklemmt; alle Caller lehnen mit `INVALID_EQUITY`/`INVALID_LEVERAGE`/`INVALID_NOTIONAL` ab). Die übrigen Befunde bleiben wie ausgewiesen valide.
 
 | ID | Bereich | Severity | Status (validiert) | Prompt |
 |----|---------|----------|--------------------|--------|
 | H1 | Handelslogik | CRITICAL | ✅ bereits gefixt (v1.36.2) | [H1](../audit-remediation/H1-risk-notional.md) |
 | H2 | Handelslogik | CRITICAL | ⚠️ teilweise (keine verteilte Atomarität) | [H2](../audit-remediation/H2-atomicity.md) |
-| H3 | Handelslogik | CRITICAL | ✅ valide | [H3](../audit-remediation/H3-order-status.md) |
-| H4 | Handelslogik/Broker | CRITICAL | ✅ valide | [H4](../audit-remediation/H4-idempotency.md) |
-| H5 | Handelslogik | CRITICAL | ✅ valide | [H5](../audit-remediation/H5-pipeline-trading.md) |
-| H6 | Handelslogik | CRITICAL | ✅ valide | [H6](../audit-remediation/H6-approval-chain.md) |
+| H3 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.4) | [H3](../audit-remediation/H3-order-status.md) |
+| H4 | Handelslogik/Broker | CRITICAL | ✅ gefixt (v1.36.5) | [H4](../audit-remediation/H4-idempotency.md) |
+| H5 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.6) | [H5](../audit-remediation/H5-pipeline-trading.md) |
+| H6 | Handelslogik | CRITICAL | ✅ gefixt (v1.36.7) | [H6](../audit-remediation/H6-approval-chain.md) |
 | H7 | Handelslogik/Control | HIGH | ✅ valide (arch.) | [H7](../audit-remediation/H7-live-kill.md) |
 | H8 | Brokers/Venues | HIGH | ✅ valide | [H8](../audit-remediation/H8-bitunix-equity.md) |
-| H9 | Handelslogik | HIGH | ✅ valide | [H9](../audit-remediation/H9-finite-guardrails.md) |
+| H9 | Handelslogik | HIGH | ✅ gefixt (v1.36.8) | [H9](../audit-remediation/H9-finite-guardrails.md) |
 | H10 | Handelslogik | HIGH | ✅ valide | [H10](../audit-remediation/H10-adaptive-failopen.md) |
 | W1 | Workshop | HIGH | ✅ valide | [W1](../audit-remediation/W1-localstorage.md) |
 | W2 | Workshop | MEDIUM | ✅ valide | [W2](../audit-remediation/W2-prompt-versioning.md) |
@@ -51,15 +51,18 @@ noch valide.
 4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
 5. **Workshop:** W1, W2
 
-Jeder Schritt ist unabhängig; H1 entfällt (bereits gefixt).
+Jeder Schritt ist unabhängig; H1 entfällt (bereits gefixt). Stand 2026-09-03 sind aus der
+Fail-closed-Gruppe H3 (v1.36.4), H4 (v1.36.5), H5 (v1.36.6), H6 (v1.36.7) und H9 (v1.36.8)
+abgeschlossen.
 
 ## Versionierung
 
-Tracking unter **v1.36.3** (PATCH: Security-Audit-Plan + Fixes). Siehe `CHANGELOG.md` und
-`docs/CHANGELOG.md` (`[1.36.3]`).
+Tracking als PATCH-Serie (Security-Audit-Plan + Fixes): H1=v1.36.2, H3=v1.36.4, H4=v1.36.5,
+H5=v1.36.6, H6=v1.36.7, **H9=v1.36.8**. Siehe `CHANGELOG.md` und
+`docs/CHANGELOG.md` (`[1.36.8]`).
 
 ## Verwandte Dokumente
 
 - [`docs/SECURITY_AUDIT.md`](SECURITY_AUDIT.md) — vorheriges Security-Audit (2026-08-25, v1.4.0)
 - [`audit-remediation/README.md`](../audit-remediation/README.md) — Prompt-Index + Validierung
-- `CHANGELOG.md` / `docs/CHANGELOG.md` — `[1.36.3]`-Eintrag
+- `CHANGELOG.md` / `docs/CHANGELOG.md` — `[1.36.8]`-Eintrag

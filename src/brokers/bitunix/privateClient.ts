@@ -21,7 +21,67 @@ import {
 } from "./signing";
 import { recordBitunixPrivateCall } from "./audit";
 import type { BitunixCredentials } from "./secrets";
-import type { BitunixAccountRaw, BitunixEnvelope, BitunixPlaceOrderBody, BitunixPositionRaw } from "./types";
+import type {
+  BitunixAccountRaw,
+  BitunixEnvelope,
+  BitunixFill,
+  BitunixOrderRaw,
+  BitunixPlaceOrderBody,
+  BitunixPositionRaw,
+  BitunixTradeRaw,
+} from "./types";
+
+/**
+ * Normalisiertes Order-Detail (H3). Venue-Status bleibt venue-nah
+ * ("NEW" | "PART_FILLED" | "FILLED" | "CANCELED" | "INIT" | string) und wird
+ * erst in der Execution-Engine auf den BrokerOrderStatus-Contract gemappt.
+ * `avgPrice` ist 0, solange das Venue keinen Füllpreis meldet — die Engine
+ * berechnet den echten avgPrice dann aus getExecutions (Trades).
+ */
+export interface BitunixOrderDetail {
+  orderId: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  filledQty: number;
+  avgPrice: number;
+  status: string;
+}
+
+/** Normalisiert einen Venue-Status-String robust (case-insensitive). */
+function normStatus(s: unknown): string {
+  return String(s ?? "").trim().toUpperCase();
+}
+
+/** Side-Rohwert (BUY/SELL) → broker-unabhängige LONG/SHORT-Richtung. */
+function sideOf(raw: unknown): "LONG" | "SHORT" {
+  return normStatus(raw) === "SELL" ? "SHORT" : "LONG";
+}
+
+/**
+ * Mappt einen Venue-Order-Status auf den BrokerOrderStatus-Contract.
+ * Bitunix-Doku: INIT (prepare), NEW (pending), PART_FILLED (partiell),
+ * CANCELED, FILLED. Unbekannte Werte → UNKNOWN (fail-safe, kein Fill).
+ */
+export function mapBitunixOrderStatus(venueStatus: string): import("../../contracts/broker").BrokerOrderStatus {
+  switch (normStatus(venueStatus)) {
+    case "NEW":
+    case "INIT":
+      return "NEW";
+    case "PART_FILLED":
+    case "PARTIALLY_FILLED":
+      return "PARTIALLY_FILLED";
+    case "FILLED":
+      return "FILLED";
+    case "CANCELED":
+    case "CANCELLED":
+    case "EXPIRED":
+    case "PART_FILLED_CANCELED":
+      return "CANCELED";
+    default:
+      return "UNKNOWN";
+  }
+}
 
 function envelopeData<T>(json: unknown): T {
   if (!json || typeof json !== "object") {
@@ -154,16 +214,155 @@ export class BitunixPrivateClient {
   }
 
   /**
-   * Sendet eine bereits serialisierte Order an die Venue.
+   * Sendet eine bereits serialisierte Order an die Venue — mit echter
+   * Idempotenz (H4).
+   *
+   *   - Der `clientOrderId` (aus `opts.clientOrderId` oder `body.clientId`)
+   *     ist der stabile Idempotenz-Key dieses Order-Intents.
+   *   - Der Transport (http.ts) wiederholt einen nicht-idempotenten
+   *     place_order-POST bei 429/Timeout/Netz/5xx NIE automatisch, sondern
+   *     reicht einen `BitunixAmbiguousError` nach oben.
+   *   - BEZIEHUNG hier: vor jedem erneuten Senden wird per `getOrderByClientId`
+   *     der echte Status abgefragt:
+   *        Order gefunden → bestehende Order zurück (kein Duplikat).
+   *        Order nicht gefunden → genau EIN kontrollierter Retry mit
+   *          demselben `clientOrderId` (derselbe Body).
+   *
    * Wird vom Adapter-Live-Pfad über `BrokerExecutionEngine.submit` aufgerufen,
    * ausschließlich nach bestandener Live-Gate-Prüfung.
    */
-  async placeSerializedOrder(body: BitunixPlaceOrderBody): Promise<{ orderId: string; clientId?: string }> {
+  async placeSerializedOrder(
+    body: BitunixPlaceOrderBody,
+    opts?: { clientOrderId?: string }
+  ): Promise<{ orderId: string; clientOrderId?: string }> {
+    const clientOrderId = opts?.clientOrderId ?? body.clientId;
     const json = JSON.stringify(body);
-    // idempotent: false — place_order darf bei Timeout/Netzwerkfehler/5xx NIE
-    // wiederholt werden (Doppel-Order-Gefahr); nur 429 bleibt Retry-fähig.
-    const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });
-    const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);
-    return { orderId: String(data?.orderId ?? ""), clientId: data?.clientId };
+    try {
+      const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });
+      const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);
+      const orderId = String(data?.orderId ?? "");
+      // Venue hat kein orderId geliefert (z. B. edge case) — per clientOrderId
+      // nachfragen, statt einen Platzhalter zurückzugeben.
+      if (!orderId && clientOrderId) {
+        const found = await this.getOrderByClientId(clientOrderId).catch(() => null);
+        if (found) return { orderId: found.orderId, clientOrderId };
+      }
+      return { orderId, clientOrderId: data?.clientId ?? clientOrderId };
+    } catch (e) {
+      if (!(e instanceof BitunixApiError)) throw e;
+      // Nur der Transport-typisierte "ambiguous"-Fehler (HTTP 429 / Timeout /
+      // Netz / 5xx) erfordert VOR einem erneuten Senden ein Status-Query per
+      // clientOrderId. Venue-Business-Fehler (Envelope-`code != 0`, kind
+      // auth/permission/rate-limit/maintenance/unknown) sind DEFINITIVE
+      // Ablehnungen — kein Status-Query, kein Retry.
+      if (e.kind !== "ambiguous") throw e;
+      // Ohne Idempotenz-Key kein sicheres Wiederholen (fail-closed: laut
+      // abbrechen statt Doppelorder).
+      if (!clientOrderId) throw e;
+      const found = await this.getOrderByClientId(clientOrderId).catch(() => null);
+      if (found) {
+        // Order existiert bereits → KEIN Duplikat senden (H4).
+        return { orderId: found.orderId, clientOrderId };
+      }
+      // Order nicht auffindbar → genau EIN kontrollierter Retry mit demselben
+      // clientOrderId (derselbe JSON-Body, keine Neu-Serialisierung).
+      const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });
+      const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);
+      const orderId = String(data?.orderId ?? "");
+      if (!orderId && clientOrderId) {
+        const after = await this.getOrderByClientId(clientOrderId).catch(() => null);
+        if (after) return { orderId: after.orderId, clientOrderId };
+      }
+      return { orderId, clientOrderId: data?.clientId ?? clientOrderId };
+    }
+  }
+
+  /**
+   * H4: Query-by-clientOrderId. Fragt die Venue-Order per `clientId` ab
+   * (GET get_order_detail?clientId=... — das Venue akzeptiert orderId ODER
+   * clientId, Letzteres gewinnt nicht, wir senden nur clientId). Liefert
+   * `{ orderId, status }` oder `null`, wenn die Order nicht auffindbar ist
+   * (z. B. nach Timeout — dann ist vor einem erneuten Senden zu prüfen, ob
+   * die Order doch schon angekommen ist).
+   */
+  async getOrderByClientId(
+    clientOrderId: string
+  ): Promise<{ orderId: string; status: string } | null> {
+    if (!clientOrderId) return null;
+    const res = await this.signed(
+      "GET",
+      BITUNIX_PATHS.orderDetail,
+      { clientId: clientOrderId },
+      ""
+    );
+    const data = envelopeData<BitunixOrderRaw | BitunixOrderRaw[] | null>(res.json);
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row !== "object" || String(row.orderId ?? "").length === 0) {
+      return null;
+    }
+    return { orderId: String(row.orderId), status: normStatus(row.status) };
+  }
+
+  /**
+   * H3: Order-Detail abfragen (read-only, idempotent).
+   * Liefert `null`, wenn das Venue die Order nicht kennt (z. B. nach
+   * Timeout — Status dann UNKNOWN statt erraten).
+   */
+  async getOrder(orderId: string): Promise<BitunixOrderDetail | null> {
+    const res = await this.signed("GET", BITUNIX_PATHS.orderDetail, { orderId }, "");
+    const data = envelopeData<BitunixOrderRaw | BitunixOrderRaw[] | null>(res.json);
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row !== "object" || String(row.orderId ?? "").length === 0) {
+      return null;
+    }
+    const qty = Number(row.qty);
+    const filledQty = Number(row.tradeQty);
+    return {
+      orderId: String(row.orderId),
+      symbol: String(row.symbol ?? "").toUpperCase(),
+      side: sideOf(row.side),
+      qty: Number.isFinite(qty) ? qty : 0,
+      filledQty: Number.isFinite(filledQty) ? filledQty : 0,
+      // Das Venue-Detail kennt keinen avgPrice — der kommt aus getExecutions.
+      avgPrice: 0,
+      status: normStatus(row.status),
+    };
+  }
+
+  /**
+   * H3: Ausführungen (Trades) abfragen — die ECHTE Fill-Quelle.
+   * Optionaler Filter nach Symbol bzw. orderId (über die Venue-Query).
+   * Sortiert aufsteigend nach Zeit (für den avgPrice egal, für Caller lesbar).
+   */
+  async getExecutions(symbol?: string, orderId?: string): Promise<BitunixFill[]> {
+    const query: Record<string, string> = {};
+    if (symbol) query.symbol = symbol;
+    if (orderId) query.orderId = orderId;
+    const res = await this.signed(
+      "GET",
+      BITUNIX_PATHS.historyTrades,
+      Object.keys(query).length > 0 ? query : undefined,
+      ""
+    );
+    const data = envelopeData<{ tradeList?: BitunixTradeRaw[] } | BitunixTradeRaw[] | null>(res.json);
+    const rows = Array.isArray(data) ? data : data?.tradeList ?? [];
+    return rows
+      .map((t): BitunixFill | null => {
+        const qty = Number(t.qty);
+        const price = Number(t.price);
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) return null;
+        return {
+          tradeId: String(t.tradeId ?? ""),
+          orderId: String(t.orderId ?? ""),
+          symbol: String(t.symbol ?? "").toUpperCase(),
+          side: sideOf(t.side),
+          qty,
+          price,
+          fee: Number(t.fee) || 0,
+          ts: Number(t.ctime) || 0,
+        };
+      })
+      .filter((f): f is BitunixFill => f !== null)
+      .sort((a, b) => a.ts - b.ts);
   }
 }

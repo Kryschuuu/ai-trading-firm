@@ -6,7 +6,7 @@
  * (Alpaca, IBKR, Binance, Kraken, dYdX) lassen sich hinter demselben Interface
  * einhängen, damit die Agenten-Schicht venue-unabhängig bleibt.
  */
-import { killSwitch, validateOrder, RISK_LIMITS } from "./riskGuard";
+import { killSwitch, validateOrder, riskValidationReason, RISK_LIMITS } from "./riskGuard";
 import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import type { BrokerCapabilities, BrokerVenueId } from "../contracts/broker";
@@ -284,15 +284,24 @@ export class PaperBroker {
     }
 
     // 3) Harte, im Code verankerte Guardrails — mit server-seitig berechnetem Notional.
-    const guard = validateOrder({
-      notional: estimatedNotional,
-      equity: this.accountEquity,
-      openPositions: this.positions.size,
-      side: order.side,
-      leverage: 1,
-      hasStopLoss,
-      symbol,
-    });
+    //    H9: validateOrder wirft bei ungültigen Zahlen (NaN/Infinity/≤0) eine
+    //    RiskValidationError (fail-closed). Die wird hier in einen REJECTED-Fill
+    //    übersetzt (INVALID_EQUITY/INVALID_LEVERAGE/INVALID_NOTIONAL) — eine
+    //    kaputte Equity/Notional darf NIEMALS durch die Schleuse rutschen.
+    let guard;
+    try {
+      guard = validateOrder({
+        notional: estimatedNotional,
+        equity: this.accountEquity,
+        openPositions: this.positions.size,
+        side: order.side,
+        leverage: 1,
+        hasStopLoss,
+        symbol,
+      });
+    } catch (e) {
+      return reject(order, riskValidationReason(e));
+    }
     if (!guard.allowed) {
       return reject(order, guard.reason);
     }

@@ -14,6 +14,13 @@ export type BitunixErrorKind =
   | "maintenance"
   | "disabled"
   | "ssrf"
+  /**
+   * Ambivalenter Ausgang eines NICHT-idempotenten Requests (z. B. place_order
+   * nach HTTP 429 / Timeout / Netzwerkfehler / 5xx). Die Anfrage KÖNNTE
+   * serverseitig verarbeitet worden sein — nie blind wiederholen, sondern
+   * VOR jedem erneuten Senden per clientOrderId den echten Status abfragen.
+   */
+  | "ambiguous"
   /** Antwort über der Payload-Kappe — niemals erneut anfragen. */
   | "payload"
   | "unknown";
@@ -25,6 +32,7 @@ const KIND_CODE: Record<BitunixErrorKind, string> = {
   maintenance: "BITUNIX_MAINTENANCE",
   disabled: "BITUNIX_DISABLED",
   ssrf: "BITUNIX_SSRF",
+  ambiguous: "BITUNIX_AMBIGUOUS",
   payload: "BITUNIX_PAYLOAD",
   unknown: "BITUNIX_UNKNOWN",
 };
@@ -54,6 +62,22 @@ export class BitunixApiError extends BrokerError {
     this.kind = kind;
     this.httpStatus = opts.httpStatus ?? null;
     this.venueCode = opts.venueCode ?? null;
+  }
+}
+
+/**
+ * Ambivalenter Fehler einer nicht-idempotenten Order (H4): Der HTTP-Transport
+ * hat bei HTTP 429 / Timeout / Netzwerkfehler / 5xx NICHT automatisch
+ * wiederholt, weil die Venue die Order bereits verarbeitet haben könnte
+ * (Doppel-Order-Gefahr). Der Aufrufer MUSS vor einem erneuten Senden den
+ * echten Status per `clientOrderId` abfragen (`getOrderByClientId`).
+ */
+export class BitunixAmbiguousError extends BitunixApiError {
+  constructor(
+    message: string,
+    opts: { httpStatus?: number | null; venueCode?: number | null } = {}
+  ) {
+    super("ambiguous", message, opts);
   }
 }
 

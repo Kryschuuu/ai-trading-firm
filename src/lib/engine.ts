@@ -252,7 +252,7 @@ export async function logAudit(
 }
 
 export type TurnResult = {
-  status: "EXECUTED" | "BLOCKED" | "HOLD" | "KILLED" | "REPORT" | "NOOP";
+  status: "EXECUTED" | "PROPOSED" | "BLOCKED" | "HOLD" | "KILLED" | "REPORT" | "NOOP";
   decision: AgentDecision;
   source: "ollama" | "fallback";
   model: string;
@@ -296,7 +296,11 @@ export const BLOCK_EXPLANATIONS: Record<string, string> = {
 };
 
 /** Führt genau einen Agenten-Turn gegen eine Mission aus. */
-export async function runAgentTurn(agentId: string, missionId: string): Promise<TurnResult> {
+export async function runAgentTurn(
+  agentId: string,
+  missionId: string,
+  options: { proposalOnly?: boolean } = {}
+): Promise<TurnResult> {
   const agent = (await db.select().from(agentTable).where(eq(agentTable.id, agentId)))[0];
   const mission = (await db.select().from(missions).where(eq(missions.id, missionId)))[0];
   if (!agent) throw new Error("Agent nicht gefunden");
@@ -507,12 +511,26 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
       }
       trace.push(step("KILL-SWITCH", true, "Nicht aktiv"));
 
-      if (agent.role !== "EXECUTOR" && agent.role !== "RESEARCH") {
-        await logAudit("ORDER_REJECTED", "WARN", { reason: "ROLE_NOT_ALLOWED_TO_TRADE", role: agent.role }, missionId, agentId);
-        trace.push(step("ROLLEN-PRÜFUNG", false, `${agent.role} darf keine Orders geben (nur EXECUTOR/RESEARCH)`));
-        return { ...base, status: "BLOCKED", guardrail: `Rolle ${agent.role} darf keine Orders auslösen`, trace };
+      // H6 FIX: EXECUTOR darf niemals eine neue Modellentscheidung ausführen.
+      if (agent.role === "EXECUTOR" && !options.proposalOnly) {
+        const [approved] = await db.select().from(proposals)
+          .where(and(eq(proposals.missionId, missionId), eq(proposals.status, "APPROVED")))
+          .orderBy(desc(proposals.createdAt)).limit(1);
+        if (!approved) {
+          await logAudit("ORDER_REJECTED", "WARN", { reason: "NO_APPROVED_PROPOSAL", missionId, agentId }, missionId, agentId);
+          trace.push(step("EXECUTOR", false, "Keine genehmigte Proposal für Ausführung"));
+          return { ...base, status: "BLOCKED", guardrail: "NO_APPROVED_PROPOSAL", trace };
+        }
+        const execResult = await executeApprovedProposal(approved.id, agent.id);
+        return { ...execResult, trace: [...trace, step("EXECUTOR", true, `Genehmigte Proposal ${approved.id} ausgeführt`)] };
       }
-      trace.push(step("ROLLEN-PRÜFUNG", true, `${agent.role} ist handelsberechtigt`));
+
+      const maySubmit = agent.role === "EXECUTOR" && !options.proposalOnly;
+      trace.push(step(
+        "ROLLEN-PRÜFUNG",
+        true,
+        maySubmit ? "EXECUTOR darf eine genehmigte Order ausführen" : `${agent.role} erzeugt ausschließlich einen Vorschlag`
+      ));
 
       const side = decision.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const);
       if (side === "SHORT" && !limits.allowShort) {
@@ -679,12 +697,24 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
         })
         .returning();
 
+      if (!maySubmit) {
+        await logAudit("PROPOSAL_CREATED", "INFO", { proposalId: proposal.id, role: agent.role, status: proposal.status }, missionId, agentId);
+        trace.push(step("PROPOSAL", true, requireApproval ? "Wartet auf menschliche Freigabe" : "Automatisch freigegeben"));
+        return { ...base, status: "PROPOSED", trace };
+      }
+
       if (requireApproval) {
         await logAudit("APPROVAL_REQUIRED", "WARN", { proposalId: proposal.id, order }, missionId, agentId);
         trace.push(step("APPROVAL", false, "Wartet auf menschliche Freigabe"));
         return { ...base, status: "BLOCKED", guardrail: "Wartet auf menschliche Freigabe (REQUIRE_HUMAN_APPROVAL=true)", trace };
       }
       trace.push(step("APPROVAL", true, "Automatisch freigegeben (REQUIRE_HUMAN_APPROVAL=false)"));
+
+      // Defense in depth: kein Nicht-EXECUTOR darf jemals die Broker-Schleuse erreichen.
+      if (agent.role !== "EXECUTOR") {
+        await logAudit("ORDER_REJECTED", "CRITICAL", { reason: "ROLE_NOT_ALLOWED_TO_TRADE", role: agent.role }, missionId, agentId);
+        return { ...base, status: "BLOCKED", guardrail: "ROLE_NOT_ALLOWED_TO_TRADE", trace };
+      }
 
       // --- Schicht 3–5: Guardrails + Broker-Schleuse ---
       // TASK 03: Modus-B-Kurs vor dem Fill warmlaufen lassen (Snapshot-Cache
@@ -696,13 +726,17 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
         /* kein Kurs verfügbar → Broker verwirft die Order (NO_QUOTE) */
       }
       const fill = broker.submit(order);
-      await logAudit(fill.status === "FILLED" ? "ORDER_SENT" : "ORDER_REJECTED",
-        fill.status === "FILLED" ? "INFO" : "WARN", { order, fill }, missionId, agentId);
+      // H3: Schalter über den vollständigen Order-Status. Nur ein echter
+      // FILLED-Fill mit belegtem Preis (>0) darf eine Position einbuchen;
+      // alles andere (REJECTED/NEW/UNKNOWN/…) blockiert die Order.
+      const filled = fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
+      await logAudit(filled ? "ORDER_SENT" : "ORDER_REJECTED", filled ? "INFO" : "WARN", { order, fill }, missionId, agentId);
 
-      if (fill.status !== "FILLED") {
-        await db.update(proposals).set({ status: "AUTO_REJECTED", reason: fill.reason }).where(eq(proposals.id, proposal.id));
-        trace.push(step("GUARDRAILS/BROKER", false, fill.reason ?? "abgelehnt"));
-        return { ...base, status: "BLOCKED", fill, guardrail: fill.reason, trace };
+      if (!filled) {
+        const why = fill.reason ?? fill.status ?? "abgelehnt";
+        await db.update(proposals).set({ status: "AUTO_REJECTED", reason: why }).where(eq(proposals.id, proposal.id));
+        trace.push(step("GUARDRAILS/BROKER", false, why));
+        return { ...base, status: "BLOCKED", fill, guardrail: why, trace };
       }
       trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${fill.fillPrice}, SL ${fill.stopLoss}, TP ${fill.takeProfit}`));
 
@@ -759,6 +793,75 @@ export async function flattenAll(reason: string) {
   return fills;
 }
 
+
+/**
+ * Führt eine bereits genehmigte Proposal ohne erneute Modellentscheidung aus.
+ * proposedDetail ist die einzige Orderquelle; unbekannte/PENDING Proposals
+ * werden fail-closed abgewiesen.
+ */
+export async function executeApprovedProposal(
+  proposalId: string,
+  executorAgentId?: string
+): Promise<TurnResult> {
+  const base = {
+    decision: { type: "TRADE" as const, reason: `approved proposal ${proposalId}` },
+    source: "fallback" as const,
+    model: "approved-proposal",
+    latencyMs: 0,
+  };
+  const [proposal] = await db.select().from(proposals).where(eq(proposals.id, proposalId)).limit(1);
+  if (!proposal || proposal.status !== "APPROVED") {
+    await logAudit("ORDER_REJECTED", "WARN", {
+      reason: proposal ? "PROPOSAL_NOT_APPROVED" : "PROPOSAL_NOT_FOUND",
+      proposalId,
+      status: proposal?.status,
+    }, proposal?.missionId ?? undefined, executorAgentId);
+    return { ...base, status: "BLOCKED", guardrail: proposal ? "PROPOSAL_NOT_APPROVED" : "PROPOSAL_NOT_FOUND" };
+  }
+  if (killSwitch.isArmed()) {
+    await logAudit("ORDER_REJECTED", "WARN", { reason: "KILL_SWITCH_ARMED", proposalId }, proposal.missionId ?? undefined, executorAgentId);
+    return { ...base, status: "BLOCKED", guardrail: "KILL_SWITCH_ARMED" };
+  }
+
+  // Runtime-Validierung: proposedDetail ist die einzige Quelle; keine Neubildung.
+  const detail = proposal.proposedDetail as Record<string, unknown>;
+  if (typeof detail?.symbol !== "string" || !sanitizeSymbol(detail.symbol) ||
+      (detail.side !== "LONG" && detail.side !== "SHORT") ||
+      !Number.isFinite(Number(detail?.qty)) || Number(detail.qty) <= 0 ||
+      !Number.isFinite(Number(detail?.riskNotional)) || Number(detail.riskNotional) <= 0 ||
+      !Number.isFinite(Number(detail?.stopLoss)) || Number(detail.stopLoss) <= 0 ||
+      !Number.isFinite(Number(detail?.takeProfit)) || Number(detail.takeProfit) <= 0) {
+    await logAudit("ORDER_REJECTED", "CRITICAL", { reason: "INVALID_PROPOSAL_DETAIL", proposalId, proposedDetail: detail }, proposal.missionId ?? undefined, executorAgentId);
+    return { ...base, status: "BLOCKED", guardrail: "INVALID_PROPOSAL_DETAIL" };
+  }
+
+  const broker = await getBroker();
+  try { await getProductionMarketDataManager().getSnapshot(detail.symbol as string); } catch { /* Broker lehnt fehlenden Kurs ab. */ }
+  const fill = broker.submit({ ...detail, side: detail.side as "LONG" | "SHORT" } as any);
+  const filled = fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
+  await logAudit(filled ? "ORDER_SENT" : "ORDER_REJECTED", filled ? "INFO" : "WARN", {
+    proposalId, order: proposal.proposedDetail, fill,
+  }, proposal.missionId ?? undefined, executorAgentId);
+  if (!filled) {
+    await db.update(proposals).set({ status: "AUTO_REJECTED", reason: fill.reason ?? fill.status }).where(eq(proposals.id, proposalId));
+    return { ...base, status: "BLOCKED", fill, guardrail: fill.reason ?? fill.status };
+  }
+
+  await db.insert(positions).values({
+    symbol: fill.symbol, side: fill.side, qty: String(fill.qty),
+    entryPrice: String(fill.fillPrice), currentPrice: String(fill.fillPrice),
+    stopLoss: fill.stopLoss === null ? null : String(fill.stopLoss),
+    takeProfit: fill.takeProfit === null ? null : String(fill.takeProfit),
+    broker: broker.name, missionId: proposal.missionId, status: "OPEN",
+  });
+  if (proposal.missionId) {
+    await db.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, proposal.missionId));
+  }
+  await db.update(proposals).set({ status: "EXECUTED", reason: "Filled by approved-proposal executor" }).where(eq(proposals.id, proposalId));
+  try { await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE"); } catch { /* optional */ }
+  return { ...base, status: "EXECUTED", fill };
+}
+
 const PIPELINE_G = globalThis as typeof globalThis & { __pipelineBusy?: boolean };
 
 /**
@@ -775,19 +878,29 @@ export async function runPipeline(missionId: string) {
   }
   PIPELINE_G.__pipelineBusy = true;
   try {
-    const order = ["CEO", "RESEARCH", "BACKTEST", "RISK_MANAGER", "APPROVER", "EXECUTOR"];
+    const phases = ["CEO", "RESEARCH", "BACKTEST", "RISK_MANAGER", "APPROVER"];
     const team = await db.select().from(agentTable);
-    const sorted = team
-      .filter((a) => order.includes(a.role))
-      .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
-
     const results: { agent: string; role: string; result: TurnResult }[] = [];
-    for (const agent of sorted) {
-      // Nach einem Not-Halt bricht die Pipeline sofort ab.
-      if (killSwitch.isArmed()) break;
-      const result = await runAgentTurn(agent.id, missionId);
-      results.push({ agent: agent.name, role: agent.role, result });
-      if (result.status === "EXECUTED" || result.status === "KILLED") break;
+
+    // Analyse-/Kontrollphasen dürfen ausschließlich Proposals erzeugen.
+    for (const role of phases) {
+      for (const agent of team.filter((candidate) => candidate.role === role)) {
+        if (killSwitch.isArmed()) return results;
+        const result = await runAgentTurn(agent.id, missionId, { proposalOnly: true });
+        results.push({ agent: agent.name, role: agent.role, result });
+        if (result.status === "KILLED") return results;
+      }
+    }
+
+    // EXECUTOR -> BROKER: keine neue Modellentscheidung. Ausschließlich der
+    // jüngste serverseitig genehmigte Vorschlag dieser Mission wird ausgeführt.
+    const executor = team.find((agent) => agent.role === "EXECUTOR");
+    const [approved] = await db.select().from(proposals)
+      .where(and(eq(proposals.missionId, missionId), eq(proposals.status, "APPROVED")))
+      .orderBy(desc(proposals.createdAt)).limit(1);
+    if (executor && approved && !killSwitch.isArmed()) {
+      const result = await executeApprovedProposal(approved.id, executor.id);
+      results.push({ agent: executor.name, role: "EXECUTOR", result });
     }
     return results;
   } finally {
