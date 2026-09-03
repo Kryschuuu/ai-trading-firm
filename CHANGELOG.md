@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.12**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.13**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,42 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.13] — 2026-09-03 · fix(auth): C1 Auth-Modus — Produktion ohne Token startet nicht, Offen-Betrieb nur explizit (HIGH)
+
+**HIGH, Control Panel/Auth (`src/auth/authMode.ts`, `src/auth/resolve.ts`, `src/lib/apiAuth.ts`,
+`src/instrumentation.ts`, `scripts/auth-boot-guard.ts`).** `checkApiToken()` antwortete mit `null` (= offen), sobald
+`FIRM_API_TOKEN` fehlte, und `resolveAuth()` schenkte demselben Fall einen Admin-Aktor
+(`source: "local-open"`). „Variable nicht gesetzt“ war damit ein funktionierender
+Sicherheits-Default: jedes Vergessen einer `.env`-Übernahme öffnete Write-, Config-,
+Credential- und Kill-Endpunkte im Netz — `npm run start` bindet `0.0.0.0`.
+
+**Fix:** Der Modus kommt aus `AUTH_MODE` (`local-open` \| `token-required`), aufgelöst im
+neuen Blatt-Modul `src/auth/authMode.ts`: Irgendein Token ⇒ immer `token-required` (ein
+gesetztes `local-open` wird ignoriert und gemeldet); kein Token ⇒ `local-open` nur als
+Dev-Default (`NODE_ENV !== "production"`) oder ausdrücklich gesetzt; unbekannter Wert ⇒
+fail-closed `token-required`. `scripts/auth-boot-guard.ts` (neu, vorgeschaltet in `npm run start`/`npm run dev`, dazu
+`npm run boot:guard`) bricht in Produktion ohne Token mit Exit-Code 1 ab, und
+`src/instrumentation.ts` wirft denselben `ConfigurationError`
+(„Refuse startup: authentication not configured“) als Zweitlinie für Starts am Skript vorbei —
+`next build` ist über `NEXT_PHASE` in beiden Fällen ausgenommen. Die Guard-Schicht vertraut dem Boot-Guard
+nicht: `checkApiToken`/`resolveAuth` prüfen denselben Modus, und wo ein Admin-/Viewer-Token
+existiert, ohne dass `FIRM_API_TOKEN` gesetzt ist, entscheidet jetzt die Permission
+`firm.write` statt „offen“ (Nebenbefund). `tokenEquals` wanderte nach `src/lib/tokenCompare.ts`,
+damit Auth-Schicht und Schreib-Guard denselben timing-sicheren Vergleich ohne Zyklus nutzen.
+
+**Sichtbar & dokumentiert:** `GET /api/auth/me` liefert `authMode` (Modus, Grund, Produktion,
+Tokens — nie Token-Werte); `.env.example`, `INSTALL.md` und `docs/INSTALL.md` erklären die
+Produktionspflicht und den Opt-in; `scripts/setup-cachyos.sh --no-api-token` schreibt
+`AUTH_MODE=local-open` in die `.env` (bewusst statt versehentlich). **Tests:** neu
+`tests/authMode.test.ts` (30 Fälle, inkl. Kindprozess gegen den echten Startwächter:
+Exit 1 ohne Token in Produktion, Exit 0 im Dev-Fall, Warnung beim Produktions-Opt-in; Route
+`POST /api/firm/tick` → 401, bevor getickt wird). `npm test` = **1639/1639**,
+Typecheck/Lint/`docs:validate` grün, `npm run build` ohne neue Warnungen.
+Manuell verifiziert: `npm run start` ohne Token → Exit 1; mit `FIRM_API_TOKEN` → 401 ohne
+Header, Durchlass mit Header. Details: `docs/CHANGELOG.md` `[1.36.13]`.
+
+---
 
 ## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
 

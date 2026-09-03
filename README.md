@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.12 (2026-09-03) · Vollständige
+> **Dokumentationsstand:** v1.36.13 (2026-09-03) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -60,6 +60,26 @@ Details: [`INSTALL.md`](INSTALL.md) und [`docs/INSTALL.md`](docs/INSTALL.md) sow
 (Schritt für Schritt auf CachyOS, Variante A/B),
 [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung) und
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B7).
+
+## Sicherheit: Auth-Modus ist Pflicht, nicht Zufall (v1.36.13)
+
+Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`,
+Credential-/Routing-Endpunkte) ist an ein Credential gebunden — und der Modus
+dafür ist eine Entscheidung, kein fehlender Wert:
+
+* `NODE_ENV=production` (also `npm run start` und die systemd-Unit) **ohne**
+  `FIRM_ADMIN_TOKEN`/`FIRM_API_TOKEN`/`FIRM_VIEWER_TOKEN` ⇒ der Dienst
+  verweigert den Start (`ConfigurationError: AUTH_NOT_CONFIGURED`). Ein
+  vergessenes Token ist kein offener Zugang mehr.
+* `AUTH_MODE=local-open` ist der bewusste Opt-in für den Single-User-Modus ohne
+  Token; außerhalb der Produktion ist es der Dev-Default (`npm run dev`), in
+  Produktion nur mit ausdrücklichem Eintrag in `.env` und Warnung im Log.
+* `AUTH_MODE=token-required` erzwingt das Credential auch in der Entwicklung —
+  nützlich, um das Produktionsverhalten lokal zu prüfen.
+* Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
+
+Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Auth-Modus“; Befund C1 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Markt-Konfiguration (v1.30.0)
 
@@ -128,6 +148,7 @@ Migrationsskript: [`docs/SYMBOLS.md`](docs/SYMBOLS.md).
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
 | `docs/CHANGELOG.md` | Versionen und Änderungen (Keep a Changelog) |
 | `docs/SECURITY_AUDIT.md` | Konsolidierte Security-Architektur + Task-Audits |
+| `docs/AUDIT_REMEDIATION_2026-09.md` | Senior-Peer-Review 2026-09: Befunde, Validierungsstand, je ein Remediation-Prompt (`audit-remediation/`) |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |
 | `docs/help/*.help.json` | 3-Ebenen-Hilfe-Systematik (Schema: `docs/help/help.schema.json`) |

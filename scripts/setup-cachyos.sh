@@ -253,7 +253,10 @@ Markt & Risiko (v1.30.0):
 Sicherheit:
   --api-token TOKEN     FIRM_API_TOKEN explizit setzen
   --no-api-token        KEIN Token erzeugen (NICHT empfohlen: die App bindet
-                        0.0.0.0 — ohne Token ist die API im LAN offen)
+                        0.0.0.0 — ohne Token ist die API im LAN offen). Seit
+                        v1.36.13 verweigert NODE_ENV=production den Start ohne
+                        Token; das Flag schreibt deshalb AUTH_MODE=local-open
+                        in die .env (Befund C1)
 
 Ablauf:
   --skip-build          Schritt 09 (next build) überspringen
@@ -805,10 +808,12 @@ step_05_env() {
     created="true"
   fi
 
-  # ── API-Token (B5) ───────────────────────────────────────────────────────
-  # npm start bindet 0.0.0.0 (package.json). Ohne FIRM_API_TOKEN sind alle
-  # POST/PUT-Routen im gesamten LAN offen — das ist der „unsichere Local-Mode",
-  # den das Setup verhindern soll.
+  # ── API-Token (B5, gehärtet in C1/v1.36.13) ─────────────────────────────
+  # npm start bindet 0.0.0.0 (package.json) UND setzt NODE_ENV=production.
+  # Seit v1.36.13 ist der offene Local-Mode kein Default mehr: ohne irgendein
+  # Token wirft der Boot-Guard (src/auth/authMode.ts) und der Dienst startet
+  # nicht. Offen laufen kann nur, wer AUTH_MODE=local-open ausdrücklich setzt.
+  OPEN_MODE_REQUESTED="false"
   if [[ -n "$API_TOKEN" ]]; then
     note "FIRM_API_TOKEN aus --api-token übernommen."
   elif grep -qE '^FIRM_API_TOKEN=.+' "$env_file" 2>/dev/null; then
@@ -819,8 +824,11 @@ step_05_env() {
     note "Neues FIRM_API_TOKEN erzeugt (wird in .env geschrieben, Rechte 600)."
   else
     API_TOKEN=""
-    warn "KEIN FIRM_API_TOKEN — die App bindet 0.0.0.0, die API ist damit im LAN offen."
-    warn "Abschaltung nur in einer vertrauenswürdigen, isolierten Umgebung vertretbar."
+    OPEN_MODE_REQUESTED="true"
+    warn "KEIN FIRM_API_TOKEN (--no-api-token) — die App bindet 0.0.0.0, die Schreib-API ist im LAN offen."
+    warn "Seit v1.36.13 (Befund C1) verweigert NODE_ENV=production den Start ohne jedes Token."
+    warn "Deshalb wird AUTH_MODE=local-open in .env eingetragen — ein bewusster, dokumentierter Opt-in."
+    warn "Nur in einer vertrauenswürdigen, isolierten Umgebung vertretbar. Empfohlen: Token erzeugen lassen."
   fi
 
   # ── Modelle je Variante ──────────────────────────────────────────────────
@@ -893,6 +901,12 @@ ENV
     env_ensure_key "PAPER_MODE"        "broker-market-data"            "$env_file" && added=$((added+1))
     if [[ -n "$API_TOKEN" ]]; then
       env_ensure_key "FIRM_API_TOKEN"  "$API_TOKEN"                    "$env_file" && added=$((added+1))
+    fi
+    # C1 (v1.36.13): Produktion ohne Token verweigert den Start (Boot-Guard in
+    # src/instrumentation.ts). Wer --no-api-token waehlt, bekommt den Offen-
+    # Betrieb deshalb als ausdruecklichen Opt-in in die .env geschrieben.
+    if [[ "$OPEN_MODE_REQUESTED" == "true" ]]; then
+      env_ensure_key "AUTH_MODE"       "local-open"                    "$env_file" && added=$((added+1))
     fi
     (( added > 0 )) && ok "${added} fehlende(r) Schlüssel in .env ergänzt." \
                     || note "Alle benötigten Schlüssel sind bereits in .env vorhanden."

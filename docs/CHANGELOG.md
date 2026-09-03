@@ -5,6 +5,158 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.13] — 2026-09-03 · fix(auth): C1 Auth-Modus — Produktion ohne Token verweigert den Start, Offen-Betrieb nur explizit (HIGH)
+
+**HIGH, Control Panel / Auth (`src/auth/authMode.ts`, `src/auth/resolve.ts`,
+`src/lib/apiAuth.ts`, `src/instrumentation.ts`).** Befund C1 des
+Senior-Peer-Reviews (`docs/AUDIT_REMEDIATION_2026-09.md`): die Offenheit der
+Schreib-API hing an einem **fehlenden** Wert.
+
+```ts
+// src/lib/apiAuth.ts (vor dem Fix)
+const expected = process.env.FIRM_API_TOKEN;
+if (!expected) return null; // Off-Betrieb  ⇒ jeder unauthentifizierte Caller durfte schreiben
+```
+
+Zusätzlich lieferte `resolveAuth()` in demselben Fall einen Admin-Aktor
+(`source: "local-open"`) — also vollen Schreib-, Config-, Credential- und
+Kill-Zugriff. Das Setup-Skript erzeugte zwar standardmäßig ein Token, aber
+„Variable nicht gesetzt“ war ein **funktionierender Default**, kein Fehler:
+ein Vergessen, eine geplatzte `.env`-Übernahme oder ein Deploy ohne Token
+öffnete die komplette Write-API im Netz (`npm run start` bindet `0.0.0.0`).
+
+### Hinzugefügt
+
+- **`src/auth/authMode.ts` (neu, Blatt-Modul):** `AUTH_MODE` mit genau zwei
+  Werten — `local-open` und `token-required` — plus `resolveAuthMode()`,
+  `assertAuthConfigured()`, `describeAuthMode()`, `authModeWarnings()` und
+  `ConfigurationError` (`code: AUTH_NOT_CONFIGURED | AUTH_MODE_INVALID`,
+  `hint` als Behebungszeile). Token-Flags und
+  `adminTokenConfigured`/`anyTokenConfigured` leben jetzt hier (SSoT) und
+  werden aus `resolve.ts` weiter exportiert.
+- **`scripts/auth-boot-guard.ts` (neu) + `npm run boot:guard`:** der harte
+  Startwächter. `npm run start` und `npm run dev` rufen ihn **vor** `next`
+  auf; bei Verstößen endet der Prozess mit Exit-Code 1 und dreizeiligen
+  Behebungshinweisen — genau das, was `systemd` (`Restart=always`) braucht, um
+  „fehlgeschlagen“ von „läuft“ zu unterscheiden.
+- **Boot-Guard zusätzlich in `src/instrumentation.ts`:** läuft **vor**
+  Adapter-Check und Scheduler und wirft in Produktion ohne Token:
+
+  ```ts
+  if (process.env.NODE_ENV === "production" && !anyTokenConfigured())
+    throw new ConfigurationError("Refuse startup: authentication not configured (set FIRM_ADMIN_TOKEN/FIRM_API_TOKEN).");
+  ```
+
+  Zweitlinie für Starts am npm-Skript vorbei (`npx next start`, eigener
+  Container-Entrypoint). Bewusst als Wurf und nicht als harter Abbruch:
+  `process.exit` in der Instrumentation meldet Turbopack als
+  Edge-Runtime-Warnung im Build.
+  `next build` (`NEXT_PHASE=phase-production-build`) ist ausgenommen — ein
+  Build ist kein Server und darf nicht an der Laufzeitkonfiguration scheitern
+  (analog zum bestehenden `next-build-fähig`-Test für `src/db`).
+- **`GET /api/auth/me`** antwortet zusätzlich auf `authMode`
+  (`mode`, `requested`, `reason`, `production`, `tokensConfigured`,
+  `summary`) — secret-frei, damit Control Panel und Runbooks sehen, *warum*
+  offen oder zu ist.
+- **Testdatei `tests/authMode.test.ts`** (29 Fälle) inkl. echtem
+  Kindprozess-Boot-Test über `spawnSync`.
+
+### Geändert
+
+- **Modus-Regeln (`resolveAuthMode`), in dieser Priorität:**
+  1. Irgendein Token konfiguriert ⇒ `token-required`. Ein gesetztes
+     `AUTH_MODE=local-open` wird **ignoriert** und boot-seitig gemeldet —
+     Offen-Betrieb darf eine installierte Token-Konfiguration nicht abschalten.
+  2. Kein Token, `AUTH_MODE` gesetzt ⇒ dieser Modus. `local-open` ist der
+     einzige Weg ohne Credential; in Produktion nur als ausdrücklich in `.env`
+     eingetragener Opt-in und mit lauter Warnung im Log.
+  3. Kein Token, `AUTH_MODE` ungesetzt ⇒ `local-open` als Dev-Default
+     (`NODE_ENV !== "production"`, im Boot-Log angekündigt), in Produktion
+     `token-required` **und** Boot-Verweigerung.
+  4. Unbekannter Wert ⇒ fail-closed `token-required` +
+     `ConfigurationError(AUTH_MODE_INVALID)`. Ein Tipfehler öffnet nichts.
+- **`src/lib/apiAuth.ts` (`checkApiToken`):** kein impliziter `return null`
+  mehr. Offen ist der Guard nur bei wirksamem `local-open`; sonst gilt —
+  401 `AUTH_NOT_CONFIGURED`, wenn gar kein Token existiert, bzw. die
+  RBAC-Permission `firm.write`, wenn ein Admin-/Viewer-Token eingerichtet,
+  `FIRM_API_TOKEN` aber ungesetzt ist. **Nebenbefund behoben:** genau dieser
+  Fall war vorher offen — `FIRM_ADMIN_TOKEN` allein schützte
+  `POST /api/firm/*` nicht.
+- **`src/auth/resolve.ts` (`resolveAuth`):** die `local-open`-Administration
+  ist an den Modus gebunden, nicht ans Fehlen von Tokens. Requestpfad bleibt
+  Wurf-frei (`resolveAuthMode` wirft nie; der Guard wirft nur beim Start).
+- **`src/lib/tokenCompare.ts` (neu):** `tokenEquals` als Blatt-Modul, damit
+  Auth-Schicht und Schreib-Guard denselben timing-sicheren Vergleich nutzen,
+  ohne Zyklus (`apiAuth → auth/resolve → apiAuth`). `@/lib/apiAuth`
+  re-exportiert die Funktion, alle bestehenden Importe bleiben gültig.
+- **`scripts/setup-cachyos.sh` (Schritt 05):** `--no-api-token` schreibt jetzt
+  zusätzlich `AUTH_MODE=local-open` in die `.env` und warnt mit dem neuen
+  Grund (Produktionsstart sonst verweigert). Der bewusste Verzicht bleibt
+  möglich — er ist nur nicht mehr still.
+- **`package.json`:** `dev`/`start` sind um den Wächter ergänzt, neu
+  `npm run boot:guard` (Prüfung ohne Server-Start, z. B. im Deploy vor dem
+  `systemctl restart`).
+- **`deploy/ai-trading-firm.service`:** Kommentar auf die Pflicht gestellt
+  (`NODE_ENV=production` braucht ein Token).
+
+### Docs
+
+- `.env.example`: neuer `AUTH_MODE`-Block inkl.
+  „PRODUKTION OHNE TOKEN STARTET NICHT“.
+- `INSTALL.md`: neuer Abschnitt „Auth-Modus: `AUTH_MODE` und die
+  Produktionspflicht“, `AUTH_MODE` in der Flag-Tabelle, Schnellstart-Hinweis;
+  Stand auf v1.36.13 gezogen.
+- `docs/INSTALL.md`: Sicherheitsblock in Kapitel 5.1, Start-Hinweis in 5.3,
+  LAN-Freigabe in 7.3, drei neue Zeilen in Kapitel 11 (Symptom
+  `Refuse startup …` / `AUTH_NOT_CONFIGURED`), V18- und B5-Texte aktualisiert.
+- `docs/FRONTEND_CONTROL_PLANE.md` (RBAC-Zeile), `docs/HANDBUCH.md`
+  (§8.3 Rollen, §17 Regelwerk-API, API-Tabelle `/api/auth/me`),
+  `docs/README.md` (Schreib-Schutz + Versionszeile), `README.md`.
+- `docs/help/ops.help.json` (Version 4): neues Feld `auth.mode` im
+  3-Ebenen-Schema, Rolle-admin/-operator-Texte auf den Modus gestellt.
+- Audit-Tracking: `audit-remediation/C1-open-mode.md`,
+  `audit-remediation/README.md` und `docs/AUDIT_REMEDIATION_2026-09.md` auf
+  **gefixt (v1.36.13)** gestellt, inkl. der dokumentierten Auflösung des
+  Zielkonflikts zwischen „Dev-Default“ und „nur explizit“.
+
+### Unverändert
+
+- Kompatible Statuscodes: Admin-Token gesetzt, kein Treffer ⇒ 403; nur
+  Operator-/Viewer-Token ⇒ 401; `GET` bleibt ohne Credential lesbar.
+- `GET /api/auth/me` liefert weiter keine Token-Werte; Elevation
+  `operator → admin` ohne `FIRM_ADMIN_TOKEN` bleibt.
+- Rate-Limit (`FIRM_RATE_LIMIT`), CSRF-Wert `local` im Offen-Betrieb und die
+  Control-Plane-Guard-Reihenfolge (Auth → CSRF → Rate-Limit) sind unverändert.
+- Die Dev-Bequemlichkeit ist nicht weg: `npm run dev` läuft ohne Token.
+
+### Tests
+
+`tests/authMode.test.ts` (neu, 30 Fälle): Modus-Matrix (Token schlägt
+Offen-Betrieb, Dev-Default, Produktions-Implikation, expliziter Opt-in,
+`token-required` in Dev, Fail-closed bei Müll-Wert), `describeAuthMode` ohne
+Credential-Echo, `assertAuthConfigured` (Refusal-Text aus dem Audit,
+`AUTH_MODE_INVALID`, Start mit Viewer-Token allein), **Kindprozess-Boot gegen
+das echte `scripts/auth-boot-guard.ts`** (Exit 1 + „Start verweigert
+(AUTH_NOT_CONFIGURED)“ + Behebung in Produktion ohne Token, Exit 0 +
+angekündigter Dev-Default, Exit 0 + Warnung beim Produktions-Opt-in,
+`AUTH_MODE_INVALID` bei Müll-Wert, Token-Wert nie im Log),
+Verkabelungs-Checks (npm-Skripte rufen den Wächter, Instrumentation wirft statt
+hart zu beenden), RBAC-Auflösung
+(Produktion ohne Token ⇒ 401 statt Admin), `checkApiToken`/`guardWrite`
+(401 `AUTH_NOT_CONFIGURED`, Dev offen, Token-Pfad, RBAC-Pfad mit
+Admin-/Viewer-Token), echte Route `POST /api/firm/tick` (401, bevor getickt
+wird) und drei statische Verkabelungs-/Doku-Checks (Guard vor
+`assertTradingVenuesHaveRealAdapters`, kein `if (!expected) return null` mehr,
+`AUTH_MODE` in `.env.example`/beiden INSTALLs).
+
+Typecheck, Lint und `npm run docs:validate` grün; `npm run build` ohne neue
+Turbopack-Warnungen. `npm test` = **1639/1639** (1609 vorher + 30 neue
+C1-Fälle). Manuell geprüft: `npm run start` ohne Token in Produktion →
+Exit 1 mit Behebung; mit `FIRM_API_TOKEN` → 401 ohne `x-firm-token`, Durchlass
+mit Header; `AUTH_MODE=local-open` in Produktion → Start mit Warnung.
+
+---
+
 ## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
 
 **MEDIUM, Brokers/Venues.** Befund B2 des Senior-Peer-Reviews
