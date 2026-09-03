@@ -16,7 +16,7 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 | H2 | Handelslogik | CRITICAL | ⚠️ **Teilweise** (Singleton weg, aber keine verteilte Atomarität) | [H2](./H2-atomicity.md) |
 | H3 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.4) | [H3](./H3-order-status.md) |
 | H4 | Handelslogik/Broker | CRITICAL | ✅ Gefixt (v1.36.5) | [H4](./H4-idempotency.md) |
-| H5 | Handelslogik | CRITICAL | ✅ Valide | [H5](./H5-pipeline-trading.md) |
+| H5 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.6) | [H5](./H5-pipeline-trading.md) |
 | H6 | Handelslogik | CRITICAL | ✅ Valide | [H6](./H6-approval-chain.md) |
 | H7 | Handelslogik/Control | HIGH | ✅ Valide (architektonisch) | [H7](./H7-live-kill.md) |
 | H8 | Brokers/Venues | HIGH | ✅ Valide | [H8](./H8-bitunix-equity.md) |
