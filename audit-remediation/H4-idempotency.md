@@ -2,7 +2,7 @@
 
 - **Severity:** CRITICAL
 - **Bereich:** Handelslogik / Broker
-- **Status (validiert):** ✅ **Valide.**
+- **Status (validiert):** ✅ **Gefixt** in **v1.36.5** (siehe `CHANGELOG.md` `[1.36.5]`).
 - **Datei(en):** `src/brokers/bitunix/http.ts` (L207 `if (res.status === 429 || idempotent) continue;`),
   `src/brokers/bitunix/privateClient.ts` (`placeSerializedOrder`), `src/brokers/bitunix/types.ts` (`BitunixPlaceOrderBody`)
 
