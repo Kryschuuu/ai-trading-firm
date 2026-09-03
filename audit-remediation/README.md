@@ -53,7 +53,7 @@ Commit/Optional-eigener-PR denkbar; dieser Plan bündelt sie als nachvollziehbar
 
 ## Reihenfolge der Abarbeitung (Empfehlung)
 
-1. **Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9
+1. ~~**Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9~~ ✅ alle gefixt siehe v1.36.4 bis v1.36.8
 2. **Broker/Venue-Korrektheit:** H8, B1, B2
 3. **Control-Plane-Sicherheit:** C1, C2, C3, C4, S1
 4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
