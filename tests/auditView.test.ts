@@ -110,6 +110,52 @@ test("ORDER_REJECTED: unbekannter Grund wird als Lücke im Katalog gekennzeichne
   assert.match(warn.title, /Unbekannter Ablehnungsgrund SOMETHING_NEW/);
 });
 
+test("ORDER_REJECTED: Grund mit Detail-Suffix (NO_QUOTE:0G/USDT) ist KEIN unbekannter Grund", () => {
+  // Reales Muster aus dem Broker: `NO_QUOTE:<symbol>` (docs/ALPACA.md). Der
+  // Katalog führt den Basiscode — die UI darf das nicht als neue Guardrail
+  // fehlalarmieren, muss das Suffix aber sichtbar halten.
+  const view = describeAuditEntry(
+    entry("ORDER_REJECTED", "WARN", {
+      reason: "NO_QUOTE:0G/USDT",
+      symbol: "0G/USDT",
+      fill: {
+        orderId: "REJ-TEST",
+        symbol: "0G/USDT",
+        side: "LONG",
+        qty: 7993.363362,
+        fillPrice: 0,
+        stopLoss: 0.180288,
+        takeProfit: 0.199068,
+        status: "REJECTED",
+        reason: "NO_QUOTE:0G/USDT",
+      },
+    }),
+    NOW
+  );
+
+  assert.match(view.headline, /Kein Kurs verfügbar \(NO_QUOTE:0G\/USDT\)/);
+  assert.match(view.explanation, /weder einen Live-Kurs noch einen Fallback-Preis/);
+  assert.doesNotMatch(view.explanation, /nicht hinterlegt/);
+
+  const flat = view.sections.flatMap((section) => section.facts);
+  const reason = flat.find((fact) => fact.label === "Ablehnungsgrund");
+  assert.match(reason?.value ?? "", /Kein Kurs verfügbar/);
+  assert.match(reason?.value ?? "", /NO_QUOTE:0G\/USDT/);
+  assert.match(reason?.hint ?? "", /Ohne Kurs wird nicht geraten/);
+
+  const unknown = view.issues.find((item) => /Unbekannter Ablehnungsgrund/.test(item.title));
+  assert.equal(unknown, undefined);
+});
+
+test("ORDER_REJECTED: wirklich neuer Code mit Suffix bleibt als Lücke sichtbar", () => {
+  const view = describeAuditEntry(entry("ORDER_REJECTED", "WARN", { reason: "BRAND_NEW_GUARD:X" }), NOW);
+  const warn = view.issues.find((item) => item.severity === "warn");
+  assert.ok(warn);
+  assert.match(warn.title, /Unbekannter Ablehnungsgrund BRAND_NEW_GUARD:X/);
+  assert.match(view.explanation, /BRAND_NEW_GUARD:X ist im Regelkatalog/);
+});
+
+
 test("ORDER_REJECTED: Fill-Details werden vollständig und beschriftet angezeigt", () => {
   const view = describeAuditEntry(
     entry("ORDER_REJECTED", "WARN", {

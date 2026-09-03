@@ -5,6 +5,39 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.5] — 2026-09-03 · fix(audit): Grund-Codes mit Detail-Suffix als "unbekannt" fehlalarmiert
+
+**Beobachtung (Audit 2026-09-03):** Eine Order-Ablehnung mit
+`NO_QUOTE:0G/USDT` (kein Kurs für 0G/USDT — korrektes Schutzverhalten, siehe
+docs/PAPER_TRADING.md „nie raten“) wurde in der UI als
+„Unbekannter Ablehnungsgrund“ markiert. Ursache: Der Broker hängt an
+Guardrail-Codes die konkrete Ursache an (`NO_QUOTE:<sym>`,
+`POSITION_ALREADY_OPEN:<sym> …`, `INVALID_STOP_LOSS:<wert>`, … — dokumentiert
+in docs/ALPACA.md), der Katalog der UI (`BLOCK_REASON_LABELS` /
+`BLOCK_REASON_EXPLANATIONS` in `src/lib/auditView.ts`) führte aber nur den
+Basiscode und matchte per exakter Zeichenfolge. Das Suffixed-Format ist
+dokumentiert und seit frühen Versionen im Einsatz — die Warnung war ein
+Fehlalarm, keine neue Guardrail und kein falsch gesetzter Grund.
+
+### Geändert
+
+- **`src/lib/auditView.ts`:** Neuer Helfer `resolveReasonCode()` — löst einen
+  Grund-Code über den Basiscode vor dem ersten Doppelpunkt auf
+  (`NO_QUOTE:0G/USDT` → `NO_QUOTE`), Voller-Treffer bleibt Vorrang. Angewendet
+  auf alle Katalog-Lookups (`reasonLabel`, `formatKnownValue("reason")`,
+  `ORDER_REJECTED.explain/sections/check`, `KILL_SWITCH.explain`). Das volle
+  Suffix bleibt in der Anzeige sichtbar
+  („Kein Kurs verfügbar (NO_QUOTE:0G/USDT)“); wirklich neue, unbekannte Codes
+  (`BRAND_NEW_GUARD:X`) werden weiterhin als Katalog-Lücke gemeldet.
+
+### Tests
+
+- `tests/auditView.test.ts`: Regressionstests mit dem realen
+  DB-Eintrag (`NO_QUOTE:0G/USDT`, Fill `REJ-…`, SL/TP) — Erklärungstext und
+  Katalog-Treffer ohne „unbekannt“-Warnung; Gegenprobe, dass ein truly
+  unbekannter Code mit Suffix weiterhin auffällt.
+
+
 ## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order fälschlich als FILLED gemeldet (CRITICAL)
 
 **Kritischer Befund H3 aus dem Senior-Peer-Review (Audit 2026-09-03):**

@@ -495,8 +495,32 @@ const sourceLabel = (value: unknown): string => {
 
 const reasonLabel = (value: unknown): string => {
   const key = text(value)?.toUpperCase();
-  return key ? (BLOCK_REASON_LABELS[key] ?? key) : "kein Grund angegeben";
+  if (!key) return "kein Grund angegeben";
+  if (BLOCK_REASON_LABELS[key]) return BLOCK_REASON_LABELS[key];
+  // Grund-Codes tragen oft ein Detail-Suffix ("NO_QUOTE:0G/USDT",
+  // "POSITION_ALREADY_OPEN:BTC (kein Nachkauf erlaubt)"). Der Katalog führt den
+  // Basiscode — dieser wird aufgelöst, das Suffix bleibt sichtbar.
+  const base = resolveReasonCode(key);
+  if (base) return `${BLOCK_REASON_LABELS[base]} (${key})`;
+  return key;
 };
+
+/**
+ * Löst einen Grund-Code inkl. optionalem Detail-Suffix auf: Voller Treffer
+ * ("NO_QUOTE") oder Basiscode vor dem ersten Doppelpunkt ("NO_QUOTE:0G/USDT"
+ * → "NO_QUOTE"). Liefert den Basiscode oder null, wenn unbekannt.
+ *
+ * Hintergrund: Der Broker hängt an Guardrail-Codes die konkrete Ursache an
+ * (`NO_QUOTE:<sym>`, `INVALID_STOP_LOSS:<wert>`, … — siehe docs/ALPACA.md).
+ * Diese formatierte Ablehnung ist dokumentiert und darf in der UI nicht als
+ * "unbekannter Grund" fehlschlagen, nur weil der Katalog den Basiscode führt.
+ */
+function resolveReasonCode(code: string): string | null {
+  const raw = code.trim();
+  if (BLOCK_REASON_LABELS[raw] !== undefined) return raw;
+  const base = raw.split(":", 1)[0]?.trim() ?? "";
+  return BLOCK_REASON_LABELS[base] !== undefined ? base : null;
+}
 
 const symbolOf = (d: Rec): string => text(d.symbol) ?? "";
 
@@ -650,7 +674,10 @@ function formatKnownValue(key: string, value: unknown): string {
   }
   if (key === "reason") {
     const code = text(value)?.toUpperCase();
-    if (code && BLOCK_REASON_LABELS[code]) return `${BLOCK_REASON_LABELS[code]} (${code})`;
+    if (code) {
+      const base = resolveReasonCode(code);
+      if (base) return `${BLOCK_REASON_LABELS[base]} (${code})`;
+    }
     return text(value) ?? String(value ?? "—");
   }
   if (key === "latencyMs") return formatDuration(num(value)) ?? "—";
@@ -1038,19 +1065,21 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
     explain: (d) => {
       const code = text(d.reason)?.toUpperCase() ?? text(record(d.fill).reason)?.toUpperCase();
-      if (code && BLOCK_REASON_EXPLANATIONS[code]) return BLOCK_REASON_EXPLANATIONS[code];
+      const base = code ? resolveReasonCode(code) : null;
+      if (base && BLOCK_REASON_EXPLANATIONS[base]) return BLOCK_REASON_EXPLANATIONS[base];
       if (code) return `Der Ablehnungsgrund ${code} ist im Regelkatalog der UI nicht hinterlegt — bitte prüfen, ob eine neue Guardrail ergänzt wurde.`;
       return "Kein Ablehnungsgrund protokolliert.";
     },
     sections: (d) => {
       const facts: AuditFact[] = [];
       const code = text(d.reason)?.toUpperCase() ?? text(record(d.fill).reason)?.toUpperCase();
+      const base = code ? resolveReasonCode(code) : null;
       if (code) {
         facts.push({
           label: "Ablehnungsgrund",
           value: reasonLabel(code),
           tone: "bad",
-          hint: BLOCK_REASON_EXPLANATIONS[code],
+          hint: base ? BLOCK_REASON_EXPLANATIONS[base] : undefined,
         });
       }
       if (text(d.role)) facts.push({ label: "Rolle", value: roleLabel(d.role) });
@@ -1074,7 +1103,7 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
           title: "Ablehnung ohne Grund",
           detail: "Ohne Grundcode ist nicht nachvollziehbar, welche Schicht blockiert hat.",
         });
-      } else if (!BLOCK_REASON_LABELS[code]) {
+      } else if (!resolveReasonCode(code)) {
         issues.push({
           severity: "warn",
           title: `Unbekannter Ablehnungsgrund ${code}`,
@@ -1679,7 +1708,8 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
     explain: (d) => {
       const reason = text(d.reason)?.toUpperCase();
-      if (reason && BLOCK_REASON_EXPLANATIONS[reason]) return BLOCK_REASON_EXPLANATIONS[reason];
+      const base = reason ? resolveReasonCode(reason) : null;
+      if (base && BLOCK_REASON_EXPLANATIONS[base]) return BLOCK_REASON_EXPLANATIONS[base];
       if (num(d.drawdownPct) !== null) return "Der Drawdown hat die konfigurierte Grenze überschritten; das System schützt das verbleibende Kapital.";
       return "Der Not-Halt wurde ausgelöst — Handeln ist erst nach manueller Entschärfung wieder möglich.";
     },
