@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.8**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.9**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,18 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.9] — 2026-09-03 · fix(api): Async Route-Params — Approve-Endpoint war zur Laufzeit tot + `next build` brach ab (CRITICAL)
+
+**CRITICAL, API/Build (`src/app/api/firm/proposals/[id]/approve/route.ts`).** Der mit H6 (v1.36.7) eingeführte Freigabe-Endpoint nutzte noch die synchrone Handler-Signatur `{ params }: { params: { id: string } }`. Seit Next.js 15 ist `params` in Route-Handlern ein **Promise**; mit Next.js 16 ist der synchrone Zugriff vollständig entfernt (Breaking Change „Sync params/searchParams props access“). Folge war zweifach: **(a) Build-Bruch** — der von `next build` generierte Route-Validator meldete `TS2344` in `.next/types/validator.ts`, `npm run build` lief nicht durch; **(b) toter Endpoint zur Laufzeit** — `params.id` lieferte `undefined`, Next.js protokollierte `Route "/api/firm/proposals/[id]/approve" used params.id. params is a Promise and must be unwrapped with await`, und jeder Freigabe-Call antwortete deterministisch mit `400 {"error":"proposal id missing"}`. Die menschliche Freigabe (`PENDING → APPROVED`) war damit seit v1.36.7 nicht funktionsfähig, obwohl die Approval-Chain selbst korrekt fail-closed arbeitete.
+
+**Warum die CI das nicht sah:** Beide Workflows (`docs-validate`, `security-live-gate`) fahren `tsc --noEmit` + Lint + Docs-/Security-Suite, aber **kein `next build`**. Die inkompatible Signatur steckt in den von Next generierten Typen unter `.next/`, die `tsc --noEmit` gegen den Quellcode nicht prüft — der Fehler tauchte deshalb erst beim Production-Build auf. Die Route war der einzige Rückstand im Repo: alle anderen dynamischen Segmente (`/api/brokers/[venue]/*`, `/api/firm/rules/[id]/*`, `/api/markets/[venue]/[symbol]`, `/api/analysis/daily/[date]`, `/api/universe/score/[instrumentId]`) nutzen bereits die Async-Konvention.
+
+**Fix:** Handler auf die Repo-Konvention umgestellt — `type RouteContext = { params: Promise<{ id: string }> }` und `const { id } = await ctx.params`. Verhalten unverändert: 400 (fehlender Actor / fehlende ID), 404 (Proposal unbekannt), 409 (nicht `PENDING`), 500 (Fehlerpfad) sowie Audit-Event `PROPOSAL_APPROVED` bleiben identisch.
+
+**Tests:** Neu `tests/routes.asyncParams.test.ts` — schließt den CI-Blindfleck projektweit: (1) Scan **aller** Dateien in dynamischen Segmenten (`route.ts`/`page.tsx`/`layout.tsx`) auf synchrone `params`/`searchParams`-Annotationen, (2) Nachweis, dass jedes gelesene `params` per `await`/`use()` ausgepackt wird, (3) Konventions-Check der Approve-Route, (4) Verhaltenstest, der den Handler direkt mit `{ params: Promise.resolve({ id }) }` aufruft und belegt, dass die Route-ID im Handler ankommt, (5) Regression des 400-Actor-Pfads. Gegen den alten Code schlagen 4 der 6 Tests fehl, gegen den Fix sind 6/6 grün. Zusätzlich verifiziert: `npm run build` läuft vollständig durch (komplette Routentabelle, kein TS2344), `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün, `npm test` = **1590/1590** Tests grün. Laufzeit-A/B am Dev-Server: vorher `400 "proposal id missing"`, nachher Auflösung der ID bis zur DB-Ebene.
+
+---
 
 ## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
 
