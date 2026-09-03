@@ -784,9 +784,31 @@ function curatedSections(spec: EventSpec, detail: Rec): AuditSection[] {
 
 function fillSection(fill: Rec, title = "Orderausführung (fill)"): AuditSection {
   const status = text(fill.status)?.toUpperCase();
+  // H3: volles Order-Status-Spektrum (NEW → PARTIALLY_FILLED → FILLED | CANCELED
+  // | REJECTED | UNKNOWN). NEW/UNKNOWN bedeuten: kein Fill — keine Position buchen.
+  const statusNote =
+    status === "REJECTED"
+      ? "Der Broker hat den Auftrag nicht ausgeführt."
+      : status === "NEW"
+        ? "Vom Broker angenommen, aber noch kein Fill — es wurde keine Position eingebucht."
+        : status === "PARTIALLY_FILLED"
+          ? "Teilweise gefüllt — nur die gefüllte Menge mit echtem Durchschnittspreis verbuchen."
+          : status === "CANCELED"
+            ? "Der Auftrag wurde storniert."
+            : status === "UNKNOWN"
+              ? "Status unbekannt (z. B. Timeout) — wie kein Fill behandeln, kein 0-Einstieg."
+              : undefined;
+  const statusTone: FactTone | undefined =
+    status === "FILLED"
+      ? "good"
+      : status === "REJECTED" || status === "CANCELED"
+        ? "bad"
+        : status === "NEW" || status === "UNKNOWN" || status === "PARTIALLY_FILLED"
+          ? "warn"
+          : undefined;
   return {
     title,
-    note: status === "REJECTED" ? "Der Broker hat den Auftrag nicht ausgeführt." : undefined,
+    note: statusNote,
     facts: [
       { label: "Symbol", value: text(fill.symbol) ?? "—" },
       { label: "Richtung", value: formatKnownValue("side", fill.side), tone: fill.side === "SHORT" ? "warn" : "good" },
@@ -794,7 +816,7 @@ function fillSection(fill: Rec, title = "Orderausführung (fill)"): AuditSection
       {
         label: "Status",
         value: formatKnownValue("status", status),
-        tone: status === "FILLED" ? "good" : status === "REJECTED" ? "bad" : undefined,
+        tone: statusTone,
       },
       { label: "Füllpreis", value: formatKnownValue("fillPrice", fill.fillPrice) },
       { label: "Stop-Loss (Kurs)", value: formatKnownValue("stopLoss", fill.stopLoss) },

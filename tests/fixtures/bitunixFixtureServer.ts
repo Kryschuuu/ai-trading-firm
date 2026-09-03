@@ -76,11 +76,59 @@ export class BitunixFixtureServer {
     const isPrivate =
       path === BITUNIX_PATHS.account ||
       path === BITUNIX_PATHS.positions ||
-      path === BITUNIX_PATHS.placeOrder;
+      path === BITUNIX_PATHS.placeOrder ||
+      path === BITUNIX_PATHS.orderDetail ||
+      path === BITUNIX_PATHS.historyTrades;
     if (isPrivate) {
       this.privateCalls += 1;
       if (!this.validSign(req, url, body)) {
         json(res, 401, { code: 10007, msg: "Signature Error", data: null });
+        return;
+      }
+      // H3: Order-Detail (Reconciliation). orderId=BX-1 liefert einen
+      // vollständigen Fill mit tradeQty; unbekannte Order → leere Antwort.
+      if (path === BITUNIX_PATHS.orderDetail) {
+        const orderId = url.searchParams.get("orderId");
+        json(res, 200, {
+          code: 0,
+          data:
+            orderId === "BX-1" || orderId === "BX-LIVE-1"
+              ? {
+                  orderId,
+                  symbol: "BTCUSDT",
+                  qty: "0.01",
+                  tradeQty: "0.01",
+                  side: "BUY",
+                  orderType: "MARKET",
+                  status: "FILLED",
+                  ctime: 1700000000000,
+                  mtime: 1700000001000,
+                }
+              : null,
+        });
+        return;
+      }
+      // H3: Ausführungen (Trades) — die echte Fill-Quelle (avgPrice).
+      if (path === BITUNIX_PATHS.historyTrades) {
+        json(res, 200, {
+          code: 0,
+          data: {
+            tradeList: [
+              {
+                tradeId: "T-FIX-1",
+                orderId: url.searchParams.get("orderId") ?? "BX-1",
+                symbol: "BTCUSDT",
+                qty: "0.01",
+                price: "65000",
+                side: "BUY",
+                fee: "0.39",
+                roleType: "TAKER",
+                ctime: 1700000001000,
+              },
+            ],
+            total: 1,
+          },
+        });
         return;
       }
       if (path === BITUNIX_PATHS.account) {

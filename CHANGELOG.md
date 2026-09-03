@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-02** ·
-> Code-Version **1.36.3**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
+> Code-Version **1.36.4**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,34 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order nicht mehr fälschlich als FILLED gemeldet (CRITICAL)
+
+**CRITICAL, Handelslogik/Broker (`src/brokers/bitunix/execution.ts`, `src/contracts/broker.ts`).**
+`BrokerExecutionEngine.submit` meldete eine vom Venue nur AKZEPTIERTE Live-Order als
+`status: "FILLED"` mit `fillPrice: 0`. Eine Annahme ist kein Fill — downstream hätte eine
+reale Position mit Entry-Preis 0 eingebucht werden können.
+
+**Fix:**
+- **Status-Vertrag getrennt:** `BrokerOrderStatus = NEW | PARTIALLY_FILLED | FILLED |
+  CANCELED | REJECTED | UNKNOWN` (Contract-Helfer `isFillStatus`/`isBookableFill`).
+- **`submit()` live** liefert nur die AKZEPTANZ: `status:"NEW", fillPrice:0,
+  reason:"ORDER_ACCEPTED"` — Paper/Backtest bleiben synchron `FILLED`.
+- **Fill-Reconciliation:** `BitunixPrivateClient.getOrder(orderId)` (`get_order_detail`)
+  und `getExecutions(symbol?, orderId?)` (`get_history_trades`) +
+  `BrokerExecutionEngine.reconcile(orderId)` bzw. `BrokerAdapter.reconcileOrder(orderId)`:
+  echter avgPrice aus den Trades (mengen-gewichtet), Status NEW → PARTIALLY_FILLED →
+  FILLED; Order nicht auffindbar oder Preis nicht belegbar → UNKNOWN (fail-safe, nie 0-Entry).
+- **Position-Adoption gehärtet:** `listPositions` verwirft Venue-Positionen mit
+  entryPrice/qty ≤ 0; Engine-/Mikro-Pfad buchen nur bei FILLED + fillPrice > 0.
+- **Consumer per Switch:** Alpaca `mapOrderResult` (NEW/PARTIALLY_FILLED/CANCELED/UNKNOWN),
+  Audit-Ansicht (Töne/Hinweise je Status).
+
+**Tests:** submit live → NEW/0; reconcile mappt Venue `PART_FILLED` → `PARTIALLY_FILLED`
+mit echtem avgPrice; FILLED ohne Trades → UNKNOWN; CANCELED mit Teilfills; Adapter-Live-Pfad
+via Gate; Paper-Reconcile → null.
+
+---
 
 ## [1.36.3] — 2026-09-03 · security(audit): Remediation-Plan Senior Peer-Review
 

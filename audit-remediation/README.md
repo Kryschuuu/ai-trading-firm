@@ -14,7 +14,7 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 |----|---------|----------|----------------|--------|
 | H1 | Handelslogik | CRITICAL | ✅ **Bereits gefixt** (v1.36.2) | [H1](./H1-risk-notional.md) |
 | H2 | Handelslogik | CRITICAL | ⚠️ **Teilweise** (Singleton weg, aber keine verteilte Atomarität) | [H2](./H2-atomicity.md) |
-| H3 | Handelslogik | CRITICAL | ✅ Valide | [H3](./H3-order-status.md) |
+| H3 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.4) | [H3](./H3-order-status.md) |
 | H4 | Handelslogik/Broker | CRITICAL | ✅ Valide | [H4](./H4-idempotency.md) |
 | H5 | Handelslogik | CRITICAL | ✅ Valide | [H5](./H5-pipeline-trading.md) |
 | H6 | Handelslogik | CRITICAL | ✅ Valide | [H6](./H6-approval-chain.md) |

@@ -104,7 +104,7 @@ ausschließlich den credential-freien PublicClient.
 | Ebene | Pfade | Auth-Anforderung | Rate-Limit | Aktivierungs-Flag |
 | --- | --- | --- | --- | --- |
 | **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** — credential-freier PublicClient, keine Signatur, kein Nonce | Token-Bucket **8 req/s/IP** (Doku: 10); ein **geteilter** Bucket je Sync-Lauf, Parallelität ≤ 8 | `BITUNIX_ENABLED=true` + `capabilities.BITUNIX.marketData` + `MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES` (Sync) |
-| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order` | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
+| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order`, `trade/get_order_detail`, `trade/get_history_trades` (H3-Reconciliation) | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger gegen echte Public-Kurse) | keine signierten Requests (liest nur Public-Ticker) | über Public-Bucket | `getBroker("BITUNIX", "paper")`, `BITUNIX_ENABLED=true` |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert (Private API) + komplette Live-Gate-State-Machine | Private-Bucket | `BITUNIX_LIVE_ENABLED` + `LIVE_TRADING_ENABLED` + `REQUIRE_HUMAN_APPROVAL=false` + Live-Gate `LIVE_ENABLED` (Default: `LiveTradingGateError`) |
 
@@ -243,7 +243,21 @@ Basis: `https://fapi.bitunix.com` (Allowlist-Host). Schema `https` erzwungen;
 | Account (privat) | `GET /api/v1/futures/account` |
 | Positionen (privat) | `GET /api/v1/futures/position/get_pending_positions` |
 | Place-Order (privat) | `POST /api/v1/futures/trade/place_order` |
+| Order-Detail (privat, H3) | `GET /api/v1/futures/trade/get_order_detail` |
+| Ausführungen/Trades (privat, H3) | `GET /api/v1/futures/trade/get_history_trades` |
 | Public WS | `wss://fapi.bitunix.com/public/` |
+
+**H3 — Order-Status & Fill-Reconciliation (seit v1.36.4):** `place_order` liefert
+nur die AKZEPTANZ der Order (`BrokerOrderResult.status = "NEW"`, `fillPrice = 0`)
+— eine Annahme ist kein Fill. Der echte Fill wird asynchron abgeglichen:
+`get_order_detail` (Venue-Status `NEW`/`PART_FILLED`/`FILLED`/`CANCELED` +
+`tradeQty`) und `get_history_trades` (echte Trades) werden über
+`BrokerExecutionEngine.reconcile(orderId)` (bzw. `Adapter.reconcileOrder`) zum
+echten Ergebnis zusammengesetzt — der avgPrice ist der mengen-gewichtete
+Mittelwert der Trades. Status-Mapping: `NEW/INIT` → NEW, `PART_FILLED` →
+PARTIALLY_FILLED, `FILLED` → FILLED, `CANCELED/EXPIRED/PART_FILLED_CANCELED` →
+CANCELED, Unbekanntes/fehlende Order/nicht belegbarer Preis → UNKNOWN
+(fail-safe — eine Position wird NIE mit Entry-Preis 0 eingebucht).
 
 Envelope: `{ code: 0, data, msg }`. `code ≠ 0` wird taxonomisch klassifiziert
 (auth / permission / rate-limit / maintenance / unknown).

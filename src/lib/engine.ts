@@ -696,13 +696,17 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
         /* kein Kurs verfügbar → Broker verwirft die Order (NO_QUOTE) */
       }
       const fill = broker.submit(order);
-      await logAudit(fill.status === "FILLED" ? "ORDER_SENT" : "ORDER_REJECTED",
-        fill.status === "FILLED" ? "INFO" : "WARN", { order, fill }, missionId, agentId);
+      // H3: Schalter über den vollständigen Order-Status. Nur ein echter
+      // FILLED-Fill mit belegtem Preis (>0) darf eine Position einbuchen;
+      // alles andere (REJECTED/NEW/UNKNOWN/…) blockiert die Order.
+      const filled = fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
+      await logAudit(filled ? "ORDER_SENT" : "ORDER_REJECTED", filled ? "INFO" : "WARN", { order, fill }, missionId, agentId);
 
-      if (fill.status !== "FILLED") {
-        await db.update(proposals).set({ status: "AUTO_REJECTED", reason: fill.reason }).where(eq(proposals.id, proposal.id));
-        trace.push(step("GUARDRAILS/BROKER", false, fill.reason ?? "abgelehnt"));
-        return { ...base, status: "BLOCKED", fill, guardrail: fill.reason, trace };
+      if (!filled) {
+        const why = fill.reason ?? fill.status ?? "abgelehnt";
+        await db.update(proposals).set({ status: "AUTO_REJECTED", reason: why }).where(eq(proposals.id, proposal.id));
+        trace.push(step("GUARDRAILS/BROKER", false, why));
+        return { ...base, status: "BLOCKED", fill, guardrail: why, trace };
       }
       trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${fill.fillPrice}, SL ${fill.stopLoss}, TP ${fill.takeProfit}`));
 

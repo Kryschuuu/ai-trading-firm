@@ -5,6 +5,57 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order fälschlich als FILLED gemeldet (CRITICAL)
+
+**Kritischer Befund H3 aus dem Senior-Peer-Review (Audit 2026-09-03):**
+`BrokerExecutionEngine.submit` (Bitunix-Live-Pfad) meldete eine vom Venue nur
+**akzeptierte** Order synchron als `status: "FILLED"` mit `fillPrice: 0`. Eine
+Annahme (ACK) ist kein Fill — die nachgelagerte Buchhaltung hätte eine reale
+Position mit Entry-Preis **0** übernehmen können.
+
+### Geändert
+
+- **Status-Vertrag (`src/contracts/broker.ts`):**
+  `BrokerOrderStatus = "NEW" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" |
+  "REJECTED" | "UNKNOWN"` — plus Contract-Helfer `isFillStatus()` und
+  `isBookableFill()` (nur `FILLED` mit `fillPrice > 0` darf eine Position einbuchen).
+  `BrokerOrderResult.filledQty` ergänzt; `BrokerAdapter.reconcileOrder?()` im Interface.
+- **`submit()` live (`src/brokers/bitunix/execution.ts`):** liefert ausschließlich die
+  AKZEPTANZ — `status: "NEW", fillPrice: 0, reason: "ORDER_ACCEPTED"`. Versandte
+  Order-Kontexte (SL/TP/Menge) werden für die spätere Reconciliation vorgehalten.
+- **Fill-Reconciliation (H3-Kern):**
+  - `BitunixPrivateClient.getOrder(orderId)` → `GET /api/v1/futures/trade/get_order_detail`
+    (Status NEW/PART_FILLED/FILLED/CANCELED + tradeQty; `null`, wenn nicht auffindbar).
+  - `BitunixPrivateClient.getExecutions(symbol?, orderId?)` →
+    `GET /api/v1/futures/trade/get_history_trades` (echte Trades als `BitunixFill[]`).
+  - `BrokerExecutionEngine.reconcile(orderId)` baut aus Order-Detail **und** den Trades
+    das ECHTE Ergebnis: avgPrice = mengen-gewichteter Mittelwert der Trades; Status
+    NEW → PARTIALLY_FILLED → FILLED; CANCELED mit/ohne Teilfills; Order nicht
+    auffindbar oder Füllpreis nicht belegbar → **UNKNOWN** (fail-safe, nie FILLED/0).
+  - `BitunixBrokerAdapter.reconcileOrder(orderId)` mit denselben Gate/Capability-Prüfungen
+    wie `placeOrder`; Paper/Backtest liefern `null` (synchroner Fill).
+- **Position-Adoption (`listPositions`):** Venue-Positionen mit `entryPrice ≤ 0` oder
+  `qty ≤ 0` werden verworfen — eine Position entsteht nur mit echtem avgPrice.
+  Engine (`src/lib/engine.ts`) und Mikro-Executor (`src/lib/microExecutor.ts`) buchen
+  Positionen nur noch bei `status === "FILLED"` UND belegtem Preis > 0.
+- **Consumer per Switch über das neue Status-Ensemble:** Alpaca `mapOrderResult`
+  (akzeptierte Orders sind jetzt NEW statt REJECTED; partial/canceled/unknown),
+  Audit-Ansicht (`fillSection`: Töne good/bad/warn + erklärende Hinweise je Status).
+
+### Tests
+
+- `submit()` live → `status:"NEW"`, `fillPrice:0`, gültige `orderId`, `reason:"ORDER_ACCEPTED"`.
+- `reconcile()` mappt Venue `PART_FILLED` → `PARTIALLY_FILLED` mit echtem avgPrice (65000).
+- `reconcile()` NEW ohne Trades → NEW/0; FILLED ohne belegbaren Preis → UNKNOWN
+  (`FILL_PRICE_UNKNOWN`); Order fehlt → UNKNOWN (`ORDER_NOT_FOUND`); CANCELED mit Teilfills.
+- Adapter-Live-Pfad: `reconcileOrder` nach Gate-Freigabe; Paper → `null`.
+- Bestehende Live-Tests (Fixture-Server, Security-Suite) auf NEW/AKZEPTANZ umgestellt;
+  Fixture-Server bedient jetzt auch `get_order_detail`/`get_history_trades`.
+
+Abwärtskompatibel: Paper-/Backtest-Engines füllen synchron und liefern weiterhin `FILLED`.
+
+---
+
 ## [1.36.3] — 2026-09-03 · security(audit): Remediation-Plan Senior Peer-Review
 
 **Schweregrad-Mix:** 8× CRITICAL, 8× HIGH, 4× MEDIUM (20 Befunde). **H1 bereits in v1.36.2 gefixt.**
