@@ -222,6 +222,13 @@ export interface BrokerOrderRequest {
   side: "LONG" | "SHORT";
   qty: number;
   limitPrice?: number;
+  /**
+   * Mark-/Quote-Preis (Hinweis), wenn keine feste Limit-Preis-Order vorliegt.
+   * Markt-Order haben keinen festen Entry; die Adapter nutzen diesen Hinweis
+   * als Bezugspunkt, um die SL/TP-Geometrie (B1) zu validieren. Rein
+   * beratend — geht nie in den Wire-Body und nicht in die Order-Idempotenz ein.
+   */
+  markPriceHint?: number;
   /** Absoluter Stop-Loss-Preis. */
   stopLoss?: number;
   /** Absoluter Take-Profit-Preis. */

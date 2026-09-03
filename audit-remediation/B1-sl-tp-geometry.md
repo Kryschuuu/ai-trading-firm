@@ -2,8 +2,10 @@
 
 - **Severity:** HIGH
 - **Bereich:** Brokers & Venues
-- **Status (validiert):** ✅ **Valide.**
-- **Datei(en):** `src/brokers/bitunix/orders.ts` (`serializePlaceOrder`)
+- **Status (validiert):** ✅ **Gefixt (v1.36.11)** — Befund war valide (Audit 2026-09-03); Fix in
+  `src/brokers/bitunix/orders.ts` (`serializePlaceOrder`) + optionale `markPriceHint` auf
+  `BrokerOrderRequest`; Tests in `tests/bitunix.unit.test.ts`. Doku: `docs/BITUNIX.md` §5.2.
+- **Datei(en):** `src/brokers/bitunix/orders.ts` (`serializePlaceOrder`), `src/contracts/broker.ts`
 
 ## Arena-Prompt (kopierbar)
 
@@ -52,10 +54,10 @@ Geometrie-Check relativ zum Entry (limitPrice bzw. Mark/Quote bei Market-Orders)
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] LONG `stopLoss >= entry` → `OrderSerializationError`.
-- [ ] LONG `takeProfit <= entry` → `OrderSerializationError`.
-- [ ] SHORT entsprechend gespiegelt.
-- [ ] Korrekte Geometrie wird akzeptiert (Regression des Engine-Pfads).
+- [x] LONG `stopLoss >= entry` → `OrderSerializationError`.
+- [x] LONG `takeProfit <= entry` → `OrderSerializationError`.
+- [x] SHORT entsprechend gespiegelt.
+- [x] Korrekte Geometrie wird akzeptiert (Regression des Engine-Pfads).
 
 ## Changelog-Blurb
 
@@ -64,4 +66,4 @@ in serializePlaceOrder; Adapter vertraut nicht auf korrekte Caller.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Validierungs-Härtung, keine API-Änderung.
+PATCH (**1.36.11** — umgesetzt) — Validierungs-Härtung, keine API-Änderung.

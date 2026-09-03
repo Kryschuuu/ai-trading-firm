@@ -18,7 +18,7 @@ Secret-Store-Schicht.
 Vor der Planung wurde jeder Befund gegen den **aktuellen** Code geprüft. Ergebnis: **H1 ist bereits
 in v1.36.2 gefixt** (serverseitige `estimatedNotional`-Berechnung), **H3 in v1.36.4** und **H4 in
 v1.36.5** (Order-Idempotenz). H2 ist teilweise adressiert (Singleton entfernt, aber keine verteilte
-Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Executor führt eine genehmigte Proposal aus). **H6 ist in v1.36.7 gefixt** (echte Approval-Chain; Executor führt nur noch server-validierte APPROVED Proposals aus; menschliche Freigabe via Endpoint). **H9 ist in v1.36.8 gefixt** (Guardrail-Numerik fail-closed: `requireFinitePositive` wirft `RiskValidationError` bei NaN/Infinity/≤0; negatives Equity wird blockiert statt geklemmt; alle Caller lehnen mit `INVALID_EQUITY`/`INVALID_LEVERAGE`/`INVALID_NOTIONAL` ab). **H8 ist in v1.36.10 gefixt** (kanonische `BrokerAccount`-Zerlegung walletBalance/availableCash/usedMargin/maintenanceMargin/unrealizedPnl; Bitunix-Equity = `walletBalance + realizedPnl + unrealizedPnl` statt `available + uPnL`). Die übrigen Befunde bleiben wie ausgewiesen valide.
+Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Executor führt eine genehmigte Proposal aus). **H6 ist in v1.36.7 gefixt** (echte Approval-Chain; Executor führt nur noch server-validierte APPROVED Proposals aus; menschliche Freigabe via Endpoint). **H9 ist in v1.36.8 gefixt** (Guardrail-Numerik fail-closed: `requireFinitePositive` wirft `RiskValidationError` bei NaN/Infinity/≤0; negatives Equity wird blockiert statt geklemmt; alle Caller lehnen mit `INVALID_EQUITY`/`INVALID_LEVERAGE`/`INVALID_NOTIONAL` ab). **H8 ist in v1.36.10 gefixt** (kanonische `BrokerAccount`-Zerlegung walletBalance/availableCash/usedMargin/maintenanceMargin/unrealizedPnl; Bitunix-Equity = `walletBalance + realizedPnl + unrealizedPnl` statt `available + uPnL`). **B1 ist in v1.36.11 gefixt** (Bitunix-SL/TP-Geometrie: `serializePlaceOrder` lehnt semantisch falsche Stop/Take-Staffelung relativ zum Entry ab). Die übrigen Befunde bleiben wie ausgewiesen valide.
 
 | ID | Bereich | Severity | Status (validiert) | Prompt |
 |----|---------|----------|--------------------|--------|
@@ -38,7 +38,7 @@ Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Execut
 | C2 | Control Panel | MED/HIGH | ✅ valide | [C2](../audit-remediation/C2-forwarded-ip.md) |
 | C3 | Control Panel | HIGH | ✅ valide | [C3](../audit-remediation/C3-kill-disarm.md) |
 | C4 | Control Panel | MEDIUM | ✅ valide | [C4](../audit-remediation/C4-control-state-persistence.md) |
-| B1 | Brokers/Venues | HIGH | ✅ valide | [B1](../audit-remediation/B1-sl-tp-geometry.md) |
+| B1 | Brokers/Venues | HIGH | ✅ gefixt (v1.36.11) | [B1](../audit-remediation/B1-sl-tp-geometry.md) |
 | B2 | Brokers/Venues | MEDIUM | ✅ valide | [B2](../audit-remediation/B2-side-fallback.md) |
 | S1 | Sonstiges | MEDIUM | ✅ valide | [S1](../audit-remediation/S1-audit-reliability.md) |
 | S2 | Sonstiges | MEDIUM | ✅ valide (arch.) | [S2](../audit-remediation/S2-singleton-consistency.md) |
@@ -46,24 +46,24 @@ Atomarität). **H5 ist in v1.36.6 gefixt** (Proposal-only-Phasen; nur der Execut
 ## Empfohlene Abarbeitungsreihenfolge
 
 1. **Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9
-2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1, B2
+2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1 ✅ gefixt (v1.36.11), B2
 3. **Control-Plane-Sicherheit:** C1, C2, C3, C4, S1
 4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
 5. **Workshop:** W1, W2
 
 Jeder Schritt ist unabhängig; H1 entfällt (bereits gefixt). Stand 2026-09-03 sind aus der
 Fail-closed-Gruppe H3 (v1.36.4), H4 (v1.36.5), H5 (v1.36.6), H6 (v1.36.7) und H9 (v1.36.8)
-abgeschlossen; aus der Broker/Venue-Korrektheit ist **H8 (v1.36.10)** abgeschlossen
-(B1 und B2 bleiben offen).
+abgeschlossen; aus der Broker/Venue-Korrektheit sind **H8 (v1.36.10)** und **B1 (v1.36.11)**
+abgeschlossen (B2 bleibt offen).
 
 ## Versionierung
 
 Tracking als PATCH-Serie (Security-Audit-Plan + Fixes): H1=v1.36.2, H3=v1.36.4, H4=v1.36.5,
-H5=v1.36.6, H6=v1.36.7, H9=v1.36.8, **H8=v1.36.10**. Siehe `CHANGELOG.md` und
-`docs/CHANGELOG.md` (`[1.36.10]`).
+H5=v1.36.6, H6=v1.36.7, H9=v1.36.8, **H8=v1.36.10**, **B1=v1.36.11**. Siehe `CHANGELOG.md` und
+`docs/CHANGELOG.md` (`[1.36.11]`).
 
 ## Verwandte Dokumente
 
 - [`docs/SECURITY_AUDIT.md`](SECURITY_AUDIT.md) — vorheriges Security-Audit (2026-08-25, v1.4.0)
 - [`audit-remediation/README.md`](../audit-remediation/README.md) — Prompt-Index + Validierung
-- `CHANGELOG.md` / `docs/CHANGELOG.md` — `[1.36.8]`-Eintrag
+- `CHANGELOG.md` / `docs/CHANGELOG.md` — `[1.36.11]`-Eintrag
