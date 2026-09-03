@@ -5,6 +5,59 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.11] — 2026-09-03 · fix(broker): B1 Bitunix SL/TP-Geometrie — semantisch falsche Stop/Take werden abgelehnt (HIGH)
+
+**HIGH, Brokers/Venues.** Befund B1 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): `serializePlaceOrder` validierte SL/TP nur
+numerisch (`finitePositive`), nicht geometrisch. Eine formal positive, aber semantisch
+unsinnige Staffelung (z. B. ein LONG-Stop oberhalb des Einstiegspreises) konnte so zur
+Venue gesendet werden.
+
+### Geändert
+
+- **`src/contracts/broker.ts`:** `BrokerOrderRequest` erhält das optionale Feld
+  `markPriceHint?: number` — der Mark-/Quote-Preis als Bezugspunkt, wenn keine feste
+  Limit-Order vorliegt. Reiner Validierungs-Hinweis (nie im Wire-Body, nie in der
+  `clientOrderId`).
+- **`src/brokers/bitunix/orders.ts` (`serializePlaceOrder`):** Geometrie-Check **vor**
+  dem Aufbau des Bodys.
+
+  ```ts
+  const entry = finitePositive(req.limitPrice) ? req.limitPrice
+    : finitePositive(req.markPriceHint) ? req.markPriceHint : undefined;
+  if (entry !== undefined) {
+    if (req.side === "LONG") {
+      if (req.stopLoss !== undefined && req.stopLoss >= entry) throw new OrderSerializationError("LONG stopLoss muss unter dem Entry liegen");
+      if (req.takeProfit !== undefined && req.takeProfit <= entry) throw new OrderSerializationError("LONG takeProfit muss über dem Entry liegen");
+    } else {
+      if (req.stopLoss !== undefined && req.stopLoss <= entry) throw new OrderSerializationError("SHORT stopLoss muss über dem Entry liegen");
+      if (req.takeProfit !== undefined && req.takeProfit >= entry) throw new OrderSerializationError("SHORT takeProfit muss unter dem Entry liegen");
+    }
+  }
+  ```
+
+  - **Entry-Bezugspunkt:** `LIMIT` = `limitPrice`; `MARKET` = `markPriceHint`; fehlt der
+    Hinweis, wird die Prüfung übersprungen (kein falscher Deny). Die Grenzfälle
+    `SL == entry` / `TP == entry` werden ebenfalls abgelehnt.
+  - Der Adapter vertraut damit nicht auf korrekte Caller — der Engine-Pfad (der aus der
+    Proposal korrekte Werte liefert) bleibt unverändert (Regression).
+
+### Unverändert
+
+- `clientOrderIdFor`: `markPriceHint` geht nicht in die Idempotenz-Identität ein
+  (nur `limitPrice`, SL/TP, side, qty, ts, rand).
+- Paper-Pfad: `serializePlaceOrder` wird dort nicht aufgerufen (Paper-Ledger faßt
+  direkt `ledger.submit`); die Geometrie-Prüfung greift nur im Broker-Live-Pfad.
+
+### Tests
+
+`tests/bitunix.unit.test.ts` — `Orders (B1): SL/TP-Geometrie …`: LONG `sl=entry+1` →
+Fehler, LONG `tp=entry-1` → Fehler, korrekte LONG-Geometrie → ok, SHORT gespiegelt,
+MARKET ohne Entry-Hinweis → übersprungen (Regression), MARKET mit `markPriceHint` →
+aktiv geprüft. Typecheck, Lint, Docs-Validierung. `npm test` = **1590/1590**.
+
+---
+
 ## [1.36.10] — 2026-09-03 · fix(broker): H8 Bitunix-Equity korrekt aus walletBalance + uPnL statt available + uPnL (HIGH)
 
 **HIGH, Brokers/Venues.** Befund H8 des Senior-Peer-Reviews

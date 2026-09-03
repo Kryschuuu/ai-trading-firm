@@ -28,7 +28,7 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 | C2 | Control Panel | MED/HIGH | ✅ Valide | [C2](./C2-forwarded-ip.md) |
 | C3 | Control Panel | HIGH | ✅ Valide | [C3](./C3-kill-disarm.md) |
 | C4 | Control Panel | MEDIUM | ✅ Valide | [C4](./C4-control-state-persistence.md) |
-| B1 | Brokers/Venues | HIGH | ✅ Valide | [B1](./B1-sl-tp-geometry.md) |
+| B1 | Brokers/Venues | HIGH | ✅ Gefixt (v1.36.11) | [B1](./B1-sl-tp-geometry.md) |
 | B2 | Brokers/Venues | MEDIUM | ✅ Valide | [B2](./B2-side-fallback.md) |
 | S1 | Sonstiges | MEDIUM | ✅ Valide | [S1](./S1-audit-reliability.md) |
 | S2 | Sonstiges | MEDIUM | ✅ Valide (architektonisch) | [S2](./S2-singleton-consistency.md) |
@@ -48,14 +48,14 @@ dass er direkt als Task an Arena (bzw. einen Coding-Agenten) übergeben werden k
 
 Die Remediation wird als PATCH-Serie getrackt (Security-Audit-Plan + Fixes):
 H1=v1.36.2, H3=v1.36.4, H4=v1.36.5, H5=v1.36.6, H6=v1.36.7, H9=v1.36.8,
-**H8=v1.36.10**.
-Siehe `CHANGELOG.md` und `docs/CHANGELOG.md` (`[1.36.10]`). Jeder einzelne Fix ist als eigener
+**H8=v1.36.10**, **B1=v1.36.11**.
+Siehe `CHANGELOG.md` und `docs/CHANGELOG.md` (`[1.36.11]`). Jeder einzelne Fix ist als eigener
 Commit/Optional-eigener-PR denkbar; dieser Plan bündelt sie als nachvollziehbares Tracking-Dokument.
 
 ## Reihenfolge der Abarbeitung (Empfehlung)
 
 1. ~~**Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9~~ ✅ alle gefixt siehe v1.36.4 bis v1.36.8
-2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1, B2
+2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1 ✅ gefixt (v1.36.11), B2
 3. **Control-Plane-Sicherheit:** C1, C2, C3, C4, S1
 4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
 5. **Workshop:** W1, W2
