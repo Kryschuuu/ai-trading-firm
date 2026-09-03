@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.13 (2026-09-03) · Vollständige
+> **Dokumentationsstand:** v1.36.14 (2026-09-03) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -79,6 +79,34 @@ dafür ist eine Entscheidung, kein fehlender Wert:
 * Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
 
 Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Auth-Modus“; Befund C1 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Sicherheit: Rate-Limits kennen keine erfundenen IPs (v1.36.14)
+
+Rate-Limits wirken nur, wenn die Client-Identität nicht vom Client stammt. Bis
+v1.36.13 lasen beide Limiter `x-forwarded-for`/`x-real-ip` — Header, die jeder
+Aufrufer selbst setzt. Ein frisches `X-Forwarded-For: <zufällig>` pro Anfrage
+erzeugte einen frischen Bucket, das Limit war damit faktisch aus (Befund C2,
+MEDIUM/HIGH). Jetzt gilt (`src/lib/clientIp.ts`, eine Quelle für Firm- und
+Credential-Limit):
+
+* `x-forwarded-for` zählt **nur**, wenn `TRUSTED_PROXY_IPS` konfiguriert ist
+  **und** die Socket-Adresse des direkten Peers darin liegt — ausgewertet
+  rightmost-untrusted, damit eine vorgeschobene Fake-IP wirkungslos bleibt.
+* `x-verified-ip` ist der Header für den Reverse Proxy (nginx:
+  `proxy_set_header X-Verified-IP $remote_addr;`) — der einzige Weg, im
+  Next.js-App-Router eine echte Client-IP zu bekommen.
+* `x-real-ip` wird nie als Identität benutzt; ohne verwertbare
+  Proxy-Information zählt die Socket-Adresse, sonst die Konstante `local`
+  (alle Clients teilen sich dann ein Limit — enger, nie weiter).
+* Credential-Brute-Force wird dreistufig gebremst: Limit pro Identität
+  (5/min) + **globales, IP-unabhängiges** Limit (20/min) + exponentieller
+  Backoff ab dem 3. Fehlversuch (2 s → 4 s → 8 s … max. 15 min). Der
+  Kill-Switch nutzt bewusst nur die erste Stufe.
+* Sichtbar ohne Secret-Werte: `curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity`
+  (inkl. `ignoredHeaders` — welche Header die App verworfen hat).
+
+Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Rate-Limit-Identität“; Befund C2 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Markt-Konfiguration (v1.30.0)

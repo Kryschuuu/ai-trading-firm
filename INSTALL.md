@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-03** · Code-Version **1.36.13**
+> Dokumentationsstand **2026-09-03** · Code-Version **1.36.14**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -169,6 +169,72 @@ npm run boot:guard        # Exit 0 = Start erlaubt · Exit 1 = verweigert + Grun
 Details: [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md), Befund C1 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
+## Rate-Limit-Identität: `TRUSTED_PROXY_IPS` (C2, v1.36.14)
+
+Rate-Limits brauchen eine stabile Client-Identität. Bis v1.36.13 kam sie aus
+`x-forwarded-for` bzw. `x-real-ip` — Headern, die **der Client selbst setzt**.
+Ein Angreifer konnte pro Anfrage eine neue IP behaupten und bekam damit pro
+Anfrage einen frischen Bucket: Das Limit war nicht umgangen, es war abgeschaltet
+(Befund C2, MEDIUM/HIGH). Seit v1.36.14 entscheidet `src/lib/clientIp.ts`
+(eine Quelle für Firm-Schreib-Limit **und** Credential-Limit):
+
+| Situation | Bucket-Identität |
+| --- | --- |
+| kein `TRUSTED_PROXY_IPS`, Socket-Adresse sichtbar | Socket-Remote-Adresse |
+| kein `TRUSTED_PROXY_IPS`, Socket-Adresse nicht sichtbar (Next.js-App-Router) | Konstante `local` — alle Clients teilen sich **ein** Limit |
+| kein `TRUSTED_PROXY_IPS`, Anfrage kommt von Loopback, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` (Same-Host-Proxy) |
+| `TRUSTED_PROXY_IPS` gesetzt, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` |
+| `TRUSTED_PROXY_IPS` gesetzt **und** Socket-Peer liegt in der Liste | `x-forwarded-for`, rightmost-untrusted ausgewertet |
+| `TRUSTED_PROXY_IPS` gesetzt, Socket-Peer liegt **nicht** in der Liste | Socket-Peer — sämtliche Proxy-Header ignoriert |
+
+`x-real-ip` wird in keinem Fall als Identität benutzt.
+
+**Betrieb hinter nginx/Traefik/Caddy:** `TRUSTED_PROXY_IPS` auf die Adresse des
+Proxys setzen und im Proxy einen eigenen, überschreibenden Header konfigurieren:
+
+```bash
+printf 'TRUSTED_PROXY_IPS=%s\n' "127.0.0.1" >> .env    # Proxy auf demselben Host
+```
+
+```nginx
+# nginx — den vom Client mitgebrachten Wert bewusst überschreiben
+proxy_set_header X-Verified-IP $remote_addr;
+```
+
+Ohne diese Konfiguration bleibt der Dienst **sicher, aber enger**: alle Clients
+teilen sich einen Bucket (`local`). Für den Single-User-Betrieb ist das der
+Normalfall; für mehrere Nutzer hinter einem Proxy ist `x-verified-ip` Pflicht.
+
+Sichtbar ist die wirksame Entscheidung jederzeit, ohne Secret-Werte:
+
+```bash
+curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity
+# {"key":"local","ip":null,"source":"local-fallback",
+#  "ignoredHeaders":["x-forwarded-for","x-real-ip"], ...}
+```
+
+Das Boot-Log nennt dieselbe Policy in einer Zeile (`[client-ip] …`) und warnt
+bei unparsebaren Einträgen sowie bei `0.0.0.0/0` (das wäre der C2-Rückfall:
+jeder Peer gilt dann als Proxy).
+
+**Brute-Force-Schichten der Credential-API** (alle seit v1.36.14 kombiniert):
+
+1. pro Client-Identität `BROKER_CREDENTIAL_RATE_LIMIT` (Default 5/min),
+2. global und **IP-unabhängig** `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT`
+   (Default 20/min) — bremst verteiltes Raten,
+3. exponentieller Backoff ab dem 3. Fehlversuch (2 s → 4 s → 8 s … max. 15 min,
+   Rücksetzung nach 15 min Ruhe oder einem von der Venue akzeptierten
+   Credential; justierbar über `BROKER_CREDENTIAL_BACKOFF_BASE_MS` /
+   `BROKER_CREDENTIAL_BACKOFF_MAX_MS`, Basis `0` schaltet die Ebene aus).
+
+Der Kill-Switch (`POST /api/live/kill`) und Gate-Transitionen nutzen weiterhin
+ausschließlich Ebene 1 — ein Credential-Flood darf die Sicherheitsaktion nie
+blockieren.
+
+Details: Befund C2 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md) und
+[`audit-remediation/C2-forwarded-ip.md`](audit-remediation/C2-forwarded-ip.md).
+
 ## Env-Flag-Referenz (sichere Defaults)
 
 Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
@@ -277,7 +343,10 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `SECRET_STORE_KMS_ENDPOINT` | — | optionaler KMS-Endpunkt |
 | `BROKER_SECRET_BACKEND` | — | Backend-Typ des Secret Store |
 | `BROKER_SECRET_DIR` | — | Ablage (falls File-Backend) |
-| `BROKER_CREDENTIAL_RATE_LIMIT` | — | Rate-Limit auf Credential-API |
+| `BROKER_CREDENTIAL_RATE_LIMIT` | `5` | Rate-Limit auf Credential-API pro Client-Identität (0 = aus) |
+| `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` | `20` | globales, IP-unabhängiges Credential-Limit (0 = aus; betrifft nie den Kill-Switch) |
+| `BROKER_CREDENTIAL_BACKOFF_BASE_MS` | `2000` | Startwert des exponentiellen Backoffs ab dem 3. Credential-Fehlversuch (0 = Backoff aus) |
+| `BROKER_CREDENTIAL_BACKOFF_MAX_MS` | `900000` (15 min) | Deckel einer Backoff-Sperre |
 | `BROKER_HEALTHCHECK_REMOTE` | `false` | remote Health-Checks aktivieren |
 
 ### RBAC / Firm-API
@@ -288,7 +357,8 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `FIRM_API_TOKEN` | *(leer)* | API-Token für alle `POST`/`PUT`-Routen; `scripts/setup-cachyos.sh` erzeugt eines |
 | `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Token |
 | `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
-| `FIRM_RATE_LIMIT` | — | Rate-Limit auf Firm-API |
+| `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |
+| `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste vertrauenswürdiger Reverse Proxys; erst damit zählen `x-verified-ip` (immer) bzw. `x-forwarded-for` (nur bei verifiziertem Socket-Peer). Leer ⇒ Header werden ignoriert, Bucket = Socket-Adresse bzw. `local` |
 
 ### Modell-Routing (Task 09)
 

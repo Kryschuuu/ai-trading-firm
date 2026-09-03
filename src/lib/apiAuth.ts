@@ -23,10 +23,23 @@
  * Rate-Limit (v1.4.0): In-Memory, pro Client, nur Schreib-Endpunkte.
  *   FIRM_RATE_LIMIT=60   Anfragen / 60 s (Standard)
  *   FIRM_RATE_LIMIT=0    deaktiviert
+ *
+ * Client-Identität (C2, v1.36.14): Der Bucket-Schlüssel kommt aus
+ * `src/lib/clientIp.ts` (`resolveClientIp`) — `x-forwarded-for`/`x-real-ip`
+ * werden NICHT mehr blind übernommen, weil der Client sie selbst setzt und so
+ * pro Anfrage einen frischen Bucket erfinden konnte. Identität ist jetzt:
+ * proxy-verifizierte IP (`x-verified-ip`, nur bei wirksamem Proxy-Vertrauen),
+ * `x-forwarded-for` ausschließlich hinter einem als `TRUSTED_PROXY_IPS`
+ * konfigurierten UND per Socket-Adresse verifizierten Peer, sonst die
+ * Socket-Remote-Adresse, sonst die Prozess-Konstante `local`.
  */
 import { anyTokenConfigured, resolveAuth } from "@/auth/resolve";
 import { resolveAuthMode } from "@/auth/authMode";
 import { tokenEquals } from "@/lib/tokenCompare";
+import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
+
+/** Client-IP-Auflösung (C2) — derselbe Helfer wie in der Control Plane. */
+export { resolveClientIp, clientRateLimitKey } from "@/lib/clientIp";
 
 /** Timing-sicherer Vergleich (Blatt-Modul) — Alias für bestehende Importpfade. */
 export { tokenEquals } from "@/lib/tokenCompare";
@@ -93,18 +106,29 @@ export function checkApiToken(req: Request): Response | null {
 
 const hits = new Map<string, number[]>();
 
-function clientKey(req: Request): string {
-  // Hinter einem Proxy wäre x-forwarded-for spoofbar — der Dienst lauscht
-  // standardmäßig nur auf 127.0.0.1, der Header ist dann irrelevant.
-  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const real = req.headers.get("x-real-ip")?.trim();
-  return fwd || real || "local";
+/**
+ * Bucket-Schlüssel = geteilte Client-IP-Auflösung (C2, v1.36.14).
+ *
+ * Vorher stand hier `x-forwarded-for`/`x-real-ip` direkt — client-setzbare
+ * Header als Sicherheitsgrenze. Jetzt entscheidet `resolveClientIp()`:
+ * ohne konfiguriertes Proxy-Vertrauen (`TRUSTED_PROXY_IPS`) bzw. ohne
+ * proxy-gesetztes `x-verified-ip` ist der Schlüssel die Socket-Adresse oder
+ * `local`, und ein mitgeschicktes `X-Forwarded-For: 1.2.3.4` ändert nichts.
+ */
+function clientKey(req: Request, opts: ClientIpOptions = {}): string {
+  return clientRateLimitKey(req, opts);
 }
 
 export type RateLimitOptions = {
   max?: number;
   windowMs?: number;
   now?: number;
+  /**
+   * Socket-Remote-Adresse des direkten Peers, falls der Aufrufer sie kennt
+   * (eigener Node-Server/Adapter). Im Next.js-App-Router nicht verfügbar —
+   * dann trägt `TRUSTED_PROXY_IPS` + `x-verified-ip` die Identität.
+   */
+  peerIp?: string | null;
 };
 
 /** Nur für Tests: Bucket-Speicher leeren. */
@@ -124,7 +148,7 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
 
   const windowMs = opts.windowMs ?? 60_000;
   const now = opts.now ?? Date.now();
-  const key = clientKey(req);
+  const key = clientKey(req, { peerIp: opts.peerIp });
   const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) {
     const retryAfter = Math.max(1, Math.ceil((windowMs - (now - recent[0])) / 1000));

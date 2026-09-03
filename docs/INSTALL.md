@@ -357,6 +357,43 @@ Was die Regeln bedeuten (Quelle: `src/auth/authMode.ts`, Flags referenziert
   oder der Wächter allein, ohne Server-Start: `npm run boot:guard`
   (Exit 0 = Start erlaubt, Exit 1 = verweigert mit Grund und Behebung).
 
+**Rate-Limit-Identität (C2, v1.36.14): `TRUSTED_PROXY_IPS`.**
+Rate-Limits (Schreib-API 60/min, Credential-Versuche 5/min) brauchen eine
+Client-Identität. `x-forwarded-for` und `x-real-ip` gehören **nicht** dazu —
+beide setzt der Client selbst, ein neuer Wert pro Anfrage hätte das Limit
+wirkungslos gemacht. Ohne Konfiguration gilt deshalb:
+
+```bash
+# Single-User auf demselben Rechner: nichts zu tun.
+# Bucket = Socket-Adresse, bzw. die Konstante "local" im Next.js-App-Router.
+curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity
+```
+
+Steht ein Reverse Proxy davor (nginx, Traefik, Caddy), muss er die echte
+Client-Adresse in einem **eigenen** Header liefern, den er überschreibt — und
+die App muss wissen, wem sie glaubt:
+
+```bash
+# .env — Proxy läuft auf demselben Host (Standard-Setup)
+printf 'TRUSTED_PROXY_IPS=%s\n' "127.0.0.1" >> .env
+```
+
+```nginx
+# nginx: den vom Client mitgebrachten Wert bewusst überschreiben
+location / {
+    proxy_pass http://127.0.0.1:3369;
+    proxy_set_header X-Verified-IP $remote_addr;   # <- von der App vertraut
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+Danach zeigt `jq .rateLimitIdentity` `source: "verified-header"` und die echte
+Client-IP; `ignoredHeaders` nennt alles, was die App verworfen hat. Ohne
+`TRUSTED_PROXY_IPS` wird `x-verified-ip` nur akzeptiert, wenn die Anfrage von
+Loopback kommt (Same-Host-Proxy) — aus dem Netz kommend bleibt die Identität
+die Socket-Adresse. Steht in `TRUSTED_PROXY_IPS` Müll oder `0.0.0.0/0`, warnt
+das Boot-Log (`[client-ip] …`) laut: `0.0.0.0/0` wäre der Rückfall in Befund C2.
+
 ### 5.2 Tabellen anlegen
 
 ```bash
@@ -570,6 +607,13 @@ sudo ufw allow from 192.168.1.0/24 to any port 3369
 > `FIRM_API_TOKEN` (bzw. die RBAC-Tokens) gebunden und in Produktion ohne Token
 > startunfähig; das Dashboard liest aber weiterhin ohne Credential. Wenn du von
 > außen zugreifen willst: WireGuard oder Tailscale, kein Portforwarding.
+>
+> **Mehrere Nutzer im LAN?** Dann braucht jedes Rate-Limit eine echte
+> Client-Identität: ohne `TRUSTED_PROXY_IPS`/`x-verified-ip` teilen sich alle
+> Clients seit v1.36.14 einen Bucket (`local`) — sicher, aber eng (60
+> Schreib-Requests bzw. 5 Credential-Versuche pro Minute **gesamt**). Mit einem
+> Reverse Proxy davor: `TRUSTED_PROXY_IPS` + `proxy_set_header X-Verified-IP`
+> setzen (Kapitel 5.1).
 
 ---
 
@@ -790,6 +834,10 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **API im LAN offen beschreibbar** | `npm run start` bindet `0.0.0.0`; offen ist sie nur noch mit wirksamem `AUTH_MODE=local-open` | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befunde B5 und C1 |
 | **Dienst startet nicht: `Refuse startup: authentication not configured` (`AUTH_NOT_CONFIGURED`)** | `NODE_ENV=production` (also `npm run start`/systemd) ohne jedes Token — seit v1.36.13 Boot-Verweigerung statt offener API | Token setzen (`openssl rand -hex 32` → `FIRM_API_TOKEN` in `.env`) oder bewusst `AUTH_MODE=local-open` eintragen; Befund C1 in **[AUDIT_REMEDIATION_2026-09.md](AUDIT_REMEDIATION_2026-09.md)** |
 | **`POST /api/firm/*` liefert `401` mit `code: AUTH_NOT_CONFIGURED`** | Auth-Modus ist `token-required`, aber es ist kein Token konfiguriert (Boot-Guard lief nicht oder wurde umgangen) | `.env`-Token setzen und Dienst neu starten; Dev-Modus mit `AUTH_MODE=local-open` |
+| **`429 RATE_LIMITED` obwohl nur eine Person nutzt** | Rate-Limit-Identität ist `local` (kein `TRUSTED_PROXY_IPS`, Socket-Adresse im Next.js-App-Router nicht sichtbar) ⇒ alle Clients teilen sich einen Bucket | hinter einem Proxy: `TRUSTED_PROXY_IPS=127.0.0.1` + `proxy_set_header X-Verified-IP $remote_addr;` (Kapitel 5.1). Diagnose: `curl -s localhost:3369/api/auth/me \| jq .rateLimitIdentity`. Befund C2 |
+| **`429` mit `code: CREDENTIAL_BACKOFF`** | drei oder mehr fehlgeschlagene Credential-Versuche (Formatfehler oder von der Venue abgelehnte Probe) ⇒ exponentielle Sperre 2 s → 4 s → 8 s … max. 15 min | `Retry-After` abwarten; ein gültiges Credential setzt die Zählung zurück. 409-Zustandskonflikte und Store-Störungen (5xx) zählen bewusst nicht. Justierbar: `BROKER_CREDENTIAL_BACKOFF_BASE_MS` (0 = Ebene aus), `BROKER_CREDENTIAL_BACKOFF_MAX_MS` |
+| **`429` mit `code: CREDENTIAL_GLOBAL_RATE_LIMITED`** | globales, IP-unabhängiges Credential-Limit erreicht (Default 20/min) — greift bei verteilten Versuchen | warten; bei Bedarf `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` anpassen (0 = aus). Der Kill-Switch (`POST /api/live/kill`) nutzt dieses Limit nie |
+| **Boot-Log warnt `[client-ip] TRUSTED_PROXY_IPS: … ungueltig`** | Eintrag ist keine CIDR/Adresse (Tippfehler, Hostname) | nur IPs/CIDR (`203.0.113.7`, `10.0.0.0/8`, `::1/128`) oder die Aliase `loopback`/`private`/`link-local`; der Eintrag wird sonst verworfen und Proxy-Header bleiben ignoriert (fail-closed) |
 | **Scanner-Funnel leer trotz großem Universum** | Marktdaten-Warmup fehlt — Kerzen fehlen | `npm run market:sync`, dann `npm run scan -- --sync-first`; `npm run market:sync:status` zeigt die Readiness |
 | **Setup-Skript: `nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'`** (v1.5.2 und älter) | systemd liefert `${PGROOT}` in `ExecStart` unexpandiert — der Gurt hält die eigene Arch-Unit fälschlich für einen fremden Drop-in | seit v1.5.3 behoben (Expansion der Unit-Environment in `scripts/lib/pg-service.sh`); Update ziehen und Setup erneut ausführen |
 | **`initdb` läuft durch, aber „Cluster nach initdb weiterhin unvollständig“** (v1.5.3 und älter) | Datenverzeichnis ist nach initdb `0700 postgres:postgres` — die alten Checks liefen als aufrufender Benutzer → EACCES → falsch „unvollständig“ (und falsches „existiert nicht“) | seit v1.5.4 behoben: alle Cluster-Checks laufen als postgres. **Nichts löschen!** → `sudo systemctl enable --now postgresql`, `pg_isready`, dann Setup erneut ausführen. Ausführlich: **docs/SETUP_PG_TROUBLESHOOTING.md** |

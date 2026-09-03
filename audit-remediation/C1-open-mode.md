@@ -166,8 +166,10 @@ ausdrücklich eintragen.
 
 ## Nachtrag (bewusst außer Scope)
 
-* `checkRateLimit`/`clientKey` verlassen sich auf `x-forwarded-for`/`x-real-ip` — das ist Befund
-  **C2** (`C2-forwarded-ip.md`) und wird dort separat abgearbeitet.
+* `checkRateLimit`/`clientKey` verließen sich auf `x-forwarded-for`/`x-real-ip` — das war Befund
+  **C2** (`C2-forwarded-ip.md`), inzwischen separat abgearbeitet (**gefixt v1.36.14**:
+  `src/lib/clientIp.ts` als geteilte `resolveClientIp()` für Firm- und Credential-Limiter,
+  `TRUSTED_PROXY_IPS` + `x-verified-ip`, globales IP-unabhängiges Limit, exponentieller Backoff).
 * `expectedCsrfValue()` der Control Plane akzeptiert im Offen-Betrieb die Konstante `local`
   (`src/brokers/control-plane/config.ts`). Solange `local-open` wirksam ist, ist das Konsistent;
   ein eigener Befund ist es nicht — der Modus-Guard gilt auch dort über `requirePermission`.

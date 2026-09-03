@@ -297,7 +297,9 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
   aus `readGateState(venue)` (Task 11: Enforcer-Entscheid über die
   persistierte State-Machine; Default `false`).
 - **Sicherheit:** RBAC (`src/auth`, Permission `broker.credentials`), CSRF
-  (`x-csrf-token`), Credential-Rate-Limit (5/min/IP), Audit je Ereignis
+  (`x-csrf-token`), Credential-Rate-Limit (5/min pro Client-Identität +
+  20/min global IP-unabhängig + exponentieller Backoff, Identität aus
+  `src/lib/clientIp.ts` — C2/v1.36.14), Audit je Ereignis
   (`BROKER_CONTROL_PLANE`), Response-/Bundle-Secret-Scanner in CI.
 
 ## 10. Ausbaupfad (Folge-Tasks)
