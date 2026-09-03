@@ -78,6 +78,11 @@ function spyPrivateClient(
       return {
         equity: 99999,
         cash: 88888,
+        walletBalance: 99999,
+        availableCash: 88888,
+        usedMargin: 0,
+        maintenanceMargin: 0,
+        unrealizedPnl: 0,
         openPositions: 0,
         startingEquity: 99999,
         drawdownPct: 0,

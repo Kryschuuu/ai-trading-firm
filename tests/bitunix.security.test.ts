@@ -61,7 +61,18 @@ function fakeClient(opts?: { failAccount?: boolean }) {
     getAccount: async () => {
       calls.getAccount += 1;
       if (opts?.failAccount) throw new BitunixApiError("unknown", "Konto-Abruf fehlgeschlagen.");
-      return { equity: 10_000, cash: 10_000, openPositions: 0, startingEquity: 10_000, drawdownPct: 0 };
+      return {
+        equity: 10_000,
+        cash: 10_000,
+        walletBalance: 10_000,
+        availableCash: 10_000,
+        usedMargin: 0,
+        maintenanceMargin: 0,
+        unrealizedPnl: 0,
+        openPositions: 0,
+        startingEquity: 10_000,
+        drawdownPct: 0,
+      };
     },
     getPositions: async () => {
       calls.getPositions += 1;

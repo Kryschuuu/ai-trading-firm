@@ -96,9 +96,22 @@ export class PaperBrokerAdapter implements BrokerAdapter {
 
   async getAccount(): Promise<BrokerAccount> {
     const b = this.paperBroker;
+    const equity = b.accountEquity;
+    // H8: Kanonische Zerlegung — PAPER ist ein voll besichertes Cash-Konto
+    // (kein Margin): unrealizedPnl aus den offenen Positionen (gleiche
+    // Preisquelle wie accountEquity), walletBalance = equity − unrealizedPnl
+    // (= Cash + Einstandswerte), freies Cash = cash, gebundene Margin = 0.
+    const unrealizedPnl = b
+      .listPositions()
+      .reduce((sum, p) => sum + (Number.isFinite(p.unrealizedPnl) ? p.unrealizedPnl : 0), 0);
     return {
-      equity: b.accountEquity,
+      equity,
       cash: b.freeCash,
+      walletBalance: equity - unrealizedPnl,
+      availableCash: b.freeCash,
+      usedMargin: 0,
+      maintenanceMargin: 0,
+      unrealizedPnl,
       openPositions: b.openPositions,
       startingEquity: b.startingEquity,
       drawdownPct: b.drawdownPct,

@@ -3,6 +3,14 @@
 - **Severity:** HIGH
 - **Bereich:** Brokers & Venues
 - **Status (validiert):** ✅ **Valide.**
+- **Status (Remediation):** ✅ **Gefixt v1.36.10** (2026-09-03) — kanonische
+  `BrokerAccount`-Zerlegung (walletBalance/availableCash/usedMargin/
+  maintenanceMargin/unrealizedPnl); `getAccount()` mappt
+  `equity = walletBalance + realizedPnl + unrealizedPnl` (realized nur, wenn
+  die API es liefert), `cash = available`; walletBalance-Fallback nur bei
+  genuin fehlendem Feld (`available + frozen + margin`), nie equity aus
+  `available` allein. Tests in `tests/bitunix.accountEquity.test.ts`,
+  Mapping-Doku in `docs/BITUNIX.md` (§5).
 - **Datei(en):** `src/brokers/bitunix/privateClient.ts` (`getAccount` L110‑123),
   `src/contracts/broker.ts` (`BrokerAccount`)
 
@@ -51,9 +59,15 @@ Venue-spezifisch auf kanonische Größen abbilden: `equity = walletBalance + rea
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] `equity` = `walletBalance + uPnL`, nicht nur `available + uPnL`.
-- [ ] `cash` bleibt das freie Margin (`available`).
-- [ ] Mock-Test mit `usedMargin>0` belegt korrekte Trennung.
+- [x] `equity` = `walletBalance + uPnL`, nicht nur `available + uPnL`
+      (umgesetzt als `equity = walletBalance + realizedPnl + unrealizedPnl`;
+      realizedPnl nur, wenn die Bitunix-API es liefert, sonst 0 — Bitunix
+      settled realisiertes PnL laufend ins Wallet).
+- [x] `cash` bleibt das freie Margin (`available`).
+- [x] Mock-Test mit `usedMargin>0` belegt korrekte Trennung
+      (`tests/bitunix.accountEquity.test.ts`: `usedMargin=1500` ⇒
+      `equity != available`; Assert `equity = walletBalance + uPnL` und
+      `cash = available`).
 
 ## Changelog-Blurb
 
@@ -62,4 +76,7 @@ uPnL; Risk-Guard nutzt echte Equity.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Datenkorrektur, `BrokerAccount`-Typ-Erweiterung (abwärtskompatibel).
+PATCH — **umgesetzt als `1.36.10`** (Reihenfolge der Remediation: H1=v1.36.2, H3=v1.36.4,
+H4=v1.36.5, H5=v1.36.6, H6=v1.36.7, H9=v1.36.8, H8=v1.36.10). Datenkorrektur +
+`BrokerAccount`-Typ-Erweiterung (abwärtskompatibel: alle Erzeuger — Paper-Ledger, PAPER-Wrapper,
+Alpaca-Mapping — liefern die kanonische Zerlegung mit).

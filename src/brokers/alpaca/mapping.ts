@@ -229,6 +229,13 @@ export function mapPosition(raw: AlpacaPosition): import("../../contracts/broker
 
 /**
  * Mappt ein Alpaca-Account auf BrokerAccount.
+ *
+ * H8: Die Alpaca-Account-Antwort führt keine Margin-/uPnL-Dekomposition
+ * (kein walletBalance/usedMargin/unrealizedPnl). Für das Alpaca-Cash-Konto
+ * wird daher ehrlich zerlegt: walletBalance = equity (Positionswerte liegen
+ * im Konto), freies Cash = cash, gebundene Margin = 0, unrealizedPnl = 0
+ * (Fallback nur für genuin fehlende Felder; siehe getPositions für echte
+ * Positions-uPnL).
  */
 export function mapAccount(raw: AlpacaAccount, startingEquity: number): import("../../contracts/broker").BrokerAccount {
   const equity = asNumber(raw.portfolio_value, 0);
@@ -236,6 +243,11 @@ export function mapAccount(raw: AlpacaAccount, startingEquity: number): import("
   return {
     equity,
     cash,
+    walletBalance: equity,
+    availableCash: cash,
+    usedMargin: 0,
+    maintenanceMargin: 0,
+    unrealizedPnl: 0,
     openPositions: 0, // wird vom Adapter aus positions gesetzt
     startingEquity,
     drawdownPct: startingEquity > 0 ? Math.max(0, (startingEquity - equity) / startingEquity) : 0,

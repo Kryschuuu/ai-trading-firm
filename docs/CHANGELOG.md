@@ -5,6 +5,88 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.10] — 2026-09-03 · fix(broker): H8 Bitunix-Equity korrekt aus walletBalance + uPnL statt available + uPnL (HIGH)
+
+**HIGH, Brokers/Venues.** Befund H8 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): `BitunixPrivateClient.getAccount()` berechnete
+
+```ts
+const equity = available + crossUnrealizedPNL + isolationUnrealizedPNL; // FALSCH
+```
+
+`available` ist bei einem USDT-margined-Futures-Konto die **freie Margin** (freies Cash), nicht
+das Gesamtkapital. Sobald Positionen offen sind (gebundene Positions-Margin `margin`, ggf.
+Order-Margin `frozen`), fehlte dieser Kontoanteil in der Equity — der Risk-Denominator für
+`maxPositionPct`, Order-Sizing und Drawdown war zu klein, und die Trennung von Equity und
+verfügbarem Cash ging verloren (`cash` soll die freie Margin für den Cash-Guard bleiben).
+
+### Geändert
+
+- **Contract (`src/contracts/broker.ts`):** `BrokerAccount` trägt jetzt die kanonische Zerlegung
+  mit Invariante `equity = walletBalance + unrealizedPnl` (+ `realizedPnl`, sofern ein Venue es
+  separat führt; Bitunix settled realisiertes PnL laufend ins Wallet):
+
+  | Feld | Bedeutung |
+  | --- | --- |
+  | `walletBalance` | Kontostand ohne offene Positionen (realisiertes PnL enthalten) |
+  | `availableCash` | frei verfügbares Cash (Futures: freie Margin) — kanonisch |
+  | `usedMargin` | aktuell gebundene Margin (Positionen + offene Orders) |
+  | `maintenanceMargin` | Wartungsmargin (Liquidationsschwelle); 0, wenn das Venue sie nicht liefert |
+  | `unrealizedPnl` | Summe der unrealisierten PnL aller offenen Positionen |
+  | `equity` | Mark-to-Market-Gesamtkapital (= walletBalance + unrealizedPnl) |
+  | `cash` | Legacy-Alias von `availableCash` (Cash-Guard) |
+
+- **Bitunix-Mapping (`src/brokers/bitunix/privateClient.ts`):** liest die echten Venue-Felder der
+  Account-Zeile (`GET /api/v1/futures/account`) und mappt:
+
+  ```ts
+  equity        = walletBalance + realizedPnl + unrealizedPnl
+  availableCash = available                       // = cash (Cash-Guard)
+  usedMargin    = usedMargin ?? row.margin ?? 0   // Positions-Margin des Venue
+  unrealizedPnl = crossUnrealizedPNL + isolationUnrealizedPNL
+  ```
+
+  - `walletBalance` wird direkt übernommen, wenn das Venue es liefert. Fehlt das Feld **genuin**
+    (die dokumentierte Antwort führt es nicht in jeder Version), wird es aus den venue-eigenen
+    Komponenten zerlegt: `available + frozen + margin` (freie Margin + Order-Margin +
+    Positions-Margin). Die Equity wird **nie** aus `available` allein synthetisiert;
+    `maintenanceMargin`/`realizedPnl` werden nur addiert, wenn die API sie tatsächlich liefert
+    (sonst 0). Leere/fehlende Felder ergeben fail-closed 0 — `validateOrder` (H9) blockt dann.
+  - `src/brokers/bitunix/types.ts`: `BitunixAccountRaw` um `walletBalance`, `usedMargin`,
+    `maintenanceMargin`, `realizedPnl` ergänzt (Feld-Doku).
+  - **Konsequenz für die Schutzkette:** `BrokerExecutionEngine.submit` prüft Guardrails weiterhin
+    gegen `account.equity` (jetzt das echte Gesamtkapital) und den Cash-Guard gegen
+    `account.cash` (= freie Margin) — exakt die H8-Trennung.
+
+- **Alle übrigen `BrokerAccount`-Erzeuger liefern die kanonische Zerlegung** (Paper/Cash-Konten,
+  kein Margin): Alpaca- und Bitunix-Paper-Ledger (`walletBalance = equity − unrealizedPnl` =
+  Cash + Einstandswerte, `availableCash = cash`, `usedMargin`/`maintenanceMargin` = 0),
+  PAPER-Venue-Wrapper (`src/brokers/paper.ts`) und Alpaca-Live-Mapping
+  (`src/brokers/alpaca/mapping.ts`, Account-Antwort ohne Margin-/uPnL-Dekomposition → ehrlicher
+  Fallback: `walletBalance = equity`, `unrealizedPnl = 0`).
+
+### Tests
+
+Neu `tests/bitunix.accountEquity.test.ts` (5 Fälle, gegen Bitunix-Fixture):
+
+- Venue-Zeile **mit** `walletBalance` und gebundener Margin (`available=8000, margin=1500,
+  uPnL=300`) → `equity = 9700 + 300 = 10.000`, `cash = 8000` → **`equity != available`
+  (usedMargin > 0)**; `usedMargin = 1500`.
+- Venue-Zeile **ohne** `walletBalance` (Bitunix-Doku-Fall) → Zerlegung `8000 + 200 + 1500 = 9700`,
+  `equity = 10.000`, nie gleich `available`.
+- Leeres Konto (Regression): `equity == cash == 10.000` wie bisher.
+- Explizite `usedMargin`/`maintenanceMargin`/`realizedPnl`-Felder werden addiert
+  (`equity = walletBalance + realizedPnl + unrealizedPnl`).
+- Genuin fehlende Felder → fail-closed 0.
+
+Verifiziert: `npm run typecheck`, `npm run lint`, `npm run docs:validate`, `npm test` =
+**1601/1601** Tests grün (davon 5 neue H8-Tests) sowie `npm run security:live-gate` grün.
+Mapping-Doku: `docs/BITUNIX.md` (Abschnitt 5), Status-Update in `docs/AUDIT_REMEDIATION_2026-09.md`
+und `audit-remediation/H8-bitunix-equity.md` („Gefixt v1.36.10“).
+
+---
+
+
 ## [1.36.9] — 2026-09-03 · fix(api): Async Route-Params — Approve-Endpoint war zur Laufzeit tot + `next build` brach ab (CRITICAL)
 
 **Kritischer Nachzug zum H6-Fix (v1.36.7):**

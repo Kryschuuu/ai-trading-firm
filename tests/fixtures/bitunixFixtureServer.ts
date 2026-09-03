@@ -26,6 +26,12 @@ export class BitunixFixtureServer {
   /** Optionaler HTTP-Status nur für `/api/v1/kline` (z. B. 429 Rate-Limit-Test). */
   klineStatus?: number;
   /**
+   * H8: Optionaler Account-Row (GET /futures/account). Ist er gesetzt, wird er
+   * als `data: [accountRow]` ausgeliefert; sonst die Default-Zeile (nur
+   * `available`, ohne gebundene Margin/Positionen).
+   */
+  accountRow: Record<string, string> | null = null;
+  /**
    * H4: Am Fixture platzierte Orders, nach `clientId` (Wire-Feld des
    * clientOrderId) registriert — damit `get_order_detail?clientId=...`
    * (getOrderByClientId) eine bestehende Order findet (Idempotenz-Tests).
@@ -158,7 +164,14 @@ export class BitunixFixtureServer {
       if (path === BITUNIX_PATHS.account) {
         json(res, 200, {
           code: 0,
-          data: [{ marginCoin: "USDT", available: "10000", crossUnrealizedPNL: "0", isolationUnrealizedPNL: "0" }],
+          data: [
+            this.accountRow ?? {
+              marginCoin: "USDT",
+              available: "10000",
+              crossUnrealizedPNL: "0",
+              isolationUnrealizedPNL: "0",
+            },
+          ],
         });
         return;
       }
