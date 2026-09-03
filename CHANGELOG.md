@@ -16,6 +16,19 @@
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
 
+## [1.36.3] — 2026-09-03 · security(audit): Remediation-Plan Senior Peer-Review
+
+**Pflicht-Audit (2026-09-03):** Senior Peer-Review über riskGuard, engine, broker, Portfolio-Risk-Guard,
+Workshop/API, Auth/RBAC, Control Plane sowie Bitunix-Ausführungs-/Signatur-/HTTP-/Secret-Store-Schicht.
+Ergebnis: **20 Befunde** (H1–H10, W1–W2, C1–C4, B1–B2, S1–S2). **H1 ist bereits in v1.36.2 gefixt**;
+19 weitere sind valide und werden als einzelne, self-contained Arena-Prompts unter `audit-remediation/`
+getrackt. Dieser Release bündelt den Plan + Dokumentation; die Fixes folgen als eigene Commits/PRs.
+
+Siehe [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md) und
+[`audit-remediation/README.md`](audit-remediation/README.md).
+
+---
+
 ## [1.36.2] — 2026-09-02 · fix(broker): H1 Risk-Notional ≠ tatsächliche Ausführungskosten (CRITICAL)
 
 **CRITICAL, Handelslogik (`src/lib/broker.ts`, `src/brokers/*/paper.ts`, `src/brokers/*/execution.ts`).**
