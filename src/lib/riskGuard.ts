@@ -213,15 +213,88 @@ export type GuardrailResult = {
   blockedBy: string[]; // which guardrail(s) fired
 };
 
+/**
+ * H9 FIX (HIGH 2026-09-03): Fail-closed Numerik-Validierung.
+ *
+ * Vergleiche mit NaN sind IMMER false (`NaN > x === false`) und eine
+ * Division durch NaN/0 ergibt NaN/Infinity — ein guardrail, der auf einem
+ * ungültigen Zahlenwert rechnet, kann damit still übergangen werden.
+ * Ein insolventes Konto (equity ≤ 0) wurde früher via `Math.max(equity, 1)`
+ * auf 1 geklemmt statt hart blockiert.
+ *
+ * Prinzip: „unbekannt“ bedeutet BLOCK, nicht ALLOW. Jede numerische
+ * Guardrail-Eingabe muss ein endlicher, positiver Wert sein; sonst wird
+ * eine `RiskValidationError` geworfen, die die Caller (PaperBroker.submit,
+ * BrokerExecutionEngine.submit, Micro-Executor) in einen REJECTED-Fill
+ * übersetzen (siehe `riskValidationReason`).
+ */
+export class RiskValidationError extends Error {
+  readonly code = "RISK_VALIDATION";
+  /** Feldname, der die Validierung verletzt hat (z. B. "equity"). */
+  readonly field: string;
+
+  constructor(field: string) {
+    super(`RISK_VALIDATION: ${field} muss eine endliche, positive Zahl sein`);
+    this.name = "RiskValidationError";
+    this.field = field;
+  }
+}
+
+/**
+ * Wandelt einen beliebigen Eingabewert in eine endliche, positive Zahl um.
+ * Wirft `RiskValidationError` bei NaN, ±Infinity, nicht-numerischen Werten
+ * oder Werten ≤ 0 (fail-closed).
+ */
+export function requireFinitePositive(value: unknown, field: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new RiskValidationError(field);
+  }
+  return n;
+}
+
+/**
+ * Übersetzt eine geworfene `RiskValidationError` in den stabilen
+ * REJECTED-Reason-Code, den die Broker-Schicht verwendet:
+ *   equity    → INVALID_EQUITY
+ *   leverage  → INVALID_LEVERAGE
+ *   notional  → INVALID_NOTIONAL
+ *   sonstige  → RISK_VALIDATION:<field>
+ */
+export function riskValidationReason(e: unknown): string {
+  if (e instanceof RiskValidationError) {
+    switch (e.field) {
+      case "equity":
+        return "INVALID_EQUITY";
+      case "leverage":
+        return "INVALID_LEVERAGE";
+      case "notional":
+        return "INVALID_NOTIONAL";
+      default:
+        return `RISK_VALIDATION:${e.field}`;
+    }
+  }
+  return e instanceof Error ? e.message.slice(0, 60) : "RISK_VALIDATION";
+}
+
 export function validateOrder(ctx: ValidateContext): GuardrailResult {
   const blockedBy: string[] = [];
 
+  // H9 FIX: Alle numerischen Guardrail-Eingaben werden fail-closed geprüft.
+  // NaN/Infinity/≤0 wirft — Vergleiche gegen NaN sind immer false und würden
+  // die Schranke sonst still umgehen; negatives Equity (insolvent) wird nie
+  // mehr auf 1 geklemmt, sondern blockiert. Der frühere notional-Fast-Path
+  // (`!Number.isFinite(notional) || notional <= 0`) bleibt als erster Check
+  // erhalten, routet aber über requireFinitePositive, sodass NaN/≤0 hier
+  // einheitlich werfen statt nur in die blockedBy-Liste zu laufen.
   if (!Number.isFinite(ctx.notional) || ctx.notional <= 0) {
-    blockedBy.push("notional:order-not-valid");
+    requireFinitePositive(ctx.notional, "notional"); // wirft immer (Fast-Path)
   }
+  const equity = requireFinitePositive(ctx.equity, "equity");
+  const leverage = requireFinitePositive(ctx.leverage, "leverage");
+  const notional = requireFinitePositive(ctx.notional, "notional");
 
-  const equity = Math.max(ctx.equity, 1);
-  const positionPct = ctx.notional / equity;
+  const positionPct = notional / equity;
 
   if (positionPct > RISK_LIMITS.maxPositionPct) {
     blockedBy.push(
@@ -231,7 +304,7 @@ export function validateOrder(ctx: ValidateContext): GuardrailResult {
 
   if (
     RISK_LIMITS.maxNotionalPerOrder > 0 &&
-    ctx.notional > RISK_LIMITS.maxNotionalPerOrder
+    notional > RISK_LIMITS.maxNotionalPerOrder
   ) {
     blockedBy.push(`notional:hard-cap-${RISK_LIMITS.maxNotionalPerOrder}`);
   }
@@ -240,7 +313,7 @@ export function validateOrder(ctx: ValidateContext): GuardrailResult {
     blockedBy.push("side:short-trading-disabled");
   }
 
-  if (ctx.leverage > RISK_LIMITS.maxLeverage) {
+  if (leverage > RISK_LIMITS.maxLeverage) {
     blockedBy.push(`leverage:max-${RISK_LIMITS.maxLeverage}x`);
   }
 
@@ -248,7 +321,15 @@ export function validateOrder(ctx: ValidateContext): GuardrailResult {
     blockedBy.push("stop-loss:mandatory");
   }
 
-  if (ctx.openPositions >= RISK_LIMITS.maxConcurrentPositions) {
+  // H9: Auch der Positionszähler wird fail-closed gelesen — ein unbekannter
+  // Wert (NaN/nicht endlich/negativ) darf die Nebenläufigkeits-Schranke nicht
+  // still umgehen (NaN >= x ist false). Unbekannt => BLOCK.
+  const openPositions = Number(ctx.openPositions);
+  const concurrencyReached =
+    Number.isFinite(openPositions) && openPositions >= 0
+      ? openPositions >= RISK_LIMITS.maxConcurrentPositions
+      : true;
+  if (concurrencyReached) {
     blockedBy.push(
       `concurrency:max-${RISK_LIMITS.maxConcurrentPositions}-positions`
     );

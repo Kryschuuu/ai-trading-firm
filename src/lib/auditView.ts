@@ -1759,6 +1759,82 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  PROPOSAL_CREATED: {
+    label: "Vorschlag erstellt (H6)",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Eine Nicht-Executor-Phase (CEO/Research/Backtest/Risk/Approver) hat einen Handelsvorschlag (Proposal) erzeugt. Vorschläge werden nie direkt ausgeführt — erst der Executor handelt eine freigegebene (APPROVED) Proposal. Status PENDING wartet auf menschliche Freigabe.",
+    headline: (d) =>
+      `${text(d.status) === "PENDING" ? "Vorschlag wartet auf Freigabe" : "Vorschlag automatisch freigegeben"} (${text(d.proposalId)?.slice(0, 12) ?? "?"})`,
+    sections: (d) => [
+      {
+        title: "Vorschlag",
+        facts: [
+          { label: "Vorschlag (ID)", value: text(d.proposalId) ?? "—", mono: true },
+          { label: "Status", value: text(d.status) ?? "—" },
+          { label: "Rolle", value: roleLabel(text(d.role)) },
+        ],
+      },
+    ],
+  },
+
+  PROPOSAL_APPROVED: {
+    label: "Vorschlag freigegeben (H6)",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Ein Mensch hat einen PENDING-Vorschlag über den Freigabe-Endpoint explizit genehmigt. Erst danach darf der Executor die Order mit den servervalidierten Vorschlagsdaten ausführen.",
+    headline: (d) => `Freigegeben durch ${text(d.approvedBy) ?? "?"} (${text(d.proposalId)?.slice(0, 12) ?? "?"})`,
+    sections: (d) => [
+      {
+        title: "Freigabe",
+        facts: [
+          { label: "Vorschlag (ID)", value: text(d.proposalId) ?? "—", mono: true },
+          { label: "Freigegeben von", value: text(d.approvedBy) ?? "—" },
+          { label: "Vorher-Status", value: text(d.previousStatus) ?? "PENDING" },
+        ],
+      },
+    ],
+  },
+
+  PROPOSAL_NOT_APPROVED: {
+    label: "Vorschlag nicht freigegeben (H6)",
+    category: "order",
+    expectedLevel: "WARN",
+    description:
+      "Der Executor sollte einen Vorschlag ausführen, der nicht (oder nicht mehr) den Status APPROVED hat. Fail-closed: Es wird nicht gehandelt. Erwartet bei PENDING/abgelehnten Vorschlägen.",
+    headline: (d) => `Vorschlag ${text(d.proposalId)?.slice(0, 12) ?? "?"} nicht freigegeben (Status ${text(d.status) ?? "?"})`,
+    sections: (d) => [
+      {
+        title: "Ablehnung",
+        facts: [
+          { label: "Vorschlag (ID)", value: text(d.proposalId) ?? "—", mono: true },
+          { label: "Aktueller Status", value: text(d.status) ?? "—" },
+          { label: "Grund", value: text(d.reason) ?? "PROPOSAL_NOT_APPROVED" },
+        ],
+      },
+    ],
+  },
+
+  PROPOSAL_NOT_FOUND: {
+    label: "Vorschlag nicht gefunden (H6)",
+    category: "order",
+    expectedLevel: "WARN",
+    description:
+      "Der Executor sollte eine Proposal-ID ausführen, zu der kein Vorschlag existiert. Fail-closed: Es wird nicht gehandelt — ein fehlender Vorschlag darf niemals zu einer Order führen.",
+    headline: (d) => `Vorschlag ${text(d.proposalId)?.slice(0, 12) ?? "?"} existiert nicht`,
+    sections: (d) => [
+      {
+        title: "Ablehnung",
+        facts: [
+          { label: "Vorschlag (ID)", value: text(d.proposalId) ?? "—", mono: true },
+          { label: "Grund", value: text(d.reason) ?? "PROPOSAL_NOT_FOUND" },
+        ],
+      },
+    ],
+  },
+
   CONFIG_CHANGED: {
     label: "Konfiguration geändert",
     category: "system",
