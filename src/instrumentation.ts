@@ -1,6 +1,17 @@
 /**
  * Next.js-Instrumentation: startet beim Server-Boot alle Hintergrundleufwerke.
  *
+ * 0) Auth-Boot-Guard (C1, v1.36.13): Produktion ohne Token verweigert den Start.
+ *    Läuft vor allem anderen und außerhalb jedes try/catch — ein Dienst, der
+ *    seine Schreib-API offen lässt, ist kein „eingeschränkt funktionierender“
+ *    Dienst. Zwei Startpunkte, weil einer nachweislich nicht reicht:
+ *    `scripts/auth-boot-guard.ts` (von `npm run start`/`npm run dev` vorgeschaltet)
+ *    beendet den Prozess hart mit Exit-Code 1; diese Instrumentation wirft, wenn
+ *    der Dienst am Skript vorbei gestartet wird (`next start`, PM2, Container).
+ *    Der Build (`NEXT_PHASE=phase-production-build`) ist in beiden Fällen
+ *    ausgenommen: Er stellt keinen Server dar und darf nicht an der
+ *    Laufzeitkonfiguration scheitern.
+ *
  * 1) Markt-Tick (Standard 60 s):
  *    Kurse aktualisieren → SL/TP prüfen → Tageslimit bewachen → Equity-Snapshot
  *
@@ -11,8 +22,46 @@
  *    Standard 23 Uhr Berliner Zeit): Penny-Team (Scout+Diligence) und danach
  *    der Swing-Researcher — genau einmal pro Tag.
  */
+/**
+ * Duck-Type statt `instanceof`: der Next-Build kompiliert `authMode.ts` in ein
+ * eigenes Chunk, `instanceof` über Modulinstanzen hinweg ist damit nicht
+ * garantiert (derselbe Grund wie für v1.36.1 bei den Adapter-Fehlern).
+ */
+function isConfigurationError(e: unknown): e is {
+  name: string;
+  code?: string;
+  message: string;
+  hint?: string;
+} {
+  return typeof e === "object" && e !== null && (e as { name?: string }).name === "ConfigurationError";
+}
+
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  const { assertAuthConfigured, authModeWarnings, describeAuthMode } = await import("@/auth/authMode");
+  // next build setzt NEXT_PHASE — dort gibt es keinen Server, der geschützt
+  // werden müsste, und ein Wurf würde jeden Build ohne .env abbrechen lassen.
+  const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+  // Hier wird geworfen, nicht der Prozess beendet: Turbopack baut die
+  // Instrumentation auch als Edge-Modul, und ein harter Abbruch wäre dort nicht
+  // verfügbar (Build-Warnung, die seit B4/„Arena-Randnotiz“ als Befund zählt).
+  // Das Ende mit Exit-Code 1 leistet der Startwächter `scripts/auth-boot-guard.ts`.
+  if (!isBuildPhase) {
+    try {
+      const decision = assertAuthConfigured();
+      for (const line of authModeWarnings(decision)) console.warn(line);
+      console.log(`[auth] ${describeAuthMode(decision)}`);
+    } catch (e) {
+      if (!isConfigurationError(e)) throw e;
+      // Next.js lässt den Prozess nach einem Instrumentations-Fehler weiterlaufen
+      // („Ready“, danach 500 auf jeder Route). Zusätzlich zur Startverweigerung
+      // muss deshalb sichtbar sein, WAS zu tun ist — die Journal-Zeile.
+      console.error(`[auth] Start verweigert (${e.code ?? "CONFIGURATION"}): ${e.message}`);
+      if (e.hint) console.error(`[auth] Behebung: ${e.hint}`);
+      throw e;
+    }
+  }
 
   const { assertTradingVenuesHaveRealAdapters } = await import("@/universe/capabilityProjection");
   assertTradingVenuesHaveRealAdapters();

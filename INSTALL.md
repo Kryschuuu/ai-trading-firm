@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-03** · Code-Version **1.36.5**
+> Dokumentationsstand **2026-09-03** · Code-Version **1.36.13**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -73,9 +73,11 @@ npm run start                   # http://0.0.0.0:3369
 ```
 
 Die `.env`-Datei enthält Zugangsdaten → `chmod 600 .env`.
-**Achtung:** `npm run start` bindet `0.0.0.0`. Ohne `FIRM_API_TOKEN` sind alle
-`POST`/`PUT`-Routen im gesamten Netz offen — das Setup-Skript erzeugt deshalb
-immer eines.
+**Achtung (C1, v1.36.13):** `npm run start` bindet `0.0.0.0` **und** setzt
+`NODE_ENV=production`. Ohne konfiguriertes Token startet der Dienst dann gar
+nicht mehr (Boot-Guard, `ConfigurationError: AUTH_NOT_CONFIGURED`) — das Setup-
+Skript erzeugt deshalb immer ein `FIRM_API_TOKEN`. Details im Abschnitt
+[Auth-Modus](#auth-modus-auth_mode-und-die-produktionspflicht-c1-v13613).
 
 ## Markt-Universum und Short-Selling (v1.30.0)
 
@@ -114,6 +116,58 @@ API-Sicherheit (V17–V18). Bestanden ab `--min-pass` (Default 15). Jeder
 Fehlcheck gibt eine konkrete Behebungszeile aus. Dokumentierte Ausnahmen und
 die Befund-Historie stehen in
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md).
+
+## Auth-Modus: `AUTH_MODE` und die Produktionspflicht (C1, v1.36.13)
+
+Schreibende Endpunkte (`POST`/`PUT`) und die Admin-Rolle hängen an einem
+expliziten Modus — nicht mehr am bloßen Fehlen eines Tokens:
+
+| Modus | Wirkt | Schreiben ohne Credential |
+| --- | --- | --- |
+| `token-required` | Tokens konfiguriert, **oder** `NODE_ENV=production`, **oder** explizit gesetzt | nein — 401/403 |
+| `local-open` | nur wenn kein Token gesetzt ist und der Modus wirksam wurde: implizit als Dev-Default (`NODE_ENV != production`), in Produktion nur explizit | ja |
+
+Drei Regeln, alle in `src/auth/authMode.ts` (SSoT) geprüft:
+
+1. **Produktion ohne Token startet nicht.** `NODE_ENV=production` (genau das setzt
+   `npm run start` / `deploy/ai-trading-firm.service`) und kein
+   `FIRM_ADMIN_TOKEN`/`FIRM_API_TOKEN`/`FIRM_VIEWER_TOKEN` ⇒ der Boot-Guard in
+   `src/instrumentation.ts` wirft `ConfigurationError`
+   (`AUTH_NOT_CONFIGURED`) und der Server bricht ab. `next build` ist ausgenommen
+   (`NEXT_PHASE=phase-production-build`) — ein Build ist kein Server.
+2. **`AUTH_MODE=local-open` ist ein Opt-in, keine Überraschung.** Ausserhalb der
+   Produktion ist es der Dev-Komfort-Default (mit Warnung im Boot-Log). In
+   Produktion braucht es den ausdrücklich in `.env` eingetragenen Wert — der
+   Betrieb ist dann offen, aber es ist eine dokumentierte Entscheidung, keine
+   Unterlassung.
+3. **Ein Token sperrt den Offen-Betrieb aus.** Sobald irgendein Token gesetzt
+   ist, gilt immer `token-required`; ein gesetztes `AUTH_MODE=local-open` wird
+   ignoriert und boot-seitig gemeldet. Ein unbekannter `AUTH_MODE`-Wert ist ein
+   Konfigurationsfehler (`AUTH_MODE_INVALID`) und startet den Dienst nicht.
+
+Token erzeugen und eintragen:
+
+```bash
+umask 077
+printf 'FIRM_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+```
+
+`scripts/setup-cachyos.sh` macht das Schritt 05 automatisch; nur `--no-api-token`
+schreibt stattdessen `AUTH_MODE=local-open` in die `.env` — bewusst offen, nicht
+versehentlich. Der Modus ist auch im Betrieb sichtbar: `GET /api/auth/me` liefert
+`authMode.{mode,requested,reason,production,tokensConfigured}`.
+
+Der Wächter läuft bei `npm run start` und `npm run dev` automatisch vor `next`
+und beendet den Prozess mit Exit-Code 1, wenn die Konfiguration nicht startfähig
+ist. Vor einem Deploy (oder als Check in der Pipeline) lässt er sich isoliert
+aufrufen, ohne einen Server zu starten:
+
+```bash
+npm run boot:guard        # Exit 0 = Start erlaubt · Exit 1 = verweigert + Grund
+```
+
+Details: [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md), Befund C1 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Env-Flag-Referenz (sichere Defaults)
 
@@ -233,6 +287,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `FIRM_ADMIN_TOKEN` | *(leer)* | Admin-Token (RBAC) |
 | `FIRM_API_TOKEN` | *(leer)* | API-Token für alle `POST`/`PUT`-Routen; `scripts/setup-cachyos.sh` erzeugt eines |
 | `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Token |
+| `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
 | `FIRM_RATE_LIMIT` | — | Rate-Limit auf Firm-API |
 
 ### Modell-Routing (Task 09)

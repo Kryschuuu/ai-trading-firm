@@ -1,9 +1,9 @@
 {
   "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
   "id": "ops",
-  "version": 3,
+  "version": 4,
   "title": "Operations Center & RBAC — Feldhilfe",
-  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) sowie der Market-Data-Readiness-Diagnose (v1.27) im 3-Ebenen-Schema.",
+  "description": "Hilfetexte zu Rollen, Permissions, Auth-Modus (AUTH_MODE), Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) sowie der Market-Data-Readiness-Diagnose (v1.27) im 3-Ebenen-Schema.",
   "source": "src/auth/ · src/ops/ · src/components/ops/OperationsCenterPanel.tsx",
   "fields": {
     "role.viewer": {
@@ -13,13 +13,18 @@
     },
     "role.operator": {
       "kurzinfo": "Operator darf Pipeline, Kill-Switch und Config, aber keine Broker-Secrets.",
-      "technischeInfo": "Zusätzlich firm.write/kill/config und broker.test. Token: FIRM_API_TOKEN. Ohne FIRM_ADMIN_TOKEN erbt der Operator Admin-Rechte (Single-Admin).",
+      "technischeInfo": "Zusätzlich firm.write/kill/config und broker.test. Token: FIRM_API_TOKEN. Ohne FIRM_ADMIN_TOKEN erbt der Operator Admin-Rechte (Single-Admin). Schreibende Firm-Endpunkte verlangen den Header x-firm-token, sobald ein Token konfiguriert ist.",
       "risiko": "Elevation ist Absicht für den Solo-Betrieb. Sobald ein Admin-Token existiert, verliert der Operator broker.credentials und routing.modes.write."
     },
     "role.admin": {
       "kurzinfo": "Admin verwaltet Credentials und Routing-Modi.",
-      "technischeInfo": "Alle Operator-Rechte plus broker.credentials und routing.modes.write. Token: FIRM_ADMIN_TOKEN. Local-open (kein Token) gilt als Admin.",
+      "technischeInfo": "Alle Operator-Rechte plus broker.credentials und routing.modes.write. Token: FIRM_ADMIN_TOKEN. Der Quelle local-open wird nur als Admin gewertet, wenn der Auth-Modus auf local-open steht (AUTH_MODE_FLAG src/auth/authMode.ts).",
       "risiko": "Admin ist nicht Live-Freigabe. live.gate bleibt leer bis Task 11."
+    },
+    "auth.mode": {
+      "kurzinfo": "AUTH_MODE entscheidet, ob die Schreib-API ohne Credential offen ist.",
+      "technischeInfo": "Werte: local-open oder token-required. Irgendein Token konfiguriert ⇒ token-required. Kein Token: lokal-offen nur als Dev-Default (NODE_ENV != production) oder explizit gesetzt; Produktion ohne Token verweigert den Start (ConfigurationError AUTH_NOT_CONFIGURED). Wirksamer Modus: GET /api/auth/me → authMode.",
+      "risiko": "Ohne diese Regel wäre ein nicht gesetztes Token ein offener Schreib-Zugang im Netz (Audit-Befund C1, HIGH). local-open in Produktion ist nur als ausdrücklicher Opt-in mit Warnung im Boot-Log möglich."
     },
     "live.gate": {
       "kurzinfo": "Permission für Live-Gate-Transitionen und Kill (Task 11): Admin-Rolle, CSRF-Pflicht, 5 Anfragen/min/IP.",

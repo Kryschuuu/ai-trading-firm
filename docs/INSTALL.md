@@ -325,6 +325,38 @@ MODEL_APPROVER=qwen2.5:7b-instruct-q4_K_M
 MODEL_EXECUTOR=qwen2.5:7b-instruct-q4_K_M
 ```
 
+**Sicherheit (C1, v1.36.13): Token oder expliziter Offen-Betrieb.**
+Seit diesem Release entscheidet **`AUTH_MODE`**, ob die Schreib-API offen ist —
+nicht mehr stillschweigend das Fehlen eines Tokens:
+
+```bash
+# Empfohlen: ein Token. scripts/setup-cachyos.sh Schritt 05 macht das automatisch.
+# Manuell: Zufallswert erzeugen und ihn in .env als FIRM_API_TOKEN eintragen:
+umask 077
+openssl rand -hex 32
+
+# Nur für den bewussten Lokalbetrieb ohne Token (Single-User, 127.0.0.1):
+printf 'AUTH_MODE=local-open\n' >> .env
+```
+
+Was die Regeln bedeuten (Quelle: `src/auth/authMode.ts`, Flags referenziert
+[`../INSTALL.md`](../INSTALL.md)):
+
+* `npm run start` und die systemd-Unit setzen `NODE_ENV=production`. **Ohne
+  irgendein Token verweigert der Dienst den Start** — `ConfigurationError:
+  Refuse startup: authentication not configured`. Das ist Absicht: ein offener
+  Schreib-Endpunkt im Netz war der Befund, kein Feature.
+* `AUTH_MODE` kennt nur `local-open` und `token-required`. Jeder andere Wert
+  (auch ein Tipfehler) ist ein Boot-Fehler, nie ein Offen-Schalter.
+* `AUTH_MODE=local-open` in Produktion startet nur mit dem ausdrücklich in
+  `.env` eingetragenen Wert und meldet eine laute Warnung ins Log.
+* `npm run dev` läuft ohne Token offen (Dev-Komfort) und kündigt das im
+  Boot-Log an. Produktionsnahes Verhalten prüfst du mit
+  `AUTH_MODE=token-required npm run dev`.
+* Kontrolle im Betrieb: `curl -s localhost:3369/api/auth/me | jq .authMode` —
+  oder der Wächter allein, ohne Server-Start: `npm run boot:guard`
+  (Exit 0 = Start erlaubt, Exit 1 = verweigert mit Grund und Behebung).
+
 ### 5.2 Tabellen anlegen
 
 ```bash
@@ -374,6 +406,10 @@ psql "$DATABASE_URL" -c "\d positions"
 npm run build
 npm run start          # läuft auf http://localhost:3369
 ```
+
+`npm run start` läuft mit `NODE_ENV=production` und braucht deshalb mindestens
+ein Token (`FIRM_API_TOKEN`) — sonst bricht der Boot mit `AUTH_NOT_CONFIGURED`
+ab (siehe 5.1, Abschnitt Sicherheit). `npm run dev` ist davon ausgenommen.
 
 Im Browser öffnen → **„Seed / Reset"** → **„▶▶ Ganze Pipeline"**.
 
@@ -530,7 +566,9 @@ sudo firewall-cmd --add-port=3369/tcp --permanent && sudo firewall-cmd --reload
 sudo ufw allow from 192.168.1.0/24 to any port 3369
 ```
 
-> **Nicht ins offene Internet stellen.** Es gibt keine Authentifizierung. Wenn du von
+> **Nicht ins offene Internet stellen.** Die Schreib-API ist seit v1.36.13 an
+> `FIRM_API_TOKEN` (bzw. die RBAC-Tokens) gebunden und in Produktion ohne Token
+> startunfähig; das Dashboard liest aber weiterhin ohne Credential. Wenn du von
 > außen zugreifen willst: WireGuard oder Tailscale, kein Portforwarding.
 
 ---
@@ -749,7 +787,9 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **`UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet`** | die Broker-Factory liefert keinen Paper-Adapter — meist fehlendes `.env` oder `PAPER_MODE`-Fehlkonfiguration | `.env` und `PAPER_MODE` prüfen, Dienst neu starten; Check V12 verifiziert `/api/firm → account.broker`. Befund B3 in **[SETUP_BUGS.md](SETUP_BUGS.md)** |
 | **`initdb: error: locale "C.UTF-8" does not exist`** | Minimalinstallation ohne `C.UTF-8` | seit v1.30.0 behoben: `pg_pick_locale()` fällt auf `en_US.UTF-8` bzw. `C` zurück. Manuell: `initdb -D … --locale=en_US.UTF-8 --encoding=UTF8`. Befund B1 |
 | **Build meldet „Dynamic filesystem access“-Warnungen** | dynamische `path.join(process.cwd(), …)`-Stellen | seit v1.30.0 behoben über `src/lib/appPaths.ts`. Wiederkehrend? `npm run build` erneut prüfen — Setup-Schritt 09 meldet sie. Befund B4 |
-| **API im LAN offen beschreibbar** | `npm run start` bindet `0.0.0.0` und ohne `FIRM_API_TOKEN` sind `POST`/`PUT` ungeschützt | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befund B5 |
+| **API im LAN offen beschreibbar** | `npm run start` bindet `0.0.0.0`; offen ist sie nur noch mit wirksamem `AUTH_MODE=local-open` | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befunde B5 und C1 |
+| **Dienst startet nicht: `Refuse startup: authentication not configured` (`AUTH_NOT_CONFIGURED`)** | `NODE_ENV=production` (also `npm run start`/systemd) ohne jedes Token — seit v1.36.13 Boot-Verweigerung statt offener API | Token setzen (`openssl rand -hex 32` → `FIRM_API_TOKEN` in `.env`) oder bewusst `AUTH_MODE=local-open` eintragen; Befund C1 in **[AUDIT_REMEDIATION_2026-09.md](AUDIT_REMEDIATION_2026-09.md)** |
+| **`POST /api/firm/*` liefert `401` mit `code: AUTH_NOT_CONFIGURED`** | Auth-Modus ist `token-required`, aber es ist kein Token konfiguriert (Boot-Guard lief nicht oder wurde umgangen) | `.env`-Token setzen und Dienst neu starten; Dev-Modus mit `AUTH_MODE=local-open` |
 | **Scanner-Funnel leer trotz großem Universum** | Marktdaten-Warmup fehlt — Kerzen fehlen | `npm run market:sync`, dann `npm run scan -- --sync-first`; `npm run market:sync:status` zeigt die Readiness |
 | **Setup-Skript: `nutzt ein anderes Datenverzeichnis: '${PGROOT}/data'`** (v1.5.2 und älter) | systemd liefert `${PGROOT}` in `ExecStart` unexpandiert — der Gurt hält die eigene Arch-Unit fälschlich für einen fremden Drop-in | seit v1.5.3 behoben (Expansion der Unit-Environment in `scripts/lib/pg-service.sh`); Update ziehen und Setup erneut ausführen |
 | **`initdb` läuft durch, aber „Cluster nach initdb weiterhin unvollständig“** (v1.5.3 und älter) | Datenverzeichnis ist nach initdb `0700 postgres:postgres` — die alten Checks liefen als aufrufender Benutzer → EACCES → falsch „unvollständig“ (und falsches „existiert nicht“) | seit v1.5.4 behoben: alle Cluster-Checks laufen als postgres. **Nichts löschen!** → `sudo systemctl enable --now postgresql`, `pg_isready`, dann Setup erneut ausführen. Ausführlich: **docs/SETUP_PG_TROUBLESHOOTING.md** |
@@ -770,7 +810,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | Port 3369 belegt / **`EADDRINUSE 0.0.0.0:3369`** | ein anderer Prozess (z. B. ein manuell gestarteter Dienst) hält den Port | Besitzer ermitteln: `sudo ss -ltnp 'sport = :3369'`; den manuellen Prozess beenden (`sudo kill <PID>`) und `sudo systemctl restart ai-trading-firm` — oder bewusst einen anderen Port wählen: `PORT=3100 npm run start` |
 | **Validierung meldet `V16` fehlgeschlagen** | Short-Selling ist aus, `--expect-shorts` erwartet aber `true` | `--expect-shorts false` — oder aktivieren: `allowShort = 1` im Dashboard bzw. `INSERT … ON CONFLICT (key) DO UPDATE` auf `risk_config` |
 | **Validierung meldet `V08`–`V11` fehlgeschlagen** | Preset-Universum nicht geseedet | `npm run universe:seed:markets` |
-| **Validierung meldet `V18` fehlgeschlagen** | kein `FIRM_API_TOKEN` konfiguriert | Token in `.env` setzen und Dienst neu starten — sonst ist die API im LAN offen |
+| **Validierung meldet `V18` fehlgeschlagen** | kein `FIRM_API_TOKEN` konfiguriert, aber `AUTH_MODE=local-open` wirksam (offener Lokalbetrieb) | Token in `.env` setzen und Dienst neu starten. Ohne Token und ohne `AUTH_MODE=local-open` startet der Dienst in Produktion gar nicht erst (Boot-Guard, Befund C1) |
 
 Weitere Diagnose im **[Handbuch, Kapitel 12](HANDBUCH.md)**.
 

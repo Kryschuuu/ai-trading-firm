@@ -1,15 +1,27 @@
 /**
- * Token → Actor (Task 10, Phase 1).
+ * Token → Actor (Task 10, Phase 1; Modus-Entscheidung seit C1 v1.36.13).
  *
  * Reihenfolge der Treffer: Admin-Token, Operator-Token, Viewer-Token.
- * Kein konfiguriertes Token ⇒ lokaler Offen-Betrieb als Admin (`local-open`).
+ * Kein konfiguriertes Token ⇒ nur dann lokaler Offen-Betrieb als Admin
+ * (`local-open`), wenn der Auth-Modus das hergibt: ausserhalb der Produktion
+ * als Dev-Default, in Produktion ausschliesslich mit explizitem
+ * `AUTH_MODE=local-open` (siehe `src/auth/authMode.ts`). Sonst ist die
+ * Auflösung zu — nie implizit offen.
  *
  * Statuscodes bleiben kompatibel zur Control Plane (Task 08):
  *   - FIRM_ADMIN_TOKEN gesetzt, kein Treffer → 403 FORBIDDEN
  *   - nur FIRM_API_TOKEN / FIRM_VIEWER_TOKEN, kein Treffer → 401 UNAUTHORIZED
  *   - authentifiziert ohne Permission → 403 FORBIDDEN
+ *   - kein Token, Modus token-required → 401 UNAUTHORIZED (AUTH_NOT_CONFIGURED)
  */
-import { tokenEquals } from "@/lib/apiAuth";
+import { tokenEquals } from "@/lib/tokenCompare";
+import {
+  ADMIN_TOKEN_FLAG,
+  OPERATOR_TOKEN_FLAG,
+  VIEWER_TOKEN_FLAG,
+  adminTokenConfigured,
+  resolveAuthMode,
+} from "./authMode";
 import { permissionsForRole } from "./permissions";
 import type {
   Actor,
@@ -18,27 +30,17 @@ import type {
   Role,
 } from "./types";
 
-export const ADMIN_TOKEN_FLAG = "FIRM_ADMIN_TOKEN";
-export const OPERATOR_TOKEN_FLAG = "FIRM_API_TOKEN";
-export const VIEWER_TOKEN_FLAG = "FIRM_VIEWER_TOKEN";
+export {
+  ADMIN_TOKEN_FLAG,
+  OPERATOR_TOKEN_FLAG,
+  VIEWER_TOKEN_FLAG,
+  adminTokenConfigured,
+  anyTokenConfigured,
+} from "./authMode";
 
 export const ADMIN_HEADER = "x-admin-token";
 export const OPERATOR_HEADER = "x-firm-token";
 export const VIEWER_HEADER = "x-viewer-token";
-
-export function adminTokenConfigured(
-  env: Record<string, string | undefined> = process.env
-): boolean {
-  return Boolean(env[ADMIN_TOKEN_FLAG]);
-}
-
-export function anyTokenConfigured(
-  env: Record<string, string | undefined> = process.env
-): boolean {
-  return Boolean(
-    env[ADMIN_TOKEN_FLAG] || env[OPERATOR_TOKEN_FLAG] || env[VIEWER_TOKEN_FLAG]
-  );
-}
 
 function presentedTokens(req: Request): {
   admin: string;
@@ -106,7 +108,17 @@ export function resolveAuth(
   }
 
   if (!adminTok && !operatorTok && !viewerTok) {
-    return { ok: true, actor: buildActor("admin", "local-open", env) };
+    // C1 (v1.36.13): Offen-Betrieb ist an den Modus gebunden, nicht an das
+    // Fehlen von Tokens. Produktion ohne Token ⇒ zu (und Boot-Guard wirft).
+    if (resolveAuthMode(env).mode === "local-open") {
+      return { ok: true, actor: buildActor("admin", "local-open", env) };
+    }
+    return {
+      ok: false,
+      status: 401,
+      error: "UNAUTHORIZED",
+      hint: "Authentifizierung ist nicht konfiguriert (AUTH_MODE=token-required, kein Token gesetzt). FIRM_ADMIN_TOKEN/FIRM_API_TOKEN setzen; lokal-offener Betrieb nur ausserhalb der Produktion mit AUTH_MODE=local-open.",
+    };
   }
 
   if (adminTok) {
