@@ -4,14 +4,25 @@ import { proposals } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { logAudit } from "@/lib/engine";
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+/**
+ * Next.js >= 15 liefert `params` in Route-Handlern als Promise; seit Next.js 16
+ * ist der synchrone Zugriff vollständig entfernt (Breaking Change
+ * "Sync params/searchParams props access"). Ohne `await` wäre `params.id`
+ * zur Laufzeit `undefined` und jeder Approve-Call würde mit 400
+ * "proposal id missing" abbrechen — deshalb hier die Repo-Konvention
+ * `RouteContext` (vgl. /api/brokers/[venue]/*, /api/firm/rules/[id]).
+ */
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function POST(request: NextRequest, ctx: RouteContext) {
   try {
+    const { id } = await ctx.params;
     const body = await request.json().catch(() => ({}));
     const approvedBy = typeof body?.approvedBy === "string" ? body.approvedBy.trim() : "";
     if (!approvedBy || approvedBy.length < 1) {
       return NextResponse.json({ error: "approvedBy (actor) is required" }, { status: 400 });
     }
-    const proposalId = params.id;
+    const proposalId = id;
     if (!proposalId) {
       return NextResponse.json({ error: "proposal id missing" }, { status: 400 });
     }
