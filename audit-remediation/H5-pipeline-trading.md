@@ -2,7 +2,7 @@
 
 - **Severity:** CRITICAL
 - **Bereich:** Handelslogik
-- **Status (validiert):** ✅ **Valide.**
+- **Status (validiert):** ✅ **Gefixt in v1.36.6.**
 - **Datei(en):** `src/lib/engine.ts` (`runAgentTurn` L510, `runPipeline` L778‑794)
 
 ## Arena-Prompt (kopierbar)
@@ -53,9 +53,9 @@ Agenten-Phasen und Ausführung trennen (siehe Audit H5-Fix-Skizze). Nur EXECUTOR
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] RESEARCH/andere Rollen → kein `broker.submit`, nur Proposal.
-- [ ] Pipeline bricht nicht mehr vorzeitig durch RESEARCH-EXECUTED ab.
-- [ ] EXECUTOR führt ausschließlich genehmigte Proposal aus.
+- [x] RESEARCH/andere Rollen → kein `broker.submit`, nur Proposal.
+- [x] Pipeline bricht nicht mehr vorzeitig durch RESEARCH-EXECUTED ab.
+- [x] EXECUTOR führt ausschließlich genehmigte Proposal aus.
 
 ## Changelog-Blurb
 
@@ -64,4 +64,8 @@ EXECUTOR submitted, alle anderen erzeugen nur Proposals.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Verhaltenskorrektur ohne Schema-Änderung.
+PATCH (`1.36.6`) — Verhaltenskorrektur ohne Schema-Änderung.
+
+## Umsetzung
+
+Gefixt: Nicht-EXECUTOR-Phasen laufen im Proposal-only-Modus. Die Executor-Phase lädt die jüngste `APPROVED` Proposal und übergibt ausschließlich deren servervalidierte Orderdaten an den Broker. Ein zusätzlicher Rollen-Guard auditiert und blockiert jeden unerwarteten Zugriff auf die Broker-Schleuse.

@@ -62,9 +62,15 @@ Status-Vertrag erweitern, `submit` liefert nur `NEW`, Fill-Daten danach über
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] `submit()` live → `status:"NEW"`, `fillPrice:0`, gültige `orderId`.
-- [ ] `reconcile()` übernimmt echten `avgPrice` (kein 0-Entry).
-- [ ] Consumer handeln `NEW | PARTIALLY_FILLED | CANCELED | UNKNOWN`.
+- [x] `submit()` live → `status:"NEW"`, `fillPrice:0`, gültige `orderId`
+      (`tests/bitunix.adapter.test.ts`, `tests/bitunix.security.test.ts`).
+- [x] `reconcile()` übernimmt echten `avgPrice` (kein 0-Entry): Venue
+      `PART_FILLED` → `PARTIALLY_FILLED` mit avgPrice aus den Trades;
+      FILLED ohne belegbaren Preis → `UNKNOWN` (`FILL_PRICE_UNKNOWN`).
+- [x] Consumer handeln `NEW | PARTIALLY_FILLED | CANCELED | UNKNOWN`
+      (Switch in Alpaca-Mapping, Audit-Ansicht, Engine/Mikro-Executor-Booking).
+- [x] Positionen werden nur mit echtem avgPrice gebucht: `isBookableFill`
+      im Contract; `listPositions` verwirft entryPrice/qty ≤ 0.
 
 ## Changelog-Blurb
 
@@ -73,4 +79,5 @@ Fill-Reconciliation via getOrder/getExecutions; Positionen nur mit echtem avgPri
 
 ## Versions-Hinweis
 
-Contract-Änderung (neue Status) → PATCH (`1.36.3`), abwärtskompatibel (paper bleibt FILLED).
+Contract-Änderung (neue Status) → PATCH (`1.36.4`, da 1.36.3 bereits durch den
+Audit-Plan-Release belegt ist), abwärtskompatibel (paper bleibt FILLED).

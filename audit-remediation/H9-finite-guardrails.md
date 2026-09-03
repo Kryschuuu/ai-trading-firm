@@ -3,6 +3,10 @@
 - **Severity:** HIGH
 - **Bereich:** Handelslogik
 - **Status (validiert):** ✅ **Valide.**
+- **Status (Remediation):** ✅ **Gefixt v1.36.8** (2026-09-03) — fail-closed
+  Numerik-Validierung via `requireFinitePositive` / `RiskValidationError`;
+  alle Caller übersetzen in REJECTED-Fills (`INVALID_EQUITY` etc.).
+  Tests in `tests/riskGuard.test.ts`.
 - **Datei(en):** `src/lib/riskGuard.ts` (`validateOrder` L219‑243)
 
 ## Arena-Prompt (kopierbar)
@@ -54,9 +58,12 @@ if (ctx.leverage > RISK_LIMITS.maxLeverage) { ... }  // NaN > x === false
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] `equity=NaN` / `leverage=NaN` → `RiskValidationError` (Order REJECTED).
-- [ ] `equity<=0` (insolvent) → hart blockiert, nicht auf 1 geklemmt.
-- [ ] `notional` bleibt finite-positive-geprüft.
+- [x] `equity=NaN` / `leverage=NaN` → `RiskValidationError` (Order REJECTED).
+- [x] `equity<=0` (insolvent) → hart blockiert, nicht auf 1 geklemmt.
+- [x] `notional` bleibt finite-positive-geprüft.
+- [x] Zusätzlich: `openPositions=NaN` blockiert fail-closed (Nebenläufigkeits-Schranke);
+      NaN/Infinity/negativ für alle drei Felder über Unit-Tests abgesichert
+      (`tests/riskGuard.test.ts`, H9-Suite).
 
 ## Changelog-Blurb
 
@@ -65,4 +72,6 @@ NaN/negativ => BLOCK statt stiller Clamp.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Verhaltens-Härtung, keine API-Änderung.
+PATCH — **umgesetzt als `1.36.8`** (Reihenfolge der Remediation: H3=v1.36.4,
+H4=v1.36.5, H5=v1.36.6, H6=v1.36.7, H9=v1.36.8). Verhaltens-Härtung, keine
+API-Änderung.

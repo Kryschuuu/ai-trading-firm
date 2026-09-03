@@ -74,6 +74,13 @@ export interface BitunixPlaceOrderBody {
   orderType: "LIMIT" | "MARKET";
   price?: string;
   effect?: "IOC" | "FOK" | "GTC" | "POST_ONLY";
+  /**
+   * Venue-Client-Order-Id (`clientOrderId` im internen Sprachgebrauch, H4):
+   * stabiler Idempotenz-Key pro Order-Intent. Bitunix' Wire-Feld heißt
+   * `clientId` ("Customize order ID") und wird vom Adapter deterministisch
+   * erzeugt und bei jedem Retry mit demselben Wert wiederverwendet, damit
+   * ein nicht-idempotenter place_order-POST nie eine Doppelorder erzeugt.
+   */
   clientId?: string;
   reduceOnly?: boolean;
   tpPrice?: string;
@@ -84,6 +91,59 @@ export interface BitunixPlaceOrderBody {
   slStopType?: "MARK_PRICE" | "LAST_PRICE" | "MARK";
   slOrderType?: "LIMIT" | "MARKET";
   slOrderPrice?: string;
+}
+
+/**
+ * Order-Detail GET /api/v1/futures/trade/get_order_detail (H3-Reconciliation).
+ * Venue-Status: INIT (prepare) | NEW (pending) | PART_FILLED (teilgefüllt) |
+ * CANCELED | FILLED (vollständig). `tradeQty` ist die gefüllte Menge; das
+ * Venue liefert KEINEN avgPrice — der wird aus den Trades (Fill[]) berechnet.
+ */
+export interface BitunixOrderRaw {
+  orderId?: string;
+  clientId?: string;
+  symbol?: string;
+  qty?: string | number;
+  tradeQty?: string | number;
+  side?: string;
+  orderType?: string;
+  status?: string;
+  price?: string | number;
+  reduceOnly?: boolean;
+  ctime?: number;
+  mtime?: number;
+  [extra: string]: unknown;
+}
+
+/** Trade/Ausführung GET /api/v1/futures/trade/get_history_trades. */
+export interface BitunixTradeRaw {
+  tradeId?: string;
+  orderId?: string;
+  symbol?: string;
+  qty?: string | number;
+  price?: string | number;
+  side?: string;
+  fee?: string | number;
+  roleType?: string;
+  ctime?: number;
+  [extra: string]: unknown;
+}
+
+/**
+ * Ein gebuchter Fill (broker-unabhängig), wie er von
+ * `BitunixPrivateClient.getExecutions` geliefert wird — die Quelle für den
+ * echten avgPrice bei der Reconciliation (H3).
+ */
+export interface BitunixFill {
+  tradeId: string;
+  orderId: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  price: number;
+  fee: number;
+  /** Unix-Epoch (ms) der Ausführung. */
+  ts: number;
 }
 
 /** Account-Zeile GET /api/v1/futures/account. */

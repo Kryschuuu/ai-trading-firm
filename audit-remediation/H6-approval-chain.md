@@ -58,4 +58,4 @@ Proposals aus; Orderparameter kommen zwingend aus proposedDetail.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Logik-Korrektur, kein Schema-Bruch (bestehende `proposals`-Tabelle).
+PATCH (`1.36.7`) — Logik-Korrektur, kein Schema-Bruch (bestehende `proposals`-Tabelle).

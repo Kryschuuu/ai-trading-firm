@@ -104,7 +104,7 @@ ausschließlich den credential-freien PublicClient.
 | Ebene | Pfade | Auth-Anforderung | Rate-Limit | Aktivierungs-Flag |
 | --- | --- | --- | --- | --- |
 | **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** — credential-freier PublicClient, keine Signatur, kein Nonce | Token-Bucket **8 req/s/IP** (Doku: 10); ein **geteilter** Bucket je Sync-Lauf, Parallelität ≤ 8 | `BITUNIX_ENABLED=true` + `capabilities.BITUNIX.marketData` + `MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES` (Sync) |
-| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order` | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
+| **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order`, `trade/get_order_detail`, `trade/get_history_trades` (H3-Reconciliation) | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger gegen echte Public-Kurse) | keine signierten Requests (liest nur Public-Ticker) | über Public-Bucket | `getBroker("BITUNIX", "paper")`, `BITUNIX_ENABLED=true` |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert (Private API) + komplette Live-Gate-State-Machine | Private-Bucket | `BITUNIX_LIVE_ENABLED` + `LIVE_TRADING_ENABLED` + `REQUIRE_HUMAN_APPROVAL=false` + Live-Gate `LIVE_ENABLED` (Default: `LiveTradingGateError`) |
 
@@ -243,10 +243,34 @@ Basis: `https://fapi.bitunix.com` (Allowlist-Host). Schema `https` erzwungen;
 | Account (privat) | `GET /api/v1/futures/account` |
 | Positionen (privat) | `GET /api/v1/futures/position/get_pending_positions` |
 | Place-Order (privat) | `POST /api/v1/futures/trade/place_order` |
+| Order-Detail (privat, H3) | `GET /api/v1/futures/trade/get_order_detail` (per `orderId` **oder** `clientId` — H4-Idempotenz-Query) |
+| Ausführungen/Trades (privat, H3) | `GET /api/v1/futures/trade/get_history_trades` |
 | Public WS | `wss://fapi.bitunix.com/public/` |
+
+**H3 — Order-Status & Fill-Reconciliation (seit v1.36.4):** `place_order` liefert
+nur die AKZEPTANZ der Order (`BrokerOrderResult.status = "NEW"`, `fillPrice = 0`)
+— eine Annahme ist kein Fill. Der echte Fill wird asynchron abgeglichen:
+`get_order_detail` (Venue-Status `NEW`/`PART_FILLED`/`FILLED`/`CANCELED` +
+`tradeQty`) und `get_history_trades` (echte Trades) werden über
+`BrokerExecutionEngine.reconcile(orderId)` (bzw. `Adapter.reconcileOrder`) zum
+echten Ergebnis zusammengesetzt — der avgPrice ist der mengen-gewichtete
+Mittelwert der Trades. Status-Mapping: `NEW/INIT` → NEW, `PART_FILLED` →
+PARTIALLY_FILLED, `FILLED` → FILLED, `CANCELED/EXPIRED/PART_FILLED_CANCELED` →
+CANCELED, Unbekanntes/fehlende Order/nicht belegbarer Preis → UNKNOWN
+(fail-safe — eine Position wird NIE mit Entry-Preis 0 eingebucht).
 
 Envelope: `{ code: 0, data, msg }`. `code ≠ 0` wird taxonomisch klassifiziert
 (auth / permission / rate-limit / maintenance / unknown).
+
+**H4 — Order-Idempotenz (seit v1.36.5):** Jede Live-Order trägt einen stabilen
+`clientOrderId` (Wire-Feld `clientId`, Format `ATF-<sha256>`). Der HTTP-Transport
+wiederholt einen nicht-idempotenten place_order-POST bei 429/Timeout/Netz/5xx
+**nie automatisch**, sondern reicht einen `BitunixAmbiguousError` nach oben.
+`placeSerializedOrder` fragt dann VOR jedem erneuten Senden per
+`getOrderByClientId(clientOrderId)` (`GET get_order_detail?clientId=…`) den
+echten Status ab: Order gefunden → bestehende Order (kein Duplikat); nicht
+gefunden → genau **ein** kontrollierter Retry mit demselben `clientOrderId`
+(derselbe Body). Damit wird nachweislich kein Doppel-Order erzeugt.
 
 **Fees:** `trading_pairs` liefert keine maker/taker-Felder. `MarketInstrument`
 erlaubt kein `null` für Fees — der Adapter setzt die dokumentierten VIP0-Defaults
@@ -339,8 +363,11 @@ ExecutionMode
   (`validateOrder`) gegen die **echte** Konto-Equity und die echten offenen
   Positionen (fail-closed: scheitert der Abruf, wird nicht gesendet). Erst dann
   geht die Order über `BitunixPrivateClient.placeSerializedOrder` (SL/TP als
-  `slPrice`/`tpPrice` im selben Body, `stopAtVenue`, **kein Retry** bei
-  Timeout/Netz/5xx — siehe §7). **Niemals** über das Paper-Ledger.
+  `slPrice`/`tpPrice` im selben Body, `stopAtVenue`; **H4-Idempotenz**: stabiler
+  `clientOrderId` (`ATF-…`) wird gesetzt und bei einem kontrollierten Retry
+  wiederverwendet; ein nicht-idempotenter place_order-POST wird bei
+  Timeout/Netz/5xx/429 nie blind wiederholt, sondern erst per `clientOrderId`
+  abgefragt — siehe §7). **Niemals** über das Paper-Ledger.
 - `getAccount`/`getPositions` im **Live**-Modus liefern **echte Venue-Daten**
   (signierte Private-API), nie Paper-Daten.
 - `paper`/`backtest` → `PaperExecutionEngine` gegen das lokale Ledger
@@ -411,7 +438,7 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | SSRF | Host-Allowlist (`fapi.bitunix.com` + optionale `BITUNIX_ALLOWED_HOSTS`). Kein Userinfo. `https` Pflicht; `http`/`ws` nur Loopback + Insecure-Flag. `redirect: "error"`. |
 | TLS | Node-Default-Zertifikatsprüfung (an). |
 | Rate-Limit | Token-Bucket, konservativ 8 req/s (Doku: 10/s). |
-| Timeout / Retry | Default 8 s, max. 3 Versuche, nur 429/5xx/Netz — **nie** auth. Nicht-idempotente Requests (POST, insbesondere `place_order`) wiederholen bei Timeout/Netzwerkfehler/5xx **nicht** (Doppel-Order-Gefahr); nur 429 (definitiv nicht verarbeitet) bleibt Retry-fähig. |
+| Timeout / Retry | Default 8 s, max. 3 Versuche, nur 5xx/Netz — **nie** auth. **H4-Idempotenz:** Nicht-idempotente Requests (POST, insbesondere `place_order`) werden bei Timeout/Netzwerkfehler/5xx/**429** **nie automatisch** wiederholt — Doppel-Order-Gefahr. Der Transport reicht stattdessen einen `BitunixAmbiguousError` (kind `ambiguous`) nach oben; der Aufrufer (`placeSerializedOrder`) fragt VOR jedem erneuten Senden per `clientOrderId` den echten Status ab (`getOrderByClientId`) und wiederholt nur dann genau **einmal** mit demselben `clientOrderId`. Idempotente GETs bleiben weiterhin Retry-fähig. |
 | Redactor | Maskiert Header-Muster, Hex-Tokens ≥ 32, injizierte Klartext-Secrets. Logger-Prefix `[bitunix]`. |
 
 ---

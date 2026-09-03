@@ -320,6 +320,38 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
   }
 
   /**
+   * H3: Fill-Reconciliation. `placeOrder` liefert live nur die AKZEPTANZ
+   * (Status NEW); hier wird danach der echte Venue-Status/Fill abgefragt
+   * (Order-Detail + Ausführungen). Eine Position darf erst nach einem
+   * Ergebnis mit Status FILLED und fillPrice > 0 eingebucht werden.
+   *
+   * paper/backtest: synchroner Fill in `placeOrder` → null (nichts abzugleichen).
+   * live: gleiche Gate-Prüfung wie placeOrder, dann BrokerEngine.reconcile.
+   * testnet: NotSupportedCapabilityError (kein Bitunix-Testnet dokumentiert).
+   */
+  async reconcileOrder(orderId: string): Promise<BrokerOrderResult | null> {
+    this.require("trading", "reconcileOrder");
+    if (this.mode === "testnet") {
+      throw new NotSupportedCapabilityError(
+        this.id,
+        "testnet",
+        "reconcileOrder",
+        "Kein Bitunix-Testnet in der offiziellen Futures-Doku."
+      );
+    }
+    if (this.mode !== "live") {
+      // Paper/backtest füllen synchron — es gibt keine offene Live-Order.
+      return null;
+    }
+    assertBitunixEnabled(this.env);
+    // Read-only-Abgleich: dasselbe Gate wie beim Senden (fail-closed).
+    assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.reconcile) return null;
+    return engine.reconcile(orderId);
+  }
+
+  /**
    * Private-Client (Account/Positions/Place) — Basis der Broker-Engine.
    * Bei fehlenden Credentials laut `NotSupportedCapabilityError` (fail-safe).
    */
