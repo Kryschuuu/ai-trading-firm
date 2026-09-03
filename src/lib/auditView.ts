@@ -794,7 +794,7 @@ function fillSection(fill: Rec, title = "Orderausführung (fill)"): AuditSection
       {
         label: "Status",
         value: formatKnownValue("status", status),
-        tone: status === "FILLED" ? "good" : status === "REJECTED" ? "bad" : undefined,
+        tone: ({ FILLED: "good", REJECTED: "bad", PARTIALLY_FILLED: "warn", NEW: undefined, UNKNOWN: undefined }[status] ?? undefined),
       },
       { label: "Füllpreis", value: formatKnownValue("fillPrice", fill.fillPrice) },
       { label: "Stop-Loss (Kurs)", value: formatKnownValue("stopLoss", fill.stopLoss) },

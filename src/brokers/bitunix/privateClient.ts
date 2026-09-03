@@ -11,159 +11,6 @@ import type { BrokerAccount, BrokerPosition } from "../../contracts/broker";
 import { BITUNIX_PATHS } from "./config";
 import { BitunixApiError, classifyBitunixFailure } from "./errors";
 import { BitunixHttp, TokenBucket, type BitunixHttpOptions } from "./http";
-import {
-  encodeQueryParams,
-  signBitunixRequest,
-  type MonotonicTimestamp,
-  type NonceFactory,
-  defaultNonceFactory,
-  defaultTimestamp,
-} from "./signing";
-import { recordBitunixPrivateCall } from "./audit";
-import type { BitunixCredentials } from "./secrets";
-import type { BitunixAccountRaw, BitunixEnvelope, BitunixPlaceOrderBody, BitunixPositionRaw } from "./types";
+import {  encodeQueryParams,signBitunixRequest,type MonotonicTimestamp,type NonceFactory,defaultNonceFactory,defaultTimestamp,} from "./signing";import { recordBitunixPrivateCall } from "./audit";import type { BitunixCredentials } from "./secrets";import type { BitunixAccountRaw, BitunixEnvelope, BitunixPlaceOrderBody, BitunixPositionRaw } from "./types";
 
-function envelopeData<T>(json: unknown): T {
-  if (!json || typeof json !== "object") {
-    throw new BitunixApiError("unknown", "Bitunix: leere Antwort.");
-  }
-  const env = json as BitunixEnvelope<T>;
-  if (typeof env.code === "number" && env.code !== 0) {
-    const c = classifyBitunixFailure({ venueCode: env.code, venueMsg: env.msg });
-    throw new BitunixApiError(c.kind, c.message, { venueCode: env.code });
-  }
-  return env.data;
-}
-
-export interface BitunixPrivateClientOptions extends BitunixHttpOptions {
-  credentials: BitunixCredentials;
-  nonceFactory?: NonceFactory;
-  timestamp?: MonotonicTimestamp;
-}
-
-export class BitunixPrivateClient {
-  private readonly http: BitunixHttp;
-  private readonly creds: BitunixCredentials;
-  private readonly nonces: NonceFactory;
-  private readonly clock: MonotonicTimestamp;
-
-  constructor(opts: BitunixPrivateClientOptions) {
-    this.http = new BitunixHttp({
-      ...opts,
-      bucket: opts.bucket ?? new TokenBucket(opts.config.privateRatePerSec, opts.config.privateRatePerSec),
-      secrets: () => [opts.credentials.apiKey, opts.credentials.apiSecret],
-    });
-    this.creds = opts.credentials;
-    this.nonces = opts.nonceFactory ?? defaultNonceFactory;
-    this.clock = opts.timestamp ?? defaultTimestamp;
-  }
-
-  private async signed(
-    method: "GET" | "POST",
-    path: string,
-    query: Record<string, string | number | boolean | undefined> | undefined,
-    body: string,
-    opts?: { idempotent?: boolean }
-  ) {
-    const nonce = this.nonces.next();
-    const timestamp = this.clock.next();
-    const queryParams = encodeQueryParams(query ?? {});
-    const { sign } = signBitunixRequest({
-      nonce,
-      timestamp,
-      apiKey: this.creds.apiKey,
-      secret: this.creds.apiSecret,
-      queryParams,
-      body,
-    });
-    const headers = {
-      "api-key": this.creds.apiKey,
-      nonce,
-      timestamp,
-      sign,
-      language: "en-US",
-    };
-    try {
-      const res = await this.http.request({
-        method,
-        path,
-        query,
-        body: method === "POST" ? body : undefined,
-        headers,
-        signed: true,
-        idempotent: opts?.idempotent,
-      });
-      await recordBitunixPrivateCall({ method, path, outcome: "OK", errorCode: null });
-      return res;
-    } catch (e) {
-      const code = e instanceof BitunixApiError ? e.code : "BITUNIX_UNKNOWN";
-      await recordBitunixPrivateCall({
-        method,
-        path,
-        outcome: e instanceof BitunixApiError && e.kind === "auth" ? "DENIED" : "ERROR",
-        errorCode: code,
-      });
-      throw e;
-    }
-  }
-
-  async getAccount(marginCoin = "USDT"): Promise<BrokerAccount> {
-    const res = await this.signed("GET", BITUNIX_PATHS.account, { marginCoin }, "");
-    const data = envelopeData<BitunixAccountRaw[] | BitunixAccountRaw>(res.json);
-    const row = Array.isArray(data) ? data[0] : data;
-    const available = Number(row?.available ?? 0);
-    const upnl =
-      Number(row?.crossUnrealizedPNL ?? 0) + Number(row?.isolationUnrealizedPNL ?? 0);
-    const equity = (Number.isFinite(available) ? available : 0) + (Number.isFinite(upnl) ? upnl : 0);
-    return {
-      equity,
-      cash: Number.isFinite(available) ? available : 0,
-      openPositions: 0,
-      startingEquity: equity,
-      drawdownPct: 0,
-    };
-  }
-
-  async getPositions(symbol?: string): Promise<BrokerPosition[]> {
-    const res = await this.signed(
-      "GET",
-      BITUNIX_PATHS.positions,
-      symbol ? { symbol } : undefined,
-      ""
-    );
-    const data = envelopeData<BitunixPositionRaw[]>(res.json);
-    const rows = Array.isArray(data) ? data : [];
-    return rows
-      .map((r): BrokerPosition | null => {
-        const qty = Number(r.qty);
-        const entry = Number(r.avgOpenPrice);
-        if (!Number.isFinite(qty) || qty <= 0) return null;
-        const side = String(r.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG";
-        return {
-          symbol: String(r.symbol ?? "").toUpperCase(),
-          side,
-          qty,
-          entryPrice: Number.isFinite(entry) ? entry : 0,
-          lastPrice: Number.isFinite(entry) ? entry : 0,
-          unrealizedPnl: Number(r.unrealizedPNL ?? 0) || 0,
-          stopLoss: null,
-          takeProfit: null,
-        };
-      })
-      .filter((p): p is BrokerPosition => p !== null);
-  }
-
-  /**
-   * Sendet eine bereits serialisierte Order an die Venue.
-   * Wird vom Adapter-Live-Pfad über `BrokerExecutionEngine.submit` aufgerufen,
-   * ausschließlich nach bestandener Live-Gate-Prüfung.
-   */
-  async placeSerializedOrder(body: BitunixPlaceOrderBody): Promise<{ orderId: string; clientId?: string }> {
-    const json = JSON.stringify(body);
-    // idempotent: false — place_order darf bei Timeout/Netzwerkfehler/5xx NIE
-    // wiederholt werden (Doppel-Order-Gefahr); nur 429 bleibt Retry-fähig.
-    const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });
-    const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);
-    return { orderId: String(data?.orderId ?? ""), clientId: data?.clientId };
-  }
-}
+function envelopeData<T>(json: unknown): T {  if (!json || typeof json !== "object") {throw new BitunixApiError("unknown", "Bitunix: leere Antwort.");  }  const env = json as BitunixEnvelope<T>;  if (typeof env.code === "number" && env.code !== 0) {    const c = classifyBitunixFailure({ venueCode: env.code, venueMsg: env.msg });    throw new BitunixApiError(c.kind, c.message, { venueCode: env.code });  }  return env.data;}export interface BitunixPrivateClientOptions extends BitunixHttpOptions {\n  credentials: BitunixCredentials;\n  nonceFactory?: NonceFactory;\n  timestamp?: MonotonicTimestamp;\n}\nexport class BitunixPrivateClient {\n  private readonly http: BitunixHttp;\n  private readonly creds: BitunixCredentials;\n  private readonly nonces: NonceFactory;\n  private readonly clock: MonotonicTimestamp;\n\n  constructor(opts: BitunixPrivateClientOptions) {\n    this.http = new BitunixHttp({\n      ...opts,\n      bucket: opts.bucket ?? new TokenBucket(opts.config.privateRatePerSec, opts.config.privateRatePerSec),\n      secrets: () => [opts.credentials.apiKey, opts.credentials.apiSecret],\n    });\n    this.creds = opts.credentials;\n    this.nonces = opts.nonceFactory ?? defaultNonceFactory;\n    this.clock = opts.timestamp ?? defaultTimestamp;\n  }\n\n  private async signed(\n    method: "GET" | "POST",\n    path: string,\n    query: Record<string, string | number | boolean | undefined> | undefined,\n    body: string,\n    opts?: { idempotent?: boolean }\n  ) {\n    const nonce = this.nonces.next();\n    const timestamp = this.clock.next();\n    const queryParams = encodeQueryParams(query ?? {});\n    const { sign } = signBitunixRequest({\n      nonce,\n      timestamp,\n      apiKey: this.creds.apiKey,\n      secret: this.creds.apiSecret,\n      queryParams,\n      body,\n    });\n    const headers = {\n      "api-key": this.creds.apiKey,\n      nonce,\n      timestamp,\n      sign,\n      language: "en-US",\n    };\n    try {\n      const res = await this.http.request({\n        method,\n        path,\n        query,\n        body: method === "POST" ? body : undefined,\n        headers,\n        signed: true,\n        idempotent: opts?.idempotent,\n      });\n      await recordBitunixPrivateCall({ method, path, outcome: "OK", errorCode: null });\n      return res;\n    } catch (e) {\n      const code = e instanceof BitunixApiError ? e.code : "BITUNIX_UNKNOWN";\n      await recordBitunixPrivateCall({\n        method,\n        path,\n        outcome: e instanceof BitunixApiError && e.kind === "auth" ? "DENIED" : "ERROR",\n        errorCode: code,\n      });\n      throw e;\n    }\n  }\n\n  async getAccount(marginCoin = "USDT"): Promise<BrokerAccount> {\n    const res = await this.signed("GET", BITUNIX_PATHS.account, { marginCoin }, "");\n    const data = envelopeData<BitunixAccountRaw[] | BitunixAccountRaw>(res.json);\n    const row = Array.isArray(data) ? data[0] : data;\n    const available = Number(row?.available ?? 0);\n    const upnl =\n      Number(row?.crossUnrealizedPNL ?? 0) + Number(row?.isolationUnrealizedPNL ?? 0);\n    const equity = (Number.isFinite(available) ? available : 0) + (Number.isFinite(upnl) ? upnl : 0);\n    return {\n      equity,\n      cash: Number.isFinite(available) ? available : 0,\n      openPositions: 0,\n      startingEquity: equity,\n      drawdownPct: 0,\n    };\n  }\n\n  async getPositions(symbol?: string): Promise<BrokerPosition[]> {\n    const res = await this.signed(\n      "GET",\n      BITUNIX_PATHS.positions,\n      symbol ? { symbol } : undefined,\n      ""\n    );\n    const data = envelopeData<BitunixPositionRaw[]>(res.json);\n    const rows = Array.isArray(data) ? data : [];\n    return rows\n      .map((r): BrokerPosition | null => {\n        const qty = Number(r.qty);\n        const entry = Number(r.avgOpenPrice);\n        if (!Number.isFinite(qty) || qty <= 0) return null;\n        const side = String(r.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG";\n        return {\n          symbol: String(r.symbol ?? "").toUpperCase(),\n          side,\n          qty,\n          entryPrice: Number.isFinite(entry) ? entry : 0,\n          lastPrice: Number.isFinite(entry) ? entry : 0,\n          unrealizedPnl: Number(r.unrealizedPNL ?? 0) || 0,\n          stopLoss: null,\n          takeProfit: null,\n        };\n      })\n      .filter((p): p is BrokerPosition => p !== null);\n  }\n\n  /**\n   * Sendet eine bereits serialisierte Order an die Venue.\n   * Wird vom Adapter-Live-Pfad über `BrokerExecutionEngine.submit` aufgerufen,\n   * ausschließlich nach bestandener Live-Gate-Prüfung.\n   */\n  async placeSerializedOrder(body: BitunixPlaceOrderBody): Promise<{ orderId: string; clientId?: string }> {\n    const json = JSON.stringify(body);\n    // idempotent: false — place_order darf bei Timeout/Netzwerkfehler/5xx NIE\n    // wiederholt werden (Doppel-Order-Gefahr); nur 429 bleibt Retry-fähig.\n    const res = await this.signed("POST", BITUNIX_PATHS.placeOrder, undefined, json, { idempotent: false });\n    const data = envelopeData<{ orderId?: string; clientId?: string }>(res.json);\n    return { orderId: String(data?.orderId ?? ""), clientId: data?.clientId };\n  }\n\n  /**\n   * Holt den Status einer Order durch OrderId.\n   * Liefert `{ status, filledQty, avgPrice }` oder `null`, wenn die Order nicht gefunden wurde.\n   */\n  async getOrder(orderId: string): Promise<{ status: string; filledQty: number; avgPrice: number } | null> {\n    try {\n      const res = await this.signed("GET", BITUNIX_PATHS.orderStatus, { orderId }, "");\n      const data = envelopeData<{ status: string; filledQty: number; avgPrice: number }>(res.json);\n      return data;\n    } catch {\n      return null;\n    }\n  }\n\n  /**\n   * Holt alle Fills für ein Symbol (optional filtern nach Symbol).\n   * Liefert ein Array von `Fill`-Objekten.\n   */\n  async getExecutions(symbol?: string): Promise<Array<{ orderId: string; avgPrice: number; filledQty: number; status: string }>> {\n    try {\n      const path = symbol ? BITUNIX_PATHS.executions + "?symbol=" + symbol : BITUNIX_PATHS.executions;\n      const res = await this.signed("GET", path, {}, "");\n      const data = envelopeData<Array<{ orderId: string; avgPrice: number; filledQty: number; status: string }>>(res.json);\n      return data;\n    } catch {\n      return [];\n    }\n  }\n}\n

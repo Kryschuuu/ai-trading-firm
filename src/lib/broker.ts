@@ -39,7 +39,7 @@ export type Fill = {
   fillPrice: number;
   stopLoss: number | null;
   takeProfit: number | null;
-  status: "FILLED" | "REJECTED";
+  status: "NEW" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED" | "UNKNOWN";
   reason?: string;
   /** Abgezogene Gebühren in Kontowährung (Task 03, Fill-Simulator). */
   fees?: number;

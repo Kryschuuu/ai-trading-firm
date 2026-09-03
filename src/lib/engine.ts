@@ -695,29 +695,54 @@ export async function runAgentTurn(agentId: string, missionId: string): Promise<
       } catch {
         /* kein Kurs verfügbar → Broker verwirft die Order (NO_QUOTE) */
       }
-      const fill = broker.submit(order);
-      await logAudit(fill.status === "FILLED" ? "ORDER_SENT" : "ORDER_REJECTED",
-        fill.status === "FILLED" ? "INFO" : "WARN", { order, fill }, missionId, agentId);
+      const submitted = await broker.submit(order);
+      // Log the submission status (NEW means venue accepted, not yet filled)
+      await logAudit(submitted.status === "NEW" ? "ORDER_ACCEPTED" : submitted.status === "FILLED" ? "ORDER_SENT" : "ORDER_REJECTED",
+        submitted.status === "NEW" ? "INFO" : submitted.status === "FILLED" ? "INFO" : "WARN", { order, fill: submitted }, missionId, agentId);
 
-      if (fill.status !== "FILLED") {
-        await db.update(proposals).set({ status: "AUTO_REJECTED", reason: fill.reason }).where(eq(proposals.id, proposal.id));
-        trace.push(step("GUARDRAILS/BROKER", false, fill.reason ?? "abgelehnt"));
-        return { ...base, status: "BLOCKED", fill, guardrail: fill.reason, trace };
+      // Step 4: Wire reconciliation into portfolio sync.
+      // A position is only booked after reconcile returns a real avgPrice,
+      // never 0. This prevents bookkeeping from adopting a position with entry price 0.
+      const result = await broker.reconcile(submitted.orderId);
+
+      if (result.status === "NEW" || result.status === "PARTIALLY_FILLED") {
+        // Order accepted or partially filled - no position booked yet
+        // (awaiting async fill confirmation from venue)
+        await db.update(proposals).set({ status: "AUTO_REJECTED", reason: result.reason ?? "pending_reconcile" }).where(eq(proposals.id, proposal.id));
+        trace.push(step("GUARDRAILS/BROKER", false, `Order ${result.status}: positionen nicht gebucht, wartet auf Venue-Fill`));
+        return { ...base, status: "BLOCKED", fill: result, guardrail: `Order status ${result.status}: positionen nicht gebucht`, trace };
       }
-      trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${fill.fillPrice}, SL ${fill.stopLoss}, TP ${fill.takeProfit}`));
 
-      await db.insert(positions).values({
-        symbol: fill.symbol,
-        side: fill.side,
-        qty: String(fill.qty),
-        entryPrice: String(fill.fillPrice),
-        currentPrice: String(fill.fillPrice),
-        stopLoss: fill.stopLoss === null ? null : String(fill.stopLoss),
-        takeProfit: fill.takeProfit === null ? null : String(fill.takeProfit),
-        broker: broker.name,
-        missionId,
-        status: "OPEN",
-      });
+      if (result.status === "FILLED") {
+        // Real fill confirmed - book the position with real entry price
+        trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${result.fillPrice}, SL ${result.stopLoss}, TP ${result.takeProfit}`));
+
+        await db.insert(positions).values({
+          symbol: result.symbol,
+          side: result.side,
+          qty: String(result.qty),
+          entryPrice: String(result.fillPrice),
+          currentPrice: String(result.fillPrice),
+          stopLoss: result.stopLoss === null ? null : String(result.stopLoss),
+          takeProfit: result.takeProfit === null ? null : String(result.takeProfit),
+          broker: broker.name,
+          missionId,
+          status: "OPEN",
+        });
+
+        try {
+          await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE");
+        } catch {
+          /* Kurvenpunkt ist optional — das Orderbuch ist bereits sicher */
+        }
+
+        return { ...base, status: "EXECUTED", fill: result, trace };
+      }
+
+      // UNKNOWN or other statuses
+      await db.update(proposals).set({ status: "AUTO_REJECTED", reason: result.reason ?? "unknown_status" }).where(eq(proposals.id, proposal.id));
+      trace.push(step("GUARDRAILS/BROKER", false, `Unbekannter Order-Status: ${result.status}`));
+      return { ...base, status: "BLOCKED", fill: result, guardrail: `Unbekannter Status: ${result.status}`, trace };
       await db.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, missionId));
       try {
         await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE");

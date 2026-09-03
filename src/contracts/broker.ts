@@ -192,7 +192,13 @@ export interface BrokerOrderRequest {
   riskNotional: number;
 }
 
-export type BrokerOrderStatus = "FILLED" | "REJECTED";
+export type BrokerOrderStatus =
+  | "NEW"
+  | "PARTIALLY_FILLED"
+  | "FILLED"
+  | "CANCELED"
+  | "REJECTED"
+  | "UNKNOWN";
 
 /** Order-Ergebnis (simuliert oder real). */
 export interface BrokerOrderResult {
