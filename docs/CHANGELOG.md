@@ -5,6 +5,29 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.17] — 2026-09-04 · chore(license): MIT → GNU General Public License v3 (GPL-3.0-only)
+
+Kein Code-Change. **Relizenzierung des Projekts:** Die bisherige MIT-Lizenz
+wird durch die **GNU General Public License, Version 3** (GPL-3.0-only)
+ersetzt. Alle MIT-Lizenz-Referenzen und -Einträge sind entfernt;
+Copyright-Inhaber bleibt Kryschuuu.
+
+### Geändert
+
+- **`LICENSE`:** vollständiger, unveränderter GPLv3-Text (`GNU GENERAL PUBLIC
+  LICENSE, Version 3, 29 June 2007`, FSF-Referenztext) — ersetzt die
+  MIT-Lizenz.
+- **`package.json`:** `"license": "MIT"` → `"license": "GPL-3.0-only"`.
+- **`README.md`:** Abschnitt „Lizenz" nennt jetzt **GNU General Public License
+  v3.0 (GPL-3.0)**; die MIT-Nennung ist entfernt.
+- **`docs/CHANGELOG.md`:** historische „License MIT"-Notiz im v1.3.0-Eintrag
+  entfernt (keine MIT-Einträge mehr im Repo).
+- **`CHANGELOG.md`**, **`docs/README.md`**, **`INSTALL.md`:** Versionsstand auf
+  v1.36.17 gezogen.
+
+Nutzung, Änderung und Weitergabe ab sofort unter den Bedingungen der GPLv3 —
+siehe [`LICENSE`](../LICENSE).
+
 ## [1.36.16] — 2026-09-04 · fix(control-plane): C4 Control-Plane-Zustand persistiert (MEDIUM)
 
 **MEDIUM, Control Panel (`src/brokers/control-plane/stateStore.ts` neu,
@@ -5200,7 +5223,7 @@ Wer Gemini nutzt: Header-Auth ist transparent, keine Key-Änderung nötig.
   `tests/security.test.ts` (Symbol-Whitelist, Injection-Versuche, parseDecision-Robustheit).
 
 ### Changed
-- `package.json`: Name `ai-trading-firm`, Version `1.3.0`, `engines.node >= 20`, License MIT.
+- `package.json`: Name `ai-trading-firm`, Version `1.3.0`, `engines.node >= 20`.
 - `.env.example`: neue Sektionen „Cloud-Provider", „Retries", „Kosten", „Scheduler".
 - `src/lib/ollama.ts` ist jetzt die Kompatibilitäts- und Orchestrierungsschicht über
   `llmProvider.ts`; öffentliche Funktionen (`getOllamaStatus`, `localReason`,

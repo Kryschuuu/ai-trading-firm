@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.16 (2026-09-04) · Vollständige
+> **Dokumentationsstand:** v1.36.17 (2026-09-04) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -241,4 +241,4 @@ npm run test:coverage:routing  # Model-Router-Coverage (Task 09 + v1.22.0 Overri
 
 ## Lizenz
 
-MIT — siehe [`LICENSE`](LICENSE).
+GNU General Public License v3.0 (GPL-3.0) — siehe [`LICENSE`](LICENSE).
