@@ -2,7 +2,7 @@
 
 - **Severity:** MEDIUM
 - **Bereich:** Sonstiges
-- **Status (validiert):** ✅ **Valide.**
+- **Status (validiert):** ✅ **Gefixt in v1.36.18** (vorher: valide).
 - **Datei(en):** `src/brokers/bitunix/audit.ts` (L46 `/* best-effort */`), `src/app/api/firm/agents/route.ts` (L63 `// Audit-Fehler darf … nicht reißen`)
 
 ## Arena-Prompt (kopierbar)
@@ -34,7 +34,7 @@ ACCEPTANCE: Security audits are never silently dropped; best-effort paths at lea
 a forced audit failure surfaces (alert/metric/rollback), not silence.
 ```
 
-## Beweis (aktueller Code)
+## Beweis (Code vor v1.36.18)
 
 `src/brokers/bitunix/audit.ts` L44‑47:
 
@@ -59,14 +59,46 @@ Sicherheitsrelevante Audits: niemals still best-effort; bei Fehler Retry oder fa
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Sicherheits-Audits werden bei Schreibfehler nicht still ignoriert.
-- [ ] Best-effort-Pfade loggen zumindest Warnung/Metrik.
-- [ ] Test: erzwungener Audit-Fehler → Operation rollbackt oder wird markiert.
+- [x] Sicherheits-Audits werden bei Schreibfehler nicht still ignoriert.
+      → `src/lib/auditSink.ts`: Klasse `security` = Retry mit Backoff, danach
+      persistenter Spool (`data/audit-spool/`, at-least-once) und CRITICAL-Alarm;
+      wo die Mutation noch vermeidbar ist (Credential-Store, Kill-Disarm,
+      Proposal-Freigabe) zusätzlich `failClosed`.
+- [x] Best-effort-Pfade loggen zumindest Warnung/Metrik.
+      → Klasse `telemetry` (Failover, Routing, Universe, adaptive Risiko-Events,
+      Live-Gate-DB-Zweitabzug): ein Versuch, aber `audit_write_failures_total`
+      + Warnung, kein leeres `catch` mehr.
+- [x] Test: erzwungener Audit-Fehler → Operation rollbackt oder wird markiert.
+      → `tests/auditReliability.test.ts` (13 Fälle): Totalverlust (DB + Spool)
+      wirft `AuditPersistenceError` und die Mutation bleibt aus; Kill-Route
+      Disarm → 503, Not-Halt bleibt aktiv; Agents-Route → gespeichert **und**
+      gemeldet (CRITICAL + Missed-Audit-Zähler + `warnings`/`audit` im Body).
+
+## Umsetzung (v1.36.18)
+
+Kern ist eine einzige klassifizierte Senke, damit „best-effort“ nicht mehr je
+Aufrufstelle neu (und unterschiedlich) interpretiert wird:
+
+```ts
+// src/lib/auditSink.ts
+export async function writeAuditRecord(rec: AuditRecord): Promise<AuditWriteOutcome>
+// security:  Retry (AUDIT_RETRY_MAX/BASE_MS) → Spool → CRITICAL + Metrik
+//            failClosed → AuditPersistenceError (Mutation bleibt aus)
+// telemetry: 1 Versuch → Warnung + Metrik, nie Wurf
+```
+
+Der dokumentierte Trade-off (Prompt-Update, Missions-Updates): die Mutation
+bleibt wirksam, die Lücke wird gemeldet — ein Abbruch *nach* erfolgreichem
+`UPDATE` wäre keine Rücknahme, sondern eine wirksame Änderung ohne Beleg, und
+ein Sperren aller Prompt-Änderungen bei DB-Degradation würde Notfall-Patches
+verhindern. Der Not-Halt-**Arm** folgt derselben Regel (sichere Richtung nie
+blockieren), der **Disarm** gegenteilig: fail-closed vor der Mutation.
 
 ## Changelog-Blurb
 
 `S1 (MEDIUM): Audit teils best-effort — sicherheitsrelevante Audits jetzt zuverlässig (Retry/fail-closed
-+ Warnung), keine stillen Lücken mehr.`
++ Warnung), keine stillen Lücken mehr.` → umgesetzt in **v1.36.18**, Einträge in `CHANGELOG.md` und
+`docs/CHANGELOG.md` (`[1.36.18]`).
 
 ## Versions-Hinweis
 

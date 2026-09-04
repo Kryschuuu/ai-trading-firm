@@ -365,10 +365,15 @@ export class ControlPlaneService {
         );
       }
       // Erneutes Speichern im Fehler-Zustand = Aendern (upsert).
-      await this.audit(actor, venue, "credential.changed", "OK");
+      await this.audit(actor, venue, "credential.changed", "OK", undefined, { failClosed: true });
     } else {
-      await this.audit(actor, venue, "credential.saved", "OK");
+      await this.audit(actor, venue, "credential.saved", "OK", undefined, { failClosed: true });
     }
+
+    // S1: Die beiden Audits ABOVE laufen vor `store.put` und sind fail-closed.
+    // Laesst sich der Beleg weder in `audit_log` noch in den Spool schreiben,
+    // wird das Credential NICHT gespeichert — eine venue-seitige Zugangsschaltung
+    // ohne Auditpfad ist genau die Lücke, die S1 schliesst.
 
     // 1) Verschluesseln (AES-256-GCM, AAD = venue) — Klartext danach weg.
     await store.put(venue, credential);
@@ -638,9 +643,13 @@ export class ControlPlaneService {
     venue: string,
     action: ControlPlaneAction,
     result: "OK" | "DENIED" | "ERROR",
-    errorCode?: string
+    errorCode?: string,
+    opts: { failClosed?: boolean } = {}
   ): Promise<void> {
-    await recordControlPlaneEvent({ actor, venue, action, result, errorCode: errorCode ?? null });
+    await recordControlPlaneEvent(
+      { actor, venue, action, result, errorCode: errorCode ?? null },
+      opts
+    );
   }
 
   private async deny(

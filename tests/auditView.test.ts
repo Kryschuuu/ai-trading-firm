@@ -450,6 +450,18 @@ test("Katalog: jedes im Code geschriebene Audit-Event ist lesbar beschrieben", (
   for (const match of source.matchAll(/insert\(auditLog\)\s*\.\s*values\(\{[^}]*?event:\s*"([A-Z][A-Z0-9_]+)"/g)) {
     written.add(match[1]);
   }
+  // 4) Klassifizierte Senke (S1, v1.36.18): auditWrite("EVENT", …) und
+  //    writeAuditRecord({ event: "EVENT", … }) — seit S1 der reguläre Weg für
+  //    Audit-Events der Venue- und Control-Plane-Module. Ohne diese Muster
+  //    wäre der Katalog-Wächter für neue Events taub.
+  for (const match of source.matchAll(/auditWrite\(\s*\n?\s*"([A-Z][A-Z0-9_]+)"/g)) {
+    written.add(match[1]);
+  }
+  for (const match of source.matchAll(
+    /writeAuditRecord\(\s*\{[\s\S]{0,60}?event:\s*"([A-Z][A-Z0-9_]+)"/g
+  )) {
+    written.add(match[1]);
+  }
 
   // Sanity-Check: Die Muster müssen die bekannten Kern-Events finden, sonst
   // wurde der Quellcode umgestellt und der Test wäre wirkungslos.

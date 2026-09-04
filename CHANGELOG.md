@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
-> Code-Version **1.36.17**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.18**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,71 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.18] — 2026-09-04 · fix(audit): S1 Audits sind nicht mehr stumm best-effort — Sicherheitsklasse mit Retry, persistentem Spool und Alarm (MEDIUM)
+
+**MEDIUM, Audit/Security (`src/lib/auditSink.ts` neu, `src/lib/telemetry.ts`,
+`src/lib/engine.ts`, `src/lib/ruleService.ts`, `src/lib/adaptiveRisk.ts`,
+`src/lib/marketdata/failover.ts`, `src/brokers/bitunix/audit.ts`,
+`src/brokers/alpaca/audit.ts`, `src/brokers/audit.ts`,
+`src/brokers/control-plane/{audit,http,service}.ts`, `src/routing/audit.ts`,
+`src/live-gate/audit.ts`, `src/universe/audit.ts`,
+`src/app/api/firm/{agents,kill,missions,run,proposals/[id]/approve}/route.ts`,
+`src/app/api/health/route.ts`, `src/ops/collect.ts`, `src/instrumentation.ts`,
+`tests/auditReliability.test.ts` neu).** Befund S1 des Senior-Peer-Reviews:
+Audit-Schreibvorgänge lagen in leeren `catch`-Blöcken
+(`src/brokers/bitunix/audit.ts` → `/* best-effort */`,
+`src/app/api/firm/agents/route.ts` → „darf nicht reißen"). Eine erfolgreiche
+sicherheitsrelevante Mutation — Credential gespeichert, Prompt geändert,
+Not-Halt entschärft, Order abgelehnt, Proposal freigegeben — konnte **ohne
+Auditbeleg** bleiben, und niemand sah es.
+
+**Fix — zwei Klassen, eine Senke (`src/lib/auditSink.ts`):**
+
+1. **`security`** (Auth, Kill-Switch, Credential-Ops, Order-Ablehnungen,
+   Freigaben, Prompt-Änderungen): Retry mit exponentiellem Backoff
+   (`AUDIT_RETRY_MAX`/`AUDIT_RETRY_BASE_MS`), danach **persistenter Spool**
+   `data/audit-spool/audit-pending.ndjson` (0600, at-least-once) mit
+   automatischem Nachzug nach `audit_log` (nach dem nächsten erfolgreichen
+   Schreibvorgang und beim Boot). Jede Abweichung zählt
+   (`audit_write_failures_total`, `audit_spooled_total`) und loggt CRITICAL —
+   nie ein leeres `catch`.
+2. **`telemetry`** (Failover-Ringe, Routing-Fallbacks, Registry- und
+   Risiko-Telemetrie): bleibt best-effort, ist aber nie mehr still — ein
+   Fehlschlag zählt und erzeugt eine Warnung.
+3. **fail-closed, wo die Mutation noch vermeidbar ist:** Credential-Store
+   (`saveCredentials` auditiert **vor** `store.put`; ohne durablen Beleg bleibt
+   das Credential unverändert, API antwortet 503 `AUDIT_PERSISTENCE_FAILED`),
+   Kill-Switch-**Disarm** (Beleg mit `stage=PRECHECK` vor dem Entschärfen —
+   sonst bleibt der Not-Halt aktiv) und Proposal-**Freigabe** (gleiches
+   Muster). Not-Halt **Arm** wird dagegen bewusst nie blockiert: die sichere
+   Richtung zu verweigern wäre gefährlicher als eine gemeldete Lücke.
+4. **dokumentierter Trade-off Prompt-Update:** der `UPDATE` bleibt wirksam
+   (ein Abbruch nach erfolgreichem Schreiben wäre keine Rücknahme), dafür
+   CRITICAL-Zeile + Missed-Audit-Zähler + `warnings`- und `audit`-Feld in der
+   Response. Dasselbe gilt für `MISSION_CREATED/UPDATED`.
+5. **Sichtbarkeit:** `/api/health → audit {pending, lost, missed, quarantined,
+   dbCoolingDown}`, Operations-Center-Sektion „Audit" mit denselben Kennzahlen
+   (Status `degraded`, sobald Reserve aktiv ist) und Prometheus-Exposition der
+   neuen Counter. Giftzeilen (von der DB dauerhaft abgelehnt, z. B. FK-Fehler)
+   wandern nach 3 Versuchen nach `audit-quarantine.ndjson` und blockieren den
+   Nachzug nicht dauerhaft.
+6. **Nebenbefund behoben:** `PROPOSAL_APPROVED` schrieb den frei textuellen
+   Actor in `audit_log.agent_id` (FK → `agents.id`, uuid) — der Insert konnte
+   auf einer echten PostgreSQL nie gelingen, das Event fehlte also **immer**.
+   Actor steht jetzt im `detail`.
+
+**Akzeptanzkriterien erfüllt:** Sicherheits-Audits werden bei Schreibfehler
+nicht mehr ignoriert (Retry → Spool → Alarm, bzw. Rollback wo `failClosed`) ·
+Best-effort-Pfade loggen mindestens Warnung + Metrik · erzwungener Audit-Fehler
+meldet sich als Alarm/Metrik/Rollback. **Tests:** neu
+`tests/auditReliability.test.ts` (13 Fälle, u. a. Retry-Zählung, Spool-Inhalt,
+Totalverlust → `AuditPersistenceError` ohne Mutation, Prompt-Route „gespeichert
++ gemeldet", Kill-Route „Disarm bleibt aus", at-least-once-Nachzug,
+Quarantäne, Bitunix-Venue-Audit, Architekturwächter gegen stille catch-Blöcke).
+Der Katalog-Wächter in `tests/auditView.test.ts` erkennt nun auch Events aus
+`auditWrite(…)`/`writeAuditRecord({…})`. Typecheck + Lint + Vollsuite grün.
+Details: Befund S1 in `docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.18**).
 
 ## [1.36.17] — 2026-09-04 · chore(license): MIT → GNU General Public License v3 (GPL-3.0-only)
 

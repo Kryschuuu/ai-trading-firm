@@ -108,6 +108,30 @@ export const telemetry = {
     /** Fehlgeschlagene Kerzenabrufe nach Ursache (MDERR-006). */
     fetchFailures: new LabelCounter("market_data_fetch_failures_total"),
   },
+  /**
+   * Audit-Zuverlässigkeit (S1, v1.36.18).
+   *
+   * Labels sind ausschließlich Code-konstant (`auditClass`, `stage`, `kind`,
+   * `result`) — kein Event-Name als Label: fremde Event-Codes wären ein
+   * Kardinalitätsrisiko (dieselbe Regel wie beim symbol-Label oben).
+   */
+  audit: {
+    /** fehlgeschlagene Audit-Schreibversuche: stage = db | spool | lost */
+    writeFailures: new LabelCounter("audit_write_failures_total"),
+    /** security-Audits, die im persistenten Spool auf den Nachzug warten */
+    spooled: new LabelCounter("audit_spooled_total"),
+    /** Nachzüge aus dem Spool: result = ok | error | corrupt */
+    spoolDrained: new LabelCounter("audit_spool_drained_total"),
+    /** Audit-Lücken: kind = dropped (verloren) | flagged (gemeldet, Trade-off) */
+    missed: new LabelCounter("audit_missed_total"),
+    /** alle Counter der Audit-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.audit.writeFailures.reset();
+      telemetry.audit.spooled.reset();
+      telemetry.audit.spoolDrained.reset();
+      telemetry.audit.missed.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -122,12 +146,19 @@ export function marketDataFailureSnapshot(): FetchFailuresSnapshot {
   };
 }
 
-/** Prometheus-Text-Exposition (für spieteres Scraping). */
+/** Prometheus-Text-Exposition (für späteres Scraping). */
 export function prometheusMetrics(): string {
-  return telemetry.marketData.fetchFailures.exposition();
+  return [
+    telemetry.marketData.fetchFailures.exposition(),
+    telemetry.audit.writeFailures.exposition(),
+    telemetry.audit.spooled.exposition(),
+    telemetry.audit.spoolDrained.exposition(),
+    telemetry.audit.missed.exposition(),
+  ].join("\n");
 }
 
 /** Nur für Tests: alle Counter zurücksetzen. */
 export function resetTelemetryForTests(): void {
   telemetry.marketData.fetchFailures.reset();
+  telemetry.audit.reset();
 }

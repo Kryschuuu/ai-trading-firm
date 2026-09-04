@@ -48,6 +48,10 @@ next-env.d.ts
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
 
+# Audit-Spool (S1, v1.36.18): persistenter Fallback, wenn audit_log nicht
+# schreibbar war. Läuft lokal, wird nach dem Nachzug geleert — nicht versioniert.
+/data/audit-spool
+
 # Live-Gate (Task 11): State-Files, Audit-Hash-Kette, Kill-Failsafe-Datei
 # und Security-Suite-Stamp sind Laufzeit-/Deployment-Artefakte (aus CI),
 # niemals versioniert.
