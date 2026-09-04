@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.15 (2026-09-04) · Vollständige
+> **Dokumentationsstand:** v1.36.16 (2026-09-04) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -127,6 +127,26 @@ Credential wieder aufheben, das ihn zieht (Befund C3, HIGH). Seit v1.36.15:
 Ein gestohlenes Operator-Token kann das Trading damit **nicht** mehr still wieder
 freischalten, nachdem der Not-Halt ausgelöst wurde. Befund C3 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Control Plane: Verbindungszustand überlebt den Neustart (v1.36.16)
+
+Bis v1.36.15 lebte der Zustand des Broker-Tabs (verbunden? welche Rechte? letzte
+Discovery?) nur im Prozessspeicher — nach jedem Neustart stand dort
+`configured=true, connected=false`, bis jemand erneut testete (Befund C4, MEDIUM).
+Seit v1.36.16 ist die Tabelle **`venue_control_state`** die Wahrheit und die
+Prozess-Map nur Cache:
+
+* jede Aktion (save/test/discover/disable) **upsertet** die Zeile,
+* `GET /api/brokers/{venue}/status` zeigt nach einem Neustart den **letzten
+  bekannten Zustand**, und der Boot-Warm-up füllt den Cache für die Live-Gate-
+  Bridge vorab,
+* persistiert wird **status-only** (Ebenen, Rechte-Namen, Zähler, Zeitstempel,
+  SAFE-Fehlercodes) — nie ein Secret; `liveEnabled` wird beim Laden immer neu aus
+  dem Live-Gate-Enforcer projiziert,
+* fehlt die Tabelle noch (`npx drizzle-kit push`), läuft alles wie zuvor
+  prozesslokal weiter und `/api/health` nennt sie unter `missingTables`.
+
+Befund C4 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Markt-Konfiguration (v1.30.0)
 

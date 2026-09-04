@@ -5,6 +5,112 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.16] — 2026-09-04 · fix(control-plane): C4 Control-Plane-Zustand persistiert (MEDIUM)
+
+**MEDIUM, Control Panel (`src/brokers/control-plane/stateStore.ts` neu,
+`src/brokers/control-plane/service.ts`, `src/brokers/control-plane/index.ts`,
+`src/db/schema.ts`, `src/lib/seed.ts`, `src/instrumentation.ts`,
+`drizzle/2026-09-04_c4_venue_control_state.sql` neu).** Befund C4 des
+Senior-Peer-Reviews (`docs/AUDIT_REMEDIATION_2026-09.md`): **der Control-Plane-
+Zustand je Venue (`VenueControlState`) lebte ausschließlich im Prozessspeicher**
+(`globalThis.__controlPlaneStates`). Credentials waren persistent, der Zustand
+nicht — nach einem Neustart zeigte der Broker-Tab `configured=true,
+connected=false` (INITIAL), bis erneut getestet wurde.
+
+```ts
+// src/brokers/control-plane/service.ts — vor dem Fix
+function readState(venue) {
+  let state = stateMap().get(venue);
+  if (!state) { state = createInitialControlState(venue); map.set(venue, state); }
+  return state;                       // nach Neustart: immer INITIAL
+}
+function writeState(state) { stateMap().set(state.venue, state); }   // nur RAM
+```
+
+### Hinzugefügt
+
+- **Tabelle `venue_control_state`** (`src/db/schema.ts`, additiv): `venue` text PK,
+  `configured` bool, `connected` bool, `permissions` jsonb (Rechte-Namen),
+  `live_enabled` bool, `last_probe` timestamptz, `connection_state` text,
+  `discovery_state` text, `discovery_count` int, `discovery_last_sync` timestamptz,
+  `last_error` text, `layers` jsonb (vollständiger 6-Ebenen-Snapshot),
+  `updated_at` timestamptz. Migration: `npx drizzle-kit push` bzw. das
+  idempotente `drizzle/2026-09-04_c4_venue_control_state.sql`
+  (`CREATE TABLE IF NOT EXISTS`, aus `drizzle-kit generate` abgeleitet).
+- **`src/brokers/control-plane/stateStore.ts`** (neu): `ControlStateRepository`
+  (`load/save/all/remove`) mit `DbControlStateRepository` (Drizzle-Upsert
+  `onConflictDoUpdate`) und `MemoryControlStateRepository` (Tests + Fail-Safe-
+  Fallback); `toPersistedRow()`/`fromPersistedRow()` (status-only, Ebenen-
+  Snapshot bevorzugt, sonst Rekonstruktion aus Einzelspalten);
+  `resolveControlStateRepository()` (Backend-Wahl mit Ping auf die Tabelle),
+  Prozess-Singleton `getControlStateRepository()`.
+- **Service-API:** `loadVenueControlState()` (async, bevorzugt),
+  `warmControlPlaneStateCache()` (Boot-Warm-up, idempotent),
+  `clearControlPlaneStateCacheForTests()` (simulierter Neustart: nur Cache).
+- **Env-Flag `CONTROL_STATE_BACKEND`** (`db` Default | `memory` nur Tests) —
+  `.env.example`, `INSTALL.md`.
+- **`tests/controlPlane.persistence.test.ts`** (10 Fälle) — siehe unten.
+
+### Geändert
+
+- **`service.ts`:** `readState()` cached kalte Venues **nicht** mehr (sonst würde
+  der persistierte Zustand nie nachgeladen); neuer async `loadState()`
+  (Cache → DB → Initialzustand mit Lazy-Insert, Single-Flight je Venue,
+  konkurrierendes `writeState` gewinnt). `writeState()` ist async und
+  **upsertet** die Zeile (best-effort; DB-Fehler ⇒ eine redigierte Warnung pro
+  Prozess, Cache bleibt Wahrheit). Alle Aktionen (`saveCredentials`,
+  `deleteCredentials`, `getStatus`, `testConnection`, `discover`,
+  `resetForTests`) laufen über `loadState`/`await writeState` und übergeben
+  `configured` aus dem Secret-Store. `readVenueControlStatePublic()` bleibt
+  synchron (Live-Gate-Bridge): warmer Cache → letzter Zustand; kalt →
+  Hydration im Hintergrund, bis dahin fail-safe `off`.
+  `getControlPlaneService()` wärmt den Cache vor.
+- **`src/instrumentation.ts`:** Boot-Warm-up `warmControlPlaneStateCache()` nach
+  dem Adapter-Check (best-effort, nie werfend; Build-Phase ausgenommen).
+- **`src/lib/seed.ts` `checkSchema()`:** `venue_control_state` ist Pflicht-
+  Tabelle (`/api/health → missingTables`). **`scripts/setup-cachyos.sh`:**
+  `REQUIRED_TABLES=14`, kritische Tabellen inkl. `venue_control_state`.
+- **`resetControlPlaneForTests()`** installiert ein frisches Memory-Repository
+  (Testprozesse dürfen sich über eine zufällig erreichbare PostgreSQL nie
+  gegenseitig Zustand hinterlassen — genau das ist ja C4).
+- **`tests/controlPlane.integration.test.ts`:** `before(resetControlPlaneForTests)`
+  aus demselben Grund.
+
+### Sicherheit
+
+- Persistiert wird **status-only**: Ebenen, Rechte-Namen, Zähler, Zeitstempel,
+  SAFE-Fehlercodes. Kein Secret, kein Envelope, kein keyHint (Test: Secret-
+  Scanner + Feld-Whitelist über alle Zeilen).
+- **Live bleibt Projektion des Enforcers:** `live_enabled` in der DB ist nur
+  informativ; `fromPersistedRow()` projiziert `liveEnabled`/`liveReason`/Live-
+  Ebene neu aus `readGateState()`. Eine manipulierte Zeile mit
+  `live_enabled=true` schaltet nichts frei (Test „Legacy-Zeile").
+- Synchrone Leser (Live-Gate) sehen bei kaltem Cache `off` ⇒ deny — nie ein
+  optimistisches „aktiv" ohne geladene Wahrheit.
+- Venue-ID-Guardrail: nur registrierte Venues (`normalizeVenue`) werden
+  persistiert.
+
+**Akzeptanzkriterien:** `writeState` + Prozess-„Neustart" (Cache geleert) →
+`readState`/`getStatus` liefern den persistierten Zustand · kein
+Verhaltensunterschied bei warmem Cache · `ALREADY_CONNECTED` greift auch nach
+Neustart. **Tests** (`tests/controlPlane.persistence.test.ts`, 10 Fälle):
+save→Neustart→getStatus identisch zum warmen Zustand · Async-/Sync-Leser ·
+Boot-Warm-up (2 Venues, idempotent) · Fehler-/Discovery-/disable-Rehydrierung ·
+Lazy-Insert + Scanner · ALREADY_CONNECTED nach Neustart · kaputtes Repository
+(eine Warnung, kein Abbruch) · Serialisierung inkl. Legacy-Zeile · Backend-Wahl.
+Gegen echte PostgreSQL verifiziert: `drizzle-kit push` legt die Tabelle an
+(zweiter Lauf `No changes detected`), Upsert = eine Zeile je Venue, SQL-Datei
+idempotent, `checkSchema()` grün. `npm run typecheck`, `npm run lint`,
+`npm test` (1702 Tests) grün — mit und ohne erreichbare Datenbank.
+
+### Migrationshinweis
+
+Additiv, kein Bruch. `npx drizzle-kit push` (oder
+`psql "$DATABASE_URL" -f drizzle/2026-09-04_c4_venue_control_state.sql`) →
+Dienst neu starten. Ohne Push läuft die Control Plane weiter wie vor v1.36.16
+(prozesslokal) und meldet den Fallback einmal im Server-Log;
+`/api/health` zeigt `venue_control_state` unter `missingTables`.
+
 ## [1.36.15] — 2026-09-04 · fix(security): C3 Kill-Switch-Disarm — stärkeres Gate als Arm (HIGH)
 
 **HIGH, Control Panel / Security (`src/app/api/firm/kill/route.ts`,
