@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.12 (2026-09-03) · Vollständige
+> **Dokumentationsstand:** v1.36.14 (2026-09-03) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -60,6 +60,54 @@ Details: [`INSTALL.md`](INSTALL.md) und [`docs/INSTALL.md`](docs/INSTALL.md) sow
 (Schritt für Schritt auf CachyOS, Variante A/B),
 [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung) und
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B7).
+
+## Sicherheit: Auth-Modus ist Pflicht, nicht Zufall (v1.36.13)
+
+Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`,
+Credential-/Routing-Endpunkte) ist an ein Credential gebunden — und der Modus
+dafür ist eine Entscheidung, kein fehlender Wert:
+
+* `NODE_ENV=production` (also `npm run start` und die systemd-Unit) **ohne**
+  `FIRM_ADMIN_TOKEN`/`FIRM_API_TOKEN`/`FIRM_VIEWER_TOKEN` ⇒ der Dienst
+  verweigert den Start (`ConfigurationError: AUTH_NOT_CONFIGURED`). Ein
+  vergessenes Token ist kein offener Zugang mehr.
+* `AUTH_MODE=local-open` ist der bewusste Opt-in für den Single-User-Modus ohne
+  Token; außerhalb der Produktion ist es der Dev-Default (`npm run dev`), in
+  Produktion nur mit ausdrücklichem Eintrag in `.env` und Warnung im Log.
+* `AUTH_MODE=token-required` erzwingt das Credential auch in der Entwicklung —
+  nützlich, um das Produktionsverhalten lokal zu prüfen.
+* Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
+
+Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Auth-Modus“; Befund C1 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Sicherheit: Rate-Limits kennen keine erfundenen IPs (v1.36.14)
+
+Rate-Limits wirken nur, wenn die Client-Identität nicht vom Client stammt. Bis
+v1.36.13 lasen beide Limiter `x-forwarded-for`/`x-real-ip` — Header, die jeder
+Aufrufer selbst setzt. Ein frisches `X-Forwarded-For: <zufällig>` pro Anfrage
+erzeugte einen frischen Bucket, das Limit war damit faktisch aus (Befund C2,
+MEDIUM/HIGH). Jetzt gilt (`src/lib/clientIp.ts`, eine Quelle für Firm- und
+Credential-Limit):
+
+* `x-forwarded-for` zählt **nur**, wenn `TRUSTED_PROXY_IPS` konfiguriert ist
+  **und** die Socket-Adresse des direkten Peers darin liegt — ausgewertet
+  rightmost-untrusted, damit eine vorgeschobene Fake-IP wirkungslos bleibt.
+* `x-verified-ip` ist der Header für den Reverse Proxy (nginx:
+  `proxy_set_header X-Verified-IP $remote_addr;`) — der einzige Weg, im
+  Next.js-App-Router eine echte Client-IP zu bekommen.
+* `x-real-ip` wird nie als Identität benutzt; ohne verwertbare
+  Proxy-Information zählt die Socket-Adresse, sonst die Konstante `local`
+  (alle Clients teilen sich dann ein Limit — enger, nie weiter).
+* Credential-Brute-Force wird dreistufig gebremst: Limit pro Identität
+  (5/min) + **globales, IP-unabhängiges** Limit (20/min) + exponentieller
+  Backoff ab dem 3. Fehlversuch (2 s → 4 s → 8 s … max. 15 min). Der
+  Kill-Switch nutzt bewusst nur die erste Stufe.
+* Sichtbar ohne Secret-Werte: `curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity`
+  (inkl. `ignoredHeaders` — welche Header die App verworfen hat).
+
+Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Rate-Limit-Identität“; Befund C2 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Markt-Konfiguration (v1.30.0)
 
@@ -128,6 +176,7 @@ Migrationsskript: [`docs/SYMBOLS.md`](docs/SYMBOLS.md).
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
 | `docs/CHANGELOG.md` | Versionen und Änderungen (Keep a Changelog) |
 | `docs/SECURITY_AUDIT.md` | Konsolidierte Security-Architektur + Task-Audits |
+| `docs/AUDIT_REMEDIATION_2026-09.md` | Senior-Peer-Review 2026-09: Befunde, Validierungsstand, je ein Remediation-Prompt (`audit-remediation/`) |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |
 | `docs/help/*.help.json` | 3-Ebenen-Hilfe-Systematik (Schema: `docs/help/help.schema.json`) |

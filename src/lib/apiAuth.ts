@@ -1,10 +1,20 @@
 /**
  * API-Token-Prüfung und Schreib-Rate-Limit für mutierende Endpunkte.
  *
- * Modell:
- *   - FIRM_API_TOKEN NICHT gesetzt → lokaler Offen-Betrieb (Standard, Single-User).
- *   - FIRM_API_TOKEN gesetzt      → POST/PUT-Routen verlangen Header `x-firm-token`.
+ * Modell (C1, v1.36.13 — Offen-Betrieb ist explizit, nie implizit in Produktion):
+ *   - FIRM_API_TOKEN gesetzt    → POST/PUT-Routen verlangen Header `x-firm-token`.
  *     GET bleibt lesbar, damit das Dashboard Status laden kann.
+ *   - kein FIRM_API_TOKEN, aber RBAC aktiv ⇒ RBAC entscheidet: ein Actor mit
+ *     Permission `firm.write` (Admin-/Operator-Credential) darf schreiben,
+ *     ein Viewer nicht. Vorher waren diese Routen offen (Befund C1).
+ *   - gar kein Token            → offen **nur** bei wirksamem Modus
+ *     `local-open` (Dev-Default ohne NODE_ENV=production oder explizit
+ *     `AUTH_MODE=local-open`). In Produktion ohne Token ist der Modus
+ *     `token-required`: 401 `AUTH_NOT_CONFIGURED` — zusätzlich verweigert der
+ *     Boot-Guard (`src/instrumentation.ts`) den Start ohnehin.
+ *
+ * Die Modus-Entcheidung liegt in `src/auth/authMode.ts` (SSoT für diesen Guard
+ * und die RBAC-Auflösung in `src/auth/resolve.ts`).
  *
  * Vergleich ist timing-safe (crypto.timingSafeEqual) inkl. Längen-Padding,
  * damit Token-Raten nicht über Antwortzeiten messbar wird. Der Server lauscht
@@ -13,30 +23,75 @@
  * Rate-Limit (v1.4.0): In-Memory, pro Client, nur Schreib-Endpunkte.
  *   FIRM_RATE_LIMIT=60   Anfragen / 60 s (Standard)
  *   FIRM_RATE_LIMIT=0    deaktiviert
+ *
+ * Client-Identität (C2, v1.36.14): Der Bucket-Schlüssel kommt aus
+ * `src/lib/clientIp.ts` (`resolveClientIp`) — `x-forwarded-for`/`x-real-ip`
+ * werden NICHT mehr blind übernommen, weil der Client sie selbst setzt und so
+ * pro Anfrage einen frischen Bucket erfinden konnte. Identität ist jetzt:
+ * proxy-verifizierte IP (`x-verified-ip`, nur bei wirksamem Proxy-Vertrauen),
+ * `x-forwarded-for` ausschließlich hinter einem als `TRUSTED_PROXY_IPS`
+ * konfigurierten UND per Socket-Adresse verifizierten Peer, sonst die
+ * Socket-Remote-Adresse, sonst die Prozess-Konstante `local`.
  */
-import { timingSafeEqual } from "node:crypto";
+import { anyTokenConfigured, resolveAuth } from "@/auth/resolve";
+import { resolveAuthMode } from "@/auth/authMode";
+import { tokenEquals } from "@/lib/tokenCompare";
+import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
+
+/** Client-IP-Auflösung (C2) — derselbe Helfer wie in der Control Plane. */
+export { resolveClientIp, clientRateLimitKey } from "@/lib/clientIp";
+
+/** Timing-sicherer Vergleich (Blatt-Modul) — Alias für bestehende Importpfade. */
+export { tokenEquals } from "@/lib/tokenCompare";
 
 export function apiTokenEnabled(): boolean {
   return Boolean(process.env.FIRM_API_TOKEN);
 }
 
-/** Timing-sicherer Vergleich, der auch bei ungleicher Länge nicht short-circuited. */
-export function tokenEquals(got: string, expected: string): boolean {
-  const a = Buffer.from(got, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  const n = Math.max(a.length, b.length, 1);
-  const pa = Buffer.alloc(n);
-  const pb = Buffer.alloc(n);
-  a.copy(pa);
-  b.copy(pb);
-  const lengthOk = a.length === b.length && b.length > 0;
-  const bodyOk = timingSafeEqual(pa, pb);
-  return lengthOk && bodyOk;
+function unauthorizedNotConfigured(): Response {
+  return Response.json(
+    {
+      ok: false,
+      error: "UNAUTHORIZED",
+      code: "AUTH_NOT_CONFIGURED",
+      hint: "Kein Token konfiguriert und Offen-Betrieb nicht wirksam. FIRM_ADMIN_TOKEN/FIRM_API_TOKEN setzen; lokal-offener Betrieb nur mit AUTH_MODE=local-open ausserhalb der Produktion.",
+    },
+    { status: 401 }
+  );
 }
 
+/**
+ * Schreib-Guard für POST/PUT. `null` = erlaubt, sonst 401/403-Response.
+ *
+ * Bewusst **kein** `if (!expected) return null` mehr: das war der Kern von
+ * Befund C1 — jede unauthentifizierte Anfrage im Netz hätte schreiben dürfen.
+ */
 export function checkApiToken(req: Request): Response | null {
   const expected = process.env.FIRM_API_TOKEN;
-  if (!expected) return null; // Off-Betrieb
+
+  if (!expected) {
+    const decision = resolveAuthMode();
+    if (decision.mode === "local-open") return null; // explizit/Dev konfiguriert
+    if (!anyTokenConfigured()) return unauthorizedNotConfigured();
+    // RBAC ist eingerichtet (z. B. nur FIRM_ADMIN_TOKEN): die Permission
+    // entscheidet, nicht das Fehlen eines Operator-Tokens.
+    const resolution = resolveAuth(req);
+    if (!resolution.ok) {
+      return Response.json(
+        { ok: false, error: resolution.error, hint: resolution.hint },
+        { status: resolution.status }
+      );
+    }
+    if (resolution.actor.permissions.includes("firm.write")) return null;
+    return Response.json(
+      {
+        ok: false,
+        error: "FORBIDDEN",
+        hint: "Rolle ohne Permission firm.write — Schreibende Firm-Endpunkte brauchen Operator- oder Admin-Credential.",
+      },
+      { status: 403 }
+    );
+  }
 
   const got = req.headers.get("x-firm-token") ?? "";
   if (tokenEquals(got, expected)) return null;
@@ -51,18 +106,29 @@ export function checkApiToken(req: Request): Response | null {
 
 const hits = new Map<string, number[]>();
 
-function clientKey(req: Request): string {
-  // Hinter einem Proxy wäre x-forwarded-for spoofbar — der Dienst lauscht
-  // standardmäßig nur auf 127.0.0.1, der Header ist dann irrelevant.
-  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const real = req.headers.get("x-real-ip")?.trim();
-  return fwd || real || "local";
+/**
+ * Bucket-Schlüssel = geteilte Client-IP-Auflösung (C2, v1.36.14).
+ *
+ * Vorher stand hier `x-forwarded-for`/`x-real-ip` direkt — client-setzbare
+ * Header als Sicherheitsgrenze. Jetzt entscheidet `resolveClientIp()`:
+ * ohne konfiguriertes Proxy-Vertrauen (`TRUSTED_PROXY_IPS`) bzw. ohne
+ * proxy-gesetztes `x-verified-ip` ist der Schlüssel die Socket-Adresse oder
+ * `local`, und ein mitgeschicktes `X-Forwarded-For: 1.2.3.4` ändert nichts.
+ */
+function clientKey(req: Request, opts: ClientIpOptions = {}): string {
+  return clientRateLimitKey(req, opts);
 }
 
 export type RateLimitOptions = {
   max?: number;
   windowMs?: number;
   now?: number;
+  /**
+   * Socket-Remote-Adresse des direkten Peers, falls der Aufrufer sie kennt
+   * (eigener Node-Server/Adapter). Im Next.js-App-Router nicht verfügbar —
+   * dann trägt `TRUSTED_PROXY_IPS` + `x-verified-ip` die Identität.
+   */
+  peerIp?: string | null;
 };
 
 /** Nur für Tests: Bucket-Speicher leeren. */
@@ -82,7 +148,7 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
 
   const windowMs = opts.windowMs ?? 60_000;
   const now = opts.now ?? Date.now();
-  const key = clientKey(req);
+  const key = clientKey(req, { peerIp: opts.peerIp });
   const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) {
     const retryAfter = Math.max(1, Math.ceil((windowMs - (now - recent[0])) / 1000));

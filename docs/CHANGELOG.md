@@ -5,6 +5,336 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.14] — 2026-09-03 · fix(security): C2 Rate-Limit-Identität — spoofbare Proxy-Headers zählen nicht mehr (MEDIUM/HIGH)
+
+**MEDIUM/HIGH, Control Panel / Security (`src/lib/clientIp.ts` neu, `src/lib/apiAuth.ts`,
+`src/brokers/control-plane/guard.ts`, `src/brokers/control-plane/config.ts`,
+`src/app/api/brokers/[venue]/credentials/route.ts`, `src/app/api/auth/me/route.ts`,
+`scripts/auth-boot-guard.ts`, `src/instrumentation.ts`).** Befund C2 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): Beide Rate-Limiter nahmen das **linkeste** Element aus
+`x-forwarded-for` (Ersatz: `x-real-ip`) als Client-Identität —
+
+```ts
+// src/lib/apiAuth.ts (clientKey) und src/brokers/control-plane/guard.ts
+// (credentialClientKey) — vor dem Fix, identisch dupliziert
+const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+const real = req.headers.get("x-real-ip")?.trim();
+return fwd || real || "local";
+```
+
+Beide Header setzt der **Client** selbst. Ein frisches `X-Forwarded-For: <zufällig>` pro Anfrage
+erzeugte einen frischen Bucket: Das per-IP-Limit (Schreib-API 60/min, Credential-Versuche 5/min)
+war damit nicht „umgangen", sondern faktisch **abgeschaltet** — Credential-Brute-Force lief
+ungedrosselt, und dieselbe unsichere Logik war an zwei Stellen dupliziert.
+
+### Hinzugefügt
+
+- **`src/lib/clientIp.ts` (neu, Blatt-Modul ohne Imports):** die einzige Quelle der
+  Rate-Limit-Identität. `resolveClientIp(req, opts)` liefert
+  `{ key, ip, source, peerIp, peerTrusted, trustedProxiesConfigured, ignoredHeaders }` und wirft
+  nie (Requestpfad). Eigenes, abhängigkeitsfreies IP-/CIDR-Parsing — IPv4, IPv6 inkl.
+  `::`-Kompression, IPv4-mapped (`::ffff:203.0.113.9` → IPv4, wie Node es auf Dual-Stack-Sockets
+  meldet), Zone-ID, RFC-5952-Kanonisierung, Ablehnung führender Nullen (Oktal-Mehrdeutigkeit =
+  Parser-Differenz zwischen Proxy und App). Gruppenbasiert statt `BigInt`, weil das Projekt auf
+  `target: ES2017` steht. Dazu `peerIpFromRequest()` (Socket/Connection, **kein** Header-Fallback),
+  `clientIpFromForwardedChain()`, `describeClientIpPolicy()` und `clientIpPolicyWarnings()`.
+- **`TRUSTED_PROXY_IPS`** (neu, `.env`): CIDR-Liste der Reverse Proxys, Komma/Semikolon/Whitespace
+  getrennt, plus die Aliase `loopback`, `private`, `link-local`. Der einzige Vertrauensanker.
+  Unparsebare Einträge werden verworfen **und** gemeldet; `0.0.0.0/0`/`::/0` erzeugt eine laute
+  Warnung (das wäre der C2-Rückfall: jeder Peer wäre „Proxy"). Ein `all`-Alias existiert bewusst
+  nicht.
+- **`x-verified-ip`** (neu): der Header, den **nur** der Reverse Proxy setzen darf
+  (nginx: `proxy_set_header X-Verified-IP $remote_addr;`) — und der einen vom Client mitgebrachten
+  Wert überschreiben muss. Mehrdeutige (mehrfacher Header ⇒ `, `-Join), kommaseparierte oder
+  unparsebare Werte werden verworfen: „der Proxy überschreibt nicht sauber" darf nie zu einer
+  freien Bucket-Wahl führen.
+- **`BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT`** (neu, Default **20/min**, 0 = aus): globales
+  Credential-Limit auf dem **festen** Bucket `global` — IP-unabhängig per Konstruktion
+  (`checkCredentialGlobalRateLimit`). Deckelt verteiltes Raten (Proxy-Wechsel, NAT, Botnet), das
+  die Identitäts-Ebene allein nicht sieht. 429-Code `CREDENTIAL_GLOBAL_RATE_LIMITED`.
+- **Exponentieller Backoff** (`credentialBackoffMs`, `CREDENTIAL_BACKOFF_CONFIG`): ab dem
+  **3.** Fehlversuch 2 s → 4 s → 8 s → …, Deckel **15 min**, Ruhe-Reset nach 15 min.
+  `recordCredentialFailure`/`recordCredentialSuccess`/`credentialBackoffState`/
+  `checkCredentialBackoff`; 429-Code `CREDENTIAL_BACKOFF`.
+- **`BROKER_CREDENTIAL_BACKOFF_BASE_MS` / `BROKER_CREDENTIAL_BACKOFF_MAX_MS`** (neu,
+  `credentialBackoffConfig`): Startwert und Deckel der Sperre per Env justierbar
+  (Basis `0` = Ebene aus, wie bei den anderen Limits) — derselbe Operator-Knob-Stil wie
+  `BROKER_CREDENTIAL_RATE_LIMIT`, und in Tests deterministisch statt wall-clock-abhängig.
+- **`GET /api/auth/me` → `rateLimitIdentity`:** `key`, `ip`, `source`
+  (`verified-header` | `trusted-forwarded-for` | `peer` | `local-fallback`), `peerAvailable`,
+  `trustedProxiesConfigured`, `ignoredHeaders`, `policy`. Secret-frei (höchstens die Adresse des
+  Aufrufers selbst) — ein falsch konfigurierter Proxy ist damit in einem `curl` sichtbar, statt
+  sich als wirkungsloses Rate-Limit zu tarnen.
+- **Boot-Log:** `scripts/auth-boot-guard.ts` und `src/instrumentation.ts` geben dieselbe Policy
+  aus (`[client-ip] client-ip=… trusted-proxies=N`) plus die Konfigurationswarnungen.
+- **Tests:** `tests/clientIp.test.ts` (26 Fälle) und `tests/controlPlane.bruteforce.test.ts`
+  (22 Fälle), siehe unten.
+
+### Geändert
+
+- **`src/lib/apiAuth.ts` (`clientKey`) und `src/brokers/control-plane/guard.ts`
+  (`credentialClientKey`):** beide rufen jetzt `clientRateLimitKey(req, { peerIp, env })` —
+  dieselbe Auflösung, keine zweite Eigenbau-Header-Logik mehr. `checkRateLimit` und
+  `checkCredentialRateLimit` akzeptieren `peerIp`, damit ein eigener Node-Server/Adapter die echte
+  Socket-Adresse durchreichen kann (im Next.js-App-Router ist sie am Web-`Request` nicht sichtbar).
+  `@/lib/apiAuth` exportiert `resolveClientIp`/`clientRateLimitKey` weiter.
+- **Header-Policy (`resolveClientIp`), in dieser Reihenfolge:**
+  1. `x-verified-ip`, wenn Proxy-Vertrauen wirksam ist: `TRUSTED_PROXY_IPS` gesetzt (Peer
+     unbekannt ⇒ die Konfiguration trägt das Vertrauen; Peer bekannt ⇒ er **muss** in der Liste
+     liegen) — oder ohne Konfiguration bei nachweislichem **Loopback**-Peer (Same-Host-Proxy).
+  2. `x-forwarded-for` **nur** bei gesetztem `TRUSTED_PROXY_IPS` **und** per Socket-Adresse
+     verifiziertem Trusted-Proxy-Peer; Auswertung **rightmost-untrusted** (von rechts alle
+     vertrauenswürdigen Proxys überspringen, erstes fremdes Element = Client). Eine vom Angreifer
+     vorgeschobene IP ist damit wertlos, weil der Proxy die echte Peer-Adresse anhängt.
+  3. `x-real-ip`: **nie** Identität — höchstens Eintrag in `ignoredHeaders`.
+  4. Server-seitiger Fallback: Socket-Remote-Adresse, sonst die Prozess-Konstante `local`
+     (alle Clients teilen sich **einen** Bucket — enger, nie weiter).
+- **`guardCredentialEndpoint` (Reihenfolge):** Auth → CSRF → **Backoff** → Limit (Identität) →
+  **Limit (global)**. Die globalen/Backoff-Ebenen liegen **hinter** der Identitäts-Ebene, damit
+  ein einzelner Flooder das globale Budget nicht füllen und legitime Admins aussperren kann
+  (DoS auf die Sicherheitsschicht).
+- **`POST /api/brokers/{venue}/credentials`:** meldet Fehlversuche für den Backoff —
+  422 (Validierung/`INVALID_ENVELOPE`) und eine von der Venue abgelehnte Probe
+  (`probe.state === "error"`, das eigentliche Brute-Force-Signal); Erfolg setzt die Zählung
+  zurück. **Nicht** gezählt werden 409-Zustandskonflikte (`ALREADY_CONNECTED`) und 5xx
+  (`SECRET_STORE_UNAVAILABLE`, `INTERNAL_ERROR`) — ein kaputter Store oder ein zweiter
+  Speicherversuch darf niemanden aussperren.
+- **Kill-Switch-Ausnahme (bewusst):** `POST /api/live/kill` und `POST /api/live/transition` rufen
+  weiterhin ausschließlich `checkCredentialRateLimit` (Identitäts-Ebene). Globales Limit und
+  Backoff wirken nur auf Credential-Endpoints — die Sicherheitsaktion darf nie durch einen
+  Credential-Flood blockierbar sein.
+
+### Bewusst strenger als der Audit-Prompt
+
+DO‑2 des Prompts erlaubt im `else`-Zweig (kein `TRUSTED_PROXY_IPS`) ein `x-verified-ip` ohne
+weitere Bedingung. Umgesetzt ist die sicherheitsrelevante Einschränkung: ohne Vertrauensanker wird
+der Header nur akzeptiert, wenn die Anfrage von **Loopback** kommt (Same-Host-Proxy — der Dienst
+bindet lokal 127.0.0.1) oder die Socket-Adresse nicht sichtbar ist **und** `TRUSTED_PROXY_IPS`
+gesetzt ist. Grund: `npm run start` bindet `0.0.0.0` — ein uneingeschränkt vertrautes
+`x-verified-ip` wäre exakt derselbe Fehler wie vorher, nur mit neuem Header-Namen. Das
+Akzeptanzkriterium („spoofed header is ignored by default") gilt damit für **beide** Header.
+
+### Docs
+
+- `.env.example`: `TRUSTED_PROXY_IPS`-Block (Policy, nginx-Zeile, Aliase, Beispiele) und
+  `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` inkl. Backoff-Erklärung.
+- `INSTALL.md`: neuer Abschnitt „Rate-Limit-Identität: `TRUSTED_PROXY_IPS` (C2, v1.36.14)" mit
+  Entscheidungstabelle, nginx-Snippet und `jq .rateLimitIdentity`-Diagnose; beide Flags in der
+  Referenz-Tabelle; Stand auf v1.36.14 gezogen.
+- `docs/INSTALL.md`: Sicherheitsblock in Kapitel 5.1 (inkl. nginx-`location`), Multi-User-Hinweis
+  in 7.3, vier neue Zeilen in Kapitel 11 (`429` mit `local`-Bucket, `CREDENTIAL_BACKOFF`,
+  `CREDENTIAL_GLOBAL_RATE_LIMITED`, `[client-ip]`-Warnung).
+- `docs/help/ops.help.json` (Version 5): neue Felder `auth.clientIp` und `rateLimit.credential` im
+  3-Ebenen-Schema, `live.gate` auf „5/min pro Client-Identität, ohne globales Limit/Backoff"
+  präzisiert.
+- `README.md` (neuer Abschnitt „Rate-Limits kennen keine erfundenen IPs"), `docs/README.md`
+  (Versionszeile, API-Hinweis, `clientIp.ts` im Quellbaum), `docs/SECURITY_AUDIT.md`
+  (Empfehlung 4 als Nachtrag erledigt, T7/T11/Red-Team-Zeile), `docs/FRONTEND_CONTROL_PLANE.md`
+  (drei Guard-Zeilen), `docs/BROKER_ARCHITECTURE.md`, `docs/LIVE_TRADING.md`, `docs/HANDBUCH.md`,
+  `deploy/ai-trading-firm.service` (Proxy-Hinweis an der Unit).
+- Audit-Tracking: `audit-remediation/C2-forwarded-ip.md` (Status, umgesetzte Fix-Spezifikation,
+  abgehakte Akzeptanzkriterien, Versions-Hinweis), `audit-remediation/README.md`,
+  `docs/AUDIT_REMEDIATION_2026-09.md` und der C2-Querverweis in `audit-remediation/C1-open-mode.md`
+  auf **gefixt v.1.36.14** gestellt.
+
+### Unverändert
+
+- `FIRM_RATE_LIMIT` (60/min), `BROKER_CREDENTIAL_RATE_LIMIT` (5/min), Backoff-Defaults
+  (Schwelle 3, Basis 2 s, Faktor 2, Deckel/Ruhe 15 min), Fenstergröße 60 s,
+  429-Contract `{ ok:false, error:"RATE_LIMITED", hint }` + `Retry-After` — ergänzt um `code`,
+  alle bestehenden Statuscodes und Tests bleiben gültig.
+- Guard-Reihenfolge Auth → CSRF → Rate-Limit, CSRF-Wert `local` im Offen-Betrieb,
+  Auth-Modus-Logik (C1, v1.36.13) und der Kill-Phrase-Contract.
+- Limiter bleiben prozess-lokal (Single-Node) — Mehrinstanzenbetrieb braucht weiterhin eine
+  geteilte Zustandsquelle (unveränderte, dokumentierte Grenze).
+
+### Tests
+
+`tests/clientIp.test.ts` (neu, 26 Fälle): Parsing-/CIDR-Matrix (IPv4, IPv6, IPv4-mapped, Zone-ID,
+führende Nullen, Müll), `clientIpFromForwardedChain` rightmost-untrusted (Spoof-Kette,
+Proxy-Kette, reine Proxy-Kette ⇒ leftmost), `peerIpFromRequest` (Socket ja, Header nein),
+**Akzeptanz**: `X-Forwarded-For: 1.2.3.4` ändert den Bucket nicht (zwei verschiedene Fake-IPs ⇒
+derselbe Schlüssel, rotierende Fake-Header ⇒ 429 im echten `checkRateLimit`), `x-real-ip` nie
+Identität, `TRUSTED_PROXY_IPS`-Matrix (vertrauenswürdiger/nicht vertrauenswürdiger/unbekannter
+Peer, CIDR-Pool, IPv6), `x-verified-ip`-Regeln (Loopback, fremder Peer, unbekannter Peer,
+Mehrdeutigkeit, IPv6-Kanonisierung), Diagnose über `/api/auth/me` (inkl. Secret-Scanner leer) und
+zwei statische Drift-Schutze (kein Modul außerhalb `clientIp.ts` liest die spoofbaren Header; der
+alte Dreizeiler darf nicht zurückkommen).
+
+`tests/controlPlane.bruteforce.test.ts` (neu, 22 Fälle): Konfiguration/Defaults
+(inkl. `credentialBackoffConfig`: Env-Override, `0` = aus, Klemmung bei Müll), `credentialBackoffMs`
+(Schwelle, Wachstum, Deckel, NaN/Infinity/negativ, kaputte Config ⇒ keine Dauersperre),
+Credential-Limiter mit derselben Identität (rotierende Header ⇒ 429; konfiguriertes Vertrauen
+trennt echte Clients wieder), globales Limit (deckelt verteilte Versuche, hängt an keinem Header,
+Fenster-Reset), Backoff (Schwelle, Wachstum, Ablaufen, Erfolgs-Reset, Ruhe-Reset, pro Identität
+getrennt), `guardCredentialEndpoint` (CSRF vor Limitern, globale Ebene greift) und die
+**Kill-Switch-Ausnahme** (global dicht + Backoff aktiv ⇒ `checkCredentialRateLimit` bleibt frei),
+plus vier Fälle über die echte Route `POST /api/brokers/{venue}/credentials`
+(3 × 422 ⇒ 429 `CREDENTIAL_BACKOFF` — mit per Env auf 600 s gestellter Backoff-Basis, damit die
+Aussage „die Route sperrt ab dem 3. Fehlversuch" nicht an einem Wall-Clock-Rennen unter paralleler
+Test-Last hängt; Erfolg setzt zurück, 409 zählt nicht, spoofbare Header kaufen keine Versuche).
+
+Typecheck, Lint und `npm run docs:validate` grün. `npm test` = **1687/1687**
+(1639 vorher + 48 neue C2-Fälle). Manuell verifiziert (echter Node-HTTP-Server, Socket-Peer
+sichtbar): spoofed `X-Forwarded-For`/`X-Real-IP` ⇒ Identität = Socket-Adresse, beide Header in
+`ignoredHeaders`; `x-verified-ip` von Loopback ⇒ übernommen; doppelt gesetztes `x-verified-ip` ⇒
+verworfen (fail-closed); mit `TRUSTED_PROXY_IPS=127.0.0.1` ⇒ Kette `1.2.3.4, 203.0.113.44` wird zu
+`203.0.113.44` (rightmost-untrusted, die Fake-IP zählt nicht).
+
+---
+
+## [1.36.13] — 2026-09-03 · fix(auth): C1 Auth-Modus — Produktion ohne Token verweigert den Start, Offen-Betrieb nur explizit (HIGH)
+
+**HIGH, Control Panel / Auth (`src/auth/authMode.ts`, `src/auth/resolve.ts`,
+`src/lib/apiAuth.ts`, `src/instrumentation.ts`).** Befund C1 des
+Senior-Peer-Reviews (`docs/AUDIT_REMEDIATION_2026-09.md`): die Offenheit der
+Schreib-API hing an einem **fehlenden** Wert.
+
+```ts
+// src/lib/apiAuth.ts (vor dem Fix)
+const expected = process.env.FIRM_API_TOKEN;
+if (!expected) return null; // Off-Betrieb  ⇒ jeder unauthentifizierte Caller durfte schreiben
+```
+
+Zusätzlich lieferte `resolveAuth()` in demselben Fall einen Admin-Aktor
+(`source: "local-open"`) — also vollen Schreib-, Config-, Credential- und
+Kill-Zugriff. Das Setup-Skript erzeugte zwar standardmäßig ein Token, aber
+„Variable nicht gesetzt“ war ein **funktionierender Default**, kein Fehler:
+ein Vergessen, eine geplatzte `.env`-Übernahme oder ein Deploy ohne Token
+öffnete die komplette Write-API im Netz (`npm run start` bindet `0.0.0.0`).
+
+### Hinzugefügt
+
+- **`src/auth/authMode.ts` (neu, Blatt-Modul):** `AUTH_MODE` mit genau zwei
+  Werten — `local-open` und `token-required` — plus `resolveAuthMode()`,
+  `assertAuthConfigured()`, `describeAuthMode()`, `authModeWarnings()` und
+  `ConfigurationError` (`code: AUTH_NOT_CONFIGURED | AUTH_MODE_INVALID`,
+  `hint` als Behebungszeile). Token-Flags und
+  `adminTokenConfigured`/`anyTokenConfigured` leben jetzt hier (SSoT) und
+  werden aus `resolve.ts` weiter exportiert.
+- **`scripts/auth-boot-guard.ts` (neu) + `npm run boot:guard`:** der harte
+  Startwächter. `npm run start` und `npm run dev` rufen ihn **vor** `next`
+  auf; bei Verstößen endet der Prozess mit Exit-Code 1 und dreizeiligen
+  Behebungshinweisen — genau das, was `systemd` (`Restart=always`) braucht, um
+  „fehlgeschlagen“ von „läuft“ zu unterscheiden.
+- **Boot-Guard zusätzlich in `src/instrumentation.ts`:** läuft **vor**
+  Adapter-Check und Scheduler und wirft in Produktion ohne Token:
+
+  ```ts
+  if (process.env.NODE_ENV === "production" && !anyTokenConfigured())
+    throw new ConfigurationError("Refuse startup: authentication not configured (set FIRM_ADMIN_TOKEN/FIRM_API_TOKEN).");
+  ```
+
+  Zweitlinie für Starts am npm-Skript vorbei (`npx next start`, eigener
+  Container-Entrypoint). Bewusst als Wurf und nicht als harter Abbruch:
+  `process.exit` in der Instrumentation meldet Turbopack als
+  Edge-Runtime-Warnung im Build.
+  `next build` (`NEXT_PHASE=phase-production-build`) ist ausgenommen — ein
+  Build ist kein Server und darf nicht an der Laufzeitkonfiguration scheitern
+  (analog zum bestehenden `next-build-fähig`-Test für `src/db`).
+- **`GET /api/auth/me`** antwortet zusätzlich auf `authMode`
+  (`mode`, `requested`, `reason`, `production`, `tokensConfigured`,
+  `summary`) — secret-frei, damit Control Panel und Runbooks sehen, *warum*
+  offen oder zu ist.
+- **Testdatei `tests/authMode.test.ts`** (29 Fälle) inkl. echtem
+  Kindprozess-Boot-Test über `spawnSync`.
+
+### Geändert
+
+- **Modus-Regeln (`resolveAuthMode`), in dieser Priorität:**
+  1. Irgendein Token konfiguriert ⇒ `token-required`. Ein gesetztes
+     `AUTH_MODE=local-open` wird **ignoriert** und boot-seitig gemeldet —
+     Offen-Betrieb darf eine installierte Token-Konfiguration nicht abschalten.
+  2. Kein Token, `AUTH_MODE` gesetzt ⇒ dieser Modus. `local-open` ist der
+     einzige Weg ohne Credential; in Produktion nur als ausdrücklich in `.env`
+     eingetragener Opt-in und mit lauter Warnung im Log.
+  3. Kein Token, `AUTH_MODE` ungesetzt ⇒ `local-open` als Dev-Default
+     (`NODE_ENV !== "production"`, im Boot-Log angekündigt), in Produktion
+     `token-required` **und** Boot-Verweigerung.
+  4. Unbekannter Wert ⇒ fail-closed `token-required` +
+     `ConfigurationError(AUTH_MODE_INVALID)`. Ein Tipfehler öffnet nichts.
+- **`src/lib/apiAuth.ts` (`checkApiToken`):** kein impliziter `return null`
+  mehr. Offen ist der Guard nur bei wirksamem `local-open`; sonst gilt —
+  401 `AUTH_NOT_CONFIGURED`, wenn gar kein Token existiert, bzw. die
+  RBAC-Permission `firm.write`, wenn ein Admin-/Viewer-Token eingerichtet,
+  `FIRM_API_TOKEN` aber ungesetzt ist. **Nebenbefund behoben:** genau dieser
+  Fall war vorher offen — `FIRM_ADMIN_TOKEN` allein schützte
+  `POST /api/firm/*` nicht.
+- **`src/auth/resolve.ts` (`resolveAuth`):** die `local-open`-Administration
+  ist an den Modus gebunden, nicht ans Fehlen von Tokens. Requestpfad bleibt
+  Wurf-frei (`resolveAuthMode` wirft nie; der Guard wirft nur beim Start).
+- **`src/lib/tokenCompare.ts` (neu):** `tokenEquals` als Blatt-Modul, damit
+  Auth-Schicht und Schreib-Guard denselben timing-sicheren Vergleich nutzen,
+  ohne Zyklus (`apiAuth → auth/resolve → apiAuth`). `@/lib/apiAuth`
+  re-exportiert die Funktion, alle bestehenden Importe bleiben gültig.
+- **`scripts/setup-cachyos.sh` (Schritt 05):** `--no-api-token` schreibt jetzt
+  zusätzlich `AUTH_MODE=local-open` in die `.env` und warnt mit dem neuen
+  Grund (Produktionsstart sonst verweigert). Der bewusste Verzicht bleibt
+  möglich — er ist nur nicht mehr still.
+- **`package.json`:** `dev`/`start` sind um den Wächter ergänzt, neu
+  `npm run boot:guard` (Prüfung ohne Server-Start, z. B. im Deploy vor dem
+  `systemctl restart`).
+- **`deploy/ai-trading-firm.service`:** Kommentar auf die Pflicht gestellt
+  (`NODE_ENV=production` braucht ein Token).
+
+### Docs
+
+- `.env.example`: neuer `AUTH_MODE`-Block inkl.
+  „PRODUKTION OHNE TOKEN STARTET NICHT“.
+- `INSTALL.md`: neuer Abschnitt „Auth-Modus: `AUTH_MODE` und die
+  Produktionspflicht“, `AUTH_MODE` in der Flag-Tabelle, Schnellstart-Hinweis;
+  Stand auf v1.36.13 gezogen.
+- `docs/INSTALL.md`: Sicherheitsblock in Kapitel 5.1, Start-Hinweis in 5.3,
+  LAN-Freigabe in 7.3, drei neue Zeilen in Kapitel 11 (Symptom
+  `Refuse startup …` / `AUTH_NOT_CONFIGURED`), V18- und B5-Texte aktualisiert.
+- `docs/FRONTEND_CONTROL_PLANE.md` (RBAC-Zeile), `docs/HANDBUCH.md`
+  (§8.3 Rollen, §17 Regelwerk-API, API-Tabelle `/api/auth/me`),
+  `docs/README.md` (Schreib-Schutz + Versionszeile), `README.md`.
+- `docs/help/ops.help.json` (Version 4): neues Feld `auth.mode` im
+  3-Ebenen-Schema, Rolle-admin/-operator-Texte auf den Modus gestellt.
+- Audit-Tracking: `audit-remediation/C1-open-mode.md`,
+  `audit-remediation/README.md` und `docs/AUDIT_REMEDIATION_2026-09.md` auf
+  **gefixt (v1.36.13)** gestellt, inkl. der dokumentierten Auflösung des
+  Zielkonflikts zwischen „Dev-Default“ und „nur explizit“.
+
+### Unverändert
+
+- Kompatible Statuscodes: Admin-Token gesetzt, kein Treffer ⇒ 403; nur
+  Operator-/Viewer-Token ⇒ 401; `GET` bleibt ohne Credential lesbar.
+- `GET /api/auth/me` liefert weiter keine Token-Werte; Elevation
+  `operator → admin` ohne `FIRM_ADMIN_TOKEN` bleibt.
+- Rate-Limit (`FIRM_RATE_LIMIT`), CSRF-Wert `local` im Offen-Betrieb und die
+  Control-Plane-Guard-Reihenfolge (Auth → CSRF → Rate-Limit) sind unverändert.
+- Die Dev-Bequemlichkeit ist nicht weg: `npm run dev` läuft ohne Token.
+
+### Tests
+
+`tests/authMode.test.ts` (neu, 30 Fälle): Modus-Matrix (Token schlägt
+Offen-Betrieb, Dev-Default, Produktions-Implikation, expliziter Opt-in,
+`token-required` in Dev, Fail-closed bei Müll-Wert), `describeAuthMode` ohne
+Credential-Echo, `assertAuthConfigured` (Refusal-Text aus dem Audit,
+`AUTH_MODE_INVALID`, Start mit Viewer-Token allein), **Kindprozess-Boot gegen
+das echte `scripts/auth-boot-guard.ts`** (Exit 1 + „Start verweigert
+(AUTH_NOT_CONFIGURED)“ + Behebung in Produktion ohne Token, Exit 0 +
+angekündigter Dev-Default, Exit 0 + Warnung beim Produktions-Opt-in,
+`AUTH_MODE_INVALID` bei Müll-Wert, Token-Wert nie im Log),
+Verkabelungs-Checks (npm-Skripte rufen den Wächter, Instrumentation wirft statt
+hart zu beenden), RBAC-Auflösung
+(Produktion ohne Token ⇒ 401 statt Admin), `checkApiToken`/`guardWrite`
+(401 `AUTH_NOT_CONFIGURED`, Dev offen, Token-Pfad, RBAC-Pfad mit
+Admin-/Viewer-Token), echte Route `POST /api/firm/tick` (401, bevor getickt
+wird) und drei statische Verkabelungs-/Doku-Checks (Guard vor
+`assertTradingVenuesHaveRealAdapters`, kein `if (!expected) return null` mehr,
+`AUTH_MODE` in `.env.example`/beiden INSTALLs).
+
+Typecheck, Lint und `npm run docs:validate` grün; `npm run build` ohne neue
+Turbopack-Warnungen. `npm test` = **1639/1639** (1609 vorher + 30 neue
+C1-Fälle). Manuell geprüft: `npm run start` ohne Token in Produktion →
+Exit 1 mit Behebung; mit `FIRM_API_TOKEN` → 401 ohne `x-firm-token`, Durchlass
+mit Header; `AUTH_MODE=local-open` in Produktion → Start mit Warnung.
+
+---
+
 ## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
 
 **MEDIUM, Brokers/Venues.** Befund B2 des Senior-Peer-Reviews

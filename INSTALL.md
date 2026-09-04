@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-03** · Code-Version **1.36.5**
+> Dokumentationsstand **2026-09-03** · Code-Version **1.36.14**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -73,9 +73,11 @@ npm run start                   # http://0.0.0.0:3369
 ```
 
 Die `.env`-Datei enthält Zugangsdaten → `chmod 600 .env`.
-**Achtung:** `npm run start` bindet `0.0.0.0`. Ohne `FIRM_API_TOKEN` sind alle
-`POST`/`PUT`-Routen im gesamten Netz offen — das Setup-Skript erzeugt deshalb
-immer eines.
+**Achtung (C1, v1.36.13):** `npm run start` bindet `0.0.0.0` **und** setzt
+`NODE_ENV=production`. Ohne konfiguriertes Token startet der Dienst dann gar
+nicht mehr (Boot-Guard, `ConfigurationError: AUTH_NOT_CONFIGURED`) — das Setup-
+Skript erzeugt deshalb immer ein `FIRM_API_TOKEN`. Details im Abschnitt
+[Auth-Modus](#auth-modus-auth_mode-und-die-produktionspflicht-c1-v13613).
 
 ## Markt-Universum und Short-Selling (v1.30.0)
 
@@ -114,6 +116,124 @@ API-Sicherheit (V17–V18). Bestanden ab `--min-pass` (Default 15). Jeder
 Fehlcheck gibt eine konkrete Behebungszeile aus. Dokumentierte Ausnahmen und
 die Befund-Historie stehen in
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md).
+
+## Auth-Modus: `AUTH_MODE` und die Produktionspflicht (C1, v1.36.13)
+
+Schreibende Endpunkte (`POST`/`PUT`) und die Admin-Rolle hängen an einem
+expliziten Modus — nicht mehr am bloßen Fehlen eines Tokens:
+
+| Modus | Wirkt | Schreiben ohne Credential |
+| --- | --- | --- |
+| `token-required` | Tokens konfiguriert, **oder** `NODE_ENV=production`, **oder** explizit gesetzt | nein — 401/403 |
+| `local-open` | nur wenn kein Token gesetzt ist und der Modus wirksam wurde: implizit als Dev-Default (`NODE_ENV != production`), in Produktion nur explizit | ja |
+
+Drei Regeln, alle in `src/auth/authMode.ts` (SSoT) geprüft:
+
+1. **Produktion ohne Token startet nicht.** `NODE_ENV=production` (genau das setzt
+   `npm run start` / `deploy/ai-trading-firm.service`) und kein
+   `FIRM_ADMIN_TOKEN`/`FIRM_API_TOKEN`/`FIRM_VIEWER_TOKEN` ⇒ der Boot-Guard in
+   `src/instrumentation.ts` wirft `ConfigurationError`
+   (`AUTH_NOT_CONFIGURED`) und der Server bricht ab. `next build` ist ausgenommen
+   (`NEXT_PHASE=phase-production-build`) — ein Build ist kein Server.
+2. **`AUTH_MODE=local-open` ist ein Opt-in, keine Überraschung.** Ausserhalb der
+   Produktion ist es der Dev-Komfort-Default (mit Warnung im Boot-Log). In
+   Produktion braucht es den ausdrücklich in `.env` eingetragenen Wert — der
+   Betrieb ist dann offen, aber es ist eine dokumentierte Entscheidung, keine
+   Unterlassung.
+3. **Ein Token sperrt den Offen-Betrieb aus.** Sobald irgendein Token gesetzt
+   ist, gilt immer `token-required`; ein gesetztes `AUTH_MODE=local-open` wird
+   ignoriert und boot-seitig gemeldet. Ein unbekannter `AUTH_MODE`-Wert ist ein
+   Konfigurationsfehler (`AUTH_MODE_INVALID`) und startet den Dienst nicht.
+
+Token erzeugen und eintragen:
+
+```bash
+umask 077
+printf 'FIRM_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+```
+
+`scripts/setup-cachyos.sh` macht das Schritt 05 automatisch; nur `--no-api-token`
+schreibt stattdessen `AUTH_MODE=local-open` in die `.env` — bewusst offen, nicht
+versehentlich. Der Modus ist auch im Betrieb sichtbar: `GET /api/auth/me` liefert
+`authMode.{mode,requested,reason,production,tokensConfigured}`.
+
+Der Wächter läuft bei `npm run start` und `npm run dev` automatisch vor `next`
+und beendet den Prozess mit Exit-Code 1, wenn die Konfiguration nicht startfähig
+ist. Vor einem Deploy (oder als Check in der Pipeline) lässt er sich isoliert
+aufrufen, ohne einen Server zu starten:
+
+```bash
+npm run boot:guard        # Exit 0 = Start erlaubt · Exit 1 = verweigert + Grund
+```
+
+Details: [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md), Befund C1 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Rate-Limit-Identität: `TRUSTED_PROXY_IPS` (C2, v1.36.14)
+
+Rate-Limits brauchen eine stabile Client-Identität. Bis v1.36.13 kam sie aus
+`x-forwarded-for` bzw. `x-real-ip` — Headern, die **der Client selbst setzt**.
+Ein Angreifer konnte pro Anfrage eine neue IP behaupten und bekam damit pro
+Anfrage einen frischen Bucket: Das Limit war nicht umgangen, es war abgeschaltet
+(Befund C2, MEDIUM/HIGH). Seit v1.36.14 entscheidet `src/lib/clientIp.ts`
+(eine Quelle für Firm-Schreib-Limit **und** Credential-Limit):
+
+| Situation | Bucket-Identität |
+| --- | --- |
+| kein `TRUSTED_PROXY_IPS`, Socket-Adresse sichtbar | Socket-Remote-Adresse |
+| kein `TRUSTED_PROXY_IPS`, Socket-Adresse nicht sichtbar (Next.js-App-Router) | Konstante `local` — alle Clients teilen sich **ein** Limit |
+| kein `TRUSTED_PROXY_IPS`, Anfrage kommt von Loopback, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` (Same-Host-Proxy) |
+| `TRUSTED_PROXY_IPS` gesetzt, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` |
+| `TRUSTED_PROXY_IPS` gesetzt **und** Socket-Peer liegt in der Liste | `x-forwarded-for`, rightmost-untrusted ausgewertet |
+| `TRUSTED_PROXY_IPS` gesetzt, Socket-Peer liegt **nicht** in der Liste | Socket-Peer — sämtliche Proxy-Header ignoriert |
+
+`x-real-ip` wird in keinem Fall als Identität benutzt.
+
+**Betrieb hinter nginx/Traefik/Caddy:** `TRUSTED_PROXY_IPS` auf die Adresse des
+Proxys setzen und im Proxy einen eigenen, überschreibenden Header konfigurieren:
+
+```bash
+printf 'TRUSTED_PROXY_IPS=%s\n' "127.0.0.1" >> .env    # Proxy auf demselben Host
+```
+
+```nginx
+# nginx — den vom Client mitgebrachten Wert bewusst überschreiben
+proxy_set_header X-Verified-IP $remote_addr;
+```
+
+Ohne diese Konfiguration bleibt der Dienst **sicher, aber enger**: alle Clients
+teilen sich einen Bucket (`local`). Für den Single-User-Betrieb ist das der
+Normalfall; für mehrere Nutzer hinter einem Proxy ist `x-verified-ip` Pflicht.
+
+Sichtbar ist die wirksame Entscheidung jederzeit, ohne Secret-Werte:
+
+```bash
+curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity
+# {"key":"local","ip":null,"source":"local-fallback",
+#  "ignoredHeaders":["x-forwarded-for","x-real-ip"], ...}
+```
+
+Das Boot-Log nennt dieselbe Policy in einer Zeile (`[client-ip] …`) und warnt
+bei unparsebaren Einträgen sowie bei `0.0.0.0/0` (das wäre der C2-Rückfall:
+jeder Peer gilt dann als Proxy).
+
+**Brute-Force-Schichten der Credential-API** (alle seit v1.36.14 kombiniert):
+
+1. pro Client-Identität `BROKER_CREDENTIAL_RATE_LIMIT` (Default 5/min),
+2. global und **IP-unabhängig** `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT`
+   (Default 20/min) — bremst verteiltes Raten,
+3. exponentieller Backoff ab dem 3. Fehlversuch (2 s → 4 s → 8 s … max. 15 min,
+   Rücksetzung nach 15 min Ruhe oder einem von der Venue akzeptierten
+   Credential; justierbar über `BROKER_CREDENTIAL_BACKOFF_BASE_MS` /
+   `BROKER_CREDENTIAL_BACKOFF_MAX_MS`, Basis `0` schaltet die Ebene aus).
+
+Der Kill-Switch (`POST /api/live/kill`) und Gate-Transitionen nutzen weiterhin
+ausschließlich Ebene 1 — ein Credential-Flood darf die Sicherheitsaktion nie
+blockieren.
+
+Details: Befund C2 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md) und
+[`audit-remediation/C2-forwarded-ip.md`](audit-remediation/C2-forwarded-ip.md).
 
 ## Env-Flag-Referenz (sichere Defaults)
 
@@ -223,7 +343,10 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `SECRET_STORE_KMS_ENDPOINT` | — | optionaler KMS-Endpunkt |
 | `BROKER_SECRET_BACKEND` | — | Backend-Typ des Secret Store |
 | `BROKER_SECRET_DIR` | — | Ablage (falls File-Backend) |
-| `BROKER_CREDENTIAL_RATE_LIMIT` | — | Rate-Limit auf Credential-API |
+| `BROKER_CREDENTIAL_RATE_LIMIT` | `5` | Rate-Limit auf Credential-API pro Client-Identität (0 = aus) |
+| `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` | `20` | globales, IP-unabhängiges Credential-Limit (0 = aus; betrifft nie den Kill-Switch) |
+| `BROKER_CREDENTIAL_BACKOFF_BASE_MS` | `2000` | Startwert des exponentiellen Backoffs ab dem 3. Credential-Fehlversuch (0 = Backoff aus) |
+| `BROKER_CREDENTIAL_BACKOFF_MAX_MS` | `900000` (15 min) | Deckel einer Backoff-Sperre |
 | `BROKER_HEALTHCHECK_REMOTE` | `false` | remote Health-Checks aktivieren |
 
 ### RBAC / Firm-API
@@ -233,7 +356,9 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `FIRM_ADMIN_TOKEN` | *(leer)* | Admin-Token (RBAC) |
 | `FIRM_API_TOKEN` | *(leer)* | API-Token für alle `POST`/`PUT`-Routen; `scripts/setup-cachyos.sh` erzeugt eines |
 | `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Token |
-| `FIRM_RATE_LIMIT` | — | Rate-Limit auf Firm-API |
+| `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
+| `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |
+| `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste vertrauenswürdiger Reverse Proxys; erst damit zählen `x-verified-ip` (immer) bzw. `x-forwarded-for` (nur bei verifiziertem Socket-Peer). Leer ⇒ Header werden ignoriert, Bucket = Socket-Adresse bzw. `local` |
 
 ### Modell-Routing (Task 09)
 
