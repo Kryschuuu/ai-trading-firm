@@ -32,8 +32,8 @@ import { requirePermission, resolveActor, resolveAuth } from "../src/auth/resolv
 import {
   checkApiToken,
   guardWrite,
-  resetRateLimiterForTests,
 } from "../src/lib/apiAuth";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 const TOKEN_KEYS = ["FIRM_ADMIN_TOKEN", "FIRM_API_TOKEN", "FIRM_VIEWER_TOKEN"] as const;
 const AUTH_KEYS = [...TOKEN_KEYS, "AUTH_MODE", "NODE_ENV", "FIRM_RATE_LIMIT"] as const;
@@ -64,7 +64,7 @@ function req(headers: Record<string, string> = {}, method = "POST"): Request {
 const saved = new Map<string, string | undefined>();
 
 beforeEach(() => {
-  resetRateLimiterForTests();
+  __resetAllSingletonsForTests();
   const env = process.env as Record<string, string | undefined>;
   for (const key of AUTH_KEYS) {
     saved.set(key, env[key]);

@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-05** ·
-> Code-Version **1.36.21**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.22**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,28 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.22] — 2026-09-05 · fix(audit): S2 zentrale State-Registry — alle Singletons an EINEM Ort, EIN Test-Reset (MEDIUM)
+
+**MEDIUM, Architektur/Sonstiges (`src/lib/stateRegistry.ts` neu,
+`src/lib/engine.ts`, `src/brokers/control-plane/service.ts`,
+`src/lib/riskGuard.ts`, `src/brokers/factory.ts`, `src/lib/apiAuth.ts`,
+`tests/stateRegistry.test.ts` neu).** Befund S2 des Senior-Peer-Reviews:
+Mehrere parallele Singleton-/State-Mechanismen (verstreute
+`globalThis`-Keys wie `__firmHydrated`/`__controlPlaneStates` sowie
+Modul-Variablen für Kill-Switch, Risk-Limits und Broker-Adapter) machten
+konsistente Zustandsführung schwer — zwei der Singletons drifteten bereits
+(H2, C4).
+
+**Fix (verhaltensneutral):** eine zentrale, dependency-freie
+`src/lib/stateRegistry.ts` mit typisierten Accessoren (`flag`/`map`/`ref`)
+unter EINEM `globalThis`-Namensraum — alle 14 Cross-Cutting-Singletons
+(Engine, Control Plane, Risk-Guard, Broker-Factory, API-Auth) hängen jetzt
+dort, dokumentiert mit ihrer Wahrheitsquelle (DB vs. RAM). Das Test-Harness
+resettet über EINE Funktion (`__resetAllSingletonsForTests()`);
+`resetControlPlaneForTests`/`resetRateLimiterForTests` bleiben für
+Repo-/DI-Installation bestehen. `resetRuntimeLimits()` resettet bewusst nur
+die Basis-Limits (Adaptivfaktor überlebt — dokumentiert, Test vorhanden).
 
 ## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
 

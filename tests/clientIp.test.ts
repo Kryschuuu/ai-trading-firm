@@ -44,9 +44,9 @@ import {
 } from "../src/lib/clientIp";
 import {
   checkRateLimit,
-  resetRateLimiterForTests,
 } from "../src/lib/apiAuth";
 import { scanTextForSecrets } from "../src/brokers/control-plane/secretScan";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 const ROOT = process.cwd();
 
@@ -61,7 +61,7 @@ function req(headers: Record<string, string> = {}): Request {
 const NO_ENV = {};
 
 beforeEach(() => {
-  resetRateLimiterForTests();
+  __resetAllSingletonsForTests();
   delete process.env[TRUSTED_PROXY_IPS_FLAG];
   delete process.env.FIRM_RATE_LIMIT;
   delete process.env.FIRM_ADMIN_TOKEN;

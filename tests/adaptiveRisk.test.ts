@@ -29,10 +29,10 @@ import {
   resetRuntimeLimits,
   RISK_LIMITS,
 } from "../src/lib/riskGuard";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 beforeEach(() => {
-  resetRuntimeLimits();
-  applyAdaptiveRisk(null);
+  __resetAllSingletonsForTests();
 });
 
 const CALM: IndicatorReadings = { vix: 18, atr: 0.004, bbw: 0.02, retStdDev: 0.004 };

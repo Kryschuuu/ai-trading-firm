@@ -16,7 +16,7 @@
  * Audit: JEDES Ereignis → Control-Plane-Audit (Ring + audit_log).
  *
  * Persistenz (C4, v1.36.16): Der Zustand je Venue liegt in der Tabelle
- * `venue_control_state` (stateStore.ts); die Map `G.__controlPlaneStates`
+ * `venue_control_state` (stateStore.ts); die Map `state.controlPlaneStates`
  * ist nur noch Cache. `writeState()` upsertet, ein kalter `loadState()`
  * laedt aus der DB — nach einem Prozess-Neustart zeigt der Broker-Tab den
  * letzten bekannten Verbindungszustand statt immer INITIAL.
@@ -55,6 +55,7 @@ import {
   setControlStateRepositoryForTests,
   toPersistedRow,
 } from "./stateStore";
+import { state } from "../../lib/stateRegistry";
 
 // ── Ergebnis-Vertraege (status-only, siehe docs/FRONTEND_CONTROL_PLANE.md) ───
 
@@ -142,21 +143,13 @@ function toLayerDto(record: Record<ControlLayerId, VenueControlState["layers"][C
   ) as Record<ControlLayerId, LayerStatusDto>;
 }
 
-const G = globalThis as typeof globalThis & {
-  __controlPlaneServicePromise?: Promise<ControlPlaneService>;
-  __controlPlaneStates?: Map<string, VenueControlState>;
-  __controlPlaneHydrating?: Map<string, Promise<VenueControlState>>;
-  __controlPlaneWarmupPromise?: Promise<number>;
-  __controlPlanePersistWarned?: boolean;
-};
-
 /** In-Memory-CACHE des Zustands (Wahrheit: `venue_control_state`, C4). */
 function stateMap(): Map<string, VenueControlState> {
-  return (G.__controlPlaneStates ??= new Map());
+  return state.controlPlaneStates.get();
 }
 
 function hydrating(): Map<string, Promise<VenueControlState>> {
-  return (G.__controlPlaneHydrating ??= new Map());
+  return state.controlPlaneHydrating.get();
 }
 
 /** Venue-ID-Guardrail fuer den Persistenzpfad (nur registrierte Venues). */
@@ -165,8 +158,8 @@ function persistableVenue(venue: string): venue is BrokerVenueId {
 }
 
 function warnPersistOnce(op: string, err: unknown): void {
-  if (G.__controlPlanePersistWarned) return;
-  G.__controlPlanePersistWarned = true;
+  if (state.controlPlanePersistWarned.get()) return;
+  state.controlPlanePersistWarned.set(true);
   const msg = err instanceof Error ? err.message : String(err);
   console.warn(
     `[control-plane] venue_control_state ${op} fehlgeschlagen — Zustand bleibt prozesslokal (Cache). Ursache (redigiert): ${msg.slice(0, 160)}`
@@ -277,8 +270,8 @@ async function writeState(state: VenueControlState, configured?: boolean): Promi
  * Liefert die Anzahl geladener Venues.
  */
 export function warmControlPlaneStateCache(): Promise<number> {
-  if (!G.__controlPlaneWarmupPromise) {
-    G.__controlPlaneWarmupPromise = (async () => {
+  if (!state.controlPlaneWarmupPromise.has()) {
+    state.controlPlaneWarmupPromise.set((async () => {
       try {
         const repo = await getControlStateRepository();
         const rows = await repo.all();
@@ -293,9 +286,9 @@ export function warmControlPlaneStateCache(): Promise<number> {
         warnPersistOnce("warm-up", err);
         return 0;
       }
-    })();
+    })());
   }
-  return G.__controlPlaneWarmupPromise;
+  return state.controlPlaneWarmupPromise.get()!;
 }
 
 export class ControlPlaneService {
@@ -715,16 +708,16 @@ async function defaultDiscoverFn(venue: BrokerVenueId): Promise<number> {
  * Memory-Store.
  */
 export function getControlPlaneService(): Promise<ControlPlaneService> {
-  if (!G.__controlPlaneServicePromise) {
-    G.__controlPlaneServicePromise = (async () => {
+  if (!state.controlPlaneServicePromise.has()) {
+    state.controlPlaneServicePromise.set((async () => {
       const { getControlPlaneSecretStore } = await import("./secretStore");
       const store = await getControlPlaneSecretStore();
       // C4: Cache aus venue_control_state vorwaermen (best-effort).
       await warmControlPlaneStateCache();
       return new ControlPlaneService({ store });
-    })();
+    })());
   }
-  return G.__controlPlaneServicePromise;
+  return state.controlPlaneServicePromise.get()!;
 }
 
 /**
@@ -733,9 +726,9 @@ export function getControlPlaneService(): Promise<ControlPlaneService> {
  * genau wie eine echte Datenbank einen Neustart ueberlebt (C4).
  */
 export function clearControlPlaneStateCacheForTests(): void {
-  G.__controlPlaneStates = undefined;
-  G.__controlPlaneHydrating = undefined;
-  G.__controlPlaneWarmupPromise = undefined;
+  state.controlPlaneStates.reset();
+  state.controlPlaneHydrating.reset();
+  state.controlPlaneWarmupPromise.reset();
 }
 
 /**
@@ -750,8 +743,8 @@ export function clearControlPlaneStateCacheForTests(): void {
  * (`setControlStateRepositoryForTests(new DbControlStateRepository())`).
  */
 export function resetControlPlaneForTests(): void {
-  G.__controlPlaneServicePromise = undefined;
-  G.__controlPlanePersistWarned = undefined;
+  state.controlPlaneServicePromise.reset();
+  state.controlPlanePersistWarned.reset();
   clearControlPlaneStateCacheForTests();
   setControlStateRepositoryForTests(new MemoryControlStateRepository());
 }

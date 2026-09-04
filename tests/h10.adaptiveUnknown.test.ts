@@ -50,6 +50,7 @@ import {
   type VolatilityConfig,
 } from "../src/lib/adaptiveRisk";
 import { adaptiveAllowsNewPositions, runAgentTurn } from "../src/lib/engine";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 import { db } from "../src/db";
 import { agentMessages, agents, auditLog, missions, proposals } from "../src/db/schema";
 import { eq, sql } from "drizzle-orm";
@@ -83,9 +84,7 @@ const SAMPLE_ASSESS: RegimeAssessment = {
 
 beforeEach(() => {
   __resetAdaptiveRiskForTests();
-  resetRuntimeLimits();
-  applyAdaptiveRisk(null);
-  killSwitch.disarm();
+  __resetAllSingletonsForTests();
 });
 
 // ── resolveAdaptiveUnknown (pure) ─────────────────────────────────────────────

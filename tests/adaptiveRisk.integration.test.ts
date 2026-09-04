@@ -23,8 +23,9 @@ import {
   type IndicatorReadings,
   type VolatilityConfig,
 } from "../src/lib/adaptiveRisk";
-import { applyAdaptiveRisk, getAdaptiveRiskState, getLimits, resetRuntimeLimits } from "../src/lib/riskGuard";
+import { getAdaptiveRiskState, getLimits } from "../src/lib/riskGuard";
 import type { Candle } from "../src/lib/marketData";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 const CALM: IndicatorReadings = { vix: 18, atr: 0.004, bbw: 0.02, retStdDev: 0.004 };
 const cfg = (over: Partial<VolatilityConfig> = {}): VolatilityConfig => ({
@@ -34,8 +35,7 @@ const cfg = (over: Partial<VolatilityConfig> = {}): VolatilityConfig => ({
 
 beforeEach(() => {
   __resetAdaptiveRiskForTests();
-  resetRuntimeLimits();
-  applyAdaptiveRisk(null);
+  __resetAllSingletonsForTests();
 });
 
 // ── Simulierte Kerzen ────────────────────────────────────────────────────────

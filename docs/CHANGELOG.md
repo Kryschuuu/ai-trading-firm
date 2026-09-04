@@ -5,6 +5,56 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.22] — 2026-09-05 · fix(audit): S2 zentrale State-Registry — alle Singletons an EINEM Ort, EIN Test-Reset (MEDIUM)
+
+**MEDIUM, Architektur/Sonstiges (`src/lib/stateRegistry.ts` neu,
+`src/lib/engine.ts`, `src/brokers/control-plane/service.ts`,
+`src/lib/riskGuard.ts`, `src/brokers/factory.ts`, `src/lib/apiAuth.ts`,
+`tests/stateRegistry.test.ts` neu).** Befund S2 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): **Unabhängige `globalThis`-Keys plus
+Modul-Variablen machten die Zustandsführung mehrfach parallel — zwei
+Singletons (`__firmHydrated`, `__controlPlaneStates`) drifteten bereits
+(H2, C4).**
+
+### Geändert
+
+- **`src/lib/stateRegistry.ts`** (neu, dependency-frei): EIN
+  `globalThis`-Namensraum (`__AITF_STATE_REGISTRY__`) mit typisierten
+  Accessoren `flag`/`map`/`ref` (lazy, optionaler `setDefault`) für alle
+  14 Cross-Cutting-Singletons. Header-Kommentar dokumentiert je Singleton
+  die Wahrheitsquelle — persistente Zustände (Positions/Kill-Switch/
+  Risk-Config/Venue-State/Proposals) liegen in der DB, reine Prozess-Caches
+  (Pipeline-Mutex, Limits-Projektion, Adapter-Cache, Rate-Limiter) im RAM.
+  DI-/Backend-Singletons (Repository, Secret-Store) bleiben bewusst außen
+  vor (injizierbare Backends mit eigenen `...ForTests`-Hooks).
+- **`__resetAllSingletonsForTests()`** (neu): DER eine Reset für das
+  Test-Harness — er vergisst keinen Singleton (Engine, Control Plane,
+  Risk-Guard, Broker-Factory, API-Auth in einem Rutsch). Die früher
+  verstreuten Reset-Pfade (`resetControlPlaneForTests`,
+  `resetRateLimiterForTests`, `G.__firmHydrated`) entfallen als
+  Zustands-Resets; `resetControlPlaneForTests` lebt als
+  Repo-/DI-Installations-Hook weiter.
+- **`src/lib/engine.ts`**: `G.__firmHydrated`/`PIPELINE_G.__pipelineBusy`
+  entfernt → `state.firmHydrated`/`state.pipelineBusy`.
+- **`src/brokers/control-plane/service.ts`**: Control-Plane-Cache,
+  Hydration-Dedup, Warmup-/Service-Promise und Persistenz-Warnung laufen
+  über die Registry.
+- **`src/lib/riskGuard.ts`**: Kill-Switch-Flag, Basis-/Current-Limits und
+  Adaptiv-Zustand über die Registry (Defaults via `setDefault`). Bewusst
+  erhalten: `resetRuntimeLimits()` resettet nur die Basis-Limits — der
+  Adaptivfaktor überlebt (dokumentiertes, getestetes Verhalten).
+- **`src/brokers/factory.ts`**: Adapter-/Ledger-Singleton-Cache über die
+  Registry (lazy set/has).
+- **`src/lib/apiAuth.ts`**: Rate-Limiter-Bucket über die Registry.
+- **`tests/stateRegistry.test.ts`** (neu): verifiziert registrierte Slots,
+  Identity von Flags/Maps, `has()`-Semantik nach Reset (lazy-neu), EIN
+  Reset über alle Besitzer sowie Idempotenz doppelter Resets; prüft den
+  Lifecycle-Kommentar (DB-Wahrheit je Singleton).
+- Bestehende Test-Harnesses umgestellt auf
+  `__resetAllSingletonsForTests()`: `hardening`, `h7.emergencyFlatten`,
+  `adaptiveRisk`(+Integration), `h10.adaptiveUnknown`, `authMode`,
+  `clientIp`.
+
 ## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
 
 **HIGH, Handelslogik (`src/lib/adaptiveRisk.ts`, `src/lib/riskGuard.ts`,

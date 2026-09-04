@@ -33,14 +33,10 @@ import { AlpacaBrokerAdapter } from "./alpaca";
 import { PaperBrokerAdapter } from "./paper";
 import { StubBrokerAdapter } from "./stubs";
 import { assertLiveOrderAllowed } from "../live-gate/enforcer";
-
-const G = globalThis as typeof globalThis & {
-  __brokerAdapters?: Map<string, BrokerAdapter>;
-  __paperBrokerLedger?: PaperBroker;
-};
+import { state } from "../lib/stateRegistry";
 
 function adapterCache(): Map<string, BrokerAdapter> {
-  return (G.__brokerAdapters ??= new Map());
+  return state.brokerAdapters.get();
 }
 
 /**
@@ -49,10 +45,12 @@ function adapterCache(): Map<string, BrokerAdapter> {
  * selbst — Bytekompatibilität über den identischen Objekttyp).
  */
 export function paperBrokerLedger(): PaperBroker {
-  G.__paperBrokerLedger ??= new PaperBroker(
-    Number(process.env.STARTING_EQUITY || 10000)
-  );
-  return G.__paperBrokerLedger;
+  if (!state.paperBrokerLedger.has()) {
+    state.paperBrokerLedger.set(
+      new PaperBroker(Number(process.env.STARTING_EQUITY || 10000))
+    );
+  }
+  return state.paperBrokerLedger.get()!;
 }
 
 /** Fügt eine Venue-Roh-Eingabe auf die Adapter-Venues der Whitelist. */
