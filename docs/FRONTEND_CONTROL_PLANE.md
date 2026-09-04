@@ -137,6 +137,15 @@ Pro Venue existiert **genau ein** Zustandsobjekt (`VenueControlState`):
 | `testnet` | nicht verfügbar (Capability) | wartet auf Verbindung | Testnet verfügbar | — |
 | `live` | **immer off** (Gate-Sperre) | — | **nie** | — |
 
+**Persistenz (C4, v1.36.16):** Das Zustandsobjekt liegt in der Tabelle
+`venue_control_state` (`src/brokers/control-plane/stateStore.ts`); die
+Prozess-Map ist nur Cache. Jede Aktion upsertet die Zeile, ein kalter Lesezugriff
+lädt sie — nach einem Neustart zeigt `GET /status` den **letzten bekannten**
+Zustand statt INITIAL. Persistiert wird status-only (Ebenen, Rechte-Namen,
+Zähler, Zeitstempel, SAFE-Fehlercodes); `liveEnabled` wird beim Laden immer neu
+aus dem Enforcer projiziert. Fehlt die Tabelle, läuft alles prozesslokal weiter
+(eine Log-Warnung, `/api/health → missingTables`).
+
 **Übergänge ausschließlich über definierte Aktionen:**
 `save` (Speichern + Probe), `test` (Verbindungstest), `discover`
 (Market Discovery), `disable` (Trennen + Zurücksetzen). Jeder andere
@@ -269,7 +278,9 @@ Dashboard-Integration: neuer Tab „🌐 Brokers & Venues" im FirmDashboard.
 - **API:** `tests/controlPlane.api.test.ts` · **Integration:**
   `tests/controlPlane.integration.test.ts` (Connect-Flow, Zustandsübergänge,
   Audit je Aktion) · **E2E:** `tests/controlPlane.e2e.test.ts` (Connect →
-  Test → Status sichtbar → Disconnect/Delete; Secret maskiert; Live off).
+  Test → Status sichtbar → Disconnect/Delete; Secret maskiert; Live off) ·
+  **Persistenz (C4):** `tests/controlPlane.persistence.test.ts` (save → Neustart
+  → getStatus, Warm-up, Rehydrierung, Fail-Safe, status-only).
 - Coverage: `npm run test:coverage:controlplane` (Ziel ≥ 90 %).
 
 **Dokumentierte Abweichungen:**

@@ -81,9 +81,10 @@ source "$SCRIPT_DIR/lib/pg-service.sh"
 source "$SCRIPT_DIR/lib/pg-cluster.sh"
 
 # Erwartete Mindestanzahl öffentlicher Tabellen nach `drizzle-kit push`.
-# Quelle: src/lib/seed.ts → checkSchema() (13 Pflicht-Tabellen). Ein niedrigerer
-# Wert lässt Schema-Drift unbemerkt durch.
-REQUIRED_TABLES=13
+# Quelle: src/lib/seed.ts → checkSchema() (14 Pflicht-Tabellen; seit v1.36.16
+# inkl. venue_control_state, C4). Ein niedrigerer Wert lässt Schema-Drift
+# unbemerkt durch.
+REQUIRED_TABLES=14
 
 # Erwartete Preset-Größen des Markt-Universums (src/universe/presets.ts).
 PRESET_EQUITIES=50
@@ -984,7 +985,7 @@ step_07_schema() {
   # jeder Pipeline. Fehlen sie, liefert /api/firm leere Arrays und der Runner
   # POSTet später missionId="null" → invalid input syntax for type uuid.
   local critical missing=() t
-  for t in agents missions risk_config kill_switches positions equity_snapshots broker_credentials; do
+  for t in agents missions risk_config kill_switches positions equity_snapshots broker_credentials venue_control_state; do
     critical="$(psql "$DATABASE_URL" -tAc \
       "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='${t}';" 2>/dev/null | tr -cd '0-9' || echo 0)"
     (( ${critical:-0} >= 1 )) || missing+=("$t")
@@ -992,7 +993,7 @@ step_07_schema() {
   if (( ${#missing[@]} > 0 )); then
     die "Kritische Tabellen fehlen: ${missing[*]}. Schema-Push wiederholen: DATABASE_URL=… npx drizzle-kit push --force"
   fi
-  ok "Kritische Tabellen vorhanden (agents, missions, risk_config, kill_switches, positions, equity_snapshots, broker_credentials)."
+  ok "Kritische Tabellen vorhanden (agents, missions, risk_config, kill_switches, positions, equity_snapshots, broker_credentials, venue_control_state)."
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

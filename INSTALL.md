@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-03** · Code-Version **1.36.14**
+> Dokumentationsstand **2026-09-04** · Code-Version **1.36.16**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -343,6 +343,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `SECRET_STORE_KMS_ENDPOINT` | — | optionaler KMS-Endpunkt |
 | `BROKER_SECRET_BACKEND` | — | Backend-Typ des Secret Store |
 | `BROKER_SECRET_DIR` | — | Ablage (falls File-Backend) |
+| `CONTROL_STATE_BACKEND` | `db` | Persistenz des Control-Plane-Zustands (`venue_control_state`, C4/v1.36.16); `memory` nur Tests — ohne erreichbare Tabelle Fallback memory + Log-Warnung |
 | `BROKER_CREDENTIAL_RATE_LIMIT` | `5` | Rate-Limit auf Credential-API pro Client-Identität (0 = aus) |
 | `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` | `20` | globales, IP-unabhängiges Credential-Limit (0 = aus; betrifft nie den Kill-Switch) |
 | `BROKER_CREDENTIAL_BACKOFF_BASE_MS` | `2000` | Startwert des exponentiellen Backoffs ab dem 3. Credential-Fehlversuch (0 = Backoff aus) |

@@ -70,6 +70,19 @@ export async function register() {
   const { assertTradingVenuesHaveRealAdapters } = await import("@/universe/capabilityProjection");
   assertTradingVenuesHaveRealAdapters();
 
+  // C4 (v1.36.16): Control-Plane-Zustand aus venue_control_state vorwaermen,
+  // damit Broker-Tab und Live-Gate-Bridge nach einem Neustart den letzten
+  // bekannten Verbindungszustand zeigen statt INITIAL. Best-effort, nie werfend.
+  if (!isBuildPhase) {
+    try {
+      const { warmControlPlaneStateCache } = await import("@/brokers/control-plane/service");
+      const loaded = await warmControlPlaneStateCache();
+      if (loaded > 0) console.log(`[control-plane] ${loaded} Venue-Zustand/-Zustaende aus venue_control_state geladen.`);
+    } catch (e) {
+      console.warn("[control-plane] Warm-up uebersprungen:", e instanceof Error ? e.message : e);
+    }
+  }
+
   if (process.env.SCHEDULER_ENABLED === "false") return;
 
   const G = globalThis as typeof globalThis & { __firmSchedulerStarted?: boolean };
