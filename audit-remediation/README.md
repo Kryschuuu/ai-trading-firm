@@ -14,7 +14,7 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 | ID | Bereich | Severity | Status im Code | Prompt |
 |----|---------|----------|----------------|--------|
 | H1 | Handelslogik | CRITICAL | ✅ **Bereits gefixt** (v1.36.2) | [H1](./H1-risk-notional.md) |
-| H2 | Handelslogik | CRITICAL | ⚠️ **Teilweise** (Singleton weg, aber keine verteilte Atomarität) | [H2](./H2-atomicity.md) |
+| H2 | Handelslogik | CRITICAL | ✅ **Gefixt v.1.36.19** (Singleton weg, aber keine verteilte Atomarität) | [H2](./H2-atomicity.md) |
 | H3 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.4) | [H3](./H3-order-status.md) |
 | H4 | Handelslogik/Broker | CRITICAL | ✅ Gefixt (v1.36.5) | [H4](./H4-idempotency.md) |
 | H5 | Handelslogik | CRITICAL | ✅ Gefixt (v1.36.6) | [H5](./H5-pipeline-trading.md) |
@@ -57,9 +57,9 @@ Commit/Optional-eigener-PR denkbar; dieser Plan bündelt sie als nachvollziehbar
 ## Reihenfolge der Abarbeitung (Empfehlung)
 
 1. ~~**Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9~~ ✅ alle gefixt siehe v1.36.4 bis v1.36.8
-2. **Broker/Venue-Korrektheit:** H8 ✅ gefixt (v1.36.10) — B1 ✅ gefixt (v1.36.11) — B2 ✅ gefixt (v1.36.12)
+2. **Broker/Venue-Korrektheit:** H8 ✅ **gefixt (v1.36.10)** — B1 ✅ gefixt (v1.36.11) — B2 ✅ **gefixt (v1.36.12)**
 3. **Control-Plane-Sicherheit:** C1 ✅ **Gefixt v.1.36.13** — C2 ✅ **Gefixt v.1.36.14** — C3 ✅ **Gefixt v.1.36.15** — C4 ✅ **Gefixt v.1.36.16** — S1 ✅ **Gefixt v.1.36.18**
-4. **Architektur/Live-Bereitschaft:** H2, H7, H10, S2
+4. **Architektur/Live-Bereitschaft:** H2 ✅ **Gefixt v.1.36.18**, H7, H10, S2
 5. **Workshop:** W1, W2
 
 Jeder Schritt ist unabhängig; H1 entfällt (bereits gefixt).
