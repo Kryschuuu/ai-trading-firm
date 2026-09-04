@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
-> Code-Version **1.36.16**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.17**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,26 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.17] — 2026-09-04 · chore(license): MIT → GNU General Public License v3 (GPL-3.0-only)
+
+Kein Code-Change — **Relizenzierung:** Das Projekt wird ab sofort unter der
+**GNU General Public License, Version 3** (GPL-3.0) veröffentlicht. Die
+bisherige MIT-Lizenz ist vollständig entfernt (keine MIT-Einträge mehr in
+`package.json`, `README.md`, Doku/Changelog). Der Copyright-Inhaber bleibt
+Kryschuuu.
+
+- **`LICENSE`:** vollständiger, unveränderter GPLv3-Text (ersetzt die
+  MIT-Lizenz; die Lizenzdatei selbst ist nicht modifiziert — „changing it is
+  not allowed" gilt unverändert).
+- **`package.json`:** `"license": "MIT"` → `"license": "GPL-3.0-only"`.
+- **`README.md`:** Abschnitt „Lizenz" nennt jetzt GNU GPL v3; alle
+  MIT-Referenzen entfernt.
+- **`docs/CHANGELOG.md`:** historische „License MIT"-Notiz (Release v1.3.0)
+  entfernt.
+
+Frei nutzbar, änderbar und weiterverteilbar — unter den Bedingungen der GPLv3
+(siehe [`LICENSE`](LICENSE)).
 
 ## [1.36.16] — 2026-09-04 · fix(control-plane): C4 Control-Plane-Zustand persistiert — Neustart zeigt letzten bekannten Zustand statt INITIAL (MEDIUM)
 
