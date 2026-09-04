@@ -7,7 +7,7 @@
  * Fehlerpfade: Probe-Fehler (SAFE-Meldung), korrupter Datensatz,
  * Entschluesselungsfehler beim Test (CREDENTIAL_READ_FAILED).
  */
-import { test, beforeEach } from "node:test";
+import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   ControlPlaneService,
@@ -16,6 +16,7 @@ import {
   clearControlPlaneAuditForTests,
   createAesGcmSecretStore,
   readControlPlaneAudit,
+  resetControlPlaneForTests,
   type ControlPlaneAuditEntry,
   type VenueSecretStore,
 } from "../src/brokers/control-plane";
@@ -57,6 +58,13 @@ const VALID = {
   apiKey: "k-integration-abcdef012345",
   apiSecret: "s-integration-abcdef012345",
 };
+
+// C4: Zustand ist persistent (venue_control_state). Der Test isoliert sich mit
+// einem frischen Memory-Repository, damit keine erreichbare DB anderer
+// Testprozesse (jede Datei = eigener Prozess) Zustand hereintraegt.
+before(() => {
+  resetControlPlaneForTests();
+});
 
 beforeEach(() => {
   clearControlPlaneAuditForTests();

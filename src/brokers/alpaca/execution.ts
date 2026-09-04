@@ -19,7 +19,7 @@ import type {
   MarketTicker,
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
-import { killSwitch, validateOrder } from "../../lib/riskGuard";
+import { killSwitch, validateOrder, riskValidationReason } from "../../lib/riskGuard";
 import { serializePlaceOrder, clientOrderIdFor } from "./orders";
 import { mapAccount, mapOrderResult, mapPosition } from "./mapping";
 import { AlpacaPaperLedger } from "./paper";
@@ -152,15 +152,35 @@ export class BrokerExecutionEngine implements ExecutionPort {
       return out;
     }
     const hasStopLoss = req.stopLoss !== undefined && req.stopLoss !== null;
-    const guard = validateOrder({
-      notional: estimatedNotional,
-      equity: account.equity,
-      openPositions: account.openPositions,
-      side: req.side,
-      leverage: 1,
-      hasStopLoss,
-      symbol: req.symbol.toUpperCase(),
-    });
+    // H9: validateOrder wirft bei NaN/Infinity/≤0 fail-closed (RiskValidationError)
+    // — eine kaputte Venue-Equity darf eine echte Order niemals zulassen.
+    let guard;
+    try {
+      guard = validateOrder({
+        notional: estimatedNotional,
+        equity: account.equity,
+        openPositions: account.openPositions,
+        side: req.side,
+        leverage: 1,
+        hasStopLoss,
+        symbol: req.symbol.toUpperCase(),
+      });
+    } catch (e) {
+      const reason = riskValidationReason(e);
+      const out: BrokerOrderResult = {
+        orderId: "KILLED",
+        symbol: req.symbol,
+        side: req.side,
+        qty: 0,
+        fillPrice: 0,
+        status: "REJECTED",
+        reason,
+        stopLoss: req.stopLoss ?? null,
+        takeProfit: req.takeProfit ?? null,
+      };
+      await recordAlpacaPrivateCall({ method: "POST", path: "/v2/orders", outcome: "DENIED", errorCode: reason.slice(0, 40) });
+      return out;
+    }
     if (!guard.allowed) {
       const out: BrokerOrderResult = {
         orderId: "KILLED",

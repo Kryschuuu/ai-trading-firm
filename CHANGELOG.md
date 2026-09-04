@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-02** ·
-> Code-Version **1.36.3**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
+> Code-Version **1.36.18**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,449 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.18] — 2026-09-04 · fix(audit): S1 Audits sind nicht mehr stumm best-effort — Sicherheitsklasse mit Retry, persistentem Spool und Alarm (MEDIUM)
+
+**MEDIUM, Audit/Security (`src/lib/auditSink.ts` neu, `src/lib/telemetry.ts`,
+`src/lib/engine.ts`, `src/lib/ruleService.ts`, `src/lib/adaptiveRisk.ts`,
+`src/lib/marketdata/failover.ts`, `src/brokers/bitunix/audit.ts`,
+`src/brokers/alpaca/audit.ts`, `src/brokers/audit.ts`,
+`src/brokers/control-plane/{audit,http,service}.ts`, `src/routing/audit.ts`,
+`src/live-gate/audit.ts`, `src/universe/audit.ts`,
+`src/app/api/firm/{agents,kill,missions,run,proposals/[id]/approve}/route.ts`,
+`src/app/api/health/route.ts`, `src/ops/collect.ts`, `src/instrumentation.ts`,
+`tests/auditReliability.test.ts` neu).** Befund S1 des Senior-Peer-Reviews:
+Audit-Schreibvorgänge lagen in leeren `catch`-Blöcken
+(`src/brokers/bitunix/audit.ts` → `/* best-effort */`,
+`src/app/api/firm/agents/route.ts` → „darf nicht reißen"). Eine erfolgreiche
+sicherheitsrelevante Mutation — Credential gespeichert, Prompt geändert,
+Not-Halt entschärft, Order abgelehnt, Proposal freigegeben — konnte **ohne
+Auditbeleg** bleiben, und niemand sah es.
+
+**Fix — zwei Klassen, eine Senke (`src/lib/auditSink.ts`):**
+
+1. **`security`** (Auth, Kill-Switch, Credential-Ops, Order-Ablehnungen,
+   Freigaben, Prompt-Änderungen): Retry mit exponentiellem Backoff
+   (`AUDIT_RETRY_MAX`/`AUDIT_RETRY_BASE_MS`), danach **persistenter Spool**
+   `data/audit-spool/audit-pending.ndjson` (0600, at-least-once) mit
+   automatischem Nachzug nach `audit_log` (nach dem nächsten erfolgreichen
+   Schreibvorgang und beim Boot). Jede Abweichung zählt
+   (`audit_write_failures_total`, `audit_spooled_total`) und loggt CRITICAL —
+   nie ein leeres `catch`.
+2. **`telemetry`** (Failover-Ringe, Routing-Fallbacks, Registry- und
+   Risiko-Telemetrie): bleibt best-effort, ist aber nie mehr still — ein
+   Fehlschlag zählt und erzeugt eine Warnung.
+3. **fail-closed, wo die Mutation noch vermeidbar ist:** Credential-Store
+   (`saveCredentials` auditiert **vor** `store.put`; ohne durablen Beleg bleibt
+   das Credential unverändert, API antwortet 503 `AUDIT_PERSISTENCE_FAILED`),
+   Kill-Switch-**Disarm** (Beleg mit `stage=PRECHECK` vor dem Entschärfen —
+   sonst bleibt der Not-Halt aktiv) und Proposal-**Freigabe** (gleiches
+   Muster). Not-Halt **Arm** wird dagegen bewusst nie blockiert: die sichere
+   Richtung zu verweigern wäre gefährlicher als eine gemeldete Lücke.
+4. **dokumentierter Trade-off Prompt-Update:** der `UPDATE` bleibt wirksam
+   (ein Abbruch nach erfolgreichem Schreiben wäre keine Rücknahme), dafür
+   CRITICAL-Zeile + Missed-Audit-Zähler + `warnings`- und `audit`-Feld in der
+   Response. Dasselbe gilt für `MISSION_CREATED/UPDATED`.
+5. **Sichtbarkeit:** `/api/health → audit {pending, lost, missed, quarantined,
+   dbCoolingDown}`, Operations-Center-Sektion „Audit" mit denselben Kennzahlen
+   (Status `degraded`, sobald Reserve aktiv ist) und Prometheus-Exposition der
+   neuen Counter. Giftzeilen (von der DB dauerhaft abgelehnt, z. B. FK-Fehler)
+   wandern nach 3 Versuchen nach `audit-quarantine.ndjson` und blockieren den
+   Nachzug nicht dauerhaft.
+6. **Nebenbefund behoben:** `PROPOSAL_APPROVED` schrieb den frei textuellen
+   Actor in `audit_log.agent_id` (FK → `agents.id`, uuid) — der Insert konnte
+   auf einer echten PostgreSQL nie gelingen, das Event fehlte also **immer**.
+   Actor steht jetzt im `detail`.
+
+**Akzeptanzkriterien erfüllt:** Sicherheits-Audits werden bei Schreibfehler
+nicht mehr ignoriert (Retry → Spool → Alarm, bzw. Rollback wo `failClosed`) ·
+Best-effort-Pfade loggen mindestens Warnung + Metrik · erzwungener Audit-Fehler
+meldet sich als Alarm/Metrik/Rollback. **Tests:** neu
+`tests/auditReliability.test.ts` (13 Fälle, u. a. Retry-Zählung, Spool-Inhalt,
+Totalverlust → `AuditPersistenceError` ohne Mutation, Prompt-Route „gespeichert
++ gemeldet", Kill-Route „Disarm bleibt aus", at-least-once-Nachzug,
+Quarantäne, Bitunix-Venue-Audit, Architekturwächter gegen stille catch-Blöcke).
+Der Katalog-Wächter in `tests/auditView.test.ts` erkennt nun auch Events aus
+`auditWrite(…)`/`writeAuditRecord({…})`. Typecheck + Lint + Vollsuite grün.
+Details: Befund S1 in `docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.18**).
+
+## [1.36.17] — 2026-09-04 · chore(license): MIT → GNU General Public License v3 (GPL-3.0-only)
+
+Kein Code-Change — **Relizenzierung:** Das Projekt wird ab sofort unter der
+**GNU General Public License, Version 3** (GPL-3.0) veröffentlicht. Die
+bisherige MIT-Lizenz ist vollständig entfernt (keine MIT-Einträge mehr in
+`package.json`, `README.md`, Doku/Changelog). Der Copyright-Inhaber bleibt
+Kryschuuu.
+
+- **`LICENSE`:** vollständiger, unveränderter GPLv3-Text (ersetzt die
+  MIT-Lizenz; die Lizenzdatei selbst ist nicht modifiziert — „changing it is
+  not allowed" gilt unverändert).
+- **`package.json`:** `"license": "MIT"` → `"license": "GPL-3.0-only"`.
+- **`README.md`:** Abschnitt „Lizenz" nennt jetzt GNU GPL v3; alle
+  MIT-Referenzen entfernt.
+- **`docs/CHANGELOG.md`:** historische „License MIT"-Notiz (Release v1.3.0)
+  entfernt.
+
+Frei nutzbar, änderbar und weiterverteilbar — unter den Bedingungen der GPLv3
+(siehe [`LICENSE`](LICENSE)).
+
+## [1.36.16] — 2026-09-04 · fix(control-plane): C4 Control-Plane-Zustand persistiert — Neustart zeigt letzten bekannten Zustand statt INITIAL (MEDIUM)
+
+**MEDIUM, Control Panel (`src/brokers/control-plane/stateStore.ts` neu,
+`src/brokers/control-plane/service.ts`, `src/db/schema.ts`, `src/lib/seed.ts`,
+`src/instrumentation.ts`, `drizzle/2026-09-04_c4_venue_control_state.sql` neu).**
+Befund C4 des Senior-Peer-Reviews: **`VenueControlState` lebte nur in
+`globalThis.__controlPlaneStates` (Map).** Die Credentials waren persistent
+(`broker_credentials`), der Zustand nicht — nach jedem Prozess-Neustart zeigte der
+Broker-Tab `configured=true, connected=false` (INITIAL), bis jemand erneut testete;
+ein erneutes `save` ging durch, obwohl die Verbindung zuvor aktiv war
+(`ALREADY_CONNECTED` griff nicht mehr). Zwei Wahrheiten, eine Konsistenzlücke.
+
+**Fix — DB ist die Wahrheit, die Map nur Cache:**
+
+1. **Neue Tabelle `venue_control_state`** (Drizzle, additiv): `venue` (PK),
+   `configured`, `connected`, `permissions` (jsonb, Rechte-**Namen**),
+   `live_enabled`, `last_probe`, `connection_state`, `discovery_state`,
+   `discovery_count`, `discovery_last_sync`, `last_error`, `layers` (jsonb,
+   vollständiger 6-Ebenen-Snapshot für verlustfreie Rehydrierung), `updated_at`.
+   Status-only — nie Secret-Inhalt, kein Envelope, kein keyHint.
+   Migration: `npx drizzle-kit push` (oder das idempotente
+   `drizzle/2026-09-04_c4_venue_control_state.sql`); `checkSchema()` und
+   `setup-cachyos.sh` erwarten die Tabelle (14 Pflicht-Tabellen).
+2. **`writeState()` upsertet** die Zeile bei jeder Aktion (save/test/discover/
+   disable). **`loadState()`** liest Cache → DB → Initialzustand (lazy
+   persistiert); parallele Aufrufe teilen sich eine Hydration. `getStatus`,
+   `saveCredentials`, `testConnection`, `discover`, `deleteCredentials` laufen
+   über diesen Pfad — **nach einem Neustart zeigt `GET /status` den letzten
+   bekannten Zustand**, und `ALREADY_CONNECTED` greift wieder.
+3. **`readVenueControlStatePublic`** (synchron, Live-Gate-Bridge) liest den
+   Cache; bei kalter Venue stößt es die Hydration an und liefert bis dahin
+   fail-safe `off` (deny). **`warmControlPlaneStateCache()`** lädt beim Server-
+   Boot (`instrumentation.ts`) und in der Service-Fabrik alle Zeilen vor, damit
+   auch synchrone Leser sofort den letzten Zustand sehen. Neu (async, bevorzugt):
+   `loadVenueControlState()`.
+4. **Live bleibt Enforcer-Projektion:** `live_enabled` in der DB ist nur eine
+   Momentaufnahme; beim Laden werden `liveEnabled`/`liveReason`/Live-Ebene neu
+   aus `readGateState()` projiziert — eine manipulierte Zeile kann Live nicht
+   freischalten.
+5. **Fail-Safe:** DB down oder Tabelle (noch) nicht gepusht → Memory-Fallback
+   mit **einer** redigierten Log-Warnung pro Prozess; Verhalten dann exakt wie
+   vor C4 (kein Bruch). Neues Flag `CONTROL_STATE_BACKEND` (`db` Default,
+   `memory` nur Tests).
+
+**Akzeptanzkriterien erfüllt:** `writeState` + Prozess-„Neustart" (Cache geleert)
+→ `readState`/`getStatus` liefern den persistierten Zustand · kein
+Verhaltensunterschied bei warmem Cache · Zeile status-only. **Tests:** neu
+`tests/controlPlane.persistence.test.ts` (10 Fälle: save→Neustart→getStatus,
+Async-/Sync-Leser, Boot-Warm-up, Fehler-/Discovery-/disable-Rehydrierung,
+Lazy-Insert + Secret-Scanner, ALREADY_CONNECTED nach Neustart, kaputtes
+Repository, Serialisierung inkl. Legacy-Zeile, Backend-Wahl). Zusätzlich gegen
+eine echte PostgreSQL verifiziert: `drizzle-kit push` legt die Tabelle an
+(danach `No changes detected`), Upsert bleibt bei einer Zeile je Venue,
+`checkSchema()` grün. Typecheck + Lint + Vollsuite (1702 Tests) grün — mit und
+ohne erreichbare Datenbank. Details: Befund C4 in
+`docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.16**).
+
+## [1.36.15] — 2026-09-04 · fix(security): C3 Kill-Switch-Disarm — stärkeres Gate als Arm (ADMIN + single-use Nonce, HIGH)
+
+**HIGH, Control Panel/Security (`src/app/api/firm/kill/route.ts`,
+`src/app/api/firm/kill/challenge/route.ts` neu, `src/lib/disarmChallenge.ts` neu,
+`src/lib/auditView.ts`, `src/components/FirmDashboard.tsx`).** Befund C3 des
+Senior-Peer-Reviews: **Arm und Disarm des Not-Halt liefen beide durch
+`guardWrite(req)`** — ein einziges, gestohlenes Operator-Token konnte `{arm:false}`
+posten und damit das Trading unmittelbar nach einem Kill-Switch wieder freischalten.
+Scharfschalten (in den sicheren Zustand) ist keine Eskalation — **Entschärfen**
+(Rückkehr aus dem sicheren Zustand) schon.
+
+**Fix — Guard-Split:** Arm nutzt weiterhin `guardWrite(req)` (Operator genügt).
+Disarm verlangt jetzt eine strikt stärkere Kette, erst danach wird entschärft:
+
+1. **ADMIN-Permission** `live.gate` (`requirePermission`) — Operator ohne
+   Admin-Elevation hat sie nicht.
+2. **CSRF-Header** `x-csrf-token` (`checkCsrfGuard`) — wie bei den
+   Control-Plane-Writes.
+3. **Single-use Nonce** (<= 60 s) aus dem neuen
+   `GET /api/firm/kill/challenge` (antwortet `{ nonce, expiresAt }`), der im
+   Disarm-Body (`{ arm:false, nonce }`) zurückgegeben werden muss. Verifikation:
+   existiert → nicht abgelaufen → nicht wiederverwendet. Fehlend/abgelaufen/
+   wiederverwendet ⇒ 403 (`NONCE_REQUIRED` / `NONCE_EXPIRED` / `NONCE_REUSED`),
+   kein Disarm. Der Nonce-Speicher ist prozesslokal (Single-Node, wie die
+   Rate-Limiter), 60-s-TTL, lazy cleanup.
+
+Erfolgreicher Disarm schreibt einen **CRITICAL**-Audit-Eintrag
+`KILL_SWITCH_DISARMED` inkl. Actor + Nonce-Referenz (vorher `WARN`, ohne Actor).
+Die Audit-View (`src/lib/auditView.ts`) erwartet dafür jetzt `CRITICAL` und zeigt
+Actor + Nonce-Präfix an. Das Dashboard holt vor einem Disarm automatisch die
+Challenge und echot den Nonce — Arm bleibt der gewohnte Ein-Klick-Weg.
+
+**Akzeptanzkriterien erfüllt:** Disarm ohne Admin → 401/403 · Disarm ohne
+gültigen Nonce → 403 · gültiger Admin + frischer Nonce → disarmed + CRITICAL
+auditiert · wiederverwendeter/abgelaufener Nonce → abgelehnt (403) · CSRF-Header
+erzwungen. **Tests:** neu `tests/disarmChallenge.test.ts` (5 Fälle: issue,
+ok/consumed, missing, reused, expired). Typecheck + Lint grün; Doku-Validierung
+und Vollsuite laufen gegen dieselbe Basis wie v1.36.14. Details: Befund C3 in
+`docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.15**).
+
+## [1.36.14] — 2026-09-03 · fix(security): C2 Rate-Limit-Identität — spoofbare Proxy-Headers zählen nicht mehr (MED/HIGH)
+
+**MEDIUM/HIGH, Control Panel/Security (`src/lib/clientIp.ts` neu, `src/lib/apiAuth.ts`,
+`src/brokers/control-plane/guard.ts`, `src/brokers/control-plane/config.ts`).** Beide Rate-Limiter
+nahmen das linkeste Element aus `x-forwarded-for` (Ersatz `x-real-ip`) als Client-Identität —
+Header, die der **Client** selbst setzt. Ein frisches `X-Forwarded-For: <zufällig>` pro Anfrage
+erzeugte einen frischen Bucket; das per-IP-Limit (Schreib-API 60/min, Credential-Versuche 5/min)
+war damit nicht umgangen, sondern faktisch abgeschaltet, und dieselbe Logik war doppelt vorhanden.
+
+**Fix:** `src/lib/clientIp.ts` ist die einzige Quelle der Identität (`resolveClientIp`,
+Blatt-Modul, eigenes IP-/CIDR-Parsing inkl. IPv6 und IPv4-mapped). Vertrauen kommt aus
+Konfiguration, nie aus dem Request: `TRUSTED_PROXY_IPS` (CIDR-Liste, Aliase
+`loopback`/`private`/`link-local`) plus der proxy-gesetzte Header `x-verified-ip`, den der Reverse
+Proxy überschreiben muss (nginx: `proxy_set_header X-Verified-IP $remote_addr;`).
+`x-forwarded-for` zählt **nur** bei gesetzter Vertrauensliste **und** per Socket-Adresse
+verifiziertem Peer — dann rightmost-untrusted, sodass eine vorgeschobene Fake-IP wirkungslos
+bleibt. `x-real-ip` wird nie benutzt. Ohne verwertbare Proxy-Information gilt die Socket-Adresse,
+sonst die Konstante `local`: alle Clients teilen sich dann **einen** Bucket — enger, nie weiter.
+Bewusst strenger als der Audit-Prompt: ohne Vertrauensanker wird `x-verified-ip` nur bei
+Loopback-Peer akzeptiert, sonst wäre der neue Header genau so spoofbar wie der alte
+(`npm run start` bindet `0.0.0.0`).
+
+**Brute-Force-Schichten (Credential-API):** Identitäts-Limit 5/min (bestehend) + **globales,
+IP-unabhängiges** Limit `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` 20/min (fester Bucket `global`) +
+**exponentieller Backoff** ab dem 3. Fehlversuch (2 s → 4 s → 8 s … max. 15 min, Reset nach
+Erfolg oder 15 min Ruhe; Startwert und Deckel per `BROKER_CREDENTIAL_BACKOFF_BASE_MS` /
+`BROKER_CREDENTIAL_BACKOFF_MAX_MS` justierbar, Basis `0` = Ebene aus). Die Route meldet dafür 422-Validierungsfehler und von der Venue
+abgelehnte Proben (`probe.state === "error"`); 409-Konflikte und 5xx zählen nicht. Der Kill-Switch
+(`/api/live/kill`, `/api/live/transition`) nutzt weiterhin **nur** das Identitäts-Limit — ein
+Credential-Flood darf die Sicherheitsaktion nie blockieren.
+
+**Sichtbar & dokumentiert:** `GET /api/auth/me` liefert `rateLimitIdentity` (Identität, Quelle,
+`ignoredHeaders`, Policy — secret-frei), das Boot-Log nennt dieselbe Policy und warnt bei
+unparsebaren Einträgen sowie bei `0.0.0.0/0` (C2-Rückfall). `.env.example`, `INSTALL.md`
+(„Rate-Limit-Identität" mit Entscheidungstabelle + nginx-Snippet), `docs/INSTALL.md` (5.1/7.3/11),
+`docs/help/ops.help.json` (Version 5: `auth.clientIp`, `rateLimit.credential`), `README.md`,
+`docs/README.md`, `docs/SECURITY_AUDIT.md`, `docs/FRONTEND_CONTROL_PLANE.md`,
+`docs/BROKER_ARCHITECTURE.md`, `docs/LIVE_TRADING.md`, `docs/HANDBUCH.md` und
+`deploy/ai-trading-firm.service`. **Tests:** neu `tests/clientIp.test.ts` (26 Fälle, inkl.
+Akzeptanznachweis und statischem Drift-Schutz) und `tests/controlPlane.bruteforce.test.ts`
+(22 Fälle, inkl. Kill-Switch-Ausnahme und echter Route). `npm test` = **1687/1687**,
+Typecheck/Lint/`docs:validate` grün. Manuell verifiziert am echten Node-HTTP-Server: spoofed
+`X-Forwarded-For`/`X-Real-IP` ⇒ Identität bleibt die Socket-Adresse; doppelt gesetztes
+`x-verified-ip` ⇒ verworfen; mit `TRUSTED_PROXY_IPS=127.0.0.1` ⇒ `1.2.3.4, 203.0.113.44` wird zu
+`203.0.113.44`. Details: `docs/CHANGELOG.md` `[1.36.14]`, Befund C2 in
+`docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.14**).
+
+---
+
+## [1.36.13] — 2026-09-03 · fix(auth): C1 Auth-Modus — Produktion ohne Token startet nicht, Offen-Betrieb nur explizit (HIGH)
+
+**HIGH, Control Panel/Auth (`src/auth/authMode.ts`, `src/auth/resolve.ts`, `src/lib/apiAuth.ts`,
+`src/instrumentation.ts`, `scripts/auth-boot-guard.ts`).** `checkApiToken()` antwortete mit `null` (= offen), sobald
+`FIRM_API_TOKEN` fehlte, und `resolveAuth()` schenkte demselben Fall einen Admin-Aktor
+(`source: "local-open"`). „Variable nicht gesetzt“ war damit ein funktionierender
+Sicherheits-Default: jedes Vergessen einer `.env`-Übernahme öffnete Write-, Config-,
+Credential- und Kill-Endpunkte im Netz — `npm run start` bindet `0.0.0.0`.
+
+**Fix:** Der Modus kommt aus `AUTH_MODE` (`local-open` \| `token-required`), aufgelöst im
+neuen Blatt-Modul `src/auth/authMode.ts`: Irgendein Token ⇒ immer `token-required` (ein
+gesetztes `local-open` wird ignoriert und gemeldet); kein Token ⇒ `local-open` nur als
+Dev-Default (`NODE_ENV !== "production"`) oder ausdrücklich gesetzt; unbekannter Wert ⇒
+fail-closed `token-required`. `scripts/auth-boot-guard.ts` (neu, vorgeschaltet in `npm run start`/`npm run dev`, dazu
+`npm run boot:guard`) bricht in Produktion ohne Token mit Exit-Code 1 ab, und
+`src/instrumentation.ts` wirft denselben `ConfigurationError`
+(„Refuse startup: authentication not configured“) als Zweitlinie für Starts am Skript vorbei —
+`next build` ist über `NEXT_PHASE` in beiden Fällen ausgenommen. Die Guard-Schicht vertraut dem Boot-Guard
+nicht: `checkApiToken`/`resolveAuth` prüfen denselben Modus, und wo ein Admin-/Viewer-Token
+existiert, ohne dass `FIRM_API_TOKEN` gesetzt ist, entscheidet jetzt die Permission
+`firm.write` statt „offen“ (Nebenbefund). `tokenEquals` wanderte nach `src/lib/tokenCompare.ts`,
+damit Auth-Schicht und Schreib-Guard denselben timing-sicheren Vergleich ohne Zyklus nutzen.
+
+**Sichtbar & dokumentiert:** `GET /api/auth/me` liefert `authMode` (Modus, Grund, Produktion,
+Tokens — nie Token-Werte); `.env.example`, `INSTALL.md` und `docs/INSTALL.md` erklären die
+Produktionspflicht und den Opt-in; `scripts/setup-cachyos.sh --no-api-token` schreibt
+`AUTH_MODE=local-open` in die `.env` (bewusst statt versehentlich). **Tests:** neu
+`tests/authMode.test.ts` (30 Fälle, inkl. Kindprozess gegen den echten Startwächter:
+Exit 1 ohne Token in Produktion, Exit 0 im Dev-Fall, Warnung beim Produktions-Opt-in; Route
+`POST /api/firm/tick` → 401, bevor getickt wird). `npm test` = **1639/1639**,
+Typecheck/Lint/`docs:validate` grün, `npm run build` ohne neue Warnungen.
+Manuell verifiziert: `npm run start` ohne Token → Exit 1; mit `FIRM_API_TOKEN` → 401 ohne
+Header, Durchlass mit Header. Details: `docs/CHANGELOG.md` `[1.36.13]`.
+
+---
+
+## [1.36.12] — 2026-09-03 · fix(broker): B2 Bitunix Positionsseite — unbekannte `side` wird verworfen, nicht als LONG geraten (MEDIUM)
+
+**MEDIUM, Brokers/Venues (`src/brokers/bitunix/privateClient.ts`, `src/brokers/bitunix/audit.ts`).**
+`getPositions()` bildete jede von `"SHORT"` verschiedene `side` auf `"LONG"` ab — auch `""`, `null`
+und offensichtlichen Müll. Eine korrumpierte Antwort war damit maskiert, und eine Short-Position
+hätte im lokalen View als Long erscheinen können (falsches uPnL-Vorzeichen, falsche SL/TP-Geometrie,
+falsche Seitenlogik im Risk-Pfad).
+
+**Fix:** Zwei-Gate-Filterung in fester Reihenfolge — (1) `qty` endlich und `> 0`, (2) `side` ∈
+{`LONG`, `SHORT`} (getrimmt, case-insensitiv, via neuem exportierten `parseBitunixPositionSide`).
+Zeile ohne verwertbare Seite wird **verworfen und gezählt**, nie geraten. Die `qty`-Prüfung läuft
+bewusst zuerst: Das Venue lässt bei geschlossenen/Null-Mengen-Zeilen die `side` weg — die dürfen
+nicht als Anomalie durchgehen, eine echte offene Position ohne Seite dagegen sehr. Verworfene
+Zeilen landen im In-Memory-Audit-Ring (`readBitunixPositionAnomalies` /
+`readBitunixPositionAnomalyCount`, secret-frei: Symbol + gekürzter Rohwert) plus einer
+zusammengefassten Warnung pro Call über den redaktierten Logger.
+
+**Tests:** Neu `tests/bitunix.positions.test.ts` (7 Fälle) — `side=""` / `"WEIRD"` / fehlende Seite
+→ verworfen und gezählt, `LONG`/`SHORT` bleiben inkl. negativer SHORT-uPnL erhalten,
+`qty<=0`-Zeilen zählen nicht als Anomalie, Warnung mit Anzahl, Zähler kumuliert und ist
+test-seitig rücksetzbar, saubere Antwort erzeugt keine Anomalie. Mapping-Doku in
+`docs/BITUNIX.md` (§5.3). Details: `docs/CHANGELOG.md` `[1.36.12]`.
+
+---
+
+## [1.36.11] — 2026-09-03 · fix(broker): B1 Bitunix SL/TP-Geometrie — semantisch falsche Stop/Take werden abgelehnt (HIGH)
+
+**HIGH, Brokers/Venues (`src/brokers/bitunix/orders.ts`, `src/contracts/broker.ts`).**
+`serializePlaceOrder` prüfte SL/TP nur auf `finitePositive` (zahl > 0) — nicht, ob sie
+auf der richtigen Seite des Entry liegen. Eine formal positive, aber semantisch falsche
+Staffelung (z. B. LONG-Stop oberhalb / TP unterhalb des Einstiegspreises) hätte zur Venue
+gehen können.
+
+**Fix:** Geometrie-Check relativ zum Entry **vor** dem Aufbau des Wire-Bodys. Entry =
+`req.limitPrice` (LIMIT) bzw. `req.markPriceHint` (MARKET). Fehlt bei einer MARKET-Order
+der Entry-Hinweis, wird die Prüfung übersprungen (kein falscher Deny). Abgelehnt wird
+(LONG) `stopLoss >= entry` / `takeProfit <= entry` und (SHORT) `stopLoss <= entry` /
+`takeProfit >= entry` — jeweils mit `OrderSerializationError` und Seiten-spezifischer
+Meldung. Der Adapter vertraut damit nicht auf korrekte Caller. `markPriceHint` ist als
+**optionales** Feld auf `BrokerOrderRequest` ergänzt; es geht nie in den Wire-Body und
+nicht in die `clientOrderId`-Idempotenz ein.
+
+**Tests:** Neu in `tests/bitunix.unit.test.ts` `Orders (B1): SL/TP-Geometrie …` —
+LONG `sl=entry+1` → Fehler, LONG `tp=entry-1` → Fehler, korrekte LONG-Geometrie → ok,
+SHORT gespiegelt, MARKET ohne Entry-Hinweis → übersprungen (Regression Engine-Pfad),
+MARKET mit `markPriceHint` → aktiv geprüft. Mapping-Doku in `docs/BITUNIX.md` (§5.2).
+Details: `docs/CHANGELOG.md` `[1.36.11]`.
+
+---
+
+## [1.36.10] — 2026-09-03 · fix(broker): H8 Bitunix-Equity aus walletBalance + uPnL statt available + uPnL (HIGH)
+
+**HIGH, Brokers/Venues (`src/contracts/broker.ts`, `src/brokers/bitunix/privateClient.ts`).**
+`getAccount()` rechnete `equity = available + crossUnrealizedPNL + isolationUnrealizedPNL` und
+`cash = available`. Bei einem Futures-Konto ist `available` aber die **freie Margin**, nicht das
+Gesamtkapital: Mit offenen (isolierten/cross) Positionen blieb die gebundene Margin außen vor und
+der Risk-Denominator (maxPositionPct, Sizing, Drawdown) war falsch.
+
+**Fix:** `BrokerAccount` trägt jetzt die kanonische Zerlegung
+`walletBalance` / `availableCash` / `usedMargin` / `maintenanceMargin` / `unrealizedPnl` / `equity`
+(alle Adapter liefern sie, inkl. Paper-Ledger). `getAccount()` liest die echten Venue-Felder
+(`walletBalance`, `available`, `frozen`, `margin`, `crossUnrealizedPNL`, `isolationUnrealizedPNL`,
+optional `usedMargin`/`maintenanceMargin`/`realizedPnl`) und mappt:
+
+    equity        = walletBalance + realizedPnl + unrealizedPnl
+    availableCash = available
+    usedMargin    = usedMargin ?? row.margin ?? 0
+    unrealizedPnl = crossUnrealizedPNL + isolationUnrealizedPNL
+
+Fehlt `walletBalance` genuin (Bitunix-Doku führt es nicht in jeder Antwort), wird es aus den
+venue-eigenen Komponenten zerlegt (`available + frozen + margin`) — **nie** wird Equity aus
+`available` allein synthetisiert; leere/unplausible Felder bleiben fail-closed 0 (H9 blockt).
+`cash` bleibt `availableCash` (Cash-Guard); `equity` ist das echte Gesamtkapital — für ein Konto
+mit `usedMargin > 0` gilt damit `equity != available`.
+
+**Tests:** Neu `tests/bitunix.accountEquity.test.ts` (5 Fälle: Venue-Zeile mit walletBalance,
+Fallback-Zerlegung ohne walletBalance, leeres Konto als Regression, explizite
+usedMargin/maintenanceMargin/realizedPnl, fail-closed bei fehlenden Feldern). Mapping-Doku in
+`docs/BITUNIX.md`. Details: `docs/CHANGELOG.md` `[1.36.10]`.
+
+---
+
+## [1.36.9] — 2026-09-03 · fix(api): Async Route-Params — Approve-Endpoint war zur Laufzeit tot + `next build` brach ab (CRITICAL)
+
+**CRITICAL, API/Build (`src/app/api/firm/proposals/[id]/approve/route.ts`).** Der mit H6 (v1.36.7) eingeführte Freigabe-Endpoint nutzte noch die synchrone Handler-Signatur `{ params }: { params: { id: string } }`. Seit Next.js 15 ist `params` in Route-Handlern ein **Promise**; mit Next.js 16 ist der synchrone Zugriff vollständig entfernt (Breaking Change „Sync params/searchParams props access“). Folge war zweifach: **(a) Build-Bruch** — der von `next build` generierte Route-Validator meldete `TS2344` in `.next/types/validator.ts`, `npm run build` lief nicht durch; **(b) toter Endpoint zur Laufzeit** — `params.id` lieferte `undefined`, Next.js protokollierte `Route "/api/firm/proposals/[id]/approve" used params.id. params is a Promise and must be unwrapped with await`, und jeder Freigabe-Call antwortete deterministisch mit `400 {"error":"proposal id missing"}`. Die menschliche Freigabe (`PENDING → APPROVED`) war damit seit v1.36.7 nicht funktionsfähig, obwohl die Approval-Chain selbst korrekt fail-closed arbeitete.
+
+**Warum die CI das nicht sah:** Beide Workflows (`docs-validate`, `security-live-gate`) fahren `tsc --noEmit` + Lint + Docs-/Security-Suite, aber **kein `next build`**. Die inkompatible Signatur steckt in den von Next generierten Typen unter `.next/`, die `tsc --noEmit` gegen den Quellcode nicht prüft — der Fehler tauchte deshalb erst beim Production-Build auf. Die Route war der einzige Rückstand im Repo: alle anderen dynamischen Segmente (`/api/brokers/[venue]/*`, `/api/firm/rules/[id]/*`, `/api/markets/[venue]/[symbol]`, `/api/analysis/daily/[date]`, `/api/universe/score/[instrumentId]`) nutzen bereits die Async-Konvention.
+
+**Fix:** Handler auf die Repo-Konvention umgestellt — `type RouteContext = { params: Promise<{ id: string }> }` und `const { id } = await ctx.params`. Verhalten unverändert: 400 (fehlender Actor / fehlende ID), 404 (Proposal unbekannt), 409 (nicht `PENDING`), 500 (Fehlerpfad) sowie Audit-Event `PROPOSAL_APPROVED` bleiben identisch.
+
+**Tests:** Neu `tests/routes.asyncParams.test.ts` — schließt den CI-Blindfleck projektweit: (1) Scan **aller** Dateien in dynamischen Segmenten (`route.ts`/`page.tsx`/`layout.tsx`) auf synchrone `params`/`searchParams`-Annotationen, (2) Nachweis, dass jedes gelesene `params` per `await`/`use()` ausgepackt wird, (3) Konventions-Check der Approve-Route, (4) Verhaltenstest, der den Handler direkt mit `{ params: Promise.resolve({ id }) }` aufruft und belegt, dass die Route-ID im Handler ankommt, (5) Regression des 400-Actor-Pfads. Gegen den alten Code schlagen 4 der 6 Tests fehl, gegen den Fix sind 6/6 grün. Zusätzlich verifiziert: `npm run build` läuft vollständig durch (komplette Routentabelle, kein TS2344), `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün, `npm test` = **1590/1590** Tests grün. Laufzeit-A/B am Dev-Server: vorher `400 "proposal id missing"`, nachher Auflösung der ID bis zur DB-Ebene.
+
+---
+
+## [1.36.8] — 2026-09-03 · fix(risk): H9 Guardrail-Numerik fail-closed — NaN/negativ blockiert statt stiller Clamp (HIGH)
+
+**HIGH, Handelslogik (`src/lib/riskGuard.ts`, `src/lib/broker.ts`, `src/lib/microExecutor.ts`, `src/brokers/alpaca/{paper,execution}.ts`, `src/brokers/bitunix/{paper,execution}.ts`).** `validateOrder()` rechnete mit `const equity = Math.max(ctx.equity, 1)` und `if (ctx.leverage > RISK_LIMITS.maxLeverage)`: Bei `NaN` sind alle Vergleiche `false`, sodass eine Guardrail still übergangen werden konnte; negatives/insolventes Equity wurde auf 1 geklemmt statt hart blockiert.
+
+**Fix:** Neuer Eingangs-Helfer `requireFinitePositive(value, field)` wirft eine `RiskValidationError` (`code = "RISK_VALIDATION"`) bei NaN/Infinity/nicht-numerischen Werten/≤0. `validateOrder` prüft damit `equity`, `leverage` und `notional` am Eingang (fail-closed: unbekannt ⇒ BLOCK); der `Math.max`-Clamp entfällt. Der Nebenläufigkeits-Zähler wird ebenfalls fail-closed gelesen (NaN ⇒ blockiert). Alle Aufrufer (`PaperBroker.submit`, `AlpacaPaperLedger.submit`, `BitunixPaperLedger.submit`, `AlpacaBrokerExecutionEngine.submit`, `BitunixBrokerExecutionEngine.submit`, Mikro-Executor) fangen den Fehler und übersetzen ihn in einen REJECTED-Fill mit stabilem Reason (`INVALID_EQUITY` / `INVALID_LEVERAGE` / `INVALID_NOTIONAL` via `riskValidationReason`). Zusätzlich nachgezogen: Audit-Event-Katalog für die H6-Proposal-Events (`PROPOSAL_CREATED`, `PROPOSAL_APPROVED`, `PROPOSAL_NOT_APPROVED`, `PROPOSAL_NOT_FOUND`) in `src/lib/auditView.ts`.
+
+**Tests:** `tests/riskGuard.test.ts` — NaN/Infinity/negativ/0 für equity, leverage, notional werfen `RiskValidationError`; nur endlich-positive Werte passieren; `PaperBroker.submit` mit Equity 0 → REJECTED/`INVALID_EQUITY`; `requireFinitePositive`/`riskValidationReason`-Unit-Tests. Typecheck, Lint, Docs-Validierung.
+
+---
+
+## [1.36.7] — 2026-09-03 · fix(engine): H6 Approval-Chain — Executor führt nur APPROVED Proposals aus (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`).** Der Executor führt keine Modellentscheidung mehr aus (`runAgentTurn` liefert früh zurück und ruft `executeApprovedProposal` auf); Orderparameter stammen zwingend aus `proposal.proposedDetail` (verbatim an `broker.submit`). PENDING/Unbekannte Proposals werden fail-closed abgelehnt. Neuer `POST /api/firm/proposals/{id}/approve`-Endpoint ermöglicht menschliche Freigabe mit Actor-Aufzeichnung. Audit verknüpft Fill mit `proposalId`.
+
+---
+
+## [1.36.6] — 2026-09-03 · fix(engine): H5 Pipeline-Ausführung strikt nach Approval (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/lib/engine.ts`).** Nicht-EXECUTOR-Phasen erzeugen bei `TRADE` nur noch Proposals (`PENDING` bei erforderlicher Human-Freigabe, sonst `APPROVED`) und geben `PROPOSED` zurück. Die Pipeline läuft explizit durch CEO → Research → Backtest → Risk Manager → Approver; erst die Executor-Phase lädt die jüngste `APPROVED` Proposal und führt deren servervalidierte Orderdaten aus. Ein Defense-in-depth-Guard blockiert und auditiert jeden Broker-Zugriff einer anderen Rolle mit `ROLE_NOT_ALLOWED_TO_TRADE`.
+
+**Tests:** `tests/engine.pipeline-approval.test.ts`; Typecheck, Lint und Docs-Validierung. Der vollständige `npm test`-Lauf wurde auf ausdrücklichen Wunsch übersprungen.
+
+---
+
+## [1.36.5] — 2026-09-03 · fix(broker): H4 Order-Idempotenz — kein Doppel-Order bei Retry (CRITICAL)
+
+**CRITICAL, Handelslogik/Broker (`src/brokers/bitunix/http.ts`, `src/brokers/bitunix/privateClient.ts`, `src/brokers/bitunix/orders.ts`).**
+Der HTTP-Transport wiederholte einen **nicht-idempotenten** place_order-POST bei
+HTTP 429 blind (Annahme „429 = definitiv nicht verarbeitet“); außerdem wurde
+keine `clientOrderId` generiert/gesendet. Ein Retry konnte so nicht über einen
+stabilen Idempotenz-Key dedupliziert werden und konnte eine Doppelorder erzeugen.
+
+**Fix:**
+- **Stabiler `clientOrderId`** (`ATF-<sha256>`): `serializePlaceOrder` setzt ihn in
+  den Venue-Body (`clientId`); wird bei einem kontrollierten Retry mit demselben
+  Body wiederverwendet. Helper `clientOrderIdFor`.
+- **Transport-Retry-Vertrag (H4):** Nicht-idempotente Requests (POST, insbesondere
+  `place_order`) werden bei 429/Timeout/Netz/5xx nie automatisch wiederholt —
+  stattdessen `BitunixAmbiguousError` (kind `ambiguous`). Definitive Ablehnungen
+  (auth/validation/payload, 4xx) bleiben unterscheidbar; GETs bleiben Retry-fähig.
+- **Status-Query vor jedem erneuten Senden** (`getOrderByClientId`):
+  `placeSerializedOrder` fragt per `clientOrderId` den echten Status ab
+  (`get_order_detail?clientId=…`): Order gefunden → bestehende Order (kein
+  Duplikat); nicht gefunden → genau **ein** kontrollierter Retry mit demselben
+  `clientOrderId`.
+
+**Tests:** `tests/bitunix.idempotency.test.ts` — (a) 429 + Query findet bestehende
+Order → kein Duplikat; (b) 429 + Query leer → genau ein Retry mit identischem
+`clientOrderId`; `BitunixAmbiguousError` bei 429/5xx/Netz; idempotenter GET bleibt
+Retry-fähig; definitive 4xx → kein Query/Retry. Bestehende Security-Suite auf den
+korrekten 429-Vertrag umgestellt.
+
+---
+
+## [1.36.4] — 2026-09-03 · fix(broker): H3 Live-Order nicht mehr fälschlich als FILLED gemeldet (CRITICAL)
+
+**CRITICAL, Handelslogik/Broker (`src/brokers/bitunix/execution.ts`, `src/contracts/broker.ts`).**
+`BrokerExecutionEngine.submit` meldete eine vom Venue nur AKZEPTIERTE Live-Order als
+`status: "FILLED"` mit `fillPrice: 0`. Eine Annahme ist kein Fill — downstream hätte eine
+reale Position mit Entry-Preis 0 eingebucht werden können.
+
+**Fix:**
+- **Status-Vertrag getrennt:** `BrokerOrderStatus = NEW | PARTIALLY_FILLED | FILLED |
+  CANCELED | REJECTED | UNKNOWN` (Contract-Helfer `isFillStatus`/`isBookableFill`).
+- **`submit()` live** liefert nur die AKZEPTANZ: `status:"NEW", fillPrice:0,
+  reason:"ORDER_ACCEPTED"` — Paper/Backtest bleiben synchron `FILLED`.
+- **Fill-Reconciliation:** `BitunixPrivateClient.getOrder(orderId)` (`get_order_detail`)
+  und `getExecutions(symbol?, orderId?)` (`get_history_trades`) +
+  `BrokerExecutionEngine.reconcile(orderId)` bzw. `BrokerAdapter.reconcileOrder(orderId)`:
+  echter avgPrice aus den Trades (mengen-gewichtet), Status NEW → PARTIALLY_FILLED →
+  FILLED; Order nicht auffindbar oder Preis nicht belegbar → UNKNOWN (fail-safe, nie 0-Entry).
+- **Position-Adoption gehärtet:** `listPositions` verwirft Venue-Positionen mit
+  entryPrice/qty ≤ 0; Engine-/Mikro-Pfad buchen nur bei FILLED + fillPrice > 0.
+- **Consumer per Switch:** Alpaca `mapOrderResult` (NEW/PARTIALLY_FILLED/CANCELED/UNKNOWN),
+  Audit-Ansicht (Töne/Hinweise je Status).
+
+**Tests:** submit live → NEW/0; reconcile mappt Venue `PART_FILLED` → `PARTIALLY_FILLED`
+mit echtem avgPrice; FILLED ohne Trades → UNKNOWN; CANCELED mit Teilfills; Adapter-Live-Pfad
+via Gate; Paper-Reconcile → null.
+
+---
 
 ## [1.36.3] — 2026-09-03 · security(audit): Remediation-Plan Senior Peer-Review
 

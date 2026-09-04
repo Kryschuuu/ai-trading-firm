@@ -246,6 +246,123 @@ test("Orders: LONG MARKET mit SL/TP, SHORT LIMIT, Validierung", () => {
   assert.throws(() => serializePlaceOrder({ symbol: "BTCUSDT", side: "LONG", qty: 0, riskNotional: 1 }), OrderSerializationError);
 });
 
+test("Orders (B1): SL/TP-Geometrie — inkorrekte Staffelung wird abgelehnt, korrekte akzeptiert", () => {
+  // LONG: StopLoss-Referenz = Limit-Preis (Entry). SL muss UNTER, TP ÜBER dem Entry liegen.
+  assert.throws(
+    () =>
+      serializePlaceOrder({
+        symbol: "BTCUSDT",
+        side: "LONG",
+        qty: 0.01,
+        limitPrice: 65000,
+        riskNotional: 650,
+        stopLoss: 65001, // SL >= Entry → Fehler
+      }),
+    OrderSerializationError
+  );
+  assert.throws(
+    () =>
+      serializePlaceOrder({
+        symbol: "BTCUSDT",
+        side: "LONG",
+        qty: 0.01,
+        limitPrice: 65000,
+        riskNotional: 650,
+        takeProfit: 64999, // TP <= Entry → Fehler
+      }),
+    OrderSerializationError
+  );
+  // LONG korrekte Geometrie: SL unter, TP über dem Entry.
+  const longOk = serializePlaceOrder({
+    symbol: "BTCUSDT",
+    side: "LONG",
+    qty: 0.01,
+    limitPrice: 65000,
+    riskNotional: 650,
+    stopLoss: 60000,
+    takeProfit: 70000,
+  });
+  assert.equal(longOk.slPrice, "60000");
+  assert.equal(longOk.tpPrice, "70000");
+
+  // SHORT gespiegelt: SL muss ÜBER, TP UNTER dem Entry liegen.
+  assert.throws(
+    () =>
+      serializePlaceOrder({
+        symbol: "ETHUSDT",
+        side: "SHORT",
+        qty: 1,
+        limitPrice: 3300,
+        riskNotional: 3300,
+        stopLoss: 3299, // SL <= Entry → Fehler
+      }),
+    OrderSerializationError
+  );
+  assert.throws(
+    () =>
+      serializePlaceOrder({
+        symbol: "ETHUSDT",
+        side: "SHORT",
+        qty: 1,
+        limitPrice: 3300,
+        riskNotional: 3300,
+        takeProfit: 3301, // TP >= Entry → Fehler
+      }),
+    OrderSerializationError
+  );
+  const shortOk = serializePlaceOrder({
+    symbol: "ETHUSDT",
+    side: "SHORT",
+    qty: 1,
+    limitPrice: 3300,
+    riskNotional: 3300,
+    stopLoss: 3400,
+    takeProfit: 3200,
+  });
+  assert.equal(shortOk.slPrice, "3400");
+  assert.equal(shortOk.tpPrice, "3200");
+
+  // MARKET ohne festen Entry (kein limitPrice/markPriceHint): Geometrie nicht prüfbar
+  // → überspringen (kein falscher Deny). Regression des Engine-Pfads.
+  const marketNoHint = serializePlaceOrder({
+    symbol: "BTCUSDT",
+    side: "LONG",
+    qty: 0.01,
+    riskNotional: 650,
+    stopLoss: 60000,
+    takeProfit: 70000,
+  });
+  assert.equal(marketNoHint.orderType, "MARKET");
+  assert.equal(marketNoHint.slPrice, "60000");
+  assert.equal(marketNoHint.tpPrice, "70000");
+
+  // MARKET MIT markPriceHint nutzt diesen als Entry-Bezugspunkt (B1).
+  assert.throws(
+    () =>
+      serializePlaceOrder({
+        symbol: "BTCUSDT",
+        side: "LONG",
+        qty: 0.01,
+        riskNotional: 650,
+        markPriceHint: 65000,
+        stopLoss: 65001,
+      }),
+    OrderSerializationError
+  );
+  const marketHintOk = serializePlaceOrder({
+    symbol: "BTCUSDT",
+    side: "SHORT",
+    qty: 0.01,
+    riskNotional: 650,
+    markPriceHint: 65000,
+    stopLoss: 66000,
+    takeProfit: 64000,
+  });
+  assert.equal(marketHintOk.orderType, "MARKET");
+  assert.equal(marketHintOk.slPrice, "66000");
+  assert.equal(marketHintOk.tpPrice, "64000");
+});
+
 test("Gates: 16 Flag-Kombinationen — Enforcer (Task 11) denied ohne State-Machine", () => {
   const flags = ["BITUNIX_ENABLED", "BITUNIX_LIVE_ENABLED", "LIVE_TRADING_ENABLED", "REQUIRE_HUMAN_APPROVAL"] as const;
   let threw = 0;

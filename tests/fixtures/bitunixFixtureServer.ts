@@ -25,6 +25,25 @@ export class BitunixFixtureServer {
   httpStatus?: number;
   /** Optionaler HTTP-Status nur für `/api/v1/kline` (z. B. 429 Rate-Limit-Test). */
   klineStatus?: number;
+  /**
+   * H8: Optionaler Account-Row (GET /futures/account). Ist er gesetzt, wird er
+   * als `data: [accountRow]` ausgeliefert; sonst die Default-Zeile (nur
+   * `available`, ohne gebundene Margin/Positionen).
+   */
+  accountRow: Record<string, string> | null = null;
+  /**
+   * B2: Optionale Positions-Zeilen (GET /futures/position/get_pending_positions).
+   * Ist das Array gesetzt (auch leer), wird es 1:1 als `data` ausgeliefert —
+   * damit lassen sich korrumpierte Antworten simulieren (`side: ""`, `side:
+   * "WEIRD"`, fehlende Seite bei 0-qty). Sonst die Default-Zeile (LONG BTCUSDT).
+   */
+  positionRows: Record<string, unknown>[] | null = null;
+  /**
+   * H4: Am Fixture platzierte Orders, nach `clientId` (Wire-Feld des
+   * clientOrderId) registriert — damit `get_order_detail?clientId=...`
+   * (getOrderByClientId) eine bestehende Order findet (Idempotenz-Tests).
+   */
+  private ordersByClientId = new Map<string, { orderId: string; status: string }>();
   private server: http.Server | null = null;
 
   async start(): Promise<string> {
@@ -76,30 +95,113 @@ export class BitunixFixtureServer {
     const isPrivate =
       path === BITUNIX_PATHS.account ||
       path === BITUNIX_PATHS.positions ||
-      path === BITUNIX_PATHS.placeOrder;
+      path === BITUNIX_PATHS.placeOrder ||
+      path === BITUNIX_PATHS.orderDetail ||
+      path === BITUNIX_PATHS.historyTrades;
     if (isPrivate) {
       this.privateCalls += 1;
       if (!this.validSign(req, url, body)) {
         json(res, 401, { code: 10007, msg: "Signature Error", data: null });
         return;
       }
+      // H3: Order-Detail (Reconciliation). orderId=BX-1 liefert einen
+      // vollständigen Fill mit tradeQty; unbekannte Order → leere Antwort.
+      // H4: auch per clientId abfragbar (clientOrderId-Idempotenz-Query).
+      if (path === BITUNIX_PATHS.orderDetail) {
+        const orderId = url.searchParams.get("orderId");
+        const clientId = url.searchParams.get("clientId");
+        const detail =
+          orderId === "BX-1" || orderId === "BX-LIVE-1"
+            ? {
+                orderId,
+                symbol: "BTCUSDT",
+                qty: "0.01",
+                tradeQty: "0.01",
+                side: "BUY",
+                orderType: "MARKET",
+                status: "FILLED",
+                ctime: 1700000000000,
+                mtime: 1700000001000,
+              }
+            : clientId
+              ? (() => {
+                  const found = this.ordersByClientId.get(clientId);
+                  return found
+                    ? {
+                        orderId: found.orderId,
+                        clientId,
+                        symbol: "BTCUSDT",
+                        qty: "0.01",
+                        tradeQty: "0",
+                        side: "BUY",
+                        orderType: "MARKET",
+                        status: found.status,
+                        ctime: 1700000000000,
+                        mtime: 1700000001000,
+                      }
+                    : null;
+                })()
+              : null;
+        json(res, 200, { code: 0, data: detail });
+        return;
+      }
+      // H3: Ausführungen (Trades) — die echte Fill-Quelle (avgPrice).
+      if (path === BITUNIX_PATHS.historyTrades) {
+        json(res, 200, {
+          code: 0,
+          data: {
+            tradeList: [
+              {
+                tradeId: "T-FIX-1",
+                orderId: url.searchParams.get("orderId") ?? "BX-1",
+                symbol: "BTCUSDT",
+                qty: "0.01",
+                price: "65000",
+                side: "BUY",
+                fee: "0.39",
+                roleType: "TAKER",
+                ctime: 1700000001000,
+              },
+            ],
+            total: 1,
+          },
+        });
+        return;
+      }
       if (path === BITUNIX_PATHS.account) {
         json(res, 200, {
           code: 0,
-          data: [{ marginCoin: "USDT", available: "10000", crossUnrealizedPNL: "0", isolationUnrealizedPNL: "0" }],
+          data: [
+            this.accountRow ?? {
+              marginCoin: "USDT",
+              available: "10000",
+              crossUnrealizedPNL: "0",
+              isolationUnrealizedPNL: "0",
+            },
+          ],
         });
         return;
       }
       if (path === BITUNIX_PATHS.positions) {
         json(res, 200, {
           code: 0,
-          data: [
-            { symbol: "BTCUSDT", qty: "0.01", side: "LONG", avgOpenPrice: "65000", unrealizedPNL: "12.5" },
-          ],
+          data:
+            this.positionRows ?? [
+              { symbol: "BTCUSDT", qty: "0.01", side: "LONG", avgOpenPrice: "65000", unrealizedPNL: "12.5" },
+            ],
         });
         return;
       }
-      json(res, 200, { code: 0, data: { orderId: "BX-1", clientId: "c1" } });
+      // H4: clientOrderId (Wire-Feld clientId) registrieren, damit
+      // get_order_detail?clientId=... die soeben platzierte Order findet.
+      let clientId: string | null = null;
+      try {
+        clientId = body ? String(JSON.parse(body)?.clientId ?? "") || null : null;
+      } catch {
+        clientId = null;
+      }
+      if (clientId) this.ordersByClientId.set(clientId, { orderId: "BX-1", status: "NEW" });
+      json(res, 200, { code: 0, data: { orderId: "BX-1", clientId: clientId ?? "c1" } });
       return;
     }
 

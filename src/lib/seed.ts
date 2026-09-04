@@ -18,6 +18,8 @@ export async function checkSchema(): Promise<{ ok: boolean; missingTables: strin
     "equity_snapshots", "trade_rules", "rule_executions", "rule_backtests",
     // Task 08: verschluesselter Broker-Credential-Store der Control Plane.
     "broker_credentials",
+    // C4 (v1.36.16): persistierter Control-Plane-Zustand je Venue.
+    "venue_control_state",
   ];
   try {
     const result = await db.execute<{ table_name: string }>(

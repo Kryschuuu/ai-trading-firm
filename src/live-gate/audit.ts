@@ -14,13 +14,17 @@
  * Senken (fail-safe, Audit wirft NIE):
  *   1. NDJSON-Datei `${dir}/audit-log.ndjson` (append-only, lokal)
  *   2. In-Memory-Ring (500) — immer verfügbar, auch bei Datei-/DB-Fehler
- *   3. `audit_log` (Event LIVE_GATE) — best-effort via Drizzle
+ *   3. `audit_log` (Event LIVE_GATE) — Zweitabzug via Drizzle; ein Fehler zählt
+ *      und warnt (S1, v1.36.18), bricht das Gate aber nie (Ring + Kette sind
+ *      bereits durable)
  *
  * Leaking-Schutz: nur strukturierte Felder, keine Secrets, keine Order-Daten.
  */
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { structuredLog } from "@/lib/logger";
+import { telemetry } from "@/lib/telemetry";
 import { LIVE_GATE_POLICY_VERSION } from "./config";
 
 export const AUDIT_FILE_NAME = "audit-log.ndjson";
@@ -242,8 +246,16 @@ export class LiveGateAudit {
           hash: entry.hash,
         },
       });
-    } catch {
-      /* DB nicht bereit: Ring + Datei bleiben die Wahrheit. */
+      // S1 (v1.36.18): Die Hash-Kette in Ring + NDJSON ist bereits durable —
+      // der DB-Zweitabzug ist Reserve. Ein Fehlschlag wird deshalb über die
+      // Telemetrie-Klasse gezählt und gewarnt, statt verschluckt zu werden.
+    } catch (e) {
+      telemetry.audit.writeFailures.inc({ auditClass: "telemetry", stage: "db" });
+      structuredLog("warn", "live_gate_audit_db_failed", {
+        seq: entry.seq,
+        action: entry.action,
+        reason: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 

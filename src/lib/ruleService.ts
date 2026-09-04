@@ -32,23 +32,34 @@ import {
   type BacktestResult,
 } from "./ruleEngine";
 import { getLimits } from "./riskGuard";
+import { writeAuditRecord, type AuditWriteOutcome } from "./auditSink";
 
 export type RuleRow = typeof tradeRules.$inferSelect;
 
-/** Audit-Eintrag ohne Engine-Import (bleibt LLM-frei). */
+/**
+ * Audit-Eintrag ohne Engine-Import (bleibt LLM-frei).
+ *
+ * S1 (v1.36.18): läuft über die klassifizierte Senke (`src/lib/auditSink.ts`) —
+ * Regel-Ablehnungen und Regel-Freigaben sind sicherheitsrelevant, also Klasse
+ * `security` mit Retry, persistenter Spool-Reserve und Alarm. Vorher warf ein
+ * DB-Ausfall hier mitten in Fehlerpfaden (z. B. `macroCycle`)
+ * und maskierte die eigentliche Ursache; jetzt wird der Beleg nachgeliefert und die Ursache
+ * bleibt sichtbar.
+ */
 export async function ruleAudit(
   event: string,
   level: "INFO" | "WARN" | "CRITICAL",
   detail: unknown,
   missionId?: string | null,
   agentId?: string | null
-): Promise<void> {
-  await db.insert(auditLog).values({
+): Promise<AuditWriteOutcome> {
+  return writeAuditRecord({
     event,
     level,
-    detail: detail as object,
-    missionId: missionId ?? null,
-    agentId: agentId ?? null,
+    detail,
+    missionId: missionId ?? undefined,
+    agentId: agentId ?? undefined,
+    auditClass: "security",
   });
 }
 

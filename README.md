@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.1 (2026-09-02) · Vollständige
+> **Dokumentationsstand:** v1.36.18 (2026-09-04) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -25,7 +25,7 @@ Risikogrenzen im Code**.
 git clone https://github.com/Kryschuuu/ai-trading-firm.git
 cd ai-trading-firm
 ./scripts/setup-cachyos.sh --variant a     # Variante A: alles auf einem Rechner
-./scripts/setup-cachyos.sh --variant b --llm-host 192.168.1.50
+./scripts/setup-cachyos.sh --variant b --llm-host 192.168.0.20
 ```
 
 Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt
@@ -60,6 +60,116 @@ Details: [`INSTALL.md`](INSTALL.md) und [`docs/INSTALL.md`](docs/INSTALL.md) sow
 (Schritt für Schritt auf CachyOS, Variante A/B),
 [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung) und
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B7).
+
+## Sicherheit: Auth-Modus ist Pflicht, nicht Zufall (v1.36.13)
+
+Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`,
+Credential-/Routing-Endpunkte) ist an ein Credential gebunden — und der Modus
+dafür ist eine Entscheidung, kein fehlender Wert:
+
+* `NODE_ENV=production` (also `npm run start` und die systemd-Unit) **ohne**
+  `FIRM_ADMIN_TOKEN`/`FIRM_API_TOKEN`/`FIRM_VIEWER_TOKEN` ⇒ der Dienst
+  verweigert den Start (`ConfigurationError: AUTH_NOT_CONFIGURED`). Ein
+  vergessenes Token ist kein offener Zugang mehr.
+* `AUTH_MODE=local-open` ist der bewusste Opt-in für den Single-User-Modus ohne
+  Token; außerhalb der Produktion ist es der Dev-Default (`npm run dev`), in
+  Produktion nur mit ausdrücklichem Eintrag in `.env` und Warnung im Log.
+* `AUTH_MODE=token-required` erzwingt das Credential auch in der Entwicklung —
+  nützlich, um das Produktionsverhalten lokal zu prüfen.
+* Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
+
+Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Auth-Modus“; Befund C1 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Sicherheit: Rate-Limits kennen keine erfundenen IPs (v1.36.14)
+
+Rate-Limits wirken nur, wenn die Client-Identität nicht vom Client stammt. Bis
+v1.36.13 lasen beide Limiter `x-forwarded-for`/`x-real-ip` — Header, die jeder
+Aufrufer selbst setzt. Ein frisches `X-Forwarded-For: <zufällig>` pro Anfrage
+erzeugte einen frischen Bucket, das Limit war damit faktisch aus (Befund C2,
+MEDIUM/HIGH). Jetzt gilt (`src/lib/clientIp.ts`, eine Quelle für Firm- und
+Credential-Limit):
+
+* `x-forwarded-for` zählt **nur**, wenn `TRUSTED_PROXY_IPS` konfiguriert ist
+  **und** die Socket-Adresse des direkten Peers darin liegt — ausgewertet
+  rightmost-untrusted, damit eine vorgeschobene Fake-IP wirkungslos bleibt.
+* `x-verified-ip` ist der Header für den Reverse Proxy (nginx:
+  `proxy_set_header X-Verified-IP $remote_addr;`) — der einzige Weg, im
+  Next.js-App-Router eine echte Client-IP zu bekommen.
+* `x-real-ip` wird nie als Identität benutzt; ohne verwertbare
+  Proxy-Information zählt die Socket-Adresse, sonst die Konstante `local`
+  (alle Clients teilen sich dann ein Limit — enger, nie weiter).
+* Credential-Brute-Force wird dreistufig gebremst: Limit pro Identität
+  (5/min) + **globales, IP-unabhängiges** Limit (20/min) + exponentieller
+  Backoff ab dem 3. Fehlversuch (2 s → 4 s → 8 s … max. 15 min). Der
+  Kill-Switch nutzt bewusst nur die erste Stufe.
+* Sichtbar ohne Secret-Werte: `curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity`
+  (inkl. `ignoredHeaders` — welche Header die App verworfen hat).
+
+Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Rate-Limit-Identität“; Befund C2 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Sicherheit: Disarm des Kill-Switch ist stärker als Arm (v1.36.15)
+
+Der Firm-Not-Halt ist die härteste Schicht — deshalb darf ihn nicht dasselbe
+Credential wieder aufheben, das ihn zieht (Befund C3, HIGH). Seit v1.36.15:
+
+* **Arm** (`POST /api/firm/kill` mit `{arm:true}`) bleibt Operator-tauglich
+  (`guardWrite`): scharfschalten ist keine Eskalation.
+* **Disarm** (`{arm:false, nonce}`) verlangt eine strikt stärkere Kette:
+  1. ADMIN-Permission `live.gate` → ein gestohlenes Operator-Token reicht nicht,
+  2. CSRF-Header `x-csrf-token`,
+  3. einen kurzlebigen **single-use Nonce** (≤ 60 s) aus
+     `GET /api/firm/kill/challenge`, der im Body zurückgegeben wird. Fehlt/ist
+     abgelaufen/wiederverwendet ⇒ 403, kein Disarm.
+* Ein erfolgreicher Disarm wird als **CRITICAL** auditiert (Actor + Nonce).
+
+Ein gestohlenes Operator-Token kann das Trading damit **nicht** mehr still wieder
+freischalten, nachdem der Not-Halt ausgelöst wurde. Befund C3 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Audit-Trail ist durable: Sicherheits-Audits mit Retry, Spool und Alarm (v1.36.18)
+
+Bis v1.36.16 konnten Audit-Schreibvorgänge in leeren `catch`-Blöcken
+verschwinden (Befund S1, MEDIUM) — eine gespeicherte Credential-Änderung, ein
+geänderter Prompt oder ein entschärfter Not-Halt blieb dann ohne Beleg im
+`audit_log`, und nichts deutete darauf hin. Seit v1.36.18 gilt:
+
+* **zwei Klassen** in `src/lib/auditSink.ts`: `security` (Auth, Kill-Switch,
+  Credentials, Order-Ablehnungen, Freigaben, Prompts) retryt mit Backoff und
+  legt den Beleg bei DB-Ausfall persistent nach `data/audit-spool/`
+  (at-least-once, automatischer Nachzug inkl. Boot); `telemetry` bleibt
+  best-effort, loggt und zählt aber mindestens,
+* **fail-closed, wo die Mutation noch vermeidbar ist:** Credential-Store,
+  Kill-Switch-**Disarm** und Proposal-Freigabe bleiben ohne durablen Beleg aus
+  (`503 AUDIT_PERSISTENCE_FAILED`); der Not-Halt-**Arm** wird nie blockiert,
+* **Lücken sind sichtbar:** CRITICAL im Journal, `audit_missed_total` in der
+  Metrik, `audit {…}` in `/api/health` und eine eigene Kennzahlengruppe in der
+  Operations-Center-Sektion „Audit",
+* **kein Dauerblocker:** von der DB abgelehnte Zeilen landen nach 3 Versuchen
+  in `audit-quarantine.ndjson`, statt den Nachzug zu stoppen.
+
+Befund S1 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Control Plane: Verbindungszustand überlebt den Neustart (v1.36.16)
+
+Bis v1.36.15 lebte der Zustand des Broker-Tabs (verbunden? welche Rechte? letzte
+Discovery?) nur im Prozessspeicher — nach jedem Neustart stand dort
+`configured=true, connected=false`, bis jemand erneut testete (Befund C4, MEDIUM).
+Seit v1.36.16 ist die Tabelle **`venue_control_state`** die Wahrheit und die
+Prozess-Map nur Cache:
+
+* jede Aktion (save/test/discover/disable) **upsertet** die Zeile,
+* `GET /api/brokers/{venue}/status` zeigt nach einem Neustart den **letzten
+  bekannten Zustand**, und der Boot-Warm-up füllt den Cache für die Live-Gate-
+  Bridge vorab,
+* persistiert wird **status-only** (Ebenen, Rechte-Namen, Zähler, Zeitstempel,
+  SAFE-Fehlercodes) — nie ein Secret; `liveEnabled` wird beim Laden immer neu aus
+  dem Live-Gate-Enforcer projiziert,
+* fehlt die Tabelle noch (`npx drizzle-kit push`), läuft alles wie zuvor
+  prozesslokal weiter und `/api/health` nennt sie unter `missingTables`.
+
+Befund C4 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Markt-Konfiguration (v1.30.0)
 
@@ -128,6 +238,7 @@ Migrationsskript: [`docs/SYMBOLS.md`](docs/SYMBOLS.md).
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
 | `docs/CHANGELOG.md` | Versionen und Änderungen (Keep a Changelog) |
 | `docs/SECURITY_AUDIT.md` | Konsolidierte Security-Architektur + Task-Audits |
+| `docs/AUDIT_REMEDIATION_2026-09.md` | Senior-Peer-Review 2026-09: Befunde, Validierungsstand, je ein Remediation-Prompt (`audit-remediation/`) |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |
 | `docs/help/*.help.json` | 3-Ebenen-Hilfe-Systematik (Schema: `docs/help/help.schema.json`) |
@@ -153,4 +264,4 @@ npm run test:coverage:routing  # Model-Router-Coverage (Task 09 + v1.22.0 Overri
 
 ## Lizenz
 
-MIT — siehe [`LICENSE`](LICENSE).
+GNU General Public License v3.0 (GPL-3.0) — siehe [`LICENSE`](LICENSE).

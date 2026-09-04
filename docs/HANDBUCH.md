@@ -432,7 +432,7 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen / Status |
 | `GET` | `/api/firm/micro` | – | Executor-Prozess-Status + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
-| `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions; 401 wenn Token gesetzt und fehlt) |
+| `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions, `authMode`; 401 wenn Credential erwartet und fehlt) |
 | `GET` | `/api/ops` | – | Operations Center: Rolle, `liveEnabled`, zehn Sektionen mit Status/Kennzahlen/Quellen |
 
 > **Workshop-Endpunkte:** Die drei Missions-/Agenten-Routen sind die Grundlage
@@ -748,8 +748,14 @@ done | sort | uniq -c
 ```
 
 > **Hinweis zum Rate-Limit:** Schreib-Requests sind auf 60/60 s begrenzt
-> (`FIRM_RATE_LIMIT`). 20 Läufe plus ein paar Speicherungen passen in ein
-> Fenster; wer mehr messen will, erhöht das Limit oder misst in Etappen.
+> (`FIRM_RATE_LIMIT`) — gezählt **pro Client-Identität**, nicht pro Header:
+> Seit v1.36.14 bestimmt `src/lib/clientIp.ts` die Identität, ein selbst
+> mitgeschicktes `X-Forwarded-For` erzeugt keinen neuen Bucket (Befund C2).
+> Ohne `TRUSTED_PROXY_IPS`/`x-verified-ip` teilen sich alle Clients hinter
+> einem Next.js-Server den Bucket `local`. 20 Läufe plus ein paar
+> Speicherungen passen in ein Fenster; wer mehr messen will, erhöht das Limit
+> oder misst in Etappen. Wirksame Identität anzeigen:
+> `curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity`.
 
 Erscheint häufig `HOLD` mit der Begründung *„Antwort des Modells war kein gültiges JSON"*,
 liefert dein Modell kaputtes JSON. Dann:
@@ -923,7 +929,12 @@ curl -s -X POST localhost:3369/api/brokers/BITUNIX/credentials \
 ```
 
 Rollen (Task 10): nur **Admin** darf Credentials schreiben. Ist
-`FIRM_ADMIN_TOKEN` ungesetzt, wirkt `FIRM_API_TOKEN` als Single-Admin.
+`FIRM_ADMIN_TOKEN` ungesetzt, wirkt `FIRM_API_TOKEN` als Single-Admin. Seit
+v1.36.13 gilt zusätzlich der Auth-Modus (`AUTH_MODE`): `local-open` (Schreib-API
+ohne Credential) ist Dev-Komfort bzw. ausdrücklich in `.env` eingetragener
+Opt-in — in Produktion ohne jedes Token startet der Dienst nicht
+(`ConfigurationError: AUTH_NOT_CONFIGURED`). Kein Token mehr bedeutet also **nicht**
+„offen“, sondern „zu“. Wirksamen Modus abfragen: `GET /api/auth/me` → `authMode`.
 Bitunix liest den Store (Env-Fallback `BITUNIX_API_KEY` /
 `BITUNIX_API_SECRET`, falls der Store leer ist).
 
@@ -1233,6 +1244,11 @@ Arbeite diese Liste **vollständig** ab, bevor irgendein Live-Endpunkt konfiguri
 - [ ] Der automatische Drawdown-Halt hat mindestens einmal ausgelöst (Startkapital testweise senken).
 
 **Betrieb**
+- [ ] Die Schreib-API ist durch ein Token geschützt (`FIRM_API_TOKEN` gesetzt) —
+      `curl -s localhost:3369/api/auth/me | jq .authMode.mode` liefert
+      `token-required`, und `POST /api/firm/tick` ohne Header antwortet `401`.
+- [ ] Es gibt kein `AUTH_MODE=local-open` in einer Produktions-`.env`
+      (offener Schreib-Zugang im Netz, Audit-Befund C1).
 - [ ] Der Dienst läuft seit mindestens 7 Tagen ohne Absturz.
 - [ ] Es gibt tägliche Datenbanksicherungen und ich habe eine Wiederherstellung geübt.
 - [ ] Der Dienst ist **nicht** aus dem Internet erreichbar.
@@ -1297,7 +1313,51 @@ Turn-Dauer ≈ Ladezeit + (Prompt-Token ÷ prompt eval rate) + (300 ÷ eval rate
 | `source: fallback` häuft sich | Timeouts | `LLM_TIMEOUT_MS` erhöhen oder Modell verkleinern |
 | Dashboard ruckelt | Datenbank groß geworden | alte `audit_log`-Zeilen löschen (10.4) |
 
-### 12.4 Wöchentlicher Gesundheitsbericht
+### 12.4 Audit-Lücken erkennen und schließen (S1, v1.36.18)
+
+Sicherheitsrelevante Audits (Auth, Not-Halt, Credentials, Order-Ablehnungen,
+Freigaben, Prompt-Änderungen) werden über `src/lib/auditSink.ts` geschrieben.
+Ist `audit_log` nicht erreichbar, retryt die Senke, legt den Beleg persistent
+ab und meldet CRITICAL — eine Lücke ist also nie stumm. So prüft man das:
+
+```bash
+# 1) Health: offene Nachzüge, verlorene und gemeldete Lücken
+curl -s localhost:3369/api/health | python3 -m json.tool | sed -n '/"audit"/,/}/p'
+```
+
+| Feld | Bedeutung | Handlung |
+| --- | --- | --- |
+| `audit.pending > 0` | Belege warten im Spool auf den Nachzug nach `audit_log` | PostgreSQL prüfen; der Nachzug läuft beim nächsten erfolgreichen Schreibvorgang und beim nächsten Boot automatisch |
+| `audit.lost > 0` | Weder DB noch Spool waren schreibbar | `AUDIT_SPOOL_DIR`-Pfad/Rechte prüfen (Datei muss `0600` anlegbar sein), dann Journal nach `audit_write_lost` durchsuchen und die betroffenen Vorgänge manuell nachtragen |
+| `audit.missed > 0` | Mutation bewusst durchgeführt, Audit fehlte (Prompt-/Missions-Update, Arm) | Journal-Ereignis `audit_missed_security` liefert Actor + Grund; Änderung ist wirksam, der Beleg fehlt |
+| `audit.quarantined > 0` | Von der DB abgelehnte Zeilen (z. B. Fremdschlüssel) | `data/audit-spool/audit-quarantine.ndjson` ansehen, Ursache beheben; blockiert den Nachzug nicht |
+
+```bash
+# 2) Journal nach den Audit-Alarmen durchsuchen
+journalctl -u ai-trading-firm --since "24 hours ago" \
+  | grep -E 'audit_write_degraded|audit_write_lost|audit_missed_security|audit_spool'
+
+# 3) Offene Spool-Belege ansehen (secret-frei, eine Zeile je Event)
+cat data/audit-spool/audit-pending.ndjson | tail -5
+
+# 4) Nach dem Nachzug: Belege realmente in audit_log?
+psql "$DATABASE_URL" -c "SELECT created_at, event, level FROM audit_log
+  ORDER BY created_at DESC LIMIT 10;"
+```
+
+Feinjustierung (optional, alles Defaults in `src/lib/auditSink.ts`):
+`AUDIT_SPOOL_DIR` (Ablage), `AUDIT_RETRY_MAX` (Versuche),
+`AUDIT_RETRY_BASE_MS` (Backoff-Basis), `AUDIT_DB_COOLDOWN_MS`
+(Fenster, in dem nach einem Fehler keine Retries mehr versucht werden).
+Bei sehr engem Zeitbudget im Handelspfad: `AUDIT_RETRY_MAX=0` — der Beleg geht
+dann sofort in den Spool, die Warnung/Metrik bleibt.
+
+**Duplikate sind Absicht:** Der Spool-Nachzug folgt at-least-once. Ein Insert, der am
+Server durchging, aber als Fehler zurückkam (Timeout nach Commit), kann beim
+Nachzug ein zweites Mal erscheinen. Doppelte Zeilen sind löschbar, fehlende
+nicht — deshalb diese Reihenfolge.
+
+### 12.5 Wöchentlicher Gesundheitsbericht
 
 ```bash
 psql "$DATABASE_URL" -c "
@@ -1629,8 +1689,11 @@ Systemrollen). Die Beschreibungen sind die **aktuellen Standard-Systemprompts**
 
 ## 17. Regelwerk-API (Rules, Macro, Micro, Backtest)
 
-Alle Endpunkte sind schreibend mit `x-firm-token` geschützt (falls
-`FIRM_API_TOKEN` gesetzt).
+Alle Endpunkte sind schreibend mit `x-firm-token` geschützt, sobald
+`FIRM_API_TOKEN` gesetzt ist. Fehlt der Operator-Token, aber es existieren
+Admin-/Viewer-Token, entscheidet die Permission `firm.write` (C1, v1.36.13) —
+und ohne jedes Credential ist die Schreib-API nur bei wirksamem
+`AUTH_MODE=local-open` offen.
 
 ### 17.1 Regeln auflisten
 

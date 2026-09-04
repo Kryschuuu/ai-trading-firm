@@ -60,11 +60,13 @@ function openLiveGate(env: Record<string, string>): void {
 }
 
 /** Fake Private-Client mit Zählern — dokumentiert, welche Methoden live laufen. */
-function spyPrivateClient(): {
+function spyPrivateClient(
+  order: { status: string; filledQty: number } = { status: "NEW", filledQty: 0 }
+): {
   client: BitunixPrivateClient;
-  calls: { place: number; getAccount: number; getPositions: number };
+  calls: { place: number; getAccount: number; getPositions: number; getOrder: number; getExecutions: number };
 } {
-  const calls = { place: 0, getAccount: 0, getPositions: 0 };
+  const calls = { place: 0, getAccount: 0, getPositions: 0, getOrder: 0, getExecutions: 0 };
   const client = {
     placeSerializedOrder: async (body: { symbol: string }) => {
       calls.place += 1;
@@ -76,6 +78,11 @@ function spyPrivateClient(): {
       return {
         equity: 99999,
         cash: 88888,
+        walletBalance: 99999,
+        availableCash: 88888,
+        usedMargin: 0,
+        maintenanceMargin: 0,
+        unrealizedPnl: 0,
         openPositions: 0,
         startingEquity: 99999,
         drawdownPct: 0,
@@ -93,6 +100,39 @@ function spyPrivateClient(): {
           unrealizedPnl: 50,
           stopLoss: null,
           takeProfit: null,
+        },
+      ];
+    },
+    // H3: Order-Detail (Venue-Status) für die Reconciliation.
+    getOrder: async (orderId: string) => {
+      calls.getOrder += 1;
+      assert.equal(orderId, "BX-LIVE-1");
+      if (order.status === "MISSING") return null;
+      return {
+        orderId,
+        symbol: "BTCUSDT",
+        side: "LONG" as const,
+        qty: 0.05,
+        filledQty: order.filledQty,
+        avgPrice: 0,
+        status: order.status,
+      };
+    },
+    // H3: Ausführungen (Trades) — die ECHTE Fill-Quelle. Bei PART_FILLED
+    // liefert die Venue einen Teilfill mit echtem Preis.
+    getExecutions: async () => {
+      calls.getExecutions += 1;
+      if (order.filledQty <= 0) return [];
+      return [
+        {
+          tradeId: "T1",
+          orderId: "BX-LIVE-1",
+          symbol: "BTCUSDT",
+          side: "LONG" as const,
+          qty: order.filledQty,
+          price: 65000,
+          fee: 0.5,
+          ts: 1,
         },
       ];
     },
@@ -273,7 +313,10 @@ test("Live-Gate OFFEN: placeOrder/getAccount/getPositions nutzen die Broker-Engi
   });
   assert.equal(calls.place, 1, "Live-Order muss den Private-Client treffen");
   assert.equal(fill.orderId, "BX-LIVE-1", "OrderId muss vom Broker stammen, nicht vom Paper-Ledger");
-  assert.equal(fill.status, "FILLED");
+  // H3: Eine akzeptierte Live-Order ist NEW (kein Fill), nicht FILLED.
+  assert.equal(fill.status, "NEW", "Venue-Annahme ist NEW — kein fiktiver Fill");
+  assert.equal(fill.fillPrice, 0, "Bei NEW gibt es keinen Fill-Preis");
+  assert.equal(fill.reason, "ORDER_ACCEPTED");
 
   const acct = await adapter.getAccount();
   assert.equal(acct.equity, 99999, "Live-Account muss Broker-Daten liefern, nicht Paper-Equity 10000");
@@ -326,6 +369,140 @@ test("ExecutionPort-Separation: PaperExecutionEngine vs. BrokerExecutionEngine s
   assert.equal(paperAcct.openPositions, 1);
   const brokerAcct = await brokerEngine.getAccount();
   assert.equal(brokerAcct.equity, 99999);
+});
+
+test("H3: submit() live meldet nur die AKZEPTANZ (NEW, fillPrice 0) — nie FILLED", async () => {
+  const { client: fake } = spyPrivateClient({ status: "NEW", filledQty: 0 });
+  const engine = new BrokerExecutionEngine(fake);
+  const req = { symbol: "BTCUSDT", side: "LONG" as const, qty: 0.01, riskNotional: 650, stopLoss: 60000, takeProfit: 70000 };
+  const ticker = { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 };
+
+  const result = await engine.submit(req, ticker);
+  assert.equal(result.status, "NEW", "akzeptierte Order ist NEW");
+  assert.equal(result.fillPrice, 0, "kein fiktiver Fill-Preis");
+  assert.equal(result.filledQty, 0);
+  assert.equal(result.reason, "ORDER_ACCEPTED");
+  assert.equal(result.orderId, "BX-LIVE-1");
+  assert.equal(result.stopLoss, 60000);
+  assert.equal(result.takeProfit, 70000);
+});
+
+test("H3: reconcile() mappt Venue PART_FILLED → PARTIALLY_FILLED mit echtem avgPrice", async () => {
+  const { client: fake, calls } = spyPrivateClient({ status: "PART_FILLED", filledQty: 0.005 });
+  const engine = new BrokerExecutionEngine(fake);
+  const req = { symbol: "BTCUSDT", side: "LONG" as const, qty: 0.01, riskNotional: 650, stopLoss: 60000 };
+  const ticker = { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 };
+  const placed = await engine.submit(req, ticker);
+
+  const reconciled = await engine.reconcile(placed.orderId);
+  assert.ok(reconciled, "reconcile liefert ein Ergebnis");
+  assert.equal(calls.getOrder, 1, "Order-Detail wird abgefragt");
+  assert.ok(calls.getExecutions >= 1, "Ausführungen (Trades) werden abgefragt");
+  assert.equal(reconciled!.status, "PARTIALLY_FILLED", "Venue PART_FILLED → Contract PARTIALLY_FILLED");
+  assert.equal(reconciled!.fillPrice, 65000, "echter avgPrice aus den Trades — nie 0");
+  assert.equal(reconciled!.filledQty, 0.005);
+  assert.equal(reconciled!.symbol, "BTCUSDT");
+  assert.equal(reconciled!.side, "LONG");
+});
+
+test("H3: reconcile() NEW ohne Trades bleibt NEW (fillPrice 0) — keine Position einbuchen", async () => {
+  const { client: fake } = spyPrivateClient({ status: "NEW", filledQty: 0 });
+  const engine = new BrokerExecutionEngine(fake);
+  const req = { symbol: "BTCUSDT", side: "LONG" as const, qty: 0.01, riskNotional: 650, stopLoss: 60000 };
+  const placed = await engine.submit(req, { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 });
+
+  const reconciled = await engine.reconcile(placed.orderId);
+  assert.equal(reconciled!.status, "NEW");
+  assert.equal(reconciled!.fillPrice, 0);
+  assert.equal(reconciled!.filledQty, 0);
+});
+
+test("H3: reconcile() FILLED mit Trades → FILLED mit avgPrice; ohne belegbaren Preis → UNKNOWN", async () => {
+  // Vollständig gefüllt, Trades vorhanden → FILLED mit echtem Preis.
+  const filled = spyPrivateClient({ status: "FILLED", filledQty: 0.01 });
+  const engineFilled = new BrokerExecutionEngine(filled.client);
+  const req = { symbol: "BTCUSDT", side: "LONG" as const, qty: 0.01, riskNotional: 650, stopLoss: 60000 };
+  await engineFilled.submit(req, { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 });
+  const recFilled = await engineFilled.reconcile("BX-LIVE-1");
+  assert.equal(recFilled!.status, "FILLED");
+  assert.equal(recFilled!.fillPrice, 65000, "avgPrice aus Trades");
+  assert.ok(recFilled!.fillPrice > 0);
+
+  // Venue meldet FILLED, aber KEINE Trades (Preis nicht belegbar) → UNKNOWN,
+  // niemals FILLED mit fillPrice 0.
+  const ghost = spyPrivateClient({ status: "FILLED", filledQty: 0 });
+  // filledQty 0 → getExecutions liefert []; getOrder meldet FILLED.
+  (ghost.client as unknown as { getOrder: () => Promise<unknown> }).getOrder = async () => ({
+    orderId: "BX-LIVE-1",
+    symbol: "BTCUSDT",
+    side: "LONG",
+    qty: 0.01,
+    filledQty: 0.01,
+    avgPrice: 0,
+    status: "FILLED",
+  });
+  const engineGhost = new BrokerExecutionEngine(ghost.client);
+  await engineGhost.submit(req, { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 });
+  const recGhost = await engineGhost.reconcile("BX-LIVE-1");
+  assert.equal(recGhost!.status, "UNKNOWN", "FILLED ohne belegbaren Preis → UNKNOWN (fail-safe)");
+  assert.equal(recGhost!.fillPrice, 0, "kein 0-Entry");
+  assert.equal(recGhost!.reason, "FILL_PRICE_UNKNOWN");
+
+  // Order beim Venue nicht auffindbar → UNKNOWN / ORDER_NOT_FOUND.
+  const missing = spyPrivateClient({ status: "MISSING", filledQty: 0 });
+  const engineMissing = new BrokerExecutionEngine(missing.client);
+  await engineMissing.submit(req, { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 });
+  const recMissing = await engineMissing.reconcile("BX-LIVE-1");
+  assert.equal(recMissing!.status, "UNKNOWN");
+  assert.equal(recMissing!.reason, "ORDER_NOT_FOUND");
+});
+
+test("H3: reconcile() CANCELED mit Teilfills → CANCELED mit avgPrice der Teilfills", async () => {
+  const { client: fake } = spyPrivateClient({ status: "CANCELED", filledQty: 0.003 });
+  const engine = new BrokerExecutionEngine(fake);
+  const req = { symbol: "BTCUSDT", side: "LONG" as const, qty: 0.01, riskNotional: 650, stopLoss: 60000 };
+  await engine.submit(req, { symbol: "BTCUSDT", price: 65000, source: "bitunix", ts: 0 });
+  const rec = await engine.reconcile("BX-LIVE-1");
+  assert.equal(rec!.status, "CANCELED");
+  assert.equal(rec!.filledQty, 0.003);
+  assert.equal(rec!.fillPrice, 65000);
+});
+
+test("H3: Adapter.reconcileOrder — live via Gate, paper liefert null", async () => {
+  resetLiveGateTestGlobals();
+  const fx = new BitunixFixtureServer();
+  const base = await fx.start();
+  servers.push(fx);
+  const env = {
+    ...allowEnv(),
+    BITUNIX_BASE_URL: base,
+    BITUNIX_ALLOW_INSECURE_HTTP: "true",
+    BITUNIX_RETRY_MAX: "1",
+  };
+  openLiveGate(env);
+  const { client, calls } = spyPrivateClient({ status: "PART_FILLED", filledQty: 0.005 });
+  const live = new BitunixBrokerAdapter("live", {
+    env,
+    config: loadBitunixConfig(env),
+    privateClient: client,
+    secretStore: new EnvSecretStore(env),
+  });
+
+  const placed = await live.placeOrder({ symbol: "BTCUSDT", side: "LONG", qty: 0.05, riskNotional: 3000, stopLoss: 50000 });
+  assert.equal(placed.status, "NEW");
+  const rec = await live.reconcileOrder(placed.orderId);
+  assert.equal(rec!.status, "PARTIALLY_FILLED");
+  assert.equal(rec!.fillPrice, 65000, "echter avgPrice — Position erst jetzt buchen");
+  assert.ok(calls.getOrder >= 1);
+
+  // Paper/backtest: synchroner Fill, keine offene Live-Order → null.
+  const paper = new BitunixBrokerAdapter("paper", {
+    env,
+    config: loadBitunixConfig(env),
+    secretStore: new EnvSecretStore(env),
+  });
+  assert.equal(await paper.reconcileOrder("irgendwas"), null);
+  resetLiveGateTestGlobals();
 });
 
 test("Semantik-Trennung: adapter.live ≠ instrument.liveTradable ≠ liveAvailable ≠ gate.state", async () => {

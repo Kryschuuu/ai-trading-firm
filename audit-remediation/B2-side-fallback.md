@@ -2,8 +2,11 @@
 
 - **Severity:** MEDIUM
 - **Bereich:** Brokers & Venues
-- **Status (validiert):** ✅ **Valide.**
-- **Datei(en):** `src/brokers/bitunix/privateClient.ts` (`getPositions` L141)
+- **Status (validiert):** ✅ **Gefixt (v1.36.12)** — Befund war valide (Audit 2026-09-03); Fix in
+  `src/brokers/bitunix/privateClient.ts` (`getPositions` + neues `parseBitunixPositionSide`) und
+  `src/brokers/bitunix/audit.ts` (Anomalie-Ring + Zähler); Tests in
+  `tests/bitunix.positions.test.ts`. Doku: `docs/BITUNIX.md` §5.3.
+- **Datei(en):** `src/brokers/bitunix/privateClient.ts` (`getPositions`), `src/brokers/bitunix/audit.ts`
 
 ## Arena-Prompt (kopierbar)
 
@@ -29,30 +32,54 @@ ACCEPTANCE: Unknown sides are dropped (and counted), never silently coerced to L
 LONG/SHORT rows are preserved.
 ```
 
-## Beweis (aktueller Code)
+## Beweis (Code vor dem Fix)
 
-`src/brokers/bitunix/privateClient.ts` L141 (in `getPositions`):
+`src/brokers/bitunix/privateClient.ts` in `getPositions` (Zeile 141 zum Audit-Zeitpunkt):
 
 ```ts
 const side = String(r.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG";
 ```
 
-## Fix-Spezifikation
+Jeder andere Rohwert (`""`, `null`, `"SELL"`, abgeschnittener Müll) wurde zu `LONG` — ohne Log, ohne
+Zähler, ohne Möglichkeit, die korrumpierte Antwort zu bemerken.
 
-Explizite Validierung: unbekannte/leere Seite → Position überspringen + loggen, nicht still als
-LONG (siehe Audit B2).
+## Fix-Spezifikation (umgesetzt v1.36.12)
+
+Zwei-Gate-Filterung pro Zeile, Reihenfolge fest:
+
+1. `qty` muss endlich und `> 0` sein — geschlossene/Null-Mengen-Zeilen (bei denen Bitunix die `side`
+   regelmäßig weglässt) scheiden hier aus und zählen **nicht** als Anomalie.
+2. `side` muss `LONG` oder `SHORT` sein (`parseBitunixPositionSide`, getrimmt + case-insensitiv).
+   Sonst: Zeile verwerfen, im Anomalie-Ring zählen, pro Call eine zusammengefasste, redaktierte
+   Warnung. **Nie** auf `LONG` fallen.
+
+`BUY`/`SELL` sind Order-Seiten desselben Venues und werden in der Positionsantwort bewusst nicht
+umgedeutet (Positionsseite ist dort `LONG`/`SHORT` dokumentiert).
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] `side=""` / `side="WEIRD"` → Position wird ausgelassen (nicht LONG).
-- [ ] `LONG`/`SHORT` bleiben erhalten.
-- [ ] Übersprungene Zeilen werden gezählt/geloggt.
+- [x] `side=""` / `side="WEIRD"` / fehlende Seite → Position wird ausgelassen (nicht LONG).
+- [x] `LONG`/`SHORT` bleiben erhalten (inkl. Vorzeichen des uPnL bei SHORT).
+- [x] Übersprungene Zeilen werden gezählt (Ring + kumulativer Zähler) und pro Call geloggt.
+- [x] `qty<=0` ohne `side` → über `qty` gefiltert, keine Anomalie (Reihenfolge geprüft).
+- [x] Saubere Antwort erzeugt keine Anomalie (Regression).
+
+Tests: `tests/bitunix.positions.test.ts` (7 Fälle, gegen `BitunixFixtureServer` mit einstellbaren
+`positionRows`). `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün;
+`npm test` = **1609/1609**.
 
 ## Changelog-Blurb
 
 `B2 (MEDIUM): Ungültige Positionsseite still als LONG — explizite Validierung; unbekannte Seite wird
-ausgelassen + geloggt statt maskiert.`
+ausgelassen + gezählt statt maskiert.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Validierungs-Härtung, keine API-Änderung.
+PATCH (**1.36.12** — umgesetzt) — Validierungs-Härtung, keine API-Änderung.
+
+## Nachtrag (bewusst außer Scope)
+
+`src/brokers/alpaca/mapping.ts` (`mapPosition` → `raw.side === "long" ? "LONG" : "SHORT"`) zeigt
+dieselbe binäre Form, dort ist die Alpaca-Semantik aber zweiwertig (`long`/`short`) dokumentiert, und
+`qty`/`entry`-Guard (Zeile 217) filtert Leerbereiche vor. Kein Auditauftrag — Beobachtung für ein
+allfälliges Folgeticket zur einheitlichen Seitenvalidierung über alle Venues.

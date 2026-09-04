@@ -45,9 +45,10 @@
  *     damit der separate Mikro-Executor-Prozess die Reduktion ebenfalls sieht.
  */
 import { db } from "@/db";
-import { auditLog, riskConfig } from "@/db/schema";
+import { riskConfig } from "@/db/schema";
 import { getCandles, type Candle } from "./marketData";
 import { atrPct, bollingerBandWidthPct, returnStdDevPct } from "./indicators";
+import { auditWrite } from "./auditSink";
 import { applyAdaptiveRisk, getBaseLimits, getLimits } from "./riskGuard";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -597,17 +598,23 @@ export function currentVolatilityConfig(): VolatilityConfig {
   return { ...state().config };
 }
 
-/** Audit-Log-Eintrag (best-effort — z. B. ohne DB in Tests). */
+/**
+ * Audit-Log-Eintrag der adaptiven Risikobewertung.
+ *
+ * S1 (v1.36.18): Klasse `telemetry` — Volatilitäts-Events sind
+ * Beobachtungsdaten, ihr Fehlen blockiert den Risikopfad nicht (Tests ohne DB,
+ * DB-Neustart). „best-effort“ heißt hier nicht mehr „still“: ein Fehlschlag
+ * zählt in `audit_write_failures_total{auditClass="telemetry"}` und erzeugt
+ * eine Warnung im strukturierten Log. Risk-Regime-Wechsel im EXTREME-Fall sind
+ * für die Nachvollziehbarkeit relevant, deshalb zusätzlich Spool-Reserve.
+ */
 async function logAdaptiveEvent(event: AdaptiveRiskEvent, regime: VolatilityRegime): Promise<void> {
-  try {
-    await db.insert(auditLog).values({
-      event: "RISK_ADAPTIVE",
-      level: regime === "EXTREME" ? "WARN" : "INFO",
-      detail: event as unknown as object,
-    });
-  } catch {
-    /* Audit ist optional (Tests ohne DB, DB-Neustart) */
-  }
+  await auditWrite(
+    "RISK_ADAPTIVE",
+    regime === "EXTREME" ? "WARN" : "INFO",
+    event,
+    { auditClass: regime === "EXTREME" ? "security" : "telemetry" }
+  );
 }
 
 /**

@@ -152,7 +152,7 @@ Zusätzliche Verifikation (jede Release): `npm run typecheck` ✅ · `npm run li
 1. **`FIRM_API_TOKEN` aktivieren**, sobald der Dienst außerhalb von 127.0.0.1 erreichbar ist (LAN/Cloud) — der Token-Schutz existiert, ist aber nur optional.
 2. **Regelmäßiges `npm audit`** in die Deploy-Checkliste aufnehmen (`CI`-Job empfohlen).
 3. **Live-Broker erst nach** Sicherheits-Checkliste (HANDBUCH Kapitel 11); kein Adapter im Auslieferungszustand.
-4. **Rate-Limiting** ist seit v1.4.0 prozess-lokal aktiv (60/min); hinter einem Proxy `x-forwarded-for` nicht als Sicherheitsgrenze behandeln.
+4. **Rate-Limiting** ist seit v1.4.0 prozess-lokal aktiv (60/min). *Nachtrag v1.36.14:* Die Warnung „`x-forwarded-for` hinter einem Proxy nicht als Sicherheitsgrenze behandeln" ist umgesetzt — Befund C2 des Senior-Peer-Reviews (`AUDIT_REMEDIATION_2026-09.md`) behoben. `src/lib/clientIp.ts` (`resolveClientIp`) ist die einzige Quelle der Rate-Limit-Identität für Firm- und Credential-Limit: `x-forwarded-for` zählt nur bei konfigurierten `TRUSTED_PROXY_IPS` **und** verifiziertem Socket-Peer (rightmost-untrusted), `x-real-ip` nie, bevorzugt wird der proxy-gesetzte Header `x-verified-ip`. Ohne Proxy-Vertrauen gilt die Socket-Adresse, sonst der gemeinsame Bucket `local` (fail-closed). Dazu globaler IP-unabhängiger Credential-Deckel (20/min) und exponentieller Backoff ab dem 3. Fehlversuch.
 5. **DB-gestützte Scheduler-Locks** bei Multi-Node-Betrieb (aktuell Single-Node; der Mikro-Executor nutzt bereits Advisory-Locks pro Symbol).
 
 ---
@@ -268,9 +268,12 @@ Testauswertung (Offline-Suite mit simuliertem fetch), npm audit.
   Ergebnis, UTC-Zeitstempel) — in der Matrix sind das 18 von 18
   (6x LGTE, 11x NSE, 1x OK). Unknown-Venue-Ablehnungen werden
   auditiert (Vollständigkeit). Senken: In-Memory-Ring (200, immer)
-  + best-effort `audit_log` (Event `BROKER_FACTORY`) — DB-Ausfall
-  bricht den Pfad nie ab (Fail-Safe, Test: Factory wirft korrekt,
-  Ring bleibt wahr).
+  + `audit_log` (Event `BROKER_FACTORY`) — seit S1 (v1.36.18) nicht mehr
+  „best-effort mit leerem catch“, sondern Sicherheitsklasse über
+  `src/lib/auditSink.ts`: Retry mit Backoff, persistenter Spool
+  (`data/audit-spool`, at-least-once) und CRITICAL-Metrik bei Totalverlust.
+  Der Pfad bricht bei DB-Ausfall weiterhin nicht ab (Fail-Safe),
+  aber der Beleg fehlt nicht mehr still.
 
 - **4. Remote-Health default OFF:** `BROKER_HEALTHCHECK_REMOTE`
   ist false, wenn nicht exakt "true". Remote-Checks sind read-only,
@@ -282,7 +285,7 @@ Testauswertung (Offline-Suite mit simuliertem fetch), npm audit.
 
 | ID | Severity | Datei (Funktion) | Problem | Status |
 | --- | --- | --- | --- | --- |
-| B-01 | Info | src/brokers/audit.ts → recordBrokerFactoryCall() | DB-Senke ist best-effort (dynamischer Import, try/catch); ohne PostgreSQL wird nur der In-Memory-Ring geführt | ✅ by design (Muster des Universe-Audits); der Pfad bleibt korrekt und auditierbar im Ring |
+| B-01 | Info | src/brokers/audit.ts → recordBrokerFactoryCall() | DB-Senke war best-effort (dynamischer Import, leeres catch); ohne PostgreSQL blieb nur der In-Memory-Ring — ohne Spur im Journal | 🔧 **behoben in v1.36.18 (S1):** Klasse `security` mit Retry, Spool-Fallback und `readBrokerFactoryAuditDegradedCount()`; der Pfad wirft weiterhin nie |
 | B-02 | Info | src/app/api/brokers/** | Health-Endpunkte sind read-only ohne Token | ✅ konsistent mit den übrigen GET-Endpunkten; keine Zustandsmutation, kein Schreibpfad |
 
 Fazit: **kein High/Critical-Befund.** Task 02 macht das Capability-Modell
@@ -309,7 +312,7 @@ Failover, Simulator, Manager, http, config, production),
 | **Timeout Pflicht** | ✅ | `httpGetJson` erzwingt `timeoutMs` (Default 8000) via AbortController; `redirect: "error"` (kein Redirect-Abfluss an Fremd-Hosts). |
 | **Retry nur mit Backoff + hartem Limit** | ✅ | `maxRetries` (Default 2, Env `PAPER_FEED_RETRY_MAX`, geklemmt 1–6) mit exponentiellem Backoff (`baseBackoffMs * 2^attempt`). Kein ungebremster Retry. |
 | **Feeds read-only** | ✅ | Nur `GET` mit `cache: "no-store"`; keine Zustandsmutation außerhalb des deterministischen Local-Simulators/Stores. |
-| **Audit-Log-Failover** | ✅ | Jeder Feed-Wechsel → `FEED_FAILOVER`, jede verworfene Anomalie → `ANOMALOUS_SNAPSHOT` in `audit_log` + In-Memory-Ring (best-effort, Fail-Safe). `failover.ts`. |
+| **Audit-Log-Failover** | ✅ | Jeder Feed-Wechsel → `FEED_FAILOVER`, jede verworfene Anomalie → `ANOMALOUS_SNAPSHOT` in `audit_log` + In-Memory-Ring; Ausfall zählt und warnt (S1-Klasse `telemetry`), bricht den Kurspfad aber nie. `failover.ts`. |
 | **Kein stiller Kursquellwechsel** | ✅ | Synthetic nur bei `PAPER_ALLOW_SYNTHETIC_FALLBACK=true`; statisches Preisbuch nur bei `PAPER_STATIC_FALLBACK=true` (Default aus). Ohne erlaubten Fallback → `NO_QUOTE`-Ablehnung, nie raten. |
 | **Kein Secret-Bedarf** | ✅ | Feeds sind Public-Endpunkte (kein API-Key); nirgends Credentials. Kein neuer Netzwerk-Import in Unit-/CI-Tests (Fixture-Server, `127.0.0.1`). |
 | **Kein LLM-Zugriff** | ✅ | Market-Data-Schicht ist rein deterministisch; kein Import von `ollama`/`llmProvider` (Import-Graph frei davon). |
@@ -320,7 +323,7 @@ Failover, Simulator, Manager, http, config, production),
 
 | ID | Severity | Datei (Funktion) | Problem | Status |
 | --- | --- | --- | --- | --- |
-| P-01 | Info | `src/lib/marketdata/failover.ts` → `recordFailover()` | DB-Senke ist best-effort (dynamischer Import, try/catch); ohne PostgreSQL nur In-Memory-Ring | ✅ by design (Muster des Universe-/Broker-Audits); der Ring bleibt Wahrheit und wird im Audit-Log gespiegelt, sobald die DB steht |
+| P-01 | Info | `src/lib/marketdata/failover.ts` → `recordFailover()` | DB-Senke war ein stilles catch; ohne PostgreSQL blieb nur der In-Memory-Ring | 🔧 **behoben in v1.36.18 (S1):** Klasse `telemetry` — bewusst noch nicht blockierend für den Kurspfad, aber jeder Fehlschlag zählt (`audit_write_failures_total`) und warnt |
 | P-02 | Info | `src/lib/marketdata/manager.ts` → `getSnapshot()` | `Date.now()` für Cache-TTL/`ts` — nicht Teil des deterministischen Replay-/Backtest-Pfads (der nutzt Store-Timestamps); für Modus B realtime gewollt | ✅ by design; Determinismus gilt für Simulator/Replay/Synthetic |
 | P-03 | Info | `src/app/api/marketdata/**` | Read-only-Endpunkte ohne Token | ✅ konsistent mit den übrigen GET-Endpunkten; keine Zustandsmutation, kein Schreibpfad |
 
@@ -501,7 +504,7 @@ Live-Ausführung **immer** `LiveTradingGateError` (`TODO(task-11)`).
 
 | ID | Severity | Datei | Problem | Status |
 | --- | --- | --- | --- | --- |
-| X-01 | Info | `src/brokers/bitunix/audit.ts` | DB-Senke best-effort | ✅ by design (Muster Factory/Universe) |
+| X-01 | Info | `src/brokers/bitunix/audit.ts` | DB-Senke war best-effort (`/* best-effort */`) — gerade der Venue-Pfad (Order, Konto, Positionen) konnte ohne Beleg bleiben | 🔧 **behoben in v1.36.18 (S1):** `writeAuditRecord({ auditClass: "security" })` (Retry + Spool + Alarm), eigener Zähler `readBitunixAuditDegradedCount()` |
 | X-02 | Info | `src/brokers/bitunix/secrets.ts` | Env-Klartext bis task-08 | ✅ dokumentiert; Dateirechte 600 in `.env.example` |
 | X-03 | Info | `mapping.ts` Fees | API liefert keine Fees → VIP0-Defaults statt `null` | ✅ `MarketInstrument` erlaubt kein null; Abweichung in BITUNIX.md |
 
@@ -526,7 +529,7 @@ Red-Team-Checkliste + Scanner-Ergebnis.
 | T4 | Secret im Storage (at rest) | DB-/Datei-Dump | AES-256-GCM, AAD=Venue, Auth-Tag; Datei-Backend chmod 600 + gitignored | Key in Env (dokumentiert; KMS-Hook vorbereitet) |
 | T5 | CSRF | Cross-Site-Formular gegen lokale API | Custom-Header `x-csrf-token` Pflicht auf allen mutierenden CP-Endpoints; API ohne Cookies | Lokaler Offen-Betrieb akzeptiert `local` (Single-User, 127.0.0.1) |
 | T6 | RBAC-Umgehung | Unauthentifizierter Credential-Zugriff | Admin-Guard (`FIRM_ADMIN_TOKEN` → 403), Fallback Operator-Token (401); timing-sicher | Bis task-10 kein zentrales Rollenmodell (TODO markiert) |
-| T7 | Rate-Limit (Brute-Force/Flood) | Massenhaft Credential-Versuche | Eigener Bucket 5/min/IP → 429 + Retry-After; unabhängig vom Firm-Schreib-Limit | Single-Node-InMemory (Prozess-lokal, wie Bestand) |
+| T7 | Rate-Limit (Brute-Force/Flood) | Massenhaft Credential-Versuche | Eigener Bucket 5/min pro Client-Identität → 429 + Retry-After; unabhängig vom Firm-Schreib-Limit. *v1.36.14 (C2):* Identität nicht mehr aus spoofbaren Headern, zusätzlich globales IP-unabhängiges Limit (20/min) und exponentieller Backoff ab dem 3. Fehlversuch | Single-Node-InMemory (Prozess-lokal, wie Bestand); globaler Deckel wirkt nur pro Instanz |
 | T8 | Tampering (Ciphertext/Key) | Datensatz manipulieren, falscher Key | Auth-Tag-Prüfung; AAD-Bindung (fremde Venue → AUTH_FAILED); generische Fehlermeldung (kein Padding-Orakel) | None (Unit-getestet) |
 | T9 | Live-Freigabe via Backdoor | Flag/Env/Parameter setzt `liveEnabled` | Kein Schalter existiert; `readGateState()` IMMER false (task-11); Live-Ebene nie ≠ off; Audit-Katalog prüft `live=active` als Widerspruch | None bis Gate-Task |
 | T10 | XSS in der CP-UI | Fremddaten via innerHTML | Kein `dangerouslySetInnerHTML`/`innerHTML` in `src/components/control-plane` (Statik-Test); CSP bleibt aktiv | None |
@@ -541,7 +544,7 @@ Red-Team-Checkliste + Scanner-Ergebnis.
 | **Kein keyHint/Maskierung** | ✅ | Contract-Test: erlaubte Top-Level-Felder enum-meriert; `keyHint`/`****` explizit negiert. |
 | **CSRF abgelehnt** | ✅ | POST/DELETE ohne `x-csrf-token` → 403 `CSRF_INVALID` (auch bei korrektem Admin-Token). |
 | **RBAC abgelehnt** | ✅ | `FIRM_ADMIN_TOKEN` gesetzt: ohne/falscher Token → 403 `FORBIDDEN`; Operator-Fallback → 401. |
-| **Rate-Limit greift** | ✅ | 6. Versuch in 60 s → 429 `RATE_LIMITED` + `Retry-After` (Limit 5/min/IP). |
+| **Rate-Limit greift** | ✅ | 6. Versuch in 60 s → 429 `RATE_LIMITED` + `Retry-After` (Limit 5/min pro Identität). Seit v1.36.14 zusätzlich: rotierende `X-Forwarded-For`-Header kaufen keine Versuche (`tests/clientIp.test.ts`), globales Limit und Backoff greifen (`tests/controlPlane.bruteforce.test.ts`). |
 | **Tampering/Wrong-Key** | ✅ | `tests/secretStore.test.ts`: Bit-Flip im Ciphertext, falscher Key, fremde Venue (AAD) → `AUTH_FAILED`. |
 | **Memory-Hygiene** | ✅ | `zeroize()`-Pfad + Test; Probe verwirft Credential (`disposeCredential`); kein Client-Speicher (Statik-Test: kein `localStorage.setItem`). |
 | **Live nirgends setzbar** | ✅ | Kein Flag/Env/Parameter; `readGateState()` konstant false; E2E + States-Tests; Audit-Katalog-Widerspruchsprüfung. |
@@ -589,7 +592,7 @@ Model + Red-Team-Checkliste + Coverage-Nachweis.
 | T2 | Injection erzwingt Eskalation | News-Headline/Modell-Output enthält „escalate to MODEL_C" | `toRoutingContext()`-Whitelist verwirft Freitext; Trigger nur Runtime-Metriken; `reason` wird protokolliert, nie ausgewertet; 6 Payloads × 5 Szenarien getestet | Keins (nur strukturierte Eingaben wirken) |
 | T3 | Kostenexplosion / unbegrenzte Cloud | Dauerhafte Höherstufung, Retry-Loops | Budget-Deckel je Provider/Agent/Tag, Eskalations-Tageslimit (12), `classCeiling`, `allowCloud`; Policy-Validierung erzwingt Cloud-Deckel > 0 | Zähler prozess-lokal (Single-Node) |
 | T4 | Policy-Manipulation | Policy-Datei/Modi ohne Autorisierung ändern | Schema-Validierung mit Startverweigerung; `PUT /api/routing/modes` nur mit Admin-Token (timing-safe) + CSRF; Modi-Datei chmod 600; jede Änderung auditiert (`outcome: admin`) | Bis task-10 kein Rollenmodell (Token-Platzhalter, TODO markiert) |
-| T5 | Audit-Lücke | Wechsel ohne Protokoll (z. B. in-class Provider-Tausch) | `finish()` auditiert jeden Wechsel (Klasse/Provider/Modell) sowie Fallback/Budget; seitwärts/rückwärts ⇒ `outcome: fallback`; Assertion-Test: 100 % der Wechsel haben Audit-Eintrag | DB-Senke best-effort (Ring + Datei bleiben Wahrheit) |
+| T5 | Audit-Lücke | Wechsel ohne Protokoll (z. B. in-class Provider-Tausch) | `finish()` auditiert jeden Wechsel (Klasse/Provider/Modell) sowie Fallback/Budget; seitwärts/rückwärts ⇒ `outcome: fallback`; Assertion-Test: 100 % der Wechsel haben Audit-Eintrag | Ring + Datei bleiben Wahrheit; seit S1 (v1.36.18) ist die DB-Senke klassifiziert (Telemetrie mit Warnung + Metrik, Ablehnungen mit Spool-Reserve) |
 | T6 | Secret-Leak über die Provider-API | `/api/providers` spiegelt Registry inkl. Keys/URLs | Antwort enthält nur Status/Modell/Kosten/Zähler — keine Keys, keine Basis-URLs; Secret-Scanner über die Response im Test | None (Scanner in CI) |
 | T7 | Cloud-Nutzung trotz lokalem Gebot | Agent mit `allowCloud:false` landet in der Cloud | Doppelte Sperre: `allowCloud` je Agent **und** `classes[*].deployment: local`; Testmatrix prüft 108 Fälle gegen Cloud-Verstoss | None |
 | T8 | Fallback-Kette als Schleichweg in die Cloud | Quota-/Timeout-Kette überschreibt die Agenten-Freigabe | `fallbackChainFor()` filtert Cloud bei `allowCloud:false`; Kette ist konfigurierbar und auditiert | None (Unit-getestet) |
@@ -616,7 +619,7 @@ Model + Red-Team-Checkliste + Coverage-Nachweis.
 | Prüfung | Ergebnis |
 | --- | --- |
 | `src/routing/**` importiert keine Markt-/Broker-/Order-Module | ✅ (kein Import von `src/brokers/**`, `src/portfolio/**`, `src/scanner/**`) |
-| Router schreibt nie Orders/Positionen | ✅ (DB-Zugriff ausschliesslich `audit_log`, best-effort) |
+| Router schreibt nie Orders/Positionen | ✅ (DB-Zugriff ausschliesslich `audit_log`, klassifiziert: Telemetrie mit Warnung + Metrik, S1/v1.36.18) |
 | Kein `Math.random()`/`Date.now()` im Entscheidungspfad | ✅ (Uhr injiziert; `grep`-geprüft) |
 | Kein `dangerouslySetInnerHTML`/`innerHTML` in Routing-Code | ✅ (kein UI-Code im Modul) |
 
@@ -634,7 +637,7 @@ Model + Red-Team-Checkliste + Coverage-Nachweis.
 | RT-02 | Info | `src/routing/registry.ts` | Cloud-Health ohne `ROUTING_HEALTH_PROBE=all` key-basiert | ✅ Dokumentiert + Fallback-Kette fängt Fehlannahmen ab |
 | RT-03 | Info | `src/routing/budget.ts` | Zähler prozess-lokal (Single-Node) | ✅ konsistent mit dem bestehenden Rate-Limiter; Mehrinstanzen-Betrieb braucht geteilte Zustandsquelle |
 | RT-04 | Info | `src/app/api/routing/modes/route.ts` | Admin-Guard ist token-basiert (kein Rollenmodell) | ✅ `TODO(task-10)`, timing-safe, auditiert |
-| RT-05 | Info | `src/routing/audit.ts` | DB-Senke best-effort | ✅ Ring + NDJSON-Datei bleiben Wahrheit; Audit-Pfad wirft nie |
+| RT-05 | Info | `src/routing/audit.ts` | DB-Senke war best-effort (leeres catch) | 🔧 **behoben in v1.36.18 (S1):** Telemetrie mit Warnung + Metrik; `denied`/`budget_blocked` hochgestuft auf `security` (Retry + Spool). Ring + NDJSON bleiben Wahrheit, Audit-Pfad wirft nie |
 
 Fazit: **kein High/Critical-Befund.** Die drei Governance-Ziele sind erreicht und
 messbar belegt: kein Agenten-Selbstwechsel, keine Injection-basierte Eskalation,
@@ -727,7 +730,7 @@ Bedingung. Details: [LIVE_TRADING.md](LIVE_TRADING.md).
 | T8 | **Self-Approval / Cooldown umgehen** | Admin bestätigt sofort selbst; zweiter Account = derselbe Mensch | Cooldown serverseitig erzwungen (retryAt im Deny); Begründungs-, Confirm- und Approver-Pflicht; 4-Augen-Modus vergleicht Approver-Namen | 4-Augen identifiziert keine Token-Identität (ein Admin-Token im RBAC) — Task-12-Follow-up dokumentiert |
 | T9 | **CI-Suite umgehen** | PR mergen, obwohl Security-Suite rot | Required Check `security-live-gate` (Branch Protection) + Enforcer verlangt Suite-Stamp (passed, runId, Max-Alter 7 d) | Branch Protection muss einmalig vom Repo-Admin eingerichtet werden (im PR beschrieben); Stamp-Datei ist Deployment-Artefakt |
 | T10 | **Secret-Leak über Live-Gate-API** | Token/Credentials in State-/Audit-/Status-Ausgaben | Audit enthält nur strukturierte Felder; API zeigt gekürzte Hashes (Secret-Scanner über Responses grün); keine Credentials im Modul | Keins (Scanner in CI) |
-| T11 | **DoS über Gate-API** | Transition/Kill flooden | Derselbe Sliding-Window-Limiter wie Credentials (5/min/IP) + CSRF + Permission-Guard; Deny-Audit ist schlank (Ring 500) | Prozess-lokaler Limiter (Single-Node, dokumentiert) |
+| T11 | **DoS über Gate-API** | Transition/Kill flooden | Derselbe Sliding-Window-Limiter wie Credentials (5/min pro Client-Identität, Identität seit C2/v1.36.14 nicht client-setzbar) + CSRF + Permission-Guard; Deny-Audit ist schlank (Ring 500). Bewusst **ohne** globales Credential-Limit und **ohne** Backoff: ein Flood auf die Credential-API darf den Kill-Switch nicht blockieren | Prozess-lokaler Limiter (Single-Node, dokumentiert) |
 | T12 | **PAPER als Live-Venue missbraucht** | `getBroker("PAPER","live")` | Capability `live=false` → `VENUE_NOT_LIVE_CAPABLE` vor allen Flags (getestet) | Keins |
 
 ### Red-Team-Checkliste (je Punkt geprüft)

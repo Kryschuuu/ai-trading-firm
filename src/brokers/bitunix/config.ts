@@ -133,4 +133,8 @@ export const BITUNIX_PATHS = {
   account: "/api/v1/futures/account",
   positions: "/api/v1/futures/position/get_pending_positions",
   placeOrder: "/api/v1/futures/trade/place_order",
+  /** H3: Order-Detail (Status NEW/PART_FILLED/FILLED/CANCELED + tradeQty). */
+  orderDetail: "/api/v1/futures/trade/get_order_detail",
+  /** H3: Ausführungen (Trades) — Basis des echten avgPrice. */
+  historyTrades: "/api/v1/futures/trade/get_history_trades",
 } as const;

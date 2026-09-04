@@ -234,8 +234,12 @@ den Contract in der Meldung.
 
 1. **In-Memory-Ring** (200 Einträge) — immer verfügbar, deterministisch
    testbar, überlebt DB-Ausfall.
-2. **`audit_log`** (Event `BROKER_FACTORY`, best-effort via Drizzle) —
-   DB-Ausfall bricht den Factory-Pfad **nie** ab (Fail-Safe).
+2. **`audit_log`** (Event `BROKER_FACTORY`, Klasse `security` via
+   `src/lib/auditSink.ts`, S1/v1.36.18) — Retry mit Backoff, bei anhaltendem
+   DB-Ausfall persistenter Spool (`data/audit-spool`, at-least-once) plus
+   CRITICAL-Meldung und `readBrokerFactoryAuditDegradedCount()`. Der
+   Factory-Pfad bricht bei DB-Ausfall **nie** ab (Fail-Safe), der Beleg fehlt
+   aber nicht mehr still.
 
 Eintrag: `{ venue, mode, outcome: OK|DENIED, capability, errorCode, at }` —
 nur diese Felder (keine Order-Daten, keine Kurse). Geprüft in
@@ -297,7 +301,9 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
   aus `readGateState(venue)` (Task 11: Enforcer-Entscheid über die
   persistierte State-Machine; Default `false`).
 - **Sicherheit:** RBAC (`src/auth`, Permission `broker.credentials`), CSRF
-  (`x-csrf-token`), Credential-Rate-Limit (5/min/IP), Audit je Ereignis
+  (`x-csrf-token`), Credential-Rate-Limit (5/min pro Client-Identität +
+  20/min global IP-unabhängig + exponentieller Backoff, Identität aus
+  `src/lib/clientIp.ts` — C2/v1.36.14), Audit je Ereignis
   (`BROKER_CONTROL_PLANE`), Response-/Bundle-Secret-Scanner in CI.
 
 ## 10. Ausbaupfad (Folge-Tasks)

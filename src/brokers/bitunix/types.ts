@@ -74,6 +74,13 @@ export interface BitunixPlaceOrderBody {
   orderType: "LIMIT" | "MARKET";
   price?: string;
   effect?: "IOC" | "FOK" | "GTC" | "POST_ONLY";
+  /**
+   * Venue-Client-Order-Id (`clientOrderId` im internen Sprachgebrauch, H4):
+   * stabiler Idempotenz-Key pro Order-Intent. Bitunix' Wire-Feld heißt
+   * `clientId` ("Customize order ID") und wird vom Adapter deterministisch
+   * erzeugt und bei jedem Retry mit demselben Wert wiederverwendet, damit
+   * ein nicht-idempotenter place_order-POST nie eine Doppelorder erzeugt.
+   */
   clientId?: string;
   reduceOnly?: boolean;
   tpPrice?: string;
@@ -86,17 +93,88 @@ export interface BitunixPlaceOrderBody {
   slOrderPrice?: string;
 }
 
+/**
+ * Order-Detail GET /api/v1/futures/trade/get_order_detail (H3-Reconciliation).
+ * Venue-Status: INIT (prepare) | NEW (pending) | PART_FILLED (teilgefüllt) |
+ * CANCELED | FILLED (vollständig). `tradeQty` ist die gefüllte Menge; das
+ * Venue liefert KEINEN avgPrice — der wird aus den Trades (Fill[]) berechnet.
+ */
+export interface BitunixOrderRaw {
+  orderId?: string;
+  clientId?: string;
+  symbol?: string;
+  qty?: string | number;
+  tradeQty?: string | number;
+  side?: string;
+  orderType?: string;
+  status?: string;
+  price?: string | number;
+  reduceOnly?: boolean;
+  ctime?: number;
+  mtime?: number;
+  [extra: string]: unknown;
+}
+
+/** Trade/Ausführung GET /api/v1/futures/trade/get_history_trades. */
+export interface BitunixTradeRaw {
+  tradeId?: string;
+  orderId?: string;
+  symbol?: string;
+  qty?: string | number;
+  price?: string | number;
+  side?: string;
+  fee?: string | number;
+  roleType?: string;
+  ctime?: number;
+  [extra: string]: unknown;
+}
+
+/**
+ * Ein gebuchter Fill (broker-unabhängig), wie er von
+ * `BitunixPrivateClient.getExecutions` geliefert wird — die Quelle für den
+ * echten avgPrice bei der Reconciliation (H3).
+ */
+export interface BitunixFill {
+  tradeId: string;
+  orderId: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  price: number;
+  fee: number;
+  /** Unix-Epoch (ms) der Ausführung. */
+  ts: number;
+}
+
 /** Account-Zeile GET /api/v1/futures/account. */
 export interface BitunixAccountRaw {
   marginCoin?: string;
+  /** Freie Margin (Futures: freies Cash in marginCoin). NICHT die Equity (H8). */
   available?: string;
+  /** Durch offene Orders gebundene Margin („locked quantity of orders“). */
   frozen?: string;
+  /** Durch offene Positionen gebundene (Initial-)Margin („locked quantity of positions“). */
   margin?: string;
   transfer?: string;
   positionMode?: string;
+  /** Unrealisiertes PnL der Cross-Positionen. */
   crossUnrealizedPNL?: string;
+  /** Unrealisiertes PnL der Isolated-Positionen. */
   isolationUnrealizedPNL?: string;
   bonus?: string;
+  /**
+   * H8: Wallet-Balance (Kontostand ohne unrealisiertes PnL). Die dokumentierte
+   * Account-Antwort führt das Feld nicht in jeder Version; fehlt es, wird es
+   * aus `available + frozen + margin` zerlegt (kein Synthetisieren der Equity
+   * aus `available` allein).
+   */
+  walletBalance?: string;
+  /** H8: Explizit gebundene Margin, sofern die API sie liefert (sonst row.margin). */
+  usedMargin?: string;
+  /** H8: Maintenance-Margin, sofern die API sie liefert (sonst 0). */
+  maintenanceMargin?: string;
+  /** H8: Realisiertes PnL, sofern separat geführt (Bitunix settled es ins Wallet → i. d. R. absent). */
+  realizedPnl?: string;
   [extra: string]: unknown;
 }
 
@@ -105,6 +183,12 @@ export interface BitunixPositionRaw {
   positionId?: string;
   symbol?: string;
   qty?: string;
+  /**
+   * Richtung der offenen Position — vom Venue dokumentiert: `LONG` | `SHORT`.
+   * Für geschlossene/Null-Mengen-Zeilen fehlt das Feld regelmäßig; solche
+   * Zeilen werden über die `qty`-Prüfung aussortiert, eine offene Zeile ohne
+   * verwertbare Seite wird verworfen (B2 — kein LONG-Fallback).
+   */
   side?: string;
   avgOpenPrice?: string;
   unrealizedPNL?: string;

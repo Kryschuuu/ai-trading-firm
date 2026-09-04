@@ -256,17 +256,52 @@ export default function FirmDashboard() {
   }
 
   async function kill(arm: boolean) {
-    const res = await apiFetch("/api/firm/kill", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ arm, reason: "OPERATOR_DASHBOARD", flatten: arm }),
-    });
-    if (!(await ensureAuth(res))) return;
-    setNotice(
-      arm
-        ? "🔴 NOT-HALT AKTIV — alle Orders blockiert, offene Positionen glattgestellt."
-        : "Kill-Switch entschärft. Missionen stehen wieder auf PENDING."
-    );
+    // Arm (Not-Halt ziehen) bleibt Operator-tauglich (guardWrite) via apiFetch.
+    if (arm) {
+      const res = await apiFetch("/api/firm/kill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arm: true, reason: "OPERATOR_DASHBOARD", flatten: true }),
+      });
+      if (!(await ensureAuth(res))) return;
+      setNotice("🔴 NOT-HALT AKTIV — alle Orders blockiert, offene Positionen glattgestellt.");
+      load();
+      return;
+    }
+
+    // Disarm (Befund C3, v1.36.15): ein Operator-Token reicht NICHT mehr.
+    // Erst eine Challenge holen (ADMIN `live.gate` + CSRF), dann den single-use
+    // Nonce (<= 60 s) im Disarm-Body zurückgeben.
+    const token = (window.localStorage.getItem("firmToken") ?? "").trim();
+    const authHeaders = new Headers({ "Content-Type": "application/json" });
+    if (token) {
+      authHeaders.set("x-firm-token", token);
+      authHeaders.set("x-admin-token", token);
+    }
+    authHeaders.set("x-csrf-token", token || "local");
+    try {
+      const chRes = await fetch("/api/firm/kill/challenge", { method: "GET", headers: authHeaders });
+      const ch = await chRes.json().catch(() => ({}));
+      if (chRes.status === 401 || chRes.status === 403 || !ch?.ok || !ch?.nonce) {
+        setNeedToken(true);
+        setNotice("🔒 Disarm braucht Admin-Zugriff (live.gate) + gültigen Token. Operator-Token allein reicht nicht.");
+        return;
+      }
+      const res = await fetch("/api/firm/kill", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ arm: false, nonce: ch.nonce, reason: "OPERATOR_DASHBOARD" }),
+      });
+      if (!(await ensureAuth(res))) return;
+      const json = await res.json().catch(() => ({}));
+      if (json?.ok) {
+        setNotice("Kill-Switch entschärft (Admin + Nonce). Missionen stehen wieder auf PENDING.");
+      } else {
+        setNotice(`Disarm abgelehnt: ${json?.error ?? json?.hint ?? `HTTP ${res.status}`}`);
+      }
+    } catch {
+      setNotice("Netzwerkfehler — Disarm-Challenge nicht erreichbar.");
+    }
     load();
   }
 

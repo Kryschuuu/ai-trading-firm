@@ -1,10 +1,10 @@
 {
   "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
   "id": "ops",
-  "version": 3,
+  "version": 5,
   "title": "Operations Center & RBAC — Feldhilfe",
-  "description": "Hilfetexte zu Rollen, Permissions, Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) sowie der Market-Data-Readiness-Diagnose (v1.27) im 3-Ebenen-Schema.",
-  "source": "src/auth/ · src/ops/ · src/components/ops/OperationsCenterPanel.tsx",
+  "description": "Hilfetexte zu Rollen, Permissions, Auth-Modus (AUTH_MODE), Rate-Limit-Identität (TRUSTED_PROXY_IPS, v1.36.14), Live-Sperre und den zehn Sektionen des Operations Centers (Task 10, vollständige Integration) sowie der Market-Data-Readiness-Diagnose (v1.27) im 3-Ebenen-Schema.",
+  "source": "src/auth/ · src/lib/clientIp.ts · src/ops/ · src/components/ops/OperationsCenterPanel.tsx",
   "fields": {
     "role.viewer": {
       "kurzinfo": "Viewer darf den Status lesen, nichts schreiben.",
@@ -13,17 +13,32 @@
     },
     "role.operator": {
       "kurzinfo": "Operator darf Pipeline, Kill-Switch und Config, aber keine Broker-Secrets.",
-      "technischeInfo": "Zusätzlich firm.write/kill/config und broker.test. Token: FIRM_API_TOKEN. Ohne FIRM_ADMIN_TOKEN erbt der Operator Admin-Rechte (Single-Admin).",
+      "technischeInfo": "Zusätzlich firm.write/kill/config und broker.test. Token: FIRM_API_TOKEN. Ohne FIRM_ADMIN_TOKEN erbt der Operator Admin-Rechte (Single-Admin). Schreibende Firm-Endpunkte verlangen den Header x-firm-token, sobald ein Token konfiguriert ist.",
       "risiko": "Elevation ist Absicht für den Solo-Betrieb. Sobald ein Admin-Token existiert, verliert der Operator broker.credentials und routing.modes.write."
     },
     "role.admin": {
       "kurzinfo": "Admin verwaltet Credentials und Routing-Modi.",
-      "technischeInfo": "Alle Operator-Rechte plus broker.credentials und routing.modes.write. Token: FIRM_ADMIN_TOKEN. Local-open (kein Token) gilt als Admin.",
+      "technischeInfo": "Alle Operator-Rechte plus broker.credentials und routing.modes.write. Token: FIRM_ADMIN_TOKEN. Der Quelle local-open wird nur als Admin gewertet, wenn der Auth-Modus auf local-open steht (AUTH_MODE_FLAG src/auth/authMode.ts).",
       "risiko": "Admin ist nicht Live-Freigabe. live.gate bleibt leer bis Task 11."
     },
+    "auth.mode": {
+      "kurzinfo": "AUTH_MODE entscheidet, ob die Schreib-API ohne Credential offen ist.",
+      "technischeInfo": "Werte: local-open oder token-required. Irgendein Token konfiguriert ⇒ token-required. Kein Token: lokal-offen nur als Dev-Default (NODE_ENV != production) oder explizit gesetzt; Produktion ohne Token verweigert den Start (ConfigurationError AUTH_NOT_CONFIGURED). Wirksamer Modus: GET /api/auth/me → authMode.",
+      "risiko": "Ohne diese Regel wäre ein nicht gesetztes Token ein offener Schreib-Zugang im Netz (Audit-Befund C1, HIGH). local-open in Produktion ist nur als ausdrücklicher Opt-in mit Warnung im Boot-Log möglich."
+    },
+    "auth.clientIp": {
+      "kurzinfo": "Rate-Limit-Identität: TRUSTED_PROXY_IPS entscheidet, ob Proxy-Header zählen — erfundene IPs zählen nie.",
+      "technischeInfo": "Quelle: src/lib/clientIp.ts (resolveClientIp), genutzt vom Firm-Schreib-Limit und vom Credential-Limit. Ohne TRUSTED_PROXY_IPS gilt die Socket-Adresse, sonst die Konstante local; x-real-ip wird nie benutzt, x-forwarded-for nur bei verifiziertem Trusted-Proxy-Peer (rightmost-untrusted). Der Reverse Proxy setzt x-verified-ip (nginx: proxy_set_header X-Verified-IP $remote_addr), mehrdeutige Werte werden verworfen. Sichtbar: GET /api/auth/me → rateLimitIdentity inkl. ignoredHeaders.",
+      "risiko": "Vor v1.36.14 lasen beide Limiter x-forwarded-for/x-real-ip blind — ein Angreifer konnte pro Anfrage einen neuen Bucket erfinden und jedes Rate-Limit aushebeln (Audit-Befund C2, MEDIUM/HIGH). Ohne Proxy-Konfiguration teilen sich alle Clients jetzt einen Bucket: enger, nie weiter. TRUSTED_PROXY_IPS=0.0.0.0/0 wäre der Rückfall und wird im Boot-Log gewarnt."
+    },
+    "rateLimit.credential": {
+      "kurzinfo": "Credential-Brute-Force wird dreistufig gebremst: pro Identität, global und mit exponentiellem Backoff.",
+      "technischeInfo": "Ebene 1 BROKER_CREDENTIAL_RATE_LIMIT (Default 5/min pro Client-Identität), Ebene 2 BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT (Default 20/min, fester Bucket global, bewusst IP-unabhängig), Ebene 3 exponentieller Backoff ab dem 3. Fehlversuch (2 s, 4 s, 8 s … max. 15 min; justierbar über BROKER_CREDENTIAL_BACKOFF_BASE_MS bzw. _MAX_MS, Basis 0 = Ebene aus; Reset nach 15 min Ruhe oder von der Venue akzeptiertem Credential). 429-Codes: CREDENTIAL_RATE_LIMITED, CREDENTIAL_GLOBAL_RATE_LIMITED, CREDENTIAL_BACKOFF. POST /api/live/kill und /api/live/transition nutzen nur Ebene 1.",
+      "risiko": "Nur die IP-Ebene wäre wirkungslos, sobald die Identität spoofbar ist oder viele Angreifer hinter einem NAT dieselbe Adresse teilen. Die globale Ebene darf den Kill-Switch nie blockieren — ein Credential-Flood könnte sonst die Sicherheitsaktion lahmlegen; deshalb liegt sie ausschließlich auf den Credential-Endpoints."
+    },
     "live.gate": {
-      "kurzinfo": "Permission für Live-Gate-Transitionen und Kill (Task 11): Admin-Rolle, CSRF-Pflicht, 5 Anfragen/min/IP.",
-      "technischeInfo": "POST /api/live/transition und POST /api/live/kill verlangen live.gate (heute Admin-Token FIRM_ADMIN_TOKEN) plus x-csrf-token (CSRF_INVALID bei Fehlen) plus Kill-Phrase ('KILL' bzw. 'CLEAR_KILL'). GET /api/live/state ist read-only und frei lesbar. Rate-Limit wie Credentials: 5/min/IP (429 GATE_RATE_LIMITED). Jede Aktion landet in der Audit-Hash-Kette.",
+      "kurzinfo": "Permission für Live-Gate-Transitionen und Kill (Task 11): Admin-Rolle, CSRF-Pflicht, 5 Anfragen/min pro Client-Identität.",
+      "technischeInfo": "POST /api/live/transition und POST /api/live/kill verlangen live.gate (heute Admin-Token FIRM_ADMIN_TOKEN) plus x-csrf-token (CSRF_INVALID bei Fehlen) plus Kill-Phrase ('KILL' bzw. 'CLEAR_KILL'). GET /api/live/state ist read-only und frei lesbar. Rate-Limit wie Credentials: 5/min pro Client-Identität (429 GATE_RATE_LIMITED) — bewusst ohne globales Limit und ohne Backoff, der Kill-Switch muss immer ausführbar bleiben. Jede Aktion landet in der Audit-Hash-Kette.",
       "risiko": "Der Status live ist rein informativ und immer fail-closed, bis die Live-State-Machine vollstaendig durchlaufen ist. Ihn als Freigabe zu deuten, ist ein Missverstaendnis."
     },
     "ops.sections": {

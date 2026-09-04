@@ -45,11 +45,12 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, ausführliche Beispiele, Runbooks, Troubleshooting, Agenten-Register |
 | **[CHANGELOG.md](CHANGELOG.md)** | Versionen, Bugfixes und Änderungen je Release |
 | **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** | Findings, Schweregrade, Fixes und Peer-Review |
+| **[AUDIT_REMEDIATION_2026-09.md](AUDIT_REMEDIATION_2026-09.md)** | Senior-Peer-Review 2026-09: Befunde H1–H10, C1–C4, B1/B2, W1/W2, S1/S2 mit Validierungsstand und eigenem Prompt je Befund (`../audit-remediation/`) |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.36.3` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+**Version:** `v1.36.18` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
 
 ---
@@ -229,6 +230,7 @@ der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FAL
 │   ├── HANDBUCH.md               ← Bedienung, Beispiele, Runbooks, Agenten-Register
 │   ├── CHANGELOG.md              ← Versionen & Bugfixes
 │   ├── SECURITY_AUDIT.md         ← Audit-Ergebnis & Peer-Review
+│   ├── AUDIT_REMEDIATION_2026-09.md ← Peer-Review 2026-09: Befunde + Fix-Stand
 │   └── PROVIDER_INTEGRATION.md   ← LLM-Provider, Kosten, Retries
 ├── deploy/
 │   ├── ai-trading-firm.service   ← systemd-Unit für den Dienst
@@ -267,6 +269,7 @@ der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FAL
     ├── components/workshop/      ← Workshop-Tab: Missionen, Turns, Prompts, Trefferquote
     └── lib/
         ├── riskGuard.ts          ← HARTE LIMITS — die wichtigste Datei
+        ├── clientIp.ts           ← Rate-Limit-Identität: Trusted Proxys, nie spoofbare Header (v1.36.14)
         ├── broker.ts             ← Broker-Abstraktion + Paper-Broker
         ├── llmProvider.ts        ← Provider-Abstraktion (Ollama/OpenAI/Gemini/Claude)
         ├── ollama.ts             ← Schema, Retry, Regel-Engine-Fallback
@@ -346,8 +349,17 @@ Risikolimits folgen einer **Kaskade** (`src/lib/riskGuard.ts` +
 | `GET` | `/api/firm/micro` | Status des Mikro-Executor-Prozesses + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=install` | Markdown-Doku als JSON |
 
-Schreibende Endpunkte (`POST`/`PUT`) werden per `x-firm-token` geschützt, sobald
-`FIRM_API_TOKEN` gesetzt ist (siehe `.env.example`).
+Schreibende Endpunkte (`POST`/`PUT`) verlangen `x-firm-token`, sobald
+`FIRM_API_TOKEN` gesetzt ist; ist gar kein Token gesetzt, entscheidet der
+Auth-Modus `AUTH_MODE` (`local-open` nur außer Produktion bzw. ausdrücklich,
+sonst 401 — siehe `.env.example` und [INSTALL.md](INSTALL.md)).
+
+Rate-Limits (Schreib-API 60/min, Credential-Versuche 5/min, global 20/min)
+bilden ihre Client-Identität seit v1.36.14 aus `TRUSTED_PROXY_IPS` bzw. dem
+proxy-gesetzten `x-verified-ip` — `x-forwarded-for`/`x-real-ip` zählt nur noch
+hinter einem verifizierten Trusted-Proxy-Peer, weil der Client sie sonst selbst
+erfinden könnte (Befund C2). Wirksame Identität eines Aufrufs, ohne
+Secret-Werte: `GET /api/auth/me` → `rateLimitIdentity`.
 
 Beispiele mit `curl` im **[Handbuch, Kapitel 4](HANDBUCH.md)**.
 

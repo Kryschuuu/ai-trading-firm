@@ -15,7 +15,7 @@ export {
   MonotonicTimestamp,
 } from "./signing";
 export { mapTradingPair, mapTradingPairs } from "./mapping";
-export { serializePlaceOrder, serializePlaceOrderJson, OrderSerializationError } from "./orders";
+export { serializePlaceOrder, serializePlaceOrderJson, clientOrderIdFor, CLIENT_ORDER_ID_PREFIX, OrderSerializationError } from "./orders";
 export { snapshotLiveGate, assertLiveOrderAllowed, assertBitunixEnabled } from "./gates";
 export { loadBitunixConfig, BITUNIX_PATHS, BITUNIX_REST_HOST } from "./config";
 export {
@@ -25,7 +25,7 @@ export {
   type SecretStore,
 } from "./secrets";
 export { redactBitunix, createBitunixLogger, safeErrorMessage } from "./redactor";
-export { BitunixApiError, BitunixDisabledError, classifyBitunixFailure, safeSnippet } from "./errors";
+export { BitunixApiError, BitunixAmbiguousError, BitunixDisabledError, classifyBitunixFailure, safeSnippet } from "./errors";
 export { BitunixPublicWs, klineChannel, backoffMs } from "./ws";
 export { BitunixPublicClient, mapTicker, mapInterval } from "./publicClient";
 export { BitunixPrivateClient } from "./privateClient";
@@ -33,4 +33,15 @@ export { BitunixPaperLedger } from "./paper";
 export { PaperExecutionEngine, BrokerExecutionEngine } from "./execution";
 export type { ExecutionPort, MarkPriceFn } from "./execution";
 export { BitunixHttp, TokenBucket, assertUrlAllowed } from "./http";
-export { recordBitunixPrivateCall, readBitunixPrivateAudit, clearBitunixPrivateAuditForTests } from "./audit";
+export {
+  recordBitunixPrivateCall,
+  readBitunixPrivateAudit,
+  readBitunixAuditDegradedCount,
+  readBitunixAuditDurability,
+  clearBitunixPrivateAuditForTests,
+  recordBitunixPositionAnomaly,
+  readBitunixPositionAnomalies,
+  readBitunixPositionAnomalyCount,
+  clearBitunixPositionAnomaliesForTests,
+  type BitunixPositionAnomalyEntry,
+} from "./audit";
