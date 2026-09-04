@@ -31,6 +31,7 @@ import {
   type AuditWriteOutcome,
 } from "./auditSink";
 import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
+import type { AdaptiveRegime } from "./riskGuard";
 import { PaperBroker } from "./broker";
 import { getBroker as createBroker } from "../brokers/factory";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
@@ -308,6 +309,17 @@ function step(layer: string, ok: boolean, detail: string): TraceStep {
   return { layer, ok, detail };
 }
 
+/**
+ * H10 (v1.36.21): Erlaubt das aktuelle Adaptiv-Regime Neupositionen?
+ *
+ * NORMAL / ELEVATED / PERSISTED → ja. EXTREME / UNKNOWN (oder gar kein
+ * Bewertungsstand) → nein. Unbekannt darf NIEMALS wie volles Risiko
+ * durchgehen (fail-closed statt „Basis-Limit aktiv“).
+ */
+export function adaptiveAllowsNewPositions(regime: AdaptiveRegime | null | undefined): boolean {
+  return regime != null && regime !== "EXTREME" && regime !== "UNKNOWN";
+}
+
 /** Menschlich lesbare Erklärung für Block-Gründe (Dashboard/Protokoll). */
 export const BLOCK_EXPLANATIONS: Record<string, string> = {
   KILL_SWITCH_ARMED:
@@ -328,6 +340,10 @@ export const BLOCK_EXPLANATIONS: Record<string, string> = {
     "REQUIRE_HUMAN_APPROVAL=true: Der Vorschlag wartet auf menschliche Freigabe.",
   INVALID_SYMBOL:
     "Das vom Modell gelieferte Symbol entspricht nicht dem erlaubten Format (A–Z, 0–9, max. 12 Zeichen, optional .XYZ bzw. =X). Abgelehnt statt geraten.",
+  ADAPTIVE_RISK_EXTREME:
+    "Extremes Volatilitäts-Regime (VIX/Korb-Trigger). Keine neuen Positionen, bis sich der Markt beruhigt.",
+  ADAPTIVE_RISK_UNKNOWN:
+    "Der adaptive Risikozustand ist UNKNOWN — die Bewertung ist fehlgeschlagen, hat keine Daten geliefert oder ist zu alt. Keine neuen Positionen, bis eine frische Bewertung vorliegt. (fail-closed)",
 };
 
 /** Führt genau einen Agenten-Turn gegen eine Mission aus. */
@@ -347,7 +363,9 @@ export async function runAgentTurn(
   // Adaptives Risk-Limit (v1.7.0): Volatilitäts-Bewertung frische halten.
   // Normalerweise hat der Monitor-Tick (60 s) sie gerade aktualisiert; bei
   // Staleness/Erststart folgt hier eine sofortige Neubewertung (Single-Flight,
-  // Fehler bleiben lokal — letzter Zustand bleibt wirksam).
+  // Fehler bleiben lokal — H10/v1.36.21: ein Bewertungsfehler ergibt den
+  // UNKNOWN-Zustand unten, der Neupositionen blockt; kein stiller letzter
+  // Zustand).
   let adaptiveState: ReturnType<typeof getAdaptiveRiskStatus>;
   try {
     await ensureAdaptiveRiskFresh();
@@ -357,15 +375,17 @@ export async function runAgentTurn(
     console.warn("[engine] Adaptives-Risiko-Update fehlgeschlagen:", e instanceof Error ? e.message : e);
   }
 
+  const adaptiveRegime: AdaptiveRegime | null = adaptiveState?.regime ?? null;
+  const adaptiveAllowsOpen = adaptiveAllowsNewPositions(adaptiveRegime);
   const limits: RiskLimits = getLimits();
   const trace: TraceStep[] = [
     step("CONFIG", true, `Limits geladen (maxPos=${(limits.maxPositionPct * 100).toFixed(0)}%, dailyLoss=${(limits.dailyLossLimitPct * 100).toFixed(1)}%, shorts=${limits.allowShort ? "an" : "aus"})`),
     step(
       "ADAPTIVES-RISIKO",
-      adaptiveState ? adaptiveState.regime !== "EXTREME" : true,
+      adaptiveAllowsOpen,
       adaptiveState
         ? `Regime ${adaptiveState.regime} → maxRiskPerTrade ${(adaptiveState.effectiveMaxRiskPerTrade * 100).toFixed(2)} % (Basis ${(adaptiveState.baseMaxRiskPerTrade * 100).toFixed(2)} % × ${adaptiveState.factor}) — ${adaptiveState.reason}`
-        : "Keine Bewertung vorhanden — Basis-Limit aktiv (Fail-Open)"
+        : "Regime UNKNOWN (keine Bewertung vorhanden) — keine neuen Positionen (fail-closed)"
     ),
   ];
 
@@ -568,6 +588,19 @@ export async function runAgentTurn(
         return { ...base, status: "BLOCKED", guardrail: "KILL_SWITCH_ARMED", trace };
       }
       trace.push(step("KILL-SWITCH", true, "Nicht aktiv"));
+
+      // H10 (v1.36.21): UNKNOWN/EXTREME blockt Neupositionen. Ein unbekannter
+      // Risikozustand darf NICHT wie volles Risiko durchgehen (fail-closed);
+      // EXTREME ist wie gehabt „keine neuen Positionen“. PERSISTED/NORMAL/
+      // ELEVATED bleiben erlaubt.
+      if (!adaptiveAllowsOpen) {
+        const guardrail = adaptiveRegime === "EXTREME" ? "ADAPTIVE_RISK_EXTREME" : "ADAPTIVE_RISK_UNKNOWN";
+        const detail =
+          adaptiveState?.reason ?? "Regime UNKNOWN (keine Bewertung vorhanden) — keine neuen Positionen (fail-closed)";
+        await logAudit("ORDER_REJECTED", "WARN", { reason: guardrail, adaptiveRegime, adaptiveReason: detail }, missionId, agentId);
+        trace.push(step("ADAPTIVES-RISIKO-GATE", false, detail));
+        return { ...base, status: "BLOCKED", guardrail, trace };
+      }
 
       // H6 FIX: EXECUTOR darf niemals eine neue Modellentscheidung ausführen.
       if (agent.role === "EXECUTOR" && !options.proposalOnly) {

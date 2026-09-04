@@ -98,12 +98,14 @@ test("assessRegime: Schwellwert-Grenze ist inklusive (≥ triggert)", () => {
 
 // ── assessRegime: Edge Cases (fehlende/kaputte Daten) ────────────────────────
 
-test("assessRegime: ALLE Quellen ohne Daten → NORMAL (Fail-Open), kein Crash", () => {
+test("assessRegime: ALLE Quellen ohne Daten → Kern-Bewertung NORMAL, Orchestrator wertet als UNKNOWN", () => {
   const r = assessRegime({ vix: null, atr: null, bbw: null, retStdDev: null }, cfg());
   assert.equal(r.regime, "NORMAL");
   assert.equal(r.factor, 1);
   assert.ok(r.indicators.every((i) => !i.available && !i.triggered));
-  assert.match(r.reason, /Fail-Open/);
+  // Kein „Fail-Open, Basis-Limit bleibt aktiv“ mehr — die reine Matrix ist
+  // neutrale Datenbasis, der UNKNOWN-Fallback passiert in updateAdaptiveRisk.
+  assert.match(r.reason, /nicht bewertbar|UNKNOWN/);
 });
 
 test("assessRegime: NaN / negative / Infinity-Werte gelten als keine Daten", () => {

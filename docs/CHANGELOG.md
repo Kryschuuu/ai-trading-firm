@@ -5,6 +5,67 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
+
+**HIGH, Handelslogik (`src/lib/adaptiveRisk.ts`, `src/lib/riskGuard.ts`,
+`src/lib/engine.ts`, `src/lib/monitor.ts`,
+`tests/h10.adaptiveUnknown.test.ts` neu).** Befund H10 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): **Das adaptive Risk-System fiel bei
+fehlender/fehlerhafter/staler Bewertung still auf das Basis-Risiko zurück
+(Fail-Open).** Der Walk des Peer-Reviews:
+
+```ts
+// vor dem Fix (Fail-Open-Semantik)
+// adaptiveRisk.ts: "Nur endliche Zahlen gelten als Messwert (Fail-Open)."
+// assessRegime-Reason: "Keine Indikator-Daten verfügbar — Fail-Open, Basis-Limit bleibt aktiv"
+// engine.ts: adaptiveState ? adaptiveState.regime !== "EXTREME" : true
+```
+Ein unbekanntes Risikobild wurde damit wie volles Risikobudget behandelt.
+
+### Geändert
+
+- **`AdaptiveRegime`** (`src/lib/riskGuard.ts`): neuer Wert `"UNKNOWN"`.
+  `ADAPTIVE_STATE_MAX_AGE_MS` (15 min) bleibt die Stale-Grenze.
+- **`src/lib/adaptiveRisk.ts`**: `buildStatus` mappt fehlende (MISSING),
+  fehlerhafte (ERRORED) oder zu alte (STALE) Bewertung — nur bei
+  `enabled=true` — auf `regime: "UNKNOWN"`; Faktor = konservativster Wert
+  `adaptiveUnknownFactor(base)`, das wirksame Limit klemmt auf den Code-Boden
+  `LIMIT_CEILINGS.maxRiskPerTrade[0]` (0.2 %). Der Fehlerpfad von
+  `updateAdaptiveRisk` (Quellen-Fehler, alle Quellen ohne Messwert, Catch)
+  wendet den Boden-Faktor über `applyAdaptiveRisk` auch auf die
+  riskGuard-Limits an, schreibt ein `UNKNOWN`-Event (WARN, Audit-Klasse
+  `security`) und persistiert den Faktor für den Mikro-Executor. Die
+  Hysterese-Maschine wird bei Fehlern NICHT bewegt (keine De-Eskalation auf
+  Teil-/Fehldaten). Kommentare/Reasons von „Fail-Open/Basis-Limit aktiv" auf
+  fail-closed-Semantik umgestellt.
+- **`src/lib/engine.ts`**: `adaptiveAllowsNewPositions(regime)` — erlaubt
+  NORMAL/ELEVATED/PERSISTED, blockiert EXTREME/UNKNOWN/null. Gate im
+  TRADE-Case direkt nach dem Kill-Switch-Check: `ORDER_REJECTED`/WARN mit
+  Guardrail `ADAPTIVE_RISK_EXTREME` oder `ADAPTIVE_RISK_UNKNOWN`,
+  Trace-Step `ADAPTIVES-RISIKO-GATE` false, Rückgabe `BLOCKED`;
+  `BLOCK_EXPLANATIONS` entsprechend erweitert. Der ADAPTIVES-RISIKO-Trace-Step
+  hat bei UNKNOWN/EXTREME `ok=false` (auch wenn gar kein Bewertungsstand
+  existiert → „Regime UNKNOWN (keine Bewertung vorhanden) — fail-closed").
+- **`src/lib/monitor.ts`**: `TickResult.adaptiveRisk.regime` auf
+  `AdaptiveRegime` erweitert (UNKNOWN fließt in die Observability durch).
+- **`tests/h10.adaptiveUnknown.test.ts`** (neu): `resolveAdaptiveUnknown`
+  (MISSING/ERRORED/STALE/frisch), `adaptiveUnknownFactor`, UNKNOWN-Pfad in
+  `updateAdaptiveRisk` (Quellen-Fehler, alle Quellen leer, Erholung,
+  deaktiviertes System), `adaptiveAllowsNewPositions`-Matrix und
+  DB-gegatete `runAgentTurn`-Akzeptanztests (UNKNOWN und EXTREME blocken,
+  Trace zeigt `ADAPTIVES-RISIKO ok=false` + Gate-Step).
+- Bestehende Tests angepasst: `adaptiveRisk.test.ts` (Reasons ohne
+  „Fail-Open"-Text), `adaptiveRisk.integration.test.ts` (VIX-Timeout →
+  UNKNOWN/Boden, Fehler im Markt-Zugriff → UNKNOWN statt letzter Zustand).
+
+### Verhalten
+
+Vorher: fehlende Bewertung → `NORMAL` + Basis-Limit (Fail-Open).
+Nachher: fehlende/fehlerhafte/zu alte Bewertung (älter als 15 min) →
+`UNKNOWN` + Code-Boden (0.2 %), Neupositionen blockiert; ein deaktiviertes
+System (`adp.enabled=0`) bleibt bewusst NORMAL (Operator-Entscheid). Die
+Erholung ist automatisch: der nächste fehlerfreie Lauf hebt UNKNOWN auf.
+
 ## [1.36.20] — 2026-09-04 · fix(audit): H7 Kill-Switch/Flatten arbeitet auf echten Venue-Positionen (HIGH)
 
 **HIGH, Handelslogik/Control (`src/contracts/broker.ts`, `src/lib/engine.ts`,

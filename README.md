@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.20 (2026-09-04) · Vollständige
+> **Dokumentationsstand:** v1.36.21 (2026-09-05) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -176,6 +176,29 @@ geschlossen und reale Venue-Positionen offen gelassen. Seit v1.36.20:
   (Fehler stehen im Outcome + Audit).
 
 Befund H7 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Adaptives Risk fällt bei unbekannter Bewertung nicht mehr still auf Basis-Risiko zurück — fail-closed, explizites UNKNOWN (v1.36.21)
+
+Bis v1.36.20 galt bei fehlender/fehlerhafter/zu alter Volatilitäts-Bewertung
+„Basis-Limit aktiv (Fail-Open)": Ein unbekanntes Risikobild wurde wie volle
+Risikobereitschaft behandelt (Befund H10, HIGH). Seit v1.36.21:
+
+* **neuer Regime-Wert `UNKNOWN`** — fehlende (MISSING), fehlerhafte (ERRORED)
+  oder älter als 15 Minuten (STALE) Bewertung ergibt bei aktiviertem
+  Adaptiv-System explizit `regime: "UNKNOWN"` statt stillem `NORMAL`,
+* **konservativster Faktor**: das wirksame `maxRiskPerTrade` klemmt auf den
+  Code-Boden (`LIMIT_CEILINGS.maxRiskPerTrade[0]`, 0.2 %) und wird über
+  `applyAdaptiveRisk` auch auf die riskGuard-Limits angewendet; der Wechsel
+  ist als WARN-Event mit Grund auditiert,
+* **keine neuen Positionen**: `runAgentTurn` blockt bei UNKNOWN genau wie bei
+  EXTREME (`ORDER_REJECTED`/WARN, Guardrail `ADAPTIVE_RISK_UNKNOWN` bzw.
+  `ADAPTIVE_RISK_EXTREME`), der Trace zeigt `ADAPTIVES-RISIKO ok=false` und
+  den Grund im `ADAPTIVES-RISIKO-GATE`-Step,
+* **Operator-Wahl bleibt respektiert**: deaktiviertes System (`adp.enabled=0`)
+  bleibt bewusst NORMAL — UNKNOWN gilt nur für aktivierte Adaptiv-Systeme.
+
+Befund H10 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md)
+und Akzeptanzdetail im [Arena-Prompt](audit-remediation/H10-adaptive-failopen.md).
 
 ## Control Plane: Verbindungszustand überlebt den Neustart (v1.36.16)
 

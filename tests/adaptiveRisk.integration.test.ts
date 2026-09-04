@@ -7,7 +7,7 @@
  *
  *   - ruhiger Markt, VIX-Trigger, VIX-Extrem, Korb-Indikatoren (ATR/BBW/StdDev)
  *   - schnelle Volatilitätswechsel (Anti-Flapping in der Pipeline)
- *   - fehlende Daten (VIX-Quellen-Timeout, leere Kerzen) → Fail-Open
+ *   - fehlende Daten (VIX-Quellen-Timeout, leere Kerzen) → UNKNOWN (fail-closed seit H10/v1.36.21)
  *   - Laufzeit-Konfigurationsänderung ohne Neustart
  *   - Min-Interval / Single-Flight (kein Re-Fetch im Sonnen-Takt)
  *   - Observability: Status-Objekt + Event-Historie
@@ -23,7 +23,7 @@ import {
   type IndicatorReadings,
   type VolatilityConfig,
 } from "../src/lib/adaptiveRisk";
-import { applyAdaptiveRisk, getLimits, resetRuntimeLimits } from "../src/lib/riskGuard";
+import { applyAdaptiveRisk, getAdaptiveRiskState, getLimits, resetRuntimeLimits } from "../src/lib/riskGuard";
 import type { Candle } from "../src/lib/marketData";
 
 const CALM: IndicatorReadings = { vix: 18, atr: 0.004, bbw: 0.02, retStdDev: 0.004 };
@@ -112,7 +112,7 @@ test("Integration: schnelle Volatilitätswechsel — kein Flapping (Hysterese in
   assert.equal(st.factor, 1);
 });
 
-test("Integration: VIX-Quellen-Timeout → Fail-Open, System bleibt funktionsfähig", async () => {
+test("Integration: VIX-Quellen-Timeout → UNKNOWN (fail-closed), System bleibt funktionsfähig", async () => {
   const st = await updateAdaptiveRisk({
     config: cfg(),
     fetchVix: async () => {
@@ -121,8 +121,14 @@ test("Integration: VIX-Quellen-Timeout → Fail-Open, System bleibt funktionsfä
     fetchCandles: () => Promise.resolve(calmCandles()),
     force: true,
   });
-  assert.equal(st.regime, "NORMAL", "fehlende VIX darf NICHT eskalieren");
-  assert.equal(st.effectiveMaxRiskPerTrade, 0.02);
+  // H10 (v1.36.21): Fehler → expliziter UNKNOWN-Zustand, NICHT „fehlende VIX
+  // darf nicht eskalieren → NORMAL“. Neupositionen sind jetzt gesperrt.
+  assert.equal(st.regime, "UNKNOWN", "Quellen-Fehler → UNKNOWN statt Fail-Open-NORMAL");
+  assert.ok(st.reason.includes("UNKNOWN"), "Grund nennt den UNKNOWN-Zustand");
+  assert.equal(st.factor, 0.1, "UNKNOWN-Faktor = Code-Boden (0.2 % / 2 % Basis)");
+  assert.equal(st.effectiveMaxRiskPerTrade, 0.002, "wirksames Limit auf dem Code-Boden");
+  assert.equal(getLimits().maxRiskPerTrade, 0.002, "riskGuard-Limit ebenfalls auf dem Boden");
+  assert.equal(getAdaptiveRiskState()?.regime, "UNKNOWN", "riskGuard-Zustand zeigt UNKNOWN");
   assert.match(st.lastError ?? "", /VIX/);
   const vixInd = st.indicators.find((i) => i.name === "VIX");
   assert.ok(vixInd && !vixInd.available && !vixInd.triggered);
@@ -226,14 +232,14 @@ test("Integration: Observability — Status + Event-Historie für Agenten/Monito
   assert.deepEqual(st.bounds.extremeFactor, [0.02, 1]);
 });
 
-test("Integration: Fehler im Markt-Zugriff brechen die Pipeline nicht (letzter Zustand bleibt)", async () => {
+test("Integration: Fehler im Markt-Zugriff → UNKNOWN statt letztem Zustand (fail-closed)", async () => {
   // Erst ELEVATED etablieren …
   await updateAdaptiveRisk({ config: cfg(), readings: { ...CALM, vix: 35 }, force: true });
   assert.equal(getLimits().maxRiskPerTrade, 0.01);
 
-  // … dann fällt die VIX-Quelle aus (Network-Ausfall). Der Fehler wird
-  // pro Quelle gefangen (Fail-Open) — der Status darf nicht crashen und
-  // das reduzierte Limit bleibt bestehen.
+  // … dann fällt die VIX-Quelle aus (Network-Ausfall). H10 (v1.36.21):
+  // Der Fehler wird pro Quelle gefangen — aber NICHT als NORMAL/letzter
+  // Zustand verschluckt: expliziter UNKNOWN-Zustand, Limit auf dem Boden.
   const st = await updateAdaptiveRisk({
     config: cfg(),
     fetchVix: async () => {
@@ -243,7 +249,8 @@ test("Integration: Fehler im Markt-Zugriff brechen die Pipeline nicht (letzter Z
     force: true,
   });
   assert.ok(st, "Status muss auch bei Fehlern geliefert werden");
-  // Ruhiger Korb + fehlende VIX → Kandidat NORMAL, aber Hysterese (Streak 1 < 3)
-  // hält ELEVATED, bis 3 ruhige Ticks vergangen sind.
-  assert.equal(getLimits().maxRiskPerTrade, 0.01);
+  assert.equal(st.regime, "UNKNOWN", "Fehler → UNKNOWN, nicht letzter Zustand");
+  assert.match(st.reason, /network down/);
+  assert.equal(getLimits().maxRiskPerTrade, 0.002, "Fail-closed: Limit auf dem Code-Boden statt 0.01");
+  assert.equal(getAdaptiveRiskState()?.regime, "UNKNOWN", "riskGuard-Zustand zeigt UNKNOWN");
 });
