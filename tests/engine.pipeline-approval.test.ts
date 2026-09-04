@@ -17,13 +17,16 @@ test("H5: executor uses only the latest approved proposal", () => {
 });
 
 test("H5: broker boundary retains a non-executor audit guard", () => {
-  assert.match(source, /agent\.role !== "EXECUTOR"[\s\S]*ROLE_NOT_ALLOWED_TO_TRADE[\s\S]*broker\.submit\(order\)/);
+  // H2 (v1.36.19): submitAtomic() replaces submit() at the DB-backed call
+  // sites (order_intents reservation + pg_advisory_xact_lock) — the
+  // non-executor role guard still gates the broker boundary unchanged.
+  assert.match(source, /agent\.role !== "EXECUTOR"[\s\S]*ROLE_NOT_ALLOWED_TO_TRADE[\s\S]*broker\.submitAtomic\(order/);
 });
 
 // H6 (CRITICAL): Approval-Chain — Executed fill must come from proposal.proposedDetail only.
 test("H6: executeApprovedProposal uses proposedDetail verbatim", () => {
-  assert.match(source, /broker\.submit\(\{ \.\.\.detail/);
-  assert.doesNotMatch(source, /broker\.submit\(\{ \.\.\.order/); // must not rebuild order
+  assert.match(source, /broker\.submitAtomic\(\{ \.\.\.detail/);
+  assert.doesNotMatch(source, /broker\.submitAtomic\(\{ \.\.\.order/); // must not rebuild order
 });
 
 test("H6: executor ignores hostile model output (BUY BTC proposal vs SELL ETH output)", () => {

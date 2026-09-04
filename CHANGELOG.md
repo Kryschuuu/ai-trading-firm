@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
-> Code-Version **1.36.18**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.19**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,34 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.19] — 2026-09-04 · fix(audit): H2 atomare Order-Reservierung über Prozessgrenzen (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/db/schema.ts`, `src/lib/broker.ts`,
+`src/lib/engine.ts`, `src/lib/microExecutor.ts`,
+`drizzle/2026-09-04_h2_order_intents.sql` neu,
+`test/integration/orderIntents.submitAtomic.test.ts` neu).** Befund H2 des
+Senior-Peer-Reviews: `PaperBroker` prüfte Cash/Positions-Slot/Kill-Switch nur
+im Prozessspeicher und schrieb erst NACH `submit()` in die DB — zwei
+Node.js-Prozesse (Next.js-Worker + separater Mikro-Executor) konnten beide
+ihren lokalen Guard bestehen und beide eine Position für dasselbe Symbol
+öffnen.
+
+**Fix:** neue Tabelle `order_intents` (partieller UNIQUE-Index auf
+`symbol WHERE status='RESERVED'`) + `withAccountLock()`
+(`pg_advisory_xact_lock(hashtext(account))`, `src/lib/broker.ts`) +
+`PaperBroker.submitAtomic()` — Advisory-Lock, DB-Wahrheits-Check gegen
+`positions` (VOR dem In-Memory-Guard — heilt veraltete Prozess-Hydration),
+In-Memory-Guard, `order_intents`-Reservierung (Savepoint, 23505 →
+`POSITION_ALREADY_OPEN`) und `persistPosition()` (Positions-/Missions-Insert)
+laufen als EINE Postgres-Transaktion. Bei DB-Konflikt: In-Memory-Rollback,
+`REJECTED`-Audit, fail-closed. `submit()` bleibt für Single-Process-/Test-
+Aufrufer unverändert. Call-Sites migriert: `src/lib/engine.ts`
+(`runAgentTurn`, `executeApprovedProposal`), `src/lib/microExecutor.ts`
+(`createPaperRuleAdapter`). Test: zwei unabhängige `PaperBroker`-Instanzen
+racen `submitAtomic()` auf dasselbe Symbol → genau ein `FILLED` + ein
+`REJECTED:POSITION_ALREADY_OPEN`. Details:
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md#13619--2026-09-04--fixaudit-h2-atomare-order-reservierung-über-prozessgrenzen-critical).
 
 ## [1.36.18] — 2026-09-04 · fix(audit): S1 Audits sind nicht mehr stumm best-effort — Sicherheitsklasse mit Retry, persistentem Spool und Alarm (MEDIUM)
 

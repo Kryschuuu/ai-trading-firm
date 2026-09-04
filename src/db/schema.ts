@@ -308,6 +308,49 @@ export const proposals = pgTable("proposals", {
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
 });
 
+/**
+ * Order-Intents (H2, v1.36.19) — der DB-seitige Reservierungsschritt, der die
+ * Broker-Ausführungsschleuse über mehrere Node-Prozesse hinweg atomar macht.
+ *
+ * PROBLEM (Audit H2): `PaperBroker` hält Positionen/Cash im Prozessspeicher.
+ * Zwei Next.js-Worker (oder Next.js + Mikro-Executor) können denselben
+ * Offene-Positionen-Stand hydratisieren, beide die Guardrails bestehen und
+ * beide eine Position in die DB schreiben — `globalThis` ist kein verteiltes
+ * Schloss. Diese Tabelle + `withAccountLock` (`src/lib/broker.ts`,
+ * `pg_advisory_xact_lock`) machen die Sequenz Reserve → Guard → Fill →
+ * Persist zu EINER exklusiven Postgres-Transaktion je Konto.
+ *
+ * Ablauf: `PaperBroker.submitAtomic()` legt VOR der In-Memory-Änderung eine
+ * Zeile mit `status='RESERVED'` an (in derselben Transaktion wie Guard +
+ * Cash-Debit + Positions-Insert). Bei Ablehnung → `REJECTED`; bei Erfolg →
+ * `FILLED`. Der partielle UNIQUE-Index erzwingt „höchstens eine offene
+ * Reservierung pro Symbol" — ein zweiter, gleichzeitiger Reservierungs-
+ * versuch für dasselbe Symbol schlägt mit Postgres-Fehlercode 23505 fehl
+ * (Mapping → `POSITION_ALREADY_OPEN`), selbst wenn zwei Prozesse den
+ * `pg_advisory_xact_lock` aus irgendeinem Grund nicht seriell durchlaufen.
+ *
+ * `account` ist bewusst text (nicht FK) — heute nur `"PAPER"`, aber additiv
+ * für künftige Live-Konten ohne Schema-Bruch.
+ */
+export const orderIntents = pgTable("order_intents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  account: text("account").notNull().default("PAPER"),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull(), // LONG | SHORT
+  qty: numeric("qty").notNull(),
+  /** RESERVED | FILLED | REJECTED | CANCELED */
+  status: text("status").notNull().default("RESERVED"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // Höchstens EINE offene Reservierung pro Symbol — unabhängig vom Konto,
+  // spiegelt die bestehende Broker-Regel „ein Symbol, eine offene Position".
+  uniqueIndex("order_intents_reserved_symbol_unique")
+    .on(t.symbol)
+    .where(sql`${t.status} = 'RESERVED'`),
+  index("order_intents_account_idx").on(t.account, t.createdAt),
+]);
+
 /** Historie des Not-Halts. Der jeweils neueste Eintrag bestimmt den Zustand. */
 export const killSwitches = pgTable("kill_switches", {
   id: uuid("id").primaryKey().defaultRandom(),
