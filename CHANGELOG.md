@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-03** ·
-> Code-Version **1.36.14**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
+> Code-Version **1.36.15**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,46 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.15] — 2026-09-04 · fix(security): C3 Kill-Switch-Disarm — stärkeres Gate als Arm (ADMIN + single-use Nonce, HIGH)
+
+**HIGH, Control Panel/Security (`src/app/api/firm/kill/route.ts`,
+`src/app/api/firm/kill/challenge/route.ts` neu, `src/lib/disarmChallenge.ts` neu,
+`src/lib/auditView.ts`, `src/components/FirmDashboard.tsx`).** Befund C3 des
+Senior-Peer-Reviews: **Arm und Disarm des Not-Halt liefen beide durch
+`guardWrite(req)`** — ein einziges, gestohlenes Operator-Token konnte `{arm:false}`
+posten und damit das Trading unmittelbar nach einem Kill-Switch wieder freischalten.
+Scharfschalten (in den sicheren Zustand) ist keine Eskalation — **Entschärfen**
+(Rückkehr aus dem sicheren Zustand) schon.
+
+**Fix — Guard-Split:** Arm nutzt weiterhin `guardWrite(req)` (Operator genügt).
+Disarm verlangt jetzt eine strikt stärkere Kette, erst danach wird entschärft:
+
+1. **ADMIN-Permission** `live.gate` (`requirePermission`) — Operator ohne
+   Admin-Elevation hat sie nicht.
+2. **CSRF-Header** `x-csrf-token` (`checkCsrfGuard`) — wie bei den
+   Control-Plane-Writes.
+3. **Single-use Nonce** (<= 60 s) aus dem neuen
+   `GET /api/firm/kill/challenge` (antwortet `{ nonce, expiresAt }`), der im
+   Disarm-Body (`{ arm:false, nonce }`) zurückgegeben werden muss. Verifikation:
+   existiert → nicht abgelaufen → nicht wiederverwendet. Fehlend/abgelaufen/
+   wiederverwendet ⇒ 403 (`NONCE_REQUIRED` / `NONCE_EXPIRED` / `NONCE_REUSED`),
+   kein Disarm. Der Nonce-Speicher ist prozesslokal (Single-Node, wie die
+   Rate-Limiter), 60-s-TTL, lazy cleanup.
+
+Erfolgreicher Disarm schreibt einen **CRITICAL**-Audit-Eintrag
+`KILL_SWITCH_DISARMED` inkl. Actor + Nonce-Referenz (vorher `WARN`, ohne Actor).
+Die Audit-View (`src/lib/auditView.ts`) erwartet dafür jetzt `CRITICAL` und zeigt
+Actor + Nonce-Präfix an. Das Dashboard holt vor einem Disarm automatisch die
+Challenge und echot den Nonce — Arm bleibt der gewohnte Ein-Klick-Weg.
+
+**Akzeptanzkriterien erfüllt:** Disarm ohne Admin → 401/403 · Disarm ohne
+gültigen Nonce → 403 · gültiger Admin + frischer Nonce → disarmed + CRITICAL
+auditiert · wiederverwendeter/abgelaufener Nonce → abgelehnt (403) · CSRF-Header
+erzwungen. **Tests:** neu `tests/disarmChallenge.test.ts` (5 Fälle: issue,
+ok/consumed, missing, reused, expired). Typecheck + Lint grün; Doku-Validierung
+und Vollsuite laufen gegen dieselbe Basis wie v1.36.14. Details: Befund C3 in
+`docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.15**).
 
 ## [1.36.14] — 2026-09-03 · fix(security): C2 Rate-Limit-Identität — spoofbare Proxy-Headers zählen nicht mehr (MED/HIGH)
 
