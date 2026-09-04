@@ -5,6 +5,62 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.15] — 2026-09-04 · fix(security): C3 Kill-Switch-Disarm — stärkeres Gate als Arm (HIGH)
+
+**HIGH, Control Panel / Security (`src/app/api/firm/kill/route.ts`,
+`src/app/api/firm/kill/challenge/route.ts` neu, `src/lib/disarmChallenge.ts` neu,
+`src/lib/auditView.ts`, `src/components/FirmDashboard.tsx`).** Befund C3 des
+Senior-Peer-Reviews (`docs/AUDIT_REMEDIATION_2026-09.md`): **Arm und Disarm des
+Not-Halt (Firm-Kill-Switch) liefen beide durch denselben `guardWrite(req)`** —
+der Disarm war also exakt so schwach wie das Ziehen selbst. Ein gestohlenes
+Operator-Token konnte `POST {arm:false}` senden und das Trading unmittelbar nach
+einem Kill-Switch wieder freischalten.
+
+```ts
+// src/app/api/firm/kill/route.ts — vor dem Fix
+const denied = guardWrite(req);          // arm UND disarm
+...
+killSwitch.disarm();                     // kein zusätzliches Gate
+```
+
+### Geändert
+
+- **`src/app/api/firm/kill/route.ts`:** Guard gesplittet. Arm (`{arm:true}`) nutzt
+  weiterhin `guardWrite(req)` (Operator). Disarm (`{arm:false}`) erfordert jetzt
+  **ADMIN-Permission `live.gate`** (`requirePermission`) **+ CSRF-Header**
+  (`checkCsrfGuard`) **+ gültiger single-use Nonce** aus dem Challenge-Endpoint.
+  Nur dann → `killSwitch.disarm()`, Missionen auf `PENDING`, Broker-Cache
+  invalidieren und ein **CRITICAL**-Audit `KILL_SWITCH_DISARMED` mit
+  `actor` + `nonceId` schreiben (vorher `WARN`, ohne Actor).
+- **`src/lib/auditView.ts`:** `KILL_SWITCH_DISARMED` erwartet jetzt `CRITICAL`
+  (statt `WARN`) und zeigt Actor + Nonce-Präfix an.
+- **`src/components/FirmDashboard.tsx`:** Der „Disarm Kill Switch“-Button holt vor
+  dem Disarm automatisch die Challenge (`GET /api/firm/kill/challenge`) und echot
+  den Nonce im Body — Arm bleibt der Ein-Klick-Weg.
+
+### Hinzugefügt
+
+- **`GET /api/firm/kill/challenge`** (`src/app/api/firm/kill/challenge/route.ts`,
+  neu): liefert `{ ok:true, nonce, expiresAt }`. Die Challenge selbst ist
+  ADMIN-gated (`live.gate`) + CSRF-geschützt. Nonce läuft in **60 s** ab.
+- **`src/lib/disarmChallenge.ts`** (neu, Blatt-Modul): prozesslokaler
+  Single-use-Nonce-Speicher (60-s-TTL, lazy cleanup). `issueDisarmNonce()` für
+  die Challenge, `consumeDisarmNonce()` für den Disarm — synchron, damit
+  check-and-consume atomar bleibt.
+
+### Sicherheit (Disarm-Kette, in dieser Reihenfolge)
+
+1. Admin-Permission `live.gate` → kein Operator-Token kann Disarm.
+2. CSRF-Header `x-csrf-token` → kein Cross-Site-Formular.
+3. Nonce: existiert → nicht abgelaufen (≤ 60 s) → nicht wiederverwendet. Fehlt /
+   abgelaufen / wiederverwendet ⇒ **403** (`NONCE_REQUIRED`/`NONCE_EXPIRED`/
+   `NONCE_REUSED`), kein Disarm.
+
+**Akzeptanzkriterien:** Disarm ohne Admin → 401/403 · ohne gültigen Nonce → 403 ·
+Admin + frischer Nonce → disarmed + CRITICAL auditiert · wiederverwendeter/
+abgelaufener Nonce → abgelehnt (403) · CSRF erzwungen. **Tests:** neu
+`tests/disarmChallenge.test.ts` (5 Fälle). Siehe `docs/AUDIT_REMEDIATION_2026-09.md`.
+
 ## [1.36.14] — 2026-09-03 · fix(security): C2 Rate-Limit-Identität — spoofbare Proxy-Headers zählen nicht mehr (MEDIUM/HIGH)
 
 **MEDIUM/HIGH, Control Panel / Security (`src/lib/clientIp.ts` neu, `src/lib/apiAuth.ts`,

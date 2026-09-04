@@ -1704,10 +1704,21 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
   KILL_SWITCH_DISARMED: {
     label: "Not-Halt entschärft",
     category: "risk",
-    expectedLevel: "WARN",
-    description: "Ein Mensch hat den Not-Halt bewusst entschärft. Die Firma darf wieder handeln — dieser Schritt wird revisionssicher protokolliert.",
+    expectedLevel: "CRITICAL",
+    description: "Ein Admin hat den Not-Halt nach C3-Härtung (v1.36.15) entschärft: ADMIN-Permission live.gate + single-use Nonce (<=60 s) + CSRF. Die Firma darf wieder handeln — dieser Schritt wird revisionssicher protokolliert.",
     headline: (d) => (text(d.reason) ? `Begründung: ${text(d.reason)}` : "ohne Begründung"),
-    sections: (d) => [{ title: "Entschärfung", facts: [{ label: "Begründung", value: text(d.reason) ?? "nicht angegeben" }] }],
+    sections: (d) => [
+      {
+        title: "Entschärfung",
+        facts: [
+          { label: "Begründung", value: text(d.reason) ?? "nicht angegeben" },
+          ...(text(d.actor) ? [{ label: "Actor", value: text(d.actor) as string }] : []),
+          ...(text(d.nonceId)
+            ? [{ label: "Disarm-Nonce", value: (text(d.nonceId) as string).slice(0, 8) + "…" }]
+            : []),
+        ],
+      },
+    ],
   },
 
   FLATTEN_ALL: {
