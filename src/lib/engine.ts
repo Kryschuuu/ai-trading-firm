@@ -33,6 +33,9 @@ import {
 import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
 import { PaperBroker } from "./broker";
 import { getBroker as createBroker } from "../brokers/factory";
+import { VENUE_CAPABILITIES } from "../brokers/capabilities";
+import { platformLiveFromEnv, venueEnabledFromEnv, venueLiveFlagFromEnv } from "../live-gate/config";
+import type { EmergencyBroker, EmergencyCloseFill } from "../contracts/broker";
 import { localReason } from "./ollama";
 import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
 import { getProductionMarketDataManager, wirePaperExecution } from "./marketdata/production";
@@ -833,29 +836,195 @@ export async function runAgentTurn(
   }
 }
 
-/** Alle offenen Positionen glattstellen (Notfall-Runbook). */
-export async function flattenAll(reason: string) {
-  const broker = await getBroker();
-  const fills = broker.closeAll(reason === "MANUAL_FLATTEN" ? "MANUAL_FLATTEN" : reason);
-  for (const f of fills) {
-    await db
-      .update(positions)
-      .set({
-        status: "CLOSED",
-        exitPrice: String(f.fillPrice),
-        realizedPnl: String(f.realizedPnl),
-        exitReason: reason,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(positions.status, "OPEN"), eq(positions.symbol, f.symbol)));
+/** H7 (v1.36.20): Ergebnis eines Kill-Flatten (cancel → close → verify). */
+export type FlattenOutcome = {
+  /** "paper" = lokales Ledger, "live" = echte Venue-Positionen. */
+  mode: "paper" | "live";
+  /** Venue bzw. "PAPER". */
+  venue: string;
+  /** Stornierte offene Orders (Paper: 0 — Paper füllt synchron). */
+  canceled: number;
+  /** Gemeldete Schließungen (Paper: echte Fills; live: zuletzt bekannte Positionen). */
+  fills: EmergencyCloseFill[];
+  /** `verifyFlat()`-Ergebnis nach dem letzten Close-/Retry-Versuch. */
+  flat: boolean;
+  /** Fehler-Hinweise, falls cancel/close/verify teilweise scheiterten (nie Wurf). */
+  error: string | null;
+};
+
+/** H7: Venues mit echtem Live-Pfad, die einen Notfall-Adapter stellen können. */
+const H7_LIVE_VENUES = ["BITUNIX", "ALPACA"] as const;
+
+function h7ErrorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * H7: Notfall-Broker auflösen — live, wenn die Plattform Live konfiguriert
+ * hat UND der Live-Gate den Adapter freigibt; sonst Paper (Default). Live ist
+ * aktuell über das Gate blockiert (`LiveTradingGateError`), der Pfad ist aber
+ * live-ready: Sobald die State-Machine LIVE_ENABLED + Flags + Suite + Control
+ * Plane freigibt, glattstellt der Not-Halt die ECHTEN Venue-Positionen.
+ */
+export async function resolveEmergencyBroker(): Promise<{
+  mode: "paper" | "live";
+  venue: string;
+  broker: EmergencyBroker;
+}> {
+  const env = process.env as Record<string, string | undefined>;
+  const liveConfigured =
+    platformLiveFromEnv(env) &&
+    H7_LIVE_VENUES.some(
+      (v) => venueLiveFlagFromEnv(v, env) && venueEnabledFromEnv(v, env) && VENUE_CAPABILITIES[v]?.live === true
+    );
+  if (liveConfigured) {
+    for (const venue of H7_LIVE_VENUES) {
+      if (!venueLiveFlagFromEnv(venue, env) || !venueEnabledFromEnv(venue, env)) continue;
+      if (!VENUE_CAPABILITIES[venue]?.live) continue;
+      try {
+        const adapter = await createBroker(venue, "live");
+        if (
+          typeof adapter.cancelAllOpenOrders !== "function" ||
+          typeof adapter.closeAllPositions !== "function" ||
+          typeof adapter.verifyFlat !== "function"
+        ) {
+          console.warn(`[flattenAll] Live-Adapter ${venue} ohne H7-Notfall-Pfad — Fallback Paper.`);
+          continue;
+        }
+        // Runtime-Check oben: der Adapter erfüllt die EmergencyBroker-Methoden.
+        const emergency = adapter as unknown as EmergencyBroker;
+        return { mode: "live", venue, broker: emergency };
+      } catch (e) {
+        // Live-Gate noch geschlossen (LiveTradingGateError) → nächste Venue,
+        // am Ende Paper-Fallback. Der Factory-Aufruf ist bereits auditiert.
+        console.warn(`[flattenAll] Live-Venue ${venue} nicht verfügbar: ${h7ErrorMessage(e)}`);
+      }
+    }
   }
-  await logAudit("FLATTEN_ALL", "CRITICAL", { reason, closed: fills.length, fills });
+  const paper = await getBroker();
+  return { mode: "paper", venue: "PAPER", broker: paper };
+}
+
+/**
+ * H7: Die Notfall-Sequenz in EINEM Aufruf — cancel → close → verify.
+ * Wirft nie: Fehler landen in `error`, die Glattheit in `flat` (Retry, dann
+ * Alarm + Audit — der Not-Halt selbst darf daran nicht scheitern).
+ */
+async function runH7EmergencySequence(
+  broker: EmergencyBroker,
+  reason: string,
+  maxRetries = 1
+): Promise<Pick<FlattenOutcome, "canceled" | "fills" | "flat" | "error">> {
+  let canceled = 0;
+  let fills: EmergencyCloseFill[] = [];
+  let error: string | null = null;
+
   try {
-    await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "FLATTEN");
-  } catch {
-    /* Kurvenpunkt optional */
+    const res = await broker.cancelAllOpenOrders();
+    canceled = Number(res?.canceled ?? 0);
+  } catch (e) {
+    error = `CANCEL_FAILED: ${h7ErrorMessage(e)}`;
   }
-  return fills;
+
+  try {
+    fills = await broker.closeAllPositions(reason);
+  } catch (e) {
+    error = error ? `${error}; CLOSE_FAILED: ${h7ErrorMessage(e)}` : `CLOSE_FAILED: ${h7ErrorMessage(e)}`;
+  }
+
+  let flat = false;
+  try {
+    flat = await broker.verifyFlat();
+  } catch (e) {
+    error = error ? `${error}; VERIFY_FAILED: ${h7ErrorMessage(e)}` : `VERIFY_FAILED: ${h7ErrorMessage(e)}`;
+  }
+
+  if (!flat && maxRetries > 0) {
+    // Nicht flach → einmal nachziehen (Retry), dann alarmieren + auditieren.
+    try {
+      fills = fills.concat(await broker.closeAllPositions(reason));
+    } catch (e) {
+      error = error ? `${error}; RETRY_CLOSE_FAILED: ${h7ErrorMessage(e)}` : `RETRY_CLOSE_FAILED: ${h7ErrorMessage(e)}`;
+    }
+    try {
+      flat = await broker.verifyFlat();
+    } catch (e) {
+      error = error ? `${error}; VERIFY_RETRY_FAILED: ${h7ErrorMessage(e)}` : `VERIFY_RETRY_FAILED: ${h7ErrorMessage(e)}`;
+    }
+  }
+
+  if (!flat) {
+    error = error ? `${error}; NOT_FLAT` : "NOT_FLAT";
+  }
+  return { canceled, fills, flat, error };
+}
+
+/**
+ * Alle offenen Positionen glattstellen (Notfall-Runbook), H7 (v1.36.20).
+ *
+ * Statt nur das lokale Paper-Ledger zu schließen läuft jetzt die
+ * venue-unabhängige Notfall-Sequenz `cancelAllOpenOrders → closeAllPositions →
+ * verifyFlat` — Paper-Ledger (Default) ODER echte Venue-Positionen (Live,
+ * sobald das Live-Gate freigibt). Der Modus im Audit: "paper-only flatten
+ * (live disabled)" vs. echte Venue-Glattstellung + Flat-Beweis.
+ *
+ * `opts.broker` dient Tests/Drills (injizierter Mock oder Adapter) — im
+ * Produktivpfad wird der Broker aus der Konfiguration aufgelöst.
+ */
+export async function flattenAll(
+  reason: string,
+  opts?: { broker?: EmergencyBroker; mode?: "paper" | "live"; venue?: string }
+): Promise<FlattenOutcome> {
+  const resolved = opts?.broker
+    ? { mode: opts.mode ?? ("paper" as const), venue: opts.venue ?? "PAPER", broker: opts.broker }
+    : await resolveEmergencyBroker();
+
+  const seq = await runH7EmergencySequence(resolved.broker, reason);
+
+  // Paper-Modus: lokales DB-Ledger aus den echten Paper-Fills nachziehen
+  // (bestehendes Verhalten). Live-Modus: Die Venue ist Quelle der Wahrheit —
+  // `close_all_position` liefert keine Fills, wir erfinden keine lokalen
+  // Exit-Preise (Positionen ohne belegten Preis bleiben für den Operator
+  // sichtbar offen, der Flat-Beweis steht im Audit).
+  if (resolved.mode === "paper" && !opts?.broker) {
+    for (const f of seq.fills) {
+      if (!Number.isFinite(f.fillPrice) || f.fillPrice <= 0) continue;
+      await db
+        .update(positions)
+        .set({
+          status: "CLOSED",
+          exitPrice: String(f.fillPrice),
+          realizedPnl: String(f.realizedPnl),
+          exitReason: reason,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(positions.status, "OPEN"), eq(positions.symbol, f.symbol)));
+    }
+    try {
+      const ledger = resolved.broker as unknown as {
+        accountEquity: number;
+        freeCash: number;
+        openPositions: number;
+      };
+      await writeEquitySnapshot(ledger.accountEquity, ledger.freeCash, ledger.openPositions, "FLATTEN");
+    } catch {
+      /* Kurvenpunkt optional */
+    }
+  }
+
+  await logAudit("FLATTEN_ALL", "CRITICAL", {
+    mode: resolved.mode,
+    venue: resolved.venue,
+    reason,
+    canceled: seq.canceled,
+    closed: seq.fills.length,
+    flat: seq.flat,
+    error: seq.error,
+    liveDisabled: resolved.mode === "paper" ? "paper-only flatten (live disabled)" : undefined,
+    fills: seq.fills,
+  });
+
+  return { mode: resolved.mode, venue: resolved.venue, ...seq };
 }
 
 

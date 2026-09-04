@@ -25,6 +25,8 @@ import {
   type BrokerOrderRequest,
   type BrokerOrderResult,
   type BrokerPosition,
+  type EmergencyCancelResult,
+  type EmergencyCloseFill,
   type ExecutionMode,
   type MarketCandle,
   type MarketOrderBook,
@@ -349,6 +351,52 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     const engine = await this.execution();
     if (!engine.reconcile) return null;
     return engine.reconcile(orderId);
+  }
+
+  // ── H7 (v1.36.20): Kill-Switch-Notfall auf Venue-Ebene ─────────────────────
+  // Delegieren an die Modus-Engine. Live: echtes cancel_all_orders /
+  // close_all_position / verifyFlat über die Private-API — NIE das
+  // Paper-Ledger. Gleiche Gate-Prüfung wie bei jeder Live-Order (fail-closed).
+  // Paper/backtest: NotSupportedCapabilityError (der Kern glattstellt dort
+  // über den Legacy-PaperBroker, nicht über den Adapter).
+
+  async cancelAllOpenOrders(): Promise<EmergencyCancelResult> {
+    if (this.mode === "testnet") {
+      throw new NotSupportedCapabilityError(this.id, "testnet", "cancelAllOpenOrders", "Kein Bitunix-Testnet dokumentiert.");
+    }
+    assertBitunixEnabled(this.env);
+    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.cancelAllOpenOrders) {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "cancelAllOpenOrders", "Engine ohne H7-Notfall-Pfad.");
+    }
+    return engine.cancelAllOpenOrders();
+  }
+
+  async closeAllPositions(reason: string): Promise<EmergencyCloseFill[]> {
+    if (this.mode === "testnet") {
+      throw new NotSupportedCapabilityError(this.id, "testnet", "closeAllPositions", "Kein Bitunix-Testnet dokumentiert.");
+    }
+    assertBitunixEnabled(this.env);
+    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.closeAllPositions) {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "closeAllPositions", "Engine ohne H7-Notfall-Pfad.");
+    }
+    return engine.closeAllPositions(reason);
+  }
+
+  async verifyFlat(): Promise<boolean> {
+    if (this.mode === "testnet") {
+      throw new NotSupportedCapabilityError(this.id, "testnet", "verifyFlat", "Kein Bitunix-Testnet dokumentiert.");
+    }
+    assertBitunixEnabled(this.env);
+    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.verifyFlat) {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "verifyFlat", "Engine ohne H7-Notfall-Pfad.");
+    }
+    return engine.verifyFlat();
   }
 
   /**

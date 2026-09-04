@@ -2,8 +2,7 @@
 
 - **Severity:** HIGH
 - **Bereich:** Handelslogik / Control
-- **Status (validiert):** ✅ **Valide (architektonisch).** Live ist aktuell über das Gate
-  blockiert, daher nicht unmittelbar ausnutzbar — bei späterer Live-Freigabe aber gefährlich.
+- **Status (validiert):** ✅ **Gefixt v.1.36.20** — siehe `CHANGELOG.md`, `docs/AUDIT_REMEDIATION_2026-09.md` und `tests/h7.emergencyFlatten.test.ts`. Live bleibt weiterhin über das Gate blockiert; der Notfall-Pfad ist jetzt live-ready.
 - **Datei(en):** `src/app/api/firm/kill/route.ts` (`flattenAll`), `src/lib/engine.ts` (`flattenAll` → `getBroker()` liefert `PaperBroker`)
 
 ## Arena-Prompt (kopierbar)
@@ -58,9 +57,18 @@ erst danach `killSwitch.arm()/disarm()` (siehe Audit H7-Fix-Skizze).
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] `flattenAll` ruft bei Live-Konfiguration `cancelAllOpenOrders`/`closeAllPositions`/`verifyFlat`.
-- [ ] Kill-Switch wird erst nach verifiziertem Flat arming/disarming.
-- [ ] Paper-Modus: Ledger-Flatten bleibt Default; Audit vermerkt Modus.
+- [x] `flattenAll` ruft bei Live-Konfiguration `cancelAllOpenOrders`/`closeAllPositions`/`verifyFlat`.
+- [x] Kill-Switch wird erst nach verifiziertem Flat arming/disarming.
+- [x] Paper-Modus: Ledger-Flatten bleibt Default; Audit vermerkt Modus.
+
+**Umsetzung (v1.36.20):** `src/contracts/broker.ts` (`EmergencyBroker`,
+`EmergencyCloseFill`), `src/lib/engine.ts` (`resolveEmergencyBroker`, `flattenAll`
+mit cancel → close → verify + Retry + `FLATTEN_ALL`-Audit mit `mode`/`venue`/
+`flat`, Paper-Default „paper-only flatten (live disabled)“),
+`src/app/api/firm/kill/route.ts` (Sequenz VOR `killSwitch.pull()`),
+`src/lib/broker.ts` (`PaperBroker`), `src/brokers/bitunix/*` +
+`src/brokers/alpaca/*` (Live-`BrokerExecutionEngine`). Tests:
+`tests/h7.emergencyFlatten.test.ts`.
 
 ## Changelog-Blurb
 
@@ -69,4 +77,6 @@ vor arm/disarm; live-ready, paper-kompatibel.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Verhaltens-Härtung (Live weiterhin über Gate blockiert).
+Gefixt in **v1.36.20** (PATCH-Serie: H1=1.36.2 … S1=1.36.18, H2=1.36.19, H7=1.36.20).
+Live bleibt über das Gate blockiert — der Notfall-Pfad ist live-ready
+(paper-first), Verhaltens-Härtung statt Freischaltung.

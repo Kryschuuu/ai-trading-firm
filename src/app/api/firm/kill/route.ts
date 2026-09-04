@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { killSwitches, missions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { killSwitch } from "@/lib/riskGuard";
-import { flattenAll, invalidateBrokerCache, logAudit } from "@/lib/engine";
+import { flattenAll, invalidateBrokerCache, logAudit, type FlattenOutcome } from "@/lib/engine";
 import { guardWrite } from "@/lib/apiAuth";
 import { actorAuditId, requirePermission } from "@/auth";
 import { checkCsrfGuard } from "@/brokers/control-plane/guard";
@@ -54,6 +54,18 @@ export async function POST(req: Request) {
     const denied = guardWrite(req);
     if (denied) return denied;
     const reason = body.reason ?? "MANUAL_OPERATOR";
+
+    // H7 (v1.36.20): Der Not-Halt glattstellt VOR dem Ziehen — erst nach
+    // cancel → close → verify gilt der Kill als vollzogen (spec: venue-level
+    // sequence BEFORE killSwitch.arm). flattenAll wirft nie (Fehler stehen im
+    // Outcome + Audit); die sichere Richtung (Pull) wird dadurch nie blockiert.
+    // Paper-Modus: lokales Ledger; Live: echte Venue-Positionen (sobald das
+    // Live-Gate freigibt) + Flat-Beweis im Audit.
+    let flattenOutcome: FlattenOutcome | null = null;
+    if (body.flatten) {
+      flattenOutcome = await flattenAll(reason);
+    }
+
     killSwitch.pull(reason);
     await db.insert(killSwitches).values({ reason, triggeredBy: "OPERATOR", armed: true });
     // S1: Scharfschalten ist die SICHERE Richtung. Der Audit ist
@@ -62,21 +74,23 @@ export async function POST(req: Request) {
     const audited = await logAudit("KILL_SWITCH", "CRITICAL", {
       reason,
       flatten: body.flatten === true,
+      flattenMode: flattenOutcome?.mode,
+      flattenVenue: flattenOutcome?.venue,
+      flattenClosed: flattenOutcome?.fills.length,
+      flattenCanceled: flattenOutcome?.canceled,
+      flattenFlat: flattenOutcome?.flat,
+      flattenError: flattenOutcome?.error ?? null,
       actor: actorAuditId(req),
     });
     if (!audited.durable) {
       flagMissedAudit("KILL_SWITCH", { reason, action: "arm", detail: audited.error ?? "audit nicht durable" });
     }
 
-    let closed = 0;
-    if (body.flatten) {
-      const fills = await flattenAll(reason);
-      closed = fills.length;
-    }
     return NextResponse.json({
       ok: true,
       killSwitchArmed: true,
-      closedPositions: closed,
+      closedPositions: flattenOutcome?.fills.length ?? 0,
+      flatten: flattenOutcome,
       audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
     });
   }

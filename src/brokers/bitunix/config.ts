@@ -137,4 +137,8 @@ export const BITUNIX_PATHS = {
   orderDetail: "/api/v1/futures/trade/get_order_detail",
   /** H3: Ausführungen (Trades) — Basis des echten avgPrice. */
   historyTrades: "/api/v1/futures/trade/get_history_trades",
+  /** H7 (v1.36.20): Alle offenen Orders stornieren (Not-Halt). */
+  cancelAllOrders: "/api/v1/futures/trade/cancel_all_orders",
+  /** H7 (v1.36.20): Alle Positionen schließen (Not-Halt). */
+  closeAllPositions: "/api/v1/futures/trade/close_all_position",
 } as const;

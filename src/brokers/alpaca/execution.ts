@@ -16,6 +16,8 @@ import type {
   BrokerOrderRequest,
   BrokerOrderResult,
   BrokerPosition,
+  EmergencyCancelResult,
+  EmergencyCloseFill,
   MarketTicker,
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
@@ -35,6 +37,12 @@ export interface ExecutionPort {
   submit(req: BrokerOrderRequest, ticker: MarketTicker): Promise<BrokerOrderResult>;
   getAccount(mark?: MarkPriceFn): Promise<BrokerAccount>;
   listPositions(mark?: MarkPriceFn): Promise<BrokerPosition[]>;
+  /**
+   * H7 (v1.36.20): Notfall-Pfad des Kill-Switch (nur Live-Engines).
+   */
+  cancelAllOpenOrders?(): Promise<EmergencyCancelResult>;
+  closeAllPositions?(reason: string): Promise<EmergencyCloseFill[]>;
+  verifyFlat?(): Promise<boolean>;
 }
 
 /** PAPER-/BACKTEST-Engine — umhüllt das lokale `AlpacaPaperLedger`. */
@@ -290,5 +298,37 @@ export class BrokerExecutionEngine implements ExecutionPort {
     // Für mapAccount als Fallback; im Live-Modus wird der Wert aus dem Broker
     // überschrieben. Hier nur, damit der Drawdown berechenbar bleibt.
     return 100000;
+  }
+
+  // ── H7 (v1.36.20): Kill-Switch-Notfall auf Venue-Ebene ─────────────────────
+  // cancel → close → verify über die echte Alpaca-Trade-API. Die Glattheit
+  // wird mit `verifyFlat()` (getPositions == 0) belegt, nie geraten.
+
+  /** H7: Storniert alle offenen Alpaca-Orders (`DELETE /v2/orders`). */
+  async cancelAllOpenOrders(): Promise<EmergencyCancelResult> {
+    const canceled = await this.client.cancelAllOrders();
+    return { canceled: canceled.length };
+  }
+
+  /** H7: Schließt alle offenen Alpaca-Positionen (`DELETE /v2/positions`). */
+  async closeAllPositions(_reason: string): Promise<EmergencyCloseFill[]> {
+    const known = await this.safeGetPositions().then((pos) =>
+      pos.map(mapPosition).filter((p): p is BrokerPosition => p !== null)
+    );
+    if (known.length === 0) return [];
+    await this.client.closeAllPositions();
+    return known.map((p) => ({
+      symbol: p.symbol,
+      side: p.side,
+      qty: p.qty,
+      fillPrice: Number.isFinite(p.lastPrice) && p.lastPrice > 0 ? p.lastPrice : 0,
+      realizedPnl: p.unrealizedPnl,
+    }));
+  }
+
+  /** H7: 0 offene Alpaca-Positionen? */
+  async verifyFlat(): Promise<boolean> {
+    const positions = await this.safeGetPositions();
+    return positions.length === 0;
   }
 }

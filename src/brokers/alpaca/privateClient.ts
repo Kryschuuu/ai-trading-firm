@@ -176,6 +176,39 @@ export class AlpacaPrivateClient {
     return res.json as AlpacaOrder;
   }
 
+  /**
+   * H7 (v1.36.20): Storniert alle offenen Orders (`DELETE /v2/orders`) —
+   * Notfall-Schritt 1 des Kill-Flatten. Im Effekt idempotent (stornieren
+   * bereits stornierter Orders ist ein No-Op).
+   */
+  async cancelAllOrders(): Promise<string[]> {
+    const res = await this.authedRequest({
+      method: "DELETE",
+      path: ALPACA_TRADE_PATHS.orders,
+      idempotent: true,
+    });
+    await recordAlpacaPrivateCall({ method: "DELETE", path: ALPACA_TRADE_PATHS.orders, outcome: "OK", errorCode: null });
+    if (!Array.isArray(res.json)) return [];
+    return res.json
+      .map((o) => String((o as { id?: unknown })?.id ?? ""))
+      .filter(Boolean);
+  }
+
+  /**
+   * H7 (v1.36.20): Schließt alle offenen Positionen (`DELETE /v2/positions`) —
+   * Notfall-Schritt 2 des Kill-Flatten. Die tatsächliche Glattheit wird über
+   * `verifyFlat()` (getPositions == 0) belegt, nicht über den Close-Report.
+   */
+  async closeAllPositions(): Promise<void> {
+    const res = await this.authedRequest({
+      method: "DELETE",
+      path: ALPACA_TRADE_PATHS.positions,
+      idempotent: true,
+    });
+    await recordAlpacaPrivateCall({ method: "DELETE", path: ALPACA_TRADE_PATHS.positions, outcome: "OK", errorCode: null });
+    void res;
+  }
+
   /** Zentrale Auth-Wrapper-Methode: setzt Basic-Auth + optionale Header. */
   private async authedRequest(req: { method: "GET" | "POST" | "DELETE" | "PATCH"; path: string; query?: Record<string, string | number | boolean | undefined>; body?: string; headers?: Record<string, string>; idempotent?: boolean }) {
     const headers: Record<string, string> = {
