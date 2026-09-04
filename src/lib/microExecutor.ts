@@ -657,14 +657,50 @@ export function createPaperRuleAdapter(opts?: {
           };
         }
 
-        const fill = broker.submit({
-          symbol,
-          side: "LONG",
-          qty,
-          riskNotional: notional,
-          stopLoss,
-          takeProfit,
-        });
+        // H2: `submitAtomic` reserviert die Position DB-seitig (order_intents,
+        // partieller UNIQUE-Index je Symbol) innerhalb einer Postgres-
+        // Advisory-Transaktionssperre je Account. Das schützt genau den Fall,
+        // den der symbol-scoped Lock oben (client-seitig, nur innerhalb
+        // dieses Prozesses wirksam) allein nicht abdecken kann: mehrere
+        // Mikro-Executor-*Prozesse*, die gleichzeitig dieselbe Regel/dasselbe
+        // Symbol feuern. Die Positions-/Missions-Persistenz läuft im selben
+        // `persistPosition`-Callback wie die Reservierung — entweder beides
+        // oder nichts.
+        const fill = await broker.submitAtomic(
+          {
+            symbol,
+            side: "LONG",
+            qty,
+            riskNotional: notional,
+            stopLoss,
+            takeProfit,
+          },
+          {
+            account: "PAPER",
+            persistPosition: async (tx, f) => {
+              await tx.insert(positionsTable).values({
+                symbol: f.symbol,
+                side: f.side,
+                qty: String(f.qty),
+                entryPrice: String(f.fillPrice),
+                currentPrice: String(f.fillPrice),
+                stopLoss: f.stopLoss === null ? null : String(f.stopLoss),
+                takeProfit: f.takeProfit === null ? null : String(f.takeProfit),
+                broker: broker.name,
+                missionId: ctx.missionId,
+                ruleId: ctx.ruleId,
+                status: "OPEN",
+              });
+
+              if (ctx.missionId) {
+                await tx
+                  .update(missionsTable)
+                  .set({ status: "ACTIVE", updatedAt: new Date() })
+                  .where(eq(missionsTable.id, ctx.missionId));
+              }
+            },
+          }
+        );
         // H3: Position nur buchen bei echtem Fill mit belegtem Preis (>0).
         // NEW/REJECTED/UNKNOWN oder ein 0-Entry blockieren die Order.
         if (fill.status !== "FILLED" || !Number.isFinite(fill.fillPrice) || fill.fillPrice <= 0) {
@@ -675,27 +711,6 @@ export function createPaperRuleAdapter(opts?: {
             reason: `BROKER:${fill.reason ?? fill.status ?? "rejected"}`,
             at: new Date().toISOString(),
           };
-        }
-
-        await db.insert(positionsTable).values({
-          symbol: fill.symbol,
-          side: fill.side,
-          qty: String(fill.qty),
-          entryPrice: String(fill.fillPrice),
-          currentPrice: String(fill.fillPrice),
-          stopLoss: fill.stopLoss === null ? null : String(fill.stopLoss),
-          takeProfit: fill.takeProfit === null ? null : String(fill.takeProfit),
-          broker: broker.name,
-          missionId: ctx.missionId,
-          ruleId: ctx.ruleId,
-          status: "OPEN",
-        });
-
-        if (ctx.missionId) {
-          await db
-            .update(missionsTable)
-            .set({ status: "ACTIVE", updatedAt: new Date() })
-            .where(eq(missionsTable.id, ctx.missionId));
         }
         try {
           await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE");

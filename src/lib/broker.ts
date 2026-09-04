@@ -11,6 +11,61 @@ import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import type { BrokerCapabilities, BrokerVenueId } from "../contracts/broker";
 import type { MarketInstrument } from "../universe/types";
+import { db } from "../db";
+import { orderIntents, positions as positionsTable } from "../db/schema";
+import { and, eq, sql } from "drizzle-orm";
+
+/** Transaktions-Handle, wie es `db.transaction(async (tx) => …)` liefert. */
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * H2: geworfen, wenn die DB-Reservierung (`order_intents`, partieller
+ * UNIQUE-Index) eine zweite offene Position für dasselbe Symbol ablehnt,
+ * obwohl der In-Memory-Guard sie erlaubt hatte. Signalisiert
+ * `submitAtomic`, die In-Memory-Mutation zurückzunehmen (fail-closed).
+ */
+export class OrderIntentConflictError extends Error {
+  constructor(public readonly symbol: string) {
+    super(`POSITION_ALREADY_OPEN:${symbol}`);
+    this.name = "OrderIntentConflictError";
+  }
+}
+
+/**
+ * Postgres-Fehlercode 23505 (unique_violation) unabhängig davon erkennen, ob
+ * der Treiber ihn direkt oder unter `cause` (Drizzle wrapt pg-Fehler)
+ * anhängt — beide Formen sind in freier Wildbahn beobachtet.
+ */
+function isUniqueViolation(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const direct = (e as { code?: unknown }).code;
+  if (direct === "23505") return true;
+  const cause = (e as { cause?: unknown }).cause;
+  if (cause && typeof cause === "object" && (cause as { code?: unknown }).code === "23505") {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * H2 FIX: exklusiver, DB-weiter Lock je Konto (`pg_advisory_xact_lock`).
+ * Wird automatisch beim Commit/Rollback der Transaktion freigegeben — kein
+ * manuelles Unlock nötig, kein Leak bei einem Crash mitten in `fn`.
+ *
+ * Eigenständig exportiert (nicht nur intern in `submitAtomic` verdrahtet),
+ * damit andere Schreibpfade auf dasselbe Konto (z. B. ein künftiger
+ * Live-Adapter) dieselbe Sperre nutzen können, statt eine zweite,
+ * inkompatible Lock-Strategie zu erfinden.
+ */
+export async function withAccountLock<T>(
+  account: string,
+  fn: (tx: Tx) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${account}))`);
+    return fn(tx);
+  });
+}
 
 /** Broker-Name = Adapter-Venue-ID (Task 02: dieselbe Whitelist, kein zweites Set). */
 export type BrokerName = BrokerVenueId;
@@ -231,6 +286,218 @@ export class PaperBroker {
         stopLoss: sanitizeLevel(r.stopLoss),
         takeProfit: sanitizeLevel(r.takeProfit),
       });
+    }
+  }
+
+  /**
+   * H2 FIX (CRITICAL, v1.36.19): atomare Ausführungsschleuse über Prozesse
+   * hinweg. `submit()` bleibt unverändert für Single-Process-/Test-Aufrufer
+   * (Backtests, reine In-Memory-Instanzen ohne DB), aber JEDER Aufrufer mit
+   * DB-Anbindung (Engine, Mikro-Executor, Approved-Proposal-Pfad) MUSS
+   * `submitAtomic()` nutzen.
+   *
+   * Ablauf, alles in EINER Postgres-Transaktion:
+   *   1. `pg_advisory_xact_lock(hashtext(account))` — exklusiv für das Konto,
+   *      wird beim Commit/Rollback automatisch freigegeben. Zwei Prozesse,
+   *      die gleichzeitig für dasselbe Konto einreichen, werden serialisiert
+   *      (der zweite wartet, bis der erste committed/rollbacked hat).
+   *   2. DB-Wahrheits-Check gegen `positions` (status='OPEN') für das Symbol.
+   *      NOTWENDIG, weil der Advisory-Lock zwar Gleichzeitigkeit auflöst,
+   *      aber nicht den veralteten In-Memory-Zustand eines zweiten Prozesses
+   *      heilt: dieser hat sein `this.positions` ggf. VOR dem Commit des
+   *      ersten Prozesses hydratisiert und würde den lokalen Guard sonst
+   *      fälschlich bestehen (sein eigener Speicher zeigt "kein BTC offen",
+   *      obwohl der andere Prozess es gerade geöffnet hat).
+   *   3. In-Memory-Guard (`submit()`) — dieselben Regeln wie bisher, aber
+   *      jetzt exklusiv UND erst nachdem Schritt 2 die DB-Wahrheit bestätigt hat.
+   *   4. Erst bei Erfolg: `order_intents`-Reservierung (status=RESERVED) als
+   *      DB-seitige, indexgestützte Zweitsicherung. Der partielle UNIQUE-
+   *      Index (`symbol WHERE status='RESERVED'`) lehnt eine zweite offene
+   *      Reservierung für dasselbe Symbol selbst dann ab, wenn zwei
+   *      `submitAtomic`-Aufrufe (unwahrscheinlich, aber defensiv) zwischen
+   *      Schritt 2 und dem Commit von Schritt 4 kollidieren — Defense in
+   *      Depth, nicht der einzige Schutzwall.
+   *   5. Guard-Ablehnung → `order_intents`-Zeile `REJECTED` (Audit-Spur);
+   *      Erfolg → `FILLED`.
+   *
+   * `persistPosition` läuft in DERSELBEN Transaktion wie die Reservierung —
+   * Reserve → Guard → Fill → Positions-Insert ist damit eine atomare Einheit,
+   * nicht mehr "Broker mutiert im Speicher, DB-Schreiben folgt später".
+   */
+  async submitAtomic(
+    order: Order,
+    opts?: {
+      account?: string;
+      persistPosition?: (tx: Tx, fill: Fill) => Promise<void>;
+    }
+  ): Promise<Fill> {
+    const account = opts?.account ?? "PAPER";
+    try {
+      return await withAccountLock(account, async (tx) => {
+        // 2) DB-Wahrheit VOR dem In-Memory-Guard prüfen. `positions` ist die
+        //    einzige Tabelle, die ein ANDERER Prozess tatsächlich committet
+        //    hat, sobald er `submitAtomic` für dasselbe Symbol erfolgreich
+        //    durchlaufen hat (siehe `persistPosition` unten, läuft in
+        //    DERSELBEN Transaktion wie die Reservierung).
+        //
+        //    Warum das trotz `pg_advisory_xact_lock` nötig ist: der Lock
+        //    serialisiert nur GLEICHZEITIGE Aufrufe für dasselbe Konto — er
+        //    verhindert nicht, dass der ZWEITE (wartende) Aufruf mit einem
+        //    VERALTETEN In-Memory-Zustand startet. Prozess A hydratisiert bei
+        //    Start, öffnet BTC, committet. Prozess B (zweite Instanz, eigener
+        //    Speicher, z. B. Next.js-Worker + Mikro-Executor) hydratisierte
+        //    VOR A's Commit und sieht in seinem eigenen `this.positions`
+        //    weiterhin "kein BTC offen" — der lokale Guard in `submit()`
+        //    würde also fälschlich FILLED erlauben, obwohl die `order_intents`
+        //    Reservierung von A zu diesem Zeitpunkt schon auf FILLED steht
+        //    (der partielle UNIQUE-Index blockt dann NICHT mehr). Diese
+        //    Prüfung schließt genau diese Lücke: DB ist Quelle der Wahrheit,
+        //    nicht der zuletzt hydratisierte Prozessspeicher.
+        const symbolForDbCheck = sanitizeSymbol(order.symbol) ?? String(order.symbol).slice(0, 40);
+        const openInDb = await tx
+          .select({ id: positionsTable.id })
+          .from(positionsTable)
+          .where(and(eq(positionsTable.symbol, symbolForDbCheck), eq(positionsTable.status, "OPEN")))
+          .limit(1);
+        if (openInDb.length > 0) {
+          const reason = `POSITION_ALREADY_OPEN:${symbolForDbCheck} (DB-Wahrheit, mehrprozess-sicher)`;
+          await tx.insert(orderIntents).values({
+            account,
+            symbol: symbolForDbCheck,
+            side: order.side,
+            qty: String(order.qty),
+            status: "REJECTED",
+            reason,
+          });
+          return reject(order, reason);
+        }
+
+        // 3) Dieselbe Guard-/Fill-Logik wie bisher, jetzt aber exklusiv:
+        //    kein anderer Prozess kann zwischen Guard-Prüfung und Fill
+        //    denselben Kontostand sehen.
+        const fill = this.submit(order);
+        const filled =
+          fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
+
+        // 4) DB-seitige Reservierung — in einem Savepoint (`tx.transaction`),
+        //    damit ein 23505-Konflikt (Unique-Verletzung) NUR die
+        //    Reservierung zurückrollt, nicht die gesamte äußere Transaktion.
+        //    Das lässt die REJECTED-Zeile sauber schreiben, statt die ganze
+        //    Order-Verarbeitung mit einem Postgres-Fehler abzubrechen.
+        const symbol = sanitizeSymbol(order.symbol) ?? String(order.symbol).slice(0, 40);
+        let intentStatus: "FILLED" | "REJECTED" = filled ? "FILLED" : "REJECTED";
+        let intentReason = filled ? undefined : fill.reason ?? fill.status;
+        let dbConflict = false;
+
+        if (filled) {
+          try {
+            await tx.transaction(async (tx2) => {
+              const inserted = await tx2
+                .insert(orderIntents)
+                .values({
+                  account,
+                  symbol,
+                  side: order.side,
+                  qty: String(order.qty),
+                  status: "RESERVED",
+                })
+                .onConflictDoNothing({
+                  target: orderIntents.symbol,
+                  where: sql`${orderIntents.status} = 'RESERVED'`,
+                })
+                .returning({ id: orderIntents.id });
+              if (inserted.length === 0) {
+                // Der partielle UNIQUE-Index hat bereits eine offene
+                // Reservierung für dieses Symbol gefunden — DB-Wahrheit
+                // widerspricht dem In-Memory-Guard (z. B. ein zweiter
+                // Prozess, der den Advisory-Lock umgangen hat, oder ein
+                // Race zwischen Hydration und Commit). Fail-closed: die
+                // In-Memory-Position wird NICHT übernommen.
+                throw new OrderIntentConflictError(symbol);
+              }
+              await tx2
+                .update(orderIntents)
+                .set({ status: "FILLED" })
+                .where(eq(orderIntents.id, inserted[0].id));
+            });
+          } catch (e) {
+            if (e instanceof OrderIntentConflictError || isUniqueViolation(e)) {
+              dbConflict = true;
+              intentStatus = "REJECTED";
+              intentReason = `POSITION_ALREADY_OPEN:${symbol} (DB-Reservierung, mehrprozess-sicher)`;
+            } else {
+              throw e;
+            }
+          }
+        }
+
+        if (dbConflict) {
+          // Der In-Memory-Guard hatte FILLED erlaubt, aber die DB-Reservierung
+          // widerspricht — die In-Memory-Mutation muss zurückgenommen werden,
+          // sonst zeigt der Prozessspeicher eine Position, die nie persistiert
+          // wurde (Quelle der Wahrheit bleibt die DB).
+          this.rollbackInMemoryFill(order, fill);
+          await tx.insert(orderIntents).values({
+            account,
+            symbol,
+            side: order.side,
+            qty: String(order.qty),
+            status: "REJECTED",
+            reason: intentReason,
+          });
+          return reject(order, intentReason ?? `POSITION_ALREADY_OPEN:${symbol}`);
+        }
+
+        if (!filled) {
+          // Guard hat bereits abgelehnt (Kill-Switch, Cash, Position offen,
+          // Drawdown, …) — Audit-Spur ohne Reservierungs-Race, weil kein
+          // zweiter Slot je beansprucht wurde.
+          await tx.insert(orderIntents).values({
+            account,
+            symbol,
+            side: order.side,
+            qty: String(order.qty),
+            status: intentStatus,
+            reason: intentReason,
+          });
+          return fill;
+        }
+
+        // 5) Erfolgreicher, DB-reservierter Fill — jetzt (innerhalb derselben
+        //    Transaktion) die Position persistieren, falls der Aufrufer eine
+        //    Persistenzfunktion mitgibt (Engine/Mikro-Executor).
+        if (opts?.persistPosition) {
+          await opts.persistPosition(tx, fill);
+        }
+        return fill;
+      });
+    } catch (e) {
+      if (e instanceof OrderIntentConflictError) {
+        return reject(order, `POSITION_ALREADY_OPEN:${e.symbol} (DB-Reservierung, mehrprozess-sicher)`);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Nimmt eine In-Memory-Mutation zurück, die `submit()` bereits angewendet
+   * hat, deren DB-Reservierung aber an der Unique-Sperre gescheitert ist
+   * (siehe `submitAtomic`). Ohne dieses Rollback würde der Prozessspeicher
+   * dauerhaft eine Position/einen Cash-Abzug zeigen, den die DB nie bestätigt
+   * hat — genau die H2-Inkonsistenz, die diese Datei beheben soll.
+   */
+  private rollbackInMemoryFill(order: Order, fill: Fill): void {
+    const symbol = sanitizeSymbol(order.symbol);
+    if (!symbol) return;
+    const pos = this.positions.get(symbol);
+    if (!pos) return;
+    // Nur zurücknehmen, wenn es exakt der Fill ist, den wir gerade gebucht
+    // haben (Preis/Menge stimmen überein) — kein blindes Löschen fremder
+    // Positionen, falls zwischen submit() und hier etwas anderes geschah.
+    if (pos.qty === fill.qty && pos.entryPrice === fill.fillPrice) {
+      const cost = pos.qty * pos.entryPrice + (fill.fees ?? 0);
+      this.positions.delete(symbol);
+      this.cash += cost;
     }
   }
 

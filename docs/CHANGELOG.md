@@ -5,6 +5,84 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.19] — 2026-09-04 · fix(audit): H2 atomare Order-Reservierung über Prozessgrenzen (CRITICAL)
+
+**CRITICAL, Handelslogik (`src/db/schema.ts`, `src/lib/broker.ts`, `src/lib/engine.ts`,
+`src/lib/microExecutor.ts`, `drizzle/2026-09-04_h2_order_intents.sql` neu,
+`test/integration/orderIntents.submitAtomic.test.ts` neu).** Befund H2 des
+Senior-Peer-Reviews (`docs/AUDIT_REMEDIATION_2026-09.md`): **nicht-atomare
+Risk-/Positionsprüfung über mehrere Node.js-Prozesse.** Der alte
+`G.__paperBrokerLedger`-Singleton wurde bereits entfernt (Factory + DB-Hydration
+in `getBroker()`), aber die kritischen Guards (Cash, Positions-Slot,
+Kill-Switch) blieben ausschließlich im Prozessspeicher von `PaperBroker` und
+wurden erst NACH `broker.submit()` in die DB geschrieben — zwei Prozesse
+(z. B. ein Next.js-Worker und der separate Mikro-Executor-Prozess), die beide
+ihren eigenen Zustand hydratisiert hatten, konnten beide ihren lokalen Guard
+bestehen und beide eine Position für dasselbe Symbol öffnen.
+
+```ts
+// vor dem Fix — src/lib/microExecutor.ts (vereinfacht)
+const fill = broker.submit(order);            // nur In-Memory-Guard
+if (fill.status === "FILLED") {
+  await db.insert(positionsTable).values({…}); // DB-Schreiben NACH dem Fakt
+}
+```
+
+### Hinzugefügt
+
+- **`order_intents`-Tabelle** (`src/db/schema.ts`, `drizzle/2026-09-04_h2_order_intents.sql`):
+  `id`, `account` (Default `"PAPER"`), `symbol`, `side`, `qty`, `status`
+  (`RESERVED | FILLED | REJECTED | CANCELED`), `reason`, `created_at`. Ein
+  **partieller UNIQUE-Index** auf `symbol WHERE status = 'RESERVED'` erzwingt
+  „höchstens eine offene Reservierung pro Symbol“ auf DB-Ebene — unabhängig
+  davon, wie viele Prozesse gleichzeitig schreiben.
+- **`withAccountLock(account, fn)`** (`src/lib/broker.ts`, eigenständig
+  exportiert): `db.transaction` + `pg_advisory_xact_lock(hashtext(account))`.
+  Serialisiert alle `submitAtomic`-Aufrufe für dasselbe Konto; die Sperre wird
+  beim Commit/Rollback automatisch freigegeben (kein manuelles Unlock, kein
+  Leak bei einem Absturz mitten in der Transaktion).
+- **`PaperBroker.submitAtomic(order, opts)`** — neue, DB-gestützte
+  Ausführungsschleuse in EINER Postgres-Transaktion: (1) Advisory-Lock je
+  Konto, (2) **DB-Wahrheits-Check gegen `positions` (status='OPEN')** für das
+  Symbol — notwendig, weil der Advisory-Lock zwar Gleichzeitigkeit auflöst,
+  aber nicht den veralteten In-Memory-Zustand eines zweiten, bereits länger
+  laufenden Prozesses heilt, (3) der bestehende In-Memory-Guard (`submit()`,
+  unverändert), (4) bei Erfolg eine `order_intents`-Reservierung in einem
+  Savepoint (`tx.transaction`) als indexgestützte Zweitsicherung — ein
+  23505-Konflikt (Unique-Verletzung) rollt nur die Reservierung zurück, nicht
+  die gesamte Transaktion, und wird auf `POSITION_ALREADY_OPEN` abgebildet,
+  (5) `persistPosition(tx, fill)` (Positions-/Missions-Insert des Aufrufers)
+  läuft in DERSELBEN Transaktion — Reserve → Guard → Fill → Persist ist damit
+  eine atomare Einheit. Bei einem verbleibenden DB-Konflikt wird die
+  In-Memory-Mutation zurückgerollt (`rollbackInMemoryFill`, defensiv: nur bei
+  exakter Fill-Übereinstimmung) und eine `REJECTED`-Audit-Zeile geschrieben —
+  fail-closed, die DB bleibt Quelle der Wahrheit.
+- `submit()` selbst bleibt **unverändert** (synchron, rein In-Memory) für
+  Single-Process-Aufrufer ohne DB-Anbindung (Backtests, reine Unit-Tests).
+- **Call-Sites migriert:** `src/lib/engine.ts` (`runAgentTurn`-Handelspfad,
+  `executeApprovedProposal`) und `src/lib/microExecutor.ts`
+  (`createPaperRuleAdapter`, der Mikro-Executor läuft als eigener OS-Prozess
+  — hier greift H2 am direktesten) nutzen jetzt `submitAtomic()` statt
+  `submit()` + separatem `db.insert(positions)`.
+- **Test:** `test/integration/orderIntents.submitAtomic.test.ts` — zwei
+  unabhängige `PaperBroker`-Instanzen (simulieren zwei Prozesse mit
+  getrenntem Speicher) racen `submitAtomic()` auf dasselbe Symbol; erwartet
+  genau ein `FILLED` + ein `REJECTED:POSITION_ALREADY_OPEN`, geprüft sowohl
+  im Rückgabewert als auch in `order_intents`/`positions`; zusätzlich ein
+  Guard-Ablehnungs-Test (keine Reservierungs-Race bei Kill-Switch) und ein
+  `withAccountLock`-Serialisierungstest. Überspringt sich selbst (statt
+  fehlzuschlagen), wenn keine PostgreSQL erreichbar ist — folgt derselben
+  Konvention wie `tests/controlPlane.persistence.test.ts`.
+
+### Kompatibilität
+
+Keine Verhaltensänderung für Single-Process-Entwicklung/Tests: `submit()` ist
+bytegleich, alle bestehenden Aufrufer, die (noch) keine DB-Transaktion
+brauchen, sind unberührt. `npm test`: 1715 bestehende Tests weiterhin grün,
+3 neue Tests (H2-Integrationstest) übersprungen ohne erreichbare PostgreSQL,
+grün mit erreichbarer Test-DB.
+
+
 ## [1.36.18] — 2026-09-04 · fix(audit): S1 Sicherheits-Audits sind durable (MEDIUM)
 
 **MEDIUM, Audit/Security (`src/lib/auditSink.ts` neu, `src/lib/telemetry.ts`,

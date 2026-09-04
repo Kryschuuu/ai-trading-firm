@@ -1,7 +1,7 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.36.18",
-  "description": "Autonome KI-Trading-Firma (Paper-Trading) \u2014 local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
+  "version": "1.36.19",
+  "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "GPL-3.0-only",
   "private": true,
   "engines": {
@@ -63,6 +63,7 @@
     "@types/react-dom": "19.2.3",
     "@types/ws": "^8.5.13",
     "drizzle-kit": "^0.31.7",
+    "embedded-postgres": "^18.4.0-beta.17",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "postcss": "^8.5.26",
