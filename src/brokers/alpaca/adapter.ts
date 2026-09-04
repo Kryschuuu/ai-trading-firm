@@ -26,6 +26,8 @@ import {
   type BrokerOrderRequest,
   type BrokerOrderResult,
   type BrokerPosition,
+  type EmergencyCancelResult,
+  type EmergencyCloseFill,
   type ExecutionMode,
   type MarketCandle,
   type MarketTicker,
@@ -312,6 +314,50 @@ export class AlpacaBrokerAdapter implements BrokerAdapter {
     const sym = req.symbol.toUpperCase();
     const ticker = this.lastTicker.get(sym) ?? (await this.getTicker(sym));
     return engine.submit(req, ticker);
+  }
+
+  // ── H7 (v1.36.20): Kill-Switch-Notfall auf Venue-Ebene ─────────────────────
+  // Live/testnet: echte Alpaca-Trade-API cancel → close → verify. Paper/
+  // backtest: NotSupportedCapabilityError — der Kern glattstellt dort über
+  // den Legacy-PaperBroker, nicht über den Adapter.
+
+  async cancelAllOpenOrders(): Promise<EmergencyCancelResult> {
+    assertAlpacaEnabled(this.env);
+    if (this.mode !== "live" && this.mode !== "testnet") {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "cancelAllOpenOrders", "Nur live/testnet.");
+    }
+    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.cancelAllOpenOrders) {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "cancelAllOpenOrders", "Engine ohne H7-Notfall-Pfad.");
+    }
+    return engine.cancelAllOpenOrders();
+  }
+
+  async closeAllPositions(reason: string): Promise<EmergencyCloseFill[]> {
+    assertAlpacaEnabled(this.env);
+    if (this.mode !== "live" && this.mode !== "testnet") {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "closeAllPositions", "Nur live/testnet.");
+    }
+    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.closeAllPositions) {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "closeAllPositions", "Engine ohne H7-Notfall-Pfad.");
+    }
+    return engine.closeAllPositions(reason);
+  }
+
+  async verifyFlat(): Promise<boolean> {
+    assertAlpacaEnabled(this.env);
+    if (this.mode !== "live" && this.mode !== "testnet") {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "verifyFlat", "Nur live/testnet.");
+    }
+    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    const engine = await this.execution();
+    if (!engine.verifyFlat) {
+      throw new NotSupportedCapabilityError(this.id, "emergency", "verifyFlat", "Engine ohne H7-Notfall-Pfad.");
+    }
+    return engine.verifyFlat();
   }
 
   /** Private-Client (Account/Positions/Place) — Basis der Broker-Engine. */

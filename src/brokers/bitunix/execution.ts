@@ -21,6 +21,8 @@ import type {
   BrokerOrderResult,
   BrokerOrderStatus,
   BrokerPosition,
+  EmergencyCancelResult,
+  EmergencyCloseFill,
   MarketTicker,
 } from "../../contracts/broker";
 import type { ExecutionMode } from "../../contracts/broker";
@@ -57,6 +59,14 @@ export interface ExecutionPort {
   getAccount(mark?: MarkPriceFn): Promise<BrokerAccount>;
   /** Liefert die offenen Positionen dieser Engine (paper: lokal, live: Venue). */
   listPositions(mark?: MarkPriceFn): Promise<BrokerPosition[]>;
+  /**
+   * H7 (v1.36.20): Notfall-Pfad des Kill-Switch. Optional, weil die
+   * Paper-Engine keinen echten Venue-Notfall kennt (synchroner Fill, keine
+   * offenen Orders). Live-Engines implementieren cancel → close → verify.
+   */
+  cancelAllOpenOrders?(): Promise<EmergencyCancelResult>;
+  closeAllPositions?(reason: string): Promise<EmergencyCloseFill[]>;
+  verifyFlat?(): Promise<boolean>;
 }
 
 /**
@@ -299,6 +309,43 @@ export class BrokerExecutionEngine implements ExecutionPort {
     return positions.filter(
       (p) => Number.isFinite(p.entryPrice) && p.entryPrice > 0 && Number.isFinite(p.qty) && p.qty > 0
     );
+  }
+
+  // ── H7 (v1.36.20): Kill-Switch-Notfall auf Venue-Ebene ─────────────────────
+  // cancel → close → verify. Diese Methoden sind der LIVE-Gegenpart zum
+  // EmergencyBroker des Paper-Ledgers — ein Not-Halt schließt hier die ECHTEN
+  // Venue-Positionen, nicht die Simulation.
+
+  /** H7: Storniert alle offenen Venue-Orders (cancel_all_orders). */
+  async cancelAllOpenOrders(): Promise<EmergencyCancelResult> {
+    const res = await this.privateClient.cancelAllOrders();
+    return { canceled: res.successList.length };
+  }
+
+  /**
+   * H7: Schließt alle offenen Venue-Positionen (close_all_position).
+   * Die Engines „rät“ NIE Fill-Preise/PnL — `close_all_position` liefert
+   * keine Fills; die Belegung der Glattheit übernimmt `verifyFlat()`. Als
+   * Fills werden die zuletzt bekannten Positionen (Letztkurs) gemeldet,
+   * damit der Audit die betroffenen Symbole nennen kann.
+   */
+  async closeAllPositions(reason: string): Promise<EmergencyCloseFill[]> {
+    const known = await this.listPositions();
+    if (known.length === 0) return [];
+    await this.privateClient.closeAllPositions();
+    return known.map((p) => ({
+      symbol: p.symbol,
+      side: p.side,
+      qty: p.qty,
+      fillPrice: Number.isFinite(p.lastPrice) && p.lastPrice > 0 ? p.lastPrice : 0,
+      realizedPnl: 0,
+    }));
+  }
+
+  /** H7: 0 offene Venue-Positionen? (Quelle der Wahrheit nach dem Close). */
+  async verifyFlat(): Promise<boolean> {
+    const positions = await this.listPositions();
+    return positions.length === 0;
   }
 }
 

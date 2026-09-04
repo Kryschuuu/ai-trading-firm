@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.18 (2026-09-04) · Vollständige
+> **Dokumentationsstand:** v1.36.20 (2026-09-04) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -150,6 +150,32 @@ geänderter Prompt oder ein entschärfter Not-Halt blieb dann ohne Beleg im
   in `audit-quarantine.ndjson`, statt den Nachzug zu stoppen.
 
 Befund S1 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Kill-Switch/Flatten arbeitet auf echten Venue-Positionen, nicht nur auf dem Paper-Ledger (v1.36.20)
+
+Bis v1.36.19 lief der Not-Halt so: `/api/firm/kill` → `flattenAll()` →
+`getBroker()` lieferte den in-process **Paper-Broker** und rief dort
+`closeAll()` — die echte Bitunix-/Live-Ausführungs-Engine war nie beteiligt
+(Befund H7, HIGH). Ein Kill hätte bei späterer Live-Freigabe die Simulation
+geschlossen und reale Venue-Positionen offen gelassen. Seit v1.36.20:
+
+* **eine `EmergencyBroker`-Schnittstelle** für Notfälle
+  (`cancelAllOpenOrders → closeAllPositions → verifyFlat`), erfüllt vom
+  `PaperBroker` **und** der Live-`BrokerExecutionEngine` (Bitunix:
+  `cancel_all_orders`/`close_all_position`, Alpaca: `DELETE /v2/orders`/
+  `DELETE /v2/positions`),
+* **`flattenAll()`** löst den Broker aus der Konfiguration:
+  Paper-Default, Live nur wenn Plattform- + Venue-Flags + Live-Gate
+  freigeben; die Sequenz läuft in fester Reihenfolge, ein „nicht flach“
+  löst genau einen Retry-Close aus, danach Alarm,
+* **im Audit belegbar**: `FLATTEN_ALL` nennt `mode`/`venue`, Storno- und
+  Close-Anzahl sowie das `verifyFlat`-Ergebnis — bei Paper-Default steht
+  dort eindeutig *„paper-only flatten (live disabled)“*,
+* **Reihenfolge im Not-Halt:** die Notfall-Sequenz läuft vor
+  `killSwitch.pull()` — Arm wird nie durch einen Flatten-Fehler blockiert
+  (Fehler stehen im Outcome + Audit).
+
+Befund H7 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Control Plane: Verbindungszustand überlebt den Neustart (v1.36.16)
 

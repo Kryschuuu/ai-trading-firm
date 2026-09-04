@@ -319,6 +319,49 @@ export interface BrokerPosition {
   takeProfit: number | null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// H7 (v1.36.20) — Notfall-Schnittstelle für den Kill-Switch (Not-Halt).
+//
+// Ein Not-Halt darf nicht nur das lokale Paper-Ledger glattstellen: Sobald
+// Live-Ausführung freigegeben ist, muss er die echten Venue-Positionen UND
+// die offenen Venue-Orders schließen (cancel → close → verify), bevor der
+// Switch als „vollzogen“ gilt. Paper und Live erfüllen dieselbe
+// `EmergencyBroker`-Schnittstelle — der Kern kennt nur dieses Interface.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Anzahl stornierter Offenen Orders (H7). */
+export interface EmergencyCancelResult {
+  canceled: number;
+}
+
+/**
+ * Eine im Notfall glattgestellte Position (H7). Venue-agnostisch — Paper
+ * liefert echte Fill-Daten, Live-Venues ggf. nur die zuvor bekannten
+ * Positionen (das Ergebnis der Schließung wird über `verifyFlat()` belegt).
+ */
+export interface EmergencyCloseFill {
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  /** Ausführungspreis der Schließung; 0 = Venue lieferte keinen Fill-Preis. */
+  fillPrice: number;
+  realizedPnl: number;
+}
+
+/**
+ * H7: Notfall-Fähigkeiten, die Paper-Broker und Live-Adapter gleichermaßen
+ * erfüllen. Reihenfolge eines Kill-Flatten ist die eigentliche Vertragssemantik:
+ *
+ *   1. `cancelAllOpenOrders()` — keine neuen Fills mehr, offene Orders stornieren
+ *   2. `closeAllPositions(reason)` — alle offenen Positionen schließen
+ *   3. `verifyFlat()` — 0 offene Positionen bestätigen (sonst Retry + Alarm)
+ */
+export interface EmergencyBroker {
+  cancelAllOpenOrders(): Promise<EmergencyCancelResult>;
+  closeAllPositions(reason: string): Promise<EmergencyCloseFill[]>;
+  verifyFlat(): Promise<boolean>;
+}
+
 /**
  * Das Broker-Interface — die EINE GRENZE, über die der Kern mit dem Markt
  * spricht. Alle Methoden außer `healthCheck` sind optional; Aufrufer müssen
@@ -355,6 +398,15 @@ export interface BrokerAdapter {
    */
   reconcileOrder?(orderId: string): Promise<BrokerOrderResult | null>;
   getPositions?(): Promise<BrokerPosition[]>;
+  /**
+   * H7 (v1.36.20): Notfall-Glattstellung auf Venue-Ebene (Kill-Switch).
+   * Optional — Paper/Stub-Adapter, die nicht live sind, brauchen sie nicht.
+   * Live-Adapter implementieren sie trotzdem, damit `flattenAll` die echten
+   * Venue-Positionen schließt und nicht nur das lokale Paper-Ledger.
+   */
+  cancelAllOpenOrders?(): Promise<EmergencyCancelResult>;
+  closeAllPositions?(reason: string): Promise<EmergencyCloseFill[]>;
+  verifyFlat?(): Promise<boolean>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
-> Code-Version **1.36.19**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.20**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,31 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.20] — 2026-09-04 · fix(audit): H7 Kill-Switch/Flatten arbeitet auf echten Venue-Positionen (HIGH)
+
+**HIGH, Handelslogik/Control (`src/contracts/broker.ts`,
+`src/lib/engine.ts`, `src/lib/broker.ts`,
+`src/app/api/firm/kill/route.ts`, `src/brokers/bitunix/*`, `src/brokers/alpaca/*`,
+`tests/h7.emergencyFlatten.test.ts` neu).** Befund H7 des Senior-Peer-Reviews:
+Der Not-Halt glättete nur das in-process Paper-Ledger —
+`/api/firm/kill → flattenAll() → getBroker() → PaperBroker.closeAll()` — die
+echte Bitunix-/Live-Ausführungs-Engine war nie beteiligt. Ein Kill hätte bei
+späterer Live-Freigabe die Simulation geschlossen und reale Venue-Positionen
+offen gelassen.
+
+**Fix (paper-first, live-ready):** neue `EmergencyBroker`-Schnittstelle
+(`cancelAllOpenOrders → closeAllPositions → verifyFlat`), die sowohl der
+`PaperBroker` (lokales Ledger) als auch die Live-`BrokerExecutionEngine`
+(Bitunix: `cancel_all_orders`/`close_all_position`, Alpaca:
+`DELETE /v2/orders`/`DELETE /v2/positions`) erfüllen. `flattenAll` löst den
+Broker über die Konfiguration auf (`resolveEmergencyBroker`: Paper-Default,
+Live nur wenn Plattform + Venue-Flags + Live-Gate freigeben), führt die
+Notfall-Sequenz in der festen Reihenfolge aus, macht bei „nicht flach“ genau
+einen Retry-Close und belegt die Glattheit im Audit (`FLATTEN_ALL` mit
+`mode`/`venue`/`flat`; Paper default: „paper-only flatten (live disabled)“).
+In `/api/firm/kill` läuft die Sequenz **vor** `killSwitch.pull()` (Arm wird nie
+blockiert — Fehler landen im Outcome + Audit).
 
 ## [1.36.19] — 2026-09-04 · fix(audit): H2 atomare Order-Reservierung über Prozessgrenzen (CRITICAL)
 

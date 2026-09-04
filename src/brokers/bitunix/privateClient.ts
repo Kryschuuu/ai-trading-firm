@@ -492,4 +492,50 @@ export class BitunixPrivateClient {
       .filter((f): f is BitunixFill => f !== null)
       .sort((a, b) => a.ts - b.ts);
   }
+
+  /**
+   * H7 (v1.36.20): Storniert ALLE offenen Orders (optional je Symbol) —
+   * Notfall-Schritt 1 des Kill-Flatten. `cancel_all_orders` ist im Effekt
+   * idempotent (bereits stornierte Orders sind keine offenen Orders mehr).
+   * Die Venue-Antwort nennt – wenn das Feld belegt ist – die erfolgreich
+   * stornierten bzw. fehlgeschlagenen Order-IDs (Fehler sind kein Abbruch:
+   * es zählt am Ende `verifyFlat()`, nicht der Einzelreport).
+   */
+  async cancelAllOrders(
+    symbol?: string
+  ): Promise<{ successList: string[]; failureList: string[] }> {
+    const sym = typeof symbol === "string" ? symbol.trim().toUpperCase() : "";
+    const body = JSON.stringify(sym.length > 0 ? { symbol: sym } : {});
+    const res = await this.signed("POST", BITUNIX_PATHS.cancelAllOrders, undefined, body);
+    const data = envelopeData<{
+      successList?: Array<{ orderId?: string; clientId?: string }>;
+      failureList?: Array<{ orderId?: string; clientId?: string; errorMsg?: string; errorCode?: string }>;
+    } | null>(res.json);
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      // Leere/ungerade Antwort: kein Einzelreport, aber kein Grund zum Abbrechen.
+      return { successList: [], failureList: [] };
+    }
+    return {
+      successList: (data.successList ?? [])
+        .map((x) => String(x?.orderId ?? ""))
+        .filter(Boolean),
+      failureList: (data.failureList ?? [])
+        .map((x) => String(x?.orderId ?? ""))
+        .filter(Boolean),
+    };
+  }
+
+  /**
+   * H7 (v1.36.20): Schließt ALLE Positionen (optional je Symbol) —
+   * Notfall-Schritt 2 des Kill-Flatten. Die Antwort trägt KEINE Fill-Daten
+   * (`data` ist leer); die tatsächliche Glattheit wird deshalb ausschließlich
+   * über `verifyFlat()` (`listPositions` == 0) belegt, nie als Fill-Report
+   * behauptet. Der Endpoint ist im Effekt idempotent (nochmal schließen ist
+   * ein No-Op) — POST wird wie gewohnt nicht vom Transport wiederholt.
+   */
+  async closeAllPositions(symbol?: string): Promise<void> {
+    const sym = typeof symbol === "string" ? symbol.trim().toUpperCase() : "";
+    const body = JSON.stringify(sym.length > 0 ? { symbol: sym } : {});
+    await this.signed("POST", BITUNIX_PATHS.closeAllPositions, undefined, body);
+  }
 }

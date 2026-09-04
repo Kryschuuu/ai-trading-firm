@@ -5,6 +5,72 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.20] — 2026-09-04 · fix(audit): H7 Kill-Switch/Flatten arbeitet auf echten Venue-Positionen (HIGH)
+
+**HIGH, Handelslogik/Control (`src/contracts/broker.ts`, `src/lib/engine.ts`,
+`src/lib/broker.ts`, `src/app/api/firm/kill/route.ts`,
+`src/brokers/bitunix/config.ts|privateClient.ts|execution.ts|adapter.ts`,
+`src/brokers/alpaca/privateClient.ts|execution.ts|adapter.ts`,
+`tests/h7.emergencyFlatten.test.ts` neu).** Befund H7 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): **Kill-Switch/Flatten arbeitet nur auf
+dem Paper-Ledger.** `/api/firm/kill → flattenAll() → getBroker()` lieferte den
+in-process `PaperBroker` und rief `closeAll()` — die echte Bitunix- bzw.
+Live-Ausführungs-Engine war nie beteiligt. Ein Not-Halt hätte bei späterer
+Live-Freigabe die Simulation geschlossen und reale Venue-Positionen offen
+gelassen.
+
+```ts
+// vor dem Fix — src/lib/engine.ts (vereinfacht)
+const broker = await getBroker();          // IMMER PaperBroker (papier)
+const fills = broker.closeAll(reason);     // nur lokales Ledger, nie die Venue
+```
+
+### Geändert
+
+- **`EmergencyBroker`-Schnittstelle** (`src/contracts/broker.ts`): die drei
+  Notfall-Fähigkeiten, die Paper und Live gleichermaßen erfüllen —
+  `cancelAllOpenOrders(): Promise<{canceled}>`, `closeAllPositions(reason):
+  Promise<EmergencyCloseFill[]>` und `verifyFlat(): Promise<boolean>`. Die
+  `BrokerAdapter`-Schnittstelle trägt die drei Methoden optional.
+- **`flattenAll()`** (`src/lib/engine.ts`): löst den Broker jetzt über
+  `resolveEmergencyBroker()` auf — Paper-Default, Live nur wenn Plattform-Flag
+  (`LIVE_TRADING_ENABLED`) **und** Venue-Live-Flags **und** Live-Gate den
+  Adapter freigeben (aktuell `LiveTradingGateError` → Paper-Fallback). Die
+  Sequenz läuft strikt cancel → close → verify; bei „nicht flach“ genau ein
+  Retry-Close, danach Alarm + Audit. **Wirft nie** — Fehler gehen in das
+  `FlattenOutcome` (`mode`, `venue`, `canceled`, `fills`, `flat`, `error`).
+- **`/api/firm/kill`** (`src/app/api/firm/kill/route.ts`): die Notfall-Sequenz
+  läuft **vor** `killSwitch.pull()`; Arm wird dadurch nie blockiert. Audit und
+  Response tragen den Flatten-Ausgang (Modus, Venue, Anzahl, Flat-Beweis).
+- **Paper-Broker** (`src/lib/broker.ts`): erfüllt `EmergencyBroker`
+  (`cancelAllOpenOrders` → `{canceled:0}`, `closeAllPositions` → `closeAll`,
+  `verifyFlat` → leeres Ledger).
+- **Bitunix live** (`src/brokers/bitunix/*`): neue Endpoints
+  `trade/cancel_all_orders` + `trade/close_all_position` (Private-Client),
+  `EmergencyBroker` auf der `BrokerExecutionEngine` (Gate-Prüfung im Adapter).
+- **Alpaca live** (`src/brokers/alpaca/*`): `DELETE /v2/orders`
+  (Cancel-all) + `DELETE /v2/positions` (Close-all) im Private-Client,
+  `EmergencyBroker` auf der `BrokerExecutionEngine`.
+- **Audit** `FLATTEN_ALL` (CRITICAL): nennt `mode`, `venue`, `reason`,
+  `canceled`, `closed`, `flat`; bei Paper-Default wird `liveDisabled:
+  "paper-only flatten (live disabled)"` vermerkt — ein späterer Live-Flatten
+  ist damit im Audit vom reinen Ledger-Flatten unterscheidbar.
+
+### Hinzugefügt
+
+- **`tests/h7.emergencyFlatten.test.ts`**: Mock-`EmergencyBroker`, Assertion
+  der Reihenfolge `cancelAllOpenOrders → closeAllPositions → verifyFlat`
+  (acceptance vor Arm), Retry-Fall (nicht flach → ein Retry → flach),
+  NOT_FLAT-Alarm ohne Wurf, Cancel-Fehler ohne Abbruch der restlichen
+  Sequenz, Audit-Nachweis für Live- vs. Paper-Modus.
+
+### Sicherheit
+
+- Ein Kill-Switch belegt die Venue-Glattheit (`verifyFlat`) bevor er als
+  vollzogen gilt (retry/alert + audit); Paper bleibt der sichere Default.
+- Live-Venue-Kill läuft über denselben Live-Gate-Enforcer wie jede Order
+  (fail-closed; kein stiller Fallback auf das Paper-Ledger).
+
 ## [1.36.19] — 2026-09-04 · fix(audit): H2 atomare Order-Reservierung über Prozessgrenzen (CRITICAL)
 
 **CRITICAL, Handelslogik (`src/db/schema.ts`, `src/lib/broker.ts`, `src/lib/engine.ts`,

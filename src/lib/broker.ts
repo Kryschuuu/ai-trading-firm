@@ -9,7 +9,12 @@
 import { killSwitch, validateOrder, riskValidationReason, RISK_LIMITS } from "./riskGuard";
 import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
-import type { BrokerCapabilities, BrokerVenueId } from "../contracts/broker";
+import type {
+  BrokerCapabilities,
+  BrokerVenueId,
+  EmergencyCancelResult,
+  EmergencyCloseFill,
+} from "../contracts/broker";
 import type { MarketInstrument } from "../universe/types";
 import { db } from "../db";
 import { orderIntents, positions as positionsTable } from "../db/schema";
@@ -717,6 +722,33 @@ export class PaperBroker {
       if (f) fills.push(f);
     }
     return fills;
+  }
+
+  // ── H7 (v1.36.20): Notfall-Schnittstelle (EmergencyBroker) ────────────────
+  // Der Paper-Broker erfüllt dieselbe Schnittstelle wie die Live-Adapter, damit
+  // der Kill-Switch venue-unabhängig glattstellen kann (cancel → close → verify).
+  // Paper füllt synchron — es existieren keine „offenen Orders“ zum Stornieren.
+
+  /** H7: Papier hat keine ruhenden Orders (Fills sind synchron). */
+  async cancelAllOpenOrders(): Promise<EmergencyCancelResult> {
+    return { canceled: 0 };
+  }
+
+  /** H7: Glattstellen des lokalen Ledgers (bestehende `closeAll`-Semantik). */
+  async closeAllPositions(reason: string): Promise<EmergencyCloseFill[]> {
+    const fills = this.closeAll(reason === "MANUAL_FLATTEN" ? "MANUAL_FLATTEN" : reason);
+    return fills.map((f) => ({
+      symbol: f.symbol,
+      side: f.side,
+      qty: f.qty,
+      fillPrice: f.fillPrice,
+      realizedPnl: f.realizedPnl,
+    }));
+  }
+
+  /** H7: Ist das Ledger flach (0 offene Positionen)? */
+  async verifyFlat(): Promise<boolean> {
+    return this.positions.size === 0;
   }
 }
 
