@@ -2,11 +2,7 @@
 
 - **Severity:** CRITICAL
 - **Bereich:** Handelslogik
-- **Status (validiert):** ⚠️ **Teilweise.** Der im Audit genannte `G.__paperBrokerLedger ??= new PaperBroker(...)`
-  Singleton existiert nicht mehr (heute: Factory + DB-Hydration in `getBroker()`). Aber: die
-  kritische Prüfung (Cash / Position-Slot / Kill-Switch) ist weiterhin prozess-lokal im
-  `PaperBroker`-Speicher und wird erst **nach** dem Broker-`submit` in die DB geschrieben →
-  über mehrere Node-Prozesse nicht atomar.
+- **Status (validiert):** ✅ **Gefixt v.1.36.18** 
 - **Datei(en):** `src/lib/engine.ts` (`getBroker`, `flattenAll`), `src/lib/broker.ts` (`PaperBroker.submit`), `src/db/schema.ts`
 
 ## Arena-Prompt (kopierbar)
