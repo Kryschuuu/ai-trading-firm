@@ -8,13 +8,17 @@
  * `src/cycle/ports.ts`):
  *   1. In-Memory-Ring (immer verfügbar, deterministisch testbar)
  *   2. NDJSON-Datei (`data/routing/audit.ndjson`) — vgl. task-01/06
- *   3. `audit_log` (Event `MODEL_ROUTING`) — best-effort, nie blockierend
+ *   3. `audit_log` (Event `MODEL_ROUTING`) — klassifiziert (S1, v1.36.18):
+ *      Freigaben/Fallbacks als Telemetrie (Warnung + Metrik bei Ausfall),
+ *      Ablehnungen/Budget-Blocks als Sicherheitsklasse (Retry + Spool).
+ *      Nie blockierend, aber nie still.
  *
  * Der Audit-Pfad wirft NIE: Ein Audit-Ausfall darf keine Routing-Entscheidung
  * verhindern (aber jeder Wechsel wird trotzdem im Ring gehalten).
  */
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { writeAuditRecord } from "@/lib/auditSink";
 import type { AuditSink, RoutingAuditEntry } from "./types";
 
 export const ROUTING_AUDIT_EVENT = "MODEL_ROUTING";
@@ -74,35 +78,39 @@ export class FileAuditSink implements AuditSink {
   }
 }
 
-/** Datenbank-Senke (`audit_log`, Event `MODEL_ROUTING`) — best-effort. */
+/**
+ * Datenbank-Senke (`audit_log`, Event `MODEL_ROUTING`) — Klasse `telemetry`
+ * (S1, v1.36.18): Routing-Entscheidungen sind Beobachtungsdaten, ihr Fehlen
+ * darf den Modellpfad nicht blockieren. „best-effort“ heißt seit S1 nicht mehr
+ * „still“: jeder Fehlschlag zählt und wird als Warnung geloggt.
+ * Ausnahmen nach oben: `denied`/`budget_blocked` sind Eingriffe in die
+ * Modellwahl und damit sicherheitsrelevant — die gehen mit Spool-Reserve.
+ */
 export class DatabaseAuditSink implements AuditSink {
   readonly name = "database";
 
   async write(entry: RoutingAuditEntry): Promise<void> {
     pushRing(entry);
     if (!process.env.DATABASE_URL) return;
-    try {
-      const [{ db }, { auditLog }] = await Promise.all([import("@/db"), import("@/db/schema")]);
-      await db.insert(auditLog).values({
-        event: ROUTING_AUDIT_EVENT,
-        level: entry.outcome === "denied" || entry.outcome === "budget_blocked" ? "WARN" : "INFO",
-        detail: {
-          ts: entry.ts,
-          agent: entry.agent,
-          from: entry.from,
-          to: entry.to,
-          reason: entry.reason,
-          trigger: entry.trigger,
-          policyVersion: entry.policyVersion,
-          outcome: entry.outcome,
-          task: entry.task ?? null,
-          complexity: entry.complexity ?? null,
-          detail: entry.detail ?? null,
-        },
-      });
-    } catch {
-      /* DB nicht bereit: Ring + Datei bleiben die Wahrheit. */
-    }
+    const securityRelevant = entry.outcome === "denied" || entry.outcome === "budget_blocked";
+    await writeAuditRecord({
+      event: ROUTING_AUDIT_EVENT,
+      level: securityRelevant ? "WARN" : "INFO",
+      detail: {
+        ts: entry.ts,
+        agent: entry.agent,
+        from: entry.from,
+        to: entry.to,
+        reason: entry.reason,
+        trigger: entry.trigger,
+        policyVersion: entry.policyVersion,
+        outcome: entry.outcome,
+        task: entry.task ?? null,
+        complexity: entry.complexity ?? null,
+        detail: entry.detail ?? null,
+      },
+      auditClass: securityRelevant ? "security" : "telemetry",
+    });
   }
 }
 

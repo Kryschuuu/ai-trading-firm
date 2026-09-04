@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.17 (2026-09-04) · Vollständige
+> **Dokumentationsstand:** v1.36.18 (2026-09-04) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -127,6 +127,29 @@ Credential wieder aufheben, das ihn zieht (Befund C3, HIGH). Seit v1.36.15:
 Ein gestohlenes Operator-Token kann das Trading damit **nicht** mehr still wieder
 freischalten, nachdem der Not-Halt ausgelöst wurde. Befund C3 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Audit-Trail ist durable: Sicherheits-Audits mit Retry, Spool und Alarm (v1.36.18)
+
+Bis v1.36.16 konnten Audit-Schreibvorgänge in leeren `catch`-Blöcken
+verschwinden (Befund S1, MEDIUM) — eine gespeicherte Credential-Änderung, ein
+geänderter Prompt oder ein entschärfter Not-Halt blieb dann ohne Beleg im
+`audit_log`, und nichts deutete darauf hin. Seit v1.36.18 gilt:
+
+* **zwei Klassen** in `src/lib/auditSink.ts`: `security` (Auth, Kill-Switch,
+  Credentials, Order-Ablehnungen, Freigaben, Prompts) retryt mit Backoff und
+  legt den Beleg bei DB-Ausfall persistent nach `data/audit-spool/`
+  (at-least-once, automatischer Nachzug inkl. Boot); `telemetry` bleibt
+  best-effort, loggt und zählt aber mindestens,
+* **fail-closed, wo die Mutation noch vermeidbar ist:** Credential-Store,
+  Kill-Switch-**Disarm** und Proposal-Freigabe bleiben ohne durablen Beleg aus
+  (`503 AUDIT_PERSISTENCE_FAILED`); der Not-Halt-**Arm** wird nie blockiert,
+* **Lücken sind sichtbar:** CRITICAL im Journal, `audit_missed_total` in der
+  Metrik, `audit {…}` in `/api/health` und eine eigene Kennzahlengruppe in der
+  Operations-Center-Sektion „Audit",
+* **kein Dauerblocker:** von der DB abgelehnte Zeilen landen nach 3 Versuchen
+  in `audit-quarantine.ndjson`, statt den Nachzug zu stoppen.
+
+Befund S1 in [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Control Plane: Verbindungszustand überlebt den Neustart (v1.36.16)
 

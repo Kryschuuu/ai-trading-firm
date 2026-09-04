@@ -311,7 +311,23 @@ export interface MissionMutationResponse {
   ok: boolean;
   mission?: MissionRow;
   warnings?: string[];
+  /** Audit-Zuverlässigkeit der Änderung (S1). */
+  audit?: AuditWriteStatusDto;
   error?: string;
+}
+
+/**
+ * Status des Sicherheits-Audits zu einer Mutation (S1, v1.36.18).
+ *
+ * `durable: false` heißt: der Beleg ist weder in `audit_log` noch im
+ * persistenten Spool — die UI muss das als Warnung zeigen, nicht als Erfolg
+ * ohne Weiteres. `degraded: true` heißt: Spool-Reserve, Nachzug ausstehend.
+ */
+export interface AuditWriteStatusDto {
+  durable: boolean;
+  target: "db" | "spool" | "none";
+  degraded: boolean;
+  attempts?: number;
 }
 
 /** Response von PUT /api/firm/agents. */
@@ -319,5 +335,7 @@ export interface AgentPromptResponse {
   ok: boolean;
   agent?: AgentRow;
   warnings?: string[];
+  /** Audit-Zuverlässigkeit der Änderung (S1). */
+  audit?: AuditWriteStatusDto;
   error?: string;
 }

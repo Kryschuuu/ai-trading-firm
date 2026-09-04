@@ -8,6 +8,7 @@
  * (`FEED_FAILOVER` / `ANOMALOUS_SNAPSHOT`), zusätzlich ein In-Memory-Ring
  * (deterministisch testbar, DB-frei). Ein Failover ist IMMER laut — nie still.
  */
+import { writeAuditRecord } from "@/lib/auditSink";
 import type { MarketInstrument } from "../../universe/types";
 import type { MarketFeed, MarketSnapshot } from "./types";
 import { AnomalousSnapshotError } from "./types";
@@ -47,21 +48,21 @@ export async function recordFailover(entry: Omit<FailoverAuditEntry, "at">): Pro
     failoverAuditRing.splice(0, failoverAuditRing.length - RING_MAX);
   }
   const event = entry.reason.startsWith("anomaly") ? "ANOMALOUS_SNAPSHOT" : "FEED_FAILOVER";
-  try {
-    const [{ db }, { auditLog }] = await Promise.all([import("../../db"), import("../../db/schema")]);
-    await db.insert(auditLog).values({
-      event,
-      level: "WARN",
-      detail: {
-        instrumentId: entry.instrumentId,
-        fromFeed: entry.fromFeed,
-        toFeed: entry.toFeed,
-        reason: entry.reason,
-      },
-    });
-  } catch {
-    /* DB nicht bereit — Ring bleibt die Wahrheit. */
-  }
+  // S1 (v1.36.18): Klasse `telemetry`. Der Kursfluss darf an einem Audit
+  // niemals scheitern — der Fehlschlag wird aber gezählt und als Warnung
+  // geloggt (`audit_write_failures_total{auditClass="telemetry",stage="db"}`),
+  // statt in einem leeren catch zu verschwinden.
+  await writeAuditRecord({
+    event,
+    level: "WARN",
+    detail: {
+      instrumentId: entry.instrumentId,
+      fromFeed: entry.fromFeed,
+      toFeed: entry.toFeed,
+      reason: entry.reason,
+    },
+    auditClass: "telemetry",
+  });
   return full;
 }
 

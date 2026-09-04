@@ -657,7 +657,10 @@ keine zweite Quelle. Capability-Matrix (Ist/Soll) und `stopAtVenue`
 ### 10.4 Audit & API
 
 * Jeder Factory-Aufruf mit `mode != "paper"` → `audit_log` (Event
-  `BROKER_FACTORY`) + In-Memory-Ring (best-effort DB, Fail-Safe).
+  `BROKER_FACTORY`) + In-Memory-Ring. Die DB-Senke ist seit S1 (v1.36.18)
+  klassifiziert (`src/lib/auditSink.ts`): Sicherheitsklasse mit Retry,
+  persistentem Spool als at-least-once-Reserve und CRITICAL-Metrik — der
+  Factory-Pfad bricht bei DB-Ausfall trotzdem nie ab (Fail-Safe).
 * `GET /api/brokers` (Übersicht: id, capabilities, Health, projizierte
   Flags) und `GET /api/brokers/{venue}/health` (read-only; Remote-Check nur
   mit `BROKER_HEALTHCHECK_REMOTE=true`, Default OFF, credential-frei).

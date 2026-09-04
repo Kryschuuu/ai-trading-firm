@@ -47,6 +47,10 @@ export default function PromptPanel({
   const [error, setError] = useState("");
   const [okMsg, setOkMsg] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
+  // S1 (v1.36.18): Audit-Lücke bei dieser Änderung — separat von den weichen
+  // Format-Warnungen, weil sie den Erfolgsfall betrifft (Änderung wirksam,
+  // Beleg fehlt). Die Response trägt `audit` seit S1 immer mit.
+  const [auditGap, setAuditGap] = useState<string | null>(null);
 
   const agent = useMemo(() => agents.find((a) => a.id === effAgentId) ?? null, [agents, effAgentId]);
   const prompt = draft ?? agent?.systemPrompt ?? "";
@@ -58,6 +62,7 @@ export default function PromptPanel({
     setError("");
     setOkMsg("");
     setWarnings([]);
+    setAuditGap(null);
   }
 
   async function save() {
@@ -65,6 +70,7 @@ export default function PromptPanel({
     setError("");
     setOkMsg("");
     setWarnings([]);
+    setAuditGap(null);
     const trimmed = prompt.trim();
     if (trimmed.length < 20) {
       setError("systemPrompt: mindestens 20 Zeichen — ein leerer Prompt liefert nur Rauschen.");
@@ -88,6 +94,11 @@ export default function PromptPanel({
       setError(err);
       return;
     }
+    setAuditGap(
+      data.audit && !data.audit.durable
+        ? "Prompt gespeichert, aber der Sicherheits-Audit war nicht persistent schreibbar — die Lücke ist im Journal (CRITICAL) und im Operations Center gemeldet."
+        : null
+    );
     setDraft(data.agent?.systemPrompt ?? trimmed);
     setOkMsg(`✔ Gespeichert (Datenbank, ${new Date().toLocaleTimeString("de-DE")}) — wirkt ab dem nächsten Turn, kein Neubau nötig.`);
     setWarnings(data.warnings ?? []);
@@ -176,6 +187,7 @@ export default function PromptPanel({
               setOkMsg("");
               setError("");
               setWarnings([]);
+              setAuditGap(null);
             }}
             disabled={!dirty}
             className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-40"
@@ -201,6 +213,11 @@ export default function PromptPanel({
               ⚠ {w}
             </p>
           ))}
+          {auditGap && (
+            <p role="alert" className="rounded-lg border border-rose-700 bg-rose-950/50 px-3 py-2 text-xs font-semibold text-rose-200">
+              ⛔ {auditGap}
+            </p>
+          )}
         </div>
       </section>
 

@@ -5,6 +5,165 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.18] — 2026-09-04 · fix(audit): S1 Sicherheits-Audits sind durable (MEDIUM)
+
+**MEDIUM, Audit/Security (`src/lib/auditSink.ts` neu, `src/lib/telemetry.ts`,
+`src/lib/engine.ts`, `src/lib/ruleService.ts`, `src/lib/adaptiveRisk.ts`,
+`src/lib/marketdata/failover.ts`, `src/brokers/bitunix/audit.ts`,
+`src/brokers/alpaca/audit.ts`, `src/brokers/audit.ts`,
+`src/brokers/control-plane/{audit,http,service}.ts`, `src/routing/audit.ts`,
+`src/live-gate/audit.ts`, `src/universe/audit.ts`,
+`src/app/api/firm/{agents,kill,missions,run,proposals/[id]/approve}/route.ts`,
+`src/app/api/health/route.ts`, `src/ops/collect.ts`, `src/instrumentation.ts`,
+`tests/auditReliability.test.ts` neu).** Befund S1 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): **Audit-Schreibvorgänge waren teils in
+leere `catch`-Blöcke verpackt.** Eine erfolgreiche sicherheitsrelevante
+Mutation konnte ohne Auditbeleg bleiben — in einem Trading-System die
+schlimmste Art von Beobachtungslücke, weil sie im Nachhinein nicht von
+„nichts passiert" zu unterscheiden ist.
+
+```ts
+// src/brokers/bitunix/audit.ts — vor dem Fix
+try {
+  await db.insert(auditLog).values({ event: "BITUNIX_PRIVATE_CALL", … });
+} catch {
+  /* best-effort */
+}
+
+// src/app/api/firm/agents/route.ts — vor dem Fix
+try {
+  await logAudit("AGENT_PROMPT_UPDATED", "INFO", …);
+} catch {
+  // Audit-Fehler darf die gespeicherte Prompt-Änderung nicht reißen.
+}
+```
+
+### Hinzugefügt
+
+- **`src/lib/auditSink.ts`** (neu): klassifizierte Audit-Senke mit
+  `AuditClass = "security" | "telemetry"`.
+  `writeAuditRecord({ event, level, detail, auditClass, failClosed? })`
+  zurückiert ein `AuditWriteOutcome`
+  (`durable / target / degraded / flagged / attempts / error`) statt `void`,
+  damit Aufrufer die Lücke auswerten können.
+  - **`security`:** Retry mit exponentiellem Backoff → bei anhaltendem
+    Fehler **persistenter Spool** (append-only NDJSON, Modus `0600`) →
+    CRITICAL-Meldung + Metrik. Mit `failClosed: true` (nur für Audits **vor**
+    einer Mutation) wirft die Senke `AuditPersistenceError`
+    (`code = AUDIT_PERSISTENCE_FAILED`), die Mutation bleibt aus.
+  - **`telemetry`:** ein Versuch, kein Wurf, aber Warnung + Zähler —
+    best-effort ja, still nein.
+  - **Spool-Nachzug (at-least-once):** `drainAuditSpool()` läuft nach dem
+    nächsten erfolgreichen Schreibvorgang (gedrosselt, nicht blockierend) und
+    beim Boot in `src/instrumentation.ts`. Bewusste Semantik: ein Insert, der
+    am Server trotzdem durchging, kann beim Nachzug **dupliziert** werden —
+    Duplikate sind korrigierbar, Verlust nicht.
+  - **Quarantäne:** lehnt die DB eine Zeile dauerhaft ab (z. B.
+    FK-Verletzung), wandert sie nach `AUDIT_DRAIN_HEAD_MAX_FAILURES` (3)
+    Versuchen nach `audit-quarantine.ndjson`, statt den gesamten Nachzug zu
+    blockieren.
+  - **Lärmschutz:** Metrik/Ring zählen jeden Einzelfall; die Logzeile wird pro
+    Schlüssel in `AUDIT_ALERT_COOLDOWN_MS` (30 s) gebündelt und nennt die
+    unterdrückte Anzahl. Nach einem DB-Fehler gelten Retries für
+    `AUDIT_DB_COOLDOWN_MS` (2 s) als übersprungen — kein Backoff im
+    Handelspfad während eines Ausfalls.
+- **Env-Flags:** `AUDIT_SPOOL_DIR` (`data/audit-spool`), `AUDIT_RETRY_MAX` (2),
+  `AUDIT_RETRY_BASE_MS` (50), `AUDIT_DB_COOLDOWN_MS` (2000).
+- **Metriken** in `src/lib/telemetry.ts`:
+  `audit_write_failures_total{auditClass,stage}`, `audit_spooled_total`,
+  `audit_spool_drained_total{result}`, `audit_missed_total{auditClass,kind}` —
+  Labels sind Code-konstant (kein Event-Name als Label, Kardinalitätsregel wie
+  bei MDERR-006), Aufnahme in `prometheusMetrics()` inklusive.
+- **Sichtbarkeit:** `/api/health` liefert `audit {pending, lost, missed,
+  spooled, drained, quarantined, dbCoolingDown, gap}`; die
+  Operations-Center-Sektion „Audit" zeigt dieselben Kennzahlen (Status
+  `degraded`, sobald Audit-Reserve aktiv ist) — und zwar auch, wenn die
+  Datenbank nicht erreichbar ist, weil genau dann die Lücken entstehen.
+- **`tests/auditReliability.test.ts`** (neu, 13 Fälle): Retry-Zählung +
+  Spool-Inhalt bei `security` · `telemetry` retryt nicht, warnt aber und zählt
+  · Totalverlust (DB + unbeschreibbarer Spool) → `AuditPersistenceError` und
+  **keine** Mutation · `flagMissedAudit` (CRITICAL + Zähler) ·
+  at-least-once-Nachzug inkl. Reihenfolge · Quarantäne statt Dauerblocker ·
+  Alarm-Bündelung bei 5 Fehlschlägen · Bitunix-Venue-Audit (Ring +
+  degradierter Zähler, kein Throw im Call-Pfad) · Agents-Route „Prompt
+  gespeichert, Lücke gemeldet" (Totalverlust) und „degraded + Nachzug"
+  (Spool-Fall) · Kill-Route Disarm → 503 `AUDIT_PERSISTENCE_FAILED`,
+  Not-Halt bleibt aktiv · Kill-Route Arm → nie durch Auditfehler blockiert ·
+  Architekturwächter: keine stillen `catch`-Blöcke in den
+  Audit-Modulen `src/brokers/*/audit.ts`, `src/lib/auditSink.ts` und den
+  Workshop-Routen.
+
+### Geändert
+
+- **`src/lib/engine.ts` → `logAudit(...)`:** läuft über die Senke
+  (Default-Klasse `security`) und gibt das Outcome zurück;
+  `LogAuditOptions { auditClass, failClosed, spool }`.
+  `src/lib/ruleService.ts` → `ruleAudit(...)` ebenso (Regel-Ablehnungen sind
+  sicherheitsrelevant; vorher konnte ein Insert-Fehler mitten im
+  Fehlerpfad von `macroCycle` die eigentliche Ursache maskieren).
+- **Venue-Audits** (`bitunix`, `alpaca`, Factory, Control Plane): der
+  DB-Anteil läuft über `writeAuditRecord({ auditClass: "security" })`;
+  pro Modul ein eigener Degradations-Zähler
+  (`readBitunixAuditDegradedCount()`, `readAlpacaAuditDegradedCount()`,
+  `readBrokerFactoryAuditDegradedCount()`,
+  `readControlPlaneAuditDegradedCount()`).
+  Ein Wurf wäre hier falsch: der Venue-Call liegt **hinter** dem Audit, eine
+  abgesetzte Order verschwindet nicht, wenn der lokale Beleg fehlschlägt —
+  deshalb Spool statt Abbruch.
+- **Credential-Store (`saveCredentials`):** der
+  `credential.saved`/`credential.changed`-Beleg wird vor `store.put`
+  geschrieben und ist `failClosed` — ohne durablen Beleg bleibt das Credential
+  unangetastet. `mapControlPlaneError` übersetzt das in
+  `503 AUDIT_PERSISTENCE_FAILED` (Behebung beim Betrieb, nicht beim Anwender).
+- **Kill-Switch (`/api/firm/kill`):** Disarm schreibt
+  `KILL_SWITCH_DISARMED { stage: "PRECHECK" }` vor der Mutation mit
+  `failClosed`; misslingt beides, bleibt der Not-Halt aktiv (503). Nach der
+  Mutation folgt `stage: "APPLIED"`. Arm bleibt bewusst unverblockiert und
+  meldet eine Lücke nur.
+- **Proposal-Freigabe (`/api/firm/proposals/[id]/approve`):** PRECHECK +
+  `failClosed` wie beim Disarm; dabei Fix eines latenten Audit-Bugs: der
+  frei textuelle `approvedBy`-Wert landete in `audit_log.agent_id` (FK auf
+  `agents.id`, uuid) — der Insert schlug auf einer echten PostgreSQL immer
+  fehl, das Event fehlte also grundsätzlich. Der Actor steht jetzt in
+  `detail`.
+- **Workshop-Routen (`agents`, `missions`):** Audit mit `security`-Klasse;
+  bei Totalverlust bleibt die (bereits wirksame) Mutation bestehen, die Lücke
+  wird aber gemeldet — CRITICAL, Missed-Audit-Zähler, `warnings`-Hinweis und
+  `audit`-Objekt im Response-Body. Begründung im Quelltext kommentiert.
+- **`src/app/api/firm/run/route.ts`:** `ERROR`-Audits laufen über `logAudit`
+  (vorher direkter Insert im `catch`: ein Auditfehler ersetzte die
+  Pipeline-Fehlermeldung durch einen 500).
+- Telemetrie-Pfade (`src/routing/audit.ts`, `src/lib/marketdata/failover.ts`,
+  `src/lib/adaptiveRisk.ts`, `src/universe/audit.ts`,
+  `src/live-gate/audit.ts`): leeres `catch` → Warnung + Metrik;
+  ablehnungs-/budgetkritische Fälle (`MODEL_ROUTING` denied/budget_blocked,
+  `RISK_ADAPTIVE` im EXTREME-Regime) hochgestuft auf `security`.
+
+### Sicherheit
+
+- **Nie stumm:** jede nicht durabler Sicherheits-Auditzeile erzeugt eine
+  CRITICAL-Journalzeile (`audit_write_degraded` / `audit_write_lost` /
+  `audit_missed_security`) und eine Zählung; `pendingAuditCount()` und
+  `auditDurabilitySnapshot()` machen den Rückstau messbar.
+- **Spool-Inhalte secret-frei:** ausschließlich, was auch in `audit_log`
+  stünde (`event`/`level`/`detail`/IDs), Zeile auf 8000 Zeichen begrenzt,
+  Datei `0600` im Datenverzeichnis, `.gitignore`-Eintrag `/data/audit-spool`.
+- **Fail-closed nur, wo es nützt:** Audits nach einer bereits wirksamen
+  Mutation brechen den Pfad nicht ab (sonst würde z. B. ein Not-Halt am
+  Auditbeleg scheitern — fail-open im einzigen Moment, in dem Schutz zählt).
+- **`isAuditPersistenceError()`** als Duck-Type-Guard, weil `instanceof` über
+  Next-Chunk-Grenzen nicht garantiert ist (Muster aus C1/`instrumentation.ts`).
+
+### Migrationshinweis
+
+Kein Schema-Bruch, keine neue Tabelle, keine Pflichtkonfiguration. Der Spool
+ist additiv: ohne DB-Ausfall ändert sich nichts; mit Ausfall entstehen
+`data/audit-spool/*.ndjson` (lokal, nicht versioniert). Wer den Ordner woanders
+haben will: `AUDIT_SPOOL_DIR`. Retry-Verhalten bei sehr engem Zeitbudget:
+`AUDIT_RETRY_MAX=0`. **Tests:** `tests/auditReliability.test.ts` (13 Fälle),
+erweiterter Katalog-Wächter in `tests/auditView.test.ts`. Typecheck, Lint und
+Vollsuite grün — mit und ohne erreichbare Datenbank.
+
 ## [1.36.17] — 2026-09-04 · chore(license): MIT → GNU General Public License v3 (GPL-3.0-only)
 
 Kein Code-Change. **Relizenzierung des Projekts:** Die bisherige MIT-Lizenz

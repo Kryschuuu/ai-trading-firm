@@ -20,6 +20,7 @@ import {
 import { MISSION_SEGMENTS } from "@/lib/missionTemplates";
 import { segmentCandidateCounts } from "@/lib/missionUniverse";
 import { logAudit } from "@/lib/engine";
+import { flagMissedAudit, type AuditWriteOutcome } from "@/lib/auditSink";
 import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
@@ -86,17 +87,36 @@ function parseBody(raw: unknown): { id?: string; payload?: Record<string, unknow
   };
 }
 
+/**
+ * Workshop-Audit (S1, v1.36.18): Sicherheitsklasse `security`, damit ein
+ * fehlgeschlagener Schreib Retry + Spool + Alarm auslöst statt in einem leeren
+ * `catch` zu verschwinden.
+ *
+ * Die Mutation selbst wird nicht abgebrochen: Missionstitel, -ziel und Budgets
+ * sind Verwaltungsdaten (keine Order, keine Live-Freischaltung), und der
+ * UPDATE/INSERT ist an dieser Stelle bereits wirksam. Die Audit-Lücke wird
+ * dafür laut: CRITICAL-Zeile, Missed-Audit-Zähler und ein `warnings`-Hinweis,
+ * damit das Formular die Lücke dem Operator zeigt statt sie zu verschweigen.
+ */
 async function writeAudit(
   event: string,
   missionId: string | null,
   detail: Record<string, unknown>
-) {
-  try {
-    await logAudit(event, "INFO", detail, missionId ?? undefined);
-  } catch {
-    // Audit-Fehler darf den Workshop-Schreibvorgang nicht reißen —
-    // die Mutation selbst ist bereits sicher validiert.
+): Promise<AuditWriteOutcome> {
+  return logAudit(event, "INFO", detail, missionId ?? undefined);
+}
+
+/** Warnhinstext, falls ein Workshop-Audit nicht durable war (S1). */
+function auditWarning(outcome: AuditWriteOutcome, subject: string): string | null {
+  if (outcome.durable && !outcome.degraded) return null;
+  if (outcome.degraded) {
+    return `Audit zu „${subject}“ noch nicht in audit_log — liegt im persistenten Spool und wird nachgezogen.`;
   }
+  flagMissedAudit(outcome.event, { subject, reason: outcome.error ?? "audit nicht durable" });
+  return (
+    `„${subject}“ ist gespeichert, aber der Audit-Eintrag war nicht persistent schreibbar — ` +
+    "Lücke im Journal (CRITICAL) und im Operations Center gemeldet."
+  );
 }
 
 /**
@@ -156,7 +176,7 @@ export async function POST(req: Request) {
       .values(toColumns(m))
       .returning();
 
-    await writeAudit("MISSION_CREATED", inserted[0]?.id ?? null, {
+    const audited = await writeAudit("MISSION_CREATED", inserted[0]?.id ?? null, {
       title: m.title,
       scope: m.scope,
       symbol: m.symbol,
@@ -166,9 +186,15 @@ export async function POST(req: Request) {
       maxPositionPct: m.maxPositionPct,
       via: "workshop-ui",
     });
+    const warning = auditWarning(audited, "Mission angelegt");
 
     return NextResponse.json(
-      { ok: true, mission: inserted[0], warnings: prepared.warnings },
+      {
+        ok: true,
+        mission: inserted[0],
+        warnings: warning ? [...prepared.warnings, warning] : prepared.warnings,
+        audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
+      },
       { status: 201 }
     );
   } catch (e) {
@@ -214,7 +240,7 @@ export async function PUT(req: Request) {
       .where(eq(missions.id, id))
       .returning();
 
-    await writeAudit("MISSION_UPDATED", id, {
+    const audited = await writeAudit("MISSION_UPDATED", id, {
       title: m.title,
       scope: m.scope,
       symbol: m.symbol,
@@ -224,11 +250,13 @@ export async function PUT(req: Request) {
       maxPositionPct: m.maxPositionPct,
       via: "workshop-ui",
     });
+    const warning = auditWarning(audited, "Mission aktualisiert");
 
     return NextResponse.json({
       ok: true,
       mission: updated[0],
-      warnings: prepared.warnings,
+      warnings: warning ? [...prepared.warnings, warning] : prepared.warnings,
+      audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
     });
   } catch (e) {
     return NextResponse.json(

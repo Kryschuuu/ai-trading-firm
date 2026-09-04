@@ -27,6 +27,10 @@ import { formatDuration, formatNumber, formatRelative, formatTimestampUtc } from
 import { BROKER_REGISTRY } from "@/lib/broker";
 import { listDocs } from "@/lib/docsCatalog";
 import { marketDataFailureSnapshot } from "@/lib/telemetry";
+import {
+  auditDurabilitySnapshot,
+  type AuditDurabilitySnapshot,
+} from "@/lib/auditSink";
 import { getOllamaStatus } from "@/lib/ollama";
 import { publicErrorMessage } from "@/lib/secrets";
 import { getLimits, killSwitch } from "@/lib/riskGuard";
@@ -732,15 +736,87 @@ function collectRisk(firm: FirmResult): Draft {
 // 9. Audit — Datenbank-Audit-Trail + Live-Gate-Hash-Kette
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Kennzahlen der Audit-Zuverlässigkeit (S1, v1.36.18).
+ *
+ * Der Punkt ist: eine Audit-Lücke ist genau dann relevant, wenn die Datenbank
+ * nicht mitspielt. Die Senken-Metriken kommen deshalb aus dem In-Memory-
+ * Zustand + Spool (`src/lib/auditSink.ts`) und sind auch ohne erreichbare
+ * `audit_log` lesbar — andernfalls wäre die Sektion ausgerechnet im
+ * Fehlerfall leer, also „grün“.
+ */
+/** Draft mit garantierten Arrays (die Aufrufer verteilen metrics/items weiter). */
+type AuditDurabilityDraft = Draft & { metrics: OpsMetric[]; items: OpsItem[] };
+
+function auditDurabilityDraft(
+  durability: AuditDurabilitySnapshot,
+  extraNote?: string | null
+): AuditDurabilityDraft {
+  const gaps = durability.pending + durability.lost + durability.missed + durability.overflowDropped;
+  const metrics: OpsMetric[] = [
+    {
+      label: "Spool offen (Nachzug)",
+      value: num(durability.pending, 0),
+      tone: durability.pending > 0 ? "warn" : "good",
+      hint: "Audits, die während eines DB-Ausfalls persistent vorgemerkt wurden und in audit_log nachgezogen werden (at-least-once).",
+    },
+    {
+      label: "Verlorene Sicherheits-Audits",
+      value: num(durability.lost, 0),
+      tone: durability.lost > 0 ? "bad" : "good",
+      hint: "Weder audit_log noch Spool waren schreibbar. Jede solche Zeile ist als CRITICAL im Journal gemeldet.",
+    },
+    {
+      label: "Gemeldete Audit-Lücken",
+      value: num(durability.missed, 0),
+      tone: durability.missed > 0 ? "bad" : "good",
+      hint: "Mutationen, die trotz nicht durablem Audit bewusst durchgeführt wurden (dokumentierter Trade-off, z. B. Prompt-Update).",
+    },
+    {
+      label: "Fehlgeschlagene Schreibversuche",
+      value: num(durability.dbFailures, 0),
+      tone: durability.dbFailures > 0 ? "warn" : "good",
+    },
+    {
+      label: "Nachgezogen",
+      value: num(durability.drained, 0),
+      tone: "neutral",
+    },
+  ];
+  return {
+    status: gaps > 0 ? "degraded" : "ready",
+    asOf: null,
+    metrics,
+    items: durability.recent.slice(0, 8).map((r) => ({
+      label: r.event,
+      value: r.path === "missed" ? "Lücke gemeldet" : r.target === "spool" ? "im Spool" : "verloren",
+      meta: `${formatTimestampUtc(r.at)} · ${r.attempts} Versuch/-versuche${r.error ? ` · ${r.error}` : ""}`,
+      tone: r.path === "missed" || r.target === "none" ? "bad" : "warn",
+    })),
+    note:
+      gaps > 0
+        ? `Audit-Reserve aktiv (${durability.spoolFile}).${extraNote ? ` ${extraNote}` : ""}`
+        : (extraNote ?? null),
+  };
+}
+
 function collectAudit(firm: FirmResult): Draft {
-  const data = requireFirm(firm);
+  const durability = auditDurabilitySnapshot();
+  if (!firm.ok) {
+    // DB unavailable: die Zuverlässigkeits-Kennzahlen bleiben lesbar —
+    // sonst wäre die Sektion im genau falschen Moment „ohne Daten“.
+    return auditDurabilityDraft(durability, `Datenbank-Sektion: ${publicErrorMessage(firm.error)}`);
+  }
+  const data = firm.data;
   const { audit } = data;
   const chain = verifyAuditChain(liveGateConfig(process.env).dir);
   const criticals = audit.critical;
   const levelTone = (level: string): OpsTone =>
     level === "CRITICAL" ? "bad" : level === "WARN" ? "warn" : "neutral";
+  const gaps = durability.pending + durability.lost + durability.missed + durability.overflowDropped;
+  const base = auditDurabilityDraft(durability);
   return {
-    status: audit.total > 0 ? "ready" : "empty",
+    status: gaps > 0 ? "degraded" : audit.total > 0 ? "ready" : "empty",
     asOf: audit.recent[0]?.createdAt ?? null,
     metrics: [
       { label: "Ereignisse", value: num(audit.total, 0) },
@@ -751,18 +827,27 @@ function collectAudit(firm: FirmResult): Draft {
         value: chain.ok ? `intakt (${num(chain.entries, 0)})` : "gebrochen",
         tone: chain.ok ? "good" : "bad",
       },
+      ...base.metrics.slice(0, 3),
       {
         label: "Letztes Ereignis",
         value: audit.recent[0] ? formatRelative(audit.recent[0].createdAt) : "—",
       },
     ],
-    items: audit.recent.map((e) => ({
-      label: e.event,
-      value: e.level,
-      meta: e.createdAt ? formatTimestampUtc(e.createdAt) : "ohne Zeitangabe",
-      tone: levelTone(e.level),
-    })),
-    note: chain.ok ? null : `Hash-Kette ab Sequenz ${chain.firstBrokenSeq ?? "?"}: ${chain.problem ?? "unbekannt"}`,
+    items: [
+      ...audit.recent.map((e) => ({
+        label: e.event,
+        value: e.level,
+        meta: e.createdAt ? formatTimestampUtc(e.createdAt) : "ohne Zeitangabe",
+        tone: levelTone(e.level),
+      })),
+      ...base.items,
+    ],
+    note: [
+      chain.ok ? null : `Hash-Kette ab Sequenz ${chain.firstBrokenSeq ?? "?"}: ${chain.problem ?? "unbekannt"}`,
+      base.note,
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }
 
