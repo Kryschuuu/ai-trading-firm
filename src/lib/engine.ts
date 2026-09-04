@@ -17,7 +17,6 @@ import { db } from "@/db";
 import {
   agentMessages,
   agents as agentTable,
-  auditLog,
   equitySnapshots,
   killSwitches,
   missions,
@@ -25,6 +24,12 @@ import {
   proposals,
 } from "@/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
+import {
+  writeAuditRecord,
+  flagMissedAudit,
+  type AuditClass,
+  type AuditWriteOutcome,
+} from "./auditSink";
 import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
 import { PaperBroker } from "./broker";
 import { getBroker as createBroker } from "../brokers/factory";
@@ -235,19 +240,46 @@ export function parseDecision(raw: string): AgentDecision {
   return decision;
 }
 
+/**
+ * Audit-Schreibvorgang (S1, v1.36.18).
+ *
+ * Neu im Vergleich zu „`db.insert` und hoffen“:
+ *   - jede Zeile läuft durch die klassifizierte Senke (`src/lib/auditSink.ts`),
+ *   - `security`-Audits (Default) retryen mit Backoff und landen bei DB-Ausfall
+ *     im persistenten Spool (at-least-once) statt in einem leeren `catch`,
+ *   - das Ergebnis wird zurückgegeben, damit Aufrufer eine Lücke melden können.
+ *
+ * `failClosed` (nur für Audits **vor** einer Mutation sinnvoll) lässt den
+ * Aufrufer scheitern, wenn kein Auditbeleg durable ist — die Mutation bleibt
+ * aus. Für Audits nach einer bereits vollzogenen Mutation wäre ein Wurf
+ * kontraproduktiv (die Tat ist geschehen); dort wird gemeldet, nicht abgebrochen.
+ */
+export interface LogAuditOptions {
+  /** Default `security` — keine stille Telemetrie für sicherheitsrelevante Events. */
+  auditClass?: AuditClass;
+  /** Abort der Operation, wenn das Audit nicht durable wird. */
+  failClosed?: boolean;
+  /** Spool-Fallback abschalten (nur Tests/Drills). */
+  spool?: boolean;
+}
+
 export async function logAudit(
   event: string,
   level: "INFO" | "WARN" | "CRITICAL",
   detail: unknown,
   missionId?: string,
-  agentId?: string
-) {
-  await db.insert(auditLog).values({
+  agentId?: string,
+  opts: LogAuditOptions = {}
+): Promise<AuditWriteOutcome> {
+  return writeAuditRecord({
     event,
     level,
-    detail: detail as object,
+    detail,
     missionId,
     agentId,
+    auditClass: opts.auditClass ?? "security",
+    failClosed: opts.failClosed,
+    spool: opts.spool,
   });
 }
 
@@ -344,7 +376,18 @@ export async function runAgentTurn(
       triggeredBy: "RISK_ENGINE",
       armed: true,
     });
-    await logAudit("KILL_SWITCH", "CRITICAL", { drawdownPct: broker.drawdownPct }, missionId, agentId);
+    // S1: Der Not-Halt ist bereits gesetzt (sichere Richtung) — die Auditzeile
+    // darf den Lauf nicht abbrechen, aber eine Lücke wird gemeldet, nicht
+    // verschluckt: CRITICAL-Zeile + Missed-Audit-Zähler + Eintrag im Protokoll.
+    const audited = await logAudit("KILL_SWITCH", "CRITICAL", { drawdownPct: broker.drawdownPct }, missionId, agentId);
+    if (!audited.durable) {
+      flagMissedAudit("KILL_SWITCH", {
+        reason: audited.error ?? "audit nicht durable",
+        trigger: "AUTO_DRAWDOWN",
+        via: "engine",
+      });
+      trace.push(step("AUDIT", false, "Not-Halt-Audit war nicht durable — Nachzug/Alarm aktiv"));
+    }
   }
 
   // ── Missions-Universum (v1.35.0) ─────────────────────────────────────────
@@ -493,8 +536,20 @@ export async function runAgentTurn(
         armed: true,
       });
       await db.update(missions).set({ status: "KILLED", updatedAt: new Date() }).where(eq(missions.id, missionId));
-      await logAudit("KILL_SWITCH", "CRITICAL", { by: agent.name }, missionId, agentId);
-      return { ...base, status: "KILLED" };
+      // S1: Scharfschalten ist die SICHERE Richtung — ein Auditfehler darf den
+      // Not-Halt niemals verhindern (das wäre fail-open im einzigen Moment, in
+      // dem Schutz zählt). Die Lücke wird stattdessen gemeldet: CRITICAL +
+      // Missed-Audit-Zähler + Protokollschritt.
+      const audited = await logAudit("KILL_SWITCH", "CRITICAL", { by: agent.name }, missionId, agentId);
+      if (!audited.durable) {
+        flagMissedAudit("KILL_SWITCH", {
+          reason: audited.error ?? "audit nicht durable",
+          by: agent.name,
+          via: "agent-decision",
+        });
+        trace.push(step("AUDIT", false, "Not-Halt-Audit war nicht durable — Nachzug/Alarm aktiv"));
+      }
+      return { ...base, status: "KILLED", trace };
     }
 
     case "REPORT":

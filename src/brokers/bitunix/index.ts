@@ -36,6 +36,8 @@ export { BitunixHttp, TokenBucket, assertUrlAllowed } from "./http";
 export {
   recordBitunixPrivateCall,
   readBitunixPrivateAudit,
+  readBitunixAuditDegradedCount,
+  readBitunixAuditDurability,
   clearBitunixPrivateAuditForTests,
   recordBitunixPositionAnomaly,
   readBitunixPositionAnomalies,

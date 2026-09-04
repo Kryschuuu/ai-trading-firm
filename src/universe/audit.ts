@@ -9,14 +9,15 @@
  *      Funktioniert ohne Datenbank — die Registry ist bewusst DB-frei.
  *   2. **Datenbank** (optional, `UNIVERSE_AUDIT_DB=1`): zusätzlicher Insert in
  *      `audit_log` (Event `UNIVERSE_MUTATION`), damit Registry-Änderungen im
- *      bestehenden revisionssicheren Protokoll erscheinen. Fehler dort werden
- *      geloggt, brechen die Mutation aber nicht ab (die Datei bleibt Wahrheit).
+ *      bestehenden revisionssicheren Protokoll erscheinen. Fehler dort brechen
+ *      die Mutation nicht ab (die Datei bleibt Wahrheit), bleiben seit S1 aber
+ *      nicht folgenlos: Warnung + Metrik über `src/lib/auditSink.ts`.
  *
  * Es werden ausschließlich Instrument-IDs und Zähler protokolliert — niemals
  * Credentials, Header oder Roh-Payloads.
  */
 
-import { redactSecrets } from "../lib/secrets";
+import { writeAuditRecord } from "../lib/auditSink";
 import type { NdjsonStore } from "./store";
 
 /** Mutationstypen, die auditiert werden. */
@@ -68,16 +69,15 @@ export function fileAuditSink(store: NdjsonStore): AuditSink {
  */
 export async function writeDbAudit(entry: UniverseAuditEntry): Promise<void> {
   if (process.env.UNIVERSE_AUDIT_DB !== "1") return;
-  try {
-    const [{ db }, { auditLog }] = await Promise.all([import("../db"), import("../db/schema")]);
-    await db.insert(auditLog).values({
-      event: "UNIVERSE_MUTATION",
-      level: "INFO",
-      detail: entry as unknown as Record<string, unknown>,
-    });
-  } catch (e) {
-    console.warn("[universe] Audit-DB-Senke fehlgeschlagen:", redactSecrets(e instanceof Error ? e.message : String(e)));
-  }
+  // S1 (v1.36.18): klassifizierte Senke statt lokalem console.warn — damit die
+  // Universum-Audits dieselbe Metrik (`audit_write_failures_total`) und
+  // dieselbe Alarmierung nutzen wie der Rest des Systems.
+  await writeAuditRecord({
+    event: "UNIVERSE_MUTATION",
+    level: "INFO",
+    detail: entry,
+    auditClass: "telemetry",
+  });
 }
 
 /** Baut einen vollständigen Audit-Eintrag mit geklemmten Feldern. */

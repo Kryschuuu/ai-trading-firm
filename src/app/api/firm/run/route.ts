@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { agents as agentTable, auditLog, missions } from "@/db/schema";
+import { agents as agentTable, missions } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { runAgentTurn, runPipeline } from "@/lib/engine";
+import { logAudit, runAgentTurn, runPipeline } from "@/lib/engine";
 import { guardWrite } from "@/lib/apiAuth";
 import { publicErrorMessage } from "@/lib/secrets";
 
@@ -52,12 +52,11 @@ export async function POST(req: Request) {
           { status: 409 }
         );
       }
-      await db.insert(auditLog).values({
-        event: "ERROR",
-        level: "CRITICAL",
-        detail: { message, scope: "pipeline" },
-        missionId: body.missionId,
-      });
+      // S1 (v1.36.18): über die klassifizierte Senke — ein fehlgeschlagener
+      // Audit-Insert durfte hier nicht die eigentliche Pipeline-Fehlermeldung
+      // ersetzen (500 mit Audit-Fehler statt Ursache). Sicherheitsklasse: der
+      // Beleg kommt in den Spool und wird nachgezogen.
+      await logAudit("ERROR", "CRITICAL", { message, scope: "pipeline" }, body.missionId);
       // FIX (v1.5.1): raw error → redacted. Verhindert Leak von DB-Strings.
       return NextResponse.json(
         { ok: false, error: publicErrorMessage(e) },
@@ -84,13 +83,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, result });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await db.insert(auditLog).values({
-      event: "ERROR",
-      level: "CRITICAL",
-      detail: { message, agentId: body.agentId },
-      missionId: body.missionId,
-      agentId: body.agentId,
-    });
+    // S1: wie oben — `agentId` ist ein FK auf `agents.id`; der Client-Wert
+    // bleibt im `detail` (nachvollziehbar), ein ungültiger Fremdschlüssel darf
+    // nicht den CRITICAL-Beleg eines Laufabbruchs kosten.
+    await logAudit("ERROR", "CRITICAL", { message, agentId: body.agentId }, body.missionId);
     await db
       .update(agentTable)
       .set({ status: "STOPPED", updatedAt: new Date() })

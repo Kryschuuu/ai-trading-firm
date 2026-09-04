@@ -83,6 +83,30 @@ export async function register() {
     }
   }
 
+  // S1 (v1.36.18): Offene Audit-Spool-Eintraege nachziehen. Ein Audit, der
+  // waehrend eines DB-Ausfalls in data/audit-spool gelandet ist, erreicht
+  // audit_log spaetestens hier (at-least-once). Best-effort, nie werfend.
+  if (!isBuildPhase) {
+    try {
+      const { drainAuditSpool, pendingAuditCount } = await import("@/lib/auditSink");
+      const openBefore = pendingAuditCount();
+      if (openBefore > 0) {
+        const drained = await drainAuditSpool();
+        console.log(
+          `[audit] Spool-Nachzug: ${drained.written}/${openBefore} in audit_log uebernommen` +
+            (drained.remaining > 0 ? `, ${drained.remaining} weiterhin offen` : "") +
+            (drained.quarantined > 0 ? `, ${drained.quarantined} in Quarantaene` : "") +
+            "."
+        );
+        if (!drained.ok) {
+          console.warn("[audit] Spool-Nachzug unvollstaendig (DB wieder erreichbar?):", drained.error);
+        }
+      }
+    } catch (e) {
+      console.warn("[audit] Spool-Nachzug uebersprungen:", e instanceof Error ? e.message : e);
+    }
+  }
+
   if (process.env.SCHEDULER_ENABLED === "false") return;
 
   const G = globalThis as typeof globalThis & { __firmSchedulerStarted?: boolean };

@@ -8,6 +8,7 @@ import { guardWrite } from "@/lib/apiAuth";
 import { actorAuditId, requirePermission } from "@/auth";
 import { checkCsrfGuard } from "@/brokers/control-plane/guard";
 import { consumeDisarmNonce } from "@/lib/disarmChallenge";
+import { flagMissedAudit, isAuditPersistenceError } from "@/lib/auditSink";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,13 @@ function disarmDenied(error: string, hint: string): Response {
  *      nicht abgelaufen (<= 60 s) und single-use (nicht wiederverwendet)
  * Erst danach wird disarmed und ein CRITICAL-Audit mit Actor + Nonce geschrieben.
  * Ein gestohlenes Operator-Token kann damit den Not-Halt NICHT mehr still aufheben.
+ *
+ * S1 (v1.36.18): Der Disarm-Audit ist **fail-closed** — er wird vor der
+ * Mutation mit `stage=PRECHECK` geschrieben; ist weder `audit_log` noch der
+ * persistente Spool schreibbar, bleibt der Not-Halt aktiv (503). Nach der
+ * Mutation folgt `stage=APPLIED`; fehlt davon nur die DB, meldet der Spool die
+ * Nachzugspflicht. Arm dagegen wird nie durch einen Auditfehler blockiert —
+ * die sichere Richtung zu verweigern wäre gefährlicher als eine gemeldete Lücke.
  */
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
@@ -48,14 +56,29 @@ export async function POST(req: Request) {
     const reason = body.reason ?? "MANUAL_OPERATOR";
     killSwitch.pull(reason);
     await db.insert(killSwitches).values({ reason, triggeredBy: "OPERATOR", armed: true });
-    await logAudit("KILL_SWITCH", "CRITICAL", { reason, flatten: body.flatten === true });
+    // S1: Scharfschalten ist die SICHERE Richtung. Der Audit ist
+    // Sicherheitsklasse (Retry + Spool + Alarm), aber ausdrücklich nicht
+    // fail-closed — ein Not-Halt darf niemals an einem Schreibfehler scheitern.
+    const audited = await logAudit("KILL_SWITCH", "CRITICAL", {
+      reason,
+      flatten: body.flatten === true,
+      actor: actorAuditId(req),
+    });
+    if (!audited.durable) {
+      flagMissedAudit("KILL_SWITCH", { reason, action: "arm", detail: audited.error ?? "audit nicht durable" });
+    }
 
     let closed = 0;
     if (body.flatten) {
       const fills = await flattenAll(reason);
       closed = fills.length;
     }
-    return NextResponse.json({ ok: true, killSwitchArmed: true, closedPositions: closed });
+    return NextResponse.json({
+      ok: true,
+      killSwitchArmed: true,
+      closedPositions: closed,
+      audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
+    });
   }
 
   // ── Disarm (C3): ADMIN + CSRF + Nonce ───────────────────────────────────
@@ -76,6 +99,46 @@ export async function POST(req: Request) {
 
   const reason = body.reason ?? "OPERATOR_DISARM";
   const actor = actorAuditId(req);
+
+  // ── S1 (v1.36.18): Disarm ist fail-closed ────────────────────────────────
+  // Entschärfen verlässt den sicheren Zustand. Ohne Auditbeleg darf das nicht
+  // passieren, sonst ist „wer hat den Not-Halt abgeschaltet“ im Ernstfall
+  // unbelegbar. Der Beleg wird deshalb VOR der Mutation geschrieben
+  // (stage=PRECHECK, at-least-once) und mit `failClosed` erzwungen: weder
+  // `audit_log` noch Spool schreibbar → kein Disarm (HTTP 503).
+  // Die doppelte Zeile (PRECHECK + APPLIED) ist dabei Absicht: at-least-once
+  // statt exactly-once, weil Verlust teurer ist als ein Duplikat.
+  try {
+    await logAudit(
+      "KILL_SWITCH_DISARMED",
+      "CRITICAL",
+      { reason, actor, nonceId: nonce, stage: "PRECHECK" },
+      undefined,
+      undefined,
+      { failClosed: true }
+    );
+  } catch (e) {
+    if (isAuditPersistenceError(e)) {
+      flagMissedAudit("KILL_SWITCH_DISARMED", {
+        reason,
+        actor,
+        action: "disarm-blocked",
+        detail: e.message,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "AUDIT_PERSISTENCE_FAILED",
+          message:
+            "Not-Halt bleibt aktiv: der Sicherheits-Audit war nicht persistent schreibbar.",
+          hint: "PostgreSQL und AUDIT_SPOOL_DIR (Schreibrechte) prüfen — Entschärfen ist ohne Auditbeleg gesperrt.",
+        },
+        { status: 503 }
+      );
+    }
+    throw e;
+  }
+
   killSwitch.disarm();
   await db.insert(killSwitches).values({ reason, triggeredBy: "OPERATOR", armed: false });
   // Gestoppte Missionen wieder in den Wartezustand versetzen.
@@ -84,7 +147,25 @@ export async function POST(req: Request) {
     .set({ status: "PENDING", updatedAt: new Date() })
     .where(eq(missions.status, "KILLED"));
   invalidateBrokerCache();
-  await logAudit("KILL_SWITCH_DISARMED", "CRITICAL", { reason, actor, nonceId: nonce });
+  const audited = await logAudit("KILL_SWITCH_DISARMED", "CRITICAL", {
+    reason,
+    actor,
+    nonceId: nonce,
+    stage: "APPLIED",
+  });
+  if (!audited.durable) {
+    // Disarm ist vollzogen und lässt sich nicht sauber zurücknehmen — melden.
+    flagMissedAudit("KILL_SWITCH_DISARMED", {
+      reason,
+      actor,
+      action: "disarm-applied",
+      detail: audited.error ?? "audit nicht durable",
+    });
+  }
 
-  return NextResponse.json({ ok: true, killSwitchArmed: false });
+  return NextResponse.json({
+    ok: true,
+    killSwitchArmed: false,
+    audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
+  });
 }

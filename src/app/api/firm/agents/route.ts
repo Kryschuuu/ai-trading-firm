@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { guardWrite } from "@/lib/apiAuth";
 import { validatePromptInput } from "@/lib/workshop";
 import { logAudit } from "@/lib/engine";
+import { flagMissedAudit } from "@/lib/auditSink";
 import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,14 @@ export const dynamic = "force-dynamic";
  * Guardrails (harte Schicht, riskGuard.ts) sind über diesen Endpunkt
  * absichtlich NICHT erreichbar. Validierung via validatePromptInput
  * (geteilt mit Tests); jede Änderung wird ins audit_log geschrieben.
+ *
+ * Audit-Zuverlässigkeit (S1, v1.36.18): Der Audit ist Sicherheitsklasse und
+ * wird nicht mehr in einem leeren `catch` entsorgt. Ist `audit_log` nicht
+ * erreichbar, übernimmt der persistente Spool (at-least-once); ist auch der
+ * nicht schreibbar, bleibt es nicht still — CRITICAL-Journalzeile,
+ * Missed-Audit-Zähler und ein `warnings`-Hinweis im Response-Body. Der Prompt
+ * wird in diesem Fall trotzdem gespeichert (Trade-off, siehe Kommentar im
+ * Handler). Die Response enthält zusätzlich `audit` mit dem Durable-Status.
  */
 export async function PUT(req: Request) {
   const denied = guardWrite(req);
@@ -48,19 +57,58 @@ export async function PUT(req: Request) {
       .where(eq(agents.id, agentId))
       .returning();
 
-    try {
-      await logAudit("AGENT_PROMPT_UPDATED", "INFO", {
+    // ── S1 (v1.36.18): dokumentierter Trade-off ──────────────────────────────
+    // Prompt-Änderungen sind sicherheitsrelevant: sie verschieben das
+    // Entscheidungsverhalten aller folgenden Agenten-Turns. Der Audit-Eintrag
+    // läuft deshalb in der Klasse `security` (Retry mit Backoff + persistenter
+    // Spool mit at-least-once-Nachzug, siehe src/lib/auditSink.ts).
+    //
+    // Bewusste Ausnahme von fail-closed: Ist *auch* der Spool nicht schreibbar,
+    // wird der Prompt **dennoch gespeichert** und die Lücke stattdessen
+    // gemeldet — CRITICAL-Zeile, Missed-Audit-Zähler und Hinweis im Response-
+    // Feld `warnings`. Begründung (dokumentierter Trade-off): Der UPDATE ist
+    // zu diesem Zeitpunkt bereits wirksam — ein „Abbruch“ nach erfolgreichem
+    // UPDATE wäre keine saubere Rücknahme, sondern eine Änderung ohne Beleg.
+    // Die Alternative (Prompt-Änderungen bei DB-Degradation sperren) würde
+    // Notfall-Patches verunmöglichen. Deshalb: Mutation zu, Lücke nie still.
+    const audited = await logAudit("AGENT_PROMPT_UPDATED", "INFO", {
+      agent: existing.name,
+      role: existing.role,
+      oldLength: existing.systemPrompt.length,
+      newLength: systemPrompt.length,
+      via: "workshop-ui",
+    }, undefined, agentId);
+
+    const warnings = [...validated.warnings];
+    if (!audited.durable) {
+      flagMissedAudit("AGENT_PROMPT_UPDATED", {
         agent: existing.name,
-        role: existing.role,
-        oldLength: existing.systemPrompt.length,
-        newLength: systemPrompt.length,
-        via: "workshop-ui",
-      }, undefined, agentId);
-    } catch {
-      // Audit-Fehler darf die gespeicherte Prompt-Änderung nicht reißen.
+        agentId,
+        reason: audited.error ?? "audit nicht durable",
+        policy: "prompt gespeichert, audit-loecke gemeldet (S1)",
+      });
+      warnings.push(
+        "Prompt gespeichert, aber der Audit-Eintrag war nicht persistent schreibbar — " +
+          "die Lücke ist im Journal (CRITICAL) und im Operations Center gemeldet. " +
+          "audit_log manuell ergänzen bzw. Spool-Nachzug prüfen."
+      );
+    } else if (audited.degraded) {
+      warnings.push(
+        "Audit nicht sofort in audit_log: Eintrag liegt im persistenten Spool und wird nachgezogen."
+      );
     }
 
-    return NextResponse.json({ ok: true, agent: updated[0], warnings: validated.warnings });
+    return NextResponse.json({
+      ok: true,
+      agent: updated[0],
+      warnings,
+      audit: {
+        durable: audited.durable,
+        target: audited.target,
+        degraded: audited.degraded,
+        attempts: audited.attempts,
+      },
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: `Prompt nicht gespeichert: ${publicErrorMessage(e)}` },

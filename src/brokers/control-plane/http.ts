@@ -8,6 +8,7 @@
  *   Zustands-Missbrauch (422), Validierung (422), Store nicht bereit (503).
  */
 import { UnknownVenueError } from "@/contracts/broker";
+import { isAuditPersistenceError } from "@/lib/auditSink";
 import { publicErrorMessage } from "@/lib/secrets";
 import { SecretStoreError } from "./secretStore";
 import { StateTransitionError } from "./states";
@@ -31,6 +32,20 @@ const VALIDATION_CODES = new Set([
 
 /** Uebersetzt Control-Plane-Fehler in eine SAFE HTTP-Response. */
 export function mapControlPlaneError(err: unknown): Response {
+  if (isAuditPersistenceError(err)) {
+    // S1: fail-closed weil der Auditbeleg nicht durable war — die Mutation
+    // wurde nicht ausgeführt. Behebung liegt beim Betrieb (DB/Spool-Verzeichnis),
+    // nicht beim Anwender: 503, kein 4xx.
+    return Response.json(
+      {
+        ok: false,
+        error: "AUDIT_PERSISTENCE_FAILED",
+        message: "Änderung wurde nicht ausgeführt: der Sicherheits-Audit war nicht persistent schreibbar.",
+        hint: "PostgreSQL und AUDIT_SPOOL_DIR (Schreibrechte) prüfen, dann erneut versuchen.",
+      },
+      { status: 503 }
+    );
+  }
   if (err instanceof UnknownVenueError) {
     return Response.json(
       { ok: false, error: err.code, message: publicErrorMessage(err) },
