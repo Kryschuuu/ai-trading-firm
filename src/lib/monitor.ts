@@ -18,6 +18,7 @@ import { agentMessages, positions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getBroker, logAudit } from "./engine";
 import { getLimits, killSwitch } from "./riskGuard";
+import type { AdaptiveRegime } from "./riskGuard";
 import { DEFAULT_WATCHLIST, getQuote, refreshQuotes, getCandles } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
 import { snapshot, snapshotLine } from "./indicators";
@@ -45,7 +46,7 @@ export type TickResult = {
   errors: string[];
   /** Zustand des adaptiven Risk-Systems nach diesem Tick (v1.7.0). */
   adaptiveRisk: {
-    regime: "NORMAL" | "ELEVATED" | "EXTREME";
+    regime: AdaptiveRegime;
     factor: number;
     baseMaxRiskPerTrade: number;
     effectiveMaxRiskPerTrade: number;

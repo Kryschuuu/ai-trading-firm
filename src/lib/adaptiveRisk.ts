@@ -31,9 +31,14 @@
  * (sichere Richtung), DE-Eskalation erst nach `deescalateAfter`
  * konsekutiven ruhigen Bewertungen (Standard: 3 Ticks ≈ 3 Minuten).
  *
- * Fehlende Daten (Fail-OPEN): Ein Indikator ohne Daten triggert NIE.
- * Fehlt also z. B. die VIX-Quelle, kann das System sich nicht in den
- * ELEVATED-Zustand "irritieren" — es können lediglich Reduktionen ausbleiben.
+ * Fehlende Daten (fail-closed seit H10/v1.36.21): Eine einzelne Indikator-
+ * Quelle ohne Daten triggert im reinen Bewertungskern (assessRegime) NIE —
+ * dort entscheidet allein die Regime-Matrix über die verfügbaren Werte.
+ * Die ORCHESTRIERUNG (updateAdaptiveRisk) wertet fehlende/fehlerhafte/
+ * veraltete Bewertungen aber als expliziten UNKNOWN-Zustand: Faktor auf dem
+ * konservativen Code-Boden, keine neuen Positionen — statt still auf volles
+ * Basisrisiko (Fail-Open) zurückzufallen.
+ *
  * Risiko kann durch fehlende Daten niemals ERHÖHT werden (Faktor ≤ 1).
  *
  * Observability (für Agenten + Monitoring):
@@ -49,7 +54,14 @@ import { riskConfig } from "@/db/schema";
 import { getCandles, type Candle } from "./marketData";
 import { atrPct, bollingerBandWidthPct, returnStdDevPct } from "./indicators";
 import { auditWrite } from "./auditSink";
-import { applyAdaptiveRisk, getBaseLimits, getLimits } from "./riskGuard";
+import {
+  ADAPTIVE_STATE_MAX_AGE_MS,
+  LIMIT_CEILINGS,
+  applyAdaptiveRisk,
+  getBaseLimits,
+  getLimits,
+} from "./riskGuard";
+import type { AdaptiveRegime } from "./riskGuard";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Konstanten
@@ -240,12 +252,56 @@ export type RegimeAssessment = {
   reason: string;
 };
 
-/** Nur endliche, nicht-negative Zahlen gelten als Messwert (Fail-Open). */
+/** Nur endliche, nicht-negative Zahlen gelten als Messwert (sonst null = nicht verfügbar). */
 const clean = (v: number | null | undefined): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 
 const regimeFactor = (regime: VolatilityRegime, cfg: VolatilityConfig): number =>
   regime === "EXTREME" ? cfg.extremeFactor : regime === "ELEVATED" ? cfg.elevatedFactor : 1;
+
+/**
+ * H10 (v1.36.21): UNKNOWN-Bestimmung — fehlende, fehlerhafte oder zu alte
+ * Bewertung ist ein EIGENER Zustand, kein stiller NORMAL-Fallback.
+ *
+ * - MISSING: noch nie eine Bewertung gelaufen.
+ * - ERRORED: letzte Bewertung lief mit Fehlern (Quellen-Timeout o. ä.).
+ * - STALE:   letzte Bewertung älter als ADAPTIVE_STATE_MAX_AGE_MS.
+ */
+export type AdaptiveUnknownCause = "MISSING" | "ERRORED" | "STALE";
+
+export function resolveAdaptiveUnknown(
+  lastAssessment: RegimeAssessment | null,
+  lastError: string | null,
+  lastUpdateAt: number | null,
+  now: number = Date.now(),
+  maxAgeMs: number = ADAPTIVE_STATE_MAX_AGE_MS
+): AdaptiveUnknownCause | null {
+  if (lastAssessment == null) return "MISSING";
+  if (lastError != null) return "ERRORED";
+  if (lastUpdateAt == null || now - lastUpdateAt > maxAgeMs) return "STALE";
+  return null;
+}
+
+/**
+ * Konservativster Faktor für UNKNOWN: klemmt das wirksame maxRiskPerTrade
+ * auf den absoluten Code-Boden (LIMIT_CEILINGS.maxRiskPerTrade[0]).
+ */
+export function adaptiveUnknownFactor(baseMaxRiskPerTrade: number): number {
+  const floor = LIMIT_CEILINGS.maxRiskPerTrade[0];
+  if (!Number.isFinite(baseMaxRiskPerTrade) || baseMaxRiskPerTrade <= 0) return 1;
+  return Math.min(Math.max(floor / baseMaxRiskPerTrade, 0), 1);
+}
+
+function unknownReason(cause: AdaptiveUnknownCause, lastError: string | null): string {
+  switch (cause) {
+    case "MISSING":
+      return "Keine Bewertung vorhanden — Regime UNKNOWN: keine neuen Positionen (fail-closed)";
+    case "ERRORED":
+      return `Adaptive-Bewertung fehlgeschlagen: ${lastError ?? "unbekannter Fehler"} — Regime UNKNOWN: keine neuen Positionen`;
+    case "STALE":
+      return `Bewertung älter als ADAPTIVE_STATE_MAX_AGE_MS (${Math.round(ADAPTIVE_STATE_MAX_AGE_MS / 60_000)} min) — Regime UNKNOWN: keine neuen Positionen (fail-closed)`;
+  }
+}
 
 /**
  * Bewertet einen Markt-Zustand deterministisch (reine Funktion — der Kern
@@ -301,7 +357,7 @@ export function assessRegime(readingsRaw: IndicatorReadings, cfg: VolatilityConf
   else if (regime === "NORMAL") {
     const none = indicators.every((i) => !i.available);
     reason = none
-      ? "Keine Indikator-Daten verfügbar — Fail-Open, Basis-Limit bleibt aktiv"
+      ? "Keine Indikator-Daten verfügbar — Regime nicht bewertbar (verarbeitet als UNKNOWN, keine neuen Positionen)"
       : "Alle Indikatoren unter den Schwellwerten";
   } else {
     const parts: string[] = [];
@@ -419,8 +475,9 @@ export async function fetchVix(): Promise<number | null> {
 
 /**
  * Liest alle vier Indikatorwerte. Fehlgeschlagene Quellen landen in
- * `errors` und liefern null (Fail-Open) — der Aufrufer bleibt funktionsfähig.
- * Korb-Indikatoren: SPITZENWERT über den Korb (das volatilste Mitglied
+ * `errors` und liefern null — der Aufrufer wertet Fehler/leere Quellen
+ * seit H10/v1.36.21 als UNKNOWN (fail-closed), statt still auf NORMAL zu
+ * fallen. Korb-Indikatoren: SPITZENWERT über den Korb (das volatilste Mitglied
  * dominiert das Risikobild).
  */
 export async function readMarketReadings(deps: FetcherDeps = {}): Promise<{
@@ -479,8 +536,8 @@ export async function readMarketReadings(deps: FetcherDeps = {}): Promise<{
 
 export type AdaptiveRiskEvent = {
   at: string;
-  prevRegime: VolatilityRegime;
-  regime: VolatilityRegime;
+  prevRegime: AdaptiveRegime;
+  regime: AdaptiveRegime;
   factor: number;
   baseMaxRiskPerTrade: number;
   effectiveMaxRiskPerTrade: number;
@@ -489,7 +546,7 @@ export type AdaptiveRiskEvent = {
 };
 
 export type AdaptiveRiskStatus = {
-  regime: VolatilityRegime;
+  regime: AdaptiveRegime;
   enabled: boolean;
   /** Aktueller Multiplikator auf das Basis-Limit (1 = keine Reduktion). */
   factor: number;
@@ -542,19 +599,31 @@ function state(): State {
 }
 
 function buildStatus(s: State): AdaptiveRiskStatus {
-  const regime = s.machine.regime;
-  const factor = regimeFactor(regime, s.config);
+  const base = getBaseLimits().maxRiskPerTrade;
+  // H10 (v1.36.21): Bei aktiviertem Adaptiv-System ist eine fehlende/
+  // fehlerhafte/zu alte Bewertung ein eigener Zustand (UNKNOWN), kein stiller
+  // NORMAL-Fallback. Deaktivierte Systeme bleiben bewusst unverändert
+  // (Operator hat die Reduktion explizit ausgeschaltet → Basis-Regime).
+  const cause = s.config.enabled ? resolveAdaptiveUnknown(s.lastAssessment, s.lastError, s.lastUpdateAt) : null;
+  const machineRegime = s.machine.regime;
+  const regime: AdaptiveRegime = cause == null ? machineRegime : "UNKNOWN";
+  const factor = cause == null ? regimeFactor(machineRegime, s.config) : adaptiveUnknownFactor(base);
+  const effective = cause == null
+    ? getLimits().maxRiskPerTrade
+    : Math.max(base * factor, LIMIT_CEILINGS.maxRiskPerTrade[0]);
   return {
     regime,
     enabled: s.config.enabled,
     factor,
-    baseMaxRiskPerTrade: getBaseLimits().maxRiskPerTrade,
-    effectiveMaxRiskPerTrade: getLimits().maxRiskPerTrade,
+    baseMaxRiskPerTrade: base,
+    effectiveMaxRiskPerTrade: effective,
     lastUpdate: s.lastUpdateAt ? new Date(s.lastUpdateAt).toISOString() : null,
     lastChange: s.lastChangeAt,
     lastError: s.lastError,
     stale: s.lastUpdateAt == null || Date.now() - s.lastUpdateAt > STATUS_STALE_MS,
-    reason: s.lastAssessment?.reason ?? "Noch keine Bewertung erfolgt (Basis-Limit aktiv).",
+    reason: cause == null
+      ? (s.lastAssessment?.reason ?? "Noch keine Bewertung erfolgt.")
+      : unknownReason(cause, s.lastError),
     indicators: s.lastAssessment?.indicators ?? [],
     events: [...s.events].reverse(),
     config: { ...s.config },
@@ -608,12 +677,13 @@ export function currentVolatilityConfig(): VolatilityConfig {
  * eine Warnung im strukturierten Log. Risk-Regime-Wechsel im EXTREME-Fall sind
  * für die Nachvollziehbarkeit relevant, deshalb zusätzlich Spool-Reserve.
  */
-async function logAdaptiveEvent(event: AdaptiveRiskEvent, regime: VolatilityRegime): Promise<void> {
+async function logAdaptiveEvent(event: AdaptiveRiskEvent, regime: AdaptiveRegime): Promise<void> {
+  const alarm = regime === "EXTREME" || regime === "UNKNOWN";
   await auditWrite(
     "RISK_ADAPTIVE",
-    regime === "EXTREME" ? "WARN" : "INFO",
+    alarm ? "WARN" : "INFO",
     event,
-    { auditClass: regime === "EXTREME" ? "security" : "telemetry" }
+    { auditClass: alarm ? "security" : "telemetry" }
   );
 }
 
@@ -666,8 +736,9 @@ export type UpdateOptions = {
  * Anwendung in riskGuard → Event + Audit + Persistenz.
  *
  * Single-Flight (kein paralleles Re-Entry) + Min-Interval (Scheduler-Takt).
- * Fehler machen den Durchlauf NIE abbrechen — die zuletzt wirksame
- * Reduktion bleibt bestehen (Fail-Safe: Risiko kann nur bleiben, nicht wachsen).
+ * Fehler machen den Durchlauf NIE abbrechen — sie münden seit H10/v1.36.21
+ * aber in einen expliziten UNKNOWN-Zustand statt in einen stillen letzten
+ * Zustand (fail-closed: Risiko kann nur bleiben oder sinken, nie wachsen).
  */
 export async function updateAdaptiveRisk(opts: UpdateOptions = {}): Promise<AdaptiveRiskStatus> {
   const s = state();
@@ -698,21 +769,71 @@ export async function updateAdaptiveRisk(opts: UpdateOptions = {}): Promise<Adap
       readings = res.readings;
       errors = res.errors;
     }
+    const assessment = assessRegime(readings, cfg);
+    const base = getBaseLimits().maxRiskPerTrade;
+    const at = new Date().toISOString();
+    const indicators = { VIX: readings.vix, ATR: readings.atr, BBW: readings.bbw, RET_STDDEV: readings.retStdDev };
+    const prevStatusRegime: AdaptiveRegime = s.lastError != null ? "UNKNOWN" : s.machine.regime;
+
+    // H10 (v1.36.21): Liefert KEINE Quelle einen Messwert, ist das Regime
+    // nicht bestimmbar — UNKNOWN (fail-closed) statt stillem NORMAL. Nur
+    // bei AKTIVIERTEM Adaptiv-System: ein deaktiviertes System ist die
+    // bewusste Operator-Entscheidung fürs Basis-Regime.
+    const noneAvailable =
+      readings.vix == null && readings.atr == null && readings.bbw == null && readings.retStdDev == null;
+    if (errors.length === 0 && noneAvailable && cfg.enabled) {
+      errors.push("Keine Indikator-Daten verfügbar (alle Quellen null/leer)");
+    }
     s.lastError = errors.length > 0 ? errors.join(" | ") : null;
 
-    const assessment = assessRegime(readings, cfg);
+    if (s.lastError != null && cfg.enabled) {
+      // Bewertung fehlgeschlagen → expliziter UNKNOWN-Zustand statt Fail-Open:
+      // wirksames Limit auf dem konservativen Code-Boden; die Hysterese-
+      // Maschine bleibt unangetastet (keine De-Eskalation auf Teil-/Fehldaten).
+      const factor = adaptiveUnknownFactor(base);
+      const reason = unknownReason("ERRORED", s.lastError);
+      const effective = Math.max(base * factor, LIMIT_CEILINGS.maxRiskPerTrade[0]);
+      applyAdaptiveRisk({ regime: "UNKNOWN", factor, reason, at, indicators });
+      s.lastAssessment = assessment;
+      s.lastUpdateAt = Date.now();
+
+      const lastEvent = s.events[s.events.length - 1];
+      const enteringUnknown = prevStatusRegime !== "UNKNOWN";
+      const effectiveChanged = lastEvent == null || Math.abs(effective - lastEvent.effectiveMaxRiskPerTrade) > 1e-12;
+      if (enteringUnknown || effectiveChanged) {
+        const event: AdaptiveRiskEvent = {
+          at,
+          prevRegime: prevStatusRegime,
+          regime: "UNKNOWN",
+          factor,
+          baseMaxRiskPerTrade: base,
+          effectiveMaxRiskPerTrade: effective,
+          triggered: assessment.triggered,
+          reason,
+        };
+        s.events.push(event);
+        if (s.events.length > EVENT_HISTORY_LENGTH) s.events.shift();
+        s.lastChangeAt = at;
+        console.warn(
+          `[adaptive-risk] ${prevStatusRegime} → UNKNOWN: maxRiskPerTrade → ${(effective * 100).toFixed(2)} % (Code-Boden) — ${reason}`
+        );
+        await logAdaptiveEvent(event, "UNKNOWN");
+        await persistActiveState(factor);
+      }
+
+      return buildStatus(s);
+    }
+
     const prevRegime = s.machine.regime;
     const { regime } = s.machine.update(assessment.regime, cfg.deescalateAfter);
     const factor = regimeFactor(regime, cfg);
-    const base = getBaseLimits().maxRiskPerTrade;
-    const at = new Date().toISOString();
     // Wende den Faktor an und lies das wirksame (geklemmte) Limit zurück.
     const effective = applyAdaptiveRisk({
       regime,
       factor,
       reason: assessment.reason,
       at,
-      indicators: { VIX: readings.vix, ATR: readings.atr, BBW: readings.bbw, RET_STDDEV: readings.retStdDev },
+      indicators,
     }).maxRiskPerTrade;
 
     s.lastAssessment = assessment;
@@ -751,9 +872,26 @@ export async function updateAdaptiveRisk(opts: UpdateOptions = {}): Promise<Adap
   try {
     return await run;
   } catch (e) {
-    // Sicherheitsnetz: selbst ein unerwarteter Fehler darf die Order-Pipeline
-    // nicht blockieren — letzter Zustand bleibt wirksam.
+    // Sicherheitsnetz (H10/v1.36.21): Ein unerwarteter Fehler hält NICHT still
+    // den letzten Zustand — der Zustand geht explizit auf UNKNOWN (fail-closed)
+    // und das wirksame Limit auf den konservativen Code-Boden. So kann eine
+    // schlafende Bewertung niemals wie „volles Risiko“ durchgehen.
     s.lastError = e instanceof Error ? e.message : String(e);
+    if (s.config.enabled) {
+      try {
+        const base = getBaseLimits().maxRiskPerTrade;
+        const factor = adaptiveUnknownFactor(base);
+        applyAdaptiveRisk({
+          regime: "UNKNOWN",
+          factor,
+          reason: unknownReason("ERRORED", s.lastError),
+          at: new Date().toISOString(),
+          indicators: {},
+        });
+      } catch {
+        /* Risiko-Anwendung darf das Sicherheitsnetz nicht selbst brechen */
+      }
+    }
     return buildStatus(s);
   } finally {
     s.updating = null;

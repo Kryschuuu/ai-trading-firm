@@ -85,11 +85,13 @@ export const LIMIT_CEILINGS: Record<keyof RiskLimits, [min: number, max: number]
  * Jede DB-Neuladung rechnet die Reduktion aus dem FRESCHEN Basiswert,
  * nie aus dem bereits reduzierten Wert.
  */
-export type AdaptiveRegime = "NORMAL" | "ELEVATED" | "EXTREME" | "PERSISTED";
+export type AdaptiveRegime = "NORMAL" | "ELEVATED" | "EXTREME" | "PERSISTED" | "UNKNOWN";
 
 /**
  * `PERSISTED` = Zustand aus der DB übernommen (Mikro-Executor-Prozess ohne
  * eigenen Marktzugriff). Für die Berechnung zählt dort nur der Faktor.
+ * `UNKNOWN` (H10, v1.36.21) = Bewertung fehlgeschlagen/fehlend/veraltet —
+ * konservativer Boden (fail-closed), keine neuen Positionen.
  */
 export type AdaptiveRiskState = {
   regime: AdaptiveRegime;

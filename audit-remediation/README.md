@@ -6,10 +6,11 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 
 > **Wichtig — Validierung zuerst.** Der aktuelle Code ist bereits mehrfach gepatcht.
 > H1 ist z. B. bereits in **v1.36.2** gefixt, B2 in **v1.36.12**, C1 in **v1.36.13**,
-> C2 in **v1.36.14**, C3 in **v1.36.15**, C4 in **v1.36.16**, S1 in **v1.36.18**. Jeder Prompt trägt daher einen **Status (validiert)**, der angibt, ob der
+> C2 in **v1.36.14**, C3 in **v1.36.15**, C4 in **v1.36.16**, S1 in **v1.36.18**,
+> H2 in **v1.36.19**, H7 in **v1.36.20**, H10 in **v1.36.21**. Jeder Prompt trägt daher einen **Status (validiert)**, der angibt, ob der
 > Befund im aktuellen Code noch zutrifft.
 
-## Validierungsübersicht (Stand 2026-09-04, main @ a29e956 · Fixes bis v1.36.20)
+## Validierungsübersicht (Stand 2026-09-05 · Fixes bis v1.36.21)
 
 | ID | Bereich | Severity | Status im Code | Prompt |
 |----|---------|----------|----------------|--------|
@@ -22,7 +23,7 @@ eine Validierung gegen den aktuellen `main`-Stand. Ziel: jeder Bug lässt sich e
 | H7 | Handelslogik/Control | HIGH | ✅ **Gefixt v.1.36.20** | [H7](./H7-live-kill.md) |
 | H8 | Brokers/Venues | HIGH | ✅ Gefixt (v1.36.10) | [H8](./H8-bitunix-equity.md) |
 | H9 | Handelslogik | HIGH | ✅ Gefixt (v1.36.8) | [H9](./H9-finite-guardrails.md) |
-| H10 | Handelslogik | HIGH | ✅ Valide | [H10](./H10-adaptive-failopen.md) |
+| H10 | Handelslogik | HIGH | ✅ **Gefixt v.1.36.21** | [H10](./H10-adaptive-failopen.md) |
 | W1 | Workshop | HIGH | ✅ Valide | [W1](./W1-localstorage.md) |
 | W2 | Workshop | MEDIUM | ✅ Valide | [W2](./W2-prompt-versioning.md) |
 | C1 | Control Panel | HIGH | ✅ **Gefixt v.1.36.13** | [C1](./C1-open-mode.md) |
@@ -50,8 +51,9 @@ dass er direkt als Task an Arena (bzw. einen Coding-Agenten) übergeben werden k
 Die Remediation wird als PATCH-Serie getrackt (Security-Audit-Plan + Fixes):
 H1=v1.36.2, H3=v1.36.4, H4=v1.36.5, H5=v1.36.6, H6=v1.36.7, H9=v1.36.8,
 **H8=v1.36.10**, **B1=v1.36.11**, **B2=v1.36.12**, **C1=v1.36.13**, **C2=v1.36.14**,
-**C3=v1.36.15**, **C4=v1.36.16**, **S1=v1.36.18**, **H2=v1.36.19**, **H7=v1.36.20**.
-Siehe `CHANGELOG.md` und `docs/CHANGELOG.md` (`[1.36.20]`). Jeder einzelne Fix ist als eigener
+**C3=v1.36.15**, **C4=v1.36.16**, **S1=v1.36.18**, **H2=v1.36.19**, **H7=v1.36.20**,
+**H10=v1.36.21**.
+Siehe `CHANGELOG.md` und `docs/CHANGELOG.md` (`[1.36.21]`). Jeder einzelne Fix ist als eigener
 Commit/Optional-eigener-PR denkbar; dieser Plan bündelt sie als nachvollziehbares Tracking-Dokument.
 
 ## Reihenfolge der Abarbeitung (Empfehlung)
@@ -59,7 +61,7 @@ Commit/Optional-eigener-PR denkbar; dieser Plan bündelt sie als nachvollziehbar
 1. ~~**Fail-closed-Härtung (CRITICAL):** H3, H4, H5, H6, H9~~ ✅ alle gefixt siehe v1.36.4 bis v1.36.8
 2. **Broker/Venue-Korrektheit:** H8 ✅ **gefixt (v1.36.10)** — B1 ✅ gefixt (v1.36.11) — B2 ✅ **gefixt (v1.36.12)**
 3. **Control-Plane-Sicherheit:** C1 ✅ **Gefixt v.1.36.13** — C2 ✅ **Gefixt v.1.36.14** — C3 ✅ **Gefixt v.1.36.15** — C4 ✅ **Gefixt v.1.36.16** — S1 ✅ **Gefixt v.1.36.18**
-4. **Architektur/Live-Bereitschaft:** H2 ✅ **Gefixt v.1.36.19**, H7 ✅ **Gefixt v.1.36.20**, H10, S2
+4. **Architektur/Live-Bereitschaft:** H2 ✅ **Gefixt v.1.36.19**, H7 ✅ **Gefixt v.1.36.20**, H10 ✅ **Gefixt v.1.36.21**, S2
 5. **Workshop:** W1, W2
 
 Jeder Schritt ist unabhängig; H1 entfällt (bereits gefixt).

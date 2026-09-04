@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
-> Code-Version **1.36.20**. Vollständige, detaillierte Einträge je Release stehen
+> **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-05** ·
+> Code-Version **1.36.21**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,25 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
+
+**HIGH, Handelslogik (`src/lib/adaptiveRisk.ts`, `src/lib/riskGuard.ts`,
+`src/lib/engine.ts`, `src/lib/monitor.ts`,
+`tests/h10.adaptiveUnknown.test.ts` neu).** Befund H10 des Senior-Peer-Reviews:
+Bei fehlender/fehlerhafter/staler Volatilitäts-Bewertung fiel das adaptive
+Risk-System still auf das Basis-Risiko zurück („Fail-Open") — ein unbekanntes
+Risikobild wurde wie „volle Risikobereitschaft" behandelt.
+
+**Fix (fail-closed):** neuer Regime-Wert `UNKNOWN`. Fehlende (MISSING),
+fehlerhafte (ERRORED) oder zu alte (STALE) Bewertung ergibt bei aktiviertem
+Adaptiv-System explizit `regime: "UNKNOWN"` mit konservativstem Faktor
+(wirksames Limit = Code-Boden `LIMIT_CEILINGS.maxRiskPerTrade[0]`, 0.2 %),
+Warnung im Audit-Log und begründendem Grund-Text im Status.
+`runAgentTurn` blockt Neupositionen bei UNKNOWN genau wie bei EXTREME
+(Guardrail `ADAPTIVE_RISK_UNKNOWN`/`ADAPTIVE_RISK_EXTREME`), der Trace zeigt
+`ADAPTIVES-RISIKO ok=false` und den `ADAPTIVES-RISIKO-GATE`. Deaktivierte
+Systeme (Operator-Wahl) bleiben bewusst NORMAL.
 
 ## [1.36.20] — 2026-09-04 · fix(audit): H7 Kill-Switch/Flatten arbeitet auf echten Venue-Positionen (HIGH)
 
