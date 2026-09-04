@@ -780,7 +780,30 @@ export async function runAgentTurn(
       } catch {
         /* kein Kurs verfügbar → Broker verwirft die Order (NO_QUOTE) */
       }
-      const fill = broker.submit(order);
+      // H2 FIX (CRITICAL, v1.36.19): submitAtomic() statt submit() — Guard,
+      // Fill UND Positions-Insert laufen in EINER exklusiv gesperrten
+      // Postgres-Transaktion (pg_advisory_xact_lock + order_intents-
+      // Reservierung). Zwei Next.js-Worker, die gleichzeitig für dieselbe
+      // Mission/dasselbe Konto einreichen, können nie mehr beide dieselbe
+      // Position eröffnen oder gemeinsam das Cash überziehen — die DB ist
+      // die einzige Quelle der Wahrheit, nicht der Prozessspeicher.
+      const fill = await broker.submitAtomic(order, {
+        persistPosition: async (tx, f) => {
+          await tx.insert(positions).values({
+            symbol: f.symbol,
+            side: f.side,
+            qty: String(f.qty),
+            entryPrice: String(f.fillPrice),
+            currentPrice: String(f.fillPrice),
+            stopLoss: f.stopLoss === null ? null : String(f.stopLoss),
+            takeProfit: f.takeProfit === null ? null : String(f.takeProfit),
+            broker: broker.name,
+            missionId,
+            status: "OPEN",
+          });
+          await tx.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, missionId));
+        },
+      });
       // H3: Schalter über den vollständigen Order-Status. Nur ein echter
       // FILLED-Fill mit belegtem Preis (>0) darf eine Position einbuchen;
       // alles andere (REJECTED/NEW/UNKNOWN/…) blockiert die Order.
@@ -795,19 +818,6 @@ export async function runAgentTurn(
       }
       trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${fill.fillPrice}, SL ${fill.stopLoss}, TP ${fill.takeProfit}`));
 
-      await db.insert(positions).values({
-        symbol: fill.symbol,
-        side: fill.side,
-        qty: String(fill.qty),
-        entryPrice: String(fill.fillPrice),
-        currentPrice: String(fill.fillPrice),
-        stopLoss: fill.stopLoss === null ? null : String(fill.stopLoss),
-        takeProfit: fill.takeProfit === null ? null : String(fill.takeProfit),
-        broker: broker.name,
-        missionId,
-        status: "OPEN",
-      });
-      await db.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, missionId));
       try {
         await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE");
       } catch {
@@ -892,7 +902,25 @@ export async function executeApprovedProposal(
 
   const broker = await getBroker();
   try { await getProductionMarketDataManager().getSnapshot(detail.symbol as string); } catch { /* Broker lehnt fehlenden Kurs ab. */ }
-  const fill = broker.submit({ ...detail, side: detail.side as "LONG" | "SHORT" } as any);
+  // H2 FIX (CRITICAL, v1.36.19): submitAtomic({ ...detail — proposedDetail
+  // bleibt die EINZIGE Orderquelle (H6 unverändert), aber Guard, Fill und
+  // Positions-Insert laufen jetzt in einer exklusiv gesperrten Transaktion
+  // (order_intents-Reservierung), statt Broker-Mutation und DB-Insert zeitlich
+  // auseinanderzureißen.
+  const fill = await broker.submitAtomic({ ...detail, side: detail.side as "LONG" | "SHORT" } as any, {
+    persistPosition: async (tx, f) => {
+      await tx.insert(positions).values({
+        symbol: f.symbol, side: f.side, qty: String(f.qty),
+        entryPrice: String(f.fillPrice), currentPrice: String(f.fillPrice),
+        stopLoss: f.stopLoss === null ? null : String(f.stopLoss),
+        takeProfit: f.takeProfit === null ? null : String(f.takeProfit),
+        broker: broker.name, missionId: proposal.missionId, status: "OPEN",
+      });
+      if (proposal.missionId) {
+        await tx.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, proposal.missionId));
+      }
+    },
+  });
   const filled = fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
   await logAudit(filled ? "ORDER_SENT" : "ORDER_REJECTED", filled ? "INFO" : "WARN", {
     proposalId, order: proposal.proposedDetail, fill,
@@ -902,16 +930,6 @@ export async function executeApprovedProposal(
     return { ...base, status: "BLOCKED", fill, guardrail: fill.reason ?? fill.status };
   }
 
-  await db.insert(positions).values({
-    symbol: fill.symbol, side: fill.side, qty: String(fill.qty),
-    entryPrice: String(fill.fillPrice), currentPrice: String(fill.fillPrice),
-    stopLoss: fill.stopLoss === null ? null : String(fill.stopLoss),
-    takeProfit: fill.takeProfit === null ? null : String(fill.takeProfit),
-    broker: broker.name, missionId: proposal.missionId, status: "OPEN",
-  });
-  if (proposal.missionId) {
-    await db.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, proposal.missionId));
-  }
   await db.update(proposals).set({ status: "EXECUTED", reason: "Filled by approved-proposal executor" }).where(eq(proposals.id, proposalId));
   try { await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE"); } catch { /* optional */ }
   return { ...base, status: "EXECUTED", fill };

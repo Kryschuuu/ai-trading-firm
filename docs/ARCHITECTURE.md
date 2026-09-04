@@ -316,16 +316,23 @@ Rechner/Container neben der Datenquelle.
 | --- | --- |
 | **Eine ACTIVE-Regel pro Symbol** | partieller UNIQUE-Index — konkurrierende Aktivierungen sind atomar |
 | **Advisory-Lock `pg_advisory_lock('rule:'+symbol)`** | kritischer Abschnitt Check→Fill ist pro Symbol serialisiert — zwei Instanzen können denselben Trade nie doppelt eröffnen |
-| **Positions-Sperre aus der DB** | `POSITION_ALREADY_OPEN` wird im Lock frisch geprüft, nicht aus dem RAM |
+| **`order_intents` (H2, v1.36.19)** | partieller UNIQUE-Index auf `symbol WHERE status='RESERVED'` + `pg_advisory_xact_lock(hashtext(account))` (`withAccountLock`, `src/lib/broker.ts`) — Guard, Fill, Reservierung und Positions-Insert laufen als EINE Postgres-Transaktion über `PaperBroker.submitAtomic()` |
+| **Positions-Sperre aus der DB** | `POSITION_ALREADY_OPEN` wird sowohl über `order_intents` als auch direkt gegen `positions` (status='OPEN') geprüft, nicht aus dem RAM |
 | **Shard-Key** | `MICRO_SYMBOLS=BTC,ETH` je Instanz — empfohlene Verteilung ohne Lock-Contention |
 
-**Einschränkung ehrlich benannt:** Der interne `PaperBroker` ist ein
-In-Memory-Ledger. Im Paper-Modus soll deshalb **genau eine**
-Executor-Instanz laufen (Single-Writer) — die Guardrail- und
-Sperrprimitive für Multi-Instanz sind bereits implementiert, aber erst ein
-echter Broker-Adapter (Alpaca/ccxt, staatsextern) macht N-Instanzen zu
-einem Normalbetrieb. Bis dahin: „1 Mikro-Instanz“ = korrekt und
-ausdrücklich so dokumentiert.
+**Stand nach H2 (v1.36.19):** Der interne `PaperBroker` bleibt intern ein
+In-Memory-Cache (Positionen/Cash), aber jeder DB-gestützte Schreibpfad
+(`src/lib/engine.ts`, `src/lib/microExecutor.ts`) nutzt `submitAtomic()`
+statt `submit()` — Guard-Prüfung, `order_intents`-Reservierung und
+Positions-Persistenz sind dadurch über Prozessgrenzen hinweg atomar
+(`pg_advisory_xact_lock` je Konto + DB-Wahrheits-Check gegen `positions`
+VOR dem In-Memory-Guard, siehe `docs/AUDIT_REMEDIATION_2026-09.md` §H2).
+Mehrere Mikro-Executor-/Next.js-Worker-Instanzen können damit nicht mehr
+denselben Symbol-Slot doppelt öffnen oder gemeinsames Cash überziehen —
+ein zweiter, gleichzeitiger Reservierungsversuch schlägt mit
+`POSITION_ALREADY_OPEN` fehl, unabhängig davon, welcher Prozess zuletzt
+hydratisiert hat. `submit()` selbst bleibt für Single-Process-Aufrufer
+(Backtests, reine Unit-Tests ohne DB) unverändert synchron und In-Memory.
 
 ### 5.3 Sizing
 
