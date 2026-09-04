@@ -63,7 +63,7 @@ Zuerst trocken durchspielen ist jederzeit möglich:
 | 04 | `step_04_database` | Rolle mit Passwort (SCRAM), Datenbank, `pg_isready` |
 | 05 | `step_05_env` | `.env` anlegen/ergänzen, `FIRM_API_TOKEN`, Recht `600` |
 | 06 | `step_06_dependencies` | `npm ci` |
-| 07 | `step_07_schema` | `drizzle-kit push`, ≥ 13 Pflicht-Tabellen verifizieren |
+| 07 | `step_07_schema` | `drizzle-kit push`, ≥ 14 Pflicht-Tabellen verifizieren |
 | 08 | `step_08_universe` | `npm run universe:seed` + `npm run universe:seed:markets` |
 | 09 | `step_09_build` | `npm run build`, Build-Warnungen auswerten |
 | 10 | `step_10_validate` | Seed, Short-Selling-Default, `scripts/validate-setup.sh` |
@@ -799,7 +799,7 @@ Hake diese Liste ab, bevor du weitermachst:
 
 - [ ] `./scripts/validate-setup.sh` → `Validierung bestanden.` (18 Checks, ab 15)
 - [ ] `systemctl status postgresql` → `active (running)`
-- [ ] `psql "$DATABASE_URL" -c "\dt"` zeigt mindestens 13 Tabellen
+- [ ] `psql "$DATABASE_URL" -c "\dt"` zeigt mindestens 14 Tabellen (inkl. `broker_credentials`, `venue_control_state`)
 - [ ] `curl -s localhost:3369/api/health` antwortet mit `schemaReady: true`
 - [ ] Dashboard erreichbar, Statusleiste zeigt Equity 10.000
 - [ ] Seed legt **12 Agenten** und **14 Missionen** an (idempotent)

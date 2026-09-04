@@ -6,6 +6,8 @@
  *   service:     Credential-Manager (save/delete/status/test/discover),
  *                Zustandsmaschine (6 Ebenen), Audit, status-only-Vertrag
  *   states:      Zustandsmaschinen-Light (off/pending/active/error)
+ *   stateStore:  Persistenz des Zustands (`venue_control_state`, C4) —
+ *                Map ist nur Cache, Neustart zeigt letzten Zustand
  *   probe:       Read-only Permission-Probe (PAPER real, sonst Mock-Adapter)
  *   guard:       RBAC (src/auth, Task 10), CSRF, Credential-Rate-Limit
  *                (Identitaet + global + Backoff, C2/v1.36.14)
@@ -37,8 +39,12 @@ export {
 } from "./secretStore";
 export {
   ControlPlaneService,
+  clearControlPlaneStateCacheForTests,
   getControlPlaneService,
+  loadVenueControlState,
+  readVenueControlStatePublic,
   resetControlPlaneForTests,
+  warmControlPlaneStateCache,
   type ControlPlaneOptions,
   type DeleteResultDto,
   type DiscoverResultDto,
@@ -47,6 +53,18 @@ export {
   type StatusDto,
   type TestResultDto,
 } from "./service";
+export {
+  CONTROL_STATE_BACKEND_FLAG,
+  DbControlStateRepository,
+  MemoryControlStateRepository,
+  fromPersistedRow,
+  getControlStateRepository,
+  resolveControlStateRepository,
+  setControlStateRepositoryForTests,
+  toPersistedRow,
+  type ControlStateRepository,
+  type PersistedControlState,
+} from "./stateStore";
 export {
   CONTROL_LAYER_IDS,
   StateTransitionError,

@@ -258,6 +258,42 @@ export const brokerCredentials = pgTable("broker_credentials", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Persistierter Control-Plane-Zustand je Venue (C4, v1.36.16).
+ *
+ * Vorher lebte `VenueControlState` nur in `globalThis.__controlPlaneStates`
+ * (Map): Credentials waren persistent, der Zustand nicht — nach einem
+ * Prozess-Neustart zeigte der Broker-Tab `configured=true, connected=false`
+ * (INITIAL), bis jemand erneut testete. Jetzt ist die Map nur noch Cache,
+ * diese Tabelle die Wahrheit: jedes `writeState()` upsertet die Zeile, ein
+ * kalter `readState()` laedt sie.
+ *
+ * Inhalt ist status-only (Ebenen, Rechte-NAMEN, Zaehler, Zeitstempel,
+ * SAFE-Fehlercodes) — NIE Secret-Inhalt, kein Envelope, kein keyHint.
+ * `live_enabled` ist eine informative Momentaufnahme; die Wahrheit bleibt
+ * der Live-Gate-Enforcer (readGateState) und wird beim Laden neu projiziert.
+ * `layers` ist der vollstaendige 6-Ebenen-Snapshot (verlustfreie
+ * Rehydrierung); die Einzelspalten sind die abfragbare Projektion.
+ * Additiv, kein Bruch: `npx drizzle-kit push` (oder
+ * `drizzle/2026-09-04_c4_venue_control_state.sql`).
+ */
+export const venueControlState = pgTable("venue_control_state", {
+  venue: text("venue").primaryKey(),
+  configured: boolean("configured").notNull().default(false),
+  connected: boolean("connected").notNull().default(false),
+  permissions: jsonb("permissions").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  liveEnabled: boolean("live_enabled").notNull().default(false),
+  lastProbe: timestamp("last_probe", { withTimezone: true }),
+  connectionState: text("connection_state").notNull().default("off"),
+  discoveryState: text("discovery_state").notNull().default("off"),
+  discoveryCount: integer("discovery_count").notNull().default(0),
+  discoveryLastSync: timestamp("discovery_last_sync", { withTimezone: true }),
+  lastError: text("last_error"),
+  /** Vollstaendiger Ebenen-Snapshot `{ connection, marketDiscovery, permissions, paper, testnet, live }`. */
+  layers: jsonb("layers").$type<Record<string, { state: string; at: string | null; detail?: string | null }>>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Vorschläge, die auf Freigabe warten (Approver-Workflow). */
 export const proposals = pgTable("proposals", {
   id: uuid("id").primaryKey().defaultRandom(),

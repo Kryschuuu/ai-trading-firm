@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-04** ·
-> Code-Version **1.36.15**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.17**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,83 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.17] — 2026-09-04 · chore(license): MIT → GNU General Public License v3 (GPL-3.0-only)
+
+Kein Code-Change — **Relizenzierung:** Das Projekt wird ab sofort unter der
+**GNU General Public License, Version 3** (GPL-3.0) veröffentlicht. Die
+bisherige MIT-Lizenz ist vollständig entfernt (keine MIT-Einträge mehr in
+`package.json`, `README.md`, Doku/Changelog). Der Copyright-Inhaber bleibt
+Kryschuuu.
+
+- **`LICENSE`:** vollständiger, unveränderter GPLv3-Text (ersetzt die
+  MIT-Lizenz; die Lizenzdatei selbst ist nicht modifiziert — „changing it is
+  not allowed" gilt unverändert).
+- **`package.json`:** `"license": "MIT"` → `"license": "GPL-3.0-only"`.
+- **`README.md`:** Abschnitt „Lizenz" nennt jetzt GNU GPL v3; alle
+  MIT-Referenzen entfernt.
+- **`docs/CHANGELOG.md`:** historische „License MIT"-Notiz (Release v1.3.0)
+  entfernt.
+
+Frei nutzbar, änderbar und weiterverteilbar — unter den Bedingungen der GPLv3
+(siehe [`LICENSE`](LICENSE)).
+
+## [1.36.16] — 2026-09-04 · fix(control-plane): C4 Control-Plane-Zustand persistiert — Neustart zeigt letzten bekannten Zustand statt INITIAL (MEDIUM)
+
+**MEDIUM, Control Panel (`src/brokers/control-plane/stateStore.ts` neu,
+`src/brokers/control-plane/service.ts`, `src/db/schema.ts`, `src/lib/seed.ts`,
+`src/instrumentation.ts`, `drizzle/2026-09-04_c4_venue_control_state.sql` neu).**
+Befund C4 des Senior-Peer-Reviews: **`VenueControlState` lebte nur in
+`globalThis.__controlPlaneStates` (Map).** Die Credentials waren persistent
+(`broker_credentials`), der Zustand nicht — nach jedem Prozess-Neustart zeigte der
+Broker-Tab `configured=true, connected=false` (INITIAL), bis jemand erneut testete;
+ein erneutes `save` ging durch, obwohl die Verbindung zuvor aktiv war
+(`ALREADY_CONNECTED` griff nicht mehr). Zwei Wahrheiten, eine Konsistenzlücke.
+
+**Fix — DB ist die Wahrheit, die Map nur Cache:**
+
+1. **Neue Tabelle `venue_control_state`** (Drizzle, additiv): `venue` (PK),
+   `configured`, `connected`, `permissions` (jsonb, Rechte-**Namen**),
+   `live_enabled`, `last_probe`, `connection_state`, `discovery_state`,
+   `discovery_count`, `discovery_last_sync`, `last_error`, `layers` (jsonb,
+   vollständiger 6-Ebenen-Snapshot für verlustfreie Rehydrierung), `updated_at`.
+   Status-only — nie Secret-Inhalt, kein Envelope, kein keyHint.
+   Migration: `npx drizzle-kit push` (oder das idempotente
+   `drizzle/2026-09-04_c4_venue_control_state.sql`); `checkSchema()` und
+   `setup-cachyos.sh` erwarten die Tabelle (14 Pflicht-Tabellen).
+2. **`writeState()` upsertet** die Zeile bei jeder Aktion (save/test/discover/
+   disable). **`loadState()`** liest Cache → DB → Initialzustand (lazy
+   persistiert); parallele Aufrufe teilen sich eine Hydration. `getStatus`,
+   `saveCredentials`, `testConnection`, `discover`, `deleteCredentials` laufen
+   über diesen Pfad — **nach einem Neustart zeigt `GET /status` den letzten
+   bekannten Zustand**, und `ALREADY_CONNECTED` greift wieder.
+3. **`readVenueControlStatePublic`** (synchron, Live-Gate-Bridge) liest den
+   Cache; bei kalter Venue stößt es die Hydration an und liefert bis dahin
+   fail-safe `off` (deny). **`warmControlPlaneStateCache()`** lädt beim Server-
+   Boot (`instrumentation.ts`) und in der Service-Fabrik alle Zeilen vor, damit
+   auch synchrone Leser sofort den letzten Zustand sehen. Neu (async, bevorzugt):
+   `loadVenueControlState()`.
+4. **Live bleibt Enforcer-Projektion:** `live_enabled` in der DB ist nur eine
+   Momentaufnahme; beim Laden werden `liveEnabled`/`liveReason`/Live-Ebene neu
+   aus `readGateState()` projiziert — eine manipulierte Zeile kann Live nicht
+   freischalten.
+5. **Fail-Safe:** DB down oder Tabelle (noch) nicht gepusht → Memory-Fallback
+   mit **einer** redigierten Log-Warnung pro Prozess; Verhalten dann exakt wie
+   vor C4 (kein Bruch). Neues Flag `CONTROL_STATE_BACKEND` (`db` Default,
+   `memory` nur Tests).
+
+**Akzeptanzkriterien erfüllt:** `writeState` + Prozess-„Neustart" (Cache geleert)
+→ `readState`/`getStatus` liefern den persistierten Zustand · kein
+Verhaltensunterschied bei warmem Cache · Zeile status-only. **Tests:** neu
+`tests/controlPlane.persistence.test.ts` (10 Fälle: save→Neustart→getStatus,
+Async-/Sync-Leser, Boot-Warm-up, Fehler-/Discovery-/disable-Rehydrierung,
+Lazy-Insert + Secret-Scanner, ALREADY_CONNECTED nach Neustart, kaputtes
+Repository, Serialisierung inkl. Legacy-Zeile, Backend-Wahl). Zusätzlich gegen
+eine echte PostgreSQL verifiziert: `drizzle-kit push` legt die Tabelle an
+(danach `No changes detected`), Upsert bleibt bei einer Zeile je Venue,
+`checkSchema()` grün. Typecheck + Lint + Vollsuite (1702 Tests) grün — mit und
+ohne erreichbare Datenbank. Details: Befund C4 in
+`docs/AUDIT_REMEDIATION_2026-09.md` (**gefixt v.1.36.16**).
 
 ## [1.36.15] — 2026-09-04 · fix(security): C3 Kill-Switch-Disarm — stärkeres Gate als Arm (ADMIN + single-use Nonce, HIGH)
 
