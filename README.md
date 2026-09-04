@@ -11,7 +11,7 @@ Risikogrenzen im Code**.
 > gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau
 > so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.14 (2026-09-03) · Vollständige
+> **Dokumentationsstand:** v1.36.15 (2026-09-04) · Vollständige
 > code-synchronisierte Docs in [`docs/`](docs/), Task-Tracker in
 > [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in
 > [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in
@@ -107,6 +107,25 @@ Credential-Limit):
   (inkl. `ignoredHeaders` — welche Header die App verworfen hat).
 
 Flag-Referenz: [`INSTALL.md`](INSTALL.md) → „Rate-Limit-Identität“; Befund C2 in
+[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Sicherheit: Disarm des Kill-Switch ist stärker als Arm (v1.36.15)
+
+Der Firm-Not-Halt ist die härteste Schicht — deshalb darf ihn nicht dasselbe
+Credential wieder aufheben, das ihn zieht (Befund C3, HIGH). Seit v1.36.15:
+
+* **Arm** (`POST /api/firm/kill` mit `{arm:true}`) bleibt Operator-tauglich
+  (`guardWrite`): scharfschalten ist keine Eskalation.
+* **Disarm** (`{arm:false, nonce}`) verlangt eine strikt stärkere Kette:
+  1. ADMIN-Permission `live.gate` → ein gestohlenes Operator-Token reicht nicht,
+  2. CSRF-Header `x-csrf-token`,
+  3. einen kurzlebigen **single-use Nonce** (≤ 60 s) aus
+     `GET /api/firm/kill/challenge`, der im Body zurückgegeben wird. Fehlt/ist
+     abgelaufen/wiederverwendet ⇒ 403, kein Disarm.
+* Ein erfolgreicher Disarm wird als **CRITICAL** auditiert (Actor + Nonce).
+
+Ein gestohlenes Operator-Token kann das Trading damit **nicht** mehr still wieder
+freischalten, nachdem der Not-Halt ausgelöst wurde. Befund C3 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
 
 ## Markt-Konfiguration (v1.30.0)
