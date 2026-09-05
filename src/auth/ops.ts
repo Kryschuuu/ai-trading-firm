@@ -17,6 +17,7 @@
  */
 import { BROKER_VENUE_IDS } from "@/contracts/broker";
 import { evaluateLiveOrder } from "@/live-gate/enforcer";
+import { docsHrefForSlug } from "@/lib/docsCatalog";
 import { APP_VERSION } from "@/lib/version";
 import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
@@ -44,7 +45,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "Instrumenten-Registry: Bestand je Venue, Datenstand und Ausschluss-Policy. Single Source of Truth für alles, was handelbar ist.",
     sources: ["src/universe (InstrumentRegistry)", "GET /api/universe/daily"],
-    href: "/docs?name=universe",
+    href: docsHrefForSlug("universe") ?? "/docs/MARKET_UNIVERSE.md",
     helpKey: "section.marketUniverse",
   },
   {
@@ -53,7 +54,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "Deterministischer 14-Faktoren-Scan: Trichter von „gescannt“ bis „Deep-Dive“ und die aktuelle Tagesrotation nach Market Score.",
     sources: ["src/scanner", "GET /api/universe/daily"],
-    href: "/docs?name=scanner",
+    href: docsHrefForSlug("scanner") ?? "/docs/DAILY_WEEKLY_RESEARCH.md",
     helpKey: "section.scanner",
   },
   {
@@ -62,7 +63,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "Offene Positionen, Exposure, Eigenkapital und Tagesergebnis — bewertet über die deterministische Kennzahlen-Schicht des Portfolio-Moduls.",
     sources: ["GET /api/firm", "src/portfolio", "GET /api/portfolio/metrics"],
-    href: "/docs?name=portfolio",
+    href: docsHrefForSlug("portfolio") ?? "/docs/PORTFOLIO_ANALYTICS.md",
     helpKey: "section.portfolio",
   },
   {
@@ -71,7 +72,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "Tages- und Wochenläufe des Makro-Zyklus: Status, Dauer, Artefakte und die Weekly-Klassifikation CORE/ROTATION/DISCOVERY.",
     sources: ["src/cycle", "GET /api/analysis/runs", "GET /api/analysis/weekly/latest"],
-    href: "/docs?name=handbuch",
+    href: docsHrefForSlug("handbuch") ?? "/docs/HANDBUCH.md",
     helpKey: "section.research",
   },
   {
@@ -81,7 +82,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
       "Sieben Venues mit Capabilities, verfügbaren Execution-Modi und lokalem Health-Status. Credentials und Live-Freigabe gehören in den Broker-Tab.",
     sources: ["GET /api/brokers", "src/brokers", "src/brokers/control-plane"],
     tab: "brokers",
-    href: "/docs?name=brokers",
+    href: docsHrefForSlug("brokers") ?? "/docs/BROKER_ARCHITECTURE.md",
     helpKey: "section.brokers",
   },
   {
@@ -90,7 +91,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "MODEL_ROUTER im Betrieb: Policy-Version, Modus, Provider-Health, Tagesbudget und die letzten Routing-Entscheidungen je Agent.",
     sources: ["GET /api/routing", "src/routing", "GET /api/firm (lokaler Provider)"],
-    href: "/docs?name=routing",
+    href: docsHrefForSlug("routing") ?? "/docs/LLM_ROUTING.md",
     helpKey: "section.llm",
   },
   {
@@ -99,7 +100,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "Die Belegschaft der Firma: Rollen, Status, aktive Missionen und wann zuletzt gesprochen wurde.",
     sources: ["GET /api/firm", "GET /api/firm/agents"],
-    href: "/docs?name=architecture",
+    href: docsHrefForSlug("architecture") ?? "/docs/ARCHITECTURE.md",
     helpKey: "section.agents",
   },
   {
@@ -109,7 +110,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
       "Wirksame Guardrails: Limits, Volatilitäts-Regime, Kill-Switch und die Freigabelage des Live-Gates. Kein Order-Pfad umgeht diese Kette.",
     sources: ["src/lib/riskGuard", "src/lib/adaptiveRisk", "src/live-gate"],
     tab: "risk",
-    href: "/docs?name=security",
+    href: docsHrefForSlug("security") ?? "/docs/SECURITY_AUDIT.md",
     helpKey: "section.risk",
   },
   {
@@ -119,7 +120,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
       "Audit-Trail mit Warnungen und kritischen Ereignissen plus die Integrität der Live-Gate-Hash-Kette (Manipulationserkennung).",
     sources: ["GET /api/firm/log", "src/live-gate/audit"],
     tab: "protocol",
-    href: "/docs?name=security",
+    href: docsHrefForSlug("security") ?? "/docs/SECURITY_AUDIT.md",
     helpKey: "section.audit",
   },
   {
@@ -128,7 +129,7 @@ export const OPS_SECTIONS: readonly OpsSectionDefinition[] = [
     summary:
       "Hilfe-Systematik und Dokumentationsportal: jede Hilfe-Datei im 3-Ebenen-Schema, jedes Handbuch direkt erreichbar.",
     sources: ["docs/help/*.help.json", "GET /api/docs"],
-    href: "/docs?name=handbuch",
+    href: docsHrefForSlug("handbuch") ?? "/docs/HANDBUCH.md",
     helpKey: "section.help",
   },
 ];

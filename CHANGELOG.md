@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-05** ·
-> Code-Version **1.36.21**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.22**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,27 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.22] — 2026-09-05 · fix(docs): lokale Markdown-Links rendern unter `/docs/<Datei>.md` statt 404
+
+**PATCH, Doku-Viewer.** Relative Links wie `[ARCHITECTURE.md](ARCHITECTURE.md)`
+in `docs/README.md` wurden im Browser unter `/docs` ohne trailing slash zu
+`http://host:3369/ARCHITECTURE.md` aufgelöst — Next.js hat dort keine Seite,
+die Datei 404te. Die Markdown-Quellen bleiben GitHub-relativ; der Viewer
+schreibt die `href`s zur Laufzeit auf die kanonische HTML-URL
+`/docs/<Datei>.md` um.
+
+* Neue SSR-Routen `src/app/docs/page.tsx` (`docs/README.md`) und
+  `src/app/docs/[...slug]/page.tsx` (`/docs/ARCHITECTURE.md`,
+  `/docs/audit-remediation/…`). Markdown wird einmal zu HTML gerendert.
+* `src/lib/docsLinks.ts` (`rewriteDocsHref`) + Middleware/Redirects für
+  Root-`/:file.md` und alte Ops-Links `/docs?name=<slug>`.
+* Katalog-Lücken aus der README-Inhalts-Tabelle geschlossen (ALPACA,
+  PAPER_TRADING, ARENA_TASKS, INSTALL-WINDOWS, Peer-Reviews, Audit-Remediation,
+  Task-10-Plan). Dateien unter `docs/` und `audit-remediation/` bleiben mit
+  Path-Traversal-Guard lesbar.
+* Regression: alle `*.md`-Links aus `docs/README.md` zeigen auf
+  `/docs/…` und existieren auf Disk.
 
 ## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
 

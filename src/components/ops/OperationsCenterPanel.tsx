@@ -188,7 +188,7 @@ export function OperationsCenterView({
             </span>
           )}
           <a
-            href="/docs?name=handbuch"
+            href="/docs/HANDBUCH.md"
             className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
           >
             Handbuch

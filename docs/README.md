@@ -50,8 +50,11 @@ Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogren
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER (Task 09): Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[task-10-IMPLEMENTATION_PLAN.md](task-10-IMPLEMENTATION_PLAN.md)** | Operations Center + RBAC (Task 10): Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0) |
 
-**Version:** `v1.36.21` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
-Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar.
+**Version:** `v1.36.22` (siehe `package.json` + [CHANGELOG.md](CHANGELOG.md)).
+Alle Dokumente sind im laufenden System unter **`/docs`** und
+**`/docs/<Datei>.md`** (z. B. `/docs/ARCHITECTURE.md`) als HTML lesbar —
+relative Markdown-Links aus dieser Übersicht landen dort, nicht auf
+`host:3369/ARCHITECTURE.md`.
 
 ---
 
@@ -243,7 +246,10 @@ der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FAL
 └── src/
     ├── app/
     │   ├── page.tsx              ← Dashboard
-    │   ├── docs/page.tsx         ← Doku im Browser
+    │   ├── docs/
+    │   │   ├── page.tsx          ← Doku-Übersicht (`/docs`, gerendertes README)
+    │   │   ├── [...slug]/page.tsx← `/docs/<Datei>.md` (HTML, relative Links)
+    │   │   └── not-found.tsx     ← fehlendes Dokument
     │   └── api/
     │       ├── health/           ← Healthcheck für systemd/Monitoring
     │       ├── seed/             ← Team + Missionen anlegen (idempotent)
@@ -269,6 +275,9 @@ der Makro-Zyklus erzeugt dann deterministische Fallback-Regeln (`sourceMode: FAL
     ├── components/workshop/      ← Workshop-Tab: Missionen, Turns, Prompts, Trefferquote
     └── lib/
         ├── riskGuard.ts          ← HARTE LIMITS — die wichtigste Datei
+        ├── docsCatalog.ts        ← Dokumentations-Whitelist (GET /api/docs, `/docs`)
+        ├── docsLinks.ts          ← Markdown-href → `/docs/<Datei>.md` (v1.36.22)
+        ├── docsContent.ts        ← Markdown vom Disk (docs/ + audit-remediation/)
         ├── clientIp.ts           ← Rate-Limit-Identität: Trusted Proxys, nie spoofbare Header (v1.36.14)
         ├── broker.ts             ← Broker-Abstraktion + Paper-Broker
         ├── llmProvider.ts        ← Provider-Abstraktion (Ollama/OpenAI/Gemini/Claude)
@@ -347,7 +356,8 @@ Risikolimits folgen einer **Kaskade** (`src/lib/riskGuard.ts` +
 | `POST` | `/api/firm/rules/[id]/backtest` | deterministischer Historie-Backtest (ohne LLM), Ergebnis in `rule_backtests` |
 | `POST/GET` | `/api/firm/macro` | Makro-Zyklus (CEO + Research) jetzt ausführen / Status |
 | `GET` | `/api/firm/micro` | Status des Mikro-Executor-Prozesses + aktive Regeln + letzte Ausführungen |
-| `GET` | `/api/docs?name=install` | Markdown-Doku als JSON |
+| `GET` | `/docs/<Datei>.md` | gerenderte Dokumentation (HTML; relative `*.md`-Links bleiben im Viewer) |
+| `GET` | `/api/docs?name=install` | Markdown-Doku als JSON (Slug oder Dateiname) |
 
 Schreibende Endpunkte (`POST`/`PUT`) verlangen `x-firm-token`, sobald
 `FIRM_API_TOKEN` gesetzt ist; ist gar kein Token gesetzt, entscheidet der

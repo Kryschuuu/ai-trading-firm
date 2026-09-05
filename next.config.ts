@@ -10,6 +10,22 @@ import type { NextConfig } from "next";
  * erforderlich. Im Dev-Modus bleibt alles offen, damit HMR funktioniert.
  */
 const nextConfig: NextConfig = {
+  /**
+   * Relative Markdown-Links aus `/docs` ohne trailing slash werden vom
+   * Browser als `/ARCHITECTURE.md` aufgelöst. Die gerenderte Doku lebt unter
+   * `/docs/<Datei>.md` — dieser Redirect macht die alten 404-URLs gültig.
+   * Die Middleware (`src/middleware.ts`) macht dasselbe plus `?name=`-Slug.
+   */
+  async redirects() {
+    return [
+      { source: "/:file.md", destination: "/docs/:file.md", permanent: false },
+      {
+        source: "/audit-remediation/:file.md",
+        destination: "/docs/audit-remediation/:file.md",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     if (process.env.NODE_ENV !== "production") return [];
     return [

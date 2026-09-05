@@ -5,6 +5,42 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.22] — 2026-09-05 · fix(docs): lokale Markdown-Links rendern unter `/docs/<Datei>.md` statt 404
+
+**PATCH, Doku-Viewer (`src/app/docs/`, `src/lib/docsLinks.ts`,
+`src/lib/docsContent.ts`, `src/middleware.ts`).** Relative Markdown-Links
+aus `docs/README.md` (z. B. `[ARCHITECTURE.md](ARCHITECTURE.md)`) löste der
+Browser von `/docs` ohne trailing slash als `http://host:3369/ARCHITECTURE.md`
+auf — das ist keine Next-Route, die Datei 404te. Die Quellen bleiben
+GitHub-relativ; der Viewer schreibt die Ziele zur Laufzeit auf die
+kanonische, gerenderte URL `/docs/<Datei>.md`.
+
+### Hinzugefügt
+
+- **SSR-Docs-Routen:** `/docs` rendert `docs/README.md` als HTML;
+  `/docs/<Datei>.md` (Catch-All `src/app/docs/[...slug]/page.tsx`) rendert
+  Katalog- und Disk-Dateien unter `docs/` und `audit-remediation/`.
+- **`src/lib/docsLinks.ts`:** `rewriteDocsHref` mappt `*.md`,
+  `../audit-remediation/X.md` und Root-`/ARCHITECTURE.md` auf `/docs/…`;
+  `http(s)`, `mailto`, `#` und App-Routen bleiben unverändert.
+- **Middleware + Redirects:** `/:file.md` → `/docs/:file.md`;
+  `/docs?name=architecture` → `/docs/ARCHITECTURE.md` (alte Ops-Links).
+- **Katalog-Lücken:** ALPACA, PAPER_TRADING, ARENA_TASKS, INSTALL-WINDOWS,
+  PEER_REVIEW_BITUNIX_EXECUTION, PEER_REVIEW_ROUTING_OVERRIDES,
+  AUDIT_REMEDIATION_2026-09, FRONTEND_CONTROL_PLANE, Task-10-Plan.
+- **Tests:** `tests/docsLinks.test.ts` — README-Link-Rewrite, Katalog-Lookup,
+  Path-Traversal-Guard.
+
+### Geändert
+
+- Ops-/Help-Hrefs zeigen auf `/docs/<Datei>.md` statt `/docs?name=<slug>`.
+- `GET /api/docs?name=` akzeptiert Slug **und** Dateiname (`ARCHITECTURE.md`).
+- `INSTALL.md`-Status-Header auf Code-Version **1.36.22**.
+
+Die Markdown-Dateien unter `docs/` bleiben die GitHub-Quelle; im laufenden
+System ist jedes Dokument unter seiner eigenen URL einmal gerendert
+aufrufbar.
+
 ## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
 
 **HIGH, Handelslogik (`src/lib/adaptiveRisk.ts`, `src/lib/riskGuard.ts`,

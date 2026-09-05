@@ -896,7 +896,7 @@ async function collectHelp(): Promise<Draft> {
       ...topics.slice(0, 4),
       ...docs.slice(0, MAX_SECTION_ITEMS - Math.min(4, topics.length)).map((d) => ({
         label: d.title,
-        value: `/docs?name=${d.slug}`,
+        value: d.href,
         meta: d.subtitle,
       })),
     ],
