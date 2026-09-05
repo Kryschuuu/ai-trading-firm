@@ -8,9 +8,11 @@
  *   POST /api/live/transition   (Permission live.gate = Admin)
  *   POST /api/live/kill         (Permission live.gate = Admin + Phrase "KILL")
  *
- * Regeln wie in controlPlane.ts: Mutating-Requests senden Token + CSRF-Header;
+ * Regeln wie in controlPlane.ts: Mutating-Requests senden den CSRF-Header
+ * (Seit W1 v1.36.23 aus der Session-Cookie, kein Token im Client-Speicher);
  * Responses enthalten niemals Secrets (der Gate-Zustand ist status-only).
  */
+import { csrfHeaderValue } from "@/lib/browserSession";
 
 export type LiveGateStateId =
   | "DISCONNECTED"
@@ -93,11 +95,6 @@ export interface LiveGateApiResult<T> {
 
 type ApiError = { ok?: boolean; error?: string; message?: string; hint?: string };
 
-function csrfValue(): string {
-  if (typeof window === "undefined") return "local";
-  return window.localStorage.getItem("firmToken")?.trim() || "local";
-}
-
 async function request<T>(
   url: string,
   method: "GET" | "POST",
@@ -105,15 +102,9 @@ async function request<T>(
 ): Promise<LiveGateApiResult<T>> {
   const headers = new Headers();
   if (method === "POST") {
-    const token =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem("firmToken") ?? ""
-        : "";
-    if (token) {
-      headers.set("x-firm-token", token);
-      headers.set("x-admin-token", token);
-    }
-    headers.set("x-csrf-token", csrfValue());
+    // W1 (v1.36.23): Kein Token mehr aus localStorage — Session-Cookie wird
+    // automatisch mitgesendet; Double-Submit-CSRF aus firm_csrf.
+    headers.set("x-csrf-token", csrfHeaderValue());
     if (body !== undefined) headers.set("content-type", "application/json");
   }
   let res: Response;
@@ -122,6 +113,7 @@ async function request<T>(
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: "same-origin",
     });
   } catch {
     return { data: null, error: "Netzwerkfehler — Server nicht erreichbar.", status: 0 };

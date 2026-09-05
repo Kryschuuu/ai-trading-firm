@@ -5,6 +5,41 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.23] — 2026-09-05 · fix(audit): W1 Session-Cookie statt API-Token in localStorage (HIGH)
+
+**HIGH, Workshop.** Befund W1 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): **Der FIRM_API_TOKEN lag dauerhaft in
+`localStorage` (`saveToken` → `window.localStorage.setItem("firmToken", …)`);
+jedes XSS im Origin konnte ihn lesen und damit API-Zugriff übernehmen.**
+
+### Geändert
+
+- **`POST /api/auth/login`** (neu, `src/app/api/auth/login/route.ts`): verifiziert
+  den Token serverseitig über die RBAC-Auflösung und antwortet ausschließlich mit
+  `Set-Cookie` — `firm_session` (HttpOnly, Secure, SameSite=Strict, Path=/,
+  Max-Age=900) und `firm_csrf` (nicht-HttpOnly für Double-Submit). Der rohe
+  FIRM_API_TOKEN wird **nie** zurückgegeben und nie im Browser gespeichert.
+- **`src/lib/authSession.ts`** (neu): stateless, HMAC-SHA256-signierte Session
+  (Payload = aufgelöster Actor inkl. Permissions + CSRF-Wert + Ablauf; kein
+  In-Memory-Zustand, überlebt Neustarts). Schlüssel: `FIRM_SESSION_SECRET`
+  (optional) oder deterministisch aus den konfigurierten Tokens. Produktion über
+  plain-HTTP ⇒ fail-closed `400 SESSION_HTTPS_REQUIRED` (Secure-Cookie nie über
+  HTTP in Prod).
+- **`src/auth/resolve.ts` / `src/auth/types.ts`:** `resolveAuth` akzeptiert die
+  Session-Cookie als weitere Credential-Quelle; neue `ActorSource`
+  `"api-session"`. Header schlagen weiterhin (curl/CLI unverändert).
+- **`src/lib/apiAuth.ts` / `src/brokers/control-plane/guard.ts`:** `checkApiToken`
+  erlaubt Operator-/Admin-Sessions für Schreibzugriffe; `checkCsrfGuard`
+  Double-Submit gegen den session-gebundenen CSRF-Wert (Legacy-Token-Pfad bleibt).
+- **Client-Seite:** `src/lib/apiClient.ts`, `src/lib/controlPlane.ts`,
+  `src/lib/liveGate.ts` lesen kein `firmToken` mehr aus `localStorage`; mutierende
+  Requests senden `x-csrf-token` (Double-Submit). `FirmDashboard` `saveToken` →
+  `POST /api/auth/login`; `src/lib/browserSession.ts` (neu) entfernt Altbestand
+  und liefert den CSRF-Header-Wert.
+- **Akzeptanz erfüllt:** Lint/Statik + `tests/w1.sessionCookie.test.ts` (26 Tests:
+  Cookie-Flags, Signatur/Manipulation/Ablauf, resolveAuth/checkApiToken/
+  checkCsrfGuard, Login-Route inkl. HTTPS-Enforcement, Statik-Greps).
+
 ## [1.36.22] — 2026-09-05 · fix(audit): S2 zentrale State-Registry — alle Singletons an EINEM Ort, EIN Test-Reset (MEDIUM)
 
 **MEDIUM, Architektur/Sonstiges (`src/lib/stateRegistry.ts` neu,

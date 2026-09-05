@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
+import { clearLegacyFirmToken, csrfHeaderValue } from "@/lib/browserSession";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
 import { missionScopeLabel } from "@/lib/missionTemplates";
@@ -139,11 +140,45 @@ export default function FirmDashboard() {
     return true;
   }
 
-  function saveToken() {
-    window.localStorage.setItem("firmToken", tokenDraft.trim());
+  /**
+   * W1 (v1.36.23): Der Token wird NUR einmal serverseitig verifiziert —
+   * `POST /api/auth/login` setzt die HttpOnly+Secure+SameSite-Session-Cookie
+   * (15 min). Der Browser-Token wird verworfen, es gibt KEIN localStorage mehr.
+   */
+  async function saveToken() {
+    const token = tokenDraft.trim();
+    if (!token) return;
     setTokenDraft("");
-    setNeedToken(false);
-    setNotice("Token gespeichert — Aktion bitte erneut ausführen.");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+        credentials: "same-origin",
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        hint?: string;
+        open?: boolean;
+        expiresInS?: number;
+      };
+      if (res.ok && json.ok) {
+        clearLegacyFirmToken(); // Altbestand aus Pre-W1-Installationen entfernen
+        setNeedToken(false);
+        setNotice(
+          json.open
+            ? "Lokaler Offen-Betrieb — keine Anmeldung nötig."
+            : `Session aktiv (${json.expiresInS ?? 900} s) — Aktion bitte erneut ausführen.`
+        );
+      } else {
+        setNeedToken(true);
+        setNotice(`Anmeldung abgelehnt: ${json.hint ?? json.error ?? `HTTP ${res.status}`}`);
+      }
+    } catch {
+      setNeedToken(true);
+      setNotice("Netzwerkfehler — /api/auth/login nicht erreichbar.");
+    }
   }
 
   const load = useCallback(async () => {
@@ -180,6 +215,12 @@ export default function FirmDashboard() {
     const id = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(id);
   }, [load]);
+
+  // W1 (v1.36.23): Altbestand eines alten Token-Schlüssels aus dem
+  // Client-Speicher entfernen (Migration, nur removeItem — nie ein Schreiben).
+  useEffect(() => {
+    clearLegacyFirmToken();
+  }, []);
 
   // auto-refresh every 8s while running, else 15s
   useEffect(() => {
@@ -269,18 +310,19 @@ export default function FirmDashboard() {
       return;
     }
 
-    // Disarm (Befund C3, v1.36.15): ein Operator-Token reicht NICHT mehr.
-    // Erst eine Challenge holen (ADMIN `live.gate` + CSRF), dann den single-use
-    // Nonce (<= 60 s) im Disarm-Body zurückgeben.
-    const token = (window.localStorage.getItem("firmToken") ?? "").trim();
+    // Disarm (Befund C3, v1.36.15 + W1 v1.36.23): ein Operator-Token reicht
+    // NICHT mehr. Erst eine Challenge holen (ADMIN `live.gate` + CSRF), dann den
+    // single-use Nonce (<= 60 s) im Disarm-Body zurückgeben. Auth läuft seit W1
+    // über die Session-Cookie (wird same-origin automatisch mitgesendet), der
+    // CSRF-Header per Double-Submit aus `firm_csrf`.
     const authHeaders = new Headers({ "Content-Type": "application/json" });
-    if (token) {
-      authHeaders.set("x-firm-token", token);
-      authHeaders.set("x-admin-token", token);
-    }
-    authHeaders.set("x-csrf-token", token || "local");
+    authHeaders.set("x-csrf-token", csrfHeaderValue());
     try {
-      const chRes = await fetch("/api/firm/kill/challenge", { method: "GET", headers: authHeaders });
+      const chRes = await fetch("/api/firm/kill/challenge", {
+        method: "GET",
+        headers: authHeaders,
+        credentials: "same-origin",
+      });
       const ch = await chRes.json().catch(() => ({}));
       if (chRes.status === 401 || chRes.status === 403 || !ch?.ok || !ch?.nonce) {
         setNeedToken(true);
@@ -291,6 +333,7 @@ export default function FirmDashboard() {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ arm: false, nonce: ch.nonce, reason: "OPERATOR_DASHBOARD" }),
+        credentials: "same-origin",
       });
       if (!(await ensureAuth(res))) return;
       const json = await res.json().catch(() => ({}));
@@ -452,7 +495,7 @@ export default function FirmDashboard() {
                 onClick={saveToken}
                 className="rounded bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500"
               >
-                Speichern
+                Anmelden
               </button>
             </div>
           )}

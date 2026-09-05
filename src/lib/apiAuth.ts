@@ -37,6 +37,7 @@ import { anyTokenConfigured, resolveAuth } from "@/auth/resolve";
 import { resolveAuthMode } from "@/auth/authMode";
 import { tokenEquals } from "@/lib/tokenCompare";
 import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
+import { readSession, sessionActor } from "@/lib/authSession";
 import { state } from "@/lib/stateRegistry";
 
 /** Client-IP-Auflösung (C2) — derselbe Helfer wie in der Control Plane. */
@@ -97,8 +98,13 @@ export function checkApiToken(req: Request): Response | null {
   const got = req.headers.get("x-firm-token") ?? "";
   if (tokenEquals(got, expected)) return null;
 
+  // W1 (v1.36.23): Auch eine gueltige Session-Cookie berechtigt zum Schreiben —
+  // der angemeldete Actor (Operator/Admin) traegt `firm.write`.
+  const session = readSession(req);
+  if (session && sessionActor(session).permissions.includes("firm.write")) return null;
+
   return Response.json(
-    { ok: false, error: "UNAUTHORIZED", hint: "Fehlender/falscher x-firm-token Header." },
+    { ok: false, error: "UNAUTHORIZED", hint: "Fehlender/falscher x-firm-token Header oder keine gueltige Session." },
     { status: 401 }
   );
 }

@@ -35,6 +35,7 @@
  */
 import { requirePermission } from "@/auth";
 import { tokenEquals } from "@/lib/apiAuth";
+import { readSession } from "@/lib/authSession";
 import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
 import {
   CREDENTIAL_BACKOFF_RESET_MS,
@@ -67,7 +68,10 @@ export function checkAdminGuard(req: Request): Response | null {
   return requirePermission(req, "broker.credentials");
 }
 
-/** Erwarteter CSRF-Wert: Admin-Token → Operator-Token → Offen-Konstante. */
+/**
+ * Erwarteter CSRF-Wert: Admin-Token → Operator-Token → Offen-Konstante.
+ * (Legacy-Pfad fuer curl/CLI/Agenten ohne Session-Cookie.)
+ */
 export function expectedCsrfValue(): string {
   return (
     process.env.FIRM_ADMIN_TOKEN ?? process.env.FIRM_API_TOKEN ?? CSRF_LOCAL_VALUE
@@ -76,11 +80,25 @@ export function expectedCsrfValue(): string {
 
 /**
  * CSRF-Guard: mutierende Endpoints verlangen `x-csrf-token`.
+ *
+ * W1 (v1.36.23) — zwei Wege:
+ *   1. **Session (Browser):** Double-Submit — der Header muss dem
+ *      session-gebundenen CSRF-Wert aus `firm_session` entsprechen (Browser-JS
+ *      echoet ihn aus dem non-HttpOnly `firm_csrf`-Cookie). Ohne den HttpOnly
+ *      Session-Cookie authentifiziert der Wert allein nichts.
+ *   2. **Legacy (curl/CLI/Agenten):** Header muss dem konfigurierten Token
+ *      (bzw. `local` im Offen-Betrieb) entsprechen — unveraendert.
+ * Quer-Site-Formulare koennen weder Cookie noch Custom-Header setzen.
  * Liefert `null` = ok, sonst 403 CSRF_INVALID.
  */
 export function checkCsrfGuard(req: Request): Response | null {
   const got = req.headers.get(CSRF_HEADER) ?? "";
-  if (tokenEqualsSafe(got, expectedCsrfValue())) return null;
+  const session = readSession(req);
+  if (session) {
+    if (got.length > 0 && tokenEqualsSafe(got, session.csrf)) return null;
+  } else if (tokenEqualsSafe(got, expectedCsrfValue())) {
+    return null;
+  }
   return forbidden(
     "CSRF_INVALID",
     `Fehlender/falscher ${CSRF_HEADER}-Header auf mutierendem Endpoint.`
