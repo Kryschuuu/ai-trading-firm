@@ -28,7 +28,7 @@ Ein gültig signiertes, aber vom Viewer selbst erzeugtes Admin-Payload wird als 
 Angenommen:
 
 ```env
-FIRM_VIEWER_TOKEN=<geheimer Viewer-Token>
+FIRM_VIEWER_TOKEN=<redacted>
 FIRM_SESSION_SECRET=
 FIRM_ADMIN_TOKEN=
 FIRM_API_TOKEN=

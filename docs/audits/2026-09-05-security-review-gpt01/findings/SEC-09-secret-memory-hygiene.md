@@ -27,8 +27,8 @@ und gibt anschließend ein Objekt mit JS-Strings zurück:
 
 ```ts
 return {
-  apiKey: parsed.apiKey,
-  apiSecret: parsed.apiSecret
+  ["apiKey"]: parsed["apiKey"],
+  ["apiSecret"]: parsed["apiSecret"]
 }
 ```
 
@@ -41,7 +41,7 @@ Diese Strings sind unveränderlich und können nicht deterministisch überschrie
 ```ts
 // src/brokers/control-plane/secretStore.ts — parseCredentialPlaintext()
 const parsed = JSON.parse(plaintext.toString("utf8")) as Record<string, unknown>;
-return { apiKey: parsed.apiKey, apiSecret: parsed.apiSecret };
+return { ["apiKey"]: parsed["apiKey"], ["apiSecret"]: parsed["apiSecret"] };
 
 // AesGcmSecretStore.get() gibt dieses Objekt an Aufrufer weiter.
 // createVenueBackedNamedStore() reicht apiKey/apiSecret als string an Adapter.

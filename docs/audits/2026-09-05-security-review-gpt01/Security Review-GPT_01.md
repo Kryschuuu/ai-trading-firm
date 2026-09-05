@@ -50,11 +50,11 @@ Fehlt dieser, wird der HMAC-Schlüssel deterministisch aus den konfigurierten Au
 
 Gleichzeitig validiert `verifySessionToken()` zwar:
 
-- HMAC,    
-- Payload-Schema,    
-- Ablauf,    
+- HMAC,
+- Payload-Schema,
+- Ablauf,
 - dass Permissions aus der erlaubten Permission-Liste stammen,
-    
+
 
 aber **nicht**, dass die `permissions` zur behaupteten Rolle gehören. Ebenso wird `effectiveRole` nicht erneut aus der aktuellen Auth-Konfiguration abgeleitet.
 
@@ -65,7 +65,7 @@ Das ist zusammen gefährlich.
 Angenommen:
 
 ```env
-FIRM_VIEWER_TOKEN=<geheimer Viewer-Token>
+FIRM_VIEWER_TOKEN=<redacted>
 FIRM_SESSION_SECRET=
 FIRM_ADMIN_TOKEN=
 FIRM_API_TOKEN=
@@ -107,12 +107,12 @@ Das Problem liegt davor: **Ein gültig signiertes, aber vom Viewer selbst erzeug
 
 Bei dieser Konfiguration kann ein Viewer potentiell:
 
-- `firm.write`    
-- `firm.kill    
-- `firm.config`    
-- `broker.credentials`    
-- `routing.modes.write`    
-- `live.gate`    
+- `firm.write`
+- `firm.kill
+- `firm.config`
+- `broker.credentials`
+- `routing.modes.write`
+- `live.gate`
 
 erlangen.
 
@@ -140,11 +140,11 @@ if (!samePermissionSet(payload.permissions, expectedPermissions)) {
 
 Noch robuster:
 
-- `role`    
-- `effectiveRole    
-- `elevated`    
+- `role`
+- `effectiveRole
+- `elevated`
 - Permissions
-    
+
 
 nicht vollständig als vertrauenswürdige Session-Autorität behandeln, sondern serverseitig neu ableiten.
 
@@ -170,20 +170,20 @@ Besonders problematisch ist `/api/firm`.
 
 Die Route liefert unter anderem:
 
-- Agents    
-- Missions    
-- Positionen    
-- P&L    
-- Proposals    
-- Audit-Log    
-- Kill-Switch-Historie    
-- Agent-Messages    
-- Risk Limits    
-- Runtime-Konfiguration    
-- adaptive Risk-Daten    
-- Broker Registry    
-- Scheduler State    
-- Account-/Equity-Daten.    
+- Agents
+- Missions
+- Positionen
+- P&L
+- Proposals
+- Audit-Log
+- Kill-Switch-Historie
+- Agent-Messages
+- Risk Limits
+- Runtime-Konfiguration
+- adaptive Risk-Daten
+- Broker Registry
+- Scheduler State
+- Account-/Equity-Daten.
 
 Noch problematischer sind die dedizierten Log-/Report-Routen.
 
@@ -200,17 +200,17 @@ und rohe Audit-Details.
 
 `/api/firm/report` liefert unter anderem:
 
-- realisiertes P&L    
-- Drawdown    
-- Symbolstatistiken    
-- Entscheidungsverteilungen    
-- Audit-Ereignisse    
-- Recommendations    
-- Thesis    
-- Entry Zone    
-- Stop Loss    
-- Target    
-- Risk Flags.    
+- realisiertes P&L
+- Drawdown
+- Symbolstatistiken
+- Entscheidungsverteilungen
+- Audit-Ereignisse
+- Recommendations
+- Thesis
+- Entry Zone
+- Stop Loss
+- Target
+- Risk Flags.
 
 Auch `/api/firm/rules` gibt das komplette Regelwerk, aktive Regeln, Feedback und Execution-Daten ohne vorgelagerte Authentifizierung zurück.
 
@@ -223,19 +223,19 @@ Das ist nicht nur „Dashboard-Information“.
 Ein Remote-Angreifer kann damit:
 
 - Handelsstrategie rekonstruieren,
-    
+
 - aktuelle Positionen und P&L beobachten,
-    
+
 - interne Risiko-Grenzen kennenlernen,
-    
+
 - Entscheidungslogik und Rules rekonstruieren,
-    
+
 - Agenten-Kommunikation analysieren,
-    
+
 - Betriebszustände überwachen,
-    
+
 - Audit-Ereignisse beobachten.
-    
+
 
 Bei einer später aktivierten Live-Broker-Integration wäre das noch wesentlich sensibler.
 
@@ -270,17 +270,17 @@ broker.status
 Mindestens:
 
 - `/api/firm`
-    
+
 - `/api/firm/log`
-    
+
 - `/api/firm/report`
-    
+
 - `/api/firm/rules`
-    
+
 - `/api/providers`
-    
+
 - `/api/routing`
-    
+
 
 sollten nicht öffentlich sein.
 
@@ -305,22 +305,22 @@ deklariert. Die Lock-Datei ist vorhanden und enthält ebenfalls diese Dependency
 Für Next.js wurde am **25. August 2026** eine **kritische ungepatchte RCE** gemeldet:
 
 - betroffen: `>=16.0 <16.3.3`
-    
+
 - behoben: `16.3.3`
-    
+
 - CVSS 9.0
-    
+
 - betroffene Windows-Server können unauthentifizierte Remote Code Execution ermöglichen. ([GitHub](https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36?utm_source=chatgpt.com "Unauthenticated Remote Code Execution on windows-hosted servers · Advisory · vercel/next.js · GitHub"))
-    
+
 
 Zusätzlich wurde für dieselbe Versionsgrenze eine weitere kritische RCE im Image Optimization API veröffentlicht:
 
 - betroffen: `<16.3.3`
-    
+
 - behoben: `16.3.3`
-    
+
 - CVSS 9.5. ([GitHub](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4?utm_source=chatgpt.com "Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used · Advisory · vercel/next.js · GitHub"))
-    
+
 
 ### Kontext des Projekts
 
@@ -331,11 +331,11 @@ Damit ist die Windows-RCE **für das dokumentierte Standarddeployment nicht unmi
 Das Dependency-Level bleibt trotzdem ein Problem, weil:
 
 1. `package.json` eine vulnerable Basisversion zulässt,
-    
+
 2. die Anwendung Next App Router verwendet,
-    
+
 3. die Release-Linie 16.3.1 nicht mehr auf dem sicheren Stand ist.
-    
+
 
 ### Remediation
 
@@ -481,11 +481,11 @@ Die tatsächliche Authentität des Requests bleibt davon unberührt.
 Der Angreifer erhält dadurch keine zusätzlichen Rechte, aber der Audit-Trail wird:
 
 - semantisch unzuverlässig,
-    
+
 - forensisch schwächer,
-    
+
 - für Incident Response manipulierbar.
-    
+
 
 Bei einem Trading-System ist genau das problematisch, weil später nicht mehr eindeutig feststellbar ist, **wer eine Strategieänderung wirklich ausgelöst hat**.
 
@@ -533,17 +533,17 @@ guardWrite(req)
 und lassen damit einen Benutzer mit `firm.write` unter anderem:
 
 - Regeln anlegen,
-    
+
 - Regeln aktivieren,
-    
+
 - Regeln pausieren,
-    
+
 - Regeln archivieren,
-    
+
 - Regeln zurückrollen,
-    
+
 - Regeln ablehnen.
-    
+
 
 Das widerspricht zumindest teilweise der im Rule-Service beschriebenen Governance-Idee, wonach Aktivierung eine explizite, auditierte Handlung sein soll.
 
@@ -661,13 +661,13 @@ und diese Werte werden bei jeder Anfrage aus der Session übernommen.
 Damit kann eine Session bis zu 15 Minuten weiter gültig bleiben, obwohl:
 
 - ein Token rotiert wurde,
-    
+
 - Berechtigungen geändert wurden,
-    
+
 - eine Rolle reduziert wurde,
-    
+
 - ein Operator degradiert wurde.
-    
+
 
 Ist ein separates `FIRM_SESSION_SECRET` gesetzt, ist eine Token-Rotation sogar vollständig von laufenden Sessions entkoppelt.
 
@@ -709,8 +709,8 @@ erzeugt einen JavaScript-String, und anschließend:
 
 ```ts
 return {
-  apiKey: parsed.apiKey,
-  apiSecret: parsed.apiSecret
+  ["apiKey"]: parsed["apiKey"],
+  ["apiSecret"]: parsed["apiSecret"]
 }
 ```
 
@@ -725,15 +725,15 @@ Kein sinnvoller Remote-Angriffspfad.
 Relevant wird es bei:
 
 - Heap-Dump,
-    
+
 - Crash-Dumps,
-    
+
 - Debugging,
-    
+
 - Process Compromise,
-    
+
 - forensischem Speicherzugriff.
-    
+
 
 ### Remediation
 
@@ -742,13 +742,13 @@ Die vorhandene Buffer-Hygiene beibehalten, aber die Behauptung „Klartext exist
 Zusätzlich:
 
 - Heap Dumps deaktivieren,
-    
+
 - Debug Inspector nicht exponieren,
-    
+
 - Core Dumps minimieren,
-    
+
 - Credentials möglichst kurzlebig halten.
-    
+
 
 ---
 
@@ -798,19 +798,19 @@ und Renovate/Dependabot nutzen, um diese SHAs kontrolliert zu aktualisieren.
 Die Rule-Engine macht hier einiges richtig:
 
 - Whitelist der Felder
-    
+
 - Whitelist der Operatoren
-    
+
 - strikte Typvalidierung
-    
+
 - Symbolnormalisierung
-    
+
 - numerische Begrenzungen
-    
+
 - keine dynamischen Funktionen
-    
+
 - keine ausführbaren LLM-Strings.
-    
+
 
 Bei den DB-Abfragen wird Drizzle verwendet; beispielsweise werden Filterwerte über `eq()` gebunden und nicht als SQL-String konkatenierter User Input eingesetzt.
 
@@ -821,11 +821,11 @@ Auch der Market-Data-Code verwendet für externe Symbolwerte `encodeURIComponent
 Das ist wichtig, weil Drizzle selbst 2026 eine SQL-Injection-Schwachstelle hatte:
 
 - betroffen: `<=0.45.1`
-    
+
 - behoben: `0.45.2`
-    
+
 - CVE-2026-39356. ([GitHub](https://github.com/drizzle-team/drizzle-orm/security/advisories/GHSA-gpj5-g38j-94v9 "https://github.com/drizzle-team/drizzle-orm/security/advisories/GHSA-gpj5-g38j-94v9"))
-    
+
 
 Das Projekt verwendet bereits:
 

@@ -36,7 +36,7 @@ Das erzeugt zwei Wahrheiten: **Control Plane ≠ tatsächliche Broker-Credential
 try {
   const credential = await opts.store.get(opts.venue);
   if (credential) {
-    return name === opts.keyName ? credential.apiKey : credential.apiSecret;
+    return name === opts.keyName ? credential["apiKey"] : credential["apiSecret"];
   }
 } catch {
   // Auth-Fehler/Store nicht bereit → Env-Fallback (task-07-Verhalten).

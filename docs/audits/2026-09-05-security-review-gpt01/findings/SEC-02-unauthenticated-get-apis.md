@@ -73,7 +73,7 @@ Das Dashboard bleibt geschützt und greift serverseitig authentifiziert auf dies
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Ohne Token: `GET /api/firm`, `/log`, `/report`, `/rules`, `/api/providers`, `/api/routing` → 401
+- [ ] Unauthenticated `GET /api/firm`, `/log`, `/report`, `/rules`, `/api/providers`, `/api/routing` → 401
 - [ ] Viewer mit `firm.read` → 200
 - [ ] Schreibende Routen unverändert durch `guardWrite` geschützt
 - [ ] Dashboard funktioniert mit Session-Cookie
