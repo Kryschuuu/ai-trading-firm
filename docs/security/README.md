@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-07 (OPEN, Template) |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (OPEN) |
 
 ## Offene Critical/High Findings (aggregiert)
 
@@ -30,10 +30,10 @@
 
 | Audit | ID | Titel | Severity | Status |
 |-------|----|-------|----------|--------|
-| 2026-09-05-gpt01 | SEC-01 | Privilege Escalation | CRITICAL | OPEN |
-| 2026-09-05-gpt01 | SEC-02 | Ungeschützte APIs | CRITICAL | OPEN |
-| 2026-09-05-gpt01 | SEC-03 | Verwundbare Dependencies (1) | HIGH | OPEN |
-| 2026-09-05-gpt01 | SEC-04 | Verwundbare Dependencies (2) | HIGH | OPEN |
+| 2026-09-05-gpt01 | SEC-01 | Privilege Escalation über signierte Session | CRITICAL | OPEN |
+| 2026-09-05-gpt01 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN |
+| 2026-09-05-gpt01 | SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN |
+| 2026-09-05-gpt01 | SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN |
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
 

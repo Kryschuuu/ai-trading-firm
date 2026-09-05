@@ -1,50 +1,54 @@
 # Security Audit: GPT_01 — 2026-09-05
 
-**Quelle:** Security Review-GPT_01.pdf (Security-Audit vom 5. September 2026)  
-**Reviewer:** GPT Security Scanner (Referenz: `Security Review-GPT_01.pdf` + `Review Scanner.pdf` aus Aufgabenstellung)  
-**Scope:** Gesamtes Repository `ai-trading-firm` — Auth, API-Security, Dependencies, RBAC, Control Plane  
+**Quelle:** `Security Review-GPT_01.md` / `Security Review-GPT_01.pdf`  
+**Reviewer:** GPT Security Review (Stand `main`, 5. September 2026)  
+**Scope:** Auth/RBAC, Session-Handling, Broker-Control-Plane, Secret-Store, Rule-Engine, API-Routen, Audit-/Logging, Deployment, Dependencies  
 **Datum:** 2026-09-05  
-**Status:** OPEN — Template für wiederkehrende Security-Audits, Findings aus PDF extrahiert  
-**Original-Dokument:** `assets/Security-Review-GPT_01.pdf` (falls vorhanden, hier ablegen)
-
-> **Kontext aus Aufgabenstellung:** Dieses Audit ist Referenz für wiederkehrende Security-Audits. Es enthält kritische Findings (z. B. SEC-01 Privilege Escalation, SEC-02 ungeschützte APIs, SEC-03/04 verwundbare Dependencies) sowie mittlere und niedrige Findings mit Remediation-Schritten. Solche Dokumente/Bugreports müssen in der neuen Struktur einen festen, wiederauffindbaren Platz haben.
+**Status:** OPEN — Findings 1:1 aus dem Review extrahiert  
+**Original-Dokument:** `Security Review-GPT_01.md` (Markdown) und `Security Review-GPT_01.pdf`
 
 ## Severity-Übersicht
 
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
-| CRITICAL | 2 | 2 | 0 | 0 |
-| HIGH | 2 | 2 | 0 | 0 |
-| MEDIUM | 3 | 3 | 0 | 0 |
+| CRITICAL | 1 | 1 | 0 | 0 |
+| HIGH | 3 | 3 | 0 | 0 |
+| MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
 
-> Zahlen basieren auf Aufgabenbeschreibung (SEC-01 bis SEC-04 als Critical/High). Für exakte Zahlen PDF prüfen und Tabelle aktualisieren.
+> Zählung gemäß Review-Tabelle (SEC-01 bis SEC-10). SEC-02 ist **HIGH** (Datenexposition), nicht Critical.
 
 ## Findings-Index
 
 | ID | Titel | Severity | Status | Fix-Version | Datei |
 |----|-------|----------|--------|-------------|-------|
-| SEC-01 | Privilege Escalation | CRITICAL | OPEN | - | [SEC-01](./findings/SEC-01-privilege-escalation.md) |
-| SEC-02 | Ungeschützte APIs | CRITICAL | OPEN | - | [SEC-02](./findings/SEC-02-unprotected-apis.md) |
-| SEC-03 | Verwundbare Dependencies (1) | HIGH | OPEN | - | [SEC-03](./findings/SEC-03-vulnerable-dependencies.md) |
-| SEC-04 | Verwundbare Dependencies (2) | HIGH | OPEN | - | [SEC-04](./findings/SEC-04-vulnerable-dependencies-2.md) |
-| SEC-05 | Beispiel: Rate-Limit Bypass | MEDIUM | OPEN | - | [SEC-05](./findings/SEC-05-rate-limit-bypass.md) |
-| SEC-06 | Beispiel: Info Disclosure | MEDIUM | OPEN | - | [SEC-06](./findings/SEC-06-info-disclosure.md) |
-| SEC-07 | Beispiel: Fehlende Security-Header | LOW | OPEN | - | [SEC-07](./findings/SEC-07-missing-security-headers.md) |
+| SEC-01 | Privilege Escalation über signierte Session | CRITICAL | OPEN | - | [SEC-01](./findings/SEC-01-privilege-escalation.md) |
+| SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN | - | [SEC-02](./findings/SEC-02-unauthenticated-get-apis.md) |
+| SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN | - | [SEC-03](./findings/SEC-03-vulnerable-next.md) |
+| SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN | - | [SEC-04](./findings/SEC-04-vulnerable-ws.md) |
+| SEC-05 | Fälschbare Akteursattribution bei Rule-Änderungen | MEDIUM | OPEN | - | [SEC-05](./findings/SEC-05-rule-actor-attribution.md) |
+| SEC-06 | Rule-Lifecycle nur durch `firm.write` geschützt | MEDIUM | OPEN | - | [SEC-06](./findings/SEC-06-rule-lifecycle-authz.md) |
+| SEC-07 | Secret-Store fällt auf Env-Credentials zurück | MEDIUM | OPEN | - | [SEC-07](./findings/SEC-07-env-credential-fallback.md) |
+| SEC-08 | Sessions sind nicht sofort widerrufbar | MEDIUM | OPEN | - | [SEC-08](./findings/SEC-08-session-revocation.md) |
+| SEC-09 | Memory-Hygiene schützt JS-Strings nicht wirklich | LOW | OPEN | - | [SEC-09](./findings/SEC-09-secret-memory-hygiene.md) |
+| SEC-10 | GitHub Actions nicht auf immutable SHAs gepinnt | LOW | OPEN | - | [SEC-10](./findings/SEC-10-github-actions-pinning.md) |
 
-> SEC-05 bis SEC-07 sind Platzhalter für mittlere/niedrige Findings aus dem PDF — nach PDF-Analyse ergänzen.
+## Executive Summary
 
-## Executive Summary (aus PDF extrahieren)
+**Für Paper-Trading:** technisch bereits deutlich gehärtet, aber noch mehrere relevante Sicherheitslücken bzw. gefährliche Designkanten.
 
-Das Security-Audit vom 5. September 2026 prüft das Repository auf typische Web-Security-Risiken. Kritische Findings betreffen Privilege Escalation (z. B. Operator kann Admin-Aktionen ausführen) und ungeschützte APIs (Endpunkte ohne Auth-Guard). Hohe Findings betreffen verwundbare Dependencies (npm audit). Mittlere/niedrige Findings betreffen Rate-Limiting, Error-Handling und Security-Header.
+**Für echtes Live-Trading:** aktuell nicht freigabefähig.
 
-**Fazit des Audits (aus Aufgabenstellung):** Struktur braucht festen Platz für solche PDFs und extrahierte Findings, da weitere Audits regelmäßig folgen.
+Die wichtigsten Punkte sind nicht klassische SQL-Injection oder Kryptographiefehler, sondern **Authorization-/Trust-Boundary-Probleme und unnötig öffentliche Datenzugriffe**. Hinzu kommen zwei aktuelle Dependency-Probleme (`next`, `ws`).
 
-## Remediation-Plan (Priorisierung)
+Injection: kein bestätigter kritischer Befund (`drizzle-orm` 0.45.2 enthält den SQLi-Fix). Kill-Switch-Disarm, AES-GCM-Secret-Store, Rule-Engine-Whitelist und CSRF (Double-Submit) sind ausdrücklich **keine** Findings.
 
-1. **CRITICAL sofort:** SEC-01 (Privilege Escalation) + SEC-02 (ungeschützte APIs) — Auth-Guards prüfen, RBAC härten
-2. **HIGH zeitnah:** SEC-03/04 Dependencies — `npm audit fix`, `package-lock.json` aktualisieren, CI-Gate
-3. **MEDIUM/LOW:** Rate-Limit, Info Disclosure, Security-Header — in nächsten Sprint
+## Remediation-Plan (Priorisierung aus dem Review)
+
+1. **Sofort:** SEC-01 (Session-Signierung) + SEC-03/SEC-04 (`next`, `ws`)
+2. **Vor weiterem Live-Ausbau:** SEC-02 (GET-APIs authentifizieren) + SEC-07 (kein Env-Fallback)
+3. **Vor echter Multi-Role-Nutzung:** SEC-05 / SEC-06 (Audit-Actor + Rule-Permissions)
+4. **Danach:** SEC-08 (Session-Revocation), SEC-09 (Memory-Hygiene-Doku), SEC-10 (Actions-SHAs)
 
 Siehe `remediation/TRACKING.md` für Status.
 
@@ -53,4 +57,4 @@ Siehe `remediation/TRACKING.md` für Status.
 - Peer-Review-Patches: [../../peer-reviews/](../../peer-reviews/)
 - Security-Übersicht: [../../security/README.md](../../security/README.md)
 - Audit-Struktur: [../README.md](../README.md)
-- Original-PDF: `assets/Security-Review-GPT_01.pdf` (hier ablegen)
+- Review-Quelle: [Security Review-GPT_01.md](./Security%20Review-GPT_01.md)
