@@ -1,12 +1,40 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-05** · Code-Version **1.36.26**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.27**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.27] — 2026-09-06 · Security: SEC-01 — Session-Autorisierung gehärtet
+
+### Security
+
+- **SEC-01 (CRITICAL) behoben:** Eine sessionbasierte Rechteausweitung in
+  **v1.36.23–v1.36.26** wurde geschlossen. Session-Identität und Berechtigungen
+  werden an die aktuelle serverseitige Auth-Konfiguration gebunden; die gemeinsame
+  Rollenprüfung schützt sowohl RBAC-Endpunkte als auch den Firm-Schreib-Guard.
+- Unabhängiger Session-Signierschlüssel, strikte Session-Validierung und
+  fail-closed Verhalten bei fehlender/ungültiger Konfiguration. Produktion mit
+  Tokens verweigert dann bereits den Start. Credential-/Key-Änderungen entziehen
+  bestehenden Sessions nach Übernahme der Konfiguration ihre Gültigkeit.
+- Regressionstests für die Vertrauensgrenze, Rollenmatrix, Credential-Änderungen,
+  Login/CSRF sowie Setup-/Boot-Fehlerfälle. Die Auth-Suite läuft vor der bestehenden
+  merge-blockierenden Live-Gate-Suite. Keine neuen Abhängigkeiten.
+
+### Upgrade
+
+- **Vor Deployment:** `FIRM_SESSION_SECRET` unabhängig und zufällig erzeugen
+  (empfohlen `openssl rand -hex 32`, mindestens 32 Zeichen), nur serverseitig
+  speichern und alle Instanzen mit gleicher Auth-Konfiguration neu starten.
+  Die Installer ergänzen fehlende Schlüssel, überschreiben keine vorhandenen Werte.
+- Vorab `NODE_ENV=production npm run boot:guard` ausführen. Bestehende Browser-
+  Sessions erfordern erneuten Login; Produktion benötigt dafür weiterhin HTTPS.
+  Header-basierte API-/CLI-Clients und bewusstes `local-open` bleiben nutzbar.
+- Version `1.36.27` in `package.json`/Lockfile; Laufzeitversion wird daraus abgeleitet.
+  Konfigurations-, Installations- und betroffene README-Dokumentation aktualisiert.
 
 ## [1.36.26] — 2026-09-05 · chore(docs): Repository-Cleanup — skalierbare Audit-/Security-Struktur, Duplikate konsolidiert (MEDIUM)
 

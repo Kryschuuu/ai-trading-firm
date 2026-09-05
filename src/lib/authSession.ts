@@ -1,103 +1,125 @@
 /**
- * W1 (v1.36.23) — serverseitige, kurzlebige Session anstelle von API-Token
- * im Browser.
+ * Kurzlebige Browser-Sessions (W1), gehaertet fuer SEC-01 (v1.36.27).
  *
- * Der Browser bekommt NIE mehr den FIRM_API_TOKEN zu sehen. Stattdessen setzt
- * `POST /api/auth/login` zwei SameSite=Strict-Cookies:
+ * `firm_session`: HttpOnly, Secure, SameSite=Strict, 15 Minuten TTL.
+ * `firm_csrf`: gleicher zufaelliger Wert wie im signierten Payload fuer
+ * session-gebundenes Double-Submit-CSRF. Niemals Login-Tokens im Cookie.
  *
- *   - `firm_session`  (HttpOnly)  — HMAC-SHA256-signiert, stateless, 15 min TTL.
- *     Enthaelt den aufgeloesten Actor (Rolle/Elevation/Permissions) — niemals
- *     einen Token-Wert. Nach Prozess-Neustart bleiben gueltige Sessions
- *     verifizierbar (kein In-Memory-Zustand, kein Registry-Slot noetig).
- *   - `firm_csrf`      (nicht-HttpOnly) — derselbe zufaellige Wert ist DOPPELT
- *     im signierten Payload gespeichert. Das Browser-JS liest den Cookie aus
- *     und echoet ihn in `x-csrf-token` (Double-Submit). Der Server vergleicht
- *     den Header gegen den session-gebundenen Wert — ein gestohlener CSRF-Wert
- *     allein reicht nie (Session-Cookie ist HttpOnly).
+ * Ausschliesslich ein unabhaengiges FIRM_SESSION_SECRET darf signieren.
+ * Kein Token-Fallback, auch nicht in Entwicklung. local-open stellt keine
+ * Sessions aus. Produktion ohne gueltigen Schluessel verweigert den Boot;
+ * der Anfragepfad bleibt unabhaengig davon fail-closed.
  *
- * Signierschluessel: `FIRM_SESSION_SECRET` (optional, Rotation) oder
- * deterministisch aus den konfigurierten Auth-Tokens abgeleitet — Sessions
- * sind nur eine kurzlebige Delegation derselben Rechte, kein neues
- * Geheimnis-Universum. Ohne konfigurierte Tokens (local-open) gibt es keine
- * Sessions (offener Betrieb braucht keine).
- *
- * Cookie-Sicherheit (Befund W1, Punkt 4):
- *   - `Secure` immer — localhost/loopback ist ein sicherer Kontext, Browser
- *     akzeptieren Secure-Cookies dort auch ueber HTTP.
- *   - `SameSite=Strict` gegen Cross-Site-Cookie.
- *   - In Produktion (`NODE_ENV=production`) wird ueber plain-HTTP **keine**
- *     Session gesetzt (fail-closed, Hinweis auf HTTPS).
- *   - `Max-Age=900` (15 min) statt dauerhaftem Secret.
+ * Schema v2 enthaelt KEINEN Berechtigungs-Snapshot. Ein Credential-Selektor
+ * ist an die aktuelle serverseitige Auth-Konfiguration gebunden (authEpoch).
+ * Rollen, Elevation, Audit-ID und Permissions werden bei JEDEM Request aus
+ * dieser Konfiguration abgeleitet. Rotation/Entfernung/Neueinrichtung eines
+ * Tokens invalidiert bestehende Sessions, auch bei konstantem Session-Key.
+ * Unveraenderte Konfiguration erlaubt weiterhin stateless Prozess-Neustarts.
+ * Alle v1-Cookies sind absichtlich ungueltig: Upgrade erfordert neuen Login.
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   ADMIN_TOKEN_FLAG,
   OPERATOR_TOKEN_FLAG,
   VIEWER_TOKEN_FLAG,
   isProductionEnv,
+  resolveAuthMode,
+  sessionSecretConfigurationError,
 } from "@/auth/authMode";
-import {
-  PERMISSIONS,
-  type Actor,
-  type Permission,
-  type Role,
-} from "@/auth/types";
+import { buildActor } from "@/auth/permissions";
+import type { Actor } from "@/auth/types";
+import { tokenEquals } from "@/lib/tokenCompare";
 
 export const SESSION_COOKIE = "firm_session";
 export const SESSION_CSRF_COOKIE = "firm_csrf";
-
-/** Kurzlebigkeit: 900 s = 15 min (Akzeptanzkriterium W1). */
 export const SESSION_TTL_S = 900;
 export const SESSION_TTL_MS = SESSION_TTL_S * 1000;
 
-/** Current payload schema version — bricht alte Cookies ab. */
-const PAYLOAD_VERSION = 1;
+const PAYLOAD_VERSION = 2;
+const MAX_SESSION_TOKEN_LENGTH = 4096;
+const CREDENTIALS = {
+  "admin-token": { flag: ADMIN_TOKEN_FLAG, role: "admin" },
+  "api-token": { flag: OPERATOR_TOKEN_FLAG, role: "operator" },
+  "viewer-token": { flag: VIEWER_TOKEN_FLAG, role: "viewer" },
+} as const;
+type SessionCredential = keyof typeof CREDENTIALS;
 
-/** Signierter Session-Payload (nie Token-Werte, nie Secrets). */
+/** Nur Identitaetsbindung und Lebenszyklus — keine Autorisierungs-Claims. */
 export type SessionPayload = {
   v: typeof PAYLOAD_VERSION;
-  role: Role;
-  effectiveRole: Role;
-  elevated: boolean;
-  auditId: Actor["auditId"];
-  /** Wirksame Permissions zum Issue-Zeitpunkt (signiert geschuetzt). */
-  permissions: Permission[];
-  /** Double-Submit-CSRF: identisch im `firm_csrf`-Cookie. */
+  credential: SessionCredential;
+  /** Keyed, domain-separated Bindung an Credential UND aktuelle Auth-Tokens. */
+  authEpoch: string;
   csrf: string;
-  /** Ablaufzeitpunkt in ms seit Epoch. */
+  /** Ausstellungs- und Ablaufzeitpunkt in ms seit Epoch. */
+  iat: number;
   exp: number;
 };
+
+const PAYLOAD_KEYS = ["v", "credential", "authEpoch", "csrf", "iat", "exp"];
+
+type EnvLike = Record<string, string | undefined>;
 
 export type SessionIssue =
   | {
       ok: true;
       open: boolean;
-      /** Leer bei `open` (kein Secret abgeleitet). */
+      /** Leer ausschliesslich bei bewusstem local-open (keine Session). */
       sessionToken: string;
       csrf: string;
       expiresAt: number;
-      /** `Set-Cookie`-Zeilen (firm_session + firm_csrf). */
       cookies: string[];
     }
   | { ok: false; error: string; hint: string; status: number };
 
-type EnvLike = Record<string, string | undefined>;
+/** Kein nutzbarer, unabhaengiger Schluessel ⇒ Sessions sind deaktiviert. */
+export function sessionSecret(env: EnvLike = process.env): string {
+  if (sessionSecretConfigurationError(env)) return "";
+  return (env.FIRM_SESSION_SECRET ?? "").trim();
+}
+
+function isSessionCredential(value: unknown): value is SessionCredential {
+  // Kein Prototyp-Lookup: z. B. "constructor" darf kein Credential werden.
+  return typeof value === "string" && Object.hasOwn(CREDENTIALS, value);
+}
 
 /**
- * Signierschluessel. Bevorzugt `FIRM_SESSION_SECRET`; sonst deterministisch
- * aus den konfigurierten Tokens abgeleitet. Leerer String ⇒ keine Sessions
- * moeglich (local-open-Betrieb ohne Token).
+ * Credential-Version ohne Klartext oder unkeyed Token-Hash im Cookie.
+ * Der Selektor ist Teil der Bindung: die Epoche eines Viewers kann nicht fuer
+ * ein anderes Credential wiederverwendet werden. Alle Token-Slots zaehlen,
+ * insbesondere der Admin-Slot, der Single-Admin-Elevation steuert.
  */
-export function sessionSecret(env: EnvLike = process.env): string {
-  const override = (env.FIRM_SESSION_SECRET ?? "").trim();
-  if (override) return override;
-  const material = [env[ADMIN_TOKEN_FLAG], env[OPERATOR_TOKEN_FLAG], env[VIEWER_TOKEN_FLAG]]
-    .filter((s): s is string => typeof s === "string" && s.length > 0)
-    .join("\x00");
-  if (!material) return "";
-  return createHash("sha256")
-    .update(`aitf-session-v${PAYLOAD_VERSION}\x00${material}`)
+function credentialEpoch(credential: SessionCredential, env: EnvLike, secret: string): string | null {
+  if (!env[CREDENTIALS[credential].flag]) return null;
+  const material = JSON.stringify([
+    credential,
+    env[ADMIN_TOKEN_FLAG] ?? "",
+    env[OPERATOR_TOKEN_FLAG] ?? "",
+    env[VIEWER_TOKEN_FLAG] ?? "",
+  ]);
+  return createHmac("sha256", secret)
+    .update(`aitf-auth-epoch-v${PAYLOAD_VERSION}\x00`)
+    .update(material)
     .digest("base64url");
+}
+
+function validPayload(value: unknown, now: number): value is SessionPayload {
+  if (!Number.isSafeInteger(now) || typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const p = value as Record<string, unknown>;
+  // Explizites Schema: auch korrekt signierte alte Rollen-/Permission-Claims
+  // sind nicht erlaubt und koennen nie zur zweiten Autoritaetsquelle werden.
+  const keys = Object.keys(p);
+  if (keys.length !== PAYLOAD_KEYS.length || !keys.every((key) => PAYLOAD_KEYS.includes(key))) return false;
+  return (
+    p.v === PAYLOAD_VERSION &&
+    isSessionCredential(p.credential) &&
+    typeof p.authEpoch === "string" && /^[A-Za-z0-9_-]{43}$/.test(p.authEpoch) &&
+    typeof p.csrf === "string" && /^[a-f0-9]{64}$/.test(p.csrf) &&
+    typeof p.iat === "number" && Number.isSafeInteger(p.iat) && p.iat >= 0 && p.iat <= now &&
+    typeof p.exp === "number" && Number.isSafeInteger(p.exp) && p.exp > now &&
+    p.exp > p.iat && p.exp - p.iat <= SESSION_TTL_MS
+  );
 }
 
 function signSession(payload: SessionPayload, secret: string): string {
@@ -106,148 +128,138 @@ function signSession(payload: SessionPayload, secret: string): string {
   return `${body}.${sig}`;
 }
 
-function isPermission(value: unknown): value is Permission {
-  return (PERMISSIONS as readonly string[]).includes(value as string);
-}
-
-/** Verifiziert Signatur, Schema und Ablauf. Wirft nie. */
+/**
+ * Kryptographische/strukturelle Pruefung; wirft bei ungueltigen Cookies nie.
+ * KEINE Autorisierung: dafuer muss sessionActor die aktuelle Credential-
+ * Bindung pruefen. Request-Guards verwenden readSession, das beides tut.
+ */
 export function verifySessionToken(
   token: string,
   secret: string,
   now: number = Date.now()
 ): SessionPayload | null {
-  const sep = token.indexOf(".");
-  if (sep <= 0) return null;
-  const body = token.slice(0, sep);
-  const sig = token.slice(sep + 1);
-  if (!body || !sig) return null;
+  if (!secret || secret.trim().length < 32 || token.length > MAX_SESSION_TOKEN_LENGTH) return null;
+  const match = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(token);
+  if (!match) return null;
+  const [, body, sig] = match;
   const got = Buffer.from(sig, "base64url");
   const expected = createHmac("sha256", secret).update(body).digest();
   if (got.length !== expected.length || !timingSafeEqual(got, expected)) return null;
+  if (got.toString("base64url") !== sig) return null;
 
-  let raw: string;
-  let parsed: unknown;
   try {
-    raw = Buffer.from(body, "base64url").toString("utf8");
-    parsed = JSON.parse(raw) as unknown;
+    const bytes = Buffer.from(body, "base64url");
+    if (bytes.toString("base64url") !== body) return null;
+    const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+    return validPayload(parsed, now) ? parsed : null;
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null) return null;
-  const p = parsed as Record<string, unknown>;
-  if (p.v !== PAYLOAD_VERSION) return null;
-  if (typeof p.exp !== "number" || !Number.isFinite(p.exp) || p.exp < now) return null;
-  if (
-    typeof p.role !== "string" ||
-    typeof p.effectiveRole !== "string" ||
-    typeof p.elevated !== "boolean" ||
-    typeof p.auditId !== "string" ||
-    typeof p.csrf !== "string" ||
-    p.csrf.length === 0 ||
-    !Array.isArray(p.permissions) ||
-    !p.permissions.every(isPermission)
-  ) {
-    return null;
-  }
-  return {
-    v: PAYLOAD_VERSION,
-    role: p.role as Role,
-    effectiveRole: p.effectiveRole as Role,
-    elevated: p.elevated,
-    auditId: p.auditId as Actor["auditId"],
-    permissions: p.permissions as Permission[],
-    csrf: p.csrf,
-    exp: p.exp,
-  };
 }
 
-/** Cookie-Header des Requests sicher in `name=value`-Paare zerlegen. */
-function cookieEntries(req: Request): Map<string, string> {
-  const out = new Map<string, string>();
+/** Cookie-Header in name=value-Paare zerlegen. Mehrdeutige Sessions ablehnen. */
+function sessionCookie(req: Request): string | null {
+  let token: string | null = null;
   for (const part of (req.headers.get("cookie") ?? "").split(";")) {
     const idx = part.indexOf("=");
-    if (idx <= 0) continue;
-    const name = part.slice(0, idx).trim();
-    const value = part.slice(idx + 1).trim();
-    if (name) out.set(name, value);
+    if (idx <= 0 || part.slice(0, idx).trim() !== SESSION_COOKIE) continue;
+    if (token !== null) return null;
+    token = part.slice(idx + 1).trim();
   }
-  return out;
+  return token;
 }
 
-/**
- * Liest und verifiziert die `firm_session`-Cookie des Requests.
- * Liefert `null` bei fehlendem/ungueltigem/abgelaufenem Token.
- */
+/** Signatur, Schema, Ablauf UND aktuelle Credential-Bindung pruefen. */
 export function readSession(
   req: Request,
   env: EnvLike = process.env,
   now: number = Date.now()
 ): SessionPayload | null {
+  const token = sessionCookie(req);
+  if (!token) return null;
   const secret = sessionSecret(env);
   if (!secret) return null;
-  const token = cookieEntries(req).get(SESSION_COOKIE);
-  if (!token) return null;
-  return verifySessionToken(token, secret, now);
+  const payload = verifySessionToken(token, secret, now);
+  return payload && sessionActor(payload, env, now) ? payload : null;
 }
 
 /**
- * Baut den Actor aus einem verifizierten Payload. `source` wird auf
- * `api-session` gesetzt (Audit/Diagnose unterscheidbar von Header-Token).
+ * Nur fuer signaturverifizierte Payloads (readSession/verifySessionToken).
+ * Niemals Cookie-Permissions kopieren: derselbe serverseitige Rollen-Builder
+ * wie fuer Header-Credentials entscheidet. Auch separat aufgerufen werden
+ * Schema, Ablauf und Credential-Bindung nochmals fail-closed geprueft.
  */
-export function sessionActor(payload: SessionPayload): Actor {
-  return {
-    role: payload.role,
-    effectiveRole: payload.effectiveRole,
-    elevated: payload.elevated,
-    source: "api-session",
-    auditId: payload.auditId,
-    permissions: payload.permissions,
-  };
+export function sessionActor(
+  payload: SessionPayload,
+  env: EnvLike = process.env,
+  now: number = Date.now()
+): Actor | null {
+  if (!validPayload(payload, now)) return null;
+  const mode = resolveAuthMode(env);
+  if (mode.mode !== "token-required" || mode.invalidValue !== null) return null;
+  const secret = sessionSecret(env);
+  if (!secret) return null;
+  const expectedEpoch = credentialEpoch(payload.credential, env, secret);
+  if (!expectedEpoch || !tokenEquals(payload.authEpoch, expectedEpoch)) return null;
+  return buildActor(CREDENTIALS[payload.credential].role, "api-session", env);
 }
 
 const COOKIE_BASE = "Path=/; Secure; SameSite=Strict";
 
-function secureCookieLine(name: string, value: string): string {
-  return `${name}=${value}; ${COOKIE_BASE}; Max-Age=${SESSION_TTL_S}`;
-}
-
 /**
- * Stellt Session-Cookies fuer einen aufgeloesten Actor aus. Fail-closed:
- * Produktion ueber plain-HTTP ⇒ keine Session (Hinweis auf HTTPS).
+ * Nur einen serverseitig via Header-Token aufgeloesten Actor delegieren.
+ * Sessions selbst duerfen keine neuen Sessions ausstellen (keine unbegrenzte
+ * Verlaengerung gestohlener Cookies). local-open wird niemals delegiert.
  */
 export function issueSession(
   req: Request,
   actor: Actor,
   env: EnvLike = process.env
 ): SessionIssue {
-  const secret = sessionSecret(env);
-  // Open-Betrieb (local-open, kein Token konfiguriert): keine Session noetig.
-  if (!secret) {
+  const mode = resolveAuthMode(env);
+  if (mode.mode === "local-open" && actor.source === "local-open") {
     return { ok: true, open: true, sessionToken: "", csrf: "", expiresAt: 0, cookies: [] };
   }
+  const configError = sessionSecretConfigurationError(env);
+  if (configError) {
+    return { ok: false, error: configError.code, hint: configError.hint, status: 503 };
+  }
+  const secret = sessionSecret(env);
+  const credential = actor.source;
+  const invalidActor: SessionIssue = {
+    ok: false,
+    error: "SESSION_CREDENTIAL_REQUIRED",
+    hint: "Eine Session erfordert ein aktuell verifiziertes Admin-/Operator-/Viewer-Credential. Bitte erneut anmelden.",
+    status: 403,
+  };
+  if (mode.invalidValue !== null || !isSessionCredential(credential)) return invalidActor;
+  const authEpoch = credentialEpoch(credential, env, secret);
+  if (!authEpoch) return invalidActor;
 
-  const protocol = new URL(req.url).protocol;
-  if (isProductionEnv(env) && protocol !== "https:") {
+  // Defense in Depth an der Issue-Grenze: ein inkonsistenter oder veralteter
+  // Actor wird nicht signiert. Die Login-Route authentifiziert den Token ohne
+  // vorhandene Session-Cookies; Rollenfelder aus dem Request sind wirkungslos.
+  const current = buildActor(CREDENTIALS[credential].role, credential, env);
+  if (
+    actor.role !== current.role || actor.effectiveRole !== current.effectiveRole ||
+    actor.elevated !== current.elevated || actor.auditId !== current.auditId ||
+    !Array.isArray(actor.permissions) || actor.permissions.length !== current.permissions.length ||
+    !current.permissions.every((permission) => actor.permissions.includes(permission))
+  ) return invalidActor;
+
+  if (isProductionEnv(env) && new URL(req.url).protocol !== "https:") {
     return {
       ok: false,
       error: "SESSION_HTTPS_REQUIRED",
-      hint: "W1: Session-Cookie ist Secure und wird in Produktion nur ueber HTTPS gesetzt. Bitte hinter TLS betreiben (Proxy/Terminator).",
+      hint: "Session-Cookies werden in Produktion nur ueber HTTPS gesetzt. Bitte hinter TLS betreiben (Proxy/Terminator).",
       status: 400,
     };
   }
 
   const csrf = randomBytes(32).toString("hex");
-  const exp = Date.now() + SESSION_TTL_MS;
-  const payload: SessionPayload = {
-    v: PAYLOAD_VERSION,
-    role: actor.role,
-    effectiveRole: actor.effectiveRole,
-    elevated: actor.elevated,
-    auditId: actor.auditId,
-    permissions: [...actor.permissions],
-    csrf,
-    exp,
-  };
+  const iat = Date.now();
+  const exp = iat + SESSION_TTL_MS;
+  const payload: SessionPayload = { v: PAYLOAD_VERSION, credential, authEpoch, csrf, iat, exp };
   const sessionToken = signSession(payload, secret);
   return {
     ok: true,
@@ -257,7 +269,7 @@ export function issueSession(
     expiresAt: exp,
     cookies: [
       `${SESSION_COOKIE}=${sessionToken}; ${COOKIE_BASE}; HttpOnly; Max-Age=${SESSION_TTL_S}`,
-      secureCookieLine(SESSION_CSRF_COOKIE, csrf),
+      `${SESSION_CSRF_COOKIE}=${csrf}; ${COOKIE_BASE}; Max-Age=${SESSION_TTL_S}`,
     ],
   };
 }

@@ -52,7 +52,11 @@ export type AuthModeReason =
   | "production-no-tokens"
   | "invalid-auth-mode";
 
-export type ConfigurationErrorCode = "AUTH_NOT_CONFIGURED" | "AUTH_MODE_INVALID";
+export type ConfigurationErrorCode =
+  | "AUTH_NOT_CONFIGURED"
+  | "AUTH_MODE_INVALID"
+  | "SESSION_SECRET_REQUIRED"
+  | "SESSION_SECRET_INVALID";
 
 /**
  * Konfigurationsfehler, der den Start verweigert. Bewusst kein `Error`-Substitut
@@ -94,6 +98,36 @@ export type AuthModeDecision = {
 };
 
 type EnvLike = Record<string, string | undefined>;
+
+/**
+ * SEC-01: Signierschluessel sind ausschliesslich serverseitige, unabhaengige
+ * Secrets — niemals Login-Credentials oder ein Fallback aus deren Material.
+ * Dieselbe Validierung gilt beim Boot UND beim Ausstellen/Lesen von Sessions.
+ * Die Mindestlaenge ersetzt keine Entropie: separat mit openssl rand erzeugen.
+ * Fehler enthalten nur Flag-Namen, niemals konfigurierte Werte.
+ */
+export function sessionSecretConfigurationError(env: EnvLike = process.env): ConfigurationError | null {
+  const secret = (env.FIRM_SESSION_SECRET ?? "").trim();
+  const hint =
+    "FIRM_SESSION_SECRET separat mit openssl rand -hex 32 erzeugen und serverseitig konfigurieren (mindestens 32 Zeichen). Kein Admin-/Operator-/Viewer-Token und keine Ableitung davon verwenden.";
+  if (!secret) {
+    return new ConfigurationError(
+      "Session signing requires an independent FIRM_SESSION_SECRET.",
+      "SESSION_SECRET_REQUIRED",
+      hint
+    );
+  }
+  const reused = [ADMIN_TOKEN_FLAG, OPERATOR_TOKEN_FLAG, VIEWER_TOKEN_FLAG]
+    .some((flag) => secret === (env[flag] ?? "").trim());
+  if (secret.length < 32 || reused) {
+    return new ConfigurationError(
+      "FIRM_SESSION_SECRET must be at least 32 characters and distinct from every auth token.",
+      "SESSION_SECRET_INVALID",
+      hint
+    );
+  }
+  return null;
+}
 
 /** Admin-Token konfiguriert? Trennt Single-Admin- von Rollen-Modell. */
 export function adminTokenConfigured(env: EnvLike = process.env): boolean {
@@ -213,7 +247,9 @@ export function authModeWarnings(decision: AuthModeDecision): string[] {
  * @throws ConfigurationError `AUTH_MODE_INVALID` bei unbekanntem Modus,
  *         `AUTH_NOT_CONFIGURED` wenn `token-required` wirksam ist, aber kein
  *         Token existiert (Produktion ohne Token, oder `AUTH_MODE=token-required`
- *         ins Leere konfiguriert).
+ *         ins Leere konfiguriert). SEC-01: In Produktion mit Tokens auch
+ *         `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`, wenn der
+ *         unabhaengige Session-Signierschluessel fehlt oder ungueltig ist.
  */
 export function assertAuthConfigured(env: EnvLike = process.env): AuthModeDecision {
   const decision = resolveAuthMode(env);
@@ -238,6 +274,13 @@ export function assertAuthConfigured(env: EnvLike = process.env): AuthModeDecisi
         ? `NODE_ENV=production ohne Token wurde im Audit als Befund C1 (HIGH) gezählt — der Dienst startet deshalb nicht. ${fix}`
         : `AUTH_MODE=token-required verlangt mindestens ein Token, keins ist gesetzt. ${fix}`
     );
+  }
+
+  // local-open verwendet ueberhaupt keine Sessions. Im Token-Betrieb darf
+  // Produktion dagegen nie ohne unabhaengigen Signierschluessel starten.
+  if (decision.production && decision.tokensConfigured) {
+    const error = sessionSecretConfigurationError(env);
+    if (error) throw error;
   }
 
   return decision;

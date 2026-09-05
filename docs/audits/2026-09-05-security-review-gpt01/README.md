@@ -4,14 +4,14 @@
 **Reviewer:** GPT Security Review (Stand `main`, 5. September 2026)  
 **Scope:** Auth/RBAC, Session-Handling, Broker-Control-Plane, Secret-Store, Rule-Engine, API-Routen, Audit-/Logging, Deployment, Dependencies  
 **Datum:** 2026-09-05  
-**Status:** OPEN — Findings 1:1 aus dem Review extrahiert  
+**Status:** OPEN — SEC-01 FIXED in v1.36.27 (2026-09-06); übrige Findings weiter offen
 **Original-Dokument:** `Security Review-GPT_01.md` (Markdown) und `Security Review-GPT_01.pdf`
 
 ## Severity-Übersicht
 
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
-| CRITICAL | 1 | 1 | 0 | 0 |
+| CRITICAL | 1 | 0 | 0 | 1 |
 | HIGH | 3 | 3 | 0 | 0 |
 | MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
@@ -22,7 +22,7 @@
 
 | ID | Titel | Severity | Status | Fix-Version | Datei |
 |----|-------|----------|--------|-------------|-------|
-| SEC-01 | Privilege Escalation über signierte Session | CRITICAL | OPEN | - | [SEC-01](./findings/SEC-01-privilege-escalation.md) |
+| SEC-01 | Privilege Escalation über signierte Session | CRITICAL | FIXED | v1.36.27 | [SEC-01](./findings/SEC-01-privilege-escalation.md) |
 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN | - | [SEC-02](./findings/SEC-02-unauthenticated-get-apis.md) |
 | SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN | - | [SEC-03](./findings/SEC-03-vulnerable-next.md) |
 | SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN | - | [SEC-04](./findings/SEC-04-vulnerable-ws.md) |
@@ -45,10 +45,14 @@ Injection: kein bestätigter kritischer Befund (`drizzle-orm` 0.45.2 enthält de
 
 ## Remediation-Plan (Priorisierung aus dem Review)
 
-1. **Sofort:** SEC-01 (Session-Signierung) + SEC-03/SEC-04 (`next`, `ws`)
+1. **SEC-01 erledigt (v1.36.27):** unabhängiger Session-Key, aktuelle serverseitige
+   Rechteprojektion und Credential-Bindung. **Weiter sofort:** SEC-03/SEC-04 (`next`, `ws`).
 2. **Vor weiterem Live-Ausbau:** SEC-02 (GET-APIs authentifizieren) + SEC-07 (kein Env-Fallback)
 3. **Vor echter Multi-Role-Nutzung:** SEC-05 / SEC-06 (Audit-Actor + Rule-Permissions)
 4. **Danach:** SEC-08 (Session-Revocation), SEC-09 (Memory-Hygiene-Doku), SEC-10 (Actions-SHAs)
+
+SEC-08 ist durch die Credential-Bindung teilweise adressiert; individuelles
+Logout/Revoke ist nicht Teil von SEC-01 und bleibt offen.
 
 Siehe `remediation/TRACKING.md` für Status.
 

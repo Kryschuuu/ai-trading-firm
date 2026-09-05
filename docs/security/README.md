@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (OPEN) |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; übrige Findings OPEN |
 
 ## Offene Critical/High Findings (aggregiert)
 
@@ -30,16 +30,21 @@
 
 | Audit | ID | Titel | Severity | Status |
 |-------|----|-------|----------|--------|
-| 2026-09-05-gpt01 | SEC-01 | Privilege Escalation über signierte Session | CRITICAL | OPEN |
 | 2026-09-05-gpt01 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN |
 | 2026-09-05-gpt01 | SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN |
 | 2026-09-05-gpt01 | SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN |
+
+**SEC-01 ist seit v1.36.27 FIXED:** [Session-Autorisierung](../audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md).
+Upgrade einschließlich unabhängigem `FIRM_SESSION_SECRET`, Neustart aller Instanzen
+und erneutem Login erforderlich. Andere offene Findings bleiben unverändert relevant.
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
 
 ## Auth-Modus (v1.36.13+)
 
 - `NODE_ENV=production` ohne Token ⇒ Boot-Verweigerung `AUTH_NOT_CONFIGURED` (kein offener Zugang)
+- Produktion mit Tokens benötigt zusätzlich einen unabhängigen Session-Key:
+  `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID` verweigert den Boot (SEC-01).
 - `AUTH_MODE=local-open` — bewusster Opt-in für Single-User ohne Token (Dev-Default)
 - `AUTH_MODE=token-required` — erzwingt Credential auch in Dev
 - Wirksamer Modus: `curl -s localhost:3369/api/auth/me | jq .authMode`
@@ -62,10 +67,22 @@ Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-
 - Fail-closed wo Mutation vermeidbar: Credential-Store, Kill-Switch-Disarm, Proposal-Freigabe ohne durablen Beleg ⇒ 503
 - Lücken sichtbar: CRITICAL im Journal, `audit_missed_total` Metrik, `/api/health → audit`
 
-## Session-Cookie (v1.36.23+)
+## Session-Cookie (v1.36.27+, SEC-01)
 
 - `firmToken` nicht mehr in `localStorage` — stattdessen `firm_session` HttpOnly, Secure, SameSite=Strict, 15min + `firm_csrf` Double-Submit
-- Stateless HMAC-Session in `src/lib/authSession.ts`
+- Stateless HMAC-Session in `src/lib/authSession.ts`, ausschließlich mit unabhängigem
+  `FIRM_SESSION_SECRET` (mindestens 32 Zeichen; separat `openssl rand -hex 32`).
+  Kein Login-Token/Token-Hash, kein Fallback. Ohne gültigen Schlüssel Login HTTP 503,
+  auch in Dev; `local-open` stellt keine Sessions aus.
+- Schema v2 ohne Berechtigungs-Snapshot: serverseitige Rollen-/Permission-Ableitung
+  pro Request, Credential-Bindung via keyed `authEpoch`. Rotation, Entfernung oder
+  Neueinrichtung eines Tokens invalidiert alle bisherigen Sessions, sobald die neue
+  Konfiguration im Prozess aktiv ist. Alle Instanzen konsistent neu starten.
+- Alte v1-Cookies werden verworfen; neuer Login erforderlich. TTL bleibt 15 Minuten,
+  Produktion verlangt HTTPS. Individuelles Logout/Revoke bleibt Teil des offenen
+  Restumfangs von SEC-08.
+- Tests: `npm run test:security:auth`; automatisch Teil von `security:live-gate`.
+- [Konfiguration und Upgrade](../../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 
 ## Verwandte Dokumente
 

@@ -20,15 +20,13 @@ import {
   ADMIN_TOKEN_FLAG,
   OPERATOR_TOKEN_FLAG,
   VIEWER_TOKEN_FLAG,
-  adminTokenConfigured,
   resolveAuthMode,
 } from "./authMode";
-import { permissionsForRole } from "./permissions";
+import { buildActor } from "./permissions";
 import type {
   Actor,
   AuthResolution,
   Permission,
-  Role,
 } from "./types";
 
 export {
@@ -64,27 +62,6 @@ function matchesAny(expected: string, candidates: readonly string[]): boolean {
   return candidates.some((got) => got.length > 0 && tokenEquals(got, expected));
 }
 
-function buildActor(
-  role: Role,
-  source: Actor["source"],
-  env: Record<string, string | undefined>
-): Actor {
-  const elevated = role === "operator" && !adminTokenConfigured(env);
-  const effectiveRole: Role = elevated ? "admin" : role;
-  const permissions = permissionsForRole(effectiveRole);
-  // Defense in Depth: live.gate (Task 11) darf ausschließlich über die
-  // Admin-Rolle in die wirksame Menge gelangen — nie über viewer/operator.
-  const safe = effectiveRole === "admin" ? permissions : permissions.filter((p) => p !== "live.gate");
-  return {
-    role,
-    effectiveRole,
-    source,
-    elevated,
-    auditId: role === "viewer" ? "viewer" : role === "operator" && !elevated ? "operator" : "admin",
-    permissions: safe,
-  };
-}
-
 /**
  * Löst den Akteur auf. Wirft nie. Liefert immer eine Resolution.
  * `env` ist injizierbar (Tests).
@@ -108,13 +85,13 @@ export function resolveAuth(
     return { ok: true, actor: buildActor("viewer", "viewer-token", env) };
   }
 
-  // W1 (v1.36.23): Session-Cookie `firm_session` als weitere Credential-Quelle.
-  // Die Session enthaelt den bei Login aufgeloesten Actor (signiert, 15 min TTL)
-  // — kein localStorage nötig, kein Token im Browser. Header schlagen Session
-  // (curl/CLI bleibt identisch).
+  // SEC-01: Die Session bindet ein aktuelles Credential, keine gespeicherten
+  // Rechte. Header und Session teilen dieselbe serverseitige Rollenprojektion.
+  // Header schlagen weiterhin Session (curl/CLI bleibt identisch).
   const session = readSession(req, env);
-  if (session) {
-    return { ok: true, actor: sessionActor(session) };
+  const actor = session ? sessionActor(session, env) : null;
+  if (actor) {
+    return { ok: true, actor };
   }
 
   if (!adminTok && !operatorTok && !viewerTok) {

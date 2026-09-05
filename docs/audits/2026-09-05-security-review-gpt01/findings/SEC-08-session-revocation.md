@@ -9,6 +9,17 @@
 - **Datei(en):** `src/lib/authSession.ts`, `src/lib/apiAuth.ts`, `src/app/api/auth/login/route.ts`, `src/auth/resolve.ts`
 - **Peer-Review-Patch:** TBD — verlinken sobald Patch in `docs/peer-reviews/` existiert
 
+## Implementierungsstand v1.36.27
+
+SEC-01 ergänzt einen credential-gebundenen, keyed Konfigurations-Fingerprint
+(`authEpoch`) und entfernt Berechtigungs-Snapshots. Token-/Key-Rotation,
+Token-Entfernung/-Neueinrichtung und Rollen-Degradierung invalidieren Sessions,
+sobald die neue Konfiguration in allen Prozessen aktiv ist (Neustart).
+Die Regressionen liegen in `tests/sec01.sessionSecurity.test.ts`.
+**SEC-08 bleibt OPEN:** individuelles Logout/Explizit-Revoke ist nicht implementiert;
+TTL bleibt 15 Minuten. Die folgende Beschreibung dokumentiert den ursprünglichen
+Stand bis v1.36.26; das Audit-Original bleibt unverändert.
+
 ## Beschreibung
 
 Sessions sind stateless, HMAC-signiert und haben 15 Minuten TTL (`SESSION_TTL_S = 900`). Das ist grundsätzlich ein gutes Design.
@@ -79,12 +90,12 @@ Tatsächlich: bis zu 15 Minuten weiter autorisiert.
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Session-Payload enthält `authEpoch` (oder gleichwertige Credential-Version)
-- [ ] Test: Token-Rotation → bestehende Session wird abgelehnt
-- [ ] Test: Rollen-Degradierung (Operator → Viewer) → `firm.write` in alter Session greift nicht mehr
+- [x] Session-Payload enthält `authEpoch` (oder gleichwertige Credential-Version)
+- [x] Test: Token-Rotation → bestehende Session wird abgelehnt
+- [x] Test: Rollen-Degradierung (Operator → Viewer) → `firm.write` in alter Session greift nicht mehr
 - [ ] Test: Logout / explizites Revoke invalidiert die Session vor TTL-Ablauf
-- [ ] Session-TTL dokumentiert und auf ≤ 5 min gesetzt (oder Epoch macht 15 min akzeptabel)
-- [ ] Keine Regression: gültige Sessions innerhalb der TTL funktionieren weiterhin
+- [x] Session-TTL dokumentiert und auf ≤ 5 min gesetzt (oder Epoch macht 15 min akzeptabel)
+- [x] Keine Regression: gültige Sessions innerhalb der TTL funktionieren weiterhin
 
 ## Changelog-Blurb
 

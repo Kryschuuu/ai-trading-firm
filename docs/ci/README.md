@@ -1,6 +1,6 @@
 # CI-Workflows — Quelle & Installation
 
-> **Zweck:** Diese Dateien sind die **Quelle** der GitHub-Actions-Workflows. Der Arena-Bot darf keine Dateien unter `.github/workflows/` schreiben (GitHub-Beschränkung), deshalb liegt die Quelle hier in `docs/ci/` und der Repository-Owner kopiert sie einmalig nach `.github/workflows/`.
+> **Zweck:** Diese Dateien spiegeln die GitHub-Actions-Workflows unter `.github/workflows/`. Beide Kopien werden zusammen gepflegt. Workflow-Änderungen benötigen entsprechende GitHub-Schreibrechte; fehlen diese der verwendeten Verbindung, muss der Repository-Owner die Quelle übernehmen.
 
 ## Workflows
 
@@ -17,11 +17,18 @@ cp docs/ci/security-live-gate.workflow.yml .github/workflows/main-security-live-
 # Danach Branch-Protection: Required Status Checks `docs-validate` + `security-live-gate`
 ```
 
-## Warum hier und nicht nur in `.github/`?
+## Trigger und Pre-PR-Prüfung
 
-- Arena-Agents arbeiten auf Branch `arena/*` und dürfen `.github/workflows/` nicht ändern (GitHub schützt Workflow-Dateien vor Bots).
-- Die Quelle in `docs/ci/` ist versioniert, dokumentiert und wird von `docs-validate` geprüft.
-- Nach Merge in `main` kopiert der Owner die Dateien — dokumentiert in [LIVE_TRADING.md](../LIVE_TRADING.md) §CI und [SECURITY_AUDIT.md](../security/SECURITY_AUDIT.md).
+- Beide Workflows starten bei `push` auf `main` und `arena/**` sowie bei `pull_request`.
+  Damit lassen sich Änderungen auf dem Arbeitsbranch prüfen, **bevor** ein PR
+  erstellt wird (SEC-01-Release-Workflow).
+- Vor PR-Erstellung müssen beide Läufe für den aktuellen Head-SHA `success` melden;
+  frühere Runs auf `main` oder nur lokale Prüfungen ersetzen das nicht.
+- Die Quelle in `docs/ci/` ist versioniert und wird von `docs-validate` geprüft.
+  Wenn eine GitHub-Verbindung Workflow-Dateien nicht schreiben darf, muss der
+  Owner die beiden Kopien synchronisieren. Ohne aktiven Branch-Trigger ist eine
+  GitHub-Prüfung vor PR-Erstellung nicht möglich.
+
 
 ## CI-Jobs
 
@@ -37,6 +44,8 @@ Ausführen: `npm run docs:validate`
 
 ### security-live-gate
 
+- SEC-01/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
+  Session-Vertrauensgrenze, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
 - Live-Gate-Suite mit ≥95% Coverage
 - Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink
 

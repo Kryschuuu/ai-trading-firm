@@ -98,10 +98,11 @@ export function checkApiToken(req: Request): Response | null {
   const got = req.headers.get("x-firm-token") ?? "";
   if (tokenEquals(got, expected)) return null;
 
-  // W1 (v1.36.23): Auch eine gueltige Session-Cookie berechtigt zum Schreiben —
-  // der angemeldete Actor (Operator/Admin) traegt `firm.write`.
+  // SEC-01: Auch dieser Legacy-Guard darf nur aktuell serverseitig abgeleitete
+  // Session-Rechte verwenden — niemals Permissions aus einem Cookie-Snapshot.
   const session = readSession(req);
-  if (session && sessionActor(session).permissions.includes("firm.write")) return null;
+  const actor = session ? sessionActor(session) : null;
+  if (actor?.permissions.includes("firm.write")) return null;
 
   return Response.json(
     { ok: false, error: "UNAUTHORIZED", hint: "Fehlender/falscher x-firm-token Header oder keine gueltige Session." },

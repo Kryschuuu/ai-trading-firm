@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.36.26",
+  "version": "1.36.27",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "GPL-3.0-only",
   "private": true,
@@ -11,7 +11,7 @@
     "dev": "node --import tsx scripts/auth-boot-guard.ts && PORT=${PORT:-3369} next dev",
     "build": "next build",
     "boot:guard": "node --import tsx scripts/auth-boot-guard.ts",
-    "start": "node --import tsx scripts/auth-boot-guard.ts && PORT=${PORT:-3369} next start -H 0.0.0.0",
+    "start": "NODE_ENV=production node --import tsx scripts/auth-boot-guard.ts && PORT=${PORT:-3369} next start -H 0.0.0.0",
     "stop": "bash scripts/stop.sh",
     "micro": "node --import tsx scripts/micro-executor.ts",
     "lint": "eslint .",
@@ -38,7 +38,8 @@
     "test:coverage:routing": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/routing/**' --test-coverage-include='src/app/api/providers/**' --test-coverage-include='src/app/api/routing/**' 'tests/routing.*.test.ts'",
     "live:kill": "node --import tsx scripts/live-kill.ts",
     "live:stamp": "node --import tsx scripts/live-security-stamp.ts",
-    "security:live-gate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
+    "test:security:auth": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/sec01.*.test.ts' 'tests/w1.sessionCookie.test.ts' 'tests/authMode.test.ts' 'tests/rbac.test.ts'",
+    "security:live-gate": "npm run test:security:auth && DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
     "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'",
     "history:migrate": "node --import tsx scripts/migrate-history-timeframe.ts",
     "symbols:normalize": "node --import tsx scripts/normalize-instrument-ids.ts"

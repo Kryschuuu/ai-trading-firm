@@ -1247,6 +1247,9 @@ Arbeite diese Liste **vollständig** ab, bevor irgendein Live-Endpunkt konfiguri
 - [ ] Die Schreib-API ist durch ein Token geschützt (`FIRM_API_TOKEN` gesetzt) —
       `curl -s localhost:3369/api/auth/me | jq .authMode.mode` liefert
       `token-required`, und `POST /api/firm/tick` ohne Header antwortet `401`.
+- [ ] `FIRM_SESSION_SECRET` ist unabhängig von den Login-Tokens erzeugt und nur
+      serverseitig hinterlegt (SEC-01, v1.36.27); nach Upgrade/Rotation alle
+      Instanzen neu starten und erneut anmelden. Browser-Login läuft über HTTPS.
 - [ ] Es gibt kein `AUTH_MODE=local-open` in einer Produktions-`.env`
       (offener Schreib-Zugang im Netz, Audit-Befund C1).
 - [ ] Der Dienst läuft seit mindestens 7 Tagen ohne Absturz.
