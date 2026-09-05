@@ -131,7 +131,7 @@ deshalb die sicherheitsrelevante Schnittmenge — und zwar hart:
       `resolveAuth`/`requirePermission` liefern 401 statt Admin-Aktor.
       (Die Acceptance-Zeile „only if“ ist bewusst als „nie implizit in Produktion +
       `token-required` erzwingbar“ umgesetzt; Begründung im Abschnitt acima.)
-- [x] Mit Token: Write-Endpunkte verlangen `x-firm-token`.
+- [x] Mit Token → Write-Endpunkte verlangen `x-firm-token`.
       `guardWrite`-Test (401 ohne, 401 bei Präfix-Fehler, `null` bei Treffer) plus
       echte Route `POST /api/firm/tick` ⇒ 401, bevor `tick()` irgendetwas tut.
 - [x] Nebenbefund: nur `FIRM_ADMIN_TOKEN`/`FIRM_VIEWER_TOKEN` gesetzt ⇒

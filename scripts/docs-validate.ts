@@ -1,5 +1,5 @@
 /**
- * `npm run docs:validate` — Docs-as-Code-CI-Validator (Task 12).
+ * `npm run docs:validate` — Docs-as-Code-CI-Validator (Task 12 + Repo-Cleanup 2026-09-05).
  *
  * Fuehrt alle automatisierten Doku-Pruefungen aus und beendet mit Exit 0
  * (gruen) bzw. 1 (rot). Der CI-Job `docs-validate` (docs/ci/docs-validate.workflow.yml)
@@ -15,12 +15,17 @@
  *   D) Secret-Scan ueber Docs-Diffs: keine API-Keys, Tokens, privaten Schluessel,
  *      internen Hostnamen oder personenbezogenen Daten in docs/.
  *   E) Konsistenz-Checks gegen den Code:
- *      - Env-Flag-Namen in INSTALL.md existieren im Code (src/**).
+ *      - Env-Flag-Namen in CONFIGURATION.md / INSTALL.md existieren im Code (src/**).
  *      - API-Routen in docs/ existieren als registrierte Routen (src/app/api).
  *      - Zustandsnamen in LIVE_TRADING.md == Live-Gate-Enum (src/live-gate/states.ts).
  *      - Alle docs/help/*.help.json erfuellen die 3-Ebenen-Pflicht (via A).
  *   F) Versions-Konsistenz: package.json == oberster Eintrag in CHANGELOG.md
- *      und docs/CHANGELOG.md == Status-Header == docs/README.md.
+ *      (kanonisch im Root, docs/CHANGELOG.md ist Stub) == Status-Header == docs/README.md.
+ *
+ * Struktur-Update 2026-09-05:
+ *   - docs/CHANGELOG.md ist jetzt Stub → nur Root wird version-geprüft
+ *   - Flag-Referenz: CONFIGURATION.md (Root) + docs/INSTALL.md (CachyOS)
+ *   - Neue Ordner audits/, peer-reviews/, security/, archive/ sind ausgenommen von strikten Checks
  */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -103,25 +108,47 @@ function checkLinks() {
   const dead: string[] = [];
   for (const file of files) {
     const base = path.dirname(file);
-    const src = readFileSync(file, "utf8");
+    const raw = readFileSync(file, "utf8");
+    // Code-Fences ignorieren (``` und ~~~) — Links in Code-Beispielen sind keine echten Links
+    // Zusätzlich: Inline-Code (`...`) entfernen und Platzhalter `...` ignorieren
+    const lines = raw.split("\n");
+    let inFence = false;
+    let filtered = "";
+    for (const line of lines) {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (!inFence) {
+        const withoutInline = line.replace(/`[^`]*`/g, "");
+        filtered += withoutInline + "\n";
+      }
+    }
     const re = /\]\(([^)]+)\)/g;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(src)) !== null) {
+    while ((m = re.exec(filtered)) !== null) {
       const target = m[1].trim();
       if (/^(https?:|mailto:|#)/.test(target)) continue; // extern / Anker
+      if (target.includes("...")) continue; // Platzhalter-Beispiel
       const [p, anchor] = target.split("#");
       if (!p) continue;
+      // Nur relative Pfade prüfen, die auf .md oder Unterordner zeigen
+      // Absolute Pfade oder ohne Extension werden als externe ignoriert, wenn sie nicht existieren? Nein, wir prüfen alle.
       const resolved = path.resolve(base, decodeURIComponent(p));
       if (!existsSync(resolved)) {
         dead.push(`${path.relative(ROOT, file)}: toter Link -> ${target}`);
         continue;
       }
       if (anchor) {
-        const content = readFileSync(resolved, "utf8");
-        const want = headingSlug(anchor);
-        const headings = [...content.matchAll(/^#{1,6}\s+(.+)$/gm)].map((hm) => headingSlug(hm[1]));
-        if (!headings.includes(want))
-          dead.push(`${path.relative(ROOT, file)}: toter Anker -> ${target}`);
+        try {
+          const content = readFileSync(resolved, "utf8");
+          const want = headingSlug(anchor);
+          const headings = [...content.matchAll(/^#{1,6}\s+(.+)$/gm)].map((hm) => headingSlug(hm[1]));
+          if (!headings.includes(want))
+            dead.push(`${path.relative(ROOT, file)}: toter Anker -> ${target}`);
+        } catch {
+          // Falls resolved ein Verzeichnis ist, Anker ignorieren
+        }
       }
     }
   }
@@ -248,15 +275,23 @@ function liveGateStatesFromCode(): string[] {
 
 function checkEnvFlags() {
   const codeFlags = envFlagsFromCode();
-  const docTargets = [path.join(ROOT, "INSTALL.md"), path.join(DOCS, "INSTALL.md")];
+  // Neue Struktur 2026-09-05: Flag-Referenz ist CONFIGURATION.md (Root) + docs/INSTALL.md (CachyOS) + INSTALL.md (Wrapper)
+  const docTargets = [
+    path.join(ROOT, "CONFIGURATION.md"),
+    path.join(ROOT, "INSTALL.md"),
+    path.join(DOCS, "INSTALL.md"),
+    path.join(DOCS, "CONFIGURATION.md"),
+  ];
   const issues: string[] = [];
   for (const t of docTargets) {
     if (!existsSync(t)) continue;
     const src = readFileSync(t, "utf8");
+    // Stub-Dateien (Weiterleitung) überspringen
+    if (src.includes("Weiterleitung") && src.length < 1500) continue;
     const flags = [...src.matchAll(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)].map((m) => m[0]);
     for (const f of new Set(flags)) {
       if (/(_URL|_KEY|_TOKEN|_ENABLED|_DIR|_MS|_CTX|_PORT|_BASE|_PATH|_DATA|_AUDIT|_MODEL|_PROVIDER|_BUDGET|_FLAG)$/.test(f) && !codeFlags.has(f)) {
-        issues.push(`INSTALL.md dokumentiert Flag '${f}', nicht im Code gefunden`);
+        issues.push(`${path.relative(ROOT, t)} dokumentiert Flag '${f}', nicht im Code gefunden`);
       }
     }
   }
@@ -269,7 +304,11 @@ function checkRoutes() {
   const skip = new Set([
     "CHANGELOG.md",
     "SETUP_PG_TROUBLESHOOTING.md",
-    "SECURITY_AUDIT.md", // referenziert Quell-Pfade (z. B. src/app/api/portfolio/parse.ts)
+    "SECURITY_AUDIT.md", // referenziert Quell-Pfade (z. B. src/app/api/portfolio/parse.ts) — jetzt in security/
+    "AUDIT_REMEDIATION_2026-09.md", // alt, jetzt in audits/
+    "PEER_REVIEW_BITUNIX_EXECUTION.md",
+    "PEER_REVIEW_LIVE_TRADING.md",
+    "PEER_REVIEW_ROUTING_OVERRIDES.md",
   ]);
   // Bekannte Top-Level-Namespaces der App-API (aus src/app/api). Routen, deren
   // erstes Segment nicht hier liegt (z. B. Ollama /api/tags, Bitunix /api/v1/...),
@@ -352,26 +391,35 @@ function checkVersionConsistency() {
   // Oberster Release-Eintrag einer Changelog-Datei ("## [x.y.z] — …").
   const latestEntry = (file: string): string | null => {
     if (!existsSync(file)) return null;
-    const m = readFileSync(file, "utf8").match(/^## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]/m);
+    const content = readFileSync(file, "utf8");
+    // Stub-Dateien (Weiterleitung) überspringen — kein Release-Eintrag erwartet
+    if (content.includes("Weiterleitung") && content.length < 1500) return version;
+    const m = content.match(/^## \[(\d+\.\d+\.\d+(?:-[\w.]+)?)\]/m);
     return m ? m[1] : null;
   };
 
-  for (const rel of ["CHANGELOG.md", "docs/CHANGELOG.md"]) {
-    const v = latestEntry(path.join(ROOT, rel));
-    if (v === null) issues.push(`${rel}: kein Release-Eintrag '## [x.y.z]' gefunden`);
-    else if (v !== version)
-      issues.push(`${rel}: oberster Eintrag [${v}] != package.json (${version})`);
+  // Neue Struktur 2026-09-05: kanonisch ist nur noch CHANGELOG.md im Root, docs/CHANGELOG.md ist Stub
+  const rootChangelog = path.join(ROOT, "CHANGELOG.md");
+  const vRoot = latestEntry(rootChangelog);
+  if (vRoot === null) issues.push(`CHANGELOG.md: kein Release-Eintrag '## [x.y.z]' gefunden`);
+  else if (vRoot !== version) issues.push(`CHANGELOG.md: oberster Eintrag [${vRoot}] != package.json (${version})`);
+
+  // docs/CHANGELOG.md nur prüfen wenn es kein Stub ist
+  const docsChangelogPath = path.join(ROOT, "docs/CHANGELOG.md");
+  if (existsSync(docsChangelogPath)) {
+    const docsContent = readFileSync(docsChangelogPath, "utf8");
+    if (!docsContent.includes("Weiterleitung")) {
+      const vDocs = latestEntry(docsChangelogPath);
+      if (vDocs === null) issues.push(`docs/CHANGELOG.md: kein Release-Eintrag '## [x.y.z]' gefunden`);
+      else if (vDocs !== version) issues.push(`docs/CHANGELOG.md: oberster Eintrag [${vDocs}] != package.json (${version})`);
+    }
   }
 
-  const top = existsSync(path.join(ROOT, "CHANGELOG.md"))
-    ? readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8")
-    : "";
+  const top = existsSync(rootChangelog) ? readFileSync(rootChangelog, "utf8") : "";
   if (!top.includes(`Code-Version **${version}**`))
     issues.push(`CHANGELOG.md: Status-Header nennt nicht 'Code-Version **${version}**'`);
 
-  const docsReadme = existsSync(path.join(DOCS, "README.md"))
-    ? readFileSync(path.join(DOCS, "README.md"), "utf8")
-    : "";
+  const docsReadme = existsSync(path.join(DOCS, "README.md")) ? readFileSync(path.join(DOCS, "README.md"), "utf8") : "";
   if (!docsReadme.includes(`**Version:** \`v${version}\``))
     issues.push(`docs/README.md: Versionszeile nennt nicht 'v${version}'`);
 

@@ -8,6 +8,14 @@
  * SICHERHEIT: Nur diese Dateien sind lesbar. Es gibt bewusst keine
  * Pfadübergabe von außen — der Schlüssel ist ein fester Slug, kein Pfad.
  * Damit ist Path-Traversal strukturell ausgeschlossen.
+ *
+ * Struktur-Update 2026-09-05:
+ *   - CHANGELOG.md kanonisch im Root, docs/CHANGELOG.md ist Stub
+ *   - SECURITY_AUDIT.md nach docs/security/SECURITY_AUDIT.md
+ *   - AUDIT_REMEDIATION_2026-09.md nach docs/audits/2026-09-03-peer-review/
+ *   - PEER_REVIEW Dateien nach docs/peer-reviews/ Unterordner review.md
+ *   - task- Dateien nach docs/archive/task-plans/
+ *   - Neue Katalog-Eintraege fuer audits/, peer-reviews/, security/, archive/
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -23,7 +31,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   readme: {
     file: "docs/README.md",
     title: "README",
-    subtitle: "Überblick, Architektur und Schnellstart",
+    subtitle: "Überblick, Architektur und Schnellstart — neue Struktur 2026-09-05",
   },
   install: {
     file: "docs/INSTALL.md",
@@ -41,14 +49,24 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     subtitle: "Missions-Typen (Einzel-Symbol / Markt-Scan), Segmente, 18 Vorlagen, Mandatsprüfung (v1.35.0)",
   },
   changelog: {
-    file: "docs/CHANGELOG.md",
+    file: "CHANGELOG.md",
     title: "Changelog",
-    subtitle: "Versionen, Bugfixes und Änderungen je Release",
+    subtitle: "Versionen, Bugfixes und Änderungen je Release — kanonisch im Root (Keep a Changelog)",
+  },
+  configuration: {
+    file: "CONFIGURATION.md",
+    title: "Konfiguration & Env-Flags",
+    subtitle: "Alle Env-Flags mit sicheren Defaults — verbindliche Flag-Referenz (ehemals Root INSTALL.md)",
   },
   security: {
-    file: "docs/SECURITY_AUDIT.md",
+    file: "docs/security/SECURITY_AUDIT.md",
     title: "Security-Audit",
-    subtitle: "Findings, Schweregrad, Fixes und Peer-Review",
+    subtitle: "Findings, Schweregrad, Fixes und Peer-Review — konsolidiert in security/",
+  },
+  securityOverview: {
+    file: "docs/security/README.md",
+    title: "Security-Übersicht",
+    subtitle: "Aggregierte Critical/High Findings, Auth-Modell, RBAC, Rate-Limit, Kill-Switch",
   },
   provider: {
     file: "docs/PROVIDER_INTEGRATION.md",
@@ -130,11 +148,6 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Portfolio-Analytics & Risk Guard",
     subtitle: "Kennzahlen, Kovarianz, drei Optimizer-Modi, Risk-Guard-Kette, API (v1.13)",
   },
-  liveReview: {
-    file: "docs/PEER_REVIEW_LIVE_TRADING.md",
-    title: "Peer-Review: Live-/Paper-Trading",
-    subtitle: "Bottlenecks der 6-Agenten-Pipeline, Code-Review, Tests und Handlungsplan",
-  },
   brokers: {
     file: "docs/BROKER_ARCHITECTURE.md",
     title: "Broker-Architektur",
@@ -165,10 +178,41 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Arena-Tasks (01–11)",
     subtitle: "Übersicht aller Tasks mit Versionen, Umfang und Merge-Status",
   },
-  auditRemediation: {
-    file: "docs/AUDIT_REMEDIATION_2026-09.md",
-    title: "Senior-Peer-Review 2026-09",
-    subtitle: "Befunde H1–H10, C1–C4, B1/B2, W1/W2, S1/S2 mit Validierungsstand",
+  // Neue Struktur 2026-09-05
+  audits: {
+    file: "docs/audits/README.md",
+    title: "Audits — Zentrale Verwaltung",
+    subtitle: "Alle Code-Reviews, Security-Audits chronologisch, skalierbares Schema für wiederkehrende Audits",
+  },
+  auditPeerReview: {
+    file: "docs/audits/2026-09-03-peer-review/README.md",
+    title: "Audit: Senior Peer-Review 2026-09-03",
+    subtitle: "Befunde H1–H10, C1–C4, B1/B2, W1/W2, S1/S2 — CLOSED, alle gefixt v1.36.2–v1.36.24",
+  },
+  auditSecurityGpt01: {
+    file: "docs/audits/2026-09-05-security-review-gpt01/README.md",
+    title: "Security-Audit: GPT_01 2026-09-05",
+    subtitle: "SEC-01 Privilege Escalation, SEC-02 ungeschützte APIs, SEC-03/04 Dependencies — OPEN",
+  },
+  peerReviews: {
+    file: "docs/peer-reviews/README.md",
+    title: "Peer-Review-Patches — Zentrale Sammlung",
+    subtitle: "Patch-Vorschläge aus Peer-Reviews gesammelt, nachvollziehbar zugeordnet, bidirektional verlinkt",
+  },
+  peerReviewLive: {
+    file: "docs/peer-reviews/2026-08-26-live-trading-readiness/README.md",
+    title: "Peer-Review: Live-Trading-Readiness",
+    subtitle: "Bottlenecks, Makro/Mikro, DB-Locks — CLOSED",
+  },
+  peerReviewBitunix: {
+    file: "docs/peer-reviews/2026-08-26-bitunix-execution/README.md",
+    title: "Peer-Review: Bitunix-Execution",
+    subtitle: "Paper/Broker getrennt, ExecutionPort — CLOSED, v1.20.0",
+  },
+  peerReviewRouting: {
+    file: "docs/peer-reviews/2026-08-26-routing-overrides/README.md",
+    title: "Peer-Review: Routing-Overrides",
+    subtitle: "Provider/Modell-Overrides, Audit-Härtung, Test-Isolation — CLOSED, v1.22",
   },
   installWindows: {
     file: "docs/INSTALL-WINDOWS.md",
@@ -180,20 +224,10 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Paper-Market-Data",
     subtitle: "Modi A/B/C, deterministischer Fill-Simulator, Failover-Kette, Replay (v1.26.2)",
   },
-  peerReviewBitunix: {
-    file: "docs/PEER_REVIEW_BITUNIX_EXECUTION.md",
-    title: "Peer-Review: Bitunix-Execution",
-    subtitle: "Paper/Broker getrennt, v1.20",
-  },
-  peerReviewRouting: {
-    file: "docs/PEER_REVIEW_ROUTING_OVERRIDES.md",
-    title: "Peer-Review: Routing-Overrides",
-    subtitle: "Provider/Modell-Overrides, Audit-Härtung, Test-Isolation (v1.22)",
-  },
-  task10: {
-    file: "docs/task-10-IMPLEMENTATION_PLAN.md",
-    title: "Task 10: Operations Center + RBAC",
-    subtitle: "Rollen, Phase-Plan (Stand v1.18.0; Nachtrag v1.23.0)",
+  archive: {
+    file: "docs/archive/README.md",
+    title: "Archiv — Historische Dokumente",
+    subtitle: "Veraltete Task-Pläne, alte Audit-Reports — nicht Teil des aktiven Katalogs",
   },
 };
 
@@ -218,8 +252,12 @@ function basename(file: string): string {
 export function docCanonicalPath(slugOrFile: string): string | null {
   const entry = DOCS_CATALOG[slugOrFile];
   const file = entry ? entry.file : slugOrFile;
-  if (!file.startsWith("docs/") || !file.endsWith(".md")) return null;
-  return `/docs/${basename(file)}`;
+  // Unterstützt sowohl docs/ als auch Root-Dateien (CHANGELOG.md, CONFIGURATION.md)
+  if (!file.endsWith(".md")) return null;
+  if (file.startsWith("docs/")) return `/docs/${basename(file)}`;
+  // Root-Dateien wie CHANGELOG.md, CONFIGURATION.md
+  if (!file.includes("/")) return `/docs/${basename(file)}`;
+  return null;
 }
 
 export type ResolvedDoc = {
@@ -236,7 +274,7 @@ export type ResolvedDoc = {
  *
  * Zuerst die Whitelist (`DOCS_CATALOG`), danach ein Existenz-Fallback innerhalb
  * von `docs/` + `.md`, damit auch nicht katalogisierte Doku-Dateien (z. B.
- * `task-*-IMPLEMENTATION_PLAN.md` oder `PAPER_TRADING.md`) lokal ohne 404
+ * `audits/README.md` oder `security/README.md`) lokal ohne 404
  * gerendert werden. Der Pfad wird ausschließlich über ein bereinigtes
  * Basename konstruiert — Path-Traversal bleibt strukturell ausgeschlossen.
  */
@@ -261,8 +299,25 @@ export function resolveDoc(name: string): ResolvedDoc | null {
     }
   }
 
-  // 3) Existenz-Fallback: echte Datei unter docs/ (nur `.md`, keine Trenner).
+  // 3) Existenz-Fallback: echte Datei unter docs/ oder Unterordnern (z. B. audits/, peer-reviews/, security/)
+  // Nur .md, keine Trenner außerhalb docs/
   if (!safeBase.endsWith(".md") || safeBase.includes("/") || safeBase.includes("\\") || safeBase === "..") return null;
+  // Suche in bekannten Unterordnern
+  const searchPaths = [
+    `docs/${safeBase}`,
+    `docs/audits/${safeBase}`,
+    `docs/peer-reviews/${safeBase}`,
+    `docs/security/${safeBase}`,
+    `docs/archive/${safeBase}`,
+    safeBase, // Root-Dateien wie CHANGELOG.md, CONFIGURATION.md
+  ];
+  for (const file of searchPaths) {
+    if (existsSync(path.join(process.cwd(), file))) {
+      const entry: DocsEntry = { file, title: safeBase.replace(/\.md$/, ""), subtitle: "" };
+      return { slug: safeBase.replace(/\.md$/, "").toLowerCase(), entry, file, canonicalPath: `/docs/${safeBase}` };
+    }
+  }
+  // Fallback: docs/* rekursiv? Nur wenn explizit erlaubt — hier nur docs/
   const file = `docs/${safeBase}`;
   if (!existsSync(path.join(process.cwd(), file))) return null;
   const entry: DocsEntry = { file, title: safeBase.replace(/\.md$/, ""), subtitle: "" };
