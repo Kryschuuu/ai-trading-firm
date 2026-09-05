@@ -14,10 +14,12 @@
  *     URLs uebertragen.
  *   - Antworten sind status-only; es gibt keinen Code, der ein Secret
  *     anzeigen kann.
- *   - Mutierende Requests senden den CSRF-Header `x-csrf-token` (Wert =
- *     Admin-/Operator-Token bzw. "local" im Offen-Betrieb) — exakt das
- *     Server-Pendant zu src/brokers/control-plane/guard.ts.
+ *   - Mutierende Requests senden den CSRF-Header `x-csrf-token` — seit W1
+ *     (v1.36.23) als Double-Submit aus dem Session-Cookie `firm_csrf`
+ *     (Offen-Betrieb weiterhin "local") — exakt das Server-Pendant zu
+ *     src/brokers/control-plane/guard.ts. Kein Token im Client-Speicher.
  */
+import { csrfHeaderValue } from "@/lib/browserSession";
 
 export type LayerStateValue = "off" | "pending" | "active" | "error";
 
@@ -143,29 +145,17 @@ export interface ApiResult<T> {
 
 const CREDENTIAL_HEADERS = ["POST", "DELETE"] as const;
 
-/** CSRF-Wert: Admin-/Operator-Token aus localStorage, sonst Offen-Konstante. */
-function csrfValue(): string {
-  if (typeof window === "undefined") return "local";
-  return window.localStorage.getItem("firmToken")?.trim() || "local";
-}
-
 async function request<T>(
   url: string,
   method: "GET" | "POST" | "DELETE",
   body?: unknown
 ): Promise<ApiResult<T>> {
   const headers = new Headers();
-  const token =
-    typeof window !== "undefined"
-      ? window.localStorage.getItem("firmToken") ?? ""
-      : "";
-  if (token && (CREDENTIAL_HEADERS as readonly string[]).includes(method)) {
-    headers.set("x-firm-token", token);
-    headers.set("x-admin-token", token);
-  }
+  // W1 (v1.36.23): Kein Token mehr aus localStorage — die HttpOnly-Session-
+  // Cookie (firm_session) wird automatisch mitgesendet (same-origin fetch).
+  // Mutierend: Double-Submit-CSRF aus firm_csrf (Offen-Betrieb: "local").
   if ((CREDENTIAL_HEADERS as readonly string[]).includes(method)) {
-    // CSRF-Guard des Servers: mutierende Endpoints verlangen x-csrf-token.
-    headers.set("x-csrf-token", csrfValue());
+    headers.set("x-csrf-token", csrfHeaderValue());
   }
   if (body !== undefined) headers.set("content-type", "application/json");
 
@@ -175,6 +165,7 @@ async function request<T>(
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: "same-origin",
     });
   } catch {
     return {

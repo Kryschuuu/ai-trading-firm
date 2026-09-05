@@ -17,6 +17,8 @@
  *   Code-Ceilings → Basis-Limit (DB/Dashboard) → adaptiver Marktfaktor.
  */
 
+import { state } from "./stateRegistry";
+
 export type RiskLimits = {
   maxPositionPct: number;
   maxRiskPerTrade: number;
@@ -105,9 +107,14 @@ export type AdaptiveRiskState = {
 /** Max. Alter eines persistierten adaptiven Faktors (Micro-Prozess-Sicht). */
 export const ADAPTIVE_STATE_MAX_AGE_MS = 15 * 60_000;
 
-let baseLimits: RiskLimits = { ...DEFAULT_LIMITS };
-let currentLimits: RiskLimits = { ...DEFAULT_LIMITS };
-let adaptiveState: AdaptiveRiskState | null = null;
+// S2 (v1.36.22): baseLimits/currentLimits/adaptiveState liegen jetzt in der
+// zentralen State-Registry (Wahrheit von `baseLimits` = risk_config/Default;
+// `currentLimits` = Basis + adaptiver Marktfaktor). Defaults werden hier
+// registriert, damit `__resetAllSingletonsForTests()` deterministisch in den
+// Ausgangszustand zuruecksetzt.
+state.baseLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
+state.currentLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
+state.adaptiveState.setDefault(() => null);
 
 /** maxRiskPerTrade nach Anwendung des adaptiven Faktors (Boden = Code-Minimum). */
 function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
@@ -120,15 +127,15 @@ function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
 
 /** currentLimits = baseLimits + (ggf.) aktive adaptive Reduktion. */
 function recomputeCurrent(): RiskLimits {
-  currentLimits = adaptiveState
-    ? applyFactorToRisk(baseLimits, adaptiveState.factor)
-    : { ...baseLimits };
-  return currentLimits;
+  const base = state.baseLimits.get()!;
+  const adaptive = state.adaptiveState.get();
+  state.currentLimits.set(adaptive ? applyFactorToRisk(base, adaptive.factor) : { ...base });
+  return state.currentLimits.get()!;
 }
 
 /** Die konfigurierten Basis-Limits (ohne adaptive Marktreduktion). */
 export function getBaseLimits(): Readonly<RiskLimits> {
-  return baseLimits;
+  return state.baseLimits.get()!;
 }
 
 /**
@@ -136,7 +143,7 @@ export function getBaseLimits(): Readonly<RiskLimits> {
  * Order-Pfade (Engine, Mikro-Executor, Guardrails, Sizing) lesen von hier.
  */
 export function getLimits(): Readonly<RiskLimits> {
-  return currentLimits;
+  return state.currentLimits.get()!;
 }
 
 /**
@@ -144,17 +151,19 @@ export function getLimits(): Readonly<RiskLimits> {
  * `null` hebt die Reduktion auf. Boden bleibt das absolute Code-Minimum
  * aus LIMIT_CEILINGS. Liefert die wirksamen Limits.
  */
-export function applyAdaptiveRisk(state: AdaptiveRiskState | null): RiskLimits {
-  adaptiveState =
-    state != null && Number.isFinite(state.factor) && state.factor > 0
-      ? { ...state, factor: Math.min(state.factor, 1) }
-      : null;
+export function applyAdaptiveRisk(snapshot: AdaptiveRiskState | null): RiskLimits {
+  state.adaptiveState.set(
+    snapshot != null && Number.isFinite(snapshot.factor) && snapshot.factor > 0
+      ? { ...snapshot, factor: Math.min(snapshot.factor, 1) }
+      : null
+  );
   return recomputeCurrent();
 }
 
 /** Aktive adaptive Reduktion (oder null), z. B. für Observability. */
 export function getAdaptiveRiskState(): Readonly<AdaptiveRiskState> | null {
-  return adaptiveState ? { ...adaptiveState } : null;
+  const current = state.adaptiveState.get();
+  return current ? { ...current } : null;
 }
 
 /**
@@ -162,7 +171,7 @@ export function getAdaptiveRiskState(): Readonly<AdaptiveRiskState> | null {
  * genau hier liegt die "Code entscheidet"-Garantie des Runtime-Tunings.
  */
 export function applyRuntimeLimits(raw: Partial<RiskLimits>) {
-  const next: RiskLimits = { ...baseLimits };
+  const next: RiskLimits = { ...state.baseLimits.get()! };
   for (const key of Object.keys(DEFAULT_LIMITS) as (keyof RiskLimits)[]) {
     const v = raw[key];
     if (v === undefined || v === null) continue;
@@ -178,7 +187,7 @@ export function applyRuntimeLimits(raw: Partial<RiskLimits>) {
     const [min, max] = LIMIT_CEILINGS[key];
     (next[key] as number) = Math.min(Math.max(num, min), max);
   }
-  baseLimits = next;
+  state.baseLimits.set(next);
   return recomputeCurrent();
 }
 
@@ -188,14 +197,14 @@ export function applyRuntimeLimits(raw: Partial<RiskLimits>) {
  * Operator-Einstellung.
  */
 export function resetRuntimeLimits() {
-  baseLimits = { ...DEFAULT_LIMITS };
+  state.baseLimits.set({ ...DEFAULT_LIMITS });
   return recomputeCurrent();
 }
 
 // Rückwärtskompatibel: bisheriger Zugriffspunkt im Code.
 export const RISK_LIMITS = new Proxy({} as RiskLimits, {
   get(_t, prop: string) {
-    return (currentLimits as unknown as Record<string, unknown>)[prop];
+    return (state.currentLimits.get()! as unknown as Record<string, unknown>)[prop];
   },
 });
 
@@ -389,16 +398,12 @@ export function missionSizedNotional(
 }
 
 /** True if the global kill switch is armed (in-memory circuit breaker). */
-let killSwitchArmed = false;
 export const killSwitch = {
-  isArmed: () => killSwitchArmed,
+  isArmed: () => state.killSwitchArmed.get(),
   pull: (reason: string) => {
-    killSwitchArmed = true;
+    state.killSwitchArmed.set(true);
     console.error(`[KILL-SWITCH] PULLED: ${reason}`);
-    return killSwitchArmed;
+    return state.killSwitchArmed.get();
   },
-  disarm: () => {
-    killSwitchArmed = false;
-    return killSwitchArmed;
-  },
+  disarm: () => state.killSwitchArmed.set(false),
 };

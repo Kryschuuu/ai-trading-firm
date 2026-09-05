@@ -37,6 +37,8 @@ import { anyTokenConfigured, resolveAuth } from "@/auth/resolve";
 import { resolveAuthMode } from "@/auth/authMode";
 import { tokenEquals } from "@/lib/tokenCompare";
 import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
+import { readSession, sessionActor } from "@/lib/authSession";
+import { state } from "@/lib/stateRegistry";
 
 /** Client-IP-Auflösung (C2) — derselbe Helfer wie in der Control Plane. */
 export { resolveClientIp, clientRateLimitKey } from "@/lib/clientIp";
@@ -96,15 +98,19 @@ export function checkApiToken(req: Request): Response | null {
   const got = req.headers.get("x-firm-token") ?? "";
   if (tokenEquals(got, expected)) return null;
 
+  // W1 (v1.36.23): Auch eine gueltige Session-Cookie berechtigt zum Schreiben —
+  // der angemeldete Actor (Operator/Admin) traegt `firm.write`.
+  const session = readSession(req);
+  if (session && sessionActor(session).permissions.includes("firm.write")) return null;
+
   return Response.json(
-    { ok: false, error: "UNAUTHORIZED", hint: "Fehlender/falscher x-firm-token Header." },
+    { ok: false, error: "UNAUTHORIZED", hint: "Fehlender/falscher x-firm-token Header oder keine gueltige Session." },
     { status: 401 }
   );
 }
 
 // ── Rate-Limit (Prozess-lokal, Single-Node) ──────────────────────────────────
-
-const hits = new Map<string, number[]>();
+// S2: Der Bucket liegt in der zentralen State-Registry (state.rateLimiterHits).
 
 /**
  * Bucket-Schlüssel = geteilte Client-IP-Auflösung (C2, v1.36.14).
@@ -133,7 +139,7 @@ export type RateLimitOptions = {
 
 /** Nur für Tests: Bucket-Speicher leeren. */
 export function resetRateLimiterForTests(): void {
-  hits.clear();
+  state.rateLimiterHits.clear();
 }
 
 /**
@@ -149,7 +155,7 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
   const windowMs = opts.windowMs ?? 60_000;
   const now = opts.now ?? Date.now();
   const key = clientKey(req, { peerIp: opts.peerIp });
-  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  const recent = (state.rateLimiterHits.get().get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) {
     const retryAfter = Math.max(1, Math.ceil((windowMs - (now - recent[0])) / 1000));
     return Response.json(
@@ -158,7 +164,7 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
     );
   }
   recent.push(now);
-  hits.set(key, recent);
+  state.rateLimiterHits.get().set(key, recent);
   return null;
 }
 

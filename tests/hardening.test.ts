@@ -6,19 +6,16 @@ import {
   checkApiToken,
   checkRateLimit,
   guardWrite,
-  resetRateLimiterForTests,
   tokenEquals,
 } from "../src/lib/apiAuth";
 import { extractJsonObject, parseDecision } from "../src/lib/engine";
 import { PaperBroker } from "../src/lib/broker";
-import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
 import { sanitizeInterval, sanitizeSymbol, isValidSymbol } from "../src/lib/marketData";
 import { finvizFeed } from "../src/lib/news";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 beforeEach(() => {
-  resetRateLimiterForTests();
-  resetRuntimeLimits();
-  killSwitch.disarm();
+  __resetAllSingletonsForTests();
   delete process.env.FIRM_API_TOKEN;
   delete process.env.FIRM_RATE_LIMIT;
 });

@@ -13,10 +13,11 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { PaperBroker } from "../src/lib/broker";
-import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
+import { killSwitch } from "../src/lib/riskGuard";
 import { flattenAll } from "../src/lib/engine";
 import { setAuditTransportForTests, type AuditRow } from "../src/lib/auditSink";
 import type { EmergencyBroker, EmergencyCloseFill } from "../src/contracts/broker";
+import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 /** Order-Helper wie in tests/broker.test.ts (BTC 0.015 @ ~67k ≈ 1005 Notional). */
 function order(overrides: Partial<Parameters<PaperBroker["submit"]>[0]> = {}) {
@@ -71,8 +72,7 @@ function mockEmergencyBroker(
 const auditRows: Array<{ event: string; detail: Record<string, unknown> }> = [];
 
 beforeEach(() => {
-  resetRuntimeLimits();
-  killSwitch.disarm();
+  __resetAllSingletonsForTests();
   auditRows.length = 0;
   // Audit erfolgreich, ohne DB: spy statt Default-Transport.
   setAuditTransportForTests(async (row: AuditRow) => {

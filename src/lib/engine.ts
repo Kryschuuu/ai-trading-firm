@@ -47,10 +47,7 @@ import { getHouseView } from "./analysts";
 import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
 import { writeEquitySnapshot } from "./equity";
 import { startOfBerlinDay } from "./time";
-
-const G = globalThis as typeof globalThis & {
-  __firmHydrated?: boolean;
-};
+import { state } from "./stateRegistry";
 
 /**
  * Liefert den Paper-Broker und stellt beim ersten Zugriff nach einem Prozessstart
@@ -87,7 +84,7 @@ export async function getBroker(): Promise<PaperBroker> {
   // Fill-Simulator) einmal in den Ledger injizieren. Idempotent.
   wirePaperExecution(broker);
 
-  if (!G.__firmHydrated) {
+  if (!state.firmHydrated.get()) {
     try {
       const openRows = await db
         .select()
@@ -141,7 +138,7 @@ export async function getBroker(): Promise<PaperBroker> {
       if (lastKill[0]?.armed) killSwitch.pull(`restored:${lastKill[0].reason}`);
       else killSwitch.disarm();
 
-      G.__firmHydrated = true;
+      state.firmHydrated.set(true);
     } catch (e) {
       // Tabellen fehlen noch → `npx drizzle-kit push` muss noch ausgeführt werden.
       // Der Broker startet trotzdem mit leerem Zustand und vollem Startkapital.
@@ -153,10 +150,10 @@ export async function getBroker(): Promise<PaperBroker> {
           "[getBroker] Tabellen fehlen — bitte `npx drizzle-kit push` ausführen.\n" +
           "  Die Anwendung startet mit leerem Zustand, bis das Schema angelegt ist."
         );
-        G.__firmHydrated = false; // erneut versuchen beim nächsten Request
+        state.firmHydrated.set(false); // erneut versuchen beim nächsten Request
       } else {
         console.error("[getBroker] Hydration fehlgeschlagen:", msg);
-        G.__firmHydrated = false;
+        state.firmHydrated.set(false);
       }
     }
   }
@@ -166,7 +163,7 @@ export async function getBroker(): Promise<PaperBroker> {
 
 /** Erzwingt beim nächsten Zugriff ein erneutes Laden aus der DB. */
 export function invalidateBrokerCache() {
-  G.__firmHydrated = false;
+  state.firmHydrated.set(false);
 }
 
 export type AgentDecision = {
@@ -1137,8 +1134,6 @@ export async function executeApprovedProposal(
   return { ...base, status: "EXECUTED", fill };
 }
 
-const PIPELINE_G = globalThis as typeof globalThis & { __pipelineBusy?: boolean };
-
 /**
  * Führt alle Agenten einer Mission in fester Reihenfolge aus (sequenzielle Pipeline).
  *
@@ -1148,10 +1143,10 @@ const PIPELINE_G = globalThis as typeof globalThis & { __pipelineBusy?: boolean 
  * wirft jetzt PIPELINE_ALREADY_RUNNING (API → HTTP 409).
  */
 export async function runPipeline(missionId: string) {
-  if (PIPELINE_G.__pipelineBusy) {
+  if (state.pipelineBusy.get()) {
     throw new Error("PIPELINE_ALREADY_RUNNING");
   }
-  PIPELINE_G.__pipelineBusy = true;
+  state.pipelineBusy.set(true);
   try {
     const phases = ["CEO", "RESEARCH", "BACKTEST", "RISK_MANAGER", "APPROVER"];
     const team = await db.select().from(agentTable);
@@ -1179,7 +1174,7 @@ export async function runPipeline(missionId: string) {
     }
     return results;
   } finally {
-    PIPELINE_G.__pipelineBusy = false;
+    state.pipelineBusy.set(false);
   }
 }
 

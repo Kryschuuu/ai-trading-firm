@@ -15,6 +15,7 @@
  *   - kein Token, Modus token-required → 401 UNAUTHORIZED (AUTH_NOT_CONFIGURED)
  */
 import { tokenEquals } from "@/lib/tokenCompare";
+import { readSession, sessionActor } from "@/lib/authSession";
 import {
   ADMIN_TOKEN_FLAG,
   OPERATOR_TOKEN_FLAG,
@@ -105,6 +106,15 @@ export function resolveAuth(
   }
   if (viewerTok && matchesAny(viewerTok, [presented.viewer, presented.firm, presented.bearer])) {
     return { ok: true, actor: buildActor("viewer", "viewer-token", env) };
+  }
+
+  // W1 (v1.36.23): Session-Cookie `firm_session` als weitere Credential-Quelle.
+  // Die Session enthaelt den bei Login aufgeloesten Actor (signiert, 15 min TTL)
+  // — kein localStorage nötig, kein Token im Browser. Header schlagen Session
+  // (curl/CLI bleibt identisch).
+  const session = readSession(req, env);
+  if (session) {
+    return { ok: true, actor: sessionActor(session) };
   }
 
   if (!adminTok && !operatorTok && !viewerTok) {

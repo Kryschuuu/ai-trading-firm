@@ -2,7 +2,10 @@
 
 - **Severity:** HIGH
 - **Bereich:** Workshop
-- **Status (validiert):** ✅ **Valide.**
+- **Status (validiert):** ✅ **Gefixt v.1.36.23** — siehe `CHANGELOG.md`,
+  `docs/AUDIT_REMEDIATION_2026-09.md` und `tests/w1.sessionCookie.test.ts`
+  (Cookie-Flags, Signatur/Manipulation/Ablauf, resolveAuth/checkApiToken/
+  checkCsrfGuard, Login-Route inkl. HTTPS-Enforcement, Statik-Greps).
 - **Datei(en):** `src/components/FirmDashboard.tsx` (`saveToken` L143), Token-Verwendung in Fetch-Aufrufen
 
 ## Arena-Prompt (kopierbar)
@@ -30,9 +33,9 @@ an HttpOnly cookie; an XSS PoC reading localStorage finds no token. If a local s
 desired, use a short-TTL session token (<=15 min) instead of a permanent secret.
 ```
 
-## Beweis (aktueller Code)
+## Beweis (Code vor v1.36.23)
 
-`src/components/FirmDashboard.tsx` L143:
+`src/components/FirmDashboard.tsx` L143 (vor dem Fix):
 
 ```ts
 function saveToken() {
@@ -48,9 +51,38 @@ Cookie (oder kurzlebiges In-Memory-Session-Token) (siehe Audit W1).
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Kein `localStorage.setItem("firmToken", …)` mehr im Code.
-- [ ] Login setzt HttpOnly+Secure+SameSite-Cookie mit kurzer TTL.
-- [ ] XSS kann das Secret nicht mehr aus `localStorage` auslesen.
+- [x] Kein `localStorage.setItem("firmToken", …)` mehr im Code.
+- [x] Login setzt HttpOnly+Secure+SameSite-Cookie mit kurzer TTL.
+- [x] XSS kann das Secret nicht mehr aus `localStorage` auslesen.
+
+## Umsetzung (v1.36.23)
+
+Neu **`POST /api/auth/login`** (`src/app/api/auth/login/route.ts`): verifiziert
+den Token serverseitig über die RBAC-Auflösung (`resolveAuth`) und antwortet
+ausschließlich mit `Set-Cookie` — `firm_session` (HttpOnly, Secure,
+SameSite=Strict, Path=/, Max-Age=900) und `firm_csrf` (nicht-HttpOnly für
+Double-Submit-CSRF). Der rohe Token wird **nie** zurückgegeben und nie im
+Browser gespeichert.
+
+**`src/lib/authSession.ts`** (neu) stellt stateless, HMAC-SHA256-signierte
+Sessions: Payload = aufgelöster Actor (Rolle/Elevation/Permissions) + CSRF +
+`exp`; Schlüssel `FIRM_SESSION_SECRET` (optional) oder deterministisch aus den
+konfigurierten Tokens abgeleitet — überlebt Neustarts, keine In-Memory-Sessions.
+Produktion über plain-HTTP ⇒ fail-closed `400 SESSION_HTTPS_REQUIRED`
+(Secure-Cookie nie über HTTP in Prod); `Secure` gilt ohnehin immer.
+
+Server-Guards lesen die Cookie: `resolveAuth` (`src/auth/resolve.ts`) führt
+`source="api-session"` als neue `ActorSource` (`src/auth/types.ts`),
+`checkApiToken` (`src/lib/apiAuth.ts`) lässt Operator-/Admin-Sessions schreiben,
+`checkCsrfGuard` (`src/brokers/control-plane/guard.ts`) prüft per Double-Submit
+gegen den session-gebundenen CSRF-Wert (Legacy-Token-Pfad für curl/CLI bleibt).
+
+Client liest nirgends mehr `firmToken` aus `localStorage`:
+`src/lib/apiClient.ts` (Cookie automatisch, `x-csrf-token` bei Mutationen),
+`src/lib/controlPlane.ts`, `src/lib/liveGate.ts` (Double-Submit statt
+Token-Header), `src/components/FirmDashboard.tsx` (`saveToken` → Login-Aufruf,
+Disarm-Pfad CSRF-only, `credentials: "same-origin"`). `src/lib/browserSession.ts`
+(neu) entfernt Altbestand (`firmToken`) und liefert den CSRF-Header-Wert.
 
 ## Changelog-Blurb
 
@@ -59,4 +91,4 @@ XSS-Lateral-Movement auf API-Zugriff entschärft.`
 
 ## Versions-Hinweis
 
-PATCH (`1.36.3`) — Sicherheits-Härtung (neue Cookie-Setzung, kein localStorage-Secret).
+PATCH (`1.36.23`) — Sicherheits-Härtung (neue Cookie-Setzung, kein localStorage-Secret).

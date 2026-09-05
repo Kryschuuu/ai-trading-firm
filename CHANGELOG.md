@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-05** ·
-> Code-Version **1.36.21**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.23**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,62 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.23] — 2026-09-05 · fix(audit): W1 Session-Cookie statt API-Token im Browser (HIGH)
+
+**HIGH, Workshop (`src/components/FirmDashboard.tsx`, `src/lib/apiClient.ts`,
+`src/lib/controlPlane.ts`, `src/lib/liveGate.ts`, `src/lib/authSession.ts` neu,
+`src/app/api/auth/login/route.ts` neu, `src/lib/browserSession.ts` neu,
+`src/auth/resolve.ts`, `src/auth/types.ts`, `src/lib/apiAuth.ts`,
+`src/brokers/control-plane/guard.ts`, `tests/w1.sessionCookie.test.ts` neu).** Befund W1 des
+Senior-Peer-Reviews: `saveToken()` legte den FIRM_API_TOKEN dauerhaft in `localStorage`
+— jedes XSS im Origin konnte ihn dort lesen. Jetzt:
+
+- **`POST /api/auth/login`** (neu) verifiziert den Token serverseitig und setzt
+  `firm_session` (HttpOnly, Secure, SameSite=Strict, Path=/, Max-Age=900) plus
+  `firm_csrf` (nicht-HttpOnly für Double-Submit-CSRF). Der rohe Token wird nie
+  zurückgegeben und nie gespeichert.
+- **Stateless HMAC-Session** (`src/lib/authSession.ts`): signiert mit
+  `FIRM_SESSION_SECRET` (optional) bzw. aus den konfigurierten Tokens abgeleitet;
+  überlebt Prozess-Neustarts, TTL ≤ 15 min. Produktion über plain-HTTP ⇒
+  fail-closed `SESSION_HTTPS_REQUIRED` (kein Secure-Cookie über HTTP).
+- **`resolveAuth`** akzeptiert die Session-Cookie als Credential-Quelle
+  (`source="api-session"`, neue `ActorSource`); `checkApiToken` lässt Operator-/
+  Admin-Sessions schreiben; `checkCsrfGuard` prüft per Double-Submit gegen den
+  session-gebundenen CSRF-Wert (Legacy-Token-Pfad für curl/CLI bleibt).
+- **Client** liest nirgends mehr `firmToken` aus `localStorage`: `apiClient.ts`
+  (Session-Cookie + `x-csrf-token`), `controlPlane.ts`/`liveGate.ts` (Double-Submit),
+  `FirmDashboard` `saveToken` → Login-Aufruf + Altbestand-Entfernung.
+
+### Geändert
+
+- **Cookie-Auth einheitlich:** Browser sendet die HttpOnly-Session automatisch
+  (`credentials: "same-origin"`); mutierende Requests senden zusätzlich
+  `x-csrf-token` (Double-Submit aus `firm_csrf`, Offen-Betrieb: `local`).
+- **Akzeptanz:** `grep localStorage` in `src/components` findet kein
+  `firmToken` mehr; `firm_session` ist HttpOnly; XSS-PoC liest kein Secret.
+
+## [1.36.22] — 2026-09-05 · fix(audit): S2 zentrale State-Registry — alle Singletons an EINEM Ort, EIN Test-Reset (MEDIUM)
+
+**MEDIUM, Architektur/Sonstiges (`src/lib/stateRegistry.ts` neu,
+`src/lib/engine.ts`, `src/brokers/control-plane/service.ts`,
+`src/lib/riskGuard.ts`, `src/brokers/factory.ts`, `src/lib/apiAuth.ts`,
+`tests/stateRegistry.test.ts` neu).** Befund S2 des Senior-Peer-Reviews:
+Mehrere parallele Singleton-/State-Mechanismen (verstreute
+`globalThis`-Keys wie `__firmHydrated`/`__controlPlaneStates` sowie
+Modul-Variablen für Kill-Switch, Risk-Limits und Broker-Adapter) machten
+konsistente Zustandsführung schwer — zwei der Singletons drifteten bereits
+(H2, C4).
+
+**Fix (verhaltensneutral):** eine zentrale, dependency-freie
+`src/lib/stateRegistry.ts` mit typisierten Accessoren (`flag`/`map`/`ref`)
+unter EINEM `globalThis`-Namensraum — alle 14 Cross-Cutting-Singletons
+(Engine, Control Plane, Risk-Guard, Broker-Factory, API-Auth) hängen jetzt
+dort, dokumentiert mit ihrer Wahrheitsquelle (DB vs. RAM). Das Test-Harness
+resettet über EINE Funktion (`__resetAllSingletonsForTests()`);
+`resetControlPlaneForTests`/`resetRateLimiterForTests` bleiben für
+Repo-/DI-Installation bestehen. `resetRuntimeLimits()` resettet bewusst nur
+die Basis-Limits (Adaptivfaktor überlebt — dokumentiert, Test vorhanden).
 
 ## [1.36.21] — 2026-09-05 · fix(audit): H10 Adaptives Risk fail-closed — expliziter UNKNOWN-Zustand statt Fail-Open (HIGH)
 

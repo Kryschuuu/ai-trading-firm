@@ -1,10 +1,11 @@
 /**
- * RBAC-Kern (Task 10, Phase 1) — Rollen, Permissions, Actor.
+ * RBAC-Kern (Task 10, Phase 1; Sessions seit W1 v1.36.23).
  *
- * Es gibt noch keine Sessions. Identität kommt aus Token-Headern
- * (`x-admin-token` / `x-firm-token` / `x-viewer-token` / Bearer) oder,
- * wenn kein Token konfiguriert ist, aus dem lokalen Offen-Betrieb
- * (Single-User, Dienst lauscht auf 127.0.0.1).
+ * Identität kommt aus Token-Headern (`x-admin-token` / `x-firm-token` /
+ * `x-viewer-token` / Bearer), aus einer signierten Session-Cookie
+ * (`firm_session`, `source="api-session"`, W1) oder, wenn kein Token
+ * konfiguriert ist, aus dem lokalen Offen-Betrieb (Single-User, Dienst
+ * lauscht auf 127.0.0.1).
  *
  * `live.gate` steht im Katalog, wird aber keiner Rolle gewährt — Live
  * bleibt bis Task 11 `LiveTradingGateError`.
@@ -33,6 +34,7 @@ export const ACTOR_SOURCES = [
   "admin-token",
   "api-token",
   "viewer-token",
+  "api-session",
 ] as const;
 export type ActorSource = (typeof ACTOR_SOURCES)[number];
 
