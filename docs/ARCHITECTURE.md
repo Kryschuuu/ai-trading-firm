@@ -326,13 +326,14 @@ In-Memory-Cache (Positionen/Cash), aber jeder DB-gestützte Schreibpfad
 statt `submit()` — Guard-Prüfung, `order_intents`-Reservierung und
 Positions-Persistenz sind dadurch über Prozessgrenzen hinweg atomar
 (`pg_advisory_xact_lock` je Konto + DB-Wahrheits-Check gegen `positions`
-VOR dem In-Memory-Guard, siehe `docs/AUDIT_REMEDIATION_2026-09.md` §H2).
+VOR dem In-Memory-Guard, siehe `docs/audits/2026-09-03-peer-review/findings/H2-atomicity.md` §H2).
 Mehrere Mikro-Executor-/Next.js-Worker-Instanzen können damit nicht mehr
 denselben Symbol-Slot doppelt öffnen oder gemeinsames Cash überziehen —
 ein zweiter, gleichzeitiger Reservierungsversuch schlägt mit
 `POSITION_ALREADY_OPEN` fehl, unabhängig davon, welcher Prozess zuletzt
 hydratisiert hat. `submit()` selbst bleibt für Single-Process-Aufrufer
 (Backtests, reine Unit-Tests ohne DB) unverändert synchron und In-Memory.
+Details: `docs/audits/2026-09-03-peer-review/findings/H2-atomicity.md` (§H2).
 
 ### 5.3 Sizing
 
@@ -774,7 +775,7 @@ Dateien in `docs/` (Task 12). Sie gelten für jede zukünftige Änderung.
 Docs und Code werden **nie getrennt gemergt**. Jeder PR, der Verhalten ändert,
 ändert im selben PR die betroffenen Docs (`docs/*.md`), Hilfe-Dateien
 (`docs/help/*.help.json`) und — bei Verhaltens-Änderungen — den Changelog
-(`docs/CHANGELOG.md`).
+(`CHANGELOG.md` im Root, kanonisch — `docs/CHANGELOG.md` ist nur Stub).
 
 ### Docs-as-Code-Regeln
 
