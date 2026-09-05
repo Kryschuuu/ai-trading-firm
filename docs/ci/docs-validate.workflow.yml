@@ -19,7 +19,7 @@ name: docs-validate
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
   pull_request:
 
 permissions:

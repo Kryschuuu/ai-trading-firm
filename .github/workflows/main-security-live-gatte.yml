@@ -25,7 +25,7 @@ name: security-live-gate
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
   pull_request:
 
 permissions:
@@ -58,7 +58,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Security-Suite Live-Gate (Matrix, Kill-Drill, Red-Team, Coverage >= 95 %)
+      - name: Auth-/Session-Regressionen und Live-Gate-Suite (Coverage >= 95 %)
         run: npm run security:live-gate
 
       - name: Secret-Scan (Quellcode-Muster)
