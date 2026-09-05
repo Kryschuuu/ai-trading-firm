@@ -53,7 +53,7 @@ Hinweisen aus:
 2. Git und Node.js LTS nachinstallieren; den PATH nach der Installation neu lesen.
 3. PostgreSQL 17 nachinstallieren, den Windows-Dienst starten und den Port prüfen.
 4. Rolle `trader` und Datenbank `trading_firm` idempotent anlegen.
-5. `.env` mit Paper-/Sicherheitsdefaults, API-Token und lokalem `DATABASE_URL`
+5. `.env` mit Paper-/Sicherheitsdefaults, API-Token, unabhängigem `FIRM_SESSION_SECRET` und lokalem `DATABASE_URL`
    schreiben. Eine vorhandene Datei wird vorher als `.env.bak-<Zeitstempel>` gesichert.
 6. `npm ci`, `npx drizzle-kit push` und beide Universe-Seeds ausführen (354
    kuratierte Marktinstrumente plus Basis-Universum).
@@ -62,6 +62,22 @@ Hinweisen aus:
    auf `/api/health` ausführen.
 
 Der Installer startet die App nur kurz für den Health-Check und beendet sie danach.
+**SEC-01 / v1.36.27:** Produktion mit Tokens benötigt zusätzlich einen unabhängigen
+Session-Schlüssel (mindestens 32 Zeichen). Der Installer ergänzt einen fehlenden
+`FIRM_SESSION_SECRET` auch mit `-KeepExistingEnv`, überschreibt aber keine vorhandenen
+Werte. Bei manuellem Upgrade einen eigenen Zufallswert erzeugen (Node ist vorhanden):
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Den Wert nur in `.env` als `FIRM_SESSION_SECRET` speichern, nicht als Login-Token
+nutzen oder in Logs/Tickets kopieren. Bestehende leere/ungültige Einträge ausdrücklich
+korrigieren. Fehlende/ungültige Werte verweigern den Start und Browser-Login
+(`SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`). Alle App-Prozesse nach dem
+Upgrade neu starten; alte Cookies erfordern neuen Login. Browser-Login in Produktion
+benötigt HTTPS. Details: [CONFIGURATION.md](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
+
 Für den normalen Betrieb:
 
 ```powershell
@@ -78,7 +94,7 @@ npm run start
 ## 4. Wiederholen, Optionen und sichere Reparatur
 
 Ein erneuter Lauf ist sicher. Für eine vorhandene, bewusst beizubehaltende
-Konfiguration:
+Konfiguration (bestehende Werte bleiben erhalten, ein fehlender Session-Key wird ergänzt):
 
 ```powershell
 .\scripts\setup-windows.ps1 -KeepExistingEnv

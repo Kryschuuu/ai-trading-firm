@@ -130,7 +130,7 @@ try {
 
   Step ".env erzeugen (bestehende Werte werden geschuetzt)"
   $envFile = Join-Path $Root ".env"
-  if ((Test-Path $envFile) -and $KeepExistingEnv) { Write-Log ".env wird unveraendert beibehalten (-KeepExistingEnv)." "OK" }
+  if ((Test-Path $envFile) -and $KeepExistingEnv) { Write-Log ".env-Werte bleiben erhalten (-KeepExistingEnv); fehlender Session-Key wird ergaenzt." "OK" }
   else {
     if ((Test-Path $envFile) -and -not (Ask ".env existiert. Sichern und Setup-Werte aktualisieren?" "J")) { throw "Abgebrochen. Nutze -KeepExistingEnv fuer vorhandene Konfiguration." }
     if (Test-Path $envFile) { Copy-Item $envFile "$envFile.bak-$(Get-Date -Format yyyyMMdd-HHmmss)" }
@@ -139,6 +139,17 @@ try {
     @("DATABASE_URL=postgresql://$encodedUser`:$encodedPass@127.0.0.1`:$DbPort/$encodedDb", "LLM_PROVIDER=ollama", "OLLAMA_BASE_URL=http://127.0.0.1:11434", "OLLAMA_NUM_CTX=4096", "LLM_MAX_TOKENS=512", "LLM_TIMEOUT_MS=180000", "LLM_MAX_ATTEMPTS=2", "LLM_MODEL=$LlmModel", "STARTING_EQUITY=10000", "PAPER_MODE=broker-market-data", "PAPER_MODE_C_ENABLED=false", "REQUIRE_HUMAN_APPROVAL=true", "FIRM_API_TOKEN=$token", "LIVE_TRADING_ENABLED=false", "BITUNIX_ENABLED=false") | Set-Content -LiteralPath $envFile -Encoding UTF8
     Write-Log ".env erstellt (Secrets nicht ausgegeben)." "OK"
   }
+
+  # SEC-01: unabhaengiger Session-Key, auch bei -KeepExistingEnv nur fehlende
+  # Konfiguration ergaenzen. Vorhandene/ungueltige Werte niemals still rotieren.
+  $envText = Get-Content -LiteralPath $envFile -Raw
+  if ($envText -notmatch '(?m)^\s*(?:export\s+)?FIRM_SESSION_SECRET\s*=') {
+    $sessionSecret = New-Token
+    Add-Content -LiteralPath $envFile -Value "`nFIRM_SESSION_SECRET=$sessionSecret" -Encoding UTF8
+    $sessionSecret = $null
+    Write-Log "Unabhaengiges FIRM_SESSION_SECRET ergaenzt (Secret nicht ausgegeben)." "OK"
+  }
+  $envText = $null
 
   Step "npm-Abhaengigkeiten und Schema"
   Run "npm.cmd" @("ci") "Loesche node_modules und package-lock.json nicht. Fix: npm cache verify; danach npm ci erneut. Bei Proxy: npm config set proxy <URL>."

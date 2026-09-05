@@ -250,3 +250,205 @@ test("SEC-01: echtes local-open stellt auch mit separatem Secret keine Session a
   assert.equal(body.session, false);
   assert.equal(response.headers.get("set-cookie"), null);
 });
+
+test("SEC-01: alle Rollen behalten exakt die serverseitige Permission-Matrix", () => {
+  const scenarios = [
+    { token: ADMIN, env: FULL_ENV },
+    { token: OPERATOR, env: FULL_ENV },
+    { token: VIEWER, env: FULL_ENV },
+    { token: VIEWER, env: VIEWER_ENV },
+    { token: OPERATOR, env: { FIRM_API_TOKEN: OPERATOR, FIRM_SESSION_SECRET: SECRET } },
+  ];
+  for (const { token, env } of scenarios) {
+    syncEnv(env);
+    const header = resolveAuth(new Request("https://localhost/api/x", { headers: { "x-firm-token": token } }), env);
+    assert.ok(header.ok);
+    const session = issue(token, env);
+    const resolved = resolveAuth(withSession(session.sessionToken), env);
+    assert.ok(resolved.ok);
+    assert.deepEqual(resolved.actor, { ...header.actor, source: "api-session" });
+    for (const permission of permissionsForRole("admin")) {
+      assert.equal(
+        requirePermission(withSession(session.sessionToken), permission, env) === null,
+        header.actor.permissions.includes(permission),
+        `${header.actor.role}: ${permission}`
+      );
+    }
+    assert.equal(checkApiToken(withSession(session.sessionToken)) === null, header.actor.permissions.includes("firm.write"));
+    const payload = decode(session.sessionToken);
+    assert.equal(payload.v, 2);
+    assert.deepEqual(Object.keys(payload).sort(), ["authEpoch", "credential", "csrf", "exp", "iat", "v"]);
+    for (const secret of [ADMIN, OPERATOR, VIEWER, SECRET]) {
+      assert.ok(!JSON.stringify(payload).includes(secret), "kein Credential-Material im Payload");
+    }
+  }
+});
+
+test("SEC-01: auch der Session-Zweig bei gesetztem FIRM_API_TOKEN lehnt Rechteinjektion ab", () => {
+  syncEnv(FULL_ENV);
+  const payload = decode(issue(VIEWER, FULL_ENV).sessionToken);
+  const forged = signed({ ...payload, permissions: [...permissionsForRole("admin")] });
+  assert.ok(checkApiToken(withSession(forged)));
+  assert.ok(requirePermission(withSession(forged), "live.gate", FULL_ENV));
+});
+
+test("SEC-01: reale Write-, Disarm- und Credential-Routen lehnen Viewer/Faelschungen vor Seiteneffekten ab", async () => {
+  const { POST: tick } = await import("../src/app/api/firm/tick/route");
+  const { GET: challenge } = await import("../src/app/api/firm/kill/challenge/route");
+  const { POST: credentials } = await import("../src/app/api/brokers/[venue]/credentials/route");
+  const validViewer = issue(VIEWER, VIEWER_ENV);
+  for (const [token, env] of [
+    [legacyViewerForgery(), { FIRM_VIEWER_TOKEN: VIEWER }],
+    [validViewer.sessionToken, VIEWER_ENV],
+    [signed({ ...decode(validViewer.sessionToken), permissions: [...permissionsForRole("admin")] }), VIEWER_ENV],
+  ] as const) {
+    syncEnv(env);
+    const request = () => new Request(withSession(token), {
+      headers: { cookie: `${SESSION_COOKIE}=${token}`, "x-csrf-token": validViewer.csrf },
+    });
+    for (const response of [
+      await tick(request()),
+      await challenge(request()),
+      await credentials(request(), { params: Promise.resolve({ venue: "bitunix" }) }),
+    ]) {
+      assert.ok([401, 403].includes(response.status), `Auth-Deny statt Route/DB-Aufruf: ${response.status}`);
+      const body = await response.json();
+      assert.equal(body.ok, false);
+      assert.equal(body.nonce, undefined);
+    }
+  }
+});
+
+test("SEC-01: ungueltige Konfiguration und vollstaendige Credential-Entfernung akzeptieren keine alten Sessions", () => {
+  const token = issue(ADMIN, FULL_ENV).sessionToken;
+  for (const env of [
+    { ...FULL_ENV, FIRM_SESSION_SECRET: undefined },
+    { ...FULL_ENV, FIRM_SESSION_SECRET: " " },
+    { ...FULL_ENV, FIRM_SESSION_SECRET: VIEWER },
+    { ...FULL_ENV, FIRM_SESSION_SECRET: randomBytes(32).toString("hex") },
+    { ...FULL_ENV, AUTH_MODE: "typo" },
+    { FIRM_SESSION_SECRET: SECRET, AUTH_MODE: "token-required" },
+    { FIRM_SESSION_SECRET: SECRET, AUTH_MODE: "local-open" },
+  ]) {
+    assert.equal(readSession(withSession(token), env), null);
+  }
+});
+
+test("SEC-01: Schema, TTL-Obergrenze, Zeitwerte und Credential-Epoche sind strikt", () => {
+  const original = decode(issue(VIEWER, VIEWER_ENV).sessionToken);
+  const now = original.iat as number;
+  const mutations = [
+    { v: 1 }, { v: 3 }, { v: "2" },
+    { credential: null }, { credential: [] },
+    { authEpoch: "" }, { authEpoch: "!".repeat(43) },
+    { csrf: "" }, { csrf: "ab" }, { csrf: 7 },
+    { exp: now }, { exp: now - 1 }, { exp: String(original.exp) },
+    { exp: now + SESSION_TTL_MS + 1 }, { exp: Number.MAX_SAFE_INTEGER + 1 },
+    { exp: (original.exp as number) + 0.5 },
+    { iat: now + 1 }, { iat: -1 }, { iat: String(now) }, { iat: now - 0.5 },
+    { extra: true },
+  ];
+  for (const mutation of mutations) {
+    assert.equal(verifySessionToken(signed({ ...original, ...mutation }), SECRET, now), null, JSON.stringify(mutation));
+  }
+  for (const key of Object.keys(original)) {
+    const missing = { ...original };
+    delete missing[key];
+    assert.equal(verifySessionToken(signed(missing), SECRET, now), null, `fehlt: ${key}`);
+  }
+  const token = signed(original);
+  assert.ok(verifySessionToken(token, SECRET, now));
+  assert.ok(verifySessionToken(token, SECRET, (original.exp as number) - 1));
+  assert.equal(verifySessionToken(token, SECRET, NaN), null);
+  assert.equal(verifySessionToken(token, SECRET, Infinity), null);
+  assert.equal(verifySessionToken(token, "", now), null);
+  assert.equal(verifySessionToken(token, "short", now), null);
+});
+
+test("SEC-01: kaputte/mehrdeutige Cookies und signierte Nicht-Objekte bleiben fail-closed", () => {
+  const token = issue(VIEWER, VIEWER_ENV).sessionToken;
+  for (const malformed of [
+    "", ".", "..", "a.b", `${token}.extra`, `${token}=`, ` ${token}`, "a".repeat(4097),
+    signed(null), signed([]), signed(12), signed("text"),
+  ]) {
+    assert.doesNotThrow(() => verifySessionToken(malformed, SECRET));
+    assert.equal(verifySessionToken(malformed, SECRET), null);
+  }
+  const body = Buffer.from("not json").toString("base64url");
+  const signature = createHmac("sha256", SECRET).update(body).digest("base64url");
+  assert.equal(verifySessionToken(`${body}.${signature}`, SECRET), null);
+  for (const cookies of [
+    `${SESSION_COOKIE}=${token}; ${SESSION_COOKIE}=${token}`,
+    `${SESSION_COOKIE}=; ${SESSION_COOKIE}=${token}`,
+    `${SESSION_COOKIE}=${token}; ${SESSION_COOKIE}=`,
+  ]) {
+    assert.equal(readSession(new Request("https://localhost", { headers: { cookie: cookies } }), VIEWER_ENV), null);
+  }
+  assert.equal(readSession(new Request("https://localhost", { headers: { cookie: "other=value; broken" } }), VIEWER_ENV), null);
+});
+
+test("SEC-01: v1-Cookies werden selbst mit dem neuen unabhaengigen Key nicht akzeptiert", () => {
+  const old = decode(legacyViewerForgery());
+  const token = signed(old);
+  assert.equal(verifySessionToken(token, SECRET), null);
+  assert.equal(readSession(withSession(token), FULL_ENV), null);
+});
+
+test("SEC-01: Ausstellen erfordert einen konsistenten aktuellen Header-Actor, nicht eine Session", () => {
+  const req = new Request("https://localhost/api/auth/login", { headers: { "x-firm-token": VIEWER } });
+  const resolved = resolveAuth(req, FULL_ENV);
+  assert.ok(resolved.ok);
+  for (const actor of [
+    { ...resolved.actor, source: "api-session" as const },
+    { ...resolved.actor, source: "local-open" as const },
+    { ...resolved.actor, source: "admin-token" as const },
+    { ...resolved.actor, role: "admin" as const },
+    { ...resolved.actor, effectiveRole: "admin" as const },
+    { ...resolved.actor, elevated: true },
+    { ...resolved.actor, auditId: "admin" as const },
+    { ...resolved.actor, permissions: permissionsForRole("admin") },
+  ]) {
+    const issued = issueSession(req, actor, FULL_ENV);
+    assert.equal(issued.ok, false);
+    if (!issued.ok) assert.equal(issued.error, "SESSION_CREDENTIAL_REQUIRED");
+  }
+  assert.equal(issueSession(req, resolved.actor, { ...FULL_ENV, FIRM_VIEWER_TOKEN: undefined }).ok, false);
+});
+
+test("SEC-01: Login erbt keine Autoritaet aus Body-Claims, Headern oder vorhandenen Cookies", async () => {
+  syncEnv(FULL_ENV);
+  const adminSession = issue(ADMIN, FULL_ENV);
+  for (const token of ["incorrect", VIEWER]) {
+    const response = await postLogin(new Request("https://localhost/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-token": ADMIN,
+        cookie: `${SESSION_COOKIE}=${adminSession.sessionToken}`,
+      },
+      body: JSON.stringify({ token, role: "admin", effectiveRole: "admin", permissions: permissionsForRole("admin") }),
+    }));
+    if (token === "incorrect") {
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("set-cookie"), null);
+    } else {
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const body = await response.json();
+      assert.equal(body.actor.role, "viewer");
+      assert.deepEqual(body.actor.permissions, permissionsForRole("viewer"));
+    }
+  }
+});
+
+test("SEC-01: ungueltige JSON-Login-Bodies liefern 400 statt Ausnahme oder Session", async () => {
+  syncEnv(FULL_ENV);
+  for (const body of ["null", "[]", "true", "12", '"text"', "{", "{}", '{"token":null}', '{"token":{}}']) {
+    const response = await postLogin(new Request("https://localhost/api/auth/login", {
+      method: "POST", headers: { "content-type": "application/json" }, body,
+    }));
+    assert.equal(response.status, 400, body);
+    assert.equal((await response.json()).error, "MISSING_TOKEN");
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
+});

@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.26 (2026-09-05) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.36.27 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -17,7 +17,7 @@ cd ai-trading-firm
 ./scripts/setup-cachyos.sh --variant b --llm-host 192.168.0.20
 ```
 
-Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt `.env` inkl. `FIRM_API_TOKEN` (Recht `600`), spielt das Schema ein, seedet das Markt-Universum (354 Instrumente), aktiviert Short-Selling, baut die App und führt am Ende **18 Validierungs-Checks** aus. Es ist beliebig oft wiederholbar und überschreibt weder `.env` noch Cluster-Daten ohne Rückfrage.
+Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt `.env` inkl. `FIRM_API_TOKEN` und separat erzeugtem `FIRM_SESSION_SECRET` (Recht `600`), spielt das Schema ein, seedet das Markt-Universum (354 Instrumente), aktiviert Short-Selling, baut die App und führt am Ende **18 Validierungs-Checks** aus. Es ist beliebig oft wiederholbar und überschreibt weder `.env` noch Cluster-Daten ohne Rückfrage.
 
 Nützlich: `--dry-run` (nichts ausführen), `--non-interactive`, `--no-shorts`, `--sync-markets`, `--skip-build`, `--min-pass 18`, `--help`.  
 Log: `data/setup/setup-<Zeitstempel>.log`.
@@ -26,6 +26,10 @@ Log: `data/setup/setup-<Zeitstempel>.log`.
 
 ```bash
 cp .env.example .env        # Pflicht-Flags setzen (DATABASE_URL)
+umask 077
+printf 'FIRM_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+printf 'FIRM_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+chmod 600 .env
 npm ci
 npx drizzle-kit push        # Schema einspielen
 npm run universe:seed:markets  # 354 Preset-Instrumente (v1.30.0)
@@ -56,7 +60,7 @@ docs/
 │   ├── README.md             # erklärt Naming, Workflow, Status-Modell
 │   ├── TEMPLATE/             # Vorlage für neuen Audit
 │   ├── 2026-09-03-peer-review/      # Peer-Review-Audit (CLOSED, H1-H10 etc.)
-│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (OPEN, SEC-01..)
+│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01 FIXED v1.36.27; Rest OPEN)
 ├── peer-reviews/             # NEU: Peer-Review-Patches gesammelt
 │   ├── README.md
 │   ├── 2026-08-26-live-trading-readiness/
@@ -86,6 +90,29 @@ Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`, Credential-/Ro
 * Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
 
 Flag-Referenz: [`CONFIGURATION.md`](CONFIGURATION.md) → „Auth-Modus“; Befund C1 in [`docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md`](docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md).
+
+## Security-Update: Sessions (SEC-01, v1.36.27)
+
+**Upgrade von v1.36.23–v1.36.26 erforderlich.** Im Token-Betrieb braucht Produktion
+jetzt ein **unabhängiges, zufällig erzeugtes `FIRM_SESSION_SECRET`** (mindestens
+32 Zeichen; empfohlen `openssl rand -hex 32`). Niemals ein Login-Token oder eine
+Ableitung davon verwenden. Fehlende, zu kurze oder als Auth-Token wiederverwendete
+Schlüssel führen zum Boot-Fehler `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`.
+Auch in Dev gibt es ohne gültigen Schlüssel keine Browser-Session (Login: HTTP 503);
+Header-Credentials bleiben nutzbar. Bewusstes `local-open` benötigt keine Sessions.
+
+- Das Setup ergänzt einen **fehlenden** Schlüssel; vorhandene Werte bleiben erhalten.
+  Bei manuellem Upgrade den Schlüssel einmalig in `.env`/Secret-Management setzen,
+  nicht in Client-Konfiguration, Logs oder Git.
+- Alle App-Instanzen mit gleicher Auth-Konfiguration neu starten. Bestehende Cookies
+  sind nach dem Upgrade ungültig: **erneut anmelden**. Browser-Login in Produktion
+  benötigt weiterhin HTTPS.
+- Rechte werden pro Request serverseitig abgeleitet. Credential-/Key-Änderungen
+  invalidieren Sessions, sobald die neue Konfiguration im jeweiligen Prozess aktiv ist.
+- Vor dem Start prüfen: `NODE_ENV=production npm run boot:guard`.
+
+Details: [Session-Konfiguration](CONFIGURATION.md#session-sicherheit-sec-01-v13627)
+und [Finding SEC-01](docs/audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md).
 
 ## Sicherheit: Rate-Limits kennen keine erfundenen IPs (v1.36.14)
 
@@ -157,7 +184,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/security/README.md` | Security-Übersicht: aggregierte Findings, Auth-Modell, RBAC |
 | `docs/audits/` | Zentrale Audit-Verwaltung: alle Audits chronologisch |
 | `docs/audits/2026-09-03-peer-review/` | Senior-Peer-Review 2026-09: H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 (CLOSED) |
-| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 bis SEC-07 (OPEN, Template) |
+| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-02 bis SEC-10 weiterhin OPEN |
 | `docs/peer-reviews/` | Peer-Review-Patches: gesammelt, verknüpft, nachvollziehbar |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |

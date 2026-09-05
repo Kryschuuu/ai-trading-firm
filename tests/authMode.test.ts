@@ -17,6 +17,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -35,8 +36,9 @@ import {
 } from "../src/lib/apiAuth";
 import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
+const SESSION_SECRET = randomBytes(32).toString("hex");
 const TOKEN_KEYS = ["FIRM_ADMIN_TOKEN", "FIRM_API_TOKEN", "FIRM_VIEWER_TOKEN"] as const;
-const AUTH_KEYS = [...TOKEN_KEYS, "AUTH_MODE", "NODE_ENV", "FIRM_RATE_LIMIT"] as const;
+const AUTH_KEYS = [...TOKEN_KEYS, "FIRM_SESSION_SECRET", "AUTH_MODE", "NODE_ENV", "FIRM_RATE_LIMIT"] as const;
 
 /** Konfigurierte Env ohne jedes Credential — wie ein frischer Clone. */
 function cleanEnv(overrides: Record<string, string | undefined> = {}) {
@@ -44,6 +46,7 @@ function cleanEnv(overrides: Record<string, string | undefined> = {}) {
     FIRM_ADMIN_TOKEN: undefined,
     FIRM_API_TOKEN: undefined,
     FIRM_VIEWER_TOKEN: undefined,
+    FIRM_SESSION_SECRET: undefined,
     AUTH_MODE: undefined,
     NODE_ENV: undefined,
   };
@@ -181,9 +184,9 @@ test("assertAuthConfigured: Dev ohne Token und Modus-Opt-in starten lässt, toke
   );
 });
 
-test("assertAuthConfigured: Produktion mit Token startet; Viewer-Token allein zählt als konfiguriert", () => {
-  assert.equal(assertAuthConfigured(cleanEnv({ NODE_ENV: "production", FIRM_ADMIN_TOKEN: "a" })).mode, "token-required");
-  assert.equal(assertAuthConfigured(cleanEnv({ NODE_ENV: "production", FIRM_VIEWER_TOKEN: "v" })).mode, "token-required");
+test("assertAuthConfigured: Produktion mit Token und unabhaengigem Session-Key startet (auch Viewer-only)", () => {
+  assert.equal(assertAuthConfigured(cleanEnv({ NODE_ENV: "production", FIRM_SESSION_SECRET: SESSION_SECRET, FIRM_ADMIN_TOKEN: "a" })).mode, "token-required");
+  assert.equal(assertAuthConfigured(cleanEnv({ NODE_ENV: "production", FIRM_SESSION_SECRET: SESSION_SECRET, FIRM_VIEWER_TOKEN: "v" })).mode, "token-required");
 });
 
 test("assertAuthConfigured: Tipfehler in AUTH_MODE ist ein Boot-Fehler, kein offener Betrieb", () => {
@@ -219,7 +222,7 @@ function codeOnly(source: string): string {
 }
 
 function runBootGuard(env: Record<string, string | undefined>): { code: number; out: string } {
-  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, DOTENV_CONFIG_PATH: "/dev/null", DOTENV_CONFIG_QUIET: "true" };
   for (const key of AUTH_KEYS) delete childEnv[key];
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) delete childEnv[key];
@@ -253,6 +256,7 @@ test("Startwächter im Kindprozess: Produktion ohne Token = Exit 1, Dev = Exit 0
   const prodWithToken = runBootGuard({
     NODE_ENV: "production",
     FIRM_API_TOKEN: "boot-guard-secret-91827364",
+    FIRM_SESSION_SECRET: SESSION_SECRET,
   });
   assert.equal(prodWithToken.code, 0, prodWithToken.out);
   assert.match(prodWithToken.out, /auth-mode=token-required reason=tokens-configured/);

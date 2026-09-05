@@ -2,7 +2,7 @@
  * W1 (v1.36.23) — HttpOnly-Session statt API-Token in localStorage.
  *
  * Abdeckung:
- *   1. Session-Modul: Schlüssel-Ableitung, Signaturen, Ablauf, Deadline-Rollover.
+ *   1. Session-Modul: unabhaengiger Schluessel, Signaturen, Ablauf, Deadline-Rollover.
  *   2. Cookie-Attribute: HttpOnly (nur firm_session), Secure, SameSite=Strict,
  *      Path=/, Max-Age=900. Kein roher Token im Cookie.
  *   3. resolveAuth liest die Session-Cookie (kein Header nötig).
@@ -18,6 +18,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { resolveAuth, type Actor } from "../src/auth";
 import { checkApiToken } from "../src/lib/apiAuth";
 import {
@@ -38,12 +39,13 @@ import { POST as postLogin } from "../src/app/api/auth/login/route";
 const OP = "operator-secret-456";
 const ADMIN = "admin-secret-123";
 const VIEWER = "viewer-secret-789";
+const SECRET = randomBytes(32).toString("hex");
 
 type Env = Record<string, string | undefined>;
 
-const ENV_OP: Env = { FIRM_API_TOKEN: OP, FIRM_ADMIN_TOKEN: undefined, FIRM_VIEWER_TOKEN: undefined };
-const ENV_ADMIN: Env = { FIRM_API_TOKEN: OP, FIRM_ADMIN_TOKEN: ADMIN, FIRM_VIEWER_TOKEN: undefined };
-const ENV_VIEWER: Env = { FIRM_API_TOKEN: undefined, FIRM_ADMIN_TOKEN: undefined, FIRM_VIEWER_TOKEN: VIEWER };
+const ENV_OP: Env = { FIRM_SESSION_SECRET: SECRET, FIRM_API_TOKEN: OP, FIRM_ADMIN_TOKEN: undefined, FIRM_VIEWER_TOKEN: undefined };
+const ENV_ADMIN: Env = { FIRM_SESSION_SECRET: SECRET, FIRM_API_TOKEN: OP, FIRM_ADMIN_TOKEN: ADMIN, FIRM_VIEWER_TOKEN: undefined };
+const ENV_VIEWER: Env = { FIRM_SESSION_SECRET: SECRET, FIRM_API_TOKEN: undefined, FIRM_ADMIN_TOKEN: undefined, FIRM_VIEWER_TOKEN: VIEWER };
 
 function req(url = "http://localhost/api/x", headers: Record<string, string> = {}): Request {
   return new Request(url, { headers });
@@ -90,20 +92,18 @@ function makeSession(tok: string, env: Env, url = "http://localhost/api/x") {
   return { actor: resolution.actor, issued, secret: sessionSecret(env) };
 }
 
-// ── 1. Schlüssel-Ableitung ─────────────────────────────────────────────────
+// ── 1. Unabhaengiger Signierschluessel (SEC-01) ────────────────────────────
 
-test("sessionSecret: FIRM_SESSION_SECRET schlägt abgeleiteten Schlüssel", () => {
-  const env = { ...ENV_OP, FIRM_SESSION_SECRET: "rotierbares-secret" };
-  assert.equal(sessionSecret(env), "rotierbares-secret");
+test("sessionSecret: ausschliesslich unabhaengiges FIRM_SESSION_SECRET", () => {
+  const env = { ...ENV_OP, FIRM_SESSION_SECRET: ` ${SECRET} ` };
+  assert.equal(sessionSecret(env), SECRET);
 });
 
-test("sessionSecret: deterministisch aus konfigurierten Tokens abgeleitet; leer ohne Tokens", () => {
-  const a = sessionSecret(ENV_OP);
-  const b = sessionSecret(ENV_OP);
-  assert.ok(a.length > 0, "abgeleiteter Schlüssel vorhanden");
-  assert.equal(a, b, "deterministisch je Konfiguration");
-  assert.ok(sessionSecret(ENV_OP) !== sessionSecret(ENV_ADMIN), "unterschiedlich bei anderer Konfiguration");
-  assert.equal(sessionSecret({}), "", "kein Schlüssel ohne Tokens (local-open)");
+test("sessionSecret: keine Ableitung aus Tokens; separater Key bleibt bei Token-Rotation gleich", () => {
+  assert.equal(sessionSecret(ENV_OP), SECRET);
+  assert.equal(sessionSecret(ENV_ADMIN), SECRET);
+  assert.equal(sessionSecret({ FIRM_API_TOKEN: OP }), "", "kein unsicherer Token-Fallback");
+  assert.equal(sessionSecret({}), "", "kein Schluessel ohne explizite Konfiguration");
 });
 
 // ── 2./3./4. Cookie-Attribute & Secret-Freiheit ────────────────────────────
@@ -156,7 +156,8 @@ test("readSession: Roundtrip liefert Rolle, Effektiv-Rolle, Source und Permissio
   const { issued, secret } = makeSession(OP, ENV_OP);
   const payload = verifySessionToken(SessionTokenValue(issued.cookies[0]), secret);
   assert.ok(payload, "Token verifiziert");
-  const actor = sessionActor(payload!);
+  const actor = sessionActor(payload!, ENV_OP);
+  assert.ok(actor);
   assert.equal(actor.role, "operator");
   assert.equal(actor.source, "api-session");
   assert.ok(actor.permissions.includes("firm.write"), "Operator darf schreiben");
@@ -187,10 +188,12 @@ test("readSession: manipuliertes Token → null (Signature verhindert Fälschung
   assert.equal(verifySessionToken([body, tamperedSig].join("."), secret), null);
 });
 
-test("readSession: anderer Schlüssel (andere Token-Konfiguration) → ungültig", () => {
+test("readSession: Rotation des separaten Session-Schluessels → ungueltig", () => {
   const { issued } = makeSession(OP, ENV_OP);
   const token = SessionTokenValue(issued.cookies[0]);
-  assert.equal(verifySessionToken(token, sessionSecret(ENV_ADMIN)), null);
+  const rotated = { ...ENV_OP, FIRM_SESSION_SECRET: randomBytes(32).toString("hex") };
+  assert.equal(verifySessionToken(token, sessionSecret(rotated)), null);
+  assert.equal(readSession(withSession(token), rotated), null);
 });
 
 // ── 3′. resolveAuth über Session-Cookie ────────────────────────────────────

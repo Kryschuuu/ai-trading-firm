@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-05** · Code-Version **1.36.26**
+> Dokumentationsstand **2026-09-06** · Code-Version **1.36.27**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -127,7 +127,7 @@ expliziten Modus — nicht mehr am bloßen Fehlen eines Tokens:
 | `token-required` | Tokens konfiguriert, **oder** `NODE_ENV=production`, **oder** explizit gesetzt | nein — 401/403 |
 | `local-open` | nur wenn kein Token gesetzt ist und der Modus wirksam wurde: implizit als Dev-Default (`NODE_ENV != production`), in Produktion nur explizit | ja |
 
-Drei Regeln, alle in `src/auth/authMode.ts` (SSoT) geprüft:
+Vier Regeln, alle in `src/auth/authMode.ts` (SSoT) geprüft:
 
 1. **Produktion ohne Token startet nicht.** `NODE_ENV=production` (genau das setzt
    `npm run start` / `deploy/ai-trading-firm.service`) und kein
@@ -145,11 +145,18 @@ Drei Regeln, alle in `src/auth/authMode.ts` (SSoT) geprüft:
    ignoriert und boot-seitig gemeldet. Ein unbekannter `AUTH_MODE`-Wert ist ein
    Konfigurationsfehler (`AUTH_MODE_INVALID`) und startet den Dienst nicht.
 
-Token erzeugen und eintragen:
+4. **Session-Signierung braucht ein unabhängiges Secret.** Im Token-Betrieb
+   verlangt Produktion zusätzlich `FIRM_SESSION_SECRET`; fehlt der Schlüssel oder
+   ist er ungültig, verweigert der Boot-Guard den Start. Der Login-Pfad bleibt
+   unabhängig vom Boot-Guard geschlossen (HTTP 503).
+
+Token und unabhängigen Session-Schlüssel bei der Ersteinrichtung erzeugen:
 
 ```bash
 umask 077
 printf 'FIRM_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+printf 'FIRM_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+chmod 600 .env
 ```
 
 `scripts/setup-cachyos.sh` macht das Schritt 05 automatisch; nur `--no-api-token`
@@ -163,11 +170,50 @@ ist. Vor einem Deploy (oder als Check in der Pipeline) lässt er sich isoliert
 aufrufen, ohne einen Server zu starten:
 
 ```bash
-npm run boot:guard        # Exit 0 = Start erlaubt · Exit 1 = verweigert + Grund
+NODE_ENV=production npm run boot:guard  # Exit 0 = Start erlaubt · Exit 1 = verweigert + Grund
 ```
 
 Details: [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md), Befund C1 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Session-Sicherheit (SEC-01, v1.36.27)
+
+- `FIRM_SESSION_SECRET`: ausschließlich serverseitig, unabhängig von allen
+  `FIRM_ADMIN_TOKEN` / `FIRM_API_TOKEN` / `FIRM_VIEWER_TOKEN`. Mindestens 32 Zeichen
+  nach Entfernen äußerer Leerzeichen; empfohlen **32 Zufallsbytes** als Hex
+  (`openssl rand -hex 32`). Länge allein garantiert keine Entropie. Keine Tokens,
+  Token-Hashes oder andere aus Login-Credentials berechenbare Werte verwenden.
+- **Kein Fallback in irgendeiner Umgebung.** Ohne gültigen Schlüssel stellt
+  `/api/auth/login` im Token-Betrieb keine Cookies aus (HTTP 503,
+  `SESSION_SECRET_REQUIRED` bzw. `SESSION_SECRET_INVALID`). In Produktion scheitert
+  zusätzlich der Start. Dev-Header-Authentifizierung funktioniert ohne Sessions;
+  echtes `local-open` stellt auch mit konfiguriertem Schlüssel keine Sessions aus.
+- `firm_session`: HttpOnly, Secure, SameSite=Strict, TTL **900 Sekunden**;
+  `firm_csrf`: session-gebundenes Double-Submit. Produktion erfordert HTTPS für
+  den Browser-Login. Header-basierte CLI-/API-Clients bleiben unverändert.
+- Schema v2 enthält keine Rolle/Elevation/Permissions als Snapshot. Der Server
+  prüft einen credential-gebundenen, keyed Konfigurations-Fingerprint (`authEpoch`)
+  und leitet Rolle, Single-Admin-Elevation, Audit-ID und Permissions jedes Mal aus
+  der aktuellen Auth-Konfiguration ab. Token-Rotation, Entfernen/Hinzufügen eines
+  Tokens oder Key-Rotation machen vorhandene Sessions ungültig. Die Konfiguration
+  muss dazu in **allen** laufenden Instanzen aktualisiert werden (Neustart).
+- Alle Instanzen benötigen dieselben Token-Werte und denselben Session-Schlüssel.
+  Gleichbleibende Konfiguration überlebt einen Prozess-Neustart ohne Session-DB.
+  Frühere Tokens/Keys nicht wiederverwenden. Individuelles Logout/Revoke ist damit
+  nicht implementiert; der Rest von SEC-08 bleibt separat nachzuverfolgen.
+
+**Upgrade:** Vor Deploy einen neuen unabhängigen Schlüssel in `.env` oder dem
+serverseitigen Secret-Management setzen. Beide Installer ergänzen nur fehlende
+Session-Schlüssel, sie überschreiben keine vorhandenen (auch keine ungültigen)
+Werte. Bei vorhandenem leeren/ungültigem Eintrag diesen ausdrücklich korrigieren,
+nicht einen zweiten Eintrag anhängen. `.env` nur für den Dienstbenutzer lesbar
+halten. `NODE_ENV=production npm run boot:guard` prüfen, dann alle Instanzen mit
+v1.36.27 neu starten; gemischter Alt-/Neubetrieb ist nicht vollständig abgesichert.
+**Alle v1-Cookies sind ungültig und erfordern erneuten Login.**
+
+Der vorgeschaltete Wächter liest `.env`; bereits gesetzte Prozess-Variablen
+(z. B. aus systemd/Secret-Management) haben Vorrang, auch bei leerem Wert.
+`next build` benötigt keine produktiven Auth-Secrets.
 
 ## Rate-Limit-Identität: `TRUSTED_PROXY_IPS` (C2, v1.36.14)
 
@@ -361,6 +407,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `FIRM_ADMIN_TOKEN` | *(leer)* | Admin-Token (RBAC) |
 | `FIRM_API_TOKEN` | *(leer)* | API-Token für alle `POST`/`PUT`-Routen; `scripts/setup-cachyos.sh` erzeugt eines |
 | `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Token |
+| `FIRM_SESSION_SECRET` | *(leer; kein Fallback)* | Unabhängiger zufälliger Session-Signierschlüssel, mindestens 32 Zeichen; Pflicht für Sessions und Produktion mit Tokens (SEC-01) |
 | `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
 | `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |
 | `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste vertrauenswürdiger Reverse Proxys; erst damit zählen `x-verified-ip` (immer) bzw. `x-forwarded-for` (nur bei verifiziertem Socket-Peer). Leer ⇒ Header werden ignoriert, Bucket = Socket-Adresse bzw. `local` |

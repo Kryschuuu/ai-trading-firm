@@ -21,6 +21,8 @@
  *   node --import tsx scripts/auth-boot-guard.ts   (von npm run start/dev aufgerufen)
  *   npm run boot:guard                            (manuelle Prüfung, z. B. im Deploy)
  */
+// Derselbe .env-Vertrag wie beim Setup/systemd; vorhandene Prozess-Env hat Vorrang.
+import "dotenv/config";
 import { assertAuthConfigured, authModeWarnings, describeAuthMode } from "../src/auth/authMode";
 import { clientIpPolicyWarnings, describeClientIpPolicy } from "../src/lib/clientIp";
 

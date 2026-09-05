@@ -15,7 +15,7 @@
 #   02 Systempakete     nodejs npm postgresql git jq curl
 #   03 PostgreSQL       Cluster prüfen/initialisieren, Dienst starten
 #   04 Rolle & Datenbank  Benutzer, Datenbank, DATABASE_URL (URL-encoded)
-#   05 .env             Konfiguration inkl. FIRM_API_TOKEN + Markt-Presets
+#   05 .env             FIRM_API_TOKEN + unabhaengiges FIRM_SESSION_SECRET + Markt-Presets
 #   06 Abhängigkeiten   npm ci
 #   07 Schema           drizzle-kit push + Tabellen-Verifikation
 #   08 Universum        universe:seed + universe:seed:markets
@@ -760,7 +760,7 @@ SQL
 # 7. Schritt 05 — .env
 #
 # Idempotenz: Eine vorhandene .env wird NIE still überschrieben. Fehlende
-# Schlüssel werden ergänzt (insbesondere FIRM_API_TOKEN), vorhandene bleiben.
+# Schluessel werden ergaenzt (Auth-Token + Session-Secret), vorhandene bleiben.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Erzeugt ein kryptografisch zufälliges Token (64 Hex-Zeichen).
@@ -891,7 +891,18 @@ ENV
 
   # ── Schlüssel ergänzen (idempotent, auch bei bestehender .env) ───────────
   if [[ "$DRY_RUN" != "true" ]]; then
+    # SEC-01: neue Secrets nie in eine noch gruppen-/weltlesbare Datei schreiben.
+    chmod 600 "$env_file"
     local added=0
+    if ! grep -qE '^[[:space:]]*(export[[:space:]]+)?FIRM_SESSION_SECRET[[:space:]]*=' "$env_file"; then
+      local session_secret
+      session_secret="$(generate_token)" || die "Session-Secret-Erzeugung fehlgeschlagen."
+      [[ "$session_secret" =~ ^[a-f0-9]{64}$ ]] || die "Session-Secret-Erzeugung lieferte keinen sicheren Zufallswert."
+      env_ensure_key "FIRM_SESSION_SECRET" "$session_secret" "$env_file" && added=$((added+1))
+      unset session_secret
+      note "Unabhaengiges FIRM_SESSION_SECRET erzeugt (nur .env, nie im Log)."
+    fi
+    # Vorhandene Werte niemals still rotieren; ungueltige Werte meldet der Boot-Guard.
     env_ensure_key "DATABASE_URL"      "$DATABASE_URL"                 "$env_file" && added=$((added+1))
     env_ensure_key "PORT"              "$APP_PORT"                     "$env_file" && added=$((added+1))
     env_ensure_key "STARTING_EQUITY"   "10000"                         "$env_file" && added=$((added+1))
@@ -1303,4 +1314,6 @@ main() {
   print_summary
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

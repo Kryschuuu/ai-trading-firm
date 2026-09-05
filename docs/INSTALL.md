@@ -61,7 +61,7 @@ Zuerst trocken durchspielen ist jederzeit möglich:
 | 02 | `step_02_packages` | `nodejs`, `npm`, `postgresql`, `openssl` über `pacman` |
 | 03 | `step_03_postgres` | Cluster prüfen, `initdb` mit UTF-8 und Fallback-Locale |
 | 04 | `step_04_database` | Rolle mit Passwort (SCRAM), Datenbank, `pg_isready` |
-| 05 | `step_05_env` | `.env` anlegen/ergänzen, `FIRM_API_TOKEN`, Recht `600` |
+| 05 | `step_05_env` | `.env` anlegen/ergänzen, `FIRM_API_TOKEN` + unabhängiges `FIRM_SESSION_SECRET`, Recht `600` |
 | 06 | `step_06_dependencies` | `npm ci` |
 | 07 | `step_07_schema` | `drizzle-kit push`, ≥ 14 Pflicht-Tabellen verifizieren |
 | 08 | `step_08_universe` | `npm run universe:seed` + `npm run universe:seed:markets` |
@@ -357,6 +357,19 @@ Was die Regeln bedeuten (Quelle: `src/auth/authMode.ts`, Flags referenziert
   oder der Wächter allein, ohne Server-Start: `npm run boot:guard`
   (Exit 0 = Start erlaubt, Exit 1 = verweigert mit Grund und Behebung).
 
+**Session-Schlüssel (SEC-01, v1.36.27):** Produktion mit Tokens braucht zusätzlich
+`FIRM_SESSION_SECRET` (mindestens 32 Zeichen, unabhängig erzeugt). Schritt 05 des
+Installers ergänzt fehlende Schlüssel. Bei manuellem Upgrade einen neuen Wert mit
+`openssl rand -hex 32` erzeugen und als **einen** Eintrag in `.env` setzen; keine
+bestehenden Einträge duplizieren, niemals einen Login-Token verwenden. `.env` muss
+Rechte `600` haben. Fehlende/ungültige Werte verweigern den Start und liefern beim
+Login HTTP 503 (`SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`), auch wenn
+jemand den Boot-Guard umgeht. Kein Session-Fallback in Dev. Vor Deploy:
+`NODE_ENV=production npm run boot:guard` (liest `.env`, Prozess-Env hat Vorrang).
+Alle Instanzen neu starten; alte Cookies erfordern neuen Login. Browser-Sessions
+benötigen in Produktion weiterhin HTTPS. Details:
+[Session-Sicherheit](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
+
 **Rate-Limit-Identität (C2, v1.36.14): `TRUSTED_PROXY_IPS`.**
 Rate-Limits (Schreib-API 60/min, Credential-Versuche 5/min) brauchen eine
 Client-Identität. `x-forwarded-for` und `x-real-ip` gehören **nicht** dazu —
@@ -445,8 +458,11 @@ npm run start          # läuft auf http://localhost:3369
 ```
 
 `npm run start` läuft mit `NODE_ENV=production` und braucht deshalb mindestens
-ein Token (`FIRM_API_TOKEN`) — sonst bricht der Boot mit `AUTH_NOT_CONFIGURED`
-ab (siehe 5.1, Abschnitt Sicherheit). `npm run dev` ist davon ausgenommen.
+ein Token (`FIRM_API_TOKEN`) **und** einen unabhängigen `FIRM_SESSION_SECRET`
+(siehe 5.1, Abschnitt Sicherheit). `AUTH_NOT_CONFIGURED` bezeichnet fehlende
+Login-Credentials; `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID` einen
+fehlenden oder ungültigen Session-Schlüssel. Dev kann ohne Session-Key Header-Credentials nutzen,
+stellt dann aber keine Browser-Sessions aus.
 
 Im Browser öffnen → **„Seed / Reset"** → **„▶▶ Ganze Pipeline"**.
 
@@ -833,6 +849,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **Build meldet „Dynamic filesystem access“-Warnungen** | dynamische `path.join(process.cwd(), …)`-Stellen | seit v1.30.0 behoben über `src/lib/appPaths.ts`. Wiederkehrend? `npm run build` erneut prüfen — Setup-Schritt 09 meldet sie. Befund B4 |
 | **API im LAN offen beschreibbar** | `npm run start` bindet `0.0.0.0`; offen ist sie nur noch mit wirksamem `AUTH_MODE=local-open` | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befunde B5 und C1 |
 | **Dienst startet nicht: `Refuse startup: authentication not configured` (`AUTH_NOT_CONFIGURED`)** | `NODE_ENV=production` (also `npm run start`/systemd) ohne jedes Token — seit v1.36.13 Boot-Verweigerung statt offener API | Token setzen (`openssl rand -hex 32` → `FIRM_API_TOKEN` in `.env`) oder bewusst `AUTH_MODE=local-open` eintragen; Befund C1 in **[C1-open-mode](audits/2026-09-03-peer-review/findings/C1-open-mode.md)** |
+| **Start/Login scheitert mit `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`** | unabhängiger Session-Key fehlt, ist zu kurz oder wird als Auth-Token wiederverwendet (SEC-01) | separat `openssl rand -hex 32` erzeugen, vorhandenen `FIRM_SESSION_SECRET`-Eintrag in `.env` korrigieren, alle Instanzen neu starten und neu anmelden; Kapitel 5.1 |
 | **`POST /api/firm/*` liefert `401` mit `code: AUTH_NOT_CONFIGURED`** | Auth-Modus ist `token-required`, aber es ist kein Token konfiguriert (Boot-Guard lief nicht oder wurde umgangen) | `.env`-Token setzen und Dienst neu starten; Dev-Modus mit `AUTH_MODE=local-open` |
 | **`429 RATE_LIMITED` obwohl nur eine Person nutzt** | Rate-Limit-Identität ist `local` (kein `TRUSTED_PROXY_IPS`, Socket-Adresse im Next.js-App-Router nicht sichtbar) ⇒ alle Clients teilen sich einen Bucket | hinter einem Proxy: `TRUSTED_PROXY_IPS=127.0.0.1` + `proxy_set_header X-Verified-IP $remote_addr;` (Kapitel 5.1). Diagnose: `curl -s localhost:3369/api/auth/me \| jq .rateLimitIdentity`. Befund C2 |
 | **`429` mit `code: CREDENTIAL_BACKOFF`** | drei oder mehr fehlgeschlagene Credential-Versuche (Formatfehler oder von der Venue abgelehnte Probe) ⇒ exponentielle Sperre 2 s → 4 s → 8 s … max. 15 min | `Retry-After` abwarten; ein gültiges Credential setzt die Zählung zurück. 409-Zustandskonflikte und Store-Störungen (5xx) zählen bewusst nicht. Justierbar: `BROKER_CREDENTIAL_BACKOFF_BASE_MS` (0 = Ebene aus), `BROKER_CREDENTIAL_BACKOFF_MAX_MS` |

@@ -12,7 +12,8 @@
  *   200 { ok, actor, session, expiresInS, open? }  — Session gesetzt
  *   400 SESSION_HTTPS_REQUIRED  — Produktion über plain-HTTP (fail-closed)
  *   400 MISSING_TOKEN           — leeres Feld
- *   401                        — falscher Token (resolveAuth entscheidet)
+ *   401/403                    — falscher Token (resolveAuth entscheidet)
+ *   503 SESSION_SECRET_*       — Session-Signierung nicht sicher konfiguriert
  *
  * Der Login-Pfad ist Rate-limitiert (geteilter Firm-Limiter), damit
  * Token-Raten über Versuche messbar/gebremst werden.
@@ -28,14 +29,17 @@ export async function POST(req: Request): Promise<Response> {
   const denied = checkRateLimit(req, { max: 20 });
   if (denied) return denied;
 
-  const body = (await req.json().catch(() => ({}))) as { token?: unknown };
-  const token = typeof body.token === "string" ? body.token.trim() : "";
+  const body: unknown = await req.json().catch(() => null);
+  const token =
+    typeof body === "object" && body !== null && "token" in body && typeof body.token === "string"
+      ? body.token.trim()
+      : "";
   if (!token) {
     return Response.json(
       {
         ok: false,
         error: "MISSING_TOKEN",
-        hint: 'Body {"token": "<FIRM_API_TOKEN|FIRM_ADMIN_TOKEN>"} fehlt oder ist leer.',
+        hint: 'Body {"token": "<FIRM_API_TOKEN|FIRM_ADMIN_TOKEN|FIRM_VIEWER_TOKEN>"} fehlt oder ist leer.',
       },
       { status: 400 }
     );
@@ -63,7 +67,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const headers = new Headers();
+  const headers = new Headers({ "Cache-Control": "no-store" });
   for (const cookie of session.cookies) headers.append("Set-Cookie", cookie);
 
   return Response.json(

@@ -3,7 +3,7 @@
 > **Status:** Kanonische Installationsanleitung ist jetzt in [`docs/INSTALL.md`](docs/INSTALL.md) (CachyOS, Variante A/B, Schritt für Schritt).  
 > **Flag-Referenz:** Alle Env-Flags mit sicheren Defaults stehen in [`CONFIGURATION.md`](CONFIGURATION.md).  
 > **Windows:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)  
-> **Code-Version:** v1.36.26
+> **Code-Version:** v1.36.27
 
 Diese Datei ist ein kurzer Einstieg — Details in den verlinkten Dokumenten.
 
@@ -15,7 +15,7 @@ cd ai-trading-firm
 ./scripts/setup-cachyos.sh --variant a     # Variante A: alles auf einem Rechner
 ```
 
-Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt `.env` inkl. `FIRM_API_TOKEN` (Recht `600`), spielt das Schema ein, seedet das Markt-Universum (354 Instrumente), aktiviert Short-Selling, baut die App und führt 18 Validierungs-Checks aus. Idempotent, wiederholbar.
+Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt `.env` inkl. `FIRM_API_TOKEN` und separat erzeugtem `FIRM_SESSION_SECRET` (Recht `600`), spielt das Schema ein, seedet das Markt-Universum (354 Instrumente), aktiviert Short-Selling, baut die App und führt 18 Validierungs-Checks aus. Idempotent, wiederholbar.
 
 **Optionen:** `--dry-run`, `--non-interactive`, `--no-shorts`, `--sync-markets`, `--skip-build`, `--min-pass 18`, `--help`.  
 **Log:** `data/setup/setup-<Zeitstempel>.log`.
@@ -26,6 +26,10 @@ Siehe [docs/INSTALL.md](docs/INSTALL.md) für vollständige Anleitung (Kapitel 0
 
 ```bash
 cp .env.example .env        # Pflicht-Flags setzen (DATABASE_URL)
+umask 077
+printf 'FIRM_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+printf 'FIRM_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+chmod 600 .env
 npm ci
 npx drizzle-kit push        # Schema einspielen
 npm run universe:seed:markets
@@ -36,6 +40,21 @@ npm run start               # http://0.0.0.0:3369
 ```
 
 Details: [CONFIGURATION.md](CONFIGURATION.md) (Flag-Tabelle), [docs/HANDBUCH.md](docs/HANDBUCH.md) (Bedienung), [docs/SETUP_BUGS.md](docs/SETUP_BUGS.md) (Befunde).
+
+## Produktions-Sicherheit / Upgrade auf v1.36.27
+
+`NODE_ENV=production` benötigt im Token-Betrieb ein unabhängiges
+`FIRM_SESSION_SECRET` (mindestens 32 zufällige Zeichen, empfohlen separat
+`openssl rand -hex 32`). Der Installer ergänzt fehlende Schlüssel; bestehende
+Werte niemals durch Login-Tokens ersetzen. Fehlende/ungültige Schlüssel verweigern
+den Start (`SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`).
+`AUTH_MODE=local-open` ist nur für bewusst offenen Lokalbetrieb ohne Tokens gedacht,
+nicht als Reparatur einer fehlerhaften Produktionskonfiguration.
+
+Beim Upgrade alle Instanzen mit der neuen Konfiguration neu starten und erneut
+anmelden; alte Session-Cookies werden nicht übernommen. Browser-Login in Produktion
+benötigt HTTPS. Vorab: `NODE_ENV=production npm run boot:guard` (liest `.env`,
+Prozess-Env hat Vorrang). Details: [CONFIGURATION.md](CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 
 ## Voraussetzungen
 
