@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { agents } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { guardWrite } from "@/lib/apiAuth";
 import { validatePromptInput } from "@/lib/workshop";
 import { logAudit } from "@/lib/engine";
@@ -13,12 +13,18 @@ export const dynamic = "force-dynamic";
 /**
  * Workshop: system_prompt eines Agenten ohne Terminal ändern (Handbuch 6.3).
  *
- *   PUT /api/firm/agents  { agentId, systemPrompt }
+ *   PUT /api/firm/agents  { agentId, systemPrompt, expectedVersion }
  *
  * Änderungen wirken sofort — Prompts stehen in der Datenbank, kein Neubau.
  * Guardrails (harte Schicht, riskGuard.ts) sind über diesen Endpunkt
  * absichtlich NICHT erreichbar. Validierung via validatePromptInput
  * (geteilt mit Tests); jede Änderung wird ins audit_log geschrieben.
+ *
+ * Optimistic Lock (W2, v1.36.24): Der Client sendet die beim Laden gesehene
+ * `expectedVersion` mit. Der UPDATE greift nur bei passender Version und
+ * inkrementiert sie atomar (`version = version + 1`) — zwei parallele
+ * Browser-Edits können sich nicht mehr still überschreiben (last-write-wins).
+ * Der Verlierer erhält 409 inklusive aktueller Version zum Neuladen.
  *
  * Audit-Zuverlässigkeit (S1, v1.36.18): Der Audit ist Sicherheitsklasse und
  * wird nicht mehr in einem leeren `catch` entsorgt. Ist `audit_log` nicht
@@ -43,7 +49,7 @@ export async function PUT(req: Request) {
   if (!validated.ok) {
     return NextResponse.json({ ok: false, error: validated.error }, { status: 400 });
   }
-  const { agentId, systemPrompt } = validated.value;
+  const { agentId, systemPrompt, expectedVersion } = validated.value;
 
   try {
     const existing = (await db.select().from(agents).where(eq(agents.id, agentId)))[0];
@@ -51,11 +57,33 @@ export async function PUT(req: Request) {
       return NextResponse.json({ ok: false, error: "Agent nicht gefunden." }, { status: 404 });
     }
 
+    // ── W2 (v1.36.24): Optimistic Lock ────────────────────────────────────────
+    // Nur die Zeile mit der vom Client gesehenen Version wird aktualisiert und
+    // dabei inkrementiert. 0 betroffene Zeilen ⇒ paralleler Editor hat gewonnen
+    // (oder die Zeile wurde zwischen Vorab-Lesen und Update geändert) ⇒ 409 mit
+    // der aktuellen Version, damit die UI neu lädt statt still zu überschreiben.
     const updated = await db
       .update(agents)
-      .set({ systemPrompt, updatedAt: new Date() })
-      .where(eq(agents.id, agentId))
+      .set({
+        systemPrompt,
+        updatedAt: new Date(),
+        version: sql`${agents.version} + 1`,
+      })
+      .where(and(eq(agents.id, agentId), eq(agents.version, expectedVersion)))
       .returning();
+
+    if (updated.length === 0) {
+      const current = (await db.select().from(agents).where(eq(agents.id, agentId)))[0];
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Konflikt: Der Prompt wurde inzwischen von jemand anderem geändert.",
+          currentVersion: current?.version ?? null,
+          hint: "Neu laden und erneut speichern — der fremde Stand ist jetzt eingeblendet.",
+        },
+        { status: 409 }
+      );
+    }
 
     // ── S1 (v1.36.18): dokumentierter Trade-off ──────────────────────────────
     // Prompt-Änderungen sind sicherheitsrelevant: sie verschieben das
@@ -101,6 +129,8 @@ export async function PUT(req: Request) {
     return NextResponse.json({
       ok: true,
       agent: updated[0],
+      /** Neue Optimistic-Lock-Version (W2) — nächster PUT muss sie als expectedVersion senden. */
+      version: updated[0].version,
       warnings,
       audit: {
         durable: audited.durable,

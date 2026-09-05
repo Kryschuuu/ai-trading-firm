@@ -259,7 +259,7 @@ export function isUuid(raw: string): boolean {
   return UUID_RE.test(raw);
 }
 
-export type PromptInput = { agentId: string; systemPrompt: string };
+export type PromptInput = { agentId: string; systemPrompt: string; expectedVersion: number };
 
 /**
  * Validiert eine Prompt-Änderung (Handbuch 6.3). Prompts sind die weiche
@@ -276,6 +276,21 @@ export function validatePromptInput(raw: unknown): ValidationResult<PromptInput>
   if (!isUuid(agentId)) {
     return { ok: false, error: "agentId fehlt oder hat kein UUID-Format." };
   }
+  // W2 (v1.36.24): Optimistic-Lock — der Client MUSS die beim Laden gesehene
+  // Version mitsenden. Ohne Version gäbe es wieder last-write-wins.
+  const rawVersion = body.expectedVersion;
+  const expectedVersion =
+    typeof rawVersion === "number"
+      ? rawVersion
+      : typeof rawVersion === "string" && rawVersion.trim() !== ""
+        ? Number(rawVersion.trim())
+        : Number.NaN;
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    return {
+      ok: false,
+      error: "expectedVersion fehlt oder ist keine positive ganze Zahl — Prompt aktualisieren und die aktuelle Version mitsenden.",
+    };
+  }
   const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : "";
   if (systemPrompt.length < PROMPT_LIMITS.min) {
     return { ok: false, error: `systemPrompt: mindestens ${PROMPT_LIMITS.min} Zeichen.` };
@@ -290,7 +305,7 @@ export function validatePromptInput(raw: unknown): ValidationResult<PromptInput>
   if (!systemPrompt.includes("{")) {
     warnings.push("Der Prompt enthält kein Beispiel-Objekt. Ein einziges vollständiges JSON-Beispiel wirkt Wunder (Handbuch 6.4).");
   }
-  return { ok: true, value: { agentId, systemPrompt }, warnings };
+  return { ok: true, value: { agentId, systemPrompt, expectedVersion }, warnings };
 }
 
 // ── Trefferquote (Handbuch 6.4) ──────────────────────────────────────────────

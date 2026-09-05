@@ -17,6 +17,8 @@ export interface AgentRow {
   /** IDLE | RUNNING | BLOCKED | STOPPED */
   status: string;
   systemPrompt: string;
+  /** Optimistic-Lock-Version (W2, v1.36.24) — steigt bei jedem Prompt-Update. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -334,8 +336,13 @@ export interface AuditWriteStatusDto {
 export interface AgentPromptResponse {
   ok: boolean;
   agent?: AgentRow;
+  /** Neue Optimistic-Lock-Version nach erfolgreichem Update (W2). */
+  version?: number;
   warnings?: string[];
   /** Audit-Zuverlässigkeit der Änderung (S1). */
   audit?: AuditWriteStatusDto;
+  /** Beim 409-Konflikt: aktuelle Version in der DB (zum Neuladen). */
+  currentVersion?: number;
+  hint?: string;
   error?: string;
 }

@@ -131,7 +131,7 @@ const goodPrompt =
   'Du bist Marktanalystin. Antworte AUSSCHLIESSLICH mit diesem JSON:\n{"type":"TRADE","symbol":"ETH","side":"LONG","stopLossPct":5,"reason":"trend intakt","riskScore":0.4}';
 
 test("validatePromptInput: akzeptiert Prompt mit Format-Beispiel ohne Warnung", () => {
-  const res = validatePromptInput({ agentId: UUID, systemPrompt: goodPrompt });
+  const res = validatePromptInput({ agentId: UUID, systemPrompt: goodPrompt, expectedVersion: 1 });
   assert.equal(res.ok, true);
   if (res.ok) assert.equal(res.value.systemPrompt, goodPrompt.trim());
   assert.equal(res.warnings.length, 0);
@@ -142,26 +142,45 @@ test("validatePromptInput: leere, zu kurze, zu lange und fehlende Eingaben", () 
   assert.equal(validatePromptInput({}).ok, false);
   assert.equal(validatePromptInput({ agentId: UUID, systemPrompt: "" }).ok, false);
   assert.equal(validateMissionInput({ ...validMission, objective: "" }).ok, false);
-  const short = validatePromptInput({ agentId: UUID, systemPrompt: "zu kurz" });
+  const short = validatePromptInput({ agentId: UUID, systemPrompt: "zu kurz", expectedVersion: 1 });
   assert.equal(short.ok, false);
   if (!short.ok) assert.match(short.error, /systemPrompt/);
 
-  const long = validatePromptInput({ agentId: UUID, systemPrompt: "x".repeat(8001) });
+  const long = validatePromptInput({ agentId: UUID, systemPrompt: "x".repeat(8001), expectedVersion: 1 });
   assert.equal(long.ok, false);
   if (!long.ok) assert.match(long.error, /8000/);
 
-  const noAgent = validatePromptInput({ agentId: "", systemPrompt: goodPrompt });
+  const noAgent = validatePromptInput({ agentId: "", systemPrompt: goodPrompt, expectedVersion: 1 });
   assert.equal(noAgent.ok, false);
   if (!noAgent.ok) assert.match(noAgent.error, /agentId/);
 
-  const badAgent = validatePromptInput({ agentId: "'; DROP TABLE agents;--", systemPrompt: goodPrompt });
+  const badAgent = validatePromptInput({ agentId: "'; DROP TABLE agents;--", systemPrompt: goodPrompt, expectedVersion: 1 });
   assert.equal(badAgent.ok, false);
+});
+
+test("validatePromptInput: W2 — expectedVersion ist Pflicht (fehlt, 0, negativ, Dezimal)", () => {
+  const base = { agentId: UUID, systemPrompt: goodPrompt };
+  const missing = validatePromptInput(base);
+  assert.equal(missing.ok, false);
+  if (!missing.ok) assert.match(missing.error, /expectedVersion/);
+  for (const bad of [0, -1, 1.5, "x", "", "0"]) {
+    const res = validatePromptInput({ ...base, expectedVersion: bad });
+    assert.equal(res.ok, false, `expectedVersion=${JSON.stringify(bad)} wird abgelehnt`);
+    if (!res.ok) assert.match(res.error, /expectedVersion/);
+  }
+  const str = validatePromptInput({ ...base, expectedVersion: "3" });
+  assert.equal(str.ok, true);
+  if (str.ok) assert.equal(str.value.expectedVersion, 3, "String-Zahl wird normalisiert");
+  const num = validatePromptInput({ ...base, expectedVersion: 7 });
+  assert.equal(num.ok, true);
+  if (num.ok) assert.equal(num.value.expectedVersion, 7);
 });
 
 test("validatePromptInput: warnt, wenn JSON/Beispiel im Prompt fehlt (blockiert nicht)", () => {
   const proseOnly = validatePromptInput({
     agentId: UUID,
     systemPrompt: "Sei ein guter Analyst und antworte immer höflich und ausführlich.",
+    expectedVersion: 1,
   });
   assert.equal(proseOnly.ok, true);
   assert.equal(proseOnly.warnings.length, 2);

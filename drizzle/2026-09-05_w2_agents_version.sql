@@ -1,0 +1,13 @@
+-- W2 (v1.36.24) — agents.version fuer den Optimistic-Lock auf Prompt-Aenderungen
+-- (additiv, kein Bruch).
+--
+-- Aequivalent zu `npx drizzle-kit generate` + `npx drizzle-kit push`: das
+-- Projekt deployt Schemata regulaer per Push, diese Datei ist der idempotente
+-- SQL-Pfad fuer Umgebungen ohne drizzle-kit
+-- (z. B. `psql "$DATABASE_URL" -f drizzle/2026-09-05_w2_agents_version.sql`).
+--
+-- Semantik: PUT /api/firm/agents aktualisiert den system_prompt nur dann,
+-- wenn die im Body gesendete `expectedVersion` zur aktuellen Spalte passt;
+-- der Gewinner-Update inkrementiert. Zwei parallele Browser-Edits koennen sich
+-- damit nicht mehr still ueberschreiben (siehe src/db/schema.ts agents.version).
+ALTER TABLE "agents" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;

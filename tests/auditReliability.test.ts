@@ -432,7 +432,8 @@ test("S1 Agents-Route: Prompt-Update trotz Audit-Totalverlust — gespeichert, a
     new Request("http://localhost:3369/api/firm/agents", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: AGENT_ID, systemPrompt: "neuer Prompt — handle nur nach Mandat" }),
+      // W2 (v1.36.24): Optimistic-Lock — expectedVersion ist Pflicht (Fake-Row startet bei 1).
+      body: JSON.stringify({ agentId: AGENT_ID, systemPrompt: "neuer Prompt — handle nur nach Mandat", expectedVersion: 1 }),
     })
   );
   const body = (await res.json()) as {
@@ -473,6 +474,8 @@ test("S1 Agents-Route: Spool-Reserve → Response meldet Nachzug (degraded, nich
       body: JSON.stringify({
         agentId: AGENT_ID,
         systemPrompt: "neuer Prompt — nur Long bei Aufwärtstrend, Stop-Loss 5 %, sonst HOLD.",
+        // W2 (v1.36.24): Optimistic-Lock — expectedVersion ist Pflicht (Fake-Row startet bei 1).
+        expectedVersion: 1,
       }),
     })
   );
