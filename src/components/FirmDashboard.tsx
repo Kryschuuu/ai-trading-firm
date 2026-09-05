@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
 import { clearLegacyFirmToken, csrfHeaderValue } from "@/lib/browserSession";
@@ -385,12 +386,12 @@ export default function FirmDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeSwitcher />
-          <a
+          <Link
             href="/docs"
             className="rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
           >
             📖 Doku &amp; Installation
-          </a>
+          </Link>
           <button
             onClick={() => runTick()}
             disabled={running !== null}

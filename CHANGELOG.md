@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-05** ·
-> Code-Version **1.36.24**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.25**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,37 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.25] — 2026-09-05 · fix(docs): Lokale Doku-404s — Markdown einmal gerendert unter /docs navigierbar (LOW)
+
+**LOW, Doku & UX (src/lib/docsCatalog.ts, src/app/api/docs/route.ts,
+src/app/docs/** neu, src/components/docs/** neu, src/lib/docsLinks.ts neu,
+next.config.ts, QoL für den lokalen Betrieb).** Die relativen `*.md`-Links in
+`docs/README.md` (und allen Doku-Dateien) zeigten auf `host:3369/ARCHITECTURE.md`
+— eine Route, die es lokal nicht gibt → **404**. Die Docs wurden nur als eine
+einzige `/docs`-Übersicht mit Client-Side-Switcher angeboten, ohne kanonische
+URLs pro Datei.
+
+- **Kanonische URLs:** jede Doku-Datei wird unter `/docs/<Datei>.md` gerendert
+  (neue Route `src/app/docs/[name]/page.tsx`). `/docs?name=<slug>` und
+  Top-Level-`/<Datei>.md` (via `next.config.ts`-Redirect) führen auf die
+  kanonische Seite.
+- **Link-Rewriting zur Renderzeit** (`src/lib/docsLinks.ts`): relative
+  `*.md`-Links werden in `/docs/<Datei>.md` umgeschrieben — externe URLs,
+  Anker und absolute Pfade bleiben unverändert.
+- **Katalog:** Doku-Übersicht listet nun auch `ALPACA.md`, `ARENA_TASKS.md`,
+  `AUDIT_REMEDIATION_2026-09.md`, `INSTALL-WINDOWS.md`, `PAPER_TRADING.md`,
+  `PEER_REVIEW_BITUNIX_EXECUTION.md`, `PEER_REVIEW_ROUTING_OVERRIDES.md` und
+  `task-10-IMPLEMENTATION_PLAN.md`; `listDocs()` liefert zusätzlich `path`.
+  Nicht katalogisierte, aber vorhandene `docs/*.md` werden über einen
+  Existenz-Fallback dennoch gerendert (kein lokaler 404).
+- **Operations Center/Help:** `/docs?name=…`-Links laufen über die kanonische
+  Seite; `src/ops/collect.ts` und `src/auth/ops.ts` nutzen die kanonischen URLs.
+- **Lint-Fix:** `@next/next/no-html-link-for-pages` — `FirmDashboard.tsx` und
+  `OperationsCenterPanel.tsx` verwenden für interne Doku-Routen `<Link>` statt
+  nativer `<a>`-Tags.
+- **Version:** `1.36.25` (package.json, beide Changelogs, beide READMEs,
+  `INSTALL.md`).
 
 ## [1.36.24] — 2026-09-05 · fix(audit): W2 Prompts mit Optimistic-Lock — versionskontrolliert statt last-write-wins (MEDIUM)
 

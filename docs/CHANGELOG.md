@@ -4,6 +4,38 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
 
+## [1.36.25] — 2026-09-05 · fix(docs): Lokale Doku-404s — Markdown einmal gerendert unter /docs navigierbar (LOW)
+
+**LOW, Doku & UX.** Die relativen `*.md`-Links in `docs/README.md` (und allen
+Doku-Dateien) zeigten auf `host:3369/ARCHITECTURE.md` — eine Route, die es lokal
+nicht gibt → **404**. Die Doku wird jetzt unter kanonischen URLs
+(`/docs/<Datei>.md`) gerendert, Markdown-Links werden beim Rendern umgeschrieben
+(`src/lib/docsLinks.ts`), `/docs?name=<slug>` und Top-Level-`/*.md` leiten auf
+die kanonische Seite um, der Doku-Katalog deckt alle Doku-Dateien ab, und die
+Operations-Center-/Help-Links nutzen dieselben URLs. Zusätzlich Lint-Fix
+(`<Link>` statt `<a>` für interne Doku-Routen in `FirmDashboard.tsx` und
+`OperationsCenterPanel.tsx`).
+
+### Geändert
+
+- **`src/lib/docsCatalog.ts`:** `resolveDoc()`, `docCanonicalPath()`,
+  `listDocs()` (+ `path`), Katalog um 8 zuvor fehlende Doku-Dateien erweitert,
+  Existenz-Fallback für nicht katalogisierte `docs/*.md`.
+- **`src/app/api/docs/route.ts`:** löst Slug ODER Dateiname auf, liefert
+  `canonicalPath`.
+- **`src/app/docs/page.tsx`** (Server): `/docs?name=<slug>` → kanonische Seite;
+  Übersicht rendert `docs/README.md`.
+- **`src/app/docs/[name]/page.tsx`** (neu, Server): kanonische Einzelseite,
+  leitet nicht-kanonische Formen auf die kanonische URL um.
+- **`src/components/docs/**`** (neu, Client): Übersicht + Einzelansicht mit
+  Link-Rewriting über `src/lib/docsLinks.ts`.
+- **`next.config.ts`:** Redirect `/<Datei>.md` → `/docs/<Datei>.md`.
+- **`src/ops/collect.ts`, `src/auth/ops.ts`, `src/components/ops/OperationsCenterPanel.tsx`:** kanonische Doku-Links.
+- **`src/components/FirmDashboard.tsx`:** `<Link>` statt `<a>` für `/docs`.
+
+### Version
+
+`1.36.25` (package.json, beide Changelogs, beide READMEs, `INSTALL.md`).
 
 ## [1.36.24] — 2026-09-05 · fix(audit): W2 Prompts mit Optimistic-Lock — version-Spalte + 409 statt stilles Überschreiben (MEDIUM)
 
