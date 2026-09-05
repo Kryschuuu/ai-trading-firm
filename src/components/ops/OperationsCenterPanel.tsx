@@ -16,6 +16,7 @@
  * XSS-sicher: kein innerHTML, alles JSX-Text. Loading / Error / Empty sind
  * eigene Zustände, damit ein Teilausfall nie als „alles gut“ erscheint.
  */
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import MarketDataPanel from "@/components/ops/MarketDataPanel";
@@ -187,12 +188,12 @@ export function OperationsCenterView({
               {health.empty > 0 ? ` · ${health.empty} leer` : ""}
             </span>
           )}
-          <a
+          <Link
             href="/docs?name=handbuch"
             className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
           >
             Handbuch
-          </a>
+          </Link>
         </div>
         {payload && !liveEnabled && (
           <p className="mt-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-[11px] leading-relaxed text-red-200">
@@ -350,9 +351,9 @@ function SectionCard({
           </button>
         )}
         {section.href && (
-          <a href={section.href} className="font-semibold text-emerald-400 hover:text-emerald-300">
+          <Link href={section.href} className="font-semibold text-emerald-400 hover:text-emerald-300">
             Dokumentation
-          </a>
+          </Link>
         )}
         <details className="ml-auto">
           <summary className="cursor-pointer text-slate-500 hover:text-slate-300">Quellen</summary>

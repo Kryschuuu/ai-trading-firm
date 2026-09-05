@@ -82,7 +82,7 @@ export type OpsSectionDefinition = {
   sources: readonly string[];
   /** Dashboard-Tab, den die Sektion direkt öffnen kann. */
   tab?: string;
-  /** Dokumentationsziel (`/docs?name=…`). */
+  /** Dokumentationsziel (kanonisch `/docs/<Datei>.md`). */
   href?: string;
   /** Hilfe-Key in `docs/help/ops.help.json`. */
   helpKey?: string;
