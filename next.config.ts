@@ -10,6 +10,12 @@ import type { NextConfig } from "next";
  * erforderlich. Im Dev-Modus bleibt alles offen, damit HMR funktioniert.
  */
 const nextConfig: NextConfig = {
+  async redirects() {
+    // Lokale Doku: Top-Level-*.md (z. B. `/ARCHITECTURE.md`) auf die gerenderte
+    // kanonische Seite `/docs/<Datei>.md` umleiten, damit die relativen
+    // Markdown-Links aus docs/README.md nicht ins Leere führen (404-Problem).
+    return [{ source: "/:slug.md", destination: "/docs/:slug.md", permanent: false }];
+  },
   async headers() {
     if (process.env.NODE_ENV !== "production") return [];
     return [
