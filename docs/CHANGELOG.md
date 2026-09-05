@@ -5,6 +5,42 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
 [SemVer](https://semver.org/lang/de/).
 
 
+## [1.36.24] — 2026-09-05 · fix(audit): W2 Prompts mit Optimistic-Lock — version-Spalte + 409 statt stilles Überschreiben (MEDIUM)
+
+**MEDIUM, Workshop.** Befund W2 des Senior-Peer-Reviews
+(`docs/AUDIT_REMEDIATION_2026-09.md`): **`PUT /api/firm/agents` aktualisierte
+den `system_prompt` ohne Versionskontrolle (nur `updatedAt`) — zwei Browser,
+die denselben Agenten bearbeiten, überschrieben sich still (last-write-wins).**
+
+### Geändert
+
+- **`src/db/schema.ts`:** `agents.version integer NOT NULL DEFAULT 1`
+  (additiv; der Default hält Alt-Installationen abwärtskompatibel bei 1).
+  Migration als idempotente SQL-Datei `drizzle/2026-09-05_w2_agents_version.sql`
+  (`ALTER TABLE "agents" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;`).
+- **`src/lib/workshop.ts`:** `PromptInput` trägt jetzt `expectedVersion`;
+  `validatePromptInput` verwirft fehlende/0/negative/Dezimal-Werte und
+  normalisiert String-Zahlen genau wie `MISSION`-Budgets.
+- **`src/app/api/firm/agents/route.ts`:** Optimistic-Lock-Update
+  (`SET system_prompt, updated_at, version=version+1 WHERE id=? AND
+  version=expectedVersion`, `.returning()`). 0 betroffene Zeilen ⇒ **409
+  CONFLICT** mit `currentVersion`; Client sendet andernfalls die neue Version
+  im Erfolgs-Body (`version: updated[0].version`). Der
+  `AGENT_PROMPT_UPDATED`-Audit (S1, v1.36.18) bleibt unverändert.
+- **`src/lib/types.ts`:** `AgentRow.version`, `AgentPromptResponse.version`,
+  `currentVersion`/`hint` für den 409-Fall.
+- **`src/components/workshop/PromptPanel.tsx`:** sendet
+  `expectedVersion: agent.version ?? 1`, zeigt die Version im Agent-Kopf, und
+  erholt sich bei 409 mit „Konflikt: neu laden“: lokalen Entwurf verwerfen
+  (`setDraft(null)`), Firmzustand neu laden (`onChanged()`), Fremdstand plus
+  aktuelle Versionsnummer einblenden.
+- **Tests:** `tests/w2.promptVersioning.test.ts` — Validator-Unit, Statik-Greps
+  (Schema/Migration/Route/UI) und DB-gegatete Akzeptanz (gleiche
+  expectedVersion ⇒ einer 200/Version+1, einer 409; Folge-PUT mit neuer Version
+  ⇒ 200; verpasste Version ⇒ 409; fehlende ⇒ 400; zwei Agenten gleicher Version
+  ⇒ nur der richtige wird aktualisiert). `tests/workshop.test.ts` trägt die
+  neue `expectedVersion`-Pflicht und deckt die Ablehnungsfälle ab.
+
 ## [1.36.23] — 2026-09-05 · fix(audit): W1 Session-Cookie statt API-Token in localStorage (HIGH)
 
 **HIGH, Workshop.** Befund W1 des Senior-Peer-Reviews

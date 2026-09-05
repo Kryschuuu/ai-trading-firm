@@ -9,6 +9,11 @@ import type { AgentPromptResponse, AgentRow } from "@/lib/types";
  * Schritt 3 (Handbuch 6.3): system_prompt eines Agenten in der UI ändern —
  * ersetzt das psql-UPDATE auf agents. Änderungen wirken sofort (Prompts
  * stehen in der DB); Guardrails bleiben unberührt, weil sie im Code leben.
+ *
+ * Versionskontrolle (W2, v1.36.24): Der Editor sendet die beim Laden gesehene
+ * `expectedVersion` mit. Bei 409 (paralleler Editor hat gewonnen) wird der
+ * fremde Stand neu geladen und der eigene Entwurf verworfen — kein stilles
+ * Überschreiben von Trading-Agent-Prompts mehr.
  */
 
 /** Das Antwortformat aus Handbuch 6.3 — unverändert. */
@@ -77,17 +82,34 @@ export default function PromptPanel({
       return;
     }
     setSaving(true);
+    // W2 (v1.36.24): Optimistic-Lock — die beim Laden gesehene Version mitsenden.
     const { res, data, error: err } = await readJson<AgentPromptResponse>(
       await apiFetch("/api/firm/agents", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId: effAgentId, systemPrompt: trimmed }),
+        body: JSON.stringify({
+          agentId: effAgentId,
+          systemPrompt: trimmed,
+          expectedVersion: agent.version ?? 1,
+        }),
       }),
       "Prompt konnte nicht gespeichert werden"
     );
     setSaving(false);
     if (res.status === 401) {
       onUnauthorized();
+      return;
+    }
+    // 409 CONFLICT: ein paralleler Editor hat inzwischen gewonnen — fremden
+    // Stand laden und den eigenen Entwurf verwerfen (kein stilles Overwrite).
+    if (res.status === 409) {
+      setDraft(null);
+      setError(
+        `Konflikt: neu laden — der Prompt wurde inzwischen von jemand anderem geändert` +
+          (data.currentVersion ? ` (aktuelle Version ${data.currentVersion})` : "") +
+          `. Der fremde Stand wird eingeblendet; deine Änderung wurde verworfen.`
+      );
+      onChanged();
       return;
     }
     if (err) {
@@ -100,7 +122,10 @@ export default function PromptPanel({
         : null
     );
     setDraft(data.agent?.systemPrompt ?? trimmed);
-    setOkMsg(`✔ Gespeichert (Datenbank, ${new Date().toLocaleTimeString("de-DE")}) — wirkt ab dem nächsten Turn, kein Neubau nötig.`);
+    const newVersion = data.version ?? data.agent?.version;
+    setOkMsg(
+      `✔ Gespeichert (Datenbank, ${new Date().toLocaleTimeString("de-DE")}${newVersion ? `, Version ${newVersion}` : ""}) — wirkt ab dem nächsten Turn, kein Neubau nötig.`
+    );
     setWarnings(data.warnings ?? []);
     onChanged();
   }
@@ -117,7 +142,7 @@ export default function PromptPanel({
             text="Die standinge Anweisung einer Rolle. Steht in der Datenbank (agents.system_prompt) und geht jedem Turn voran — hier gehört das Antwortformat hinein."
           />
         </div>
-        <p className="mb-4 text-xs text-slate-500">PUT <code className="font-mono">/api/firm/agents</code> mit <code className="font-mono">{`{agentId, systemPrompt}`}</code></p>
+        <p className="mb-4 text-xs text-slate-500">PUT <code className="font-mono">/api/firm/agents</code> mit <code className="font-mono">{`{agentId, systemPrompt, expectedVersion}`}</code></p>
 
         <div className="mb-4">
           <label htmlFor="prompt-agent" className="mb-1 block text-xs font-semibold text-slate-300">
@@ -144,6 +169,7 @@ export default function PromptPanel({
           {agent && (
             <p className="mt-1 text-[11px] text-slate-500">
               Modell: <code className="font-mono">{agent.model}</code> · geändert: {new Date(agent.updatedAt).toLocaleString("de-DE")}
+              {typeof agent.version === "number" && <> · Version <code className="font-mono">{agent.version}</code></>}
             </p>
           )}
         </div>

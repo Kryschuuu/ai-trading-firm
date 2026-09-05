@@ -37,6 +37,14 @@ export const agents = pgTable("agents", {
   /** IDLE | RUNNING | BLOCKED | STOPPED */
   status: text("status").notNull().default("IDLE"),
   systemPrompt: text("system_prompt").notNull(),
+  /**
+   * Optimistic-Lock-Version (W2, v1.36.24): wird bei JEDEM Prompt-Update
+   * inkrementiert (`version = version + 1`). Der Prompt-Editor sendet die
+   * geladene `expectedVersion` mit; ein veralteter Stand erhält 409 statt
+   * stillen Überschreibens (last-write-wins). Default 1 hält
+   * Alt-Installationen abwärtskompatibel.
+   */
+  version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -1,7 +1,7 @@
 # Changelog — Autonome KI-Trading-Firma
 
 > **Status-Header (Task 12):** Konsolidierter Überblick · **2026-09-05** ·
-> Code-Version **1.36.23**. Vollständige, detaillierte Einträge je Release stehen
+> Code-Version **1.36.24**. Vollständige, detaillierte Einträge je Release stehen
 > in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (Keep a Changelog + SemVer).
 > Diese Datei ist der konsolidierte, task-zugeordnete Überblick.
 
@@ -15,6 +15,29 @@
 
 Die Version steht in `package.json` und wird von `/api/health` und `/api/firm`
 ausgeliefert.
+
+## [1.36.24] — 2026-09-05 · fix(audit): W2 Prompts mit Optimistic-Lock — versionskontrolliert statt last-write-wins (MEDIUM)
+
+**MEDIUM, Workshop (src/db/schema.ts, src/app/api/firm/agents/route.ts,
+src/lib/workshop.ts, src/components/workshop/PromptPanel.tsx, src/lib/types.ts,
+`drizzle/2026-09-05_w2_agents_version.sql` neu, `tests/w2.promptVersioning.test.ts` neu).**
+Befund W2 des Senior-Peer-Reviews: `PUT /api/firm/agents` aktualisierte den
+`system_prompt` ohne Versionskontrolle — zwei Browser, die denselben Agenten
+bearbeiten, überschrieben sich still (last-write-wins).
+
+- **DB (`agents.version`):** neue Spalte `version integer NOT NULL DEFAULT 1`
+  (additiv, Alt-Installationen starten bei 1); idempotenter SQL-Pfad
+  `drizzle/2026-09-05_w2_agents_version.sql`.
+- **Route:** Client MUSS `expectedVersion` senden (Validierung in
+  `validatePromptInput > PromptInput`). Der UPDATE greift nur mit
+  `WHERE id = … AND version = expectedVersion` und inkrementiert atomar
+  (`version = version + 1`, `.returning()`). 0 betroffene Zeilen ⇒ **409
+  CONFLICT** inklusive `currentVersion` zum Neuladen. Erfolg liefert die neue
+  Version zurück; `AGENT_PROMPT_UPDATED`-Audit bleibt (S1-Pfad unverändert).
+- **UI (PromptPanel):** sendet die beim Laden gesehene Version, zeigt
+  `Version n` im Kopf, behandelt 409 mit „Konflikt: neu laden“, verwirft den
+  lokalen Entwurf, lädt den Fremdstand via `onChanged()` und zeigt die neue
+  Version nach dem Speichern.
 
 ## [1.36.23] — 2026-09-05 · fix(audit): W1 Session-Cookie statt API-Token im Browser (HIGH)
 
