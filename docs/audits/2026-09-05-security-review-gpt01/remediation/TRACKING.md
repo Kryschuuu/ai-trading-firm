@@ -4,13 +4,16 @@ Diese Datei ist die einzige Wahrheit für den Status aller Findings dieses Audit
 
 | ID | Titel | Severity | Status | Fix-Version | PR | Assignee | Notizen |
 |----|-------|----------|--------|-------------|----|----------|---------|
-| SEC-01 | Privilege Escalation | CRITICAL | OPEN | - | - | - | RBAC-Matrix prüfen |
-| SEC-02 | Ungeschützte APIs | CRITICAL | OPEN | - | - | - | Auth-Guards auditieren |
-| SEC-03 | Verwundbare Dependencies (1) | HIGH | OPEN | - | - | - | npm audit |
-| SEC-04 | Verwundbare Dependencies (2) | HIGH | OPEN | - | - | - | transitive Deps |
-| SEC-05 | Rate-Limit Bypass | MEDIUM | OPEN | - | - | - | Platzhalter |
-| SEC-06 | Info Disclosure | MEDIUM | OPEN | - | - | - | Platzhalter |
-| SEC-07 | Missing Security-Headers | LOW | OPEN | - | - | - | Platzhalter |
+| SEC-01 | Privilege Escalation über signierte Session | CRITICAL | OPEN | - | - | - | HMAC aus Viewer-Token; Permissions nicht an Rolle gebunden |
+| SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN | - | - | - | `/api/firm`, `/log`, `/report`, `/rules`, `/providers`, `/routing` |
+| SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN | - | - | - | `next ^16.3.1`; Fix ≥16.3.3 |
+| SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN | - | - | - | `ws ^8.18.0`; Fix ≥8.21.0 |
+| SEC-05 | Fälschbare Akteursattribution bei Rule-Änderungen | MEDIUM | OPEN | - | - | - | Client-`by` / `sourceRole` im Audit |
+| SEC-06 | Rule-Lifecycle nur durch `firm.write` geschützt | MEDIUM | OPEN | - | - | - | activate/rollback ohne eigene Permission |
+| SEC-07 | Secret-Store fällt auf Env-Credentials zurück | MEDIUM | OPEN | - | - | - | Bitunix/Alpaca Env-Fallback bei Store-Fehler |
+| SEC-08 | Sessions sind nicht sofort widerrufbar | MEDIUM | OPEN | - | - | - | Stateless HMAC, 15 min Snapshot, keine Epoch |
+| SEC-09 | Memory-Hygiene schützt JS-Strings nicht wirklich | LOW | OPEN | - | - | - | `plaintext.toString` → immutable JS-Strings |
+| SEC-10 | GitHub Actions nicht auf immutable SHAs gepinnt | LOW | OPEN | - | - | - | `actions/*@v4` mutable Tags |
 
 ## Legende
 
@@ -18,13 +21,13 @@ Diese Datei ist die einzige Wahrheit für den Status aller Findings dieses Audit
 
 ## Verlauf
 
-- 2026-09-05: Audit angelegt (aus Aufgabenstellung Security Review-GPT_01.pdf)
-- 2026-09-05: Struktur erstellt, Findings extrahiert (Template)
-- TODO: PDF in `assets/` ablegen, Findings mit exakten Seitenzahlen ergänzen
+- 2026-09-05: Audit angelegt (Security Review-GPT_01)
+- 2026-09-05: Finding-Dateien SEC-01–SEC-10 1:1 auf den Review-Inhalt ausgerichtet (Platzhalter SEC-05–SEC-07 ersetzt; SEC-01–SEC-04 korrigiert)
 
 ## Nächste Schritte
 
-1. PDF in `assets/Security-Review-GPT_01.pdf` ablegen
-2. Findings SEC-01 bis SEC-04 mit exakten Code-Stellen aus PDF ergänzen
-3. Medium/Low Findings aus PDF in SEC-05..SEC-07 überführen
-4. Fixes priorisiert abarbeiten (Critical zuerst)
+1. SEC-01 Session-Signierung reparieren
+2. SEC-03 / SEC-04 `next` und `ws` aktualisieren
+3. SEC-02 GET-APIs authentifizieren, SEC-07 Env-Fallback entfernen
+4. SEC-05 / SEC-06 Rule-Audit und Permissions
+5. SEC-08–SEC-10 Hardening

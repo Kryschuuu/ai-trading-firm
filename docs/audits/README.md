@@ -32,11 +32,7 @@ docs/audits/
 │       └── SUMMARY.md
 └── 2026-09-05-security-review-gpt01/  # Beispiel: Security-Audit Sep 2026
     ├── README.md
-    ├── findings/
-    │   ├── SEC-01-privilege-escalation.md
-    │   ├── SEC-02-unprotected-apis.md
-    │   ├── SEC-03-vulnerable-dependencies.md
-    │   └── SEC-04-vulnerable-dependencies-2.md
+    ├── findings/                # SEC-01 … SEC-10 (siehe Audit-README)
     ├── remediation/
     │   └── TRACKING.md
     └── assets/
@@ -53,7 +49,7 @@ docs/audits/
 
 Beispiele:
 - `2026-09-03-peer-review` — Senior Peer-Review (H1-H10 etc.)
-- `2026-09-05-security-review-gpt01` — Security-Audit GPT_01 (SEC-01..SEC-04)
+- `2026-09-05-security-review-gpt01` — Security-Audit GPT_01 (SEC-01..SEC-10)
 - `2026-10-12-scanner-dependabot` — Dependabot-Scan
 - `2027-01-15-external-trailofbits` — Externer Audit
 
