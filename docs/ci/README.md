@@ -37,6 +37,8 @@ Ausführen: `npm run docs:validate`
 
 ### security-live-gate
 
+- SEC-01/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
+  Session-Vertrauensgrenze, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
 - Live-Gate-Suite mit ≥95% Coverage
 - Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink
 
