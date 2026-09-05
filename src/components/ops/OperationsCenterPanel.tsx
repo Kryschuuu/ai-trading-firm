@@ -17,6 +17,7 @@
  * eigene Zustände, damit ein Teilausfall nie als „alles gut“ erscheint.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import MarketDataPanel from "@/components/ops/MarketDataPanel";
 import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
@@ -187,12 +188,12 @@ export function OperationsCenterView({
               {health.empty > 0 ? ` · ${health.empty} leer` : ""}
             </span>
           )}
-          <a
+          <Link
             href="/docs/HANDBUCH.md"
             className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
           >
             Handbuch
-          </a>
+          </Link>
         </div>
         {payload && !liveEnabled && (
           <p className="mt-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-[11px] leading-relaxed text-red-200">
