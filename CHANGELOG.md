@@ -1,12 +1,51 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.33**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.34**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.34] — 2026-09-06 · Security: SEC-06 — getrennte Rule-Governance; SEC-05 nachgeprüft
+
+### Security
+
+- **SEC-06 (MEDIUM) behoben; betroffen bis einschließlich v1.36.33:** Die
+  Regelverwaltung prüft jetzt aktionsbezogene `strategy.rules.*`-Permissions
+  statt allgemeiner Firm-Schreibrechte. Operatoren dürfen Entwürfe anlegen
+  und versionieren, aktive Regeln pausieren sowie Entwürfe ablehnen.
+  Aktivierung, Rollback und Archivierung erfordern administrative Rechte.
+  Die Prüfung erfolgt vor jedem Datenzugriff, auch bei kombinierter Erstellung
+  und Freigabe sowie beim manuellen Start des Makro-Zyklus.
+- **Einheitliche Authentifizierung:** Admin-/Operator-/Viewer-Header, Bearer-
+  Tokens und signierte Sessions verwenden dieselbe aktuelle RBAC-Matrix.
+  Schreib-Rate-Limits und bestehende Lifecycle-/Risikolimits bleiben wirksam.
+  Ungültige Rule-Request-Formate werden vor der Persistenz abgewiesen.
+- **SEC-05-Nachprüfung:** Auch die Erstellung einer Regelversion trägt jetzt
+  den verifizierten Akteur im Audit und in dessen Anzeige. API-erzeugte Regeln
+  erhalten serverseitig `sourceRole=MANUAL` und `sourceMode=MANUAL`; interne
+  Erzeuger behalten ihre eigene Herkunft. Attributionsfelder bleiben aus dem
+  API-Vertrag ausgeschlossen. Mutierende Service-Aufrufe verlangen einen
+  expliziten Audit-Akteur; fehlende Authentifizierung erhält keinen Default-Actor.
+- **Verbindliche Regressionen:** 72 neue SEC-06-/SEC-05-Nachprüfungstests und die
+  bestehenden 17 SEC-05-Tests laufen im Auth-Security-Gate der CI. Sie prüfen
+  Rollen und Credential-Wege, erlaubte und verweigerte Mutationen, Fehlerpfade,
+  Rate-Limits, Audit-Attribution sowie die bestehende Single-Admin-Konfiguration.
+
+### Upgrade
+
+- **Alle Instanzen auf v1.36.34 aktualisieren, neu bauen und neu starten.**
+  Keine neue Abhängigkeit, Datenmigration oder neue Konfigurationsvariable.
+- Für echte Rollentrennung einen vom Operator-Token **verschiedenen**
+  `FIRM_ADMIN_TOKEN` konfigurieren. Ohne Admin-Token bleibt der Operator gemäß
+  bestehendem Single-Admin-Modell effektiv Admin; bewusstes `local-open`
+  bleibt ein lokaler Single-User-Modus, keine Multi-Role-Isolation.
+- Integrationen müssen für administrative Regelaktionen und den manuellen
+  Makro-Start ein Admin-Credential verwenden. Das interne Scheduler-Verhalten
+  bleibt an die vorhandene serverseitige `REQUIRE_HUMAN_APPROVAL`-Policy gebunden.
+  API-Vertrag und Rollenmatrix: [Security-Übersicht](docs/security/README.md#rule-governance-sec-06).
 
 ## [1.36.33] — 2026-09-06 · Security: SEC-05 — Rule-Audit-Attribution ausschliesslich serverseitig (MEDIUM)
 

@@ -19,7 +19,7 @@
  *      sind immer `MANUAL` (interne Erzeuger wie der Makro-Zyklus setzen ihre
  *      Rolle serverseitig beim Aufruf von `sanitizeRuleSpec`).
  */
-import { actorAuditId } from "@/auth";
+import { resolveAuth } from "@/auth";
 
 /** Vom Client verbotene Attributionsfelder (Top-Level des Request-Bodys). */
 export const CLIENT_FORBIDDEN_ACTOR_FIELDS = ["by", "actor", "sourceRole"] as const;
@@ -31,12 +31,15 @@ export const API_RULE_SOURCE_ROLE = "MANUAL" as const;
  * Audit-Akteur einer Regel-Änderung.
  *
  * Der Wert kommt aus der serverseitigen RBAC-Auflösung (`admin` | `operator` |
- * `viewer`; `admin` im wirksamen `local-open`-Betrieb). Der Guard der Route
- * (`guardWrite`) hat zu diesem Zeitpunkt bereits `firm.write` sichergestellt —
- * hier wird die Identität nur noch für den Audit-Trail abgeleitet.
+ * `viewer`; `admin` im wirksamen `local-open`-Betrieb). Die Route prüft zuvor
+ * die aktionsbezogene strategy.rules.*-Permission. Anders als der generische
+ * actorAuditId-Helper gibt es hier KEINEN Admin-Fallback bei fehlender Auth:
+ * ein inkonsistenter Aufruf muss vor der Mutation fail-closed abbrechen.
  */
 export function ruleActor(req: Request): string {
-  return actorAuditId(req);
+  const resolution = resolveAuth(req);
+  if (!resolution.ok) throw new Error("Rule audit requires an authenticated actor");
+  return resolution.actor.auditId;
 }
 
 /**

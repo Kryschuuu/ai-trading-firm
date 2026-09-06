@@ -323,7 +323,7 @@ export async function runMacroCycle(opts?: { missionId?: string }): Promise<Macr
     }
 
     // ── Persistieren (DRAFT) + Aktivieren ───────────────────────────────────
-    const upsert = await upsertRuleSpec(spec, researchAgent?.id ?? null, sourceMode);
+    const upsert = await upsertRuleSpec(spec, "MACRO_CYCLE", researchAgent?.id ?? null, sourceMode);
     if (!upsert.ok || !upsert.rule) {
       return { ok: false, missionId, symbol, warnings, error: upsert.error ?? "Upsert fehlgeschlagen", at: new Date().toISOString() };
     }
