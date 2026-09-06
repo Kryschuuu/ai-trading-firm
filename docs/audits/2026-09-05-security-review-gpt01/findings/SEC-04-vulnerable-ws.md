@@ -8,8 +8,8 @@
 - **Fix-Version:** 1.36.30
 - **Betroffener Projektstand:** bis einschließlich v1.36.29 (`ws: ^8.18.0`); jede Installation, die außerhalb des Lockfiles aufgelöst wurde, zusätzlich prüfen
 - **Datei(en):** `package.json`, `package-lock.json`, `src/brokers/bitunix/ws.ts`, `tests/sec04.wsDependency.test.ts`, `tests/sec04.wsRuntime.test.ts`, Security-Workflow und dessen Quelle unter `docs/ci/`; zugehörige Release-/Upgrade-Dokumentation
-- **Fix-Commit:** FIX_COMMIT_PLACEHOLDER
-- **Red-Test-Commit:** RED_COMMIT_PLACEHOLDER
+- **Fix-Commit:** [a131479](https://github.com/Kryschuuu/ai-trading-firm/commit/a1314793862d1a51e2664aac0a304aa0b46805a0)
+- **Red-Test-Commit:** [52d5949](https://github.com/Kryschuuu/ai-trading-firm/commit/52d594922b0a12c0aca0906c478a371289ddf377)
 - **Peer-Review-Patch:** TBD
 
 ## Beschreibung

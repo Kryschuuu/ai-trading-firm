@@ -7,7 +7,7 @@ Diese Datei ist die einzige Wahrheit für den Status aller Findings dieses Audit
 | SEC-01 | Privilege Escalation über signierte Session | CRITICAL | FIXED | v1.36.27 | [3dfede1](https://github.com/Kryschuuu/ai-trading-firm/commit/3dfede16ced729f1583e37305690df95a569e16e) | - | Unabhängiger Key, aktuelle serverseitige Rechte, Credential-Bindung; Upgrade mit neuem Login |
 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN | - | - | - | `/api/firm`, `/log`, `/report`, `/rules`, `/providers`, `/routing` |
 | SEC-03 | Verwundbare Next.js-Version | HIGH | FIXED | v1.36.28 | [25dcc8b](https://github.com/Kryschuuu/ai-trading-firm/commit/25dcc8bbe8ef309c8b735c40573e06110058906d) | - | Next 16.3.4, sharp 0.35.4, libheif 1.23.2; Regressionen Linux/Windows |
-| SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | FIXED | v1.36.30 | FIX_COMMIT_PLACEHOLDER | - | Exakter Pin `ws 8.21.3` + Override; Laufzeit-Guard und Payload-Kappe im Bitunix-WS |
+| SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | FIXED | v1.36.30 | [a131479](https://github.com/Kryschuuu/ai-trading-firm/commit/a1314793862d1a51e2664aac0a304aa0b46805a0) | - | Exakter Pin `ws 8.21.3` + Override; Laufzeit-Guard und Payload-Kappe im Bitunix-WS |
 | SEC-05 | Fälschbare Akteursattribution bei Rule-Änderungen | MEDIUM | OPEN | - | - | - | Client-`by` / `sourceRole` im Audit |
 | SEC-06 | Rule-Lifecycle nur durch `firm.write` geschützt | MEDIUM | OPEN | - | - | - | activate/rollback ohne eigene Permission |
 | SEC-07 | Secret-Store fällt auf Env-Credentials zurück | MEDIUM | OPEN | - | - | - | Bitunix/Alpaca Env-Fallback bei Store-Fehler |
