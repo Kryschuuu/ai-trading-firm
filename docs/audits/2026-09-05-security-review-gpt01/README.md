@@ -4,7 +4,7 @@
 **Reviewer:** GPT Security Review (Stand `main`, 5. September 2026)  
 **Scope:** Auth/RBAC, Session-Handling, Broker-Control-Plane, Secret-Store, Rule-Engine, API-Routen, Audit-/Logging, Deployment, Dependencies  
 **Datum:** 2026-09-05  
-**Status:** OPEN — SEC-01 FIXED in v1.36.27 (2026-09-06); übrige Findings weiter offen
+**Status:** OPEN — SEC-01 FIXED in v1.36.27, SEC-03 FIXED in v1.36.28 (2026-09-06); übrige Findings weiter offen
 **Original-Dokument:** `Security Review-GPT_01.md` (Markdown) und `Security Review-GPT_01.pdf`
 
 ## Severity-Übersicht
@@ -12,7 +12,7 @@
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 1 | 0 | 0 | 1 |
-| HIGH | 3 | 3 | 0 | 0 |
+| HIGH | 3 | 2 | 0 | 1 |
 | MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
 
@@ -24,7 +24,7 @@
 |----|-------|----------|--------|-------------|-------|
 | SEC-01 | Privilege Escalation über signierte Session | CRITICAL | FIXED | v1.36.27 | [SEC-01](./findings/SEC-01-privilege-escalation.md) |
 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN | - | [SEC-02](./findings/SEC-02-unauthenticated-get-apis.md) |
-| SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN | - | [SEC-03](./findings/SEC-03-vulnerable-next.md) |
+| SEC-03 | Verwundbare Next.js-Version | HIGH | FIXED | v1.36.28 | [SEC-03](./findings/SEC-03-vulnerable-next.md) |
 | SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN | - | [SEC-04](./findings/SEC-04-vulnerable-ws.md) |
 | SEC-05 | Fälschbare Akteursattribution bei Rule-Änderungen | MEDIUM | OPEN | - | [SEC-05](./findings/SEC-05-rule-actor-attribution.md) |
 | SEC-06 | Rule-Lifecycle nur durch `firm.write` geschützt | MEDIUM | OPEN | - | [SEC-06](./findings/SEC-06-rule-lifecycle-authz.md) |
@@ -39,14 +39,15 @@
 
 **Für echtes Live-Trading:** aktuell nicht freigabefähig.
 
-Die wichtigsten Punkte sind nicht klassische SQL-Injection oder Kryptographiefehler, sondern **Authorization-/Trust-Boundary-Probleme und unnötig öffentliche Datenzugriffe**. Hinzu kommen zwei aktuelle Dependency-Probleme (`next`, `ws`).
+Die wichtigsten Punkte sind nicht klassische SQL-Injection oder Kryptographiefehler, sondern **Authorization-/Trust-Boundary-Probleme und unnötig öffentliche Datenzugriffe**. Von den Dependency-Befunden ist `next` seit v1.36.28 behoben; `ws` bleibt offen.
 
 Injection: kein bestätigter kritischer Befund (`drizzle-orm` 0.45.2 enthält den SQLi-Fix). Kill-Switch-Disarm, AES-GCM-Secret-Store, Rule-Engine-Whitelist und CSRF (Double-Submit) sind ausdrücklich **keine** Findings.
 
 ## Remediation-Plan (Priorisierung aus dem Review)
 
 1. **SEC-01 erledigt (v1.36.27):** unabhängiger Session-Key, aktuelle serverseitige
-   Rechteprojektion und Credential-Bindung. **Weiter sofort:** SEC-03/SEC-04 (`next`, `ws`).
+   Rechteprojektion und Credential-Bindung. **SEC-03 erledigt (v1.36.28):** Next.js
+   und native Decoder-Kette aktualisiert. **Weiter sofort:** SEC-04 (`ws`).
 2. **Vor weiterem Live-Ausbau:** SEC-02 (GET-APIs authentifizieren) + SEC-07 (kein Env-Fallback)
 3. **Vor echter Multi-Role-Nutzung:** SEC-05 / SEC-06 (Audit-Actor + Rule-Permissions)
 4. **Danach:** SEC-08 (Session-Revocation), SEC-09 (Memory-Hygiene-Doku), SEC-10 (Actions-SHAs)

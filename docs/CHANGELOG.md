@@ -4,7 +4,7 @@
 >
 > Diese Datei ist ein Stub, um alte Links nicht zu brechen. Bitte nutze die Root-Datei für alle Versionen.
 >
-> **Version:** `v1.36.27` (siehe `package.json` und `../CHANGELOG.md`)
+> **Version:** `v1.36.28` (siehe `package.json` und `../CHANGELOG.md`)
 
 Siehe [../CHANGELOG.md](../CHANGELOG.md) für alle Einträge (Keep a Changelog + SemVer).
 

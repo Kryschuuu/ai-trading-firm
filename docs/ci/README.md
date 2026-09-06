@@ -7,7 +7,7 @@
 | Datei | Zweck | Ziel in `.github/workflows/` |
 |-------|-------|-------------------------------|
 | `docs-validate.workflow.yml` | Docs-as-Code-Wächter: Schema, Links, Lint, Secrets, Konsistenz (Task 12) | `main.yml` |
-| `security-live-gate.workflow.yml` | Live-Gate Security-Suite: ≥95% Coverage, Enforcer, Kill-Switch | `main-security-live-gatte.yml` |
+| `security-live-gate.workflow.yml` | Next-Regressionen Linux/Windows, Build, Auth und Live-Gate ≥95% Coverage | `main-security-live-gatte.yml` |
 
 ## Installation (einmalig durch Owner)
 
@@ -21,7 +21,7 @@ cp docs/ci/security-live-gate.workflow.yml .github/workflows/main-security-live-
 
 - Beide Workflows starten bei `push` auf `main` und `arena/**` sowie bei `pull_request`.
   Damit lassen sich Änderungen auf dem Arbeitsbranch prüfen, **bevor** ein PR
-  erstellt wird (SEC-01-Release-Workflow).
+  erstellt wird (Security-Release-Workflow).
 - Vor PR-Erstellung müssen beide Läufe für den aktuellen Head-SHA `success` melden;
   frühere Runs auf `main` oder nur lokale Prüfungen ersetzen das nicht.
 - Die Quelle in `docs/ci/` ist versioniert und wird von `docs-validate` geprüft.
@@ -44,6 +44,13 @@ Ausführen: `npm run docs:validate`
 
 ### security-live-gate
 
+- SEC-03: Job `security-next-windows` prüft die installierte Next-/Decoder-Kette
+  und die Framework-Grenzen nativ unter Windows (`npm run test:security:next`).
+- Der Required Check `security-live-gate` hängt von diesem Job ab, führt dieselbe
+  Next-Suite unter Linux aus und prüft zusätzlich den Produktions-Build.
+  Kein Suite-Stamp bei fehlgeschlagener Windows-Regression. Ein expliziter
+  Fail-Closed-Schritt macht den Required Check bei fehlgeschlagenem/ausgelassenem
+  Windows-Job rot; ein lediglich übersprungener abhängiger Job genügt nicht.
 - SEC-01/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
   Session-Vertrauensgrenze, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
 - Live-Gate-Suite mit ≥95% Coverage

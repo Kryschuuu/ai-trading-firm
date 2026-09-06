@@ -4,10 +4,15 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.36.27` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.36.28` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Security-Upgrade v1.36.27:** SEC-01 ist behoben. Produktion mit Tokens benötigt
 ein unabhängiges `FIRM_SESSION_SECRET`; alle Instanzen neu starten und erneut
 anmelden. [Konfiguration und Migration](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
+
+**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js 16.3.4 und gepatchte
+native Bildverarbeitung. Für Linux und Windows: `npm ci`,
+`npm run test:security:next`, frischer Build und Neustart aller Instanzen.
+[Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
 
 Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar (kanonische URLs `/docs/<Datei>.md`).
 
@@ -55,7 +60,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 |-------------|-------|---------|
 | **[audits/](audits/)** | Zentrale Audit-Verwaltung — alle Audits chronologisch | [README](audits/README.md) erklärt Naming, Workflow, Status-Modell |
 | [audits/2026-09-03-peer-review/](audits/2026-09-03-peer-review/) | Senior Peer-Review 2026-09-03 — H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 | CLOSED, alle gefixt v1.36.2–v1.36.24 |
-| [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; übrige OPEN |
+| [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; übrige OPEN |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
@@ -154,7 +159,7 @@ sudo systemctl enable --now postgresql
 
 # 3. Projekt
 git clone <dein-repo> ai-trading-firm && cd ai-trading-firm
-npm install
+npm ci
 cp .env.example .env        # DATABASE_URL prüfen
 npx drizzle-kit push        # Tabellen anlegen
 
@@ -185,7 +190,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 │   │   ├── README.md         ← erklärt Naming, Workflow, Status-Modell
 │   │   ├── TEMPLATE/         ← Vorlage für neuen Audit
 │   │   ├── 2026-09-03-peer-review/  ← Peer-Review-Audit (CLOSED)
-│   │   └── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01 FIXED v1.36.27; übrige OPEN)
+│   │   └── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; übrige OPEN)
 │   ├── peer-reviews/         ← NEU: Peer-Review-Patches gesammelt
 │   │   ├── README.md
 │   │   ├── 2026-08-26-live-trading-readiness/
@@ -228,4 +233,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.36.25` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.36.28` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

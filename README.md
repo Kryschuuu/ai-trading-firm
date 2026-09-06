@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.27 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.36.28 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -60,7 +60,7 @@ docs/
 │   ├── README.md             # erklärt Naming, Workflow, Status-Modell
 │   ├── TEMPLATE/             # Vorlage für neuen Audit
 │   ├── 2026-09-03-peer-review/      # Peer-Review-Audit (CLOSED, H1-H10 etc.)
-│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01 FIXED v1.36.27; Rest OPEN)
+│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01/SEC-03 FIXED; Rest OPEN)
 ├── peer-reviews/             # NEU: Peer-Review-Patches gesammelt
 │   ├── README.md
 │   ├── 2026-08-26-live-trading-readiness/
@@ -90,6 +90,19 @@ Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`, Credential-/Ro
 * Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
 
 Flag-Referenz: [`CONFIGURATION.md`](CONFIGURATION.md) → „Auth-Modus“; Befund C1 in [`docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md`](docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md).
+
+## Security-Update: Next.js (SEC-03, v1.36.28)
+
+**Upgrade erforderlich:** v1.36.27 enthält Next.js 16.3.1 mit bekannten
+Framework-/Bildverarbeitungs-Schwachstellen. v1.36.28 pinnt **Next.js 16.3.4**
+und aktualisiert die native Decoder-Kette. Das gilt für **Linux und Windows**;
+API-Login oder ein derzeit nicht genutztes Image-UI ersetzen den Patch nicht.
+
+Aus dem geprüften Release mit `npm ci` neu installieren, `npm run test:security:next`
+ausführen, frisch bauen und alle Instanzen neu starten. Nicht nur das Manifest
+ändern oder alte `.next`-Artefakte weiterverwenden. Die Suite prüft auch die
+wirklich geladenen Libraries und läuft in CI unter Linux und Windows.
+[Upgrade und Betrieb](docs/security/README.md#nextjs-upgrade-sec-03).
 
 ## Security-Update: Sessions (SEC-01, v1.36.27)
 
@@ -184,7 +197,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/security/README.md` | Security-Übersicht: aggregierte Findings, Auth-Modell, RBAC |
 | `docs/audits/` | Zentrale Audit-Verwaltung: alle Audits chronologisch |
 | `docs/audits/2026-09-03-peer-review/` | Senior-Peer-Review 2026-09: H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 (CLOSED) |
-| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-02 bis SEC-10 weiterhin OPEN |
+| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; übrige OPEN |
 | `docs/peer-reviews/` | Peer-Review-Patches: gesammelt, verknüpft, nachvollziehbar |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |
@@ -198,6 +211,8 @@ Weitere Module: `MARKET_UNIVERSE`, `BROKER_ARCHITECTURE`, `BITUNIX`, `PAPER_TRAD
 npm test                 # Unit/Integration
 npm run typecheck        # tsc --noEmit
 npm run lint             # ESLint
+npm run test:security:next # SEC-03: Dependency-/Framework-Regressionen
+npm run security:live-gate # Next + Auth + Live-Gate (CI-Pflicht)
 npm run docs:validate    # Docs-as-Code-Wächter (grün nach Repo-Cleanup 2026-09-05)
 ./scripts/validate-setup.sh    # 18 Setup-Checks
 ```

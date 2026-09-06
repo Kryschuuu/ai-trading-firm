@@ -32,14 +32,47 @@ permissions:
   contents: read
 
 jobs:
+  # SEC-03: Windows-Pfadsemantik und nativer AVIF-Decoder muessen ebenfalls
+  # gepatcht sein. Keine DB/Orders; die isolierte Suite ist plattformneutral.
+  security-next-windows:
+    name: security-next-windows
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22 + npm-Cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Abhaengigkeiten
+        run: npm ci
+
+      - name: Next-Dependency- und Framework-Regressionen (Windows)
+        run: npm run test:security:next
+
   security-live-gate:
     name: security-live-gate
+    # Kein gruener Required Check/Suite-Stamp bei roter Windows-Regression.
+    needs: security-next-windows
+    # Abhaengige Jobs werden sonst bei Fehlern nur SKIPPED (kein sicherer
+    # Required Check). Explizit laufen und unten fail-closed abbrechen.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       DATABASE_URL: postgresql://test:test@0.0.0.0:5432/test
       STARTING_EQUITY: "10000"
     steps:
+      - name: Windows-Security-Pruefung muss erfolgreich sein
+        if: ${{ needs.security-next-windows.result != 'success' }}
+        run: |
+          echo "::error::Windows-Security-Pruefung nicht erfolgreich; kein Suite-Stamp."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -58,7 +91,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Auth-/Session-Regressionen und Live-Gate-Suite (Coverage >= 95 %)
+      - name: Produktions-Build mit gepatchtem Next.js
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          SCHEDULER_ENABLED: "false"
+
+      - name: Next-/Auth-Regressionen und Live-Gate-Suite (Coverage >= 95 %)
         run: npm run security:live-gate
 
       - name: Secret-Scan (Quellcode-Muster)
