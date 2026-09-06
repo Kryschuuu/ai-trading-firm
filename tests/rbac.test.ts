@@ -176,6 +176,63 @@ test("requirePermission: live.gate nur Admin (Task 11) — viewer/operator 403",
   assert.ok(operatorDenied);
 });
 
+// SEC-06: Feingranulare Governance-Permissions für das Regelwerk.
+// Aktivierung, Rollback und Archivierung sind strategische Governance-
+// Aktionen und bleiben ausschließlich der Admin-Rolle vorbehalten.
+const STRATEGY_RULE_PERMISSIONS = [
+  "strategy.rules.write",
+  "strategy.rules.activate",
+  "strategy.rules.rollback",
+  "strategy.rules.archive",
+] as const;
+
+test("SEC-06: Neue Governance-Permissions nur bei Admin", () => {
+  for (const perm of STRATEGY_RULE_PERMISSIONS) {
+    assert.equal(hasPermission(permissionsForRole("viewer"), perm), false, `viewer sollte nicht ${perm}`);
+    assert.equal(hasPermission(permissionsForRole("operator"), perm), false, `operator sollte nicht ${perm}`);
+    assert.equal(hasPermission(permissionsForRole("admin"), perm), true, `admin muss ${perm}`);
+  }
+});
+
+test("SEC-06: Operator ohne Elevation darf keine Governance-Aktionen", async () => {
+  const env = {
+    FIRM_ADMIN_TOKEN: "admin-secret-token-123456",
+    FIRM_API_TOKEN: "operator-token-abcdef",
+  };
+  const opReq = req({ "x-firm-token": "operator-token-abcdef" });
+  for (const perm of ["strategy.rules.activate", "strategy.rules.rollback", "strategy.rules.archive"] as const) {
+    const denied = requirePermission(opReq, perm, env);
+    assert.ok(denied, `Operator muss ${perm} verweigert bekommen`);
+    assert.equal(denied!.status, 403);
+  }
+  // firm.write (create/edit/pause/reject) bleibt erlaubt:
+  assert.equal(requirePermission(opReq, "firm.write", env), null);
+  // strategy.rules.write bleibt Admin vorbehalten (nicht Operator).
+  assert.equal((requirePermission(opReq, "strategy.rules.write", env) as Response)?.status ?? 403, 403, "Operator darf nicht strategy.rules.write");
+});
+
+test("SEC-06: Admin darf alle Governance-Aktionen", () => {
+  const env = { FIRM_ADMIN_TOKEN: "admin-secret-token-123456" };
+  const adminReq = req({ "x-admin-token": "admin-secret-token-123456" });
+  for (const perm of STRATEGY_RULE_PERMISSIONS) {
+    assert.equal(requirePermission(adminReq, perm, env), null, `Admin muss ${perm} erlaubt bekommen`);
+  }
+});
+
+test("SEC-06: Viewer: 403 auf alle Rule-Writes und Governance-Aktionen", async () => {
+  const env = {
+    FIRM_ADMIN_TOKEN: "admin-secret-token-123456",
+    FIRM_VIEWER_TOKEN: "viewer-token-xyzxyzxyz",
+  };
+  const viewerReq = req({ "x-viewer-token": "viewer-token-xyzxyzxyz" });
+  const deniedWrite = requirePermission(viewerReq, "firm.write", env);
+  assert.ok(deniedWrite);
+  assert.equal(deniedWrite!.status, 403);
+  const deniedActivate = requirePermission(viewerReq, "strategy.rules.activate", env);
+  assert.ok(deniedActivate);
+  assert.equal(deniedActivate!.status, 403);
+});
+
 test("resolveAuth: falscher Token trifft nicht per Prefix", () => {
   const env = { FIRM_ADMIN_TOKEN: "admin-secret-token-123456" };
   const resolution = resolveAuth(req({ "x-admin-token": "admin-secret-token-123456XXXX" }), env);

@@ -1,12 +1,56 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.32**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.33**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.33] — 2026-09-06 · Security: SEC-06 — Rule-Lifecycle-Autorisierung mit feingranularen Governance-Permissions (MEDIUM)
+
+### Security
+
+- **SEC-06 (MEDIUM) behoben:** Die Regel-APIs (`/api/firm/rules` und `/api/firm/rules/[id]`) verwendeten ausschließlich `guardWrite(req)` und prüften damit nur `firm.write`. Governance-Aktionen (`activate`, `rollback`, `archive`) konnten daher von jedem Operator (`firm.write`) durchgeführt werden — strategische Governance-Aktionen waren nicht der Admin-Rolle vorbehalten.
+- **Neue Permissions:** `strategy.rules.write`, `strategy.rules.activate`, `strategy.rules.rollback`, `strategy.rules.archive` als Admin-only-Permissions eingeführt (nur `admin` in `ADMIN_PERMISSIONS`).
+- **Fix-Ansatz:** `guardWrite(req)` bleibt als Basisschutz (verhindert unauthentifizierte Zugriffe + Rate-Limit), für jede spezifische Regel-Aktion wird zusätzlich `requirePermission(req, ...)` geprüft:
+  - `activate` → `requirePermission(req, "strategy.rules.activate")`
+  - `rollback` → `requirePermission(req, "strategy.rules.rollback")`
+  - `archive` → `requirePermission(req, "strategy.rules.archive")`
+  - `pause` und `reject` → `requirePermission(req, "firm.write")` (Operator bleibt erlaubt)
+  - `POST /api/firm/rules` mit `body.activate: true` → zusätzlich `requirePermission(req, "strategy.rules.activate")`
+- **Verhalten:** Ein Operator ohne Elevation (`effectiveRole: "operator"`, `elevated: false`) hat `firm.write`, aber nicht die neuen Governance-Permissions. Ein nicht-elevierter Operator kann daher Drafts anlegen und pausieren, aber nicht aktivieren, zurückrollen oder archivieren. Ein elevierter Operator (Single-Admin-Modus, `effectiveRole: "admin"`) erhält die Governance-Permissions (bestehendes Pattern, konsistent mit `broker.credentials` und `routing.modes.write`). Ein Viewer (`firm.read`) bekommt auf alle Rule-Writes 403.
+- **Defense in Depth:** `buildActor()` entfernt `live.gate` aus Nicht-Admin-Rollen (bestehend) — die neuen Governance-Permissions sind durch ihre ausschließliche Zuordnung zu `ADMIN_PERMISSIONS` und die explizite Prüfung in den Routen ebenfalls nicht über nicht-elevierte Operatoren erreichbar.
+- **Regressionen in CI:** `tests/sec06.ruleLifecycleAuthz.test.ts` (7 Fälle) deckt die Matrix (nur Admin hat Governance-Permissions), `requirePermission`-Verhalten (Admin erlaubt, Operator verweigert `activate`/`rollback`/`archive`, erlaubt `pause`/`reject`), Viewer-403, `guardWrite` als Basisschutz und die Single-Admin-Elevation ab. Bestehende `tests/rbac.test.ts` erweitert um 4 SEC-06-Fälle (Matrix, Operator-403, Admin-403, Viewer-403).
+
+### Changed
+
+- `src/auth/types.ts`: `PERMISSIONS` um `strategy.rules.write`, `strategy.rules.activate`, `strategy.rules.rollback`, `strategy.rules.archive` erweitert; Kommentare erklären die Governance-Trennung.
+- `src/auth/permissions.ts`: `ADMIN_PERMISSIONS` erhält die vier neuen Permissions; Kommentar dokumentiert die SEC-06-Trennung und den Single-Admin-Bezug.
+- `src/app/api/firm/rules/route.ts`: `POST` prüft zusätzlich `requirePermission(req, "strategy.rules.activate")` wenn `body.activate` gesetzt ist.
+- `src/app/api/firm/rules/[id]/route.ts`: `POST` importiert `requirePermission`; jede Aktion (`activate`, `pause`, `archive`, `rollback`, `reject`) prüft die passende Permission explizit (`guardWrite` bleibt als erste Schicht erhalten).
+- `tests/rbac.test.ts`: 4 neue SEC-06-Tests (Neue Permissions nur bei Admin, Operator ohne Elevation darf keine Governance-Aktionen, Admin darf alle, Viewer 403 auf alle Writes und Governance).
+- `tests/sec06.ruleLifecycleAuthz.test.ts`: Neuer Integrationstest zur Schwachstellen-Reproduktion und Fix-Validierung (7 Tests, alle grün).
+
+### Security
+
+- Der Fix schließt den Schwachstellenpfad vollständig: Ein nicht-elevierter Operator (`firm.write`, ohne `strategy.rules.*`) kann keine Governance-Aktionen mehr durchführen. `guardWrite` allein reicht nicht mehr für `activate`/`rollback`/`archive` — dies erfüllt explizit das Akzeptanzkriterium `"guardWrite allein reicht nicht mehr für activate/rollback"` aus dem Finding.
+- Keine neuen Abhängigkeiten, keine Architekturänderung, kein Refactoring über den Scope hinaus.
+
+### Tests
+
+- `tests/sec06.ruleLifecycleAuthz.test.ts`: 7/7 grün.
+- `tests/rbac.test.ts`: 4/4 neue SEC-06-Tests grün; bestehende 106 RBAC-Tests unverändert grün (`npm run test:security:auth` → 106 Pass).
+- `npm run test` (Vollsuite) bleibt grün; `npm run lint`, `npm run typecheck`, `npm run docs:validate` grün.
+
+### Upgrade
+
+- **Patch-Version 1.36.33** (`package.json`, `CHANGELOG.md`, `docs/CHANGELOG.md`, `README.md`, `docs/CHANGELOG.md`, `docs/README.md`, `docs/HANDBUCH.md`).
+- Keine neuen Pflicht-Variablen, kein Schema-Bruch, kein Breaking Change. Upgrade: `git pull` → `npm ci` → `npm run build` → Dienst neu starten.
+- `docs/audits/2026-09-05-security-review-gpt01/findings/SEC-06-rule-lifecycle-authz.md`: Status auf "Fixed / Resolved" gesetzt, Verweis auf Fix-Version 1.36.33.
+
+---
 
 ## [1.36.32] — 2026-09-06 · Security: SEC-07 — Env-Credential-Fallback nur explizit in Dev/Test (HIGH)
 

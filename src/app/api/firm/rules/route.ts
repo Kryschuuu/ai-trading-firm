@@ -85,6 +85,11 @@ export async function POST(req: Request) {
     }
     let rule = upsert.rule;
     if (body.activate) {
+      // SEC-06: Aktivierung ist eine strategische Governance-Aktion und
+      // erfordert explizit die Admin-Permission strategy.rules.activate.
+      // guardWrite allein (firm.write) reicht nicht mehr.
+      const deniedActivate = requirePermission(req, "strategy.rules.activate");
+      if (deniedActivate) return deniedActivate;
       const activated = await activateRule(rule.id, "API");
       if (!activated.ok) {
         return NextResponse.json({ ok: false, error: activated.error }, { status: 409 });

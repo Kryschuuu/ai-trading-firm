@@ -31,6 +31,14 @@ const ADMIN_PERMISSIONS: readonly Permission[] = [
   // Task 11: Live-Gate-Bedienung NUR für Admin — Human-Gate bleibt
   // strukturell Teil der State-Machine (Cooldown, 4-Augen, Audit).
   "live.gate",
+  // SEC-06: Governance-Aktionen am Regelwerk bleiben Admin vorbehalten.
+  // Operator (firm.write) darf Drafts anlegen/pausieren, nicht aktivieren,
+  // rollbacken oder archivieren. Diese Trennung verhindert, dass ein
+  // kompromittierter Operator-Token strategische Governance durchführt.
+  "strategy.rules.write",
+  "strategy.rules.activate",
+  "strategy.rules.rollback",
+  "strategy.rules.archive",
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {

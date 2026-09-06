@@ -4,95 +4,37 @@
 - **Severity:** MEDIUM
 - **Bereich:** AuthZ / Governance
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-06 — Rule-Lifecycle benötigt keine spezifische Privilegstufe
-- **Status:** OPEN
-- **Fix-Version:** -
-- **Datei(en):** `src/app/api/firm/rules/route.ts`, `src/app/api/firm/rules/[id]/route.ts`, `src/auth/permissions.ts`, `src/lib/ruleService.ts`
-- **Peer-Review-Patch:** TBD
+- **Status:** Fixed / Resolved
+- **Fix-Version:** 1.36.33
+- **Fix-Commit / PR:** `arena/01a078d8-ai-trading-firm` — Fix: Neue Governance-Permissions (`strategy.rules.*`) + explizite `requirePermission`-Prüfung in Rule-APIs
+- **Datei(en):** `src/auth/types.ts`, `src/auth/permissions.ts`, `src/app/api/firm/rules/route.ts`, `src/app/api/firm/rules/[id]/route.ts`, `tests/rbac.test.ts`, `tests/sec06.ruleLifecycleAuthz.test.ts`
+- **Peer-Review-Patch:** Implementiert und validiert (Tests: `tests/sec06.ruleLifecycleAuthz.test.ts`: 7/7 grün; `tests/rbac.test.ts`: 4 neue SEC-06-Tests grün; `npm run test:security:auth`: 106 Pass)
 
-## Beschreibung
+## Root Cause (zusammengefasst vor Fix)
 
-Die Rollenmatrix enthält:
+Die Regel-APIs (`POST /api/firm/rules` und `POST /api/firm/rules/[id]`) verwendeten ausschließlich `guardWrite(req)`, das nur auf `firm.write` prüft. Es fehlte jede feingranulare Autorisierung für Governance-Aktionen (`activate`, `rollback`, `archive`). Dadurch konnte ein Operator (`firm.write`) strategische Governance-Aktionen durchführen, die laut Architektur nur der Admin-Rolle vorbehalten sein sollten.
 
-```text
-operator:
-  firm.write
-  firm.kill
-  firm.config
-  broker.test
+## Behobene Schwachstelle
 
-admin zusätzlich:
-  broker.credentials
-  routing.modes.write
-  live.gate
-```
+- Neue Permissions `strategy.rules.write`, `strategy.rules.activate`, `strategy.rules.rollback`, `strategy.rules.archive` als Admin-only-Permissions eingeführt.
+- `POST /api/firm/rules` prüft zusätzlich `requirePermission(req, "strategy.rules.activate")` wenn `body.activate` gesetzt ist.
+- `POST /api/firm/rules/[id]` prüft explizit für jede Aktion (`activate` → `strategy.rules.activate`, `rollback` → `strategy.rules.rollback`, `archive` → `strategy.rules.archive`, `pause`/`reject` → `firm.write`).
+- `guardWrite(req)` bleibt als Basisschutz erhalten (verhindert unauthentifizierte Zugriffe + Rate-Limit), reicht aber allein nicht mehr für Governance-Aktionen.
 
-Die Rule-APIs verlangen jedoch lediglich `guardWrite(req)` und lassen damit einen Benutzer mit `firm.write` unter anderem:
+## Akzeptanzkriterien / Tests (Status: alle erfüllt)
 
-- Regeln anlegen,
-- Regeln aktivieren (`activate` inkl. `POST /api/firm/rules` mit `activate: true`),
-- Regeln pausieren,
-- Regeln archivieren,
-- Regeln zurückrollen,
-- Regeln ablehnen.
-
-Das widerspricht zumindest teilweise der im Rule-Service beschriebenen Governance-Idee, wonach Aktivierung eine explizite, auditierte Handlung sein soll.
-
-Echtes Autorisierungsproblem, falls Operator nicht strategische Governance besitzen soll.
-
-## Beweis / PoC
-
-```ts
-// src/auth/permissions.ts — Operator hat firm.write, aber keine Rule-spezifische Permission
-const OPERATOR_PERMISSIONS = [..., "firm.write", "firm.kill", "firm.config", "broker.test"];
-
-// src/app/api/firm/rules/[id]/route.ts
-const denied = guardWrite(req); // nur firm.write
-switch (body.action) {
-  case "activate":
-  case "pause":
-  case "archive":
-  case "rollback":
-  case "reject":
-}
-```
-
-Erwartet (Governance): activate/rollback/archive nur Admin.  
-Tatsächlich: jeder Actor mit `firm.write`.
-
-## Remediation (aus Audit + eigene Bewertung)
-
-Eigene Permissions einführen:
-
-```text
-strategy.rules.write
-strategy.rules.activate
-strategy.rules.rollback
-```
-
-Beispiel:
-
-```text
-viewer   -> read
-operator -> create/edit/pause
-admin    -> activate/rollback/archive
-```
-
-Noch besser: Aktivierung einer Regel und insbesondere Rollback nur mit einem expliziten Governance-Gate.
-
-## Akzeptanzkriterien / Tests
-
-- [ ] Operator darf Draft anlegen / pausieren, nicht aktivieren/rollback/archivieren
-- [ ] Admin darf activate/rollback/archive
-- [ ] Viewer: 403 auf alle Rule-Writes
-- [ ] Permission-Katalog und Tests (`rbac` / Rule-API) decken die Matrix ab
-- [ ] `guardWrite` allein reicht nicht mehr für activate/rollback
+- [x] Operator darf Draft anlegen / pausieren, nicht aktivieren/rollback/archivieren
+- [x] Admin darf activate/rollback/archive
+- [x] Viewer: 403 auf alle Rule-Writes und Governance-Aktionen
+- [x] Permission-Katalog (`rbac` / Rule-API) deckt die Matrix ab (`tests/rbac.test.ts`: neue Permissions nur bei Admin; `tests/sec06.ruleLifecycleAuthz.test.ts`: Matrix, Operator-403, Admin-Null, Viewer-403)
+- [x] `guardWrite` allein reicht nicht mehr für activate/rollback (`tests/sec06.ruleLifecycleAuthz.test.ts`: Operator `body.activate` → 403)
 
 ## Changelog-Blurb
 
 ```
-SEC-06 (MEDIUM): Rule-Lifecycle — eigene Permissions für write/activate/rollback statt nur firm.write
+SEC-06 (MEDIUM): Rule-Lifecycle — eigene Permissions (strategy.rules.write/.activate/.rollback/.archive) für Governance-Aktionen; Operator (firm.write) kann nicht mehr aktivieren/rollbacken/archivieren; Admin behält Governance vor; Tests und RBAC-Matrix abgedeckt (v1.36.33).
 ```
 
 ## Versions-Hinweis
 
-PATCH, vor echter Multi-Role-Nutzung.
+PATCH (v1.36.33). Keine neuen Pflicht-Variablen, kein Schema-Bruch, kein Breaking Change. Upgrade: `git pull` → `npm ci` → `npm run build` → Dienst neu starten.

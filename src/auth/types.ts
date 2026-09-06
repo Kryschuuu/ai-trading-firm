@@ -26,6 +26,13 @@ export const PERMISSIONS = [
   "broker.credentials",
   "routing.modes.write",
   "live.gate",
+  // SEC-06: Feingranulare Governance-Permissions für das Regelwerk.
+  // Aktivierung, Rollback und Archivierung sind strategische Governance-
+  // Aktionen und bleiben der Admin-Rolle vorbehalten.
+  "strategy.rules.write",
+  "strategy.rules.activate",
+  "strategy.rules.rollback",
+  "strategy.rules.archive",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
