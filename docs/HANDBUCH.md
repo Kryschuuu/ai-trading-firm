@@ -435,10 +435,10 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `POST` | `/api/firm/missions` | `{title, objective, symbol, riskBudget, maxPositionPct, status?}` | `{ok, mission, warnings?}` |
 | `PUT` | `/api/firm/missions` | `{id, …felder wie POST}` | `{ok, mission, warnings?}` |
 | `PUT` | `/api/firm/agents` | `{agentId, systemPrompt}` | `{ok, agent, warnings?}` |
-| `GET/POST` | `/api/firm/rules` | – / `{rule, activate?}` | Regelwerk lesen (`GET`: `firm.read`, `private, no-store`) bzw. Regel anlegen (DRAFT) |
-| `POST` | `/api/firm/rules/[id]` | `{action: activate\|pause\|archive\|rollback\|reject, by?}` | Lebenszyklus/Versionierung einer Regel |
+| `GET/POST` | `/api/firm/rules` | – / `{rule, activate?}` | Lesen: `firm.read`, `private, no-store`; Draft: `strategy.rules.write`; `activate: true`: zusätzlich `strategy.rules.activate` |
+| `POST` | `/api/firm/rules/[id]` | `{action: activate\|pause\|archive\|rollback\|reject, reason?}` | `strategy.rules.write`; activate/rollback/archive zusätzlich administrativ (Kap. 17). Kein client-geliefertes `by` |
 | `POST` | `/api/firm/rules/[id]/backtest` | `{interval?, limit?, startingEquity?}` | deterministischer Historie-Backtest + Speicherung |
-| `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen / Status |
+| `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen (`POST`: `strategy.rules.activate`) / Status |
 | `GET` | `/api/firm/micro` | – | Executor-Prozess-Status + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
 | `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions, `authMode`; 401 wenn Credential erwartet und fehlt) |
@@ -1503,7 +1503,8 @@ Der Scheduler ruft ihn automatisch alle `MACRO_CYCLE_INTERVAL_MIN` (Default 60 m
 auf. Manuell:
 
 ```bash
-curl -s -X POST localhost:3369/api/firm/macro -H 'Content-Type: application/json' -d '{}' \
+curl -s -X POST localhost:3369/api/firm/macro \
+  -H "x-firm-token: ${FIRM_ADMIN_TOKEN:-$FIRM_API_TOKEN}" -H 'Content-Type: application/json' -d '{}' \
  | jq '.cycle | {ok, rule: .rule, warnings}'
 ```
 
@@ -1581,7 +1582,9 @@ deutlich unter deiner Schwelle.** Dann: 10–20 Paper-Durchläufe mit
 
 ```bash
 curl -s -X POST localhost:3369/api/firm/rules/$RULE \
-  -H 'Content-Type: application/json' -d '{"action":"rollback"}' | jq '{detail, ok}'
+  -H 'Content-Type: application/json' \
+  -H "x-firm-token: ${FIRM_ADMIN_TOKEN:-$FIRM_API_TOKEN}" \
+  -d '{"action":"rollback"}' | jq '{detail, ok}'
 # → {"detail":"Rollback auf v1 (…)", "ok":true}
 ```
 
@@ -1704,13 +1707,28 @@ Systemrollen). Die Beschreibungen sind die **aktuellen Standard-Systemprompts**
 
 ## 17. Regelwerk-API (Rules, Macro, Micro, Backtest)
 
-Die schreibenden Endpunkte sind mit `x-firm-token` geschützt, sobald
-`FIRM_API_TOKEN` gesetzt ist. Das Lesen von `/api/firm/rules` verlangt seit
-SEC-02 (v1.36.31) zusätzlich `firm.read`; Viewer, Operator und Admin erhalten
-sie über ein Header-Credential oder eine gültige Browser-Session. Fehlt der
-Operator-Token, aber es existieren Admin-/Viewer-Token, entscheidet für
-Mutationen die Permission `firm.write` (C1, v1.36.13) — und ohne jedes
-Credential ist die Schreib-API nur bei wirksamem `AUTH_MODE=local-open` offen.
+Seit SEC-06 (v1.36.34) verlangen Erstellung/Versionierung, Pausieren und
+Ablehnen `strategy.rules.write` (Operator oder Admin). Aktivierung, Rollback
+und Archivierung verlangen zusätzlich `strategy.rules.activate`,
+`strategy.rules.rollback` bzw. `strategy.rules.archive` (Admin). Der manuelle
+Makro-Start braucht ebenfalls `strategy.rules.activate`. Das Lesen von
+`/api/firm/rules` verlangt `firm.read` (Viewer, Operator oder Admin).
+Header-Credentials, Bearer und signierte Browser-Sessions verwenden dieselbe
+aktuelle Rollenmatrix. Backtests verändern keinen Regelstatus und behalten
+ihren bisherigen `guardWrite`-Schutz.
+
+Echte Multi-Role-Trennung braucht verschiedene `FIRM_ADMIN_TOKEN` und
+`FIRM_API_TOKEN`; ohne Admin-Token bleibt der Operator effektiv Single-Admin.
+Ohne jedes Credential ist nur bewusstes `AUTH_MODE=local-open` administrativ
+offen. Der interne Makro-Scheduler behält unabhängig davon seine
+`REQUIRE_HUMAN_APPROVAL`-Policy. [Vollständige Matrix und Upgrade](security/README.md#rule-governance-sec-06).
+
+`by`, `actor` und `sourceRole` dürfen nicht mitgesendet werden — weder auf
+Top-Level noch in `rule` (400 `ACTOR_NOT_CLIENT_CONTROLLED`). API-Herkunft ist
+serverseitig `MANUAL`; der Audit-Akteur kommt aus dem Credential, auch beim
+Anlegen. `activate` muss, falls vorhanden, ein Boolean sein. Unbekannte Actions
+und ungültige Request-Typen ergeben 400, fehlende Rechte 403, inhaltlich ungültige
+Specs 422; keine solche Ablehnung erzeugt oder verändert eine Regel.
 
 ### 17.1 Regeln auflisten
 
@@ -1725,7 +1743,7 @@ Regel), `executions` (letzte 20) und `summaries`.
 
 ```bash
 curl -s -X POST localhost:3369/api/firm/rules -H 'Content-Type: application/json' \
-  -H 'x-firm-token: …' -d '{
+  -H "x-firm-token: $FIRM_API_TOKEN" -d '{
     "name": "BTC RSI-Kauf manuell",
     "symbol": "BTC",
     "condition": {"logic":"all","conditions":[
@@ -1734,9 +1752,14 @@ curl -s -X POST localhost:3369/api/firm/rules -H 'Content-Type: application/json
     ]},
     "action": {"side":"LONG","stopLossPct":5,"takeProfitRR":1.5,"riskBudgetPct":0.02,"maxPositionPct":0.25},
     "window": {"timeframe":"15m","maxExecutionsPerDay":3,"cooldownMinutes":120},
-    "activate": true
+    "activate": false
   }' | jq '{ok, rule: {id: .rule.id, status: .rule.status, version: .rule.version}}'
 ```
+
+Das Beispiel legt einen Draft an. Für eine direkte Freigabe `activate: true`
+setzen und ein Admin-Credential verwenden; `activate` wegzulassen entspricht
+`false`. Eine unveränderte, bereits aktive Spezifikation bleibt beim idempotenten
+Upsert unverändert — sie wird nicht erneut aktiviert.
 
 **Wichtig:** Alle Werte laufen durch `sanitizeRuleSpec()` — Whitelist + Klemmung.
 Unbekannte Felder, `SHORT`, `__proto__`-Keys oder exotische Operatoren werden
@@ -1745,16 +1768,21 @@ abgelehnt/verworfen (422 bzw. stillschweigend normalisiert).
 ### 17.3 Lebenszyklus
 
 ```bash
-for A in activate pause archive rollback reject; do
-  curl -s -X POST localhost:3369/api/firm/rules/$RULE -H 'Content-Type: application/json' \
-    -d "{\"action\":\"$A\"}" | jq -c '{ok, detail}'
-done
+# Pro Aufruf eine zum aktuellen Status passende Aktion wählen.
+# Für activate/rollback/archive: Admin (oder bewusster Single-Admin).
+ACTION=activate
+curl -s -X POST "localhost:3369/api/firm/rules/$RULE" \
+  -H 'Content-Type: application/json' \
+  -H "x-firm-token: ${FIRM_ADMIN_TOKEN:-$FIRM_API_TOKEN}" \
+  -d "{\"action\":\"$ACTION\"}" | jq -c '{ok, detail}'
+# pause/reject können auch mit dem separaten Operator-Credential ausgeführt werden.
 ```
 
 ### 17.4 Makro-Zyklus & Mikro-Status
 
 ```bash
-curl -s -X POST localhost:3369/api/firm/macro | jq '.cycle.rule'
+curl -s -X POST localhost:3369/api/firm/macro \
+  -H "x-firm-token: ${FIRM_ADMIN_TOKEN:-$FIRM_API_TOKEN}" | jq '.cycle.rule'
 curl -s localhost:3369/api/firm/micro | jq '{process: .microProcess.reachable, active: [.activeRules[].name], executions: [.executions[0:3][] | {status, symbol, latencyMicros}]}'
 ```
 
@@ -1772,7 +1800,7 @@ Vor jeder Änderung an der Regel-Engine oder vor jeder Live-Aktivierung:
 **Regel-Ebene**
 
 - [ ] Backtest gelaufen (`POST /api/firm/rules/:id/backtest`), Ergebnis in `rule_backtests`.
-- [ ] `riskScore ≤ 0.9` und `sourceMode` bekannt (SIGMA = LLM, FALLBACK = deterministisch).
+- [ ] `riskScore ≤ 0.9` und `sourceMode` bekannt (SIGMA = LLM, FALLBACK = deterministisch, MANUAL = API-Erstellung).
 - [ ] Rollback-Ziel dokumentiert (vorherige Version bleibt erhalten).
 - [ ] `maxExecutionsPerDay` und `cooldownMinutes` bewusst gewählt (Spam-Schutz).
 - [ ] Kein Feld/Operator genutzt, das nicht in `RULE_FIELDS` steht (wird sonst verworfen).
