@@ -9,6 +9,7 @@ import {
   listRuleExecutions,
 } from "@/lib/ruleService";
 import { guardWrite } from "@/lib/apiAuth";
+import { API_RULE_SOURCE_ROLE, rejectClientActorFields, ruleActor } from "@/lib/ruleActor";
 import { requirePermission } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";
 
@@ -23,6 +24,11 @@ export const maxDuration = 60;
  *        Die Spezifikation wird hier IMMER durch sanitizeRuleSpec() geschleust
  *        (Whitelist + Code-Klemmung) — es gibt keinen Weg, eine unvalidierte
  *        Regel in die DB zu schreiben.
+ *
+ * SEC-05: Weder die Herkunftsrolle (`sourceRole`) noch die Audit-Attribution
+ *        (`by`) sind client-steuerbar. Über die API erzeugte Regeln sind immer
+ *        `MANUAL`; eine direkt mitaktivierte Regel wird dem authentifizierten
+ *        Akteur zugeschrieben.
  */
 export async function GET(req: Request) {
   // SEC-02: active rules, feedback and executions expose the trading strategy.
@@ -66,10 +72,19 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => ({}))) as {
       rule?: RuleSpecInput;
       activate?: boolean;
-      sourceRole?: "CEO" | "RESEARCH" | "MANUAL";
     };
+
+    // SEC-05: `by`/`actor`/`sourceRole` sind nicht Teil des API-Vertrags —
+    // weder auf Top-Level noch verschachtelt in `rule`.
+    const forgedTop = rejectClientActorFields(body);
+    if (forgedTop) return forgedTop;
+    const forgedNested = rejectClientActorFields(body.rule);
+    if (forgedNested) return forgedNested;
+
     const input = body.rule ?? body;
-    const validated = sanitizeRuleSpec(input, body.sourceRole ?? "MANUAL");
+    // `forceSourceRole` schließt den Pfad auch dann, wenn die Spezifikation
+    // (z. B. über eine kopierte Regel) ein `sourceRole` mitführt.
+    const validated = sanitizeRuleSpec(input, API_RULE_SOURCE_ROLE, { forceSourceRole: true });
     if (!validated.ok) {
       return NextResponse.json(
         { ok: false, errors: validated.errors },

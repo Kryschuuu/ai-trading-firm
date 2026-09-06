@@ -15,6 +15,7 @@ native Bildverarbeitung. Für Linux und Windows: `npm ci`,
 [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
 
 **Security-Upgrade v1.36.33:** SEC-07 ist behoben (Env-Fallback nur noch explizit Dev/Test hinter BROKER_ALLOW_ENV_FALLBACK). Vorheriger Eintrag v1.36.31: SEC-02 ist behoben: Die sensitiven Dashboard-Reads
+**Security-Upgrade v1.36.33:** SEC-05 ist behoben (Audit-Attribution von Regel-Änderungen kommt ausschließlich aus dem authentifizierten Credential; `by`/`actor`/`sourceRole` sind kein Teil der API mehr). Vorheriger Eintrag v1.36.32: SEC-07 ist behoben (Env-Fallback nur noch explizit Dev/Test hinter BROKER_ALLOW_ENV_FALLBACK). Vorheriger Eintrag v1.36.31: SEC-02 ist behoben: Die sensitiven Dashboard-Reads
 für Firmenstatus, Protokoll, Report, Regeln, Provider und Routing verlangen
 jetzt `firm.read` und werden nicht in Shared Caches gespeichert. Viewer,
 Operator und Admin sowie bestehende Browser-Sessions bleiben leseberechtigt.
@@ -75,6 +76,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[audits/](audits/)** | Zentrale Audit-Verwaltung — alle Audits chronologisch | [README](audits/README.md) erklärt Naming, Workflow, Status-Modell |
 | [audits/2026-09-03-peer-review/](audits/2026-09-03-peer-review/) | Senior Peer-Review 2026-09-03 — H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 | CLOSED, alle gefixt v1.36.2–v1.36.24 |
 | [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-07 FIXED v1.36.33; übrige OPEN |
+| [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33; SEC-07 FIXED v1.36.32; übrige OPEN |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
@@ -205,6 +207,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 │   │   ├── TEMPLATE/         ← Vorlage für neuen Audit
 │   │   ├── 2026-09-03-peer-review/  ← Peer-Review-Audit (CLOSED)
 │   │   └── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01/02/03/10/04/07 FIXED bis v1.36.33; übrige OPEN)
+│   │   └── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01/02/03/10/04/07/05 FIXED bis v1.36.33; übrige OPEN)
 │   ├── peer-reviews/         ← NEU: Peer-Review-Patches gesammelt
 │   │   ├── README.md
 │   │   ├── 2026-08-26-live-trading-readiness/
