@@ -1,12 +1,16 @@
 /**
- * SecretStore-Interface für den Alpaca-Adapter.
+ * SecretStore-Interface fuer den Alpaca-Adapter.
  *
- * Default: Venue-backed Named Store der Control Plane
- * (`createVenueBackedNamedStore`) mit Env-Fallback
- * `ALPACA_API_KEY` / `ALPACA_API_SECRET`. Niemals Disk-Klartext,
- * niemals Frontend. Siehe docs/ALPACA.md.
+ * Default (SEC-07, v1.36.32): Venue-backed Named Store der Control Plane
+ * (`createVenueBackedNamedStore`) — in Produktion KEIN Env-Fallback.
+ * `ALPACA_API_KEY` / `ALPACA_API_SECRET` nur noch in explizitem
+ * Dev/Test-Modus hinter `BROKER_ALLOW_ENV_FALLBACK=true`. Niemals
+ * Disk-Klartext, niemals Frontend. Siehe docs/ALPACA.md.
  */
-import { createVenueBackedNamedStore } from "../control-plane/secretStore";
+import {
+  createVenueBackedNamedStore,
+  isEnvCredentialFallbackAllowed,
+} from "../control-plane/secretStore";
 
 export interface SecretStore {
   /** Liefert den Klartext oder `null`, wenn nicht gesetzt. */
@@ -18,8 +22,8 @@ const SECRET_NAME = "ALPACA_API_SECRET";
 
 /**
  * Dev-/Test-Fallback und DI-Implementierung: liest `process.env`.
- * Produktion nutzt `createDefaultAlpacaSecretStore` (verschlüsselter
- * Control-Plane-Store, Env nur wenn dort nichts liegt).
+ * Produktion nutzt `createDefaultAlpacaSecretStore` (verschluesselter
+ * Control-Plane-Store, Env nur wenn explizit erlaubt).
  */
 export class EnvSecretStore implements SecretStore {
   constructor(private readonly env: Record<string, string | undefined> = process.env) {}
@@ -35,15 +39,36 @@ export class EnvSecretStore implements SecretStore {
 /**
  * Default-Store des Adapters: AES-256-GCM-Store der Control Plane
  * (AAD = ALPACA), gemappt auf ALPACA_API_KEY / ALPACA_API_SECRET.
- * Fehlt SECRET_STORE_KEY oder der Datensatz, greift der Env-Fallback.
- * `EnvSecretStore` bleibt für Tests injizierbar.
+ *
+ * SEC-07 Fix (v1.36.32):
+ *   - credential exists in secure store → use it
+ *   - credential absent                 → no credential (null)
+ *   - store failure (AUTH_FAILED, STORAGE_UNAVAILABLE) → HARD FAIL (throw)
+ *   - Env-Fallback nur wenn `BROKER_ALLOW_ENV_FALLBACK=true` und
+ *     NODE_ENV != production (expliziter Dev/Test-Modus).
+ *
+ * Fehlt SECRET_STORE_KEY:
+ *   - mit explizitem Dev-Fallback-Flag → EnvFallback (Dev-Komfort)
+ *   - ohne Flag / in Produktion      → kein Credential (fail-closed)
+ *
+ * `EnvSecretStore` bleibt fuer Tests injizierbar.
  */
 export function createDefaultAlpacaSecretStore(
   env: Record<string, string | undefined> = process.env
 ): SecretStore {
   const envFallback = new EnvSecretStore(env);
+  const allowEnvFallback = isEnvCredentialFallbackAllowed(env);
+
   if (!env.SECRET_STORE_KEY || env.SECRET_STORE_KEY.trim().length === 0) {
-    return envFallback;
+    if (allowEnvFallback) {
+      return envFallback;
+    }
+    // Fail-closed: kein Store-Key und kein expliziter Dev-Fallback → kein Credential.
+    return {
+      async get(): Promise<string | null> {
+        return null;
+      },
+    };
   }
   return createVenueBackedNamedStore({
     venue: "ALPACA",
@@ -68,6 +93,7 @@ export function createDefaultAlpacaSecretStore(
     envFallback,
     keyName: KEY_NAME,
     secretName: SECRET_NAME,
+    allowEnvFallback,
   });
 }
 

@@ -1,5 +1,5 @@
 /**
- * Unit-Tests des verschluesselten Secret-Stores (Task 08).
+ * Unit-Tests des verschluesselten Secret-Stores (Task 08) + SEC-07 Fix.
  *
  * Pflicht laut DoD:
  *   - Roundtrip put/get
@@ -8,6 +8,7 @@
  *   - AAD-Bindung (Datensatz einer anderen Venue) → Fehler
  *   - Buffer-Nullung (zeroize)
  *   - Env-/KMS-Key-Handling, Backend-Fallback, Task-07-Bridge
+ *   - SEC-07: kein Env-Fallback nach Store-Fehlern in Produktion
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -24,6 +25,7 @@ import {
   createAesGcmSecretStore,
   createVenueBackedNamedStore,
   deriveStoreKey,
+  isEnvCredentialFallbackAllowed,
   openEnvelope,
   resolveSecretStorage,
   sealEnvelope,
@@ -258,9 +260,9 @@ test("resolveSecretStorage: explizite Backends + db→file-Fallback (ohne DATABA
   }
 });
 
-// ── Task-07-Bridge ──────────────────────────────────────────────────────────
+// ── Task-07-Bridge — SEC-07 Fix ─────────────────────────────────────────────
 
-test("createVenueBackedNamedStore: entschluesselte Felder auf BITUNIX_*-Namen; Env-Fallback", async () => {
+test("createVenueBackedNamedStore: SEC-07 — Produktion fail-closed, kein Env-Fallback bei fehlendem Datensatz", async () => {
   const store = memStore();
   await store.put("BITUNIX", {
     apiKey: "bt-key-abcdef0123456789",
@@ -281,6 +283,7 @@ test("createVenueBackedNamedStore: entschluesselte Felder auf BITUNIX_*-Namen; E
     envFallback,
     keyName: "BITUNIX_API_KEY",
     secretName: "BITUNIX_API_SECRET",
+    // allowEnvFallback nicht gesetzt → Produktion fail-closed
   });
 
   // Store gewinnt ueber Env:
@@ -289,8 +292,149 @@ test("createVenueBackedNamedStore: entschluesselte Felder auf BITUNIX_*-Namen; E
   // Unbekannte Namen werden nie beantwortet:
   assert.equal(await bridge.get("ANDERER_NAME"), null);
 
-  // Ohne Store-Datensatz greift der Env-Fallback (task-07-Verhalten):
+  // Ohne Store-Datensatz → kein Env-Fallback mehr in Produktion (SEC-07):
   await store.delete("BITUNIX");
-  assert.equal(await bridge.get("BITUNIX_API_KEY"), "env-key-abcdef0123456789");
-  assert.equal(await bridge.get("BITUNIX_API_SECRET"), "env-secret-abcdef012345");
+  assert.equal(await bridge.get("BITUNIX_API_KEY"), null);
+  assert.equal(await bridge.get("BITUNIX_API_SECRET"), null);
+});
+
+test("createVenueBackedNamedStore: SEC-07 — Store-Fehler → HARD FAIL, kein Env-Fallback", async () => {
+  const failingStore: VenueSecretStore = {
+    async put() {},
+    async get() {
+      throw new SecretStoreError("AUTH_FAILED", "simulierter Auth-Fehler");
+    },
+    async delete() { return false; },
+    async exists() { return true; },
+  };
+  const envFallback = {
+    async get(name: string): Promise<string | null> {
+      return `env-${name}`;
+    },
+  };
+  const bridge = createVenueBackedNamedStore({
+    venue: "BITUNIX",
+    store: failingStore,
+    envFallback,
+    keyName: "BITUNIX_API_KEY",
+    secretName: "BITUNIX_API_SECRET",
+  });
+
+  await assert.rejects(
+    () => bridge.get("BITUNIX_API_KEY"),
+    (err: unknown) => err instanceof SecretStoreError && err.code === "AUTH_FAILED"
+  );
+  await assert.rejects(
+    () => bridge.get("BITUNIX_API_SECRET"),
+    (err: unknown) => err instanceof SecretStoreError && err.code === "AUTH_FAILED"
+  );
+});
+
+test("createVenueBackedNamedStore: SEC-07 — STORAGE_UNAVAILABLE → HARD FAIL", async () => {
+  const failingStore: VenueSecretStore = {
+    async put() {},
+    async get() {
+      throw new SecretStoreError("STORAGE_UNAVAILABLE", "simulierter Storage-Fehler");
+    },
+    async delete() { return false; },
+    async exists() { return false; },
+  };
+  const envFallback = {
+    async get(): Promise<string | null> { return "env-value"; },
+  };
+  const bridge = createVenueBackedNamedStore({
+    venue: "ALPACA",
+    store: failingStore,
+    envFallback,
+    keyName: "ALPACA_API_KEY",
+    secretName: "ALPACA_API_SECRET",
+  });
+
+  await assert.rejects(
+    () => bridge.get("ALPACA_API_KEY"),
+    (err: unknown) => err instanceof SecretStoreError && err.code === "STORAGE_UNAVAILABLE"
+  );
+});
+
+test("createVenueBackedNamedStore: SEC-07 — Dev-Modus mit explizitem Flag erlaubt Env-Fallback", async () => {
+  // Simuliere non-production
+  const originalNodeEnv = process.env.NODE_ENV;
+  (process.env as any).NODE_ENV = "development";
+  try {
+    const store = memStore();
+    const envValues: Record<string, string> = {
+      BITUNIX_API_KEY: "env-key-abcdef0123456789",
+      BITUNIX_API_SECRET: "env-secret-abcdef012345",
+    };
+    const envFallback = {
+      async get(name: string): Promise<string | null> {
+        return envValues[name] ?? null;
+      },
+    };
+    const bridge = createVenueBackedNamedStore({
+      venue: "BITUNIX",
+      store,
+      envFallback,
+      keyName: "BITUNIX_API_KEY",
+      secretName: "BITUNIX_API_SECRET",
+      allowEnvFallback: true,
+    });
+
+    // Kein Datensatz, aber Flag erlaubt Fallback in Dev:
+    assert.equal(await bridge.get("BITUNIX_API_KEY"), "env-key-abcdef0123456789");
+    assert.equal(await bridge.get("BITUNIX_API_SECRET"), "env-secret-abcdef012345");
+  } finally {
+    (process.env as any).NODE_ENV = originalNodeEnv;
+  }
+});
+
+test("createVenueBackedNamedStore: SEC-07 — Produktion ignoriert allowEnvFallback (Defense in Depth)", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  (process.env as any).NODE_ENV = "production";
+  try {
+    const store = memStore();
+    const envFallback = {
+      async get(): Promise<string | null> { return "env-should-not-be-used"; },
+    };
+    const bridge = createVenueBackedNamedStore({
+      venue: "BITUNIX",
+      store,
+      envFallback,
+      keyName: "BITUNIX_API_KEY",
+      secretName: "BITUNIX_API_SECRET",
+      allowEnvFallback: true, // selbst mit true in Prod kein Fallback
+    });
+
+    // Kein Datensatz → null, nicht env
+    assert.equal(await bridge.get("BITUNIX_API_KEY"), null);
+
+    // Store-Fehler → throw, nicht env
+    const failingStore: VenueSecretStore = {
+      async put() {},
+      async get() { throw new SecretStoreError("AUTH_FAILED", "fail"); },
+      async delete() { return false; },
+      async exists() { return false; },
+    };
+    const bridgeFail = createVenueBackedNamedStore({
+      venue: "BITUNIX",
+      store: failingStore,
+      envFallback,
+      keyName: "BITUNIX_API_KEY",
+      secretName: "BITUNIX_API_SECRET",
+      allowEnvFallback: true,
+    });
+    await assert.rejects(() => bridgeFail.get("BITUNIX_API_KEY"));
+  } finally {
+    (process.env as any).NODE_ENV = originalNodeEnv;
+  }
+});
+
+test("isEnvCredentialFallbackAllowed: nur mit Flag und non-production", () => {
+  assert.equal(isEnvCredentialFallbackAllowed({ BROKER_ALLOW_ENV_FALLBACK: "true", NODE_ENV: "development" }), true);
+  assert.equal(isEnvCredentialFallbackAllowed({ BROKER_ALLOW_ENV_FALLBACK: "true", NODE_ENV: "test" }), true);
+  assert.equal(isEnvCredentialFallbackAllowed({ BROKER_ALLOW_ENV_FALLBACK: "true", NODE_ENV: "production" }), false);
+  assert.equal(isEnvCredentialFallbackAllowed({ BROKER_ALLOW_ENV_FALLBACK: "false", NODE_ENV: "development" }), false);
+  assert.equal(isEnvCredentialFallbackAllowed({ NODE_ENV: "development" }), false);
+  assert.equal(isEnvCredentialFallbackAllowed({ BROKER_ALLOW_ENV_FALLBACK: "true" }), true); // NODE_ENV undefined → non-prod
+  assert.equal(isEnvCredentialFallbackAllowed({}), false);
 });

@@ -1,12 +1,50 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.31**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.32**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.32] — 2026-09-06 · Security: SEC-07 — Env-Credential-Fallback nur explizit in Dev/Test (HIGH)
+
+### Security
+
+- **SEC-07 (HIGH) behoben:** Der verschluesselte Credential-Store der Control Plane
+  faellt in Produktion nicht mehr still auf Umgebungsvariablen zurueck.
+  Fehlender Datensatz bedeutet kein Credential (null); Store-Fehler wie
+  AUTH_FAILED oder STORAGE_UNAVAILABLE fuehren zu einem harten Fehler,
+  der im Control-Plane-Flow als 503 mit SAFE-Meldung sichtbar ist und im Audit
+  erscheint. Env-Fallback ist nur noch erlaubt, wenn `BROKER_ALLOW_ENV_FALLBACK=true`
+  und `NODE_ENV!=production` gesetzt sind — expliziter Dev-/Test-Modus.
+- **Betroffen:** Bitunix- und Alpaca-Adapter sowie die Task-07-Bridge
+  `createVenueBackedNamedStore`. `createDefault*SecretStore` ohne
+  `SECRET_STORE_KEY` liefert ohne Flag kein Credential (fail-closed); mit Flag
+  in Dev/Test faellt er auf `EnvSecretStore` zurueck.
+- **Defense in Depth:** In Produktion ignoriert der Store das Fallback-Flag
+  selbst dann (zweite Sperre). Dev-Fallbacks werden als `[secretStore]`
+  Warnung geloggt.
+- **Regressionen in CI:** `tests/sec07.envCredentialFallback.test.ts`
+  (19 Faelle) deckt Bitunix/Alpaca AUTH_FAILED/STORAGE_UNAVAILABLE Hard-Fail,
+  fehlenden Datensatz (null statt Env), konfiguriertes Verhalten,
+  Dev ohne/mit Flag, Produktion mit Flag (bleibt blockiert) und
+  Angriffsvektoren (korrumpiertes Envelope, geloeschtes Credential,
+  Angreifer-Env-Vars ignoriert in Prod) ab. Bestehende
+  `secretStore.test.ts` erweitert um 5 SEC-07 Faelle. Zwei Alt-Tests in
+  `bitunix.unit.test.ts`/`alpaca.unit.test.ts`, die stillen Fallback
+  erwarteten, auf neues fail-closed Verhalten korrigiert.
+
+### Upgrade
+
+- **Alle Instanzen auf v1.36.32 ausrollen und neu starten.** Keine neuen
+  Pflicht-Variablen, kein Schema-Bruch. Produktion nutzt weiter
+  `SECRET_STORE_KEY` und den verschluesselten Store. Wer lokal ohne
+  Store-Key entwickeln will, setzt `BROKER_ALLOW_ENV_FALLBACK=true`
+  und `NODE_ENV=development` (oder `test`).
+- Keine Aenderung an Trading-Logik, Auth, API-Vertraegen; keine neue
+  Abhaengigkeit.
 
 ## [1.36.31] — 2026-09-06 · Security: SEC-02 — sensible Dashboard-Reads autorisiert
 

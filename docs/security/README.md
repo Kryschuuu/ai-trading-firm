@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; übrige Findings OPEN |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-07 FIXED v1.36.32; übrige Findings OPEN |
 
 ## Critical/High Findings (aggregierter Status)
 
@@ -42,6 +42,8 @@ und erneutem Login erforderlich. Andere offene Findings bleiben unverändert rel
 Alle Linux-/Windows-Instanzen aus dem neuen Lockfile installieren und frisch ausrollen.
 
 **SEC-04 ist seit v1.36.30 FIXED:** [ws-Pin und WS-Härtung](../audits/2026-09-05-security-review-gpt01/findings/SEC-04-vulnerable-ws.md).
+
+**SEC-07 ist seit v1.36.32 FIXED:** [Env-Credential-Fallback nur explizit Dev/Test](../audits/2026-09-05-security-review-gpt01/findings/SEC-07-env-credential-fallback.md) — in Produktion kein stiller Fallback auf `BITUNIX_API_KEY`/`ALPACA_API_KEY` mehr; fehlender Datensatz = null, Store-Fehler = HARD FAIL. Env nur mit `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`.
 Alle Instanzen mit `npm ci` neu installieren und sämtliche Prozesse neu starten.
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).

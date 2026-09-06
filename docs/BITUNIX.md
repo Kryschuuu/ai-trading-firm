@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.36.12 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.36.32 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -569,7 +569,7 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 
 | Thema | Regel |
 | --- | --- |
-| Secrets | Default: Control-Plane-Store (`createVenueBackedNamedStore`, AES-256-GCM, AAD=`BITUNIX`) mit Env-Fallback `BITUNIX_API_KEY` / `BITUNIX_API_SECRET`. Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert `configured`/`connected`/`permissions`/`permissionsVerified`/`liveEnabled:false` — Rechte werden **nie angenommen**: ohne `verify` bleibt `permissions` leer; mit `verify` belegt ein read-only Konto-Abruf maximal `READ` (TRADE wäre nur per echter Order beweisbar). |
+| Secrets | Default: Control-Plane-Store (`createVenueBackedNamedStore`, AES-256-GCM, AAD=`BITUNIX`) — in Produktion **kein** Env-Fallback (SEC-07 v1.36.32). Env `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` nur wenn `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`. Ohne `SECRET_STORE_KEY` und ohne Flag → kein Credential (fail-closed). Fehlender Datensatz → null; Store-Fehler (AUTH_FAILED, STORAGE_UNAVAILABLE) → HARD FAIL (throw, im Control-Plane als 503). Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert `configured`/`connected`/`permissions`/`permissionsVerified`/`liveEnabled:false` — Rechte werden **nie angenommen**: ohne `verify` bleibt `permissions` leer; mit `verify` belegt ein read-only Konto-Abruf maximal `READ`. |
 | SSRF | Host-Allowlist (`fapi.bitunix.com` + optionale `BITUNIX_ALLOWED_HOSTS`). Kein Userinfo. `https` Pflicht; `http`/`ws` nur Loopback + Insecure-Flag. `redirect: "error"`. |
 | TLS | Node-Default-Zertifikatsprüfung (an). |
 | Rate-Limit | Token-Bucket, konservativ 8 req/s (Doku: 10/s). |
@@ -586,10 +586,11 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | `BITUNIX_LIVE_ENABLED` | false | Venue-Live-Teilbedingung (allein wirkungslos) |
 | `LIVE_TRADING_ENABLED` | false | Plattform-Live-Teilbedingung |
 | `REQUIRE_HUMAN_APPROVAL` | fehlend = **true** für Live | nur `"false"` öffnet diese Teilbedingung |
-| `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` | leer | Env-Fallback, nicht für Frontend |
+| `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` | leer | Env-Fallback nur mit `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production` (SEC-07 v1.36.32), nie Frontend |
 | `BITUNIX_BASE_URL` / `BITUNIX_WS_URL` | offizielle Hosts | Test-Overrides (Fixture) |
 | `BITUNIX_ALLOW_INSECURE_HTTP` | false | Loopback-http für Mock-Tests |
 | `BITUNIX_ALLOWED_HOSTS` | — | zusätzliche Hosts (Komma) |
+| `BROKER_ALLOW_ENV_FALLBACK` | `false` | SEC-07 v1.36.32: Env-Fallback nur explizit in Dev/Test |
 | `BITUNIX_TIMEOUT_MS` / `BITUNIX_RETRY_MAX` | 8000 / 3 | geklemmt |
 
 ---

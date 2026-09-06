@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-06** · Code-Version **1.36.31**
+> Dokumentationsstand **2026-09-06** · Code-Version **1.36.32**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -405,6 +405,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` | `20` | globales, IP-unabhängiges Credential-Limit (0 = aus; betrifft nie den Kill-Switch) |
 | `BROKER_CREDENTIAL_BACKOFF_BASE_MS` | `2000` | Startwert des exponentiellen Backoffs ab dem 3. Credential-Fehlversuch (0 = Backoff aus) |
 | `BROKER_CREDENTIAL_BACKOFF_MAX_MS` | `900000` (15 min) | Deckel einer Backoff-Sperre |
+| `BROKER_ALLOW_ENV_FALLBACK` | `false` | **SEC-07 (v1.36.32):** Erlaubt Env-Fallback fuer Broker-Credentials (`BITUNIX_API_KEY` etc.) nur wenn `true` UND `NODE_ENV!=production`. In Produktion immer aus — fehlender Datensatz = null, Store-Fehler = HARD FAIL. |
 | `BROKER_HEALTHCHECK_REMOTE` | `false` | remote Health-Checks aktivieren |
 
 ### RBAC / Firm-API

@@ -514,7 +514,7 @@ export function assertValidCredential(credential: CredentialPayload): void {
       );
     }
     // Steuerzeichen sind in echten API-Keys nie enthalten und brechen Logs/Formate.
-     
+    
     if (/[\u0000-\u001f\u007f]/.test(value)) {
       throw new SecretStoreError(
         "INVALID_ENVELOPE",
@@ -670,14 +670,38 @@ export function createAesGcmSecretStore(opts: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Task-07-Kompatibilitaet
+// Task-07-Kompatibilitaet + SEC-07 Fix
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Prueft, ob der Env-Fallback explizit erlaubt ist.
+ *
+ * SEC-07 Fix: Env-Credentials duerfen nur in einem expliziten
+ * development/test-Modus hinter einem Flag verwendet werden.
+ * In Produktion ist der Fallback IMMER verboten — auch wenn das
+ * Flag gesetzt ist (fail-closed).
+ */
+export function isEnvCredentialFallbackAllowed(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  const flag = env.BROKER_ALLOW_ENV_FALLBACK === "true";
+  const isProd = env.NODE_ENV === "production";
+  return flag && !isProd;
+}
 
 /**
  * Bridge auf das Task-07-Interface `SecretStore` (`get(name)`),
  * z. B. fuer den Bitunix-Adapter: Die entschluesselten Felder der Venue
- * werden auf `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` gemappt. Liegt im
- * verschluesselten Store nichts vor, greift der Env-Fallback (task-07).
+ * werden auf `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` gemappt.
+ *
+ * SEC-07 Fix — harte Semantik (fail-closed):
+ *   credential exists in secure store → use it
+ *   credential absent                 → no credential (null)
+ *   store failure (AUTH_FAILED, STORAGE_UNAVAILABLE, etc.) → HARD FAIL (throw)
+ *
+ * Env-Fallback nur, wenn `allowEnvFallback=true` UND nicht Produktion.
+ * `allowEnvFallback` muss explizit via `BROKER_ALLOW_ENV_FALLBACK=true`
+ * in non-production gesetzt werden (siehe `isEnvCredentialFallbackAllowed`).
  *
  * WICHTIG: Liefert NIE etwas anderes als exakt diese zwei Namen — der
  * task-07-Adapter fragt nur sie ab.
@@ -688,19 +712,46 @@ export function createVenueBackedNamedStore(opts: {
   envFallback: { get(name: string): Promise<string | null> };
   keyName: string;
   secretName: string;
+  /** Explizites Opt-in fuer Env-Fallback, nur wirksam in non-production. */
+  allowEnvFallback?: boolean;
 }): { get(name: string): Promise<string | null> } {
+  // Effektiver Fallback: nur wenn explizit erlaubt UND nicht Produktion.
+  // Selbst wenn `allowEnvFallback=true` in Produktion uebergeben wird,
+  // wird es ignoriert — Defense in Depth.
+  const isProduction = process.env.NODE_ENV === "production";
+  const effectiveAllowEnvFallback = !isProduction && opts.allowEnvFallback === true;
+
   return {
     async get(name: string): Promise<string | null> {
       if (name !== opts.keyName && name !== opts.secretName) return null;
+      let credential: CredentialPayload | null;
       try {
-        const credential = await opts.store.get(opts.venue);
-        if (credential) {
-          return name === opts.keyName ? credential.apiKey : credential.apiSecret;
+        credential = await opts.store.get(opts.venue);
+      } catch (err) {
+        // SEC-07: Store-Fehler → HARD FAIL in Produktion.
+        // In Dev/Test nur mit explizitem Flag fallback, sonst ebenfalls throw.
+        if (effectiveAllowEnvFallback) {
+          // Laute Warnung, damit ein korruptes Envelope / DB-Ausfall
+          // nicht still auf Env zurueckfaellt, selbst im Dev-Modus.
+          console.warn(
+            `[secretStore] SEC-07: store failure for venue ${opts.venue} — falling back to env only because BROKER_ALLOW_ENV_FALLBACK=true and NODE_ENV!=production. Error: ${err instanceof Error ? err.message : String(err)}`.slice(
+              0,
+              500
+            )
+          );
+          return opts.envFallback.get(name);
         }
-      } catch {
-        // Auth-Fehler/Store nicht bereit → Env-Fallback (task-07-Verhalten).
+        // Fail-closed: Fehler nach oben reichen, kein Env-Fallback.
+        throw err;
       }
-      return opts.envFallback.get(name);
+      if (credential) {
+        return name === opts.keyName ? credential.apiKey : credential.apiSecret;
+      }
+      // SEC-07: Fehlender Datensatz → kein Credential, nicht stilles Env.
+      if (effectiveAllowEnvFallback) {
+        return opts.envFallback.get(name);
+      }
+      return null;
     },
   };
 }
