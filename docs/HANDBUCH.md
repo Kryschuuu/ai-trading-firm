@@ -171,10 +171,19 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 Ein kompletter Durchlauf mit erwarteten Ausgaben. Rechne bei Variante A mit einigen
 Minuten Wartezeit, bei Variante B mit unter einer Minute.
 
+> **Read-Zugriff im Token-Betrieb (SEC-02, v1.36.31):** Die sensitiven
+> Dashboard-APIs `/api/firm`, `/api/firm/log`, `/api/firm/report`,
+> `/api/firm/rules`, `/api/providers` und `/api/routing` verlangen `firm.read`.
+> Die folgenden Terminalbeispiele verwenden deshalb `FIRM_API_TOKEN` als
+> Operator-Credential. Ein `FIRM_VIEWER_TOKEN` mit `x-viewer-token` ist für reine
+> Leseabfragen ebenfalls geeignet; die Browser-Oberfläche nutzt nach Login ihre
+> HttpOnly-Session automatisch. Antworten dieser sechs Endpunkte sind
+> `private, no-store`.
+
 ### Schritt 1 — Grundzustand prüfen
 
 ```bash
-curl -s localhost:3369/api/firm | jq '{
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq '{
   equity: .account.equity,
   cash: .account.freeCash,
   positionen: .account.openPositions,
@@ -196,7 +205,7 @@ curl -s localhost:3369/api/firm | jq '{
 ### Schritt 2 — Mission auswählen
 
 ```bash
-curl -s localhost:3369/api/firm | jq -r '.missions[] | "\(.id)  \(.status)  \(.title)"'
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.missions[] | "\(.id)  \(.status)  \(.title)"'
 ```
 
 ```
@@ -205,7 +214,7 @@ b21c…  PENDING  Beobachtungsmandat: SPY
 ```
 
 ```bash
-MISSION=$(curl -s localhost:3369/api/firm | jq -r '.missions[0].id')
+MISSION=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.missions[0].id')
 ```
 
 ### Schritt 3 — Pipeline starten
@@ -237,7 +246,7 @@ curl -s -X POST localhost:3369/api/firm/run \
 ### Schritt 4 — Was ist rechnerisch passiert?
 
 ```bash
-curl -s localhost:3369/api/firm | jq '.account'
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq '.account'
 ```
 
 ```json
@@ -285,7 +294,7 @@ Agent davon wusste oder zustimmen musste.
 ### Schritt 5 — Protokoll lesen
 
 ```bash
-curl -s localhost:3369/api/firm | jq -r '.auditLog[] | "\(.level)  \(.event)"' | head -8
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.auditLog[] | "\(.level)  \(.event)"' | head -8
 ```
 
 ```
@@ -310,7 +319,7 @@ curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" >/dev/null
 
-curl -s localhost:3369/api/firm | jq '.account.livePositions[0] | {qty, entryPrice}'
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq '.account.livePositions[0] | {qty, entryPrice}'
 ```
 
 Ergebnis: **exakt dieselbe Positionsgröße wie vorher** (0,037313 BTC). Die Mission durfte
@@ -368,7 +377,7 @@ sudo systemctl restart ai-trading-firm
 eine Handelsentscheidung:
 
 ```bash
-CEO=$(curl -s localhost:3369/api/firm | jq -r '.agents[] | select(.role=="CEO") | .id')
+CEO=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.agents[] | select(.role=="CEO") | .id')
 curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
   -d "{\"agentId\":\"$CEO\",\"missionId\":\"$MISSION\"}" | jq '.result.guardrail'
@@ -417,7 +426,7 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | Methode | Pfad | Nutzlast | Antwort |
 | --- | --- | --- | --- |
 | `GET` | `/api/health` | – | Statusobjekt |
-| `GET` | `/api/firm` | – | kompletter Firmenzustand |
+| `GET` | `/api/firm` | – | kompletter Firmenzustand (`firm.read`, `private, no-store`) |
 | `POST` | `/api/seed` | – | `{ok, seeded}` |
 | `POST` | `/api/firm/run` | `{agentId, missionId}` | `{ok, result}` |
 | `POST` | `/api/firm/run` | `{missionId, pipeline:true}` | `{ok, pipeline:[…]}` |
@@ -426,7 +435,7 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `POST` | `/api/firm/missions` | `{title, objective, symbol, riskBudget, maxPositionPct, status?}` | `{ok, mission, warnings?}` |
 | `PUT` | `/api/firm/missions` | `{id, …felder wie POST}` | `{ok, mission, warnings?}` |
 | `PUT` | `/api/firm/agents` | `{agentId, systemPrompt}` | `{ok, agent, warnings?}` |
-| `GET/POST` | `/api/firm/rules` | – / `{rule, activate?}` | Regelwerk lesen bzw. Regel anlegen (DRAFT) |
+| `GET/POST` | `/api/firm/rules` | – / `{rule, activate?}` | Regelwerk lesen (`GET`: `firm.read`, `private, no-store`) bzw. Regel anlegen (DRAFT) |
 | `POST` | `/api/firm/rules/[id]` | `{action: activate\|pause\|archive\|rollback\|reject, by?}` | Lebenszyklus/Versionierung einer Regel |
 | `POST` | `/api/firm/rules/[id]/backtest` | `{interval?, limit?, startingEquity?}` | deterministischer Historie-Backtest + Speicherung |
 | `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen / Status |
@@ -446,14 +455,14 @@ curl -s -X POST localhost:3369/api/firm/kill \
 **Nur die Agentenliste mit Modellen:**
 
 ```bash
-curl -s localhost:3369/api/firm | jq -r '.agents[] | "\(.role)\t\(.model)\t\(.status)"' | column -t
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.agents[] | "\(.role)\t\(.model)\t\(.status)"' | column -t
 ```
 
 **Einzelnen Agenten starten (zum Prompt-Debuggen):**
 
 ```bash
-AGENT=$(curl -s localhost:3369/api/firm | jq -r '.agents[] | select(.role=="RESEARCH") | .id')
-MISSION=$(curl -s localhost:3369/api/firm | jq -r '.missions[0].id')
+AGENT=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.agents[] | select(.role=="RESEARCH") | .id')
+MISSION=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq -r '.missions[0].id')
 
 curl -s -X POST localhost:3369/api/firm/run \
   -H 'Content-Type: application/json' \
@@ -960,7 +969,7 @@ erfordert einen Rebuild:
 
 ```bash
 # Wirksame Limits (Schicht 2 × 3) + Basis + Fenster auf einen Blick
-curl -s localhost:3369/api/firm | jq '{riskLimits, adaptiveRisk}'
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq '{riskLimits, adaptiveRisk}'
 
 # Adaptives System im Detail (Indikatoren, Trigger-Events, Konfiguration)
 curl -s localhost:3369/api/firm/risk/volatility | jq '.adaptive'
@@ -1247,6 +1256,9 @@ Arbeite diese Liste **vollständig** ab, bevor irgendein Live-Endpunkt konfiguri
 - [ ] Die Schreib-API ist durch ein Token geschützt (`FIRM_API_TOKEN` gesetzt) —
       `curl -s localhost:3369/api/auth/me | jq .authMode.mode` liefert
       `token-required`, und `POST /api/firm/tick` ohne Header antwortet `401`.
+- [ ] Die sensitiven Dashboard-Reads (`/api/firm`, Log, Report, Rules, Provider,
+      Routing) fordern `firm.read`; anonyme Requests erhalten keinen Payload
+      (SEC-02, v1.36.31). Browser-Sessions und Viewer-Reads sind geprüft.
 - [ ] `FIRM_SESSION_SECRET` ist unabhängig von den Login-Tokens erzeugt und nur
       serverseitig hinterlegt (SEC-01, v1.36.27); nach Upgrade/Rotation alle
       Instanzen neu starten und erneut anmelden. Browser-Login läuft über HTTPS.
@@ -1285,7 +1297,7 @@ curl -s --max-time 5 http://127.0.0.1:11434/api/tags | jq '.models | length'
 curl -s --max-time 5 http://192.168.1.50:11434/api/tags | jq '.models | length'
 
 # Was sagt die Anwendung selbst?
-curl -s localhost:3369/api/firm | jq '{llm: .ollama, konto: .account}'
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm | jq '{llm: .ollama, konto: .account}'
 ```
 
 ### 12.2 Modellgeschwindigkeit messen
@@ -1549,7 +1561,7 @@ Rückkanal zum CEO (`ruleFeedback()` → nächster Makro-Zyklus).
 ### 15.4 Regel prüfen, bevor sie live geht — Backtest
 
 ```bash
-RULE=$(curl -s localhost:3369/api/firm/rules | jq -r '.rules[0].id')
+RULE=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm/rules | jq -r '.rules[0].id')
 
 curl -s -X POST localhost:3369/api/firm/rules/$RULE/backtest \
   -H 'Content-Type: application/json' \
@@ -1692,16 +1704,18 @@ Systemrollen). Die Beschreibungen sind die **aktuellen Standard-Systemprompts**
 
 ## 17. Regelwerk-API (Rules, Macro, Micro, Backtest)
 
-Alle Endpunkte sind schreibend mit `x-firm-token` geschützt, sobald
-`FIRM_API_TOKEN` gesetzt ist. Fehlt der Operator-Token, aber es existieren
-Admin-/Viewer-Token, entscheidet die Permission `firm.write` (C1, v1.36.13) —
-und ohne jedes Credential ist die Schreib-API nur bei wirksamem
-`AUTH_MODE=local-open` offen.
+Die schreibenden Endpunkte sind mit `x-firm-token` geschützt, sobald
+`FIRM_API_TOKEN` gesetzt ist. Das Lesen von `/api/firm/rules` verlangt seit
+SEC-02 (v1.36.31) zusätzlich `firm.read`; Viewer, Operator und Admin erhalten
+sie über ein Header-Credential oder eine gültige Browser-Session. Fehlt der
+Operator-Token, aber es existieren Admin-/Viewer-Token, entscheidet für
+Mutationen die Permission `firm.write` (C1, v1.36.13) — und ohne jedes
+Credential ist die Schreib-API nur bei wirksamem `AUTH_MODE=local-open` offen.
 
 ### 17.1 Regeln auflisten
 
 ```bash
-curl -s localhost:3369/api/firm/rules | jq '{summaries, active: [.active[] | {name, symbol, version, window}]}'
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm/rules | jq '{summaries, active: [.active[] | {name, symbol, version, window}]}'
 ```
 
 Antwort enthält `rules` (alle Versionen), `active`, `feedback` (24h-Statistik je

@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-06** · Code-Version **1.36.30**
+> Dokumentationsstand **2026-09-06** · Code-Version **1.36.31**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -119,8 +119,9 @@ die Befund-Historie stehen in
 
 ## Auth-Modus: `AUTH_MODE` und die Produktionspflicht (C1, v1.36.13)
 
-Schreibende Endpunkte (`POST`/`PUT`) und die Admin-Rolle hängen an einem
-expliziten Modus — nicht mehr am bloßen Fehlen eines Tokens:
+Schreibende Endpunkte (`POST`/`PUT`), die Admin-Rolle und die sensitiven
+Dashboard-Reads aus SEC-02 hängen an einem expliziten Modus — nicht mehr am
+bloßen Fehlen eines Tokens:
 
 | Modus | Wirkt | Schreiben ohne Credential |
 | --- | --- | --- |
@@ -149,6 +150,12 @@ Vier Regeln, alle in `src/auth/authMode.ts` (SSoT) geprüft:
    verlangt Produktion zusätzlich `FIRM_SESSION_SECRET`; fehlt der Schlüssel oder
    ist er ungültig, verweigert der Boot-Guard den Start. Der Login-Pfad bleibt
    unabhängig vom Boot-Guard geschlossen (HTTP 503).
+5. **Sensible Reads verlangen `firm.read`.** `/api/firm`, `/api/firm/log`,
+   `/api/firm/report`, `/api/firm/rules`, `/api/providers` und `/api/routing`
+   akzeptieren im Token-Betrieb ausschließlich einen Viewer-, Operator- oder
+   Admin-Actor (Header oder gültige Browser-Session). Sie antworten mit
+   `Cache-Control: private, no-store`; die Schreib-Rate-Limits bleiben davon
+   unabhängig unverändert.
 
 Token und unabhängigen Session-Schlüssel bei der Ersteinrichtung erzeugen:
 
@@ -405,8 +412,8 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
 | `FIRM_ADMIN_TOKEN` | *(leer)* | Admin-Token (RBAC) |
-| `FIRM_API_TOKEN` | *(leer)* | API-Token für alle `POST`/`PUT`-Routen; `scripts/setup-cachyos.sh` erzeugt eines |
-| `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Token |
+| `FIRM_API_TOKEN` | *(leer)* | Operator-Credential für `POST`/`PUT` und sensible Dashboard-Reads (`firm.read`); `scripts/setup-cachyos.sh` erzeugt eines |
+| `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Credential für sensible Dashboard-Reads (`firm.read`), ohne Schreibrechte |
 | `FIRM_SESSION_SECRET` | *(leer; kein Fallback)* | Unabhängiger zufälliger Session-Signierschlüssel, mindestens 32 Zeichen; Pflicht für Sessions und Produktion mit Tokens (SEC-01) |
 | `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
 | `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |

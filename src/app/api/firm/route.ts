@@ -98,7 +98,7 @@ export async function GET(req: Request) {
       },
       requireHumanApproval: process.env.REQUIRE_HUMAN_APPROVAL === "true",
       timestamp: new Date().toISOString(),
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {
     // FIX (v1.5.1): DB-Fehler abfangen statt 500 mit rohem Stack-Trace.
     return NextResponse.json(

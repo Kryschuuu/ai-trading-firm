@@ -88,7 +88,7 @@ test("SEC-02: jeder dokumentierte sensible GET weist anonyme Requests vor Datenz
 });
 
 test("SEC-02: manipulierbare Header und Query-Parameter umgehen firm.read nicht", async () => {
-  const attackerHeaders = [
+  const attackerHeaders: Array<Record<string, string>> = [
     { authorization: "Bearer forged-token", "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1" },
     { "x-firm-token": "forged-operator-token", "x-admin-token": "forged-admin-token" },
     { "x-viewer-token": "forged-viewer-token", cookie: `${SESSION_COOKIE}=forged.session.signature` },
@@ -108,6 +108,7 @@ test("SEC-02: Viewer mit firm.read kann Provider- und Routing-Dashboard lesen", 
   for (const route of routes.filter((route) => route.path.startsWith("/api/providers") || route.path === "/api/routing")) {
     const response = await route.get(request(route.path, { "x-viewer-token": VIEWER_TOKEN }));
     assert.equal(response.status, 200, `${route.path} muss für Viewer mit firm.read lesbar bleiben`);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store", `${route.path} darf Daten nicht in Shared Caches ablegen`);
     assert.equal(((await response.json()) as { ok?: unknown }).ok, true);
   }
 });
@@ -136,5 +137,7 @@ test("SEC-02: CI-Drift-Schutz verlangt firm.read vor jedem sensitiven Handler-Pf
       `${route.source} muss den gemeinsamen RBAC-Guard importieren`);
     assert.match(source, /export\s+async\s+function\s+GET\s*\(\s*req\s*:\s*Request\s*\)\s*(?::\s*Promise<Response>)?\s*\{[\s\S]{0,600}?const\s+denied\s*=\s*requirePermission\(req,\s*["']firm\.read["']\);\s*if\s*\(denied\)\s*return\s+denied;/,
       `${route.source} muss firm.read vor jeder sensitiven Verarbeitung prüfen`);
+    assert.match(source, /["']Cache-Control["']\s*:\s*["']private,\s*no-store["']/,
+      `${route.source} muss erfolgreiche sensible Antworten gegen Shared Caches schützen`);
   }
 });

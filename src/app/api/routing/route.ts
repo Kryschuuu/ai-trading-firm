@@ -45,7 +45,7 @@ export async function GET(req: Request): Promise<Response> {
       lastDecisions: snapshot.lastDecisions,
       audit: snapshot.audit,
       generatedAt: snapshot.generatedAt,
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {
     return Response.json(
       { ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(e) },

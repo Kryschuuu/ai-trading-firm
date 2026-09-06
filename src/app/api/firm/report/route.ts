@@ -209,5 +209,5 @@ export async function GET(req: Request) {
     })),
     recommendations,
     summary: bullets,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

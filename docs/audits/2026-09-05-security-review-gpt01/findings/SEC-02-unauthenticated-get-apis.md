@@ -4,10 +4,15 @@
 - **Severity:** HIGH
 - **Bereich:** Datenexposition / API / AuthZ
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-02 — Sensible Daten sind über unauthentifizierte GET-APIs erreichbar
-- **Status:** OPEN
-- **Fix-Version:** -
-- **Datei(en):** `src/app/api/firm/route.ts`, `src/app/api/firm/log/route.ts`, `src/app/api/firm/report/route.ts`, `src/app/api/firm/rules/route.ts`, `src/app/api/providers/route.ts`, `src/app/api/routing/route.ts`
-- **Peer-Review-Patch:** TBD
+- **Status:** FIXED (2026-09-06)
+- **Fix-Version:** 1.36.31
+- **Betroffene Versionen:** bis einschließlich 1.36.30
+- **Datei(en):** `src/app/api/firm/route.ts`, `src/app/api/firm/log/route.ts`, `src/app/api/firm/report/route.ts`, `src/app/api/firm/rules/route.ts`, `src/app/api/providers/route.ts`, `src/app/api/routing/route.ts`, `src/lib/apiAuth.ts`, `tests/sec02.unauthenticatedGetApis.test.ts`; zugehörige Release-/Betriebsdokumentation
+- **Fix-Commit:** [d900a71](https://github.com/Kryschuuu/ai-trading-firm/commit/d900a715d26213508aa7240f1acb65441118ecc1)
+- **Red-Test-Commit:** [a148b0b](https://github.com/Kryschuuu/ai-trading-firm/commit/a148b0bc31101ab105f95d309fb391b6486d0d61)
+
+> Beschreibung und PoC unten dokumentieren den ursprünglichen verwundbaren Stand.
+> Die Behebung, Tests und verbleibenden Grenzen stehen unter „Implementierter Fix“.
 
 ## Beschreibung
 
@@ -69,15 +74,49 @@ Mindestens nicht öffentlich:
 - `/api/providers`
 - `/api/routing`
 
-Das Dashboard bleibt geschützt und greift serverseitig authentifiziert auf diese APIs zu.
+Das Dashboard bleibt durch die bestehende Browser-Session geschützt; der Browser
+sendet deren HttpOnly-Cookie bei Same-Origin-Reads automatisch mit. Direkte Clients
+verwenden ein vorhandenes Viewer-, Operator- oder Admin-Credential.
+
+## Implementierter Fix (v1.36.31)
+
+- Jede der sechs erfassten Routen ruft am Beginn ihres GET-Handlers den gemeinsamen
+  RBAC-Guard `requirePermission(req, "firm.read")` auf. Die Prüfung liegt vor
+  Datenbankabfragen, Broker-/Runtime-Zugriffen, Router-Snapshots und dem optionalen
+  Provider-Refresh. Damit erzeugt ein abgewiesener Request keinen sensitiven
+  Antwort-Payload und triggert keine externe Health-Prüfung.
+- `firm.read` ist bereits den Rollen Viewer, Operator und Admin zugeordnet. Header-
+  Credentials und signierte `firm_session`-Cookies werden über denselben
+  serverseitigen Actor/Permission-Pfad aufgelöst; es gibt keinen separaten
+  Dashboard-Bypass. Der explizite lokale `AUTH_MODE=local-open` bleibt als bewusster
+  Single-User-Modus unverändert.
+- Erfolgreiche Antworten tragen zusätzlich `Cache-Control: private, no-store`.
+  Das verhindert, dass ein Shared Cache eine autorisierte Strategie- oder
+  Betriebsantwort einem späteren Aufrufer bereitstellt.
+- Der bisherige Kommentar am Schreib-Guard wurde präzisiert: Das HTTP-Verb GET ist
+  keine Freigabeentscheidung; sensitive Lesezugriffe müssen ihren eigenen
+  Permission-Guard verwenden.
+
+## Regressionen und Validierung
+
+- **Rot vor Fix:** Die neu angelegte SEC-02-Suite scheiterte auf dem Ausgangsstand:
+  anonyme Requests erreichten Backend-Pfade statt einer Autorisierungsablehnung;
+  außerdem fehlte die verbindliche Guard-Verdrahtung in den Quellrouten.
+- **Grün nach Fix:** `tests/sec02.unauthenticatedGetApis.test.ts` prüft alle sechs
+  Handler für anonyme sowie manipulierte Bearer-/Header-/Proxy-/Cookie-Eingaben,
+  Viewer mit `firm.read`, die signierte Viewer-Session, private No-Store-Antworten
+  und einen gezielten CI-Drift-Check für die Guard-Reihenfolge.
+- Die Suite ist in `npm run test:security:auth` eingebunden und läuft damit im
+  merge-blockierenden Security-Workflow vor dem Live-Gate. Bestehende
+  `guardWrite`-Schreibpfade wurden nicht verändert.
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Unauthenticated `GET /api/firm`, `/log`, `/report`, `/rules`, `/api/providers`, `/api/routing` → 401
-- [ ] Viewer mit `firm.read` → 200
-- [ ] Schreibende Routen unverändert durch `guardWrite` geschützt
-- [ ] Dashboard funktioniert mit Session-Cookie
-- [ ] Kein neuer sensitiver GET-Endpunkt ohne Guard (CI-Grep)
+- [x] Anonyme `GET /api/firm`, `/log`, `/report`, `/rules`, `/api/providers` und `/api/routing` → 401 bei Operator-/Viewer-Token-Konfiguration (bei ausschließlich konfiguriertem Admin-Credential kann der bestehende allgemeine Auth-Vertrag 403 liefern)
+- [x] Viewer mit `firm.read` → 200 für Provider-/Routing-Dashboard-Reads; alle sechs Handler verwenden denselben Permission-Guard
+- [x] Schreibende Routen unverändert durch `guardWrite` geschützt
+- [x] Dashboard funktioniert mit signiertem Session-Cookie
+- [x] Kein Entfernen des Guards aus den sechs sensitiven GET-Endpunkten ohne fehlenden CI-Regressionstest
 
 ## Changelog-Blurb
 
@@ -87,4 +126,4 @@ SEC-02 (HIGH): Unauthentifizierte GET-APIs — firm.read für Dashboard-/Log-/Re
 
 ## Versions-Hinweis
 
-PATCH, Security-Fix — vor weiterem Live-Ausbau.
+PATCH, Security-Fix — v1.36.31 auf allen Instanzen ausrollen.

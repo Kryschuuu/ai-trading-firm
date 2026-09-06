@@ -12,7 +12,7 @@
 2. **Guardrails** (`riskGuard.ts`) — max. 25% Position, Stop-Loss Pflicht, kein Short ohne Flag
 3. **Kill-Switch** — globaler Circuit-Breaker, DB-persistent, Disarm stärker als Arm (ADMIN + Nonce + CSRF)
 4. **Broker-Schleuse** — prüft alles nochmal, unabhängig von Schicht 2+3
-5. **Auth & RBAC** — `AUTH_MODE=local-open | token-required`, `FIRM_ADMIN_TOKEN`, `FIRM_API_TOKEN`, `FIRM_VIEWER_TOKEN`, Permission `live.gate`, `broker.credentials`
+5. **Auth & RBAC** — `AUTH_MODE=local-open | token-required`, `FIRM_ADMIN_TOKEN`, `FIRM_API_TOKEN`, `FIRM_VIEWER_TOKEN`, Permissions `firm.read`, `live.gate`, `broker.credentials`
 6. **Rate-Limit-Identität** — `src/lib/clientIp.ts` als einzige Quelle, `TRUSTED_PROXY_IPS` + `x-verified-ip`, `x-forwarded-for` nur hinter verifiziertem Proxy, globaler Deckel + exponentieller Backoff
 
 ## Dokumente
@@ -22,15 +22,17 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; übrige Findings OPEN |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; übrige Findings OPEN |
 
-## Offene Critical/High Findings (aggregiert)
+## Critical/High Findings (aggregierter Status)
 
 > Quelle: `docs/audits/*/remediation/TRACKING.md` — hier nur aggregierte Sicht, Details in jeweiligen Audit-Ordnern.
 
-| Audit | ID | Titel | Severity | Status |
-|-------|----|-------|----------|--------|
-| 2026-09-05-gpt01 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN |
+Derzeit enthält die aggregierte Sicht **keine offenen Critical- oder High-Findings**.
+Offene Medium-/Low-Themen bleiben im jeweiligen Audit-Tracking erfasst und sind
+kein Freigabesignal für Live-Trading.
+
+**SEC-02 ist seit v1.36.31 FIXED:** [sensible Dashboard-Reads](../audits/2026-09-05-security-review-gpt01/findings/SEC-02-unauthenticated-get-apis.md) verlangen `firm.read` und werden `private, no-store` ausgeliefert.
 
 **SEC-01 ist seit v1.36.27 FIXED:** [Session-Autorisierung](../audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md).
 Upgrade einschließlich unabhängigem `FIRM_SESSION_SECRET`, Neustart aller Instanzen
@@ -43,6 +45,49 @@ Alle Linux-/Windows-Instanzen aus dem neuen Lockfile installieren und frisch aus
 Alle Instanzen mit `npm ci` neu installieren und sämtliche Prozesse neu starten.
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
+
+## Sensible Dashboard-Read-APIs (SEC-02)
+
+**v1.36.31:** Die folgenden Read-Endpunkte sind nicht öffentlich: `/api/firm`,
+`/api/firm/log`, `/api/firm/report`, `/api/firm/rules`, `/api/providers` und
+`/api/routing`. Sie prüfen vor jeder Datenbank-, Router- oder Providerarbeit die
+bestehende Permission `firm.read`.
+
+### Berechtigung und Browser-Kompatibilität
+
+- **Viewer, Operator und Admin** besitzen `firm.read`; ein vorhandenes Header-
+  Credential oder die gültige signierte `firm_session` genügt.
+- Das Dashboard verwendet weiterhin seine HttpOnly-Session im Same-Origin-
+  Kontext. Es muss und darf keinen Token im Browser speichern.
+- In `token-required` erhalten nicht authentifizierte Requests eine
+  Autorisierungsablehnung. `AUTH_MODE=local-open` bleibt ausschließlich ein
+  bewusster lokaler Single-User-Modus; Netzwerkzugriff darauf muss unabhängig
+  begrenzt werden.
+- Erfolgreiche Antworten senden `Cache-Control: private, no-store`; ein
+  geteiltes Proxy-/Browser-Cache darf sie daher nicht für einen anderen Aufrufer
+  wiederverwenden.
+
+### Ausrollen und Prüfen
+
+1. Geprüften Release **v1.36.31 oder neuer** auf **allen** App-Instanzen
+   ausrollen und die Prozesse neu starten. Keine Datenmigration und keine neue
+   Umgebungsvariable sind erforderlich.
+2. Direkte CLI-/Integrationsclients für die sechs Endpunkte mit einem bestehenden
+   Viewer-, Operator- oder Admin-Credential konfigurieren. Browser-Nutzer melden
+   sich wie bisher über `/api/auth/login` an.
+3. Vor der Freigabe ausführen:
+
+   ```bash
+   npm ci
+   npm run test:security:auth
+   npm run typecheck
+   npm run lint
+   npm run build
+   ```
+
+   Der Security-Test enthält die SEC-02-Regressionen für anonyme und
+   manipulierte Anfragen, Viewer-Credentials und Browser-Sessions. Ein Upgrade
+   schützt nur Instanzen, die den neuen Build tatsächlich ausführen.
 
 ## Next.js-Upgrade (SEC-03)
 
@@ -154,6 +199,8 @@ dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
   `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID` verweigert den Boot (SEC-01).
 - `AUTH_MODE=local-open` — bewusster Opt-in für Single-User ohne Token (Dev-Default)
 - `AUTH_MODE=token-required` — erzwingt Credential auch in Dev
+- Sensible Dashboard-Reads in SEC-02 verlangen zusätzlich `firm.read`; die
+  Permission wird nach Header-/Session-Authentifizierung serverseitig bestimmt.
 - Wirksamer Modus: `curl -s localhost:3369/api/auth/me | jq .authMode`
 
 ## Rate-Limit-Identität (v1.36.14+)

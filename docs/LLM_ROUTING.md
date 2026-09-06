@@ -380,13 +380,13 @@ Jeder Wechsel (inkl. Fallback und abgelehnter Eskalation) erzeugt einen Eintrag:
 
 ## 11. API-Referenz
 
-| Methode | Pfad | Zweck |
-| --- | --- | --- |
-| `GET` | `/api/providers` | Karten-Daten: Status, Modell(e), Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen |
-| `GET` | `/api/providers?refresh=1` | erzwingt eine Health-Prüfung |
-| `GET` | `/api/routing` | Policy (Version, Klassen, Eskalation, Budgets, Ketten), Modi, Provider, Budget, Audit |
-| `GET` | `/api/routing/modes` | Routing-Modi und Provider/Modell-Overrides je Agent |
-| `PUT` | `/api/routing/modes` | Admin-Änderung (Token + CSRF, auditiert); akzeptiert `modes` und `overrides` |
+| Methode | Pfad | Zweck | Zugriff |
+| --- | --- | --- | --- |
+| `GET` | `/api/providers` | Karten-Daten: Status, Modell(e), Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen | `firm.read` (Viewer/Operator/Admin oder Browser-Session) |
+| `GET` | `/api/providers?refresh=1` | erzwingt eine Health-Prüfung | `firm.read` vor dem Refresh |
+| `GET` | `/api/routing` | Policy (Version, Klassen, Eskalation, Budgets, Ketten), Modi, Provider, Budget, Audit | `firm.read` (Antwort `private, no-store`) |
+| `GET` | `/api/routing/modes` | Routing-Modi und Provider/Modell-Overrides je Agent | Read-only-Contract unverändert |
+| `PUT` | `/api/routing/modes` | Admin-Änderung (Token + CSRF, auditiert); akzeptiert `modes` und `overrides` | Admin + CSRF |
 
 ---
 

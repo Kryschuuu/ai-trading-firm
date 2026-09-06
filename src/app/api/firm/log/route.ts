@@ -142,5 +142,5 @@ export async function GET(req: Request) {
     audit,
     meta,
     agents: agentRows,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

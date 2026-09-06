@@ -100,7 +100,7 @@ export async function GET(req: Request): Promise<Response> {
       },
       audit: snapshot.audit.slice(0, 25),
       generatedAt: snapshot.generatedAt,
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {
     return Response.json(
       { ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(e) },

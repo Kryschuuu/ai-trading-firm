@@ -53,7 +53,7 @@ export async function GET(req: Request) {
       executions,
       summaries,
       timestamp: new Date().toISOString(),
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {
     return NextResponse.json({ ok: false, error: publicErrorMessage(e) }, { status: 500 });
   }
