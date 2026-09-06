@@ -1,12 +1,45 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.32**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.33**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.33] — 2026-09-06 · Security: SEC-05 — Rule-Audit-Attribution ausschliesslich serverseitig (MEDIUM)
+
+### Security
+
+- **SEC-05 (MEDIUM) behoben:** Die Akteurs- und Rollenattribution von
+  Regel-Aenderungen wird nicht mehr aus dem Request-Body uebernommen. Wer eine
+  Regel aktiviert, pausiert, archiviert, zurueckrollt, ablehnt oder neu anlegt,
+  wird im Audit-Trail ausschliesslich anhand des authentifizierten Credentials
+  (RBAC-Actor) vermerkt. Damit ist forensisch wieder eindeutig, wer eine
+  Strategieaenderung ausgeloest hat.
+- **API-Vertrag (Breaking, bewusst):** Die Felder `by`, `actor` und
+  `sourceRole` sind kein Teil der Firm-Rules-API mehr. Requests, die sie
+  mitschicken, werden fail-closed mit `400 ACTOR_NOT_CLIENT_CONTROLLED`
+  beantwortet, statt sie still zu ignorieren — Integrationen bemerken die
+  Aenderung sofort. Ueber die API erzeugte Regeln haben immer die
+  Herkunftsrolle `MANUAL`; interne Erzeuger (Makro-Zyklus, Research/CEO-Pfad)
+  setzen ihre Rolle unveraendert serverseitig.
+- **Betroffen:** `POST /api/firm/rules`, `POST /api/firm/rules/[id]`. Keine
+  Aenderung an Berechtigungen, Trading-Logik oder Rule-Lifecycle-Semantik.
+- **Regressionen in CI:** `tests/sec05.ruleActorAttribution.test.ts` (17 Faelle)
+  deckt alle Lifecycle-Aktionen mit gefaelschtem `by`, verschachteltes
+  `sourceRole`, Prototype-Pollution-Varianten, die Reihenfolge Guard-vor-DB,
+  unauthentifizierte Requests sowie die Ableitung der Attribution aus
+  Operator-/Admin-Credential ab. Ein Quell-Drift-Check verhindert den Rueckfall.
+
+### Upgrade
+
+- **Alle Instanzen auf v1.36.33 ausrollen und neu starten.** Keine neuen
+  Pflicht-Variablen, kein Schema-Bruch, keine neue Abhaengigkeit.
+- Eigene Skripte/Integrationen, die `by` oder `sourceRole` an die
+  Firm-Rules-API senden, muessen diese Felder entfernen und stattdessen mit dem
+  passenden Credential (Operator- oder Admin-Token) authentifizieren.
 
 ## [1.36.32] — 2026-09-06 · Security: SEC-07 — Env-Credential-Fallback nur explizit in Dev/Test (HIGH)
 

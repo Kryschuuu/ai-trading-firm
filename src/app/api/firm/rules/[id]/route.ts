@@ -8,6 +8,7 @@ import {
   getRule,
 } from "@/lib/ruleService";
 import { guardWrite } from "@/lib/apiAuth";
+import { rejectClientActorFields, ruleActor } from "@/lib/ruleActor";
 import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,11 @@ export const maxDuration = 60;
  *
  * Rollback aktiviert die Vorgängerversion (−1) und superseded die aktuelle —
  * versioniert, atomar und vollständig im Audit-Log nachvollziehbar.
+ *
+ * SEC-05: Die Audit-Attribution (`by`) stammt ausschließlich aus dem
+ * authentifizierten Credential (`ruleActor` → `actorAuditId`). Ein
+ * client-geliefertes `by`/`actor`/`sourceRole` ist kein Teil des API-Vertrags
+ * mehr und führt zu 400 — der Audit-Trail bleibt forensisch belastbar.
  */
 export async function POST(
   req: Request,
@@ -29,9 +35,15 @@ export async function POST(
     const { id } = await params;
     const body = (await req.json().catch(() => ({}))) as {
       action?: "activate" | "pause" | "archive" | "rollback" | "reject";
-      by?: string;
       reason?: string;
     };
+
+    // SEC-05: fail-closed statt stillem Ignorieren.
+    const forged = rejectClientActorFields(body);
+    if (forged) return forged;
+
+    // Einzige Quelle der Attribution: das authentifizierte Credential.
+    const actor = ruleActor(req);
 
     const rule = await getRule(id);
     if (!rule) {
@@ -41,19 +53,19 @@ export async function POST(
     let outcome;
     switch (body.action) {
       case "activate":
-        outcome = await activateRule(id, body.by ?? "API");
+        outcome = await activateRule(id, actor);
         break;
       case "pause":
-        outcome = await pauseRule(id, body.by ?? "API");
+        outcome = await pauseRule(id, actor);
         break;
       case "archive":
-        outcome = await archiveRule(id, body.by ?? "API");
+        outcome = await archiveRule(id, actor);
         break;
       case "rollback":
-        outcome = await rollbackRule(id, body.by ?? "API");
+        outcome = await rollbackRule(id, actor);
         break;
       case "reject":
-        outcome = await rejectRule(id, body.reason ?? "abgelehnt über API", body.by ?? "API");
+        outcome = await rejectRule(id, body.reason ?? "abgelehnt über API", actor);
         break;
       default:
         return NextResponse.json(

@@ -261,7 +261,23 @@ export function ruleSignature(spec: RuleSpec): string {
  * geklemmte Regel um. Fehler: Liste menschenlesbar. Erfolg: nur Whitelist-
  * Felder, nur endliche Zahlen, alle Risikowerte geklemmt.
  */
-export function sanitizeRuleSpec(input: RuleSpecInput | null | undefined, fallbackSourceRole: RuleSpec["sourceRole"] = "MANUAL"): ValidationResult {
+export type SanitizeRuleSpecOptions = {
+  /**
+   * SEC-05: Ignoriert ein in der Spezifikation mitgeliefertes `sourceRole`
+   * vollstaendig und erzwingt `fallbackSourceRole`. Wird von der oeffentlichen
+   * API genutzt, damit die Herkunftsrolle einer Regel nicht client-steuerbar
+   * ist. Interne Erzeuger (Makro-Zyklus, Mikro-Executor) setzen ihre Rolle
+   * ebenfalls serverseitig, duerfen aber eine bereits normalisierte Spezifikation
+   * erneut durchreichen.
+   */
+  forceSourceRole?: boolean;
+};
+
+export function sanitizeRuleSpec(
+  input: RuleSpecInput | null | undefined,
+  fallbackSourceRole: RuleSpec["sourceRole"] = "MANUAL",
+  options: SanitizeRuleSpecOptions = {}
+): ValidationResult {
   const errors: string[] = [];
   if (!isRecord(input)) return { ok: false, errors: ["Regel-Spezifikation ist kein Objekt."] };
 
@@ -284,7 +300,11 @@ export function sanitizeRuleSpec(input: RuleSpecInput | null | undefined, fallba
     typeof input.missionId === "string" && input.missionId.trim() ? input.missionId.trim() : null;
 
   // sourceRole
-  const sourceRoleRaw = typeof input.sourceRole === "string" ? input.sourceRole.toUpperCase() : fallbackSourceRole;
+  // SEC-05: Mit `forceSourceRole` bleibt ein client-gelieferter Wert wirkungslos.
+  const sourceRoleRaw =
+    !options.forceSourceRole && typeof input.sourceRole === "string"
+      ? input.sourceRole.toUpperCase()
+      : fallbackSourceRole;
   const sourceRole = ALLOWED_SOURCE_ROLES.has(sourceRoleRaw as RuleSpec["sourceRole"])
     ? (sourceRoleRaw as RuleSpec["sourceRole"])
     : fallbackSourceRole;
