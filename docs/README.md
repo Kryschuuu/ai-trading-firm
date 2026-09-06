@@ -44,6 +44,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[OPERATIONS.md](OPERATIONS.md)** | Runbook „Funnel ist leer“: Entscheidungsbaum + Ops-Sektion Market Data |
 | **[OPERATIONS_CENTER.md](OPERATIONS_CENTER.md)** | Operations Center: Market-Data-Readiness-Diagnose |
 | **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup, Migration |
+| **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
 | **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler: Taxonomie, Metriken, strukturierte Logs, Redaction |
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE` |
 | **[BITUNIX.md](BITUNIX.md)** | Bitunix-Adapter: 7. Venue, Public REST/WS, Signing, Paper-Modus B, Live-Gate |
@@ -233,4 +234,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.36.28` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.36.29` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

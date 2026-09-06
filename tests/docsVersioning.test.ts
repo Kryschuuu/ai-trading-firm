@@ -2,7 +2,8 @@
  * Versionierung & Doku-Verlinkung (Nacharbeit v1.26.2, MDSYNC-001).
  *
  * Die Version steht an vier Stellen gleichzeitig (`package.json`,
- * Status-Header `CHANGELOG.md`, oberster Eintrag beider Changelogs,
+ * Status-Header `CHANGELOG.md`, oberster Eintrag des kanonischen Changelogs
+ * (Root `CHANGELOG.md`; `docs/CHANGELOG.md` ist seit 2026-09-05 Stub/Weiterleitung),
  * Versionszeile `docs/README.md`). Drift dort ist für Betrieb und Deployment
  * unsichtbar — ein Release kann älter wirken, als er ist. Diese Tests
  * sichern die Konsistenz statisch ab; `npm run docs:validate` prüft dasselbe
@@ -42,7 +43,15 @@ const VERSION = ((): string => {
 test("package.json-Version ist semver und in beiden Changelogs der oberste Eintrag", () => {
   assert.match(VERSION, /^\d+\.\d+\.\d+(?:-[\w.]+)?$/, "Version muss semver sein");
   assert.equal(latestChangelogEntry("CHANGELOG.md"), VERSION, "CHANGELOG.md: oberster Eintrag muss package.json entsprechen");
-  assert.equal(latestChangelogEntry("docs/CHANGELOG.md"), VERSION, "docs/CHANGELOG.md: oberster Eintrag muss package.json entsprechen");
+  // docs/CHANGELOG.md ist seit 2026-09-05 ein Stub/Weiterleitung (kanonisch: Root CHANGELOG.md).
+  // Prüfe Stub-Integrität statt Release-Eintrag — verhindert Drift/Gabelung.
+  const docsChangelog = read("docs/CHANGELOG.md");
+  if (docsChangelog.includes("Weiterleitung")) {
+    assert.ok(docsChangelog.includes("../CHANGELOG.md"), "docs/CHANGELOG.md Stub muss auf ../CHANGELOG.md verweisen");
+    assert.ok(docsChangelog.includes(`v${VERSION}`), `docs/CHANGELOG.md Stub muss Version v${VERSION} nennen`);
+  } else {
+    assert.equal(latestChangelogEntry("docs/CHANGELOG.md"), VERSION, "docs/CHANGELOG.md: oberster Eintrag muss package.json entsprechen");
+  }
 });
 
 test("CHANGELOG.md-Status-Header und docs/README.md nennen dieselbe Version", () => {

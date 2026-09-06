@@ -59,7 +59,7 @@ test("HANDBUCH 19.4 behauptet nicht mehr, Task 09 stehe aus", () => {
 });
 
 test("Plan-Datei Task 10 liegt unter docs/", () => {
-  const src = read("docs/task-10-IMPLEMENTATION_PLAN.md");
+  const src = read("docs/archive/task-plans/task-10-IMPLEMENTATION_PLAN.md");
   assert.ok(src.includes("Phase 1"));
   assert.ok(src.includes("live.gate"));
 });
