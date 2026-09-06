@@ -1,0 +1,36 @@
+# =============================================================================
+# Dependabot — rotierende Updates fuer die in den Workflows gepinnten Actions.
+#
+# SEC-10 (Supply-Chain-Hardening): Alle Actions sind auf immutable Commit-SHAs
+# gepinnt (Tag als Kommentar). Damit diese Pins nicht einfrieren, oeffnet
+# Dependabot woechentlich gruppierte PRs fuer neue Action-Versionen und zieht
+# SHA + Versionskommentar gemeinsam hoch.
+#
+# WICHTIG bei jedem Actions-PR: Die Quellen unter docs/ci/ sind 1:1 nach
+# .github/workflows/ gespiegelt. Dependabot aktualisiert nur letztere —
+# vor dem Merge die docs/ci-Kopien synchronisieren, sonst rotet der
+# Spiegel-Sync-Schritt im Job `docs-validate` (siehe docs/ci/README.md).
+#
+# Bewusst NUR Oekosystem `github-actions`: npm-Abhaengigkeiten werden kuratiert
+# und mit Runbook + Regressionssuite aktualisiert (siehe Next.js-Upgrade-Runbook
+# in docs/security/README.md) — automatische Dependency-PRs wuerden diesen
+# geprüften Release-Prozess umgehen. Advisories zusaetzlich faengt der
+# fail-closed-Schritt `npm audit --audit-level=high` im security-live-gate-Job.
+# =============================================================================
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    # Alle Action-Updates in einem PR buendeln (weniger Review-Noise);
+    # Pinning-Updates sind atomar risikoarm, da jede Action einzeln getestet wird.
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(actions): "
+    open-pull-requests-limit: 5

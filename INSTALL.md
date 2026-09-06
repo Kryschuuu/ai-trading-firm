@@ -3,7 +3,7 @@
 > **Status:** Kanonische Installationsanleitung ist jetzt in [`docs/INSTALL.md`](docs/INSTALL.md) (CachyOS, Variante A/B, Schritt für Schritt).  
 > **Flag-Referenz:** Alle Env-Flags mit sicheren Defaults stehen in [`CONFIGURATION.md`](CONFIGURATION.md).  
 > **Windows:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)  
-> **Code-Version:** v1.36.28
+> **Code-Version:** v1.36.29
 
 Diese Datei ist ein kurzer Einstieg — Details in den verlinkten Dokumenten.
 

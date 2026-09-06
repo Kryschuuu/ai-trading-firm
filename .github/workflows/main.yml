@@ -1,7 +1,8 @@
-# CI-Job `docs-validate` (Task 12) — Docs-as-Code-Waechter.
+# =============================================================================
+# CI-Workflow `docs-validate` (Task 12) — Docs-as-Code-Waechter.
 #
-# Verpflichtend fuer jeden PR (Basis-Level Security). Fuehrt `npm run docs:validate`
-# aus, das scripts/docs-validate.ts ruft:
+# Verpflichtend fuer jeden PR (Basis-Level Security). Fuehrt `npm run
+# docs:validate` aus, das scripts/docs-validate.ts ruft:
 #   - Hilfe-Schema-Validierung aller docs/help/*.help.json gegen
 #     docs/help/help.schema.json (3-Ebenen-Systematik kurzinfo/technischeInfo/risiko),
 #   - relativer Link-Check innerhalb docs/ (0 tote relative Links/Anker),
@@ -12,36 +13,82 @@
 #       API-Routen in docs/ == registrierte Routen (src/app/api),
 #       Zustandsnamen LIVE_TRADING.md == Live-Gate-Enum (src/live-gate/states.ts).
 #
-# MERGE-BLOCKADE: In der Branch-Protection von `main` als Required Status Check
-# `docs-validate` eintragen. Docs und Code werden im selben PR geaendert — nie
-# auseinander mergen.
+# Hinzu kommt (vor der Docs-Validierung) ein TypeScript-Typecheck: Die
+# Konsistenz-Checks lesen den Code — ist der Code nicht statisch sauber,
+# waeren Aussagen darueber wertlos. Ein Spiegel-Sync-Schritt prueft, dass
+# die versionierte Quelle in docs/ci/ und die ausgefuehrten Kopien unter
+# .github/workflows/ identisch sind (siehe docs/ci/README.md).
+#
+# MERGE-BLOCKADE: In der Branch-Protection von `main` als Required Status
+# Check `docs-validate` eintragen. Docs und Code werden im selben PR geaendert
+# — nie auseinander mergen.
+#
+# QUELLE DER WAHRHEIT: Diese Datei ist die versionierte Quelle und wird 1:1
+# nach .github/workflows/main.yml gespiegelt (Installation siehe docs/ci/README.md).
+# =============================================================================
 name: docs-validate
 
 on:
+  # push auf main (Post-Merge) und arena/** (Pre-PR-Validierung auf
+  # Arbeitsbranches — siehe docs/ci/README.md, "Trigger und Pre-PR-Pruefung").
   push:
     branches: [main, 'arena/**']
+  # Jeder PR, unabhaengig vom Ziel-Branch. Bewusst OHNE `paths`-Filter:
+  # Ein Required Check, dessen Workflow wegen Path-Filterung gar nicht
+  # laeuft, bleibt ewig "pending" und blockiert den Merge unloesbar.
   pull_request:
+  # Manuelle Ausfuehrung zum Debuggen/Reproduzieren ohne neuen Commit.
+  workflow_dispatch:
 
+# Least privilege (siehe Audit SEC-10): Der Job liest nur das Repository und
+# schreibt weder Commits noch Artefakte — read-only-Token genuegt.
 permissions:
   contents: read
+
+# Schnelle Folge-Pushes auf denselben Branch/PR: Nur der neueste Lauf zaehlt,
+# veraltete Laeufe werden abgebrochen (spart Runner-Minuten; der juengere Run
+# liefert den Required Check fuer den aktuellen Head-SHA).
+concurrency:
+  group: docs-validate-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   docs-validate:
     name: docs-validate
     runs-on: ubuntu-latest
+    # Hartes Zeitlimit: Ein haengender Job rotet die Pipeline, statt
+    # Runner-Minuten zu verbrennen (fail fast).
     timeout-minutes: 10
     steps:
+      # SEC-10 (Supply-Chain-Hardening): Alle Actions sind auf immutable
+      # Commit-SHAs gepinnt; der Tag steht als Kommentar dahinter. Updates
+      # rolliert Dependabot (.github/dependabot.yml) — nie per Tag-Referenz.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Node 22 + npm-Cache
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
+          # Node 22 = LTS-Linie, gegen die entwickelt wird (@types/node 22).
+          # Bewusst KEINE Versions-Matrix: Required Checks sollen deterministisch
+          # auf genau einer Runtime laufen; Kompatibilitaetsstreuseltests waeren
+          # ein separater, nicht-blockierender Job.
           node-version: 22
+          # Cache fuer ~/.npm anhand des package-lock.json-Hashs — beschleunigt
+          # `npm ci` bei Folge-Laeufen deutlich.
           cache: npm
 
-      - name: Abhaengigkeiten
+      - name: Abhaengigkeiten (npm ci, exakt aus package-lock.json)
+        # `npm ci` statt `npm install`: reproduzierbar, bricht bei Lockfile-Drift.
         run: npm ci
+
+      - name: Spiegel-Sync pruefen (docs/ci == .github/workflows)
+        # docs/ci/ ist die versionierte Quelle der Workflows; beide Kopien
+        # muessen byte-identisch sein (docs/ci/README.md). Waere eine Seite
+        # geaendert, liefen Tests gegen einen anderen Workflow als dokumentiert.
+        run: |
+          diff -u docs/ci/docs-validate.workflow.yml .github/workflows/main.yml
+          diff -u docs/ci/security-live-gate.workflow.yml .github/workflows/security-live-gate.yml
 
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck

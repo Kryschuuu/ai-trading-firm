@@ -4,9 +4,9 @@
 - **Severity:** LOW
 - **Bereich:** CI / Supply Chain
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-10 — GitHub Actions nicht auf immutable SHAs gepinnt
-- **Status:** OPEN
-- **Fix-Version:** -
-- **Datei(en):** `.github/workflows/main.yml`, `.github/workflows/main-security-live-gatte.yml`
+- **Status:** FIXED
+- **Fix-Version:** 1.36.29
+- **Datei(en):** `.github/workflows/main.yml`, `.github/workflows/security-live-gate.yml`
 - **Peer-Review-Patch:** TBD — verlinken sobald Patch in `docs/peer-reviews/` existiert
 
 ## Beschreibung
@@ -50,20 +50,30 @@ Tatsächlich: floating major tags.
 
 1. Actions auf **vollständige Commit-SHAs** pinnen:
    ```yaml
-   uses: actions/checkout@<vollständige-Commit-SHA> # v4.x.x
-   uses: actions/setup-node@<vollständige-Commit-SHA> # v4.x.x
-   uses: actions/upload-artifact@<vollständige-Commit-SHA> # v4.x.x
+   uses: actions/checkout@<vollständige-Commit-SHA> # v7.0.1
+   uses: actions/setup-node@<vollständige-Commit-SHA> # v7.0.0
+   uses: actions/upload-artifact@<vollständige-Commit-SHA> # v7.0.1
    ```
 2. Renovate oder Dependabot nutzen, um diese SHAs kontrolliert zu aktualisieren (nicht manuell „ewig“ einfrieren).
 3. `permissions: contents: read` beibehalten; keine Ausweitung ohne Begründung.
 
+**Umgesetzt in v1.36.29:** Alle drei Actions auf die aktuellen Releases
+(checkout v7.0.1, setup-node v7.0.0, upload-artifact v7.0.1) inkl. Tag-Kommentar
+gepinnt; `.github/dependabot.yml` (Ökosystem `github-actions`, wöchentlich,
+gruppierte PRs) übernimmt die kontrollierten SHA-Updates. Zusätzlich erzwungen:
+Spiegel-Sync-Schritt (`docs/ci/` == `.github/workflows/`) und fail-closed
+`npm audit --audit-level=high` im Security-Gate. Der Mirror
+`main-security-live-gatte.yml` (Tippfehler im Namen) wurde nach
+`security-live-gate.yml` umbenannt — der Ziel-Pfad, den `scan-live-gate-secrets.ts`
+und `docs/LIVE_TRADING.md` §8 bereits erwarteten.
+
 ## Akzeptanzkriterien / Tests
 
-- [ ] Kein `uses: actions/*@vN` ohne SHA in `.github/workflows/`
-- [ ] Jede gepinnte Action hat einen Kommentar mit Tag/Version
-- [ ] Dependabot/Renovate für GitHub Actions aktiv oder Update-Prozess dokumentiert
-- [ ] `permissions:` bleibt least-privilege
-- [ ] CI (`docs-validate`, `security-live-gate`) bleibt grün
+- [x] Kein `uses: actions/*@vN` ohne SHA in `.github/workflows/`
+- [x] Jede gepinnte Action hat einen Kommentar mit Tag/Version
+- [x] Dependabot/Renovate für GitHub Actions aktiv oder Update-Prozess dokumentiert
+- [x] `permissions:` bleibt least-privilege
+- [x] CI (`docs-validate`, `security-live-gate`) bleibt grün
 
 ## Changelog-Blurb
 
