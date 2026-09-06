@@ -3,7 +3,7 @@
 > **Status:** Kanonische Installationsanleitung ist jetzt in [`docs/INSTALL.md`](docs/INSTALL.md) (CachyOS, Variante A/B, Schritt für Schritt).  
 > **Flag-Referenz:** Alle Env-Flags mit sicheren Defaults stehen in [`CONFIGURATION.md`](CONFIGURATION.md).  
 > **Windows:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)  
-> **Code-Version:** v1.36.27
+> **Code-Version:** v1.36.28
 
 Diese Datei ist ein kurzer Einstieg — Details in den verlinkten Dokumenten.
 
@@ -41,7 +41,13 @@ npm run start               # http://0.0.0.0:3369
 
 Details: [CONFIGURATION.md](CONFIGURATION.md) (Flag-Tabelle), [docs/HANDBUCH.md](docs/HANDBUCH.md) (Bedienung), [docs/SETUP_BUGS.md](docs/SETUP_BUGS.md) (Befunde).
 
-## Produktions-Sicherheit / Upgrade auf v1.36.27
+## Produktions-Sicherheit / Upgrade auf v1.36.28
+
+**SEC-03:** Next.js 16.3.4 und die native Decoder-Kette müssen gemeinsam aus dem
+Lockfile installiert werden. Vor Deployment `npm ci`,
+`npm run test:security:next` und einen frischen Build ausführen; alle Instanzen
+neu starten. [Vollständiges Upgrade-Runbook](docs/security/README.md#nextjs-upgrade-sec-03).
+Die folgenden Session-Anforderungen aus v1.36.27 gelten weiterhin.
 
 `NODE_ENV=production` benötigt im Token-Betrieb ein unabhängiges
 `FIRM_SESSION_SECRET` (mindestens 32 zufällige Zeichen, empfohlen separat
@@ -51,8 +57,8 @@ den Start (`SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`).
 `AUTH_MODE=local-open` ist nur für bewusst offenen Lokalbetrieb ohne Tokens gedacht,
 nicht als Reparatur einer fehlerhaften Produktionskonfiguration.
 
-Beim Upgrade alle Instanzen mit der neuen Konfiguration neu starten und erneut
-anmelden; alte Session-Cookies werden nicht übernommen. Browser-Login in Produktion
+Beim Upgrade von Versionen vor v1.36.27 alle Instanzen mit der neuen Konfiguration
+neu starten und erneut anmelden; deren alte Session-Cookies werden nicht übernommen. Browser-Login in Produktion
 benötigt HTTPS. Vorab: `NODE_ENV=production npm run boot:guard` (liest `.env`,
 Prozess-Env hat Vorrang). Details: [CONFIGURATION.md](CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 

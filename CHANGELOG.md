@@ -1,12 +1,42 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.27**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.28**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.28] — 2026-09-06 · Security: SEC-03 — Next.js und native Bildverarbeitung aktualisiert
+
+### Security
+
+- **SEC-03 (HIGH) behoben:** Die in **v1.36.27** ausgelieferte Next.js-Version
+  16.3.1 enthielt bekannte Schwachstellen mit möglicher unauthentifizierter
+  Codeausführung. Next.js ist jetzt exakt auf **16.3.4** gepinnt; Lockfile und
+  zugehörige Runtime-/Plattformpakete wurden gemeinsam aktualisiert.
+  Referenzen: [GHSA-p293-qw3h-jr36 / CVE-2026-75604](https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36),
+  [GHSA-2xp9-vwfh-vxw4](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4).
+- Native Bildverarbeitung über **sharp 0.35.4**, zugehörige libvips-Pakete
+  **1.3.3** und **libheif 1.23.2** abgesichert. Die transitive Decoder-Kette ist
+  Bestandteil des Fixes; keine neue direkte Abhängigkeit und keine Änderung
+  der Trading-/Auth-Architektur.
+- Neue Dependency- und Framework-Regressionen prüfen Manifest, sämtliche
+  relevanten Lockfile-Einträge, installierte Pakete und den geladenen Decoder.
+  Sie laufen verbindlich unter Linux und Windows im Security-Workflow; auch der
+  Produktions-Build ist Pflicht vor Ausstellung des Security-Suite-Stamps.
+
+### Upgrade
+
+- **Alle Instanzen aktualisieren**, nicht nur Windows-Deployments. Aus dem
+  geprüften Lockfile mit `npm ci` neu installieren, `npm run test:security:next`
+  ausführen, frisch bauen und vollständig neu starten. Keine alten Build-/Image-
+  Caches oder laufenden Prozesse übernehmen. Details im
+  [Upgrade-Runbook](docs/security/README.md#nextjs-upgrade-sec-03).
+- Patch-Version **1.36.28** in Manifest/Lockfile und aktuellen Versionsangaben;
+  Finding und Security-Tracking als FIXED dokumentiert. Andere Findings bleiben
+  unverändert offen.
 
 ## [1.36.27] — 2026-09-06 · Security: SEC-01 — Session-Autorisierung gehärtet
 

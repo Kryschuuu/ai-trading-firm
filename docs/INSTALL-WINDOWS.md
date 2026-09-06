@@ -1,5 +1,11 @@
 # Windows-Installation (PowerShell, Schritt für Schritt)
 
+> **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf Next.js
+> 16.3.4 einschließlich nativer Bildverarbeitung aktualisieren. `npm ci`,
+> `npm run test:security:next`, frischer Build und Neustart aller Instanzen sind
+> erforderlich; ein reines Manifest-Update reicht nicht. Das gilt auch ohne
+> Nutzung von Bildern im Dashboard. [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
+
 Diese Anleitung installiert das Projekt **von Grund auf** auf Windows 10/11. Der
 Ablauf ist wiederholbar und schützt eine vorhandene `.env` durch ein Backup. Das
 System bleibt dabei strikt im Paper-Trading: `LIVE_TRADING_ENABLED=false`,

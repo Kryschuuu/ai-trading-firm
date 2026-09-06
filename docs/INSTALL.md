@@ -1,5 +1,11 @@
 # Installation — Schritt für Schritt auf CachyOS
 
+> **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf Next.js
+> 16.3.4 einschließlich nativer Bildverarbeitung aktualisieren. `npm ci`,
+> `npm run test:security:next`, frischer Build und Neustart aller Instanzen sind
+> erforderlich; ein reines Manifest-Update reicht nicht. Das gilt auch ohne
+> Nutzung von Bildern im Dashboard. [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
+
 Diese Anleitung führt dich von einem frischen CachyOS bis zum laufenden Dienst.
 Sie ist für **beide Varianten** geschrieben:
 

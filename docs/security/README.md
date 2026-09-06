@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; übrige Findings OPEN |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; übrige Findings OPEN |
 
 ## Offene Critical/High Findings (aggregiert)
 
@@ -31,14 +31,65 @@
 | Audit | ID | Titel | Severity | Status |
 |-------|----|-------|----------|--------|
 | 2026-09-05-gpt01 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN |
-| 2026-09-05-gpt01 | SEC-03 | Verwundbare Next.js-Version | HIGH | OPEN |
 | 2026-09-05-gpt01 | SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN |
 
 **SEC-01 ist seit v1.36.27 FIXED:** [Session-Autorisierung](../audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md).
 Upgrade einschließlich unabhängigem `FIRM_SESSION_SECRET`, Neustart aller Instanzen
 und erneutem Login erforderlich. Andere offene Findings bleiben unverändert relevant.
 
+**SEC-03 ist seit v1.36.28 FIXED:** [Framework-/Decoder-Update](../audits/2026-09-05-security-review-gpt01/findings/SEC-03-vulnerable-next.md).
+Alle Linux-/Windows-Instanzen aus dem neuen Lockfile installieren und frisch ausrollen.
+
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
+
+## Next.js-Upgrade (SEC-03)
+
+**v1.36.28:** Next.js ist exakt auf **16.3.4** gepinnt. Der Mindestfix der
+Advisories ist 16.3.3; dieses Release nutzt bewusst den stabilen Folgepatch
+mit wieder aktivierter AVIF-Unterstützung und **sharp 0.35.4**, passenden
+libvips-Paketen **1.3.3** sowie **libheif 1.23.2**. Die gesamte Kette ist relevant,
+nicht allein die Versionsnummer von Next.js. v1.36.27 lieferte Next.js 16.3.1 aus.
+
+### Ausrollen
+
+1. Geprüften Release **v1.36.28 oder neuer** in einem frischen Release-Verzeichnis
+   vorbereiten. Keine alten `.next`-Builds oder Image-/ISR-Caches übernehmen.
+   `.env`, Datenbank und fachliche persistente Daten erhalten, nicht löschen.
+2. Mit Node 22 (wie CI) installieren und prüfen:
+
+   ```bash
+   npm ci
+   npm run test:security:next
+   npm audit
+   npm run build
+   ```
+
+   **Jeder Schritt muss erfolgreich sein; bei Fehlern nicht deployen.**
+   `test:security:next` funktioniert auch in PowerShell. Auth-/Live-Gate-Suite,
+   Typecheck, Lint, Doku-Validierung und Produktions-Build werden zusätzlich durch
+   GitHub Actions geprüft. Ein grünes `npm audit` allein ersetzt das Gate nicht.
+3. Erst danach auf den neuen Build umschalten und **sämtliche App-Prozesse neu
+   starten**. Alte Instanzen aus dem Load-Balancer nehmen; kein gemischter
+   Alt-/Neubetrieb. Auch Windows, Linux und Installationen ohne Image-UI upgraden.
+4. Health-/Versionsanzeige gegen `package.json` prüfen. Nicht auf einen bekannten
+   verwundbaren Release zurückrollen. SEC-01-Session-Konfiguration bleibt Pflicht.
+
+### Wartung und Grenzen
+
+- Das Gate prüft exakten stabilen Pin, Root-/Lockfile-Konsistenz, alle relevanten
+  nativen Plattformpakete, die tatsächlich von Next aufgelöste Installation und
+  die geladene libheif-Version. Alte/fehlende Libraries oder Lockfile-Drift lassen
+  die Prüfung fehlschlagen, auch bei eigenen/globalen libvips-Builds.
+- Dependency-Updates immer inklusive Lockfile reviewen, mit `npm ci` installieren
+  und auf beiden CI-Plattformen prüfen. Kein automatisches `next@latest` ohne
+  Review und keine Overrides auf ältere Decoder. Der Versions-Floor ist ein
+  gezielter SEC-03-Regressionsschutz, keine Garantie gegen künftige Advisories.
+- `security-live-gate` verlangt die Windows-Regression und führt dieselbe Suite
+  unter Linux aus; ein fehlgeschlagener Windows-Lauf verhindert den grünen
+  Required Check und den Security-Suite-Stamp.
+- Bei Verdacht auf bereits erfolgte Kompromittierung Instanz isolieren, aus
+  vertrauenswürdigem Release neu aufbauen und erreichbare Credentials rotieren.
+  Ein Dependency-Update beseitigt keinen bereits erfolgten Einbruch.
 
 ## Auth-Modus (v1.36.13+)
 
