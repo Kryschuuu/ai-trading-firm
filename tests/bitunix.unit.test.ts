@@ -477,13 +477,35 @@ test("Secrets: Env-Fallback, nie Throw mit Klartext", async () => {
   assert.equal(empty, null);
 });
 
-test("Secrets: Default-Store ohne SECRET_STORE_KEY fällt auf Env zurück", async () => {
+test("Secrets: Default-Store ohne SECRET_STORE_KEY — SEC-07 fail-closed, kein Env-Fallback ohne Flag", async () => {
+  const prev = process.env.SECRET_STORE_KEY;
+  const prevNode = process.env.NODE_ENV;
+  delete process.env.SECRET_STORE_KEY;
+  (process.env as any).NODE_ENV = "production";
+  try {
+    const store = createDefaultBitunixSecretStore({
+      BITUNIX_API_KEY: "env-key-abcdef01234567",
+      BITUNIX_API_SECRET: "env-secret-abcdef0123",
+      NODE_ENV: "production",
+    });
+    const creds = await loadBitunixCredentials(store);
+    assert.equal(creds, null);
+  } finally {
+    if (prev !== undefined) process.env.SECRET_STORE_KEY = prev;
+    else delete process.env.SECRET_STORE_KEY;
+    (process.env as any).NODE_ENV = prevNode;
+  }
+});
+
+test("Secrets: Default-Store ohne SECRET_STORE_KEY — mit BROKER_ALLOW_ENV_FALLBACK in Dev faellt auf Env", async () => {
   const prev = process.env.SECRET_STORE_KEY;
   delete process.env.SECRET_STORE_KEY;
   try {
     const store = createDefaultBitunixSecretStore({
       BITUNIX_API_KEY: "env-key-abcdef01234567",
       BITUNIX_API_SECRET: "env-secret-abcdef0123",
+      BROKER_ALLOW_ENV_FALLBACK: "true",
+      NODE_ENV: "development",
     });
     const creds = await loadBitunixCredentials(store);
     assert.deepEqual(creds, {
@@ -492,6 +514,7 @@ test("Secrets: Default-Store ohne SECRET_STORE_KEY fällt auf Env zurück", asyn
     });
   } finally {
     if (prev !== undefined) process.env.SECRET_STORE_KEY = prev;
+    else delete process.env.SECRET_STORE_KEY;
   }
 });
 

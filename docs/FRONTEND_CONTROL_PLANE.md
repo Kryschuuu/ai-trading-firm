@@ -1,6 +1,6 @@
 # Broker Control Plane — Frontend & Credential-Manager (Task 08)
 
-**Stand:** v1.16.0 · **Scope:** `src/brokers/control-plane/**`,
+**Stand:** v1.36.32 · **Scope:** `src/brokers/control-plane/**`,
 `src/app/api/brokers/{venue}/(credentials|status|test|discover)`,
 `src/components/control-plane/**`, `src/lib/controlPlane.ts`,
 `src/app/brokers/page.tsx`, Dashboard-Tab „Brokers & Venues".
@@ -175,12 +175,13 @@ immer `off` und `liveEnabled` immer `false` — einzige Quelle ist
   (`KMS_NOT_IMPLEMENTED`), nie stiller Env-Fallback.
 - **Storage-Backends:** `db` (Tabelle `broker_credentials`, Default mit
   Fallback) → `file` (`data/secrets/*.enc`, chmod 600, gitignored) →
-  `memory` (nur Tests). Fehlt `SECRET_STORE_KEY` → 503
-  `SECRET_STORE_UNAVAILABLE` (fail-closed).
-- **Task-07-Kompatibilität:** `createVenueBackedNamedStore("BITUNIX", …)`
+  `memory` (nur Tests). Fehlt `SECRET_STORE_KEY` und kein Dev-Fallback-Flag → null-store (fail-closed, kein Credential).
+- **Task-07-Kompatibilität (SEC-07 v1.36.32):** `createVenueBackedNamedStore("BITUNIX", …)`
   bildet die entschlüsselten Felder auf das task-07-Interface
-  `SecretStore.get(name)` (`BITUNIX_API_KEY`/`BITUNIX_API_SECRET`) ab;
-  Env-Fallback bleibt erhalten.
+  `SecretStore.get(name)` (`BITUNIX_API_KEY`/`BITUNIX_API_SECRET`) ab.
+  Env-Fallback nur wenn `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`;
+  in Produktion: fehlender Datensatz → null, Store-Fehler (AUTH_FAILED, STORAGE_UNAVAILABLE) → HARD FAIL (throw).
+  `createDefault*SecretStore` ohne `SECRET_STORE_KEY` und ohne Flag → fail-closed (kein Credential).
 - **Memory-Hygiene:** Krypto-Pfad über Buffer; `zeroize()` nach Nutzung;
   Probe arbeitet mit dem transienten Wert und verwirft ihn danach
   (`disposeCredential`). JS-Strings sind unveränderlich — die Grenze ist
@@ -270,7 +271,7 @@ Dashboard-Integration: neuer Tab „🌐 Brokers & Venues" im FirmDashboard.
 ## 9. Tests & Abweichungen (RECON-Dokumentation)
 
 - **Unit:** `tests/secretStore.test.ts` (Roundtrip, Wrong-Key, Tampering →
-  Auth-Tag, AAD-Bindung, Buffer-Nullung, Backends, Task-07-Bridge),
+  Auth-Tag, AAD-Bindung, Buffer-Nullung, Backends, Task-07-Bridge, SEC-07 fail-closed + Dev-Flag),
   `tests/controlPlane.states.test.ts` (Übergänge + Missbrauch 409/422).
 - **Contract/Security:** `tests/controlPlane.security.test.ts` (Response-
   Scanner über ALLE Broker-API-Responses, Bundle-Scanner, CSRF, RBAC,
@@ -281,7 +282,7 @@ Dashboard-Integration: neuer Tab „🌐 Brokers & Venues" im FirmDashboard.
   Test → Status sichtbar → Disconnect/Delete; Secret maskiert; Live off) ·
   **Persistenz (C4):** `tests/controlPlane.persistence.test.ts` (save → Neustart
   → getStatus, Warm-up, Rehydrierung, Fail-Safe, status-only).
-- Coverage: `npm run test:coverage:controlplane` (Ziel ≥ 90 %).
+- Coverage: `npm run test:coverage:controlplane` (Ziel ≥ 90 %). SEC-07: `tests/sec07.envCredentialFallback.test.ts` (19 Faelle: Bitunix/Alpaca AUTH_FAILED/STORAGE_UNAVAILABLE Hard-Fail, missing→null, Dev Flag, Prod Defense-in-Depth, Angriffsvektoren).
 
 **Dokumentierte Abweichungen:**
 

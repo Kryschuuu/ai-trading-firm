@@ -28,6 +28,7 @@ export {
   createVenueBackedNamedStore,
   deriveStoreKey,
   getControlPlaneSecretStore,
+  isEnvCredentialFallbackAllowed,
   openEnvelope,
   sealEnvelope,
   setControlPlaneSecretStoreForTests,

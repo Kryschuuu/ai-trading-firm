@@ -1,6 +1,6 @@
 # Alpaca-Adapter (Task 12) — 8. Venue, US-Aktien/ETFs/Crypto
 
-**Stand:** v1.36.0 · **Modul:** `src/brokers/alpaca/` · **Contract:** `BrokerAdapter`
+**Stand:** v1.36.32 · **Modul:** `src/brokers/alpaca/` · **Contract:** `BrokerAdapter`
 **Status:** Public REST (Market Data v2) + Private Trading API (Basic-Auth) +
 Paper (Modus B) ausführbar. Live-Ausführung über den zentralen Live-Gate-Enforcer
 (Task 11) und eine **getrennte Broker-Ausführungs-Engine** (s. §5) — ohne
@@ -26,7 +26,7 @@ bleiben in diesem Ordner.
 | `ExecutionPort` | `src/brokers/alpaca/execution.ts` | `PaperExecutionEngine` (paper) + `BrokerExecutionEngine` (live) — getrennte Implementierungen, niemals vermischt |
 | Mapping | `src/brokers/alpaca/mapping.ts` | `mapAsset`/`mapAssets` (Alpaca-Asset → `MarketInstrument`), `mapBar`/`mapBars`, `mapOrderResult`/`mapPosition`/`mapAccount` |
 | Order-Serialisierung | `src/brokers/alpaca/orders.ts` | `serializePlaceOrder` + `makeClientOrderId` (Idempotenz-Key) |
-| Secret-Store | `src/brokers/alpaca/secrets.ts` | `SecretStore` + Env-Fallback `ALPACA_API_KEY`/`ALPACA_API_SECRET` |
+| Secret-Store | `src/brokers/alpaca/secrets.ts` | `SecretStore` = Control-Plane-Store (SEC-07 v1.36.32: in Prod kein Env-Fallback; Env nur mit `BROKER_ALLOW_ENV_FALLBACK=true` + non-prod) |
 | Redactor | `src/brokers/alpaca/redactor.ts` | `createAlpacaLogger` + `redactAlpaca` (maskiert `apiKey`/`apiSecret`/Header) |
 | Config | `src/brokers/alpaca/config.ts` | `loadAlpacaPublicConfig`/`loadAlpacaTradeConfig` |
 | Audit | `src/brokers/alpaca/audit.ts` | synchroner In-Memory-Ring + `audit_log`-Event `ALPACA_PRIVATE_CALL` |
@@ -134,7 +134,9 @@ Anfang an erfüllt.
 * `src/lib/auditView.ts` enthält den Katalogeintrag mit deutscher
   Beschreibung, Sektion „Privater Call" (Methode/Pfad/Ergebnis/Fehlercode).
 
-## 8. Security-Audit
+## 8. Security-Audit (SEC-07 v1.36.32)
+
+* **Env-Fallback nur explizit in Dev/Test:** In Produktion kein Fallback auf `ALPACA_API_KEY`/`ALPACA_API_SECRET`. Fehlender Datensatz → null, Store-Fehler (AUTH_FAILED, STORAGE_UNAVAILABLE) → HARD FAIL. Env nur wenn `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`. Ohne `SECRET_STORE_KEY` und ohne Flag → fail-closed.
 
 * **Kill-Switch** prüft sowohl `killSwitch.isArmed()` als auch
   Datei-Kill-Flag im Enforcer.
@@ -171,6 +173,7 @@ ALPACA_API_SECRET=…
 ALPACA_USE_LIVE_ENDPOINTS=false # Default: Paper-API
 ALPACA_ALLOW_INSECURE_HTTP=false # nur Loopback-Tests
 ALPACA_RETRY_MAX=2              # Default
+BROKER_ALLOW_ENV_FALLBACK=false # SEC-07: Env-Fallback nur explizit Dev/Test
 ```
 
 `GET /api/brokers` zeigt ab v1.36.0 `count=8` Venues (PAPER + BITUNIX +
