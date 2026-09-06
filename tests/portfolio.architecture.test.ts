@@ -245,7 +245,7 @@ test("Doku: README-Index und /api/docs-Whitelist kennen das neue Dokument", () =
 });
 
 test("Doku: Security-Audit-Kapitel für Task 05 existiert", () => {
-  const audit = readFileSync(path.join(ROOT, "docs/SECURITY_AUDIT.md"), "utf8");
+  const audit = readFileSync(path.join(ROOT, "docs/security/SECURITY_AUDIT.md"), "utf8");
   assert.match(audit, /## Security Audit — Task 05/);
   const haystack = audit.toLowerCase();
   for (const criterion of ["read-only", "größenlimits", "determinismus", "kein llm-import"]) {
@@ -255,7 +255,7 @@ test("Doku: Security-Audit-Kapitel für Task 05 existiert", () => {
 });
 
 test("Doku: CHANGELOG führt Task 05", () => {
-  const changelog = readFileSync(path.join(ROOT, "docs/CHANGELOG.md"), "utf8");
+  const changelog = readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8");
   assert.match(changelog, /Task 05/);
   assert.match(changelog, /src\/portfolio/);
 });
