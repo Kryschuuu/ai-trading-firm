@@ -127,10 +127,16 @@ export type UpsertResult = {
  * Neu:        keine aktive Regel für symbol+mission → ruleKey v1 (DRAFT).
  *
  * Neue Versionen landen bewusst als DRAFT: Die Aktivierung (menschlich oder
- * über REQUIRE_HUMAN_APPROVAL) ist ein expliziter, auditiertier Schritt.
+ * über REQUIRE_HUMAN_APPROVAL) ist ein expliziter, auditierter Schritt.
+ *
+ * SEC-05/06: Vertrauenswürdiger interner Service, keine HTTP-Autorisierung.
+ * API-Aufrufer prüfen strategy.rules.* VOR dem ersten Zugriff und übergeben
+ * ausschließlich den verifizierten Actor. Interne Erzeuger nennen ihren
+ * Systemakteur explizit; auch RULE_CREATED darf keine anonyme Mutation sein.
  */
 export async function upsertRuleSpec(
   spec: RuleSpec,
+  by: string,
   sourceAgentId?: string | null,
   sourceMode: "SIGMA" | "FALLBACK" | "MANUAL" = "SIGMA"
 ): Promise<UpsertResult> {
@@ -186,6 +192,7 @@ export async function upsertRuleSpec(
       version: row.version,
       symbol: row.symbol,
       signature,
+      by,
       sourceRole: row.sourceRole,
       sourceMode: row.sourceMode,
       previousVersionId: row.previousVersionId,
@@ -209,7 +216,7 @@ export type RuleActionOutcome =
  * desselben Symbols/Mandats. Der Mikro-Executor sieht beim nächsten
  * Cache-Reload (oder per Invalidation) nur noch die neue Version.
  */
-export async function activateRule(ruleId: string, by = "MANUAL"): Promise<RuleActionOutcome> {
+export async function activateRule(ruleId: string, by: string): Promise<RuleActionOutcome> {
   return db.transaction(async (tx) => {
     const [row] = await tx.select().from(tradeRules).where(eq(tradeRules.id, ruleId)).limit(1);
     if (!row) return { ok: false as const, error: "Regel nicht gefunden" };
@@ -262,7 +269,7 @@ export async function activateRule(ruleId: string, by = "MANUAL"): Promise<RuleA
 }
 
 /** Pausieren: Regel bleibt erhalten, wird aber nicht mehr ausgeführt. */
-export async function pauseRule(ruleId: string, by = "MANUAL"): Promise<RuleActionOutcome> {
+export async function pauseRule(ruleId: string, by: string): Promise<RuleActionOutcome> {
   const [row] = await db.select().from(tradeRules).where(eq(tradeRules.id, ruleId)).limit(1);
   if (!row) return { ok: false, error: "Regel nicht gefunden" };
   if (row.status !== "ACTIVE") return { ok: false, error: `Nur ACTIVE-Regeln können pausiert werden (Status: ${row.status})` };
@@ -275,7 +282,7 @@ export async function pauseRule(ruleId: string, by = "MANUAL"): Promise<RuleActi
   return { ok: true, rule: updated, detail: "pausiert" };
 }
 
-export async function archiveRule(ruleId: string, by = "MANUAL"): Promise<RuleActionOutcome> {
+export async function archiveRule(ruleId: string, by: string): Promise<RuleActionOutcome> {
   const [row] = await db.select().from(tradeRules).where(eq(tradeRules.id, ruleId)).limit(1);
   if (!row) return { ok: false, error: "Regel nicht gefunden" };
   if (row.status === "ACTIVE" || row.status === "SUPERSEDED") {
@@ -291,7 +298,7 @@ export async function archiveRule(ruleId: string, by = "MANUAL"): Promise<RuleAc
 }
 
 /** Abgelehnte (z. B. vom Risk-Gate verworfene) Regel-Entwürfe fürs Audit. */
-export async function rejectRule(ruleId: string, reason: string, by = "RISK_GATE"): Promise<RuleActionOutcome> {
+export async function rejectRule(ruleId: string, reason: string, by: string): Promise<RuleActionOutcome> {
   const [row] = await db.select().from(tradeRules).where(eq(tradeRules.id, ruleId)).limit(1);
   if (!row) return { ok: false, error: "Regel nicht gefunden" };
   if (row.status !== "DRAFT") return { ok: false, error: `Nur DRAFT-Regeln können abgelehnt werden (Status: ${row.status})` };
@@ -309,7 +316,7 @@ export async function rejectRule(ruleId: string, reason: string, by = "RISK_GATE
  * SUPERSEDED. Atomar in einer Transaktion; danach sieht der Mikro-Executor
  * nach Cache-Reload wieder die alte Regel — der Stand der Welt ist die DB.
  */
-export async function rollbackRule(ruleId: string, by = "MANUAL"): Promise<RuleActionOutcome> {
+export async function rollbackRule(ruleId: string, by: string): Promise<RuleActionOutcome> {
   return db.transaction(async (tx) => {
     const [current] = await tx.select().from(tradeRules).where(eq(tradeRules.id, ruleId)).limit(1);
     if (!current) return { ok: false as const, error: "Regel nicht gefunden" };

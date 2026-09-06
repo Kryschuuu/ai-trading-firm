@@ -15,8 +15,10 @@ import { PERMISSIONS, permissionsForRole, resolveAuth, type Role } from "../src/
 import { tradeRules } from "../src/db/schema";
 import { resetRateLimiterForTests } from "../src/lib/apiAuth";
 import { resetAuditDurabilityForTests, setAuditTransportForTests, type AuditRow } from "../src/lib/auditSink";
+import { describeAuditEntry } from "../src/lib/auditView";
 import { issueSession, SESSION_COOKIE } from "../src/lib/authSession";
 import { ruleActor } from "../src/lib/ruleActor";
+import { ruleSignature, sanitizeRuleSpec } from "../src/lib/ruleEngine";
 import type { RuleRow } from "../src/lib/ruleService";
 
 const TOKENS = {
@@ -299,6 +301,9 @@ for (const transport of ["header", "bearer", "session"] as const) {
     assert.equal(audits.length, 1);
     assert.equal(audits[0].event, "RULE_CREATED");
     assert.equal((audits[0].detail as Record<string, unknown>).by, "operator");
+    const view = describeAuditEntry({ ...audits[0], id: "created", createdAt: "2026-09-06T00:00:00Z" });
+    assert.equal(view.sections.flatMap((section) => section.facts)
+      .find((fact) => fact.label === "Ausgelöst von")?.value, "operator");
   });
 
   test(`SEC-06/05: Admin/${transport} darf create-and-activate, beide Audits tragen denselben Actor`, async () => {
@@ -337,6 +342,78 @@ test("SEC-06: activate=false legt auch in flacher Form nur einen Draft an", asyn
   assert.equal(res.status, 200);
   assert.equal((await res.json()).rule.status, "DRAFT");
   assert.deepEqual(db.writes.map((write) => write.kind), ["insert"]);
+});
+
+test("SEC-06: Operator-Änderungen erzeugen nur einen Draft, die aktive Version bleibt unangetastet", async () => {
+  const active = row("ACTIVE");
+  db.reads = [[active]];
+  const res = await post(request({ ...SPEC, name: "Revised draft", activate: false }, credential("operator")));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.rule.ruleKey, active.ruleKey);
+  assert.equal(body.rule.version, active.version + 1);
+  assert.equal(body.rule.previousVersionId, active.id);
+  assert.equal(body.rule.status, "DRAFT");
+  assert.deepEqual(db.writes.map((write) => write.kind), ["insert"]);
+});
+
+test("SEC-06: idempotentes Upsert ohne Freigabe ist keine Mutation", async () => {
+  const validated = sanitizeRuleSpec(SPEC);
+  assert.ok(validated.ok);
+  const active = row("ACTIVE", { signature: ruleSignature(validated.spec) });
+  db.reads = [[active]];
+  const res = await post(request({ rule: SPEC, activate: false }, credential("operator")));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.reason, "IDEMPOTENT");
+  assert.equal(body.rule.id, active.id);
+  assert.deepEqual(db.writes, []);
+  assert.deepEqual(audits, []);
+});
+
+test("SEC-06: auch ungültige Specs und idempotente Aktivierung umgehen den Freigabe-Guard nicht", async () => {
+  for (const rule of [{}, SPEC]) {
+    db.reads = [[row("ACTIVE")]];
+    assert.equal((await post(request({ rule, activate: true }, credential("operator")))).status, 403);
+    assertUntouched();
+  }
+  for (const status of ["DRAFT", "ACTIVE", "PAUSED", "REJECTED", "SUPERSEDED", "ARCHIVED"]) {
+    db.reads = [[row(status)]];
+    assert.equal((await actionRequest({ action: "activate" })).status, 403);
+    assertUntouched();
+  }
+});
+
+test("SEC-06: Admin-Token im dokumentierten x-firm-token-Alias bleibt zulässig", async () => {
+  prepareAction("activate");
+  assert.equal((await actionRequest({ action: "activate" }, { "x-firm-token": TOKENS.admin })).status, 200);
+  assert.equal((audits[0].detail as Record<string, unknown>).by, "admin");
+});
+
+test("SEC-06: token-required bleibt auch ohne konfigurierte Credentials geschlossen", async () => {
+  delete process.env.FIRM_ADMIN_TOKEN;
+  delete process.env.FIRM_API_TOKEN;
+  delete process.env.FIRM_VIEWER_TOKEN;
+  assert.equal((await post(request({ rule: SPEC, activate: true }))).status, 401);
+  assert.equal((await actionRequest({ action: "activate" }, {})).status, 401);
+  assert.equal((await macro(request({}))).status, 401);
+  assertUntouched();
+});
+
+test("SEC-05-Nachprüfung: leere/falsy Attributionsfelder werden nicht still akzeptiert", async () => {
+  for (const field of ["by", "actor", "sourceRole"]) {
+    for (const value of [null, "", false, [], {}]) {
+      for (const body of [{ ...SPEC, [field]: value }, { rule: { ...SPEC, [field]: value } }]) {
+        const res = await post(request(body, credential("operator")));
+        assert.equal(res.status, 400);
+        assert.equal((await res.json()).error, "ACTOR_NOT_CLIENT_CONTROLLED");
+      }
+      const res = await actionRequest({ action: "pause", [field]: value });
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).error, "ACTOR_NOT_CLIENT_CONTROLLED");
+    }
+  }
+  assertUntouched();
 });
 
 test("SEC-06: unbekannte/mehrdeutige Aktionen sind vor dem Lookup ungültig", async () => {

@@ -1409,6 +1409,7 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
           { label: "Regel-Familie (ruleKey)", value: text(d.ruleKey) ?? "—", mono: true },
           { label: "Version", value: num(d.version) !== null ? `v${num(d.version)}` : "—" },
           { label: "Erstellt von (Rolle)", value: roleLabel(d.sourceRole) },
+          { label: "Ausgelöst von", value: text(d.by) ?? "—" },
           { label: "Entstehung", value: formatKnownValue("sourceMode", d.sourceMode) },
           { label: "Signatur", value: text(d.signature) ?? "—", mono: true },
         ],

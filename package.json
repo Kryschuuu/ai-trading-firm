@@ -40,7 +40,7 @@
     "live:stamp": "node --import tsx scripts/live-security-stamp.ts",
     "test:security:next": "node --import tsx --test \"tests/sec03.*.test.ts\"",
     "test:security:ws": "node --import tsx --test \"tests/sec04.*.test.ts\"",
-    "test:security:auth": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/sec01.*.test.ts' 'tests/sec02.*.test.ts' 'tests/w1.sessionCookie.test.ts' 'tests/authMode.test.ts' 'tests/rbac.test.ts'",
+    "test:security:auth": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/sec01.*.test.ts' 'tests/sec02.*.test.ts' 'tests/sec05.*.test.ts' 'tests/sec06.*.test.ts' 'tests/w1.sessionCookie.test.ts' 'tests/authMode.test.ts' 'tests/rbac.test.ts'",
     "security:live-gate": "npm run test:security:next && npm run test:security:ws && npm run test:security:auth && DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
     "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'",
     "history:migrate": "node --import tsx scripts/migrate-history-timeframe.ts",
