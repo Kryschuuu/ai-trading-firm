@@ -3,14 +3,20 @@
  *
  * Liefert Policy-Version, Routing-Tabelle (Agent → Modus/Klasse), Modi,
  * Provider-Karten, Budget-Zähler, letzte Entscheidungen und Audit-Auszug.
- * Rein lesend (kein Token nötig), keine Secrets in der Antwort.
+ * Diese Betriebs- und Strategieinformationen erfordern `firm.read`; Secrets
+ * bleiben unabhängig davon aus der Antwort ausgeschlossen.
  */
+import { requirePermission } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";
 import { getModelRouter } from "@/routing";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
+  // SEC-02: do not expose routing policy or decision telemetry to anonymous callers.
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const router = getModelRouter();
     const snapshot = router.snapshot(50);

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/auth";
 import { db } from "@/db";
 import {
   agents,
@@ -24,7 +25,12 @@ import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  // SEC-02: "read-only" does not make portfolio, audit and strategy data public.
+  // Authorize before any DB, broker or runtime-state access.
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     await refreshRuntimeLimits();
     const broker = await getBroker();

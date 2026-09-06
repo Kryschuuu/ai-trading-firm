@@ -9,6 +9,7 @@ import {
   listRuleExecutions,
 } from "@/lib/ruleService";
 import { guardWrite } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,11 @@ export const maxDuration = 60;
  *        (Whitelist + Code-Klemmung) — es gibt keinen Weg, eine unvalidierte
  *        Regel in die DB zu schreiben.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  // SEC-02: active rules, feedback and executions expose the trading strategy.
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const [rules, active, feedback, executions] = await Promise.all([
       listRules(),

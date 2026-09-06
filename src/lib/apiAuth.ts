@@ -3,7 +3,8 @@
  *
  * Modell (C1, v1.36.13 — Offen-Betrieb ist explizit, nie implizit in Produktion):
  *   - FIRM_API_TOKEN gesetzt    → POST/PUT-Routen verlangen Header `x-firm-token`.
- *     GET bleibt lesbar, damit das Dashboard Status laden kann.
+ *     Dieser Schreib-Guard autorisiert GET nicht: sensitive Dashboard-Reads
+ *     verlangen separat `requirePermission(req, "firm.read")` (SEC-02).
  *   - kein FIRM_API_TOKEN, aber RBAC aktiv ⇒ RBAC entscheidet: ein Actor mit
  *     Permission `firm.write` (Admin-/Operator-Credential) darf schreiben,
  *     ein Viewer nicht. Vorher waren diese Routen offen (Befund C1).

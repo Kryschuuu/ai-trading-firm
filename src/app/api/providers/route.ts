@@ -9,7 +9,8 @@
  * Budget) und der Routing-Audit-Auszug.
  *
  * SICHERHEIT:
- *   - Rein lesend ⇒ kein API-Token erforderlich (konsistent mit `/api/brokers`).
+ *   - Provider-, Budget- und Routing-Status sind betriebs- und strategie-sensitiv:
+ *     `firm.read` ist vor jeder Verarbeitung erforderlich.
  *   - Keine Secrets: Kosten/Modelle/Health only — niemals API-Keys, niemals
  *     Basis-URLs mit Userinfo.
  *   - `?refresh=1` erzwingt eine Health-Prüfung (Admin/UI), Default: Cache.
@@ -24,6 +25,7 @@
  *   "routing": { "policyVersion": "1.0.0", "modes": {…}, "budget": {…} } }
  * ```
  */
+import { requirePermission } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";
 import { getModelRouter } from "@/routing";
 import { MODEL_CLASSES, PROVIDER_IDS, type ProviderId } from "@/routing/types";
@@ -31,6 +33,10 @@ import { MODEL_CLASSES, PROVIDER_IDS, type ProviderId } from "@/routing/types";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<Response> {
+  // SEC-02: authorize before an optional refresh can contact a provider.
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const router = getModelRouter();
     const url = new URL(req.url);

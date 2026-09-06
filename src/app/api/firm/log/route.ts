@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/auth";
 import { db } from "@/db";
 import { agentMessages, agents, auditLog } from "@/db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -28,6 +29,10 @@ export const dynamic = "force-dynamic";
  *   `offset` wird ebenfalls akzeptiert (hat Vorrang vor `page`).
  */
 export async function GET(req: Request) {
+  // SEC-02: raw agent messages and audit details are strategy-sensitive.
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   const url = new URL(req.url);
 
   // KORRIGIERT (v1.1.0): Limit robust klemmen — NaN bzw. negative Werte
