@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.28 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.36.29 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -197,7 +197,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/security/README.md` | Security-Übersicht: aggregierte Findings, Auth-Modell, RBAC |
 | `docs/audits/` | Zentrale Audit-Verwaltung: alle Audits chronologisch |
 | `docs/audits/2026-09-03-peer-review/` | Senior-Peer-Review 2026-09: H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 (CLOSED) |
-| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; übrige OPEN |
+| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; übrige OPEN |
 | `docs/peer-reviews/` | Peer-Review-Patches: gesammelt, verknüpft, nachvollziehbar |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |

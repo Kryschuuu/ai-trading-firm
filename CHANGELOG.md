@@ -1,12 +1,64 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.28**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.29**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.29] — 2026-09-06 · Security: SEC-10 — CI-Workflows auf immutable SHAs gepinnt und gehärtet
+
+### Security
+
+- **SEC-10 (LOW) behoben:** Die CI-Workflows referenzieren GitHub Actions
+  nicht mehr über bewegliche Major-Tags (`@v4`), sondern sind auf immutable
+  Commit-SHAs gepinnt — `actions/checkout` v7.0.1, `actions/setup-node` v7.0.0,
+  `actions/upload-artifact` v7.0.1 (Tag je als Kommentar dokumentiert). Damit
+  ist ein verschobenes/kompromittiertes Tag kein Angriffsvektor auf den Runner
+  mehr. Neue `.github/dependabot.yml` (Ökosystem `github-actions`) hält die
+  Pins kontrolliert aktuell; npm-Abhängigkeiten bleiben bewusst manuell
+  kuratiert (Runbook-Prozess, siehe SEC-03).
+- **Neuer fail-closed Dependency-Audit** im Job `security-live-gate`:
+  `npm audit --audit-level=high` schlägt bei hohen/kritischen Advisories in
+  den installierten Abhängigkeiten an — inklusive Dev-Abhängigkeiten, da
+  Build-Tools (esbuild, Tailwind, PostCSS) in die ausgelieferten Bundles
+  einfließen. Baseline zum Release: 0 Funde.
+- **Spiegel-Sync erzwungen:** Der Job `docs-validate` prüft jetzt per
+  `diff`, dass die Workflow-Quellen in `docs/ci/` byte-identisch zu den
+  ausgeführten Kopien unter `.github/workflows/` sind — bisher war das nur
+  Konvention (docs/ci/README.md).
+
+### Changed
+
+- CI-Modernisierung: `workflow_dispatch` (manuelle Ausführung zum Debuggen),
+  `concurrency` mit `cancel-in-progress` (bei Folge-Pushes auf denselben
+  Branch/PR läuft nur der neueste Lauf — der Required Check bezieht sich
+  immer auf den aktuellen Head-SHA), Windows-Timeout des
+  Next-Regression-Jobs von 10 auf 15 Minuten (Puffer für kalten npm-Cache).
+  Trigger, Job-Struktur, Fail-Closed-Muster und Suite-Stamp bleiben
+  unverändert.
+- Workflow-Mirror `main-security-live-gatte.yml` (Tippfehler) in
+  `security-live-gate.yml` umbenannt — der Pfad, den
+  `scripts/scan-live-gate-secrets.ts` und `docs/LIVE_TRADING.md` §8 bereits
+  erwarteten.
+- Alle Workflow-Steps sind jetzt kommentiert (Zweck + Begründung), u. a.
+  warum Required Checks ohne `paths`-Filter laufen und auf genau einer
+  Node-Version (22 LTS) deterministisch bleiben. Die reguläre Unit-Suite
+  (`npm test`) bleibt bewusst kein Required Check — auf `main` schlagen
+  aktuell 5 Docs-Konsistenz-Tests fehl (veraltete Erwartungen nach der
+  CHANGELOG-Konsolidierung); Details in docs/ci/README.md.
+
+### Upgrade
+
+- Keine Auswirkungen auf Laufzeit oder Deployment. Repo-Owner: nach dem
+  Merge die Installations-Schritte aus `docs/ci/README.md` ausführen (inkl.
+  Entfernen der Alt-Datei `main-security-live-gatte.yml`); die Required
+  Checks (`docs-validate`, `security-live-gate`) bleiben unverändert.
+- Patch-Version **1.36.29** in Manifest/Lockfile und aktuellen
+  Versionsangaben; SEC-10 als FIXED dokumentiert. Andere Findings bleiben
+  unverändert offen.
 
 ## [1.36.28] — 2026-09-06 · Security: SEC-03 — Next.js und native Bildverarbeitung aktualisiert
 
