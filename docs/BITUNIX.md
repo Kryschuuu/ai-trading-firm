@@ -311,6 +311,16 @@ Subscribe: `{ op: "subscribe", args: [{ symbol, ch }] }`.
 Reconnect: exponentielles Backoff 250 ms … 8 s, danach Resubscribe aller Channels.
 Backoff ist in Tests injizierbar (`backoff?: (attempt) => ms`).
 
+**Härtung des Clients (SEC-04, v1.36.30):** `ws` ist exakt auf 8.21.3 gepinnt
+(Floor `MIN_WS_VERSION` in `src/brokers/bitunix/ws.ts`). Vor jedem
+Verbindungsaufbau prüft `openHardenedWs()` die Version des tatsächlich
+installierten Pakets und verweigert bei älterem oder unklarem Stand den Socket
+(`BITUNIX_DISABLED`, fail-closed). Der Client läuft mit harten Grenzen:
+`maxPayload` 1 MiB je Nachricht inklusive aller Fragmente,
+`perMessageDeflate: false`, `skipUTF8Validation: false`, `followRedirects: false`
+(sonst wäre die Host-Allowlist umgehbar) und 10 s Handshake-Timeout. `stop()`
+schließt weiterhin ohne Code/Reason-Argument.
+
 ---
 
 ## 4. Signatur (REST)
@@ -621,6 +631,8 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 - `tests/bitunix.http.test.ts` — Fixture-REST, Private-Signatur, SSRF, Token-Bucket
 - `tests/bitunix.positions.test.ts` — B2: Positionsseite validiert (Verwurf + Zähler + Warnung), `qty`-vor-`side`-Reihenfolge, LONG/SHORT-Regression
 - `tests/bitunix.ws.test.ts` — Ingest, Reconnect/Resubscribe, WS-SSRF
+- `tests/sec04.wsRuntime.test.ts` — SEC-04: Fail-Closed-Versionsguard, gehärtete Client-Optionen, echte Fragment-Flut gegen die Payload-Kappe
+- `tests/sec04.wsDependency.test.ts` — SEC-04: exakter `ws`-Pin, Override, Lockfile-/Installations-Konsistenz, CI-Verdrahtung
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
 - `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
 - `test/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`test/fixtures/bitunix/`)
