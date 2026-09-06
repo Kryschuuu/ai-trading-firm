@@ -156,6 +156,11 @@ test("SEC-03: tatsaechlich aufgeloestes Next und dessen sharp stimmen mit dem Lo
   }
 });
 
+test("SEC-03: Dependency- und Framework-Regressionen sind Pflicht vor dem Live-Gate", () => {
+  assert.match(manifest.scripts["security:live-gate"], /^npm run test:security:next && /);
+  assert.match(manifest.scripts["test:security:next"], /--test "tests\/sec03\.\*\.test\.ts"/);
+});
+
 test("SEC-03: der von Next geladene native AVIF-Decoder enthaelt den libheif-Fix", () => {
   // Wichtig auch bei globalem/custom libvips: Paketversion != geladene Library.
   // GHSA-2xp9-vwfh-vxw4 / GHSA-g89c-p67h-r497. Keine RCE-Datei wird dekodiert.
