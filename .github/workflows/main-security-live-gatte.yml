@@ -58,12 +58,21 @@ jobs:
     name: security-live-gate
     # Kein gruener Required Check/Suite-Stamp bei roter Windows-Regression.
     needs: security-next-windows
+    # Abhaengige Jobs werden sonst bei Fehlern nur SKIPPED (kein sicherer
+    # Required Check). Explizit laufen und unten fail-closed abbrechen.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       DATABASE_URL: postgresql://test:test@0.0.0.0:5432/test
       STARTING_EQUITY: "10000"
     steps:
+      - name: Windows-Security-Pruefung muss erfolgreich sein
+        if: ${{ needs.security-next-windows.result != 'success' }}
+        run: |
+          echo "::error::Windows-Security-Pruefung nicht erfolgreich; kein Suite-Stamp."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
 

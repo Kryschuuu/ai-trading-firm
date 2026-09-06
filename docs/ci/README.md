@@ -48,7 +48,9 @@ Ausführen: `npm run docs:validate`
   und die Framework-Grenzen nativ unter Windows (`npm run test:security:next`).
 - Der Required Check `security-live-gate` hängt von diesem Job ab, führt dieselbe
   Next-Suite unter Linux aus und prüft zusätzlich den Produktions-Build.
-  Kein Suite-Stamp bei fehlgeschlagener Windows-Regression.
+  Kein Suite-Stamp bei fehlgeschlagener Windows-Regression. Ein expliziter
+  Fail-Closed-Schritt macht den Required Check bei fehlgeschlagenem/ausgelassenem
+  Windows-Job rot; ein lediglich übersprungener abhängiger Job genügt nicht.
 - SEC-01/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
   Session-Vertrauensgrenze, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
 - Live-Gate-Suite mit ≥95% Coverage
