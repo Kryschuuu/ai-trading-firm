@@ -4,10 +4,10 @@
 - **Severity:** MEDIUM
 - **Bereich:** AuthZ / Audit-Integrität
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-05 — Fälschbare Akteurs-/Rollenattribution bei Rule-Änderungen
-- **Status:** OPEN
-- **Fix-Version:** -
-- **Datei(en):** `src/app/api/firm/rules/[id]/route.ts`, `src/app/api/firm/rules/route.ts`, `src/lib/ruleService.ts`
-- **Peer-Review-Patch:** TBD
+- **Status:** FIXED (Resolved)
+- **Fix-Version:** v1.36.33 (2026-09-06)
+- **Datei(en):** `src/app/api/firm/rules/[id]/route.ts`, `src/app/api/firm/rules/route.ts`, `src/lib/ruleActor.ts` (neu), `src/lib/ruleEngine.ts`
+- **Peer-Review-Patch:** Branch `arena/01a078c8-ai-trading-firm` (PR gegen `main`)
 
 ## Beschreibung
 
@@ -61,11 +61,35 @@ Auch `sourceRole` nicht aus dem Client übernehmen.
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Request-Feld `by` wird ignoriert bzw. abgelehnt
-- [ ] Audit-Attribution stammt ausschließlich aus `resolveAuth` / Session-Actor
-- [ ] Test: Operator sendet `"by": "ADMIN"` → Log zeigt Operator-`auditId`
-- [ ] `sourceRole` nicht client-steuerbar
-- [ ] Keine Regression der Rule-Lifecycle-Aktionen
+- [x] Request-Feld `by` wird abgelehnt (fail-closed, `400 ACTOR_NOT_CLIENT_CONTROLLED`)
+- [x] Audit-Attribution stammt ausschließlich aus `resolveAuth` / Session-Actor (`actorAuditId`)
+- [x] Test: Operator sendet `"by": "ADMIN"` → Request wird abgewiesen; Attribution bleibt Operator-`auditId`
+- [x] `sourceRole` nicht client-steuerbar (Top-Level und verschachtelt in `rule`)
+- [x] Keine Regression der Rule-Lifecycle-Aktionen
+
+## Fix (v1.36.33)
+
+**Root Cause:** Die Route hat eine *Behauptung* des Clients (`body.by`,
+`body.sourceRole`) als Identitätsaussage in den Audit-Trail übernommen. Die
+Authentifizierung (`guardWrite`) belegte lediglich *dass* jemand schreiben darf,
+nicht *wer* schreibt — Authentifizierungsergebnis und Audit-Attribution waren
+entkoppelt.
+
+**Umsetzung:**
+
+- Neues Modul `src/lib/ruleActor.ts` als Single Source of Truth:
+  `ruleActor(req)` leitet die Attribution ausschließlich aus dem
+  authentifizierten Credential ab (`actorAuditId` → `resolveAuth`).
+- `rejectClientActorFields()` weist `by`, `actor` und `sourceRole` fail-closed
+  mit `400 ACTOR_NOT_CLIENT_CONTROLLED` ab — auf Top-Level und verschachtelt in
+  `rule`, vor jedem Datenbankzugriff. Geerbte Prototyp-Felder lösen bewusst
+  keinen Fehlalarm aus (`Object.hasOwn`).
+- `sanitizeRuleSpec(..., { forceSourceRole: true })` erzwingt für API-erzeugte
+  Regeln `MANUAL`; interne Erzeuger (Makro-Zyklus: `RESEARCH`/`CEO`) bleiben
+  unverändert.
+- Regressionstests: `tests/sec05.ruleActorAttribution.test.ts` (17 Fälle,
+  inkl. Angriffsvektoren und Quell-Drift-Check gegen einen Rückfall auf
+  `body.by`).
 
 ## Changelog-Blurb
 
@@ -75,4 +99,4 @@ SEC-05 (MEDIUM): Rule-Audit — Actor/by ausschließlich serverseitig aus authen
 
 ## Versions-Hinweis
 
-PATCH, vor echter Multi-Role-Nutzung.
+PATCH — ausgeliefert als v1.36.33.
