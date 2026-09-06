@@ -1,12 +1,43 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.30**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.31**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.31] — 2026-09-06 · Security: SEC-02 — sensible Dashboard-Reads autorisiert
+
+### Security
+
+- **SEC-02 (HIGH) behoben:** Die sensitiven Dashboard-Read-APIs für Firmenstatus,
+  Audit/Protokoll, Reports, Regeln, Provider und Routing verlangen jetzt die
+  bestehende RBAC-Permission `firm.read`. Anonyme oder ungültig authentifizierte
+  Requests erhalten vor jedem Daten-, Router- oder Providerzugriff eine
+  standardisierte Autorisierungsablehnung; der geschützte Payload wird nicht
+  erzeugt.
+- **Kompatibel mit dem Dashboard:** Viewer, Operator und Admin besitzen
+  `firm.read`. Bestehende signierte Browser-Sessions werden ebenso akzeptiert wie
+  die vorhandenen Header-Credentials. Der bewusste `local-open`-Modus bleibt für
+  lokale Einzelplatzentwicklung unverändert.
+- **Cache-Grenze:** Erfolgreiche Antworten dieser sechs Routen setzen zusätzlich
+  `Cache-Control: private, no-store`, damit sensible Antworten nicht durch einen
+  Shared Cache zwischen Aufrufern wiederverwendet werden.
+- **Regressionen in CI:** `tests/sec02.unauthenticatedGetApis.test.ts` deckt
+  alle sechs Handler, manipulierte Credential-/Proxy-/Cookie-Eingaben, Viewer-
+  und Session-Zugriff sowie die Guard-Verdrahtung ab. Die Suite läuft verbindlich
+  innerhalb von `npm run test:security:auth` und damit im Security-Workflow.
+
+### Upgrade
+
+- **Alle Instanzen auf v1.36.31 ausrollen und neu starten.** Es sind keine neuen
+  Environment-Variablen oder Datenmigrationen nötig. Direkte Clients müssen für
+  die geschützten Read-APIs ein vorhandenes Viewer-, Operator- oder
+  Admin-Credential verwenden; Browser verwenden nach dem Login automatisch ihre
+  HttpOnly-Session. Der absichtlich konfigurierte `AUTH_MODE=local-open` bleibt
+  ein lokaler Single-User-Modus und ist kein Ersatz für Netzwerkisolation.
 
 ## [1.36.30] — 2026-09-06 · Security: SEC-04 — WebSocket-Bibliothek `ws` gepinnt und WS-Client gehärtet
 

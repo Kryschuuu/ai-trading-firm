@@ -192,7 +192,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   auditSecurityGpt01: {
     file: "docs/audits/2026-09-05-security-review-gpt01/README.md",
     title: "Security-Audit: GPT_01 2026-09-05",
-    subtitle: "SEC-01/SEC-03 behoben; SEC-02, SEC-04 und weitere Findings offen",
+    subtitle: "SEC-01/SEC-02/SEC-03/SEC-04/SEC-10 behoben; weitere Findings offen",
   },
   peerReviews: {
     file: "docs/peer-reviews/README.md",

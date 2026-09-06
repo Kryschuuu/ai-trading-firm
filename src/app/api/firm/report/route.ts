@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/auth";
 import { db } from "@/db";
 import { agentMessages, agents, auditLog, positions } from "@/db/schema";
 import { and, desc, gte } from "drizzle-orm";
@@ -23,6 +24,10 @@ type SymbolStat = {
  * und eine regelbasierte Boss-Zusammenfassung.
  */
 export async function GET(req: Request) {
+  // SEC-02: performance, drawdown and recommendations require an authenticated reader.
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   const url = new URL(req.url);
   const periodRaw = (url.searchParams.get("period") ?? "day").toLowerCase();
   const period: Period = (["day", "week", "month"] as const).includes(periodRaw as Period)
@@ -204,5 +209,5 @@ export async function GET(req: Request) {
     })),
     recommendations,
     summary: bullets,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

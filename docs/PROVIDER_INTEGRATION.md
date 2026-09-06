@@ -151,7 +151,9 @@ type ProviderDescriptor = {
 | **Tests** | `createFakeProviderRegistry()` — Health/Quota/Latenz/Timeout injizierbar, kein Netzwerk |
 
 Karten-Daten für das Operations Center: **`GET /api/providers`** (Status, Modell,
-Modelle, Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen).
+Modelle, Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen). Seit SEC-02
+(v1.36.31) verlangt dieser Endpoint `firm.read` (Viewer, Operator oder Admin;
+Header-Credential oder gültige Browser-Session) und liefert `private, no-store`.
 
 ## 5. Einen neuen Provider hinzufügen
 
