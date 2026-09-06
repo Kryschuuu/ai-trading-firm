@@ -1,12 +1,58 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.29**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.30**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.30] — 2026-09-06 · Security: SEC-04 — WebSocket-Bibliothek `ws` gepinnt und WS-Client gehärtet
+
+### Security
+
+- **SEC-04 (HIGH) behoben:** Bis einschließlich **v1.36.29** erlaubte die
+  Deklaration `ws: ^8.18.0` Installationen bekannter verwundbarer Stände der
+  WebSocket-Bibliothek — mit möglicher Speichererschöpfung durch einen
+  unauthentifizierten Netzwerk-Peer und möglicher Offenlegung nicht
+  initialisierten Speichers. `ws` ist jetzt exakt auf **8.21.3** gepinnt
+  (Mindestfix der Advisories: 8.21.0), Lockfile entsprechend regeneriert.
+  Referenzen: [GHSA-96hv-2xvq-fx4p / CVE-2026-48779](https://github.com/advisories/GHSA-96hv-2xvq-fx4p),
+  [GHSA-58qx-3vcg-4xpx / CVE-2026-45736](https://github.com/advisories/GHSA-58qx-3vcg-4xpx).
+- **Transitive Kopien geschlossen:** Ein npm-`overrides`-Eintrag erzwingt
+  dieselbe geprüfte Version für jede (auch verschachtelte) `ws`-Kopie im
+  Abhängigkeitsbaum — ein Downgrade über eine fremde Abhängigkeit ist damit
+  ausgeschlossen.
+- **Fail-closed zur Laufzeit:** Der Bitunix-Public-WebSocket prüft vor jedem
+  Verbindungsaufbau die tatsächlich installierte `ws`-Version und verweigert die
+  Verbindung bei nicht gepatchtem oder unbekanntem Stand
+  (`BITUNIX_DISABLED`). Ein nachträgliches Downgrade am Deployment führt damit
+  nicht mehr zu einer stillen, verwundbaren Verbindung.
+- **Harte Ressourcen-Grenzen am WS-Client:** Nachrichten-Obergrenze 1 MiB
+  (inklusive aller Fragmente einer Nachricht, zwei Größenordnungen unter dem
+  Bibliotheks-Default), keine Nachrichten-Kompression, verpflichtende
+  UTF-8-Validierung, keine Redirects (die Host-Allowlist bleibt wirksam) und ein
+  begrenzter Handshake. Defense in Depth, unabhängig von der Bibliotheksversion.
+- **Neues verbindliches CI-Gate:** `npm ls ws --all` und
+  `npm run test:security:ws` laufen im Job `security-live-gate` vor Build und
+  Suite; zusätzlich ist das Gate in `npm run security:live-gate` verkettet. Die
+  Regressionen prüfen Pin, Override, jeden Lockfile-Eintrag, die installierte
+  Auflösung, den Laufzeit-Guard und die Payload-Kappe gegen eine echte
+  Fragment-Flut.
+
+### Upgrade
+
+- **Alle Instanzen aktualisieren.** Aus dem geprüften Lockfile mit `npm ci` neu
+  installieren (`npm install` allein genügt nicht, wenn ein altes Lockfile
+  vorliegt), danach `npm ls ws --all`, `npm run test:security:ws` und
+  `npm audit` ausführen; erst dann bauen und **alle** App-Prozesse neu starten.
+  Laufende Prozesse behalten die alte Bibliothek im Speicher.
+  Details im [Upgrade-Runbook](docs/security/README.md#ws-upgrade-sec-04).
+- Keine Änderung an Trading-Logik, Auth, API-Verträgen oder Konfiguration; keine
+  neue Abhängigkeit. Der Bitunix-WS-Datenpfad bleibt unverändert.
+- Patch-Version **1.36.30** in Manifest/Lockfile und aktuellen Versionsangaben;
+  SEC-04 als FIXED dokumentiert. Andere Findings bleiben unverändert offen.
 
 ## [1.36.29] — 2026-09-06 · Security: SEC-10 — CI-Workflows auf immutable SHAs gepinnt und gehärtet
 

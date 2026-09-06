@@ -65,6 +65,10 @@ Ausführen: `npm run docs:validate`
 - Dependency-Audit: `npm audit --audit-level=high` schlägt fail-closed bei
   hohen/kritischen Advisories in den installierten Abhängigkeiten an
   (inkl. Dev — Build-Tools fließen in die Bundles ein).
+- SEC-04: `npm ls ws --all` + `npm run test:security:ws` vor Build und Suite —
+  exakter `ws`-Pin, Override für transitive Kopien, jeder Lockfile-Eintrag, die
+  installierte Auflösung sowie Laufzeit-Guard und Payload-Kappe des
+  Bitunix-WS-Clients.
 - SEC-01/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
   Session-Vertrauensgrenze, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
 - Live-Gate-Suite mit ≥95% Coverage

@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; übrige Findings OPEN |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; übrige Findings OPEN |
 
 ## Offene Critical/High Findings (aggregiert)
 
@@ -31,7 +31,6 @@
 | Audit | ID | Titel | Severity | Status |
 |-------|----|-------|----------|--------|
 | 2026-09-05-gpt01 | SEC-02 | Sensible Daten über unauthentifizierte GET-APIs | HIGH | OPEN |
-| 2026-09-05-gpt01 | SEC-04 | `ws` erlaubt verwundbare Versionen | HIGH | OPEN |
 
 **SEC-01 ist seit v1.36.27 FIXED:** [Session-Autorisierung](../audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md).
 Upgrade einschließlich unabhängigem `FIRM_SESSION_SECRET`, Neustart aller Instanzen
@@ -39,6 +38,9 @@ und erneutem Login erforderlich. Andere offene Findings bleiben unverändert rel
 
 **SEC-03 ist seit v1.36.28 FIXED:** [Framework-/Decoder-Update](../audits/2026-09-05-security-review-gpt01/findings/SEC-03-vulnerable-next.md).
 Alle Linux-/Windows-Instanzen aus dem neuen Lockfile installieren und frisch ausrollen.
+
+**SEC-04 ist seit v1.36.30 FIXED:** [ws-Pin und WS-Härtung](../audits/2026-09-05-security-review-gpt01/findings/SEC-04-vulnerable-ws.md).
+Alle Instanzen mit `npm ci` neu installieren und sämtliche Prozesse neu starten.
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
 
@@ -90,6 +92,60 @@ nicht allein die Versionsnummer von Next.js. v1.36.27 lieferte Next.js 16.3.1 au
 - Bei Verdacht auf bereits erfolgte Kompromittierung Instanz isolieren, aus
   vertrauenswürdigem Release neu aufbauen und erreichbare Credentials rotieren.
   Ein Dependency-Update beseitigt keinen bereits erfolgten Einbruch.
+
+## ws-Upgrade (SEC-04)
+
+**v1.36.30:** Die WebSocket-Bibliothek `ws` ist exakt auf **8.21.3** gepinnt
+(Mindestfix der Advisories: **8.21.0**). Bis v1.36.29 stand im Manifest die Range
+`^8.18.0` — sie ließ jederzeit eine verwundbare Installation zu, unabhängig davon,
+was gerade im Lockfile stand. `ws` ist die einzige Bibliothek, die im Betrieb eine
+dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
+
+### Was der Fix umfasst
+
+- Exakter Pin in `package.json` plus npm-`overrides`: Auch jede transitive oder
+  verschachtelte `ws`-Kopie wird auf die geprüfte Version gezwungen.
+- **Fail-closed-Guard:** Der Bitunix-WS-Client liest vor jedem Verbindungsaufbau
+  die Version des tatsächlich installierten `ws`-Pakets. Ist sie älter als der
+  Floor oder nicht eindeutig lesbar, entsteht kein Socket, sondern der Fehler
+  `BITUNIX_DISABLED`. Ein Downgrade am Deployment fällt damit sofort auf.
+- **Ressourcen-Kappen:** 1 MiB Obergrenze je Nachricht (inklusive aller Fragmente),
+  keine Nachrichten-Kompression, verpflichtende UTF-8-Validierung, keine Redirects
+  (die SSRF-Host-Allowlist bleibt wirksam), begrenzter Handshake.
+
+### Ausrollen
+
+1. Geprüften Release **v1.36.30 oder neuer** in einem frischen Release-Verzeichnis
+   vorbereiten. `.env`, Datenbank und persistente Daten bleiben unverändert.
+2. Mit Node 22 (wie CI) installieren und prüfen:
+
+   ```bash
+   npm ci
+   npm ls ws --all
+   npm run test:security:ws
+   npm audit
+   ```
+
+   **Jeder Schritt muss erfolgreich sein; bei Fehlern nicht deployen.** `npm ci`
+   ist Pflicht — ein `npm install` auf einem alten Lockfile kann eine
+   verwundbare Version stehen lassen.
+3. Danach neu bauen und **alle** App-Prozesse neu starten. Ein laufender Prozess
+   behält die alte Bibliothek im Speicher; ein Dateiaustausch allein wirkt nicht.
+4. Version gegen `package.json` prüfen und nicht auf einen älteren Release
+   zurückrollen.
+
+### Wartung und Grenzen
+
+- Der Versions-Floor steht als eine Konstante in `src/brokers/bitunix/ws.ts` und
+  wird von Laufzeit-Guard und Dependency-Gate gemeinsam benutzt. Beim Anheben des
+  Pins darf er mitwachsen, nie sinken.
+- `npm ls ws --all` und `npm run test:security:ws` laufen verbindlich im Job
+  `security-live-gate` und zusätzlich verkettet vor der Live-Gate-Suite.
+- Ein grünes `npm audit` allein ist kein Nachweis: Es kennt nur veröffentlichte
+  Advisories. Der Pin ist ein gezielter SEC-04-Regressionsschutz, keine Garantie
+  gegen künftige Schwachstellen.
+- Die Kappen schützen den eigenen Prozess vor einem böswilligen oder
+  übernommenen Endpunkt; sie ersetzen kein Update der Bibliothek.
 
 ## Auth-Modus (v1.36.13+)
 

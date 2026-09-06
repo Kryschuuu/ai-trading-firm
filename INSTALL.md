@@ -3,7 +3,7 @@
 > **Status:** Kanonische Installationsanleitung ist jetzt in [`docs/INSTALL.md`](docs/INSTALL.md) (CachyOS, Variante A/B, Schritt für Schritt).  
 > **Flag-Referenz:** Alle Env-Flags mit sicheren Defaults stehen in [`CONFIGURATION.md`](CONFIGURATION.md).  
 > **Windows:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)  
-> **Code-Version:** v1.36.29
+> **Code-Version:** v1.36.30
 
 Diese Datei ist ein kurzer Einstieg — Details in den verlinkten Dokumenten.
 
@@ -41,7 +41,12 @@ npm run start               # http://0.0.0.0:3369
 
 Details: [CONFIGURATION.md](CONFIGURATION.md) (Flag-Tabelle), [docs/HANDBUCH.md](docs/HANDBUCH.md) (Bedienung), [docs/SETUP_BUGS.md](docs/SETUP_BUGS.md) (Befunde).
 
-## Produktions-Sicherheit / Upgrade auf v1.36.28
+## Produktions-Sicherheit / Upgrade auf v1.36.30
+
+**SEC-04:** Die WebSocket-Bibliothek `ws` ist exakt auf 8.21.3 gepinnt; ältere
+Stände sind verwundbar. Ausschließlich mit `npm ci` aus dem Lockfile
+installieren, danach `npm ls ws --all` und `npm run test:security:ws` ausführen
+und alle Prozesse neu starten. [Upgrade-Runbook](docs/security/README.md#ws-upgrade-sec-04).
 
 **SEC-03:** Next.js 16.3.4 und die native Decoder-Kette müssen gemeinsam aus dem
 Lockfile installiert werden. Vor Deployment `npm ci`,

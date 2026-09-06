@@ -140,6 +140,19 @@ jobs:
         # Bundles einflieszen. Baseline aktuell: 0 Funde (2026-09-06).
         run: npm audit --audit-level=high
 
+      - name: SEC-04 ws-Supply-Chain-Gate (Pin, Lockfile, Laufzeit)
+        # Root Cause von SEC-04 war eine SemVer-Range, die verwundbare
+        # ws-Versionen zuliesz. `npm ls ws --all` bricht ab, sobald der
+        # installierte Baum eine abweichende (auch verschachtelte) ws-Kopie
+        # enthaelt; `test:security:ws` prueft exakten Pin, Override, jeden
+        # Lockfile-Eintrag, die tatsaechlich aufgeloeste Installation sowie den
+        # Fail-Closed-Guard und die Payload-Kappe des Bitunix-WS-Clients.
+        # Bewusst frueh und getrennt von `security:live-gate`: Ein
+        # Supply-Chain-Fund soll vor Build und Suite sichtbar sein.
+        run: |
+          npm ls ws --all
+          npm run test:security:ws
+
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
 

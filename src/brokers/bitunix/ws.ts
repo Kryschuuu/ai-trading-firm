@@ -38,6 +38,50 @@ export interface BitunixWsOptions {
   backoff?: (attempt: number) => number;
 }
 
+/**
+ * SEC-04 — Mindestversion der `ws`-Bibliothek.
+ *
+ * Erst ab 8.21.0 sind beide Advisories behoben:
+ *   - GHSA-96hv-2xvq-fx4p / CVE-2026-48779 (>=8.0.0 <8.21.0): unauthentifizierter
+ *     Netzwerk-Peer kann ueber sehr viele kleine Fragmente Speicher erschoepfen,
+ *   - GHSA-58qx-3vcg-4xpx / CVE-2026-45736 (>=8.0.0 <8.20.1): moegliche
+ *     Offenlegung nicht initialisierten Speichers bei bestimmter close()-Nutzung.
+ *
+ * Diese Konstante ist die einzige Quelle der Wahrheit fuer den Versions-Floor:
+ * Laufzeit-Guard (hier) und Dependency-Gate (`tests/sec04.*`) lesen sie.
+ * Beim Anheben des Pins in `package.json` darf sie mitwachsen, nie sinken.
+ */
+export const MIN_WS_VERSION = "8.21.0";
+
+/**
+ * Harte Obergrenze je WebSocket-Nachricht (inkl. aller Fragmente einer
+ * fragmentierten Nachricht). Bitunix-Ticker/Klines liegen im einstelligen
+ * KiB-Bereich; 1 MiB ist grosszuegig, aber zwei Groessenordnungen unter dem
+ * ws-Default (100 MiB). Defense in Depth gegen Speichererschoepfung durch
+ * einen boesartigen oder uebernommenen Endpunkt — unabhaengig davon, welche
+ * gepatchte ws-Version installiert ist.
+ */
+export const WS_MAX_PAYLOAD_BYTES = 1024 * 1024;
+
+/** Obergrenze fuer den Verbindungsaufbau (haengende Handshakes binden Ressourcen). */
+export const WS_HANDSHAKE_TIMEOUT_MS = 10_000;
+
+/** Gehaertete Client-Optionen fuer den echten `ws`-Client. */
+export interface WsClientOptions {
+  readonly maxPayload: number;
+  readonly perMessageDeflate: false;
+  readonly skipUTF8Validation: false;
+  readonly followRedirects: false;
+  readonly handshakeTimeout: number;
+}
+
+/** Der Teil der `ws`-Laufzeit, den dieser Adapter benutzt (injizierbar fuer Tests). */
+export interface WsRuntime {
+  /** Version des tatsaechlich installierten `ws`-Pakets. */
+  readonly version: string;
+  readonly WebSocket: new (url: string, options: WsClientOptions) => unknown;
+}
+
 /** Minimales WS-Interface (Browser/ws-kompatibel). */
 export interface WsLike {
   send(data: string): void;
@@ -285,7 +329,80 @@ function bind(
 }
 
 function defaultOpen(url: string): WsLike {
-  // `ws` ist Dependency; Tests injizieren `open` und berühren diesen Pfad nicht.
-  const { WebSocket: NodeWebSocket } = require("ws") as typeof import("ws");
-  return new NodeWebSocket(url) as unknown as WsLike;
+  return openHardenedWs(url);
+}
+
+/**
+ * SEC-04 — Versions-Guard fuer die installierte `ws`-Laufzeit.
+ *
+ * Bewusst kein SemVer-Range-Parser und keine neue Abhaengigkeit: Erlaubt sind
+ * ausschliesslich exakte stabile Versionen (`x.y.z`) ab {@link MIN_WS_VERSION}.
+ * Prereleases, Ranges, Tags oder unlesbare Angaben gelten als "unbekannt" und
+ * werden abgelehnt — fail-closed, weil ein unbekannter Stand genauso gut ein
+ * verwundbarer sein kann.
+ */
+export function assertPatchedWsVersion(version: unknown): asserts version is string {
+  if (!isPatchedWsVersion(version)) {
+    throw new BitunixApiError(
+      "disabled",
+      `Bitunix-WS deaktiviert: ws-Version "${safeSnippet(version, 20)}" ist nicht gepatcht (>= ${MIN_WS_VERSION} erforderlich).`
+    );
+  }
+}
+
+/** Reine Pruefung ohne Seiteneffekt: exakte stabile Version >= MIN_WS_VERSION. */
+function isPatchedWsVersion(version: unknown): version is string {
+  if (typeof version !== "string") return false;
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) return false;
+  const actual = version.split(".").map(Number);
+  const floor = MIN_WS_VERSION.split(".").map(Number);
+  if (!actual.every(Number.isSafeInteger)) return false;
+  const firstDifference = actual.findIndex((part, i) => part !== floor[i]);
+  return firstDifference === -1 || actual[firstDifference] > floor[firstDifference];
+}
+
+/** Gehaertete Optionen des ausgehenden WS-Clients (siehe Konstanten oben). */
+export function wsClientOptions(): WsClientOptions {
+  return {
+    // Kappt auch die Summe aller Fragmente einer Nachricht.
+    maxPayload: WS_MAX_PAYLOAD_BYTES,
+    // Kompression waere eine Speicher-/CPU-Amplifikation ohne fachlichen Nutzen.
+    perMessageDeflate: false,
+    // Ungueltiges UTF-8 muss weiterhin abgelehnt werden.
+    skipUTF8Validation: false,
+    // Redirects wuerden die Host-Allowlist aus assertWsUrl() umgehen.
+    followRedirects: false,
+    handshakeTimeout: WS_HANDSHAKE_TIMEOUT_MS,
+  };
+}
+
+/**
+ * Laedt die installierte `ws`-Laufzeit inklusive ihrer echten Paketversion.
+ * `ws` ist direkte Dependency; die Version kommt aus dem installierten
+ * Paket-Manifest, nicht aus `package.json` des Projekts — nur so faellt ein
+ * nachtraeglich untergeschobenes Downgrade auf.
+ */
+export function loadWsRuntime(): WsRuntime {
+  let mod: typeof import("ws");
+  let meta: { version?: unknown };
+  try {
+    mod = require("ws") as typeof import("ws");
+    meta = require("ws/package.json") as { version?: unknown };
+  } catch (e) {
+    // Fail-closed: Ohne nachweisbare Laufzeit gibt es keine Verbindung.
+    const reason = safeSnippet(e instanceof Error ? e.message : e, 60);
+    throw new BitunixApiError("disabled", `Bitunix-WS deaktiviert: ws-Laufzeit nicht ladbar (${reason}).`);
+  }
+  const version = typeof meta.version === "string" ? meta.version : "";
+  return { version, WebSocket: mod.WebSocket as unknown as WsRuntime["WebSocket"] };
+}
+
+/**
+ * Oeffnet den echten WS-Client — aber erst nach dem Versions-Guard und nur mit
+ * den gehaerteten Optionen. Reihenfolge ist sicherheitsrelevant: Auf einer
+ * verwundbaren Installation entsteht kein Socket.
+ */
+export function openHardenedWs(url: string, runtime: WsRuntime = loadWsRuntime()): WsLike {
+  assertPatchedWsVersion(runtime.version);
+  return new runtime.WebSocket(url, wsClientOptions()) as WsLike;
 }
