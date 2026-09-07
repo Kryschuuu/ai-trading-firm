@@ -25,13 +25,22 @@ Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format fol
   `{"all": true}` (geschützt durch die Admin-Permission `broker.credentials`)
   können alle vor dem Zeitpunkt ausgestellten Sessions global invalidiert
   werden (`state.sessionsRevokedBefore`), ohne Server-Neustarts zu erfordern.
+- **Deterministischer Epochen-Schnitt (Millisekunden-Race behoben):** Der globale
+  Cutoff ist streng monoton (`max(now, vorheriger Cutoff + 1)`) und neue Sessions
+  werden strikt nach ihm datiert (`iat > cutoff`). Ein Login in derselben
+  Millisekunde wie ein `all: true`-Widerruf ist damit nicht mehr augenblicklich
+  wieder tot — der Fehler brach in CI den Required Check `security-live-gate` ab
+  (PR #120), weil schnelle Runner Cut und Neuanmeldung in denselben Takt legen.
+  Gleichzeitig hebt ein rückwärts springender Systemtakt einen gesetzten Cut
+  niemals auf (kein Fail-Open durch Clock-Skew) und sperrt Neuanmeldungen nicht aus.
 - **Memory-Hygiene & Auto-Pruning:** Natürlicher TTL-Ablauf von Revocation-
   Einträgen wird automatisch bereinigt (`pruneRevokedSessions`), um
   unbegrenzten Speicherverbrauch zu verhindern.
-- **Verbindliche Regressionen:** 11 neue SEC-08-Tests in `tests/sec08.sessionRevocation.test.ts`
+- **Verbindliche Regressionen:** 15 neue SEC-08-Tests in `tests/sec08.sessionRevocation.test.ts`
   sichern Logout, gezielten Widerruf, globale Admin-Revocation, Replay-Abwehr,
-  Cookie-Löschung (`Max-Age=0`), CSRF-Guards und Rate-Limiting ab. Sie sind fest
-  im `test:security:auth`-CI-Gate verankert.
+  Cookie-Löschung (`Max-Age=0`), CSRF-Guards, Rate-Limiting und die Zeitbasis
+  (gleiche Millisekunde, Doppelschnitt, Login-Route, Clock-Skew) ab. Sie sind fest
+  im `test:security:auth`-CI-Gate verankert (`npm run test:security:auth`: 210/210 grün).
 
 ### Upgrade
 

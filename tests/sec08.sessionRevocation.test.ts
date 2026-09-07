@@ -326,3 +326,124 @@ test("SEC-08: revokeSession behandelt ungueltige Parameter fail-safe", () => {
   assert.equal(revokeSession({} as never), false);
   assert.equal(revokeSession(null as never), false);
 });
+
+/**
+ * Friert `Date.now()` fuer die Dauer von `run` auf einen festen Zeitpunkt ein.
+ * Reproduziert deterministisch die Millisekunden-Kollision zwischen globalem
+ * Revocation-Cut und Neuanmeldung: `Date.now()` loest nur in ganzen
+ * Millisekunden auf, auf schnellen CI-Runnern fallen Cut und Login regelmaessig
+ * in denselben Tick (Red Gate fuer den `security:live-gate`-Abbruch in PR #120).
+ */
+async function withFrozenClock<T>(run: () => T | Promise<T>): Promise<T> {
+  const frozen = Date.now();
+  const realNow = Date.now;
+  try {
+    Date.now = () => frozen;
+    return await run();
+  } finally {
+    Date.now = realNow;
+  }
+}
+
+test("SEC-08: Globaler Cut und Neuanmeldung in derselben Millisekunde (CI-Regress)", async () => {
+  await withFrozenClock(() => {
+    const oldSession = createSession(OPERATOR);
+    const oldPayload = readSession(sessionRequest("https://localhost", oldSession.sessionToken));
+    assert.ok(oldPayload, "Session muss vor dem globalen Cut gueltig sein");
+
+    revokeAllSessions();
+
+    // Alt-Sessions sind am Cut sofort ungueltig (fail-closed).
+    assert.equal(isSessionRevoked(oldPayload), true, "Globaler Cut muss die Altsession als widerrufen kennzeichnen");
+    assert.equal(readSession(sessionRequest("https://localhost", oldSession.sessionToken)), null);
+
+    // Neuanmeldung im SELBEN Millisekunden-Tick wie der Cut: ohne strikt
+    // monotone Ausgabe waere iat == cutoff und die frische Session sofort tot.
+    const fresh = createSession(OPERATOR);
+    assert.ok(
+      readSession(sessionRequest("https://localhost", fresh.sessionToken)),
+      "Neuanmeldung in derselben Millisekunde wie der Cut darf nicht sofort widerrufen sein"
+    );
+    assert.ok(
+      sessionActor(
+        readSession(sessionRequest("https://localhost", fresh.sessionToken))!,
+        FULL_ENV
+      ),
+      "Auch sessionActor muss die frische Session nach dem Cut akzeptieren"
+    );
+  });
+});
+
+test("SEC-08: Zwei globale Schnitte in derselben Millisekunde erfassen auch die Session dazwischen", async () => {
+  await withFrozenClock(() => {
+    const first = createSession(OPERATOR);
+    revokeAllSessions();
+    const between = createSession(OPERATOR);
+    revokeAllSessions();
+
+    assert.equal(readSession(sessionRequest("https://localhost", first.sessionToken)), null);
+    assert.equal(
+      readSession(sessionRequest("https://localhost", between.sessionToken)),
+      null,
+      "Der zweite Cut muss die zwischenzeitlich ausgestellte Session widerrufen"
+    );
+
+    const after = createSession(OPERATOR);
+    assert.ok(readSession(sessionRequest("https://localhost", after.sessionToken)), "Session nach dem zweiten Cut bleibt gueltig");
+  });
+});
+
+test("SEC-08: Login-Route unmittelbar nach globalem Admin-Cut liefert nutzbare Session (End-to-End)", async () => {
+  await withFrozenClock(async () => {
+    const adminSession = createSession(ADMIN);
+    const cutRes = await postLogout(
+      sessionRequest("https://localhost/api/auth/logout", adminSession.sessionToken, {
+        method: "POST",
+        csrf: adminSession.csrf,
+        body: JSON.stringify({ all: true }),
+      })
+    );
+    assert.equal(cutRes.status, 200);
+    assert.equal((await cutRes.json()).allRevoked, true);
+
+    const loginRes = await postLogin(
+      new Request("https://localhost/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: OPERATOR }),
+      })
+    );
+    assert.equal(loginRes.status, 200, "Login darf direkt nach dem globalen Cut nicht scheitern");
+    const issued = /firm_session=([^;]+)/.exec(loginRes.headers.get("set-cookie") ?? "");
+    assert.ok(issued?.[1], "Login muss ein Session-Cookie setzen");
+
+    const meRes = await getMe(sessionRequest("https://localhost/api/auth/me", issued![1]));
+    assert.equal(meRes.status, 200, "Die im selben Tick ausgestellte Session muss sofort nutzbar sein");
+  });
+});
+
+test("SEC-08: Rueckwaerts springender Takt hebt einen globalen Cut nicht auf (kein Fail-Open)", () => {
+  const t0 = Date.now();
+  const realNow = Date.now;
+  try {
+    Date.now = () => t0;
+    const before = createSession(OPERATOR);
+    revokeAllSessions();
+
+    // Systemtakt springt eine Minute zurueck (NTP-Step / VM-Migration).
+    Date.now = () => t0 - 60_000;
+
+    assert.equal(
+      readSession(sessionRequest("https://localhost", before.sessionToken)),
+      null,
+      "Clock-Skew darf eine widerrufene Session nicht wieder gueltig machen"
+    );
+    const after = createSession(OPERATOR);
+    assert.ok(
+      readSession(sessionRequest("https://localhost", after.sessionToken)),
+      "Neuanmeldung muss auch mit zurueckgesprungenem Takt moeglich bleiben (kein Lockout)"
+    );
+  } finally {
+    Date.now = realNow;
+  }
+});

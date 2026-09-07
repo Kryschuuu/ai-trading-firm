@@ -309,6 +309,10 @@ dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
   Revocation-Registry (`state.revokedSessions`) und Logout-Endpunkt (`POST /api/auth/logout`).
   Sessions werden bei Logout oder gezielter Revocation sofort für ungültig erklärt.
   Admins können via `{"all": true}` eine globale Epochen-Revocation auslösen.
+- **Deterministischer Epochen-Schnitt:** Der globale Cutoff ist streng monoton und neue
+  Sessions werden strikt nach ihm datiert (`iat > cutoff`). Logins in derselben Millisekunde
+  wie der Cut bleiben gültig, Altsessions sind sofort tot; ein rückwärts springender Takt
+  hebt keinen Cut auf (kein Fail-Open) und sperrt keine Neuanmeldung aus.
   Abgelaufene Einträge werden automatisch bereinigt (`pruneRevokedSessions`).
 - Tests: `npm run test:security:auth`; automatisch Teil von `security:live-gate`.
 - [Konfiguration und Upgrade](../../CONFIGURATION.md#session-sicherheit-sec-01-v13627).

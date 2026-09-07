@@ -8,8 +8,8 @@
 - **Fix-Version:** v1.36.35 (2026-09-07)
 - **Betroffene Versionen:** bis einschließlich v1.36.34
 - **Datei(en):** `src/lib/authSession.ts`, `src/lib/apiAuth.ts`, `src/app/api/auth/logout/route.ts`, `src/app/api/auth/login/route.ts`, `src/auth/resolve.ts`, `src/lib/stateRegistry.ts`, `src/lib/browserSession.ts`, `src/components/FirmDashboard.tsx`
-- **Fix-Commit:** arena/01a07aae-ai-trading-firm (PR folgt)
-- **Red-Test-Commit:** arena/01a07aae-ai-trading-firm
+- **Fix-Commit:** arena/01a07b1d-ai-trading-firm (ersetzt PR #120 von arena/01a07aae-ai-trading-firm)
+- **Red-Test-Commit:** arena/01a07b1d-ai-trading-firm
 
 > Beschreibung und PoC unten dokumentieren den ursprünglichen verwundbaren Stand.
 > Die Behebung und deren Absicherung sind unter „Implementierter Fix (v1.36.35)“ festgehalten.
@@ -82,7 +82,8 @@ Szenario:
 - **Zentrale Revocation-Registry (`src/lib/stateRegistry.ts`):** `state.revokedSessions` (Map Session-Key → `exp`) und `state.sessionsRevokedBefore` (globaler Revocation-Cutoff-Timestamp) in die singleton-geführte State-Registry integriert. Vollständig testbar über `__resetAllSingletonsForTests()`.
 - **Session-Revocation-Engine (`src/lib/authSession.ts`):**
   - `revokeSession(session)`: Trägt die eindeutige Session-Kennung (`csrf`) mit Ablaufzeitpunkt `exp` in die Revocation-Registry ein.
-  - `revokeAllSessions(now)`: Setzt den globalen Widerrufs-Zeitstempel. Alle Sessions mit `iat <= now` werden augenblicklich ungültig.
+  - `revokeAllSessions(now)`: Setzt den globalen Widerrufs-Zeitstempel **streng monoton** (`max(now, vorheriger Cutoff + 1)`). Alle Sessions mit `iat <= Cutoff` werden augenblicklich ungültig; zwei Schnitte in derselben Millisekunde erfassen auch die dazwischen ausgestellte Session.
+  - `issueInstant()` (Ausgabepfad): Neue Sessions werden strikt **nach** dem aktuellen Cutoff datiert (`iat = max(now, Cutoff + 1)`), `validPayload()` akzeptiert genau diesen serverseitigen Klemmwert als obere `iat`-Grenze. Damit ist der Epochen-Schnitt unabhängig von der Millisekunden-Auflösung der Uhr deterministisch — ein Login im selben Takt wie der Cut ist nicht sofort wieder widerrufen, und ein rückwärts springender Takt macht einen Cut weder rückgängig (kein Fail-Open) noch blockiert er Neuanmeldungen.
   - `isSessionRevoked(payload, now)`: Prüft globale und individuelle Revocation und bereinigt abgelaufene Einträge automatisch.
   - `clearSessionCookies()`: Erzeugt `Set-Cookie`-Header mit `Max-Age=0`, `HttpOnly`, `Secure`, `SameSite=Strict`.
   - `readSession()` & `sessionActor()`: Fail-Closed-Validierung vor jeder Rechte- und Identitätserteilung.
@@ -95,7 +96,8 @@ Szenario:
 ### Validierung
 
 - **Vor Fix (Red Test):** Replay-Angriffe nach Logout wurden akzeptiert (HTTP 200) und der Logout-Endpunkt existierte nicht.
-- **Nach Fix:** `tests/sec08.sessionRevocation.test.ts` (11 Tests, 100 % bestanden):
+- **CI-Regress (PR #120):** Der Required Check `security-live-gate` scheiterte an `SEC-08: Globale Revocation invalidiert alle vorher ausgestellten Sessions` — nicht auf dem Push-Runner, wohl aber auf beiden PR-Runnern. Ursache war kein Umgebungs-, sondern ein Zeitbasis-Fehler: `revokeAllSessions()` schrieb `Cutoff = Date.now()` und `issueSession()` vergab `iat = Date.now()`. Fiel die Neuanmeldung in dieselbe Millisekunde wie der Cut, galt `iat <= Cutoff` und die frische Session war sofort widerrufen (`AssertionError` in Zeile 217 des Tests). Auf schnellen CI-Runnern ist das deterministisch, lokal nur zufällig — deshalb lokal 206/206 grün, in CI rot. Die vier neuen Zeitbasis-Tests reproduzieren den Fehler mit eingefrorener Uhr und schlagen ohne Fix fehl (Red), mit Fix sind sie grün.
+- **Nach Fix:** `tests/sec08.sessionRevocation.test.ts` (15 Tests, 100 % bestanden):
   - Einzel-Logout vor Ablauf der TTL invalidiert die Session unmittelbar.
   - Replay-Angriffe gegen Schreib- und Lese-Endpunkte (`/api/firm/tick`, `/api/auth/me`, `/api/firm/kill`) scheitern sofort mit 401/403.
   - Gezielter Einzelwiderruf isoliert die kompromittierte Session, ohne parallele Sessions anderer Benutzer zu stören.
@@ -103,7 +105,8 @@ Szenario:
   - Nicht-Admins können keine globale Revocation auslösen (403).
   - Memory-Hygiene: Pruning entfernt abgelaufene Revocation-Einträge.
   - Standardkonforme `Max-Age=0` Cookie-Löschung und Rate-Limiting gegen Flood-Angriffe.
-- `npm run test:security:auth`: **206/206 Tests grün** (keine Skips).
+  - Zeitbasis-Regressionen (feste Uhr via `withFrozenClock`): Cut und Neuanmeldung in derselben Millisekunde, zwei Schnitte in derselben Millisekunde, `POST /api/auth/login` unmittelbar nach einem `all: true`-Cut sowie rückwärts springender Systemtakt.
+- `npm run test:security:auth`: **210/210 Tests grün** (keine Skips).
 - `npm run typecheck`, `npm run lint`, `npm run docs:validate`: **alle grün**.
 
 ## Changelog-Blurb

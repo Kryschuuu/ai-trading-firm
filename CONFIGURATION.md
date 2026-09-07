@@ -228,7 +228,12 @@ manuelle Freigaben muss dieses Flag `true` sein. Keine neue Variable erforderlic
   `POST /api/auth/logout` mit Body `{"all": true}` alle zuvor ausgestellten
   Sessions global invalidieren (`state.sessionsRevokedBefore`), ohne Prozesse neu
   starten zu müssen. Abgelaufene Revocation-Einträge werden automatisch bereinigt
-  (`pruneRevokedSessions`).
+  (`pruneRevokedSessions`). Der Cutoff ist streng monoton und neue Sessions werden
+  strikt nach ihm datiert: Ein Login in derselben Millisekunde wie der Cut bleibt
+  gültig, ein rückwärts springender Systemtakt hebt keinen Cut auf (kein Fail-Open).
+  Revocation-Status lebt im Prozess-RAM — nach einem Neustart sind Einzel-Widerrufe
+  und der Cutoff weg; für einen harten Schnitt zusätzlich Tokens/`FIRM_SESSION_SECRET`
+  rotieren (invalidiert alle Sessions über `authEpoch`).
 
 **Upgrade:** Vor Deploy einen neuen unabhängigen Schlüssel in `.env` oder dem
 serverseitigen Secret-Management setzen. Beide Installer ergänzen nur fehlende
