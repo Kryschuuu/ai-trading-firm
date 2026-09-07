@@ -45,6 +45,8 @@
  *   - `paperBrokerLedger`       Papier-Ledger (RAM); offene Positionen/Kill-
  *                               Status werden aus der DB hydriert.
  *   - `rateLimiterHits`         Sliding-Window-Bucket der API-Auth (Single-Node).
+ *   - `revokedSessions`         Widerrufene Session-IDs mit Ablaufzeitpunkt (RAM).
+ *   - `sessionsRevokedBefore`   Globaler Widerrufs-Zeitstempel fuer Sessions (RAM).
  *
  * DI-/Backend-Singletons der Control Plane (Repository `getControlStateRepository`,
  * Secret-Store `getControlPlaneSecretStore`) sind bewusst NICHT hier — sie sind
@@ -199,6 +201,12 @@ export const state = {
   // ── API-Auth (src/lib/apiAuth.ts) ──────────────────────────────────────────
   /** Sliding-Window-Rate-Limit-Bucket (RAM, Single-Node). */
   rateLimiterHits: map<string, number[]>("rateLimiterHits"),
+
+  // ── Session-Revocation (src/lib/authSession.ts) ───────────────────────────
+  /** Widerrufene Session-IDs mit Ablaufzeitpunkt exp (RAM). */
+  revokedSessions: map<string, number>("revokedSessions"),
+  /** Globaler Widerrufs-Zeitstempel in ms (alle Sessions mit iat <= Zeitstempel sind ungueltig). */
+  sessionsRevokedBefore: ref<number>("sessionsRevokedBefore"),
 } as const;
 
 /**
@@ -228,4 +236,7 @@ export function __resetAllSingletonsForTests(): void {
   state.paperBrokerLedger.reset();
   // API-Auth
   state.rateLimiterHits.reset();
+  // Session-Revocation
+  state.revokedSessions.reset();
+  state.sessionsRevokedBefore.reset();
 }

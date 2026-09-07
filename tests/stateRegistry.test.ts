@@ -44,6 +44,9 @@ const EXPECTED_SLOTS = [
   "paperBrokerLedger",
   // API-Auth
   "rateLimiterHits",
+  // Session-Revocation
+  "revokedSessions",
+  "sessionsRevokedBefore",
 ] as const;
 
 beforeEach(() => {

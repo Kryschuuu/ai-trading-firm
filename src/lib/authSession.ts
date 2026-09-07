@@ -30,6 +30,7 @@ import {
 import { buildActor } from "@/auth/permissions";
 import type { Actor } from "@/auth/types";
 import { tokenEquals } from "@/lib/tokenCompare";
+import { state } from "@/lib/stateRegistry";
 
 export const SESSION_COOKIE = "firm_session";
 export const SESSION_CSRF_COOKIE = "firm_csrf";
@@ -180,21 +181,22 @@ export function readSession(
   const secret = sessionSecret(env);
   if (!secret) return null;
   const payload = verifySessionToken(token, secret, now);
-  return payload && sessionActor(payload, env, now) ? payload : null;
+  if (!payload || isSessionRevoked(payload, now)) return null;
+  return sessionActor(payload, env, now) ? payload : null;
 }
 
 /**
  * Nur fuer signaturverifizierte Payloads (readSession/verifySessionToken).
  * Niemals Cookie-Permissions kopieren: derselbe serverseitige Rollen-Builder
  * wie fuer Header-Credentials entscheidet. Auch separat aufgerufen werden
- * Schema, Ablauf und Credential-Bindung nochmals fail-closed geprueft.
+ * Schema, Ablauf, Revocation-Status und Credential-Bindung nochmals fail-closed geprueft.
  */
 export function sessionActor(
   payload: SessionPayload,
   env: EnvLike = process.env,
   now: number = Date.now()
 ): Actor | null {
-  if (!validPayload(payload, now)) return null;
+  if (!validPayload(payload, now) || isSessionRevoked(payload, now)) return null;
   const mode = resolveAuthMode(env);
   if (mode.mode !== "token-required" || mode.invalidValue !== null) return null;
   const secret = sessionSecret(env);
@@ -202,6 +204,106 @@ export function sessionActor(
   const expectedEpoch = credentialEpoch(payload.credential, env, secret);
   if (!expectedEpoch || !tokenEquals(payload.authEpoch, expectedEpoch)) return null;
   return buildActor(CREDENTIALS[payload.credential].role, "api-session", env);
+}
+
+/**
+ * Prueft, ob eine Session serverseitig widerrufen wurde (SEC-08).
+ * Beruecksichtigt sowohl individuelle Session-Revocations als auch globale Epochen-Schnitte.
+ * Raeumt abgelaufene Eintraege automatisch auf (Memory-Hygiene).
+ */
+export function isSessionRevoked(payload: SessionPayload, now: number = Date.now()): boolean {
+  const cutoff = state.sessionsRevokedBefore.get();
+  if (typeof cutoff === "number" && payload.iat <= cutoff) {
+    return true;
+  }
+  const map = state.revokedSessions.get();
+  const exp = map.get(payload.csrf);
+  if (exp !== undefined) {
+    if (now >= exp) {
+      map.delete(payload.csrf);
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Widerruft eine einzelne Session serverseitig vor Ablauf ihrer TTL (SEC-08).
+ * Akzeptiert ein SessionPayload-Objekt oder einen signierten Session-Token-String.
+ */
+export function revokeSession(
+  session: SessionPayload | string,
+  now: number = Date.now()
+): boolean {
+  if (typeof session === "string") {
+    const match = /^([A-Za-z0-9_-]+)\./.exec(session.trim());
+    if (!match) return false;
+    try {
+      const parsed: unknown = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "csrf" in parsed &&
+        typeof (parsed as SessionPayload).csrf === "string" &&
+        "exp" in parsed &&
+        typeof (parsed as SessionPayload).exp === "number"
+      ) {
+        state.revokedSessions.get().set((parsed as SessionPayload).csrf, (parsed as SessionPayload).exp);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  if (
+    typeof session === "object" &&
+    session !== null &&
+    typeof session.csrf === "string" &&
+    typeof session.exp === "number"
+  ) {
+    state.revokedSessions.get().set(session.csrf, session.exp);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Widerruft alle bis zu diesem Zeitpunkt ausgestellten Sessions global (Admin-Notfall/Epochen-Schnitt).
+ */
+export function revokeAllSessions(now: number = Date.now()): void {
+  state.sessionsRevokedBefore.set(now);
+  const map = state.revokedSessions.get();
+  for (const [key, exp] of map.entries()) {
+    if (exp <= now) map.delete(key);
+  }
+}
+
+/**
+ * Bereinigt abgelaufene Eintraege aus der Revocation-Registry.
+ */
+export function pruneRevokedSessions(now: number = Date.now()): number {
+  const map = state.revokedSessions.get();
+  let pruned = 0;
+  for (const [key, exp] of map.entries()) {
+    if (exp <= now) {
+      map.delete(key);
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Liefert Set-Cookie-Header zum sicheren Loeschen der Browser-Session-Cookies.
+ */
+export function clearSessionCookies(): string[] {
+  return [
+    `${SESSION_COOKIE}=; ${COOKIE_BASE}; HttpOnly; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+    `${SESSION_CSRF_COOKIE}=; ${COOKIE_BASE}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+  ];
 }
 
 const COOKIE_BASE = "Path=/; Secure; SameSite=Strict";
