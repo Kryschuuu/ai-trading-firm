@@ -209,6 +209,24 @@ export default function FirmDashboard() {
     }
   }, []);
 
+  /**
+   * SEC-08 (v1.36.35): Session serverseitig widerrufen und Cookies entfernen.
+   */
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      clearLegacyFirmToken();
+      setNeedToken(true);
+      setNotice("Abgemeldet — Session wurde serverseitig widerrufen.");
+      load();
+    } catch {
+      setNotice("Netzwerkfehler beim Abmelden.");
+    }
+  }
+
   // Kein synchrones setState im Effekt (react-hooks/set-state-in-effect):
   // Das initiale Laden wird um einen Tick verschoben, der Effekt selbst ruft
   // keine Setter auf.
@@ -481,7 +499,17 @@ export default function FirmDashboard() {
 
       {notice && (
         <div className="mb-6 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-200">
-          {notice}
+          <div className="flex items-center justify-between gap-4">
+            <span>{notice}</span>
+            {!needToken && (
+              <button
+                onClick={handleLogout}
+                className="rounded border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Abmelden
+              </button>
+            )}
+          </div>
           {needToken && (
             <div className="mt-2 flex items-center gap-2">
               <input

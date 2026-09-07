@@ -441,6 +441,8 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen (`POST`: `strategy.rules.activate`) / Status |
 | `GET` | `/api/firm/micro` | – | Executor-Prozess-Status + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
+| `POST` | `/api/auth/login` | `{token}` | Browser-Session setzen (`firm_session`, `firm_csrf`) |
+| `POST` | `/api/auth/logout` | `{all?: boolean}` | Session serverseitig widerrufen und Cookies löschen (`all: true` administrativ) |
 | `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions, `authMode`; 401 wenn Credential erwartet und fehlt) |
 | `GET` | `/api/ops` | – | Operations Center: Rolle, `liveEnabled`, zehn Sektionen mit Status/Kennzahlen/Quellen |
 
