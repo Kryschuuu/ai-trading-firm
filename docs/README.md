@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.36.35` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.36.36` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Security-Upgrade v1.36.27:** SEC-01 ist behoben. Produktion mit Tokens benötigt
 ein unabhängiges `FIRM_SESSION_SECRET`; alle Instanzen neu starten und erneut
 anmelden. [Konfiguration und Migration](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
@@ -207,7 +207,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 │   │   ├── README.md         ← erklärt Naming, Workflow, Status-Modell
 │   │   ├── TEMPLATE/         ← Vorlage für neuen Audit
 │   │   ├── 2026-09-03-peer-review/  ← Peer-Review-Audit (CLOSED)
-│   │   └── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01–08/10 FIXED bis v1.36.35; SEC-09 OPEN)
+│   │   └── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01–10 FIXED bis v1.36.36)
 │   ├── peer-reviews/         ← NEU: Peer-Review-Patches gesammelt
 │   │   ├── README.md
 │   │   ├── 2026-08-26-live-trading-readiness/
@@ -250,4 +250,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.36.35` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.36.36` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

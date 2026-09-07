@@ -182,10 +182,17 @@ immer `off` und `liveEnabled` immer `false` — einzige Quelle ist
   Env-Fallback nur wenn `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`;
   in Produktion: fehlender Datensatz → null, Store-Fehler (AUTH_FAILED, STORAGE_UNAVAILABLE) → HARD FAIL (throw).
   `createDefault*SecretStore` ohne `SECRET_STORE_KEY` und ohne Flag → fail-closed (kein Credential).
-- **Memory-Hygiene:** Krypto-Pfad über Buffer; `zeroize()` nach Nutzung;
-  Probe arbeitet mit dem transienten Wert und verwirft ihn danach
-  (`disposeCredential`). JS-Strings sind unveränderlich — die Grenze ist
-  dokumentiert; die Werte werden nie länger als den Request gehalten.
+- **Memory-Hygiene (SEC-09, FIXED v1.36.36):** Krypto-/Key-Buffer werden
+  nach Nutzung genullt (`zeroize()`); das deckt IV/Tag/Ciphertext/Key und den
+  Plaintext-Buffer ab — NICHT die entschlüsselten JS-Strings. `get()` liefert
+  `CredentialPayload` als transiente, unveränderliche JS-Strings im Heap
+  (`toString` → `JSON.parse`); diese können nicht deterministisch gelöscht
+  werden. Deshalb: Werte nie cachen/loggen, nur für die read-only Probe
+  halten und sofort danach verwerfen (`disposeCredential()` löst die
+  Referenzen für den GC; kein Nullen möglich). Betrieblich: kein
+  `--inspect`/Inspector, keine Heap-Snapshots, Core-Dumps deaktiviert
+  (`ulimit -c 0`) — siehe
+  [Secret-Memory-Hygiene](security/README.md#secret-memory-hygiene-sec-09).
 
 ---
 
@@ -229,8 +236,10 @@ Nach dem Speichern (und bei jedem Test) läuft **ein** read-only Check:
 
 1. **Kein Lesepfad:** Es existiert kein Endpoint und keine Funktion, die ein
    gespeichertes Secret zurückliefert. `get(venue)` dient ausschließlich
-   Backend-internen, read-only Probes und liefert eine frische Kopie, die
-   nach der Probe verworfen/genullt wird.
+   Backend-internen, read-only Probes und liefert je Aufruf eine frische
+   Kopie, die nur für die Dauer der Probe gehalten und danach verworfen wird
+   (Referenzen fallen lassen; JS-Strings können nicht genullt werden —
+   SEC-09, siehe Memory-Hygiene oben).
 2. **Verschlüsselung at rest:** Gespeichert wird nur das AES-256-GCM-Envelope
    (IV + Ciphertext + Auth-Tag); der Schlüssel lebt in Env/KMS. Ein
    Datenbank- oder Datei-Dump allein ist wertlos.

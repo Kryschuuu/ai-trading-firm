@@ -4,12 +4,15 @@
 - **Severity:** LOW
 - **Bereich:** Kryptographie / Secret Management
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-09 — Memory-Hygiene schützt JS-Strings nicht wirklich
-- **Status:** OPEN
-- **Fix-Version:** -
+- **Status:** FIXED
+- **Fix-Version:** v1.36.36 (2026-09-07)
+- **Fix-Branch:** `arena/01a07b95-ai-trading-firm` (PR folgt)
 - **Datei(en):** `src/brokers/control-plane/secretStore.ts`, `docs/FRONTEND_CONTROL_PLANE.md`
 - **Peer-Review-Patch:** TBD — verlinken sobald Patch in `docs/peer-reviews/` existiert
 
-## Beschreibung
+> Die Behebung und deren Absicherung sind unter „Implementierter Fix (v1.36.36)“ festgehalten.
+
+## Beschreibung (vor v1.36.36)
 
 Der Secret Store bemüht sich ausdrücklich um `Buffer`-basierte Secret-Verarbeitung und `zeroize()`. Das ist positiv.
 
@@ -62,17 +65,56 @@ Tatsächliche Doku: „es entstehen keine langlebigen Strings.“
 
 ## Akzeptanzkriterien / Tests
 
-- [ ] Dokumentation/Kommentare behaupten nicht mehr, JS-Strings seien genullt
-- [ ] `zeroize()` bleibt auf allen Krypto-Buffern erhalten
-- [ ] Secret-Store-Tests grün (`secretStore` / Control-Plane)
-- [ ] Betriebs-Hinweise (kein Inspector, keine Core Dumps) in Security-Docs
+- [x] Dokumentation/Kommentare behaupten nicht mehr, JS-Strings seien genullt
+- [x] `zeroize()` bleibt auf allen Krypto-Buffern erhalten
+- [x] Secret-Store-Tests grün (`secretStore` / Control-Plane)
+- [x] Betriebs-Hinweise (kein Inspector, keine Core Dumps) in Security-Docs
+
+## Implementierter Fix (v1.36.36)
+
+**Root Cause (Angreifer-Sicht):** Kein Krypto-Fehler — AES-256-GCM, AAD-Bindung
+und `zeroize()` auf Buffern waren korrekt. Die Schwachstelle war eine falsche
+Sicherheitsgarantie („keine langlebigen Strings“) plus Placebo-Entsorgung:
+`parseCredentialPlaintext()` erzeugt via `toString("utf8")` → `JSON.parse`
+unveraenderliche JS-Strings, und `disposeCredential()` nullte nur eine
+Buffer-Kopie statt der Originale. Kein Remote-Angriffspfad; relevant bei
+Heap-Dump, Crash-/Core-Dumps, Debugging, Process Compromise und forensischem
+Speicherzugriff. Die falsche Garantie lud zu unsicherem Betrieb (Inspector /
+Dumps in Produktion) ein und das Placebo verlaengerte das Zeitfenster.
+
+**Fix (keine neuen Abhaengigkeiten):**
+
+1. `src/brokers/control-plane/secretStore.ts` — alle Nullungs-Versprechen
+   durch die ehrliche SEC-09-Grenze ersetzt (Header, Krypto-Kommentar,
+   `parseCredentialPlaintext`-, `put`- und `get`-Doku); `zeroize()` auf allen
+   Krypto-/Key-Buffern unveraendert.
+2. `src/brokers/control-plane/probe.ts` — `disposeCredential()` loest jetzt
+   die Referenzen (Felder → `""`, GC kann einsammeln) und erzeugt keine
+   zusaetzlichen Secret-Kopien mehr; Header-Kommentar korrigiert.
+3. `src/brokers/control-plane/service.ts` — Probe-Kommentar korrigiert
+   (Referenz-Verwurf statt „zeroize“).
+4. `docs/FRONTEND_CONTROL_PLANE.md` — Memory-Hygiene-Abschnitt und
+   „Warum nie anzeigbar“ korrigiert, Verweis auf Betriebsschutz.
+5. `docs/security/README.md` — neuer Abschnitt „Secret-Memory-Hygiene
+   (SEC-09)“: Kurzlebigkeit, kein `--inspect`/Heap-Snapshot, `ulimit -c 0`,
+   Least Privilege, Vorgehen bei Dump-Verdacht.
+
+**Red-Tests (vor dem Fix rot, danach gruen):**
+`tests/sec09.secretMemoryHygiene.test.ts` — 8 Faelle, davon 4 vor dem Fix rot:
+Referenz-Verwurf, Probe-Flow-Fenster, Quellcode-Scan auf Nullungs-Versprechen,
+Doku-Scan auf JS-String-Grenze + Betriebsschutz. Dazu Regressionen:
+`zeroize`-Hygiene, kein Klartext im Envelope, kein Credential-Caching.
+
+**Validierung:** `sec09`-Suite 8/8 gruen; `secretStore` + Control-Plane +
+SEC-07-Suites 122/122 gruen; `typecheck`, `lint`, `docs:validate` gruen;
+CI-Workflows (`docs-validate`, `security-live-gate`) gruen.
 
 ## Changelog-Blurb
 
 ```
-SEC-09 (LOW): Secret-Memory-Hygiene — Doku korrigiert; Buffer-zeroize bleibt, JS-String-Limit dokumentiert
+SEC-09 (LOW): Secret-Memory-Hygiene — Doku korrigiert; Buffer-zeroize bleibt, JS-String-Limit dokumentiert (v1.36.36)
 ```
 
 ## Versions-Hinweis
 
-PATCH, Dokumentation / Hardening.
+PATCH — Security-Fix (v1.36.36). Keine Datenbank-Migration erforderlich.
