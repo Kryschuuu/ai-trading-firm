@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.33 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.36.34 (2026-09-06) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -60,7 +60,7 @@ docs/
 │   ├── README.md             # erklärt Naming, Workflow, Status-Modell
 │   ├── TEMPLATE/             # Vorlage für neuen Audit
 │   ├── 2026-09-03-peer-review/      # Peer-Review-Audit (CLOSED, H1-H10 etc.)
-│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01/02/03/04/10 FIXED; Rest OPEN)
+│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01–07/10 FIXED; SEC-08/09 OPEN)
 ├── peer-reviews/             # NEU: Peer-Review-Patches gesammelt
 │   ├── README.md
 │   ├── 2026-08-26-live-trading-readiness/
@@ -95,6 +95,23 @@ Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`, Credential-/Ro
 * Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
 
 Flag-Referenz: [`CONFIGURATION.md`](CONFIGURATION.md) → „Auth-Modus“; Befund C1 in [`docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md`](docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md).
+
+## Security-Update: Rule-Governance und Audit (SEC-06/SEC-05, v1.36.34)
+
+**Upgrade von v1.36.33 und älter erforderlich:** Regelaktionen prüfen jetzt
+spezifische `strategy.rules.*`-Permissions vor dem Datenzugriff. Operatoren dürfen
+Entwürfe anlegen/versionieren, pausieren und ablehnen; Aktivierung, Rollback und
+Archivierung bleiben Admins vorbehalten. Auch der manuelle Makro-Start verlangt
+administrative Freigaberechte. Der Ersteller einer Regel wird zusätzlich zum
+Lifecycle-Akteur serverseitig im Audit vermerkt; `by`, `actor` und `sourceRole`
+sind weiterhin keine zulässigen Request-Felder.
+
+Für echte Rollentrennung müssen `FIRM_ADMIN_TOKEN` und `FIRM_API_TOKEN`
+**verschiedene Credentials** sein. Ohne Admin-Token bleibt der Operator bewusst
+Single-Admin; `local-open` ist ebenfalls kein Multi-Role-Modus. Keine neue
+Abhängigkeit oder Migration: neu bauen und alle Instanzen neu starten. Der interne
+Scheduler behält die bestehende `REQUIRE_HUMAN_APPROVAL`-Policy.
+[Rollenmatrix und API-Vertrag](docs/security/README.md#rule-governance-sec-06).
 
 ## Security-Update: sensible Dashboard-Reads (SEC-02, v1.36.31)
 
@@ -230,7 +247,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/security/README.md` | Security-Übersicht: aggregierte Findings, Auth-Modell, RBAC |
 | `docs/audits/` | Zentrale Audit-Verwaltung: alle Audits chronologisch |
 | `docs/audits/2026-09-03-peer-review/` | Senior-Peer-Review 2026-09: H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 (CLOSED) |
-| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33; SEC-07 FIXED v1.36.32; übrige OPEN |
+| `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; übrige OPEN |
 | `docs/peer-reviews/` | Peer-Review-Patches: gesammelt, verknüpft, nachvollziehbar |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |

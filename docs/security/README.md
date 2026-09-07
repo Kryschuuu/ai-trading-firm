@@ -12,7 +12,7 @@
 2. **Guardrails** (`riskGuard.ts`) — max. 25% Position, Stop-Loss Pflicht, kein Short ohne Flag
 3. **Kill-Switch** — globaler Circuit-Breaker, DB-persistent, Disarm stärker als Arm (ADMIN + Nonce + CSRF)
 4. **Broker-Schleuse** — prüft alles nochmal, unabhängig von Schicht 2+3
-5. **Auth & RBAC** — `AUTH_MODE=local-open | token-required`, `FIRM_ADMIN_TOKEN`, `FIRM_API_TOKEN`, `FIRM_VIEWER_TOKEN`, Permissions `firm.read`, `live.gate`, `broker.credentials`
+5. **Auth & RBAC** — `AUTH_MODE=local-open | token-required`, `FIRM_ADMIN_TOKEN`, `FIRM_API_TOKEN`, `FIRM_VIEWER_TOKEN`, Permissions `firm.read`, `strategy.rules.*`, `live.gate`, `broker.credentials`
 6. **Rate-Limit-Identität** — `src/lib/clientIp.ts` als einzige Quelle, `TRUSTED_PROXY_IPS` + `x-verified-ip`, `x-forwarded-for` nur hinter verifiziertem Proxy, globaler Deckel + exponentieller Backoff
 
 ## Dokumente
@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33; SEC-07 FIXED v1.36.32; übrige Findings OPEN |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; übrige Findings OPEN |
 
 ## Critical/High Findings (aggregierter Status)
 
@@ -43,12 +43,81 @@ Alle Linux-/Windows-Instanzen aus dem neuen Lockfile installieren und frisch aus
 
 **SEC-04 ist seit v1.36.30 FIXED:** [ws-Pin und WS-Härtung](../audits/2026-09-05-security-review-gpt01/findings/SEC-04-vulnerable-ws.md).
 
-**SEC-05 ist seit v1.36.33 FIXED:** [Rule-Audit-Attribution serverseitig](../audits/2026-09-05-security-review-gpt01/findings/SEC-05-rule-actor-attribution.md) — Akteur und Herkunftsrolle von Regel-Änderungen stammen ausschließlich aus dem authentifizierten Credential; client-gelieferte Attributionsfelder werden mit 400 abgelehnt.
+**SEC-05 ist seit v1.36.33 FIXED, in v1.36.34 ergänzt:** [Rule-Audit-Attribution serverseitig](../audits/2026-09-05-security-review-gpt01/findings/SEC-05-rule-actor-attribution.md) — der Akteur stammt aus dem authentifizierten Credential, die API-Herkunft ist serverseitig `MANUAL`. Auch `RULE_CREATED` trägt jetzt den verifizierten Ersteller. Client-gelieferte Attributionsfelder werden mit 400 abgelehnt.
+
+**SEC-06 ist seit v1.36.34 FIXED:** [Rule-Lifecycle-Autorisierung](../audits/2026-09-05-security-review-gpt01/findings/SEC-06-rule-lifecycle-authz.md) — eigene Permissions für operative Pflege und administrative Governance.
 
 **SEC-07 ist seit v1.36.32 FIXED:** [Env-Credential-Fallback nur explizit Dev/Test](../audits/2026-09-05-security-review-gpt01/findings/SEC-07-env-credential-fallback.md) — in Produktion kein stiller Fallback auf `BITUNIX_API_KEY`/`ALPACA_API_KEY` mehr; fehlender Datensatz = null, Store-Fehler = HARD FAIL. Env nur mit `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`.
 Alle Instanzen mit `npm ci` neu installieren und sämtliche Prozesse neu starten.
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
+
+## Rule-Governance (SEC-06)
+
+**v1.36.34; betroffen bis einschließlich v1.36.33.** Die Rule-APIs verwenden die
+zentrale RBAC-Auflösung für `POST /api/firm/rules` und
+`POST /api/firm/rules/[id]`, nicht den Legacy-`guardWrite`. Alle Prüfungen erfolgen
+vor Rule-Lookups, Upserts und Lifecycle-Mutationen; eine abgewiesene Freigabe
+hinterlässt insbesondere keinen neuen Draft.
+
+| Aktion | Permission | Viewer | Operator | Admin |
+|--------|------------|--------|----------|-------|
+| Regeln lesen | `firm.read` | ja | ja | ja |
+| Draft anlegen/versionieren, ACTIVE pausieren, DRAFT ablehnen | `strategy.rules.write` | nein | ja | ja |
+| Aktivieren (auch direkt beim Anlegen) | `strategy.rules.activate` | nein | nein | ja |
+| Rollback | `strategy.rules.rollback` | nein | nein | ja |
+| Archivieren | `strategy.rules.archive` | nein | nein | ja |
+| Makro-Zyklus manuell starten | `strategy.rules.activate` | nein | nein | ja |
+
+Diese beiden Rule-Endpunkte verlangen zusätzlich zur jeweiligen Freigabe
+`strategy.rules.write`. Die Rollenmatrix gewährt dies jedem Admin. `reject`
+betrifft ausschließlich DRAFTs, `pause` ausschließlich ACTIVE-Regeln; bisherige
+Statuskonflikte bleiben HTTP 409. Unbekannte Aktionen und ungültige JSON-Formate
+werden ohne Datenzugriff mit 400 abgewiesen; Regel-Spezifikationen werden weiter
+per Whitelist geprüft (422 bei inhaltlichen Fehlern). `activate` ist optional,
+aber falls angegeben zwingend ein Boolean. Das Schreib-Rate-Limit bleibt aktiv
+(429 mit `Retry-After`).
+
+### Credentials und Betriebsmodi
+
+- Header (`x-admin-token`, `x-firm-token`, `x-viewer-token`), Bearer und signierte
+  `firm_session` verwenden dieselben aktuellen serverseitigen Rechte. Ein
+  Admin-Token funktioniert auch als `x-firm-token`, selbst wenn ein separater
+  Operator-Token konfiguriert ist. Fehlende Rechte: 403 `FORBIDDEN`; fehlende oder
+  ungültige Authentifizierung gemäß zentralem RBAC 401, mit konfiguriertem
+  Admin-Token 403.
+- **Multi-Role benötigt verschiedene Admin-/Operator-Credentials.** Ohne
+  `FIRM_ADMIN_TOKEN` erbt der Operator unverändert die effektive Admin-Rolle
+  (Single-Admin-Kompatibilität). `local-open` ist ein bewusster lokaler
+  Admin-Modus, niemals eine Rollentrennung; ohne Credentials bleibt
+  `token-required` geschlossen.
+- Der **manuelle** Makro-Start ist immer administrativ, auch wenn gerade
+  `REQUIRE_HUMAN_APPROVAL=true` gesetzt ist. Der interne Scheduler bleibt ein
+  vertrauenswürdiger Systemakteur und respektiert die bestehende serverseitige
+  Approval-Policy. Wer jede automatische Aktivierung verhindern will, setzt
+  `REQUIRE_HUMAN_APPROVAL=true`; die neue RBAC-Matrix ersetzt diese Policy nicht.
+
+### Audit-Attribution (SEC-05-Nachprüfung)
+
+`by`, `actor` und `sourceRole` sind weder auf Top-Level noch in `rule` zulässige
+Attributionsfelder der Rule-Requests (400 `ACTOR_NOT_CLIENT_CONTROLLED`).
+API-Spezifikationen haben immer `sourceRole=MANUAL` und `sourceMode=MANUAL`.
+Erstellung und Lifecycle-Aktionen tragen den serverseitig verifizierten Akteur;
+interne Erzeuger nennen explizit ihren Systemakteur. Fehlende Authentifizierung
+wird niemals als Admin-Attribution interpretiert. Die Audit-Anzeige zeigt den
+Ersteller getrennt von der Herkunftsrolle. Vorhandene historische Einträge
+werden nicht nachträglich umgeschrieben.
+
+### Upgrade und Prüfung
+
+Mit `npm ci` installieren, `npm run build` ausführen und alle App-Instanzen neu
+starten. Keine neue Abhängigkeit oder Schema-Migration. Eigene Integrationen
+müssen für administrative Regelaktionen und den manuellen Makro-Start ein
+Admin-Credential verwenden; normale Draft-Pflege bleibt Operator-tauglich.
+
+`npm run test:security:auth` prüft SEC-05/SEC-06 verbindlich in CI: Rollenmatrix,
+Header/Bearer/Sessions, fehlende Rechte ohne Datenzugriff, gültige Mutationen
+mit Audit, ungültige Eingaben, Rate-Limit und Single-Admin-Kompatibilität.
 
 ## Sensible Dashboard-Read-APIs (SEC-02)
 

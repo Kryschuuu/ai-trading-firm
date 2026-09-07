@@ -476,8 +476,15 @@ Im Browser öffnen → **„Seed / Reset"** → **„▶▶ Ganze Pipeline"**.
 (regelbasiert, pro Preis-Tick). Einmal die erste Regel erzeugen:
 
 ```bash
-curl -s -X POST localhost:3369/api/firm/macro | jq '.cycle.rule.status'
+curl -s -X POST localhost:3369/api/firm/macro \
+  -H "x-firm-token: ${FIRM_ADMIN_TOKEN:-$FIRM_API_TOKEN}" | jq '.cycle.rule.status'
 ```
+
+Der manuelle Makro-Start braucht seit v1.36.34 administrative Rule-Rechte.
+Das Beispiel nutzt den separat konfigurierten Admin-Token oder — nur ohne
+Admin-Token — den bestehenden Single-Admin-Operator. Für echte Rollentrennung
+verschiedene Credentials verwenden; den internen Scheduler steuert weiterhin
+`REQUIRE_HUMAN_APPROVAL`. [Details](security/README.md#rule-governance-sec-06).
 
 Dann als eigener Prozess bzw. Dienst (Kapitel 7.1):
 

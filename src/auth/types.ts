@@ -23,6 +23,11 @@ export const PERMISSIONS = [
   "firm.kill",
   "firm.config",
   "broker.test",
+  // SEC-06: operative Regelpflege ist von Governance-Freigaben getrennt.
+  "strategy.rules.write",
+  "strategy.rules.activate",
+  "strategy.rules.rollback",
+  "strategy.rules.archive",
   "broker.credentials",
   "routing.modes.write",
   "live.gate",

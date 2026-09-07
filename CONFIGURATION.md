@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-06** · Code-Version **1.36.33**
+> Dokumentationsstand **2026-09-06** · Code-Version **1.36.34**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -182,6 +182,22 @@ NODE_ENV=production npm run boot:guard  # Exit 0 = Start erlaubt · Exit 1 = ver
 
 Details: [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md), Befund C1 in
 [`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md).
+
+## Rule-Governance (SEC-06, v1.36.34)
+
+Für echte Multi-Role-Trennung müssen `FIRM_ADMIN_TOKEN` und `FIRM_API_TOKEN`
+verschieden sein. Operatoren besitzen `strategy.rules.write` (Drafts
+anlegen/versionieren, pausieren, ablehnen); Admins zusätzlich
+`strategy.rules.activate`, `strategy.rules.rollback` und `strategy.rules.archive`.
+Der manuelle Makro-Start verlangt ebenfalls `strategy.rules.activate`.
+
+**Kompatibilität:** Ohne konfigurierten Admin-Token ist der Operator weiterhin
+Single-Admin mit effektiven Admin-Rechten. `local-open` ist ein lokaler
+Single-User-Modus, keine Rollen-Isolation. Der interne Makro-Scheduler bleibt
+an die bestehende `REQUIRE_HUMAN_APPROVAL`-Policy gebunden; für ausschließlich
+manuelle Freigaben muss dieses Flag `true` sein. Keine neue Variable erforderlich.
+
+[API-Vertrag und Upgrade](docs/security/README.md#rule-governance-sec-06).
 
 ## Session-Sicherheit (SEC-01, v1.36.27)
 

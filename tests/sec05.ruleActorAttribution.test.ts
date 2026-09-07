@@ -110,7 +110,9 @@ test("SEC-05: unauthentifizierter Request wird weiterhin vor allem anderen abgew
     }),
     { params }
   );
-  assert.equal(res.status, 401);
+  // SEC-06: Zentraler RBAC-Guard statt Legacy-Token-Guard; mit
+  // konfiguriertem Admin-Token ist die kanonische Auth-Ablehnung 403.
+  assert.equal(res.status, 403);
 });
 
 // ── Angriffsvektor 2: client-gesteuerte sourceRole beim Anlegen ─────────────

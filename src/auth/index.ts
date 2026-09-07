@@ -36,6 +36,8 @@ export {
 } from "./authMode";
 export {
   ROLE_PERMISSIONS,
+  RULE_ACTION_PERMISSIONS,
+  type RuleLifecycleAction,
   hasPermission,
   liveGateGranted,
   permissionsForRole,

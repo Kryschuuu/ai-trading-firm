@@ -5,11 +5,12 @@
 - **Bereich:** AuthZ / Audit-Integrität
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-05 — Fälschbare Akteurs-/Rollenattribution bei Rule-Änderungen
 - **Status:** FIXED (Resolved)
-- **Fix-Version:** v1.36.33 (2026-09-06)
-- **Datei(en):** `src/app/api/firm/rules/[id]/route.ts`, `src/app/api/firm/rules/route.ts`, `src/lib/ruleActor.ts` (neu), `src/lib/ruleEngine.ts`
-- **Peer-Review-Patch:** Branch `arena/01a078c8-ai-trading-firm` (PR gegen `main`)
+- **Fix-Version:** v1.36.33; Nachprüfung und Ergänzung in v1.36.34 (2026-09-06)
+- **Datei(en):** `src/app/api/firm/rules/[id]/route.ts`, `src/app/api/firm/rules/route.ts`, `src/lib/{ruleActor,ruleEngine,ruleService,macroCycle,auditView}.ts`
+- **Initialer Fix:** [PR #117](https://github.com/Kryschuuu/ai-trading-firm/pull/117)
+- **Nachprüfungs-/Ergänzungs-Commit:** [57fec8f](https://github.com/Kryschuuu/ai-trading-firm/commit/57fec8f08c7de8ac556fe842db04ff2cce978842)
 
-## Beschreibung
+## Beschreibung (vor v1.36.33)
 
 Bei `POST /api/firm/rules/[id]` wird die Authentifizierung nur über `guardWrite(req)` durchgeführt. Danach wird ein vom Client gelieferter Wert `by?: string` übernommen und an die Rule-Service-Funktionen weitergereicht:
 
@@ -62,12 +63,12 @@ Auch `sourceRole` nicht aus dem Client übernehmen.
 ## Akzeptanzkriterien / Tests
 
 - [x] Request-Feld `by` wird abgelehnt (fail-closed, `400 ACTOR_NOT_CLIENT_CONTROLLED`)
-- [x] Audit-Attribution stammt ausschließlich aus `resolveAuth` / Session-Actor (`actorAuditId`)
+- [x] Audit-Attribution stammt ausschließlich aus `resolveAuth` / Session-Actor (`actor.auditId`)
 - [x] Test: Operator sendet `"by": "ADMIN"` → Request wird abgewiesen; Attribution bleibt Operator-`auditId`
 - [x] `sourceRole` nicht client-steuerbar (Top-Level und verschachtelt in `rule`)
 - [x] Keine Regression der Rule-Lifecycle-Aktionen
 
-## Fix (v1.36.33)
+## Initialer Fix (v1.36.33)
 
 **Root Cause:** Die Route hat eine *Behauptung* des Clients (`body.by`,
 `body.sourceRole`) als Identitätsaussage in den Audit-Trail übernommen. Die
@@ -91,6 +92,38 @@ entkoppelt.
   inkl. Angriffsvektoren und Quell-Drift-Check gegen einen Rückfall auf
   `body.by`).
 
+## Nachprüfung und Ergänzung (v1.36.34)
+
+Bei der SEC-06-Nachprüfung wurden nicht nur abgewiesene Requests, sondern auch
+**erfolgreiche** Mutationen bis zum Audit-Transport getestet. Dabei zeigte sich:
+Der initiale Fix schützte die Lifecycle-Attribution, aber `RULE_CREATED` erhielt
+noch keinen verifizierten Ersteller. Der allgemeine `actorAuditId`-Helper bot
+zudem einen für Rule-Mutationen ungeeigneten Admin-Fallback; die verschachtelte
+Attributionsprüfung fehlte im Lifecycle-Handler (dort zuvor ignorierte Felder,
+keine zusätzliche Rollenübernahme).
+
+[57fec8f](https://github.com/Kryschuuu/ai-trading-firm/commit/57fec8f08c7de8ac556fe842db04ff2cce978842) schließt diese Restlücken:
+
+- Erstellung und optionale Aktivierung verwenden denselben verifizierten
+  Request-Akteur. `upsertRuleSpec` und alle mutierenden Lifecycle-Funktionen
+  verlangen einen expliziten `by`-Parameter. Interne Erzeuger übergeben ihren
+  Systemakteur; API-Aufrufer ausschließlich `ruleActor(req)`.
+- `ruleActor` nutzt `resolveAuth` direkt und bricht bei fehlender Authentifizierung
+  vor jeder Mutation ab. Ein fehlender Actor wird niemals zu `admin`.
+- API-Erstellung erzwingt sowohl `sourceRole=MANUAL` als auch `sourceMode=MANUAL`.
+  `RULE_CREATED` protokolliert `by`, die Audit-Anzeige zeigt ihn getrennt von der
+  Herkunftsrolle. Historische Audit-Einträge bleiben unverändert.
+- Top-Level und `rule` werden in beiden Rule-POSTs konsistent auf `by`, `actor`
+  und `sourceRole` geprüft, einschließlich leerer/falsy Werte.
+- `tests/sec06.ruleLifecycleAuthz.test.ts` prüft erfolgreiche Erstellung und alle
+  Lifecycle-Aktionen für Header, Bearer und Session bis zur gespeicherten
+  Attribution. Die 17 ursprünglichen SEC-05-Tests bleiben bestehen; zusammen mit
+  den 72 neuen SEC-06-/Nachprüfungstests laufen sie nun verpflichtend im
+  `test:security:auth`-Gate (zuvor nur in der regulären Unit-Suite).
+
+Die neue aktionsbezogene Rechteprüfung und die dokumentierte effektive
+Rollenmatrix stehen im [SEC-06-Finding](SEC-06-rule-lifecycle-authz.md).
+
 ## Changelog-Blurb
 
 ```
@@ -99,4 +132,4 @@ SEC-05 (MEDIUM): Rule-Audit — Actor/by ausschließlich serverseitig aus authen
 
 ## Versions-Hinweis
 
-PATCH — ausgeliefert als v1.36.33.
+PATCH — initial v1.36.33; vollständige Erstellungsattribution und Nachprüfung in v1.36.34.

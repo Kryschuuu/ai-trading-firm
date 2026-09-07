@@ -69,22 +69,25 @@ Ausführen: `npm run docs:validate`
   exakter `ws`-Pin, Override für transitive Kopien, jeder Lockfile-Eintrag, die
   installierte Auflösung sowie Laufzeit-Guard und Payload-Kappe des
   Bitunix-WS-Clients.
-- SEC-01/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
-  Session-Vertrauensgrenze, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
+- SEC-01/SEC-02/Auth-Regressionen vor der Live-Gate-Suite (`npm run test:security:auth`):
+  Session-Vertrauensgrenze, geschützte Reads, RBAC, Login/CSRF, Credential-Änderungen, Setup/Boot
+- SEC-05/SEC-06 im selben verpflichtenden Auth-Gate: 17 bestehende Attributions-
+  und 72 neue Rule-Governance-/Nachprüfungstests, inklusive Header/Bearer/Session,
+  positiver Mutations-/Audit-Pfade, verweigerter Zugriffe vor Persistenz und
+  administrativem Makro-Einstieg. Keine Datenbank-/LLM-Verbindung, kein Skip.
 - Live-Gate-Suite mit ≥95% Coverage
 - Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink
 
 Ausführen: `npm run security:live-gate`
 
-### Bekannte Lücke: Unit-Tests (`npm test`)
+### Ergänzende Gesamtsuite (`npm test`)
 
-Die reguläre Unit-Suite läuft bewusst **nicht** als Required Check: Auf `main`
-schlagen aktuell 5 Docs-Konsistenz-Tests fehl (veraltete Erwartungen nach der
-CHANGELOG-Konsolidierung `docs/CHANGELOG.md` → Root und der Migration der
-Security-Audit-Kapitel; siehe `tests/docsVersioning.test.ts`,
-`tests/portfolio.architecture.test.ts`). Erst wenn diese Tests repariert sind,
-sollte `npm test` als zusätzlicher Job ergänzt werden — ein dauerhaft roter
-oder still übergangener Check wäre schlechter als die dokumentierte Lücke.
+Die reguläre Unit-Suite ist weiterhin kein eigener Required Check. Die früher
+hier genannten fünf Docs-Konsistenzfehler sind behoben; die SEC-06-Nachprüfung
+hat das auf dem Ausgangsstand v1.36.33 bestätigt. `npm test` daher zusätzlich
+lokal vor der Auslieferung ausführen. Einzelne bestehende DB-Integrationstests
+überspringen sich ohne PostgreSQL; die SEC-05-/SEC-06-Security-Regressionen
+benötigen keine externe Datenbank und laufen stets im Required Security-Gate.
 
 ## Verwandte Dokumente
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runMacroCycle, macroCycleStatus } from "@/lib/macroCycle";
-import { guardWrite } from "@/lib/apiAuth";
+import { checkRateLimit } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const denied = guardWrite(req);
+  // SEC-06: Der Zyklus kann Regeln aktivieren. Der manuelle Einstieg darf
+  // die Rule-Governance nicht umgehen — unabhängig vom aktuellen Human-Flag.
+  // Der interne Scheduler behält seine serverseitige Approval-Policy.
+  const denied = requirePermission(req, "strategy.rules.activate") ?? checkRateLimit(req);
   if (denied) return denied;
   try {
     const body = (await req.json().catch(() => ({}))) as { missionId?: string };

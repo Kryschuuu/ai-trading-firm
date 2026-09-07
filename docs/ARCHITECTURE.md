@@ -177,6 +177,18 @@ wahr.
 
 ### 2.4 Versionierung & Rollback
 
+**HTTP-Governance (SEC-06, v1.36.34):** `POST /api/firm/rules` und
+`POST /api/firm/rules/[id]` prüfen `strategy.rules.write` plus das zur Aktion
+gehörende Recht vor jeder Persistenz. Operatoren dürfen Drafts anlegen/versionieren,
+ACTIVE pausieren und DRAFT ablehnen. Aktivierung (auch direkt beim Anlegen),
+Rollback und Archivierung verlangen administrative Permissions
+`strategy.rules.activate` / `.rollback` / `.archive`. Auch der manuelle Makro-Start
+benötigt `.activate`; der interne Scheduler bleibt durch die serverseitige
+`REQUIRE_HUMAN_APPROVAL`-Policy gesteuert. Der Rule-Service ist ein
+vertrauenswürdiger interner Persistenzdienst, keine HTTP-Auth-Schicht.
+Erstellung und Lifecycle werden mit explizitem serverseitigem Akteur auditiert
+(SEC-05); API-Herkunft ist `MANUAL`. [Matrix und Betriebsmodi](security/README.md#rule-governance-sec-06).
+
 * **Aktivieren** (`POST /api/firm/rules/:id`, `action:activate`):
   Transaktion setzt alle anderen ACTIVE-Versionen desselben Symbols auf
   `SUPERSEDED` und die neue auf `ACTIVE` (+ `activatedAt`). Doppelte
