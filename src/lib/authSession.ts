@@ -17,6 +17,12 @@
  * Tokens invalidiert bestehende Sessions, auch bei konstantem Session-Key.
  * Unveraenderte Konfiguration erlaubt weiterhin stateless Prozess-Neustarts.
  * Alle v1-Cookies sind absichtlich ungueltig: Upgrade erfordert neuen Login.
+ *
+ * SEC-08 (v1.36.35): Zusaetzlich zur Credential-Bindung existiert eine
+ * serverseitige Revocation-Registry (RAM, `state` in `lib/stateRegistry.ts`).
+ * `readSession`/`sessionActor` pruefen sie fail-closed vor jeder Rechtevergabe;
+ * der globale Epochen-Cutoff ist millisekundengenau deterministisch (Sessions
+ * NACH dem Schnitt bleiben gueltig, alle davor sind sofort ungueltig).
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -30,6 +36,7 @@ import {
 import { buildActor } from "@/auth/permissions";
 import type { Actor } from "@/auth/types";
 import { tokenEquals } from "@/lib/tokenCompare";
+import { state } from "@/lib/stateRegistry";
 
 export const SESSION_COOKIE = "firm_session";
 export const SESSION_CSRF_COOKIE = "firm_csrf";
@@ -104,6 +111,42 @@ function credentialEpoch(credential: SessionCredential, env: EnvLike, secret: st
     .digest("base64url");
 }
 
+/**
+ * Globaler Revocation-Cutoff (SEC-08) oder null, wenn nie global widerrufen
+ * wurde. Nur wohlgeformte, nicht negative Zeitstempel zaehlen; alles andere
+ * wird ignoriert (fail-closed bleibt ueber die Einzel-Registry bestehen).
+ */
+function globalRevocationCutoff(): number | null {
+  const cutoff = state.sessionsRevokedBefore.get();
+  return typeof cutoff === "number" && Number.isSafeInteger(cutoff) && cutoff >= 0 ? cutoff : null;
+}
+
+/**
+ * Obergrenze fuer `iat` (SEC-08): der aktuelle Zeitpunkt — bzw. nach einem
+ * globalen Widerruf zusaetzlich der Klemmwert `cutoff + 1`, den der Server
+ * selbst vergibt (siehe `issueInstant`). `Date.now()` loest nur in ganzen
+ * Millisekunden auf: Ohne Klemmung waere eine Session, die in derselben
+ * Millisekunde wie `revokeAllSessions()` ausgestellt wird, sofort wieder
+ * "widerrufen" (iat <= cutoff). Futuristische Fremd-`iat` bleiben abgewiesen —
+ * Payloads sind HMAC-signiert, den Klemmwert kann nur dieser Prozess setzen.
+ */
+function maxIssuedAt(now: number): number {
+  const cutoff = globalRevocationCutoff();
+  return cutoff === null ? now : Math.max(now, cutoff + 1);
+}
+
+/**
+ * Ausstellungszeitpunkt neuer Sessions (SEC-08): immer strikt nach einem
+ * bestehenden globalen Cut. Damit gilt deterministisch — unabhaengig von der
+ * Millisekunden-Aufloesung der Uhr:
+ *   iat <= cutoff  ⇒  Session stammt von VOR dem Schnitt  ⇒  widerrufen
+ *   iat  > cutoff  ⇒  Session stammt von NACH dem Schnitt ⇒  gueltig
+ */
+function issueInstant(now: number = Date.now()): number {
+  const cutoff = globalRevocationCutoff();
+  return cutoff !== null && now <= cutoff ? cutoff + 1 : now;
+}
+
 function validPayload(value: unknown, now: number): value is SessionPayload {
   if (!Number.isSafeInteger(now) || typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const p = value as Record<string, unknown>;
@@ -116,7 +159,7 @@ function validPayload(value: unknown, now: number): value is SessionPayload {
     isSessionCredential(p.credential) &&
     typeof p.authEpoch === "string" && /^[A-Za-z0-9_-]{43}$/.test(p.authEpoch) &&
     typeof p.csrf === "string" && /^[a-f0-9]{64}$/.test(p.csrf) &&
-    typeof p.iat === "number" && Number.isSafeInteger(p.iat) && p.iat >= 0 && p.iat <= now &&
+    typeof p.iat === "number" && Number.isSafeInteger(p.iat) && p.iat >= 0 && p.iat <= maxIssuedAt(now) &&
     typeof p.exp === "number" && Number.isSafeInteger(p.exp) && p.exp > now &&
     p.exp > p.iat && p.exp - p.iat <= SESSION_TTL_MS
   );
@@ -180,21 +223,22 @@ export function readSession(
   const secret = sessionSecret(env);
   if (!secret) return null;
   const payload = verifySessionToken(token, secret, now);
-  return payload && sessionActor(payload, env, now) ? payload : null;
+  if (!payload || isSessionRevoked(payload, now)) return null;
+  return sessionActor(payload, env, now) ? payload : null;
 }
 
 /**
  * Nur fuer signaturverifizierte Payloads (readSession/verifySessionToken).
  * Niemals Cookie-Permissions kopieren: derselbe serverseitige Rollen-Builder
  * wie fuer Header-Credentials entscheidet. Auch separat aufgerufen werden
- * Schema, Ablauf und Credential-Bindung nochmals fail-closed geprueft.
+ * Schema, Ablauf, Revocation-Status und Credential-Bindung nochmals fail-closed geprueft.
  */
 export function sessionActor(
   payload: SessionPayload,
   env: EnvLike = process.env,
   now: number = Date.now()
 ): Actor | null {
-  if (!validPayload(payload, now)) return null;
+  if (!validPayload(payload, now) || isSessionRevoked(payload, now)) return null;
   const mode = resolveAuthMode(env);
   if (mode.mode !== "token-required" || mode.invalidValue !== null) return null;
   const secret = sessionSecret(env);
@@ -202,6 +246,118 @@ export function sessionActor(
   const expectedEpoch = credentialEpoch(payload.credential, env, secret);
   if (!expectedEpoch || !tokenEquals(payload.authEpoch, expectedEpoch)) return null;
   return buildActor(CREDENTIALS[payload.credential].role, "api-session", env);
+}
+
+/**
+ * Prueft, ob eine Session serverseitig widerrufen wurde (SEC-08).
+ * Beruecksichtigt sowohl individuelle Session-Revocations als auch globale Epochen-Schnitte.
+ * Raeumt abgelaufene Eintraege automatisch auf (Memory-Hygiene).
+ */
+export function isSessionRevoked(payload: SessionPayload, now: number = Date.now()): boolean {
+  const cutoff = globalRevocationCutoff();
+  if (cutoff !== null && payload.iat <= cutoff) {
+    return true;
+  }
+  const map = state.revokedSessions.get();
+  const exp = map.get(payload.csrf);
+  if (exp !== undefined) {
+    if (now >= exp) {
+      map.delete(payload.csrf);
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Widerruft eine einzelne Session serverseitig vor Ablauf ihrer TTL (SEC-08).
+ * Akzeptiert ein SessionPayload-Objekt oder einen signierten Session-Token-String.
+ */
+export function revokeSession(
+  session: SessionPayload | string,
+  now: number = Date.now()
+): boolean {
+  if (typeof session === "string") {
+    const match = /^([A-Za-z0-9_-]+)\./.exec(session.trim());
+    if (!match) return false;
+    try {
+      const parsed: unknown = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "csrf" in parsed &&
+        typeof (parsed as SessionPayload).csrf === "string" &&
+        "exp" in parsed &&
+        typeof (parsed as SessionPayload).exp === "number"
+      ) {
+        state.revokedSessions.get().set((parsed as SessionPayload).csrf, (parsed as SessionPayload).exp);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  if (
+    typeof session === "object" &&
+    session !== null &&
+    typeof session.csrf === "string" &&
+    typeof session.exp === "number"
+  ) {
+    state.revokedSessions.get().set(session.csrf, session.exp);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Widerruft alle bis zu diesem Zeitpunkt ausgestellten Sessions global
+ * (Admin-Notfall/Epochen-Schnitt, SEC-08).
+ *
+ * Der Cutoff ist streng monoton: Zwei Schnitte innerhalb derselben
+ * Millisekunde schreiben nicht denselben Wert, sonst wuerde eine zwischen
+ * beiden Schnitten ausgestellte Session (iat = cutoff + 1) den zweiten Schnitt
+ * ueberleben. Ebenso kann ein rueckwaerts springender Systemtakt einen einmal
+ * gesetzten Cut nicht wieder aufheben (kein Fail-Open durch Clock-Skew).
+ */
+export function revokeAllSessions(now: number = Date.now()): void {
+  const instant = Number.isSafeInteger(now) && now >= 0 ? now : Date.now();
+  const previous = globalRevocationCutoff();
+  const cutoff = previous === null ? instant : Math.max(instant, previous + 1);
+  state.sessionsRevokedBefore.set(cutoff);
+  // Einzel-Revocations, deren natuerliche TTL vor dem Schnitt endet, sind durch
+  // den globalen Cut laengst abgedeckt (iat <= exp <= cutoff) — raus damit.
+  const map = state.revokedSessions.get();
+  for (const [key, exp] of map.entries()) {
+    if (exp <= cutoff) map.delete(key);
+  }
+}
+
+/**
+ * Bereinigt abgelaufene Eintraege aus der Revocation-Registry.
+ */
+export function pruneRevokedSessions(now: number = Date.now()): number {
+  const map = state.revokedSessions.get();
+  let pruned = 0;
+  for (const [key, exp] of map.entries()) {
+    if (exp <= now) {
+      map.delete(key);
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Liefert Set-Cookie-Header zum sicheren Loeschen der Browser-Session-Cookies.
+ */
+export function clearSessionCookies(): string[] {
+  return [
+    `${SESSION_COOKIE}=; ${COOKIE_BASE}; HttpOnly; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+    `${SESSION_CSRF_COOKIE}=; ${COOKIE_BASE}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+  ];
 }
 
 const COOKIE_BASE = "Path=/; Secure; SameSite=Strict";
@@ -257,7 +413,10 @@ export function issueSession(
   }
 
   const csrf = randomBytes(32).toString("hex");
-  const iat = Date.now();
+  // SEC-08: strikt nach einem globalen Revocation-Cutoff datieren, damit ein
+  // Login in derselben Millisekunde wie `revokeAllSessions()` nicht sofort
+  // wieder als widerrufen gilt (siehe `issueInstant`).
+  const iat = issueInstant();
   const exp = iat + SESSION_TTL_MS;
   const payload: SessionPayload = { v: PAYLOAD_VERSION, credential, authEpoch, csrf, iat, exp };
   const sessionToken = signSession(payload, secret);

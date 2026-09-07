@@ -1,12 +1,51 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-06** · Code-Version **1.36.34**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-07** · Code-Version **1.36.35**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.35] — 2026-09-07 · Security: SEC-08 — Session-Revocation & Logout
+
+### Security
+
+- **SEC-08 (MEDIUM) behoben; betroffen bis einschließlich v1.36.34:** Browser-
+  Sessions besitzen nun eine serverseitige Revocation-Registry (`state.revokedSessions`)
+  und einen dedizierten Logout-Endpunkt (`POST /api/auth/logout`). Nach einem
+  Logout oder einer gezielten Revocation wird die betroffene Session auf dem
+  Server unmittelbar invalidiert und vor Ablauf der 15-Minuten-TTL abgewiesen.
+- **Sofortige serverseitige Ungültigkeit:** Replay-Versuche mit alten oder
+  abgefangenen Session-Cookies scheitern sofort mit 401/403 an allen lesenden
+  und schreibenden API-Endpunkten (`resolveAuth`, `checkApiToken`, `checkCsrfGuard`,
+  `requirePermission`).
+- **Administrative globale Revocation:** Über `POST /api/auth/logout` mit
+  `{"all": true}` (geschützt durch die Admin-Permission `broker.credentials`)
+  können alle vor dem Zeitpunkt ausgestellten Sessions global invalidiert
+  werden (`state.sessionsRevokedBefore`), ohne Server-Neustarts zu erfordern.
+- **Deterministischer Epochen-Schnitt (Millisekunden-Race behoben):** Der globale
+  Cutoff ist streng monoton (`max(now, vorheriger Cutoff + 1)`) und neue Sessions
+  werden strikt nach ihm datiert (`iat > cutoff`). Ein Login in derselben
+  Millisekunde wie ein `all: true`-Widerruf ist damit nicht mehr augenblicklich
+  wieder tot — der Fehler brach in CI den Required Check `security-live-gate` ab
+  (PR #120), weil schnelle Runner Cut und Neuanmeldung in denselben Takt legen.
+  Gleichzeitig hebt ein rückwärts springender Systemtakt einen gesetzten Cut
+  niemals auf (kein Fail-Open durch Clock-Skew) und sperrt Neuanmeldungen nicht aus.
+- **Memory-Hygiene & Auto-Pruning:** Natürlicher TTL-Ablauf von Revocation-
+  Einträgen wird automatisch bereinigt (`pruneRevokedSessions`), um
+  unbegrenzten Speicherverbrauch zu verhindern.
+- **Verbindliche Regressionen:** 15 neue SEC-08-Tests in `tests/sec08.sessionRevocation.test.ts`
+  sichern Logout, gezielten Widerruf, globale Admin-Revocation, Replay-Abwehr,
+  Cookie-Löschung (`Max-Age=0`), CSRF-Guards, Rate-Limiting und die Zeitbasis
+  (gleiche Millisekunde, Doppelschnitt, Login-Route, Clock-Skew) ab. Sie sind fest
+  im `test:security:auth`-CI-Gate verankert (`npm run test:security:auth`: 210/210 grün).
+
+### Upgrade
+
+- **Alle Instanzen auf v1.36.35 aktualisieren, neu bauen und neu starten.**
+  Keine Datenmigration oder neue Umgebungsvariable erforderlich.
 
 ## [1.36.34] — 2026-09-06 · Security: SEC-06 — getrennte Rule-Governance; SEC-05 nachgeprüft
 

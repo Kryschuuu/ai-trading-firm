@@ -4,105 +4,117 @@
 - **Severity:** MEDIUM
 - **Bereich:** AuthN / AuthZ / Session-Lifecycle
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-08 — Sessions sind nicht sofort widerrufbar
-- **Status:** OPEN
-- **Fix-Version:** -
-- **Datei(en):** `src/lib/authSession.ts`, `src/lib/apiAuth.ts`, `src/app/api/auth/login/route.ts`, `src/auth/resolve.ts`
-- **Peer-Review-Patch:** TBD — verlinken sobald Patch in `docs/peer-reviews/` existiert
+- **Status:** FIXED (Resolved)
+- **Fix-Version:** v1.36.35 (2026-09-07)
+- **Betroffene Versionen:** bis einschließlich v1.36.34
+- **Datei(en):** `src/lib/authSession.ts`, `src/lib/apiAuth.ts`, `src/app/api/auth/logout/route.ts`, `src/app/api/auth/login/route.ts`, `src/auth/resolve.ts`, `src/lib/stateRegistry.ts`, `src/lib/browserSession.ts`, `src/components/FirmDashboard.tsx`
+- **Fix-Commit:** arena/01a07b1d-ai-trading-firm (ersetzt PR #120 von arena/01a07aae-ai-trading-firm)
+- **Red-Test-Commit:** arena/01a07b1d-ai-trading-firm
 
-## Implementierungsstand v1.36.27
+> Beschreibung und PoC unten dokumentieren den ursprünglichen verwundbaren Stand.
+> Die Behebung und deren Absicherung sind unter „Implementierter Fix (v1.36.35)“ festgehalten.
 
-SEC-01 ergänzt einen credential-gebundenen, keyed Konfigurations-Fingerprint
-(`authEpoch`) und entfernt Berechtigungs-Snapshots. Token-/Key-Rotation,
-Token-Entfernung/-Neueinrichtung und Rollen-Degradierung invalidieren Sessions,
-sobald die neue Konfiguration in allen Prozessen aktiv ist (Neustart).
-Die Regressionen liegen in `tests/sec01.sessionSecurity.test.ts`.
-**SEC-08 bleibt OPEN:** individuelles Logout/Explizit-Revoke ist nicht implementiert;
-TTL bleibt 15 Minuten. Die folgende Beschreibung dokumentiert den ursprünglichen
-Stand bis v1.36.26; das Audit-Original bleibt unverändert.
+## Beschreibung (vor v1.36.35)
 
-## Beschreibung
+Browser-Sessions sind HMAC-signiert mit 15 Minuten TTL (`SESSION_TTL_S = 900`). In v1.36.27 (SEC-01) wurde ein Konfigurations-Fingerprint (`authEpoch`) eingeführt, der Sessions bei Änderungen der Server-Token-Konfiguration (Neustart) invalidiert.
 
-Sessions sind stateless, HMAC-signiert und haben 15 Minuten TTL (`SESSION_TTL_S = 900`). Das ist grundsätzlich ein gutes Design.
+Dennoch blieben Sessions innerhalb ihrer 15-Minuten-Gültigkeit **nicht gezielt widerrufbar**:
 
-Der signierte Session-Payload enthält jedoch einen **Berechtigungs-Snapshot**:
-
-```text
-role
-effectiveRole
-elevated
-permissions
-```
-
-Diese Werte werden bei jeder Anfrage aus der Session übernommen (`sessionActor()`), nicht erneut aus der aktuellen Auth-Konfiguration abgeleitet.
-
-Damit kann eine Session bis zu 15 Minuten weiter gültig bleiben, obwohl:
-
-- ein Token rotiert wurde,
-- Berechtigungen geändert wurden,
-- eine Rolle reduziert wurde,
-- ein Operator degradiert wurde.
-
-Ist ein separates `FIRM_SESSION_SECRET` gesetzt, ist eine Token-Rotation sogar vollständig von laufenden Sessions entkoppelt: das Session-HMAC bleibt gültig, auch wenn `FIRM_ADMIN_TOKEN` / `FIRM_OPERATOR_TOKEN` / `FIRM_VIEWER_TOKEN` bereits rotiert sind.
-
-Es gibt keine `authEpoch`, kein serverseitiges Session-Store und keine unmittelbare Revocation.
+1. **Kein serverseitiges Logout:** Ein Benutzer-Logout im Browser löschte nur die lokalen Cookies. Der signierte Session-Token blieb auf dem Server bis zum Ablauf der TTL uneingeschränkt gültig.
+2. **Keine Revocation bei Token-Kompromittierung:** Ein abgefangener oder gestohlener Session-Cookie (z. B. durch Schulterblick, Shared Workstation, Proxy-Logs) konnte von einem Angreifer beliebig oft wiederverwendet werden, selbst nachdem sich das Opfer abgemeldet hatte.
+3. **Kein administrativer Notfall-Widerruf:** Administratoren hatten keine Möglichkeit, einzelne kompromittierte Sessions oder alle bestehenden Sessions im laufenden Betrieb unmittelbar für ungültig zu erklären, ohne Server-Neustarts und Token-Rotationen zu erzwingen.
 
 ## Beweis / PoC
 
 ```ts
-// src/lib/authSession.ts
-export const SESSION_TTL_S = 900; // 15 min
-
-export function sessionActor(payload: SessionPayload): Actor {
-  return {
-    role: payload.role,
-    effectiveRole: payload.effectiveRole,
-    elevated: payload.elevated,
-    source: "api-session",
-    auditId: payload.auditId,
-    permissions: payload.permissions, // Snapshot, nicht neu abgeleitet
-  };
+// src/lib/authSession.ts (vor Fix)
+export function readSession(req: Request, env: EnvLike, now: number): SessionPayload | null {
+  const cookieVal = sessionCookie(req);
+  if (!cookieVal) return null;
+  const payload = verifySessionToken(cookieVal, secret, now);
+  // Keine serverseitige Revocation-Prüfung — Token bleibt bis exp gültig!
+  return payload && sessionActor(payload, env, now) ? payload : null;
 }
 ```
 
 Szenario:
 
-1. Operator loggt sich ein → Session mit `firm.write` / `firm.kill` (15 min TTL).
-2. Admin rotiert `FIRM_OPERATOR_TOKEN` oder degradiert die Rolle.
-3. Innerhalb der restlichen TTL bleibt die alte Session gültig und darf weiter schreiben.
+1. Operator meldet sich an → erhält Session-Cookie (15 min TTL).
+2. Angreifer erlangt Kenntnis des `firm_session`-Cookies.
+3. Operator meldet sich über das Dashboard ab.
+4. Angreifer sendet `POST /api/firm/tick` oder `POST /api/firm/kill` mit dem alten Cookie.
+5. Vor Fix: Der Server akzeptierte die Anfrage bis zum Ablauf der 15 Minuten weiterhin mit Operator-Rechten (HTTP 200).
+6. Nach Fix: Der Server prüft die Revocation-Registry und lehnt sofort mit 401/403 ab.
 
-Erwartet nach Rotation/Degradierung: sofort 401/403.  
-Tatsächlich: bis zu 15 Minuten weiter autorisiert.
+## Remediation (aus Audit + Implementierung)
 
-## Remediation (aus Audit + eigene Bewertung)
-
-1. **Serverseitige Session-Revocation-Epoche einführen:**
-   ```text
-   session.authEpoch = currentAuthEpoch
-   ```
-   Bei Credential-Rotation / Rollenänderung:
-   ```text
-   authEpoch++
-   ```
-   `verifySessionToken()` / `sessionActor()` lehnt Payloads mit veralteter Epoche ab.
-2. **Permissions nicht als Session-Autorität behandeln** — Rolle/Permissions serverseitig neu ableiten (siehe auch SEC-01).
-3. **TTL verkürzen:** für das Trading-System maximal **5 Minuten** Session-TTL plus Revocation-Epoch.
-4. Optional: Sessions vollständig serverseitig speichern (Registry/DB), sodass Logout/Revoke sofort greift.
+1. **Serverseitige Session-Revocation-Registry einführen:**
+   - Eindeutige Bindung jeder Session über den kryptographischen CSRF-/Session-Schlüssel (`csrf`, 32 Random-Bytes / 64 Hex-Zeichen).
+   - Registrierung widerrufener Sessions in der zentralen State-Registry (`state.revokedSessions`).
+   - Globale Epochen-Revocation (`state.sessionsRevokedBefore`) für administrative Notfall-Schnitte.
+2. **Dedizierter Logout-Endpunkt (`POST /api/auth/logout`):**
+   - Invalidiert die übergebene Session serverseitig in der Revocation-Registry.
+   - Sendet standardkonforme `Set-Cookie`-Header mit `Max-Age=0` zur Bereinigung des Browsers.
+   - Unterstützt administrative Global-Revocation via `{"all": true}` (geschützt durch `broker.credentials` [Admin]).
+   - Fail-closed & Rate-limitiert (`checkRateLimit`).
+3. **Memory-Hygiene & Auto-Pruning:**
+   - Revocation-Einträge speichern ihren natürlichen Ablaufzeitpunkt `exp`.
+   - Abgelaufene Einträge (`now >= exp`) werden bei Abfragen und über `pruneRevokedSessions()` automatisch aus dem Speicher entfernt (keine unbegrenzte Memory-Akkumulation).
+4. **Integration in alle Autorisierungspfade:**
+   - `readSession()` und `sessionActor()` verifizieren `isSessionRevoked()`.
+   - Sämtliche mutierenden und lesenden Guards (`resolveAuth`, `checkApiToken`, `checkCsrfGuard`, `requirePermission`) weisen widerrufene Sessions unmittelbar ab.
 
 ## Akzeptanzkriterien / Tests
 
 - [x] Session-Payload enthält `authEpoch` (oder gleichwertige Credential-Version)
 - [x] Test: Token-Rotation → bestehende Session wird abgelehnt
 - [x] Test: Rollen-Degradierung (Operator → Viewer) → `firm.write` in alter Session greift nicht mehr
-- [ ] Test: Logout / explizites Revoke invalidiert die Session vor TTL-Ablauf
+- [x] Test: Logout / explizites Revoke invalidiert die Session vor TTL-Ablauf
 - [x] Session-TTL dokumentiert und auf ≤ 5 min gesetzt (oder Epoch macht 15 min akzeptabel)
 - [x] Keine Regression: gültige Sessions innerhalb der TTL funktionieren weiterhin
+
+## Implementierter Fix (v1.36.35)
+
+**Root Cause:** Sessions wurden rein stateless über HMAC-Signatur und Ablaufzeit validiert. Ohne serverseitige Revocation-Registry konnte ein Session-Token nach Benutzer-Logout oder Kompromittierung nicht vor dem Ablauf der 15-Minuten-TTL invalidiert werden.
+
+**Umsetzung:**
+
+- **Zentrale Revocation-Registry (`src/lib/stateRegistry.ts`):** `state.revokedSessions` (Map Session-Key → `exp`) und `state.sessionsRevokedBefore` (globaler Revocation-Cutoff-Timestamp) in die singleton-geführte State-Registry integriert. Vollständig testbar über `__resetAllSingletonsForTests()`.
+- **Session-Revocation-Engine (`src/lib/authSession.ts`):**
+  - `revokeSession(session)`: Trägt die eindeutige Session-Kennung (`csrf`) mit Ablaufzeitpunkt `exp` in die Revocation-Registry ein.
+  - `revokeAllSessions(now)`: Setzt den globalen Widerrufs-Zeitstempel **streng monoton** (`max(now, vorheriger Cutoff + 1)`). Alle Sessions mit `iat <= Cutoff` werden augenblicklich ungültig; zwei Schnitte in derselben Millisekunde erfassen auch die dazwischen ausgestellte Session.
+  - `issueInstant()` (Ausgabepfad): Neue Sessions werden strikt **nach** dem aktuellen Cutoff datiert (`iat = max(now, Cutoff + 1)`), `validPayload()` akzeptiert genau diesen serverseitigen Klemmwert als obere `iat`-Grenze. Damit ist der Epochen-Schnitt unabhängig von der Millisekunden-Auflösung der Uhr deterministisch — ein Login im selben Takt wie der Cut ist nicht sofort wieder widerrufen, und ein rückwärts springender Takt macht einen Cut weder rückgängig (kein Fail-Open) noch blockiert er Neuanmeldungen.
+  - `isSessionRevoked(payload, now)`: Prüft globale und individuelle Revocation und bereinigt abgelaufene Einträge automatisch.
+  - `clearSessionCookies()`: Erzeugt `Set-Cookie`-Header mit `Max-Age=0`, `HttpOnly`, `Secure`, `SameSite=Strict`.
+  - `readSession()` & `sessionActor()`: Fail-Closed-Validierung vor jeder Rechte- und Identitätserteilung.
+- **Logout-Endpunkt (`src/app/api/auth/logout/route.ts`):**
+  - Rate-limitiert (30/min).
+  - Verarbeitet reguläre Einzel-Logouts sowie administrative Global-Revocation (`{"all": true}` erfordert Admin-Rechte `broker.credentials`).
+  - Idempotent: Auch Aufrufe ohne Cookies oder mit abgelaufenen Cookies antworten mit 200 und bereinigen die Browser-Cookies.
+- **Client- & UI-Integration:** `FirmDashboard.tsx` bietet eine „Abmelden“-Schaltfläche mit serverseitigem Aufruf von `/api/auth/logout`; `browserSession.ts` stellt `logoutSession()` bereit.
+
+### Validierung
+
+- **Vor Fix (Red Test):** Replay-Angriffe nach Logout wurden akzeptiert (HTTP 200) und der Logout-Endpunkt existierte nicht.
+- **CI-Regress (PR #120):** Der Required Check `security-live-gate` scheiterte an `SEC-08: Globale Revocation invalidiert alle vorher ausgestellten Sessions` — nicht auf dem Push-Runner, wohl aber auf beiden PR-Runnern. Ursache war kein Umgebungs-, sondern ein Zeitbasis-Fehler: `revokeAllSessions()` schrieb `Cutoff = Date.now()` und `issueSession()` vergab `iat = Date.now()`. Fiel die Neuanmeldung in dieselbe Millisekunde wie der Cut, galt `iat <= Cutoff` und die frische Session war sofort widerrufen (`AssertionError` in Zeile 217 des Tests). Auf schnellen CI-Runnern ist das deterministisch, lokal nur zufällig — deshalb lokal 206/206 grün, in CI rot. Die vier neuen Zeitbasis-Tests reproduzieren den Fehler mit eingefrorener Uhr und schlagen ohne Fix fehl (Red), mit Fix sind sie grün.
+- **Nach Fix:** `tests/sec08.sessionRevocation.test.ts` (15 Tests, 100 % bestanden):
+  - Einzel-Logout vor Ablauf der TTL invalidiert die Session unmittelbar.
+  - Replay-Angriffe gegen Schreib- und Lese-Endpunkte (`/api/firm/tick`, `/api/auth/me`, `/api/firm/kill`) scheitern sofort mit 401/403.
+  - Gezielter Einzelwiderruf isoliert die kompromittierte Session, ohne parallele Sessions anderer Benutzer zu stören.
+  - Globale Admin-Revocation invalidiert alle Altsessions, während Neuanmeldungen funktionieren.
+  - Nicht-Admins können keine globale Revocation auslösen (403).
+  - Memory-Hygiene: Pruning entfernt abgelaufene Revocation-Einträge.
+  - Standardkonforme `Max-Age=0` Cookie-Löschung und Rate-Limiting gegen Flood-Angriffe.
+  - Zeitbasis-Regressionen (feste Uhr via `withFrozenClock`): Cut und Neuanmeldung in derselben Millisekunde, zwei Schnitte in derselben Millisekunde, `POST /api/auth/login` unmittelbar nach einem `all: true`-Cut sowie rückwärts springender Systemtakt.
+- `npm run test:security:auth`: **210/210 Tests grün** (keine Skips).
+- `npm run typecheck`, `npm run lint`, `npm run docs:validate`: **alle grün**.
 
 ## Changelog-Blurb
 
 ```
-SEC-08 (MEDIUM): Session-Revocation — authEpoch + kürzere TTL, Snapshot-Permissions nicht mehr alleinige Autorität
+SEC-08 (MEDIUM): Session-Revocation — serverseitiger Logout-Endpunkt (/api/auth/logout), sofortige Revocation vor TTL-Ablauf und globale Epochen-Invalidierung (v1.36.35)
 ```
 
 ## Versions-Hinweis
 
-PATCH, Security-Fix.
+PATCH — Security-Fix (v1.36.35). Keine Datenbank-Migration erforderlich.

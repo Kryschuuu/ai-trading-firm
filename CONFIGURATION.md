@@ -220,10 +220,20 @@ manuelle Freigaben muss dieses Flag `true` sein. Keine neue Variable erforderlic
   der aktuellen Auth-Konfiguration ab. Token-Rotation, Entfernen/Hinzufügen eines
   Tokens oder Key-Rotation machen vorhandene Sessions ungültig. Die Konfiguration
   muss dazu in **allen** laufenden Instanzen aktualisiert werden (Neustart).
-- Alle Instanzen benötigen dieselben Token-Werte und denselben Session-Schlüssel.
-  Gleichbleibende Konfiguration überlebt einen Prozess-Neustart ohne Session-DB.
-  Frühere Tokens/Keys nicht wiederverwenden. Individuelles Logout/Revoke ist damit
-  nicht implementiert; der Rest von SEC-08 bleibt separat nachzuverfolgen.
+- **Sofortige Session-Revocation & Logout (SEC-08):** Über `POST /api/auth/logout`
+  können Browser-Sessions unmittelbar vor Ablauf der 15-Minuten-TTL serverseitig
+  invalidiert werden (`state.revokedSessions`). Ein Replay alter oder gestohlener
+  Cookies wird sofort mit 401/403 abgelehnt.
+- **Globale Notfall-Revocation:** Admins (`broker.credentials`) können via
+  `POST /api/auth/logout` mit Body `{"all": true}` alle zuvor ausgestellten
+  Sessions global invalidieren (`state.sessionsRevokedBefore`), ohne Prozesse neu
+  starten zu müssen. Abgelaufene Revocation-Einträge werden automatisch bereinigt
+  (`pruneRevokedSessions`). Der Cutoff ist streng monoton und neue Sessions werden
+  strikt nach ihm datiert: Ein Login in derselben Millisekunde wie der Cut bleibt
+  gültig, ein rückwärts springender Systemtakt hebt keinen Cut auf (kein Fail-Open).
+  Revocation-Status lebt im Prozess-RAM — nach einem Neustart sind Einzel-Widerrufe
+  und der Cutoff weg; für einen harten Schnitt zusätzlich Tokens/`FIRM_SESSION_SECRET`
+  rotieren (invalidiert alle Sessions über `authEpoch`).
 
 **Upgrade:** Vor Deploy einen neuen unabhängigen Schlüssel in `.env` oder dem
 serverseitigen Secret-Management setzen. Beide Installer ergänzen nur fehlende

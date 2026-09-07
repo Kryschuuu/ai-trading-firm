@@ -56,3 +56,21 @@ export function clearLegacyFirmToken(): void {
     // localStorage gesperrt — ignorieren (Themen- und Bootstrap-Code ebenso).
   }
 }
+
+/**
+ * Ruft POST /api/auth/logout auf, um die Session serverseitig zu widerrufen
+ * und Cookies im Browser zu entfernen (SEC-08).
+ */
+export async function logoutSession(): Promise<boolean> {
+  if (typeof window === "undefined" || typeof fetch === "undefined") return false;
+  try {
+    const res = await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    clearLegacyFirmToken();
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
