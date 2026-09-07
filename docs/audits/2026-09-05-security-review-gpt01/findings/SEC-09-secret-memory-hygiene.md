@@ -6,7 +6,7 @@
 - **Quelle:** Security Review-GPT_01.md, Kapitel SEC-09 — Memory-Hygiene schützt JS-Strings nicht wirklich
 - **Status:** FIXED
 - **Fix-Version:** v1.36.36 (2026-09-07)
-- **Fix-Branch:** `arena/01a07b95-ai-trading-firm` (PR folgt)
+- **Fix-PR:** [PR #122](https://github.com/Kryschuuu/ai-trading-firm/pull/122) (Branch `arena/01a07b95-ai-trading-firm`, Commit `fe205f9`)
 - **Datei(en):** `src/brokers/control-plane/secretStore.ts`, `docs/FRONTEND_CONTROL_PLANE.md`
 - **Peer-Review-Patch:** TBD — verlinken sobald Patch in `docs/peer-reviews/` existiert
 
