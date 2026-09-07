@@ -9,8 +9,12 @@
  *     schlägt bei der Entschlüsselung fehl (Auth-Tag).
  *   - Ent-/Verschlüsselung ausschließlich im Backend. Das Secret fließt
  *     einmalig Form → Store, danach existiert nur noch die Referenz.
- *   - Memory-Hygiene: Secret-Buffer werden nach Nutzung genullt (zeroize),
- *     es entstehen keine langlebigen Strings.
+ *   - Memory-Hygiene (SEC-09): Krypto-/Key-Buffer werden nach Nutzung
+ *     genullt (zeroize). Entschluesselte Credentials existieren danach
+ *     NOTWENDIG transient als unveraenderliche JS-Strings im Heap — diese
+ *     koennen NICHT deterministisch genullt werden. Deshalb: Werte nie
+ *     cachen/loggen, nur fuer die Probe halten und sofort danach verwerfen
+ *     (disposeCredential); kein Inspector/Heap-Dump in Produktion.
  *
  * KMS-Hook: `KmsClient.resolveKey(context)` liefert das 32-Byte-Key-Material.
  * Default ist der Env-Client (`SECRET_STORE_KEY`, hex oder base64). Ein
@@ -76,12 +80,15 @@ export function zeroize(buf: Buffer): void {
 /**
  * Krypto-Primitive (AES-256-GCM).
  *
- * Eingabe/Ausgabe sind Buffer, damit der Klartext nie als langlebiger String
- * existiert und deterministisch genullt werden kann. JS-Strings sind
- * unveraenderlich und koennen nicht genullt werden — deshalb laeuft der
- * komplette Krypto-Pfad ueber Buffer (put: JSON → Buffer → seal; get:
- * open → Buffer → parse → Ergebnis-Objekt wird von zeroizeCredential()-Kopien
- * getragen, die der Aufrufer nach der Probe entsorgt).
+ * Eingabe/Ausgabe sind Buffer, damit Key-Material und Ciphertext-Artefakte
+ * (IV/Tag/CT) deterministisch genullt werden koennen. SEC-09-Grenze: Der
+ * Klartext MUSS am Pfadende in JS-Strings ueberfuehrt werden
+ * (parseCredentialPlaintext: toString -> JSON.parse -> CredentialPayload),
+ * weil Adapter/Probe String-APIs erwarten. Diese Strings sind
+ * unveraenderlich und koennen NICHT genullt werden - sie existieren
+ * transient im Heap. Der Aufrufer haelt das Ergebnis daher nur kurzlebig:
+ * sofort nutzen, danach Referenzen verwerfen (disposeCredential), nie
+ * cachen/loggen.
  */
 
 const ALGORITHM = "aes-256-gcm";
@@ -233,7 +240,16 @@ export function openEnvelope(key: Buffer, envelopeText: string, venue: string): 
   }
 }
 
-/** Credential-Payload aus einem Klartext-Buffer parsen (strikt validiert). */
+/**
+ * Credential-Payload aus einem Klartext-Buffer parsen (strikt validiert).
+ *
+ * SEC-09: `toString("utf8")` + `JSON.parse` erzeugen unveraenderliche
+ * JS-Strings - der Klartext existiert ab hier transient im Heap und kann
+ * nicht deterministisch geloescht werden. Aufrufer halten das Ergebnis nur
+ * kurzlebig (read-only Probe) und verwerfen es danach via
+ * `disposeCredential()` (Referenzen fallen lassen, nie cachen/loggen). Der
+ * Plaintext-BUFFER wird vom Aufrufer via `zeroize()` genullt (siehe `get()`).
+ */
 export function parseCredentialPlaintext(plaintext: Buffer): CredentialPayload {
   try {
     const parsed = JSON.parse(plaintext.toString("utf8")) as Record<string, unknown>;
@@ -534,7 +550,12 @@ export class AesGcmSecretStore implements VenueSecretStore {
     return this.kms.resolveKey("broker-control-plane");
   }
 
-  /** Verschluesselt und speichert das Credential fuer eine Venue (upsert). */
+  /**
+   * Verschluesselt und speichert das Credential fuer eine Venue (upsert).
+   * Genullt werden hier nur Key-/Plaintext-Buffer; der Eingabe-Payload
+   * (JS-Strings aus dem Request-Body) bleibt Sache des Aufrufers
+   * (disposeCredential nach der Probe, SEC-09).
+   */
   async put(venue: string, credential: CredentialPayload): Promise<void> {
     assertValidVenueId(venue);
     assertValidCredential(credential);
@@ -559,7 +580,12 @@ export class AesGcmSecretStore implements VenueSecretStore {
     }
   }
 
-  /** Entschluesselt das Credential einer Venue (frische Kopie) oder `null`. */
+  /**
+   * Entschluesselt das Credential einer Venue (frische Kopie) oder `null`.
+   * Frische Kopie je Aufruf, transient - der Aufrufer muss sie sofort nach
+   * der Probe verwerfen (disposeCredential); JS-Strings koennen nicht
+   * genullt werden (SEC-09).
+   */
   async get(venue: string): Promise<CredentialPayload | null> {
     assertValidVenueId(venue);
     let envelope: string | null;

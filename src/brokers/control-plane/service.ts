@@ -372,7 +372,8 @@ export class ControlPlaneService {
     await store.put(venue, credential);
 
     // 2) Read-only Probe mit dem (noch im Speicher gehaltenen) Credential →
-    //    permissions[] ableiten. Danach wird der Wert verworfen (zeroize);
+    //    permissions[] ableiten. Danach werden die Referenzen verworfen
+    //    (disposeCredential; JS-Strings koennen nicht genullt werden, SEC-09);
     //    ein Fehler fuehrt zu Zustand error mit SAFE-Meldung.
     const probe = await this.runProbe(venue, credential);
     disposeCredential(credential);

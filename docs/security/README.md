@@ -22,7 +22,7 @@
 | [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security-Audit 2026-08-25 (v1.4.0) — Findings, Fixes, Peer-Review |
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
-| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; übrige Findings OPEN |
+| [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 
 ## Critical/High Findings (aggregierter Status)
 
@@ -49,6 +49,10 @@ Alle Linux-/Windows-Instanzen aus dem neuen Lockfile installieren und frisch aus
 
 **SEC-07 ist seit v1.36.32 FIXED:** [Env-Credential-Fallback nur explizit Dev/Test](../audits/2026-09-05-security-review-gpt01/findings/SEC-07-env-credential-fallback.md) — in Produktion kein stiller Fallback auf `BITUNIX_API_KEY`/`ALPACA_API_KEY` mehr; fehlender Datensatz = null, Store-Fehler = HARD FAIL. Env nur mit `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`.
 Alle Instanzen mit `npm ci` neu installieren und sämtliche Prozesse neu starten.
+
+**SEC-08 ist seit v1.36.35 FIXED:** [sofortige Session-Revocation & Logout](../audits/2026-09-05-security-review-gpt01/findings/SEC-08-session-revocation.md) — serverseitige Revocation-Registry, `POST /api/auth/logout` und globale Epochen-Invalidierung (Details unten, Abschnitt Session-Cookie & Revocation).
+
+**SEC-09 ist seit v1.36.36 FIXED:** [Secret-Memory-Hygiene](../audits/2026-09-05-security-review-gpt01/findings/SEC-09-secret-memory-hygiene.md) — ehrliche JS-String-Grenze (`zeroize()` deckt Krypto-/Key-Buffer ab, keine Strings), Referenz-Verwurf nach der Probe und betriebliche Dump-Härtung (Details unten, Abschnitt Secret-Memory-Hygiene).
 
 Alle Findings aus 2026-09-03 sind FIXED (siehe [dort](../audits/2026-09-03-peer-review/remediation/SUMMARY.md)).
 
@@ -316,6 +320,55 @@ dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
   Abgelaufene Einträge werden automatisch bereinigt (`pruneRevokedSessions`).
 - Tests: `npm run test:security:auth`; automatisch Teil von `security:live-gate`.
 - [Konfiguration und Upgrade](../../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
+
+## Secret-Memory-Hygiene (SEC-09)
+
+**v1.36.36; betroffen bis einschließlich v1.36.35.** Der Secret-Store der
+Broker Control Plane (`src/brokers/control-plane/secretStore.ts`) behauptete,
+es entstünden „keine langlebigen Strings“. Das war falsch: Der Parse-Pfad
+(`Buffer.toString` → `JSON.parse` → `CredentialPayload`) erzeugt
+unveränderliche JS-Strings im Heap, die nicht deterministisch gelöscht werden
+können. `zeroize()` deckt ausschließlich Krypto-/Key-Buffer (IV, Tag,
+Ciphertext, Key, Plaintext-Buffer) ab — niemals Strings. Es gibt keinen
+Remote-Angriffspfad; relevant sind Heap-Dumps, Crash-/Core-Dumps, Debugging,
+Process Compromise und forensischer Speicherzugriff.
+
+### Was seit v1.36.36 gilt
+
+- **Ehrliche Grenze im Code:** Alle Kommentare und die Control-Plane-Doku
+  ([Memory-Hygiene](../FRONTEND_CONTROL_PLANE.md)) sagen klar, dass
+  entschlüsselte Credentials transient als JS-Strings existieren.
+- **Referenz-Verwurf statt Placebo:** `disposeCredential()` überschreibt die
+  Credential-Felder mit `""`, damit der GC die Originale früh einsammelt —
+  und erzeugt bewusst keine zusätzlichen Secret-Kopien mehr.
+- **Kurzlebigkeit:** `get()` liefert je Aufruf eine frische Kopie, die nur
+  für die read-only Probe gehalten wird. Credentials werden nie gecacht,
+  geloggt, persistiert oder an das Frontend gegeben.
+
+### Betriebliche Pflichtmaßnahmen (Produktion)
+
+- **Kein Inspector:** Node nie mit `--inspect`/`--inspect-brk`/`--inspect-port`
+  starten; Port 9229 weder öffnen noch publishen. Debug-Zugang nur auf
+  isolierten Dev-Hosts ohne echte Credentials.
+- **Keine Heap-Snapshots:** `--heap-prof`/`--cpu-prof` aus lassen, keine
+  `v8.getHeapSnapshot`-Pfade und keine Diagnose-Endpoints in Produktion.
+- **Core-Dumps deaktivieren:** `ulimit -c 0` für den App-Prozess (systemd:
+  `LimitCORE=0`); kein Core-Sammeln (apport/systemd-coredump) auf App-Hosts.
+  Swap/Hibernation-Files auf Secret-Hosts vermeiden oder verschlüsseln.
+- **Least Privilege:** Kein `CAP_SYS_PTRACE`, kein lesender Zugriff auf
+  `/proc/<pid>/mem` außer für root; Dumps/Artefakte aus Staging mit echten
+  Secrets wie Credentials behandeln.
+- **Bei Dump-Verdacht:** Betroffene Venue-Credentials rotieren (neu speichern
+  oder löschen + neu anlegen), Prozesse neu starten, Dump-Artefakt sicher
+  löschen.
+
+### Ausrollen und Prüfen
+
+Geprüften Release **v1.36.36 oder neuer** ausrollen und alle Prozesse neu
+starten. Keine Datenmigration, keine neue Umgebungsvariable. Regressionen in
+`tests/sec09.secretMemoryHygiene.test.ts` (8 Fälle: Referenz-Verwurf,
+Buffer-Hygiene, kein Credential-Caching, Docs-as-Code-Scan der
+Nullungs-Versprechen, Betriebs-Hinweise) laufen im vollen `npm test`.
 
 ## Verwandte Dokumente
 

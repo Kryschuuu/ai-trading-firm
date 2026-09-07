@@ -1,12 +1,44 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-07** · Code-Version **1.36.35**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-07** · Code-Version **1.36.36**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.36] — 2026-09-07 · Security: SEC-09 — Secret-Memory-Hygiene
+
+### Security
+
+- **SEC-09 (LOW) behoben; betroffen bis einschließlich v1.36.35:** Die
+  Memory-Hygiene-Dokumentation des Secret-Stores behauptete, es entstünden
+  „keine langlebigen Strings“. Tatsächlich liegen entschlüsselte Credentials
+  transient als unveränderliche JS-Strings im Heap und können nicht
+  deterministisch gelöscht werden. Code-Kommentare und Control-Plane-Doku
+  beschreiben diese Grenze nun ehrlich; `zeroize()` bleibt auf allen
+  Krypto-/Key-Buffern erhalten. Kein Remote-Angriffspfad; relevant sind
+  Heap-Dumps, Crash-Dumps, Debugging und forensischer Speicherzugriff.
+- **Referenz-Verwurf nach der Probe:** `disposeCredential()` löst die
+  Credential-Referenzen, damit der Garbage Collector die Werte früh
+  einsammelt, und erzeugt keine zusätzlichen Secret-Kopien mehr. Credentials
+  bleiben kurzlebig (nur für die read-only Probe) und werden nie gecacht
+  oder geloggt.
+- **Betriebliche Härtung:** Neue Security-Anleitung untersagt Node-Inspector,
+  Heap-Snapshots und Core-Dumps in Produktion und beschreibt das Vorgehen bei
+  Dump-Verdacht (Rotation, Neustart).
+  ([Anleitung](docs/security/README.md#secret-memory-hygiene-sec-09))
+- **Verbindliche Regressionen:** 8 neue SEC-09-Tests in
+  `tests/sec09.secretMemoryHygiene.test.ts` sichern Referenz-Verwurf,
+  Buffer-Hygiene, fehlendes Credential-Caching, ehrliche Doku
+  (Docs-as-Code-Scan) und Betriebs-Hinweise ab. Secret-Store- und
+  Control-Plane-Tests bleiben grün.
+
+### Upgrade
+
+- **Alle Instanzen auf v1.36.36 aktualisieren, neu bauen und neu starten.**
+  Keine Datenmigration oder neue Umgebungsvariable erforderlich.
 
 ## [1.36.35] — 2026-09-07 · Security: SEC-08 — Session-Revocation & Logout
 

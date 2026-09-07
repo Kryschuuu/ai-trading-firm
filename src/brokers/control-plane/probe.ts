@@ -4,8 +4,9 @@
  * Nach dem Speichern (und bei jedem Verbindungstest) fuehrt die Control
  * Plane EINEN read-only API-Check aus und leitet daraus `permissions[]`
  * (z. B. READ, TRADE) ab. Der Check NIE verfuegbar: Secret wird nur im
- * Speicher genutzt und danach verworfen (zeroize), Fehler sind SAFE
- * (kein Echo von Secret-Inhalten, keine Infrastruktur-Details).
+ * Speicher genutzt und danach verworfen (Referenzen fallen lassen; JS-
+ * Strings koennen nicht deterministisch genullt werden, SEC-09), Fehler
+ * sind SAFE (kein Echo von Secret-Inhalten, keine Infrastruktur-Details).
  *
  * Implementierungsstand (ehrliche Ist-Lage, Unabhaengigkeitsklausel):
  *   - PAPER: ECHTE Probe gegen den Paper-Ledger (getAccount, in-process).
@@ -23,7 +24,6 @@ import { VENUE_CAPABILITIES } from "../capabilities";
 import { createAdapter } from "../factory";
 import type { BrokerVenueId } from "@/contracts/broker";
 import type { CredentialPayload } from "./secretStore";
-import { zeroize } from "./secretStore";
 import type { ProbeOutcome } from "./states";
 
 export const PERMISSION_READ = "READ";
@@ -142,20 +142,26 @@ export async function probePermissions(
 }
 
 /**
- * Nuellt die String-Felder eines Credential-Objekts, soweit das in JS
- * moeglich ist: Die Werte werden ueber einen Buffer-Pfad gefuehrt und der
- * Buffer genullt. JS-Strings selbst sind unveraenderlich — der Hinweis
- * dokumentiert die Grenze ehrlich (siehe FRONTEND_CONTROL_PLANE.md,
- * Kapitel Memory-Hygiene).
+ * Verwirft ein Credential-Objekt nach der Nutzung (SEC-09).
+ *
+ * Ehrliche Grenze: JS-Strings sind unveraenderlich - bereits erzeugte
+ * String-Kopien im Heap koennen NICHT ueberschrieben oder deterministisch
+ * geloescht werden. Diese Funktion loest daher nur die Referenzen (Felder
+ * werden mit "" ueberschrieben), damit der Garbage Collector die Originale
+ * moeglichst frueh einsammeln kann. Sie erzeugt bewusst KEINE zusaetzlichen
+ * Buffer-Kopien des Secrets - das wuerde die Angriffsflaeche (Heap-Dump,
+ * Core-Dump, forensischer Speicherzugriff) nur vergroessern. Der Aufrufer
+ * darf das Objekt danach nicht weitergeben, cachen oder loggen;
+ * Betriebsschutz (kein Inspector, keine Heap-/Core-Dumps in Produktion)
+ * siehe docs/security/README.md (Secret-Memory-Hygiene, SEC-09).
  */
 export function disposeCredential(credential: CredentialPayload | null): void {
   if (!credential) return;
   for (const field of ["apiKey", "apiSecret"] as const) {
     try {
-      const buf = Buffer.from(credential[field], "utf8");
-      zeroize(buf);
+      credential[field] = "";
     } catch {
-      /* never throw on cleanup */
+      /* never throw on cleanup (z. B. gefrorenes Objekt) */
     }
   }
 }

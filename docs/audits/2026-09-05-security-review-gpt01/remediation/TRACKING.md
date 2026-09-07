@@ -12,7 +12,7 @@ Diese Datei ist die einzige Wahrheit für den Status aller Findings dieses Audit
 | SEC-06 | Rule-Lifecycle nur durch `firm.write` geschützt | MEDIUM | FIXED | v1.36.34 | [57fec8f](https://github.com/Kryschuuu/ai-trading-firm/commit/57fec8f08c7de8ac556fe842db04ff2cce978842) | - | strategy.rules.write/activate/rollback/archive vor Persistenz; manueller Makro-Einstieg ebenfalls administrativ; Header/Bearer/Session getestet |
 | SEC-07 | Secret-Store fällt auf Env-Credentials zurück | HIGH | FIXED | v1.36.32 | arena/01a07843-ai-trading-firm (PR folgt) | - | Env-Fallback nur noch explizit Dev/Test hinter BROKER_ALLOW_ENV_FALLBACK=true, Prod fail-closed: missing→null, failure→HARD FAIL |
 | SEC-08 | Sessions sind nicht sofort widerrufbar | MEDIUM | FIXED | v1.36.35 | arena/01a07b1d-ai-trading-firm (ersetzt PR #120) | - | Serverseitige Revocation-Registry (`state.revokedSessions`), `/api/auth/logout`, sofortige Ungültigkeit vor TTL-Ablauf, globale Epochen-Invalidierung mit streng monotonem Cutoff |
-| SEC-09 | Memory-Hygiene schützt JS-Strings nicht wirklich | LOW | OPEN | - | - | - | `plaintext.toString` → immutable JS-Strings |
+| SEC-09 | Memory-Hygiene schützt JS-Strings nicht wirklich | LOW | FIXED | v1.36.36 | [PR #122](https://github.com/Kryschuuu/ai-trading-firm/pull/122) | - | Ehrliche JS-String-Grenze in Code+Doku, `zeroize` auf Krypto-Buffern erhalten, `disposeCredential` verwirft Referenzen, Betriebs-Hinweise (kein Inspector, keine Heap-/Core-Dumps) |
 | SEC-10 | GitHub Actions nicht auf immutable SHAs gepinnt | LOW | FIXED | v1.36.29 | - | - | SHA-Pinning |
 
 ## Legende
@@ -46,10 +46,12 @@ Diese Datei ist die einzige Wahrheit für den Status aller Findings dieses Audit
 
 - 2026-09-07: SEC-08 in v1.36.35 behoben; serverseitige Session-Revocation-Registry (`state.revokedSessions`), dedizierter Logout-Endpunkt (`POST /api/auth/logout`), sofortige serverseitige Invalidierung vor Ablauf der 15-Minuten-TTL, administrative globale Revocation (`all: true`) und Memory-Hygiene mit automatischem Pruning. 15 neue Regressionstests in `tests/sec08.sessionRevocation.test.ts`.
 
+- 2026-09-07: SEC-09 in v1.36.36 behoben; ehrliche JS-String-Grenze in Code-Kommentaren und Control-Plane-Doku, `zeroize()` auf allen Krypto-/Key-Buffern erhalten, `disposeCredential()` verwirft Referenzen ohne neue Secret-Kopien, betriebliche Dump-Haertung in den Security-Docs. 8 neue Regressionstests in `tests/sec09.secretMemoryHygiene.test.ts` (4 davon vor dem Fix rot).
+
 - 2026-09-07 (Nachzug): CI-Regress aus PR #120 behoben. Der Required Check `security-live-gate` scheiterte im PR-Event (Push-Event grün) an `SEC-08: Globale Revocation invalidiert alle vorher ausgestellten Sessions`: `revokeAllSessions()` und `issueSession()` nutzten beide `Date.now()`, fielen Cut und Neuanmeldung in dieselbe Millisekunde war die frische Session wegen `iat <= Cutoff` sofort widerrufen. Fix: streng monotoner Cutoff (`max(now, vorheriger Cutoff + 1)`) plus strikt nach dem Cut datierte `iat` (`issueInstant`), von `validPayload` als obere Grenze akzeptiert. Vier neue Zeitbasis-Tests mit eingefrorener Uhr (`withFrozenClock`) sind ohne Fix rot, mit Fix grün; `npm run test:security:auth` jetzt 210/210.
 
 ## Nächste Schritte
 
-1. SEC-01–SEC-08/SEC-10 erledigt — v1.36.35 mit `npm ci` installieren, neu bauen und alle Prozesse neu starten
+1. SEC-01–SEC-10 erledigt — v1.36.36 mit `npm ci` installieren, neu bauen und alle Prozesse neu starten
 2. Multi-Role: verschiedene Admin-/Operator-Credentials sicher konfigurieren; internes Human-Approval unabhängig von RBAC prüfen
-3. SEC-09 Hardening (Memory-Hygiene-Dokumentation)
+3. Audit GPT_01 abgeschlossen — keine offenen Findings mehr
