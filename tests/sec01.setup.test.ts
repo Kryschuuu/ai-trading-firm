@@ -151,7 +151,13 @@ test("SEC-01 Windows-Setup: separater RNG-Aufruf und fehlenden Key auch bei Keep
   const source = readFileSync(resolve(ROOT, "scripts/setup-windows.ps1"), "utf8");
   assert.match(source, /\$token = New-Token/);
   assert.match(source, /\$sessionSecret = New-Token/);
-  assert.match(source, /Add-Content -LiteralPath \$envFile -Value "`nFIRM_SESSION_SECRET=\$sessionSecret"/);
+  // WIN-01 (v1.36.38): BOM-freies Anhaengen per .NET-UTF8-ohne-BOM statt
+  // `Add-Content -Encoding UTF8` (PowerShell 5.1 haengt sonst ein BOM an,
+  // das aeltere dotenv-Versionen als Teil des ersten Schluessels lesen).
+  assert.match(source, /AppendAllText\(\$envFile, "`r`nFIRM_SESSION_SECRET=\$sessionSecret`r`n"/);
+  assert.match(source, /WriteAllLines\(\$envFile, \[string\[\]\]\$envLines, \(New-Object System\.Text\.UTF8Encoding\(\$false\)\)\)/);
+  const codeOnly = source.split("\n").map((line) => line.replace(/#.*$/, "")).join("\n");
+  assert.ok(!codeOnly.includes("-Encoding UTF8"), "kein BOM-produzierendes Encoding mehr im Windows-Setup");
   const keyCheck = source.indexOf("if ($envText -notmatch");
   assert.ok(keyCheck > source.indexOf("$KeepExistingEnv)"));
   assert.ok(keyCheck < source.indexOf('$sessionSecret = New-Token'));
