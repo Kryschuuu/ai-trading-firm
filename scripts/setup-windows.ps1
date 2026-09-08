@@ -67,6 +67,15 @@ function Run([string]$File, [string[]]$Arguments, [string]$Fix) {
   & $File @Arguments 2>&1 | Tee-Object -FilePath $LogFile -Append
   if ($LASTEXITCODE -ne 0) { throw "Befehl fehlgeschlagen (Exit $LASTEXITCODE). Fix: $Fix`nLog: $LogFile" }
 }
+function Run-Stdin([string]$File, [string[]]$Arguments, [string]$Stdin, [string]$Fix) {
+  # WIN-02 (v1.36.38): SQL mit Secrets (DB-Passwort) laeuft ueber STDIN statt
+  # `-c` — ein `-c`-Argument ist waehrend der Laufzeit fuer jeden lokalen
+  # Benutzer in der Prozessliste (Task-Manager, tasklist) lesbar. psql echot
+  # STDIN ohne -e weder auf stdout noch ins Log.
+  Write-Log ("Ausfuehren: {0} {1} (Eingabe via STDIN, redigiert)" -f $File, ($Arguments -join " "))
+  $Stdin | & $File @Arguments 2>&1 | Tee-Object -FilePath $LogFile -Append
+  if ($LASTEXITCODE -ne 0) { throw "Befehl fehlgeschlagen (Exit $LASTEXITCODE). Fix: $Fix`nLog: $LogFile" }
+}
 function Winget-Install([string]$Id, [string]$Name) {
   if (Get-Command $Name -ErrorAction SilentlyContinue) { Write-Log "$Name ist bereits installiert." "OK"; return }
   Need "winget" "Windows App Installer aus dem Microsoft Store installieren oder die Pakete manuell installieren."
@@ -123,7 +132,7 @@ try {
   $env:PGPASSWORD = $PostgresSuperPassword
   $safeUser = Escape-Sql $DbUser; $safeDb = Escape-Sql $DbName; $safePass = Escape-Sql $DbPassword
   $roleSql = "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$safeUser') THEN CREATE ROLE $DbUser LOGIN PASSWORD '$safePass'; ELSE ALTER ROLE $DbUser WITH LOGIN PASSWORD '$safePass'; END IF; END `$`$;"
-  Run "psql" @("-h","127.0.0.1","-p",$DbPort,"-U","postgres","-d","postgres","-v","ON_ERROR_STOP=1","-c",$roleSql) "PostgreSQL-Passwort, Dienst und Port pruefen: psql -h 127.0.0.1 -U postgres -d postgres."
+  Run-Stdin "psql" @("-h","127.0.0.1","-p",$DbPort,"-U","postgres","-d","postgres","-v","ON_ERROR_STOP=1") $roleSql "PostgreSQL-Passwort, Dienst und Port pruefen: psql -h 127.0.0.1 -U postgres -d postgres."
   $dbExists = (& psql -h 127.0.0.1 -p $DbPort -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$safeDb'" 2>>$LogFile).Trim()
   if ($dbExists -ne "1") { Run "psql" @("-h","127.0.0.1","-p",$DbPort,"-U","postgres","-d","postgres","-v","ON_ERROR_STOP=1","-c","CREATE DATABASE $DbName OWNER $DbUser;") "Datenbankname/Benutzer pruefen oder CREATE DATABASE manuell ausfuehren." }
   Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
@@ -136,8 +145,13 @@ try {
     if (Test-Path $envFile) { Copy-Item $envFile "$envFile.bak-$(Get-Date -Format yyyyMMdd-HHmmss)" }
     $encodedUser = [Uri]::EscapeDataString($DbUser); $encodedPass = [Uri]::EscapeDataString($DbPassword); $encodedDb = [Uri]::EscapeDataString($DbName)
     $token = New-Token
-    @("DATABASE_URL=postgresql://$encodedUser`:$encodedPass@127.0.0.1`:$DbPort/$encodedDb", "LLM_PROVIDER=ollama", "OLLAMA_BASE_URL=http://127.0.0.1:11434", "OLLAMA_NUM_CTX=4096", "LLM_MAX_TOKENS=512", "LLM_TIMEOUT_MS=180000", "LLM_MAX_ATTEMPTS=2", "LLM_MODEL=$LlmModel", "STARTING_EQUITY=10000", "PAPER_MODE=broker-market-data", "PAPER_MODE_C_ENABLED=false", "REQUIRE_HUMAN_APPROVAL=true", "FIRM_API_TOKEN=$token", "LIVE_TRADING_ENABLED=false", "BITUNIX_ENABLED=false") | Set-Content -LiteralPath $envFile -Encoding UTF8
-    Write-Log ".env erstellt (Secrets nicht ausgegeben)." "OK"
+    $envLines = @("DATABASE_URL=postgresql://$encodedUser`:$encodedPass@127.0.0.1`:$DbPort/$encodedDb", "LLM_PROVIDER=ollama", "OLLAMA_BASE_URL=http://127.0.0.1:11434", "OLLAMA_NUM_CTX=4096", "LLM_MAX_TOKENS=512", "LLM_TIMEOUT_MS=180000", "LLM_MAX_ATTEMPTS=2", "LLM_MODEL=$LlmModel", "STARTING_EQUITY=10000", "PAPER_MODE=broker-market-data", "PAPER_MODE_C_ENABLED=false", "REQUIRE_HUMAN_APPROVAL=true", "FIRM_API_TOKEN=$token", "LIVE_TRADING_ENABLED=false", "BITUNIX_ENABLED=false")
+    # WIN-01 (v1.36.38): BOM-frei schreiben — Windows PowerShell 5.1 haengt bei
+    # `-Encoding UTF8` ein BOM an, das aeltere dotenv-Versionen und manche
+    # Tools als Teil des ersten Schluessels lesen. .NET-UTF8 ohne BOM ist auf
+    # PowerShell 5.1 und 7+ byte-identisch (CRLF-Zeilenenden bleiben).
+    [System.IO.File]::WriteAllLines($envFile, [string[]]$envLines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Log ".env erstellt, BOM-frei (Secrets nicht ausgegeben)." "OK"
   }
 
   # SEC-01: unabhaengiger Session-Key, auch bei -KeepExistingEnv nur fehlende
@@ -145,7 +159,8 @@ try {
   $envText = Get-Content -LiteralPath $envFile -Raw
   if ($envText -notmatch '(?m)^\s*(?:export\s+)?FIRM_SESSION_SECRET\s*=') {
     $sessionSecret = New-Token
-    Add-Content -LiteralPath $envFile -Value "`nFIRM_SESSION_SECRET=$sessionSecret" -Encoding UTF8
+    # WIN-01: BOM-freies Anhaengen (CRLF, wie der Rest der Datei).
+    [System.IO.File]::AppendAllText($envFile, "`r`nFIRM_SESSION_SECRET=$sessionSecret`r`n", (New-Object System.Text.UTF8Encoding($false)))
     $sessionSecret = $null
     Write-Log "Unabhaengiges FIRM_SESSION_SECRET ergaenzt (Secret nicht ausgegeben)." "OK"
   }
@@ -156,6 +171,21 @@ try {
   Run "npx.cmd" @("drizzle-kit","push") "DATABASE_URL in .env und PostgreSQL-Verbindung pruefen; danach npx drizzle-kit push erneut."
   Run "npm.cmd" @("run","universe:seed:markets") "Schema zuerst einspielen; danach npm run universe:seed:markets erneut."
   Run "npm.cmd" @("run","universe:seed") "Schema zuerst einspielen; danach npm run universe:seed erneut."
+
+  # WIN-04 (v1.36.38): Schema-Verifikation + Risiko-Default — Paritaet mit
+  # scripts/setup-cachyos.sh (Schritte 07/10). Ohne diese Pruefung liefe ein
+  # unvollstaendiger `drizzle-kit push` still durch; ohne den Upsert stuende
+  # risk_config.allowShort auf dem Code-Default 0 statt auf dem dokumentierten
+  # Setup-Default 1 (docs/SETUP_BUGS.md, Abschnitt 9).
+  $env:PGPASSWORD = $DbPassword
+  try {
+    $tableCount = ((& psql -h 127.0.0.1 -p $DbPort -U $DbUser -d $DbName -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>>$LogFile) | Out-String).Trim()
+    if (-not ($tableCount -match '^\d+$') -or [int]$tableCount -lt 14) { throw "Schema unvollstaendig: $tableCount Tabellen (erwartet >= 14). Fix: npx drizzle-kit push erneut ausfuehren." }
+    Write-Log "Schema geprueft: $tableCount Tabellen." "OK"
+    $shortSql = "INSERT INTO risk_config (key, value, description) VALUES ('allowShort', '1', 'Short-Handel erlaubt? (0/1)') ON CONFLICT (key) DO UPDATE SET value = '1', updated_at = now();"
+    Run-Stdin "psql" @("-h","127.0.0.1","-p",$DbPort,"-U",$DbUser,"-d",$DbName,"-v","ON_ERROR_STOP=1") $shortSql "risk_config-Tabelle pruefen (npx drizzle-kit push) und Setup erneut starten."
+    Write-Log "Short-Selling per Default aktiviert (risk_config.allowShort = 1)." "OK"
+  } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
 
   Step "Ollama (optional) und Modell"
   if (-not $SkipOllama -and (Ask "Ollama fuer lokalen LLM installieren und Modell '$LlmModel' laden?" "J")) {
@@ -179,13 +209,34 @@ try {
     $out = Join-Path $LogDir "next-start-$((Get-Date).ToString('yyyyMMdd-HHmmss')).log"
     # `npm run start` nutzt im package.json POSIX-PORT-Syntax; direktes Next-CLI
     # ist deshalb der portable Windows-Aufruf.
+    # WIN-03 (v1.36.38): Port-Status VOR dem Start merken — das Cleanup unten
+    # darf nur aufraeumen, was dieses Script selbst belegt hat. War der Port
+    # schon vorher belegt (fremde Instanz), wird kein fremder Prozess beendet.
+    $portWasFree = -not (Get-NetTCPConnection -LocalPort $AppPort -ErrorAction SilentlyContinue)
+    if (-not $portWasFree) { Write-Log "Port $AppPort ist bereits belegt — der Health-Check trifft ggf. eine fremde Instanz." "WARN" }
     $app = Start-Process -FilePath "npx.cmd" -ArgumentList @("next","start","-H","127.0.0.1","-p",$AppPort) -WorkingDirectory $Root -RedirectStandardOutput $out -RedirectStandardError (Join-Path $LogDir "next-start-stderr.log") -PassThru -WindowStyle Hidden
     try {
       $healthy = $false
       1..30 | ForEach-Object { Start-Sleep -Seconds 2; try { $r = Invoke-WebRequest "http://127.0.0.1:$AppPort/api/health" -UseBasicParsing -TimeoutSec 3; if ($r.StatusCode -eq 200) { $healthy = $true; break } } catch {} }
       if (-not $healthy) { throw "Health-Check http://127.0.0.1:$AppPort/api/health nicht erreichbar. Fix: Get-Content '$out'; pruefe Port, .env und PostgreSQL." }
       Write-Log "Health-Check erfolgreich: http://127.0.0.1:$AppPort/api/health" "OK"
-    } finally { if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force } }
+    } finally {
+      # WIN-03: taskkill /T beendet den ProzessBAUM (npx.cmd -> node.exe).
+      # Stop-Process allein liesse node.exe als Waise auf dem Port zurueck.
+      if ($app -and -not $app.HasExited) {
+        try { & taskkill /PID $app.Id /T /F 2>&1 | Out-Null } catch {}
+        Start-Sleep -Milliseconds 500
+        if (-not $app.HasExited) { try { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue } catch {} }
+      }
+      # Verwaiste Kinder (npx tot, node lebt) nur dann per Port suchen, wenn
+      # der Port vorher frei war — sonst gehoert er einer fremden Instanz.
+      if ($portWasFree) {
+        try {
+          $owners = Get-NetTCPConnection -LocalPort $AppPort -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique
+          foreach ($ownerPid in @($owners)) { if ($ownerPid -and $ownerPid -ne $PID) { Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue } }
+        } catch {}
+      }
+    }
   } else { Write-Log "Health-Check uebersprungen (-SkipValidation)." "WARN" }
 
   Write-Host "`nINSTALLATION ERFOLGREICH" -ForegroundColor Green

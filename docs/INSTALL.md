@@ -87,7 +87,8 @@ Zuerst trocken durchspielen ist jederzeit möglich:
 --sync-markets         Marktdaten-Warmup gleich mitfahren
 --skip-build / --skip-validate / --min-pass N
 --reset-cluster        Cluster ohne Rückfrage neu initialisieren
---dry-run              nur anzeigen, nichts ausführen
+--dry-run              keine Schreiboperationen (kein initdb/psql/.env/Seed/
+                       Server-Start); lesende Prüfungen laufen, Ausgabe nur stdout
 --non-interactive / -y keine Fragen
 --log-file PFAD        Default: data/setup/setup-<Zeitstempel>.log
 ```
@@ -812,7 +813,9 @@ dort stehen Aufruf, zehn Schritte, alle Optionen, Log-Pfad und Exit-Codes.
 
 Das Skript ist absichtlich gesprächig: es zeigt jeden Befehl an, fragt vor
 Systemänderungen nach und bricht bei Fehlern ab. Lies mit, statt blind zu
-bestätigen. Mit `--dry-run` zeigt es jeden Befehl, führt aber nichts aus.
+bestätigen. Mit `--dry-run` zeigt es jeden Befehl auf stdout (keine Log-Datei),
+führt aber keine Schreiboperation durch — lesende Prüfungen (Versionen,
+Pfade, Cluster-Status) laufen trotzdem, damit die Vorschau ehrlich bleibt.
 
 **Hängt das Setup beim PostgreSQL-Schritt oder meldet es einen
 Cluster-Fehler:** Sofort-Hilfe und alle Fehlerfälle stehen in

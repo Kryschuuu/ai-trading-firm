@@ -27,7 +27,10 @@
 #
 # Alle Funktionen sind set -e- und set -o pipefail-sicher (keine
 # &&-Kurzschlüsse als letztes Kommando), damit das aufrufende Skript nie
-# mitten im Check stirbt.
+# mitten im Check stirbt. Seit ERR-01 (v1.30.1) sind zusätzlich alle
+# Befehls-Substitutionen, die planmäßig fehlschlagen können (fehlende
+# Binaries/Dateien), mit `|| true` gegen die ERR-Falle gehärtet — sonst
+# meldete das Setup „Abbruch …“, obwohl es korrekt fortfuhr.
 #
 set -o pipefail
 
@@ -55,12 +58,15 @@ pg_as_postgres() {
 # Leer, wenn nicht ermittelbar (dann laufen Checks ohne Versionsabgleich).
 pg_server_major() {
   local v=""
-  v="$(postgres --version 2>/dev/null | sed -nE 's/^postgres \(PostgreSQL\) ([0-9]+)\..*/\1/p')"
+  # ERR-01 (v1.30.1): `|| true` schluckt den Exit-Status fehlender Binaries —
+  # mit pipefail lieferte die Pipeline sonst 127, und die ERR-Falle des
+  # Setup-Skripts meldete „Abbruch …“, obwohl planmäßig fortgesetzt wird.
+  v="$(postgres --version 2>/dev/null | sed -nE 's/^postgres \(PostgreSQL\) ([0-9]+)\..*/\1/p' || true)"
   if [[ "$v" =~ ^[0-9]+$ ]]; then
     printf '%s' "$v"
     return 0
   fi
-  v="$(pg_config --version 2>/dev/null | sed -nE 's/PostgreSQL ([0-9]+)\..*/\1/p')"
+  v="$(pg_config --version 2>/dev/null | sed -nE 's/PostgreSQL ([0-9]+)\..*/\1/p' || true)"
   if [[ "$v" =~ ^[0-9]+$ ]]; then
     printf '%s' "$v"
   fi
@@ -75,7 +81,9 @@ pg_data_version() {
     printf ''
     return 0
   fi
-  v="$(pg_as_postgres cat "$data/PG_VERSION" 2>/dev/null | tr -cd '0-9')"
+  # ERR-01: Fehlende/unlesbare PG_VERSION ist ein Normalfall (frischer Host),
+  # kein Abbruch — `|| true` hält die ERR-Falle still (Wert bleibt leer).
+  v="$(pg_as_postgres cat "$data/PG_VERSION" 2>/dev/null | tr -cd '0-9' || true)"
   if [[ "$v" =~ ^[0-9]+$ ]]; then
     printf '%s' "$v"
   fi

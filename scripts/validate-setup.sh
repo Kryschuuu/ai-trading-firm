@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Validierungs-Routine der autonomen KI-Trading-Firma (v1.30.0).
+# Validierungs-Routine der autonomen KI-Trading-Firma (v1.30.1).
 #
 #   ./scripts/validate-setup.sh
 #   BASE_URL=http://192.168.1.42:3369 ./scripts/validate-setup.sh
@@ -207,7 +207,10 @@ check() {
 }
 
 section() {
-  printf '\n%s%s%s\n' "$C_CYAN" "$1" "$C_RESET" >&2
+  # VAL-01 (v1.30.1): Überschriften laufen über progress() — im Normalmodus
+  # nach stdout (wie die Check-Zeilen), im JSON-Modus nach stderr, damit
+  # stdout reines JSON bleibt. Früher gingen sie immer nach stderr.
+  progress "$(printf '\n%s%s%s' "$C_CYAN" "$1" "$C_RESET")"
 }
 
 # ── WURZELURSACHE ───────────────────────────────────────────────────────────
@@ -449,9 +452,12 @@ TOTAL=$((PASS + FAIL))
 
 if [[ "$OUTPUT_JSON" == "true" ]]; then
   {
+    # VAL-02 (v1.30.1): baseUrl/version werden jq-kodiert — ein kompromittierter
+    # oder älterer Server könnte sonst mit Anführungszeichen im Versionsstring
+    # das JSON brechen (alle Check-Labels unten waren schon immer kodiert).
     printf '{\n'
-    printf '  "baseUrl": "%s",\n' "$BASE_URL"
-    printf '  "version": "%s",\n' "$APP_VERSION"
+    printf '  "baseUrl": %s,\n' "$(jq -Rn --arg v "$BASE_URL" '$v')"
+    printf '  "version": %s,\n' "$(jq -Rn --arg v "$APP_VERSION" '$v')"
     printf '  "pass": %d,\n' "$PASS"
     printf '  "fail": %d,\n' "$FAIL"
     printf '  "total": %d,\n' "$TOTAL"

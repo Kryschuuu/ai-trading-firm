@@ -2,7 +2,7 @@
 #
 # ═══════════════════════════════════════════════════════════════════════════
 #  Autonome KI-Trading-Firma — geführte Installation auf CachyOS / Arch Linux
-#  Version 1.30.0
+#  Version 1.30.1
 # ═══════════════════════════════════════════════════════════════════════════
 #
 #   ./scripts/setup-cachyos.sh --variant a
@@ -50,6 +50,16 @@
 #  B6 Smoke-/Setup-Tests
 #     * Validierung über scripts/validate-setup.sh: 18 Checks, bestanden ab
 #       --min-pass (Default 15), jeder Fehlcheck mit Behebungszeile
+#
+# ── Nachträge v1.30.1 (Dry-Run-Vertrag, UUID, Logging) ──────────────────────
+#  DRY-01  --dry-run loggt stdout-only (kein „No such file“-Spam mehr)
+#  DRY-02  --dry-run führt keine Schreiboperationen aus (kein initdb, psql,
+#          .env, Seed, Server-Start); lesende Prüfungen laufen weiter
+#  UUID-01 Mission-UUID-Prüfung case-insensitiv (wie V07 in validate-setup.sh)
+#  LOG-01  Validierungs-Server fällt ohne Log-Datei auf /dev/null zurück
+#  SEC-PSQL DB-Passwort per STDIN (Dollar-quoted), nie als psql-Argument
+#  ERR-01  Keine „Abbruch …“-Fehlalarme der ERR-Falle bei planmäßig
+#          fehlschlagenden Prüfungen (lib/pg-cluster.sh + Token/Preset-Parses)
 #
 # ── Idempotenz ─────────────────────────────────────────────────────────────
 # Mehrfaches Ausführen ist sicher: vorhandene Cluster, Rollen, Datenbanken,
@@ -264,7 +274,9 @@ Ablauf:
   --skip-validate       Schritt 10 (18-Check-Validierung) überspringen
   --min-pass N          Mindestanzahl bestandener Checks (Default 15 von 18)
   --reset-cluster       Cluster-Reset anbieten, falls der Check fehlschlägt
-  --dry-run             nur anzeigen, was passieren würde (keine Mutation)
+  --dry-run             keine Schreiboperationen (kein initdb, kein psql,
+                        kein .env, kein Seed, kein Server-Start); lesende
+                        Prüfungen (Versionen, Pfade, Cluster-Status) laufen
   --non-interactive, -y keine Rückfragen (Default-Antworten)
   --log-file PFAD       Log-Ziel (Default data/setup/setup-<Zeitstempel>.log)
   -h, --help            diese Hilfe
@@ -322,14 +334,20 @@ done
 [[ "$PGDATA" == /* ]] || die "--pgdata muss ein absoluter Pfad sein (war: '$PGDATA')."
 
 # ── Log-Datei vorbereiten ───────────────────────────────────────────────────
-if [[ -z "$LOG_FILE" ]]; then
-  LOG_FILE="$PROJECT_ROOT/data/setup/setup-$(date -u '+%Y%m%d-%H%M%S').log"
-fi
-if [[ "$DRY_RUN" != "true" ]]; then
+# DRY-01 (v1.30.1): Ein Dry-Run schreibt grundsätzlich keine Dateien — auch
+# kein Log. Früher wurde der Default-Pfad gesetzt, das Verzeichnis aber nie
+# angelegt, sodass jede Log-Zeile „No such file or directory“ auf stderr
+# spammte. Jetzt ist der Dry-Run stdout-only (Banner zeigt „<nur stdout>“).
+if [[ "$DRY_RUN" == "true" ]]; then
+  LOG_FILE=""
+else
+  if [[ -z "$LOG_FILE" ]]; then
+    LOG_FILE="$PROJECT_ROOT/data/setup/setup-$(date -u '+%Y%m%d-%H%M%S').log"
+  fi
   mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
   : >"$LOG_FILE" 2>/dev/null || LOG_FILE=""
+  [[ -n "$LOG_FILE" ]] || warn "Log-Datei nicht schreibbar — es wird nur auf stdout geloggt."
 fi
-[[ -n "$LOG_FILE" ]] || warn "Log-Datei nicht schreibbar — es wird nur auf stdout geloggt."
 
 # ── Fehlerfalle: jeder unerwartete Abbruch meldet Zeile + Schritt ───────────
 on_error() {
@@ -469,6 +487,11 @@ pg_cleanup_stale_pid() {
     return 1
   fi
   warn "Veraltete postmaster.pid gefunden (Prozess ${pid:-?} läuft nicht) — wird entfernt."
+  # DRY-02: Auch das Aufräumen ist eine Schreiboperation — im Dry-Run nur melden.
+  if [[ "$DRY_RUN" == "true" ]]; then
+    note "(dry-run) postmaster.pid würde entfernt — nicht ausgeführt."
+    return 0
+  fi
   pg_as_postgres rm -f "$PGDATA/postmaster.pid" || true
   return 0
 }
@@ -540,6 +563,14 @@ step_03_postgres() {
       die "pg_controldata meldet: $pg_state. Cluster zuerst stoppen (sudo systemctl stop $PG_SVC)."
     fi
 
+    # DRY-02: Im Dry-Run wird weder gefragt noch zurückgesetzt — der Schritt
+    # endet nach der lesenden Diagnose (die Verifikation unten würde sonst
+    # gegen den weiterhin fehlenden Cluster abbrechen).
+    if [[ "$DRY_RUN" == "true" ]]; then
+      note "(dry-run) Cluster würde hier neu initialisiert (initdb) — angeboten, nicht ausgeführt."
+      note "(dry-run) Dienst-Start und Bereitschafts-Wartezeit entfallen."
+      return 0
+    fi
     if [[ "$RESET_CLUSTER" == "true" ]] || ask "Cluster neu initialisieren? (Vorhandene Daten in $PGDATA gehen verloren)"; then
       pg_reset_cluster
     else
@@ -653,6 +684,12 @@ pg_service_start() {
 # Warten auf ECHTE Annahmebereitschaft. `systemctl is-active` meldet
 # Type=forking-Dienste schon als aktiv, bevor der Server Connections nimmt.
 pg_wait_ready() {
+  # DRY-02: Im Dry-Run wurde nichts gestartet — 30 s auf Bereitschaft zu
+  # warten würde den Vorschau-Lauf nur aufhalten (und ggf. abbrechen).
+  if [[ "$DRY_RUN" == "true" ]]; then
+    note "(dry-run) Bereitschafts-Wartezeit (pg_isready) entfällt."
+    return 0
+  fi
   info "Warte auf PostgreSQL-Bereitschaft (max. 30 s)…"
   local _
   for _ in $(seq 1 30); do
@@ -677,8 +714,35 @@ pg_psql() {
   sudo -u "$PG_SUDO_USER" psql -X -v ON_ERROR_STOP=1 "$@"
 }
 
+# Passwort als Dollar-quoted SQL-Literal (SEC-PSQL, v1.30.1): Das Passwort
+# läuft per STDIN, nie als Prozess-Argument (`-v db_pass=…` wäre für jeden
+# lokalen Benutzer in `ps aux` lesbar). Der Tag weicht aus, falls das Passwort
+# die schließende Markierung enthält — Kollisionen sind damit ausgeschlossen.
+# Dollar-Quotes brauchen keinerlei Escaping: $, ', \, Backticks und
+# Zeilenumbrüche im Passwort bleiben literal (kein Quote-Bruch möglich).
+pg_sql_quote_password() {
+  local pass="$1" tag="aitfsetup" n=0
+  while [[ "$pass" == *"\$${tag}\$"* ]]; do
+    n=$((n + 1))
+    tag="aitfsetup${n}"
+  done
+  printf '$%s$%s$%s$' "$tag" "$pass" "$tag"
+}
+
 step_04_database() {
   step "Rolle & Datenbank"
+
+  # DRY-02: Keine Passwort-Abfrage, kein psql — nur die Connection-URI
+  # aufbauen (brauchen Schritt 05/07 als Anzeige-/Vergleichswert). Der
+  # Platzhalter verlässt den Prozess nie (Dry-Run schreibt keine .env).
+  if [[ "$DRY_RUN" == "true" ]]; then
+    DB_PASS="dry-run-placeholder"
+    require_cmd jq
+    DB_PASS_ENC="$(jq -rn --arg v "$DB_PASS" '$v | @uri')"
+    DATABASE_URL="postgresql://${DB_USER}:${DB_PASS_ENC}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    note "(dry-run) Rolle '${DB_USER}' + Datenbank '${DB_NAME}' würden angelegt/geprüft — keine Änderung."
+    return 0
+  fi
 
   # Harte SQL-Verifikation als Superuser, BEVOR Passwörter abgefragt werden.
   if [[ "$DB_HOST" == "127.0.0.1" || "$DB_HOST" == "localhost" ]]; then
@@ -712,14 +776,18 @@ step_04_database() {
       read -r -s -p "  Neues Passwort für '${DB_USER}': " DB_PASS; echo
       [[ -n "$DB_PASS" ]] || die "Leeres Passwort ist keine gute Idee."
     fi
-    # Injection-/Quote-sicher: Werte gehen als psql-Variablen hinein;
-    # :\"var\" bzw. :'var' maskieren kontextsicher. Ein ' im Passwort bricht
-    # damit nichts mehr (v1.5.3-Fix).
-    pg_psql -v db_user="$DB_USER" -v db_name="$DB_NAME" -v db_pass="$DB_PASS" <<'SQL'
-CREATE USER :"db_user" WITH PASSWORD :'db_pass';
-CREATE DATABASE :"db_name" OWNER :"db_user";
-GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
-SQL
+    # Injection-/Quote-sicher UND argv-frei (SEC-PSQL, v1.30.1): Das SQL wird
+    # mit printf gebaut (DB_USER/DB_NAME sind oben regex-validiert, das
+    # Passwort läuft Dollar-quoted) und per STDIN übergeben — es steht nie in
+    # der Prozessliste. Zuvor lief das Passwort als `-v db_pass=…` für jeden
+    # lokalen Benutzer lesbar in `ps aux` mit (der v1.5.3-Fix schützte nur
+    # vor Quote-Bruch, nicht vor Mitlesern).
+    local quoted_pass role_sql
+    quoted_pass="$(pg_sql_quote_password "$DB_PASS")"
+    role_sql="$(printf 'CREATE USER "%s" WITH PASSWORD %s;\nCREATE DATABASE "%s" OWNER "%s";\nGRANT ALL PRIVILEGES ON DATABASE "%s" TO "%s";' \
+      "$DB_USER" "$quoted_pass" "$DB_NAME" "$DB_USER" "$DB_NAME" "$DB_USER")"
+    printf '%s\n' "$role_sql" | pg_psql \
+      || die "Rolle/Datenbank konnte nicht angelegt werden. 'journalctl -u $PG_SVC -n 50' prüfen."
     ok "Rolle '${DB_USER}' und Datenbank '${DB_NAME}' angelegt."
   fi
 
@@ -790,7 +858,15 @@ step_05_env() {
   local env_file="$PROJECT_ROOT/.env"
   local created="false"
 
-  if [[ -f "$env_file" ]]; then
+  # DRY-02: Im Dry-Run keine Rückfrage zum Überschreiben, kein Backup (`cp`)
+  # und kein Schreiben — nur melden, was passieren würde.
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ -f "$env_file" ]]; then
+      note "(dry-run) Bestehende .env bliebe erhalten — fehlende Schlüssel würden ergänzt (keine Änderung)."
+    else
+      note "(dry-run) .env würde neu geschrieben (Rechte 600) — nicht ausgeführt."
+    fi
+  elif [[ -f "$env_file" ]]; then
     if [[ "$NON_INTERACTIVE" == "true" ]] || ! ask "Vorhandene .env überschreiben? (fehlende Schlüssel werden sonst nur ergänzt)"; then
       ok "Bestehende .env bleibt erhalten — fehlende Schlüssel werden ergänzt."
       # Bestehende DATABASE_URL übernehmen, damit Schritt 07/10 dieselbe DB nutzen.
@@ -820,7 +896,9 @@ step_05_env() {
   elif grep -qE '^FIRM_API_TOKEN=.+' "$env_file" 2>/dev/null; then
     ok "FIRM_API_TOKEN bereits gesetzt."
   elif [[ "$GENERATE_API_TOKEN" == "true" ]]; then
-    API_TOKEN="$(generate_token)"
+    # ERR-01: `|| true` hält die ERR-Falle still — ein leerer Wert fällt in
+    # die klare die()-Meldung darunter, nicht in „Abbruch (Zeile …)“.
+    API_TOKEN="$(generate_token || true)"
     [[ -n "$API_TOKEN" ]] || die "Token-Erzeugung fehlgeschlagen (openssl rand)."
     note "Neues FIRM_API_TOKEN erzeugt (wird in .env geschrieben, Rechte 600)."
   else
@@ -974,6 +1052,13 @@ step_07_schema() {
   run_masked env DATABASE_URL="$DATABASE_URL" npx drizzle-kit push --force \
     || die "drizzle-kit push fehlgeschlagen. DATABASE_URL prüfen; Details im Log."
 
+  # DRY-02: Der Push oben wurde nur angezeigt — gegen die unveränderte DB zu
+  # verifizieren (Tabellen zählen) meldete falsche Fehlbestände.
+  if [[ "$DRY_RUN" == "true" ]]; then
+    note "(dry-run) Schema-Verifikation (Tabellen zählen) entfällt — keine Änderung."
+    return 0
+  fi
+
   # Verifikation mit Retry: PostgreSQL kann kurz brauchen, bis die Kataloge
   # konsistent sichtbar sind. Erwartet werden die Pflicht-Tabellen aus
   # src/lib/seed.ts → checkSchema().
@@ -1019,19 +1104,29 @@ step_08_universe() {
 
   # 2) Markt-Presets v1.30.0: 50 Aktien · 50 Indizes · 22 Rohstoffe · 30 Krypto.
   #    Das Skript ist idempotent (Upsert) und fail-loud bei abgelehnten Sätzen.
+  # DRY-02: Der direkte Aufruf unten schreibt die Registry (Upsert) — im
+  # Dry-Run entfällt er (die Anzeige des Basis-Seeds oben genügt als Vorschau).
+  if [[ "$DRY_RUN" == "true" ]]; then
+    note "(dry-run) Markt-Presets würden geseedet (50·50·22·30, idempotent) — nicht ausgeführt."
+    note "(dry-run) Marktdaten-Warmup (--sync-markets) entfällt."
+    return 0
+  fi
   local preset_json
   preset_json="$(npm run universe:seed:markets --silent -- --json 2>/dev/null || true)"
   if [[ -z "$preset_json" ]]; then
     die "universe:seed:markets lieferte kein Ergebnis. Manuell: npm run universe:seed:markets"
   fi
 
+  # ERR-01: Fällt jq auf Nicht-JSON (npm-Fehlermeldung), bleibt der Wert leer
+  # und die Prüfung unten bricht mit Fix-Hinweis ab — `|| true` verhindert
+  # nur die irreführende „Abbruch (Zeile …)“-Meldung der ERR-Falle.
   local p_ok p_equity p_index p_commodity p_crypto p_rejected
-  p_ok="$(jq -r '.ok' <<<"$preset_json")"
-  p_equity="$(jq -r '.presets.equities' <<<"$preset_json")"
-  p_index="$(jq -r '.presets.indices' <<<"$preset_json")"
-  p_commodity="$(jq -r '.presets.commodities' <<<"$preset_json")"
-  p_crypto="$(jq -r '.presets.crypto' <<<"$preset_json")"
-  p_rejected="$(jq -r '.rejected | length' <<<"$preset_json")"
+  p_ok="$(jq -r '.ok' <<<"$preset_json" || true)"
+  p_equity="$(jq -r '.presets.equities' <<<"$preset_json" || true)"
+  p_index="$(jq -r '.presets.indices' <<<"$preset_json" || true)"
+  p_commodity="$(jq -r '.presets.commodities' <<<"$preset_json" || true)"
+  p_crypto="$(jq -r '.presets.crypto' <<<"$preset_json" || true)"
+  p_rejected="$(jq -r '.rejected | length' <<<"$preset_json" || true)"
 
   if [[ "$p_ok" != "true" ]]; then
     jq -r '.rejected[] | "      abgelehnt \(.ref): \(.code) — \(.message)"' <<<"$preset_json" || true
@@ -1145,6 +1240,13 @@ step_10_validate() {
     return 0
   fi
 
+  # DRY-02: Seed-POST, Risiko-Upsert und Server-Start sind Schreiboperationen
+  # bzw. Seiteneffekte — der Dry-Run endet hier mit der Vorschau.
+  if [[ "$DRY_RUN" == "true" ]]; then
+    note "(dry-run) Temporärer Server, Seed, Risiko-Defaults und 18-Check-Validierung entfallen."
+    return 0
+  fi
+
   local base_url="http://127.0.0.1:${APP_PORT}"
   local started_here="false"
 
@@ -1158,8 +1260,10 @@ step_10_validate() {
     fi
     info "Starte temporären Validierungs-Server auf ${base_url} (nur 127.0.0.1)…"
     # Bewusst auf 127.0.0.1 gebunden: die Validierung braucht keine LAN-Öffnung.
+    # LOG-01 (v1.30.1): Fällt auf /dev/null zurück, wenn kein Log schreibbar
+    # ist — `>>""` bräche den Start mit „ambiguous redirect“ ab.
     ( cd "$PROJECT_ROOT" && PORT="$APP_PORT" npx next start -H 127.0.0.1 -p "$APP_PORT" ) \
-      >>"$LOG_FILE" 2>&1 &
+      >>"${LOG_FILE:-/dev/null}" 2>&1 &
     VALIDATE_PID=$!
     started_here="true"
     trap 'cleanup_validate_server' EXIT
@@ -1202,8 +1306,10 @@ step_10_validate() {
 
   # Mission-IDs auf UUID-Form prüfen (B2): der alte Smoke-Test POSTete bei
   # leerer Liste den String "null" → invalid input syntax for type uuid.
+  # UUID-01 (v1.30.1): Vergleich case-insensitiv (`!~*`) — PostgreSQL und
+  # validate-setup.sh (V07) akzeptieren Großbuchstaben-UUIDs ebenfalls.
   bad_ids="$(psql "$DATABASE_URL" -tAc \
-    "SELECT count(*) FROM missions WHERE id::text !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$';" \
+    "SELECT count(*) FROM missions WHERE id::text !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$';" \
     2>/dev/null | tr -cd '0-9' || echo 0)"
   if (( ${bad_ids:-0} > 0 )); then
     die "${bad_ids} Mission-IDs sind keine gültigen UUIDs — Datenbankbestand prüfen."
@@ -1260,7 +1366,7 @@ SQL
 # ─────────────────────────────────────────────────────────────────────────────
 
 print_banner() {
-  printf '\n%s%s%s\n' "$C_BOLD" "Autonome KI-Trading-Firma — Installation (v1.30.0)" "$C_RESET"
+  printf '\n%s%s%s\n' "$C_BOLD" "Autonome KI-Trading-Firma — Installation (v1.30.1)" "$C_RESET"
   printf '  Variante:       %s  %s\n' "${VARIANT^^}" \
     "$( [[ $VARIANT == a ]] && echo '(Solo-Node)' || echo '(Split-Node)' )"
   printf '  Modellserver:   http://%s:11434\n' "$LLM_HOST"

@@ -69,6 +69,14 @@ async function main(): Promise<void> {
     res.statusCode = 404;
     res.end("not found");
   });
+  // MICRO-001 (v1.36.38): Belegter Port (EADDRINUSE) oder fehlende Rechte
+  // beenden den Prozess mit einer Zeile statt mit ungefiltertem Stack —
+  // systemd/journald sieht den Grund, der Exit-Code bleibt 1 (fatal).
+  server.on("error", (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[micro] Health-Endpunkt auf Port ${healthPort} nicht verfügbar: ${message}`);
+    void executor.stop().finally(() => process.exit(1));
+  });
   server.listen(healthPort, "127.0.0.1", () => {
     console.log(`[micro] Health-Endpunkt: http://127.0.0.1:${healthPort}/health`);
   });

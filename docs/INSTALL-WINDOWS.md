@@ -59,13 +59,17 @@ Hinweisen aus:
 2. Git und Node.js LTS nachinstallieren; den PATH nach der Installation neu lesen.
 3. PostgreSQL 17 nachinstallieren, den Windows-Dienst starten und den Port prüfen.
 4. Rolle `trader` und Datenbank `trading_firm` idempotent anlegen.
-5. `.env` mit Paper-/Sicherheitsdefaults, API-Token, unabhängigem `FIRM_SESSION_SECRET` und lokalem `DATABASE_URL`
-   schreiben. Eine vorhandene Datei wird vorher als `.env.bak-<Zeitstempel>` gesichert.
+5. `.env` **BOM-frei** mit Paper-/Sicherheitsdefaults, API-Token, unabhängigem `FIRM_SESSION_SECRET` und lokalem `DATABASE_URL`
+   schreiben (seit v1.36.38 per .NET-UTF8 ohne BOM — Windows PowerShell 5.1 hängt sonst ein BOM an).
+   Eine vorhandene Datei wird vorher als `.env.bak-<Zeitstempel>` gesichert.
 6. `npm ci`, `npx drizzle-kit push` und beide Universe-Seeds ausführen (354
-   kuratierte Marktinstrumente plus Basis-Universum).
+   kuratierte Marktinstrumente plus Basis-Universum), danach den Tabellenstand
+   verifizieren (>= 14 Tabellen, fatal mit Fix-Hinweis) und `risk_config.allowShort = 1`
+   setzen (seit v1.36.38, Parität mit dem Linux-Setup).
 7. Optional Ollama installieren und das Modell laden.
 8. `npm run typecheck`, `npm run lint`, `npm run build` und einen Health-Check
-   auf `/api/health` ausführen.
+   auf `/api/health` ausführen. Der Installer beendet die App samt Prozessbaum
+   danach wieder (`taskkill /T`; der Port wird nur aufgeräumt, wenn er vorher frei war).
 
 Der Installer startet die App nur kurz für den Health-Check und beendet sie danach.
 **SEC-01 / v1.36.27:** Produktion mit Tokens benötigt zusätzlich einen unabhängigen

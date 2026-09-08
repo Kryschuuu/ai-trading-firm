@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.37 (2026-09-08) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.36.38 (2026-09-08) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -19,8 +19,8 @@ cd ai-trading-firm
 
 Das Skript installiert Node/PostgreSQL, legt Rolle und Datenbank an, schreibt `.env` inkl. `FIRM_API_TOKEN` und separat erzeugtem `FIRM_SESSION_SECRET` (Recht `600`), spielt das Schema ein, seedet das Markt-Universum (354 Instrumente), aktiviert Short-Selling, baut die App und führt am Ende **18 Validierungs-Checks** aus. Es ist beliebig oft wiederholbar und überschreibt weder `.env` noch Cluster-Daten ohne Rückfrage.
 
-Nützlich: `--dry-run` (nichts ausführen), `--non-interactive`, `--no-shorts`, `--sync-markets`, `--skip-build`, `--min-pass 18`, `--help`.  
-Log: `data/setup/setup-<Zeitstempel>.log`.
+Nützlich: `--dry-run` (keine Schreiboperationen, nur lesende Prüfungen und Befehls-Vorschau auf stdout), `--non-interactive`, `--no-shorts`, `--sync-markets`, `--skip-build`, `--min-pass 18`, `--help`.  
+Log: `data/setup/setup-<Zeitstempel>.log` (im Dry-Run: nur stdout, keine Datei).
 
 **Manuell / anderes System:**
 

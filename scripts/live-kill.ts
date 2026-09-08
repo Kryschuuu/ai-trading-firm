@@ -51,7 +51,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(`[live:kill] FEHLGESCHLAGEN: ${(err as Error).message}`);
+  // LGKILL-001 (v1.36.38): Auch Nicht-Error-Würfe (string, null) ergeben eine
+  // lesbare Meldung statt „FEHLGESCHLAGEN: undefined“.
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[live:kill] FEHLGESCHLAGEN: ${message}`);
   console.error("[live:kill] Nutzung: --venue=BITUNIX | --scope=all --reason=… [--confirm=KILL] | --clear");
   process.exit(1);
 });
