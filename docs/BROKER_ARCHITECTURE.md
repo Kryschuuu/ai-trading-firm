@@ -198,6 +198,16 @@ entsteht nie eine zweite, unhydratierte Buchhaltung. Die Engine
 hydratiert denselben Ledger aus PostgreSQL (offene Positionen, Cash-Hint,
 Kill-Switch) — unverändert aus v1.1.0/v1.5.2.
 
+**Restore-Koordination (RESTORE-01, v1.36.37):** Dieser Restore läuft als
+Single-Flight — alle parallelen Zugriffe (HTTP-Request, 60-s-Tick, Pipeline)
+hängen sich an denselben Lauf, statt N-fach dieselben Abfragen zu stellen.
+Schlägt er fehl (DB weg, Schema fehlt), wiederholt die Engine den Versuch
+frühestens nach 5 s und meldet den Fehler einmal pro Fenster; der Ledger
+bleibt dabei ausdrücklich unhydratisiert (`firmHydrated === false`).
+`invalidateBrokerCache()` erzwingt den sofortigen Nächsten-versuch — das nutzt
+u. a. `POST /api/firm/kill`. Die Abfrage selbst läuft über den partiellen
+Index `positions_open_idx` (`positions (symbol) WHERE status = 'OPEN'`).
+
 **Registry-Projektion:** `BROKER_REGISTRY` (src/lib/broker.ts) leitet
 `paperAvailable = capabilities.paper` und `liveAvailable = capabilities.live`
 über `projectCapabilityFlags()` ab. **Single Source of Truth = Adapter**;

@@ -50,6 +50,20 @@ import { startOfBerlinDay } from "./time";
 import { state } from "./stateRegistry";
 
 /**
+ * Mindestabstand zwischen zwei Restore-VERSUCHEN nach einem Fehlschlag.
+ *
+ * RESTORE-01 (v1.36.37): Der Restore liest alle offenen Positionen und ist
+ * damit der teuerste Schritt jedes Kaltstarts. Fehlten Datenbank oder Schema,
+ * blieb `firmHydrated` auf `false` — und jeder einzelne Zugriff (HTTP-Request
+ * auf `/api/firm`, 60-s-Monitor-Tick, Agenten-Pipeline) wiederholte denselben
+ * teuren Versuch, unbegrenzt. Aus einem Kaltstart wurde so eine
+ * Dauerschleife gegen genau die Datenbank, die gerade schon nicht
+ * antwortete. Der Backoff deckelt die Wiederholung; `invalidateBrokerCache()`
+ * hebt sie für explizite Operator-Eingriffe sofort auf.
+ */
+const FIRM_HYDRATION_RETRY_MS = 5_000;
+
+/**
  * Liefert den Paper-Broker und stellt beim ersten Zugriff nach einem Prozessstart
  * den Zustand aus PostgreSQL wieder her (offene Positionen + Kill-Switch-Status).
  * Nötig, weil systemd den Dienst neu starten kann, die Buchhaltung aber persistent ist.
@@ -61,6 +75,13 @@ import { state } from "./stateRegistry";
  * Engine (DB-Wahrheit). Das Rückgabetyp bleibt `PaperBroker` — alle
  * bestehenden Aufrufer (Monitor, API, runAgentTurn, flattenAll) sind
  * bytekompatibel.
+ *
+ * RESTORE-01 (v1.36.37, MEDIUM): Die Wiederherstellung ist kein offener
+ * Pro-Aufruf-Pfad mehr, sondern läuft als Single-Flight mit gedeckelter
+ * Wiederholung (`ensureFirmStateRestored`) und benötigt für ihre Abfrage einen
+ * partiellen Index (`positions_open_idx`, `src/db/schema.ts` +
+ * `drizzle/2026-09-08_positions_open_idx.sql`) — sonst kostet jeder Restore
+ * einen Sequenz-Scan über die append-only wachsende `positions`-Tabelle.
  *
  * FEHLERBEHANDLUNG: Fehlen die Tabellen (relation does not exist), weil
  * `drizzle-kit push` noch nicht lief, startet der Broker trotzdem mit leerem
@@ -84,86 +105,168 @@ export async function getBroker(): Promise<PaperBroker> {
   // Fill-Simulator) einmal in den Ledger injizieren. Idempotent.
   wirePaperExecution(broker);
 
-  if (!state.firmHydrated.get()) {
-    try {
-      const openRows = await db
-        .select()
-        .from(positions)
-        .where(eq(positions.status, "OPEN"));
-
-      // KORRIGIERT (v1.1.0): Cash aus dem letzten persistenten Equity-Snapshot
-      // übernehmen, statt ihn aus startEquity − Einstiegs-Notional zu rechnen.
-      // Sonst gehen realisierte P&L und alle Gewinne/Verluste geschlossener
-      // Trades bei einem Neustart (systemd, Deploy, Stromausfall) verloren.
-      let cashHint: number | undefined;
-      try {
-        const latestSnap = await db
-          .select({ cash: equitySnapshots.cash })
-          .from(equitySnapshots)
-          .orderBy(desc(equitySnapshots.ts))
-          .limit(1);
-        const cashNum = Number(latestSnap[0]?.cash);
-        if (latestSnap[0] && Number.isFinite(cashNum) && cashNum >= 0) cashHint = cashNum;
-      } catch {
-        /* Snapshot-Tabelle fehlt/leer → Fallback auf alte Berechnung */
-      }
-
-      broker.hydrate(
-        openRows.map((r) => ({
-          symbol: r.symbol,
-          side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
-          qty: Number(r.qty),
-          entryPrice: Number(r.entryPrice),
-          // KORRIGIERT (v1.5.2): SL/TP mithydratieren — sonst zeigt das
-          // Dashboard nach einem Neustart „kein Stop-Loss", obwohl die
-          // Schutzebenen (Monitor) weiterhin aus der DB prüfen. Der Broker-
-          // Zustand soll dieselbe Wahrheit zeigen wie die Datenbank.
-          stopLoss:
-            r.stopLoss != null && Number.isFinite(Number(r.stopLoss))
-              ? Number(r.stopLoss)
-              : null,
-          takeProfit:
-            r.takeProfit != null && Number.isFinite(Number(r.takeProfit))
-              ? Number(r.takeProfit)
-              : null,
-        })),
-        { cashHint }
-      );
-
-      const lastKill = await db
-        .select()
-        .from(killSwitches)
-        .orderBy(desc(killSwitches.createdAt))
-        .limit(1);
-      if (lastKill[0]?.armed) killSwitch.pull(`restored:${lastKill[0].reason}`);
-      else killSwitch.disarm();
-
-      state.firmHydrated.set(true);
-    } catch (e) {
-      // Tabellen fehlen noch → `npx drizzle-kit push` muss noch ausgeführt werden.
-      // Der Broker startet trotzdem mit leerem Zustand und vollem Startkapital.
-      // Der Fehler wird beim nächsten Zugriff erneut versucht (kein true setzen).
-      const msg = e instanceof Error ? e.message : String(e);
-      const missingTable = msg.includes("relation") && msg.includes("does not exist");
-      if (missingTable) {
-        console.error(
-          "[getBroker] Tabellen fehlen — bitte `npx drizzle-kit push` ausführen.\n" +
-          "  Die Anwendung startet mit leerem Zustand, bis das Schema angelegt ist."
-        );
-        state.firmHydrated.set(false); // erneut versuchen beim nächsten Request
-      } else {
-        console.error("[getBroker] Hydration fehlgeschlagen:", msg);
-        state.firmHydrated.set(false);
-      }
-    }
-  }
+  // RESTORE-01: Restore gebündelt statt pro Aufrufer einzeln. Alle parallelen
+  // Zugriffe hängen sich an denselben Lauf; ein Fehlschlag deckelt die
+  // folgenden Versuche über das Backoff-Fenster.
+  await ensureFirmStateRestored(broker);
 
   return broker;
 }
 
-/** Erzwingt beim nächsten Zugriff ein erneutes Laden aus der DB. */
+/**
+ * Liest den persistenten Firmenzustand und überträgt ihn auf den Ledger.
+ *
+ * Wirft bei DB- oder Schema-Fehlern weiter — die Aufruferseite
+ * (`ensureFirmStateRestored`) entscheidet über Wiederholung und Rückmeldung,
+ * damit der Fehler nicht in einem lokalen `catch` verschwindet.
+ */
+async function restoreFirmState(broker: PaperBroker): Promise<void> {
+  const openRows = await db
+    .select()
+    .from(positions)
+    .where(eq(positions.status, "OPEN"));
+
+  // KORRIGIERT (v1.1.0): Cash aus dem letzten persistenten Equity-Snapshot
+  // übernehmen, statt ihn aus startEquity − Einstiegs-Notional zu rechnen.
+  // Sonst gehen realisierte P&L und alle Gewinne/Verluste geschlossener
+  // Trades bei einem Neustart (systemd, Deploy, Stromausfall) verloren.
+  let cashHint: number | undefined;
+  try {
+    const latestSnap = await db
+      .select({ cash: equitySnapshots.cash })
+      .from(equitySnapshots)
+      .orderBy(desc(equitySnapshots.ts))
+      .limit(1);
+    const cashNum = Number(latestSnap[0]?.cash);
+    if (latestSnap[0] && Number.isFinite(cashNum) && cashNum >= 0) cashHint = cashNum;
+  } catch {
+    /* Snapshot-Tabelle fehlt/leer → Fallback auf alte Berechnung */
+  }
+
+  broker.hydrate(
+    openRows.map((r) => ({
+      symbol: r.symbol,
+      side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
+      qty: Number(r.qty),
+      entryPrice: Number(r.entryPrice),
+      // KORRIGIERT (v1.5.2): SL/TP mithydratieren — sonst zeigt das
+      // Dashboard nach einem Neustart „kein Stop-Loss“, obwohl die
+      // Schutzebenen (Monitor) weiterhin aus der DB prüfen. Der Broker-
+      // Zustand soll dieselbe Wahrheit zeigen wie die Datenbank.
+      stopLoss:
+        r.stopLoss != null && Number.isFinite(Number(r.stopLoss))
+          ? Number(r.stopLoss)
+          : null,
+      takeProfit:
+        r.takeProfit != null && Number.isFinite(Number(r.takeProfit))
+          ? Number(r.takeProfit)
+          : null,
+    })),
+    { cashHint }
+  );
+
+  const lastKill = await db
+    .select()
+    .from(killSwitches)
+    .orderBy(desc(killSwitches.createdAt))
+    .limit(1);
+  if (lastKill[0]?.armed) killSwitch.pull(`restored:${lastKill[0].reason}`);
+  else killSwitch.disarm();
+}
+
+/**
+ * Restore des Firmenzustands — Single-Flight mit Backoff (RESTORE-01).
+ *
+ * Drei Eigenschaften schließen den Befund:
+ *   1. **Single-Flight:** Läuft bereits ein Restore, hängen sich alle
+ *      weiteren Aufrufer an dasselbe Promise. N parallele Kaltstarts sind
+ *      damit N Wartende, aber EIN Datenbanklauf (Muster identisch zu
+ *      `controlPlaneHydrating` der Control Plane). Nebenbei entfällt der
+ *      Wettlauf zweier `broker.hydrate()`-Läufe um denselben Ledger.
+ *   2. **Backoff:** Nach einem Fehlschlag wird der teure Versuch frühestens
+ *      nach `FIRM_HYDRATION_RETRY_MS` wiederholt. `firmHydrated` bleibt
+ *      `false`, damit niemand aus dem Flag ableitet, der Zustand sei aktuell.
+ *   3. **Kein Log-Amplifier:** Die Warnung erscheint einmal pro Fenster,
+ *      nicht einmal pro Aufruf.
+ *
+ * Das zurückgegebene Promise lehnt bewusst nie ab: ein fehlgeschlagener
+ * Restore darf den auslösenden Request nicht in einen zweiten, unabhängigen
+ * Fehlerlauf schicken (App läuft mit leerem Zustand weiter — wie bisher).
+ */
+function ensureFirmStateRestored(broker: PaperBroker): Promise<void> {
+  const inFlight = state.firmHydration.get();
+  if (inFlight) return inFlight;
+  if (state.firmHydrated.get()) return Promise.resolve();
+
+  const now = Date.now();
+  const retryAt = state.firmHydrateRetryAt.get();
+  if (retryAt !== undefined) {
+    // Clock-Skew-Grenze: ein zurückspringender Systemtakt darf ein offenes
+    // Backoff-Fenster nicht verlängern (Lektion aus SEC-08/v1.36.35). Liegt
+    // die Frist weiter in der Zukunft als die Fensterlänge selbst, wird sie
+    // verworfen — der nächste Aufruf darf es sofort wieder versuchen.
+    if (retryAt - now > FIRM_HYDRATION_RETRY_MS) state.firmHydrateRetryAt.reset();
+    else if (now < retryAt) return Promise.resolve();
+  }
+
+  const attempt: Promise<void> = (async () => {
+    try {
+      await restoreFirmState(broker);
+      state.firmHydrated.set(true);
+      state.firmHydrateRetryAt.reset();
+      state.firmHydrateWarned.reset();
+    } catch (e) {
+      // Tabellen fehlen noch → `npx drizzle-kit push` muss noch ausgeführt
+      // werden. Der Broker startet trotzdem mit leerem Zustand und vollem
+      // Startkapital; der nächste Versuch liegt im Backoff-Fenster.
+      state.firmHydrated.set(false);
+      state.firmHydrateRetryAt.set(Date.now() + FIRM_HYDRATION_RETRY_MS);
+      reportRestoreFailureOnce(e);
+    }
+  })();
+
+  state.firmHydration.set(attempt);
+  // Slot nach Abschluss freigeben — sonst hinge der Prozess an einem
+  // bereits erledigten Promise und jeder künftige Zugriff wartete darauf.
+  void attempt.finally(() => state.firmHydration.reset());
+  return attempt;
+}
+
+/**
+ * Restore-Fehler melden — höchstens einmal pro Backoff-Fenster.
+ *
+ * Der Fehler ist für den Betrieb relevant (leerer Zustand statt
+ * Buchhaltung), aber ein Pfad, den jeder HTTP-Request und jeder 60-s-Tick
+ * auslösen kann, darf kein unbegrenzter Log-Schreiber sein. Dedup-Muster wie
+ * `warnPersistOnce` in der Control Plane.
+ */
+function reportRestoreFailureOnce(e: unknown): void {
+  if (state.firmHydrateWarned.get()) return;
+  state.firmHydrateWarned.set(true);
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes("relation") && msg.includes("does not exist")) {
+    console.error(
+      "[getBroker] Tabellen fehlen — bitte `npx drizzle-kit push` ausführen.\n" +
+      "  Die Anwendung startet mit leerem Zustand, bis das Schema angelegt ist.\n" +
+      `  Erneuter Versuch frühestens nach ${FIRM_HYDRATION_RETRY_MS} ms.`
+    );
+    return;
+  }
+  console.error("[getBroker] Hydration fehlgeschlagen:", msg);
+}
+
+/**
+ * Erzwingt beim nächsten Zugriff ein erneutes Laden aus der DB.
+ *
+ * RESTORE-01: hebt auch das Backoff-Fenster und das Log-Dedup auf. Wer den
+ * Cache explizit verwirft (Kill-Switch-Route, Schema-Push, Restore-Drill),
+ * erwartet den sofortigen neuen Restore — und bei erneutem Fehlschlag eine
+ * frische Journalzeile.
+ */
 export function invalidateBrokerCache() {
   state.firmHydrated.set(false);
+  state.firmHydrateRetryAt.reset();
+  state.firmHydrateWarned.reset();
 }
 
 export type AgentDecision = {

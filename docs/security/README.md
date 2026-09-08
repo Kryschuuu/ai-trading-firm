@@ -23,6 +23,7 @@
 | [../audits/README.md](../audits/README.md) | Zentrale Audit-Verwaltung — alle Audits chronologisch |
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
 | [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
+| [../audits/2026-09-08-arena-prompts/](../audits/2026-09-08-arena-prompts/) | Arena-Review-Serie (Prompts) — RESTORE-01: Restore des Firmenzustands pro Aufrufer (MEDIUM, Verfügbarkeit) | RESTORE-01 FIXED v1.36.37 (Closed) |
 
 ## Critical/High Findings (aggregierter Status)
 

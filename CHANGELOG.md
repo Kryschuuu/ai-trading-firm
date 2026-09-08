@@ -1,12 +1,97 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-07** · Code-Version **1.36.36**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-08** · Code-Version **1.36.37**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.37] — 2026-09-08 · fix(engine): RESTORE-01 — Restore des Firmenzustands gebündelt, gedeckelt und indexgestützt (MEDIUM)
+
+**MEDIUM, Verfügbarkeits-/Betriebshärtung (`src/lib/engine.ts`,
+`src/lib/stateRegistry.ts`, `src/db/schema.ts`,
+`drizzle/2026-09-08_positions_open_idx.sql` neu,
+`tests/engine.stateRestore.test.ts` neu, `tests/stateRegistry.test.ts`).**
+Befund RESTORE-01 (externe Review-Serie, Prompt 13 — dort für einen Django-Bot
+formuliert; auf diesen Stack übersetzt heisst der Pfad „Zustandswiederherstellung
+blockiert bei großen Tabellen“): **Die Hydration des Paper-Ledgers lief pro
+Aufrufer — ohne Bündelung, ohne Versuchsdeckel und ohne Index auf dem
+Abfrageprädikat.** Der Pfad wird von jedem HTTP-Request auf `/api/firm`, vom
+60-Sekunden-Monitor-Tick und von der Agenten-Pipeline ausgelöst; eine
+bereits langsame oder ausgefallene Datenbank wurde dadurch multipliziert
+belastet (Selbstverstärker bei Ausfall, kein Vertrauens-/Autonomie-Breach,
+keine Order konnte dadurch falsch ausgeführt werden).
+
+### Behoben
+
+- **Single-Flight für den Restore (`src/lib/engine.ts`):** `getBroker()` ruft
+  die Wiederherstellung nicht mehr pro Aufruf einzeln ab, sondern hängt sich
+  an den laufenden Lauf (`state.firmHydration`, Muster identisch zu
+  `controlPlaneHydrating` der Control Plane). N parallele Kaltstarts sind
+  damit N Wartende, aber **ein** Restore. Nebenbedingung: zwei `hydrate()`-Läufe
+  kämpfen nicht mehr um denselben Ledger (Clear-Then-Fill konnte einen
+  zwischenzeitlich gebuchten Fill verwischen).
+- **Gedeckelte Wiederholung nach Fehlschlag:** Der Restore-Versuch wird nach
+  einem Fehler frühestens nach `FIRM_HYDRATION_RETRY_MS` (5 s) wiederholt.
+  `firmHydrated` bleibt `false` — das Flag wird also nie gesetzt, obwohl der
+  Zustand gerade nicht der DB-Wahrheit entspricht. `invalidateBrokerCache()`
+  (u. a. Kill-Switch-Route) hebt das Fenster gezielt auf.
+- **Clock-Skew-Grenze:** Ein zurückspringender Systemtakt verlängert kein
+  offenes Backoff-Fenster (Fristen jenseits der eigenen Fensterlänge werden
+  verworfen) — analog der Lektion aus SEC-08/v1.36.35.
+- **Kein Log-Amplifier:** Die Restore-Warnung erscheint einmal pro Fenster
+  statt einmal pro Aufruf (`state.firmHydrateWarned`, Dedup-Muster wie
+  `warnPersistOnce`).
+- **Indexgestützte Abfrage (`src/db/schema.ts`):** Neuer partieller Index
+  `positions_open_idx` auf `positions (symbol) WHERE status = 'OPEN'`. Die
+  Restore-, Monitor-, Ops- und Mikro-Executor-Abfragen auf offene Positionen
+  brauchten vorher einen Sequenz-Scan über die append-only wachsende Tabelle
+  (20.000+ Zeilen sind im Regelbetrieb normal). Der Index enthält nur die
+  offenen Zeilen, bedient zugleich die Symbol-Lookups und ist additiv —
+  keine Datenänderung, kein Verhaltenwechsel.
+
+### Hinzugefügt
+
+- **`drizzle/2026-09-08_positions_open_idx.sql`** (neu): idempotenter
+  SQL-Pfad (`CREATE INDEX IF NOT EXISTS`) für Umgebungen ohne
+  `drizzle-kit push` — analog `2026-09-04_h2_order_intents.sql`.
+- **Drei Registry-Slots** (`src/lib/stateRegistry.ts`): `firmHydration`
+  (laufender Restore), `firmHydrateRetryAt` (Backoff-Frist),
+  `firmHydrateWarned` (Log-Dedup) — alle im einen Test-Reset
+  `__resetAllSingletonsForTests()` und in der Lifecycle-Doku (Wahrheit: DB,
+  Flags/Caches: RAM).
+- **`tests/engine.stateRestore.test.ts`** (neu, 9 Regressionstests):
+  10 parallele Kaltstarts → genau ein Restore; Request-Flut (200 parallele
+  Leser) vervielfacht die DB-Last nicht; kein Restore nach Erfolg;
+  fehlgeschlagener Restore wird nicht pro Aufruf wiederholt;
+  `invalidateBrokerCache()` erzwingt den sofortigen Versuch; Log-Dedup;
+  unveränderte Restore-Semantik (Positionen, Cash-Hinweis, SL/TP);
+  Schema- und Migrations-Guards. Alle Verhaltenstests waren vor dem Fix rot
+  (10/200/20 Restore-Läufe statt 1).
+
+### Dokumentiert
+
+- `docs/BROKER_ARCHITECTURE.md` (Singleton-Semantik: gebündelter Restore),
+  `docs/HANDBUCH.md` (Diagnose: Warnung erscheint jetzt gebündelt),
+  `docs/audits/2026-09-08-arena-review/` (neuer Audit-Ordner mit
+  RESTORE-01-Finding, Triage und Tracking).
+
+### Upgrade
+
+- Index anlegen: `npx drizzle-kit push` **oder**
+  `psql "$DATABASE_URL" -f drizzle/2026-09-08_positions_open_idx.sql`.
+  Fehlt der Index, funktioniert alles wie bisher — nur ohne den
+  Geschwindigkeitsvorteil.
+- Keine neue Umgebungsvariable, keine Datenmigration, keine API-Änderung.
+  Nach einem Restore-Fehlschlag gilt: erster neuer Versuch nach 5 s
+  (vorher: jeder Aufruf).
+
+### Validierung
+
+- `npm test`: 2005 Tests, 0 Fehlern (7 Übersprungen wie vorher).
+- `npm run typecheck`, `npm run lint`, `npm run docs:validate`: grün.
 
 ## [1.36.36] — 2026-09-07 · Security: SEC-09 — Secret-Memory-Hygiene
 

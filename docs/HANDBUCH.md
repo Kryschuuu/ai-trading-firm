@@ -1191,6 +1191,15 @@ danach im Dienst-Log (`journalctl -u ai-trading-firm`) laufend:
 und im Dashboard die Seite **„Setup erforderlich"**. `npx drizzle-kit push`
 scheitert zusätzlich mit `ECONNREFUSED 127.0.0.1:5432`.
 
+> **Hinweis ab v1.36.37 (RESTORE-01):** Die `[getBroker]`-Zeile ist die
+> Zustands-Wiederherstellung des Ledgers. Sie erscheint seit v1.36.37
+> gebündelt — einmal pro 5-Sekunden-Fenster statt einmal pro Request — und
+> der Wiederholungsversuch folgt automatisch. Weniger Logzeilen bedeuten also
+> **nicht**, dass die Datenbank wieder antwortet; der verlässliche Beweis ist
+> `journalctl`-Verlauf plus `GET /api/health`. Wer den Restore sofort erneut
+> auslösen will: `npx drizzle-kit push` und danach ein Kill-Switch-POST
+> (`POST /api/firm/kill`) oder ein Dienst-Neustart.
+
 **Ursache:** Das Datenverzeichnis `/var/lib/postgres/data` ist unvollständig —
 initdb wurde abgebrochen oder lief, während `postgresql.service` schon lief bzw.
 in einer Restart-Schleife hing. Der Server startet dann scheinbar normal
