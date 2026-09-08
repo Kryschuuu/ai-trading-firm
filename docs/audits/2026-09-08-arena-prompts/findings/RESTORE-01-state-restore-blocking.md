@@ -11,8 +11,8 @@
 - **Fix-PR:** PR [#123](https://github.com/Kryschuuu/ai-trading-firm/pull/123) (Branch `arena/01a080a3-ai-trading-firm`)
 - **Datei(en):** `src/lib/engine.ts`, `src/lib/stateRegistry.ts`, `src/db/schema.ts`, `drizzle/2026-09-08_positions_open_idx.sql` (neu), `tests/engine.stateRestore.test.ts` (neu), `tests/stateRegistry.test.ts`
 
-> Der Status und die Validierung sind unter „Implementierter Fix (v1.36.37)“
-> festgehalten. Der überprüfte Wortlaut des Findings (Python/`sync_to_async`)
+> Der Status und die Validierung sind unter „Remediation (umgesetzt,
+> v1.36.37)“ und „Akzeptanzkriterien / Validierung“ festgehalten. Der überprüfte Wortlaut des Findings (Python/`sync_to_async`)
 > ist unter „Triage des Wortlauts“ dokumentiert und für dieses Repository als
 > nicht anwendbar bewertet — die Schwachstellenklasse dagegen ist real und
 > wurde behoben.
