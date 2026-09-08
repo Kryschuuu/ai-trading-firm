@@ -27,6 +27,12 @@
  * Reine RAM-Caches / Prozess-Singletons (kein verteilter Zustand):
  *   - `firmHydrated`            Hydration-Flag des Paper-Ledgers; DB ist die
  *                               Wahrheit, das Flag nur "schon geladen".
+ *   - `firmHydration`           Laufender Restore des Ledgers (Single-Flight,
+ *                               Promise-Dedup wie `controlPlaneHydrating`).
+ *   - `firmHydrateRetryAt`      Backoff-Frist nach einem Restore-Fehlschlag
+ *                               (RAM-Zeitstempel, deckelt die Wiederholung).
+ *   - `firmHydrateWarned`       Einmalige Restore-Warnung pro Fenster
+ *                               (Log-Dedup analog `controlPlanePersistWarned`).
  *   - `pipelineBusy`            Mutex der Agenten-Pipeline (Single-Flight).
  *   - `controlPlaneStates`      Cache der Venue-Zustaende (`venue_control_state`).
  *   - `controlPlaneHydrating`   Dedup laufender Venue-Hydrationen.
@@ -167,6 +173,20 @@ export const state = {
   // ── Engine (src/lib/engine.ts) ─────────────────────────────────────────────
   /** Papier-Ledger aus DB hydriert? (Wahrheit: `positions`/`equity_snapshots`.) */
   firmHydrated: flag("firmHydrated"),
+  /**
+   * Laufender Restore des Ledgers (Single-Flight). Wer den Restore ausloest,
+   * haengt sich an DIESES Promise — parallele Kaltstarts (HTTP-Request +
+   * Monitor-Tick + Pipeline) teilen sich einen einzigen DB-Restore statt N.
+   */
+  firmHydration: ref<Promise<void>>("firmHydration"),
+  /**
+   * Fruehester Zeitpunkt fuer den naechsten Restore-VERSUCH nach einem
+   * Fehlschlag (RAM, kein persistenter Zustand). Schuetzt eine bereits
+   * degradierte DB vor der Wiederholungs-Schleife jedes einzelnen Aufrufs.
+   */
+  firmHydrateRetryAt: ref<number>("firmHydrateRetryAt"),
+  /** Restore-Warnung wurde in diesem Fenster bereits geloggt? (Log-Dedup.) */
+  firmHydrateWarned: flag("firmHydrateWarned"),
   /** Pipeline-Einzelausfuehrung aktiv? (RAM-Mutex gegen Doppelverarbeitung.) */
   pipelineBusy: flag("pipelineBusy"),
 
@@ -219,6 +239,9 @@ export const state = {
 export function __resetAllSingletonsForTests(): void {
   // Engine
   state.firmHydrated.reset();
+  state.firmHydration.reset();
+  state.firmHydrateRetryAt.reset();
+  state.firmHydrateWarned.reset();
   state.pipelineBusy.reset();
   // Control Plane
   state.controlPlaneStates.reset();

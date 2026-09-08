@@ -226,7 +226,18 @@ export const positions = pgTable("positions", {
   ruleId: uuid("rule_id").references(() => tradeRules.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  // RESTORE-01 (v1.36.37, MEDIUM): Der Restore des Firmenzustands
+  // (`getBroker()`), der Monitor-Tick und der Mikro-Executor fragen alle nach
+  // `status = 'OPEN'`. Ohne Index war das ein Sequenz-Scan über die
+  // append-only wachsende Tabelle (20.000+ Zeilen sind im Regelbetrieb
+  // normal) — bei jedem Kaltstart und, vor dem Fix, bei jedem einzelnen
+  // Aufruf. Der partielle Index enthält nur die offenen Zeilen und bedient
+  // zugleich die Symbol-Lookups (`WHERE status = 'OPEN' AND symbol = …`).
+  index("positions_open_idx")
+    .on(t.symbol)
+    .where(sql`${t.status} = 'OPEN'`),
+]);
 
 /** Kommunikation der Agenten — das „institutionelle Gedächtnis“ der Firma. */
 export const agentMessages = pgTable("agent_messages", {
