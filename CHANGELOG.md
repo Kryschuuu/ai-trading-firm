@@ -1,12 +1,148 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-08** · Code-Version **1.36.37**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-08** · Code-Version **1.36.38**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.38] — 2026-09-08 · fix(scripts): Setup-, Stopp- und Wartungs-Scripts production-gehärtet (Dry-Run-Vertrag, Windows-Parität, Fehlalarm-Freiheit)
+
+**Betriebshärtung aller `scripts/`-Einstiegspunkte (Linux-Installer →
+v1.30.1, `setup-windows.ps1`, `stop.sh`, `validate-setup.sh` → v1.30.1,
+`smoke-test.sh`, `scripts/lib/pg-cluster.sh`, `scripts/lib/market-sync.ts`,
+`live-kill.ts`, `live-security-stamp.ts`, `scan-live-gate-secrets.ts`,
+`micro-executor.ts`).** Jedes Script wurde ausgeführt und gegen Doku und
+Changelog verifiziert — vom `--help` über Fehlerpfade (Exit-Codes) bis zum
+vollständigen Dry-Run des Installers in simulierter Arch-Umgebung. Alle
+Befunde tragen Kennungen und sind in
+[`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (neuer Abschnitt 10)
+nachvollziehbar dokumentiert. Keine API-Änderung, keine Migration, kein
+neues Pflicht-Flag — reiner Patch-Release (SemVer).
+
+### Behoben
+
+**Linux-Installer (`scripts/setup-cachyos.sh`, Installer v1.30.1):**
+
+- **DRY-01 — Dry-Run-Log-Spam:** Der Dry-Run setzte einen Log-Dateipfad,
+  legte das Verzeichnis aber nie an — jede Log-Zeile spammte „No such file
+  or directory“ auf stderr. Der Dry-Run ist jetzt stdout-only (Banner zeigt
+  `<nur stdout>`).
+- **DRY-02 — Dry-Run-Vertrag:** `--dry-run` ist dokumentiert als „nichts
+  ausführen“, führte aber real aus: Cluster-Reset-Dialog, `psql`-Aufrufe,
+  `.env`-Backup per `cp`, Registry-Seed (Upsert), Seed-POST,
+  `risk_config`-Upsert und Server-Start. Alle Schritte haben jetzt
+  Dry-Run-Guards; der dokumentierte Vertrag lautet präzise: **keine
+  Schreiboperationen, lesende Prüfungen laufen** (Versionen, Pfade,
+  Cluster-Status, Befehls-Vorschau).
+- **UUID-01 — UUID-Prüfung case-insensitiv:** Die Mission-UUID-Prüfung
+  lehnte Großbuchstaben-UUIDs ab (`!~`), während PostgreSQL und V07 in
+  `validate-setup.sh` sie akzeptieren — jetzt `!~*`.
+- **LOG-01 — Log-Fallback:** Der temporäre Validierungs-Server startet auch
+  ohne schreibbares Log (Fallback `/dev/null`) statt mit „ambiguous
+  redirect“ zu sterben.
+- **SEC-PSQL — Passwort aus der Prozessliste:** Das DB-Passwort lief als
+  `psql`-Argument (`-v`) für jeden lokalen Benutzer lesbar in `ps aux`.
+  Es läuft jetzt Dollar-quoted per STDIN (`pg_sql_quote_password()` mit
+  kollisionsfreiem Tag; `$`, Quotes, Backslashes und Umbrüche bleiben
+  literal). Gegen 10 gemeine Passwörter verifiziert.
+- **ERR-01 — Fehlalarme der ERR-Falle:** Planmäßig fehlschlagende
+  Prüfungen (fehlende `postgres`-Binaries, fehlende `PG_VERSION` auf
+  frischen Hosts) lösten die Meldung „Abbruch in Schritt …“ aus, obwohl
+  korrekt fortgefahren wurde (`pipefail` + ERR-Falle feuern auch in
+  Befehls-Substitutionen). Alle betroffenen Captures in
+  `scripts/lib/pg-cluster.sh` sowie Token- und Preset-Parses im Setup sind
+  mit `|| true` gehärtet (Werte-/Verzweigungslogik unverändert).
+
+**Stopp-Script (`scripts/stop.sh`):**
+
+- **STOP-01 — Timeout-Validierung:** Ein nicht-numerisches `STOP_TIMEOUT`
+  ließ `seq` fehlschlagen — die SIGTERM-Wartezeit entfiel still und der
+  Server bekam sofort SIGKILL. Jetzt validiert (1–300 s, Fallback 30 s mit
+  Warnung).
+- **STOP-02 — Selbstschutz:** Die `pgrep`-Fallback-Muster treffen jede
+  Kommandozeile mit „next-server“ — auch die eigene Ahnenkette. Keine PID
+  der eigenen Kette bekommt je ein Signal (verifiziert: Harness überlebt).
+- **STOP-03 — Verankerte Muster:** `next-server` zählt nur als Token
+  (`argv[0]` des Workers, `npx next start`, …), nicht als Substring —
+  `less next-server.log` & Co. werden nicht mehr getroffen (13/13
+  Pattern-Fälle verifiziert).
+
+**Validator (`scripts/validate-setup.sh` → v1.30.1):**
+
+- **VAL-01 — Stream-Konsistenz:** Abschnitts-Überschriften liefen immer
+  nach stderr, Check-Zeilen nach stdout — jetzt beide über `progress()`
+  (stdout normal, stderr im JSON-Modus; stdout bleibt reines JSON).
+- **VAL-02 — JSON-Härtung:** `baseUrl`/`version` werden jq-kodiert wie
+  alle Labels (ein Versionsstring mit Anführungszeichen bräche sonst
+  das JSON).
+
+**Smoke-Test (`scripts/smoke-test.sh`):**
+
+- **SMOKE-01 — Bash-3-Kompatibilität:** `"${AUTH[@]}"` auf leerem Array
+  bricht unter `set -u` auf Bash < 4.4 (macOS-Bash 3.2) mit „unbound
+  variable“ ab — jetzt `${AUTH[@]+"${AUTH[@]}"}` wie in
+  `validate-setup.sh` (8 Stellen).
+
+**Windows-Installer (`scripts/setup-windows.ps1`):**
+
+- **WIN-01 — BOM-freie `.env`:** `Set-Content -Encoding UTF8` hängt auf
+  PowerShell 5.1 ein BOM an (aktuelle dotenv-Versionen tolerieren es,
+  ältere Tools lesen es als Teil des ersten Schlüssels). Die Datei wird
+  jetzt per .NET-UTF8 ohne BOM geschrieben — byte-identisch auf 5.1 und 7+.
+- **WIN-02 — SQL via STDIN:** Das Rollen-SQL mit Klartext-Passwort stand
+  als `-c`-Argument in der Prozessliste — neuer `Run-Stdin`-Helper
+  (Passwort nie in `argv`, `psql` echot STDIN ohne `-e` nicht).
+- **WIN-03 — Prozessbaum-Cleanup:** `Stop-Process` auf `npx.cmd` ließ
+  `node.exe` als Waise auf dem Port zurück — jetzt `taskkill /T`
+  (Baum-Kill) plus Port-Cleanup, das nur greift, wenn der Port vorher
+  frei war (fremde Instanzen werden nie beendet).
+- **WIN-04 — Schema- und Risiko-Parität:** Der Windows-Pfad prüfte weder
+  Tabellenstand (≥ 14, wie Schritt 07 auf Linux) noch setzte er den
+  dokumentierten Short-Default — `risk_config.allowShort` blieb auf dem
+  Code-Default 0 statt 1. Beides nachgezogen (fatal mit Fix-Hinweis, wie
+  auf Linux).
+
+**TypeScript-CLIs (`scripts/*.ts`, `scripts/lib/market-sync.ts`):**
+
+- **MDSYNC-002 — Doppel-Präfix:** Die Gate-Fehlermeldung trug `[market-sync]`
+  doppelt (`gateMessage()` präfixte, der CLI präfixte erneut) — eine Stelle
+  präfixt.
+- **LGSCAN-001 — Credential-Guard:** `scan-live-gate-secrets.ts` prüfte,
+  ob der Datei-*Inhalt* „tests/“ enthält, statt ob der *Pfad* eine
+  Testdatei ist — Testdateien ohne diesen String übersprangen die
+  Echt-Credential-Prüfung still. Jetzt pfadbasiert (8/8 Fälle verifiziert).
+- **LGSTAMP-001 — `--source`-Validierung:** Jeder Tippfehler
+  (`--source=manuell`) fiel still auf `ci` zurück — der Stamp behauptete
+  eine CI-Herkunft, die es nie gab. Ungültige Werte brechen mit Exit 2 ab.
+- **LGKILL-001 — Fehlermeldung:** Nicht-Error-Würfe ergaben
+  „FEHLGESCHLAGEN: undefined“ — jetzt lesbar.
+- **MICRO-001 — Port-Fehler:** Belegter Health-Port (EADDRINUSE) warf
+  einen ungefilterten Stack — jetzt eine Zeile plus sauberer
+  Executor-Stopp, Exit 1.
+
+### Geändert
+
+- `.env.example` dokumentiert `UNIVERSE_DATA_DIR` (schrieb das Setup
+  schon immer, fehlte nur in der Vorlage).
+- Doku präzisiert: `docs/SETUP_BUGS.md` (Abschnitt 11: alle Kennungen mit
+  Nachweis), `docs/INSTALL.md` + `README.md` (exakter Dry-Run-Vertrag),
+  `docs/INSTALL-WINDOWS.md` (BOM-frei, Short-Default, Prozess-Cleanup).
+
+### Nachweis
+
+- Jedes Script ausgeführt: `--help`/Hilfe-Texte, Dry-Runs, Fehlerpfade mit
+  dokumentierten Exit-Codes (0/1/2 je Script, siehe SETUP_BUGS.md §10).
+- Installer-Dry-Run Ende-zu-Ende in simulierter Arch-Umgebung (Stub-`pacman`/
+  `sudo`): Exit 0, stderr leer, keine einzige Datei geschrieben.
+- `tsc --noEmit` und `eslint scripts/` sauber; `docs:validate` grün (8/8);
+  gezielte Regressionstests grün (setupCluster, setupPgService,
+  docsVersioning, marketdata-CLI, symbols, history-migration: 69/69).
+- PowerShell-Script statisch verifiziert (Klammer-Balance,
+  keine PS-7-only-Syntax, alle Aufruf-Bindungen geprüft) — kein
+  Windows-Runner in dieser Umgebung, CI/Review auf Windows empfohlen.
 
 ## [1.36.37] — 2026-09-08 · fix(engine): RESTORE-01 — Restore des Firmenzustands gebündelt, gedeckelt und indexgestützt (MEDIUM)
 

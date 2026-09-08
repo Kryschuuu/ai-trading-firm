@@ -101,7 +101,13 @@ export async function runMarketSyncDetailed(options: MarketSyncRunOptions): Prom
   return { result, skipped: adapters.skipped };
 }
 
-/** Behebungshinweis pro Gate-Grund — symbolische Codes, keine Pfade/URLs. */
+/**
+ * Behebungshinweis pro Gate-Grund — symbolische Codes, keine Pfade/URLs.
+ *
+ * MDSYNC-002 (v1.36.38): bewusst OHNE `[market-sync]`-Präfix — der Einstiegspunkt
+ * (`runMarketSyncCli`) stellt es voran. Zuvor stand es doppelt in der Ausgabe
+ * („[market-sync] [market-sync] BITUNIX wurde nicht freigeschaltet …“).
+ */
 export function gateMessage(venue: string, skipped: readonly SkippedAdapter[]): string {
   const reason = skipped.find((s) => s.venue === venue)?.reason ?? "UNKNOWN_VENUE";
   const hints: Record<SkippedAdapter["reason"], string> = {
@@ -112,7 +118,7 @@ export function gateMessage(venue: string, skipped: readonly SkippedAdapter[]): 
     UNKNOWN_VENUE: `Für "${venue}" existiert kein MarketDataAdapter. Bekannte Venues: ${KNOWN_SYNC_VENUES.join(", ")}.`,
     INVALID_VENUE_KEY: "Venue-Key verletzt das erlaubte Format [A-Z0-9][A-Z0-9_-]{0,31}.",
   };
-  return `[market-sync] ${venue} wurde nicht freigeschaltet (Grund: ${reason}). Behebung: ${hints[reason]}`;
+  return `${venue} wurde nicht freigeschaltet (Grund: ${reason}). Behebung: ${hints[reason]}`;
 }
 
 /** Rückwärtskompatibler Aufruf: nur das `SyncResult`. */

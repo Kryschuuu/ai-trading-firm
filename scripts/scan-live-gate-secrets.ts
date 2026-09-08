@@ -65,7 +65,12 @@ for (const file of files) {
       console.error(`  - Muster ${hit.pattern} @${hit.index}: ${hit.excerpt}`);
     }
   }
-  if (/tests\\/.test(text) || /tests\//.test(text)) {
+  // LGSCAN-001 (v1.36.38): Der Test-Datei-Check lief versehentlich auf dem
+  // Datei-INHALT (`text`) statt auf dem PFAD — eine Testdatei, die den String
+  // „tests/“ nicht enthält, übersprang die Credential-Prüfung still. Jetzt
+  // entscheidet der Pfad (…/tests/… oder *.test.ts), geprüft wird der Inhalt.
+  const isTestFile = /(^|[\\/])tests[\\/]/.test(file) || file.endsWith(".test.ts");
+  if (isTestFile) {
     if (/(BITUNIX_API_SECRET|BITUNIX_API_KEY)\s*[:=]\s*["'][A-Za-z0-9+/_-]{16,}/.test(text)) {
       findings += 1;
       console.error(`[scan-live-gate-secrets] ${path.relative(ROOT, file)}: echte Venue-Credentials in Tests verboten.`);

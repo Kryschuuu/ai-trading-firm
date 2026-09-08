@@ -23,7 +23,15 @@ function arg(name: string): string | undefined {
 
 const runId = arg("run-id");
 const sha = arg("sha");
-const source = arg("source") === "manual" ? "manual" : "ci";
+// LGSTAMP-001 (v1.36.38): `--source` wird validiert — zuvor fiel jeder
+// Tippfehler (z. B. `--source=manuell`) still auf „ci“ zurück und der Stamp
+// behauptete eine CI-Herkunft, die es nie gab (Audit-Genauigkeit).
+const sourceRaw = arg("source") ?? "ci";
+if (sourceRaw !== "ci" && sourceRaw !== "manual") {
+  console.error(`[live:stamp] --source muss "ci" oder "manual" sein (war "${sourceRaw.slice(0, 32)}").`);
+  process.exit(2);
+}
+const source: "ci" | "manual" = sourceRaw;
 
 if (!runId) {
   console.error("[live:stamp] --run-id=… ist Pflicht (CI-Kennung der Suite).");

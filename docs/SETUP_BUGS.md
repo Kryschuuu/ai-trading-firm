@@ -1,9 +1,16 @@
 # Setup-Bug-Register — `scripts/setup-cachyos.sh`
 
-**Stand:** v1.33.1 · **Datum:** 2026-08-31 · **Status:** alle Befunde behoben (B1–B7)
+**Stand:** v1.36.38 · **Datum:** 2026-09-08 · **Status:** alle Befunde behoben
+(B1–B7 plus Script-Härtung v1.36.38: DRY-01/02, UUID-01, LOG-01, SEC-PSQL,
+ERR-01, STOP-01/02/03, VAL-01/02, SMOKE-01, WIN-01/02/03/04, MDSYNC-002,
+LGSCAN-001, LGSTAMP-001, LGKILL-001, MICRO-001)
 **Betroffene Dateien:** `scripts/setup-cachyos.sh`, `scripts/validate-setup.sh`,
 `src/lib/appPaths.ts`, `src/universe/presets.ts`, `src/lib/marketdata/config.ts`
-(Referenz für die akzeptierten `PAPER_MODE`-Werte)
+(Referenz für die akzeptierten `PAPER_MODE`-Werte) sowie seit v1.36.38
+`scripts/stop.sh`, `scripts/smoke-test.sh`, `scripts/setup-windows.ps1`,
+`scripts/lib/pg-cluster.sh`, `scripts/lib/market-sync.ts`,
+`scripts/live-kill.ts`, `scripts/live-security-stamp.ts`,
+`scripts/scan-live-gate-secrets.ts`, `scripts/micro-executor.ts`
 
 Dieses Dokument ist die verbindliche Befund-/Fix-Liste des Setup-Pfads. Es
 ersetzt die formlose Notizsammlung „bugs start script.md“, die nie versioniert
@@ -26,6 +33,20 @@ ist).
 | B5 | API-Sicherheit | hoch | offener LAN-Betrieb ohne Token; falsch geprüfte Ceiling-Klemmung | behoben |
 | B6 | Validierung | hoch | kein reproduzierbarer Abnahme-Check; Smoke-Test zu langsam | behoben |
 | B7 | PAPER_MODE-Default | kritisch | Setup schreibt `PAPER_MODE=B` → `parsePaperMode()` lehnt ab → `/api/firm` 503 mit irreführendem Hinweis; zehn stille Folgefehler | behoben |
+| DRY-01/02 | Dry-Run-Vertrag | hoch | `--dry-run` spammte Log-Fehler und führte real aus (psql, Seed, Server-Start) | behoben (v1.36.38) |
+| UUID-01 | UUID-Prüfung | niedrig | Setup lehnte Großbuchstaben-UUIDs ab | behoben (v1.36.38) |
+| LOG-01 | Validierungs-Server | niedrig | Start ohne Log-Datei brach mit „ambiguous redirect“ ab | behoben (v1.36.38) |
+| SEC-PSQL | Passwort-Hygiene | mittel | DB-Passwort in `ps aux` lesbar (Linux `-v`, Windows `-c`) | behoben (v1.36.38) |
+| ERR-01 | ERR-Fallen-Fehlalarm | mittel | „Abbruch in Schritt …“ ohne Abbruch bei planmäßigen Prüfungen | behoben (v1.36.38) |
+| STOP-01/02/03 | Stopp-Script | hoch | sofortiges SIGKILL bei Müll-Timeout; Selbst-Abschuss; Substring-Treffer | behoben (v1.36.38) |
+| VAL-01/02 | Validator | niedrig | Überschriften auf stderr; ungekodierte JSON-Strings | behoben (v1.36.38) |
+| SMOKE-01 | Smoke-Test | niedrig | Absturz auf Bash < 4.4 bei leerem AUTH-Array | behoben (v1.36.38) |
+| WIN-01–04 | Windows-Installer | hoch | BOM-`.env`, Passwort in `argv`, Waisen-Prozess, fehlende Schema-/Short-Prüfung | behoben (v1.36.38) |
+| MDSYNC-002 | Sync-CLI | niedrig | doppelte `[market-sync]`-Präfixe | behoben (v1.36.38) |
+| LGSCAN-001 | Secret-Scanner | mittel | Credential-Guard prüfte Inhalt statt Pfad | behoben (v1.36.38) |
+| LGSTAMP-001 | Suite-Stamp | niedrig | Tippfehler in `--source` wurde still `ci` | behoben (v1.36.38) |
+| LGKILL-001 | Kill-CLI | niedrig | „undefined“-Meldung bei Nicht-Error-Würfen | behoben (v1.36.38) |
+| MICRO-001 | Micro-Executor | niedrig | Stack-Trace bei belegtem Health-Port | behoben (v1.36.38) |
 
 ---
 
@@ -396,7 +417,156 @@ die operative Freigabe ist ausschließlich `riskLimits.allowShort`.
 
 ---
 
-## 10. Verwandte Dokumente
+## 10. Script-Härtung v1.36.38 (Ausführungs-Review aller `scripts/`)
+
+Anlass: Vollständiges Ausführungs-Review aller Scripts (jedes Script
+gestartet, Hilfe-Texte, Dry-Runs, Fehlerpfade mit Exit-Codes, Installer-
+Dry-Run Ende-zu-Ende in simulierter Arch-Umgebung). Installer-Version
+`scripts/setup-cachyos.sh` v1.30.0 → v1.30.1,
+`scripts/validate-setup.sh` v1.30.0 → v1.30.1.
+
+### DRY-01 — Dry-Run spammte „No such file or directory“
+
+**Symptom:** Jeder `--dry-run`-Lauf druckte pro Log-Zeile
+`... setup-<ts>.log: No such file or directory` auf stderr.
+**Ursache:** Der Default-Logpfad wurde gesetzt, das Verzeichnis aber im
+Dry-Run nie angelegt; `_log_to_file()` hing am fehlenden Pfad.
+**Fix:** Dry-Run ist stdout-only (`LOG_FILE=""`, Banner: `<nur stdout>`).
+**Nachweis:** Dry-Run Ende-zu-Ende: Exit 0, stderr 0 Bytes.
+
+### DRY-02 — Dry-Run führte real aus (Vertragsbruch)
+
+**Symptom:** `--dry-run` („nichts ausführen“) fragte Cluster-Resets ab,
+rief `psql` auf, kopierte `.env`-Backups, seedete die Registry (Upsert),
+POSTete Seeds, schrieb `risk_config` und startete Server.
+**Ursache:** Nur `run()`/`run_masked()` waren Dry-Run-sicher; direkte
+`psql`-/`npm`-/`curl`-Aufrufe und Seiteneffekte hatten keine Guards.
+**Fix:** Dry-Run-Guards in Schritt 03 (Cluster-Diagnose endet lesend),
+04 (nur URI aufbauen), 05 (kein Backup/kein Schreiben), 07 (keine
+Verifikation), 08 (kein Preset-Seed), 10 (komplett Vorschau);
+`pg_cleanup_stale_pid()` und `pg_wait_ready()` melden statt zu handeln.
+Vertrag jetzt exakt dokumentiert: **keine Schreiboperationen, lesende
+Prüfungen laufen** (`--help`, `README.md`, `INSTALL.md`).
+**Nachweis:** Simulierter Arch-Dry-Run (Stub-`pacman`/`sudo`): 10/10
+Schritte, Exit 0, keine einzige Datei geschrieben (`git status` leer bis
+auf die gewollten Code-Änderungen, kein `data/setup/`).
+
+### UUID-01 — UUID-Prüfung case-sensitiv
+
+**Symptom:** Großbuchstaben-UUIDs in `missions` zählten als „keine gültige
+UUID“. **Ursache:** `!~` statt `!~*` (PostgreSQL und V07 akzeptieren beide
+Schreibweisen). **Fix:** Ein Zeichen (`!~*`).
+**Nachweis:** Parity mit `looks_like_uuid()` in `validate-setup.sh`.
+
+### LOG-01 — Validierungs-Server ohne Log-Datei
+
+**Symptom:** Bei unbeschreibbarem Log starb der Server-Start mit
+„ambiguous redirect“ (`>>""`). **Fix:** Fallback `/dev/null`.
+
+### SEC-PSQL — DB-Passwort in der Prozessliste
+
+**Symptom:** Das Passwort war während des Setups für jeden lokalen
+Benutzer lesbar (`ps aux`: Linux `-v db_pass=…`, Windows `psql -c …`).
+**Fix:** Linux baut das SQL mit `printf` (regex-validierte Bezeichner,
+Dollar-quoted Passwort mit kollisionsfreiem Tag) und füttert `psql` per
+STDIN; Windows nutzt den neuen `Run-Stdin`-Helper. `psql` echot STDIN
+ohne `-e` nicht (weder Terminal noch Log).
+**Nachweis:** `pg_sql_quote_password()` gegen 10 gemeine Passwörter
+(Quotes, `$`, Backticks, `%`-Formate, Semikola, Tag-Kollisionen,
+Leerstring) — 10/10 Roundtrips exakt.
+
+### ERR-01 — „Abbruch …“-Fehlalarme der ERR-Falle
+
+**Symptom:** Auf frischen Hosts (keine `postgres`-Binaries, kein Cluster)
+meldete das Setup „Abbruch in Schritt PostgreSQL-Cluster (Zeile …)“ —
+und fuhr korrekt fort.
+**Ursache:** Mit `pipefail` liefern `v="$(postgres … | sed …)"`,
+`v="$(pg_config … | sed …)"` und `v="$(… cat PG_VERSION | tr …)"` 127/1;
+die ERR-Falle feuert auch in Befehls-Substitutionen (doppelt: Subshell
+plus Eltern), während `set -e` dort nicht abbricht. Die Lib war
+„set -e-sicher“, aber nicht „ERR-Fallen-still“.
+**Fix:** `|| true` an den drei Captures in
+`scripts/lib/pg-cluster.sh` plus Token-/Preset-Parses im Setup
+(Werte-/Verzweigungslogik unverändert).
+**Nachweis:** Isolierte Reproduktion (vorher 6 Trap-Feuer, nachher 0);
+voller Dry-Run mit stderr 0 Bytes; `tests/setupCluster.test.ts` und
+`tests/setupPgService.test.ts` grün.
+
+### STOP-01/02/03 — Stopp-Script
+
+- **STOP-01:** Müll-`STOP_TIMEOUT` → `seq`-Fehler → SIGTERM-Wartezeit
+  entfiel still → sofort SIGKILL. Jetzt validiert (1–300, Fallback 30).
+- **STOP-02:** `pgrep`-Muster trafen auch die eigene Ahnenkette (Aufruf
+  mit „next-server“ im Befehl tötete die aufrufende Shell — im Review
+  live passiert). Keine PID der eigenen Kette bekommt je ein Signal.
+- **STOP-03:** Muster verankert (Tokens statt Substrings):
+  `less next-server.log` & Co. treffen nicht mehr.
+  **Nachweis:** 13/13 Pattern-Fälle; Ende-zu-Ende mit Fake-Server
+  (`argv[0]=next-server`): erkannt, per SIGTERM sauber gestoppt,
+  Harness überlebt.
+
+### VAL-01/02 — Validator
+
+- **VAL-01:** Überschriften → `progress()` (stdout normal, stderr nur im
+  JSON-Modus; stdout bleibt reines JSON).
+- **VAL-02:** `baseUrl`/`version` jq-kodiert.
+  **Nachweis:** `--json` gegen toten Server: valides JSON, Exit 1.
+
+### SMOKE-01 — Smoke-Test auf Bash < 4.4
+
+**Symptom:** `"${AUTH[@]}"` auf leerem Array bricht unter `set -u` auf
+Bash < 4.4 (macOS 3.2) mit „unbound variable“ ab.
+**Fix:** `${AUTH[@]+"${AUTH[@]}"}` (8 Stellen, wie `validate-setup.sh`).
+**Nachweis:** `bash -n`; Pfad ohne Token gegen toten Server: Exit 1 mit
+Hinweis (kein Crash).
+
+### WIN-01–04 — Windows-Installer
+
+- **WIN-01:** `.env` BOM-frei per .NET-UTF8-ohne-BOM (5.1- und 7-kompatibel
+  — `Set-Content -Encoding UTF8` hängt auf 5.1 ein BOM an).
+- **WIN-02:** Rollen-SQL via STDIN (`Run-Stdin`) statt `-c` (Passwort nie
+  in `argv`/Task-Manager).
+- **WIN-03:** Health-Check-Cleanup per `taskkill /T` (Baum-Kill gegen
+  `node.exe`-Waisen) plus Port-Cleanup nur bei vorher freiem Port
+  (fremde Instanzen werden nie beendet; Warnung bei belegtem Port).
+- **WIN-04:** Schema-Verifikation (≥ 14 Tabellen) und
+  `risk_config.allowShort = 1`-Upsert — Parität mit Linux-Schritt 07/10
+  (zuvor blieb Windows auf Code-Default 0 statt Setup-Default 1).
+  **Nachweis:** statisch (Klammer-Balance, keine PS-7-only-Syntax,
+  Bindungen geprüft); Laufzeit auf Windows in CI/Review empfohlen.
+
+### TS-CLIs (MDSYNC-002, LGSCAN-001, LGSTAMP-001, LGKILL-001, MICRO-001)
+
+- **MDSYNC-002** (`scripts/lib/market-sync.ts`): Gate-Meldung ohne
+  Doppel-Präfix (nur der Einstiegspunkt präfixt).
+- **LGSCAN-001** (`scan-live-gate-secrets.ts`): Testdatei-Erkennung
+  pfadbasiert statt inhaltsbasiert (8/8 Fälle).
+- **LGSTAMP-001** (`live-security-stamp.ts`): `--source` validiert
+  (`ci|manual`, sonst Exit 2 statt stillem `ci`-Fallback).
+- **LGKILL-001** (`live-kill.ts`): Lesbare Meldung auch bei
+  Nicht-Error-Würfen.
+- **MICRO-001** (`micro-executor.ts`): `server.on("error")` — belegter
+  Port beendet mit einer Zeile plus Executor-Stopp (Exit 1).
+  **Nachweis:** Gate-Meldung einfach; Stamp-Validierung Exit 2/0;
+  Secret-Scan weiter negativ (28 Dateien); `tsc`/`eslint` sauber;
+  marketdata-CLI-Tests grün.
+
+### Verifizierte Nicht-Befunde (bewusst nicht geändert)
+
+- `PAPER:EURUSD=X`-Hinweis in `normalize-instrument-ids.ts` (Dry-Run):
+  legale Alt-Notation, per Design nur Hinweis (SYM-007 §3.4).
+- `run-scan.ts --candle-limit=abc`: bereits fail-loud
+  („muss eine positive Ganzzahl sein“, Exit 1, kein Request).
+- `"${VAR%$'\r'}"` in den Shell-Scripts: funktioniert (in
+  Parameter-Expansion wird `$'…'` expandiert) — per Hex-Dump verifiziert.
+- `Run`-Helper in `setup-windows.ps1`: `$LASTEXITCODE` übersteht die
+  `Tee-Object`-Pipeline korrekt (Cmdlets ändern es nicht).
+- Rolle `DILIGENCE`: kanonischer Name (Seed, Analysten, Handbuch
+  konsistent) — kein Tippfehler.
+
+---
+
+## 11. Verwandte Dokumente
 
 * [`SETUP_PG_TROUBLESHOOTING.md`](SETUP_PG_TROUBLESHOOTING.md) —
   PostgreSQL-Soforthilfe (Abschnitte 1–6)

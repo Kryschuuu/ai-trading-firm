@@ -14,6 +14,9 @@ if [[ -z "${FIRM_API_TOKEN:-}" && -f ".env" ]]; then
   # Letzter Treffer gewinnt; \047 = Hochkomma, \r = CR (falls die .env CRLF hat).
   FIRM_API_TOKEN="$(grep -E '^FIRM_API_TOKEN=' .env | tail -n 1 | cut -d= -f2- | tr -d $'"\047\r' || true)"
 fi
+# SMOKE-01 (v1.30.1): Leere Arrays werden unter `set -u` auf Bash < 4.4 (z. B.
+# macOS-Bash 3.2) als „unbound variable“ abgelehnt — deshalb überall die
+# Form `${AUTH[@]+"${AUTH[@]}"}` (wie in validate-setup.sh), nicht `"${AUTH[@]}"`.
 AUTH=()
 [[ -n "${FIRM_API_TOKEN:-}" ]] && AUTH=(-H "x-firm-token: ${FIRM_API_TOKEN}")
 PASS=0; FAIL=0
@@ -79,7 +82,7 @@ fi
 # ------------------------------------------------------------------ 2. Seed
 echo
 echo "${C_CYAN}2. Stammdaten${C_RESET}"
-curl -sf -X POST "${BASE_URL}/api/seed" "${AUTH[@]}" >/dev/null 2>&1
+curl -sf -X POST "${BASE_URL}/api/seed" ${AUTH[@]+"${AUTH[@]}"} >/dev/null 2>&1
 STATE="$(curl -s "${BASE_URL}/api/firm")"
 
 AGENTS="$(jq '.agents | length'   <<<"$STATE")"
@@ -144,7 +147,7 @@ fi
 
 if [[ "$(jq -r '.killSwitchArmed' <<<"$STATE")" == "true" ]]; then
   note "Not-Halt ist aktiv — wird für den Test entschärft."
-  curl -s -X POST "${BASE_URL}/api/firm/kill" "${AUTH[@]}" \
+  curl -s -X POST "${BASE_URL}/api/firm/kill" ${AUTH[@]+"${AUTH[@]}"} \
     -H 'Content-Type: application/json' -d '{"arm":false}' >/dev/null
 fi
 
@@ -155,7 +158,7 @@ if [[ ! "$MISSION" =~ $UUID_RE ]]; then
 else
   note "Läuft… (Variante A kann einige Minuten dauern)"
   START=$(date +%s)
-  RESULT="$(curl -s --max-time 900 -X POST "${BASE_URL}/api/firm/run" "${AUTH[@]}" \
+  RESULT="$(curl -s --max-time 900 -X POST "${BASE_URL}/api/firm/run" ${AUTH[@]+"${AUTH[@]}"} \
     -H 'Content-Type: application/json' \
     -d "{\"missionId\":\"${MISSION}\",\"pipeline\":true}")"
   ELAPSED=$(( $(date +%s) - START ))
@@ -171,13 +174,13 @@ fi
 # -------------------------------------------------------------- 6. Not-Halt
 echo
 echo "${C_CYAN}6. Not-Halt${C_RESET}"
-KILL="$(curl -s -X POST "${BASE_URL}/api/firm/kill" "${AUTH[@]}" \
+KILL="$(curl -s -X POST "${BASE_URL}/api/firm/kill" ${AUTH[@]+"${AUTH[@]}"} \
   -H 'Content-Type: application/json' \
   -d '{"arm":true,"flatten":true,"reason":"smoke-test"}')"
 check "Kill-Switch lässt sich ziehen" test "$(jq -r '.killSwitchArmed' <<<"$KILL")" == "true"
 note "Dabei glattgestellt: $(jq -r '.closedPositions' <<<"$KILL") Position(en)"
 
-BLOCKED="$(curl -s --max-time 300 -X POST "${BASE_URL}/api/firm/run" "${AUTH[@]}" \
+BLOCKED="$(curl -s --max-time 300 -X POST "${BASE_URL}/api/firm/run" ${AUTH[@]+"${AUTH[@]}"} \
   -H 'Content-Type: application/json' \
   -d "{\"missionId\":\"${MISSION}\",\"pipeline\":true}")"
 if jq -e '.pipeline[]?.result.status | select(. == "EXECUTED")' <<<"$BLOCKED" >/dev/null 2>&1; then
@@ -186,7 +189,7 @@ else
   echo "  ${C_GREEN}✓${C_RESET} Orders werden bei aktivem Not-Halt blockiert"; ((PASS++))
 fi
 
-curl -s -X POST "${BASE_URL}/api/firm/kill" "${AUTH[@]}" \
+curl -s -X POST "${BASE_URL}/api/firm/kill" ${AUTH[@]+"${AUTH[@]}"} \
   -H 'Content-Type: application/json' -d '{"arm":false}' >/dev/null
 note "Not-Halt wieder entschärft."
 
@@ -209,7 +212,7 @@ check "Snapshots vorhanden (${SNAP_N})" test "${SNAP_N}" -ge 1
 # konnte deshalb nie bestehen. Siehe docs/SETUP_BUGS.md, Befund B5.)
 ORIG_PCT="$(jq -r '.riskLimits.maxPositionPct * 100 | floor' <<<"$STATE")"
 [[ "$ORIG_PCT" =~ ^[0-9]+$ ]] || ORIG_PCT=25
-CLAMP="$(curl -s -X PUT "${BASE_URL}/api/firm/config" "${AUTH[@]}" \
+CLAMP="$(curl -s -X PUT "${BASE_URL}/api/firm/config" ${AUTH[@]+"${AUTH[@]}"} \
   -H 'Content-Type: application/json' -d '{"key":"maxPositionPct","value":90}')"
 if [[ "$(jq -r '.effective' <<<"$CLAMP")" == "0.5" ]]; then
   echo "  ${C_GREEN}✓${C_RESET} Ceiling-Klemmung aktiv (90 % → 0.5)"; ((PASS++))
@@ -217,7 +220,7 @@ else
   echo "  ${C_RED}✗${C_RESET} Ceiling-Klemmung FEHLERHAFT: $(jq -c . <<<"$CLAMP")"; ((FAIL++))
 fi
 # Ursprungswert zurueckschreiben -- der Test veraendert die Konfiguration nicht.
-curl -s -X PUT "${BASE_URL}/api/firm/config" "${AUTH[@]}" \
+curl -s -X PUT "${BASE_URL}/api/firm/config" ${AUTH[@]+"${AUTH[@]}"} \
   -H 'Content-Type: application/json' -d "{\"key\":\"maxPositionPct\",\"value\":${ORIG_PCT}}" >/dev/null
 
 # Token-Schutz prüfen (nur wenn konfiguriert)
