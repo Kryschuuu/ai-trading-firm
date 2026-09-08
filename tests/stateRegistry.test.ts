@@ -27,6 +27,9 @@ import {
 const EXPECTED_SLOTS = [
   // Engine
   "firmHydrated",
+  "firmHydration",
+  "firmHydrateRetryAt",
+  "firmHydrateWarned",
   "pipelineBusy",
   // Control Plane
   "controlPlaneStates",
@@ -108,6 +111,23 @@ test("S2: EIN Reset stellt Engine-Singletons in den Ausgangszustand", () => {
   __resetAllSingletonsForTests();
   assert.equal(state.firmHydrated.get(), false, "firmHydrated nach Reset false");
   assert.equal(state.pipelineBusy.get(), false, "pipelineBusy nach Reset false");
+});
+
+// RESTORE-01 (v1.36.37): Der Restore-Slot (Single-Flight-Promise) und sein
+// Backoff-Fenster sind Prozess-Zustand — ein Test-Reset, der sie
+// zurücklässt, vererbt ein offenes Backoff an den nächsten Test.
+test("S2: EIN Reset raeumt Restore-Single-Flight und Backoff-Fenster der Engine auf", () => {
+  state.firmHydration.set(Promise.resolve());
+  state.firmHydrateRetryAt.set(Date.now() + 60_000);
+  state.firmHydrateWarned.set(true);
+  assert.equal(state.firmHydration.has(), true);
+  assert.equal(state.firmHydrateWarned.get(), true);
+
+  __resetAllSingletonsForTests();
+
+  assert.equal(state.firmHydration.has(), false, "Restore-Promise aus dem Registry-Slot entfernt");
+  assert.equal(state.firmHydrateRetryAt.has(), false, "Backoff-Frist nach Reset aufgehoben");
+  assert.equal(state.firmHydrateWarned.get(), false, "Log-Dedup nach Reset wieder scharf");
 });
 
 test("S2: EIN Reset raeumt Risk-Guard auf (Kill-Switch, Limits, Adaptivfaktor)", () => {
