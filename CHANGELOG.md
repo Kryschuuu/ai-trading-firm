@@ -1,12 +1,33 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-09** · Code-Version **1.36.39**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-09** · Code-Version **1.36.40**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.40] — 2026-09-09 · Security: js-yaml-Advisory GHSA-2883-xcg3-v3hh behoben (npm audit wieder grün)
+
+### Security
+
+- **js-yaml 4.3.1 → 4.3.2 (transitiv via `eslint → @eslint/eslintrc`):**
+  Das Advisory [GHSA-2883-xcg3-v3hh](https://github.com/advisories/GHSA-2883-xcg3-v3hh)
+  (`maxTotalMergeKeys` begrenzt den CPU-Verbrauch bei leeren Merge-Quellen
+  nicht, Severity high) ist behoben. `npm audit --audit-level=high` meldet
+  wieder 0 Schwachstellen; der fail-closed-Schritt im
+  `security-live-gate`-Workflow ist grün. Reiner Lockfile-Fix
+  (`package-lock.json`, 3 Zeilen) — kein Code-, API- oder Config-Wechsel,
+  kein Override nötig (die Range `^4.3.0` erlaubt die gefixte Version).
+
+### Validierung
+
+- `npm audit --audit-level=high`: Exit 0, 0 Schwachstellen.
+- `npm run lint`, `npm run docs:validate`: grün.
+- `npm test`: 1997 bestanden, 7 übersprungen; 1 Fehlschlag in
+  `tests/dbConfig.test.ts` (Setup-Passwort-Interpolation) besteht
+  unverändert auch ohne diese Änderung (pre-existing).
 
 ## [1.36.39] — 2026-09-09 · fix(scripts): Validierung sendet API-Token bei GET (B8) — Setup-Abnahme repariert, Build warnungsfrei
 
