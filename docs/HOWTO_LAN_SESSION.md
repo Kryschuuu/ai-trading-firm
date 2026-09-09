@@ -1,0 +1,114 @@
+# How-to: LAN weg nach Update (`trading.local` / `192.168.0.10:3369`) + „Firm-Status nicht verfügbar"
+
+> **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
+> systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard
+> „Firm-Status nicht verfügbar (Datenbank)" — das ist aber nur eine abgelaufene Session.
+>
+> ```bash
+> npm run stop                          # alten 127.0.0.1-Prozess beenden
+> sudo systemctl restart ai-trading-firm
+> ss -tlnp | grep 3369                  # muss 0.0.0.0:3369 zeigen
+> ```
+>
+> Danach im Dashboard **einmal neu anmelden** (Token aus `.env`), Seite neu laden. Fertig.
+
+---
+
+## Bug 1 — LAN nicht erreichbar nach Update
+
+### Symptom
+
+- `http://192.168.0.10:3369` von einem anderen Rechner (z. B. `192.168.0.20): Timeout / Connection refused.
+- `https://trading.local` (Caddy) ebenfalls tot.
+- Lokal auf dem Server geht `curl http://127.0.0.1:3369/api/health`.
+
+### Ursache
+
+Ein alter Next.js-Prozess bindet den Port **nur auf Loopback**:
+
+```
+LISTEN 127.0.0.1:3369  (next start -H 127.0.0.1)
+```
+
+Das ist typischerweise ein Rest aus `scripts/setup-cachyos.sh` Schritt 10
+(Validierung startet bewusst `npx next start -H 127.0.0.1`) oder ein manueller
+Start vor dem Update. Der systemd-Dienst (`npm run start` = `next start -H 0.0.0.0`)
+kann dann nicht starten und loopt:
+
+```
+Error: listen EADDRINUSE: address already in use 0.0.0.0:3369
+```
+
+sichtbar via `journalctl -u ai-trading-firm`. Auch Caddy
+(`nas-server-proxy-1`: `trading.local → host.docker.internal:3369`) erreicht
+einen reinen `127.0.0.1`-Listener nicht. Hinweis: `GET /api/health`-Check
+V03 (`package.json ≠ API-Version`) verrät den alten Prozess zusätzlich.
+
+### Fix
+
+```bash
+cd ~/GITHUB/ai-trading-firm
+npm run stop                              # beendet den 127.0.0.1-Prozess (ohne sudo)
+sudo systemctl restart ai-trading-firm
+systemctl status ai-trading-firm --no-pager   # muss active (running) zeigen
+ss -tlnp | grep 3369                      # SOLL: 0.0.0.0:3369 — NICHT 127.0.0.1:3369
+curl -s http://192.168.0.10:3369/api/health | head -c 300
+```
+
+Danach vom Client testen: `http://192.168.0.10:3369` und `https://trading.local`
+(Zertifikatswarnung für `tls internal` einmal bestätigen).
+
+Hinweis: `trading.firm` existiert nicht — kein DNS, kein Caddy-VHost
+(`~/nas-server/Caddyfile` kennt nur `trading.local`). Wer den Namen will,
+muss DNS + Caddy-VHost erst anlegen.
+
+---
+
+## Bug 2 — „Firm-Status nicht verfügbar (Datenbank)" + `UNAUTHORIZED`
+
+### Symptom
+
+Gelbe Box im Dashboard:
+
+> **Firm-Status nicht verfügbar (Datenbank).**
+> `UNAUTHORIZED` … Die Modul-Tabs (Operations Center, Brokers & Venues) funktionieren weiter.
+
+### Ursache (kein DB-Schaden!)
+
+- `GET /api/health` → `ok:true, schemaReady:true` — PostgreSQL, `DATABASE_URL` und Schema sind OK.
+- `GET /api/firm` verlangt seit SEC-02 die Permission `firm.read`
+  (`requirePermission(req, "firm.read")` in `src/app/api/firm/route.ts`).
+  Ohne gültige Session/Token antwortet die Route `401 UNAUTHORIZED`.
+- Nach Update + Neustart ist das `firm_session`-Cookie weg/ungültig
+  (15 min Laufzeit, Secret-Rotation, `clearLegacyFirmToken()`-Migration seit W1/v1.36.23).
+- `FirmDashboard.tsx` (`load()`, `fetch("/api/firm")`) schreibt **jeden**
+  Fehlerbody — auch `401` — in die Box, deren Titel hart „(Datenbank)" sagt.
+  Der Text lügt also: Es ist Auth, nicht die DB. Prüfen:
+
+```bash
+TOKEN=$(grep '^FIRM_API_TOKEN=' .env | cut -d= -f2)
+curl -s -H "x-firm-token: $TOKEN" http://127.0.0.1:3369/api/firm | head -c 200
+# → {"version":"1.36.40","agents":[…]} heißt: DB gesund, nur Session fehlt
+```
+
+### Fix — einmal neu anmelden
+
+1. Token auf dem Server holen:
+   ```bash
+   grep '^FIRM_API_TOKEN=' .env
+   ```
+2. Im Dashboard eine Aktion klicken (z. B. `▶▶ Ganze Pipeline`) → es erscheint
+   `🔒 Diese Aktion braucht den API-Token` mit Eingabefeld.
+3. Token einfügen → **Anmelden** → Seite neu laden (`F5`).
+   Der Firm-Status lädt dann über die neue `firm_session`-Cookie.
+
+Bleibt die Box: über **Abmelden** im Hinweisbalken aus- und wieder einloggen.
+
+---
+
+## Siehe auch
+
+- `docs/INSTALL.md` (Kap. 5 Reverse Proxy, Kap. 7 systemd, Troubleshooting-Tabelle
+  `EADDRINUSE 0.0.0.0:3369`)
+- `docs/SETUP_BUGS.md` (Befund B8: Validator-Auth / SEC-02)
+- `docs/security/README.md` (SEC-02: sensible Reads brauchen `firm.read`)
