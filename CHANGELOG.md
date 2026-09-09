@@ -1,12 +1,69 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-08** · Code-Version **1.36.38**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-09** · Code-Version **1.36.40**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.40] — 2026-09-09 · Security: js-yaml-Advisory GHSA-2883-xcg3-v3hh behoben (npm audit wieder grün)
+
+### Security
+
+- **js-yaml 4.3.1 → 4.3.2 (transitiv via `eslint → @eslint/eslintrc`):**
+  Das Advisory [GHSA-2883-xcg3-v3hh](https://github.com/advisories/GHSA-2883-xcg3-v3hh)
+  (`maxTotalMergeKeys` begrenzt den CPU-Verbrauch bei leeren Merge-Quellen
+  nicht, Severity high) ist behoben. `npm audit --audit-level=high` meldet
+  wieder 0 Schwachstellen; der fail-closed-Schritt im
+  `security-live-gate`-Workflow ist grün. Reiner Lockfile-Fix
+  (`package-lock.json`, 3 Zeilen) — kein Code-, API- oder Config-Wechsel,
+  kein Override nötig (die Range `^4.3.0` erlaubt die gefixte Version).
+
+### Validierung
+
+- `npm audit --audit-level=high`: Exit 0, 0 Schwachstellen.
+- `npm run lint`, `npm run docs:validate`: grün.
+- `npm test`: 1997 bestanden, 7 übersprungen; 1 Fehlschlag in
+  `tests/dbConfig.test.ts` (Setup-Passwort-Interpolation) besteht
+  unverändert auch ohne diese Änderung (pre-existing).
+
+## [1.36.39] — 2026-09-09 · fix(scripts): Validierung sendet API-Token bei GET (B8) — Setup-Abnahme repariert, Build warnungsfrei
+
+**Kritischer Setup-Fix:** `./scripts/validate-setup.sh` brach bei jeder
+Installation mit konfiguriertem `FIRM_API_TOKEN` mit einem nackten
+`WURZELURSACHE / UNAUTHORIZED` (Exit 2) ab, bevor ein einziger V-Check lief —
+das Setup war damit nie abgenommen (`FATAL Validierung fehlgeschlagen`).
+Ursache: `GET /api/firm` verlangt seit SEC-02 die Permission `firm.read`,
+der Validator hing `x-firm-token` aber nur an PUT (V17), nie an die GETs.
+Details und Nachweis: Befund B8 in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md).
+Reiner Patch-Release (SemVer): keine API-Änderung, keine Migration.
+
+### Behoben
+
+- **VAL-03 (`scripts/validate-setup.sh`):** `http_get` und `http_get_ok`
+  senden `x-firm-token` mit (offene Routen ignorieren den Header
+  schadlos). Der `WURZELURSACHE`-Block liest `.hint` als Fallback
+  (Auth-Denials tragen kein `.fix`) und gibt bei `UNAUTHORIZED`/`FORBIDDEN`
+  eine konkrete Token-Drift-Behebung aus, statt stumm zu bleiben.
+- **SMOKE-02 (`scripts/smoke-test.sh`):** gleicher latenter Fehler behoben —
+  `${AUTH[@]}` an allen Firm-GETs (`/api/firm`, `/api/firm/report`,
+  `/api/firm/equity`, `/api/firm/log`).
+- **B4-Folgefix (Build-Warnungen):** die 3 verbliebenen
+  Turbopack-Warnungen `Dynamic filesystem access` (`src/lib/auditSink.ts`,
+  `src/lib/docsCatalog.ts`) sind über `resolveRuntimePath()` /
+  `joinRuntimePath()` aus `src/lib/appPaths.ts` aufgelöst —
+  verhaltensidentisch, `..`-Ausbruch jetzt fail-closed. `npm run build`
+  ist warnungsfrei (Setup-Schritt 09 meldet `Build warnungsfrei`).
+
+### Nachweis
+
+- Stub-Server-Nachbau des 401-Verhaltens: vor dem Fix Exit 2 mit nacktem
+  `UNAUTHORIZED` (reproduziert), nach dem Fix 18/18 Checks, Exit 0.
+- `npm run build` (0 Warnungen), `tsc --noEmit`, `eslint`,
+  `tests/auditReliability.test.ts` (13/13),
+  `tests/docsVersioning.test.ts` (7/7) grün.
 
 ## [1.36.38] — 2026-09-08 · fix(scripts): Setup-, Stopp- und Wartungs-Scripts production-gehärtet (Dry-Run-Vertrag, Windows-Parität, Fehlalarm-Freiheit)
 
@@ -6421,6 +6478,47 @@ Wer Gemini nutzt: Header-Auth ist transparent, keine Key-Änderung nötig.
 - `scripts/drizzle.config.json` (veraltet, hardcodierte DB-Zugangsdaten) entfernt —
   das Projekt nutzt `drizzle.config.ts` mit `DATABASE_URL` aus `.env`.
 - `scripts/smoke-test.sh` prüfte das Feld `status`/`SCHEMA_MISSING`, das die API nie
+  liefert (toter Setup-Zweig). **Fix:** `schemaReady === false`.
+- Scheduler-Analysten-Slot nutzte Server-Stunde statt Berliner Zeit → Doppelstart-
+  Schutz griff auf UTC-Servern unzuverlässig. **Fix:** `Europe/Berlin`-Schlüssel.
+- Lint: 10 Fehler in `FirmDashboard.tsx`/`docs/page.tsx` (unescaped entities,
+  setState im Effekt) behoben — `npm run lint` ist jetzt fehlerfrei.
+- `tsconfig.tsbuildinfo` aus dem Repo entfernt und per `.gitignore` ausgeschlossen.
+
+### Security (geprüft, keine Änderung nötig)
+- `npm audit`: **0 Schwachstellen** (Stand des Release).
+- API-Token-Vergleich: `crypto.timingSafeEqual` ✓
+- Keine `eval`/`child_process`/`exec`, keine `dangerouslySetInnerHTML` ✓
+- `parseDecision`-Prototype-Pollution-Test (neu) ✓
+- SQL: ausschließlich parametrisierte Queries via Drizzle ✓
+
+### Tests
+- 63 Unit-Tests, alle grün (`npm test`).
+- Neu: Broker-Hydration (Neustart-Fix), Symbol-Injection, parseDecision-Robustheit,
+  Provider-Builder/Parser, Retry/Backoff, Kosten, Fallback-Kette, KILL-Marker.
+
+### Anmerkung Migration
+Kein Schema-Bruch: `equity_snapshots` existierte bereits; geändert wurde nur die
+Prüfung. Bei Alt-Installationen einfach `npx drizzle-kit push` erneut ausführen.
+
+---
+
+## [1.0.0] — 2026-08 (Ausgangsstand beim Audit)
+
+Baseline: Archiv-Repository mit Engine, Paper-Broker, Ollama/OpenAI-Client,
+Guardrails, Monitor, Analysten, Dashboard und erster Test-Suite (26 Tests).
+
+---
+
+## Offen / bewusst nicht gemacht (Backlog)
+
+| Thema | Grund |
+| --- | --- |
+| Multi-Node Rate-Limit / Scheduler-Locks | v1.4.0 limiter ist prozess-lokal; Cluster bräuchte Redis/DB |
+| Auto-Upgrade der Abhängigkeiten | Versions-Pins sind bewusst stabil; `npm audit` als Teil des Deploy-Checks |
+| Live-Broker-Adapter (Alpaca/ccxt) | bewusst außerhalb des Paper-only-Scopes (Handbuch Kapitel 8) |
+| Persistente Scheduler-Locks über Prozesse hinweg | aktuell prozess-lokal (Single-Node-Betrieb); Multi-Node bräuchte DB-Locks |
+status`/`SCHEMA_MISSING`, das die API nie
   liefert (toter Setup-Zweig). **Fix:** `schemaReady === false`.
 - Scheduler-Analysten-Slot nutzte Server-Stunde statt Berliner Zeit → Doppelstart-
   Schutz griff auf UTC-Servern unzuverlässig. **Fix:** `Europe/Berlin`-Schlüssel.

@@ -53,6 +53,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+import { joinRuntimePath, resolveRuntimePath } from "./appPaths";
 import { envInt } from "./env";
 import { sanitizeLogField, structuredLog } from "./logger";
 import { telemetry } from "./telemetry";
@@ -203,13 +204,19 @@ export function auditSinkConfig(
 ): AuditSinkConfig {
   const rawDir = env[AUDIT_SPOOL_DIR_FLAG]?.trim();
   const dir = rawDir && rawDir.length > 0 ? rawDir : AUDIT_SPOOL_DIR_DEFAULT;
-  const abs = path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir);
+  // B4-Folgefix (Befund B8): identische Semantik wie `path.join(process.cwd(), dir)`
+  // (absolute Pfade übernommen, relative unter dem Projektstamm verankert), aber
+  // die Pfadherkunft endet an der Modulgrenze von `./appPaths` — sonst meldet
+  // Turbopack hier und am Verbraucher `existsSync(cfg.spoolFile)` Projekt-Tracing.
+  // `..`-Ausbruch ⇒ PathTraversalError statt stillem Escape (fail-closed, wie
+  // alle B4-Stellen).
+  const abs = resolveRuntimePath(dir);
   return {
     retryMax: envInt(AUDIT_RETRY_MAX_FLAG, RETRY_MAX_DEFAULT, 0, 10, env),
     backoffMs: envInt(AUDIT_RETRY_BASE_MS_FLAG, RETRY_BASE_MS_DEFAULT, 0, 5_000, env),
     dbCooldownMs: envInt(AUDIT_DB_COOLDOWN_MS_FLAG, DB_COOLDOWN_MS_DEFAULT, 0, 600_000, env),
     spoolDir: abs,
-    spoolFile: path.join(abs, AUDIT_SPOOL_FILE_NAME),
+    spoolFile: joinRuntimePath(abs, AUDIT_SPOOL_FILE_NAME),
   };
 }
 

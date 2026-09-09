@@ -892,6 +892,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **Validierung meldet `V16` fehlgeschlagen** | Short-Selling ist aus, `--expect-shorts` erwartet aber `true` | `--expect-shorts false` — oder aktivieren: `allowShort = 1` im Dashboard bzw. `INSERT … ON CONFLICT (key) DO UPDATE` auf `risk_config` |
 | **Validierung meldet `V08`–`V11` fehlgeschlagen** | Preset-Universum nicht geseedet | `npm run universe:seed:markets` |
 | **Validierung meldet `V18` fehlgeschlagen** | kein `FIRM_API_TOKEN` konfiguriert, aber `AUTH_MODE=local-open` wirksam (offener Lokalbetrieb) | Token in `.env` setzen und Dienst neu starten. Ohne Token und ohne `AUTH_MODE=local-open` startet der Dienst in Produktion gar nicht erst (Boot-Guard, Befund C1) |
+| **Validierung bricht mit `WURZELURSACHE` / `UNAUTHORIZED` ab (Exit 2), kein V-Check läuft** | der Validator sendete `x-firm-token` nur bei PUT (V17), nicht bei den GETs — `GET /api/firm` verlangt aber seit SEC-02 die Permission `firm.read` (der `WURZELURSACHE`-Block feuerte fälschlich) | seit v1.36.39 behoben: Update ziehen und Setup erneut ausführen. Sofort-Behelf ohne Update: in `scripts/validate-setup.sh` den Token-Header auch an `http_get`/`http_get_ok` hängen (Details: Befund B8 in **[SETUP_BUGS.md](SETUP_BUGS.md)**) |
 
 Weitere Diagnose im **[Handbuch, Kapitel 12](HANDBUCH.md)**.
 

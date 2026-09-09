@@ -70,9 +70,11 @@ if [[ "$SCHEMA_READY" == "false" ]]; then
   exit 1
 fi
 
-check "Firmenzustand abrufbar" curl -sf --max-time 10 "${BASE_URL}/api/firm"
+# SMOKE-02 (Befund B8): GET /api/firm verlangt seit SEC-02 `firm.read` — alle
+# Firm-GETs tragen den Token-Header, sonst 401 UNAUTHORIZED im Modus token-required.
+check "Firmenzustand abrufbar" curl -sf --max-time 10 "${BASE_URL}/api/firm" ${AUTH[@]+"${AUTH[@]}"}
 
-STATE="$(curl -s --max-time 10 "${BASE_URL}/api/firm" 2>/dev/null)"
+STATE="$(curl -s --max-time 10 "${BASE_URL}/api/firm" ${AUTH[@]+"${AUTH[@]}"} 2>/dev/null)"
 if [[ -z "$STATE" ]]; then
   echo
   echo "${C_RED}Der Dienst antwortet nicht. Läuft 'npm run start'?${C_RESET}"
@@ -83,7 +85,7 @@ fi
 echo
 echo "${C_CYAN}2. Stammdaten${C_RESET}"
 curl -sf -X POST "${BASE_URL}/api/seed" ${AUTH[@]+"${AUTH[@]}"} >/dev/null 2>&1
-STATE="$(curl -s "${BASE_URL}/api/firm")"
+STATE="$(curl -s "${BASE_URL}/api/firm" ${AUTH[@]+"${AUTH[@]}"})"
 
 AGENTS="$(jq '.agents | length'   <<<"$STATE")"
 MISSIONS="$(jq '.missions | length' <<<"$STATE")"
@@ -198,12 +200,12 @@ note "Not-Halt wieder entschärft."
 echo
 echo "${C_CYAN}7. Reports, Equity-Kurve & Sicherheit${C_RESET}"
 
-check "Report-API (Tag)"     curl -sf --max-time 15 "${BASE_URL}/api/firm/report?period=day"
-check "Report-API (Woche)"   curl -sf --max-time 15 "${BASE_URL}/api/firm/report?period=week"
-check "Equity-Kurve (Tag)"   curl -sf --max-time 15 "${BASE_URL}/api/firm/equity?range=day"
-check "Protokoll-API"        curl -sf --max-time 15 "${BASE_URL}/api/firm/log?limit=5"
+check "Report-API (Tag)"     curl -sf --max-time 15 "${BASE_URL}/api/firm/report?period=day" ${AUTH[@]+"${AUTH[@]}"}
+check "Report-API (Woche)"   curl -sf --max-time 15 "${BASE_URL}/api/firm/report?period=week" ${AUTH[@]+"${AUTH[@]}"}
+check "Equity-Kurve (Tag)"   curl -sf --max-time 15 "${BASE_URL}/api/firm/equity?range=day" ${AUTH[@]+"${AUTH[@]}"}
+check "Protokoll-API"        curl -sf --max-time 15 "${BASE_URL}/api/firm/log?limit=5" ${AUTH[@]+"${AUTH[@]}"}
 
-SNAP_N="$(curl -s "${BASE_URL}/api/firm/equity?range=all" | jq '.series | length')"
+SNAP_N="$(curl -s "${BASE_URL}/api/firm/equity?range=all" ${AUTH[@]+"${AUTH[@]}"} | jq '.series | length')"
 check "Snapshots vorhanden (${SNAP_N})" test "${SNAP_N}" -ge 1
 
 # Konfigurations-Klemmung: die API nimmt PROZENT (asFraction, v1.7.0), also

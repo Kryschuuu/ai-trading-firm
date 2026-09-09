@@ -39,7 +39,10 @@
 #
 # Zusätzlich: eine .env-Vorabprüfung (PAPER_MODE) und ein WURZELURSACHE-Block
 # fangen Boot-Konfigurationsfehler ab, bevor sie als zehn stille Folgefehler
-# (V05–V17) erscheinen. Siehe docs/SETUP_BUGS.md, Befund B7.
+# (V05–V17) erscheinen. Siehe docs/SETUP_BUGS.md, Befunde B7 und B8.
+#
+# B8/VAL-03: Alle HTTP-Helfer (auch GET) senden x-firm-token — GET /api/firm
+# verlangt seit SEC-02 die Permission `firm.read`.
 #
 # ── Bewertung ──────────────────────────────────────────────────────────────
 # Bestanden gilt ab `--min-pass` (Default 15) von 18. Einzelne Checks dürfen
@@ -155,14 +158,20 @@ done
 # ── HTTP-Helfer ─────────────────────────────────────────────────────────────
 
 # GET → Body auf stdout; leer + Status 000 bei Verbindungsfehler.
+# VAL-03 (Befund B8): GETs tragen den Token-Header mit. GET /api/firm verlangt
+# seit SEC-02 die Permission `firm.read` und antwortet im Modus token-required
+# ohne/mit falschem x-firm-token mit 401 UNAUTHORIZED. Offene Routen
+# (/api/health, /api/markets, …) ignorieren den Header — er schadet dort nicht.
 http_get() {
-  curl -s --max-time "$TIMEOUT_SECONDS" "$1" 2>/dev/null || true
+  curl -s --max-time "$TIMEOUT_SECONDS" "$1" \
+    ${AUTH_HEADERS[@]+"${AUTH_HEADERS[@]}"} 2>/dev/null || true
 }
 
-# GET mit Erwartung auf HTTP 200.
+# GET mit Erwartung auf HTTP 200 (mit Auth — siehe VAL-03 oben).
 http_get_ok() {
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SECONDS" "$1" 2>/dev/null || echo 000)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SECONDS" "$1" \
+    ${AUTH_HEADERS[@]+"${AUTH_HEADERS[@]}"} 2>/dev/null || echo 000)"
   [[ "$code" == "200" ]]
 }
 
@@ -272,11 +281,23 @@ LIVE="$(http_get "${BASE_URL}/api/live/state")"
 # abgebrochen, statt zehn stille Fehlchecks zu produzieren.
 FIRM_ERROR="$(jqr '.error // empty' "$STATE")"
 FIRM_FIX="$(jqr '.fix // empty' "$STATE")"
+# VAL-03 (Befund B8): Auth-Denials (401/403) tragen `.hint`, nicht `.fix`
+# (denialResponse in src/auth/resolve.ts). Ohne diesen Fallback blieb der
+# WURZELURSACHE-Block stumm — nur „UNAUTHORIZED“ ohne jede Behebungszeile.
+if [[ -z "$FIRM_FIX" || "$FIRM_FIX" == "null" ]]; then
+  FIRM_FIX="$(jqr '.hint // empty' "$STATE")"
+  [[ "$FIRM_FIX" == "null" ]] && FIRM_FIX=""
+fi
 if [[ -n "$FIRM_ERROR" && "$FIRM_ERROR" != "null" ]]; then
   # paperMode-Fehler bekommen die konkrete .env-Behebung statt des generischen
   # Route-Hinweises („PostgreSQL läuft?").
   if [[ "$FIRM_ERROR" =~ paperMode|PAPER_MODE|broker-market-data|broker-paper-api ]]; then
     FIRM_FIX="sed -i 's/^PAPER_MODE=.*/PAPER_MODE=broker-market-data/' .env && sudo systemctl restart ai-trading-firm"
+  elif [[ "$FIRM_ERROR" == "UNAUTHORIZED" || "$FIRM_ERROR" == "FORBIDDEN" ]]; then
+    # B8: Token-Drift — der laufende Prozess kennt ein anderes Token als das
+    # geprüfte (z. B. .env nach dem Server-Start geändert), oder das Skript
+    # läuft ohne Token gegen einen Dienst im Modus token-required.
+    FIRM_FIX="Geprüftes Token ≠ Token des laufenden Dienstes: 1) Skript im Projektstamm ausführen (./.env wird dort gelesen). 2) Dienst neu starten, damit er die aktuelle .env lädt (sudo systemctl restart ai-trading-firm). 3) Erneut validieren — notfalls explizit: FIRM_API_TOKEN='<Token aus .env>' ./scripts/validate-setup.sh --base-url ${BASE_URL}"
   fi
   wurzelursache "$FIRM_ERROR" "$FIRM_FIX"
   exit 2

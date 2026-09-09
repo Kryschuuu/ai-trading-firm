@@ -33,6 +33,7 @@ ist).
 | B5 | API-Sicherheit | hoch | offener LAN-Betrieb ohne Token; falsch geprüfte Ceiling-Klemmung | behoben |
 | B6 | Validierung | hoch | kein reproduzierbarer Abnahme-Check; Smoke-Test zu langsam | behoben |
 | B7 | PAPER_MODE-Default | kritisch | Setup schreibt `PAPER_MODE=B` → `parsePaperMode()` lehnt ab → `/api/firm` 503 mit irreführendem Hinweis; zehn stille Folgefehler | behoben |
+| B8 | Validator-Auth (SEC-02) | kritisch | Validierung bricht mit nacktem `WURZELURSACHE / UNAUTHORIZED` ab (Exit 2), kein V-Check läuft; Setup NICHT abgenommen — plus 3 verbliebene Turbopack-Warnungen | behoben (v1.36.39) |
 | DRY-01/02 | Dry-Run-Vertrag | hoch | `--dry-run` spammte Log-Fehler und führte real aus (psql, Seed, Server-Start) | behoben (v1.36.38) |
 | UUID-01 | UUID-Prüfung | niedrig | Setup lehnte Großbuchstaben-UUIDs ab | behoben (v1.36.38) |
 | LOG-01 | Validierungs-Server | niedrig | Start ohne Log-Datei brach mit „ambiguous redirect“ ab | behoben (v1.36.38) |
@@ -566,7 +567,72 @@ Hinweis (kein Crash).
 
 ---
 
-## 11. Verwandte Dokumente
+## 11. B8 — Validator sendet kein Token bei GET (SEC-02) + 3 Build-Warnungen
+
+### Symptom
+
+* Setup-Schritt 10/10 bricht ab: `./scripts/validate-setup.sh` druckt nur
+  den Header (Token ist gesetzt) und danach einen nackten Block —
+  `WURZELURSACHE`, `UNAUTHORIZED`, **ohne jede Behebungszeile** — und endet
+  mit Exit 2. Kein einziger V-Check läuft; das Setup meldet
+  `FATAL Validierung fehlgeschlagen` und ist damit NICHT abgenommen.
+* Betroffen: **jede Installation mit konfiguriertem `FIRM_API_TOKEN`**
+  (also der Normalfall — das Setup erzeugt das Token, wenn es fehlt).
+* Daneben meldete Schritt 09/10 drei Turbopack-Warnungen
+  `Dynamic filesystem access` (`src/lib/auditSink.ts` ×2,
+  `src/lib/docsCatalog.ts` ×1) — nach B4 neu hinzugekommene Stellen.
+
+### Ursache
+
+* `GET /api/firm` verlangt seit SEC-02 die Permission `firm.read`
+  (`requirePermission(req, "firm.read")` in `src/app/api/firm/route.ts`).
+  Im Modus `token-required` — wirksam bei jedem konfigurierten Token —
+  antwortet die Route ohne oder mit falschem `x-firm-token` mit HTTP 401
+  und `{ok:false, error:"UNAUTHORIZED", hint:…}` (`denialResponse` in
+  `src/auth/resolve.ts`).
+* `scripts/validate-setup.sh` las das Token zwar nach `AUTH_HEADERS`, hing
+  den Header aber nur an `http_json` (PUT, V17). Der Zustands-Preload
+  (`STATE=$(http_get …/api/firm)`), V04 (`http_get_ok …/api/firm`) und die
+  Universum-Totals liefen **ohne** Header → 401 → `.error = "UNAUTHORIZED"`
+  → der B7-`WURZELURSACHE`-Block feuerte und beendete das Skript mit
+  Exit 2, bevor ein Check lief.
+* Zusatzfehler im selben Block: er las nur `.fix`; Auth-Denials tragen
+  aber `.hint` — deshalb blieb der Block stumm (keine Behebungszeile).
+* Gleicher latenter Fehler in `scripts/smoke-test.sh`: die Firm-GETs
+  (`/api/firm`, `/api/firm/report`, `/api/firm/equity`, `/api/firm/log`)
+  liefen ohne `${AUTH[@]}` und scheiterten mit Token ebenfalls mit 401.
+
+### Fix
+
+* `scripts/validate-setup.sh` (VAL-03): `http_get`/`http_get_ok` senden
+  `AUTH_HEADERS` mit (Bash-<4.4-sichere Form wie `http_json`). Offene
+  Routen (`/api/health`, `/api/markets`, …) ignorieren den Header.
+* `WURZELURSACHE` liest `.hint` als Fallback, wenn `.fix` fehlt, und gibt
+  bei `UNAUTHORIZED`/`FORBIDDEN` eine konkrete Token-Drift-Behebung aus
+  (Skript im Projektstamm ausführen, Dienst neu starten, notfalls
+  explizites `FIRM_API_TOKEN=…`).
+* `scripts/smoke-test.sh` (SMOKE-02): `${AUTH[@]}` an allen Firm-GETs.
+* B4-Folgefix Build-Warnungen: `auditSinkConfig()` löst über
+  `resolveRuntimePath()`/`joinRuntimePath()` auf, `docsCatalog` nutzt
+  `resolveRuntimePath()` — verhaltensidentisch zu
+  `path.join(process.cwd(), …)`; `..`-Ausbruch ist jetzt fail-closed
+  (`PathTraversalError`, wie alle B4-Stellen). Unnötiger `path`-Import in
+  `docsCatalog.ts` entfernt.
+
+### Nachweis
+
+* Stub-Server-Nachbau (bildet `401-ohne-Token` mit `.hint` exakt nach):
+  vor dem Fix Exit 2 mit nacktem `UNAUTHORIZED` (Fehler reproduziert),
+  nach dem Fix **18/18 Checks, Exit 0**; falsches Token → `WURZELURSACHE`
+  mit Behebungszeile.
+* `bash -n` beider Scripts grün.
+* `npm run build`: **0 Turbopack-Warnungen** (vorher 3); `tsc --noEmit`
+  und `eslint` sauber; `tests/auditReliability.test.ts` (13/13) und
+  `tests/docsVersioning.test.ts` (7/7) grün.
+
+---
+
+## 12. Verwandte Dokumente
 
 * [`SETUP_PG_TROUBLESHOOTING.md`](SETUP_PG_TROUBLESHOOTING.md) —
   PostgreSQL-Soforthilfe (Abschnitte 1–6)

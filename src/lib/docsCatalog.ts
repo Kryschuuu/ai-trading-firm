@@ -18,7 +18,8 @@
  *   - Neue Katalog-Eintraege fuer audits/, peer-reviews/, security/, archive/
  */
 import { existsSync } from "node:fs";
-import path from "node:path";
+
+import { resolveRuntimePath } from "./appPaths";
 
 export type DocsEntry = {
   /** Dateipfad relativ zum Projektstamm. */
@@ -312,14 +313,16 @@ export function resolveDoc(name: string): ResolvedDoc | null {
     safeBase, // Root-Dateien wie CHANGELOG.md, CONFIGURATION.md
   ];
   for (const file of searchPaths) {
-    if (existsSync(path.join(process.cwd(), file))) {
+    // B4-Folgefix (Befund B8): identisch zu `path.join(process.cwd(), file)`,
+    // aber ohne Turbopack-Projekt-Tracing (Opt-out liegt in `./appPaths`).
+    if (existsSync(resolveRuntimePath(file))) {
       const entry: DocsEntry = { file, title: safeBase.replace(/\.md$/, ""), subtitle: "" };
       return { slug: safeBase.replace(/\.md$/, "").toLowerCase(), entry, file, canonicalPath: `/docs/${safeBase}` };
     }
   }
   // Fallback: docs/* rekursiv? Nur wenn explizit erlaubt — hier nur docs/
   const file = `docs/${safeBase}`;
-  if (!existsSync(path.join(process.cwd(), file))) return null;
+  if (!existsSync(resolveRuntimePath(file))) return null;
   const entry: DocsEntry = { file, title: safeBase.replace(/\.md$/, ""), subtitle: "" };
   return { slug: safeBase.replace(/\.md$/, "").toLowerCase(), entry, file, canonicalPath: `/docs/${safeBase}` };
 }
