@@ -1,12 +1,98 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-09** · Code-Version **1.36.40**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-10** · Code-Version **1.36.41**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.36.41] — 2026-09-10 · fix(dashboard): Session-Ablauf zeigt „Sitzung abgelaufen" statt „Firm-Status nicht verfügbar (Datenbank)"
+
+**Dashboard-Fix (Bug 2 aus [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md)):**
+Nach Update + `systemctl restart ai-trading-firm` ist die `firm_session`-Cookie
+(HttpOnly, 15 min TTL) weg bzw. ungültig, und `GET /api/firm` antwortet seit
+SEC-02 mit `401 {"ok":false,"error":"UNAUTHORIZED"}` (`requirePermission(req,
+"firm.read")`). `FirmDashboard.load()` schrieb diesen Body ungeprüft in eine
+Hinweisbox mit hart verdrahtetem Titel „Firm-Status nicht verfügbar
+(Datenbank)." — samt der Empfehlung, PostgreSQL, `DATABASE_URL` und
+`npx drizzle-kit push` zu prüfen, obwohl die DB gesund war
+(`/api/health` → `schemaReady:true`, `/api/firm` mit `x-firm-token` → normaler
+Payload). Der Re-Login war zusätzlich umständlich: das Token-Feld erschien erst
+nach einer *Aktion* (z. B. Pipeline-Start), und nach erfolgreichem Login musste
+die Seite manuell neu geladen werden (`F5`).
+
+Reiner Patch-Release (SemVer): **kein** Wechsel am Auth-Modell (SEC-01/SEC-02,
+Session-Laufzeit, Permission-Matrix unverändert), **keine** Änderung am
+DB-/Schema-Verhalten, **kein** API-Vertragswechsel, keine Migration.
+
+### Behoben
+
+- **Fehlerklassifikation statt Vermutung** (neu: `src/lib/firmSession.ts`):
+  `classifyFirmFailure()` trennt `401` (Session abgelaufen), `403`
+  (authentifiziert ohne `firm.read` — der Server-`hint` wird angezeigt),
+  `5xx`/Body mit `.fix` (Datenquelle) sowie „unerwartete Antwort" und
+  „nicht erreichbar". Den DB-Titel und die
+  `PostgreSQL`/`DATABASE_URL`/`drizzle-kit`-Anleitung rendert nur noch
+  `kind: "database"`; ein `401` zeigt „Sitzung abgelaufen — bitte neu
+  anmelden."
+- **Automatischer Reload nach dem Login:** `submitSessionToken()` ruft nach
+  erfolgreichem `POST /api/auth/login` `load()` nach — der Firm-Status
+  erscheint ohne manuelles `F5`; die Meldung lautet entsprechend
+  „Session aktiv (900 s) — Firm-Status wird neu geladen."
+- **Token-Feld sofort sichtbar:** `showTokenField = needToken || issue.needsLogin`
+  blendet die Anmeldung ab dem ersten `401` beim Mount ein, nicht erst nach
+  einer Aktion. Bewusst **ohne** zusätzlichen `/api/auth/me`-Roundtrip —
+  `load()` läuft beim Mount und klassifiziert die `401` bereits; ein zweiter
+  Request mit eigener Fehlerbehandlung wäre redundante Logik.
+- **Wartbarkeit/Refaktor:** `FirmDashboard.tsx` −104/+62 Zeilen. Hinweisbox und
+  Hinweisbalken sind eigene, wiederverwendbare Komponenten
+  (`src/components/common/FirmIssueBox.tsx`,
+  `src/components/common/SessionNoticeBar.tsx`); die Klassifikation und der
+  Login-Flow liegen React-frei in `src/lib/firmSession.ts` und sind damit
+  direkt mit einem Stub-`fetch` testbar. Unverändert bleibt: Ein Fehler
+  ersetzt nie den letzten gültigen Zustand (FIX v1.23.0), die Modul-Tabs
+  (Operations Center, Brokers & Venues) bleiben nutzbar.
+
+### Sicherheit
+
+- Der API-Token reist weiterhin ausschließlich im Body von
+  `POST /api/auth/login` — kein Header, keine URL, kein `localStorage`
+  (W1, v1.36.23). Neue Tests prüfen, dass weder URL noch Header noch eine
+  Meldung den Token echoen.
+- Session-Laufzeit, Permission-Matrix, Auth-Modus und die serverseitige
+  Fehler-Redaction (`publicErrorMessage`) bleiben unverändert.
+
+### Dokumentation
+
+- [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md) (Bug 2): Symptom,
+  Ursache und Fix auf den Stand v1.36.41 gebracht — inkl. Hinweis, wie das
+  Verhalten vor v1.36.41 aussah, und dem Nachweis, dass die DB gesund ist.
+- [`docs/HANDBUCH.md`](docs/HANDBUCH.md) Kapitel 2.4: Anmeldung und
+  Sitzungsdauer im Dashboard (was welche Box bedeutet, wann neu angemeldet
+  werden muss).
+- [`docs/INSTALL.md`](docs/INSTALL.md) Troubleshooting-Tabelle: Zeile
+  „Sitzung abgelaufen" ergänzt; [`docs/README.md`](docs/README.md) führt das
+  LAN-Howto jetzt im Index, `src/lib/docsCatalog.ts` macht es unter
+  `/docs/HOWTO_LAN_SESSION.md` lesbar.
+
+### Nachweis
+
+- `tests/firmSession.test.ts` (17 Tests): `401` → `kind:"session"` +
+  `needsLogin` **ohne** die Begriffe Datenbank/PostgreSQL/`DATABASE_URL`/
+  `drizzle-kit`; `403` → Permission-Hint; `503` → DB-Titel und Original-`fix`
+  bleiben; `500` ohne `.fix` → Fallback-Anleitung; Netzwerk → „nicht
+  erreichbar"; erfolgreicher Login → `/api/auth/login` **dann** `/api/firm`
+  (genau ein Reload); abgelehnter Login → kein Reload; Token-Hygiene.
+- `test/ui/FirmSessionBox.test.tsx` (5 Render-Tests gegen die echten
+  Komponenten): `401` → „Sitzung abgelaufen" + `type="password"` sichtbar,
+  kein „Datenbank"-Text; `503` → DB-Titel, `drizzle-kit`, „Abmelden" statt
+  Token-Feld.
+- `npm run lint`, `npm run typecheck`, `npm run docs:validate`: grün.
+- `npm test` wurde für dieses Release auf Anweisung **nicht** ausgeführt;
+  beide neuen Dateien liegen in den bestehenden Globs (`tests/*.test.ts`,
+  `test/ui/*.test.tsx`) und laufen damit in der Gesamtsuite mit.
 
 ## [1.36.40] — 2026-09-09 · Security: js-yaml-Advisory GHSA-2883-xcg3-v3hh behoben (npm audit wieder grün)
 

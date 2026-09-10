@@ -84,6 +84,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Setup-Bug-Register",
     subtitle: "Befunde und Fixes des Setup-Pfads: PostgreSQL, Seed, Adapter, Build, Validierung (v1.30.0)",
   },
+  howtoLanSession: {
+    file: "docs/HOWTO_LAN_SESSION.md",
+    title: "How-to: LAN und Sitzung nach Update",
+    subtitle: "EADDRINUSE/127.0.0.1-Listener plus „Sitzung abgelaufen“ statt Datenbankfehler (v1.36.41)",
+  },
   architecture: {
     file: "docs/ARCHITECTURE.md",
     title: "Architektur: Makro/Mikro-Zyklen",
