@@ -26,6 +26,9 @@ die Seite manuell neu geladen werden (`F5`).
 Reiner Patch-Release (SemVer): **kein** Wechsel am Auth-Modell (SEC-01/SEC-02,
 Session-Laufzeit, Permission-Matrix unverändert), **keine** Änderung am
 DB-/Schema-Verhalten, **kein** API-Vertragswechsel, keine Migration.
+Versionsstand `1.36.40 → 1.36.41` — einschließlich `package-lock.json`
+(`version` und `packages[""].version`), das `tests/sec03.nextDependencies.test.ts`
+gegen `package.json` prüft.
 
 ### Behoben
 
@@ -90,6 +93,11 @@ DB-/Schema-Verhalten, **kein** API-Vertragswechsel, keine Migration.
   kein „Datenbank"-Text; `503` → DB-Titel, `drizzle-kit`, „Abmelden" statt
   Token-Feld.
 - `npm run lint`, `npm run typecheck`, `npm run docs:validate`: grün.
+- Security-Suiten (die der `security-live-gate`-Workflow fährt):
+  `npm run test:security:next` 26/26, `npm run test:security:ws` 16/16,
+  `npm run test:security:auth` 210/210, Live-Gate-Suite inkl. Coverage-Tor
+  78/78, `npm audit --audit-level=high` 0 Funde,
+  `scripts/scan-live-gate-secrets.ts` 0 Funde, `next build` ohne Warnungen.
 - `npm test` wurde für dieses Release auf Anweisung **nicht** ausgeführt;
   beide neuen Dateien liegen in den bestehenden Globs (`tests/*.test.ts`,
   `test/ui/*.test.tsx`) und laufen damit in der Gesamtsuite mit.
