@@ -164,6 +164,24 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 * **Design Decisions / Guide** — Ist-Architektur (Makro/Mikro, Paper, Broker,
   Router, RBAC), nicht der ursprüngliche Entwurfs-Essay.
 
+### 2.4 Anmeldung und Sitzung
+
+Im Token-Betrieb (`FIRM_API_TOKEN` gesetzt, `AUTH_MODE=token-required`) braucht
+das Dashboard eine Browser-Sitzung: `POST /api/auth/login` prüft den Token
+einmal serverseitig und setzt dafür ein HttpOnly-Cookie (`firm_session`,
+**15 Minuten** gültig). Der Token selbst bleibt nie im Browser (W1, v1.36.23).
+
+| Hinweis im Dashboard | Bedeutung | Was zu tun ist |
+| --- | --- | --- |
+| **Sitzung abgelaufen — bitte neu anmelden.** | `GET /api/firm` antwortete `401`: Dienst-Neustart, TTL abgelaufen oder `FIRM_SESSION_SECRET` rotiert | Token aus `.env` (`FIRM_API_TOKEN`) eintragen → **Anmelden**. Der Firm-Status lädt automatisch neu (seit v1.36.41, kein `F5` nötig) |
+| **Zugriff verweigert — Anmeldung oder Berechtigung fehlt.** | `403`: die Session ist gültig, aber die Rolle hat `firm.read` nicht | mit einem Token der passenden Rolle neu anmelden (Rollenmatrix: [security/README.md](security/README.md)) |
+| **Firm-Status nicht verfügbar (Datenbank).** | `5xx` von `GET /api/firm` — PostgreSQL antwortet nicht | die angezeigte Anleitung prüfen (`DATABASE_URL`, `npx drizzle-kit push`); die Modul-Tabs bleiben nutzbar |
+| **Firm-Status nicht erreichbar (Netzwerk).** | der Dienst selbst antwortet nicht | `systemctl status ai-trading-firm`, `journalctl -u ai-trading-firm -n 50 --no-pager` |
+
+> **Bis v1.36.40** zeigte das Dashboard bei einer abgelaufenen Sitzung
+> irreführend den Datenbank-Titel samt `DATABASE_URL`-Anleitung. Befund und
+> Nachweis: [HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md) (Bug 2).
+
 ---
 
 ## 3. Erste Sitzung — geführtes Beispiel

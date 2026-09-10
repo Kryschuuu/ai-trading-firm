@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.36.40` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.36.41` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Security-Upgrade v1.36.27:** SEC-01 ist behoben. Produktion mit Tokens benötigt
 ein unabhängiges `FIRM_SESSION_SECRET`; alle Instanzen neu starten und erneut
 anmelden. [Konfiguration und Migration](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
@@ -68,6 +68,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[DAILY_WEEKLY_RESEARCH.md](DAILY_WEEKLY_RESEARCH.md)** | Tages-/Wochen-Research-Pipeline: Scanner, Macro, Market Selection, Technical, News |
 | **[SETUP_BUGS.md](SETUP_BUGS.md)** | Setup-Bug-Register: PostgreSQL-Init, Seed/UUID, Broker-Adapter, Build-Warnungen |
 | **[SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** | PostgreSQL-Soforthilfe |
+| **[HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md)** | How-to: LAN nach Update tot (`EADDRINUSE`/`127.0.0.1`) + „Sitzung abgelaufen" statt Datenbankfehler (v1.36.41) |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang, Merge-Status |
 | **[DOCS_SYNC_AUDIT.md](DOCS_SYNC_AUDIT.md)** | Docs-Code-Sync-Audit: jede Behauptung gegen Code geprüft |
 
@@ -252,4 +253,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.36.40` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.36.41` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

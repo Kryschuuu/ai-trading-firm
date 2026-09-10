@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
 import { clearLegacyFirmToken, csrfHeaderValue } from "@/lib/browserSession";
+import {
+  fetchFirmSnapshot,
+  submitSessionToken,
+  type FirmIssue,
+} from "@/lib/firmSession";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
 import { missionScopeLabel } from "@/lib/missionTemplates";
@@ -12,7 +17,9 @@ import BrokersPanel from "./control-plane/BrokersPanel";
 import OperationsCenterPanel from "./ops/OperationsCenterPanel";
 import ThemeSwitcher from "./ThemeSwitcher";
 import AuditTrailPanel from "./common/AuditTrailPanel";
+import { FirmIssueBox } from "./common/FirmIssueBox";
 import ProtocolPanel from "./common/ProtocolPanel";
+import { SessionNoticeBar } from "./common/SessionNoticeBar";
 
 type ConfigEntry = {
   key: string;
@@ -122,7 +129,13 @@ export default function FirmDashboard() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [firmError, setFirmError] = useState("");
+  /**
+   * Klassifizierter Ladefehler von `GET /api/firm` (v1.36.41) — `null` heißt
+   * „letzter Load erfolgreich". Die Klassifikation unterscheidet Session (401),
+   * Permission (403) und Datenquelle (5xx); Titel und Anleitung kommen aus
+   * `src/lib/firmSession.ts`, nicht mehr aus diesem Template.
+   */
+  const [firmIssue, setFirmIssue] = useState<FirmIssue | null>(null);
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
   /** Pipeline-Statusleiste: läuft / fertig / fehlgeschlagen (optisch hervorgehoben). */
@@ -130,6 +143,28 @@ export default function FirmDashboard() {
     phase: "running" | "done" | "failed";
     detail?: string;
   } | null>(null);
+
+  /**
+   * Lädt den Firm-Zustand und klassifiziert Fehler zentral
+   * (`src/lib/firmSession.ts`, v1.36.41):
+   *
+   * - `401`/`403` → `issue.needsLogin`; das Token-Feld ist damit **sofort**
+   *   sichtbar (auch beim allerersten Load nach einem Neustart) und der Titel
+   *   beschuldigt nicht mehr die Datenbank,
+   * - `5xx` → Datenbank-Hinweis inklusive `fix`-Anleitung des Servers,
+   * - ein Fehler ersetzt nie den letzten gültigen Zustand (FIX v1.23.0) — die
+   *   modulbasierten Tabs (Operations Center, Brokers) bleiben nutzbar.
+   */
+  const load = useCallback(async () => {
+    const result = await fetchFirmSnapshot();
+    if (result.ok) {
+      setFirmIssue(null);
+      setData(result.data as FirmData);
+    } else {
+      setFirmIssue(result.issue);
+    }
+    setLoading(false);
+  }, []);
 
   /** Zeigt nach einer 401 die Token-Eingabe und bricht die Aktion ab. */
   async function ensureAuth(res: Response): Promise<boolean> {
@@ -145,69 +180,21 @@ export default function FirmDashboard() {
    * W1 (v1.36.23): Der Token wird NUR einmal serverseitig verifiziert —
    * `POST /api/auth/login` setzt die HttpOnly+Secure+SameSite-Session-Cookie
    * (15 min). Der Browser-Token wird verworfen, es gibt KEIN localStorage mehr.
+   *
+   * v1.36.41: Nach erfolgreicher Anmeldung lädt `load()` automatisch neu —
+   * das manuelle `F5` aus dem LAN-Howto entfällt.
    */
   async function saveToken() {
     const token = tokenDraft.trim();
     if (!token) return;
     setTokenDraft("");
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-        credentials: "same-origin",
-      });
-      const json = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        error?: string;
-        hint?: string;
-        open?: boolean;
-        expiresInS?: number;
-      };
-      if (res.ok && json.ok) {
-        clearLegacyFirmToken(); // Altbestand aus Pre-W1-Installationen entfernen
-        setNeedToken(false);
-        setNotice(
-          json.open
-            ? "Lokaler Offen-Betrieb — keine Anmeldung nötig."
-            : `Session aktiv (${json.expiresInS ?? 900} s) — Aktion bitte erneut ausführen.`
-        );
-      } else {
-        setNeedToken(true);
-        setNotice(`Anmeldung abgelehnt: ${json.hint ?? json.error ?? `HTTP ${res.status}`}`);
-      }
-    } catch {
-      setNeedToken(true);
-      setNotice("Netzwerkfehler — /api/auth/login nicht erreichbar.");
-    }
+    const authenticated = await submitSessionToken(token, {
+      onNotice: setNotice,
+      reload: load,
+    });
+    if (authenticated) clearLegacyFirmToken(); // Altbestand aus Pre-W1-Installationen
+    setNeedToken(!authenticated);
   }
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/firm");
-      const json = await res.json();
-      // FIX (v1.23.0): Ein 503 (z. B. PostgreSQL nicht erreichbar) liefert
-      // einen Fehlerkörper statt des Firm-Zustands. Der wurde früher ungeprüft
-      // in den State geschrieben und hat das Dashboard beim nächsten Rendern
-      // zerschossen (`data.positions.filter` auf undefined). Jetzt bleibt der
-      // letzte gültige Zustand stehen und die Meldung erscheint als Hinweis —
-      // die modulbasierten Tabs (Operations Center, Brokers) bleiben nutzbar.
-      if (!json || json.ok === false || !Array.isArray(json.positions) || !Array.isArray(json.missions)) {
-        setFirmError(
-          typeof json?.error === "string" && json.error
-            ? json.error
-            : `Unerwartete Antwort von GET /api/firm (HTTP ${res.status}).`
-        );
-        return;
-      }
-      setFirmError("");
-      setData(json);
-    } catch {
-      setFirmError("Netzwerkfehler — /api/firm nicht erreichbar.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   /**
    * SEC-08 (v1.36.35): Session serverseitig widerrufen und Cookies entfernen.
@@ -386,6 +373,13 @@ export default function FirmDashboard() {
 
   const badAgents = data.agents;
   const openPositions = data.positions.filter((p) => p.status === "OPEN");
+  /**
+   * v1.36.41: Ein `401`/`403` beim Laden blendet das Token-Feld sofort ein —
+   * auch ohne vorherige Aktion. `needToken` bleibt der manuelle Pfad
+   * (Aktion abgelehnt, Logout, Anmeldung abgelehnt).
+   */
+  const sessionExpired = firmIssue?.needsLogin ?? false;
+  const showTokenField = needToken || sessionExpired;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -497,38 +491,15 @@ export default function FirmDashboard() {
         </div>
       )}
 
-      {notice && (
-        <div className="mb-6 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-200">
-          <div className="flex items-center justify-between gap-4">
-            <span>{notice}</span>
-            {!needToken && (
-              <button
-                onClick={handleLogout}
-                className="rounded border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-700"
-              >
-                Abmelden
-              </button>
-            )}
-          </div>
-          {needToken && (
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="password"
-                placeholder="API-Token (FIRM_API_TOKEN)"
-                value={tokenDraft}
-                onChange={(e) => setTokenDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && saveToken()}
-                className="w-72 rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
-              />
-              <button
-                onClick={saveToken}
-                className="rounded bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500"
-              >
-                Anmelden
-              </button>
-            </div>
-          )}
-        </div>
+      {(notice !== "" || showTokenField) && (
+        <SessionNoticeBar
+          notice={notice}
+          showTokenField={showTokenField}
+          tokenDraft={tokenDraft}
+          onTokenDraftChange={setTokenDraft}
+          onSubmit={saveToken}
+          onLogout={handleLogout}
+        />
       )}
 
       {/* Status strip */}
@@ -581,20 +552,7 @@ export default function FirmDashboard() {
         ))}
       </nav>
 
-      {firmError && (
-        <div className="mb-4 rounded-xl border border-amber-800/60 bg-amber-950/30 px-4 py-3 text-xs leading-relaxed text-amber-200">
-          <p className="font-bold text-amber-100">Firm-Status nicht verfügbar (Datenbank).</p>
-          <p className="mt-1">
-            {firmError} Die Modul-Tabs (Operations Center, Brokers & Venues) funktionieren weiter —
-            ihre Quellen sind lokal.
-          </p>
-          {data.positions.length === 0 && (
-            <p className="mt-1 text-amber-300/80">
-              Prüfen: PostgreSQL gestartet? `DATABASE_URL` gesetzt? `npx drizzle-kit push` ausgeführt?
-            </p>
-          )}
-        </div>
-      )}
+      {firmIssue && <FirmIssueBox issue={firmIssue} />}
 
       {loading ? (
         <p className="py-16 text-center text-slate-400">Loading firm state…</p>

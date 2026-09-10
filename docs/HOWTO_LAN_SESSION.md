@@ -1,8 +1,8 @@
 # How-to: LAN weg nach Update (`trading.local` / `192.168.0.10:3369`) + „Firm-Status nicht verfügbar"
 
 > **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
-> systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard
-> „Firm-Status nicht verfügbar (Datenbank)" — das ist aber nur eine abgelaufene Session.
+> systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard eine
+> abgelaufene Sitzung — **nicht** die Datenbank.
 >
 > ```bash
 > npm run stop                          # alten 127.0.0.1-Prozess beenden
@@ -10,7 +10,8 @@
 > ss -tlnp | grep 3369                  # muss 0.0.0.0:3369 zeigen
 > ```
 >
-> Danach im Dashboard **einmal neu anmelden** (Token aus `.env`), Seite neu laden. Fertig.
+> Danach im Dashboard **einmal neu anmelden** (Token aus `.env`). Der Firm-Status
+> lädt seit **v1.36.41** von selbst neu — ein manuelles `F5` entfällt. Fertig.
 
 ---
 
@@ -18,7 +19,7 @@
 
 ### Symptom
 
-- `http://192.168.0.10:3369` von einem anderen Rechner (z. B. `192.168.0.20): Timeout / Connection refused.
+- `http://192.168.0.10:3369` von einem anderen Rechner (z. B. `192.168.0.20`): Timeout / Connection refused.
 - `https://trading.local` (Caddy) ebenfalls tot.
 - Lokal auf dem Server geht `curl http://127.0.0.1:3369/api/health`.
 
@@ -66,12 +67,28 @@ muss DNS + Caddy-VHost erst anlegen.
 
 ## Bug 2 — „Firm-Status nicht verfügbar (Datenbank)" + `UNAUTHORIZED`
 
+> **Behoben seit v1.36.41.** Das Dashboard trennt eine abgelaufene Sitzung von
+> einem echten Datenbankfehler (`classifyFirmFailure()` in
+> `src/lib/firmSession.ts`): Bei `401`/`403` steht dort jetzt **„Sitzung
+> abgelaufen — bitte neu anmelden."**, das Anmeldefeld ist sofort sichtbar und
+> nach dem Eintragen des Tokens lädt der Firm-Status automatisch neu. Die
+> PostgreSQL-Anleitung erscheint nur noch bei einem echten `5xx` der
+> `/api/firm`-Route. Der Rest dieses Abschnitts erklärt den Befund und zeigt,
+> wie man ihn ohne Dashboard nachweist.
+
 ### Symptom
 
-Gelbe Box im Dashboard:
+**Bis v1.36.40** — gelbe Box im Dashboard, deren Titel die Datenbank beschuldigt:
 
 > **Firm-Status nicht verfügbar (Datenbank).**
 > `UNAUTHORIZED` … Die Modul-Tabs (Operations Center, Brokers & Venues) funktionieren weiter.
+
+**Ab v1.36.41** — derselbe Zustand, korrekt benannt und mit Ausweg:
+
+> **Sitzung abgelaufen — bitte neu anmelden.**
+> `UNAUTHORIZED` Nach der Anmeldung lädt der Firm-Status automatisch neu — kein F5 nötig.
+>
+> `[ API-Token (FIRM_API_TOKEN) ]` **[Anmelden]**
 
 ### Ursache (kein DB-Schaden!)
 
@@ -81,14 +98,19 @@ Gelbe Box im Dashboard:
   Ohne gültige Session/Token antwortet die Route `401 UNAUTHORIZED`.
 - Nach Update + Neustart ist das `firm_session`-Cookie weg/ungültig
   (15 min Laufzeit, Secret-Rotation, `clearLegacyFirmToken()`-Migration seit W1/v1.36.23).
-- `FirmDashboard.tsx` (`load()`, `fetch("/api/firm")`) schreibt **jeden**
-  Fehlerbody — auch `401` — in die Box, deren Titel hart „(Datenbank)" sagt.
-  Der Text lügt also: Es ist Auth, nicht die DB. Prüfen:
+- **Bis v1.36.40** schrieb `FirmDashboard.tsx` (`load()`, `fetch("/api/firm")`)
+  **jeden** Fehlerbody — auch `401` — in dieselbe Box mit hart verdrahtetem
+  Titel „(Datenbank)". Der Text log also: Es war Auth, nicht die DB.
+  **Seit v1.36.41** wird die Antwort nach Statuscode klassifiziert; Titel und
+  Anleitung kommen aus `src/lib/firmSession.ts`.
+
+Nachweis, dass die Datenbank gesund ist und nur die Session fehlt:
 
 ```bash
-TOKEN=$(grep '^FIRM_API_TOKEN=' .env | cut -d= -f2)
-curl -s -H "x-firm-token: $TOKEN" http://127.0.0.1:3369/api/firm | head -c 200
-# → {"version":"1.36.40","agents":[…]} heißt: DB gesund, nur Session fehlt
+# .env in die Shell laden (Secret bleibt dort, erscheint in keiner Datei):
+set -a; . ./.env; set +a
+curl -s -H "x-firm-token: $FIRM_API_TOKEN" http://127.0.0.1:3369/api/firm | head -c 200
+# → {"version":"1.36.41","agents":[…]} heißt: DB gesund, nur Session fehlt
 ```
 
 ### Fix — einmal neu anmelden
@@ -97,18 +119,25 @@ curl -s -H "x-firm-token: $TOKEN" http://127.0.0.1:3369/api/firm | head -c 200
    ```bash
    grep '^FIRM_API_TOKEN=' .env
    ```
-2. Im Dashboard eine Aktion klicken (z. B. `▶▶ Ganze Pipeline`) → es erscheint
-   `🔒 Diese Aktion braucht den API-Token` mit Eingabefeld.
-3. Token einfügen → **Anmelden** → Seite neu laden (`F5`).
-   Der Firm-Status lädt dann über die neue `firm_session`-Cookie.
+2. Im Dashboard das Feld **API-Token (FIRM_API_TOKEN)** ausfüllen. Seit
+   v1.36.41 steht es direkt unter dem Hinweis „Sitzung abgelaufen"; bis
+   v1.36.40 erschien es erst nach einer *Aktion* (z. B. `▶▶ Ganze Pipeline`).
+3. **Anmelden** — der Firm-Status lädt automatisch neu, ein manuelles `F5`
+   ist seit v1.36.41 nicht mehr nötig.
 
 Bleibt die Box: über **Abmelden** im Hinweisbalken aus- und wieder einloggen.
+Steht dort stattdessen **„Zugriff verweigert"**, ist die Session gültig, aber
+die Rolle hat `firm.read` nicht (Rollenmatrix: `docs/security/README.md`).
+
+Die Sitzung gilt **15 Minuten** (`SESSION_TTL_S`) und endet außerdem bei jeder
+Secret-Rotation (`FIRM_SESSION_SECRET`) und bei jedem Dienst-Neustart.
 
 ---
 
 ## Siehe auch
 
-- `docs/INSTALL.md` (Kap. 5 Reverse Proxy, Kap. 7 systemd, Troubleshooting-Tabelle
-  `EADDRINUSE 0.0.0.0:3369`)
-- `docs/SETUP_BUGS.md` (Befund B8: Validator-Auth / SEC-02)
-- `docs/security/README.md` (SEC-02: sensible Reads brauchen `firm.read`)
+- [HANDBUCH.md](HANDBUCH.md) Kap. 2.4 — Anmeldung und Sitzung im Dashboard
+- [INSTALL.md](INSTALL.md) — Kap. 5 Reverse Proxy, Kap. 7 systemd,
+  Troubleshooting-Tabelle (`EADDRINUSE 0.0.0.0:3369`, „Sitzung abgelaufen")
+- [SETUP_BUGS.md](SETUP_BUGS.md) — Befund B8: Validator-Auth / SEC-02
+- [security/README.md](security/README.md) — SEC-02: sensible Reads brauchen `firm.read`
