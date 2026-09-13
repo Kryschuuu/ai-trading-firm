@@ -64,8 +64,11 @@ export function inverseNorm(value: number, min: number, max: number): number {
  * (Volumen, Open Interest): `min → 0`, `max → 1`, dazwischen `log10`-linear.
  */
 export function logNorm(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value) || value <= 0 || !(max > min) || min <= 0) return 0;
-  return clamp01((Math.log10(value) - Math.log10(min)) / (Math.log10(max) - Math.log10(min)));
+  if (!Number.isFinite(value) || value <= 0 || !(max > min) || min <= 0)
+    return 0;
+  return clamp01(
+    (Math.log10(value) - Math.log10(min)) / (Math.log10(max) - Math.log10(min)),
+  );
 }
 
 /**
@@ -81,7 +84,7 @@ export function bandNorm(
   floor: number,
   idealLow: number,
   idealHigh: number,
-  ceiling: number
+  ceiling: number,
 ): number {
   if (!Number.isFinite(value)) return 0;
   if (value <= floor || value >= ceiling) return 0;
@@ -132,7 +135,13 @@ export function logReturns(closes: readonly number[]): number[] | null {
   for (let i = 1; i < closes.length; i++) {
     const prev = closes[i - 1];
     const cur = closes[i];
-    if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) return null;
+    if (
+      !Number.isFinite(prev) ||
+      !Number.isFinite(cur) ||
+      prev <= 0 ||
+      cur <= 0
+    )
+      return null;
     out.push(Math.log(cur / prev));
   }
   return out;
@@ -142,7 +151,10 @@ export function logReturns(closes: readonly number[]): number[] | null {
  * Exponentiell geglätteter Durchschnitt, `k = 2/(period+1)`, Seed = erster Wert.
  * Identische Konvention wie `src/lib/indicators.ts` (ein Verfahren im Repo).
  */
-export function ema(values: readonly number[], period: number): number[] | null {
+export function ema(
+  values: readonly number[],
+  period: number,
+): number[] | null {
   if (!values.length || !(period >= 1)) return null;
   const k = 2 / (period + 1);
   const out: number[] = [];
@@ -162,8 +174,64 @@ export function last<T>(values: readonly T[]): T | null {
 }
 
 /** Multipliziert eine Perioden-Volatilität auf ein Jahr hoch: `σ × √periodsPerYear`. */
-export function annualize(sigmaPerPeriod: number, periodsPerYear: number): number {
+export function annualize(
+  sigmaPerPeriod: number,
+  periodsPerYear: number,
+): number {
   return sigmaPerPeriod * Math.sqrt(periodsPerYear);
+}
+
+/** Millisekunden eines Jahres mit 365 Tagen (24/7-Märkte wie Crypto). */
+export const YEAR_MS_365 = 365 * 24 * 60 * 60 * 1000;
+
+/** Median einer sortierbaren Zahlenreihe; `null` bei einer leeren Reihe. */
+export function median(values: readonly number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Leitet die Perioden pro Jahr aus dem **tatsächlichen Kerzenabstand** ab.
+ *
+ * Die Annualisierung (`σ × √periodsPerYear`) hängt zwingend von der
+ * Periodizität der gewerteten Reihe ab. Bisher war der Default 365
+ * („Tageskerzen“), während der Scanner über die Timeframe-Präferenz
+ * (`1h → 4h → …`) auf **Stundenkerzen** rechnet — das unterschlug die
+ * annualisierte Volatilität um den Faktor √(8760/365) ≈ 4,9 und drückte
+ * damit den 15-%-Scoreblock UND die Regime-Klassifikation in Richtung LOW
+ * (Hauptursache zu seltener Signale bei 1h-Warmup).
+ *
+ * Der Abstand wird als **Median** der positiven Zeitdifferenzen bestimmt
+ * (Robust gegen Lücken: Wochenenden bei Aktien, ausgefallene Bars,
+ * außerbörsliche Feiertage — Einzelausreißer verzerren den Median nicht).
+ *
+ * @param timestamps Aufsteigende Kerzenzeitpunkte (ms).
+ * @param fallback Perioden/Jahr, wenn sich kein Abstand ableiten lässt
+ *   (zu wenige Kerzen, ungleichmäßige Reihe ohne auswertbare Differenzen).
+ * @param clampMs Plausibilitätsintervall ableitbarer Abstände:
+ *   1 Minute … 1 Woche. Darunter/darüber wird der Fallback genommen, damit
+ *   ein defekter Zeitstempel (Sekunden statt ms, Jahresbars) keine
+ *   absurden Annualisierungen erzeugt.
+ */
+export function inferPeriodsPerYear(
+  timestamps: readonly number[],
+  fallback: number,
+  clampMs: { min: number; max: number } = {
+    min: 60_000,
+    max: 7 * 24 * 60 * 60 * 1000,
+  },
+): number {
+  const deltas: number[] = [];
+  for (let i = 1; i < timestamps.length; i++) {
+    const d = timestamps[i] - timestamps[i - 1];
+    if (Number.isFinite(d) && d >= clampMs.min && d <= clampMs.max)
+      deltas.push(d);
+  }
+  const spacing = median(deltas);
+  if (spacing === null || spacing <= 0) return fallback;
+  return YEAR_MS_365 / spacing;
 }
 
 /** Schneidet die letzten `n` Elemente aus (n ≤ 0 ⇒ leere Liste). */
@@ -177,7 +245,10 @@ export function tail<T>(values: readonly T[], n: number): T[] {
  * danach `rma_t = (rma_{t-1} × (period − 1) + x_t) / period`.
  * Gibt den **letzten** geglätteten Wert zurück; `null` bei zu wenig Daten.
  */
-export function wilderSmooth(values: readonly number[], period: number): number | null {
+export function wilderSmooth(
+  values: readonly number[],
+  period: number,
+): number | null {
   if (period < 1 || values.length < period) return null;
   let acc = 0;
   for (let i = 0; i < period; i++) {

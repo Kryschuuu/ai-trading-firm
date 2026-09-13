@@ -25,6 +25,8 @@ function snapshot(status: MarketDataReadinessStatus, overrides: Partial<MarketDa
     generatedAt: AT,
     requiredCandles: 61,
     registry: 26,
+    outOfScope: 0,
+    scoped: 26,
     discovered: 26,
     dataReady: 0,
     warming: 26,

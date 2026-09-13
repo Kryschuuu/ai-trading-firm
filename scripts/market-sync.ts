@@ -56,7 +56,7 @@ const VALUE_FLAGS = [
   "symbols",
   "concurrency",
 ] as const;
-const BOOLEAN_FLAGS = ["strict", "dry-run", "json", "no-manifest", "status", "help"] as const;
+const BOOLEAN_FLAGS = ["strict", "dry-run", "json", "no-manifest", "status", "help", "full"] as const;
 
 export interface ParsedCli {
   options: MarketSyncRunOptions;
@@ -113,6 +113,11 @@ Optionen:
   --strict
         Abbruch beim ersten Fehler statt degradiertem Lauf (Exit 1); bereits
         persistierte Daten bleiben erhalten (Append-only + Dedup).
+  --full
+        Vollen Kerzen-Abruf erzwingen. Default ist inkrementell: Reihen, die
+        bereits die Kerze des laufenden Zeitraums halten, werden ohne Request
+        übersprungen (ideal für den Stundentimer; der Erst-Warmup läuft immer
+        vollständig, weil noch nichts im Store liegt).
   --dry-run
         Volles Request-Budget, aber KEINE Persistenz: Registry und Historical
         Store werden in ein temporäres Verzeichnis geschrieben und verworfen.
@@ -261,6 +266,10 @@ export function parseSyncArgs(argv: readonly string[]): ParseResult {
   if (typeof strict === "string") return usage(strict);
   if (strict) options.strict = true;
 
+  const full = boolOf("full", false);
+  if (typeof full === "string") return usage(full);
+  if (full) options.fullRefresh = true;
+
   const dryRun = boolOf("dry-run", false);
   if (typeof dryRun === "string") return usage(dryRun);
   const json = boolOf("json", false);
@@ -405,6 +414,9 @@ export async function runMarketSyncCli(
       // Der Logger entscheidet, ob gedruckt wird (--json unterdrückt die
       // Zählerzeilen, sammelt sie aber für den Rückgabewert).
       logger,
+      // Dry-Runs versprechen „nichts in data/ schreiben“ — auch nicht in
+      // den Spread-Cache.
+      ...(dryRun ? { spreadCache: false } : {}),
       ...(deps.env ? { env: deps.env } : {}),
       ...(registry ? { registry } : {}),
       ...(history ? { history } : {}),

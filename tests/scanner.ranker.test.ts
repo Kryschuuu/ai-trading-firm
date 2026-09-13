@@ -14,12 +14,27 @@ import {
   resolveScannerConfig,
   validateScannerConfig,
 } from "../src/scanner/config";
-import { assertWeightsSumToOne, compareByScore, rankByScore, scoreInstrument } from "../src/scanner/ranker";
+import {
+  assertWeightsSumToOne,
+  compareByScore,
+  rankByScore,
+  scoreInstrument,
+} from "../src/scanner/ranker";
 import { classifyRegime, describeRegime } from "../src/scanner/regime";
 import { FactorCache, dataVersionOf } from "../src/scanner/cache";
 import { computeAllFactors } from "../src/scanner/factors";
-import { SCORE_COMPONENTS, COMPONENT_FACTOR, type FactorInput } from "../src/scanner/types";
-import { AS_OF_MS, candlesFromCloses, growthSeries, healthyCandles, instrument } from "./fixtures/scannerFixtures";
+import {
+  SCORE_COMPONENTS,
+  COMPONENT_FACTOR,
+  type FactorInput,
+} from "../src/scanner/types";
+import {
+  AS_OF_MS,
+  candlesFromCloses,
+  growthSeries,
+  healthyCandles,
+  instrument,
+} from "./fixtures/scannerFixtures";
 
 function input(overrides: Partial<FactorInput> = {}): FactorInput {
   return {
@@ -27,7 +42,12 @@ function input(overrides: Partial<FactorInput> = {}): FactorInput {
     candles: healthyCandles(),
     benchmarkCandles: null,
     derivatives: null,
-    news: { events24h: 1, events7d: 3, highImpact24h: 0, scheduledEventInHours: null },
+    news: {
+      events24h: 1,
+      events7d: 3,
+      highImpact24h: 0,
+      scheduledEventInHours: null,
+    },
     asOf: AS_OF_MS,
     config: DEFAULT_SCANNER_CONFIG,
     ...overrides,
@@ -55,10 +75,17 @@ test("Gewichte: exakt 25/15/15/10/10/10/5/5/5 und Summe 100 %", () => {
 
 test("Gewichte: eine Summe ≠ 100 % wird hart abgelehnt", () => {
   assert.throws(
-    () => validateScannerConfig({ weights: { ...DEFAULT_SCANNER_CONFIG.weights, liquidity: 0.3 } }),
-    ScannerConfigError
+    () =>
+      validateScannerConfig({
+        weights: { ...DEFAULT_SCANNER_CONFIG.weights, liquidity: 0.3 },
+      }),
+    ScannerConfigError,
   );
-  assert.throws(() => assertWeightsSumToOne({ ...DEFAULT_SCANNER_CONFIG.weights, news: 0.5 }), /100 %/);
+  assert.throws(
+    () =>
+      assertWeightsSumToOne({ ...DEFAULT_SCANNER_CONFIG.weights, news: 0.5 }),
+    /100 %/,
+  );
 });
 
 test("Konfiguration: scanner.config.json ist deckungsgleich mit DEFAULT_SCANNER_CONFIG", () => {
@@ -75,17 +102,38 @@ test("Konfiguration: Datei-Override via SCANNER_CONFIG_FILE wird geladen und val
 });
 
 test("Konfiguration: unplausible Werte werfen mit sprechender Meldung", () => {
-  assert.throws(() => validateScannerConfig({ regime: { low: 1, normal: 0.5, high: 2 } }), /aufsteigend/);
-  assert.throws(() => validateScannerConfig({ funnel: { deepMin: 50, deepMax: 40 } }), /deepMin/);
-  assert.throws(() => validateScannerConfig({ funnel: { dailyMax: 5000 } }), /monoton/);
-  assert.throws(() => validateScannerConfig({ factors: { momentum: { mode: "zufall" } } }), /absolute\|directional/);
-  assert.throws(() => validateScannerConfig({ weekly: { rotationMinScore: 90 } }), /rotationMinScore/);
+  assert.throws(
+    () => validateScannerConfig({ regime: { low: 1, normal: 0.5, high: 2 } }),
+    /aufsteigend/,
+  );
+  assert.throws(
+    () => validateScannerConfig({ funnel: { deepMin: 50, deepMax: 40 } }),
+    /deepMin/,
+  );
+  assert.throws(
+    () => validateScannerConfig({ funnel: { dailyMax: 5000 } }),
+    /monoton/,
+  );
+  assert.throws(
+    () => validateScannerConfig({ factors: { momentum: { mode: "zufall" } } }),
+    /absolute\|directional/,
+  );
+  assert.throws(
+    () => validateScannerConfig({ weekly: { rotationMinScore: 90 } }),
+    /rotationMinScore/,
+  );
   assert.throws(() => validateScannerConfig("kaputt"), /erwartet Objekt/);
 });
 
 test("Konfiguration: unbekannte Schlüssel werden ignoriert (kein Schmuggelpfad)", () => {
-  const cfg = validateScannerConfig({ boeserSchalter: true, funnel: { dailyMax: 42 } });
-  assert.equal((cfg as unknown as Record<string, unknown>).boeserSchalter, undefined);
+  const cfg = validateScannerConfig({
+    boeserSchalter: true,
+    funnel: { dailyMax: 42 },
+  });
+  assert.equal(
+    (cfg as unknown as Record<string, unknown>).boeserSchalter,
+    undefined,
+  );
   assert.equal(cfg.funnel.dailyMax, 42);
 });
 
@@ -99,8 +147,15 @@ test("Konfiguration: filters.minCandles ist per Default nicht gesetzt (abgeleite
 
 test("config validation warns when minCandles < requiredWarmupCandles", () => {
   const warnings: string[] = [];
-  const cfg = validateScannerConfig({ filters: { minCandles: 30 } }, { onWarn: (m) => warnings.push(m) });
-  assert.equal(cfg.filters.minCandles, 30, "der explizite Wert bleibt erhalten");
+  const cfg = validateScannerConfig(
+    { filters: { minCandles: 30 } },
+    { onWarn: (m) => warnings.push(m) },
+  );
+  assert.equal(
+    cfg.filters.minCandles,
+    30,
+    "der explizite Wert bleibt erhalten",
+  );
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /minCandles=30/);
   assert.match(warnings[0], /requiredWarmupCandles=61/);
@@ -108,14 +163,18 @@ test("config validation warns when minCandles < requiredWarmupCandles", () => {
 
 test("config validation: strict mode escalates a too-small minCandles to an error", () => {
   assert.throws(
-    () => validateScannerConfig({ filters: { minCandles: 10 } }, { strict: true }),
+    () =>
+      validateScannerConfig({ filters: { minCandles: 10 } }, { strict: true }),
     ScannerConfigError,
   );
 });
 
 test("config validation: an explicit minCandles >= required is accepted silently", () => {
   const warnings: string[] = [];
-  const cfg = validateScannerConfig({ filters: { minCandles: 200 } }, { onWarn: (m) => warnings.push(m) });
+  const cfg = validateScannerConfig(
+    { filters: { minCandles: 200 } },
+    { onWarn: (m) => warnings.push(m) },
+  );
   assert.equal(cfg.filters.minCandles, 200);
   assert.equal(warnings.length, 0);
 });
@@ -125,7 +184,10 @@ test("config validation: an explicit minCandles >= required is accepted silently
 test("Score: Summe der Beiträge entspricht dem Endscore", () => {
   const score = scoreInstrument(input());
   const sum = score.breakdown.reduce((a, e) => a + e.contribution, 0);
-  assert.ok(Math.abs(sum - score.score) < 1e-9, `Breakdown ${sum} ≠ Score ${score.score}`);
+  assert.ok(
+    Math.abs(sum - score.score) < 1e-9,
+    `Breakdown ${sum} ≠ Score ${score.score}`,
+  );
   assert.equal(score.breakdown.length, 9);
 });
 
@@ -133,12 +195,15 @@ test("Score: Breakdown ist vollständig, sortiert und rechnerisch konsistent", (
   const score = scoreInstrument(input());
   assert.deepEqual(
     score.breakdown.map((e) => e.component),
-    [...SCORE_COMPONENTS]
+    [...SCORE_COMPONENTS],
   );
   for (const entry of score.breakdown) {
     assert.equal(entry.factorId, COMPONENT_FACTOR[entry.component]);
     assert.equal(entry.weight, DEFAULT_SCANNER_CONFIG.weights[entry.component]);
-    assert.ok(Math.abs(entry.contribution - entry.weight * entry.normalized * 100) < 1e-9);
+    assert.ok(
+      Math.abs(entry.contribution - entry.weight * entry.normalized * 100) <
+        1e-9,
+    );
     assert.ok(entry.normalized >= 0 && entry.normalized <= 1);
     assert.ok(entry.reason.length > 0);
   }
@@ -147,22 +212,45 @@ test("Score: Breakdown ist vollständig, sortiert und rechnerisch konsistent", (
 test("Score: liegt immer in [0, 100] — bestes und schlechtestes Instrument", () => {
   const best = scoreInstrument(
     input({
-      instrument: instrument({ volume24h: 50_000_000_000, spread: 0.00005, takerFee: 0.0001, makerFee: 0 }),
+      instrument: instrument({
+        volume24h: 50_000_000_000,
+        spread: 0.00005,
+        takerFee: 0.0001,
+        makerFee: 0,
+      }),
       candles: healthyCandles(120),
       benchmarkCandles: candlesFromCloses(growthSeries(500, 0.999, 120)),
-      news: { events24h: 0, events7d: 0, highImpact24h: 0, scheduledEventInHours: null },
-    })
+      news: {
+        events24h: 0,
+        events7d: 0,
+        highImpact24h: 0,
+        scheduledEventInHours: null,
+      },
+    }),
   );
   const worst = scoreInstrument(
     input({
-      instrument: instrument({ volume24h: 1, spread: 0.02, takerFee: 0.01, makerFee: 0.01 }),
+      instrument: instrument({
+        volume24h: 1,
+        spread: 0.02,
+        takerFee: 0.01,
+        makerFee: 0.01,
+      }),
       candles: [],
-      news: { events24h: 20, events7d: 50, highImpact24h: 5, scheduledEventInHours: 1 },
-    })
+      news: {
+        events24h: 20,
+        events7d: 50,
+        highImpact24h: 5,
+        scheduledEventInHours: 1,
+      },
+    }),
   );
   assert.ok(best.score > worst.score);
   for (const s of [best, worst]) {
-    assert.ok(s.score >= 0 && s.score <= 100, `Score außerhalb [0,100]: ${s.score}`);
+    assert.ok(
+      s.score >= 0 && s.score <= 100,
+      `Score außerhalb [0,100]: ${s.score}`,
+    );
   }
 });
 
@@ -190,18 +278,25 @@ test("Score: Gewichtsänderung verschiebt den Score nachvollziehbar", () => {
   const liquidity = score.breakdown.find((e) => e.component === "liquidity");
   assert.ok(liquidity);
   assert.equal(score.score, liquidity.contribution);
-  assert.equal(score.score, Math.round(liquidity.normalized * 100 * 1e10) / 1e10);
+  assert.equal(
+    score.score,
+    Math.round(liquidity.normalized * 100 * 1e10) / 1e10,
+  );
 });
 
 test("Ranking: Score absteigend, ID als stabiler Tiebreaker", () => {
-  const a = scoreInstrument(input({ instrument: instrument({ symbol: "AAAUSDT" }) }));
-  const b = scoreInstrument(input({ instrument: instrument({ symbol: "BBBUSDT" }) }));
+  const a = scoreInstrument(
+    input({ instrument: instrument({ symbol: "AAAUSDT" }) }),
+  );
+  const b = scoreInstrument(
+    input({ instrument: instrument({ symbol: "BBBUSDT" }) }),
+  );
   assert.equal(a.score, b.score);
   assert.equal(compareByScore(a, b), -1);
   const ranked = rankByScore([b, a]);
   assert.deepEqual(
     ranked.map((s) => s.instrumentId),
-    ["BINANCE:AAAUSDT", "BINANCE:BBBUSDT"]
+    ["BINANCE:AAAUSDT", "BINANCE:BBBUSDT"],
   );
 });
 
@@ -223,7 +318,9 @@ test("Regime: Klassifikation exakt an den Schwellenwerten (Grenze gehört nach o
 });
 
 test("Regime: eigene Schwellen wirken sofort", () => {
-  const cfg = resolveScannerConfig({ regime: { low: 0.1, normal: 0.2, high: 0.3 } });
+  const cfg = resolveScannerConfig({
+    regime: { low: 0.1, normal: 0.2, high: 0.3 },
+  });
   assert.equal(classifyRegime(0.25, cfg.regime), "HIGH");
   assert.match(describeRegime("EXTREME", cfg.regime), /extrem/);
   assert.match(describeRegime("LOW", cfg.regime), /ruhig/);
@@ -232,10 +329,16 @@ test("Regime: eigene Schwellen wirken sofort", () => {
 });
 
 test("Regime: Score-Ergebnis trägt das Regime der realisierten Volatilität", () => {
-  const calm = scoreInstrument(input({ candles: candlesFromCloses(growthSeries(100, 1.0002, 60)) }));
+  const calm = scoreInstrument(
+    input({ candles: candlesFromCloses(growthSeries(100, 1.0002, 60)) }),
+  );
   assert.equal(calm.regime, "LOW");
   const wild = scoreInstrument(
-    input({ candles: candlesFromCloses(Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? 100 : 140))) })
+    input({
+      candles: candlesFromCloses(
+        Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? 100 : 140)),
+      ),
+    }),
   );
   assert.equal(wild.regime, "EXTREME");
 });
@@ -268,11 +371,42 @@ test("Cache: Treffer liefert exakt dasselbe Ergebnis wie eine Neuberechnung", ()
 test("Cache: LRU verdrängt und clear() setzt zurück", () => {
   const cache = new FactorCache(2);
   for (let i = 0; i < 5; i++) {
-    cache.getOrCompute(input({ instrument: instrument({ symbol: `SYM${i}USDT` }) }), computeAllFactors);
+    cache.getOrCompute(
+      input({ instrument: instrument({ symbol: `SYM${i}USDT` }) }),
+      computeAllFactors,
+    );
   }
   assert.equal(cache.size, 2);
   assert.equal(cache.statistics.evictions, 3);
   cache.clear();
   assert.equal(cache.size, 0);
   assert.equal(cache.statistics.hits, 0);
+});
+
+test("Konfiguration: Volatilitäts-Annualisierung (v1.37.0) — Defaults und Plausibilitätsschranken", () => {
+  // Default: Intervall wird abgeleitet, Fallback ist 1h (8760).
+  assert.equal(
+    DEFAULT_SCANNER_CONFIG.factors.volatility.inferPeriodsPerYear,
+    true,
+  );
+  assert.equal(DEFAULT_SCANNER_CONFIG.factors.volatility.periodsPerYear, 8760);
+  assert.equal(DEFAULT_SCANNER_CONFIG.version, 2);
+  // Explizite Opt-outs und andere Zeitrahmen sind zulässig.
+  assert.equal(
+    resolveScannerConfig({
+      factors: {
+        volatility: { inferPeriodsPerYear: false, periodsPerYear: 252 },
+      },
+    }).factors.volatility.periodsPerYear,
+    252,
+  );
+  // Unplausible Annualisierungen werden abgelehnt (Tippschutz, kein fs-Faktor).
+  assert.throws(() =>
+    validateScannerConfig({ factors: { volatility: { periodsPerYear: 0 } } }),
+  );
+  assert.throws(() =>
+    validateScannerConfig({
+      factors: { volatility: { periodsPerYear: 1_000_000 } },
+    }),
+  );
 });

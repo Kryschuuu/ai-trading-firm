@@ -23,7 +23,12 @@ import { checkEligibility, type FilterRejection } from "./filters";
 import { buildFunnel, type FunnelResult } from "./funnel";
 import { classifyRegime } from "./regime";
 import { rankByScore, scoreFromFactors } from "./ranker";
-import type { DerivativeContext, FactorInput, InstrumentScore, NewsRiskContext } from "./types";
+import type {
+  DerivativeContext,
+  FactorInput,
+  InstrumentScore,
+  NewsRiskContext,
+} from "./types";
 import type { ScannerReadiness } from "./readiness";
 import { assessDataReadiness, requiredWarmupCandles } from "./warmup";
 
@@ -39,7 +44,9 @@ export interface ScanDataProvider {
   /** OHLCV-Kerzen des Instruments (aufsteigend nach `time`). */
   candles(instrument: MarketInstrument): readonly MarketCandle[];
   /** Benchmark-Kerzen für die Korrelation (optional). */
-  benchmarkCandles?(instrument: MarketInstrument): readonly MarketCandle[] | null;
+  benchmarkCandles?(
+    instrument: MarketInstrument,
+  ): readonly MarketCandle[] | null;
   /** Funding/Open Interest (optional). */
   derivatives?(instrument: MarketInstrument): DerivativeContext | null;
   /** Deterministische News-Zähler (optional). */
@@ -66,6 +73,15 @@ export interface ScanOptions {
    * unterschieden.
    */
   dataErrors?: ReadonlyMap<string, string>;
+  /**
+   * Readiness-Scope (v1.37.0): `"data"` (Empfehlung für alle
+   * Produktionsaufrufer) bewertet nur Venues, an denen bereits Kerzen
+   * vorliegen. Damit blockieren kuratierte Seed-Instrumente auf Venues ohne
+   * laufenden Sync (ALPACA/IBKR/BINANCE-Presets bei aktiver BITUNIX-Venue)
+   * nicht dauerhaft den READY-Zustand. Default ohne Angabe: alle Instrumente
+   * (unverändertes Verhalten der reinen Funktion/Tests).
+   */
+  readinessScopeVenues?: readonly string[] | "data";
 }
 
 /** Kennzahlen eines Laufs (nicht Teil der Artefakte — Laufzeit ist nicht deterministisch). */
@@ -115,8 +131,14 @@ export interface ScanResult {
 
 /** Wandelt die injizierte Uhr in Millisekunden (wirft bei Unsinn). */
 export function toEpochMs(asOf: number | Date | string): number {
-  const ms = asOf instanceof Date ? asOf.getTime() : typeof asOf === "number" ? asOf : Date.parse(asOf);
-  if (!Number.isFinite(ms)) throw new Error("scanUniverse: asOf ist kein gültiger Zeitpunkt");
+  const ms =
+    asOf instanceof Date
+      ? asOf.getTime()
+      : typeof asOf === "number"
+        ? asOf
+        : Date.parse(asOf);
+  if (!Number.isFinite(ms))
+    throw new Error("scanUniverse: asOf ist kein gültiger Zeitpunkt");
   return ms;
 }
 
@@ -139,7 +161,9 @@ export function scanUniverse(options: ScanOptions): ScanResult {
   const asOfMs = toEpochMs(options.asOf);
   const instruments = options.instruments;
   if (instruments.length > MAX_SCAN_INSTRUMENTS) {
-    throw new Error(`scanUniverse: max. ${MAX_SCAN_INSTRUMENTS} Instrumente je Lauf`);
+    throw new Error(
+      `scanUniverse: max. ${MAX_SCAN_INSTRUMENTS} Instrumente je Lauf`,
+    );
   }
   const cache = options.cache ?? new FactorCache();
   const data = options.data;
@@ -182,11 +206,12 @@ export function scanUniverse(options: ScanOptions): ScanResult {
         regime,
         dataError: options.dataErrors?.get(instrument.id) ?? undefined,
       },
-      config
+      config,
     );
     if (rejection) {
       rejections.push(rejection);
-      rejectionsByRule[rejection.ruleId] = (rejectionsByRule[rejection.ruleId] ?? 0) + 1;
+      rejectionsByRule[rejection.ruleId] =
+        (rejectionsByRule[rejection.ruleId] ?? 0) + 1;
     } else {
       eligibleScores.push(score);
     }
@@ -199,6 +224,7 @@ export function scanUniverse(options: ScanOptions): ScanResult {
     historyByInstrument,
     requiredCandles,
     dataErrors: options.dataErrors,
+    scopeVenues: options.readinessScopeVenues,
   });
 
   return {

@@ -391,6 +391,8 @@ test("snapshot is JSON-serializable and stable", () => {
     requiredCandles: REQUIRED,
     registry: 3,
     discovered: 3,
+    scoped: 3,
+    outOfScope: 0,
     dataReady: 1,
     warming: 2,
     tickerReady: 3,

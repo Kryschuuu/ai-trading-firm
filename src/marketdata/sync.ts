@@ -27,6 +27,8 @@
 
 import {
   isSupportedTimeframe,
+  seriesKey,
+  SUPPORTED_TIMEFRAME_MS,
   type CandleSeriesGroup,
   type HistoricalStore,
   type SupportedTimeframe,
@@ -45,8 +47,13 @@ import {
   SyncPartialFailureError,
   UnsupportedVenueError,
 } from "./errors";
-import { enrichWithTickers, enrichWithOrderBooks, type EnrichmentReport } from "./enrichment";
+import {
+  enrichWithTickers,
+  enrichWithOrderBooks,
+  type EnrichmentReport,
+} from "./enrichment";
 import { calculateRelativeSpread } from "./spread";
+import type { SpreadCache } from "./spreadCache";
 import {
   candleTimeMs,
   SYNC_CANDLE_LIMIT,
@@ -86,11 +93,18 @@ export interface MarketDataAdapter {
   /** BULK, nicht pro Symbol: ein Request für alle angefragten Symbole. */
   getTickers?(symbols?: string[]): Promise<MarketTicker[]>;
   getOrderBook(symbol: string): Promise<MarketOrderBook>;
-  getCandles(symbol: string, timeframe: SupportedTimeframe, limit: number): Promise<MarketCandle[]>;
+  getCandles(
+    symbol: string,
+    timeframe: SupportedTimeframe,
+    limit: number,
+  ): Promise<MarketCandle[]>;
 }
 
 /** Minimales Logger-Contract des Syncs: eine fertig formatierte, leak-freie Zeile. */
-export type SyncLogger = (level: "info" | "warn" | "error", line: string) => void;
+export type SyncLogger = (
+  level: "info" | "warn" | "error",
+  line: string,
+) => void;
 
 /** Default-Senke: `console` (CLI/Betrieb). Strukturierte Events laufen separat über `structuredLog`. */
 export const defaultSyncLogger: SyncLogger = (level, line) => {
@@ -129,12 +143,30 @@ export interface SyncOptions {
   concurrency: number;
   /** `true` (Default): Einzelfehler degradieren, der Lauf läuft weiter. */
   continueOnError: boolean;
+  /**
+   * `true` erzwingt den vollen Kerzen-Abruf je Instrument/Timeframe
+   * (CLI `--full`). Default `false` (inkrementell): enthält der Store
+   * bereits die Kerze des laufenden Zeitraums (Periodenrand nach Uhr des
+   * Laufs), wird der Kline-Request für diese Reihe vollständig
+   * übersprungen. Ein stündlicher Lauf ist so nach dem Erst-Warmup nahezu
+   * requestfrei; der tägliche Lauf holt wie gewohnt alles Fehlende (die
+   * Börsen liefern die letzten `candleLimit` Bars inkl. Lückenfüllung).
+   */
+  fullRefresh?: boolean;
   /** Injizierbare Uhr (Determinismus in Tests). */
   clock?: () => Date;
   /** Alias von `clock` (bestehende Aufrufer). */
   now?: () => Date;
   /** Globaler Token-Bucket; der Bitunix-HTTP-Layer hat einen eigenen (8 req/s). */
   rateLimiter?: RateLimiter;
+  /**
+   * Persistenter Spread-Cache (Depth-Stage). Frische, innerhalb der TTL
+   * gemessene Spreads führen dazu, dass der Orderbuch-Request für das
+   * Instrument entfällt. Default: kein Cache (Tests, direkte Service-Nutzung);
+   * die Produktiv-CLI (`runMarketSyncDetailed`) verdrahtet den
+   * dateigestützten Cache, `--dry-run` keinen.
+   */
+  spreadCache?: SpreadCache | null;
   /** Injizierbarer Warmup-Bedarf; Default: `requiredWarmupCandles(loadScannerConfig())`. */
   requiredWarmupCandles?: number;
   /** Senke für die strukturierten `[market-sync]`-Zeilen. */
@@ -151,6 +183,8 @@ export interface ResolvedSyncOptions {
   readonly symbolAllowlist: readonly string[] | null;
   readonly concurrency: number;
   readonly continueOnError: boolean;
+  /** Siehe {@link SyncOptions.fullRefresh}. */
+  readonly fullRefresh: boolean;
   /** Abgeleiteter Warmup-Bedarf, gegen den `candleLimit` validiert wird. */
   readonly requiredWarmup: number;
 }
@@ -175,6 +209,11 @@ interface InstrumentOutcome {
    * komplett atomar umschreiben (O(n²) I/O).
    */
   candlesByTimeframe: Map<SupportedTimeframe, StoreCandle[]>;
+  /**
+   * Timeframes, für die der Kline-Request inkrementell übersprungen wurde
+   * (Store hält bereits die Kerze des laufenden Zeitraums).
+   */
+  freshTimeframes: SupportedTimeframe[];
 }
 
 /**
@@ -192,11 +231,13 @@ export function defaultRequiredWarmupCandles(): number {
  */
 export function resolveSyncOptions(
   input: Partial<SyncOptions> = {},
-  requiredWarmup: number = defaultRequiredWarmupCandles()
+  requiredWarmup: number = defaultRequiredWarmupCandles(),
 ): ResolvedSyncOptions {
   const timeframes = (input.timeframes ?? SYNC_TIMEFRAMES) as readonly string[];
   if (timeframes.length === 0) {
-    throw new Error("SyncOptions.timeframes darf nicht leer sein — ein leerer Backfill wäre still ein Erfolg ohne Daten.");
+    throw new Error(
+      "SyncOptions.timeframes darf nicht leer sein — ein leerer Backfill wäre still ein Erfolg ohne Daten.",
+    );
   }
   const seen = new Set<string>();
   for (const tf of timeframes) {
@@ -208,20 +249,23 @@ export function resolveSyncOptions(
     }
     if (seen.has(tf)) {
       throw new Error(
-        `SyncOptions.timeframes: \"${tf}\" ist doppelt enthalten — das würde Bars und Instrumente doppelt zählen.`
+        `SyncOptions.timeframes: \"${tf}\" ist doppelt enthalten — das würde Bars und Instrumente doppelt zählen.`,
       );
     }
     seen.add(tf);
   }
 
-  const candleLimit = input.candleLimit ?? Math.max(SYNC_CANDLE_LIMIT, requiredWarmup);
+  const candleLimit =
+    input.candleLimit ?? Math.max(SYNC_CANDLE_LIMIT, requiredWarmup);
   if (!Number.isInteger(candleLimit) || candleLimit <= 0) {
-    throw new Error(`SyncOptions.candleLimit muss eine positive Ganzzahl sein (war ${String(input.candleLimit)}).`);
+    throw new Error(
+      `SyncOptions.candleLimit muss eine positive Ganzzahl sein (war ${String(input.candleLimit)}).`,
+    );
   }
   if (candleLimit > MAX_CANDLE_LIMIT) {
     throw new Error(
       `SyncOptions.candleLimit=${candleLimit} übersteigt die harte Obergrenze ${MAX_CANDLE_LIMIT} ` +
-        `(Payload-/Speicher-Schutz). Reduziere das Limit.`
+        `(Payload-/Speicher-Schutz). Reduziere das Limit.`,
     );
   }
   if (candleLimit < requiredWarmup) {
@@ -232,7 +276,9 @@ export function resolveSyncOptions(
 
   const requestedMax = input.maxInstruments ?? SYNC_LIMITS.maxInstruments;
   if (!Number.isInteger(requestedMax) || requestedMax <= 0) {
-    throw new Error(`SyncOptions.maxInstruments muss eine positive Ganzzahl sein (war ${String(input.maxInstruments)}).`);
+    throw new Error(
+      `SyncOptions.maxInstruments muss eine positive Ganzzahl sein (war ${String(input.maxInstruments)}).`,
+    );
   }
   const maxInstruments = Math.min(requestedMax, MAX_INSTRUMENTS_CEILING);
 
@@ -240,7 +286,7 @@ export function resolveSyncOptions(
   if (input.symbolAllowlist !== undefined) {
     if (input.symbolAllowlist.length > SYNC_LIMITS.maxAllowlist) {
       throw new Error(
-        `SyncOptions.symbolAllowlist: ${input.symbolAllowlist.length} Einträge über der Obergrenze ${SYNC_LIMITS.maxAllowlist}.`
+        `SyncOptions.symbolAllowlist: ${input.symbolAllowlist.length} Einträge über der Obergrenze ${SYNC_LIMITS.maxAllowlist}.`,
       );
     }
     const normalized: string[] = [];
@@ -249,7 +295,7 @@ export function resolveSyncOptions(
       if (!value) {
         throw new Error(
           `SyncOptions.symbolAllowlist: \"${String(raw).slice(0, 40)}\" verletzt die Symbol-Allowlist ` +
-            `(erlaubt sind Großbuchstaben, Ziffern und /. - = _ in begrenzter Anzahl).`
+            `(erlaubt sind Großbuchstaben, Ziffern und /. - = _ in begrenzter Anzahl).`,
         );
       }
       if (!normalized.includes(value)) normalized.push(value);
@@ -259,10 +305,14 @@ export function resolveSyncOptions(
 
   const concurrency = Math.min(
     MAX_CONCURRENCY,
-    Math.max(MIN_CONCURRENCY, Math.floor(input.concurrency ?? 4) || MIN_CONCURRENCY)
+    Math.max(
+      MIN_CONCURRENCY,
+      Math.floor(input.concurrency ?? 4) || MIN_CONCURRENCY,
+    ),
   );
 
-  const continueOnError = input.strict === true ? false : (input.continueOnError ?? true);
+  const continueOnError =
+    input.strict === true ? false : (input.continueOnError ?? true);
 
   return {
     timeframes: timeframes as readonly SupportedTimeframe[],
@@ -271,6 +321,7 @@ export function resolveSyncOptions(
     symbolAllowlist: allowlist,
     concurrency,
     continueOnError,
+    fullRefresh: input.fullRefresh === true,
     requiredWarmup,
   };
 }
@@ -290,12 +341,14 @@ function momentumLookbackFor(requiredWarmup: number): number | undefined {
  */
 export function rankInstruments(
   instruments: readonly MarketInstrument[],
-  tickerBySymbol: ReadonlyMap<string, MarketTicker>
+  tickerBySymbol: ReadonlyMap<string, MarketTicker>,
 ): MarketInstrument[] {
   const volumeOf = (instrument: MarketInstrument): number | null => {
     const key = normalizeSyncSymbol(instrument.symbol);
     const quoteVol = key ? tickerBySymbol.get(key)?.quoteVol : undefined;
-    return typeof quoteVol === "number" && Number.isFinite(quoteVol) ? quoteVol : null;
+    return typeof quoteVol === "number" && Number.isFinite(quoteVol)
+      ? quoteVol
+      : null;
   };
   return [...instruments].sort((a, b) => {
     const va = volumeOf(a);
@@ -318,7 +371,7 @@ async function runPool<T, R>(
   items: readonly T[],
   limit: number,
   worker: (item: T, index: number) => Promise<R>,
-  aborted: () => boolean
+  aborted: () => boolean,
 ): Promise<(R | undefined)[]> {
   const results = new Array<R | undefined>(items.length);
   let cursor = 0;
@@ -338,6 +391,7 @@ async function runPool<T, R>(
 export class MarketDataSyncService {
   private readonly clock: () => Date;
   private readonly rateLimiter?: RateLimiter;
+  private readonly spreadCache?: SpreadCache | null;
   private readonly logger: SyncLogger;
   private readonly options: ResolvedSyncOptions;
 
@@ -349,8 +403,12 @@ export class MarketDataSyncService {
   ) {
     this.clock = options.clock ?? options.now ?? (() => new Date());
     this.rateLimiter = options.rateLimiter;
+    this.spreadCache = options.spreadCache;
     this.logger = options.logger ?? defaultSyncLogger;
-    this.options = resolveSyncOptions(options, options.requiredWarmupCandles ?? defaultRequiredWarmupCandles());
+    this.options = resolveSyncOptions(
+      options,
+      options.requiredWarmupCandles ?? defaultRequiredWarmupCandles(),
+    );
     if (
       options.maxInstruments !== undefined &&
       Number.isInteger(options.maxInstruments) &&
@@ -358,7 +416,7 @@ export class MarketDataSyncService {
     ) {
       this.logger(
         "warn",
-        `[market-sync] maxInstruments=${options.maxInstruments} begrenzt auf ${MAX_INSTRUMENTS_CEILING} (harte Obergrenze).`
+        `[market-sync] maxInstruments=${options.maxInstruments} begrenzt auf ${MAX_INSTRUMENTS_CEILING} (harte Obergrenze).`,
       );
     }
   }
@@ -388,12 +446,15 @@ export class MarketDataSyncService {
    * @throws {UnsupportedVenueError} wenn kein Adapter registriert ist.
    * @throws {SyncPartialFailureError} bei `continueOnError: false` und Fehlern.
    */
-  async syncVenue(venue: string, options: Partial<SyncOptions> = {}): Promise<SyncResult> {
+  async syncVenue(
+    venue: string,
+    options: Partial<SyncOptions> = {},
+  ): Promise<SyncResult> {
     const startedAtMs = performance.now();
     const opts = Object.keys(options).length
       ? resolveSyncOptions(
           { ...this.instanceDefaults(), ...options },
-          options.requiredWarmupCandles ?? this.options.requiredWarmup
+          options.requiredWarmupCandles ?? this.options.requiredWarmup,
         )
       : this.options;
     const key = sanitizeVenue(venue).toUpperCase();
@@ -415,9 +476,11 @@ export class MarketDataSyncService {
       failures.push(this.toFailure("discovery", e));
       const zeroBars = new Map<SupportedTimeframe, number>();
       const zeroInstruments = new Map<SupportedTimeframe, number>();
+      const zeroFresh = new Map<SupportedTimeframe, number>();
       for (const tf of opts.timeframes) {
         zeroBars.set(tf, 0);
         zeroInstruments.set(tf, 0);
+        zeroFresh.set(tf, 0);
       }
       return this.finalize(key, startedAt, startedAtMs, opts, {
         discovered: 0,
@@ -429,6 +492,7 @@ export class MarketDataSyncService {
         policyExcluded: 0,
         barsByTimeframe: zeroBars,
         instrumentsWithBars: zeroInstruments,
+        freshByTimeframe: zeroFresh,
         failures,
       });
     }
@@ -437,7 +501,9 @@ export class MarketDataSyncService {
     const usable: MarketInstrument[] = [];
     const seenIds = new Set<string>();
     let unusableRows = 0;
-    const allowlist = opts.symbolAllowlist ? new Set(opts.symbolAllowlist) : null;
+    const allowlist = opts.symbolAllowlist
+      ? new Set(opts.symbolAllowlist)
+      : null;
     const discoveryRows = Math.min(discovered.length, MAX_RESPONSE_ROWS);
     if (discovered.length > MAX_RESPONSE_ROWS) {
       failures.push({
@@ -486,7 +552,12 @@ export class MarketDataSyncService {
     // ── 3. Tickers: EIN bulk-Request für alle Symbole (Stage) ───────────────
     // P1: enrichWithTickers() als eigenständige Stage — 1× Bulk, missing → null
     let volumeBySymbol = new Map<string, number | null>();
-    let tickerReport: EnrichmentReport = { attempted: 0, succeeded: 0, missing: [], failures: [] };
+    let tickerReport: EnrichmentReport = {
+      attempted: 0,
+      succeeded: 0,
+      missing: [],
+      failures: [],
+    };
     let tickerBySymbol = new Map<string, MarketTicker>();
     try {
       await this.limit();
@@ -528,15 +599,33 @@ export class MarketDataSyncService {
     if (unusableRows > 0) {
       this.logger(
         "warn",
-        `[market-sync] ${key}: ${unusableRows} Discovery-Zeile(n) unbrauchbar oder dupliziert — nicht synchronisiert.`
+        `[market-sync] ${key}: ${unusableRows} Discovery-Zeile(n) unbrauchbar oder dupliziert — nicht synchronisiert.`,
       );
     }
 
-    // ── 5. Orderbook-Enrichment: N× depth (Stage) ───────────────────────────
-    // P1: enrichWithOrderBooks() — limit=5, concurrency-begrenzt, Timeout 5s, 1 Retry
-    // Rate-Limit: jeder Depth-Call geht durch den globalen Limiter
+    // ── 5. Orderbook-Enrichment: N× depth (Stage), mit Spread-Cache ─────────
+    // P1: enrichWithOrderBooks() — limit=5, concurrency-begrenzt, Timeout 5s,
+    // 1 Retry; jeder Depth-Call geht durch den globalen Limiter. Frische
+    // Werte aus dem persistenten Spread-Cache werden GAR NICHT abgefragt —
+    // die Depth-Stage ist der teuerste Request-Typ des Syncs.
     let spreadBySymbol = new Map<string, number | null>();
-    let orderbookReport: EnrichmentReport = { attempted: 0, succeeded: 0, missing: [], failures: [] };
+    let orderbookReport: EnrichmentReport = {
+      attempted: 0,
+      succeeded: 0,
+      missing: [],
+      failures: [],
+    };
+    let cachedSpreadSymbols = 0;
+    const cacheNowMs = this.clock().getTime();
+    const cacheTargets = selected.filter((instrument) => {
+      const cached = this.spreadCache?.fresh(instrument.id, cacheNowMs);
+      if (cached !== undefined) {
+        spreadBySymbol.set(instrument.symbol, cached);
+        cachedSpreadSymbols += 1;
+        return false;
+      }
+      return true;
+    });
     try {
       const rateLimitedAdapter: MarketDataAdapter = {
         ...adapter,
@@ -545,13 +634,22 @@ export class MarketDataSyncService {
           return adapter.getOrderBook(symbol);
         },
       };
-      const enrich = await enrichWithOrderBooks(selected, rateLimitedAdapter, {
+      const enrich = await enrichWithOrderBooks(cacheTargets, rateLimitedAdapter, {
         depthLimit: 5,
         concurrency: opts.concurrency,
         timeoutMs: 5_000,
         logger: (lvl, line) => this.logger(lvl, line),
       });
-      spreadBySymbol = enrich.spreadBySymbol;
+      // Frisch gemessene Werte übernehmen (niemals null/Fehlwerte).
+      for (const instrument of cacheTargets) {
+        const measured = enrich.spreadBySymbol.get(instrument.symbol);
+        if (typeof measured === "number" && Number.isFinite(measured)) {
+          this.spreadCache?.record(instrument.id, measured, this.clock());
+        }
+      }
+      for (const [symbol, spread] of enrich.spreadBySymbol) {
+        spreadBySymbol.set(symbol, spread);
+      }
       orderbookReport = enrich.report;
       for (const f of orderbookReport.failures) {
         failures.push({
@@ -565,20 +663,45 @@ export class MarketDataSyncService {
     } catch (e) {
       failures.push(this.toFailure("orderbook", e));
     }
+    if (cachedSpreadSymbols > 0) {
+      this.logger(
+        "info",
+        `[market-sync] spread cache: ${cachedSpreadSymbols}/${selected.length} Buecher innerhalb der TTL wiederverwendet (kein Depth-Request)`,
+      );
+    }
+    // Genau EIN atomarer Schreibvorgang je Lauf. Ein Cache-Schreibfehler
+    // degradiert den Sync NICHT (nächster Lauf holt die Werte einfach frisch).
+    try {
+      this.spreadCache?.flush(this.clock());
+    } catch (e) {
+      this.logger(
+        "warn",
+        `[market-sync] Spread-Cache konnte nicht geschrieben werden: ${sanitizeSyncErrorMessage(
+          e instanceof Error ? e.message : String(e),
+        )}`,
+      );
+    }
 
     // Zähler aus Enrichment-Reports (für SyncResult)
     // tickersEnriched = erfolgreiche Ticker-Fetches (auch wenn quoteVol null, aber Fetch ok)
     // orderbooksEnriched = erfolgreiche Depth-Fetches
     // spreadsUnknown = Spreads, die null blieben
     const selectedSymbols = new Set(selected.map((s) => s.symbol));
-    const tickerFailSymbols = new Set(tickerReport.failures.map((f) => f.symbol));
-    const orderbookFailSymbols = new Set(orderbookReport.failures.map((f) => f.symbol));
+    const tickerFailSymbols = new Set(
+      tickerReport.failures.map((f) => f.symbol),
+    );
+    const orderbookFailSymbols = new Set(
+      orderbookReport.failures.map((f) => f.symbol),
+    );
 
     let tickersEnriched = 0;
     for (const s of selected) {
       if (!tickerFailSymbols.has(s.symbol) && volumeBySymbol.has(s.symbol)) {
         tickersEnriched += 1;
-      } else if (tickerReport.attempted > 0 && !tickerFailSymbols.has(s.symbol)) {
+      } else if (
+        tickerReport.attempted > 0 &&
+        !tickerFailSymbols.has(s.symbol)
+      ) {
         // Auch wenn volume null, aber Fetch ok (z. B. ohne quoteVol) → enriched
         tickersEnriched += 1;
       }
@@ -586,7 +709,9 @@ export class MarketDataSyncService {
     // Fallback: wenn tickerReport leer (kein Bulk), zähle selected als enriched wenn volume vorhanden
     if (tickerReport.attempted === 0 && usable.length > 0) {
       // Kein Bulk — per-Symbol Fallback wurde in enrichWithTickers versucht
-      tickersEnriched = selected.filter((s) => volumeBySymbol.has(s.symbol) && !tickerFailSymbols.has(s.symbol)).length;
+      tickersEnriched = selected.filter(
+        (s) => volumeBySymbol.has(s.symbol) && !tickerFailSymbols.has(s.symbol),
+      ).length;
     }
 
     let orderbooksEnriched = 0;
@@ -606,7 +731,7 @@ export class MarketDataSyncService {
     if (spreadsUnknown > 0) {
       this.logger(
         "warn",
-        `[market-sync] spread unavailable for ${spreadsUnknown}/${selected.length} symbols — diese Instrumente werden mit rule="max-spread" (data quality) abgelehnt, nicht wegen zu hoher Kosten.`
+        `[market-sync] spread unavailable for ${spreadsUnknown}/${selected.length} symbols — diese Instrumente werden mit rule="max-spread" (data quality) abgelehnt, nicht wegen zu hoher Kosten.`,
       );
     }
 
@@ -620,7 +745,18 @@ export class MarketDataSyncService {
 
     let policyExcluded = 0;
     const groups: CandleSeriesGroup[] = [];
-    const owners: { instrumentId: string; timeframe: SupportedTimeframe }[] = [];
+    const owners: { instrumentId: string; timeframe: SupportedTimeframe }[] =
+      [];
+    const freshByTimeframe = new Map<SupportedTimeframe, number>();
+    for (const tf of opts.timeframes) freshByTimeframe.set(tf, 0);
+
+    // Inkrementeller Sync (Default): ein EINZIGER Lesedurchgang über den
+    // Store baut den jüngsten Zeitstempel je Reihe. Hält die Reihe bereits
+    // die Kerze des laufenden Zeitraums, erübrigt sich ihr Kline-Request
+    // (siehe syncInstrumentWithEnrichment). `--full` lässt die Map leer.
+    const lastBarBySeries = opts.fullRefresh
+      ? new Map<string, number>()
+      : buildLastBarBySeries(this.history.readAll());
 
     const outcomes = await runPool<MarketInstrument, InstrumentOutcome>(
       selected,
@@ -628,11 +764,24 @@ export class MarketDataSyncService {
       async (instrument) => {
         const volume = volumeBySymbol.get(instrument.symbol) ?? null;
         const spread = spreadBySymbol.get(instrument.symbol) ?? null;
-        const outcome = await this.syncInstrumentWithEnrichment(key, adapter, instrument, volume, spread, opts, abort);
-        if (!opts.continueOnError && outcome.failures.length > 0) runState.aborted = true;
+        const outcome = await this.syncInstrumentWithEnrichment(
+          key,
+          adapter,
+          instrument,
+          volume,
+          spread,
+          opts,
+          abort,
+          lastBarBySeries,
+        );
+        for (const tf of outcome.freshTimeframes) {
+          freshByTimeframe.set(tf, (freshByTimeframe.get(tf) ?? 0) + 1);
+        }
+        if (!opts.continueOnError && outcome.failures.length > 0)
+          runState.aborted = true;
         return outcome;
       },
-      abort
+      abort,
     );
 
     for (const outcome of outcomes) {
@@ -653,28 +802,29 @@ export class MarketDataSyncService {
       }
     }
 
-    this.persistBars(groups, owners, failures, barsByTimeframe, instrumentsWithBars);
+    this.persistBars(
+      groups,
+      owners,
+      failures,
+      barsByTimeframe,
+      instrumentsWithBars,
+    );
 
     if (!opts.continueOnError && failures.length > 0) runState.aborted = true;
 
-    return this.finalize(
-      key,
-      startedAt,
-      startedAtMs,
-      opts,
-      {
-        discovered: discovered.length,
-        synced: selected.length,
-        skipped,
-        tickersEnriched,
-        orderbooksEnriched,
-        spreadsUnknown,
-        policyExcluded,
-        barsByTimeframe,
-        instrumentsWithBars,
-        failures,
-      }
-    );
+    return this.finalize(key, startedAt, startedAtMs, opts, {
+      discovered: discovered.length,
+      synced: selected.length,
+      skipped,
+      tickersEnriched,
+      orderbooksEnriched,
+      spreadsUnknown,
+      policyExcluded,
+      barsByTimeframe,
+      instrumentsWithBars,
+      freshByTimeframe,
+      failures,
+    });
   }
 
   /**
@@ -685,7 +835,7 @@ export class MarketDataSyncService {
     startedAt: string,
     startedAtMs: number,
     opts: ResolvedSyncOptions,
-    stats: Parameters<MarketDataSyncService["finish"]>[3]
+    stats: Parameters<MarketDataSyncService["finish"]>[3],
   ): SyncResult {
     const result = this.finish(key, startedAt, startedAtMs, stats);
     for (const line of formatSyncLog(result, opts)) this.logger("info", line);
@@ -724,7 +874,8 @@ export class MarketDataSyncService {
     volume24h: number | null,
     spread: number | null,
     opts: ResolvedSyncOptions,
-    aborted: () => boolean
+    aborted: () => boolean,
+    lastBarBySeries: ReadonlyMap<string, number>,
   ): Promise<InstrumentOutcome> {
     const failures: SyncFailure[] = [];
     const symbol = instrument.symbol;
@@ -737,6 +888,7 @@ export class MarketDataSyncService {
       spreadUnknown: spread === null,
       policyExcluded: 0,
       candlesByTimeframe: new Map(),
+      freshTimeframes: [],
     };
     if (aborted()) return outcome;
 
@@ -774,169 +926,45 @@ export class MarketDataSyncService {
       failures.push(this.toFailure("upsert", e, { instrumentId, symbol }));
     }
 
-    // 2) Candle-Backfill je Timeframe
+    // 2) Candle-Backfill je Timeframe (inkrementell, außer bei --full)
+    const nowMs = this.clock().getTime();
     for (const timeframe of opts.timeframes) {
       if (aborted()) break;
+      // Hält der Store bereits die Kerze des laufenden Zeitraums, ist die
+      // Reihe aktuell: der Kline-Request entfällt vollständig. Die Börsen
+      // liefern die sich bildende Kerze mit Beginn des Zeitraums; ab dem
+      // nächsten Periodenrand wird automatisch wieder abgerufen (die alte
+      // Reihe wird dabei wie gewohnt mit den letzten `candleLimit` Bars
+      // ergänzt/überschrieben, Dedup im Store ist idempotent).
+      const intervalMs = SUPPORTED_TIMEFRAME_MS[timeframe];
+      const periodStart =
+        intervalMs > 0 ? Math.floor(nowMs / intervalMs) * intervalMs : 0;
+      const lastTs = lastBarBySeries.get(seriesKey(instrumentId, timeframe));
+      if (lastTs !== undefined && intervalMs > 0 && lastTs >= periodStart) {
+        outcome.freshTimeframes.push(timeframe);
+        continue;
+      }
       try {
         await this.limit();
-        const candles = await adapter.getCandles(symbol, timeframe, opts.candleLimit);
-        const rows = normalizeCandles(candles, timeframe, failures, { instrumentId, symbol });
-        if (rows.length === 0) continue;
-        outcome.candlesByTimeframe.set(timeframe, rows);
-      } catch (e) {
-        failures.push(this.toFailure("candles", e, { instrumentId, symbol, timeframe }));
-      }
-    }
-
-    return outcome;
-  }
-
-  /**
-   * @deprecated Nutze `syncInstrumentWithEnrichment` + Enrichment-Stages.
-   * Bleibt für Rückwärtskompatibilität (Tests, die direkt syncInstrument aufrufen).
-   */
-  private async syncInstrument(
-    venueKey: string,
-    adapter: MarketDataAdapter,
-    instrument: MarketInstrument,
-    tickerBySymbol: Map<string, MarketTicker>,
-    opts: ResolvedSyncOptions,
-    aborted: () => boolean
-  ): Promise<InstrumentOutcome> {
-    const symbol = instrument.symbol;
-    const instrumentId = instrument.id;
-    const failures: SyncFailure[] = [];
-    const outcome: InstrumentOutcome = {
-      failures,
-      instrumentId,
-      tickerEnriched: false,
-      orderbookEnriched: false,
-      spreadUnknown: true,
-      policyExcluded: 0,
-      candlesByTimeframe: new Map(),
-    };
-    if (aborted()) return outcome;
-
-    let ticker: MarketTicker | undefined = tickerBySymbol.get(symbol);
-    if (!ticker) {
-      try {
-        await this.limit();
-        const fetched = await adapter.getTicker(symbol);
-        const fetchedSymbol = normalizeSyncSymbol(fetched?.symbol);
-        if (fetchedSymbol) tickerBySymbol.set(fetchedSymbol, fetched);
-        if (fetchedSymbol === symbol) {
-          ticker = fetched;
-        } else {
-          failures.push({
-            stage: "ticker",
-            instrumentId,
-            symbol,
-            message:
-              fetchedSymbol === undefined
-                ? "Kein Ticker für das Symbol verfügbar — volume24h bleibt unbekannt"
-                : "Ticker-Antwort enthält ein anderes Symbol — volume24h bleibt unbekannt",
-          });
-        }
-      } catch (e) {
-        failures.push(this.toFailure("ticker", e, { instrumentId, symbol }));
-      }
-    }
-    if (ticker) outcome.tickerEnriched = true;
-
-    let spread: number | null = null;
-    try {
-      await this.limit();
-      const book = await adapter.getOrderBook(symbol);
-      spread = calculateRelativeSpread(bestPrice(book?.bids), bestPrice(book?.asks));
-      outcome.orderbookEnriched = true;
-      outcome.spreadUnknown = spread === null;
-    } catch (e) {
-      failures.push(this.toFailure("orderbook", e, { instrumentId, symbol }));
-    }
-
-    try {
-      const upserted = this.registry.upsert(
-        {
-          ...instrument,
-          venue: venueKey,
+        const candles = await adapter.getCandles(
           symbol,
-          volume24h: finiteOrNull(ticker?.quoteVol ?? ticker?.last ?? null),
-          spread,
-          lastSeen: this.clock().toISOString(),
-        },
-        `sync:${venueKey}`,
-      );
-      for (const rejected of upserted.rejected ?? []) {
-        if (rejected.code === "POLICY_EXCLUDED") {
-          outcome.policyExcluded += 1;
-          continue;
-        }
-        failures.push({
-          stage: "upsert",
+          timeframe,
+          opts.candleLimit,
+        );
+        const rows = normalizeCandles(candles, timeframe, failures, {
           instrumentId,
           symbol,
-          message: `Registry-Ablehnung (${String(rejected.code).slice(0, 32)}): ${sanitizeSyncErrorMessage(rejected.message)}`,
-          reason: "SCHEMA_MISMATCH",
-          retryable: false,
         });
-      }
-    } catch (e) {
-      failures.push(this.toFailure("upsert", e, { instrumentId, symbol }));
-    }
-
-    for (const timeframe of opts.timeframes) {
-      if (aborted()) break;
-      try {
-        await this.limit();
-        const candles = await adapter.getCandles(symbol, timeframe, opts.candleLimit);
-        const rows = normalizeCandles(candles, timeframe, failures, { instrumentId, symbol });
         if (rows.length === 0) continue;
         outcome.candlesByTimeframe.set(timeframe, rows);
       } catch (e) {
-        failures.push(this.toFailure("candles", e, { instrumentId, symbol, timeframe }));
+        failures.push(
+          this.toFailure("candles", e, { instrumentId, symbol, timeframe }),
+        );
       }
     }
 
     return outcome;
-  }
-
-  /**
-   * 1 × tickers (batch), wenn der Adapter sie unterstützt. Ein Fehler im
-   * Bulk-Call ist kein Abbruch: der per-Symbol-Fallback im Instrumentenlauf
-   * holt die Lücken nach (und degradiert den Lauf sichtbar).
-   * @deprecated Nutze `enrichWithTickers()` aus `./enrichment.ts`.
-   */
-  private async loadTickers(
-    adapter: MarketDataAdapter,
-    instruments: readonly MarketInstrument[],
-    opts: ResolvedSyncOptions,
-    failures: SyncFailure[]
-  ): Promise<Map<string, MarketTicker>> {
-    const out = new Map<string, MarketTicker>();
-    if (!adapter.getTickers || instruments.length === 0) return out;
-    try {
-      await this.limit();
-      const symbols = instruments.map((i) => i.symbol).slice(0, SYNC_LIMITS.maxTickerBatch);
-      const batch = await adapter.getTickers(symbols);
-      const rows = Array.isArray(batch) ? batch : [];
-      if (rows.length > MAX_RESPONSE_ROWS) {
-        failures.push({
-          stage: "ticker",
-          message: `Ticker-Response gekappt: ${rows.length} > ${MAX_RESPONSE_ROWS} Zeilen (Payload-Schutz).`,
-          reason: "SCHEMA_MISMATCH",
-          retryable: false,
-        });
-      }
-      for (let i = 0; i < Math.min(rows.length, MAX_RESPONSE_ROWS); i++) {
-        const t = rows[i];
-        const symbol = normalizeSyncSymbol(t?.symbol);
-        if (!symbol) continue;
-        if (!out.has(symbol)) out.set(symbol, t);
-      }
-    } catch (e) {
-      failures.push(this.toFailure("ticker", e));
-    }
-    return out;
   }
 
   /**
@@ -947,7 +975,7 @@ export class MarketDataSyncService {
     owners: { instrumentId: string; timeframe: SupportedTimeframe }[],
     failures: SyncFailure[],
     barsByTimeframe: Map<SupportedTimeframe, number>,
-    instrumentsWithBars: Map<SupportedTimeframe, number>
+    instrumentsWithBars: Map<SupportedTimeframe, number>,
   ): void {
     if (groups.length === 0) return;
     let batch;
@@ -955,7 +983,12 @@ export class MarketDataSyncService {
       batch = this.history.appendSeries(groups, this.clock());
     } catch (e) {
       for (const owner of owners) {
-        failures.push(this.toFailure("candles", e, { instrumentId: owner.instrumentId, timeframe: owner.timeframe }));
+        failures.push(
+          this.toFailure("candles", e, {
+            instrumentId: owner.instrumentId,
+            timeframe: owner.timeframe,
+          }),
+        );
       }
       return;
     }
@@ -963,9 +996,15 @@ export class MarketDataSyncService {
       const stats = batch.perGroup[i];
       const owner = owners[i];
       if (!owner) continue;
-      barsByTimeframe.set(owner.timeframe, (barsByTimeframe.get(owner.timeframe) ?? 0) + stats.written);
+      barsByTimeframe.set(
+        owner.timeframe,
+        (barsByTimeframe.get(owner.timeframe) ?? 0) + stats.written,
+      );
       if (stats.written > 0) {
-        instrumentsWithBars.set(owner.timeframe, (instrumentsWithBars.get(owner.timeframe) ?? 0) + 1);
+        instrumentsWithBars.set(
+          owner.timeframe,
+          (instrumentsWithBars.get(owner.timeframe) ?? 0) + 1,
+        );
       }
       if (stats.invalid > 0) {
         failures.push({
@@ -986,9 +1025,12 @@ export class MarketDataSyncService {
       timeframes: this.options.timeframes,
       candleLimit: this.options.candleLimit,
       maxInstruments: this.options.maxInstruments,
-      ...(this.options.symbolAllowlist ? { symbolAllowlist: this.options.symbolAllowlist } : {}),
+      ...(this.options.symbolAllowlist
+        ? { symbolAllowlist: this.options.symbolAllowlist }
+        : {}),
       concurrency: this.options.concurrency,
       continueOnError: this.options.continueOnError,
+      fullRefresh: this.options.fullRefresh,
     };
   }
 
@@ -1006,12 +1048,28 @@ export class MarketDataSyncService {
       policyExcluded: number;
       barsByTimeframe: Map<SupportedTimeframe, number>;
       instrumentsWithBars: Map<SupportedTimeframe, number>;
+      freshByTimeframe: Map<SupportedTimeframe, number>;
       failures: SyncFailure[];
-    }
+    },
   ): SyncResult {
-    const candlesByTimeframe: Partial<Record<SupportedTimeframe, TimeframeSyncStats>> = {};
+    const candlesByTimeframe: Partial<
+      Record<SupportedTimeframe, TimeframeSyncStats>
+    > = {};
     for (const [tf, bars] of stats.barsByTimeframe) {
-      candlesByTimeframe[tf] = { instruments: stats.instrumentsWithBars.get(tf) ?? 0, bars };
+      candlesByTimeframe[tf] = {
+        instruments: stats.instrumentsWithBars.get(tf) ?? 0,
+        bars,
+      };
+    }
+    // Nur Timeframes mit tatsächlichen Überspringungen erscheinen im
+    // Ergebnis (bei --full bzw. Kaltstart bleibt das Feld leer/undefiniert).
+    const freshCandlesByTimeframe: SyncResult["freshCandlesByTimeframe"] = {};
+    let freshTotal = 0;
+    for (const [tf, count] of stats.freshByTimeframe) {
+      if (count > 0) {
+        freshCandlesByTimeframe[tf] = count;
+        freshTotal += count;
+      }
     }
     return {
       venue,
@@ -1025,6 +1083,7 @@ export class MarketDataSyncService {
       spreadsUnknown: stats.spreadsUnknown,
       policyExcluded: stats.policyExcluded,
       candlesByTimeframe,
+      ...(freshTotal > 0 ? { freshCandlesByTimeframe } : {}),
       failures: stats.failures,
       degraded: stats.failures.length > 0,
       durationMs: Math.max(0, performance.now() - startedAtMs),
@@ -1037,7 +1096,7 @@ export class MarketDataSyncService {
   private toFailure(
     stage: SyncError["stage"],
     cause: unknown,
-    ctx: { instrumentId?: string; symbol?: string; timeframe?: string } = {}
+    ctx: { instrumentId?: string; symbol?: string; timeframe?: string } = {},
   ): SyncFailure {
     const { reason, retryable, httpStatus } = classifyMarketDataError(cause);
     return {
@@ -1058,15 +1117,22 @@ export class MarketDataSyncService {
   }
 }
 
-/** Bestes Level (`bids[0]`/`asks[0]`) eines Orders — gekappt gegen Payload-Bombing. */
-function bestPrice(levels: MarketOrderBookLevel[] | undefined): number | undefined {
-  if (!Array.isArray(levels) || levels.length === 0) return undefined;
-  const top = levels.slice(0, SYNC_LIMITS.maxBookLevels).find((l) => typeof l?.price === "number");
-  return top?.price;
-}
-
-function finiteOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+/**
+ * Ein einziger Lesedurchgang über den Store: jüngster Zeitstempel je
+ * Reihe (`Instrument ⟂ Timeframe`). Grundlage des inkrementellen Syncs —
+ * bewusst EIN Durchgang statt N×M `store.query()`-Aufrufe (jeder würde die
+ * NDJSON-Datei komplett neu parsen).
+ */
+function buildLastBarBySeries(
+  entries: ReadonlyArray<{ instrumentId: string; timeframe: string; ts: number }>,
+): Map<string, number> {
+  const lastBySeries = new Map<string, number>();
+  for (const e of entries) {
+    const key = seriesKey(e.instrumentId, e.timeframe);
+    const known = lastBySeries.get(key);
+    if (known === undefined || e.ts > known) lastBySeries.set(key, e.ts);
+  }
+  return lastBySeries;
 }
 
 /**
@@ -1076,7 +1142,7 @@ function normalizeCandles(
   candles: MarketCandle[] | undefined,
   timeframe: SupportedTimeframe,
   failures: SyncFailure[],
-  ctx: { instrumentId: string; symbol: string }
+  ctx: { instrumentId: string; symbol: string },
 ): StoreCandle[] {
   const rows = Array.isArray(candles) ? candles : [];
   if (rows.length > SYNC_LIMITS.maxCandlesPerResponse) {
@@ -1095,7 +1161,9 @@ function normalizeCandles(
     const time = candleTimeMs(c);
     const ok =
       time !== null &&
-      [c.open, c.high, c.low, c.close].every((v) => typeof v === "number" && Number.isFinite(v) && v > 0) &&
+      [c.open, c.high, c.low, c.close].every(
+        (v) => typeof v === "number" && Number.isFinite(v) && v > 0,
+      ) &&
       typeof c.volume === "number" &&
       Number.isFinite(c.volume) &&
       c.volume >= 0;
@@ -1103,7 +1171,14 @@ function normalizeCandles(
       dropped += 1;
       continue;
     }
-    out.push({ time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
+    out.push({
+      time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+    });
   }
   if (dropped > 0) {
     failures.push({
@@ -1123,10 +1198,11 @@ function normalizeCandles(
  */
 export function formatSyncLog(
   result: SyncResult,
-  options?: { candleLimit?: number; timeframes?: readonly string[] }
+  options?: { candleLimit?: number; timeframes?: readonly string[] },
 ): string[] {
   const candleLimit = options?.candleLimit ?? SYNC_CANDLE_LIMIT;
-  const timeframes = (options?.timeframes ?? Object.keys(result.candlesByTimeframe)) as readonly string[];
+  const timeframes = (options?.timeframes ??
+    Object.keys(result.candlesByTimeframe)) as readonly string[];
   const lines = [
     `[market-sync] ${result.venue} discovery: ${result.synced} instruments`,
     `[market-sync] tickers enriched: ${result.tickersEnriched}`,
@@ -1140,15 +1216,25 @@ export function formatSyncLog(
     const total = Math.max(result.synced, instruments);
     lines.push(
       `[market-sync] ${tf} candles: ${instruments}/${total}` +
-        ` (${bars}/${total * candleLimit} bars)`
+        ` (${bars}/${total * candleLimit} bars)`,
     );
+    // Inkrementeller Lauf: wie viele Reihen bereits aktuell waren und keinen
+    // Kline-Request benötigten (Audit der tatsächlichen Request-Zahl).
+    const fresh = result.freshCandlesByTimeframe?.[tf as SupportedTimeframe] ?? 0;
+    if (fresh > 0) {
+      lines.push(
+        `[market-sync] ${tf} candles aktuell, keine Anfrage: ${fresh}/${Math.max(result.synced, instruments + fresh)}`,
+      );
+    }
   }
   if (result.skipped > 0) {
-    lines.push(`[market-sync] übersprungen (Allowlist/Kappung): ${result.skipped}`);
+    lines.push(
+      `[market-sync] übersprungen (Allowlist/Kappung): ${result.skipped}`,
+    );
   }
   if (result.policyExcluded > 0) {
     lines.push(
-      `[market-sync] von der Universe-Policy abgelehnt: ${result.policyExcluded} (fachlicher Ausschluss, kein Datenfehler)`
+      `[market-sync] von der Universe-Policy abgelehnt: ${result.policyExcluded} (fachlicher Ausschluss, kein Datenfehler)`,
     );
   }
   if (result.failures.length) {
@@ -1169,13 +1255,13 @@ export function formatDegradedLog(result: SyncResult): string | null {
   if (result.spreadsUnknown > 0) {
     lines.push(
       `[market-sync] DEGRADED: ${result.spreadsUnknown}/${total} Instrumente ohne Orderbook — Spread bleibt null, ` +
-        `diese Instrumente werden vom Scanner mit rule="max-spread" (Datenqualität) abgelehnt.`
+        `diese Instrumente werden vom Scanner mit rule="max-spread" (Datenqualität) abgelehnt.`,
     );
   }
   if (result.failures.length > 0) {
     lines.push(
       `[market-sync] DEGRADED: ${result.failures.length} isolierte(r) Fehler — ` +
-        `Ursachen im Manifest (data/market-data-errors.json), Behebung: erneut ausführen.`
+        `Ursachen im Manifest (data/market-data-errors.json), Behebung: erneut ausführen.`,
     );
   }
   return lines.join(" ");

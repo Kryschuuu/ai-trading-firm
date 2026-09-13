@@ -404,7 +404,10 @@ export function MarketDataReadinessCard({
   report: MarketDataReadinessReport;
   diagnostics?: EligibilityDiagnosticsSummary | null;
 }) {
-  const total = report.registryCount;
+  // Denominator ist der Daten-Scope: Instrumente auf Venues mit vorhandenen
+  // Kerzen. Kuratierte Presets auf unversorgten Venues („außer Scope“)
+  // blockieren READY nicht mehr (v1.38.0).
+  const total = report.scopedCount ?? report.registryCount;
   const readyTone = (count: number): OpsTone =>
     total === 0 || count === 0 ? (count === 0 ? "bad" : "neutral") : count >= total ? "good" : "warn";
   const scannerTone: OpsTone = report.scannerReady ? "good" : "bad";
@@ -414,18 +417,31 @@ export function MarketDataReadinessCard({
       value: String(report.registryCount),
       hint: "Instrumente in der Registry (Single Source of Truth des Universums).",
     },
+    ...(report.outOfScopeCount > 0
+      ? [
+          {
+            label: "Außer Scope",
+            value: String(report.outOfScopeCount),
+            tone: "neutral" as OpsTone,
+            hint:
+              "Instrumente auf Venues ohne laufenden Market-Data-Sync (z. B. ALPACA/IBKR/BINANCE-Presets " +
+              "bei alleiniger BITUNIX-Venue). Sie blockieren READY nicht; ohne Kerzen werden sie vom Scanner " +
+              "fachlich mit min-candles abgelehnt.",
+          },
+        ]
+      : []),
     {
       label: "Discovered",
       value: String(report.discoveredCount),
-      tone: report.registryCount > 0 && report.discoveredCount < report.registryCount ? "warn" : "neutral",
+      tone: total > 0 && report.discoveredCount < total ? "warn" : "neutral",
       hint:
-        "Instrumente mit frischem Discovery-Zeitstempel (lastSeen ≤ 24 h). " +
+        "Instrumente mit frischem Discovery-Zeitstempel (lastSeen ≤ 24 h) im Daten-Scope. " +
         "Ein Rückstand bedeutet: Die Discovery lief länger nicht — Markt-Sync prüfen.",
     },
     {
       label: "Data-ready",
       value: String(report.dataReadyCount),
-      tone: report.dataReadyCount > 0 ? "good" : report.registryCount > 0 ? "bad" : "neutral",
+      tone: report.dataReadyCount > 0 ? "good" : total > 0 ? "bad" : "neutral",
       hint:
         "Instrumente mit vollständigen Daten: Kerzen ≥ Mindestanzahl UND " +
         "24h-Volumen bekannt UND Spread bekannt.",
@@ -435,7 +451,7 @@ export function MarketDataReadinessCard({
       value: String(report.warmingCount),
       tone: report.warmingCount > 0 ? "warn" : "neutral",
       hint:
-        "Registry minus Data-ready — Instrumente, deren Datenpipeline noch " +
+        "Scope minus Data-ready — Instrumente, deren Datenpipeline noch " +
         "läuft oder nie lief (npm run market-sync).",
     },
     {

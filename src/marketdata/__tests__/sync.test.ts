@@ -5,17 +5,34 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { HistoricalStore } from "../../lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../universe/registry";
 import { syncErrorsToDataErrors } from "../dataErrors";
-import { MarketDataSyncService, type MarketDataAdapter, type MarketDataSyncOptions } from "../sync";
+import {
+  MarketDataSyncService,
+  type MarketDataAdapter,
+  type MarketDataSyncOptions,
+} from "../sync";
 import { UnsupportedVenueError } from "../errors";
 import { calculateRelativeSpread } from "../spread";
-import { SYNC_TIMEFRAMES, type MarketCandle, type MarketInstrument, type MarketOrderBook, type RateLimiter, type MarketTicker } from "../types";
+import {
+  SYNC_TIMEFRAMES,
+  type MarketCandle,
+  type MarketInstrument,
+  type MarketOrderBook,
+  type RateLimiter,
+  type MarketTicker,
+} from "../types";
 import { DEFAULT_SCANNER_CONFIG } from "../../scanner/config";
 import { liquidityFactor } from "../../scanner/factors/liquidity";
 import { spreadFactor } from "../../scanner/factors/spread";
@@ -65,7 +82,14 @@ function instrument(symbol: string, venue = "BITUNIX"): MarketInstrument {
 }
 
 function candle(i = 0): MarketCandle {
-  return { time: 1_700_000_000_000 + i * 60_000, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 };
+  return {
+    time: 1_700_000_000_000 + i * 60_000,
+    open: 1,
+    high: 2,
+    low: 0.5,
+    close: 1.5,
+    volume: 10,
+  };
 }
 
 function book(bid = 99, ask = 101): MarketOrderBook {
@@ -98,16 +122,30 @@ function mockAdapter(opts: {
   /** Optionaler Batch-Pfad (`getTickers`) — sonst per-Symbol-Fallback. */
   batchTickers?: (symbols?: string[]) => Promise<MarketTicker[]>;
   book?: (symbol: string) => Promise<MarketOrderBook>;
-  candles?: (symbol: string, tf: string, limit: number) => Promise<MarketCandle[]>;
+  candles?: (
+    symbol: string,
+    tf: string,
+    limit: number,
+  ) => Promise<MarketCandle[]>;
   failCandles?: boolean;
 }): { adapter: MarketDataAdapter; calls: CallLog } {
-  const calls: CallLog = { discover: 0, ticker: [], book: [], candles: [], tickerBatches: [], maxConcurrency: 0 };
-  const instruments = opts.instruments ?? [instrument("BTCUSDT"), instrument("ETHUSDT")];
+  const calls: CallLog = {
+    discover: 0,
+    ticker: [],
+    book: [],
+    candles: [],
+    tickerBatches: [],
+    maxConcurrency: 0,
+  };
+  const instruments = opts.instruments ?? [
+    instrument("BTCUSDT"),
+    instrument("ETHUSDT"),
+  ];
   let active = 0;
   // Misst die Parallelität: ein unbegrenzter Burst (Promise.all über N
   // Instrumente) würde hier sofort auffallen — der Sync-Orchestrator arbeitet
   // mit konfigurierbarer, hart auf ≤ 8 begrenzter Nebenläufigkeit.
-  const guard = async <T,>(run: () => Promise<T>): Promise<T> => {
+  const guard = async <T>(run: () => Promise<T>): Promise<T> => {
     active += 1;
     calls.maxConcurrency = Math.max(calls.maxConcurrency, active);
     try {
@@ -156,25 +194,41 @@ function mockAdapter(opts: {
   return { adapter, calls };
 }
 
-function harness(adapter: MarketDataAdapter, venue = "BITUNIX", options: MarketDataSyncOptions = {}) {
+function harness(
+  adapter: MarketDataAdapter,
+  venue = "BITUNIX",
+  options: MarketDataSyncOptions = {},
+) {
   const dir = tmp();
-  const registry = new InstrumentRegistry({ dir, autoSave: true, now: () => new Date("2026-08-29T00:00:00.000Z") });
-  const history = new HistoricalStore(path.join(dir, "history"));
-  const service = new MarketDataSyncService(registry, history, new Map([[venue, adapter]]), {
+  const registry = new InstrumentRegistry({
+    dir,
+    autoSave: true,
     now: () => new Date("2026-08-29T00:00:00.000Z"),
-    ...options,
   });
+  const history = new HistoricalStore(path.join(dir, "history"));
+  const service = new MarketDataSyncService(
+    registry,
+    history,
+    new Map([[venue, adapter]]),
+    {
+      now: () => new Date("2026-08-29T00:00:00.000Z"),
+      ...options,
+    },
+  );
   return { registry, history, service, dir };
 }
 
 test("syncVenue() wirft UnsupportedVenueError bei unbekannter Venue", async () => {
   const { service } = harness(mockAdapter({}).adapter, "BITUNIX");
-  await assert.rejects(() => service.syncVenue("NOPE"), (e: unknown) => {
-    assert.ok(e instanceof UnsupportedVenueError);
-    assert.equal((e as UnsupportedVenueError).code, "UNSUPPORTED_VENUE");
-    assert.match((e as Error).message, /NOPE/);
-    return true;
-  });
+  await assert.rejects(
+    () => service.syncVenue("NOPE"),
+    (e: unknown) => {
+      assert.ok(e instanceof UnsupportedVenueError);
+      assert.equal((e as UnsupportedVenueError).code, "UNSUPPORTED_VENUE");
+      assert.match((e as Error).message, /NOPE/);
+      return true;
+    },
+  );
 });
 
 test("syncVenue() ruft discoverInstruments() genau einmal auf", async () => {
@@ -184,7 +238,7 @@ test("syncVenue() ruft discoverInstruments() genau einmal auf", async () => {
   assert.equal(calls.discover, 1);
 });
 
-test("für jedes Instrument: getTicker, getOrderBook, getCandles × 4 Timeframes", async () => {
+test("für jedes Instrument: getTicker, getOrderBook, getCandles je Default-Timeframe (SYNC_TIMEFRAMES)", async () => {
   const { adapter, calls } = mockAdapter({
     instruments: [instrument("BTCUSDT"), instrument("ETHUSDT")],
   });
@@ -214,7 +268,10 @@ test("Adapter-Fehler in getCandles() landen in SyncResult.errors — kein Full-A
   assert.equal(result.discovered, 2);
   assert.equal(result.tickersEnriched, 2);
   assert.equal(result.orderbooksEnriched, 2);
-  assert.ok(result.failures.length >= 8, `erwartet 2×4 Candle-Fehler, war ${result.failures.length}`);
+  assert.ok(
+    result.failures.length >= 2 * SYNC_TIMEFRAMES.length,
+    `erwartet 2×${SYNC_TIMEFRAMES.length} Candle-Fehler, war ${result.failures.length}`,
+  );
   assert.ok(result.failures.every((e) => e.stage === "candles"));
   assert.equal(calls.discover, 1);
   assert.ok(registry.size >= 1, "Registry bleibt trotz Candle-Fehlern befüllt");
@@ -225,7 +282,9 @@ test("SyncError behält klassifizierte reason/httpStatus (429) pro Instrument, R
     instruments: [instrument("BTCUSDT"), instrument("ETHUSDT")],
     candles: async (symbol, _tf, _limit) => {
       if (symbol === "BTCUSDT") {
-        throw Object.assign(new Error("HTTP 429 rate limit"), { httpStatus: 429 });
+        throw Object.assign(new Error("HTTP 429 rate limit"), {
+          httpStatus: 429,
+        });
       }
       return [candle(0)];
     },
@@ -242,10 +301,16 @@ test("SyncError behält klassifizierte reason/httpStatus (429) pro Instrument, R
   assert.equal(btcCandleErrors[0].retryable, true);
 
   // Das verbleibende Instrument wird trotzdem synchronisiert.
-  assert.ok(result.candlesByTimeframe["1h"]!.bars >= 1, "ETHUSDT-Kerzen müssen geschrieben werden");
+  assert.ok(
+    result.candlesByTimeframe["1h"]!.bars >= 1,
+    "ETHUSDT-Kerzen müssen geschrieben werden",
+  );
   assert.ok(registry.get("BITUNIX:ETHUSDT"));
   assert.equal(calls.discover, 1);
-  assert.equal(syncErrorsToDataErrors(result.failures).get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
+  assert.equal(
+    syncErrorsToDataErrors(result.failures).get("BITUNIX:BTCUSDT"),
+    "RATE_LIMITED",
+  );
 });
 
 test("leeres discoverInstruments() → instrumentsDiscovered: 0, kein Crash", async () => {
@@ -314,9 +379,20 @@ test("market sync enriches 24h volume", async () => {
 
   const btc = registry.get("BITUNIX:BTCUSDT");
   assert.ok(btc);
-  assert.ok((btc!.volume24h ?? 0) > 0, `volume24h erwartet > 0, war ${btc!.volume24h}`);
-  assert.equal(btc!.volume24h, 1_000_000, "volume24h kommt aus ticker.quoteVol");
-  assert.equal(btc!.lastSeen, "2026-08-29T00:00:00.000Z", "lastSeen wird beim Upsert gestempelt");
+  assert.ok(
+    (btc!.volume24h ?? 0) > 0,
+    `volume24h erwartet > 0, war ${btc!.volume24h}`,
+  );
+  assert.equal(
+    btc!.volume24h,
+    1_000_000,
+    "volume24h kommt aus ticker.quoteVol",
+  );
+  assert.equal(
+    btc!.lastSeen,
+    "2026-08-29T00:00:00.000Z",
+    "lastSeen wird beim Upsert gestempelt",
+  );
 });
 
 test("market sync writes orderbook-derived spread into the registry", async () => {
@@ -330,17 +406,31 @@ test("market sync writes orderbook-derived spread into the registry", async () =
 
   const btc = registry.get("BITUNIX:BTCUSDT");
   assert.ok(btc);
-  assert.ok(btc!.spread !== null, "spread muss aus bestBid/bestAsk gefüllt sein");
-  assert.ok(Math.abs(btc!.spread! - calculateRelativeSpread(100, 100.02)!) < 1e-12);
-  assert.ok(Math.abs(btc!.spread! - 0.00019998) < 1e-6, `≈2 bp erwartet, war ${btc!.spread}`);
+  assert.ok(
+    btc!.spread !== null,
+    "spread muss aus bestBid/bestAsk gefüllt sein",
+  );
+  assert.ok(
+    Math.abs(btc!.spread! - calculateRelativeSpread(100, 100.02)!) < 1e-12,
+  );
+  assert.ok(
+    Math.abs(btc!.spread! - 0.00019998) < 1e-6,
+    `≈2 bp erwartet, war ${btc!.spread}`,
+  );
 });
 
 test("Batch-Tickers: 1× getTickers(symbols) für alle Instrumente, kein per-Symbol-getTicker", async () => {
-  const instruments = [instrument("BTCUSDT"), instrument("ETHUSDT"), instrument("SOLUSDT")];
+  const instruments = [
+    instrument("BTCUSDT"),
+    instrument("ETHUSDT"),
+    instrument("SOLUSDT"),
+  ];
   const { adapter, calls } = mockAdapter({
     instruments,
     batchTickers: async (symbols) =>
-      (symbols ?? instruments.map((i) => i.symbol)).map((s) => ticker(s, 2_500_000)),
+      (symbols ?? instruments.map((i) => i.symbol)).map((s) =>
+        ticker(s, 2_500_000),
+      ),
   });
   const { service, registry } = harness(adapter);
 
@@ -348,7 +438,11 @@ test("Batch-Tickers: 1× getTickers(symbols) für alle Instrumente, kein per-Sym
 
   assert.equal(calls.tickerBatches.length, 1, "genau EIN Batch-Call");
   assert.deepEqual(calls.tickerBatches[0], ["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
-  assert.deepEqual(calls.ticker, [], "kein Fallback-getTicker, wenn der Batch vollständig ist");
+  assert.deepEqual(
+    calls.ticker,
+    [],
+    "kein Fallback-getTicker, wenn der Batch vollständig ist",
+  );
   assert.equal(result.tickersEnriched, 3);
   for (const id of ["BITUNIX:BTCUSDT", "BITUNIX:ETHUSDT", "BITUNIX:SOLUSDT"]) {
     assert.equal(registry.get(id)?.volume24h, 2_500_000);
@@ -368,9 +462,17 @@ test("Batch-Tickers unvollständig → Lücken-Fallback per Einzel-Ticker (Symbo
   // Lücken-Fallback: das im Bulk fehlende Symbol wird genau EINMAL einzeln
   // geholt (Symbol-Guard). Eine Lücke zählt nie still als „enriched" —
   // entweder schließt der Fallback sie, oder sie wird als failure sichtbar.
-  assert.deepEqual(calls.ticker, ["ETHUSDT"], "genau ein Einzel-Ticker für die Bulk-Lücke");
+  assert.deepEqual(
+    calls.ticker,
+    ["ETHUSDT"],
+    "genau ein Einzel-Ticker für die Bulk-Lücke",
+  );
   assert.equal(registry.get("BITUNIX:BTCUSDT")?.volume24h, 5_000_000);
-  assert.equal(registry.get("BITUNIX:ETHUSDT")?.volume24h, 1_000_000, "Lücke per Einzel-Ticker geschlossen");
+  assert.equal(
+    registry.get("BITUNIX:ETHUSDT")?.volume24h,
+    1_000_000,
+    "Lücke per Einzel-Ticker geschlossen",
+  );
   assert.equal(result.tickersEnriched, 2);
   assert.equal(result.failures.filter((f) => f.stage === "ticker").length, 0);
   assert.ok(result.spreadsUnknown >= 0);
@@ -391,8 +493,16 @@ test("Batch-Lücke UND Einzel-Ticker-Fehlschlag → sichtbarer ticker-failure, n
 
   assert.deepEqual(calls.ticker, ["ETHUSDT"], "Fallback wurde versucht");
   assert.equal(registry.get("BITUNIX:BTCUSDT")?.volume24h, 5_000_000);
-  assert.equal(registry.get("BITUNIX:ETHUSDT")?.volume24h, null, "Lücke bleibt null (Data-Quality)");
-  assert.equal(result.tickersEnriched, 1, "die offene Lücke zählt nicht als enriched");
+  assert.equal(
+    registry.get("BITUNIX:ETHUSDT")?.volume24h,
+    null,
+    "Lücke bleibt null (Data-Quality)",
+  );
+  assert.equal(
+    result.tickersEnriched,
+    1,
+    "die offene Lücke zählt nicht als enriched",
+  );
   assert.ok(
     result.failures.some((f) => f.stage === "ticker" && f.symbol === "ETHUSDT"),
     "die Lücke muss als Sync-Fehler sichtbar sein",
@@ -411,11 +521,17 @@ test("Ticker-Symbol weicht ab → volume24h bleibt null (kein Fremd-Volumen)", a
 
   const eth = registry.get("BITUNIX:ETHUSDT");
   assert.ok(eth);
-  assert.equal(eth!.volume24h, null, "fremdes quoteVol darf nicht übernommen werden");
+  assert.equal(
+    eth!.volume24h,
+    null,
+    "fremdes quoteVol darf nicht übernommen werden",
+  );
   // P1: per-Symbol-Fallback mit Symbol-Guard → mismatch → failure + null, tickersEnriched 0
   assert.equal(result.tickersEnriched, 0);
   assert.ok(
-    result.failures.some((e) => e.stage === "ticker" && /Symbol/.test(e.message)),
+    result.failures.some(
+      (e) => e.stage === "ticker" && /Symbol/.test(e.message),
+    ),
     "Abweichung muss als Sync-Fehler sichtbar sein",
   );
 });
@@ -439,7 +555,14 @@ test("Ticker ohne quoteVol → volume24h bleibt null, Liquiditäts-Faktor fällt
   // Review-Punkt 5: Der Liquiditätsfaktor hat einen Kerzen-Fallback …
   const stored: ScannerCandle[] = history
     .query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" })
-    .map((e) => ({ time: e.ts, open: e.open, high: e.high, low: e.low, close: e.close, volume: e.volume }));
+    .map((e) => ({
+      time: e.ts,
+      open: e.open,
+      high: e.high,
+      low: e.low,
+      close: e.close,
+      volume: e.volume,
+    }));
   assert.ok(stored.length > 0, "Kerzen müssen nach dem Sync lesbar sein");
   const liquidity = liquidityFactor.compute({
     instrument: btc!,
@@ -447,7 +570,11 @@ test("Ticker ohne quoteVol → volume24h bleibt null, Liquiditäts-Faktor fällt
     asOf: Date.parse("2026-08-29T00:00:00.000Z"),
     config: DEFAULT_SCANNER_CONFIG,
   });
-  assert.equal(liquidity.available, true, "Fallback macht den Faktor verfügbar");
+  assert.equal(
+    liquidity.available,
+    true,
+    "Fallback macht den Faktor verfügbar",
+  );
   assert.equal(liquidity.detail.source, "candle");
   assert.equal(liquidity.raw, 15, "10 (volume) × 1.5 (close) = 15");
 
@@ -463,7 +590,9 @@ test("Ticker ohne quoteVol → volume24h bleibt null, Liquiditäts-Faktor fällt
 
 test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, Parallelität ≤ 8 (kein unbegrenzter Burst)", async () => {
   const N = 180;
-  const instruments = Array.from({ length: N }, (_, i) => instrument(`SYM${i}USDT`));
+  const instruments = Array.from({ length: N }, (_, i) =>
+    instrument(`SYM${i}USDT`),
+  );
   const { adapter, calls } = mockAdapter({ instruments });
 
   let takes = 0;
@@ -473,19 +602,32 @@ test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, Parall
     },
   };
   const dir = tmp();
-  const registry = new InstrumentRegistry({ dir, autoSave: false, now: () => new Date("2026-08-29T00:00:00.000Z") });
-  const history = new HistoricalStore(path.join(dir, "history"));
-  const service = new MarketDataSyncService(registry, history, new Map([["BITUNIX", adapter]]), {
+  const registry = new InstrumentRegistry({
+    dir,
+    autoSave: false,
     now: () => new Date("2026-08-29T00:00:00.000Z"),
-    rateLimiter: limiter,
   });
+  const history = new HistoricalStore(path.join(dir, "history"));
+  const service = new MarketDataSyncService(
+    registry,
+    history,
+    new Map([["BITUNIX", adapter]]),
+    {
+      now: () => new Date("2026-08-29T00:00:00.000Z"),
+      rateLimiter: limiter,
+    },
+  );
 
   const result = await service.syncVenue("BITUNIX");
 
   // P1: 1× discovery + 1× bulk tickers + N× depth + N×4 kline = 2 + N*5
   // (alter Pfad 1× discovery + N×(ticker+depth+4) = 1+N*6 =1081, neu 902)
   const expected = 2 + N * (1 + SYNC_TIMEFRAMES.length);
-  assert.equal(takes, expected, `Limiter-Takes: erwartet ${expected}, war ${takes}`);
+  assert.equal(
+    takes,
+    expected,
+    `Limiter-Takes: erwartet ${expected}, war ${takes}`,
+  );
   assert.equal(calls.book.length, N, "1 depth-Call je Instrument (N × depth)");
   // P1: Bulk-Tickers → kein per-Symbol-Ticker, wenn Adapter Bulk unterstützt
   // Dieser Mock hat keinen Batch, daher per-Symbol-Fallback? mockAdapter ohne batchTickers hat keinen getTickers,
@@ -496,10 +638,13 @@ test("Rate-Limiting: 180 Instrumente → jeder Request über den Limiter, Parall
   // Wir haben oben expected für bulk gerechnet; korrigiere für no-bulk-Fall:
   const expectedNoBulk = 1 + N * (1 + 1 + SYNC_TIMEFRAMES.length);
   const okTakes = takes === expected || takes === expectedNoBulk;
-  assert.ok(okTakes, `Limiter-Takes: erwartet ${expected} (bulk) oder ${expectedNoBulk} (no-bulk), war ${takes}`);
+  assert.ok(
+    okTakes,
+    `Limiter-Takes: erwartet ${expected} (bulk) oder ${expectedNoBulk} (no-bulk), war ${takes}`,
+  );
   assert.ok(
     calls.maxConcurrency <= 8,
-    `Concurrency hart auf ≤ 8 begrenzt, war ${calls.maxConcurrency}`
+    `Concurrency hart auf ≤ 8 begrenzt, war ${calls.maxConcurrency}`,
   );
   assert.equal(result.orderbooksEnriched, N);
   assert.equal(registry.size, N);
@@ -519,12 +664,19 @@ test("Architektur: src/marketdata importiert keinen PrivateClient und loggt kein
   };
   walk(root);
   assert.ok(files.length >= 4);
-  const forbiddenImport = /from\s+["'][^"']*privateClient["']|new\s+BitunixPrivateClient/;
+  const forbiddenImport =
+    /from\s+["'][^"']*privateClient["']|new\s+BitunixPrivateClient/;
   for (const f of files) {
     const src = readFileSync(f, "utf8");
-    assert.equal(forbiddenImport.test(src), false, `${path.relative(process.cwd(), f)} importiert PrivateClient`);
     assert.equal(
-      /console\.(log|info|warn|error)\([^)]*(apiSecret|api-key|secretKey|\.sign\b)/i.test(src),
+      forbiddenImport.test(src),
+      false,
+      `${path.relative(process.cwd(), f)} importiert PrivateClient`,
+    );
+    assert.equal(
+      /console\.(log|info|warn|error)\([^)]*(apiSecret|api-key|secretKey|\.sign\b)/i.test(
+        src,
+      ),
       false,
       `${path.relative(process.cwd(), f)} loggt potenziell Secrets`,
     );
@@ -545,7 +697,8 @@ test("scanUniverse-Modul importiert MarketDataSyncService nicht", () => {
   for (const f of files) {
     const src = readFileSync(f, "utf8");
     assert.equal(
-      /from\s+["'][^"']*marketdata\/sync["']/.test(src) || /new\s+MarketDataSyncService/.test(src),
+      /from\s+["'][^"']*marketdata\/sync["']/.test(src) ||
+        /new\s+MarketDataSyncService/.test(src),
       false,
       `${path.relative(process.cwd(), f)} darf den Sync-Service nicht aufrufen`,
     );

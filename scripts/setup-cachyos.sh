@@ -956,7 +956,12 @@ PORT=${APP_PORT}
 UNIVERSE_DATA_DIR=data/universe
 
 # --- Marktdaten-Sync (MDSYNC-001) ------------------------------------------
+# Globaler Kill-Switch. Die einzige produktiv angebundene Sync-Venue ist
+# BITUNIX (siehe src/marketdata/registerAdapters.ts); ohne das Venue-Flag
+# laufen Sync/Warmup leer (VENUE_DISABLED) und der Scanner bleibt WARMING.
 MARKET_SYNC_ENABLED=true
+MARKET_SYNC_VENUES=BITUNIX
+BITUNIX_ENABLED=true
 
 # --- Paper-Trading ---------------------------------------------------------
 # Erlaubt: synthetic | broker-market-data | broker-paper-api (parsePaperMode()).
@@ -988,6 +993,11 @@ ENV
     env_ensure_key "OLLAMA_BASE_URL"   "http://${LLM_HOST}:11434"      "$env_file" && added=$((added+1))
     env_ensure_key "UNIVERSE_DATA_DIR" "data/universe"                 "$env_file" && added=$((added+1))
     env_ensure_key "MARKET_SYNC_ENABLED" "true"                        "$env_file" && added=$((added+1))
+    # Ohne Venue-Flag läuft der Sync leer (VENUE_DISABLED) und der Scanner
+    # bleibt dauerhaft WARMING — der interaktive Warmup-Schritt würde sonst
+    # scheinbar erfolgreich „nichts“ synchronisieren.
+    env_ensure_key "MARKET_SYNC_VENUES"  "BITUNIX"                     "$env_file" && added=$((added+1))
+    env_ensure_key "BITUNIX_ENABLED"     "true"                        "$env_file" && added=$((added+1))
     env_ensure_key "PAPER_MODE"        "broker-market-data"            "$env_file" && added=$((added+1))
     if [[ -n "$API_TOKEN" ]]; then
       env_ensure_key "FIRM_API_TOKEN"  "$API_TOKEN"                    "$env_file" && added=$((added+1))
@@ -1147,14 +1157,22 @@ step_08_universe() {
   #    mit „min-candles" ab (MDSYNC-001) — deshalb ausdrücklich anbieten.
   if [[ "$DO_SYNC_MARKETS" == "true" ]]; then
     info "Marktdaten-Warmup (--sync-markets)…"
-    if run_soft npm run market:sync -- --dry-run; then
-      note "Dry-Run bestanden — echter Sync folgt. Ohne freigeschaltete Venue bleibt der Warmup leer."
-      run_soft npm run market:sync
+    # Die CLI liert die Konfiguration aus der Prozessumgebung (kein
+    # dotenv-Loader im Node-Pfad) — die eben geschriebene .env deshalb für
+    # die Warmup-Aufrufe explizit exportieren, sonst schlägt der Venue-Gate
+    # mit VENUE_DISABLED fehl, obwohl die .env korrekt ist.
+    local sync_env=()
+    if [[ -f "$PROJECT_ROOT/.env" ]]; then
+      sync_env=(bash -c 'set -a; source "$1"; set +a; shift; "$@"' _ "$PROJECT_ROOT/.env")
+    fi
+    if run_soft "${sync_env[@]}" npm run market:sync -- --dry-run; then
+      note "Dry-Run bestanden — echter Sync folgt."
+      run_soft "${sync_env[@]}" npm run market:sync
     else
       warn "Marktdaten-Dry-Run fehlgeschlagen — Warmup übersprungen (Registry ist trotzdem vollständig)."
     fi
-    run_soft npm run market:sync:status \
-      || note "Warmup-Readiness noch unvollständig: npm run market:sync -- --venue=<VENUE>"
+    run_soft "${sync_env[@]}" npm run market:sync:status \
+      || note "Warmup-Readiness noch unvollständig: npm run market:sync -- --venue=BITUNIX"
   else
     note "Marktdaten-Warmup übersprungen. Nachholen: npm run market:sync -- --venue=BITUNIX"
     note "(ohne Warmup lehnt der Scanner alle Instrumente mit 'min-candles' ab)"
@@ -1399,6 +1417,13 @@ ${C_GREEN}${C_BOLD}Installation abgeschlossen.${C_RESET}
     1. Marktdaten-Warmup:  npm run market:sync -- --venue=BITUNIX
     2. Scan:               npm run scan -- --sync-first
     3. Danach:             docs/HANDBUCH.md, Kapitel 3
+
+  Automatische Marktversorgung (optional, systemd):
+    Stündlicher Inkrementallauf + täglicher Vollabgleich über die
+    Timer in deploy/market-sync*.timer, siehe
+    docs/MARKET_DATA_PIPELINE.md §12.2. Der Sync läuft inkrementell
+    (nur neue Periodenkerzen) und wiederverwendet frische Spreads
+    (data/spread-cache.json, TTL 6 h).
 
   Dokumentation:    docs/INSTALL.md · docs/SETUP_BUGS.md · docs/MARKET_UNIVERSE.md
 

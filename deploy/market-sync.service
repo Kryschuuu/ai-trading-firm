@@ -1,0 +1,62 @@
+#
+# systemd-Unit für den inkrementellen Market-Data-Sync (v1.38.0).
+#
+# Installation (Pfade/Benutzer wie bei ai-trading-firm.service anpassen):
+#   sudo cp deploy/market-sync.service deploy/market-sync.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now market-sync.timer
+#
+# Erster vollständiger Warmup weiterhin manuell:
+#   sudo -u DEIN_USER npm run market:sync
+#
+# Was die Unit tut:
+#   - stündlicher, REIN inkrementeller Lauf (Default ohne --full): Reihen,
+#     deren laufende Periodenkerze bereits im Store liegt, werden ohne
+#     Kline-Request übersprungen; frische Spread-Cache-Werte (TTL 6 h)
+#     überspringen den Depth-Request. Nach dem Warmup ist so ein Lauf
+#     nahezu requestfrei.
+#   - Exit-Code: 0 sauber/inkrementell, 1 degradiert/WARMING (systemd
+#     journalt das; der Timer läuft zur nächsten Stunde erneut), 2 Bedienfehler.
+#
+# Kein Netzwerk-Fallback im Scanner: dieser Dienst ist die EINZIGE Stelle,
+# über die der historische Bestand befüllt wird.
+#
+[Unit]
+Description=Market-Data-Sync der autonomen KI-Trading-Firma (inkrementell, BITUNIX)
+Documentation=file:///home/DEIN_USER/ai-trading-firm/docs/MARKET_DATA_PIPELINE.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# ---- ANPASSEN ----
+User=DEIN_USER
+Group=DEIN_USER
+WorkingDirectory=/home/DEIN_USER/ai-trading-firm
+# ------------------
+EnvironmentFile=/home/DEIN_USER/ai-trading-firm/.env
+# Öffentliche Endpunkte, keine Credentials im Sync-Pfad (PublicClient).
+ExecStart=/usr/bin/npm run market:sync
+# Ein degradiertes Laufende (Exit 1) ist ein erwarteter, sichtbarer Zustand
+# und wird nicht als eskalierender Fehlschlag behandelt; das Journal bleibt
+# die Nachweisstelle.
+SuccessExitStatus=0 1
+TimeoutStartSec=1800
+# Härtestellungen analog dem Hauptdienst, ohne Schreibzugriff außerhalb.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/DEIN_USER/ai-trading-firm
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=1G
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=market-sync
+
+[Install]
+WantedBy=multi-user.target

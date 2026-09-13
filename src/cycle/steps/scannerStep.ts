@@ -12,7 +12,10 @@ export interface ScannerStepInput {
   asOf?: string;
 }
 
-export const scannerStep: StepDefinition<ScannerStepInput, DailyUniverseArtifact> = {
+export const scannerStep: StepDefinition<
+  ScannerStepInput,
+  DailyUniverseArtifact
+> = {
   stepId: "01-market-scanner",
   name: "Market Scanner",
   role: "MARKET_SCANNER",
@@ -23,12 +26,29 @@ export const scannerStep: StepDefinition<ScannerStepInput, DailyUniverseArtifact
     backoffMs: 100,
   },
 
-  async execute(context: StepExecutionContext<ScannerStepInput>): Promise<DailyUniverseArtifact> {
+  async execute(
+    context: StepExecutionContext<ScannerStepInput>,
+  ): Promise<DailyUniverseArtifact> {
     context.log("Starte deterministischen Markt-Scan …");
     const scanArtifact = await context.ports.scanner.runScan(context.asOf);
+    const readiness = scanArtifact.readiness;
+    const readinessLine = readiness
+      ? ` Readiness ${readiness.status} (${readiness.warmed}/${readiness.instruments} gewärmt, ${readiness.outOfScope} außer Scope).`
+      : "";
     context.log(
-      `Scan abgeschlossen: ${scanArtifact.funnel.scanned} gescannt, ${scanArtifact.funnel.daily} Daily, ${scanArtifact.funnel.deep} Deep.`
+      `Scan abgeschlossen: ${scanArtifact.funnel.scanned} gescannt, ${scanArtifact.funnel.eligible} geeignet, ` +
+        `${scanArtifact.funnel.daily} Daily, ${scanArtifact.funnel.deep} Deep.${readinessLine}`,
     );
+    // Bei WARMING/ERROR wird der Zyklus NICHT abgebrochen (die Fachschritte
+    // reagieren mit leeren, ehrlichen Fallbacks), aber die Ursache ist
+    // auditierbar: Datenproblem statt „keine Marktchance“.
+    if (readiness && readiness.status !== "READY") {
+      context.log(
+        readiness.status === "ERROR"
+          ? `Scanner-Readiness ERROR: ${readiness.error}`
+          : `Scanner-Readiness WARMING: ${readiness.missing} Instrument(e) unter ${readiness.requiredCandles} Kerzen — Market-Data-Sync nachziehen.`,
+      );
+    }
     return scanArtifact;
   },
 };

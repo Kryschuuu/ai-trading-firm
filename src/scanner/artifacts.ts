@@ -18,13 +18,64 @@
  * `.gitignore`), aber sie sind reproduzierbar aus Registry + Historie.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { resolveRuntimePath } from "../lib/appPaths";
 import type { ScannerConfig, ScoreWeights } from "./config";
 import type { ScanResult } from "./pipeline";
+import type { ScannerReadiness } from "./readiness";
 import type { InstrumentScore, ScoreBreakdownEntry } from "./types";
 import { validateWeeklyReview, type WeeklyReview } from "./weekly";
+
+/**
+ * Kompakte, serialisierbare Readiness-Sicht im Tagesartefakt. Bewusst ohne
+ * optionale Felder der Union (schlankes JSON); der volle Zustand bleibt über
+ * {@link ScanResult} abrufbar. Folge-Schritte der Tagespipeline (Market
+ * Selection, Technical, Research) sehen so auf einen Blick, ob ein leerer
+ * Trichter ein **Fachergebnis** (READY, keine Chancen) oder ein
+ * **Datenproblem** (WARMING/ERROR → Warmup/Sync nötig, kein LLM raten lassen)
+ * ist.
+ */
+export interface ArtifactReadiness {
+  status: ScannerReadiness["status"];
+  instruments: number;
+  warmed: number;
+  missing: number;
+  outOfScope: number;
+  requiredCandles: number;
+  error?: string;
+}
+
+/** Extrahiert die Artefakt-Readiness aus einem Scan (deterministisch). */
+export function artifactReadiness(scan: ScanResult): ArtifactReadiness {
+  const r = scan.readiness;
+  if (r.status === "ERROR") {
+    return {
+      status: "ERROR",
+      instruments: 0,
+      warmed: 0,
+      missing: 0,
+      outOfScope: 0,
+      requiredCandles: scan.requiredCandles,
+      error: r.error,
+    };
+  }
+  return {
+    status: r.status,
+    instruments: r.instruments,
+    warmed: r.warmed,
+    missing: r.missing,
+    outOfScope: r.outOfScope,
+    requiredCandles: r.requiredCandles,
+  };
+}
 
 /** Standard-Verzeichnis der Artefakte (relativ zum Projektstamm). */
 export const DEFAULT_ARTIFACTS_DIR = "artifacts";
@@ -63,6 +114,12 @@ export interface DailyUniverseArtifact {
   configVersion: number;
   /** Auswertungszeitpunkt (ISO-8601-UTC). */
   asOf: string;
+  /**
+   * Daten-Readiness zum Artefakt-Zeitpunkt (v1.37.0). Optional im Typ, damit
+   * ältere/Test-Artefakte weiter gültig sind; vom Produktionspfad wird sie
+   * immer befüllt (siehe {@link artifactReadiness}).
+   */
+  readiness?: ArtifactReadiness;
   /** Verwendete Score-Gewichte (Nachvollziehbarkeit alter Snapshots). */
   weights: ScoreWeights;
   /** Trichter-Kennzahlen. */
@@ -87,7 +144,11 @@ export interface DailyUniverseArtifact {
   rejections: { total: number; byRule: Record<string, number> };
 }
 
-function entry(score: InstrumentScore, rank: number, withBreakdown: boolean): ArtifactScoreEntry {
+function entry(
+  score: InstrumentScore,
+  rank: number,
+  withBreakdown: boolean,
+): ArtifactScoreEntry {
   const base: ArtifactScoreEntry = {
     rank,
     instrumentId: score.instrumentId,
@@ -106,6 +167,7 @@ export function buildDailyArtifact(scan: ScanResult): DailyUniverseArtifact {
     generator: "scanner/task-04",
     configVersion: scan.config.version,
     asOf: scan.asOf,
+    readiness: artifactReadiness(scan),
     weights: { ...scan.config.weights },
     funnel: {
       scanned: scan.funnel.scanned,
@@ -120,10 +182,15 @@ export function buildDailyArtifact(scan: ScanResult): DailyUniverseArtifact {
     levels: {
       deep: scan.funnel.deep.map((s, i) => entry(s, i + 1, true)),
       daily: scan.funnel.daily.map((s, i) => entry(s, i + 1, true)),
-      interesting: scan.funnel.interesting.map((s, i) => entry(s, i + 1, false)),
+      interesting: scan.funnel.interesting.map((s, i) =>
+        entry(s, i + 1, false),
+      ),
       eligible: scan.funnel.eligible.map((s) => s.instrumentId),
     },
-    rejections: { total: scan.rejections.length, byRule: { ...scan.rejectionsByRule } },
+    rejections: {
+      total: scan.rejections.length,
+      byRule: { ...scan.rejectionsByRule },
+    },
   };
 }
 
@@ -144,26 +211,31 @@ export function resolveArtifactsDir(dir?: string): string {
 /** Tagesordner `YYYY-MM-DD` aus einem ISO-Zeitstempel. */
 export function artifactDateOf(isoTimestamp: string): string {
   const ms = Date.parse(isoTimestamp);
-  if (!Number.isFinite(ms)) throw new Error("artifactDateOf: ungültiger Zeitstempel");
+  if (!Number.isFinite(ms))
+    throw new Error("artifactDateOf: ungültiger Zeitstempel");
   return new Date(ms).toISOString().slice(0, 10);
 }
 
 function assertDate(date: string): string {
-  if (!ARTIFACT_DATE_RE.test(date)) throw new Error(`Artefakt-Datum ungültig: "${date.slice(0, 20)}"`);
+  if (!ARTIFACT_DATE_RE.test(date))
+    throw new Error(`Artefakt-Datum ungültig: "${date.slice(0, 20)}"`);
   return date;
 }
 
 function writeJsonAtomic(target: string, value: unknown): void {
   mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o644,
+  });
   renameSync(tmp, target);
 }
 
 /** Schreibt `artifacts/YYYY-MM-DD/universe.json` und liefert Pfad + Artefakt. */
 export function writeDailyArtifact(
   scan: ScanResult,
-  options: { dir?: string; date?: string } = {}
+  options: { dir?: string; date?: string } = {},
 ): { path: string; artifact: DailyUniverseArtifact } {
   const artifact = buildDailyArtifact(scan);
   const date = assertDate(options.date ?? artifactDateOf(scan.asOf));
@@ -175,7 +247,7 @@ export function writeDailyArtifact(
 /** Schreibt `artifacts/YYYY-MM-DD/weekly.json` und liefert den Pfad. */
 export function writeWeeklyArtifact(
   review: WeeklyReview,
-  options: { dir?: string; date?: string } = {}
+  options: { dir?: string; date?: string } = {},
 ): { path: string; review: WeeklyReview } {
   const date = assertDate(options.date ?? artifactDateOf(review.asOf));
   const target = path.join(resolveArtifactsDir(options.dir), date, WEEKLY_FILE);
@@ -194,15 +266,29 @@ export function listArtifactDates(dir?: string): string[] {
 }
 
 /** Liest einen Tages-Snapshot (`null`, wenn er nicht existiert). */
-export function readDailyArtifact(date: string, dir?: string): DailyUniverseArtifact | null {
-  const target = path.join(resolveArtifactsDir(dir), assertDate(date), DAILY_FILE);
+export function readDailyArtifact(
+  date: string,
+  dir?: string,
+): DailyUniverseArtifact | null {
+  const target = path.join(
+    resolveArtifactsDir(dir),
+    assertDate(date),
+    DAILY_FILE,
+  );
   if (!existsSync(target)) return null;
   return JSON.parse(readFileSync(target, "utf8")) as DailyUniverseArtifact;
 }
 
 /** Liest einen Weekly-Review und validiert ihn (`null`, wenn er nicht existiert). */
-export function readWeeklyArtifact(date: string, dir?: string): WeeklyReview | null {
-  const target = path.join(resolveArtifactsDir(dir), assertDate(date), WEEKLY_FILE);
+export function readWeeklyArtifact(
+  date: string,
+  dir?: string,
+): WeeklyReview | null {
+  const target = path.join(
+    resolveArtifactsDir(dir),
+    assertDate(date),
+    WEEKLY_FILE,
+  );
   if (!existsSync(target)) return null;
   return validateWeeklyReview(JSON.parse(readFileSync(target, "utf8")));
 }
@@ -214,6 +300,9 @@ export function latestArtifactDate(dir?: string): string | null {
 }
 
 /** Nur Doku/Tests: die Konfiguration, mit der ein Artefakt erzeugt wurde. */
-export function artifactMatchesConfig(artifact: DailyUniverseArtifact, config: ScannerConfig): boolean {
+export function artifactMatchesConfig(
+  artifact: DailyUniverseArtifact,
+  config: ScannerConfig,
+): boolean {
   return artifact.configVersion === config.version;
 }

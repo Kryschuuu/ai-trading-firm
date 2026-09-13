@@ -46,6 +46,13 @@ export interface MarketDataReadinessReport {
   venue: string;
   /** Instrumente in der Registry (`registry.size`). */
   registryCount: number;
+  /**
+   * Instrumente außerhalb des Daten-Scopes (Venues ohne jede Kerze im
+   * Store); sie blockieren READY nicht. 0 im Kaltstart.
+   */
+  outOfScopeCount: number;
+  /** Registry-Instrumente im Scope (`registryCount − outOfScopeCount`). */
+  scopedCount: number;
   /** Instrumente mit `lastSeen` innerhalb {@link DISCOVERY_FRESHNESS_WINDOW_MS}. */
   discoveredCount: number;
   /**
@@ -95,6 +102,28 @@ export interface MarketDataReadinessInput {
 }
 
 /**
+ * Daten-Scope im Ops-Aggregat (v1.38.0), gespiegelt aus der Readiness-Logik des Scanners
+ * (`scopeVenues: "data"`): Venues, an denen der Store mindestens eine Kerze
+ * bereithält, können den Bereitschaftszustand blockieren; kuratierte
+ * Preset-Instrumente auf Venues ohne laufenden Sync (ALPACA/IBKR/BINANCE
+ * bei alleiniger BITUNIX-Sync-Venue) werden als „außer Scope“ gezählt.
+ * Kaltstart-Schutz: liegt noch für KEINE Venue eine Kerze vor, bleiben alle
+ * Instrumente im Scope (sonst wäre der leere Store fälschlich READY).
+ */
+export function dataScopeInstruments(
+  instruments: readonly MarketInstrument[],
+  candleCounts: ReadonlyMap<string, number>,
+): { scoped: MarketInstrument[]; outOfScope: number } {
+  const venuesWithData = new Set<string>();
+  for (const instrument of instruments) {
+    if ((candleCounts.get(instrument.id) ?? 0) > 0) venuesWithData.add(instrument.venue);
+  }
+  if (venuesWithData.size === 0) return { scoped: [...instruments], outOfScope: 0 };
+  const scoped = instruments.filter((instrument) => venuesWithData.has(instrument.venue));
+  return { scoped, outOfScope: instruments.length - scoped.length };
+}
+
+/**
  * Aggregiert den Readiness-Report. Reine Funktion: kein I/O, keine Uhr
  * (außer der injizierbaren `now`), keine Mutation der Eingaben.
  *
@@ -120,8 +149,16 @@ export function collectMarketDataReadiness(input: MarketDataReadinessInput): Mar
   let candlesLoaded = 0;
   const venues = new Set<string>();
 
+  // Daten-Scope: nur Venues mit nachweislich vorhandenen Kerzen blockieren
+  // READY (gespiegelt die Readiness-Logik des Scanners).
+  const { scoped, outOfScope: outOfScopeLoaded } = dataScopeInstruments(instruments, candleCounts);
+  const outOfScopeCount = Math.max(0, Math.min(outOfScopeLoaded, registryCount));
+  const scopedCount = Math.max(0, registryCount - outOfScopeCount);
+  const scopedIds = new Set(scoped.map((instrument) => instrument.id));
+
   for (const instrument of instruments) {
     venues.add(instrument.venue);
+    if (!scopedIds.has(instrument.id)) continue;
     const seenMs = Date.parse(instrument.lastSeen);
     if (Number.isFinite(seenMs) && seenMs >= now - windowMs) discovered += 1;
 
@@ -138,9 +175,11 @@ export function collectMarketDataReadiness(input: MarketDataReadinessInput): Mar
   return {
     venue: venues.size === 1 ? [...venues][0] : MULTI_VENUE_LABEL,
     registryCount,
+    outOfScopeCount,
+    scopedCount,
     discoveredCount: discovered,
     dataReadyCount: dataReady,
-    warmingCount: Math.max(registryCount - dataReady, 0),
+    warmingCount: Math.max(scopedCount - dataReady, 0),
     candlesLoaded,
     candlesRequired: requiredCandles,
     tickerReadyCount: tickerReady,
