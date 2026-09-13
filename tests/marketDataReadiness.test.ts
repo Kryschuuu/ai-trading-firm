@@ -84,6 +84,8 @@ test("leere Registry: alle Zähler 0, scannerReady false, Venue ALL", () => {
   assert.deepEqual(report, {
     venue: MULTI_VENUE_LABEL,
     registryCount: 0,
+    outOfScopeCount: 0,
+    scopedCount: 0,
     discoveredCount: 0,
     dataReadyCount: 0,
     warmingCount: 0,

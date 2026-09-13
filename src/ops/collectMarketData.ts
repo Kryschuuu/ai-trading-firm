@@ -34,6 +34,7 @@ import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
 
 import {
+  dataScopeInstruments,
   DISCOVERY_FRESHNESS_WINDOW_MS,
   marketDataReadinessStore,
   scannerCandleCounts,
@@ -104,8 +105,16 @@ export function collectMarketDataReadiness(input?: MarketDataSnapshotInput): Mar
   const offenders: MarketDataOpsOffender[] = [];
   const instrumentsByVenue = new Map<string, number>();
 
+  // Daten-Scope (v1.38.0): Preset-Venues ohne Kerzen blockieren READY nicht,
+  // gespiegelt zur Readiness-Logik des Scanners. Kaltstart ⇒ alle im Scope.
+  const { scoped, outOfScope: outOfScopeLoaded } = dataScopeInstruments(instruments, candleCounts);
+  const outOfScope = Math.max(0, Math.min(outOfScopeLoaded, registry));
+  const scopedTotal = Math.max(0, registry - outOfScope);
+  const scopedIds = new Set(scoped.map((instrument) => instrument.id));
+
   for (const instrument of instruments) {
     instrumentsByVenue.set(instrument.venue, (instrumentsByVenue.get(instrument.venue) ?? 0) + 1);
+    if (!scopedIds.has(instrument.id)) continue;
 
     const seenMs = Date.parse(instrument.lastSeen);
     if (Number.isFinite(seenMs) && seenMs >= now - windowMs) discovered += 1;
@@ -135,7 +144,7 @@ export function collectMarketDataReadiness(input?: MarketDataSnapshotInput): Mar
   const readinessStatus: MarketDataOpsSnapshot["readinessStatus"] =
     dataErrorCount > 0
       ? "ERROR"
-      : registry > 0 && complete >= registry && instruments.length >= registry
+      : scopedTotal > 0 && complete >= scopedTotal
         ? "READY"
         : "WARMING";
 
@@ -143,9 +152,11 @@ export function collectMarketDataReadiness(input?: MarketDataSnapshotInput): Mar
     generatedAt: new Date(now).toISOString(),
     requiredCandles,
     registry,
+    outOfScope,
+    scoped: scopedTotal,
     discovered,
     dataReady,
-    warming: Math.max(registry - dataReady, 0),
+    warming: Math.max(scopedTotal - complete, 0),
     tickerReady,
     spreadReady,
     scannerReady: readinessStatus === "READY",

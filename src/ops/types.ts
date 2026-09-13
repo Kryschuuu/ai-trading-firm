@@ -198,6 +198,15 @@ export interface MarketDataOpsSnapshot {
   requiredCandles: number;
   /** Instrumente in der Registry. */
   registry: number;
+  /**
+   * Instrumente außerhalb des Daten-Scopes (v1.38.0): Venues, an denen der
+   * Store nie eine Kerze gesehen hat (z. B. kuratierte ALPACA/IBKR/BINANCE-
+   * Presets bei alleiniger BITUNIX-Sync-Venue). Sie blockieren READY nicht;
+   * im Kaltstart (keine Venue mit Daten) ist der Wert 0 und alles zählt.
+   */
+  outOfScope: number;
+  /** Registry-Instrumente innerhalb des Daten-Scopes (`registry − outOfScope`). */
+  scoped: number;
   /** Per Sync entdeckt (`lastSeen` innerhalb des Frische-Fensters). */
   discovered: number;
   /** Instrumente mit ≥ `requiredCandles` Kerzen im Scanner-Timeframe. */

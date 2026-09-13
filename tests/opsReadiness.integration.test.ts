@@ -157,7 +157,12 @@ test("GET /api/ops: Readiness-Report konsistent mit Registry-/HistoricalStore-Zu
   // 24h-Fenster; nur die 3 frisch gesyncten zählen als discovered.
   assert.equal(report.discoveredCount, 3);
   assert.equal(report.dataReadyCount, 3);
-  assert.equal(report.warmingCount, 26);
+  // Daten-Scope (v1.38.0): nur die BITUNIX-Venue hält Kerzen. Die 26 Seeds
+  // auf den ungesyncten Preset-Venues sind „außer Scope“ und blockieren
+  // READY nicht (erscheinen aber weiter in den Eligibility-Diagnosen).
+  assert.equal(report.scopedCount, 3);
+  assert.equal(report.outOfScopeCount, 26);
+  assert.equal(report.warmingCount, 0);
   assert.equal(report.candlesLoaded, 3 * CANDLES_PER_INSTRUMENT); // 450
   assert.equal(report.candlesRequired, 61);
   assert.equal(report.tickerReadyCount, 3);

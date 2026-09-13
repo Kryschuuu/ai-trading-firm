@@ -62,8 +62,12 @@ export default function MarketDataPanel({
 }) {
   const s = snapshot;
   const meta = STATUS_META[s.readinessStatus] ?? STATUS_META.WARMING;
+  // Denominator für Bereitschaftstonwerte ist der Daten-Scope (Instrumente
+  // auf Venues mit nachweislich vorhandenen Kerzen), nicht die komplette
+  // Registry — kuratierte Presets auf unversorgten Venues sind „außer Scope“.
+  const scoped = s.scoped ?? s.registry;
   const readyTone = (count: number): OpsTone =>
-    s.registry === 0 ? "neutral" : count === 0 ? "bad" : count >= s.registry ? "good" : "warn";
+    scoped === 0 ? "neutral" : count === 0 ? "bad" : count >= scoped ? "good" : "warn";
 
   // Tooltips je Kennzahl: Herkunft, Berechnung, Sollwert (Review-Auflage).
   const rows: { label: string; value: string; tone: OpsTone; hint: string }[] = [
@@ -73,28 +77,39 @@ export default function MarketDataPanel({
       tone: "neutral",
       hint: "Instrumente in der Instrument-Registry (Single Source of Truth des Universums). Sollwert: > 0 nach npm run universe:seed bzw. Discovery.",
     },
+    // Nur anzeigen, wenn es tatsächlich Instrumente außerhalb des Daten-Scopes gibt.
+    ...(s.outOfScope > 0
+      ? [
+          {
+            label: "Außer Scope",
+            value: String(s.outOfScope),
+            tone: "neutral" as OpsTone,
+            hint: "Instrumente auf Venues ohne laufenden Market-Data-Sync (z. B. kuratierte ALPACA/IBKR/BINANCE-Presets bei alleiniger BITUNIX-Sync-Venue). Sie blockieren READY nicht und nehmen trotzdem am Scan teil; ohne Kerzen werden sie dort fachlich mit min-candles abgelehnt.",
+          },
+        ]
+      : []),
     {
       label: "Discovered",
       value: String(s.discovered),
-      tone: s.registry > 0 && s.discovered < s.registry ? "warn" : "neutral",
-      hint: "Per Sync entdeckt: lastSeen innerhalb der letzten 24 h. Sollwert: = Registry. Rückstand bedeutet: die Discovery lief länger nicht.",
+      tone: scoped > 0 && s.discovered < scoped ? "warn" : "neutral",
+      hint: "Per Sync entdeckt (im Daten-Scope): lastSeen innerhalb der letzten 24 h. Sollwert: = Scope. Rückstand bedeutet: die Discovery lief länger nicht.",
     },
     {
       label: "Data-ready",
       value: String(s.dataReady),
-      tone: s.dataReady === 0 ? (s.registry > 0 ? "bad" : "neutral") : s.dataReady >= s.registry ? "good" : "warn",
-      hint: `Instrumente mit ≥ ${s.requiredCandles} Kerzen im Scanner-Timeframe (Historical Store, data/history). Sollwert: = Registry.`,
+      tone: s.dataReady === 0 ? (scoped > 0 ? "bad" : "neutral") : s.dataReady >= scoped ? "good" : "warn",
+      hint: `Instrumente im Daten-Scope mit ≥ ${s.requiredCandles} Kerzen im Scanner-Timeframe (Historical Store, data/history). Sollwert: = Scope (${scoped}).`,
     },
     {
       label: "Warming",
       value: String(s.warming),
       tone: s.warming > 0 ? "warn" : "neutral",
-      hint: "Registry minus Data-ready — Instrumente ohne vollständige Kerzenhistorie. Behebung: npm run market:sync. Sollwert: 0.",
+      hint: "Scope minus Data-ready — Instrumente ohne vollständige Kerzenhistorie. Behebung: npm run market:sync. Sollwert: 0.",
     },
     {
       label: "Candles",
       value: `${s.dataReady} / ${s.requiredCandles}`,
-      tone: s.dataReady === 0 ? (s.registry > 0 ? "bad" : "neutral") : s.dataReady >= s.registry ? "good" : "warn",
+      tone: s.dataReady === 0 ? (scoped > 0 ? "bad" : "neutral") : s.dataReady >= scoped ? "good" : "warn",
       hint: `Instrumente mit vollständiger Kerzenhistorie / benötigte Kerzen je Instrument. Der Sollwert ${s.requiredCandles} wird dynamisch aus der Faktor-Konfiguration abgeleitet (requiredWarmupCandles: EMA50, Momentum-Lookback 60 + 1 Referenzkerze).`,
     },
     {
