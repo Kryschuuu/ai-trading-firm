@@ -13,7 +13,12 @@
  */
 
 import { readFileSync } from "node:fs";
-import { ASSET_CLASSES, MARKET_TYPES, type AssetClass, type MarketType } from "@/universe/types";
+import {
+  ASSET_CLASSES,
+  MARKET_TYPES,
+  type AssetClass,
+  type MarketType,
+} from "@/universe/types";
 import { SCORE_COMPONENTS, type ScoreComponent } from "./types";
 import { requiredWarmupCandles } from "./warmup";
 
@@ -77,8 +82,26 @@ export interface AtrConfig {
 export interface VolatilityConfig {
   /** Anzahl Perioden (Renditen), über die σ berechnet wird. */
   lookback: number;
-  /** Perioden pro Jahr für die Annualisierung (365 = Tageskerzen, 24/7). */
+  /**
+   * Perioden pro Jahr für die Annualisierung.
+   *
+   * Bedeutung seit Config-Version **2**: dieser Wert ist nur noch der
+   * **Fallback**, wenn {@link inferPeriodsPerYear} den Abstand nicht aus der
+   * Reihe ableiten kann (zu wenige/ungleichmäßige Kerzen). Der Default 8.760
+   * entspricht dem Scanner-Analyse-Timeframe **1h** bei 24/7-Märkten
+   * (`DEFAULT_ANALYSIS_TIMEFRAME`, 365 × 24); Tageskerzen werden über die
+   * Ableitung automatisch zu 365. Ein harter Wert 365 auf 1h-Kerzen
+   * unterschlug die Volatilität um √24 ≈ 4,9 und damit einen Großteil der
+   * Signale (Hauptbefund v1.37.0).
+   */
   periodsPerYear: number;
+  /**
+   * `true` (Default, v2): Perioden/Jahr aus dem Median des echten
+   * Kerzenabstands der gewerteten Reihe ableiten — die Annualisierung ist
+   * dann unabhängig vom gewählten Timeframe immer korrekt. `false`: der
+   * eingestellte {@link periodsPerYear}-Wert gilt unverändert.
+   */
+  inferPeriodsPerYear: boolean;
   /** Unterhalb: zu ruhig (→ 0). */
   floor: number;
   /** Untere Grenze des Sweet Spots. */
@@ -328,7 +351,12 @@ export interface ScannerConfig {
  * Trichter exakt nach Vorgabe: 2.000 → 500 → 100 (+20–40 Deep).
  */
 export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
-  version: 1,
+  // v2 (1.37.0): Volatilitäts-Annualisierung zeitbasiert (Default 1h ⇒ 8760
+  // statt 365 — die 1h-Volatilität war um √24 unterschätzt und drückte den
+  // 15-%-Block und das Regime), Korrelations-Benchmark auf die real
+  // angebundene Venue BITUNIX umgezogen (BINANCE:BTCUSDT existiert im
+  // Sync-Universum nicht → Faktor war dauerhaft „unbekannt“).
+  version: 2,
   description:
     "Deterministischer Markt-Scanner (Task 04): Faktor-Parameter, Score-Gewichte, " +
     "Regime-Schwellen, Trichtergrößen und Filterregeln. Kein LLM, kein Netzwerk.",
@@ -346,21 +374,51 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   factors: {
     liquidity: { minVolume24h: 100_000, maxVolume24h: 10_000_000_000 },
     spread: { bestSpread: 0.0001, worstSpread: 0.005 },
-    atr: { period: 14, floorPct: 0.002, idealLowPct: 0.01, idealHighPct: 0.04, ceilingPct: 0.12 },
+    atr: {
+      period: 14,
+      floorPct: 0.002,
+      idealLowPct: 0.01,
+      idealHighPct: 0.04,
+      ceilingPct: 0.12,
+    },
     volatility: {
       lookback: 30,
-      periodsPerYear: 365,
+      // Fallback 8.760 = 1h-Kerzen an 365 × 24 Stunden (Scanner-Analyse-
+      // Timeframe ist 1h). Bei ableitbarem Abstand überschreibt die
+      // Intervall-Inferenz diesen Wert je Reihe (Tageskerzen → 365 usw.).
+      periodsPerYear: 8760,
+      inferPeriodsPerYear: true,
       floor: 0.05,
       idealLow: 0.2,
       idealHigh: 0.8,
       ceiling: 2.5,
     },
-    momentum: { lookbacks: [5, 20, 60], lookbackWeights: [0.2, 0.3, 0.5], scale: 0.3, mode: "absolute" },
+    momentum: {
+      lookbacks: [5, 20, 60],
+      lookbackWeights: [0.2, 0.3, 0.5],
+      scale: 0.3,
+      mode: "absolute",
+    },
     trend: { fastPeriod: 9, midPeriod: 21, slowPeriod: 50, scale: 0.1 },
-    volumeRatio: { recentPeriods: 5, basePeriods: 20, minRatio: 0.5, maxRatio: 2 },
+    volumeRatio: {
+      recentPeriods: 5,
+      basePeriods: 20,
+      minRatio: 0.5,
+      maxRatio: 2,
+    },
     rsi: { period: 14, neutralBand: 20, extremeBand: 50 },
     drawdown: { lookback: 60, maxDrawdown: 0.5 },
-    correlation: { lookback: 30, method: "pearson", benchmarkInstrumentId: "BINANCE:BTCUSDT" },
+    // Benchmark ist die real über den Market-Data-Sync angebundene Venue.
+    // Ein Verweis auf BINANCE:BTCUSDT (ohne Binance-Adapter) bedeutete:
+    // Der Korrelationsfaktor (5 % des Scores) und die Cluster-Erkennung des
+    // Weekly-Reviews waren auf JEDEM Lauf „unbekannt“ — der Datenprovider
+    // löst die ID zusätzlich venue-agnostisch auf (gleiches Symbol/Base-Quote
+    // auf einer anderen Venue), siehe service.ts `resolveBenchmarkId`.
+    correlation: {
+      lookback: 30,
+      method: "pearson",
+      benchmarkInstrumentId: "BITUNIX:BTCUSDT",
+    },
     news: {
       weightEvents24h: 0.08,
       weightEvents7d: 0.02,
@@ -371,9 +429,22 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
       weightStaleness: 0.2,
       neutralRisk: 0.25,
     },
-    funding: { defaultIntervalsPerYear: 1095, maxAnnualized: 0.5, spotValue: 1 },
-    openInterest: { minOpenInterest: 100_000, maxOpenInterest: 5_000_000_000, neutralValue: 0.5 },
-    execution: { feeMode: "taker", includeSpread: true, bestCost: 0.0005, worstCost: 0.005 },
+    funding: {
+      defaultIntervalsPerYear: 1095,
+      maxAnnualized: 0.5,
+      spotValue: 1,
+    },
+    openInterest: {
+      minOpenInterest: 100_000,
+      maxOpenInterest: 5_000_000_000,
+      neutralValue: 0.5,
+    },
+    execution: {
+      feeMode: "taker",
+      includeSpread: true,
+      bestCost: 0.0005,
+      worstCost: 0.005,
+    },
   },
   regime: { low: 0.25, normal: 0.6, high: 1.2 },
   funnel: {
@@ -389,7 +460,14 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
     requireStatusActive: true,
     requirePaperAvailable: true,
     allowedMarketTypes: ["spot", "perpetual", "future"],
-    allowedAssetClasses: ["crypto", "equity", "etf", "fx", "commodity", "index"],
+    allowedAssetClasses: [
+      "crypto",
+      "equity",
+      "etf",
+      "fx",
+      "commodity",
+      "index",
+    ],
     minVolume24h: 1_000_000,
     maxSpread: 0.005,
     // `minCandles` ist bewusst NICHT gesetzt (OPS-009): ohne expliziten Wert
@@ -419,7 +497,11 @@ export const WEIGHT_SUM_TOLERANCE = 1e-9;
 
 /** Rekursive Teilstruktur — Overrides dürfen beliebig flach angegeben werden. */
 export type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends readonly (infer _U)[] ? T[K] : T[K] extends object ? DeepPartial<T[K]> : T[K];
+  [K in keyof T]?: T[K] extends readonly (infer _U)[]
+    ? T[K]
+    : T[K] extends object
+      ? DeepPartial<T[K]>
+      : T[K];
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -429,28 +511,43 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** Tiefer Merge: `patch` überschreibt `base` feldweise (Arrays werden ersetzt). */
 function deepMerge<T>(base: T, patch: unknown): T {
   if (!isPlainObject(patch)) return base;
-  const out: Record<string, unknown> = { ...(base as unknown as Record<string, unknown>) };
+  const out: Record<string, unknown> = {
+    ...(base as unknown as Record<string, unknown>),
+  };
   for (const [key, value] of Object.entries(patch)) {
     if (!(key in out)) continue; // unbekannte Schlüssel werden ignoriert (kein Schmuggelpfad)
     const current = out[key];
-    out[key] = isPlainObject(current) && isPlainObject(value) ? deepMerge(current, value) : value;
+    out[key] =
+      isPlainObject(current) && isPlainObject(value)
+        ? deepMerge(current, value)
+        : value;
   }
   return out as T;
 }
 
-function num(value: unknown, path: string, opts: { min?: number; max?: number; int?: boolean } = {}): number {
+function num(
+  value: unknown,
+  path: string,
+  opts: { min?: number; max?: number; int?: boolean } = {},
+): number {
   const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) throw new ScannerConfigError(`${path}: erwartet endliche Zahl`);
-  if (opts.int && !Number.isInteger(n)) throw new ScannerConfigError(`${path}: erwartet Ganzzahl`);
-  if (opts.min !== undefined && n < opts.min) throw new ScannerConfigError(`${path}: muss ≥ ${opts.min} sein`);
-  if (opts.max !== undefined && n > opts.max) throw new ScannerConfigError(`${path}: muss ≤ ${opts.max} sein`);
+  if (!Number.isFinite(n))
+    throw new ScannerConfigError(`${path}: erwartet endliche Zahl`);
+  if (opts.int && !Number.isInteger(n))
+    throw new ScannerConfigError(`${path}: erwartet Ganzzahl`);
+  if (opts.min !== undefined && n < opts.min)
+    throw new ScannerConfigError(`${path}: muss ≥ ${opts.min} sein`);
+  if (opts.max !== undefined && n > opts.max)
+    throw new ScannerConfigError(`${path}: muss ≤ ${opts.max} sein`);
   return n;
 }
 
 function ordered(values: number[], path: string): void {
   for (let i = 1; i < values.length; i++) {
     if (!(values[i] > values[i - 1])) {
-      throw new ScannerConfigError(`${path}: Schwellen müssen streng aufsteigend sein`);
+      throw new ScannerConfigError(
+        `${path}: Schwellen müssen streng aufsteigend sein`,
+      );
     }
   }
 }
@@ -462,27 +559,37 @@ function ordered(values: number[], path: string): void {
  * @throws {ScannerConfigError} bei Strukturfehlern, unplausiblen Schwellen oder
  *   einer Gewichtssumme ≠ 1.
  */
-export function validateScannerConfig(raw: unknown, options: ValidateScannerConfigOptions = {}): ScannerConfig {
+export function validateScannerConfig(
+  raw: unknown,
+  options: ValidateScannerConfigOptions = {},
+): ScannerConfig {
   if (!isPlainObject(raw)) throw new ScannerConfigError("erwartet Objekt");
   const warn = (message: string): void => {
     if (options.strict) throw new ScannerConfigError(message);
-    (options.onWarn ?? ((m: string) => console.warn(`[scanner-config] ${m}`)))(message);
+    (options.onWarn ?? ((m: string) => console.warn(`[scanner-config] ${m}`)))(
+      message,
+    );
   };
   // `deepMerge` startet von den Defaults, in denen `filters.minCandles` bewusst
   // fehlt. Damit ein explizit gesetzter Wert nicht durch den Merge verloren geht
   // und ein *fehlender* Wert wirklich als „nicht gesetzt“ erkannt wird, merken
   // wir uns, ob der Aufrufer `minCandles` überhaupt angegeben hat.
   const rawFilters = isPlainObject(raw.filters) ? raw.filters : undefined;
-  const minCandlesProvided = rawFilters !== undefined && "minCandles" in rawFilters;
+  const minCandlesProvided =
+    rawFilters !== undefined && "minCandles" in rawFilters;
   const cfg = deepMerge(structuredClone(DEFAULT_SCANNER_CONFIG), raw);
 
   cfg.version = num(cfg.version, "version", { min: 1, int: true });
-  cfg.description = typeof cfg.description === "string" ? cfg.description.slice(0, 1000) : "";
+  cfg.description =
+    typeof cfg.description === "string" ? cfg.description.slice(0, 1000) : "";
 
   // ── Gewichte: alle Komponenten vorhanden, ≥ 0, Summe exakt 1 ──────────────
   let sum = 0;
   for (const component of SCORE_COMPONENTS) {
-    const w = num(cfg.weights?.[component], `weights.${component}`, { min: 0, max: 1 });
+    const w = num(cfg.weights?.[component], `weights.${component}`, {
+      min: 0,
+      max: 1,
+    });
     cfg.weights[component] = w;
     sum += w;
   }
@@ -491,115 +598,305 @@ export function validateScannerConfig(raw: unknown, options: ValidateScannerConf
   }
 
   const f = cfg.factors;
-  f.liquidity.minVolume24h = num(f.liquidity.minVolume24h, "factors.liquidity.minVolume24h", { min: 1 });
-  f.liquidity.maxVolume24h = num(f.liquidity.maxVolume24h, "factors.liquidity.maxVolume24h", { min: 1 });
-  ordered([f.liquidity.minVolume24h, f.liquidity.maxVolume24h], "factors.liquidity");
+  f.liquidity.minVolume24h = num(
+    f.liquidity.minVolume24h,
+    "factors.liquidity.minVolume24h",
+    { min: 1 },
+  );
+  f.liquidity.maxVolume24h = num(
+    f.liquidity.maxVolume24h,
+    "factors.liquidity.maxVolume24h",
+    { min: 1 },
+  );
+  ordered(
+    [f.liquidity.minVolume24h, f.liquidity.maxVolume24h],
+    "factors.liquidity",
+  );
 
-  f.spread.bestSpread = num(f.spread.bestSpread, "factors.spread.bestSpread", { min: 0 });
-  f.spread.worstSpread = num(f.spread.worstSpread, "factors.spread.worstSpread", { min: 0 });
+  f.spread.bestSpread = num(f.spread.bestSpread, "factors.spread.bestSpread", {
+    min: 0,
+  });
+  f.spread.worstSpread = num(
+    f.spread.worstSpread,
+    "factors.spread.worstSpread",
+    { min: 0 },
+  );
   ordered([f.spread.bestSpread, f.spread.worstSpread], "factors.spread");
   f.correlation.benchmarkInstrumentId =
     typeof f.correlation.benchmarkInstrumentId === "string"
       ? f.correlation.benchmarkInstrumentId.slice(0, 64)
       : DEFAULT_SCANNER_CONFIG.factors.correlation.benchmarkInstrumentId;
 
-  f.atr.period = num(f.atr.period, "factors.atr.period", { min: 2, max: 500, int: true });
+  f.atr.period = num(f.atr.period, "factors.atr.period", {
+    min: 2,
+    max: 500,
+    int: true,
+  });
   f.atr.floorPct = num(f.atr.floorPct, "factors.atr.floorPct", { min: 0 });
-  f.atr.idealLowPct = num(f.atr.idealLowPct, "factors.atr.idealLowPct", { min: 0 });
-  f.atr.idealHighPct = num(f.atr.idealHighPct, "factors.atr.idealHighPct", { min: 0 });
-  f.atr.ceilingPct = num(f.atr.ceilingPct, "factors.atr.ceilingPct", { min: 0 });
-  ordered([f.atr.floorPct, f.atr.idealLowPct, f.atr.idealHighPct, f.atr.ceilingPct], "factors.atr");
-
-  f.volatility.lookback = num(f.volatility.lookback, "factors.volatility.lookback", { min: 2, max: 5000, int: true });
-  f.volatility.periodsPerYear = num(f.volatility.periodsPerYear, "factors.volatility.periodsPerYear", { min: 1 });
-  f.volatility.floor = num(f.volatility.floor, "factors.volatility.floor", { min: 0 });
-  f.volatility.idealLow = num(f.volatility.idealLow, "factors.volatility.idealLow", { min: 0 });
-  f.volatility.idealHigh = num(f.volatility.idealHigh, "factors.volatility.idealHigh", { min: 0 });
-  f.volatility.ceiling = num(f.volatility.ceiling, "factors.volatility.ceiling", { min: 0 });
+  f.atr.idealLowPct = num(f.atr.idealLowPct, "factors.atr.idealLowPct", {
+    min: 0,
+  });
+  f.atr.idealHighPct = num(f.atr.idealHighPct, "factors.atr.idealHighPct", {
+    min: 0,
+  });
+  f.atr.ceilingPct = num(f.atr.ceilingPct, "factors.atr.ceilingPct", {
+    min: 0,
+  });
   ordered(
-    [f.volatility.floor, f.volatility.idealLow, f.volatility.idealHigh, f.volatility.ceiling],
-    "factors.volatility"
+    [f.atr.floorPct, f.atr.idealLowPct, f.atr.idealHighPct, f.atr.ceilingPct],
+    "factors.atr",
+  );
+
+  f.volatility.lookback = num(
+    f.volatility.lookback,
+    "factors.volatility.lookback",
+    { min: 2, max: 5000, int: true },
+  );
+  f.volatility.periodsPerYear = num(
+    f.volatility.periodsPerYear,
+    "factors.volatility.periodsPerYear",
+    {
+      // 1 Jahresserze … 1-Minuten-Kerzen an 365 × 24 h. Jenseits davon ist
+      // jeder Wert ein Tippfehler (verhindert ebenfalls fs-fehlende Skalierung).
+      min: 1,
+      max: 525_600,
+    },
+  );
+  f.volatility.inferPeriodsPerYear = Boolean(f.volatility.inferPeriodsPerYear);
+  f.volatility.floor = num(f.volatility.floor, "factors.volatility.floor", {
+    min: 0,
+  });
+  f.volatility.idealLow = num(
+    f.volatility.idealLow,
+    "factors.volatility.idealLow",
+    { min: 0 },
+  );
+  f.volatility.idealHigh = num(
+    f.volatility.idealHigh,
+    "factors.volatility.idealHigh",
+    { min: 0 },
+  );
+  f.volatility.ceiling = num(
+    f.volatility.ceiling,
+    "factors.volatility.ceiling",
+    { min: 0 },
+  );
+  ordered(
+    [
+      f.volatility.floor,
+      f.volatility.idealLow,
+      f.volatility.idealHigh,
+      f.volatility.ceiling,
+    ],
+    "factors.volatility",
   );
 
   if (!Array.isArray(f.momentum.lookbacks) || !f.momentum.lookbacks.length) {
-    throw new ScannerConfigError("factors.momentum.lookbacks: mindestens ein Fenster");
+    throw new ScannerConfigError(
+      "factors.momentum.lookbacks: mindestens ein Fenster",
+    );
   }
   if (f.momentum.lookbacks.length !== f.momentum.lookbackWeights.length) {
-    throw new ScannerConfigError("factors.momentum: lookbacks und lookbackWeights müssen gleich lang sein");
+    throw new ScannerConfigError(
+      "factors.momentum: lookbacks und lookbackWeights müssen gleich lang sein",
+    );
   }
   f.momentum.lookbacks = f.momentum.lookbacks.map((v, i) =>
-    num(v, `factors.momentum.lookbacks[${i}]`, { min: 1, max: 5000, int: true })
+    num(v, `factors.momentum.lookbacks[${i}]`, {
+      min: 1,
+      max: 5000,
+      int: true,
+    }),
   );
   const mWeightSum = f.momentum.lookbackWeights.reduce(
-    (a, v, i) => a + num(v, `factors.momentum.lookbackWeights[${i}]`, { min: 0 }),
-    0
+    (a, v, i) =>
+      a + num(v, `factors.momentum.lookbackWeights[${i}]`, { min: 0 }),
+    0,
   );
   if (Math.abs(mWeightSum - 1) > WEIGHT_SUM_TOLERANCE) {
-    throw new ScannerConfigError(`factors.momentum.lookbackWeights: Summe muss 1 sein (ist ${mWeightSum})`);
+    throw new ScannerConfigError(
+      `factors.momentum.lookbackWeights: Summe muss 1 sein (ist ${mWeightSum})`,
+    );
   }
-  f.momentum.scale = num(f.momentum.scale, "factors.momentum.scale", { min: 1e-6 });
+  f.momentum.scale = num(f.momentum.scale, "factors.momentum.scale", {
+    min: 1e-6,
+  });
   if (f.momentum.mode !== "absolute" && f.momentum.mode !== "directional") {
-    throw new ScannerConfigError("factors.momentum.mode: erwartet absolute|directional");
+    throw new ScannerConfigError(
+      "factors.momentum.mode: erwartet absolute|directional",
+    );
   }
 
-  f.trend.fastPeriod = num(f.trend.fastPeriod, "factors.trend.fastPeriod", { min: 1, max: 5000, int: true });
-  f.trend.midPeriod = num(f.trend.midPeriod, "factors.trend.midPeriod", { min: 1, max: 5000, int: true });
-  f.trend.slowPeriod = num(f.trend.slowPeriod, "factors.trend.slowPeriod", { min: 1, max: 5000, int: true });
-  ordered([f.trend.fastPeriod, f.trend.midPeriod, f.trend.slowPeriod], "factors.trend");
+  f.trend.fastPeriod = num(f.trend.fastPeriod, "factors.trend.fastPeriod", {
+    min: 1,
+    max: 5000,
+    int: true,
+  });
+  f.trend.midPeriod = num(f.trend.midPeriod, "factors.trend.midPeriod", {
+    min: 1,
+    max: 5000,
+    int: true,
+  });
+  f.trend.slowPeriod = num(f.trend.slowPeriod, "factors.trend.slowPeriod", {
+    min: 1,
+    max: 5000,
+    int: true,
+  });
+  ordered(
+    [f.trend.fastPeriod, f.trend.midPeriod, f.trend.slowPeriod],
+    "factors.trend",
+  );
   f.trend.scale = num(f.trend.scale, "factors.trend.scale", { min: 1e-6 });
 
-  f.volumeRatio.recentPeriods = num(f.volumeRatio.recentPeriods, "factors.volumeRatio.recentPeriods", {
-    min: 1,
-    max: 5000,
-    int: true,
-  });
-  f.volumeRatio.basePeriods = num(f.volumeRatio.basePeriods, "factors.volumeRatio.basePeriods", {
-    min: 1,
-    max: 5000,
-    int: true,
-  });
-  f.volumeRatio.minRatio = num(f.volumeRatio.minRatio, "factors.volumeRatio.minRatio", { min: 0 });
-  f.volumeRatio.maxRatio = num(f.volumeRatio.maxRatio, "factors.volumeRatio.maxRatio", { min: 0 });
-  ordered([f.volumeRatio.minRatio, f.volumeRatio.maxRatio], "factors.volumeRatio");
+  f.volumeRatio.recentPeriods = num(
+    f.volumeRatio.recentPeriods,
+    "factors.volumeRatio.recentPeriods",
+    {
+      min: 1,
+      max: 5000,
+      int: true,
+    },
+  );
+  f.volumeRatio.basePeriods = num(
+    f.volumeRatio.basePeriods,
+    "factors.volumeRatio.basePeriods",
+    {
+      min: 1,
+      max: 5000,
+      int: true,
+    },
+  );
+  f.volumeRatio.minRatio = num(
+    f.volumeRatio.minRatio,
+    "factors.volumeRatio.minRatio",
+    { min: 0 },
+  );
+  f.volumeRatio.maxRatio = num(
+    f.volumeRatio.maxRatio,
+    "factors.volumeRatio.maxRatio",
+    { min: 0 },
+  );
+  ordered(
+    [f.volumeRatio.minRatio, f.volumeRatio.maxRatio],
+    "factors.volumeRatio",
+  );
 
-  f.rsi.period = num(f.rsi.period, "factors.rsi.period", { min: 2, max: 500, int: true });
-  f.rsi.neutralBand = num(f.rsi.neutralBand, "factors.rsi.neutralBand", { min: 0, max: 50 });
-  f.rsi.extremeBand = num(f.rsi.extremeBand, "factors.rsi.extremeBand", { min: 0, max: 50 });
+  f.rsi.period = num(f.rsi.period, "factors.rsi.period", {
+    min: 2,
+    max: 500,
+    int: true,
+  });
+  f.rsi.neutralBand = num(f.rsi.neutralBand, "factors.rsi.neutralBand", {
+    min: 0,
+    max: 50,
+  });
+  f.rsi.extremeBand = num(f.rsi.extremeBand, "factors.rsi.extremeBand", {
+    min: 0,
+    max: 50,
+  });
   ordered([f.rsi.neutralBand, f.rsi.extremeBand], "factors.rsi");
 
-  f.drawdown.lookback = num(f.drawdown.lookback, "factors.drawdown.lookback", { min: 2, max: 5000, int: true });
-  f.drawdown.maxDrawdown = num(f.drawdown.maxDrawdown, "factors.drawdown.maxDrawdown", { min: 0.01, max: 1 });
-
-  f.correlation.lookback = num(f.correlation.lookback, "factors.correlation.lookback", {
+  f.drawdown.lookback = num(f.drawdown.lookback, "factors.drawdown.lookback", {
     min: 2,
     max: 5000,
     int: true,
   });
-  if (f.correlation.method !== "pearson" && f.correlation.method !== "spearman") {
-    throw new ScannerConfigError("factors.correlation.method: erwartet pearson|spearman");
+  f.drawdown.maxDrawdown = num(
+    f.drawdown.maxDrawdown,
+    "factors.drawdown.maxDrawdown",
+    { min: 0.01, max: 1 },
+  );
+
+  f.correlation.lookback = num(
+    f.correlation.lookback,
+    "factors.correlation.lookback",
+    {
+      min: 2,
+      max: 5000,
+      int: true,
+    },
+  );
+  if (
+    f.correlation.method !== "pearson" &&
+    f.correlation.method !== "spearman"
+  ) {
+    throw new ScannerConfigError(
+      "factors.correlation.method: erwartet pearson|spearman",
+    );
   }
 
-  for (const key of ["weightEvents24h", "weightEvents7d", "weightHighImpact", "weightScheduled", "weightStaleness", "neutralRisk"] as const) {
+  for (const key of [
+    "weightEvents24h",
+    "weightEvents7d",
+    "weightHighImpact",
+    "weightScheduled",
+    "weightStaleness",
+    "neutralRisk",
+  ] as const) {
     f.news[key] = num(f.news[key], `factors.news.${key}`, { min: 0, max: 1 });
   }
-  f.news.scheduledHorizonHours = num(f.news.scheduledHorizonHours, "factors.news.scheduledHorizonHours", { min: 0 });
-  f.news.stalenessHours = num(f.news.stalenessHours, "factors.news.stalenessHours", { min: 0 });
+  f.news.scheduledHorizonHours = num(
+    f.news.scheduledHorizonHours,
+    "factors.news.scheduledHorizonHours",
+    { min: 0 },
+  );
+  f.news.stalenessHours = num(
+    f.news.stalenessHours,
+    "factors.news.stalenessHours",
+    { min: 0 },
+  );
 
-  f.funding.defaultIntervalsPerYear = num(f.funding.defaultIntervalsPerYear, "factors.funding.defaultIntervalsPerYear", { min: 1 });
-  f.funding.maxAnnualized = num(f.funding.maxAnnualized, "factors.funding.maxAnnualized", { min: 1e-6 });
-  f.funding.spotValue = num(f.funding.spotValue, "factors.funding.spotValue", { min: 0, max: 1 });
+  f.funding.defaultIntervalsPerYear = num(
+    f.funding.defaultIntervalsPerYear,
+    "factors.funding.defaultIntervalsPerYear",
+    { min: 1 },
+  );
+  f.funding.maxAnnualized = num(
+    f.funding.maxAnnualized,
+    "factors.funding.maxAnnualized",
+    { min: 1e-6 },
+  );
+  f.funding.spotValue = num(f.funding.spotValue, "factors.funding.spotValue", {
+    min: 0,
+    max: 1,
+  });
 
-  f.openInterest.minOpenInterest = num(f.openInterest.minOpenInterest, "factors.openInterest.minOpenInterest", { min: 1 });
-  f.openInterest.maxOpenInterest = num(f.openInterest.maxOpenInterest, "factors.openInterest.maxOpenInterest", { min: 1 });
-  ordered([f.openInterest.minOpenInterest, f.openInterest.maxOpenInterest], "factors.openInterest");
-  f.openInterest.neutralValue = num(f.openInterest.neutralValue, "factors.openInterest.neutralValue", { min: 0, max: 1 });
+  f.openInterest.minOpenInterest = num(
+    f.openInterest.minOpenInterest,
+    "factors.openInterest.minOpenInterest",
+    { min: 1 },
+  );
+  f.openInterest.maxOpenInterest = num(
+    f.openInterest.maxOpenInterest,
+    "factors.openInterest.maxOpenInterest",
+    { min: 1 },
+  );
+  ordered(
+    [f.openInterest.minOpenInterest, f.openInterest.maxOpenInterest],
+    "factors.openInterest",
+  );
+  f.openInterest.neutralValue = num(
+    f.openInterest.neutralValue,
+    "factors.openInterest.neutralValue",
+    { min: 0, max: 1 },
+  );
 
   if (!["taker", "maker", "blend"].includes(f.execution.feeMode)) {
-    throw new ScannerConfigError("factors.execution.feeMode: erwartet taker|maker|blend");
+    throw new ScannerConfigError(
+      "factors.execution.feeMode: erwartet taker|maker|blend",
+    );
   }
   f.execution.includeSpread = Boolean(f.execution.includeSpread);
-  f.execution.bestCost = num(f.execution.bestCost, "factors.execution.bestCost", { min: 0 });
-  f.execution.worstCost = num(f.execution.worstCost, "factors.execution.worstCost", { min: 0 });
+  f.execution.bestCost = num(
+    f.execution.bestCost,
+    "factors.execution.bestCost",
+    { min: 0 },
+  );
+  f.execution.worstCost = num(
+    f.execution.worstCost,
+    "factors.execution.worstCost",
+    { min: 0 },
+  );
   ordered([f.execution.bestCost, f.execution.worstCost], "factors.execution");
 
   cfg.regime.low = num(cfg.regime.low, "regime.low", { min: 0 });
@@ -608,24 +905,69 @@ export function validateScannerConfig(raw: unknown, options: ValidateScannerConf
   ordered([cfg.regime.low, cfg.regime.normal, cfg.regime.high], "regime");
 
   const fn = cfg.funnel;
-  fn.eligibleMax = num(fn.eligibleMax, "funnel.eligibleMax", { min: 1, max: 1_000_000, int: true });
-  fn.interestingMax = num(fn.interestingMax, "funnel.interestingMax", { min: 1, max: 1_000_000, int: true });
-  fn.interestingMinScore = num(fn.interestingMinScore, "funnel.interestingMinScore", { min: 0, max: 100 });
-  fn.dailyMax = num(fn.dailyMax, "funnel.dailyMax", { min: 1, max: 1_000_000, int: true });
-  fn.deepMin = num(fn.deepMin, "funnel.deepMin", { min: 0, max: 1_000_000, int: true });
-  fn.deepMax = num(fn.deepMax, "funnel.deepMax", { min: 1, max: 1_000_000, int: true });
-  fn.maxPerAssetClass = num(fn.maxPerAssetClass, "funnel.maxPerAssetClass", { min: 1, max: 1_000_000, int: true });
-  if (fn.deepMin > fn.deepMax) throw new ScannerConfigError("funnel: deepMin darf deepMax nicht überschreiten");
-  if (!(fn.eligibleMax >= fn.interestingMax && fn.interestingMax >= fn.dailyMax && fn.dailyMax >= fn.deepMax)) {
-    throw new ScannerConfigError("funnel: Ebenen müssen monoton kleiner werden (eligible ≥ interesting ≥ daily ≥ deep)");
+  fn.eligibleMax = num(fn.eligibleMax, "funnel.eligibleMax", {
+    min: 1,
+    max: 1_000_000,
+    int: true,
+  });
+  fn.interestingMax = num(fn.interestingMax, "funnel.interestingMax", {
+    min: 1,
+    max: 1_000_000,
+    int: true,
+  });
+  fn.interestingMinScore = num(
+    fn.interestingMinScore,
+    "funnel.interestingMinScore",
+    { min: 0, max: 100 },
+  );
+  fn.dailyMax = num(fn.dailyMax, "funnel.dailyMax", {
+    min: 1,
+    max: 1_000_000,
+    int: true,
+  });
+  fn.deepMin = num(fn.deepMin, "funnel.deepMin", {
+    min: 0,
+    max: 1_000_000,
+    int: true,
+  });
+  fn.deepMax = num(fn.deepMax, "funnel.deepMax", {
+    min: 1,
+    max: 1_000_000,
+    int: true,
+  });
+  fn.maxPerAssetClass = num(fn.maxPerAssetClass, "funnel.maxPerAssetClass", {
+    min: 1,
+    max: 1_000_000,
+    int: true,
+  });
+  if (fn.deepMin > fn.deepMax)
+    throw new ScannerConfigError(
+      "funnel: deepMin darf deepMax nicht überschreiten",
+    );
+  if (!(
+    fn.eligibleMax >= fn.interestingMax &&
+    fn.interestingMax >= fn.dailyMax &&
+    fn.dailyMax >= fn.deepMax
+  )) {
+    throw new ScannerConfigError(
+      "funnel: Ebenen müssen monoton kleiner werden (eligible ≥ interesting ≥ daily ≥ deep)",
+    );
   }
 
   const fl = cfg.filters;
   fl.requireStatusActive = Boolean(fl.requireStatusActive);
   fl.requirePaperAvailable = Boolean(fl.requirePaperAvailable);
   fl.excludeExtremeRegime = Boolean(fl.excludeExtremeRegime);
-  fl.allowedMarketTypes = uniqueEnum(fl.allowedMarketTypes, MARKET_TYPES, "filters.allowedMarketTypes");
-  fl.allowedAssetClasses = uniqueEnum(fl.allowedAssetClasses, ASSET_CLASSES, "filters.allowedAssetClasses");
+  fl.allowedMarketTypes = uniqueEnum(
+    fl.allowedMarketTypes,
+    MARKET_TYPES,
+    "filters.allowedMarketTypes",
+  );
+  fl.allowedAssetClasses = uniqueEnum(
+    fl.allowedAssetClasses,
+    ASSET_CLASSES,
+    "filters.allowedAssetClasses",
+  );
   fl.minVolume24h = num(fl.minVolume24h, "filters.minVolume24h", { min: 0 });
   fl.maxSpread = num(fl.maxSpread, "filters.maxSpread", { min: 0, max: 1 });
   // `minCandles` ist optional (OPS-009): ohne expliziten Wert bleibt das Feld
@@ -638,7 +980,11 @@ export function validateScannerConfig(raw: unknown, options: ValidateScannerConf
     // `deepMerge` überträgt nur Schlüssel, die bereits in den Defaults liegen.
     // Da `minCandles` dort bewusst fehlt, holen wir den Rohwert direkt aus der
     // eingehenden Konfiguration.
-    fl.minCandles = num(rawFilters!.minCandles, "filters.minCandles", { min: 0, max: 100_000, int: true });
+    fl.minCandles = num(rawFilters!.minCandles, "filters.minCandles", {
+      min: 0,
+      max: 100_000,
+      int: true,
+    });
     const required = requiredWarmupCandles(cfg);
     if (fl.minCandles < required) {
       warn(
@@ -650,31 +996,73 @@ export function validateScannerConfig(raw: unknown, options: ValidateScannerConf
   } else {
     delete fl.minCandles;
   }
-  fl.maxDrawdown = num(fl.maxDrawdown, "filters.maxDrawdown", { min: 0, max: 1 });
-  fl.maxExecutionCost = num(fl.maxExecutionCost, "filters.maxExecutionCost", { min: 0, max: 1 });
+  fl.maxDrawdown = num(fl.maxDrawdown, "filters.maxDrawdown", {
+    min: 0,
+    max: 1,
+  });
+  fl.maxExecutionCost = num(fl.maxExecutionCost, "filters.maxExecutionCost", {
+    min: 0,
+    max: 1,
+  });
 
   const wk = cfg.weekly;
-  wk.coreMinScore = num(wk.coreMinScore, "weekly.coreMinScore", { min: 0, max: 100 });
-  wk.coreMinVolume24h = num(wk.coreMinVolume24h, "weekly.coreMinVolume24h", { min: 0 });
-  wk.coreMinPersistence = num(wk.coreMinPersistence, "weekly.coreMinPersistence", { min: 0, max: 520, int: true });
-  wk.rotationMinScore = num(wk.rotationMinScore, "weekly.rotationMinScore", { min: 0, max: 100 });
-  wk.discoveryMinScore = num(wk.discoveryMinScore, "weekly.discoveryMinScore", { min: 0, max: 100 });
-  if (!(wk.coreMinScore >= wk.rotationMinScore && wk.rotationMinScore >= wk.discoveryMinScore)) {
-    throw new ScannerConfigError("weekly: coreMinScore ≥ rotationMinScore ≥ discoveryMinScore erforderlich");
+  wk.coreMinScore = num(wk.coreMinScore, "weekly.coreMinScore", {
+    min: 0,
+    max: 100,
+  });
+  wk.coreMinVolume24h = num(wk.coreMinVolume24h, "weekly.coreMinVolume24h", {
+    min: 0,
+  });
+  wk.coreMinPersistence = num(
+    wk.coreMinPersistence,
+    "weekly.coreMinPersistence",
+    { min: 0, max: 520, int: true },
+  );
+  wk.rotationMinScore = num(wk.rotationMinScore, "weekly.rotationMinScore", {
+    min: 0,
+    max: 100,
+  });
+  wk.discoveryMinScore = num(wk.discoveryMinScore, "weekly.discoveryMinScore", {
+    min: 0,
+    max: 100,
+  });
+  if (!(
+    wk.coreMinScore >= wk.rotationMinScore &&
+    wk.rotationMinScore >= wk.discoveryMinScore
+  )) {
+    throw new ScannerConfigError(
+      "weekly: coreMinScore ≥ rotationMinScore ≥ discoveryMinScore erforderlich",
+    );
   }
-  wk.liquidityDropPct = num(wk.liquidityDropPct, "weekly.liquidityDropPct", { min: 0, max: 1 });
-  wk.feeIncreasePct = num(wk.feeIncreasePct, "weekly.feeIncreasePct", { min: 0 });
-  wk.clusterCorrelation = num(wk.clusterCorrelation, "weekly.clusterCorrelation", { min: 0, max: 1 });
+  wk.liquidityDropPct = num(wk.liquidityDropPct, "weekly.liquidityDropPct", {
+    min: 0,
+    max: 1,
+  });
+  wk.feeIncreasePct = num(wk.feeIncreasePct, "weekly.feeIncreasePct", {
+    min: 0,
+  });
+  wk.clusterCorrelation = num(
+    wk.clusterCorrelation,
+    "weekly.clusterCorrelation",
+    { min: 0, max: 1 },
+  );
 
   return cfg;
 }
 
-function uniqueEnum<T extends string>(raw: unknown, allowed: readonly T[], path: string): T[] {
-  if (!Array.isArray(raw) || !raw.length) throw new ScannerConfigError(`${path}: erwartet nicht-leere Liste`);
+function uniqueEnum<T extends string>(
+  raw: unknown,
+  allowed: readonly T[],
+  path: string,
+): T[] {
+  if (!Array.isArray(raw) || !raw.length)
+    throw new ScannerConfigError(`${path}: erwartet nicht-leere Liste`);
   const out: T[] = [];
   for (const v of raw) {
     if (typeof v !== "string" || !(allowed as readonly string[]).includes(v)) {
-      throw new ScannerConfigError(`${path}: "${String(v).slice(0, 20)}" ist keiner von ${allowed.join(" | ")}`);
+      throw new ScannerConfigError(
+        `${path}: "${String(v).slice(0, 20)}" ist keiner von ${allowed.join(" | ")}`,
+      );
     }
     if (!out.includes(v as T)) out.push(v as T);
   }
@@ -686,7 +1074,9 @@ function uniqueEnum<T extends string>(raw: unknown, allowed: readonly T[], path:
  * Praktisch für Tests („was passiert, wenn `dailyMax` 10 ist?“) und für
  * Aufrufer, die nur eine Schwelle verschieben wollen.
  */
-export function resolveScannerConfig(overrides?: DeepPartial<ScannerConfig>): ScannerConfig {
+export function resolveScannerConfig(
+  overrides?: DeepPartial<ScannerConfig>,
+): ScannerConfig {
   if (!overrides) return structuredClone(DEFAULT_SCANNER_CONFIG);
   return validateScannerConfig(overrides);
 }
@@ -695,7 +1085,9 @@ export function resolveScannerConfig(overrides?: DeepPartial<ScannerConfig>): Sc
  * Lädt die Konfiguration: Datei aus `SCANNER_CONFIG_FILE`, sonst die
  * eingebauten Defaults. Eine unlesbare Datei ist ein harter Fehler.
  */
-export function loadScannerConfig(file = process.env.SCANNER_CONFIG_FILE): ScannerConfig {
+export function loadScannerConfig(
+  file = process.env.SCANNER_CONFIG_FILE,
+): ScannerConfig {
   if (!file) return structuredClone(DEFAULT_SCANNER_CONFIG);
   return validateScannerConfig(JSON.parse(readFileSync(file, "utf8")));
 }

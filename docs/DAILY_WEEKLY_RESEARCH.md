@@ -179,6 +179,17 @@ Grundlage ist die annualisierte realisierte Volatilität aus Faktor 4.
 Schwellen: `regime.low/normal/high` in `scanner.config.json`. Fehlende oder
 ungültige Volatilität ⇒ `NORMAL` (konservativ neutral, nie stillschweigend `LOW`).
 
+> **Annualisierung (seit v1.37.0):** Die Skalierung `σ × √periodsPerYear`
+> leitet die Perioden pro Jahr aus dem **Median-Abstand der gewerteten
+> Kerzen** ab (`factors.volatility.inferPeriodsPerYear`, robuster gegen
+> Lücken als Mittelwert/Modus), mit dem Config-Wert
+> `factors.volatility.periodsPerYear` (Default **8760**, 1h) als Fallback.
+> Vor v1.37.0 galt unabhängig vom tatsächlichen Zeitrahmen pauschal 365 —
+> bei 1h-Kerzen war die annualisierte Volatilität damit um den Faktor
+> √24 ≈ 4,9 zu klein, und fast alle Instrumente rutschten ins `LOW`-Regime
+> (Hauptursache zu seltener Signale). Tageskerzen ergeben weiterhin 365;
+> die historischen Golden-Werte bleiben unverändert.
+
 ---
 
 ## 6. Trichter

@@ -17,7 +17,11 @@
 import type { MarketCandle } from "@/lib/marketdata/types";
 import type { MarketInstrument } from "@/universe/types";
 import type { ScannerConfig } from "./config";
-import type { ReadinessFailure, ReadinessOffender, ScannerReadiness } from "./readiness";
+import type {
+  ReadinessFailure,
+  ReadinessOffender,
+  ScannerReadiness,
+} from "./readiness";
 
 /**
  * Absolute Obergrenze des abgeleiteten Warmup-Bedarfs (Security).
@@ -82,6 +86,21 @@ export interface DataReadinessInput {
   requiredCandles: number;
   /** Echte Fetch-/Infrastruktur-Fehler je Instrument-ID (aus MDERR-006). */
   dataErrors?: ReadonlyMap<string, string>;
+  /**
+   * Optionaler Readiness-Scope (v1.37.0):
+   *
+   * - `undefined`/`[]` ⇒ **alle** Instrumente fließen in die Bewertung ein
+   *   (ursprüngliches Verhalten, Default der reinen Pipeline-Funktion).
+   * - explizite Venue-Liste ⇒ nur Instrumente dieser Venues zählen.
+   * - `"data"` ⇒ automatischer Daten-Scope: es zählen nur Venues, an denen
+   *   der Store **mindestens eine** Kerze bereithält. Kuratierte
+   *   Seed-/Preset-Instrumente auf Venues ohne laufenden Sync
+   *   (ALPACA/IBKR/BINANCE-Presets bei aktiver BITUNIX-Sync-Venue) blockieren
+   *   dann nicht mehr dauerhaft den READY-Zustand. Liefert noch KEINE Venue
+   *   Kerzen (kalter Erststart), fällt die Bewertung auf „alle“ zurück,
+   *   damit der Kaltstart weiter als WARMING sichtbar bleibt.
+   */
+  scopeVenues?: readonly string[] | "data";
 }
 
 /**
@@ -98,13 +117,25 @@ export interface DataReadinessInput {
  * Reine Funktion: kein I/O, keine Zeitabhaengigkeit, keine Mutation der
  * Eingaben.
  */
-export function assessDataReadiness(input: DataReadinessInput): ScannerReadiness {
-  const { instruments, historyByInstrument, requiredCandles, dataErrors } = input;
+export function assessDataReadiness(
+  input: DataReadinessInput,
+): ScannerReadiness {
+  const { instruments, historyByInstrument, requiredCandles, dataErrors } =
+    input;
 
   if (dataErrors && dataErrors.size > 0) {
     const failures: ReadinessFailure[] = [...dataErrors.entries()]
-      .map(([instrumentId, reason]) => ({ instrumentId, reason: sanitizeReason(reason) }))
-      .sort((a, b) => (a.instrumentId < b.instrumentId ? -1 : a.instrumentId > b.instrumentId ? 1 : 0));
+      .map(([instrumentId, reason]) => ({
+        instrumentId,
+        reason: sanitizeReason(reason),
+      }))
+      .sort((a, b) =>
+        a.instrumentId < b.instrumentId
+          ? -1
+          : a.instrumentId > b.instrumentId
+            ? 1
+            : 0,
+      );
     return {
       status: "ERROR",
       error: `${failures.length} Instrument(e) mit Datenfehler — Marktdaten-Infrastruktur pruefen (kein Marktausschluss).`,
@@ -112,11 +143,35 @@ export function assessDataReadiness(input: DataReadinessInput): ScannerReadiness
     };
   }
 
-  const total = instruments.length;
+  // Readiness-Scope (siehe DataReadinessInput.scopeVenues): nur Instrumente
+  // tatsächlich versorgter Venues sollen READY blockieren können.
+  let scoped: readonly MarketInstrument[] = instruments;
+  if (input.scopeVenues === "data") {
+    const venuesWithData = new Set<string>();
+    for (const instrument of instruments) {
+      if ((historyByInstrument.get(instrument.id)?.length ?? 0) > 0)
+        venuesWithData.add(instrument.venue);
+    }
+    // Kaltstart-Schutz: hat noch KEINE Venue Daten, werten wir weiter alle —
+    // sonst wäre der leere Store fälschlich READY.
+    if (venuesWithData.size > 0) {
+      scoped = instruments.filter((instrument) =>
+        venuesWithData.has(instrument.venue),
+      );
+    }
+  } else if (Array.isArray(input.scopeVenues) && input.scopeVenues.length > 0) {
+    const allowed = new Set(
+      input.scopeVenues.map((venue) => venue.toUpperCase()),
+    );
+    scoped = instruments.filter((instrument) => allowed.has(instrument.venue));
+  }
+  const outOfScope = instruments.length - scoped.length;
+
+  const total = scoped.length;
   let warmed = 0;
   const offenders: ReadinessOffender[] = [];
 
-  for (const instrument of instruments) {
+  for (const instrument of scoped) {
     const candles = historyByInstrument.get(instrument.id)?.length ?? 0;
     if (candles >= requiredCandles) {
       warmed += 1;
@@ -128,7 +183,14 @@ export function assessDataReadiness(input: DataReadinessInput): ScannerReadiness
   const missing = total - warmed;
 
   if (missing === 0) {
-    return { status: "READY", instruments: total, warmed, missing: 0, requiredCandles };
+    return {
+      status: "READY",
+      instruments: total,
+      warmed,
+      missing: 0,
+      requiredCandles,
+      outOfScope,
+    };
   }
 
   offenders.sort((a, b) =>
@@ -147,6 +209,7 @@ export function assessDataReadiness(input: DataReadinessInput): ScannerReadiness
     warmed,
     missing,
     requiredCandles,
+    outOfScope,
     worstOffenders: offenders.slice(0, MAX_WORST_OFFENDERS),
   };
 }
@@ -156,7 +219,10 @@ export function assessDataReadiness(input: DataReadinessInput): ScannerReadiness
  * des Schwellwerts (dominanter Momentum-Lookback + EMA) und macht klar, dass es
  * sich um ein Datenverfuegbarkeits-, kein Marktqualitaetsproblem handelt.
  */
-export function minCandlesRejectionMessage(candleCount: number, config: ScannerConfig): string {
+export function minCandlesRejectionMessage(
+  candleCount: number,
+  config: ScannerConfig,
+): string {
   const required = requiredWarmupCandles(config);
   const momentumMax = Math.max(...config.factors.momentum.lookbacks);
   return (

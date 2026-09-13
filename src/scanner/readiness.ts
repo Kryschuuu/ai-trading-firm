@@ -37,13 +37,31 @@ export interface ReadinessFailure {
  *   Fachlogik: ein Fetch-Fehler dominiert einen bloßen Warmup-Rückstand).
  */
 export type ScannerReadiness =
-  | { status: "READY"; instruments: number; warmed: number; missing: number; requiredCandles: number }
+  | {
+      status: "READY";
+      instruments: number;
+      warmed: number;
+      missing: number;
+      requiredCandles: number;
+      /**
+       * Instrumente, die für die Readiness-Bewertung **nicht** gezählt werden:
+       * sie gehören zu Venues, für die kein Market-Data-Pfad läuft bzw. an
+       * denen der Store noch nie eine Kerze gesehen hat (z. B. kuratierte
+       * Seed-/Preset-Instrumente auf ALPACA/IBKR/BINANCE, während nur die
+       * BITUNIX-Sync-Venue aktiv ist). Sie nehmen weiter am Scan teil und
+       * können über die Eignungsfilter abgelehnt werden, blockieren aber
+       * nicht den READY-Zustand der tatsächlich versorgten Venues.
+       */
+      outOfScope: number;
+    }
   | {
       status: "WARMING";
       instruments: number;
       warmed: number;
       missing: number;
       requiredCandles: number;
+      /** Siehe {@link ScannerReadiness} READY-Variante. */
+      outOfScope: number;
       /** Deterministisch sortiert (candles asc, dann instrumentId asc), max. 10. */
       worstOffenders: ReadinessOffender[];
     }

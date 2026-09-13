@@ -10,7 +10,8 @@
  * Antwort 200:
  * ```json
  * {
- *   "ok": true, "asOf": "2026-08-27T00:00:00.000Z", "configVersion": 1,
+ *   "ok": true, "asOf": "2026-08-27T00:00:00.000Z", "configVersion": 2,
+ *   "readiness": { "status": "READY", "instruments": 250, … },
  *   "level": "daily",
  *   "funnel": { "scanned": 10000, "eligible": 2000, "interesting": 500, "daily": 100, "deep": 25 },
  *   "items": [ { "rank": 1, "instrumentId": "BINANCE:BTCUSDT", "score": 78.42,
@@ -23,6 +24,7 @@
  */
 
 import { publicErrorMessage } from "@/lib/secrets";
+import { artifactReadiness } from "@/scanner/artifacts";
 import { getScannerService } from "@/scanner/service";
 import type { InstrumentScore } from "@/scanner/types";
 
@@ -38,11 +40,19 @@ export const MAX_PAGE_SIZE = 200;
 export const DEFAULT_PAGE_SIZE = 50;
 
 function badRequest(message: string): Response {
-  return Response.json({ ok: false, error: "VALIDATION_ERROR", message }, { status: 400 });
+  return Response.json(
+    { ok: false, error: "VALIDATION_ERROR", message },
+    { status: 400 },
+  );
 }
 
 /** Liest und validiert `page`/`pageSize`/`level`/`breakdown`. */
-export function parseDailyQuery(url: URL): { level: Level; page: number; pageSize: number; breakdown: boolean } {
+export function parseDailyQuery(url: URL): {
+  level: Level;
+  page: number;
+  pageSize: number;
+  breakdown: boolean;
+} {
   const p = url.searchParams;
 
   const rawLevel = (p.get("level") ?? "daily").trim().toLowerCase();
@@ -53,7 +63,8 @@ export function parseDailyQuery(url: URL): { level: Level; page: number; pageSiz
 
   const rawPage = p.get("page");
   const page = rawPage === null ? 1 : Number(rawPage);
-  if (!Number.isFinite(page) || page < 1 || page > 100_000) throw new Error("page: erwartet Ganzzahl ≥ 1");
+  if (!Number.isFinite(page) || page < 1 || page > 100_000)
+    throw new Error("page: erwartet Ganzzahl ≥ 1");
 
   const rawSize = p.get("pageSize");
   const pageSize = rawSize === null ? DEFAULT_PAGE_SIZE : Number(rawSize);
@@ -62,14 +73,24 @@ export function parseDailyQuery(url: URL): { level: Level; page: number; pageSiz
   }
 
   const rawBreakdown = p.get("breakdown");
-  if (rawBreakdown !== null && !["true", "false", "1", "0"].includes(rawBreakdown)) {
+  if (
+    rawBreakdown !== null &&
+    !["true", "false", "1", "0"].includes(rawBreakdown)
+  ) {
     throw new Error("breakdown: erwartet true|false");
   }
   const detailedLevel = level === "deep" || level === "daily";
   const breakdown =
-    rawBreakdown === null ? detailedLevel : (rawBreakdown === "true" || rawBreakdown === "1") && detailedLevel;
+    rawBreakdown === null
+      ? detailedLevel
+      : (rawBreakdown === "true" || rawBreakdown === "1") && detailedLevel;
 
-  return { level, page: Math.trunc(page), pageSize: Math.trunc(pageSize), breakdown };
+  return {
+    level,
+    page: Math.trunc(page),
+    pageSize: Math.trunc(pageSize),
+    breakdown,
+  };
 }
 
 function serialize(score: InstrumentScore, rank: number, breakdown: boolean) {
@@ -105,6 +126,10 @@ export async function GET(req: Request): Promise<Response> {
       ok: true,
       asOf: scan.asOf,
       configVersion: scan.config.version,
+      // Readiness im Payload: die UI/Dashboards unterscheiden damit „leer,
+      // weil keine Chance“ (READY) von „leer wegen Datenmangels“ (WARMING/
+      // ERROR) — zuvor war ein leerer Trichter ohne Erklärung.
+      readiness: artifactReadiness(scan),
       level: query.level,
       funnel: {
         scanned: scan.funnel.scanned,
@@ -126,6 +151,9 @@ export async function GET(req: Request): Promise<Response> {
       hasMore: start + items.length < total,
     });
   } catch (e) {
-    return Response.json({ ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(e) }, { status: 500 });
+    return Response.json(
+      { ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(e) },
+      { status: 500 },
+    );
   }
 }

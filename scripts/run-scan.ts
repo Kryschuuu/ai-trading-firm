@@ -28,9 +28,19 @@
  * `scanUniverse()` als `dataErrors` gereicht → Readiness `ERROR` und
  * `data-unavailable`-Rejections statt `min-candles`. Der Scan läuft auch bei
  * Fehlern (Artefakte bleiben erzeugbar), beendet sich aber mit Exit 1.
+ *
+ * Exit-Codes (v1.37.0): echte Läufe (ohne `--dry`) beenden sich mit Exit 1,
+ * wenn die Readiness nicht READY ist (WARMING/ERROR) — stille „erfolgreiche“
+ * Leerläufe in der Automatisierung waren der Kernbefund der Code-Revision.
+ * `--dry` bleibt eine reine Vorschau und wird nie über die Readiness
+ * fehlschlagen (hermetische/CI-Probeläufe).
  */
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
-import { loadMarketDataErrors, saveMarketDataErrors, clearMarketDataErrors } from "../src/marketdata/dataErrors";
+import {
+  loadMarketDataErrors,
+  saveMarketDataErrors,
+  clearMarketDataErrors,
+} from "../src/marketdata/dataErrors";
 import { saveVenueSyncStatus } from "../src/marketdata/syncStatus";
 import { loadScannerConfig } from "../src/scanner/config";
 import { scanUniverse } from "../src/scanner/pipeline";
@@ -43,7 +53,10 @@ import {
   writeDailyArtifact,
   writeWeeklyArtifact,
 } from "../src/scanner/artifacts";
-import { historicalStoreProvider, loadAllInstruments } from "../src/scanner/service";
+import {
+  historicalStoreProvider,
+  loadAllInstruments,
+} from "../src/scanner/service";
 import { runMarketSync } from "./lib/market-sync";
 
 async function main(): Promise<void> {
@@ -55,16 +68,33 @@ async function main(): Promise<void> {
     args.find((a) => a.startsWith(`--${name}=`))?.slice(`--${name}=`.length);
   const syncOptions = {
     ...(valueOf("timeframes")
-      ? { timeframes: valueOf("timeframes")!.split(",").map((t) => t.trim()).filter(Boolean) as never[] }
+      ? {
+          timeframes: valueOf("timeframes")!
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean) as never[],
+        }
       : {}),
-    ...(valueOf("candle-limit") ? { candleLimit: Number(valueOf("candle-limit")) } : {}),
-    ...(valueOf("max-instruments") ? { maxInstruments: Number(valueOf("max-instruments")) } : {}),
-    ...(valueOf("concurrency") ? { concurrency: Number(valueOf("concurrency")) } : {}),
+    ...(valueOf("candle-limit")
+      ? { candleLimit: Number(valueOf("candle-limit")) }
+      : {}),
+    ...(valueOf("max-instruments")
+      ? { maxInstruments: Number(valueOf("max-instruments")) }
+      : {}),
+    ...(valueOf("concurrency")
+      ? { concurrency: Number(valueOf("concurrency")) }
+      : {}),
   };
-  const dateArg = args.find((a) => a.startsWith("--date="))?.slice("--date=".length);
-  const venueArg = args.find((a) => a.startsWith("--venue="))?.slice("--venue=".length);
+  const dateArg = args
+    .find((a) => a.startsWith("--date="))
+    ?.slice("--date=".length);
+  const venueArg = args
+    .find((a) => a.startsWith("--venue="))
+    ?.slice("--venue=".length);
   if (dateArg && !ARTIFACT_DATE_RE.test(dateArg)) {
-    console.error(`[scanner] --date erwartet YYYY-MM-DD, war "${dateArg.slice(0, 20)}"`);
+    console.error(
+      `[scanner] --date erwartet YYYY-MM-DD, war "${dateArg.slice(0, 20)}"`,
+    );
     process.exit(1);
   }
 
@@ -83,7 +113,7 @@ async function main(): Promise<void> {
       saveMarketDataErrors(result.failures);
       console.error(
         `[scanner] --sync: ${syncErrorCount} Marktdaten-Fehler — ` +
-          `Manifest geschrieben, Scan läuft mit Readiness ERROR (kein Marktausschluss).`
+          `Manifest geschrieben, Scan läuft mit Readiness ERROR (kein Marktausschluss).`,
       );
     } else {
       clearMarketDataErrors();
@@ -93,7 +123,14 @@ async function main(): Promise<void> {
   const config = loadScannerConfig();
   const instruments = loadAllInstruments();
   const store = new HistoricalStore();
-  const data = historicalStoreProvider(store, config.factors.correlation.benchmarkInstrumentId);
+  // Instrumente mitreichen: die konfigurierte Benchmark-ID (Default
+  // BITUNIX:BTCUSDT) wird venue-agnostisch gegen den tatsächlichen
+  // Store-Bestand aufgelöst, sonst bleibt der Korrelationsfaktor „unbekannt“.
+  const data = historicalStoreProvider(
+    store,
+    config.factors.correlation.benchmarkInstrumentId,
+    instruments,
+  );
 
   const dataErrors = loadMarketDataErrors();
   const scan = scanUniverse({
@@ -101,6 +138,9 @@ async function main(): Promise<void> {
     data,
     asOf: new Date(),
     config,
+    // Readiness-Scope „data“: kuratierte Seed-Instrumente auf Venues ohne
+    // laufenden Sync blockieren den READY-Zustand der versorgten Venue nicht.
+    readinessScopeVenues: "data",
     ...(dataErrors.size > 0 ? { dataErrors } : {}),
   });
   const date = dateArg ?? artifactDateOf(scan.asOf);
@@ -108,21 +148,30 @@ async function main(): Promise<void> {
   console.log(
     `[scanner] gescannt ${scan.stats.scanned} · geeignet ${scan.funnel.eligible.length} · ` +
       `interessant ${scan.funnel.interesting.length} · daily ${scan.funnel.daily.length} · ` +
-      `deep ${scan.funnel.deep.length} · ${scan.stats.durationMs.toFixed(0)} ms`
+      `deep ${scan.funnel.deep.length} · ${scan.stats.durationMs.toFixed(0)} ms`,
   );
 
   // Readiness ZUERST — trennt Infrastruktur (Warmup/Datenfehler) von Fachlogik.
   const { readiness } = scan;
+  const scopeNote =
+    "outOfScope" in readiness && readiness.outOfScope > 0
+      ? ` · ${readiness.outOfScope} ohne Sync-Venue (außer Scope)`
+      : "";
   if (readiness.status === "READY") {
-    console.log(`[scanner] Readiness: READY · ${readiness.warmed}/${readiness.instruments} gewärmt (≥ ${readiness.requiredCandles} Kerzen)`);
+    console.log(
+      `[scanner] Readiness: READY · ${readiness.warmed}/${readiness.instruments} gewärmt ` +
+        `(≥ ${readiness.requiredCandles} Kerzen)${scopeNote}`,
+    );
   } else if (readiness.status === "WARMING") {
     console.log(
       `[scanner] Readiness: WARMING · ${readiness.warmed}/${readiness.instruments} gewärmt, ` +
-        `${readiness.missing} ohne genügend Historie (benötigt ${readiness.requiredCandles} Kerzen). ` +
-        `Behebung: npm run market-sync`
+        `${readiness.missing} ohne genügend Historie (benötigt ${readiness.requiredCandles} Kerzen)${scopeNote}. ` +
+        `Behebung: npm run market:sync`,
     );
     for (const o of readiness.worstOffenders) {
-      console.log(`[scanner]   warmup fehlt: ${o.instrumentId} — ${o.candles}/${readiness.requiredCandles} Kerzen`);
+      console.log(
+        `[scanner]   warmup fehlt: ${o.instrumentId} — ${o.candles}/${readiness.requiredCandles} Kerzen`,
+      );
     }
   } else {
     console.log(`[scanner] Readiness: ERROR · ${readiness.error}`);
@@ -139,23 +188,44 @@ async function main(): Promise<void> {
     console.log("[scanner] --dry: keine Artefakte geschrieben");
   } else {
     const previousDate = latestArtifactDate();
-    const previous = previousDate && previousDate !== date ? readWeeklyArtifact(previousDate) : null;
+    const previous =
+      previousDate && previousDate !== date
+        ? readWeeklyArtifact(previousDate)
+        : null;
     const daily = writeDailyArtifact(scan, { date });
-    const weekly = writeWeeklyArtifact(classifyWeekly({ scan, instruments, previous }), { date });
+    const weekly = writeWeeklyArtifact(
+      classifyWeekly({ scan, instruments, previous }),
+      { date },
+    );
     console.log(`[scanner] Artefakt: ${daily.path}`);
     console.log(
       `[scanner] Weekly: ${weekly.path} — CORE ${weekly.review.summary.CORE}, ` +
         `ROTATION ${weekly.review.summary.ROTATION}, DISCOVERY ${weekly.review.summary.DISCOVERY}, ` +
-        `EXCLUDED ${weekly.review.summary.EXCLUDED}`
+        `EXCLUDED ${weekly.review.summary.EXCLUDED}`,
     );
   }
 
   // MDERR-006: Sync-Fehler sind sichtbar (Readiness ERROR, Manifest) — der
   // Scan ist trotzdem gelaufen, der Exit-Code bleibt aber fehlerhaft (1).
-  if (syncFirst && syncErrorCount > 0) process.exitCode = 1;
+  // Ebenso WARMING auf einem ECHTEN Lauf: ein Automatisierungslauf
+  // (Cron/Systemd), der „erfolgreich“ einen leeren Trichter produziert, ist
+  // der Kernbefund dieser Code-Revision — ein nicht bereiter Datenbestand
+  // muss als Fehler sichtbar werden. Leere Sichten bei READY (echtes
+  // Fachsignal „keine Chance“) bleiben Exit 0. `--dry` ist eine reine
+  // Vorschau ohne Schreibvertrag und bleibt bewusst Exit 0 (sonst würde
+  // jeder hermetische Probelauf auf einem leeren Datenbestand fehlschlagen).
+  if (
+    !dry &&
+    ((syncFirst && syncErrorCount > 0) || readiness.status !== "READY")
+  ) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((e) => {
-  console.error("[scanner] Fehlgeschlagen:", e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200));
+  console.error(
+    "[scanner] Fehlgeschlagen:",
+    e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
+  );
   process.exit(1);
 });

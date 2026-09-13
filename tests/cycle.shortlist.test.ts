@@ -10,7 +10,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assertShortlistLimit } from "../src/cycle/security";
-import { MAX_SHORTLIST_LIMIT, ShortlistLimitExceededError } from "../src/cycle/types";
+import {
+  MAX_SHORTLIST_LIMIT,
+  ShortlistLimitExceededError,
+} from "../src/cycle/types";
 import { technicalStep } from "../src/cycle/steps/technicalStep";
 import { newsStep } from "../src/cycle/steps/newsStep";
 import { selectionStep } from "../src/cycle/steps/selectionStep";
@@ -36,9 +39,12 @@ test("Shortlist: assertShortlistLimit akzeptiert 40 Instrumente und weist 41 str
       assert.ok(err instanceof ShortlistLimitExceededError);
       assert.equal(err.count, 41);
       assert.equal(err.limit, 40);
-      assert.match(err.message, /Shortlist-Limit überschritten: 41 Instrumente übergeben, maximal 40 erlaubt/);
+      assert.match(
+        err.message,
+        /Shortlist-Limit überschritten: 41 Instrumente übergeben, maximal 40 erlaubt/,
+      );
       return true;
-    }
+    },
   );
 });
 
@@ -47,12 +53,9 @@ test("Technical Analyst: 41. Instrument wird bei der Input-Validierung abgewiese
     instrumentId: `SYM_${i + 1}`,
   }));
 
-  assert.throws(
-    () => {
-      technicalStep.validateInput!({ candidates: fortyOneCandidates });
-    },
-    ShortlistLimitExceededError
-  );
+  assert.throws(() => {
+    technicalStep.validateInput!({ candidates: fortyOneCandidates });
+  }, ShortlistLimitExceededError);
 
   // 40 Kandidaten müssen validieren
   const fortyCandidates = Array.from({ length: 40 }, (_, i) => ({
@@ -65,12 +68,9 @@ test("Technical Analyst: 41. Instrument wird bei der Input-Validierung abgewiese
 test("News Analyst: 41. Instrument wird bei der Input-Validierung abgewiesen", () => {
   const fortyOneSymbols = Array.from({ length: 41 }, (_, i) => `SYM_${i + 1}`);
 
-  assert.throws(
-    () => {
-      newsStep.validateInput!({ symbols: fortyOneSymbols });
-    },
-    ShortlistLimitExceededError
-  );
+  assert.throws(() => {
+    newsStep.validateInput!({ symbols: fortyOneSymbols });
+  }, ShortlistLimitExceededError);
 
   const fortySymbols = Array.from({ length: 40 }, (_, i) => `SYM_${i + 1}`);
   const valid = newsStep.validateInput!({ symbols: fortySymbols });
@@ -112,4 +112,101 @@ test("Market Selection: deckelt Kandidatenliste im Code auf maximal 40", async (
   // Code-Grenze erzwingt maximal 40
   assert.equal(result.candidates.length, 40);
   assert.equal(result.selectedCount, 40);
+});
+
+test("Market Selection: WARMING mit leerem Trichter ruft KEIN LLM und liefert deterministisch leer (v1.37.0)", async () => {
+  const ports = createTestPorts();
+  const clock = new SimulatedClock();
+
+  // Wäre der Kurzschluss nicht vorhanden, würde diese Antwort auf 40 gekappt.
+  const fiftyCandidates = Array.from({ length: 50 }, (_, i) => ({
+    instrumentId: `SYM_${i + 1}`,
+    rank: i + 1,
+    score: 80 - i,
+    assetClass: "crypto",
+    selectionRationale: "Test",
+  }));
+  ports.agent.setResponseForRole("MARKET_SELECTION", {
+    candidates: fiftyCandidates,
+    selectedCount: 50,
+    asOf: clock.toISOString(),
+  });
+
+  const warmingArtifact = {
+    levels: { deep: [], daily: [], interesting: [], eligible: [] },
+    readiness: {
+      status: "WARMING",
+      instruments: 26,
+      warmed: 0,
+      missing: 26,
+      outOfScope: 0,
+      requiredCandles: 61,
+    },
+  } as unknown as import("../src/scanner/artifacts").DailyUniverseArtifact;
+
+  const ctx = {
+    cycleId: "test-cycle",
+    date: "2026-08-27",
+    asOf: clock.now(),
+    clock,
+    input: { scannerArtifact: warmingArtifact },
+    previousStepOutputs: {},
+    ports,
+    emitEscalation: () => {},
+    log: () => {},
+  };
+
+  const result = await selectionStep.execute(ctx);
+  assert.equal(
+    result.candidates.length,
+    0,
+    "keine Halluzinations-Kandidaten ohne Datenfundament",
+  );
+  assert.equal(result.selectedCount, 0);
+});
+
+test("Market Selection: READY mit leerem Trichter behält den Agenten-Vertrag (Kappung auf 40)", async () => {
+  // Regression zur Begrenzung des Kurzschlusses: nur nicht-READY blockiert das LLM.
+  const ports = createTestPorts();
+  const clock = new SimulatedClock();
+  ports.agent.setResponseForRole("MARKET_SELECTION", {
+    candidates: Array.from({ length: 50 }, (_, i) => ({
+      instrumentId: `SYM_${i + 1}`,
+      rank: i + 1,
+      score: 80 - i,
+      assetClass: "crypto",
+      selectionRationale: "Test",
+    })),
+    selectedCount: 50,
+    asOf: clock.toISOString(),
+  });
+  const readyArtifact = {
+    levels: { deep: [], daily: [], interesting: [], eligible: [] },
+    readiness: {
+      status: "READY",
+      instruments: 26,
+      warmed: 26,
+      missing: 0,
+      outOfScope: 0,
+      requiredCandles: 61,
+    },
+  } as unknown as import("../src/scanner/artifacts").DailyUniverseArtifact;
+
+  const ctx = {
+    cycleId: "test-cycle",
+    date: "2026-08-27",
+    asOf: clock.now(),
+    clock,
+    input: { scannerArtifact: readyArtifact },
+    previousStepOutputs: {},
+    ports,
+    emitEscalation: () => {},
+    log: () => {},
+  };
+  const result = await selectionStep.execute(ctx);
+  assert.equal(
+    result.candidates.length,
+    40,
+    "bei READY gilt weiter der Agentenpfad mit 40er-Kappung",
+  );
 });

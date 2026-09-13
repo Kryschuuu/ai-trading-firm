@@ -18,7 +18,10 @@ export interface SelectionStepInput {
   macroOutput?: MacroStepOutput;
 }
 
-export const selectionStep: StepDefinition<SelectionStepInput, SelectionStepOutput> = {
+export const selectionStep: StepDefinition<
+  SelectionStepInput,
+  SelectionStepOutput
+> = {
   stepId: "03-market-selection",
   name: "Market Selection Agent",
   role: "MARKET_SELECTION",
@@ -29,23 +32,28 @@ export const selectionStep: StepDefinition<SelectionStepInput, SelectionStepOutp
     backoffMs: 200,
   },
 
-  async execute(context: StepExecutionContext<SelectionStepInput>): Promise<SelectionStepOutput> {
+  async execute(
+    context: StepExecutionContext<SelectionStepInput>,
+  ): Promise<SelectionStepOutput> {
     context.log("Erstelle Daily Candidate List aus Scanner- und Makro-Daten …");
 
     const scannerArtifact =
       context.input?.scannerArtifact ??
-      (context.previousStepOutputs["01-market-scanner"] as DailyUniverseArtifact | undefined);
+      (context.previousStepOutputs["01-market-scanner"] as
+        DailyUniverseArtifact | undefined);
 
     const macroOutput =
       context.input?.macroOutput ??
-      (context.previousStepOutputs["02-macro-analyst"] as MacroStepOutput | undefined);
+      (context.previousStepOutputs["02-macro-analyst"] as
+        MacroStepOutput | undefined);
 
     // Deep- und Daily-Kandidaten aus dem Scanner heranziehen
     const deepCandidates = scannerArtifact?.levels.deep ?? [];
     const dailyCandidates = scannerArtifact?.levels.daily ?? [];
 
     // Fallback-Zusammenstellung (bis zu 40 Instrumente)
-    const baseList = deepCandidates.length > 0 ? deepCandidates : dailyCandidates;
+    const baseList =
+      deepCandidates.length > 0 ? deepCandidates : dailyCandidates;
     const boundedCandidates = baseList.slice(0, 40).map((c, i) => ({
       instrumentId: c.instrumentId,
       rank: i + 1,
@@ -59,6 +67,25 @@ export const selectionStep: StepDefinition<SelectionStepInput, SelectionStepOutp
       selectedCount: boundedCandidates.length,
       asOf: context.clock.toISOString(),
     };
+
+    // Keine Kandidaten bei nicht READY-Readiness ist ein DATENPROBLEM
+    // (Warmup/Sync), kein Fall für ein LLM: Ein Modell-Aufruf könnte aus
+    // „0 Kandidaten“ nur Halluzinationen erfinden und würde den
+    // 40-Instrumente-Code-Pfad sowie API-Kontingent belasten. Deterministisch
+    // leer melden — die Ursache steht im Scanner-Artefakt (`readiness`).
+    // Bei READY bleibt der bestehende Vertrag erhalten (Fachentscheidung des
+    // Auswahl-Agenten, inkl. der 40er-Kappung im Code).
+    const readiness = scannerArtifact?.readiness;
+    if (baseList.length === 0 && readiness && readiness.status !== "READY") {
+      context.log(
+        readiness.status === "ERROR"
+          ? `Scanner-Readiness ERROR (${readiness.error ?? "unbekannt"}) — kein LLM-Fallbacksignal.`
+          : `Scanner-Readiness ${readiness.status} (${readiness.warmed}/${readiness.instruments} gewärmt, ` +
+              `${readiness.missing} fehlen, ≥ ${readiness.requiredCandles} Kerzen nötig) — ` +
+              `Warmup/Sync nachziehen, kein LLM-Fallbacksignal.`,
+      );
+      return fallback;
+    }
 
     const systemPrompt = `You are the Market Selection Agent of an autonomous trading firm.
 Your role is to evaluate the candidates proposed by the deterministic Market Scanner in light of the Macro Analyst's findings.
