@@ -30,6 +30,12 @@ import {
   type SyncResult,
 } from "../../src/marketdata";
 import { createAdapterRegistry } from "../../src/marketdata/adapterRegistry";
+import {
+  FileSpreadCache,
+  MARKET_SPREAD_CACHE_FILE,
+  spreadCacheTtlMs,
+  type SpreadCache,
+} from "../../src/marketdata/spreadCache";
 
 export interface MarketSyncRunOptions {
   /** Zu synchronisierende Venue (Großbuchstaben, z. B. `BITUNIX`). */
@@ -46,6 +52,15 @@ export interface MarketSyncRunOptions {
   concurrency?: number;
   /** `true` ⇒ Abbruch beim ersten Fehler (kein degradierter Lauf). */
   strict?: boolean;
+  /** `true` ⇒ vollen Kerzen-Abruf erzwingen (kein inkrementelles Überspringen). */
+  fullRefresh?: boolean;
+  /**
+   * Spread-Cache für die Depth-Stage. Default: dateigestützter Cache
+   * (`data/spread-cache.json`, TTL aus `MARKET_SPREAD_CACHE_TTL_MS`,
+   * Default 6 h; `0` schaltet ab). Explizit `false` deaktiviert den Cache
+   * (Dry-Runs: es darf nichts in `data/` landen).
+   */
+  spreadCache?: SpreadCache | false;
   /** Env für Adapter-Aufbau und Feature-Gates (Default `process.env`). */
   env?: EnvLike;
   /** Injizierbare Registry (Tests). */
@@ -85,6 +100,7 @@ export async function runMarketSyncDetailed(options: MarketSyncRunOptions): Prom
     ...(options.symbols ? { symbolAllowlist: options.symbols } : {}),
     ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
     ...(options.strict !== undefined ? { strict: options.strict } : {}),
+    ...(options.fullRefresh !== undefined ? { fullRefresh: options.fullRefresh } : {}),
   };
   // Validation vor dem ersten Request: ein Fehler in `timeframes` oder
   // `candleLimit` darf keinen halbvollgeschriebenen Store hinterlassen.
@@ -93,8 +109,20 @@ export async function runMarketSyncDetailed(options: MarketSyncRunOptions): Prom
   if (!adapters.has(venue)) throw new Error(gateMessage(venue, adapters.skipped));
 
   const silentLogger: SyncLogger = () => {};
+  // Spread-Cache: explizit false (Dry-Run) ⇒ aus; explizite Instanz ⇒ diese;
+  // sonst dateigestützter Cache mit der TTL aus der Umgebung.
+  let spreadCache: SpreadCache | null = null;
+  if (options.spreadCache === false) {
+    spreadCache = null;
+  } else if (options.spreadCache) {
+    spreadCache = options.spreadCache;
+  } else {
+    const ttlMs = spreadCacheTtlMs(options.env ?? process.env);
+    if (ttlMs > 0) spreadCache = new FileSpreadCache(MARKET_SPREAD_CACHE_FILE, ttlMs);
+  }
   const service = new MarketDataSyncService(registry, history, adapters.entries, {
     ...syncOptions,
+    ...(spreadCache ? { spreadCache } : {}),
     logger: options.quiet ? silentLogger : (options.logger ?? defaultSyncLogger),
   });
   const result = await service.syncVenue(venue);

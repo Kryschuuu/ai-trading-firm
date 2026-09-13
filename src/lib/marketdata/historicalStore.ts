@@ -58,6 +58,25 @@ export const SUPPORTED_TIMEFRAMES = [
 export type SupportedTimeframe = (typeof SUPPORTED_TIMEFRAMES)[number];
 
 /**
+ * Periodenlänge je erlaubtem Timeframe in Millisekunden (kanonische, einzige
+ * solche Tabelle im Store-Modul). Dient u. a. dem inkrementellen Sync
+ * (Vergleich der jüngsten gespeicherten Kerze mit dem laufenden Periodenrand,
+ * siehe `MarketDataSyncService`) und Alignment-Prüfungen.
+ */
+export const SUPPORTED_TIMEFRAME_MS: Record<SupportedTimeframe, number> = {
+  "1m": 60_000,
+  "3m": 3 * 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "2h": 2 * 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "5d": 5 * 24 * 60 * 60_000,
+};
+
+/**
  * Marker für Zeilen im Legacy-Schema (v1, ohne `timeframe`). Solche Zeilen
  * werden im Runtime-Loader niemals über {@link HistoricalStore.query}
  * ausgeliefert (ein Timeframe-Pflicht-Query kann sie nie matchen) — sie
@@ -177,7 +196,8 @@ export function isSupportedTimeframe(value: unknown): value is SupportedTimefram
 }
 
 /** Logischer Schlüssel einer Kerze. */
-function seriesKey(instrumentId: string, timeframe: string): string {
+/** Reihenschlüssel `Instrument ⟂ Timeframe` (für Index-/Cache-Maps). */
+export function seriesKey(instrumentId: string, timeframe: string): string {
   return `${instrumentId}\u0000${timeframe}`;
 }
 

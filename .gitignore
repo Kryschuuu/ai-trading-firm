@@ -39,6 +39,8 @@ next-env.d.ts
 # vom Scanner/Operations Center gelesen — nicht versioniert
 /data/market-data-errors.json
 /data/market-data-errors.json.tmp
+/data/spread-cache.json
+/data/spread-cache.json.tmp
 
 # Sync-Status je Venue (OPS-011): Laufzeit-Artefakt des Sync-Jobs,
 # vom Operations Center gelesen — nicht versioniert

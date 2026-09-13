@@ -51,8 +51,24 @@ export const MARKET_SYNC_TIMEFRAMES: readonly SupportedTimeframe[] = [
   "1d",
 ] as const;
 
-/** Zeitrahmen, die `syncVenue()` standardmäßig backfüllt (Ticket-Default). */
-export const SYNC_TIMEFRAMES = ["5m", "15m", "30m", "1h"] as const;
+/**
+ * Zeitrahmen, die `syncVenue()` standardmäßig backfüllt.
+ *
+ * Seit v1.37.0 **nur noch `1h`**: der Scanner (und Analytics/Backtest der
+ * Tagespipeline) werten ausschließlich
+ * {@link DEFAULT_ANALYSIS_TIMEFRAME} = `1h` aus
+ * (`TIMEFRAME_PREFERENCE` im Scanner-Provider, `SCANNER_CANDLE_TIMEFRAME`
+ * im Analytics-Port) — die einzigen Produktivleser des Historical Store.
+ * Die zusätzlichen 5m/15m/30m-Serien kosteten bei 250 Instrumenten 750
+ * überflüssige Kline-Requests je Lauf (4× statt 1×), ohne dass ein
+ * Produktionskonsument sie las: der Mikro-Executor/die Rule-Engine und die
+ * Makro-/Analysten-Schritte beziehen ihre Feintakt-Kerzen live über
+ * WebSocket bzw. den REST-/Cache-Pfad `getCandles()` (nicht aus dem Store),
+ * und Replay/Backtest ist per `--timeframes` explizit. Wer Replays/Backtests
+ * auf kürzeren Zeitrahmen fährt, holt sie explizit:
+ * `npm run market:sync -- --timeframes=5m,15m,30m,1h`.
+ */
+export const SYNC_TIMEFRAMES = ["1h"] as const;
 export type SyncTimeframe = (typeof SYNC_TIMEFRAMES)[number];
 
 /** Default candle page size per instrument × timeframe. */
@@ -144,10 +160,16 @@ export interface MarketCandle {
 }
 
 /** Liest den Zeitstempel einer Adapter-Kerze (`time` ∪ `ts`). `null` = unbrauchbar. */
-export function candleTimeMs(candle: MarketCandle | null | undefined): number | null {
+export function candleTimeMs(
+  candle: MarketCandle | null | undefined,
+): number | null {
   if (!candle || typeof candle !== "object") return null;
   for (const candidate of [candle.time, candle.ts]) {
-    if (typeof candidate === "number" && Number.isInteger(candidate) && candidate > 0) {
+    if (
+      typeof candidate === "number" &&
+      Number.isInteger(candidate) &&
+      candidate > 0
+    ) {
       return candidate;
     }
   }
@@ -215,6 +237,14 @@ export interface SyncResult {
   policyExcluded: number;
   /** Bars/Instrumente je Timeframe. */
   candlesByTimeframe: Partial<Record<SupportedTimeframe, TimeframeSyncStats>>;
+  /**
+   * Instrument-Timeframe-Paare, deren Kline-Request inkrementell
+   * ÜBERSPRUNGEN wurde, weil der Store bereits die Kerze des laufenden
+   * Zeitraums hält (je Timeframe die Anzahl übersprungener Instrumente).
+   * Zeigt gemeinsam mit `candlesByTimeframe`, wie viele Requests der Lauf
+   * tatsächlich gestellt hat.
+   */
+  freshCandlesByTimeframe?: Partial<Record<SupportedTimeframe, number>>;
   /** Isolierte Fehler; leer bei sauberem Lauf. */
   failures: SyncFailure[];
   /** `true`, wenn `failures.length > 0`, der Lauf aber fortgesetzt wurde. */
