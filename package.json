@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.36.41",
+  "version": "1.38.0",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "GPL-3.0-only",
   "private": true,
@@ -24,6 +24,7 @@
     "test:coverage:bitunix": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/brokers/bitunix/**' 'tests/bitunix.*.test.ts'",
     "test:coverage:scanner": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/scanner/**' --test-coverage-include='src/app/api/universe/**' 'tests/scanner.*.test.ts'",
     "scan": "node --import tsx scripts/run-scan.ts",
+    "scanner:regenerate-config": "node --import tsx scripts/regen-scanner-config.ts",
     "market-sync": "node --import tsx scripts/run-market-sync.ts",
     "market:sync": "node --import tsx scripts/market-sync.ts",
     "market:sync:status": "node --import tsx scripts/market-sync.ts --status",

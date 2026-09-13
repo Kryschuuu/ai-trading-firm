@@ -1,0 +1,27 @@
+#
+# Stündlicher Auslöser für market-sync.service (v1.38.0).
+#
+# Installation:
+#   sudo systemctl enable --now market-sync.timer
+#   systemctl list-timers market-sync.timer      # nächste Auskunft
+#   journalctl -u market-sync.service -f         # Lauftagebuch
+#
+# Wahlfrei: täglicher VOLLABGLEICH (frische Orderbücher, Auffüllen aller
+# Lücken) über eine zweite Unit:
+#   sudo cp deploy/market-sync-full.service /etc/systemd/system/
+#   sudo systemctl enable --now market-sync-full.timer
+#
+[Unit]
+Description=Stündlicher inkrementeller Market-Data-Sync (KI-Trading-Firma)
+Documentation=file:///home/DEIN_USER/ai-trading-firm/docs/MARKET_DATA_PIPELINE.md
+
+[Timer]
+# Jede volle Stunde zwei Minuten nach der vollen Stunde (versetzt zur
+# Lastspitze zur vollen Stunde und zum täglichen Zyklus der Firma).
+OnCalendar=*-*-* *:02:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=market-sync.service
+
+[Install]
+WantedBy=timers.target

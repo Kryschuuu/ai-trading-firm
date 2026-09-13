@@ -357,8 +357,8 @@ npm run market-sync -- --venue=BITUNIX
 
 | Grund | Erläuterung |
 | --- | --- |
-| Datenvolumen gering | 150 Bars je Instrument und Timeframe, vier Timeframes (`5m`, `15m`, `30m`, `1h`) — ein Sync-Lauf genügt |
-| Kein Rate-Limit-Problem | öffentliche REST-Schnittstelle, 4 Requests je Instrument |
+| Datenvolumen gering | 150 Bars je Instrument und Timeframe; der **Standardlauf lädt seit v1.37.0 nur noch `1h`** (der einzige von Scanner/Analytics ausgewertete Zeitrahmen, Präferenz `1h → 4h → 30m → 15m → 5m`). Wer Replays auf kürzeren Zeitrahmen braucht, holt sie explizit: `--timeframes=5m,15m,30m,1h` — dann ein Lauf mit vier Timeframes |
+| Kein Rate-Limit-Problem | öffentliche REST-Schnittstelle, 1 Request je Instrument und Timeframe im Standardlauf |
 | Keine Rate-Fehler möglich | der Timeframe stammt aus dem Backfill-Kontext statt aus einer Annahme |
 | Prüfbar | Sync-Report nennt `written` je Instrument und Timeframe |
 
@@ -583,7 +583,7 @@ behandelt (`min-candles` → `WARMING`).
 | Discovery selbst wirft | Lauf bricht ab (ohne Instrumente gibt es nichts zu isolieren) |
 
 CLI loggt nur aggregierte Zähler (`discovery`, `tickers enriched`,
-`orderbooks enriched`, `5m candles: N/N`, `errors: K`) plus
+`orderbooks enriched`, `1h candles: N/N` (sowie ggf. „aktuell, keine Anfrage“), `errors: K`) plus
 `market_sync_fetch_failures` (venue, count, byStage). Keine Symbole, keine
 URLs, keine Secrets.
 
@@ -662,7 +662,7 @@ Retry nur für 429/5xx (bestehender HTTP-Client). Eine Antwort über
 
 ## 10. Venue capability matrix
 
-| Venue | Adapter | Discovery | Tickers (Batch) | Orderbuch | Kerzen 5m/15m/30m/1h | Timeframe-Lücken | Private/Keys im Sync |
+| Venue | Adapter | Discovery | Tickers (Batch) | Orderbuch | Kerzen 1h Default (5m/15m/30m per `--timeframes`) | Timeframe-Lücken | Private/Keys im Sync |
 | --- | :---: | :---: | :---: | :---: | :---: | :--- | :---: |
 | BITUNIX | `createBitunixMarketDataAdapter` um `BitunixPublicClient` (nur Public) | ja (public REST) | ja | ja | ja | **3m, 5d** (`UnsupportedTimeframeError`, kein Ersatztimeframe) | **nein** |
 | BINANCE | — (Feed in `src/lib/marketdata/feeds`, kein Sync-Adapter) | geplant | — | — | — | — | nein |
@@ -776,8 +776,8 @@ sichtbaren Verhaltensänderungen: **[SYMBOLS.md](SYMBOLS.md)**.
 ## 12. Synchronisations-CLI (MDSYNC-001, v1.29.0)
 
 ```bash
-npm run market:sync                                                     # BITUNIX, Default-Profile
-npm run market:sync -- --venue=BITUNIX --timeframes=5m,15m,30m,1h
+npm run market:sync                                                     # BITUNIX, Default-Profil (nur 1h, siehe SYNC_TIMEFRAMES)
+npm run market:sync -- --venue=BITUNIX --timeframes=5m,15m,30m,1h        # nur bei Bedarf: kürzere Zeitrahmen ergänzen
 npm run market:sync -- --symbols=BTCUSDT,ETHUSDT --candle-limit=200
 npm run market:sync -- --dry-run --json                                  # volles Budget, keine Persistenz
 npm run market:sync:status                                               # Warmup lesen (nur lesen, kein Request)
@@ -793,6 +793,7 @@ npm run scan -- --sync-first                                             # Sync 
 | `--symbols=A,B` | Allowlist venue-nativer Symbole (normalisiert) | Allowlist-Verstoß ⇒ Exit 2 |
 | `--concurrency=N` | Parallelität, Default 4, hart ≤ 8 | > 8 ⇒ Exit 2 |
 | `--strict` | Abbruch beim ersten Fehler statt degradiertem Lauf | — |
+| `--full` (v1.38.0) | vollen Kerzen-Abruf erzwingen; Default ist **inkrementell**: Reihen, deren Kerze des laufenden Zeitraums bereits im Store liegt, werden ohne Kline-Request übersprungen (Zähler `freshCandlesByTimeframe`, Logzeile „aktuell, keine Anfrage“) | — |
 | `--dry-run` | echte Requests, Registry/Store in temporärem Verzeichnis | — |
 | `--json` | `SyncResult` auf stdout, Zählerzeilen entfallen | — |
 | `--no-manifest` | `data/market-data-errors.json` nicht schreiben | — |
@@ -829,14 +830,79 @@ Dedup idempotent sind.
 [market-sync] BITUNIX discovery: 4 instruments
 [market-sync] tickers enriched: 4
 [market-sync] orderbooks enriched: 4
-[market-sync] 5m candles: 4/4 (600/600 bars)
+[market-sync] 1h candles: 4/4 (600/600 bars)
 [market-sync] duration: 107 ms
+```
+
+Bei einem inkrementellen Wiederholungslauf innerhalb desselben Zeitraums
+erscheint je Timeframe zusätzlich eine Zeile der Form
+
+```
+[market-sync] 1h candles aktuell, keine Anfrage: 4/4
+```
+
+und bei Spread-Cache-Treffern
+
+```
+[market-sync] spread cache: 3/4 Buecher innerhalb der TTL wiederverwendet (kein Depth-Request)
 ```
 
 Ein unvollständiger Backfill steht **nie** als „fertig“ im Log: `A/B bars`
 beziffert die Lücke gegen `candleLimit × Instrumente`, und eine
 `spreadsUnknown`-Zeile sowie die `DEGRADED`-Zeile nennen Regel und Anzahl
 (`rule="max-spread"`), ohne Symbol-URLs.
+
+### 12.1 Inkrementeller Sync und Spread-Cache (v1.38.0)
+
+Der tägliche Lauf holt alles Fehlende (die Börse liefert die letzten
+`candleLimit` Bars, Lückenfüllung inklusive). Häufige Läufe müssen aber
+**nicht** jedes Instrument erneut abfragen:
+
+- **Kerzen (inkrementeller Sync, Default):** hält der Store bereits die
+  Kerze des laufenden Zeitraums (Periodenrand nach der Laufuhr), wird der
+  Kline-Request je Instrument/Timeframe übersprungen. Ein stündlicher Lauf
+  ist nach dem Erst-Warmup damit nahezu requestfrei; ab dem nächsten
+  Periodenrand wird automatisch wieder abgerufen. `--full` schaltet das ab.
+  Die Anfrage-Logik liest den jüngsten Zeitstempel je Reihe in **einem**
+  Store-Durchgang (`buildLastBarBySeries`, keine N×M-`query()`-Aufrufe, die
+  die NDJSON jedes Mal neu parsen würden).
+- **Orderbuch-Spreads:** erfolgreich gemessene Spreads werden in der
+  gitignorierten Datei `data/spread-cache.json` (Mode 0600, atomarer
+  tmp+rename-Schreibvorgang je Lauf) gehalten und innerhalb der TTL
+  (Default **6 h**, `MARKET_SPREAD_CACHE_TTL_MS`, `0` = aus) ohne
+  Depth-Request wiederverwendet. Fehlgeschlagene/unplausible Werte
+  (`null`, > 50 %) werden **nie** gecacht — ein einmaliger Ausfall wird im
+  nächsten Lauf zwingend erneut geholt. `--dry-run` schreibt den Cache
+  nicht. Der Live-Handel/Mikro-Executor verwenden diese Datei **nicht**
+  (dort zählen Live-Books/WebSocket-Ticks).
+
+### 12.2 Automatisierung mit systemd
+
+Zwei Unit-Paare liegen in `deploy/` und werden analog zu
+`ai-trading-firm.service` nach `/etc/systemd/system/` kopiert (Benutzer/
+Pfade `DEIN_USER` in den Dateien anpassen):
+
+| Unit-Paar | Rhythmus | Wirkung |
+| --- | --- | --- |
+| `market-sync.service` + `market-sync.timer` | stündlich zur Minute 02 | inkrementeller Lauf, nach dem Warmup fast requestfrei |
+| `market-sync-full.service` + `market-sync-full.timer` | täglich 06:12 | `--full`: füllt Lücken auf und frischt Bars VOR dem 07:00-Zyklus auf |
+
+```bash
+sudo cp deploy/market-sync.service deploy/market-sync.timer \
+        deploy/market-sync-full.service deploy/market-sync-full.timer \
+        /etc/systemd/system/
+# Benutzer-/Pfadplatzhalter DEIN_USER in allen vier Dateien ersetzen, dann:
+sudo systemctl daemon-reload
+sudo systemctl enable --now market-sync.timer market-sync-full.timer
+systemctl list-timers 'market-sync*'
+journalctl -u market-sync.service -f
+```
+
+Beide Services nutzen die `.env` (`EnvironmentFile=`) und brauchen **keine**
+API-Keys (PublicClient). Ein degradiertes Laufende (Exit 1, WARMING/
+Teilfehler) wird im Journal sichtbar, eskaliert aber nicht; Bedienfehler
+sind Exit 2. Vor dem ersten Timerlauf ist der vollständige Erst-Warmup
+einmal manuell auszuführen (`npm run market:sync`).
 
 ## 13. Bekannte Abweichungen vom Ticket (MDSYNC-001)
 

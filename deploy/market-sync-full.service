@@ -1,0 +1,49 @@
+#
+# Täglicher VOLLABGLEICH der Marktdaten (v1.38.0) — Gegenstück zum
+# stündlichen Inkrementallauf (market-sync.service/timer):
+#
+#   - --full erzwingt den Kerzen-Abruf unabhängig vom Bestand
+#     (Auffüllen von Lücken, frische letzte Bars),
+#   - der Spread-Cache wird hier regulär mit TTL 6 h genutzt (wer eine
+#     Zwangsauffrischung der Bücher will, startet mit
+#     MARKET_SPREAD_CACHE_TTL_MS=0 in der EnvironmentFile/Unit).
+#
+# Installation:
+#   sudo cp deploy/market-sync-full.service deploy/market-sync-full.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now market-sync-full.timer
+#
+[Unit]
+Description=Täglicher voller Market-Data-Sync der autonomen KI-Trading-Firma (BITUNIX)
+Documentation=file:///home/DEIN_USER/ai-trading-firm/docs/MARKET_DATA_PIPELINE.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# ---- ANPASSEN ----
+User=DEIN_USER
+Group=DEIN_USER
+WorkingDirectory=/home/DEIN_USER/ai-trading-firm
+# ------------------
+EnvironmentFile=/home/DEIN_USER/ai-trading-firm/.env
+ExecStart=/usr/bin/npm run market:sync -- --full
+SuccessExitStatus=0 1
+TimeoutStartSec=3600
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/DEIN_USER/ai-trading-firm
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=1G
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=market-sync-full
+
+[Install]
+WantedBy=multi-user.target

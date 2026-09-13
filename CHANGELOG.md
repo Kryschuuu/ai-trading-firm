@@ -1,12 +1,219 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-10** · Code-Version **1.36.41**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-13** · Code-Version **1.38.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.38.0] — 2026-09-13 · feat(market-sync): Inkrementelle Wiederholungsläufe, Spread-Cache, Readiness-Scope im Ops-Dashboard und systemd-Timer
+
+**Hintergrund:** Nach dem v1.37.0-Review ist die Signalkette fachlich
+repariert; der zweite Review-Block beseitigt den verbleibenden
+Verschleiß der täglichen Marktversorgung im lokalen Dauerbetrieb:
+jeder Wiederholungslauf fragte sämtliche Kerzen und Orderbücher erneut
+ab (Rate-Limit-Risiko, überflüssige Latenz), das Ops-Dashboard
+meldete wegen kuratierter Preset-Instrumente ungesyncter Venues
+dauerhaft „Warming“, und eine getimte Automatisierung fehlte ganz.
+
+### Hinzugefügt
+
+- **Inkrementeller Kerzen-Sync (Default)** (`src/marketdata/sync.ts`):
+  liegt für eine Instrument/Timeframe-Reihe bereits die Kerze des
+  laufenden Zeitraums im Store (Periodenrand nach der Laufuhr), wird
+  der Kline-Request übersprungen. Ein stündlicher Lauf ist nach dem
+  Erst-Warmup nahezu requestfrei; am nächsten Periodenrand holt der
+  Börsen-Abruf (letzte `candleLimit` Bars) automatisch auf,
+  Lückenfüllung inklusive. Neuer Schalter `--full`
+  (`SyncOptions.fullRefresh`) erzwingt den vollständigen Abruf. Die
+  Überspringlogik liest den jüngsten Zeitstempel je Reihe in **einem**
+  `history.readAll()`-Durchgang (`buildLastBarBySeries`), nicht in
+  N×M `query()`-Aufrufen. Pro Timeframe erscheint eine Logzeile
+  „aktuell, keine Anfrage: N/N“, der Ergebnisbericht führt die Zählung
+  in `freshCandlesByTimeframe`.
+- **Spread-Cache für Orderbücher** (`src/marketdata/spreadCache.ts`
+  neu, `SpreadCache`-Interface + `FileSpreadCache`): erfolgreich
+  gemessene relative Spreads werden in `data/spread-cache.json`
+  (gitignoriert, Mode 0600, Schema v1, atomar via tmp+rename,
+  sortierte Keys, ein `flush()` je Lauf) gespeichert und innerhalb der
+  TTL (Default 6 h, `MARKET_SPREAD_CACHE_TTL_MS`, `0` = aus) ohne
+  Depth-Request wiederverwendet. Fehlgeschlagene, nicht-endliche oder
+  unplausible Werte (> 50 %) werden **nie** gecacht — ein einmaliger
+  Ausfall wird im nächsten Lauf zwingend erneut geholt. Schreib-/
+  Lesefehler der Cache-Datei degradiieren den Lauf nicht
+  (fehlgeschlagenes Buch → regulärer Request); `--dry-run` nutzt den
+  Cache nicht. Der Live-Handel/Mikro-Executor verwendet die Datei
+  **nicht** (dort zählen Live-Books/WebSocket-Ticks).
+- **Readiness-Daten-Scope im Ops-Dashboard**
+  (`src/ops/marketDataReadiness.ts` neue reine Funktion
+  `dataScopeInstruments()`, `src/ops/collectMarketData.ts`,
+  `src/ops/types.ts`, `MarketDataPanel.tsx`,
+  `OperationsCenterPanel.tsx`): Venues, an denen der Store mindestens
+  eine Kerze hält, bilden den Daten-Scope (entspricht dem Scanner-Scope
+  `data` aus v1.37.0). Kuratierte Preset-Instrumente ungesyncter Venues
+  blockieren READY nicht mehr und erscheinen als eigene Zeile
+  „Außer Scope“ (nur wenn > 0); Kaltstartschutz: ohne jede Kerze gilt
+  wieder das Gesamt-Universum, damit ein leerer Store nicht READY
+  zeigt. Snapshot/Report führen `scoped`/`outOfScope`
+  (`scopedCount`/`outOfScopeCount`).
+- **systemd-Timer für den Sync** (`deploy/market-sync.service` +
+  `market-sync.timer`, `deploy/market-sync-full.service` +
+  `market-sync-full.timer`): stündlicher Inkrementallauf zur Minute
+  :02 (`Persistent`, `RandomizedDelaySec=120`) sowie täglicher
+  Vollabgleich um 06:12 vor dem 07:00-Firmenzyklus. Beide Services
+  nutzen die `.env` (`EnvironmentFile=`), brauchen keine API-Keys
+  (PublicClient), und `SuccessExitStatus=0 1` lässt das erwünschte,
+  im Journal sichtbare WARMING-Ergebnis (Exit 1) nicht als
+  Fehlschlag eskalieren; Bedienfehler bleiben Exit 2.
+- `.env.example` erklärt Inkrementallauf, Spread-Cache/TTL und die
+  Timer-Installation; Setup-Zusammenfassung
+  (`scripts/setup-cachyos.sh`) verweist auf die Timer.
+
+### Tests
+
+- Neu `test/marketdata/incremental.test.ts` (7 Fälle): Zweitlauf ohne
+  Kline-Requests, Periodenablauf holt erneut auf, `--full` erzwingt
+  Abruf, veralteter Zwischenstand wird überschrieben,
+  Discovery-Fehler-Pfad (alle Timeframes initialisiert),
+  Spread-Cache-Fälle.
+- Neu `test/marketdata/spreadCache.test.ts` (6 Fälle): Roundtrip/
+  atomares Schreiben, TTL-Ablauf, TTL 0 = aus (keine Datei, keine
+  Treffer), korrupte Datei → leerer Cache, Plausibilitätsfilter,
+  Env-Auflösung; inklusive Vertrag, dass ein einmal fehlgeschlagenes
+  Buch im Folgelauf zwingend erneut geholt wird.
+- Readiness-/UI-Suites um Scope-Fixtures und -Denominatoren
+  ergänzt; Teilverbund Markt/Ops/UI: 131/131 grün.
+
+### Dokumentation
+
+- `docs/MARKET_DATA_PIPELINE.md` §12: `--full`, inkrementeller
+  Sync, Spread-Cache und neue §12.1/§12.2 (Cache-Verhalten,
+  systemd-Installation); Logbeispiele auf den 1h-Default aktualisiert.
+- README-Schnellstart: Hinweis auf Inkrementallauf, Cache-TTL und
+  Timer.
+
+## [1.37.0] — 2026-09-13 · feat(scanner): Peer-Review der Signalkette — korrekte Volatilitäts-Annualisierung, Daten-Readiness-Scope, Benchmark-Auflösung, Sync-/Warmup-Reparatur
+
+**Hinterlassenschaft des Reviews:** Obwohl der Markt täglich gescannt wurde,
+blieben Trichter und Signale häufig leer. Ursachen lagen nicht in der
+Fachlogik, sondern in der Datenkette und einer einzigen falschen
+Skalierung: die annualisierte Volatilität wurde unabhängig vom tatsächlichen
+Kerzenintervall stets mit **365 Perioden/Jahr** skaliert — bei 1-Stunden-
+Kerzen Faktor √24 ≈ 4,9 zu klein. Die meisten Krypto-Instrumente landeten
+damit faktisch im LOW-Regime und außerhalb der Idealbänder der
+Volatilitäts- und ATR-Faktoren. Daneben blockierten kuratierte
+Preset-Instrumente auf Venues ohne laufenden Sync dauerhaft den
+READY-Zustand, der Korrelations-Benchmark zeigte auf eine nicht angebundene
+Venue, das Setup schaltete die einzige vorhandene Sync-Venue nicht frei,
+und der tägliche Sync holte 75 % ungenutzte Kerzenzeitrahmen.
+
+### Behoben
+
+- **Volatilitäts-Annualisierung aus dem echten Kerzenintervall**
+  (`src/scanner/math.ts` neu: `inferPeriodsPerYear()`/`median()`,
+  `src/scanner/factors/volatility.ts`): Perioden/Jahr werden aus dem
+  Medianabstand der Zeitstempel des gewerteten Fensters abgeleitet
+  (robust gegen Lücken, geclampt 1 Minute … 1 Woche). Der Config-Wert
+  `factors.volatility.periodsPerYear` bleibt der explizite Fallback
+  (Default jetzt 8760 = 1h), abschaltbar über
+  `inferPeriodsPerYear: false`. **Golden-Value unverändert:** Tageskerzen
+  mit σ 0,09531018 ergeben weiterhin 1,8208984284 (Intervall → 365).
+- **Readiness-Scope „data“** (`src/scanner/warmup.ts`, `pipeline.ts`,
+  `service.ts`, `scripts/run-scan.ts`): Venues, an denen der Store nie eine
+  Kerze gesehen hat (ALPACA/IBKR/BINANCE-Presets bei aktiver BITUNIX-Venue),
+  blockieren READY nicht mehr. Sie nehmen weiter am Scan teil, werden im
+  Readiness-Report als `outOfScope` gezählt. Kaltstart-Schutz: liegt noch gar
+  keine Venue mit Daten vor, gilt wieder das Gesamt-Universum (sonst wäre
+  der leere Store READY).
+- **Benchmark venue-agnostisch aufgelöst** (`resolveBenchmarkId()` in
+  `src/scanner/service.ts`): Default-Benchmark jetzt `BITUNIX:BTCUSDT`;
+  fehlt die ID, wird gleiches Symbol bzw. gleiche Basis-/Quote-Währung auf
+  einer vorhandenen Venue genutzt — der Korrelationsfaktor (5 % des Scores)
+  und die Korrelationscluster des Weekly-Reviews funktionieren damit erst
+  wieder. Keine Daten ⇒ dokumentierter Neutral-Wert wie bisher.
+- **EINE Scanner-Verdrahtung:** Tageszyklus (`DefaultScannerPort`) und
+  Weekly-Review-Schritt nutzten eigene, von der API abweichende
+  Scan-Verkabelungen (ohne Data-Error-Manifest, ohne Scope, ohne
+  Benchmark-Auflösung). Beide delegieren jetzt an den zentralen
+  `ScannerService`; der seit v1.30.x als `@deprecated` markierte
+  Instrumenten-Sync-Pfad im Market-Data-Service wurde entfernt.
+- **Stale-Scan in langlaufenden Prozessen:** `ScannerService.getScan()`
+  lieferte das einmal berechnete (leere) Ergebnis den ganzen
+  Prozesslauf lang aus. Neue TTL-Logik (Default 5 Minuten, Option
+  `cacheTtlMs`, `0` = immer neu), Uhr injizierbar (kein statischer
+  Wanduhr-Zugriff im Scanner — Architekturtests weiter grün).
+- **Keine LLM-Anfragen ohne Datenfundament** (`selectionStep`): bei
+  Readiness WARMING/ERROR und leerem Trichter kehrt der Market-Selection-
+  Schritt deterministisch mit leerem, ehrlichem Fallback zurück, statt
+  ein Modell „0 Kandidaten“ raten zu lassen (Halluzinationspfad,
+  Tokens). Bei READY bleibt der bestehende Vertrag (Agent inkl. 40er-Kappe)
+  erhalten.
+- **Readiness überall sichtbar:** im täglichen Artefakt
+  (`DailyUniverseArtifact.readiness`, optional/abwärtskompatibel), in
+  `GET /api/universe/daily` (Feld `readiness`) sowie in den Logs des
+  Scanner-Schritts und des `run-scan`-CLI. Echte Läufe (ohne `--dry`)
+  beenden sich mit Exit 1, wenn die Readiness nicht READY ist — stille
+  „erfolgreiche“ Leerläufe im Cron/Systemd waren der Kernbefund;
+  `--dry` bleibt reine Vorschau mit Exit 0.
+- **Setup schaltet die Sync-Venue frei** (`scripts/setup-cachyos.sh`):
+  `.env`-Heredoc und idempotente Ergänzung schreiben jetzt
+  `MARKET_SYNC_VENUES=BITUNIX` und `BITUNIX_ENABLED=true`
+  (bisher nur `MARKET_SYNC_ENABLED=true`, Warmup lief mit
+  VENUE_DISABLED scheinbar erfolgreich ins Leere). Der Warmup-Abschnitt
+  exportiert die `.env` explizit für die CLI-Aufrufe (der Node-Pfad hat
+  keinen dotenv-Loader). `.env.example` erklärt den Zusammenhang.
+
+### Geändert (Performance / lokale Nutzung)
+
+- **Sync nur noch den Scanner-Timeframe:** `SYNC_TIMEFRAMES` Default
+  `["5m","15m","30m","1h"]` → `["1h"]`. Scanner und Analytics werten
+  ausschließlich 1h aus (Timeframe-Präferenz des Providers), der
+  Mikro-Executor bezieht Feintakt-Kerzen live über WebSocket. Spart bei
+  250 Instrumenten 750 Kline-Requests je Lauf; kürzere Zeitrahmen sind
+  weiter per `--timeframes=…` (oder `npm run scan -- --sync
+  --timeframes=…`) explizit verfügbar.
+- **Ticker-Lücken-Fallback gepoolt** (`src/marketdata/enrichment.ts`):
+  Einzel-Ticker bei Bulk-Lücken bzw. Venues ohne Bulk liefen seriell
+  (N+1, >30 s Latenz bei 250 Instrumenten) und laufen jetzt über den
+  bestehenden Concurrency-Pool (4, Token-Bucket autoritativ). Die
+  Failure-Reihenfolge bleibt eingangsdeterministisch (Ergebnisse statt
+  Seiteneffekte im Worker).
+- **Timeframe-Auswahl im Scanner-Provider O(n)** statt wiederholtem
+  Gruppen-Filter je Instrument.
+
+### Config-Migration (Config-Version 1 → 2)
+
+- `src/scanner/scanner.config.json` ist der exakte Spiegel von
+  `DEFAULT_SCANNER_CONFIG` (Test erzwingt tiefengleiche Gleichheit).
+  Neues Pflegeskript `npm run scanner:regenerate-config`
+  (`scripts/regen-scanner-config.ts`) erzeugt die JSON datei; eine
+  manuelle Pflege beider Orte entfällt.
+- Neue/geänderte Felder:
+  `factors.volatility.inferPeriodsPerYear: true`,
+  `factors.volatility.periodsPerYear: 8760` (Fallback),
+  `factors.correlation.benchmarkInstrumentId: "BITUNIX:BTCUSDT"`.
+  Bestehende Override-Dateien ohne die neuen Felder werden per
+  Deep-Merge weiter akzeptiert; ungültige `periodsPerYear` werden
+  hart abgelehnt (1…525.600).
+
+### Tests
+
+- Scanner/Faktoren/Pipeline/Warmup/Ranker/API: 76/76 grün, Golden-Value
+  der Volatilität unverändert; umfangreiche Suite gesamt: 2.015 grün
+  (7 übersprungen, 0 fehlerhaft).
+- Sync-Tests leiten Timeframe-Erwartungen aus `SYNC_TIMEFRAMES` ab
+  statt 4 Zeitrahmen hart zu kodieren (`test/marketdata/sync.test.ts`,
+  `src/marketdata/__tests__/sync.test.ts`).
+- Der Sicherheits-Test zur Passwort-Interpolation des Setup-Skripts
+  (`tests/dbConfig.test.ts`) prüfte das seit v1.30.1 abgelöste
+  psql-Variablen-Verfahren; er wird jetzt gegen den tatsächlich
+  stärkeren Stand geführt: Dollar-Quoting via
+  `pg_sql_quote_password`, Übergabe per STDIN, kein
+  `-v db_pass=` im ausführbaren Code.
+- Neu: TTL-Verhalten/Readiness-Scope/Benchmark-Resolver werden über die
+  bestehenden Service-/API-/Warmup-Suites abgesichert.
 
 ## [1.36.41] — 2026-09-10 · fix(dashboard): Session-Ablauf zeigt „Sitzung abgelaufen" statt „Firm-Status nicht verfügbar (Datenbank)"
 

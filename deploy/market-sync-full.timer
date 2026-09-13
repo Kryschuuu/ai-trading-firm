@@ -1,0 +1,20 @@
+#
+# Täglicher Vollabgleich um 06:12 Uhr Lokalzeit — VOR dem täglichen
+# Forschungs-/Handelszyklus der Firma (07:00 UTC; die Maschine läuft in
+# Europe/Berlin, 06:12 lokal liegt vor Öffnung der Makro-Schritte und
+# versetzt zur vollen Stunde). Zusammen mit dem stündlichen
+# Inkrementallauf (market-sync.timer) ist der Bestand zur Zykluszeit
+# nachweislich frisch.
+#
+[Unit]
+Description=Täglicher voller Market-Data-Sync (KI-Trading-Firma)
+Documentation=file:///home/DEIN_USER/ai-trading-firm/docs/MARKET_DATA_PIPELINE.md
+
+[Timer]
+OnCalendar=*-*-* 06:12:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=market-sync-full.service
+
+[Install]
+WantedBy=timers.target

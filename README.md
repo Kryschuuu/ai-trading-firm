@@ -38,6 +38,10 @@ npm run market:sync -- --dry-run   # Marktdaten-Warmup prüfen (MDSYNC-001)
 BITUNIX_ENABLED=true npm run market:sync   # Registry + Historie persistent füllen
 npm run scan -- --sync-first       # deterministischer Scan auf dem Warmup
 npm run market:sync:status         # Warmup-Readiness prüfen (nur lesen; Exit 1 = fehlt)
+# Wiederholungsläufe sind inkrementell (nur neue Periodenkerzen) und
+# wiederverwenden frische Orderbuch-Spreads (data/spread-cache.json, TTL 6 h,
+# MARKET_SPREAD_CACHE_TTL_MS=0 schaltet ab); --full erzwingt den Komplettabruf.
+# Automatisierung: stündlich/täglich via deploy/market-sync*.timer (systemd)
 rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm run build
 npm run start               # http://0.0.0.0:3369
