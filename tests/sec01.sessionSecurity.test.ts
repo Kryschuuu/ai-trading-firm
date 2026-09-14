@@ -15,9 +15,13 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
   sessionActor,
+  sessionMaxLifeMs,
   sessionSecret,
   verifySessionToken,
 } from "../src/lib/authSession";
+
+/** Eine konfigurationsunabhaengig gueltige Ueberschreitung der Lebensdauer. */
+const SESSION_MAX_LIFE_MS_PROBE = sessionMaxLifeMs() + SESSION_TTL_MS;
 import { POST as postLogin } from "../src/app/api/auth/login/route";
 
 type Env = Record<string, string | undefined>;
@@ -276,8 +280,10 @@ test("SEC-01: alle Rollen behalten exakt die serverseitige Permission-Matrix", (
     }
     assert.equal(checkApiToken(withSession(session.sessionToken)) === null, header.actor.permissions.includes("firm.write"));
     const payload = decode(session.sessionToken);
-    assert.equal(payload.v, 2);
-    assert.deepEqual(Object.keys(payload).sort(), ["authEpoch", "credential", "csrf", "exp", "iat", "v"]);
+    // v3 (v1.39.0): maxExp ist Pflicht — die absolute Grenze, die keine
+    // Verlaengerung verschiebt. Sonst gilt weiter: nur Identitaet, keine Rechte.
+    assert.equal(payload.v, 3);
+    assert.deepEqual(Object.keys(payload).sort(), ["authEpoch", "credential", "csrf", "exp", "iat", "maxExp", "v"]);
     for (const secret of [ADMIN, OPERATOR, VIEWER, SECRET]) {
       assert.ok(!JSON.stringify(payload).includes(secret), "kein Credential-Material im Payload");
     }
@@ -338,13 +344,22 @@ test("SEC-01: Schema, TTL-Obergrenze, Zeitwerte und Credential-Epoche sind strik
   const original = decode(issue(VIEWER, VIEWER_ENV).sessionToken);
   const now = original.iat as number;
   const mutations = [
-    { v: 1 }, { v: 3 }, { v: "2" },
+    { v: 1 }, { v: 2 }, { v: 4 }, { v: "3" },
     { credential: null }, { credential: [] },
     { authEpoch: "" }, { authEpoch: "!".repeat(43) },
     { csrf: "" }, { csrf: "ab" }, { csrf: 7 },
     { exp: now }, { exp: now - 1 }, { exp: String(original.exp) },
-    { exp: now + SESSION_TTL_MS + 1 }, { exp: Number.MAX_SAFE_INTEGER + 1 },
+    // Die Idle-Frist darf nie ueber die absolute Grenze hinausgeschoben werden,
+    // und keine Session behauptet eine Lebensdauer jenseits der harten Decke.
+    { exp: (original.maxExp as number) + 1 },
+    { exp: now + SESSION_MAX_LIFE_MS_PROBE },
+    { exp: Number.MAX_SAFE_INTEGER + 1 },
     { exp: (original.exp as number) + 0.5 },
+    // maxExp ist unverschieblich: sie darf nicht hinter die Anmeldung oder
+    // sogar hinter die Idle-Frist zurueckfallen und keinen Uberlauf bauen.
+    { maxExp: (original.iat as number) - 1 },
+    { maxExp: Number.MAX_SAFE_INTEGER + 1 },
+    { maxExp: (original.exp as number) - 1 },
     { iat: now + 1 }, { iat: -1 }, { iat: String(now) }, { iat: now - 0.5 },
     { extra: true },
   ];
@@ -355,6 +370,16 @@ test("SEC-01: Schema, TTL-Obergrenze, Zeitwerte und Credential-Epoche sind strik
     const missing = { ...original };
     delete missing[key];
     assert.equal(verifySessionToken(signed(missing), SECRET, now), null, `fehlt: ${key}`);
+  }
+  // Die ABSOLUTE Lebensdauer ist an die Serverkonfiguration gebunden, nicht an
+  // die Struktur: ein laenger behauptetes `maxExp` ist formal signierbar, darf
+  // aber weder autorisieren (`readSession`) noch verlaengern (`sessionActor`).
+  for (const longer of [
+    { maxExp: (original.maxExp as number) + SESSION_MAX_LIFE_MS_PROBE },
+    { maxExp: now + SESSION_MAX_LIFE_MS_PROBE },
+  ]) {
+    const token = signed({ ...original, ...longer });
+    assert.equal(readSession(withSession(token), VIEWER_ENV, now), null, JSON.stringify(longer));
   }
   const token = signed(original);
   assert.ok(verifySessionToken(token, SECRET, now));

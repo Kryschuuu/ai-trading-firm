@@ -264,10 +264,21 @@ test("SEC-08: Pruning raeumt abgelaufene Revocation-Eintraege automatisch auf", 
   // Unmittelbar nach Revocation: als widerrufen erkannt
   assert.equal(readSession(req), null);
 
-  // Nach natuerlichem TTL-Ablauf: Pruning bereinigt den Eintrag
-  const nowAfterExp = Date.now() + SESSION_TTL_MS + 5000;
-  const pruned = pruneRevokedSessions(nowAfterExp);
+  // v1.39.0: der Eintrag gilt bis zur ABSOLEN Grenze der Sitzung (maxExp),
+  // nicht bis zur Idle-Frist der zuletzt gesehenen Generation — sonst
+  // Raeumt ein Pruning den Widerruf, waehrend eine juengere Generation
+  // desselben Cookies noch lief. Erst nach `maxExp` darf er weg.
+  const nowAfterMaxExp = session.lifetime.maxExpiresAt + 1000;
+  const pruned = pruneRevokedSessions(nowAfterMaxExp);
   assert.ok(pruned >= 1, "Abgelaufener Revocation-Eintrag muss gepruned werden");
+  // Vorher (lengst innerhalb der Idle-Frist-Kaskade) bleibt er stehen:
+  const session2 = createSession(OPERATOR);
+  revokeSession(session2.sessionToken);
+  assert.equal(
+    pruneRevokedSessions(Date.now() + SESSION_TTL_MS + 5000),
+    0,
+    "innerhalb der absoluten Grenze darf ein Widerruf nicht weggepruned werden"
+  );
 });
 
 test("SEC-08: clearSessionCookies liefert Standard-konforme Loesch-Header", () => {

@@ -1,12 +1,165 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-13** · Code-Version **1.38.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-14** · Code-Version **1.39.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.39.0] — 2026-09-14 · feat(auth): Browser-Sitzung bis zum Schließen des Fensters — automatische Verlängerung, Nachfrist, Login/Logout/Status im Dashboard (S1)
+
+**Hintergrund:** Die Browser-Sitzung war seit W1 (v1.36.23) eine
+15-Minuten-Cookie mit hartem `Max-Age`. Wer das Dashboard bediente, wurde
+mitten in der Arbeit abgemeldet und musste den Token aus `.env` neu
+eintippen — und weil das Dashboard weder zeigte, ob `FIRM_API_TOKEN`
+überhaupt eingetragen ist, noch ob die eigene Sitzung läuft, war der
+Fehlerzustand nicht von einer Datenbankstörung zu unterscheiden (der
+Bug-2-Block in `docs/HOWTO_LAN_SESSION.md`). Seit diesem Release trägt
+der Browser die Sitzung, **bis er das Fenster schließt**; der Server
+verlängert sie auf Zuruf des Clients und bleibt dabei in allen
+anderen Grenzen fail-closed.
+
+### Hinzugefügt
+
+- **`POST /api/auth/refresh`** (`src/app/api/auth/refresh/route.ts`,
+  `renewSession()` in `src/lib/authSession.ts`): verschiebt ausschließlich
+  die Idle-Frist einer bestehenden Sitzung. Vier Bedingungen, sonst keine
+  neuen Cookies: signierte Session (auch innerhalb der Nachfrist),
+  Double-Submit-Header `x-csrf-token` == session-gebundener Wert, keine
+  Revocation, keine veränderte Auth-Konfiguration (`authEpoch`). Die
+  Legacy-CSRF-Regel „Header == Token“ gilt hier bewusst **nicht** —
+  Verlängern ist eine Session-Operation, kein API-Zugriff. Außerhalb des
+  Verlängerungsfensters (Rest > 5 min) antwortet die Route mit
+  `renewed:false` und setzt nichts: kein Signieraufwand pro Anfrage.
+- **`GET /api/auth/status`** (`src/app/api/auth/status/route.ts`,
+  `sessionStatus()`): authentifizierungsfreier, secret-freier Status —
+  `firmApi.configured`/`admin`/`operator`/`viewer` (nur Booleans, nie
+  Werte), `authMode` und der eigene Sitzungszustand als
+  `active | expiring | renewable | missing | expired | max-life |
+  revoked | invalid | open` samt Restzeiten. Damit ist erstmals sichtbar,
+  **ob die Firm-API eingetragen ist** und warum Aktionen scheitern.
+- **Nachfrist `FIRM_SESSION_GRACE_S`** (Default 900 s): eine während
+  Notebook-Schlaf, Tab-Drosselung oder Lockscreen abgelaufene Idle-Frist
+  heilt der Client selbst — ohne erneute Token-Eingabe. `0` schaltet die
+  Nachfrist ab (dann gilt die Idle-Frist hart). Sie gilt **ausschließlich**
+  für `renewSession`; `readSession` und damit jede Guard-Route ignorieren sie.
+- **Dashboard-Bedienung** (`SessionNoticeBar.tsx`, `FirmDashboard.tsx`):
+  der Balken ist jetzt immer sichtbar und zeigt Statuspunkt, Rolle,
+  herunterzählende Restzeit und die absolute Grenze, dazu **Anmelden**,
+  **Abmelden** und **Verlängern**. Der Takt im Dashboard erneuert
+  rechtzeitig (`renewInS` des Servers), bei Tab-Fokus/`visibilitychange`
+  sofort; ein 20-s-Ticker zieht die Anzeige nach. Kein Dauerintervall.
+- **Diagnose „Login 200, aber keine Cookie“** (`diagnosePostLogin()` in
+  `src/lib/firmSession.ts`): häufigste stille Ursache im LAN-Betrieb ist
+  plain-HTTP mit `Secure`-Cookie. Das Dashboard nennt jetzt genau das,
+  statt danach „Sitzung abgelaufen“ zu zeigen.
+
+### Geändert
+
+- **Cookie-Laufzeit:** `firm_session` und `firm_csrf` werden **ohne**
+  `Max-Age`/`Expires` gesetzt (Browser-Session-Cookie); `HttpOnly` nur auf
+  `firm_session`, `Secure`/`SameSite=Strict`/`Path=/` bleiben auf beiden.
+- **Session-Payload v3:** neu `maxExp` (absolute Grenze). `iat` ist jetzt
+  unverrückbar der **Anmeldungs**zeitpunkt und wird durch Verlängerungen
+  nicht verschoben — der globale Revocation-Schnitt (SEC-08) kann also
+  nicht durch Verlängern gewaschen werden. `csrf` bleibt über alle
+  Generationen identisch, damit ein Logout beide trifft. Schema v2 ist
+  damit ungueltig: nach dem Upgrade ist einmalig Neu-Anmeldung nötig
+  (bewusst, wie schon v1→v2).
+- **Fristen sind konfigurierbar** (`FIRM_SESSION_IDLE_TTL_S` Default 900 s,
+  `FIRM_SESSION_MAX_LIFE_S` Default 86 400 s, `FIRM_SESSION_GRACE_S`
+  Default 900 s) — mit Klemmbereichen und Default-Fallback bei
+  unbrauchbaren Werten. `0` bedeutet bei Idle und Max-Life „nicht
+  konfiguriert“, **nie** „unbegrenzt“.
+- **`revokeSession()`** registriert bis `maxExp` statt bis `exp`;
+  `revokeAllSessions()` räumt nur Einträge, deren `maxExp` vor dem Schnitt
+  liegt. `SESSION_TTL_S` bleibt als Name der Default-Idle-Frist erhalten.
+
+### Sicherheit
+
+Unverändert fail-closed: kein Credential im Browser (kein localStorage,
+kein Token-Cookie), Session-Bindung an `authEpoch`, Rollen-/
+Permission-Ableitung pro Request, HMAC-Signatur mit unabhängiger
+`FIRM_SESSION_SECRET`, `Secure`+`SameSite=Strict`, HTTPS-Zwang in
+Produktion, Rate-Limits (Login 20/min, Refresh/Logout 30/min),
+Double-Submit-CSRF, Revocation-Registry, harte 7-Tage-Decke über allen
+Laufzeit-Konfigurationen.
+
+### Sicherheitseinbußen — bewusst abgewogen
+
+1. **Längere Missbrauchsfrist bei gestohlenem Cookie.** Ein Dieb, der das
+   HttpOnly-Cookie kennt, kann die Sitzung aktiv halten (Verlängerung) und
+   muss den Token nicht besitzen. Gegenmaßnahmen: absolute Grenze (Default
+   24 h, Konfigationshebel), `POST /api/auth/logout` mit `{"all": true}`,
+   Rotation von `FIRM_SESSION_SECRET` oder des Tokens (invalidiert über
+   `authEpoch` alle Sitzungen), `SameSite=Strict` plus `Secure` gegen
+   Cross-Site-Delivery, keine Verlängerung ohne Double-Submit-Header.
+2. **Verlängerung braucht einen Beweis.** Deshalb verlangt `refresh` den
+   CSRF-Header aus dem nicht-HttpOnly-Cookie: ein reiner Cookie-Diebstahl
+   (z. B. SSRF, Log-Leak) kann die Sitzung nicht mehr verlängern.
+3. **Nachfrist ≠ Autorisierung.** Sie gilt nur für `refresh`. Ein
+   liegengebliebenes Cookie öffnet keine Route — nachgewiesen in
+   `tests/sessionRenewal.test.ts` (readSession ⇒ null, Schreib-Guard ⇒ 401).
+4. **Browser-Sitzungs-Wiederherstellung.**Moderne Browser stellen Cookies nach
+   „Wiederherstellen“ teils wieder her; verlässlich beendet wird die Sitzung
+   durch Fenster-Zu **oder** Ablauf der Idle-Frist — der Payload, nicht das
+   Cookie, entscheidet über Rechte.
+5. **Single-Node-Revocation.** Die Registry lebt im RAM: Nach einem
+   Neustart sind Einzel-Widerrufe und der globale Cut weg, `authEpoch`
+   (Token-/Secret-Rotation) bleibt die harte Kante. Unverändert zu SEC-08.
+
+### Tests
+
+- Neu `tests/sessionRenewal.test.ts` (28 Fälle): Cookie-Flags ohne
+  `Max-Age`, Payload v3 mit `iat`/`exp`/`maxExp`, Frist-Klemmung und
+  Müllwerte, Verlängerung nur im Fenster/Nachfrist, Nachfrist heilt und
+  autorisiert nirgends sonst, `maxExp` unverrückbar (auch nach Konfig-
+  Erhöhung), CSRF-Zwang inkl. abgelehntem Legacy-Weg, Widerruf/Rotation/
+  Moduswechsel blockieren Verlängerung, Logout entwertet beide
+  Generationen, beide neuen Routen inkl. Secret-Freiheit,
+  `inspectSessionToken`-Zustände.
+- `test/ui/SessionStatusBar.test.tsx` (neu, 6 Fälle): echtes
+  `FirmDashboard` rendert den Balken; aktive Sitzung mit Rolle/Restzeit;
+  „KEIN Token gesetzt“; Anmeldeknopf blendet das Feld erst ein.
+- Angepasst: `tests/w1.sessionCookie.test.ts` (Cookie-Attribute: kein
+  `Max-Age`, Ablauframie), `tests/sec01.sessionSecurity.test.ts`
+  (Schema v3, `maxExp`-Manipulationen, Konfigurationsbindung der
+  Lebensdauer), `tests/sec08.sessionRevocation.test.ts` (Pruning bis
+  `maxExp`), `tests/firmSession.test.ts` (+9 Fälle für Statusparser,
+  Taktentscheidung, Meldungen), `test/ui/FirmSessionBox.test.tsx`.
+- `npm run lint`, `npm run typecheck`, `npm run docs:validate`,
+  `npm test` (gesamt: 2108 Tests, 0 Fehler, 7 bekannte Skips) und
+  `npm run security:live-gate` grün (auth-Teil 210/210, liveGate 78/78).
+- `npm run build` produktiv fehlerfrei ohne Warnungen, `/api/auth/refresh` und
+  `/api/auth/status` im Routen-Manifest; `npm run scan:secrets` findet in 17
+  Bundle-Dateien kein Secret-Muster (die Status-Route liefert nur Booleans).
+- End-to-End gegen einen laufenden Dev-Server (`FIRM_SESSION_IDLE_TTL_S=60`,
+  `FIRM_SESSION_GRACE_S=120`) geprüft: Login ohne `Max-Age`/`Expires`,
+  `firm_session` HttpOnly / `firm_csrf` lesbar, `renewed:false` außerhalb des
+  Fensters (keine Cookies), Verlängerung innerhalb der Frist mit unverrücktem
+  `maxExp`, 403 `CSRF_INVALID` ohne Header, 403 auch beim Legacy-Weg
+  („Header == API-Token“), `401` auf Schreib-Guards im Nachfrist-Zustand,
+  danach `state:"expired"` mit `401 SESSION_INVALID`, `logout` ⇒ beide
+  Löschcookies und `state:"revoked"`.
+
+### Dokumentation
+
+`CONFIGURATION.md` (neuer Abschnitt „Sitzungsdauer & Verlängerung“ +
+Flag-Tabelle), `.env.example`, `docs/HANDBUCH.md` §2.4,
+`docs/HOWTO_LAN_SESSION.md` (neues Kapitel inkl. Sicherheitseinbußen),
+`docs/security/README.md` (Session-Abschnitt auf Policy v3),
+`docs/INSTALL.md` (Troubleshooting-Zeile), `README.md`, `docs/README.md`.
+
+### Upgrade
+
+Kein Schema, keine Migration. Nach dem Deploy einmalig neu anmelden:
+Session-Cookies des Schemas v2 werden nicht mehr akzeptiert. Defaults
+erhalten das bisherige Sicherkeitsniveau (Idle 15 min) und ändern nur das
+Cookie-Verhalten; `FIRM_SESSION_MAX_LIFE_S` nur anheben, wenn ein
+Dauerbetrieb im gleichen Tag wirklich gebraucht wird.
+
 
 ## [1.38.0] — 2026-09-13 · feat(market-sync): Inkrementelle Wiederholungsläufe, Spread-Cache, Readiness-Scope im Ops-Dashboard und systemd-Timer
 

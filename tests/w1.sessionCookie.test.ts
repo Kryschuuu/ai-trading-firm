@@ -4,7 +4,10 @@
  * Abdeckung:
  *   1. Session-Modul: unabhaengiger Schluessel, Signaturen, Ablauf, Deadline-Rollover.
  *   2. Cookie-Attribute: HttpOnly (nur firm_session), Secure, SameSite=Strict,
- *      Path=/, Max-Age=900. Kein roher Token im Cookie.
+ *      Path=/ — und seit v1.39.0 bewusst OHNE Max-Age/Expires
+ *      (Browser-Session-Cookie: lebt, bis das Fenster geschlossen wird).
+ *      Kein roher Token im Cookie. Autorisiert wird trotzdem nur bis `exp`,
+ *      spaetestens bis `maxExp` — das Cookie-Alter ist kein Rechtebeweis.
  *   3. resolveAuth liest die Session-Cookie (kein Header nötig).
  *   4. checkApiToken akzeptiert Operator-/Admin-Session für Writes.
  *   5. checkCsrfGuard: Double-Submit gegen session-gebundenen CSRF-Wert;
@@ -108,7 +111,7 @@ test("sessionSecret: keine Ableitung aus Tokens; separater Key bleibt bei Token-
 
 // ── 2./3./4. Cookie-Attribute & Secret-Freiheit ────────────────────────────
 
-test("issueSession: HttpOnly nur auf firm_session, Flags Secure/SameSite=Strict/Max-Age=900/Path=/ auf beiden", () => {
+test("issueSession: HttpOnly nur auf firm_session, Flags Secure/SameSite=Strict/Path=/ auf beiden", () => {
   const { issued } = makeSession(OP, ENV_OP);
   assert.equal(issued.cookies.length, 2);
   assert.equal(issued.open, false);
@@ -119,7 +122,10 @@ test("issueSession: HttpOnly nur auf firm_session, Flags Secure/SameSite=Strict/
     assert.ok(c.includes("; Secure"), "Secure");
     assert.ok(c.includes("; SameSite=Strict"), "SameSite=Strict");
     assert.ok(c.includes("; Path=/"), "Path=/");
-    assert.ok(c.includes(`; Max-Age=${SESSION_TTL_S}`), `Max-Age=${SESSION_TTL_S}`);
+    // v1.39.0: kein Max-Age/Expires — beide Cookies enden mit der Browsersession.
+    // Der Verfall der Autorisierung steht ausschliesslich im signierten Payload.
+    assert.ok(!/Max-Age/i.test(c), "kein Max-Age (Browser-Session-Cookie)");
+    assert.ok(!/Expires/i.test(c), "kein Expires");
   }
   assert.ok(sessionCookie.includes("; HttpOnly"), "firm_session ist HttpOnly");
   assert.ok(!csrfCookie.includes("; HttpOnly"), "firm_csrf bleibt für JS lesbar (Double-Submit)");
@@ -165,7 +171,7 @@ test("readSession: Roundtrip liefert Rolle, Effektiv-Rolle, Source und Permissio
   assert.equal(payload!.csrf.length, 64, "CSRF ist 32 Byte hex");
 });
 
-test("readSession: abgelaufen → null (Ablauf innerhalb Max-Age=900)", () => {
+test("readSession: abgelaufen → null (Idle-Frist 900 s, unabhaengig vom Cookie)", () => {
   const { issued, secret } = makeSession(OP, ENV_OP);
   const token = SessionTokenValue(issued.cookies[0]);
   assert.ok(verifySessionToken(token, secret), "sofort gültig");

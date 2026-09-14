@@ -3,11 +3,17 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
-import { clearLegacyFirmToken, csrfHeaderValue } from "@/lib/browserSession";
+import { clearLegacyFirmToken, csrfHeaderValue, logoutSession } from "@/lib/browserSession";
 import {
+  diagnosePostLogin,
   fetchFirmSnapshot,
+  fetchSessionStatus,
+  renewSession,
+  sessionNeedsLogin,
+  sessionRenewDelayMs,
   submitSessionToken,
   type FirmIssue,
+  type SessionSnapshot,
 } from "@/lib/firmSession";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
@@ -138,6 +144,16 @@ export default function FirmDashboard() {
   const [firmIssue, setFirmIssue] = useState<FirmIssue | null>(null);
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
+  /**
+   * Anmelde-/Sitzungsstatus von `GET /api/auth/status` (v1.39.0) — beantwortet
+   * sichtbar, ob die Firm-API eingetragen ist und ob die eigene Sitzung laeuft.
+   * `sessionNow` ist nur der Anker fuer das Runterzaehlen der Restzeit.
+   */
+  const [session, setSession] = useState<SessionSnapshot | null>(null);
+  const [sessionNow, setSessionNow] = useState(() => Date.now());
+  const [sessionBusy, setSessionBusy] = useState(false);
+  /** `true`, sobald der Statusabruf selbst fehlschlug (Netzwerk/Deploy-Fehler). */
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   /** Pipeline-Statusleiste: läuft / fertig / fehlgeschlagen (optisch hervorgehoben). */
   const [pipeline, setPipeline] = useState<{
     phase: "running" | "done" | "failed";
@@ -166,6 +182,63 @@ export default function FirmDashboard() {
     setLoading(false);
   }, []);
 
+  /**
+   * Holt den Anmeldestatus (`GET /api/auth/status`, v1.39.0) und beantwortet
+   * damit zwei Fragen, die das Dashboard vorher nie gezeigt hat: Ist die
+   * Firm-API serverseitig ueberhaupt eingetragen, und laeuft meine Session?
+   * Wirft nie — `fetchSessionStatus` fangt Netzwerk- und Formatfehler.
+   */
+  const refreshSessionStatus = useCallback(async () => {
+    const result = await fetchSessionStatus();
+    setSession(result.ok ? result.snapshot : null);
+    setSessionUnavailable(!result.ok);
+    setSessionNow(Date.now());
+    if (result.ok) setNeedToken(sessionNeedsLogin(result.snapshot));
+    return result;
+  }, []);
+
+  /**
+   * v1.39.0: die Sitzung haelt, bis das Browserfenster geschlossen wird.
+   *
+   * Der Server setzt die Idle-Frist (Default 15 min) und nennt die Restzeit;
+   * dieser Takt erneuert sie rechtzeitig ueber `POST /api/auth/refresh`.
+   * Scheitert die Verlaengung (Nachfrist abgelaufen, Logout, Secret-/Token-
+   * Rotation), wird der Status neu geholt — das Token-Feld erscheint, ohne
+   * dass erst eine Aktion mit 401 zurueckkommen muss.
+   */
+  const renew = useCallback(async () => {
+    const csrf = csrfHeaderValue();
+    setSessionBusy(true);
+    // Kein CSRF-Wert im Cookie == keine (verlaengerbare) Session: Status
+    // nachziehen, damit der Balken den wahren Grund zeigt.
+    const result = csrf ? await renewSession(csrf) : null;
+    setSessionBusy(false);
+    if (result && result.ok && !result.renewed) return; // Frist laeuft noch
+    await refreshSessionStatus();
+  }, [refreshSessionStatus]);
+
+  /**
+   * Der „Anmelden“-Knopf im Balken blendet nur das Feld ein — der Token wird
+   * erst mit dem Absenden an `POST /api/auth/login` geschickt und dort
+   * serverseitig geprueft (W1: nie ein Store, nie ein Header durch den Nutzer).
+   */
+  function showLoginField() {
+    setNeedToken(true);
+    setNotice(
+      session?.firmApi.sessionsAvailable
+        ? "Token aus `.env` eintragen (FIRM_API_TOKEN oder FIRM_ADMIN_TOKEN) — der Browser behaelt danach nur die HttpOnly-Sitzung."
+        : "Es ist kein Firm-API-Token eingerichtet und kein Session-Schluessel konfiguriert — Anmeldung ist auf dem Server nicht moeglich (siehe CONFIGURATION.md, Abschnitt Session-Sicherheit)."
+    );
+  }
+
+  /** Ausdruecklicher Klick auf „Verlaengern“ — gleiche Bahn wie der Takt. */
+  async function manualRenew() {
+    setSessionBusy(true);
+    await renew();
+    setSessionBusy(false);
+    setNotice("Sitzungstaetigkeit gemeldet — Restzeit wird oben neu angezeigt.");
+  }
+
   /** Zeigt nach einer 401 die Token-Eingabe und bricht die Aktion ab. */
   async function ensureAuth(res: Response): Promise<boolean> {
     if (res.status === 401) {
@@ -178,8 +251,10 @@ export default function FirmDashboard() {
 
   /**
    * W1 (v1.36.23): Der Token wird NUR einmal serverseitig verifiziert —
-   * `POST /api/auth/login` setzt die HttpOnly+Secure+SameSite-Session-Cookie
-   * (15 min). Der Browser-Token wird verworfen, es gibt KEIN localStorage mehr.
+   * `POST /api/auth/login` setzt die HttpOnly+Secure+SameSite-Session-Cookie.
+   * v1.39.0: die Cookie ist eine Browser-Session-Cookie (kein `Max-Age`), die
+   * Idle-Frist (Default 15 min) wird vom Takt automatisch erneuert. Der
+   * Browser-Token wird verworfen, es gibt KEIN localStorage mehr.
    *
    * v1.36.41: Nach erfolgreicher Anmeldung lädt `load()` automatisch neu —
    * das manuelle `F5` aus dem LAN-Howto entfällt.
@@ -194,33 +269,79 @@ export default function FirmDashboard() {
     });
     if (authenticated) clearLegacyFirmToken(); // Altbestand aus Pre-W1-Installationen
     setNeedToken(!authenticated);
+    // v1.39.0: nach erfolgreichem Login steht die Restzeit fest — anzeigen,
+    // statt sie zu raten, und den Verlaengerungstakt damit neu stellen.
+    if (authenticated) {
+      const status = await refreshSessionStatus();
+      const diagnosis = status.ok ? diagnosePostLogin(status.snapshot) : "";
+      if (diagnosis) setNotice(diagnosis);
+    }
   }
 
   /**
    * SEC-08 (v1.36.35): Session serverseitig widerrufen und Cookies entfernen.
    */
   async function handleLogout() {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "same-origin",
-      });
-      clearLegacyFirmToken();
-      setNeedToken(true);
-      setNotice("Abgemeldet — Session wurde serverseitig widerrufen.");
-      load();
-    } catch {
-      setNotice("Netzwerkfehler beim Abmelden.");
-    }
+    const ok = await logoutSession();
+    clearLegacyFirmToken();
+    setNeedToken(true);
+    setSession(null);
+    setNotice(
+      ok
+        ? "Abgemeldet — Session serverseitig widerrufen, Cookies entfernt. Die Anmeldung gilt wieder, sobald ein Token eingetragen wird."
+        : "Abmelden nicht bestaetigt (Netzwerk?) — die Sitzung laeuft moeglicherweise weiter."
+    );
+    // Status neu holen: zeigt, ob die Session wirklich weg ist (200) oder der
+    // Dienst nicht antwortet — und stellt den Verlaengerungstakt ab.
+    await refreshSessionStatus();
+    load();
   }
 
   // Kein synchrones setState im Effekt (react-hooks/set-state-in-effect):
   // Das initiale Laden wird um einen Tick verschoben, der Effekt selbst ruft
   // keine Setter auf.
   useEffect(() => {
-    const id = window.setTimeout(() => void load(), 0);
+    const id = window.setTimeout(() => {
+      void load();
+      void refreshSessionStatus();
+    }, 0);
     return () => window.clearTimeout(id);
-  }, [load]);
+  }, [load, refreshSessionStatus]);
+
+  // v1.39.0: ein einziger Timer pro Zustand — der Server nennt die Restzeit,
+  // der Client erneuert genau davor. Kein Dauerintervall: ein gedrosselter
+  // Hintergrund-Tab verlaesst sich auf die serverseitige Nachfrist.
+  useEffect(() => {
+    const delay = sessionRenewDelayMs(session, Date.now());
+    if (delay === null) return;
+    const id = window.setTimeout(() => void renew(), delay);
+    return () => window.clearTimeout(id);
+  }, [session, renew]);
+
+  // Fenster zurueck (Tab-Wechsel, aufgewecktes Notebook): Status sofort
+  // nachziehen, statt auf den naechsten Takt zu warten. Genau hier heilt die
+  // Nachfrist eine inaktiv abgelaufene Sitzung ohne erneute Token-Eingabe.
+  useEffect(() => {
+    const onActive = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void renew();
+    };
+    window.addEventListener("focus", onActive);
+    document.addEventListener("visibilitychange", onActive);
+    return () => {
+      window.removeEventListener("focus", onActive);
+      document.removeEventListener("visibilitychange", onActive);
+    };
+  }, [renew]);
+
+  // Restzeit-Anzeige alle 20 s nachziehen (kein 1-s-Ticker: das Dashboard
+  // rendert ohnehin im 8-/15-s-Takt, und die Anzeige braucht keine Sekunden-
+  // scharfe Uhr). Laeuft nur, waehrend eine Session aktiv ist.
+  useEffect(() => {
+    if (!session?.session.active) return;
+    const id = window.setInterval(() => setSessionNow(Date.now()), 20_000);
+    return () => window.clearInterval(id);
+  }, [session]);
 
   // W1 (v1.36.23): Altbestand eines alten Token-Schlüssels aus dem
   // Client-Speicher entfernen (Migration, nur removeItem — nie ein Schreiben).
@@ -379,7 +500,12 @@ export default function FirmDashboard() {
    * (Aktion abgelehnt, Logout, Anmeldung abgelehnt).
    */
   const sessionExpired = firmIssue?.needsLogin ?? false;
-  const showTokenField = needToken || sessionExpired;
+  /**
+   * Das Token-Feld erscheint, wenn eine Aktion/Load abgelehnt wurde ODER der
+   * Status eine Anmeldung verlangt (`sessionNeedsLogin`) — z. B. direkt nach
+   * einem Dienst-Neustart, ohne dass erst jemand klicken muss.
+   */
+  const showTokenField = needToken || sessionExpired || sessionNeedsLogin(session);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -491,16 +617,20 @@ export default function FirmDashboard() {
         </div>
       )}
 
-      {(notice !== "" || showTokenField) && (
-        <SessionNoticeBar
-          notice={notice}
-          showTokenField={showTokenField}
-          tokenDraft={tokenDraft}
-          onTokenDraftChange={setTokenDraft}
-          onSubmit={saveToken}
-          onLogout={handleLogout}
-        />
-      )}
+      <SessionNoticeBar
+        notice={notice}
+        showTokenField={showTokenField}
+        tokenDraft={tokenDraft}
+        onTokenDraftChange={setTokenDraft}
+        onSubmit={saveToken}
+        onLogout={handleLogout}
+        onRenew={manualRenew}
+        onShowLogin={showLoginField}
+        session={session}
+        statusUnavailable={sessionUnavailable}
+        busy={sessionBusy}
+        now={sessionNow}
+      />
 
       {/* Status strip */}
       <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
