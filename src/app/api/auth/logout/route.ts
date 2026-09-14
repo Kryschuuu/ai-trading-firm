@@ -1,9 +1,14 @@
 /**
  * `POST /api/auth/logout` — SEC-08 (v1.36.35): Server-side Session-Revocation und Logout.
  *
- * Beendet eine aktive Browser-Session vor Ablauf der TTL (15 min):
- *   - Revokiert die Session serverseitig in der Revocation-Registry (`state.revokedSessions`),
- *     sodass gestohlene/gespeicherte Cookies sofort ungueltig werden (401/403).
+ * Beendet eine aktive Browser-Session sofort — ohne auf ihre Fristen zu
+ * warten (Idle 15 min, absolute Grenze 24 h, Cookie ohnehin Browser-Session,
+ * v1.39.0):
+ *   - Revokiert die Session serverseitig in der Revocation-Registry
+ *     (`state.revokedSessions`) — eingetragen bis zur ABSOLEN Grenze (`maxExp`),
+ *     damit auch eine aeltere Cookie-Generation einer verlAengerten Sitzung nicht
+ *     wieder auffliegt (v1.39.0). Gestohlene/gespeicherte Cookies werden sofort
+ *     ungueltig (401/403), auch durch Verlängerungsversuche.
  *   - Loescht die Cookies im Browser (`Set-Cookie: Max-Age=0`).
  *   - Optionale administrative Global-Revocation: Body `{"all": true}` erfordert Admin-
  *     Berechtigung und invalidiert alle bestehenden Sessions via `revokeAllSessions()`.

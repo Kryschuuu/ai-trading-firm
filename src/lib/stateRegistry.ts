@@ -223,7 +223,11 @@ export const state = {
   rateLimiterHits: map<string, number[]>("rateLimiterHits"),
 
   // ── Session-Revocation (src/lib/authSession.ts) ───────────────────────────
-  /** Widerrufene Session-IDs mit Ablaufzeitpunkt exp (RAM). */
+  /**
+   * Widerrufene Session-IDs bis zu ihrer absoluten Grenze `maxExp` (RAM).
+   * v1.39.0: nicht bis zur Idle-Frist der zuletzt gesehenen Generation —
+   * Verlaengerungen ruecken an ihr, an `maxExp` nie.
+   */
   revokedSessions: map<string, number>("revokedSessions"),
   /** Globaler Widerrufs-Zeitstempel in ms (alle Sessions mit iat <= Zeitstempel sind ungueltig). */
   sessionsRevokedBefore: ref<number>("sessionsRevokedBefore"),

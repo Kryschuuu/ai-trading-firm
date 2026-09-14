@@ -154,7 +154,315 @@ export async function fetchFirmSnapshot(
   return { ok: false, issue: classifyFirmFailure(res.status, body) };
 }
 
-type LoginBody = { ok?: unknown; error?: unknown; hint?: unknown; open?: unknown; expiresInS?: unknown };
+/* ---------------------------------------------------------------------------
+ * Anmelde-/Sitzungsstatus (v1.39.0, S1) — „Ist die Firm-API eingetragen, und
+ * laeuft meine Session gerade?“
+ *
+ * Dieselbe Regel wie oben: bewusst kein React und keine Browser-Globals, damit
+ * `tests/firmSession.test.ts` alles mit einem Stub-`fetch` prueft. Der Server
+ * ist die einzige Wahrheit ueber Fristen (`/api/auth/status`); der Client
+ * rechnet nur die Restzeit bis zum Naechstpruef-Zeitpunkt herunter.
+ * ------------------------------------------------------------------------- */
+
+/** Zustand der eigenen Browser-Session — Projektion von `sessionStatus()`. */
+export type SessionState =
+  | "active"
+  | "expiring"
+  | "renewable"
+  | "missing"
+  | "expired"
+  | "max-life"
+  | "revoked"
+  | "invalid"
+  | "open";
+
+/** Ist die Firm-API serverseitig eingerichtet? Nur Booleans, nie Werte. */
+export type FirmApiConfig = {
+  configured: boolean;
+  admin: boolean;
+  operator: boolean;
+  viewer: boolean;
+  /** Gueltiges, unabhaengiges `FIRM_SESSION_SECRET` ⇒ Sessions moeglich. */
+  sessionsAvailable: boolean;
+};
+
+/** Snapshot von `GET /api/auth/status`, auf das UI-Notwendige reduziert. */
+export type SessionSnapshot = {
+  mode: "local-open" | "token-required";
+  reason: string;
+  firmApi: FirmApiConfig;
+  session: {
+    active: boolean;
+    state: SessionState;
+    role: string | null;
+    remainingS: number;
+    maxLifeRemainingS: number;
+    renewInS: number;
+    idleTtlS: number;
+    maxLifeS: number;
+    graceS: number;
+    cookieLifetime: string;
+    expiresAt: number | null;
+  };
+  /** Millisekunden seit Epoch der Serverantwort — Basis des Runterzaehlens. */
+  observedAt: number;
+};
+
+const SESSION_STATES: readonly string[] = [
+  "active", "expiring", "renewable", "missing", "expired", "max-life", "revoked", "invalid", "open",
+];
+
+function bool(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function int(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : fallback;
+}
+
+/**
+ * Toleranter Parser: ein Teil eines fehlenden Felds macht keinen Crash, aber
+ * ein Snapshot ohne `session`-Objekt ist wertlos ⇒ `null` (= Status unbekannt).
+ */
+export function parseSessionStatus(json: unknown, observedAt: number = Date.now()): SessionSnapshot | null {
+  if (!json || typeof json !== "object") return null;
+  const root = json as Record<string, unknown>;
+  const session = root.session as Record<string, unknown> | undefined;
+  if (!session || typeof session !== "object") return null;
+  const firmApi = (root.firmApi ?? {}) as Record<string, unknown>;
+  const authMode = (root.authMode ?? {}) as Record<string, unknown>;
+  const state = SESSION_STATES.includes(String(session.state)) ? (String(session.state) as SessionState) : "invalid";
+  const mode = authMode.mode === "local-open" ? "local-open" : "token-required";
+  const expiresAtMs = typeof session.expiresAt === "string" ? Date.parse(session.expiresAt) : NaN;
+  return {
+    mode,
+    reason: typeof authMode.reason === "string" ? authMode.reason : "",
+    firmApi: {
+      configured: bool(firmApi.configured),
+      admin: bool(firmApi.admin),
+      operator: bool(firmApi.operator),
+      viewer: bool(firmApi.viewer),
+      sessionsAvailable: bool(firmApi.sessionsAvailable),
+    },
+    session: {
+      active: bool(session.active),
+      state,
+      role: typeof session.role === "string" ? session.role : null,
+      remainingS: int(session.remainingS),
+      maxLifeRemainingS: int(session.maxLifeRemainingS),
+      renewInS: int(session.renewInS, 15),
+      idleTtlS: int(session.idleTtlS, 900),
+      maxLifeS: int(session.maxLifeS),
+      graceS: int(session.graceS),
+      cookieLifetime: typeof session.cookieLifetime === "string" ? session.cookieLifetime : "browser-session",
+      expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : null,
+    },
+    observedAt,
+  };
+}
+
+/** Laeuft die Session noch — ggf. abzgl. der seit der Antwort verstrichenen Zeit. */
+export function sessionRemainingS(snapshot: SessionSnapshot, now: number = Date.now()): number {
+  const elapsed = Math.max(0, Math.floor((now - snapshot.observedAt) / 1000));
+  return Math.max(0, snapshot.session.remainingS - elapsed);
+}
+
+/** Restzeit bis zur absoluten Grenze (unabhaengig von Verlaengerungen). */
+export function sessionMaxLifeRemainingS(snapshot: SessionSnapshot, now: number = Date.now()): number {
+  const elapsed = Math.max(0, Math.floor((now - snapshot.observedAt) / 1000));
+  return Math.max(0, snapshot.session.maxLifeRemainingS - elapsed);
+}
+
+/** Sekunden, bis der Client die Verlaengerung anstossen soll (`null` = nie). */
+export function sessionRenewDelayMs(snapshot: SessionSnapshot | null, now: number = Date.now()): number | null {
+  if (!snapshot || snapshot.session.state === "open") return null;
+  // Idle-Frist um, Nachfrist laeuft: sofort versuchen (Schlafpause, gedrosselter Tab).
+  if (snapshot.session.state === "renewable") return 0;
+  if (snapshot.session.state !== "active" && snapshot.session.state !== "expiring") return null;
+  const remaining = sessionRemainingS(snapshot, now);
+  if (remaining <= 0) return 0;
+  return Math.max(15, snapshot.session.renewInS) * 1000;
+}
+
+/** Braucht diese Antwort das Token-Feld? (offener Betrieb und renewable: nein) */
+export function sessionNeedsLogin(snapshot: SessionSnapshot | null): boolean {
+  if (!snapshot) return false;
+  const { state } = snapshot.session;
+  if (state === "open" || state === "active" || state === "expiring" || state === "renewable") return false;
+  // Ohne eingerichtetes Credential und ohne moegliche Sessions fuehrt das
+  // Feld zu nichts — die Meldung erklaert den Konfigurationsfehler.
+  return snapshot.firmApi.configured || snapshot.firmApi.sessionsAvailable;
+}
+
+export type SessionNotice = {
+  /** Kurztext fuer den Balken — nennt immer API-Konfiguration UND Session. */
+  label: string;
+  /** `true` ⇒ Warn-/Farbton, sonst neutral. */
+  warning: boolean;
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  operator: "Operator",
+  viewer: "Viewer",
+};
+
+/** `mm:ss` bzw. `h:mm:ss` — die einzige Ort, an dem die Restzeit formatiert wird. */
+export function formatSessionCountdown(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
+  const tail = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return hours > 0 ? `${hours}:${tail}` : tail;
+}
+
+/**
+ * Menschenlesbare Statuszeile: unterscheidet als erstes, ob die Firm-API
+ * ueberhaupt eingetragen ist (die Frage, die das Dashboard vorher nie
+ * beantwortet hat), und dann, was mit der eigenen Session los ist.
+ */
+export function describeSession(
+  snapshot: SessionSnapshot | null,
+  now: number = Date.now(),
+  unavailable = false
+): SessionNotice {
+  if (!snapshot) {
+    return unavailable
+      ? {
+          label: "Anmeldestatus nicht ermittelbar (Netzwerk?) — Aktionen brauchen eine gueltige Sitzung.",
+          warning: true,
+        }
+      : { label: "Anmeldestatus wird gepraft…", warning: false };
+  }
+  const { session, firmApi } = snapshot;
+  if (session.state === "open") {
+    return {
+      label: "Lokaler Offen-Betrieb: kein Firm-API-Token eingerichtet — keine Anmeldung noetig (nur fuer Entwicklung/Loopback geeignet).",
+      warning: true,
+    };
+  }
+  const apiPart = firmApi.configured
+    ? `Firm-API: eingetragen${firmApi.admin ? " (Admin" : " ("}${firmApi.operator ? "+Operator" : ""}${
+        firmApi.viewer ? "+Viewer" : ""
+      })`
+    : "Firm-API: KEIN Token gesetzt";
+  const countdown = formatSessionCountdown(sessionRemainingS(snapshot, now));
+  const maxLife = sessionMaxLifeRemainingS(snapshot, now);
+  const life = `Session noch ${countdown} · automatische Verlaengerung · absolute Grenze in ${formatSessionCountdown(maxLife)}`;
+
+  switch (session.state) {
+    case "active":
+    case "expiring":
+      return {
+        label: `${apiPart} · angemeldet als ${ROLE_LABEL[session.role ?? ""] ?? session.role ?? "unbekannt"} · ${life}`,
+        warning: session.state === "expiring",
+      };
+    case "renewable":
+      return {
+        label: `${apiPart} · Sitzung war im Hintergrund inaktiv (${countdown} Puffer) — wird automatisch wiederhergestellt, sofort mit „Verlängern”.`,
+        warning: true,
+      };
+    case "missing":
+      return {
+        label: `${apiPart} · nicht angemeldet — API-Token eintragen. Die Sitzung gilt bis zum Schließen des Browserfensters.`,
+        warning: true,
+      };
+    case "expired":
+      return { label: `${apiPart} · Sitzung abgelaufen (auch Nachfrist vorbei) — bitte neu anmelden.`, warning: true };
+    case "max-life":
+      return {
+        label: `${apiPart} · Maximale Sitzungsdauer erreicht (${formatCountdownHint(snapshot)}) — bitte neu anmelden.`,
+        warning: true,
+      };
+    case "revoked":
+      return { label: `${apiPart} · Sitzung widerrufen (Logout oder Notfallschnitt) — bitte neu anmelden.`, warning: true };
+    default:
+      return {
+        label: `${apiPart} · gueltige Anmeldung erforderlich (Session ungueltig: Auth-Konfiguration oder Secret geaendert).`,
+        warning: true,
+      };
+  }
+}
+
+/** Lesbarer Hinweis auf die absolute Grenze, ohne sie zu erraten. */
+function formatCountdownHint(snapshot: SessionSnapshot): string {
+  const hours = Math.round((snapshot.session.maxLifeS || 0) / 3600);
+  return hours > 0 ? `${hours} h` : `${snapshot.session.maxLifeS || 0} s`;
+}
+
+export type SessionStatusResult =
+  | { ok: true; snapshot: SessionSnapshot }
+  | { ok: false; error: string };
+
+/** `GET /api/auth/status` — wirft nie, auch nicht bei HTML/Stolpern des Servers. */
+export async function fetchSessionStatus(
+  fetchImpl: typeof fetch = fetch,
+  now: number = Date.now()
+): Promise<SessionStatusResult> {
+  let res: Response;
+  try {
+    res = await fetchImpl("/api/auth/status", { method: "GET", credentials: "same-origin", cache: "no-store" });
+  } catch {
+    return { ok: false, error: "Netzwerkfehler — /api/auth/status nicht erreichbar." };
+  }
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+  const snapshot = parseSessionStatus(json, now);
+  if (!snapshot) return { ok: false, error: "Unerwartete Antwort von GET /api/auth/status." };
+  return { ok: true, snapshot };
+}
+
+export type SessionRenewResult =
+  | { ok: true; renewed: boolean; remainingS: number; error: string }
+  | { ok: false; renewed: false; remainingS: number; error: string };
+
+/**
+ * `POST /api/auth/refresh` — eine Verlaengerung anstossen. Der CSRF-Wert kommt
+ * als Parameter herein (Double-Submit aus `firm_csrf`), damit diese Funktion
+ * ohne `document` testbar bleibt. Bei 401 meldet der Server „neu anmelden“.
+ */
+export async function renewSession(
+  csrf: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<SessionRenewResult> {
+  let res: Response;
+  try {
+    res = await fetchImpl("/api/auth/refresh", {
+      method: "POST",
+      headers: { "x-csrf-token": csrf },
+      credentials: "same-origin",
+    });
+  } catch {
+    return { ok: false, renewed: false, remainingS: 0, error: "Netzwerkfehler — /api/auth/refresh nicht erreichbar." };
+  }
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  const remainingS = int(json?.expiresInS);
+  if (!res.ok) {
+    const error = text(json?.hint) || text(json?.error) || `HTTP ${res.status}`;
+    return { ok: false, renewed: false, remainingS, error };
+  }
+  if (bool(json?.open)) {
+    return { ok: true, renewed: false, remainingS, error: "Lokaler Offen-Betrieb — keine Session." };
+  }
+  return {
+    ok: true,
+    renewed: bool(json?.renewed),
+    remainingS,
+    error: text(json?.hint),
+  };
+}
+
+type LoginBody = {
+  ok?: unknown;
+  error?: unknown;
+  hint?: unknown;
+  open?: unknown;
+  expiresInS?: unknown;
+  lifetime?: { idleTtlS?: unknown; maxLifeS?: unknown } | null;
+};
 
 export type SessionTokenHooks = {
   /** Ergebnis-Meldung für den Hinweisbalken (Erfolg wie Ablehnung). */
@@ -164,6 +472,23 @@ export type SessionTokenHooks = {
   /** Nur für Tests: injizierbares `fetch`. */
   fetchImpl?: typeof fetch;
 };
+
+/**
+ * Meldung, wenn der Login serverseitig Erfolg meldete, die Session aber nicht
+ * angenommen wurde. Das ist der häufigste stille Bruch im LAN-Betrieb: Die
+ * Cookies tragen `Secure` — über `http://192.168.x.x:3369` verwirft der
+ * Browser sie, obwohl der Login `200` war. Ohne diese Zeile bleibt nur
+ * „Sitzung abgelaufen“ als rätselhafter Zustand zurück.
+ */
+export function diagnosePostLogin(snapshot: SessionSnapshot | null): string {
+  if (snapshot?.session.active) return "";
+  if (snapshot && snapshot.session.state !== "missing") return "";
+  return (
+    "Anmeldung vom Server bestätigt, aber keine Sitzungs-Cookie im Browser — " +
+    "die App läuft über plain-HTTP? `Secure`-Cookies brauchen TLS (Gegencheck: " +
+    "GET /api/auth/status). Behelf: über https:// (Proxy/TLS) oder localhost öffnen."
+  );
+}
 
 /**
  * Meldet den Browser über `POST /api/auth/login` an (W1, v1.36.23: der Token
@@ -199,10 +524,14 @@ export async function submitSessionToken(
     return false;
   }
 
+  const idleS = typeof json.lifetime?.idleTtlS === "number" ? json.lifetime.idleTtlS : SESSION_TTL_FALLBACK_S;
+  const maxLifeS = typeof json.lifetime?.maxLifeS === "number" ? json.lifetime.maxLifeS : 0;
   hooks.onNotice(
     json.open
       ? "Lokaler Offen-Betrieb — keine Anmeldung nötig."
-      : `Session aktiv (${typeof json.expiresInS === "number" ? json.expiresInS : SESSION_TTL_FALLBACK_S} s) — Firm-Status wird neu geladen.`
+      : `Angemeldet: die Sitzung gilt bis zum Schließen des Browserfensters und verlängert sich automatisch ` +
+        `(Frist ${idleS} s${maxLifeS ? `, absolute Grenze ${Math.round(maxLifeS / 3600)} h` : ""}). ` +
+        `Firm-Status wird neu geladen.`
   );
   await hooks.reload();
   return true;

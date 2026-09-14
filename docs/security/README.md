@@ -301,12 +301,25 @@ dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
 
 ## Session-Cookie & Revocation (v1.36.27 / v1.36.35, SEC-01 / SEC-08)
 
-- `firmToken` nicht mehr in `localStorage` — stattdessen `firm_session` HttpOnly, Secure, SameSite=Strict, 15min + `firm_csrf` Double-Submit
+- `firmToken` nicht mehr in `localStorage` — stattdessen `firm_session` HttpOnly, Secure, SameSite=Strict + `firm_csrf`
+  Double-Submit. Seit **v1.39.0 ohne `Max-Age`** (Browser-Session-Cookie, endet
+  mit dem Fenster-Schließen): autorisiert wird über `exp` (Idle, Default 900 s)
+  und `maxExp` (absolut, Default 86 400 s, hart bei 7 d) im signierten Payload —
+  nie über das Cookie-Alter. Verlängern ausschließlich über
+  `POST /api/auth/refresh` mit Double-Submit-Header `x-csrf-token` (der
+  API-Token allein verlängert nichts); `iat`/`maxExp` bleiben dabei fix, der
+  globale Notfallschnitt wirkt weiter. `FIRM_SESSION_GRACE_S` heilt eine
+  abgelaufene Idle-Frist **nur** dort — `readSession()` und jede Guard-Route
+  bleiben bei `exp` hart. `GET /api/auth/status` meldet secret-frei, ob Firm-
+  Tokens eingetragen sind und wie lange die eigene Sitzung läuft
 - Stateless HMAC-Session in `src/lib/authSession.ts`, ausschließlich mit unabhängigem
   `FIRM_SESSION_SECRET` (mindestens 32 Zeichen; separat `openssl rand -hex 32`).
   Kein Login-Token/Token-Hash, kein Fallback. Ohne gültigen Schlüssel Login HTTP 503,
   auch in Dev; `local-open` stellt keine Sessions aus.
-- Schema v2 ohne Berechtigungs-Snapshot: serverseitige Rollen-/Permission-Ableitung
+- Schema v3 (`SESSION_PAYLOAD_VERSION = 3`) ohne Berechtigungs-Snapshot, dafür mit
+  `iat` (Anmeldung), `exp` (Idle) und `maxExp` (absolute Grenze); v2 wird nicht mehr
+  akzeptiert — nach dem Upgrade ist einmalige Neu-Anmeldung nötig.
+  Serverseitige Rollen-/Permission-Ableitung
   pro Request, Credential-Bindung via keyed `authEpoch`. Rotation, Entfernung oder
   Neueinrichtung eines Tokens invalidiert alle bisherigen Sessions, sobald die neue
   Konfiguration im Prozess aktiv ist. Alle Instanzen konsistent neu starten.

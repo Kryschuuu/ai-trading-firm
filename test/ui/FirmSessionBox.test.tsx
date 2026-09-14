@@ -18,6 +18,7 @@ import {
   classifyFirmFailure,
   fetchFirmSnapshot,
   type FirmIssue,
+  type SessionSnapshot,
 } from "../../src/lib/firmSession";
 import { FirmIssueBox } from "../../src/components/common/FirmIssueBox";
 import { SessionNoticeBar } from "../../src/components/common/SessionNoticeBar";
@@ -29,7 +30,7 @@ function renderBox(issue: FirmIssue): string {
 }
 
 /** Der Hinweisbalken, wie das Dashboard ihn bei `showTokenField` rendert. */
-function renderBar(showTokenField: boolean): string {
+function renderBar(showTokenField: boolean, session: SessionSnapshot | null = null): string {
   return renderToStaticMarkup(
     createElement(SessionNoticeBar, {
       notice: "",
@@ -38,8 +39,50 @@ function renderBar(showTokenField: boolean): string {
       onTokenDraftChange: () => undefined,
       onSubmit: () => undefined,
       onLogout: () => undefined,
+      onRenew: () => undefined,
+      onShowLogin: () => undefined,
+      statusUnavailable: !showTokenField && session === null ? true : false,
+      session,
+      now: NOW,
     })
   );
+}
+
+/** Fester Anker, damit kein Test von der Uhr abhängt. */
+const NOW = 1_789_000_000_000;
+
+/** Session-Snapshot, wie `parseSessionStatus` ihn aus `GET /api/auth/status` baut. */
+function snapshot(
+  over: Partial<SessionSnapshot["session"]> = {},
+  firmApi: Partial<SessionSnapshot["firmApi"]> = {}
+): SessionSnapshot {
+  return {
+    mode: "token-required",
+    reason: "tokens-configured",
+    firmApi: {
+      configured: true,
+      admin: true,
+      operator: true,
+      viewer: false,
+      sessionsAvailable: true,
+      ...firmApi,
+    },
+    session: {
+      active: true,
+      state: "active",
+      role: "operator",
+      remainingS: 780,
+      maxLifeRemainingS: 43_200,
+      renewInS: 480,
+      idleTtlS: 900,
+      maxLifeS: 86_400,
+      graceS: 900,
+      cookieLifetime: "browser-session",
+      expiresAt: NOW + 780_000,
+      ...over,
+    },
+    observedAt: NOW,
+  };
 }
 
 function assertNoDatabaseText(html: string, context: string): void {
@@ -123,4 +166,81 @@ test("Token-Feld ist ausgeblendet, solange eine gültige Session besteht", () =>
   const bar = renderBar(false);
   assert.ok(!bar.includes('type="password"'));
   assert.match(bar, /Abmelden/);
+});
+
+// ── 6 · Anmeldestatus im Balken (v1.39.0) ─────────────────────────────────────
+
+test("aktive Session: Balken nennt API-Konfiguration, Rolle und Restzeit", () => {
+  const bar = renderBar(false, snapshot());
+  assert.match(bar, /Firm-API: eingetragen/, "die Frage „API eingetragen?“ steht endlich da");
+  assert.match(bar, /angemeldet als Operator/);
+  assert.match(bar, /automatische Verlaengerung/);
+  assert.match(bar, /13:00/, "780 s Restzeit werden angezeigt");
+  assert.match(bar, /absolute Grenze in 12:00:00/, "der absolute Deckel bleibt sichtbar");
+  assert.match(bar, /Verlängern/, "manuelle Verlängerung direkt bedienbar");
+  assert.match(bar, /Abmelden/);
+  assert.ok(!bar.includes('type="password"'), "mit gültiger Session ist kein Tokenfeld nötig");
+  assertNoDatabaseText(bar, "Session-Balken");
+});
+
+test("abgelaufene Idle-Frist mit Nachfrist: heilt ohne Token-Eingabe", () => {
+  const bar = renderBar(
+    false,
+    snapshot({ active: false, state: "renewable", remainingS: 0 })
+  );
+  assert.match(bar, /automatisch wiederhergestellt/);
+  assert.ok(!bar.includes('type="password"'), "renewable ist kein Anmeldegrund");
+});
+
+test("Nachfrist vorbei: klarer Hinweis aufs Neuanmelden, kein DB-Text", () => {
+  const bar = renderBar(
+    true,
+    snapshot({ active: false, state: "expired", remainingS: 0, maxLifeRemainingS: 0, expiresAt: null })
+  );
+  assert.match(bar, /auch Nachfrist vorbei/);
+  assert.match(bar, /bitte neu anmelden/);
+  assert.match(bar, /type="password"/, "jetzt darf das Tokenfeld erscheinen");
+  assertNoDatabaseText(bar, "expired-Balken");
+});
+
+test("absolute Grenze erreicht: Neu-Anmeldung, nicht Verlängern", () => {
+  const bar = renderBar(
+    true,
+    snapshot({ active: false, state: "max-life", remainingS: 0, maxLifeRemainingS: 0, expiresAt: null })
+  );
+  assert.match(bar, /Maximale Sitzungsdauer erreicht/);
+  assert.match(bar, /24 h/);
+  assert.ok(!bar.includes("Verlängern"), "Verlängern ist hier sinnlos und wird nicht angeboten");
+});
+
+test("kein Token gesetzt: der Balken benennt die Konfiguration, statt zu schweigen", () => {
+  const bar = renderBar(
+    false,
+    snapshot(
+      { active: false, state: "invalid", role: null, remainingS: 0, expiresAt: null },
+      { configured: false, admin: false, operator: false, sessionsAvailable: false }
+    )
+  );
+  assert.match(bar, /Firm-API: KEIN Token gesetzt/);
+  assert.match(bar, /Abmelden/, "ohne Konfiguration führt Anmelden zu nichts — Abmelden räumt auf");
+  assert.ok(!bar.includes('type="password"'), "ohne Token bringt das Feld nichts");
+});
+
+test("Lokal-Offen-Betrieb: keine Anmeldung nötig, aber klarer Warnhinweis", () => {
+  const bar = renderBar(
+    false,
+    snapshot(
+      { active: true, state: "open", role: "admin", remainingS: 0, maxLifeRemainingS: 0, expiresAt: null },
+      { configured: false, admin: false, operator: false, sessionsAvailable: false }
+    )
+  );
+  assert.match(bar, /Lokaler Offen-Betrieb/);
+  assert.match(bar, /nur fuer Entwicklung\/Loopback/);
+  assert.ok(!bar.includes("Anmelden"), "offener Betrieb braucht keinen Login-Knopf");
+});
+
+test("Status unbekannt (Netzwerk): Warnung ohne Fehldiagnose", () => {
+  const bar = renderBar(false, null);
+  assert.match(bar, /Anmeldestatus nicht ermittelbar/);
+  assertNoDatabaseText(bar, "Snapshot-los-Balken");
 });

@@ -2,7 +2,10 @@
 
 > **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
 > systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard eine
-> abgelaufene Sitzung — **nicht** die Datenbank.
+> abgelaufene Sitzung — **nicht** die Datenbank. Seit v1.39.0 bleibt die
+> Sitzung bis zum Fenster-Schließen aktiv und der Balken zeigt außerdem, ob
+> überhaupt ein Firm-Token eingetragen ist (Kapitel
+> [Sitzung bis zum Fenster-Schließen](#sitzung-bis-zum-fenster-schließen-v1390-s1)).
 >
 > ```bash
 > npm run stop                          # alten 127.0.0.1-Prozess beenden
@@ -129,8 +132,121 @@ Bleibt die Box: über **Abmelden** im Hinweisbalken aus- und wieder einloggen.
 Steht dort stattdessen **„Zugriff verweigert"**, ist die Session gültig, aber
 die Rolle hat `firm.read` nicht (Rollenmatrix: `docs/security/README.md`).
 
-Die Sitzung gilt **15 Minuten** (`SESSION_TTL_S`) und endet außerdem bei jeder
-Secret-Rotation (`FIRM_SESSION_SECRET`) und bei jedem Dienst-Neustart.
+Die Sitzung gilt nicht mehr starr 15 Minuten: seit v1.39.0 trägt der Browser
+sie bis zum Fenster-Schließen, das Dashboard verlängert sie automatisch, und
+eine abgelaufene Idle-Frist heilt innerhalb der Nachfrist ohne Token-Eingabe.
+Enden tut sie trotzdem noch bei jeder Secret-Rotation (`FIRM_SESSION_SECRET`),
+bei Token-Rotation (`authEpoch`), bei jedem Dienst-Neustart (Revocation-Registry
+lebt im RAM) und spätestens an der absoluten Grenze (`FIRM_SESSION_MAX_LIFE_S`,
+Default 24 h). Details im nächsten Kapitel.
+
+---
+
+---
+
+## Sitzung bis zum Fenster-Schließen (v1.39.0, S1)
+
+Vorher: `Max-Age=900`. Wer nach 15 Minuten noch am Dashboard saß, bekam `401`,
+sah aber nicht, woran es lag — und musste den Token aus `.env` abtippen. Jetzt
+trägt der Browser die Sitzung, solange das Fenster offen ist.
+
+### Was der Server tut
+
+| Frist | Flag | Default | Verschiebbar durch Aktivität? |
+| --- | --- | --- | --- |
+| Idle-Frist `exp` | `FIRM_SESSION_IDLE_TTL_S` | 900 s (15 min) | **ja** — `POST /api/auth/refresh` |
+| Absolute Grenze `maxExp` | `FIRM_SESSION_MAX_LIFE_S` | 86 400 s (24 h), harte Obergrenze 7 d | **nein** |
+| Nachfrist (nur `refresh`) | `FIRM_SESSION_GRACE_S` | 900 s, `0` = aus | — |
+
+```text
+Login  ──► firm_session (HttpOnly, Secure, SameSite=Strict, KEIN Max-Age)
+         ──► firm_csrf    (lesbar, Double-Submit-Beweis)
+Dashboard-Takt (renewInS des Servers, bei Tab-Fokus sofort)
+         ──► POST /api/auth/refresh  + Header x-csrf-token
+                  │  Restzeit > Fenster   ⇒ 200 { renewed:false } — keine neuen Cookies
+                  │  Idle um, Nachfrist an ⇒ heilt die Sitzung (ein Klick aufs Tab genügt)
+                  │  maxExp um / widerr.   ⇒ 401 — Anmeldung nötig
+                  └─ innerhalb Fenster     ⇒ neues Set-Cookie, gleiches iat + maxExp
+Fenster zu ⇒ Cookie weg. Neustart/Logout/Rotation ⇒ Session weg (Payload, nicht Alter).
+```
+
+Drei Eigenschaften tragen das Sicherheitsversprechen:
+
+1. **`iat` rutscht nicht.** Der Anmeldezeitpunkt bleibt Teil der Signatur,
+   Verlängern schreibt nur `exp` neu. Der globale Notfallschnitt
+   (`sessionsRevokedBefore`, SEC-08) tötet damit auch eine 400-mal verlängerte
+   Sitzung. `revokeSession()` registriert bis `maxExp`, nicht bis zur alten
+   Restzeit — Logout einer Generation entwertet die andere mit.
+2. **Nachfrist ≠ Autorisierung.** `FIRM_SESSION_GRACE_S` kennen ausschließlich
+   `renewSession()` und die Statusanzeige. `readSession()` und damit jede
+   Guard-Route bleiben bei `exp` hart; ein liegengelassenes Cookie öffnet
+   nichts (Test: `tests/sessionRenewal.test.ts`).
+3. **Verlängern braucht den CSRF-Beweis.** Der Header muss den Wert des
+   `firm_csrf`-Cookies zurückgeben. Die Legacy-Regel „Header == API-Token"
+   akzeptiert `refresh` bewusst nicht — sonst wäre jede API-Copy ein
+   Verlängerungsmandat.
+
+### Was das kostet (die ehrliche Rechnung)
+
+- **Missbrauchsfrist.** Ein Dieb des HttpOnly-Cookies kann die Sitzung aktiv
+  halten, ohne den Token zu kennen; vorher war nach 15 Minuten Schluss.
+  Dagegen: absolute Grenze (Default 24 h), `SameSite=Strict` + `Secure`
+  (ohne TLS kommt das Cookie ohnehin nicht an), Double-Submit-Pflicht,
+  `POST /api/auth/logout` (Admin: Body `{"all": true}`) und Rotation von
+  `FIRM_SESSION_SECRET` als harte Schnitte.
+- **Rehydrierung.** Moderne Browser stellen nach „Sitzung wiederherstellen"
+  teils Cookies zu. Die Rechte hängen am signierten Payload — ist `exp` um und
+  die Nachfrist vorbei, ist die Sitzung tot, auch mit rehydrierter Cookie.
+- **Kein Token im Client.** Bewusst **kein** `localStorage`/SessionStorage und
+  kein Refresh-Token im JS: Der Verlängerungsmechanismus ist eine HttpOnly-
+  Session mit kurzem `exp`, kein langlebiges Secret im Browser. W1 bleibt
+  erhalten, die Reichweite des Diebstahls ist die Sitzung — nicht der Token.
+- **Wer länger als ein Arbeitstag am Stück arbeiten will,** muss
+  `FIRM_SESSION_MAX_LIFE_S` heraufsetzen (max. 7 Tage) und nimmt die längere
+  Missbrauchsfrist bewusst in Kauf. Abgelaufene Grenze ⇒ Token neu eintragen.
+
+### Die Anzeige im Dashboard
+
+`GET /api/auth/status` ist secret-frei und beantwortet genau die Frage, die
+vorher offen blieb: **Ist die Firm-API eingetragen?** Der Balken zeigt
+
+```text
+● Firm-API: eingetragen (+Operator) · angemeldet als Operator ·
+  Session noch 13:04 · automatische Verlängerung · absolute Grenze in 23:59:12
+                                     [13:04 · max 23:59:12]  [Verlängern] [Abmelden]
+```
+
+Zustände: `nicht angemeldet` · `angemeldet als <Rolle>` · `läuft aus` ·
+`abgelaufen, aber innerhalb der Nachfrist verlängerbar` · `Session abgelaufen` ·
+`absolute Lebensdauergrenze erreicht` · `Session wurde abgemeldet oder
+serverseitig widerrufen` · `KEIN Token gesetzt`. Nach einem erfolgreichen Login
+meldet sich zusätzlich der Fall „Login bestätigt, aber keine Cookie im Browser"
+— das ist fast immer plain-HTTP gegen `192.168.x.x:3369` (`Secure`-Cookies
+brauchen TLS; Fix: TLS-Proxy oder `localhost`).
+
+### Prüfen statt raten
+
+```bash
+curl -s http://127.0.0.1:3369/api/auth/status | jq '.firmApi, .session'
+# Set-Cookie beim Login muss OHNE Max-Age/Expires sein:
+curl -s -D- -o /dev/null -X POST http://127.0.0.1:3369/api/auth/login \
+  -H 'content-type: application/json' -d '{"firmToken":"…"}' | grep -i '^set-cookie'
+# Verlängerung (CSRF aus dem Cookie firm_csrf):
+curl -s -X POST -H "Cookie: firm_session=…; firm_csrf=…" \
+  -H 'x-csrf-token: …' http://127.0.0.1:3369/api/auth/refresh | jq
+```
+
+Verdacht „Token nicht eingetragen"? `firmApi.configured:false` ist der Beweis —
+dann im Server-`.env` nachtragen und neu starten, das Dashboard kann das nicht
+erledigen. `403 SESSION_FORBIDDEN`/`CSRF_INVALID` bei `refresh`: das Tab hat
+ein Alt-Cookie ohne passendes `firm_csrf` (zuvor **Abmelden**, neu anmelden).
+`503 SESSION_SECRET_REQUIRED`: `FIRM_SESSION_SECRET` fehlt — Sessions gibt es
+gar nicht, deshalb half bisher nur der Neustart mit Schlüssel.
+
+Nachweise im Repo: `tests/sessionRenewal.test.ts` (Policy, Verlängerung,
+Nachfrist, beide neuen Routen), `test/ui/SessionStatusBar.test.tsx` und
+`test/ui/FirmSessionBox.test.tsx` (Anzeige), `tests/w1.sessionCookie.test.ts`
+(Cookie-Attribute), `tests/sec01.sessionSecurity.test.ts` (Payload v3).
 
 ---
 

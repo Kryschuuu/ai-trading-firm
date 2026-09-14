@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.36.41 (2026-09-10) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.39.0 (2026-09-14) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -97,6 +97,9 @@ Die schreibende API (`POST`/`PUT` auf `/api/firm/*`, `/api/seed`, Credential-/Ro
   Clients verwenden ihr vorhandenes Header-Credential; die Browser-Oberfläche
   sendet nach dem Login die HttpOnly-Session automatisch mit.
 * Wirksamer Modus, ohne Credential-Werte: `curl -s localhost:3369/api/auth/me | jq .authMode`.
+* `curl -s localhost:3369/api/auth/status | jq` sagt zusätzlich, ob überhaupt ein
+  Firm-Token eingetragen ist (`firmApi.configured`) und wie lange die eigene
+  Browser-Sitzung noch läuft — ohne Credential, ohne Secret-Werte (v1.39.0).
 
 Flag-Referenz: [`CONFIGURATION.md`](CONFIGURATION.md) → „Auth-Modus“; Befund C1 in [`docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md`](docs/audits/2026-09-03-peer-review/findings/C1-open-mode.md).
 
@@ -180,6 +183,35 @@ Header-Credentials bleiben nutzbar. Bewusstes `local-open` benötigt keine Sessi
 
 Details: [Session-Konfiguration](CONFIGURATION.md#session-sicherheit-sec-01-v13627)
 und [Finding SEC-01](docs/audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md).
+
+## Sicherheit: Sitzung bis zum Fenster-Schließen (v1.39.0)
+
+Vorher lief die Browser-Sitzung nach 15 Minuten ab — mitten in der Arbeit, und
+ohne sichtbaren Grund. Seit v1.39.0 trägt der Browser die Sitzung, **bis er das
+Fenster schließt**; das Dashboard verlängert sie automatisch über
+`POST /api/auth/refresh`, und ein Hinweisbalken zeigt permanent, ob die
+Firm-API serverseitig ein Token eingetragen ist und welche Rolle die eigene
+Sitzung hat (`GET /api/auth/status`, secret-frei).
+
+- Autorisiert wird über den signierten Payload, nicht über das Cookie-Alter:
+  Idle-Frist `exp` (`FIRM_SESSION_IDLE_TTL_S`, Default 900 s) **und** absolute
+  Grenze `maxExp` (`FIRM_SESSION_MAX_LIFE_S`, Default 86 400 s, hart bei 7 Tagen).
+  Verlängern verschiebt nur `exp` — `iat` und `maxExp` bleiben, der globale
+  Notfallschnitt (SEC-08) wirkt also weiterhin.
+- Eine abgelaufene Idle-Frist heilt innerhalb `FIRM_SESSION_GRACE_S`
+  (Default 900 s) ohne Token-Eingabe — ausschließlich über `refresh`. Jede
+  andere Route bleibt bei `exp` hart zu (fail-closed, Test:
+  `tests/sessionRenewal.test.ts`).
+- `refresh` verlangt den Double-Submit-Header `x-csrf-token`; der API-Token
+  allein verlängert nichts. Kein Token und kein Refresh-Secret im Browser
+  (kein `localStorage`), `HttpOnly` + `Secure` + `SameSite=Strict` bleiben.
+- **Abwägung:** längere Lebensdauer bedeutet längere Missbrauchsfrist, falls
+  das Cookie selbst abfließt. Gegenhalten: `maxExp`, `POST /api/auth/logout`
+  (Admin: Body `{"all": true}`), Rotation von `FIRM_SESSION_SECRET` (entwertet
+  alle Sitzungen) und TLS-Pflicht im Browser-Betrieb.
+
+Details und Upgrade: [CONFIGURATION.md — Sitzungsdauer und Verlängerung](CONFIGURATION.md#sitzungsdauer-und-verl%C3%A4ngerung-v1390-s1)
+und [docs/HOWTO_LAN_SESSION.md](docs/HOWTO_LAN_SESSION.md).
 
 ## Sicherheit: Rate-Limits kennen keine erfundenen IPs (v1.36.14)
 

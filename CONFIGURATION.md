@@ -211,9 +211,18 @@ manuelle Freigaben muss dieses Flag `true` sein. Keine neue Variable erforderlic
   `SESSION_SECRET_REQUIRED` bzw. `SESSION_SECRET_INVALID`). In Produktion scheitert
   zusätzlich der Start. Dev-Header-Authentifizierung funktioniert ohne Sessions;
   echtes `local-open` stellt auch mit konfiguriertem Schlüssel keine Sessions aus.
-- `firm_session`: HttpOnly, Secure, SameSite=Strict, TTL **900 Sekunden**;
-  `firm_csrf`: session-gebundenes Double-Submit. Produktion erfordert HTTPS für
+- `firm_session`: HttpOnly, Secure, SameSite=Strict und **seit v1.39.0 ohne
+  `Max-Age`** (Browser-Session-Cookie, endet mit dem Schließen des Fensters);
+  `firm_csrf`: session-gebundenes Double-Submit. Autorisiert wird über `exp`
+  (Idle-Frist, Default **900 s**) und `maxExp` (absolute Grenze, Default
+  **86 400 s**) — nicht über das Cookie-Alter. Produktion erfordert HTTPS für
   den Browser-Login. Header-basierte CLI-/API-Clients bleiben unverändert.
+- **Sitzungsdauer und Verlängerung (v1.39.0, S1):** Der Client erneuert die
+  Idle-Frist über `POST /api/auth/refresh` (Double-Submit-Header
+  `x-csrf-token` Pflicht, `iat`/`maxExp` bleiben), `GET /api/auth/status`
+  liefert secret-frei Konfigurations- und Sitzungsdiagnose ins Dashboard.
+  Details und die abgewogenen Sicherheitseinbußen:
+  [Sitzungsdauer und Verlängerung](#sitzungsdauer-und-verl%C3%A4ngerung-v1390-s1).
 - Schema v2 enthält keine Rolle/Elevation/Permissions als Snapshot. Der Server
   prüft einen credential-gebundenen, keyed Konfigurations-Fingerprint (`authEpoch`)
   und leitet Rolle, Single-Admin-Elevation, Audit-ID und Permissions jedes Mal aus
@@ -221,8 +230,9 @@ manuelle Freigaben muss dieses Flag `true` sein. Keine neue Variable erforderlic
   Tokens oder Key-Rotation machen vorhandene Sessions ungültig. Die Konfiguration
   muss dazu in **allen** laufenden Instanzen aktualisiert werden (Neustart).
 - **Sofortige Session-Revocation & Logout (SEC-08):** Über `POST /api/auth/logout`
-  können Browser-Sessions unmittelbar vor Ablauf der 15-Minuten-TTL serverseitig
-  invalidiert werden (`state.revokedSessions`). Ein Replay alter oder gestohlener
+  können Browser-Sessions jederzeit serverseitig invalidiert werden
+  (`state.revokedSessions`, seit v1.39.0 bis `maxExp` — eine Verlängerung macht
+  einen Widerruf nicht zunichte). Ein Replay alter oder gestohlener
   Cookies wird sofort mit 401/403 abgelehnt.
 - **Globale Notfall-Revocation:** Admins (`broker.credentials`) können via
   `POST /api/auth/logout` mit Body `{"all": true}` alle zuvor ausgestellten
@@ -247,6 +257,61 @@ v1.36.27 neu starten; gemischter Alt-/Neubetrieb ist nicht vollständig abgesich
 Der vorgeschaltete Wächter liest `.env`; bereits gesetzte Prozess-Variablen
 (z. B. aus systemd/Secret-Management) haben Vorrang, auch bei leerem Wert.
 `next build` benötigt keine produktiven Auth-Secrets.
+
+## Sitzungsdauer und Verlängerung (v1.39.0, S1)
+
+Die Browser-Sitzung ist eine **Browser-Session-Cookie**: Sie endet mit dem
+Schließen des Fensters und läuft nicht mehr nach 15 Minuten mitten in der
+Arbeit ab. Autorisiert wird weiterhin über zwei Fristen im signierten Payload
+(`src/lib/authSession.ts`, `SESSION_PAYLOAD_VERSION = 3`):
+
+```text
+exp     Idle-Frist — wird durch Arbeiten verlängert (Client taktet /api/auth/refresh)
+maxExp  absolute Grenze der Anmeldung — wird durch Verlängerung nie verschoben
+```
+
+| Flag | Default | Bereich | Wirkung |
+| --- | --- | --- | --- |
+| `FIRM_SESSION_IDLE_TTL_S` | `900` | 60 … 86 400 s | Frist ohne Lebenszeichen; der Client meldet sich in deren Hälfte und heilt sie über die Nachfrist. `0` oder Müll ⇒ Default, **nie** „unbegrenzt“ |
+| `FIRM_SESSION_MAX_LIFE_S` | `86400` | 600 s … 7 d, ≥ Idle | Harte Decke ab `iat`. Danach `401 SESSION_MAX_LIFE_REACHED` — der Token muss neu eingetragen werden |
+| `FIRM_SESSION_GRACE_S` | `900` | 0 … 86 400 s | Nachfrist, in der `POST /api/auth/refresh` eine abgelaufene Idle-Frist heilt (Notebook-Schlaf, gesperrter Screen, gedrosseltes Tab). `0` = aus; gilt **nur** für `refresh` |
+| `SESSION_RENEW_WINDOW_S` | `min(300, Idle/2)` | 10 s … Idle/2 | Unterhalb dieser Restzeit stellt `refresh` tatsächlich neue Cookies aus |
+
+`SESSION_TTL_S` bleibt der Name der Default-Idle-Frist (900 s) und wird von
+`FIRM_SESSION_IDLE_TTL_S` übersteuert. Session-Schema v2 wird nicht mehr
+akzeptiert — nach dem Deploy ist einmalig Neu-Anmeldung nötig.
+
+Die vier Endpunkte: `POST /api/auth/login` (Token im Body, nie als Browser-Header),
+`POST /api/auth/logout` (löscht beide Cookies **und** registriert die Session bis
+`maxExp`), `POST /api/auth/refresh` (Verlängerung gegen `x-csrf-token`) und
+`GET /api/auth/status` (öffentliche Diagnose: sind Firm-Tokens eingetragen,
+welche Rolle trägt die Sitzung, wie lange noch — secret-frei, `no-store`).
+
+### Was das sicherheitstechnisch kostet — und was dagegen hält
+
+1. **Längere Missbrauchsfrist, wenn das Cookie selbst abfließt.** Wer ein
+   HttpOnly-Cookie stiehlt, kann die Sitzung aktiv halten, ohne den Token zu
+   kennen. Dagegen: `maxExp` (Default 24 h), `SameSite=Strict` + `Secure`,
+   `POST /api/auth/logout` mit `{"all": true}` als Notfallschnitt sowie
+   Rotation von `FIRM_SESSION_SECRET` oder des Tokens — beides entwertet über
+   `authEpoch` alle Sitzungen sofort.
+2. **Verlängerung ist an keinen beliebigen Token gebunden.** Der CSRF-Header
+   muss den Wert des `firm_csrf`-Cookies zurückgeben; die Legacy-Regel
+   „Header == API-Token“ akzeptiert `refresh` bewusst nicht. Ein Cookie-Leak
+   ohne Lesezugriff auf die Cookies verlängert damit nichts.
+3. **Die Nachfrist öffnet keine Tür.** `readSession` ignoriert
+   `FIRM_SESSION_GRACE_S`; jede Guard-Route antwortet `401`, sobald `exp` um
+   ist. Nachgewiesen in `tests/sessionRenewal.test.ts` (gleiche
+   Konfiguration: `renewSession` ⇒ 200, `readSession` ⇒ `null`).
+4. **`iat` rutscht nicht.** Verlängern verschiebt nur `exp`. Der globale
+   Revocation-Schnitt (SEC-08) bleibt wirksam: Ein Cut tötet alle vor ihm
+   ausgestellten Sitzungen — auch verlängerte.
+5. **Revocation bleibt RAM** (unverändert seit SEC-08): Nach einem Neustart
+   sind Einzel-Widerrufe und der Cut weg. Harte Trennung erreicht die Rotation
+   von `FIRM_SESSION_SECRET`.
+6. **Sitzungs-Wiederherstellung des Browsers** kann das Cookie rehydrieren.
+   Die Rechte hängen am Payload: ist `exp` um und die Nachfrist vorbei, nützt
+   das beste Cookie nichts.
 
 ## Rate-Limit-Identität: `TRUSTED_PROXY_IPS` (C2, v1.36.14)
 
@@ -442,6 +507,10 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `FIRM_API_TOKEN` | *(leer)* | Operator-Credential für `POST`/`PUT` und sensible Dashboard-Reads (`firm.read`); `scripts/setup-cachyos.sh` erzeugt eines |
 | `FIRM_VIEWER_TOKEN` | *(leer)* | Viewer-Credential für sensible Dashboard-Reads (`firm.read`), ohne Schreibrechte |
 | `FIRM_SESSION_SECRET` | *(leer; kein Fallback)* | Unabhängiger zufälliger Session-Signierschlüssel, mindestens 32 Zeichen; Pflicht für Sessions und Produktion mit Tokens (SEC-01) |
+| `FIRM_SESSION_IDLE_TTL_S` | `900` | Idle-Frist der Browser-Sitzung in Sekunden (60 … 86 400), `0` ⇒ Default; wird über `POST /api/auth/refresh` verlängert (v1.39.0) |
+| `FIRM_SESSION_MAX_LIFE_S` | `86400` | Absolute Grenze ab Anmeldung in Sekunden (600 … 7 d, ≥ Idle); Verlängerungen verschieben sie nicht (v1.39.0) |
+| `FIRM_SESSION_GRACE_S` | `900` | Nachfrist, in der `POST /api/auth/refresh` eine abgelaufene Idle-Frist heilt; `0` schaltet sie ab, sonst nirgends wirksam (v1.39.0) |
+| `SESSION_RENEW_WINDOW_S` | `min(300, Idle/2)` | Restzeit, unterhalb derer `refresh` neue Cookies ausstellt (10 s … Idle/2) (v1.39.0) |
 | `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
 | `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |
 | `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste vertrauenswürdiger Reverse Proxys; erst damit zählen `x-verified-ip` (immer) bzw. `x-forwarded-for` (nur bei verifiziertem Socket-Peer). Leer ⇒ Header werden ignoriert, Bucket = Socket-Adresse bzw. `local` |

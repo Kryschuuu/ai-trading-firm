@@ -168,12 +168,29 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 
 Im Token-Betrieb (`FIRM_API_TOKEN` gesetzt, `AUTH_MODE=token-required`) braucht
 das Dashboard eine Browser-Sitzung: `POST /api/auth/login` prüft den Token
-einmal serverseitig und setzt dafür ein HttpOnly-Cookie (`firm_session`,
-**15 Minuten** gültig). Der Token selbst bleibt nie im Browser (W1, v1.36.23).
+einmal serverseitig und setzt dafür ein HttpOnly-Cookie (`firm_session`). Seit
+v1.39.0 ist das eine **Browser-Session-Cookie ohne `Max-Age`**: sie endet mit
+dem Schließen des Fensters und läuft nicht mehr nach 15 Minuten mitten in der
+Arbeit ab — der Balken oben verlängert sie über `POST /api/auth/refresh`,
+solange das Tab lebt. Autorisiert bleibt über zwei Fristen: Idle-Frist
+(`FIRM_SESSION_IDLE_TTL_S`, 900 s) und absolute Grenze (`FIRM_SESSION_MAX_LIFE_S`,
+24 h, durch Verlängern **nicht** verschiebbar). Der Token selbst bleibt nie im
+Browser (W1, v1.36.23).
+
+Der Balken zeigt immer den Befund — zuerst die Frage, ob überhaupt ein
+Firm-Token eingetragen ist (`Firm-API: eingetragen (+Operator)` bzw.
+`KEIN Token gesetzt`), dann Rolle und herunterzählende Restzeit
+(`angemeldet als Operator · Session noch 13:04`), daneben **Abmelden** und
+**Verlängern**. `GET /api/auth/status` liefert das secret-frei (nur Booleans
+und Restzeiten).
 
 | Hinweis im Dashboard | Bedeutung | Was zu tun ist |
 | --- | --- | --- |
-| **Sitzung abgelaufen — bitte neu anmelden.** | `GET /api/firm` antwortete `401`: Dienst-Neustart, TTL abgelaufen oder `FIRM_SESSION_SECRET` rotiert | Token aus `.env` (`FIRM_API_TOKEN`) eintragen → **Anmelden**. Der Firm-Status lädt automatisch neu (seit v1.36.41, kein `F5` nötig) |
+| **Sitzung abgelaufen — bitte neu anmelden.** | `GET /api/firm` antwortete `401`: Dienst-Neustart, Idle-Frist abgelaufen und Nachfrist vorbei, oder `FIRM_SESSION_SECRET` rotiert | **Verlängern** versuchen (heilt innerhalb der Nachfrist), sonst Token aus `.env` (`FIRM_API_TOKEN`) eintragen → **Anmelden**. Der Firm-Status lädt automatisch neu (seit v1.36.41, kein `F5` nötig) |
+| **Angemeldet als … · Session noch mm:ss** | der Normalzustand seit v1.39.0; die Zahl ist die Restzeit der Idle-Frist | nichts — der Takt im Dashboard erneuert automatisch; `max hh:mm:ss` ist die absolute Grenze der Anmeldung |
+| **Sitzung war im Hintergrund inaktiv (mm:ss Puffer) — wird automatisch wiederhergestellt** | Tab war gedrosselt oder der Rechner im Schlaf; die Idle-Frist ist um, die Nachfrist läuft noch. Schreib-/Lese-Routen sind weiter zu | **Verlängern** im Balken (oder einen Moment warten — der Takt heilt von selbst, `F5` ist nicht nötig) |
+| **Anmeldung vom Server bestätigt, aber keine Sitzungs-Cookie im Browser** | der häufigste LAN-Fehler: App über `http://192.168.x.x` geöffnet, `Secure`-Cookie verworfen | über `https://` (TLS-Proxy) oder `localhost` öffnen — [HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md) |
+| **KEIN Token gesetzt** | `FIRM_API_TOKEN`/`FIRM_ADMIN_TOKEN`/`FIRM_VIEWER_TOKEN` fehlen serverseitig | im Server-`.env` nachtragen und neu starten — das Dashboard kann das nicht erledigen |
 | **Zugriff verweigert — Anmeldung oder Berechtigung fehlt.** | `403`: die Session ist gültig, aber die Rolle hat `firm.read` nicht | mit einem Token der passenden Rolle neu anmelden (Rollenmatrix: [security/README.md](security/README.md)) |
 | **Firm-Status nicht verfügbar (Datenbank).** | `5xx` von `GET /api/firm` — PostgreSQL antwortet nicht | die angezeigte Anleitung prüfen (`DATABASE_URL`, `npx drizzle-kit push`); die Modul-Tabs bleiben nutzbar |
 | **Firm-Status nicht erreichbar (Netzwerk).** | der Dienst selbst antwortet nicht | `systemctl status ai-trading-firm`, `journalctl -u ai-trading-firm -n 50 --no-pager` |
