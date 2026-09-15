@@ -72,6 +72,59 @@
 #   * PostgreSQL-Probleme: docs/SETUP_PG_TROUBLESHOOTING.md
 #   * Setup-/Validierungsfehler: docs/SETUP_BUGS.md
 #
+# ── Interpreter-Guard (SET-09, v1.39.1) ─────────────────────────────────────
+# Der Shebang `#!/usr/bin/env bash` gilt nur beim direkten Ausführen. Wer die
+# Datei mit einem anderen Interpreter aufruft (`sh scripts/setup-cachyos.sh`,
+# dash, busybox) oder in fish/zsh einbindet, läuft gegen bash-only Syntax
+# (`[[ … ]]`, `${VAR^^}`, `<<<`, `(( … ))`) und sieht Fehler, die wie ein Bug im
+# Setup aussehen — nicht wie ein Aufruf-Problem. Der Guard muss VOR
+# `set -Eeuo pipefail` stehen und selbst POSIX-korrekt sein: dash/busybox kennen
+# weder pipefail noch `[[ … ]]`, und ein `[[` im Guard wäre genau der Fehler,
+# den der Guard melden will.
+if [ -z "${BASH_VERSION:-}" ]; then
+  # Wichtig: kein Backtick und kein $( … ) in diesem Text — der Guard läuft im
+  # FALSCHEN Interpreter, und dort wäre genau das eine Befehlsausführung
+  # (in dash reproduziert: „role: not found" statt der Meldung). Ein
+  # Single-quoted-Heredoc ist der einzige Weg, das garantiiert wörtlich zu halten.
+  cat 1>&2 <<'GUARD'
+setup-cachyos.sh braucht bash — aufgerufen wurde es ohne BASH_VERSION
+(dash/sh/ksh/fish können dieses Skript nicht ausführen: [[ … ]], ${VAR^^},
+(( … )) und Arrays sind Bash-Syntax).
+
+  Richtig:
+    bash scripts/setup-cachyos.sh --variant a
+    ./scripts/setup-cachyos.sh --variant a        (Shebang beachten)
+
+  fish / zsh — alle bash-Skripte dieses Projekts durch bash laufen lassen:
+    bash scripts/setup-cachyos.sh --variant a
+    bash scripts/validate-setup.sh
+    bash scripts/smoke-test.sh
+
+  .env shell-unabhängig laden. Ein nicht geladenes DATABASE_URL ist die
+  häufigste Ursache für „FATAL: role <login> does not exist“: pg_dump/psql
+  fallen dann auf den Unix-Socket und den OS-Benutzer zurück.
+    fish:  scripts/env-run.sh --fish | source
+    bash:  set -a; eval "$(scripts/env-run.sh)"; set +a
+    zsh:   wie bash
+
+  DETAILS: docs/HOWTO_RESET_LOKAL.md, Abschnitt „Shell-Kompatibilität"
+GUARD
+  exit 2
+fi
+
+# bash < 4 hat weder `${VAR^^}` noch brauchbare Assoziativ-Handling-Extras.
+# Der Vergleich bleibt String-basiert, damit er auch ohne arithmetische
+# Bash-Erweiterungen auswertbar ist (und in Tests nicht von LC_* abhängt).
+_bash_major="$(printf '%s' "${BASH_VERSION:-0}" | cut -d. -f1)"
+case "$_bash_major" in
+  ''|1|2|3)
+    if [ -n "${BASH_VERSION:-}" ]; then
+      printf 'bash %s gefunden, benötigt wird bash >= 4 (Parameter-Erweiterungen, Arrays in helpers).\n' "$BASH_VERSION" 1>&2
+      exit 2
+    fi ;;
+esac
+unset _bash_major
+
 set -Eeuo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,6 +176,10 @@ API_TOKEN=""
 DO_BUILD="true"
 DO_VALIDATE="true"
 DO_SYNC_MARKETS="false"
+# SET-09 (v1.39.1): .env wird standardmäßig NICHT ersetzt, sondern ergänzt
+# (Merge). `--force-env` stellt den alten Neu-Schreib-Pfad her — ausdrücklich,
+# weil dabei Operator-Schlüssel verloren gehen, die das Template nicht kennt.
+FORCE_ENV="false"
 RESET_CLUSTER="false"
 NON_INTERACTIVE="false"
 DRY_RUN="false"
@@ -273,6 +330,9 @@ Ablauf:
   --skip-build          Schritt 09 (next build) überspringen
   --skip-validate       Schritt 10 (18-Check-Validierung) überspringen
   --min-pass N          Mindestanzahl bestandener Checks (Default 15 von 18)
+  --force-env           .env aus dem Template NEU schreiben (Sicherungskopie +
+                        Rückholung bekannter Schlüssel). Default ist Merge:
+                        bestehende .env bleibt erhalten, fehlt nur ergänzt (SET-09)
   --reset-cluster       Cluster-Reset anbieten, falls der Check fehlschlägt
   --dry-run             keine Schreiboperationen (kein initdb, kein psql,
                         kein .env, kein Seed, kein Server-Start); lesende
@@ -310,6 +370,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build)       DO_BUILD="false"; shift ;;
     --skip-validate)    DO_VALIDATE="false"; shift ;;
     --min-pass)         need_value "$@"; MIN_PASS="$2"; shift 2 ;;
+    --force-env)        FORCE_ENV="true"; shift ;;
     --reset-cluster)    RESET_CLUSTER="true"; shift ;;
     --dry-run)          DRY_RUN="true"; shift ;;
     --non-interactive|-y) NON_INTERACTIVE="true"; shift ;;
@@ -354,7 +415,15 @@ on_error() {
   local exit_code=$1 line=$2
   printf '\n%sAbbruch in Schritt „%s" (Zeile %s, Exit %s).%s\n' \
     "$C_RED" "$CURRENT_STEP" "$line" "$exit_code" "$C_RESET" >&2
-  [[ -n "$LOG_FILE" ]] && printf 'Log: %s\n' "$LOG_FILE" >&2
+  # SET-09 (v1.39.1): bisher war nur die Zeilennummer sichtbar — bei einem
+  # „Exit 1 ohne jede Meldung" half das null. Jetzt: fehlgeschlagenes Kommando
+  # und umgebende Funktion, damit der Befund in einem Schritt diagnostizierbar ist.
+  printf '  %sfehlgeschlagenes Kommando:%s %s (in %s:%s)\n' \
+    "$C_DIM" "$C_RESET" "${BASH_COMMAND:-?}" "${FUNCNAME[1]:-main}" "$line" >&2
+  if [[ -n "$LOG_FILE" ]]; then
+    printf 'Log: %s\n' "$LOG_FILE" >&2
+    _log_to_file "FATAL Zeile ${line} Exit ${exit_code}: ${BASH_COMMAND:-?} (in ${FUNCNAME[1]:-main})"
+  fi
   printf 'Hilfe: docs/SETUP_BUGS.md · docs/SETUP_PG_TROUBLESHOOTING.md\n' >&2
 }
 trap 'on_error $? $LINENO' ERR
@@ -413,6 +482,7 @@ step_01_preflight() {
     die "Node.js 20+ nötig, gefunden: $(node --version 2>/dev/null || echo 'keins')"
   fi
   ok "Node.js $(node --version) · npm $(npm --version)"
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -439,6 +509,7 @@ step_02_packages() {
   else
     die "Ohne diese Pakete geht es nicht weiter: ${missing[*]}"
   fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -606,6 +677,7 @@ RECOVER
   # ── 6) Dienst starten (mit Fremdinstanz-Erkennung) ──
   pg_service_start
   pg_wait_ready
+  return 0
 }
 
 # Cluster zurücksetzen und neu initialisieren. Nur nach expliziter Zustimmung
@@ -822,6 +894,7 @@ SQL
   else
     ok "Server-Encoding: ${enc:-UTF8}."
   fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -842,76 +915,66 @@ generate_token() {
 }
 
 # Schreibt KEY=VALUE in .env, wenn der Schlüssel fehlt (sonst unverändert).
-env_ensure_key() {
-  local key="$1" value="$2" file="$3"
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    return 1  # vorhanden
+# Rückgabe ist ein Signal, kein Fehler: 0 = ergänzt, 1 = bereits vorhanden.
+# SET-09 (v1.39.1): Aufrufer müssen das in `if`-Bedingungen auswerten. Ein
+# nacktes `env_ensure_key … && added=$((added+1))` als letzte Zeile einer
+# Funktion liefert deren Status (1) bis nach `main` durch — `set -Ee` deutet
+# das als Fehlschritt um und bricht ab, ohne dass etwas kaputt war.
+# Hängt eine `KEY=WERT`-Zeile an eine Datei an — und stellt vorher das
+# Zeilenende sicher. Ohne das wäre `TRUSTED_PROXY_IPS=127.0.0.1FIRM_SESSION_SECRET=…`
+# das Ergebnis, wenn die vorhandene .env (Hand-Edit, `printf >>`) mit einem
+# Wert ohne Umbruch endet. Getestet in tests/setupScripts.test.ts.
+env_append_line() {
+  local line="$1" file="$2"
+  if [[ -s "$file" && "$(tail -c 1 "$file" | od -An -c | tr -d ' \n')" != '\n' ]]; then
+    printf '\n' >>"$file"
   fi
-  printf '%s=%s\n' "$key" "$value" >>"$file"
+  printf '%s\n' "$line" >>"$file"
   return 0
 }
 
-step_05_env() {
-  step "Konfiguration (.env)"
-
-  cd "$PROJECT_ROOT"
-  local env_file="$PROJECT_ROOT/.env"
-  local created="false"
-
-  # DRY-02: Im Dry-Run keine Rückfrage zum Überschreiben, kein Backup (`cp`)
-  # und kein Schreiben — nur melden, was passieren würde.
-  if [[ "$DRY_RUN" == "true" ]]; then
-    if [[ -f "$env_file" ]]; then
-      note "(dry-run) Bestehende .env bliebe erhalten — fehlende Schlüssel würden ergänzt (keine Änderung)."
-    else
-      note "(dry-run) .env würde neu geschrieben (Rechte 600) — nicht ausgeführt."
-    fi
-  elif [[ -f "$env_file" ]]; then
-    if [[ "$NON_INTERACTIVE" == "true" ]] || ! ask "Vorhandene .env überschreiben? (fehlende Schlüssel werden sonst nur ergänzt)"; then
-      ok "Bestehende .env bleibt erhalten — fehlende Schlüssel werden ergänzt."
-      # Bestehende DATABASE_URL übernehmen, damit Schritt 07/10 dieselbe DB nutzen.
-      local existing_url
-      existing_url="$(sed -n 's/^DATABASE_URL=//p' "$env_file" | tail -1 || true)"
-      if [[ -n "$existing_url" && "$existing_url" != "$DATABASE_URL" ]]; then
-        warn ".env enthält eine andere DATABASE_URL — sie hat Vorrang vor der hier erzeugten."
-        DATABASE_URL="$existing_url"
-      fi
-    else
-      cp "$env_file" "${env_file}.bak-$(date -u '+%Y%m%d-%H%M%S')"
-      ok "Sicherungskopie der alten .env angelegt."
-      created="true"
-    fi
-  else
-    created="true"
+env_ensure_key() {
+  local key="$1" value="$2" file="$3"
+  if grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" 2>/dev/null; then
+    return 1  # vorhanden
   fi
+  env_append_line "$key=$value" "$file"
+  return 0
+}
 
-  # ── API-Token (B5, gehärtet in C1/v1.36.13) ─────────────────────────────
-  # npm start bindet 0.0.0.0 (package.json) UND setzt NODE_ENV=production.
-  # Seit v1.36.13 ist der offene Local-Mode kein Default mehr: ohne irgendein
-  # Token wirft der Boot-Guard (src/auth/authMode.ts) und der Dienst startet
-  # nicht. Offen laufen kann nur, wer AUTH_MODE=local-open ausdrücklich setzt.
-  OPEN_MODE_REQUESTED="false"
-  if [[ -n "$API_TOKEN" ]]; then
-    note "FIRM_API_TOKEN aus --api-token übernommen."
-  elif grep -qE '^FIRM_API_TOKEN=.+' "$env_file" 2>/dev/null; then
-    ok "FIRM_API_TOKEN bereits gesetzt."
-  elif [[ "$GENERATE_API_TOKEN" == "true" ]]; then
-    # ERR-01: `|| true` hält die ERR-Falle still — ein leerer Wert fällt in
-    # die klare die()-Meldung darunter, nicht in „Abbruch (Zeile …)“.
-    API_TOKEN="$(generate_token || true)"
-    [[ -n "$API_TOKEN" ]] || die "Token-Erzeugung fehlgeschlagen (openssl rand)."
-    note "Neues FIRM_API_TOKEN erzeugt (wird in .env geschrieben, Rechte 600)."
-  else
-    API_TOKEN=""
-    OPEN_MODE_REQUESTED="true"
-    warn "KEIN FIRM_API_TOKEN (--no-api-token) — die App bindet 0.0.0.0, die Schreib-API ist im LAN offen."
-    warn "Seit v1.36.13 (Befund C1) verweigert NODE_ENV=production den Start ohne jedes Token."
-    warn "Deshalb wird AUTH_MODE=local-open in .env eingetragen — ein bewusster, dokumentierter Opt-in."
-    warn "Nur in einer vertrauenswürdigen, isolierten Umgebung vertretbar. Empfohlen: Token erzeugen lassen."
+# Liest einen Schlüssel aus einer .env-Datei ("" wenn fehlt). Immer Exit 0,
+# damit `VAR="$(env_read_key …)"` die ERR-Falle nie auslösen kann.
+# Semantik wie dotenv (was src/lib/* über `dotenv/config` liest): optionale
+# Quotes außen ab, ` #`-Kommentar bei unquotierten Werten weg, CRLF tolerant.
+# ACHTUNG: ein unquotiertes `#` im Wert (z. B. im DB-Passwort) wird ebenfalls
+# abgeschnitten — Passwörter mit `#` müssen in der .env gequotet werden.
+env_read_key() {
+  local key="$1" file="$2" value=""
+  if [[ -f "$file" ]]; then
+    value="$(sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=(.*)$/\2/p" "$file" | tail -1)" || value=""
+    value="${value%$'\r'}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    local dq='"' sq
+    sq="'"
+    if [[ "${value:0:1}" == "$dq" && "${value: -1}" == "$dq" && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value:0:1}" == "$sq" && "${value: -1}" == "$sq" && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    else
+      value="${value%%[[:space:]]#*}"
+      value="${value%"${value##*[![:space:]]}"}"
+    fi
   fi
+  printf '%s' "$value"
+  return 0
+}
 
-  # ── Modelle je Variante ──────────────────────────────────────────────────
-  local m_big m_sml m_cod m_exec ctx
+# Der .env-Template-Rumpf. Bewusst EINE Funktion: der Neu-Schreib-Pfad
+# (`--force-env`) und künftige `--print-template`-Helfer dürfen nicht
+# auseinanderdriften — was hier steht, ist exakt das, was in eine frische .env
+# kommt. Alle Werte stammen aus den geprüften Globals des Skripts.
+env_write_template() {
+  local file="$1" m_big m_sml m_cod m_exec ctx
   if [[ "$VARIANT" == "a" ]]; then
     m_big="qwen2.5:3b-instruct-q4_K_M"; m_sml="qwen2.5:3b-instruct-q4_K_M"
     m_cod="qwen2.5:3b-instruct-q4_K_M"; m_exec="qwen2.5:1.5b-instruct-q4_K_M"
@@ -921,9 +984,7 @@ step_05_env() {
     m_cod="qwen2.5-coder:7b";            m_exec="qwen2.5:7b-instruct-q4_K_M"
     ctx=8192
   fi
-
-  if [[ "$created" == "true" && "$DRY_RUN" != "true" ]]; then
-    cat >"$env_file" <<ENV
+  cat >"$file" <<ENV
 # Erzeugt von scripts/setup-cachyos.sh — Variante ${VARIANT^^}, $(date -u '+%Y-%m-%d %H:%M UTC')
 # Rechte 600: diese Datei enthält Zugangsdaten.
 
@@ -969,7 +1030,117 @@ BITUNIX_ENABLED=true
 PAPER_MODE=broker-market-data
 PAPER_STATIC_FALLBACK=false
 ENV
-    ok ".env neu geschrieben."
+  return 0
+}
+
+# SET-09 (v1.39.1): Schlüssel, die bei `--force-env` aus der Sicherungskopie
+# zurückgeholt werden, wenn das Template sie nicht (mehr) schreibt. Kern der
+# Sache: Neu-Schreiben einer .env darf keine Zugangsdaten still eliminieren.
+ENV_RESCUE_KEYS=(
+  DATABASE_URL FIRM_API_TOKEN FIRM_ADMIN_TOKEN FIRM_VIEWER_TOKEN FIRM_SESSION_SECRET
+  AUTH_MODE PAPER_MODE PAPER_STATIC_FALLBACK STARTING_EQUITY REQUIRE_HUMAN_APPROVAL
+  PORT OLLAMA_BASE_URL LLM_PROVIDER MARKET_SYNC_ENABLED MARKET_SYNC_VENUES
+  BITUNIX_ENABLED UNIVERSE_DATA_DIR TRUSTED_PROXY_IPS NEWS_PROVIDER
+)
+
+# Zählt die geretteten Schlüssel auf stdout (der Aufrufer fängt sie ein).
+env_rescue_keys() {
+  local target="$1" source="$2" key value added=0
+  [[ -f "$source" ]] || { printf '0'; return 0; }
+  for key in "${ENV_RESCUE_KEYS[@]}"; do
+    grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$target" 2>/dev/null && continue
+    value="$(env_read_key "$key" "$source")"
+    [[ -n "$value" ]] || continue
+    env_append_line "$key=$value" "$target"
+    added=$((added + 1))
+  done
+  printf '%s' "$added"
+  return 0
+}
+
+step_05_env() {
+  step "Konfiguration (.env)"
+
+  cd "$PROJECT_ROOT"
+  local env_file="$PROJECT_ROOT/.env"
+  local created="false"
+
+  local env_backup=""
+
+  # DRY-02: Im Dry-Run keine Rückfrage zum Überschreiben, kein Backup (`cp`)
+  # und kein Schreiben — nur melden, was passieren würde.
+  #
+  # SET-09 (v1.39.1): Der bisherige Rückfrage-Pfad ("überschreiben? j") hat die
+  # .env aus dem Template NEU geschrieben. Alles, was das Template nicht kennt —
+  # Broker-Flags, Limits, TRUSTED_PROXY_IPS, auch ein bereits gesetztes
+  # FIRM_API_TOKEN — war damit still weg, und zwar bevor der Nutzer den Rest des
+  # Setups sehen konnte. Deshalb: Merge ist der Default, Ersetzen ist eine
+  # explizite Entscheidung (`--force-env`) und holt bekannte Schlüssel aus der
+  # Sicherungskopie zurück.
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ "$FORCE_ENV" == "true" ]]; then
+      note "(dry-run) --force-env: .env würde gesichert und aus dem Template neu geschrieben."
+    elif [[ -f "$env_file" ]]; then
+      note "(dry-run) Bestehende .env bliebe erhalten — fehlende Schlüssel würden ergänzt (keine Änderung)."
+    else
+      note "(dry-run) .env würde neu geschrieben (Rechte 600) — nicht ausgeführt."
+    fi
+  elif [[ -f "$env_file" && "$FORCE_ENV" != "true" ]]; then
+    ok "Bestehende .env bleibt erhalten — fehlende Schlüssel werden ergänzt (ersetzen: --force-env)."
+    # Bestehende DATABASE_URL übernehmen, damit Schritt 07/10 dieselbe DB nutzen.
+    local existing_url
+    existing_url="$(env_read_key DATABASE_URL "$env_file")"
+    if [[ -n "$existing_url" && "$existing_url" != "$DATABASE_URL" ]]; then
+      warn ".env enthält eine andere DATABASE_URL — sie hat Vorrang vor der hier erzeugten."
+      DATABASE_URL="$existing_url"
+    fi
+  elif [[ -f "$env_file" ]]; then
+    env_backup="${env_file}.bak-$(date -u '+%Y%m%d-%H%M%S')"
+    cp "$env_file" "$env_backup"
+    chmod 600 "$env_backup"
+    ok "Sicherungskopie der alten .env angelegt: $(basename "$env_backup")"
+    created="true"
+  else
+    created="true"
+  fi
+
+  # ── API-Token (B5, gehärtet in C1/v1.36.13) ─────────────────────────────
+  # npm start bindet 0.0.0.0 (package.json) UND setzt NODE_ENV=production.
+  # Seit v1.36.13 ist der offene Local-Mode kein Default mehr: ohne irgendein
+  # Token wirft der Boot-Guard (src/auth/authMode.ts) und der Dienst startet
+  # nicht. Offen laufen kann nur, wer AUTH_MODE=local-open ausdrücklich setzt.
+  OPEN_MODE_REQUESTED="false"
+  if [[ -n "$API_TOKEN" ]]; then
+    note "FIRM_API_TOKEN aus --api-token übernommen."
+  elif [[ -n "$(env_read_key FIRM_API_TOKEN "$env_file")" ]]; then
+    ok "FIRM_API_TOKEN bereits gesetzt."
+  elif [[ "$GENERATE_API_TOKEN" == "true" ]]; then
+    # ERR-01: `|| true` hält die ERR-Falle still — ein leerer Wert fällt in
+    # die klare die()-Meldung darunter, nicht in „Abbruch (Zeile …)“.
+    API_TOKEN="$(generate_token || true)"
+    [[ -n "$API_TOKEN" ]] || die "Token-Erzeugung fehlgeschlagen (openssl rand)."
+    note "Neues FIRM_API_TOKEN erzeugt (wird in .env geschrieben, Rechte 600)."
+  else
+    API_TOKEN=""
+    OPEN_MODE_REQUESTED="true"
+    warn "KEIN FIRM_API_TOKEN (--no-api-token) — die App bindet 0.0.0.0, die Schreib-API ist im LAN offen."
+    warn "Seit v1.36.13 (Befund C1) verweigert NODE_ENV=production den Start ohne jedes Token."
+    warn "Deshalb wird AUTH_MODE=local-open in .env eingetragen — ein bewusster, dokumentierter Opt-in."
+    warn "Nur in einer vertrauenswürdigen, isolierten Umgebung vertretbar. Empfohlen: Token erzeugen lassen."
+  fi
+
+  # ── Template schreiben (nur bei frisch angelegter oder --force-env .env) ─
+  if [[ "$created" == "true" && "$DRY_RUN" != "true" ]]; then
+    env_write_template "$env_file" || die ".env konnte nicht geschrieben werden: $env_file"
+    ok ".env aus dem Template neu geschrieben."
+    if [[ -n "$env_backup" ]]; then
+      local rescued
+      rescued="$(env_rescue_keys "$env_file" "$env_backup")"
+      if [[ "${rescued:-0}" != "0" ]]; then
+        ok "${rescued} Schlüssel aus der Sicherungskopie zurückgeholt (fehlen im Template)."
+      fi
+      note "Alle übrigen eigenen Einträge stehen unverändert in: $env_backup"
+    fi
   fi
 
   # ── Schlüssel ergänzen (idempotent, auch bei bestehender .env) ───────────
@@ -977,39 +1148,53 @@ ENV
     # SEC-01: neue Secrets nie in eine noch gruppen-/weltlesbare Datei schreiben.
     chmod 600 "$env_file"
     local added=0
-    if ! grep -qE '^[[:space:]]*(export[[:space:]]+)?FIRM_SESSION_SECRET[[:space:]]*=' "$env_file"; then
+    # SET-09 (v1.39.1): Zähler als lokale Funktion statt
+    # `env_ensure_key … && added=$((added+1))`. War ein Schlüssel schon vorhanden,
+    # endete die Funktion mit Status 1 und `main` brach ab — mit "Abbruch …
+    # (Exit 1)" und OHNE irgendeine Fehlermeldung. env_add() liefert immer 0.
+    env_add() {
+      local key="$1" value="$2"
+      if env_ensure_key "$key" "$value" "$env_file"; then
+        added=$((added + 1))
+      fi
+      return 0
+    }
+    if [[ -z "$(env_read_key FIRM_SESSION_SECRET "$env_file")" ]]; then
       local session_secret
       session_secret="$(generate_token)" || die "Session-Secret-Erzeugung fehlgeschlagen."
       [[ "$session_secret" =~ ^[a-f0-9]{64}$ ]] || die "Session-Secret-Erzeugung lieferte keinen sicheren Zufallswert."
-      env_ensure_key "FIRM_SESSION_SECRET" "$session_secret" "$env_file" && added=$((added+1))
+      env_add "FIRM_SESSION_SECRET" "$session_secret"
       unset session_secret
       note "Unabhaengiges FIRM_SESSION_SECRET erzeugt (nur .env, nie im Log)."
     fi
     # Vorhandene Werte niemals still rotieren; ungueltige Werte meldet der Boot-Guard.
-    env_ensure_key "DATABASE_URL"      "$DATABASE_URL"                 "$env_file" && added=$((added+1))
-    env_ensure_key "PORT"              "$APP_PORT"                     "$env_file" && added=$((added+1))
-    env_ensure_key "STARTING_EQUITY"   "10000"                         "$env_file" && added=$((added+1))
-    env_ensure_key "LLM_PROVIDER"      "ollama"                        "$env_file" && added=$((added+1))
-    env_ensure_key "OLLAMA_BASE_URL"   "http://${LLM_HOST}:11434"      "$env_file" && added=$((added+1))
-    env_ensure_key "UNIVERSE_DATA_DIR" "data/universe"                 "$env_file" && added=$((added+1))
-    env_ensure_key "MARKET_SYNC_ENABLED" "true"                        "$env_file" && added=$((added+1))
+    env_add "DATABASE_URL" "$DATABASE_URL"
+    env_add "PORT" "$APP_PORT"
+    env_add "STARTING_EQUITY" "10000"
+    env_add "LLM_PROVIDER" "ollama"
+    env_add "OLLAMA_BASE_URL" "http://${LLM_HOST}:11434"
+    env_add "UNIVERSE_DATA_DIR" "data/universe"
+    env_add "MARKET_SYNC_ENABLED" "true"
     # Ohne Venue-Flag läuft der Sync leer (VENUE_DISABLED) und der Scanner
     # bleibt dauerhaft WARMING — der interaktive Warmup-Schritt würde sonst
     # scheinbar erfolgreich „nichts“ synchronisieren.
-    env_ensure_key "MARKET_SYNC_VENUES"  "BITUNIX"                     "$env_file" && added=$((added+1))
-    env_ensure_key "BITUNIX_ENABLED"     "true"                        "$env_file" && added=$((added+1))
-    env_ensure_key "PAPER_MODE"        "broker-market-data"            "$env_file" && added=$((added+1))
+    env_add "MARKET_SYNC_VENUES" "BITUNIX"
+    env_add "BITUNIX_ENABLED" "true"
+    env_add "PAPER_MODE" "broker-market-data"
     if [[ -n "$API_TOKEN" ]]; then
-      env_ensure_key "FIRM_API_TOKEN"  "$API_TOKEN"                    "$env_file" && added=$((added+1))
+      env_add "FIRM_API_TOKEN" "$API_TOKEN"
     fi
     # C1 (v1.36.13): Produktion ohne Token verweigert den Start (Boot-Guard in
     # src/instrumentation.ts). Wer --no-api-token waehlt, bekommt den Offen-
     # Betrieb deshalb als ausdruecklichen Opt-in in die .env geschrieben.
     if [[ "$OPEN_MODE_REQUESTED" == "true" ]]; then
-      env_ensure_key "AUTH_MODE"       "local-open"                    "$env_file" && added=$((added+1))
+      env_add "AUTH_MODE" "local-open"
     fi
-    (( added > 0 )) && ok "${added} fehlende(r) Schlüssel in .env ergänzt." \
-                    || note "Alle benötigten Schlüssel sind bereits in .env vorhanden."
+    if (( added > 0 )); then
+      ok "${added} fehlende(r) Schlüssel in .env ergänzt."
+    else
+      note "Alle benötigten Schlüssel sind bereits in .env vorhanden."
+    fi
 
     chmod 600 .env
     ok ".env Rechte: 600."
@@ -1020,10 +1205,19 @@ ENV
   # Token aus der .env lesen, falls es aus einer früheren Installation stammt
   # (sonst könnte Schritt 10 keine autorisierten Requests stellen).
   if [[ -z "$API_TOKEN" ]]; then
-    API_TOKEN="$(sed -n 's/^FIRM_API_TOKEN=//p' "$env_file" 2>/dev/null | tail -1 || true)"
-    API_TOKEN="${API_TOKEN%$'\r'}"
-    [[ -n "$API_TOKEN" ]] && ok "FIRM_API_TOKEN aus bestehender .env übernommen."
+    API_TOKEN="$(env_read_key FIRM_API_TOKEN "$env_file")"
+    if [[ -n "$API_TOKEN" ]]; then
+      ok "FIRM_API_TOKEN aus bestehender .env übernommen."
+    else
+      warn "Kein FIRM_API_TOKEN in .env — Schritt 10 (Validierung) kann nicht autorisieren."
+      warn "Behebung: --api-token <TOKEN> oder FIRM_API_TOKEN in .env (docs/CONFIGURATION.md)."
+    fi
   fi
+
+  # SET-09 (v1.39.1): Schritt-Funktionen enden explizit mit 0. Ein Test als
+  # letzte Zeile (`[[ … ]] && ok …`) wäre sonst der Rückgabewert der Funktion —
+  # und über `set -Ee` ein Setup-Abbruch, obwohl alles durchgelaufen ist.
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1041,13 +1235,16 @@ step_06_dependencies() {
   else
     warn "Ollama auf ${LLM_HOST}:11434 nicht erreichbar."
     warn "Das System startet trotzdem und nutzt die deterministische Regel-Engine."
-    [[ "$VARIANT" == "b" ]] && warn "Variante B: docs/INSTALL.md Kapitel 8.1 (LAN-Freigabe) prüfen."
+    if [[ "$VARIANT" == "b" ]]; then
+      warn "Variante B: docs/INSTALL.md Kapitel 8.1 (LAN-Freigabe) prüfen."
+    fi
   fi
 
   # npm ci statt npm install: reproduzierbar aus package-lock.json.
   run npm ci --no-audit --no-fund \
     || die "npm ci fehlgeschlagen — package-lock.json und Netzwerk prüfen."
   ok "Node-Abhängigkeiten installiert."
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1100,6 +1297,7 @@ step_07_schema() {
     die "Kritische Tabellen fehlen: ${missing[*]}. Schema-Push wiederholen: DATABASE_URL=… npx drizzle-kit push --force"
   fi
   ok "Kritische Tabellen vorhanden (agents, missions, risk_config, kill_switches, positions, equity_snapshots, broker_credentials, venue_control_state)."
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1177,6 +1375,7 @@ step_08_universe() {
     note "Marktdaten-Warmup übersprungen. Nachholen: npm run market:sync -- --venue=BITUNIX"
     note "(ohne Warmup lehnt der Scanner alle Instrumente mit 'min-candles' ab)"
   fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1223,6 +1422,7 @@ step_09_build() {
   fi
   rm -f "$build_log"
   ok "Build erfolgreich."
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1377,6 +1577,7 @@ SQL
     die "Validierung fehlgeschlagen."
   fi
   ok "Validierung bestanden."
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1396,8 +1597,11 @@ print_banner() {
   printf '  Markt-Presets:  %d Aktien · %d Indizes · %d Rohstoffe · %d Krypto\n' \
     "$PRESET_EQUITIES" "$PRESET_INDICES" "$PRESET_COMMODITIES" "$PRESET_CRYPTO"
   printf '  Log:            %s\n' "${LOG_FILE:-<nur stdout>}"
-  [[ "$DRY_RUN" == "true" ]] && printf '  %sMODUS: DRY-RUN — es wird nichts geändert%s\n' "$C_YELLOW" "$C_RESET"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    printf '  %sMODUS: DRY-RUN — es wird nichts geändert%s\n' "$C_YELLOW" "$C_RESET"
+  fi
   printf '\n'
+  return 0
 }
 
 print_summary() {
@@ -1430,19 +1634,44 @@ ${C_GREEN}${C_BOLD}Installation abgeschlossen.${C_RESET}
 EOF
 }
 
+# SET-09 (v1.39.1): Kapselung um jeden Schritt. Ohne sie endet `main` mit dem
+# Status des letzten Schritts — und eine Schritt-Funktion, deren letzte Zeile ein
+# Test war, gilt als Fehlschlag, obwohl der Schritt vollständig durchgelaufen ist.
+# `local rc=$?` NACH einer `if !`-Bedingung wäre übrigens selbst der Fehler:
+# `local` setzt $? auf 0. Deshalb `cmd || rc=$?`.
+run_step() {
+  local name="$1" rc=0
+  "$name" || rc=$?
+  if (( rc != 0 )); then
+    printf '\n%s✗ Schritt „%s" endete mit Exit %s.%s\n' \
+      "$C_RED" "$CURRENT_STEP" "$rc" "$C_RESET" >&2
+    printf '  Die Funktion hat ohne eigene Fehlermeldung abgebrochen.\n' >&2
+    printf '  Häufigste Ursache (Befund SET-09 in docs/SETUP_BUGS.md): letzter Befehl\n' >&2
+    printf '  der Funktion war ein Test (`[[ … ]] && ok …`) — das ist ein Skript-Bug,\n' >&2
+    printf '  kein Konfigurationsfehler. Letztes Kommando: %s\n' "${BASH_COMMAND:-unbekannt}" >&2
+    if [[ -n "${LOG_FILE:-}" ]]; then
+      printf '  Log: %s\n' "$LOG_FILE" >&2
+    fi
+    printf '  Handarbeit ab hier: docs/INSTALL.md, Kapitel 5.2 (Schema) bis 10 (Abnahme).\n' >&2
+    return "$rc"
+  fi
+  return 0
+}
+
 main() {
   print_banner
-  step_01_preflight
-  step_02_packages
-  step_03_postgres
-  step_04_database
-  step_05_env
-  step_06_dependencies
-  step_07_schema
-  step_08_universe
-  step_09_build
-  step_10_validate
+  run_step step_01_preflight
+  run_step step_02_packages
+  run_step step_03_postgres
+  run_step step_04_database
+  run_step step_05_env
+  run_step step_06_dependencies
+  run_step step_07_schema
+  run_step step_08_universe
+  run_step step_09_build
+  run_step step_10_validate
   print_summary
+  return 0
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

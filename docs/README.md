@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.39.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.39.1` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -72,6 +72,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[SETUP_BUGS.md](SETUP_BUGS.md)** | Setup-Bug-Register: PostgreSQL-Init, Seed/UUID, Broker-Adapter, Build-Warnungen |
 | **[SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** | PostgreSQL-Soforthilfe |
 | **[HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md)** | How-to: LAN nach Update tot (`EADDRINUSE`/`127.0.0.1`) + „Sitzung abgelaufen" statt Datenbankfehler (v1.36.41) |
+| **[HOWTO_RESET_LOKAL.md](HOWTO_RESET_LOKAL.md)** | How-to: Firma lokal sauber neu aufsetzen — Tabellen leeren, `data/` aufräumen, komplett neu bauen, seeden, mit 18 Checks abnehmen |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang, Merge-Status |
 | **[DOCS_SYNC_AUDIT.md](DOCS_SYNC_AUDIT.md)** | Docs-Code-Sync-Audit: jede Behauptung gegen Code geprüft |
 

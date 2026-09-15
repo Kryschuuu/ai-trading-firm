@@ -1,12 +1,123 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-14** · Code-Version **1.39.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-15** · Code-Version **1.39.1**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.39.1] — 2026-09-15 · fix(setup): .env bleibt beim Setup heil, und die Shell-Anleitungen funktionieren auch in fish (SET-09, SET-10)
+
+**Hintergrund:** Ein lokaler Reset-Durchlauf (Datenbank leeren, komplett neu
+bauen) deckte zwei Defekte im Setup-Pfad auf, die zusammen einen
+unbrauchbaren Zustand erzeugten. `./scripts/setup-cachyos.sh --variant a`
+meldete nach vollständigem Durchlauf von Schritt 5:
+
+```
+Abbruch in Schritt „Konfiguration (.env)" (Zeile 1439, Exit 1).
+```
+
+— ohne `die()`-Meldung, ohne Log-Eintrag, ohne Erklärung. Ursache war kein
+Konfigurationsfehler, sondern Bash-Mechanik: `step_05_env` endete mit
+`[[ -n "$API_TOKEN" ]] && ok "…"`. War `FIRM_API_TOKEN` bereits in der `.env`
+(gilt fast immer), war der **Rückgabewert der Funktion** 1, und `set -Eeuo
+pipefail` wertet den Nicht-Null-Status eines einfachen Funktionsaufrufs in
+`main` als Fehlschritt. Dieselbe Falle steckte zwölfmal im selben Block
+(`env_ensure_key … && added=$((added+1))` — „Schlüssel vorhanden" liefert 1).
+
+Zweitens war die Rückfrage „Vorhandene `.env` überschreiben?" eine
+Falle: Beantwortet mit „j", wurde die Datei komplett aus dem Template
+neu geschrieben. Alles, was das Template nicht kennt, war damit **still
+weg** — unter anderem das `FIRM_API_TOKEN`, das derselbe Lauf kurz zuvor
+als „bereits gesetzt" gelesen hatte, plus `PAPER_MODE`-Feineinstellungen,
+`TRUSTED_PROXY_IPS` und alle Venue-/Limit-Flags.
+
+Der Auslöser des Nutzerberichts war dritter Natur: Die Reset-Anleitung nutzt
+bash-Idiome (`set -a; . ./.env; set +a`, `VAR=$(…)`), die in **fish**
+Syntaxfehler sind. Bleibt `$DATABASE_URL` dadurch leer, fallen
+`pg_dump`/`psql` auf die libpq-Defaults zurück (Unix-Socket, OS-Benutzer)
+und melden `FATAL: role "kris" does not exist` — die Datenbank war
+unverändert gesund. Und `pg_dump … | gzip > ~/backups/datei` sichert
+**nichts**, wenn `~/backups` fehlt: die Shell öffnet das Datei-Ziel vor
+dem Befehl und meldet nur `open: Ist ein Verzeichnis`.
+
+### Behoben
+
+* **Jede der zehn Schritt-Funktionen endet jetzt explizit mit `return 0`**,
+  und `main` ruft sie über `run_step` auf, das einen Nicht-Null-Status als
+  *Schritt* meldet (inklusive `BASH_COMMAND` und Funktionsname) statt als
+  nackter Zeilennummer in `main`. Ein `local rc=$?` nach einer
+  `if !`-Bedingung wäre übrigens selbst der Fehler gewesen (`local` setzt
+  `$?` auf 0) — deshalb `"$name" || rc=$?`.
+* **Merge ist der Default.** Die Überschreiben-Rückfrage gibt es nicht
+  mehr: eine bestehende `.env` wird ergänzt, nichts geht verloren.
+  Ersetzen ist eine ausdrückliche Entscheidung (`--force-env`), sichert
+  vorher nach `.env.bak-<UTC>` (Rechte `600`) und holt bekannte Schlüssel
+  aus `ENV_RESCUE_KEYS` (`DATABASE_URL`, `FIRM_API_TOKEN`, `FIRM_ADMIN_TOKEN`,
+  `FIRM_VIEWER_TOKEN`, `FIRM_SESSION_SECRET`, `AUTH_MODE`, `PAPER_MODE`,
+  `TRUSTED_PROXY_IPS`, …) automatisch zurück; der Rest liegt im Backup und
+  wird in der Ausgabe benannt. Das `.env`-Template lebt jetzt in einer
+  Funktion (`env_write_template`), damit Neu-Schreib-Pfad und Doku nicht
+  auseinanderdriften.
+* **Ein Zeilenende-Fix mit Suchtpotenzial:** `env_append_line` stellt vor
+  jedem Anhängen ein `\n` sicher. Ohne das wurde aus
+  `TRUSTED_PROXY_IPS=127.0.0.1` + angehängtem Schlüssel
+  `TRUSTED_PROXY_IPS=127.0.0.1FIRM_SESSION_SECRET=…` — ein stiller
+  Doppelverlust, sobald die `.env` ohne Umbruch endete (`printf >>`,
+  Hand-Edit).
+* **`env_read_key`** liest die `.env` jetzt wie `dotenv`: `export `-Präfix,
+  Leerzeichen um das `=`, optionale Quotes, CRLF. `env_ensure_key` benutzt
+  dieselbe Erkennung — der alte Anker `^KEY=` konnte einen vorhanden
+  Schlüssel übersehen und ein zweites Mal anhängen.
+* **Interpreter-Guard vor `set -Eeuo pipefail`** (bewusst in dieser
+  Reihenfolge und POSIX-notiert: dash kennt `[[ … ]]` und `pipefail` nicht —
+  ein `[[` im Guard wäre genau der Fehler, den er melden will):
+  `sh scripts/setup-cachyos.sh` endet jetzt mit Exit 2 und der korrekten
+  Anweisung, statt mittendrin an `${VAR^^}` zu zerplatzen.
+* **`scripts/env-run.sh` + `scripts/load-env.mjs`** — ein Loader, dessen
+  Ausgabe in jeder Shell funktioniert: `--fish | source`, `eval "$(…)"`,
+  `--raw --print DATABASE_URL` für Tools, `--keys`, `--check` (Exit 1 bei
+  fehlerhafter Zeile) und `-- <befehl>` für einen Kindprozess mit dem
+  Projekt-Env. Formatierung und Regeln stecken in **einem** awk-Parser; das
+  Node-Skript ist der bash-freie Weg (fish, nushell, Container ohne bash).
+  Werte werden für das Zielshell-Format escaped, `$( )` in der `.env` wird
+  nie ausgeführt.
+
+### Dokumentiert
+
+* `docs/HOWTO_RESET_LOKAL.md` (neu, v1.39.1): Reset-Fahrplan in 10 Schritten
+  — Stoppen, `pg_dump -Fc`, `TRUNCATE … RESTART IDENTITY CASCADE`, `data/`
+  aufräumen, `npm ci` + `drizzle-kit push --force`, Seeds, Build, `POST
+  /api/seed`, Abnahme mit `validate-setup.sh`. Plus Abschnitt 2.5
+  „Shell-Kompatibilität" (bash/zsh/fish/PowerShell) und die drei Fallen
+  (leeres `DATABASE_URL`, `mkdir -p` vor der Umleitung, keine
+  Auslassungspunkte in `rm -rf`).
+* `docs/SETUP_BUGS.md`: Befunde **SET-09** und **SET-10** mit Symptom,
+  Ursache, Minimierrepro, Fix und Nachweis.
+* `docs/INSTALL.md` Kap. 0.5 (Merge statt Überschreiben) und Kap. 3.3
+  (`DATABASE_URL` pro Shell laden); `README.md`-Quickstart nutzt den Loader.
+
+### Nachweis
+
+* `tests/setupScripts.test.ts` (neu, 14 Tests): Parser-Randfälle (Kommentar,
+  `export`, Quotes, ` #`-Rest, CRLF, Wert ohne `=`, `#` im Passwort),
+  Maskierung vor `eval`, Key-Menge identisch zwischen bash- und Node-Loader,
+  `--check`-Vertrag, `bash -n` des Setup-Skripts, Dash-Abbruch mit Exit 2,
+  Strukturvertrag „jede Schritt-Funktion endet mit `return 0`",
+  Merge-/`--force-env`-/Frisch-Installation am echten `step_05_env`
+  (kein `pg_dump`-Fake, sondern der reale Codepfad in einem temporären
+  Projektstamm).
+* `npm run test:setup` (neu) = 33/33 grün, ohne PostgreSQL.
+* `npm run typecheck` sauber, `eslint` ohne Meldung.
+
+**Betroffene Dateien:** `scripts/setup-cachyos.sh`, `scripts/env-run.sh`
+(neu), `scripts/load-env.mjs` (neu), `tests/setupScripts.test.ts` (neu),
+`docs/HOWTO_RESET_LOKAL.md` (neu), `docs/SETUP_BUGS.md`, `docs/INSTALL.md`,
+`docs/README.md`, `README.md`, `package.json`.
+
+---
 
 ## [1.39.0] — 2026-09-14 · feat(auth): Browser-Sitzung bis zum Schließen des Fensters — automatische Verlängerung, Nachfrist, Login/Logout/Status im Dashboard (S1)
 

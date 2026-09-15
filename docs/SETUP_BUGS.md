@@ -1,16 +1,18 @@
 # Setup-Bug-Register — `scripts/setup-cachyos.sh`
 
-**Stand:** v1.36.38 · **Datum:** 2026-09-08 · **Status:** alle Befunde behoben
-(B1–B7 plus Script-Härtung v1.36.38: DRY-01/02, UUID-01, LOG-01, SEC-PSQL,
+**Stand:** v1.39.1 · **Datum:** 2026-09-15 · **Status:** alle Befunde behoben
+(B1–B8 plus Script-Härtung v1.36.38: DRY-01/02, UUID-01, LOG-01, SEC-PSQL,
 ERR-01, STOP-01/02/03, VAL-01/02, SMOKE-01, WIN-01/02/03/04, MDSYNC-002,
-LGSCAN-001, LGSTAMP-001, LGKILL-001, MICRO-001)
+LGSCAN-001, LGSTAMP-001, LGKILL-001, MICRO-001; neu in v1.39.1: SET-09,
+SET-10 — Shell- und `.env`-Behandlung des Setup-Pfads)
 **Betroffene Dateien:** `scripts/setup-cachyos.sh`, `scripts/validate-setup.sh`,
 `src/lib/appPaths.ts`, `src/universe/presets.ts`, `src/lib/marketdata/config.ts`
 (Referenz für die akzeptierten `PAPER_MODE`-Werte) sowie seit v1.36.38
 `scripts/stop.sh`, `scripts/smoke-test.sh`, `scripts/setup-windows.ps1`,
 `scripts/lib/pg-cluster.sh`, `scripts/lib/market-sync.ts`,
 `scripts/live-kill.ts`, `scripts/live-security-stamp.ts`,
-`scripts/scan-live-gate-secrets.ts`, `scripts/micro-executor.ts`
+`scripts/scan-live-gate-secrets.ts`, `scripts/micro-executor.ts` und seit v1.39.1
+`scripts/env-run.sh`, `scripts/load-env.mjs`, `tests/setupScripts.test.ts`
 
 Dieses Dokument ist die verbindliche Befund-/Fix-Liste des Setup-Pfads. Es
 ersetzt die formlose Notizsammlung „bugs start script.md“, die nie versioniert
@@ -48,6 +50,8 @@ ist).
 | LGSTAMP-001 | Suite-Stamp | niedrig | Tippfehler in `--source` wurde still `ci` | behoben (v1.36.38) |
 | LGKILL-001 | Kill-CLI | niedrig | „undefined“-Meldung bei Nicht-Error-Würfen | behoben (v1.36.38) |
 | MICRO-001 | Micro-Executor | niedrig | Stack-Trace bei belegtem Health-Port | behoben (v1.36.38) |
+| SET-09 | Setup-Abbruch + `.env`-Verlust | kritisch | „Abbruch in Schritt „Konfiguration (.env)" (Zeile …, Exit 1)" ohne jede Fehlermeldung — und der Überschreiben-Pfad löschte `FIRM_API_TOKEN` + alle Operator-Schlüssel aus der `.env` | behoben (v1.39.1) |
+| SET-10 | Shell-Kompatibilität | hoch | Anleitungs-Idiome (`. ./.env`, `VAR=x cmd`) sind in fish Fehler; leeres `$DATABASE_URL` ⇒ `FATAL: role "<login>" does not exist` und Backup bricht mit „Ist ein Verzeichnis" ab | behoben (v1.39.1) |
 
 ---
 
@@ -632,11 +636,138 @@ Hinweis (kein Crash).
 
 ---
 
-## 12. Verwandte Dokumente
+## 12. SET-09 — Setup bricht ohne Meldung ab, `.env` wird beim Überschreiben entkernt (v1.39.1)
+
+### Symptom
+
+`./scripts/setup-cachyos.sh --variant a --reset-cluster` läuft vollständig durch —
+`.env` wird geschrieben, Rechte 600, gemeldet werden ergänzte Schlüssel — und endet
+dennoch:
+
+```
+Abbruch in Schritt „Konfiguration (.env)" (Zeile 1439, Exit 1).
+```
+
+Ohne `die()`-Meldung, ohne Log-Zeile, ohne Erklärung. Zuvor hatte der Nutzer „Vorhandene
+`.env` überschreiben? j" beantwortet; die neue `.env` enthielt zwar alle Template-Werte,
+aber weder das bestehende `FIRM_API_TOKEN` noch `PAPER_MODE`-Feineinstellungen des Operators.
+
+### Ursache
+
+Zwei unabhängige Fehler, die zusammenwirkten:
+
+1. **Rückgabewert als Status.** `step_05_env` endete mit
+   `[[ -n "$API_TOKEN" ]] && ok "…"`. War `API_TOKEN` leer (weil `FIRM_API_TOKEN`
+   bereits in der `.env` stand und deshalb nicht neu erzeugt wurde), war der
+   Rückgabewert der **Funktion** 1 — und `set -Eeuo pipefail` wertet einen
+   Nicht-Null-Status eines einfachen `step_05_env`-Aufrufs in `main` als Fehlschritt.
+   Die Zeile in der Meldung ist deshalb die **Aufrufstelle in `main`**, nicht die
+   Fehlerstelle. `env_ensure_key … && added=$((added+1))` (12× im selben Block) ist
+   dieselbe Falle: „Schlüssel vorhanden" liefert 1.
+2. **Überschreiben = Template-Neuschreiben.** Auf „j" wurde die `.env` komplett aus dem
+   Template neu erzeugt. Alle Schlüssel außerhalb des Templates waren damit still weg —
+   darunter `FIRM_API_TOKEN`, das derselbe Lauf im selben Schritt als „bereits gesetzt"
+   gelesen hatte.
+
+Reproduzierbar ohne Datenbank (`docs/HOWTO_RESET_LOKAL.md` verlinkt die Tests):
+
+```bash
+bash -c 'set -Eeuo pipefail
+  f(){ :; [[ -n "" ]] && echo nie; }
+  trap "echo FALLE" ERR
+  f; echo "main läuft weiter"'      # → "FALLE", kein „main läuft weiter"
+```
+
+### Fix
+
+* Jede der zehn Schritt-Funktionen endet jetzt explizit mit `return 0`;
+  `main` ruft sie über `run_step`, das einen Nicht-Null-Status **als Schritt**
+  meldet (inklusive `BASH_COMMAND` und Funktionsname) statt als Zeilennummer.
+* Schlüssel-Zählung läuft über `env_add`, das nie mit 1 zurückkehrt.
+* `env_ensure_key` akzeptiert wie `env_read_key` `export `-Präfix, Leerzeichen um das `=`
+  und CRLF — der bisherige Anker `^KEY=` konnte einen vorhandenen Schlüssel übersehen und
+  ihn ein zweites Mal anhängen.
+* `env_append_line` stellt vor jedem Anhängen ein Zeilenende sicher. Ohne das entstand
+  `TRUSTED_PROXY_IPS=127.0.0.1FIRM_SESSION_SECRET=…`, wenn die `.env` ohne Umbruch endete
+  (Realfall: `printf … >> .env` oder Hand-Edit).
+* **Merge ist der Default.** Die Rückfrage „überschreiben?" gibt es nicht mehr: eine
+  bestehende `.env` wird ergänzt, nichts verschwindet. Ersetzen ist eine ausdrückliche
+  Entscheidung (`--force-env`) und sichert vorher (`.env.bak-<UTC>`, Rechte 600) und holt
+  bekannte Schlüssel (`ENV_RESCUE_KEYS`) aus dem Backup zurück.
+* `on_error` gibt jetzt Kommando + Funktion aus, damit ein künftiger Fall dieser Klasse
+  nicht wieder „Exit 1 und Tschieß" ist.
+* Interpreter-Guard vor `set -Eeuo pipefail`: `sh scripts/setup-cachyos.sh` meldet Exit 2
+  mit der korrekten Anweisung, statt an `[[ … ]]`/`pipefail` zu zerplatzen.
+
+### Nachweis
+
+`tests/setupScripts.test.ts` (14 Tests) prüft u. a.: jede Schritt-Funktion endet mit
+`return 0`; kein `env_ensure_key … && added=` mehr im Skript; Merge-Pfad erhält
+`FIRM_ADMIN_TOKEN`/`PAPER_MODE`/`TRUSTED_PROXY_IPS` und liefert rc 0; `--force-env`
+legt Backup + Rettung an und verweist auf das Backup; angehängte Zeilen kleben nicht
+zusammen. `npm run test:setup` läuft ohne PostgreSQL.
+
+---
+
+## 13. SET-10 — Die Anleitungs-Shellsprache ist bash-only (fish/Nutzer-Runbooks)
+
+### Symptom
+
+Aus dem Reset-Fahrplan (`docs/HOWTO_RESET_LOKAL.md`) kopiert, in **fish**:
+
+```
+set: # Erzeugt von scripts/setup-cachyos.sh — …: invalid variable name.
+fish: Unsupported use of '='. In fish, please use 'set STAMP (date +%F-%H%M)'.
+warning: An error occurred while redirecting file '/home/kris/backups/': open: Ist ein Verzeichnis
+pg_dump: Fehler: Verbindung … fehlgeschlagen: FATAL: role "kris" does not exist
+```
+
+Die Meldung legt einen Datenbank-Defekt nahe. Die Datenbank war unverändert erreichbar.
+
+### Ursache
+
+* Die Anleitung nutzt bash-Idiome (`. ./.env`, `VAR=$(…)`). In fish ist beides ein
+  Syntaxfehler — `export (cat .env | xargs)` versucht, **Kommentarzeilen** als
+  Variablennamen zu setzen und scheitert, bevor `DATABASE_URL` gesetzt ist.
+* Bleibt `$DATABASE_URL` leer, fallen `psql`/`pg_dump` auf libpq-Defaults zurück:
+  Unix-Socket `/run/postgresql`, Benutzer = Login-Name. Die Rolle `kris` existiert in
+  der Cluster-`pg_hba`/`pg_roles` nur nicht, gemeint war `trader`.
+* Die Umleitung `pg_dump … | gzip > ~/backups/datei` wird von der Shell **vor** dem
+  Befehl geöffnet. Existiert `~/backups` nicht, bricht die Umleitung ab — `pg_dump`
+  lief, aber die Sicherung gab es nie.
+
+### Fix
+
+* `scripts/env-run.sh` — ein Parser (awk), der die `.env` in das Zielshell-Format
+  schreibt: Standard `export KEY="wert"` für `eval "$(scripts/env-run.sh)"`,
+  `--fish` (`set -gx KEY wert`) für `… | source`, `--raw` (unmaskiertes
+  `KEY=wert`) für Werkzeuge, `--keys`, `--print KEY` (nur der Wert, maskiert;
+  mit `--raw` unmaskiert), `--check` (Exit 1 bei fehlerhafter Zeile) und
+  `-- <befehl>` (Kindprozess mit dem Projekt-Env). Kein `export`-Trick über die
+  Datei, kein Ausführen von `$( )`/Backticks aus der `.env`.
+* `scripts/load-env.mjs` — derselbe Vertrag für Shells ohne bash (nur Node nötig):
+  `--sh`, `--fish`, `--keys`, `--print`, `--raw`, `--check`. Parität ist für
+  jedes Format getestet (Ausgabe-Zeile für Zeile identisch), weil sonst eine der
+  beiden Varianten still auseinanderdriftet.
+* Anleitungen dokumentieren jetzt pro Shell, was zu tippen ist
+  (`docs/HOWTO_RESET_LOKAL.md` Abschnitt 2.5, `docs/INSTALL.md` Kapitel 3.3),
+  und stellen `mkdir -p` + `-f datei` vor jede Sicherung.
+
+### Nachweis
+
+`tests/setupScripts.test.ts`: Randfälle (Kommentar, `export`, Quotes, ` #`-Rest, CRLF,
+Wert ohne `=`, `#` im Passwort), Maskierung vor `eval`, Key-Menge identisch zwischen
+bash-Loader und Node-Loader, `--check` mit Exit 1 bei fehlerhafter Zeile.
+
+---
+
+## 14. Verwandte Dokumente
 
 * [`SETUP_PG_TROUBLESHOOTING.md`](SETUP_PG_TROUBLESHOOTING.md) —
   PostgreSQL-Soforthilfe (Abschnitte 1–6)
 * [`INSTALL.md`](INSTALL.md) — Installation auf CachyOS, Variante A/B
 * [`MARKET_UNIVERSE.md`](MARKET_UNIVERSE.md) — Datenmodell der Registry
 * [`MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md) — Warmup/Sync (MDSYNC-001)
-* [`CHANGELOG.md`](CHANGELOG.md) — Release-Eintrag v1.30.0
+* [`CHANGELOG.md`](CHANGELOG.md) — Release-Einträge (v1.30.0 … v1.39.1)
+* [`HOWTO_RESET_LOKAL.md`](HOWTO_RESET_LOKAL.md) — Reset-Fahrplan inkl.
+  Shell-Kompatibilität (SET-10)

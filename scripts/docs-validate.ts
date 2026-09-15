@@ -187,7 +187,7 @@ function checkSecrets() {
   const files = mdFiles(DOCS);
   // Platzhalter-Werte, die in Setup-Dokumentation erlaubt sind (keine echten Secrets).
   const placeholder =
-    /bitte-hier-aendern|changeme|ihr-passwort|dein-passwort|your-|passwort-|db_pass|db_user|sk-[^\w]|\$[A-Za-z_][A-Za-z0-9_]*|…|\.\.\.|<\s*[^>]*\s*>|'\w+'|\{+\s*\w+\s*,?\s*\}/i;
+    /bitte-hier-aendern|changeme|ihr-passwort|dein-passwort|your-|passwort-|db_pass|db_user|sk-[^\w]|\$[A-Za-z_][A-Za-z0-9_]*|\$\(|\(\$\(|\$\{|\$[A-Za-z_][A-Za-z0-9_]*[):, ]|printf[^\n]*\$?%s[^\n]*>>|…|\.\.\.|<\s*[^>]*\s*>|'\w+'|\{+\s*\w+\s*,?\s*\}/i;
   const patterns: [RegExp, string][] = [
     [/AIza[0-9A-Za-z_-]{20,}/, "Google-API-Key"],
     [/sk-[0-9A-Za-z]{20,}/, "OpenAI-/Anthropic-Key"],
@@ -198,7 +198,11 @@ function checkSecrets() {
   ];
   // Klartext-Passwort/Tokens nur bei Wertzuweisung (>=4 Zeichen) und wenn der
   // Wert kein Platzhalter/Env-Referenz/Beispiel ist.
-  const valuePattern = /(?:passwort|password|passwd|pw|secret|api[_-]?key|token)\s*[:=]\s*(\S{4,})/i;
+  // Der Wert wird inklusive seiner Anführungszeichen erfasst: früher schnitt
+  // `\S+` an jedem Leerzeichen ab, wodurch `TOKEN="$(grep ...)"` als Wert
+  // `="$(grep` las — ein Pseudotreffer auf einer Befehlszeile ohne Secret.
+  const valuePattern =
+    /(?<![A-Za-z0-9_])(?:[A-Za-z0-9_]*[_-])?(?:passwort|password|passwd|pw|secret|api[_-]?key|token)(?:[_-][A-Za-z0-9]+)*\s*[:=]\s*(?:"((?:[^"\\]|\\.)+)"|'([^']+)'|(\S{4,}))/i;
   const findings: string[] = [];
   for (const file of files) {
     const lines = readFileSync(file, "utf8").split("\n");
@@ -207,9 +211,19 @@ function checkSecrets() {
       for (const [re, label] of patterns) {
         if (re.test(l)) findings.push(`${rel}:${i + 1}: ${label}`);
       }
+      // Pruefung gegen Zeile ODER Wert: Zeilen, die den Wert nur aus einer
+      // Variablen/Kommando-Substitution in eine Datei schreiben
+      // (`printf 'KEY=%s\n' "$(openssl rand -hex 32)" >> .env`), sind kein
+      // Leak — ein echtes Literal in derselben Zeile wird ueber den Wert
+      // trotzdem erkannt (der Zeilen-Fallback enthaelt nie das Zitat selbst).
       const vm = l.match(valuePattern);
-      if (vm && !placeholder.test(vm[1])) {
-        findings.push(`${rel}:${i + 1}: Klartext-Passwort/Token-Wert (${vm[1].slice(0, 12)}...)`);
+      const value = vm ? vm[1] ?? vm[2] ?? vm[3] : undefined;
+      if (vm && value !== undefined && !placeholder.test(value) && !placeholder.test(l)) {
+        // Gemeldet wird der Schlüsselname, nie der Fund selbst — sonst druckt
+        // der Secret-Scan das gefundene Secret in die Konsole.
+        const at = vm.index ?? 0;
+        const key = l.slice(at, at + 48).replace(/\s*[:=].*$/, "").replace(/^\W+/, "");
+        findings.push(`${rel}:${i + 1}: Klartext-Passwort/Token-Wert bei ${key || "unbenannt"}`);
       }
     });
   }

@@ -1,4 +1,3 @@
-# Installation — Schritt für Schritt auf CachyOS
 
 > **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf Next.js
 > 16.3.4 einschließlich nativer Bildverarbeitung aktualisieren. `npm ci`,
@@ -39,6 +38,14 @@ Beantworte diese drei Fragen, bevor du tippst:
 Seit v1.30.0 erledigt `scripts/setup-cachyos.sh` die Kapitel 1–7 in einem
 Durchlauf. Das Skript ist idempotent: Es darf beliebig oft erneut laufen, ohne
 Daten zu verlieren oder `.env` still zu überschreiben.
+
+> **Seit v1.39.1 ist das auch wörtlich gemeint** (Befund SET-09 in
+> [`SETUP_BUGS.md`](SETUP_BUGS.md)): Es gibt keine Rückfrage mehr, die die `.env`
+> ersetzt. Bestehende Werte bleiben stehen, fehlende werden ergänzt. Wer bewusst
+> eine frische Konfiguration will: `--force-env` — sichert vorher nach
+> `.env.bak-<UTC>` (Rechte 600) und holt bekannte Schlüssel (`FIRM_API_TOKEN`,
+> `PAPER_MODE`, `DATABASE_URL`, …) automatisch zurück. Das Skript braucht **bash**;
+> `sh scripts/setup-cachyos.sh` bricht mit Exit 2 und Hinweis ab statt mittendrin.
 
 ```bash
 # auf dem N150
@@ -218,6 +225,28 @@ Kommt eine Versionszeile zurück, ist die Datenbank bereit.
 
 > **Sicherheitshinweis:** Ändere das Passwort. Die Datenbank enthält dein komplettes
 > Entscheidungsprotokoll — sie soll nur auf `127.0.0.1` lauschen (Standard bei Arch/CachyOS).
+
+**`DATABASE_URL` in der Shell derselben Fenster-Sitzung verfügbar machen** — für alle
+`psql`-/`npm`-Befehle der Kapitel 5–6 (die App selbst lädt die `.env` über `dotenv`):
+
+```bash
+# bash / zsh
+set -a; eval "$(scripts/env-run.sh)"; set +a
+
+# fish — `. ./.env` und `VAR=$(…)` sind dort Syntaxfehler. Ein leer gelassenes
+# DATABASE_URL fuehrt zur Fehlermeldung „role <login> does not exist“ (Befund SET-10)
+scripts/env-run.sh --fish | source
+
+# jede Shell, nur Node nötig
+eval "$(node scripts/load-env.mjs --sh)"        # fish: … --fish | source
+
+echo "$DATABASE_URL"        # muss postgresql://trader:…@127.0.0.1:5432/trading_firm zeigen
+```
+
+Beide Loader ignorieren Kommentarzeilen, `export`-Präfix, ` #`-Anhänger und CRLF,
+quotieren Werte so, dass `eval`/`source` sie wörtlich nehmen (kein `$( )`-Execute),
+und melden fehlerhafte Zeilen mit Zeilennummer — `scripts/env-run.sh --check` gibt
+dafür Exit 1. Getestet in `tests/setupScripts.test.ts` (`npm run test:setup`).
 
 ---
 

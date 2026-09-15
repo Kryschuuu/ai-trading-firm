@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.39.0 (2026-09-14) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.39.1 (2026-09-15) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (B1–B8, C1/C2, SET-09/10), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -26,6 +26,7 @@ Log: `data/setup/setup-<Zeitstempel>.log` (im Dry-Run: nur stdout, keine Datei).
 
 ```bash
 cp .env.example .env        # Pflicht-Flags setzen (DATABASE_URL)
+set -a; eval "$(scripts/env-run.sh)"; set +a   # .env in die Shell (fish: --fish | source)
 umask 077
 printf 'FIRM_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
 printf 'FIRM_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
@@ -47,6 +48,13 @@ npm run build
 npm run start               # http://0.0.0.0:3369
 ./scripts/validate-setup.sh        # 18 Checks, bestanden ab 15
 ```
+
+**Lokale Instanz komplett auf Werkseinstellung zurücksetzen** (alle Datenbank-Inhalte weg,
+`data/` leer, Neu-Build, Seed, Abnahme): Schritt-für-Schritt in
+[`docs/HOWTO_RESET_LOKAL.md`](docs/HOWTO_RESET_LOKAL.md). Kurzform: Dienst stoppen →
+`pg_dump` → `TRUNCATE … RESTART IDENTITY CASCADE` → `rm -rf data/history … artifacts` →
+`rm -rf .next node_modules && npm ci` → `npx drizzle-kit push --force` → Seeds →
+`npm run build` → `POST /api/seed` → `./scripts/validate-setup.sh`.
 
 Details: [`INSTALL.md`](INSTALL.md) (Wrapper) → [`docs/INSTALL.md`](docs/INSTALL.md) (CachyOS, Schritt für Schritt, Variante A/B) + [`CONFIGURATION.md`](CONFIGURATION.md) (Flag-Referenz) sowie [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) für Windows/PowerShell, [`docs/HANDBUCH.md`](docs/HANDBUCH.md) (Bedienung) und [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md) (Setup-Befunde B1–B7).
 
