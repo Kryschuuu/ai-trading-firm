@@ -1,6 +1,6 @@
 # How-to: Laufende Firma nach `git pull` aktualisieren
 
-**Stand:** v1.39.1 · **Zielgruppe:** Betreiber einer laufenden Instanz (Paper oder Live)
+**Stand:** v1.39.2 · **Zielgruppe:** Betreiber einer laufenden Instanz (Paper oder Live)
 · **Dauer:** 3–10 Minuten (der Build ist der längste Teil)
 
 Dieses Runbook beantwortet eine einzige Frage: *Ich habe lokal `git pull` gemacht —
@@ -297,10 +297,18 @@ dann vor dem Start neu einspielen: `sudo cp deploy/<unit> /etc/systemd/system/ &
 
 ## 11. Sonderfälle
 
-### A) Patch-Update ohne Schema- und Env-Änderung (Normalfall, z. B. 1.39.0 → 1.39.1)
+### A) Patch-Update ohne Schema- und Env-Änderung (Normalfall, z. B. 1.39.1 → 1.39.2)
 
 Stop → `git pull --ff-only` → Cache löschen → `npm ci` → `npm run build` → Start.
 Kein `drizzle-kit push`, kein `.env`-Eingriff. Dauer: Build-Zeit.
+
+**v1.39.2 Spezial:** Der 754× `ticker/SCHEMA_MISMATCH`-Fix liegt in `publicClient.ts`
+(Chunking 50, ~1 KB, Gateway-Limit >6 KB), `enrichment.ts` (Batch-Kappe) und
+`sync.ts` (Klassifizierung aus `cause`). Wer von 1.39.1 kommt, muss nach dem
+Build nur neu starten – danach `BITUNIX_ENABLED=true npm run market:sync`:
+`tickers enriched` geht von 0 auf N, `failures` von 754 auf 0. Neues optionales
+Flag `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50` – nur setzen, wenn Gateway noch
+restriktiver ist.
 
 ### B) `git pull` meldet Konflikt in `data/universe/instruments.ndjson`
 

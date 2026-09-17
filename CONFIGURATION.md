@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-06** · Code-Version **1.36.34**
+> Dokumentationsstand **2026-09-17** · Code-Version **1.39.2**
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung
@@ -467,6 +467,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `BITUNIX_ALLOWED_HOSTS` | — | SSRF-Allowlist |
 | `BITUNIX_ALLOW_INSECURE_HTTP` | `false` | nur Testumgebung |
 | `BITUNIX_RATE_LIMIT` / `BITUNIX_RETRY_MAX` / `BITUNIX_TIMEOUT_MS` | — | HTTP-Schutz |
+| `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `50` | Chunk-Größe für `GET /tickers?symbols=…` (~1 KB, Gateway-Limit >6 KB). Fix v1.39.2 gegen 754× `ticker/SCHEMA_MISMATCH` (vorher 1× >6 KB-URL). Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler. |
 
 ### Live-Trading-Gate (Task 11) — alle Defaults SICHER (fail-closed)
 

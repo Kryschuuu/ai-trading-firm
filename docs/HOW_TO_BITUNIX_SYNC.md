@@ -109,7 +109,9 @@ npm run market:sync -- --venue=BITUNIX
 
 Seit v1.37.0 lädt der Standardlauf nur `1h` (der einzige von Scanner/Analytics
 ausgewertete Zeitrahmen); kürzere Zeitrahmen gezielt mit
-`--timeframes=5m,15m,30m,1h`:
+`--timeframes=5m,15m,30m,1h`. Seit v1.39.2 werden Ticker in 50er-Chunks
+angefragt (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, Gateway-Limit >6 KB
+– Fix gegen 754× `SCHEMA_MISMATCH`):
 
 ```
 [market-sync] BITUNIX discovery: <N> instruments
@@ -233,6 +235,7 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 | Trotz Eintrag in `.env` weiter `VENUE_DISABLED` | Das CLI lädt `.env` nicht. Variable in der Shell setzen: `BITUNIX_ENABLED=true npm run market:sync …` (bzw. `export` / PowerShell `$env:`). Prüfen mit `echo "$BITUNIX_ENABLED"` (muss exakt `true` ergeben). |
 | `--env-file= is not allowed in NODE_OPTIONS` | Node verbietet `--env-file` in `NODE_OPTIONS` bewusst. Bitte Inline/`export` verwenden. |
 | Flag gesetzt, aber Wert ist `TRUE`/`1`/`yes` | Es zählt nur der exakte String `"true"` (klein geschrieben). |
+| `tickers enriched: 0`, `failures: 754`, `ticker/SCHEMA_MISMATCH: 754` | **Vor v1.39.2:** `enrichWithTickers()` schickte ~750 Symbole als **einen** `GET /tickers?symbols=…` (>6 KB URL) → Gateway lehnt ab → jeder als `SCHEMA_MISMATCH` endgültig markiert. **Seit v1.39.2 behoben:** Chunking in 50er-Blöcken (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB Query), Teilausfall toleriert. Falls nach Update noch auftritt: Version prüfen (`npm run market:sync -- --help` zeigt keine, aber `package.json` = 1.39.2), `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` nicht über 100 setzen, Gateway-Logs prüfen. |
 | `discovery: 0 instruments`, `failures: 1` | Netzwerk/API nicht erreichbar (Proxy/Firewall, Geo-Block) oder Ratenlimit. Seit v1.39.1 zeigt die Logzeile `failures nach Ursache:` die klassifizierte Ursache (`discovery/NETWORK` = API nicht erreichbar, `discovery/RATE_LIMITED` = Limit, `discovery/TLS` = Zertifikat/Proxy). Batch-Fehler stehen seit v1.39.1 auch im `batch`-Abschnitt von `data/market-data-errors.json`; erneut ausführen. |
 | „Komische Zeichen“ (z. B. `â€"`, `Ã¼`) in der Konsole | bis v1.39.0: UTF-8-Ausgabe auf Windows-Konsolen mit Legacy-Codepage. Seit v1.39.1 behoben — alle CLI-Ausgaben sind ASCII-sicher (`toConsoleAscii`). Falls weiterhin Mojibake erscheint: Konsole auf Windows-Terminal/`chcp 65001` stellen. |
 | Immer noch „< 61 Kerzen“ nach dem Lauf | `--candle-limit` weglassen (Default 150 ≥ 61) bzw. auf ≥ 61 stellen; Status mit `npm run market:sync:status` prüfen. |
@@ -243,7 +246,10 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 
 ## 8. Quellen im Repository
 
-- `src/brokers/bitunix/config.ts` — `envFlagTrue` / `bitunixEnabled` (nur `"true"` schaltet an)
+- `src/brokers/bitunix/config.ts` — `envFlagTrue` / `bitunixEnabled` (nur `"true"` schaltet an) + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50` (v1.39.2 Chunking, ~1 KB, Gateway >6 KB)
+- `src/brokers/bitunix/publicClient.ts` — `fetchTickers` chunked (50, Teilausfall toleriert, Totalausfall wirft ersten Fehler)
+- `src/marketdata/enrichment.ts` — Batch-Kappe verwirft keine selbst angeforderten Zeilen, Failures mit `cause`
+- `src/marketdata/sync.ts` — `selectedSymbolSet` + `toFailure` Klassifizierung aus Originalfehler
 - `src/marketdata/registerAdapters.ts` — die vier Gates: Kill-Switch → Allowlist → Capability → Venue-Flag
 - `scripts/market-sync.ts`, `scripts/run-market-sync.ts`, `scripts/lib/market-sync.ts` — CLI (ohne dotenv-Bezug)
 - `src/scanner/warmup.ts` — `requiredWarmupCandles` = 61 (EMA50 + Momentum 60)

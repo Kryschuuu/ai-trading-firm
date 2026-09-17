@@ -1,12 +1,67 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-16** · Code-Version **1.39.1**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-17** · Code-Version **1.39.2**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.39.2] — 2026-09-17 · fix(market-sync): Bitunix Bulk-Ticker in URL-sichere Chunks aufteilen (754× ticker/SCHEMA_MISMATCH)
+
+**Hintergrund:** `npm run market-sync` (BITUNIX) endete regelmäßig mit:
+
+```
+tickers enriched: 0
+failures: 754
+failures nach Ursache: ticker/SCHEMA_MISMATCH: 754
+DEGRADED
+```
+
+**Ursache:** `enrichWithTickers()` schickte den kompletten Katalog (~750 Symbole)
+als **einen** `GET /market/tickers?symbols=…` – eine URL mit > 6 KB, die der
+Venue-Gateway ablehnt. Der Bulk-Call warf, und der `catch`-Pfad markierte **jedes**
+Instrument als `ticker/SCHEMA_MISMATCH` (endgültig) – auch die 504 durch die
+Kappung gar nicht synchronisierten.
+
+Nebenbefunde: die Batch-Kappe `maxTickerBatch=500` verwarf bei 754 Symbolen
+selbst angeforderte Zeilen (Scheinfehler + 254 Einzel-Nachfragen), und
+Ticker-Fehler wurden unabhängig von der echten Ursache immer als
+`SCHEMA_MISMATCH / nicht wiederholbar` klassifiziert.
+
+### Behoben
+
+- **`publicClient.fetchTickers`**: Listen > 50 Symbole werden in Chunks
+  angefragt (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST`, ~1 KB Query). Ein
+  fehlgeschlagener Chunk reißt die übrigen nicht mit; nur wenn alle scheitern,
+  wird geworfen.
+- **`enrichment.ts`**: Batch-Kappe verwirft keine selbst angeforderten Zeilen
+  mehr; Failures tragen den Originalfehler (`cause`). Der 750er-Katalog wurde
+  vorher auf 500 gekappt → 250 Einzel-Requests + Scheinfehler (Selbst-DoS).
+- **`sync.ts`**: Ticker-Fehler nur noch für **ausgewählte** Instrumente melden
+  (nicht für gekappte); Ursache aus dem Originalfehler klassifiziert
+  (NETWORK/5xx/429 ⇒ wiederholbar statt pauschal SCHEMA_MISMATCH). Vorher
+  meldete ein Lauf mit 250 Instrumenten „754 failures“.
+- **Env-Flag `BITUNIX_TICKER_SYMBOLS_PER_REQUEST`** (Default 50) neu in
+  `src/brokers/bitunix/config.ts` – zentrale Konstante, dokumentiert in
+  `.env.example` und `CONFIGURATION.md`.
+
+### Tests
+
+- 3 neue Regressionstests in `test/marketdata/adapters/bitunix.test.ts` gegen
+  Gateway-Simulation (URL > 6 KB ablehnend): Chunking liefert trotz Ablehnung
+  großer URLs alle Symbole, Teilausfall eines Chunks → übrige Chunks bleiben
+  erhalten, Totalausfall → wirft.
+- Verifikation gegen lokalen Mock-Gateway mit 750 Symbolen: vorher
+  `tickers enriched 0 / failures 750 / 1h candles 0/250`, nachher
+  `tickers enriched 250 / failures 0 / 1h candles 250/250`.
+
+### Dokumentation
+
+- `docs/BITUNIX.md`, `docs/MARKET_DATA_PIPELINE.md`,
+  `docs/HOW_TO_BITUNIX_SYNC.md`: Chunking, URL-Grenze und neues Flag dokumentiert.
+- `.env.example`, `CONFIGURATION.md`: Flag erklärt.
 
 ## [1.39.1] — 2026-09-16 · fix(market-sync): ASCII-sichere Konsolen-Ausgabe, Ursachen-Buckets für Failures, ehrliches Fehler-Manifest
 
