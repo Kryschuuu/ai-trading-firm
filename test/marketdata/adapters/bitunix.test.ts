@@ -45,7 +45,7 @@ import { promisify } from "node:util";
 
 import { BitunixBrokerAdapter } from "../../../src/brokers/bitunix/adapter";
 import { VENUE_CAPABILITIES } from "../../../src/brokers/capabilities";
-import { BITUNIX_PATHS, loadBitunixConfig } from "../../../src/brokers/bitunix/config";
+import { BITUNIX_PATHS, BITUNIX_TICKER_SYMBOLS_PER_REQUEST, loadBitunixConfig } from "../../../src/brokers/bitunix/config";
 import { BitunixApiError } from "../../../src/brokers/bitunix/errors";
 import { TokenBucket } from "../../../src/brokers/bitunix/http";
 import { BitunixPublicClient } from "../../../src/brokers/bitunix/publicClient";
@@ -188,6 +188,13 @@ interface FixtureFetchOptions {
   depthFailTimes?: number;
   /** Erzwungener HTTP-Status auf `/kline` für ALLE Calls. */
   klineStatus?: number;
+  /**
+   * Gateway-Simulation: `/tickers`-Requests, deren `symbols`-Query mehr als
+   * `maxTickerSymbolsPerUrl` Symbole trägt, werden abgelehnt (wie der echte
+   * Venue-Gateway bei > 6 KB URL für den vollen Katalog).
+   */
+  maxTickerSymbolsPerUrl?: number;
+  tickerRejectStatus?: number;
 }
 
 /** In-Memory-fetch gegen die Fixture-Dateien (0 Netzwerk, zählt jeden Call). */
@@ -213,6 +220,9 @@ function fixtureFetch(opts: FixtureFetchOptions = {}): { fetchImpl: typeof fetch
       return respond(200, data);
     }
     if (url.pathname === BITUNIX_PATHS.tickers) {
+      if (opts.maxTickerSymbolsPerUrl !== undefined && symbols.length > opts.maxTickerSymbolsPerUrl) {
+        return respond(opts.tickerRejectStatus ?? 414, null);
+      }
       const data = symbols.length ? TICKERS.data.filter((t) => symbols.includes(t.symbol.toUpperCase())) : TICKERS.data;
       return respond(200, data);
     }
@@ -815,6 +825,51 @@ test("voller Sync über registerMarketDataAdapters füllt Registry und Historica
   } finally {
     await api.stop();
   }
+});
+
+test("Bulk-Ticker: > 50 Symbole werden in URL-sichere Chunks aufgeteilt (Regression: 754× ticker/SCHEMA_MISMATCH)", async () => {
+  // Realer Fehlerfall: BITUNIX-Katalog ≈ 750 Symbole → EIN Request mit
+  // > 6 KB URL → vom Gateway abgelehnt → gesamte Ticker-Stage tot. Der
+  // Fixture-Gateway lehnt alles über 50 Symbole je URL ab.
+  const { adapter, calls } = wrapperFromFetch({ maxTickerSymbolsPerUrl: BITUNIX_TICKER_SYMBOLS_PER_REQUEST, retryMax: 1 });
+  const symbols = ["BTCUSDT", "ETHUSDT", ...Array.from({ length: 748 }, (_, i) => `SYM${i}USDT`)];
+  const tickers = await adapter.getTickers!(symbols);
+
+  assert.equal(tickers.length, 2, "Fixture-Ticker für BTC/ETH trotz 750er-Liste");
+  const tickerCalls = calls.filter((c) => c.path === BITUNIX_PATHS.tickers);
+  assert.equal(tickerCalls.length, Math.ceil(symbols.length / BITUNIX_TICKER_SYMBOLS_PER_REQUEST), "ein Request je Chunk");
+  for (const call of tickerCalls) {
+    const n = String(call.query.symbols ?? "").split(",").filter(Boolean).length;
+    assert.ok(n >= 1 && n <= BITUNIX_TICKER_SYMBOLS_PER_REQUEST, `Chunk-Größe ${n} überschreitet die URL-Grenze`);
+    assert.ok(String(call.query.symbols).length < 1_200, "Query bleibt weit unter jeder Gateway-Grenze");
+  }
+  const joined = tickerCalls.map((c) => String(c.query.symbols)).join(",").split(",");
+  assert.deepEqual(joined, symbols, "alle Symbole genau einmal, Reihenfolge erhalten");
+});
+
+test("Bulk-Ticker: ein fehlgeschlagener Chunk reißt die übrigen nicht mit", async () => {
+  let tickerCallNo = 0;
+  const base = fixtureFetch({});
+  const failingSecond: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === BITUNIX_PATHS.tickers && ++tickerCallNo === 2) {
+      return new Response(JSON.stringify({ code: 500, msg: "boom", data: null }), { status: 500 });
+    }
+    return base.fetchImpl(input, init);
+  };
+  const adapter = createBitunixMarketDataAdapter({
+    publicClient: mockBitunixPublicClient({ fetchImpl: failingSecond, retryMax: 1 }),
+    symbolNormalizer: normalizeVenueSymbol,
+  });
+  const symbols = ["BTCUSDT", ...Array.from({ length: 60 }, (_, i) => `SYM${i}USDT`), "ETHUSDT"];
+  const tickers = await adapter.getTickers!(symbols);
+  assert.deepEqual(tickers.map((t) => t.symbol), ["BTCUSDT"], "Chunk 1 geliefert, Chunk 2 (ETH) fehlt → Einzel-Fallback im Sync");
+});
+
+test("Bulk-Ticker: scheitern ALLE Chunks, wird der erste Fehler geworfen", async () => {
+  const { adapter } = wrapperFromFetch({ maxTickerSymbolsPerUrl: 0, tickerRejectStatus: 500, retryMax: 1 });
+  const symbols = Array.from({ length: 120 }, (_, i) => `SYM${i}USDT`);
+  await assert.rejects(adapter.getTickers!(symbols), BitunixApiError);
 });
 
 test("Bulk-Ticker: getTickers fragt ALLE Symbole in EINEM Request (kein N+1)", async () => {

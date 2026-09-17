@@ -124,6 +124,14 @@ export function loadBitunixConfig(env: EnvLike = process.env): BitunixRuntimeCon
  */
 export const BITUNIX_MAX_RESPONSE_BYTES = 5_242_880;
 
+/**
+ * Maximale Symbolzahl je `GET /market/tickers?symbols=…`-Request. 50 Symbole
+ * à ≤ 20 Zeichen ergeben < 1,1 KB Query — weit unter jeder Gateway-Grenze.
+ * Der volle Katalog (≈ 750 Symbole, > 6 KB URL) wurde vom Venue-Gateway
+ * abgelehnt und ließ die gesamte Ticker-Stage des Market-Syncs scheitern.
+ */
+export const BITUNIX_TICKER_SYMBOLS_PER_REQUEST = 50;
+
 /** REST-Pfade (Single Source of Truth für Client + Mock + Doku). */
 export const BITUNIX_PATHS = {
   tradingPairs: "/api/v1/futures/market/trading_pairs",

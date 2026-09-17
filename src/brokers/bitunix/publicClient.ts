@@ -4,7 +4,7 @@
  * Endpunkte: trading_pairs, tickers, kline, depth.
  */
 import type { MarketCandle, MarketOrderBook, MarketTicker } from "../../contracts/broker";
-import { BITUNIX_PATHS, type BitunixRuntimeConfig } from "./config";
+import { BITUNIX_PATHS, BITUNIX_TICKER_SYMBOLS_PER_REQUEST, type BitunixRuntimeConfig } from "./config";
 import { BitunixApiError, classifyBitunixFailure } from "./errors";
 import { BitunixHttp, type BitunixHttpOptions } from "./http";
 import { mapTradingPairs } from "./mapping";
@@ -66,13 +66,45 @@ export class BitunixPublicClient {
    *                (`["BTCUSDT","ETHUSDT"]` → `symbols=BTCUSDT,ETHUSDT`,
    *                leeres Array = kein Filter = alle Symbole) sowie der
    *                vorformatierte Query-String (Abwärtskompatibilität).
+   *
+   * Große Symbol-Listen werden in Chunks von `BITUNIX_TICKER_SYMBOLS_PER_REQUEST`
+   * angefragt: Der volle Bitunix-Katalog (≈ 750 Symbole) ergibt sonst eine
+   * URL von > 6 KB, die der Venue-Gateway ablehnt — und ein einziger
+   * abgelehnter Request riss bisher die komplette Ticker-Stage (alle
+   * Instrumente „SCHEMA_MISMATCH“) mit. Schlägt ein Chunk fehl, werden die
+   * übrigen trotzdem geliefert (fehlende Symbole füllt der Aufrufer per
+   * Einzel-Ticker nach); nur wenn KEIN Chunk gelingt, wird der erste Fehler
+   * geworfen.
    */
   async fetchTickers(symbols?: string[] | string): Promise<BitunixTickerRaw[]> {
+    if (Array.isArray(symbols) && symbols.length > BITUNIX_TICKER_SYMBOLS_PER_REQUEST) {
+      const chunks: string[][] = [];
+      for (let i = 0; i < symbols.length; i += BITUNIX_TICKER_SYMBOLS_PER_REQUEST) {
+        chunks.push(symbols.slice(i, i + BITUNIX_TICKER_SYMBOLS_PER_REQUEST));
+      }
+      const out: BitunixTickerRaw[] = [];
+      let firstError: unknown;
+      let succeeded = 0;
+      for (const chunk of chunks) {
+        try {
+          out.push(...(await this.fetchTickersOnce(chunk.join(","))));
+          succeeded += 1;
+        } catch (e) {
+          if (firstError === undefined) firstError = e;
+        }
+      }
+      if (succeeded === 0 && firstError !== undefined) throw firstError;
+      return out;
+    }
     const query = Array.isArray(symbols)
       ? symbols.length > 0
         ? symbols.join(",")
         : undefined
       : symbols;
+    return this.fetchTickersOnce(query);
+  }
+
+  private async fetchTickersOnce(query: string | undefined): Promise<BitunixTickerRaw[]> {
     const res = await this.http.request({
       method: "GET",
       path: BITUNIX_PATHS.tickers,

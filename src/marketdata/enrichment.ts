@@ -43,8 +43,13 @@ export interface EnrichmentReport {
   succeeded: number;
   /** Instrument-IDs/Symbole ohne Wert (Data-Quality). */
   missing: string[];
-  /** Fehler je Symbol mit Begründung (Sync läuft weiter). */
-  failures: Array<{ symbol: string; reason: string }>;
+  /**
+   * Fehler je Symbol mit Begründung (Sync läuft weiter). `cause` trägt das
+   * ursprüngliche Fehlerobjekt (HTTP-Status/Code), damit der Sync die
+   * Ursache ehrlich klassifizieren kann (NETWORK/UPSTREAM_5XX/…) statt
+   * pauschal „SCHEMA_MISMATCH“ zu melden.
+   */
+  failures: Array<{ symbol: string; reason: string; cause?: unknown }>;
 }
 
 /** Optionen der Orderbook-Stage. */
@@ -186,7 +191,7 @@ export async function enrichWithTickers(
   const attempted = cappedInstruments.length;
   const volumeBySymbol = new Map<string, number | null>();
   const missing: string[] = [];
-  const failures: Array<{ symbol: string; reason: string }> = [];
+  const failures: Array<{ symbol: string; reason: string; cause?: unknown }> = [];
 
   if (attempted === 0) {
     return {
@@ -223,6 +228,7 @@ export async function enrichWithTickers(
     symbol: string;
     quoteVol?: number | null;
     failure?: string;
+    cause?: unknown;
   }> => {
     try {
       const t = await adapter.getTicker(inst.symbol);
@@ -244,6 +250,7 @@ export async function enrichWithTickers(
         symbol: inst.symbol,
         failure:
           e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80),
+        cause: e,
       };
     }
   };
@@ -254,11 +261,16 @@ export async function enrichWithTickers(
       symbol: string;
       quoteVol?: number | null;
       failure?: string;
+      cause?: unknown;
     }>,
   ): void => {
     for (const result of results) {
       if (result.failure) {
-        failures.push({ symbol: result.symbol, reason: result.failure });
+        failures.push({
+          symbol: result.symbol,
+          reason: result.failure,
+          ...(result.cause !== undefined ? { cause: result.cause } : {}),
+        });
       } else if (!tickerMap.has(result.symbol)) {
         tickerMap.set(result.symbol, { quoteVol: result.quoteVol ?? null });
       }
@@ -277,16 +289,22 @@ export async function enrichWithTickers(
           reason: `Ticker-Response gekappt: ${rows.length} > ${MAX_RESPONSE_ROWS} Zeilen (Payload-Schutz).`,
         });
       }
-      if (rows.length > SYNC_LIMITS.maxTickerBatch) {
+      // Die Batch-Kappe schützt vor UNANGEFORDERTEN Massen-Payloads. Zeilen,
+      // die wir für die (bereits auf MAX_INSTRUMENTS_CEILING begrenzten)
+      // Instrumente selbst angefragt haben, sind erwartet — sie zu verwerfen
+      // erzeugte einen Schein-Fehler UND einen Selbst-DoS: ein 750er-Katalog
+      // wurde auf 500 gekappt, die 250 fehlenden dann einzeln nachgeholt.
+      const tickerBatchCap = Math.min(
+        MAX_RESPONSE_ROWS,
+        Math.max(SYNC_LIMITS.maxTickerBatch, symbols.length),
+      );
+      if (rows.length > tickerBatchCap) {
         failures.push({
           symbol: "BATCH",
-          reason: `Ticker-Batch gekappt: ${rows.length} > ${SYNC_LIMITS.maxTickerBatch} (maxTickerBatch).`,
+          reason: `Ticker-Batch gekappt: ${rows.length} > ${tickerBatchCap} (maxTickerBatch).`,
         });
       }
-      const cappedRows = rows.slice(
-        0,
-        Math.min(MAX_RESPONSE_ROWS, SYNC_LIMITS.maxTickerBatch),
-      );
+      const cappedRows = rows.slice(0, tickerBatchCap);
       for (const t of cappedRows) {
         const sym = safeSymbol((t as { symbol?: unknown })?.symbol as string);
         if (!sym) continue;
@@ -327,7 +345,7 @@ export async function enrichWithTickers(
     for (const inst of validInstruments) {
       volumeBySymbol.set(inst.symbol, null);
       missing.push(inst.id ?? inst.symbol);
-      failures.push({ symbol: inst.symbol, reason });
+      failures.push({ symbol: inst.symbol, reason, cause: e });
     }
     // Auch für bereits validierte, aber nicht in tickerMap enthaltene
     const succeeded = 0;

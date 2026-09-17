@@ -582,16 +582,6 @@ export class MarketDataSyncService {
           });
         }
       }
-      // Failures aus Enrichment in Sync-Failures übernehmen
-      for (const f of tickerReport.failures) {
-        failures.push({
-          stage: "ticker",
-          symbol: f.symbol,
-          message: `Ticker-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`,
-          reason: "SCHEMA_MISMATCH",
-          retryable: false,
-        });
-      }
     } catch (e) {
       failures.push(this.toFailure("ticker", e));
     }
@@ -600,6 +590,36 @@ export class MarketDataSyncService {
     const ranked = rankInstruments(usable, tickerBySymbol);
     const selected = ranked.slice(0, opts.maxInstruments);
     const skipped = Math.max(0, discovered.length - selected.length);
+
+    // Ticker-Failures in Sync-Failures übernehmen — NUR für ausgewählte
+    // Instrumente (plus Stage-Level-Einträge wie "BATCH"): Der Bulk-Ticker
+    // läuft über den gesamten Katalog (für das Liquiditäts-Ranking), gekappte
+    // Instrumente werden aber nicht synchronisiert; ihre Ticker-Lücke ist kein
+    // Fehler des Laufs. Vorher meldete ein Lauf mit 250 Instrumenten
+    // „754 failures“. Die Ursache wird aus dem Originalfehler klassifiziert
+    // (Netzwerk/5xx/429 ⇒ wiederholbar) statt pauschal SCHEMA_MISMATCH.
+    // Bewusst OHNE instrumentId: eine Volumen-Lücke ist Data-Quality, kein
+    // Historien-Fetch-Fehler — sie gehört nicht ins Instrument-Manifest.
+    {
+      const selectedSymbolSet = new Set(selected.map((s) => s.symbol));
+      const kept: EnrichmentReport["failures"] = [];
+      for (const f of tickerReport.failures) {
+        if (f.symbol !== "BATCH" && !selectedSymbolSet.has(f.symbol)) continue;
+        kept.push(f);
+        if (f.cause !== undefined) {
+          failures.push(this.toFailure("ticker", f.cause, { symbol: f.symbol }));
+          continue;
+        }
+        failures.push({
+          stage: "ticker",
+          symbol: f.symbol,
+          message: `Ticker-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`,
+          reason: "SCHEMA_MISMATCH",
+          retryable: false,
+        });
+      }
+      tickerReport = { ...tickerReport, failures: kept };
+    }
 
     if (unusableRows > 0) {
       this.logger(
