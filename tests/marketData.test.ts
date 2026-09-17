@@ -8,7 +8,7 @@
  */
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -22,7 +22,11 @@ import {
 import { MarketDataFetchError } from "../src/lib/marketDataErrors";
 import { setStructuredLogSinkForTests, type StructuredLogEntry } from "../src/lib/logger";
 import { resetTelemetryForTests, marketDataFailureSnapshot, telemetry } from "../src/lib/telemetry";
-import { saveMarketDataErrors, loadMarketDataErrors } from "../src/marketdata/dataErrors";
+import {
+  loadMarketDataBatchErrors,
+  loadMarketDataErrors,
+  saveMarketDataErrors,
+} from "../src/marketdata/dataErrors";
 import { scanUniverse } from "../src/scanner/pipeline";
 import { DEFAULT_SCANNER_CONFIG } from "../src/scanner/config";
 import { instrument } from "./fixtures/scannerFixtures";
@@ -331,6 +335,57 @@ test("Manifest: Sync-Fehler werden klassifiziert persistiert und gelesen", () =>
     const map = loadMarketDataErrors(file);
     assert.equal(map.get("BITUNIX:BTCUSDT"), "RATE_LIMITED");
     assert.equal(map.get("BITUNIX:ETHUSDT"), "NETWORK");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Manifest: Batch-Fehler ohne instrumentId werden als Stage-Bucket persistiert (v1.39.1)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mderr-batch-"));
+  const file = path.join(dir, "errors.json");
+  try {
+    const outcome = saveMarketDataErrors(
+      [
+        {
+          // Discovery-Komplettausfall: kein instrumentId, kein symbol.
+          stage: "discovery" as const,
+          message: "Bitunix-Netzwerkfehler: connect ECONNREFUSED",
+          reason: "NETWORK" as const,
+          retryable: true,
+        },
+      ],
+      file,
+    );
+    assert.equal(outcome.persisted, 0, "kein Instrument-Fehler zuordnbar");
+    assert.equal(outcome.batch, 1, "genau ein Batch-Bucket");
+    // Per-Instrument-Map bleibt leer — der Scanner darf daraus keine
+    // Instrument-Ableitung lesen.
+    assert.equal(loadMarketDataErrors(file).size, 0);
+    const batch = loadMarketDataBatchErrors(file);
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].stage, "discovery");
+    assert.equal(batch[0].reason, "NETWORK");
+    assert.equal(batch[0].count, 1);
+    assert.equal(typeof batch[0].at, "string");
+    // Security-Politik: keine Meldungstexte im Manifest.
+    const raw = JSON.parse(readFileSync(file, "utf8")) as { batch: Array<{ reason?: string }> };
+    assert.ok(!("message" in raw.batch[0]), "keine Meldungstexte im Batch-Eintrag");
+
+    // Mehrere gleiche Batch-Fehler → ein Bucket mit count>1.
+    saveMarketDataErrors(
+      [
+        { stage: "discovery" as const, message: "a", reason: "NETWORK" as const },
+        { stage: "discovery" as const, message: "b", reason: "NETWORK" as const },
+      ],
+      file,
+    );
+    const merged = loadMarketDataBatchErrors(file);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].count, 2);
+
+    // Altbestand ohne batch-Feld ⇒ leere Liste (kein Wurf).
+    writeFileSync(file, JSON.stringify({ writtenAt: "t", errors: [] }), "utf8");
+    assert.deepEqual(loadMarketDataBatchErrors(file), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

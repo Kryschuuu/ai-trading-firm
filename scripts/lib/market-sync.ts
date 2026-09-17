@@ -40,7 +40,11 @@ import {
 export interface MarketSyncRunOptions {
   /** Zu synchronisierende Venue (Großbuchstaben, z. B. `BITUNIX`). */
   venue: string;
-  /** Zu backfillende Timeframes; Default `5m,15m,30m,1h`. */
+  /**
+   * Zu backfillende Timeframes. Default liegt im Service (`SYNC_TIMEFRAMES`,
+   * seit v1.37.0 nur `1h` — der einzige von Scanner/Analytics ausgewertete
+   * Zeitrahmen). Kürzere Zeitrahmen explizit: `--timeframes=5m,15m,30m,1h`.
+   */
   timeframes?: readonly SupportedTimeframe[];
   /** Kerzen je Timeframe; Default `max(150, requiredWarmupCandles)`. */
   candleLimit?: number;

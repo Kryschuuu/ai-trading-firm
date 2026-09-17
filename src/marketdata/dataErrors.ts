@@ -37,9 +37,26 @@ export interface MarketDataErrorManifestEntry {
   at: string;
 }
 
+/**
+ * Batch-Fehler ohne Instrument-Zuordnung (v1.39.1): schlägt eine GANZE Stage
+ * fehl (z. B. Discovery/Netzwerk), gibt es kein `instrumentId` — bisher wurden
+ * solche Fehler still verworfen, das Manifest blieb leer und der Betrieb las
+ * „1 Fehler“ ohne jeden nachlesbaren Grund. Batch-Einträge tragen deshalb nur
+ * Stage + klassifizierte Ursache (gleiche Security-Politik wie oben: keine
+ * Meldungstexte, keine URLs, keine Secrets).
+ */
+export interface MarketDataErrorBatchEntry {
+  stage: SyncError["stage"];
+  reason: MarketDataErrorReason | "UNCLASSIFIED";
+  count: number;
+  at: string;
+}
+
 export interface MarketDataErrorManifest {
   writtenAt: string;
   errors: MarketDataErrorManifestEntry[];
+  /** Batch-Fehler (Stage-Level, ohne Instrument); optional für Altbestände. */
+  batch?: MarketDataErrorBatchEntry[];
 }
 
 /**
@@ -63,13 +80,25 @@ export function syncErrorsToDataErrors(errors: readonly SyncError[]): Map<string
 
 /**
  * Persistiert Fehler atomar (tmp + rename). Nur stabile Felder — keine
- * rohen Fehlermeldungen (können URLs/Secrets enthalten).
+ * rohen Fehlermeldungen (können URLs/Secrets enthalten). Batch-Fehler ohne
+ * `instrumentId` werden je Stage/Ursache zusammengefasst (`batch`), damit ein
+ * Komplettausfall (Discovery/Netzwerk) über Prozessgrenzen nachlesbar bleibt.
+ *
+ * Rückgabe: tatsächlich persistierte Einträge (Instrument-Fehler und
+ * Batch-Buckets) — der CLI leitet daraus seine ehrliche Statuszeile ab, statt
+ * „Manifest geschrieben“ zu behaupten, wenn nichts drin landete.
  */
 export function saveMarketDataErrors(
   errors: readonly SyncError[],
   file: string = MARKET_DATA_ERRORS_FILE,
   now: Date = new Date(),
-): void {
+): { persisted: number; batch: number } {
+  const batchCounts = new Map<string, number>();
+  for (const e of errors) {
+    if (e.instrumentId || e.stage === "upsert") continue;
+    const key = `${e.stage}/${e.reason ?? "UNCLASSIFIED"}`;
+    batchCounts.set(key, (batchCounts.get(key) ?? 0) + 1);
+  }
   const manifest: MarketDataErrorManifest = {
     writtenAt: now.toISOString(),
     errors: errors
@@ -82,11 +111,40 @@ export function saveMarketDataErrors(
         at: now.toISOString(),
       }))
       .slice(0, MAX_MANIFEST_ENTRIES),
+    ...(batchCounts.size > 0
+      ? {
+          batch: [...batchCounts.entries()].map(([key, count]) => {
+            const [stage, reason] = key.split("/");
+            return { stage, reason, count, at: now.toISOString() } as MarketDataErrorBatchEntry;
+          }),
+        }
+      : {}),
   };
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(manifest, null, 2), { mode: 0o600 });
   renameSync(tmp, file);
+  return { persisted: manifest.errors.length, batch: manifest.batch?.length ?? 0 };
+}
+
+/**
+ * Lädt die Batch-Fehler des Manifests (Read-only; fehlende/korrupte Datei
+ * oder Altbestand ohne `batch` ⇒ leere Liste).
+ */
+export function loadMarketDataBatchErrors(
+  file: string = MARKET_DATA_ERRORS_FILE,
+): MarketDataErrorBatchEntry[] {
+  try {
+    if (!existsSync(file)) return [];
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<MarketDataErrorManifest>;
+    if (!Array.isArray(parsed.batch)) return [];
+    return parsed.batch.filter(
+      (e): e is MarketDataErrorBatchEntry =>
+        !!e && typeof e.stage === "string" && typeof e.count === "number",
+    );
+  } catch {
+    return [];
+  }
 }
 
 /**

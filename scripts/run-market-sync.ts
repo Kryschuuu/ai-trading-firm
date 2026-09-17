@@ -16,6 +16,7 @@
  *
  * See docs/MARKET_DATA_PIPELINE.md.
  */
+import { toConsoleAscii } from "../src/lib/consoleFormat";
 import { main } from "./market-sync";
 
 main()
@@ -24,6 +25,7 @@ main()
   })
   .catch((e) => {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[market-sync] failed: ${msg.slice(0, 160)}`);
+    // ASCII-sicher (v1.39.1): Windows-Konsolen mit Legacy-Codepage sonst Mojibake.
+    console.error(toConsoleAscii(`[market-sync] failed: ${msg.slice(0, 160)}`));
     process.exit(1);
   });

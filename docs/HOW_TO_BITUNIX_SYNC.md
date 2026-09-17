@@ -107,20 +107,33 @@ npm run market:sync -- --venue=BITUNIX
 
 ### Erwartete Ausgabe eines erfolgreichen Laufs
 
+Seit v1.37.0 lädt der Standardlauf nur `1h` (der einzige von Scanner/Analytics
+ausgewertete Zeitrahmen); kürzere Zeitrahmen gezielt mit
+`--timeframes=5m,15m,30m,1h`:
+
 ```
 [market-sync] BITUNIX discovery: <N> instruments
 [market-sync] tickers enriched: <N>
-[market-sync] 5m candles: <N>/<N> (... bars)
-[market-sync] 15m candles: ...
-[market-sync] 30m candles: ...
-[market-sync] 1h candles: ...
-[market-sync] failures: 0
+[market-sync] orderbooks enriched: <N>
+[market-sync] 1h candles: <N>/<N> (<bars>/<soll> bars)
 [market-sync] duration: ...
 ```
 
 Exit-Codes: `0` = sauber · `1` = degradiert (Details im Manifest
 `data/market-data-errors.json` — einfach **erneut ausführen**, es gibt z. B. Rate-Limits
 von 8 req/s/IP) · `2` = Bedienfehler/Gate (z. B. weiterhin `VENUE_DISABLED`).
+
+**Seit v1.39.1** nennt der Lauf bei Fehlern die Ursache direkt im Log
+(Ursachen-Buckets je Stage/Taxonomie + Wiederholbarkeits-Bilanz), und ALLE
+Ausgaben sind ASCII-sicher — auf Windows-Konsolen mit Legacy-Codepage erscheinen
+keine „komischen Zeichen“ (Mojibake) mehr:
+
+```
+[market-sync] failures: 1
+[market-sync] failures nach Ursache: discovery/NETWORK: 1
+[market-sync] failures: 1 wiederholbar, 0 endgültig — Instrument-Zuordnung im Manifest (data/market-data-errors.json), Rohdaten per --json
+[market-sync] DEGRADED: 1 isolierte(r) Fehler - Ursachen im Manifest (data/market-data-errors.json), Behebung: erneut ausfuehren.
+```
 
 ---
 
@@ -220,7 +233,8 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 | Trotz Eintrag in `.env` weiter `VENUE_DISABLED` | Das CLI lädt `.env` nicht. Variable in der Shell setzen: `BITUNIX_ENABLED=true npm run market:sync …` (bzw. `export` / PowerShell `$env:`). Prüfen mit `echo "$BITUNIX_ENABLED"` (muss exakt `true` ergeben). |
 | `--env-file= is not allowed in NODE_OPTIONS` | Node verbietet `--env-file` in `NODE_OPTIONS` bewusst. Bitte Inline/`export` verwenden. |
 | Flag gesetzt, aber Wert ist `TRUE`/`1`/`yes` | Es zählt nur der exakte String `"true"` (klein geschrieben). |
-| `discovery: 0 instruments`, `failures: 1` | Netzwerk/API nicht erreichbar (Proxy/Firewall) oder Ratenlimit. Details in `data/market-data-errors.json`; erneut ausführen. |
+| `discovery: 0 instruments`, `failures: 1` | Netzwerk/API nicht erreichbar (Proxy/Firewall, Geo-Block) oder Ratenlimit. Seit v1.39.1 zeigt die Logzeile `failures nach Ursache:` die klassifizierte Ursache (`discovery/NETWORK` = API nicht erreichbar, `discovery/RATE_LIMITED` = Limit, `discovery/TLS` = Zertifikat/Proxy). Batch-Fehler stehen seit v1.39.1 auch im `batch`-Abschnitt von `data/market-data-errors.json`; erneut ausführen. |
+| „Komische Zeichen“ (z. B. `â€"`, `Ã¼`) in der Konsole | bis v1.39.0: UTF-8-Ausgabe auf Windows-Konsolen mit Legacy-Codepage. Seit v1.39.1 behoben — alle CLI-Ausgaben sind ASCII-sicher (`toConsoleAscii`). Falls weiterhin Mojibake erscheint: Konsole auf Windows-Terminal/`chcp 65001` stellen. |
 | Immer noch „< 61 Kerzen“ nach dem Lauf | `--candle-limit` weglassen (Default 150 ≥ 61) bzw. auf ≥ 61 stellen; Status mit `npm run market:sync:status` prüfen. |
 | Warnung im Control Panel bleibt nach Sync | Seite hart neu laden (Cache). Die Anzeige liest die Daten zur Anfragezeit — ein App-Neustart ist nicht nötig. |
 | Web-App reagiert nicht auf `.env`-Änderung | Next.js liest `.env` nur beim Start → `npm run dev`/`npm run start` neu starten. |

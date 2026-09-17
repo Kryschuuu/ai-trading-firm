@@ -47,6 +47,13 @@ export function safeSnippet(value: unknown, max = 80): string {
 /**
  * Venue-Fehler mit Taxonomie. `kind` steuert Retry (nur rate-limit /
  * maintenance / unknown-5xx), nie auth.
+ *
+ * `cause` (v1.39.1): die Ursachen-Kette des ursprünglichen Fehlers wird
+ * durchgereicht — `classifyMarketDataError` liest daraus Codes/Namen
+ * (ENOTFOUND, ERR_TLS_*, AbortError …) und kann Netzwerk-/TLS-/Timeout-Fehler
+ * korrekt einordnen. Ohne Kette landete jeder "fetch failed" als UNKNOWN.
+ * Die Kette fließt NIEMALS in Logzeilen/Meldungen (`sanitizeSyncErrorMessage`
+ * redigiert nur `message`); sie dient allein der Klassifikation.
  */
 export class BitunixApiError extends BrokerError {
   readonly kind: BitunixErrorKind;
@@ -56,12 +63,15 @@ export class BitunixApiError extends BrokerError {
   constructor(
     kind: BitunixErrorKind,
     message: string,
-    opts: { httpStatus?: number | null; venueCode?: number | null } = {}
+    opts: { httpStatus?: number | null; venueCode?: number | null; cause?: unknown } = {}
   ) {
     super(KIND_CODE[kind], message);
     this.kind = kind;
     this.httpStatus = opts.httpStatus ?? null;
     this.venueCode = opts.venueCode ?? null;
+    if (opts.cause !== undefined) {
+      (this as { cause?: unknown }).cause = opts.cause;
+    }
   }
 }
 

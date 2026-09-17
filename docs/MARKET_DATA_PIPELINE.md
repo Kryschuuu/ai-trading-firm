@@ -815,11 +815,19 @@ bricht nicht beim ersten Fehler ab (`continueOnError` ist Default). Jeder Eintra
 trägt `stage`, `instrumentId`/`symbol`/`timeframe` (wo sinnvoll), eine gekürzte
 meldung und `reason` aus der Taxonomie MDERR-006 (`classifyMarketDataError`).
 Bei Fehlern schreibt das CLI das Manifest `data/market-data-errors.json`
-(`{ writtenAt, errors: [{ instrumentId, reason, stage, timeframe?, at }] }`,
-atomar tmp+rename, `mode 0600`, gedeckelt auf `MAX_MANIFEST_ENTRIES`; Zeilen ohne
-`instrumentId` und `upsert`-Fehler bleiben bewusst draußen, weil sie dem Scanner
-keinen Datenfehler signalisieren dürfen). Ohne Fehler wird das Manifest geleert.
-Die vollständigen Lauf-Zähler stehen nur im `SyncResult` (`--json`).
+(`{ writtenAt, errors: [{ instrumentId, reason, stage, timeframe?, at }],
+batch?: [{ stage, reason, count, at }] }`,
+atomar tmp+rename, `mode 0600`, gedeckelt auf `MAX_MANIFEST_ENTRIES`). Gilt seit
+v1.26.1: `upsert`-Fehler bleiben bewusst draußen, weil sie dem Scanner keinen
+Datenfehler signalisieren dürfen. **Seit v1.39.1** landen auch Batch-Fehler
+(Stage-Komplettausfälle ohne `instrumentId`, z. B. Discovery/Netzwerk) im
+Manifest — im `batch`-Abschnitt je Stage/Ursache zusammengezählt; sie fließen
+bewusst NICHT in die per-Instrument-`errors`-Map des Scanners (`loadMarketDataErrors`),
+sind aber über `loadMarketDataBatchErrors()` nachlesbar. Der CLI-Schlussbericht
+nennt ehrlich, was persistiert wurde („N Instrument-Fehler, M Batch-Fehler
+(Stage-Level)“), statt pauschal „Manifest geschrieben“ zu melden. Ohne Fehler
+wird das Manifest geleert. Die vollständigen Lauf-Zähler und die redigierten
+Fehlermeldungen stehen nur im `SyncResult` (`--json`).
 `--strict` wirft `SyncPartialFailureError` (mit `failureCount` und Vorschau von
 max. 10 Fehlern) — Exit 1, persistierte Daten bleiben erhalten, weil Append und
 Dedup idempotent sind.
@@ -851,6 +859,31 @@ Ein unvollständiger Backfill steht **nie** als „fertig“ im Log: `A/B bars`
 beziffert die Lücke gegen `candleLimit × Instrumente`, und eine
 `spreadsUnknown`-Zeile sowie die `DEGRADED`-Zeile nennen Regel und Anzahl
 (`rule="max-spread"`), ohne Symbol-URLs.
+
+**Fehlerzeilen (seit v1.39.1).** Mit mindestens einem Fehler folgen auf die
+`failures: N`-Zeile zwei Aufschlüsselungen — Ursachen-Buckets je
+Stage/Taxonomie und die Wiederholbarkeits-Bilanz:
+
+```
+[market-sync] failures: 2
+[market-sync] failures nach Ursache: discovery/NETWORK: 1, candles/RATE_LIMITED: 1
+[market-sync] failures: 1 wiederholbar, 1 endgültig — Instrument-Zuordnung im Manifest (data/market-data-errors.json), Rohdaten per --json
+```
+
+Geloggt werden dabei ausschließlich Zähler und klassifizierte Ursachen — keine
+Rohmeldungen (die Venue-/Symboltexte enthalten können; Security-Guard:
+`test/marketdata/security.test.ts`). Der ursächliche Klassifizierer liest seit
+v1.39.1 die `cause`-Kette der Transportfehler: ein `fetch failed` mit
+`ECONNREFUSED` dahinter erscheint als `NETWORK` statt `UNKNOWN`.
+
+**ASCII-sichere Konsole (seit v1.39.1).** Alle Druckpfade der CLIs
+(`market:sync`, `market-sync`, `scan --sync`) transliterieren über
+`src/lib/consoleFormat.ts` (`toConsoleAscii()`): Umlaute nach DIN 5008
+(„übersprungen“ → „uebersprungen“), Symbole mit festen Äquivalenten
+(`—` zu `-`, `·` zu `|`, `→` zu `->`, `≥` zu `>=`). Grund: Windows-Konsolen mit
+Legacy-Codepage (CP850/CP1252) und umgeleitete Ausgaben zeigten sonst Mojibake
+(„â€“, „Ã¼“). Rohwerte (`--json`, Rückgabewerte, Manifest, Tests) bleiben
+unberührt — nur die Terminal-Darstellung ist ASCII.
 
 ### 12.1 Inkrementeller Sync und Spread-Cache (v1.38.0)
 

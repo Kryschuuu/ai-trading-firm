@@ -253,14 +253,19 @@ export class BitunixHttp {
           });
         }
         if (e instanceof Error && e.name === "AbortError") {
-          last = new BitunixApiError("unknown", `Bitunix-Timeout nach ${this.cfg.timeoutMs} ms.`);
+          // `cause` hält den AbortError — die Market-Data-Klassifikation
+          // ordnet ihn sonst als UNKNOWN statt TIMEOUT ein (v1.39.1).
+          last = new BitunixApiError("unknown", `Bitunix-Timeout nach ${this.cfg.timeoutMs} ms.`, { cause: e });
           // Timeout ist ambivalent — nicht-idempotente Requests reichen einen
           // "ambiguous"-Fehler nach oben (kein blindes erneutes Senden).
           if (idempotent) continue;
           throw new BitunixAmbiguousError(last.message, { httpStatus: null, venueCode: null });
         }
         const msg = redactBitunix(e instanceof Error ? e.message : String(e), this.secrets());
-        last = new BitunixApiError("unknown", `Bitunix-Netzwerkfehler: ${msg.slice(0, 80)}`);
+        // `cause` hält den Originalfehler (DNS/TLS/ECONNREFUSED …), damit die
+        // Ursachen-Taxonomie (`classifyMarketDataError`) über die Kette
+        // klassifizieren kann — ohne sie war jeder Ausfall "UNKNOWN".
+        last = new BitunixApiError("unknown", `Bitunix-Netzwerkfehler: ${msg.slice(0, 80)}`, { cause: e });
         // Netzwerkabbruch ist ambivalent — dito.
         if (idempotent) continue;
         throw new BitunixAmbiguousError(last.message, { httpStatus: null, venueCode: null });
