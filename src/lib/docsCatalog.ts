@@ -89,6 +89,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "How-to: LAN und Sitzung nach Update",
     subtitle: "EADDRINUSE/127.0.0.1-Listener plus „Sitzung abgelaufen“ statt Datenbankfehler (v1.36.41)",
   },
+  howtoUpdate: {
+    file: "docs/HOWTO_UPDATE.md",
+    title: "How-to: Update einer laufenden Firma",
+    subtitle: "git pull → Stop-Reihenfolge → npm ci → Schema → Build → Start → Verifikation (v1.39.1)",
+  },
   architecture: {
     file: "docs/ARCHITECTURE.md",
     title: "Architektur: Makro/Mikro-Zyklen",

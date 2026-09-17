@@ -903,6 +903,11 @@ Weitere Diagnose im **[Handbuch, Kapitel 12](HANDBUCH.md)**.
 
 ## Kapitel 12 — Updates und Sicherung `[A+B]`
 
+> Kurzform. Das ausführliche Runbook für eine **laufende** Instanz — richtige
+> Stop-/Start-Reihenfolge der Units, `.env`-Abgleich, wann `drizzle-kit push`
+> nötig ist, Verifikations-Checkliste und Rollback — steht in
+> [`HOWTO_UPDATE.md`](HOWTO_UPDATE.md).
+
 ```bash
 # Update einspielen
 cd ~/ai-trading-firm
