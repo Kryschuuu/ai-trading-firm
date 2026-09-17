@@ -93,9 +93,11 @@ export {
 } from "./adapters/bitunix";
 export {
   clearMarketDataErrors,
+  loadMarketDataBatchErrors,
   loadMarketDataErrors,
   saveMarketDataErrors,
   syncErrorsToDataErrors,
+  type MarketDataErrorBatchEntry,
   type MarketDataErrorManifest,
   type MarketDataErrorManifestEntry,
 } from "./dataErrors";

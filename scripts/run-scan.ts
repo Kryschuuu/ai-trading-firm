@@ -58,6 +58,21 @@ import {
   loadAllInstruments,
 } from "../src/scanner/service";
 import { runMarketSync } from "./lib/market-sync";
+import { toConsoleAscii } from "../src/lib/consoleFormat";
+
+/**
+ * Einzige Druckstelle dieses CLI — ASCII-sicher (v1.39.1): deutsche Logzeilen
+ * mit Umlauten/`·`/`—` erscheinen auf Windows-Konsolen mit Legacy-Codepage
+ * sonst als Mojibake. Gleiche Übersetzungsstelle wie `market:sync`.
+ */
+function say(line: string): void {
+  console.log(toConsoleAscii(line));
+}
+
+/** ASCII-sichere stderr-Zeile (Fehlerpfade). */
+function sayError(line: string): void {
+  console.error(toConsoleAscii(line));
+}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -92,9 +107,7 @@ async function main(): Promise<void> {
     .find((a) => a.startsWith("--venue="))
     ?.slice("--venue=".length);
   if (dateArg && !ARTIFACT_DATE_RE.test(dateArg)) {
-    console.error(
-      `[scanner] --date erwartet YYYY-MM-DD, war "${dateArg.slice(0, 20)}"`,
-    );
+    sayError(`[scanner] --date erwartet YYYY-MM-DD, war "${dateArg.slice(0, 20)}"`);
     process.exit(1);
   }
 
@@ -110,10 +123,16 @@ async function main(): Promise<void> {
       // MDERR-006: Fehler manifestieren und Scan TROTZDEM ausführen — der
       // Scanner übersetzt sie in DATA_UNAVAILABLE/Readiness ERROR statt in
       // eine stille min-candles-Aussortierung (Exit-Code unten = 1).
-      saveMarketDataErrors(result.failures);
-      console.error(
-        `[scanner] --sync: ${syncErrorCount} Marktdaten-Fehler — ` +
-          `Manifest geschrieben, Scan läuft mit Readiness ERROR (kein Marktausschluss).`,
+      // Ehrliche Berichterstattung wie `market:sync` (v1.39.1): benennt,
+      // was im Manifest landete (Instrument-Fehler vs. Batch-Buckets).
+      const { persisted, batch } = saveMarketDataErrors(result.failures);
+      const persistedNote =
+        persisted + batch > 0
+          ? `${persisted} Instrument-Fehler, ${batch} Batch-Fehler im Manifest`
+          : "Manifest ohne zuordenbare Einträge";
+      sayError(
+        `[scanner] --sync: ${syncErrorCount} Marktdaten-Fehler (${persistedNote}) — ` +
+          `Scan läuft mit Readiness ERROR (kein Marktausschluss).`,
       );
     } else {
       clearMarketDataErrors();
@@ -145,7 +164,7 @@ async function main(): Promise<void> {
   });
   const date = dateArg ?? artifactDateOf(scan.asOf);
 
-  console.log(
+  say(
     `[scanner] gescannt ${scan.stats.scanned} · geeignet ${scan.funnel.eligible.length} · ` +
       `interessant ${scan.funnel.interesting.length} · daily ${scan.funnel.daily.length} · ` +
       `deep ${scan.funnel.deep.length} · ${scan.stats.durationMs.toFixed(0)} ms`,
@@ -158,34 +177,34 @@ async function main(): Promise<void> {
       ? ` · ${readiness.outOfScope} ohne Sync-Venue (außer Scope)`
       : "";
   if (readiness.status === "READY") {
-    console.log(
+    say(
       `[scanner] Readiness: READY · ${readiness.warmed}/${readiness.instruments} gewärmt ` +
         `(≥ ${readiness.requiredCandles} Kerzen)${scopeNote}`,
     );
   } else if (readiness.status === "WARMING") {
-    console.log(
+    say(
       `[scanner] Readiness: WARMING · ${readiness.warmed}/${readiness.instruments} gewärmt, ` +
         `${readiness.missing} ohne genügend Historie (benötigt ${readiness.requiredCandles} Kerzen)${scopeNote}. ` +
         `Behebung: npm run market:sync`,
     );
     for (const o of readiness.worstOffenders) {
-      console.log(
+      say(
         `[scanner]   warmup fehlt: ${o.instrumentId} — ${o.candles}/${readiness.requiredCandles} Kerzen`,
       );
     }
   } else {
-    console.log(`[scanner] Readiness: ERROR · ${readiness.error}`);
+    say(`[scanner] Readiness: ERROR · ${readiness.error}`);
     for (const f of readiness.failures.slice(0, 10)) {
-      console.log(`[scanner]   datenfehler: ${f.instrumentId} — ${f.reason}`);
+      say(`[scanner]   datenfehler: ${f.instrumentId} — ${f.reason}`);
     }
   }
 
   for (const [rule, count] of Object.entries(scan.rejectionsByRule).sort()) {
-    console.log(`[scanner]   abgelehnt (${rule}): ${count}`);
+    say(`[scanner]   abgelehnt (${rule}): ${count}`);
   }
 
   if (dry) {
-    console.log("[scanner] --dry: keine Artefakte geschrieben");
+    say("[scanner] --dry: keine Artefakte geschrieben");
   } else {
     const previousDate = latestArtifactDate();
     const previous =
@@ -197,8 +216,8 @@ async function main(): Promise<void> {
       classifyWeekly({ scan, instruments, previous }),
       { date },
     );
-    console.log(`[scanner] Artefakt: ${daily.path}`);
-    console.log(
+    say(`[scanner] Artefakt: ${daily.path}`);
+    say(
       `[scanner] Weekly: ${weekly.path} — CORE ${weekly.review.summary.CORE}, ` +
         `ROTATION ${weekly.review.summary.ROTATION}, DISCOVERY ${weekly.review.summary.DISCOVERY}, ` +
         `EXCLUDED ${weekly.review.summary.EXCLUDED}`,
@@ -223,9 +242,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  console.error(
-    "[scanner] Fehlgeschlagen:",
-    e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
+  sayError(
+    "[scanner] Fehlgeschlagen: " +
+      (e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)),
   );
   process.exit(1);
 });

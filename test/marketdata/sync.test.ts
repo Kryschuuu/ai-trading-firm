@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { HistoricalStore } from "../../src/lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../../src/universe/registry";
 import {
+  defaultSyncLogger,
   formatDegradedLog,
   formatSyncLog,
   InsufficientCandleLimitError,
@@ -265,6 +266,86 @@ test("adapter failure on single symbol does not abort sync (continueOnError)", a
   assert.ok(syncErrorsToDataErrors(result.failures).size <= 1);
   // Und die Warnung für den Betreiber existiert.
   assert.match(formatDegradedLog(result) as string, /DEGRADED/);
+});
+
+test("defaultSyncLogger druckt ASCII-sicher (Mojibake-Fix v1.39.1)", () => {
+  const printed: { level: string; line: string }[] = [];
+  const original = { log: console.log, warn: console.warn, error: console.error };
+  console.log = (line: unknown): void => { printed.push({ level: "info", line: String(line) }); };
+  console.warn = (line: unknown): void => { printed.push({ level: "warn", line: String(line) }); };
+  console.error = (line: unknown): void => { printed.push({ level: "error", line: String(line) }); };
+  try {
+    defaultSyncLogger("warn", "[market-sync] übersprungen — Bitunix-URL ist ungültig (≥ 2)");
+    defaultSyncLogger("error", "[market-sync] Fehler · Session abgelaufen");
+  } finally {
+    console.log = original.log;
+    console.warn = original.warn;
+    console.error = original.error;
+  }
+  assert.equal(printed.length, 2);
+  assert.equal(printed[0].level, "warn");
+  assert.equal(printed[0].line, "[market-sync] uebersprungen - Bitunix-URL ist ungueltig (>= 2)");
+  assert.equal(printed[1].line, "[market-sync] Fehler | Session abgelaufen");
+});
+
+test("formatSyncLog: Fehlerzeilen nennen Ursachen-Buckets und Wiederholbarkeits-Bilanz (v1.39.1)", async () => {
+  const failing = "SYM001USDT";
+  const { adapter } = mockMarketDataAdapter({
+    instruments: symbols(3).map((s) => instrumentOf(s)),
+    failOrderBookFor: [failing],
+  });
+  const { service } = syncHarness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+  const lines = formatSyncLog(result);
+
+  assert.equal(result.failures.length, 1, "Setup: genau 1 isolierter Fehler");
+  // Zählerzeile bleibt; NEU: Ursachen-Bucket je Stage/Reason.
+  assert.ok(
+    lines.some((l) => l === "[market-sync] failures: 1"),
+    `"failures: 1" erwartet:\n${lines.join("\n")}`,
+  );
+  assert.ok(
+    lines.some((l) => l.startsWith("[market-sync] failures nach Ursache: orderbook/")),
+    `Ursachen-Bucket erwartet:\n${lines.join("\n")}`,
+  );
+  assert.ok(
+    lines.some((l) =>
+      /^\[market-sync\] failures: 1 wiederholbar, 0 endgültig — Instrument-Zuordnung im Manifest/.test(l),
+    ),
+    `Wiederholbarkeits-Bilanz erwartet:\n${lines.join("\n")}`,
+  );
+  // Security-Politik (test/marketdata/security.test.ts): KEINE Symbole und
+  // keine Rohmeldungen in Logzeilen — die Instrument-Zuordnung bleibt im
+  // Manifest, die redigierten Meldungen in der --json-Ausgabe.
+  assert.ok(!lines.some((l) => l.includes(failing)), `keine Symbole in den Logzeilen:\n${lines.join("\n")}`);
+  assert.ok(!lines.some((l) => l.includes("depth unavailable")), `keine Rohmeldungen in den Logzeilen:\n${lines.join("\n")}`);
+  assert.ok(!lines.some((l) => l.includes("http")), `keine URLs in den Logzeilen: ${lines.join("\n")}`);
+
+  // Mehrere Fehler mit gemischter Ursache: Buckets werden je Stage/Reason
+  // zusammengefasst, die Bilanz zählt beide Seiten.
+  const base = result.failures[0];
+  const many: SyncResult = {
+    ...result,
+    failures: [
+      base,
+      { ...base, retryable: false },
+      { ...base, stage: "candles" as const, timeframe: "1h", reason: "RATE_LIMITED" as const, retryable: true },
+    ],
+  };
+  const manyLines = formatSyncLog(many);
+  assert.ok(
+    manyLines.some((l) => l.includes("orderbook/SCHEMA_MISMATCH: 2")),
+    `Bucket-Zusammenfassung erwartet:\n${manyLines.join("\n")}`,
+  );
+  assert.ok(
+    manyLines.some((l) => l.includes("candles/RATE_LIMITED: 1")),
+    `zweiter Bucket erwartet:\n${manyLines.join("\n")}`,
+  );
+  assert.ok(
+    manyLines.some((l) => l.includes("2 wiederholbar, 1 endgültig")),
+    `Bilanz erwartet:\n${manyLines.join("\n")}`,
+  );
 });
 
 test("continueOnError=false bricht mit SyncPartialFailureError ab", async () => {

@@ -1,12 +1,75 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-14** · Code-Version **1.39.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-16** · Code-Version **1.39.1**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.39.1] — 2026-09-16 · fix(market-sync): ASCII-sichere Konsolen-Ausgabe, Ursachen-Buckets für Failures, ehrliches Fehler-Manifest
+
+**Hintergrund:** `BITUNIX_ENABLED=true npm run market:sync` zeigte auf
+Windows-Konsolen mit Legacy-Codepage Mojibake („â€“, „Ã¼“ — die
+deutschsprachigen Logzeilen enthalten Gedankenstriche, Mittelpunkte und
+Umlaute), und ein fehlgeschlagener Lauf meldete nur `failures: N` ohne jeden
+erkennbaren Grund: Der bereinigte Fehlertext wurde weder gezeigt noch — bei
+Stage-Komplettausfällen wie Discovery/Netzwerk — ins Manifest geschrieben, das
+die Fehlermeldung „Manifest geschrieben“ dennoch versprach. Die Kombination
+machte den Sync im Betrieb undurchsichtig.
+
+### Behoben
+
+- **Mojibake („komische Zeichen“) in der Konsole:** neue zentrale
+  Transliterationsstelle `toConsoleAscii()` (`src/lib/consoleFormat.ts`).
+  Alle Druckpfade der Sync-CLIs (`scripts/market-sync.ts`,
+  `scripts/run-market-sync.ts`, `scripts/run-scan.ts`) und der
+  `defaultSyncLogger` geben ASCII-sicher aus — Umlaute nach DIN 5008
+  („übersprungen“ → „uebersprungen“), typografische Symbole mit festen
+  Äquivalenten (`—` zu `-`, `·` zu `|`, `→` zu `->`, `≥` zu `>=`), alle
+  übrigen Nicht-ASCII-Zeichen entfernt. Rohwerte (`--json`, Rückgabewerte,
+  Manifest, Tests) bleiben unberührt.
+- **„Wieso nur failures?“ — Ursachen sichtbar:** `formatSyncLog()` ergänzt
+  bei Fehlern Ursachen-Buckets je Stage/Taxonomie
+  (`failures nach Ursache: discovery/NETWORK: 1`) und eine
+  Wiederholbarkeits-Bilanz (`1 wiederholbar, 0 endgültig`). Security-konform:
+  nur Zähler und klassifizierte Ursachen, keine Rohmeldungen (Guard
+  `test/marketdata/security.test.ts` verbietet Symbole in Logzeilen).
+- **Fehlerursache bleibt klassifizierbar:** `BitunixApiError` hält jetzt die
+  `cause`-Kette des Transportfehlers; `classifyMarketDataError()` liest
+  Codes/Namen daraus — ein `fetch failed` mit `ECONNREFUSED` erscheint als
+  `NETWORK` statt `UNKNOWN`, TLS-/Timeout-Fehler entsprechend als `TLS`/`TIMEOUT`.
+- **Manifest verspricht nichts Falsches:** Batch-Fehler ohne
+  `instrumentId` (z. B. Discovery-Komplettausfall) landen im neuen
+  `batch`-Abschnitt von `data/market-data-errors.json`
+  (`{ stage, reason, count, at }`, Security-Politik unverändert: keine
+  Meldungstexte). `saveMarketDataErrors()` liefert die persistierten Zähler
+  zurück; der CLI-Schlussbericht nennt genau, was wohin ging
+  („1 Marktdaten-Fehler (1 Batch-Fehler (Stage-Level)) — Manifest: …“).
+  Neu: `loadMarketDataBatchErrors()` (read-only, altbestand-fest).
+
+### Geändert
+
+- **Help-Text `--timeframes`:** der Text behauptete Default
+  `5m,15m,30m,1h` — tatsächlich ist der Default seit v1.37.0 `1h` (Service-
+  Konstante `SYNC_TIMEFRAMES`). Hilfe und Doku-Kommentare sagen das jetzt
+  korrekt und nennen den expliziten Aufruf für kürzere Zeitrahmen.
+- `docs/MARKET_DATA_PIPELINE.md` §Fehlerbehandlung/§Logformat: Manifest-Schema
+  mit `batch`, neue failure-Zeilen, ASCII-Konsole dokumentiert.
+- `docs/HOW_TO_BITUNIX_SYNC.md`: erwartete Ausgabe (1h-Default), Troubleshooting
+  um Ursachen-Buckets und Mojibake-Zeile ergänzt.
+
+### Tests
+
+- Neu: `test/marketdata/consoleFormat.test.ts` (Übersetzungstabelle,
+  Idempotenz, ASCII-Garantie für echte CLI-Logmuster).
+- `test/marketdata/sync.test.ts`: Ursachen-Buckets + Bilanz in
+  `formatSyncLog`, ASCII-sicherer `defaultSyncLogger`.
+- `test/marketdata/cli.test.ts`: Konsolendruck ASCII-sicher, Rückgabewerte
+  bleiben Rohtext.
+- `tests/marketData.test.ts`: Batch-Persistenz im Manifest (Buckets,
+  Altbestand ohne `batch`, Security-Politik „keine Meldungstexte“).
 
 ## [1.39.0] — 2026-09-14 · feat(auth): Browser-Sitzung bis zum Schließen des Fensters — automatische Verlängerung, Nachfrist, Login/Logout/Status im Dashboard (S1)
 

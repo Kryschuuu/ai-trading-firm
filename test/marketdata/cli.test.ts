@@ -43,6 +43,7 @@ function fakeAdapter(): MarketDataAdapter {
   };
 }
 import { gateMessage } from "../../scripts/lib/market-sync";
+import { isAsciiSafe } from "../../src/lib/consoleFormat";
 import { defaultRequiredWarmupCandles } from "../../src/marketdata";
 
 const HISTORY_FILE = path.join(process.cwd(), "data", "history", "candles.ndjson");
@@ -279,6 +280,40 @@ test("runMarketSyncCli: --status führt keinen Sync aus (kein Request, kein Writ
   assert.equal(run.exitCode, 2, "Kombination ist ein Bedienfehler, kein stilles Ignorieren");
   assert.match(run.lines[0], /--status kombiniert keine Sync-Optionen/);
   assert.equal(existsSync(HISTORY_FILE), before);
+});
+
+test("Konsolendruck ist ASCII-sicher, Rückgabewerte bleiben Rohtext (Mojibake-Fix v1.39.1)", async () => {
+  const printed: string[] = [];
+  const original = { log: console.log, error: console.error };
+  console.log = (line: unknown): void => {
+    printed.push(String(line));
+  };
+  console.error = (line: unknown): void => {
+    printed.push(String(line));
+  };
+  try {
+    // 1) Hilfe: enthält im Rohtext Gedankenstrich/»ü« — der Druck darf sie
+    //    nicht roh durchreichen (Windows-Codepage würde Mojibake zeigen).
+    const help = await runMarketSyncCli(["--help"]);
+    assert.ok(help.lines[0].includes("—"), "Rückgabewert behält den Originaltext");
+    // 2) Gate-Fehler: Meldung mit Umlauten über stderr.
+    const off = await runMarketSyncCli(["--venue=BITUNIX"], { env: {} });
+    assert.equal(off.exitCode, 2);
+  } finally {
+    console.log = original.log;
+    console.error = original.error;
+  }
+  assert.ok(printed.length > 0, "es wurde überhaupt gedruckt");
+  for (const line of printed) {
+    assert.ok(
+      isAsciiSafe(line),
+      `Konsolenzeile nicht ASCII-sicher: ${JSON.stringify(line)}`,
+    );
+  }
+  assert.ok(
+    printed.some((l) => l.includes("uebersprungen")),
+    "Transliteration aktiv: Hilfe-Text mit 'übersprungen' wird als 'uebersprungen' gedruckt",
+  );
 });
 
 test("describeSyncError: URLs und Kontrollzeichen überleben die Meldung nicht", () => {

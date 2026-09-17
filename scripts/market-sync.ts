@@ -16,6 +16,11 @@
  * keine Signatur. Geloggt werden Zähler — niemals Symbole, URLs oder Header.
  *
  * Exit-Codes: 0 sauberer Lauf · 1 degradierter/abgebrochener Lauf · 2 Bedienfehler.
+ *
+ * Konsole (v1.39.1): ALLE Druckpfade dieses CLI transliterieren über
+ * `toConsoleAscii()` — deutsche Umlaute und typografische Symbole erscheinen
+ * sonst auf Windows-Terminals mit Legacy-Codepage als Mojibake. Rohwerte
+ * (`--json`, Rückgabewerte, Manifest) bleiben unberührt.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,6 +50,7 @@ import {
 } from "../src/ops/marketDataReadiness";
 import { resolveDataDir } from "../src/universe/store";
 import type { EnvLike } from "../src/brokers/bitunix/config";
+import { toConsoleAscii } from "../src/lib/consoleFormat";
 import { runMarketSyncDetailed, type MarketSyncRunOptions } from "./lib/market-sync";
 
 /** Vom CLI verstandene Switches ohne Wert. */
@@ -88,9 +94,13 @@ Optionen:
         Venue, die synchronisiert wird (Default: BITUNIX). Unbekannte Venues
         brechen ab, bevor ein Request abgeht.
   --timeframes=LISTE
-        Kommagetrennte Kerzen-Periodizitäten des Backfills (Default:
-        5m,15m,30m,1h). Erlaubt sind nur ${SUPPORTED_TIMEFRAMES.join(", ")} —
+        Kommagetrennte Kerzen-Periodizitäten des Backfills. Erlaubt sind nur ${SUPPORTED_TIMEFRAMES.join(
+          ", ",
+        )} —
         ein ungültiger Wert würde Reihen verschiedener Länge mischen.
+        Default: 1h (seit v1.37.0 — der einzige von Scanner/Analytics
+        ausgewertete Zeitrahmen; 150 Bars je Instrument). Kürzere Zeitrahmen
+        bei Bedarf: --timeframes=5m,15m,30m,1h.
   --candle-limit=N
         Anzahl je Timeframe zu ladender Kerzen. Muss >= requiredWarmupCandles
         sein (aktuell ${required} bei Default-Faktoren: EMA50 → 50 Kerzen,
@@ -299,6 +309,16 @@ export function parseSyncArgs(argv: readonly string[]): ParseResult {
   };
 }
 
+/**
+ * Einzige Druckstelle des CLI: jede Zeile verlässt den Prozess ASCII-sicher
+ * (Mojibake-Schutz für Windows-Konsolen mit Legacy-Codepage, siehe Dateikopf).
+ * Die gesammelten Rohzeilen (`lines`) bleiben unberührt — Tests und
+ * Automatisierung lesen den Originaltext.
+ */
+function printLine(line: string): void {
+  console.log(toConsoleAscii(line));
+}
+
 /** Obergrenze des Readiness-Scans (Schutz gegen unendliche Registry-Seiten). */
 const STATUS_SCAN_PAGE_SIZE = 1000;
 
@@ -323,7 +343,7 @@ export interface StatusRunDeps {
 export function runMarketSyncStatus(
   deps: StatusRunDeps = {}
 ): { exitCode: number; lines: string[]; report: MarketDataReadinessReport | null } {
-  const emit = deps.logger ?? ((line: string) => console.log(line));
+  const emit = deps.logger ?? printLine;
   try {
     // autoSave:false + explizites load(): ein Status-Kommando schreibt nie —
     // auch nicht den Seed in eine leere Registry (sonst wäre „leer“ nie lesbar).
@@ -383,7 +403,7 @@ export async function runMarketSyncCli(
   const parsed = parseSyncArgs(argv);
   if (!parsed.ok) {
     const lines = parsed.help ? [buildHelpText()] : [`[market-sync] ${parsed.error}`, "", buildHelpText()];
-    for (const line of lines) console.log(line);
+    for (const line of lines) printLine(line);
     return { exitCode: parsed.help ? 0 : 2, lines, result: null };
   }
   const { options, dryRun, json, manifest, status } = parsed.parsed;
@@ -394,7 +414,7 @@ export async function runMarketSyncCli(
   const lines: string[] = [];
   const logger: SyncLogger = (_level, line) => {
     lines.push(line);
-    if (!json) console.log(line);
+    if (!json) printLine(line);
   };
 
   // Dry-Run: echte Requests, aber temporäre Senken. Ein "trockener" Lauf, der
@@ -428,18 +448,26 @@ export async function runMarketSyncCli(
         `${Object.values(result.candlesByTimeframe).reduce((sum, s) => sum + (s?.bars ?? 0), 0)} Bars — ` +
         `nichts in data/ geschrieben.`;
       lines.push(line);
-      console.log(line);
+      printLine(line);
     } else if (manifest) {
       // OPS-011: kompakter Sync-Status je Venue (letzter Lauf, degraded,
       // Fehler nach Ursache) — Quelle der Sektion „Market Data“ im Ops-Center.
       saveVenueSyncStatus(result);
       if (result.failures.length > 0) {
-        saveMarketDataErrors(result.failures);
+        const { persisted, batch } = saveMarketDataErrors(result.failures);
+        // Ehrliche Berichterstattung (v1.39.1): Batch-Fehler (z. B.
+        // Discovery-Ausfall) sind keinem Instrument zuzuordnen und landen
+        // nur im `batch`-Abschnitt — die Zeile benennt, was WOHIN ging,
+        // statt pauschal „Manifest geschrieben“ zu melden.
+        const parts: string[] = [];
+        if (persisted > 0) parts.push(`${persisted} Instrument-Fehler`);
+        if (batch > 0) parts.push(`${batch} Batch-Fehler (Stage-Level)`);
+        const breakdown = parts.length > 0 ? parts.join(", ") : "keine persistierbaren Einträge";
         const line =
-          `[market-sync] ${result.failures.length} Marktdaten-Fehler — Manifest geschrieben ` +
-          `(data/market-data-errors.json)`;
+          `[market-sync] ${result.failures.length} Marktdaten-Fehler (${breakdown}) — ` +
+          `Manifest: data/market-data-errors.json`;
         lines.push(line);
-        console.error(line);
+        console.error(toConsoleAscii(line));
       } else {
         clearMarketDataErrors();
       }
@@ -448,13 +476,13 @@ export async function runMarketSyncCli(
     if (json) {
       const jsonLine = JSON.stringify(result);
       lines.push(jsonLine);
-      console.log(jsonLine);
+      printLine(jsonLine);
     }
     return { exitCode: result.failures.length > 0 ? 1 : 0, lines, result };
   } catch (e) {
     const line = `[market-sync] ${describeSyncError(e)}`;
     lines.push(line);
-    console.error(line);
+    console.error(toConsoleAscii(line));
     return { exitCode: usageExitCode(e), lines, result: null };
   } finally {
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
@@ -497,7 +525,7 @@ if (typeof process !== "undefined" && /(^|\/)market-sync\.[cm]?[jt]s$/.test(proc
       process.exitCode = code;
     })
     .catch((e) => {
-      console.error(`[market-sync] failed: ${describeSyncError(e)}`);
+      console.error(toConsoleAscii(`[market-sync] failed: ${describeSyncError(e)}`));
       process.exit(1);
     });
 }

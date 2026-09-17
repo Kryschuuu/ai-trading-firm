@@ -35,6 +35,7 @@ import {
 } from "../lib/marketdata/historicalStore";
 import type { MarketCandle as StoreCandle } from "../lib/marketdata/types";
 import { classifyMarketDataError } from "../lib/marketDataErrors";
+import { toConsoleAscii } from "../lib/consoleFormat";
 import { loadScannerConfig } from "../scanner/config";
 import { requiredWarmupCandles } from "../scanner/warmup";
 import { toInstrumentId } from "../universe/normalization";
@@ -108,9 +109,13 @@ export type SyncLogger = (
 
 /** Default-Senke: `console` (CLI/Betrieb). Strukturierte Events laufen separat über `structuredLog`. */
 export const defaultSyncLogger: SyncLogger = (level, line) => {
-  if (level === "error") console.error(line);
-  else if (level === "warn") console.warn(line);
-  else console.log(line);
+  // ASCII-sicher (v1.39.1): dieselbe Zeile kann auf Windows-Konsolen mit
+  // Legacy-Codepage sonst als Mojibake erscheinen. Übersetzungsstelle ist
+  // bewusst DIESE Senke — strukturierte Rohwerte bleiben unberührt.
+  const safe = toConsoleAscii(line);
+  if (level === "error") console.error(safe);
+  else if (level === "warn") console.warn(safe);
+  else console.log(safe);
 };
 
 /** Harte, nicht konfigurierbare Deckel (Security: kein Massen-Fetching). */
@@ -1239,6 +1244,31 @@ export function formatSyncLog(
   }
   if (result.failures.length) {
     lines.push(`[market-sync] failures: ${result.failures.length}`);
+    // Ursachen-Aufschluesselung (v1.39.1): „failures: N“ allein war im Betrieb
+    // nicht handlungsfaehig — der bereinigte Grund wurde nur ins Manifest
+    // geschrieben, nie gezeigt. Kompaktstatistik nach Stage/Ursache plus die
+    // Wiederholbarkeits-Bilanz.
+    // Security: bewusst nur Zähler und klassifizierte Ursachen, KEINE
+    // Rohmeldungen (die können Venue-/Symboltexte enthalten — geloggt werden
+    // „niemals Symbole, URLs oder Header“, siehe Dateikopf; erzwungen durch
+    // test/marketdata/security.test.ts). Die Zuordnung je Instrument bleibt im
+    // Manifest (0600, gitignored), die redigierten Rohmeldungen in der
+    // `--json`-Ausgabe des CLIs.
+    const byStageReason = new Map<string, number>();
+    let retryable = 0;
+    for (const failure of result.failures) {
+      const bucket = `${failure.stage}/${failure.reason ?? "UNCLASSIFIED"}`;
+      byStageReason.set(bucket, (byStageReason.get(bucket) ?? 0) + 1);
+      if (failure.retryable) retryable += 1;
+    }
+    lines.push(
+      `[market-sync] failures nach Ursache: ` +
+        [...byStageReason.entries()].map(([bucket, count]) => `${bucket}: ${count}`).join(", "),
+    );
+    lines.push(
+      `[market-sync] failures: ${retryable} wiederholbar, ${result.failures.length - retryable} endgültig` +
+        ` — Instrument-Zuordnung im Manifest (data/market-data-errors.json), Rohdaten per --json`,
+    );
   }
   lines.push(`[market-sync] duration: ${result.durationMs.toFixed(0)} ms`);
   return lines;
