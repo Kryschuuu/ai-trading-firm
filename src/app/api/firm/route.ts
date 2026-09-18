@@ -10,7 +10,7 @@ import {
   positions,
   proposals,
 } from "@/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import { getOllamaStatus } from "@/lib/ollama";
 import { getBroker } from "@/lib/engine";
 import { getLimits, LIMIT_CEILINGS, DEFAULT_LIMITS, killSwitch } from "@/lib/riskGuard";
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     await refreshRuntimeLimits();
     const broker = await getBroker();
 
-    const [agentRows, missionRows, positionRows, proposalRows, auditRows, ksRows, msgRows] =
+    const [agentRows, missionRows, positionRows, proposalRows, auditRows, ksRows, msgRows, fundingRows] =
       await Promise.all([
         db.select().from(agents),
         db.select().from(missions).orderBy(desc(missions.createdAt)),
@@ -44,6 +44,12 @@ export async function GET(req: Request) {
         db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(40),
         db.select().from(killSwitches).orderBy(desc(killSwitches.createdAt)).limit(8),
         db.select().from(agentMessages).orderBy(desc(agentMessages.createdAt)).limit(20),
+        // GAP-02 (v1.42.0): Gesamtfunding über ALLE Positionen (offen UND
+        // geschlossen — funding_paid bleibt nach Schließen stehen). Kontosicht:
+        // negativ = insgesamt gezahlt, positiv = erhalten.
+        db
+          .select({ total: sql<string | null>`coalesce(sum(${positions.fundingPaid}), 0)` })
+          .from(positions),
       ]);
 
     const ollama = await getOllamaStatus();
@@ -54,6 +60,9 @@ export async function GET(req: Request) {
       const qty = Number(p.qty);
       const entry = Number(p.entryPrice);
       const dir = p.side === "SHORT" ? -1 : 1;
+      // GAP-02: kumuliertes Funding je Position ausweisen (Kontosicht:
+      // negativ = gezahlt). numeric kommt als String → Number, kaputte Werte → 0.
+      const fundingPaidNum = Number(p.fundingPaid);
       return {
         ...p,
         lastPrice: live,
@@ -61,6 +70,7 @@ export async function GET(req: Request) {
           p.status === "OPEN" && live != null
             ? Number((dir * qty * (live - entry)).toFixed(2))
             : Number(p.realizedPnl ?? 0),
+        fundingPaid: Number.isFinite(fundingPaidNum) ? fundingPaidNum : 0,
       };
     });
 
@@ -95,6 +105,11 @@ export async function GET(req: Request) {
         broker: broker.name,
         paperMode: true,
         livePositions: broker.listPositions(),
+        // GAP-02 (v1.42.0): Gesamtfunding im Account-Snapshot.
+        // fundingPaid (DB-Summe über alle Positionen, Lifetime) vs.
+        // fundingPaidOpen (Ledger, aktuell offene Positionen).
+        fundingPaid: Number(Number(fundingRows[0]?.total ?? 0).toFixed(8)),
+        fundingPaidOpen: Number(broker.totalFundingPaid.toFixed(8)),
       },
       requireHumanApproval: process.env.REQUIRE_HUMAN_APPROVAL === "true",
       timestamp: new Date().toISOString(),

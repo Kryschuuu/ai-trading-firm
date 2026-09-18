@@ -217,6 +217,18 @@ export const positions = pgTable("positions", {
   takeProfit: numeric("take_profit"),
   exitPrice: numeric("exit_price"),
   realizedPnl: numeric("realized_pnl"),
+  /**
+   * GAP-02 (v1.42.0): kumuliertes Funding dieser Position (Perpetuals) in
+   * Kontowährung. Vorzeichenkonvention (Kontosicht/Cashflow, siehe
+   * src/lib/funding.ts): negativ = gezahlt (LONG bei positiver Funding-Rate),
+   * positiv = erhalten (SHORT bei positiver Rate). Default 0 = neutral
+   * (PAPER_FUNDING_RATE_PCT_PER_8H=0) — Alt-Installationen und bestehende
+   * Tests bleiben unverändert. Wert bleibt nach Schließen stehen
+   * (Historie/Lifetime-Ausweis, z. B. SUM in GET /api/firm).
+   * Migration: drizzle/2026-09-18_positions_funding.sql (append-only,
+   * idempotent; alternativ `npx drizzle-kit push`).
+   */
+  fundingPaid: numeric("funding_paid").notNull().default("0"),
   /** STOP_LOSS | TAKE_PROFIT | MANUAL_FLATTEN | AGENT_CLOSE | RULE_EXECUTION | null bei offen */
   exitReason: text("exit_reason"),
   broker: text("broker").notNull(),

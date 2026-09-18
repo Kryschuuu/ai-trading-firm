@@ -143,6 +143,12 @@ export type HydratePosition = {
   entryPrice: number;
   stopLoss?: number | null;
   takeProfit?: number | null;
+  /**
+   * GAP-02 (v1.42.0): kumuliertes Funding der Position (Kontosicht:
+   * negativ = gezahlt, positiv = erhalten). Optional — fehlt/nicht endlich
+   * → 0. Siehe src/lib/funding.ts (Vorzeichenkonvention).
+   */
+  fundingPaid?: number | null;
 };
 
 /**
@@ -165,13 +171,32 @@ function sanitizeLevel(value: number | null | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * GAP-02: kumuliertes Funding aus einer DB-Zeile sanitizen: null/NaN → 0.
+ * Vorzeichen bleibt erhalten (Kontosicht: negativ = gezahlt) — nur kaputte
+ * Zahlen werden neutralisiert, damit kein NaN ins Ledger sickert.
+ */
+function sanitizeFunding(value: number | null | undefined): number {
+  if (value == null) return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export class PaperBroker {
   readonly name: BrokerName = "PAPER";
   private cash: number;
   private readonly startEquity: number;
   private positions = new Map<
     string,
-    { qty: number; side: OrderSide; entryPrice: number; stopLoss: number | null; takeProfit: number | null }
+    {
+      qty: number;
+      side: OrderSide;
+      entryPrice: number;
+      stopLoss: number | null;
+      takeProfit: number | null;
+      /** GAP-02: kumuliertes Funding (Kontosicht: negativ = gezahlt). */
+      fundingPaid: number;
+    }
   >();
   private execution?: PaperExecutionAdapter;
 
@@ -203,13 +228,32 @@ export class PaperBroker {
     return this.cash;
   }
 
-  /** Equity = Cash + Marktwert aller offenen Positionen (Mark-to-Market). */
+  /**
+   * Equity = Cash + Marktwert aller offenen Positionen (Mark-to-Market).
+   *
+   * GAP-02 (v1.42.0): Funding fließt als echter Cashflow ein — `accrueFunding`
+   * bucht direkt auf `this.cash` (wie Gebühren beim Fill), dieses Feld ist
+   * damit funding-scharf OHNE Doppelzählung. Beim Hydraten ohne `cashHint`
+   * (Legacy-Pfad) wird das kumulierte Funding offener Positionen explizit
+   * nachgebucht, damit auch dieser Restore-Pfad funding-scharf ist.
+   */
   get accountEquity(): number {
     let marketValue = 0;
     for (const [symbol, p] of this.positions) {
       marketValue += p.qty * (paperQuote(symbol) ?? p.entryPrice);
     }
     return this.cash + marketValue;
+  }
+
+  /**
+   * GAP-02: Gesamtes kumuliertes Funding der OFFENEN Positionen (Kontosicht:
+   * negativ = insgesamt gezahlt, positiv = insgesamt erhalten). Historisches
+   * Funding geschlossener Positionen lebt in `positions.funding_paid` (DB).
+   */
+  get totalFundingPaid(): number {
+    let sum = 0;
+    for (const p of this.positions.values()) sum += p.fundingPaid;
+    return Number(sum.toFixed(8));
   }
 
   /** Aktueller Drawdown gegenüber dem Startkapital (0.12 = 12 % im Minus). */
@@ -239,7 +283,36 @@ export class PaperBroker {
       lastPrice: paperQuote(symbol) ?? p.entryPrice,
       unrealizedPnl:
         (p.side === "LONG" ? 1 : -1) * p.qty * ((paperQuote(symbol) ?? p.entryPrice) - p.entryPrice),
+      fundingPaid: p.fundingPaid,
     }));
+  }
+
+  /**
+   * GAP-02 (v1.42.0): bucht Perpetual-Funding auf eine offene Position.
+   *
+   * Vorzeichen (Kontosicht, siehe src/lib/funding.ts): `funding` ist der
+   * Cashflow — negativ = gezahlt (LONG bei positiver Rate), positiv = erhalten
+   * (SHORT bei positiver Rate). Die Buchung wirkt sofort auf Cash (und damit
+   * auf `accountEquity`), das kumulierte Funding steht je Position in
+   * `fundingPaid` (und analog in `positions.funding_paid` in der DB).
+   *
+   * Rückgabe: der gebuchte Stand (inkl. neuem Kumulativwert) oder `null`,
+   * wenn die Position nicht (mehr) existiert oder der Betrag nicht endlich
+   * ist (fail-closed: keine NaN-Buchung ins Ledger).
+   */
+  accrueFunding(
+    symbol: string,
+    funding: number
+  ): { symbol: string; funding: number; fundingPaid: number } | null {
+    if (!Number.isFinite(funding)) return null;
+    // Kanonisches Symbol (wie submitAtomic): DB-Zeilen tragen bereits die
+    // kanonische Form, rohe Eingaben werden hier defensiv normalisiert.
+    const key = sanitizeSymbol(symbol) ?? symbol.toUpperCase();
+    const pos = this.positions.get(key);
+    if (!pos) return null;
+    pos.fundingPaid = Number((pos.fundingPaid + funding).toFixed(8));
+    this.cash = Number((this.cash + funding).toFixed(8));
+    return { symbol: key, funding: Number(funding.toFixed(8)), fundingPaid: pos.fundingPaid };
   }
 
   /**
@@ -276,6 +349,11 @@ export class PaperBroker {
     } else {
       this.cash = this.startEquity;
       for (const r of valid) this.cash -= r.qty * r.entryPrice;
+      // GAP-02 (v1.42.0): Ohne Snapshot-Cash-Hint wäre das kumulierte Funding
+      // offener Positionen nach einem Neustart „verschwunden“ (Cash zu hoch).
+      // Es wird nachgebucht — mit Kontosicht-Vorzeichen (negativ = gezahlt ⇒
+      // Cash sinkt). Siehe src/lib/funding.ts.
+      for (const r of valid) this.cash += sanitizeFunding(r.fundingPaid);
     }
     for (const r of valid) {
       const symbol = sanitizeSymbol(r.symbol);
@@ -290,6 +368,7 @@ export class PaperBroker {
         // still weitergereicht werden.
         stopLoss: sanitizeLevel(r.stopLoss),
         takeProfit: sanitizeLevel(r.takeProfit),
+        fundingPaid: sanitizeFunding(r.fundingPaid),
       });
     }
   }
@@ -636,6 +715,7 @@ export class PaperBroker {
         entryPrice: fillPrice,
         stopLoss: order.stopLoss ?? null,
         takeProfit: order.takeProfit ?? null,
+        fundingPaid: 0,
       });
       this.cash -= cost;
 
@@ -673,6 +753,7 @@ export class PaperBroker {
       entryPrice: fillPrice,
       stopLoss: order.stopLoss ?? null,
       takeProfit: order.takeProfit ?? null,
+      fundingPaid: 0,
     });
     this.cash -= cost;
 

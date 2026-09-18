@@ -445,6 +445,12 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `PAPER_SIM_SLIPPAGE_BPS_BASE` / `..._JITTER_BPS` / `..._PER_PARTICIPATION` | — | Slippage-Modell |
 | `PAPER_SIM_VOLUME_FALLBACK` | — | Volumen-Fallback |
 | `PAPER_SIM_SYNTHETIC_SPREAD_BPS` | `2` | Bid/Ask-Spread für ticker-basierte Paper-Fills (z. B. Bitunix Modus B) |
+| `PAPER_MAKER_FEE_PCT` | `0.04` | GAP-02 (v1.42.0): Kalibrierungs-Overlay Maker-Gebühr in **Prozent** (0.04 = 0,04 %). Überschreibt `PAPER_SIM_MAKER_FEE`, wenn gesetzt. Bounds [0, 10], Clamp mit Log-Warnung. |
+| `PAPER_TAKER_FEE_PCT` | `0.1` | GAP-02 (v1.42.0): Kalibrierungs-Overlay Taker-Gebühr in **Prozent** (Market-Fills). Überschreibt `PAPER_SIM_TAKER_FEE`, wenn gesetzt. Bounds [0, 10]. |
+| `PAPER_SLIPPAGE_BPS` | `1` | GAP-02 (v1.42.0): Kalibrierungs-Overlay Basis-Slippage in Basispunkten. Überschreibt `PAPER_SIM_SLIPPAGE_BPS_BASE`, wenn gesetzt. Bounds [0, 10000]. |
+| `PAPER_SPREAD_FALLBACK_BPS` | `2` | GAP-02 (v1.42.0): Kalibrierungs-Overlay Spread-Fallback in Basispunkten (ticker-basierte Snapshots). Überschreibt `PAPER_SIM_SYNTHETIC_SPREAD_BPS`, wenn gesetzt. Bounds [0, 10000]. |
+| `PAPER_FUNDING_INTERVAL_HOURS` | `8` | GAP-02 (v1.42.0): Funding-Accrual-Intervall in Stunden (8 = Marken 00/08/16 UTC). Bounds [1, 24], Clamp mit Log-Warnung. |
+| `PAPER_FUNDING_RATE_PCT_PER_8H` | `0` | GAP-02 (v1.42.0): statische Funding-Rate je 8h in **Prozent** (0.01 = 0,01 %/8h; LONG zahlt bei positiver Rate). `0` = Funding-Simulation aus (neutral). Bounds [−1, 1]. Details: docs/PAPER_TRADING.md §3.2. |
 | `PAPER_STALE_AFTER_MS` | — | Staleness-Schwelle |
 | `PAPER_STATIC_FALLBACK` | `false` | statisches Preisbuch nur explizit |
 | `PAPER_ALLOW_SYNTHETIC_FALLBACK` | — | Synthetic als Fallback erlauben |

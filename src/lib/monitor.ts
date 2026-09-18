@@ -25,6 +25,8 @@ import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
 import { realizedPnlToday, writeEquitySnapshot, pruneEquitySnapshots } from "./equity";
+import { FundingAccrualEngine, loadFundingConfig, runFundingAccrual } from "./funding";
+import { getProductionMarketDataManager } from "./marketdata/production";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __lastTickAt?: number;
@@ -32,6 +34,8 @@ const GLOBAL = globalThis as typeof globalThis & {
   __scanCount?: number;
   /** Single-Flight-Schutz: verhindert überlappende Monitor-Zyklen. */
   __tickLock?: Promise<TickResult> | null;
+  /** GAP-02: Accrual-Engine (Periodenwechsel-Zustand) — pro Prozess einmal. */
+  __fundingEngine?: FundingAccrualEngine;
 };
 
 const SCAN_EVERY_TICKS = 15; // alle 15 Minuten ein Marktbericht
@@ -41,6 +45,12 @@ export type TickResult = {
   at: string;
   quotesRefreshed: number;
   stopsTriggered: { symbol: string; reason: string; pnl: number }[];
+  /**
+   * GAP-02 (v1.42.0): in diesem Tick gebuchte Funding-Accruals (nur bei
+   * Periodenwechsel nicht-leer; `funding` = Cashflow aus Kontosicht,
+   * negativ = gezahlt). Default-Konfiguration (Rate 0) → immer leer.
+   */
+  fundingAccruals: { symbol: string; funding: number; fundingPaid: number }[];
   dailyLossKill: boolean;
   marketScan: boolean;
   errors: string[];
@@ -95,6 +105,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
   const limits = getLimits();
   const broker = await getBroker();
   const stopsTriggered: TickResult["stopsTriggered"] = [];
+  const fundingAccruals: TickResult["fundingAccruals"] = [];
 
   // --- 1) Kurse: offene Positionen zuerst, dann Watchlist ---
   const openRows = await db.select().from(positions).where(eq(positions.status, "OPEN"));
@@ -106,6 +117,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
   const priceOf = new Map(quotes.map((q) => [q.symbol, q.price]));
 
   // --- 2) SL/TP je Position prüfen ---
+  const closedThisTick = new Set<string>();
   for (const row of openRows) {
     const price = priceOf.get(row.symbol.toUpperCase()) ?? Number(row.currentPrice ?? row.entryPrice);
     if (!Number.isFinite(price)) continue;
@@ -133,6 +145,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     const reason = slHit ? "STOP_LOSS" : "TAKE_PROFIT";
     const fill = broker.close(row.symbol, reason);
     if (fill) {
+      closedThisTick.add(row.id);
       await db
         .update(positions)
         .set({
@@ -164,6 +177,39 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
         /* Kurvenpunkt optional */
       }
     }
+  }
+
+  // --- 2b) Funding-Accrual (GAP-02, v1.42.0) ------------------------------
+  // Perpetual-Haltekosten bei Periodenwechsel (Default: 8h-Marke UTC). Nur
+  // Positionen, die diesen Tick noch offen sind (SL/TP zuerst), nur als
+  // Perpetual erkannte Instrumente, Rate 0 (Default) ⇒ kein Event. Die
+  // Buchung läuft über src/lib/funding.ts: Ledger → DB → audit_log, mit
+  // Ledger-Rollback, falls die Persistenz scheitert (fail-closed).
+  try {
+    const fundingRows = openRows
+      .filter((row) => !closedThisTick.has(row.id))
+      .map((row) => ({
+        id: row.id,
+        missionId: row.missionId ?? null,
+        symbol: row.symbol,
+        side: row.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
+        qty: Number(row.qty),
+        price: priceOf.get(row.symbol.toUpperCase()) ?? Number(row.currentPrice ?? row.entryPrice),
+        isPerpetual: isPerpetualSymbol(row.symbol),
+      }));
+    const events = await runFundingAccrual({
+      broker,
+      rows: fundingRows,
+      nowMs: Date.now(),
+      engine: getFundingEngine(),
+    });
+    for (const ev of events) {
+      fundingAccruals.push({ symbol: ev.symbol, funding: ev.funding, fundingPaid: ev.fundingPaid });
+    }
+  } catch (e) {
+    // Fail-laut: Funding bleibt aus, wenn es nicht sicher gebucht werden
+    // kann — aber der Tick bricht nicht ab (SL/TP-Wachstum läuft weiter).
+    errors.push(`Funding-Accrual fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
   }
 
   // --- 3) Tagesverlust-Limit: Basis ist der PERSISTENTE Tages-P&L aus der DB ---
@@ -247,11 +293,42 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     at: new Date().toISOString(),
     quotesRefreshed: quotes.length,
     stopsTriggered,
+    fundingAccruals,
     dailyLossKill,
     marketScan,
     errors,
     adaptiveRisk,
   };
+}
+
+/**
+ * GAP-02: Accrual-Engine als Prozess-Singleton — der Periodenwechsel-Zustand
+ * (letzte gebuchte Intervall-Marke) muss über Ticks hinweg erhalten bleiben.
+ * Konfiguration wird beim ersten Zugriff gelesen (Bounds + Default, siehe
+ * src/lib/funding.ts); `loadFundingConfig` klemmt mit Warnung.
+ */
+function getFundingEngine(): FundingAccrualEngine {
+  if (!GLOBAL.__fundingEngine) {
+    GLOBAL.__fundingEngine = new FundingAccrualEngine(loadFundingConfig());
+  }
+  return GLOBAL.__fundingEngine;
+}
+
+/**
+ * GAP-02: Ist ein Symbol ein Perpetual? Quelle ist die Instrument-Registry
+ * über den Produktions-Marktdaten-Manager (derselbe Auflaufpfad wie beim
+ * Fill — Modus B lehnt unbekannte Instrumente ab, gefüllte Paper-Positionen
+ * sind also dort registriert). Nicht eindeutig als Perpetual erkannt
+ * (unbekannt, Spot, Aktie, Fehler) ⇒ KEIN Funding — nur eindeutig erkannte
+ * Perpetuals erzeugen Kosten (fail-safe gegen erfundene Lasten).
+ */
+function isPerpetualSymbol(symbol: string): boolean {
+  try {
+    const manager = getProductionMarketDataManager();
+    return manager.resolveInstrument(symbol)?.marketType === "perpetual";
+  } catch {
+    return false;
+  }
 }
 
 function isCryptoLike(symbol: string): boolean {
