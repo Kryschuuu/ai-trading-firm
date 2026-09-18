@@ -22,8 +22,9 @@ Positionen liefen bei einem Bug weiter), es gab keinen Alert-Kanal und kein
 Signal für einen stehenden Monitor-Tick. Dieser Release schließt das Delta
 (PROMPT-10 der Remediation-Serie): paper-only, keine neuen
 Runtime-Dependencies, Fail-closed, Wiederverwendung des bestehenden
-Kill-Switch- und Disarm-Pfads. Umsetzung: Branch
-`arena/01a0b6a7-ai-trading-firm` (PR folgt).
+Kill-Switch- und Disarm-Pfads. Umsetzung: PR
+[#139](https://github.com/Kryschuuu/ai-trading-firm/pull/139)
+(`arena/01a0b6a7-ai-trading-firm`).
 
 ### Hinzugefügt
 
