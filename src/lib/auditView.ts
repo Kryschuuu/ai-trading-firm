@@ -1226,6 +1226,51 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  FUNDING_ACCRUAL: {
+    label: "Funding gebucht",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Perpetual-Funding wurde auf eine offene Position gebucht (GAP-02, v1.42.0). Haltekosten sind Teil einer ehrlichen Paper-Bilanz: Longs zahlen bei positiver Funding-Rate, Shorts erhalten — und umgekehrt bei negativer Rate. Ohne Funding wäre jedes Paper-PnL bei Perpetuals systematisch zu optimistisch.",
+    headline: (d) => {
+      const symbol = symbolOf(d);
+      const funding = num(d.funding);
+      return [
+        "Funding",
+        symbol,
+        funding !== null ? `${formatSigned(funding)} USD` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    },
+    explain: (d) => {
+      const funding = num(d.funding);
+      if (funding === null) return "Kumuliertes Funding der Position wurde fortgeschrieben.";
+      return funding < 0
+        ? `Die Position hat ${Math.abs(funding).toFixed(4)} USD Funding gezahlt — Cash und Equity sind entsprechend gesunken.`
+        : `Die Position hat ${funding.toFixed(4)} USD Funding erhalten — Cash und Equity sind entsprechend gestiegen.`;
+    },
+    sections: (d) => [
+      {
+        title: "Funding-Accrual",
+        facts: [
+          { label: "Symbol", value: symbolOf(d) || "—" },
+          { label: "Richtung", value: formatKnownValue("side", d.side) },
+          { label: "Rate je 8h", value: text(d.ratePer8h) ?? "—" },
+          { label: "Notional", value: text(d.notional) ?? "—" },
+          { label: "Perioden", value: text(d.periods) ?? "—" },
+          {
+            label: "Funding (Cashflow)",
+            value: text(d.funding) ?? "—",
+            tone: (num(d.funding) ?? 0) < 0 ? ("bad" as FactTone) : ("good" as FactTone),
+          },
+          { label: "Kumuliertes Funding", value: text(d.fundingPaid) ?? "—" },
+          { label: "Intervall (h)", value: text(d.intervalHours) ?? "—" },
+        ],
+      },
+    ],
+  },
+
   MISSION_CREATED: {
     label: "Mission erstellt",
     category: "mission",

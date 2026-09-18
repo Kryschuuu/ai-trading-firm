@@ -1,0 +1,24 @@
+-- GAP-02 (v1.42.0) — Funding-Accrual fuer Perpetual-Positionen im Paper-Betrieb
+-- (additiv, kein Bruch, keine Datenmigration bestehender Zeilen).
+--
+-- Hintergrund: Der Fill-Simulator (Gebuehren/Spread/Slippage/Partial Fills)
+-- existierte bereits, aber Perpetual-Funding floss NICHT ins Paper-PnL —
+-- Funding war nur ein Scanner-Ranking-Faktor. Geraude bei laengeren
+-- Haltedauern frisst Funding real die Edge; Paper-Ergebnisse waren
+-- systematisch zu optimistisch (Audit 2026-09-18,
+-- docs/audits/2026-09-18-feature-gap/findings/GAP-02-execution-simulation.md).
+--
+-- Neue Spalte `positions.funding_paid`: kumuliertes Funding je Position in
+-- Kontowaehrung, Vorzeichenkonvention KONTOSICHT (Cashflow):
+--   negativ = gezahlt (LONG bei positiver Funding-Rate),
+--   positiv = erhalten (SHORT bei positiver Rate).
+-- Default 0 = neutral (PAPER_FUNDING_RATE_PCT_PER_8H=0) — bestehende Zeilen
+-- und Installationen verhalten sich unverändert.
+--
+-- Erklaert mit `npx drizzle-kit push` aus src/db/schema.ts
+-- (`positions.fundingPaid`); diese Datei ist der aequivalente, idempotente
+-- SQL-Pfad fuer Umgebungen ohne drizzle-kit (z. B.
+-- `psql "$DATABASE_URL" -f drizzle/2026-09-18_positions_funding.sql`).
+-- Der Wert bleibt nach dem Schließen der Position stehen (Historie /
+-- Lifetime-Ausweis, z. B. SUM(funding_paid) in GET /api/firm).
+ALTER TABLE "positions" ADD COLUMN IF NOT EXISTS "funding_paid" numeric NOT NULL DEFAULT '0';

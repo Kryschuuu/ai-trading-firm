@@ -317,6 +317,12 @@ export interface BrokerPosition {
   unrealizedPnl: number;
   stopLoss: number | null;
   takeProfit: number | null;
+  /**
+   * GAP-02 (v1.42.0, optional): kumuliertes Funding der Position (Kontosicht:
+   * negativ = gezahlt). Nur Paper-Adapter mit Funding-Accrual füllen das
+   * Feld; andere Adapter lassen es weg.
+   */
+  fundingPaid?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

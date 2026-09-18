@@ -142,6 +142,96 @@ Gebühren    = fillPrice · filledQty · takerFee
 Ergebnis. Der Test `marketdata.simulator.test.ts` belegt 100 identische Fills
 bei gleicher Seed.
 
+### 3.1 Gebühren, Slippage & Kalibrierung (GAP-02, v1.42.0)
+
+Die vier Kernparameter der Ausführungs-Simulation sind über Env-Flags
+kalibrierbar (`calibrateSimulatorConfig` in `src/lib/marketdata/config.ts`,
+verdrahtet in `createPaperExecution`). Sie wirken als **Overlay** über die
+Basis-Konfiguration (`PAPER_SIM_*` bzw. deren Defaults = die bisher
+hartcodierten Werte): Ist ein Flag nicht gesetzt, bleibt die Basis unverändert
+— **kein Verhaltensbruch**. Ist es gesetzt, überschreibt es das entsprechende
+Feld; Werte außerhalb der Bounds werden **geklemmt und per Log-Warnung
+angemekert** (fail-laut, nie still — ein falsch kalibriertes Paper-PnL wäre
+schlimmer als eine abgewiesene Konfiguration).
+
+| Parameter | Env | Default (= Basis) | Bounds | Effekt |
+| --- | --- | --- | --- | --- |
+| Maker-Gebühr | `PAPER_MAKER_FEE_PCT` | `0.04` (= 4 bp) | [0, 10] % | Maker-Fallback, falls Registry-Feld fehlt |
+| Taker-Gebühr | `PAPER_TAKER_FEE_PCT` | `0.1` (= 10 bp) | [0, 10] % | Taker-Gebühr für Market-Fills (overrides `PAPER_SIM_TAKER_FEE`) |
+| Basis-Slippage | `PAPER_SLIPPAGE_BPS` | `1` bp | [0, 10000] bp | Slippage bei Ordergröße → 0 (overrides `PAPER_SIM_SLIPPAGE_BPS_BASE`) |
+| Spread-Fallback | `PAPER_SPREAD_FALLBACK_BPS` | `2` bp | [0, 10000] bp | synthetischer Bid/Ask-Spread für ticker-basierte Snapshots (overrides `PAPER_SIM_SYNTHETIC_SPREAD_BPS`) |
+
+Einheiten: `_PCT`-Flags sind **Prozent** (`0.04` = 0,04 % ⇒ 0.0004 als
+Dezimalanteil), `_BPS`-Flags sind Basispunkte. Beispiel:
+`PAPER_TAKER_FEE_PCT=0.05` ⇒ jede Market-Order zahlt 5 bp Taker-Gebühr.
+
+### 3.2 Funding-Accrual für Perpetuals (GAP-02, v1.42.0)
+
+Vor v1.42.0 existierte Funding nur als Scanner-Ranking-Faktor — die
+Haltekosten offener Perpetual-Positionen flossen **nicht** ins Paper-PnL.
+Jetzt führt der PaperBroker je offener Perpetual-Position kumuliertes Funding
+(`src/lib/funding.ts`, gebucht im Monitor-Tick bei Periodenwechsel).
+
+**Formel und Vorzeichenkonvention (verbindlich):**
+
+```
+funding_zahlung = fundingRate · |notional| · direction        (LONG = +1, SHORT = −1)
+                 → funding_zahlung > 0: die Position ZAHLT (LONG bei positiver Rate)
+funding (Kontosicht) = −funding_zahlung
+                 → funding < 0: gezahlt (Cash-Abfluss, Equity sinkt)
+                   funding > 0: erhalten (Cash-Zufluss, Equity steigt)
+```
+
+Alle Felder und Events verwenden die **Kontosicht**: `positions.funding_paid`
+(DB-Spalte, kumuliert je Position, bleibt nach Schließen stehen),
+`PaperBroker.listPositions().fundingPaid`, `broker.totalFundingPaid` sowie der
+Audit-Eintrag (`funding:SYMBOL:-1.0000` = gezahlt). Damit gilt exakt:
+**equity nach Accrual = equity vorher + fundingPaid-Summe.**
+
+**Ablauf (Monitor-Tick, alle 60 s):**
+
+1. Periodenwechsel-Prüfung (Default: 8h-Marken 00/08/16 UTC; ohne Wechsel ⇒
+   nichts zu tun). Erste Sichtung nach Prozessstart bucht nichts nach
+   (kein doppeltes Accrual nach Neustart); Standby über mehrere Marken bucht
+   `periods`-fach (aktuelle Rate, dokumentierte Näherung).
+2. Nur als Perpetual erkannte Instrumente (Registry-Lookup über den
+   Marktdaten-Manager; Spot/Aktien/unbekannt ⇒ kein Funding — fail-safe
+   gegen erfundene Lasten).
+3. Buchung: Ledger (`broker.accrueFunding` — Cash und Kumulativwert) →
+   DB (`positions.funding_paid`) → `audit_log` (`FUNDING_ACCRUAL`, Muster
+   `funding:SYMBOL:+0.42`, revisionssicher über die Audit-Senke mit Retry +
+   Spool). Schlägt die Persistenz fehl, wird die Ledger-Buchung
+   zurückgerollt (fail-closed).
+4. Rate 0 (Default) ⇒ kein Event, keine Buchung, kein Audit — bestehende
+   Installationen verhalten sich unverändert.
+
+**Rate-Quelle (gestuft):**
+
+- **(a) Statisch (Default):** `PAPER_FUNDING_RATE_PCT_PER_8H` (Default `0` =
+  neutral). Die Prozentangabe bezieht sich auf 8h und wird auf das
+  konfigurierte Intervall skaliert (4h-Takt ⇒ halbe Rate je Accrual, gleiche
+  annualisierte Last).
+- **(b) Provider (Erweiterungspunkt):** Interface `FundingRateProvider`
+  (`getFundingRate(symbol)` → signierte Rate je 8h als Dezimalanteil, `null` =
+  unbekannt ⇒ statischer Default). Keine Netzwerk-Anbindung in diesem
+  Release — echte Raten (z. B. Bitunix) können später hier eingehängt werden.
+
+**Ausweis:** Equity enthält Funding über den Cash-Bestand (wie Gebühren beim
+Fill — keine Doppelzählung). `GET /api/firm` zeigt je Position `fundingPaid`
+(aktiv + historisch) und im Account-Snapshot `fundingPaid` (SUMME über alle
+Positionen, Lifetime) sowie `fundingPaidOpen` (aktuell offen).
+
+| Parameter | Env | Default | Bounds | Effekt |
+| --- | --- | --- | --- | --- |
+| Funding-Intervall | `PAPER_FUNDING_INTERVAL_HOURS` | `8` | [1, 24] | Accrual-Takt in Stunden (8 = Marken 00/08/16 UTC) |
+| Funding-Rate | `PAPER_FUNDING_RATE_PCT_PER_8H` | `0` | [−1, 1] % | statische Rate je 8h in Prozent (0.01 = 0,01 %/8h); 0 = aus |
+
+Migration: `drizzle/2026-09-18_positions_funding.sql` (append-only,
+`ALTER TABLE positions ADD COLUMN funding_paid numeric NOT NULL DEFAULT 0`)
+oder `npx drizzle-kit push`. Tests: `tests/paper.funding.test.ts`
+(Vorzeichen, Periodenwechsel, Equity-Abgleich, Bounds, Neutralität,
+Determinismus).
+
 ---
 
 ## 4. Failover-Kette (kein stiller Kursquellwechsel)
@@ -201,6 +291,10 @@ Aufruffolge → identische Kursfolge.
 | `PAPER_FEED_ALLOWED_HOSTS` | – | zusätzliche erlaubte Feed-Hosts (SSRF) |
 | `PAPER_HISTORY_DIR` | `data/history` | Verzeichnis des Historical Store |
 | `PAPER_SIM_*` | siehe §3 | Simulator-Parameter |
+| `PAPER_MAKER_FEE_PCT` / `PAPER_TAKER_FEE_PCT` | `0.04` / `0.1` (%) | Kalibrierung: Gebühren-Overlay (GAP-02, siehe §3.1) |
+| `PAPER_SLIPPAGE_BPS` / `PAPER_SPREAD_FALLBACK_BPS` | `1` / `2` (bp) | Kalibrierung: Slippage/Spread-Overlay (GAP-02, siehe §3.1) |
+| `PAPER_FUNDING_INTERVAL_HOURS` | `8` | Funding-Accrual-Takt (GAP-02, siehe §3.2) |
+| `PAPER_FUNDING_RATE_PCT_PER_8H` | `0` | statische Funding-Rate je 8h in % (0 = aus) |
 
 ---
 

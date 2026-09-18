@@ -1,12 +1,91 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.41.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.42.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.42.0] — 2026-09-18 · feat(paper): Funding-Kosten im Paper-PnL + kalibrierbare Execution-Simulation (GAP-02)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-02](docs/audits/2026-09-18-feature-gap/findings/GAP-02-execution-simulation.md))
+bildete der Fill-Simulator zwar Gebühren, Spread, Slippage und Partial Fills ab,
+aber **Perpetual-Funding floss nicht ins Paper-PnL** — Funding existierte nur
+als Scanner-Ranking-Faktor. Gerade bei längeren Haltedauern frisst Funding real
+die Edge; Paper-Ergebnisse waren damit systematisch zu optimistisch. Dieser
+Release schließt die Lücke (PROMPT-02 der Remediation-Serie) und macht die
+Simulationsparameter kalibrierbar. Umsetzung: PR
+[#136](https://github.com/Kryschuuu/ai-trading-firm/pull/136)
+(`arena/01a0b48a-ai-trading-firm`).
+
+### Hinzugefügt
+
+- **Funding-Accrual je offener Perpetual-Position** (`src/lib/funding.ts`, neu):
+  - Gebucht im Monitor-Tick bei **Periodenwechsel** (Default: 8h-Marken
+    00/08/16 UTC; `PAPER_FUNDING_INTERVAL_HOURS`, Bounds [1, 24]). Erste
+    Sichtung nach Prozessstart bucht nichts nach; Standby über mehrere Marken
+    bucht `periods`-fach.
+  - Formel `funding = fundingRate · |notional| · direction` (LONG = +1 zahlt
+    bei positiver Rate, SHORT = −1 erhält). Verbindliche
+    **Vorzeichenkonvention (Kontosicht)**: negativ = gezahlt, positiv =
+    erhalten — dokumentiert in `docs/PAPER_TRADING.md` §3.2.
+  - **Rate-Quelle gestuft:** (a) statisch über `PAPER_FUNDING_RATE_PCT_PER_8H`
+    (Default `0` = **neutral** — bestehende Tests und Installationen bleiben
+    unverändert grün), (b) Erweiterungspunkt `FundingRateProvider`
+    (`getFundingRate(symbol)`) für echte Raten — ohne Netzwerk-Anbindung in
+    diesem Release.
+  - **Nur Perpetuals** zahlen (Registry-Lookup über den Marktdaten-Manager;
+    Spot/Aktien/unbekannt ⇒ kein Funding, fail-safe gegen erfundene Lasten).
+  - **Revisionssicher:** jedes Accrual-Ereignis ins `audit_log`
+    (`FUNDING_ACCRUAL`, Muster `funding:SYMBOL:+0.42`, Audit-Senke mit Retry +
+    Spool). Schlägt die Persistenz fehl, wird die Ledger-Buchung
+    zurückgerollt (fail-closed).
+- **Neue DB-Spalte `positions.funding_paid`** (numeric, NOT NULL DEFAULT 0;
+  append-only Migration `drizzle/2026-09-18_positions_funding.sql`, alternativ
+  `npx drizzle-kit push`): kumuliertes Funding je Position, bleibt nach
+  Schließen stehen (Lifetime-Historie).
+- **Equity- & Positions-Ausweis:** Funding wirkt als echter Cashflow auf Cash
+  und damit `accountEquity` (wie Gebühren beim Fill — keine Doppelzählung);
+  `PaperBroker.accrueFunding`/`totalFundingPaid`, `fundingPaid` je Position in
+  `listPositions`/Adapter (`BrokerPosition`, optional), Restore (`getBroker`)
+  hydratiert `funding_paid` (auch im Legacy-Cash-Pfad).
+  `GET /api/firm` zeigt `fundingPaid` je Position sowie `account.fundingPaid`
+  (SUMME über alle Positionen) und `account.fundingPaidOpen` (offene).
+- **Kalibrierung der Execution-Simulation** (GAP-02 D3): `PAPER_MAKER_FEE_PCT`,
+  `PAPER_TAKER_FEE_PCT`, `PAPER_SLIPPAGE_BPS`, `PAPER_SPREAD_FALLBACK_BPS` —
+  Overlay über die `PAPER_SIM_*`-Basis in `createPaperExecution`
+  (`calibrateSimulatorConfig`), Defaults = heutige hartcodierte Werte (kein
+  Verhaltensbruch), Bounds-Clamp **mit Log-Warnung** bei Korrektur
+  (`envNumber`, Muster `src/lib/env.ts`).
+- **Monitor-Tick-Ergebnis** um `fundingAccruals` erweitert (pro Tick gebuchte
+  Accruals; Default-Konfiguration ⇒ immer leer).
+- **Tests** `tests/paper.funding.test.ts` (15 Tests): Vorzeichen exakt, Accrual
+  nur bei Periodenwechsel (injizierbare Clock, zweimal ticken ⇒ genau eine
+  Buchung), Equity-Abgleich („equity nach Accrual = vorher + fundingPaid-
+  Summe“), Bounds/Clamp-Warnungen, Rate-Default 0 = neutral, nur Perpetuals,
+  Rate-Quelle gestuft, Persistenz-Fehler ⇒ Ledger-Rollback, Determinismus
+  (identische Quote-Folge ⇒ SHA-256-identische Fills; Engine ohne
+  Date.now()/Math.random()).
+
+### Dokumentation
+
+- `docs/PAPER_TRADING.md`: neue Abschnitte **§3.1 „Gebühren, Slippage &
+  Kalibrierung“** und **§3.2 „Funding-Accrual für Perpetuals“** (inkl.
+  Vorzeichenkonvention, Flag-Tabellen, Migrations-Hinweis) + §6-Env-Tabelle.
+- `CONFIGURATION.md` + `.env.example`: sechs neue Flags mit Defaults/Bounds.
+- `docs/audits/2026-09-18-feature-gap/remediation/TRACKING.md`: GAP-02 → FIXED
+  (v1.42.0); Finding-Datei um „Umsetzung“-Abschnitt ergänzt.
+
+### Nicht enthalten (bewusst)
+
+- Keine echte Funding-Raten-Anbindung (z. B. Bitunix REST/WS) — nur das
+  Provider-Interface als Erweiterungspunkt (siehe „Offene Punkte“ im
+  GAP-02-Finding).
+- Keine Änderung an `src/live-gate/**` (Paper-only bleibt erzwungen); keine
+  neuen Runtime-Dependencies.
 
 ## [1.41.0] — 2026-09-18 · docs(audit): Feature-Gap-Audit 2026-09-18 (Co-Audit) + ausführbare Arena-Prompt-Serie (GAP-01…GAP-10)
 

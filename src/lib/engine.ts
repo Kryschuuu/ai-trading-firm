@@ -161,6 +161,11 @@ async function restoreFirmState(broker: PaperBroker): Promise<void> {
         r.takeProfit != null && Number.isFinite(Number(r.takeProfit))
           ? Number(r.takeProfit)
           : null,
+      // GAP-02 (v1.42.0): kumuliertes Funding mithydratieren (Kontosicht:
+      // negativ = gezahlt) — sonst „vergäße“ der Ledger nach einem Neustart
+      // bereits gebuchtes Funding, obwohl die DB es führt. NaN/kaputte Werte
+      // werden im hydrate() zu 0 sanitiziert.
+      fundingPaid: r.fundingPaid != null ? Number(r.fundingPaid) : 0,
     })),
     { cashHint }
   );

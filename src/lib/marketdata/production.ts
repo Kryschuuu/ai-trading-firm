@@ -12,6 +12,7 @@ import { createAdapter } from "../../brokers/factory";
 import { PaperBroker, type ExecutedFill, type LiveQuote, type Order, type PaperExecutionAdapter } from "../broker";
 import { FillSimulator } from "./simulator";
 import { MarketDataManager, type MarketDataManagerOptions } from "./manager";
+import { calibrateSimulatorConfig } from "./config";
 import type { MarketSnapshot } from "./types";
 
 const G = globalThis as typeof globalThis & {
@@ -37,9 +38,19 @@ export function setProductionMarketDataManagerForTests(manager: MarketDataManage
   G.__prodMarketDataManager = manager;
 }
 
-/** In-Memory-Ausführungs-Adapter über den Manager (Modus B). */
+/**
+ * In-Memory-Ausführungs-Adapter über den Manager (Modus B).
+ *
+ * GAP-02 (v1.42.0): Die Simulationsparameter sind über die Kalibrierungs-
+ * Flags (`PAPER_MAKER_FEE_PCT`, `PAPER_TAKER_FEE_PCT`, `PAPER_SLIPPAGE_BPS`,
+ * `PAPER_SPREAD_FALLBACK_BPS`) konfigurierbar — als Overlay über die
+ * Manager-Konfiguration (Legacy-`PAPER_SIM_*`). Ohne gesetzte Flags gilt
+ * unverändert `manager.config.simulator` (Defaults = die bisher hart-
+ * kodierten Werte, kein Verhaltensbruch). Bounds + Warnung: config.ts
+ * (`calibrateSimulatorConfig`), Doku: docs/PAPER_TRADING.md §3.1.
+ */
 export function createPaperExecution(manager: MarketDataManager): PaperExecutionAdapter {
-  const simulator = new FillSimulator(manager.config.simulator);
+  const simulator = new FillSimulator(calibrateSimulatorConfig(manager.config.simulator));
   return {
     quoteProvider(symbol: string): LiveQuote | null {
       const snap = manager.getSnapshotSync(symbol);
