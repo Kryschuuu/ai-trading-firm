@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.44.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.45.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -61,11 +61,11 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[LLM_ROUTING.md](LLM_ROUTING.md)** | MODEL_ROUTER: Modell-Klassen, Routing-Modi, Eskalation, Budget-Deckel, Audit |
 | **[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)** | LLM-Provider (Ollama/OpenAI/Gemini/Claude) im Detail |
 | **[FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md)** | Control Plane: Brokers & Venues UI, Credential-Manager, Secret-Store |
-| **[OPERATIONS.md](OPERATIONS.md)** | Runbook „Funnel ist leer“: Entscheidungsbaum + Ops-Sektion Market Data |
+| **[OPERATIONS.md](OPERATIONS.md)** | Runbooks: „Funnel ist leer“ (§1–3) und „Auto-Breaker hat ausgelöst“ (§4) |
 | **[OPERATIONS_CENTER.md](OPERATIONS_CENTER.md)** | Operations Center: Market-Data-Readiness-Diagnose |
 | **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup, Migration |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
-| **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler: Taxonomie, Metriken, strukturierte Logs, Redaction |
+| **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler, Firmen-Metriken, Auto-Circuit-Breaker, Alerts, Heartbeat (§9–12) |
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE` |
 | **[BITUNIX.md](BITUNIX.md)** | Bitunix-Adapter: 7. Venue, Public REST/WS, Signing, Paper-Modus B, Live-Gate |
 | **[ALPACA.md](ALPACA.md)** | Alpaca-Adapter: 8. Venue, US-Aktien/ETFs/Crypto, Paper-API = Testnet |
@@ -260,4 +260,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.44.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.45.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

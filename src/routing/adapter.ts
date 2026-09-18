@@ -17,6 +17,7 @@
  */
 import { chatLlm, type LlmChatRequest, type LlmMessage, type LlmUsage } from "@/lib/llmProvider";
 import { publicErrorMessage } from "@/lib/secrets";
+import { metricLabel, telemetry } from "@/lib/telemetry";
 import { estimateCostUsd, getModelRouter, modelSignature, type ModelRouter } from "./router";
 import {
   PROVIDER_IDS,
@@ -118,6 +119,10 @@ export async function routeChat(
 
   // Kein Modell verfügbar ⇒ deterministische Regel-Engine des Aufrufers.
   if (decision.provider === "none" || chain.length === 0) {
+    // GAP-10 (v1.45.0): Firmen-Metrik — auch der Regel-Engine-Fallback ist
+    // ein LLM-Aufruf-Versuch (provider="none", outcome="fallback"), damit die
+    // Quote „Provider nicht erreichbar“ in der Exposition sichtbar bleibt.
+    telemetry.firm.llmCalls.inc({ provider: "none", outcome: "fallback" });
     return {
       content: spec.fallbackContent ?? "",
       provider: "none",
@@ -153,6 +158,19 @@ export async function routeChat(
     const tokens = Number(result.usage?.totalTokens ?? 0);
     const costUsd = result.costUsd ?? estimateCost(router, provider, decision, spec);
     const latencyMs = Date.now() - started;
+
+    // GAP-10 (v1.45.0): LLM-Latenz je Provider — exakt an der Stelle, an der
+    // die Latenz ohnehin anfällt (keine zweite Messlogik). `metricLabel`
+    // begrenzt das Label auf die Provider-Whitelist; die Summe plus
+    // `llm_calls_total` ergibt den Mittelwert im Scrape-Tool.
+    {
+      const providerLabel = metricLabel(provider, "unknown");
+      const observedLatency = Number.isFinite(result.latencyMs) ? Number(result.latencyMs) : latencyMs;
+      telemetry.firm.llmCalls.inc({ provider: providerLabel, outcome: "ok" });
+      if (Number.isFinite(observedLatency) && observedLatency >= 0) {
+        telemetry.firm.llmLatencyMs.inc({ provider: providerLabel }, observedLatency);
+      }
+    }
 
     router.consumeUsage({
       provider,
@@ -198,6 +216,10 @@ export async function routeChat(
     };
   } catch (e) {
     const message = publicErrorMessage(e, "LLM-Aufruf fehlgeschlagen");
+    // GAP-10: Fehlversuche der Kette zählen (Kette bzw. Ziel-Provider).
+    for (const p of chain) {
+      telemetry.firm.llmCalls.inc({ provider: metricLabel(p, "unknown"), outcome: "error" });
+    }
     void router.audit.write({
       ts: new Date().toISOString(),
       agent: decision.agent,

@@ -2,6 +2,7 @@ import { auditDurabilitySnapshot } from "@/lib/auditSink";
 import { checkSchema } from "@/lib/seed";
 import { APP_NAME, APP_VERSION } from "@/lib/version";
 import { publicErrorMessage } from "@/lib/secrets";
+import { readHeartbeat } from "@/lib/heartbeat";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,13 @@ export const dynamic = "force-dynamic";
  * Monitoring-Systeme die zwischen "Process up" und "DB ready" unterscheiden
  * wollen, können das Feld auswerten. Der Prozess selbst ist in beiden Fällen
  * lebendig — genau was ein Healthcheck prüft.
+ *
+ * GAP-10 (D4, v1.45.0): Zusätzlich `monitorLastTickAt` + `stale` (Schwelle
+ * `HEALTH_STALE_AFTER_MS`, Default 300000 ms). Ein lebender Prozess mit totem
+ * Scheduler-Tick ist NICHT gesund: `stale: true` heißt „die Firma handelt
+ * gerade nicht mehr“ und ist das Signal, das `scripts/watchdog.ts` alarmiert.
+ * Das Feld bleibt bewusst DB-frei lesbar (Quelle: RAM-Heartbeat des Ticks),
+ * damit es auch bei einem Datenbank-Ausfall aussagekräftig ist.
  */
 /**
  * Audit-Zuverlässigkeit (S1, v1.36.18) als Health-Feld.
@@ -43,6 +51,8 @@ function auditHealth() {
 }
 
 export async function GET() {
+  // Heartbeat einmal je Request (RAM-only, wirft nie).
+  const heartbeat = readHeartbeat();
   try {
     const schema = await checkSchema();
     return Response.json({
@@ -52,6 +62,10 @@ export async function GET() {
       schemaReady: schema.ok,
       missingTables: schema.ok ? [] : schema.missingTables,
       fix: schema.ok ? null : "npx drizzle-kit push",
+      monitorLastTickAt: heartbeat.monitorLastTickAt,
+      monitorAgeMs: heartbeat.monitorAgeMs,
+      stale: heartbeat.stale,
+      staleAfterMs: heartbeat.staleAfterMs,
       audit: auditHealth(),
       timestamp: new Date().toISOString(),
     });
@@ -65,6 +79,10 @@ export async function GET() {
       schemaReady: false,
       error: publicErrorMessage(e, "Datenbank nicht erreichbar"),
       fix: "PostgreSQL läuft? DATABASE_URL korrekt?",
+      monitorLastTickAt: heartbeat.monitorLastTickAt,
+      monitorAgeMs: heartbeat.monitorAgeMs,
+      stale: heartbeat.stale,
+      staleAfterMs: heartbeat.staleAfterMs,
       audit: auditHealth(),
       timestamp: new Date().toISOString(),
     });

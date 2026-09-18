@@ -22,6 +22,8 @@ import { getBroker, logAudit } from "./engine";
 import type { PaperBroker, Fill } from "./broker";
 import { decideExit, loadExitConfig, type ExitReason } from "./exits";
 import { getLimits, killSwitch } from "./riskGuard";
+import { checkCircuitBreaker, type CircuitBreakerOutcome } from "./circuitBreaker";
+import { state } from "./stateRegistry";
 import type { AdaptiveRegime } from "./riskGuard";
 import { DEFAULT_WATCHLIST, getQuote, refreshQuotes, getCandles } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
@@ -57,6 +59,19 @@ export type TickResult = {
    */
   fundingAccruals: { symbol: string; funding: number; fundingPaid: number }[];
   dailyLossKill: boolean;
+  /**
+   * GAP-10 (v1.45.0): Zustand des Auto-Circuit-Breakers nach diesem Tick.
+   * `engaged` = in DIESEM Tick ausgeloest, `latched` = Brecher ist (weiterhin)
+   * gesperrt; `null` = Pruefung nicht moeglich (z. B. Flag aus oder Fehler).
+   */
+  circuitBreaker: {
+    engaged: boolean;
+    latched: boolean;
+    reason: string | null;
+    metric: string | null;
+    value: number | null;
+    limit: number | null;
+  } | null;
   marketScan: boolean;
   errors: string[];
   /** Zustand des adaptiven Risk-Systems nach diesem Tick (v1.7.0). */
@@ -276,24 +291,39 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     errors.push(`Funding-Accrual fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
   }
 
-  // --- 3) Tagesverlust-Limit: Basis ist der PERSISTENTE Tages-P&L aus der DB ---
+  // --- 3) Harte Grenzen: Auto-Circuit-Breaker (GAP-10) ---
+  // Basis ist der PERSISTENTE Tages-P&L aus der DB; Drawdown und offene
+  // Positionen kommen aus dem Ledger. Der Brecher prueft DREI Ausloeser
+  // (Drawdown, Tagesverlust, Verlustserie) und nutzt den BESTEHENDEN
+  // Kill-Switch-Pfad — Latching, kein Auto-Re-Arm.
   const equity = broker.accountEquity;
   const dayPnlNow = await realizedPnlToday();
+  const dayPnlPct = broker.startingEquity > 0 ? dayPnlNow / broker.startingEquity : 0;
   let dailyLossKill = false;
-  if (broker.startingEquity > 0) {
-    const dayPnlPct = dayPnlNow / broker.startingEquity;
-    if (dayPnlPct <= -limits.dailyLossLimitPct && !killSwitch.isArmed()) {
-      killSwitch.pull(
-        `TAGESVERLUSS ${dayPnlNow.toFixed(2)} (${(dayPnlPct * 100).toFixed(2)}%) ≤ Limit -${(limits.dailyLossLimitPct * 100).toFixed(1)}%`
-      );
-      dailyLossKill = true;
-      await logAudit("KILL_SWITCH", "CRITICAL", {
-        reason: "DAILY_LOSS_LIMIT",
-        realizedToday: dayPnlNow,
-        equity,
-        dailyLossLimitPct: limits.dailyLossLimitPct,
-      });
-    }
+  let circuitBreaker: TickResult["circuitBreaker"] = null;
+  try {
+    const breaker: CircuitBreakerOutcome = await checkCircuitBreaker({
+      drawdownPct: broker.drawdownPct,
+      maxEquityDrawdownPct: limits.maxEquityDrawdownPct,
+      dailyLossPct: -dayPnlPct,
+      dailyLossLimitPct: limits.dailyLossLimitPct,
+      // Verlustserie + Schwelle liest der Brecher selbst (begrenzte
+      // DB-Abfrage, nur wenn Ausloeser a/b nicht ohnehin greifen).
+    });
+    circuitBreaker = {
+      engaged: breaker.engaged,
+      latched: breaker.latched,
+      reason: breaker.reason,
+      metric: breaker.trigger?.metric ?? null,
+      value: breaker.trigger?.value ?? null,
+      limit: breaker.trigger?.limit ?? null,
+    };
+    dailyLossKill = breaker.engaged && breaker.trigger?.metric === "dailyLoss";
+    for (const message of breaker.errors) errors.push(`Circuit-Breaker: ${message}`);
+  } catch (e) {
+    // Beobachtungsfehler darf den Tick nicht abbrechen (SL/TP laufen weiter);
+    // der Fehler ist sichtbar, nicht still.
+    errors.push(`Circuit-Breaker fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
   }
 
   // Snapshot für die Equity-Kurve — bei jedem Tick.
@@ -352,13 +382,16 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     }
   }
 
+  // GAP-10 (D4): Heartbeat-Quelle fuer /api/health + Watchdog.
   GLOBAL.__lastTickAt = Date.now();
+  state.monitorLastTickAt.set(GLOBAL.__lastTickAt);
   return {
     at: new Date().toISOString(),
     quotesRefreshed: priceOf.size,
     stopsTriggered,
     fundingAccruals,
     dailyLossKill,
+    circuitBreaker,
     marketScan,
     errors,
     adaptiveRisk,

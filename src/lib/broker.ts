@@ -8,6 +8,7 @@
  */
 import { killSwitch, validateOrder, riskValidationReason, RISK_LIMITS } from "./riskGuard";
 import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
+import { metricLabel, telemetry } from "./telemetry";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import type {
   BrokerCapabilities,
@@ -740,6 +741,12 @@ export class PaperBroker {
       });
       this.cash -= cost;
 
+      // GAP-10: Fill-Metrik (Simulator-Pfad) — Grund-Klasse, kein Symbol.
+      telemetry.firm.orderFills.inc({
+        kind: "OPEN",
+        reason: executed.status === "PARTIALLY_FILLED" ? "ORDER_PARTIAL" : "ORDER",
+      });
+
       return {
         orderId: `PAP-${Date.now().toString(36).toUpperCase()}`,
         symbol,
@@ -781,6 +788,9 @@ export class PaperBroker {
     });
     this.cash -= cost;
 
+    // GAP-10: Fill-Metrik (Legacy-Paper-Pfad).
+    telemetry.firm.orderFills.inc({ kind: "OPEN", reason: "ORDER" });
+
     return {
       orderId: `PAP-${Date.now().toString(36).toUpperCase()}`,
       symbol,
@@ -806,6 +816,8 @@ export class PaperBroker {
     this.positions.delete(key);
     const pnl =
       (pos.side === "LONG" ? 1 : -1) * pos.qty * (price - pos.entryPrice);
+    // GAP-10: Close-Fill-Metrik je Exit-Grund (STOP_LOSS/TAKE_PROFIT/…).
+    telemetry.firm.orderFills.inc({ kind: "CLOSE", reason: classifyCloseReason(reason) });
     return {
       orderId: `CLS-${Date.now().toString(36).toUpperCase()}`,
       symbol: key,
@@ -857,7 +869,34 @@ export class PaperBroker {
   }
 }
 
+/**
+ * GAP-10 (v1.45.0): Klassifiziert einen Ablehnungsgrund für die Firmen-Metrik.
+ *
+ * Der Grund darf **niemals** roh ins Label: Meldungen wie
+ * `POSITION_ALREADY_OPEN:SOL (kein Nachkauf erlaubt)` oder
+ * `INSUFFICIENT_CASH: benötigt 12.34 (…)` tragen Symbol und Zahlen — ein
+ * Label würde pro Symbol wachsen (Kardinalität) und könnte im Fehlerfall
+ * sogar Fremdtext/Secrets aus dem Upstream enthalten. Es bleibt deshalb nur
+ * die Code-Klasse vor dem ersten `:`/Leerzeichen, und die muss den
+ * `metricLabel`-Zeichensatz erfüllen (sonst `OTHER`).
+ */
+export function classifyRejectReason(reason: string): string {
+  const raw = String(reason ?? "").trim();
+  if (/^blocked by guardrail/i.test(raw)) return "GUARDRAIL";
+  const code = raw.split(/[:\s(]/, 1)[0] ?? "";
+  return metricLabel(code.toUpperCase(), "OTHER");
+}
+
+/** GAP-10: Klassen-Code eines Exit-/Close-Grundes (z. B. STOP_LOSS). */
+function classifyCloseReason(reason: string | undefined): string {
+  const raw = String(reason ?? "").trim().toUpperCase().replace(/\s+/g, "_");
+  return metricLabel(raw, "OTHER");
+}
+
 function reject(order: Order, reason: string): Fill {
+  // GAP-10: Reject-Metrik am einzigen Ablehnungs-Funnel — je Grund-Klasse,
+  // keine Rohgründe/Symbole (siehe classifyRejectReason).
+  telemetry.firm.orderRejects.inc({ reason: classifyRejectReason(reason) });
   const symbol =
     typeof order.symbol === "string" ? order.symbol.toUpperCase().slice(0, 40) : "INVALID";
   return {

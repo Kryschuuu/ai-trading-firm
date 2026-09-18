@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.44.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.45.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,159 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.45.0] — 2026-09-18 · feat(observability): Firmen-Metriken, Auto-Circuit-Breaker, Alerting & Heartbeat (GAP-10)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-10](docs/audits/2026-09-18-feature-gap/findings/GAP-10-observability-circuit-breaker.md))
+war die Firma im Betrieb unzureichend beobachtbar und im Grenzfall nicht
+selbstschützend: `prometheusMetrics()` lieferte nur Marktdaten-/Audit-Counter,
+die harten Risiko-Grenzen blockierten ausschließlich **neue** Orders (offene
+Positionen liefen bei einem Bug weiter), es gab keinen Alert-Kanal und kein
+Signal für einen stehenden Monitor-Tick. Dieser Release schließt das Delta
+(PROMPT-10 der Remediation-Serie): paper-only, keine neuen
+Runtime-Dependencies, Fail-closed, Wiederverwendung des bestehenden
+Kill-Switch- und Disarm-Pfads. Umsetzung: PR
+[#139](https://github.com/Kryschuuu/ai-trading-firm/pull/139)
+(`arena/01a0b6a7-ai-trading-firm`).
+
+### Hinzugefügt
+
+- **Firmen-Metriken in `prometheusMetrics()`** (`src/lib/telemetry.ts`, jetzt
+  `async`; Instrumentierung in `src/lib/broker.ts` und
+  `src/routing/adapter.ts`): `firm_equity`, `firm_drawdown_pct`,
+  `firm_open_positions`, `firm_realized_pnl_today` (Ledger, sonst jüngster
+  `equity_snapshots`-Eintrag), `firm_metric_source{source}`,
+  `firm_order_fills_total{kind,reason}`, `firm_order_rejects_total{reason}`,
+  `llm_calls_total{provider,outcome}`, `llm_latency_ms_sum{provider}`. Alles
+  wird aus **bestehenden** Stores gelesen (Paper-Ledger, PostgreSQL,
+  In-Memory-Counter) — keine zweite Messschleife. Labels sind ausschließlich
+  klassifizierte Codes (`metricLabel()`, `classifyRejectReason()`); Symbole,
+  Beträge, URLs oder Tokens erscheinen nie. Ist der Firmenzustand nicht lesbar,
+  werden die betroffenen Metriken **weggelassen** und mit
+  `# HELP … degraded: <grund>` markiert — kein erfundener 0-Wert, kein Throw,
+  kein Hänger.
+- **Auto-Circuit-Breaker** (`src/lib/circuitBreaker.ts`, im Monitor-Tick nach
+  der Equity-Berechnung): drei Auslöser — Drawdown ≥ `maxEquityDrawdownPct`
+  (Metrik `drawdown`), Tagesverlust ≥ `dailyLossLimitPct` (`dailyLoss`),
+  `RISK_MAX_CONSECUTIVE_LOSSES` Verlust-Closes in Folge
+  (`consecutiveLosses`, Default 5, Bounds [2, 50]) — in dieser Prioritätsfolge.
+  Aktion über den **bestehenden** Kill-Switch-Pfad: `killSwitch.pull(reason)`,
+  `kill_switches`-Zeile (`triggered_by = AUTO_CIRCUIT_BREAKER`),
+  `KILL_SWITCH`-Audit (CRITICAL) mit fixiertem Auslösewert
+  (`metric`/`value`/`limit`/`triggeredAt`) und Alert
+  `circuit-breaker:<metrik>`. Grundformat stabil:
+  `auto-circuit-breaker:drawdown:0.1834`,
+  `auto-circuit-breaker:consecutiveLosses:5`. **Latching:** einmal ENGAGE
+  bleibt ENGAGE, kein zweites Engage/Update, keine Hysterese. `checkCircuitBreaker()`
+  wirft nie; nicht lesbare Verlustserie armiert **nicht** (kein Raten).
+- **Alert-Adapter** (`src/lib/alerts.ts`): `AlertSink`-Interface mit
+  `LogAlertSink` (strukturiert, redigiert) und `FileAlertSink` (append-only
+  NDJSON `data/alerts.ndjson` über `resolveRuntimePath()`, Modus 0600 — CLI
+  und Server sehen dieselbe Datei). **Debounce** je identischem Alarm-Code
+  (`ALERT_DEBOUNCE_MINUTES`, Default 30, Bounds [1, 1440]) mit Zählung
+  unterdrückter Alarme (`meta.suppressedSinceLast`). **Optionaler**
+  Webhook-Sink, Default **aus**: URL ausschließlich aus dem Secret-Store
+  (`ALERT_WEBHOOK_URL_SECRET_NAME`, Feld `apiKey`), Timeout 5 s; die URL ist
+  selbst ein Credential und erscheint nie in Logs/Fehlermeldungen (Nicht-OK →
+  `webhook: HTTP <status>`). `AlertDispatcher.emit()` sammelt Sink-Fehler und
+  wirft nie.
+- **Heartbeat + Watchdog** (`src/lib/heartbeat.ts`, `GET /api/health`,
+  `scripts/watchdog.ts` + `npm run watchdog`): Health-Payload enthält
+  `monitorLastTickAt`, `monitorAgeMs`, `stale`, `staleAfterMs` (immer HTTP
+  200); `stale` gilt bei Alter > `HEALTH_STALE_AFTER_MS` (Default 300 000,
+  Bounds [30 000, 3 600 000]) und bei „noch nie getickt“ (fail-loud). Der
+  Watchdog ist **alarm-first**: ein Lauf, kein Daemon, **kein Auto-Restart,
+  keine Mutation**; Prüfung per HTTP (Default `http://127.0.0.1:$PORT/api/health`)
+  oder `--source=inprocess`, Alerts `heartbeat-stale`,
+  `heartbeat-health-unreachable`, `heartbeat-health-unreadable`, Exit-Codes
+  0 = gesund, 1 = Alarm, 2 = Bedienfehler.
+
+### Behoben
+
+- **Fehlender CHANGELOG-Verweis auf Arena-Task 05 (Portfolio-Analytics)
+  wiederhergestellt:** Die Doku-Konsolidierung vom 2026-09-05 hatte den
+  Verweis auf Task 05 (`src/portfolio/`, `docs/PORTFOLIO_ANALYTICS.md`,
+  `docs/security/SECURITY_AUDIT.md` §„Security Audit — Task 05“) im Changelog
+  verloren; der Architektur-Test `tests/portfolio.architecture.test.ts`
+  („Doku: CHANGELOG führt Task 05“) war dadurch **schon im Baseline-Stand
+  rot**. Reine Dokumentation, kein Verhaltenswechsel — als Nebenfund
+  mitkorrigiert, damit die Pflicht-Checks grün sind (siehe `TRACKING.md`,
+  GAP-10-Notizen).
+
+### Geändert
+
+- **Verhaltensänderung (explizit):** `AUTO_CIRCUIT_BREAKER` ist per Default
+  **an** — bestehende Installationen erhalten damit erstmals einen
+  automatischen Not-Halt bei Grenzbruch. Der Tagesverlust-Auto-Pull existierte
+  zuvor bereits im Monitor-Tick; er läuft jetzt über den zentralen Brecher mit
+  einheitlichem Grund/Audit/Alert und Latching (`TickResult.dailyLossKill`
+  bleibt als Feld erhalten). „Aus“ ist ein bewusster, hier dokumentierter
+  Betriebsentscheid (z. B. Fehlersuche); ein unbekannter Wert schaltet den
+  Schutz nicht still ab (Default + Warnung).
+- **Monitor-Tick:** Schritt 3 ist `checkCircuitBreaker(...)` (vorher
+  Tagesverlust-Sonderfall inline); `TickResult.circuitBreaker` beschreibt den
+  Zustand (`engaged`/`latched`/`reason`); der Tick merkt sich
+  `state.monitorLastTickAt` (`lastTickAt()` bleibt stabil).
+- **Client-Bundle-Grenze:** `src/lib/telemetry.ts` bleibt **DB-frei** (kein
+  `@/db`/`pg`); der Firmenzustand wird von `src/lib/firmState.ts`
+  (server-only; Ledger zuerst, sonst jüngster `equity_snapshots`-Eintrag)
+  gelesen und über `setFirmMetricStateReader()` registriert. Grund:
+  `telemetry.ts` hängt über `marketData.ts`/`workshop.ts` im Import-Graph der
+  Client-Komponenten — ein DB-Import dort ließ den Produktions-Build mit
+  „Module not found: Can't resolve 'tls'“ (pg → Node-Builtins) scheitern.
+  `prometheusMetrics()` ohne Argument nutzt den registrierten Leser, sonst
+  den prozesslokalen RAM-Ledger und degradiert sauber; fehlt nur das
+  Tages-P&L, wird genau diese Metrik als `degraded` markiert (kein 0-Wert).
+- **`GET /api/health`:** neue Felder `monitorLastTickAt`/`monitorAgeMs`/
+  `stale`/`staleAfterMs` in Erfolgs- **und** Fehlerzweig; Statuscode bleibt
+  konstruktionsbedingt 200 (Liveness ≠ Readiness).
+
+### Sicherheit / Grenzen
+
+- **Kein Auto-Re-Arm:** Der Weg zurück bleibt ausschließlich der manuelle
+  Disarm-Pfad (Admin-Permission `live.gate` + CSRF + single-use
+  Challenge-Nonce ≤ 60 s, `src/lib/disarmChallenge.ts`) — unverändert und
+  fail-closed (ohne Auditbeleg kein Disarm). Der Brecher setzt nur den Latch
+  zurück, wenn ein Mensch entschärft hat.
+- **Keine Secrets/PII** in Metrik-Labels, Alerts, Logs oder Docs; die
+  Webhook-URL kommt ausschließlich aus dem Secret-Store und wird nie
+  geloggt (`.env.example` enthält nur den **Namen** des Eintrags).
+- **Keine neuen Runtime-Dependencies**, keine Schema-Migration; der Watchdog
+  mutiert nichts (kein Restart, kein Kill, kein Flatten).
+
+### Tests
+
+- `tests/telemetry.firm.test.ts` (7): Firmen-Metriken im Snapshot,
+  DB-Fehler → `degraded` statt Exception, keine Secrets im Output,
+  Label-Whitelist, Reject-Klassifikation.
+- `tests/circuitBreaker.test.ts` (12): D2 (a) Drawdown-/Tagesverlust-Auslöser
+  → ENGAGE + Audit-Grund + Alert, (b) Verlustserie inkl. Priorität und
+  unlesbarer Serie, (c) Flag aus + Bounds, (d) Latching + gemeldete
+  Audit-Lücke, (e) kein Auto-Re-Arm (Source-Scan + Disarm-Route verlangt
+  Nonce, `CSRF_INVALID` vor Nonce-Prüfung).
+- `tests/alertSink.test.ts` (8): Debounce inkl. `suppressedSinceLast`,
+  Sink-Fehler bricht nicht ab, Log-/File-Sink (NDJSON via
+  `resolveRuntimePath`) und Webhook-Credential aus dem Secret-Store,
+  Config-Bounds.
+- `tests/health.heartbeat.test.ts` (5): `stale`-Grenzen mit Fake-Clock
+  (`>`-Semantik: Schwelle selbst gesund), „nie getickt“ → stale,
+  `HEALTH_STALE_AFTER_MS`-Clamp, Health-Payload.
+
+### Dokumentation
+
+- `docs/OBSERVABILITY.md`: Status-Header auf v1.45.0, neue Abschnitte
+  **9. Firmen-Metriken**, **10. Auto-Circuit-Breaker**, **11. Alert-Adapter**,
+  **12. Heartbeat & Watchdog** (inkl. bewusst offener Punkt „kein
+  `/api/metrics`-Scrape-Endpoint“).
+- `docs/OPERATIONS.md`: neues Runbook **„Auto-Breaker hat ausgelöst“**
+  (Symptom → Audit lesen → Heartbeat prüfen → manuell entschärfen) inkl.
+  Fehlercodes; Status-Header aktualisiert.
+- `CONFIGURATION.md`: neue Tabelle „Firmen-Metriken, Auto-Circuit-Breaker,
+  Alerts & Heartbeat" mit `AUTO_CIRCUIT_BREAKER`,
+  `RISK_MAX_CONSECUTIVE_LOSSES`, `ALERT_DEBOUNCE_MINUTES`, `ALERT_FILE`,
+  `ALERT_WEBHOOK_URL_SECRET_NAME`, `HEALTH_STALE_AFTER_MS`; `.env.example`
+  ergänzt.
 
 ## [1.44.0] — 2026-09-18 · feat(paper): Server-seitiges Exit-Management — Trailing-Stop, Time-Stop, OCO-Exklusivität (GAP-05)
 
