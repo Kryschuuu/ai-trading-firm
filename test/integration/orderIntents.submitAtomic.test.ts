@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import { db } from "../../src/db";
-import { orderIntents, positions } from "../../src/db/schema";
+import { orderIntents, positions, tradeJournal } from "../../src/db/schema";
 import { sql, eq, and } from "drizzle-orm";
 import { PaperBroker, OrderIntentConflictError, type Fill, type Tx } from "../../src/lib/broker";
 import { killSwitch, resetRuntimeLimits } from "../../src/lib/riskGuard";
@@ -98,6 +98,14 @@ test("H2: zwei Prozesse (zwei PaperBroker-Instanzen) racen auf dasselbe Symbol �
   await db
     .delete(orderIntents)
     .where(sql`${orderIntents.symbol} = 'BTC' AND ${orderIntents.status} = 'RESERVED'`);
+  // GAP-03 (v1.43.0): `trade_journal` ist eine Kind-Tabelle von `positions`
+  // (FK). Das Positions-Bulk-Delete unten würde auf deren Zeilen mit FK
+  // kollidieren → die (zu den BTC-Positionen gehörenden) Journal-Zeilen erst
+  // entfernen. So bleibt der Test unabhängig davon grün, welches Symbol die
+  // Journal-Tests nutzen und welche Altlast vorhanden ist.
+  await db
+    .delete(tradeJournal)
+    .where(sql`${tradeJournal.positionId} IN (SELECT id FROM positions WHERE symbol = 'BTC')`);
   await db.delete(positions).where(eq(positions.symbol, "BTC"));
 
   try {
@@ -164,6 +172,11 @@ test("H2: zwei Prozesse (zwei PaperBroker-Instanzen) racen auf dasselbe Symbol �
     assert.equal(openPositions.length, 1, `Genau eine offene BTC-Position erwartet: ${JSON.stringify(openPositions)}`);
   } finally {
     await db.delete(orderIntents).where(eq(orderIntents.account, account));
+    // GAP-03 (v1.43.0): Journal-Zeilen (FK-Kind von positions) vor dem
+    // Positions-Delete räumen — sonst bricht das Bulk-Delete auf der FK ab.
+    await db
+      .delete(tradeJournal)
+      .where(sql`${tradeJournal.positionId} IN (SELECT id FROM positions WHERE symbol = 'BTC')`);
     await db.delete(positions).where(eq(positions.symbol, "BTC"));
   }
 });

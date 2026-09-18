@@ -318,13 +318,13 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
   resetRuntimeLimits();
   killSwitch.disarm();
 
-  // Altlast-Setup wie test/integration/orderIntents.submitAtomic.test.ts:
-  // ein offener BTC-Bestand (z. B. aus einem abgebrochenen Vorlauf) würde die
-  // Guardrail "DB-Wahrheit" zu Recht blockieren — daher exakt dieses Symbol
-  // vorab reinigen (das Shared-Paper-Konto ist je DB, nicht je Test).
-  await db.delete(tradeJournal).where(eq(tradeJournal.symbol, "BTC"));
-  await db.delete(positions).where(eq(positions.symbol, "BTC"));
-  await db.delete(orderIntents).where(sql`${orderIntents.symbol} = 'BTC'`);
+  // Symbol-Isolation: bewusst ETH — BTC gehört dem H2-Integrationstest
+  // (orderIntents), der Positions je Symbol löscht; eine BTC-Position mit
+  // trade_journal-FK aus diesem Test würde dessen Cleanup brechen (FK).
+  // ETH persistiert kein anderer Test (getestet). Vorlauf-Reste reinigen:
+  await db.delete(tradeJournal).where(eq(tradeJournal.symbol, "ETH"));
+  await db.delete(positions).where(eq(positions.symbol, "ETH"));
+  await db.delete(orderIntents).where(sql`${orderIntents.symbol} = 'ETH'`);
 
   // Der Broker hydratisiert einmalig pro Prozess aus dem Shared-DB-Zustand
   // (letzte Equity-Snapshots + offene Positionen). Ein frischer Snapshot mit
@@ -348,12 +348,12 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
   const agentName = `journal-e2e-${randomUUID().slice(0, 8)}`;
   const researchName = `journal-research-${randomUUID().slice(0, 8)}`;
   const detail = {
-    symbol: "BTC",
+    symbol: "ETH",
     side: "LONG",
-    qty: 0.015,
-    riskNotional: 1005,
-    stopLoss: 60000,
-    takeProfit: 70000,
+    qty: 0.05,
+    riskNotional: 160,
+    stopLoss: 2800,
+    takeProfit: 3600,
   };
   const reason = "journal e2e: genehmigter Vorschlag";
 
@@ -379,7 +379,7 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
     id: missionId,
     title: "journal-e2e",
     objective: "Journal-Attribution E2E-Test",
-    symbol: "BTC",
+    symbol: "ETH",
     scope: "SINGLE_SYMBOL",
     riskBudget: "0.02",
     maxPositionPct: "0.25",
@@ -407,13 +407,13 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
     },
   });
 
-  // Kursquelle: Fixture-Broker (BTC = 67000) statt Netzwerk.
+  // Kursquelle: Fixture-Broker (ETH = 3200) statt Netzwerk.
   setProductionMarketDataManagerForTests(
     new MarketDataManager({
       config: testConfig("http://127.0.0.1:1/", "http://127.0.0.1:1/"),
       registry: getRegistry(),
       store: tempStore(),
-      brokerAdapter: new FixtureBrokerAdapter({ BTC: 67000 }),
+      brokerAdapter: new FixtureBrokerAdapter({ ETH: 3200 }),
     })
   );
 
@@ -460,11 +460,11 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
     const closedAt = new Date(openedAtMs + 3 * H);
     const close = await completeJournalRow({
       positionId: pos.id,
-      symbol: "BTC",
+      symbol: "ETH",
       side: "LONG",
       openedAt: pos.createdAt,
       entryPrice: entry,
-      exitPrice: entry + 1200,
+      exitPrice: entry + 300,
       realizedPnl: 15,
       exitReason: "TAKE_PROFIT",
       closedAt,
@@ -472,17 +472,17 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
       ruleId: null,
       timeframe: "1h",
       candles: [
-        { ts: openedAtMs, high: entry + 100, low: entry - 500 },
-        { ts: openedAtMs + H, high: entry + 1200, low: entry + 100 },
-        { ts: openedAtMs + 2 * H, high: entry + 900, low: entry - 200 },
+        { ts: openedAtMs, high: entry + 100, low: entry - 250 },
+        { ts: openedAtMs + H, high: entry + 400, low: entry + 100 },
+        { ts: openedAtMs + 2 * H, high: entry + 300, low: entry - 150 },
       ],
     });
     assert.equal(close.closed, true, `Close muss gelingen (quality=${close.quality})`);
     assert.equal(close.backfilled, false, "Zeile existierte — kein Backfill");
     assert.equal(close.quality, "OK");
-    // Referenz: worst = entry−500, best = entry+1200.
-    assert.ok(Math.abs((close.maePct as number) - (-500 / entry)) < 1e-12, "MAE-Referenzwert");
-    assert.ok(Math.abs((close.mfePct as number) - (1200 / entry)) < 1e-12, "MFE-Referenzwert");
+    // Referenz: worst = entry−250, best = entry+400.
+    assert.ok(Math.abs((close.maePct as number) - (-250 / entry)) < 1e-12, "MAE-Referenzwert");
+    assert.ok(Math.abs((close.mfePct as number) - (400 / entry)) < 1e-12, "MFE-Referenzwert");
 
     const [closedRow] = await db.select().from(tradeJournal).where(eq(tradeJournal.positionId, pos.id)).limit(1);
     assert.equal(Number(closedRow.pnl), 15);
@@ -586,11 +586,11 @@ test("Journal: idempotente Eröffnung (UNIQUE position_id → genau 1 Zeile)", a
   const positionId = randomUUID();
   await db.insert(positions).values({
     id: positionId,
-    symbol: "BTC",
+    symbol: "ETH",
     side: "LONG",
-    qty: "0.01",
-    entryPrice: "67000",
-    currentPrice: "67000",
+    qty: "0.05",
+    entryPrice: "3200",
+    currentPrice: "3200",
     broker: "PAPER",
     status: "OPEN",
   });
@@ -599,7 +599,7 @@ test("Journal: idempotente Eröffnung (UNIQUE position_id → genau 1 Zeile)", a
   try {
     const first = await recordJournalOpen({
       positionId,
-      symbol: "BTC",
+      symbol: "ETH",
       side: "LONG",
       openedAt: new Date(),
       missionId: null,
@@ -610,7 +610,7 @@ test("Journal: idempotente Eröffnung (UNIQUE position_id → genau 1 Zeile)", a
     // Zweiter Aufruf (z. B. Doppel-Trigger): kein Duplikat, kein Fehler.
     const second = await recordJournalOpen({
       positionId,
-      symbol: "BTC",
+      symbol: "ETH",
       side: "LONG",
       openedAt: new Date(),
       missionId: null,
@@ -648,18 +648,18 @@ test("Auswertung + Feedback: insufficient-sample, Modi off/monitor/enforce, schr
     jobPosIds.push(posId);
     await db.insert(positions).values({
       id: posId,
-      symbol: "BTC",
+      symbol: "ETH",
       side: "LONG",
-      qty: "0.01",
-      entryPrice: "67000",
-      currentPrice: "67000",
+      qty: "0.05",
+      entryPrice: "3200",
+      currentPrice: "3200",
       broker: "PAPER",
       status: "CLOSED",
       exitReason: "TAKE_PROFIT",
     });
     await db.insert(tradeJournal).values({
       positionId: posId,
-      symbol: "BTC",
+      symbol: "ETH",
       side: "LONG",
       openedAt: new Date(Date.now() - (i + 2) * 24 * H),
       closedAt: new Date(Date.now() - (i + 1) * 24 * H),
