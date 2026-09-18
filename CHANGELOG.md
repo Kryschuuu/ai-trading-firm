@@ -21,7 +21,9 @@ Garantie „genau **ein** Exit pro Position, auch bei parallelen Ticks/Instanzen
 war nicht belegt (Check-then-Act im Prozessspeicher). Dieser Release schließt
 das Delta (PROMPT-05 der Remediation-Serie): paper-only, Fail-closed, alle
 Flags per Default **aus** (= heutiges Verhalten), keine neuen
-Runtime-Dependencies. Umsetzung: Branch `arena/01a0b5f8-ai-trading-firm`.
+Runtime-Dependencies. Umsetzung: PR
+[#138](https://github.com/Kryschuuu/ai-trading-firm/pull/138)
+(`arena/01a0b5f8-ai-trading-firm`).
 
 ### Hinzugefügt
 

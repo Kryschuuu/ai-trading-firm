@@ -38,7 +38,8 @@ Race-Test (2 parallele Ticks → genau 1 Exit), Audit-Assertions.
 ## Umsetzung (v1.44.0, 2026-09-18)
 
 Umsetzung im Rahmen von [PROMPT-05](../prompts/PROMPT-05-server-side-exit-management.md)
-(Arena-Session, Branch `arena/01a0b5f8-ai-trading-firm`). **Ist-Stand abweichend
+(Arena-Session, Branch `arena/01a0b5f8-ai-trading-firm`, PR
+[#138](https://github.com/Kryschuuu/ai-trading-firm/pull/138)). **Ist-Stand abweichend
 zum Audit:** OCO-Exklusivität war nicht nur „nicht belegt“, sondern existierte
 gar nicht — der alte Monitor-Pfad schloss Ledger (`broker.close`) und DB ohne
 bedingten Claim, zwei überlappende Zyklen auf **verschiedenen Prozessen**
