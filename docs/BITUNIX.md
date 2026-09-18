@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.39.2 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v1.40.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -25,16 +25,16 @@ leben (Stand v1.32.0):
 | Baustein | Realer Pfad | Anmerkung |
 | --- | --- | --- |
 | `BitunixBrokerAdapter` | `src/brokers/bitunix/adapter.ts` | implementiert nur `BrokerAdapter`; Public-Methoden (`discoverInstruments`, `getTicker(s)`, `getOrderBook`, `getCandles`) bleiben für Paper/Health/API erhalten |
-| `PublicClient` | `src/brokers/bitunix/publicClient.ts` (`BitunixPublicClient`) | credential-frei; `fetchTradingPairsRaw`, `fetchTickers` (chunked Bulk `string[] | string`, `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.39.2), `fetchTicker`, `fetchDepth` (RAW-DTO, Default `limit=5`), `fetchKlines` |
+| `PublicClient` | `src/brokers/bitunix/publicClient.ts` (`BitunixPublicClient`) | credential-frei; `fetchTradingPairsRaw`, `fetchTickers` (chunked Bulk `string[] | string`, `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0), `fetchTicker`, `fetchDepth` (RAW-DTO, Default `limit=5`), `fetchKlines` |
 | `PrivateClient` | `src/brokers/bitunix/privateClient.ts` (`BitunixPrivateClient`) | signierte Requests — **niemals** im Market-Data-Pfad instanziiert |
 | Broker-Factory `createAdapter()` | `src/brokers/factory.ts` | `createAdapter("BITUNIX", mode)` → `BitunixBrokerAdapter`; Live über zentralen Live-Gate-Enforcer |
 | Capability-SSoT | `src/brokers/capabilities.ts` (`VENUE_CAPABILITIES.BITUNIX`) | `discovery/marketData/trading/paper/live: true`, `testnet: false`, `stopAtVenue: true` |
 | Market-Data-Adapter-Wrapper | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | `BitunixPublicClient` → `MarketDataAdapter`; Timeframe-Map, DTO-Mapping, Symbol-SSoT |
 | Adapter-Registrierung | `src/marketdata/registerAdapters.ts` (`registerAdapters`, `registerMarketDataAdapters(env)`) | einzige Instanzierungsstelle; Capability- + Env-Gate; ein geteilter Token-Bucket pro Lauf |
-| `MarketDataSyncService` (MDSYNC-001) | `src/marketdata/sync.ts` | Discovery → Ticker/Depth-Enrichment (v1.39.2: Chunking + `selectedSymbolSet` + `cause`-Klassifizierung) → Candle-Backfill → Registry/HistoricalStore |
+| `MarketDataSyncService` (MDSYNC-001) | `src/marketdata/sync.ts` | Discovery → Ticker/Depth-Enrichment (v1.40.0: Chunking + `selectedSymbolSet` + `cause`-Klassifizierung) → Candle-Backfill (**v1.40.0:** leere Kerzen-Antwort `data: []` → `candles/DATA_UNAVAILABLE`-Failure, Cross-Prozess-Registry-Refresh, Status/Manifest via `resolveRuntimePath`) → Registry/HistoricalStore |
 | Sync-CLI | `scripts/market-sync.ts` + `scripts/lib/market-sync.ts` | `npm run market:sync -- --venue=BITUNIX` |
 | `run-scan.ts` | `scripts/run-scan.ts` | `--sync` (Default aus) = optionaler Warmstart VOR dem deterministischen Scan |
-| Env-Handling `BITUNIX_ENABLED` + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `src/brokers/bitunix/config.ts` (`bitunixEnabled`, nur exakt `"true"`; `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.39.2) | geteilt zwischen Trading-Adapter und Market-Data-Sync; `.env.example` § Bitunix/Market-Data-Sync |
+| Env-Handling `BITUNIX_ENABLED` + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `src/brokers/bitunix/config.ts` (`bitunixEnabled`, nur exakt `"true"`; `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0) | geteilt zwischen Trading-Adapter und Market-Data-Sync; `.env.example` § Bitunix/Market-Data-Sync |
 | Symbol-SSoT (SYM-007) | `src/symbols/normalize.ts` (`normalizeVenueSymbol`) | Instrument-ID in **venue-nativer Speicherform** `BITUNIX:BTCUSDT` (docs/SYMBOLS.md §4) |
 | Fixtures (echte API-Responses) | `test/fixtures/bitunix/*.json` | Snapshot 2026-08-31; Provenanz siehe `test/fixtures/bitunix/README.md` |
 
@@ -116,7 +116,7 @@ Orderbook (bestBid/bestAsk) berechnet. Dies erfordert einen zusätzlichen
 
 | Metrik | Endpunkt | Feld | Bemerkung |
 | --- | --- | --- | --- |
-| 24h-Volumen | `GET /tickers` | `quoteVol` → `volume24h` | **Chunked Bulk** – ⌈N/50⌉ Calls à ~1 KB (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, seit v1.39.2, Stage `enrichWithTickers`) |
+| 24h-Volumen | `GET /tickers` | `quoteVol` → `volume24h` | **Chunked Bulk** – ⌈N/50⌉ Calls à ~1 KB (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, seit v1.40.0, Stage `enrichWithTickers`) |
 | Spread | `GET /depth` | `bids[0].price` / `asks[0].price` → `spread` | **1 Call je Instrument**, kein Batch-Äquivalent (Stage `enrichWithOrderBooks`, limit=5) |
 
 Berechnung (`src/marketdata/spread.ts` → `calculateRelativeSpread`):
@@ -154,10 +154,10 @@ export async function enrichWithOrderBooks(
 
 - `enrichWithTickers()`: **chunked Bulk** – Listen > `BITUNIX_TICKER_SYMBOLS_PER_REQUEST`
   (Default 50, ~1 KB Query) werden in `⌈N/50⌉` `GET /tickers?symbols=…`-Calls aufgeteilt
-  (Gateway-Limit >6 KB, v1.39.2 Fix gegen 754× `SCHEMA_MISMATCH`). Teilausfall eines Chunks
+  (Gateway-Limit >6 KB, v1.40.0 Fix gegen 754× `SCHEMA_MISMATCH`). Teilausfall eines Chunks
   reißt die übrigen nicht mit; Totalausfall wirft den ersten Fehler. Fehlendes Symbol →
   `null` + `missing` (kein Throw). Die Batch-Kappe verwirft keine selbst angeforderten
-  Zeilen mehr (vor v1.39.2: 754 → 500 Kappung). Failures tragen `cause` (Originalfehler).
+  Zeilen mehr (vor v1.40.0: 754 → 500 Kappung). Failures tragen `cause` (Originalfehler).
   `volume24h` ist explizit **Quote-Volumen** (`ticker.quoteVol`) — Verwechslung mit Base-Volumen
   verfälscht jeden `min-volume`-Filter um Größenordnungen.
 - `enrichWithOrderBooks()`: `depthLimit=5`, pro Symbol Timeout 5 s, max. 1 Retry,
@@ -214,6 +214,40 @@ daher Concurrency-Begrenzung und Token-Bucket.“
 [market-sync] spread unavailable for 12/180 symbols — diese Instrumente
 werden mit rule="max-spread" (data quality) abgelehnt, nicht wegen zu hoher Kosten.
 ```
+
+#### 1.2.1 Leere Kline-Antworten als `DATA_UNAVAILABLE` (v1.40.0 — Fix 1/250 WARMING)
+
+Eine Venue-Antwort `{{ code: 0, data: [] }}` (0 verwertbare Bars bei `rawCount 0`
+— z. B. illiquides/neues Perpetual, Zeitraum `BEFORE_START`/`INVALID`) lieferte
+vor v1.40.0 still 0 Bars je Instrument und 0 Failures — `1/250 (150/37500)`
+erschien als „erfolgreich“. Seit v1.40.0 meldet `syncInstrumentWithEnrichment`
+(`src/marketdata/sync.ts`) jede Timeframe-Reihe mit 0 verwertbaren Bars als
+`SyncFailure {{ stage: "candles", reason: "DATA_UNAVAILABLE", retryable:false }}`
+(`rows.length===0` → Failure, Log `failures nach Ursache: candles/DATA_UNAVAILABLE: N`,
+`SyncResult.degraded = true`, Manifest `data/market-data-errors.json`). Ein Lauf
+mit 1/250 zeigt jetzt `249 × candles/DATA_UNAVAILABLE` und `DEGRADED` statt
+„250 synchronisiert“.
+
+**Validator-Ergebnis** `EMPTY_CANDLES`/`EMPTY_AFTER_FILTER` (leerer `data`-Array
+oder gefiltert auf 0 verwertbare Bars bei `rawCount 0`) wird damit nicht mehr
+auf „keine Kerzen vorhanden“ abgebildet — das ist die Infrastruktur-Aussage des
+Manifests (`ERROR`-Readiness), nicht die Fachablehnung `min-candles`/`WARMING`.
+Der reine REST-Cache-Pfad `getCandles()` (Legacy, ohne Manifest) gibt `[]`
+dagegen weiter als „keine Bars“ zurück (kein Wurf), weil Scanner/Executor dort
+`[]` als „noch WARMING“ interpretieren — Abgrenzung dokumentiert in
+`docs/MARKET_DATA_PIPELINE.md` §8.
+
+#### 1.2.2 Cross-Prozess-Sichtbarkeit & Scanner-Cache-Invalidierung (v1.40.0)
+
+`market-sync-status.json` und `market-data-errors.json` lösen den Pfad seit
+v1.40.0 einheitlich über `resolveRuntimePath()` auf (wie `InstrumentRegistry`
+und `HistoricalStore`) — CLI und Next.js (`/api/ops`) sehen dieselben Dateien
+auch bei `DATA_DIR`/`HISTORY_DIR`-Override oder unterschiedlichem cwd.
+`getRegistry()` ruft bei jedem Zugriff `load()` (mtime+size-Check, kein
+Force-Read) — CLI schreibt 250 → Next.js sieht sie beim nächsten Request.
+`ScannerService.getScan()` invalidiert bei veränderter
+`instruments.ndjson`- oder `candles.ndjson`-mtime sofort (vor Ablauf der
+5-Minuten-TTL) — das Ops-Center verlässt `WARMING` ohne Neustart.
 
 Garantien des Sync-Kontexts (durch Tests abgesichert):
 
@@ -596,7 +630,7 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | `BITUNIX_ALLOW_INSECURE_HTTP` | false | Loopback-http für Mock-Tests |
 | `BITUNIX_ALLOWED_HOSTS` | — | zusätzliche Hosts (Komma) |
 | `BROKER_ALLOW_ENV_FALLBACK` | `false` | SEC-07 v1.36.32: Env-Fallback nur explizit in Dev/Test |
-| `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `50` | Chunk-Größe für `GET /tickers?symbols=…` (~1 KB, Gateway-Limit >6 KB). v1.39.2 Fix gegen 754× `ticker/SCHEMA_MISMATCH` (vorher 1× >6 KB-URL). |
+| `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `50` | Chunk-Größe für `GET /tickers?symbols=…` (~1 KB, Gateway-Limit >6 KB). v1.40.0 Fix gegen 754× `ticker/SCHEMA_MISMATCH` (vorher 1× >6 KB-URL). |
 | `BITUNIX_TIMEOUT_MS` / `BITUNIX_RETRY_MAX` | 8000 / 3 | geklemmt |
 
 ---
@@ -642,7 +676,7 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 - `tests/sec04.wsDependency.test.ts` — SEC-04: exakter `ws`-Pin, Override, Lockfile-/Installations-Konsistenz, CI-Verdrahtung
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
 - `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
-- `test/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`test/fixtures/bitunix/`), **v1.39.2 Chunking-Regression**: Gateway-Simulation lehnt >6 KB URLs ab – Chunking (50, ~1 KB) liefert trotzdem alle Symbole, Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler (3 neue Tests)
+- `test/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`test/fixtures/bitunix/`), **v1.40.0 Chunking-Regression**: Gateway-Simulation lehnt >6 KB URLs ab – Chunking (50, ~1 KB) liefert trotzdem alle Symbole, Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler (3 neue Tests)
 - `src/marketdata/__tests__/spread.test.ts` — `calculateRelativeSpread` (Golden 100/100.02 ≈ 0.00019998, Edge Cases: fehlend/invertiert/`0`/`NaN`/`null` ⇒ `null`)
 - `src/marketdata/__tests__/sync.test.ts` — `volume24h`-Enrichment, Orderbook-Spread-Upsert, Batch-Tickers, `quoteVol`-Fehlend-Fallback, Rate-Limiter-Zählung bei 180 Instrumenten
 - Factory 28er-Matrix, Contract-Suite, `GET /api/brokers` count=7

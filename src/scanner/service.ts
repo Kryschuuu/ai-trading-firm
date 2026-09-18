@@ -22,6 +22,7 @@ import {
 } from "@/lib/marketdata/historicalStore";
 import type { MarketCandle } from "@/lib/marketdata/types";
 import { loadMarketDataErrors } from "@/marketdata/dataErrors";
+import { resolveRuntimePath } from "@/lib/appPaths";
 import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
 import { loadScannerConfig, type ScannerConfig } from "./config";
@@ -46,6 +47,23 @@ export const MAX_SERVICE_INSTRUMENTS = 50_000;
  * neu). Der Scanner liest KEINE Umgebungsvariablen (Architekturtest).
  */
 export const DEFAULT_SCAN_CACHE_TTL_MS = 5 * 60_000;
+
+/** Intern: mtime einer Runtime-Datei (best-effort, fehlende Datei → 0). */
+function fileMtimeMs(file: string): number {
+  try {
+    // `resolveRuntimePath` löst `data/...` relativ zur Runtime (Berücksichtigt
+    // `DATA_DIR`/`HISTORY_DIR` und den Next.js-cwd, identisch zu
+    // `HistoricalStore`/`InstrumentRegistry`).
+    const resolved = resolveRuntimePath(file);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { existsSync, statSync } = require("node:fs") as typeof import("node:fs");
+    if (!existsSync(resolved)) return 0;
+    return statSync(resolved).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 
 /**
  * Löst die konfigurierte Benchmark-ID gegen das tatsächlich vorhandene
@@ -270,6 +288,13 @@ export class ScannerService {
   private scan: ScanResult | null = null;
   private scannedAt = 0;
   private weekly: WeeklyReview | null = null;
+  /** Letzte bekannte mtimes der Runtime-Dateien — erkennt Cross-Prozess-Writes
+   *  (CLI `market:sync` schreibt, Next.js liest) ohne auf die 5-Minuten-TTL
+   *  warten zu müssen. Vorher zeigte die UI nach einem erfolgreichen Sync
+   *  weiter den alten WARMING-Zustand.
+   */
+  private lastRegistryMtime = 0;
+  private lastHistoryMtime = 0;
   private readonly options: ScannerServiceOptions;
 
   constructor(options: ScannerServiceOptions = {}) {
@@ -291,7 +316,19 @@ export class ScannerService {
     const cacheDisabled = ttl === 0;
     const staleByInjectedClock =
       ttl > 0 && this.clockNow() - this.scannedAt >= ttl;
-    if (!this.scan || cacheDisabled || staleByInjectedClock) {
+    // Cross-Prozess-Invalidierung: Hat ein paralleler `market:sync`-Lauf die
+    // Registry- oder History-Datei seit dem letzten Scan verändert, ist der
+    // Cache sofort veraltet — nicht erst nach 5 Minuten. Beide Dateien werden
+    // über `resolveRuntimePath` aufgelöst (identisch zu ihren Stores).
+    let staleByFileChange = false;
+    if (this.scan) {
+      const regMtime = fileMtimeMs("data/instruments.ndjson");
+      const histMtime = fileMtimeMs("data/history/candles.ndjson");
+      if (regMtime !== this.lastRegistryMtime || histMtime !== this.lastHistoryMtime) {
+        staleByFileChange = true;
+      }
+    }
+    if (!this.scan || cacheDisabled || staleByInjectedClock || staleByFileChange) {
       this.refresh();
     }
     return this.scan as ScanResult;
@@ -365,6 +402,10 @@ export class ScannerService {
     // Cache nicht als „abgelaufen“ markieren.
     this.scannedAt = this.clockNow();
     this.weekly = null;
+    // Merke die mtimes der Runtime-Dateien zum Zeitpunkt des frischen Scans,
+    // damit der nächste `getScan()`-Aufruf eine Cross-Prozess-Änderung erkennt.
+    this.lastRegistryMtime = fileMtimeMs("data/instruments.ndjson");
+    this.lastHistoryMtime = fileMtimeMs("data/history/candles.ndjson");
     return this.scan;
   }
 

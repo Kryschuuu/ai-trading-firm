@@ -980,7 +980,27 @@ export class MarketDataSyncService {
           instrumentId,
           symbol,
         });
-        if (rows.length === 0) continue;
+        if (rows.length === 0) {
+          // Leere oder komplett unbrauchbare Antwort ist kein stiller Erfolg:
+          // Ohne Kerzen bleibt das Instrument im WARMING und der Scanner leer.
+          // Sichtbarer `candles`-Fehler (DATA_UNAVAILABLE) statt stiller Null,
+          // damit der Betreiber zwischen "Venue hat keine Historie" und
+          // "Netzwerkfehler" unterscheiden kann und das Ops-Center nicht
+          // fälschlich "250 Instrumente, keine Fehler" meldet, während 249
+          // Reihen leer sind (Befund des Bug-Reports: 1/250 mit 150 Bars,
+          // 249 mit 0 Bars, aber 0 failures).
+          const rawCount = Array.isArray(candles) ? candles.length : 0;
+          failures.push({
+            stage: "candles",
+            instrumentId,
+            symbol,
+            timeframe,
+            message: `Leere Kerzen-Antwort für ${timeframe} — Venue lieferte 0 verwertbare Bars (0 von ${rawCount} Zeilen).`,
+            reason: "DATA_UNAVAILABLE",
+            retryable: false,
+          });
+          continue;
+        }
         outcome.candlesByTimeframe.set(timeframe, rows);
       } catch (e) {
         failures.push(

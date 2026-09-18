@@ -24,9 +24,18 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 
 import { isMarketDataErrorReason } from "../lib/marketDataErrors";
+import { resolveRuntimePath } from "../lib/appPaths";
 import type { SyncResult } from "./types";
 
-/** Ablage des Sync-Status (gitignored wie das Fehler-Manifest daneben). */
+/** Ablage des Sync-Status (gitignored wie das Fehler-Manifest daneben).
+ *  Bewusst relativ gehalten (`data/...`) — beim Lesen/Schreiben wird über
+ *  `resolveRuntimePath` aufgelöst, damit CLI (cwd Projekt-Root) und
+ *  Next.js-Server (möglicherweise anderer cwd/`DATA_DIR`) dieselbe Datei sehen.
+ *  Vorher nutzte nur der Sync-Status `path.join("data",...)` direkt, während
+ *  `HistoricalStore`/`InstrumentRegistry` bereits `resolveRuntimePath` nutzten —
+ *  Folge: Ops-Center (Next.js) las einen anderen Pfad als die CLI schrieb
+ *  ("zuletzt 2026-09-17" vs. "2026-09-18", lastSync 26 vs. 250).
+ */
 export const MARKET_SYNC_STATUS_FILE = path.join("data", "market-sync-status.json");
 
 /** Harte Obergrenze gespeicherter Venues (Kappung, kein Response-Wachstum). */
@@ -90,6 +99,7 @@ export function saveVenueSyncStatus(
 ): void {
   const next = syncResultToVenueStatus(result);
   if (!VENUE_RE.test(next.venue)) return; // defensive: nie einen unbrauchbaren Key persistieren
+  const resolved = resolveRuntimePath(file);
   const merged = loadVenueSyncStatuses(file).filter((entry) => entry.venue !== next.venue);
   merged.push(next);
   merged.sort((a, b) => (a.venue < b.venue ? -1 : a.venue > b.venue ? 1 : 0));
@@ -97,10 +107,10 @@ export function saveVenueSyncStatus(
     writtenAt: now.toISOString(),
     venues: merged.slice(0, MAX_STATUS_VENUES),
   };
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
+  mkdirSync(path.dirname(resolved), { recursive: true });
+  const tmp = `${resolved}.tmp`;
   writeFileSync(tmp, JSON.stringify(manifest, null, 2), { mode: 0o600 });
-  renameSync(tmp, file);
+  renameSync(tmp, resolved);
 }
 
 /**
@@ -111,8 +121,9 @@ export function saveVenueSyncStatus(
  */
 export function loadVenueSyncStatuses(file: string = MARKET_SYNC_STATUS_FILE): VenueSyncStatus[] {
   try {
-    if (!existsSync(file)) return [];
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<SyncStatusManifest>;
+    const resolved = resolveRuntimePath(file);
+    if (!existsSync(resolved)) return [];
+    const parsed = JSON.parse(readFileSync(resolved, "utf8")) as Partial<SyncStatusManifest>;
     const out: VenueSyncStatus[] = [];
     for (const entry of Array.isArray(parsed.venues) ? parsed.venues : []) {
       if (!entry || typeof entry !== "object") continue;

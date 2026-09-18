@@ -109,7 +109,7 @@ npm run market:sync -- --venue=BITUNIX
 
 Seit v1.37.0 lädt der Standardlauf nur `1h` (der einzige von Scanner/Analytics
 ausgewertete Zeitrahmen); kürzere Zeitrahmen gezielt mit
-`--timeframes=5m,15m,30m,1h`. Seit v1.39.2 werden Ticker in 50er-Chunks
+`--timeframes=5m,15m,30m,1h`. Seit v1.40.0 werden Ticker in 50er-Chunks
 angefragt (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, Gateway-Limit >6 KB
 – Fix gegen 754× `SCHEMA_MISMATCH`):
 
@@ -235,9 +235,10 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 | Trotz Eintrag in `.env` weiter `VENUE_DISABLED` | Das CLI lädt `.env` nicht. Variable in der Shell setzen: `BITUNIX_ENABLED=true npm run market:sync …` (bzw. `export` / PowerShell `$env:`). Prüfen mit `echo "$BITUNIX_ENABLED"` (muss exakt `true` ergeben). |
 | `--env-file= is not allowed in NODE_OPTIONS` | Node verbietet `--env-file` in `NODE_OPTIONS` bewusst. Bitte Inline/`export` verwenden. |
 | Flag gesetzt, aber Wert ist `TRUE`/`1`/`yes` | Es zählt nur der exakte String `"true"` (klein geschrieben). |
-| `tickers enriched: 0`, `failures: 754`, `ticker/SCHEMA_MISMATCH: 754` | **Vor v1.39.2:** `enrichWithTickers()` schickte ~750 Symbole als **einen** `GET /tickers?symbols=…` (>6 KB URL) → Gateway lehnt ab → jeder als `SCHEMA_MISMATCH` endgültig markiert. **Seit v1.39.2 behoben:** Chunking in 50er-Blöcken (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB Query), Teilausfall toleriert. Falls nach Update noch auftritt: Version prüfen (`npm run market:sync -- --help` zeigt keine, aber `package.json` = 1.39.2), `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` nicht über 100 setzen, Gateway-Logs prüfen. |
+| `tickers enriched: 0`, `failures: 754`, `ticker/SCHEMA_MISMATCH: 754` | **Vor v1.40.0:** `enrichWithTickers()` schickte ~750 Symbole als **einen** `GET /tickers?symbols=…` (>6 KB URL) → Gateway lehnt ab → jeder als `SCHEMA_MISMATCH` endgültig markiert. **Seit v1.40.0 behoben:** Chunking in 50er-Blöcken (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB Query), Teilausfall toleriert. Falls nach Update noch auftritt: Version prüfen (`npm run market:sync -- --help` zeigt keine, aber `package.json` = 1.40.0), `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` nicht über 100 setzen, Gateway-Logs prüfen. |
 | `discovery: 0 instruments`, `failures: 1` | Netzwerk/API nicht erreichbar (Proxy/Firewall, Geo-Block) oder Ratenlimit. Seit v1.39.1 zeigt die Logzeile `failures nach Ursache:` die klassifizierte Ursache (`discovery/NETWORK` = API nicht erreichbar, `discovery/RATE_LIMITED` = Limit, `discovery/TLS` = Zertifikat/Proxy). Batch-Fehler stehen seit v1.39.1 auch im `batch`-Abschnitt von `data/market-data-errors.json`; erneut ausführen. |
 | „Komische Zeichen“ (z. B. `â€"`, `Ã¼`) in der Konsole | bis v1.39.0: UTF-8-Ausgabe auf Windows-Konsolen mit Legacy-Codepage. Seit v1.39.1 behoben — alle CLI-Ausgaben sind ASCII-sicher (`toConsoleAscii`). Falls weiterhin Mojibake erscheint: Konsole auf Windows-Terminal/`chcp 65001` stellen. |
+| `1h candles: 1/250 (150/37500 bars)` oder `1/250` → `0/250` im zweiten Lauf / `Scanner WARMING`, obwohl Sync „erfolgreich“ | **Vor v1.40.0 (Bug 250→WARMING, 2026-09-17):** leere Kline-Antworten (`data: []`, 0 verwertbare Bars) zählten still als 0-Bars-Erfolg ohne `SyncFailure` — 249 leere Antworten blieben unsichtbar, Log meldete „250 Instrumente, keine Fehler“, Ops-Center (Next.js) sah die 250 nicht (Cross-Prozess-Path-Drift + Registry-Singleton ohne mtime) und der Scanner-Cache (5 Min TTL) hielt das leere Ergebnis. **Seit v1.40.0 behoben:** leere Kerzen-Reihe → `failure { stage: "candles", reason: "DATA_UNAVAILABLE" }`, Log `failures nach Ursache: candles/DATA_UNAVAILABLE: 249`, `DEGRADED`, Manifest `data/market-data-errors.json`; Status/Manifest/Registry/History einheitlich via `resolveRuntimePath()`, Registry-Refresh via mtime je `getRegistry()`-Aufruf, Scanner invalidiert bei geänderter `instruments.ndjson`/`candles.ndjson`-mtime sofort. **Behebung:** auf v1.40.0 aktualisieren, erneut `BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX` ausführen — bei persistierendem `DATA_UNAVAILABLE` hat die Venue für diese Symbole/Zeitraum keine Bars (illiquides/neues Perpetual, `BEFORE_START`/`INVALID`-Zeitraum) — kein Bug, aber bewusst sichtbar. |
 | Immer noch „< 61 Kerzen“ nach dem Lauf | `--candle-limit` weglassen (Default 150 ≥ 61) bzw. auf ≥ 61 stellen; Status mit `npm run market:sync:status` prüfen. |
 | Warnung im Control Panel bleibt nach Sync | Seite hart neu laden (Cache). Die Anzeige liest die Daten zur Anfragezeit — ein App-Neustart ist nicht nötig. |
 | Web-App reagiert nicht auf `.env`-Änderung | Next.js liest `.env` nur beim Start → `npm run dev`/`npm run start` neu starten. |
@@ -246,10 +247,13 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 
 ## 8. Quellen im Repository
 
-- `src/brokers/bitunix/config.ts` — `envFlagTrue` / `bitunixEnabled` (nur `"true"` schaltet an) + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50` (v1.39.2 Chunking, ~1 KB, Gateway >6 KB)
+- `src/brokers/bitunix/config.ts` — `envFlagTrue` / `bitunixEnabled` (nur `"true"` schaltet an) + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50` (v1.40.0 Chunking, ~1 KB, Gateway >6 KB)
 - `src/brokers/bitunix/publicClient.ts` — `fetchTickers` chunked (50, Teilausfall toleriert, Totalausfall wirft ersten Fehler)
 - `src/marketdata/enrichment.ts` — Batch-Kappe verwirft keine selbst angeforderten Zeilen, Failures mit `cause`
-- `src/marketdata/sync.ts` — `selectedSymbolSet` + `toFailure` Klassifizierung aus Originalfehler
+- `src/marketdata/sync.ts` — `selectedSymbolSet` + `toFailure` Klassifizierung aus Originalfehler; **v1.40.0:** `rows.length===0` (0 verwertbare Bars bei `rawCount 0`, `EMPTY_CANDLES`/`EMPTY_AFTER_FILTER`) → `candles/DATA_UNAVAILABLE`-Failure (statt stiller 0) + mtime-Logik wird nicht verfälscht
+- `src/universe/registry.ts` / `src/universe/index.ts` — **v1.40.0:** `load()` mtime+size-gestützt (`lastMtimeMs/lastFileSize`), `!existsSync` löscht nur wenn `lastMtimeMs !== null` (Fix 180→1-Race bei `autoSave:false`), `getRegistry()` ruft `load()` je Zugriff (Cross-Prozess-Sichtbarkeit)
+- `src/marketdata/syncStatus.ts` + `src/marketdata/dataErrors.ts` — **v1.40.0:** I/O via `resolveRuntimePath()` (einheitlich mit Registry/History, kein Path-Drift CLI↔Next.js)
+- `src/scanner/service.ts` — **v1.40.0:** `fileMtimeMs()` + `lastRegistryMtime`/`lastHistoryMtime`, `getScan()` invalidiert bei geänderter Registry-/History-mtime sofort (vor 5-Min-TTL)
 - `src/marketdata/registerAdapters.ts` — die vier Gates: Kill-Switch → Allowlist → Capability → Venue-Flag
 - `scripts/market-sync.ts`, `scripts/run-market-sync.ts`, `scripts/lib/market-sync.ts` — CLI (ohne dotenv-Bezug)
 - `src/scanner/warmup.ts` — `requiredWarmupCandles` = 61 (EMA50 + Momentum 60)

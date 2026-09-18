@@ -31,6 +31,7 @@ export type MarketDataErrorReason =
   | "NETWORK" // DNS (ENOTFOUND), ECONNREFUSED, ECONNRESET …
   | "TLS" // ERR_TLS_CERT_ALTNAME_INVALID …
   | "ABORTED" // expliziter Abbruch (code "ABORTED")
+  | "DATA_UNAVAILABLE" // Venue liefert valide, aber leere Antwort — z. B. `data: []` bei Klines (0 verwertbare Bars, BEFORE_START/INVALID-Zeitraum), kein Retry
   | "UNKNOWN";
 
 /** Ursachen, die mit Backoff/Retry behandelt werden dürfen. */
@@ -56,6 +57,7 @@ const ALL_REASONS: Record<MarketDataErrorReason, true> = {
   NETWORK: true,
   TLS: true,
   ABORTED: true,
+  DATA_UNAVAILABLE: true,
   UNKNOWN: true,
 };
 

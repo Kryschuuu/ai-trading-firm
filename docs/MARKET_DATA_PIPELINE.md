@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-17** ·
-> Code-Version **1.39.2** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-18** ·
+> Code-Version **1.40.0** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize`)
 
@@ -45,7 +45,7 @@ heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.32.0):
 | `InstrumentRegistry` (`src/universe/registry.ts`) | `src/universe/registry.ts` | Ablage `data/universe/instruments.ndjson` |
 | `BitunixBrokerAdapter` (`src/brokers/bitunix/`) | `src/brokers/bitunix/adapter.ts` | erfüllt nur `BrokerAdapter`; Public-Methoden bleiben erhalten |
 | Market-Data-Adapter des Syncs | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | dünner Wrapper Broker-PublicClient → `MarketDataAdapter` (P0-Verdrahtung, Domänentrennung) |
-| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | RAW-Varianten `fetchTradingPairsRaw()` und `fetchDepth(symbol, limit=5)` ergänzt; `fetchTickers` nimmt Bulk-Arrays **chunked** (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.39.2) |
+| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | RAW-Varianten `fetchTradingPairsRaw()` und `fetchDepth(symbol, limit=5)` ergänzt; `fetchTickers` nimmt Bulk-Arrays **chunked** (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0) |
 | Sync-CLI (`scripts/run-scan.ts`) | `scripts/market-sync.ts` (+ `scripts/lib/market-sync.ts`), `scripts/run-scan.ts --sync` | `run-market-sync.ts` ist ein Delegate auf ersteres |
 | Rate-Limit „8 req/s dokumentiert“ | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Bitunix-Doku nennt 10 req/s/IP, Code bleibt konservativ bei 8; **ein geteilter Bucket je Registrierungs-Lauf** |
 | Adapter-Registry | `src/marketdata/registerAdapters.ts` (Kern, inkl. `registerMarketDataAdapters(env)`) + `src/marketdata/adapterRegistry.ts` (Wrapper) | zwei Dateien statt einer — Begründung §13 |
@@ -94,19 +94,19 @@ export async function enrichWithOrderBooks(
 ): Promise<{ spreadBySymbol: Map<string, number | null>; report: EnrichmentReport }>;
 ```
 
-### Ticker-Stage `enrichWithTickers()` (seit v1.39.2 chunked)
+### Ticker-Stage `enrichWithTickers()` (seit v1.40.0 chunked)
 
 - **Chunked Bulk** – Listen > `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` (Default 50,
   ~1 KB Query, Gateway-Limit >6 KB) werden in `⌈N/50⌉` Calls aufgeteilt
   (`publicClient.fetchTickers`). Ein fehlgeschlagener Chunk reißt die übrigen
-  nicht mit; nur wenn alle scheitern, wird geworfen. Vor v1.39.2 schickte der
+  nicht mit; nur wenn alle scheitern, wird geworfen. Vor v1.40.0 schickte der
   Katalog (~750 Symbole) **einen** >6 KB-URL → Gateway-Ablehnung → 754×
   `ticker/SCHEMA_MISMATCH` + `tickers enriched: 0`.
 - Fehlt ein Symbol in der Bulk-Response → **ein** Einzel-Ticker-Versuch
   (Lücken-Fallback mit Symbol-Guard). Schließt auch der die Lücke nicht,
   wird sie als `failure` (`stage: "ticker"`) sichtbar und der Lauf gilt als
   degradiert — eine Lücke zählt nie still als „enriched" (kein Throw).
-- **Batch-Kappe**: seit v1.39.2 verwirft die Kappe keine selbst angeforderten
+- **Batch-Kappe**: seit v1.40.0 verwirft die Kappe keine selbst angeforderten
   Zeilen mehr. Vorher: 754 Symbole → Kappung auf 500 → 254 Scheinfehler +
   254 Einzel-Requests (Selbst-DoS).
 - **Failure-Klassifizierung**: `enrichment.ts` trägt `cause` (Originalfehler);
@@ -139,7 +139,7 @@ GET /trading_pairs                       (1× — Discovery)
    ▼
 registry instruments  (id = "VENUE:SYMBOL", volume24h = null, spread = null)
    │
-   ├─ enrichWithTickers()                (⌈N/50⌉× chunked, ~1 KB — src/marketdata/enrichment.ts, v1.39.2)
+   ├─ enrichWithTickers()                (⌈N/50⌉× chunked, ~1 KB — src/marketdata/enrichment.ts, v1.40.0)
    │   GET /tickers?symbols=…  (Chunked Bulk, 50/Chunk)
    │     quoteVol ─────────────────────────────────► volume24h  (null wenn absent)
    │     Report: attempted/succeeded/missing/failures
@@ -296,6 +296,20 @@ bevorzugt `1h` (Präferenz `1h → 4h → 30m → 15m → 5m`, danach Legacy-Fal
 
 Keine PostgreSQL-Pflicht. Kein Private-Ledger. `/api/markets` bleibt **read-only**
 und triggert `syncVenue()` nicht.
+
+**Cross-Prozess-Sichtbarkeit seit v1.40.0:** `InstrumentRegistry`,
+`HistoricalStore`, `market-sync-status.json` und `market-data-errors.json`
+lösen den Pfad einheitlich über `resolveRuntimePath()` auf (berücksichtigt
+`DATA_DIR`/`HISTORY_DIR` und den Next.js-cwd). Das Next.js-Ops-Center
+(`/api/ops`) und die CLI (`npm run market:sync`) sehen damit dieselben
+Dateien — auch bei `DATA_DIR`-Override oder unterschiedlichem cwd. Die
+Registry hält zusätzlich einen mtime-gestützten Cache (`loaded && stat(mtime/size)`,
+`lastMtime/lastFileSize`): der globale Singleton `getRegistry()` ruft bei
+jedem Zugriff `load()` auf und lädt bei externer Änderung nach, ohne bei
+unveränderter Datei neu zu lesen. Bei `!existsSync` wird nur gelöscht, wenn
+die Datei zuvor existierte (`lastMtime !== null`); frische tmp-Verzeichnisse
+(`autoSave:false`, Tests) behalten den In-Memory-Stand — Fix des 180→1-Race
+(§13).
 
 ### 5.1 Historical-Store-Schema (v2, seit 1.26.0)
 
@@ -578,11 +592,18 @@ Antwort auf „werfen vs. Cache vs. `DATA_UNAVAILABLE`“ steht im
 | `NETWORK` | `ENOTFOUND`, `ECONNREFUSED`, `ECONNRESET` … | ja | Fehler isoliert | Netz/Infrastruktur prüfen |
 | `TLS` | `ERR_TLS_*`, Zertifikat/Hostname | nein | Fehler isoliert | Zertifikat/Deployment sofort prüfen (MitM?) |
 | `ABORTED` | expliziter Abbruch | nein | Fehler isoliert | Aufrufer-Abbruch |
+| `DATA_UNAVAILABLE` | Venue meldet valide, aber leere Kerzen-Antwort (`code 0`, `data: []`, 0 verwertbare Bars bei `rawCount 0`) — seit v1.40.0 im **Sync** als `candles`-Failure statt stiller `[]` | nein | Fehler isoliert, Manifest `candles/DATA_UNAVAILABLE`, Log `failures nach Ursache: candles/DATA_UNAVAILABLE: N`, `SyncResult.degraded = true` | Scanner-Diagnose: `WARMING` + Manifest `candles/DATA_UNAVAILABLE` → Venue hat für diesen Zeitraum keine Bars (neues Symbol, illiquides Perpetual, `BEFORE_START/INVALID`-Zeitraum) — kein Bug, aber bewusst sichtbar |
 | `UNKNOWN` | alles andere | nein | Fehler isoliert | Doku/Log analysieren |
 
-Diese Klassen werden **nie** als „keine Daten vorhanden“ interpretiert. Nur
-eine tatsächliche leere Venue-Antwort (`[]`) wird als fehlende Historie
-behandelt (`min-candles` → `WARMING`).
+Diese Klassen werden **nie** als „keine Daten vorhanden“ interpretiert. Eine
+tatsächlich leere Kerzen-Antwort der Venue (`data: []` bei `code: 0`, also 0
+verwertbare Bars) meldet der **Sync** seit v1.40.0 als
+`candles/DATA_UNAVAILABLE` (nicht als stille `[]`-Historie) — sie erscheint
+als `failure` im Log, im `SyncResult.degraded` und im Manifest und lässt
+`1/250 (150/37500 bars)` ehrlich als degradierten Lauf erkennen. Der reine
+REST-Cache-Pfad `getCandles()` (Legacy, §8 unten) gibt `[]` dagegen weiter
+als „keine Bars“ zurück (kein Wurf), weil Scanner/Executor dort `[]` als
+„noch WARMING“ interpretieren.
 
 | Ereignis | Verhalten |
 | --- | --- |
@@ -657,9 +678,9 @@ Bucket:
 Bündelung pro Lauf und Venue (`N` = synchronisierte Instrumente, `M` = Timeframes):
 
 1. 1 × `trading_pairs` (Discovery)
-2. ⌈N/50⌉ × `tickers` (Chunked Bulk, `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.39.2)
+2. ⌈N/50⌉ × `tickers` (Chunked Bulk, `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0)
 3. +1 × `tickers` **je Lücke**: fehlt ein Symbol im Bulk, holt der Sync den
-   Einzel-Ticker — der Bulk spart Requests, er ersetzt sie nicht (Kappung verwirft seit v1.39.2 keine selbst angeforderten Zeilen mehr)
+   Einzel-Ticker — der Bulk spart Requests, er ersetzt sie nicht (Kappung verwirft seit v1.40.0 keine selbst angeforderten Zeilen mehr)
 4. N × `depth`
 5. N × M × `kline`
 
@@ -950,6 +971,60 @@ Teilfehler) wird im Journal sichtbar, eskaliert aber nicht; Bedienfehler
 sind Exit 2. Vor dem ersten Timerlauf ist der vollständige Erst-Warmup
 einmal manuell auszuführen (`npm run market:sync`).
 
+### 12.3 Cross-Prozess-Sichtbarkeit, leere Kerzen und Scanner-Cache (v1.40.0 — Fix „250 Instrumente, 1/250 Kerzen, WARMING“)
+
+**Bug-Bild vor v1.40.0 (2026-09-17):** `npm run market:sync` meldete
+„`discovery: 250 · tickers enriched: 250 · orderbooks enriched: 250 ·
+1h candles: 1/250 (150/37500 bars)`“ — beim zweiten Lauf sogar `0/250` im
+inkrementellen Modus. Registry (`data/universe/instruments.ndjson`) und History
+(`data/history/candles.ndjson`) schienen leer, der Scanner fand keine Trades,
+das Ops-Center zeigte dauerhaft `WARMING` und `lastSync` blieb auf 2026-09-17.
+
+**Vier verkettete Ursachen (kein Venue-Ausfall):**
+
+1. **Cross-Prozess-Path-Drift:** `syncStatus.ts`/`dataErrors.ts` schrieben
+   `market-sync-status.json`/`market-data-errors.json` via `path.join("data",…)`
+   direkt, Registry/History via `resolveRuntimePath()`. CLI schrieb nach
+   `…/data`, Next.js las aus `…/other/data`. Zusätzlich hielt `getRegistry()`
+   (globalThis-Singleton, `loaded`-Flag ohne mtime) den alten Seed-Stand (26).
+2. **Registry-Race bei `autoSave:false`:** `load()` bei `!existsSync` löschte
+   den In-Memory-Stand bei jedem parallelen `upsertMany` (180 → 1).
+3. **Leere Kerzen als stiller Erfolg:** `normalizeCandles([], {rawCount:0})`
+   mit `rows.length===0 → continue` erzeugte 0 Failures — 249 leere
+   `data:[]`-Antworten blieben unsichtbar, `formatDegradedLog` stumm.
+4. **Scanner-Cache 5-Minuten-TTL ohne mtime:** `ScannerService.getScan()` hielt
+das leere Ergebnis 5 Minuten, selbst nach frischem Sync eines anderen Prozesses.
+
+**Fixes (keine neue Env, kein Schema-Bruch, keine API-Änderung):**
+
+- **`InstrumentRegistry.load()` mtime-bewusst** (`src/universe/registry.ts`):
+  bei `loaded && !force` nur `statSync(mtimeMs+size)`; `!existsSync` löscht
+  nur wenn `lastMtimeMs !== null` (extern gelöscht). `save()` aktualisiert
+  `lastMtimeMs/lastFileSize` atomar.
+- **`getRegistry()` Cross-Prozess-Refresh** (`src/universe/index.ts`): ruft
+  bei jedem Zugriff `load()` (mtime-Check, kein Force-Read) — CLI schreibt
+  250 → Next.js sieht sie beim nächsten Request.
+- **`resolveRuntimePath` für Status/Manifest** (`src/marketdata/syncStatus.ts`,
+  `src/marketdata/dataErrors.ts`): CLI und Next.js sehen dieselbe Datei.
+- **`syncInstrumentWithEnrichment` leere Kerzen → `DATA_UNAVAILABLE`**
+  (`src/marketdata/sync.ts`): `rows.length===0` erzeugt
+  `SyncFailure { stage: "candles", reason: "DATA_UNAVAILABLE", retryable:false }`
+  mit Meldung „Leere Kerzen-Antwort für 1h — 0 verwertbare Bars (0 von N Zeilen)“;
+  `1/250` meldet jetzt `249 × candles/DATA_UNAVAILABLE` und `DEGRADED`.
+- **`ScannerService` mtime-Invalidierung** (`src/scanner/service.ts`):
+  `fileMtimeMs()` (via `resolveRuntimePath`) + Felder `lastRegistryMtime`/
+  `lastHistoryMtime`; `getScan()` invalidiert bei veränderter
+  `instruments.ndjson`- oder `candles.ndjson`-mtime sofort (vor TTL-Ablauf).
+
+**Nach dem Fix:** `npm test` 2115/2115 grün (7 skipped, vorher 3 Fehler);
+Mock-Repro (5 Symbole, 1 mit 150 Bars, 4 leer) → `1/5 (150/750)`,
+`failures: 4 × candles/DATA_UNAVAILABLE`, `degraded true`; 150 Bars/Symbol
+→ `10/10 (1500/1500)`, `warming 0`, `scannerReady true`.
+
+**Bedienhinweis:** `GET /api/ops` und `npm run market:sync:status` lesen
+jetzt konsistent über `resolveRuntimePath`; der Scanner-Cache zieht bei
+mtime-Änderung sofort nach — kein Neustart nötig.
+
 ## 13. Bekannte Abweichungen vom Ticket (MDSYNC-001)
 
 | Punkt | Ticket | Umsetzung | Warum |
@@ -964,3 +1039,6 @@ einmal manuell auszuführen (`npm run market:sync`).
 | Store-Schreiben | ein `append` je Instrument × Timeframe | `appendSeries` je Lauf (eine Revision) | `append` lädt und schreibt die ganze Datei; N × M Aufrufe = quadratische I/O. Zähler/Semantik je Reihe sind identisch, `append` bleibt öffentliche API |
 | `skipped` | „nur übersprungene Instrumente“ | `discovered − synced` (Allowlist, Cap, unbrauchbare Zeilen) | sonst wäre die Deckungsgleichheit `discovered = synced + skipped` nicht prüfbar |
 | Response-Größe | „5 MiB Cap empfohlen“ | im Bitunix-HTTP-Layer umgesetzt (`BITUNIX_MAX_RESPONSE_BYTES`) | die Kappe gehört an den Transport, nicht in den Sync — sonst gilt sie nur für einen Aufrufer |
+| Registry-Cache | kein Cross-Prozess-Refresh vorgesehen | Singleton `getRegistry()` ruft `load()` (mtime+size) je Zugriff, Status/Manifest via `resolveRuntimePath` | CLI und Next.js sahen sonst verschiedene Dateien/Stände (v1.40.0 Fix) |
+| Leere Kerzen (`data: []`) | als 0 Bars zählen, aber nicht als Failure | `rows.length===0` → `DATA_UNAVAILABLE`-Failure (Sync), `getCandles()= []` bleibt Wurf-frei | Sync-Lauf mit 1/250 ist jetzt als `degraded` + `candles/DATA_UNAVAILABLE` sichtbar |
+| Scanner-Cache | 5-Min-TTL | TTL + mtime-Invalidierung bei geänderter Registry/History-Datei | separater Sync-Prozess war sonst 5 Min unsichtbar |
