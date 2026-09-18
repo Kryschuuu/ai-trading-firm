@@ -1,0 +1,305 @@
+/**
+ * Multi-Asset Backtest — Portfolio-Manager (Task 02).
+ *
+ * Verwaltet den dynamischen Kontozustand über den Zeitverlauf:
+ *   - Cash, offene Positionen und Mark-to-Market-Eigenkapital
+ *   - Einhaltung von Guardrails: maxOpenPositions, maxPositionPct, maxRiskPerTrade
+ *   - Aufzeichnung der kontinuierlichen Equity-Kurve
+ */
+
+import type {
+  BacktestEngineConfig,
+  BacktestEquityPoint,
+  BacktestOpenPosition,
+  BacktestTradeLog,
+  TradeExitReason,
+} from "./types";
+import type { CandleLike } from "../lib/ruleEngine";
+import type { SimulatedFill, ExitEvaluation } from "./simulator";
+
+export class BacktestPortfolio {
+  private cash: number;
+  private readonly initialCapital: number;
+  private readonly config: BacktestEngineConfig;
+  private readonly positions = new Map<string, BacktestOpenPosition>();
+  private readonly closedTrades: BacktestTradeLog[] = [];
+  private readonly equityHistory: BacktestEquityPoint[] = [];
+
+  private peakEquity: number;
+  private realizedPnl = 0;
+  private totalFees = 0;
+  private totalSlippage = 0;
+  private posSeq = 1;
+
+  constructor(config: BacktestEngineConfig) {
+    this.config = config;
+    this.initialCapital = config.initialCapital;
+    this.cash = config.initialCapital;
+    this.peakEquity = config.initialCapital;
+  }
+
+  get currentCash(): number {
+    return this.cash;
+  }
+
+  get openPositionsCount(): number {
+    return this.positions.size;
+  }
+
+  get openPositionsList(): BacktestOpenPosition[] {
+    return Array.from(this.positions.values());
+  }
+
+  get trades(): BacktestTradeLog[] {
+    return this.closedTrades;
+  }
+
+  get equityCurve(): BacktestEquityPoint[] {
+    return this.equityHistory;
+  }
+
+  get feesPaid(): number {
+    return this.totalFees;
+  }
+
+  get slippagePaid(): number {
+    return this.totalSlippage;
+  }
+
+  /**
+   * Berechnet das aktuelle Mark-to-Market-Eigenkapital anhand aktueller Kurse.
+   */
+  computeCurrentEquity(currentPrices: Map<string, number>): number {
+    let openNotional = 0;
+    let unrealized = 0;
+
+    for (const pos of this.positions.values()) {
+      const price = currentPrices.get(pos.symbol) ?? pos.entryPrice;
+      const posPnl =
+        pos.side === "LONG"
+          ? pos.qty * (price - pos.entryPrice)
+          : pos.qty * (pos.entryPrice - price);
+
+      pos.unrealizedPnl = Number(posPnl.toFixed(4));
+      unrealized += pos.unrealizedPnl;
+      openNotional += pos.qty * price;
+    }
+
+    const equity = this.cash + openNotional;
+    return Number(equity.toFixed(4));
+  }
+
+  /**
+   * Prüft, ob ein neues Signal das Portfolio-Risiko und die Limits einhält.
+   */
+  canOpenPosition(
+    symbol: string,
+    currentEquity: number
+  ): { allowed: boolean; reason?: string } {
+    if (this.positions.has(symbol)) {
+      return { allowed: false, reason: `POSITION_ALREADY_OPEN:${symbol}` };
+    }
+
+    if (this.positions.size >= this.config.maxOpenPositions) {
+      return { allowed: false, reason: "MAX_OPEN_POSITIONS_REACHED" };
+    }
+
+    if (this.cash <= currentEquity * 0.05) {
+      return { allowed: false, reason: "INSUFFICIENT_CASH_BUFFER" };
+    }
+
+    return { allowed: true };
+  }
+
+  /**
+   * Errechnet die allokierbare Positionsgröße basierend auf Stop-Loss und Risikobudget.
+   */
+  calculatePositionSize(
+    currentEquity: number,
+    entryPrice: number,
+    stopLossPrice: number | null,
+    riskBudgetPct?: number,
+    maxPosPctOverride?: number
+  ): number {
+    const riskPct = riskBudgetPct ?? this.config.maxRiskPerTrade;
+    const maxPosPct = maxPosPctOverride ?? this.config.maxPositionPct;
+
+    // Maximales Notional nach Portfoliogröße
+    const maxNotionalCap = currentEquity * maxPosPct;
+
+    if (stopLossPrice !== null && stopLossPrice > 0) {
+      const stopDistancePct = Math.abs(entryPrice - stopLossPrice) / entryPrice;
+      if (stopDistancePct > 0.0001) {
+        // Notional = Risikobetrag / Stop-Distanz
+        const riskAmount = currentEquity * riskPct;
+        const riskBasedNotional = riskAmount / stopDistancePct;
+        const desiredNotional = Math.min(riskBasedNotional, maxNotionalCap);
+        return Math.min(desiredNotional, this.cash * 0.95);
+      }
+    }
+
+    // Fallback ohne Stop-Loss: direkt auf maxNotionalCap / Cash
+    return Math.min(maxNotionalCap, this.cash * 0.95);
+  }
+
+  /**
+   * Bucht eine neu eröffnete Position ein.
+   */
+  openPosition(
+    strategyId: string,
+    symbol: string,
+    side: "LONG" | "SHORT",
+    fill: SimulatedFill,
+    candle: CandleLike,
+    barIndex: number,
+    stopLoss: number | null,
+    takeProfit: number | null
+  ): BacktestOpenPosition {
+    const id = `POS-${this.posSeq++}`;
+    const notional = fill.qty * fill.fillPrice;
+
+    // Cash abziehen (Kaufpreis + Gebühren)
+    this.cash -= notional + fill.fees;
+    this.totalFees += fill.fees;
+    this.totalSlippage += fill.slippage;
+
+    const position: BacktestOpenPosition = {
+      id,
+      strategyId,
+      symbol,
+      side,
+      entryTime: candle.time,
+      entryBarIndex: barIndex,
+      entryPrice: fill.fillPrice,
+      qty: fill.qty,
+      notional: Number(notional.toFixed(4)),
+      stopLoss,
+      takeProfit,
+      unrealizedPnl: 0,
+      highestPrice: fill.fillPrice,
+      lowestPrice: fill.fillPrice,
+      feesPaid: fill.fees,
+      slippagePaid: fill.slippage,
+    };
+
+    this.positions.set(symbol, position);
+    return position;
+  }
+
+  /**
+   * Schließt eine bestehende Position und verbucht den realisierten PnL.
+   */
+  closePosition(
+    symbol: string,
+    exitEval: ExitEvaluation,
+    exitTime: number,
+    currentBarIndex: number
+  ): BacktestTradeLog | null {
+    const pos = this.positions.get(symbol);
+    if (!pos) return null;
+
+    const exitNotional = pos.qty * exitEval.exitPrice;
+    const grossPnl =
+      pos.side === "LONG"
+        ? pos.qty * (exitEval.exitPrice - pos.entryPrice)
+        : pos.qty * (pos.entryPrice - exitEval.exitPrice);
+
+    const totalTradeFees = pos.feesPaid + exitEval.fees;
+    const netPnl = grossPnl - totalTradeFees;
+
+    // Cash gutschreiben (Verkaufserlös minus Ausstiegsgebühren)
+    this.cash += exitNotional - exitEval.fees;
+    this.realizedPnl += netPnl;
+    this.totalFees += exitEval.fees;
+    this.totalSlippage += exitEval.slippage;
+
+    const durationBars = Math.max(1, currentBarIndex - pos.entryBarIndex);
+    const durationMs = Math.max(0, exitTime - pos.entryTime);
+
+    const tradeLog: BacktestTradeLog = {
+      id: pos.id,
+      strategyId: pos.strategyId,
+      symbol: pos.symbol,
+      side: pos.side,
+      entryTime: pos.entryTime,
+      exitTime,
+      entryPrice: pos.entryPrice,
+      exitPrice: exitEval.exitPrice,
+      qty: pos.qty,
+      notional: pos.notional,
+      pnl: Number(netPnl.toFixed(4)),
+      pnlPct: Number(((netPnl / pos.notional) * 100).toFixed(4)),
+      fees: Number(totalTradeFees.toFixed(4)),
+      slippage: Number((pos.slippagePaid + exitEval.slippage).toFixed(4)),
+      exitReason: exitEval.reason,
+      durationBars,
+      durationMs,
+    };
+
+    this.closedTrades.push(tradeLog);
+    this.positions.delete(symbol);
+    return tradeLog;
+  }
+
+  /**
+   * Schreibt einen Snapshot der aktuellen Equity-Kurve.
+   */
+  recordSnapshot(timestamp: number, currentPrices: Map<string, number>): BacktestEquityPoint {
+    const equity = this.computeCurrentEquity(currentPrices);
+    this.peakEquity = Math.max(this.peakEquity, equity);
+
+    const drawdownPct =
+      this.peakEquity > 0
+        ? Number((((this.peakEquity - equity) / this.peakEquity) * 100).toFixed(4))
+        : 0;
+
+    let openNotional = 0;
+    let unrealized = 0;
+    for (const pos of this.positions.values()) {
+      const p = currentPrices.get(pos.symbol) ?? pos.entryPrice;
+      const posPnl =
+        pos.side === "LONG"
+          ? pos.qty * (p - pos.entryPrice)
+          : pos.qty * (pos.entryPrice - p);
+      unrealized += posPnl;
+      openNotional += pos.qty * p;
+    }
+
+    const exposurePct =
+      equity > 0 ? Number(((openNotional / equity) * 100).toFixed(2)) : 0;
+
+    const point: BacktestEquityPoint = {
+      timestamp,
+      equity,
+      cash: Number(this.cash.toFixed(4)),
+      openPositions: this.positions.size,
+      exposurePct,
+      unrealizedPnl: Number(unrealized.toFixed(4)),
+      realizedPnl: Number(this.realizedPnl.toFixed(4)),
+      drawdownPct,
+    };
+
+    this.equityHistory.push(point);
+    return point;
+  }
+
+  /**
+   * Schließt alle noch offenen Positionen am Ende des Backtests.
+   */
+  closeAllAtEnd(currentPrices: Map<string, number>, finalTimestamp: number, finalBarIndex: number): void {
+    for (const pos of Array.from(this.positions.values())) {
+      const price = currentPrices.get(pos.symbol) ?? pos.entryPrice;
+      const fees = pos.qty * price * this.config.feeModel.takerFee;
+
+      const exitEval: ExitEvaluation = {
+        triggered: true,
+        exitPrice: price,
+        reason: "END_OF_DATA",
+        fees,
+        slippage: 0,
+      };
+
+      this.closePosition(pos.symbol, exitEval, finalTimestamp, finalBarIndex);
+    }
+  }
+}
