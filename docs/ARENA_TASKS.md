@@ -35,6 +35,7 @@ welchem Security-Audit und welchem Review-Status“. Spalten:
 | **14** | **Timeframe-Dimension im Historical Store (MDSYNC-001)** | **Implementiert** | **1.26.0** (Nacharbeit **1.26.2**) | **PR #40** + Nacharbeit | **✓** | **✓** | **—** |
 | **15** | **Zentrale, venue-aware Symbol-Normalisierung (SYM-007)** | **Implementiert** | **1.28.0** | **dieser PR** | **✓ SYM-007** | **✓** | **—** |
 | **16** | **Persistenter Marktdaten-Warmup + Sync-CLI (MDSYNC-001)** | **Implementiert** | **1.29.0** | **dieser PR** | **✓ (Pipeline-Doku, Sicherheit)** | **✓** | **—** |
+| **17** | **Feature-Gap-Audit + Arena-Prompt-Serie (GAP-01…GAP-10)** | **Offen (abarbeitbar)** | **1.41.0** | **dieser PR** | **n. a. (Docs/Audit)** | **✓** | **GAP-01…GAP-10 je [TRACKING](audits/2026-09-18-feature-gap/remediation/TRACKING.md)** |
 
 > **Nachtrag 2026-08-30 (v1.29.0):** Task 16 (persistenter Marktdaten-Warmup,
 > MDSYNC-001) ist implementiert: `npm run market:sync` befüllt
@@ -351,3 +352,31 @@ grün; Coverage-Gate `npm run test:coverage:marketsync` ≥ 90 % Linien.
 Manueller Dry-Run gegen einen lokalen Mock der Bitunix-Public-Routen: 12
 Instrumente, 4 Timeframes, **62 Requests** (1 `trading_pairs` + 1 `tickers` +
 12 `depth` + 48 `kline`) und 0 Schreibzugriffe auf `data/`.
+
+---
+
+## Task 17 im Detail — Feature-Gap-Audit + Arena-Prompt-Serie (v1.41.0)
+
+**Quelle:** Arena-Session `01a0b41c` · Branch
+`arena/01a0b41c-ai-trading-firm`. Externes Co-Audit (Architektur-/
+Feature-Lücken-Analyse ohne Code-Zugriff) wurde als Audit-Zyklus
+[`2026-09-18-feature-gap`](audits/2026-09-18-feature-gap/README.md) konsolidiert und
+um eine **Code-Verifikation** (Ist-Stand je Finding, Basis v1.40.0) ergänzt.
+
+**Umfang dieses PR (Task 17 selbst):** Audit-Ordner (report, 10 Findings,
+Tracking, Baseline-Prompt + 10 Session-Prompts), Katalog-/Tabellen-Einträge,
+GitHub-Description-Korrektur („Python-basiert“ → Node.js/TypeScript),
+Changelog 1.41.0. **Keine** Code-Änderung an der Trading-Logik.
+
+**Abarbeitung:** Jede Lücke (GAP-01…GAP-10) wird über einen eigenständigen
+Arena-Session-Prompt umgesetzt (Reihenfolge und Abhängigkeiten:
+[`prompts/README.md`](audits/2026-09-18-feature-gap/prompts/README.md)); der Status
+läuft in [`remediation/TRACKING.md`](audits/2026-09-18-feature-gap/remediation/TRACKING.md).
+Diese Zeile wird je gemergtem GAP-PR aktualisiert (Status → Implementiert,
+Version + PR).
+
+**Nebenbefund ENV-01 (LOW, offen):** `tests/secretStore.test.ts` fällt im
+Voll-Suite-Lauf aus, wenn unter der effektiven `DATABASE_URL` eine erreichbare
+Datenbank antwortet (Test erwartet den File-Fallback „ohne DB“; standalone
+grün). Vorab existierend, Test-Isolation — siehe
+[`TRACKING.md`](audits/2026-09-18-feature-gap/remediation/TRACKING.md).

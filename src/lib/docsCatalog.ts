@@ -205,6 +205,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Security-Audit: GPT_01 2026-09-05",
     subtitle: "SEC-01/SEC-02/SEC-03/SEC-04/SEC-10 behoben; weitere Findings offen",
   },
+  auditFeatureGap: {
+    file: "docs/audits/2026-09-18-feature-gap/README.md",
+    title: "Feature-Gap-Audit 2026-09-18 (Co-Audit)",
+    subtitle: "10 Feature-Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie (v1.41.0)",
+  },
   peerReviews: {
     file: "docs/peer-reviews/README.md",
     title: "Peer-Review-Patches — Zentrale Sammlung",

@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.40.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.41.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -84,6 +84,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | [audits/2026-09-03-peer-review/](audits/2026-09-03-peer-review/) | Senior Peer-Review 2026-09-03 — H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 | CLOSED, alle gefixt v1.36.2–v1.36.24 |
 | [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | [audits/2026-09-08-arena-prompts/](audits/2026-09-08-arena-prompts/) | Arena-Review-Serie (Prompts) — RESTORE-01: Restore des Firmenzustands pro Aufrufer | RESTORE-01 FIXED v1.36.37 |
+| [audits/2026-09-18-feature-gap/](audits/2026-09-18-feature-gap/) | Feature-Gap-Audit (Co-Audit) — 10 Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie | GAP-01…GAP-10 OPEN, abarbeitbar per [Prompt-Serie](audits/2026-09-18-feature-gap/prompts/README.md) |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
@@ -214,7 +215,8 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 │   │   ├── TEMPLATE/         ← Vorlage für neuen Audit
 │   │   ├── 2026-09-03-peer-review/  ← Peer-Review-Audit (CLOSED)
 │   │   ├── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01–10 FIXED bis v1.36.36)
-│   │   └── 2026-09-08-arena-prompts/  ← Arena-Review-Serie (RESTORE-01 FIXED v1.36.37)
+│   │   ├── 2026-09-08-arena-prompts/  ← Arena-Review-Serie (RESTORE-01 FIXED v1.36.37)
+│   │   └── 2026-09-18-feature-gap/    ← Feature-Gap-Audit + Arena-Prompt-Serie (GAP-01…GAP-10, OPEN)
 │   ├── peer-reviews/         ← NEU: Peer-Review-Patches gesammelt
 │   │   ├── README.md
 │   │   ├── 2026-08-26-live-trading-readiness/
