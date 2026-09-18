@@ -232,6 +232,76 @@ oder `npx drizzle-kit push`. Tests: `tests/paper.funding.test.ts`
 (Vorzeichen, Periodenwechsel, Equity-Abgleich, Bounds, Neutralität,
 Determinismus).
 
+### 3.3 Server-seitiges Exit-Management: Trailing, Time-Stop, OCO (GAP-05, v1.44.0)
+
+Exits dürfen nie von LLM-Latenz oder Provider-Ausfall abhängen. Der
+Monitor-Tick (`src/lib/monitor.ts`, alle 60 s oder manuell via
+`POST /api/firm/tick`) prüft je offener Position **vier komplementäre
+Exit-Bedingungen** und schließt genau einmal:
+
+| Bedingung | Auslösung | `exitReason` | Konfiguration |
+| --- | --- | --- | --- |
+| Stop-Loss | Kurs ≤ SL (LONG) bzw. ≥ SL (SHORT) | `STOP_LOSS` | wie bisher je Order |
+| Take-Profit | Kurs ≥ TP (LONG) bzw. ≤ TP (SHORT) | `TAKE_PROFIT` | wie bisher je Order |
+| **Trailing-Stop** | bewaffneter Ratchet-Stop berührt | `TRAILING_STOP` | `RISK_TRAILING_*` (Default aus) |
+| **Time-Stop** | Haltedauer ≥ Limit | `TIME_STOP` | `RISK_TIME_STOP_HOURS` (Default 0 = aus) |
+
+**Trailing-Stop.** Ab `RISK_TRAILING_ACTIVATION_PCT` Prozent Gewinn (vom
+Einstieg, seitenrichtig für LONG/SHORT) wird die Position *bewaffnet*; der
+Stop liegt `RISK_TRAILING_RETURN_PCT` Prozent hinter dem Kurs (LONG darunter,
+SHORT darüber). Mit jedem besseren Stand **ratchtet** der Stop nach —
+ausschließlich in Schutzrichtung: LONG steigt er nur, SHORT fällt er nur.
+Ein Rücksetzer über dem Stop schließt nicht, ein Berühren des Stops schließt
+mit `exitReason = TRAILING_STOP`. Der Zustand (bewaffnet? Stop-Level?) liegt
+in `positions.trailing_armed`/`positions.trailing_stop` — crash-safe: Nach
+einem Prozess-Neustart liest der Monitor den erreichten Stand aus der DB,
+kein Stop geht verloren, keiner wird aus dem Prozessgedächtnis erfunden.
+Stops werden **nie automatisch verengt**; jede Bewegung ist im Audit
+nachvollziehbar.
+
+**Time-Stop.** `RISK_TIME_STOP_HOURS > 0` begrenzt die Haltedauer unabhängig
+vom Kurs (Kapitalbindung, Haltekosten, Signalentropie). Ablauf → Close mit
+`exitReason = TIME_STOP` + Audit. Default `0` = komplett inaktiv.
+
+**OCO-Exklusivität (genau ein Exit).** Kritischer Fall: zwei parallele Ticks
+— oder sogar zwei Prozessinstanzen — entscheiden dieselbe Position
+gleichzeitig zu schließen (etwa der eine auf SL, der andere auf TP). Der Exit
+ist deshalb kein Check-then-Act im Speicher, sondern ein **atomarer
+DB-Claim**: `UPDATE positions SET status = 'CLOSED', exit_reason = … WHERE
+id = … AND status = 'OPEN'` — genau eine Transaktion bekommt die Zeile
+(`RETURNING` liefert sie), jede weitere sieht die Position als bereits
+geschlossen und macht einen sauberen **no-op** (kein Doppel-Fill, kein
+Doppel-P&L, kein Fehler). Der Gewinner glattstellt danach den Ledger
+(`broker.close`, der bei fehlender Position `null` liefert und dann ignoriert
+wird), schreibt den Exit-Preis/PnL nach und protokolliert **genau ein**
+`audit_log`-Ereignis (`STOP_LOSS_HIT`/`TAKE_PROFIT_HIT`/
+`TRAILING_STOP_HIT`/`TIME_STOP_HIT`, Detail-Code `exit:SYMBOL:grund`).
+
+Bei gleichzeitiger SL- und TP-Berührung im selben Intervall gilt wie bisher
+konservativ **der Stop zuerst**; die Priorität der vier Bedingungen ist
+SL → TP → Trailing → Time-Stop (preisbasiert vor Zeit). Die Bewaffnung des
+Trailing-Stops wird genau einmal je Position auditiert
+(`TRAILING_STOP_ARMED`, Detail-Code `trailing-arm:SYMBOL`); reine
+Ratchet-Anhebungen sind Zustandspflege in `positions.trailing_stop` und
+schreiben kein Audit (kein Log-Flood pro Tick). Die Logik selbst ist
+als reine, clock-unabhängige Funktion in `src/lib/exits.ts` gekapselt
+(`decideExit`, `loadExitConfig`) und wird über `tick()`-Optionen
+(Fake-Clock, injizierte Kurse) deterministisch getestet —
+`tests/monitor.exits.test.ts`.
+
+| Flag | Default | Bounds | Bedeutung |
+| --- | --- | --- | --- |
+| `RISK_TRAILING_ENABLED` | `false` | — | Trailing-Stop an/aus (aus = heutiges Verhalten) |
+| `RISK_TRAILING_ACTIVATION_PCT` | `1.0` | [0.1, 20] | Bewaffnungsschwelle in % Gewinn |
+| `RISK_TRAILING_RETURN_PCT` | `0.5` | [0.1, 10] | Rückgabeweg in % (Stop-Abstand zum Kurs) |
+| `RISK_TIME_STOP_HOURS` | `0` | [0, 720] | max. Haltedauer in h; 0 = aus |
+
+Migration: `drizzle/2026-09-18_exit_management.sql` (append-only, zwei neue
+Spalten auf `positions`) oder `npx drizzle-kit push`. Bewusst **Paper-only**:
+Die Auslösung ist Ledger-/DB-Logik; ein Order-Mapping (Conditional/Reduce-Only)
+an echte Venues ist nicht Teil dieses Deltas und bleibt durch die Live-Gate
+(`src/live-gate/**`, unangetastet) ohnehin gesperrt.
+
 ---
 
 ## 4. Failover-Kette (kein stiller Kursquellwechsel)

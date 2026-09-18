@@ -230,8 +230,30 @@ export const positions = pgTable("positions", {
    * idempotent; alternativ `npx drizzle-kit push`).
    */
   fundingPaid: numeric("funding_paid").notNull().default("0"),
-  /** STOP_LOSS | TAKE_PROFIT | MANUAL_FLATTEN | AGENT_CLOSE | RULE_EXECUTION | null bei offen */
+  /**
+   * Exit-Grund (Taxonomie, GAP-05 / v1.44.0 erweitert):
+   *   STOP_LOSS | TAKE_PROFIT | TRAILING_STOP | TIME_STOP |
+   *   MANUAL_FLATTEN | AGENT_CLOSE | RULE_EXECUTION | null bei offen.
+   * TRAILING_STOP / TIME_STOP sind neu (server-seitiges Exit-Management).
+   */
   exitReason: text("exit_reason"),
+  /**
+   * GAP-05 (v1.44.0): persistierter Trailing-Stop-Level (absoluter Kurs).
+   * NULL = (noch) nicht bewaffnet / nicht aktiv. Wird im Monitor-Tick
+   * ratcheted (LONG: nur nach oben, SHORT: nur nach unten) und ist die
+   * einzige Wahrheit für den Trailing-Auslöser — Prozess-Neustart verliert
+   * keinen Stop, weil der Monitor ihn aus dieser Spalte liest (kein Memory-
+   * Only-Zustand). Migration: `drizzle/2026-09-18_exit_management.sql`
+   * (append-only, idempotent) oder `npx drizzle-kit push`.
+   */
+  trailingStop: numeric("trailing_stop"),
+  /**
+   * GAP-05 (v1.44.0): ist der Trailing-Stop für diese Position bewaffnet?
+   * NOT NULL DEFAULT false — Alt-Installationen und bestehende Tests zeigen
+   * per Default „nicht bewaffnet“ (Verhaltensneutralität). Zusammen mit
+   * `trailing_stop` crash-safe persistiert.
+   */
+  trailingArmed: boolean("trailing_armed").notNull().default(false),
   broker: text("broker").notNull(),
   status: text("status").notNull().default("OPEN"), // OPEN | CLOSED
   missionId: uuid("mission_id").references(() => missions.id),

@@ -151,29 +151,38 @@ async function restoreFirmState(broker: PaperBroker): Promise<void> {
   }
 
   broker.hydrate(
-    openRows.map((r) => ({
-      symbol: r.symbol,
-      side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
-      qty: Number(r.qty),
-      entryPrice: Number(r.entryPrice),
-      // KORRIGIERT (v1.5.2): SL/TP mithydratieren — sonst zeigt das
-      // Dashboard nach einem Neustart „kein Stop-Loss“, obwohl die
-      // Schutzebenen (Monitor) weiterhin aus der DB prüfen. Der Broker-
-      // Zustand soll dieselbe Wahrheit zeigen wie die Datenbank.
-      stopLoss:
-        r.stopLoss != null && Number.isFinite(Number(r.stopLoss))
-          ? Number(r.stopLoss)
-          : null,
-      takeProfit:
-        r.takeProfit != null && Number.isFinite(Number(r.takeProfit))
-          ? Number(r.takeProfit)
-          : null,
-      // GAP-02 (v1.42.0): kumuliertes Funding mithydratieren (Kontosicht:
-      // negativ = gezahlt) — sonst „vergäße“ der Ledger nach einem Neustart
-      // bereits gebuchtes Funding, obwohl die DB es führt. NaN/kaputte Werte
-      // werden im hydrate() zu 0 sanitiziert.
-      fundingPaid: r.fundingPaid != null ? Number(r.fundingPaid) : 0,
-    })),
+      openRows.map((r) => ({
+        symbol: r.symbol,
+        side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
+        qty: Number(r.qty),
+        entryPrice: Number(r.entryPrice),
+        // KORRIGIERT (v1.5.2): SL/TP mithydratieren — sonst zeigt das
+        // Dashboard nach einem Neustart „kein Stop-Loss“, obwohl die
+        // Schutzebenen (Monitor) weiterhin aus der DB prüfen. Der Broker-
+        // Zustand soll dieselbe Wahrheit zeigen wie die Datenbank.
+        stopLoss:
+          r.stopLoss != null && Number.isFinite(Number(r.stopLoss))
+            ? Number(r.stopLoss)
+            : null,
+        takeProfit:
+          r.takeProfit != null && Number.isFinite(Number(r.takeProfit))
+            ? Number(r.takeProfit)
+            : null,
+        // GAP-02 (v1.42.0): kumuliertes Funding mithydratieren (Kontosicht:
+        // negativ = gezahlt) — sonst „vergäße“ der Ledger nach einem Neustart
+        // bereits gebuchtes Funding, obwohl die DB es führt. NaN/kaputte Werte
+        // werden im hydrate() zu 0 sanitiziert.
+        fundingPaid: r.fundingPaid != null ? Number(r.fundingPaid) : 0,
+        // GAP-05 (v1.44.0): Trailing-Stop-Zustand mithydratieren — sonst
+        // würden nach einem Neustart bewaffnete Trailing-Stops „vergessen"
+        // und der Monitor müsste sie neu bewaffnen (Verlust des Schutzes).
+        // Die DB ist die Wahrheit; der Ledger spiegelt sie.
+        trailingStop:
+          r.trailingStop != null && Number.isFinite(Number(r.trailingStop))
+            ? Number(r.trailingStop)
+            : null,
+        trailingArmed: r.trailingArmed === true,
+      })),
     { cashHint }
   );
 

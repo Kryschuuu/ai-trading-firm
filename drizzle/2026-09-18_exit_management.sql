@@ -1,0 +1,30 @@
+-- GAP-05 (v1.44.0) — Server-seitiges Exit-Management: Trailing-Stop-Zustand
+-- auf `positions` (additiv, kein Bruch, keine Datenmigration bestehender Zeilen).
+--
+-- Hintergrund: Der Monitor prueft SL/TP je offener Position unabhaengig von
+-- LLM-Turns, aber Trailing-Stop und Time-Stop fehlten (Audit 2026-09-18,
+-- docs/audits/2026-09-18-feature-gap/findings/GAP-05-server-side-exit-management.md).
+-- Ein Trailing-Stop benoetigt persistierten Zustand (bewaffnet? aktiver
+-- Stop-Level?), sonst verliert ein Prozess-Neustart (systemd, Deploy) jeden
+-- einmal erreichten Ratchet-Stand und der Schutz waere memory-only.
+--
+-- Neue Spalten:
+--   positions.trailing_stop  numeric NULL   — aktueller Trailing-Stop-Level
+--     (absoluter Kurs); NULL = (noch) kein bewachter Stop. LONG: steigt nur,
+--     SHORT: faellt nur (Ratchet — der Stop wird nie automatisch verengt, nur
+--     erweitert; Verengungen werden lediglich im Audit geloggt).
+--   positions.trailing_armed boolean NOT NULL DEFAULT false — bewaffnet?
+--     Default false = Alt-Installationen und bestehende Positionen sind
+--     unbewaffnet (Verhaltensneutralitaet; Trailing ist per Default AUS,
+--     RISK_TRAILING_ENABLED=false).
+--
+-- Exit-Taxonomie erweitert (reine text exit_reason, keine Schema-Aenderung
+-- noetig): TRAILING_STOP und TIME_STOP sind neue zulaessige Werte; die
+-- Spaltenkommentar-Taxonomie steht in src/db/schema.ts.
+--
+-- Erklaert mit `npx drizzle-kit push` aus src/db/schema.ts
+-- (`positions.trailingStop` / `positions.trailingArmed`); diese Datei ist der
+-- aequivalente, idempotente SQL-Pfad fuer Umgebungen ohne drizzle-kit (z. B.
+-- `psql "$DATABASE_URL" -f drizzle/2026-09-18_exit_management.sql`).
+ALTER TABLE "positions" ADD COLUMN IF NOT EXISTS "trailing_stop" numeric;
+ALTER TABLE "positions" ADD COLUMN IF NOT EXISTS "trailing_armed" boolean NOT NULL DEFAULT false;

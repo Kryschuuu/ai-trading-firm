@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.43.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.44.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,92 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.44.0] — 2026-09-18 · feat(paper): Server-seitiges Exit-Management — Trailing-Stop, Time-Stop, OCO-Exklusivität (GAP-05)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-05](docs/audits/2026-09-18-feature-gap/findings/GAP-05-server-side-exit-management.md))
+prüft der Monitor zwar serverseitig Stop-Loss/Take-Profit unabhängig von
+LLM-Turns — Trailing-Stop und Time-Stop fehlten jedoch vollständig, und die
+Garantie „genau **ein** Exit pro Position, auch bei parallelen Ticks/Instanzen“
+war nicht belegt (Check-then-Act im Prozessspeicher). Dieser Release schließt
+das Delta (PROMPT-05 der Remediation-Serie): paper-only, Fail-closed, alle
+Flags per Default **aus** (= heutiges Verhalten), keine neuen
+Runtime-Dependencies. Umsetzung: PR
+[#138](https://github.com/Kryschuuu/ai-trading-firm/pull/138)
+(`arena/01a0b5f8-ai-trading-firm`).
+
+### Hinzugefügt
+
+- **Trailing-Stop im Monitor-Tick** (`src/lib/exits.ts` — reine, clock-unabhängige
+  `decideExit`-Entscheidung; `src/lib/monitor.ts` — Ausführung): Bewaffnung ab
+  `RISK_TRAILING_ACTIVATION_PCT` % Gewinn, Stop = Kurs − `RISK_TRAILING_RETURN_PCT` %
+  Rückgabeweg (LONG; SHORT gespiegelt). **Ratchet:** LONG hebt den Stop nur,
+  SHORT senkt ihn nur — automatische Verengungen gibt es nicht. Trigger →
+  Close mit `exitReason = TRAILING_STOP`. Aus/Bewaffnet/Stop-Level persistieren
+  in `positions.trailing_armed` (NOT NULL DEFAULT false) und
+  `positions.trailing_stop` (numeric NULL) — ein Prozess-Neustart verliert
+  keinen erreichten Stop (crash-safe, kein Memory-Only-Zustand;
+  `PaperBroker.hydrate` spiegelt den Stand ins Ledger). Migration:
+  `drizzle/2026-09-18_exit_management.sql` (append-only) oder
+  `npx drizzle-kit push`.
+- **Time-Stop:** `RISK_TIME_STOP_HOURS > 0` schließt Positionen nach der
+  maximalen Haltedauer unabhängig vom Kurs (`exitReason = TIME_STOP`,
+  Audit-Eintrag). Default `0` = inaktiv.
+- **OCO-Exklusivität (genau ein Exit):** Der Exit ist ein atomarer DB-Claim —
+  bedingtes `UPDATE positions … WHERE id = … AND status = 'OPEN'`
+  (`applyExit()` in `src/lib/monitor.ts`, `RETURNING` als Gewinner-Ermittlung).
+  Zwei parallele Ticks oder zwei Instanzen können dieselbe Position nie
+  doppelt schließen: der Verlierer sieht CLOSED und macht einen sauberen
+  no-op (kein Doppel-Fill, kein Doppel-P&L, kein Fehler). Bei SL+TP im
+  selben Intervall gilt wie bisher konservativ SL zuerst; Priorität
+  SL → TP → Trailing → Time-Stop.
+- **Audit je Exit:** genau ein `audit_log`-Eintrag pro Exit mit
+  maschinenlesbarem Grund — Detail-Code `exit:SYMBOL:grund`, Events
+  `STOP_LOSS_HIT`/`TAKE_PROFIT_HIT`/`TRAILING_STOP_HIT`/`TIME_STOP_HIT`; die
+  beiden neuen Events sind im Audit-Katalog (`src/lib/auditView.ts`)
+  beschriftet und erklärt. Die Bewaffnung auditiert genau EINMAL je Position
+  (`TRAILING_STOP_ARMED`, Code `trailing-arm:SYMBOL`); reine
+  Ratchet-Anhebungen bleiben Zustandspflege in der Positionsspalte und
+  fluten den Audit-Log nicht.
+- **Konfiguration (D4):** Env-Flags mit Bounds-Clamp und sicheren Defaults
+  (`loadExitConfig` — dasselbe Muster wie `loadFundingConfig`, GAP-02):
+  `RISK_TRAILING_ENABLED` (false), `RISK_TRAILING_ACTIVATION_PCT` (1.0,
+  Bounds [0.1, 20]), `RISK_TRAILING_RETURN_PCT` (0.5, [0.1, 10]),
+  `RISK_TIME_STOP_HOURS` (0 = aus, [0, 720]). Tabelle: `CONFIGURATION.md`
+  („Exit-Management“), `docs/PAPER_TRADING.md` §3.3, `.env.example`.
+- **Exit-Taxonomie erweitert:** `positions.exit_reason` dokumentiert jetzt
+  `STOP_LOSS | TAKE_PROFIT | TRAILING_STOP | TIME_STOP | MANUAL_FLATTEN |
+  AGENT_CLOSE | RULE_EXECUTION` (Kommentar in `src/db/schema.ts`).
+- **Tests:** `tests/monitor.exits.test.ts` (17 Tests) — Trailing-Lifecycle
+  (bewaffnen/ratcheten/auslösen, LONG+SHORT), Restart-Persistenz über
+  `invalidateBrokerCache()` + Rehydrierung aus der DB, Time-Stop (Ablauf/0),
+  OCO-Race (parallele `applyExit`-Gewinner-Ermittlung, `Promise.all([tick(),
+  tick()])` mit Single-Flight + nachfolgender no-op-Tick, Multi-Instanz-Race
+  über zwei echte Postgres-Transaktionen), Defaults-Neutralität,
+  genau-ein-Audit-Assertionen; Determinismus über Fake-Clock und injizierte
+  Kurse (neue `tick(forceScan, { now, quotes, skipScan })`-Optionen,
+  produktionsneutral). Tick-Tests springen sauber über (skip), wenn kein
+  PostgreSQL erreichbar ist — wie im Rest der Suite gilt keine DB-Pflicht.
+
+### Geändert
+
+- `src/lib/monitor.ts`: Die SL/TP-Prüfung nutzt jetzt `decideExit()` +
+  `applyExit()` (vorher direktes `broker.close()` + unbedingtes UPDATE).
+  Verhalten mit allen Flags aus ist identisch zum bisherigen Watcher
+  (bestehende Tests unverändert grün); der Tick schreibt `updatedAt`/
+  Haltedauer-Berechnung mit einem **einheitlichen** Zeitstempel pro Zyklus.
+- `PaperBroker`: Positions-Eintrag und `listPositions()` tragen
+  `trailingStop`/`trailingArmed` (hydrate-Mapping in `engine.getBroker()`
+  inklusive) — das Ledger zeigt dieselbe Wahrheit wie die DB.
+
+### Sicherheit / Grenzen
+
+- Paper-only: `src/live-gate/**` unangetastet; keine Order-Mapping-Pfade an
+  echte Venues (Stop-Auslösung bleibt Ledger-/DB-Logik).
+- Fail-closed: Bounds-Clamp mit sicherem Default, kaputte/env-fremde Werte
+  neutralisiert; Stops werden nie automatisch verengt, nur erweitert und
+  geloggt; jede Mutation revisionssicher im Audit.
 
 ## [1.43.0] — 2026-09-18 · feat(paper): Trade-Journal mit Agenten-Attribution + begrenzte Gewichts-Rückführung (GAP-03)
 

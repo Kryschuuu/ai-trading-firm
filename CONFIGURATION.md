@@ -490,6 +490,39 @@ Hinweise:
   (enforce, Label `journal-weight:AGENT:REGIME:x→y`), `JOURNAL_WRITE_FAILED`
   (CRITICAL, Schreibfehler — der Handelspfad bleibt davon unberührt).
 
+### Exit-Management (GAP-05, v1.44.0)
+
+Trailing-Stop, Time-Stop und OCO-Exklusivität — alles serverseitig im
+Monitor-Tick (`src/lib/monitor.ts`), unabhängig von LLM-Turns. Alle Flags
+sind per Default **aus**: ohne Konfiguration prüft der Monitor weiterhin nur
+Stop-Loss/Take-Profit — bestehende Installationen ändern ihr Verhalten nicht.
+Der Trailing-Zustand (bewaffnet/Stop-Level) liegt persistiert in
+`positions.trailing_armed`/`positions.trailing_stop` (append-only Migration
+`drizzle/2026-09-18_exit_management.sql` oder `npx drizzle-kit push`) — ein
+Prozess-Neustart verliert keinen erreichten Stop. Doku:
+`docs/PAPER_TRADING.md` (Abschnitt „Exit-Management“).
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `RISK_TRAILING_ENABLED` | `false` | Trailing-Stop insgesamt. Bewaffnet ab `RISK_TRAILING_ACTIVATION_PCT` Gewinn: der Monitor hebt den Stop mit dem Kurs (LONG: nur nach oben, SHORT: nur nach unten — ein Ratchet, der **nie** automatisch verengt). Trigger → Close mit `exitReason = TRAILING_STOP`. |
+| `RISK_TRAILING_ACTIVATION_PCT` | `1.0` | Gewinn in Prozent (vom Einstiegskurs, seitenrichtig für LONG/SHORT), ab dem der Trailing-Stop bewaffnet wird. Bounds [0.1, 20], Clamp mit sicherem Default. |
+| `RISK_TRAILING_RETURN_PCT` | `0.5` | Erlaubter Rückgabeweg in Prozent: Stop = Kurs − Rückgabeweg (LONG; SHORT gespiegelt). Bounds [0.1, 10]. |
+| `RISK_TIME_STOP_HOURS` | `0` | Maximale Haltedauer einer Position in Stunden → Close mit `exitReason = TIME_STOP`. `0` = aus (Default). Bounds [0, 720] (= 24 · 30). |
+
+Zusätzlich hart verdrahtet (kein Flag, keine Konfiguration nötig):
+
+- **OCO-Exklusivität:** SL/TP/Trailing/Time-Stop sind komplementäre
+  Bedingungen EINER Position. Der Exit ist ein bedingtes
+  `UPDATE positions … WHERE status = 'OPEN'` (atomarer DB-Claim) — zwei
+  parallele Ticks oder zwei Instanzen können dieselbe Position nie doppelt
+  schließen; der zweite sieht sie als CLOSED und macht einen sauberen no-op
+  (kein Doppel-Fill, kein Doppel-Audit, kein Fehler).
+- **Audit je Exit:** jeder Exit schreibt genau einen `audit_log`-Eintrag mit
+  maschinenlesbarem Grund (`detail.code = "exit:SYMBOL:grund"`, Event
+  `STOP_LOSS_HIT`/`TAKE_PROFIT_HIT`/`TRAILING_STOP_HIT`/`TIME_STOP_HIT`).
+- **Priorität bei Gleichzeitigkeit:** SL vor TP (konservativ, wie bisher),
+  preisbasierte Exits vor dem Time-Stop.
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |
