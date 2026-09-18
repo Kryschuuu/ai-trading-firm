@@ -462,6 +462,34 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `PAPER_SYNTHETIC_BASE_PRICE` | — | Basispreis Synthetic |
 | `PAPER_ANOMALY_MAX_JUMP_PCT` | — | Anomalie-Schwelle |
 
+### Trade-Journal (GAP-03, v1.43.0)
+
+Alle Flags sind neu und optional — **ohne jede Konfiguration läuft das
+System exakt wie vorher** (Default `off`: nur Auswertung, keine
+Auswirkung auf den Entscheidungspfad). Details + Sicherheitsbegründung:
+`docs/HANDBUCH.md` §13.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `JOURNAL_FEEDBACK_MODE` | `off` | Feedback-Modus der Gewichts-Rückführung: `off` (nur Auswertung — **Default, sicher**), `monitor` (Vorschläge als `audit_log` + Zyklus-Artefakt, Entscheidungspfad unverändert), `enforce` (Gewichte wirken im Approver-/Portfolio-Prompt der Engine + Persistenz in `journal_agent_weights`). Unbekannter Wert → fail-closed auf `off` (Log-Warnung). |
+| `JOURNAL_MIN_TRADES` | `20` | Mindest-Stichprobe (geschlossene, attributierte Trades je Agent×Regime), ab der Kennzahlen/Gewichte wirksam werden. Darunter `insufficient-sample` — **niemals als Faktor**. Bounds [5, 200], Clamp mit Log-Warnung. |
+| `JOURNAL_WEIGHT_MIN` | `0.5` | Untere Bound der Agenten-Gewichte. Bounds des Wertes selbst: [0.1, 1.0] (darunter wäre ein Agent praktisch stummschaltet — kein zulässiges Journal-Instrument). |
+| `JOURNAL_WEIGHT_MAX` | `1.5` | Obere Bound der Agenten-Gewichte. Bounds des Wertes selbst: [1.0, 3.0]. |
+| `JOURNAL_MAX_WEIGHT_DELTA` | `0.1` | Maximale Gewichtsänderung **je Zyklus** — selbst extreme Serien bewegen Gewichte nur schrittweise (Multi-Zyklus-Annäherung, nie Sprung). Bounds [0.01, 0.5]. |
+| `JOURNAL_CANDLES_TIMEFRAME` | `1h` | Kerzen-Intervall für die MAE/MFE-Berechnung (Allowlist = unterstützte Timeframes; ungültig → `1h` + Log-Warnung). Kerzenlücken ⇒ Metriken null + `CANDLE_GAP`-Flag (nie geschätzt). |
+
+Hinweise:
+
+- **Schema:** zwei neue Tabellen `trade_journal` + `journal_agent_weights`
+  (append-only Migration `drizzle/2026-09-18_trade_journal.sql` oder
+  `npx drizzle-kit push`). Bestehende Tabellen bleiben unverändert.
+- **Read-API:** `GET /api/firm/journal` (Berechtigung `firm.read`).
+- **Zyklus-Artefakte:** `journal-summary.json` + `journal-feedback.json`
+  im Tages-Artefakt-Verzeichnis.
+- **Audits:** `JOURNAL_WEIGHT_PROPOSED` (monitor), `JOURNAL_WEIGHT_APPLIED`
+  (enforce, Label `journal-weight:AGENT:REGIME:x→y`), `JOURNAL_WRITE_FAILED`
+  (CRITICAL, Schreibfehler — der Handelspfad bleibt davon unberührt).
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |

@@ -1271,6 +1271,116 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     ],
   },
 
+  JOURNAL_WRITE_FAILED: {
+    label: "Journal-Schreibfehler",
+    category: "system",
+    expectedLevel: "CRITICAL",
+    description:
+      "Das Trade-Journal konnte eine Zeile nicht schreiben (GAP-03, v1.43.0). Der Handelspfad bleibt davon bewusst unberührt (die Position ist bereits sicher gebucht) — der Fehler ist hier sichtbar, damit die Lücke nicht stillschweigend verschwindet. Betroffen: Eröffnung (Snapshot fehlt) oder Close (Metriken fehlen).",
+    headline: (d) => `Journal-Schreibfehler (${text(d.phase) ?? "unbekannte Phase"}) · Position ${text(d.positionId) ?? "—"} · ${text(d.error) ?? "ohne Meldung"}`,
+    explain: () =>
+      "Die Position selbst ist korrekt gebucht. Die Zeile im Journal bleibt sichtbar leer oder unvollständig (Attribution UNKNOWN bzw. Metriken null); Audit-Klassifikation: security.",
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Phase", value: text(d.phase) ?? "—" },
+          { label: "Position", value: text(d.positionId) ?? "—", mono: true },
+          { label: "Fehler", value: text(d.error) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  JOURNAL_WEIGHT_PROPOSED: {
+    label: "Journal-Gewicht vorgeschlagen",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Vorschlag einer Agenten-Gewichtsänderung aus dem Trade-Journal (GAP-03, v1.43.0, Modus `monitor`). Nur Vorschlag: im `monitor`-Modus wird der Entscheidungspfad NICHT berührt — die Änderung wird erst nach Prüfung des Vorschlags per Hand oder über `enforce` übernommen. Grundlage: Bayes-geglättete Trefferquote mit Mindest-Stichprobe.",
+    headline: (d) => `${text(d.agent) ?? "—"} @ ${text(d.regime) ?? "—"}: ${num(d.from) ?? 1} → ${num(d.to) ?? "—"}`,
+    explain: (d) =>
+      `Vorschlag aus ${text(d.trades) ?? "?"} geschlossenen Trades (geglättete Trefferquote ${num(d.smoothedWinRate) ?? "—"}). Schrittweite maximal ${text(d.change) ?? "—"} je Zyklus.`,
+    sections: (d) => [
+      {
+        title: "Vorschlag",
+        facts: [
+          { label: "Agent", value: text(d.agent) ?? "—" },
+          { label: "Regime", value: text(d.regime) ?? "—" },
+          { label: "Gewicht von", value: num(d.from) !== null ? String(num(d.from)) : "—" },
+          { label: "Gewicht nach", value: num(d.to) !== null ? String(num(d.to)) : "—" },
+          { label: "Trades", value: text(d.trades) ?? "—" },
+          { label: "Gegl. Trefferquote", value: num(d.smoothedWinRate) !== null ? String(num(d.smoothedWinRate)) : "—" },
+        ],
+      },
+    ],
+  },
+
+  JOURNAL_WEIGHT_APPLIED: {
+    label: "Journal-Gewicht übernommen",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Agenten-Gewicht aus dem Trade-Journal wurde tatsächlich übernommen (GAP-03, v1.43.0, Modus `enforce`): persistiert in `journal_agent_weights` und wirkt im Approver-/Portfolio-Prompt der Engine. Revisionssicher: jeder Vorgang trägt das Label `journal-weight:AGENT:REGIME:x→y`. Schutzschalen: Bounds [0.5, 1.5] und maximale Änderung je Zyklus (Default 0.1).",
+    headline: (d) => `${text(d.agent) ?? "—"} @ ${text(d.regime) ?? "—"}: ${num(d.from) ?? 1} → ${num(d.to) ?? "—"}`,
+    explain: (d) =>
+      `Übernommen nach ${text(d.trades) ?? "?"} geschlossenen Trades (geglättete Trefferquote ${num(d.smoothedWinRate) ?? "—"}). Die Änderung ist im Prompt-Kontext der Engine aktiv und in ` +
+      "`journal_agent_weights` persistiert.",
+    sections: (d) => [
+      {
+        title: "Übernahme",
+        facts: [
+          { label: "Agent", value: text(d.agent) ?? "—" },
+          { label: "Regime", value: text(d.regime) ?? "—" },
+          { label: "Gewicht von", value: num(d.from) !== null ? String(num(d.from)) : "—" },
+          { label: "Gewicht nach", value: num(d.to) !== null ? String(num(d.to)) : "—" },
+          { label: "Trades", value: text(d.trades) ?? "—" },
+          { label: "Gegl. Trefferquote", value: num(d.smoothedWinRate) !== null ? String(num(d.smoothedWinRate)) : "—" },
+        ],
+      },
+    ],
+  },
+
+  JOURNAL_WEIGHT_APPLY_FAILED: {
+    label: "Journal-Gewicht nicht übernehmbar",
+    category: "system",
+    expectedLevel: "CRITICAL",
+    description:
+      "Die Übernahme eines vorgeschlagenen Agenten-Gewichts aus dem Trade-Journal (GAP-03, v1.43.0, Modus `enforce`) ist fehlgeschlagen — z. B. weil die Persistenz in `journal_agent_weights` nicht funktionierte. Der Handel läuft unverändert weiter (die Änderung wird NICHT half-applied); der Vorgang bleibt hier sichtbar.",
+    headline: (d) => `${text(d.agent) ?? "—"} @ ${text(d.regime) ?? "—"}: Übernahme fehlgeschlagen`,
+    explain: (d) => `Grund: ${text(d.error) ?? "unbekannt"}. Der aktuelle Gewichtsstand bleibt unverändert.`,
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Agent", value: text(d.agent) ?? "—" },
+          { label: "Regime", value: text(d.regime) ?? "—" },
+          { label: "Geplantes Gewicht", value: num(d.to) !== null ? String(num(d.to)) : "—" },
+          { label: "Fehler", value: text(d.error) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  JOURNAL_EVALUATION_FAILED: {
+    label: "Journal-Auswertung fehlgeschlagen",
+    category: "system",
+    expectedLevel: "CRITICAL",
+    description:
+      "Die Trade-Journal-Auswertung (GAP-03, v1.43.0) konnte in diesem Zyklus nicht berechnet werden — z. B. weil die Datenbank nicht lesbar war. Der Tageslauf und der Handel bleiben davon unberührt; der Fehler ist hier sichtbar, damit ein dauerhaft fehlendes Journal auffällt.",
+    headline: (d) => `Auswertung fehlgeschlagen (Modus ${text(d.mode) ?? "unbekannt"}) · ${text(d.error) ?? "ohne Meldung"}`,
+    explain: () => "Kein Gewichts-Vorschlag wurde in diesem Zyklus erstellt. Die letzte erfolgreiche Auswertung bleibt im Artefakt erhalten.",
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Modus", value: text(d.mode) ?? "—" },
+          { label: "Fehler", value: text(d.error) ?? "—" },
+        ],
+      },
+    ],
+  },
+
   MISSION_CREATED: {
     label: "Mission erstellt",
     category: "mission",

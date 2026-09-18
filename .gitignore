@@ -67,3 +67,7 @@ next-env.d.ts
 # Scanner-Artefakte (Task 04): taegliche Universe-Snapshots werden lokal
 # erzeugt und sind aus Registry + Historie reproduzierbar — nicht versioniert.
 /artifacts
+
+# Lokale Test-Datenbank (embedded-postgres) — Laufzeitcluster, nie versioniert;
+# gitignored, damit `git stash -u` / Checkouts den Live-Cluster nicht anruhren.
+/data/db

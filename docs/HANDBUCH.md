@@ -29,6 +29,7 @@ N150) und **Variante B** (N150 + Desktop als Modellserver). Unterschiede sind mi
 17. [Regelwerk-API (Rules, Macro, Micro, Backtest)](#17-regelwerk-api-rules-macro-micro-backtest)
 18. [Review- & Security-Checkliste für neue Regeln](#18-review--security-checkliste-für-neue-regeln)
 19. [Tagesroutine der Mitarbeiter (Agenten-Zyklus)](#19-tagesroutine-der-mitarbeiter-agenten-zyklus)
+20. [Trade-Journal: Wer hat was warum entschieden? (v1.43.0)](#20-trade-journal-wer-hat-was-warum-entschieden-v1430)
 
 ---
 
@@ -1927,3 +1928,97 @@ Ausführliche Feldbeschreibungen, Formeln und Risikohinweise im 3-Ebenen-Schema 
 en-Trichter.
 - **`docs/help/portfolio.help.json`**: Kovarianz, Korrelationen, Sharpe, Sortino, Drawdown und Portfolio-Guardrails.
 
+## 20. Trade-Journal: Wer hat was warum entschieden? (v1.43.0)
+
+**Warum es gibt:** Vor v1.43.0 ließ sich nicht belastbar nachvollziehen,
+welche Agenten-Entscheidung (Stimmen, Regime, Begründung) zu welcher
+Position geführt hat — und ob die Position dann gewann oder verlor. Das
+Trade-Journal schließt genau diese Lücke (GAP-03): jede Position erhält ein
+**unveränderliches Entscheidungs-Foto** zum Eröffnungszeitpunkt, beim Close
+werden PnL, Excursions (MAE/MFE), Haltedauer und Exit-Reason ergänzt.
+
+### 20.1 Was das Journal aufzeichnet
+
+- **Bei der Eröffnung** (Engine — EXECUTOR oder genehmigtes Proposal — und
+  Regel-Mikro-Executor) entsteht eine Zeile in `trade_journal` mit einem
+  `decision_snapshot`:
+  - **Attribution** `PROPOSAL` / `RULE` / `UNKNOWN` — `UNKNOWN` bedeutet:
+    die Position hat keine auffindbare Entscheidungskette (z. B. manuell
+    angelegter Altbestand). Die Lücke bleibt **sichtbar**, das System ratet
+    nicht.
+  - **Stimmen**: alle Agenten-Turns der Mission im 6-Stunden-Fenster vor der
+    Eröffnung (Rolle, Entscheidung, Confidence, Risiko-Score).
+  - **Regime** (adaptives Risiko, UNKNOWN erlaubt) + **rationaleHash**
+    (sha256 über Begründung + Detail, bzw. die Signatur der Regel).
+- **Beim Close** (Monitor Stop-Loss/Take-Profit, Emergency-Flatten):
+  `pnl`, `mae_pct`, `mfe_pct`, `holding_minutes`, `exit_reason` und das
+  Qualitäts-Flag `quality`.
+
+**Robustheitsgarantie:** Ein Journal-Fehler bricht den Handelspfad nie ab —
+er wird als `JOURNAL_WRITE_FAILED` (CRITICAL) in den Audit-Log gemeldet.
+
+### 20.2 MAE/MFE: Excursions, die nicht geschätzt werden
+
+- Zeitmaske: nur Kerzen, deren Intervallstart zwischen Eröffnung und Close
+  liegt (Standard 1h, `JOURNAL_CANDLES_TIMEFRAME`).
+- **Einheitliches P&L-Vorzeichen:** MAE = P&L am ungünstigsten Kurs (≤ 0),
+  MFE = P&L am günstigsten Kurs (≥ 0) — für LONG und SHORT gleich.
+- **Lücke in den Kerzen ⇒ `CANDLE_GAP`:** Die Metriken bleiben null, es wird
+  nichts „aus dem Nichts“ berechnet. Leeres Fenster ⇒ `NO_DATA`.
+
+| `quality` | Bedeutung |
+| --- | --- |
+| `OK` | Metriken vollständig aus lückenlosen Kerzen |
+| `CANDLE_GAP` | Kerzenlücke im Fenster — Metriken null, nicht geschätzt |
+| `NO_DATA` | keine Kerzen im Fenster |
+| `ERROR` | Berechnung/Lesen fehlgeschlagen (siehe Audit-Log) |
+
+### 20.3 Auswertung & KPIs
+
+`GET /api/firm/journal` (Berechtigung `firm.read`) liefert die Summary:
+Trefferquote, Erwartungswert (Ø-PnL), MAE/MFE-Mittel **je Agent × Regime ×
+Symbolgruppe**, plus Totals (attribuiert vs. nicht-attriuiert). Der
+Daily-Cycle schreibt zusätzlich `journal-summary.json` +
+`journal-feedback.json` in das Tages-Artefakt-Verzeichnis.
+
+**Schutz vor Rauschen (bewusst doppelt):**
+1. **Bayes-Glättung** der Trefferquote mit Beta-Prior α=β=2 (dokumentierte
+   Konstante): `p = (wins+2)/(n+4)`. 2 von 3 gewonnen bleiben nahe am Prior
+   (0,571 statt 0,667) — frisch geschlossene Trades dürfen keine
+   Kennzahl domieren.
+2. **Mindest-Stichprobe** `JOURNAL_MIN_TRADES` (Default 20): darunter trägt
+   die Gruppe den Status `insufficient-sample` — deren Kennzahlen und
+   Gewichte werden **niemals** in die Entscheidungslogik eingespeist.
+
+### 20.4 Feedback-Modi — und warum „off“ der Default ist
+
+`JOURNAL_FEEDBACK_MODE`:
+
+| Modus | Wirkung |
+| --- | --- |
+| `off` (Default) | Nur Auswertung. Der Entscheidungspfad bleibt **exakt** wie v1.42.x: kein Prompt-Kontext, keine Gewichte. |
+| `monitor` | Vorgeschlagene Agenten-Gewichte erscheinen als `JOURNAL_WEIGHT_PROPOSED` im Audit-Log + im Zyklus-Artefakt. **Keine** Auswirkung auf Entscheidungen. |
+| `enforce` | Gewichte werden persistiert (`journal_agent_weights`, Audit `JOURNAL_WEIGHT_APPLIED`) und wirken im Approver-/Portfolio-Prompt der Engine. |
+
+**Sicherheitsbegründung:** Ein Lern-Loop ist am gefährlichsten dort, wo er
+kleine Stichproben als Signal umsetzt — genau das verhindert der
+`off`-Default, bis die Auswertung geprüft wurde (Stufe 2: `monitor`,
+optional Stufe 3: `enforce`). Selbst in `enforce` gilt:
+- Gewichte bleiben in **[0.5, 1.5]** (`JOURNAL_WEIGHT_MIN`/`_MAX`),
+- **maximale Änderung je Zyklus** `JOURNAL_MAX_WEIGHT_DELTA` (Default 0.1)
+  — Annäherung über mehrere Zyklen, nie ein Sprung,
+- jede Änderung ist revisionssicher im Audit-Log
+  (`journal-weight:AGENT:REGIME:x→y`).
+
+### 20.5 Diagnose
+
+| Symptom | Ursache / Aktion |
+| --- | --- |
+| `GET /api/firm/journal` → 503 `JOURNAL_UNAVAILABLE` | DB nicht lesbar oder Migration nicht gespielt → `npx drizzle-kit push` (bzw. `drizzle/2026-09-18_trade_journal.sql`) |
+| Alle Snapshots `attribution: UNKNOWN` | Positionen ohne Eröffnungspfad (Altbestand) — erwartbar, sichtbar |
+| Viele `CANDLE_GAP` | Kerzen-Lücken in der Historie für das gewählte Timeframe — ggf. `JOURNAL_CANDLES_TIMEFRAME` anpassen; Metriken bleiben bewusst null |
+| Keine Vorschläge im `monitor`-Modus | `insufficient-sample` (< `JOURNAL_MIN_TRADES`) oder keine ausreichende Abweichung von 1.0 — beides gewünscht |
+
+Weitere Details: `CONFIGURATION.md` (Tabelle „Trade-Journal“),
+Changelog [1.43.0](../CHANGELOG.md),
+Finding [GAP-03](audits/2026-09-18-feature-gap/findings/GAP-03-trade-journal-attribution.md).

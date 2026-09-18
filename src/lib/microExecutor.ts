@@ -29,6 +29,7 @@ import { PaperBroker } from "./broker";
 import {
   ADAPTIVE_STATE_MAX_AGE_MS,
   applyAdaptiveRisk,
+  getAdaptiveRiskState,
   getLimits,
   killSwitch,
   validateOrder,
@@ -41,6 +42,10 @@ import { getCandles, sanitizeSymbol } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
 import { structuredLog } from "./logger";
 import { writeEquitySnapshot } from "./equity";
+// GAP-03 (v1.43.0): Journal-Attribution für regelförmige Eröffnungen.
+// Bewusst NICHT `./engine` (LLM-freier Ausführungspfad, Guard-Test oben);
+// `./journal` ist I/O-Only (DB + audit_log) ohne Modell-Abhängigkeit.
+import { buildRuleSnapshot, recordJournalOpen } from "./journal";
 import {
   buildSnapshotFromCandles,
   compileRuleSpec,
@@ -666,6 +671,9 @@ export function createPaperRuleAdapter(opts?: {
         // Symbol feuern. Die Positions-/Missions-Persistenz läuft im selben
         // `persistPosition`-Callback wie die Reservierung — entweder beides
         // oder nichts.
+        // GAP-03: Positions-ID übernehmen (Journal-Verknüpfung, ohne
+        // Schema-Änderung an `positions`).
+        const journalPosRef: { value: { id: string; createdAt: Date } | null } = { value: null };
         const fill = await broker.submitAtomic(
           {
             symbol,
@@ -678,7 +686,7 @@ export function createPaperRuleAdapter(opts?: {
           {
             account: "PAPER",
             persistPosition: async (tx, f) => {
-              await tx.insert(positionsTable).values({
+              const [pos] = await tx.insert(positionsTable).values({
                 symbol: f.symbol,
                 side: f.side,
                 qty: String(f.qty),
@@ -690,7 +698,8 @@ export function createPaperRuleAdapter(opts?: {
                 missionId: ctx.missionId,
                 ruleId: ctx.ruleId,
                 status: "OPEN",
-              });
+              }).returning({ id: positionsTable.id, createdAt: positionsTable.createdAt });
+              journalPosRef.value = pos ?? null;
 
               if (ctx.missionId) {
                 await tx
@@ -711,6 +720,42 @@ export function createPaperRuleAdapter(opts?: {
             reason: `BROKER:${fill.reason ?? fill.status ?? "rejected"}`,
             at: new Date().toISOString(),
           };
+        }
+        // GAP-03 (D1a): Journal-Zeile mit RULE-Snapshot (Regel =
+        // Entscheidungskette: signature + Ursprungsrolle; keine erfundenen
+        // Agenten-Stimmen). Fehlertolerant — Journal-Fehler ändert das
+        // ExecutionOutcome NICHT (die Position ist bereits gebucht).
+        if (journalPosRef.value) {
+          try {
+            let regime = "UNKNOWN";
+            try {
+              regime = getAdaptiveRiskState()?.regime ?? "UNKNOWN";
+            } catch {
+              regime = "UNKNOWN";
+            }
+            const snapshot = await buildRuleSnapshot({
+              ruleId: ctx.ruleId,
+              missionId: ctx.missionId,
+              regime,
+              source: "MICRO_EXECUTOR",
+              openedAt: journalPosRef.value.createdAt,
+            });
+            await recordJournalOpen({
+              positionId: journalPosRef.value.id,
+              symbol,
+              side: "LONG",
+              openedAt: journalPosRef.value.createdAt,
+              missionId: ctx.missionId,
+              ruleId: ctx.ruleId,
+              snapshot,
+            });
+          } catch (e) {
+            structuredLog("warn", "journal_open_failed", {
+              ruleId: ctx.ruleId,
+              symbol,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
         }
         try {
           await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE");

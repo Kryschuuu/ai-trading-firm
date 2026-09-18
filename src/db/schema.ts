@@ -9,6 +9,7 @@ import {
   uuid,
   index,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -406,3 +407,110 @@ export const equitySnapshots = pgTable("equity_snapshots", {
   /** Auslöser des Snapshots: TICK | TRADE | CLOSE | FLATTEN | BOOT */
   trigger: text("trigger").notNull().default("TICK"),
 });
+
+/**
+ * Trade-Journal mit Agenten-Attribution (GAP-03, v1.43.0).
+ *
+ * VERKNÜPFUNG, die bisher fehlte: Position ↔ Entscheidungskette der Agenten.
+ * Eine Zeile pro Position (UNIQUE `position_id`), append-only in der
+ * Lebenszyklus-Semantik:
+ *
+ *   1. Bei Eröffnung (Engine-/Mikro-Executor-Pfad) entsteht die Zeile mit
+ *      `decisionSnapshot` — dem unveränderlichen Foto der Entscheidungskette
+ *      zum Eröffnungszeitpunkt (Stimmen, Confidence/RiskScore, Regime,
+ *      rationaleHash). Fehlt die Attribution (z. B. Position ohne Proposal,
+ *      Altbestand), trägt der Snapshot `attribution: "UNKNOWN"` — die Lücke
+ *      ist SICHTBAR, nie still geraten (fail-closed).
+ *   2. Beim Close (Monitor/Flatten) werden die Metriken ergänzt
+ *      (`closedAt`, `pnl`, `maePct`, `mfePct`, `holdingMinutes`,
+ *      `exitReason`, `quality`).
+ *
+ * `decisionSnapshot` (jsonb, Strukturschema in `src/lib/journal.ts`):
+ *   {
+ *     schemaVersion: 1,
+ *     attribution: "PROPOSAL" | "RULE" | "UNKNOWN",
+ *     proposalId: string | null,
+ *     ruleId: string | null,
+ *     votes: [{ name, role, vote, confidence, riskScore, at }],
+ *     proposer: { name, role } | null,
+ *     regime: string,
+ *     rationaleHash: string,
+ *     source: "ENGINE" | "MICRO_EXECUTOR"
+ *   }
+ *
+ * Bestehende Tabellen bleiben UNVERÄNDERT (Schema append-only; Migration:
+ * `drizzle/2026-09-18_trade_journal.sql` oder `npx drizzle-kit push`).
+ */
+export const tradeJournal = pgTable(
+  "trade_journal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    positionId: uuid("position_id").notNull().references(() => positions.id),
+    symbol: text("symbol").notNull(),
+    /** LONG | SHORT */
+    side: text("side").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    missionId: uuid("mission_id").references(() => missions.id),
+    ruleId: uuid("rule_id").references(() => tradeRules.id),
+    /** Unveränderliches Entscheidungs-Foto zum Eröffnungszeitpunkt (siehe TSDoc oben). */
+    decisionSnapshot: jsonb("decision_snapshot").notNull(),
+    /**
+     * Adaptives Regime zum Eröffnungszeitpunkt
+     * (NORMAL | ELEVATED | EXTREME | PERSISTED | UNKNOWN — UNKNOWN erlaubt,
+     * z. B. fehlende Bewertung oder Regime-Quelle außerhalb der Engine).
+     */
+    regime: text("regime").notNull().default("UNKNOWN"),
+    /** Realisiertes P&L nach Close (Kontowährung). */
+    pnl: numeric("pnl"),
+    /** Maximaler ungünstiger Excursion in Prozent (negativ bei Verlust, sonst 0). */
+    maePct: numeric("mae_pct"),
+    /** Maximaler günstiger Excursion in Prozent (positiv bei Gewinn, sonst 0). */
+    mfePct: numeric("mfe_pct"),
+    holdingMinutes: integer("holding_minutes"),
+    /** STOP_LOSS | TAKE_PROFIT | MANUAL_FLATTEN | AGENT_CLOSE | RULE_EXECUTION | … */
+    exitReason: text("exit_reason"),
+    /**
+     * Datenqualität der MAE/MFE-Berechnung: OK | CANDLE_GAP | NO_DATA | ERROR.
+     * `null` = Position noch offen (Metriken noch nicht berechnet). Kerzenlücken
+     * werden NICHT geschätzt — Metriken bleiben null + Flag (GAP-03, D2).
+     */
+    quality: text("quality"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Eine Journal-Zeile pro Position: idempotente Closes, keine Duplikate
+    // (Close-Pfad upsertet über diesen Index).
+    uniqueIndex("trade_journal_position_unique").on(t.positionId),
+    index("trade_journal_regime_idx").on(t.regime, t.closedAt),
+  ]
+);
+
+/**
+ * Journal-Feedback-Gewichte (GAP-03, v1.43.0) — begrenzte Rückführung.
+ *
+ * Gewicht je (Agentenrolle, Regime), aus glättungsgeprüften Trefferquoten
+ * abgeschlossener Journal-Trades abgeleitet (`src/lib/journalAnalytics.ts`).
+ * Harte Invarianten:
+ *   - Bounds [JOURNAL_WEIGHT_MIN, JOURNAL_WEIGHT_MAX] (Default [0.5, 1.5]),
+ *   - maximale Änderung je Zyklus JOURNAL_MAX_WEIGHT_DELTA (Default 0.1),
+ *   - geschrieben NUR im Modus `enforce` (Default `off`: keine Schreibung
+ *     überhaupt, reine Auswertung),
+ *   - jede Änderung revisionssicher im audit_log
+ *     ("journal-weight:AGENT:REGIME:x→y").
+ */
+export const journalAgentWeights = pgTable(
+  "journal_agent_weights",
+  {
+    /** Agentenrolle (CEO | RESEARCH | BACKTEST | RISK_MANAGER | APPROVER | …). */
+    agentRole: text("agent_role").notNull(),
+    /** Regime (aus dem Journal, inkl. UNKNOWN). */
+    regime: text("regime").notNull(),
+    /** Gewicht inkl. Bounds; 1.0 = neutral. */
+    weight: numeric("weight").notNull(),
+    /** Stichprobe (abgeschlossene Trades) zum Zeitpunkt des Updates. */
+    trades: integer("trades").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.agentRole, t.regime] })]
+);

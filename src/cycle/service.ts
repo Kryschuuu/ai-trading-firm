@@ -22,6 +22,16 @@ import { createDefaultPorts } from "./ports";
 import { SystemClock } from "./clock";
 import type { Clock, CyclePorts, CycleRunRecord } from "./types";
 import type { WeeklyReview } from "@/scanner/weekly";
+import path from "node:path";
+import { writeJsonAtomic } from "./artifacts";
+// GAP-03 (v1.43.0): Trade-Journal-Auswertung + modusabhängige
+// Gewichts-Rückführung (Best-effort — ein Journal-Fehler bricht den Zyklus
+// NIE ab; der Handelspfad bleibt unverändert).
+import {
+  computeJournalSummary,
+  evaluateJournalFeedback,
+  registrySymbolGroupResolver,
+} from "@/lib/journalAnalytics";
 
 export class CycleService {
   private scheduler: CycleScheduler;
@@ -83,6 +93,31 @@ export class CycleService {
     // Outputs aus dem Lauf aggregieren
     const stepOutputs: Record<string, unknown> = {};
     const saved = saveDailyCycleArtifacts(record, stepOutputs);
+
+    // GAP-03 (v1.43.0): Trade-Journal-Auswertung + modusabhängige
+    // Gewichts-Rückführung als Zyklus-Artefakt. Best-effort: ein Fehler
+    // (DB weg, Tabelle fehlt) darf den Tageslauf NICHT abbrechen — der
+    // Handelspfad bleibt unverändert, der Fehler ist im Log + audit_log.
+    try {
+      const feedback = await evaluateJournalFeedback();
+      const feedbackPath = path.join(saved.artifactsDir, "journal-feedback.json");
+      writeJsonAtomic(feedbackPath, {
+        schemaVersion: 1,
+        asOf: new Date().toISOString(),
+        ...feedback,
+      });
+      saved.filesWritten.push(feedbackPath);
+
+      const summary = await computeJournalSummary({ symbolGroupOf: registrySymbolGroupResolver() });
+      const summaryPath = path.join(saved.artifactsDir, "journal-summary.json");
+      writeJsonAtomic(summaryPath, summary);
+      saved.filesWritten.push(summaryPath);
+    } catch (e) {
+      console.error(
+        "[cycle] Trade-Journal-Auswertung fehlgeschlagen (Zyklus läuft weiter):",
+        e instanceof Error ? e.message : e
+      );
+    }
 
     return {
       record,
