@@ -38,7 +38,7 @@ Test, Bounds-Test auf Gewichte, Migration append-only (bestehende Tests grün).
 
 ## Umsetzung (v1.43.0, 2026-09-18)
 
-Umgesetzt in Branch `arena/01a0b4c1-ai-trading-firm` (PROMPT-03). Ist-Stand
+Umgesetzt in PR #137, Branch `arena/01a0b4c1-ai-trading-firm` (PROMPT-03). Ist-Stand
 vorab verifiziert — er entsprach exakt dem Audit: `positions` referenziert
 Mission/Rule, aber **keine** Verknüpfung zur Entscheidungskette, keine
 MAE/MFE, keine Auswertung, keine Rückführung.

@@ -19,7 +19,9 @@ Entscheidungskette (Stimmen, Regime, Begründung) zum Eröffnungszeitpunkt;
 Excursions (MAE/MFE) wurden nie gemessen. Dieser Release schließt die Lücke
 (PROMPT-03 der Remediation-Serie) mit einem **append-only Trade-Journal** und
 einer **bewusst begrenzten, aus- bzw. zuschaltbaren Feedback-Schleife** —
-sicherheitsseitig Default **off**.
+sicherheitsseitig Default **off**. Umsetzung: PR
+[#137](https://github.com/Kryschuuu/ai-trading-firm/pull/137)
+(`arena/01a0b4c1-ai-trading-firm`).
 
 ### Hinzugefügt
 
