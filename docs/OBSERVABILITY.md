@@ -1,9 +1,11 @@
-# Observability — Marktdaten-Fehler, Metriken und strukturierte Logs
+# Observability — Marktdaten-Fehler, Firmen-Metriken, Alerts und Heartbeat
 
-> **Status-Header:** **Implementiert** (MDERR-006, Nacharbeit) · **2026-08-30** ·
-> Code-Version **1.26.3** · Module `src/lib/marketDataErrors.ts`,
-> `src/lib/telemetry.ts`, `src/lib/logger.ts`,
-> `src/marketdata/dataErrors.ts`
+> **Status-Header:** **Implementiert** (MDERR-006; GAP-10 v1.45.0 ergänzt
+> Firmen-Metriken, Auto-Circuit-Breaker, Alerting und Heartbeat) ·
+> **2026-09-18** · Code-Version **1.45.0** · Module
+> `src/lib/marketDataErrors.ts`, `src/lib/telemetry.ts`,
+> `src/lib/alerts.ts`, `src/lib/circuitBreaker.ts`, `src/lib/heartbeat.ts`,
+> `src/lib/logger.ts`, `src/marketdata/dataErrors.ts`
 
 Dieses Dokument beschreibt, wie der Marktdaten-Pfad Fehler **sichtbar**
 macht. Das ist die Antwort auf den P1-Defekt „stille leere Arrays“: `getCandles()`
@@ -13,7 +15,9 @@ im Scanner als `min-candles` sichtbar und ohne jede Alarmierung.
 
 Die operative Entscheidung „Werfen vs. Cache vs. `DATA_UNAVAILABLE`“ ist im
 [**ERROR_HANDLING_MARKETDATA.md**](ERROR_HANDLING_MARKETDATA.md)
-(Entscheidungsbaum) dokumentiert.
+(Entscheidungsbaum) dokumentiert. Die **Firma als Ganzes** (Equity, Drawdown,
+Auto-Not-Halt, Alerts, Tick-Heartbeat) behandeln die Abschnitte 9–12; das
+Runbook dazu steht in [OPERATIONS.md](OPERATIONS.md).
 
 ## 1. Grundsatz
 
@@ -144,3 +148,155 @@ const r = await getCandlesWithFallback("SPY", "1h", 120);
   gemacht und auf 512 Zeichen gekürzt.
 - [x] `UNAUTHORIZED` im Public-Pfad wird als Konfigurationsfehler laut
   alarmiert (`critical`-Event).
+
+## 9. Firmen-Metriken in `prometheusMetrics()`
+
+Seit **GAP-10 (v1.45.0)** liefert `prometheusMetrics()` (jetzt `async`) neben
+den Marktdaten-/Audit-Countern die Kennzahlen der **Firma** — gelesen
+ausschließlich aus **bestehenden Stores** (Paper-Ledger, PostgreSQL,
+In-Memory-Counter der Routing-/Order-Pfade), nicht aus einer zweiten
+Messschleife:
+
+| Metrik | Typ | Quelle | Bedeutung |
+| --- | --- | --- | --- |
+| `firm_equity` | Gauge | Paper-Ledger (Fallback: jüngster `equity_snapshots`-Eintrag) | Kontostand (mark-to-market) |
+| `firm_drawdown_pct` | Gauge | Paper-Ledger (`drawdownPct`, dieselbe Rechnung wie der Brecher) | Drawdown gegenüber Startkapital (`0.12` = 12 %) |
+| `firm_open_positions` | Gauge | Paper-Ledger | offene Positionen |
+| `firm_realized_pnl_today` | Gauge | `realizedPnlToday()` (Berliner Tag) | realisiertes Tages-P&L |
+| `firm_metric_source{source}` | Gauge | — | Quelle des Zustands (`paper-broker` = 1, sonst `db-snapshot`) |
+| `firm_order_fills_total{kind,reason}` | Counter | Order-Pfad (`src/lib/broker.ts`) | Fills: `kind` = `OPEN`/`CLOSE`, `reason` = `ORDER`/`ORDER_PARTIAL` bzw. der Exit-Grund (`STOP_LOSS`, `TAKE_PROFIT`, `TRAILING_STOP`, `TIME_STOP`, …) |
+| `firm_order_rejects_total{reason}` | Counter | Ablehnungs-Funnel (`reject()`) | Rejects je Grund-**Klasse** (`INSUFFICIENT_CASH`, `KILL_SWITCH_ARMED`, `GUARDRAIL`, …) |
+| `llm_calls_total{provider,outcome}` | Counter | Routing-Schicht (`src/routing/adapter.ts`) | LLM-Aufrufe je Provider; `outcome` = `ok`/`error`/`fallback` |
+| `llm_latency_ms_sum{provider}` | Counter | Routing-Schicht (Latenz fällt dort ohnehin an) | Summe der Latenzen; Mittelwert = `llm_latency_ms_sum / llm_calls_total{outcome="ok"}` |
+
+**Kardinalitäts- und Secret-Regel** (wie beim Marktdaten-Counter): Labels sind
+ausschließlich **klassifizierte Codes** — `metricLabel()` verwirft alles, was
+nicht dem konservativen Zeichensatz entspricht, und `classifyRejectReason()`
+schneidet Rohgründe wie `POSITION_ALREADY_OPEN:SOL (kein Nachkauf erlaubt)` auf
+die Code-Klasse ab. Symbole, Beträge, URLs oder Tokens erscheinen nie in einem
+Label; der vollständige Grund bleibt im strukturierten Log.
+
+**Degradierter Betrieb (verbindlich):** Ist der Firmenzustand nicht lesbar
+(DB weg, Ledger in diesem Prozess noch nicht hydratisiert), werden die
+betroffenen Metriken **weggelassen** und mit einem
+`# HELP firm_equity … degraded: …`-Kommentar markiert — kein erfundener
+`0`-Wert (0 wäre eine falsche Aussage über den Kontostand), kein Throw, kein
+Hänger. `prometheusMetrics()` ist damit auch bei komplettem DB-Ausfall
+aufrufbar.
+
+> **Offener Punkt (bewusste Abgrenzung):** Es gibt weiterhin **keinen
+> HTTP-Scrape-Endpoint**; die Exposition ist über `prometheusMetrics()`
+> aufrufbar (z. B. aus einem eigenen, authentifizierten Scraper). Ein
+> `/api/metrics` wäre wegen der enthaltenen Kontodaten ein sensibler Read
+> (`firm.read`) und ist als eigener Schritt dokumentiert — siehe
+> `docs/audits/2026-09-18-feature-gap/remediation/TRACKING.md` (Spalte
+> „Notizen“).
+
+## 10. Auto-Circuit-Breaker (D2)
+
+Der Kill-Switch war bis v1.44.0 rein manuell: die Risiko-Grenzen blockierten
+nur **neue** Orders, offene Positionen liefen bei einem Bug weiter. Seit
+**v1.45.0** prüft der Monitor-Tick **nach der Equity-Berechnung** drei
+Auslöser und nutzt den **bestehenden Kill-Switch-Pfad**:
+
+| Auslöser | Bedingung | Metrik im Grund |
+| --- | --- | --- |
+| Drawdown | `drawdownPct >= maxEquityDrawdownPct` | `drawdown` |
+| Tagesverlust | Tagesverlust ≥ `dailyLossLimitPct` (Anteil des Startkapitals) | `dailyLoss` |
+| Verlustserie | `RISK_MAX_CONSECUTIVE_LOSSES` Verlust-Closes in Folge (Default 5, Bounds [2, 50]) | `consecutiveLosses` |
+
+Es gewinnt der **erste** zutreffende Auslöser in dieser Reihenfolge
+(Eingriffstiefe). Aktion je Auslösung:
+
+1. `killSwitch.pull(reason)` — die in-memory Sperre (jede Order läuft dagegen),
+2. Zeile in `kill_switches` (`triggered_by = AUTO_CIRCUIT_BREAKER`, best effort),
+3. **Audit** `KILL_SWITCH` (CRITICAL, Security-Klasse) mit fixiertem
+   Auslösewert: `reason`, `trigger`, `metric`, `value`, `limit`, `triggeredAt`,
+   `drawdownPct`, `dailyLossPct`, `consecutiveLosses` — eine Lücke wird gemeldet
+   (Missed-Audit-Zähler), der Engage selbst nie durch einen Auditfehler
+   blockiert (die sichere Richtung zu verweigern wäre gefährlicher),
+4. **Alert** `circuit-breaker:<metrik>` (severity `critical`) über den
+   Alert-Adapter (Abschnitt 11).
+
+**Maschinenlesbarer Grund** (stabil, im Audit fixiert):
+
+```text
+auto-circuit-breaker:<metrik>:<wert>
+auto-circuit-breaker:drawdown:0.1834      # Dezimalanteil, 4 Nachkommastellen
+auto-circuit-breaker:dailyLoss:0.0621
+auto-circuit-breaker:consecutiveLosses:5  # ganze Zahl
+```
+
+**Latching (Flatter-Schutz):** Einmal ENGAGE bleibt ENGAGE. Weitere Ticks
+ändern nichts — kein zweites Engage, kein zweiter Audit, kein zweiter Alert,
+keine Hysterese. Der Latch fällt ausschließlich, wenn der Not-Halt
+**manuell** entschärft wurde (siehe unten); danach darf der Brecher erneut
+greifen.
+
+**Re-Arm-Politik (unverändert manuell):** Es gibt **keine Auto-Re-Arm-Logik**.
+Der Weg zurück ist ausschließlich der bestehende Disarm-Pfad
+(`POST /api/firm/kill` mit `{ arm: false }`): Permission `live.gate` (Admin),
+CSRF-Header und ein kurzlebiger **single-use Challenge-Nonce** aus
+`GET /api/firm/kill/challenge` (≤ 60 s). Jeder Disarm wird mit `stage=PRECHECK`
+und `stage=APPLIED` auditiert und ist fail-closed (ohne Auditbeleg kein
+Disarm).
+
+**Verhaltensänderung:** `AUTO_CIRCUIT_BREAKER` ist per Default **an** —
+existierende Installationen erhalten damit erstmals einen automatischen
+Not-Halt bei Grenzbruch. Der Tagesverlust-Trigger existierte zuvor bereits im
+Monitor, jetzt mit einheitlichem Grund/Audit/Alert und Latching; „aus“ ist ein
+bewusster Betriebsentscheid (z. B. Fehlersuche) und steht im CHANGELOG.
+
+## 11. Alert-Adapter (`src/lib/alerts.ts`)
+
+`AlertSink { send(alert: { code, severity, message, meta, at }) }` mit drei
+Implementierungen:
+
+| Senke | Verhalten |
+| --- | --- |
+| `LogAlertSink` | strukturiertes JSON-Log (`event: "alert"`, Muster `logger.ts`): redigiert, einzeilig, ≤ 512 Zeichen je Feld |
+| `FileAlertSink` | append-only NDJSON, Default `data/alerts.ndjson` über `resolveRuntimePath()` (Modus 0600) — CLI und Server sehen dieselbe Datei |
+| `WebhookAlertSink` | **optional, Default aus**: URL ausschließlich aus dem verschlüsselten Secret-Store (`ALERT_WEBHOOK_URL_SECRET_NAME`), Timeout 5 s; die URL ist selbst ein Credential und erscheint nie in Logs oder Fehlermeldungen |
+
+**Debounce (Alert-Fatigue-Schutz):** Ein identischer `alert.code` wird
+höchstens einmal pro `ALERT_DEBOUNCE_MINUTES` (Default 30, Bounds [1, 1440])
+versendet. Unterdrückte Alarme werden gezählt und beim nächsten Versand als
+`meta.suppressedSinceLast` ausgewiesen — der Operator sieht „2 weitere
+identische Alarme im Fenster“ statt zwei Zeilen Rauschen. Ein Fehler einer
+Senke bricht nichts ab: `AlertDispatcher.emit()` sammelt Fehler, loggt sie und
+wirft nie (Alarmierung ist Beobachtbarkeit, kein Handelspfad).
+
+## 12. Heartbeat & Watchdog (D4)
+
+`/api/health` (antwortet konstruktionsbedingt immer HTTP 200) meldet
+zusätzlich:
+
+| Feld | Bedeutung |
+| --- | --- |
+| `monitorLastTickAt` | ISO-Zeitpunkt des letzten Monitor-Ticks (`null` = noch keiner) |
+| `monitorAgeMs` | Alter in ms (`null` = kein Tick bekannt) |
+| `stale` | `true`, wenn Alter > `HEALTH_STALE_AFTER_MS` **oder** noch nie ein Tick lief |
+| `staleAfterMs` | wirksame Schwelle (Default 300000 ms = 5 min, Bounds [30000, 3600000]) |
+
+Quelle ist der RAM-Heartbeat des Ticks (`state.monitorLastTickAt`) — das Signal
+ist absichtlich **DB-frei** lesbar: gerade bei einem Datenbank-Ausfall muss
+erkennbar bleiben, ob der Scheduler noch tickt. Die Schwelle selbst ist
+gesund (`stale` erst bei echtem Überschreiten); ein frisch gestarteter Prozess
+ist bis zum ersten Tick `stale: true` (fail-loud).
+
+**`npm run watchdog`** (`scripts/watchdog.ts`) ist der alarm-first Gegenpart:
+ein Lauf, ein Alarm, kein Daemon, **kein Auto-Restart**. Er prüft
+`/api/health` (Default `http://127.0.0.1:$PORT/api/health`, überschreibbar per
+`--url=`/`WATCHDOG_HEALTH_URL`) und meldet über den Alert-Adapter:
+
+| Code | Ursache |
+| --- | --- |
+| `heartbeat-stale` | `stale: true` (Tick überfällig oder nie gelaufen) |
+| `heartbeat-health-unreachable` | `/api/health` nicht erreichbar oder HTTP ≠ 200 |
+| `heartbeat-health-unreadable` | Antwort ist kein lesbares JSON |
+
+Exit-Codes: `0` gesund · `1` Alarm · `2` Bedienfehler. Der Aufruf gehört in
+einen systemd-Timer/Cron (z. B. alle 5 Minuten); der Debounce verhindert, dass
+ein andauernder Ausfall die Alert-Datei flutet. Für den Sonderfall „Prüfung im
+eigenen Prozess“ gibt es `--source=inprocess` (liest `lastTickAt()` direkt —
+ein separater Prozess hat seinen eigenen RAM-Heartbeat und muss HTTP nutzen).

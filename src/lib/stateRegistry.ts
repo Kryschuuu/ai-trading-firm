@@ -65,6 +65,7 @@
 // entfernt) — die Registry hat KEINE Runtime-Importe, es entsteht also kein
 // Modul-Zyklus mit den Besitzern (`riskGuard`, `engine`, …).
 import type { RiskLimits, AdaptiveRiskState } from "./riskGuard";
+import type { CircuitBreakerLatch } from "./circuitBreaker";
 import type { BrokerAdapter, BrokerVenueId } from "../contracts/broker";
 import type { PaperBroker } from "./broker";
 import type { ControlPlaneService } from "../brokers/control-plane/service";
@@ -211,6 +212,21 @@ export const state = {
   currentLimits: ref<RiskLimits>("currentLimits"),
   /** Aktuelle Volatilitaets-Bewertung (RAM; `PERSISTED`-Faktor liegt in DB). */
   adaptiveState: ref<AdaptiveRiskState | null>("adaptiveState"),
+  /**
+   * GAP-10 (v1.45.0): Latch des Auto-Circuit-Breakers. LATCHING heisst: einmal
+   * ausgeloest bleibt ausgeloest, bis ein Mensch den Not-Halt ueber den
+   * Disarm-Pfad (Challenge-Nonce) loest — es gibt bewusst KEINE Auto-Re-Arm-
+   * Logik. Der Ausloesewert wird beim Ausloesen fixiert (im Audit).
+   */
+  circuitBreakerLatch: ref<CircuitBreakerLatch | null>("circuitBreakerLatch"),
+
+  // ── Monitor (src/lib/monitor.ts) ───────────────────────────────────────────
+  /**
+   * GAP-10 (v1.45.0): Zeitpunkt des letzten Monitor-Ticks (epoch ms, RAM).
+   * Quelle fuer Heartbeat/Alarm (`lastTickAt()`, `/api/health`, Watchdog) —
+   * kein DB-Read, damit das Stale-Signal auch bei DB-Ausfall lesbar bleibt.
+   */
+  monitorLastTickAt: ref<number>("monitorLastTickAt"),
 
   // ── Broker-Factory (src/brokers/factory.ts) ────────────────────────────────
   /** Adapter-Singletons je venue:mode (RAM-Cache). */
@@ -258,6 +274,9 @@ export function __resetAllSingletonsForTests(): void {
   state.baseLimits.reset();
   state.currentLimits.reset();
   state.adaptiveState.reset();
+  state.circuitBreakerLatch.reset();
+  // Monitor
+  state.monitorLastTickAt.reset();
   // Broker-Factory
   state.brokerAdapters.reset();
   state.paperBrokerLedger.reset();
