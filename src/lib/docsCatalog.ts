@@ -92,7 +92,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   howtoUpdate: {
     file: "docs/HOWTO_UPDATE.md",
     title: "How-to: Update einer laufenden Firma",
-    subtitle: "git pull → Stop-Reihenfolge → npm ci → Schema → Build → Start → Verifikation (v1.39.1)",
+    subtitle: "git pull → Stop-Reihenfolge → npm ci → Schema → Build → Start → Verifikation (v1.39.2)",
   },
   architecture: {
     file: "docs/ARCHITECTURE.md",

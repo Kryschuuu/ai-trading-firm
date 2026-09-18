@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-31** ·
-> Code-Version **1.32.0** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-17** ·
+> Code-Version **1.39.2** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize`)
 
@@ -45,7 +45,7 @@ heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.32.0):
 | `InstrumentRegistry` (`src/universe/registry.ts`) | `src/universe/registry.ts` | Ablage `data/universe/instruments.ndjson` |
 | `BitunixBrokerAdapter` (`src/brokers/bitunix/`) | `src/brokers/bitunix/adapter.ts` | erfüllt nur `BrokerAdapter`; Public-Methoden bleiben erhalten |
 | Market-Data-Adapter des Syncs | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | dünner Wrapper Broker-PublicClient → `MarketDataAdapter` (P0-Verdrahtung, Domänentrennung) |
-| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | RAW-Varianten `fetchTradingPairsRaw()` und `fetchDepth(symbol, limit=5)` ergänzt; `fetchTickers` nimmt Bulk-Arrays |
+| `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | RAW-Varianten `fetchTradingPairsRaw()` und `fetchDepth(symbol, limit=5)` ergänzt; `fetchTickers` nimmt Bulk-Arrays **chunked** (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.39.2) |
 | Sync-CLI (`scripts/run-scan.ts`) | `scripts/market-sync.ts` (+ `scripts/lib/market-sync.ts`), `scripts/run-scan.ts --sync` | `run-market-sync.ts` ist ein Delegate auf ersteres |
 | Rate-Limit „8 req/s dokumentiert“ | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Bitunix-Doku nennt 10 req/s/IP, Code bleibt konservativ bei 8; **ein geteilter Bucket je Registrierungs-Lauf** |
 | Adapter-Registry | `src/marketdata/registerAdapters.ts` (Kern, inkl. `registerMarketDataAdapters(env)`) + `src/marketdata/adapterRegistry.ts` (Wrapper) | zwei Dateien statt einer — Begründung §13 |
@@ -94,13 +94,25 @@ export async function enrichWithOrderBooks(
 ): Promise<{ spreadBySymbol: Map<string, number | null>; report: EnrichmentReport }>;
 ```
 
-### Ticker-Stage `enrichWithTickers()`
+### Ticker-Stage `enrichWithTickers()` (seit v1.39.2 chunked)
 
-- **Ein Bulk-Call** (`adapter.getTickers(symbols)`) für alle Instrumente.
-  Fehlt ein Symbol in der Bulk-Response → **ein** Einzel-Ticker-Versuch
+- **Chunked Bulk** – Listen > `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` (Default 50,
+  ~1 KB Query, Gateway-Limit >6 KB) werden in `⌈N/50⌉` Calls aufgeteilt
+  (`publicClient.fetchTickers`). Ein fehlgeschlagener Chunk reißt die übrigen
+  nicht mit; nur wenn alle scheitern, wird geworfen. Vor v1.39.2 schickte der
+  Katalog (~750 Symbole) **einen** >6 KB-URL → Gateway-Ablehnung → 754×
+  `ticker/SCHEMA_MISMATCH` + `tickers enriched: 0`.
+- Fehlt ein Symbol in der Bulk-Response → **ein** Einzel-Ticker-Versuch
   (Lücken-Fallback mit Symbol-Guard). Schließt auch der die Lücke nicht,
   wird sie als `failure` (`stage: "ticker"`) sichtbar und der Lauf gilt als
   degradiert — eine Lücke zählt nie still als „enriched" (kein Throw).
+- **Batch-Kappe**: seit v1.39.2 verwirft die Kappe keine selbst angeforderten
+  Zeilen mehr. Vorher: 754 Symbole → Kappung auf 500 → 254 Scheinfehler +
+  254 Einzel-Requests (Selbst-DoS).
+- **Failure-Klassifizierung**: `enrichment.ts` trägt `cause` (Originalfehler);
+  `sync.ts` klassifiziert daraus (`classifyMarketDataError(cause)`) statt
+  pauschal `SCHEMA_MISMATCH`. NETWORK/5xx/429 ⇒ wiederholbar. Failures nur für
+  **ausgewählte** Instrumente (`selectedSymbolSet`), nicht für gekappte.
 - `volume24h` ist explizit **Quote-Volumen** (`ticker.quoteVol`) in
   Quote-Währung (z. B. USDT). Dokumentiert im Registry-Typ als JSDoc —
   Verwechslung mit Base-Volumen verfälscht jeden `min-volume`-Filter um
@@ -127,8 +139,8 @@ GET /trading_pairs                       (1× — Discovery)
    ▼
 registry instruments  (id = "VENUE:SYMBOL", volume24h = null, spread = null)
    │
-   ├─ enrichWithTickers()                (1× Batch — src/marketdata/enrichment.ts)
-   │   GET /tickers?symbols=…  (Bulk)
+   ├─ enrichWithTickers()                (⌈N/50⌉× chunked, ~1 KB — src/marketdata/enrichment.ts, v1.39.2)
+   │   GET /tickers?symbols=…  (Chunked Bulk, 50/Chunk)
    │     quoteVol ─────────────────────────────────► volume24h  (null wenn absent)
    │     Report: attempted/succeeded/missing/failures
    │
@@ -645,14 +657,15 @@ Bucket:
 Bündelung pro Lauf und Venue (`N` = synchronisierte Instrumente, `M` = Timeframes):
 
 1. 1 × `trading_pairs` (Discovery)
-2. 1 × `tickers` (Batch, wenn der Adapter `getTickers` anbietet)
-3. +1 × `tickers` **je Lücke**: fehlt ein Symbol im Batch, holt der Sync den
-   Einzel-Ticker — der Batch spart Requests, er ersetzt sie nicht
+2. ⌈N/50⌉ × `tickers` (Chunked Bulk, `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.39.2)
+3. +1 × `tickers` **je Lücke**: fehlt ein Symbol im Bulk, holt der Sync den
+   Einzel-Ticker — der Bulk spart Requests, er ersetzt sie nicht (Kappung verwirft seit v1.39.2 keine selbst angeforderten Zeilen mehr)
 4. N × `depth`
 5. N × M × `kline`
 
-Beispiel 200 Instrumente, 4 Timeframes: `1 + 1 + 200·depth + 800·kline = 1002`
-Requests (Integrationstest zählt genau diese Zahl). Der Sync läuft mit begrenzter
+Beispiel 200 Instrumente, 4 Timeframes: `1 + 4 + 200·depth + 800·kline = 1005`
+Requests (⌈200/50⌉=4 Chunks). Beispiel 750 Instrumente (voller Katalog): `1 + 15 + …`
+statt vorher 1× >6 KB-URL → Gateway-Ablehnung. Der Sync läuft mit begrenzter
 Parallelität (`concurrency ≤ 8`) **innerhalb** des Buckets — Parallelität
 erzeugt Requests, kein Recht auf mehr; autoritativ bleibt der Bucket.
 

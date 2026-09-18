@@ -1,7 +1,7 @@
 # Fehlerbehandlung Marktdaten — Entscheidungsbaum (MDERR-006)
 
-> **Status-Header:** Implementiert (MDERR-006, Nacharbeit) · **2026-08-30** ·
-> Code-Version **1.26.3** · Module `src/lib/marketDataErrors.ts`,
+> **Status-Header:** Implementiert (MDERR-006, Nacharbeit + v1.39.2 Klassifizierung) · **2026-09-17** ·
+> Code-Version **1.39.2** · Module `src/lib/marketDataErrors.ts`,
 > `src/lib/marketData.ts`, `src/marketdata/sync.ts`,
 > `src/marketdata/dataErrors.ts`, `src/lib/telemetry.ts`
 
@@ -52,11 +52,17 @@ Oberklassen:
 | `UNKNOWN` | `UNKNOWN` | alles andere | nein |
 
 `classifyMarketDataError(err)` liest dabei HTTP-Status (inkl.
-`BitunixApiError.httpStatus`), die `.cause`-Kette (undici), bekannte
-Node-Codes in Messages und JSON-Parse-Signaturen. Die Klassifikation ist
-**nicht nur kosmetisch** — sie entscheidet, ob ein Fehler als transient
-(Retry sinnvoll) oder permanent (Instrument-Konfigurationsfehler) behandelt
-wird.
+`BitunixApiError.httpStatus`), die `.cause`-Kette (undici, seit v1.39.1
+fix für `ECONNREFUSED` hinter `fetch failed`), bekannte Node-Codes in
+Messages und JSON-Parse-Signaturen. Seit v1.39.2 trägt `enrichment.ts`
+`cause` (Originalfehler) und `sync.ts` klassifiziert daraus via
+`toFailure` – vor v1.39.2 wurden Ticker-Fehler unabhängig von der echten
+Ursache immer als `SCHEMA_MISMATCH / nicht wiederholbar` klassifiziert.
+Die Klassifikation ist **nicht nur kosmetisch** — sie entscheidet, ob ein
+Fehler als transient (Retry sinnvoll) oder permanent
+(Instrument-Konfigurationsfehler) behandelt wird. Gateway-Ablehnung einer
+>6 KB-URL (v1.39.2) ist damit korrekt als `SCHEMA_MISMATCH` erkennbar,
+während echte Netzwerk-/5xx-/429-Fälle als wiederholbar gelten.
 
 ---
 
