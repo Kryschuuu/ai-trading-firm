@@ -17,7 +17,9 @@ aber **Perpetual-Funding floss nicht ins Paper-PnL** — Funding existierte nur
 als Scanner-Ranking-Faktor. Gerade bei längeren Haltedauern frisst Funding real
 die Edge; Paper-Ergebnisse waren damit systematisch zu optimistisch. Dieser
 Release schließt die Lücke (PROMPT-02 der Remediation-Serie) und macht die
-Simulationsparameter kalibrierbar. Umsetzung: [`arena/01a0b48a-ai-trading-firm`].
+Simulationsparameter kalibrierbar. Umsetzung: PR
+[#136](https://github.com/Kryschuuu/ai-trading-firm/pull/136)
+(`arena/01a0b48a-ai-trading-firm`).
 
 ### Hinzugefügt
 

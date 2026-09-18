@@ -40,7 +40,7 @@ Funding, Docs/Flags/Changelog.
 
 ## Umsetzung (v1.42.0, 2026-09-18)
 
-Umgesetzt in Branch `arena/01a0b48a-ai-trading-firm` (PROMPT-02, Start der
+Umgesetzt in PR #136, Branch `arena/01a0b48a-ai-trading-firm` (PROMPT-02, Start der
 Serie). Ist-Stand vorab verifiziert — er entsprach exakt dem Audit: Simulator
 mit Gebühren/Spread/Slippage/Partial-Fills vorhanden, Funding nur als
 Scanner-Faktor, keine Abweichung zu dokumentieren.
