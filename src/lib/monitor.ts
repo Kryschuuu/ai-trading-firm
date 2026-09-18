@@ -5,7 +5,9 @@
  * (oder manuell via POST /api/firm/tick):
  *
  *   1. Kurse der Watchlist + aller offenen Positionen aktualisieren
- *   2. Stop-Loss / Take-Profit jeder offenen Position prüfen → ggf. schließen
+ *   2. SL/TP/Trailing-Stop/Time-Stop je offener Position prüfen (GAP-05) →
+ *      ggf. schließen; OCO-Exklusivität über atomaren DB-Claim (genau ein
+ *      Exit je Position, auch bei parallelen Ticks/Instanzen)
  *   3. currentPrice/realizedPnl in der DB nachführen
  *   4. Tagesverlust-Limit prüfen → Auto-Kill für den Rest des Tages
  *   5. Periodisch einen Multi-Market-Scan ins Gedächtnis schreiben
@@ -15,8 +17,10 @@
  */
 import { db } from "@/db";
 import { agentMessages, positions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getBroker, logAudit } from "./engine";
+import type { PaperBroker, Fill } from "./broker";
+import { decideExit, loadExitConfig, type ExitReason } from "./exits";
 import { getLimits, killSwitch } from "./riskGuard";
 import type { AdaptiveRegime } from "./riskGuard";
 import { DEFAULT_WATCHLIST, getQuote, refreshQuotes, getCandles } from "./marketData";
@@ -66,24 +70,42 @@ export type TickResult = {
 };
 
 /**
+ * Optionen für einen Monitor-Zyklus (v1.44.0) — primär für deterministische
+ * Tests (Fake-Clock, injizierte Kurse, Scan-Unterdrückung) gedacht, ohne das
+ * Produktivverhalten zu verändern.
+ */
+export type TickOptions = {
+  /** Fester Zeitstempel (ms, epoch) — für die Haltedauer-/Time-Stop-Prüfung und alle `updatedAt`. */
+  now?: number;
+  /** Vorab bekannte Kurse (Symbol → Preis); umgeht den Netzwerk-Quote im Test. */
+  quotes?: Record<string, number>;
+  /** Marktscan unterdrücken (Tests, um Netzwerk-Zugriff zu vermeiden). */
+  skipScan?: boolean;
+};
+
+/**
  * Ein voller Monitor-Zyklus. Idempotent und gegen Doppelstart geschützt.
  *
  * KORRIGIERT (v1.1.0): Single-Flight-Schutz. Läuft ein Zyklus (Scheduler +
  * manueller POST /tick überlappen z. B.), bekommt der zweite Aufrufer das
  * Ergebnis des laufenden Zyklus, statt einen zweiten parallel zu starten
- * (doppelte Snapshots, konkurrierende DB-Updates).
+ * (doppelte Snapshots, konkurrierende DB-Updates). Der zweite, echte Schutz
+ * gegen Doppel-Exits wirkt DB-seitig (atomarer Claim in `applyExit`, GAP-05)
+ * und gilt damit auch über Prozessgrenzen hinweg.
  */
-export function tick(forceScan = false): Promise<TickResult> {
+export function tick(forceScan = false, opts: TickOptions = {}): Promise<TickResult> {
   if (GLOBAL.__tickLock) return GLOBAL.__tickLock;
-  const run = doTick(forceScan).finally(() => {
+  const run = doTick(forceScan, opts).finally(() => {
     GLOBAL.__tickLock = null;
   });
   GLOBAL.__tickLock = run;
   return run;
 }
 
-async function doTick(forceScan: boolean): Promise<TickResult> {
+async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickResult> {
   await refreshRuntimeLimits();
+  // Einheitlicher, deterministischer Zeitstempel für diesen Zyklus.
+  const now = typeof opts.now === "number" ? new Date(opts.now) : new Date();
   const errors: string[] = [];
 
   // Adaptives Risk-Limit: Volatilität bewerten und maxRiskPerTrade ggf.
@@ -114,89 +136,110 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     ...openRows.map((p) => p.symbol),
     ...DEFAULT_WATCHLIST,
   ];
-  const quotes = await refreshQuotes(symbols);
-  const priceOf = new Map(quotes.map((q) => [q.symbol, q.price]));
+  let priceOf: Map<string, number>;
+  if (opts.quotes) {
+    // Test/Injektion: vorab bekannte Kurse (umgeht den Netzwerk-Quote).
+    priceOf = new Map(Object.entries(opts.quotes).map(([k, v]) => [k.toUpperCase(), v]));
+  } else {
+    const quotes = await refreshQuotes(symbols);
+    priceOf = new Map(quotes.map((q) => [q.symbol, q.price]));
+  }
 
-  // --- 2) SL/TP je Position prüfen ---
+  // --- 2) SL/TP/Trailing/Time-Stop je Position prüfen (server-seitig, OCO) ---
+
   const closedThisTick = new Set<string>();
+  const exitConfig = loadExitConfig();
   for (const row of openRows) {
     const price = priceOf.get(row.symbol.toUpperCase()) ?? Number(row.currentPrice ?? row.entryPrice);
     if (!Number.isFinite(price)) continue;
 
     const entry = Number(row.entryPrice);
-    const long = row.side === "LONG";
+    const side: "LONG" | "SHORT" = row.side === "SHORT" ? "SHORT" : "LONG";
     const sl = row.stopLoss != null ? Number(row.stopLoss) : null;
     const tp = row.takeProfit != null ? Number(row.takeProfit) : null;
 
-    const slHit = sl != null && ((long && price <= sl) || (!long && price >= sl));
-    const tpHit = tp != null && ((long && price >= tp) || (!long && price <= tp));
-
-    // currentPrice immer fortschreiben
+    // currentPrice immer fortschreiben (auch ohne Exit)
     await db
       .update(positions)
-      .set({ currentPrice: String(price), updatedAt: new Date() })
+      .set({ currentPrice: String(price), updatedAt: now })
       .where(eq(positions.id, row.id));
 
-    if (!slHit && !tpHit) continue;
-    if (slHit && tpHit) {
-      // Beide berührt im selben Intervall → konservativ: Stop gilt zuerst.
-      errors.push(`${row.symbol}: SL+TP gleichzeitig berührt — Stop hat Vorrang`);
-    }
+    // Reine, deterministische Exit-Entscheidung (SL/TP/Trailing/Time-Stop).
+    const decision = decideExit(
+      {
+        side,
+        entryPrice: entry,
+        price,
+        stopLoss: sl,
+        takeProfit: tp,
+        trailingStop: row.trailingStop != null ? Number(row.trailingStop) : null,
+        trailingArmed: row.trailingArmed === true,
+        createdAtMs: new Date(row.createdAt).getTime(),
+        nowMs: now.getTime(),
+      },
+      exitConfig,
+    );
 
-    const reason = slHit ? "STOP_LOSS" : "TAKE_PROFIT";
-    const fill = broker.close(row.symbol, reason);
-    if (fill) {
-      closedThisTick.add(row.id);
+    // Trailing-Zustand persistieren, wenn er sich geändert hat (Ratchet → nur
+    // erweitern, nie verengen — konservativ, siehe src/lib/exits.ts).
+    if (decision.trailingChanged) {
       await db
         .update(positions)
         .set({
-          status: "CLOSED",
-          exitPrice: String(fill.fillPrice),
-          realizedPnl: String(fill.realizedPnl),
-          exitReason: reason,
-          updatedAt: new Date(),
+          trailingArmed: decision.trailingArmed,
+          trailingStop: decision.trailingStop == null ? null : String(decision.trailingStop),
+          updatedAt: now,
         })
         .where(eq(positions.id, row.id));
-      stopsTriggered.push({ symbol: row.symbol, reason, pnl: fill.realizedPnl });
-      await logAudit(
-        reason === "STOP_LOSS" ? "STOP_LOSS_HIT" : "TAKE_PROFIT_HIT",
-        "INFO",
-        {
+
+      // Zustand ist eine Mutation → Audit, aber NUR je Bewaffnung einmal
+      // (false→true): reine Ratchet-Anhebungen sind Zustandspflege und
+      // würden den Audit-Log pro Tick fluten. Der Exit selbst auditiert
+      // separat mit Trigger-Preis (applyExit).
+      if (decision.trailingArmed && row.trailingArmed !== true) {
+        await logAudit("TRAILING_STOP_ARMED", "INFO", {
           symbol: row.symbol,
           entry,
-          exit: fill.fillPrice,
-          qty: row.qty,
-          side: row.side,
-          realizedPnl: fill.realizedPnl,
-          triggerPrice: price,
-        },
-        row.missionId ?? undefined
-      );
-      // GAP-03 (D1b): Journal-Metriken ergänzen (PnL, MAE/MFE aus Kerzen mit
-      // Zeitmaske ≤ Exit, Haltedauer, Exit-Reason, Lücken-Flag). Fehlertolerant
-      // — der Tick läuft weiter, ein Fehler landet in `errors`.
-      try {
-        await completeJournalRow({
-          positionId: row.id,
-          symbol: row.symbol,
-          side: row.side === "SHORT" ? "SHORT" : "LONG",
-          openedAt: row.createdAt,
-          entryPrice: entry,
-          exitPrice: fill.fillPrice,
-          realizedPnl: fill.realizedPnl,
-          exitReason: reason,
-          closedAt: new Date(),
-          missionId: row.missionId,
-          ruleId: row.ruleId,
+          price,
+          trailingStop: decision.trailingStop,
+          activationPct: exitConfig.trailingActivationPct,
+          returnPct: exitConfig.trailingReturnPct,
+          code: `trailing-arm:${row.symbol}`,
         });
-      } catch (e) {
-        errors.push(`Journal ${row.symbol}: ${e instanceof Error ? e.message : e}`);
       }
-      try {
-        await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "CLOSE");
-      } catch {
-        /* Kurvenpunkt optional */
-      }
+    }
+
+    if (decision.reason == null) continue;
+    if (decision.bothHit) {
+      // Beide (SL+TP) im selben Intervall berührt → konservativ: Stop zuerst.
+      errors.push(`${row.symbol}: SL+TP gleichzeitig berührt — Stop hat Vorrang`);
+    }
+
+    // Atomarer, OCO-garantierter Exit: genau ein Close je Position, auch bei
+    // parallelen Ticks/Prozessen. applyExit liefert `closed: false`, wenn ein
+    // anderer Tick/Prozess die Position bereits geschlossen hat (sauberer no-op).
+    const res = await applyExit({
+      broker,
+      positionId: row.id,
+      symbol: row.symbol,
+      side,
+      qty: Number(row.qty),
+      entryPrice: entry,
+      reason: decision.reason,
+      missionId: row.missionId,
+      ruleId: row.ruleId,
+      createdAt: row.createdAt,
+      now,
+      triggerPrice: price,
+      onError: (m) => errors.push(m),
+    });
+    if (res.closed) {
+      closedThisTick.add(row.id);
+      stopsTriggered.push({
+        symbol: row.symbol,
+        reason: decision.reason,
+        pnl: res.fill?.realizedPnl ?? 0,
+      });
     }
   }
 
@@ -221,7 +264,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     const events = await runFundingAccrual({
       broker,
       rows: fundingRows,
-      nowMs: Date.now(),
+      nowMs: now.getTime(),
       engine: getFundingEngine(),
     });
     for (const ev of events) {
@@ -270,7 +313,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
       errors.push(`Retention fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
     }
   }
-  const doScan = forceScan || GLOBAL.__tickCount % SCAN_EVERY_TICKS === 1;
+  const doScan = (!opts.skipScan) && (forceScan || GLOBAL.__tickCount % SCAN_EVERY_TICKS === 1);
   let marketScan = false;
   if (doScan) {
     try {
@@ -312,7 +355,7 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
   GLOBAL.__lastTickAt = Date.now();
   return {
     at: new Date().toISOString(),
-    quotesRefreshed: quotes.length,
+    quotesRefreshed: priceOf.size,
     stopsTriggered,
     fundingAccruals,
     dailyLossKill,
@@ -320,6 +363,119 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
     errors,
     adaptiveRisk,
   };
+}
+
+/**
+ * GAP-05 (v1.44.0): atomarer, OCO-garantierter Exit einer Position.
+ *
+ * Kritischer Pfad: zwei parallele Ticks (oder zwei Prozesse) entscheiden
+ * unabhängig, dieselbe Position zu schließen. Statt Check-then-Act im Speicher
+ * wird der Close durch ein **bedingtes UPDATE … WHERE status = 'OPEN'**
+ * atomar beansprucht — genau EINE Transaktion bekommt eine betroffene Zeile
+ * (die andere sieht die Position bereits als CLOSED und macht einen sauberen
+ * no-op: kein zweiter Fill, kein zweites Audit, kein Doppel-P&L). Das ist die
+ * OCO/Bracket-Exklusivität auf DB-Ebene (mehrprozess-sicher, nicht nur im
+ * Prozessspeicher).
+ *
+ * Danach (nur der Gewinner) wird der In-Memory-Ledger glattgestellt, der
+ * Exit-Preis/PnL nachgetragen und revisionssicher ins `audit_log` geschrieben
+ * (maschinenlesbarer Grund `exit:SYMBOL:grund`).
+ */
+export async function applyExit(params: {
+  broker: PaperBroker;
+  positionId: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  entryPrice: number;
+  reason: ExitReason;
+  missionId?: string | null;
+  ruleId?: string | null;
+  createdAt: Date;
+  now: Date;
+  triggerPrice?: number;
+  /** Fehler-Sammler (z. B. Monitor-`errors`) — bei direktem Testaufruf weglassbar. */
+  onError?: (msg: string) => void;
+}): Promise<{ closed: boolean; fill?: Fill & { realizedPnl: number } }> {
+  // 1) Atomarer Claim: nur wer die Position noch als OPEN vorfindet, darf sie
+  //    schließen. RETURNING liefert genau eine Zeile bei Erfolg (andernfalls []).
+  const claimed = await db
+    .update(positions)
+    .set({ status: "CLOSED", exitReason: params.reason, updatedAt: params.now })
+    .where(and(eq(positions.id, params.positionId), eq(positions.status, "OPEN")))
+    .returning({ id: positions.id });
+
+  if (claimed.length === 0) {
+    // Ein anderer Tick/Prozess war schneller → sauberer no-op (kein Doppel-Fill/Audit).
+    return { closed: false };
+  }
+
+  // 2) In-Memory-Ledger glattstellen (nur der Gewinner) — liefert Fill + PnL.
+  const fill = params.broker.close(params.symbol, params.reason);
+  const exitPrice = fill ? fill.fillPrice : params.triggerPrice ?? params.entryPrice;
+  const realizedPnl = fill ? fill.realizedPnl : 0;
+
+  // 3) Exit-Preis/PnL nachtragen (Position ist jetzt CLOSED; nur der Gewinner schreibt).
+  await db
+    .update(positions)
+    .set({ exitPrice: String(exitPrice), realizedPnl: String(realizedPnl) })
+    .where(eq(positions.id, params.positionId));
+
+  // 4) Revisionssicheres Audit — maschinenlesbarer Grund für JEDEN Exit.
+  //    Die Anordnung der Zweige ist kein Stilfehler: Der Katalog-Wächter
+  //    (tests/auditView.test.ts) erwartet das Literal-Paar TAKE_PROFIT_HIT/
+  //    STOP_LOSS_HIT direkt am Aufruf — die Legacy-Events stehen deshalb
+  //    zuletzt als benachbarte Zweige, die neuen (GAP-05) vorne.
+  await logAudit(
+    params.reason === "TRAILING_STOP" ? "TRAILING_STOP_HIT"
+    : params.reason === "TIME_STOP" ? "TIME_STOP_HIT"
+    : params.reason === "TAKE_PROFIT" ? "TAKE_PROFIT_HIT"
+    : "STOP_LOSS_HIT",
+    "INFO",
+    {
+      symbol: params.symbol,
+      entry: params.entryPrice,
+      exit: exitPrice,
+      qty: params.qty,
+      side: params.side,
+      realizedPnl,
+      triggerPrice: params.triggerPrice ?? exitPrice,
+      // Maschinenlesbarer Grund (OCO-Audit): "exit:SYMBOL:grund".
+      code: `exit:${params.symbol}:${params.reason}`,
+    },
+    params.missionId ?? undefined,
+  );
+
+  // 5) Trade-Journal + Equity-Snapshot (fehlertolerant, wie der bisherige Pfad).
+  try {
+    await completeJournalRow({
+      positionId: params.positionId,
+      symbol: params.symbol,
+      side: params.side,
+      openedAt: params.createdAt,
+      entryPrice: params.entryPrice,
+      exitPrice,
+      realizedPnl,
+      exitReason: params.reason,
+      closedAt: params.now,
+      missionId: params.missionId ?? null,
+      ruleId: params.ruleId ?? null,
+    });
+  } catch (e) {
+    params.onError?.(`Journal ${params.symbol}: ${e instanceof Error ? e.message : e}`);
+  }
+  try {
+    await writeEquitySnapshot(
+      params.broker.accountEquity,
+      params.broker.freeCash,
+      params.broker.openPositions,
+      "CLOSE",
+    );
+  } catch {
+    /* Kurvenpunkt optional */
+  }
+
+  return { closed: true, fill: fill ?? undefined };
 }
 
 /**

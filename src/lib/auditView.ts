@@ -308,6 +308,8 @@ export const BLOCK_REASON_LABELS: Record<string, string> = {
   INVALID_SYMBOL: "Ungültiges Symbol",
   STOP_LOSS_HIT: "Stop-Loss ausgelöst",
   TAKE_PROFIT_HIT: "Take-Profit erreicht",
+  TRAILING_STOP_HIT: "Trailing-Stop ausgelöst",
+  TIME_STOP_HIT: "Time-Stop (max. Haltedauer) erreicht",
   MISSION_KILLED: "Mission beendet",
   MAX_POSITION_PCT: "Positionsgröße über Limit",
   NO_STOP_LOSS: "Order ohne Pflicht-Stop-Loss",
@@ -335,6 +337,10 @@ export const BLOCK_REASON_EXPLANATIONS: Record<string, string> = {
     "Der Kurs hat den Stop-Loss erreicht; der Monitor hat die Position automatisch glattgestellt. Verlust ist einkalkuliert, kein Systemfehler.",
   TAKE_PROFIT_HIT:
     "Der Kurs hat das Take-Profit-Ziel erreicht; der Monitor hat den Gewinn realisiert.",
+  TRAILING_STOP_HIT:
+    "Der Trailing-Stop (GAP-05) hat die Position glattgestellt: Der Kurs ist vom erreichten Stand um mehr als den konfigurierten Rückgabeweg zurückgefallen. Gewinnschutz, kein Fehler.",
+  TIME_STOP_HIT:
+    "Die maximale Haltedauer (RISK_TIME_STOP_HOURS) ist erreicht; der Monitor hat die Position unabhängig vom Kurs geschlossen.",
   MISSION_KILLED: "Die zugehörige Mission wurde beendet, bevor der Auftrag ausgeführt werden konnte.",
   MAX_POSITION_PCT: "Die Ordergröße hätte das konfigurierte Positions-Limit überschritten.",
   NO_STOP_LOSS: "Jede Order braucht zwingend einen Stop-Loss. Ohne ihn wird nicht gehandelt.",
@@ -1224,6 +1230,98 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       }
       return [];
     },
+  },
+
+  TRAILING_STOP_ARMED: {
+    label: "Trailing-Stop bewaffnet",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Der Gewinn der Position hat die Aktivierungsschwelle erreicht; der Monitor hat den Trailing-Stop bewaffnet und seinen ersten Level persistiert (GAP-05, v1.44.0). Ab jetzt hebt der Stop nur noch in Schutzrichtung — jeder neue Level steht in `positions.trailing_stop`.",
+    headline: (d) => {
+      const symbol = symbolOf(d);
+      const stop = num(d.trailingStop);
+      return [symbol, stop !== null ? `Stop ${formatQuantity(stop)}` : ""].filter(Boolean).join(" · ");
+    },
+    explain: () => "Bewaffnung ist der Moment, in dem aus einem offenen Gewinn eine gesicherte Position wird.",
+    sections: (d) => [
+      {
+        title: "Bewaffnung",
+        facts: [
+          { label: "Symbol", value: symbolOf(d) || "—" },
+          { label: "Einstiegskurs", value: formatKnownValue("entry", d.entry) },
+          { label: "Aktueller Kurs", value: formatKnownValue("price", d.price) },
+          { label: "Trailing-Stop", value: formatKnownValue("trailingStop", d.trailingStop) },
+          { label: "Aktivierung (in %)", value: formatKnownValue("activationPct", d.activationPct) },
+          { label: "Rückgabeweg (in %)", value: formatKnownValue("returnPct", d.returnPct) },
+        ],
+      },
+    ],
+  },
+
+  TRAILING_STOP_HIT: {
+    label: "Trailing-Stop ausgelöst",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Der Kurs ist vom besten Stand um mehr als den konfigurierten Rückgabeweg gefallen bzw. gestiegen. Der Monitor hat die Position auf dem persistierten Trailing-Stop glattgestellt (GAP-05, v1.44.0) — Gewinnschutz, kein Fehler.",
+    headline: (d) => {
+      const side = text(d.side)?.toUpperCase();
+      const symbol = symbolOf(d);
+      const entry = num(d.entry);
+      const exit = num(d.exit);
+      return [
+        side ?? "Position",
+        symbol,
+        entry !== null && exit !== null ? `${formatQuantity(entry)} → ${formatQuantity(exit)}` : "",
+        num(d.realizedPnl) !== null ? `${formatSigned(num(d.realizedPnl) as number)} USD` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    },
+    explain: () =>
+      "Ein Trailing-Stop folgt dem Kurs und fixiert Gewinne, statt sie voll zurückzugeben. Dass er auslöst, ist erwartetes Verhalten.",
+    sections: (d) => [
+      {
+        title: "Positionsabschluss",
+        facts: [
+          { label: "Symbol", value: symbolOf(d) || "—" },
+          { label: "Richtung", value: formatKnownValue("side", d.side) },
+          { label: "Menge", value: formatKnownValue("qty", d.qty) },
+          { label: "Einstiegskurs", value: formatKnownValue("entry", d.entry) },
+          { label: "Ausstiegskurs", value: formatKnownValue("exit", d.exit) },
+          { label: "Auslösekurs", value: formatKnownValue("triggerPrice", d.triggerPrice) },
+          { label: "Realisierter Gewinn/Verlust", value: formatKnownValue("realizedPnl", d.realizedPnl) },
+        ],
+      },
+    ],
+  },
+
+  TIME_STOP_HIT: {
+    label: "Time-Stop ausgelöst",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Die Position hat die maximal konfigurierte Haltedauer erreicht und wurde vom Monitor glattgestellt (GAP-05, v1.44.0). Time-Stops begrenzen Halte- und Funding-Risiko und das Kapitalbinden ohne Signal — Absicherung, kein Fehler.",
+    headline: (d) => {
+      const symbol = symbolOf(d);
+      const exit = num(d.exit);
+      return [symbol, exit !== null ? `Exit ${formatQuantity(exit)}` : ""].filter(Boolean).join(" · ");
+    },
+    explain: () => "Eine Position länger zu halten als das konfigurierte Limit ist eine Risikoentscheidung — der Monitor trifft sie nicht ohne Auftrag.",
+    sections: (d) => [
+      {
+        title: "Positionsabschluss",
+        facts: [
+          { label: "Symbol", value: symbolOf(d) || "—" },
+          { label: "Richtung", value: formatKnownValue("side", d.side) },
+          { label: "Menge", value: formatKnownValue("qty", d.qty) },
+          { label: "Einstiegskurs", value: formatKnownValue("entry", d.entry) },
+          { label: "Ausstiegskurs", value: formatKnownValue("exit", d.exit) },
+          { label: "Realisierter Gewinn/Verlust", value: formatKnownValue("realizedPnl", d.realizedPnl) },
+        ],
+      },
+    ],
   },
 
   FUNDING_ACCRUAL: {

@@ -149,6 +149,12 @@ export type HydratePosition = {
    * → 0. Siehe src/lib/funding.ts (Vorzeichenkonvention).
    */
   fundingPaid?: number | null;
+  /**
+   * GAP-05 (v1.44.0): persistierter Trailing-Stop-Zustand. Optional —
+   * fehlt → nicht bewaffnet (Verhaltensneutralität nach Neustart).
+   */
+  trailingStop?: number | null;
+  trailingArmed?: boolean | null;
 };
 
 /**
@@ -196,6 +202,9 @@ export class PaperBroker {
       takeProfit: number | null;
       /** GAP-02: kumuliertes Funding (Kontosicht: negativ = gezahlt). */
       fundingPaid: number;
+      /** GAP-05: persistierter Trailing-Stop-Zustand. */
+      trailingStop: number | null;
+      trailingArmed: boolean;
     }
   >();
   private execution?: PaperExecutionAdapter;
@@ -284,6 +293,8 @@ export class PaperBroker {
       unrealizedPnl:
         (p.side === "LONG" ? 1 : -1) * p.qty * ((paperQuote(symbol) ?? p.entryPrice) - p.entryPrice),
       fundingPaid: p.fundingPaid,
+      trailingStop: p.trailingStop,
+      trailingArmed: p.trailingArmed,
     }));
   }
 
@@ -369,6 +380,12 @@ export class PaperBroker {
         stopLoss: sanitizeLevel(r.stopLoss),
         takeProfit: sanitizeLevel(r.takeProfit),
         fundingPaid: sanitizeFunding(r.fundingPaid),
+        // GAP-05 (v1.44.0): Trailing-Stop-Zustand mithydratieren, damit das
+        // Ledger nach einem Neustart denselben Stand zeigt wie die DB (kein
+        // Memory-Only-Verlust). Der Monitor liest ihn ohnehin aus der DB-Zeile,
+        // aber auch das Ledger soll ihn tragen (Konsistenz, siehe Exit-Mgmt).
+        trailingStop: sanitizeLevel(r.trailingStop),
+        trailingArmed: r.trailingArmed === true,
       });
     }
   }
@@ -716,6 +733,10 @@ export class PaperBroker {
         stopLoss: order.stopLoss ?? null,
         takeProfit: order.takeProfit ?? null,
         fundingPaid: 0,
+        // GAP-05: neu eröffnete Positionen sind nicht bewaffnet (der Monitor
+        // bewaffnet im Tick über den Konfigurations-Schwellenwert).
+        trailingStop: null,
+        trailingArmed: false,
       });
       this.cash -= cost;
 
@@ -754,6 +775,9 @@ export class PaperBroker {
       stopLoss: order.stopLoss ?? null,
       takeProfit: order.takeProfit ?? null,
       fundingPaid: 0,
+      // GAP-05: wie oben — frische Position, Trailing noch unbewaffnet.
+      trailingStop: null,
+      trailingArmed: false,
     });
     this.cash -= cost;
 
