@@ -7,6 +7,7 @@
  */
 import { PaperConfigError, type PaperMode } from "./types";
 import { normalizeSeed } from "./prng";
+import { envNumber } from "../../lib/env";
 
 /** Env-Namen (zentral, für Doku/Tests). */
 export const ENV = {
@@ -168,6 +169,88 @@ export function loadSimulatorConfig(env: EnvLike = process.env): FillSimulatorCo
     volume24hFallback: num(env, "PAPER_SIM_VOLUME_FALLBACK", 10_000_000, 1, 1e15),
     syntheticSpreadBps: num(env, "PAPER_SIM_SYNTHETIC_SPREAD_BPS", 2, 0, 10_000),
   };
+}
+
+// ── GAP-02 (v1.42.0): Kalibrierungs-Overlay für die Paper-Ausführung ────────
+
+/** Env-Namen der Kalibrierungs-Flags (zentral, für Doku/Tests). */
+export const CALIBRATION_ENV = {
+  PAPER_MAKER_FEE_PCT: "PAPER_MAKER_FEE_PCT",
+  PAPER_TAKER_FEE_PCT: "PAPER_TAKER_FEE_PCT",
+  PAPER_SLIPPAGE_BPS: "PAPER_SLIPPAGE_BPS",
+  PAPER_SPREAD_FALLBACK_BPS: "PAPER_SPREAD_FALLBACK_BPS",
+} as const;
+
+/** Bounds der Kalibrierungs-Flags (Clamp + Warnung, siehe envNumber). */
+export const CALIBRATION_BOUNDS = {
+  /** Gebühren in Prozent: 0 = gratis, 10 % = absurd hohe Obergrenze. */
+  feePct: { min: 0, max: 10 },
+  /** Slippage/Spread in Basispunkten (10 000 bp = 100 %). */
+  bps: { min: 0, max: 10_000 },
+} as const;
+
+/**
+ * Kalibriert die Simulator-Konfiguration über die GAP-02-Flags
+ * (`PAPER_MAKER_FEE_PCT`, `PAPER_TAKER_FEE_PCT`, `PAPER_SLIPPAGE_BPS`,
+ * `PAPER_SPREAD_FALLBACK_BPS`).
+ *
+ * Semantik — bewusstes Overlay, kein zweiter Konfig-Pfad:
+ *   - Flag NICHT gesetzt  → `base` wird **als Referenz** zurückgegeben
+ *     (Default = die heutigen hartcodierten Werte bzw. ein gesetztes
+ *     Legacy-`PAPER_SIM_*`-Flag). Live-Mutationen an der Manager-Konfiguration
+ *     (z. B. `manager.config.simulator.partialFillEnabled = true` in Tests)
+ *     bleiben damit sichtbar — kein Verhaltensbruch.
+ *   - Flag GESETZT        → neue Kopie mit überschriebenem Feld, mit Bounds-
+ *     Clamp und Log-Warnung bei Korrektur (`envNumber`, Muster src/lib/env.ts).
+ *
+ * Einheiten: `_PCT`-Flags sind PROZENT (0.04 = 0,04 % ⇒ 0.0004 als
+ * Dezimalanteil), `_BPS`-Flags sind Basispunkte — identisch zur Tabelle in
+ * docs/PAPER_TRADING.md §3.1 und CONFIGURATION.md.
+ */
+export function calibrateSimulatorConfig(
+  base: FillSimulatorConfig,
+  env: EnvLike = process.env
+): FillSimulatorConfig {
+  const overrides: Partial<FillSimulatorConfig> = {};
+  const override = (name: string, min: number, max: number, apply: (v: number) => void): void => {
+    const raw = env[name];
+    if (raw === undefined || raw.trim() === "") return;
+    const raw2 = raw.trim();
+    const n = Number(raw2);
+    if (!Number.isFinite(n)) {
+      console.warn(`[env] ${name}="${raw2.slice(0, 40)}" ist keine Zahl → Kalibrierung ignoriert, Basis-Konfiguration bleibt gelten`);
+      return;
+    }
+    // envNumber übernimmt Bounds-Clamp + Warnung (fail-laut).
+    apply(envNumber(name, n, min, max, env));
+  };
+  override(
+    CALIBRATION_ENV.PAPER_MAKER_FEE_PCT,
+    CALIBRATION_BOUNDS.feePct.min,
+    CALIBRATION_BOUNDS.feePct.max,
+    (v) => (overrides.makerFeeFallback = v / 100)
+  );
+  override(
+    CALIBRATION_ENV.PAPER_TAKER_FEE_PCT,
+    CALIBRATION_BOUNDS.feePct.min,
+    CALIBRATION_BOUNDS.feePct.max,
+    (v) => (overrides.takerFeeFallback = v / 100)
+  );
+  override(
+    CALIBRATION_ENV.PAPER_SLIPPAGE_BPS,
+    CALIBRATION_BOUNDS.bps.min,
+    CALIBRATION_BOUNDS.bps.max,
+    (v) => (overrides.slippageBpsBase = v)
+  );
+  override(
+    CALIBRATION_ENV.PAPER_SPREAD_FALLBACK_BPS,
+    CALIBRATION_BOUNDS.bps.min,
+    CALIBRATION_BOUNDS.bps.max,
+    (v) => (overrides.syntheticSpreadBps = v)
+  );
+  // Ohne Overrides: Basis als Referenz (Live-Mutationen bleiben wirksam).
+  if (Object.keys(overrides).length === 0) return base;
+  return { ...base, ...overrides };
 }
 
 /** Gesamtkonfiguration der Market-Data-Schicht. */

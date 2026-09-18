@@ -158,6 +158,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       unrealizedPnl: p.unrealizedPnl,
       stopLoss: p.stopLoss,
       takeProfit: p.takeProfit,
+      // GAP-02: kumuliertes Funding je Position (Kontosicht: negativ = gezahlt).
+      fundingPaid: p.fundingPaid,
     }));
   }
 }
