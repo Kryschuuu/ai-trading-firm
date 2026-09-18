@@ -42,6 +42,13 @@ import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
 import { getProductionMarketDataManager, wirePaperExecution } from "./marketdata/production";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
+import {
+  completeJournalRow,
+  buildProposalSnapshot,
+  recordJournalOpen,
+  type JournalSource,
+} from "./journal";
+import { formatJournalWeightsContext, getEffectiveWeights } from "./journalAnalytics";
 import { ensureAdaptiveRiskFresh, getAdaptiveRiskStatus } from "./adaptiveRisk";
 import { getHouseView } from "./analysts";
 import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
@@ -605,6 +612,21 @@ export async function runAgentTurn(
     inCooldown ? `ACHTUNG: ${consecLosses} Verluste in Folge — Cooldown aktiv, empfiehlt HOLD.` : "",
   ].filter(Boolean).join("\n");
 
+  // GAP-03 (v1.43.0): Journal-Feedback-Gewichte wirken NUR im Modus
+  // "enforce" im Entscheidungspfad (Approver-/Portfolio-Kontext). "off"
+  // (Default) und "monitor" lassen den Prompt byte-identisch — die
+  // Auswertung bleibt reines Nachschlagen (GET /api/firm/journal).
+  let journalContext = "";
+  if (process.env.JOURNAL_FEEDBACK_MODE === "enforce") {
+    try {
+      const regime = adaptiveRegime ?? "UNKNOWN";
+      const effectiveWeights = await getEffectiveWeights(regime);
+      journalContext = formatJournalWeightsContext(effectiveWeights, regime);
+    } catch {
+      journalContext = ""; // Journal optional — darf den Turn nicht blocken.
+    }
+  }
+
   const userPrompt = [
     `MISSION: ${mission.objective}`,
     `SYMBOL=${symbolHint}`,
@@ -617,6 +639,8 @@ export async function runAgentTurn(
     marketContext,
     kpiContext,
     houseContext,
+    // NUR bei aktiven enforce-Gewichten — off/monitor bleibt prompt-identisch.
+    ...(journalContext ? [journalContext] : []),
     ``,
     `Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:`,
     `{"type":"TRADE|HOLD|REPORT|APPROVE|REJECT","symbol":"${symbolHint}","side":"${limits.allowShort ? "LONG|SHORT" : "LONG"}","stopLossPct":${snap?.atrPercent != null ? Math.max(1, Math.min(20, snap.atrPercent * limits.atrStopMultiplier)).toFixed(1) : 5},"reason":"kurze Begründung","riskScore":0.4}`,
@@ -928,9 +952,13 @@ export async function runAgentTurn(
       // Mission/dasselbe Konto einreichen, können nie mehr beide dieselbe
       // Position eröffnen oder gemeinsam das Cash überziehen — die DB ist
       // die einzige Quelle der Wahrheit, nicht der Prozessspeicher.
+      // GAP-03: Positions-ID aus dem Eröffnungs-Insert übernehmen, damit die
+      // Journal-Zeile (nach der Transaction, unten) exakt diese Position
+      // verknüpfen kann — ohne Schema-Änderung an `positions`.
+      const journalPosRef: { value: { id: string; createdAt: Date } | null } = { value: null };
       const fill = await broker.submitAtomic(order, {
         persistPosition: async (tx, f) => {
-          await tx.insert(positions).values({
+          const [pos] = await tx.insert(positions).values({
             symbol: f.symbol,
             side: f.side,
             qty: String(f.qty),
@@ -941,7 +969,8 @@ export async function runAgentTurn(
             broker: broker.name,
             missionId,
             status: "OPEN",
-          });
+          }).returning({ id: positions.id, createdAt: positions.createdAt });
+          journalPosRef.value = pos ?? null;
           await tx.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, missionId));
         },
       });
@@ -958,6 +987,36 @@ export async function runAgentTurn(
         return { ...base, status: "BLOCKED", fill, guardrail: why, trace };
       }
       trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${fill.fillPrice}, SL ${fill.stopLoss}, TP ${fill.takeProfit}`));
+
+      // GAP-03 (D1a): Journal-Zeile mit Decision-Snapshot aus Proposal +
+      // Agenten-Turns der Mission (Entscheidungskette). Nach der Fill-
+      // Transaktion, fehlertolerant — ein Journal-Fehler bricht den Trade
+      // NICHT ab (visible gap + CRITICAL-Audit statt Order-Abbruch).
+      if (journalPosRef.value) {
+        try {
+          const snapshot = await buildProposalSnapshot({
+            proposalId: proposal.id,
+            missionId,
+            agentId: agent.id,
+            reason: proposal.reason,
+            detail: proposal.proposedDetail,
+            regime: adaptiveRegime ?? "UNKNOWN",
+            source: "ENGINE",
+            openedAt: journalPosRef.value.createdAt,
+          });
+          await recordJournalOpen({
+            positionId: journalPosRef.value.id,
+            symbol,
+            side,
+            openedAt: journalPosRef.value.createdAt,
+            missionId,
+            ruleId: null,
+            snapshot,
+          });
+        } catch (e) {
+          console.error("[engine] trade journal (open):", e instanceof Error ? e.message : e);
+        }
+      }
 
       try {
         await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE");
@@ -1125,8 +1184,18 @@ export async function flattenAll(
   // Exit-Preise (Positionen ohne belegten Preis bleiben für den Operator
   // sichtbar offen, der Flat-Beweis steht im Audit).
   if (resolved.mode === "paper" && !opts?.broker) {
+    // GAP-03 (D1b): Journal-Metriken beim Flatten schließen — Entry/Open aus
+    // der DB-Zeile (vor dem Update), nicht aus dem Fill erfunden.
+    let openBefore: (typeof positions.$inferSelect)[] = [];
+    try {
+      openBefore = await db.select().from(positions).where(eq(positions.status, "OPEN"));
+    } catch {
+      openBefore = []; // DB-Lesefehler: Journal-Close entfällt, Flatten läuft weiter.
+    }
+    const openBySymbol = new Map(openBefore.map((p) => [p.symbol, p]));
     for (const f of seq.fills) {
       if (!Number.isFinite(f.fillPrice) || f.fillPrice <= 0) continue;
+      const posRow = openBySymbol.get(f.symbol) ?? null;
       await db
         .update(positions)
         .set({
@@ -1137,6 +1206,25 @@ export async function flattenAll(
           updatedAt: new Date(),
         })
         .where(and(eq(positions.status, "OPEN"), eq(positions.symbol, f.symbol)));
+      if (posRow) {
+        try {
+          await completeJournalRow({
+            positionId: posRow.id,
+            symbol: posRow.symbol,
+            side: posRow.side === "SHORT" ? "SHORT" : "LONG",
+            openedAt: posRow.createdAt,
+            entryPrice: Number(posRow.entryPrice),
+            exitPrice: f.fillPrice,
+            realizedPnl: f.realizedPnl,
+            exitReason: reason,
+            closedAt: new Date(),
+            missionId: posRow.missionId,
+            ruleId: posRow.ruleId,
+          });
+        } catch {
+          /* Journal ist fehlertolerant (CRITICAL-Audit intern) */
+        }
+      }
     }
     try {
       const ledger = resolved.broker as unknown as {
@@ -1214,15 +1302,19 @@ export async function executeApprovedProposal(
   // Positions-Insert laufen jetzt in einer exklusiv gesperrten Transaktion
   // (order_intents-Reservierung), statt Broker-Mutation und DB-Insert zeitlich
   // auseinanderzureißen.
+  // GAP-03: Positions-ID übernehmen (Journal-Verknüpfung, siehe
+  // runAgentTurn/EXECUTOR-Pfad).
+  const journalPosRef: { value: { id: string; createdAt: Date } | null } = { value: null };
   const fill = await broker.submitAtomic({ ...detail, side: detail.side as "LONG" | "SHORT" } as any, {
     persistPosition: async (tx, f) => {
-      await tx.insert(positions).values({
+      const [pos] = await tx.insert(positions).values({
         symbol: f.symbol, side: f.side, qty: String(f.qty),
         entryPrice: String(f.fillPrice), currentPrice: String(f.fillPrice),
         stopLoss: f.stopLoss === null ? null : String(f.stopLoss),
         takeProfit: f.takeProfit === null ? null : String(f.takeProfit),
         broker: broker.name, missionId: proposal.missionId, status: "OPEN",
-      });
+      }).returning({ id: positions.id, createdAt: positions.createdAt });
+      journalPosRef.value = pos ?? null;
       if (proposal.missionId) {
         await tx.update(missions).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(missions.id, proposal.missionId));
       }
@@ -1238,6 +1330,42 @@ export async function executeApprovedProposal(
   }
 
   await db.update(proposals).set({ status: "EXECUTED", reason: "Filled by approved-proposal executor" }).where(eq(proposals.id, proposalId));
+
+  // GAP-03 (D1a): Journal-Zeile mit Decision-Snapshot aus dem genehmigten
+  // Proposal + Agenten-Turns der Mission. Fehlertolerant wie im
+  // EXECUTOR-Direktpfad (Journal-Fehler bricht den ausgeführten Trade nicht ab).
+  if (journalPosRef.value) {
+    try {
+      let regime = "UNKNOWN";
+      try {
+        regime = getAdaptiveRiskStatus()?.regime ?? "UNKNOWN";
+      } catch {
+        regime = "UNKNOWN"; // keine Bewertung vorhanden → sichtbar, nicht geraten
+      }
+      const snapshot = await buildProposalSnapshot({
+        proposalId,
+        missionId: proposal.missionId,
+        agentId: proposal.agentId,
+        reason: proposal.reason,
+        detail: proposal.proposedDetail,
+        regime,
+        source: "ENGINE",
+        openedAt: journalPosRef.value.createdAt,
+      });
+      await recordJournalOpen({
+        positionId: journalPosRef.value.id,
+        symbol: String(detail.symbol),
+        side: detail.side as "LONG" | "SHORT",
+        openedAt: journalPosRef.value.createdAt,
+        missionId: proposal.missionId,
+        ruleId: null,
+        snapshot,
+      });
+    } catch (e) {
+      console.error("[engine] trade journal (open, approved proposal):", e instanceof Error ? e.message : e);
+    }
+  }
+
   try { await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "TRADE"); } catch { /* optional */ }
   return { ...base, status: "EXECUTED", fill };
 }

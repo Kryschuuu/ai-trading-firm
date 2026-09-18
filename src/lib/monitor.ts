@@ -26,6 +26,7 @@ import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
 import { realizedPnlToday, writeEquitySnapshot, pruneEquitySnapshots } from "./equity";
 import { FundingAccrualEngine, loadFundingConfig, runFundingAccrual } from "./funding";
+import { completeJournalRow } from "./journal";
 import { getProductionMarketDataManager } from "./marketdata/production";
 
 const GLOBAL = globalThis as typeof globalThis & {
@@ -171,6 +172,26 @@ async function doTick(forceScan: boolean): Promise<TickResult> {
         },
         row.missionId ?? undefined
       );
+      // GAP-03 (D1b): Journal-Metriken ergänzen (PnL, MAE/MFE aus Kerzen mit
+      // Zeitmaske ≤ Exit, Haltedauer, Exit-Reason, Lücken-Flag). Fehlertolerant
+      // — der Tick läuft weiter, ein Fehler landet in `errors`.
+      try {
+        await completeJournalRow({
+          positionId: row.id,
+          symbol: row.symbol,
+          side: row.side === "SHORT" ? "SHORT" : "LONG",
+          openedAt: row.createdAt,
+          entryPrice: entry,
+          exitPrice: fill.fillPrice,
+          realizedPnl: fill.realizedPnl,
+          exitReason: reason,
+          closedAt: new Date(),
+          missionId: row.missionId,
+          ruleId: row.ruleId,
+        });
+      } catch (e) {
+        errors.push(`Journal ${row.symbol}: ${e instanceof Error ? e.message : e}`);
+      }
       try {
         await writeEquitySnapshot(broker.accountEquity, broker.freeCash, broker.openPositions, "CLOSE");
       } catch {

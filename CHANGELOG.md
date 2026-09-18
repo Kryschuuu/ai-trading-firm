@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.42.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.43.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,113 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.43.0] — 2026-09-18 · feat(paper): Trade-Journal mit Agenten-Attribution + begrenzte Gewichts-Rückführung (GAP-03)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-03](docs/audits/2026-09-18-feature-gap/findings/GAP-03-trade-journal-attribution.md))
+gab es keinen Weg, **nachvollziehen zu können, welche Agenten-Entscheidung zu
+welcher Position geführt hat** — und damit keinen belastbaren Boden für eine
+Lernschleife. `positions` referenziert Missionen/Regeln, aber nicht die
+Entscheidungskette (Stimmen, Regime, Begründung) zum Eröffnungszeitpunkt;
+Excursions (MAE/MFE) wurden nie gemessen. Dieser Release schließt die Lücke
+(PROMPT-03 der Remediation-Serie) mit einem **append-only Trade-Journal** und
+einer **bewusst begrenzten, aus- bzw. zuschaltbaren Feedback-Schleife** —
+sicherheitsseitig Default **off**. Umsetzung: PR
+[#137](https://github.com/Kryschuuu/ai-trading-firm/pull/137)
+(`arena/01a0b4c1-ai-trading-firm`).
+
+### Hinzugefügt
+
+- **Neue append-only Tabelle `trade_journal`** (Migration
+  `drizzle/2026-09-18_trade_journal.sql`, alternativ `npx drizzle-kit push`;
+  **keine Änderung bestehender Tabellen/Spalten** — die fehlende Verknüpfung
+  wird über ein Foto im Journal geschlossen, nicht über neue FKs an
+  `positions`):
+  - `position_id` (UNIQUE, FK), `symbol`, `side`, `opened_at`, `closed_at`,
+    `mission_id`, `rule_id`, `decision_snapshot` (jsonb), `regime`
+    (UNKNOWN erlaubt), `pnl`, `mae_pct`, `mfe_pct`, `holding_minutes`,
+    `exit_reason`, `quality` (OK | CANDLE_GAP | NO_DATA | ERROR), `created_at`.
+  - **Schreibweg (a) bei Eröffnung** (Engine EXECUTOR-Direktpfad,
+    genehmigtes Proposal, Mikro-Executor-Regelpfad): `decision_snapshot` =
+    unveränderliches Foto der Entscheidungskette — Attribution
+    `PROPOSAL`/`RULE`/`UNKNOWN`, Stimmen (Agenten-Turns der Mission im
+    6h-Fenster), Proposer, Regime, `rationale_hash` (sha256(reason+detail)
+    bzw. Regel-Signatur). **Fehlt die Verknüpfung (z. B. manuelle
+    Altbestands-Position), trägt der Snapshot `attribution: "UNKNOWN"` —
+    die Lücke ist sichtbar, wird nie still geraten (fail-closed).**
+  - **Schreibweg (b) beim Close** (Monitor SL/TP, Emergency-Flatten):
+    PnL, Haltedauer, Exit-Reason + MAE/MFE; fehlende Zeile wird mit
+    UNKNOWN-Snapshot nachgetragen (Backfill).
+  - Robustheitsvertrag: ein Journal-Fehler **bricht den Handelspfad nie ab**
+    (CRITICAL-Audit `JOURNAL_WRITE_FAILED`, Lücke bleibt in der Tabelle
+    sichtbar).
+- **MAE/MFE aus Kerzen** (`src/lib/journalMetrics.ts`, rein/deterministisch):
+  Zeitmaske nur auf Kerzen mit Intervallstart ∈ [Eröffnung, Close] (Default
+  1h, `JOURNAL_CANDLES_TIMEFRAME`); einheitliches **P&L-Vorzeichen**
+  (MAE = P&L am ungünstigsten Kurs ≤ 0, MFE = P&L am günstigsten Kurs ≥ 0,
+  LONG und SHORT). **Kerzenlücke ⇒ Metriken null + Flag `CANDLE_GAP`
+  (niemals geschätzt)**; leeres Fenster ⇒ `NO_DATA`.
+- **Auswertung** (`src/lib/journalAnalytics.ts`): Trefferquote/Erwartungswert
+  je Agent × Regime × Symbolgruppe (Asset-Klasse der Registry) mit
+  **Beta-Prior-Glättung α=β=2** (dokumentierte Konstante
+  `JOURNAL_BETA_PRIOR`) und **Mindest-Stichprobe `JOURNAL_MIN_TRADES`
+  (Default 20, Bounds [5,200])** — darunter Status `insufficient-sample`
+  und die Kennzahl wird **niemals als Faktor** verwendet.
+- **Read-API `GET /api/firm/journal`** (SEC-02-Muster: `firm.read`,
+  `force-dynamic`, `no-store`): vollständige Summary (Totals inkl.
+  attributed/unattributed, Gruppen, Gewichtsstand/Vorschläge). DB-Fehler ⇒
+  sauberes `503 JOURNAL_UNAVAILABLE`.
+- **Zyklus-Artefakte:** der Daily-Cycle schreibt `journal-feedback.json` +
+  `journal-summary.json` neben die übrigen Tages-Artefakte (best-effort —
+  ein Journal-Fehler bricht den Zyklus nie ab).
+- **Begrenzte Gewichts-Rückführung `JOURNAL_FEEDBACK_MODE`** (Default **off**):
+  - `off` — nur Auswertung; Entscheidungspfad bleibt **byte-identisch** zu
+    v1.42.x (kein Prompt-Kontext, keine Gewichtszeilen).
+  - `monitor` — vorgeschlagene Gewichte als `audit_log`-Events
+    (`JOURNAL_WEIGHT_PROPOSED`) + Zyklus-Artefakt; Entscheidungspfad
+    unverändert.
+  - `enforce` — Gewichte werden in der neuen Tabelle
+    `journal_agent_weights` persistiert (`JOURNAL_WEIGHT_APPLIED`,
+    revisionssicher `journal-weight:AGENT:REGIME:x→y`) und wirken im
+    Approver-/Portfolio-Prompt der Engine (Regime-scope).
+  - **Schutzschalen (GAP-03 D4):** Bounds
+    [`JOURNAL_WEIGHT_MIN`=0.5, `JOURNAL_WEIGHT_MAX`=1.5], **maximale
+    Änderung je Zyklus `JOURNAL_MAX_WEIGHT_DELTA` (Default 0.1, Bounds
+    [0.01,0.5])** → selbst extreme Serien bewegen Gewichte nur
+    schrittweise; Bayes-Glättung FIRST (frische Trades können ohne
+    ausreichend großen Beleg kein Gewicht außerhalb der Bounds treiben).
+  - **Sicherheitsbegründung des off-Defaults:** ein Lern-Loop ist genau dort
+    am gefährlichsten, wo er kleine Stichproben als Signal umsetzen würde;
+    deshalb reiner Nachschlageweg bis der Operator die Auswertung geprüft
+    hat (→ monitor → optional enforce).
+- **Tests** `tests/tradeJournal.test.ts` (21 Tests): MAE/MFE-Handreferenzen
+  LONG+SHORT (inkl. Zeitmaske, CANDLE_GAP/NO_DATA), Glättung (2/3 nahe am
+  Prior, 20/30 empirisch, n=0 → 0.5), Bounds/maxDelta (Clamp, schrittweise
+  Multi-Zyklus-Annäherung), Config-Clamp/fail-closed, E2E-Attribution über
+  `executeApprovedProposal` (Snapshot korrekt, Close-Metriken,
+  UNKNOWN-Backfill, idempotente Eröffnung), Auswertung (insufficient-sample
+  nie als Faktor) + Modus-Verhalten off/monitor/enforce mit audit_log- und
+  `journal_agent_weights`-Prüfung, Quellmuster-Wiring aller Schreibpfade.
+
+### Dokumentation
+
+- `docs/HANDBUCH.md`: neuer Abschnitt **§13 „Trade-Journal“**
+  (Attribution, KPIs, Glättung, Feedback-Modi + Sicherheitsbegründung,
+  Diagnose).
+- `CONFIGURATION.md` + `.env.example`: sechs neue `JOURNAL_*`-Flags mit
+  Defaults/Bounds.
+- `docs/audits/2026-09-18-feature-gap/remediation/TRACKING.md`: GAP-03 →
+  IN_PROGRESS (dieser PR; FIXED nach Merge); Finding-Datei um
+  „Umsetzung“-Abschnitt ergänzt.
+
+### Nicht enthalten (bewusst)
+
+- Keine Qualitätsbefund-Verarbeitung (z. B. automatische Degradierung bei
+  vielen CANDLE_GAP) — die Flaggs sind vorhanden und sichtbar, die
+  Auswertung gehört in einen Folge-Release.
+- Keine Änderung an `src/live-gate/**` (Paper-only bleibt erzwungen); keine
+  neuen Runtime-Dependencies.
 
 ## [1.42.0] — 2026-09-18 · feat(backtest): Multi-Asset Event-Driven Backtest-Engine & Replay-Simulator (Task 02)
 
