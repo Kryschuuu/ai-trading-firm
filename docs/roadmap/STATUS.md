@@ -1,6 +1,6 @@
 # Roadmap & Entwicklungs-Status
 
-> **Stand:** 2026-09-18 · **Code-Version:** 1.40.0  
+> **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
 > **Verantwortlich:** `docs/roadmap/STATUS.md`
 
 ---
@@ -15,13 +15,19 @@
   - Etablierung des Architecture Decision Logs in `docs/roadmap/DECISIONS.md`.
   - Verifikation aller referenzierten Dateipfade und Einhaltung der CI-Doku-Validierung (`npm run docs:validate`).
 
+- [x] **TASK 02: Multi-Asset Backtest-Engine & Replay-Simulator**
+  - Entwicklung der synchronisierten Event-Driven Multi-Asset Backtest-Engine unter `src/backtest/` (`engine.ts`, `portfolio.ts`, `simulator.ts`, `metrics.ts`, `types.ts`).
+  - Zeitleisten-Synchronisation über N Instrumente (`HistoricalStore`) ohne Lookahead-Bias.
+  - Zentrales Portfolio-Management mit Cash-Tracking, Mark-to-Market-Eigenkapital und Risikodeckeln.
+  - Realistische Slippage- und Gebührenmodelle mit Stop-Loss-Vorrang bei Kerzenkollisionen.
+  - Vollständige mathematische Portfolio-Kennzahlen (Sharpe, Sortino, Max Drawdown, Profit Factor, Expectancy, CAGR, Streaks).
+  - Nahtlose Integration in Step 8 des Agenten-Zyklus (`src/cycle/steps/backtestStep.ts`) und REST-API `POST /api/firm/backtest`.
+  - Normative Dokumentation in `docs/BACKTEST_ENGINE.md` und ADR-007 in `docs/roadmap/DECISIONS.md`.
+
 ---
 
 ## 2. Offen
 
-- [ ] **TASK 02: Multi-Asset Backtest-Engine & Replay-Simulator**
-  - Entwicklung eines synchronisierten Multi-Asset-Event-Replay-Simulators auf Basis von `HistoricalStore`.
-  - Berechnung von Portfolio-Kennzahlen (Drawdown, Sharpe, Sortino, Profit Factor, Exposure-Clustering).
 - [ ] **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren**
   - Erweiterung des Bitunix-Market-Data-Adapters um Funding Rates und Open Interest.
   - Persistenz im `InstrumentRegistry`-Schema und Aktivierung der Faktoren 12 (`funding`) und 13 (`openInterest`).
@@ -38,4 +44,4 @@
 
 ## 3. Nächster Schritt
 
-- Start von **TASK 02: Multi-Asset Backtest-Engine & Replay-Simulator** unter Nutzung des in `docs/architecture/INTEGRATION_POINTS.md` definierten Schnittstellen-Blueprints.
+- Start von **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren** zur Anbindung von echten Funding-Rates und Open-Interest-Daten von Bitunix.

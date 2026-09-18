@@ -1,18 +1,18 @@
-# Integrationspunkte & Erweiterungs-Blaupause (v1.40.0)
+# Integrationspunkte & Erweiterungs-Blaupause (v1.41.0)
 
 > **Dokumenten-Status:** Kanonische Integrations- und Erweiterungskarte  
-> **Stand:** 2026-09-18 · **Code-Version:** 1.40.0  
+> **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
 > **Verbindliche Referenz:** `docs/architecture/INTEGRATION_POINTS.md`
 
-Dieses Dokument spezifiziert die **10 wichtigsten Integrationspunkte** im System für die anstehenden Erweiterungen (Backtest-Engine, Trade-Attribution, Regime-Filter, Perp-Daten, Portfolio-Sizing, Execution-Tracking, etc.).
+Dieses Dokument spezifiziert die **10 wichtigsten Integrationspunkte** im System für anstehende und implementierte Erweiterungen (Backtest-Engine, Trade-Attribution, Regime-Filter, Perp-Daten, Portfolio-Sizing, Execution-Tracking, etc.).
 
 ---
 
 ## Übersicht der 10 Integrationspunkte
 
-| # | Integrationspunkt | Primäre Quelldateien | Erweiterungsziel |
+| # | Integrationspunkt | Primäre Quelldateien | Status / Erweiterungsziel |
 |---|---|---|---|
-| 1 | **Backtest-Engine (Multi-Asset)** | `src/cycle/steps/backtestStep.ts`, `src/lib/marketdata/historicalStore.ts`, `src/lib/ruleEngine.ts` | Vollständiger deterministischer Event-Driven Backtest über historische Kerzen |
+| 1 | **Backtest-Engine (Multi-Asset)** | `src/backtest/engine.ts`, `src/backtest/portfolio.ts`, `src/backtest/simulator.ts`, `src/cycle/steps/backtestStep.ts` | **Implementiert (Task 02 / v1.41.0):** Vollständiger synchronisierter Event-Driven Backtest über historische Kerzen |
 | 2 | **Trade-Attribution & Analytics** | `src/lib/broker.ts`, `src/lib/microExecutor.ts`, `src/db/schema.ts` | PnL-Zuordnung je Regel, Setup, Agent und Markt-Regime |
 | 3 | **Regime-Filter (Markt & Asset)** | `src/scanner/regime.ts`, `src/cycle/steps/macroStep.ts`, `src/lib/adaptiveRisk.ts` | Marktweites Makro-Regime + instrument-spezifisches Volatilitätsregime |
 | 4 | **Perp-Daten-Ingestion (FR / OI)** | `src/marketdata/adapters/bitunix.ts`, `src/marketdata/sync.ts`, `src/scanner/factors/funding.ts` | Echte Funding Rates und Open Interest von Bitunix erfassen und persisted enrichern |

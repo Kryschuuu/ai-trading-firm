@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-> **Stand:** 2026-09-18 · **Code-Version:** 1.40.0  
+> **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
 > **Verantwortlich:** `docs/roadmap/DECISIONS.md`
 
 Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen, Annahmen und Invarianten des Gesamtsystems.
@@ -76,3 +76,15 @@ Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen,
   - `HistoricalStore` (`data/history/candles.ndjson`) nutzt Schema-Version **v2** mit Pflichtfeld `timeframe` aus der Allowlist (`1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `1d`, `5d`).
   - Logischer Primärschlüssel ist `instrumentId + timeframe + ts`.
   - Automatische Kompaktierung (`compact()`) auf max. 5.000 Kerzen je Reihe beim Batch-Append.
+
+---
+
+## ADR-007: Event-Driven Multi-Asset Backtesting & Stop-Vorrang-Invariante (Task 02)
+
+- **Status:** Angenommen & Verbindlich
+- **Kontext:** Isolierte Einzeltitel-Backtests übersehen Liquiditätsengpässe, gleichzeitige Signale und Portfolio-Klumpenrisiken.
+- **Entscheidung:**
+  - Die Backtest-Engine (`src/backtest/`) arbeitet zeitachsensynchronisiert über alle Instrumente hinweg ohne Lookahead-Bias.
+  - Ein zentrales Portfolio verwaltet Cash, offene Positionen und Notional-Caps über alle parallelen Trades.
+  - Bei zeitgleicher Berührung von Stop-Loss und Take-Profit innerhalb derselben Kerze greift ausnahmslos der **Stop-Loss-Vorrang**.
+  - Metriken werden aus der kontinuierlichen Equity-Kurve abgeleitet (Sharpe, Sortino, Max Drawdown mit Recovery-Dauer, Profit Factor, Win Rate, Expectancy).

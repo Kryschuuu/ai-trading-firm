@@ -1,7 +1,7 @@
-# Datenbank-Schema & Persistenz-Verzeichnis (v1.40.0)
+# Datenbank-Schema & Persistenz-Verzeichnis (v1.41.0)
 
 > **Dokumenten-Status:** Kanonisches Datenbank- und Persistenzverzeichnis  
-> **Stand:** 2026-09-18 · **Code-Version:** 1.40.0  
+> **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
 > **Verbindliche Referenz:** `src/db/schema.ts`
 
 Dieses Dokument spezifiziert alle 15 Drizzle-Tabellen der PostgreSQL-Datenbank sowie sämtliche dateigestützten Persistenzstrukturen des Gesamtsystems.

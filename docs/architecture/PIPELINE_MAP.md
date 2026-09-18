@@ -1,6 +1,6 @@
-# Pipeline-Architektur & Ausführungskarte (v1.40.0)
+# Pipeline-Architektur & Ausführungskarte (v1.41.0)
 
-> **Dokumenten-Status:** Master-Architekturkarte · **Stand:** 2026-09-18 · **Code-Version:** 1.40.0  
+> **Dokumenten-Status:** Master-Architekturkarte · **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
 > **Verbindliche Referenz:** `docs/architecture/PIPELINE_MAP.md`
 
 ---
@@ -258,7 +258,8 @@ flowchart TD
 
 - **Dateien:**
   - `src/cycle/steps/researchStep.ts` (Rhea / Setup-Vorschläge)
-  - `src/cycle/steps/backtestStep.ts` (Milo / Deterministische Backtest-Verifikation)
+  - `src/cycle/steps/backtestStep.ts` (Milo / Multi-Asset Backtest-Verifikation via `src/backtest`)
+  - `src/backtest/engine.ts`, `src/backtest/portfolio.ts`, `src/backtest/simulator.ts`, `src/backtest/metrics.ts`
   - `src/lib/macroCycle.ts` (`runMacroCycle`, CEO/Research-Regel-Zyklus)
   - `src/lib/ruleEngine.ts` (`sanitizeRuleSpec`, `ruleSignature`, `RULE_CEILINGS`)
   - `src/lib/ruleService.ts` (`upsertRuleSpec`, `activateRule`, `listRules`)
