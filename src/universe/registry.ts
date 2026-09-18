@@ -94,6 +94,8 @@ export class InstrumentRegistry {
   private readonly autoSave: boolean;
   private loaded = false;
   private skippedOnLoad = 0;
+  private lastMtimeMs: number | null = null;
+  private lastFileSize: number | null = null;
 
   constructor(options: RegistryOptions = {}) {
     this.store = options.store ?? new NdjsonStore(options.dir);
@@ -132,20 +134,94 @@ export class InstrumentRegistry {
     return max;
   }
 
-  /** Lädt die Persistenz (idempotent; `force` erzwingt Neu-Einlesen). */
+  /** Lädt die Persistenz (idempotent; `force` erzwingt Neu-Einlesen).
+   *  Cross-Prozess-Sichtbarkeit (CLI `market:sync` ↔ Next.js-Server):
+   *  Der Registry-Singleton lebt je Prozess im Speicher. Schreibt ein
+   *  separater CLI-Prozess neue Instrumente auf die NDJSON-Datei, muss der
+   *  langlebige Server-Prozess sie beim nächsten Zugriff sehen — sonst zeigt
+   *  das Operations Center dauerhaft den alten Stand (26 statt 250). Deshalb
+   *  prüft `load()` bei bereits geladenem Zustand die Datei-Metadaten (mtime
+   *  + Größe): hat sich die Datei seit dem letzten Laden verändert, wird
+   *  transparent neu eingelesen. Ein `force===true` umgeht die Prüfung
+   *  vollständig (z. B. für Tests mit injiziertem Store).
+   */
   load(force = false): this {
-    if (this.loaded && !force) return this;
+    if (this.loaded && !force) {
+      try {
+        // `NdjsonStore` hält den absoluten Pfad in `instrumentsPath`.
+        // Stat-Prüfung ist billig (kein File-Read) und deckt den
+        // Cross-Prozess-Fall ab: CLI schreibt, Server liest.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { statSync, existsSync } = require("node:fs") as typeof import("node:fs");
+        const p = this.store.instrumentsPath;
+        if (!existsSync(p)) {
+          // Datei existiert nicht. Zwei Fälle:
+          //  - `lastMtime === null` → Datei hat noch nie existiert (frischer
+          //    tmp-Store, `autoSave:false`-Tests) → In-Memory-Stand behalten,
+          //    nicht löschen. Vorher wurde hier bei `size !==0` gelöscht und
+          //    jeder zweite `upsert` im selben Prozess (Concurrency 4) verlor
+          //    die Daten des ersten (Rate-Limiting-Test: 180 → 1).
+          //  - `lastMtime !== null` → Datei wurde extern gelöscht → leeren
+          //    Zustand spiegeln (Cross-Prozess-Sichtbarkeit).
+          if (this.lastMtimeMs !== null || this.lastFileSize !== null) {
+            this.items.clear();
+            this.skippedOnLoad = 0;
+            this.lastMtimeMs = null;
+            this.lastFileSize = null;
+          }
+          return this;
+        }
+        const st = statSync(p);
+        const mtime = st.mtimeMs;
+        const size = st.size;
+        if (this.lastMtimeMs !== null && this.lastFileSize !== null && mtime === this.lastMtimeMs && size === this.lastFileSize) {
+          return this;
+        }
+        // Metadaten haben sich geändert → unten neu einlesen.
+      } catch {
+        // Stat-Fehler → konservativ neu laden (kein Cache-Hit).
+      }
+    }
     const result = this.store.load();
     this.items.clear();
     for (const i of result.instruments) this.items.set(i.id, withProjectedCapabilities(i));
     this.skippedOnLoad = result.skipped;
     this.loaded = true;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { statSync, existsSync } = require("node:fs") as typeof import("node:fs");
+      const p = this.store.instrumentsPath;
+      if (existsSync(p)) {
+        const st = statSync(p);
+        this.lastMtimeMs = st.mtimeMs;
+        this.lastFileSize = st.size;
+      } else {
+        this.lastMtimeMs = null;
+        this.lastFileSize = null;
+      }
+    } catch {
+      this.lastMtimeMs = null;
+      this.lastFileSize = null;
+    }
     return this;
   }
 
   /** Schreibt den aktuellen Stand atomar in die NDJSON-Datei. */
   save(): this {
     this.store.save([...this.items.values()]);
+    try {
+      // Nach dem Schreiben Metadaten aktualisieren, damit das nächste
+      // `load()` ohne Force den frisch geschriebenen Stand als aktuell
+      // erkennt (kein unnötiges Re-Read).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { statSync } = require("node:fs") as typeof import("node:fs");
+      const st = statSync(this.store.instrumentsPath);
+      this.lastMtimeMs = st.mtimeMs;
+      this.lastFileSize = st.size;
+      this.loaded = true;
+    } catch {
+      // best-effort
+    }
     return this;
   }
 

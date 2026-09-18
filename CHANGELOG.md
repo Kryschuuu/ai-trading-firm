@@ -1,12 +1,120 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-17** · Code-Version **1.39.2**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.40.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
 Alle für Nutzer sichtbaren Änderungen werden hier dokumentiert. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.40.0] — 2026-09-18 · fix(market-sync): Cross-Prozess-Sichtbarkeit, leere Kerzen als DATA_UNAVAILABLE, Registry-Race & Scanner-Cache (250 → WARMING-Bug)
+
+**Hintergrund (Bug-Report 2026-09-17):** Ein `market-sync`-Lauf meldete
+„250 Instrumente entdeckt/synchronisiert, 250 Ticker, 250 Orderbooks, aber
+`1h candles: 1/250 (150/37500 bars)`“ — beim zweiten Lauf sogar
+`0/250` im inkrementellen Modus. Registry (`data/universe/instruments.ndjson`)
+und History (`data/history/candles.ndjson`) blieben scheinbar leer, der
+Scanner fand „keine Trades“, das Ops-Center zeigte dauerhaft `WARMING` und
+`lastSync` 2026-09-17 statt 2026-09-18.
+
+**Ursachenanalyse (vier verkettete Fehler, kein Venue-Ausfall):**
+
+1. **Cross-Prozess-Sichtbarkeit gebrochen:** `MarketDataSyncService`
+   schreibt Registry/History via `resolveRuntimePath` (berücksichtigt
+   `DATA_DIR`/`HISTORY_DIR` und Next.js-cwd), `market-sync-status.json`
+   und `market-data-errors.json` dagegen via `path.join("data",...)`
+   direkt — CLI schrieb nach `…/data`, Next.js las aus `…/other/data`.
+   Zusätzlich hielt `getRegistry()` (globalThis-Singleton, `loaded`-Flag)
+   den In-Memory-Stand ohne mtime-Prüfung fest: die CLI schrieb 250,
+   der Server zeigte weiter 26 (Seed-Stand). `HistoricalStore.loadAll()`
+   liest frisch, die Registry nicht — das Ops-Center (Next.js) sah die
+   250 nie.
+
+2. **InstrumentRegistry-Race bei `autoSave:false`:** Tests (und der Sync
+   mit `autoSave:false`-Harness) riefen `upsertMany` 180× parallel auf.
+   Der neue `load()`-mTime-Check bei `!existsSync` löschte den In-Memory-
+   Stand (`clear()`), weil er `size !==0` als „gelöscht“ interpretierte —
+   jeder zweite `upsert` im selben Prozess verlor die Daten des ersten
+   (180 → 1). Folge: `Rate-Limiting: 180 Instrumente`-Test brach mit
+   `registry.size 1 !==180`.
+
+3. **Leere Kerzen-Antworten als stiller Erfolg:** `syncInstrumentWithEnrichment`
+   wertete `normalizeCandles([], …)` (0 verwertbare Bars bei `rawCount 0`)
+   mit `rows.length===0 → continue` als Erfolg **ohne** `SyncFailure`.
+   249 Symbole mit `data:[]` (Code 0, aber leeres `data`) erzeugten 0
+   Failures — das Log meldete „250 Instrumente, keine Fehler“, während
+   249 Reihen leer blieben. `formatDegradedLog` blieb stumm, das
+   Fehler-Manifest leer.
+
+4. **Scanner-Cache 5-Minuten-TTL ohne File-mTime:** `ScannerService.getScan()`
+   hielt das einmal berechnete (leere) Ergebnis 5 Minuten, selbst wenn
+   `market:sync` (separater CLI-Prozess) soeben 250×150 Bars schrieb.
+   Die UI zeigte weiter `WARMING`.
+
+Mock-Reproduktion (`scripts/lib/market-sync.ts` gegen `http://127.0.0.1`-Mock
+mit 10 Symbolen): 2 Bars/Symbol → `10/10 (20/1500)`, `warming 10`,
+`scannerReady false`; 150 Bars/Symbol → `10/10 (1500/1500)`,
+`scannerReady true` — Pipeline korrekt, nur leere Antworten blieben unsichtbar.
+
+### Behoben
+
+- **`src/universe/registry.ts` — `InstrumentRegistry.load()` mtime-bewusst:**
+  Bei `loaded && !force` Stat-Prüfung (mtime+size, `statSync`, billig, kein
+  File-Read bei unveränderter Datei). `!existsSync` löscht nur, wenn
+  `lastMtime !== null` (Datei war zuvor vorhanden → extern gelöscht);
+  `lastMtime===null` (frischer tmp, `autoSave:false`) behält den
+  In-Memory-Stand — fixt den 180→1-Race. `save()` aktualisiert
+  `lastMtime/lastFileSize` und `loaded` atomar.
+
+- **`src/universe/index.ts` — `getRegistry()` Cross-Prozess-Refresh:**
+  Bestehender Singleton ruft bei jedem `getRegistry()` `load()` (mtime-Check,
+  kein Force-Read). CLI schreibt 250 → Next.js sieht sie beim nächsten
+  Request ohne Neustart.
+
+- **`src/marketdata/syncStatus.ts` + `src/marketdata/dataErrors.ts`:**
+  I/O jetzt über `resolveRuntimePath(file)` (wie `HistoricalStore`/
+  `InstrumentRegistry`/`FileSpreadCache`), Konstante bleibt relativ
+  (`data/...`). CLI und Next.js sehen dieselbe Datei, auch bei
+  `DATA_DIR`/`HISTORY_DIR`-Override oder unterschiedlichem cwd. Fixes
+  Path-Drift (Ops-Center `lastSync`).
+
+- **`src/marketdata/sync.ts` — `syncInstrumentWithEnrichment`:**
+  `rows.length===0` erzeugt jetzt `SyncFailure { stage:"candles",
+  reason:"DATA_UNAVAILABLE", retryable:false }` mit Meldung
+  „Leere Kerzen-Antwort für 1h — 0 verwertbare Bars (0 von N Zeilen)“.
+  Leere `data:[]`-Antworten sind damit als `candles/DATA_UNAVAILABLE`
+  im Log (`failures nach Ursache`), im `SyncResult.degraded` und im
+  Manifest (`data/market-data-errors.json`) sichtbar. Ein Lauf mit
+  `1/250` meldet jetzt `failures: 249 × candles/DATA_UNAVAILABLE`
+  und `DEGRADED` statt „erfolgreich“.
+
+- **`src/scanner/service.ts` — `ScannerService` mtime-Invalidierung:**
+  Neue Hilfsfunktion `fileMtimeMs()` (via `resolveRuntimePath`), Felder
+  `lastRegistryMtime`/`lastHistoryMtime`. `getScan()` invalidiert bei
+  veränderter `instruments.ndjson`- oder `candles.ndjson`-mtime sofort
+  (vor Ablauf der 5-Minuten-TTL) und `refresh()` merkt die neuen mtimes.
+  `loadAllInstruments()` sieht via `getRegistry()` bereits den frischen
+  Stand.
+
+- **Tests:** Mock-Repro `mock_empty2.mjs` (5 Symbole, 1 mit 150 Bars,
+  4 leer → `1/5`, `failures: 4 × DATA_UNAVAILABLE`, `degraded true`);
+  `Rate-Limiting: 180`-Race behoben (2115/2115 grün, 7 skipped);
+  `npm test` 0 Fehler (vorher 3).
+
+### Geändert
+
+- Keine API-Änderung, keine neue Env-Variable, kein Schema-Bruch.
+- Verhalten für `autoSave:false` und Cross-Prozess-Invalidierung
+  dokumentiert (JSDoc in `registry.ts`, `sync.ts`, `service.ts`).
+
+### Dokumentation
+
+- `docs/MARKET_DATA_PIPELINE.md` §12/13: inkrementeller Sync +
+  `DATA_UNAVAILABLE`-Failure, Cross-Prozess-Sichtbarkeit (Registry/
+  History/Status/Manifest) und Scanner-Cache-Invalidierung.
+- `docs/BITUNIX.md` §1.2/§5: Kline-Leerantwort als `DATA_UNAVAILABLE`
+  (nicht Kappung), Path-Drift-Hinweis.
 
 ## [1.39.2] — 2026-09-17 · fix(market-sync): Bitunix Bulk-Ticker in URL-sichere Chunks aufteilen (754× ticker/SCHEMA_MISMATCH)
 

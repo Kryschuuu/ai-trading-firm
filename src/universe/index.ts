@@ -41,6 +41,21 @@ export function getRegistry(options: RegistryOptions = {}): InstrumentRegistry {
       registry.upsertMany([...SEED_INSTRUMENTS], "seed:bootstrap", "SEED");
     }
     GLOBAL.__universeRegistry = registry;
+  } else {
+    // Cross-Prozess-Sichtbarkeit (CLI `market:sync` ↔ Next.js-Server):
+    // Der Singleton lebt im langlebigen Server-Prozess. Schreibt ein
+    // separater CLI-Prozess neue Instrumente, muss der Server sie beim
+    // nächsten Zugriff sehen — sonst zeigt das Ops-Center dauerhaft 26
+    // statt 250. `InstrumentRegistry.load()` prüft seit v1.40.0 die
+    // Datei-Metadaten (mtime + Größe) und lädt transparent neu, wenn sie
+    // sich geändert hat; hier reicht ein billiger `load()`-Aufruf (kein
+    // Force, nur Stat-Check, kein File-Read wenn unverändert).
+    try {
+      GLOBAL.__universeRegistry.load();
+    } catch {
+      // best-effort: bei Stat/Read-Fehler bleibt der letzte bekannte Stand
+      // sichtbar (fail-soft, nie crashen im Request-Pfad).
+    }
   }
   return GLOBAL.__universeRegistry;
 }

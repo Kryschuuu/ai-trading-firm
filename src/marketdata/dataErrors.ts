@@ -21,9 +21,13 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import path from "node:path";
 
 import type { MarketDataErrorReason } from "../lib/marketDataErrors";
+import { resolveRuntimePath } from "../lib/appPaths";
 import type { SyncError } from "./types";
 
-/** Ablage des Manifests (gitignored, siehe .gitignore). */
+/** Ablage des Manifests (gitignored, siehe .gitignore).
+ *  Relativ gehalten; I/O wird über `resolveRuntimePath` aufgelöst (siehe
+ *  `syncStatus.ts` — identischer Cross-Prozess-Pfad-Fix für CLI vs. Next.js).
+ */
 export const MARKET_DATA_ERRORS_FILE = path.join("data", "market-data-errors.json");
 
 /** Harte Obergrenze der Manifest-Einträge (DoS: Registry ist auf 50 k begrenzt). */
@@ -93,6 +97,7 @@ export function saveMarketDataErrors(
   file: string = MARKET_DATA_ERRORS_FILE,
   now: Date = new Date(),
 ): { persisted: number; batch: number } {
+  const resolved = resolveRuntimePath(file);
   const batchCounts = new Map<string, number>();
   for (const e of errors) {
     if (e.instrumentId || e.stage === "upsert") continue;
@@ -120,10 +125,10 @@ export function saveMarketDataErrors(
         }
       : {}),
   };
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
+  mkdirSync(path.dirname(resolved), { recursive: true });
+  const tmp = `${resolved}.tmp`;
   writeFileSync(tmp, JSON.stringify(manifest, null, 2), { mode: 0o600 });
-  renameSync(tmp, file);
+  renameSync(tmp, resolved);
   return { persisted: manifest.errors.length, batch: manifest.batch?.length ?? 0 };
 }
 
@@ -135,8 +140,9 @@ export function loadMarketDataBatchErrors(
   file: string = MARKET_DATA_ERRORS_FILE,
 ): MarketDataErrorBatchEntry[] {
   try {
-    if (!existsSync(file)) return [];
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<MarketDataErrorManifest>;
+    const resolved = resolveRuntimePath(file);
+    if (!existsSync(resolved)) return [];
+    const parsed = JSON.parse(readFileSync(resolved, "utf8")) as Partial<MarketDataErrorManifest>;
     if (!Array.isArray(parsed.batch)) return [];
     return parsed.batch.filter(
       (e): e is MarketDataErrorBatchEntry =>
@@ -153,8 +159,9 @@ export function loadMarketDataBatchErrors(
  */
 export function loadMarketDataErrors(file: string = MARKET_DATA_ERRORS_FILE): Map<string, string> {
   try {
-    if (!existsSync(file)) return new Map();
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<MarketDataErrorManifest>;
+    const resolved = resolveRuntimePath(file);
+    if (!existsSync(resolved)) return new Map();
+    const parsed = JSON.parse(readFileSync(resolved, "utf8")) as Partial<MarketDataErrorManifest>;
     const out = new Map<string, string>();
     for (const entry of Array.isArray(parsed.errors) ? parsed.errors : []) {
       if (typeof entry?.instrumentId === "string" && typeof entry?.reason === "string" && entry.instrumentId) {
@@ -169,5 +176,5 @@ export function loadMarketDataErrors(file: string = MARKET_DATA_ERRORS_FILE): Ma
 
 /** Entfernt das Manifest (nach erfolgreichem, fehlerfreiem Sync). */
 export function clearMarketDataErrors(file: string = MARKET_DATA_ERRORS_FILE): void {
-  rmSync(file, { force: true });
+  rmSync(resolveRuntimePath(file), { force: true });
 }
