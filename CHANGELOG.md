@@ -104,6 +104,16 @@ Kill-Switch- und Disarm-Pfads. Umsetzung: PR
   Tagesverlust-Sonderfall inline); `TickResult.circuitBreaker` beschreibt den
   Zustand (`engaged`/`latched`/`reason`); der Tick merkt sich
   `state.monitorLastTickAt` (`lastTickAt()` bleibt stabil).
+- **Client-Bundle-Grenze:** `src/lib/telemetry.ts` bleibt **DB-frei** (kein
+  `@/db`/`pg`); der Firmenzustand wird von `src/lib/firmState.ts`
+  (server-only; Ledger zuerst, sonst jüngster `equity_snapshots`-Eintrag)
+  gelesen und über `setFirmMetricStateReader()` registriert. Grund:
+  `telemetry.ts` hängt über `marketData.ts`/`workshop.ts` im Import-Graph der
+  Client-Komponenten — ein DB-Import dort ließ den Produktions-Build mit
+  „Module not found: Can't resolve 'tls'“ (pg → Node-Builtins) scheitern.
+  `prometheusMetrics()` ohne Argument nutzt den registrierten Leser, sonst
+  den prozesslokalen RAM-Ledger und degradiert sauber; fehlt nur das
+  Tages-P&L, wird genau diese Metrik als `degraded` markiert (kein 0-Wert).
 - **`GET /api/health`:** neue Felder `monitorLastTickAt`/`monitorAgeMs`/
   `stale`/`staleAfterMs` in Erfolgs- **und** Fehlerzweig; Statuscode bleibt
   konstruktionsbedingt 200 (Liveness ≠ Readiness).
@@ -123,7 +133,7 @@ Kill-Switch- und Disarm-Pfads. Umsetzung: PR
 
 ### Tests
 
-- `tests/telemetry.firm.test.ts` (6): Firmen-Metriken im Snapshot,
+- `tests/telemetry.firm.test.ts` (7): Firmen-Metriken im Snapshot,
   DB-Fehler → `degraded` statt Exception, keine Secrets im Output,
   Label-Whitelist, Reject-Klassifikation.
 - `tests/circuitBreaker.test.ts` (12): D2 (a) Drawdown-/Tagesverlust-Auslöser

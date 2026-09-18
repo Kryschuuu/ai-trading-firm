@@ -40,6 +40,13 @@
  * Metriken **weggelassen** und mit einem `# HELP … degraded:`-Kommentar
  * markiert. Die Funktion wirft nie und hängt nie — ein Scrape darf den
  * Handelspfad nicht blockieren.
+ *
+ * ── Client-Bundle-Grenze (wichtig für den Build) ────────────────────────────
+ * Diese Datei liegt (über `marketData.ts` → `workshop.ts`) im Import-Graph von
+ * Client-Komponenten. Sie darf deshalb **kein** `@/db`/`pg` und kein
+ * `./equity` importieren — genau daran scheiterte der Produktions-Build
+ * („Can't resolve 'tls'“). Der DB-Zugriff lebt in `src/lib/firmState.ts`
+ * (server-only) und wird hier über `setFirmMetricStateReader()` registriert.
  */
 import type { MarketDataErrorReason } from "./marketDataErrors";
 import { state } from "./stateRegistry";
@@ -233,72 +240,54 @@ export interface FirmMetricState {
 }
 
 /**
- * Liest den Firmenzustand aus BESTEHENDEN Stores:
+ * Leser für den Firmenzustand (Injektion aus einem Server-Modul).
  *
- *   1. Paper-Ledger (`state.paperBrokerLedger`) — dieselbe Quelle, die der
- *      Monitor-Tick für Equity/Drawdown nutzt (keine zweite Rechnung).
- *   2. Fallback: jüngster `equity_snapshots`-Eintrag (DB), wenn der Ledger in
- *      diesem Prozess noch nicht existiert (z. B. reiner CLI-Prozess).
- *
- * Wirft, wenn BEIDE Quellen nicht lesbar sind — der Aufrufer
- * (`prometheusMetrics`) degradiert dann statt zu werfen. `realizedPnlToday`
- * ist optional: ein Fehler dort lässt die übrigen Werte bestehen.
+ * `src/lib/firmState.ts` implementiert den Ledger-/DB-Zugriff und registriert
+ * sich beim Import selbst. `telemetry.ts` bleibt bewusst **DB-frei**: dieses
+ * Modul liegt im Import-Graph von Client-Komponenten (`marketData.ts` →
+ * `workshop.ts` → `HitRatePanel.tsx`), und ein `@/db`-Import bricht den
+ * Produktions-Build mit „Module not found: Can't resolve 'tls'“ (pg →
+ * Node-Builtins, die es im Browser nicht gibt).
  */
-export async function collectFirmMetricState(): Promise<FirmMetricState> {
-  let realizedPnlToday: number | null = null;
-  try {
-    const { realizedPnlToday: readRealizedToday } = await import("./equity");
-    const value = await readRealizedToday();
-    realizedPnlToday = Number.isFinite(value) ? value : null;
-  } catch {
-    realizedPnlToday = null; // optional — restliche Metriken bleiben lesbar.
-  }
+export type FirmMetricStateReader = () => Promise<FirmMetricState>;
 
-  const broker = state.paperBrokerLedger.get();
-  if (broker) {
-    return {
-      equity: broker.accountEquity,
-      startingEquity: broker.startingEquity,
-      drawdownPct: broker.drawdownPct,
-      openPositions: broker.openPositions,
-      realizedPnlToday,
-      source: "paper-broker",
-    };
-  }
+let firmMetricStateReader: FirmMetricStateReader | null = null;
 
-  // Fallback: persistierter Snapshot. Der Ledger wird von `createBroker()`
-  // erzeugt; Prozesse ohne Broker (reine CLI/Skripte) haben keinen.
-  const { db } = await import("@/db");
-  const { equitySnapshots } = await import("@/db/schema");
-  const { desc } = await import("drizzle-orm");
-  const rows = await db
-    .select({
-      equity: equitySnapshots.equity,
-      openPositions: equitySnapshots.openPositions,
-    })
-    .from(equitySnapshots)
-    .orderBy(desc(equitySnapshots.ts))
-    .limit(1);
-  const row = rows[0];
-  if (!row) throw new Error("kein Firmenzustand lesbar (kein Ledger, kein Snapshot)");
-  const equity = Number(row.equity);
-  if (!Number.isFinite(equity)) throw new Error("Equity-Snapshot ungültig");
-  const startingEquity = readStartingEquity();
-  return {
-    equity,
-    startingEquity,
-    drawdownPct:
-      startingEquity > 0 ? Math.max(0, (startingEquity - equity) / startingEquity) : 0,
-    openPositions: Number(row.openPositions ?? 0),
-    realizedPnlToday,
-    source: "db-snapshot",
-  };
+/**
+ * Registriert den Server-Leser für den Firmenzustand.
+ *
+ * Der Import von `./firmState` erledigt das automatisch; ein Aufrufer kann
+ * hier auch einen eigenen Leser (z. B. Test-Double) setzen. `null` entfernt
+ * die Registrierung.
+ */
+export function setFirmMetricStateReader(reader: FirmMetricStateReader | null): void {
+  firmMetricStateReader = reader;
 }
 
-/** Startkapital wie im Paper-Ledger-Default (`STARTING_EQUITY`, Default 10000). */
-function readStartingEquity(env: Record<string, string | undefined> = process.env): number {
-  const raw = Number(env.STARTING_EQUITY);
-  return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
+/** Nur für Tests: Registrierung entfernen. */
+export function resetFirmMetricStateReaderForTests(): void {
+  firmMetricStateReader = null;
+}
+
+/**
+ * DB-freier Fallback: der prozesslokale Paper-Ledger (RAM) — dieselbe Quelle,
+ * die der Monitor-Tick für Equity/Drawdown nutzt, ohne zweite Rechnung.
+ *
+ * Ohne Ledger (z. B. reiner CLI-Prozess) gibt es hier nichts zu lesen; die
+ * Exposition degradiert dann sauber. Das Tages-P&L stammt aus der DB und
+ * bleibt ohne DB-Zugriff unbelegt (eigene `degraded`-Markierung statt 0).
+ */
+function readLedgerFirmMetricState(): FirmMetricState | null {
+  const broker = state.paperBrokerLedger.get();
+  if (!broker) return null;
+  return {
+    equity: broker.accountEquity,
+    startingEquity: broker.startingEquity,
+    drawdownPct: broker.drawdownPct,
+    openPositions: broker.openPositions,
+    realizedPnlToday: null,
+    source: "paper-broker",
+  };
 }
 
 /** Prometheus-Zahl: endlich, ohne Float-Rauschen, sonst `null`. */
@@ -336,7 +325,8 @@ function gaugeLines(
 export interface PrometheusMetricsOptions {
   /**
    * Vorab gelesener Firmenzustand (Tests/Injektion). `undefined` = selbst
-   * lesen, `null` = Zustand bewusst nicht verfügbar (Degradations-Zweig).
+   * lesen (registrierter Server-Leser, sonst prozesslokaler Ledger),
+   * `null` = Zustand bewusst nicht verfügbar (Degradations-Zweig).
    */
   firmState?: FirmMetricState | null;
 }
@@ -362,7 +352,15 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
 
   let firm: FirmMetricState | null;
   try {
-    firm = opts.firmState === undefined ? await collectFirmMetricState() : opts.firmState;
+    if (opts.firmState !== undefined) {
+      firm = opts.firmState;
+    } else if (firmMetricStateReader) {
+      firm = await firmMetricStateReader();
+    } else {
+      // Kein Server-Modul geladen (z. B. Browser/CLI ohne Ledger) — der
+      // RAM-Ledger bleibt als letzte DB-freie Quelle.
+      firm = readLedgerFirmMetricState();
+    }
   } catch (e) {
     // Betriebsregel: degradieren, nicht werfen. Der Grund steht im Log.
     firm = null;
@@ -402,7 +400,11 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
       "Realisiertes P&L des laufenden Berliner Tages.",
       "gauge",
       [{ name: "firm_realized_pnl_today", value: firm?.realizedPnlToday ?? NaN }],
-      firm ? undefined : degraded,
+      firm
+        ? firm.realizedPnlToday === null
+          ? "Tages-P&L nicht lesbar (DB nicht verfügbar)"
+          : undefined
+        : degraded,
     ),
   );
   if (firm) {

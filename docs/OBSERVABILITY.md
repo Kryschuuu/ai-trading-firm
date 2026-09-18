@@ -176,6 +176,16 @@ schneidet Rohgründe wie `POSITION_ALREADY_OPEN:SOL (kein Nachkauf erlaubt)` auf
 die Code-Klasse ab. Symbole, Beträge, URLs oder Tokens erscheinen nie in einem
 Label; der vollständige Grund bleibt im strukturierten Log.
 
+**Client-Bundle-Grenze (Build-relevant):** `telemetry.ts` liegt über
+`marketData.ts` → `workshop.ts` im Import-Graph der **Client**-Komponenten
+und bleibt deshalb **DB-frei** (kein `@/db`/`pg`). Den Ledger-/DB-Zugriff
+(Ledger zuerst, sonst jüngster `equity_snapshots`-Eintrag) übernimmt
+`src/lib/firmState.ts` — ein **server-only** Modul, das sich beim Import als
+Leser registriert (`setFirmMetricStateReader`). Ohne dieses Modul nutzt
+`prometheusMetrics()` den prozesslokalen RAM-Ledger und markiert sonst
+`degraded`; ein `@/db`-Import in `telemetry.ts` brach den Produktions-Build
+mit „Module not found: Can't resolve 'tls'“ (Node-Builtins im Browser).
+
 **Degradierter Betrieb (verbindlich):** Ist der Firmenzustand nicht lesbar
 (DB weg, Ledger in diesem Prozess noch nicht hydratisiert), werden die
 betroffenen Metriken **weggelassen** und mit einem

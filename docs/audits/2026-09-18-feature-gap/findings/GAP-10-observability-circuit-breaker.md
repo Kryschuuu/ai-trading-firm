@@ -61,8 +61,13 @@ Alert-Fatigue-Schutz (Debounce/Hysterese) getestet.
   `POSITION_ALREADY_OPEN:SOL` werden auf die Code-Klasse geschnitten), keine
   Secrets/PII. Nicht lesbarer Firmenzustand ⇒ betroffene Metriken
   **weggelassen** + `# HELP … degraded: <grund>` (bewusst kein erfundener
-  0-Wert), nie Throw/Hang. **Rest-Delta:** weiterhin kein
-  HTTP-Scrape-Endpoint (Exposition nur über die Funktion).
+  0-Wert), nie Throw/Hang. **Client-Bundle-Grenze:** der Ledger-/DB-Zugriff
+  liegt in `src/lib/firmState.ts` (server-only, registriert sich als Leser);
+  `telemetry.ts` bleibt DB-frei, weil es über `marketData.ts`/`workshop.ts`
+  im Import-Graph der Client-Komponenten liegt — ein `@/db`-Import dort
+  brach den Produktions-Build („Can't resolve 'tls'“ über pg).
+  **Rest-Delta:** weiterhin kein HTTP-Scrape-Endpoint (Exposition nur über
+  die Funktion).
 - **D2 Auto-Circuit-Breaker:** `src/lib/circuitBreaker.ts` — Auslöser in der
   Priorität Drawdown (`drawdownPct >= maxEquityDrawdownPct`) → Tagesverlust
   (`dailyLossPct >= dailyLossLimitPct`) → Verlustserie

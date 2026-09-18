@@ -22,7 +22,9 @@ import assert from "node:assert/strict";
 import {
   metricLabel,
   prometheusMetrics,
+  resetFirmMetricStateReaderForTests,
   resetTelemetryForTests,
+  setFirmMetricStateReader,
   telemetry,
   type FirmMetricState,
 } from "../src/lib/telemetry";
@@ -39,6 +41,7 @@ const FIRM_STATE: FirmMetricState = {
 
 beforeEach(() => {
   resetTelemetryForTests();
+  resetFirmMetricStateReaderForTests();
 });
 
 test("D1: Exposition enthält Firmen-Metriken aus dem übergebenen Zustand", async () => {
@@ -81,6 +84,24 @@ test("D1: nicht lesbarer Firmenzustand → degraded statt Exception, kein 0-Wert
   assert.match(text, /^# HELP firm_drawdown_pct .*degraded:/m);
   // Die (prozesslokalen) Counter bleiben vollständig lesbar.
   assert.match(text, /^market_data_fetch_failures_total /m);
+});
+
+test("D1: registrierter Server-Leser liefert die Metriken — Fehler degradieren", async () => {
+  // Server-Prozess: `src/lib/firmState.ts` registriert sich beim Import und
+  // liefert Ledger/DB-Werte; hier als Test-Double.
+  setFirmMetricStateReader(async () => ({ ...FIRM_STATE, equity: 12345.5 }));
+  const withReader = await prometheusMetrics();
+  assert.match(withReader, /^firm_equity 12345\.5$/m);
+  assert.match(withReader, /^firm_metric_source\{source="paper-broker"\} 1$/m);
+
+  // DB weg: der Leser wirft → Exposition degradiert, statt zu werfen.
+  setFirmMetricStateReader(async () => {
+    throw new Error("DB nicht erreichbar");
+  });
+  const degraded = await prometheusMetrics();
+  assert.ok(!/^firm_equity /m.test(degraded), "kein erfundenes Equity-Sample");
+  assert.match(degraded, /^# HELP firm_equity .*degraded:/m);
+  assert.match(degraded, /^audit_write_failures_total /m, "Counter bleiben lesbar");
 });
 
 test("D1: ohne Injektion wirft die Exposition nie (DB/Ledger nicht erreichbar)", async () => {
