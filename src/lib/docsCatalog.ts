@@ -159,6 +159,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Portfolio-Analytics & Risk Guard",
     subtitle: "Kennzahlen, Kovarianz, drei Optimizer-Modi, Risk-Guard-Kette, API (v1.13)",
   },
+  backtestEngine: {
+    file: "docs/BACKTEST_ENGINE.md",
+    title: "Multi-Asset Backtest-Engine",
+    subtitle: "Synchronisierter Event-Driven Replay Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0)",
+  },
   brokers: {
     file: "docs/BROKER_ARCHITECTURE.md",
     title: "Broker-Architektur",
