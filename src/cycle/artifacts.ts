@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveRuntimePath, resolveStoredPath } from "@/lib/appPaths";
+import { collectRegimeHistoryArtifact } from "@/lib/marketRegime";
 import { formatDateYYYYMMDD, getIsoWeekString } from "./clock";
 import type { CycleRunRecord } from "./types";
 import type { WeeklyReview } from "@/scanner/weekly";
@@ -157,6 +158,21 @@ export function saveDailyCycleArtifacts(
       writeJsonAtomic(filePath, output);
       filesWritten.push(filePath);
     }
+  }
+
+  // 1b. GAP-06 (v1.46.0): Regime-Verlauf als eigenes Tages-Artefakt
+  // (`regime-history.json`) — Stand + Historie des Markt-Regime-
+  // Klassifikators je Instrument. Nur geschrieben, wenn in diesem Prozess
+  // mindestens ein Instrument bewertet wurde (sonst kein leeres Artefakt).
+  try {
+    const regimeHistory = collectRegimeHistoryArtifact();
+    if (regimeHistory) {
+      const regimePath = path.join(dailyDir, "regime-history.json");
+      writeJsonAtomic(regimePath, regimeHistory);
+      filesWritten.push(regimePath);
+    }
+  } catch {
+    /* Regime-Verlauf ist Beobachtung — ein Schreibfehler bricht den Zyklus nicht. */
   }
 
   // 2. Gesamt-Summary schreiben

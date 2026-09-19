@@ -1119,6 +1119,19 @@ Alle `adp.*`-Werte werden gegen `VOLATILITY_CONFIG_BOUNDS` geklemmt
 `CONFIG_CHANGED` (Namespace `volatility`) protokolliert. Im Dashboard:
 Reiter **Risiko** → Panels „Adaptives Risiko“ und „Volatilitäts-Schwellwerte“.
 
+### 9.4 Markt-Regime & Regime-Gate (GAP-06, v1.46.0)
+
+Zusätzlich zum Volatilitäts-Regime (9.3) klassifiziert die Firma je
+Instrument das **Markt-Regime** — TREND_UP/TREND_DOWN/RANGE/HIGH_VOL/CRASH —
+und dämpft darüber Signalgewichte je Strategieklasse (z. B. Mean-Reversion
+in Trendmärkten ×0.5). Deterministisch (kein LLM), mit Hysterese gegen
+Whipsaws, standardmäßig im **monitor**-Modus (Ausweis + Audit, keine
+Wirkung). Sichtbar in der Ops-Center-Risk-Sektion (`Regime SYMBOL`), im
+Agenten-Protokoll (Schicht „REGIME-GATE“), im Cycle-Artefakt
+`regime-history.json` und im Audit-Log (`REGIME_CHANGE`). Konfiguration und
+Details: [`REGIME_GATE.md`](REGIME_GATE.md), Flags in
+[`CONFIGURATION.md`](../CONFIGURATION.md) §„Regime-Gate“.
+
 ---
 
 ## 10. Notfall-Runbooks

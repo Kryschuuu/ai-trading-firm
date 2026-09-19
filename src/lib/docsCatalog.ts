@@ -164,6 +164,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Multi-Asset Backtest-Engine",
     subtitle: "Synchronisierter Event-Driven Replay Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0)",
   },
+  regimeGate: {
+    file: "docs/REGIME_GATE.md",
+    title: "Regime-Gate (Markt-Regime-Klassifikator)",
+    subtitle: "Trend/Range/Crash-Klassifikation, Gate-Modi off/monitor/enforce, Hysterese (GAP-06, v1.46.0)",
+  },
   brokers: {
     file: "docs/BROKER_ARCHITECTURE.md",
     title: "Broker-Architektur",

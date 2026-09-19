@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rsi, ema, atrPct, bollingerBandWidthPct, returnStdDevPct, snapshot } from "../src/lib/indicators";
+import { adx, rsi, ema, atrPct, bollingerBandWidthPct, returnStdDevPct, snapshot } from "../src/lib/indicators";
 import type { Candle } from "../src/lib/marketData";
 
 test("RSI: stetiger Aufwärtslauf → überkauft (>70)", () => {
@@ -121,4 +121,79 @@ test("Return-StdDev: nicht-sinnvoller Vorgängerkurs (≤0) → null statt NaN",
 test("ATR: zu wenige Kerzen → null", () => {
   const few = candlesFrom([100, 101, 102]);
   assert.equal(atrPct(few, 14), null);
+});
+
+// ── ADX (Wilder) — GAP-06, Referenzwerte per Handrechnung ──────────────────
+
+/** Kerze mit explizitem High/Low/Close (für die ADX-Handrechnung). */
+function hlc(high: number, low: number, close: number, i: number): Candle {
+  return { time: i, open: close, high, low, close, volume: 0 };
+}
+
+test("ADX: exakte Handrechnung (Periode 2, 5 Kerzen) → 190/3 ≈ 63.3333", () => {
+  // Serie (H/L/C):
+  //   c0: 10 / 9  / 9.5    c1: 11 / 10 / 10.5   c2: 11 / 10 / 10.2
+  //   c3: 10 / 9  / 9.4    c4: 9.5 / 8.5 / 8.9
+  //
+  // Schritt 1 — Richtungsmaße + True Range je Bar (ab c1):
+  //   i=1: upMove=11−10=1 > downMove=9−10=−1 → +DM=1, −DM=0
+  //        TR = max(1, |11−9.5|, |10−9.5|) = 1.5
+  //   i=2: upMove=0, downMove=0 → +DM=0, −DM=0;  TR = max(1, 0.5, 0.5) = 1
+  //   i=3: downMove=10−9=1 > upMove=10−11=−1 → +DM=0, −DM=1
+  //        TR = max(1, |10−10.2|, |9−10.2|) = 1.2
+  //   i=4: downMove=9−8.5=0.5 > upMove=9.5−10=−0.5 → +DM=0, −DM=0.5
+  //        TR = max(1, |9.5−9.4|, |8.5−9.4|) = 1
+  //
+  // Schritt 2 — Wilder-Summen (Periode 2, Start = Summe der ersten 2):
+  //   TR₀=1.5+1=2.5,  +DM₀=1+0=1,  −DM₀=0
+  //   → DX₀: +DI=100·1/2.5=40, −DI=0 ⇒ DX₀=100
+  //   i=2: TR=2.5−1.25+1.2=2.45, +DM=1−0.5+0=0.5, −DM=0−0+1=1
+  //        +DI=100·0.5/2.45, −DI=100·1/2.45 ⇒ DX₁=100·(1000/49)/(3000/49)=100/3
+  //   i=3: TR=2.45−1.225+1=2.225, +DM=0.5−0.25+0=0.25, −DM=1−0.5+0.5=1
+  //        +DI=100·(1/4)/(89/40)=1000/89, −DI=4000/89 ⇒ DX₂=100·3000/5000=60
+  //
+  // Schritt 3 — ADX: Start = Mittel(DX₀, DX₁) = (100+100/3)/2 = 200/3,
+  //   dann Wilder: (200/3·1 + 60)/2 = 190/3 ≈ 63.3333
+  const series = [
+    hlc(10, 9, 9.5, 0),
+    hlc(11, 10, 10.5, 1),
+    hlc(11, 10, 10.2, 2),
+    hlc(10, 9, 9.4, 3),
+    hlc(9.5, 8.5, 8.9, 4),
+  ];
+  const value = adx(series, 2);
+  assert.ok(value != null, "erwartet Zahl, war null");
+  assert.ok(Math.abs(value - 190 / 3) < 1e-9, `erwartet 190/3 ≈ 63.3333, war ${value}`);
+});
+
+test("ADX: reiner Aufwärtstrend → 100 (nur +DM, DX stets 100)", () => {
+  // Stufenleiter mit konstanter Schrittweite: jeder Bar hat upMove > 0 und
+  // downMove ≤ 0 → −DM ≡ 0 → −DI ≡ 0 → DX ≡ 100 → ADX ≡ 100.
+  const up = Array.from({ length: 40 }, (_, i) => {
+    const close = 100 + i;
+    return hlc(close + 0.4, close - 0.4, close, i);
+  });
+  const value = adx(up, 14);
+  assert.ok(value != null);
+  assert.ok(Math.abs(value - 100) < 1e-9, `erwartet 100, war ${value}`);
+});
+
+test("ADX: Trendstärke-Monotonie — Trendserie > Chop-Serie", () => {
+  const trend = Array.from({ length: 60 }, (_, i) => {
+    const close = 100 + i * 0.5;
+    return hlc(close + 0.3, close - 0.3, close, i);
+  });
+  const chop = Array.from({ length: 60 }, (_, i) => {
+    const close = 100 + (i % 2 === 0 ? 1 : -1);
+    return hlc(close + 0.5, close - 0.5, close, i);
+  });
+  const trendAdx = adx(trend, 14)!;
+  const chopAdx = adx(chop, 14)!;
+  assert.ok(trendAdx > chopAdx, `Trend-ADX ${trendAdx} muss über Chop-ADX ${chopAdx} liegen`);
+});
+
+test("ADX: zu wenige Kerzen (< 2·Periode+1) oder leere Eingabe → null", () => {
+  const few = Array.from({ length: 4 }, (_, i) => hlc(101 + i, 99 + i, 100 + i, i));
+  assert.equal(adx(few, 2), null, "4 Kerzen < 2·2+1");
+  assert.equal(adx([], 14), null);
 });

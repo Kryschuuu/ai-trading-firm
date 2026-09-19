@@ -30,6 +30,7 @@ import { MarketDataFetchError } from "./marketDataErrors";
 import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
+import { refreshInstrumentRegimes } from "./marketRegime";
 import { realizedPnlToday, writeEquitySnapshot, pruneEquitySnapshots } from "./equity";
 import { FundingAccrualEngine, loadFundingConfig, runFundingAccrual } from "./funding";
 import { completeJournalRow } from "./journal";
@@ -82,6 +83,11 @@ export type TickResult = {
     effectiveMaxRiskPerTrade: number;
     reason: string;
   } | null;
+  /**
+   * GAP-06 (v1.46.0): Markt-Regime der offenen Positionen nach diesem Tick
+   * (best-effort; leer bei injizierten Test-Kursen oder ohne Positionen).
+   */
+  marketRegimes: { symbol: string; regime: string }[];
 };
 
 /**
@@ -158,6 +164,21 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
   } else {
     const quotes = await refreshQuotes(symbols);
     priceOf = new Map(quotes.map((q) => [q.symbol, q.price]));
+  }
+
+  // --- 1b) Markt-Regime je offener Position (GAP-06, v1.46.0) ---
+  // Best-effort + fail-soft: versorgt Ops-Center, Cycle-Artefakte und das
+  // Regime-Gate mit aktuellen Ständen. Bewusst NUR ohne injizierte Kurse
+  // (opts.quotes = Test-/Determinismus-Pfad) — dort gibt es keine Kerzen.
+  // Fehler je Symbol bleiben lokal; der Tick läuft immer weiter.
+  let marketRegimes: TickResult["marketRegimes"] = [];
+  if (!opts.quotes) {
+    try {
+      const snaps = await refreshInstrumentRegimes(openRows.map((p) => p.symbol), { now: now.getTime() });
+      marketRegimes = snaps.map((s) => ({ symbol: s.symbol, regime: s.regime }));
+    } catch (e) {
+      errors.push(`Markt-Regime fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   // --- 2) SL/TP/Trailing/Time-Stop je Position prüfen (server-seitig, OCO) ---
@@ -395,6 +416,7 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     marketScan,
     errors,
     adaptiveRisk,
+    marketRegimes,
   };
 }
 
