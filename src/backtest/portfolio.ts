@@ -29,6 +29,8 @@ export class BacktestPortfolio {
   private realizedPnl = 0;
   private totalFees = 0;
   private totalSlippage = 0;
+  /** Kumuliertes Funding (nur „paper“-Pfad; Kontosicht: negativ = gezahlt). */
+  private totalFunding = 0;
   private posSeq = 1;
 
   constructor(config: BacktestEngineConfig) {
@@ -64,6 +66,10 @@ export class BacktestPortfolio {
 
   get slippagePaid(): number {
     return this.totalSlippage;
+  }
+
+  get fundingPaidTotal(): number {
+    return this.totalFunding;
   }
 
   /**
@@ -180,6 +186,7 @@ export class BacktestPortfolio {
       lowestPrice: fill.fillPrice,
       feesPaid: fill.fees,
       slippagePaid: fill.slippage,
+      fundingPaid: 0,
     };
 
     this.positions.set(symbol, position);
@@ -205,7 +212,10 @@ export class BacktestPortfolio {
         : pos.qty * (pos.entryPrice - exitEval.exitPrice);
 
     const totalTradeFees = pos.feesPaid + exitEval.fees;
-    const netPnl = grossPnl - totalTradeFees;
+    // Funding wurde laufend auf Cash gebucht (applyFunding) ⇒ schmälert den
+    // Trade-PnL exakt einmal (Kontosicht: gezahlt = negativ = Abzug).
+    const tradeFunding = pos.fundingPaid ?? 0;
+    const netPnl = grossPnl - totalTradeFees + tradeFunding;
 
     // Cash gutschreiben (Verkaufserlös minus Ausstiegsgebühren)
     this.cash += exitNotional - exitEval.fees;
@@ -231,6 +241,7 @@ export class BacktestPortfolio {
       pnlPct: Number(((netPnl / pos.notional) * 100).toFixed(4)),
       fees: Number(totalTradeFees.toFixed(4)),
       slippage: Number((pos.slippagePaid + exitEval.slippage).toFixed(4)),
+      funding: Number(tradeFunding.toFixed(8)),
       exitReason: exitEval.reason,
       durationBars,
       durationMs,
@@ -284,11 +295,45 @@ export class BacktestPortfolio {
   }
 
   /**
-   * Schließt alle noch offenen Positionen am Ende des Backtests.
+   * Bucht einen Funding-Accrual auf eine offene Position (nur „paper“-Pfad).
+   *
+   * Wie `PaperBroker.accrueFunding`: sofortiger Cashflow (Kontosicht —
+   * negativ = gezahlt ⇒ Cash sinkt) + kumulierter Positions-Saldo. Der
+   * Trade-PnL beim Close enthält das Funding exakt einmal (siehe
+   * `closePosition`); `totalFunding` speist `metrics.totalFundingPaid`.
+   * Nicht-endliche Beträge und unbekannte Symbole werden fail-closed
+   * abgewiesen (keine NaN-Buchung ins Ledger).
    */
-  closeAllAtEnd(currentPrices: Map<string, number>, finalTimestamp: number, finalBarIndex: number): void {
+  applyFunding(symbol: string, funding: number): boolean {
+    if (!Number.isFinite(funding)) return false;
+    const pos = this.positions.get(symbol);
+    if (!pos) return false;
+    pos.fundingPaid = Number(((pos.fundingPaid ?? 0) + funding).toFixed(8));
+    this.cash = Number((this.cash + funding).toFixed(8));
+    this.totalFunding = Number((this.totalFunding + funding).toFixed(8));
+    return true;
+  }
+
+  /**
+   * Schließt alle noch offenen Positionen am Ende des Backtests.
+   *
+   * `exitFill` (nur „paper“-Pfad): löst den Ausstiegs-Fill je Position
+   * durch den Paper-Simulator auf; fehlt er, gilt die Legacy-Rechnung
+   * (Close-Kurs + Taker-Fee, Slippage 0).
+   */
+  closeAllAtEnd(
+    currentPrices: Map<string, number>,
+    finalTimestamp: number,
+    finalBarIndex: number,
+    exitFill?: (pos: BacktestOpenPosition, price: number) => ExitEvaluation | null
+  ): void {
     for (const pos of Array.from(this.positions.values())) {
       const price = currentPrices.get(pos.symbol) ?? pos.entryPrice;
+      const paperEval = exitFill ? exitFill(pos, price) : null;
+      if (paperEval) {
+        this.closePosition(pos.symbol, paperEval, finalTimestamp, finalBarIndex);
+        continue;
+      }
       const fees = pos.qty * price * this.config.feeModel.takerFee;
 
       const exitEval: ExitEvaluation = {

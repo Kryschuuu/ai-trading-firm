@@ -13,6 +13,7 @@ import type { StepDefinition, StepExecutionContext } from "../types";
 import { type BacktestStepOutput, type VerifiedSetupResult, validateBacktestOutput } from "../schemas";
 import type { ResearchStepOutput, TradeSetupProposal } from "../schemas";
 import { HistoricalStore, DEFAULT_ANALYSIS_TIMEFRAME } from "@/lib/marketdata/historicalStore";
+import { historyDir } from "@/lib/marketdata/config";
 import { runMultiAssetBacktest, type BacktestStrategyItem } from "@/backtest";
 import type { CandleLike } from "@/lib/ruleEngine";
 
@@ -37,7 +38,9 @@ export const backtestStep: StepDefinition<BacktestStepInput, BacktestStepOutput>
 
     context.log(`Verifiziere ${setups.length} Research-Setups deterministisch gegen historische Daten …`);
 
-    const store = new HistoricalStore();
+    // GAP-01 (v1.51.0): Store-Pfad wie researchStep über PAPER_HISTORY_DIR
+    // (Default data/history — prod-neutral, Tests injizieren ein Temp-Verz).
+    const store = new HistoricalStore(historyDir());
     const verifiedSetups: VerifiedSetupResult[] = [];
     let passedCount = 0;
     let failedCount = 0;
@@ -59,20 +62,40 @@ export const backtestStep: StepDefinition<BacktestStepInput, BacktestStepOutput>
       let sharpeVal = 0;
       let sortinoVal = 0;
       let regimeRobustness = 0.5;
+      let status: "OK" | "DATA_UNAVAILABLE" = "OK";
       const failureReasons: string[] = [];
 
       if (candles.length < 5) {
-        // Bei sehr wenigen Kerzen (< 5) im Store: Konservative Mindestbewertung
-        const isLong = setup.side === "LONG";
-        const reward = isLong ? setup.takeProfit - setup.entryPrice : setup.entryPrice - setup.takeProfit;
-        const risk = isLong ? setup.entryPrice - setup.stopLoss : setup.stopLoss - setup.entryPrice;
-        const rrr = risk > 0 ? reward / risk : 1.5;
-
-        profitFactorValue = Number(Math.max(1.0, rrr).toFixed(2));
-        sharpeVal = 1.0;
-        sortinoVal = 1.2;
-        maxDrawdownPct = 5.0;
-        regimeRobustness = 0.6;
+        // GAP-01 (v1.51.0), D4: KEINE erfundene Mindestbewertung mehr.
+        // Bei < 5 Kerzen ist keine Messung möglich ⇒ fail-closed:
+        // verified=false, sichtbarer DATA_UNAVAILABLE-Status, neutrale
+        // Null-Kennzahlen, maschinenlesbarer Grund + Audit + Log (R2/R6).
+        status = "DATA_UNAVAILABLE";
+        maxDrawdownPct = 0;
+        profitFactorValue = 0;
+        sharpeVal = 0;
+        sortinoVal = 0;
+        regimeRobustness = 0;
+        const reason = `data:insufficient-candles:${candles.length}-of-5-minimum`;
+        failureReasons.push(reason);
+        context.log(
+          `Setup ${setup.instrumentId} nicht verifizierbar (${candles.length}/5 Kerzen) — DATA_UNAVAILABLE, keine Bewertung.`,
+          "WARN"
+        );
+        await context.ports.audit.logEvent({
+          event: "CYCLE_STEP_SKIPPED",
+          level: "WARN",
+          cycleId: context.cycleId,
+          stepId: "08-backtest-verification",
+          role: "BACKTEST_VERIFICATION",
+          timestamp: context.clock.toISOString(),
+          detail: {
+            reason,
+            instrumentId: setup.instrumentId,
+            candles: candles.length,
+            minimum: 5,
+          },
+        });
       } else {
         // Echter Event-Driven Backtest über die Multi-Asset-Engine
         const strategyItem: BacktestStrategyItem = {
@@ -122,6 +145,7 @@ export const backtestStep: StepDefinition<BacktestStepInput, BacktestStepOutput>
         setup,
         verified,
         verdict: verified ? "PASSED" : "FAILED",
+        status,
         metrics: {
           maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
           profitFactor: Number(profitFactorValue.toFixed(2)),
@@ -133,12 +157,14 @@ export const backtestStep: StepDefinition<BacktestStepInput, BacktestStepOutput>
       });
     }
 
+    const unavailableCount = verifiedSetups.filter((v) => v.status === "DATA_UNAVAILABLE").length;
     const output: BacktestStepOutput = {
       verifiedSetups,
       summary: {
         total: verifiedSetups.length,
         passed: passedCount,
         failed: failedCount,
+        unavailable: unavailableCount,
       },
     };
 

@@ -164,6 +164,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Multi-Asset Backtest-Engine",
     subtitle: "Synchronisierter Event-Driven Replay Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0)",
   },
+  backtesting: {
+    file: "docs/BACKTESTING.md",
+    title: "Walk-Forward-Backtesting",
+    subtitle: "Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs, CLI (GAP-01, v1.51.0)",
+  },
   regimeGate: {
     file: "docs/REGIME_GATE.md",
     title: "Regime-Gate (Markt-Regime-Klassifikator)",

@@ -244,36 +244,57 @@ describe("Multi-Asset Backtest Engine", () => {
   });
 
   it("funktioniert nahtlos im Step 8 Backtest Verification Cycle", async () => {
-    const setup: TradeSetupProposal = {
-      instrumentId: "BTCUSDT",
-      side: "LONG",
-      entryPrice: 30000,
-      stopLoss: 28500,
-      takeProfit: 33000,
-      riskScore: 0.3,
-      timeframe: "1h",
-      thesis: "Trend-Setup",
-      isProposal: true,
-    };
+    // GAP-01 (v1.51.0): sinngemäß auf den Fail-closed-Pfad umgestellt — bei
+    // leerem Store (isoliertes Temp-Verz) meldet der Step DATA_UNAVAILABLE
+    // (verified=false) statt einer erfundenen Bewertung.
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), "backtest-step8-empty-"));
+    const prevHistoryDir = process.env.PAPER_HISTORY_DIR;
+    process.env.PAPER_HISTORY_DIR = tmpDir;
+    try {
+      const setup: TradeSetupProposal = {
+        instrumentId: "BTCUSDT",
+        side: "LONG",
+        entryPrice: 30000,
+        stopLoss: 28500,
+        takeProfit: 33000,
+        riskScore: 0.3,
+        timeframe: "1h",
+        thesis: "Trend-Setup",
+        isProposal: true,
+      };
 
-    const dummyContext: any = {
-      cycleId: "test-cycle",
-      date: "2026-09-18",
-      asOf: new Date(),
-      clock: { now: () => new Date(), nowMs: () => Date.now(), toISOString: () => new Date().toISOString() },
-      input: { setups: [setup] },
-      previousStepOutputs: {
-        "07-research": { setups: [setup], totalSetups: 1, disclaimer: "PROPOSAL_ONLY_NO_ORDERS_PLACED" },
-      },
-      ports: {},
-      log: () => {},
-    };
+      const auditEvents: unknown[] = [];
+      const dummyContext: any = {
+        cycleId: "test-cycle",
+        date: "2026-09-18",
+        asOf: new Date(),
+        clock: { now: () => new Date(), nowMs: () => Date.now(), toISOString: () => new Date().toISOString() },
+        input: { setups: [setup] },
+        previousStepOutputs: {
+          "07-research": { setups: [setup], totalSetups: 1, disclaimer: "PROPOSAL_ONLY_NO_ORDERS_PLACED" },
+        },
+        ports: {
+          audit: {
+            logEvent: async (e: unknown) => { auditEvents.push(e); },
+            getEvents: async () => auditEvents,
+          },
+        },
+        log: () => {},
+      };
 
-    const out = await backtestStep.execute(dummyContext);
-    const validation = validateBacktestOutput(out);
-    assert.equal(validation.valid, true);
-    assert.equal(out.verifiedSetups.length, 1);
-    assert.ok(out.verifiedSetups[0].metrics);
-    assert.ok(out.verifiedSetups[0].verdict === "PASSED" || out.verifiedSetups[0].verdict === "FAILED");
+      const out = await backtestStep.execute(dummyContext);
+      const validation = validateBacktestOutput(out);
+      assert.equal(validation.valid, true);
+      assert.equal(out.verifiedSetups.length, 1);
+      assert.ok(out.verifiedSetups[0].metrics);
+      assert.equal(out.verifiedSetups[0].status, "DATA_UNAVAILABLE");
+      assert.equal(out.verifiedSetups[0].verified, false);
+      assert.equal(out.summary.unavailable, 1);
+      assert.equal(auditEvents.length, 1);
+    } finally {
+      if (prevHistoryDir === undefined) delete process.env.PAPER_HISTORY_DIR;
+      else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

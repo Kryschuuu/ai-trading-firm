@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.50.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.51.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,58 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.51.0] — 2026-09-19 · feat(backtest): Regelbasierte Backtesting-Engine mit Walk-Forward-Fenstern, Paper-Ausführung & persistierten Runs (GAP-01)
+
+### Hinzugefügt
+
+- Paper-Ausführungspfad der Backtest-Engine (`src/backtest/paperExecution.ts`,
+  `executionModel: "paper"`): Einstiegs- und Ausstiegs-Fills laufen durch
+  DIESELBE deterministische `FillSimulator`-Klasse wie der PaperBroker
+  (kein zweiter Kosten-Code-Pfad); Kerzen → Quotes via `snapshotFromLastPrice`
+  über das Spread-Modell (Registry-Spread → kalibrierter Fallback); Funding
+  über DIESELBE `FundingAccrualEngine`/`computeFunding`-Formel wie der
+  Paper-Monitor (nur Registry-Perpetuals, sonst fail-safe Spot-Default).
+  SL/TP-Trigger-Erkennung mit Stop-Vorrang bei Kollision.
+- Walk-Forward-Validierung (`src/backtest/walkforward.ts`): rollierende
+  IS/OOS-Fenster (`WF_IS_WINDOW_DAYS` Default 90, Bounds [14, 720];
+  `WF_OOS_WINDOW_DAYS` Default 30, Bounds [7, 180]; `WF_MAX_SPAN_DAYS`
+  Default 730, Bounds [30, 3650]), nur vollständige Fenster, OOS kachelt
+  lückenlos/überlappungsfrei; Report je Fenster (Kennzahlen + sha256
+  Trade-Hash) + OOS/IS-Aggregate (aus Summen neu berechnet); strikte
+  Zeitmaske (Daten ≤ t, Fenster-Clips); Determinismus (zwei Läufe ⇒
+  byte-identischer Report); fail-closed (`walkforward:insufficient-span`,
+  `walkforward:no-candles`). Kennzahlen aus `src/portfolio` (keine Duplikate),
+  kein LLM-Import (Architektur-Test).
+- Run-Persistenz (`backtest_runs`, append-only, Migration
+  `drizzle/2026-09-19_backtest_runs.sql`): ein Walk-Forward-Lauf = EINE Zeile
+  mit `paramsJson` (Regel + Fenster + Kostenprofil), `metricsJson`
+  (OOS/IS-Aggregate), `windowsJson` (Fensterdetails) und `codeVersion`.
+- CLI `scripts/run-backtest.ts` (`npm run backtest`): Flags `--instrument`
+  `--timeframe` `--from` `--to` `--rule-id`/`--rule-file` (XOR)
+  `--is-days`/`--oos-days` `--skip-db`; schreibt Report-JSON +
+  MD-Zusammenfassung nach `data/backtest/` und die `backtest_runs`-Zeile
+  (fail-closed, Exit 1 bei Flag-/Regel-/Daten-/DB-Fehlern).
+- Read-API `GET /api/firm/backtests` (Liste, `?limit=1..100`) und
+  `GET /api/firm/backtests/[id]` (Detail, 404 wenn unbekannt): `firm.read`
+  erforderlich (SEC-02-Muster, no-store), DB-Ausfall ⇒ 503 mit Hinweis.
+  KEIN POST-Endpunkt — Runs entstehen nur via CLI.
+- Neue Doku `docs/BACKTESTING.md` (Architektur, Zeitmaske, Kostenmodell,
+  Walk-Forward, Persistenz, CLI-Referenz, Anti-Overfitting-Grenzen);
+  Katalog-Eintrag (`docsCatalog`), Flags in `CONFIGURATION.md` +
+  `.env.example`.
+
+### Fixiert
+
+- Synthetischer Fallback in Step 8 (`08-backtest-verification`) entfernt
+  (Audit 2026-09-18, GAP-01 D4): Bei < 5 Kerzen gab es eine ERFUNDENE
+  Mindestbewertung (u. a. Sharpe 1.0, Sortino 1.2, `verified=true`) statt
+  einer Messung. Jetzt fail-closed: `verified=false`, sichtbarer Status
+  `DATA_UNAVAILABLE`, neutrale Null-Kennzahlen, maschinenlesbarer Grund
+  `data:insufficient-candles:<n>-of-5-minimum`, `CYCLE_STEP_SKIPPED`-Audit
+  und WARN-Log; Summary zählt `unavailable`. Zugehörige Step-Tests
+  sinngemäß auf den Fail-closed-Pfad umgestellt (Red/Green dokumentiert in
+  `tests/backtest.step.nosynthetic.test.ts`).
 
 ## [1.50.0] — 2026-09-19 · feat(reconciliation): Periodischer Reconciliation-Job, Differenz-Klassifikation & idempotente Order-IDs (GAP-09)
 

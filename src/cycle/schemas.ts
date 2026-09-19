@@ -433,10 +433,20 @@ export function validateResearchOutput(input: unknown): { valid: boolean; data?:
 // 7. Backtest Verification Schemata
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Verifikations-Status EINES Setups (GAP-01, v1.51.0):
+ *   - `"OK"` — Kennzahlen wurden gegen echte Kerzen gemessen.
+ *   - `"DATA_UNAVAILABLE"` — zu wenige Kerzen (< 5): KEINE Bewertung,
+ *     `verified=false`, Kennzahlen neutral-null (fail-closed statt der
+ *     früheren erfundenen Mindestbewertung).
+ */
+export type VerifiedSetupStatus = "OK" | "DATA_UNAVAILABLE";
+
 export interface VerifiedSetupResult {
   setup: TradeSetupProposal;
   verified: boolean;
   verdict: "PASSED" | "FAILED";
+  status: VerifiedSetupStatus;
   metrics: {
     maxDrawdownPct: number;
     profitFactor: number;
@@ -453,6 +463,8 @@ export interface BacktestStepOutput {
     total: number;
     passed: number;
     failed: number;
+    /** Setups mit `status: "DATA_UNAVAILABLE"` (Teilmenge von `failed`). */
+    unavailable: number;
   };
 }
 
@@ -469,6 +481,7 @@ export function validateBacktestOutput(input: unknown): { valid: boolean; data?:
   const verifiedSetups: VerifiedSetupResult[] = [];
   let passedCount = 0;
   let failedCount = 0;
+  let unavailableCount = 0;
 
   for (const item of rawList) {
     if (item && typeof item === "object") {
@@ -485,6 +498,12 @@ export function validateBacktestOutput(input: unknown): { valid: boolean; data?:
       const verified = Boolean(v.verified);
       if (verified) passedCount++;
       else failedCount++;
+
+      // GAP-01 (v1.51.0): DATA_UNAVAILABLE-Status übernehmen (Default OK —
+      // Alt-Artefakte ohne Status bleiben lesbar), Zähler mitführen.
+      const status: VerifiedSetupStatus =
+        v.status === "DATA_UNAVAILABLE" ? "DATA_UNAVAILABLE" : "OK";
+      if (status === "DATA_UNAVAILABLE") unavailableCount++;
 
       const rawSetup = (v.setup && typeof v.setup === "object" ? v.setup : {}) as Record<string, unknown>;
       const setup: TradeSetupProposal = {
@@ -503,6 +522,7 @@ export function validateBacktestOutput(input: unknown): { valid: boolean; data?:
         setup,
         verified,
         verdict: verified ? "PASSED" : "FAILED",
+        status,
         metrics,
         failureReasons: Array.isArray(v.failureReasons) ? v.failureReasons.map(String) : undefined,
       });
@@ -517,6 +537,7 @@ export function validateBacktestOutput(input: unknown): { valid: boolean; data?:
         total: verifiedSetups.length,
         passed: passedCount,
         failed: failedCount,
+        unavailable: unavailableCount,
       },
     },
   };

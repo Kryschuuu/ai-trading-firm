@@ -26,7 +26,12 @@ export function computeBacktestMetrics(
   initialCapital: number,
   totalFeesPaid: number,
   totalSlippagePaid: number,
-  annualizationFactor: number = 365 * 24 // 1h-Kerzen -> 8760 Perioden p. a.
+  annualizationFactor: number = 365 * 24, // 1h-Kerzen -> 8760 Perioden p. a.
+  /**
+   * Kumuliertes Funding in Kontowährung (GAP-01, v1.51.0; nur „paper“-Pfad,
+   * negativ = gezahlt). Default 0 = Legacy-Läufe unverändert.
+   */
+  totalFundingPaid: number = 0
 ): BacktestMetrics {
   const endingEquity = equityCurve.length > 0 ? equityCurve[equityCurve.length - 1].equity : initialCapital;
   const totalReturn = endingEquity - initialCapital;
@@ -155,6 +160,7 @@ export function computeBacktestMetrics(
     exposureTimePct: Number(exposureTimePct.toFixed(2)),
     totalFeesPaid: Number(totalFeesPaid.toFixed(2)),
     totalSlippagePaid: Number(totalSlippagePaid.toFixed(2)),
+    totalFundingPaid: Number((Number.isFinite(totalFundingPaid) ? totalFundingPaid : 0).toFixed(8)),
   };
 }
 

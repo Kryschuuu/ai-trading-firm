@@ -719,6 +719,31 @@ Hinweise:
   aus dem Order-Intent abgeleitet und bei Timeouts wiederholt, um Doppelorders
   zu verhindern.
 
+### Walk-Forward-Backtesting (GAP-01, v1.51.0)
+
+Regelbasierte Backtesting-Engine mit rollierenden IS/OOS-Fenstern
+(`src/backtest/walkforward.ts`), Paper-Ausführung über denselben
+Fill-Simulator wie der PaperBroker und vergleichbar persistierten Runs
+(`backtest_runs`, CLI `scripts/run-backtest.ts`). Details:
+[`docs/BACKTESTING.md`](docs/BACKTESTING.md).
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `WF_IS_WINDOW_DAYS` | `90` | Länge des In-Sample-Fensters in Tagen. Bounds [14, 720], Clamp mit Log-Warnung. IS/OOS trennt EVALUATIONS-Fenster (Robustheit) — keine Parameter-Optimierung. |
+| `WF_OOS_WINDOW_DAYS` | `30` | Länge des Out-of-Sample-Fensters in Tagen (zugleich Schrittweite). Bounds [7, 180]. OOS-Segmente kacheln lückenlos/überlappungsfrei; nur vollständige Fenster werden gelegt. |
+| `WF_MAX_SPAN_DAYS` | `730` | Maximaler Backtest-Zeitraum in Tagen (Anti-Overfitting-Deckel, Default 2 Jahre). Bounds [30, 3650]. Längere Zeiträume werden am Anfang gekappt (jüngste Daten gewinnen, `truncated: true` im Report). |
+
+Hinweise:
+
+- **Kostenprofil:** Der Paper-Pfad nutzt die kalibrierte Paper-Konfiguration
+  (`PAPER_SIM_*` + `PAPER_MAKER_FEE_PCT`/`PAPER_TAKER_FEE_PCT`/
+  `PAPER_SLIPPAGE_BPS`/`PAPER_SPREAD_FALLBACK_BPS`, siehe „Paper-Trading /
+  Marktdaten“) sowie die Funding-Konfiguration (`PAPER_FUNDING_*`).
+- **Determinismus:** Gleiche (Kerzen, Regel, Fenster, Kosten) ⇒
+  byte-identischer Report (Walk-Forward erzwingt `executionModel: "paper"`).
+- **CLI-Flags `--is-days`/`--oos-days`** überschreiben die Env-Werte je Lauf
+  (Bounds wie oben, sonst Abbruch mit Exit 1).
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |
