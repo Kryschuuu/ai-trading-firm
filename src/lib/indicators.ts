@@ -158,17 +158,35 @@ export function adx(candles: Candle[], period = 14): number | null {
 
 /** Average True Range in Prozent des letzten Kurses. */
 export function atrPct(candles: Candle[], period = 14): number | null {
-  if (candles.length < period + 1) return null;
+  const absolute = atr(candles, period);
+  if (absolute == null) return null;
+  const last = candles[candles.length - 1].close;
+  return last > 0 ? absolute / last : null;
+}
+
+/**
+ * Average True Range in PREISEINHEITEN (einfache Wilder-Näherung: arithmetisches
+ * Mittel der letzten `period` True-Range-Werte) — die Größe für das
+ * Vol-basierte Position-Sizing (GAP-04, v1.48.0): `stop = entry − k·ATR`.
+ *
+ * trueRange(i) = max(high−low, |high−prevClose|, |low−prevClose|).
+ * Liefert null bei unzureichender Historie (< period+1 Kerzen) oder
+ * nicht-sinnvollen (nicht endlichen, ≤ 0) Werten — der Sizing-Pfad wertet
+ * das als UNKNOWN (fail-closed), nie als stillen Wert.
+ */
+export function atr(candles: Candle[], period = 14): number | null {
+  if (!Array.isArray(candles) || period < 1 || candles.length < period + 1) return null;
   const trs: number[] = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
     const prevClose = candles[i - 1].close;
-    trs.push(Math.max(c.high - c.low, Math.abs(c.high - prevClose), Math.abs(c.low - prevClose)));
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - prevClose), Math.abs(c.low - prevClose));
+    if (!Number.isFinite(tr) || tr < 0) return null;
+    trs.push(tr);
   }
   const slice = trs.slice(-period);
-  const atr = slice.reduce((a, b) => a + b, 0) / slice.length;
-  const last = candles[candles.length - 1].close;
-  return last > 0 ? atr / last : null;
+  const value = slice.reduce((a, b) => a + b, 0) / slice.length;
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 export type MarketSnapshot = {

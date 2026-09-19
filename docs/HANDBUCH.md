@@ -1132,6 +1132,60 @@ Agenten-Protokoll (Schicht „REGIME-GATE“), im Cycle-Artefakt
 Details: [`REGIME_GATE.md`](REGIME_GATE.md), Flags in
 [`CONFIGURATION.md`](../CONFIGURATION.md) §„Regime-Gate“.
 
+### 9.5 Vol-Sizing & Cluster-Limits im Order-Pfad (GAP-04, v1.48.0)
+
+Die Positionsgröße wird jetzt zentral aus **Volatilität** berechnet
+(`qty = Risikobudget / Stop-Abstand`, ATR-Fallback-Stop, Fractional-Kelly als
+Obergrenze) und jede neue Order läuft vor der Freigabe durch den
+**Cluster-Exposure-Guardrail**: Das neue Symbol wird gegen die offenen
+Positionen korrelationsgeclustert (Single-Linkage, Schwelle 0.7, max. 3
+Positionen je Cluster). Details:
+[`PORTFOLIO_ANALYTICS.md`](PORTFOLIO_ANALYTICS.md) §10, Flags in
+[`CONFIGURATION.md`](../CONFIGURATION.md) §„Sizing & Cluster-Limits“.
+
+**Rollout (monitor → enforce) — bewusste Umschaltung, nicht still:**
+
+1. **Beobachten (Default `monitor`):** Der Guardrail ändert nichts — er
+   protokolliert nur, was er *würde* ablehnen (Audit-Events
+   `CLUSTER_EXPOSURE_MONITOR`, Code `cluster-exposure:…`, Feld
+   `wouldBlock: true`). Eine Woche laufen lassen, die Würde-Prüfungen
+   sichten:
+
+   ```bash
+   psql "$DATABASE_URL" -c "SELECT created_at, detail->>'code' AS code, detail->>'count' AS count FROM audit_log WHERE event='CLUSTER_EXPOSURE_MONITOR' ORDER BY created_at DESC LIMIT 20;"
+   ```
+
+2. **Umschalten auf `enforce`:** erst wenn die Würde-Ablehnungen plausibel
+   sind (keine Dauerabfuhr durch fehlende Kerzen im `data/history`-Store!):
+
+   ```ini
+   # .env (oder Deployment-Umgebung) — wirksam nach Neustart
+   RISK_CLUSTER_LIMITS_MODE=enforce
+   ```
+
+   Jetzt blockt der Guardrail mit `cluster-exposure:max-per-cluster:N` bzw.
+   `cluster-exposure:correlation-stale` (Audit `CLUSTER_EXPOSURE_BLOCKED`).
+
+3. **Kelly-Deckel optional aktivieren:** `RISK_KELLY_FRACTION` (z. B. `0.25`
+   = Viertel-Kelly) wirkt **nur**, wenn das Trade-Journal genug geschlossene
+   Trades liefert (`JOURNAL_MIN_TRADES`, Default 20); vorher bleibt er
+   wirkungslos (`GET /api/firm/risk` → `kelly.status = "unavailable"`).
+
+**Status auf einen Blick:**
+
+```bash
+curl -s localhost:3369/api/firm/risk | jq '{sizing: .sizing, cluster: .clusterGuardrail, unknown: .unknown}'
+```
+
+`unknown.correlationUnavailable = true` heißt: keine Korrelationsaussage
+möglich (keine/zu alten Kerzen im HistoricalStore) — im enforce-Modus würde
+das Aufstockungen ablehnen; Ursache fast immer: `npm run market:sync`
+laufend halten, damit `data/history` frische 1h-Kerzen enthält.
+
+**Zurückrollen:** `RISK_CLUSTER_LIMITS_MODE=monitor` (Neustart) — das
+Sizing-Verhalten selbst ist an die Code-Ceilings geklemmt und rollt nicht
+separat zurück (es lockert die Limits nie).
+
 ---
 
 ## 10. Notfall-Runbooks

@@ -30,7 +30,10 @@ import {
   type AuditClass,
   type AuditWriteOutcome,
 } from "./auditSink";
-import { RISK_LIMITS, getLimits, killSwitch, missionSizedNotional, type RiskLimits } from "./riskGuard";
+import { getLimits, killSwitch, type RiskLimits } from "./riskGuard";
+// GAP-04 (v1.48.0): Vol-basiertes Sizing + Cluster-Exposure-Guardrail (Schicht 3).
+import { computePositionSize, loadSizingConfig, resolveKellyEdge } from "./positionSizing";
+import { checkClusterExposure, loadClusterLimitsConfig } from "./clusterExposure";
 import type { AdaptiveRegime } from "./riskGuard";
 import { PaperBroker } from "./broker";
 import { getBroker as createBroker } from "../brokers/factory";
@@ -927,18 +930,40 @@ export async function runAgentTurn(
         Number.isFinite(missionMaxPos) && missionMaxPos > 0
           ? Math.min(missionMaxPos, limits.maxPositionPct)
           : limits.maxPositionPct;
-      const notional = missionSizedNotional(
-        broker.accountEquity,
-        stopPct,
-        Math.min(missionRisk, limits.maxRiskPerTrade),
-        missionMaxPos,
-        limits.maxPositionPct
-      );
-      const qty = Number((notional / price).toFixed(6));
-      const stopLossPrice =
-        side === "LONG"
-          ? Number((price * (1 - stopPct)).toFixed(price > 100 ? 2 : 6))
-          : Number((price * (1 + stopPct)).toFixed(price > 100 ? 2 : 6));
+      // GAP-04 (v1.48.0): Vol-basiertes Sizing (reine Formel in
+      // positionSizing.ts): qty = Risikobudget/Stop-Abstand, hier mit
+      // EXPLIZITEM Stop (Agent/ATR/Default — wie oben bestimmt). Der
+      // ATR-Fallback-Stop greift, wenn kein Stop bestimmt wird können; der
+      // Fractional-Kelly-Deckel wirkt nur mit verfügbaren Journal-
+      // Statistiken (sonst wirkungslos). Das Ergebnis wird IMMER an die
+      // Code-Ceilings geklemmt (Sizing verschärft, lockert nie). UNKNOWN
+      // (kein ATR + kein Stop) → Basis-Größe + Kennzeichnung + Audit-Notiz
+      // (Muster adaptiveRisk v1.36.21) — kein Block.
+      const sizingCfg = loadSizingConfig();
+      const kellyEdge = await resolveKellyEdge(sizingCfg);
+      const sized = computePositionSize({
+        equity: broker.accountEquity,
+        riskPerTradePct: Math.min(missionRisk, limits.maxRiskPerTrade),
+        entryPrice: price,
+        atr: snap?.atrPercent != null ? (snap.atrPercent / 100) * price : null,
+        stopLoss: side === "LONG" ? price * (1 - stopPct) : price * (1 + stopPct),
+        side,
+        missionMaxPositionPct: missionMaxPos,
+        kelly: kellyEdge,
+        cfg: sizingCfg,
+      });
+      if (sized.unknown) {
+        await logAudit(
+          "POSITION_SIZING",
+          "WARN",
+          { symbol, code: `sizing:atr-unknown:${symbol}`, note: sized.note },
+          missionId,
+          agentId
+        );
+      }
+      const notional = sized.notional;
+      const qty = sized.qty;
+      const stopLossPrice = Number(sized.stopPrice.toFixed(price > 100 ? 2 : 6));
       const tpDist = stopPct * limits.takeProfitRR;
       const takeProfitPrice =
         side === "LONG"
@@ -947,7 +972,7 @@ export async function runAgentTurn(
 
       trace.push(
         step("POSITION-SIZING", true,
-          `Stop ${(stopPct * 100).toFixed(1)}% (${modelStopPct != null ? "Agent" : atrStop != null ? "ATR×" + limits.atrStopMultiplier : "Default"}) → Notional ${notional.toFixed(2)} (Cap ${(effectiveMissionCapPct * 100).toFixed(0)}%), TP bei ${takeProfitPrice}`)
+          `Stop ${(stopPct * 100).toFixed(1)}% (${modelStopPct != null ? "Agent" : atrStop != null ? "ATR×" + limits.atrStopMultiplier : "Default"}) → Notional ${notional.toFixed(2)} (Cap ${(effectiveMissionCapPct * 100).toFixed(0)}%${sized.kelly.applied ? " + Kelly-Deckel" : ""}${sized.unknown ? ", UNKNOWN: Basis-Größe" : ""}), TP bei ${takeProfitPrice}`)
       );
 
       const order = {
@@ -1008,6 +1033,59 @@ export async function runAgentTurn(
       } catch {
         /* kein Kurs verfügbar → Broker verwirft die Order (NO_QUOTE) */
       }
+
+      // GAP-04 (v1.48.0): Cluster-Exposure-Guardrail (Schicht 3) — das neue
+      // Symbol wird gegen die OFFENEN Positionen korrelationsgeclustert
+      // (src/portfolio-Mathematik, HistoricalStore, Cache-TTL, kein
+      // Hintergrund-Job). monitor (Default): Entscheidung unverändert, nur
+      // Audit-Notiz + Log der Würde-Prüfung; enforce: Ablehnung mit
+      // maschinenlesbarem Grund (cluster-exposure:max-per-cluster:N bzw.
+      // -correlation-stale, fail-closed bei fehlenden/veralteten Daten).
+      let clusterOpenSymbols: string[] = [];
+      try {
+        const openRows = await db
+          .select({ symbol: positions.symbol })
+          .from(positions)
+          .where(eq(positions.status, "OPEN"));
+        clusterOpenSymbols = openRows.map((r) => r.symbol).filter((s) => s !== symbol);
+      } catch {
+        clusterOpenSymbols = [];
+      }
+      let clusterCheck;
+      try {
+        clusterCheck = await checkClusterExposure({
+          symbol,
+          openSymbols: clusterOpenSymbols,
+          missionId,
+          agentId,
+        });
+      } catch (e) {
+        // Guardrail-Selbstfehler: fail-closed im enforce-Modus; im
+        // monitor-Modus bleibt die Entscheidung unverändert (sonst wäre
+        // „monitor“ kein no-op).
+        console.error("[engine] cluster-exposure guardrail fehlgeschlagen:", e instanceof Error ? e.message : e);
+        const clusterMode = loadClusterLimitsConfig().mode;
+        clusterCheck =
+          clusterMode === "enforce"
+            ? { allowed: false, reason: "cluster-exposure:guardrail-error", blockedBy: ["cluster-exposure:guardrail-error"] }
+            : { allowed: true, reason: "cluster-exposure guardrail fehlgeschlagen (monitor: keine Auswirkung)", blockedBy: [] };
+      }
+      if (!clusterCheck.allowed) {
+        await logAudit(
+          "ORDER_REJECTED",
+          "WARN",
+          { symbol, reason: clusterCheck.reason, code: clusterCheck.blockedBy.join("|") },
+          missionId,
+          agentId
+        );
+        trace.push(step("CLUSTER-EXPOSURE", false, clusterCheck.reason));
+        await db
+          .update(proposals)
+          .set({ status: "AUTO_REJECTED", reason: clusterCheck.reason })
+          .where(eq(proposals.id, proposal.id));
+        return { ...base, status: "BLOCKED", guardrail: clusterCheck.reason, trace };
+      }
+
       // H2 FIX (CRITICAL, v1.36.19): submitAtomic() statt submit() — Guard,
       // Fill UND Positions-Insert laufen in EINER exklusiv gesperrten
       // Postgres-Transaktion (pg_advisory_xact_lock + order_intents-

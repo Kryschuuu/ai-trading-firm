@@ -612,6 +612,46 @@ exakt wie vorher** (Modus `log`, Aggregation/Cross-Check aus). Details:
 | `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in — Rate-Limits!). Nur wirksam, wenn der Adapter die optionale Methode `getCrosscheckCandles()` implementiert (Adapter-Registry-Muster); ohne Implementierung no-op. Bei `on` ein zusätzlicher Request je Reihe (Rate-Limit-Bucket bleibt autoritativ). |
 | `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in Prozent (Abweichung der Schlusskurse auf gemeinsamen Zeitstempeln, relativ zum Primärkurs). **Streng** größer ⇒ `QUALITY_CROSSCHECK`-Befund + Log. Bounds [0.1, 10], Clamp mit Log-Warnung. 0 gemeinsame Zeitstempel = kein Befund (kein Vergleich ≠ Abweichung). |
 
+### Sizing & Cluster-Limits (GAP-04, v1.48.0)
+
+Vol-basiertes Position-Sizing (`qty = (equity · riskPerTradePct) / |entry − stop|`,
+ATR-Fallback-Stop, Fractional-Kelly-Deckel) und der Cluster-Exposure-Guardrail
+(Schicht 3 des riskGuard) im Order-Pfad. **Rollout monitor-first:** ohne
+Konfiguration bleibt der Order-Pfad in seinen Entscheidungen unverändert
+(monitor + Kelly aus); Sizing selbst wirkt bereits mit Defaults (Formel identisch
+zur bisherigen Risikoformel, nur zentralisiert + an Ceilings geklemmt).
+Formeln und Rollout: [`docs/PORTFOLIO_ANALYTICS.md`](docs/PORTFOLIO_ANALYTICS.md)
+(Abschnitt „Sizing & Cluster-Limits im Order-Pfad“); Ops (monitor→enforce):
+[`docs/HANDBUCH.md`](docs/HANDBUCH.md) §9.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `RISK_ATR_STOP_MULT` | `2` | ATR-Fallback-Stop-Multiplikator `k` (`stop = entry − k·ATR`, SHORT gespiegelt), wirksam wenn kein expliziter Stop vorliegt. Bounds [0.5, 6], Clamp mit sicherem Default. Semantisch identisch zu `atrStopMultiplier` in den Risk-Limits (LIMIT_CEILINGS [0.5, 6]). |
+| `RISK_KELLY_FRACTION` | `0` | Fractional-Kelly-Deckel: `maxNotional = equity · fraction · f*`, `f* = (b·p − (1−p))/b` (p = Win-Rate, b = Payoff aus dem Trade-Journal, GAP-03). `0` = aus (**Default**). Bounds [0, 1]. Wirkt **nur** mit ausreichenden Journal-Statistiken (`JOURNAL_MIN_TRADES`); sonst wirkungslos (Status `unavailable` in `GET /api/firm/risk`). `f* ≤ 0` → keine Größe (`kelly:no-positive-edge`). |
+| `RISK_CLUSTER_LIMITS_MODE` | `monitor` | Guardrail-Modus: `monitor` (**Default**: Entscheidung unverändert, Verstoß/Stale nur als Audit-Notiz `CLUSTER_EXPOSURE_MONITOR` + Log mit Würde-Prüfung) \| `enforce` (echte Ablehnung `CLUSTER_EXPOSURE_BLOCKED`). Unbekannter Wert → `monitor` + Warnung. |
+| `RISK_CORR_THRESHOLD` | `0.7` | \|ρ\|-Schwelle für die Cluster-Union (Single-Linkage, `\|ρ\| ≥ Schwelle`). Bounds [0.3, 0.99], Clamp mit Log-Warnung. |
+| `RISK_MAX_PER_CLUSTER` | `3` | Maximale offene Positionen je Korrelations-Cluster (inkl. der neuen). Bounds [1, 10]. Verstoß → `cluster-exposure:max-per-cluster:N`. |
+| `RISK_CORR_WINDOW_CANDLES` | `90` | Renditen-Fenster in 1h-Kerzen (≈ 3,75 Tage; gemeinsame Zeitstempel-Intersection, log-Renditen). Bounds [30, 365]. |
+| `RISK_CORR_CACHE_TTL_MS` | `900000` | TTL des Korrelations-Caches (Symbol-Menge + Fenster + Schwelle). Berechnung nur je Order-Prüfung, kein Hintergrund-Job. Bounds [60000, 3600000]. |
+
+Hinweise:
+
+- **Fail-closed (Stale-Policy):** Fehlen die Korrelationsdaten (keine Kerzen im
+  `data/history`-Store, Symbol nicht im Universum auflösbar, < 20 gemeinsame
+  Renditen, Kerzen älter als 24 h), wird in `enforce` die Aufstockung in
+  möglicherweise korrelierte Cluster abgelehnt
+  (`cluster-exposure:correlation-stale`) — statt zu raten. `monitor` bleibt
+  unverändert. Keine offenen Positionen → keine Prüfung (nichts zu clustern).
+- **Ausschluss-Kern:** `computePositionSize()` (reine Funktion) und
+  `assessClusterExposure()` (reine Funktion) sind vollständig deterministisch
+  und unit-gedeckt; Korrelations-Mathematik kommt aus `src/portfolio`
+  (Import, keine Duplikation).
+- **Observability:** `GET /api/firm/risk` zeigt effektive Sizing-/Cluster-
+  Parameter, Kelly-Edge-Status (inkl. `unavailable`) und die UNKNOWN-Zustände;
+  Audit-Events: `POSITION_SIZING` / `POSITION_SIZING_UNKNOWN`
+  (Code `sizing:atr-unknown:SYMBOL`) und `CLUSTER_EXPOSURE_MONITOR` /
+  `CLUSTER_EXPOSURE_BLOCKED` (Code `cluster-exposure:…`).
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |

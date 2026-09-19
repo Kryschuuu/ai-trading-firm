@@ -25,6 +25,7 @@ und jede Entscheidung der Risk Guard landet strukturiert im `audit_log`.
 7. [Warum das LLM keine Gewichte berechnet](#7-warum-das-llm-keine-gewichte-berechnet)
 8. [Benchmark](#8-benchmark)
 9. [Grenzen und bewusste Nicht-Entscheidungen](#9-grenzen-und-bewusste-nicht-entscheidungen)
+10. [Sizing & Cluster-Limits im Order-Pfad (GAP-04, v1.48.0)](#10-sizing--cluster-limits-im-order-pfad-gap-04-v1480)
 
 ---
 
@@ -467,7 +468,10 @@ hat. Bei `T ≤ n` wäre sie mathematisch zwingend singulär — ein Benchmark m
   Ein Optimierer ohne Kosten handelt zu viel.
 * **Keine Rebalancing-Logik, keine Ordergenerierung.** Dieses Modul liefert Gewichte
   und einen Guard-Report — nichts davon wird ausgeführt, und kein Portfolio- oder
-  Orderzustand wird verändert.
+  Orderzustand wird verändert. *(Ausnahme seit v1.48.0, GAP-04: Die
+  Cluster-Mathematik `correlationClusters` wird vom Order-Pfad als Guardrail
+  WIEDERVERWENDET — siehe Abschnitt 10. Der Optimierer selbst generiert
+  weiterhin keine Orders.)*
 * **Keine erwarteten Renditen aus der Zukunft.** `max_sharpe` braucht `μ`; wer historische
   Mittelwerte einsetzt, optimiert gegen Rauschen. `min_variance` und `risk_parity`
   brauchen kein `μ` — deshalb sind sie die robustere Voreinstellung.
@@ -476,3 +480,100 @@ hat. Bei `T ≤ n` wäre sie mathematisch zwingend singulär — ein Benchmark m
 * **`src/scanner/factors/correlation.ts`** (Task 04) enthält noch eine eigene
   Pearson/Spearman-Implementierung. Der Umzug auf `src/portfolio` ist dokumentiert,
   aber bewusst nicht in diesem Task gemacht: Der Scanner bleibt unverändert lauffähig.
+
+---
+
+## 10. Sizing & Cluster-Limits im Order-Pfad (GAP-04, v1.48.0)
+
+Seit v1.48.0 nutzt der Order-Pfad (Engine + Mikro-Executor) die
+Portfolio-Mathematik an zwei Stellen — als **Sizing** und als **Guardrail**.
+Beides ist fail-closed, an die Code-Ceilings geklemmt und revisionssicher im
+audit_log; die Korrelations-Mathematik wird dabei **wiederverwendet**
+(Import aus `src/portfolio`, keine Duplikation).
+
+### 10.1 Vol-basiertes Position-Sizing (`src/lib/positionSizing.ts`)
+
+Formel (reine, deterministische Funktion `computePositionSize`):
+
+```
+qty       = (equity · riskPerTradePct) / |entry − stop|
+notional  = qty · entry
+```
+
+**Stop-Auflösung (in dieser Reihenfolge):**
+
+1. **EXPLICIT** — expliziter Stop (Agent/Regel); muss seitenkonsistent sein
+   (LONG: unter, SHORT: über dem Entry), sonst wird er verworfen.
+2. **ATR-Fallback** — `stop = entry − k·ATR` (SHORT gespiegelt),
+   `k = RISK_ATR_STOP_MULT` (Default 2, Bounds [0.5, 6]). ATR in
+   Preiseinheiten (`atr()` in `src/lib/indicators.ts`, Wilder-Näherung).
+3. **FALLBACK (UNKNOWN)** — ATR und expliziter Stop fehlen → heutige
+   Basis-Größe (`defaultStopLossPct`) + Kennzeichnung `unknown = true` +
+   Audit-Notiz (Muster adaptiveRisk v1.36.21: UNKNOWN ist ein eigener
+   Zustand, kein stiller Wert). **Kein Block.**
+
+**Fractional-Kelly als Obergrenze (kein Ersatz):**
+
+```
+f*          = (b·p − (1−p)) / b        p = Win-Rate, b = Payoff = ØWin/ØLoss
+maxNotional = equity · RISK_KELLY_FRACTION · f*
+```
+
+- `RISK_KELLY_FRACTION` Default `0` = **aus**; Bounds [0, 1].
+- Wirkt **nur**, wenn Trefferquote/Payoff aus dem Trade-Journal (GAP-03)
+  verfügbar sind (Stichprobe ≥ `JOURNAL_MIN_TRADES`, ØLoss > 0); sonst
+  wirkungslos (Status `no-stats`/`unavailable`, kein stiller Zwangswert).
+- `f* ≤ 0` (kein positiver Edge) → Cap 0 → keine Größe
+  (`kelly:no-positive-edge`).
+
+**Klemmung (Sizing verschärft, lockert nie):** Risikobudget wird vor der
+Formel auf `maxRiskPerTrade` (wirksames Limit inkl. adaptiver Reduktion)
+geklemmt; das Notional danach auf `equity · min(Missions-Cap, maxPositionPct)`.
+Missions-Caps können die globale Grenze nur verschärfen (Sandbox-Prinzip).
+
+### 10.2 Cluster-Exposure-Guardrail (Schicht 3, `src/lib/clusterExposure.ts`)
+
+Vor der Freigabe wird das neue Symbol gegen die **offenen Positionen**
+korrelationsgeclustert:
+
+- Quelle: HistoricalStore (lokale `1h`-Kerzen), rollierende
+  **logarithmische Renditen** über ein gemeinsames Zeitstempel-Intersection
+  (Fenster `RISK_CORR_WINDOW_CANDLES`, Default 90 ≈ 3,75 Tage; < 20 gemeinsame
+  Renditen → keine Aussage).
+- Clustering: `correlationClusters` (Single-Linkage,
+  `|ρ| ≥ RISK_CORR_THRESHOLD`, Default 0.7) — **Import aus `src/portfolio`**
+  (dieselbe getestete Task-05-Mathematik wie `POST /api/portfolio/correlation`).
+- Limit: `RISK_MAX_PER_CLUSTER` (Default 3) offene Positionen je Cluster,
+  inkl. der neuen. Verstoß → `cluster-exposure:max-per-cluster:N`.
+
+**Fail-closed Stale-Policy:** Fehlen die Daten (keine Kerzen, Symbol nicht
+auflösbar, zu wenige gemeinsame Zeitstempel, Kerzen älter als 24 h), wird im
+`enforce`-Modus die Aufstockung in möglicherweise korrelierte Cluster
+abgelehnt: `cluster-exposure:correlation-stale`. Keine offenen Positionen →
+keine Prüfung (nichts zu clustern), immer erlaubt.
+
+**Rechenlast:** Berechnung nur je Order-Prüfung, mit TTL-Cache
+(`RISK_CORR_CACHE_TTL_MS`, Default 15 Min; Key = Symbol-Menge + Fenster +
+Schwelle). Kein Hintergrund-Job.
+
+### 10.3 Rollout-Modus `RISK_CLUSTER_LIMITS_MODE`
+
+| Modus | Wirkung | Audit |
+| --- | --- | --- |
+| `monitor` (**Default**) | Entscheidungspfad **unverändert** — die Würde-Prüfung wird nur protokolliert | `CLUSTER_EXPOSURE_MONITOR` (Code `cluster-exposure:…`, `wouldBlock: true`) |
+| `enforce` | echte Ablehnung vor dem Broker | `CLUSTER_EXPOSURE_BLOCKED` |
+
+Unbekannter Wert → `monitor` + Warnung. Audit-Einträge sind `security`-Klasse
+(at-least-once via auditSink). Status & UNKNOWN-Zustände:
+`GET /api/firm/risk` (effektive Parameter, Kelly-Edge, Cache, offene
+Positionen, aktuelle Cluster). Ops (monitor→enforce): HANDBUCH §9.5.
+
+### 10.4 Tests
+
+- `tests/positionSizing.test.ts` — Sizing-Mathe (Standardfall, Short
+  gespiegelt), ATR-Fallback-Stop, Kelly-Deckel nur mit Statistiken,
+  Clamp an die LIMIT_CEILINGS, UNKNOWN-Pfad, Determinismus.
+- `tests/riskGuard.cluster.test.ts` — enforce-Ablehnung bei Cluster-Überlauf,
+  monitor ändert die Entscheidung nicht (nur Audit/Log), stale →
+  konservative Ablehnung, Cache-TTL (Fake-Clock), Schwelle-Grenzfälle
+  (0.699 vs 0.7), Single-Linkage-Kette, Bounds-Parsing.
