@@ -156,6 +156,13 @@ export const telemetry = {
   marketData: {
     /** Fehlgeschlagene Kerzenabrufe nach Ursache (MDERR-006). */
     fetchFailures: new LabelCounter("market_data_fetch_failures_total"),
+    /**
+     * Datenqualitäts-Befunde des Qualitäts-Layers (GAP-07, v1.47.0).
+     * Label `class` ist die geschlossene Qualitäts-Klasse
+     * (GAP/OUTLIER/INVALID/DUPLICATE/CROSSCHECK) — kein Symbol, kein TF
+     * (Kardinalität wie beim Fetch-Counter).
+     */
+    qualityFindings: new LabelCounter("market_data_quality_findings_total"),
   },
   /**
    * Audit-Zuverlässigkeit (S1, v1.36.18).
@@ -344,6 +351,7 @@ export interface PrometheusMetricsOptions {
 export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Promise<string> {
   const lines: string[] = [
     telemetry.marketData.fetchFailures.exposition(),
+    telemetry.marketData.qualityFindings.exposition(),
     telemetry.audit.writeFailures.exposition(),
     telemetry.audit.spooled.exposition(),
     telemetry.audit.spoolDrained.exposition(),
@@ -430,6 +438,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
 /** Nur für Tests: alle Counter zurücksetzen. */
 export function resetTelemetryForTests(): void {
   telemetry.marketData.fetchFailures.reset();
+  telemetry.marketData.qualityFindings.reset();
   telemetry.audit.reset();
   telemetry.firm.reset();
 }

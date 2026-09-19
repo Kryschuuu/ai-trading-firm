@@ -87,6 +87,35 @@ test("parseSyncArgs: nur genannte Flags landen im Optionsobjekt", () => {
   assert.equal(full.parsed.manifest, false);
 });
 
+test("parseSyncArgs: --aggregate (GAP-07) ist ein Boolean-Schalter (Default off)", () => {
+  const off = parseSyncArgs([]);
+  assert.equal(off.ok, true);
+  if (!off.ok) return;
+  assert.equal(off.parsed.options.aggregate, undefined, "Default off (Env-Auflösung im Entry-Point)");
+
+  const on = parseSyncArgs(["--aggregate"]);
+  assert.equal(on.ok, true);
+  if (!on.ok) return;
+  assert.equal(on.parsed.options.aggregate, true);
+
+  const onInline = parseSyncArgs(["--aggregate=1"]);
+  assert.equal(onInline.ok, true);
+  if (!onInline.ok) return;
+  assert.equal(onInline.parsed.options.aggregate, true);
+
+  const explicitOff = parseSyncArgs(["--aggregate=false"]);
+  assert.equal(explicitOff.ok, true);
+  if (!explicitOff.ok) return;
+  assert.equal(explicitOff.parsed.options.aggregate, undefined);
+
+  const bad = parseSyncArgs(["--aggregate=vielleicht"]);
+  assert.equal(bad.ok, false, "ungültiger Boolean-Wert wird abgelehnt");
+
+  // Hilfe erklärt die Option.
+  assert.match(buildHelpText(), /--aggregate/);
+  assert.match(buildHelpText(), /MARKET_SYNC_AGGREGATE/);
+});
+
 test("parseSyncArgs: Bedienfehler werden abgelehnt, bevor ein Request möglich ist", () => {
   const cases: [string[], RegExp][] = [
     [["positionale"], /Erwartet --option=value/],

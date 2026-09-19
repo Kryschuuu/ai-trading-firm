@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.46.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.47.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,121 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.47.0] — 2026-09-19 · feat(marketdata): Datenqualitäts-Layer & deterministische Multi-TF-Aggregation (GAP-07)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-07](docs/audits/2026-09-18-feature-gap/findings/GAP-07-data-quality-multi-timeframe.md))
+gab es keine Gap-Detection in Kerzenserien, keinen Outlier-/Wick-Filter, keine
+Plausibilitätsregeln (OHLC ≤ 0, high < low, close außerhalb [low, high],
+Duplikate), keine deterministische 1h→4h/1d-Aggregation und keinen
+Zweitquellen-Cross-Check. „Garbage in, garbage out“ gilt für LLM-Agenten
+doppelt — eine falsche Candle produziert eine überzeugend formulierte
+Fehlentscheidung. Dieses Release schließt das Delta (PROMPT-07 der
+Remediation-Serie): paper-only, keine neuen Runtime-Dependencies,
+fail-closed, Rollout bewusst **log-first** (Default: sichtbar machen, keine
+Wirkung). Grundprinzip: Qualitätsbefunde werden **sichtbar klassifiziert**
+(MDERR-Stil) — gespeicherte Historie wird nie still verändert, und echte
+Flash-Moves werden nicht weggefiltert. Umsetzung: Branch
+`arena/01a0b751-ai-trading-firm`.
+
+### Hinzugefügt
+
+- **Qualitäts-Validierung** (`src/marketdata/quality.ts`,
+  `validateCandleSeries()`) mit vier neuen, in die MDERR-Taxonomie
+  aufgenommenen Klassen (`src/lib/marketDataErrors.ts`, IDs
+  `QUALITY_GAP`/`QUALITY_OUTLIER`/`QUALITY_INVALID`/`QUALITY_DUPLICATE`,
+  dazu `QUALITY_CROSSCHECK`):
+  - `GAP` — fehlende Intervalle; Befund an der **ersten fehlenden Position**
+    (exakt ein Intervall Abstand = **kein** Befund),
+  - `INVALID` — OHLC ≤ 0 / nicht endlich, `high < low`, `close` außerhalb
+    `[low, high]`,
+  - `OUTLIER` — Wick **oder** Körper **streng** > `MARKETDATA_OUTLIER_ATR_MULT`
+    × Volatilitäts-Baseline (Default **25**, Bounds [5, 200] — bewusst
+    großzügig, damit echte Flash-Moves durchkommen; **Grenzwert-Test**:
+    exakt mult × Baseline = kein Befund). Baseline = leave-one-out-Mittel der
+    True-Ranges der strukturell gültigen Kerzen (ein Spike bläst seine eigene
+    Schwelle nicht auf),
+  - `DUPLICATE` — doppelter Zeitstempel.
+- **Qualitäts-Report je Instrument** (`data/marketdata/quality-report.json`,
+  gitignored, atomar 0600, `resolveRuntimePath` — derselbe Cross-Prozess-Pfad
+  wie das Fehler-Manifest): persistiert vom Sync-CLI, enthält Befunde +
+  Zähler je Reihe (Instrument ⟂ Timeframe). **Die Historie-Datei wird vom
+  Qualitäts-Layer nie berührt** (Test belegt: Eingabe bleibt freeze-intakt).
+- **Lesepfad-Modi `MARKETDATA_QUALITY_MODE`:** `log` (**Default**: nur
+  sichtbar machen — Report + Log-Zeile + Metrik, keine Wirkung auf Scanner) |
+  `strict` (fail-closed: Instrumente mit `INVALID`-Befund behandelt der
+  Scanner wie `DATA_UNAVAILABLE` — existierende Stale-Fallback-Kette,
+  `data-unavailable`-Ablehnung, nie `min-candles`; verdrahtet in
+  `scripts/run-scan.ts` + `ScannerService.refresh`).
+- **Stale-Guard je Instrument/Timeframe** (D2): konfigurierbare Schwellen
+  `MARKETDATA_STALE_1H_HOURS` (Default **26**, Bounds [2, 168]),
+  `MARKETDATA_STALE_4H_HOURS` (Default 104, Bounds [8, 672]),
+  `MARKETDATA_STALE_1D_HOURS` (Default 624, Bounds [48, 4032]); Ausweis als
+  **Zähler** (`staleSeries`/`staleByTimeframe`) im Sync-Status
+  (`data/market-sync-status.json`), damit Ops-Center/Scanner gut degradieren
+  (keine Symbole im Status — geschlossene Security-Policy).
+- **Deterministische Multi-TF-Aggregation** (`src/marketdata/aggregate.ts`,
+  `aggregateCandles()`): 1h → 4h/1d mit **UTC-Anker** (4h: 00/04/08/12/16/20
+  UTC, 1d: 00:00 UTC), OHLCV-Korrektur (open/close erst/letzter, high/low
+  max/min, volume Summe), **unvollständige Bucket werden NIEMALS aggregiert**
+  (als `partial` gezählt und ausgeschlossen), Zeitmaske (nur abgeschlossene
+  Perioden ≤ `nowMs`), Konsistenz-Check (`checkAggregationConsistency()`).
+  Deterministisch: zwei Läufe ⇒ byte-identisches Ergebnis (Test),
+  Ankunftsreihenfolge der Quelle irrelevant (interne Sortierung).
+- **Zweitquellen-Cross-Check** (D4, **Default off** — Rate-Limits!):
+  optionale Adapter-Methode `getCrosscheckCandles()` am
+  `MarketDataAdapter`-Contract (Adapter-Registry-Muster);
+  `MARKETDATA_CROSSCHECK` + `MARKETDATA_CROSSCHECK_TOLERANCE_PCT`
+  (Default **1**, Bounds [0.1, 10]); Abweichung > Toleranz ⇒
+  `QUALITY_CROSSCHECK`-Befund + Log. **Keine neue Venue-Anbindung** in diesem
+  PR (Scope-Disziplin) — ohne implementierende Methode ist der Cross-Check
+  ein no-op.
+- **Metrik** `market_data_quality_findings_total` (Label `class`, prozesslokal
+  wie der Fetch-Counter; in `prometheusMetrics()` exponiert) +
+  `[market-sync] quality: …`-Zeile (nur bei Befunden, Zähler ohne Symbole).
+- **Sync-CLI:** `--aggregate` (Env `MARKET_SYNC_AGGREGATE`, Default off) —
+  aggregiert nach dem Backfill die persistierten 1h-Reihen zu 4h/1d und
+  appendet sie als **neue** Timeframe-Reihen (`feed: "agg:1h"`); die 1h-Quelle
+  bleibt unangetastet.
+
+### Geändert
+
+- `MarketDataErrorReason` um die fünf `QUALITY_*`-Klassen erweitert
+  (geschlossene Aufzählung; `retryable` = nein, nie im Fetch-Backoff).
+- **Schreibpfad-Verdrahtung:** der Sync validiert jede frisch gepflögte
+  Serie (read-only), der Report landet im `SyncResult.qualityReport` +
+  Metrik + Log. Qualitätsbefunde zählen **nicht** als Fetch-Fehler:
+  `degraded`/Exit-Code bleiben im `log`-Modus entkoppelt, und
+  `syncErrorsToDataErrors()` lässt `QUALITY_*` aus dem
+  Datenfehler-Manifest heraus (sonst würde der log-Modus Instrumente
+  fälschlich als `data-unavailable` abwerten).
+- `VenueSyncStatus` um `staleSeries`/`staleByTimeframe` (nur Zähler,
+  Timeframe-Keys gegen erlaubte Allowlist validiert).
+
+### Tests
+
+- Neu `test/marketdata/quality.test.ts` (35 Tests): GAP-Position exakt an
+  Intervallgrenzen, INVALID-Fälle, **Flash-Move-Schutz** (10 %-Crash unter
+  25×Baseline bleibt erhalten, exakter Grenzwert ⇒ kein Befund),
+  Determinismus (byte-identisch), Immutabilität (Freeze-Vergleich),
+  Report-Roundtrip, strict ⇒ `DATA_UNAVAILABLE`-Fallback (log ⇒ leer),
+  Stale-Guard mit Fake-Clock, Cross-Check (striktes `>`), Config-Bounds,
+  Metrik-Counter, Sync-Integration (log-Modus, Cross-Check on/off).
+- Neu `test/marketdata/aggregate.test.ts` (14 Tests): 4h-/1d-UTC-Anker,
+  OHLCV-Handrechnung, Envelope-Konsistenz, unvollständige Schlusskerze
+  ausgeschlossen (15/16-Stunden- und 23/24-Fälle), Zeitmaske,
+  Determinismus (inkl. Reihenfolge-Unabhängigkeit), Freeze, Vertrag.
+- `test/marketdata/cli.test.ts`: `--aggregate`-Parsing (Default off,
+  Boolean-Grammatik, Hilfe).
+
+### Keine Änderungen (bewusst)
+
+- `data/history/candles.ndjson` und jede gespeicherte Reihe bleiben vom
+  Qualitäts-Layer **unangetastet** (Report ist ein neues Artefakt; Aggregation
+  appendet nur neue Timeframe-Reihen).
+- Der Bitunix-Adapter erhält **keine** Zweitquellen-Methode (keine neue
+  Venue-Anbindung; Interface + Vertrag + Flag nur).
 
 ## [1.46.0] — 2026-09-19 · feat(risk): Markt-Regime-Klassifikator + Regime-Gate für Strategie-Gewichtung (GAP-06)
 

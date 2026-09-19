@@ -38,6 +38,11 @@ next-env.d.ts
 # Marktdaten-Fehler-Manifest (MDERR-006): Laufzeit-Artefakt des Sync-Jobs,
 # vom Scanner/Operations Center gelesen — nicht versioniert
 /data/market-data-errors.json
+
+# Qualitäts-Report (GAP-07): Laufzeit-Artefakt des Sync-Jobs (Report je
+# Instrument), vom Lesepfad im strict-Modus gelesen — nicht versioniert
+/data/marketdata/quality-report.json
+/data/marketdata/*.tmp*
 /data/market-data-errors.json.tmp
 /data/spread-cache.json
 /data/spread-cache.json.tmp

@@ -27,6 +27,10 @@
  */
 
 import type { SupportedTimeframe as StoreSupportedTimeframe } from "../lib/marketdata/historicalStore";
+// Nur `import type` (kein Runtime-Zyklus): `quality.ts` importiert
+// `candleTimeMs` von hier; diese typisierte Rückverweisung wird zur
+// Compilezeit eliminiert.
+import type { QualityReport } from "./quality";
 
 export type { MarketInstrument } from "../universe/types";
 
@@ -251,6 +255,14 @@ export interface SyncResult {
   degraded: boolean;
   /** Laufzeit in ms (Betriebs-Diagnose; kein Fachwert). */
   durationMs: number;
+  /**
+   * Qualitäts-Report des Laufs (GAP-07). Enthält die Befundklassen je Reihe
+   * (Instrument ⟂ Timeframe) über die FRISCH GEPFLOGTEN Serien. Persistiert
+   * der Entry-Point (CLI) ihn nach `data/marketdata/quality-report.json`.
+   * `degraded` bleibt von diesem Feld bewusst entkoppelt: ein Qualitätsbefund
+   * im `log`-Modus degradiert den Lauf nicht (sichtbar machen, nicht bremsen).
+   */
+  qualityReport?: QualityReport;
 }
 
 /** Optional token-bucket (or any serial limiter) used by the orchestrator. */

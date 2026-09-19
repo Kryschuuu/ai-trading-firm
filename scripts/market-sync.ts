@@ -27,21 +27,27 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { SUPPORTED_TIMEFRAMES, HistoricalStore, type SupportedTimeframe } from "../src/lib/marketdata/historicalStore";
+import { getRegistry } from "../src/universe";
 import { InstrumentRegistry } from "../src/universe/registry";
 import {
+  AGGREGATE_ENABLED_ENV,
   defaultRequiredWarmupCandles,
   InsufficientCandleLimitError,
+  loadQualityConfig,
   MAX_CANDLE_LIMIT,
   MAX_CONCURRENCY,
   MAX_INSTRUMENTS_CEILING,
   normalizeSyncSymbol,
+  parseOnFlag,
+  saveQualityReport,
+  summarizeStaleByVenue,
   SYNC_CANDLE_LIMIT,
   UnsupportedVenueError,
   type SyncLogger,
   type SyncResult,
 } from "../src/marketdata";
 import { clearMarketDataErrors, saveMarketDataErrors } from "../src/marketdata/dataErrors";
-import { saveVenueSyncStatus } from "../src/marketdata/syncStatus";
+import { MARKET_SYNC_STATUS_FILE, saveVenueSyncStatus } from "../src/marketdata/syncStatus";
 import { loadScannerConfig } from "../src/scanner/config";
 import {
   collectMarketDataReadiness,
@@ -51,7 +57,7 @@ import {
 import { resolveDataDir } from "../src/universe/store";
 import type { EnvLike } from "../src/brokers/bitunix/config";
 import { toConsoleAscii } from "../src/lib/consoleFormat";
-import { runMarketSyncDetailed, type MarketSyncRunOptions } from "./lib/market-sync";
+import { runAggregation, runMarketSyncDetailed, type MarketSyncRunOptions } from "./lib/market-sync";
 
 /** Vom CLI verstandene Switches ohne Wert. */
 const VALUE_FLAGS = [
@@ -62,7 +68,7 @@ const VALUE_FLAGS = [
   "symbols",
   "concurrency",
 ] as const;
-const BOOLEAN_FLAGS = ["strict", "dry-run", "json", "no-manifest", "status", "help", "full"] as const;
+const BOOLEAN_FLAGS = ["strict", "dry-run", "json", "no-manifest", "status", "help", "full", "aggregate"] as const;
 
 export interface ParsedCli {
   options: MarketSyncRunOptions;
@@ -128,6 +134,13 @@ Optionen:
         bereits die Kerze des laufenden Zeitraums halten, werden ohne Request
         übersprungen (ideal für den Stundentimer; der Erst-Warmup läuft immer
         vollständig, weil noch nichts im Store liegt).
+  --aggregate
+        Multi-TF-Aggregation (GAP-07, Default off, Env: MARKET_SYNC_AGGREGATE):
+        nach dem Backfill werden die persistierten 1h-Reihen deterministisch
+        zu 4h/1d-Kerzen aggregiert (UTC-Anker 00/04/… bzw. 00:00 UTC;
+        unvollständige Buckets — auch die aktuelle Periode — werden NIE
+        aggregiert) und als neue Timeframe-Reihen appendet. Wirkt nur, wenn
+        1h synchronisiert wurde. Die 1h-Quelle bleibt unangetastet.
   --dry-run
         Volles Request-Budget, aber KEINE Persistenz: Registry und Historical
         Store werden in ein temporäres Verzeichnis geschrieben und verworfen.
@@ -280,6 +293,13 @@ export function parseSyncArgs(argv: readonly string[]): ParseResult {
   if (typeof full === "string") return usage(full);
   if (full) options.fullRefresh = true;
 
+  // Multi-TF-Aggregation (GAP-07): nur explizit per `--aggregate` (CLI).
+  // Der Env-Default `MARKET_SYNC_AGGREGATE` wird vom Entry-Point (runMarketSyncCli)
+  // aufgelöst, damit `parseSyncArgs` rein bleibt (keine Env-Lesung hier).
+  const aggregate = boolOf("aggregate", false);
+  if (typeof aggregate === "string") return usage(aggregate);
+  if (aggregate) options.aggregate = true;
+
   const dryRun = boolOf("dry-run", false);
   if (typeof dryRun === "string") return usage(dryRun);
   const json = boolOf("json", false);
@@ -416,6 +436,9 @@ export async function runMarketSyncCli(
     lines.push(line);
     if (!json) printLine(line);
   };
+  // Exit-Code-Akku: der Sync selbst liefert 0/1; ein Aggregations-Fehler
+  // (GAP-07, opt-in) hebt einen ansonsten sauberen Lauf auf 1 an.
+  let exitCodeBase = 0;
 
   // Dry-Run: echte Requests, aber temporäre Senken. Ein "trockener" Lauf, der
   // in data/ schreibt, wäre kein Dry-Run.
@@ -427,6 +450,11 @@ export async function runMarketSyncCli(
     registry = new InstrumentRegistry({ dir: path.join(tmpDir, "universe"), autoSave: true });
     history = new HistoricalStore(path.join(tmpDir, "history"));
   }
+
+  // Aggregation-Default (GAP-07): CLI-Flag schlägt Env (Default off).
+  const env = deps.env ?? process.env;
+  const aggregate =
+    options.aggregate === true || parseOnFlag(env[AGGREGATE_ENABLED_ENV]);
 
   try {
     const { result } = await runMarketSyncDetailed({
@@ -442,6 +470,13 @@ export async function runMarketSyncCli(
       ...(history ? { history } : {}),
     });
 
+    // GAP-07: Qualitäts-Report persistieren (Write-Pfad, atomar, gitignored).
+    // Die Historie selbst wird NICHT berührt — der Report ist ein eigenes
+    // Artefakt. Dry-Runs schreiben bewusst nichts nach data/.
+    if (!dryRun && result.qualityReport) {
+      saveQualityReport(result.qualityReport);
+    }
+
     if (dryRun) {
       const line =
         `[market-sync] DRY-RUN: ${result.synced} Instrumente geplant, ` +
@@ -450,9 +485,34 @@ export async function runMarketSyncCli(
       lines.push(line);
       printLine(line);
     } else if (manifest) {
-      // OPS-011: kompakter Sync-Status je Venue (letzter Lauf, degraded,
-      // Fehler nach Ursache) — Quelle der Sektion „Market Data“ im Ops-Center.
-      saveVenueSyncStatus(result);
+      // OPS-011 + GAP-07: kompakter Sync-Status je Venue (letzter Lauf,
+      // degraded, Fehler nach Ursache, Stale-Guard-Zähler) — Quelle der
+      // Sektion „Market Data“ im Ops-Center.
+      const activeHistory = history ?? new HistoricalStore();
+      const staleCfg = loadQualityConfig(env);
+      const nowMs = (deps.now ?? (() => new Date()))().getTime();
+      const staleByVenue = summarizeStaleByVenue(
+        activeHistory.readAll(),
+        staleCfg.staleHours,
+        nowMs,
+      );
+      const stale = staleByVenue.get(result.venue);
+      saveVenueSyncStatus(
+        result,
+        MARKET_SYNC_STATUS_FILE,
+        new Date(nowMs),
+        stale
+          ? { staleSeries: stale.staleSeries, staleByTimeframe: stale.staleByTimeframe }
+          : undefined,
+      );
+      if (stale && stale.staleSeries > 0) {
+        const tfPart = Object.entries(stale.staleByTimeframe)
+          .map(([tf, n]) => `${tf}: ${n}`)
+          .join(", ");
+        const line = `[market-sync] stale: ${stale.staleSeries} Reihe(n) über der TF-Schwelle (${tfPart}) — Ops-Center/Scanner können degradieren`;
+        logger("warn", line);
+        lines.push(line);
+      }
       if (result.failures.length > 0) {
         const { persisted, batch } = saveMarketDataErrors(result.failures);
         // Ehrliche Berichterstattung (v1.39.1): Batch-Fehler (z. B.
@@ -473,12 +533,41 @@ export async function runMarketSyncCli(
       }
     }
 
+    // GAP-07: Multi-TF-Aggregation (opt-in): 1h → 4h/1d aus der persistierten
+    // Historie, deterministisch (UTC-Anker, unvollständige Buckets werden nie
+    // aggregiert). Nur, wenn 1h Teil dieses Laufs war — sonst nichts Neues.
+    if (aggregate && (options.timeframes ?? ["1h"]).includes("1h")) {
+      try {
+        const summary = runAggregation({
+          history: history ?? new HistoricalStore(),
+          registry: registry ?? getRegistry(),
+          venue: result.venue,
+          nowMs: (deps.now ?? (() => new Date()))().getTime(),
+        });
+        if (summary) {
+          const line =
+            `[market-sync] aggregation: ${summary.instruments} Reihe(n) → 4h/1d ` +
+            `(${summary.bars["4h"]} 4h-Bars, ${summary.bars["1d"]} 1d-Bars), ` +
+            `${summary.partialBuckets} unvollständige Bucket(s) ausgeschlossen (Zeitmaske)`;
+          logger("info", line);
+          lines.push(line);
+        }
+      } catch (e) {
+        // Aggregation ist ein Bonus, kein Pflichtpfad: ein Fehler degradiert
+        // den (bereits persistierten) Sync nicht — aber er wird laut gemeldet.
+        const line = `[market-sync] aggregation fehlgeschlagen: ${describeSyncError(e)}`;
+        logger("warn", line);
+        lines.push(line);
+        if (exitCodeBase === 0) exitCodeBase = 1;
+      }
+    }
+
     if (json) {
       const jsonLine = JSON.stringify(result);
       lines.push(jsonLine);
       printLine(jsonLine);
     }
-    return { exitCode: result.failures.length > 0 ? 1 : 0, lines, result };
+    return { exitCode: Math.max(result.failures.length > 0 ? 1 : 0, exitCodeBase), lines, result };
   } catch (e) {
     const line = `[market-sync] ${describeSyncError(e)}`;
     lines.push(line);
