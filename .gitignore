@@ -63,6 +63,11 @@ next-env.d.ts
 # last-report.json — Laufzeitdaten, nicht versioniert.
 /data/reconciliation
 
+# Walk-Forward-Run-Artefakte (GAP-01, v1.51.0): `scripts/run-backtest.ts`
+# schreibt Report-JSON + MD-Zusammenfassung je Lauf — reproduzierbar aus
+# Historie + Regel, nicht versioniert (Vergleich via backtest_runs/Read-API).
+/data/backtest
+
 # Audit-Spool (S1, v1.36.18): persistenter Fallback, wenn audit_log nicht
 # schreibbar war. Läuft lokal, wird nach dem Nachzug geleert — nicht versioniert.
 /data/audit-spool

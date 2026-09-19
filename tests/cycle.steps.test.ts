@@ -242,32 +242,48 @@ test("Step 7 (Research): erzeugt Setups mit expliziter Proposal-Markierung (kein
 });
 
 test("Step 8 (Backtest-Verifikation): prüft Setups deterministisch (MaxDD, Sharpe, Sortino, Robustness)", async () => {
-  const ports = createTestPorts();
-  const setups = [
-    {
-      instrumentId: "BINANCE:BTCUSDT",
-      side: "LONG" as const,
-      entryPrice: 65000,
-      stopLoss: 63000,
-      takeProfit: 71000,
-      riskScore: 0.4,
-      timeframe: "4h",
-      thesis: "Long Setup",
-      isProposal: true as const,
-    },
-  ];
+  // GAP-01 (v1.51.0): sinngemäß auf den Fail-closed-Pfad umgestellt — bei
+  // leerem Store (isoliertes Temp-Verz) meldet der Step DATA_UNAVAILABLE
+  // statt einer erfundenen Mindestbewertung (Red/Green siehe
+  // tests/backtest.step.nosynthetic.test.ts).
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const prevHistoryDir = process.env.PAPER_HISTORY_DIR;
+  process.env.PAPER_HISTORY_DIR = mkdtempSync(`${tmpdir()}/cycle-steps-empty-history-`);
+  try {
+    const ports = createTestPorts();
+    const setups = [
+      {
+        instrumentId: "BINANCE:BTCUSDT",
+        side: "LONG" as const,
+        entryPrice: 65000,
+        stopLoss: 63000,
+        takeProfit: 71000,
+        riskScore: 0.4,
+        timeframe: "4h",
+        thesis: "Long Setup",
+        isProposal: true as const,
+      },
+    ];
 
-  const ctx = mockContext({ setups }, ports);
-  const result = await backtestStep.execute(ctx);
+    const ctx = mockContext({ setups }, ports);
+    const result = await backtestStep.execute(ctx);
 
-  assert.equal(backtestStep.llmAllowed, false);
-  assert.equal(result.summary.total, 1);
-  assert.ok(["PASSED", "FAILED"].includes(result.verifiedSetups[0].verdict));
+    assert.equal(backtestStep.llmAllowed, false);
+    assert.equal(result.summary.total, 1);
+    assert.equal(result.verifiedSetups[0].status, "DATA_UNAVAILABLE");
+    assert.equal(result.verifiedSetups[0].verified, false);
+    assert.equal(result.verifiedSetups[0].verdict, "FAILED");
+    assert.equal(result.summary.unavailable, 1);
 
-  const metrics = result.verifiedSetups[0].metrics;
-  assert.ok(typeof metrics.maxDrawdownPct === "number");
-  assert.ok(typeof metrics.profitFactor === "number");
-  assert.ok(typeof metrics.sharpeRatio === "number");
-  assert.ok(typeof metrics.sortinoRatio === "number");
-  assert.ok(typeof metrics.regimeRobustness === "number");
+    const metrics = result.verifiedSetups[0].metrics;
+    assert.ok(typeof metrics.maxDrawdownPct === "number");
+    assert.ok(typeof metrics.profitFactor === "number");
+    assert.ok(typeof metrics.sharpeRatio === "number");
+    assert.ok(typeof metrics.sortinoRatio === "number");
+    assert.ok(typeof metrics.regimeRobustness === "number");
+  } finally {
+    if (prevHistoryDir === undefined) delete process.env.PAPER_HISTORY_DIR;
+    else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
+  }
 });

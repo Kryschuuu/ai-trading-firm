@@ -187,6 +187,32 @@ export const ruleExecutions = pgTable("rule_executions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("rule_executions_rule_idx").on(t.ruleId, t.createdAt)]);
 
+/**
+ * Vergleichbar persistierte Walk-Forward-Runs (GAP-01, v1.51.0).
+ * Append-only (insert-only, kein Update-Pfad): ein Lauf = EINE Zeile mit
+ * Regel-Referenz + Kostenprofil (`params_json`), Aggregaten (`metrics_json`)
+ * und Fensterdetails (`windows_json`). Runs entstehen NUR via CLI
+ * (`scripts/run-backtest.ts`); Lesen via `GET /api/firm/backtests*`
+ * (`firm.read`). Migration: `drizzle/2026-09-19_backtest_runs.sql`
+ * (append-only, idempotent; alternativ `npx drizzle-kit push`).
+ */
+export const backtestRuns = pgTable("backtest_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  instrumentId: text("instrument_id").notNull(),
+  timeframe: text("timeframe").notNull(),
+  fromTs: timestamp("from_ts", { withTimezone: true }).notNull(),
+  toTs: timestamp("to_ts", { withTimezone: true }).notNull(),
+  /** Regel-Ref + Regel-Spezifikation + Fenster + Kostenprofil. */
+  paramsJson: jsonb("params_json").notNull(),
+  /** Aggregate OOS/IS (Kennzahlen je Aggregat). */
+  metricsJson: jsonb("metrics_json").notNull(),
+  /** Kennzahlen + Trade-Hash je IS/OOS-Fenster. */
+  windowsJson: jsonb("windows_json").notNull(),
+  /** Code-Version des Laufs (APP_VERSION, Vergleichbarkeit). */
+  codeVersion: text("code_version").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("backtest_runs_instrument_idx").on(t.instrumentId, t.createdAt)]);
+
 /** Backtest-Läufe einer Regel gegen historische Kerzen (deterministisch). */
 export const ruleBacktests = pgTable("rule_backtests", {
   id: uuid("id").primaryKey().defaultRandom(),

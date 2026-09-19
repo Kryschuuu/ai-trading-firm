@@ -11,8 +11,19 @@ import type { SupportedTimeframe } from "../lib/marketdata/historicalStore";
 import type { RuleSpec } from "../lib/ruleEngine";
 import type { TradeSetupProposal } from "../cycle/schemas";
 import type { CandleLike } from "../lib/ruleEngine";
+import type { PaperBacktestOptions } from "./paperExecution";
 
 export type SlippageModel = "fixed" | "spread_relative" | "none";
+
+/**
+ * Ausführungspfad der Engine (GAP-01, v1.51.0):
+ *   - `"legacy"` — der eingefrorene Task-02-Simulator (`./simulator.ts`).
+ *     Default (Byte-kompatibel zu allen bestehenden Tests/Läufen).
+ *   - `"paper"` — DERSELBE `FillSimulator` wie der PaperBroker
+ *     (`./paperExecution.ts`) + Funding-Accrual. Pflicht für
+ *     Walk-Forward-Runs (vergleichbar persistiert).
+ */
+export type BacktestExecutionModel = "legacy" | "paper";
 
 /** Konfigurationsparameter für einen Backtest-Lauf. */
 export interface BacktestEngineConfig {
@@ -45,6 +56,13 @@ export interface BacktestEngineConfig {
   };
   /** Erlaube Short-Positionen (Default: false). */
   enableShorts: boolean;
+  /**
+   * Ausführungspfad (GAP-01, v1.51.0): `"legacy"` (Default, eingefroren)
+   * oder `"paper"` (Paper-Fill-Simulator + Funding).
+   */
+  executionModel: BacktestExecutionModel;
+  /** Kostenprofil des `"paper"`-Pfads (nur dort gelesen). */
+  paper?: PaperBacktestOptions;
 }
 
 /** Teilkonfiguration für Aufrufer mit sinnvollen Defaults. */
@@ -68,6 +86,12 @@ export interface BacktestOpenPosition {
   lowestPrice: number;
   feesPaid: number;
   slippagePaid: number;
+  /**
+   * Kumuliertes Funding dieser Position in Kontowährung (GAP-01, v1.51.0;
+   * nur `"paper"`-Pfad, Kontosicht wie `funding.ts`: negativ = gezahlt).
+   * Optional = Legacy-Läufe ohne Funding (0-Semantik).
+   */
+  fundingPaid?: number;
 }
 
 /** Grund für die Schließung eines Trades. */
@@ -95,6 +119,11 @@ export interface BacktestTradeLog {
   pnlPct: number;
   fees: number;
   slippage: number;
+  /**
+   * Funding-Anteil dieses Trades in Kontowährung (GAP-01, v1.51.0;
+   * nur `"paper"`-Pfad; im `pnl` bereits enthalten via Cash-Buchung).
+   */
+  funding?: number;
   exitReason: TradeExitReason;
   durationBars: number;
   durationMs: number;
@@ -145,6 +174,11 @@ export interface BacktestMetrics {
   exposureTimePct: number;
   totalFeesPaid: number;
   totalSlippagePaid: number;
+  /**
+   * Kumuliertes Funding aller Positionen in Kontowährung (GAP-01, v1.51.0;
+   * nur `"paper"`-Pfad; negativ = gezahlt). Legacy-Läufe: immer 0.
+   */
+  totalFundingPaid: number;
 }
 
 /** Einzelstatistik je Symbol. */

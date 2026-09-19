@@ -7,6 +7,11 @@
  *   - Deterministische Mehrfachausführung: Feste Sortierung nach Zeitstempel und Symbol.
  *   - Integriertes Portfolio-Management mit Cash-Tracking und Guardrails.
  *   - Realistische Ausführung mit Slippage, Gebühren und Stop-Vorrang.
+ *
+ * Ausführungspfade (GAP-01, v1.51.0): `executionModel: "legacy"` (Default,
+ * eingefrorener Task-02-Simulator — Byte-kompatibel) oder `"paper"`
+ * (DERSELBE `FillSimulator` wie der PaperBroker + Funding-Accrual, siehe
+ * `./paperExecution.ts`). Walk-Forward-Runs nutzen immer `"paper"`.
  */
 
 import type {
@@ -18,6 +23,11 @@ import type {
 } from "./types";
 import { BacktestPortfolio } from "./portfolio";
 import { evaluateExit, simulateEntry } from "./simulator";
+import {
+  createPaperExecutionRuntime,
+  detectExitTrigger,
+  type PaperExecutionRuntime,
+} from "./paperExecution";
 import { computeBacktestMetrics, computePerStrategyStats, computePerSymbolStats } from "./metrics";
 import {
   buildSnapshotFromCandles,
@@ -49,6 +59,8 @@ export const DEFAULT_BACKTEST_CONFIG: BacktestEngineConfig = {
     takerFee: 0.0006, // 6 bp
   },
   enableShorts: false,
+  // GAP-01: Legacy-Default = Byte-kompatibel zu allen bestehenden Läufen.
+  executionModel: "legacy",
 };
 
 export interface MultiAssetBacktestInput {
@@ -129,6 +141,13 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
   const timeline = Array.from(allTimestampsSet).sort((a, b) => a - b);
   const portfolio = new BacktestPortfolio(config);
 
+  // GAP-01: Paper-Laufzeit EINMAL pro Lauf erzeugen (frischer Simulator-seq
+  // ⇒ deterministische Order-IDs; Legacy-Läufe bleiben unberührt).
+  const paper: PaperExecutionRuntime | null =
+    config.executionModel === "paper"
+      ? createPaperExecutionRuntime(config.paper ?? {}, config.feeModel)
+      : null;
+
   // 3. Strategien kompilieren & vorbereiten
   const compiledRules = input.strategies.map((item, idx) => {
     if (item.type === "rule") {
@@ -166,6 +185,39 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
 
   const currentPrices = new Map<string, number>();
 
+  // GAP-01: Paper-Einstieg (Regel- und Setup-Pfad teilen sich diese Abwicklung).
+  const openPaperEntry = (
+    strategyId: string,
+    symbol: string,
+    side: "LONG" | "SHORT",
+    notional: number,
+    candle: CandleLike,
+    atTime: number,
+    atBar: number,
+    stopLoss: number | null,
+    takeProfit: number | null
+  ): void => {
+    if (!paper || notional <= 0) return;
+    const fill = paper.fillEntry(symbol, side, notional, candle.close, atTime);
+    // Fail-closed: Simulator-Reject ⇒ kein Einstieg (kein erfundener Fill).
+    if (!fill) return;
+    portfolio.openPosition(
+      strategyId,
+      symbol,
+      side,
+      {
+        fillPrice: fill.fillPrice,
+        qty: fill.filledQty,
+        fees: fill.fees,
+        slippage: fill.slippageCost,
+      },
+      candle,
+      atBar,
+      stopLoss,
+      takeProfit
+    );
+  };
+
   // 4. Haupt-Event-Schleife: Schrittweise entlang der synchronisierten Zeitachse
   let barStep = 0;
   for (const currentTime of timeline) {
@@ -192,6 +244,30 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     for (const pos of portfolio.openPositionsList) {
       const candleInfo = currentCandleBySymbol.get(pos.symbol);
       if (!candleInfo) continue;
+
+      if (paper) {
+        // Paper-Pfad: Trigger = Marktstruktur (Stop-Vorrang), Fill = Simulator.
+        const trigger = detectExitTrigger(pos, candleInfo.candle);
+        if (!trigger) continue;
+        const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
+        const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, trigger.price, currentTime);
+        // Fail-closed: Simulator-Reject ⇒ Position bleibt offen (kein
+        // erfundener Ausstiegspreis; mit Default-Konfig unerreichbar).
+        if (!fill) continue;
+        portfolio.closePosition(
+          pos.symbol,
+          {
+            triggered: true,
+            exitPrice: fill.fillPrice,
+            reason: trigger.reason,
+            fees: fill.fees,
+            slippage: fill.slippageCost,
+          },
+          currentTime,
+          barStep
+        );
+        continue;
+      }
 
       const exitEval = evaluateExit(pos, candleInfo.candle, config);
       if (exitEval && exitEval.triggered) {
@@ -240,7 +316,19 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
               spec.action.maxPositionPct
             );
 
-            if (notional > 0) {
+            if (paper) {
+              openPaperEntry(
+                strat.id,
+                strat.symbol,
+                spec.action.side,
+                notional,
+                candleInfo.candle,
+                currentTime,
+                barStep,
+                stopLoss,
+                takeProfit
+              );
+            } else if (notional > 0) {
               const fill = simulateEntry(candleInfo.candle, spec.action.side, notional, config);
               if (fill) {
                 portfolio.openPosition(
@@ -271,7 +359,19 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
               config.maxPositionPct
             );
 
-            if (notional > 0) {
+            if (paper) {
+              openPaperEntry(
+                strat.id,
+                strat.symbol,
+                evalItem.side,
+                notional,
+                candleInfo.candle,
+                currentTime,
+                barStep,
+                evalItem.stopLoss,
+                evalItem.takeProfit
+              );
+            } else if (notional > 0) {
               const fill = simulateEntry(candleInfo.candle, evalItem.side, notional, config);
               if (fill) {
                 portfolio.openPosition(
@@ -291,13 +391,47 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       }
     }
 
+    // c2) Funding-Accrual offener Perpetual-Positionen (nur „paper“-Pfad —
+    //     DIESELBE Engine + Formel wie der Paper-Monitor-Tick).
+    if (paper && portfolio.openPositionsCount > 0) {
+      const openRows = portfolio.openPositionsList.map((p) => ({
+        symbol: p.symbol,
+        side: p.side,
+        qty: p.qty,
+        price: currentPrices.get(p.symbol) ?? p.entryPrice,
+      }));
+      for (const accrual of paper.accrueFunding(openRows, currentTime)) {
+        portfolio.applyFunding(accrual.symbol, accrual.funding);
+      }
+    }
+
     // d) Equity-Snapshot für diesen Zeitschritt aufzeichnen
     portfolio.recordSnapshot(currentTime, currentPrices);
   }
 
   // 5. Noch offene Positionen am Ende schließen
   const lastTime = timeline.length > 0 ? timeline[timeline.length - 1] : Date.now();
-  portfolio.closeAllAtEnd(currentPrices, lastTime, barStep);
+  portfolio.closeAllAtEnd(
+    currentPrices,
+    lastTime,
+    barStep,
+    paper
+      ? (pos, price) => {
+          const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
+          const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, price, lastTime);
+          // null ⇒ Legacy-Schlussrechnung (defensiv; mit Default-Konfig
+          // unerreichbar, siehe portfolio.closeAllAtEnd).
+          if (!fill) return null;
+          return {
+            triggered: true,
+            exitPrice: fill.fillPrice,
+            reason: "END_OF_DATA" as const,
+            fees: fill.fees,
+            slippage: fill.slippageCost,
+          };
+        }
+      : undefined
+  );
 
   // 6. Kennzahlen berechnen
   const metrics = computeBacktestMetrics(
@@ -305,7 +439,9 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     portfolio.equityCurve,
     config.initialCapital,
     portfolio.feesPaid,
-    portfolio.slippagePaid
+    portfolio.slippagePaid,
+    365 * 24,
+    portfolio.fundingPaidTotal
   );
 
   const perSymbolStats = computePerSymbolStats(portfolio.trades);

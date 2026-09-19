@@ -1,6 +1,11 @@
 /**
  * Multi-Asset Backtest — Ausführungssimulator (Task 02).
  *
+ * EINGEFROREN seit GAP-01 (v1.51.0): Dieser Legacy-Kostenpfad bleibt
+ * Byte-kompatibel bestehen (`executionModel: "legacy"`), wird aber nicht
+ * mehr weiterentwickelt. Neue Läufe nutzen den Paper-Fill-Simulator
+ * (`./paperExecution.ts` — DIESELBE Klasse wie der PaperBroker).
+ *
  * Modelliert realistische Orderausführungen im Backtest:
  *   - Slippage: Fixed Basis-Points oder Spread-Relativ
  *   - Gebühren: Taker-Fee beim Einstieg und Ausstieg (Market Orders)

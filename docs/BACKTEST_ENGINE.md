@@ -3,6 +3,14 @@
 **Stand:** 2026-09-18 · **Modul:** `src/backtest/` · **API:** `/api/firm/backtest`
 **Version:** `1.41.0` · **Status:** Implementiert
 
+> **Fortschreibung (GAP-01, v1.51.0):** Diese Datei beschreibt die
+> Engine-Basis (Event-Schleife, Portfolio, Legacy-Kostenmodell —
+> `executionModel: "legacy"`, eingefroren). Neu dazu: Paper-Ausführung über
+> den Paper-Fill-Simulator, Walk-Forward-Fenster, persistierte Runs und die
+> CLI — siehe [BACKTESTING.md](BACKTESTING.md). Der synthetische
+> `<5`-Kerzen-Fallback in Step 8 ist entfernt (fail-closed
+> `DATA_UNAVAILABLE`).
+
 ---
 
 ## 1. Übersicht & Architekturziel
