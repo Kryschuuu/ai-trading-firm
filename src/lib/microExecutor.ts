@@ -33,11 +33,15 @@ import {
   getLimits,
   killSwitch,
   validateOrder,
-  missionSizedNotional,
   applyRuntimeLimits,
   riskValidationReason,
   type RiskLimits,
 } from "./riskGuard";
+// GAP-04 (v1.48.0): Vol-basiertes Sizing (ATR-Fallback-Stop + Fractional-Kelly)
+// und Cluster-Exposure-Guardrail (Schicht 3) — LLM-frei (nur Portfolio-Mathe,
+// LocalStore, DB/Audit).
+import { computePositionSize, loadSizingConfig, resolveKellyEdge } from "./positionSizing";
+import { checkClusterExposure, loadClusterLimitsConfig } from "./clusterExposure";
 import { getCandles, sanitizeSymbol } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
 import { structuredLog } from "./logger";
@@ -654,13 +658,6 @@ export function createPaperRuleAdapter(opts?: {
           ? ctx.spec.action.riskBudgetPct * regimeGate.factor
           : ctx.spec.action.riskBudgetPct;
 
-        const notional = missionSizedNotional(
-          equity,
-          stopPct,
-          Math.min(gatedRiskBudgetPct, limits.maxRiskPerTrade),
-          ctx.spec.action.maxPositionPct,
-          limits.maxPositionPct
-        );
         const price = broker.quote(symbol);
         if (price === null || price <= 0) {
           return {
@@ -671,9 +668,60 @@ export function createPaperRuleAdapter(opts?: {
             at: new Date().toISOString(),
           };
         }
-        const qty = Number((notional / price).toFixed(6));
-        const stopLoss = Number((price * (1 - stopPct)).toFixed(price > 100 ? 2 : 6));
-        const tpDist = stopPct * Math.min(ctx.spec.action.takeProfitRR, limits.takeProfitRR);
+
+        // GAP-04 (v1.48.0): Vol-basiertes Sizing — qty = Risikobudget/Stop-
+        // Abstand. Stop: explizit aus der Regel (stopPct); fehlender/0-Stop →
+        // ATR-Fallback (k·ATR, k = RISK_ATR_STOP_MULT). Fractional-Kelly-Deckel
+        // wirkt nur mit verfügbaren Journal-Statistiken (sonst wirkungslos).
+        // IMMER an die Code-Ceilings geklemmt (Sizing verschärft, lockert nie).
+        // UNKNOWN (kein ATR + kein Stop) → heutige Basis-Größe + Kennzeichnung
+        // + Audit-Notiz (Muster adaptiveRisk v1.36.21) — kein Block.
+        const sizingCfg = loadSizingConfig();
+        const kellyEdge = await resolveKellyEdge(sizingCfg);
+        const sized = computePositionSize({
+          equity,
+          riskPerTradePct: Math.min(gatedRiskBudgetPct, limits.maxRiskPerTrade),
+          entryPrice: price,
+          atr: ctx.snapshot.atrPct != null ? (ctx.snapshot.atrPct / 100) * price : null,
+          stopLoss: stopPct > 0 ? price * (1 - stopPct) : null,
+          side: "LONG",
+          missionMaxPositionPct: ctx.spec.action.maxPositionPct,
+          kelly: kellyEdge,
+          cfg: sizingCfg,
+        });
+        if (sized.unknown) {
+          // Fail-closed-Kennzeichnung (kein stiller Wert): Audit-Notiz, Order
+          // läuft mit der Basis-Größe weiter.
+          try {
+            await ruleAudit(
+              "POSITION_SIZING_UNKNOWN",
+              "WARN",
+              { ruleId: ctx.ruleId, symbol, code: `sizing:atr-unknown:${symbol}`, note: sized.note },
+              ctx.missionId
+            );
+          } catch {
+            /* Audit ist best-effort — darf die Ausführung nie brechen */
+          }
+        }
+        const notional = sized.notional;
+        if (notional <= 0) {
+          // Kelly-Deckel ohne positiven Edge → keine Größe (maschinenlesbar).
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: "GUARDRAIL:kelly:no-positive-edge",
+            at: new Date().toISOString(),
+          };
+        }
+        const qty = sized.qty;
+        const stopLoss =
+          stopPct > 0
+            ? Number((price * (1 - stopPct)).toFixed(price > 100 ? 2 : 6))
+            : Number(sized.stopPrice.toFixed(price > 100 ? 2 : 6));
+        const tpDist =
+          (stopPct > 0 ? stopPct : Math.max(sized.stopDistancePct, 0.001)) *
+          Math.min(ctx.spec.action.takeProfitRR, limits.takeProfitRR);
         const takeProfit = Number((price * (1 + tpDist)).toFixed(price > 100 ? 2 : 6));
 
         // H9: validateOrder wirft bei NaN/Infinity/≤0 fail-closed
@@ -705,6 +753,57 @@ export function createPaperRuleAdapter(opts?: {
             ruleId: ctx.ruleId,
             symbol,
             reason: `GUARDRAIL:${guard.reason}`,
+            at: new Date().toISOString(),
+          };
+        }
+
+        // GAP-04 (v1.48.0): Cluster-Exposure-Guardrail (Schicht 3) — neues
+        // Symbol gegen offene Positionen korrelationsgeclustert (Cache-TTL,
+        // kein Hintergrund-Job). monitor (Default): nur Audit-Notiz + Log der
+        // Würde-Prüfung, Entscheidung unverändert; enforce: Ablehnung
+        // `cluster-exposure:max-per-cluster:N` bzw. `-correlation-stale`.
+        const clusterCheck = await checkClusterExposure({
+          symbol,
+          openSymbols: posRows.rows.map((r) => r.symbol).filter((s) => s !== symbol),
+          missionId: ctx.missionId,
+        }).catch((e) => {
+          // Guardrail-Selbstfehler: fail-closed im enforce-Modus; im
+          // monitor-Modus bleibt die Entscheidung unverändert (sonst wäre
+          // „monitor“ kein no-op).
+          console.error(
+            "[micro] cluster-exposure guardrail fehlgeschlagen:",
+            e instanceof Error ? e.message : e
+          );
+          const mode = loadClusterLimitsConfig().mode;
+          if (mode === "enforce") {
+            return {
+              allowed: false,
+              reason: "cluster-exposure:guardrail-error",
+              blockedBy: ["cluster-exposure:guardrail-error"],
+              verdict: "STALE" as const,
+              mode: "enforce" as const,
+              clusterOfSymbol: null,
+              clusters: null,
+              auditWritten: false,
+            };
+          }
+          return {
+            allowed: true,
+            reason: "cluster-exposure guardrail fehlgeschlagen (monitor: keine Auswirkung)",
+            blockedBy: [],
+            verdict: "STALE" as const,
+            mode: "monitor" as const,
+            clusterOfSymbol: null,
+            clusters: null,
+            auditWritten: false,
+          };
+        });
+        if (!clusterCheck.allowed) {
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: `GUARDRAIL:${clusterCheck.blockedBy.join("|") || clusterCheck.reason}`,
             at: new Date().toISOString(),
           };
         }

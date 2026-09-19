@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.47.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.48.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,119 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.48.0] — 2026-09-19 · feat(risk): Vol-Sizing + Korrelations-Exposure-Limits im Order-Pfad (GAP-04)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-04](docs/audits/2026-09-18-feature-gap/findings/GAP-04-vol-sizing-correlation-limits.md))
+begrenzte `riskGuard` `maxPositionPct` **fix** (LIMIT_CEILINGS-Konvention),
+`adaptiveRisk` skalierte per Vol-Regime — aber es gab kein ATR-basiertes
+Sizing, keinen Fractional-Kelly-Deckel, und die Cluster-Mathematik aus
+`src/portfolio` war **nicht** als Guardrail im Order-Pfad verdrahtet: 5
+„unabhängige“ Trades konnten in Wahrheit ein BTC-Beta-Trade sein. Dieses
+Release schließt das Delta (PROMPT-04 der Remediation-Serie): Größe nach
+Volatilität, Exposure nach Korrelations-Clustern — alles geklemmt, alles
+fail-closed, Rollout bewusst **monitor-first** (Default: sichtbar machen,
+keine Wirkung). Paper-only, keine neuen Runtime-Dependencies, keine
+Schema-Änderung. Umsetzung: Branch `arena/01a0b953-ai-trading-firm`.
+
+### Hinzugefügt
+
+- **ATR-/Vol-basiertes Position-Sizing** (`src/lib/positionSizing.ts`,
+  D1) — reine, deterministische Funktion `computePositionSize()`:
+  `qty = (equity · riskPerTradePct) / |entry − stop|`. Stop-Auflösung:
+  expliziter Stop (seitenkonsistent) → **ATR-Fallback-Stop**
+  `entry − k·ATR` (`RISK_ATR_STOP_MULT`, Default 2, Bounds [0.5, 6]) →
+  **UNKNOWN-Fallback** auf die heutige Basis-Größe (`defaultStopLossPct`)
+  mit Kennzeichnung + Audit-Notiz (Muster adaptiveRisk v1.36.21 — kein
+  Block, kein stiller Wert). **Fractional-Kelly als Obergrenze**:
+  `maxNotional = equity · RISK_KELLY_FRACTION · f*`
+  (`f* = (b·p − (1−p))/b` aus Trefferquote/Payoff des Trade-Journals,
+  GAP-03; `RISK_KELLY_FRACTION` Default 0 = aus, Bounds [0, 1]; wirkt nur
+  mit ausreichender Stichprobe, sonst dokumentiert wirkungslos;
+  `f* ≤ 0` → keine Größe `kelly:no-positive-edge`). Ergebnis **immer** an
+  die bestehenden Grenzen geklemmt (`maxRiskPerTrade` vor der Formel,
+  `maxPositionPct`/Missions-Cap danach — Sizing verschärft, lockert nie);
+  `equity`/`entry ≤ 0` → `RiskValidationError` (fail-closed). Verdrahtet in
+  beiden Order-Pfaden: `src/lib/engine.ts` (LLM-Turn) und
+  `src/lib/microExecutor.ts` (Regel-Executor, ATR aus der
+  Rolling-Serie — Hot-Path bleibt I/O-frei).
+- **`atr()` in Preiseinheiten** in `src/lib/indicators.ts` (einfache
+  Wilder-Näherung, `null` bei unzureichender Historie — der Sizing-Pfad
+  wertet das als UNKNOWN); `atrPct` rechnet jetzt darüber (Ergebnis
+  unverändert).
+- **Cluster-Exposure-Guardrail, Schicht 3** (`src/lib/clusterExposure.ts`,
+  D2) — vor der Freigabe wird das neue Symbol gegen die **offenen
+  Positionen** korrelationsgeclustert: `correlationMatrix` +
+  `correlationClusters` **aus `src/portfolio` importiert** (keine
+  Duplikation), logarithmische Renditen über gemeinsame Zeitstempel aus dem
+  lokalen HistoricalStore (`1h`-Reihe, Fenster
+  `RISK_CORR_WINDOW_CANDLES` Default 90, Bounds [30, 365]), Single-Linkage
+  mit `|ρ| ≥ RISK_CORR_THRESHOLD` (Default 0.7, Bounds [0.3, 0.99]), Limit
+  `RISK_MAX_PER_CLUSTER` (Default 3, Bounds [1, 10]) offene Positionen je
+  Cluster. **Fail-closed Stale-Policy:** fehlende/veraltete Daten (> 24 h,
+  < 20 gemeinsame Renditen, nicht auflösbares Symbol) → enforce lehnt ab
+  (`cluster-exposure:correlation-stale`), statt zu raten. Berechnung nur je
+  Order-Prüfung mit TTL-Cache (`RISK_CORR_CACHE_TTL_MS` Default 900000,
+  Bounds [60000, 3600000]; Key = Symbol-Menge + Fenster + Schwelle) — kein
+  Hintergrund-Job.
+- **Rollout-Modus** `RISK_CLUSTER_LIMITS_MODE` (Default `monitor`):
+  `monitor` = Entscheidungspfad unverändert, Würde-Prüfung nur als
+  Audit-Notiz + Log (`CLUSTER_EXPOSURE_MONITOR`, `wouldBlock: true`);
+  `enforce` = echte Ablehnung (`cluster-exposure:max-per-cluster:N`,
+  Audit `CLUSTER_EXPOSURE_BLOCKED`). Unbekannter Wert → `monitor` +
+  Warnung.
+- **Transparenz** (D3): `GET /api/firm/risk` zeigt effektive Sizing- und
+  Cluster-Parameter (inkl. Bounds), Kelly-Edge-Status (`off`/`ok`/
+  `unavailable` + Statistik), Cache-Zustand, offene Positionen und aktuelle
+  Cluster sowie die UNKNOWN-Zustände (`unknown.correlationUnavailable`).
+  Je Guardrail-Entscheidung revisionssichere audit_log-Einträge
+  (`security`-Klasse, at-least-once); Sizing-UNKNOWN wird als
+  `POSITION_SIZING`/`POSITION_SIZING_UNKNOWN` mit Code
+  `sizing:atr-unknown:SYMBOL` protokolliert.
+
+### Geändert
+
+- Order-Pfade (Engine + Mikro-Executor) nutzen jetzt
+  `computePositionSize()` statt der inline aufgerufenen
+  `missionSizedNotional()` — mit den Default-Parametern (expliziter Stop,
+  Kelly aus) **byte-identische Notional-Werte** wie vorher; veränderlich
+  werden nur degenerative 0-Stop-Regeln (ATR-Fallback statt 0-Distanz).
+
+### Behoben
+
+- 0-Stop-Regeln im Mikro-Executor produzierten früher einen Stop **am
+  Entry-Preis** (`stopLoss = price`) — jetzt ATR-Fallback-Stop (bzw.
+  Basis-Stop bei UNKNOWN).
+
+### Tests & Checks
+
+- Neu: `tests/positionSizing.test.ts` (14), `tests/riskGuard.cluster.test.ts`
+  (14). Bestehende riskGuard-/portfolio-/microExecutor-/indicators-Tests
+  unverändert grün (Defaults = kein Verhaltensbruch; `monitor` blockt nie).
+- Pflicht-Checks der Serie (typecheck/lint/test/docs:validate) laufen in
+  der CI; Details im PR.
+
+### Konfiguration (neue Flags, Details: CONFIGURATION.md „Sizing & Cluster-Limits“)
+
+| Flag | Default | Bounds |
+| --- | --- | --- |
+| `RISK_ATR_STOP_MULT` | `2` | [0.5, 6] |
+| `RISK_KELLY_FRACTION` | `0` (aus) | [0, 1] |
+| `RISK_CLUSTER_LIMITS_MODE` | `monitor` | `monitor` \| `enforce` |
+| `RISK_CORR_THRESHOLD` | `0.7` | [0.3, 0.99] |
+| `RISK_MAX_PER_CLUSTER` | `3` | [1, 10] |
+| `RISK_CORR_WINDOW_CANDLES` | `90` | [30, 365] |
+| `RISK_CORR_CACHE_TTL_MS` | `900000` | [60000, 3600000] |
+
+### Doku
+
+- `docs/PORTFOLIO_ANALYTICS.md` §10 „Sizing & Cluster-Limits im
+  Order-Pfad“ (Formeln, Wiederverwendung `correlation.ts`, Rollout-Modus),
+  `docs/HANDBUCH.md` §9.5 (Ops: monitor→enforce-Umschaltung + Status-Check),
+  `CONFIGURATION.md` + `.env.example` (Flags), Finding
+  `GAP-04-vol-sizing-correlation-limits.md` („Umsetzung“) und
+  `remediation/TRACKING.md` (GAP-04 → IN_PROGRESS).
 
 ## [1.47.0] — 2026-09-19 · feat(marketdata): Datenqualitäts-Layer & deterministische Multi-TF-Aggregation (GAP-07)
 
