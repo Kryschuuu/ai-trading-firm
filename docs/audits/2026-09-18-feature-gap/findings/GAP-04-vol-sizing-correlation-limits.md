@@ -104,3 +104,31 @@ riskGuard-/portfolio-/microExecutor-/indicators-Tests unverändert grün.
   blockt dann Aufstockungen — siehe HANDBUCH §9.5, `npm run market:sync`
   hält den Store frisch).
 - Keine Schema-Änderung, keine neuen Runtime-Dependencies.
+
+## Nachtrag (v1.51.1, 2026-09-19, PR [#146](https://github.com/Kryschuuu/ai-trading-firm/pull/146)) — Audit-Katalog
+
+**Befund des Status-Reviews** ([`../remediation/STATUS-REVIEW-2026-09-19.md`](../remediation/STATUS-REVIEW-2026-09-19.md)):
+Die vier mit v1.48.0 eingeführten Audit-Events hatten **keinen Eintrag** im
+`AUDIT_EVENT_CATALOG` (`src/lib/auditView.ts`):
+
+| Event | Schreibpfad | Wirkung der Lücke |
+|-------|-------------|-------------------|
+| `POSITION_SIZING` | `src/lib/engine.ts` (`logAudit`) | Katalog-Wächter `tests/auditView.test.ts` **rot auf `main`** seit PR #142 |
+| `POSITION_SIZING_UNKNOWN` | `src/lib/microExecutor.ts` (`ruleAudit`) | dito |
+| `CLUSTER_EXPOSURE_MONITOR` | `src/lib/clusterExposure.ts` (`auditWrite(event, …)`) | vom Wächter-Regex nicht erfasst (Variable statt Literal), aber ebenso unbeschrieben |
+| `CLUSTER_EXPOSURE_BLOCKED` | dito | dito |
+
+Im Audit-Viewer fielen alle vier auf den `UNKNOWN_EVENT_SPEC`-Fallback zurück —
+die Guardrail-Entscheidungen, die R6 „revisionssicher“ verlangt, waren für
+Menschen ohne Label, Kategorie und Erklärung. Ursache: PR #142 hatte `npm test`
+nicht ausgeführt („läuft in der CI“) — die CI führt die Suite aber nicht aus;
+PRs #143/#145 haben den Failure regelkonform (R11) nur notiert.
+
+**Fix (v1.51.1):** Vier Katalog-Einträge (Kategorie `risk`, erwartete Stufe
+`WARN`) mit Headline/Erklärung/Fakten — Sizing: Instrument, Code
+`sizing:atr-unknown:SYMBOL`, Notiz (+ Regel-ID); Cluster-Exposure: Urteil
+VIOLATION/STALE, Code, Würde-blockieren-Flag, offene Positionen, Cluster +
+Zählung gegen `RISK_MAX_PER_CLUSTER`, Schwelle/Fenster, Datenstand
+(fehlend ⇒ „fail-closed“). Render-Test „GAP-04-Events (v1.51.1-Nachtrag)“ in
+`tests/auditView.test.ts` (26/26 grün). Status in
+[`../remediation/TRACKING.md`](../remediation/TRACKING.md): **FIXED**.

@@ -474,6 +474,89 @@ test("Katalog: jedes im Code geschriebene Audit-Event ist lesbar beschrieben", (
   assert.deepEqual(missing, [], `Diese Audit-Events haben keine deutsche Beschreibung: ${missing.join(", ")}`);
 });
 
+test("GAP-04-Events (v1.51.1-Nachtrag): Sizing-UNKNOWN + Cluster-Exposure sind lesbar beschrieben", () => {
+  // Regression: Mit v1.48.0 kamen vier Audit-Events ohne Katalog-Eintrag —
+  // der Katalog-Wächter oben war seitdem rot, und die Guardrail-Entscheidungen
+  // liefen im Viewer auf den UNKNOWN_EVENT_SPEC-Fallback. Dieser Test bindet
+  // die Payloads aus engine.ts / microExecutor.ts / clusterExposure.ts an
+  // sichtbare deutsche Fakten.
+  const sizing = describeAuditEntry(
+    entry("POSITION_SIZING", "WARN", {
+      symbol: "SOL",
+      code: "sizing:atr-unknown:SOL",
+      note: "UNKNOWN: ATR und expliziter Stop fehlen — Fallback auf Basis-Größe (Stop 2 %)",
+    }),
+    NOW
+  );
+  assert.equal(sizing.eventLabel, "Positionsgröße: Stop nicht auflösbar (UNKNOWN)");
+  assert.match(sizing.headline, /SOL · UNKNOWN → Basis-Größe/);
+  assert.match(sizing.explanation, /Fallback auf Basis-Größe/);
+  const sizingFacts = sizing.sections.flatMap((s) => s.facts);
+  assert.equal(sizingFacts.find((f) => f.label === "Code")?.value, "sizing:atr-unknown:SOL");
+
+  const ruleSizing = describeAuditEntry(
+    entry("POSITION_SIZING_UNKNOWN", "WARN", { ruleId: "rule-7", symbol: "ETH", code: "sizing:atr-unknown:ETH", note: "UNKNOWN" }),
+    NOW
+  );
+  assert.equal(ruleSizing.eventLabel, "Regel-Positionsgröße: Stop nicht auflösbar (UNKNOWN)");
+  assert.match(ruleSizing.headline, /ETH · Regel rule-7/);
+
+  const monitor = describeAuditEntry(
+    entry("CLUSTER_EXPOSURE_MONITOR", "WARN", {
+      symbol: "SOL",
+      openSymbols: ["BTC", "ETH", "AVAX"],
+      mode: "monitor",
+      verdict: "VIOLATION",
+      code: "cluster-exposure:max-per-cluster:3",
+      reason: "Cluster BTC/ETH/AVAX/SOL hätte 4 Positionen — Limit 3 (Schwelle 0.7).",
+      wouldBlock: true,
+      threshold: 0.7,
+      maxPerCluster: 3,
+      windowCandles: 90,
+      data: { observations: 89, lastTs: "2026-08-27T14:00:00.000Z", ageMs: 3_374_000 },
+      clusterOfSymbol: ["BTC", "ETH", "AVAX", "SOL"],
+      count: 4,
+      limit: 3,
+    }),
+    NOW
+  );
+  assert.equal(monitor.eventLabel, "Cluster-Exposure: würde blockieren (Monitor-Modus)");
+  assert.match(monitor.headline, /SOL · VIOLATION · würde blockieren/);
+  assert.match(monitor.explanation, /Limit 3/);
+  const monitorFacts = monitor.sections.flatMap((s) => s.facts);
+  assert.equal(monitorFacts.find((f) => f.label === "Urteil")?.value, "Verstoß (Cluster-Limit)");
+  assert.equal(monitorFacts.find((f) => f.label === "Würde blockieren")?.value, "ja");
+  assert.equal(monitorFacts.find((f) => f.label === "Positionen im Cluster")?.value, "4 (Limit 3)");
+  assert.equal(monitorFacts.find((f) => f.label === "Cluster des Instruments")?.value, "BTC, ETH, AVAX, SOL");
+  assert.equal(monitorFacts.find((f) => f.label === "Korrelationsschwelle")?.value, "|ρ| ≥ 0,7");
+  assert.match(monitorFacts.find((f) => f.label === "Datenstand")?.value ?? "", /89 gemeinsame Renditen/);
+
+  // STALE im enforce-Modus: keine Daten ⇒ fail-closed, Cluster-Fakten entfallen.
+  const blocked = describeAuditEntry(
+    entry("CLUSTER_EXPOSURE_BLOCKED", "WARN", {
+      symbol: "DOGE",
+      openSymbols: ["BTC"],
+      mode: "enforce",
+      verdict: "STALE",
+      code: "cluster-exposure:correlation-stale",
+      reason: "Korrelationsdaten nicht verfügbar — keine Aussage möglich (fail-closed).",
+      wouldBlock: false,
+      threshold: 0.7,
+      maxPerCluster: 3,
+      windowCandles: 90,
+      data: null,
+    }),
+    NOW
+  );
+  assert.equal(blocked.eventLabel, "Cluster-Exposure: Order abgelehnt");
+  assert.match(blocked.headline, /DOGE · STALE · abgelehnt/);
+  assert.match(blocked.explanation, /fail-closed/);
+  const blockedFacts = blocked.sections.flatMap((s) => s.facts);
+  assert.equal(blockedFacts.find((f) => f.label === "Urteil")?.value, "Korrelationsdaten stale");
+  assert.equal(blockedFacts.find((f) => f.label === "Datenstand")?.value, "keine Korrelationsdaten (fail-closed)");
+  assert.equal(blockedFacts.find((f) => f.label === "Positionen im Cluster"), undefined);
+});
+
 test("KILL_SWITCH: Tagesverlust-Limit wird erklärt, Equity ohne Vorzeichen", () => {
   const view = describeAuditEntry(
     entry(
