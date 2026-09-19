@@ -70,6 +70,7 @@ import type { BrokerAdapter, BrokerVenueId } from "../contracts/broker";
 import type { PaperBroker } from "./broker";
 import type { ControlPlaneService } from "../brokers/control-plane/service";
 import type { VenueControlState } from "../brokers/control-plane/states";
+import type { ReconciliationReport } from "../brokers/reconciliation";
 
 /**
  * EIN globalThis-Namensraum fuer alle Cross-Cutting-Singletons. Das ueberlebt
@@ -228,6 +229,12 @@ export const state = {
    */
   monitorLastTickAt: ref<number>("monitorLastTickAt"),
 
+  // ── Reconciliation (src/brokers/reconciliation.ts) ─────────────────────────
+  /**
+   * GAP-09 (v1.50.0): Letzter Reconciliation-Bericht (RAM).
+   */
+  reconciliationLastReport: ref<ReconciliationReport | null>("reconciliationLastReport"),
+
   // ── Broker-Factory (src/brokers/factory.ts) ────────────────────────────────
   /** Adapter-Singletons je venue:mode (RAM-Cache). */
   brokerAdapters: map<`${BrokerVenueId}:${string}`, BrokerAdapter>("brokerAdapters"),
@@ -277,6 +284,8 @@ export function __resetAllSingletonsForTests(): void {
   state.circuitBreakerLatch.reset();
   // Monitor
   state.monitorLastTickAt.reset();
+  // Reconciliation (GAP-09)
+  state.reconciliationLastReport.reset();
   // Broker-Factory
   state.brokerAdapters.reset();
   state.paperBrokerLedger.reset();

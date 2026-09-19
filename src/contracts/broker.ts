@@ -235,6 +235,16 @@ export interface BrokerOrderRequest {
   takeProfit?: number;
   /** Notional (qty × Preis) in Kontowährung — Basis der Guardrail-Prüfung. */
   riskNotional: number;
+  /**
+   * GAP-09 (v1.50.0): Deterministische Client-Order-ID ("atf-<intentId-kurz>")
+   * für sichere Retries ohne Doppel-Order-Risiko.
+   */
+  clientOrderId?: string;
+  /**
+   * GAP-09 (v1.50.0): ID des DB-Order-Intents (order_intents), aus dem die
+   * clientOrderId abgeleitet wird.
+   */
+  orderIntentId?: string;
 }
 
 /**

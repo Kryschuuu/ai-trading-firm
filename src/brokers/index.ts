@@ -37,3 +37,21 @@ export { PaperBrokerAdapter } from "./paper";
 export { StubBrokerAdapter, type StubVenueId } from "./stubs";
 export { BitunixBrokerAdapter } from "./bitunix";
 export { AlpacaBrokerAdapter } from "./alpaca";
+export {
+  runReconciliation,
+  classifyDifferences,
+  buildClientOrderId,
+  submitWithIntent,
+  loadReconciliationConfig,
+  formatReconReason,
+  createDefaultDbStore,
+  RECON_ENV,
+  RECON_BOUNDS,
+  RECON_DEFAULTS,
+  RECON_REPORT_DEFAULT_FILE,
+  type ReconciliationConfig,
+  type ReconciliationReport,
+  type Discrepancy,
+  type ReconciliationDifferenceType,
+  type ReconciliationDbStore,
+} from "./reconciliation";

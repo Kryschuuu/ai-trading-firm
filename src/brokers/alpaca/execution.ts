@@ -23,6 +23,7 @@ import type {
 import type { ExecutionMode } from "../../contracts/broker";
 import { killSwitch, validateOrder, riskValidationReason } from "../../lib/riskGuard";
 import { serializePlaceOrder, clientOrderIdFor } from "./orders";
+import { buildClientOrderId } from "../reconciliation";
 import { mapAccount, mapOrderResult, mapPosition } from "./mapping";
 import { AlpacaPaperLedger } from "./paper";
 import type { AlpacaPrivateClient } from "./privateClient";
@@ -237,7 +238,10 @@ export class BrokerExecutionEngine implements ExecutionPort {
     }
 
     const alpacaReq = serializePlaceOrder(req);
-    const idem = clientOrderIdFor(req);
+    // GAP-09: deterministische clientOrderId aus req oder orderIntentId
+    const idem =
+      req.clientOrderId ??
+      (req.orderIntentId ? buildClientOrderId(req.orderIntentId) : clientOrderIdFor(req));
     let rawOrder;
     try {
       rawOrder = await this.client.placeOrder(alpacaReq, idem);

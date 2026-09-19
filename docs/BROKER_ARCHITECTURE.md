@@ -316,7 +316,65 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
   `src/lib/clientIp.ts` — C2/v1.36.14), Audit je Ereignis
   (`BROKER_CONTROL_PLANE`), Response-/Bundle-Secret-Scanner in CI.
 
-## 10. Ausbaupfad (Folge-Tasks)
+---
+
+## 10. Reconciliation & Idempotenz (GAP-09, v1.50.0)
+
+Der periodische Abgleich zwischen Broker-Zustand und Datenbank
+(`src/brokers/reconciliation.ts`) schließt Lücke GAP-09 und stellt eine
+zentrale Live-Readiness-Voraussetzung dar.
+
+### 10.1 Differenz-Klassifikation & Toleranzen
+
+| Klasse | Typ | Auslöser / Prüfung | Schweregrad |
+| --- | --- | --- | --- |
+| `PRICE_DRIFT` | Tolerierbar (≤ Limit) | Differenz zwischen Broker- und DB-Einstandskurs innerhalb `RECON_PRICE_DRIFT_PCT` (Default: 1 %, Bounds: [0.01, 10]) | Info / Warnung (nur Report) |
+| `PRICE_DRIFT` | Kritisch (> Limit) | Preis-Drift überschreitet `RECON_PRICE_DRIFT_PCT` | Kritisch |
+| `QTY_MISMATCH` | Kritisch | Mengendifferenz (`\|brokerQty - dbQty\| > 1e-6`) oder Positions-Richtungs-Mismatch (LONG vs. SHORT) | Kritisch |
+| `PHANTOM_POSITION` | Kritisch | Position existiert am Broker, fehlt aber in der DB (`positions` status='OPEN') | Kritisch |
+| `MISSING_POSITION` | Kritisch | Position existiert in der DB (`status='OPEN'`), fehlt aber am Broker | Kritisch |
+| `BALANCE_MISMATCH` | Kritisch | Kontostand-Abweichung (`\|brokerCash - dbCash\| > 0.01`) | Kritisch |
+| `INVARIANT_VIOLATION` | Kritisch | Paper-Ledger-Invarianz gebrochen (negatives Cash, Notional > Equity, inkonsistente Equity) | Kritisch |
+
+### 10.2 Pause-Politik & Schutzgarantien
+
+- **Flag:** `RECON_PAUSE_ON_MISMATCH` (Default: `false`).
+- **Verhalten bei `true`:** Bei Feststellung einer kritischen Klasse (`QTY_MISMATCH`,
+  `PHANTOM_POSITION`, `MISSING_POSITION`, `BALANCE_MISMATCH`, `INVARIANT_VIOLATION`)
+  wird der prozessweite Kill-Switch aktiviert (`killSwitch.pull("recon:<klasse>")`),
+  in `kill_switches` persistiert und ein `CRITICAL`-Audit (`KILL_SWITCH`) sowie ein
+  Alert über den AlertSink abgesetzt.
+- **Auto-Flatten ist STRIKT VERBOTEN:** Eine automatische Glattstellung bei
+  Reconciliation-Diskrepanzen findet **niemals** statt. Das Aufräumen und Glattstellen
+  erfolgt ausschließlich durch den Administrator nach manueller Analyse.
+- **Disarm-Schutz unverändert:** Ein Entschärfen des Kill-Switches bleibt
+  ausnahmslos dem manuellen Challenge-Nonce-Pfad (`GET /api/firm/kill/challenge` +
+  `POST /api/firm/kill` mit `nonce`, ADMIN-Recht `live.gate` und CSRF-Schutz) vorbehalten.
+
+### 10.3 Client-Order-ID-Schema & Retries
+
+- **Schema:** `atf-<orderIntentId-kurz>` (Präfix `atf-` gefolgt von den ersten 12
+  alphanumerischen Zeichen der Order-Intent-ID).
+- **Idempotenz:** Jeder Retry nach einem ambivalenten Ausgang (Timeout, Netzwerkfehler)
+  verwendet dieselbe `clientOrderId` aus demselben `orderIntent`.
+- **Deduplizierung:**
+  1. *Lokale DB-Deduplizierung:* Wenn der `orderIntent` bereits `status = 'FILLED'` trägt,
+     wird kein zweiter Auftrag an den Broker gesendet, sondern der bestehende Fill zurückgegeben.
+  2. *Venue-Deduplizierung:* Venues, die Client-Order-IDs unterstützen, deduplizieren
+     den Auftrag serverseitig bzw. erlauben eine Statusabfrage vor erneutem Senden.
+
+### 10.4 Venue-Fähigkeiten & Ausnahmen
+
+- **Bitunix:** Volle Unterstützung über `clientId` im Place-Order-Body (`POST /api/v1/futures/trade/place_order`)
+  und Status-Query per `clientId` (`GET /api/v1/futures/trade/order_detail`).
+- **Alpaca:** Volle Unterstützung über `client_order_id` und `Idempotency-Key`-Header.
+- **Paper:** Vollständige synchrone Simulation mit Ledger-Invarianten-Selbsttest.
+- **Stubs (IBKR, BINANCE, KRAKEN, DYDX):** Noch nicht implementiert; werfen
+  `NotSupportedCapabilityError`.
+
+---
+
+## 11. Ausbaupfad (Folge-Tasks)
 
 | Task | Inhalt |
 | --- | --- |
@@ -327,7 +385,7 @@ Details: [FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md).
 | Bitunix-Adapter (Task 07) | **umgesetzt:** `src/brokers/bitunix/`, `stopAtVenue: true`, Paper-Modus B; Live bleibt LGTE bis task-11. Doku: [BITUNIX.md](BITUNIX.md) |
 | Alpaca-Adapter (Task 12, v1.36.0) | **umgesetzt:** `src/brokers/alpaca/`, `testnet: true` (Paper-API ist offizielles Testnet), `stopAtVenue: true` (Bracket-Orders), Paper-Modus B, getrennte Paper-/Broker-Engines; Live bleibt LGTE. Doku: [ALPACA.md](ALPACA.md) |
 
-## 11. Verweise
+## 12. Verweise
 
 - Contracts: `src/contracts/broker.ts` · Factory: `src/brokers/factory.ts`
 - Capability-SSoT: `src/brokers/capabilities.ts` · Audit: `src/brokers/audit.ts`
