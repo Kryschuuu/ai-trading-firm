@@ -1,0 +1,28 @@
+{
+  "id": "research-monotonicity-short",
+  "step": "research",
+  "description": "Schlecht-Fall: SHORT mit Take-Profit ÜBER dem Entry — verletzt tp < entry < stop.",
+  "candles": [
+    { "time": "2026-09-10T00:00:00.000Z", "open": 3520, "high": 3560, "low": 3490, "close": 3510 },
+    { "time": "2026-09-10T01:00:00.000Z", "open": 3510, "high": 3530, "low": 3480, "close": 3495 },
+    { "time": "2026-09-10T02:00:00.000Z", "open": 3495, "high": 3515, "low": 3470, "close": 3485 }
+  ],
+  "providerResponse": {
+    "setups": [
+      {
+        "instrumentId": "BINANCE:ETHUSDT",
+        "side": "SHORT",
+        "entryPrice": 3490,
+        "stopLoss": 3580,
+        "takeProfit": 3550,
+        "riskScore": 0.5,
+        "timeframe": "4h",
+        "thesis": "Short am fallenden Widerstand mit engem Stop über dem letzten Hoch und Ziel am Tagestief.",
+        "isProposal": true
+      }
+    ],
+    "totalSetups": 1,
+    "disclaimer": "PROPOSAL_ONLY_NO_ORDERS_PLACED"
+  },
+  "expect": { "schemaValid": true, "plausible": false, "codes": ["MONOTONICITY"] }
+}

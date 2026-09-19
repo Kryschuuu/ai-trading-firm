@@ -90,8 +90,11 @@ export class CycleService {
     const targetDate = asOf ?? this.clock.now();
     const record = await this.scheduler.runDaily(targetDate);
 
-    // Outputs aus dem Lauf aggregieren
-    const stepOutputs: Record<string, unknown> = {};
+    // Outputs aus dem Lauf aggregieren (GAP-08, v1.49.0: die Engine hängt
+    // die validierten Step-Outputs seitdem an den Record — vorher blieb die
+    // Ablage bewusst leer, jetzt landen die Step-Dateien inkl. sichtbarem
+    // Plausibilitäts-Status im Tages-Artefakt).
+    const stepOutputs: Record<string, unknown> = record.stepOutputs ?? {};
     const saved = saveDailyCycleArtifacts(record, stepOutputs);
 
     // GAP-03 (v1.43.0): Trade-Journal-Auswertung + modusabhängige

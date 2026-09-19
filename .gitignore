@@ -55,6 +55,10 @@ next-env.d.ts
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
 
+# Prompt-Eval-Reports (GAP-08, v1.49.0): `npm run eval:prompts` schreibt
+# JSON- + MD-Report je Lauf — reproduzierbar, nicht versioniert.
+/data/eval
+
 # Audit-Spool (S1, v1.36.18): persistenter Fallback, wenn audit_log nicht
 # schreibbar war. Läuft lokal, wird nach dem Nachzug geleert — nicht versioniert.
 /data/audit-spool

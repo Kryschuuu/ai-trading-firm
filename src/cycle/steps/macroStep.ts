@@ -7,15 +7,30 @@
 
 import type { StepDefinition, StepExecutionContext } from "../types";
 import { type MacroStepOutput, validateMacroOutput } from "../schemas";
+import {
+  adaptMacroOutput,
+  plausibilityAuditReason,
+  toStepStatus,
+  type PlausibilityStepStatus,
+} from "../plausibility";
 
 export const MACRO_REQUIRED_ASSETS = ["BTC", "ETH", "DXY", "SPX", "Nasdaq", "Gold", "Bonds"] as const;
+
+/**
+ * Makro-Output mit sichtbarem Plausibilitäts-Status (GAP-08, v1.49.0).
+ * Der Step hängt das Feld an (nie das LLM); es landet im Tages-Artefakt
+ * `02-macro-analyst.json`.
+ */
+export type MacroStepOutputWithStatus = MacroStepOutput & {
+  plausibility?: PlausibilityStepStatus;
+};
 
 export interface MacroStepInput {
   asOf?: string;
   externalMacroData?: Record<string, { price?: number; change24hPct?: number; trend?: string }>;
 }
 
-export const macroStep: StepDefinition<MacroStepInput, MacroStepOutput> = {
+export const macroStep: StepDefinition<MacroStepInput, MacroStepOutputWithStatus> = {
   stepId: "02-macro-analyst",
   name: "Macro Analyst",
   role: "MACRO_ANALYST",
@@ -26,7 +41,7 @@ export const macroStep: StepDefinition<MacroStepInput, MacroStepOutput> = {
     backoffMs: 200,
   },
 
-  async execute(context: StepExecutionContext<MacroStepInput>): Promise<MacroStepOutput> {
+  async execute(context: StepExecutionContext<MacroStepInput>): Promise<MacroStepOutputWithStatus> {
     context.log("Starte Makro-Analyse für BTC, ETH, DXY, SPX, Nasdaq, Gold, Bonds …");
 
     const fallback: MacroStepOutput = {
@@ -79,6 +94,12 @@ Output JSON schema:
       untrustedData: context.input?.externalMacroData ?? { coveredAssets: MACRO_REQUIRED_ASSETS },
       schemaValidator: validateMacroOutput,
       fallback,
+      // GAP-08: Plausibilitäts-Schicht (hier wirksam: Confidence vs.
+      // Begründungsqualität — preisbezogene Regeln entfallen ohne Kerzen).
+      plausibility: {
+        adapt: adaptMacroOutput,
+        fieldPrefix: "macro",
+      },
       /**
        * KORRIGIERT (task-09, Governance-Regel 1): Der Eskalationstrigger kommt
        * aus den **validierten Strukturfeldern**, nicht aus Freitext. Sonst
@@ -117,6 +138,37 @@ Output JSON schema:
       context.emitEscalation(res.escalation);
     }
 
+    // Fail-closed (GAP-08): Unplausibler Makro-Output → Skip mit Audit
+    // (`plausibility:CODE`) und sichtbarem Status statt stiller Übernahme.
+    if (res.plausibility?.status === "SKIPPED") {
+      const reason = plausibilityAuditReason(res.plausibility);
+      await context.ports.audit.logEvent({
+        event: "CYCLE_STEP_SKIPPED",
+        level: "WARN",
+        cycleId: context.cycleId,
+        stepId: "02-macro-analyst",
+        role: "MACRO_ANALYST",
+        timestamp: context.clock.toISOString(),
+        detail: {
+          reason,
+          findings: res.plausibility.findings.map((f) => ({
+            code: f.code,
+            field: f.field,
+            detail: f.detail,
+          })),
+          attempts: res.plausibility.attempts,
+        },
+      });
+      context.log(
+        `Makro-Output verworfen (${reason}) — deterministischer Fallback.`,
+        "WARN",
+      );
+      return { ...fallback, plausibility: toStepStatus(res.plausibility) };
+    }
+
+    if (res.plausibility) {
+      return { ...res.output, plausibility: toStepStatus(res.plausibility) };
+    }
     return res.output;
   },
 };

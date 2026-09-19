@@ -1,0 +1,28 @@
+{
+  "id": "research-price-band",
+  "step": "research",
+  "description": "Schlecht-Fall: Kurshalluzination — Entry ~50 % über dem Known-Good-Kurs (Band ±15 %).",
+  "candles": [
+    { "time": "2026-09-10T00:00:00.000Z", "open": 99, "high": 102, "low": 98, "close": 100 },
+    { "time": "2026-09-10T01:00:00.000Z", "open": 100, "high": 103, "low": 99, "close": 101 },
+    { "time": "2026-09-10T02:00:00.000Z", "open": 101, "high": 104, "low": 100, "close": 102 }
+  ],
+  "providerResponse": {
+    "setups": [
+      {
+        "instrumentId": "ALPACA:AAPL",
+        "side": "LONG",
+        "entryPrice": 150,
+        "stopLoss": 140,
+        "takeProfit": 165,
+        "riskScore": 0.4,
+        "timeframe": "4h",
+        "thesis": "Ausbruch über die runde Marke mit klarem Stop und ausgedehntem Kursziel nach oben.",
+        "isProposal": true
+      }
+    ],
+    "totalSetups": 1,
+    "disclaimer": "PROPOSAL_ONLY_NO_ORDERS_PLACED"
+  },
+  "expect": { "schemaValid": true, "plausible": false, "codes": ["PRICE_RANGE"] }
+}

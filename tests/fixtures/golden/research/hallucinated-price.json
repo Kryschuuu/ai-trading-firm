@@ -1,0 +1,28 @@
+{
+  "id": "research-hallucinated-price",
+  "step": "research",
+  "description": "Schlecht-Fall: Die Begründung nennt 68250 — außerhalb [minLow, maxHigh] der Kerzen. 65500 liegt im Bereich und ist OK.",
+  "candles": [
+    { "time": "2026-09-10T00:00:00.000Z", "open": 64800, "high": 65200, "low": 64500, "close": 65000 },
+    { "time": "2026-09-10T01:00:00.000Z", "open": 65000, "high": 65600, "low": 64900, "close": 65400 },
+    { "time": "2026-09-10T02:00:00.000Z", "open": 65400, "high": 65800, "low": 65100, "close": 65600 }
+  ],
+  "providerResponse": {
+    "setups": [
+      {
+        "instrumentId": "BINANCE:BTCUSDT",
+        "side": "LONG",
+        "entryPrice": 65400,
+        "stopLoss": 64000,
+        "takeProfit": 68500,
+        "riskScore": 0.4,
+        "timeframe": "4h",
+        "thesis": "Ausbruch über 65500 mit Ziel 68250 bei starkem Volumen bestätigt den intakten Aufwärtstrend.",
+        "isProposal": true
+      }
+    ],
+    "totalSetups": 1,
+    "disclaimer": "PROPOSAL_ONLY_NO_ORDERS_PLACED"
+  },
+  "expect": { "schemaValid": true, "plausible": false, "codes": ["HALLUCINATED_PRICE"] }
+}

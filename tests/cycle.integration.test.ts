@@ -34,6 +34,10 @@ test("Integration: Vollzyklus im Zeitraffer (24h in Sekunden) inkl. Artefakte & 
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), "cycle-integration-"));
   const prevEnv = process.env.CYCLE_ARTIFACTS_DIR;
   process.env.CYCLE_ARTIFACTS_DIR = tmpDir;
+  // GAP-08: Plausibilitäts-Referenzkerzen isolieren (leere Historie →
+  // referenceMissing statt maschinenabhängiger Preisbewertung).
+  const prevHistoryDir = process.env.PAPER_HISTORY_DIR;
+  process.env.PAPER_HISTORY_DIR = mkdtempSync(path.join(os.tmpdir(), "cycle-integration-history-"));
 
   const clock = new SimulatedClock("2026-08-27T00:00:00.000Z"); // Start um Mitternacht
   const testPorts = createTestPorts();
@@ -234,6 +238,8 @@ test("Integration: Vollzyklus im Zeitraffer (24h in Sekunden) inkl. Artefakte & 
     assert.equal(runsData.total, 2); // 1 Daily + 1 Weekly
   } finally {
     process.env.CYCLE_ARTIFACTS_DIR = prevEnv;
+    if (prevHistoryDir === undefined) delete process.env.PAPER_HISTORY_DIR;
+    else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
     resetCycleServiceForTests();
     rmSync(tmpDir, { recursive: true, force: true });
   }

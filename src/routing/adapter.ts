@@ -19,6 +19,7 @@ import { chatLlm, type LlmChatRequest, type LlmMessage, type LlmUsage } from "@/
 import { publicErrorMessage } from "@/lib/secrets";
 import { metricLabel, telemetry } from "@/lib/telemetry";
 import { estimateCostUsd, getModelRouter, modelSignature, type ModelRouter } from "./router";
+import { TurnBudgetExceededError, turnBudgetAuditLabel, type TurnBudget } from "./turnBudget";
 import {
   PROVIDER_IDS,
   type EscalationRequest,
@@ -82,6 +83,13 @@ export type RouteChatOptions = {
    * dann NICHT erneut befragt; der Wechsel ist bereits auditiert.
    */
   forcedDecision?: RoutingDecision;
+  /**
+   * Turn-Budget-Hartdeckel (GAP-08, v1.49.0): Zeit wird VOR dem Aufruf,
+   * Token-Verbrauch NACH dem Aufruf gebucht. Überschreitung → Audit
+   * (`llm-budget:tokens`/`llm-budget:time`) + `TurnBudgetExceededError`
+   * (kein Fallback-Inhalt als Erfolg).
+   */
+  turn?: TurnBudget;
 };
 
 /** Baut den Routing-Kontext aus der Spec — Whitelist, kein Freitext. */
@@ -116,6 +124,20 @@ export async function routeChat(
   const chain: ProviderId[] = [decision.provider, ...decision.providerChain].filter((p): p is ProviderId =>
     PROVIDER_IDS.includes(p as ProviderId)
   );
+
+  // GAP-08 (v1.49.0): Turn-Hartdeckel — Zeitgrenze VOR jedem Aufruf der Kette.
+  // Die Prüfung steht bewusst VOR dem Regel-Engine-Fallback: Ein abgelaufener
+  // Turn bricht sauber ab, statt still Fallback-Inhalt zu liefern.
+  if (opts.turn) {
+    try {
+      opts.turn.checkTime();
+    } catch (e) {
+      if (e instanceof TurnBudgetExceededError) {
+        auditTurnBudgetBreach(router, decision, chain, e);
+      }
+      throw e;
+    }
+  }
 
   // Kein Modell verfügbar ⇒ deterministische Regel-Engine des Aufrufers.
   if (decision.provider === "none" || chain.length === 0) {
@@ -156,6 +178,20 @@ export async function routeChat(
       ? result.provider
       : chain[0]) as ProviderId;
     const tokens = Number(result.usage?.totalTokens ?? 0);
+
+    // GAP-08 (v1.49.0): Token-Verbrauch des Turns buchen — Überschreitung
+    // bricht den Turn ab (Audit + strukturierter Fehler, kein Teilergebnis).
+    if (opts.turn) {
+      try {
+        opts.turn.consume(tokens);
+      } catch (e) {
+        if (e instanceof TurnBudgetExceededError) {
+          auditTurnBudgetBreach(router, decision, chain, e);
+        }
+        throw e;
+      }
+    }
+
     const costUsd = result.costUsd ?? estimateCost(router, provider, decision, spec);
     const latencyMs = Date.now() - started;
 
@@ -215,6 +251,9 @@ export async function routeChat(
       switched,
     };
   } catch (e) {
+    // GAP-08: Ein Turn-Budget-Bruch ist ein sauberer Abbruch — NIEMALS ein
+    // Fallback-Erfolg. Der Fehler (bereits auditiert) propagiert zum Aufrufer.
+    if (e instanceof TurnBudgetExceededError) throw e;
     const message = publicErrorMessage(e, "LLM-Aufruf fehlgeschlagen");
     // GAP-10: Fehlversuche der Kette zählen (Kette bzw. Ziel-Provider).
     for (const p of chain) {
@@ -250,6 +289,51 @@ export async function routeChat(
       error: message,
     };
   }
+}
+
+/**
+ * Auditiert einen Turn-Budget-Bruch (GAP-08, v1.49.0): Trigger
+ * `BUDGET_EXCEEDED`, Outcome `budget_blocked` (Sicherheitsklasse → landet in
+ * `audit_log`, Event `MODEL_ROUTING`). Der Grund trägt das Label
+ * `llm-budget:tokens` bzw. `llm-budget:time`.
+ */
+function auditTurnBudgetBreach(
+  router: ModelRouter,
+  decision: RoutingDecision,
+  chain: ProviderId[],
+  error: TurnBudgetExceededError,
+): void {
+  const label = turnBudgetAuditLabel(error.reason);
+  void router.audit.write({
+    ts: new Date().toISOString(),
+    agent: decision.agent,
+    from: modelSignature({
+      modelClass: decision.modelClass,
+      provider: decision.provider,
+      model: decision.model,
+    }),
+    to: modelSignature({
+      modelClass: decision.modelClass,
+      provider: decision.provider,
+      model: decision.model,
+    }),
+    reason:
+      error.reason === "tokens"
+        ? `${label}: Turn-Token-Budget überschritten (${error.tokensUsed}/${error.tokensMax} Tokens). Turn sauber abgebrochen — keine Teil-Results.`
+        : `${label}: Turn-Zeit-Budget überschritten (${error.elapsedMs}/${error.maxMs} ms). Turn sauber abgebrochen — keine Teil-Results.`,
+    trigger: "BUDGET_EXCEEDED",
+    policyVersion: decision.policyVersion,
+    outcome: "budget_blocked",
+    task: decision.task,
+    complexity: decision.complexity,
+    detail: {
+      chain: chain.join(">"),
+      turnTokensUsed: error.tokensUsed,
+      turnTokensMax: error.tokensMax,
+      turnElapsedMs: error.elapsedMs,
+      turnMaxMs: error.maxMs,
+    },
+  } satisfies RoutingAuditEntry);
 }
 
 function estimateCost(

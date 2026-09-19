@@ -263,5 +263,10 @@ export async function executeCycle(options: CycleExecutionOptions): Promise<Cycl
     escalations,
     artifacts: [],
     error: failureError,
+    // GAP-08 (v1.49.0): Die validierten Step-Outputs lagen bisher nur intern
+    // vor (Artefakt-Dateien blieben leer) — jetzt hängt sie der Record an,
+    // damit der Service sie als Tages-Artefakte persistiert (u. a. sichtbarer
+    // Plausibilitäts-Status je Step). Reine Daten, keine Funktionen.
+    stepOutputs,
   };
 }

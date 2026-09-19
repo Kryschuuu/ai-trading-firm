@@ -1,0 +1,13 @@
+{
+  "id": "macro-schema-invalid",
+  "step": "macro",
+  "description": "Schema-Fall: view ist keine Zeichenkette — Schema-Validierung scheitert.",
+  "candles": [],
+  "providerResponse": {
+    "view": 123,
+    "regime": "RISK_ON",
+    "thesis": "Risk-On-Umfeld über alle Assetklassen mit stabiler Volatilität.",
+    "confidence": 0.7
+  },
+  "expect": { "schemaValid": false, "plausible": false, "codes": [] }
+}

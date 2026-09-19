@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.48.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.49.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,44 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.49.0] — 2026-09-19 · feat(llm): Plausibilitäts-Schicht, Prompt-Eval-Harness & Turn-Budget (GAP-08)
+
+### Added
+
+- Plausibilitäts-Schicht nach der Schema-Validierung
+  (`src/cycle/plausibility.ts`): Monotonie je Richtung (`MONOTONICITY`),
+  Preisband um Known-Good-Kurse (`PRICE_RANGE`), Confidence-vs.-Begründung
+  (`RATIONALE_MISSING`), regex-basierter Zahlenbezug (`HALLUCINATED_PRICE`).
+  Strukturierte Befunde `{code, field, detail}`; genau EIN Retry mit
+  Fehlermeldungs-Kontext, danach deterministischer Skip (leerer Fallback +
+  `CYCLE_STEP_SKIPPED` mit Grund `plausibility:CODE`, z. B.
+  `plausibility:MONOTONICITY,PRICE_RANGE`) + sichtbarer `plausibility`-Block
+  in `07-research.json` / `02-macro-analyst.json`. In Research- und
+  Makro-Step verdrahtet (`spec.plausibility`); auch eskalierte Antworten
+  werden plausibilisiert (ohne weiteres Retry). Flags:
+  `PLAUSIBILITY_PRICE_BAND_PCT` (15, [1, 90]),
+  `PLAUSIBILITY_MIN_RATIONALE_CHARS` (40, [0, 1000], `0` = Regel aus).
+- Prompt-Eval-Harness (`npm run eval:prompts`): Golden-Dataset mit 12
+  Fixtures (`tests/fixtures/golden/<step>/*.json`), Offline-Default
+  (deterministisch, byte-identisch), JSON- + MD-Reports nach `data/eval/`
+  (`EVAL_OUTPUT_DIR`/`--out-dir`), Exit 0/1/2
+  (bestanden/Regression/Fixture-Fehler), optionaler Provider-Rauchtest
+  (`--provider`, nur mit explizitem Flag).
+- Turn-Budget-Hartdeckel (`src/routing/turnBudget.ts`): `TurnBudget` je
+  Agenten-Turn (Hauptaufruf + Retries) — `LLM_MAX_TOKENS_PER_TURN` (20000,
+  [1000, 200000]) + `LLM_MAX_TURN_MS` (120000, [10000, 900000],
+  Aufrufgrenzen-Prüfung). Überschreitung → `TurnBudgetExceededError` +
+  Routing-Audit `llm-budget:tokens`/`llm-budget:time` (`budget_blocked`,
+  Sicherheitsklasse); niemals Fallback-Umwandlung. Tages-Deckel und
+  Einzelaufruf-Limits unverändert.
+
+### Docs
+
+- Neuer `docs/LLM_ROUTING.md`-Abschnitt 17 (Schicht/Eval-Harness/Turn-Deckel
+  inkl. Heuristik-Grenzen), `CONFIGURATION.md`-Sektion („Plausibilität,
+  Eval-Harness & Turn-Budget“), `.env.example`-Flags, Fixture-README mit
+  Pflege-HowTo.
 
 ## [1.48.0] — 2026-09-19 · feat(risk): Vol-Sizing + Korrelations-Exposure-Limits im Order-Pfad (GAP-04)
 

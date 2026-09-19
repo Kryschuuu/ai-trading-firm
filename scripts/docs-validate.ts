@@ -221,7 +221,16 @@ function checkSecrets() {
 // ---------------------------------------------------------------------------
 const CODE_EXT = [".ts", ".tsx"];
 function codeSource() {
-  return walk(SRC).filter((f) => CODE_EXT.includes(path.extname(f)));
+  const fromSrc = walk(SRC).filter((f) => CODE_EXT.includes(path.extname(f)));
+  // GAP-08 (v1.49.0): CLI-Runner unter scripts/ sind ebenfalls Code — deren
+  // Env-Flags (z. B. EVAL_OUTPUT_DIR in scripts/eval-prompts.ts) zählen als
+  // „im Code gefunden“. Wird nur vom Env-Flags-Check genutzt (Richtung
+  // Doku→Code), kann also nur Fehlalarme entfernen, keine erzeugen.
+  const scriptsDir = path.join(ROOT, "scripts");
+  const fromScripts = existsSync(scriptsDir)
+    ? walk(scriptsDir).filter((f) => CODE_EXT.includes(path.extname(f)))
+    : [];
+  return [...fromSrc, ...fromScripts];
 }
 
 function envFlagsFromCode(): Set<string> {

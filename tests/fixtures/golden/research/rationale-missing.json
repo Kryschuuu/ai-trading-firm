@@ -1,0 +1,28 @@
+{
+  "id": "research-rationale-missing",
+  "step": "research",
+  "description": "Schlecht-Fall: Sehr hohe Confidence (riskScore 0.03 → 0.97) mit 14-Zeichen-Begründung — unter 40 Zeichen.",
+  "candles": [
+    { "time": "2026-09-10T00:00:00.000Z", "open": 64800, "high": 65200, "low": 64500, "close": 65000 },
+    { "time": "2026-09-10T01:00:00.000Z", "open": 65000, "high": 65600, "low": 64900, "close": 65400 },
+    { "time": "2026-09-10T02:00:00.000Z", "open": 65400, "high": 65800, "low": 65100, "close": 65600 }
+  ],
+  "providerResponse": {
+    "setups": [
+      {
+        "instrumentId": "BINANCE:BTCUSDT",
+        "side": "LONG",
+        "entryPrice": 65400,
+        "stopLoss": 64000,
+        "takeProfit": 68500,
+        "riskScore": 0.03,
+        "timeframe": "4h",
+        "thesis": "Long breakout.",
+        "isProposal": true
+      }
+    ],
+    "totalSetups": 1,
+    "disclaimer": "PROPOSAL_ONLY_NO_ORDERS_PLACED"
+  },
+  "expect": { "schemaValid": true, "plausible": false, "codes": ["RATIONALE_MISSING"] }
+}

@@ -408,6 +408,11 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `LLM_MAX_TOKENS` | `512` | Max. Ausgabetokens je Aufruf |
 | `LLM_TIMEOUT_MS` | `180000` | Zeitlimit je Modellantwort |
 | `LLM_MAX_ATTEMPTS` | `2` | Retries (1–5) |
+| `LLM_MAX_TOKENS_PER_TURN` | `20000` | GAP-08: Token-Summe je Agenten-Turn inkl. Retries (Bounds [1000, 200000]); Bruch → sauberer Abbruch + Audit `llm-budget:tokens` |
+| `LLM_MAX_TURN_MS` | `120000` | GAP-08: Wall-Clock je Turn in ms (Bounds [10000, 900000]); Bruch → Abbruch + Audit `llm-budget:time` |
+| `PLAUSIBILITY_PRICE_BAND_PCT` | `15` | GAP-08: Preisband in % um den Known-Good-Kurs (Bounds [1, 90]) |
+| `PLAUSIBILITY_MIN_RATIONALE_CHARS` | `40` | GAP-08: Mindestbegründung bei Confidence ≥ 0.9 in Zeichen (Bounds [0, 1000]; `0` = Regel aus) |
+| `EVAL_OUTPUT_DIR` | `data/eval` | GAP-08: Report-Verzeichnis des Prompt-Eval-Harness (`npm run eval:prompts`) |
 | `LLM_CONTEXT_SIZE` | je Config | Kontextfenster |
 | `LLM_FALLBACK_PROVIDERS` | *(leer)* | Fallback-Kette, kommagetrennt |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama-Server |
@@ -651,6 +656,45 @@ Hinweise:
   Audit-Events: `POSITION_SIZING` / `POSITION_SIZING_UNKNOWN`
   (Code `sizing:atr-unknown:SYMBOL`) und `CLUSTER_EXPOSURE_MONITOR` /
   `CLUSTER_EXPOSURE_BLOCKED` (Code `cluster-exposure:…`).
+
+### Plausibilität, Eval-Harness & Turn-Budget (GAP-08, v1.49.0)
+
+Plausibilitäts-Schicht über den Agenten-Outputs (Research-Setups + Makro):
+Monotonie je Richtung, Preisband um den Known-Good-Kurs aus dem
+HistoricalStore, Confidence-vs.-Begründung und regex-basierter Zahlenbezug
+als Halluzinations-Heuristik. Befunde → genau EIN Retry mit
+Fehlermeldungs-Kontext, danach deterministischer Skip (leerer Fallback +
+`CYCLE_STEP_SKIPPED` mit Grund `plausibility:CODE` + sichtbarer Status im
+Step-Output/Tages-Artefakt). Das Golden-Dataset (`tests/fixtures/golden/`)
+prüft Schema + Plausibilität nach jedem Prompt-Edit (`npm run eval:prompts`,
+Offline-Default, deterministische Reports); der Turn-Hartdeckel begrenzt
+Token-Summe + Wall-Clock je Agenten-Turn inkl. aller Retries. Details +
+Grenzen der Heuristik: [`docs/LLM_ROUTING.md`](docs/LLM_ROUTING.md)
+(Abschnitt 17).
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `PLAUSIBILITY_PRICE_BAND_PCT` | `15` | Preisband in % um den letzten Known-Good-Kurs (jüngster valider Schlusskurs der Referenzkerzen); Entry/Stop/TP außerhalb → `PRICE_RANGE`. Bounds [1, 90], Clamp mit Log-Warnung. |
+| `PLAUSIBILITY_MIN_RATIONALE_CHARS` | `40` | Mindestlänge der Begründung (Research: `thesis`, Makro: `thesis`) bei Confidence ≥ 0.9 (Research: `1 − riskScore`); darunter → `RATIONALE_MISSING`. Bounds [0, 1000], `0` = Regel aus. |
+| `LLM_MAX_TOKENS_PER_TURN` | `20000` | Token-Summe je Agenten-Turn (Hauptaufruf + Eskalations-/Plausibilitäts-Retries). Bounds [1000, 200000]. Überschreitung → `TurnBudgetExceededError` + Routing-Audit `llm-budget:tokens` (Outcome `budget_blocked`, Sicherheitsklasse in `audit_log`); keine Teil-Results als Erfolg. Zählung: gemeldeter Verbrauch je `routeChat()` (Näherung, siehe Doku). |
+| `LLM_MAX_TURN_MS` | `120000` | Wall-Clock je Turn in ms (geprüft an Aufrufgrenzen, kein Timer). Bounds [10000, 900000]. Überschreitung → Abbruch + Audit `llm-budget:time`. |
+| `EVAL_OUTPUT_DIR` | `data/eval` | Ablage der Eval-Reports (`eval-report.json` + `eval-report.md`, via `resolveRuntimePath`, Laufzeitdaten, nicht versioniert). Override auch per `--out-dir`. |
+
+Hinweise:
+
+- **Fail-closed:** Befund nach dem einzigen Retry → Skip (sichtbar in
+  `audit_log` UND im Artefakt `07-research.json`/`02-macro-analyst.json` als
+  `plausibility`-Block). Ungültiger Retry → `plausibility:invalid-retry`.
+  Auch eskalierte Antworten werden plausibilisiert (ohne weiteres Retry).
+- **Referenzdaten:** Ohne Kerzen melden die Preis-Regeln `referenceMissing`
+  (sichtbar, nicht blockierend) statt zu raten; Regel (a)/(c) laufen immer.
+- **Eval:** `npm run eval:prompts` (Exit 0 = alle Fixtures wie erwartet,
+  1 = Regression, 2 = Fixture-/Bedienfehler). `--provider` fragt den
+  konfigurierten Provider (Rauchtest, kostet Tokens, Budget-Hinweis im
+  Report) — nur mit explizitem Flag.
+- **Turn vs. Tages-Deckel:** Die Tages-Deckel (`BudgetTracker`) und
+  Einzelaufruf-Limits (`LLM_MAX_TOKENS`/`LLM_TIMEOUT_MS`) bleiben unverändert;
+  der Turn-Deckel schließt die Lücke für Multi-Call-Turns.
 
 ### Bitunix-Adapter (7. Venue)
 

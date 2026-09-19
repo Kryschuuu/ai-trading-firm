@@ -1,0 +1,14 @@
+{
+  "id": "research-schema-invalid",
+  "step": "research",
+  "description": "Schema-Fall: setups ist kein Array — Schema-Validierung scheitert, Plausibilität läuft nicht.",
+  "candles": [
+    { "time": "2026-09-10T00:00:00.000Z", "open": 64800, "high": 65200, "low": 64500, "close": 65000 }
+  ],
+  "providerResponse": {
+    "setups": "kein-array",
+    "totalSetups": 1,
+    "disclaimer": "PROPOSAL_ONLY_NO_ORDERS_PLACED"
+  },
+  "expect": { "schemaValid": false, "plausible": false, "codes": [] }
+}
