@@ -590,6 +590,28 @@ Zusätzlich hart verdrahtet (kein Flag):
   (Stand + Verlauf je Instrument); Ops-Center-Risk-Sektion weist Modus und
   Regime je Instrument aus.
 
+### Datenqualitäts-Layer & Multi-TF (GAP-07, v1.47.0)
+
+Qualitätsprüfung der Kerzenserien (GAP/OUTLIER/INVALID/DUPLICATE) +
+deterministische 1h→4h/1d-Aggregation + opt-in Zweitquellen-Cross-Check.
+Grundprinzip: Befunde werden **sichtbar klassifiziert** (MDERR-Stil) —
+gespeicherte Historie wird nie still verändert, echte Flash-Moves werden nicht
+weggefiltert. Alle Flags sind optional — **ohne Konfiguration läuft das System
+exakt wie vorher** (Modus `log`, Aggregation/Cross-Check aus). Details:
+[`docs/MARKET_DATA_PIPELINE.md`](docs/MARKET_DATA_PIPELINE.md) §14 und
+[`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) §2.1.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `MARKETDATA_QUALITY_MODE` | `log` | Lesepfad-Modus: `log` (Default: Befunde nur sichtbar machen — Report `data/marketdata/quality-report.json` + Log + Metrik, Scan byte-identisch) \| `strict` (fail-closed: Instrumente mit `INVALID`-Befund behandelt der Scanner wie `DATA_UNAVAILABLE` — bestehende Stale-Fallback-Kette, `data-unavailable`-Ablehnung, nie `min-candles`). Unbekannter Wert → `log` + Warnung. |
+| `MARKETDATA_OUTLIER_ATR_MULT` | `25` | Outlier-Schwelle: Wick oder Körper **streng** größer als Multiplikator × Volatilitäts-Baseline (leave-one-out-Mittel der True-Ranges). Bounds [5, 200], Clamp mit Log-Warnung. Bewusst großzügig, damit echte Flash-Moves durchkommen; exakt Schwelle = **kein** Befund (Grenzwert getestet). |
+| `MARKETDATA_STALE_1H_HOURS` | `26` | Stale-Guard: eine 1h-Reihe ist stale, wenn die jüngste Kerze älter als N Stunden ist. Bounds [2, 168], Clamp mit Log-Warnung. Ausweis als Zähler im Sync-Status (`staleSeries`/`staleByTimeframe`), keine Symbole. |
+| `MARKETDATA_STALE_4H_HOURS` | `104` | Stale-Schwelle für 4h-Reihen (Default 26 × 4). Bounds [8, 672]. |
+| `MARKETDATA_STALE_1D_HOURS` | `624` | Stale-Schwelle für 1d-Reihen (Default 26 × 24). Bounds [48, 4032]. |
+| `MARKET_SYNC_AGGREGATE` | `off` | Deterministische Multi-TF-Aggregation im Sync-CLI (auch `--aggregate`): persistierte 1h-Reihen → 4h/1d (UTC-Anker 00/04/… bzw. 00:00 UTC; **unvollständige Bucket werden nie aggregiert**; Zeitmaske nur abgeschlossene Perioden). Aggregat wird als **neue** Timeframe-Reihe (`feed: "agg:1h"`) appendet, 1h-Quelle bleibt unangetastet. Nur wirksam bei synchronisiertem `1h`. `on`/`true`/`1` schaltet an. |
+| `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in — Rate-Limits!). Nur wirksam, wenn der Adapter die optionale Methode `getCrosscheckCandles()` implementiert (Adapter-Registry-Muster); ohne Implementierung no-op. Bei `on` ein zusätzlicher Request je Reihe (Rate-Limit-Bucket bleibt autoritativ). |
+| `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in Prozent (Abweichung der Schlusskurse auf gemeinsamen Zeitstempeln, relativ zum Primärkurs). **Streng** größer ⇒ `QUALITY_CROSSCHECK`-Befund + Log. Bounds [0.1, 10], Clamp mit Log-Warnung. 0 gemeinsame Zeitstempel = kein Befund (kein Vergleich ≠ Abweichung). |
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |

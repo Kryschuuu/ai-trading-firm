@@ -1,9 +1,10 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-18** ·
-> Code-Version **1.40.0** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-19** ·
+> Code-Version **1.47.0** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
-> `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize`)
+> `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize` ·
+> Qualitäts-Layer & Aggregation: §14)
 
 Die Pipeline füllt Instrument-Registry und Historical Store aus **öffentlichen**
 Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
@@ -1042,3 +1043,126 @@ mtime-Änderung sofort nach — kein Neustart nötig.
 | Registry-Cache | kein Cross-Prozess-Refresh vorgesehen | Singleton `getRegistry()` ruft `load()` (mtime+size) je Zugriff, Status/Manifest via `resolveRuntimePath` | CLI und Next.js sahen sonst verschiedene Dateien/Stände (v1.40.0 Fix) |
 | Leere Kerzen (`data: []`) | als 0 Bars zählen, aber nicht als Failure | `rows.length===0` → `DATA_UNAVAILABLE`-Failure (Sync), `getCandles()= []` bleibt Wurf-frei | Sync-Lauf mit 1/250 ist jetzt als `degraded` + `candles/DATA_UNAVAILABLE` sichtbar |
 | Scanner-Cache | 5-Min-TTL | TTL + mtime-Invalidierung bei geänderter Registry/History-Datei | separater Sync-Prozess war sonst 5 Min unsichtbar |
+
+## 14. Qualitäts-Layer & Aggregation (GAP-07, v1.47.0)
+
+Seit v1.47.0 wird jede frisch gepflögte Kerzenserie **qualitätsgeprüft**
+(`src/marketdata/quality.ts`), und die 1h-Historie lässt sich **deterministisch**
+zu 4h/1d aggregieren (`src/marketdata/aggregate.ts`). Grundprinzip:
+Qualitätsbefunde werden **sichtbar klassifiziert** (MDERR-Stil) — gespeicherte
+Historie wird nie still verändert, und echte Flash-Moves werden nicht
+weggefiltert.
+
+### 14.1 Befundklassen (neue MDERR-IDs)
+
+| Klasse | MDERR-ID | Regel |
+| --- | --- | --- |
+| `GAP` | `QUALITY_GAP` | fehlendes Intervall; Befund an der **ersten fehlenden Position** (Abstand exakt = Intervall ⇒ **kein** Befund) |
+| `INVALID` | `QUALITY_INVALID` | OHLC ≤ 0 / nicht endlich, `high < low`, `close` außerhalb `[low, high]` |
+| `OUTLIER` | `QUALITY_OUTLIER` | Wick **oder** Körper **streng** > `MARKETDATA_OUTLIER_ATR_MULT` × Baseline (Default **25**, Bounds [5, 200]; exakt = kein Befund) |
+| `DUPLICATE` | `QUALITY_DUPLICATE` | derselbe Zeitstempel mehrfach |
+| `CROSSCHECK` | `QUALITY_CROSSCHECK` | Zweitquellen-Abweichung > Toleranz (opt-in, §14.5) |
+
+Die IDs sind Teil der geschlossenen `MarketDataErrorReason`-Taxonomie
+(`src/lib/marketDataErrors.ts`), aber **nicht retryable** und fließen nie in
+den Fetch-Backoff. Die Outlier-Baseline ist das **leave-one-out-Mittel der
+True-Ranges** der strukturell gültigen Kerzen — ein einzelner Spike bläst seine
+eigene Schwelle nicht auf. Ein realistischer Flash-Move (z. B. 10 % in einer
+1h-Kerze bei 0,7 % Vol-Baseline ≈ 14×) bleibt **unterhalb** der 25×-Schwelle
+und wird nicht markiert (Flash-Move-Schutz, Grenzwert getestet).
+
+### 14.2 Befund-Ausweis (nie still)
+
+| Ausweis | Ort | Inhalt |
+| --- | --- | --- |
+| **Report je Instrument** | `data/marketdata/quality-report.json` (gitignored, atomar 0600, `resolveRuntimePath`) | Befunde + Zähler je Reihe (Instrument ⟂ Timeframe), geschrieben vom Sync-CLI (auch bei 0 Befunden — belegt, dass der Check lief) |
+| **Log** | `[market-sync] quality: N Befund(e) (GAP …, OUTLIER …)` | nur bei Befunden, Zähler ohne Symbole |
+| **Metrik** | `market_data_quality_findings_total{class=…}` | prozesslokal, in `prometheusMetrics()` exponiert |
+| **Sync-Report** | `SyncResult.qualityReport` | `--json`-Ausgabe; Basis des Reports |
+
+**Schreibpfad-Verdrahtung:** der Sync validiert nur die **frisch geholten**
+Reihen (read-only) und schreibt in die Historie nichts zurück. Qualitätsbefunde
+zählen **nicht** als Fetch-Fehler: `degraded`/Exit-Code bleiben im `log`-Modus
+entkoppelt, und `syncErrorsToDataErrors()` lässt `QUALITY_*` aus dem
+Datenfehler-Manifest heraus — sonst würde der log-Modus Instrumente fälschlich
+als `data-unavailable` abwerten.
+
+### 14.3 Lesepfad-Modi (`MARKETDATA_QUALITY_MODE`)
+
+| Modus | Wirkung |
+| --- | --- |
+| `log` (**Default**) | nur sichtbar machen (Report + Log + Metrik); der Scan bleibt byte-identisch |
+| `strict` (fail-closed) | Instrumente mit `INVALID`-Befund behandelt der Scanner wie `DATA_UNAVAILABLE` — die **existierende** Stale-Fallback-Kette (`data-unavailable`-Ablehnung, nie `min-candles`). Verdrahtet in `scripts/run-scan.ts` + `ScannerService.refresh` über `qualityStrictDataErrorsForScan()` (liest Modus + Report) |
+
+Unbekannter Modus-Wert ⇒ `log` + Warnung (ein Tippfehler schaltet `strict` nie
+still ein).
+
+### 14.4 Stale-Guard je Instrument/Timeframe (D2)
+
+Schwellen in Stunden, je TF konfigurierbar (Defaults = 26 h × Periodenfaktor):
+
+| Flag | Default | Bounds |
+| --- | --- | --- |
+| `MARKETDATA_STALE_1H_HOURS` | `26` | `[2, 168]` |
+| `MARKETDATA_STALE_4H_HOURS` | `104` | `[8, 672]` |
+| `MARKETDATA_STALE_1D_HOURS` | `624` | `[48, 4032]` |
+
+Eine Reihe ist **stale**, wenn `now − jüngsteKerze > Schwelle(TF)` (ältere
+Einträge der Reihe sind irrelevant; Lücken sind `GAP`, nicht Staleness). Der
+Sync-CLI schreibt den Zustand als **Zähler** in den Sync-Status
+(`data/market-sync-status.json` → `staleSeries`/`staleByTimeframe` je Venue),
+damit Ops-Center/Scanner gut degradieren können — **keine Symbole** im Status
+(geschlossene Security-Policy, Timeframe-Keys gegen erlaubte Allowlist).
+
+### 14.5 Multi-TF-Aggregation (D3) + Zweitquellen-Cross-Check (D4)
+
+**Aggregation** (`aggregateCandles()`, 1h → 4h/1d, reine Funktion):
+
+- **UTC-Anker:** 4h-Kerzen beginnen um 00/04/08/12/16/20 UTC, 1d um 00:00 UTC
+  (`floor(ts/Intervall) × Intervall`; 4h/1d teilen den UTC-Mitternachtsanker
+  exakt, Epoche 0 = 1970-01-01T00:00:00Z — keine Zeitzone-Konvertierung).
+- **OHLCV:** open = erste, close = letzte Sub-Kerze, high = max, low = min,
+  volume = Summe (Zeit- statt Ankunftsreihenfolge).
+- **Unvollständige Bucket werden NIEMALS aggregiert:** ein Bucket zählt als
+  abgeschlossen nur, wenn alle Sub-Intervalle vorliegen (4h: 4×1h, 1d: 24×1h);
+  sonst `partial` (gezählt, ausgeschlossen, nie erfunden).
+- **Zeitmaske:** mit `nowMs` wird keine Kerze ausgegeben, deren Periode noch
+  offen ist (`bucketEnd > nowMs`) — auch wenn zufällig alle Sub-Kerzen da wären.
+- **Determinismus:** zwei Läufe ⇒ byte-identisches Ergebnis; Ankunftsreihenfolge
+  der Quelle ist egal (interne Sortierung); Eingabe wird nie mutiert (Freeze).
+- **Konsistenz-Check:** `checkAggregationConsistency()` (Envelope
+  high/low ≥/≤ Sub-Kerzen, open/close/volume, fehlende vollständige Buckets).
+
+Im Sync-CLI per **`--aggregate`** bzw. **`MARKET_SYNC_AGGREGATE`**
+(**Default off**): nach dem Backfill werden die persistierten 1h-Reihen
+aggregiert und als **neue** Timeframe-Reihen appendet (`feed: "agg:1h"`) — die
+1h-Quelle bleibt unangetastet (Append-only + Dedup im Store). Wirkt nur, wenn
+`1h` Teil des Laufs war.
+
+**Zweitquellen-Cross-Check** (Default **off** — Rate-Limits!): optionaler
+Adapter-Methode `getCrosscheckCandles(symbol, timeframe, limit)` am
+`MarketDataAdapter` (Adapter-Registry-Muster — eine zweite Venue dockt dort an,
+ohne den Kern zu berühren). Bei `MARKETDATA_CROSSCHECK=on` vergleicht der Sync
+die Schlusskurse auf gemeinsamen Zeitstempeln; Abweichung **streng** >
+`MARKETDATA_CROSSCHECK_TOLERANCE_PCT` (Default **1**, Bounds [0.1, 10]) ⇒
+`QUALITY_CROSSCHECK`-Befund + Log. 0 gemeinsame Zeitstempel = kein Befund
+(kein Vergleich ≠ Abweichung). **Keine neue Venue-Anbindung** in diesem PR —
+ohne implementierende Methode ist der Cross-Check ein no-op (Test belegt:
+Default off ⇒ kein Zweitquellen-Request).
+
+### 14.6 Flags (vollständig in `CONFIGURATION.md` + `.env.example`)
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `MARKETDATA_QUALITY_MODE` | `log` | `log` (nur sichtbar machen) \| `strict` (INVALID ⇒ `DATA_UNAVAILABLE`) |
+| `MARKETDATA_OUTLIER_ATR_MULT` | `25` | Outlier-Schwelle × Baseline, Bounds [5, 200] |
+| `MARKETDATA_STALE_1H_HOURS` | `26` | Stale-Schwelle 1h, Bounds [2, 168] |
+| `MARKETDATA_STALE_4H_HOURS` | `104` | Stale-Schwelle 4h, Bounds [8, 672] |
+| `MARKETDATA_STALE_1D_HOURS` | `624` | Stale-Schwelle 1d, Bounds [48, 4032] |
+| `MARKET_SYNC_AGGREGATE` | `off` | 1h→4h/1d-Aggregation im Sync-CLI (`on`/`true`/`1`) |
+| `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in, Rate-Limits) |
+| `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in %, Bounds [0.1, 10] |
+
+Alle Defaults sind **sicher/neutral**: ohne jede Konfiguration läuft das System
+exakt wie vorher (Qualitäts-Check im `log`-Modus sichtbar, Aggregation/Cross-
+Check aus). Beobachtbarkeit der neuen Klassen: `docs/OBSERVABILITY.md` §2.

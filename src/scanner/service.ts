@@ -22,6 +22,7 @@ import {
 } from "@/lib/marketdata/historicalStore";
 import type { MarketCandle } from "@/lib/marketdata/types";
 import { loadMarketDataErrors } from "@/marketdata/dataErrors";
+import { qualityStrictDataErrorsForScan } from "@/marketdata/quality";
 import { resolveRuntimePath } from "@/lib/appPaths";
 import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
@@ -384,8 +385,17 @@ export class ScannerService {
     const now = this.options.now ?? (() => new Date());
     const effectiveNow = asOf ?? now();
     // MDERR-006: Datenfehler-Manifest (Sync-Prozess) → Readiness ERROR statt
-    // stiller min-candles-Aussortierung.
-    const dataErrors = this.options.dataErrors?.() ?? loadMarketDataErrors();
+    // stiller min-candles-Aussortierung. (Eigene Kopie: die injizierte
+    // `dataErrors`-Funktion darf den aufrufenden Zustand nicht mutieren.)
+    const dataErrors = new Map(
+      this.options.dataErrors?.() ?? loadMarketDataErrors(),
+    );
+    // GAP-07 (strict-Modus): Instrumente mit INVALID-Befunden im
+    // Qualitäts-Report zählen wie DATA_UNAVAILABLE (existierende
+    // Stale-Fallback-Kette). `log` (Default) liefert leer.
+    for (const [id, reason] of qualityStrictDataErrorsForScan()) {
+      if (!dataErrors.has(id)) dataErrors.set(id, reason);
+    }
     this.scan = scanUniverse({
       instruments,
       data,

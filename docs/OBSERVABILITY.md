@@ -1,11 +1,13 @@
 # Observability — Marktdaten-Fehler, Firmen-Metriken, Alerts und Heartbeat
 
 > **Status-Header:** **Implementiert** (MDERR-006; GAP-10 v1.45.0 ergänzt
-> Firmen-Metriken, Auto-Circuit-Breaker, Alerting und Heartbeat) ·
-> **2026-09-18** · Code-Version **1.45.0** · Module
+> Firmen-Metriken, Auto-Circuit-Breaker, Alerting und Heartbeat; GAP-07
+> v1.47.0 ergänzt die Datenqualitäts-Klassen §2.1) ·
+> **2026-09-19** · Code-Version **1.47.0** · Module
 > `src/lib/marketDataErrors.ts`, `src/lib/telemetry.ts`,
 > `src/lib/alerts.ts`, `src/lib/circuitBreaker.ts`, `src/lib/heartbeat.ts`,
-> `src/lib/logger.ts`, `src/marketdata/dataErrors.ts`
+> `src/lib/logger.ts`, `src/marketdata/dataErrors.ts`,
+> `src/marketdata/quality.ts`, `src/marketdata/aggregate.ts`
 
 Dieses Dokument beschreibt, wie der Marktdaten-Pfad Fehler **sichtbar**
 macht. Das ist die Antwort auf den P1-Defekt „stille leere Arrays“: `getCandles()`
@@ -46,6 +48,20 @@ Jeder echte Abruf-Fehler erzeugt **drei** Beobachtungen gleichzeitig:
 | `TLS` | `ERR_TLS_CERT_ALTNAME_INVALID` … | nein | Zertifikat/Hostname → sofort prüfen (MitM/Veraltet) |
 | `ABORTED` | expliziter Abbruch | nein | Aufrufer-Abbruch |
 | `UNKNOWN` | alles andere | nein | Doku/Log analysieren |
+| `QUALITY_GAP` | (GAP-07) fehlende Intervalle in der Serie | nein | Datenqualität: Lücke im Raster — Report prüfen |
+| `QUALITY_OUTLIER` | (GAP-07) Wick/Körper > `MARKETDATA_OUTLIER_ATR_MULT` × Baseline | nein | Datenqualität: Ausreißer — bewusst großzügig, Flash-Moves bleiben |
+| `QUALITY_INVALID` | (GAP-07) OHLC ≤ 0, `high < low`, close außerhalb `[low, high]` | nein | Datenqualität: inkonsistente Kerze — `strict` ⇒ `DATA_UNAVAILABLE` |
+| `QUALITY_DUPLICATE` | (GAP-07) doppelter Zeitstempel | nein | Datenqualität: Duplikat im Raster |
+| `QUALITY_CROSSCHECK` | (GAP-07) Zweitquellen-Abweichung > Toleranz (opt-in) | nein | Datenqualität: Quellen divergieren — Venue prüfen |
+
+Die `QUALITY_*`-Klassen sind **keine Abruf-Fehler**: die Daten sind gelandet,
+die Serie ist nur auffällig. Sie sind deshalb nie `retryable`, fließen nie in
+den Fetch-Backoff und **nie** in das Fetch-Fehler-Manifest
+(`data/market-data-errors.json`). Ihr Ausweis läuft über den
+Qualitäts-Report (`data/marketdata/quality-report.json`), die
+`[market-sync] quality:`-Logzeile und die Metrik
+`market_data_quality_findings_total` (Abschnitt 2.1). Details:
+[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md) §14.
 
 `classifyMarketDataError(err)` liest `httpStatus`/`status`/`statusCode`
 (inkl. `BitunixApiError.httpStatus`), die `.cause`-Kette (undici kapselt) und —
@@ -56,6 +72,27 @@ für Fremd-Clients — bekannte Codes in Messages (`ENOTFOUND`, `ECONNREFUSED`,
 `retryable`, optional `httpStatus` und `cause`. Die Message sagt explizit:
 **Infrastrukturfehler, KEIN „keine Historie vorhanden“ — der Scanner meldet
 dafür `DATA_UNAVAILABLE`** (`buildMarketDataErrorMessage`).
+
+### 2.1 Datenqualitäts-Ausweis (GAP-07, v1.47.0)
+
+Qualitätsbefunde (`QUALITY_*`) sind Beobachtungen über **vorhandene** Daten —
+kein Abruf-Fehler. Deshalb drei Ausweiskanäle, aber kein Fetch-Manifest:
+
+| Kanal | Ort | Inhalt |
+| --- | --- | --- |
+| **Report je Instrument** | `data/marketdata/quality-report.json` (gitignored, atomar 0600, `resolveRuntimePath`) | Befunde + Zähler je Reihe (Instrument ⟂ Timeframe); vom Sync-CLI geschrieben (auch bei 0 Befunden) |
+| **Log** | `[market-sync] quality: N Befund(e) (GAP …, OUTLIER …)` | nur bei Befunden, Zähler ohne Symbole |
+| **Metrik** | `market_data_quality_findings_total{class=…}` | prozesslokal, in `prometheusMetrics()` exponiert; Label `class` ∈ {GAP, OUTLIER, INVALID, DUPLICATE, CROSSCHECK} (geschlossene Aufzählung — keine Kardinalität) |
+| **Lesepfad (strict)** | `MARKETDATA_QUALITY_MODE=strict` | Instrumente mit `INVALID` ⇒ `DATA_UNAVAILABLE` (existierende Stale-Fallback-Kette, fail-closed); `log` (Default) = nur sichtbar machen |
+| **Stale-Guard** | Sync-Status `data/market-sync-status.json` → `staleSeries`/`staleByTimeframe` | Zähler je Venue (keine Symbole), Schwellen `MARKETDATA_STALE_*_HOURS` |
+
+**Redaction/Garantien:** Report-Felder sind stabile Codes (`instrumentId`,
+Klasse, Zeitstempel, kurze Details) — keine Rohmeldungen, keine URLs, keine
+Secrets. Die Historie-Datei wird vom Qualitäts-Layer **nie** berührt; die
+Eingabeserie wird nie mutiert (Freeze-Tests in `test/marketdata/quality.test.ts`).
+Kein Outlier-Filter entfernt Daten: Befund ≠ Löschung, ein realistischer
+Flash-Move bleibt unterhalb der (bewusst großzügigen) 25×-Schwelle erhalten
+(Grenzwert getestet).
 
 ## 3. Metrik: `market_data_fetch_failures_total`
 

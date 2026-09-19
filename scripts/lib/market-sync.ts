@@ -19,6 +19,8 @@ import { getRegistry } from "../../src/universe";
 import type { EnvLike } from "../../src/brokers/bitunix/config";
 import type { InstrumentRegistry } from "../../src/universe/registry";
 import {
+  AGGREGATION_TARGETS,
+  aggregateCandles,
   defaultSyncLogger,
   KNOWN_SYNC_VENUES,
   MARKET_SYNC_ENABLED_FLAG,
@@ -75,6 +77,14 @@ export interface MarketSyncRunOptions {
   logger?: SyncLogger;
   /** `true` ⇒ gar nicht loggen (JSON-Ausgabe des CLIs, Tests). */
   quiet?: boolean;
+  /**
+   * Multi-TF-Aggregation (GAP-07, Default **off**): nach dem Backfill werden
+   * die persistierten 1h-Reihen deterministisch zu 4h/1d-Kerzen aggregiert
+   * (UTC-Anker, unvollständige Buckets werden ausgeschlossen) und als neue
+   * Timeframe-Reihen in den Store appendet. Wirkt nur, wenn `1h`
+   * synchronisiert wurde. Env-Default: `MARKET_SYNC_AGGREGATE`.
+   */
+  aggregate?: boolean;
 }
 
 export interface MarketSyncRun {
@@ -131,6 +141,101 @@ export async function runMarketSyncDetailed(options: MarketSyncRunOptions): Prom
   });
   const result = await service.syncVenue(venue);
   return { result, skipped: adapters.skipped };
+}
+
+export interface AggregationSummary {
+  /** Reihen mit ≥ 1 geschriebener aggregierter Bar. */
+  instruments: number;
+  /** Neu geschriebene Bars je Ziel-Timeframe. */
+  bars: Record<"4h" | "1d", number>;
+  /** Ausgeschlossene unvollständige Buckets (Total über alle Ziele). */
+  partialBuckets: number;
+}
+
+/**
+ * Multi-TF-Aggregation (GAP-07): 1h → 4h/1d aus der PERSISTIERTEN Historie,
+ * deterministisch (UTC-Anker; unvollständige Buckets — auch die aktuelle
+ * Periode — werden nie aggregiert, `nowMs`-Zeitmaske gewahrt). Die
+ * aggregierten Reihen sind NEUE Timeframe-Reihen (`feed: "agg:1h"`) — die
+ * 1h-Quelle bleibt unangetastet (Append-only + Dedup im Store).
+ *
+ * Reine CLI-Logik (kein Request): liest den Store, appendet Aggregat.
+ * `undefined` bei `1h` ohne Bestand oder ohne synchronisierte 1h-Reihe.
+ */
+export function runAggregation(
+  deps: {
+    history: HistoricalStore;
+    registry: InstrumentRegistry;
+    venue: string;
+    nowMs: number;
+  },
+): AggregationSummary | undefined {
+  const { history, registry, venue, nowMs } = deps;
+  const instruments: string[] = [];
+  let cursor = 1;
+  for (;;) {
+    const chunk = registry.query({ venue, pageSize: 1000, page: cursor });
+    for (const inst of chunk.items) instruments.push(inst.id);
+    if (!chunk.hasMore) break;
+    cursor += 1;
+    if (cursor > 100) break; // harte Obergrenze (DoS-Schutz, Registry ≤ 50k)
+  }
+  if (instruments.length === 0) return undefined;
+
+  const summary: AggregationSummary = {
+    instruments: 0,
+    bars: { "4h": 0, "1d": 0 },
+    partialBuckets: 0,
+  };
+  const now = new Date(nowMs);
+  for (const instrumentId of instruments) {
+    // Store-Einträge (ts-basiert) → QualityCandle (`ts` ist erlaubt); die
+    // AGGREGIERTEN Kerzen tragen `time` (Store-Contract des Appends).
+    const source = history.query({ instrumentId, timeframe: "1h" });
+    if (source.length === 0) continue;
+    const qualitySource = source.map((e) => ({
+      ts: e.ts,
+      open: e.open,
+      high: e.high,
+      low: e.low,
+      close: e.close,
+      volume: e.volume,
+    }));
+    const groups: {
+      candles: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
+      instrumentId: string;
+      provenance: { venue: string; feed: string };
+      timeframe: "4h" | "1d";
+    }[] = [];
+    let writtenThisInstrument = 0;
+    for (const target of AGGREGATION_TARGETS) {
+      const res = aggregateCandles(qualitySource, "1h", target, { nowMs });
+      summary.partialBuckets += res.partial.length;
+      if (res.candles.length === 0) continue;
+      groups.push({
+        candles: res.candles.map((c) => ({
+          time: c.time ?? c.ts ?? 0,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        })),
+        instrumentId,
+        provenance: { venue, feed: "agg:1h" },
+        timeframe: target as "4h" | "1d",
+      });
+    }
+    if (groups.length === 0) continue;
+    const batch = history.appendSeries(groups, now);
+    for (const [i, group] of groups.entries()) {
+      const written = batch.perGroup[i]?.written ?? 0;
+      summary.bars[group.timeframe] += written;
+      if (written > 0) writtenThisInstrument += 1;
+    }
+    if (writtenThisInstrument > 0) summary.instruments += 1;
+  }
+  return summary;
 }
 
 /**

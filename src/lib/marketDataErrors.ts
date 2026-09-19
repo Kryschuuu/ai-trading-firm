@@ -32,6 +32,16 @@ export type MarketDataErrorReason =
   | "TLS" // ERR_TLS_CERT_ALTNAME_INVALID …
   | "ABORTED" // expliziter Abbruch (code "ABORTED")
   | "DATA_UNAVAILABLE" // Venue liefert valide, aber leere Antwort — z. B. `data: []` bei Klines (0 verwertbare Bars, BEFORE_START/INVALID-Zeitraum), kein Retry
+  // ── Datenqualitäts-Klassen (GAP-07, v1.47.0) ─────────────────────────────
+  // Keine Abruf-Fehler: die Daten sind gelandet, die Serie ist nur auffällig.
+  // Sie werden deshalb bewusst NICHT als retryable eingestuft und fließen nie
+  // in die Fetch-Backoff-Logik; die Sichtbarkeit läuft über Quality-Report,
+  // Sync-Report (stage `candles`) und `market_data_quality_findings_total`.
+  | "QUALITY_GAP" // fehlende Intervalle in der Serie (erwartete Kerze nicht vorhanden)
+  | "QUALITY_OUTLIER" // Wick/Körper > MARKETDATA_OUTLIER_ATR_MULT × ATR (Default 25 — bewusst großzügig, Flash-Moves durchkommen)
+  | "QUALITY_INVALID" // OHLC ≤ 0, high < low oder close außerhalb [low, high]
+  | "QUALITY_DUPLICATE" // derselbe Zeitstempel mehrfach in der Serie
+  | "QUALITY_CROSSCHECK" // Zweitquellen-Abweichung > MARKETDATA_CROSSCHECK_TOLERANCE_PCT (opt-in)
   | "UNKNOWN";
 
 /** Ursachen, die mit Backoff/Retry behandelt werden dürfen. */
@@ -58,6 +68,11 @@ const ALL_REASONS: Record<MarketDataErrorReason, true> = {
   TLS: true,
   ABORTED: true,
   DATA_UNAVAILABLE: true,
+  QUALITY_GAP: true,
+  QUALITY_OUTLIER: true,
+  QUALITY_INVALID: true,
+  QUALITY_DUPLICATE: true,
+  QUALITY_CROSSCHECK: true,
   UNKNOWN: true,
 };
 

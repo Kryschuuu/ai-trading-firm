@@ -71,12 +71,29 @@ export interface MarketDataErrorManifest {
  * `DATA_UNAVAILABLE` ausfallen lassen. Nur Fehler mit klassifizierter `reason`
  * (vom `MarketDataSyncService` gesetzt) signalisieren einen Abruffehler.
  */
+/**
+ * Datenqualitäts-Klassen (GAP-07) gehören NICHT ins Fetch-Fehler-Manifest:
+ * sie sind Beobachtungen über vorhandene Daten, keine Abruf-Fehler. Im
+ * `log`-Modus (Default) dürfen sie das Instrument im Scanner nicht als
+ * `data-unavailable` abwerten; im `strict`-Modus läuft dieselbe Wirkung
+ * bewusst über den Qualitäts-Report (`qualityStrictDataErrors()`), nicht
+ * über dieses Manifest.
+ */
+const QUALITY_REASONS = new Set<string>([
+  "QUALITY_GAP",
+  "QUALITY_OUTLIER",
+  "QUALITY_INVALID",
+  "QUALITY_DUPLICATE",
+  "QUALITY_CROSSCHECK",
+]);
+
 export function syncErrorsToDataErrors(errors: readonly SyncError[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const error of errors) {
     if (!error.instrumentId) continue; // Batch-Fehler ohne Instrument → keinem Instrument zuordenbar
     if (error.stage === "upsert") continue; // Persistenzfehler, kein Marktdaten-Fetch-Fehler
     if (typeof error.reason !== "string") continue; // reine Datenqualitäts-Warnung ohne Fehlerobjekt
+    if (QUALITY_REASONS.has(error.reason)) continue; // Qualitäts-Befund (GAP-07), kein Fetch-Fehler
     if (!out.has(error.instrumentId)) out.set(error.instrumentId, error.reason);
   }
   return out;

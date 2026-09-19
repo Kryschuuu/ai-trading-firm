@@ -41,6 +41,7 @@ import {
   saveMarketDataErrors,
   clearMarketDataErrors,
 } from "../src/marketdata/dataErrors";
+import { qualityStrictDataErrorsForScan } from "../src/marketdata/quality";
 import { saveVenueSyncStatus } from "../src/marketdata/syncStatus";
 import { loadScannerConfig } from "../src/scanner/config";
 import { scanUniverse } from "../src/scanner/pipeline";
@@ -152,6 +153,13 @@ async function main(): Promise<void> {
   );
 
   const dataErrors = loadMarketDataErrors();
+  // GAP-07 (strict-Modus): Instrumente mit INVALID-Befunden im Qualitäts-
+  // Report zählen wie DATA_UNAVAILABLE (existierende Stale-Fallback-Kette:
+  // data-unavailable-Ablehnung, nie min-candles). `log` (Default) ändert
+  // nichts — der Scan bleibt byte-identisch.
+  for (const [id, reason] of qualityStrictDataErrorsForScan()) {
+    if (!dataErrors.has(id)) dataErrors.set(id, reason);
+  }
   const scan = scanUniverse({
     instruments,
     data,

@@ -36,6 +36,16 @@ import {
 import type { MarketCandle as StoreCandle } from "../lib/marketdata/types";
 import { classifyMarketDataError } from "../lib/marketDataErrors";
 import { toConsoleAscii } from "../lib/consoleFormat";
+import {
+  buildQualityReport,
+  crosscheckCandles,
+  loadQualityConfig,
+  recordQualityFindings,
+  validateCandleSeries,
+  type QualityMode,
+  type QualityReport,
+  type QualitySeriesReport,
+} from "./quality";
 import { loadScannerConfig } from "../scanner/config";
 import { requiredWarmupCandles } from "../scanner/warmup";
 import { toInstrumentId } from "../universe/normalization";
@@ -95,6 +105,18 @@ export interface MarketDataAdapter {
   getTickers?(symbols?: string[]): Promise<MarketTicker[]>;
   getOrderBook(symbol: string): Promise<MarketOrderBook>;
   getCandles(
+    symbol: string,
+    timeframe: SupportedTimeframe,
+    limit: number,
+  ): Promise<MarketCandle[]>;
+  /**
+   * (Optional, GAP-07) Zweitquelle für den opt-in Cross-Check
+   * (`MARKETDATA_CROSSCHECK`, Default **off** — Rate-Limits!). Fehlt die
+   * Methode, bleibt der Cross-Check ein no-op (keine stille Annahme, keine
+   * neue Venue-Anbindung in diesem Pfad). Adaption des Adapter-Registry-Musters:
+   * eine zweite Venue würde sich hier andocken, ohne den Kern zu berühren.
+   */
+  getCrosscheckCandles?(
     symbol: string,
     timeframe: SupportedTimeframe,
     limit: number,
@@ -178,6 +200,22 @@ export interface SyncOptions {
   logger?: SyncLogger;
   /** `true` ⇒ Abbruch beim ersten Fehler (Alias von `continueOnError: false`). */
   strict?: boolean;
+  /**
+   * Qualitäts-Layer (GAP-07): Lesepfad-Modus. Default aus
+   * `MARKETDATA_QUALITY_MODE` (`log`). `strict` betrifft den Lesepfad
+   * (Scanner); der Sync schreibt den Report in beiden Modi.
+   */
+  qualityMode?: QualityMode;
+  /** Outlier-Schwelle in × ATR (Default `MARKETDATA_OUTLIER_ATR_MULT`=25). */
+  outlierAtrMult?: number;
+  /**
+   * Zweitquellen-Cross-Check (GAP-07). Default aus `MARKETDATA_CROSSCHECK`
+   * (**off** — Rate-Limits!). Wirkt nur, wenn der Adapter
+   * `getCrosscheckCandles` implementiert.
+   */
+  crosscheck?: boolean;
+  /** Cross-Check-Toleranz in % (Default `MARKETDATA_CROSSCHECK_TOLERANCE_PCT`=1). */
+  crosscheckTolerancePct?: number;
 }
 
 /** Vollständige, validierte Optionen nach Auflösung der Defaults. */
@@ -192,6 +230,14 @@ export interface ResolvedSyncOptions {
   readonly fullRefresh: boolean;
   /** Abgeleiteter Warmup-Bedarf, gegen den `candleLimit` validiert wird. */
   readonly requiredWarmup: number;
+  /** Qualitäts-Layer-Modus (GAP-07; Default `log`). */
+  readonly qualityMode: QualityMode;
+  /** Outlier-Schwelle × ATR (Bounds-geclampt). */
+  readonly outlierAtrMult: number;
+  /** Zweitquellen-Cross-Check aktiv (Default off). */
+  readonly crosscheck: boolean;
+  /** Cross-Check-Toleranz in % (Bounds-geclampt). */
+  readonly crosscheckTolerancePct: number;
 }
 
 /** Kompatibilitätsname älterer Aufrufer (identische Struktur). */
@@ -219,6 +265,11 @@ interface InstrumentOutcome {
    * (Store hält bereits die Kerze des laufenden Zeitraums).
    */
   freshTimeframes: SupportedTimeframe[];
+  /**
+   * Qualitäts-Befunde je Reihe (GAP-07) — gelesen aus der frisch geholten
+   * Serie, NIE aus gespeicherter Historie. Leeres Array = kein Befund.
+   */
+  qualityReports: QualitySeriesReport[];
 }
 
 /**
@@ -319,6 +370,18 @@ export function resolveSyncOptions(
   const continueOnError =
     input.strict === true ? false : (input.continueOnError ?? true);
 
+  // Qualitäts-Konfiguration (GAP-07): explizite Optionen gewinnen, sonst
+  // Env mit Bounds-Clamp + sicheren Defaults (Muster loadMarketRegimeConfig).
+  // `resolveSyncOptions` ist rein (keine Warnung) — Warnungen laufen über den
+  // Service (Logger), hier nur die aufgelösten Werte.
+  const envCfg = loadQualityConfig(process.env, {});
+  const qualityMode: QualityMode =
+    input.qualityMode ?? envCfg.mode;
+  const outlierAtrMult = input.outlierAtrMult ?? envCfg.outlierAtrMult;
+  const crosscheck = input.crosscheck ?? envCfg.crosscheck;
+  const crosscheckTolerancePct =
+    input.crosscheckTolerancePct ?? envCfg.crosscheckTolerancePct;
+
   return {
     timeframes: timeframes as readonly SupportedTimeframe[],
     candleLimit,
@@ -328,6 +391,10 @@ export function resolveSyncOptions(
     continueOnError,
     fullRefresh: input.fullRefresh === true,
     requiredWarmup,
+    qualityMode,
+    outlierAtrMult,
+    crosscheck,
+    crosscheckTolerancePct,
   };
 }
 
@@ -499,6 +566,8 @@ export class MarketDataSyncService {
         instrumentsWithBars: zeroInstruments,
         freshByTimeframe: zeroFresh,
         failures,
+        qualityReports: [],
+        qualityMode: opts.qualityMode,
       });
     }
 
@@ -809,6 +878,7 @@ export class MarketDataSyncService {
       abort,
     );
 
+    const qualityReports: QualitySeriesReport[] = [];
     for (const outcome of outcomes) {
       if (!outcome) continue;
       for (const failure of outcome.failures) failures.push(failure);
@@ -816,6 +886,7 @@ export class MarketDataSyncService {
       // spreadUnknown bereits gezählt — hier nicht nochmal, aber für Konsistenz:
       // Falls InstrumentOutcome spreadUnknown true, aber bereits gezählt, nicht doppelt zählen.
       policyExcluded += outcome.policyExcluded;
+      for (const report of outcome.qualityReports) qualityReports.push(report);
       for (const [timeframe, candles] of outcome.candlesByTimeframe) {
         groups.push({
           candles,
@@ -849,6 +920,8 @@ export class MarketDataSyncService {
       instrumentsWithBars,
       freshByTimeframe,
       failures,
+      qualityReports,
+      qualityMode: opts.qualityMode,
     });
   }
 
@@ -914,6 +987,7 @@ export class MarketDataSyncService {
       policyExcluded: 0,
       candlesByTimeframe: new Map(),
       freshTimeframes: [],
+      qualityReports: [],
     };
     if (aborted()) return outcome;
 
@@ -1002,6 +1076,46 @@ export class MarketDataSyncService {
           continue;
         }
         outcome.candlesByTimeframe.set(timeframe, rows);
+
+        // ── Qualitäts-Layer (GAP-07) ────────────────────────────────────────
+        // Reine Validierung der FRISCH GEPFLOGTEN Serie (read-only, keine
+        // Mutation). Befunde fließen in den Sync-Report (qualityReport) +
+        // Metrik, nie in die gespeicherte Historie. Zweitquellen-Cross-Check
+        // ist opt-in (Default off, Rate-Limits).
+        const quality = validateCandleSeries(rows, {
+          expectedIntervalMs: SUPPORTED_TIMEFRAME_MS[timeframe],
+          outlierAtrMult: opts.outlierAtrMult,
+        });
+        quality.instrumentId = instrumentId;
+        quality.timeframe = timeframe;
+
+        if (opts.crosscheck && adapter.getCrosscheckCandles) {
+          try {
+            await this.limit();
+            const secondary = await adapter.getCrosscheckCandles(
+              symbol,
+              timeframe,
+              opts.candleLimit,
+            );
+            const cc = crosscheckCandles(
+              rows,
+              Array.isArray(secondary) ? secondary : [],
+              opts.crosscheckTolerancePct,
+            );
+            quality.crosscheckCompared = cc.compared;
+            if (cc.finding) {
+              quality.findings.push(cc.finding);
+              quality.counts.CROSSCHECK += 1;
+            }
+          } catch (e) {
+            // Zweitquelle ist ein Bonus, kein Pflichtpfad: Fehler werden
+            // klassifiziert isoliert (MDERR), der Lauf geht weiter (fail-soft).
+            failures.push(
+              this.toFailure("candles", e, { instrumentId, symbol, timeframe }),
+            );
+          }
+        }
+        outcome.qualityReports.push(quality);
       } catch (e) {
         failures.push(
           this.toFailure("candles", e, { instrumentId, symbol, timeframe }),
@@ -1076,6 +1190,10 @@ export class MarketDataSyncService {
       concurrency: this.options.concurrency,
       continueOnError: this.options.continueOnError,
       fullRefresh: this.options.fullRefresh,
+      qualityMode: this.options.qualityMode,
+      outlierAtrMult: this.options.outlierAtrMult,
+      crosscheck: this.options.crosscheck,
+      crosscheckTolerancePct: this.options.crosscheckTolerancePct,
     };
   }
 
@@ -1095,8 +1213,35 @@ export class MarketDataSyncService {
       instrumentsWithBars: Map<SupportedTimeframe, number>;
       freshByTimeframe: Map<SupportedTimeframe, number>;
       failures: SyncFailure[];
+      qualityReports: QualitySeriesReport[];
+      qualityMode: QualityMode;
     },
   ): SyncResult {
+    // Qualitäts-Report (GAP-07): aus den Reihen-Berichten den Gesamt-Report
+    // bauen, Befunde in die Metrik zählen und (bei Befunden) eine
+    // aggregate, symbol-freie Warnzeile emittieren. Der Report ist im
+    // SyncResult enthalten, damit der Entry-Point (CLI) ihn persistieren
+    // kann — dieser Service selbst schreibt keine Dateien.
+    const qualityReport = buildQualityReport(
+      stats.qualityReports ?? [],
+      stats.qualityMode,
+      this.clock(),
+    );
+    const qualityTotal = Object.values(qualityReport.totals.byClass).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    if (qualityTotal > 0) {
+      recordQualityFindings(qualityReport);
+      this.logger(
+        "warn",
+        `[market-sync] QUALITY: ${qualityTotal} Befund(e) in ${qualityReport.totals.series} Reihe(n) — ` +
+          `GAP ${qualityReport.totals.byClass.GAP}, OUTLIER ${qualityReport.totals.byClass.OUTLIER}, ` +
+          `INVALID ${qualityReport.totals.byClass.INVALID}, DUPLICATE ${qualityReport.totals.byClass.DUPLICATE}, ` +
+          `CROSSCHECK ${qualityReport.totals.byClass.CROSSCHECK}. Report: data/marketdata/quality-report.json` +
+          ` (Modus ${qualityReport.mode}). Gespeicherte Historie bleibt unangetastet.`,
+      );
+    }
     const candlesByTimeframe: Partial<
       Record<SupportedTimeframe, TimeframeSyncStats>
     > = {};
@@ -1132,6 +1277,11 @@ export class MarketDataSyncService {
       failures: stats.failures,
       degraded: stats.failures.length > 0,
       durationMs: Math.max(0, performance.now() - startedAtMs),
+      // Qualitäts-Layer (GAP-07): Report ist im Ergebnis, damit der
+      // Entry-Point (CLI) ihn atomar persistieren kann. `degraded` bleibt
+      // bewusst an echten Fetch-Fehlern gekoppelt — ein Qualitätsbefund im
+      // `log`-Modus degradiert den Lauf nicht (sichtbar machen, nicht bremsen).
+      ...(qualityReport.totals.series > 0 ? { qualityReport } : {}),
     };
   }
 
@@ -1309,6 +1459,20 @@ export function formatSyncLog(
       `[market-sync] failures: ${retryable} wiederholbar, ${result.failures.length - retryable} endgültig` +
         ` — Instrument-Zuordnung im Manifest (data/market-data-errors.json), Rohdaten per --json`,
     );
+  }
+  // Qualitäts-Layer (GAP-07): Zähler + Report-Pfad, nie Symbole (selbe
+  // Security-Regel wie die Failures-Zeilen). Leerer Report (0 Befunde) ist
+  // kein Log-Nachricht — der persistierte Report dokumentiert den Lauf.
+  if (result.qualityReport) {
+    const total = Object.values(result.qualityReport.totals.byClass).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      lines.push(
+        `[market-sync] quality: ${total} Befund(e) (GAP ${result.qualityReport.totals.byClass.GAP}, ` +
+          `OUTLIER ${result.qualityReport.totals.byClass.OUTLIER}, INVALID ${result.qualityReport.totals.byClass.INVALID}, ` +
+          `DUPLICATE ${result.qualityReport.totals.byClass.DUPLICATE}, CROSSCHECK ${result.qualityReport.totals.byClass.CROSSCHECK}) — ` +
+          `Report: data/marketdata/quality-report.json (Modus ${result.qualityReport.mode})`,
+      );
+    }
   }
   lines.push(`[market-sync] duration: ${result.durationMs.toFixed(0)} ms`);
   return lines;

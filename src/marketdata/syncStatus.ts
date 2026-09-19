@@ -44,6 +44,13 @@ export const MAX_STATUS_VENUES = 10;
 /** Erlaubte Venue-Form (Großbuchstaben/Ziffern/Unterstrich, wie `KNOWN_SYNC_VENUES`). */
 const VENUE_RE = /^[A-Z0-9_]{1,32}$/;
 
+/**
+ * Erlaubte Timeframe-Form für `staleByTimeframe` (geschlossene Allowlist des
+ * Historical Store: 1m,3m,5m,15m,30m,1h,2h,4h,1d,5d). Kein Freitext —
+ * sonst wäre das Status-Feld ein unbegrenzter Label-Raum.
+ */
+const STALE_TIMEFRAME_RE = /^(1m|3m|5m|15m|30m|1h|2h|4h|1d|5d)$/;
+
 /** Kompakte, credentials-freie Projektion eines `SyncResult` je Venue. */
 export interface VenueSyncStatus {
   /** Venue-Key in Großbuchstaben (z. B. `"BITUNIX"`). */
@@ -60,6 +67,16 @@ export interface VenueSyncStatus {
    * rohe Upstream-Messages werden nie gespeichert.
    */
   failuresByReason: Record<string, number>;
+  /**
+   * Stale-Guard (GAP-07): Reihen (`Instrument ⟂ Timeframe`) der Venue, deren
+   * jüngste Kerze die TF-Schwelle (`MARKETDATA_STALE_*_HOURS`) überschreitet.
+   * Ausschließlich ZÄHLER — keine Instrument-IDs (keine Symbole im Status,
+   * dieselbe Security-Policy wie oben). `undefined` = Guard nicht gelaufen
+   * (Altbestände/ältere CLI).
+   */
+  staleSeries?: number;
+  /** Stale-Reihen je Timeframe (nur Timeframes mit Befund, erlaubte TF-Keys). */
+  staleByTimeframe?: Record<string, number>;
 }
 
 interface SyncStatusManifest {
@@ -92,13 +109,34 @@ export function syncResultToVenueStatus(result: SyncResult): VenueSyncStatus {
  * wird ersetzt. Ergebnis ist deterministisch sortiert (venue asc) und auf
  * {@link MAX_STATUS_VENUES} gekappt.
  */
+/**
+ * Optionale Stale-Guard-Zusammenfassung (GAP-07) je Venue — ausschließlich
+ * Zähler (`staleSeries`, `staleByTimeframe`), keine Instrument-IDs.
+ */
+export interface VenueStaleStatus {
+  staleSeries: number;
+  staleByTimeframe: Record<string, number>;
+}
+
 export function saveVenueSyncStatus(
   result: SyncResult,
   file: string = MARKET_SYNC_STATUS_FILE,
   now: Date = new Date(),
+  stale?: VenueStaleStatus,
 ): void {
   const next = syncResultToVenueStatus(result);
   if (!VENUE_RE.test(next.venue)) return; // defensive: nie einen unbrauchbaren Key persistieren
+  if (stale && Number.isFinite(stale.staleSeries) && stale.staleSeries >= 0) {
+    next.staleSeries = Math.max(0, Math.floor(stale.staleSeries));
+    const tf: Record<string, number> = {};
+    if (stale.staleByTimeframe && typeof stale.staleByTimeframe === "object") {
+      for (const [k, v] of Object.entries(stale.staleByTimeframe)) {
+        if (!STALE_TIMEFRAME_RE.test(k)) continue; // nur erlaubte Timeframe-Keys
+        if (typeof v === "number" && Number.isFinite(v) && v >= 0) tf[k] = Math.floor(v);
+      }
+    }
+    if (Object.keys(tf).length > 0) next.staleByTimeframe = tf;
+  }
   const resolved = resolveRuntimePath(file);
   const merged = loadVenueSyncStatuses(file).filter((entry) => entry.venue !== next.venue);
   merged.push(next);
@@ -137,6 +175,21 @@ export function loadVenueSyncStatuses(file: string = MARKET_SYNC_STATUS_FILE): V
           failuresByReason[reason] = Math.floor(count);
         }
       }
+      // Stale-Guard (GAP-07): nur Zähler + erlaubte Timeframe-Keys; alles
+      // andere (Instrument-IDs, Freitext) wird verworfen — fail-safe.
+      let staleSeries: number | undefined;
+      let staleByTimeframe: Record<string, number> | undefined;
+      if (typeof entry.staleSeries === "number" && Number.isFinite(entry.staleSeries) && entry.staleSeries >= 0) {
+        staleSeries = Math.max(0, Math.floor(entry.staleSeries));
+      }
+      if (entry.staleByTimeframe && typeof entry.staleByTimeframe === "object") {
+        const tf: Record<string, number> = {};
+        for (const [k, v] of Object.entries(entry.staleByTimeframe)) {
+          if (!STALE_TIMEFRAME_RE.test(k)) continue;
+          if (typeof v === "number" && Number.isFinite(v) && v >= 0) tf[k] = Math.floor(v);
+        }
+        if (Object.keys(tf).length > 0) staleByTimeframe = tf;
+      }
       out.push({
         venue,
         lastSyncAt:
@@ -149,6 +202,8 @@ export function loadVenueSyncStatuses(file: string = MARKET_SYNC_STATUS_FILE): V
             ? Math.max(0, Math.floor(entry.instruments))
             : 0,
         failuresByReason,
+        ...(staleSeries !== undefined ? { staleSeries } : {}),
+        ...(staleByTimeframe !== undefined ? { staleByTimeframe } : {}),
       });
       if (out.length >= MAX_STATUS_VENUES) break;
     }
