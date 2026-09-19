@@ -557,6 +557,39 @@ gesund, 1 = Alarm, 2 = Bedienfehler. Er startet **nichts** neu und entschärft
 **nichts** (alarm-first); Aufruf per systemd-Timer/Cron. Optionen:
 `--url=…`, `--source=inprocess`, `--timeout-ms=…` (CLI, keine Env-Flags).
 
+### Regime-Gate (GAP-06, v1.46.0)
+
+Deterministischer Markt-Regime-Klassifikator (TREND_UP/TREND_DOWN/RANGE/
+HIGH_VOL/CRASH, aus Kerzen: ADX + Regressions-Slope + realisierte Vol als
+Perzentil + Drawdown vom Fensterhoch) mit Hysterese gegen Whipsaws; das Gate
+dämpft Signalgewichte je Strategieklasse (mean-reversion/trend/breakout) als
+**Datenkontext** — nie als hartes Veto. Rollout bewusst **monitor-first**:
+Default ist Ausweis + Audit ohne Wirkung. Alle Flags sind optional — ohne
+Konfiguration läuft das System exakt wie vorher (nur Ausweis). Doku:
+[`docs/REGIME_GATE.md`](docs/REGIME_GATE.md).
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `REGIME_GATE_MODE` | `monitor` | Gate-Modus: `off` (keine Ausweisung, Prompt/Entscheidungspfad byte-identisch), `monitor` (**Default**: Ausweis im Ops-Center/Prompt + Audit je Regime-Wechsel, keine Wirkung), `enforce` (Faktor wirkt: Engine-Risikobudget-Kontext + Mikro-Executor-Sizing, gegen die Code-Ceilings geklemmt). Unbekannter Wert → fail-closed `monitor` (nie still `enforce`). |
+| `REGIME_LOOKBACK_CANDLES` | `100` | Lookback-Fenster der Klassifikation in Kerzen. Bounds [20, 500], Clamp mit sicherem Default. |
+| `CRASH_DRAWDOWN_PCT` | `10` | Drawdown vom Fensterhoch in %, ab dem (zusammen mit negativem Slope) `CRASH` gilt. Bounds [3, 50]. |
+| `HIGH_VOL_PERCENTILE` | `90` | Perzentil-Rang der realisierten Volatilität über den Lookback, ab dem `HIGH_VOL` gilt. Bounds [50, 99]. |
+| `REGIME_CONFIRM_CANDLES` | `3` | Hysterese: konsekutive bestätigende Bewertungen, bis ein Seitwärts-/De-Eskalationswechsel übernommen wird (Eskalation ist sofort). Bounds [1, 20]. |
+| `REGIME_TREND_ADX` | `25` | ADX-Schwelle (Wilder, Periode 14) für `TREND_UP`/`TREND_DOWN`. Bounds [10, 60]. |
+| `REGIME_TREND_SLOPE_PCT` | `0.05` | Mindest-|Regressions-Slope| in % pro Kerze für `TREND_*` (darunter `RANGE`). Bounds [0.005, 1]. |
+| `REGIME_GATE_FACTORS` | s. u. | Dämpfungsfaktoren je Regime × Strategieklasse, Grammatik `REGIME:klasse=faktor,…` (z. B. `TREND_UP:mean-reversion=0.25`). Werte geklemmt auf [0, 2]; kaputte Einträge werden übersprungen. Defaults: mean-reversion × 0.5 in TREND_UP/TREND_DOWN, breakout × 0.5 in RANGE, sonst × 1. |
+
+Zusätzlich hart verdrahtet (kein Flag):
+
+- **UNKNOWN statt Raten:** unter 30 Kerzen ist das Regime `UNKNOWN` →
+  Faktor 1 + Kennzeichnung (nie still); `UNKNOWN` berührt die Hysterese nicht.
+- **Audit je Regime-Wechsel:** `REGIME_CHANGE` mit Code
+  `regime:SYMBOL:VON→NACH`; jede enforce-Dämpfung zusätzlich
+  `REGIME_GATE_APPLIED` (`regime-gate:SYMBOL:KLASSE:REGIME`).
+- **Cycle-Artefakt:** `artifacts/YYYY-MM-DD/daily/regime-history.json`
+  (Stand + Verlauf je Instrument); Ops-Center-Risk-Sektion weist Modus und
+  Regime je Instrument aus.
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |

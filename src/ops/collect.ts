@@ -35,6 +35,7 @@ import { getOllamaStatus } from "@/lib/ollama";
 import { publicErrorMessage } from "@/lib/secrets";
 import { getLimits, killSwitch } from "@/lib/riskGuard";
 import { getAdaptiveRiskStatus } from "@/lib/adaptiveRisk";
+import { getMarketRegimeStatus, type MarketRegimeLabel } from "@/lib/marketRegime";
 import { verifyAuditChain } from "@/live-gate/audit";
 import { liveGateConfig } from "@/live-gate/config";
 import { PORTFOLIO_CONFIG_VERSION } from "@/portfolio/config";
@@ -679,12 +680,37 @@ function collectAgentOperations(firm: FirmResult): Draft {
 // 8. Risk — Risk Guard, adaptives Risiko, Live-Gate
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Farbton je Markt-Regime (GAP-06) — CRASH/HIGH_VOL alarmierend, UNKNOWN warnend. */
+function toneForMarketRegime(regime: MarketRegimeLabel): OpsTone {
+  if (regime === "CRASH") return "bad";
+  if (regime === "HIGH_VOL") return "warn";
+  if (regime === "UNKNOWN") return "warn";
+  if (regime === "RANGE") return "good";
+  return "neutral"; // TREND_UP / TREND_DOWN sind Richtungen, keine Alarme.
+}
+
 function collectRisk(firm: FirmResult): Draft {
   const limits = getLimits();
   const adaptive = getAdaptiveRiskStatus();
   const armed = killSwitch.isArmed();
   const openPositions = firm.ok ? firm.data.openPositions.length : null;
   const gate = liveGateConfig(process.env);
+  // GAP-06 (v1.46.0): Markt-Regime je Instrument (reine RAM-Lese, keine IO).
+  const regimeStatus = getMarketRegimeStatus();
+  const regimeMetrics: OpsMetric[] = [
+    {
+      label: "Markt-Regime-Gate",
+      value: regimeStatus.mode,
+      hint:
+        "REGIME_GATE_MODE — monitor (Default): Ausweis + Audit, keine Wirkung; enforce: Dämpfung der Signalgewichte; off: keine Ausweisung. Details: docs/REGIME_GATE.md",
+    },
+    ...regimeStatus.instruments.map((i) => ({
+      label: `Regime ${i.symbol}`,
+      value: i.regime,
+      tone: toneForMarketRegime(i.regime),
+      hint: `${i.reason}${i.at ? ` · Stand ${formatTimestampUtc(i.at)}` : ""}`,
+    })),
+  ];
   return {
     // Kill-Switch scharf == Handel gesperrt: das ist ein bewusster Zustand,
     // kein Fehler der Aggregation — daher `locked`, nicht `unavailable`.
@@ -711,6 +737,8 @@ function collectRisk(firm: FirmResult): Draft {
         value: adaptive ? adaptive.regime : "—",
         tone: adaptive?.regime === "EXTREME" ? "bad" : adaptive?.regime === "ELEVATED" ? "warn" : "neutral",
       },
+      // GAP-06: Markt-Regime (Trend/Range/Crash) je Instrument + Gate-Modus.
+      ...regimeMetrics,
     ],
     items: [
       { label: "Stop-Loss Pflicht", value: limits.requireStopLoss ? "ja" : "nein", tone: limits.requireStopLoss ? "good" : "warn" },
@@ -723,6 +751,15 @@ function collectRisk(firm: FirmResult): Draft {
         meta: adaptive ? `Faktor ${num(adaptive.factor, 2)}` : "keine adaptive Bewertung",
       },
       { label: "Live-Gate-Datenpfad", value: gate.dir },
+      {
+        label: "Regime-Gate-Faktoren (GAP-06)",
+        value: regimeStatus.mode,
+        meta:
+          regimeStatus.instruments.length > 0
+            ? `${regimeStatus.instruments.length} Instrument(e) bewertet · mean-reversion/trend/breakout je Regime`
+            : "noch kein Instrument bewertet (Monitor-Tick/Agenten-Turn abwarten)",
+        tone: regimeStatus.mode === "enforce" ? "warn" : "neutral",
+      },
     ],
     note: adaptive?.stale
       ? "Adaptive Risikobewertung ist veraltet (kein Update im Erwartungsfenster)."

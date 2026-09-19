@@ -38,7 +38,7 @@ import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import { platformLiveFromEnv, venueEnabledFromEnv, venueLiveFlagFromEnv } from "../live-gate/config";
 import type { EmergencyBroker, EmergencyCloseFill } from "../contracts/broker";
 import { localReason } from "./ollama";
-import { getCandles, getQuote, sanitizeSymbol } from "./marketData";
+import { getCandles, getQuote, sanitizeSymbol, type Candle } from "./marketData";
 import { getProductionMarketDataManager, wirePaperExecution } from "./marketdata/production";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
@@ -50,6 +50,15 @@ import {
 } from "./journal";
 import { formatJournalWeightsContext, getEffectiveWeights } from "./journalAnalytics";
 import { ensureAdaptiveRiskFresh, getAdaptiveRiskStatus } from "./adaptiveRisk";
+import {
+  applyRegimeGate,
+  evaluateInstrumentRegime,
+  formatRegimeGateContext,
+  loadMarketRegimeConfig,
+  strategyClassOfTemplate,
+  type InstrumentRegimeSnapshot,
+  type StrategyClass,
+} from "./marketRegime";
 import { getHouseView } from "./analysts";
 import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
 import { writeEquitySnapshot } from "./equity";
@@ -551,8 +560,10 @@ export async function runAgentTurn(
   // --- Markt-Kontext: Indikatoren für das Missionssymbol + Multi-Market-Blick ---
   let marketContext = "";
   let snap: MarketSnapshot | null = null;
+  let turnCandles: Candle[] = [];
   try {
     const candles = await getCandles(symbolHint, "15m", 120);
+    turnCandles = candles;
     snap = snapshot(symbolHint, candles);
     if (snap) {
       trace.push(step("MARKET_DATA", true, `Kurs ${snap.price}, RSI ${snap.rsi14}, Trend ${snap.trend}${snap.atrPercent != null ? `, ATR ${snap.atrPercent}%` : ""}`));
@@ -564,6 +575,44 @@ export async function runAgentTurn(
     trace.push(step("MARKET_DATA", false, `Kein Marktkontext: ${e instanceof Error ? e.message : e}`));
   }
   marketContext += `(Regel: RSI>70 überkauft, RSI<30 überverkauft, EMA9>EMA21=Aufwärtstrend)\n`;
+
+  // --- GAP-06 (v1.46.0): Markt-Regime + Regime-Gate als Datenkontext ---
+  // Deterministischer Klassifikator (kein LLM) über dieselben Kerzen des
+  // Markt-Kontexts — kein zusätzlicher Datenabruf. Modus monitor (Default):
+  // Ausweis + Audit, OHNE Wirkung; enforce: der Faktor dämpft das im Prompt
+  // ausgewiesene Risikobudget der Mission (Signalgewicht), nie ein Veto.
+  // off: Prompt bleibt byte-identisch zum Vor-GAP-06-Stand.
+  const regimeCfg = loadMarketRegimeConfig();
+  let regimeContext = "";
+  let regimeGateFactorEffective = 1;
+  let regimeApplied = false;
+  let regimeLabel: InstrumentRegimeSnapshot["regime"] = "UNKNOWN";
+  if (regimeCfg.gateMode !== "off") {
+    try {
+      const regimeSnap = evaluateInstrumentRegime(symbolHint, turnCandles, { cfg: regimeCfg });
+      regimeLabel = regimeSnap.regime;
+      const missionClass: StrategyClass | null = strategyClassOfTemplate(mission.templateId);
+      const gate = applyRegimeGate({
+        regime: regimeSnap.regime,
+        strategyClass: missionClass,
+        weight: 1,
+        mode: regimeCfg.gateMode,
+        cfg: regimeCfg,
+      });
+      regimeGateFactorEffective = gate.factor;
+      regimeApplied = gate.applied;
+      regimeContext = formatRegimeGateContext(regimeSnap, missionClass, gate);
+      trace.push(
+        step(
+          "REGIME-GATE",
+          true,
+          `Regime ${regimeSnap.regime} · Klasse ${missionClass ?? "n/v"} · Faktor ${gate.factor.toFixed(2)} (${regimeCfg.gateMode}${gate.applied ? ", wirkt" : ", ohne Wirkung"})`
+        )
+      );
+    } catch (e) {
+      trace.push(step("REGIME-GATE", false, `Regime-Klassifikation fehlgeschlagen: ${e instanceof Error ? e.message : e}`));
+    }
+  }
 
   // --- Performance-Kontext: KPIs abgeschlossener Trades dieser Mission ---
   const closedRows = await db
@@ -640,7 +689,9 @@ export async function runAgentTurn(
     `MISSION: ${mission.objective}`,
     `SYMBOL=${symbolHint}`,
     `KONTO: Equity ${broker.accountEquity.toFixed(2)}, freies Cash ${broker.freeCash.toFixed(2)}, offene Positionen ${broker.openPositions}/${limits.maxConcurrentPositions}.`,
-    `RISIKOBUDGET: max ${(Number(mission.riskBudget) * 100).toFixed(1)} % Risiko pro Trade, max ${(Number(mission.maxPositionPct) * 100).toFixed(0)} % Positionsgröße.`,
+    `RISIKOBUDGET: max ${((regimeApplied ? Number(mission.riskBudget) * regimeGateFactorEffective : Number(mission.riskBudget)) * 100).toFixed(1)} % Risiko pro Trade${
+      regimeApplied ? ` (Regime-Gate enforce: Regime ${regimeLabel}, Faktor ${regimeGateFactorEffective.toFixed(2)})` : ""
+    }, max ${(Number(mission.maxPositionPct) * 100).toFixed(0)} % Positionsgröße.`,
     `HARTE REGELN (werden ohnehin im Code erzwungen): Stop-Loss verpflichtend, kein Hebel${limits.allowShort ? ", Long und Short erlaubt" : ", nur Long"}.`,
     // Scan-Missionen: Kandidatenliste + Segment-Regel, Zeile für Zeile
     // (bei SINGLE_SYMBOL ist das Array leer → der Prompt bleibt unverändert).
@@ -650,6 +701,9 @@ export async function runAgentTurn(
     houseContext,
     // NUR bei aktiven enforce-Gewichten — off/monitor bleibt prompt-identisch.
     ...(journalContext ? [journalContext] : []),
+    // GAP-06: Regime-Gate-Ausweis (monitor) bzw. Wirkzeile (enforce); bei
+    // Modus off leer — der Prompt bleibt byte-identisch.
+    ...(regimeContext ? [regimeContext] : []),
     ``,
     `Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:`,
     `{"type":"TRADE|HOLD|REPORT|APPROVE|REJECT","symbol":"${symbolHint}","side":"${limits.allowShort ? "LONG|SHORT" : "LONG"}","stopLossPct":${snap?.atrPercent != null ? Math.max(1, Math.min(20, snap.atrPercent * limits.atrStopMultiplier)).toFixed(1) : 5},"reason":"kurze Begründung","riskScore":0.4}`,

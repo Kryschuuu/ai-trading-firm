@@ -1917,6 +1917,62 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  REGIME_CHANGE: {
+    label: "Markt-Regime gewechselt",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Der deterministische Markt-Regime-Klassifikator (GAP-06, v1.46.0) hat für ein Instrument das Regime gewechselt (TREND_UP/TREND_DOWN/RANGE/HIGH_VOL/CRASH, mit Hysterese gegen Whipsaws). Maschinenlesbarer Code: `regime:SYMBOL:VON→NACH`. Der Wechsel ist Beobachtung — Wirkung entfaltet nur das Regime-Gate im Modus enforce.",
+    headline: (d) => `${text(d.symbol) ?? "—"}: ${text(d.from) ?? "?"} → ${text(d.to) ?? "?"}`,
+    explain: (d) => {
+      const reason = text(d.reason);
+      return reason ? `Auslöser: ${reason}` : "Keine Begründung protokolliert.";
+    },
+    sections: (d) => [
+      {
+        title: "Regime-Wechsel",
+        facts: [
+          { label: "Zeitpunkt", value: formatTimestampUtc(text(d.at)) },
+          { label: "Instrument", value: text(d.symbol) ?? "—" },
+          { label: "Von", value: text(d.from) ?? "—" },
+          { label: "Nach", value: text(d.to) ?? "—" },
+          { label: "Begründung", value: text(d.reason) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  REGIME_GATE_APPLIED: {
+    label: "Regime-Gate-Dämpfung wirksam",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Das Regime-Gate (GAP-06, v1.46.0) hat im Modus enforce das Signalgewicht einer Regel gedämpft: Risikobudget × Faktor je Regime × Strategieklasse (mean-reversion/trend/breakout, Werte geklemmt auf [0, 2]). Kein Veto — die Order wurde ausgeführt, nur das Budget ist gedämpft (stets gegen die Code-Ceilings geklemmt). Code: `regime-gate:SYMBOL:KLASSE:REGIME`.",
+    headline: (d) =>
+      `${text(d.symbol) ?? "—"} · ${text(d.strategyClass) ?? "?"} × ${num(d.factor) !== null ? formatNumber(num(d.factor) as number, 2) : "?"}`,
+    explain: (d) => {
+      const before = num(d.riskBudgetPctBefore);
+      const after = num(d.riskBudgetPctAfter);
+      return before !== null && after !== null
+        ? `Risikobudget ${formatNumber(before * 100, 2)} % → ${formatNumber(after * 100, 2)} % (Regime ${text(d.regime) ?? "?"}).`
+        : "Dämpfung ohne Budgetdetails protokolliert.";
+    },
+    sections: (d) => [
+      {
+        title: "Dämpfung",
+        facts: [
+          { label: "Instrument", value: text(d.symbol) ?? "—" },
+          { label: "Regel", value: text(d.ruleId) ?? "—" },
+          { label: "Regime", value: text(d.regime) ?? "—" },
+          { label: "Strategieklasse", value: text(d.strategyClass) ?? "—" },
+          { label: "Faktor", value: num(d.factor) !== null ? formatNumber(num(d.factor) as number, 2) : "—" },
+          { label: "Budget vorher", value: num(d.riskBudgetPctBefore) !== null ? `${formatNumber((num(d.riskBudgetPctBefore) as number) * 100, 2)} %` : "—" },
+          { label: "Budget nachher", value: num(d.riskBudgetPctAfter) !== null ? `${formatNumber((num(d.riskBudgetPctAfter) as number) * 100, 2)} %` : "—" },
+        ],
+      },
+    ],
+  },
+
   KILL_SWITCH: {
     label: "Not-Halt ausgelöst",
     category: "risk",

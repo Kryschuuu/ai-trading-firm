@@ -58,6 +58,14 @@ import {
 } from "./ruleEngine";
 import { ruleAudit } from "./ruleService";
 import { startOfBerlinDay } from "./time";
+// GAP-06 (v1.46.0): Regime-Gate als DATENKONTEXT — nur RAM-Lesezugriff im
+// Ausführungspfad (`resolveRegimeGateForExecution`), kein LLM, keine IO.
+import {
+  evaluateInstrumentRegime,
+  resolveRegimeGateForExecution,
+  strategyClassOfTemplate,
+  type StrategyClass,
+} from "./marketRegime";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Basistypen
@@ -106,6 +114,11 @@ export type ExecuteContext = {
   executionsToday: number;
   /** Bewertungszeit des Hot-Paths in µs (ohne DB/Fill). */
   evalMicros: number;
+  /**
+   * GAP-06 (v1.46.0): deterministisch aus dem Mission-Template abgeleitete
+   * Strategieklasse (null = nicht ableitbar → Regime-Gate-Faktor 1).
+   */
+  strategyClass?: StrategyClass | null;
 };
 
 export interface RuleExecutionAdapter {
@@ -263,6 +276,8 @@ export type RuleCacheStatus = {
 export class RuleCache {
   private bySymbol = new Map<string, CachedRule[]>();
   private missions = new Map<string, string>();
+  /** GAP-06: Mission → Template-ID (Quelle der Strategieklasse des Regime-Gates). */
+  private missionTemplates = new Map<string, string | null>();
   private loadedAt: number | null = null;
   private dirty = true;
   private dayKey = "";
@@ -293,7 +308,7 @@ export class RuleCache {
     try {
       const rows = await db.select().from(tradeRules).where(eq(tradeRules.status, "ACTIVE"));
       const missionRows = await db
-        .select({ id: missionsTable.id, status: missionsTable.status })
+        .select({ id: missionsTable.id, status: missionsTable.status, templateId: missionsTable.templateId })
         .from(missionsTable);
       const dayStart = startOfBerlinDay();
       const countRows = await db
@@ -340,7 +355,11 @@ export class RuleCache {
 
       this.bySymbol.clear();
       this.missions.clear();
-      for (const m of missionRows) this.missions.set(m.id, m.status);
+      this.missionTemplates.clear();
+      for (const m of missionRows) {
+        this.missions.set(m.id, m.status);
+        this.missionTemplates.set(m.id, m.templateId ?? null);
+      }
       for (const r of active) {
         const list = this.bySymbol.get(r.symbol) ?? [];
         list.push(r);
@@ -373,14 +392,30 @@ export class RuleCache {
   }
 
   /**
+   * GAP-06 (v1.46.0): Strategieklasse einer Regel — deterministisch aus dem
+   * Mission-Template abgeleitet (`strategyClassOfTemplate`). null = keine
+   * Mission/kein Template/kein Treffer → Regime-Gate-Faktor 1 (nie Raten).
+   */
+  strategyClassFor(missionId: string | null): StrategyClass | null {
+    if (!missionId) return null;
+    return strategyClassOfTemplate(this.missionTemplates.get(missionId) ?? null);
+  }
+
+  /**
    * Test-/Injections-Hook: Regeln direkt in den RAM-Cache setzen, ohne DB.
    * Wird von den Unit-Tests genutzt (Hot-Path-Logik ohne PostgreSQL) und
    * dokumentiert zugleich, dass der Cache nur die DB als Quelle braucht.
    */
-  _seedForTest(rules: CachedRule[], missionStatus: [string, string][] = []): void {
+  _seedForTest(
+    rules: CachedRule[],
+    missionStatus: [string, string][] = [],
+    missionTemplates: [string, string | null][] = []
+  ): void {
     this.bySymbol.clear();
     this.missions.clear();
+    this.missionTemplates.clear();
     for (const [id, status] of missionStatus) this.missions.set(id, status);
+    for (const [id, templateId] of missionTemplates) this.missionTemplates.set(id, templateId);
     for (const r of rules) {
       const list = this.bySymbol.get(r.symbol) ?? [];
       list.push(r);
@@ -607,10 +642,22 @@ export function createPaperRuleAdapter(opts?: {
         const equity = broker.accountEquity;
         const limits = getLimits();
         const stopPct = Math.min(ctx.spec.action.stopLossPct / 100, limits.defaultStopLossPct);
+
+        // GAP-06 (v1.46.0): Regime-Gate (nur enforce) dämpft das Signal-
+        // Risikobudget der Regel mit dem Faktor je Regime × Strategieklasse —
+        // DATENKONTEXT, kein Veto: die Order wird nie abgelehnt, nur das
+        // Budget läuft gedämpft in die Mission-Sizing-Formel (und bleibt dort
+        // gegen limits.maxRiskPerTrade geklemmt → nie über den Code-Ceilings).
+        // monitor/off/UNKNOWN/ohne Klasse → Faktor 1 (fail-safe, nie Raten).
+        const regimeGate = resolveRegimeGateForExecution(symbol, ctx.strategyClass ?? null);
+        const gatedRiskBudgetPct = regimeGate.applied
+          ? ctx.spec.action.riskBudgetPct * regimeGate.factor
+          : ctx.spec.action.riskBudgetPct;
+
         const notional = missionSizedNotional(
           equity,
           stopPct,
-          Math.min(ctx.spec.action.riskBudgetPct, limits.maxRiskPerTrade),
+          Math.min(gatedRiskBudgetPct, limits.maxRiskPerTrade),
           ctx.spec.action.maxPositionPct,
           limits.maxPositionPct
         );
@@ -792,6 +839,25 @@ export function createPaperRuleAdapter(opts?: {
           },
           ctx.missionId
         );
+        // GAP-06: Eine enforce-Dämpfung ist eine Mutation des Signalgewichts
+        // → eigenes Audit (Maschinenlesbarer Code `regime-gate:SYMBOL:KLASSE:REGIME`).
+        if (regimeGate.applied) {
+          await ruleAudit(
+            "REGIME_GATE_APPLIED",
+            "INFO",
+            {
+              ruleId: ctx.ruleId,
+              symbol,
+              regime: regimeGate.regime,
+              strategyClass: ctx.strategyClass ?? null,
+              factor: regimeGate.factor,
+              riskBudgetPctBefore: ctx.spec.action.riskBudgetPct,
+              riskBudgetPctAfter: gatedRiskBudgetPct,
+              code: `regime-gate:${symbol}:${ctx.strategyClass ?? "?"}:${regimeGate.regime}`,
+            },
+            ctx.missionId
+          );
+        }
         opts?.onFired?.(ctx.ruleId);
         return {
           status: "TRIGGERED",
@@ -928,6 +994,15 @@ export class MicroExecutor {
               key,
               new RollingTimeframeSeries(symbol, timeframe, candles)
             );
+            // GAP-06 (v1.46.0): Mit den Seed-Kerzen zugleich das Markt-Regime
+            // bestimmen (reine Arithmetik; Audit nur bei Wechsel, best-effort).
+            // Damit besitzt auch ein separater Mikro-Executor-Prozess ab Start
+            // einen Regime-Stand — der Gate-Faktor bleibt sonst fail-safe 1.
+            try {
+              evaluateInstrumentRegime(symbol, candles);
+            } catch {
+              /* Regime-Klassifikation darf den Seed nie brechen. */
+            }
           }
         } catch (err) {
           this.seedFailed++;
@@ -994,6 +1069,7 @@ export class MicroExecutor {
             missionId: rule.missionId,
             executionsToday: rule.executionsToday,
             evalMicros,
+            strategyClass: this.cache.strategyClassFor(rule.missionId),
           })
           .then((outcome) => {
             if (outcome.status === "TRIGGERED") this.execCount++;

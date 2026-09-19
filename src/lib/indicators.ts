@@ -92,6 +92,70 @@ export function returnStdDevPct(closes: number[], n = 20): number | null {
   return Number.isFinite(sd) ? sd : null;
 }
 
+/**
+ * Average Directional Index (Wilder) — TrendSTÄRKE ohne Richtungsbezug.
+ *
+ * Deterministische Referenzimplementierung (kein LLM, keine Bibliothek):
+ *   1. Je Bar: +DM / −DM (Directional Movement) und TR (True Range).
+ *   2. Wilder-Glättung als Summenrekursion: Start = Summe der ersten
+ *      `period` Werte, danach S ← S − S/period + Wert.
+ *   3. +DI/−DI = 100 · geglättete DM / geglättete TR; DX aus der
+ *      Differenz; ADX = Wilder-geglätteter DX (Start = einfacher
+ *      Mittelwert der ersten `period` DX-Werte).
+ *
+ * Liefert null bei unzureichender Historie (< 2·period + 1 Kerzen) oder
+ * nicht-sinnvollen Werten. Referenz-/Handrechnungs-Test: tests/indicators.test.ts.
+ */
+export function adx(candles: Candle[], period = 14): number | null {
+  if (!Array.isArray(candles) || period < 1 || candles.length < 2 * period + 1) return null;
+
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+  const tr: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i];
+    const p = candles[i - 1];
+    const upMove = c.high - p.high;
+    const downMove = p.low - c.low;
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    tr.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+  }
+
+  // Wilder-Summenrekursion über die ersten `period` Bars.
+  let trS = 0;
+  let pS = 0;
+  let mS = 0;
+  for (let i = 0; i < period; i++) {
+    trS += tr[i];
+    pS += plusDM[i];
+    mS += minusDM[i];
+  }
+
+  const dxAt = (): number => {
+    if (!Number.isFinite(trS) || trS <= 0) return 0;
+    const pdi = (100 * pS) / trS;
+    const mdi = (100 * mS) / trS;
+    const sum = pdi + mdi;
+    return sum > 0 ? (100 * Math.abs(pdi - mdi)) / sum : 0;
+  };
+
+  const dxs: number[] = [dxAt()];
+  for (let i = period; i < tr.length; i++) {
+    trS = trS - trS / period + tr[i];
+    pS = pS - pS / period + plusDM[i];
+    mS = mS - mS / period + minusDM[i];
+    dxs.push(dxAt());
+  }
+  if (dxs.length < period) return null;
+
+  let value = dxs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < dxs.length; i++) {
+    value = (value * (period - 1) + dxs[i]) / period;
+  }
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 /** Average True Range in Prozent des letzten Kurses. */
 export function atrPct(candles: Candle[], period = 14): number | null {
   if (candles.length < period + 1) return null;

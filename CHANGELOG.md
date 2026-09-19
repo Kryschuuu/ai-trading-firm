@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-18** · Code-Version **1.45.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.46.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,92 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.46.0] — 2026-09-19 · feat(risk): Markt-Regime-Klassifikator + Regime-Gate für Strategie-Gewichtung (GAP-06)
+
+**Hintergrund:** Laut Feature-Gap-Audit 2026-09-18
+([GAP-06](docs/audits/2026-09-18-feature-gap/findings/GAP-06-regime-gate.md))
+klassifizierte `adaptiveRisk.ts` zwar das Volatilitäts-Regime
+(NORMAL/ELEVATED/EXTREME, mit Hysterese) — aber ausschließlich als
+Risikofaktor. Ein Trend/Range/Crash-Klassifikator existierte nicht, und
+Agenten-/Strategiegewichte reagierten nicht auf das Markt-Regime:
+Mean-Reversion-Signale liefen in Trendmärkten ungedämpft (und umgekehrt).
+Dieser Release schließt das Delta (PROMPT-06 der Remediation-Serie):
+paper-only, keine neuen Runtime-Dependencies, Fail-closed, Rollout bewusst
+monitor-first. Umsetzung: Branch `arena/01a0b708-ai-trading-firm`.
+
+### Hinzugefügt
+
+- **Markt-Regime-Klassifikator** (`src/lib/marketRegime.ts`,
+  `classifyMarketRegime()`): deterministisch (KEIN LLM —
+  Architektur-Test `tests/marketRegime.test.ts`), nur aus Kerzen
+  (Zeitmaske: nur Daten ≤ t): ADX (Wilder, neu in `src/lib/indicators.ts`
+  inkl. Handrechnungs-Referenztest), OLS-Regressions-Slope über
+  Schlusskurse, realisierte Volatilität als Perzentil über den Lookback
+  (Entartungsschutz bei konstanter Vol), Drawdown vom Fensterhoch. Fünf
+  Regimes mit strikter Priorität **CRASH > HIGH_VOL > TREND\_\* > RANGE**;
+  unter 30 Kerzen `UNKNOWN` — nie eine stille Rate-Klassifikation.
+- **Regime-Hysterese** (`MarketRegimeStateMachine`, Muster an
+  `adaptiveRisk`-`RegimeStateMachine` angelehnt): Eskalation (Schwere ↑)
+  sofort, Seitwärts-/De-Eskalation erst nach `REGIME_CONFIRM_CANDLES`
+  (Default 3, Bounds [1, 20]) konsekutiven bestätigenden Bewertungen —
+  einzelne Gegenkerzen wechseln das Regime nicht (Whipsaw-Schutz).
+- **Regime-Gate** (`applyRegimeGate()`): Mapping Regime → Dämpfungsfaktor
+  je Strategieklasse (`mean-reversion`/`trend`/`breakout`), konfigurierbar
+  über `REGIME_GATE_FACTORS` (Grammatik `REGIME:klasse=faktor,…`, Werte
+  geklemmt [0, 2]). Defaults: mean-reversion ×0.5 in TREND_UP/TREND_DOWN,
+  breakout ×0.5 in RANGE, sonst ×1. Umsetzung als **Datenkontext** für
+  ruleEngine/Approver (Faktor multipliziert das Signalgewicht), NICHT als
+  hartes Veto. Modi `REGIME_GATE_MODE`: `off` | `monitor` (**Default**:
+  Ausweis + Audit, keine Wirkung) | `enforce`; unbekannter Wert →
+  fail-closed `monitor`. `UNKNOWN` → Faktor 1 + Kennzeichnung, nie still.
+  - *Engine-Turn:* Regime-Klassifikation über dieselben Kerzen des
+    Markt-Kontexts (kein Extra-Abruf); `REGIME-GATE`-Trace + Prompt-Zeile
+    (monitor: Ausweis; enforce: zusätzlich gedämpftes Risikobudget der
+    Mission). `off` lässt den Prompt byte-identisch.
+  - *Mikro-Executor:* nur `enforce` dämpft das Regel-Risikobudget
+    (`riskBudgetPct × Faktor`, gegen `maxRiskPerTrade` geklemmt); Regime
+    aus dem RAM-Snapshot (Seed + Monitor-Tick), fehlender Stand →
+    fail-safe Faktor 1; Audit `REGIME_GATE_APPLIED`
+    (`regime-gate:SYMBOL:KLASSE:REGIME`).
+  - *Strategieklasse:* deterministisch aus dem Mission-Template abgeleitet
+    (`strategyClassOfTemplate`); ohne Klasse Faktor 1.
+- **Sichtbarkeit:** Regime je Instrument in der Risk-Sektion des
+  Ops-Centers (Modus + Regime nach Schwere sortiert, inkl. Begründung),
+  Regime-Verlauf als Cycle-Artefakt
+  (`artifacts/YYYY-MM-DD/daily/regime-history.json`), Audit je
+  Regime-Wechsel (`REGIME_CHANGE`, Code `regime:SYMBOL:VON→NACH`) — beides
+  im Audit-Katalog (`src/lib/auditView.ts`) dokumentiert.
+- **Konfiguration:** `REGIME_LOOKBACK_CANDLES` (Default 100, Bounds
+  [20, 500]), `CRASH_DRAWDOWN_PCT` (10, [3, 50]), `HIGH_VOL_PERCENTILE`
+  (90, [50, 99]), `REGIME_CONFIRM_CANDLES` (3, [1, 20]), `REGIME_TREND_ADX`
+  (25, [10, 60]), `REGIME_TREND_SLOPE_PCT` (0.05, [0.005, 1]) — alle in
+  `.env.example` + `CONFIGURATION.md` (§„Regime-Gate“).
+- **Doku:** neues `docs/REGIME_GATE.md` (Klassifikator-Logik, Prioritäten,
+  Gate-Modi, Hysterese-Parameter, Abweichungen/Offene Punkte), im
+  Doku-Katalog registriert.
+- **Tests:** `tests/marketRegime.test.ts` (Golden-Cases je Regime inkl.
+  Grenzfälle, Hysterese — Gegenkerzen/Bestätigung/De-Eskalationsfenster,
+  Determinismus per Hash, Gate-Modi exakt, Konfig-Klemmung,
+  Architektur-Garantie „kein LLM im Klassifikator“); ADX-Mathe gegen
+  Handrechnung in `tests/indicators.test.ts`.
+
+### Geändert
+
+- **Monitor-Tick:** bewertet zusätzlich das Markt-Regime der offenen
+  Positionen (best-effort, fail-soft, Min-Interval je Symbol; nur ohne
+  injizierte Test-Kurse) — `TickResult.marketRegimes` neu.
+- **Mikro-Executor:** RuleCache lädt `missions.template_id` mit (Quelle
+  der Strategieklasse); Seed wertet mit den Seed-Kerzen zugleich das
+  Regime aus (auch im separaten `npm run micro`-Prozess).
+- **Cycle-Artefakte:** `saveDailyCycleArtifacts()` schreibt zusätzlich
+  `regime-history.json` (nur, wenn im Prozess mindestens ein Instrument
+  bewertet wurde).
+
+**Keine Verhaltensänderung im Default:** ohne Konfiguration gilt
+`REGIME_GATE_MODE=monitor` — reine Ausweisung + Audit; Entscheidungs- und
+Orderpfade bleiben unverändert. `enforce` dämpft ausschließlich
+Signalgewichte (nie Veto, nie über den Code-Ceilings).
 
 ## [1.45.0] — 2026-09-18 · feat(observability): Firmen-Metriken, Auto-Circuit-Breaker, Alerting & Heartbeat (GAP-10)
 
