@@ -217,8 +217,34 @@ export async function register() {
       setTimeout(() => void runMacro(), 15_000);
       setInterval(() => void runMacro(), macroIntervalMs);
 
+      // ── 5) RECONCILIATION: Periodischer Abgleich Broker ↔ DB (GAP-09, v1.50.0) ──
+      const reconIntervalMin = envInt("RECON_INTERVAL_MINUTES", 60, 5, 1440);
+      const reconIntervalMs = reconIntervalMin * 60_000;
+      let reconBusy = false;
+      const runRecon = async () => {
+        if (reconBusy) return;
+        reconBusy = true;
+        try {
+          const { runReconciliation } = await import("@/brokers/reconciliation");
+          const { getBroker } = await import("@/brokers/factory");
+          const adapter = await getBroker("PAPER", "paper");
+          const rep = await runReconciliation(adapter);
+          if (!rep.clean) {
+            console.warn(
+              `[scheduler] Reconciliation-Befund: ${rep.summary.critical} kritische Abweichung(en) gefunden`
+            );
+          }
+        } catch (e) {
+          console.warn("[scheduler] Reconciliation fehlgeschlagen:", e instanceof Error ? e.message : e);
+        } finally {
+          reconBusy = false;
+        }
+      };
+      setTimeout(() => void runRecon(), 20_000);
+      setInterval(() => void runRecon(), reconIntervalMs);
+
       console.log(
-        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin · Makro-Zyklus ${macroIntervalMs / 60000 | 0}min`
+        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin · Makro-Zyklus ${macroIntervalMs / 60000 | 0}min · Recon ${reconIntervalMin}min`
       );
     } catch (e) {
       console.warn("[scheduler] Start fehlgeschlagen:", e instanceof Error ? e.message : e);

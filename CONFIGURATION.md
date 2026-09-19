@@ -696,6 +696,29 @@ Hinweise:
   Einzelaufruf-Limits (`LLM_MAX_TOKENS`/`LLM_TIMEOUT_MS`) bleiben unverändert;
   der Turn-Deckel schließt die Lücke für Multi-Call-Turns.
 
+### Reconciliation & Idempotenz (GAP-09, v1.50.0)
+
+Periodischer Abgleich zwischen Broker und Datenbank (`src/brokers/reconciliation.ts`),
+Differenz-Klassifikation, automatischer Pause-Pfad (ohne Auto-Flatten),
+einheitliches Client-Order-ID-Schema (`atf-<orderIntentId-kurz>`) und
+Paper-Invarianz-Selbsttest. Details: [`docs/BROKER_ARCHITECTURE.md`](docs/BROKER_ARCHITECTURE.md) (§10).
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `RECON_PRICE_DRIFT_PCT` | `1` | Maximale Kursabweichung in % zwischen Broker und DB, die als tolerierbar eingestuft wird (`PRICE_DRIFT`). Bounds [0.01, 10], Clamp mit Log-Warnung. |
+| `RECON_INTERVAL_MINUTES` | `60` | Scheduler-Intervall für den periodischen Abgleich in Minuten. Bounds [5, 1440]. Ad-hoc-Aufruf via `scripts/reconcile.ts` (oder `npm run reconcile`). |
+| `RECON_PAUSE_ON_MISMATCH` | `false` | Bei kritischen Diskrepanzen (`QTY_MISMATCH`, `PHANTOM_POSITION`, `MISSING_POSITION`, `BALANCE_MISMATCH`, `INVARIANT_VIOLATION`) Kill-Switch scharfschalten (`recon:<klasse>`). Kein Auto-Flatten; Disarm erfordert manuelle Challenge. |
+
+Hinweise:
+
+- **Reine Funktion & Testbarkeit:** `classifyDifferences` ist frei von I/O
+  und prüft Positionsdifferenzen, Kassensalden und Ledger-Invarianten.
+- **Auto-Flatten ist STRIKT VERBOTEN:** Ein Pause-Ereignis schaltet lediglich
+  den Kill-Switch scharf; offene Positionen werden niemals automatisch geschlossen.
+- **Client-Order-ID:** Schema `atf-<orderIntentId-kurz>` wird deterministisch
+  aus dem Order-Intent abgeleitet und bei Timeouts wiederholt, um Doppelorders
+  zu verhindern.
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |

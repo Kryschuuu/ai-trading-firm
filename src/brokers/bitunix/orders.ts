@@ -13,6 +13,7 @@
  */
 import type { BrokerOrderRequest } from "../../contracts/broker";
 import { isValidVenueNativeSymbol } from "../../symbols/normalize";
+import { buildClientOrderId } from "../reconciliation";
 import { sha256Hex } from "./signing";
 import type { BitunixPlaceOrderBody } from "./types";
 
@@ -120,10 +121,14 @@ export function serializePlaceOrder(
     tradeSide: "OPEN",
     orderType: finitePositive(req.limitPrice) ? "LIMIT" : "MARKET",
   };
-  // H4-Idempotenz: stabiler clientOrderId wird gesetzt und bei jedem Retry
-  // wiederverwendet (der Retry nutzt denselben Body). Ein explizit
-  // übergebener Key gewinnt — sonst deterministisch + Zeit-/Zufalls-Anteil.
-  body.clientId = opts?.clientOrderId ?? clientOrderIdFor(req, opts?.ts, opts?.rand);
+  // H4-Idempotenz & GAP-09: stabiler clientOrderId wird gesetzt und bei jedem
+  // Retry wiederverwendet (der Retry nutzt denselben Body). Ein explizit
+  // übergebener Key gewinnt — sonst req.clientOrderId, sonst aus orderIntentId
+  // ("atf-<intentId-kurz>"), sonst deterministisch + Zeit-/Zufalls-Anteil.
+  body.clientId =
+    opts?.clientOrderId ??
+    req.clientOrderId ??
+    (req.orderIntentId ? buildClientOrderId(req.orderIntentId) : clientOrderIdFor(req, opts?.ts, opts?.rand));
   if (finitePositive(req.limitPrice)) {
     body.price = String(req.limitPrice);
     body.effect = "GTC";

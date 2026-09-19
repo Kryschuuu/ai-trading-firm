@@ -253,3 +253,20 @@ Enforcer-Tabelle) sowie `FIRM_ADMIN_TOKEN` (Admin-Rolle für `live.gate`).
   Testnet-Anbindung (heute für Bitunix nicht dokumentiert).
 - **Single-Node:** State-Files und Kill-Datei sind lokal; Multi-Instanz-Betrieb
   bräuchte eine gemeinsame Ablage (konsistent mit dem Rest der Plattform).
+
+## 12. Live-Readiness & Reconciliation (GAP-09, v1.50.0)
+
+Mit der Umsetzung von GAP-09 (`src/brokers/reconciliation.ts`) ist eine
+zwingende Readiness-Bedingung für einen künftigen Live-Start erfüllt:
+
+- **Broker ↔ DB Reconciliation:** Periodischer Abgleich offener Positionen,
+  Balances und Orders verhindert unerkannte Asynchronitäten.
+- **Idempotente Order-IDs:** Einheitliches Schema `atf-<orderIntentId-kurz>`
+  mit deterministischer Wiederholung bei Retries eliminiert das Doppel-Order-Risiko
+  bei Timeouts nach Order-Submit.
+- **Sicherer Pause-Pfad:** Bei kritischen Diskrepanzen kann der Kill-Switch
+  automatisch greifen (`RECON_PAUSE_ON_MISMATCH`), wobei Auto-Flatten verboten bleibt
+  und Re-Arm an die Disarm-Challenge gebunden ist.
+- **Enforcement unverändert:** Der Live-Trading-Pfad bleibt weiterhin vollständig
+  verriegelt (`LiveTradingGateError`). GAP-09 baut das Fundament, um Live dereinst
+  sicher aktivieren zu können, öffnet aber keine Schleusen.

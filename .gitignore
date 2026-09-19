@@ -59,6 +59,10 @@ next-env.d.ts
 # JSON- + MD-Report je Lauf — reproduzierbar, nicht versioniert.
 /data/eval
 
+# Reconciliation-Reports (GAP-09, v1.50.0): `scripts/reconcile.ts` schreibt
+# last-report.json — Laufzeitdaten, nicht versioniert.
+/data/reconciliation
+
 # Audit-Spool (S1, v1.36.18): persistenter Fallback, wenn audit_log nicht
 # schreibbar war. Läuft lokal, wird nach dem Nachzug geleert — nicht versioniert.
 /data/audit-spool

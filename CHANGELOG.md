@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.49.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.50.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,41 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.50.0] — 2026-09-19 · feat(reconciliation): Periodischer Reconciliation-Job, Differenz-Klassifikation & idempotente Order-IDs (GAP-09)
+
+### Added
+
+- Periodischer Reconciliation-Job (`src/brokers/reconciliation.ts`, `runReconciliation`):
+  Abgleich von Broker-Positionen, Account-Guthaben und Ledger ↔ DB (`positions`,
+  `orderIntents`, `equity_snapshots`). Report-Generierung mit Persistenz nach
+  `data/reconciliation/last-report.json` via `resolveRuntimePath()`.
+- Reine Differenz-Klassifikation (`classifyDifferences`):
+  - `PRICE_DRIFT`: Tolerierbar bei Kursdifferenzen innerhalb `RECON_PRICE_DRIFT_PCT`
+    (Default 1 %, Bounds [0.01, 10]); wird nur reportet. Überschreitung gilt als kritisch.
+  - `QTY_MISMATCH`: Positionsmengen- oder Richtungsabweichung (kritisch).
+  - `PHANTOM_POSITION`: Position existiert nur am Broker, fehlt in der DB (kritisch).
+  - `MISSING_POSITION`: Position existiert nur in der DB, fehlt am Broker (kritisch).
+  - `BALANCE_MISMATCH`: Kassen- oder Equity-Abweichung (kritisch).
+  - `INVARIANT_VIOLATION`: Bruch der Paper-Ledger-Invarianten (kritisch).
+- Pause-Pfad (`RECON_PAUSE_ON_MISMATCH`, Default false):
+  Bei kritischer Diskrepanz wird der prozessweite Kill-Switch aktiviert
+  (`killSwitch.pull("recon:<klasse>")`), in `kill_switches` persistiert und ein
+  `CRITICAL`-Alert über den AlertSink emittiert. Auto-Flatten ist strikt
+  verboten; Re-Arm erfordert weiterhin die manuelle Challenge.
+- Einheitliches Client-Order-ID-Schema `atf-<orderIntentId-kurz>` (`buildClientOrderId`):
+  Deterministische Ableitung der `clientOrderId` aus der Order-Intent-ID für
+  Bitunix- und Alpaca-Adapter. Retry nach Timeout wiederholt dieselbe ID,
+  wodurch Venue- und lokale DB-Deduplizierung Doppel-Orders sicher verhindern
+  (`submitWithIntent`).
+- Paper-Invarianz-Selbsttest (D4):
+  Automatische Prüfung aller Ledger-Invarianten (`freeCash >= 0`, `Summe Notional <= equity`,
+  `fees >= 0`, keine negative Menge, `equity = freeCash + Summe Einstandswerte ± unrealizedPnl`).
+  Verletzungen werden als `INVARIANT_VIOLATION` auditiert und alarmiert.
+- CLI-Tool `scripts/reconcile.ts` (und npm run script `reconcile`):
+  Ad-hoc-Reconciliation für beliebige Venues mit Report-Ausgabe und Statuscode-Signalisierung.
+- Scheduler-Integration (`src/instrumentation.ts`):
+  Periodischer Aufruf alle `RECON_INTERVAL_MINUTES` Minuten (Default 60, Bounds [5, 1440]).
 
 ## [1.49.0] — 2026-09-19 · feat(llm): Plausibilitäts-Schicht, Prompt-Eval-Harness & Turn-Budget (GAP-08)
 
