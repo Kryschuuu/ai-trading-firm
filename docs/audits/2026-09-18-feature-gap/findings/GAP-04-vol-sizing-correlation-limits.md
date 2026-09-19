@@ -105,7 +105,7 @@ riskGuard-/portfolio-/microExecutor-/indicators-Tests unverändert grün.
   hält den Store frisch).
 - Keine Schema-Änderung, keine neuen Runtime-Dependencies.
 
-## Nachtrag (v1.51.1, 2026-09-19) — Audit-Katalog
+## Nachtrag (v1.51.1, 2026-09-19, PR [#146](https://github.com/Kryschuuu/ai-trading-firm/pull/146)) — Audit-Katalog
 
 **Befund des Status-Reviews** ([`../remediation/STATUS-REVIEW-2026-09-19.md`](../remediation/STATUS-REVIEW-2026-09-19.md)):
 Die vier mit v1.48.0 eingeführten Audit-Events hatten **keinen Eintrag** im

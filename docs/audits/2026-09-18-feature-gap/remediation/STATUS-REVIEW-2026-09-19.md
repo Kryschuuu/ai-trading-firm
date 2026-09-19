@@ -1,6 +1,6 @@
 # Status-Review der IN_PROGRESS-Findings — 2026-09-19
 
-> **Umgesetzt in v1.51.1** (gleicher PR wie dieses Dokument): Alle
+> **Umgesetzt in v1.51.1** (PR [#146](https://github.com/Kryschuuu/ai-trading-firm/pull/146), gleicher PR wie dieses Dokument): Alle
 > Empfehlungen aus §12 sind angewendet — `TRACKING.md` führt alle zehn GAPs
 > als `FIXED` (inkl. PR-Nummern), der GAP-04-Audit-Katalog ist nachgetragen
 > (`tests/auditView.test.ts` 26/26 grün), Audit-README, `docs/README.md`,
