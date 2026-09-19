@@ -201,6 +201,14 @@ test("Step 6 (Risk Manager): berechnet Korrelationen und filtert Klumpenrisiken"
 });
 
 test("Step 7 (Research): erzeugt Setups mit expliziter Proposal-Markierung (keine Orders)", async () => {
+  // GAP-08: Die Plausibilitäts-Schicht lädt Referenzkerzen aus PAPER_HISTORY_DIR —
+  // Isolation auf ein leeres Temp-Verzeichnis (Preis-Regeln melden dann
+  // referenceMissing statt maschinenabhängig zu plausibilisieren).
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const prevHistoryDir = process.env.PAPER_HISTORY_DIR;
+  process.env.PAPER_HISTORY_DIR = mkdtempSync(`${tmpdir()}/cycle-steps-empty-history-`);
+  try {
   const ports = createTestPorts();
   ports.agent.setResponseForRole("RESEARCH", {
     setups: [
@@ -227,6 +235,10 @@ test("Step 7 (Research): erzeugt Setups mit expliziter Proposal-Markierung (kein
   assert.equal(result.disclaimer, "PROPOSAL_ONLY_NO_ORDERS_PLACED");
   assert.equal(result.setups[0].isProposal, true);
   assert.ok(result.setups[0].stopLoss < result.setups[0].entryPrice);
+  } finally {
+    if (prevHistoryDir === undefined) delete process.env.PAPER_HISTORY_DIR;
+    else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
+  }
 });
 
 test("Step 8 (Backtest-Verifikation): prüft Setups deterministisch (MaxDD, Sharpe, Sortino, Robustness)", async () => {

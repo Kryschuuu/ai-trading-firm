@@ -313,6 +313,13 @@ Konfigurierbar in der Policy (`budgets`) bzw. über die Registry-Felder:
 * **Cloud ist immer gedeckelt:** die Policy-Validierung erzwingt für
   `gemini`/`anthropic` einen `tokensPerDay > 0`. „Unbegrenzt" ist unzulässig.
 * `tokensPerDay <= 0` bei lokalen Providern bedeutet „kein Deckel" (kostenlos).
+* **Turn-Hartdeckel (GAP-08, v1.49.0):** `LLM_MAX_TOKENS_PER_TURN` (Default
+  20000, Bounds [1000, 200000]) + `LLM_MAX_TURN_MS` (Default 120000, Bounds
+  [10000, 900000]) begrenzen EINEN Agenten-Turn (Hauptaufruf +
+  Eskalations-/Plausibilitäts-Retries) als Ganzes. Überschreitung → sauberer
+  Abbruch mit `TurnBudgetExceededError` + Audit `llm-budget:tokens` /
+  `llm-budget:time` (`budget_blocked`, Sicherheitsklasse) — keine
+  Teil-Results als Erfolg. Details: Abschnitt 17.
 
 ---
 
@@ -428,6 +435,11 @@ npm run test:coverage:routing
 | `ROUTING_HEALTH_TIMEOUT_MS` | `1500` | Timeout je Health-Prüfung |
 | `ROUTING_BUDGET_<PROVIDER>_TOKENS` | Policy | Tages-Token-Deckel je Provider |
 | `ROUTING_POLICY_VERSION` | – | nur Audit-Kontext (Version stammt aus der Policy) |
+| `LLM_MAX_TOKENS_PER_TURN` | `20000` | Turn-Token-Deckel inkl. Retries (Bounds [1000, 200000]) — Details Abschnitt 17 |
+| `LLM_MAX_TURN_MS` | `120000` | Turn-Zeit-Deckel in ms (Bounds [10000, 900000]) — Details Abschnitt 17 |
+| `PLAUSIBILITY_PRICE_BAND_PCT` | `15` | Preisband um Known-Good-Kurs in % (Bounds [1, 90]) — Details Abschnitt 17 |
+| `PLAUSIBILITY_MIN_RATIONALE_CHARS` | `40` | Mindestbegründung bei Confidence ≥ 0.9 (Bounds [0, 1000], `0` = aus) |
+| `EVAL_OUTPUT_DIR` | `data/eval` | Report-Verzeichnis des Eval-Harness |
 
 ---
 
@@ -472,3 +484,85 @@ npm run test:coverage:routing
 * Klassen-Grenzen orientieren sich an Modell-Tags, nicht an gemessener Qualität.
 * Budget-Zähler sind prozess-lokal (Single-Node), analog zum bestehenden
   Rate-Limiter. Mehrinstanzen-Betrieb braucht eine geteilte Zustandsquelle.
+
+---
+
+## 17. Plausibilitäts-Schicht & Eval-Harness (GAP-08, v1.49.0)
+
+Die Schema-Validierung prüft die STRUKTUR einer LLM-Antwort — aber ein
+valides JSON kann trotzdem halluziniert sein (erfundene Kurse, Stop über dem
+Entry, 97 % Confidence ohne Begründung). GAP-08 legt drei Schichten darüber:
+
+### 17.1 Plausibilitäts-Schicht (`src/cycle/plausibility.ts`)
+
+Läuft NACH der Schema-Validierung (valide Struktur ist Voraussetzung) über
+Setup-/Entscheidungs-Outputs — aktuell Research-Setups (voll) und
+Makro-Output (Confidence/Begründung). Handgeschriebene Regeln im Repo-Stil,
+keine Schema-Library:
+
+| # | Regel | Code | Beschreibung |
+| --- | --- | --- | --- |
+| (a) | Monotonie je Richtung | `MONOTONICITY` | LONG: `stop < entry < tp` (strikt); SHORT gespiegelt |
+| (b) | Preisnähe | `PRICE_RANGE` | Entry/Stop/TP innerhalb ± `PLAUSIBILITY_PRICE_BAND_PCT` (Default 15, Bounds [1, 90], Kante inklusive) um den letzten Known-Good-Kurs (jüngster valider Schlusskurs der Referenzkerzen aus dem HistoricalStore) |
+| (c) | Confidence-Konsistenz | `RATIONALE_MISSING` | Confidence ≥ 0.9 (Research: `1 − riskScore`) verlangt eine Begründung ≥ `PLAUSIBILITY_MIN_RATIONALE_CHARS` (Default 40, Bounds [0, 1000]; `0` = Regel aus) |
+| (d) | Zahlenbezug | `HALLUCINATED_PRICE` | Im Begründungstext genannte Kurse müssen in `[minLow, maxHigh]` der Kerzen liegen (regex-Heuristik) |
+
+Befunde sind strukturiert (`{code, field, detail}`, Feldpfade wie
+`setups[0].stopLoss`). **Retry-Politik:** genau EIN Retry mit
+Fehlermeldungs-Kontext an den Provider; danach deterministischer Skip —
+leerer Fallback, Audit `CYCLE_STEP_SKIPPED` (Grund `plausibility:CODE`,
+z. B. `plausibility:MONOTONICITY,PRICE_RANGE`; ungültiger Retry:
+`plausibility:invalid-retry`) und sichtbarer `plausibility`-Block im
+Step-Output/Tages-Artefakt (`07-research.json`, `02-macro-analyst.json`).
+Auch eskalierte Antworten werden plausibilisiert (ohne weiteres Retry).
+Niemals still weiterrechnen.
+
+**Grenzen der Heuristik (d)** — dokumentiert statt verschwiegen: Jede Zahl
+im Text zählt als Kurskandidat; Kennzahlen ohne Kursbezug (RSI-Werte,
+Prozente ohne `%`-Zeichen, Stückzahlen) können Fehlbefunde erzeugen.
+Ausgenommen: Zahlen mit `%`, Jahreszahlen (1900–2100), Zahlen in enger
+Wortbindung; Tausender nur im en-Format (`65,000.5`), keine
+de-Dezimalkommas. Ohne Kerzen melden (b)/(d) `referenceMissing` — sichtbar,
+aber nicht blockierend; (a)/(c) laufen immer.
+
+### 17.2 Eval-Harness (`npm run eval:prompts`)
+
+Bewertet Prompt-Edits gegen das Golden-Dataset
+(`tests/fixtures/golden/<step>/*.json`, synthetisch, nur in `tests/`):
+Kerzen + Provider-Antwort + Erwartung (`schemaValid`/`plausible`/`codes`).
+Der Runner (`scripts/eval-prompts.ts`) führt die Betriebs-Pipeline
+(Schema + Plausibilität) aus und vergleicht Ist gegen Erwartung:
+
+* **Offline-Modus (Default):** gestubbte Antworten, ohne Netz, ohne
+  Secrets. Zwei Läufe → byte-identische Reports (keine Zeitstempel;
+  Hash-Test in `tests/evalPrompts.test.ts`).
+* **Reports:** `eval-report.json` + `eval-report.md` nach `data/eval/`
+  (via `resolveRuntimePath`, Override `EVAL_OUTPUT_DIR` / `--out-dir`).
+* **Exit-Codes:** 0 = alle Fixtures wie erwartet · 1 = Regression ·
+  2 = Fixture-/Bedienfehler.
+* **Provider-Modus** (`--provider`, nur mit explizitem Flag): echte
+  LLM-Aufrufe (kostet Tokens!) als Rauchtest — Schema+Plausibilität ohne
+  Golden-Vergleich, mit Budget-Hinweis (Aufrufe/Tokens/Latenz) im Report.
+
+**Fixtures-Pflege-HowTo:** Nach jedem Prompt-Edit `npm run eval:prompts`
+(Exit ≠ 0 = Regression). Neue Fixture: Datei unter `<step>/<id>.json`
+(`research/` für Setups, `macro/` für Makro), eindeutige ID, bewusste
+Erwartung, Single-Instrument-Kerzen (Eval-Vereinfachung — im Betrieb kommen
+Kerzen je Instrument aus dem Store). Details:
+[`tests/fixtures/golden/README.md`](../tests/fixtures/golden/README.md).
+
+### 17.3 Turn-Budget-Hartdeckel (`src/routing/turnBudget.ts`)
+
+Tages-Deckel (`BudgetTracker`) und Einzelaufruf-Limits (`LLM_MAX_TOKENS`,
+`LLM_TIMEOUT_MS`) ließen Multi-Call-Turns offen. `TurnBudget` deckelt EINEN
+Agenten-Turn (Hauptaufruf + Eskalations-/Plausibilitäts-Retries, erzeugt je
+`invokeAgent`): Token-Summe (`LLM_MAX_TOKENS_PER_TURN`, Default 20000,
+Bounds [1000, 200000]) und Wall-Clock (`LLM_MAX_TURN_MS`, Default 120000,
+Bounds [10000, 900000], geprüft an Aufrufgrenzen). Überschreitung →
+`TurnBudgetExceededError` (Code `LLM_TURN_BUDGET_EXCEEDED`) + Routing-Audit
+`llm-budget:tokens` / `llm-budget:time` (Outcome `budget_blocked` →
+Sicherheitsklasse in `audit_log`); der Fehler propagiert bis zur
+Step-Engine (sichtbarer Step-Fehlschlag) und wird NIE in einen Fallback
+umgewandelt. Zählung: gemeldeter `totalTokens`-Verbrauch je `routeChat()`
+(Näherung — Provider-interne Retries sind unsichtbar; Cloud-Provider melden
+zuverlässig, lokale kosten 0).

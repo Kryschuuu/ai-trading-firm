@@ -1,0 +1,17 @@
+{
+  "id": "macro-rationale-missing",
+  "step": "macro",
+  "description": "Schlecht-Fall: Confidence 0.95 mit 8-Zeichen-These — unter 40 Zeichen.",
+  "candles": [],
+  "providerResponse": {
+    "view": "BEARISH",
+    "regime": "RISK_OFF",
+    "volatilityRegime": "HIGH",
+    "assets": {
+      "btc": { "price": 65000, "trend": "DOWN" }
+    },
+    "thesis": "Bullish.",
+    "confidence": 0.95
+  },
+  "expect": { "schemaValid": true, "plausible": false, "codes": ["RATIONALE_MISSING"] }
+}

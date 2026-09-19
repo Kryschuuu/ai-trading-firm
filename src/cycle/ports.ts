@@ -15,6 +15,8 @@ import path from "node:path";
 import { resolveRuntimePath } from "@/lib/appPaths";
 import { chatLlm } from "@/lib/llmProvider";
 import {
+  TurnBudgetExceededError,
+  createTurnBudget,
   escalationFromRuntime,
   getModelRouter,
   routeChat,
@@ -22,7 +24,14 @@ import {
   type ModelRouter,
   type RoutedChatResult,
   type RoutedChatSpec,
+  type TurnBudget,
 } from "@/routing";
+import {
+  formatPlausibilityFeedback,
+  runPlausibilitySpec,
+  type PlausibilityFinding,
+  type PlausibilityOutcome,
+} from "./plausibility";
 import type { RoutingTask } from "@/routing/types";
 import {
   type AnalysisAgentPort,
@@ -415,16 +424,19 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
       temperature: 0.1,
     };
 
+    // GAP-08 (v1.49.0): EIN Turn-Budget je Aufruf — deckelt Hauptaufruf und
+    // alle Retries (Eskalation, Plausibilität) gemeinsam als Hartdeckel.
+    const turn = createTurnBudget();
     try {
       const routed = await routeChat(routedSpec, {
         ...(this.deps.router ? { router: this.deps.router } : {}),
         ...(this.deps.chatFn ? { chatFn: this.deps.chatFn } : {}),
+        turn,
       });
-      return this.finishInvocation<T>(spec, routed.content, routed.model, {
-        usedFallback: routed.usedFallback,
-        routing: routed,
-      });
-    } catch {
+      return await this.finishInvocation<T>(spec, routed, turn, payloadPrompt);
+    } catch (e) {
+      // Turn-Bruch ist ein sauberer Abbruch — NIEMALS ein Fallback-Erfolg.
+      if (e instanceof TurnBudgetExceededError) throw e;
       return {
         output: spec.fallback,
         rawText: "",
@@ -435,35 +447,27 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
   }
 
   /**
-   * Gemeinsame Nachbearbeitung: JSON-Extraktion, Schema-Validierung und
-   * EskalationsprÜfung. Eine Eskalation wird **nur vom Router** entschieden —
+   * Gemeinsame Nachbearbeitung: JSON-Extraktion, Schema-Validierung,
+   * Plausibilitäts-Schicht (GAP-08: genau EIN Retry, danach Skip) und
+   * Eskalationsprüfung. Eine Eskalation wird **nur vom Router** entschieden —
    * bei Genehmigung folgt genau EIN erneuter Aufruf mit dem eskalierten Modell.
    */
   private async finishInvocation<T>(
     spec: AgentInvocationSpec<T>,
-    rawText: string,
-    modelUsed: string,
-    opts: { usedFallback: boolean; routing?: RoutedChatResult },
+    routed: RoutedChatResult,
+    turn: TurnBudget,
+    payloadPrompt: string,
   ): Promise<AgentInvocationResult<T>> {
-    const parsedJson = safeExtractJson<unknown>(rawText);
-
-    let escalation: ModelEscalationRequest | undefined;
-    if (spec.escalationCheck) {
-      const esc = spec.escalationCheck(rawText, parsedJson.data);
-      if (esc) {
-        escalation = { ...esc, timestamp: new Date().toISOString() };
-      }
-    }
-
-    const routingMetaOut = opts.routing ? routingMeta(opts.routing) : {};
+    const parsedJson = safeExtractJson<unknown>(routed.content);
+    const routingMetaOut = routingMeta(routed);
 
     if (!parsedJson.ok || parsedJson.data === undefined) {
       return {
         output: spec.fallback,
-        rawText,
+        rawText: routed.content,
         usedFallback: true,
-        modelUsed,
-        escalation,
+        modelUsed: routed.model,
+        escalation: toEscalation(spec, routed.content, undefined),
         routing: routingMetaOut,
       };
     }
@@ -472,27 +476,183 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
     if (!validated.valid || validated.data === undefined) {
       return {
         output: spec.fallback,
-        rawText,
+        rawText: routed.content,
         usedFallback: true,
-        modelUsed,
-        escalation,
+        modelUsed: routed.model,
+        escalation: toEscalation(spec, routed.content, parsedJson.data),
         routing: routingMetaOut,
       };
     }
 
+    // GAP-08: Plausibilitäts-Schicht — läuft NACH der Schema-Validierung.
+    // Explizites `T` (statt inferiertem verengtem Generik), damit der Retry-
+    // Output ohne Schnittmengen-Kunsttyp zuweisbar bleibt.
+    let acceptedData: T = validated.data;
+    let acceptedRaw = routed.content;
+    let acceptedParsed: unknown = parsedJson.data;
+    let acceptedModel = routed.model;
+    let acceptedRouting = routingMetaOut;
+    let acceptedFallback = routed.usedFallback;
+    let plausibility: PlausibilityOutcome | undefined;
+
+    if (spec.plausibility) {
+      const first = runPlausibilitySpec(validated.data, spec.plausibility);
+      if (first.findings.length === 0) {
+        plausibility = {
+          status: "OK",
+          findings: [],
+          attempts: 1,
+          referenceMissingInstruments: first.referenceMissingInstruments,
+        };
+      } else {
+        const retry = await this.retryPlausibility(spec, turn, payloadPrompt, first.findings);
+        if (!retry.accepted) {
+          return {
+            output: spec.fallback,
+            rawText: retry.rawText,
+            usedFallback: true,
+            modelUsed: retry.modelUsed,
+            escalation: toEscalation(spec, retry.rawText, retry.parsed),
+            routing: retry.routing,
+            plausibility: retry.outcome,
+          };
+        }
+        acceptedData = retry.data;
+        acceptedRaw = retry.rawText;
+        acceptedParsed = retry.parsed;
+        acceptedModel = retry.modelUsed;
+        acceptedRouting = retry.routing;
+        acceptedFallback = retry.usedFallback;
+        plausibility = retry.outcome;
+      }
+    }
+
+    const escalation = toEscalation(spec, acceptedRaw, acceptedParsed);
+
     // Eskalation: der Agent beantragt, der ROUTER entscheidet (Regel 1).
     if (escalation) {
-      const outcome = await this.requestEscalation(spec, escalation);
+      const outcome = await this.requestEscalation(spec, escalation, turn, plausibility);
       if (outcome) return outcome;
     }
 
     return {
-      output: validated.data,
-      rawText,
-      usedFallback: false,
-      modelUsed,
+      output: acceptedData,
+      rawText: acceptedRaw,
+      usedFallback: acceptedFallback,
+      modelUsed: acceptedModel,
       escalation,
-      routing: routingMetaOut,
+      routing: acceptedRouting,
+      ...(plausibility ? { plausibility } : {}),
+    };
+  }
+
+  /**
+   * Der genau EINE Plausibilitäts-Retry (GAP-08): wiederholt den Aufruf mit
+   * Fehlermeldungs-Kontext im selben Turn-Budget. Ein Turn-Budget-Bruch
+   * propagiert (fail-closed) — er wird nie in einen Fallback umgewandelt.
+   */
+  private async retryPlausibility<T>(
+    spec: AgentInvocationSpec<T>,
+    turn: TurnBudget,
+    payloadPrompt: string,
+    firstFindings: PlausibilityFinding[],
+  ): Promise<
+    | {
+        accepted: true;
+        data: T;
+        rawText: string;
+        parsed: unknown;
+        modelUsed: string;
+        routing: Record<string, unknown>;
+        usedFallback: boolean;
+        outcome: PlausibilityOutcome;
+      }
+    | {
+        accepted: false;
+        rawText: string;
+        parsed: unknown;
+        modelUsed: string;
+        routing: Record<string, unknown>;
+        outcome: PlausibilityOutcome;
+      }
+  > {
+    const feedback = formatPlausibilityFeedback(firstFindings);
+    const routed = await routeChat(
+      {
+        agent: spec.role,
+        task: roleToRoutingTask(spec.role),
+        complexity: spec.complexity ?? "medium",
+        risk: "low",
+        messages: [
+          {
+            role: "system",
+            content: `${spec.systemPrompt}\nRespond strictly with valid JSON conforming to the requested schema.`,
+          },
+          { role: "user", content: `${payloadPrompt}\n\n${feedback}` },
+        ],
+        json: true,
+        temperature: 0.1,
+      },
+      {
+        ...(this.deps.router ? { router: this.deps.router } : {}),
+        ...(this.deps.chatFn ? { chatFn: this.deps.chatFn } : {}),
+        turn,
+      },
+    );
+    const parsed = safeExtractJson<unknown>(routed.content);
+    const meta = routingMeta(routed);
+    const validated =
+      parsed.ok && parsed.data !== undefined ? spec.schemaValidator(parsed.data) : null;
+    if (!validated || !validated.valid || validated.data === undefined) {
+      return {
+        accepted: false,
+        rawText: routed.content,
+        parsed: parsed.data,
+        modelUsed: routed.model,
+        routing: meta,
+        outcome: {
+          status: "SKIPPED",
+          // Der Retry lieferte keine bewertbare Struktur — die Befunde des
+          // ersten Versuchs bleiben als Ursache erhalten (Nachvollziehbarkeit).
+          findings: [...firstFindings],
+          attempts: 2,
+          skipReason: "invalid-retry",
+          referenceMissingInstruments: [],
+        },
+      };
+    }
+    // `spec.plausibility` ist gesetzt — der Aufrufer prüft das vor dem Retry.
+    const second = runPlausibilitySpec(validated.data, spec.plausibility!);
+    if (second.findings.length > 0) {
+      return {
+        accepted: false,
+        rawText: routed.content,
+        parsed: parsed.data,
+        modelUsed: routed.model,
+        routing: meta,
+        outcome: {
+          status: "SKIPPED",
+          findings: second.findings,
+          attempts: 2,
+          skipReason: "plausibility",
+          referenceMissingInstruments: second.referenceMissingInstruments,
+        },
+      };
+    }
+    return {
+      accepted: true,
+      data: validated.data,
+      rawText: routed.content,
+      parsed: parsed.data,
+      modelUsed: routed.model,
+      routing: meta,
+      usedFallback: routed.usedFallback,
+      outcome: {
+        status: "RETRIED",
+        findings: [],
+        attempts: 2,
+        referenceMissingInstruments: second.referenceMissingInstruments,
+      },
     };
   }
 
@@ -500,6 +660,8 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
   private async requestEscalation<T>(
     spec: AgentInvocationSpec<T>,
     escalation: ModelEscalationRequest,
+    turn: TurnBudget,
+    plausibility?: PlausibilityOutcome,
   ): Promise<AgentInvocationResult<T> | null> {
     const router = this.deps.router ?? getModelRouter();
     const escalationDecision = router.requestEscalation(
@@ -521,7 +683,7 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
       return null; // denied ⇒ Agent läuft mit dem aktuellen Modell weiter
     }
 
-    // Genehmigt: EIN erneuter Aufruf mit dem eskalierten Modell.
+    // Genehmigt: EIN erneuter Aufruf mit dem eskalierten Modell (im selben Turn).
     const routed = await routeChat(
       {
         agent: spec.role,
@@ -539,6 +701,7 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
         forcedDecision: escalationDecision.decision,
         ...(this.deps.router ? { router: this.deps.router } : {}),
         ...(this.deps.chatFn ? { chatFn: this.deps.chatFn } : {}),
+        turn,
       },
     );
 
@@ -547,11 +710,38 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
       parsed.ok && parsed.data !== undefined
         ? spec.schemaValidator(parsed.data)
         : null;
+    const validOutput =
+      validated && validated.valid && validated.data !== undefined
+        ? validated.data
+        : null;
+    // GAP-08: Auch die eskalierte Antwort muss plausibel sein — ohne weitere
+    // Retries (das Kontingent ist verbraucht): Befund → Skip, nie still.
+    if (validOutput !== null && spec.plausibility) {
+      const check = runPlausibilitySpec(validOutput, spec.plausibility);
+      if (check.findings.length > 0) {
+        return {
+          output: spec.fallback,
+          rawText: routed.content,
+          usedFallback: true,
+          modelUsed: routed.model,
+          escalation,
+          routing: {
+            ...routingMeta(routed),
+            escalationApproved: true,
+            escalationTrigger: escalationDecision.trigger,
+          },
+          plausibility: {
+            status: "SKIPPED",
+            findings: check.findings,
+            attempts: plausibility?.attempts ?? 1,
+            skipReason: "plausibility",
+            referenceMissingInstruments: check.referenceMissingInstruments,
+          },
+        };
+      }
+    }
     return {
-      output:
-        validated && validated.valid && validated.data !== undefined
-          ? validated.data
-          : spec.fallback,
+      output: validOutput ?? spec.fallback,
       rawText: routed.content,
       usedFallback: routed.usedFallback || !validated?.valid,
       modelUsed: routed.model,
@@ -561,8 +751,24 @@ export class DefaultAnalysisAgentPort implements AnalysisAgentPort {
         escalationApproved: true,
         escalationTrigger: escalationDecision.trigger,
       },
+      ...(plausibility ? { plausibility } : {}),
     };
   }
+}
+
+/**
+ * Eskalationsprüfung aus Runtime-Daten (GAP-08-Hilfsfunktion): wertet
+ * `spec.escalationCheck` auf der AKZEPTIERTEN Antwort aus (nach Schema- und
+ * Plausibilitäts-Prüfung) — eine verworfene Antwort eskaliert nie.
+ */
+function toEscalation<T>(
+  spec: AgentInvocationSpec<T>,
+  rawText: string,
+  parsed: unknown,
+): ModelEscalationRequest | undefined {
+  if (!spec.escalationCheck) return undefined;
+  const esc = spec.escalationCheck(rawText, parsed);
+  return esc ? { ...esc, timestamp: new Date().toISOString() } : undefined;
 }
 
 /**
@@ -573,6 +779,12 @@ export class FakeAnalysisAgentPort implements AnalysisAgentPort {
   private defaultResponse: unknown = null;
   private forceFallback = false;
   private queuedEscalations: Omit<ModelEscalationRequest, "timestamp">[] = [];
+  /**
+   * GAP-08: Antwort-Sequenzen je Rolle (Plausibilitäts-Retry-Tests) und
+   * kumulative Versuchszähler je Rolle (seit Port-Erzeugung).
+   */
+  private sequences = new Map<string, unknown[]>();
+  private attempts = new Map<string, number>();
 
   setResponseForRole(role: string, response: unknown): void {
     this.responsesByRole.set(role, response);
@@ -590,25 +802,53 @@ export class FakeAnalysisAgentPort implements AnalysisAgentPort {
     this.queuedEscalations.push(esc);
   }
 
+  /**
+   * GAP-08: Antwort-Folge je Rolle — jeder (Retry-)Versuch verbraucht genau
+   * einen Eintrag; danach gilt wieder `setResponseForRole`/Default.
+   */
+  setResponseSequenceForRole(role: string, responses: unknown[]): void {
+    this.sequences.set(role, [...responses]);
+  }
+
+  /** GAP-08: Kumulative Versuche je Rolle (1 = kein Retry, 2 = genau ein Retry). */
+  attemptsFor(role: string): number {
+    return this.attempts.get(role) ?? 0;
+  }
+
+  private takeResponse(role: string): unknown {
+    const sequence = this.sequences.get(role);
+    if (sequence && sequence.length > 0) return sequence.shift();
+    return this.responsesByRole.get(role) ?? this.defaultResponse;
+  }
+
+  private countAttempt(role: string): void {
+    this.attempts.set(role, (this.attempts.get(role) ?? 0) + 1);
+  }
+
+  private takeEscalation(
+    spec: AgentInvocationSpec<unknown>,
+    rawText: string,
+    rawObj: unknown,
+  ): ModelEscalationRequest | undefined {
+    if (this.queuedEscalations.length > 0) {
+      const nextEsc = this.queuedEscalations.shift()!;
+      return { ...nextEsc, timestamp: new Date().toISOString() };
+    }
+    if (spec.escalationCheck) {
+      const esc = spec.escalationCheck(rawText, rawObj);
+      if (esc) return { ...esc, timestamp: new Date().toISOString() };
+    }
+    return undefined;
+  }
+
   async invokeAgent<T>(
     spec: AgentInvocationSpec<T>,
   ): Promise<AgentInvocationResult<T>> {
-    const rawObj = this.forceFallback
-      ? null
-      : (this.responsesByRole.get(spec.role) ?? this.defaultResponse);
+    const rawObj = this.forceFallback ? null : this.takeResponse(spec.role);
+    this.countAttempt(spec.role);
 
     const rawText = JSON.stringify(rawObj ?? {});
-    let escalation: ModelEscalationRequest | undefined;
-
-    if (this.queuedEscalations.length > 0) {
-      const nextEsc = this.queuedEscalations.shift()!;
-      escalation = { ...nextEsc, timestamp: new Date().toISOString() };
-    } else if (spec.escalationCheck) {
-      const esc = spec.escalationCheck(rawText, rawObj);
-      if (esc) {
-        escalation = { ...esc, timestamp: new Date().toISOString() };
-      }
-    }
+    const escalation = this.takeEscalation(spec, rawText, rawObj);
 
     if (this.forceFallback || rawObj === null || rawObj === undefined) {
       return {
@@ -628,6 +868,81 @@ export class FakeAnalysisAgentPort implements AnalysisAgentPort {
         usedFallback: true,
         modelUsed: "fake-model",
         escalation,
+      };
+    }
+
+    // GAP-08: Plausibilitäts-Schicht — spiegelt den Default-Port (genau EIN
+    // Retry aus der Sequenz, danach deterministischer Skip). Ohne Spec exakt
+    // das alte Verhalten (kein `plausibility`-Ergebnis).
+    if (spec.plausibility) {
+      const first = runPlausibilitySpec(validated.data, spec.plausibility);
+      if (first.findings.length === 0) {
+        return {
+          output: validated.data,
+          rawText,
+          usedFallback: false,
+          modelUsed: "fake-model",
+          escalation,
+          plausibility: {
+            status: "OK",
+            findings: [],
+            attempts: 1,
+            referenceMissingInstruments: first.referenceMissingInstruments,
+          },
+        };
+      }
+      const retryRaw = this.forceFallback ? null : this.takeResponse(spec.role);
+      this.countAttempt(spec.role);
+      const retryText = JSON.stringify(retryRaw ?? {});
+      const retryValidated =
+        retryRaw === null || retryRaw === undefined
+          ? null
+          : spec.schemaValidator(retryRaw);
+      if (!retryValidated || !retryValidated.valid || retryValidated.data === undefined) {
+        return {
+          output: spec.fallback,
+          rawText: retryText,
+          usedFallback: true,
+          modelUsed: "fake-model",
+          escalation,
+          plausibility: {
+            status: "SKIPPED",
+            findings: [...first.findings],
+            attempts: 2,
+            skipReason: "invalid-retry",
+            referenceMissingInstruments: [],
+          },
+        };
+      }
+      const second = runPlausibilitySpec(retryValidated.data, spec.plausibility);
+      if (second.findings.length > 0) {
+        return {
+          output: spec.fallback,
+          rawText: retryText,
+          usedFallback: true,
+          modelUsed: "fake-model",
+          escalation,
+          plausibility: {
+            status: "SKIPPED",
+            findings: second.findings,
+            attempts: 2,
+            skipReason: "plausibility",
+            referenceMissingInstruments: second.referenceMissingInstruments,
+          },
+        };
+      }
+      return {
+        output: retryValidated.data,
+        rawText: retryText,
+        usedFallback: false,
+        modelUsed: "fake-model",
+        escalation,
+        plausibility: {
+          status: "RETRIED",
+          findings: [],
+          attempts: 2,
+          referenceMissingInstruments: second.referenceMissingInstruments,
+        },
       };
     }
 

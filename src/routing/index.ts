@@ -67,6 +67,22 @@ export {
   routingAuditRing,
 } from "./audit";
 export {
+  LLM_MAX_TOKENS_PER_TURN_DEFAULT,
+  LLM_MAX_TOKENS_PER_TURN_MAX,
+  LLM_MAX_TOKENS_PER_TURN_MIN,
+  LLM_MAX_TURN_MS_DEFAULT,
+  LLM_MAX_TURN_MS_MAX,
+  LLM_MAX_TURN_MS_MIN,
+  TurnBudget,
+  TurnBudgetExceededError,
+  createTurnBudget,
+  loadTurnBudgetConfig,
+  turnBudgetAuditLabel,
+  type TurnBudgetClock,
+  type TurnBudgetConfig,
+  type TurnBudgetExceededReason,
+} from "./turnBudget";
+export {
   ModelRouter,
   ROUTING_MODES_FILE,
   defaultRoutingPolicy,

@@ -12,12 +12,67 @@ import type { StepDefinition, StepExecutionContext } from "../types";
 import { type ResearchStepOutput, validateResearchOutput, type TradeSetupProposal } from "../schemas";
 import { assertShortlistLimit } from "../security";
 import type { RiskStepOutput, TechnicalStepOutput } from "../schemas";
+import { HistoricalStore, DEFAULT_ANALYSIS_TIMEFRAME } from "@/lib/marketdata/historicalStore";
+import { historyDir } from "@/lib/marketdata/config";
+import {
+  adaptResearchOutput,
+  plausibilityAuditReason,
+  toStepStatus,
+  type PlausibilityCandle,
+  type PlausibilityStepStatus,
+} from "../plausibility";
+
+/**
+ * Research-Output mit sichtbarem Plausibilitäts-Status (GAP-08, v1.49.0).
+ * Das Feld hängt der STEP an (nie das LLM — der Schema-Validator übernimmt
+ * es bewusst nicht); es landet im Tages-Artefakt `07-research.json`.
+ */
+export type ResearchStepOutputWithStatus = ResearchStepOutput & {
+  plausibility?: PlausibilityStepStatus;
+};
+
+/**
+ * Lädt Referenzkerzen (Known-Good-Kurse) je Instrument aus dem
+ * HistoricalStore — best-effort: Fehlt der Store oder eine Reihe, melden die
+ * preisbezogenen Plausibilitäts-Regeln `referenceMissing` statt zu raten.
+ * Der Pfad folgt `PAPER_HISTORY_DIR` (Tests injizieren ein Temp-Verzeichnis).
+ */
+function loadReferenceCandles(symbols: readonly string[]): Record<string, PlausibilityCandle[]> {
+  const out: Record<string, PlausibilityCandle[]> = {};
+  try {
+    const store = new HistoricalStore(historyDir());
+    for (const symbol of symbols.slice(0, 40)) {
+      try {
+        const rows = store.query({
+          instrumentId: symbol,
+          timeframe: DEFAULT_ANALYSIS_TIMEFRAME,
+          limit: 120,
+        });
+        const candles = rows
+          .filter(
+            (row) =>
+              Number.isFinite(row.close) &&
+              row.close > 0 &&
+              Number.isFinite(row.high) &&
+              Number.isFinite(row.low),
+          )
+          .map((row) => ({ close: row.close, high: row.high, low: row.low }));
+        if (candles.length > 0) out[symbol] = candles;
+      } catch {
+        // Einzelne Reihe fehlt/fehlerhaft → referenceMissing für dieses Symbol.
+      }
+    }
+  } catch {
+    // Store nicht lesbar → alle preisbezogenen Regeln melden referenceMissing.
+  }
+  return out;
+}
 
 export interface ResearchStepInput {
   approvedCandidates?: string[];
 }
 
-export const researchStep: StepDefinition<ResearchStepInput, ResearchStepOutput> = {
+export const researchStep: StepDefinition<ResearchStepInput, ResearchStepOutputWithStatus> = {
   stepId: "07-research",
   name: "Research",
   role: "RESEARCH",
@@ -28,7 +83,7 @@ export const researchStep: StepDefinition<ResearchStepInput, ResearchStepOutput>
     backoffMs: 200,
   },
 
-  async execute(context: StepExecutionContext<ResearchStepInput>): Promise<ResearchStepOutput> {
+  async execute(context: StepExecutionContext<ResearchStepInput>): Promise<ResearchStepOutputWithStatus> {
     const riskOutput = context.previousStepOutputs["06-risk-manager"] as RiskStepOutput | undefined;
     const techOutput = context.previousStepOutputs["04-technical-analyst"] as TechnicalStepOutput | undefined;
 
@@ -101,6 +156,10 @@ JSON schema:
   "disclaimer": "PROPOSAL_ONLY_NO_ORDERS_PLACED"
 }`;
 
+    // GAP-08: Plausibilitäts-Schicht über den Setup-Outputs (Monotonie,
+    // Preisband um Known-Good-Kurse, Confidence/Begründung, Zahlenbezug).
+    const candlesByInstrument = loadReferenceCandles(approved);
+
     const res = await context.ports.agent.invokeAgent<ResearchStepOutput>({
       role: "RESEARCH",
       systemPrompt,
@@ -108,8 +167,53 @@ JSON schema:
       untrustedData: { approvedSymbols: approved },
       schemaValidator: validateResearchOutput,
       fallback,
+      plausibility: {
+        adapt: adaptResearchOutput,
+        candlesByInstrument,
+        fieldPrefix: "setups",
+      },
     });
 
+    // Fail-closed: Nach dem (einzigen) Plausibilitäts-Retry bleibt ein
+    // unplausibler Output ein Skip — deterministischer Leer-Fallback, Audit
+    // `CYCLE_STEP_SKIPPED` (Grund `plausibility:CODE`) und sichtbarer Status
+    // im Output/Artefakt. Kein Setup-Export aus verworfenen Antworten.
+    if (res.plausibility?.status === "SKIPPED") {
+      const reason = plausibilityAuditReason(res.plausibility);
+      await context.ports.audit.logEvent({
+        event: "CYCLE_STEP_SKIPPED",
+        level: "WARN",
+        cycleId: context.cycleId,
+        stepId: "07-research",
+        role: "RESEARCH",
+        timestamp: context.clock.toISOString(),
+        detail: {
+          reason,
+          findings: res.plausibility.findings.map((f) => ({
+            code: f.code,
+            field: f.field,
+            detail: f.detail,
+          })),
+          attempts: res.plausibility.attempts,
+          approvedCount: approved.length,
+          referenceMissing: res.plausibility.referenceMissingInstruments,
+        },
+      });
+      context.log(
+        `Research-Output verworfen (${reason}) — deterministischer Leer-Fallback, kein Setup-Export.`,
+        "WARN",
+      );
+      const skipped: ResearchStepOutput = {
+        setups: [],
+        totalSetups: 0,
+        disclaimer: "PROPOSAL_ONLY_NO_ORDERS_PLACED",
+      };
+      return { ...skipped, plausibility: toStepStatus(res.plausibility) };
+    }
+
+    if (res.plausibility) {
+      return { ...res.output, plausibility: toStepStatus(res.plausibility) };
+    }
     return res.output;
   },
 };

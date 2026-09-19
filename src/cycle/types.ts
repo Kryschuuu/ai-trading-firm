@@ -12,6 +12,7 @@
 
 import type { DailyUniverseArtifact } from "@/scanner/artifacts";
 import type { WeeklyReview } from "@/scanner/weekly";
+import type { PlausibilityOutcome, PlausibilitySpec } from "./plausibility";
 
 /** Rollen der Pipeline-Schritte */
 export type CycleStepRole =
@@ -104,6 +105,13 @@ export interface CycleRunRecord {
     message: string;
     code?: string;
   };
+  /**
+   * Validierte Step-Outputs je stepId (GAP-08, v1.49.0) — die Engine hält sie
+   * ohnehin vor; der Service persistiert sie als Tages-Artefakte
+   * (`01-…json` … `08-…json`). Damit ist z. B. ein Plausibilitäts-Skip im
+   * Artefakt sichtbar statt nur im Audit-Log.
+   */
+  stepOutputs?: Record<string, unknown>;
 }
 
 /** Audit-Ereignis für Zyklen */
@@ -116,6 +124,7 @@ export interface CycleAuditEvent {
     | "CYCLE_STEP_COMPLETED"
     | "CYCLE_STEP_RETRY"
     | "CYCLE_STEP_FAILED"
+    | "CYCLE_STEP_SKIPPED"
     | "MODEL_ESCALATION_REQUEST";
   level: "INFO" | "WARN" | "CRITICAL";
   cycleId: string;
@@ -212,6 +221,12 @@ export interface AgentInvocationSpec<TOutput> {
   fallback: TOutput;
   /** Optionale Eskalationsprüfung */
   escalationCheck?: (raw: string, parsed?: unknown) => Omit<ModelEscalationRequest, "timestamp"> | null;
+  /**
+   * Optionale Plausibilitäts-Schicht (GAP-08, v1.49.0): läuft NACH der
+   * Schema-Validierung. Befunde → genau EIN Retry mit Fehlermeldungs-Kontext,
+   * danach deterministischer Skip (Fallback + `plausibility`-Ergebnis).
+   */
+  plausibility?: PlausibilitySpec;
 }
 
 /** Ergebnis eines Agenten-Aufrufs */
@@ -223,6 +238,12 @@ export interface AgentInvocationResult<TOutput> {
   escalation?: ModelEscalationRequest;
   /** Task-09: Routing-Trace (Entscheidung, Klasse, Trigger, Kette). */
   routing?: Record<string, unknown>;
+  /**
+   * GAP-08: Plausibilitäts-Ergebnis — nur gesetzt, wenn die Spec eine
+   * `plausibility`-Prüfung verlangte UND eine LLM-Antwort bewertet wurde
+   * (Fallbacks ohne LLM-Antwort tragen kein Ergebnis).
+   */
+  plausibility?: PlausibilityOutcome;
 }
 
 /** Port für LLM-Agenten-Ausführung */
