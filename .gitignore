@@ -68,6 +68,11 @@ next-env.d.ts
 # Historie + Regel, nicht versioniert (Vergleich via backtest_runs/Read-API).
 /data/backtest
 
+# Alert-Datei-Sink (GAP-10, v1.45.0; ignoriert seit v1.51.1): der
+# AlertDispatcher hängt jeden Alarm als NDJSON-Zeile an — Betriebsdaten
+# (Kill-Switch-Gründe, Heartbeat-Ausfälle), nicht versioniert.
+/data/alerts.ndjson
+
 # Audit-Spool (S1, v1.36.18): persistenter Fallback, wenn audit_log nicht
 # schreibbar war. Läuft lokal, wird nach dem Nachzug geleert — nicht versioniert.
 /data/audit-spool

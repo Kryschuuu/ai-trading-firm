@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.51.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-19** · Code-Version **1.51.1**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,54 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.51.1] — 2026-09-19 · fix(audit): GAP-04-Audit-Events im Katalog nachgetragen · docs(audit): Feature-Gap-Remediation abgeschlossen (GAP-01…GAP-10 FIXED)
+
+### Fixiert
+
+- **Audit-Katalog (GAP-04-Nachtrag):** Die mit v1.48.0 eingeführten Events
+  `POSITION_SIZING` (Engine), `POSITION_SIZING_UNKNOWN` (Mikro-Executor),
+  `CLUSTER_EXPOSURE_MONITOR` und `CLUSTER_EXPOSURE_BLOCKED` (Cluster-Guardrail)
+  hatten keinen Eintrag in `AUDIT_EVENT_CATALOG` (`src/lib/auditView.ts`).
+  Folgen: `tests/auditView.test.ts` („Katalog: jedes im Code geschriebene
+  Audit-Event ist lesbar beschrieben“) war seit dem Merge von PR #142 rot auf
+  `main`, und die Sizing-/Guardrail-Entscheidungen erschienen im Audit-Viewer
+  nur über den `UNKNOWN_EVENT_SPEC`-Fallback (ohne Label, Kategorie,
+  Erklärung). Jetzt: vier Einträge (Kategorie `risk`, erwartete Stufe `WARN`)
+  mit Headline, Erklärung und Fakten-Sektionen — Sizing: Instrument, Code
+  `sizing:atr-unknown:SYMBOL`, Notiz (+ Regel-ID im Mikro-Pfad);
+  Cluster-Exposure: Urteil (VIOLATION/STALE), Code
+  (`cluster-exposure:max-per-cluster:N` / `cluster-exposure:correlation-stale`),
+  Würde-blockieren-Flag, offene Positionen, Cluster + Zählung gegen
+  `RISK_MAX_PER_CLUSTER`, wirksame Schwelle/Fenster, Datenstand der
+  Korrelationsmatrix (fehlend ⇒ „fail-closed“ hervorgehoben). Neuer Render-
+  Test in `tests/auditView.test.ts` (26 Tests, vorher 24/25).
+  Warum es durchrutschte: PR #142 hat `npm test` nicht ausgeführt
+  („läuft in der CI“) — die CI führt aber nur `typecheck` + `docs:validate`
+  aus. Die Folge-PRs #143 und #145 haben den Failure regelkonform (R11) als
+  „GAP-04-Scope“ notiert statt still mitzufixen.
+
+### Geändert
+
+- **Feature-Gap-Audit 2026-09-18 — Status abgeschlossen:**
+  `docs/audits/2026-09-18-feature-gap/remediation/TRACKING.md` führt jetzt
+  **alle zehn Findings als `FIXED`** (GAP-02 v1.42.0 · GAP-03 v1.43.0 ·
+  GAP-05 v1.44.0 · GAP-10 v1.45.0 · GAP-06 v1.46.0 · GAP-07 v1.47.0 ·
+  GAP-04 v1.48.0 (+ Katalog-Nachtrag v1.51.1) · GAP-08 v1.49.0 ·
+  GAP-09 v1.50.0 · GAP-01 v1.51.0) mit PR-Belegen (#136–#145; die bisher
+  fehlenden Nummern #140/#141/#142/#144 nachgetragen). Neun Zeilen standen
+  seit dem jeweiligen Merge fälschlich auf `IN_PROGRESS` — der Workflow-
+  Schritt „nach Merge `FIXED`“ hatte keinen Eigentümer. Grundlage ist der
+  Status-Review `remediation/STATUS-REVIEW-2026-09-19.md` (PR-Status,
+  Artefakt-Existenz, Flags, Docs und **vollständiger Testlauf inklusive der
+  DB-gegateten Suites** gegen eine lokale PostgreSQL-18-Instanz). Konsistent
+  nachgezogen: Audit-README (Findings-Index + Status-Header), `docs/README.md`
+  (Audit-Zeile), Finding GAP-04 („Nachtrag v1.51.1“). ENV-01 bleibt OPEN.
+- **`.gitignore`:** `/data/alerts.ndjson` (append-only Datei-Sink des
+  Alert-Dispatchers, GAP-10 v1.45.0) ist jetzt wie `/data/eval`,
+  `/data/reconciliation` und `/data/backtest` von der Versionierung
+  ausgeschlossen — ein lokaler Alarm hinterließ bisher eine untracked Datei
+  mit Betriebsdaten im Arbeitsbaum.
 
 ## [1.51.0] — 2026-09-19 · feat(backtest): Regelbasierte Backtesting-Engine mit Walk-Forward-Fenstern, Paper-Ausführung & persistierten Runs (GAP-01)
 

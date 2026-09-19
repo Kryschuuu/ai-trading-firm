@@ -880,6 +880,60 @@ function missionSection(detail: Rec): AuditSection {
   return { title: "Missionsdaten", facts };
 }
 
+/**
+ * Gemeinsame Detail-Sektionen für die Cluster-Exposure-Events (GAP-04,
+ * `src/lib/clusterExposure.ts`): Urteil + Code, betroffener Cluster (nur bei
+ * VIOLATION), wirksame Parameter und der Datenstand der Korrelationsmatrix
+ * (null = keine Daten → STALE, fail-closed).
+ */
+function clusterExposureSections(d: Rec): AuditSection[] {
+  const verdict = text(d.verdict)?.toUpperCase();
+  const decision: AuditFact[] = [
+    { label: "Instrument", value: text(d.symbol) ?? "—" },
+    { label: "Modus", value: text(d.mode) ?? "—" },
+    {
+      label: "Urteil",
+      value: verdict === "VIOLATION" ? "Verstoß (Cluster-Limit)" : verdict === "STALE" ? "Korrelationsdaten stale" : (verdict ?? "—"),
+      tone: verdict ? "bad" : undefined,
+    },
+    { label: "Code", value: text(d.code) ?? "—", mono: true },
+    { label: "Würde blockieren", value: formatKnownValue("wouldBlock", d.wouldBlock) },
+    { label: "Offene Positionen", value: formatKnownValue("openSymbols", d.openSymbols) },
+    { label: "Begründung", value: text(d.reason) ?? "—" },
+  ];
+  if (verdict === "VIOLATION") {
+    decision.push(
+      { label: "Cluster des Instruments", value: formatKnownValue("clusterOfSymbol", d.clusterOfSymbol) },
+      {
+        label: "Positionen im Cluster",
+        value: num(d.count) !== null && num(d.limit) !== null ? `${num(d.count)} (Limit ${num(d.limit)})` : "—",
+        hint: "Anzahl offener Positionen im Cluster inklusive der geprüften Order gegenüber RISK_MAX_PER_CLUSTER.",
+      }
+    );
+  }
+  const data = record(d.data);
+  const parameters: AuditFact[] = [
+    {
+      label: "Korrelationsschwelle",
+      value: num(d.threshold) !== null ? `|ρ| ≥ ${formatNumber(num(d.threshold) as number, 2)}` : "—",
+      hint: "RISK_CORR_THRESHOLD — ab dieser absoluten Korrelation gelten zwei Instrumente als ein Cluster (Single-Linkage).",
+    },
+    { label: "Max. Positionen je Cluster", value: num(d.maxPerCluster) !== null ? String(num(d.maxPerCluster)) : "—", hint: "RISK_MAX_PER_CLUSTER" },
+    { label: "Fenster", value: num(d.windowCandles) !== null ? `${num(d.windowCandles)} Kerzen (1h)` : "—", hint: "RISK_CORR_WINDOW_CANDLES" },
+    {
+      label: "Datenstand",
+      value: isRecord(d.data)
+        ? `${num(data.observations) ?? "?"} gemeinsame Renditen · Stand ${text(data.lastTs) ? formatTimestampUtc(String(data.lastTs)) : "?"}${num(data.ageMs) !== null ? ` (Alter ${formatNumber((num(data.ageMs) as number) / 60_000, 0)} min)` : ""}`
+        : "keine Korrelationsdaten (fail-closed)",
+      tone: isRecord(d.data) ? undefined : "bad",
+    },
+  ];
+  return [
+    { title: "Guardrail-Entscheidung", facts: decision },
+    { title: "Wirksame Parameter", facts: parameters },
+  ];
+}
+
 // ── Katalog ─────────────────────────────────────────────────────────────────
 
 export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
@@ -1971,6 +2025,79 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
         ],
       },
     ],
+  },
+
+  // ── GAP-04 (v1.48.0): Vol-Sizing + Cluster-Exposure-Guardrail ─────────────
+  // Katalog-Nachtrag v1.51.1: Die vier Events wurden mit GAP-04 eingeführt,
+  // aber nicht beschrieben — der Katalog-Wächter (tests/auditView.test.ts)
+  // war seitdem rot, und die Guardrail-Entscheidungen erschienen im
+  // Audit-Viewer ohne Erklärung (UNKNOWN_EVENT_SPEC).
+
+  POSITION_SIZING: {
+    label: "Positionsgröße: Stop nicht auflösbar (UNKNOWN)",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Das volatilitätsbasierte Position-Sizing (GAP-04, v1.48.0) berechnet die Ordergröße als Risikobudget ÷ Stop-Abstand. Für diese Engine-Order ließ sich weder ein expliziter Stop noch ein ATR-Fallback-Stop (k × ATR) auflösen. Statt still zu raten wurde die bisherige Basis-Größe (Stop = defaultStopLossPct) verwendet und der Zustand als UNKNOWN gekennzeichnet — kein Block, aber sichtbar (Muster adaptiveRisk v1.36.21). Code: `sizing:atr-unknown:SYMBOL`.",
+    headline: (d) => `${text(d.symbol) ?? "—"} · UNKNOWN → Basis-Größe`,
+    explain: (d) =>
+      text(d.note) ??
+      "ATR und expliziter Stop fehlten — die Order lief mit der konservativen Basis-Größe weiter.",
+    sections: (d) => [
+      {
+        title: "Sizing-Entscheidung",
+        facts: [
+          { label: "Instrument", value: text(d.symbol) ?? "—" },
+          { label: "Code", value: text(d.code) ?? "—", mono: true },
+          { label: "Notiz", value: text(d.note) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  POSITION_SIZING_UNKNOWN: {
+    label: "Regel-Positionsgröße: Stop nicht auflösbar (UNKNOWN)",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Gegenstück zu POSITION_SIZING für den Mikro-Executor (Regel-Pfad, GAP-04, v1.48.0): Für eine Regel-Order ließ sich weder ein expliziter Stop noch ein ATR-Fallback-Stop auflösen. Die Order wurde mit der Basis-Größe ausgeführt und der Zustand als UNKNOWN gekennzeichnet — kein Block, kein stiller Wert. Code: `sizing:atr-unknown:SYMBOL`.",
+    headline: (d) => `${text(d.symbol) ?? "—"} · Regel ${text(d.ruleId) ?? "?"} · UNKNOWN → Basis-Größe`,
+    explain: (d) =>
+      text(d.note) ??
+      "ATR und expliziter Stop fehlten — die Regel-Order lief mit der konservativen Basis-Größe weiter.",
+    sections: (d) => [
+      {
+        title: "Sizing-Entscheidung",
+        facts: [
+          { label: "Instrument", value: text(d.symbol) ?? "—" },
+          { label: "Regel", value: text(d.ruleId) ?? "—", mono: true },
+          { label: "Code", value: text(d.code) ?? "—", mono: true },
+          { label: "Notiz", value: text(d.note) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  CLUSTER_EXPOSURE_MONITOR: {
+    label: "Cluster-Exposure: würde blockieren (Monitor-Modus)",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Der Korrelations-Cluster-Guardrail (GAP-04, v1.48.0, Schicht 3 des Risk-Guards) hat im Modus monitor (Default) einen Verstoß oder veraltete Korrelationsdaten festgestellt. Die Order wurde NICHT abgelehnt — dieses Ereignis zeigt nur, dass sie im Modus enforce abgelehnt worden wäre (wouldBlock). Codes: `cluster-exposure:max-per-cluster:N` (zu viele offene Positionen im selben Korrelations-Cluster, |ρ| ≥ Schwelle) oder `cluster-exposure:correlation-stale` (keine/zu alte Korrelationsdaten — fail-closed statt raten).",
+    headline: (d) => `${text(d.symbol) ?? "—"} · ${text(d.verdict) ?? "?"} · würde blockieren`,
+    explain: (d) => text(d.reason) ?? "Würde-Prüfung ohne Begründung protokolliert.",
+    sections: (d) => clusterExposureSections(d),
+  },
+
+  CLUSTER_EXPOSURE_BLOCKED: {
+    label: "Cluster-Exposure: Order abgelehnt",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Der Korrelations-Cluster-Guardrail (GAP-04, v1.48.0, Schicht 3 des Risk-Guards) hat im Modus enforce eine Order abgelehnt: Entweder hätte das Instrument die erlaubte Anzahl offener Positionen je Korrelations-Cluster überschritten (`cluster-exposure:max-per-cluster:N`) oder die Korrelationsdaten waren nicht verfügbar bzw. zu alt (`cluster-exposure:correlation-stale`, fail-closed). Bestehende Positionen bleiben unberührt; die Ablehnung betrifft nur die neue Order.",
+    headline: (d) => `${text(d.symbol) ?? "—"} · ${text(d.verdict) ?? "?"} · abgelehnt`,
+    explain: (d) => text(d.reason) ?? "Ablehnung ohne Begründung protokolliert.",
+    sections: (d) => clusterExposureSections(d),
   },
 
   KILL_SWITCH: {
