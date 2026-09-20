@@ -25,6 +25,7 @@
  * Abhängigkeiten (DB, Audit) injizierbar entgegen.
  */
 
+import { insertQualityBatch } from "../executionQuality/transaction";
 import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { db } from "../db";
 import { backtestRuns, backtestTrades } from "../db/schema";
@@ -463,6 +464,8 @@ export async function persistBacktestRun(
         const chunk = rows.slice(i, i + chunkSize).map(tradeInsertValues);
         await tx.insert(backtestTrades).values(chunk);
       }
+
+      for (const batch of input.report.executionQuality ?? []) await insertQualityBatch(tx, batch);
 
       // Read-back: die DATENBANK ist die Wahrheit — erst wenn die gelesenen
       // Zeilen dieselben Fenster-Hashes und Summen liefern, wird committet.

@@ -15,6 +15,8 @@
  * Control Plane freigibt (docs/LIVE_TRADING.md).
  * Paper: echte Public-Kurse, lokales Ledger, keine Private-API.
  */
+import { mapBitunixOrderStatus } from "./privateClient";
+import { captureOrder } from "../../executionQuality/runtime";
 import { VENUE_CAPABILITIES } from "../capabilities";
 import {
   NotSupportedCapabilityError,
@@ -318,7 +320,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     }
     const engine = await this.execution();
     const ticker = this.lastTicker.get(req.symbol.toUpperCase()) ?? (await this.getTicker(req.symbol));
-    return engine.submit(req, ticker);
+    return captureOrder({venue:this.id,mode:this.mode,request:req,quoteCurrency:(this.registry ?? getRegistry()).get(`${this.id}:${req.symbol.toUpperCase()}`)?.quote,execute:request=>engine.submit(request,ticker),book:()=>this.getOrderBook(req.symbol)});
   }
 
   /**
@@ -351,6 +353,21 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     const engine = await this.execution();
     if (!engine.reconcile) return null;
     return engine.reconcile(orderId);
+  }
+
+  async getExecutionEvidence(clientOrderId:string,symbol:string,_since:number):Promise<import("../../contracts/broker").ExecutionEvidence|null> {
+    this.require("trading", "getExecutionEvidence");
+    assertBitunixEnabled(this.env);
+    if (this.mode !== "live") throw new NotSupportedCapabilityError(this.id,"trading","getExecutionEvidence","Only live has venue executions");
+    assertLiveOrderAllowed(this.id,this.env);
+    const client = await this.privateClient();
+    const located = await client.getOrderByClientId(clientOrderId);
+    if (!located) return null;
+    const order = await client.getOrder(located.orderId);
+    if (!order) return null;
+    const trades = (await client.getExecutions(symbol,order.orderId)).filter(f=>f.orderId === order.orderId);
+    return {status:mapBitunixOrderStatus(order.status),orderId:order.orderId,filledQuantity:order.filledQty,feeQuoteTotal:null,
+      fills:trades.map(f=>({id:f.tradeId,quantity:f.qty,price:f.price,feeQuote:f.feeKnown === true ? f.fee:null,at:f.ts}))};
   }
 
   // ── H7 (v1.36.20): Kill-Switch-Notfall auf Venue-Ebene ─────────────────────

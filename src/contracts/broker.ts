@@ -213,6 +213,8 @@ export interface BrokerAccount {
 
 /** Order-Request im broker-unabhängigen Format. */
 export interface BrokerOrderRequest {
+  /** Additive, normalized decision provenance; never raw model text. */
+  executionQuality?: import("../executionQuality/capture").DecisionContext;
   /**
    * Sanitisiertes Venue-Symbol. PAPER-Orders tragen kanonische Symbole
    * (`marketData.sanitizeSymbol` → `src/symbols`-SSoT, SYM-007); Live-Adapter
@@ -294,8 +296,19 @@ export function isBookableFill(result: {
   return result.status === "FILLED" && Number.isFinite(result.fillPrice) && result.fillPrice > 0;
 }
 
+/** Minimal venue fill facts. Never a cumulative order-average pseudo-fill. */
+export interface ExecutionEvidence {
+  status?: BrokerOrderStatus;
+  orderId: string;
+  filledQuantity: number;
+  feeQuoteTotal: number | null;
+  fills: Array<{id:string;quantity:number;price:number;feeQuote:number|null;at:number}>;
+}
+
 /** Order-Ergebnis (simuliert oder real). */
 export interface BrokerOrderResult {
+  /** Quote-currency fee actually booked by the simulator/provider, null if unknown. */
+  feesQuote?: number | null;
   orderId: string;
   symbol: string;
   side: "LONG" | "SHORT";
@@ -401,6 +414,8 @@ export interface BrokerAdapter {
   getTicker?(symbol: string): Promise<MarketTicker>;
   getCandles?(symbol: string, timeframe: string): Promise<MarketCandle[]>;
   getOrderBook?(symbol: string): Promise<MarketOrderBook>;
+  /** L1 benchmark quote; distinct from claiming full order-book capability. */
+  getExecutionQuote?(symbol:string):Promise<MarketOrderBook>;
   getAccount?(): Promise<BrokerAccount>;
   placeOrder?(req: BrokerOrderRequest): Promise<BrokerOrderResult>;
   /**
@@ -413,6 +428,8 @@ export interface BrokerAdapter {
    * Fehlt die Methode (Paper: synchroner Fill), ist keine Reconciliation nötig.
    */
   reconcileOrder?(orderId: string): Promise<BrokerOrderResult | null>;
+  /** Read-only recovery by durable client ID, behind the same venue/live gates. */
+  getExecutionEvidence?(clientOrderId:string,symbol:string,since:number):Promise<ExecutionEvidence|null>;
   getPositions?(): Promise<BrokerPosition[]>;
   /**
    * H7 (v1.36.20): Notfall-Glattstellung auf Venue-Ebene (Kill-Switch).

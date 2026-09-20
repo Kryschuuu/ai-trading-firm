@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.56.0 (2026-09-20) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), aktueller [25-Punkte-Roadmap-Audit](docs/audits/2026-09-20-roadmap-audit/README.md) mit [21 eigenständigen Umsetzungs-Prompts](docs/audits/2026-09-20-roadmap-audit/prompts/README.md), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.56.0 (2026-09-21) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), aktueller [25-Punkte-Roadmap-Audit](docs/audits/2026-09-20-roadmap-audit/README.md) mit [21 eigenständigen Umsetzungs-Prompts](docs/audits/2026-09-20-roadmap-audit/prompts/README.md), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -314,10 +314,12 @@ npm run docs:validate    # Docs-as-Code-Wächter (grün nach Repo-Cleanup 2026-0
 
 GNU General Public License v3.0 (GPL-3.0) — siehe [`LICENSE`](LICENSE).
 
-## Execution-Quality-Ledger (Teilumsetzung)
+## Venueübergreifendes Execution-Benchmarking
 
-Normalisierte Intent-/Fill-/Benchmarkereignisse lassen sich über
-`npm run execution:ingest -- normalized-batch.json` append-only speichern und über
-`GET /api/firm/execution-quality` autorisiert aggregieren. Automatische Broker-
-und Backtest-Erfassung ist noch nicht angeschlossen; RMA-P4-01 bleibt offen.
-[Vertrag, Formeln, Migration und Grenzen](src/executionQuality/README.md).
+Optionales `EXECUTION_QUALITY_ENABLED=true` verbindet normale Paper-/Broker-
+Submissions und Backtest-Persistenz mit einem append-only Quality-Ledger.
+`npm run execution:reconcile -- ALPACA testnet --watch` sammelt echte Fill-Fakten
+und zeitpunktgerechte Markouts; `GET /api/firm/execution-quality` liefert bounded,
+autorisierte Aggregate. Fehlende Quellen bleiben null, unklare Submissions werden
+nur lesend rekonstruiert und niemals erneut gesendet.
+[Vertrag, Formeln, Migration und Rollback](src/executionQuality/README.md).

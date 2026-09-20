@@ -207,6 +207,7 @@ export interface StrategyBacktestStats {
 
 /** Gesamtergebnis eines Multi-Asset-Backtests. */
 export interface MultiAssetBacktestResult {
+  executionQuality?: import("../executionQuality/model").Batch[];
   config: BacktestEngineConfig;
   symbols: string[];
   timeframe: SupportedTimeframe;

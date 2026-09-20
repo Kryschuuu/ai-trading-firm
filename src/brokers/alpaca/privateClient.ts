@@ -176,6 +176,37 @@ export class AlpacaPrivateClient {
     return res.json as AlpacaOrder;
   }
 
+  /** Read-only client-key recovery. 404 remains an explicit provider error. */
+  async getOrderByClientId(clientOrderId:string):Promise<AlpacaOrder> {
+    const res = await this.authedRequest({method:"GET",path:"/v2/orders:by_client_order_id",query:{client_order_id:clientOrderId},idempotent:true});
+    if (!res.json || typeof res.json !== "object") throw new AlpacaApiError("unknown","INVALID_ORDER_EVIDENCE");
+    return res.json as AlpacaOrder;
+  }
+
+  /** Account FILL activities contain individual execution IDs. Bounded pagination
+   * refuses a truncated history; order averages are never substituted. */
+  async getFillActivities(orderId:string,since:number):Promise<import("../../contracts/broker").ExecutionEvidence["fills"]> {
+    const fills: import("../../contracts/broker").ExecutionEvidence["fills"] = [];
+    let token: string | undefined;
+    for (let page=0;page<20;page++) {
+      const res = await this.authedRequest({method:"GET",path:"/v2/account/activities/FILL",query:{after:new Date(since).toISOString(),direction:"asc",page_size:100,page_token:token},idempotent:true});
+      if (!Array.isArray(res.json)) throw new AlpacaApiError("unknown","INVALID_FILL_EVIDENCE");
+      for (const raw of res.json) {
+        if (!raw || typeof raw !== "object") throw new AlpacaApiError("unknown","INVALID_FILL_EVIDENCE");
+        const r = raw as Record<string,unknown>;
+        if (r.order_id !== orderId) continue;
+        if (typeof r.id !== "string" || typeof r.transaction_time !== "string") throw new AlpacaApiError("unknown","INVALID_FILL_EVIDENCE");
+        // FILL activities do not prove a quote-currency commission. Unknown ≠ 0.
+        fills.push({id:r.id,quantity:Number(r.qty),price:Number(r.price),feeQuote:null,at:Date.parse(r.transaction_time)});
+      }
+      if (res.json.length < 100) return fills;
+      const last = res.json[res.json.length-1] as Record<string,unknown>;
+      if (typeof last.id !== "string" || last.id === token) throw new AlpacaApiError("unknown","INVALID_ACTIVITY_CURSOR");
+      token = last.id;
+    }
+    throw new AlpacaApiError("unknown","FILL_EVIDENCE_PAGE_LIMIT");
+  }
+
   /**
    * H7 (v1.36.20): Storniert alle offenen Orders (`DELETE /v2/orders`) —
    * Notfall-Schritt 1 des Kill-Flatten. Im Effekt idempotent (stornieren

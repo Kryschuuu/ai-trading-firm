@@ -216,6 +216,7 @@ export class BitunixPaperLedger {
       symbol,
       side: req.side,
       qty: filledQty,
+      feesQuote: sim.fees,
       fillPrice,
       status: "FILLED",
       stopLoss: req.stopLoss ?? null,

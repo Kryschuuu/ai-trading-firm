@@ -14,6 +14,7 @@
  * Alle Execution-Modi (backtest/paper) teilen sich diesen EINEN Ledger —
  * es entsteht nie eine zweite, unhydratierte Buchhaltung.
  */
+import { captureOrder } from "../executionQuality/runtime";
 import { PaperBroker, type Fill, type Order } from "../lib/broker";
 import { getCandlesWithFallback, getQuote } from "../lib/marketData";
 import { getRegistry } from "../universe";
@@ -124,6 +125,10 @@ export class PaperBrokerAdapter implements BrokerAdapter {
    * innerhalb des `PaperBroker.submit()`.
    */
   async placeOrder(req: BrokerOrderRequest): Promise<BrokerOrderResult> {
+    return captureOrder({venue:this.id,mode:this.mode,request:req,execute:async request => this.executeOrder(request)});
+  }
+
+  private async executeOrder(req: BrokerOrderRequest): Promise<BrokerOrderResult> {
     const order: Order = {
       symbol: req.symbol,
       side: req.side,
@@ -137,6 +142,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     const fill: Fill = this.paperBroker.submit(order);
     return {
       orderId: fill.orderId,
+      feesQuote: fill.fees ?? null,
       symbol: fill.symbol,
       side: fill.side,
       qty: fill.qty,

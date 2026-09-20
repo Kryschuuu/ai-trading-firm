@@ -31,6 +31,9 @@
  * neue Läufe (Walk-Forward, CLI) nutzen `"paper"`. Siehe docs/BACKTESTING.md.
  */
 
+import { simulatedBatch } from "../executionQuality/backtest";
+import { qualityEnabled } from "../executionQuality/capture";
+import { digest, type Batch } from "../executionQuality/model";
 import { FillSimulator, type SimulatedFill as PaperSimulatedFill } from "../lib/marketdata/simulator";
 import {
   calibrateSimulatorConfig,
@@ -118,6 +121,7 @@ export interface ExitTrigger {
 
 /** Laufzeit-Kontext EINES Backtest-Laufs (pro Lauf frisch erzeugen). */
 export interface PaperExecutionRuntime {
+  readonly qualityBatches: Batch[];
   /** Simulator-Instanz dieses Laufs (seq ab 0 ⇒ deterministische Order-IDs). */
   readonly simulator: FillSimulator;
   /** Effektives Instrument je Engine-Symbol (übergeben oder Default). */
@@ -130,7 +134,8 @@ export interface PaperExecutionRuntime {
     side: "LONG" | "SHORT",
     notional: number,
     refPrice: number,
-    ts: number
+    ts: number,
+    strategy?: string
   ): PaperBacktestFill | null;
   /** Ausstiegs-Fill (Seite = Closing-Seite) zum Trigger-/Referenzpreis. */
   fillExit(
@@ -138,7 +143,8 @@ export interface PaperExecutionRuntime {
     closingSide: "LONG" | "SHORT",
     qty: number,
     refPrice: number,
-    ts: number
+    ts: number,
+    strategy?: string
   ): PaperBacktestFill | null;
   /**
    * Funding-Accruals offener Positionen zur Kerzenzeit (reine Weitergabe an
@@ -227,8 +233,11 @@ export function detectExitTrigger(
  */
 export function createPaperExecutionRuntime(
   opts: PaperBacktestOptions = {},
-  engineFeeModel: { makerFee: number; takerFee: number } = { makerFee: 0.0002, takerFee: 0.0006 }
+  engineFeeModel: { makerFee: number; takerFee: number } = { makerFee: 0.0002, takerFee: 0.0006 },
+  completedBarOffsetMs = 0
 ): PaperExecutionRuntime {
+  const qualityBatches: Batch[] = [];
+  const captureQuality = qualityEnabled();
   // DIESELBE Quelle wie der PaperBroker: Legacy-PAPER_SIM_* + GAP-02-Overlay.
   const simulatorConfig = opts.simulator ?? calibrateSimulatorConfig(loadSimulatorConfig());
   const simulator = new FillSimulator(simulatorConfig);
@@ -299,7 +308,8 @@ export function createPaperExecutionRuntime(
     side: "LONG" | "SHORT",
     notional: number,
     refPrice: number,
-    ts: number
+    ts: number,
+    strategy = "UNATTRIBUTED"
   ): PaperBacktestFill | null {
     if (!Number.isFinite(notional) || notional <= 0) return null;
     const snap = snapshotOf(symbol, refPrice, ts);
@@ -310,6 +320,10 @@ export function createPaperExecutionRuntime(
     if (!Number.isFinite(qty) || qty <= 0) return null;
     // DERSELBE Simulator wie der PaperBroker (kein zweiter Kosten-Code-Pfad).
     const fill = simulator.simulate({ symbol: snap.symbol, side, qty }, snap, instrumentOf(symbol));
+    if (captureQuality) {
+      const instrument = instrumentOf(symbol);
+      qualityBatches.push(simulatedBatch({symbol,venue:instrument.venue,quote:instrument.quote,strategy,at:ts+completedBarOffsetMs,reference:refPrice,fill,inputHash:digest({snapshot:snap,instrument,fill,simulator:opts.simulator ?? null,fees:engineFeeModel})}));
+    }
     return toFill(fill, refPrice);
   }
 
@@ -318,12 +332,17 @@ export function createPaperExecutionRuntime(
     closingSide: "LONG" | "SHORT",
     qty: number,
     refPrice: number,
-    ts: number
+    ts: number,
+    strategy = "UNATTRIBUTED"
   ): PaperBacktestFill | null {
     if (!Number.isFinite(qty) || qty <= 0) return null;
     const snap = snapshotOf(symbol, refPrice, ts);
     if (!snap) return null;
     const fill = simulator.simulate({ symbol: snap.symbol, side: closingSide, qty }, snap, instrumentOf(symbol));
+    if (captureQuality) {
+      const instrument = instrumentOf(symbol);
+      qualityBatches.push(simulatedBatch({symbol,venue:instrument.venue,quote:instrument.quote,strategy,at:ts+completedBarOffsetMs,reference:refPrice,fill,inputHash:digest({snapshot:snap,instrument,fill,simulator:opts.simulator ?? null,fees:engineFeeModel})}));
+    }
     return toFill(fill, refPrice);
   }
 
@@ -344,7 +363,7 @@ export function createPaperExecutionRuntime(
     );
   }
 
-  return { simulator, instrumentOf, snapshotOf, fillEntry, fillExit, accrueFunding };
+  return { qualityBatches, simulator, instrumentOf, snapshotOf, fillEntry, fillExit, accrueFunding };
 }
 
 /** Re-Export der Paper-Funding-Formel für Tests (Import-Nachweis, kein Duplikat). */

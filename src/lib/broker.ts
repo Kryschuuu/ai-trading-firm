@@ -6,6 +6,9 @@
  * (Alpaca, IBKR, Binance, Kraken, dYdX) lassen sich hinter demselben Interface
  * einhängen, damit die Agenten-Schicht venue-unabhängig bleibt.
  */
+import { newIntent, orderRequestHash, synchronousResult, qualityEnabled, type DecisionContext } from "../executionQuality/capture";
+import { digest, QualityError, type Fill as QualityFill } from "../executionQuality/model";
+import { insertQualityBatch } from "../executionQuality/transaction";
 import { killSwitch, validateOrder, riskValidationReason, RISK_LIMITS } from "./riskGuard";
 import { STATIC_PRICES, getQuoteSync, sanitizeSymbol } from "./marketData";
 import { metricLabel, telemetry } from "./telemetry";
@@ -18,7 +21,7 @@ import type {
 } from "../contracts/broker";
 import type { MarketInstrument } from "../universe/types";
 import { db } from "../db";
-import { orderIntents, positions as positionsTable } from "../db/schema";
+import { orderIntents, executionQualityIntents, executionQualityEvents, positions as positionsTable } from "../db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 /** Transaktions-Handle, wie es `db.transaction(async (tx) => …)` liefert. */
@@ -430,12 +433,41 @@ export class PaperBroker {
     order: Order,
     opts?: {
       account?: string;
+      executionQuality?: DecisionContext;
       persistPosition?: (tx: Tx, fill: Fill) => Promise<void>;
     }
   ): Promise<Fill> {
     const account = opts?.account ?? "PAPER";
+    const capture = qualityEnabled();
+    const captureScope = process.env.EXECUTION_QUALITY_SCOPE;
+    if (capture && (!captureScope || !/^[A-Za-z0-9_.-]{1,64}$/.test(captureScope))) throw new Error("MISSING_CAPTURE_SCOPE");
+    const submittedAt = Date.now(), submittedMono = performance.now();
+    let pendingQualityFill: Fill | null = null;
     try {
       return await withAccountLock(account, async (tx) => {
+        const qualityClientId=opts?.executionQuality ? `paper-${digest([captureScope,opts.executionQuality.id,order.symbol]).slice(0,40)}`:null;
+        if (capture && qualityClientId) {
+          const [prior]=await tx.select({payload:executionQualityIntents.payload}).from(executionQualityIntents).where(and(eq(executionQualityIntents.venue,"PAPER"),eq(executionQualityIntents.mode,"paper"),eq(executionQualityIntents.scope,captureScope!),eq(executionQualityIntents.clientOrderId,qualityClientId))).limit(1);
+          if (prior) {
+            if (prior.payload.requestHash !== orderRequestHash({...order,executionQuality:opts?.executionQuality})) throw new QualityError("SUBMISSION_CONFLICT");
+            const events=await tx.select({payload:executionQualityEvents.payload}).from(executionQualityEvents).where(eq(executionQualityEvents.intentId,prior.payload.id)).limit(10001);
+            if (events.length>10000) throw new QualityError("EVENT_LIMIT");
+            const fills=events.map(e=>e.payload).filter((e):e is QualityFill=>e.kind === "fill");
+            const qty=fills.reduce((sum,f)=>sum+f.quantity,0);
+            if (!qty) return reject(order,"IDEMPOTENT_REJECT");
+            telemetry.executionQuality.inc({result:"replayed"});
+            return {orderId:fills[0].orderId,symbol:order.symbol,side:order.side,qty,fillPrice:fills.reduce((sum,f)=>sum+f.quantity*f.price,0)/qty,status:"FILLED",stopLoss:order.stopLoss ?? null,takeProfit:order.takeProfit ?? null,partial:qty<order.qty, ...(fills.every(f=>f.feeQuote !== null) ? {fees:fills.reduce((sum,f)=>sum+f.feeQuote!,0)}:{})};
+          }
+        }
+        const captureResult = async (intentId: string, fill: Fill) => {
+          if (!capture) return;
+          const request = { ...order, orderIntentId: intentId, clientOrderId: qualityClientId ?? `paper-${intentId}`, executionQuality: opts?.executionQuality };
+          const batch = newIntent(request, "PAPER", "paper", captureScope!, submittedAt);
+          // Link the exact order_intents PK, not a second independent intent identity.
+          batch.intent.id = intentId;
+          batch.events = batch.events.map(e => ({...e,intentId}));
+          await insertQualityBatch(tx, synchronousResult(batch, { ...fill, feesQuote: fill.fees ?? null }, Date.now(), performance.now()-submittedMono));
+        };
         // 2) DB-Wahrheit VOR dem In-Memory-Guard prüfen. `positions` ist die
         //    einzige Tabelle, die ein ANDERER Prozess tatsächlich committet
         //    hat, sobald er `submitAtomic` für dasselbe Symbol erfolgreich
@@ -463,21 +495,20 @@ export class PaperBroker {
           .limit(1);
         if (openInDb.length > 0) {
           const reason = `POSITION_ALREADY_OPEN:${symbolForDbCheck} (DB-Wahrheit, mehrprozess-sicher)`;
-          await tx.insert(orderIntents).values({
-            account,
-            symbol: symbolForDbCheck,
-            side: order.side,
-            qty: String(order.qty),
-            status: "REJECTED",
-            reason,
-          });
-          return reject(order, reason);
+          const [intent] = await tx.insert(orderIntents).values({
+            account, symbol: symbolForDbCheck, side: order.side, qty: String(order.qty), status: "REJECTED", reason,
+          }).returning({id:orderIntents.id});
+          const rejected = reject(order, reason);
+          await captureResult(intent.id, rejected);
+          return rejected;
         }
 
         // 3) Dieselbe Guard-/Fill-Logik wie bisher, jetzt aber exklusiv:
         //    kein anderer Prozess kann zwischen Guard-Prüfung und Fill
         //    denselben Kontostand sehen.
         const fill = this.submit(order);
+        if (capture && fill.status === "FILLED") pendingQualityFill = fill;
+        let qualityIntentId: string | null = null;
         const filled =
           fill.status === "FILLED" && Number.isFinite(fill.fillPrice) && fill.fillPrice > 0;
 
@@ -517,6 +548,8 @@ export class PaperBroker {
                 // In-Memory-Position wird NICHT übernommen.
                 throw new OrderIntentConflictError(symbol);
               }
+              qualityIntentId = inserted[0].id;
+              if (capture) fill.orderId = `PAP-${qualityIntentId}`;
               await tx2
                 .update(orderIntents)
                 .set({ status: "FILLED" })
@@ -539,29 +572,28 @@ export class PaperBroker {
           // sonst zeigt der Prozessspeicher eine Position, die nie persistiert
           // wurde (Quelle der Wahrheit bleibt die DB).
           this.rollbackInMemoryFill(order, fill);
-          await tx.insert(orderIntents).values({
+          pendingQualityFill = null;
+          const [rejectedIntent] = await tx.insert(orderIntents).values({
             account,
             symbol,
             side: order.side,
             qty: String(order.qty),
             status: "REJECTED",
             reason: intentReason,
-          });
-          return reject(order, intentReason ?? `POSITION_ALREADY_OPEN:${symbol}`);
+          }).returning({id:orderIntents.id});
+          const rejected = reject(order, intentReason ?? `POSITION_ALREADY_OPEN:${symbol}`);
+          await captureResult(rejectedIntent.id, rejected);
+          return rejected;
         }
 
         if (!filled) {
           // Guard hat bereits abgelehnt (Kill-Switch, Cash, Position offen,
           // Drawdown, …) — Audit-Spur ohne Reservierungs-Race, weil kein
           // zweiter Slot je beansprucht wurde.
-          await tx.insert(orderIntents).values({
-            account,
-            symbol,
-            side: order.side,
-            qty: String(order.qty),
-            status: intentStatus,
-            reason: intentReason,
-          });
+          const [rejectedIntent] = await tx.insert(orderIntents).values({
+            account, symbol, side: order.side, qty: String(order.qty), status: intentStatus, reason: intentReason,
+          }).returning({id:orderIntents.id});
+          await captureResult(rejectedIntent.id, fill);
           return fill;
         }
 
@@ -571,9 +603,11 @@ export class PaperBroker {
         if (opts?.persistPosition) {
           await opts.persistPosition(tx, fill);
         }
+        if (qualityIntentId) await captureResult(qualityIntentId, fill);
         return fill;
       });
     } catch (e) {
+      if (pendingQualityFill) this.rollbackInMemoryFill(order, pendingQualityFill);
       if (e instanceof OrderIntentConflictError) {
         return reject(order, `POSITION_ALREADY_OPEN:${e.symbol} (DB-Reservierung, mehrprozess-sicher)`);
       }
@@ -793,6 +827,7 @@ export class PaperBroker {
 
     return {
       orderId: `PAP-${Date.now().toString(36).toUpperCase()}`,
+      fees: 0,
       symbol,
       side: order.side,
       qty: order.qty,

@@ -227,6 +227,7 @@ export class AlpacaPaperLedger {
       symbol,
       side: req.side,
       qty: simulated.filledQty,
+      feesQuote: simulated.fees,
       fillPrice: simulated.fillPrice,
       status: simulated.status === "PARTIALLY_FILLED" ? "FILLED" : "FILLED",
       stopLoss: req.stopLoss ?? null,

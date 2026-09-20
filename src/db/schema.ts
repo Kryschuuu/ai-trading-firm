@@ -1,5 +1,6 @@
 import {
   pgTable,
+  type AnyPgColumn,
   text,
   boolean,
   timestamp,
@@ -1611,9 +1612,13 @@ export const executionQualityIntents = pgTable("execution_quality_intents", {
   clientOrderId: text("client_order_id").notNull(),
   submitAt: timestamp("submit_at", { withTimezone: true }).notNull(),
   payload: jsonb("payload").$type<import("../executionQuality/model").Intent>().notNull(),
+  parentIntentId:text("parent_intent_id").generatedAlwaysAs(sql`payload->>'parentIntentId'`).references(():AnyPgColumn=>executionQualityIntents.id),
 }, t => [
   uniqueIndex("execution_quality_intents_client_idx").on(t.venue, t.mode, t.scope, t.clientOrderId),
   index("execution_quality_intents_time_idx").on(t.submitAt, t.id),
+  index("execution_quality_parent_idx").on(t.parentIntentId),
+  index("execution_quality_decision_idx").on(sql`(${t.payload}->>'decisionId')`),
+  index("execution_quality_scope_idx").on(t.venue,t.mode,t.scope,t.id),
   check("execution_quality_intents_mode_check", sql`${t.mode} IN ('backtest','paper','testnet','live')`),
   check("execution_quality_intents_payload_check", sql`jsonb_typeof(${t.payload}) = 'object'`),
 ]);
@@ -1629,3 +1634,34 @@ export const executionQualityEvents = pgTable("execution_quality_events", {
   check("execution_quality_events_kind_check", sql`${t.kind} IN ('ack','fill','benchmark')`),
   check("execution_quality_events_payload_check", sql`jsonb_typeof(${t.payload}) = 'object'`),
 ]);
+
+/** Durable send-once claims. Missing receipt means UNKNOWN, never retry send. */
+export const executionQualitySubmissions = pgTable("execution_quality_submissions", {
+  intentId: text("intent_id").primaryKey().references(() => executionQualityIntents.id),
+  requestHash: text("request_hash").notNull(),
+  createdAt: timestamp("created_at", {withTimezone:true}).notNull().defaultNow(),
+}, t => [check("execution_quality_submissions_request_hash_check", sql`${t.requestHash} ~ '^[a-f0-9]{64}$'`)]);
+export const executionQualityReceipts = pgTable("execution_quality_receipts", {
+  intentId: text("intent_id").primaryKey().references(() => executionQualitySubmissions.intentId),
+  result: jsonb("result").$type<import("../contracts/broker").BrokerOrderResult>().notNull(),
+  observedAt:timestamp("observed_at",{withTimezone:true}).notNull(),
+  elapsedMs:numeric("elapsed_ms"),
+  createdAt: timestamp("created_at", {withTimezone:true}).notNull().defaultNow(),
+}, t => [check("execution_quality_receipts_elapsed_ms_check",sql`${t.elapsedMs} >= 0`),check("execution_quality_receipts_result_check", sql`jsonb_typeof(${t.result}) = 'object'`)]);
+
+/** Minimal observed L1 mids, never raw broker bodies. */
+export const executionQualityQuotes = pgTable("execution_quality_quotes", {
+  id:text("id").primaryKey(), venue:text("venue").notNull(), mode:text("mode").notNull(),
+  scope:text("scope").notNull(), instrument:text("instrument").notNull(), mid:numeric("mid").notNull(),
+  eventAt:timestamp("event_at",{withTimezone:true}).notNull(), availableAt:timestamp("available_at",{withTimezone:true}).notNull(),
+},t=>[
+  index("execution_quality_quotes_asof_idx").on(t.venue,t.mode,t.scope,t.instrument,t.eventAt.desc(),t.availableAt),
+  check("execution_quality_quotes_mode_check",sql`${t.mode} IN ('backtest','paper','testnet','live')`),
+  check("execution_quality_quotes_mid_check",sql`${t.mid} > 0 AND ${t.mid} <= 1000000000000000`),
+  check("execution_quality_quotes_check",sql`${t.eventAt} <= ${t.availableAt}`),
+]);
+
+export const executionQualityCompleted = pgTable("execution_quality_completed", {
+  intentId:text("intent_id").primaryKey().references(()=>executionQualityIntents.id),
+  completedAt:timestamp("completed_at",{withTimezone:true}).notNull().defaultNow(),
+});

@@ -155,6 +155,8 @@ export class LabelCounter {
 
 /** Zentrales Telemetrie-Objekt. */
 export const telemetry = {
+  /** Execution-quality outcomes only; never free-form identifiers. */
+  executionQuality: new LabelCounter("execution_quality_total"),
   marketData: {
     /** Fehlgeschlagene Kerzenabrufe nach Ursache (MDERR-006). */
     fetchFailures: new LabelCounter("market_data_fetch_failures_total"),
@@ -465,6 +467,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.audit.spoolDrained.exposition(),
     telemetry.audit.missed.exposition(),
     telemetry.backtest.runPersist.exposition(),
+    telemetry.executionQuality.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),
     telemetry.features.pitQueries.exposition(),
@@ -550,6 +553,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.firm.llmCalls.exposition(),
     telemetry.firm.llmLatencyMs.exposition(),
     telemetry.backtest.runPersist.exposition(),
+    telemetry.executionQuality.exposition(),
   );
 
   return lines.join("\n");

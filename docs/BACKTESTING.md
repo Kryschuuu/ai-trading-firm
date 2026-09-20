@@ -412,3 +412,16 @@ mit `RECONCILED`-Ledger als persistiert.
 - Tests: `tests/backtest.engine.test.ts`, `tests/backtest.step.nosynthetic.test.ts`,
   `tests/backtest.tradeLedger.test.ts` (Mapping, Abgleich, Idempotenz,
   Rollback, Cursor-API — DB-Teile ping → skip)
+
+## Execution-Quality-Evidenz
+
+Mit `EXECUTION_QUALITY_ENABLED=true` erfasst der vorhandene Paper-Simulator
+normalisierte Intent-/Fill-/Benchmarkereignisse. Walk-forward-JSON enthält diese
+Evidenz; Run-, Trade- und Quality-Ledger werden atomar persistiert. Wiederholungen
+nutzen den bestehenden Run-Key. Kerzenbasierte Quality-Zeitpunkte liegen am
+abgeschlossenen Bar-Ende (Open + Timeframe), nicht am historischen Open-Zeitstempel
+des Legacy-Trade-Ledgers. Referenzpreise/Mids und Latenzen sind als **modeled**
+markiert. Fehlende historische L1-Markouts/VWAPs werden nicht aus späteren Kerzen
+erfunden. Bestehende Trading-/Kostenentscheidungen und Defaults bleiben unverändert.
+
+[Gemeinsamer Vertrag und Formeln](../src/executionQuality/README.md).
