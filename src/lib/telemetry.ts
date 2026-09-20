@@ -229,6 +229,40 @@ export const telemetry = {
       telemetry.backtest.runPersist.reset();
     },
   },
+  /**
+   * Point-in-Time Feature Store (RMA-P6-01, v1.53.0).
+   *
+   * Labels sind Code-konstante Kategorien:
+   *   * `result`  = written | null_value | duplicate | revision | created |
+   *                 skipped | failed | ok | noop | dry_run | match | divergent
+   *   * `reason`  = `metricLabel`-normalisierter Grund bzw. Fehlercode
+   *   * `mode`    = INCREMENTAL | BACKFILL
+   *
+   * **Keine** Entity-/Instrument-IDs und keine Trade-IDs als Label
+   * (Kardinalitätsregel wie oben); Feature-IDs stammen aus der geschlossenen
+   * Registry und erscheinen deshalb nur dort, wo die Menge durch die Registry
+   * begrenzt ist.
+   */
+  features: {
+    /** Geschriebene Wertzeilen je Ergebnis und Grund/Feature. */
+    materializationValues: new LabelCounter("feature_materialization_values_total"),
+    /** Materialisierungsläufe je Ergebnis und Modus. */
+    materializationRuns: new LabelCounter("feature_materialization_runs_total"),
+    /** PIT-Abfragen je Ergebnis (ok | invalid | unavailable | truncated). */
+    pitQueries: new LabelCounter("feature_pit_queries_total"),
+    /** PIT-Antworten je Status (ok | null_value | missing | stale). */
+    pitOutcomes: new LabelCounter("feature_pit_outcomes_total"),
+    /** Paritätsvergleiche je Ergebnis (match | divergent). */
+    parityChecks: new LabelCounter("feature_parity_checks_total"),
+    /** alle Zähler der Feature-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.features.materializationValues.reset();
+      telemetry.features.materializationRuns.reset();
+      telemetry.features.pitQueries.reset();
+      telemetry.features.pitOutcomes.reset();
+      telemetry.features.parityChecks.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -372,6 +406,12 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.audit.spooled.exposition(),
     telemetry.audit.spoolDrained.exposition(),
     telemetry.audit.missed.exposition(),
+    telemetry.backtest.runPersist.exposition(),
+    telemetry.features.materializationValues.exposition(),
+    telemetry.features.materializationRuns.exposition(),
+    telemetry.features.pitQueries.exposition(),
+    telemetry.features.pitOutcomes.exposition(),
+    telemetry.features.parityChecks.exposition(),
   ];
 
   let firm: FirmMetricState | null;

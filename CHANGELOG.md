@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.52.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.53.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,89 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.53.0] — 2026-09-20 · feat(research): Point-in-Time Feature Store (RMA-P6-01)
+
+### Hinzugefügt
+
+- **Point-in-Time Feature Store (`src/features/`, Migration
+  `drizzle/2026-09-20_feature_store.sql`, additiv):** Featurewerte werden ab
+  jetzt versioniert, typisiert und mit vollständiger Provenienz gespeichert und
+  sind damit für Backtest/Research reproduzierbar:
+  - **Registry** (`registry.ts`, `definitions.ts`): Name, semantische Version,
+    Ausgabeschema (`number`/`boolean`/`enum`), Einheit, Wertdezimale, Entity-Typ,
+    Timeframe, Lookback, Abhängigkeiten, `computeKey`, Konfiguration und Owner;
+    Fingerprints `fc1` (Code), `fg1` (Config), `fd1` (Definition). Definitionen
+    sind **unveränderlich** — dieselbe `(feature_id, version)` mit anderer
+    Semantik wird von Registry und Datenbank abgelehnt; neue Semantik ⇒ neue
+    Version. Erster Slice: `scanner.rsi@1`, `scanner.atr@1`,
+    `scanner.atr_band@1` (abhängig auf ATR) mit den Scanner-Defaults; Formeln
+    werden mit dem Scanner **geteilt** (`computeRsi`, `computeAtrPct`), ein Test
+    erzwingt die Parität.
+  - **Wertmodell** (`types.ts`, `validate.ts`, `feature_values`): `event_time`,
+    `available_at`, `computed_at`, dtype-genauer Wert, Null-Grund,
+    `quality_status`, Definitions- und Inhalts-Fingerprint (`fv1`) sowie
+    `source_manifest` (Dataset-Hash `ds1` über die Rohkerzen **inklusive**
+    Ingestion-Zeitstempel). UNIQUE je
+    `(feature_id, feature_version, entity_id, timeframe, event_time)`,
+    append-only, CHECK-Invarianten (`available_at ≥ event_time`,
+    `computed_at ≥ available_at`, Wert **oder** Null-Grund — nie beides, nie
+    nichts: `null ≠ 0`), PIT-Index für As-of-Abfragen.
+  - **Materialisierung** (`materialize.ts`, `service.ts`, `store.ts`): reine,
+    deterministische Berechnung, topologische Reihenfolge, bounded Batches
+    (≤ 2000 Werte, ≤ 250 je Insert-Chunk), monotoner Cursor-Wasserstand,
+    Idempotency-Key `fm1:<sha256>` je Lauf (Replay statt Doppelwrite),
+    Trockenlauf, Backfill-Manifest mit Zählern/Definitions-Fingerprints/
+    Source-Manifesten sowie ausdrückliches **Verwerfen** eines Batches, der eine
+    Rohdatenrevision berührt (`FEATURE_DATA_REVISION_DETECTED`, Manifest
+    `FAILED`, Revision protokolliert, Cursor bleibt stehen) — historische Werte
+    werden nie still überschrieben.
+  - **PIT-Abfrage** (`pitQuery.ts`): `GET /api/firm/features/values` liefert je
+    Entity/Feature den jüngsten Wert mit `event_time ≤ target_time` **und**
+    `available_at ≤ as_of`; harte Grenzen (200 Entities, 25 Features, 2000
+    Zeilen, 20 000 Quellzeilen ⇒ `FEATURE_PIT_SOURCE_TRUNCATED` statt stiller
+    Kürzung), typisierte Antwort und **explizite** Missingness
+    (`OK`/`NULL_VALUE`/`MISSING`, `value: null`, Zähler mit Invariante
+    `matched + missing = requested`). `lagMs`/`stale` messen das
+    Informationsalter gegenüber `as_of`.
+  - **Offline/Online-Parität** (`adapters.ts`, `parity.ts`): Store- und
+    Compute-Adapter teilen Registry und Executors; der Paritätsjob meldet
+    `MISSING_STORED`, `VALUE_MISMATCH`, `DATASET_REVISION` oder
+    `DEFINITION_MISMATCH`.
+  - **Qualität und Betrieb** (`sourceQuality.ts`, `service.ts`): Propagierung
+    des schwersten Quality-Befunds im Fenster (`UNKNOWN` = „nicht geprüft“,
+    niemals `OK`), Abdeckung/Lag je Reihe, Retention wertfreier Manifeste
+    (`pruneRuns`), Read-API `GET /api/firm/features`, CLI
+    `npm run features:materialize|status|parity`, Audit-Events und bounded
+    Metriken (`feature_materialization_*`, `feature_pit_*`,
+    `feature_parity_checks_total`).
+- **Tests:** `tests/featureStore.test.ts` (24 Tests) inklusive synthetischem
+  Leakage-Test (nachgelieferte Kerze ist vor ihrem `available_at` unsichtbar,
+  `event_time`-Grenze hart), Idempotenz/Replay, Cursor-Neustart ohne Lücke und
+  Duplikat, Revision vs. Parität, fail-closed Scope-/Grenzprüfungen;
+  `tests/featureStore.db.test.ts` prüft die Postgres-Variante (Constraints,
+  Transaktionsatomarität, Idempotenz, As-of-Indexpfad) und überspringt sich ohne
+  erreichbare Datenbank.
+- **Dokumentation:** [docs/FEATURE_STORE.md](docs/FEATURE_STORE.md) (Semantik,
+  Formeln und Einheiten, Zeit-/Verfügbarkeitsmodell, PIT-Regeln, Migration,
+  Deployment und Rollback).
+
+### Geändert
+
+- `src/scanner/factors/atr.ts`: ATR-Kursanteil als `computeAtrPct` extrahiert und
+  als **einzige** Implementierung exportiert — Scanner-Faktor und Feature Store
+  nutzen dieselbe Formel (keine Zweitformel).
+- `package.json` / `package-lock.json`: Version **1.53.0**; neue Scripts
+  `features:materialize`, `features:status`, `features:parity`.
+
+### Sicherheit
+
+- Read-Endpunkte verlangen `firm.read`, senden `Cache-Control: private, no-store`
+  und sind ausschließlich lesend (es gibt bewusst keinen POST-Pfad; die
+  Materialisierung läuft über die CLI).
+- Keine Entity-/Order-/Trade-IDs als Metrik-Label (Kardinalitätsregel); keine
+  Secrets, keine Roh-Broker-Payloads, kein PII in Werten, Audit-Details oder
+  Logs.
 
 ## [1.52.0] — 2026-09-20 · feat(backtest): persistente Backtest-Trades als Trade-Level-Wahrheitsquelle (RMA-P1-04)
 

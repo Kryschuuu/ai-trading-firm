@@ -2750,6 +2750,190 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       },
     ],
   },
+  // ── Point-in-Time Feature Store (RMA-P6-01, v1.53.0) ─────────────────────
+  FEATURE_DEFINITIONS_REGISTERED: {
+    label: "Feature-Definitionen registriert",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Featuredefinitionen wurden im Store registriert (feature_definitions). Definitionen sind immutable: ein abweichender Fingerprint für dieselbe (feature_id, version) wird abgelehnt — neue Semantik braucht eine neue Version.",
+    headline: (d) => {
+      const registered = num(d.registered);
+      const existing = num(d.existing);
+      return [
+        registered !== null ? `${registered} neu registriert` : "Registrierung",
+        existing !== null && existing > 0 ? `${existing} bereits vorhanden` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    },
+    explain: () =>
+      "Registrierte Definitionen tragen Code-, Config- und Definitions-Fingerprint. Jeder materialisierte Wert verweist auf denselben Fingerprint, sodass Backtests beweisen können, mit welcher Semantik gerechnet wurde.",
+    sections: (d) => {
+      const definitions = Array.isArray(d.definitions) ? (d.definitions as Rec[]) : [];
+      return [
+        {
+          title: "Definitionen",
+          facts: definitions.slice(0, 10).map((def) => ({
+            label: `${text(def.featureId) ?? "Feature"}@${num(def.version) ?? "?"}`,
+            value: `${text(def.definitionHash)?.slice(0, 16) ?? "—"}… (Owner: ${text(def.owner) ?? "—"})`,
+            mono: true,
+          })),
+        },
+      ];
+    },
+  },
+  FEATURE_MATERIALIZATION_COMPLETED: {
+    label: "Feature-Materialisierung abgeschlossen",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Ein Materialisierungslauf wurde atomar gespeichert: Manifest, Werte und Cursor in EINER Transaktion. Werte tragen event_time, available_at und computed_at getrennt; identische Werte werden nicht erneut geschrieben.",
+    headline: (d) => {
+      const features = Array.isArray(d.features) ? (d.features as unknown[]).map((f) => String(f)) : [];
+      const inserted = num(d.valuesInserted);
+      return [
+        text(d.timeframe) ? `${text(d.timeframe)}` : "Feature-Lauf",
+        d.created === false ? "idempotentes Replay" : "neu",
+        inserted !== null ? `${inserted} Werte geschrieben` : "",
+        features.length > 0 ? features.slice(0, 3).join(", ") : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    },
+    explain: (d) =>
+      d.created === false
+        ? "Ein Lauf mit identischem Idempotency-Key existierte bereits — es wurde nichts doppelt geschrieben."
+        : `Verfügbarkeitspolitik ${text(d.availabilityPolicy) ?? "—"}: ein Wert ist erst ab available_at sichtbar (kein Look-ahead).`,
+    sections: (d) => {
+      const counts = record(d.counts);
+      return [
+        {
+          title: "Lauf",
+          facts: [
+            { label: "Run-ID", value: text(d.runId) ?? "—", mono: true },
+            { label: "Modus", value: text(d.mode) ?? "—" },
+            { label: "Zeitrahmen", value: text(d.timeframe) ?? "—", mono: true },
+            { label: "Verfügbarkeit", value: text(d.availabilityPolicy) ?? "—", mono: true },
+            { label: "Entities", value: num(d.entityCount) !== null ? String(num(d.entityCount)) : "—" },
+            { label: "Code-Version", value: text(d.codeVersion) ?? "—", mono: true },
+          ],
+        },
+        {
+          title: "Zähler",
+          facts: [
+            { label: "Bars bewertet", value: num(counts.barsConsidered) !== null ? String(num(counts.barsConsidered)) : "—" },
+            { label: "Werte geschrieben", value: num(counts.valuesWritten) !== null ? String(num(counts.valuesWritten)) : "—" },
+            { label: "davon unavailable (NULL)", value: num(counts.nullValues) !== null ? String(num(counts.nullValues)) : "—" },
+            { label: "Duplikate (kein Write)", value: num(counts.duplicates) !== null ? String(num(counts.duplicates)) : "—" },
+            { label: "Revisionen protokolliert", value: num(counts.revisions) !== null ? String(num(counts.revisions)) : "—" },
+            { label: "Lücken im Raster", value: num(counts.gapBars) !== null ? String(num(counts.gapBars)) : "—" },
+          ],
+        },
+      ];
+    },
+  },
+  FEATURE_MATERIALIZATION_FAILED: {
+    label: "Feature-Materialisierung fehlgeschlagen",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Ein Materialisierungslauf wurde nicht geschrieben oder ist fehlgeschlagen. Es bleibt ein Manifest mit Fehlercode (kein Teilerfolg): Werte und Cursor der Transaktion sind zurückgerollt, der Cursor des letzten erfolgreichen Laufs gilt weiter.",
+    headline: (d) => [text(d.timeframe) ?? "Feature-Lauf", text(d.code) ?? "Fehler"].join(" · "),
+    explain: (d) => {
+      const code = text(d.code) ?? "";
+      if (code.startsWith("run:idempotency")) return "Der Idempotency-Key ist bereits mit anderem Inhalt belegt — kein sicheres Replay möglich.";
+      if (code.startsWith("run:readback")) return "Die zurückgelesenen Zeilen wichen von den geschriebenen ab — die Transaktion wurde zurückgerollt.";
+      if (code.startsWith("value:")) return "Mindestens eine Wertzeile war unbrauchbar (z. B. Wert ohne Dtype-Spalte, unlesbares Source-Manifest) — es wurde nichts geschrieben.";
+      if (code === "FEATURE_DEFINITION_DRIFT_DETECTED") return "Die gespeicherten Zeilen wurden mit einer anderen Definition erzeugt als der heute registrierten — neue Semantik braucht eine neue Version.";
+      return "Der Lauf wurde fail-closed abgebrochen; fehlende Werte werden nie durch 0/false/leere Strings ersetzt.";
+    },
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Fehlercode", value: text(d.code) ?? "—", mono: true },
+          { label: "SQLSTATE", value: text(d.sqlState) ?? "—", mono: true },
+          { label: "Constraint", value: text(d.constraint) ?? "—", mono: true },
+          { label: "Meldung", value: text(d.message) ?? "—" },
+        ],
+      },
+    ],
+  },
+  FEATURE_VALUE_REVISION_DETECTED: {
+    label: "Datenrevision erkannt (Wert nicht überschrieben)",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Ein Recompute lieferte zum selben Schlüssel (Entity, Feature, Timeframe, event_time) einen anderen Inhalt — typischerweise, weil Rohkerzen korrigiert wurden. Der historische Wert bleibt gültig und wird NICHT überschrieben; der Befund wird protokolliert (feature_data_revisions).",
+    headline: (d) => [text(d.featureId) ?? "Feature", text(d.entityId) ?? "Entity", text(d.eventTime) ?? ""].filter(Boolean).join(" · "),
+    explain: () =>
+      "Historische Werte bleiben reproduzierbar. Für korrigierte Rohdaten empfiehlt sich eine neue Featureversion plus Backfill — nicht ein stilles Überschreiben.",
+    sections: (d) => [
+      {
+        title: "Revision",
+        facts: [
+          { label: "Feature", value: `${text(d.featureId) ?? "—"}@${num(d.version) ?? "?"}`, mono: true },
+          { label: "Entity", value: text(d.entityId) ?? "—", mono: true },
+          { label: "Eventzeit", value: text(d.eventTime) ?? "—", mono: true },
+          { label: "gespeicherter Hash", value: text(d.existingValueHash)?.slice(0, 20) ?? "—", mono: true },
+          { label: "neuer Hash (abgelehnt)", value: text(d.incomingValueHash)?.slice(0, 20) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  FEATURE_DEFINITION_DRIFT_DETECTED: {
+    label: "Feature-Definitionsdrift erkannt",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Gespeicherte Werte wurden mit einer anderen Definition erzeugt als der heute registrierten (gleicher Schlüssel, anderer Definitions-Fingerprint). Der Lauf schreibt nichts still um; die Drift wird gemeldet.",
+    headline: (d) => {
+      const drift = Array.isArray(d.definitionDrift) ? (d.definitionDrift as unknown[]).map((v) => String(v)) : [];
+      return drift.length > 0 ? drift.slice(0, 4).join(", ") : "Definitionsdrift";
+    },
+    explain: () =>
+      "Neue Semantik gehört in eine neue Version: Version erhöhen, Backfill fahren, alte Werte unverändert liegen lassen. Ein In-Place-Update würde die Reproduzierbarkeit zerstören.",
+    sections: (d) => [
+      {
+        title: "Betroffene Definitionen",
+        facts: (Array.isArray(d.definitionDrift) ? (d.definitionDrift as unknown[]) : []).slice(0, 10).map((ref) => ({
+          label: String(ref),
+          value: "Fingerprint weicht vom Store ab",
+        })),
+      },
+    ],
+  },
+  FEATURE_MATERIALIZATION_RUNS_PRUNED: {
+    label: "Feature-Lauf-Manifeste aufgeräumt",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Retention der Betriebsmetadaten: alte Manifeste ohne Werte (fehlgeschlagene Läufe, Läufe ohne geschriebenen Wert) und ohne Cursor-Verweis wurden entfernt. Wertezeilen und die Manifeste erfolgreicher Läufe bleiben unangetastet.",
+    headline: (d) => {
+      const removed = num(d.removed);
+      const keepLast = num(d.keepLast);
+      return [
+        removed !== null ? `${removed} Manifeste entfernt` : "Retention",
+        keepLast !== null ? `${keepLast} je Klasse behalten` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    },
+    explain: () =>
+      "Provenienz wird nie gelöscht: jede Wertezeile behält ihren Lauf und ihr Rohdatenmanifest. Entfernt werden ausschließlich wertfreie Betriebsmetadaten.",
+    sections: (d) => [
+      {
+        title: "Retention",
+        facts: [
+          { label: "Entfernt", value: num(d.removed) !== null ? String(num(d.removed)) : "—" },
+          { label: "Behalten (je Klasse)", value: num(d.keepLast) !== null ? String(num(d.keepLast)) : "—" },
+          { label: "Code-Version", value: text(d.codeVersion) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+
 };
 
 /** Fallback für unbekannte Events — nie leer, nie abgeschnitten. */
