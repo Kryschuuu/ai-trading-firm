@@ -292,6 +292,35 @@ export const telemetry = {
       telemetry.perp.asOfQueries.reset();
     },
   },
+  /**
+   * Forecast-Ledger und Kalibrierung (RMA-P3-01, v1.55.0).
+   *
+   * Labels sind ausschließlich Code-konstante Kategorien (`result`,
+   * `reason`-Klassen, `mode`, `status`) — keine Forecast-, Entity- oder
+   * Agenten-IDs als Label (Kardinalitätsregel wie oben); IDs stehen in den
+   * Audit-Events (`FORECAST_RECORDED`, `FORECAST_RESOLVED`, …) und im
+   * Outcome-Manifest.
+   */
+  forecasts: {
+    /** Capture-Versuche je Ergebnis (captured | skipped) und Skip-Grund. */
+    captures: new LabelCounter("forecast_captures_total"),
+    /** Auflösungen je Ergebnis (resolved | void | re_resolved | duplicate | failed). */
+    resolutions: new LabelCounter("forecast_resolutions_total"),
+    /** Resolver-Läufe je Ergebnis und Modus. */
+    runs: new LabelCounter("forecast_resolution_runs_total"),
+    /** Feed-Phase-Abrufe je Ergebnis (ok | failed). */
+    feeds: new LabelCounter("forecast_feed_total"),
+    /** Score-/List-API-Abfragen je Ergebnis (ok | invalid | unavailable | truncated). */
+    queries: new LabelCounter("forecast_score_queries_total"),
+    /** alle Zähler der Forecast-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.forecasts.captures.reset();
+      telemetry.forecasts.resolutions.reset();
+      telemetry.forecasts.runs.reset();
+      telemetry.forecasts.feeds.reset();
+      telemetry.forecasts.queries.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */

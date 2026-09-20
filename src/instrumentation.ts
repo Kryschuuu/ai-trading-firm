@@ -243,8 +243,41 @@ export async function register() {
       setTimeout(() => void runRecon(), 20_000);
       setInterval(() => void runRecon(), reconIntervalMs);
 
+      // ── 6) FORECAST-RESOLVER: fällige Forecasts auflösen (RMA-P3-01, v1.55.0) ──
+      // Rein auswertend (Brier/Kalibrierung), ohne Einfluss auf Handels- oder
+      // Risikopfade. `FORECAST_LEDGER_ENABLED=false` deaktiviert den Lauf
+      // vollständig (Rollback-Pfad, siehe docs/FORECASTS.md).
+      const { forecastLedgerEnabled } = await import("@/forecasts/service");
+      const forecastIntervalMin = envInt("FORECAST_RESOLVER_INTERVAL_MIN", 15, 5, 1440);
+      let forecastBusy = false;
+      const runForecastResolver = async () => {
+        if (forecastBusy) return;
+        forecastBusy = true;
+        try {
+          const { runForecastResolverJob } = await import("@/forecasts/service");
+          const result = await runForecastResolverJob();
+          if (result !== null && (result.counts.resolved > 0 || result.counts.voided > 0 || result.counts.failed > 0)) {
+            console.log(
+              `[scheduler] Forecast-Resolver: ${result.counts.resolved} aufgelöst, ${result.counts.voided} VOID, ${result.counts.failed} Fehler` +
+                (result.lagMs !== null && result.lagMs > forecastIntervalMin * 60_000
+                  ? ` — Lag ${Math.round(result.lagMs / 60000)}min`
+                  : "")
+            );
+          }
+        } catch (e) {
+          console.warn("[scheduler] Forecast-Resolver fehlgeschlagen:", e instanceof Error ? e.message : e);
+        } finally {
+          forecastBusy = false;
+        }
+      };
+      if (forecastLedgerEnabled()) {
+        setTimeout(() => void runForecastResolver(), 30_000);
+        setInterval(() => void runForecastResolver(), forecastIntervalMin * 60_000);
+      }
+
       console.log(
-        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin · Makro-Zyklus ${macroIntervalMs / 60000 | 0}min · Recon ${reconIntervalMin}min`
+        `[scheduler] Aktiv — Tick ${(intervalMs / 1000) | 0}s · Analysten ${analystIntervalMs / 60000 | 0}min · Penny/Swing ab ${pennyHour}:00 Berlin · Makro-Zyklus ${macroIntervalMs / 60000 | 0}min · Recon ${reconIntervalMin}min` +
+          (forecastLedgerEnabled() ? ` · Forecast-Resolver ${forecastIntervalMin}min` : "")
       );
     } catch (e) {
       console.warn("[scheduler] Start fehlgeschlagen:", e instanceof Error ? e.message : e);

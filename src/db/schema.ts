@@ -1335,3 +1335,268 @@ export const perpSyncCursors = pgTable(
     check("perp_sync_cursors_failures_check", sql`${t.consecutiveFailures} >= 0`),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Forecast-Ledger, Auflösung und Kalibrierung (RMA-P3-01, v1.55.0)
+//
+// Vier Tabellen, ausschließlich additiv (Migration
+// `drizzle/2026-09-20_forecast_ledger.sql`):
+//
+//   forecasts                  immutable Forecast-Verträge (append-only)
+//   forecast_resolutions       versionierte Auflösungen (RESOLVED | VOID)
+//   forecast_resolution_runs   Lauf-Manifeste des Resolver-Jobs
+//   forecast_resolver_cursors  Wasserstand des Resolver-Jobs
+//
+// Zeitsemantik je Forecast: `as_of` (Entstehung), `reference_time`
+// (Schlusszeit der Referenzkerze), `resolves_at` (Schlusszeit der
+// Outcome-Kerze), `availability_deadline` (= `resolves_at` + Settling-Frist).
+// Die automatische Auflösung verwendet ausschließlich Kerzen mit
+// `fetched_at <= availability_deadline` — später eintreffende oder
+// korrigierte Daten sind für die Erstauflösung unsichtbar (kein Look-ahead).
+// Eine Datenkorrektur erzeugt eine NEUE Resolution-Version (append-only),
+// überschreibt aber niemals die Historie.
+//
+// Der Wirksstatus eines Forecasts ist ABGELEITET: die jüngste Resolution
+// (höchstes `resolution_version`) bestimmt RESOLVED/VOID; ohne Resolution
+// ist der Forecast PENDING. Die Forecast-Zeile selbst wird nie aktualisiert.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Unveränderlicher Forecast-Vertrag (append-only).
+ *
+ * Natürlicher Schlüssel: `idempotency_key` = `fk1:<sha256>` über Vertrags-
+ * und Inhaltsfelder (Rolle, Promptversion, Modell, Entity, Ziel-Event,
+ * Horizont, As-of-Zeit, Wahrscheinlichkeitsinhalt). Retries oder doppelt
+ * erfasste Analysen schreiben keinen zweiten Forecast.
+ */
+export const forecasts = pgTable(
+  "forecasts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `fk1:<sha256>` — natürlicher, inhaltlicher Schlüssel (Idempotenz). */
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** Rolle des erzeugenden Agenten (z. B. `TECHNICAL_ANALYST`). */
+    agentRole: text("agent_role").notNull(),
+    /** Prompt-Version (`agents.version`) zum Capture-Zeitpunkt. */
+    promptVersion: integer("prompt_version").notNull(),
+    /** Modelltag zum Capture-Zeitpunkt. */
+    model: text("model").notNull(),
+    /** Entity-Typ — aktuell ausschließlich `instrument`. */
+    entityType: text("entity_type").notNull().default("instrument"),
+    /** Kanonische Instrument-ID (z. B. `PAPER:BTC`). */
+    entityId: text("entity_id").notNull(),
+    /** Symbol, wie der Analyst es verwendet hat (Anzeige/Provenienz). */
+    symbol: text("symbol").notNull(),
+    /** Ziel-Event (abgeschlossene Liste, aktuell `CLOSE_DIRECTION`). */
+    targetKind: text("target_kind").notNull(),
+    /** Auflösungskategorien, z. B. `["DOWN","UP"]`. */
+    categories: jsonb("categories").notNull().$type<readonly string[]>(),
+    /** Wahrscheinlichkeitsvektor zu `categories`, Summe = 1 (validiert). */
+    probabilities: jsonb("probabilities").notNull().$type<readonly number[]>(),
+    /** Kategorie, deren Eintreten binär als „1“ gezählt wird. */
+    targetCategory: text("target_category").notNull(),
+    /** Target-Wahrscheinlichkeit als Skalar (binäre Sicht, SQL-tauglich). */
+    probability: numeric("probability").notNull(),
+    /** Horizont-ID (abgeschlossen: 4h | 24h | 72h). */
+    horizonId: text("horizon_id").notNull(),
+    /** Horizont in Minuten (redundant zu `horizon_id`, explizit für Queries). */
+    horizonMinutes: integer("horizon_minutes").notNull(),
+    /** Auflösungs-Timeframe der Kerzen-Schlusszeiten (fix `1h`). */
+    timeframe: text("timeframe").notNull(),
+    /** Entstehungszeit (Analysezeitpunkt). */
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    /** Schlusszeit der Referenzkerze (letzte geschlossene Kerze vor `as_of`). */
+    referenceTime: timestamp("reference_time", { withTimezone: true }).notNull(),
+    /** Referenzschlusskurs zum Capture-Zeitpunkt (Provenienz). */
+    referenceClose: numeric("reference_close").notNull(),
+    /** Schlusszeit der Outcome-Kerze. */
+    resolvesAt: timestamp("resolves_at", { withTimezone: true }).notNull(),
+    /** Verfügbarkeits-Deadline der automatischen Auflösung. */
+    availabilityDeadline: timestamp("availability_deadline", { withTimezone: true }).notNull(),
+    /** Adaptives Regime zum Capture-Zeitpunkt (`UNKNOWN` zulässig). */
+    regime: text("regime").notNull().default("UNKNOWN"),
+    /** Policyversion der Capture-/Auflösungsregeln (z. B. `fp1`). */
+    policyVersion: text("policy_version").notNull(),
+    /** Vertragsversion. */
+    contractVersion: integer("contract_version").notNull(),
+    /** Capture-Provenienz (Quelle, Referenzbar, Policy) — ohne Fremdtexte. */
+    sourceManifest: jsonb("source_manifest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("forecasts_key_unique").on(t.idempotencyKey),
+    // Segment-/Scorepfade (bounded Queries nach Rolle/Horizont/Entity/Zeitraum).
+    index("forecasts_agent_asof_idx").on(t.agentRole, t.asOf),
+    index("forecasts_entity_asof_idx").on(t.entityId, t.asOf),
+    index("forecasts_horizon_asof_idx").on(t.horizonId, t.asOf),
+    // Resolver: fällige Forecasts (Deadline erreicht, jüngste zuerst).
+    index("forecasts_deadline_idx").on(t.availabilityDeadline),
+    check("forecasts_entity_type_check", sql`${t.entityType} = 'instrument'`),
+    check("forecasts_target_kind_check", sql`${t.targetKind} = 'CLOSE_DIRECTION'`),
+    check("forecasts_horizon_check", sql`${t.horizonId} IN ('4h','24h','72h')`),
+    check("forecasts_horizon_minutes_check", sql`${t.horizonMinutes} IN (240, 1440, 4320)`),
+    check("forecasts_timeframe_check", sql`${t.timeframe} = '1h'`),
+    check(
+      "forecasts_probability_check",
+      sql`${t.probability} >= 0 AND ${t.probability} <= 1`
+    ),
+    check("forecasts_prompt_version_check", sql`${t.promptVersion} >= 0`),
+    check("forecasts_contract_version_check", sql`${t.contractVersion} >= 1`),
+    check(
+      "forecasts_time_order_check",
+      sql`${t.referenceTime} <= ${t.asOf} AND ${t.resolvesAt} > ${t.asOf} AND ${t.availabilityDeadline} > ${t.resolvesAt}`
+    ),
+    check("forecasts_key_hash_check", sql`${t.idempotencyKey} ~ '^fk1:[0-9a-f]{64}$'`),
+    check(
+      "forecasts_regime_check",
+      sql`${t.regime} IN ('NORMAL','ELEVATED','EXTREME','PERSISTED','UNKNOWN')`
+    ),
+    check(
+      "forecasts_categories_json_check",
+      sql`jsonb_typeof(${t.categories}) = 'array' AND jsonb_array_length(${t.categories}) >= 2`
+    ),
+    check(
+      "forecasts_probabilities_json_check",
+      sql`jsonb_typeof(${t.probabilities}) = 'array' AND jsonb_array_length(${t.probabilities}) = jsonb_array_length(${t.categories})`
+    ),
+  ]
+);
+
+/**
+ * Versionierte Auflösung eines Forecasts (append-only).
+ *
+ * Eine Resolution wird genau einmal geschrieben: `UNIQUE(forecast_id,
+ * outcome_hash)` macht Retries idempotent (identisches Ergebnis ⇒ no-op).
+ * Ein ABWEICHENDES Ergebnis (Datenkorrektur, Operator-Eingriff) erhält die
+ * nächste `resolution_version` — die Historie wird nie überschrieben.
+ * Für das Scoring zählt stets die jüngste Version je Forecast.
+ */
+export const forecastResolutions = pgTable(
+  "forecast_resolutions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    forecastId: uuid("forecast_id").notNull().references(() => forecasts.id),
+    /** 1-basiert, strikt monoton je Forecast. */
+    resolutionVersion: integer("resolution_version").notNull(),
+    /** RESOLVED | VOID. */
+    status: text("status").notNull(),
+    /** Index der eingetretenen Kategorie (`null` bei VOID). */
+    outcomeIndex: integer("outcome_index"),
+    /** Label der eingetretenen Kategorie (`null` bei VOID). */
+    outcomeLabel: text("outcome_label"),
+    /** Binäre Sicht: 1 = Target-Kategorie eingetreten (`null` bei VOID). */
+    outcomeBinary: integer("outcome_binary"),
+    /** Autoritativer Referenzschlusskurs (`null` bei VOID ohne Daten). */
+    referenceClose: numeric("reference_close"),
+    /** Autoritativer Outcome-Schlusskurs (`null` bei VOID ohne Daten). */
+    outcomeClose: numeric("outcome_close"),
+    /** Geschlossener VOID-Grund (`null` bei RESOLVED). */
+    voidReason: text("void_reason"),
+    /** AUTOMATIC | OPERATOR. */
+    resolutionKind: text("resolution_kind").notNull(),
+    /** Berechnungszeitpunkt der Auflösung. */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }).notNull(),
+    /** Policyversion der Auflösung. */
+    policyVersion: text("policy_version").notNull(),
+    /** `fo1:<sha256>` — Inhaltsfingerprint (Idempotenz-/Revisionskennung). */
+    outcomeHash: text("outcome_hash").notNull(),
+    /**
+     * Datenmanifest: verwendete Kerzen (ts/close/volume/fetched_at),
+     * Dataset-Hash, Qualitätszähler, Auflösungsweg — keine Secrets.
+     */
+    outcomeManifest: jsonb("outcome_manifest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("forecast_resolutions_version_unique").on(t.forecastId, t.resolutionVersion),
+    uniqueIndex("forecast_resolutions_outcome_hash_unique").on(t.forecastId, t.outcomeHash),
+    index("forecast_resolutions_status_idx").on(t.status, t.resolvedAt),
+    check("forecast_resolutions_status_check", sql`${t.status} IN ('RESOLVED','VOID')`),
+    check(
+      "forecast_resolutions_exclusive_check",
+      sql`(${t.status} = 'RESOLVED' AND ${t.outcomeIndex} IS NOT NULL AND ${t.voidReason} IS NULL)
+        OR (${t.status} = 'VOID' AND ${t.outcomeIndex} IS NULL AND ${t.voidReason} IS NOT NULL)`
+    ),
+    check(
+      "forecast_resolutions_binary_check",
+      sql`${t.outcomeBinary} IS NULL OR ${t.outcomeBinary} IN (0, 1)`
+    ),
+    check(
+      "forecast_resolutions_void_reason_check",
+      sql`${t.voidReason} IS NULL OR ${t.voidReason} IN
+        ('MISSING_DATA','INVALID_DATA','TRADING_HALT','STALE_DATA','CORPORATE_ACTION','DATA_CORRECTION')`
+    ),
+    check(
+      "forecast_resolutions_kind_check",
+      sql`${t.resolutionKind} IN ('AUTOMATIC','OPERATOR')`
+    ),
+    check("forecast_resolutions_version_check", sql`${t.resolutionVersion} >= 1`),
+    check("forecast_resolutions_hash_check", sql`${t.outcomeHash} ~ '^fo1:[0-9a-f]{64}$'`),
+  ]
+);
+
+/**
+ * Lauf-Manifest des Resolver-Jobs (append-only, Idempotenzschlüssel).
+ *
+ * Ein Lauf dokumentiert Fenster, Politik, Codeversion und Zähler. Der
+ * `idempotency_key` ist UNIQUE — ein identisch parametrisierter Retry
+ * erzeugt kein zweites Manifest. Die Wirkungsidempotenz (keine doppelten
+ * Resolutionen) garantieren zusätzlich die Unique-Keys der Resolutionen.
+ */
+export const forecastResolutionRuns = pgTable(
+  "forecast_resolution_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `frk1:<sha256>` über Modus, Fenster, Policy, Codeversion, Limit. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** AUTOMATIC | OPERATOR. */
+    mode: text("mode").notNull(),
+    /** SUCCEEDED | FAILED. */
+    status: text("status").notNull(),
+    /** Zähler (dueConsidered, resolved, voided, duplicates, failed, …). */
+    countsJson: jsonb("counts_json").notNull(),
+    cursorBefore: jsonb("cursor_before").notNull(),
+    cursorAfter: jsonb("cursor_after").notNull(),
+    codeVersion: text("code_version").notNull(),
+    /** Bounded Fehlercode bei FAILED, sonst NULL. */
+    errorCode: text("error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("forecast_resolution_runs_key_unique").on(t.idempotencyKey),
+    index("forecast_resolution_runs_finished_idx").on(t.finishedAt),
+    check("forecast_resolution_runs_mode_check", sql`${t.mode} IN ('AUTOMATIC','OPERATOR')`),
+    check("forecast_resolution_runs_status_check", sql`${t.status} IN ('SUCCEEDED','FAILED')`),
+    check(
+      "forecast_resolution_runs_error_check",
+      sql`(${t.status} = 'FAILED' AND ${t.errorCode} IS NOT NULL)
+        OR (${t.status} = 'SUCCEEDED' AND ${t.errorCode} IS NULL)`
+    ),
+    check("forecast_resolution_runs_key_hash_check", sql`${t.idempotencyKey} ~ '^frk1:[0-9a-f]{64}$'`),
+  ]
+);
+
+/**
+ * Wasserstand des Resolver-Jobs (Betriebsdiagnose, monotone Marke).
+ *
+ * `watermark_deadline` ist die höchste Verfügbarkeits-Deadline, bis zu der
+ * alle fälligen Forecasts bearbeitet wurden. Die Marke bewegt sich nur
+ * vorwärts (`GREATEST` im Upsert); Lag/Staleness ist damit direkt messbar
+ * (`now − älteste offene Deadline` bzw. `now − watermark`).
+ */
+export const forecastResolverCursors = pgTable(
+  "forecast_resolver_cursors",
+  {
+    /** Fester Schlüssel — aktuell ausschließlich `resolution`. */
+    cursorId: text("cursor_id").primaryKey(),
+    watermarkDeadline: timestamp("watermark_deadline", { withTimezone: true }).notNull(),
+    lastRunId: uuid("last_run_id").references(() => forecastResolutionRuns.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("forecast_resolver_cursors_last_run_idx").on(t.lastRunId),
+    check("forecast_resolver_cursors_id_check", sql`${t.cursorId} = 'resolution'`),
+  ]
+);
