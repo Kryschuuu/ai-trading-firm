@@ -94,6 +94,25 @@ Kein Outlier-Filter entfernt Daten: Befund ≠ Löschung, ein realistischer
 Flash-Move bleibt unterhalb der (bewusst großzügigen) 25×-Schwelle erhalten
 (Grenzwert getestet).
 
+### 2.2 Perpetual-Daten (RMA-P2-02, v1.54.0)
+
+Fünf Counter, alle mit begrenzten Labels (kein Instrument-Identifier):
+
+| Metrik | Labels | Bedeutung |
+| --- | --- | --- |
+| `perp_sync_runs_total` | `result` (`written`\|`replayed`\|`failed`), `mode` | Läufe je Ergebnis — `replayed` ist der Idempotenznachweis |
+| `perp_sync_rows_total` | `kind`, `result` (`written`\|`duplicate`\|`rejected`) | Zeilen je Reihe und Schicksal |
+| `perp_data_quality_findings_total` | `class` (`GAP`\|`OUTLIER`\|`INVALID`\|`DUPLICATE`\|`CROSSCHECK`\|`STALE`) | Befunde aus `validatePerpSeries` |
+| `perp_data_revisions_total` | `kind` | abweichender Satz zum selben natürlichen Schlüssel (nicht überschrieben) |
+| `perp_data_asof_queries_total` | `result` (Verfügbarkeit), `kind` | as-of-Lesungen inkl. `MISSING`/`STALE`/`UNSUPPORTED`/`UNAVAILABLE` |
+
+Logs: `[perp]`/`[perp:warn]`/`[perp:error]`-Zeilen des CLI und des Services,
+statt Zahlenlisten mit Symbolen. Ein Fremd-Fehler der Venue wird vor Log und
+Manifest redigiert (URLs → `[url]`, `key=value`-Secrets → `[redacted]`,
+einzeilig, ≤ 200 Zeichen). Artefakte: `data/perpdata/quality-report.json`
+(Befund-Headline je Reihe) und `data/perpdata/derivatives.json`
+(Konsumenten-Artefakt, 0600). Details: [PERPETUAL_DATA.md](PERPETUAL_DATA.md).
+
 ## 3. Metrik: `market_data_fetch_failures_total`
 
 ```text

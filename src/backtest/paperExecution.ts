@@ -42,6 +42,7 @@ import {
   computeFunding,
   FundingAccrualEngine,
   loadFundingConfig,
+  type FundingRateProvider,
   type FundingAccrual,
 } from "../lib/funding";
 import type { MarketInstrument } from "../universe/types";
@@ -76,9 +77,19 @@ export interface PaperBacktestOptions {
   /**
    * Statische Funding-Rate in PROZENT je 8h (0.01 = 0,01 %/8h).
    * Default: `loadFundingConfig()` — wie der Paper-Monitor (Default 0 =
-   * neutral, kein Accrual). Provider-Anbindung: out of scope (GAP-02).
+   * neutral, kein Accrual).
    */
   fundingRatePctPer8h?: number;
+  /**
+   * Historischer Funding-Provider (RMA-P2-02, v1.54.0). Wenn gesetzt, schlägt
+   * die Engine den Satz **pro 8h** dort nach (as-of des Bar-Zeitstempels) und
+   * fällt nur zurück, wenn der Provider `null` liefert — dann greift
+   * `fundingRatePctPer8h`/`loadFundingConfig()` wie bisher.
+   *
+   * Build: `createPerpFundingRateProvider()` aus `src/perpdata` (liest die
+   * kanonische `perp_funding_rates`-Historie, nie einen Live-Ticker).
+   */
+  fundingRateProvider?: FundingRateProvider;
   /** Funding-Intervall in Stunden (Default: `loadFundingConfig()` = 8). */
   fundingIntervalHours?: number;
 }
@@ -224,10 +235,15 @@ export function createPaperExecutionRuntime(
   const spreadFallbackBps = opts.spreadBpsFallback ?? simulatorConfig.syntheticSpreadBps;
 
   const fundingDefaults = loadFundingConfig();
-  const fundingEngine = new FundingAccrualEngine({
-    intervalHours: opts.fundingIntervalHours ?? fundingDefaults.intervalHours,
-    ratePctPer8h: opts.fundingRatePctPer8h ?? fundingDefaults.ratePctPer8h,
-  });
+  const fundingEngine = new FundingAccrualEngine(
+    {
+      intervalHours: opts.fundingIntervalHours ?? fundingDefaults.intervalHours,
+      ratePctPer8h: opts.fundingRatePctPer8h ?? fundingDefaults.ratePctPer8h,
+    },
+    // RMA-P2-02: optionaler historischer Provider (Default: keiner ⇒ Verhalten
+    // wie vor v1.54.0 — bitstabile Backtests, solange PERP_DATA_ENABLED=false).
+    opts.fundingRateProvider ? { rateProvider: opts.fundingRateProvider } : {}
+  );
 
   const provided = opts.instruments ?? {};
   const cache = new Map<string, MarketInstrument>();

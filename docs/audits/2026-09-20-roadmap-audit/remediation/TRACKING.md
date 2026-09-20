@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-20 (RMA-P6-01 → FIXED, v1.53.0)
+Letzte Aktualisierung: 2026-09-20 (RMA-P2-02 → FIXED, v1.54.0)
 
 ## Statusmodell
 
@@ -38,7 +38,7 @@ codebasierten Detailbefund.
 | RMA-P1-05 | Lifecycle/Drift | OPEN | [P1-05](../prompts/PROMPT-P1-05-lifecycle-drift.md) | — | — | — | Auditbefund |
 | RMA-P1-06 | Trade-Attribution | PARTIAL | [P1-06](../prompts/PROMPT-P1-06-trade-attribution.md) | — | — | — | Auditbefund |
 | RMA-P2-01 | Regime-Erkennung | PARTIAL | [P2-01](../prompts/PROMPT-P2-01-regime-detection.md) | — | — | — | Auditbefund |
-| RMA-P2-02 | Perpetual-Daten | PARTIAL | [P2-02](../prompts/PROMPT-P2-02-perpetual-data.md) | — | — | — | Auditbefund |
+| RMA-P2-02 | Perpetual-Daten | FIXED | [P2-02](../prompts/PROMPT-P2-02-perpetual-data.md) | [#151](https://github.com/Kryschuuu/ai-trading-firm/pull/151) | `985b0a8` | v1.54.0 | `tests/perpPipeline.{normalize,sync,db,consumers,security,cli}.test.ts` (95 Tests: Normalisierung/Einheiten je Provider-Kante, duplikatfreier Backfill + Increment-Retry gegen embedded Postgres inkl. Wasserstand nach Prozessneustart, Revision statt Überschreiben, as-of verbirgt später verfügbare Sätze, Lücken/Staleness/negatives OI/Rate-Bounds/Duplikate, `unsupported` vs. transienter Fehler vs. leer, Replay nur fälliger Intervalle, Belegbarkeits-Grenze der Konsumenten, 400/405/503-Vertrag, Leak-/Injection-/Label-Architekturtests); `npm test` 2705 Tests / 0 fail, typecheck/lint/docs:validate grün |
 | RMA-P2-03 | MTF-Konfluenz | PARTIAL | [P2-03](../prompts/PROMPT-P2-03-multi-timeframe-confluence.md) | — | — | — | Auditbefund |
 | RMA-P2-04 | Cross-Sectional Ranking | OPEN | [P2-04](../prompts/PROMPT-P2-04-cross-sectional-ranking.md) | — | — | — | Auditbefund |
 | RMA-P2-05 | Sentiment-Outputs | PARTIAL | [P2-05](../prompts/PROMPT-P2-05-structured-sentiment.md) | — | — | — | Auditbefund |
@@ -65,8 +65,19 @@ codebasierten Detailbefund.
 | QA-02 | `loadQualityReport()` verlor aggregierte Summen und `crosscheckCompared` | FIXED | v1.51.3 | `src/marketdata/quality.ts`, `test/marketdata/quality.test.ts` |
 
 PR [#148](https://github.com/Kryschuuu/ai-trading-firm/pull/148) und Commit
-`c8dded3` sind die übergeordnete Evidenz für das Audit-Paket. Von den 21
-Roadmap-Deltas ist RMA-P1-04 mit PR
-[#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149) (v1.52.0)
-umgesetzt; die übrigen 20 bleiben offen und werden nicht durch Dokumentation
-als umgesetzt markiert.
+`c8dded3` sind die übergeordnete Evidenz für das Audit-Paket. Umgesetzt sind
+RMA-P1-04 mit PR [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149)
+(v1.52.0), RMA-P6-01 mit PR
+[#150](https://github.com/Kryschuuu/ai-trading-firm/pull/150) (v1.53.0) und
+RMA-P2-02 mit PR [#151](https://github.com/Kryschuuu/ai-trading-firm/pull/151)
+(v1.54.0); die übrigen Deltas bleiben offen und werden nicht durch
+Dokumentation als umgesetzt markiert.
+
+**Basis-Abweichung (RMA-P2-02):** die Audit-Basis `df3163e` ist in diesem
+Repository nicht auflösbar (`git cat-file -e df3163e` schlägt fehl). Umsetzung
+und Tests stehen auf `83935e9` (v1.53.0), dem Stand bei Bearbeitungsbeginn; der
+inzwischen vorhandene Point-in-Time Feature Store (v1.53.0) wurde als Muster für
+Zeitachse, Idempotenz und Quality-Layer verwendet, statt eine zweite Variante
+davon zu bauen. Nicht belegt werden konnte der Live-Smoke-Test des
+Bitunix-Endpunkts: die Bearbeitungsumgebung hat keinen ausgehenden
+Netzwerkzugriff (dokumentiert in PR #151, Risiken).

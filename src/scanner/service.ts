@@ -22,6 +22,8 @@ import {
 } from "@/lib/marketdata/historicalStore";
 import type { MarketCandle } from "@/lib/marketdata/types";
 import { loadMarketDataErrors } from "@/marketdata/dataErrors";
+import { loadPerpConfig } from "@/perpdata/config";
+import { perpDerivativeContextsFromCache } from "@/perpdata/derivativeCache";
 import { qualityStrictDataErrorsForScan } from "@/marketdata/quality";
 import { resolveRuntimePath } from "@/lib/appPaths";
 import { getRegistry } from "@/universe";
@@ -33,6 +35,7 @@ import {
   type ScanResult,
 } from "./pipeline";
 import { classifyWeekly, type WeeklyReview } from "./weekly";
+import type { DerivativeContext } from "./types";
 
 /** Harte Obergrenze der Instrumente, die der Service aus der Registry zieht. */
 export const MAX_SERVICE_INSTRUMENTS = 50_000;
@@ -181,6 +184,13 @@ export function historicalStoreProvider(
   store: HistoricalStore,
   benchmarkInstrumentId: string,
   instruments?: readonly MarketInstrument[],
+  /**
+   * Derivate-Kontext je Instrument-ID (RMA-P2-02, v1.54.0). Optional und
+   * **sync**: die Karte wird as-of vorgebaut (Cache-Artefakt oder
+   * `buildPerpDerivativeSnapshots`). Fehlt ein Eintrag, liefert der Provider
+   * `null` — die Funding-/OI-Faktoren bleiben bei ihrem Neutralwert.
+   */
+  derivatives?: ReadonlyMap<string, DerivativeContext> | null
 ): ScanDataProvider {
   const raw = new Map<
     string,
@@ -222,6 +232,9 @@ export function historicalStoreProvider(
     // wäre seine Korrelation 0 und der Diversifikations-Score fälschlich 1).
     benchmarkCandles: (instrument) =>
       instrument.id === resolvedBenchmarkId ? null : benchmark,
+    // RMA-P2-02: Funding/Open Interest aus der kanonischen Quelle (bzw. deren
+    // Artefakt). Ohne Karte ⇒ `undefined` ⇒ exakt das Verhalten vor v1.54.0.
+    ...(derivatives ? { derivatives: (instrument) => derivatives.get(instrument.id) ?? null } : {}),
   };
 }
 
@@ -275,6 +288,15 @@ export interface ScannerServiceOptions {
   previousInstruments?: () => MarketInstrument[] | null;
   /** Vorheriger Weekly-Review. */
   previousReview?: () => WeeklyReview | null;
+  /**
+   * Derivate-Kontext je Instrument (RMA-P2-02): Funding-Rate/Raster und Open
+   * Interest für die Derivate-Faktoren. Default: das Artefakt der Perp-Syncs
+   * (`data/perpdata/derivatives.json`), gelesen nur bei `PERP_DATA_ENABLED`
+   * und nur innerhalb der Staleness-Grenze — sonst `null`, und die Faktoren
+   * bleiben bei ihrem Neutralwert. Ein injizierter `data`-Provider trägt den
+   * Kontext selbst; diese Quelle gilt dann nicht zusätzlich.
+   */
+  derivatives?: () => ReadonlyMap<string, DerivativeContext> | null;
   /**
    * Maximales Cache-Alter des Scan-Ergebnisses in ms (Default
    * {@link DEFAULT_SCAN_CACHE_TTL_MS} = 5 Minuten; `0` = keine Cache-Wieder-
@@ -357,6 +379,21 @@ export class ScannerService {
     return this.weekly;
   }
 
+  /**
+   * Derivate-Kontext für den aktuellen Lauf: injizierte Quelle, sonst das
+   * Sync-Artefakt (as-of-gelesen, Staleness-begrenzt). `null` ⇒ Provider kennt
+   * keinen Derivatetzweig ⇒ Factor-Neutralität (kein `0`).
+   */
+  private derivativesForScan(): ReadonlyMap<string, DerivativeContext> | null {
+    if (this.options.derivatives) return this.options.derivatives() ?? null;
+    const perpConfig = loadPerpConfig();
+    const loaded = perpDerivativeContextsFromCache({
+      nowMs: this.clockNow(),
+      maxAgeMs: perpConfig.maxStaleMs.funding,
+    });
+    return loaded.map;
+  }
+
   /** Score-Breakdown eines Instruments (`null`, wenn unbekannt). */
   scoreFor(instrumentId: string) {
     return this.getScan().byId.get(instrumentId) ?? null;
@@ -381,6 +418,7 @@ export class ScannerService {
         new HistoricalStore(),
         config.factors.correlation.benchmarkInstrumentId,
         instruments,
+        this.derivativesForScan()
       );
     const now = this.options.now ?? (() => new Date());
     const effectiveNow = asOf ?? now();

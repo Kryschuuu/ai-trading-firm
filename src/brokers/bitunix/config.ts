@@ -149,4 +149,34 @@ export const BITUNIX_PATHS = {
   cancelAllOrders: "/api/v1/futures/trade/cancel_all_orders",
   /** H7 (v1.36.20): Alle Positionen schließen (Not-Halt). */
   closeAllPositions: "/api/v1/futures/trade/close_all_position",
+  /**
+   * RMA-P2-02 (v1.54.0): aktuelle Funding-Rate je Symbol (public, keine
+   * Credentials). Liefert `markPrice`/`indexPrice`/`fundingRate`/
+   * `fundingInterval`/`nextFundingTime` sowie die Venue-Bounds
+   * `maxFundingRate`/`minFundingRate`.
+   */
+  fundingRate: "/api/v1/futures/market/funding_rate",
+  /**
+   * RMA-P2-02 (v1.54.0): **Historie** der Funding-Rates (public).
+   * `limit` default 100, Maximum 200 (Venue-Doku). Die Doku nennt das
+   * Start-Parameter-Feld an einer Stelle `starTime` (Tippfehler der Venue),
+   * `/market/kline` nutzt `startTime`; der Perp-Adapter sendet `startTime`
+   * und filtert zusätzlich client-seitig (siehe
+   * `src/perpdata/adapters/bitunix.ts`).
+   */
+  fundingRateHistory: "/api/v1/futures/market/get_funding_rate_history",
 } as const;
+
+/**
+ * Rate-Limit des Perp-Daten-Syncs (RMA-P2-02).
+ *
+ * Der Kerzen-Sync nutzt bereits 8 req/s des dokumentierten Limits von
+ * 10 req/s/IP. Beide Syncs können parallel laufen (getrennte Prozesse,
+ * getrennte Token-Buckets) — der Perp-Pfad fährt deshalb bewusst
+ * **untergeordnet** (4 req/s), damit die Summe das Venue-Limit auch bei
+ * gleichzeitigem Lauf nicht reißt.
+ */
+export const BITUNIX_PERP_RATE_PER_SEC = 4;
+
+/** Maximale Zeilen je Funding-History-Request (Venue-Doku: Maximum 200). */
+export const BITUNIX_FUNDING_HISTORY_MAX_LIMIT = 200;

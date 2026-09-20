@@ -1,14 +1,29 @@
 /**
  * Public REST-Client (keine Signatur, keine Credentials).
  *
- * Endpunkte: trading_pairs, tickers, kline, depth.
+ * Endpunkte: trading_pairs, tickers, kline, depth und — seit RMA-P2-02 —
+ * funding_rate sowie get_funding_rate_history (historische Perpetual-Daten,
+ * ebenfalls public und credential-frei).
  */
 import type { MarketCandle, MarketOrderBook, MarketTicker } from "../../contracts/broker";
-import { BITUNIX_PATHS, BITUNIX_TICKER_SYMBOLS_PER_REQUEST, type BitunixRuntimeConfig } from "./config";
-import { BitunixApiError, classifyBitunixFailure } from "./errors";
+import {
+  BITUNIX_FUNDING_HISTORY_MAX_LIMIT,
+  BITUNIX_PATHS,
+  BITUNIX_TICKER_SYMBOLS_PER_REQUEST,
+  type BitunixRuntimeConfig,
+} from "./config";
+import { BitunixApiError, classifyBitunixFailure, safeSnippet } from "./errors";
 import { BitunixHttp, type BitunixHttpOptions } from "./http";
 import { mapTradingPairs } from "./mapping";
-import type { BitunixDepthRaw, BitunixEnvelope, BitunixKlineRaw, BitunixTickerRaw, BitunixTradingPair } from "./types";
+import type {
+  BitunixDepthRaw,
+  BitunixEnvelope,
+  BitunixFundingRateHistoryRaw,
+  BitunixFundingRateRaw,
+  BitunixKlineRaw,
+  BitunixTickerRaw,
+  BitunixTradingPair,
+} from "./types";
 import type { MarketInstrument } from "../../universe/types";
 
 function envelopeData<T>(json: unknown): T {
@@ -158,6 +173,64 @@ export class BitunixPublicClient {
     return envelopeData<BitunixDepthRaw>(res.json) ?? {};
   }
 
+  /**
+   * `GET /market/funding_rate` — **aktuelle** Funding-Rate (public, RMA-P2-02).
+   *
+   * Die Venue antwortet mit einem Array (ein Eintrag je angefragtem Symbol).
+   * Credentials sind nicht beteiligt; es wird ausschließlich über den
+   * credential-freien Public-Transport angefragt.
+   *
+   * @param symbol Optionales venue-natives Symbol (`BTCUSDT`). Wird es
+   *               abgelehnt (Format), wirft der Client **vor** dem Request —
+   *               ein Fremd-Symbol erreicht das Netz nie.
+   */
+  async fetchFundingRates(symbol?: string): Promise<BitunixFundingRateRaw[]> {
+    const query = symbol === undefined ? undefined : { symbol: assertPerpSymbol(symbol) };
+    const res = await this.http.request({
+      method: "GET",
+      path: BITUNIX_PATHS.fundingRate,
+      query,
+    });
+    const data = envelopeData<unknown>(res.json);
+    return Array.isArray(data) ? (data as BitunixFundingRateRaw[]) : [];
+  }
+
+  /**
+   * `GET /market/get_funding_rate_history` — Historie der Funding-Sätze
+   * (public, RMA-P2-02).
+   *
+   * Grenzen der Venue-Doku: `limit` Default 100, Maximum 200. Der Client
+   * klemmt `limit` hart auf {@link BITUNIX_FUNDING_HISTORY_MAX_LIMIT} und
+   * verwirft nicht-endliche Zeitstempel (Validierung **vor** dem Request).
+   *
+   * Zeitparameter: die Futures-Doku nennt das Startfeld an einer Stelle
+   * `starTime` (Tippfehler), `/market/kline` nutzt `startTime`. Gesendet wird
+   * `startTime`/`endTime`; der Perp-Adapter filtert zusätzlich client-seitig
+   * und meldet ein zu enges Fenster, statt blind zu blättern.
+   */
+  async fetchFundingRateHistory(request: {
+    symbol: string;
+    startTime?: number;
+    endTime?: number;
+    limit?: number;
+  }): Promise<BitunixFundingRateHistoryRaw[]> {
+    const symbol = assertPerpSymbol(request.symbol);
+    const limit = Math.min(
+      BITUNIX_FUNDING_HISTORY_MAX_LIMIT,
+      Math.max(1, Math.trunc(request.limit ?? BITUNIX_FUNDING_HISTORY_MAX_LIMIT))
+    );
+    const query: Record<string, string | number> = { symbol, limit };
+    if (Number.isFinite(request.startTime ?? NaN) && (request.startTime as number) > 0) {
+      query.startTime = Math.trunc(request.startTime as number);
+    }
+    if (Number.isFinite(request.endTime ?? NaN) && (request.endTime as number) > 0) {
+      query.endTime = Math.trunc(request.endTime as number);
+    }
+    const res = await this.http.request({ method: "GET", path: BITUNIX_PATHS.fundingRateHistory, query });
+    const data = envelopeData<unknown>(res.json);
+    return Array.isArray(data) ? (data as BitunixFundingRateHistoryRaw[]) : [];
+  }
+
   async fetchOrderBook(symbol: string, limit: "1" | "5" | "15" | "50" | "max" = "15"): Promise<MarketOrderBook> {
     const data = await this.fetchDepth(symbol, limit);
     const mapLevels = (rows: Array<[number | string, number | string]> | undefined) =>
@@ -171,6 +244,23 @@ export class BitunixPublicClient {
       ts: Date.now(),
     };
   }
+}
+
+/**
+ * Erlaubtes Format eines venue-nativen Symbols (Log-/URL-Injection-Grenze).
+ *
+ * Bewusst eng: `BTCUSDT`, `BTC_USDT_250926`, `ETHUSDT.P`. Alles andere wird
+ * **vor** dem Request abgelehnt — ein fremdbestimmter String darf weder Query
+ * noch Log erreichen.
+ */
+const PERP_SYMBOL_RE = /^[A-Z0-9][A-Z0-9._-]{0,31}$/;
+
+export function assertPerpSymbol(symbol: string): string {
+  const value = String(symbol ?? "").trim().toUpperCase();
+  if (!PERP_SYMBOL_RE.test(value)) {
+    throw new BitunixApiError("unknown", `Symbol „${safeSnippet(value, 32)}“ ist für Perp-Abfragen nicht zulässig.`);
+  }
+  return value;
 }
 
 export function mapTicker(row: BitunixTickerRaw): MarketTicker {

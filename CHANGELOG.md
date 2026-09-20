@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.53.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.54.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,125 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.54.0] — 2026-09-20 · feat(data): historische Perpetual-Daten (RMA-P2-02)
+
+### Hinzugefügt
+
+- **Perpetual-Daten-Layer (`src/perpdata/`, Migration
+  `drizzle/2026-09-20_perpetual_data.sql`, append-only/additiv):** Funding-Raten,
+  Open Interest und Liquidationen liegen erstmals als punktreiche Historie in
+  eigenen Tabellen (`perp_funding_rates`, `perp_open_interest`,
+  `perp_liquidations`, `perp_sync_runs`, `perp_sync_cursors`) — vorher existierten
+  Funding/OI nur als Momentwert der Ticker-Discovery, Liquidationen gar nicht.
+  - **Kanonisches Schema je Reihe** mit vollständiger Provenienz (`venue`,
+    `instrument_id` = `VENUE:SYMBOL`, `symbol`, `source_id`, `schema_version`) und
+    der getrennten Zeitachse `event_time` / `available_at` / `fetched_at`. CHECKs
+    erzwingen: Wert **XOR** `missing_reason` („kein Wert“ ist nie `0`),
+    `available_at >= event_time` (kein Look-ahead in der Ablage),
+    `basis`-Kopplung des Open Interest (weitere Größen nur mit `converted`).
+  - **Einheitenvertrag:** Funding als Anteil je Intervall
+    (`fraction_per_interval`, 0.0001 = 1 bp) plus `interval_hours` und
+    `next_funding_time`; Open Interest in `contracts`/`base_quantity`/`quote_value`
+    mit autoritativer `basis`; Liquidationen mit kanonisierter Positionsseite
+    (`LONG_LIQUIDATED`/`SHORT_LIQUIDATED`), Menge, Preis, Notional und
+    `source_event_id`.
+  - **Capability-Ports:** `unsupported` ist typisiert und von leerer Liste/0
+    getrennt (`NO_PUBLIC_ENDPOINT`, `VENUE_NOT_PERP`, `DISABLED_BY_POLICY`) —
+    Bitunix veröffentlicht public keinen OI-/Liquidations-Endpunkt, beide Reihen
+    bleiben deshalb als `UNSUPPORTED` markiert statt gefüllt.
+  - **Adapter:** `bitunix` (real, ausschließlich `BitunixPublicClient`,
+    `get_funding_rate_history` mit Antwortkappung auf das Venue-Maximum von
+    200 und client-seitiger Fensterfilterung — die Venue-Doku nennt den
+    Startparameter stellenweise `starTime`) und `fixture` (Venue `SIM`,
+    simuliert Lücken, Duplikate, negatives OI, Bereichsverletzungen,
+    429/Timeout und fehlende Reihen — für Tests und Offline-Validierung).
+  - **Sync:** Backfill und inkrementell mit persistierten Wasserständen je
+    `(venue, instrument, kind)`, Overlap, `PERP_DATA_SAFETY_LAG_MS`,
+    Idempotenzschlüssel `prk1:<sha256>` auf `perp_sync_runs` (Replay schreibt
+    nichts), `ON CONFLICT DO NOTHING` je Zeile, Revisionsschutz bei
+    abweichendem Inhalt (überschreibt nie, zählt und auditiert), Rate-Limit,
+    ein Retry mit Backoff bei übertragbarem Ausfall, harte Caps
+    (`PERP_LIMITS`: 250 Instrumente/Lauf, 500 Zeilen/Request, 20
+    Requests/Reihe, 2 000 Zeilen/Batch), `--dry-run` gegen Speicher-Ablage.
+  - **Qualitäts-Layer** analog zum Kerzen-Layer: `GAP`, `STALE` (Alter gegen
+    `event_time`, nicht gegen `available_at`), `INVALID` (u. a. negatives/widersprüchliches
+    OI, Wert außerhalb der Bounds ⇒ `null` + Grund statt Klemmen), `DUPLICATE`,
+    `CROSSCHECK` (Zweitvenue, opt-in); Modi `log`/`strict`, Report
+    `data/perpdata/quality-report.json`, Befunde zusätzlich als
+    `qualityStatus` an der Zeile.
+  - **as-of-Query** (`GET /api/marketdata/perpetual/series`) über
+    Venue/Instrument/Fenster mit harten Limits; liefert nur Zeilen mit
+    `event_time ≤ asOf` **und** `available_at ≤ asOf`; je Reihe
+    `availability` + `reason` (`AVAILABLE`/`MISSING`/`STALE`/`UNSUPPORTED`/
+    `UNAVAILABLE`). `GET /api/marketdata/perpetual/status` zeigt Gates,
+    Capabilities, Coverage, letzte Läufe und den Ablagestatus als Teil der
+    Antwort. Fehlercontract `{ok:false, error, message, hint}`: 400 bei
+    Anfrageablehnung, 503 `perp:store_unavailable` — nie 200 mit leerem Bestand.
+  - **Konsumenten verdrahtet:** `DerivativeContext` von
+    Scanner/Signal-Faktoren (`perpDerivativeProvider`), Funding-Rate-Provider
+    der Backtest-/Paper-Funding-Engine (nur fällige Settlements je Haltedauer,
+    `hiddenRows`/`missingMarks`/`qualityFlagged`), Analystensnapshot
+    (`perpAnalystSnapshotLines`), Konsumenten-Artefakt
+    `data/perpdata/derivatives.json` (0600, atomar, `FRESH`/`STALE`/`FILE_STALE`/
+    `MISSING`/`DISABLED`/`ERROR`). Fehlende, veraltete oder **unbelegbare**
+    Daten (`INVALID`/`DUPLICATE`/`CROSSCHECK`/`UNKNOWN`) ergeben `null` mit
+    Grund, nie eine 0 — `perpRowIsAttestable` ist dafür die einzige Schwelle.
+  - **CLI** `npm run perp:sync` (`--status`, `--fixture`, `--dry-run`,
+    `--venue`, `--mode`, `--days`, `--from/--to`, `--kinds`, `--availability`,
+    `--quality`, `--max-instruments`, `--concurrency`, `--safety-lag`,
+    `--refresh-cache`, `--prune-runs`, `--json`), Exit 0/1/2;
+    Aliase `perp:sync:status`, `perp:sync:fixture`.
+  - **Betrieb:** 15 `PERP_DATA_*`-Flags (beide Gates Default `false` ⇒ ohne
+    Konfiguration byte-identisches Verhalten), fünf Metrik-Counter mit bounded
+    Labels (`perp_sync_runs_total`, `perp_sync_rows_total`,
+    `perp_data_quality_findings_total`, `perp_data_revisions_total`,
+    `perp_data_asof_queries_total`), Audit-Ereignisse je Lauf.
+- **Doku:** [docs/PERPETUAL_DATA.md](docs/PERPETUAL_DATA.md) (Vertrag: Schema,
+  Capabilities, Sync, Qualität, Query, Konsumenten, CLI, Migration, Sicherheit)
+  sowie Verweise in `MARKET_DATA_PIPELINE.md` §15, `BITUNIX.md`,
+  `OBSERVABILITY.md` §2.2, `BACKTESTING.md` §3.1, `PAPER_TRADING.md` §3.4,
+  `CONFIGURATION.md` und `.env.example`.
+
+### Behoben
+
+- **CLI-Flags wurden still ignoriert:** `parseArgs` erkannte
+  Wert-Flags nur bei exakter Array-Position (`argv.includes("--venue")`), nicht
+  in der dokumentierten Form `--venue=BITUNIX` — `--mode`, `--days`, `--kinds`,
+  `--quality` und Co. liefen damit unwirksam durch. Erkennt jetzt beide Formen
+  und verlangt den Wert (`--flag=…`), sonst UsageError (Exit 2).
+- **Retention konnte Manifeste nie löschen:** `pruneRuns` nullte `run_id` der
+  Datenzeilen, nicht aber `last_run_id` der Sync-Cursor — der Foreign-Key blockierte
+  das `DELETE`. Cursor-Wasserstände bleiben unverändert, nur der Manifest-Verweis
+  wird geleert.
+- **Redaktionslücke in Fehler-Echos:** die as-of-Validierung gab die rohe
+  Instrument-ID im Fehler-`detail` zurück (Steuerzeichen/Umbrüche möglich,
+  Log-Injection). Echo läuft jetzt durch `perpRedactMessage` (gekürzt,
+  einzeilig, kontrollzeichenfrei).
+- **Open Interest ohne darstellbaren Zustand:** eine Zeile, deren einziger
+  Wert negativ oder ohne Währungscode war, würde `basis NOT NULL` plus
+  Werte-CHECK der Tabelle verletzen. Sie wird jetzt in der Normalisierung
+  qualifiziert abgewiesen (`INVALID_MEASURE`/`NO_MEASURE`) und zählt in die
+  Statistiken, statt den Schreibpfad zum Ausnahmefall zu machen.
+
+### Migration
+
+- `psql "$DATABASE_URL" -f drizzle/2026-09-20_perpetual_data.sql` (idempotent,
+  fünf neue Tabellen, keine Änderung bestehender Tabellen) oder
+  `npx drizzle-kit push`. Danach `npm run perp:sync -- --fixture --dry-run
+  --mode=backfill` (netzfreier Selbsttest) und bei Bedarf
+  `npm run perp:sync -- --venue=BITUNIX --mode=backfill --days=30`.
+- Rollback: Gates aus, Code zurück, `DROP TABLE` der fünf `perp_*`-Tabellen
+  (nur ohne laufenden v1.54.0-Code) — der Bestand ist aus denselben Quellen
+  reproduzierbar.
+
+### Testen
+
+- `tests/perpPipeline.normalize.test.ts`, `.sync.test.ts`, `.db.test.ts`
+  (embedded Postgres: Constraints, Replay, Revision, Neustart-Wasserstand,
+  as-of, Retention), `.consumers.test.ts`, `.security.test.ts`,
+  `.cli.test.ts` — 95 Tests; Gesamtsuite 2 705 Tests grün
+  (`npm run typecheck`, `npm run lint`, `npm test`, `npm run docs:validate`).
 
 ## [1.53.0] — 2026-09-20 · feat(research): Point-in-Time Feature Store (RMA-P6-01)
 

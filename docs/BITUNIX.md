@@ -338,6 +338,30 @@ höheres `candleLimit` erforderte Paging (out of scope, Sync-Default 150/100 ≤
 
 ---
 
+## Perpetual-Marktdaten (RMA-P2-02, v1.54.0)
+
+Für die historische Perp-Ablage (`src/perpdata/adapters/bitunix.ts`) werden
+ausschließlich zwei **öffentliche** Endpunkte genutzt:
+
+| Zweck | Endpunkt | Grenzen |
+| --- | --- | --- |
+| Funding-Historie | `GET /api/v1/futures/market/get_funding_rate_history` | `limit` max 200, 10 req/s je IP; die Doku nennt den Startparameter stellenweise `starTime` (Tippfehler der Venue) — gesendet wird `startTime`/`endTime`, und der Adapter filtert das Fenster zusätzlich client-seitig |
+| Funding-Snapshot/Raster | `GET /api/v1/futures/market/funding_rate` | liefert `fundingInterval` (h) und `nextFundingTime` (ms) |
+
+Rohe Raten sind Dezimalzeichenketten (`"-0.0001191"` = Anteil je Intervall,
+kein Prozentwert); `fundingTime` kommt als Zeichenkette in ms. Die
+Venue-Grenzen `minFundingRate`/`maxFundingRate` (±30 %) werden als Bounds
+übernommen, die Outlier-Schwelle der Ablage ist enger
+(`PERP_DATA_MAX_ABS_FUNDING_RATE`, Default 0,75 % je Intervall).
+
+**Kein** öffentlicher Endpunkt existiert für Open Interest und für
+Liquidationen/Force-Orders — beide Reihen sind für `BITUNIX` deshalb typisiert
+`UNSUPPORTED` (`NO_PUBLIC_ENDPOINT`) und werden nicht durch geratene Werte
+ersetzt. Signierte Requests, Orders oder Positionen berührt der Datenpfad nie.
+
+Verweise: [PERPETUAL_DATA.md](PERPETUAL_DATA.md) (Schema, Sync, Qualität,
+Konsumenten), [OBSERVABILITY.md](OBSERVABILITY.md) §2.2 (Metriken).
+
 ## 3. WebSocket (Public)
 
 Subscribe: `{ op: "subscribe", args: [{ symbol, ch }] }`.

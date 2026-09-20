@@ -263,6 +263,35 @@ export const telemetry = {
       telemetry.features.parityChecks.reset();
     },
   },
+  /**
+   * Historische Perpetual-Daten (RMA-P2-02, v1.54.0).
+   *
+   * Labels sind ausschließlich Code-konstante Kategorien
+   * (`kind` = funding | openInterest | liquidations, `result`, `class`,
+   * `mode`, `stage`) — keine Instrument-IDs, keine Symbol-/Venue-Freitexte
+   * (Kardinalitätsregel wie oben). Das Venue steht in den Audit-Events und im
+   * Sync-Manifest, nicht im Label.
+   */
+  perp: {
+    /** Sync-Läufe je Ergebnis und Modus. */
+    syncRuns: new LabelCounter("perp_sync_runs_total"),
+    /** Geschriebene Zeilen je Reihe und Ergebnis (written | duplicate | rejected). */
+    syncRows: new LabelCounter("perp_sync_rows_total"),
+    /** Qualitätsbefunde je Klasse (GAP | OUTLIER | INVALID | DUPLICATE | CROSSCHECK | STALE). */
+    qualityFindings: new LabelCounter("perp_data_quality_findings_total"),
+    /** Abweichende Sätze zum selben Schlüssel je Reihe (nicht überschrieben). */
+    revisions: new LabelCounter("perp_data_revisions_total"),
+    /** as-of-Abfragen je Verfügbarkeit (AVAILABLE | MISSING | STALE | UNSUPPORTED | UNAVAILABLE). */
+    asOfQueries: new LabelCounter("perp_data_asof_queries_total"),
+    /** alle Counter der Perp-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.perp.syncRuns.reset();
+      telemetry.perp.syncRows.reset();
+      telemetry.perp.qualityFindings.reset();
+      telemetry.perp.revisions.reset();
+      telemetry.perp.asOfQueries.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -412,6 +441,11 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.features.pitQueries.exposition(),
     telemetry.features.pitOutcomes.exposition(),
     telemetry.features.parityChecks.exposition(),
+    telemetry.perp.syncRuns.exposition(),
+    telemetry.perp.syncRows.exposition(),
+    telemetry.perp.qualityFindings.exposition(),
+    telemetry.perp.revisions.exposition(),
+    telemetry.perp.asOfQueries.exposition(),
   ];
 
   let firm: FirmMetricState | null;

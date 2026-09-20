@@ -115,6 +115,29 @@ Details und bewusste Grenzen:
 
 ---
 
+### 3.1 Perpetual-Funding aus der Ablage (RMA-P2-02, v1.54.0)
+
+`scripts/run-backtest.ts` speist die Funding-Accrual-Engine über
+`createPerpFundingRateProvider` (`src/perpdata/consumers.ts`) — dieselbe Engine
+und dieselbe Formel wie im Paper-Betrieb, nur mit historischen Raten aus
+`perp_funding_rates`. Drei Punkte machen das replay-sicher:
+
+* **as-of**: geladen wird `event_time ≤ asOf` **und** `available_at ≤ asOf`;
+  ein Satz, den es zum Zeitpunkt noch nicht gab, existiert für den Backtest
+  nicht. Die Provider-Lesung ist auf `toMs` begrenzt.
+* **nur fällige Settlements**: `replayPositionFunding` bucht jede Rate genau
+  einmal je Position und Intervall (`hiddenRows`, `missingMarks`,
+  `qualityFlagged` im Ergebnis); Sätze außerhalb der Haltedauer werden
+  ausgewiesen, nicht verrechnet.
+* **fehlend bleibt fehlend**: ohne `PERP_DATA_ENABLED=true`, ohne Daten oder
+  bei unbelegbarer Qualität (`INVALID`/`DUPLICATE`/`CROSSCHECK`/`UNKNOWN`)
+  liefert der Provider `null` — die Engine rechnet dann wie vor v1.54.0
+  (statischer `PAPER_FUNDING_RATE_PCT_PER_8H`-Pfad bleibt unverändert), nie mit
+  einer erfundenen 0-Rate. Treffer/Zähler: `provider.stats()`.
+
+Details: [PERPETUAL_DATA.md](PERPETUAL_DATA.md) §1, §4, §6 und
+[../CONFIGURATION.md](../CONFIGURATION.md#perpetual-daten-rma-p2-02-v1540).
+
 ## 4. Walk-Forward-Fenster (IS/OOS)
 
 Konfiguration (`src/backtest/walkforward.ts`, Flags in

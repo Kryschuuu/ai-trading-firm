@@ -58,6 +58,37 @@ export interface BitunixKlineRaw {
   [extra: string]: unknown;
 }
 
+/**
+ * Aktuelle Funding-Rate von GET /api/v1/futures/market/funding_rate
+ * (RMA-P2-02, v1.54.0). Die Venue liefert Zahlen als String; `fundingInterval`
+ * ist in **Stunden**.
+ */
+export interface BitunixFundingRateRaw {
+  symbol?: string;
+  markPrice?: string | number;
+  lastPrice?: string | number;
+  indexPrice?: string | number;
+  fundingRate?: string | number;
+  nextFundingTime?: string | number;
+  fundingInterval?: string | number;
+  maxFundingRate?: string | number;
+  minFundingRate?: string | number;
+  [extra: string]: unknown;
+}
+
+/**
+ * Einzelner Settlement-Satz von
+ * GET /api/v1/futures/market/get_funding_rate_history (RMA-P2-02).
+ * `fundingTime` ist die Settlement-Zeit in Epoch-ms (die Venue liefert sie
+ * je nach Feld als Zahl **oder** String).
+ */
+export interface BitunixFundingRateHistoryRaw {
+  fundingRate?: string | number;
+  fundingTime?: string | number;
+  markPrice?: string | number;
+  [extra: string]: unknown;
+}
+
 /** Orderbuch von GET /api/v1/futures/market/depth. */
 export interface BitunixDepthRaw {
   asks?: Array<[number | string, number | string]>;

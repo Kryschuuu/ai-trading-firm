@@ -59,6 +59,13 @@ import {
   loadAllInstruments,
 } from "../src/scanner/service";
 import { runMarketSync } from "./lib/market-sync";
+import { perpDataSyncEnabled } from "../src/perpdata/config";
+import {
+  PERP_DERIVATIVE_CACHE_FILE,
+  getPerpDataService,
+  loadPerpConfig,
+  perpDerivativeContextsFromCache,
+} from "../src/perpdata/index";
 import { toConsoleAscii } from "../src/lib/consoleFormat";
 
 /**
@@ -140,9 +147,51 @@ async function main(): Promise<void> {
     }
   }
 
+  // RMA-P2-02: Perp-Sync (Funding / Open Interest / Liquidationen) als eigener
+  // Schritt NACH dem Kerzen-Sync — nur mit `--sync` und nur, wenn
+  // `PERP_DATA_SYNC_ENABLED=true`. Derivatedaten sind eine Anreicherung: ein
+  // Fehler hier ändert die Readiness des Scans nicht (dafür ist der Kerzenpfad
+  // zuständig), der Derivatekontext bleibt dann leer und die Funding-/OI-
+  // Faktoren laufen bei ihrem Neutralwert — nie mit erfundenen 0-Sätzen.
+  if (syncFirst && perpDataSyncEnabled()) {
+    try {
+      const perpService = getPerpDataService();
+      const perpVenue = (venueArg ?? "").trim().toUpperCase();
+      const synced = await perpService.sync({
+        mode: "INCREMENTAL",
+        ...(perpVenue ? { venues: [perpVenue] } : {}),
+      });
+      const refreshed = await perpService.refreshDerivativeCache();
+      say(
+        `[scanner] --sync: Perp ${synced.totals.fetched} gelesen / ${synced.totals.written} geschrieben` +
+          (synced.totals.duplicates > 0 ? `, ${synced.totals.duplicates} Duplikat(e)` : "") +
+          `, ${synced.totals.failures} Fehlbefund(e); Derivat-Artefakt: ` +
+          (refreshed.written
+            ? `${refreshed.available}/${refreshed.entries} Instrument(e) mit Wert`
+            : `nicht aktualisiert (${refreshed.reason})`),
+      );
+      for (const entry of synced.venues) {
+        if (entry.skipped !== null) say(`[scanner] --sync: Perp ${entry.venue} übersprungen — ${entry.message}`);
+      }
+    } catch (error) {
+      sayError(
+        `[scanner] --sync: Perp-Sync fehlgeschlagen (${
+          error instanceof Error ? error.message.slice(0, 160) : "unbekannter Fehler"
+        }) — Scan läuft ohne Derivatekontext.`,
+      );
+    }
+  }
+
   const config = loadScannerConfig();
   const instruments = loadAllInstruments();
   const store = new HistoricalStore();
+  // Derivatekontext (RMA-P2-02) aus dem Artefakt der kanonischen Ablage:
+  // as-of-gelesen, staleness-begrenzt, nur bei `PERP_DATA_ENABLED`. `null`
+  // bedeutet „kein Kontext“ — die Faktoren bleiben neutral.
+  const perpContext = perpDerivativeContextsFromCache({
+    nowMs: Date.now(),
+    maxAgeMs: loadPerpConfig().maxStaleMs.funding,
+  });
   // Instrumente mitreichen: die konfigurierte Benchmark-ID (Default
   // BITUNIX:BTCUSDT) wird venue-agnostisch gegen den tatsächlichen
   // Store-Bestand aufgelöst, sonst bleibt der Korrelationsfaktor „unbekannt“.
@@ -150,7 +199,16 @@ async function main(): Promise<void> {
     store,
     config.factors.correlation.benchmarkInstrumentId,
     instruments,
+    perpContext.map,
   );
+  if (perpContext.map !== null) {
+    say(`[scanner] Derivatekontext: ${perpContext.entries} Instrument(e) aus ${PERP_DERIVATIVE_CACHE_FILE}.`);
+  } else if (perpContext.reason === "FILE_STALE" || perpContext.reason === "EMPTY") {
+    say(
+      `[scanner] Derivat-Artefakt zu alt oder leer (${perpContext.reason}) — Funding-/OI-Faktoren bleiben neutral. ` +
+        `Behebung: npm run perp:sync -- --mode=incremental`,
+    );
+  }
 
   const dataErrors = loadMarketDataErrors();
   // GAP-07 (strict-Modus): Instrumente mit INVALID-Befunden im Qualitäts-

@@ -1069,7 +1069,7 @@ describe("featureStore: Quality und Betrieb", () => {
     assert.equal(rsiSeries.lagMs, 2 * HOUR - HOUR, "Eventzeit + 1h Schlusszeit vs. jetzt (+2h)");
     assert.equal(status.runs.length, 4, "ein Manifest je Entity/Feature-Kombination des Laufs");
     assert.equal(status.revisions.length, 0);
-    assert.equal(status.codeVersion, "1.53.0");
+    assert.equal(status.codeVersion, "1.54.0");
     assert.equal(status.timeframe, TF);
 
     // Retention: ein wertfreier, fehlgeschlagener Lauf verschwindet, der
