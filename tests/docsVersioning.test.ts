@@ -16,7 +16,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
@@ -62,6 +62,30 @@ test("CHANGELOG.md-Status-Header und docs/README.md nennen dieselbe Version", ()
   assert.ok(
     read("docs/README.md").includes(`**Version:** \`v${VERSION}\``),
     `docs/README.md: Versionszeile muss 'v${VERSION}' nennen`,
+  );
+});
+
+test("Roadmap-Audit enthält 25 Findings, 21 Prompts und ist katalogisiert", () => {
+  const audit = "docs/audits/2026-09-20-roadmap-audit";
+  const findingsDir = path.join(ROOT, audit, "findings");
+  const promptsDir = path.join(ROOT, audit, "prompts");
+  const findings = readdirSync(findingsDir).filter((name) => /^RMA-P\d-\d{2}-.+\.md$/.test(name));
+  const prompts = readdirSync(promptsDir).filter((name) => /^PROMPT-P\d-\d{2}-.+\.md$/.test(name));
+
+  assert.equal(findings.length, 25, "jede Roadmap-Komponente braucht genau einen Detailbefund");
+  assert.equal(prompts.length, 21, "jede PARTIAL-/OPEN-Komponente braucht einen Umsetzungs-Prompt");
+
+  const tracking = read(`${audit}/remediation/TRACKING.md`);
+  for (const finding of findings) {
+    const id = finding.match(/^(RMA-P\d-\d{2})-/)?.[1];
+    assert.ok(id && tracking.includes(`| ${id} |`), `${finding}: Finding-ID muss im Tracking stehen`);
+  }
+
+  assert.ok(read("docs/README.md").includes("audits/2026-09-20-roadmap-audit/"), "Doku-Index muss Audit verlinken");
+  assert.match(
+    read("src/lib/docsCatalog.ts"),
+    /file:\s*"docs\/audits\/2026-09-20-roadmap-audit\/README\.md"/,
+    "Roadmap-Audit muss im docsCatalog stehen",
   );
 });
 

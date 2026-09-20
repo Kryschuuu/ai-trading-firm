@@ -571,23 +571,40 @@ export function loadQualityReport(file: string = QUALITY_REPORT_FILE): QualityRe
           });
         }
       }
+      const crosscheckCompared =
+        typeof s.crosscheckCompared === "number" &&
+        Number.isFinite(s.crosscheckCompared) &&
+        s.crosscheckCompared >= 0
+          ? Math.floor(s.crosscheckCompared)
+          : null;
       series.push({
         instrumentId: s.instrumentId.slice(0, 128),
         timeframe: typeof s.timeframe === "string" ? s.timeframe.slice(0, 16) : "",
         candles: typeof s.candles === "number" && Number.isFinite(s.candles) ? Math.max(0, Math.floor(s.candles)) : 0,
         counts,
         findings,
+        ...(crosscheckCompared !== null ? { crosscheckCompared } : {}),
       });
     }
+
+    // Aggregate ausschließlich aus den defensiv validierten Reihen. Die
+    // persistierten Totals sind abgeleitete Daten und können veraltet oder
+    // manipuliert sein; beim Laden bleiben sie deshalb nie autoritativ.
+    const totals: QualityReport["totals"] = {
+      series: series.length,
+      candles: 0,
+      byClass: { GAP: 0, OUTLIER: 0, INVALID: 0, DUPLICATE: 0, CROSSCHECK: 0 },
+    };
+    for (const item of series) {
+      totals.candles += item.candles;
+      for (const cls of QUALITY_CLASSES) totals.byClass[cls] += item.counts[cls];
+    }
+
     return {
       writtenAt: typeof parsed.writtenAt === "string" ? parsed.writtenAt : "",
       mode: parsed.mode === "strict" ? "strict" : "log",
       series,
-      totals: {
-        series: series.length,
-        candles: series.reduce((a, s) => a + s.candles, 0),
-        byClass: { GAP: 0, OUTLIER: 0, INVALID: 0, DUPLICATE: 0, CROSSCHECK: 0 },
-      },
+      totals,
     };
   } catch {
     return null;

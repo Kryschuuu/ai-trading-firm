@@ -223,7 +223,12 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   auditFeatureGap: {
     file: "docs/audits/2026-09-18-feature-gap/README.md",
     title: "Feature-Gap-Audit 2026-09-18 (Co-Audit)",
-    subtitle: "10 Feature-Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie (v1.41.0)",
+    subtitle: "10 Feature-Lücken (GAP-01…GAP-10) — Remediation abgeschlossen mit v1.51.1",
+  },
+  auditRoadmap20260920: {
+    file: "docs/audits/2026-09-20-roadmap-audit/README.md",
+    title: "Roadmap-Audit 2026-09-20",
+    subtitle: "25 Komponenten: 4 VERIFIED, 13 PARTIAL, 8 OPEN — 21 eigenständige Remediation-Prompts (v1.51.3)",
   },
   peerReviews: {
     file: "docs/peer-reviews/README.md",

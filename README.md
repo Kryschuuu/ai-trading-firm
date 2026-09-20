@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.42.0 (2026-09-18) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.51.3 (2026-09-20) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), aktueller [25-Punkte-Roadmap-Audit](docs/audits/2026-09-20-roadmap-audit/README.md) mit [21 eigenständigen Umsetzungs-Prompts](docs/audits/2026-09-20-roadmap-audit/prompts/README.md), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -65,7 +65,9 @@ docs/
 │   ├── README.md             # erklärt Naming, Workflow, Status-Modell
 │   ├── TEMPLATE/             # Vorlage für neuen Audit
 │   ├── 2026-09-03-peer-review/      # Peer-Review-Audit (CLOSED, H1-H10 etc.)
-│   └── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01–10 FIXED)
+│   ├── 2026-09-05-security-review-gpt01/  # Security-Audit GPT_01 (SEC-01–10 FIXED)
+│   ├── 2026-09-18-feature-gap/      # Feature-Gap-Audit (abgeschlossen v1.51.1)
+│   └── 2026-09-20-roadmap-audit/    # 25 Roadmap-Befunde + 21 Umsetzungs-Prompts
 ├── peer-reviews/             # NEU: Peer-Review-Patches gesammelt
 │   ├── README.md
 │   ├── 2026-08-26-live-trading-readiness/
@@ -286,7 +288,8 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/audits/2026-09-03-peer-review/` | Senior-Peer-Review 2026-09: H1-H10, C1-C4, B1/B2, W1/W2, S1/S2 (CLOSED) |
 | `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | `docs/audits/2026-09-08-arena-prompts/` | Arena-Review-Serie (Prompt 13): RESTORE-01 FIXED v1.36.37 — Restore des Firmenzustands gebündelt, gedeckelt und indexgestützt |
-| `docs/audits/2026-09-18-feature-gap/` | Feature-Gap-Audit (Co-Audit): 10 Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie |
+| `docs/audits/2026-09-18-feature-gap/` | Feature-Gap-Audit (Co-Audit): 10 Lücken (GAP-01…GAP-10), abgeschlossen v1.51.1 |
+| `docs/audits/2026-09-20-roadmap-audit/` | 25-Punkte-Roadmap-Audit: 4 VERIFIED, 13 PARTIAL, 8 OPEN; 21 vollständige Remediation-Prompts |
 | `docs/peer-reviews/` | Peer-Review-Patches: gesammelt, verknüpft, nachvollziehbar |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |

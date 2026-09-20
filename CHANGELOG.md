@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.51.2**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.51.3**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -11,6 +11,42 @@ Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
 
+## [1.51.3] — 2026-09-20 · fix(backtest, marketdata): Metrik-/Quality-Roundtrips korrigiert · docs(audit): 25-Punkte-Roadmap-Audit mit 21 Remediation-Prompts
+
+### Fixiert
+
+- **Backtest-Volatilität (QA-01):** `computeBacktestMetrics()` las das
+  nicht existente Feld `volatility` aus dem Ergebnis von `sharpeRatio()` und
+  meldete deshalb auch bei schwankenden Equity-Returns immer
+  `annualizedVolatility: 0`. Die Kennzahl verwendet jetzt dieselbe
+  Equity-Log-Return-Serie, `ddof=1` und die dokumentierte
+  `sqrt(annualization)`-Skalierung aus `realizedVolatility()`; ein präziser
+  Regressionstest prüft den positiven, annualisierten Prozentwert.
+- **Marketdata-Quality-Persistenz (QA-02):** `loadQualityReport()` verwirft
+  beim sicheren Einlesen nicht länger alle aggregierten Klassen-Zähler und
+  `crosscheckCompared`. Aggregate werden bewusst aus den validierten
+  Serienzeilen rekonstruiert, statt untrusted persistierte Summen zu
+  übernehmen; der Roundtrip-Test deckt Zähler, Candles und Crosscheck-Coverage
+  ab.
+
+### Hinzugefügt
+
+- **Roadmap-Audit 2026-09-20:** Neues vollständiges Audit-Paket unter
+  `docs/audits/2026-09-20-roadmap-audit/` mit Statusübersicht, Detailreport,
+  **25 komponentenspezifischen Findings**, Abhängigkeiten, TOP-3-Gates und
+  Remediation-Tracking. Ergebnis: **4 VERIFIED, 13 PARTIAL, 8 OPEN**.
+- **Produktionsreife Prompt-Serie:** Für jedes der 21 PARTIAL-/OPEN-Deltas ein
+  eigenständiger Prompt mit verifiziertem Ausgangszustand, konkreten
+  Deliverables, Nicht-Zielen, Point-in-Time-/Idempotenz-/Security-Regeln,
+  Tests, Akzeptanzkriterien sowie Dokumentations-, SemVer-, Commit- und
+  PR-Pflichten. Die vier erfüllten Komponenten bleiben Kontrollbefunde und
+  werden nicht künstlich als Implementierungsaufgabe dupliziert.
+
+### Geändert
+
+- Audit-Zyklus in `docs/audits/README.md`, `docs/README.md`, Root-`README.md`
+  und dem Docs-Katalog registriert. Der veraltete Root-Dokumentationsstand
+  `v1.42.0` ist auf `v1.51.3` korrigiert.
 ## [1.51.2] — 2026-09-20 · test: Unit-Tests für sieben bisher ungetestete Kernmodule (112 Tests) · docs: Versionierung und Doku-Sync
 
 ### Hinzugefügt

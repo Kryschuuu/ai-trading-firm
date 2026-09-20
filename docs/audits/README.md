@@ -30,14 +30,28 @@ docs/audits/
 │   ├── findings/                # H1-H10, C1-C4, B1-B2, S1-S2, W1-W2
 │   └── remediation/
 │       └── SUMMARY.md
-└── 2026-09-05-security-review-gpt01/  # Beispiel: Security-Audit Sep 2026
+├── 2026-09-05-security-review-gpt01/  # Security-Audit Sep 2026
+│   ├── README.md
+│   ├── findings/                # SEC-01 … SEC-10 (siehe Audit-README)
+│   ├── remediation/
+│   │   └── TRACKING.md
+│   └── assets/
+│       └── Security-Review-GPT_01.pdf  # Original-PDF (falls vorhanden)
+├── 2026-09-18-feature-gap/      # Abgeschlossen: GAP-01 … GAP-10
+└── 2026-09-20-roadmap-audit/    # 25 Befunde + 21 Umsetzungs-Prompts
     ├── README.md
-    ├── findings/                # SEC-01 … SEC-10 (siehe Audit-README)
-    ├── remediation/
-    │   └── TRACKING.md
-    └── assets/
-        └── Security-Review-GPT_01.pdf  # Original-PDF (falls vorhanden)
+    ├── report.md
+    ├── findings/
+    ├── prompts/
+    └── remediation/TRACKING.md
 ```
+
+## Aktive und jüngste Auditzyklen
+
+| Zyklus | Scope | Status |
+|---|---|---|
+| [2026-09-20-roadmap-audit](2026-09-20-roadmap-audit/README.md) | 25 Komponenten aus Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **OPEN:** 4 VERIFIED, 13 PARTIAL, 8 OPEN; [21 Umsetzungs-Prompts](2026-09-20-roadmap-audit/prompts/README.md) |
+| [2026-09-18-feature-gap](2026-09-18-feature-gap/README.md) | Zehn priorisierte Feature-Gaps | **CLOSED v1.51.1:** alle zehn Findings behoben; ENV-01 bleibt separates Low-Risk-Engineering-Thema |
 
 ### Naming-Konvention
 
@@ -134,9 +148,11 @@ In `docs/README.md` den neuen Audit in die Tabelle eintragen.
 
 Jedes Finding hat einen Status:
 
-- **OPEN** — Gefunden, noch nicht bearbeitet
+- **OPEN** — Geforderte Funktion beziehungsweise Fix fehlt
+- **PARTIAL** — nahe Infrastruktur existiert, das definierte Delta ist offen
 - **IN_PROGRESS** — Fix in Arbeit (Branch `arena/...`)
-- **FIXED** — Gefixt, mit Version und PR belegt
+- **FIXED** — Gefixt, mit Version, Tests und PR belegt
+- **VERIFIED** — codebasiert geprüft und bereits ohne blockerndes Delta erfüllt
 - **WONTFIX** — Bewusst nicht gefixt, mit Begründung
 - **FALSE_POSITIVE** — Kein echtes Problem, mit Begründung
 

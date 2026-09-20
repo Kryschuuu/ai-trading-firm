@@ -248,7 +248,11 @@ test("Report: speichern + laden (atomar, 0600) — log-Modus schreibt nur den Re
   const dir = tempDir("mdq-");
   const file = path.join(dir, "quality-report.json");
   const raw = validateCandleSeries([calm(T0), calm(T0 + 3 * H)], { expectedIntervalMs: INTERVAL });
-  const report = buildQualityReport([seriesWith("BITUNIX:BTCUSDT", raw)], "log", new Date("2026-01-02T00:00:00Z"));
+  const report = buildQualityReport(
+    [seriesWith("BITUNIX:BTCUSDT", { ...raw, crosscheckCompared: 2 })],
+    "log",
+    new Date("2026-01-02T00:00:00Z"),
+  );
   assert.equal(report.totals.byClass.GAP, 1);
 
   saveQualityReport(report, file);
@@ -258,6 +262,10 @@ test("Report: speichern + laden (atomar, 0600) — log-Modus schreibt nur den Re
   assert.equal(loaded!.series.length, 1);
   assert.equal(loaded!.series[0].instrumentId, "BITUNIX:BTCUSDT");
   assert.equal(loaded!.series[0].counts.GAP, 1);
+  assert.equal(loaded!.series[0].crosscheckCompared, 2, "Cross-Check-Coverage bleibt erhalten");
+  assert.equal(loaded!.totals.series, 1);
+  assert.equal(loaded!.totals.candles, 2);
+  assert.equal(loaded!.totals.byClass.GAP, 1, "Aggregate werden aus validierten Reihen rekonstruiert");
   assert.equal(loaded!.mode, "log");
   // Roh-JSON ist deterministisch sortiert und stabil.
   const rawJson = JSON.parse(readFileSync(file, "utf8"));
