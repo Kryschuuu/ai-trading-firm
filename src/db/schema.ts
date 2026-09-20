@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -195,6 +196,15 @@ export const ruleExecutions = pgTable("rule_executions", {
  * (`scripts/run-backtest.ts`); Lesen via `GET /api/firm/backtests*`
  * (`firm.read`). Migration: `drizzle/2026-09-19_backtest_runs.sql`
  * (append-only, idempotent; alternativ `npx drizzle-kit push`).
+ *
+ * RMA-P1-04 (v1.52.0) — Trade-Ledger-Spalten (additiv, Migration
+ * `drizzle/2026-09-20_backtest_trades.sql`): `idempotency_key` (stabiler
+ * Schlüssel des Laufs; Retry ⇒ derselbe Run, partieller UNIQUE-Index),
+ * `trade_count` (Anzahl persistierter `backtest_trades`-Zeilen),
+ * `reconciliation_status` + `reconciliation_json` (Abgleich Trade-Zeilen ↔
+ * Run-Aggregate, siehe `src/backtest/tradeLedger.ts`). Alle vier Spalten
+ * sind NULL für Alt-Runs (vor v1.52.0): NULL = „kein Trade-Ledger
+ * persistiert“ — bewusst NICHT 0 (Fail-closed-Regel: unavailable ≠ 0).
  */
 export const backtestRuns = pgTable("backtest_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -210,8 +220,118 @@ export const backtestRuns = pgTable("backtest_runs", {
   windowsJson: jsonb("windows_json").notNull(),
   /** Code-Version des Laufs (APP_VERSION, Vergleichbarkeit). */
   codeVersion: text("code_version").notNull(),
+  /**
+   * Stabiler Idempotency-Key des Laufs (RMA-P1-04): `wf1:<sha256>` über die
+   * Lauf-Identität (Instrument, Zeitraum, Regel-Signatur, Fenster, Kosten,
+   * Code-Version, Trade-Hashes). Ein Retry mit gleichem Key liefert den
+   * bestehenden Run zurück statt einen zweiten zu schreiben. NULL = Alt-Run.
+   */
+  idempotencyKey: text("idempotency_key"),
+  /** Anzahl persistierter Trade-Zeilen (NULL = kein Ledger, Alt-Run). */
+  tradeCount: integer("trade_count"),
+  /** `RECONCILED` (Ledger gegen Aggregate geprüft) oder NULL (Alt-Run). */
+  reconciliationStatus: text("reconciliation_status"),
+  /** Abgleich-Evidenz (Checks, Deltas, Toleranzen, Fenster-Hashes). */
+  reconciliationJson: jsonb("reconciliation_json"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("backtest_runs_instrument_idx").on(t.instrumentId, t.createdAt)]);
+}, (t) => [
+  index("backtest_runs_instrument_idx").on(t.instrumentId, t.createdAt),
+  uniqueIndex("backtest_runs_idempotency_key_unique")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  check("backtest_runs_trade_count_check", sql`${t.tradeCount} IS NULL OR ${t.tradeCount} >= 0`),
+  check(
+    "backtest_runs_reconciliation_status_check",
+    sql`${t.reconciliationStatus} IS NULL OR ${t.reconciliationStatus} IN ('RECONCILED')`
+  ),
+]);
+
+/**
+ * Trade-Level-Wahrheitsquelle eines Walk-Forward-Runs (RMA-P1-04, v1.52.0).
+ *
+ * Eine Zeile je abgeschlossenem Trade eines Evaluations-Laufs
+ * (Fenster × Segment IS/OOS). Append-only: Zeilen entstehen ausschließlich
+ * atomar zusammen mit ihrem Run (`persistBacktestRun`, eine Transaktion);
+ * es gibt keinen Update- und keinen Code-Löschpfad.
+ *
+ * Einheiten/Semantik (siehe docs/BACKTESTING.md §5):
+ *   - Preise (`entry_price`, `exit_price`) in Kontowährung je Basiseinheit,
+ *     `qty` in Basiseinheiten, `notional`/PnL/Gebühren/Funding/Slippage in
+ *     Kontowährung. `pnl_pct` in Prozent des Notionals.
+ *   - `pnl_net = pnl_gross − fees + funding` (Kontosicht: Funding negativ =
+ *     gezahlt). `pnl_net`, `fees`, `slippage`, `notional`, `pnl_pct` tragen
+ *     die 4-Nachkommastellen-Rundung der Engine, `funding` 8 Stellen,
+ *     Preise/`qty` sind ungerundete Simulator-Doubles (exakter Roundtrip
+ *     über `numeric`, daraus reproduzierbarer Trade-Hash).
+ *   - `funding` NULL = Engine ohne Funding-Ausweis (nicht 0).
+ *   - Zeit: `entry_ts`/`exit_ts` = Ereigniszeit (Open-Zeitstempel der Kerze,
+ *     auf deren Schlusskurs der Fill simuliert wurde); Berechnungszeit des
+ *     Laufs = `backtest_runs.created_at` bzw. `params_json.createdAt`.
+ *   - `seq` = stabile Reihenfolge im Run (1..N): Fenster aufsteigend, IS vor
+ *     OOS, darin Engine-Schließreihenfolge. `trade_ref` = Engine-ID
+ *     (`POS-n`, eindeutig je Evaluations-Lauf).
+ *
+ * FK ohne Cascade (Repo-Konvention): ein Run mit Trades kann nur gelöscht
+ * werden, wenn seine Trades zuvor explizit gelöscht wurden — kein stilles
+ * Mitlöschen einer Wahrheitsquelle. Migration:
+ * `drizzle/2026-09-20_backtest_trades.sql` (append-only, idempotent).
+ */
+export const backtestTrades = pgTable("backtest_trades", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull().references(() => backtestRuns.id),
+  /** Stabile Sequenz im Run (1..N, kanonische Reihenfolge). */
+  seq: integer("seq").notNull(),
+  /** Walk-Forward-Fensterindex (0-basiert). */
+  windowIndex: integer("window_index").notNull(),
+  /** IS | OOS */
+  segment: text("segment").notNull(),
+  /** Engine-Trade-ID innerhalb des Evaluations-Laufs (`POS-n`). */
+  tradeRef: text("trade_ref").notNull(),
+  strategyId: text("strategy_id").notNull(),
+  symbol: text("symbol").notNull(),
+  /** LONG | SHORT */
+  side: text("side").notNull(),
+  qty: numeric("qty").notNull(),
+  notional: numeric("notional").notNull(),
+  entryTs: timestamp("entry_ts", { withTimezone: true }).notNull(),
+  exitTs: timestamp("exit_ts", { withTimezone: true }).notNull(),
+  entryPrice: numeric("entry_price").notNull(),
+  exitPrice: numeric("exit_price").notNull(),
+  /** Brutto-PnL = qty × (Exit − Entry) (LONG) bzw. qty × (Entry − Exit) (SHORT). */
+  pnlGross: numeric("pnl_gross").notNull(),
+  /** Netto-PnL der Engine (Brutto − Gebühren + Funding), 4 Nachkommastellen. */
+  pnlNet: numeric("pnl_net").notNull(),
+  pnlPct: numeric("pnl_pct").notNull(),
+  fees: numeric("fees").notNull(),
+  /** Funding in Kontosicht (negativ = gezahlt); NULL = nicht ausgewiesen. */
+  funding: numeric("funding"),
+  slippage: numeric("slippage").notNull(),
+  exitReason: text("exit_reason").notNull(),
+  durationBars: integer("duration_bars").notNull(),
+  /** Herkunft (Fenstergrenzen, Regel-Signatur, Simulator-Seed, Engine-ID). */
+  provenanceJson: jsonb("provenance_json").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("backtest_trades_run_seq_unique").on(t.runId, t.seq),
+  uniqueIndex("backtest_trades_run_window_ref_unique").on(t.runId, t.windowIndex, t.segment, t.tradeRef),
+  index("backtest_trades_run_window_idx").on(t.runId, t.windowIndex, t.segment, t.seq),
+  index("backtest_trades_run_symbol_idx").on(t.runId, t.symbol, t.seq),
+  check("backtest_trades_seq_check", sql`${t.seq} >= 1`),
+  check("backtest_trades_window_index_check", sql`${t.windowIndex} >= 0`),
+  check("backtest_trades_segment_check", sql`${t.segment} IN ('IS', 'OOS')`),
+  check("backtest_trades_side_check", sql`${t.side} IN ('LONG', 'SHORT')`),
+  check("backtest_trades_qty_check", sql`${t.qty} > 0`),
+  check("backtest_trades_notional_check", sql`${t.notional} >= 0`),
+  check("backtest_trades_prices_check", sql`${t.entryPrice} > 0 AND ${t.exitPrice} > 0`),
+  check("backtest_trades_time_check", sql`${t.exitTs} >= ${t.entryTs}`),
+  check("backtest_trades_fees_check", sql`${t.fees} >= 0`),
+  check("backtest_trades_slippage_check", sql`${t.slippage} >= 0`),
+  check("backtest_trades_duration_check", sql`${t.durationBars} >= 1`),
+  check(
+    "backtest_trades_exit_reason_check",
+    sql`${t.exitReason} IN ('STOP_LOSS', 'TAKE_PROFIT', 'SIGNAL_EXIT', 'MAX_HOLDING', 'RISK_STOP', 'END_OF_DATA')`
+  ),
+]);
 
 /** Backtest-Läufe einer Regel gegen historische Kerzen (deterministisch). */
 export const ruleBacktests = pgTable("rule_backtests", {

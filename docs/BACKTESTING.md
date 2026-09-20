@@ -1,10 +1,11 @@
 # Regelbasierte Backtesting-Engine mit Walk-Forward-Validierung (GAP-01)
 
-**Stand:** 2026-09-19 · **Modul:** `src/backtest/` · **Version:** `1.51.0` · **Status:** Implementiert
+**Stand:** 2026-09-20 · **Modul:** `src/backtest/` · **Version:** `1.52.0` · **Status:** Implementiert
 
 Diese Datei beschreibt die Walk-Forward-Erweiterung der Backtest-Engine:
 strikte Zeitmaske, Paper-Ausführung über den Paper-Fill-Simulator,
-rollierende IS/OOS-Fenster, vergleichbar persistierte Runs und die CLI.
+rollierende IS/OOS-Fenster, vergleichbar persistierte Runs samt
+Trade-Ledger (`backtest_trades`, RMA-P1-04) und die CLI.
 Die Engine-Basis (Event-Schleife, Portfolio, Legacy-Kostenmodell) steht in
 [BACKTEST_ENGINE.md](BACKTEST_ENGINE.md); das Kostenmodell im Paper-Betrieb
 in [PAPER_TRADING.md](PAPER_TRADING.md) (§3).
@@ -22,8 +23,8 @@ flowchart TD
     E --> F[Kennzahlen aus src/portfolio\nMaxDD, Profit Factor, Sharpe, Sortino]
     F --> G[Report: Aggregate + Fenster\n+ Trade-Hashes]
     G --> H[data/backtest/<runId>.json + .md]
-    G --> I[(backtest_runs\nappend-only)]
-    I --> J[GET /api/firm/backtests\nGET /api/firm/backtests/[id]\nfirm.read]
+    G --> I[(backtest_runs + backtest_trades\nEINE Transaktion, idempotent)]
+    I --> J[GET /api/firm/backtests\nGET /api/firm/backtests/[id]\nGET /api/firm/backtests/[id]/trades\nfirm.read]
 ```
 
 Schichten-Trennung (bewusst):
@@ -153,16 +154,158 @@ Tabelle `backtest_runs` (append-only, Migration
 Walk-Forward-Lauf = EINE Zeile (insert-only, kein Update-Pfad) mit
 `paramsJson` (Regel-Ref + Regel-Spezifikation + Fenster + Kostenprofil),
 `metricsJson` (Aggregate OOS/IS), `windowsJson` (Kennzahlen + Trade-Hash je
-Fenster) und `codeVersion` (Vergleichbarkeit über Releases).
+Fenster) und `codeVersion` (Vergleichbarkeit über Releases). Seit v1.52.0
+zusätzlich (additiv, Migration `drizzle/2026-09-20_backtest_trades.sql`):
+`idempotency_key` (partiell UNIQUE), `trade_count`, `reconciliation_status`
+(`RECONCILED`) und `reconciliation_json` (Abgleich-Evidenz, §5.1). Alt-Runs
+tragen dort `NULL` — „kein Ledger persistiert“, nie „0 Trades“.
 
 Zugriff (kein POST-Endpunkt — Runs entstehen NUR via CLI):
 
-- `GET /api/firm/backtests?limit=1..100` (Default 20) — Liste, jüngste zuerst.
-- `GET /api/firm/backtests/[id]` — ein Run per UUID (404 wenn unbekannt).
+- `GET /api/firm/backtests?limit=1..100` (Default 20) — Liste, jüngste
+  zuerst. Lädt NIE Trade-Zeilen (nur die Run-Zeile inkl. `tradeCount` /
+  `reconciliationStatus`).
+- `GET /api/firm/backtests/[id]` — ein Run per UUID (404 wenn unbekannt);
+  additiv um `ledger`, `trades` (erste Seite) und `links.trades` ergänzt
+  (§5.2). Bestehende Felder (`run`) sind unverändert.
+- `GET /api/firm/backtests/[id]/trades` — Trade-Ledger paginiert (§5.2).
 
-Beide verlangen `firm.read` (SEC-02-Muster, `no-store`) und melden einen
+Alle verlangen `firm.read` (SEC-02-Muster, `no-store`) und melden einen
 unerreichbaren DB-Stand als `503 BACKTEST_RUNS_UNAVAILABLE` mit
 Handlungs-Hinweis (fail-closed statt leerer Liste).
+
+### 5.1 Trade-Ledger `backtest_trades` (RMA-P1-04)
+
+Ein Run ohne seine Trades war bis v1.51.x nur ein Aggregat: die Trade-Logs
+wurden nach der Hash-Bildung verworfen. Seit v1.52.0 ist jeder Trade eines
+Runs als eigene Zeile persistiert — die **Trade-Level-Wahrheitsquelle**
+für Attribution (P1.6), Audits und Reproduzierbarkeit.
+
+**Schema** (Modul `src/backtest/tradeLedger.ts`, reine Abbildung
+`WalkForwardTradeRecord` → Zeile; Drizzle `backtestTrades`):
+
+| Spalte | Typ | Bedeutung / Einheit / Rundung |
+|---|---|---|
+| `id` | uuid PK | technische Zeilen-ID |
+| `run_id` | uuid FK → `backtest_runs.id` | **ohne** `ON DELETE CASCADE` (Repo-Konvention: Trades verhindern das Löschen ihres Runs) |
+| `seq` | int, `UNIQUE (run_id, seq)`, ≥ 1 | stabile Sequenz in Report-Reihenfolge: Fenster ↑, IS vor OOS, Engine-Schließreihenfolge — Keyset-Cursor |
+| `window_index` / `segment` | int ≥ 0 / `IS`·`OOS` | Walk-Forward-Fenster und Evaluationssegment |
+| `trade_ref` | text, `UNIQUE (run_id, window_index, segment, trade_ref)` | Engine-Trade-ID (`POS-n`, je Fenster/Segment eindeutig) |
+| `strategy_id`, `symbol`, `side` | text / `LONG`·`SHORT` | Strategie-Item, Instrument-ID (Replay-Ziel), Richtung |
+| `qty` (> 0), `notional` (≥ 0) | numeric | Basismenge (roh) und Einstiegs-Notional in Quote (4 Stellen) |
+| `entry_ts` / `exit_ts` | timestamptz, `exit ≥ entry` | Zeitstempel der Kerze, deren Schluss den Fill bepreist hat (Engine-`entryTime`/`exitTime`) |
+| `entry_price` / `exit_price` | numeric > 0 | **Fill-Preise** des Paper-Simulators (Slippage/Spread bereits enthalten, roh) |
+| `pnl_gross` | numeric | `qty · Δpreis` (8 Stellen), aus den Fill-Preisen abgeleitet |
+| `pnl_net` | numeric | Engine-`pnl` = `pnl_gross − fees + funding` (4 Stellen; Identität wird beim Mappen geprüft, Toleranz 0,0002) |
+| `pnl_pct` | numeric | `pnl_net / notional · 100` (4 Stellen) |
+| `fees` (≥ 0), `slippage` (≥ 0) | numeric | Gebühren Ein- + Ausstieg (4 Stellen); Slippage-Kosten informativ (4 Stellen, bereits in den Fill-Preisen) |
+| `funding` | numeric NULL-bar | Funding je Trade (8 Stellen, negativ = gezahlt); `NULL` = nicht ausgewiesen (≠ 0) |
+| `exit_reason` | text (CHECK) | `STOP_LOSS`·`TAKE_PROFIT`·`SIGNAL_EXIT`·`MAX_HOLDING`·`RISK_STOP`·`END_OF_DATA` |
+| `duration_bars` | int ≥ 1 | Haltedauer in Kerzen; `durationMs` wird aus den Zeitstempeln abgeleitet (keine redundante Spalte) |
+| `provenance_json` | jsonb | `{v:1, source:"walk-forward", engineTradeId, windowFrom, windowTo, ruleSignature, executionModel, simulatorSeed}` |
+| `created_at` | timestamptz | Schreibzeitpunkt (= Run-`created_at`, Berechnungszeitpunkt) |
+
+Alle Zahlen werden als endliche Dezimal-Strings geschrieben (`decimalString`:
+kein `NaN`/`Infinity`/Exponent) und mit `Number()` gelesen; das Mapping ist
+verlustfrei (`tradeRowToLog(row)` reproduziert das Engine-Log exakt, Test
+„Roundtrip“). Ungültige Trades (nicht endlich, `qty ≤ 0`, Preis ≤ 0,
+negative Gebühren, `exit < entry`, unbekannte Enums, verletzte
+PnL-Identität, Reihenfolgebruch, doppelte Trade-ID) werden **vor** jedem
+DB-Zugriff mit `TradeLedgerError` (`ledger:invalid-trade` /
+`ledger:invalid-report`) abgewiesen.
+
+**Atomarer, idempotenter Write** (`persistBacktestRun` in
+`src/backtest/runStore.ts`):
+
+1. Mapping + Abgleich (unten) laufen rein im Speicher; scheitern sie,
+   wird nichts geschrieben.
+2. Innerhalb EINER Transaktion: Lookup über `idempotency_key` → existiert
+   der Run, wird er (nach Prüfung von Trade-Anzahl und Fenster-Hashes)
+   als Replay zurückgegeben (`created: false`, gleiche UUID); sonst
+   Run-Zeile + Trade-Zeilen (Chunks à 250) einfügen, **Read-back** aller
+   Zeilen aus der Transaktion, erneuter Abgleich — erst bei identischer
+   Evidenz `COMMIT`. Jeder Fehler (DB-Constraint, Exception, Read-back-
+   Abweichung) rollt Run UND Trades zurück (Test „Fehler bei Trade N“).
+3. Idempotency-Key (Default): `wf1:` + sha256 über die Lauf-Identität
+   (Art, Instrument, Timeframe, Zeitraum, Regel-Signatur + -Symbol,
+   Fensterparameter, Kostenprofil, Code-Version, Trade-Hashes aller
+   Fenster) — ohne `createdAt`, damit ein Retry desselben Laufs denselben
+   Key ergibt. Der partielle UNIQUE-Index löst auch parallele Retries auf
+   (SQLSTATE 23505 ⇒ erneuter Lookup ⇒ Replay): nie zwei Runs, nie
+   doppelte Sequenzen. Gleicher Key mit anderem Inhalt ⇒
+   `ledger:idempotency-conflict` (kein stilles Replay); eine Run-UUID mit
+   fremdem Key ⇒ `persist:run-id-conflict`.
+4. Audit (Klasse `telemetry`, nach dem Commit): `BACKTEST_RUN_PERSISTED`
+   (INFO) bzw. `BACKTEST_RUN_PERSIST_FAILED` (WARN, mit Fehlercode);
+   bounded Metrik `backtest_run_persist_total{result,reason}`
+   (`created` · `replayed` · `failed`).
+
+**Abgleich Ledger ↔ Run-Aggregate** (`reconcileTradeLedger`, Evidenz in
+`reconciliation_json`): je Fenster × Segment und je Aggregat werden
+verglichen — Trade-Anzahl und Gewinner (exakt), Netto-PnL (exakt gegen das
+4-stellige `netPnl` des Reports), Gebühren und Slippage
+(|Δ| ≤ 0,005 + n · 5·10⁻⁵, weil die Fenster-Kennzahlen auf 2 Stellen, die
+Trade-Werte auf 4 Stellen gerundet sind), Funding (|Δ| ≤ 10⁻⁶ + n · 10⁻⁸)
+und der **Trade-Hash** (`hashTrades(rows → logs)` muss dem gespeicherten
+`tradeHash` gleichen). Jede Abweichung ⇒ `ledger:reconciliation-mismatch`,
+der Run wird **nicht** geschrieben (kein Status „inkonsistent“ in der DB —
+inkonsistente Runs existieren nicht). Der Equity-PnL (`pnl`, aus der
+Equity-Kurve) darf vom Ledger-PnL (`netPnl`, Σ Trades) abweichen: die
+Differenz ist die END_OF_DATA-Glattstellung nach dem letzten Snapshot und
+wird als `equityLedgerGap` ausgewiesen, nicht kaschiert.
+
+**Volumen & Query-Plan:** Ein Run erzeugt typischerweise 10²–10⁴ Zeilen
+(Fensteranzahl × Trades je Fenster; `WF_MAX_SPAN_DAYS` deckelt implizit).
+Gemessen (PostgreSQL 17, 20 000 Zeilen eines Runs): ≈ 3,8 MB Heap, ≈ 11 MB
+inkl. Indizes (≈ 550 B/Zeile). Alle Lesepfade sind Index-Range-Scans ohne
+Sort-Knoten:
+
+| Query | Plan |
+|---|---|
+| Keyset-Seite `run_id = ? AND seq > ? ORDER BY seq LIMIT n+1` | `Index Scan using backtest_trades_run_seq_unique` |
+| Filter `window`/`segment` | `Index Scan using backtest_trades_run_window_idx (run_id, window_index, segment, seq)` |
+| Filter `symbol` | `Index Scan using backtest_trades_run_symbol_idx (run_id, symbol, seq)` |
+| Existenz/Zählung je Run, FK-Prüfung beim Löschen | `backtest_trades_run_seq_unique` |
+
+**Retention/Löschung:** Es gibt — wie für `backtest_runs` — keinen
+Lösch-Endpunkt und kein Cascade. Ein Run mit Ledger lässt sich nur
+löschen, wenn zuerst seine Trades gelöscht werden (`DELETE FROM
+backtest_trades WHERE run_id = …`, dann der Run); ein Retention-Job wäre
+ein eigenes, dokumentiertes Vorhaben (bewusst nicht Teil von RMA-P1-04).
+Rollback der Migration (nur wenn nötig, verliert das Ledger):
+`DROP TABLE backtest_trades; ALTER TABLE backtest_runs DROP COLUMN
+reconciliation_json, DROP COLUMN reconciliation_status, DROP COLUMN
+trade_count, DROP COLUMN idempotency_key;` — Alt-Code (v1.51.x) liest die
+Run-Zeile danach unverändert.
+
+### 5.2 Read-API des Trade-Ledgers
+
+`GET /api/firm/backtests/[id]/trades` (und dieselben Parameter auf
+`GET /api/firm/backtests/[id]`, dessen `trades` die ERSTE Seite enthält):
+
+| Parameter | Bedeutung |
+|---|---|
+| `limit` | 1..500, Default 100 (hartes Limit — größere Werte ⇒ 400 `INVALID_TRADE_LIMIT`) |
+| `cursor` | opaker Cursor der Vorseite (`nextCursor`); Seite beginnt NACH der letzten gelieferten `seq` (Keyset, kein OFFSET). Ungültig ⇒ 400 `INVALID_TRADE_CURSOR` |
+| `segment` | `IS` · `OOS` |
+| `window` | Fensterindex ≥ 0 |
+| `symbol` | Instrument-ID (≤ 64 Zeichen `[A-Za-z0-9:_./-]`) |
+| `side` | `LONG` · `SHORT` |
+| `exitReason` | einer der sechs Exit-Gründe |
+
+Unbekannte Filterwerte ⇒ 400 `INVALID_TRADE_FILTER` (nie stilles
+Ignorieren). Antwort: `{ ok, runId, ledger, trades }` mit
+`ledger = { status: "RECONCILED" | "UNAVAILABLE", tradeCount, idempotencyKey,
+reconciliation }` und `trades = { items[], nextCursor, limit, filter }`;
+`nextCursor: null` markiert die letzte Seite. Jedes Item trägt `seq`,
+`windowIndex`, `segment`, `tradeRef`, `symbol`, `side`, `qty`, `notional`,
+`entryTs`/`exitTs` (ISO), `entryPrice`/`exitPrice`, `pnlGross`, `pnlNet`,
+`pnlPct`, `fees`, `funding` (`null` möglich), `slippage`, `exitReason`,
+`durationBars`, `durationMs`, `provenance`. Alt-Runs (vor v1.52.0) liefern
+`ledger.status = "UNAVAILABLE"`, `tradeCount = null` und eine leere Seite
+mit Hinweis — nie „0 Trades“. Unbekannte UUID ⇒ 404
+`BACKTEST_RUN_NOT_FOUND`, ungültige UUID ⇒ 400 `INVALID_RUN_ID` (beides vor
+jedem DB-Zugriff bzw. Ledger-Read).
 
 ---
 
@@ -173,7 +316,7 @@ node --import tsx scripts/run-backtest.ts \
   --instrument=BITUNIX:BTCUSDT --timeframe=1h \
   --from=2024-01-01 --to=2026-01-01 \
   --rule-id=<uuid> | --rule-file=./regel.json \
-  [--is-days=90] [--oos-days=30] [--skip-db]
+  [--is-days=90] [--oos-days=30] [--idempotency-key=<key>] [--skip-db]
 ```
 
 | Flag | Pflicht | Bedeutung |
@@ -184,14 +327,18 @@ node --import tsx scripts/run-backtest.ts \
 | `--rule-id` | genau eine Regelquelle | Regel-UUID aus `trade_rules` |
 | `--rule-file` | genau eine Regelquelle | Pfad zu einer RuleSpec-JSON (wird sanitized + gegen `RULE_CEILINGS` geklemmt) |
 | `--is-days` / `--oos-days` | nein | Fenster-Override (Bounds wie `WF_*`, sonst Env-Wert) |
-| `--skip-db` | nein | kein `backtest_runs`-Insert (nur Artefakte; Offline-Betrieb) |
+| `--idempotency-key` | nein | eigener Lauf-Schlüssel (8..128 Zeichen `[A-Za-z0-9:_.-]`); Default: Inhalts-Fingerprint des Laufs (§5.1) |
+| `--skip-db` | nein | keine Persistenz (nur Artefakte; Offline-Betrieb) |
 
 Ablauf: Regel laden (DB oder Datei) → Kerzen aus dem HistoricalStore →
 Instrument aus der Universe-Registry auflösen (fehlt sie: neutrales
 Spot-Default, sichtbar in der Konsolenausgabe) → Walk-Forward-Lauf mit
 kalibriertem Simulator + Funding-Konfiguration des Paper-Betriebs →
-Artefakte `data/backtest/<runId>.json` (Report) + `<runId>.md`
-(Zusammenfassung) → `backtest_runs`-Zeile mit derselben UUID.
+`persistBacktestRun` (Run + ALLE Trades in EINER Transaktion, idempotent;
+Retry meldet „Idempotent: Lauf war bereits als Run … persistiert“) →
+Artefakte `data/backtest/<runId>.json` (Report inkl. `trades`) +
+`<runId>.md` (Zusammenfassung mit Equity- UND Ledger-PnL) unter der UUID
+des persistierten Runs.
 
 Regel-Symbol vs. Instrument: Regel-Spezifikationen tragen PAPER-kanonische
 Symbole (z. B. `BTC/USDT`), Store-Reihen Venue-IDs (z. B.
@@ -202,8 +349,11 @@ MD-Zusammenfassung — kein stiller Tausch.
 
 Fail-closed: Fehlende/ungültige Flags, ungültige Regeln, leere Kerzenreihen
 und zu kurze Zeiträume brechen mit Exit 1 ab (kein Run, kein Artefakt,
-keine DB-Zeile). Schlägt das DB-Insert fehl, bleiben die Artefakte
-bestehen und der Exit-Code ist 1 (laut, nie still).
+keine DB-Zeile). Schlägt die Persistenz fehl oder wird sie abgelehnt
+(Ledger ≠ Aggregate, DB-Fehler), entsteht KEINE DB-Zeile (Transaktion
+zurückgerollt); die Artefakte werden unter der Kandidaten-UUID trotzdem
+geschrieben und der Exit-Code ist 1 (laut, nie still). Ein Lauf gilt erst
+mit `RECONCILED`-Ledger als persistiert.
 
 ---
 
@@ -231,5 +381,11 @@ bestehen und der Exit-Code ist 1 (laut, nie still).
 - Paper-Kostenmodell: [PAPER_TRADING.md](PAPER_TRADING.md) (§3), Funding:
   `src/lib/funding.ts`
 - Flags: [CONFIGURATION.md](../CONFIGURATION.md) („Walk-Forward-Backtesting“)
-- Finding: [GAP-01](audits/2026-09-18-feature-gap/findings/GAP-01-backtesting-walk-forward.md)
-- Tests: `tests/backtest.engine.test.ts`, `tests/backtest.step.nosynthetic.test.ts`
+- Findings: [GAP-01](audits/2026-09-18-feature-gap/findings/GAP-01-backtesting-walk-forward.md),
+  [RMA-P1-04](audits/2026-09-20-roadmap-audit/findings/RMA-P1-04-backtest-trades.md)
+  (Trade-Ledger)
+- Migrationen: `drizzle/2026-09-19_backtest_runs.sql`,
+  `drizzle/2026-09-20_backtest_trades.sql`
+- Tests: `tests/backtest.engine.test.ts`, `tests/backtest.step.nosynthetic.test.ts`,
+  `tests/backtest.tradeLedger.test.ts` (Mapping, Abgleich, Idempotenz,
+  Rollback, Cursor-API — DB-Teile ping → skip)

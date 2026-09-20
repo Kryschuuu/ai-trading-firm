@@ -205,6 +205,7 @@ Messschleife:
 | `firm_order_rejects_total{reason}` | Counter | Ablehnungs-Funnel (`reject()`) | Rejects je Grund-**Klasse** (`INSUFFICIENT_CASH`, `KILL_SWITCH_ARMED`, `GUARDRAIL`, …) |
 | `llm_calls_total{provider,outcome}` | Counter | Routing-Schicht (`src/routing/adapter.ts`) | LLM-Aufrufe je Provider; `outcome` = `ok`/`error`/`fallback` |
 | `llm_latency_ms_sum{provider}` | Counter | Routing-Schicht (Latenz fällt dort ohnehin an) | Summe der Latenzen; Mittelwert = `llm_latency_ms_sum / llm_calls_total{outcome="ok"}` |
+| `backtest_run_persist_total{result,reason}` | Counter | Backtest-Persistenz (`persistBacktestRun`, RMA-P1-04) | Walk-Forward-Runs mit Trade-Ledger: `result` = `created`/`replayed`/`failed`; `reason` = `ok` bzw. Fehlercode-Klasse (`ledger:reconciliation-mismatch`, `ledger:idempotency-conflict`, `persist:db-error`, …) — nie Run-IDs oder Symbole |
 
 **Kardinalitäts- und Secret-Regel** (wie beim Marktdaten-Counter): Labels sind
 ausschließlich **klassifizierte Codes** — `metricLabel()` verwirft alles, was

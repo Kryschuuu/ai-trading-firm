@@ -1900,6 +1900,86 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  BACKTEST_RUN_PERSISTED: {
+    label: "Backtest-Run persistiert",
+    category: "rule",
+    expectedLevel: "INFO",
+    description:
+      "Ein Walk-Forward-Run wurde zusammen mit seinem vollständigen Trade-Ledger in einer Transaktion gespeichert (backtest_runs + backtest_trades). Die Trade-Zeilen wurden vor dem Commit gegen die Run-Aggregate und die Trade-Hashes je Fenster abgeglichen.",
+    headline: (d) => {
+      const trades = num(d.tradeCount);
+      const created = d.created === false ? "idempotentes Replay" : "neu";
+      return [
+        text(d.instrumentId) ? `${text(d.instrumentId)} (${text(d.timeframe) ?? "?"})` : "Backtest-Run",
+        trades !== null ? `${trades} Trades` : "",
+        created,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    },
+    explain: (d) =>
+      d.created === false
+        ? "Ein Run mit identischem Idempotency-Key existierte bereits — es wurde nichts doppelt geschrieben, der bestehende Run wurde zurückgegeben."
+        : "Run und alle Trade-Zeilen sind atomar gespeichert; das Ledger ist als RECONCILED markiert (Anzahl, Netto-PnL, Gebühren, Funding und Trade-Hashes stimmen mit den Run-Aggregaten überein).",
+    sections: (d) => [
+      {
+        title: "Run",
+        facts: [
+          { label: "Run-ID", value: text(d.runId) ?? "—", mono: true },
+          { label: "Instrument", value: text(d.instrumentId) ?? "—" },
+          { label: "Timeframe", value: text(d.timeframe) ?? "—" },
+          { label: "Fenster", value: num(d.windows) !== null ? String(num(d.windows)) : "—" },
+          { label: "Code-Version", value: text(d.codeVersion) ?? "—", mono: true },
+        ],
+      },
+      {
+        title: "Trade-Ledger",
+        facts: [
+          { label: "Trade-Zeilen gesamt", value: num(d.tradeCount) !== null ? String(num(d.tradeCount)) : "—" },
+          { label: "OOS-Trades", value: num(d.oosTrades) !== null ? String(num(d.oosTrades)) : "—" },
+          { label: "OOS-Netto-PnL (Ledger)", value: formatKnownValue("pnl", d.oosNetPnl), tone: toneForValue("pnl", d.oosNetPnl) },
+          { label: "Schreibart", value: d.created === false ? "idempotentes Replay (kein neuer Run)" : "neu angelegt" },
+          { label: "Idempotency-Key", value: text(d.idempotencyKey) ?? "—", mono: true, hint: "wf1:<sha256> über Lauf-Identität + Trade-Hashes — ein Retry mit gleichem Key erzeugt keinen zweiten Run." },
+        ],
+      },
+    ],
+  },
+
+  BACKTEST_RUN_PERSIST_FAILED: {
+    label: "Backtest-Run nicht persistiert",
+    category: "rule",
+    expectedLevel: "WARN",
+    description:
+      "Die atomare Speicherung eines Walk-Forward-Runs mit Trade-Ledger ist fehlgeschlagen oder wurde abgelehnt (ungültige Trade-Zeile, Abgleich Ledger ↔ Aggregate verletzt, Idempotency-Konflikt, DB-Fehler). Es wurde weder ein Run noch eine Trade-Zeile geschrieben — der Lauf gilt NICHT als persistiert.",
+    headline: (d) => [text(d.instrumentId) ?? "Backtest-Run", text(d.code) ?? "Fehler"].join(" · "),
+    explain: (d) => {
+      const code = text(d.code) ?? "";
+      if (code.startsWith("ledger:reconciliation")) return "Die Trade-Zeilen reproduzieren die Run-Aggregate nicht — der Write wurde fail-closed abgelehnt (kein Run ohne stimmiges Ledger).";
+      if (code.startsWith("ledger:readback")) return "Die aus der Datenbank zurückgelesenen Zeilen weichen vom Vorab-Abgleich ab — die Transaktion wurde zurückgerollt.";
+      if (code.startsWith("ledger:idempotency")) return "Der Idempotency-Key ist bereits mit einem anderen Ergebnis belegt — kein sicheres Replay möglich.";
+      if (code.startsWith("ledger:invalid")) return "Mindestens eine Trade-Zeile ist ungültig (z. B. NaN, negative Menge, Exit vor Entry) — nichts wurde geschrieben.";
+      return "Datenbankfehler beim Schreiben — Artefakte der CLI bleiben bestehen, der Exit-Code ist 1.";
+    },
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Run-ID", value: text(d.runId) ?? "—", mono: true },
+          { label: "Instrument", value: text(d.instrumentId) ?? "—" },
+          { label: "Code", value: text(d.code) ?? "—", mono: true },
+          { label: "Meldung", value: text(d.message) ?? "—" },
+        ],
+      },
+    ],
+    check: () => [
+      {
+        severity: "warn",
+        title: "Run nicht gespeichert",
+        detail: "Der Lauf ist nicht in backtest_runs vorhanden. CLI-Ausgabe prüfen (Exit 1) und nach Behebung erneut ausführen — der Idempotency-Key verhindert Duplikate.",
+      },
+    ],
+  },
+
   RISK_ADAPTIVE: {
     label: "Risiko angepasst",
     category: "risk",

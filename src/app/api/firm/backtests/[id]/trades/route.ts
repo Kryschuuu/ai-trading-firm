@@ -12,25 +12,19 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * EINEN Walk-Forward-Run lesen (GAP-01, v1.51.0; Trade-Ledger RMA-P1-04,
- * v1.52.0).
+ * Trade-Ledger eines Walk-Forward-Runs, paginiert (RMA-P1-04, v1.52.0).
  *
- * Liefert die vollständige Run-Zeile (`paramsJson`, `metricsJson`,
- * `windowsJson`) per UUID — additiv ergänzt um
- *   - `ledger`: Status des Trade-Ledgers (`RECONCILED` | `UNAVAILABLE` für
- *     Alt-Runs), `tradeCount` (`null` = nicht persistiert, nie 0),
- *     Idempotency-Key und Abgleich-Evidenz;
- *   - `trades`: die ERSTE Seite der Trade-Zeilen (Keyset-Paging über `seq`,
- *     hartes Limit 500, Default 100) mit `nextCursor`. Dieselben Query-
- *     Parameter wie `GET /api/firm/backtests/[id]/trades`
- *     (`limit`, `cursor`, `segment`, `window`, `symbol`, `side`,
- *     `exitReason`); Folgeseiten holt man über die Trades-Route
- *     (`links.trades`), damit die Run-Zeile nicht je Seite erneut übertragen
- *     wird.
+ * `GET /api/firm/backtests/[id]/trades?limit=1..500&cursor=…&segment=IS|OOS
+ *   &window=N&symbol=…&side=LONG|SHORT&exitReason=…`
  *
- * SEC-02-Muster: `firm.read` erforderlich, no-store, reines Lesen (kein
- * POST-Endpunkt — Runs entstehen via CLI). Ungültige Query ⇒ 400 vor jedem
- * DB-Zugriff.
+ * Keyset-Paging über die stabile Sequenz `seq` (Index-Range, kein OFFSET):
+ * `nextCursor` ist opak und zeigt auf die Zeile NACH der letzten gelieferten;
+ * `null` = letzte Seite. Filter sind geschlossene Mengen bzw. bounded
+ * Strings; unbekannte Werte ⇒ 400 (nie stilles Ignorieren). Alt-Runs ohne
+ * persistiertes Ledger liefern `ledger.status = "UNAVAILABLE"`,
+ * `tradeCount = null` und eine leere Seite — nie „0 Trades“.
+ *
+ * SEC-02-Muster: `firm.read` erforderlich, no-store, reines Lesen.
  */
 export async function GET(
   req: Request,
@@ -47,8 +41,7 @@ export async function GET(
       { status: 400, headers: { "Cache-Control": "private, no-store" } }
     );
   }
-  const url = new URL(req.url);
-  const tradeQuery = tradePageQueryFromUrl(url);
+  const tradeQuery = tradePageQueryFromUrl(new URL(req.url));
   if (!tradeQuery.ok) {
     return NextResponse.json(
       { ok: false, error: tradeQuery.error },
@@ -65,18 +58,21 @@ export async function GET(
       );
     }
     const ledger = runLedgerView(run);
-    const trades =
-      ledger.status === "RECONCILED"
-        ? await listBacktestTrades(checked.id, tradeQuery.query)
-        : emptyTradePage(tradeQuery.query);
+    if (ledger.status !== "RECONCILED") {
+      return NextResponse.json(
+        {
+          ok: true,
+          runId: run.id,
+          ledger,
+          trades: emptyTradePage(tradeQuery.query),
+          note: "Run vor v1.52.0 — kein Trade-Ledger persistiert (tradeCount null, nicht 0).",
+        },
+        { headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+    const trades = await listBacktestTrades(checked.id, tradeQuery.query);
     return NextResponse.json(
-      {
-        ok: true,
-        run,
-        ledger,
-        trades,
-        links: { trades: `/api/firm/backtests/${checked.id}/trades` },
-      },
+      { ok: true, runId: run.id, ledger, trades },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (e) {
