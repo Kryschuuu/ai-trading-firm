@@ -304,6 +304,21 @@ an echte Venues ist nicht Teil dieses Deltas und bleibt durch die Live-Gate
 
 ---
 
+### 3.4 Derivat-Kontext aus der Perp-Ablage (RMA-P2-02, v1.54.0)
+
+Scanner-Signale und der Derivat-Kontext des Paper-Pfads können Funding-Rate,
+Intervall, Open Interest (Quote) und Δ24 h aus der kanonischen Ablage lesen
+(`perpDerivativeProvider`). Der statische Fallback aus §3.2
+(`PAPER_FUNDING_RATE_PCT_PER_8H`) bleibt unverändert die Quelle der
+Paper-Accruals, solange `PERP_DATA_ENABLED=false` (Default) — mit Freigabe
+ersetzt der as-of-gelesene Wert den gerateten, und **nur** belegbare Sätze
+werden benutzt. Alles, was die Ablage nicht belegen kann, bleibt `null` mit
+Grund (`MISSING`, `STALE`, `UNSUPPORTED`, `UNAVAILABLE`,
+`ALL_ROWS_UNATTESTABLE`); das Artefakt `data/perpdata/derivatives.json` wird bei
+zu alter Datei verworfen (`FILE_STALE`) statt mit Alt-Werten zu handeln.
+Kein Orderrouting, keine Risiko- oder Gate-Änderung. Details:
+[PERPETUAL_DATA.md](PERPETUAL_DATA.md) §6.
+
 ## 4. Failover-Kette (kein stiller Kursquellwechsel)
 
 Reihenfolge (konfigurierbar, dokumentiert):

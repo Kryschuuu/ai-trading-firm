@@ -117,7 +117,16 @@ export function loadFundingConfig(
  * NICHT Teil dieses PR — das Interface hält nur den Austauschpunkt offen.
  */
 export interface FundingRateProvider {
-  getFundingRate(symbol: string): number | null;
+  /**
+   * @param symbol  Engine-Symbol (Großbuchstaben wie in `FundingPositionRow`).
+   * @param asOfMs  Auswertungszeitpunkt desTicks (Epoch-ms). **Optional**:
+   *   Live-Provider (Momentwert) ignorieren ihn; historische Provider
+   *   (RMA-P2-02, `src/perpdata/consumers.ts`) dürfen daraus nur Sätze
+   *   verwenden, die zu `asOfMs` bereits bekannt sein durften
+   *   (`available_at <= asOfMs`) — sonst wäre der Backtest-Blick in die
+   *   Zukunft gebucht.
+   */
+  getFundingRate(symbol: string, asOfMs?: number): number | null;
 }
 
 /** Runden auf 8 Nachkommastellen (numeric-Spalte, keine Float-Rests). */
@@ -268,7 +277,7 @@ export class FundingAccrualEngine {
       if (row.isPerpetual !== true) continue;
       const symbol = row.symbol.toUpperCase();
       // Quelle gestuft: Provider (Stufe b) vor statischem Default (Stufe a).
-      const provided = this.opts.rateProvider?.getFundingRate(symbol) ?? null;
+      const provided = this.opts.rateProvider?.getFundingRate(symbol, nowMs) ?? null;
       const ratePer8h =
         provided !== null && Number.isFinite(provided)
           ? provided

@@ -26,6 +26,9 @@ import { MarketDataFetchError } from "./marketDataErrors";
 import { structuredLog } from "./logger";
 import { snapshot, ema, rsi } from "./indicators";
 import { fetchMarketNews } from "./news";
+// RMA-P2-02: Derivatekontext für den Technical Analyst. Das schmale Modul
+// (nicht der Barrel) hält die Abhängigkeit richtungsrein: lib → perpdata.
+import { perpAnalystSnapshotLinesFromCache } from "@/perpdata/consumers";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __analystBusy?: boolean;
@@ -212,6 +215,14 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
       });
     }
   }
+  // RMA-P2-02: Derivatekontext aus der kanonischen Perp-Ablage (Funding-Satz
+  // je Intervall, Open Interest, Liquidationen) — **additive** Zeilen, keine
+  // Ersetzung der Kerzenzeilen. Ein fehlender/veralteter Befund erscheint als
+  // „unavailable (Grund)“-Zeile, damit der Analyst „kein Datum“ nicht mit
+  // „Funding 0 %“ verwechselt. Bei PERP_DATA_ENABLED=false (Default) und ohne
+  // Artefakt bleibt der Prompt identisch zu v1.53.0.
+  const perpLines = perpAnalystSnapshotLinesFromCache({ symbol, maxLines: 4 });
+
   if (lines.length === 0) return;
 
   const userPrompt = [
@@ -220,6 +231,7 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
     ``,
     `Multi-timeframe data for ${symbol}:`,
     ...lines,
+    ...(perpLines.length > 0 ? [``, `Perpetual derivatives (canonical store, as-of):`, ...perpLines] : []),
     ``,
     `Assess trend alignment across timeframes (RSI zones, EMA9/21 relationship, ATR volatility regime).`,
     `Respond ONLY with JSON: {"view":"BULLISH|BEARISH|NEUTRAL","confidence":0..1,"thesis":"<=200 chars","recommendation":null}`,
@@ -235,8 +247,8 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
   if (!result) return;
   const a = normalizeAnalysis(result.parsed);
   await recordAnalysis(await findAgentByRole("TECHNICAL_ANALYST"), "TECHNICAL_ANALYST", undefined,
-    `[TECH ${symbol} ${new Date().toISOString()}]\n${lines.join("\n")}\n→ ${a.view}: ${a.thesis}`.trim(),
-    { kind: "ANALYSIS", view: a.view, confidence: a.confidence, thesis: a.thesis, data: lines },
+    `[TECH ${symbol} ${new Date().toISOString()}]\n${[...lines, ...perpLines].join("\n")}\n→ ${a.view}: ${a.thesis}`.trim(),
+    { kind: "ANALYSIS", view: a.view, confidence: a.confidence, thesis: a.thesis, data: [...lines, ...perpLines] },
     result
   );
 }

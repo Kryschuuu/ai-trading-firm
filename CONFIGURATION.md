@@ -617,6 +617,38 @@ exakt wie vorher** (Modus `log`, Aggregation/Cross-Check aus). Details:
 | `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in — Rate-Limits!). Nur wirksam, wenn der Adapter die optionale Methode `getCrosscheckCandles()` implementiert (Adapter-Registry-Muster); ohne Implementierung no-op. Bei `on` ein zusätzlicher Request je Reihe (Rate-Limit-Bucket bleibt autoritativ). |
 | `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in Prozent (Abweichung der Schlusskurse auf gemeinsamen Zeitstempeln, relativ zum Primärkurs). **Streng** größer ⇒ `QUALITY_CROSSCHECK`-Befund + Log. Bounds [0.1, 10], Clamp mit Log-Warnung. 0 gemeinsame Zeitstempel = kein Befund (kein Vergleich ≠ Abweichung). |
 
+### Perpetual-Daten (RMA-P2-02, v1.54.0)
+
+Historische Funding-Raten, Open Interest und Liquidationen in eigenen
+`perp_*`-Tabellen, as-of-lesbar (`event_time ≤ asOf` **und**
+`available_at ≤ asOf`), append-only und idempotent. Beide Hauptschalter stehen
+aus: ohne Konfiguration läuft das System exakt wie vor v1.54.0 (Scanner,
+Zyklus, Risiko, Live-Gate unverändert). Details:
+[`docs/PERPETUAL_DATA.md`](docs/PERPETUAL_DATA.md), CLI `npm run perp:sync`.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `PERP_DATA_ENABLED` | `false` | Konsumenten an: Derivatekontext der Signale, Funding-Replay im Backtest, Analystenzeilen, Derivat-Artefakt. `false` ⇒ alle Pfade lesen nicht und verhalten sich wie vorher. |
+| `PERP_DATA_SYNC_ENABLED` | `false` | Netz-Ingestion an. Ohne sie geht **kein** Request ab; zusätzlich gilt pro Venue `<VENUE>_ENABLED` (Bitunix: `BITUNIX_ENABLED=true`). |
+| `PERP_DATA_VENUES` | alle bekannten | Kommaliste als Allowlist des Sync (`BITUNIX`, `SIM`). Unbekannte Venue ⇒ klassifizierter Skip, kein Lauf. |
+| `PERP_DATA_AVAILABILITY` | `ingested` | `availableAt`-Politik: `ingested` = `max(event_time, fetched_at)` (realistisch für Punkt-für-Punkt-Replays), `settlement` = `event_time` (volle Historie, nur für Forschung mit bekanntem Stand). |
+| `PERP_DATA_QUALITY_MODE` | `log` | `log` (Befunde sichtbar, Bestand bleibt lesbar) \| `strict` (Reihen mit `INVALID`/`DUPLICATE` bleiben ungeschrieben und werden in der Abfrage gefiltert). |
+| `PERP_DATA_BACKFILL_DAYS` | `30` | Tiefe der Erstbefüllung je Reihe. Bounds [1, 400], Clamp mit Warnung. |
+| `PERP_DATA_FUNDING_INTERVAL_HOURS` | `8` | erwartetes Funding-Raster (Lücken- und Overlap-Berechnung). Bounds [1, 24]. Gemeldete Intervalle gewinnen immer. |
+| `PERP_DATA_OI_INTERVAL_MINUTES` | `60` | erwartetes Open-Interest-Raster (Lückenprüfung, Limit der Abfragefenster). Bounds [1, 1440]. |
+| `PERP_DATA_MAX_STALE_FUNDING_HOURS` | `24` | Frische der Funding-Reihe, gemessen am **Ereignis** (nicht am Abruf). Bounds [1, 168]. |
+| `PERP_DATA_MAX_STALE_OI_HOURS` | `4` | Frische des Open Interest. Bounds [1, 72]. |
+| `PERP_DATA_MAX_ABS_FUNDING_RATE` | `0.0075` | Plausibilitäts-Bound je Intervall (0,75 % ist bereits extrem). Außerhalb ⇒ Wert `null` + `OUT_OF_BOUNDS`, **nie** geklemmt. Bounds [0.0001, 0.3]. |
+| `PERP_DATA_MAX_OI_CHANGE` | `0.5` | maximale relative OI-Änderung je Schritt (Δ beyond ⇒ `OUTLIER`-Befund, Wert bleibt markiert). Bounds [0.01, 5]. |
+| `PERP_DATA_CONCURRENCY` | `4` | parallele Reihen je Lauf, hart ≤ 8 (der Rate-Bucket bleibt autoritativ). Bounds [1, 8]. |
+| `PERP_DATA_SAFETY_LAG_MS` | `60000` | Nachlauf des Sync-Fensters gegen die Uhr, damit ein noch laufendes Settlement nicht halbvoll gelesen wird. Bounds [0, 6 h]. |
+| `PERP_DATA_CROSSCHECK_VENUE` | `—` | zweite Venue für den Funding-Abgleich (`CROSSCHECK`-Befund bei Abweichung). Leer = aus (kein zusätzlicher Netzwerkverkehr). |
+
+Artefakte: `data/perpdata/quality-report.json` und
+`data/perpdata/derivatives.json` (0600, atomar). Migration:
+`psql \"$DATABASE_URL\" -f drizzle/2026-09-20_perpetual_data.sql`.
+
+
 ### Sizing & Cluster-Limits (GAP-04, v1.48.0)
 
 Vol-basiertes Position-Sizing (`qty = (equity · riskPerTradePct) / |entry − stop|`,

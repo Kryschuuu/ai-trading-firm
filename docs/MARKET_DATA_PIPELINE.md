@@ -1163,6 +1163,20 @@ Default off ⇒ kein Zweitquellen-Request).
 | `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in, Rate-Limits) |
 | `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in %, Bounds [0.1, 10] |
 
+## 15. Perpetual-Daten — eigene Pipeline (RMA-P2-02, v1.54.0)
+
+Funding-Raten, Open Interest und Liquidationen laufen **bewusst nicht** durch
+diese Kerzen-Pipeline, sondern durch `src/perpdata/` (eigene Ablage
+`perp_*`, eigene Capabilities, eigener Quality-Layer, eigenes CLI
+`npm run perp:sync`). Geteilt werden Muster und Grenzen, nicht die Tabellen:
+Token-Bucket pro Lauf, Public-Client ohne Credentials, Fehlerklassen statt
+Rohmeldungen, `log`/`strict`-Qualität mit denselben Klassen (GAP/OUTLIER/
+INVALID/DUPLICATE plus CROSSCHECK), append-only-Idempotenz. Grund der Trennung:
+Derivate-Reihen haben ein anderes Zeit- und Einheitenmodell (`interval_hours`,
+`basis` mit Umrechnung, `source_event_id` je Liquidation) und eine eigene
+Verfügbarkeits-Politik (`ingested`/`settlement`). Details:
+[PERPETUAL_DATA.md](PERPETUAL_DATA.md).
+
 Alle Defaults sind **sicher/neutral**: ohne jede Konfiguration läuft das System
 exakt wie vorher (Qualitäts-Check im `log`-Modus sichtbar, Aggregation/Cross-
 Check aus). Beobachtbarkeit der neuen Klassen: `docs/OBSERVABILITY.md` §2.

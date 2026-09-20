@@ -60,6 +60,12 @@ import type { MarketInstrument } from "../src/universe/types";
 import { resolveRuntimePath } from "../src/lib/appPaths";
 import { calibrateSimulatorConfig, loadSimulatorConfig } from "../src/lib/marketdata/config";
 import { loadFundingConfig } from "../src/lib/funding";
+import {
+  createPerpFundingRateProvider,
+  getPerpDataService,
+  loadPerpConfig,
+  perpDataEnabled,
+} from "../src/perpdata/index";
 import { loadWalkForwardConfig, WF_BOUNDS } from "../src/backtest/walkforward";
 
 const USAGE = `Walk-Forward-Backtest (GAP-01) — genau EIN Regel-Replay je Aufruf.
@@ -303,6 +309,56 @@ async function main(): Promise<void> {
   const funding = loadFundingConfig();
   const strategies: BacktestStrategyItem[] = [{ type: "rule", spec: replaySpec, id: `RULE-${spec.symbol}` }];
 
+  // RMA-P2-02: Funding-Satz aus der kanonischen Perp-Historie statt des
+  // statischen Umgebungs-Satzes — as-of dem Bar-Zeitstempel
+  // (`available_at <= asOfMs`), damit kein Backtest-Satz aus der Zukunft
+  // gebucht wird. Nur bei `PERP_DATA_ENABLED=true`; sonst bleibt der Lauf
+  // bit-identisch zu v1.53.0 (statischer Default). Liefert die Ablage für ein
+  // Symbol nichts, fällt die Engine pro Bar auf den dokumentierten
+  // Umgebungs-Satz zurück und sagt es einmal laut.
+  let perpFunding: ReturnType<typeof createPerpFundingRateProvider> | null = null;
+  if (perpDataEnabled()) {
+    try {
+      const perpConfig = loadPerpConfig();
+      const venue = instrumentId.includes(":") ? instrumentId.slice(0, instrumentId.indexOf(":")) : null;
+      const registry = getRegistry();
+      perpFunding = createPerpFundingRateProvider({
+        source: getPerpDataService().store,
+        config: perpConfig,
+        instrumentOf: (symbol) => {
+          const key = String(symbol).toUpperCase();
+          return (
+            instruments[key] ??
+            registry.get(key) ??
+            (venue === null ? null : registry.get(`${venue}:${key}`)) ??
+            null
+          );
+        },
+        warn: (line) => console.warn(`[run-backtest] ${line}`),
+      });
+      await perpFunding.load({
+        // Engine-Symbol ist je nach Lauf der Instrument-Key oder das
+        // Regel-Symbol — beide Adressen füllen denselben Cache-Eintrag.
+        symbols: [instrumentId, spec.symbol],
+        fromMs: candles[0].time,
+        toMs: candles[candles.length - 1].time,
+      });
+      const loaded = perpFunding.stats();
+      console.log(
+        `[run-backtest] Funding: kanonische Perp-Historie (${loaded.symbols} Symbol(e) mit Reihen, ` +
+          `Fenster ${new Date(candles[0].time).toISOString()} → ${new Date(candles[candles.length - 1].time).toISOString()})` +
+          (loaded.symbols === 0 ? ` — Ablage leer, Engine nutzt den Umgebungs-Default ${funding.ratePctPer8h} %/8h.` : ".")
+      );
+    } catch (error) {
+      perpFunding = null;
+      console.warn(
+        `[run-backtest] Funding-Historie nicht lesbar (${
+          error instanceof Error ? error.message.slice(0, 160) : "unbekannter Fehler"
+        }) — Backtest läuft mit dem statischen Satz (${funding.ratePctPer8h} %/8h).`
+      );
+    }
+  }
+
   let report: WalkForwardReport;
   try {
     report = runWalkForward({
@@ -325,6 +381,7 @@ async function main(): Promise<void> {
           instruments,
           fundingRatePctPer8h: funding.ratePctPer8h,
           fundingIntervalHours: funding.intervalHours,
+          ...(perpFunding ? { fundingRateProvider: perpFunding } : {}),
         },
       },
       walkforward: { isDays, oosDays, maxSpanDays: wfBase.maxSpanDays },
@@ -336,6 +393,13 @@ async function main(): Promise<void> {
   }
 
   console.log(`[run-backtest] ${registryFeeNote}`);
+  if (perpFunding !== null) {
+    const stats = perpFunding.stats();
+    console.log(
+      `[run-backtest] Funding-Treffer: ${stats.hits} genutzt, ${stats.misses} ohne historischen Satz ` +
+        `(Engine-Default ${funding.ratePctPer8h} %/8h) — Details: docs/PERPETUAL_DATA.md`
+    );
+  }
   console.log(
     `[run-backtest] ${report.walkforward.windowCount} Fenster, OOS: ${report.aggregateOos.trades} Trades, PnL ${report.aggregateOos.pnl} (Ledger netto ${report.aggregateOos.netPnl}), Win-Rate ${report.aggregateOos.winRate} %, ${report.trades.length} Trade-Zeilen gesamt`
   );

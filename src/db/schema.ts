@@ -971,3 +971,367 @@ export const featureDataRevisions = pgTable(
     check("feature_data_revisions_incoming_hash_check", sql`${t.incomingValueHash} ~ '^fv1:[0-9a-f]{64}$'`),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Historische Perpetual-Daten (RMA-P2-02, v1.54.0) — append-only
+//
+// Drei Datenquellen + Betriebsmetadaten, äquivalent zu
+// `drizzle/2026-09-20_perpetual_data.sql`:
+//
+//   perp_funding_rates   Funding-Sätze je Intervall (signiert)
+//   perp_open_interest   Open Interest mit **expliziter** Einheit
+//   perp_liquidations    Zwangsschließungen als Ereignisse
+//   perp_sync_runs       Lauf-Manifeste (Idempotenzschlüssel)
+//   perp_sync_cursors    Wasserstand je (Venue, Instrument, Reihenart)
+//
+// Zeitsemantik in jeder Datenzeile: `event_time` (Ereignis), `available_at`
+// (ab wann der Satz wahrheitsgemäß bekannt sein durfte), `fetched_at` (Abruf).
+// Eine as-of-Abfrage ist nur zulässig mit
+//
+//     event_time <= as_of  AND  available_at <= as_of
+//
+// Verfügbarkeit ist damit Bestandteil der Daten, nicht einer
+// Consumer-Disziplin. `null` ist nie `0`: jede Größe ist nullable und trägt
+// bei `null` einen `missing_reason` — die CHECK-Constraints erzwingen genau
+// eines von beidem.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Erlaubte Qualitätsstatus (identisch zu `src/perpdata/types.ts`). */
+const PERP_QUALITY_STATUSES = "('OK','GAP','OUTLIER','INVALID','DUPLICATE','CROSSCHECK','STALE','UNKNOWN')";
+
+/** Funding-Historie: ein Satz je (Venue, Instrument, Settlement-Zeit). */
+export const perpFundingRates = pgTable(
+  "perp_funding_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Lauf, der die Zeile geschrieben hat (`null` bei Direkteinspielung). */
+    runId: uuid("run_id").references(() => perpSyncRuns.id),
+    venue: text("venue").notNull(),
+    /** Kanonische Instrument-ID in Speicherform (`BITUNIX:BTCUSDT`). */
+    instrumentId: text("instrument_id").notNull(),
+    /** Venue-natives Symbol (`BTCUSDT`). */
+    symbol: text("symbol").notNull(),
+    /** Endpunkt/Kanal (`bitunix:funding_history`) — nie ein Secret. */
+    sourceId: text("source_id").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    /** Settlement-Zeit des Satzes. */
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    /** Ab wann der Satz bekannt sein durfte (Politik, `>= event_time`). */
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    /** Abrufzeit (Transport, keine Entscheidungsgrundlage). */
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    /** Rate je Intervall als Dezimalanteil; `null` = unbekannt (nie 0). */
+    fundingRate: numeric("funding_rate"),
+    /** Funding-Intervall in Stunden, wenn die Quelle es meldet. */
+    intervalHours: numeric("interval_hours"),
+    /** Nächstes Settlement (nur Snapshot-Endpunkte melden das). */
+    nextFundingTime: timestamp("next_funding_time", { withTimezone: true }),
+    markPrice: numeric("mark_price"),
+    /** Einheit der Rate (fix; eine Umschreibung wäre eine neue Semantik). */
+    unit: text("unit").notNull().default("fraction_per_interval"),
+    qualityStatus: text("quality_status").notNull(),
+    missingReason: text("missing_reason"),
+    /** `pv1:<sha256>` über die Fachfelder (Inhalt, nicht Quelle). */
+    contentHash: text("content_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Natürlicher Schlüssel: ein Settlement je Instrument und Zeitpunkt.
+    uniqueIndex("perp_funding_rates_key_unique").on(t.venue, t.instrumentId, t.eventTime),
+    // As-of-Lesepfad (Point-in-Time) und Coverage-Pfad (venue-major).
+    index("perp_funding_rates_pit_idx").on(t.instrumentId, t.eventTime, t.availableAt),
+    index("perp_funding_rates_venue_event_idx").on(t.venue, t.eventTime),
+    index("perp_funding_rates_run_idx").on(t.runId),
+    check("perp_funding_rates_event_check", sql`${t.availableAt} >= ${t.eventTime}`),
+    check("perp_funding_rates_fetched_check", sql`${t.fetchedAt} >= ${t.eventTime}`),
+    check("perp_funding_rates_schema_check", sql`${t.schemaVersion} >= 1`),
+    check("perp_funding_rates_unit_check", sql`${t.unit} = 'fraction_per_interval'`),
+    // Genau eines: Wert oder begründete Nichtverfügbarkeit.
+    check(
+      "perp_funding_rates_value_exclusive_check",
+      sql`${t.fundingRate} IS NULL AND ${t.missingReason} IS NOT NULL
+        OR ${t.fundingRate} IS NOT NULL AND ${t.missingReason} IS NULL`
+    ),
+    check(
+      "perp_funding_rates_missing_reason_check",
+      sql`${t.missingReason} IS NULL OR ${t.missingReason} IN
+        ('NOT_REPORTED','OUT_OF_BOUNDS','SOURCE_ERROR','NOT_APPLICABLE')`
+    ),
+    check("perp_funding_rates_quality_check", sql`${t.qualityStatus} IN ${sql.raw(PERP_QUALITY_STATUSES)}`),
+    // Harte Plausibilität: |Rate| ≤ 30 % je Intervall (Venue-Kappe) und
+    // Intervall zwischen 1 und 24 Stunden.
+    check(
+      "perp_funding_rates_rate_bound_check",
+      sql`${t.fundingRate} IS NULL OR abs(${t.fundingRate}) <= 0.3`
+    ),
+    check(
+      "perp_funding_rates_interval_check",
+      sql`${t.intervalHours} IS NULL OR (${t.intervalHours} > 0 AND ${t.intervalHours} <= 24)`
+    ),
+    check("perp_funding_rates_hash_check", sql`${t.contentHash} ~ '^pv1:[0-9a-f]{64}$'`),
+    check("perp_funding_rates_venue_check", sql`${t.venue} ~ '^[A-Z0-9][A-Z0-9_-]{0,31}$'`),
+    check("perp_funding_rates_symbol_check", sql`${t.symbol} ~ '^[A-Z0-9][A-Z0-9._/-]{0,39}$'`),
+  ]
+);
+
+/**
+ * Open Interest — `basis` sagt, welche Größe die Quelle **autoritativ**
+ * gemeldet hat; die übrigen sind nur mit `converted = true` erlaubt (bis zu
+ * zwei abgeleitete Felder, nie ein drittes geratenes). Damit ist eine
+ * Vermischung von Contracts/Base/Quote strukturell ausgeschlossen.
+ */
+export const perpOpenInterest = pgTable(
+  "perp_open_interest",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").references(() => perpSyncRuns.id),
+    venue: text("venue").notNull(),
+    instrumentId: text("instrument_id").notNull(),
+    symbol: text("symbol").notNull(),
+    sourceId: text("source_id").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    /** Offene Kontrakte (Einheit `contracts`). */
+    contracts: numeric("contracts"),
+    /** Offene Menge in Basiseinheit (Einheit `base_units`). */
+    baseQuantity: numeric("base_quantity"),
+    /** Offener Wert in Quote-Währung (Einheit `quote_units`). */
+    quoteValue: numeric("quote_value"),
+    /** Autoritative Größe der Quelle. */
+    basis: text("basis").notNull(),
+    /** Kontraktgröße in Basiseinheit (Basis für Contracts ↔ Base). */
+    contractSize: numeric("contract_size"),
+    /** Pflicht, sobald `quote_value` gesetzt ist. */
+    quoteCurrency: text("quote_currency"),
+    markPrice: numeric("mark_price"),
+    /** `true` = mindestens ein Feld ist gerechnet, nicht gemeldet. */
+    converted: boolean("converted").notNull().default(false),
+    unit: text("unit").notNull(),
+    qualityStatus: text("quality_status").notNull(),
+    missingReason: text("missing_reason"),
+    contentHash: text("content_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("perp_open_interest_key_unique").on(t.venue, t.instrumentId, t.eventTime),
+    index("perp_open_interest_pit_idx").on(t.instrumentId, t.eventTime, t.availableAt),
+    index("perp_open_interest_venue_event_idx").on(t.venue, t.eventTime),
+    index("perp_open_interest_run_idx").on(t.runId),
+    check("perp_open_interest_event_check", sql`${t.availableAt} >= ${t.eventTime}`),
+    check("perp_open_interest_fetched_check", sql`${t.fetchedAt} >= ${t.eventTime}`),
+    check("perp_open_interest_schema_check", sql`${t.schemaVersion} >= 1`),
+    check(
+      "perp_open_interest_basis_check",
+      sql`(${t.basis} = 'contracts' AND ${t.contracts} IS NOT NULL)
+        OR (${t.basis} = 'base_units' AND ${t.baseQuantity} IS NOT NULL)
+        OR (${t.basis} = 'quote_units' AND ${t.quoteValue} IS NOT NULL)`
+    ),
+    check("perp_open_interest_unit_matches_basis_check", sql`${t.unit} = ${t.basis}`),
+    // Mehr als ein gemessener Wert ⇒ nur als Ableitung gekennzeichnet.
+    check(
+      "perp_open_interest_conversion_check",
+      sql`${t.converted}
+        OR ((CASE WHEN ${t.contracts} IS NOT NULL THEN 1 ELSE 0 END)
+          + (CASE WHEN ${t.baseQuantity} IS NOT NULL THEN 1 ELSE 0 END)
+          + (CASE WHEN ${t.quoteValue} IS NOT NULL THEN 1 ELSE 0 END)) <= 1`
+    ),
+    // Negative OI ist fachlich unmöglich (0 = „kein offenes Interesse“ ist erlaubt).
+    check(
+      "perp_open_interest_non_negative_check",
+      sql`(${t.contracts} IS NULL OR ${t.contracts} >= 0)
+        AND (${t.baseQuantity} IS NULL OR ${t.baseQuantity} >= 0)
+        AND (${t.quoteValue} IS NULL OR ${t.quoteValue} >= 0)`
+    ),
+    check(
+      "perp_open_interest_currency_check",
+      sql`${t.quoteValue} IS NULL OR ${t.quoteCurrency} IS NOT NULL`
+    ),
+    check(
+      "perp_open_interest_contract_size_check",
+      sql`${t.contractSize} IS NULL OR ${t.contractSize} > 0`
+    ),
+    check(
+      "perp_open_interest_missing_reason_check",
+      sql`${t.missingReason} IS NULL OR ${t.missingReason} IN
+        ('NOT_REPORTED','OUT_OF_BOUNDS','SOURCE_ERROR','NOT_APPLICABLE')`
+    ),
+    check("perp_open_interest_quality_check", sql`${t.qualityStatus} IN ${sql.raw(PERP_QUALITY_STATUSES)}`),
+    check("perp_open_interest_hash_check", sql`${t.contentHash} ~ '^pv1:[0-9a-f]{64}$'`),
+    check(
+      "perp_open_interest_currency_format_check",
+      sql`${t.quoteCurrency} IS NULL OR ${t.quoteCurrency} ~ '^[A-Z][A-Z0-9]{1,6}$'`
+    ),
+  ]
+);
+
+/** Liquidationsereignisse (kein Reihenbegriff → keine Staleness-Regel). */
+export const perpLiquidations = pgTable(
+  "perp_liquidations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").references(() => perpSyncRuns.id),
+    venue: text("venue").notNull(),
+    instrumentId: text("instrument_id").notNull(),
+    symbol: text("symbol").notNull(),
+    sourceId: text("source_id").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    /** Betroffene Positionsseite (kanonisiert, nicht Order-Richtung). */
+    side: text("side").notNull(),
+    /** Zwangsgeschlossene Menge in Basiseinheit. */
+    quantityBase: numeric("quantity_base"),
+    /** Ausführungspreis (`quote_per_base`). */
+    price: numeric("price"),
+    /** Notional in Quote-Währung (`null` = nicht gemeldet, nicht 0). */
+    notionalQuote: numeric("notional_quote"),
+    quoteCurrency: text("quote_currency"),
+    /** Venue-Ereignis-ID oder deterministischer Payload-Hash (`h1:…`). */
+    sourceEventId: text("source_event_id").notNull(),
+    /** Venue-Bündelung: Anzahl Einzelereignisse dieses Satzes. */
+    aggregateCount: integer("aggregate_count"),
+    unit: text("unit").notNull().default("base_units"),
+    qualityStatus: text("quality_status").notNull(),
+    missingReason: text("missing_reason"),
+    contentHash: text("content_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Idempotenz über die Ereignis-ID: derselbe Satz wird nie zweimal gebucht.
+    uniqueIndex("perp_liquidations_key_unique").on(
+      t.venue,
+      t.instrumentId,
+      t.eventTime,
+      t.sourceEventId
+    ),
+    index("perp_liquidations_pit_idx").on(t.instrumentId, t.eventTime, t.availableAt),
+    index("perp_liquidations_venue_event_idx").on(t.venue, t.eventTime),
+    index("perp_liquidations_run_idx").on(t.runId),
+    check("perp_liquidations_event_check", sql`${t.availableAt} >= ${t.eventTime}`),
+    check("perp_liquidations_fetched_check", sql`${t.fetchedAt} >= ${t.eventTime}`),
+    check("perp_liquidations_schema_check", sql`${t.schemaVersion} >= 1`),
+    check(
+      "perp_liquidations_side_check",
+      sql`${t.side} IN ('LONG_LIQUIDATED','SHORT_LIQUIDATED')`
+    ),
+    check(
+      "perp_liquidations_positive_check",
+      sql`(${t.quantityBase} IS NULL OR ${t.quantityBase} > 0)
+        AND (${t.price} IS NULL OR ${t.price} > 0)
+        AND (${t.notionalQuote} IS NULL OR ${t.notionalQuote} > 0)`
+    ),
+    // Menge oder Notional muss bekannt sein — sonst ist das Ereignis wertlos.
+    check(
+      "perp_liquidations_measure_check",
+      sql`${t.quantityBase} IS NOT NULL OR ${t.notionalQuote} IS NOT NULL`
+    ),
+    check(
+      "perp_liquidations_currency_check",
+      sql`${t.notionalQuote} IS NULL OR ${t.quoteCurrency} IS NOT NULL`
+    ),
+    check(
+      "perp_liquidations_aggregate_check",
+      sql`${t.aggregateCount} IS NULL OR ${t.aggregateCount} >= 1`
+    ),
+    check("perp_liquidations_unit_check", sql`${t.unit} = 'base_units'`),
+    check("perp_liquidations_quality_check", sql`${t.qualityStatus} IN ${sql.raw(PERP_QUALITY_STATUSES)}`),
+    check("perp_liquidations_hash_check", sql`${t.contentHash} ~ '^pv1:[0-9a-f]{64}$'`),
+    check(
+      "perp_liquidations_event_id_check",
+      sql`${t.sourceEventId} ~ '^[A-Za-z0-9:._-]{1,64}$'`
+    ),
+  ]
+);
+
+/**
+ * Sync-Manifest je Lauf.
+ *
+ * `idempotency_key` (`prk1:<sha256>` über Venue, Modus, Fenster, Instrumente,
+ * Reihenarten, Politik und Code-Version) macht den Lauf selbst idempotent:
+ * ein Retry mit identischen Eingaben findet das bestehende Manifest und
+ * schreibt nichts erneut.
+ */
+export const perpSyncRuns = pgTable(
+  "perp_sync_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    venue: text("venue").notNull(),
+    mode: text("mode").notNull(),
+    status: text("status").notNull(),
+    availabilityPolicy: text("availability_policy").notNull(),
+    /** Abrufbare `from`/`to` des Fensters (Backfill-Dokumentation). */
+    fromTs: timestamp("from_ts", { withTimezone: true }).notNull(),
+    toTs: timestamp("to_ts", { withTimezone: true }).notNull(),
+    /** Reihenarten dieses Laufs. */
+    kinds: jsonb("kinds").notNull(),
+    /** Instrumente im Scope (begrenzte Liste, Betriebsmetadaten). */
+    instrumentIds: jsonb("instrument_ids").notNull(),
+    /** Zähler je Reihenart + Qualitätsbefunde (JSON, nicht Spalten-Drift). */
+    counts: jsonb("counts_json").notNull(),
+    /** Capability-Antwort der Venue (macht `UNSUPPORTED` nachvollziehbar). */
+    capabilities: jsonb("capabilities_json").notNull(),
+    /** Klassifizierte Fehlbefunde (keine Vendor-Rohtexte). */
+    failures: jsonb("failures_json").notNull(),
+    /** Code-Version des Schreibers (Reproduzierbarkeit, nicht dupliziert). */
+    codeVersion: text("code_version").notNull(),
+    errorCode: text("error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("perp_sync_runs_key_unique").on(t.idempotencyKey),
+    index("perp_sync_runs_venue_finished_idx").on(t.venue, t.finishedAt),
+    check("perp_sync_runs_mode_check", sql`${t.mode} IN ('INCREMENTAL','BACKFILL')`),
+    check("perp_sync_runs_status_check", sql`${t.status} IN ('SUCCEEDED','PARTIAL','FAILED')`),
+    check(
+      "perp_sync_runs_policy_check",
+      sql`${t.availabilityPolicy} IN ('ingested','settlement')`
+    ),
+    check("perp_sync_runs_window_check", sql`${t.toTs} > ${t.fromTs}`),
+    check(
+      "perp_sync_runs_error_check",
+      sql`(${t.status} = 'FAILED' AND ${t.errorCode} IS NOT NULL)
+        OR (${t.status} <> 'FAILED' AND ${t.errorCode} IS NULL)`
+    ),
+  ]
+);
+
+/** Wasserstand je (Venue, Instrument, Reihenart) — Restart-/Retry-Anker. */
+export const perpSyncCursors = pgTable(
+  "perp_sync_cursors",
+  {
+    venue: text("venue").notNull(),
+    instrumentId: text("instrument_id").notNull(),
+    kind: text("kind").notNull(),
+    /** Höchste geschriebene Ereigniszeit (nächstes Fenster beginnt hier). */
+    watermarkEventTime: timestamp("watermark_event_time", { withTimezone: true }).notNull(),
+    /** Höchste geschriebene Verfügbarkeit (As-of-Grenze des Bestands). */
+    watermarkAvailableAt: timestamp("watermark_available_at", { withTimezone: true }).notNull(),
+    lastRunId: uuid("last_run_id").references(() => perpSyncRuns.id),
+    /** Fehlschläge in Folge (Betrieb: Dauerstörung sichtbar, ohne still zu werden). */
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastStatus: text("last_status").notNull().default("OK"),
+    /** Typisierter Grund, wenn die Venue die Reihe nicht liefert (sonst `null`). */
+    unsupportedReason: text("unsupported_reason"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.venue, t.instrumentId, t.kind] }),
+    index("perp_sync_cursors_venue_kind_idx").on(t.venue, t.kind),
+    check("perp_sync_cursors_kind_check", sql`${t.kind} IN ('funding','openInterest','liquidations')`),
+    check(
+      "perp_sync_cursors_watermark_check",
+      sql`${t.watermarkAvailableAt} >= ${t.watermarkEventTime}`
+    ),
+    check(
+      "perp_sync_cursors_status_check",
+      sql`${t.lastStatus} IN ('OK','PARTIAL','FAILED','UNSUPPORTED')`
+    ),
+    check("perp_sync_cursors_failures_check", sql`${t.consecutiveFailures} >= 0`),
+  ]
+);

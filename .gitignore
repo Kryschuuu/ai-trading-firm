@@ -94,3 +94,6 @@ next-env.d.ts
 # Lokale Test-Datenbank (embedded-postgres) — Laufzeitcluster, nie versioniert;
 # gitignored, damit `git stash -u` / Checkouts den Live-Cluster nicht anruhren.
 /data/db
+
+# Perp-Qualitätsreport (RMA-P2-02, Laufzeit-Artefakt)
+/data/perpdata
