@@ -2,6 +2,7 @@
 
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
+Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.2`
 Letzte Aktualisierung: 2026-09-20
 
 ## Statusmodell
@@ -63,7 +64,7 @@ codebasierten Detailbefund.
 | QA-01 | `annualizedVolatility` las nicht existentes Sharpe-Feld und war immer 0 | FIXED | v1.51.2 | `src/backtest/metrics.ts`, `tests/backtest.unit.test.ts` |
 | QA-02 | `loadQualityReport()` verlor aggregierte Summen und `crosscheckCompared` | FIXED | v1.51.2 | `src/marketdata/quality.ts`, `test/marketdata/quality.test.ts` |
 
-Commit und PR dieses Audit-Pakets werden nach Erstellung in der PR-Beschreibung
-als übergeordnete Audit-Evidenz verlinkt. Die 21 Roadmap-Deltas bleiben bewusst
-offen und werden nicht durch die Dokumentation dieses PRs als umgesetzt
-markiert.
+PR [#148](https://github.com/Kryschuuu/ai-trading-firm/pull/148) und Commit
+`c8dded3` sind die übergeordnete Evidenz für das Audit-Paket. Die 21
+Roadmap-Deltas bleiben bewusst offen und werden nicht durch die Dokumentation
+dieses PRs als umgesetzt markiert.

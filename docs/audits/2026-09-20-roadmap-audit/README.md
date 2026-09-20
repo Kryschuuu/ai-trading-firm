@@ -3,7 +3,7 @@
 **Quelle:** Interner, codebasierter Peer-Review gegen 25 Roadmap-Komponenten
 **Reviewer:** Arena-Agent
 **Audit-Basis:** `df3163e` (`main`, Produktversion `v1.51.1`)
-**Audit-PR:** neuer PR vom Branch `arena/01a0bba7-ai-trading-firm`
+**Audit-PR:** [#148](https://github.com/Kryschuuu/ai-trading-firm/pull/148) vom Branch `arena/01a0bba7-ai-trading-firm`
 **Scope:** Backtesting, Research-Signale, Agenten-Evaluation, Execution, Risiko und Datenfundament
 **Status:** OPEN — 21 konkrete Deltas sind über eigenständige Umsetzungs-Prompts geplant; vier Komponenten sind bereits verifiziert erfüllt.
 
