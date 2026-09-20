@@ -37,6 +37,7 @@ import type {
   BacktestEngineOptions,
   BacktestMetrics,
   BacktestStrategyItem,
+  BacktestTradeLog,
   MultiAssetBacktestResult,
 } from "./types";
 import type { CandleLike } from "../lib/ruleEngine";
@@ -175,7 +176,19 @@ export class WalkForwardError extends Error {
   }
 }
 
-/** Kompakte Fenster-Kennzahlen (persistiert in `windowsJson`). */
+/**
+ * Kompakte Fenster-Kennzahlen (persistiert in `windowsJson`).
+ *
+ * Zwei PnL-Sichten (RMA-P1-04, v1.52.0):
+ *   - `pnl`    = Equity-Sicht der Engine (`metrics.totalReturn`): Mark-to-
+ *     Market am letzten Snapshot des Fensters, d. h. VOR den erzwungenen
+ *     `END_OF_DATA`-Schließungen (deren Gebühren/Slippage fehlen hier).
+ *   - `netPnl` = Trade-Ledger-Sicht: Summe der realisierten Netto-PnL aller
+ *     Trades des Fensters (inkl. `END_OF_DATA`-Schlusskosten). Diese Summe
+ *     wird exakt aus den `backtest_trades`-Zeilen reproduziert.
+ *   `pnl − netPnl` ist damit genau der Kostenanteil der Schlussglattstellung
+ *   (kein Fehler, dokumentierte Differenz; siehe docs/BACKTESTING.md §5).
+ */
 export interface WindowEvalSummary {
   from: number;
   to: number;
@@ -190,6 +203,10 @@ export interface WindowEvalSummary {
   sortinoRatio: number;
   fees: number;
   funding: number;
+  /** Summe der Trade-Netto-PnL (Trade-Ledger, 4 Nachkommastellen). */
+  netPnl: number;
+  /** Summe der Slippage-Kosten (Kontowährung, 2 Nachkommastellen wie `fees`). */
+  slippage: number;
   /** sha256 über die kanonische Trade-Liste (Lookahead-/Drift-Nachweis). */
   tradeHash: string;
 }
@@ -214,6 +231,25 @@ export interface WalkForwardAggregate {
   sortinoRatio: number;
   fees: number;
   funding: number;
+  /** Summe der Trade-Netto-PnL über alle Fenster (Trade-Ledger-Sicht). */
+  netPnl: number;
+  /** Summe der Slippage-Kosten über alle Fenster. */
+  slippage: number;
+}
+
+/** Segment eines Walk-Forward-Fensters. */
+export type WalkForwardSegment = "IS" | "OOS";
+
+/**
+ * Ein Trade des Walk-Forward-Laufs mit seiner Fenster-Zuordnung
+ * (RMA-P1-04): identisch zum Engine-Trade-Log plus `windowIndex`/`segment`.
+ * Die Liste im Report ist kanonisch geordnet (Fenster ↑, IS vor OOS, darin
+ * Engine-Schließreihenfolge) — dieselbe Ordnung wie `backtest_trades.seq`.
+ */
+export interface WalkForwardTradeRecord {
+  windowIndex: number;
+  segment: WalkForwardSegment;
+  trade: BacktestTradeLog;
 }
 
 export interface WalkForwardReport {
@@ -250,6 +286,13 @@ export interface WalkForwardReport {
   codeVersion: string;
   /** Erstellungszeitpunkt (injiziert — Tests nutzen eine feste Clock). */
   createdAt: string;
+  /**
+   * Vollständige, kanonisch geordnete Trade-Liste des Laufs (RMA-P1-04).
+   * Quelle der `backtest_trades`-Zeilen; wird NICHT in `params_json`/
+   * `metrics_json`/`windows_json` kopiert (explizites Mapping in
+   * `toBacktestRunInsert`), landet aber im JSON-Artefakt der CLI.
+   */
+  trades: WalkForwardTradeRecord[];
 }
 
 export interface RunWalkForwardInput {
@@ -268,9 +311,21 @@ export interface RunWalkForwardInput {
 
 /** sha256 über die kanonische Trade-Liste (stabile Key-Reihung). */
 export function hashTrades(
-  trades: ReadonlyArray<Record<string, unknown>>
+  trades: ReadonlyArray<BacktestTradeLog | Record<string, unknown>>
 ): string {
   return createHash("sha256").update(stableStringify(trades)).digest("hex");
+}
+
+/**
+ * Summe der Trade-Netto-PnL eines Evaluations-Laufs — auf 4 Nachkommastellen
+ * gerundet, weil jeder Summand bereits mit dieser Skala aus der Engine kommt
+ * (`portfolio.closePosition`). Dieselbe Summe wird beim Ledger-Abgleich aus
+ * den persistierten Zeilen gebildet (`src/backtest/tradeLedger.ts`).
+ */
+export function sumTradeNetPnl(trades: ReadonlyArray<Pick<BacktestTradeLog, "pnl">>): number {
+  let sum = 0;
+  for (const t of trades) sum += t.pnl;
+  return Number(sum.toFixed(4));
 }
 
 function summarizeEval(result: MultiAssetBacktestResult, from: number, to: number): WindowEvalSummary {
@@ -289,7 +344,9 @@ function summarizeEval(result: MultiAssetBacktestResult, from: number, to: numbe
     sortinoRatio: m.sortinoRatio,
     fees: m.totalFeesPaid,
     funding: m.totalFundingPaid,
-    tradeHash: hashTrades(result.trades as unknown as Record<string, unknown>[]),
+    netPnl: sumTradeNetPnl(result.trades),
+    slippage: m.totalSlippagePaid,
+    tradeHash: hashTrades(result.trades),
   };
 }
 
@@ -307,7 +364,7 @@ export function aggregateWindowEvals(
   const empty: WalkForwardAggregate = {
     windows: 0, bars: 0, trades: 0, wins: 0, winRate: 0, pnl: 0,
     profitFactor: null, maxDrawdownPct: 0, sharpeRatio: 0, sortinoRatio: 0,
-    fees: 0, funding: 0,
+    fees: 0, funding: 0, netPnl: 0, slippage: 0,
   };
   if (evals.length === 0) return empty;
 
@@ -317,6 +374,8 @@ export function aggregateWindowEvals(
   let pnl = 0;
   let fees = 0;
   let funding = 0;
+  let netPnl = 0;
+  let slippage = 0;
   const logReturns: number[] = [];
   const equityLevels: number[] = [];
 
@@ -327,6 +386,8 @@ export function aggregateWindowEvals(
     pnl += summary.pnl;
     fees += summary.fees;
     funding += summary.funding;
+    netPnl += summary.netPnl;
+    slippage += summary.slippage;
     const curve = result.equityCurve;
     for (let i = 1; i < curve.length; i++) {
       const prev = curve[i - 1].equity;
@@ -354,6 +415,8 @@ export function aggregateWindowEvals(
     sortinoRatio: Number((sortino.annualized ?? 0).toFixed(2)),
     fees: Number(fees.toFixed(2)),
     funding: Number(funding.toFixed(8)),
+    netPnl: Number(netPnl.toFixed(4)),
+    slippage: Number(slippage.toFixed(2)),
   };
 }
 
@@ -388,6 +451,9 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
   const windowReports: WalkForwardWindowReport[] = [];
   const isEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
   const oosEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
+  // Kanonische Trade-Liste (RMA-P1-04): Fenster ↑, IS vor OOS, darin die
+  // Schließreihenfolge der Engine — identisch zu `backtest_trades.seq`.
+  const trades: WalkForwardTradeRecord[] = [];
 
   for (const w of layout.windows) {
     // Walk-Forward läuft IMMER auf dem Paper-Ausführungspfad — kein
@@ -408,6 +474,8 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
     windowReports.push({ index: w.index, is: isSummary, oos: oosSummary });
     isEvals.push({ summary: isSummary, result: isResult });
     oosEvals.push({ summary: oosSummary, result: oosResult });
+    for (const trade of isResult.trades) trades.push({ windowIndex: w.index, segment: "IS", trade });
+    for (const trade of oosResult.trades) trades.push({ windowIndex: w.index, segment: "OOS", trade });
   }
 
   const enginePaper = input.engineConfig?.paper;
@@ -439,5 +507,6 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
     aggregateIs: aggregateWindowEvals(isEvals),
     codeVersion: APP_VERSION,
     createdAt: new Date(nowMs).toISOString(),
+    trades,
   };
 }

@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-20
+Letzte Aktualisierung: 2026-09-20 (RMA-P1-04 → FIXED, v1.52.0)
 
 ## Statusmodell
 
@@ -25,7 +25,7 @@ codebasierten Detailbefund.
 |---:|---|---|---|
 | 1 | [RMA-P1-05](../findings/RMA-P1-05-lifecycle-drift.md) | OPEN | Keine evidenzbasierte Promotion/Degradation zwischen Backtest, Paper und Live |
 | 2 | [RMA-P1-02](../findings/RMA-P1-02-walk-forward-training.md) | PARTIAL | OOS ist Replay, nicht Train-Select-Freeze-Test |
-| 3 | [RMA-P1-04](../findings/RMA-P1-04-backtest-trades.md) | PARTIAL | Keine abfragbare Trade-Level-Wahrheitsquelle |
+| 3 | [RMA-P1-04](../findings/RMA-P1-04-backtest-trades.md) | FIXED (v1.52.0) | Trade-Level-Wahrheitsquelle `backtest_trades` vorhanden: atomar mit dem Run geschrieben, abgeglichen, idempotent, paginiert abfragbar |
 
 ## Roadmap-Status
 
@@ -34,7 +34,7 @@ codebasierten Detailbefund.
 | RMA-P1-01 | Event-Replay/Friktionen | PARTIAL | [P1-01](../prompts/PROMPT-P1-01-event-replay-frictions.md) | — | — | — | Auditbefund |
 | RMA-P1-02 | 90d/30d Walk-Forward | PARTIAL | [P1-02](../prompts/PROMPT-P1-02-walk-forward-training.md) | — | — | — | Auditbefund |
 | RMA-P1-03 | Backtest-Kennzahlen | VERIFIED | — | — | `df3163e` + QA-01-Fix | v1.51.3 | Kennzahltests + QA-01-Regression |
-| RMA-P1-04 | Persistente Backtest-Trades | PARTIAL | [P1-04](../prompts/PROMPT-P1-04-backtest-trades.md) | — | — | — | Auditbefund |
+| RMA-P1-04 | Persistente Backtest-Trades | FIXED | [P1-04](../prompts/PROMPT-P1-04-backtest-trades.md) | [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149) | `88161dc` | v1.52.0 | `tests/backtest.tradeLedger.test.ts` (26 Tests: Mapping, Abgleich, Rollback bei Trade N, Idempotenz sequentiell + parallel, Aggregate/Hash aus DB-Zeilen, API Limit/Cursor/404/400), `tests/backtest.engine.test.ts` grün; typecheck/lint/docs:validate grün |
 | RMA-P1-05 | Lifecycle/Drift | OPEN | [P1-05](../prompts/PROMPT-P1-05-lifecycle-drift.md) | — | — | — | Auditbefund |
 | RMA-P1-06 | Trade-Attribution | PARTIAL | [P1-06](../prompts/PROMPT-P1-06-trade-attribution.md) | — | — | — | Auditbefund |
 | RMA-P2-01 | Regime-Erkennung | PARTIAL | [P2-01](../prompts/PROMPT-P2-01-regime-detection.md) | — | — | — | Auditbefund |
@@ -65,6 +65,8 @@ codebasierten Detailbefund.
 | QA-02 | `loadQualityReport()` verlor aggregierte Summen und `crosscheckCompared` | FIXED | v1.51.3 | `src/marketdata/quality.ts`, `test/marketdata/quality.test.ts` |
 
 PR [#148](https://github.com/Kryschuuu/ai-trading-firm/pull/148) und Commit
-`c8dded3` sind die übergeordnete Evidenz für das Audit-Paket. Die 21
-Roadmap-Deltas bleiben bewusst offen und werden nicht durch die Dokumentation
-dieses PRs als umgesetzt markiert.
+`c8dded3` sind die übergeordnete Evidenz für das Audit-Paket. Von den 21
+Roadmap-Deltas ist RMA-P1-04 mit PR
+[#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149) (v1.52.0)
+umgesetzt; die übrigen 20 bleiben offen und werden nicht durch Dokumentation
+als umgesetzt markiert.

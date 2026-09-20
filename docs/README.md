@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.51.3` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.52.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -54,7 +54,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data: Modi A/B/C, deterministischer Fill-Simulator, Failover, Replay |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
 | **[BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)** | Multi-Asset Backtest-Engine: synchronisierter Replay-Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0) |
-| **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs, CLI (GAP-01, v1.51.0) |
+| **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0) |
 | **[REGIME_GATE.md](REGIME_GATE.md)** | Markt-Regime-Klassifikator (Trend/Range/Crash) + Regime-Gate für Strategie-Gewichtung — Klassifikator-Logik, Prioritäten, Gate-Modi, Hysterese (GAP-06, v1.46.0) |
 | **[MARKET_UNIVERSE.md](MARKET_UNIVERSE.md)** | Instrument-Universum: Datenmodell, Registry, Normalisierung, `/api/markets` |
 | **[SYMBOLS.md](SYMBOLS.md)** | Venue-aware Symbol-Normalisierung: Kanon ↔ Nativ, Profile, ID-Migration (SYM-007) |
@@ -88,7 +88,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | [audits/2026-09-08-arena-prompts/](audits/2026-09-08-arena-prompts/) | Arena-Review-Serie (Prompts) — RESTORE-01: Restore des Firmenzustands pro Aufrufer | RESTORE-01 FIXED v1.36.37 |
 | [audits/2026-09-18-feature-gap/](audits/2026-09-18-feature-gap/) | Feature-Gap-Audit (Co-Audit) — 10 Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie | **Abgeschlossen (v1.51.1): alle 10 FIXED** — GAP-02 v1.42.0, GAP-03 v1.43.0, GAP-05 v1.44.0, GAP-10 v1.45.0, GAP-06 v1.46.0, GAP-07 v1.47.0, GAP-04 v1.48.0 (+ Audit-Katalog-Nachtrag v1.51.1), GAP-08 v1.49.0, GAP-09 v1.50.0, GAP-01 v1.51.0 (PRs #136–#145); offen nur ENV-01 (Test-Isolation, LOW) — [Prompt-Serie](audits/2026-09-18-feature-gap/prompts/README.md), Stand in [TRACKING.md](audits/2026-09-18-feature-gap/remediation/TRACKING.md), Abschluss-Abgleich in [STATUS-REVIEW-2026-09-19.md](audits/2026-09-18-feature-gap/remediation/STATUS-REVIEW-2026-09-19.md) |
-| [audits/2026-09-20-roadmap-audit/](audits/2026-09-20-roadmap-audit/) | 25-Punkte-Roadmap-Audit für Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **OPEN (v1.51.3): 4 VERIFIED, 13 PARTIAL, 8 OPEN** — [vollständiger Bericht](audits/2026-09-20-roadmap-audit/report.md), [21 eigenständige Umsetzungs-Prompts](audits/2026-09-20-roadmap-audit/prompts/README.md), [Tracking](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md) |
+| [audits/2026-09-20-roadmap-audit/](audits/2026-09-20-roadmap-audit/) | 25-Punkte-Roadmap-Audit für Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **IN ARBEIT (v1.52.0): 4 VERIFIED, 1 FIXED (RMA-P1-04 v1.52.0), 12 PARTIAL, 8 OPEN** — [vollständiger Bericht](audits/2026-09-20-roadmap-audit/report.md), [21 eigenständige Umsetzungs-Prompts](audits/2026-09-20-roadmap-audit/prompts/README.md), [Tracking](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md) |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |

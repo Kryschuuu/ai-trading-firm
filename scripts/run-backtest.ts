@@ -1,32 +1,47 @@
 #!/usr/bin/env node
 /**
- * CLI für Walk-Forward-Backtests (GAP-01, D3, v1.51.0).
+ * CLI für Walk-Forward-Backtests (GAP-01, D3, v1.51.0; Trade-Ledger
+ * RMA-P1-04, v1.52.0).
  *
  * Replayt EINE Mikro-Zyklus-Regel gegen den HistoricalStore in rollierenden
  * IS/OOS-Fenstern (Paper-Ausführung = DERSELBE Fill-Simulator wie der
  * PaperBroker) und persistiert den Run vergleichbar:
- *   - Artefakte: `data/backtest/<runId>.json` (Report) + `<runId>.md`
- *     (Zusammenfassung) via `resolveRuntimePath()`.
- *   - Datenbank: EINE Zeile in `backtest_runs` (insert-only).
+ *   - Datenbank: Run-Zeile in `backtest_runs` + ALLE Trades in
+ *     `backtest_trades`, atomar in EINER Transaktion und idempotent
+ *     (`persistBacktestRun`): Key = Inhalts-Fingerprint des Laufs
+ *     (`--idempotency-key` überschreibt); ein Retry desselben Laufs liefert
+ *     den bestehenden Run statt eines Duplikats.
+ *   - Artefakte: `data/backtest/<runId>.json` (Report inkl. Trade-Liste) +
+ *     `<runId>.md` (Zusammenfassung) via `resolveRuntimePath()` — unter der
+ *     UUID des (ggf. bereits bestehenden) persistierten Runs.
  *
  * Aufruf:
  *   node --import tsx scripts/run-backtest.ts \
  *     --instrument=BITUNIX:BTCUSDT --timeframe=1h \
  *     --from=2024-01-01 --to=2026-01-01 \
  *     --rule-id=<uuid> | --rule-file=./regel.json \
- *     [--is-days=90] [--oos-days=30] [--skip-db]
+ *     [--is-days=90] [--oos-days=30] [--idempotency-key=<key>] [--skip-db]
  *
  * Fail-closed: fehlende/ungültige Flags, leere Kerzenreihen, ungültige
  * Regeln und zu kurze Zeiträume brechen mit Exit 1 ab (kein Run, kein
- * Artefakt, keine DB-Zeile). Schlägt das DB-Insert fehl, bleiben die
- * Artefakte bestehen und der Exit-Code ist 1 (laut, nie still).
+ * Artefakt, keine DB-Zeile). Schlägt die Persistenz fehl oder wird sie
+ * abgelehnt (Ledger ≠ Aggregate), entsteht KEINE DB-Zeile; die Artefakte
+ * werden trotzdem geschrieben und der Exit-Code ist 1 (laut, nie still) —
+ * ein Lauf gilt erst mit RECONCILED-Ledger als persistiert.
  */
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { runWalkForward, toBacktestRunInsert, insertBacktestRun, WalkForwardError } from "../src/backtest";
+import {
+  backtestRunIdempotencyKey,
+  BacktestPersistenceError,
+  persistBacktestRun,
+  runWalkForward,
+  TradeLedgerError,
+  WalkForwardError,
+} from "../src/backtest";
 import type { BacktestStrategyItem, WalkForwardReport } from "../src/backtest";
 import {
   HistoricalStore,
@@ -52,7 +67,7 @@ const USAGE = `Walk-Forward-Backtest (GAP-01) — genau EIN Regel-Replay je Aufr
 Aufruf:
   node --import tsx scripts/run-backtest.ts --instrument=<ID> --timeframe=<tf>
     --from=<ISO|ms> --to=<ISO|ms> (--rule-id=<uuid> | --rule-file=<pfad>)
-    [--is-days=N] [--oos-days=N] [--skip-db]
+    [--is-days=N] [--oos-days=N] [--idempotency-key=<key>] [--skip-db]
 
 Pflicht:
   --instrument   Instrument-ID wie im HistoricalStore (z. B. BITUNIX:BTCUSDT)
@@ -64,9 +79,12 @@ Pflicht:
 Optional:
   --is-days      IS-Fenster in Tagen (Bounds [${WF_BOUNDS.isDays.min}, ${WF_BOUNDS.isDays.max}], Default Env/90)
   --oos-days     OOS-Fenster in Tagen (Bounds [${WF_BOUNDS.oosDays.min}, ${WF_BOUNDS.oosDays.max}], Default Env/30)
-  --skip-db      kein backtest_runs-Insert (nur Artefakte; Offline-Betrieb)
+  --idempotency-key  eigener Lauf-Schlüssel (8..128 Zeichen [A-Za-z0-9:_.-]);
+                 Default: Inhalts-Fingerprint (Retry ⇒ derselbe Run)
+  --skip-db      keine Persistenz (nur Artefakte; Offline-Betrieb)
 
-Ausgabe: data/backtest/<runId>.json + <runId>.md, DB-Zeile in backtest_runs.
+Ausgabe: data/backtest/<runId>.json + <runId>.md; DB: backtest_runs-Zeile +
+backtest_trades (atomar, idempotent, Ledger RECONCILED).
 Doku: docs/BACKTESTING.md (CLI-Referenz), CONFIGURATION.md (WF_*-Flags).`;
 
 function fail(message: string): never {
@@ -172,27 +190,32 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
     ``,
     `## Aggregate`,
     ``,
-    `| Aggregat | Fenster | Trades | Win-Rate | PnL | Profit-Factor | MaxDD | Sharpe | Sortino | Gebühren | Funding |`,
-    `|---|---|---|---|---|---|---|---|---|---|---|`,
+    `| Aggregat | Fenster | Trades | Win-Rate | PnL (Equity) | Netto-PnL (Ledger) | Profit-Factor | MaxDD | Sharpe | Sortino | Gebühren | Slippage | Funding |`,
+    `|---|---|---|---|---|---|---|---|---|---|---|---|---|`,
   ];
   for (const [label, a] of [["OOS", report.aggregateOos], ["IS", report.aggregateIs]] as const) {
     lines.push(
-      `| ${label} | ${a.windows} | ${a.trades} | ${a.winRate} % | ${a.pnl} | ${a.profitFactor ?? "—"} | ${a.maxDrawdownPct} % | ${a.sharpeRatio} | ${a.sortinoRatio} | ${a.fees} | ${a.funding} |`
+      `| ${label} | ${a.windows} | ${a.trades} | ${a.winRate} % | ${a.pnl} | ${a.netPnl} | ${a.profitFactor ?? "—"} | ${a.maxDrawdownPct} % | ${a.sharpeRatio} | ${a.sortinoRatio} | ${a.fees} | ${a.slippage} | ${a.funding} |`
     );
   }
   lines.push(
     ``,
     `## Fenster`,
     ``,
-    `| # | IS | OOS | IS-Trades | IS-PnL | OOS-Trades | OOS-PnL | OOS-Win-Rate | OOS-MaxDD | Trade-Hash (OOS) |`,
-    `|---|---|---|---|---|---|---|---|---|---|`
+    `| # | IS | OOS | IS-Trades | IS-PnL | OOS-Trades | OOS-PnL | OOS-Netto (Ledger) | OOS-Win-Rate | OOS-MaxDD | Trade-Hash (OOS) |`,
+    `|---|---|---|---|---|---|---|---|---|---|---|`
   );
   for (const w of report.windows) {
     lines.push(
-      `| ${w.index} | ${d(w.is.from)}…${d(w.is.to)} | ${d(w.oos.from)}…${d(w.oos.to)} | ${w.is.trades} | ${w.is.pnl} | ${w.oos.trades} | ${w.oos.pnl} | ${w.oos.winRate} % | ${w.oos.maxDrawdownPct} % | \`${w.oos.tradeHash.slice(0, 12)}…\` |`
+      `| ${w.index} | ${d(w.is.from)}…${d(w.is.to)} | ${d(w.oos.from)}…${d(w.oos.to)} | ${w.is.trades} | ${w.is.pnl} | ${w.oos.trades} | ${w.oos.pnl} | ${w.oos.netPnl} | ${w.oos.winRate} % | ${w.oos.maxDrawdownPct} % | \`${w.oos.tradeHash.slice(0, 12)}…\` |`
     );
   }
   lines.push(
+    ``,
+    `## Trade-Ledger`,
+    ``,
+    `- ${report.trades.length} Trade-Zeilen (IS + OOS, Fenster ↑, IS vor OOS) — vollständig im JSON-Artefakt (\`trades\`) und in \`backtest_trades\` (seq 1…${report.trades.length}).`,
+    `- PnL (Equity) stammt aus der Equity-Kurve des Fensters; Netto-PnL (Ledger) ist Σ der Trade-PnL. Die Differenz entsteht durch die END_OF_DATA-Glattstellung nach dem letzten Equity-Snapshot (Fill-Kosten des Schlussfills) — beide Werte stehen im Report, keiner wird umgebogen (\`reconciliation.equityLedgerGap\`).`,
     ``,
     `> Anti-Overfitting-Hinweis: IS/OOS trennt EVALUATIONS-Fenster — die Regel`,
     `> ist statisch, es findet keine Parameter-Optimierung statt. OOS trägt die`,
@@ -312,30 +335,53 @@ async function main(): Promise<void> {
     throw e;
   }
 
-  const runId = randomUUID();
-  const dir = resolveRuntimePath("data/backtest");
-  mkdirSync(dir, { recursive: true });
-  const jsonPath = path.join(dir, `${runId}.json`);
-  const mdPath = path.join(dir, `${runId}.md`);
-  writeFileSync(jsonPath, JSON.stringify({ runId, ...report }, null, 2), "utf8");
-  writeFileSync(mdPath, renderMarkdown(runId, report), "utf8");
   console.log(`[run-backtest] ${registryFeeNote}`);
   console.log(
-    `[run-backtest] ${report.walkforward.windowCount} Fenster, OOS: ${report.aggregateOos.trades} Trades, PnL ${report.aggregateOos.pnl}, Win-Rate ${report.aggregateOos.winRate} %`
+    `[run-backtest] ${report.walkforward.windowCount} Fenster, OOS: ${report.aggregateOos.trades} Trades, PnL ${report.aggregateOos.pnl} (Ledger netto ${report.aggregateOos.netPnl}), Win-Rate ${report.aggregateOos.winRate} %, ${report.trades.length} Trade-Zeilen gesamt`
   );
-  console.log(`[run-backtest] Artefakte: ${jsonPath}, ${mdPath}`);
 
+  const idempotencyKey =
+    typeof args["idempotency-key"] === "string" ? (args["idempotency-key"] as string).trim() : backtestRunIdempotencyKey(report);
+  console.log(`[run-backtest] Idempotency-Key: ${idempotencyKey}`);
+
+  const writeArtifacts = (runId: string): { jsonPath: string; mdPath: string } => {
+    const dir = resolveRuntimePath("data/backtest");
+    mkdirSync(dir, { recursive: true });
+    const jsonPath = path.join(dir, `${runId}.json`);
+    const mdPath = path.join(dir, `${runId}.md`);
+    writeFileSync(jsonPath, JSON.stringify({ runId, idempotencyKey, ...report }, null, 2), "utf8");
+    writeFileSync(mdPath, renderMarkdown(runId, report), "utf8");
+    return { jsonPath, mdPath };
+  };
+
+  const candidateRunId = randomUUID();
   if (args["skip-db"] === true) {
-    console.log("[run-backtest] --skip-db: kein backtest_runs-Insert.");
+    const { jsonPath, mdPath } = writeArtifacts(candidateRunId);
+    console.log(`[run-backtest] Artefakte: ${jsonPath}, ${mdPath}`);
+    console.log("[run-backtest] --skip-db: keine Persistenz (kein backtest_runs-/backtest_trades-Write).");
     return;
   }
+
   try {
-    const inserted = await insertBacktestRun(toBacktestRunInsert(report, replaySpec, runId));
-    console.log(`[run-backtest] backtest_runs-Zeile: ${inserted.id}`);
+    const persisted = await persistBacktestRun({ report, spec: replaySpec, runId: candidateRunId, idempotencyKey });
+    const { jsonPath, mdPath } = writeArtifacts(persisted.id);
+    console.log(`[run-backtest] Artefakte: ${jsonPath}, ${mdPath}`);
+    if (persisted.created) {
+      console.log(
+        `[run-backtest] backtest_runs-Zeile ${persisted.id} + ${persisted.tradeCount} backtest_trades (atomar, Ledger ${persisted.reconciliation.status}).`
+      );
+    } else {
+      console.log(
+        `[run-backtest] Idempotent: Lauf war bereits als Run ${persisted.id} persistiert (${persisted.tradeCount} Trades) — kein zweiter Write.`
+      );
+    }
   } catch (e) {
-    // Artefakte sind geschrieben (durable) — der DB-Fehler bleibt laut.
+    // Keine DB-Zeile entstanden (Transaktion zurückgerollt). Die Artefakte
+    // werden trotzdem geschrieben (durable Evidenz) — der Fehler bleibt laut.
+    const { jsonPath, mdPath } = writeArtifacts(candidateRunId);
+    const code = e instanceof TradeLedgerError || e instanceof BacktestPersistenceError ? `${e.code} — ` : "";
     console.error(
-      `[run-backtest] FEHLER: backtest_runs-Insert fehlgeschlagen (${e instanceof Error ? e.message : String(e)}). Artefakte bleiben bestehen.`
+      `[run-backtest] FEHLER: Persistenz abgelehnt/fehlgeschlagen (${code}${e instanceof Error ? e.message : String(e)}). Kein Run, keine Trade-Zeile geschrieben; Artefakte: ${jsonPath}, ${mdPath}.`
     );
     process.exit(1);
   }

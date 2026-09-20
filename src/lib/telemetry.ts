@@ -34,6 +34,8 @@
  *   firm_order_rejects_total   abgelehnte Orders je Grund-Klasse
  *   llm_calls_total            LLM-Aufrufe je Provider/Ergebnis
  *   llm_latency_ms_sum         Summe der LLM-Latenzen je Provider (ms)
+ *   backtest_run_persist_total persistierte Backtest-Runs je result/reason
+ *                              (RMA-P1-04: created | replayed | failed)
  *
  * Fehlertoleranz (Betriebsregel): Ist der Firmenzustand nicht lesbar
  * (z. B. DB weg, Ledger noch nicht hydratisiert), werden die betroffenen
@@ -211,6 +213,20 @@ export const telemetry = {
       telemetry.firm.orderRejects.reset();
       telemetry.firm.llmCalls.reset();
       telemetry.firm.llmLatencyMs.reset();
+    },
+  },
+  /**
+   * Backtest-Persistenz (RMA-P1-04, v1.52.0).
+   *
+   * `result` = created | replayed | failed, `reason` = `ok` oder ein
+   * Code-konstanter Fehlercode (`ledger:*`, `persist:*`). Keine Run-IDs,
+   * Instrumente oder Trade-IDs als Label (Kardinalitätsregel oben) — die
+   * stehen im Audit-Event `BACKTEST_RUN_PERSISTED`.
+   */
+  backtest: {
+    runPersist: new LabelCounter("backtest_run_persist_total"),
+    reset(): void {
+      telemetry.backtest.runPersist.reset();
     },
   },
 };
@@ -430,6 +446,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.firm.orderRejects.exposition(),
     telemetry.firm.llmCalls.exposition(),
     telemetry.firm.llmLatencyMs.exposition(),
+    telemetry.backtest.runPersist.exposition(),
   );
 
   return lines.join("\n");
@@ -441,4 +458,5 @@ export function resetTelemetryForTests(): void {
   telemetry.marketData.qualityFindings.reset();
   telemetry.audit.reset();
   telemetry.firm.reset();
+  telemetry.backtest.reset();
 }

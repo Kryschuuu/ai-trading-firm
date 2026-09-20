@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.51.3**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.52.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,75 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.52.0] — 2026-09-20 · feat(backtest): persistente Backtest-Trades als Trade-Level-Wahrheitsquelle (RMA-P1-04)
+
+### Hinzugefügt
+
+- **Tabelle `backtest_trades` (append-only, Migration
+  `drizzle/2026-09-20_backtest_trades.sql`):** jeder Trade eines
+  Walk-Forward-Runs als eigene Zeile — FK auf `backtest_runs` (ohne Cascade,
+  Repo-Konvention), stabile Sequenz `seq` (`UNIQUE (run_id, seq)`),
+  Fenster/Segment, Engine-Trade-Referenz (`UNIQUE` je Fenster/Segment),
+  Symbol, Seite, Menge/Notional, Entry/Exit-Zeit und -Preis, Brutto-/Netto-PnL,
+  Gebühren, Funding (NULL-bar, ≠ 0), Slippage, Exit-Grund, Haltedauer und
+  JSONB-Provenienz (Regel-Signatur, Fenstergrenzen, Simulator-Seed);
+  CHECK-Constraints (Enums, Vorzeichen, `exit ≥ entry`) und drei
+  Query-Indizes (Keyset, Fenster/Segment, Symbol). `backtest_runs` additiv um
+  `idempotency_key` (partiell UNIQUE), `trade_count`,
+  `reconciliation_status` und `reconciliation_json` erweitert — Alt-Runs
+  tragen `NULL` („kein Ledger“, nie „0 Trades“).
+- **Reines Ledger-Modul `src/backtest/tradeLedger.ts`:** validierende
+  Abbildung `BacktestTradeLog` → Zeile (endliche Dezimal-Strings, keine
+  NaN/Infinity, dokumentierte Einheiten/Rundung, PnL-Identität
+  `netto = brutto − fees + funding`), verlustfreier Rück-Roundtrip,
+  Abgleich Ledger ↔ Run-Aggregate (Anzahl, Gewinner, Netto-PnL, Gebühren,
+  Slippage, Funding, Trade-Hash je Fenster/Segment mit dokumentierten
+  Rundungstoleranzen), Inhalts-Idempotency-Key (`wf1:` + sha256 der
+  Lauf-Identität ohne `createdAt`), opaker Keyset-Cursor und handgeschriebene
+  Query-Validatoren.
+- **Atomare, idempotente Persistenz `persistBacktestRun()`
+  (`src/backtest/runStore.ts`):** Run + alle Trades in EINER Transaktion mit
+  Read-back-Abgleich vor dem Commit; jeder Fehler bei Trade N rollt den Run
+  zurück. Gleicher Idempotency-Key ⇒ Replay des bestehenden Runs (auch unter
+  parallelen Retries via SQLSTATE 23505), abweichender Inhalt ⇒
+  `ledger:idempotency-conflict`, fremde Run-UUID ⇒ `persist:run-id-conflict`.
+  Audit-Events `BACKTEST_RUN_PERSISTED` / `BACKTEST_RUN_PERSIST_FAILED`
+  (Klasse `telemetry`, im Audit-Katalog beschrieben) und bounded Metrik
+  `backtest_run_persist_total{result,reason}`.
+- **Read-API `GET /api/firm/backtests/[id]/trades`:** paginiertes
+  Trade-Ledger (`limit` 1..500, Default 100; opaker `cursor`; Filter
+  `segment`, `window`, `symbol`, `side`, `exitReason`; unbekannte Werte ⇒
+  400), `firm.read`, `no-store`; unbekannte Run-ID ⇒ 404. Detail-Route
+  `GET /api/firm/backtests/[id]` additiv um `ledger`, `trades` (erste Seite)
+  und `links.trades` ergänzt; Alt-Runs melden `ledger.status = "UNAVAILABLE"`.
+  Die Liste lädt weiterhin keine Trades.
+- **Tests `tests/backtest.tradeLedger.test.ts`** (26 Tests; DB-Teile
+  ping → skip): Mapping/Rundung/NULL-Semantik, negative Pfade, Abgleich +
+  manipulierte Aggregate/Zeilen, Idempotency-Key, Cursor/Query-Validatoren,
+  Migration/Constraints in der DB, Roundtrip Run + N Trades geordnet,
+  Rollback bei Fehler an Trade N (Constraint und Exception), Read-back-
+  Ablehnung, sequentielle + parallele Retries (exakt 1 Run + N Trades),
+  Aggregate/Trade-Hash aus DB-Zeilen reproduziert, API-Limit/Cursor-Kette/
+  Filter/404/400/Alt-Run.
+
+### Geändert
+
+- **Walk-Forward-Report (`src/backtest/walkforward.ts`):** additiv
+  `netPnl` (Σ Trade-PnL) und `slippage` je Fenster-Segment und Aggregat sowie
+  `trades[]` (alle Trade-Logs mit Fenster/Segment) — die Trade-Logs werden
+  nicht mehr verworfen. `hashTrades()` akzeptiert `BacktestTradeLog[]`
+  direkt. Bestehende Felder und Hash-Vertrag unverändert.
+- **CLI `scripts/run-backtest.ts`:** persistiert über `persistBacktestRun`
+  (statt eines nackten Run-Inserts), neues Flag `--idempotency-key`,
+  Artefakte unter der UUID des persistierten Runs (bei Replay: des
+  bestehenden), JSON-Artefakt enthält `trades`, MD-Zusammenfassung zeigt
+  Equity- UND Ledger-PnL sowie Slippage. Fehlgeschlagene/abgelehnte
+  Persistenz ⇒ keine DB-Zeile, Artefakte bleiben, Exit 1.
+- **Doku:** `docs/BACKTESTING.md` §5.1/§5.2 (Schema, Einheiten, Rundung,
+  Zeitsemantik, Abgleich, Idempotenz, Volumen + gemessene Query-Pläne,
+  Retention/Rollback, API-Vertrag), `docs/README.md`, README,
+  Roadmap-Audit RMA-P1-04 → `FIXED`.
 
 ## [1.51.3] — 2026-09-20 · fix(backtest, marketdata): Metrik-/Quality-Roundtrips korrigiert · docs(audit): 25-Punkte-Roadmap-Audit mit 21 Remediation-Prompts
 
