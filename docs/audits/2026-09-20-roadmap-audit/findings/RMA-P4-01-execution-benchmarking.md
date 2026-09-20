@@ -38,3 +38,12 @@ Fills, Gebühren und einzelne Ausführungsdaten werden erfasst. Sie sind aber ni
 - Methode: statische Pfad-/Symbolprüfung, Schema- und Testabgleich; keine reine
   Dokumentationsbehauptung als Implementierungsbeleg.
 - Tracking: [`../remediation/TRACKING.md`](../remediation/TRACKING.md)
+
+## Teilumsetzung 2026-09-20
+
+Auf aktuellem Stand `a09582f` (v1.55.0 statt Audit v1.51.1) wurde ein kanonischer
+normalisierter Import-/PostgreSQL-/Read-API-Pfad ergänzt (Zielversion v1.56.0).
+Details: `src/executionQuality/README.md`. Die automatische Strategy-/Broker-/
+Backtest-Anbindung sowie die dort dokumentierten weiteren Akzeptanzlücken sind
+nicht geschlossen. Status bleibt ausdrücklich `PARTIAL`, keine Fix-Version.
+Test- und PR-Evidenz wird im Remediation-PR dokumentiert.

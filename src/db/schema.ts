@@ -1600,3 +1600,32 @@ export const forecastResolverCursors = pgTable(
     check("forecast_resolver_cursors_id_check", sql`${t.cursorId} = 'resolution'`),
   ]
 );
+
+/** Canonical execution-quality ledger. SQL migration also installs immutability
+ * triggers; apply drizzle/2026-09-20_execution_quality.sql, not only schema push. */
+export const executionQualityIntents = pgTable("execution_quality_intents", {
+  id: text("id").primaryKey(),
+  venue: text("venue").notNull(),
+  mode: text("mode").notNull(),
+  scope: text("scope").notNull(),
+  clientOrderId: text("client_order_id").notNull(),
+  submitAt: timestamp("submit_at", { withTimezone: true }).notNull(),
+  payload: jsonb("payload").$type<import("../executionQuality/model").Intent>().notNull(),
+}, t => [
+  uniqueIndex("execution_quality_intents_client_idx").on(t.venue, t.mode, t.scope, t.clientOrderId),
+  index("execution_quality_intents_time_idx").on(t.submitAt, t.id),
+  check("execution_quality_intents_mode_check", sql`${t.mode} IN ('backtest','paper','testnet','live')`),
+  check("execution_quality_intents_payload_check", sql`jsonb_typeof(${t.payload}) = 'object'`),
+]);
+export const executionQualityEvents = pgTable("execution_quality_events", {
+  id: text("id").primaryKey(),
+  intentId: text("intent_id").notNull().references(() => executionQualityIntents.id),
+  externalKey: text("external_key").notNull().unique(),
+  kind: text("kind").notNull(),
+  availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+  payload: jsonb("payload").$type<import("../executionQuality/model").QualityEvent>().notNull(),
+}, t => [
+  index("execution_quality_events_intent_idx").on(t.intentId, t.availableAt),
+  check("execution_quality_events_kind_check", sql`${t.kind} IN ('ack','fill','benchmark')`),
+  check("execution_quality_events_payload_check", sql`jsonb_typeof(${t.payload}) = 'object'`),
+]);

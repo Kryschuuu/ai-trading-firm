@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.55.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.56.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,22 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.56.0] — 2026-09-20 · Execution-Quality-Ledger (Teilumsetzung RMA-P4-01)
+
+### Hinzugefügt
+
+- Strikt validierter, versionierter Execution-Quality-Vertrag mit Buy-/Sell-
+  Kosten, mengenbezogenen Teilfills, Null-Reasons, Provenienz, As-of-Auswertung,
+  Fees, festen Markout-Horizonten und bounded Aggregaten.
+- Append-only PostgreSQL-Ledger mit atomaren Writes, Konflikterkennung und
+  venue-/modus-/scopebezogener Fill-Idempotenz; neue additive SQL-Migration.
+- Operator-Import `npm run execution:ingest` und autorisierter Read-Endpunkt
+  `/api/firm/execution-quality`; Einheiten, Rollout, Grenzen und Rollback in
+  `src/executionQuality/README.md`.
+- **Nicht abgeschlossen:** automatische Broker-/Backtest-Anbindung und vollständige
+  Operations-/Provenienzparität. RMA-P4-01 bleibt `PARTIAL`; bestehende Execution-
+  und Risikoentscheidungen werden nicht verändert.
 
 ## [1.55.0] — 2026-09-20 · feat(forecasts): Forecast-Ledger, Brier-Score & Kalibrierung (RMA-P3-01)
 
