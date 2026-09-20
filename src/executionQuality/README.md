@@ -156,6 +156,8 @@ Let `s=+1` for buy, `s=-1` for sell, `P=sum(q*f)/sum(q)` and benchmark `B`:
   bp denominator is executed quantity × decision reference. Unknown fees/reference
   produce null. Unfilled opportunity cost is **not** included.
 - Fill ratio: filled/requested quantity; completion latency stays null until full.
+  `meanFillLatencyMs` is sum(quantity × monotonic fill delay)/filled quantity,
+  null unless every contributing fill has a same-process duration.
 - Adverse-selection bp per fill: `s*(fillPrice-futureMid)/fillPrice*10000`;
   positive means the market moved against the acquired position. Per-order
   markouts are quantity weighted and include quantity coverage.

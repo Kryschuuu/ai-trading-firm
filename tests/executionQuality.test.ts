@@ -32,6 +32,7 @@ test("partial fills are quantity weighted, duplicate events do not count twice",
   assert.ok(Math.abs(out.shortfallWithFees.value! - 17) < 1e-10);
   assert.equal(out.fees.value, 1);
   assert.equal(out.timeToAckMs, 100);
+  assert.equal(out.meanFillLatencyMs, 1600);
   assert.equal(out.timeToFirstMs, 1000);
   assert.equal(out.timeToCompleteMs, 2000);
   const partial = summarize(intent, [fill], 12000);

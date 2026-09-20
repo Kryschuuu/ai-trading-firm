@@ -483,6 +483,12 @@ export function summarize(intent: Intent, input: QualityEvent[], asOf: number) {
     ackAt: ack?.eventTime ?? null,
     decisionToSubmitMs: intent.decisionElapsedSubmitMs ?? null,
     timeToAckMs: ack?.elapsedSubmitMs ?? null,
+    // Quantity-weighted completion delay, only for a shared monotonic clock.
+    meanFillLatencyMs:
+      qty > 0 && fills.every((f) => f.elapsedSubmitMs !== null)
+        ? fills.reduce((sum, f) => sum + f.quantity * f.elapsedSubmitMs!, 0) /
+          qty
+        : null,
     timeToFirstMs: first?.elapsedSubmitMs ?? null,
     timeToCompleteMs:
       qty >= intent.quantity * (1 - 1e-10)
@@ -613,6 +619,7 @@ export function aggregate(batches: Batch[], asOf: number) {
         vwapBps: statistics((r) => r.vwap.bps.value),
         fillRatio: statistics((r) => r.fillRatio),
         timeToAckMs: statistics((r) => r.timeToAckMs),
+        meanFillLatencyMs: statistics((r) => r.meanFillLatencyMs),
         timeToFirstMs: statistics((r) => r.timeToFirstMs),
         timeToCompleteMs: statistics((r) => r.timeToCompleteMs),
       };
