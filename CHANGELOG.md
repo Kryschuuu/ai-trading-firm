@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.51.2**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.51.3**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -11,7 +11,7 @@ Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
 
-## [1.51.2] — 2026-09-20 · fix(backtest, marketdata): Metrik-/Quality-Roundtrips korrigiert · docs(audit): 25-Punkte-Roadmap-Audit mit 21 Remediation-Prompts
+## [1.51.3] — 2026-09-20 · fix(backtest, marketdata): Metrik-/Quality-Roundtrips korrigiert · docs(audit): 25-Punkte-Roadmap-Audit mit 21 Remediation-Prompts
 
 ### Fixiert
 
@@ -46,7 +46,69 @@ Das Format basiert auf
 
 - Audit-Zyklus in `docs/audits/README.md`, `docs/README.md`, Root-`README.md`
   und dem Docs-Katalog registriert. Der veraltete Root-Dokumentationsstand
-  `v1.42.0` ist auf `v1.51.2` korrigiert.
+  `v1.42.0` ist auf `v1.51.3` korrigiert.
+## [1.51.2] — 2026-09-20 · test: Unit-Tests für sieben bisher ungetestete Kernmodule (112 Tests) · docs: Versionierung und Doku-Sync
+
+### Hinzugefügt
+
+- **Unit-Tests für verifizierte Testlücken (112 Tests, 7 neue Dateien unter
+  `tests/`):** Systematische Abdeckungslücken-Analyse (jedes `src/`-Modul
+  gegen alle Test-Importe gematcht) — getestet werden ausschließlich Module
+  mit **null direkter Test-Abdeckung**, rein deterministisch und DB-frei
+  (Repo-Konvention: `node:test` + `assert/strict`, kein Duplikat zu den
+  bestehenden ~2.440 Tests; scheinbar ungetestete Kandidaten wie
+  Walk-Forward oder MAE/MFE waren bereits über `backtest.engine.test.ts`
+  bzw. `tradeJournal.test.ts` abgedeckt und wurden bewusst nicht doppelt
+  getestet):
+  - `tests/tokenCompare.test.ts` (15): timing-sicherer Token-Vergleich
+    (`src/lib/tokenCompare.ts`, Sicherheitskern aller Schreib-Endpunkte und
+    der RBAC-Auflösung; bisher nur ein Smoke-Test in `hardening.test.ts`):
+    Längen-Padding ohne Throw (das nackte `timingSafeEqual` wirft bei
+    ungleicher Länge), fail-closed bei leeren Werten (zwei leere Strings
+    sind bewusst UNGLEICH), UTF-8-Byte-Semantik (é als Codepoint vs.
+    kombinierender Akzent), 10k-Zeichen-Tokens und Alias-Identität des
+    `apiAuth`-Re-Exports.
+  - `tests/appPaths.test.ts` (29): Path-Traversal-Verteidigung
+    (`src/lib/appPaths.ts`): `..`-Ausbrüche einfach/getarnt
+    (`data/../..`)/Backslash-getarnt/tief (zählende Auflösung), absolute
+    Pfade als Operator-Entscheidung, Segment-Einzelprüfung in
+    `joinRuntimePath`, Redaktions-Garantien der Fehlermeldungen (kein
+    Host-Pfad-Leak, 200-Zeichen-Cap, Steuerzeichen-Entfernung),
+    Safe-Fallback fällt niemals auf den Ausbruchspfad.
+  - `tests/envParsing.test.ts` (22): `envInt`/`envNumber` (`src/lib/env.ts`)
+    vollständig — NaN/Infinity-Schutz, Bounds-Clamp, Truncation,
+    Leerstring-Semantik-Differenz beider Funktionen und die sonst nirgends
+    abgesicherte fail-laut-Warnpflicht von `envNumber` (jede Korrektur warnt
+    genau einmal, Normalfall bleibt still; `console.warn` pro Test gemockt).
+  - `tests/analysisContext.test.ts` (16): Portfolio-Analyse-Kontext für die
+    LLM-Ebene (`src/portfolio/context.ts`): Strukturvertrag, Garantie
+    „keine Gewichte im Kontext“ (Autoritätskette), Pearson-ρ ≈ ±1-Signale,
+    alle `PortfolioError`-Pfade (`INVALID_INPUT`, `LENGTH_MISMATCH` × 2 mit
+    Index-Diagnose), `summarizeAnalysisContext`-Kappung, Rundungs- und
+    Mutationsfreiheit der Prompt-Helfer.
+  - `tests/riskConfigView.test.ts` (16): `effectiveConfigView()` +
+    `CONFIG_KEYS` (`src/lib/riskConfigService.ts`, DB-freier Teil):
+    Metadaten-Vertrag (Vollständigkeit/Eindeutigkeit/Verankerung in
+    `LIMIT_CEILINGS` + `DEFAULT_LIMITS`), Code-Ceilings als min/max des
+    Views, Clamping von Ausreißern, adp.*-Namensraum getrennt und im
+    Bounds-Fenster; dazu die Entschärfungs-Garantien: `requireStopLoss` ist
+    dem Dashboard komplett entzogen UND bleibt nach einem
+    `applyRuntimeLimits`-Abschaltversuch wirksam `true`.
+  - `tests/version.test.ts` (4): Versions-SSoT (`src/lib/version.ts`) —
+    `APP_NAME`/`APP_VERSION` exakt aus `package.json`, SemVer-Format
+    (maschinenlesbar für Gateways).
+  - `tests/ollamaModelTag.test.ts` (10): `resolveModelTag`
+    (`src/lib/ollama.ts`) — exakter Treffer gewinnt vor der
+    Familien-Heuristik, Familien-Ersatz bleibt in der Familie, keine
+    Präfix-Verwechslung (`llama3` ≠ `llama32`, sonst liefe das System still
+    mit dem falschen Modell), leere Modellliste und Case-Sensitivität.
+
+### Verifikation
+
+- 112/112 neue Tests grün; Gesamtsuite **2.552 Tests: 2.531 pass, 0 fail,
+  21 skipped** (DB-gegatete Tests, Repo-Konvention `ping → skip`);
+  `tsc --noEmit` (strict) und `eslint` fehlerfrei; `docs:validate` grün.
+- Kein Laufzeitverhalten geändert (reine Test-/Doku-Ergänzung → Patch-Bump).
 
 ## [1.51.1] — 2026-09-19 · fix(audit): GAP-04-Audit-Events im Katalog nachgetragen · docs(audit): Feature-Gap-Remediation abgeschlossen (GAP-01…GAP-10 FIXED)
 

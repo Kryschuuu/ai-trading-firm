@@ -2,7 +2,7 @@
 
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
-Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.2`
+Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
 Letzte Aktualisierung: 2026-09-20
 
 ## Statusmodell
@@ -33,7 +33,7 @@ codebasierten Detailbefund.
 |---|---|---|---|---|---|---|---|
 | RMA-P1-01 | Event-Replay/Friktionen | PARTIAL | [P1-01](../prompts/PROMPT-P1-01-event-replay-frictions.md) | — | — | — | Auditbefund |
 | RMA-P1-02 | 90d/30d Walk-Forward | PARTIAL | [P1-02](../prompts/PROMPT-P1-02-walk-forward-training.md) | — | — | — | Auditbefund |
-| RMA-P1-03 | Backtest-Kennzahlen | VERIFIED | — | — | `df3163e` + QA-01-Fix | v1.51.2 | Kennzahltests + QA-01-Regression |
+| RMA-P1-03 | Backtest-Kennzahlen | VERIFIED | — | — | `df3163e` + QA-01-Fix | v1.51.3 | Kennzahltests + QA-01-Regression |
 | RMA-P1-04 | Persistente Backtest-Trades | PARTIAL | [P1-04](../prompts/PROMPT-P1-04-backtest-trades.md) | — | — | — | Auditbefund |
 | RMA-P1-05 | Lifecycle/Drift | OPEN | [P1-05](../prompts/PROMPT-P1-05-lifecycle-drift.md) | — | — | — | Auditbefund |
 | RMA-P1-06 | Trade-Attribution | PARTIAL | [P1-06](../prompts/PROMPT-P1-06-trade-attribution.md) | — | — | — | Auditbefund |
@@ -55,14 +55,14 @@ codebasierten Detailbefund.
 | RMA-P5-05 | Signal-Decay-Exits | OPEN | [P5-05](../prompts/PROMPT-P5-05-signal-decay-exits.md) | — | — | — | Auditbefund |
 | RMA-P6-01 | Point-in-Time Feature Store | OPEN | [P6-01](../prompts/PROMPT-P6-01-point-in-time-feature-store.md) | — | — | — | Auditbefund |
 | RMA-P6-02 | Monte Carlo | OPEN | [P6-02](../prompts/PROMPT-P6-02-monte-carlo.md) | — | — | — | Auditbefund |
-| RMA-P6-03 | Data Quality | VERIFIED | — | — | `df3163e` + QA-02-Fix | v1.51.2 | Quality-Tests + QA-02-Roundtrip |
+| RMA-P6-03 | Data Quality | VERIFIED | — | — | `df3163e` + QA-02-Fix | v1.51.3 | Quality-Tests + QA-02-Roundtrip |
 
 ## Sofort-Remediation aus dem Peer-Review
 
 | ID | Fehler | Status | Fix-Version | Evidenz |
 |---|---|---|---|---|
-| QA-01 | `annualizedVolatility` las nicht existentes Sharpe-Feld und war immer 0 | FIXED | v1.51.2 | `src/backtest/metrics.ts`, `tests/backtest.unit.test.ts` |
-| QA-02 | `loadQualityReport()` verlor aggregierte Summen und `crosscheckCompared` | FIXED | v1.51.2 | `src/marketdata/quality.ts`, `test/marketdata/quality.test.ts` |
+| QA-01 | `annualizedVolatility` las nicht existentes Sharpe-Feld und war immer 0 | FIXED | v1.51.3 | `src/backtest/metrics.ts`, `tests/backtest.unit.test.ts` |
+| QA-02 | `loadQualityReport()` verlor aggregierte Summen und `crosscheckCompared` | FIXED | v1.51.3 | `src/marketdata/quality.ts`, `test/marketdata/quality.test.ts` |
 
 PR [#148](https://github.com/Kryschuuu/ai-trading-firm/pull/148) und Commit
 `c8dded3` sind die übergeordnete Evidenz für das Audit-Paket. Die 21
