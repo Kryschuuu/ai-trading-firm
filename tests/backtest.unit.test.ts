@@ -306,6 +306,17 @@ describe("Backtest Metrics Computation", () => {
     assert.equal(metrics.grossLoss, 50);
     assert.ok(metrics.maxDrawdownPct >= 0);
 
+    const logReturns = [Math.log(10100 / 10000), Math.log(10100 / 10100), Math.log(10050 / 10100)];
+    const meanReturn = logReturns.reduce((sum, value) => sum + value, 0) / logReturns.length;
+    const sampleVariance =
+      logReturns.reduce((sum, value) => sum + (value - meanReturn) ** 2, 0) /
+      (logReturns.length - 1);
+    const expectedAnnualizedVolatilityPct = Number(
+      (Math.sqrt(sampleVariance) * Math.sqrt(365 * 24) * 100).toFixed(2),
+    );
+    assert.ok(metrics.annualizedVolatility > 0, "nichtkonstante Equity-Renditen haben positive Volatilität");
+    assert.equal(metrics.annualizedVolatility, expectedAnnualizedVolatilityPct);
+
     const symStats = computePerSymbolStats(trades);
     assert.ok(symStats["BTCUSDT"]);
     assert.equal(symStats["BTCUSDT"].trades, 2);

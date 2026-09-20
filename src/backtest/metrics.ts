@@ -15,7 +15,13 @@ import type {
   StrategyBacktestStats,
   SymbolBacktestStats,
 } from "./types";
-import { maxDrawdown, profitFactor, sharpeRatio, sortinoRatio } from "../portfolio/metrics";
+import {
+  maxDrawdown,
+  profitFactor,
+  realizedVolatility,
+  sharpeRatio,
+  sortinoRatio,
+} from "../portfolio/metrics";
 
 /**
  * Berechnet die Gesamtkennzahlen aus den Trade-Logs und der Equity-Kurve.
@@ -55,6 +61,14 @@ export function computeBacktestMetrics(
     periodicReturns.length >= 2
       ? sortinoRatio(periodicReturns, { annualization: annualizationFactor })
       : { perPeriod: 0, annualized: 0 };
+  // Stichproben-Standardabweichung (ddof=1) derselben Log-Renditen wie
+  // Sharpe, annualisiert mit sqrt(A). `sharpeRatio()` liefert bewusst keine
+  // Volatilität mit; sie wird daher explizit über die gemeinsame
+  // Portfolio-Kennzahl berechnet.
+  const annualizedVolatility =
+    periodicReturns.length >= 2
+      ? realizedVolatility(periodicReturns, annualizationFactor)
+      : 0;
 
   const equityValues = equityCurve.map((p) => p.equity);
   const mddRes = equityValues.length > 0 ? maxDrawdown(equityValues) : { value: 0, durationPeriods: 0 };
@@ -135,7 +149,7 @@ export function computeBacktestMetrics(
     totalReturnPct: Number(totalReturnPct.toFixed(2)),
     cagr,
     annualizedReturn: Number((sharpeRes.annualized !== undefined ? (totalReturnPct * (annualizationFactor / Math.max(1, equityCurve.length))) : 0).toFixed(2)),
-    annualizedVolatility: Number((((sharpeRes as any).volatility ?? 0) * 100).toFixed(2)),
+    annualizedVolatility: Number((annualizedVolatility * 100).toFixed(2)),
     sharpeRatio: Number((sharpeRes.annualized ?? 0).toFixed(2)),
     sortinoRatio: Number((sortinoRes.annualized ?? 0).toFixed(2)),
     calmarRatio,
