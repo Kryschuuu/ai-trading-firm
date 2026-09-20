@@ -1,7 +1,7 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.52.0",
-  "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
+  "version": "1.53.0",
+  "description": "Autonome KI-Trading-Firma (Paper-Trading) \u2014 local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "GPL-3.0-only",
   "private": true,
   "engines": {
@@ -49,7 +49,10 @@
     "security:live-gate": "npm run test:security:next && npm run test:security:ws && npm run test:security:auth && DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
     "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'",
     "history:migrate": "node --import tsx scripts/migrate-history-timeframe.ts",
-    "symbols:normalize": "node --import tsx scripts/normalize-instrument-ids.ts"
+    "symbols:normalize": "node --import tsx scripts/normalize-instrument-ids.ts",
+    "features:materialize": "node --import tsx scripts/feature-materialize.ts",
+    "features:status": "node --import tsx scripts/feature-materialize.ts --status",
+    "features:parity": "node --import tsx scripts/feature-materialize.ts --parity"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",

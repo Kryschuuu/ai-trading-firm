@@ -682,3 +682,292 @@ export const journalAgentWeights = pgTable(
   },
   (t) => [primaryKey({ columns: [t.agentRole, t.regime] })]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Point-in-Time Feature Store (RMA-P6-01, v1.53.0)
+//
+// Fünf Tabellen, ausschließlich additiv (Migration
+// `drizzle/2026-09-20_feature_store.sql`):
+//
+//   feature_definitions           immutables Verzeichnis je (feature_id, version)
+//   feature_values                Werte mit event_time/available_at/computed_at
+//   feature_materialization_runs  Backfill-Manifeste je Lauf (Idempotency-Key)
+//   feature_materialization_cursors  Wasserstand je (feature, entity, timeframe)
+//   feature_data_revisions        protokollierte, NICHT übernommene Revisionen
+//
+// Zeit-Semantik: `event_time` = Schlusszeit der Kerze, `available_at` = ab wann
+// der Wert bekannt sein konnte, `computed_at` = Berechnungszeitpunkt. Eine
+// Point-in-Time-Abfrage prüft `event_time <= target` UND `available_at <= as_of`
+// — `computed_at` ist bewusst kein Zulässigkeitskriterium.
+//
+// `null` ist nie `0`: eine Zeile trägt entweder einen Wert oder einen
+// `null_reason` (CHECK `feature_values_value_exclusive_check`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Featuredefinition (immutable). Änderung ⇒ neue `version`, nie ein Update. */
+export const featureDefinitions = pgTable(
+  "feature_definitions",
+  {
+    /** Stabile logische ID, z. B. `scanner.rsi`. */
+    featureId: text("feature_id").notNull(),
+    /** Semantikversion (≥ 1). */
+    version: integer("version").notNull(),
+    label: text("label").notNull(),
+    /** Semantik, Einheiten, Zeitbezug — Teil der Definition, nicht optional. */
+    description: text("description").notNull(),
+    /** number | boolean | enum (geschlossene Aufzählung). */
+    dtype: text("dtype").notNull(),
+    /** Geschlossene Werteliste bei `dtype = 'enum'`, sonst NULL. */
+    enumValues: jsonb("enum_values").$type<readonly string[] | null>(),
+    /** Einheit des Rohwerts (`fraction_of_close`, `index_0_100`, …). */
+    unit: text("unit"),
+    /** Nachkommastellen der gerundeten Ausgabe (`dtype = 'number'`). */
+    valueDecimals: integer("value_decimals"),
+    /** Entity-Typ (aktuell ausschließlich `instrument`). */
+    entityType: text("entity_type").notNull().default("instrument"),
+    timeframe: text("timeframe").notNull(),
+    /** Benötigte geschlossene Bars (Lookback). */
+    lookbackBars: integer("lookback_bars").notNull(),
+    /** Abhängigkeiten als `[{featureId, version}]` (exakte Versionen). */
+    dependencies: jsonb("dependencies").notNull().$type<readonly { featureId: string; version: number }[]>(),
+    /** Schlüssel der Executor-Tabelle (`src/features/compute.ts`). */
+    computeKey: text("compute_key").notNull(),
+    /** Kanonisch gehashte Berechnungsparameter. */
+    config: jsonb("config").notNull().$type<Readonly<Record<string, number | string | boolean | null>>>(),
+    owner: text("owner").notNull(),
+    /** `fc1:<sha256>` — Implementierungs-/Vertrags-Fingerprint. */
+    codeHash: text("code_hash").notNull(),
+    /** `fg1:<sha256>` — Fingerprint der Berechnungsparameter. */
+    configHash: text("config_hash").notNull(),
+    /** `fd1:<sha256>` — Gesamtfingerprint der Semantik. */
+    definitionHash: text("definition_hash").notNull(),
+    registeredAt: timestamp("registered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.featureId, t.version] }),
+    index("feature_definitions_latest_idx").on(t.featureId, t.version),
+    check("feature_definitions_version_check", sql`${t.version} >= 1`),
+    check("feature_definitions_dtype_check", sql`${t.dtype} IN ('number', 'boolean', 'enum')`),
+    check(
+      "feature_definitions_enum_check",
+      sql`(${t.dtype} = 'enum' AND ${t.enumValues} IS NOT NULL) OR (${t.dtype} <> 'enum' AND ${t.enumValues} IS NULL)`
+    ),
+    check("feature_definitions_lookback_check", sql`${t.lookbackBars} >= 1`),
+    check("feature_definitions_entity_type_check", sql`${t.entityType} = 'instrument'`),
+    check("feature_definitions_code_hash_check", sql`${t.codeHash} ~ '^fc1:[0-9a-f]{64}$'`),
+    check("feature_definitions_config_hash_check", sql`${t.configHash} ~ '^fg1:[0-9a-f]{64}$'`),
+    check("feature_definitions_hash_check", sql`${t.definitionHash} ~ '^fd1:[0-9a-f]{64}$'`),
+  ]
+);
+
+/**
+ * Materialisierungslauf (Backfill-Manifest, append-only).
+ *
+ * Ein Lauf wird genau einmal geschrieben: `SUCCEEDED` atomar mit seinen
+ * Wertezeilen und Cursorn (eine Transaktion), `FAILED` als einzelnes Manifest
+ * (ohne Werte) für die Betriebsdiagnose. `idempotency_key` ist UNIQUE — ein
+ * Retry mit identischen Eingaben liefert das bestehende Manifest zurück.
+ */
+export const featureMaterializationRuns = pgTable(
+  "feature_materialization_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `fm1:<sha256>` über Definitionen, Scope, Politik, Datasets, Version. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** INCREMENTAL | BACKFILL */
+    mode: text("mode").notNull(),
+    /** SUCCEEDED | FAILED */
+    status: text("status").notNull(),
+    timeframe: text("timeframe").notNull(),
+    /** bar_close | ingested (Zeitsemantik der Verfügbarkeit). */
+    availabilityPolicy: text("availability_policy").notNull(),
+    /** `["scanner.rsi@1", …]` — beteiligte Featureversionen. */
+    featureRefs: jsonb("feature_refs").notNull().$type<readonly string[]>(),
+    /** Entity-Scope (Instrument-IDs) des Laufs. */
+    entityIds: jsonb("entity_ids").notNull().$type<readonly string[]>(),
+    fromTs: timestamp("from_ts", { withTimezone: true }),
+    toTs: timestamp("to_ts", { withTimezone: true }),
+    /** Zähler (barsConsidered, valuesWritten, duplicates, revisions, …). */
+    countsJson: jsonb("counts_json").notNull(),
+    /** `featureId@version → fd1:<sha256>` (Reproduzierbarkeit). */
+    definitionHashes: jsonb("definition_hashes").notNull().$type<Readonly<Record<string, string>>>(),
+    /** `entityId → Source-Manifest` (Rohdatenmanifest je Entity). */
+    sourceManifests: jsonb("source_manifests").notNull().$type<Readonly<Record<string, unknown>>>(),
+    cursorBefore: jsonb("cursor_before").notNull(),
+    cursorAfter: jsonb("cursor_after").notNull(),
+    codeVersion: text("code_version").notNull(),
+    /** Bounded Fehlercode bei FAILED, sonst NULL. */
+    errorCode: text("error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("feature_materialization_runs_key_unique").on(t.idempotencyKey),
+    index("feature_materialization_runs_finished_idx").on(t.finishedAt),
+    check("feature_materialization_runs_mode_check", sql`${t.mode} IN ('INCREMENTAL', 'BACKFILL')`),
+    check("feature_materialization_runs_status_check", sql`${t.status} IN ('SUCCEEDED', 'FAILED')`),
+    check(
+      "feature_materialization_runs_policy_check",
+      sql`${t.availabilityPolicy} IN ('bar_close', 'ingested')`
+    ),
+    check(
+      "feature_materialization_runs_error_check",
+      sql`(${t.status} = 'FAILED' AND ${t.errorCode} IS NOT NULL) OR (${t.status} = 'SUCCEEDED' AND ${t.errorCode} IS NULL)`
+    ),
+  ]
+);
+
+/**
+ * Featurewert (append-only Wahrheitsquelle).
+ *
+ * Logischer Schlüssel: `(feature_id, feature_version, entity_id, timeframe,
+ * event_time)` — UNIQUE. Ein identischer Wert wird nicht erneut geschrieben
+ * (Idempotenz); ein **abweichender** Wert zum selben Schlüssel wird nicht
+ * überschrieben, sondern in `feature_data_revisions` protokolliert.
+ */
+export const featureValues = pgTable(
+  "feature_values",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Lauf, der die Zeile geschrieben hat (Manifest-Retention berührt Werte nie). */
+    runId: uuid("run_id").references(() => featureMaterializationRuns.id),
+    featureId: text("feature_id").notNull(),
+    featureVersion: integer("feature_version").notNull(),
+    entityType: text("entity_type").notNull().default("instrument"),
+    entityId: text("entity_id").notNull(),
+    timeframe: text("timeframe").notNull(),
+    /** Schlusszeit der Kerze, aus der der Wert stammt. */
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    /** Ab wann der Wert bekannt sein konnte (`>= event_time`). */
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    /** Berechnungszeitpunkt (`>= available_at`). */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    dtype: text("dtype").notNull(),
+    /** Wertspalten: GENAU EINE ist gesetzt — oder `null_reason`. */
+    valueNum: numeric("value_num"),
+    valueBool: boolean("value_bool"),
+    valueText: text("value_text"),
+    /** Geschlossene Begründung der Nichtverfügbarkeit (NULL = Wert vorhanden). */
+    nullReason: text("null_reason"),
+    /** Source-Quality-Status (OK | GAP | OUTLIER | INVALID | DUPLICATE | CROSSCHECK | UNKNOWN). */
+    qualityStatus: text("quality_status").notNull(),
+    definitionHash: text("definition_hash").notNull(),
+    /** `fv1:<sha256>` — inhaltlicher Fingerprint (Duplikat-/Revisionserkennung). */
+    valueHash: text("value_hash").notNull(),
+    /** Rohdatenmanifest (Quelle, Kerzen, Ingestion, Dataset-Hash, Politik). */
+    sourceManifest: jsonb("source_manifest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("feature_values_key_unique").on(
+      t.featureId,
+      t.featureVersion,
+      t.entityId,
+      t.timeframe,
+      t.eventTime
+    ),
+    // PIT-Lesepfad: entity-major, jüngste Eventzeit zuerst.
+    index("feature_values_pit_idx").on(
+      t.entityId,
+      t.featureId,
+      t.featureVersion,
+      t.timeframe,
+      t.eventTime,
+      t.availableAt
+    ),
+    // Coverage-/Status-/Paritätspfad: feature-major.
+    index("feature_values_feature_event_idx").on(t.featureId, t.featureVersion, t.eventTime),
+    index("feature_values_run_idx").on(t.runId),
+    check("feature_values_available_check", sql`${t.availableAt} >= ${t.eventTime}`),
+    check("feature_values_computed_check", sql`${t.computedAt} >= ${t.availableAt}`),
+    check(
+      "feature_values_value_exclusive_check",
+      sql`((CASE WHEN ${t.valueNum} IS NOT NULL THEN 1 ELSE 0 END) + (CASE WHEN ${t.valueBool} IS NOT NULL THEN 1 ELSE 0 END) + (CASE WHEN ${t.valueText} IS NOT NULL THEN 1 ELSE 0 END) + (CASE WHEN ${t.nullReason} IS NOT NULL THEN 1 ELSE 0 END)) = 1`
+    ),
+    check(
+      "feature_values_dtype_check",
+      sql`(${t.dtype} = 'number' AND (${t.valueNum} IS NOT NULL OR ${t.nullReason} IS NOT NULL)) OR (${t.dtype} = 'boolean' AND (${t.valueBool} IS NOT NULL OR ${t.nullReason} IS NOT NULL)) OR (${t.dtype} = 'enum' AND (${t.valueText} IS NOT NULL OR ${t.nullReason} IS NOT NULL))`
+    ),
+    check(
+      "feature_values_null_reason_check",
+      sql`${t.nullReason} IS NULL OR ${t.nullReason} IN ('INSUFFICIENT_LOOKBACK', 'INVALID_INPUT', 'MISSING_BARS', 'NOT_COMPUTABLE', 'DEPENDENCY_NULL', 'DEPENDENCY_MISSING')`
+    ),
+    check(
+      "feature_values_quality_check",
+      sql`${t.qualityStatus} IN ('OK', 'GAP', 'OUTLIER', 'INVALID', 'DUPLICATE', 'CROSSCHECK', 'UNKNOWN')`
+    ),
+    check("feature_values_definition_hash_check", sql`${t.definitionHash} ~ '^fd1:[0-9a-f]{64}$'`),
+    check("feature_values_hash_check", sql`${t.valueHash} ~ '^fv1:[0-9a-f]{64}$'`),
+  ]
+);
+
+/**
+ * Materialisierungs-Cursor (Wasserstand je Featurereihe).
+ *
+ * Der Wasserstand ist monoton: ein Recompute darf ihn nur vorwärts bewegen
+ * (`GREATEST(alt, neu)` im Upsert). Ein Rücksprung würde Bars erneut
+ * materialisieren — das ist ausschließlich über einen expliziten
+ * `--reset-cursor`-Pfad mit Audit-Event erlaubt.
+ */
+export const featureMaterializationCursors = pgTable(
+  "feature_materialization_cursors",
+  {
+    featureId: text("feature_id").notNull(),
+    featureVersion: integer("feature_version").notNull(),
+    entityId: text("entity_id").notNull(),
+    timeframe: text("timeframe").notNull(),
+    watermarkEventTime: timestamp("watermark_event_time", { withTimezone: true }).notNull(),
+    watermarkAvailableAt: timestamp("watermark_available_at", { withTimezone: true }).notNull(),
+    lastRunId: uuid("last_run_id").references(() => featureMaterializationRuns.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.featureId, t.featureVersion, t.entityId, t.timeframe] }),
+    index("feature_materialization_cursors_last_run_idx").on(t.lastRunId),
+    check(
+      "feature_materialization_cursors_watermark_check",
+      sql`${t.watermarkAvailableAt} >= ${t.watermarkEventTime}`
+    ),
+  ]
+);
+
+/**
+ * Beobachtete Datenrevision (append-only Protokoll).
+ *
+ * Entsteht, wenn ein Recompute zum **selben Schlüssel** einen anderen Inhalt
+ * liefert (z. B. korrigierte Rohkerzen). Der historische Wert bleibt gültig und
+ * wird nicht überschrieben; der Befund ist die Grundlage für die Entscheidung,
+ * ob eine neue Featureversion materialisiert wird. UNIQUE über
+ * `(Schlüssel, incoming_value_hash)` macht die Erkennung selbst idempotent —
+ * derselbe Befund wird nicht zweimal protokolliert.
+ */
+export const featureDataRevisions = pgTable(
+  "feature_data_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    featureId: text("feature_id").notNull(),
+    featureVersion: integer("feature_version").notNull(),
+    entityId: text("entity_id").notNull(),
+    timeframe: text("timeframe").notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    existingValueHash: text("existing_value_hash").notNull(),
+    incomingValueHash: text("incoming_value_hash").notNull(),
+    runId: uuid("run_id").references(() => featureMaterializationRuns.id),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("feature_data_revisions_key_unique").on(
+      t.featureId,
+      t.featureVersion,
+      t.entityId,
+      t.timeframe,
+      t.eventTime,
+      t.incomingValueHash
+    ),
+    index("feature_data_revisions_series_idx").on(t.featureId, t.entityId, t.eventTime),
+    check("feature_data_revisions_existing_hash_check", sql`${t.existingValueHash} ~ '^fv1:[0-9a-f]{64}$'`),
+    check("feature_data_revisions_incoming_hash_check", sql`${t.incomingValueHash} ~ '^fv1:[0-9a-f]{64}$'`),
+  ]
+);

@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-20 (RMA-P1-04 → FIXED, v1.52.0)
+Letzte Aktualisierung: 2026-09-20 (RMA-P6-01 → FIXED, v1.53.0)
 
 ## Statusmodell
 
@@ -53,7 +53,7 @@ codebasierten Detailbefund.
 | RMA-P5-03 | Cluster-Limits | VERIFIED | — | — | `df3163e` | v1.51.1 | Portfolio-Risk-Guard-Tests |
 | RMA-P5-04 | Drawdown-Scaling | PARTIAL | [P5-04](../prompts/PROMPT-P5-04-drawdown-scaling.md) | — | — | — | Auditbefund |
 | RMA-P5-05 | Signal-Decay-Exits | OPEN | [P5-05](../prompts/PROMPT-P5-05-signal-decay-exits.md) | — | — | — | Auditbefund |
-| RMA-P6-01 | Point-in-Time Feature Store | OPEN | [P6-01](../prompts/PROMPT-P6-01-point-in-time-feature-store.md) | — | — | — | Auditbefund |
+| RMA-P6-01 | Point-in-Time Feature Store | FIXED | [P6-01](../prompts/PROMPT-P6-01-point-in-time-feature-store.md) | [#150](https://github.com/Kryschuuu/ai-trading-firm/pull/150) | `2bf46c8` | v1.53.0 | `tests/featureStore.test.ts` (24 Tests: Registry-Immutabilität, Formelparität zum Scanner, synthetischer Leakage-Test, Missingness, Grenzen, Cursor/Replay, Revision vs. Parität, Quality/Betrieb) + `tests/featureStore.db.test.ts` (7 Tests gegen echte Postgres: CHECK/UNIQUE, Atomarität, Replay, Revisionen, Retention, as-of-Indexpfad); `npm test` 2610/0 fail, typecheck/lint/docs:validate grün |
 | RMA-P6-02 | Monte Carlo | OPEN | [P6-02](../prompts/PROMPT-P6-02-monte-carlo.md) | — | — | — | Auditbefund |
 | RMA-P6-03 | Data Quality | VERIFIED | — | — | `df3163e` + QA-02-Fix | v1.51.3 | Quality-Tests + QA-02-Roundtrip |
 
