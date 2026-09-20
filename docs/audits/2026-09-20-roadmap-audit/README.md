@@ -20,7 +20,7 @@
 | P1.1 Event-Replay mit realistischen Friktionen | PARTIAL | 5–8 PT | [RMA-P1-01](findings/RMA-P1-01-event-replay-frictions.md) | [PROMPT-P1-01](prompts/PROMPT-P1-01-event-replay-frictions.md) |
 | P1.2 90d/30d Walk-Forward | PARTIAL | 4–6 PT | [RMA-P1-02](findings/RMA-P1-02-walk-forward-training.md) | [PROMPT-P1-02](prompts/PROMPT-P1-02-walk-forward-training.md) |
 | P1.3 Backtest-Kennzahlen | VERIFIED | 0 PT | [RMA-P1-03](findings/RMA-P1-03-backtest-metrics.md) | — |
-| P1.4 `backtest_runs` / `backtest_trades` | PARTIAL | 2–3 PT | [RMA-P1-04](findings/RMA-P1-04-backtest-trades.md) | [PROMPT-P1-04](prompts/PROMPT-P1-04-backtest-trades.md) |
+| P1.4 `backtest_runs` / `backtest_trades` | FIXED (v1.52.0, [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149)) | 0 PT | [RMA-P1-04](findings/RMA-P1-04-backtest-trades.md) | [PROMPT-P1-04](prompts/PROMPT-P1-04-backtest-trades.md) |
 | P1.5 Backtest↔Paper↔Live-Drift und Strategy-Lifecycle | OPEN | 8–12 PT | [RMA-P1-05](findings/RMA-P1-05-lifecycle-drift.md) | [PROMPT-P1-05](prompts/PROMPT-P1-05-lifecycle-drift.md) |
 | P1.6 Trade-Attribution | PARTIAL | 3–5 PT | [RMA-P1-06](findings/RMA-P1-06-trade-attribution.md) | [PROMPT-P1-06](prompts/PROMPT-P1-06-trade-attribution.md) |
 | P2.1 Regime-Erkennung | PARTIAL | 2–4 PT | [RMA-P2-01](findings/RMA-P2-01-regime-detection.md) | [PROMPT-P2-01](prompts/PROMPT-P2-01-regime-detection.md) |
@@ -43,8 +43,9 @@
 | P6.2 Monte-Carlo-Simulation | OPEN | 3–5 PT | [RMA-P6-02](findings/RMA-P6-02-monte-carlo.md) | [PROMPT-P6-02](prompts/PROMPT-P6-02-monte-carlo.md) |
 | P6.3 Data-Quality-Checks | VERIFIED | 0 PT | [RMA-P6-03](findings/RMA-P6-03-data-quality.md) | — |
 
-**Verteilung:** 4 VERIFIED · 13 PARTIAL · 8 OPEN.
-**Schätzung:** 76–124 PT für alle verbleibenden Deltas bei sequenzieller Umsetzung.
+**Verteilung (Audit-Basis):** 4 VERIFIED · 13 PARTIAL · 8 OPEN.
+**Stand v1.52.0:** 4 VERIFIED · **1 FIXED** (RMA-P1-04) · 12 PARTIAL · 8 OPEN — Status-SSoT: [remediation/TRACKING.md](remediation/TRACKING.md).
+**Schätzung:** 76–124 PT für alle Deltas bei sequenzieller Umsetzung (Audit-Basis); davon 2–3 PT durch RMA-P1-04 erledigt.
 
 ## TOP-3-Gating-Faktoren
 
@@ -55,6 +56,9 @@
    finalem Holdout.
 3. **RMA-P1-04 — persistente Backtest-Trades:** Run-Aggregate und Trade-Hashes
    reichen nicht für Drift, Attribution und Trade-Level-Reproduzierbarkeit.
+   → **FIXED in v1.52.0** (PR [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149)):
+   `backtest_trades` wird atomar mit dem Run geschrieben, gegen die Aggregate
+   abgeglichen, idempotent und paginiert abfragbar.
 
 ## Sofort behobene Peer-Review-Bugs
 
