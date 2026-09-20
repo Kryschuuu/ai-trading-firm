@@ -2933,6 +2933,134 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       },
     ],
   },
+  FORECAST_RECORDED: {
+    label: "Prognose erfasst",
+    category: "agent",
+    expectedLevel: "INFO",
+    description:
+      "Eine Agenten-Analyse wurde als unveränderlicher Forecast-Vertrag im Ledger erfasst (RMA-P3-01): Zielereignis, Wahrscheinlichkeiten, Horizont, Stichtag (as_of) und Auflösungszeitpunkt sind fixiert. Der Vertrag ist append-only — dieselbe Analyse wird über den Idempotenzschlüssel nur einmal erfasst.",
+    headline: (d) =>
+      [text(d.agentRole) ?? "Agent", text(d.entityId) ? `auf ${text(d.entityId)}` : "", text(d.horizonId) ? `Horizont ${text(d.horizonId)}` : ""]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Bewertet wird später ausschließlich gegen den eingefrorenen Vertrag — unabhängig davon, ob Trades entstanden sind. Auflösung und Scoring referenzieren denselben Vertrag plus Datenmanifest.",
+    sections: (d) => [
+      {
+        title: "Vertrag",
+        facts: [
+          { label: "Forecast-ID", value: text(d.forecastId) ?? "—", mono: true },
+          { label: "Agenten-Rolle", value: text(d.agentRole) ?? "—" },
+          { label: "Ziel", value: text(d.entityId) ?? "—" },
+          { label: "Horizont", value: text(d.horizonId) ?? "—" },
+          { label: "Richtlinien-Version", value: text(d.policyVersion) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  FORECAST_CAPTURE_FAILED: {
+    label: "Prognose-Erfassung fehlgeschlagen",
+    category: "agent",
+    expectedLevel: "WARN",
+    description:
+      "Eine Agenten-Analyse konnte nicht als Forecast erfasst werden (z. B. ungültiger Vertrag, fehlende Referenzkerze oder Ledger-Störung). Der Analysepfad läuft weiter; es entsteht kein Forecast und kein Trade aus diesem Vorgang.",
+    headline: (d) =>
+      [text(d.role) ?? "Agent", text(d.entityId) ? `für ${text(d.entityId)}` : "", text(d.code) ? `Code ${text(d.code)}` : ""]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Fail-closed: statt eines stillschweigend fehlerhaften Eintrags wird die Erfassung verworfen und hier laut gemeldet.",
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Rolle", value: text(d.role) ?? "—" },
+          { label: "Ziel", value: text(d.entityId) ?? "—" },
+          { label: "Code", value: text(d.code) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  FORECAST_RESOLVED: {
+    label: "Prognose aufgelöst",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Ein fälliger Forecast wurde gegen die Outcome-Daten aufgelöst (RESOLVED): Referenz- und Schlussschlusskurs wurden ausschließlich aus Daten vor der Verfügbarkeits-Frist gelesen (Point-in-Time). Die Auflösung ist eine neue, versionierte Zeile — ältere Auflösungen werden nie überschrieben.",
+    headline: (d) =>
+      [text(d.forecastId) ? `Forecast ${text(d.forecastId)}` : "Forecast", num(d.resolutionVersion) !== null ? `Version ${num(d.resolutionVersion)}` : ""]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Der Outcome-Hash bindet die Auflösung an das konkrete Datenmanifest. Korrigierte Marktdaten erzeugen später eine neue Version (FORECAST_RE_RESOLUTION), niemals eine stille Änderung.",
+    sections: (d) => [
+      {
+        title: "Auflösung",
+        facts: [
+          { label: "Forecast-ID", value: text(d.forecastId) ?? "—", mono: true },
+          { label: "Version", value: num(d.resolutionVersion) !== null ? String(num(d.resolutionVersion)) : "—" },
+          { label: "Status", value: text(d.status) ?? "—" },
+          { label: "Auflösungsart", value: text(d.resolutionKind) ?? "—" },
+          { label: "Outcome-Hash", value: text(d.outcomeHash) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  FORECAST_VOID: {
+    label: "Prognose verworfen (VOID)",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Ein fälliger Forecast konnte nicht aufgelöst werden (z. B. fehlende Kerzen, Handelsaussetzung, ungültige Kurse oder Corporate Action gemäß Richtlinie) und wurde als VOID markiert. VOID-Prognosen fließen nicht in Brier-Scores ein, bleiben aber in der Abdeckungsstatistik sichtbar.",
+    headline: (d) =>
+      [text(d.forecastId) ? `Forecast ${text(d.forecastId)}` : "Forecast", text(d.voidReason) ? `Grund ${text(d.voidReason)}` : ""]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Fail-closed statt stillschweigend falsch: ohne belastbare Outcome-Daten wird nicht geraten. Die Auflösung bleibt als versionierte Zeile im Ledger.",
+    sections: (d) => [
+      {
+        title: "Auflösung",
+        facts: [
+          { label: "Forecast-ID", value: text(d.forecastId) ?? "—", mono: true },
+          { label: "Version", value: num(d.resolutionVersion) !== null ? String(num(d.resolutionVersion)) : "—" },
+          { label: "Verwerfungsgrund", value: text(d.voidReason) ?? "—", mono: true },
+          { label: "Auflösungsart", value: text(d.resolutionKind) ?? "—" },
+          { label: "Outcome-Hash", value: text(d.outcomeHash) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  FORECAST_RE_RESOLUTION: {
+    label: "Prognose neu aufgelöst",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Korrigierte Marktdaten nach der ursprünglichen Auflösung haben zu einer neuen Auflösungs-Version geführt. Die frühere Version bleibt unverändert erhalten — so bleibt nachvollziehbar, welches Scoring auf welcher Datenlage beruhte.",
+    headline: (d) =>
+      [
+        text(d.forecastId) ? `Forecast ${text(d.forecastId)}` : "Forecast",
+        num(d.previousVersion) !== null && num(d.resolutionVersion) !== null
+          ? `Version ${num(d.previousVersion)} → ${num(d.resolutionVersion)}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Re-Resolution ist ein bewusster, protokollierter Vorgang (Datenkorrektur, Corporate Action …) — stille Mutationen historischer Auflösungen sind ausgeschlossen.",
+    sections: (d) => [
+      {
+        title: "Auflösung",
+        facts: [
+          { label: "Forecast-ID", value: text(d.forecastId) ?? "—", mono: true },
+          { label: "Neue Version", value: num(d.resolutionVersion) !== null ? String(num(d.resolutionVersion)) : "—" },
+          { label: "Vorherige Version", value: num(d.previousVersion) !== null ? String(num(d.previousVersion)) : "—" },
+          { label: "Status", value: text(d.status) ?? "—" },
+          { label: "Outcome-Hash", value: text(d.outcomeHash) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
 
 };
 

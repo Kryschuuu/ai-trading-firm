@@ -649,6 +649,26 @@ Artefakte: `data/perpdata/quality-report.json` und
 `psql \"$DATABASE_URL\" -f drizzle/2026-09-20_perpetual_data.sql`.
 
 
+### Forecast-Ledger & Kalibrierung (RMA-P3-01, v1.55.0)
+
+Analysen der Agenten werden als unveränderliche Forecast-Verträge erfasst,
+Point-in-Time aufgelöst und mit Brier-Score/Kalibrierung bewertet — unabhängig
+von Trades. Details: [docs/FORECASTS.md](docs/FORECASTS.md).
+
+| Flag | Default | Bedeutung |
+|------|---------|-----------|
+| `FORECAST_LEDGER_ENABLED` | `true` | Capture-Hook im Analystenpfad + Resolver-/Score-APIs aktiv. `false` ⇒ kein Forecast wird erfasst, APIs antworten `503 DISABLED`; bestehende Ledger-Daten bleiben lesbar. Der Analysten- und Trade-Pfad läuft unverändert weiter (additiv, kein Fail des Analysepipeline-Zyklus bei Ledger-Störungen). |
+| `FORECAST_RESOLVER_INTERVAL_MIN` | `15` | Kadenz (Minuten) des Resolution-Schedulers in `instrumentation.ts`. Bounds [5, 1440], Clamp mit Warnung. `0`/negativ ⇒ Scheduler aus (nur manuelle Auflösung über die API). |
+| `FORECAST_MIN_SAMPLE` | `30` | Mindeststichprobe für die Status-Einstufung `ok` in Scoreberichten; darunter bleibt der Bericht sichtbar, trägt aber `insufficient-sample`. Bounds [5, 1000]. |
+
+Migration: `psql "$DATABASE_URL" -f drizzle/2026-09-20_forecast_ledger.sql`
+(idempotent, append-only — wiederholtes Ausführen ist sicher). Rollback:
+`FORECAST_LEDGER_ENABLED=false` setzt das Feature vollständig außer Kraft, ohne
+die Tabellen anzufassen (Tabellen dürfen erst nach Verifikation leer/duplikatfrei
+per `DROP TABLE … CASCADE` entfernt werden — Downgrade-Runbook in
+[docs/FORECASTS.md](docs/FORECASTS.md)).
+
+
 ### Sizing & Cluster-Limits (GAP-04, v1.48.0)
 
 Vol-basiertes Position-Sizing (`qty = (equity · riskPerTradePct) / |entry − stop|`,

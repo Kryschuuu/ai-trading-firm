@@ -29,6 +29,9 @@ import { fetchMarketNews } from "./news";
 // RMA-P2-02: Derivatekontext für den Technical Analyst. Das schmale Modul
 // (nicht der Barrel) hält die Abhängigkeit richtungsrein: lib → perpdata.
 import { perpAnalystSnapshotLinesFromCache } from "@/perpdata/consumers";
+// RMA-P3-01: Forecast-Capture — schmales Modul statt Barrel, damit die
+// Abhängigkeitsrichtung (lib → forecasts → db) erhalten bleibt.
+import { captureAnalystForecast } from "@/forecasts/service";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __analystBusy?: boolean;
@@ -37,7 +40,7 @@ const GLOBAL = globalThis as typeof globalThis & {
   __lastPennyRun?: string;
 };
 
-type AgentRowLite = { id: string; name: string; role: string; model: string };
+type AgentRowLite = { id: string; name: string; role: string; model: string; version: number };
 
 type AnalystRun = ReasonResult & {
   /** Vollständiger Nutzerprompt, damit ein Bericht später reproduzierbar bleibt. */
@@ -113,6 +116,30 @@ async function recordAnalysis(
       ...trace,
     },
   });
+
+  // ── RMA-P3-01 (v1.55.0): Forecast-Capture ────────────────────────────────
+  // Jede strukturierte Analyse mit Ziel-Symbol wird als unveränderlicher
+  // Forecast erfasst und später unabhängig von Trades aufgelöst/gescoret
+  // (Brier Score, Reliability). Der Pfad ist additiv und risikoneutral:
+  // ein Fehlschlag des Ledgers ändert nichts am Analystenbericht, bleibt
+  // aber laut (Telemetrie + strukturiertes Log). Forecasts für Rollen ohne
+  // Ziel-Entity (MACRO/NEWS) werden von der Policy `fp1` abgelehnt — es
+  // wird nichts rückwirkend aus Freitext konstruiert.
+  try {
+    await captureAnalystForecast({
+      role,
+      symbol: typeof meta.symbol === "string" ? meta.symbol : null,
+      view: meta.view,
+      confidence: meta.confidence,
+      promptVersion: agent?.version ?? 0,
+      model: agent?.model ?? "unknown",
+    });
+  } catch (e) {
+    structuredLog("warn", "forecast_capture_hook_failed", {
+      role,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 const ANTI_INJECTION =
@@ -248,7 +275,9 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
   const a = normalizeAnalysis(result.parsed);
   await recordAnalysis(await findAgentByRole("TECHNICAL_ANALYST"), "TECHNICAL_ANALYST", undefined,
     `[TECH ${symbol} ${new Date().toISOString()}]\n${[...lines, ...perpLines].join("\n")}\n→ ${a.view}: ${a.thesis}`.trim(),
-    { kind: "ANALYSIS", view: a.view, confidence: a.confidence, thesis: a.thesis, data: [...lines, ...perpLines] },
+    // `symbol` ist Teil der Metadaten (additiv): das Forecast-Ledger
+    // (RMA-P3-01) braucht das Ziel-Entity der Analyse.
+    { kind: "ANALYSIS", symbol, view: a.view, confidence: a.confidence, thesis: a.thesis, data: [...lines, ...perpLines] },
     result
   );
 }

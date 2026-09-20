@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.54.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.55.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,81 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.55.0] — 2026-09-20 · feat(forecasts): Forecast-Ledger, Brier-Score & Kalibrierung (RMA-P3-01)
+
+### Hinzugefügt
+
+- **Forecast-Ledger (`src/forecasts/`, Migration
+  `drizzle/2026-09-20_forecast_ledger.sql`, append-only/additiv):**
+  Agenten-Analysen werden erstmals als unveränderliche Forecast-Verträge
+  erfasst, Point-in-Time aufgelöst und unabhängig vom Trade-Journal mit
+  Brier-Score und Kalibrierungsmetriken bewertet.
+  - **Vertrag (immutable):** Agentenrolle, Prompt-Version und Modell,
+    Zielereignis `CLOSE_DIRECTION` auf `PAPER:<SYMBOL>`, geschlossene
+    Kategorien `[DOWN, UP]` mit validiertem Wahrscheinlichkeitsvektor
+    (Summe ≈ 1, ±1e-6), Horizont (`4h|24h|72h`), `asOf`, Referenzzeit/-kurs,
+    `resolvesAt`, Verfügbarkeitsdeadline (`resolvesAt + 2 h` Settling-Frist),
+    Regime und Policy-Version (`fp1`). Natürlicher Idempotenzschlüssel
+    `fk1:<sha256>` — Retries schreiben nie einen zweiten Forecast.
+  - **Persistenz:** vier neue Tabellen (`forecasts`,
+    `forecast_resolutions`, `forecast_resolution_runs`,
+    `forecast_resolver_cursors`); Auflösungen sind versionierte Append-only-
+    Zeilen mit Outcome-Hash (`fo1:<sha256>`), Status `PENDING/RESOLVED/VOID`,
+    Ereignis-/Verfügbarkeitszeit und Run-Manifesten. Migration vollständig
+    idempotent (`IF NOT EXISTS` + bewachte Constraints, Feature-Store-Muster).
+  - **Resolver (idempotent, begrenzt):** löst ausschließlich fällige Forecasts
+    gegen Kerzen mit `fetchedAt <= availabilityDeadline` auf (Point-in-Time,
+    kein Look-ahead durch nachträglich reparierte Historie). Fehlende Kerze ⇒
+    `VOID(MISSING_DATA)`, unbrauchbarer Kurs ⇒ `VOID(INVALID_DATA)`, Volumen 0
+    ⇒ `VOID(TRADING_HALT)` — niemals wird stillschweigend geraten. Monotoner
+    Cursor + Run-Manifeste; Wiederholungen/Neustarts setzen am Wasserstand auf.
+  - **Metriken (rein, Version `fm1`):** binärer Brier-Score `mean((p−y)²)` und
+    kategorial (`[0,2]`), Brier Skill Score gegen Segment-Klimatologie,
+    Log Loss (ε = 1e-6), Reliability-Bins (exakt an den Rändern 0/1) mit
+    Wilson-95-Intervallen, Expected Calibration Error, Sample Count, Coverage
+    `(resolved+void)/due` und Mindeststichproben-Gate
+    (`insufficient-sample`). Nur `RESOLVED` zählt in Scores; `VOID`/`PENDING`
+    bleiben in der Coverage sichtbar.
+  - **Segmentierung/API:** `GET /api/firm/forecasts` (Liste +
+    Operations-Status: Cursor-Wasserstand, ältester überfälliger Forecast,
+    `lagMs`), `GET /api/firm/forecasts/scores` (Overall + Segmente, bounded),
+    `POST /api/firm/forecasts/resolve` (manueller Lauf, `409` bei
+    Parallelität), `POST /api/firm/forecasts/resolutions` (Operator:
+    `RE_RESOLVE`/`VOID` mit geschlossener Grundliste). `firm.read`/`firm.write`,
+    `no-store`, harte Mengenlimits, keine High-Cardinality-Labels.
+  - **Re-Resolution statt stiller Mutation:** Marktdaten-Korrekturen oder
+    Operator-Eingriffe erzeugen eine neue Resolution-Version; frühere
+    Versionen bleiben unverändert und nachvollziehbar.
+  - **Betrieb:** Resolver-Kadenz in `instrumentation.ts` (§6), Audit-Events
+    `FORECAST_RECORDED`/`FORECAST_RESOLVED`/`FORECAST_VOID`/
+    `FORECAST_RE_RESOLUTION`/`FORECAST_CAPTURE_FAILED` (Katalog in
+    `auditView.ts`), bounded Telemetrie (`telemetry.forecasts`).
+
+### Konfiguration
+
+- `FORECAST_LEDGER_ENABLED` (Default `true`) — Master-Schalter Capture + APIs;
+  `false` ist der Rollback-Pfad (APIs antworten `503 DISABLED`).
+- `FORECAST_RESOLVER_INTERVAL_MIN` (Default `15`, Bounds 5…1440, `0` = aus).
+- `FORECAST_MIN_SAMPLE` (Default `30`, Bounds 5…1000).
+
+### Dokumentation & Tests
+
+- Neues Modul-Dokument [`docs/FORECASTS.md`](docs/FORECASTS.md): Vertrag,
+  Zeitsemantik (Ereignis/Verfügbarkeit/Berechnung), Formeln, Einheiten,
+  Fallbacks, API-Referenz, Migrations-/Rollback-Runbook.
+- Testsuite: `tests/forecastScoring.test.ts`, `tests/forecastCapture.test.ts`,
+  `tests/forecastResolver.test.ts`, `tests/forecastService.test.ts`,
+  `tests/forecastApi.test.ts` (rein) sowie `tests/forecastLedger.db.test.ts`
+  (eingebettetes Postgres: Migration doppelt ausgeführt, Idempotenz,
+  Re-Resolution, Cursor/Restart).
+
+### Hinweise (Abweichung vom Audit-Stand)
+
+- Audit-Basis war `df3163e`/v1.51.1; umgesetzt auf v1.54.0 mit dem
+  etablierten Feature-Store-/Perp-Data-Muster (idempotente Migration,
+  Cursor-Jobs, `firm.*`-APIs) — ohne Änderung bestehender Tabellen oder
+  Default-Verhalten.
 
 ## [1.54.0] — 2026-09-20 · feat(data): historische Perpetual-Daten (RMA-P2-02)
 
