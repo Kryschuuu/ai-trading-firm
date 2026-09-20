@@ -46,4 +46,9 @@ normalisierter Import-/PostgreSQL-/Read-API-Pfad ergänzt (Zielversion v1.56.0).
 Details: `src/executionQuality/README.md`. Die automatische Strategy-/Broker-/
 Backtest-Anbindung sowie die dort dokumentierten weiteren Akzeptanzlücken sind
 nicht geschlossen. Status bleibt ausdrücklich `PARTIAL`, keine Fix-Version.
-Test- und PR-Evidenz wird im Remediation-PR dokumentiert.
+Evidenz: [Draft-PR #153](https://github.com/Kryschuuu/ai-trading-firm/pull/153),
+Implementierungscommit `66eb1fc`. `typecheck`, `lint`, `docs:validate` erfolgreich;
+`npm test`: 2784 bestanden, 30 übersprungen, 0 Fehler; gezielte
+`tests/executionQuality*.test.ts`: 11/11 bestanden einschließlich echtem
+PostgreSQL. Der Bundle-Secret-Scan war mangels Build nicht verfügbar.
+Vollständige Kommandos, Einschränkungen und Rollback-Hinweise stehen im PR.
