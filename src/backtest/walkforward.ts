@@ -1,25 +1,21 @@
 /**
  * Walk-Forward-Validierung für die regelbasierte Backtesting-Engine
- * (GAP-01, v1.51.0).
+ * (GAP-01, v1.51.0; Train-Select-Freeze-Test RMA-P1-02, v1.60.0).
  *
  * Rollierende In-Sample-/Out-of-Sample-Fenster über den Backtest-Zeitraum:
  *   - OOS-Segmente kacheln den Zeitraum lückenlos und überlappungsfrei
  *     (Schrittweite = OOS-Länge, jüngstes Fenster endet an `to`).
  *   - Jedes OOS-Segment wird von einem direkt davor liegenden IS-Fenster
  *     fester Länge begleitet (IS-Fenster dürfen überlappen — Standard).
- *   - Jedes Fenster ist ein EIGENSTÄNDIGER Evaluations-Lauf (keine
- *     fensterübergreifenden Positionen): IS/OOS trennt hier
- *     EVALUATIONS-Fenster (Robustheit), KEINE Parameterschätzung.
- *
- * Bewusst NICHT Teil dieses Moduls (dokumentierte Grenze, siehe
- * docs/BACKTESTING.md): Parameter-Optimierung auf IS mit OOS-Verifikation.
- * Die replayten Regeln sind statisch — IS vs. OOS zeigt, ob eine Regel über
- * die Zeit stabil trägt oder nur auf einem Abschnitt „passt“
- * (Anti-Overfitting-Ausweis statt Optimierung).
+ *   - Train-Select-Freeze-Test: Jedes Fenster selektiert ausschließlich anhand
+ *     von IS-Daten eine Kandidatenkonfiguration, friert diese mit vollständiger
+ *     Provenance ein und evaluiert genau diese Konfiguration auf OOS.
+ *   - Unabhängiger Holdout: Nach allen Fenstern kann ein unangetasteter
+ *     Holdout-Zeitraum auf dem selektierten Modell ausgewertet werden.
  *
  * Determinismus: rein + injizierbare Zeit (`nowMs`, Muster
- * `src/cycle/clock.ts`) — gleiche (Kerzen, Regel, Fenster, Kosten) ⇒
- * byte-identisches `metricsJson` (Test: `tests/backtest.engine.test.ts`).
+ * `src/cycle/clock.ts`) — gleiche (Kerzen, Kandidaten, Fenster, Kosten) ⇒
+ * byte-identisches `metricsJson` + `freezeHash`.
  */
 
 import { scopeReplay } from "../executionQuality/backtest";
@@ -71,6 +67,8 @@ export const WF_BOUNDS = {
    * begrenzt implizit die Fensteranzahl). Default 2 Jahre.
    */
   maxSpanDays: { min: 30, max: 3650 },
+  /** Obergrenze für Kandidaten-Suchräume (Vermeidung von Kombinationsexplosionen). */
+  maxCandidates: { min: 1, max: 100 },
 } as const;
 
 /** Sichere Defaults: 90/30 Tage, maximal 2 Jahre Zeitraum. */
@@ -84,6 +82,122 @@ export interface WalkForwardConfig {
   isDays: number;
   oosDays: number;
   maxSpanDays: number;
+}
+
+/** Ein Kandidat für Train-Select-Freeze (RMA-P1-02). */
+export interface WalkForwardCandidate {
+  /** Stabile, eindeutige ID (1..64 Zeichen, z. B. "cand-1", "rsi_30_70"). */
+  id: string;
+  /** Name des Kandidaten. */
+  name?: string;
+  /** Strategie-/Regel-Version. */
+  strategyVersion?: string;
+  /** Serialisierbare Parameter-Konfiguration. */
+  config: Record<string, unknown>;
+  /** Strategie-Elemente (Regeln oder Setups). */
+  strategies: BacktestStrategyItem[];
+}
+
+/** Unterstützte Zielmetriken für die IS-Selektion. */
+export type SelectorTargetMetric =
+  | "sharpeRatio"
+  | "sortinoRatio"
+  | "netPnl"
+  | "totalReturn"
+  | "winRate"
+  | "profitFactor"
+  | "calmarRatio"
+  | "expectancy";
+
+/** Harte Mindestgates für die Kandidatenselektion auf IS. */
+export interface SelectorGates {
+  minTrades?: number;
+  minWinRate?: number;
+  minSharpeRatio?: number;
+  minProfitFactor?: number;
+  maxDrawdownPct?: number;
+}
+
+/** Konfiguration der Kandidatenselektion auf IS. */
+export interface WalkForwardSelectorConfig {
+  targetMetric?: SelectorTargetMetric;
+  gates?: SelectorGates;
+  failClosed?: boolean;
+}
+
+/** Zeile der vollständigen Score-Tabelle pro Fenster. */
+export interface CandidateScoreRow {
+  candidateId: string;
+  candidateName?: string;
+  config: Record<string, unknown>;
+  score: number;
+  passedGates: boolean;
+  rejectionReason?: string | null;
+  metrics: {
+    trades: number;
+    winRate: number;
+    netPnl: number;
+    pnl: number;
+    sharpeRatio: number;
+    sortinoRatio: number;
+    profitFactor: number | null;
+    maxDrawdownPct: number;
+  };
+}
+
+/** Unveränderliches Freeze-Artefakt pro Fenster. */
+export interface FreezeArtifact {
+  windowIndex: number;
+  isFrom: number;
+  isTo: number;
+  oosFrom: number;
+  oosTo: number;
+  selectedCandidateId: string;
+  selectedCandidate: WalkForwardCandidate;
+  scoreTable: CandidateScoreRow[];
+  dataManifest: {
+    candlesHash: string;
+    candleCount: number;
+    from: number;
+    to: number;
+  };
+  candidateHash: string;
+  configHash: string;
+  codeVersion: string;
+  seed: number;
+  cutoffs: {
+    isFrom: number;
+    isTo: number;
+    oosFrom: number;
+    oosTo: number;
+    embargoMs?: number;
+    purgeMs?: number;
+  };
+  /** sha256 über alle Bestandteile des Freeze-Artefakts. */
+  freezeHash: string;
+}
+
+/** Finaler Holdout-Konfiguration. */
+export interface HoldoutConfig {
+  holdoutDays: number;
+  embargoHours?: number;
+}
+
+/** Report einer Holdout-Auswertung. */
+export interface HoldoutReport {
+  from: number;
+  to: number;
+  candidateId: string;
+  candidate: WalkForwardCandidate;
+  summary: WindowEvalSummary;
+  trades: BacktestTradeLog[];
+  replay?: MultiAssetBacktestResult["replay"];
+}
+
+/** Kerze mit optionaler Verfügbarkeits- und Horizont-Information für Leakage-Tests. */
+export interface CandleWithHorizon extends CandleLike {
+  availableAt?: number;
+  labelHorizonEnd?: number;
 }
 
 /** Lädt die Walk-Forward-Konfiguration aus Env (Bounds-Clamp mit Warnung). */
@@ -106,6 +220,266 @@ export function loadWalkForwardConfig(
   };
 }
 
+/** Validiert und normalisiert Kandidaten (RMA-P1-02). */
+export function validateCandidates(candidates: unknown): WalkForwardCandidate[] {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    throw new WalkForwardError(
+      "walkforward:invalid-candidates",
+      "walkforward:invalid-candidates — candidates muss ein nicht-leeres Array sein."
+    );
+  }
+  if (candidates.length > WF_BOUNDS.maxCandidates.max) {
+    throw new WalkForwardError(
+      "walkforward:unbounded-candidate-space",
+      `walkforward:unbounded-candidate-space — Kandidatenanzahl ${candidates.length} überschreitet das Limit von ${WF_BOUNDS.maxCandidates.max}.`
+    );
+  }
+
+  const seenIds = new Set<string>();
+  const validated: WalkForwardCandidate[] = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const raw = candidates[i] as Partial<WalkForwardCandidate>;
+    if (!raw || typeof raw !== "object") {
+      throw new WalkForwardError(
+        "walkforward:invalid-candidates",
+        `walkforward:invalid-candidates — Kandidat [${i}] ist kein gültiges Objekt.`
+      );
+    }
+
+    if (typeof raw.id !== "string" || raw.id.trim() === "" || !/^[A-Za-z0-9_.:-]+$/.test(raw.id.trim())) {
+      throw new WalkForwardError(
+        "walkforward:invalid-candidates",
+        `walkforward:invalid-candidates — Kandidat [${i}] hat eine ungültige ID "${String(raw.id)}".`
+      );
+    }
+    const id = raw.id.trim();
+    if (seenIds.has(id)) {
+      throw new WalkForwardError(
+        "walkforward:duplicate-candidate-id",
+        `walkforward:duplicate-candidate-id — Doppelte Kandidaten-ID "${id}".`
+      );
+    }
+    seenIds.add(id);
+
+    if (!Array.isArray(raw.strategies) || raw.strategies.length === 0) {
+      throw new WalkForwardError(
+        "walkforward:invalid-candidates",
+        `walkforward:invalid-candidates — Kandidat "${id}" hat keine Strategien.`
+      );
+    }
+
+    const config = raw.config && typeof raw.config === "object" ? raw.config : {};
+    for (const [k, v] of Object.entries(config)) {
+      if (typeof v === "number" && !Number.isFinite(v)) {
+        throw new WalkForwardError(
+          "walkforward:invalid-candidate-config",
+          `walkforward:invalid-candidate-config — Kandidat "${id}" enthält nicht-endliche Zahl in Config [${k}]: ${v}.`
+        );
+      }
+    }
+
+    validated.push({
+      id,
+      name: raw.name ? String(raw.name) : id,
+      strategyVersion: raw.strategyVersion ? String(raw.strategyVersion) : undefined,
+      config: JSON.parse(stableStringify(config)),
+      strategies: raw.strategies,
+    });
+  }
+
+  return validated;
+}
+
+/** Extrahiert die Zielmetrik aus Metriken und Evaluation-Summary. */
+export function extractTargetMetric(
+  metrics: BacktestMetrics,
+  summary: WindowEvalSummary,
+  targetMetric: SelectorTargetMetric = "sharpeRatio"
+): number {
+  switch (targetMetric) {
+    case "sharpeRatio":
+      return summary.sharpeRatio;
+    case "sortinoRatio":
+      return summary.sortinoRatio;
+    case "netPnl":
+      return summary.netPnl;
+    case "totalReturn":
+      return summary.pnl;
+    case "winRate":
+      return summary.winRate;
+    case "profitFactor":
+      return summary.profitFactor ?? 0;
+    case "calmarRatio":
+      return metrics.calmarRatio ?? 0;
+    case "expectancy":
+      return metrics.expectancy ?? 0;
+    default:
+      return summary.sharpeRatio;
+  }
+}
+
+/** Prüft harte Mindestgates auf IS. */
+export function evaluateGates(
+  summary: WindowEvalSummary,
+  gates?: SelectorGates
+): { passed: boolean; reason?: string } {
+  if (!gates) return { passed: true };
+
+  if (gates.minTrades !== undefined && summary.trades < gates.minTrades) {
+    return { passed: false, reason: `minTrades: ${summary.trades} < ${gates.minTrades}` };
+  }
+  if (gates.minWinRate !== undefined && summary.winRate < gates.minWinRate) {
+    return { passed: false, reason: `minWinRate: ${summary.winRate}% < ${gates.minWinRate}%` };
+  }
+  if (gates.minSharpeRatio !== undefined && summary.sharpeRatio < gates.minSharpeRatio) {
+    return { passed: false, reason: `minSharpeRatio: ${summary.sharpeRatio} < ${gates.minSharpeRatio}` };
+  }
+  if (gates.minProfitFactor !== undefined) {
+    if (summary.profitFactor === null || summary.profitFactor < gates.minProfitFactor) {
+      return { passed: false, reason: `minProfitFactor: ${summary.profitFactor ?? "null"} < ${gates.minProfitFactor}` };
+    }
+  }
+  if (gates.maxDrawdownPct !== undefined && summary.maxDrawdownPct > gates.maxDrawdownPct) {
+    return { passed: false, reason: `maxDrawdownPct: ${summary.maxDrawdownPct}% > ${gates.maxDrawdownPct}%` };
+  }
+
+  return { passed: true };
+}
+
+/** Filtert Kerzen as-of-sicher und purged horizonüberlappende Daten (RMA-P1-02). */
+export function filterCandlesWithLeakageProtection(
+  candles: CandleLike[],
+  from: number,
+  to: number,
+  opts?: { purgeMs?: number; strict?: boolean }
+): CandleLike[] {
+  const purgeMs = opts?.purgeMs ?? 0;
+  const effectiveTo = to - purgeMs;
+  const result: CandleLike[] = [];
+
+  for (const c of candles) {
+    if (c.time < from || c.time >= effectiveTo) continue;
+
+    const candle = c as CandleWithHorizon;
+    if (candle.availableAt !== undefined && candle.availableAt > to) {
+      if (opts?.strict) {
+        throw new WalkForwardError(
+          "walkforward:leakage-detected",
+          `walkforward:leakage-detected — Kerze t=${c.time} hat availableAt=${candle.availableAt} > Cutoff ${to}.`
+        );
+      }
+      continue;
+    }
+
+    if (candle.labelHorizonEnd !== undefined && candle.labelHorizonEnd > to) {
+      if (opts?.strict) {
+        throw new WalkForwardError(
+          "walkforward:leakage-detected",
+          `walkforward:leakage-detected — Kerze t=${c.time} hat labelHorizonEnd=${candle.labelHorizonEnd} > Cutoff ${to}.`
+        );
+      }
+      continue;
+    }
+
+    result.push(c);
+  }
+
+  return result;
+}
+
+/** Erstellt das unveränderliche Freeze-Artefakt pro Fenster. */
+export function createFreezeArtifact(params: {
+  windowIndex: number;
+  isFrom: number;
+  isTo: number;
+  oosFrom: number;
+  oosTo: number;
+  selectedCandidate: WalkForwardCandidate;
+  scoreTable: CandidateScoreRow[];
+  candles: CandleLike[];
+  selectorConfig?: WalkForwardSelectorConfig;
+  engineConfig?: BacktestEngineOptions;
+  seed?: number;
+  embargoMs?: number;
+  purgeMs?: number;
+}): FreezeArtifact {
+  const {
+    windowIndex,
+    isFrom,
+    isTo,
+    oosFrom,
+    oosTo,
+    selectedCandidate,
+    scoreTable,
+    candles,
+    selectorConfig,
+    engineConfig,
+    seed = 1,
+    embargoMs,
+    purgeMs,
+  } = params;
+
+  const isCandles = candles.filter((c) => c.time >= isFrom && c.time < isTo);
+  const candlesHash = createHash("sha256").update(stableStringify(isCandles)).digest("hex");
+  const dataManifest = {
+    candlesHash,
+    candleCount: isCandles.length,
+    from: isFrom,
+    to: isTo,
+  };
+
+  const candidateHash = createHash("sha256")
+    .update(stableStringify(scoreTable.map((s) => ({ id: s.candidateId, config: s.config }))))
+    .digest("hex");
+
+  const configHash = createHash("sha256")
+    .update(stableStringify({ selectorConfig: selectorConfig ?? null, engineConfig: engineConfig ?? null }))
+    .digest("hex");
+
+  const cutoffs = {
+    isFrom,
+    isTo,
+    oosFrom,
+    oosTo,
+    ...(embargoMs ? { embargoMs } : {}),
+    ...(purgeMs ? { purgeMs } : {}),
+  };
+
+  const preHashObj = {
+    windowIndex,
+    selectedCandidateId: selectedCandidate.id,
+    selectedCandidateConfig: selectedCandidate.config,
+    scoreTable,
+    dataManifest,
+    candidateHash,
+    configHash,
+    codeVersion: APP_VERSION,
+    seed,
+    cutoffs,
+  };
+
+  const freezeHash = createHash("sha256").update(stableStringify(preHashObj)).digest("hex");
+
+  return {
+    windowIndex,
+    isFrom,
+    isTo,
+    oosFrom,
+    oosTo,
+    selectedCandidateId: selectedCandidate.id,
+    selectedCandidate,
+    scoreTable,
+    dataManifest,
+    candidateHash,
+    configHash,
+    codeVersion: APP_VERSION,
+    seed,
+    cutoffs,
+    freezeHash,
+  };
+}
+
 /** Ein IS/OOS-Fensterpaar (Halboffen: [from, to), OOS kachelt lückenlos). */
 export interface WalkForwardWindow {
   index: number;
@@ -117,25 +491,13 @@ export interface WalkForwardWindow {
 
 export interface WalkForwardLayout {
   windows: WalkForwardWindow[];
-  /** Effektiver Zeitraum nach maxSpanDays-Deckel (jüngste Daten gewinnen). */
   effectiveFrom: number;
   effectiveTo: number;
-  /** true, wenn der Zeitraum am Deckel gekappt wurde. */
   truncated: boolean;
 }
 
 /**
  * Berechnet das rollierende Fensterlayout — rein, ohne Kerzen/IO.
- *
- * Layout (klassisch, vorwärts-rollierend): Fenster 0 startet am
- * Zeitraum-Anfang mit IS=[from, from+is), OOS=[from+is, from+is+oos);
- * jedes weitere Fenster rückt um EINE OOS-Länge vor. Nur VOLLSTÄNDIGE
- * Fenster (IS+OOS komplett innerhalb [from, to]) werden gelegt — ein
- * angebrochenes Restfenster wird verworfen (kein „fast voll“).
- *
- * Fail-closed: Passt nicht einmal EIN vollständiges Fenster in den
- * Zeitraum, ist `windows` leer — der Runner wirft dann
- * `walkforward:insufficient-span` statt zu raten.
  */
 export function computeWalkForwardWindows(
   from: number,
@@ -186,19 +548,7 @@ export class WalkForwardError extends Error {
   }
 }
 
-/**
- * Kompakte Fenster-Kennzahlen (persistiert in `windowsJson`).
- *
- * Zwei PnL-Sichten (RMA-P1-04, v1.52.0):
- *   - `pnl`    = Equity-Sicht der Engine (`metrics.totalReturn`): Mark-to-
- *     Market am letzten Snapshot des Fensters, d. h. VOR den erzwungenen
- *     `END_OF_DATA`-Schließungen (deren Gebühren/Slippage fehlen hier).
- *   - `netPnl` = Trade-Ledger-Sicht: Summe der realisierten Netto-PnL aller
- *     Trades des Fensters (inkl. `END_OF_DATA`-Schlusskosten). Diese Summe
- *     wird exakt aus den `backtest_trades`-Zeilen reproduziert.
- *   `pnl − netPnl` ist damit genau der Kostenanteil der Schlussglattstellung
- *   (kein Fehler, dokumentierte Differenz; siehe docs/BACKTESTING.md §5).
- */
+/** Kompakte Fenster-Kennzahlen. */
 export interface WindowEvalSummary {
   from: number;
   to: number;
@@ -213,11 +563,8 @@ export interface WindowEvalSummary {
   sortinoRatio: number;
   fees: number;
   funding: number;
-  /** Summe der Trade-Netto-PnL (Trade-Ledger, 4 Nachkommastellen). */
   netPnl: number;
-  /** Summe der Slippage-Kosten (Kontowährung, 2 Nachkommastellen wie `fees`). */
   slippage: number;
-  /** sha256 über die kanonische Trade-Liste (Lookahead-/Drift-Nachweis). */
   tradeHash: string;
 }
 
@@ -227,7 +574,7 @@ export interface WalkForwardWindowReport {
   oos: WindowEvalSummary;
 }
 
-/** Aggregierte OOS-/IS-Kennzahlen über alle Fenster (persistiert). */
+/** Aggregierte OOS-/IS-Kennzahlen über alle Fenster. */
 export interface WalkForwardAggregate {
   windows: number;
   bars: number;
@@ -241,24 +588,13 @@ export interface WalkForwardAggregate {
   sortinoRatio: number;
   fees: number;
   funding: number;
-  /** Summe der Trade-Netto-PnL über alle Fenster (Trade-Ledger-Sicht). */
   netPnl: number;
-  /** Summe der Slippage-Kosten über alle Fenster. */
   slippage: number;
 }
 
 /** Segment eines Walk-Forward-Fensters. */
 export type WalkForwardSegment = "IS" | "OOS";
 
-/**
- * Ein Trade des Walk-Forward-Laufs mit seiner Fenster-Zuordnung
- * (RMA-P1-04): identisch zum Engine-Trade-Log plus `windowIndex`/`segment`.
- * Die Liste im Report ist kanonisch geordnet (Fenster ↑, IS vor OOS, darin
- * Engine-Schließreihenfolge) — dieselbe Ordnung wie `backtest_trades.seq`.
- * `replay` (RMA-P1-01, v1.58.0, optional): Fill-/Funding-/Impact-Details des
- * `event_replay`-Pfads — geht NICHT in den Trade-Hash ein (der hasht nur den
- * `trade`-Log), landet aber in `provenance_json.replay` der Trade-Zeile.
- */
 export interface WalkForwardTradeRecord {
   windowIndex: number;
   segment: WalkForwardSegment;
@@ -266,13 +602,6 @@ export interface WalkForwardTradeRecord {
   replay?: TradeReplayDetail;
 }
 
-/**
- * Replay-Evidenz eines Walk-Forward-Laufs (RMA-P1-01, v1.58.0; nur
- * `executionModel: "event_replay"`): eingefrorene Friktionskonfiguration,
- * Datenmanifest (identisch über alle Fensterläufe — jeder Fensterlauf sieht
- * dieselbe versionierte Eingabe, geclippt nur über die Zeitmaske), summierte
- * Event-Coverage und die Vereinigungsmenge der degradierten Annahmen.
- */
 export interface WalkForwardReplayEvidence {
   config: ResolvedEventReplayConfig;
   manifest: EventReplayDataManifest;
@@ -292,15 +621,17 @@ export interface WalkForwardReport {
     ruleKey: string | null;
     name: string;
     signature: string;
-    /**
-     * Symbol, wie es in der Regel STEHT (PAPER-kanonisch, z. B. „BTC/USDT“).
-     * Das Replay läuft gegen `instrumentId` (Store-ID, z. B.
-     * „BITUNIX:BTCUSDT“) — Bedingung/Action/Fenster sind venue-agnostisch,
-     * beide IDs stehen im Report (Nachvollziehbarkeit, kein stiller Tausch).
-     */
     ruleSymbol: string;
   };
   walkforward: WalkForwardConfig & { windowCount: number; truncated: boolean };
+  selection?: {
+    targetMetric: SelectorTargetMetric;
+    gates?: SelectorGates;
+    candidatesCount: number;
+    candidateHash: string;
+  };
+  freezeArtifacts?: FreezeArtifact[];
+  holdout?: HoldoutReport | null;
   costProfile: {
     executionModel: string;
     makerFee: number;
@@ -308,27 +639,14 @@ export interface WalkForwardReport {
     spreadBpsFallback: number | null;
     fundingRatePctPer8h: number;
     simulatorSeed: number;
-    /**
-     * Friktionsmodell-Version des `event_replay`-Pfads (RMA-P1-01, v1.58.0);
-     * `null` bei `legacy`/`paper` — geht in den Idempotency-Key ein, damit
-     * ein Modellwechsel nie als Replay desselben Laufs durchgeht.
-     */
     frictionModelVersion?: string | null;
   };
-  /** Replay-Evidenz (nur `event_replay`; fehlt sonst — additiv). */
   replayEvidence?: WalkForwardReplayEvidence;
   windows: WalkForwardWindowReport[];
   aggregateOos: WalkForwardAggregate;
   aggregateIs: WalkForwardAggregate;
   codeVersion: string;
-  /** Erstellungszeitpunkt (injiziert — Tests nutzen eine feste Clock). */
   createdAt: string;
-  /**
-   * Vollständige, kanonisch geordnete Trade-Liste des Laufs (RMA-P1-04).
-   * Quelle der `backtest_trades`-Zeilen; wird NICHT in `params_json`/
-   * `metrics_json`/`windows_json` kopiert (explizites Mapping in
-   * `toBacktestRunInsert`), landet aber im JSON-Artefakt der CLI.
-   */
   trades: WalkForwardTradeRecord[];
 }
 
@@ -336,13 +654,15 @@ export interface RunWalkForwardInput {
   instrumentId: string;
   timeframe: SupportedTimeframe;
   candles: CandleLike[];
-  strategies: BacktestStrategyItem[];
-  /** Regel-Referenz für `paramsJson` (Identität des Laufs). */
+  strategies?: BacktestStrategyItem[];
+  candidates?: WalkForwardCandidate[];
+  selector?: WalkForwardSelectorConfig;
+  holdout?: HoldoutConfig;
+  embargoHours?: number;
+  purgeHours?: number;
   ruleRef: WalkForwardReport["ruleRef"];
-  /** Engine-Optionen (Walk-Forward erzwingt `executionModel: "paper"`). */
   engineConfig?: BacktestEngineOptions;
   walkforward?: Partial<WalkForwardConfig>;
-  /** Injizierbare Zeit in ms (Default: Date.now — nur CLI/Prod). */
   nowMs?: number;
 }
 
@@ -353,12 +673,6 @@ export function hashTrades(
   return createHash("sha256").update(stableStringify(trades)).digest("hex");
 }
 
-/**
- * Summe der Trade-Netto-PnL eines Evaluations-Laufs — auf 4 Nachkommastellen
- * gerundet, weil jeder Summand bereits mit dieser Skala aus der Engine kommt
- * (`portfolio.closePosition`). Dieselbe Summe wird beim Ledger-Abgleich aus
- * den persistierten Zeilen gebildet (`src/backtest/tradeLedger.ts`).
- */
 export function sumTradeNetPnl(trades: ReadonlyArray<Pick<BacktestTradeLog, "pnl">>): number {
   let sum = 0;
   for (const t of trades) sum += t.pnl;
@@ -387,14 +701,6 @@ function summarizeEval(result: MultiAssetBacktestResult, from: number, to: numbe
   };
 }
 
-/**
- * Aggregiert Fensterläufe — alle Verhältnisse werden aus Summen NEU
- * berechnet (kein Mittel über Raten — das wäre mathematisch falsch).
- *
- * Sharpe/Sortino/MaxDD über die VERKETTETE OOS-/IS-Equity-Renditenreihe
- * (Anfangskapital je Fenster identisch ⇒ Renditen sind vergleichbar;
- * dokumentierte Näherung, kein fiktiver Kontoverlauf).
- */
 export function aggregateWindowEvals(
   evals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }>
 ): WalkForwardAggregate {
@@ -458,48 +764,79 @@ export function aggregateWindowEvals(
 }
 
 /**
- * Führt den Walk-Forward-Lauf aus: je Fenster ein IS- und ein OOS-
- * Evaluations-Lauf durch die Multi-Asset-Engine (Paper-Ausführung).
- *
- * Zeitmaske: Jeder Fensterlauf sieht NUR Kerzen seines Fensters
- * (`from`/`to`-Clip der Engine) — OOS-Kerzen sind für den IS-Lauf
- * strukturell unerreichbar (Test: `tests/backtest.engine.test.ts`).
+ * Führt den echten Train-Select-Freeze-Test Walk-Forward-Lauf aus (RMA-P1-02).
  */
 export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
   const wf = { ...loadWalkForwardConfig(), ...input.walkforward };
-  const from = input.candles.length > 0 ? input.candles[0].time : NaN;
-  const to = input.candles.length > 0 ? input.candles[input.candles.length - 1].time : NaN;
-  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+  const totalFrom = input.candles.length > 0 ? input.candles[0].time : NaN;
+  const totalTo = input.candles.length > 0 ? input.candles[input.candles.length - 1].time : NaN;
+  if (!Number.isFinite(totalFrom) || !Number.isFinite(totalTo) || totalTo <= totalFrom) {
     throw new WalkForwardError(
       "walkforward:no-candles",
       "walkforward:no-candles — Walk-Forward braucht mindestens 2 Kerzen mit aufsteigender Zeit."
     );
   }
 
-  const layout = computeWalkForwardWindows(from, to, wf);
+  // Kandidaten ermitteln & validieren
+  let candidateList: WalkForwardCandidate[];
+  if (input.candidates && input.candidates.length > 0) {
+    candidateList = validateCandidates(input.candidates);
+  } else {
+    candidateList = [
+      {
+        id: input.ruleRef.ruleId ?? "cand-default",
+        name: input.ruleRef.name,
+        strategyVersion: input.ruleRef.signature,
+        config: { ruleSymbol: input.ruleRef.ruleSymbol },
+        strategies: input.strategies ?? [],
+      },
+    ];
+  }
+
+  const targetMetric = input.selector?.targetMetric ?? "sharpeRatio";
+  const failClosedSelector = input.selector?.failClosed !== false;
+
+  // Embargo & Purge Parameter (in Millisekunden)
+  const embargoMs = Math.round((input.embargoHours ?? 0) * 3600_000);
+  const purgeMs = Math.round((input.purgeHours ?? 0) * 3600_000);
+
+  // Holdout-Bereich ermitteln
+  let wfTo = totalTo;
+  let holdoutFrom = totalTo;
+  let holdoutTo = totalTo;
+  if (input.holdout && input.holdout.holdoutDays > 0) {
+    const holdoutMs = Math.round(input.holdout.holdoutDays * 86_400_000);
+    const holdoutEmbargoMs = Math.round((input.holdout.embargoHours ?? 0) * 3600_000);
+    holdoutTo = totalTo;
+    holdoutFrom = totalTo - holdoutMs;
+    wfTo = holdoutFrom - holdoutEmbargoMs;
+    if (wfTo <= totalFrom) {
+      throw new WalkForwardError(
+        "walkforward:insufficient-span",
+        `walkforward:insufficient-span — Zeitraum ist nach Abzug des Holdouts (${input.holdout.holdoutDays}d) zu kurz.`
+      );
+    }
+  }
+
+  const layout = computeWalkForwardWindows(totalFrom, wfTo, wf);
   if (layout.windows.length === 0) {
     throw new WalkForwardError(
       "walkforward:insufficient-span",
-      `walkforward:insufficient-span — Zeitraum ${Math.round((to - from) / 86_400_000)}d trägt kein vollständiges IS(${wf.isDays}d)+OOS(${wf.oosDays}d)-Fenster.`
+      `walkforward:insufficient-span — Zeitraum ${Math.round((wfTo - totalFrom) / 86_400_000)}d trägt kein vollständiges IS(${wf.isDays}d)+OOS(${wf.oosDays}d)-Fenster.`
     );
   }
 
-  const candlesBySymbol = new Map<string, CandleLike[]>([[input.instrumentId, input.candles]]);
-  const windowReports: WalkForwardWindowReport[] = [];
-  const isEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
-  const oosEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
-  // Kanonische Trade-Liste (RMA-P1-04): Fenster ↑, IS vor OOS, darin die
-  // Schließreihenfolge der Engine — identisch zu `backtest_trades.seq`.
-  const trades: WalkForwardTradeRecord[] = [];
-  const executionQuality: Batch[] = [];
-  const captureHash = digest({candles:input.candles,rule:input.ruleRef,config:input.engineConfig ?? null,version:APP_VERSION,timeframe:input.timeframe,layout});
-
-  // RMA-P1-01: Walk-Forward erlaubt zusätzlich zum Paper-Pfad das explizite
-  // Opt-in `executionModel: "event_replay"` — nie den Legacy-Pfad (kein
-  // Legacy-Kostenmodell in vergleichbar persistierten Runs). Alte Aufrufer
-  // ohne Angabe bleiben byte-identisch auf `"paper"`.
   const executionModel: "paper" | "event_replay" =
     input.engineConfig?.executionModel === "event_replay" ? "event_replay" : "paper";
+  const baseConfig: BacktestEngineOptions = { ...input.engineConfig, executionModel };
+
+  const windowReports: WalkForwardWindowReport[] = [];
+  const freezeArtifacts: FreezeArtifact[] = [];
+  const isEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
+  const oosEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
+  const trades: WalkForwardTradeRecord[] = [];
+  const executionQuality: Batch[] = [];
+
   const evidenceBox: { current: WalkForwardReplayEvidence | null } = { current: null };
   const mergeReplayEvidence = (result: MultiAssetBacktestResult): void => {
     const summary = result.replay;
@@ -521,31 +858,135 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
     ).sort();
   };
 
+  const captureHash = digest({
+    candles: input.candles,
+    rule: input.ruleRef,
+    config: input.engineConfig ?? null,
+    version: APP_VERSION,
+    timeframe: input.timeframe,
+    layout,
+  });
+
+  // Letzter selektierter Kandidat für Holdout
+  let lastSelectedCandidate: WalkForwardCandidate = candidateList[0];
+
   for (const w of layout.windows) {
-    const baseConfig: BacktestEngineOptions = { ...input.engineConfig, executionModel };
-    const isResult = runMultiAssetBacktest({
-      candlesBySymbol,
-      strategies: input.strategies,
-      config: { ...baseConfig, from: w.isFrom, to: w.isTo },
+    // 1. IS-Selektion
+    const isCandles = filterCandlesWithLeakageProtection(input.candles, w.isFrom, w.isTo, {
+      purgeMs,
+      strict: true,
     });
+    const candlesBySymbolIs = new Map<string, CandleLike[]>([[input.instrumentId, isCandles]]);
+
+    const scoreTable: CandidateScoreRow[] = [];
+    const candidateEvalMap = new Map<string, { summary: WindowEvalSummary; result: MultiAssetBacktestResult }>();
+
+    for (const cand of candidateList) {
+      const isResult = runMultiAssetBacktest({
+        candlesBySymbol: candlesBySymbolIs,
+        strategies: cand.strategies,
+        config: { ...baseConfig, from: w.isFrom, to: w.isTo },
+      });
+      const isSummary = summarizeEval(isResult, w.isFrom, w.isTo);
+      const gateRes = evaluateGates(isSummary, input.selector?.gates);
+      const score = extractTargetMetric(isResult.metrics, isSummary, targetMetric);
+
+      candidateEvalMap.set(cand.id, { summary: isSummary, result: isResult });
+
+      scoreTable.push({
+        candidateId: cand.id,
+        candidateName: cand.name,
+        config: cand.config,
+        score,
+        passedGates: gateRes.passed,
+        rejectionReason: gateRes.reason ?? null,
+        metrics: {
+          trades: isSummary.trades,
+          winRate: isSummary.winRate,
+          netPnl: isSummary.netPnl,
+          pnl: isSummary.pnl,
+          sharpeRatio: isSummary.sharpeRatio,
+          sortinoRatio: isSummary.sortinoRatio,
+          profitFactor: isSummary.profitFactor,
+          maxDrawdownPct: isSummary.maxDrawdownPct,
+        },
+      });
+    }
+
+    // Deterministisches Sortieren mit Tie-Breaker:
+    // 1. Gate bestanden (true > false)
+    // 2. Score (descending)
+    // 3. Net PnL (descending)
+    // 4. Trades (descending)
+    // 5. Max Drawdown % (ascending)
+    // 6. Candidate ID (lexikographisch aufsteigend)
+    scoreTable.sort((a, b) => {
+      if (a.passedGates !== b.passedGates) return a.passedGates ? -1 : 1;
+      if (a.score !== b.score) return b.score - a.score;
+      if (a.metrics.netPnl !== b.metrics.netPnl) return b.metrics.netPnl - a.metrics.netPnl;
+      if (a.metrics.trades !== b.metrics.trades) return b.metrics.trades - a.metrics.trades;
+      if (a.metrics.maxDrawdownPct !== b.metrics.maxDrawdownPct) return a.metrics.maxDrawdownPct - b.metrics.maxDrawdownPct;
+      return a.candidateId.localeCompare(b.candidateId);
+    });
+
+    const winningRow = scoreTable[0];
+    if (!winningRow.passedGates && failClosedSelector) {
+      throw new WalkForwardError(
+        "walkforward:no-candidate-passed-gates",
+        `walkforward:no-candidate-passed-gates — Kein Kandidat hat im IS-Fenster [${new Date(w.isFrom).toISOString()}, ${new Date(w.isTo).toISOString()}] die harten Mindestgates erfüllt.`
+      );
+    }
+
+    const winningCandidate = candidateList.find((c) => c.id === winningRow.candidateId)!;
+    lastSelectedCandidate = winningCandidate;
+
+    const winningIsEval = candidateEvalMap.get(winningCandidate.id)!;
+    isEvals.push(winningIsEval);
+    mergeReplayEvidence(winningIsEval.result);
+
+    // Freeze-Artefakt erzeugen
+    const freezeArtifact = createFreezeArtifact({
+      windowIndex: w.index,
+      isFrom: w.isFrom,
+      isTo: w.isTo,
+      oosFrom: w.oosFrom,
+      oosTo: w.oosTo,
+      selectedCandidate: winningCandidate,
+      scoreTable,
+      candles: input.candles,
+      selectorConfig: input.selector,
+      engineConfig: input.engineConfig,
+      seed: input.engineConfig?.paper?.simulator?.seed ?? input.engineConfig?.replay?.seed ?? 1,
+      embargoMs,
+      purgeMs,
+    });
+    freezeArtifacts.push(freezeArtifact);
+
+    // 2. OOS-Evaluation NUR mit dem selektierten Kandidaten
+    const oosCandles = filterCandlesWithLeakageProtection(input.candles, w.oosFrom, w.oosTo, {
+      purgeMs: 0,
+      strict: false,
+    });
+    const candlesBySymbolOos = new Map<string, CandleLike[]>([[input.instrumentId, oosCandles]]);
+
     const oosResult = runMultiAssetBacktest({
-      candlesBySymbol,
-      strategies: input.strategies,
+      candlesBySymbol: candlesBySymbolOos,
+      strategies: winningCandidate.strategies,
       config: { ...baseConfig, from: w.oosFrom, to: w.oosTo },
     });
-    for (const [segment,result] of [["IS",isResult],["OOS",oosResult]] as const) {
-      const scope = digest([captureHash,w,segment]);
-      executionQuality.push(...(result.executionQuality ?? []).map(b=>scopeReplay(b,scope,input.nowMs ?? Date.now())));
+
+    for (const [segment, result] of [["IS", winningIsEval.result], ["OOS", oosResult]] as const) {
+      const scope = digest([captureHash, w, segment]);
+      executionQuality.push(...(result.executionQuality ?? []).map((b) => scopeReplay(b, scope, input.nowMs ?? Date.now())));
     }
-    const isSummary = summarizeEval(isResult, w.isFrom, w.isTo);
+
     const oosSummary = summarizeEval(oosResult, w.oosFrom, w.oosTo);
-    windowReports.push({ index: w.index, is: isSummary, oos: oosSummary });
-    isEvals.push({ summary: isSummary, result: isResult });
+    windowReports.push({ index: w.index, is: winningIsEval.summary, oos: oosSummary });
     oosEvals.push({ summary: oosSummary, result: oosResult });
-    mergeReplayEvidence(isResult);
     mergeReplayEvidence(oosResult);
-    for (const trade of isResult.trades) {
-      const detail = isResult.replay?.tradeDetails[trade.id];
+
+    for (const trade of winningIsEval.result.trades) {
+      const detail = winningIsEval.result.replay?.tradeDetails[trade.id];
       trades.push({ windowIndex: w.index, segment: "IS", trade, ...(detail ? { replay: detail } : {}) });
     }
     for (const trade of oosResult.trades) {
@@ -554,10 +995,44 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
     }
   }
 
+  // 3. Finaler Holdout (erst NACH allen IS/OOS-Entscheidungen)
+  let holdoutReport: HoldoutReport | null = null;
+  if (input.holdout && input.holdout.holdoutDays > 0 && holdoutFrom < holdoutTo) {
+    const holdoutCandles = filterCandlesWithLeakageProtection(input.candles, holdoutFrom, holdoutTo, {
+      purgeMs: 0,
+      strict: false,
+    });
+    const candlesBySymbolHoldout = new Map<string, CandleLike[]>([[input.instrumentId, holdoutCandles]]);
+
+    const holdoutResult = runMultiAssetBacktest({
+      candlesBySymbol: candlesBySymbolHoldout,
+      strategies: lastSelectedCandidate.strategies,
+      config: { ...baseConfig, from: holdoutFrom, to: holdoutTo },
+    });
+
+    const holdoutSummary = summarizeEval(holdoutResult, holdoutFrom, holdoutTo);
+    mergeReplayEvidence(holdoutResult);
+
+    holdoutReport = {
+      from: holdoutFrom,
+      to: holdoutTo,
+      candidateId: lastSelectedCandidate.id,
+      candidate: lastSelectedCandidate,
+      summary: holdoutSummary,
+      trades: holdoutResult.trades,
+      ...(holdoutResult.replay ? { replay: holdoutResult.replay } : {}),
+    };
+  }
+
+  const candidateHash = createHash("sha256")
+    .update(stableStringify(candidateList.map((c) => ({ id: c.id, config: c.config }))))
+    .digest("hex");
+
   const enginePaper = input.engineConfig?.paper;
   const engineReplay = input.engineConfig?.replay;
   const nowMs = input.nowMs ?? Date.now();
   const evidence: WalkForwardReplayEvidence | null = evidenceBox.current;
+
   return {
     executionQuality,
     kind: "walk-forward",
@@ -573,6 +1048,14 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
       windowCount: layout.windows.length,
       truncated: layout.truncated,
     },
+    selection: {
+      targetMetric,
+      gates: input.selector?.gates,
+      candidatesCount: candidateList.length,
+      candidateHash,
+    },
+    freezeArtifacts,
+    ...(holdoutReport ? { holdout: holdoutReport } : {}),
     costProfile: {
       executionModel,
       makerFee: enginePaper?.makerFee ?? engineReplay?.makerFee ?? input.engineConfig?.feeModel?.makerFee ?? 0.0002,

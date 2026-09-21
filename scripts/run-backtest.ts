@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
  * CLI für Walk-Forward-Backtests (GAP-01, D3, v1.51.0; Trade-Ledger
- * RMA-P1-04, v1.52.0).
+ * RMA-P1-04, v1.52.0; Train-Select-Freeze-Test RMA-P1-02, v1.60.0).
  *
- * Replayt EINE Mikro-Zyklus-Regel gegen den HistoricalStore in rollierenden
- * IS/OOS-Fenstern (Paper-Ausführung = DERSELBE Fill-Simulator wie der
- * PaperBroker) und persistiert den Run vergleichbar:
+ * Replayt eine Mikro-Zyklus-Regel ODER mehrere Strategiekandidaten gegen
+ * den HistoricalStore in rollierenden IS/OOS-Fenstern mit Train-Select-Freeze-Test:
  *   - Datenbank: Run-Zeile in `backtest_runs` + ALLE Trades in
  *     `backtest_trades`, atomar in EINER Transaktion und idempotent
  *     (`persistBacktestRun`): Key = Inhalts-Fingerprint des Laufs
@@ -19,15 +18,8 @@
  *   node --import tsx scripts/run-backtest.ts \
  *     --instrument=BITUNIX:BTCUSDT --timeframe=1h \
  *     --from=2024-01-01 --to=2026-01-01 \
- *     --rule-id=<uuid> | --rule-file=./regel.json \
- *     [--is-days=90] [--oos-days=30] [--idempotency-key=<key>] [--skip-db]
- *
- * Fail-closed: fehlende/ungültige Flags, leere Kerzenreihen, ungültige
- * Regeln und zu kurze Zeiträume brechen mit Exit 1 ab (kein Run, kein
- * Artefakt, keine DB-Zeile). Schlägt die Persistenz fehl oder wird sie
- * abgelehnt (Ledger ≠ Aggregate), entsteht KEINE DB-Zeile; die Artefakte
- * werden trotzdem geschrieben und der Exit-Code ist 1 (laut, nie still) —
- * ein Lauf gilt erst mit RECONCILED-Ledger als persistiert.
+ *     (--rule-id=<uuid> | --rule-file=./regel.json | --candidates-file=./candidates.json) \
+ *     [--target-metric=sharpeRatio] [--holdout-days=30] [--is-days=90] [--oos-days=30]
  */
 
 import { randomUUID } from "node:crypto";
@@ -42,11 +34,14 @@ import {
   persistBacktestRun,
   runWalkForward,
   TradeLedgerError,
+  validateCandidates,
   WalkForwardError,
 } from "../src/backtest";
 import type {
   BacktestStrategyItem,
   ReplayInputEvent,
+  SelectorTargetMetric,
+  WalkForwardCandidate,
   WalkForwardReport,
 } from "../src/backtest";
 import {
@@ -74,32 +69,40 @@ import {
 } from "../src/perpdata/index";
 import { loadWalkForwardConfig, WF_BOUNDS } from "../src/backtest/walkforward";
 
-const USAGE = `Walk-Forward-Backtest (GAP-01) — genau EIN Regel-Replay je Aufruf.
+const USAGE = `Walk-Forward-Backtest (GAP-01 / RMA-P1-02 Train-Select-Freeze-Test).
 
 Aufruf:
   node --import tsx scripts/run-backtest.ts --instrument=<ID> --timeframe=<tf>
-    --from=<ISO|ms> --to=<ISO|ms> (--rule-id=<uuid> | --rule-file=<pfad>)
+    --from=<ISO|ms> --to=<ISO|ms>
+    (--rule-id=<uuid> | --rule-file=<pfad> | --candidates-file=<pfad>)
+    [--target-metric=sharpeRatio|netPnl|sortinoRatio|winRate|profitFactor]
+    [--holdout-days=N] [--embargo-hours=N] [--purge-hours=N]
     [--is-days=N] [--oos-days=N] [--idempotency-key=<key>] [--skip-db]
 
 Pflicht:
   --instrument   Instrument-ID wie im HistoricalStore (z. B. BITUNIX:BTCUSDT)
   --timeframe    Kerzen-Periodizität (${"1h"} u. a. — Allowlist des Stores)
   --from/--to    Zeitraum (ISO-8601 oder Epoch-ms; muss mind. 1 IS+OOS tragen)
-  --rule-id      Regel-UUID aus trade_rules (genau eine Regelquelle!)
-  --rule-file    Pfad zu einer RuleSpec-JSON (wird sanitized + geklemmt)
+  Genau eine Quelle:
+    --rule-id          Regel-UUID aus trade_rules
+    --rule-file        Pfad zu einer RuleSpec-JSON
+    --candidates-file  Pfad zu einer Kandidaten-JSON (Array von WalkForwardCandidate)
 
-Optional:
-  --is-days      IS-Fenster in Tagen (Bounds [${WF_BOUNDS.isDays.min}, ${WF_BOUNDS.isDays.max}], Default Env/90)
-  --oos-days     OOS-Fenster in Tagen (Bounds [${WF_BOUNDS.oosDays.min}, ${WF_BOUNDS.oosDays.max}], Default Env/30)
-  --idempotency-key  eigener Lauf-Schlüssel (8..128 Zeichen [A-Za-z0-9:_.-]);
-                 Default: Inhalts-Fingerprint (Retry ⇒ derselbe Run)
-  --skip-db      keine Persistenz (nur Artefakte; Offline-Betrieb)
-  --execution-model  paper (Default) | event_replay (RMA-P1-01: Order-
-                 Lifecycle mit Partial Fills, Latenz, Depth-Impact und
-                 punktgenauen Funding-Ereignissen aus der Perp-Historie)
-  --replay-latency-ms  Submit→Arrival-Latenz in ms (nur event_replay, ≥ 0,
-                 Default 0 = Fill auf der Entscheidungskerze)
-  --replay-seed  Seed des Replay-Laufs (nur event_replay, Default 1)
+Optional (Train-Select-Freeze & Holdout):
+  --target-metric      Zielmetrik für IS-Selektion (sharpeRatio, netPnl, sortinoRatio, winRate, profitFactor)
+  --holdout-days       Finaler Holdout in Tagen (z. B. 30; erst nach IS/OOS ausgewertet)
+  --embargo-hours      Embargo-Sperrfrist zwischen IS und OOS in Stunden (z. B. 4)
+  --purge-hours        Purge-Schnitt für Horizon-Überlappung in Stunden (z. B. 4)
+  --min-trades         Harter IS-Mindestgate: Mindestanzahl Trades
+  --min-win-rate       Harter IS-Mindestgate: Mindest-Win-Rate (%)
+  --min-sharpe         Harter IS-Mindestgate: Mindest-Sharpe-Ratio
+  --max-drawdown       Harter IS-Mindestgate: Maximaler Drawdown (%)
+  --is-days            IS-Fenster in Tagen (Bounds [${WF_BOUNDS.isDays.min}, ${WF_BOUNDS.isDays.max}], Default Env/90)
+  --oos-days           OOS-Fenster in Tagen (Bounds [${WF_BOUNDS.oosDays.min}, ${WF_BOUNDS.oosDays.max}], Default Env/30)
+  --idempotency-key    eigener Lauf-Schlüssel (8..128 Zeichen [A-Za-z0-9:_.-]);
+                       Default: Inhalts-Fingerprint (Retry ⇒ derselbe Run)
+  --skip-db            keine Persistenz (nur Artefakte; Offline-Betrieb)
+  --execution-model    paper (Default) | event_replay (Order-Lifecycle mit Partial Fills, Latenz, Depth)
 
 Ausgabe: data/backtest/<runId>.json + <runId>.md; DB: backtest_runs-Zeile +
 backtest_trades (atomar, idempotent, Ledger RECONCILED).
@@ -129,7 +132,6 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
   return out;
 }
 
-/** ISO-8601 oder Epoch-ms → ms (fail-closed bei ungültiger Zeit). */
 function parseTime(raw: string, flag: string): number {
   const t = raw.trim();
   if (/^-?\d+$/.test(t)) {
@@ -163,9 +165,6 @@ function readRuleFile(file: string): string {
 async function loadRule(args: Record<string, string | boolean>): Promise<{ spec: RuleSpec; ruleId: string | null }> {
   const ruleId = args["rule-id"];
   const ruleFile = args["rule-file"];
-  if ((ruleId === undefined) === (ruleFile === undefined)) {
-    fail("genau EINE Regelquelle angeben: --rule-id=<uuid> ODER --rule-file=<pfad>.");
-  }
   if (typeof ruleId === "string") {
     const id = ruleId.trim();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
@@ -180,19 +179,22 @@ async function loadRule(args: Record<string, string | boolean>): Promise<{ spec:
     if (!row) fail(`Regel ${id} existiert nicht (trade_rules).`);
     return { spec: rowToSpec(row), ruleId: id };
   }
-  const file = String(ruleFile);
-  const raw = readRuleFile(file);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    fail(`--rule-file="${file.slice(0, 80)}" ist kein gültiges JSON.`);
+  if (typeof ruleFile === "string") {
+    const file = String(ruleFile);
+    const raw = readRuleFile(file);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      fail(`--rule-file="${file.slice(0, 80)}" ist kein gültiges JSON.`);
+    }
+    const checked = sanitizeRuleSpec(parsed as Record<string, unknown>, "MANUAL");
+    if (!checked.ok) {
+      fail(`Regel-Spezifikation ungültig: ${checked.errors.join("; ").slice(0, 300)}`);
+    }
+    return { spec: checked.spec, ruleId: null };
   }
-  const checked = sanitizeRuleSpec(parsed as Record<string, unknown>, "MANUAL");
-  if (!checked.ok) {
-    fail(`Regel-Spezifikation ungültig: ${checked.errors.join("; ").slice(0, 300)}`);
-  }
-  return { spec: checked.spec, ruleId: null };
+  fail("genau EINE Quelle angeben: --rule-id=<uuid>, --rule-file=<pfad> ODER --candidates-file=<pfad>.");
 }
 
 function renderMarkdown(runId: string, report: WalkForwardReport): string {
@@ -201,33 +203,61 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
     `# Walk-Forward-Run ${runId}`,
     ``,
     `- Instrument: \`${report.instrumentId}\` (${report.timeframe}), Zeitraum ${d(report.from)} … ${d(report.to)}`,
-    `- Regel: ${report.ruleRef.name} (Signatur \`${report.ruleRef.signature}\`, Regel-Symbol \`${report.ruleRef.ruleSymbol}\`)`,
+    `- Regel / Strategie: ${report.ruleRef.name} (Signatur \`${report.ruleRef.signature}\`, Regel-Symbol \`${report.ruleRef.ruleSymbol}\`)`,
     `- Fenster: ${report.walkforward.windowCount} × IS ${report.walkforward.isDays}d / OOS ${report.walkforward.oosDays}d${report.walkforward.truncated ? ` (Zeitraum am ${report.walkforward.maxSpanDays}d-Deckel gekappt)` : ""}`,
     `- Kosten: ${report.costProfile.executionModel === "event_replay" ? `Event-Replay (Friktionsmodell ${report.costProfile.frictionModelVersion ?? "er1"}: Order-Lifecycle, Latenz, Depth-Impact, FUNDING_DUE-Ereignisse)` : "Paper-Ausführung (Fill-Simulator wie PaperBroker)"}, Maker ${(report.costProfile.makerFee * 100).toFixed(3)} %, Taker ${(report.costProfile.takerFee * 100).toFixed(3)} %, Funding ${report.costProfile.fundingRatePctPer8h} %/8h, Seed ${report.costProfile.simulatorSeed}`,
     `- Code-Version: \`${report.codeVersion}\`, erstellt ${report.createdAt}`,
+  ];
+
+  if (report.selection) {
+    lines.push(
+      `- Selektion (Train-Select-Freeze): Zielmetrik \`${report.selection.targetMetric}\`, ${report.selection.candidatesCount} Kandidaten (Hash \`${report.selection.candidateHash.slice(0, 12)}…\`)`
+    );
+  }
+
+  lines.push(
     ``,
     `## Aggregate`,
     ``,
     `| Aggregat | Fenster | Trades | Win-Rate | PnL (Equity) | Netto-PnL (Ledger) | Profit-Factor | MaxDD | Sharpe | Sortino | Gebühren | Slippage | Funding |`,
-    `|---|---|---|---|---|---|---|---|---|---|---|---|---|`,
-  ];
+    `|---|---|---|---|---|---|---|---|---|---|---|---|---|`
+  );
+
   for (const [label, a] of [["OOS", report.aggregateOos], ["IS", report.aggregateIs]] as const) {
     lines.push(
       `| ${label} | ${a.windows} | ${a.trades} | ${a.winRate} % | ${a.pnl} | ${a.netPnl} | ${a.profitFactor ?? "—"} | ${a.maxDrawdownPct} % | ${a.sharpeRatio} | ${a.sortinoRatio} | ${a.fees} | ${a.slippage} | ${a.funding} |`
     );
   }
+
   lines.push(
     ``,
-    `## Fenster`,
+    `## Fenster & Freeze-Artefakte`,
     ``,
-    `| # | IS | OOS | IS-Trades | IS-PnL | OOS-Trades | OOS-PnL | OOS-Netto (Ledger) | OOS-Win-Rate | OOS-MaxDD | Trade-Hash (OOS) |`,
+    `| # | IS | OOS | Selektion | IS-Trades | IS-PnL | OOS-Trades | OOS-PnL | OOS-Netto | OOS-Win-Rate | Freeze-Hash |`,
     `|---|---|---|---|---|---|---|---|---|---|---|`
   );
+
   for (const w of report.windows) {
+    const freeze = report.freezeArtifacts?.find((f) => f.windowIndex === w.index);
+    const selectedId = freeze ? freeze.selectedCandidateId : "default";
+    const freezeHash = freeze ? `\`${freeze.freezeHash.slice(0, 12)}…\`` : "—";
     lines.push(
-      `| ${w.index} | ${d(w.is.from)}…${d(w.is.to)} | ${d(w.oos.from)}…${d(w.oos.to)} | ${w.is.trades} | ${w.is.pnl} | ${w.oos.trades} | ${w.oos.pnl} | ${w.oos.netPnl} | ${w.oos.winRate} % | ${w.oos.maxDrawdownPct} % | \`${w.oos.tradeHash.slice(0, 12)}…\` |`
+      `| ${w.index} | ${d(w.is.from)}…${d(w.is.to)} | ${d(w.oos.from)}…${d(w.oos.to)} | ${selectedId} | ${w.is.trades} | ${w.is.pnl} | ${w.oos.trades} | ${w.oos.pnl} | ${w.oos.netPnl} | ${w.oos.winRate} % | ${freezeHash} |`
     );
   }
+
+  if (report.holdout) {
+    const h = report.holdout;
+    lines.push(
+      ``,
+      `## Finaler Holdout`,
+      ``,
+      `- Holdout-Zeitraum: ${d(h.from)} … ${d(h.to)}`,
+      `- Ausgewerteter Kandidat: \`${h.candidateId}\` (${h.candidate.name ?? h.candidateId})`,
+      `- Holdout-Ergebnis: ${h.summary.trades} Trades, Win-Rate ${h.summary.winRate} %, Equity-PnL ${h.summary.pnl}, Netto-PnL ${h.summary.netPnl}, Sharpe ${h.summary.sharpeRatio}, MaxDD ${h.summary.maxDrawdownPct} %`
+    );
+  }
+
   if (report.replayEvidence) {
     const ev = report.replayEvidence;
     lines.push(
@@ -240,6 +270,7 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
       `- Degradierte Annahmen: ${ev.degradedReasons.length > 0 ? ev.degradedReasons.map((r) => `\`${r}\``).join(", ") : "keine"}`
     );
   }
+
   lines.push(
     ``,
     `## Trade-Ledger`,
@@ -247,9 +278,9 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
     `- ${report.trades.length} Trade-Zeilen (IS + OOS, Fenster ↑, IS vor OOS) — vollständig im JSON-Artefakt (\`trades\`) und in \`backtest_trades\` (seq 1…${report.trades.length}).`,
     `- PnL (Equity) stammt aus der Equity-Kurve des Fensters; Netto-PnL (Ledger) ist Σ der Trade-PnL. Die Differenz entsteht durch die END_OF_DATA-Glattstellung nach dem letzten Equity-Snapshot (Fill-Kosten des Schlussfills) — beide Werte stehen im Report, keiner wird umgebogen (\`reconciliation.equityLedgerGap\`).`,
     ``,
-    `> Anti-Overfitting-Hinweis: IS/OOS trennt EVALUATIONS-Fenster — die Regel`,
-    `> ist statisch, es findet keine Parameter-Optimierung statt. OOS trägt die`,
-    `> Wahrheit, IS nur den Vergleich. Siehe docs/BACKTESTING.md.`
+    `> Train-Select-Freeze-Hinweis: Jedes Fenster selektiert das Modell`,
+    `> ausschließlich auf IS-Daten und evaluiert genau diese Auswahl auf OOS.`,
+    `> Siehe docs/BACKTESTING.md.`
   );
   return lines.join("\n") + "\n";
 }
@@ -286,7 +317,6 @@ async function main(): Promise<void> {
       ? clampDays(args["oos-days"], "--oos-days", WF_BOUNDS.oosDays.min, WF_BOUNDS.oosDays.max)
       : wfBase.oosDays;
 
-  // RMA-P1-01: Ausführungspfad — Default bleibt "paper" (kein stiller Wechsel).
   const executionModelRaw =
     typeof args["execution-model"] === "string" ? (args["execution-model"] as string).trim() : "paper";
   if (executionModelRaw !== "paper" && executionModelRaw !== "event_replay") {
@@ -303,17 +333,72 @@ async function main(): Promise<void> {
     fail(`--replay-seed="${String(args["replay-seed"]).slice(0, 20)}" muss eine Ganzzahl ≥ 0 sein.`);
   }
 
-  const { spec, ruleId } = await loadRule(args);
+  // Kandidaten & Selektion laden
+  let candidates: WalkForwardCandidate[] | undefined = undefined;
+  let ruleSpecForPersist: RuleSpec;
+  let ruleRef: WalkForwardReport["ruleRef"];
 
-  // Regel-Logik (Bedingung/Action/Fenster — venue-agnostisch, sanitized +
-  // geklemmt) wird gegen --instrument replayt: Das Regel-Symbol
-  // (PAPER-kanonisch, z. B. „BTC/USDT“) adressiert nie Store-Reihen
-  // (z. B. „BITUNIX:BTCUSDT“). Beide IDs stehen im Report (ruleSymbol vs.
-  // instrumentId) — kein stiller Tausch, siehe docs/BACKTESTING.md.
-  const replaySpec: RuleSpec = { ...spec, symbol: instrumentId };
-  if (spec.symbol !== instrumentId) {
-    console.log(`[run-backtest] Regel-Symbol ${spec.symbol} ⇒ Replay gegen ${instrumentId} (siehe ruleSymbol im Report).`);
+  const candidatesFile = args["candidates-file"];
+  if (typeof candidatesFile === "string") {
+    const raw = readFileSync(candidatesFile, "utf8");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      fail(`--candidates-file="${candidatesFile.slice(0, 80)}" ist kein gültiges JSON.`);
+    }
+    candidates = validateCandidates(parsed);
+    const firstStrategy = candidates[0].strategies[0];
+    const spec = firstStrategy.type === "rule" ? firstStrategy.spec : ({ name: candidates[0].name ?? "candidate-1", symbol: instrumentId, condition: {}, action: {}, window: {} } as unknown as RuleSpec);
+    ruleSpecForPersist = spec;
+    ruleRef = {
+      ruleId: null,
+      ruleKey: null,
+      name: `Candidates (${candidates.length})`,
+      signature: ruleSignature(spec),
+      ruleSymbol: spec.symbol ?? instrumentId,
+    };
+  } else {
+    const { spec, ruleId } = await loadRule(args);
+    ruleSpecForPersist = { ...spec, symbol: instrumentId };
+    ruleRef = {
+      ruleId,
+      ruleKey: null,
+      name: spec.name,
+      signature: ruleSignature(spec),
+      ruleSymbol: spec.symbol,
+    };
   }
+
+  const targetMetricRaw = typeof args["target-metric"] === "string" ? args["target-metric"].trim() : "sharpeRatio";
+  const validMetrics: SelectorTargetMetric[] = [
+    "sharpeRatio", "sortinoRatio", "netPnl", "totalReturn", "winRate", "profitFactor", "calmarRatio", "expectancy"
+  ];
+  if (!validMetrics.includes(targetMetricRaw as SelectorTargetMetric)) {
+    fail(`--target-metric="${targetMetricRaw.slice(0, 30)}" ungültig. Erwartet: ${validMetrics.join(", ")}`);
+  }
+  const targetMetric = targetMetricRaw as SelectorTargetMetric;
+
+  const minTrades = typeof args["min-trades"] === "string" ? Number(args["min-trades"]) : undefined;
+  const minWinRate = typeof args["min-win-rate"] === "string" ? Number(args["min-win-rate"]) : undefined;
+  const minSharpe = typeof args["min-sharpe"] === "string" ? Number(args["min-sharpe"]) : undefined;
+  const maxDrawdown = typeof args["max-drawdown"] === "string" ? Number(args["max-drawdown"]) : undefined;
+
+  const selector = {
+    targetMetric,
+    gates: {
+      ...(minTrades !== undefined ? { minTrades } : {}),
+      ...(minWinRate !== undefined ? { minWinRate } : {}),
+      ...(minSharpe !== undefined ? { minSharpeRatio: minSharpe } : {}),
+      ...(maxDrawdown !== undefined ? { maxDrawdownPct: maxDrawdown } : {}),
+    },
+  };
+
+  const holdoutDays = typeof args["holdout-days"] === "string" ? Number(args["holdout-days"]) : 0;
+  const holdout = holdoutDays > 0 ? { holdoutDays } : undefined;
+
+  const embargoHours = typeof args["embargo-hours"] === "string" ? Number(args["embargo-hours"]) : 0;
+  const purgeHours = typeof args["purge-hours"] === "string" ? Number(args["purge-hours"]) : 0;
 
   const store = new HistoricalStore();
   const history = store.query({ instrumentId, timeframe, from, to });
@@ -329,8 +414,6 @@ async function main(): Promise<void> {
     volume: h.volume,
   }));
 
-  // Instrument aus der Registry (Fees/Spread/Perpetual-Erkennung); fehlt es,
-  // baut die Engine ein neutrales Spot-Default (fail-safe: kein Funding).
   let registryFeeNote = "Registry: kein Eintrag (Default-Gebühren, Spot, kein Funding)";
   const instruments: Record<string, MarketInstrument> = {};
   try {
@@ -345,18 +428,10 @@ async function main(): Promise<void> {
     console.warn(`[run-backtest] Registry nicht lesbar (${e instanceof Error ? e.message : String(e)}) — Default-Instrument.`);
   }
 
-  // DIESELBEN Quellen wie der Paper-Betrieb: kalibrierter Simulator + Funding.
   const simulator = calibrateSimulatorConfig(loadSimulatorConfig());
   const funding = loadFundingConfig();
-  const strategies: BacktestStrategyItem[] = [{ type: "rule", spec: replaySpec, id: `RULE-${spec.symbol}` }];
+  const strategies: BacktestStrategyItem[] = [{ type: "rule", spec: ruleSpecForPersist, id: `RULE-${ruleSpecForPersist.symbol}` }];
 
-  // RMA-P2-02: Funding-Satz aus der kanonischen Perp-Historie statt des
-  // statischen Umgebungs-Satzes — as-of dem Bar-Zeitstempel
-  // (`available_at <= asOfMs`), damit kein Backtest-Satz aus der Zukunft
-  // gebucht wird. Nur bei `PERP_DATA_ENABLED=true`; sonst bleibt der Lauf
-  // bit-identisch zu v1.53.0 (statischer Default). Liefert die Ablage für ein
-  // Symbol nichts, fällt die Engine pro Bar auf den dokumentierten
-  // Umgebungs-Satz zurück und sagt es einmal laut.
   let perpFunding: ReturnType<typeof createPerpFundingRateProvider> | null = null;
   if (perpDataEnabled() && executionModel === "paper") {
     try {
@@ -378,9 +453,7 @@ async function main(): Promise<void> {
         warn: (line) => console.warn(`[run-backtest] ${line}`),
       });
       await perpFunding.load({
-        // Engine-Symbol ist je nach Lauf der Instrument-Key oder das
-        // Regel-Symbol — beide Adressen füllen denselben Cache-Eintrag.
-        symbols: [instrumentId, spec.symbol],
+        symbols: [instrumentId, ruleSpecForPersist.symbol],
         fromMs: candles[0].time,
         toMs: candles[candles.length - 1].time,
       });
@@ -400,12 +473,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // RMA-P1-01: Event-Replay lädt punktgenaue FUNDING_DUE-Ereignisse aus der
-  // kanonischen Perp-Historie (as-of über `available_at` der Zeilen — der
-  // Replayer bucht ein Ereignis erst, wenn es bekannt sein durfte). Ohne
-  // PERP_DATA_ENABLED bleibt die Ereignisliste leer: Funding fehlt dann
-  // SICHTBAR (Coverage `fundingEvents: 0`), es wird nie ein statischer Satz
-  // still untergeschoben.
   const replayEvents: ReplayInputEvent[] = [];
   if (executionModel === "event_replay" && perpDataEnabled()) {
     try {
@@ -461,13 +528,12 @@ async function main(): Promise<void> {
       timeframe,
       candles,
       strategies,
-      ruleRef: {
-        ruleId,
-        ruleKey: null,
-        name: spec.name,
-        signature: ruleSignature(spec),
-        ruleSymbol: spec.symbol,
-      },
+      candidates,
+      selector,
+      holdout,
+      embargoHours,
+      purgeHours,
+      ruleRef,
       engineConfig:
         executionModel === "event_replay"
           ? {
@@ -499,6 +565,7 @@ async function main(): Promise<void> {
     if (e instanceof EventReplayError) fail(`${e.code} — ${e.message}`);
     throw e;
   }
+
   if (report.replayEvidence) {
     const ev = report.replayEvidence;
     console.log(
@@ -544,7 +611,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    const persisted = await persistBacktestRun({ report, spec: replaySpec, runId: candidateRunId, idempotencyKey });
+    const persisted = await persistBacktestRun({ report, spec: ruleSpecForPersist, runId: candidateRunId, idempotencyKey });
     const { jsonPath, mdPath } = writeArtifacts(persisted.id);
     console.log(`[run-backtest] Artefakte: ${jsonPath}, ${mdPath}`);
     if (persisted.created) {
@@ -557,8 +624,6 @@ async function main(): Promise<void> {
       );
     }
   } catch (e) {
-    // Keine DB-Zeile entstanden (Transaktion zurückgerollt). Die Artefakte
-    // werden trotzdem geschrieben (durable Evidenz) — der Fehler bleibt laut.
     const { jsonPath, mdPath } = writeArtifacts(candidateRunId);
     const code = e instanceof TradeLedgerError || e instanceof BacktestPersistenceError ? `${e.code} — ` : "";
     console.error(

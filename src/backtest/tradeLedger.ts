@@ -645,6 +645,9 @@ export function backtestRunIdempotencyKey(report: WalkForwardReport): string {
     costProfile: report.costProfile,
     codeVersion: report.codeVersion,
     windows: report.windows.map((w) => ({ index: w.index, is: w.is.tradeHash, oos: w.oos.tradeHash })),
+    ...(report.selection ? { selection: report.selection } : {}),
+    ...(report.freezeArtifacts ? { freezeHashes: report.freezeArtifacts.map((f) => f.freezeHash) } : {}),
+    ...(report.holdout ? { holdout: report.holdout.summary.tradeHash } : {}),
   };
   return `wf1:${createHash("sha256").update(stableStringify(identity)).digest("hex")}`;
 }
