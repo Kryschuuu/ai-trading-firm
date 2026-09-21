@@ -226,8 +226,8 @@ function assertPlainSerializable(value: unknown, path: string, depth = 0): void 
   const keys = Object.keys(record);
   if (keys.length > 128) throw new WalkForwardTrainingError("training:invalid-candidates", `${path} enthält zu viele Felder.`);
   for (const key of keys) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") {
-      throw new WalkForwardTrainingError("training:invalid-candidates", `${path} enthält einen unzulässigen Schlüssel.`);
+    if (key === "__proto__" || key === "constructor" || key === "prototype" || SENSITIVE_KEY_PATTERN.test(key)) {
+      throw new WalkForwardTrainingError("training:invalid-candidates", `${path} enthält einen unzulässigen oder sensiblen Schlüssel.`);
     }
     assertPlainSerializable(record[key], `${path}.${key}`, depth + 1);
   }
