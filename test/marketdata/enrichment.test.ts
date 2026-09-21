@@ -18,6 +18,7 @@ import {
   enrichWithTickers,
   enrichWithOrderBooks,
 } from "../../src/marketdata/enrichment";
+import { MarketDataHttpError } from "../../src/lib/marketDataErrors";
 import type { MarketDataAdapter } from "../../src/marketdata/sync";
 import type {
   MarketInstrument,
@@ -876,4 +877,78 @@ test("enrichWithTickers: Bulk-Lücken werden gepoolt gefüllt (kein serieller N+
     maxConcurrent >= 2,
     "die beiden Lücken laufen parallel (Pool), nicht seriell",
   );
+});
+
+// ── Fehlklassifikations-Fix: cause + code-Marker ─────────────────────────────
+
+test("enrichWithOrderBooks: failure carries cause (typed error survives)", async () => {
+  const typed = new MarketDataHttpError(429, "venue");
+  const { adapter } = mockAdapter({
+    instruments: [instrument("BTCUSDT")],
+    book: async () => {
+      throw typed;
+    },
+  });
+  const { report } = await enrichWithOrderBooks([instrument("BTCUSDT")], adapter, {
+    depthLimit: 5,
+    concurrency: 2,
+  });
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].symbol, "BTCUSDT");
+  assert.equal(report.failures[0].cause, typed);
+});
+
+test("enrichWithOrderBooks: INVALID_SYMBOL allowlist violation carries code", async () => {
+  const { adapter } = mockAdapter({ instruments: [instrument("BTCUSDT")] });
+  const bad = instrument("BTC USDT !!"); // verletzt die Symbol-Allowlist
+  const { report } = await enrichWithOrderBooks([bad], adapter, {
+    depthLimit: 5,
+    concurrency: 2,
+  });
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].code, "INVALID_SYMBOL");
+  assert.equal(report.failures[0].cause, undefined);
+});
+
+test("enrichWithOrderBooks: IMPLAUSIBLE_SPREAD carries code SCHEMA_MISMATCH", async () => {
+  const { adapter } = mockAdapter({
+    instruments: [instrument("BTCUSDT")],
+    book: async (symbol) => book(symbol, 100, 300), // +200 % ⇒ unplausibel
+  });
+  const { report } = await enrichWithOrderBooks([instrument("BTCUSDT")], adapter, {
+    depthLimit: 5,
+    concurrency: 2,
+  });
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].code, "SCHEMA_MISMATCH");
+});
+
+test("enrichWithTickers: missing ticker carries code NOT_FOUND (kein SCHEMA)", async () => {
+  const { adapter } = mockAdapter({
+    instruments: [instrument("BTCUSDT")],
+    tickers: [], // Bulk leer ⇒ Lücken-Fallback …
+    ticker: async () => ({}) as MarketTicker, // … liefert keinen Ticker
+  });
+  const { report } = await enrichWithTickers([instrument("BTCUSDT")], adapter);
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].code, "NOT_FOUND");
+});
+
+test("enrichWithTickers: wrong-symbol guard carries code SCHEMA_MISMATCH", async () => {
+  const { adapter } = mockAdapter({
+    instruments: [instrument("BTCUSDT")],
+    tickers: [],
+    ticker: async () => ticker("ETHUSDT", 5_000_000), // fremde Zeile
+  });
+  const { report } = await enrichWithTickers([instrument("BTCUSDT")], adapter);
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].code, "SCHEMA_MISMATCH");
+});
+
+test("enrichWithTickers: INVALID_SYMBOL allowlist violation carries code", async () => {
+  const { adapter } = mockAdapter({ instruments: [instrument("BTCUSDT")] });
+  const bad = instrument("BTC USDT !!");
+  const { report } = await enrichWithTickers([bad], adapter);
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].code, "INVALID_SYMBOL");
 });

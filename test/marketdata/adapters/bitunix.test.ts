@@ -58,6 +58,7 @@ import {
   toBitunixInterval,
 } from "../../../src/marketdata/adapters/bitunix";
 import {
+  KNOWN_SYNC_VENUES,
   MarketDataSyncService,
   UnsupportedTimeframeError,
   UnsupportedVenueError,
@@ -403,9 +404,13 @@ test("adapter is not registered when BITUNIX_ENABLED is unset", async () => {
     }
   );
 
-  // Gate-Report: Grund VENUE_DISABLED statt stillschweigend.
+  // Gate-Report: Grund VENUE_DISABLED statt stillschweigend — für ALLE
+  // bekannten Venues (Phase B: 6), nicht nur BITUNIX.
   const gated = registerAdapters({ env: {} });
-  assert.deepEqual(gated.skipped, [{ venue: "BITUNIX", reason: "VENUE_DISABLED" }]);
+  assert.deepEqual(
+    gated.skipped,
+    KNOWN_SYNC_VENUES.map((venue) => ({ venue, reason: "VENUE_DISABLED" })),
+  );
 });
 
 test("adapter is not registered when capabilities.BITUNIX.marketData=false", () => {
@@ -417,7 +422,14 @@ test("adapter is not registered when capabilities.BITUNIX.marketData=false", () 
     const adapters = registerMarketDataAdapters({ BITUNIX_ENABLED: "true" });
     assert.equal(adapters.size, 0, "Flag allein reicht nicht — Capability ist Pflicht");
     const gated = registerAdapters({ env: { BITUNIX_ENABLED: "true" } });
-    assert.deepEqual(gated.skipped, [{ venue: "BITUNIX", reason: "CAPABILITY_DISABLED" }]);
+    // BITUNIX fällt durch die Capability, alle anderen durch das Env-Flag.
+    assert.deepEqual(
+      gated.skipped,
+      KNOWN_SYNC_VENUES.map((venue) => ({
+        venue,
+        reason: venue === "BITUNIX" ? "CAPABILITY_DISABLED" : "VENUE_DISABLED",
+      })),
+    );
   } finally {
     (caps as { marketData: boolean }).marketData = original;
   }

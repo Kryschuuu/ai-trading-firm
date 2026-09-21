@@ -22,7 +22,7 @@ import { BitunixApiError } from "../src/brokers/bitunix/errors";
 import { TokenBucket } from "../src/brokers/bitunix/http";
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
 import { InstrumentRegistry } from "../src/universe/registry";
-import { createAdapterRegistry } from "../src/marketdata/adapterRegistry";
+import { KNOWN_SYNC_VENUES, createAdapterRegistry } from "../src/marketdata/adapterRegistry";
 import { MarketDataSyncService, type MarketDataAdapter } from "../src/marketdata/sync";
 import type { MarketOrderBook } from "../src/marketdata/types";
 import { createMockBitunixFetch, mockBitunixPublicClient } from "./fixtures/bitunixMockClient";
@@ -100,7 +100,9 @@ test("adapterRegistry: get(\"BITUNIX\") liefert den Public-only-Wrapper, get(\"U
   assert.ok(!registry.has("NOPE"));
   assert.ok(registry.has("bitunix"), "Venue-Keys sind case-insensitiv");
   assert.deepEqual(registry.list(), ["BITUNIX"]);
-  assert.deepEqual(registry.known(), ["BITUNIX"]);
+  // `known()` ist der Venue-Katalog unabhängig vom Filter (Phase B: 6 Venues).
+  assert.deepEqual(registry.known(), KNOWN_SYNC_VENUES);
+  assert.ok(registry.known().includes("BITUNIX"));
   assert.deepEqual(registry.skipped, []);
 });
 

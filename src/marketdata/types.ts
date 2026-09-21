@@ -231,6 +231,14 @@ export interface SyncResult {
   synced: number;
   /** Durch Allowlist/Kappung verworfene Instrumente. */
   skipped: number;
+  /**
+   * Aktive Registry-Zeilen dieser Venue, die in der Discovery fehlten
+   * (verwaist: delistet? umbenannt? Seed ohne Abdeckung?). Nur gesetzt, wenn
+   * > 0 UND keine `symbolAllowlist` gilt (mit Allowlist ist das Schweigen
+   * Absicht). Entdeckte, aber gekappte Zeilen zählen NICHT (depriorisiert,
+   * nicht verwaist). Runbook: `docs/MARKET_DATA_PIPELINE.md` („verwaist“).
+   */
+  orphanedInstruments?: number;
   /** Instrumente mit verwertetem Ticker (`volume24h` gesetzt). */
   tickersEnriched: number;
   /** Instrumente mit verwertetem Orderbook (Spread berechnet oder bewusst `null`). */

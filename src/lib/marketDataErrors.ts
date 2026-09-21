@@ -178,15 +178,133 @@ function codesOf(err: unknown): string[] {
 const JSON_SCHEMA_MARKERS =
   /JSON|Unexpected token|Unexpected end of JSON|is not valid JSON|not valid JSON|unterminated (?:string|array|object)|at position/i;
 
-function isJsonParseError(err: unknown): boolean {
-  if (err instanceof SyntaxError) return true;
-  if (err && typeof err === "object") {
-    const e = err as { name?: unknown; message?: unknown };
-    if (e.name === "SyntaxError") return true;
-    if (typeof e.message === "string" && JSON_SCHEMA_MARKERS.test(e.message)) return true;
+function causeChain(err: unknown): unknown[] {
+  const out: unknown[] = [];
+  const seen = new Set<unknown>();
+  let current = err;
+  for (let depth = 0; depth < 4 && current != null; depth++) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    out.push(current);
+    if (typeof current === "object" && "cause" in current) {
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      break;
+    }
   }
-  if (typeof err === "string" && JSON_SCHEMA_MARKERS.test(err)) return true;
+  return out;
+}
+
+function isJsonParseError(err: unknown): boolean {
+  for (const node of causeChain(err)) {
+    if (node instanceof SyntaxError) return true;
+    if (node && typeof node === "object") {
+      const e = node as { name?: unknown; message?: unknown };
+      if (e.name === "SyntaxError") return true;
+      if (typeof e.message === "string" && JSON_SCHEMA_MARKERS.test(e.message)) return true;
+    }
+    if (typeof node === "string" && JSON_SCHEMA_MARKERS.test(node)) return true;
+  }
   return false;
+}
+
+/**
+ * Sammelt `kind`-Werte von Fehler und Ursachen-Kette. Venue-Clients
+ * (Bitunix: `auth`/`permission`/`rate-limit`/`maintenance`/`payload`/…,
+ * siehe `src/brokers/bitunix/errors.ts`) typisieren Fehler maschinenlesbar —
+ * ohne diese Abbildung landete z. B. ein Bitunix-Rate-Limit als generisches
+ * `UNKNOWN` statt als retryable `RATE_LIMITED`.
+ */
+function kindsOf(err: unknown): string[] {
+  const out: string[] = [];
+  for (const node of causeChain(err)) {
+    if (node && typeof node === "object") {
+      const kind = (node as { kind?: unknown }).kind;
+      if (typeof kind === "string" && kind) out.push(kind);
+    }
+  }
+  return out;
+}
+
+/**
+ * Normalisiert einen `kind`-Wert auf vergleichbare Token
+ * (`rate-limit` → `[rate, limit]`, `RATE_LIMIT` → `[rate, limit]`).
+ */
+function kindTokens(kind: string): string[] {
+  return kind
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 0);
+}
+
+/**
+ * Bildet einen normalisierten `kind` auf die Taxonomie ab. `null` = kein
+ * Treffer (Aufrufer fällt auf die nächste Regel zurück).
+ */
+function reasonForKind(kind: string): { reason: MarketDataErrorReason; retryable: boolean } | null {
+  const tokens = kindTokens(kind);
+  const joined = tokens.join("");
+  const has = (...want: string[]): boolean => want.every((w) => tokens.includes(w));
+  // `data_unavailable` (valide, aber leere Venue-Antwort) ist KEIN 5xx:
+  // explizit vor der `unavailable`-Regel abfangen, sonst würde ein
+  // valides Leer-Ergebnis als retryable eingestuft (Retry-Loop).
+  if (has("data", "unavailable") || joined === "dataunavailable") {
+    return { reason: "DATA_UNAVAILABLE", retryable: false };
+  }
+  if (has("rate", "limit") || joined.includes("ratelimit") || joined.includes("toomanyrequests") || tokens.includes("429")) {
+    return { reason: "RATE_LIMITED", retryable: true };
+  }
+  if (
+    has("maintenance") ||
+    has("service", "unavailable") ||
+    has("bad", "gateway") ||
+    has("gateway", "timeout") ||
+    tokens.includes("unavailable") ||
+    tokens.includes("maintenance")
+  ) {
+    return { reason: "UPSTREAM_5XX", retryable: true };
+  }
+  if (
+    tokens.includes("auth") ||
+    tokens.includes("authentication") ||
+    tokens.includes("unauthorized") ||
+    tokens.includes("permission") ||
+    tokens.includes("permissions") ||
+    tokens.includes("forbidden")
+  ) {
+    return { reason: "UNAUTHORIZED", retryable: false };
+  }
+  if (has("not", "found") || tokens.includes("notfound") || joined.includes("unknownsymbol") || joined.includes("symbolnotfound")) {
+    return { reason: "NOT_FOUND", retryable: false };
+  }
+  if (joined.includes("invalidsymbol") || joined.includes("badsymbol")) {
+    return { reason: "INVALID_SYMBOL", retryable: false };
+  }
+  // Antwort über der Payload-Kappe: niemals erneut anfragen (non-retryable);
+  // nächstliegende Taxonomie-Klasse ist SCHEMA_MISMATCH (Antwort unbrauchbar).
+  if (tokens.includes("payload") || has("too", "large") || has("payload", "too", "large")) {
+    return { reason: "SCHEMA_MISMATCH", retryable: false };
+  }
+  if (tokens.includes("timeout") || has("deadline", "exceeded") || tokens.includes("deadline")) {
+    return { reason: "TIMEOUT", retryable: true };
+  }
+  if (tokens.includes("aborted") || tokens.includes("cancelled") || tokens.includes("canceled")) {
+    return { reason: "ABORTED", retryable: false };
+  }
+  if (
+    tokens.includes("network") ||
+    tokens.includes("dns") ||
+    tokens.includes("socket") ||
+    has("connection", "refused") ||
+    has("connection", "reset") ||
+    NETWORK_CODES.has(kind.toUpperCase())
+  ) {
+    return { reason: "NETWORK", retryable: true };
+  }
+  if (tokens.includes("tls") || tokens.includes("ssl") || tokens.includes("cert") || tokens.includes("certificate")) {
+    return { reason: "TLS", retryable: false };
+  }
+  return null;
 }
 
 /**
@@ -195,7 +313,9 @@ function isJsonParseError(err: unknown): boolean {
  * (Instrument-Konfigurationsfehler) behandelt wird.
  *
  * Priorität: expliziter HTTP-Status (inkl. `BitunixApiError.httpStatus`) →
- * Fehler-Codes/Names (inkl. `.cause`-Kette) → `UNKNOWN`.
+ * JSON-Parse (inkl. `.cause`-Kette) → Schema-/Timeout-Codes →
+ * explizite Typisierung (`code` exakt = Taxonomie-Klasse, Venue-`kind`,
+ * Broker-Codes wie `BITUNIX_RATE_LIMIT`) → TLS-/Netzwerk-Codes → `UNKNOWN`.
  */
 export function classifyMarketDataError(err: unknown): {
   reason: MarketDataErrorReason;
@@ -225,6 +345,21 @@ export function classifyMarketDataError(err: unknown): {
   if (codes.includes("TIMEOUT") || codes.includes("ABORTED") || names.includes("ABORTERROR") || names.includes("TIMEOUTERROR")) {
     // AbortError entsteht hier praktisch immer durch den Timeout-Timer.
     return { reason: codes.includes("ABORTED") ? "ABORTED" : "TIMEOUT", retryable: codes.includes("ABORTED") ? false : true, httpStatus };
+  }
+  // Explizit typisierte Fehler schlagen die nachfolgenden Heuristiken: ein
+  // `code`, der exakt einer Taxonomie-Klasse entspricht, wird direkt
+  // übernommen (retryable folgt `RETRYABLE_REASONS`); danach Venue-`kind`
+  // (`rate-limit`, `maintenance`, `auth`, … — `kindsOf` liest die
+  // `.cause`-Kette) und Broker-Codes (`BITUNIX_RATE_LIMIT`, …). Ohne diese
+  // Abbildung landete z. B. jedes Bitunix-Rate-Limit als `UNKNOWN`.
+  for (const code of codes) {
+    if (isMarketDataErrorReason(code)) {
+      return { reason: code, retryable: RETRYABLE_REASONS.has(code), httpStatus };
+    }
+  }
+  for (const kind of [...kindsOf(err), ...codes]) {
+    const mapped = reasonForKind(kind);
+    if (mapped) return { ...mapped, httpStatus };
   }
   if (codes.some((c) => c.startsWith("ERR_TLS") || TLS_MARKERS.some((m) => c.toUpperCase().includes(m)))) {
     return { reason: "TLS", retryable: false, httpStatus };

@@ -25,9 +25,12 @@ import {
   SyncPartialFailureError,
   SYNC_TIMEFRAMES,
   UnsupportedVenueError,
+  type MarketDataAdapter,
+  type MarketInstrument,
   type SyncResult,
 } from "../../src/marketdata";
 import { syncErrorsToDataErrors } from "../../src/marketdata/dataErrors";
+import { MarketDataHttpError } from "../../src/lib/marketDataErrors";
 import {
   barsOf,
   instrumentOf,
@@ -309,9 +312,12 @@ test("formatSyncLog: Fehlerzeilen nennen Ursachen-Buckets und Wiederholbarkeits-
     lines.some((l) => l.startsWith("[market-sync] failures nach Ursache: orderbook/")),
     `Ursachen-Bucket erwartet:\n${lines.join("\n")}`,
   );
+  // Ehrliche Klassifikation (Fehlklassifikations-Fix): Der Mock wirft einen
+  // generischen `Error` ohne Ursache — das ist UNKNOWN/nicht-wiederholbar,
+  // nicht mehr pauschal SCHEMA_MISMATCH/retryable.
   assert.ok(
     lines.some((l) =>
-      /^\[market-sync\] failures: 1 wiederholbar, 0 endgültig — Instrument-Zuordnung im Manifest/.test(l),
+      /^\[market-sync\] failures: 0 wiederholbar, 1 endgültig — Instrument-Zuordnung im Manifest/.test(l),
     ),
     `Wiederholbarkeits-Bilanz erwartet:\n${lines.join("\n")}`,
   );
@@ -335,7 +341,7 @@ test("formatSyncLog: Fehlerzeilen nennen Ursachen-Buckets und Wiederholbarkeits-
   };
   const manyLines = formatSyncLog(many);
   assert.ok(
-    manyLines.some((l) => l.includes("orderbook/SCHEMA_MISMATCH: 2")),
+    manyLines.some((l) => l.includes("orderbook/UNKNOWN: 2")),
     `Bucket-Zusammenfassung erwartet:\n${manyLines.join("\n")}`,
   );
   assert.ok(
@@ -343,7 +349,7 @@ test("formatSyncLog: Fehlerzeilen nennen Ursachen-Buckets und Wiederholbarkeits-
     `zweiter Bucket erwartet:\n${manyLines.join("\n")}`,
   );
   assert.ok(
-    manyLines.some((l) => l.includes("2 wiederholbar, 1 endgültig")),
+    manyLines.some((l) => l.includes("1 wiederholbar, 2 endgültig")),
     `Bilanz erwartet:\n${manyLines.join("\n")}`,
   );
 });
@@ -766,4 +772,139 @@ test("HistoricalStore-Schlüssel == Registry-Schlüssel (der Kern des Fehlers)",
     150,
     "Kerzen liegen unter genau der ID, die der Scanner benutzt",
   );
+});
+
+// ── Fehlklassifikations-Fix: ehrliche Stage-Reasons ──────────────────────────
+
+test("orderbook failure with typed cause classifies honestly (429 → RATE_LIMITED, retryable)", async () => {
+  const failing = "SYM001USDT";
+  const { adapter } = mockMarketDataAdapter({
+    instruments: symbols(2).map((s) => instrumentOf(s)),
+  });
+  const throwing: MarketDataAdapter = {
+    ...adapter,
+    getOrderBook: async (symbol: string) => {
+      if (symbol === failing) throw new MarketDataHttpError(429, "venue");
+      return adapter.getOrderBook(symbol);
+    },
+  };
+  const { service } = syncHarness(throwing);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  const failure = result.failures.find((f) => f.stage === "orderbook");
+  assert.ok(failure, `orderbook-Failure erwartet: ${JSON.stringify(result.failures)}`);
+  assert.equal(failure!.reason, "RATE_LIMITED");
+  assert.equal(failure!.retryable, true);
+  assert.equal(failure!.httpStatus, 429);
+  assert.equal(result.degraded, true);
+});
+
+test("ticker failure with typed cause classifies honestly (503 → UPSTREAM_5XX, retryable)", async () => {
+  const failing = "SYM000USDT";
+  const { adapter } = mockMarketDataAdapter({
+    instruments: symbols(2).map((s) => instrumentOf(s)),
+    noBulkTickers: true,
+  });
+  const throwing: MarketDataAdapter = {
+    ...adapter,
+    getTicker: async (symbol: string) => {
+      if (symbol === failing) throw new MarketDataHttpError(503, "venue");
+      return adapter.getTicker(symbol);
+    },
+  };
+  const { service } = syncHarness(throwing);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  const failure = result.failures.find((f) => f.stage === "ticker");
+  assert.ok(failure, `ticker-Failure erwartet: ${JSON.stringify(result.failures)}`);
+  assert.equal(failure!.reason, "UPSTREAM_5XX");
+  assert.equal(failure!.retryable, true);
+  assert.equal(failure!.httpStatus, 503);
+});
+
+test("upsert rejection classifies as INVALID_SYMBOL (not SCHEMA_MISMATCH)", async () => {
+  const bad = {
+    ...instrumentOf("SYM000USDT"),
+    assetClass: "bogus" as MarketInstrument["assetClass"],
+  };
+  const { adapter } = mockMarketDataAdapter({ instruments: [bad] });
+  const { service } = syncHarness(adapter);
+
+  const result = await service.syncVenue("BITUNIX");
+
+  const failure = result.failures.find((f) => f.stage === "upsert");
+  assert.ok(failure, `upsert-Failure erwartet: ${JSON.stringify(result.failures)}`);
+  assert.equal(failure!.reason, "INVALID_SYMBOL");
+  assert.equal(failure!.retryable, false);
+  assert.match(failure!.message, /VALIDATION_ERROR/);
+});
+
+// ── Verwaiste Instrumente: Warnung statt stillem WARMING ─────────────────────
+
+test("syncVenue meldet verwaiste Registry-Zeilen (orphanedInstruments + Warnung)", async () => {
+  const { adapter } = mockMarketDataAdapter({
+    instruments: symbols(2).map((s) => instrumentOf(s)),
+  });
+  const warnings: string[] = [];
+  const { service, registry } = syncHarness(adapter, "BITUNIX", {
+    logger: (level, line) => {
+      if (level === "warn") warnings.push(line);
+    },
+  });
+  registry.upsert({ ...instrumentOf("ORPHANUSDT") }, "seed:test");
+
+  const result = await service.syncVenue("BITUNIX");
+
+  assert.equal(result.orphanedInstruments, 1);
+  const orphanWarn = warnings.filter((w) => w.includes("Registry-Zeile(n)"));
+  assert.equal(orphanWarn.length, 1, `eine Orphan-Warnung erwartet: ${JSON.stringify(warnings)}`);
+  assert.ok(orphanWarn[0].includes("BITUNIX"));
+  assert.ok(
+    warnings.every((w) => !w.includes("ORPHANUSDT")),
+    "keine Symbole in Warnungen (Security-Politik)",
+  );
+});
+
+test("syncVenue mit Allowlist zählt keine verwaisten Zeilen (Absicht, kein Befund)", async () => {
+  const { adapter } = mockMarketDataAdapter({
+    instruments: symbols(2).map((s) => instrumentOf(s)),
+  });
+  const warnings: string[] = [];
+  const { service, registry } = syncHarness(adapter, "BITUNIX", {
+    logger: (level, line) => {
+      if (level === "warn") warnings.push(line);
+    },
+  });
+  registry.upsert({ ...instrumentOf("ORPHANUSDT") }, "seed:test");
+
+  const result = await service.syncVenue("BITUNIX", { symbolAllowlist: symbols(2) });
+
+  assert.equal(result.orphanedInstruments, undefined);
+  assert.ok(
+    warnings.every((w) => !w.includes("Registry-Zeile(n)")),
+    `keine Orphan-Warnung erwartet: ${JSON.stringify(warnings)}`,
+  );
+});
+
+test("syncAll warnt über Registry-Venues ohne Adapter-Abdeckung", async () => {
+  const { adapter } = mockMarketDataAdapter({
+    instruments: symbols(1).map((s) => instrumentOf(s)),
+  });
+  const warnings: string[] = [];
+  const { service, registry } = syncHarness(adapter, "BITUNIX", {
+    logger: (level, line) => {
+      if (level === "warn") warnings.push(line);
+    },
+  });
+  registry.upsert({ ...instrumentOf("BTCUSDT", "BINANCE") }, "seed:test");
+
+  const results = await service.syncAll();
+
+  assert.equal(results.length, 1);
+  const coverageWarn = warnings.filter((w) => w.includes("ohne Sync-Abdeckung"));
+  assert.equal(coverageWarn.length, 1, `eine Coverage-Warnung erwartet: ${JSON.stringify(warnings)}`);
+  assert.ok(coverageWarn[0].includes("BINANCE"), coverageWarn[0]);
+  assert.ok(!coverageWarn[0].includes("BTCUSDT"), "keine Symbole in Warnungen");
 });

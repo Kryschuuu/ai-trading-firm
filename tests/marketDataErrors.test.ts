@@ -205,3 +205,117 @@ test("MarketDataFetchError: ohne HTTP-Status bleibt das Template korrekt", () =>
   assert.match(err.message, /ohne HTTP-Status, retryable/);
   assert.equal(err.httpStatus, undefined);
 });
+
+// ── 3) Venue-Typisierung: `kind` + Broker-Codes + `.cause`-Kette ────────────
+
+test("classify: Bitunix-kind rate-limit → RATE_LIMITED, retryable (ohne HTTP-Status)", () => {
+  const err = Object.assign(new Error("Bitunix Rate-Limit erreicht."), {
+    kind: "rate-limit",
+    code: "BITUNIX_RATE_LIMIT",
+  });
+  const r = classifyMarketDataError(err);
+  assert.equal(r.reason, "RATE_LIMITED");
+  assert.equal(r.retryable, true);
+});
+
+test("classify: Bitunix-kind maintenance → UPSTREAM_5XX, retryable", () => {
+  const err = Object.assign(new Error("Bitunix nicht erreichbar oder in Wartung."), {
+    kind: "maintenance",
+    code: "BITUNIX_MAINTENANCE",
+  });
+  const r = classifyMarketDataError(err);
+  assert.equal(r.reason, "UPSTREAM_5XX");
+  assert.equal(r.retryable, true);
+});
+
+test("classify: Bitunix-kind auth/permission → UNAUTHORIZED, nicht retryable", () => {
+  for (const kind of ["auth", "permission"]) {
+    const err = Object.assign(new Error(`Bitunix ${kind}`), {
+      kind,
+      code: `BITUNIX_${kind.toUpperCase()}`,
+    });
+    const r = classifyMarketDataError(err);
+    assert.equal(r.reason, "UNAUTHORIZED", `kind ${kind}`);
+    assert.equal(r.retryable, false);
+  }
+});
+
+test("classify: Bitunix-kind payload → SCHEMA_MISMATCH, nicht retryable", () => {
+  const err = Object.assign(new Error("Antwort über der Payload-Kappe"), {
+    kind: "payload",
+    code: "BITUNIX_PAYLOAD",
+  });
+  const r = classifyMarketDataError(err);
+  assert.equal(r.reason, "SCHEMA_MISMATCH");
+  assert.equal(r.retryable, false);
+});
+
+test("classify: Bitunix-kind disabled/unknown → UNKNOWN, nicht retryable", () => {
+  for (const kind of ["disabled", "unknown", "ambiguous", "ssrf"]) {
+    const err = Object.assign(new Error(`Bitunix ${kind}`), {
+      kind,
+      code: `BITUNIX_${kind.toUpperCase()}`,
+    });
+    const r = classifyMarketDataError(err);
+    assert.equal(r.reason, "UNKNOWN", `kind ${kind}`);
+    assert.equal(r.retryable, false);
+  }
+});
+
+test("classify: Broker-Code ohne kind wird gelesen (RATE_LIMIT/MAINTENANCE/AUTH)", () => {
+  const cases: Array<{ code: string; reason: string; retryable: boolean }> = [
+    { code: "BINANCE_RATE_LIMIT", reason: "RATE_LIMITED", retryable: true },
+    { code: "KRAKEN_MAINTENANCE", reason: "UPSTREAM_5XX", retryable: true },
+    { code: "SOME_AUTH", reason: "UNAUTHORIZED", retryable: false },
+    { code: "VENUE_PERMISSION", reason: "UNAUTHORIZED", retryable: false },
+  ];
+  for (const c of cases) {
+    const r = classifyMarketDataError(Object.assign(new Error("venue failure"), { code: c.code }));
+    assert.equal(r.reason, c.reason, `code ${c.code}`);
+    assert.equal(r.retryable, c.retryable, `code ${c.code}`);
+  }
+});
+
+test("classify: `code` exakt = Taxonomie-Klasse wird übernommen", () => {
+  const r = classifyMarketDataError(Object.assign(new Error("nichts da"), { code: "DATA_UNAVAILABLE" }));
+  assert.equal(r.reason, "DATA_UNAVAILABLE");
+  assert.equal(r.retryable, false);
+  const invalid = classifyMarketDataError(Object.assign(new Error("falsches Format"), { code: "INVALID_SYMBOL" }));
+  assert.equal(invalid.reason, "INVALID_SYMBOL");
+  assert.equal(invalid.retryable, false);
+});
+
+test("classify: `kind` in der `.cause`-Kette wird gefunden", () => {
+  const inner = Object.assign(new Error("Bitunix Rate-Limit erreicht."), { kind: "rate-limit" });
+  const outer = new Error("depth failed") as Error & { cause?: unknown };
+  outer.cause = inner;
+  const r = classifyMarketDataError(outer);
+  assert.equal(r.reason, "RATE_LIMITED");
+  assert.equal(r.retryable, true);
+});
+
+test("classify: JSON-Parse-Fehler in der `.cause`-Kette → SCHEMA_MISMATCH", () => {
+  const outer = new Error("venue antwortete unverständlich") as Error & { cause?: unknown };
+  outer.cause = new SyntaxError("Unexpected token '<' in JSON at position 0");
+  const r = classifyMarketDataError(outer);
+  assert.equal(r.reason, "SCHEMA_MISMATCH");
+  assert.equal(r.retryable, false);
+});
+
+test("classify: HTTP-Status schlägt kind (Status ist spezifischer)", () => {
+  const err = Object.assign(new Error("Upstream antwortete mit HTTP 503"), {
+    kind: "auth",
+    code: "BITUNIX_AUTH",
+  });
+  const r = classifyMarketDataError(err);
+  assert.equal(r.reason, "UPSTREAM_5XX");
+  assert.equal(r.retryable, true);
+  assert.equal(r.httpStatus, 503);
+});
+
+test("classify: zyklische `.cause`-Kette terminiert", () => {
+  const a = new Error("a") as Error & { cause?: unknown };
+  a.cause = a;
+  const r = classifyMarketDataError(a);
+  assert.equal(r.reason, "UNKNOWN");
+});

@@ -621,6 +621,24 @@ CLI loggt nur aggregierte Zähler (`discovery`, `tickers enriched`,
 `market_sync_fetch_failures` (venue, count, byStage). Keine Symbole, keine
 URLs, keine Secrets.
 
+### Verwaiste Instrumente (Runbook, seit v1.59.0)
+
+Zwei Warnungen machen „stille Lücken“ laut — beide nennen nur Zähler (und
+Venue-Namen, das ist Konfiguration), **niemals Symbole**:
+
+| Warnung | Bedeutung | Typische Ursache | Abhilfe |
+| --- | --- | --- | --- |
+| `<VENUE>: N aktive Registry-Zeile(n) fehlten in der Discovery (verwaist/delistet?)` | Aktive Registry-Sätze dieser Venue kamen in der bereinigten Discovery nicht vor | Delistet/umbenannt an der Venue; Seed-Zeile ohne Venue-Abdeckung | IDs in der Registry prüfen (`registry.query({ venue })`), Zeile deaktivieren/korrigieren oder an der Venue verifizieren |
+| `verwaiste Instrumente: N Registry-Zeile(n) ohne Sync-Abdeckung (Venue(n): …)` | Registry enthält Venues, für die `syncAll` keinen Adapter hatte | `<VENUE>_ENABLED` fehlt; `MARKET_SYNC_VENUES` filtert; Capability `marketData=false` | Flag setzen bzw. `MARKET_SYNC_VENUES`/Capabilities prüfen (§10, §12) |
+
+Regeln: Das Feld `SyncResult.orphanedInstruments` existiert nur bei Befund
+(`> 0`, sonst weggelassen — JSON-Contract stabil). Mit gesetzter
+`symbolAllowlist` ist Schweigen Absicht (kein Zähler, keine Warnung).
+Entdeckte, aber per `maxInstruments` gekappte Zeilen zählen **nicht** als
+verwaist (depriorisiert, nicht verloren). Wer nach einem Teil-Sync einen
+ewig `WARMING`-bleibenden Scanner sieht, prüft zuerst diese beiden
+Warnungen — sie sind die häufigste Erklärung.
+
 ### `getCandles()` (legacy REST-Cache-Pfad) — wirft statt `[]`
 
 Der REST-/Cache-Pfad in `src/lib/marketData.ts` wird von Analysten, Monitor,
