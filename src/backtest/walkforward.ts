@@ -22,6 +22,8 @@
  * byte-identisches `metricsJson` (Test: `tests/backtest.engine.test.ts`).
  */
 
+import { scopeReplay } from "../executionQuality/backtest";
+import { digest, type Batch } from "../executionQuality/model";
 import { createHash } from "node:crypto";
 import { envNumber } from "../lib/env";
 import { APP_VERSION } from "../lib/version";
@@ -253,6 +255,7 @@ export interface WalkForwardTradeRecord {
 }
 
 export interface WalkForwardReport {
+  executionQuality?: Batch[];
   kind: "walk-forward";
   instrumentId: string;
   timeframe: SupportedTimeframe;
@@ -454,6 +457,8 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
   // Kanonische Trade-Liste (RMA-P1-04): Fenster ↑, IS vor OOS, darin die
   // Schließreihenfolge der Engine — identisch zu `backtest_trades.seq`.
   const trades: WalkForwardTradeRecord[] = [];
+  const executionQuality: Batch[] = [];
+  const captureHash = digest({candles:input.candles,rule:input.ruleRef,config:input.engineConfig ?? null,version:APP_VERSION,timeframe:input.timeframe,layout});
 
   for (const w of layout.windows) {
     // Walk-Forward läuft IMMER auf dem Paper-Ausführungspfad — kein
@@ -469,6 +474,10 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
       strategies: input.strategies,
       config: { ...baseConfig, from: w.oosFrom, to: w.oosTo },
     });
+    for (const [segment,result] of [["IS",isResult],["OOS",oosResult]] as const) {
+      const scope = digest([captureHash,w,segment]);
+      executionQuality.push(...(result.executionQuality ?? []).map(b=>scopeReplay(b,scope,input.nowMs ?? Date.now())));
+    }
     const isSummary = summarizeEval(isResult, w.isFrom, w.isTo);
     const oosSummary = summarizeEval(oosResult, w.oosFrom, w.oosTo);
     windowReports.push({ index: w.index, is: isSummary, oos: oosSummary });
@@ -481,6 +490,7 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
   const enginePaper = input.engineConfig?.paper;
   const nowMs = input.nowMs ?? Date.now();
   return {
+    executionQuality,
     kind: "walk-forward",
     instrumentId: input.instrumentId,
     timeframe: input.timeframe,

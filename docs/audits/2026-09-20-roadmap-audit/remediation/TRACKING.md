@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-20 (RMA-P3-01 → FIXED, v1.55.0)
+Letzte Aktualisierung: 2026-09-21 (RMA-P4-01 → FIXED, v1.56.0)
 
 ## Statusmodell
 
@@ -45,7 +45,7 @@ codebasierten Detailbefund.
 | RMA-P3-01 | Forecast-Kalibrierung | FIXED | [P3-01](../prompts/PROMPT-P3-01-forecast-calibration.md) | [#152](https://github.com/Kryschuuu/ai-trading-firm/pull/152) | `c7f9c50` | v1.55.0 | 98 neue Forecast-Tests grün: `tests/forecastScoring.test.ts` (35: Brier-Fixtures perfekt/uninformiert/sicher-falsch, BSS, Log Loss, Reliability-Bins exakt an 0/1 mit Wilson, ECE, Coverage), `forecastCapture` (18), `forecastResolver` (16: PIT ohne Post-Cutoff-Daten, VOID-Pfade, Idempotenz), `forecastService` (6: E2E Capture→Resolve→Score, Segment-Reconciliation), `forecastApi` (14: 400-Verträge), `forecastLedger.db.test.ts` (9, eingebettetes Postgres: Migration zweifach/idempotent, Roundtrip, Restart-Retry, Re-Resolution); `npm test` 2803 Tests / 0 fail; typecheck/lint/docs:validate grün |
 | RMA-P3-02 | Prompt-Metrikvergleich | PARTIAL | [P3-02](../prompts/PROMPT-P3-02-prompt-performance.md) | — | — | — | Auditbefund |
 | RMA-P3-03 | Devil’s Advocate | OPEN | [P3-03](../prompts/PROMPT-P3-03-devils-advocate.md) | — | — | — | Auditbefund |
-| RMA-P4-01 | Execution-Benchmarking | PARTIAL | [P4-01](../prompts/PROMPT-P4-01-execution-benchmarking.md) | — | — | — | Auditbefund |
+| RMA-P4-01 | Execution-Benchmarking | FIXED | [P4-01](../prompts/PROMPT-P4-01-execution-benchmarking.md) | [#153](https://github.com/Kryschuuu/ai-trading-firm/pull/153) | `99919bc`, `fb295ab` | `v1.56.0` | Automatischer Paper-/Broker-/Backtest-Pfad, durable Retry-Recovery, As-of-Markouts; 25/25 gezielt; Gesamtsuite 2798 bestanden/30 Skips/0 Fehler; Typecheck/Lint/Docs/Build/Bundle-Scan erfolgreich |
 | RMA-P4-02 | Post-Only-Fallback | PARTIAL | [P4-02](../prompts/PROMPT-P4-02-post-only-fallback.md) | — | — | — | Auditbefund |
 | RMA-P4-03 | TWAP/Depth | OPEN | [P4-03](../prompts/PROMPT-P4-03-twap-depth.md) | — | — | — | Auditbefund |
 | RMA-P5-01 | Volatility Targeting | PARTIAL | [P5-01](../prompts/PROMPT-P5-01-volatility-targeting.md) | — | — | — | Auditbefund |

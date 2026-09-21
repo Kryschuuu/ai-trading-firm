@@ -38,6 +38,7 @@ import {
 } from "../lib/ruleEngine";
 import {
   DEFAULT_ANALYSIS_TIMEFRAME,
+  SUPPORTED_TIMEFRAME_MS,
   type HistoricalStore,
   type SupportedTimeframe,
 } from "../lib/marketdata/historicalStore";
@@ -145,7 +146,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
   // ⇒ deterministische Order-IDs; Legacy-Läufe bleiben unberührt).
   const paper: PaperExecutionRuntime | null =
     config.executionModel === "paper"
-      ? createPaperExecutionRuntime(config.paper ?? {}, config.feeModel)
+      ? createPaperExecutionRuntime(config.paper ?? {}, config.feeModel, SUPPORTED_TIMEFRAME_MS[config.timeframe])
       : null;
 
   // 3. Strategien kompilieren & vorbereiten
@@ -198,7 +199,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     takeProfit: number | null
   ): void => {
     if (!paper || notional <= 0) return;
-    const fill = paper.fillEntry(symbol, side, notional, candle.close, atTime);
+    const fill = paper.fillEntry(symbol, side, notional, candle.close, atTime, strategyId);
     // Fail-closed: Simulator-Reject ⇒ kein Einstieg (kein erfundener Fill).
     if (!fill) return;
     portfolio.openPosition(
@@ -250,7 +251,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
         const trigger = detectExitTrigger(pos, candleInfo.candle);
         if (!trigger) continue;
         const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
-        const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, trigger.price, currentTime);
+        const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, trigger.price, currentTime, pos.strategyId);
         // Fail-closed: Simulator-Reject ⇒ Position bleibt offen (kein
         // erfundener Ausstiegspreis; mit Default-Konfig unerreichbar).
         if (!fill) continue;
@@ -418,7 +419,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     paper
       ? (pos, price) => {
           const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
-          const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, price, lastTime);
+          const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, price, lastTime, pos.strategyId);
           // null ⇒ Legacy-Schlussrechnung (defensiv; mit Default-Konfig
           // unerreichbar, siehe portfolio.closeAllAtEnd).
           if (!fill) return null;
@@ -451,6 +452,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
   const toTime = timeline.length > 0 ? timeline[timeline.length - 1] : 0;
 
   return {
+    executionQuality: paper?.qualityBatches ?? [],
     config,
     symbols,
     timeframe: config.timeframe,

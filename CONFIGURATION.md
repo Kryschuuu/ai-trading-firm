@@ -900,3 +900,18 @@ Migrationshinweise stehen im [`docs/CHANGELOG.md`](docs/CHANGELOG.md);
 Setup-Befunde und ihre Behebung in
 [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), PostgreSQL-Soforthilfe in
 [`docs/SETUP_PG_TROUBLESHOOTING.md`](docs/SETUP_PG_TROUBLESHOOTING.md).
+
+## Execution-Quality-Capture
+
+`EXECUTION_QUALITY_ENABLED` ist standardmäßig `false` und akzeptiert nur
+`true`/`false`. Vor Aktivierung die neuen Execution-Quality-Migrationen anwenden.
+`EXECUTION_QUALITY_SCOPE` ist ein stabiler, opaker Account-/Deployment-Namespace
+(1–64 Zeichen aus Buchstaben, Ziffern, Punkt, Unterstrich, Bindestrich), keine
+Broker-Kontonummer und kein Secret. Bei aktivem Capture fehlen Scope oder stabile
+Adapter-Intent-ID nicht stillschweigend: der Aufruf blockiert vor dem Senden.
+
+Worker pro Venue/Modus: `npm run execution:reconcile -- ALPACA testnet --watch`.
+Er liest ausschließlich Venue-Fakten; unklare Submissions dürfen nie durch eine
+neue Order „repariert“ werden. Fehlende/stale Benchmarks bleiben null mit Reason.
+Rollback: Capture deaktivieren, Worker stoppen, Audit-Tabellen behalten; zunächst
+unklare Orders beim Venue abgleichen. [Migration, Vertrag, API und Formeln](src/executionQuality/README.md).

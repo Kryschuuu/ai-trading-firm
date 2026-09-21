@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-20** · Code-Version **1.55.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.56.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,30 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.56.0] — 2026-09-21 · Venueübergreifendes Execution-Benchmarking (RMA-P4-01)
+
+### Hinzugefügt
+
+- Opt-in Capture verbindet atomare Paper-/Engine-/MicroExecutor-Submissions,
+  PAPER-/ALPACA-/BITUNIX-Adapter und Walk-forward-Persistenz mit einem kanonischen
+  append-only Intent-/ACK-/Fill-/Benchmark-Ledger. Keine Änderung von
+  Preis-/Sizing-Entscheidungen, Risk-Ceilings, Kill-Switches oder Live-Gates.
+- Echte Alpaca-FILL-Aktivitäten und Bitunix-Trade-IDs, stabile Client-Keys,
+  durable Send-Claims/Receipts, Restart-/Retry-Recovery ohne erneutes Senden;
+  unbekannte Gebühren/Benchmarks bleiben null statt künstlicher Nullkosten.
+- Bounded Read-API mit vorzeichenrichtigen Kosten, Fees/Shortfall, Fill Ratio,
+  Latenzen, p50/p95, gewichteten Mitteln, Coverage und Provenienz-Zählung.
+  Persistente L1-Samples belegen 1s-/5s-/30s-Markouts ohne Look-ahead.
+- Read-only Worker `npm run execution:reconcile -- VENUE MODE --watch`,
+  Operator-Import, strukturierte Audit-Einträge und bounded Prometheus-Counter.
+- Neue additive SQL-Migrationen mit Unique-Keys, FKs, As-of-Indizes sowie
+  UPDATE-/DELETE-/TRUNCATE-Sperren. Bestehende Migrationen bleiben unverändert.
+  `EXECUTION_QUALITY_ENABLED=false` bleibt Default; Rollout/Rollback und die
+  ehrlichen Null-Fallbacks sind in `src/executionQuality/README.md` beschrieben.
+- PostgreSQL-/Produktionspfadtests für atomaren Paper-Rollback/Replay,
+  Backtest-Fee-Roundtrip, parallele Claims, Receipt-Crash-Recovery, tatsächliche
+  HTTP-Fill-Aktivitäten, historische As-of-Abfragen und deterministische Goldens.
 
 ## [1.55.0] — 2026-09-20 · feat(forecasts): Forecast-Ledger, Brier-Score & Kalibrierung (RMA-P3-01)
 

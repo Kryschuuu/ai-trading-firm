@@ -16,6 +16,7 @@
  *     → RuleCache.match() (kompilierte ACTIVE-Regeln, Cooldown/Tageslimit im RAM)
  *     → RuleExecutionAdapter (Kill-Switch, Sperren, Guardrails, Fill, Feedback)
  */
+import { digest as executionInputHash } from "../executionQuality/model";
 import { db, getPool } from "@/db";
 import {
   tradeRules,
@@ -545,7 +546,7 @@ export function createPaperRuleAdapter(opts?: {
   return {
     name: "PAPER_RULE",
     async execute(ctx): Promise<ExecutionOutcome> {
-      const started = Date.now();
+      const started = Date.now(), startedMono = performance.now();
       const symbol = sanitizeSymbol(ctx.spec.symbol);
       if (!symbol) {
         return {
@@ -831,6 +832,7 @@ export function createPaperRuleAdapter(opts?: {
           },
           {
             account: "PAPER",
+            executionQuality: {id:`${ctx.ruleId}:${ctx.snapshot.ts}`,at:started,elapsedMs:performance.now()-startedMono,strategy:`rule:${ctx.ruleId}`,quoteCurrency:symbol.includes("/") ? symbol.split("/")[1]:"UNKNOWN",price:{value:ctx.snapshot.price,eventTime:ctx.snapshot.ts,availableAt:started,inputHash:executionInputHash({price:ctx.snapshot.price,ts:ctx.snapshot.ts,symbol})}},
             persistPosition: async (tx, f) => {
               const [pos] = await tx.insert(positionsTable).values({
                 symbol: f.symbol,

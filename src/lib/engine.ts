@@ -35,7 +35,7 @@ import { getLimits, killSwitch, type RiskLimits } from "./riskGuard";
 import { computePositionSize, loadSizingConfig, resolveKellyEdge } from "./positionSizing";
 import { checkClusterExposure, loadClusterLimitsConfig } from "./clusterExposure";
 import type { AdaptiveRegime } from "./riskGuard";
-import { PaperBroker } from "./broker";
+import { PaperBroker, type Order } from "./broker";
 import { getBroker as createBroker } from "../brokers/factory";
 import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import { platformLiveFromEnv, venueEnabledFromEnv, venueLiveFlagFromEnv } from "../live-gate/config";
@@ -975,6 +975,7 @@ export async function runAgentTurn(
           `Stop ${(stopPct * 100).toFixed(1)}% (${modelStopPct != null ? "Agent" : atrStop != null ? "ATR×" + limits.atrStopMultiplier : "Default"}) → Notional ${notional.toFixed(2)} (Cap ${(effectiveMissionCapPct * 100).toFixed(0)}%${sized.kelly.applied ? " + Kelly-Deckel" : ""}${sized.unknown ? ", UNKNOWN: Basis-Größe" : ""}), TP bei ${takeProfitPrice}`)
       );
 
+      const executionDecisionAt=Date.now(),executionDecisionMono=performance.now();
       const order = {
         symbol,
         side,
@@ -1098,6 +1099,7 @@ export async function runAgentTurn(
       // verknüpfen kann — ohne Schema-Änderung an `positions`.
       const journalPosRef: { value: { id: string; createdAt: Date } | null } = { value: null };
       const fill = await broker.submitAtomic(order, {
+        executionQuality: { id: proposal.id, at: executionDecisionAt, elapsedMs:performance.now()-executionDecisionMono, strategy: `mission:${missionId ?? "unattributed"}`, quoteCurrency: symbol.includes("/") ? symbol.split("/")[1]:"UNKNOWN" },
         persistPosition: async (tx, f) => {
           const [pos] = await tx.insert(positions).values({
             symbol: f.symbol,
@@ -1446,7 +1448,8 @@ export async function executeApprovedProposal(
   // GAP-03: Positions-ID übernehmen (Journal-Verknüpfung, siehe
   // runAgentTurn/EXECUTOR-Pfad).
   const journalPosRef: { value: { id: string; createdAt: Date } | null } = { value: null };
-  const fill = await broker.submitAtomic({ ...detail, side: detail.side as "LONG" | "SHORT" } as any, {
+  const fill = await broker.submitAtomic({ ...detail, side: detail.side as "LONG" | "SHORT" } as Order, {
+    executionQuality: { id: proposal.id, at: proposal.createdAt.getTime(), strategy: `mission:${proposal.missionId ?? "unattributed"}`, quoteCurrency: String(detail.symbol).includes("/") ? String(detail.symbol).split("/")[1]:"UNKNOWN" },
     persistPosition: async (tx, f) => {
       const [pos] = await tx.insert(positions).values({
         symbol: f.symbol, side: f.side, qty: String(f.qty),

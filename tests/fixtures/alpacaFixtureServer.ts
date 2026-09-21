@@ -200,6 +200,16 @@ export class AlpacaFixtureServer {
       ]);
       return;
     }
+    if (path === "/v2/orders:by_client_order_id") {
+      this.privateCalls++;
+      json(res,200,{id:"fixture-order-1",client_order_id:url.searchParams.get("client_order_id"),created_at:"2024-01-01T00:00:00Z",symbol:"AAPL",qty:"1",filled_qty:"1",filled_avg_price:"195.5",type:"market",side:"buy",time_in_force:"day",status:"filled"});
+      return;
+    }
+    if (path === "/v2/account/activities/FILL") {
+      this.privateCalls++;
+      json(res,200,[{id:"activity-1",order_id:"fixture-order-1",transaction_time:"2024-01-01T00:00:01Z",qty:"0.4",price:"195"},{id:"activity-2",order_id:"fixture-order-1",transaction_time:"2024-01-01T00:00:02Z",qty:"0.6",price:"196"}]);
+      return;
+    }
     if (path === ALPACA_TRADE_PATHS.orders && req.method === "POST") {
       this.privateCalls++;
       if (this.failOrder) {

@@ -16,6 +16,7 @@
  * weiter `LiveTradingGateError`, bis die State-Machine LIVE_ENABLED + Flags
  * + Suite + Control Plane freigibt (docs/LIVE_TRADING.md).
  */
+import { captureOrder } from "../../executionQuality/runtime";
 import { VENUE_CAPABILITIES } from "../capabilities";
 import {
   NotSupportedCapabilityError,
@@ -48,7 +49,7 @@ import { BrokerExecutionEngine, PaperExecutionEngine, type ExecutionPort } from 
 import { createDefaultAlpacaSecretStore, loadAlpacaCredentials, type AlpacaCredentials, type SecretStore } from "./secrets";
 import { createAlpacaLogger, type AlpacaLogger } from "./redactor";
 import { AlpacaHttp, TokenBucket } from "./http";
-import { mapAsset, mapAssets } from "./mapping";
+import { mapAsset, mapAssets, mapOrderResult } from "./mapping";
 import { envInt } from "../../lib/env";
 
 export interface AlpacaAdapterDeps {
@@ -268,6 +269,15 @@ export class AlpacaBrokerAdapter implements BrokerAdapter {
     return this.publicClient.fetchCandles(sym, assetClass, timeframe, limit);
   }
 
+  async getExecutionQuote(symbol:string):Promise<import("../../contracts/broker").MarketOrderBook> {
+    this.require("marketData","getExecutionQuote");
+    assertAlpacaEnabled(this.env);
+    const snap=await this.publicClient.fetchSnapshot(symbol,symbol.includes("/") ? "crypto":"equity");
+    const q=snap?.latestQuote;
+    if (!q) throw new Error("EXECUTION_QUOTE_UNAVAILABLE");
+    return {symbol,bids:[{price:q.bp,qty:q.bs}],asks:[{price:q.ap,qty:q.as}],ts:Date.parse(q.t)};
+  }
+
   async getOrderBook(_symbol: string): Promise<import("../../contracts/broker").MarketOrderBook> {
     this.require("marketData", "getOrderBook");
     throw new NotSupportedCapabilityError(
@@ -313,7 +323,17 @@ export class AlpacaBrokerAdapter implements BrokerAdapter {
     const engine = await this.execution();
     const sym = req.symbol.toUpperCase();
     const ticker = this.lastTicker.get(sym) ?? (await this.getTicker(sym));
-    return engine.submit(req, ticker);
+    return captureOrder({venue:this.id,mode:this.mode,request:req,quoteCurrency:(this.registry ?? getRegistry()).get(`${this.id}:${req.symbol.toUpperCase()}`)?.quote,execute:request=>engine.submit(request,ticker),book:()=>this.getExecutionQuote(req.symbol)});
+  }
+
+  async getExecutionEvidence(clientOrderId:string,_symbol:string,since:number):Promise<import("../../contracts/broker").ExecutionEvidence|null> {
+    this.require("trading","getExecutionEvidence");
+    assertAlpacaEnabled(this.env);
+    if (this.mode !== "live" && this.mode !== "testnet") throw new NotSupportedCapabilityError(this.id,"trading","getExecutionEvidence","Only venue modes have observed executions");
+    if (this.mode === "live") assertLiveOrderAllowed(this.id,this.env);
+    const client = await this.privateClient();
+    const order = await client.getOrderByClientId(clientOrderId);
+    return {status:mapOrderResult(order,Number(order.qty)).status,orderId:order.id,filledQuantity:Number(order.filled_qty ?? 0),feeQuoteTotal:null,fills:await client.getFillActivities(order.id,since)};
   }
 
   // ── H7 (v1.36.20): Kill-Switch-Notfall auf Venue-Ebene ─────────────────────

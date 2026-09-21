@@ -437,3 +437,15 @@ eine **separate**, vereinfachte Simulation mit festen Faktoren
 (LONG → `price·1.0001`, SHORT → `price·0.9999`) verwendete. Heute gilt:
 `Generic Paper === Bitunix Paper`. Belege: `tests/bitunix.paper.unified.test.ts`
 und `tests/marketdata.snapshot.test.ts`.
+
+## Kanonisches Execution-Benchmarking
+
+Optionales `EXECUTION_QUALITY_ENABLED=true` erfasst normale Order-Submissions in
+PAPER/ALPACA/BITUNIX und den atomaren Engine-/MicroExecutor-Pfad. Paper-Fills sind
+modeled, echte Venue-Ausführungen observed. Der Paper-Transaktionspfad schreibt
+Quality-Evidenz zusammen mit Order/Position und rollt eine neue In-Memory-Füllung
+bei Persistenzfehler zurück. Bekannte Decision-IDs werden ohne erneuten Fill
+wiedergegeben; Scope und stabile Adapter-IDs sind für Restart-Sicherheit Pflicht.
+Kein Benchmark verändert Sizing, Preisentscheidung oder Risk-/Live-Gates.
+
+[Migration, Operations-Worker und Read-API](../src/executionQuality/README.md).

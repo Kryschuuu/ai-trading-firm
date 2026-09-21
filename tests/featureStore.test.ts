@@ -31,6 +31,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { APP_VERSION } from "../src/lib/version";
 
 import {
   FEATURE_EXECUTORS,
@@ -1069,7 +1070,7 @@ describe("featureStore: Quality und Betrieb", () => {
     assert.equal(rsiSeries.lagMs, 2 * HOUR - HOUR, "Eventzeit + 1h Schlusszeit vs. jetzt (+2h)");
     assert.equal(status.runs.length, 4, "ein Manifest je Entity/Feature-Kombination des Laufs");
     assert.equal(status.revisions.length, 0);
-    assert.equal(status.codeVersion, "1.55.0");
+    assert.equal(status.codeVersion, APP_VERSION);
     assert.equal(status.timeframe, TF);
 
     // Retention: ein wertfreier, fehlgeschlagener Lauf verschwindet, der

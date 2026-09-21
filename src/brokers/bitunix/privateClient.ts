@@ -486,6 +486,7 @@ export class BitunixPrivateClient {
           qty,
           price,
           fee: Number(t.fee) || 0,
+          feeKnown: t.fee !== undefined && t.fee !== null && String(t.fee).trim() !== "" && Number.isFinite(Number(t.fee)),
           ts: Number(t.ctime) || 0,
         };
       })

@@ -167,6 +167,8 @@ export interface BitunixTradeRaw {
  */
 export interface BitunixFill {
   tradeId: string;
+  /** Whether the provider actually supplied a finite fee, rather than legacy fallback 0. */
+  feeKnown?: boolean;
   orderId: string;
   symbol: string;
   side: "LONG" | "SHORT";

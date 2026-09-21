@@ -1900,6 +1900,25 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  EXECUTION_QUALITY: {
+    label: "Ausführungsqualität",
+    category: "rule",
+    expectedLevel: "INFO",
+    description: "Normalisierte Order-/Fill-Benchmarks wurden erfasst oder lesend mit der Venue abgeglichen. Fehlende Marktdaten und unklare Übertragungen bleiben ausdrücklich unbekannt; dieser Pfad sendet keine Ersatzorder.",
+    headline: (d) => `Execution-Quality · ${text(d.stage) ?? "Erfassung"} · ${text(d.code) ?? "Abgleich"}`,
+    explain: () => "Ein unklarer Submit darf nur über die stabile Client-Order-ID abgeglichen werden. Ein fehlender Benchmark ist kein Nullkosten-Fill. Details und Coverage stehen in der Execution-Quality-API.",
+    sections: (d) => [{title:"Betriebszustand",facts:recordToFacts(d)}],
+  },
+  EXECUTION_QUALITY_INGEST: {
+    label: "Execution-Quality-Import",
+    category: "rule",
+    expectedLevel: "INFO",
+    description: "Ein normalisierter Operator-Import wurde append-only verarbeitet. Rohpayloads und zusätzliche Felder werden abgewiesen.",
+    headline: (d) => `Execution-Quality-Import · ${num(d.inserted) ?? 0} neue Ereignisse`,
+    explain: () => "Identische Wiederholungen erzeugen keine weiteren Fillzeilen. Konflikte werden nicht überschrieben.",
+    sections: (d) => [{title:"Import",facts:recordToFacts(d)}],
+  },
+
   BACKTEST_RUN_PERSISTED: {
     label: "Backtest-Run persistiert",
     category: "rule",
