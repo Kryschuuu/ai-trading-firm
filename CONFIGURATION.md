@@ -812,6 +812,33 @@ Hinweise:
 - **CLI-Flags `--is-days`/`--oos-days`** überschreiben die Env-Werte je Lauf
   (Bounds wie oben, sonst Abbruch mit Exit 1).
 
+### Train-Select-Freeze (RMA-P1-02, v1.60.0)
+
+Der Replay-only-Aufruf bleibt rückwärtskompatibel. Der produktive
+Train-Select-Freeze-Pfad wird durch `--candidate-file=<JSON>` (CLI) oder
+`walkforward.candidates` (API) aktiviert. Ein Kandidat ist bounded und
+serialisierbar: `id`, `strategyVersion`, skalare `config` und 1..8 ausführbare
+`strategies`; der Kandidatenraum ist auf 64 begrenzt. Secrets/Token-Schlüssel,
+NaN/Infinity und unbounded Arrays/Strings werden abgewiesen.
+
+| CLI-Flag | Default | Bedeutung |
+|---|---:|---|
+| `--candidate-file` | — | JSON-Array mit Kandidaten; ohne Flag bleibt der explizite Replay-only-Pfad aktiv |
+| `--selection-metric` | `netPnl` | IS-Ziel: `netPnl`, `pnl`, `sharpeRatio`, `sortinoRatio`, `profitFactor` oder `winRate` |
+| `--min-trades` | `1` | harte Mindestanzahl IS-Trades; unavailable/null ist kein Nullwert |
+| `--max-drawdown-pct` | — | optionales hartes IS-Maximum in Prozent |
+| `--purge-bars` | `0` | IS-Schlussbars, deren Label-Horizont über den Split reichen kann |
+| `--embargo-bars` | `0` | OOS-Anfangsbars nach der Purge-Grenze |
+| `--holdout-from`/`--holdout-to` | — | separates Intervall nach `--to`; erst nach allen IS-Entscheidungen ausgewertet |
+
+Der Selector sieht nur IS-Zusammenfassungen. Scores werden absteigend (bei
+`maxDrawdownPct` aufsteigend) und zuletzt immer lexikografisch nach Kandidaten-ID
+geordnet. Jede Fensterwahl und die finale Entscheidung tragen ein unveränderliches
+Freeze-Artefakt. `available_at` verhindert die Verwendung nicht verfügbarer
+historischer Daten; `computed_at` dokumentiert die Materialisierung und ist kein
+Ersatz für die As-of-Grenze. Neue Migration:
+`drizzle/2026-09-22_backtest_walkforward_freezes.sql`.
+
 ### Bitunix-Adapter (7. Venue)
 
 | Flag | Default | Bedeutung |

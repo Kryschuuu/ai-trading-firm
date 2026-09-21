@@ -51,7 +51,25 @@ import {
   type TradeReplayDetail,
 } from "./replayEvents";
 import type { CandleLike } from "../lib/ruleEngine";
-import type { SupportedTimeframe } from "../lib/marketdata/historicalStore";
+import { SUPPORTED_TIMEFRAME_MS, type SupportedTimeframe } from "../lib/marketdata/historicalStore";
+import {
+  aggregateSelectionSummary,
+  buildWalkForwardDataManifest,
+  createWalkForwardFreezeArtifact,
+  hashWalkForwardCandidates,
+  normalizeWalkForwardSelection,
+  selectWalkForwardCandidate,
+  trainingDefaults,
+  validateWalkForwardCandidates,
+  type WalkForwardCandidate,
+  type WalkForwardCandleProvenance,
+  type WalkForwardDataManifest,
+  type WalkForwardFreezeArtifact,
+  type WalkForwardLeakagePolicy,
+  type WalkForwardSelectionConfig,
+  type WalkForwardSelectionDecision,
+  type WalkForwardTrainingReport,
+} from "./walkforwardTraining";
 
 /** Env-Namen der Walk-Forward-Fenster (zentral, für Doku/Tests). */
 export const WF_ENV = {
@@ -225,6 +243,12 @@ export interface WalkForwardWindowReport {
   index: number;
   is: WindowEvalSummary;
   oos: WindowEvalSummary;
+  /** Present only for the train-select-freeze path. */
+  selection?: WalkForwardSelectionDecision;
+  /** Immutable selection provenance for this window. */
+  freeze?: WalkForwardFreezeArtifact;
+  /** The candidate ID whose frozen config produced the OOS result. */
+  selectedCandidateId?: string;
 }
 
 /** Aggregierte OOS-/IS-Kennzahlen über alle Fenster (persistiert). */
@@ -317,6 +341,8 @@ export interface WalkForwardReport {
   };
   /** Replay-Evidenz (nur `event_replay`; fehlt sonst — additiv). */
   replayEvidence?: WalkForwardReplayEvidence;
+  /** Additive train-select-freeze provenance; absent for legacy replay-only runs. */
+  training?: WalkForwardTrainingReport;
   windows: WalkForwardWindowReport[];
   aggregateOos: WalkForwardAggregate;
   aggregateIs: WalkForwardAggregate;
@@ -336,12 +362,28 @@ export interface RunWalkForwardInput {
   instrumentId: string;
   timeframe: SupportedTimeframe;
   candles: CandleLike[];
+  /** Legacy replay-only strategy input; ignored when `candidates` is supplied. */
   strategies: BacktestStrategyItem[];
   /** Regel-Referenz für `paramsJson` (Identität des Laufs). */
   ruleRef: WalkForwardReport["ruleRef"];
   /** Engine-Optionen (Walk-Forward erzwingt `executionModel: "paper"`). */
   engineConfig?: BacktestEngineOptions;
   walkforward?: Partial<WalkForwardConfig>;
+  /** Bounded candidate set activates the production train-select-freeze path. */
+  candidates?: readonly WalkForwardCandidate[];
+  selection?: Partial<WalkForwardSelectionConfig>;
+  /** Seed is provenance only; it never changes the risk engine or live gates. */
+  seed?: number;
+  /** Separate point-in-time metadata for event/availability/computation time. */
+  candleProvenance?: readonly WalkForwardCandleProvenance[];
+  leakage?: Partial<WalkForwardLeakagePolicy>;
+  /** Optional untouched final data, evaluated only after all IS decisions. */
+  finalHoldout?: {
+    candles: CandleLike[];
+    from?: number;
+    to?: number;
+    candleProvenance?: readonly WalkForwardCandleProvenance[];
+  };
   /** Injizierbare Zeit in ms (Default: Date.now — nur CLI/Prod). */
   nowMs?: number;
 }
@@ -488,16 +530,10 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
   const windowReports: WalkForwardWindowReport[] = [];
   const isEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
   const oosEvals: Array<{ summary: WindowEvalSummary; result: MultiAssetBacktestResult }> = [];
-  // Kanonische Trade-Liste (RMA-P1-04): Fenster ↑, IS vor OOS, darin die
-  // Schließreihenfolge der Engine — identisch zu `backtest_trades.seq`.
   const trades: WalkForwardTradeRecord[] = [];
   const executionQuality: Batch[] = [];
-  const captureHash = digest({candles:input.candles,rule:input.ruleRef,config:input.engineConfig ?? null,version:APP_VERSION,timeframe:input.timeframe,layout});
+  const captureHash = digest({ candles: input.candles, rule: input.ruleRef, config: input.engineConfig ?? null, version: APP_VERSION, timeframe: input.timeframe, layout });
 
-  // RMA-P1-01: Walk-Forward erlaubt zusätzlich zum Paper-Pfad das explizite
-  // Opt-in `executionModel: "event_replay"` — nie den Legacy-Pfad (kein
-  // Legacy-Kostenmodell in vergleichbar persistierten Runs). Alte Aufrufer
-  // ohne Angabe bleiben byte-identisch auf `"paper"`.
   const executionModel: "paper" | "event_replay" =
     input.engineConfig?.executionModel === "event_replay" ? "event_replay" : "paper";
   const evidenceBox: { current: WalkForwardReplayEvidence | null } = { current: null };
@@ -513,45 +549,177 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
       };
     }
     const cov = evidenceBox.current.coverage;
-    for (const key of Object.keys(cov) as Array<keyof EventReplayCoverage>) {
-      cov[key] += summary.coverage[key];
-    }
+    for (const key of Object.keys(cov) as Array<keyof EventReplayCoverage>) cov[key] += summary.coverage[key];
     evidenceBox.current.degradedReasons = Array.from(
       new Set([...evidenceBox.current.degradedReasons, ...summary.degradedReasons])
     ).sort();
   };
 
-  for (const w of layout.windows) {
-    const baseConfig: BacktestEngineOptions = { ...input.engineConfig, executionModel };
-    const isResult = runMultiAssetBacktest({
-      candlesBySymbol,
-      strategies: input.strategies,
-      config: { ...baseConfig, from: w.isFrom, to: w.isTo },
-    });
-    const oosResult = runMultiAssetBacktest({
-      candlesBySymbol,
-      strategies: input.strategies,
-      config: { ...baseConfig, from: w.oosFrom, to: w.oosTo },
-    });
-    for (const [segment,result] of [["IS",isResult],["OOS",oosResult]] as const) {
-      const scope = digest([captureHash,w,segment]);
-      executionQuality.push(...(result.executionQuality ?? []).map(b=>scopeReplay(b,scope,input.nowMs ?? Date.now())));
+  const recordResult = (window: WalkForwardWindow, segment: "IS" | "OOS", result: MultiAssetBacktestResult): void => {
+    const scope = digest([captureHash, window, segment]);
+    executionQuality.push(...(result.executionQuality ?? []).map((batch) => scopeReplay(batch, scope, input.nowMs ?? Date.now())));
+    mergeReplayEvidence(result);
+    for (const trade of result.trades) {
+      const detail = result.replay?.tradeDetails[trade.id];
+      trades.push({ windowIndex: window.index, segment, trade, ...(detail ? { replay: detail } : {}) });
     }
-    const isSummary = summarizeEval(isResult, w.isFrom, w.isTo);
-    const oosSummary = summarizeEval(oosResult, w.oosFrom, w.oosTo);
-    windowReports.push({ index: w.index, is: isSummary, oos: oosSummary });
+  };
+
+  const baseConfig: BacktestEngineOptions = { ...input.engineConfig, executionModel };
+  const runSegment = (strategies: BacktestStrategyItem[], start: number, end: number): MultiAssetBacktestResult =>
+    runMultiAssetBacktest({ candlesBySymbol, strategies, config: { ...baseConfig, from: start, to: end } });
+  const runStandaloneSegment = (candles: CandleLike[], strategies: BacktestStrategyItem[], start: number, end: number): MultiAssetBacktestResult =>
+    runMultiAssetBacktest({
+      candlesBySymbol: new Map([[input.instrumentId, candles]]),
+      strategies,
+      config: { ...baseConfig, from: start, to: end },
+    });
+
+  const trainingEnabled = input.candidates !== undefined;
+  if (input.finalHoldout && !trainingEnabled) {
+    throw new WalkForwardError("walkforward:invalid-training", "Finaler Holdout ist nur mit einem vollständigen Train-Select-Freeze-Lauf zulässig.");
+  }
+  let normalizedCandidates: readonly WalkForwardCandidate[] | undefined;
+  let trainingSelection: WalkForwardSelectionConfig | undefined;
+  let trainingSeed = 1;
+  let trainingManifest: WalkForwardDataManifest | undefined;
+  let trainingConfigHash: string | undefined;
+  let leakage: WalkForwardLeakagePolicy | undefined;
+  const freezes: WalkForwardFreezeArtifact[] = [];
+  const candidateSummaries = new Map<string, WindowEvalSummary[]>();
+
+  if (trainingEnabled) {
+    normalizedCandidates = validateWalkForwardCandidates(input.candidates ?? []);
+    trainingSelection = normalizeWalkForwardSelection(input.selection);
+    trainingSeed = input.seed ?? 1;
+    if (!Number.isInteger(trainingSeed) || trainingSeed < 0 || trainingSeed > 2_147_483_647) {
+      throw new WalkForwardError("walkforward:invalid-training", "Seed muss eine Ganzzahl zwischen 0 und 2147483647 sein.");
+    }
+    const purgeBars = input.leakage?.purgeBars ?? input.leakage?.labelHorizonBars ?? 0;
+    const labelHorizonBars = input.leakage?.labelHorizonBars ?? purgeBars;
+    const embargoBars = input.leakage?.embargoBars ?? 0;
+    if (![purgeBars, labelHorizonBars, embargoBars].every((value) => Number.isInteger(value) && value >= 0 && value <= 1000)) {
+      throw new WalkForwardError("walkforward:invalid-training", "Purge-, Embargo- und Label-Horizon-Bars liegen außerhalb [0,1000].");
+    }
+    leakage = { purgeBars, embargoBars, labelHorizonBars };
+    trainingManifest = buildWalkForwardDataManifest(input.instrumentId, input.timeframe, input.candles, input.candleProvenance);
+    trainingConfigHash = trainingDefaults(input.selection, input.engineConfig ?? {}, leakage).configHash;
+    for (const candidate of normalizedCandidates) candidateSummaries.set(candidate.id, []);
+  }
+
+  for (const w of layout.windows) {
+    let isResult: MultiAssetBacktestResult;
+    let oosResult: MultiAssetBacktestResult;
+    let selection: WalkForwardSelectionDecision | undefined;
+    let freeze: WalkForwardFreezeArtifact | undefined;
+    let selectedCandidateId: string | undefined;
+
+    if (normalizedCandidates && trainingSelection && trainingManifest && leakage && trainingConfigHash) {
+      const timeframeMs = SUPPORTED_TIMEFRAME_MS[input.timeframe];
+      const selectionIsTo = w.isTo - leakage.purgeBars * timeframeMs;
+      const oosEvaluationFrom = w.oosFrom + leakage.embargoBars * timeframeMs;
+      if (selectionIsTo <= w.isFrom || oosEvaluationFrom >= w.oosTo) {
+        throw new WalkForwardError("walkforward:invalid-training", `Fenster ${w.index} ist nach Purge/Embargo nicht mehr auswertbar.`);
+      }
+      const evaluated = normalizedCandidates.map((candidate) => {
+        const result = runSegment([...candidate.strategies], w.isFrom, selectionIsTo);
+        const summary = summarizeEval(result, w.isFrom, selectionIsTo);
+        candidateSummaries.get(candidate.id)?.push(summary);
+        return { candidate, result, summary };
+      });
+      selection = selectWalkForwardCandidate(
+        evaluated.map(({ candidate, summary }) => ({ candidate, is: summary })),
+        trainingSelection
+      );
+      const selected = evaluated.find(({ candidate }) => candidate.id === selection?.selectedCandidateId);
+      if (!selected) throw new WalkForwardError("walkforward:invalid-training", "Selector-Auswahl ist im Kandidatenraum nicht vorhanden.");
+      selectedCandidateId = selected.candidate.id;
+      isResult = selected.result;
+      oosResult = runSegment([...selected.candidate.strategies], oosEvaluationFrom, w.oosTo);
+      freeze = createWalkForwardFreezeArtifact({
+        phase: "window",
+        window: w,
+        selection,
+        candidates: normalizedCandidates,
+        dataManifest: trainingManifest,
+        configHash: trainingConfigHash,
+        seed: trainingSeed,
+        leakage,
+        selectionIsTo,
+        oosEvaluationFrom,
+      });
+      freezes.push(freeze);
+      recordResult(w, "IS", isResult);
+      recordResult(w, "OOS", oosResult);
+    } else {
+      isResult = runSegment(input.strategies, w.isFrom, w.isTo);
+      oosResult = runSegment(input.strategies, w.oosFrom, w.oosTo);
+      recordResult(w, "IS", isResult);
+      recordResult(w, "OOS", oosResult);
+    }
+
+    const isSummary = summarizeEval(isResult, w.isFrom, normalizedCandidates && leakage ? w.isTo - leakage.purgeBars * SUPPORTED_TIMEFRAME_MS[input.timeframe] : w.isFrom + (w.isTo - w.isFrom));
+    const oosSummary = summarizeEval(oosResult, normalizedCandidates && leakage ? w.oosFrom + leakage.embargoBars * SUPPORTED_TIMEFRAME_MS[input.timeframe] : w.oosFrom, w.oosTo);
+    windowReports.push({
+      index: w.index,
+      is: isSummary,
+      oos: oosSummary,
+      ...(selection ? { selection } : {}),
+      ...(freeze ? { freeze } : {}),
+      ...(selectedCandidateId ? { selectedCandidateId } : {}),
+    });
     isEvals.push({ summary: isSummary, result: isResult });
     oosEvals.push({ summary: oosSummary, result: oosResult });
-    mergeReplayEvidence(isResult);
-    mergeReplayEvidence(oosResult);
-    for (const trade of isResult.trades) {
-      const detail = isResult.replay?.tradeDetails[trade.id];
-      trades.push({ windowIndex: w.index, segment: "IS", trade, ...(detail ? { replay: detail } : {}) });
+  }
+
+  let training: WalkForwardTrainingReport | undefined;
+  if (normalizedCandidates && trainingSelection && trainingManifest && leakage && trainingConfigHash) {
+    const aggregateEvaluations = normalizedCandidates.map((candidate) => ({
+      candidate,
+      is: aggregateSelectionSummary(candidateSummaries.get(candidate.id) ?? []),
+    }));
+    const finalSelection = selectWalkForwardCandidate(aggregateEvaluations, trainingSelection);
+    const finalFreeze = createWalkForwardFreezeArtifact({
+      phase: "final-decision",
+      window: null,
+      selection: finalSelection,
+      candidates: normalizedCandidates,
+      dataManifest: trainingManifest,
+      configHash: trainingConfigHash,
+      seed: trainingSeed,
+      leakage,
+      selectionIsTo: null,
+      oosEvaluationFrom: null,
+    });
+    const selectedFinal = normalizedCandidates.find((candidate) => candidate.id === finalSelection.selectedCandidateId);
+    if (!selectedFinal) throw new WalkForwardError("walkforward:invalid-training", "Finale Auswahl ist im Kandidatenraum nicht vorhanden.");
+    let holdout: WalkForwardTrainingReport["holdout"];
+    if (input.finalHoldout) {
+      const holdoutManifest = buildWalkForwardDataManifest(input.instrumentId, input.timeframe, input.finalHoldout.candles, input.finalHoldout.candleProvenance);
+      const holdoutFrom = input.finalHoldout.from ?? holdoutManifest.firstEventTime;
+      const holdoutTo = input.finalHoldout.to ?? holdoutManifest.lastEventTime;
+      if (!Number.isFinite(holdoutFrom) || !Number.isFinite(holdoutTo) || holdoutTo <= holdoutFrom || holdoutFrom <= to) {
+        throw new WalkForwardError("walkforward:invalid-training", "Finaler Holdout muss zeitlich nach den Walk-Forward-Daten liegen.");
+      }
+      const holdoutResult = runStandaloneSegment(input.finalHoldout.candles, [...selectedFinal.strategies], holdoutFrom, holdoutTo);
+      const holdoutSummary = summarizeEval(holdoutResult, holdoutFrom, holdoutTo);
+      holdout = { selectedCandidateId: selectedFinal.id, from: holdoutFrom, to: holdoutTo, dataManifest: holdoutManifest, summary: holdoutSummary };
+      // Holdout trades are intentionally not merged into the window ledger:
+      // they are a separate post-decision evaluation, never an OOS input.
+      mergeReplayEvidence(holdoutResult);
     }
-    for (const trade of oosResult.trades) {
-      const detail = oosResult.replay?.tradeDetails[trade.id];
-      trades.push({ windowIndex: w.index, segment: "OOS", trade, ...(detail ? { replay: detail } : {}) });
-    }
+    training = {
+      mode: "train-select-freeze-test",
+      selector: trainingSelection,
+      seed: trainingSeed,
+      candidatesHash: hashWalkForwardCandidates(normalizedCandidates),
+      codeHash: finalFreeze.codeHash,
+      configHash: trainingConfigHash,
+      candidates: normalizedCandidates,
+      freezes,
+      finalDecision: finalFreeze,
+      ...(holdout ? { holdout } : {}),
+    };
   }
 
   const enginePaper = input.engineConfig?.paper;
@@ -589,6 +757,7 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
       frictionModelVersion: evidence?.config.frictionModelVersion ?? null,
     },
     ...(evidence ? { replayEvidence: evidence } : {}),
+    ...(training ? { training } : {}),
     windows: windowReports,
     aggregateOos: aggregateWindowEvals(oosEvals),
     aggregateIs: aggregateWindowEvals(isEvals),

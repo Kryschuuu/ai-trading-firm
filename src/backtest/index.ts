@@ -22,5 +22,6 @@ export * from "./replayEvents";
 export * from "./replayExecution";
 export * from "./replayFunding";
 export * from "./walkforward";
+export * from "./walkforwardTraining";
 export * from "./runStore";
 export * from "./tradeLedger";

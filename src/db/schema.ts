@@ -334,6 +334,32 @@ export const backtestTrades = pgTable("backtest_trades", {
   ),
 ]);
 
+/**
+ * Immutable Train/Select/Freeze evidence (RMA-P1-02). One row per window and
+ * one final-decision row; there is deliberately no update/delete application
+ * path. `artifactJson` contains the bounded score table and hashes needed to
+ * reproduce the selected OOS candidate without persisting provider payloads.
+ * Migration: `drizzle/2026-09-22_backtest_walkforward_freezes.sql`.
+ */
+export const backtestWalkforwardFreezes = pgTable("backtest_walkforward_freezes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull().references(() => backtestRuns.id),
+  freezeKey: text("freeze_key").notNull(),
+  phase: text("phase").notNull(),
+  windowIndex: integer("window_index"),
+  selectedCandidateId: text("selected_candidate_id").notNull(),
+  freezeHash: text("freeze_hash").notNull(),
+  artifactJson: jsonb("artifact_json").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("backtest_walkforward_freezes_key_unique").on(t.freezeKey),
+  uniqueIndex("backtest_walkforward_freezes_run_phase_window_unique").on(t.runId, t.phase, t.windowIndex),
+  index("backtest_walkforward_freezes_run_idx").on(t.runId, t.windowIndex),
+  check("backtest_walkforward_freezes_phase_check", sql`${t.phase} IN ('window', 'final-decision')`),
+  check("backtest_walkforward_freezes_window_check", sql`(${t.phase} = 'final-decision' AND ${t.windowIndex} IS NULL) OR (${t.phase} = 'window' AND ${t.windowIndex} >= 0)`),
+  check("backtest_walkforward_freezes_hash_check", sql`${t.freezeHash} ~ '^[0-9a-f]{64}$'`),
+]);
+
 /** Backtest-Läufe einer Regel gegen historische Kerzen (deterministisch). */
 export const ruleBacktests = pgTable("rule_backtests", {
   id: uuid("id").primaryKey().defaultRandom(),

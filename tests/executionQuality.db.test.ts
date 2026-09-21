@@ -435,6 +435,9 @@ test("WalkForward→persistBacktestRun writes quality atomically and replays wit
     await pool.query(
       await readFile("drizzle/2026-09-20_backtest_trades.sql", "utf8"),
     );
+    const freezeMigration = await readFile("drizzle/2026-09-22_backtest_walkforward_freezes.sql", "utf8");
+    await pool.query(freezeMigration);
+    await pool.query(freezeMigration);
     const rule: import("../src/lib/ruleEngine").RuleSpec = {
       name: "quality-rule",
       symbol: "BTC/USDT",

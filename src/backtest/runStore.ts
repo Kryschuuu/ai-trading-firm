@@ -28,7 +28,7 @@
 import { insertQualityBatch } from "../executionQuality/transaction";
 import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { db } from "../db";
-import { backtestRuns, backtestTrades } from "../db/schema";
+import { backtestRuns, backtestTrades, backtestWalkforwardFreezes } from "../db/schema";
 import { APP_VERSION } from "../lib/version";
 import { auditWrite, type AuditLevel } from "../lib/auditSink";
 import { metricLabel, telemetry } from "../lib/telemetry";
@@ -98,6 +98,7 @@ export function toBacktestRunInsert(
       // Friktionskonfiguration (inkl. Seed + Modellversion), Event-Coverage
       // und degradierte Annahmen. Fehlt bei paper-Läufen (Alt-Semantik).
       ...(report.replayEvidence ? { replayEvidence: report.replayEvidence } : {}),
+      ...(report.training ? { training: report.training } : {}),
     },
     metricsJson: {
       aggregateOos: report.aggregateOos,
@@ -464,6 +465,34 @@ export async function persistBacktestRun(
         reconciliationStatus: "RECONCILED",
         reconciliationJson: reconciliation,
       });
+
+      // Train/select/freeze evidence is part of the same atomic write. A
+      // missing migration therefore fails the whole run instead of creating a
+      // report whose selection cannot be audited later.
+      const freezeArtifacts = input.report.training
+        ? [...input.report.training.freezes, input.report.training.finalDecision]
+        : [];
+      if (freezeArtifacts.length > 0) {
+        await tx.insert(backtestWalkforwardFreezes).values(
+          freezeArtifacts.map((artifact) => ({
+            runId,
+            freezeKey: `wfz1:${runId}:${artifact.phase}:${artifact.windowIndex === null ? "final" : String(artifact.windowIndex)}`,
+            phase: artifact.phase,
+            windowIndex: artifact.windowIndex,
+            selectedCandidateId: artifact.selectedCandidateId,
+            freezeHash: artifact.freezeHash,
+            artifactJson: artifact,
+          }))
+        );
+        const storedFreezes = await tx
+          .select({ phase: backtestWalkforwardFreezes.phase, windowIndex: backtestWalkforwardFreezes.windowIndex, freezeHash: backtestWalkforwardFreezes.freezeHash })
+          .from(backtestWalkforwardFreezes)
+          .where(eq(backtestWalkforwardFreezes.runId, runId));
+        const storedKeys = new Set(storedFreezes.map((row) => `${row.phase}:${row.windowIndex === null ? "final" : String(row.windowIndex)}:${row.freezeHash}`));
+        if (storedKeys.size !== freezeArtifacts.length || freezeArtifacts.some((artifact) => !storedKeys.has(`${artifact.phase}:${artifact.windowIndex === null ? "final" : String(artifact.windowIndex)}:${artifact.freezeHash}`))) {
+          throw new TradeLedgerError("ledger:readback-mismatch", "Freeze-Artefakte konnten vor COMMIT nicht vollständig zurückgelesen werden.", { runId });
+        }
+      }
 
       for (let i = 0; i < rows.length; i += chunkSize) {
         const chunk = rows.slice(i, i + chunkSize).map(tradeInsertValues);

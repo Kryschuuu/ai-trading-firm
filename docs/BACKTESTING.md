@@ -250,6 +250,64 @@ Fail-closed: Trägt der Zeitraum kein vollständiges IS+OOS-Fenster, wirft
 der Runner `walkforward:insufficient-span` (statt zu raten); ohne Kerzen
 `walkforward:no-candles`.
 
+## 4.1 Train-Select-Freeze-Test (RMA-P1-02, v1.60.0)
+
+`runWalkForward()` bleibt ohne `candidates` ein expliziter Replay-only-Aufruf.
+Mit einem bounded Kandidatenraum (`src/backtest/walkforwardTraining.ts`) wird
+pro Fenster folgender unveränderlicher Ablauf ausgeführt:
+
+1. Jede Kandidatenstrategie wird ausschließlich auf dem IS-Clip replayt.
+2. Der Selector berechnet das konfigurierbare Ziel (`netPnl`, `pnl`, Sharpe,
+   Sortino, Profit-Factor oder Win-Rate) und harte Mindestgates nur aus diesen
+   IS-Summaries. `null`/unavailable (z. B. kein Profit-Factor) ist nicht 0.
+3. Die Score-Tabelle wird nach Kandidaten-ID kanonisch geordnet. Nach dem Ziel
+   gelten die konfigurierte Tie-Break-Reihenfolge und als letzter Schutz immer
+   `candidateId` — die Eingabereihenfolge ist somit bedeutungslos.
+4. Das Freeze-Artefakt (`wf-freeze-1`) bindet Auswahl, Score-Tabelle,
+   Kandidatenmanifest/-hash, Config-/Code-Hash, Seed, Cutoffs, Leakage-Politik
+   und Datenmanifest. Fenster- und finale Artefakte werden append-only in
+   `backtest_walkforward_freezes` sowie im Run-Report persistiert.
+5. OOS wird genau einmal mit `selectedCandidateId` aus dem Freeze evaluiert.
+   Ein optionaler finaler Holdout wird erst nach der finalen IS-Gesamtentscheidung
+   ausgeführt; weder OOS noch Holdout fließen in einen Selector. Der Holdout
+führt ein eigenes Datenmanifest und einen Trade-Hash, wird aber nicht in das
+Fenster-Ledger oder die IS-Auswahl gemischt.
+
+### Zeit- und Leakage-Semantik
+
+Das Manifest trennt `event_time` (Kerzenzeit), `available_at` (frühester
+zulässiger as-of-Zeitpunkt) und `computed_at` (Materialisierung). Standard-
+OHLCV verwendet die explizite `bar_close`-Politik; Aufrufer können Provenienz
+liefern. Ein `availableAt` nach dem Event wird im aktuellen Eventzeit-Enginevertrag
+fail-closed abgewiesen (kein stiller verzögerter Feature-Queue-Ersatz).
+`purgeBars` entfernt IS-
+Schlussbars mit potenziell überlappendem Label-Horizont, `embargoBars` entfernt
+OOS-Anfangsbars. Ist nach diesen Grenzen kein gültiger Clip übrig, bricht der
+Lauf ab; es gibt keinen neutralen Fallback.
+
+### Kandidatenvertrag und Beispiele
+
+```json
+[
+  {
+    "id": "rule-conservative",
+    "strategyVersion": "rule-v3",
+    "config": { "threshold": 100 },
+    "strategies": [{ "type": "rule", "id": "rule-conservative", "spec": "<sanitized RuleSpec>" }]
+  }
+]
+```
+
+`config` enthält ausschließlich bounded primitive Werte; ausführbare Callbacks,
+Secrets/Token-Schlüssel, NaN/Infinity, doppelte Definitionen und unbounded
+Kombinationen werden abgewiesen. Die maximal 64 Kandidaten und 8 Strategien je
+Kandidat verhindern eine unbounded Suchraumeskalation. Die CLI aktiviert den
+Pfad mit `--candidate-file`; die API akzeptiert additiv
+`walkforward.candidates`, `walkforward.selection`, `walkforward.seed`,
+`walkforward.purgeBars` und `walkforward.embargoBars`. Die Antwort unterscheidet
+`result.training.freezes`, `result.training.finalDecision` und
+`result.training.holdout` eindeutig.
+
 ---
 
 ## 5. Run-Persistenz & Read-API
@@ -265,7 +323,18 @@ zusätzlich (additiv, Migration `drizzle/2026-09-20_backtest_trades.sql`):
 (`RECONCILED`) und `reconciliation_json` (Abgleich-Evidenz, §5.1). Alt-Runs
 tragen dort `NULL` — „kein Ledger persistiert“, nie „0 Trades“.
 
-Zugriff (kein POST-Endpunkt — Runs entstehen NUR via CLI):
+Train-Select-Freeze-Artefakte liegen zusätzlich in
+`backtest_walkforward_freezes` (Migration
+`drizzle/2026-09-22_backtest_walkforward_freezes.sql`). `freeze_key` und
+`(run_id, phase, window_index)` sind UNIQUE; ein Datenbank-Trigger weist UPDATE
+und DELETE ab, es gibt keinen Anwendungslöschpfad. Das Artefakt ist in derselben Transaktion wie Run, Trade-Ledger und
+Execution-Quality. Fehlt die Migration, wird ein Trainings-Write komplett
+zurückgerollt. Rollback: neuen Trainingspfad stoppen, Tabelle erst danach
+entfernen; der Run bleibt dann ohne auswählbare Freeze-Evidenz und wird
+fail-closed als nicht promotable behandelt.
+
+Zugriff (persistierte Runs entstehen NUR via CLI; die API liefert additiv einen
+nicht-persistierenden Trainingsreport):
 
 - `GET /api/firm/backtests?limit=1..100` (Default 20) — Liste, jüngste
   zuerst. Lädt NIE Trade-Zeilen (nur die Run-Zeile inkl. `tradeCount` /
@@ -274,6 +343,9 @@ Zugriff (kein POST-Endpunkt — Runs entstehen NUR via CLI):
   additiv um `ledger`, `trades` (erste Seite) und `links.trades` ergänzt
   (§5.2). Bestehende Felder (`run`) sind unverändert.
 - `GET /api/firm/backtests/[id]/trades` — Trade-Ledger paginiert (§5.2).
+- `POST /api/firm/backtest` — bestehender Multi-Asset-Replay; additiv akzeptiert
+  `walkforward.candidates` und liefert Selection-/Freeze-/Holdout-Summaries
+  (Persistenz des Produktionslaufs erfolgt über die CLI).
 
 Alle verlangen `firm.read` (SEC-02-Muster, `no-store`) und melden einen
 unerreichbaren DB-Stand als `503 BACKTEST_RUNS_UNAVAILABLE` mit
@@ -432,6 +504,11 @@ node --import tsx scripts/run-backtest.ts \
 | `--rule-id` | genau eine Regelquelle | Regel-UUID aus `trade_rules` |
 | `--rule-file` | genau eine Regelquelle | Pfad zu einer RuleSpec-JSON (wird sanitized + gegen `RULE_CEILINGS` geklemmt) |
 | `--is-days` / `--oos-days` | nein | Fenster-Override (Bounds wie `WF_*`, sonst Env-Wert) |
+| `--candidate-file` | nein | bounded JSON-Kandidatenraum; aktiviert Train-Select-Freeze, ohne Flag Replay-only |
+| `--selection-metric` / `--min-trades` | nein | IS-Ziel und hartes IS-Minimum; Default `netPnl` / `1` |
+| `--max-drawdown-pct` | nein | optionales hartes IS-Maximum in Prozent |
+| `--purge-bars` / `--embargo-bars` | nein | Leakage-Schutz an Splitgrenzen, jeweils Default `0`, Bounds `[0,1000]` |
+| `--holdout-from` / `--holdout-to` | nein | separates Holdout nach `--to`, erst nach finaler IS-Entscheidung |
 | `--idempotency-key` | nein | eigener Lauf-Schlüssel (8..128 Zeichen `[A-Za-z0-9:_.-]`); Default: Inhalts-Fingerprint des Laufs (§5.1) |
 | `--skip-db` | nein | keine Persistenz (nur Artefakte; Offline-Betrieb) |
 | `--execution-model` | nein (Default `paper`) | `paper` oder `event_replay` (§3.2: Order-Lifecycle mit Partial Fills, Latenz, Depth-Impact, punktgenaue `FUNDING_DUE`-Ereignisse aus der Perp-Historie) |
@@ -467,10 +544,10 @@ mit `RECONCILED`-Ledger als persistiert.
 
 ## 7. Anti-Overfitting-Grenzen (bewusst nicht enthalten)
 
-1. **Statische Regeln, keine Parameter-Optimierung:** IS/OOS trennt hier
-   EVALUATIONS-Fenster (Robustheit: trägt die Regel über die Zeit, oder
-   „passt“ sie nur auf einem Abschnitt?). Eine Schätzung auf IS mit
-   Verifikation auf OOS ist bewusst NICHT Teil dieses PRs.
+1. **Bounded Auswahl statt Hyperparameterdienst:** Der neue Kandidatenpfad
+   selektiert explizit auf IS; er bietet keinen verteilten Optimierer und keine
+   unbounded Kombinationsexplosion. Ohne Kandidaten bleibt der historische
+   Replay-only-Modus statisch und kompatibel.
 2. **Fensteranzahl-Deckel:** `WF_MAX_SPAN_DAYS` (Default 2 Jahre) begrenzt
    implizit die Fensteranzahl — mehr Fenster laden zu selektivem Lesen
    („das beste Fenster zählt“) ein.
@@ -490,11 +567,15 @@ mit `RECONCILED`-Ledger als persistiert.
   `src/lib/funding.ts`
 - Flags: [CONFIGURATION.md](../CONFIGURATION.md) („Walk-Forward-Backtesting“)
 - Findings: [GAP-01](audits/2026-09-18-feature-gap/findings/GAP-01-backtesting-walk-forward.md),
+  [RMA-P1-02](audits/2026-09-20-roadmap-audit/findings/RMA-P1-02-walk-forward-training.md),
   [RMA-P1-04](audits/2026-09-20-roadmap-audit/findings/RMA-P1-04-backtest-trades.md)
   (Trade-Ledger)
 - Migrationen: `drizzle/2026-09-19_backtest_runs.sql`,
-  `drizzle/2026-09-20_backtest_trades.sql`
-- Tests: `tests/backtest.engine.test.ts`, `tests/backtest.step.nosynthetic.test.ts`,
+  `drizzle/2026-09-20_backtest_trades.sql`,
+  `drizzle/2026-09-22_backtest_walkforward_freezes.sql`
+- Tests: `tests/backtest.engine.test.ts`,
+  `tests/backtest.walkforward.training.test.ts`,
+  `tests/backtest.step.nosynthetic.test.ts`,
   `tests/backtest.tradeLedger.test.ts` (Mapping, Abgleich, Idempotenz,
   Rollback, Cursor-API — DB-Teile ping → skip)
 

@@ -20,7 +20,9 @@
  *     --instrument=BITUNIX:BTCUSDT --timeframe=1h \
  *     --from=2024-01-01 --to=2026-01-01 \
  *     --rule-id=<uuid> | --rule-file=./regel.json \
- *     [--is-days=90] [--oos-days=30] [--idempotency-key=<key>] [--skip-db]
+ *     [--is-days=90] [--oos-days=30] [--candidate-file=<path>]
+ *     [--holdout-from=<ISO|ms>] [--holdout-to=<ISO|ms>]
+ *     [--idempotency-key=<key>] [--skip-db]
  *
  * Fail-closed: fehlende/ungültige Flags, leere Kerzenreihen, ungültige
  * Regeln und zu kurze Zeiträume brechen mit Exit 1 ab (kein Run, kein
@@ -47,8 +49,11 @@ import {
 import type {
   BacktestStrategyItem,
   ReplayInputEvent,
+  WalkForwardCandidate,
   WalkForwardReport,
+  CandidateConfig,
 } from "../src/backtest";
+import { validateWalkForwardCandidates, WalkForwardTrainingError } from "../src/backtest";
 import {
   HistoricalStore,
   isSupportedTimeframe,
@@ -79,7 +84,9 @@ const USAGE = `Walk-Forward-Backtest (GAP-01) — genau EIN Regel-Replay je Aufr
 Aufruf:
   node --import tsx scripts/run-backtest.ts --instrument=<ID> --timeframe=<tf>
     --from=<ISO|ms> --to=<ISO|ms> (--rule-id=<uuid> | --rule-file=<pfad>)
-    [--is-days=N] [--oos-days=N] [--idempotency-key=<key>] [--skip-db]
+    [--is-days=N] [--oos-days=N] [--candidate-file=<path>]
+    [--holdout-from=<ISO|ms>] [--holdout-to=<ISO|ms>]
+    [--idempotency-key=<key>] [--skip-db]
 
 Pflicht:
   --instrument   Instrument-ID wie im HistoricalStore (z. B. BITUNIX:BTCUSDT)
@@ -91,6 +98,15 @@ Pflicht:
 Optional:
   --is-days      IS-Fenster in Tagen (Bounds [${WF_BOUNDS.isDays.min}, ${WF_BOUNDS.isDays.max}], Default Env/90)
   --oos-days     OOS-Fenster in Tagen (Bounds [${WF_BOUNDS.oosDays.min}, ${WF_BOUNDS.oosDays.max}], Default Env/30)
+  --candidate-file  JSON mit bounded Kandidaten (id, strategyVersion, config,
+                 strategies); aktiviert Train-Select-Freeze statt Replay-only
+  --holdout-from/to  separates, unangetastetes Holdout-Intervall nach --to;
+                 beide Flags gemeinsam oder keines
+  --selection-metric  IS-Ziel: netPnl | pnl | sharpeRatio | sortinoRatio |
+                 profitFactor | winRate (Default netPnl)
+  --min-trades      hartes IS-Minimum (Default 1)
+  --max-drawdown-pct hartes IS-Maximum, optional
+  --purge-bars / --embargo-bars  Leakage-Schutz an Splitgrenzen (Default 0)
   --idempotency-key  eigener Lauf-Schlüssel (8..128 Zeichen [A-Za-z0-9:_.-]);
                  Default: Inhalts-Fingerprint (Retry ⇒ derselbe Run)
   --skip-db      keine Persistenz (nur Artefakte; Offline-Betrieb)
@@ -157,6 +173,41 @@ function readRuleFile(file: string): string {
     return readFileSync(file, "utf8");
   } catch {
     fail(`--rule-file="${file.slice(0, 80)}" nicht lesbar.`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function loadCandidates(args: Record<string, string | boolean>): readonly WalkForwardCandidate[] | undefined {
+  const file = args["candidate-file"];
+  if (file === undefined) return undefined;
+  if (typeof file !== "string" || file.trim() === "") fail("--candidate-file darf nicht leer sein.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readRuleFile(file));
+  } catch {
+    fail(`--candidate-file="${file.slice(0, 80)}" ist kein gültiges JSON.`);
+  }
+  if (!Array.isArray(parsed)) fail("--candidate-file muss ein JSON-Array bounded Kandidaten enthalten.");
+  if (parsed.length > 64) fail("--candidate-file überschreitet den Kandidaten-Deckel von 64.");
+  const candidates: WalkForwardCandidate[] = [];
+  for (const [index, item] of parsed.entries()) {
+    if (!isRecord(item) || !Array.isArray(item.strategies) || !isRecord(item.config)) {
+      fail(`Kandidat ${index} braucht id, strategyVersion, config und strategies.`);
+    }
+    candidates.push({
+      id: item.id as string,
+      strategyVersion: item.strategyVersion as string,
+      config: item.config as CandidateConfig,
+      strategies: item.strategies as BacktestStrategyItem[],
+    });
+  }
+  try {
+    return validateWalkForwardCandidates(candidates);
+  } catch (error) {
+    fail(`--candidate-file ungültig: ${error instanceof Error ? error.message.slice(0, 300) : "unbekannter Fehler"}`);
   }
 }
 
@@ -227,6 +278,21 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
     lines.push(
       `| ${w.index} | ${d(w.is.from)}…${d(w.is.to)} | ${d(w.oos.from)}…${d(w.oos.to)} | ${w.is.trades} | ${w.is.pnl} | ${w.oos.trades} | ${w.oos.pnl} | ${w.oos.netPnl} | ${w.oos.winRate} % | ${w.oos.maxDrawdownPct} % | \`${w.oos.tradeHash.slice(0, 12)}…\` |`
     );
+  }
+  if (report.training) {
+    lines.push(
+      ``,
+      `## Train-Select-Freeze`,
+      ``,
+      `- Kandidaten: ${report.training.candidates.length} (Hash \`${report.training.candidatesHash.slice(0, 16)}…\`), Selector \`${report.training.selector.metric}\`, Seed ${report.training.seed}`,
+      `- Fenster-Auswahlen: ${report.training.freezes.map((freeze) => `#${freeze.windowIndex}: \`${freeze.selectedCandidateId}\` (Freeze \`${freeze.freezeHash.slice(0, 16)}…\`)`).join(", ")}`,
+      `- Finale IS-Gesamtentscheidung: \`${report.training.finalDecision.selectedCandidateId}\` (Freeze \`${report.training.finalDecision.freezeHash.slice(0, 16)}…\`)`,
+    );
+    if (report.training.holdout) {
+      lines.push(`- Finaler Holdout: \`${report.training.holdout.selectedCandidateId}\`, ${report.training.holdout.summary.trades} Trades, PnL ${report.training.holdout.summary.pnl}, Hash \`${report.training.holdout.summary.tradeHash.slice(0, 16)}…\``);
+    }
+  } else {
+    lines.push(``, `## Train-Select-Freeze`, ``, `- Replay-only-Kompatibilitätsmodus: keine IS-Auswahl und kein Freeze-Artefakt.`);
   }
   if (report.replayEvidence) {
     const ev = report.replayEvidence;
@@ -302,6 +368,16 @@ async function main(): Promise<void> {
   if (!Number.isInteger(replaySeed) || replaySeed < 0) {
     fail(`--replay-seed="${String(args["replay-seed"]).slice(0, 20)}" muss eine Ganzzahl ≥ 0 sein.`);
   }
+  const selectionMetric = typeof args["selection-metric"] === "string" ? args["selection-metric"] : "netPnl";
+  const allowedSelectionMetrics = ["netPnl", "pnl", "sharpeRatio", "sortinoRatio", "profitFactor", "winRate"] as const;
+  if (!(allowedSelectionMetrics as readonly string[]).includes(selectionMetric)) fail(`--selection-metric="${selectionMetric.slice(0, 30)}" ist ungültig.`);
+  const minTrades = typeof args["min-trades"] === "string" ? Number(args["min-trades"]) : 1;
+  if (!Number.isInteger(minTrades) || minTrades < 0 || minTrades > 100_000) fail("--min-trades muss eine Ganzzahl in [0,100000] sein.");
+  const maxDrawdownPct = typeof args["max-drawdown-pct"] === "string" ? Number(args["max-drawdown-pct"]) : null;
+  if (maxDrawdownPct !== null && (!Number.isFinite(maxDrawdownPct) || maxDrawdownPct < 0 || maxDrawdownPct > 100)) fail("--max-drawdown-pct muss in [0,100] liegen.");
+  const purgeBars = typeof args["purge-bars"] === "string" ? Number(args["purge-bars"]) : 0;
+  const embargoBars = typeof args["embargo-bars"] === "string" ? Number(args["embargo-bars"]) : 0;
+  if (![purgeBars, embargoBars].every((value) => Number.isInteger(value) && value >= 0 && value <= 1000)) fail("--purge-bars/--embargo-bars müssen Ganzzahlen in [0,1000] sein.");
 
   const { spec, ruleId } = await loadRule(args);
 
@@ -311,6 +387,7 @@ async function main(): Promise<void> {
   // (z. B. „BITUNIX:BTCUSDT“). Beide IDs stehen im Report (ruleSymbol vs.
   // instrumentId) — kein stiller Tausch, siehe docs/BACKTESTING.md.
   const replaySpec: RuleSpec = { ...spec, symbol: instrumentId };
+  const candidates = loadCandidates(args);
   if (spec.symbol !== instrumentId) {
     console.log(`[run-backtest] Regel-Symbol ${spec.symbol} ⇒ Replay gegen ${instrumentId} (siehe ruleSymbol im Report).`);
   }
@@ -328,6 +405,25 @@ async function main(): Promise<void> {
     close: h.close,
     volume: h.volume,
   }));
+
+  const holdoutFromRaw = args["holdout-from"];
+  const holdoutToRaw = args["holdout-to"];
+  if ((holdoutFromRaw === undefined) !== (holdoutToRaw === undefined)) {
+    fail("--holdout-from und --holdout-to müssen gemeinsam gesetzt werden.");
+  }
+  let finalHoldout: { candles: CandleLike[]; from: number; to: number } | undefined;
+  if (typeof holdoutFromRaw === "string" && typeof holdoutToRaw === "string") {
+    const holdoutFrom = parseTime(holdoutFromRaw, "--holdout-from");
+    const holdoutTo = parseTime(holdoutToRaw, "--holdout-to");
+    if (holdoutFrom <= to || holdoutTo <= holdoutFrom) fail("Finaler Holdout muss vollständig nach --to liegen.");
+    const holdoutHistory = store.query({ instrumentId, timeframe, from: holdoutFrom, to: holdoutTo });
+    if (holdoutHistory.length < 2) fail("data:no-holdout — der finale Holdout braucht mindestens 2 Kerzen.");
+    finalHoldout = {
+      from: holdoutFrom,
+      to: holdoutTo,
+      candles: holdoutHistory.map((h) => ({ time: h.ts, open: h.open, high: h.high, low: h.low, close: h.close, volume: h.volume })),
+    };
+  }
 
   // Instrument aus der Registry (Fees/Spread/Perpetual-Erkennung); fehlt es,
   // baut die Engine ein neutrales Spot-Default (fail-safe: kein Funding).
@@ -492,10 +588,21 @@ async function main(): Promise<void> {
               },
             },
       walkforward: { isDays, oosDays, maxSpanDays: wfBase.maxSpanDays },
+      ...(candidates ? {
+        candidates,
+        selection: { metric: selectionMetric as typeof allowedSelectionMetrics[number], minTrades, maxDrawdownPct },
+        leakage: { purgeBars, embargoBars, labelHorizonBars: purgeBars },
+        ...(finalHoldout ? { finalHoldout } : {}),
+        candleProvenance: history.map((h) => {
+          const computedAt = Date.parse(h.fetchedAt);
+          return { eventTime: h.ts, availableAt: h.ts, computedAt: Number.isFinite(computedAt) ? Math.max(h.ts, computedAt) : h.ts };
+        }),
+      } : {}),
       nowMs: Date.now(),
     });
   } catch (e) {
     if (e instanceof WalkForwardError) fail(`${e.code} — ${e.message}`);
+    if (e instanceof WalkForwardTrainingError) fail(`${e.code} — ${e.message}`);
     if (e instanceof EventReplayError) fail(`${e.code} — ${e.message}`);
     throw e;
   }
@@ -520,6 +627,16 @@ async function main(): Promise<void> {
   console.log(
     `[run-backtest] ${report.walkforward.windowCount} Fenster, OOS: ${report.aggregateOos.trades} Trades, PnL ${report.aggregateOos.pnl} (Ledger netto ${report.aggregateOos.netPnl}), Win-Rate ${report.aggregateOos.winRate} %, ${report.trades.length} Trade-Zeilen gesamt`
   );
+  if (report.training) {
+    console.log(
+      `[run-backtest] Train-Select-Freeze: ${report.training.candidates.length} Kandidaten, ` +
+      `Finale Auswahl ${report.training.finalDecision.selectedCandidateId}, ` +
+      `${report.training.freezes.length} immutable Fenster-Artefakte` +
+      (report.training.holdout ? `, Holdout ${report.training.holdout.summary.trades} Trades` : "")
+    );
+  } else {
+    console.log("[run-backtest] Replay-only-Kompatibilitätsmodus: kein Kandidatenraum, keine Auswahl/Freeze-Evidenz.");
+  }
 
   const idempotencyKey =
     typeof args["idempotency-key"] === "string" ? (args["idempotency-key"] as string).trim() : backtestRunIdempotencyKey(report);

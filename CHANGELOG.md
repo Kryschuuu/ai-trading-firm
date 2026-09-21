@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.59.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.60.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,35 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.60.0] — 2026-09-22 · Train-Select-Freeze Walk-Forward (RMA-P1-02)
+
+### Hinzugefügt
+
+- **Echtes IS-Train-Select-Freeze-OOS-Training:** bounded Kandidaten mit stabiler
+  ID, Strategieversion und serialisierbarer Config werden ausschließlich auf IS
+  bewertet. Harte Gates, deterministische Tie-Breaks (am Ende immer Kandidaten-ID)
+  und `netPnl` als kompatibler Default verhindern Auswahl aus OOS-Daten.
+- **Reproduzierbare Freeze-Artefakte:** jede Fensterentscheidung und die finale
+  Gesamtentscheidung tragen Score-Tabelle, Kandidaten-/Config-/Code-Hashes,
+  Datenmanifest, Seed, Cutoffs sowie getrennte `event_time`, `available_at` und
+  `computed_at`-Provenienz. Die Artefakte werden append-only und atomar mit dem
+  Backtest-Run persistiert.
+- **OOS und finaler Holdout:** OOS läuft ausschließlich mit der eingefrorenen
+  Kandidaten-ID; ein optionaler Holdout wird erst nach der vollständigen
+  IS-Entscheidung evaluiert und fließt nie in einen Selector zurück.
+- **Leakage-Schutz:** konfigurierbares Purge/Embargo an Splitgrenzen, bounded
+  Kandidatenraum (maximal 64) und fail-closed Behandlung unvollständiger Daten.
+- **CLI/API:** `--candidate-file`, Selector-/Purge-/Embargo-Flags und Holdout-
+  Zeitraum im Backtest-CLI; der Backtest-API-Response liefert additiv
+  Selection-, Freeze- und Holdout-Summaries. Replay-only-Aufrufe bleiben unverändert.
+
+### Datenbank/Migration
+
+- Neue append-only Migration `drizzle/2026-09-22_backtest_walkforward_freezes.sql`
+  mit eindeutiger Run-/Fenster-/Phase-Identität, Hash-Constraint und FK ohne
+  Cascade. Rollback: neuen Trainingspfad deaktivieren und die Freeze-Tabelle
+  erst entfernen, wenn keine neuen Runs mehr schreiben.
 
 ## [1.59.0] — 2026-09-21 · Multi-Venue-Market-Data-Sync (alle 6 Venues) + Warnung vor verwaisten Instrumenten
 
