@@ -685,6 +685,160 @@ export const journalAgentWeights = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Deterministische Trade-PnL-Attribution (RMA-P1-06, v1.57.0)
+//
+// Zwei append-only Tabellen (Migration `drizzle/2026-09-21_trade_attribution.sql`;
+// die SQL-Datei installiert zusätzlich UPDATE/DELETE/TRUNCATE-Sperren —
+// `npx drizzle-kit push` allein legt die Sperr-Trigger NICHT an):
+//
+//   trade_attributions         EINE Kopfzeile je (journal_id, method_version)
+//                              — Idempotenz-Schlüssel: Retry/Restart erzeugt
+//                              keine zweite Attribution desselben Trades.
+//   trade_attribution_entries  Beitragsposten (AGENT | RULE | COST), eindeutig
+//                              je (attribution_id, source_type, source_id).
+//
+// Invariante (vom Modell erzwungen, siehe src/attribution/model.ts):
+//   Σ Quellenbeiträge + Σ Kostenbeiträge + Residual = Netto-PnL (± 1e-6)
+// mit Netto = Brutto (Journal `pnl`) − Gebühren + Funding (Kontosicht).
+// `fees`/`funding` sind NULL-bare Fakten: NULL = unbekannt, NIE still 0 —
+// unbekannte Komponenten stehen sichtbar in `unknown_costs`.
+// Zeitsemantik: `closed_at` = Ereigniszeit des Trade-Closes (Journal-Zeile),
+// `computed_at` = Berechnungszeitpunkt der Attribution. Abfragen filtern
+// nach Ereigniszeit; Look-ahead ist konstruktiv ausgeschlossen, weil alle
+// Eingaben aus dem unveränderlichen Entry-Snapshot bzw. den Close-Fakten
+// stammen.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Attributions-Kopf: deterministische Allokation eines geschlossenen Trades. */
+export const tradeAttributions = pgTable(
+  "trade_attributions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Journal-Zeile des Trades (append-only-Vertrag, kein CASCADE). */
+    journalId: uuid("journal_id")
+      .notNull()
+      .references(() => tradeJournal.id),
+    /** Ops-Denormalisierung der Journal-Position (Journal position_id ist UNIQUE). */
+    positionId: uuid("position_id").notNull(),
+    /** Methode (ta1 = 1). Ein Wechsel schreibt NEUE Zeilen, nie Updates. */
+    methodVersion: integer("method_version").notNull(),
+    /** ATTRIBUTED | UNATTRIBUTABLE (fail-closed, sichtbarer Grund). */
+    status: text("status").notNull(),
+    /** Geschlossener Grund bei UNATTRIBUTABLE, sonst NULL. */
+    unattributableReason: text("unattributable_reason"),
+    /** Fingerprint des Entry-Snapshots (js…:<sha256>) — Verweis auf die Basis. */
+    snapshotHash: text("snapshot_hash").notNull(),
+    /** Schema-Version des Entry-Snapshots (0 = fehlend/unlesbar). */
+    snapshotSchemaVersion: integer("snapshot_schema_version").notNull(),
+    symbol: text("symbol").notNull(),
+    /** LONG | SHORT */
+    side: text("side").notNull(),
+    /** Regime zum Eröffnungszeitpunkt (aus der Journal-Zeile). */
+    regime: text("regime").notNull(),
+    /** Ereigniszeit des Closes (Journal closed_at) — Zeitfilter der Queries. */
+    closedAt: timestamp("closed_at", { withTimezone: true }).notNull(),
+    /** Realisiertes PnL der Buchungsquelle (Journal `pnl`, vor Gebühren). */
+    pnlGross: numeric("pnl_gross").notNull(),
+    /** Gebühren; NULL = unbekannt (kein stiller 0-Ersatz). */
+    fees: numeric("fees"),
+    /** Funding (Kontosicht, negativ = gezahlt); NULL = unbekannt. */
+    funding: numeric("funding"),
+    /** Slippage-Memo (bereits in Fill-Preisen enthalten, NICHT reconciliert). */
+    slippageMemo: numeric("slippage_memo"),
+    /** Reconciliationsziel: pnl_gross − fees??0 + funding??0. */
+    pnlNet: numeric("pnl_net").notNull(),
+    sourcesSum: numeric("sources_sum").notNull(),
+    costsSum: numeric("costs_sum").notNull(),
+    /** Explizites Residual (Konflikte + Rundung) — schließt exakt ab. */
+    residual: numeric("residual").notNull(),
+    /** Nicht quantifizierbare Kostenkomponenten (Teilmenge von [FEES, FUNDING]). */
+    unknownCosts: text("unknown_costs").array().notNull().default(sql`'{}'::text[]`),
+    /** Anzahl richtungsbelegter Quellen (aligned + opposing). */
+    participants: integer("participants").notNull().default(0),
+    /** Anzahl Enthaltungen (Beitrag exakt 0, sichtbar). */
+    abstentions: integer("abstentions").notNull().default(0),
+    /** Berechnungszeitpunkt (monoton nur Info; Zeitfilter ist closed_at). */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Idempotenz: genau eine Attribution je Trade und Methode — Retries und
+    // Restarts können keine zweite Kopfzeile (und damit keine zweiten
+    // Beitragsposten) erzeugen.
+    uniqueIndex("trade_attributions_journal_method_unique").on(t.journalId, t.methodVersion),
+    index("trade_attributions_closed_idx").on(t.closedAt, t.id),
+    index("trade_attributions_symbol_idx").on(t.symbol, t.closedAt),
+    index("trade_attributions_regime_idx").on(t.regime, t.closedAt),
+    index("trade_attributions_status_idx").on(t.methodVersion, t.status),
+    index("trade_attributions_position_idx").on(t.positionId),
+    check("trade_attributions_method_version_check", sql`${t.methodVersion} >= 1`),
+    check("trade_attributions_status_check", sql`${t.status} IN ('ATTRIBUTED', 'UNATTRIBUTABLE')`),
+    check(
+      "trade_attributions_reason_check",
+      sql`(${t.status} = 'UNATTRIBUTABLE' AND ${t.unattributableReason} IN ('SNAPSHOT_MISSING','SNAPSHOT_SCHEMA_V1','SNAPSHOT_INVALID','NO_SOURCES')) OR (${t.status} = 'ATTRIBUTED' AND ${t.unattributableReason} IS NULL)`
+    ),
+    check("trade_attributions_side_check", sql`${t.side} IN ('LONG', 'SHORT')`),
+    check("trade_attributions_schema_version_check", sql`${t.snapshotSchemaVersion} >= 0`),
+    check("trade_attributions_participants_check", sql`${t.participants} >= 0`),
+    check("trade_attributions_abstentions_check", sql`${t.abstentions} >= 0`),
+    check("trade_attributions_fees_check", sql`${t.fees} IS NULL OR ${t.fees} >= 0`),
+    check(
+      "trade_attributions_slippage_check",
+      sql`${t.slippageMemo} IS NULL OR ${t.slippageMemo} >= 0`
+    ),
+    check(
+      "trade_attributions_unknown_costs_check",
+      sql`${t.unknownCosts} <@ ARRAY['FEES','FUNDING']::text[]`
+    ),
+  ]
+);
+
+/** Attributions-Posten: Quelle, Version, Alignment, Gewicht, Beitrag. */
+export const tradeAttributionEntries = pgTable(
+  "trade_attribution_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    attributionId: uuid("attribution_id")
+      .notNull()
+      .references(() => tradeAttributions.id),
+    /** AGENT | RULE | COST. */
+    sourceType: text("source_type").notNull(),
+    /**
+     * Bounded Quellen-ID: Agentenname | rule_key | FEES | FUNDING. Bewusst
+     * KEINE Instrument-/Order-/Trade-IDs und KEINE Metrics-Labels mit
+     * unbeschränkter Kardinalität.
+     */
+    sourceId: text("source_id").notNull(),
+    /** Promptversion des Agenten | Regelversion | Methoden-Tag ta1. */
+    sourceVersion: text("source_version").notNull(),
+    /** Agentenrolle (nur AGENT; sonst NULL). */
+    role: text("role"),
+    /** Richtungsrelation: 1 = gleichgerichtet, −1 = gegen, 0 = Enthaltung/Kosten. */
+    alignment: integer("alignment").notNull(),
+    /** Normalisierter Anteil [0,1] an der Teilnehmermasse; NULL für COST. */
+    weight: numeric("weight"),
+    /** Signierter Beitrag in Kontowährung (8 Nachkommastellen). */
+    contribution: numeric("contribution").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("trade_attribution_entries_source_unique").on(
+      t.attributionId,
+      t.sourceType,
+      t.sourceId
+    ),
+    index("trade_attribution_entries_source_idx").on(t.sourceType, t.sourceId),
+    check(
+      "trade_attribution_entries_type_check",
+      sql`${t.sourceType} IN ('AGENT', 'RULE', 'COST')`
+    ),
+    check("trade_attribution_entries_alignment_check", sql`${t.alignment} IN (-1, 0, 1)`),
+    check("trade_attribution_entries_weight_check", sql`${t.weight} IS NULL OR (${t.weight} >= 0 AND ${t.weight} <= 1)`),
+    check("trade_attribution_entries_source_id_check", sql`length(${t.sourceId}) > 0 AND length(${t.sourceId}) <= 200`),
+  ]
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Point-in-Time Feature Store (RMA-P6-01, v1.53.0)
 //
 // Fünf Tabellen, ausschließlich additiv (Migration

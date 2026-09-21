@@ -40,12 +40,34 @@ import {
   tradeJournal,
   journalAgentWeights,
 } from "../src/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import type { Column } from "drizzle-orm";
 
 /** IN-Liste ohne drizzle-inList (Versions-Compat): `col IN (${ids})`. */
 function inSql(col: Column, ids: string[]) {
   return sql`${col} IN ${sql.join(ids.map((i) => sql`${i}`), sql`, `)}`;
+}
+
+/**
+ * RMA-P1-06 (v1.57.0): Attribution-Posten/-Köpfe entfernen, BEVOR Journal-
+ * Zeilen gelöscht werden (FK `trade_attributions.journal_id` ohne CASCADE —
+ * Kinder zuerst). Best-effort: Auf nicht migrierten DBs (Tabellen fehlen)
+ * ist das ein No-op, der Test bleibt grün.
+ */
+async function deleteAttributionRows(journalWhere: SQL): Promise<void> {
+  try {
+    await db.execute(
+      sql`DELETE FROM trade_attribution_entries WHERE attribution_id IN
+          (SELECT id FROM trade_attributions WHERE journal_id IN
+            (SELECT id FROM trade_journal WHERE ${journalWhere}))`
+    );
+    await db.execute(
+      sql`DELETE FROM trade_attributions WHERE journal_id IN
+          (SELECT id FROM trade_journal WHERE ${journalWhere})`
+    );
+  } catch {
+    /* Tabellen fehlen (unmigrierte DB) — kein FK, Löschung unnötig. */
+  }
 }
 import { computeMaeMfe } from "../src/lib/journalMetrics";
 import {
@@ -321,7 +343,9 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
   // Symbol-Isolation: bewusst ETH — BTC gehört dem H2-Integrationstest
   // (orderIntents), der Positions je Symbol löscht; eine BTC-Position mit
   // trade_journal-FK aus diesem Test würde dessen Cleanup brechen (FK).
-  // ETH persistiert kein anderer Test (getestet). Vorlauf-Reste reinigen:
+  // ETH persistiert kein anderer Test (getestet). Vorlauf-Reste reinigen
+  // (Attribution-Kinder zuerst, RMA-P1-06-FK):
+  await deleteAttributionRows(sql`${tradeJournal.symbol} = 'ETH'`);
   await db.delete(tradeJournal).where(eq(tradeJournal.symbol, "ETH"));
   await db.delete(positions).where(eq(positions.symbol, "ETH"));
   await db.delete(orderIntents).where(sql`${orderIntents.symbol} = 'ETH'`);
@@ -437,17 +461,34 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
     const [row] = await db.select().from(tradeJournal).where(eq(tradeJournal.positionId, pos.id)).limit(1);
     assert.ok(row, "Journal-Zeile existiert direkt nach der Eröffnung");
     const snap = row.decisionSnapshot as Record<string, unknown>;
-    assert.equal(snap.schemaVersion, 1);
+    // RMA-P1-06 (v1.57.0): Schema v2 — Versionskette + kanonischer Hash.
+    assert.equal(snap.schemaVersion, 2);
     assert.equal(snap.attribution, "PROPOSAL");
     assert.equal(snap.proposalId, proposalId);
     assert.equal(snap.source, "ENGINE");
     assert.equal(row.regime, snap.regime, "Regime-Spalte spiegelt den Snapshot");
     assert.equal(snap.rationaleHash, createHash("sha256").update(JSON.stringify({ reason: dbReason, detail: dbDetail })).digest("hex"), "rationaleHash = sha256(reason+detail)");
+    assert.ok(
+      typeof snap.snapshotHash === "string" && snap.snapshotHash.startsWith("js2:"),
+      "kanonischer Snapshot-Fingerprint (js2:<sha256>)"
+    );
+    const versions = snap.versions as Record<string, unknown>;
+    assert.ok(versions, "Versionskette (v2) vorhanden");
+    assert.equal(versions.promptVersion, 1, "Promptversion des Proposers (agents.version Default 1)");
+    const agentVersions = versions.agentVersions as Record<string, number>;
+    assert.ok(Number.isFinite(agentVersions[researchName]), "Promptversion der Kettenstimme erfasst");
+    assert.equal(versions.ruleKey, null, "Proposal-Pfad: keine Regelversion");
+    assert.equal(versions.ruleVersion, null);
+    assert.ok(typeof versions.policyVersion === "string" && versions.policyVersion.startsWith("rp1:"), "Policy-Fingerprint der wirksamen Limits");
     const votes = snap.votes as Array<Record<string, unknown>>;
     assert.equal(votes.length, 1, "genau die eine Kettenstimme (RESEARCH) im Snapshot");
     assert.equal(votes[0].role, "RESEARCH");
     assert.equal(votes[0].vote, "TRADE");
     assert.equal(votes[0].confidence, 0.8);
+    // v2: Richtungsbeleg der Stimme — hier bewusst unbelegt (kein symbol/side
+    // in der Seed-Entscheidung) ⇒ Attribution behandelt sie als Enthaltung.
+    assert.equal(votes[0].symbol, null);
+    assert.equal(votes[0].side, null);
     assert.equal((snap.proposer as { name?: string })?.name, agentName, "Proposer = der Vorschlags-Agent");
 
     // (b) Close: Metriken aus injizierten 1h-Kerzen (Rechenwert = Referenz).
@@ -491,8 +532,10 @@ test("E2E: executeApprovedProposal → Journal-Zeile mit Decision-Snapshot; Clos
     assert.equal(closedRow.quality, "OK");
   } finally {
     // Kinder zuerst (FK-tolerant, best-effort).
+    const journalPosId = positionId ?? "00000000-0000-0000-0000-000000000000";
+    await deleteAttributionRows(sql`${tradeJournal.positionId} = ${journalPosId}`);
     for (const fn of [
-      () => db.delete(tradeJournal).where(sql`${tradeJournal.positionId} = ${positionId ?? "00000000-0000-0000-0000-000000000000"}`),
+      () => db.delete(tradeJournal).where(sql`${tradeJournal.positionId} = ${journalPosId}`),
       () => db.delete(positions).where(eq(positions.missionId, missionId)),
       () => db.delete(agentMessages).where(eq(agentMessages.missionId, missionId)),
       () => db.delete(proposals).where(eq(proposals.id, proposalId)),
@@ -564,6 +607,7 @@ test("Journal: Backfill bei fehlender Zeile → UNKNOWN-Snapshot (sichtbare Lüc
     assert.deepEqual(snap.votes, [], "keine erfundenen Stimmen");
     assert.equal(row.regime, "UNKNOWN");
   } finally {
+    await deleteAttributionRows(sql`${tradeJournal.positionId} = ${positionId}`);
     for (const fn of [
       () => db.delete(tradeJournal).where(eq(tradeJournal.positionId, positionId)),
       () => db.delete(positions).where(eq(positions.id, positionId)),
@@ -621,6 +665,7 @@ test("Journal: idempotente Eröffnung (UNIQUE position_id → genau 1 Zeile)", a
     const rows = await db.select().from(tradeJournal).where(eq(tradeJournal.positionId, positionId));
     assert.equal(rows.length, 1, "genau eine Journal-Zeile pro Position");
   } finally {
+    await deleteAttributionRows(sql`${tradeJournal.positionId} = ${positionId}`);
     for (const fn of [
       () => db.delete(tradeJournal).where(eq(tradeJournal.positionId, positionId)),
       () => db.delete(positions).where(eq(positions.id, positionId)),
@@ -686,6 +731,7 @@ test("Auswertung + Feedback: insufficient-sample, Modi off/monitor/enforce, schr
 
   const labelPrefix = `journal-weight:RESEARCH:${REGIME_TAG}:`;
   const cleanup = async () => {
+    await deleteAttributionRows(sql`${tradeJournal.positionId} IN ${sql.join(jobPosIds.map((i) => sql`${i}`), sql`, `)}`);
     for (const fn of [
       () => db.delete(journalAgentWeights).where(eq(journalAgentWeights.regime, REGIME_TAG)),
       () =>

@@ -1,7 +1,7 @@
 {
   "name": "ai-trading-firm",
-  "version": "1.56.0",
-  "description": "Autonome KI-Trading-Firma (Paper-Trading) \u2014 local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
+  "version": "1.57.0",
+  "description": "Autonome KI-Trading-Firma (Paper-Trading) — local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude.",
   "license": "GPL-3.0-only",
   "private": true,
   "engines": {
@@ -57,7 +57,8 @@
     "features:status": "node --import tsx scripts/feature-materialize.ts --status",
     "features:parity": "node --import tsx scripts/feature-materialize.ts --parity",
     "execution:ingest": "node --import tsx scripts/execution-quality.ts",
-    "execution:reconcile": "node --import tsx scripts/execution-quality-reconcile.ts"
+    "execution:reconcile": "node --import tsx scripts/execution-quality-reconcile.ts",
+    "attribution:backfill": "node --import tsx scripts/attribution-backfill.ts"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",

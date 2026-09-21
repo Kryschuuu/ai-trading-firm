@@ -157,6 +157,27 @@ export class LabelCounter {
 export const telemetry = {
   /** Execution-quality outcomes only; never free-form identifiers. */
   executionQuality: new LabelCounter("execution_quality_total"),
+  /**
+   * Trade-PnL-Attribution (RMA-P1-06, v1.57.0). Labels sind ausschließlich
+   * Code-konstante Ergebniswerte (`result`: attributed | unattributable |
+   * duplicate | failed bzw. ok | invalid | unavailable) — KEINE Agentennamen,
+   * Journal-/Trade-/Positions-IDs oder Instrumente als Labels (begrenzte
+   * Kardinalität).
+   */
+  attribution: {
+    /** Attributionsschreibungen je Ergebnis. */
+    captures: new LabelCounter("trade_attribution_captures_total"),
+    /** Backfill-Läufe je Ergebnis. */
+    backfills: new LabelCounter("trade_attribution_backfills_total"),
+    /** Read-API-Abfragen je Ergebnis. */
+    queries: new LabelCounter("trade_attribution_queries_total"),
+    /** alle Zähler der Sektion zurücksetzen (nur Tests). */
+    reset(): void {
+      telemetry.attribution.captures.reset();
+      telemetry.attribution.backfills.reset();
+      telemetry.attribution.queries.reset();
+    },
+  },
   marketData: {
     /** Fehlgeschlagene Kerzenabrufe nach Ursache (MDERR-006). */
     fetchFailures: new LabelCounter("market_data_fetch_failures_total"),

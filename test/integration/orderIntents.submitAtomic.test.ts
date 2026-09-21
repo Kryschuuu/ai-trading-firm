@@ -103,6 +103,22 @@ test("H2: zwei Prozesse (zwei PaperBroker-Instanzen) racen auf dasselbe Symbol �
   // kollidieren → die (zu den BTC-Positionen gehörenden) Journal-Zeilen erst
   // entfernen. So bleibt der Test unabhängig davon grün, welches Symbol die
   // Journal-Tests nutzen und welche Altlast vorhanden ist.
+  // RMA-P1-06 (v1.57.0): Attribution-Posten/-Köpfe sind Kind von trade_journal
+  // (FK ohne CASCADE) und werden zuerst entfernt (best-effort: auf nicht
+  // migrierten DBs ein No-op).
+  try {
+    await db.execute(
+      sql`DELETE FROM trade_attribution_entries WHERE attribution_id IN
+          (SELECT id FROM trade_attributions WHERE journal_id IN
+            (SELECT id FROM trade_journal WHERE position_id IN (SELECT id FROM positions WHERE symbol = 'BTC')))`
+    );
+    await db.execute(
+      sql`DELETE FROM trade_attributions WHERE journal_id IN
+          (SELECT id FROM trade_journal WHERE position_id IN (SELECT id FROM positions WHERE symbol = 'BTC'))`
+    );
+  } catch {
+    /* Tabellen fehlen (unmigrierte DB) — kein FK, Löschung unnötig. */
+  }
   await db
     .delete(tradeJournal)
     .where(sql`${tradeJournal.positionId} IN (SELECT id FROM positions WHERE symbol = 'BTC')`);
@@ -174,6 +190,20 @@ test("H2: zwei Prozesse (zwei PaperBroker-Instanzen) racen auf dasselbe Symbol �
     await db.delete(orderIntents).where(eq(orderIntents.account, account));
     // GAP-03 (v1.43.0): Journal-Zeilen (FK-Kind von positions) vor dem
     // Positions-Delete räumen — sonst bricht das Bulk-Delete auf der FK ab.
+    // RMA-P1-06 (v1.57.0): Attribution-Kinder zuerst (best-effort).
+    try {
+      await db.execute(
+        sql`DELETE FROM trade_attribution_entries WHERE attribution_id IN
+            (SELECT id FROM trade_attributions WHERE journal_id IN
+              (SELECT id FROM trade_journal WHERE position_id IN (SELECT id FROM positions WHERE symbol = 'BTC')))`
+      );
+      await db.execute(
+        sql`DELETE FROM trade_attributions WHERE journal_id IN
+            (SELECT id FROM trade_journal WHERE position_id IN (SELECT id FROM positions WHERE symbol = 'BTC'))`
+      );
+    } catch {
+      /* Tabellen fehlen (unmigrierte DB) — kein FK, Löschung unnötig. */
+    }
     await db
       .delete(tradeJournal)
       .where(sql`${tradeJournal.positionId} IN (SELECT id FROM positions WHERE symbol = 'BTC')`);

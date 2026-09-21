@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-21 (RMA-P4-01 → FIXED, v1.56.0)
+Letzte Aktualisierung: 2026-09-21 (RMA-P1-06 → FIXED, v1.57.0)
 
 ## Statusmodell
 
@@ -36,7 +36,7 @@ codebasierten Detailbefund.
 | RMA-P1-03 | Backtest-Kennzahlen | VERIFIED | — | — | `df3163e` + QA-01-Fix | v1.51.3 | Kennzahltests + QA-01-Regression |
 | RMA-P1-04 | Persistente Backtest-Trades | FIXED | [P1-04](../prompts/PROMPT-P1-04-backtest-trades.md) | [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149) | `88161dc` | v1.52.0 | `tests/backtest.tradeLedger.test.ts` (26 Tests: Mapping, Abgleich, Rollback bei Trade N, Idempotenz sequentiell + parallel, Aggregate/Hash aus DB-Zeilen, API Limit/Cursor/404/400), `tests/backtest.engine.test.ts` grün; typecheck/lint/docs:validate grün |
 | RMA-P1-05 | Lifecycle/Drift | OPEN | [P1-05](../prompts/PROMPT-P1-05-lifecycle-drift.md) | — | — | — | Auditbefund |
-| RMA-P1-06 | Trade-Attribution | PARTIAL | [P1-06](../prompts/PROMPT-P1-06-trade-attribution.md) | — | — | — | Auditbefund |
+| RMA-P1-06 | Trade-Attribution | FIXED | [P1-06](../prompts/PROMPT-P1-06-trade-attribution.md) | [#154](https://github.com/Kryschuuu/ai-trading-firm/pull/154) | `fd7fdbc` | v1.57.0 | `tests/tradeAttribution.test.ts` (20: Reconciliation LONG/SHORT/Gewinn/Verlust, Kosten bekannt/unbekannt, Alignment-/Enthaltungsregeln, Konflikte, Determinismus/Golden, Negative Paths), `tests/tradeAttribution.db.test.ts` (7: Roundtrip, Idempotenz Retry/Restart, Methodenwechsel erhält alte Zeilen, Backfill v1 ⇒ UNATTRIBUTABLE + zweiter Lauf leer, Aggregate-Reconciliation + Coverage, Close-Wiring + Disable-Flag, Migration idempotent + Append-only-Trigger auf eigener Wegwerf-Postgres), `tests/tradeAttribution.api.test.ts` (4: 400-Verträge, Dimensionen, no-store); `tests/tradeJournal.test.ts` auf Snapshot v2 erweitert; typecheck/lint/docs:validate grün |
 | RMA-P2-01 | Regime-Erkennung | PARTIAL | [P2-01](../prompts/PROMPT-P2-01-regime-detection.md) | — | — | — | Auditbefund |
 | RMA-P2-02 | Perpetual-Daten | FIXED | [P2-02](../prompts/PROMPT-P2-02-perpetual-data.md) | [#151](https://github.com/Kryschuuu/ai-trading-firm/pull/151) | `985b0a8` | v1.54.0 | `tests/perpPipeline.{normalize,sync,db,consumers,security,cli}.test.ts` (95 Tests: Normalisierung/Einheiten je Provider-Kante, duplikatfreier Backfill + Increment-Retry gegen embedded Postgres inkl. Wasserstand nach Prozessneustart, Revision statt Überschreiben, as-of verbirgt später verfügbare Sätze, Lücken/Staleness/negatives OI/Rate-Bounds/Duplikate, `unsupported` vs. transienter Fehler vs. leer, Replay nur fälliger Intervalle, Belegbarkeits-Grenze der Konsumenten, 400/405/503-Vertrag, Leak-/Injection-/Label-Architekturtests); `npm test` 2705 Tests / 0 fail, typecheck/lint/docs:validate grün |
 | RMA-P2-03 | MTF-Konfluenz | PARTIAL | [P2-03](../prompts/PROMPT-P2-03-multi-timeframe-confluence.md) | — | — | — | Auditbefund |

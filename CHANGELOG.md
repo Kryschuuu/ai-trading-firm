@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.56.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.57.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,85 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.57.0] — 2026-09-21 · Deterministische Trade-PnL-Attribution (RMA-P1-06)
+
+### Hinzugefügt
+
+- **Attributionsmodul `src/attribution/` (Methode `ta1`, DETERMINISTIC_ALLOCATION):**
+  Jeder geschlossene Trade erhält eine versionierte, reproduzierbare Netto-PnL-
+  Attribution, deren Quellenbeiträge (Agenten der Entscheidungskette, Proposer
+  oder auslösende Regel) plus Kostenposten (Gebühren, Funding) plus explizites
+  Residual **exakt** das realisierte Netto-PnL ergeben (erzwungene
+  Reconciliation, Toleranz 1e-6). Normierte Gewichte aus den Confidence-Werten
+  der Stimmen (fehlend → Beta(2,2)-Prior 0.5, konsistent mit journalAnalytics);
+  Enthaltungen erhalten Beitrag 0 und bleiben sichtbar; widersprüchliche
+  Stimmen gehen mit negativem Beitrag ein, der Konfliktanteil verbleibt im
+  Residual. Ausdrücklich KEINE Kausalanalyse (Deklaration in jeder
+  API-Antwort, jedem Audit und jeder Kopfzeile); Shapley nur nach expliziter
+  Roadmap-Entscheidung.
+- **Immutable Entry-Snapshot v2 (`trade_journal.decision_snapshot`):** exakte
+  Prompt-, Agenten-, Regel-, Policy- (`rp1:<sha256>` über die wirksamen
+  Risk-Limits) und Daten-Fingerprints (`df1:<sha256>` über Markt-/Trigger-
+  Snapshot) plus kanonischer `snapshotHash` (`js2:<sha256>`) — spätere
+  Prompt-/Regel-/Policy-Änderungen können historische Attribution nicht
+  umdeuten. Stimmen tragen zusätzlich `symbol`, `side`, `model`. Alte v1-
+  Snapshots bleiben lesbar; die Attribution behandelt sie fail-closed als
+  `UNATTRIBUTABLE` (Grund `SNAPSHOT_SCHEMA_V1`) statt zu raten.
+- **Append-only Persistenz (Migration
+  `drizzle/2026-09-21_trade_attribution.sql`, idempotent):** Tabellen
+  `trade_attributions` (Kopf) und `trade_attribution_entries` (Posten) mit
+  Unique-Idempotenzschlüssel (`journal_id`, `method_version`) bzw.
+  (`attribution_id`, `source_type`, `source_id`), FKs ohne CASCADE, CHECKs,
+  Zeit- und Statusindizes sowie UPDATE/DELETE/TRUNCATE-Sperren auf DB-Ebene.
+  `closed_at` = Ereigniszeit (Zeitfilter aller Queries), `computed_at` =
+  Berechnungszeit; `fees`/`funding` NULL = unbekannt (nie still 0, sichtbar in
+  `unknown_costs`). Ein Methodenwechsel schreibt NEUE Zeilen — historische
+  Ergebnisse bleiben unverändert.
+- **Produktions-Wiring:** `completeJournalRow()` attribuiert automatisch beim
+  Trade-Close (Monitor, Engine-Flatten, Mikro-Executor) — fehlertolerant (ein
+  Attribution-Fehler blockiert den Close nie; Audit `JOURNAL_ATTRIBUTION_FAILED`
+  bleibt sichtbar). Funding kommt aus `positions.funding_paid`; Gebühren bleiben
+  im Paper-Pfad ehrlich unbekannt. Backtest-Trades via
+  `attributeBacktestTrade()` als Wert — der eingefrorene `BacktestTradeLog`-
+  Ledger (RMA-P1-04) wird nicht mutiert; semantisch identische Methode.
+- **Bounded Read-APIs (SEC-02-Muster, `firm.read`, `no-store`):**
+  `GET /api/firm/journal/attributions` (Detail-Liste, Limit ≤ 200, Filter
+  Symbol/Regime/Status/Methodenversion/Zeitraum, `truncated`-Flag) und
+  `GET /api/firm/journal/attributions/aggregate?dimension=agent|rule|regime|cost`
+  — Aggregate liefern immer Counts, Coverage gegen die geschlossenen
+  Journal-Zeilen desselben Zeitraums und die serverseitig geprüfte
+  Reconciliation (Δ ≤ 1e-6) mit.
+- **Backfill-CLI `npm run attribution:backfill`:** historische, geschlossene
+  Journal-Zeilen ohne Attribution nachziehen — idempotent in begrenzten
+  Batches (Restart-sicher), `--dry-run`, `--from/--to` (Ereigniszeit), Dry-Run;
+  Zeilen ohne ausreichenden Snapshot werden als `UNATTRIBUTABLE` persistiert,
+  nie mit geschätzten Quellen gefüllt. Audit-Event `ATTRIBUTION_BACKFILL_RUN`.
+- **Konfiguration:** `TRADE_ATTRIBUTION_ENABLED` (Default `true`) und
+  `TRADE_ATTRIBUTION_METHOD_VERSION` (Default `1`, Allowlist) — siehe
+  `CONFIGURATION.md` und `src/attribution/README.md` (vollständige
+  Spezifikation, Einheiten, Zeitsemantik, Rollback).
+- **Tests (31 neue):** `tests/tradeAttribution.test.ts` (20: Reconciliation
+  LONG/SHORT/Gewinn/Verlust, Kosten bekannt/unbekannt, Alignment- und
+  Enthaltungsregeln, Konflikte, Determinismus/Golden, Negative Paths),
+  `tests/tradeAttribution.db.test.ts` (7: Roundtrip, Idempotenz bei
+  Retry/Restart, Methodenwechsel erhält alte Zeilen, Backfill v1 ⇒
+  UNATTRIBUTABLE + zweiter Lauf leer, Aggregate-Reconciliation + Coverage,
+  Close-Wiring + Disable-Flag, Migration idempotent + Append-only-Trigger),
+  `tests/tradeAttribution.api.test.ts` (4: 400-Verträge, Dimensionen,
+  no-store, Deklarationsanker). Neue Audit-Events
+  (`JOURNAL_ATTRIBUTED`, `JOURNAL_ATTRIBUTION_FAILED`,
+  `ATTRIBUTION_BACKFILL_RUN`) vollständig im Audit-Katalog beschrieben;
+  bounded Telemetrie-Counter ohne IDs als Labels.
+
+### Geändert
+
+- `buildProposalSnapshot()`/`buildRuleSnapshot()` schreiben Schema v2 mit
+  Versionskette (additiv — Felder optional; `journalAnalytics` bleibt
+  unberührt); `JournalVote` trägt optionale `symbol`/`side`/`model`-Felder.
+- `JournalCloseInput` akzeptiert optionale `fees`/`funding`/`slippage`;
+  `JournalCloseResult` meldet die Attribution (`status`, `methodVersion`,
+  `created`).
 
 ## [1.56.0] — 2026-09-21 · Venueübergreifendes Execution-Benchmarking (RMA-P4-01)
 

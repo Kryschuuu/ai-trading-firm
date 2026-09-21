@@ -2017,9 +2017,23 @@ werden PnL, Excursions (MAE/MFE), Haltedauer und Exit-Reason ergänzt.
     Eröffnung (Rolle, Entscheidung, Confidence, Risiko-Score).
   - **Regime** (adaptives Risiko, UNKNOWN erlaubt) + **rationaleHash**
     (sha256 über Begründung + Detail, bzw. die Signatur der Regel).
+  - **Versionskette (v1.57.0, RMA-P1-06)**: exakte Prompt-, Agenten-, Regel-,
+    Policy- (`rp1:<sha256>`) und Daten-Fingerprints (`df1:<sha256>`) plus
+    kanonischer `snapshotHash` — spätere Prompt-/Regeländerungen können
+    historische Attributionen nicht umdeuten.
 - **Beim Close** (Monitor Stop-Loss/Take-Profit, Emergency-Flatten):
-  `pnl`, `mae_pct`, `mfe_pct`, `holding_minutes`, `exit_reason` und das
-  Qualitäts-Flag `quality`.
+  `pnl`, `mae_pct`, `mfe_pct`, `holding_minutes`, `exit_reason`, das
+  Qualitäts-Flag `quality` — und seit v1.57.0 zusätzlich die deterministische
+  **Netto-PnL-Attribution** (append-only `trade_attributions`): Quellenbeiträge
+  (Agenten/Regel) + Kosten (Gebühren, Funding) + explizites Residual ergeben
+  exakt das Netto-PnL (± 1e-6). Methode `ta1` = normierte Aufteilung
+  (`DETERMINISTIC_ALLOCATION`), **keine Kausalanalyse**. Details:
+  `src/attribution/README.md`; APIs:
+  `GET /api/firm/journal/attributions` (Detail) und
+  `GET /api/firm/journal/attributions/aggregate` (Aggregat je Agent/Regel/
+  Regime/Kostenart, immer mit Coverage + Reconciliation). Backfill:
+  `npm run attribution:backfill` (idempotent; Altzeilen ohne v2-Snapshot
+  werden als `UNATTRIBUTABLE` erfasst, nie geschätzt).
 
 **Robustheitsgarantie:** Ein Journal-Fehler bricht den Handelspfad nie ab —
 er wird als `JOURNAL_WRITE_FAILED` (CRITICAL) in den Audit-Log gemeldet.
