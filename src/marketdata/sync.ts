@@ -34,7 +34,11 @@ import {
   type SupportedTimeframe,
 } from "../lib/marketdata/historicalStore";
 import type { MarketCandle as StoreCandle } from "../lib/marketdata/types";
-import { classifyMarketDataError } from "../lib/marketDataErrors";
+import {
+  classifyMarketDataError,
+  isMarketDataErrorReason,
+  RETRYABLE_REASONS,
+} from "../lib/marketDataErrors";
 import { toConsoleAscii } from "../lib/consoleFormat";
 import {
   buildQualityReport,
@@ -568,6 +572,9 @@ export class MarketDataSyncService {
         failures,
         qualityReports: [],
         qualityMode: opts.qualityMode,
+        // Discovery gescheitert ⇒ kein Vergleich möglich (der
+        // Discovery-Failure selbst ist bereits laut genug).
+        orphanedInstruments: 0,
       });
     }
 
@@ -666,7 +673,9 @@ export class MarketDataSyncService {
     // Instrumente werden aber nicht synchronisiert; ihre Ticker-Lücke ist kein
     // Fehler des Laufs. Vorher meldete ein Lauf mit 250 Instrumenten
     // „754 failures“. Die Ursache wird aus dem Originalfehler klassifiziert
-    // (Netzwerk/5xx/429 ⇒ wiederholbar) statt pauschal SCHEMA_MISMATCH.
+    // (Netzwerk/5xx/429 ⇒ wiederholbar) bzw. aus dem `code`-Marker des
+    // Reports (INVALID_SYMBOL/NOT_FOUND/…) übernommen — pauschales
+    // SCHEMA_MISMATCH nur noch als letzter Fallback ohne `cause`/`code`.
     // Bewusst OHNE instrumentId: eine Volumen-Lücke ist Data-Quality, kein
     // Historien-Fetch-Fehler — sie gehört nicht ins Instrument-Manifest.
     {
@@ -675,17 +684,7 @@ export class MarketDataSyncService {
       for (const f of tickerReport.failures) {
         if (f.symbol !== "BATCH" && !selectedSymbolSet.has(f.symbol)) continue;
         kept.push(f);
-        if (f.cause !== undefined) {
-          failures.push(this.toFailure("ticker", f.cause, { symbol: f.symbol }));
-          continue;
-        }
-        failures.push({
-          stage: "ticker",
-          symbol: f.symbol,
-          message: `Ticker-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`,
-          reason: "SCHEMA_MISMATCH",
-          retryable: false,
-        });
+        failures.push(this.reportFailureToFailure("ticker", f));
       }
       tickerReport = { ...tickerReport, failures: kept };
     }
@@ -746,13 +745,7 @@ export class MarketDataSyncService {
       }
       orderbookReport = enrich.report;
       for (const f of orderbookReport.failures) {
-        failures.push({
-          stage: "orderbook",
-          symbol: f.symbol,
-          message: `Orderbook-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`,
-          reason: "SCHEMA_MISMATCH",
-          retryable: true,
-        });
+        failures.push(this.reportFailureToFailure("orderbook", f));
       }
     } catch (e) {
       failures.push(this.toFailure("orderbook", e));
@@ -908,6 +901,11 @@ export class MarketDataSyncService {
 
     if (!opts.continueOnError && failures.length > 0) runState.aborted = true;
 
+    // Verwaiste Zeilen: aktive Registry-Sätze der Venue, die (ohne
+    // Allowlist) in der bereinigten Discovery (`usable`) fehlten.
+    const usableIds = new Set(usable.map((i) => i.id));
+    const orphanedInstruments = this.countOrphanedInstruments(key, usableIds, opts.symbolAllowlist !== null);
+
     return this.finalize(key, startedAt, startedAtMs, opts, {
       discovered: discovered.length,
       synced: selected.length,
@@ -922,6 +920,7 @@ export class MarketDataSyncService {
       failures,
       qualityReports,
       qualityMode: opts.qualityMode,
+      orphanedInstruments,
     });
   }
 
@@ -939,6 +938,14 @@ export class MarketDataSyncService {
     for (const line of formatSyncLog(result, opts)) this.logger("info", line);
     const degradedLine = formatDegradedLog(result);
     if (degradedLine) this.logger("warn", degradedLine);
+    // Verwaiste Zeilen: Zähler + Hinweis, NIEMALS Symbole (Security-Politik).
+    if (result.orphanedInstruments !== undefined && result.orphanedInstruments > 0) {
+      this.logger(
+        "warn",
+        `[market-sync] ${key}: ${result.orphanedInstruments} aktive Registry-Zeile(n) fehlten in der Discovery ` +
+          `(verwaist/delistet?) — IDs in der Registry prüfen (Runbook „verwaiste Instrumente“ in docs/MARKET_DATA_PIPELINE.md).`,
+      );
+    }
     if (!opts.continueOnError && result.failures.length > 0) {
       throw new SyncPartialFailureError(key, result.failures);
     }
@@ -954,7 +961,59 @@ export class MarketDataSyncService {
     const venues = [...this.adapters.keys()].sort();
     const out: SyncResult[] = [];
     for (const venue of venues) out.push(await this.syncVenue(venue, options));
+    this.warnUncoveredRegistryVenues(venues);
     return out;
+  }
+
+  /**
+   * Zählt aktive Registry-Zeilen der Venue, die in der Discovery fehlten.
+   * Mit Allowlist ist das Schweigen Absicht (⇒ 0, keine Warnung).
+   */
+  private countOrphanedInstruments(
+    venueKey: string,
+    discoveredIds: ReadonlySet<string>,
+    hasAllowlist: boolean,
+  ): number {
+    if (hasAllowlist) return 0;
+    let orphaned = 0;
+    let page = 1;
+    for (;;) {
+      const result = this.registry.query({ venue: venueKey, pageSize: 500, page });
+      for (const row of result.items) {
+        if (row.status === "active" && !discoveredIds.has(row.id)) orphaned += 1;
+      }
+      if (!result.hasMore) break;
+      page += 1;
+      // Sicherheitsdeckel (praktisch unerreichbar: 500k Zeilen je Venue).
+      if (page > 1000) break;
+    }
+    return orphaned;
+  }
+
+  /**
+   * Warnt über Registry-Venues ganz ohne Sync-Abdeckung (kein Adapter im
+   * Lauf): Deren Zeilen bekommen nie Kerzen/Metriken — der häufigste Grund
+   * für einen ewig `WARMING`-bleibenden Scanner nach Teil-Syncs. Zähler +
+   * Venue-Namen (Konfiguration, kein Secret), NIEMALS Symbole.
+   */
+  private warnUncoveredRegistryVenues(syncedVenues: readonly string[]): void {
+    const covered = new Set(syncedVenues.map((v) => v.toUpperCase()));
+    const uncovered: Array<{ venue: string; count: number }> = [];
+    for (const [venue, count] of Object.entries(this.registry.countByVenue())) {
+      if (!covered.has(venue.toUpperCase()) && count > 0) uncovered.push({ venue, count });
+    }
+    if (uncovered.length === 0) return;
+    const total = uncovered.reduce((a, u) => a + u.count, 0);
+    const venues = uncovered
+      .sort((a, b) => (a.venue < b.venue ? -1 : 1))
+      .map((u) => u.venue)
+      .join(", ");
+    this.logger(
+      "warn",
+      `[market-sync] verwaiste Instrumente: ${total} Registry-Zeile(n) ohne Sync-Abdeckung ` +
+        `(Venue(n): ${venues} — Adapter per <VENUE>_ENABLED freischalten oder MARKET_SYNC_VENUES prüfen; ` +
+        `Runbook „verwaiste Instrumente“ in docs/MARKET_DATA_PIPELINE.md).`,
+    );
   }
 
   /**
@@ -1012,12 +1071,16 @@ export class MarketDataSyncService {
           outcome.policyExcluded += 1;
           continue;
         }
+        // Validierungs-Ablehnung der Registry (VALIDATION_ERROR & Co.): Der
+        // Instrument-Datensatz ist unbrauchbar — das ist eine
+        // Symbol-/Datensatz-Ursache (INVALID_SYMBOL), kein Schema-Bruch der
+        // Venue-Antwort. Der Original-`code` bleibt in der Meldung lesbar.
         failures.push({
           stage: "upsert",
           instrumentId,
           symbol,
           message: `Registry-Ablehnung (${String(rejected.code).slice(0, 32)}): ${sanitizeSyncErrorMessage(rejected.message)}`,
-          reason: "SCHEMA_MISMATCH",
+          reason: "INVALID_SYMBOL",
           retryable: false,
         });
       }
@@ -1215,6 +1278,7 @@ export class MarketDataSyncService {
       failures: SyncFailure[];
       qualityReports: QualitySeriesReport[];
       qualityMode: QualityMode;
+      orphanedInstruments: number;
     },
   ): SyncResult {
     // Qualitäts-Report (GAP-07): aus den Reihen-Berichten den Gesamt-Report
@@ -1268,6 +1332,9 @@ export class MarketDataSyncService {
       discovered: stats.discovered,
       synced: stats.synced,
       skipped: stats.skipped,
+      // Nur bei Befund gesetzt (verwaiste Zeilen) — sonst bleibt das Feld
+      // weg (JSON-Contract stabil, keine `0`-Zeilen in bestehenden Reports).
+      ...(stats.orphanedInstruments > 0 ? { orphanedInstruments: stats.orphanedInstruments } : {}),
       tickersEnriched: stats.tickersEnriched,
       orderbooksEnriched: stats.orderbooksEnriched,
       spreadsUnknown: stats.spreadsUnknown,
@@ -1282,6 +1349,44 @@ export class MarketDataSyncService {
       // bewusst an echten Fetch-Fehlern gekoppelt — ein Qualitätsbefund im
       // `log`-Modus degradiert den Lauf nicht (sichtbar machen, nicht bremsen).
       ...(qualityReport.totals.series > 0 ? { qualityReport } : {}),
+    };
+  }
+
+  /**
+   * Enrichment-Report-Eintrag → Sync-Failure ohne Fehlklassifikation.
+   *
+   * Priorität: `cause` (Originalfehler ⇒ `classifyMarketDataError`) vor
+   * `code` (Taxonomie-Marker des Reports: INVALID_SYMBOL, NOT_FOUND,
+   * SCHEMA_MISMATCH für lokale Kappen/Datenform-Befunde). Nur wenn beides
+   * fehlt, greift der historische SCHEMA_MISMATCH-Fallback (non-retryable).
+   * Insbesondere wird ein Depth-Fehler mit Netzwerk-/5xx-/429-Ursache als
+   * wiederholbar erkannt — vorher war jeder Orderbook-Fehler pauschal
+   * `SCHEMA_MISMATCH` (und fälschlich immer `retryable: true`).
+   */
+  private reportFailureToFailure(
+    stage: "ticker" | "orderbook",
+    f: { symbol: string; reason: string; cause?: unknown; code?: string },
+  ): SyncFailure {
+    if (f.cause !== undefined) {
+      return this.toFailure(stage, f.cause, { symbol: f.symbol });
+    }
+    const label = stage === "ticker" ? "Ticker" : "Orderbook";
+    const message = `${label}-Enrichment fehlgeschlagen: ${sanitizeSyncErrorMessage(f.reason)}`;
+    if (f.code !== undefined && isMarketDataErrorReason(f.code)) {
+      return {
+        stage,
+        symbol: f.symbol,
+        message,
+        reason: f.code,
+        retryable: RETRYABLE_REASONS.has(f.code),
+      };
+    }
+    return {
+      stage,
+      symbol: f.symbol,
+      message,
+      reason: "SCHEMA_MISMATCH",
+      retryable: false,
     };
   }
 

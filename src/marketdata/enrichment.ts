@@ -47,9 +47,12 @@ export interface EnrichmentReport {
    * Fehler je Symbol mit Begründung (Sync läuft weiter). `cause` trägt das
    * ursprüngliche Fehlerobjekt (HTTP-Status/Code), damit der Sync die
    * Ursache ehrlich klassifizieren kann (NETWORK/UPSTREAM_5XX/…) statt
-   * pauschal „SCHEMA_MISMATCH“ zu melden.
+   * pauschal „SCHEMA_MISMATCH“ zu melden. Wo es kein Fehlerobjekt gibt
+   * (Allowlist-Verletzung, Symbol-Guard, lokale Kappen), trägt `code` die
+   * Taxonomie-Klasse direkt (`INVALID_SYMBOL`, `NOT_FOUND`,
+   * `SCHEMA_MISMATCH`) — `cause` hat bei der Abbildung Vorrang vor `code`.
    */
-  failures: Array<{ symbol: string; reason: string; cause?: unknown }>;
+  failures: Array<{ symbol: string; reason: string; cause?: unknown; code?: string }>;
 }
 
 /** Optionen der Orderbook-Stage. */
@@ -191,7 +194,7 @@ export async function enrichWithTickers(
   const attempted = cappedInstruments.length;
   const volumeBySymbol = new Map<string, number | null>();
   const missing: string[] = [];
-  const failures: Array<{ symbol: string; reason: string; cause?: unknown }> = [];
+  const failures: EnrichmentReport["failures"] = [];
 
   if (attempted === 0) {
     return {
@@ -207,7 +210,7 @@ export async function enrichWithTickers(
     if (!safe) {
       volumeBySymbol.set(inst.symbol, null);
       missing.push(inst.id ?? inst.symbol);
-      failures.push({ symbol: inst.symbol, reason: "INVALID_SYMBOL" });
+      failures.push({ symbol: inst.symbol, reason: "INVALID_SYMBOL", code: "INVALID_SYMBOL" });
       continue;
     }
     validInstruments.push(inst);
@@ -229,6 +232,7 @@ export async function enrichWithTickers(
     quoteVol?: number | null;
     failure?: string;
     cause?: unknown;
+    code?: string;
   }> => {
     try {
       const t = await adapter.getTicker(inst.symbol);
@@ -239,11 +243,16 @@ export async function enrichWithTickers(
           quoteVol: (t as { quoteVol?: unknown })?.quoteVol as number | null,
         };
       }
+      // Symbol-Guard: eine fremde Zeile ist eine Schema-Abweichung der
+      // Venue-Antwort, ein fehlender Ticker ein NOT_FOUND — beides ohne
+      // Fehlerobjekt, daher als `code` markiert (kein pauschales
+      // SCHEMA_MISMATCH im Sync mehr nötig).
       return {
         symbol: inst.symbol,
         failure: sym
           ? `Ticker-Antwort enthält anderes Symbol ${sym} — volume24h bleibt unbekannt`
           : "Kein Ticker für das Symbol verfügbar — volume24h bleibt unbekannt",
+        code: sym ? "SCHEMA_MISMATCH" : "NOT_FOUND",
       };
     } catch (e) {
       return {
@@ -262,6 +271,7 @@ export async function enrichWithTickers(
       quoteVol?: number | null;
       failure?: string;
       cause?: unknown;
+      code?: string;
     }>,
   ): void => {
     for (const result of results) {
@@ -270,6 +280,7 @@ export async function enrichWithTickers(
           symbol: result.symbol,
           reason: result.failure,
           ...(result.cause !== undefined ? { cause: result.cause } : {}),
+          ...(result.code !== undefined ? { code: result.code } : {}),
         });
       } else if (!tickerMap.has(result.symbol)) {
         tickerMap.set(result.symbol, { quoteVol: result.quoteVol ?? null });
@@ -287,6 +298,7 @@ export async function enrichWithTickers(
         failures.push({
           symbol: "BATCH",
           reason: `Ticker-Response gekappt: ${rows.length} > ${MAX_RESPONSE_ROWS} Zeilen (Payload-Schutz).`,
+          code: "SCHEMA_MISMATCH",
         });
       }
       // Die Batch-Kappe schützt vor UNANGEFORDERTEN Massen-Payloads. Zeilen,
@@ -302,6 +314,7 @@ export async function enrichWithTickers(
         failures.push({
           symbol: "BATCH",
           reason: `Ticker-Batch gekappt: ${rows.length} > ${tickerBatchCap} (maxTickerBatch).`,
+          code: "SCHEMA_MISMATCH",
         });
       }
       const cappedRows = rows.slice(0, tickerBatchCap);
@@ -429,7 +442,7 @@ export async function enrichWithOrderBooks(
   const attempted = cappedInstruments.length;
   const spreadBySymbol = new Map<string, number | null>();
   const missing: string[] = [];
-  const failures: Array<{ symbol: string; reason: string }> = [];
+  const failures: EnrichmentReport["failures"] = [];
 
   if (attempted === 0) {
     return {
@@ -445,7 +458,7 @@ export async function enrichWithOrderBooks(
     if (!safe) {
       spreadBySymbol.set(inst.symbol, null);
       missing.push(inst.id ?? inst.symbol);
-      failures.push({ symbol: inst.symbol, reason: "INVALID_SYMBOL" });
+      failures.push({ symbol: inst.symbol, reason: "INVALID_SYMBOL", code: "INVALID_SYMBOL" });
       continue;
     }
     validInstruments.push(inst);
@@ -529,14 +542,17 @@ export async function enrichWithOrderBooks(
             e instanceof Error
               ? e.message.slice(0, 120)
               : String(e).slice(0, 120);
-          return { symbol, spread: null as number | null, ok: false, reason };
+          // `cause` durchreichen: Der Sync klassifiziert daraus die echte
+          // Ursache (NETWORK/UPSTREAM_5XX/RATE_LIMITED/…) statt pauschal
+          // SCHEMA_MISMATCH zu melden (Fehlklassifikations-Fix).
+          return { symbol, spread: null as number | null, ok: false, reason, cause: e };
         }
       }
       const reason =
         lastError instanceof Error
           ? lastError.message.slice(0, 120)
           : String(lastError ?? "unknown").slice(0, 120);
-      return { symbol, spread: null as number | null, ok: false, reason };
+      return { symbol, spread: null as number | null, ok: false, reason, cause: lastError };
     },
   );
 
@@ -551,11 +567,18 @@ export async function enrichWithOrderBooks(
       const inst = validInstruments.find((i) => i.symbol === res.symbol);
       missing.push(inst?.id ?? res.symbol);
       if (!res.ok && res.reason) {
-        failures.push({ symbol: res.symbol, reason: res.reason });
+        failures.push({
+          symbol: res.symbol,
+          reason: res.reason,
+          ...("cause" in res && res.cause !== undefined && res.cause !== null ? { cause: res.cause } : {}),
+        });
       } else if (res.reason === "IMPLAUSIBLE_SPREAD") {
+        // Datenform-Befund (kein Abruf-Fehler): als SCHEMA_MISMATCH markiert,
+        // nicht retryable — ein Retry lieferte dasselbe unplausible Buch.
         failures.push({
           symbol: res.symbol,
           reason: "IMPLAUSIBLE_SPREAD > 50%",
+          code: "SCHEMA_MISMATCH",
         });
       }
     }

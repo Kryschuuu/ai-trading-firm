@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.58.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.59.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,59 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.59.0] — 2026-09-21 · Multi-Venue-Market-Data-Sync (alle 6 Venues) + Warnung vor verwaisten Instrumenten
+
+### Hinzugefügt
+
+- **Sync-Adapter für alle Venues (`src/marketdata/adapters/`):** `BINANCE`
+  und `KRAKEN` (öffentliche REST-APIs, credential-frei), `ALPACA`/`IBKR`/
+  `PAPER` über eine Yahoo-Finance-Fassade (Aktien/Underlyings) bzw. das
+  Binance-Bein (PAPER-Krypto) — jeweils mit Env-Gate (`<VENUE>_ENABLED`),
+  host-autoritativen Token-Buckets (kein Bucket-Doppelverbrauch über
+  Venues) und striktem Public-only-Pfad (keine Credentials, keine
+  Order-/Account-Endpunkte im Sync).
+- **Gemeinsamer `SyncHttpClient` (`adapters/http.ts`):** ein Fetch-Pfad für
+  alle neuen Adapter — Retry mit Backoff (429/5xx), Timeout/Abbruch,
+  Fehlerklassifizierung (`MarketDataErrorReason`, inkl. `SCHEMA_MISMATCH`
+  bei unerwarteten Venue-Antworten) und Secret-Redaction in Fehlern/Logs.
+- **Warnung vor verwaisten Instrumenten (statt stillem `WARMING`):**
+  `SyncResult.orphanedInstruments` (nur bei Befund gesetzt) + zwei
+  Warnungen — aktive Registry-Zeilen, die in der Discovery fehlten, und
+  Registry-Venues ganz ohne Sync-Abdeckung — plus Runbook-Sektion
+  „Verwaiste Instrumente“ in `docs/MARKET_DATA_PIPELINE.md` (§8). Mit
+  `symbolAllowlist` ist Schweigen Absicht (kein Zähler, keine Warnung);
+  gekappte (`maxInstruments`) Zeilen zählen nicht als verwaist.
+- **Integrationssuite 26 Seeds → `READY`
+  (`src/marketdata/__tests__/sync.venues.integration.test.ts`):** belegt
+  Ende-zu-Ende, dass Discovery→Enrichment→Backfill→Readiness für alle
+  Venues funktioniert — 26 Seed-Instrumente erhalten je ≥ 61 1h-Kerzen mit
+  Volumen/Spread, der Scanner kippt von `WARMING` auf `READY`; dazu
+  Venue-Isolation (Yahoo-404 reißt Binance nicht mit).
+
+### Geändert
+
+- **`registerAdapters`/`AdapterRegistry` kennen 6 Sync-Venues
+  (`KNOWN_SYNC_VENUES`):** der Gate-Report `skipped` listet jetzt für jede
+  bekannte Venue einen symbolischen Grund (`VENUE_DISABLED`,
+  `CAPABILITY_DISABLED`, …) statt nur BITUNIX; `AdapterRegistry.known()`
+  ist der filterunabhängige Venue-Katalog.
+- **Enrichment-Stages sind chunked und fehlerisoliert:** Bulk-Ticker laufen
+  in URL-sicheren Chunks (Regression: hunderte Einzel-Calls mit
+  `SCHEMA_MISMATCH`-Folgefehlern), ein fehlgeschlagener Chunk reißt die
+  übrigen nicht mit; Ticker/Orderbook/Candles-Fehler landen klassifiziert
+  im `SyncResult` (Instrument isoliert, Lauf geht weiter).
+
+### Behoben
+
+- **SCHEMA_MISMATCH-Root-Cause im Sync-Pfad:** ungechunkte Bulk-Requests
+  und still verschluckte Enrichment-Fehler produzierten leere Metriken und
+  ewiges `WARMING`; Adapter validieren Venue-Antworten jetzt gegen
+  explizite Schemata, Befunde sind benannt (`reason`), gezählt und im
+  Fehler-Manifest sichtbar.
+- **Gate-Report-Vertrag an 6 Venues angepasst:** bestehende BITUNIX-Gate-
+  und Registry-Tests pinnen jetzt den vollständigen `skipped`-Report
+  (`VENUE_DISABLED` je Venue) bzw. den 6-eintragigen `known()`-Katalog.
 
 ## [1.58.0] — 2026-09-21 · Event-Replay mit realistischen Friktionen (RMA-P1-01)
 
