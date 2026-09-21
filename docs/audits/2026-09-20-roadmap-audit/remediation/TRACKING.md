@@ -24,7 +24,7 @@ codebasierten Detailbefund.
 | Rang | Finding | Status | Warum gate-relevant |
 |---:|---|---|---|
 | 1 | [RMA-P1-05](../findings/RMA-P1-05-lifecycle-drift.md) | OPEN | Keine evidenzbasierte Promotion/Degradation zwischen Backtest, Paper und Live |
-| 2 | [RMA-P1-02](../findings/RMA-P1-02-walk-forward-training.md) | PARTIAL | OOS ist Replay, nicht Train-Select-Freeze-Test |
+| 2 | [RMA-P1-02](../findings/RMA-P1-02-walk-forward-training.md) | FIXED (v1.60.0) | IS-only Train-Select-Freeze, OOS mit eingefrorener ID, finaler Holdout, append-only Freeze-Artefakte |
 | 3 | [RMA-P1-04](../findings/RMA-P1-04-backtest-trades.md) | FIXED (v1.52.0) | Trade-Level-Wahrheitsquelle `backtest_trades` vorhanden: atomar mit dem Run geschrieben, abgeglichen, idempotent, paginiert abfragbar |
 
 ## Roadmap-Status
@@ -32,7 +32,7 @@ codebasierten Detailbefund.
 | ID | Komponente | Status | Prompt | PR | Commit | Fix-Version | Testevidenz |
 |---|---|---|---|---|---|---|---|
 | RMA-P1-01 | Event-Replay/Friktionen | FIXED | [P1-01](../prompts/PROMPT-P1-01-event-replay-frictions.md) | [#155](https://github.com/Kryschuuu/ai-trading-firm/pull/155) | `5ad77f8` | v1.58.0 | `tests/backtest.replay.test.ts` (28: Golden Replay Bar+Latenz+2 Partial Fills+Fee+Funding mit exakt nachgerechneter Cash/PnL, Determinismus Event-/Trade-/Metrik-Hash + byte-identischer Walk-Forward, Depth-Fallbacks fehlend/stale/ohne Volumen ⇒ kein Fill, Mengen-Guards ≤ Depth/Orderrest/Position, Funding nie vor Entry/nach Exit/vor availableAt/auf Spot, Negative Paths + kanonische Sortierung, perp_funding_rates-Konvertierung, WF-Persistenz inkl. Ledger-Reconciliation + Idempotency-Key-Abgrenzung, Performance 2 Jahre Stundenkerzen < 10 s); Legacy-/Paper-Regressionen unverändert grün; typecheck/lint/docs:validate grün, npm test 2851 pass / 0 fail |
-| RMA-P1-02 | 90d/30d Walk-Forward | PARTIAL | [P1-02](../prompts/PROMPT-P1-02-walk-forward-training.md) | — | — | — | Auditbefund |
+| RMA-P1-02 | 90d/30d Walk-Forward | FIXED | [P1-02](../prompts/PROMPT-P1-02-walk-forward-training.md) | [#157](https://github.com/Kryschuuu/ai-trading-firm/pull/157) | `a0e17df` | v1.60.0 | `tests/backtest.walkforward.training.test.ts` (5), gezielte Backtest-/Ledger-Regression (48 pass, 11 DB-Skips), typecheck/lint/docs:validate grün; `npm test` auf Nutzeranweisung übersprungen |
 | RMA-P1-03 | Backtest-Kennzahlen | VERIFIED | — | — | `df3163e` + QA-01-Fix | v1.51.3 | Kennzahltests + QA-01-Regression |
 | RMA-P1-04 | Persistente Backtest-Trades | FIXED | [P1-04](../prompts/PROMPT-P1-04-backtest-trades.md) | [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149) | `88161dc` | v1.52.0 | `tests/backtest.tradeLedger.test.ts` (26 Tests: Mapping, Abgleich, Rollback bei Trade N, Idempotenz sequentiell + parallel, Aggregate/Hash aus DB-Zeilen, API Limit/Cursor/404/400), `tests/backtest.engine.test.ts` grün; typecheck/lint/docs:validate grün |
 | RMA-P1-05 | Lifecycle/Drift | OPEN | [P1-05](../prompts/PROMPT-P1-05-lifecycle-drift.md) | — | — | — | Auditbefund |
