@@ -36,6 +36,10 @@
  *   llm_latency_ms_sum         Summe der LLM-Latenzen je Provider (ms)
  *   backtest_run_persist_total persistierte Backtest-Runs je result/reason
  *                              (RMA-P1-04: created | replayed | failed)
+ *   backtest_replay_runs_total Event-Replay-Läufe je result/degraded
+ *                              (RMA-P1-01: ok × none | degraded)
+ *   backtest_replay_degraded_total degradierte Replay-Annahmen je reason
+ *                              (geschlossenes Vokabular ReplayDegradedReason)
  *
  * Fehlertoleranz (Betriebsregel): Ist der Firmenzustand nicht lesbar
  * (z. B. DB weg, Ledger noch nicht hydratisiert), werden die betroffenen
@@ -248,8 +252,21 @@ export const telemetry = {
    */
   backtest: {
     runPersist: new LabelCounter("backtest_run_persist_total"),
+    /**
+     * Event-Replay-Läufe (RMA-P1-01, v1.58.0): `result` = ok,
+     * `degraded` = none | degraded (Lauf enthält degradierte Annahmen).
+     * Keine Instrument-/Run-IDs als Label (Kardinalitätsregel oben).
+     */
+    replayRuns: new LabelCounter("backtest_replay_runs_total"),
+    /**
+     * Degradierte Replay-Annahmen je Grund — `reason` stammt aus dem
+     * GESCHLOSSENEN Vokabular `ReplayDegradedReason` (bounded, kein Freitext).
+     */
+    replayDegraded: new LabelCounter("backtest_replay_degraded_total"),
     reset(): void {
       telemetry.backtest.runPersist.reset();
+      telemetry.backtest.replayRuns.reset();
+      telemetry.backtest.replayDegraded.reset();
     },
   },
   /**
@@ -488,6 +505,8 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.audit.spoolDrained.exposition(),
     telemetry.audit.missed.exposition(),
     telemetry.backtest.runPersist.exposition(),
+    telemetry.backtest.replayRuns.exposition(),
+    telemetry.backtest.replayDegraded.exposition(),
     telemetry.executionQuality.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),

@@ -12,18 +12,23 @@ import type { RuleSpec } from "../lib/ruleEngine";
 import type { TradeSetupProposal } from "../cycle/schemas";
 import type { CandleLike } from "../lib/ruleEngine";
 import type { PaperBacktestOptions } from "./paperExecution";
+import type { EventReplayOptions, EventReplayRunSummary } from "./replayEvents";
 
 export type SlippageModel = "fixed" | "spread_relative" | "none";
 
 /**
- * Ausführungspfad der Engine (GAP-01, v1.51.0):
+ * Ausführungspfad der Engine (GAP-01, v1.51.0; RMA-P1-01, v1.58.0):
  *   - `"legacy"` — der eingefrorene Task-02-Simulator (`./simulator.ts`).
  *     Default (Byte-kompatibel zu allen bestehenden Tests/Läufen).
  *   - `"paper"` — DERSELBE `FillSimulator` wie der PaperBroker
- *     (`./paperExecution.ts`) + Funding-Accrual. Pflicht für
+ *     (`./paperExecution.ts`) + Funding-Accrual. Default für
  *     Walk-Forward-Runs (vergleichbar persistiert).
+ *   - `"event_replay"` — deterministischer Event-Replayer mit Order-
+ *     Lifecycle (Partial Fills + Restmenge), Latenz, Depth-Impact und
+ *     punktgenauen Funding-Ereignissen (`./replayExecution.ts`).
+ *     Explizites Opt-in — kein bestehender Lauf wechselt still den Pfad.
  */
-export type BacktestExecutionModel = "legacy" | "paper";
+export type BacktestExecutionModel = "legacy" | "paper" | "event_replay";
 
 /** Konfigurationsparameter für einen Backtest-Lauf. */
 export interface BacktestEngineConfig {
@@ -63,6 +68,12 @@ export interface BacktestEngineConfig {
   executionModel: BacktestExecutionModel;
   /** Kostenprofil des `"paper"`-Pfads (nur dort gelesen). */
   paper?: PaperBacktestOptions;
+  /**
+   * Friktions-/Eventkonfiguration des `"event_replay"`-Pfads (RMA-P1-01,
+   * v1.58.0; nur dort gelesen): Latenz, Impact, Depth-/Quote-/Funding-
+   * Ereignisse, Order-TTL, Seed. Siehe `./replayEvents.ts`.
+   */
+  replay?: EventReplayOptions;
 }
 
 /** Teilkonfiguration für Aufrufer mit sinnvollen Defaults. */
@@ -92,6 +103,17 @@ export interface BacktestOpenPosition {
    * Optional = Legacy-Läufe ohne Funding (0-Semantik).
    */
   fundingPaid?: number;
+  /**
+   * Partial-Exit-Buchhaltung (RMA-P1-01, v1.58.0; nur `"event_replay"`-Pfad —
+   * Legacy/Paper lassen die Felder weg und schließen weiterhin atomar):
+   * kumulierte geschlossene Menge, Exit-Erlös (Σ qty×price), realisierter
+   * Brutto-PnL der geschlossenen Menge sowie Exit-Gebühren/-Slippage.
+   */
+  closedQty?: number;
+  exitNotional?: number;
+  realizedGrossPnl?: number;
+  exitFees?: number;
+  exitSlippage?: number;
 }
 
 /** Grund für die Schließung eines Trades. */
@@ -208,6 +230,13 @@ export interface StrategyBacktestStats {
 /** Gesamtergebnis eines Multi-Asset-Backtests. */
 export interface MultiAssetBacktestResult {
   executionQuality?: import("../executionQuality/model").Batch[];
+  /**
+   * Replay-Evidenz des `"event_replay"`-Pfads (RMA-P1-01, v1.58.0):
+   * Datenmanifest, aufgelöste Friktionskonfiguration, Event-Coverage,
+   * degradierte Annahmen, Order-Eventlog und Fill-/Funding-Details je
+   * Trade. Fehlt bei `"legacy"`/`"paper"` (additiv, kein Bruch).
+   */
+  replay?: EventReplayRunSummary;
   config: BacktestEngineConfig;
   symbols: string[];
   timeframe: SupportedTimeframe;

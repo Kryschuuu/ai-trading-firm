@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.57.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.58.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,88 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.58.0] — 2026-09-21 · Event-Replay mit realistischen Friktionen (RMA-P1-01)
+
+### Hinzugefügt
+
+- **Dritter Ausführungspfad `executionModel: "event_replay"`
+  (`src/backtest/replayEvents.ts` + `src/backtest/replayExecution.ts`,
+  Friktionsmodell-Version `er1`):** deterministischer Event-Replayer für
+  Markt-, Funding- und Order-Lifecycle-Ereignisse in Ereigniszeit —
+  explizites Opt-in, `legacy` bleibt Default und `paper` bleibt
+  byte-identisch (kein bestehender Lauf wechselt still den Pfad).
+- **Kanonischer Eventvertrag:** diskriminierte Union
+  `MARKET_BAR | MARKET_QUOTE | MARKET_DEPTH | FUNDING_DUE` (Input) und
+  `ORDER_SUBMITTED | ORDER_ACK | ORDER_REJECT | ORDER_PARTIAL_FILL |
+  ORDER_FILL | ORDER_CANCEL` (erzeugtes Eventlog) mit dokumentierter
+  stabiler Sortierung (`eventTime ↑` → Typ-Priorität → Symbol →
+  Einfüge-Reihenfolge). Jedes Input-Ereignis trennt `eventTime` und
+  `availableAt`; sichtbar erst ab `availableAt ≤ Simulationszeit` (kein
+  Look-ahead, auch nicht für Kosten); `availableAt < eventTime` und nicht
+  endliche Werte werden fail-closed abgewiesen (`replay:invalid-event`).
+- **Zeit- und Latenzmodell:** vier getrennte Zeiten je Order
+  (`decisionTime → submitTime → arrivalTime → fillTime(s)`), Latenz
+  konfigurierbar (`decisionToSubmitMs`/`submitToArrivalMs`, ≥ 0 erzwungen,
+  `replay:invalid-config` sonst); Fills frühestens auf der ersten Kerze mit
+  `time ≥ arrivalTime`.
+- **Fill-/Impact-Modell mit Order-Lifecycle:** verfügbare Menge aus
+  historischer `MARKET_DEPTH` (Staleness-Deckel `maxDepthAgeMs`),
+  dokumentierter konservativer Fallback `bar.volume ×
+  maxBarVolumeParticipation`, ohne Liquiditätsdaten KEIN Fill
+  (`NO_LIQUIDITY_DATA_NO_FILL`). Size-abhängiger Impact
+  (`impactBps = impactBpsPerParticipation × Partizipation`), Gebühren und
+  Slippage nur auf tatsächlich gefüllte Mengen. Partial-Exit lässt die
+  Position mit Restmenge OFFEN (vorher: jeder Exit galt als Vollschluss —
+  Kern des Findings); Restmengen verfallen nach `orderTtlBars`
+  (`ORDER_CANCEL`). Fillmenge überschreitet nie Depth, Orderrestmenge oder
+  offene Positionsmenge (`BacktestPortfolio.increasePosition`/
+  `applyPartialExit`/`finalizeReplayPosition`, Exit-Preis = Fill-VWAP).
+- **Punktgenaues Funding:** `FUNDING_DUE`-Ereignisse (Venue, Instrument,
+  signierte `ratePer8h`, `intervalHours` 1..24) werden nur für zum
+  Settlement-Zeitpunkt offene Perp-Positionen gebucht — dieselbe Formel
+  (`computeFunding`) und Vorzeichenkonvention (Kontosicht: negativ =
+  gezahlt) wie der Paper-Betrieb; Funding vor Entry/nach Exit wird nie
+  gebucht, fehlende Ereignisse werden nie still durch einen statischen Satz
+  ersetzt. `perpFundingRowsToReplayEvents`
+  (`src/backtest/replayFunding.ts`) übersetzt kanonische
+  `perp_funding_rates`-Zeilen as-of `available_at` in Ereignisse.
+- **Reproduzierbarkeit:** `result.replay` trägt Datenmanifest
+  (sha256 über Kerzen + kanonische Events), aufgelöste
+  Friktionskonfiguration inkl. Seed + Modellversion, Event-Coverage,
+  degradierte Annahmen (geschlossenes Vokabular `ReplayDegradedReason`),
+  gedeckeltes Order-Eventlog und Fill-/Funding-/Impact-Details je Trade.
+  Walk-Forward: `report.replayEvidence` + `costProfile.frictionModelVersion`
+  (geht in den Idempotency-Key ein — Modellwechsel ist nie ein Replay);
+  Persistenz additiv in `params_json.replayEvidence` und
+  `provenance_json.replay` je Trade-Zeile (max. 64 Fills, `truncated`-Flag).
+  Keine neue Migration nötig (JSON-Spalten, Alt-Runs unverändert lesbar).
+- **CLI:** `scripts/run-backtest.ts` mit `--execution-model=event_replay`,
+  `--replay-latency-ms`, `--replay-seed`; lädt `FUNDING_DUE`-Ereignisse aus
+  der Perp-Historie (`PERP_DATA_ENABLED=true`), meldet Replay-Evidenz und
+  degradierte Annahmen in Konsole und MD-Artefakt.
+- **Observability:** bounded Metriken
+  `backtest_replay_runs_total{result,degraded}` und
+  `backtest_replay_degraded_total{reason}` (Gründe = geschlossene Union,
+  keine Instrument-/Order-IDs als Label); Audit-Event
+  `BACKTEST_RUN_PERSISTED` trägt zusätzlich `executionModel` +
+  `frictionModelVersion`.
+- **Tests (`tests/backtest.replay.test.ts`, 28 Tests):** Golden Replay
+  (Bar + Latenz + zwei Partial Fills + Fee + Funding ⇒ unabhängig
+  nachgerechnete exakte Cash-/PnL-Werte), Determinismus (identischer
+  Event-/Trade-/Metrik-Hash), Depth-Fallback fehlend/stale/ohne Volumen,
+  Mengen-Guards, Funding vor Entry/nach Exit/Look-ahead/Spot, Negative
+  Paths für invalide Events/Config, kanonische Sortierung, Perp-Historie-
+  Konvertierung, Walk-Forward-Persistenz-Verdrahtung inkl.
+  Ledger-Reconciliation und Idempotency-Key-Abgrenzung, Performance-Deckel
+  (2 Jahre Stundenkerzen < 10 s).
+
+### Kompatibilität
+
+- Rein additiv: `legacy` bleibt Engine-Default, `paper` bleibt
+  Walk-Forward-Default und byte-identisch; alte gespeicherte Runs werden
+  nicht uminterpretiert (`params_json.costProfile.executionModel`
+  unterscheidet die Semantik je Run). Rollback = Opt-in-Flag nicht setzen.
 
 ## [1.57.0] — 2026-09-21 · Deterministische Trade-PnL-Attribution (RMA-P1-06)
 

@@ -150,6 +150,12 @@ export interface TradeProvenance {
   ruleSignature: string;
   executionModel: string;
   simulatorSeed: number;
+  /**
+   * Fill-/Funding-/Impact-Details des `event_replay`-Pfads (RMA-P1-01,
+   * v1.58.0; additiv — fehlt bei `legacy`/`paper`-Zeilen). Bounded:
+   * höchstens `REPLAY_TRADE_MAX_FILLS` Fills je Trade (`truncated`-Flag).
+   */
+  replay?: import("./replayEvents").TradeReplayDetail;
 }
 
 /**
@@ -311,6 +317,7 @@ export function mapTradeRecordToRow(
       ruleSignature: ctx.ruleSignature,
       executionModel: ctx.executionModel,
       simulatorSeed: ctx.simulatorSeed,
+      ...(record.replay ? { replay: record.replay } : {}),
     },
   };
 }

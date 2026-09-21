@@ -93,6 +93,11 @@ export function toBacktestRunInsert(
       walkforward: report.walkforward,
       costProfile: report.costProfile,
       createdAt: report.createdAt,
+      // RMA-P1-01 (v1.58.0, additiv): Reproduzierbarkeits-Evidenz des
+      // event_replay-Pfads — Datenmanifest (Input-Hashes), aufgelöste
+      // Friktionskonfiguration (inkl. Seed + Modellversion), Event-Coverage
+      // und degradierte Annahmen. Fehlt bei paper-Läufen (Alt-Semantik).
+      ...(report.replayEvidence ? { replayEvidence: report.replayEvidence } : {}),
     },
     metricsJson: {
       aggregateOos: report.aggregateOos,
@@ -544,6 +549,9 @@ export async function persistBacktestRun(
       oosNetPnl: result.reconciliation.segments.OOS.netPnl,
       idempotencyKey: result.idempotencyKey,
       codeVersion: input.report.codeVersion,
+      // RMA-P1-01 (additiv): Ausführungspfad + Friktionsmodell des Laufs.
+      executionModel: input.report.costProfile.executionModel,
+      frictionModelVersion: input.report.costProfile.frictionModelVersion ?? null,
     },
     { auditClass: "telemetry" }
   );
