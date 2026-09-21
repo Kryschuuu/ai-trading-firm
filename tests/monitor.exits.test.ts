@@ -155,6 +155,19 @@ async function cleanDb(): Promise<void> {
   const rows = await db.select({ id: positions.id }).from(positions).where(like(positions.symbol, `${SYM}%`));
   if (rows.length > 0) {
     const ids = rows.map((r) => r.id);
+    // RMA-P1-06 (v1.57.0): Attribution-Kinder zuerst (FK ohne CASCADE);
+    // best-effort — auf nicht migrierten DBs ist das ein No-op.
+    try {
+      await db.execute(
+        sql`DELETE FROM trade_attribution_entries WHERE attribution_id IN
+            (SELECT id FROM trade_attributions WHERE position_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`,`)}))`
+      );
+      await db.execute(
+        sql`DELETE FROM trade_attributions WHERE position_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`,`)})`
+      );
+    } catch {
+      /* Tabellen fehlen (unmigrierte DB) — kein FK, Löschung unnötig. */
+    }
     await db.delete(tradeJournal).where(sql`${tradeJournal.positionId} in (${sql.join(ids.map((id) => sql`${id}`), sql`,`)})`);
     await db.delete(positions).where(sql`${positions.id} in (${sql.join(ids.map((id) => sql`${id}`), sql`,`)})`);
   }

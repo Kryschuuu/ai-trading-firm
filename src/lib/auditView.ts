@@ -1533,6 +1533,83 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     ],
   },
 
+  JOURNAL_ATTRIBUTED: {
+    label: "Trade-PnL-Attribution erstellt",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Zu einem geschlossenen Trade wurde die deterministische Netto-PnL-Attribution (RMA-P1-06, v1.57.0) berechnet und append-only persistiert: Quellenbeiträge plus Kosten plus Residual ergeben exakt das realisierte Netto-PnL. Die Methode ist eine normierte Aufteilung (DETERMINISTIC_ALLOCATION) auf die im Entry-Snapshot dokumentierten Entscheidungsquellen — keine Kausalanalyse.",
+    headline: (d) =>
+      `Attribution ${text(d.status) ?? "ATTRIBUTED"} · ${num(d.netPnl) ?? "—"} Netto · ${text(d.sources) ?? "0"} Quellen · Residual ${num(d.residual) ?? "—"}`,
+    explain: (d) =>
+      `Beiträge: Quellen ${num(d.sourcesSum) ?? "—"}, Kosten ${num(d.costsSum) ?? "—"}, Residual ${num(d.residual) ?? "—"}` +
+      (Array.isArray(d.unknownCosts) && d.unknownCosts.length > 0
+        ? `. Nicht quantifizierbare Kosten: ${d.unknownCosts.join(", ")} — sie werden NICHT als 0 angenommen.`
+        : ". Alle Kostenkomponenten quantifiziert."),
+    sections: (d) => [
+      {
+        title: "Attribution",
+        facts: [
+          { label: "Journal", value: text(d.journalId) ?? "—", mono: true },
+          { label: "Position", value: text(d.positionId) ?? "—", mono: true },
+          { label: "Methodenversion", value: text(d.methodVersion) ?? "—" },
+          { label: "Netto-PnL", value: num(d.netPnl) !== null ? String(num(d.netPnl)) : "—" },
+          { label: "Quellenbeitrag", value: num(d.sourcesSum) !== null ? String(num(d.sourcesSum)) : "—" },
+          { label: "Kostenbeitrag", value: num(d.costsSum) !== null ? String(num(d.costsSum)) : "—" },
+          { label: "Residual", value: num(d.residual) !== null ? String(num(d.residual)) : "—" },
+          { label: "Quellen", value: text(d.sources) ?? "—" },
+          { label: "Enthaltungen", value: text(d.abstentions) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  JOURNAL_ATTRIBUTION_FAILED: {
+    label: "Trade-Attribution fehlgeschlagen",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Die deterministische PnL-Attribution eines geschlossenen Trades (RMA-P1-06, v1.57.0) konnte nicht berechnet oder persistiert werden — z. B. invalide Eingaben (NaN-PnL) oder ein Datenbankfehler. Der Close des Trades ist bereits sicher abgeschlossen und bleibt unberührt; die Lücke ist hier sichtbar und kann über den Backfill (npm run attribution:backfill) nachgezogen werden.",
+    headline: (d) => `Attribution fehlgeschlagen · Position ${text(d.positionId) ?? "—"} · ${text(d.error) ?? "ohne Meldung"}`,
+    explain: () =>
+      "Für diesen Trade existiert (noch) keine Attribution. Er bleibt in der Coverage-Quote der Auswertung als Lücke sichtbar — nichts wurde geschätzt.",
+    sections: (d) => [
+      {
+        title: "Fehler",
+        facts: [
+          { label: "Position", value: text(d.positionId) ?? "—", mono: true },
+          { label: "Fehler", value: text(d.error) ?? "—" },
+        ],
+      },
+    ],
+  },
+
+  ATTRIBUTION_BACKFILL_RUN: {
+    label: "Attribution-Backfill-Lauf",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Backfill-Lauf der Trade-Attribution (RMA-P1-06, v1.57.0): historische, geschlossene Journal-Zeilen ohne Attribution der Methodenversion werden nachträglich attribuiert — idempotent und in begrenzten Batches. Zeilen ohne ausreichenden Snapshot werden als UNATTRIBUTABLE erfasst (sichtbare Lücke), niemals mit geschätzten Quellen gefüllt.",
+    headline: (d) =>
+      `Backfill (Methode ${text(d.methodVersion) ?? "—"}${d.dryRun ? ", Dry-Run" : ""}) · ${text(d.considered) ?? "0"} geprüft · ${text(d.attributed) ?? "0"} attribuiert · ${text(d.unattributable) ?? "0"} UNATTRIBUTABLE`,
+    explain: (d) =>
+      `Davon Duplikate (bereits attribuiert): ${text(d.duplicates) ?? "0"}, Fehler: ${text(d.failed) ?? "0"}. Wiederholte Läufe schreiben keine zweiten Zeilen (Idempotenz-Schlüssel journal_id + method_version).`,
+    sections: (d) => [
+      {
+        title: "Lauf",
+        facts: [
+          { label: "Methodenversion", value: text(d.methodVersion) ?? "—" },
+          { label: "Geprüfte Zeilen", value: text(d.considered) ?? "—" },
+          { label: "Attribuiert", value: text(d.attributed) ?? "—" },
+          { label: "UNATTRIBUTABLE", value: text(d.unattributable) ?? "—" },
+          { label: "Duplikate", value: text(d.duplicates) ?? "—" },
+          { label: "Fehler", value: text(d.failed) ?? "—" },
+          { label: "Dry-Run", value: d.dryRun ? "ja" : "nein" },
+        ],
+      },
+    ],
+  },
+
   MISSION_CREATED: {
     label: "Mission erstellt",
     category: "mission",

@@ -1146,6 +1146,11 @@ export async function runAgentTurn(
             regime: adaptiveRegime ?? "UNKNOWN",
             source: "ENGINE",
             openedAt: journalPosRef.value.createdAt,
+            // RMA-P1-06 (v1.57.0): exakte Versions-/Datenkette des Entry-
+            // Snapshots — Promptversion des vorschlagenden Agenten + Markt-
+            // Snapshot als Daten-Fingerprint (Point-in-Time, unveränderlich).
+            promptVersion: agent.version,
+            decisionData: snap,
           });
           await recordJournalOpen({
             positionId: journalPosRef.value.id,

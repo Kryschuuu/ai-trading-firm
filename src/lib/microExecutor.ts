@@ -887,6 +887,9 @@ export function createPaperRuleAdapter(opts?: {
               regime,
               source: "MICRO_EXECUTOR",
               openedAt: journalPosRef.value.createdAt,
+              // RMA-P1-06 (v1.57.0): Trigger-Snapshot als Daten-Fingerprint
+              // des Regel-Entscheids (Point-in-Time, unveränderlich).
+              decisionData: ctx.snapshot,
             });
             await recordJournalOpen({
               positionId: journalPosRef.value.id,

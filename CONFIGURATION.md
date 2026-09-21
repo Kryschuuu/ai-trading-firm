@@ -483,6 +483,22 @@ Auswirkung auf den Entscheidungspfad). Details + Sicherheitsbegründung:
 | `JOURNAL_MAX_WEIGHT_DELTA` | `0.1` | Maximale Gewichtsänderung **je Zyklus** — selbst extreme Serien bewegen Gewichte nur schrittweise (Multi-Zyklus-Annäherung, nie Sprung). Bounds [0.01, 0.5]. |
 | `JOURNAL_CANDLES_TIMEFRAME` | `1h` | Kerzen-Intervall für die MAE/MFE-Berechnung (Allowlist = unterstützte Timeframes; ungültig → `1h` + Log-Warnung). Kerzenlücken ⇒ Metriken null + `CANDLE_GAP`-Flag (nie geschätzt). |
 
+### Trade-PnL-Attribution (RMA-P1-06, v1.57.0)
+
+Beim Close eines Trades wird automatisch eine **deterministische Netto-PnL-Attribution**
+berechnet und append-only persistiert: Die Quellenbeiträge (Agenten der
+Entscheidungskette bzw. die auslösende Regel) plus Kostenposten (Gebühren,
+Funding) plus ein **explizites Residual** ergeben **exakt** das realisierte
+Netto-PnL (± 1e-6). Die Methode `ta1` ist eine normierte Aufteilung
+(`DETERMINISTIC_ALLOCATION`) auf die im unveränderlichen Entry-Snapshot
+dokumentierten Quellen — **keine Kausalanalyse**. Spezifikation und Mathematik:
+`src/attribution/README.md`.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `TRADE_ATTRIBUTION_ENABLED` | `true` | Schaltet den automatischen Attribution-Pfad beim Trade-Close ein. Rein additiv — kein Einfluss auf Order-, Risiko- oder Entscheidungspfade; ein Attribution-Fehler blockiert den Close nie (Audit `JOURNAL_ATTRIBUTION_FAILED`). `false` stoppt Close-Attribution UND den Backfill (fail-closed). Unbekannter Wert → `true` + Log-Warnung. |
+| `TRADE_ATTRIBUTION_METHOD_VERSION` | `1` | Methodenversion (Allowlist `[1]` = `ta1`; unbekannt → `1` + Log-Warnung). Ein Wechsel schreibt **neue** Zeilen (Idempotenz-Schlüssel `journal_id` + `method_version`) — historische Ergebnisse bleiben unverändert erhalten. |
+
 Hinweise:
 
 - **Schema:** zwei neue Tabellen `trade_journal` + `journal_agent_weights`
