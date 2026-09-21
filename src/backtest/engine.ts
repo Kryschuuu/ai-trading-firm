@@ -28,6 +28,11 @@ import {
   detectExitTrigger,
   type PaperExecutionRuntime,
 } from "./paperExecution";
+import {
+  createEventReplayRuntime,
+  type EventReplayRuntime,
+  type ReplayBarInfo,
+} from "./replayExecution";
 import { computeBacktestMetrics, computePerStrategyStats, computePerSymbolStats } from "./metrics";
 import {
   buildSnapshotFromCandles,
@@ -42,6 +47,7 @@ import {
   type HistoricalStore,
   type SupportedTimeframe,
 } from "../lib/marketdata/historicalStore";
+import { metricLabel, telemetry } from "../lib/telemetry";
 import type { TradeSetupProposal } from "../cycle/schemas";
 
 /** Standard-Konfiguration der Engine. */
@@ -149,6 +155,19 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       ? createPaperExecutionRuntime(config.paper ?? {}, config.feeModel, SUPPORTED_TIMEFRAME_MS[config.timeframe])
       : null;
 
+  // RMA-P1-01: Event-Replay-Laufzeit (Order-Lifecycle, Latenz, Depth-Impact,
+  // punktgenaues Funding). Validiert alle Input-Ereignisse fail-closed,
+  // BEVOR simuliert wird; wirft `EventReplayError` bei invalider Config.
+  const replay: EventReplayRuntime | null =
+    config.executionModel === "event_replay"
+      ? createEventReplayRuntime({
+          options: config.replay ?? {},
+          engineFeeModel: config.feeModel,
+          barMs: SUPPORTED_TIMEFRAME_MS[config.timeframe],
+          candlesBySymbol: candlesIndexed,
+        })
+      : null;
+
   // 3. Strategien kompilieren & vorbereiten
   const compiledRules = input.strategies.map((item, idx) => {
     if (item.type === "rule") {
@@ -241,8 +260,16 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       symbolPointers.set(sym, ptr);
     }
 
+    // b0) RMA-P1-01: Event-Replay verarbeitet je Zeitschritt Funding-
+    //     Ereignisse, offene Order-Restmengen und Exit-Trigger in EINEM
+    //     deterministischen Durchlauf (Order-Lifecycle mit Partial Fills).
+    if (replay) {
+      const bars: ReadonlyMap<string, ReplayBarInfo> = currentCandleBySymbol;
+      replay.beginBar(currentTime, barStep, bars, currentPrices, portfolio);
+    }
+
     // b) Exits für alle offenen Positionen prüfen (Stop Loss / Take Profit)
-    for (const pos of portfolio.openPositionsList) {
+    for (const pos of replay ? [] : portfolio.openPositionsList) {
       const candleInfo = currentCandleBySymbol.get(pos.symbol);
       if (!candleInfo) continue;
 
@@ -292,6 +319,9 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
         // Guardrails vorab prüfen
         const canOpen = portfolio.canOpenPosition(strat.symbol, currentEquity);
         if (!canOpen.allowed) continue;
+        // RMA-P1-01: eine offene (Teil-)Order zählt wie eine Position —
+        // kein zweiter Entry, solange der Lifecycle des ersten läuft.
+        if (replay && replay.hasPendingOrder(strat.symbol)) continue;
 
         if (strat.type === "rule") {
           const spec = strat.spec;
@@ -317,7 +347,20 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
               spec.action.maxPositionPct
             );
 
-            if (paper) {
+            if (replay) {
+              replay.submitEntry({
+                strategyId: strat.id,
+                symbol: strat.symbol,
+                side: spec.action.side,
+                notional,
+                candle: candleInfo.candle,
+                now: currentTime,
+                barStep,
+                stopLoss,
+                takeProfit,
+                portfolio,
+              });
+            } else if (paper) {
               openPaperEntry(
                 strat.id,
                 strat.symbol,
@@ -360,7 +403,20 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
               config.maxPositionPct
             );
 
-            if (paper) {
+            if (replay) {
+              replay.submitEntry({
+                strategyId: strat.id,
+                symbol: strat.symbol,
+                side: evalItem.side,
+                notional,
+                candle: candleInfo.candle,
+                now: currentTime,
+                barStep,
+                stopLoss: evalItem.stopLoss,
+                takeProfit: evalItem.takeProfit,
+                portfolio,
+              });
+            } else if (paper) {
               openPaperEntry(
                 strat.id,
                 strat.symbol,
@@ -412,27 +468,35 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
 
   // 5. Noch offene Positionen am Ende schließen
   const lastTime = timeline.length > 0 ? timeline[timeline.length - 1] : Date.now();
-  portfolio.closeAllAtEnd(
-    currentPrices,
-    lastTime,
-    barStep,
-    paper
-      ? (pos, price) => {
-          const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
-          const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, price, lastTime, pos.strategyId);
-          // null ⇒ Legacy-Schlussrechnung (defensiv; mit Default-Konfig
-          // unerreichbar, siehe portfolio.closeAllAtEnd).
-          if (!fill) return null;
-          return {
-            triggered: true,
-            exitPrice: fill.fillPrice,
-            reason: "END_OF_DATA" as const,
-            fees: fill.fees,
-            slippage: fill.slippageCost,
-          };
-        }
-      : undefined
-  );
+  if (replay) {
+    // Event-Replay: offene Orders canceln + Positionen deterministisch
+    // zwangsglattstellen (FORCED_FINAL, siehe replayExecution.ts). Der
+    // Legacy-/Paper-Schlusspfad wird NICHT zusätzlich durchlaufen — die
+    // Partial-Exit-Buchhaltung wäre mit `closePosition` nicht kompatibel.
+    replay.finish(lastTime, barStep, currentPrices, portfolio);
+  } else {
+    portfolio.closeAllAtEnd(
+      currentPrices,
+      lastTime,
+      barStep,
+      paper
+        ? (pos, price) => {
+            const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
+            const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, price, lastTime, pos.strategyId);
+            // null ⇒ Legacy-Schlussrechnung (defensiv; mit Default-Konfig
+            // unerreichbar, siehe portfolio.closeAllAtEnd).
+            if (!fill) return null;
+            return {
+              triggered: true,
+              exitPrice: fill.fillPrice,
+              reason: "END_OF_DATA" as const,
+              fees: fill.fees,
+              slippage: fill.slippageCost,
+            };
+          }
+        : undefined
+    );
+  }
 
   // 6. Kennzahlen berechnen
   const metrics = computeBacktestMetrics(
@@ -451,8 +515,22 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
   const fromTime = timeline.length > 0 ? timeline[0] : 0;
   const toTime = timeline.length > 0 ? timeline[timeline.length - 1] : 0;
 
+  // RMA-P1-01: bounded Metriken je Replay-Lauf (Grund-Vokabular ist die
+  // geschlossene `ReplayDegradedReason`-Union — nie Symbole/IDs als Label).
+  const replaySummary = replay ? replay.summary() : null;
+  if (replaySummary) {
+    telemetry.backtest.replayRuns.inc({
+      result: "ok",
+      degraded: replaySummary.degradedReasons.length > 0 ? "degraded" : "none",
+    });
+    for (const reason of replaySummary.degradedReasons) {
+      telemetry.backtest.replayDegraded.inc({ reason: metricLabel(reason, "OTHER") });
+    }
+  }
+
   return {
     executionQuality: paper?.qualityBatches ?? [],
+    ...(replaySummary ? { replay: replaySummary } : {}),
     config,
     symbols,
     timeframe: config.timeframe,

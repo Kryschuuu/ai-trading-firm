@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.57.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.58.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -54,7 +54,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data: Modi A/B/C, deterministischer Fill-Simulator, Failover, Replay |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
 | **[BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)** | Multi-Asset Backtest-Engine: synchronisierter Replay-Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0) |
-| **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0) |
+| **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0), Event-Replay mit realistischen Friktionen `event_replay` (RMA-P1-01 v1.58.0) |
 | **[FEATURE_STORE.md](FEATURE_STORE.md)** | Point-in-Time Feature Store: Feature-Registry (immutable, versioniert), Wertmodell mit `event_time`/`available_at`/`computed_at`, idempotente Materialisierung mit Cursor, Look-ahead-freie PIT-Abfrage, Offline/Online-Parität, Quality-Propagation, Retention (RMA-P6-01, v1.53.0) |
 | **[FORECASTS.md](FORECASTS.md)** | Forecast-Ledger & Kalibrierung: immutable Forecast-Verträge aus Agenten-Analysen, append-only Auflösungen mit Point-in-Time-Resolver (Cursor, Settling-Frist, VOID-Policy), Brier/Brier-Skill/Log-Loss, Reliability-Bins mit Wilson-Intervallen, ECE, Coverage & Mindeststichprobe, Segment-API, versionierte Re-Resolution statt stiller Mutation (RMA-P3-01, v1.55.0) |
 | **[PERPETUAL_DATA.md](PERPETUAL_DATA.md)** | Historische Perpetual-Daten: kanonisches Schema für Funding/Open Interest/Liquidationen mit `event_time`/`available_at`/`fetched_at`, Capability-Ports (`unsupported` ≠ leer), append-only Sync mit Cursor + Idempotenz, Quality-Layer (`log`/`strict`), as-of-Query + API, Konsumenten (Derivatekontext, Funding-Replay, Analystensnapshot), CLI `npm run perp:sync` (RMA-P2-02, v1.54.0) |

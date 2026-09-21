@@ -42,6 +42,14 @@ import type {
   BacktestTradeLog,
   MultiAssetBacktestResult,
 } from "./types";
+import {
+  emptyReplayCoverage,
+  type EventReplayCoverage,
+  type EventReplayDataManifest,
+  type ReplayDegradedReason,
+  type ResolvedEventReplayConfig,
+  type TradeReplayDetail,
+} from "./replayEvents";
 import type { CandleLike } from "../lib/ruleEngine";
 import type { SupportedTimeframe } from "../lib/marketdata/historicalStore";
 
@@ -247,11 +255,29 @@ export type WalkForwardSegment = "IS" | "OOS";
  * (RMA-P1-04): identisch zum Engine-Trade-Log plus `windowIndex`/`segment`.
  * Die Liste im Report ist kanonisch geordnet (Fenster ↑, IS vor OOS, darin
  * Engine-Schließreihenfolge) — dieselbe Ordnung wie `backtest_trades.seq`.
+ * `replay` (RMA-P1-01, v1.58.0, optional): Fill-/Funding-/Impact-Details des
+ * `event_replay`-Pfads — geht NICHT in den Trade-Hash ein (der hasht nur den
+ * `trade`-Log), landet aber in `provenance_json.replay` der Trade-Zeile.
  */
 export interface WalkForwardTradeRecord {
   windowIndex: number;
   segment: WalkForwardSegment;
   trade: BacktestTradeLog;
+  replay?: TradeReplayDetail;
+}
+
+/**
+ * Replay-Evidenz eines Walk-Forward-Laufs (RMA-P1-01, v1.58.0; nur
+ * `executionModel: "event_replay"`): eingefrorene Friktionskonfiguration,
+ * Datenmanifest (identisch über alle Fensterläufe — jeder Fensterlauf sieht
+ * dieselbe versionierte Eingabe, geclippt nur über die Zeitmaske), summierte
+ * Event-Coverage und die Vereinigungsmenge der degradierten Annahmen.
+ */
+export interface WalkForwardReplayEvidence {
+  config: ResolvedEventReplayConfig;
+  manifest: EventReplayDataManifest;
+  coverage: EventReplayCoverage;
+  degradedReasons: ReplayDegradedReason[];
 }
 
 export interface WalkForwardReport {
@@ -282,7 +308,15 @@ export interface WalkForwardReport {
     spreadBpsFallback: number | null;
     fundingRatePctPer8h: number;
     simulatorSeed: number;
+    /**
+     * Friktionsmodell-Version des `event_replay`-Pfads (RMA-P1-01, v1.58.0);
+     * `null` bei `legacy`/`paper` — geht in den Idempotency-Key ein, damit
+     * ein Modellwechsel nie als Replay desselben Laufs durchgeht.
+     */
+    frictionModelVersion?: string | null;
   };
+  /** Replay-Evidenz (nur `event_replay`; fehlt sonst — additiv). */
+  replayEvidence?: WalkForwardReplayEvidence;
   windows: WalkForwardWindowReport[];
   aggregateOos: WalkForwardAggregate;
   aggregateIs: WalkForwardAggregate;
@@ -460,10 +494,35 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
   const executionQuality: Batch[] = [];
   const captureHash = digest({candles:input.candles,rule:input.ruleRef,config:input.engineConfig ?? null,version:APP_VERSION,timeframe:input.timeframe,layout});
 
+  // RMA-P1-01: Walk-Forward erlaubt zusätzlich zum Paper-Pfad das explizite
+  // Opt-in `executionModel: "event_replay"` — nie den Legacy-Pfad (kein
+  // Legacy-Kostenmodell in vergleichbar persistierten Runs). Alte Aufrufer
+  // ohne Angabe bleiben byte-identisch auf `"paper"`.
+  const executionModel: "paper" | "event_replay" =
+    input.engineConfig?.executionModel === "event_replay" ? "event_replay" : "paper";
+  const evidenceBox: { current: WalkForwardReplayEvidence | null } = { current: null };
+  const mergeReplayEvidence = (result: MultiAssetBacktestResult): void => {
+    const summary = result.replay;
+    if (!summary) return;
+    if (evidenceBox.current === null) {
+      evidenceBox.current = {
+        config: summary.config,
+        manifest: summary.manifest,
+        coverage: emptyReplayCoverage(),
+        degradedReasons: [],
+      };
+    }
+    const cov = evidenceBox.current.coverage;
+    for (const key of Object.keys(cov) as Array<keyof EventReplayCoverage>) {
+      cov[key] += summary.coverage[key];
+    }
+    evidenceBox.current.degradedReasons = Array.from(
+      new Set([...evidenceBox.current.degradedReasons, ...summary.degradedReasons])
+    ).sort();
+  };
+
   for (const w of layout.windows) {
-    // Walk-Forward läuft IMMER auf dem Paper-Ausführungspfad — kein
-    // Legacy-Kostenmodell in vergleichbar persistierten Runs.
-    const baseConfig: BacktestEngineOptions = { ...input.engineConfig, executionModel: "paper" };
+    const baseConfig: BacktestEngineOptions = { ...input.engineConfig, executionModel };
     const isResult = runMultiAssetBacktest({
       candlesBySymbol,
       strategies: input.strategies,
@@ -483,12 +542,22 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
     windowReports.push({ index: w.index, is: isSummary, oos: oosSummary });
     isEvals.push({ summary: isSummary, result: isResult });
     oosEvals.push({ summary: oosSummary, result: oosResult });
-    for (const trade of isResult.trades) trades.push({ windowIndex: w.index, segment: "IS", trade });
-    for (const trade of oosResult.trades) trades.push({ windowIndex: w.index, segment: "OOS", trade });
+    mergeReplayEvidence(isResult);
+    mergeReplayEvidence(oosResult);
+    for (const trade of isResult.trades) {
+      const detail = isResult.replay?.tradeDetails[trade.id];
+      trades.push({ windowIndex: w.index, segment: "IS", trade, ...(detail ? { replay: detail } : {}) });
+    }
+    for (const trade of oosResult.trades) {
+      const detail = oosResult.replay?.tradeDetails[trade.id];
+      trades.push({ windowIndex: w.index, segment: "OOS", trade, ...(detail ? { replay: detail } : {}) });
+    }
   }
 
   const enginePaper = input.engineConfig?.paper;
+  const engineReplay = input.engineConfig?.replay;
   const nowMs = input.nowMs ?? Date.now();
+  const evidence: WalkForwardReplayEvidence | null = evidenceBox.current;
   return {
     executionQuality,
     kind: "walk-forward",
@@ -505,13 +574,21 @@ export function runWalkForward(input: RunWalkForwardInput): WalkForwardReport {
       truncated: layout.truncated,
     },
     costProfile: {
-      executionModel: "paper",
-      makerFee: enginePaper?.makerFee ?? input.engineConfig?.feeModel?.makerFee ?? 0.0002,
-      takerFee: enginePaper?.takerFee ?? input.engineConfig?.feeModel?.takerFee ?? 0.0006,
-      spreadBpsFallback: enginePaper?.spreadBpsFallback ?? enginePaper?.simulator?.syntheticSpreadBps ?? null,
+      executionModel,
+      makerFee: enginePaper?.makerFee ?? engineReplay?.makerFee ?? input.engineConfig?.feeModel?.makerFee ?? 0.0002,
+      takerFee: enginePaper?.takerFee ?? engineReplay?.takerFee ?? input.engineConfig?.feeModel?.takerFee ?? 0.0006,
+      spreadBpsFallback:
+        executionModel === "event_replay"
+          ? evidence?.config.spreadBpsFallback ?? engineReplay?.spreadBpsFallback ?? null
+          : enginePaper?.spreadBpsFallback ?? enginePaper?.simulator?.syntheticSpreadBps ?? null,
       fundingRatePctPer8h: enginePaper?.fundingRatePctPer8h ?? 0,
-      simulatorSeed: enginePaper?.simulator?.seed ?? 0,
+      simulatorSeed:
+        executionModel === "event_replay"
+          ? evidence?.config.seed ?? engineReplay?.seed ?? 1
+          : enginePaper?.simulator?.seed ?? 0,
+      frictionModelVersion: evidence?.config.frictionModelVersion ?? null,
     },
+    ...(evidence ? { replayEvidence: evidence } : {}),
     windows: windowReports,
     aggregateOos: aggregateWindowEvals(oosEvals),
     aggregateIs: aggregateWindowEvals(isEvals),

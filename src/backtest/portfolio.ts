@@ -52,6 +52,11 @@ export class BacktestPortfolio {
     return Array.from(this.positions.values());
   }
 
+  /** Offene Position eines Symbols (RMA-P1-01: Order-Lifecycle-Zugriff). */
+  getOpenPosition(symbol: string): BacktestOpenPosition | null {
+    return this.positions.get(symbol) ?? null;
+  }
+
   get trades(): BacktestTradeLog[] {
     return this.closedTrades;
   }
@@ -191,6 +196,147 @@ export class BacktestPortfolio {
 
     this.positions.set(symbol, position);
     return position;
+  }
+
+  /**
+   * Erhöht eine bestehende Position um einen weiteren Entry-Fill
+   * (RMA-P1-01, v1.58.0; nur `"event_replay"`-Pfad: eine Entry-Order füllt
+   * über mehrere Kerzen). Entry-Preis wird mengen­gewichtet gemittelt;
+   * Cash/Fees/Slippage werden wie bei `openPosition` gebucht. Fail-closed:
+   * unbekanntes Symbol oder nicht endliche Werte ⇒ `false`, keine Buchung.
+   */
+  increasePosition(
+    symbol: string,
+    fill: SimulatedFill
+  ): boolean {
+    const pos = this.positions.get(symbol);
+    if (!pos) return false;
+    if (
+      !Number.isFinite(fill.qty) || fill.qty <= 0 ||
+      !Number.isFinite(fill.fillPrice) || fill.fillPrice <= 0 ||
+      !Number.isFinite(fill.fees) || fill.fees < 0 ||
+      !Number.isFinite(fill.slippage) || fill.slippage < 0
+    ) {
+      return false;
+    }
+    const addNotional = fill.qty * fill.fillPrice;
+    this.cash -= addNotional + fill.fees;
+    this.totalFees += fill.fees;
+    this.totalSlippage += fill.slippage;
+
+    const newQty = pos.qty + fill.qty;
+    pos.entryPrice = (pos.entryPrice * pos.qty + fill.fillPrice * fill.qty) / newQty;
+    pos.qty = newQty;
+    pos.notional = Number((pos.notional + addNotional).toFixed(4));
+    pos.feesPaid += fill.fees;
+    pos.slippagePaid += fill.slippage;
+    pos.highestPrice = Math.max(pos.highestPrice, fill.fillPrice);
+    pos.lowestPrice = Math.min(pos.lowestPrice, fill.fillPrice);
+    return true;
+  }
+
+  /**
+   * Bucht einen PARTIELLEN Exit-Fill (RMA-P1-01, v1.58.0; nur
+   * `"event_replay"`-Pfad). Die Position bleibt mit Restmenge OFFEN —
+   * der Trade wird erst in `finalizeReplayPosition` geschlossen, wenn die
+   * Restmenge 0 ist. Cash erhält den Erlös minus Gebühren sofort; der
+   * realisierte Brutto-PnL der geschlossenen Menge wird gegen den
+   * (mengengewichteten) Entry-Preis kumuliert. Fail-closed: unbekanntes
+   * Symbol, `qty ≤ 0`, `qty > pos.qty` (über Toleranz) oder nicht endliche
+   * Werte ⇒ `false`, keine Buchung — ein Fill kann nie mehr schließen, als
+   * offen ist.
+   */
+  applyPartialExit(
+    symbol: string,
+    fill: { qty: number; price: number; fees: number; slippage: number }
+  ): boolean {
+    const pos = this.positions.get(symbol);
+    if (!pos) return false;
+    if (
+      !Number.isFinite(fill.qty) || fill.qty <= 0 ||
+      !Number.isFinite(fill.price) || fill.price <= 0 ||
+      !Number.isFinite(fill.fees) || fill.fees < 0 ||
+      !Number.isFinite(fill.slippage) || fill.slippage < 0
+    ) {
+      return false;
+    }
+    // Mengen-Guard: nie mehr schließen, als offen ist (kleine Float-Toleranz).
+    if (fill.qty > pos.qty * (1 + 1e-9)) return false;
+    const qty = Math.min(fill.qty, pos.qty);
+
+    const proceeds = qty * fill.price;
+    const grossPartial =
+      pos.side === "LONG" ? qty * (fill.price - pos.entryPrice) : qty * (pos.entryPrice - fill.price);
+
+    this.cash += proceeds - fill.fees;
+    this.totalFees += fill.fees;
+    this.totalSlippage += fill.slippage;
+
+    pos.qty = Math.max(0, pos.qty - qty);
+    pos.closedQty = (pos.closedQty ?? 0) + qty;
+    pos.exitNotional = (pos.exitNotional ?? 0) + proceeds;
+    pos.realizedGrossPnl = (pos.realizedGrossPnl ?? 0) + grossPartial;
+    pos.exitFees = (pos.exitFees ?? 0) + fill.fees;
+    pos.exitSlippage = (pos.exitSlippage ?? 0) + fill.slippage;
+    return true;
+  }
+
+  /**
+   * Schließt eine per Partial Exits vollständig abgebaute Position als EINEN
+   * Trade-Log-Eintrag (RMA-P1-01, v1.58.0; nur `"event_replay"`-Pfad).
+   * Voraussetzung: `pos.qty ≈ 0` und `closedQty > 0` — sonst `null` (die
+   * Position bleibt unangetastet offen, nie ein halbfertiger Trade).
+   *
+   * Exit-Preis = mengengewichteter Fill-VWAP (`exitNotional / closedQty`);
+   * damit gilt exakt `pnlGross = closedQty × (VWAP − entry)` (LONG) — die
+   * Trade-Ledger-Identität (`tradeLedger.ts`) bleibt reproduzierbar.
+   */
+  finalizeReplayPosition(
+    symbol: string,
+    exitTime: number,
+    currentBarIndex: number,
+    reason: TradeExitReason
+  ): BacktestTradeLog | null {
+    const pos = this.positions.get(symbol);
+    if (!pos) return null;
+    const closedQty = pos.closedQty ?? 0;
+    if (pos.qty > closedQty * 1e-9 + 1e-12 || closedQty <= 0) return null;
+
+    const exitNotional = pos.exitNotional ?? 0;
+    const exitPrice = exitNotional / closedQty;
+    const grossPnl = pos.realizedGrossPnl ?? 0;
+    const totalTradeFees = pos.feesPaid + (pos.exitFees ?? 0);
+    const tradeFunding = pos.fundingPaid ?? 0;
+    const netPnl = grossPnl - totalTradeFees + tradeFunding;
+    this.realizedPnl += netPnl;
+
+    const durationBars = Math.max(1, currentBarIndex - pos.entryBarIndex);
+    const durationMs = Math.max(0, exitTime - pos.entryTime);
+
+    const tradeLog: BacktestTradeLog = {
+      id: pos.id,
+      strategyId: pos.strategyId,
+      symbol: pos.symbol,
+      side: pos.side,
+      entryTime: pos.entryTime,
+      exitTime,
+      entryPrice: pos.entryPrice,
+      exitPrice,
+      qty: closedQty,
+      notional: pos.notional,
+      pnl: Number(netPnl.toFixed(4)),
+      pnlPct: Number(((netPnl / pos.notional) * 100).toFixed(4)),
+      fees: Number(totalTradeFees.toFixed(4)),
+      slippage: Number((pos.slippagePaid + (pos.exitSlippage ?? 0)).toFixed(4)),
+      funding: Number(tradeFunding.toFixed(8)),
+      exitReason: reason,
+      durationBars,
+      durationMs,
+    };
+
+    this.closedTrades.push(tradeLog);
+    this.positions.delete(symbol);
+    return tradeLog;
   }
 
   /**

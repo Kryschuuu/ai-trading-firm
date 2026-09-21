@@ -37,12 +37,18 @@ import path from "node:path";
 import {
   backtestRunIdempotencyKey,
   BacktestPersistenceError,
+  EventReplayError,
+  perpFundingRowsToReplayEvents,
   persistBacktestRun,
   runWalkForward,
   TradeLedgerError,
   WalkForwardError,
 } from "../src/backtest";
-import type { BacktestStrategyItem, WalkForwardReport } from "../src/backtest";
+import type {
+  BacktestStrategyItem,
+  ReplayInputEvent,
+  WalkForwardReport,
+} from "../src/backtest";
 import {
   HistoricalStore,
   isSupportedTimeframe,
@@ -88,6 +94,12 @@ Optional:
   --idempotency-key  eigener Lauf-Schlüssel (8..128 Zeichen [A-Za-z0-9:_.-]);
                  Default: Inhalts-Fingerprint (Retry ⇒ derselbe Run)
   --skip-db      keine Persistenz (nur Artefakte; Offline-Betrieb)
+  --execution-model  paper (Default) | event_replay (RMA-P1-01: Order-
+                 Lifecycle mit Partial Fills, Latenz, Depth-Impact und
+                 punktgenauen Funding-Ereignissen aus der Perp-Historie)
+  --replay-latency-ms  Submit→Arrival-Latenz in ms (nur event_replay, ≥ 0,
+                 Default 0 = Fill auf der Entscheidungskerze)
+  --replay-seed  Seed des Replay-Laufs (nur event_replay, Default 1)
 
 Ausgabe: data/backtest/<runId>.json + <runId>.md; DB: backtest_runs-Zeile +
 backtest_trades (atomar, idempotent, Ledger RECONCILED).
@@ -191,7 +203,7 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
     `- Instrument: \`${report.instrumentId}\` (${report.timeframe}), Zeitraum ${d(report.from)} … ${d(report.to)}`,
     `- Regel: ${report.ruleRef.name} (Signatur \`${report.ruleRef.signature}\`, Regel-Symbol \`${report.ruleRef.ruleSymbol}\`)`,
     `- Fenster: ${report.walkforward.windowCount} × IS ${report.walkforward.isDays}d / OOS ${report.walkforward.oosDays}d${report.walkforward.truncated ? ` (Zeitraum am ${report.walkforward.maxSpanDays}d-Deckel gekappt)` : ""}`,
-    `- Kosten: Paper-Ausführung (Fill-Simulator wie PaperBroker), Maker ${(report.costProfile.makerFee * 100).toFixed(3)} %, Taker ${(report.costProfile.takerFee * 100).toFixed(3)} %, Funding ${report.costProfile.fundingRatePctPer8h} %/8h, Seed ${report.costProfile.simulatorSeed}`,
+    `- Kosten: ${report.costProfile.executionModel === "event_replay" ? `Event-Replay (Friktionsmodell ${report.costProfile.frictionModelVersion ?? "er1"}: Order-Lifecycle, Latenz, Depth-Impact, FUNDING_DUE-Ereignisse)` : "Paper-Ausführung (Fill-Simulator wie PaperBroker)"}, Maker ${(report.costProfile.makerFee * 100).toFixed(3)} %, Taker ${(report.costProfile.takerFee * 100).toFixed(3)} %, Funding ${report.costProfile.fundingRatePctPer8h} %/8h, Seed ${report.costProfile.simulatorSeed}`,
     `- Code-Version: \`${report.codeVersion}\`, erstellt ${report.createdAt}`,
     ``,
     `## Aggregate`,
@@ -214,6 +226,18 @@ function renderMarkdown(runId: string, report: WalkForwardReport): string {
   for (const w of report.windows) {
     lines.push(
       `| ${w.index} | ${d(w.is.from)}…${d(w.is.to)} | ${d(w.oos.from)}…${d(w.oos.to)} | ${w.is.trades} | ${w.is.pnl} | ${w.oos.trades} | ${w.oos.pnl} | ${w.oos.netPnl} | ${w.oos.winRate} % | ${w.oos.maxDrawdownPct} % | \`${w.oos.tradeHash.slice(0, 12)}…\` |`
+    );
+  }
+  if (report.replayEvidence) {
+    const ev = report.replayEvidence;
+    lines.push(
+      ``,
+      `## Replay-Evidenz (Event-Replay)`,
+      ``,
+      `- Friktionsmodell \`${ev.config.frictionModelVersion}\`, Seed ${ev.config.seed}, Latenz ${ev.config.latency.decisionToSubmitMs}+${ev.config.latency.submitToArrivalMs} ms, Impact ${ev.config.impactBpsPerParticipation} bp/Partizipation, Order-TTL ${ev.config.orderTtlBars} Kerzen`,
+      `- Datenmanifest: Kerzen \`${ev.manifest.candlesHash.slice(0, 12)}…\` (${ev.manifest.candleCount}), Events \`${ev.manifest.eventsHash.slice(0, 12)}…\` (Quotes ${ev.manifest.eventCounts.quotes}, Depth ${ev.manifest.eventCounts.depth}, Funding ${ev.manifest.eventCounts.funding})`,
+      `- Coverage: ${ev.coverage.bars} Kerzen, Orders ${ev.coverage.ordersSubmitted} submitted / ${ev.coverage.ordersFilled} filled / ${ev.coverage.ordersPartiallyFilled} partial / ${ev.coverage.ordersCancelled} cancelled; Fills aus Depth ${ev.coverage.fillsFromDepth}, aus Volumen-Fallback ${ev.coverage.fillsFromBarVolumeFallback}; Funding gebucht ${ev.coverage.fundingApplied} / übersprungen ${ev.coverage.fundingSkipped}`,
+      `- Degradierte Annahmen: ${ev.degradedReasons.length > 0 ? ev.degradedReasons.map((r) => `\`${r}\``).join(", ") : "keine"}`
     );
   }
   lines.push(
@@ -261,6 +285,23 @@ async function main(): Promise<void> {
     typeof args["oos-days"] === "string"
       ? clampDays(args["oos-days"], "--oos-days", WF_BOUNDS.oosDays.min, WF_BOUNDS.oosDays.max)
       : wfBase.oosDays;
+
+  // RMA-P1-01: Ausführungspfad — Default bleibt "paper" (kein stiller Wechsel).
+  const executionModelRaw =
+    typeof args["execution-model"] === "string" ? (args["execution-model"] as string).trim() : "paper";
+  if (executionModelRaw !== "paper" && executionModelRaw !== "event_replay") {
+    fail(`--execution-model="${executionModelRaw.slice(0, 30)}" ist ungültig (paper | event_replay).`);
+  }
+  const executionModel: "paper" | "event_replay" = executionModelRaw;
+  const replayLatencyMs =
+    typeof args["replay-latency-ms"] === "string" ? Number(args["replay-latency-ms"]) : 0;
+  if (!Number.isFinite(replayLatencyMs) || replayLatencyMs < 0) {
+    fail(`--replay-latency-ms="${String(args["replay-latency-ms"]).slice(0, 20)}" muss ≥ 0 sein.`);
+  }
+  const replaySeed = typeof args["replay-seed"] === "string" ? Number(args["replay-seed"]) : 1;
+  if (!Number.isInteger(replaySeed) || replaySeed < 0) {
+    fail(`--replay-seed="${String(args["replay-seed"]).slice(0, 20)}" muss eine Ganzzahl ≥ 0 sein.`);
+  }
 
   const { spec, ruleId } = await loadRule(args);
 
@@ -317,7 +358,7 @@ async function main(): Promise<void> {
   // Symbol nichts, fällt die Engine pro Bar auf den dokumentierten
   // Umgebungs-Satz zurück und sagt es einmal laut.
   let perpFunding: ReturnType<typeof createPerpFundingRateProvider> | null = null;
-  if (perpDataEnabled()) {
+  if (perpDataEnabled() && executionModel === "paper") {
     try {
       const perpConfig = loadPerpConfig();
       const venue = instrumentId.includes(":") ? instrumentId.slice(0, instrumentId.indexOf(":")) : null;
@@ -359,6 +400,60 @@ async function main(): Promise<void> {
     }
   }
 
+  // RMA-P1-01: Event-Replay lädt punktgenaue FUNDING_DUE-Ereignisse aus der
+  // kanonischen Perp-Historie (as-of über `available_at` der Zeilen — der
+  // Replayer bucht ein Ereignis erst, wenn es bekannt sein durfte). Ohne
+  // PERP_DATA_ENABLED bleibt die Ereignisliste leer: Funding fehlt dann
+  // SICHTBAR (Coverage `fundingEvents: 0`), es wird nie ein statischer Satz
+  // still untergeschoben.
+  const replayEvents: ReplayInputEvent[] = [];
+  if (executionModel === "event_replay" && perpDataEnabled()) {
+    try {
+      const perpConfig = loadPerpConfig();
+      const registryInstrument = instruments[instrumentId] ?? null;
+      if (registryInstrument && registryInstrument.marketType === "perpetual") {
+        const { queryPerpSeries, PERP_LIMITS, perpRowIsAttestable } = await import("../src/perpdata/index");
+        const response = await queryPerpSeries(
+          getPerpDataService().store,
+          {
+            instruments: [registryInstrument.id],
+            kinds: ["funding"],
+            fromMs: candles[0].time,
+            toMs: candles[candles.length - 1].time,
+            asOfMs: candles[candles.length - 1].time,
+            limit: PERP_LIMITS.queryRowsPerSeries,
+          },
+          { config: perpConfig, nowMs: Date.now() }
+        );
+        const venue = instrumentId.includes(":") ? instrumentId.slice(0, instrumentId.indexOf(":")) : "PAPER";
+        for (const serie of response.series) {
+          const rows = (serie.rows as import("../src/perpdata/index").PerpFundingRow[]).filter(perpRowIsAttestable);
+          const converted = perpFundingRowsToReplayEvents({
+            engineSymbol: instrumentId,
+            venue,
+            rows,
+            defaultIntervalHours: perpConfig.fundingIntervalHours,
+          });
+          replayEvents.push(...converted.events);
+          if (converted.skipped > 0) {
+            console.warn(`[run-backtest] Replay-Funding: ${converted.skipped} Zeile(n) ohne belegbare Rate übersprungen (fail-closed).`);
+          }
+        }
+        console.log(`[run-backtest] Replay-Funding: ${replayEvents.length} FUNDING_DUE-Ereignis(se) aus der Perp-Historie.`);
+      } else {
+        console.log(`[run-backtest] Replay-Funding: ${instrumentId} ist kein Registry-Perpetual — keine Funding-Ereignisse (Spot-Semantik).`);
+      }
+    } catch (error) {
+      console.warn(
+        `[run-backtest] Replay-Funding-Historie nicht lesbar (${
+          error instanceof Error ? error.message.slice(0, 160) : "unbekannter Fehler"
+        }) — Lauf ohne FUNDING_DUE-Ereignisse (sichtbar in coverage.fundingEvents).`
+      );
+    }
+  } else if (executionModel === "event_replay") {
+    console.log("[run-backtest] Replay-Funding: PERP_DATA_ENABLED=false — keine Funding-Ereignisse (coverage.fundingEvents = 0).");
+  }
+
   let report: WalkForwardReport;
   try {
     report = runWalkForward({
@@ -373,23 +468,45 @@ async function main(): Promise<void> {
         signature: ruleSignature(spec),
         ruleSymbol: spec.symbol,
       },
-      engineConfig: {
-        timeframe,
-        executionModel: "paper",
-        paper: {
-          simulator,
-          instruments,
-          fundingRatePctPer8h: funding.ratePctPer8h,
-          fundingIntervalHours: funding.intervalHours,
-          ...(perpFunding ? { fundingRateProvider: perpFunding } : {}),
-        },
-      },
+      engineConfig:
+        executionModel === "event_replay"
+          ? {
+              timeframe,
+              executionModel: "event_replay",
+              replay: {
+                seed: replaySeed,
+                latency: { decisionToSubmitMs: 0, submitToArrivalMs: replayLatencyMs },
+                instruments,
+                events: replayEvents,
+              },
+            }
+          : {
+              timeframe,
+              executionModel: "paper",
+              paper: {
+                simulator,
+                instruments,
+                fundingRatePctPer8h: funding.ratePctPer8h,
+                fundingIntervalHours: funding.intervalHours,
+                ...(perpFunding ? { fundingRateProvider: perpFunding } : {}),
+              },
+            },
       walkforward: { isDays, oosDays, maxSpanDays: wfBase.maxSpanDays },
       nowMs: Date.now(),
     });
   } catch (e) {
     if (e instanceof WalkForwardError) fail(`${e.code} — ${e.message}`);
+    if (e instanceof EventReplayError) fail(`${e.code} — ${e.message}`);
     throw e;
+  }
+  if (report.replayEvidence) {
+    const ev = report.replayEvidence;
+    console.log(
+      `[run-backtest] Replay-Evidenz: Modell ${ev.config.frictionModelVersion}, Seed ${ev.config.seed}, ` +
+        `Coverage bars=${ev.coverage.bars} funding=${ev.coverage.fundingApplied}/${ev.coverage.fundingEvents} ` +
+        `fills(depth=${ev.coverage.fillsFromDepth}, fallback=${ev.coverage.fillsFromBarVolumeFallback}); ` +
+        `degradiert: ${ev.degradedReasons.length > 0 ? ev.degradedReasons.join(", ") : "keine"}`
+    );
   }
 
   console.log(`[run-backtest] ${registryFeeNote}`);

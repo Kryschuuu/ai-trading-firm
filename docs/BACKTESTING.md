@@ -1,6 +1,6 @@
 # Regelbasierte Backtesting-Engine mit Walk-Forward-Validierung (GAP-01)
 
-**Stand:** 2026-09-20 · **Modul:** `src/backtest/` · **Version:** `1.52.0` · **Status:** Implementiert
+**Stand:** 2026-09-21 · **Modul:** `src/backtest/` · **Version:** `1.58.0` · **Status:** Implementiert
 
 Diese Datei beschreibt die Walk-Forward-Erweiterung der Backtest-Engine:
 strikte Zeitmaske, Paper-Ausführung über den Paper-Fill-Simulator,
@@ -111,7 +111,89 @@ Details und bewusste Grenzen:
 - **Legacy-Pfad:** `executionModel: "legacy"` (Default) ist der
   eingefrorene Task-02-Simulator (`src/backtest/simulator.ts`) —
   Byte-kompatibel für bestehende Läufe/Tests, aber nicht mehr
-  weiterentwickelt. Neue, vergleichbar persistierte Runs nutzen `"paper"`.
+  weiterentwickelt. Neue, vergleichbar persistierte Runs nutzen `"paper"`
+  oder — explizit — `"event_replay"` (§3.2).
+
+---
+
+### 3.2 Event-Replay mit realistischen Friktionen (RMA-P1-01, v1.58.0)
+
+`executionModel: "event_replay"` ist der dritte Ausführungspfad
+(`src/backtest/replayEvents.ts` + `src/backtest/replayExecution.ts`) —
+explizites Opt-in, kein bestehender Lauf wechselt still den Pfad. Er
+modelliert, was `"paper"` nicht kann:
+
+* **Kanonischer Eventvertrag:** diskriminierte Union
+  `MARKET_BAR | MARKET_QUOTE | MARKET_DEPTH | FUNDING_DUE` (Input) und
+  `ORDER_SUBMITTED | ORDER_ACK | ORDER_REJECT | ORDER_PARTIAL_FILL |
+  ORDER_FILL | ORDER_CANCEL` (deterministisch erzeugtes Eventlog).
+  Sortierung: `eventTime ↑` → Typ-Priorität (Depth vor Quote vor Bar vor
+  Funding vor Order-Lifecycle) → Symbol → Einfüge-Reihenfolge
+  (dokumentierter stabiler Tie-Break, `sortReplayEvents`).
+* **Zeit-/Latenzmodell:** vier getrennte Zeiten je Order —
+  `decisionTime → submitTime (+decisionToSubmitMs) → arrivalTime
+  (+submitToArrivalMs) → fillTime(s)`. Eine Order füllt frühestens auf der
+  ersten Kerze mit `time ≥ arrivalTime`; Latenz 0 = Paper-Konvention.
+  Jedes Input-Ereignis trennt `eventTime` von `availableAt`
+  (`availableAt ≥ eventTime`, sonst `replay:invalid-event`); sichtbar wird
+  es erst ab `availableAt ≤ Simulationszeit` — kein Look-ahead, auch nicht
+  für Kosten. Negative Latenz/rückwärts laufende Zeit wird abgewiesen
+  (`replay:invalid-config`).
+* **Fill-/Impact-Modell:** verfügbare Menge = frisches
+  `MARKET_DEPTH`-Ereignis (Alter ≤ `maxDepthAgeMs`, Default 2 Kerzen);
+  fehlt/veraltet es, greift der dokumentierte konservative Fallback
+  `bar.volume × maxBarVolumeParticipation` (Default 10 %); fehlt auch das
+  Kerzenvolumen, findet KEIN Fill statt (fail-closed, Grund
+  `NO_LIQUIDITY_DATA_NO_FILL`). Preis:
+  `touch = base × (1 ± spread/2)`, `price = touch × (1 ± impactBps/10⁴)`
+  mit `impactBps = impactBpsPerParticipation × (fillQty/verfügbareMenge)`;
+  Spread aus frischer `MARKET_QUOTE`, sonst `spreadBpsFallback`
+  (degradiert sichtbar). Gebühren (Taker) und Slippage werden NUR auf die
+  tatsächlich gefüllte Menge gebucht. Ein Fill überschreitet nie Depth,
+  Orderrestmenge oder offene Positionsmenge.
+* **Order-Lifecycle mit Restmenge:** ein PARTIAL-Exit lässt die Position
+  mit Restmenge OFFEN; der Trade schließt erst, wenn die Restmenge 0 ist
+  (Exit-Preis = Fill-VWAP). Offene Restmengen verfallen nach
+  `orderTtlBars` Kerzen (`ORDER_CANCEL`, Grund `ORDER_TTL_EXPIRED`).
+  Beginnt ein Exit, werden laufende Entry-Restmengen gecancelt.
+* **Punktgenaues Funding:** `FUNDING_DUE`-Ereignisse (Venue, Instrument,
+  signierte `ratePer8h` als Dezimalanteil — positiv = Longs zahlen,
+  `intervalHours` 1..24) werden ausschließlich für zum
+  Settlement-Zeitpunkt offene, eindeutig als Perpetual erkannte Positionen
+  gebucht (DIESELBE Formel `computeFunding` wie der Paper-Betrieb;
+  Kontosicht: negativ = gezahlt). Funding vor Entry oder nach Exit wird
+  nie gebucht; ohne Ereignis wird KEIN statischer Satz untergeschoben —
+  fehlendes Funding ist sichtbar (`coverage.fundingEvents`). Die CLI
+  übersetzt kanonische `perp_funding_rates`-Zeilen via
+  `perpFundingRowsToReplayEvents` (`src/backtest/replayFunding.ts`,
+  as-of über `available_at`).
+* **Reproduzierbarkeit:** jeder Lauf trägt `result.replay` mit
+  Datenmanifest (sha256 über Kerzen + kanonische Events), aufgelöster
+  Friktionskonfiguration (inkl. Seed und Modellversion `er1`),
+  Event-Coverage, degradierten Annahmen (geschlossenes Vokabular
+  `ReplayDegradedReason`), gedeckeltem Order-Eventlog und
+  Fill-/Funding-/Impact-Details je Trade. Walk-Forward-Reports persistieren
+  das als `params_json.replayEvidence`; Trade-Zeilen tragen
+  `provenance_json.replay` (max. 64 Fills je Trade, `truncated`-Flag).
+  Der Idempotency-Key enthält `frictionModelVersion` — ein Modellwechsel
+  gilt nie als Replay desselben Laufs.
+* **Metriken (bounded):** `backtest_replay_runs_total{result,degraded}` und
+  `backtest_replay_degraded_total{reason}` (Gründe = geschlossene Union,
+  nie Symbole/IDs).
+* **Bewusste Grenzen:** kein Live-Order-Scheduler (P4.2/P4.3), keine
+  synthetische Erfindung fehlender historischer Orderbücher (fehlende
+  Depth ⇒ dokumentierter konservativer Fallback oder kein Fill), kein
+  Umbau der Portfolio-Strategielogik. Der `FillSimulator` des Paper-Pfads
+  wird hier bewusst NICHT verwendet: Impact kommt aus historischer Depth
+  statt aus dem 24h-Volumen-Modell — beide Pfade bleiben getrennt
+  versioniert (`costProfile.executionModel` + `frictionModelVersion`).
+
+Rollback/Feature-Gate: der Pfad ist reines Opt-in über
+`executionModel: "event_replay"` (Engine) bzw.
+`--execution-model=event_replay` (CLI). Ohne diese Angabe ist das
+Verhalten byte-identisch zu v1.57.0; alte gespeicherte Runs werden nicht
+uminterpretiert (`params_json.costProfile.executionModel` unterscheidet
+die Semantik je Run).
 
 ---
 
@@ -352,6 +434,9 @@ node --import tsx scripts/run-backtest.ts \
 | `--is-days` / `--oos-days` | nein | Fenster-Override (Bounds wie `WF_*`, sonst Env-Wert) |
 | `--idempotency-key` | nein | eigener Lauf-Schlüssel (8..128 Zeichen `[A-Za-z0-9:_.-]`); Default: Inhalts-Fingerprint des Laufs (§5.1) |
 | `--skip-db` | nein | keine Persistenz (nur Artefakte; Offline-Betrieb) |
+| `--execution-model` | nein (Default `paper`) | `paper` oder `event_replay` (§3.2: Order-Lifecycle mit Partial Fills, Latenz, Depth-Impact, punktgenaue `FUNDING_DUE`-Ereignisse aus der Perp-Historie) |
+| `--replay-latency-ms` | nein (Default 0) | Submit→Arrival-Latenz in ms (nur `event_replay`, ≥ 0) |
+| `--replay-seed` | nein (Default 1) | Seed des Replay-Laufs (nur `event_replay`, Ganzzahl ≥ 0; salzt Order-IDs, kein RNG) |
 
 Ablauf: Regel laden (DB oder Datei) → Kerzen aus dem HistoricalStore →
 Instrument aus der Universe-Registry auflösen (fehlt sie: neutrales
