@@ -5,7 +5,7 @@
 - **Severity:** `CRITICAL`
 - **Fix-Version:** `v1.60.0`
 - **Fix-PR:** [#157](https://github.com/Kryschuuu/ai-trading-firm/pull/157)
-- **Fix-Commit:** `a0e17df`
+- **Fix-Commit:** `10e83f3` (inkl. `a0e17df` Implementierung)
 - **Umsetzungs-Prompt:** [`PROMPT-P1-02`](../prompts/PROMPT-P1-02-walk-forward-training.md)
 
 ## Verifizierte Fundstellen
