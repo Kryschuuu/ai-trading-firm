@@ -89,7 +89,7 @@ Der Scanner kann Instrumente insgesamt sortieren und besitzt Momentum als einen 
   `docs/architecture/PIPELINE_MAP.md`, `docs/HANDBUCH.md`,
   `docs/help/scanner.help.json`, `CONFIGURATION.md`, `.env.example`,
   `CHANGELOG.md` (v1.63.0).
-- **Evidenz:** Fix-Version v1.63.0, Commit `c03ee05`; Rollback: Redeploy auf
+- **Evidenz:** Fix-Version v1.63.0, Commit `c03ee05`, PR [#161](https://github.com/Kryschuuu/ai-trading-firm/pull/161); Rollback: Redeploy auf
   v1.62.0 oder `CROSS_SECTIONAL_ENABLED=false` (exaktes Vor-Verhalten).
 - **Bewusst nicht Teil (Scope-Grenze PROMPT-P2-04):** survivorship-bias-freie
   Universums-Rekonstruktion (Lücke dokumentiert, Survivorship-Note je
