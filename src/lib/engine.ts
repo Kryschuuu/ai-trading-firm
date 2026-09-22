@@ -66,6 +66,7 @@ import {
 import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
 import { scheduleRegimeSnapshotPersist } from "./regimeSnapshotStore";
 import { telemetry } from "./telemetry";
+import { LIVE_SIGNAL_BAR_MS, persistClosedEntrySignal } from "./signalDecayRuntime";
 import { getHouseView } from "./analysts";
 import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
 import { writeEquitySnapshot } from "./equity";
@@ -1205,6 +1206,21 @@ export async function runAgentTurn(
         return { ...base, status: "BLOCKED", fill, guardrail: why, trace };
       }
       trace.push(step("GUARDRAILS/BROKER", true, `Gefüllt @ ${fill.fillPrice}, SL ${fill.stopLoss}, TP ${fill.takeProfit}`));
+      if (journalPosRef.value) {
+        try {
+          await persistClosedEntrySignal({
+            positionId: journalPosRef.value.id,
+            symbol: fill.symbol,
+            strategyClass: strategyClassOfTemplate(mission.templateId),
+            asOfMs: Date.now(),
+            candles: turnCandles,
+            barDurationMs: LIVE_SIGNAL_BAR_MS,
+            timeBasis: "open",
+          });
+        } catch (e) {
+          console.error("[engine] Signal-Decay-Entry nicht erfasst:", e instanceof Error ? e.message : e);
+        }
+      }
 
       // GAP-03 (D1a): Journal-Zeile mit Decision-Snapshot aus Proposal +
       // Agenten-Turns der Mission (Entscheidungskette). Nach der Fill-
@@ -1554,6 +1570,30 @@ export async function executeApprovedProposal(
   }
 
   await db.update(proposals).set({ status: "EXECUTED", reason: "Filled by approved-proposal executor" }).where(eq(proposals.id, proposalId));
+  if (journalPosRef.value) {
+    try {
+      let candles: Candle[] = [];
+      try {
+        candles = await getCandles(String(detail.symbol), "15m", 120);
+      } catch {
+        candles = [];
+      }
+      const [missionRow] = proposal.missionId
+        ? await db.select({ templateId: missions.templateId }).from(missions).where(eq(missions.id, proposal.missionId)).limit(1)
+        : [];
+      await persistClosedEntrySignal({
+        positionId: journalPosRef.value.id,
+        symbol: fill.symbol,
+        strategyClass: strategyClassOfTemplate(missionRow?.templateId),
+        asOfMs: Date.now(),
+        candles,
+        barDurationMs: LIVE_SIGNAL_BAR_MS,
+        timeBasis: "open",
+      });
+    } catch (e) {
+      console.error("[engine] Signal-Decay-Entry nicht erfasst:", e instanceof Error ? e.message : e);
+    }
+  }
 
   // GAP-03 (D1a): Journal-Zeile mit Decision-Snapshot aus dem genehmigten
   // Proposal + Agenten-Turns der Mission. Fehlertolerant wie im

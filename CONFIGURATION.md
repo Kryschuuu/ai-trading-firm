@@ -1110,3 +1110,32 @@ Rollback: `DRAWDOWN_SCALING_MODE=monitor` oder `=off` (+ optional
 `dsp.enabled=0`) + Restart — Faktor und PAUSE werden sofort zurückgenommen,
 keine Datenbereinigung nötig (Snapshots bleiben lesbar).
 
+## Signal-Decay-Exits (RMA-P5-05, v1.69.0)
+
+Schließt eine Position, wenn das unveränderliche Entry-Signal gegenüber einem
+point-in-time aktuellen Signal derselben Version bestätigt verfallen oder
+umgekehrt ist. `SIGNAL_DECAY` kommt nach Kill-Switch, Stop, Take-Profit,
+Trailing und Time-Stop. Fehlende Daten schließen nicht. Vollständige Formeln:
+[`docs/SIGNAL_DECAY.md`](docs/SIGNAL_DECAY.md).
+Migration vor dem Deploy:
+`psql "$DATABASE_URL" -f drizzle/2026-09-22_signal_decay.sql`.
+
+| Variable | Standard | Erlaubte Werte | Bedeutung |
+| --- | --- | --- | --- |
+| `SIGNAL_DECAY_MODE` | `monitor` | `off`, `monitor`, `active` | `monitor`: bewerten und Counterfactual schreiben, nicht schließen. `active`: bestätigter Verfall schließt mit `SIGNAL_DECAY`, aber nur für aktivierte Klassen. `off`: keine Writes, Exits unverändert. Unbekannt ⇒ `monitor`. |
+| `SIGNAL_DECAY_CLASS_TREND` | `false` | `true`/`false` | Klasse `trend`. Default aus. |
+| `SIGNAL_DECAY_CLASS_MEAN_REVERSION` | `false` | `true`/`false` | Klasse `mean-reversion`. Default aus. |
+| `SIGNAL_DECAY_CLASS_BREAKOUT` | `false` | `true`/`false` | Klasse `breakout`. Default aus. |
+| `SIGNAL_DECAY_CLASS_UNCLASSIFIED` | `false` | `true`/`false` | Klasse `unclassified`. Wird nie automatisch eingeschaltet. |
+| `SIGNAL_DECAY_MIGRATIONS` | leer | kommaseparierte IDs | Nur bekannte IDs (`mig-mkt-sig-0-to-1`, `mig-strength-pct-to-unit`). Sonst strikter Versionsgleichstand. |
+| `SIGNAL_DECAY_THRESHOLD_MODE` | Klassen-Default | `absolute`, `relative`, `either`, `both` | Globaler Override der Drop-Verknüpfung. |
+
+Numerische Schwellen liegen unter `sdc.<klasse>.<feld>` (Bounds in
+`docs/SIGNAL_DECAY.md`) und sind über `POST /api/firm/risk/signal-decay`
+schreibbar. Der Modus selbst ist nicht per API umschaltbar.
+
+**Rollout:** Migration, dann `monitor` mit einer Klasse beobachten
+(`GET /api/firm/risk/signal-decay`: Coverage, additional/avoided PnL), dann
+`SIGNAL_DECAY_MODE=active`. Rollback: `SIGNAL_DECAY_MODE=off` oder die
+Klassenflags auf `false`. Die Event-Tabelle bleibt append-only.
+

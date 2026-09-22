@@ -282,6 +282,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/SENTIMENT.md` | Kalibrierbare strukturierte Sentiment-Outputs (Forecast-Envelopes, Trennung p/Coverage, Deduplikation, P3.1-Link; RMA-P2-05, v1.64.0) |
 | `docs/VOLATILITY_TARGETING.md` | Kontinuierliches Portfolio-Volatility-Targeting: as-of-sichere Forecast-Volatilität gegen Ziel, Risikomultiplikator hart ≤ 1, `monitor`/`active`/`off`-Rollout, idempotente Snapshot-Persistenz, Live & Backtest teilen den pure Kern (RMA-P5-01, v1.67.0) |
 | `docs/DRAWDOWN_SCALING.md` | Hysteretisches Drawdown-Risk-Scaling: reconcilte Equity gegen persistierten High-Water-Mark, monotoner Faktor hart ≤ 1, sofortige Degradation + bestätigte Recovery, optionales PAUSE-Veto für neue Einstiege, cashflow-neutrale HWM-Führung (RMA-P5-04, v1.68.0) |
+| `docs/SIGNAL_DECAY.md` | Versionierte Signal-Decay-Exits: Entry-Snapshot gegen point-in-time Current-Signal, default-off je Klasse, Hysterese, Safety-Exits bleiben vorrangig (RMA-P5-05, v1.69.0) |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
 | `docs/CONFIGURATION.md` / `CONFIGURATION.md` | Env-Flags mit sicheren Defaults (kanonisch) |
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |

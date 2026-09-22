@@ -80,6 +80,7 @@ import {
 } from "./marketRegime";
 import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
 import { telemetry } from "./telemetry";
+import { LIVE_SIGNAL_BAR_MS, persistClosedEntrySignal } from "./signalDecayRuntime";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Basistypen
@@ -945,6 +946,25 @@ export function createPaperRuleAdapter(opts?: {
             reason: `BROKER:${fill.reason ?? fill.status ?? "rejected"}`,
             at: new Date().toISOString(),
           };
+        }
+        if (journalPosRef.value) {
+          try {
+            const candles = await getCandles(symbol, "15m", 120);
+            await persistClosedEntrySignal({
+              positionId: journalPosRef.value.id,
+              symbol,
+              strategyClass: ctx.strategyClass ?? null,
+              asOfMs: Date.now(),
+              candles,
+              barDurationMs: LIVE_SIGNAL_BAR_MS,
+              timeBasis: "open",
+            });
+          } catch (e) {
+            structuredLog("error", "signal_decay_entry_capture_failed", {
+              symbol,
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
         }
         // GAP-03 (D1a): Journal-Zeile mit RULE-Snapshot (Regel =
         // Entscheidungskette: signature + Ursprungsrolle; keine erfundenen

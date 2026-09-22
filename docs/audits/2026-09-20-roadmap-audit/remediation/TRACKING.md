@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-22 (RMA-P5-04 → FIXED, v1.68.0)
+Letzte Aktualisierung: 2026-09-22 (RMA-P5-05 → FIXED, v1.69.0)
 
 ## Statusmodell
 

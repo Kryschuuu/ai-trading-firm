@@ -310,6 +310,9 @@ export const BLOCK_REASON_LABELS: Record<string, string> = {
   TAKE_PROFIT_HIT: "Take-Profit erreicht",
   TRAILING_STOP_HIT: "Trailing-Stop ausgelöst",
   TIME_STOP_HIT: "Time-Stop (max. Haltedauer) erreicht",
+  SIGNAL_DECAY_EXIT: "Signal-Verfall (bestätigter Exit)",
+  SIGNAL_DECAY_COUNTERFACTUAL: "Signal-Verfall (Monitor-Counterfactual)",
+  SIGNAL_DECAY_CAPTURED: "Entry-Signal erfasst",
   MISSION_KILLED: "Mission beendet",
   MAX_POSITION_PCT: "Positionsgröße über Limit",
   NO_STOP_LOSS: "Order ohne Pflicht-Stop-Loss",
@@ -341,6 +344,12 @@ export const BLOCK_REASON_EXPLANATIONS: Record<string, string> = {
     "Der Trailing-Stop (GAP-05) hat die Position glattgestellt: Der Kurs ist vom erreichten Stand um mehr als den konfigurierten Rückgabeweg zurückgefallen. Gewinnschutz, kein Fehler.",
   TIME_STOP_HIT:
     "Die maximale Haltedauer (RISK_TIME_STOP_HOURS) ist erreicht; der Monitor hat die Position unabhängig vom Kurs geschlossen.",
+  SIGNAL_DECAY_EXIT:
+    "Das versionierte Entry-Signal ist bestätigt verfallen oder umgekehrt. Der Monitor hat SIGNAL_DECAY gesetzt — erst nach Stop, Take-Profit, Trailing und Time-Stop.",
+  SIGNAL_DECAY_COUNTERFACTUAL:
+    "Dieselbe Schwelle wäre erreicht, aber der Modus ist monitor, ein Safety-Exit hat Vorrang, oder der Kill-Switch besitzt den Close. Es wurde nicht wegen Signal-Verfall geschlossen.",
+  SIGNAL_DECAY_CAPTURED:
+    "Beim Fill wurde der unveränderliche Entry-Signal-Snapshot geschrieben. Fehlt er, bleibt die Position MISSING und wird nicht wegen Signal-Verfall geschlossen.",
   MISSION_KILLED: "Die zugehörige Mission wurde beendet, bevor der Auftrag ausgeführt werden konnte.",
   MAX_POSITION_PCT: "Die Ordergröße hätte das konfigurierte Positions-Limit überschritten.",
   NO_STOP_LOSS: "Jede Order braucht zwingend einen Stop-Loss. Ohne ihn wird nicht gehandelt.",
@@ -1346,6 +1355,99 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
           { label: "Ausstiegskurs", value: formatKnownValue("exit", d.exit) },
           { label: "Auslösekurs", value: formatKnownValue("triggerPrice", d.triggerPrice) },
           { label: "Realisierter Gewinn/Verlust", value: formatKnownValue("realizedPnl", d.realizedPnl) },
+        ],
+      },
+    ],
+  },
+
+  SIGNAL_DECAY_EXIT: {
+    label: "Signal-Verfall ausgelöst",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "SIGNAL_DECAY (RMA-P5-05, v1.69.0): das persistierte Entry-Signal und das point-in-time aktuelle Signal derselben Semantik haben die versionierte Schwelle bestätigt. Safety-Exits (Kill-Switch, Stop, Take-Profit, Trailing, Time-Stop) bleiben vorrangig. Fehlende, stale oder inkompatible Signale schließen nicht.",
+    headline: (d) => {
+      const signal = d.signal as Rec | undefined;
+      const symbol = symbolOf(d);
+      const reason = text(signal?.policyReason) ?? text(d.code);
+      return [symbol, reason ?? "SIGNAL_DECAY"].filter(Boolean).join(" · ");
+    },
+    explain: () =>
+      "Der Exit folgt einer bestätigten Signaländerung, nicht einer Haltedauer und nicht einem manuellen Flatten. Der Audit enthält Entry- und Current-Scores nur bis zur Entscheidungszeit.",
+    sections: (d) => {
+      const signal = (d.signal ?? {}) as Rec;
+      return [
+        {
+          title: "Positionsabschluss",
+          facts: [
+            { label: "Symbol", value: symbolOf(d) || "—" },
+            { label: "Richtung", value: formatKnownValue("side", d.side) },
+            { label: "Ausstiegskurs", value: formatKnownValue("exit", d.exit) },
+            { label: "Realisierter Gewinn/Verlust", value: formatKnownValue("realizedPnl", d.realizedPnl) },
+          ],
+        },
+        {
+          title: "Signalvergleich",
+          facts: [
+            { label: "Policy", value: text(signal.policyVersion) ?? "—", mono: true },
+            { label: "Grund", value: text(signal.policyReason) ?? "—", mono: true },
+            { label: "Klasse", value: text(signal.strategyClass) ?? "—" },
+            { label: "Entry-Stärke", value: num(signal.entryStrength) !== null ? formatNumber(num(signal.entryStrength) as number, 4) : "unbekannt" },
+            { label: "Aktuelle Stärke", value: num(signal.currentStrength) !== null ? formatNumber(num(signal.currentStrength) as number, 4) : "unbekannt" },
+            { label: "Coverage", value: num(signal.coverage) !== null ? formatNumber(num(signal.coverage) as number, 2) : "unbekannt" },
+            { label: "Semantik", value: text(signal.semanticsVersion) ?? "—" },
+            { label: "Modus", value: text(signal.mode) ?? "—" },
+          ],
+        },
+      ];
+    },
+  },
+
+  SIGNAL_DECAY_COUNTERFACTUAL: {
+    label: "Signal-Verfall (nur Beobachtung)",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Die Signal-Decay-Schwelle wäre bestätigt, aber es wurde nicht deswegen geschlossen (Monitor-Modus, Kill-Switch oder vorrangiger Safety-Exit). Der Counterfactual-PnL ist Mark-to-market, kein realisierter Exit.",
+    headline: (d) => symbolOf(d) || "Signal-Decay",
+    explain: () => "Monitor-only misst, bevor eine Klasse live schließen darf. Unbekannt bleibt unbekannt — kein Exit aus fehlenden Daten.",
+    sections: (d) => {
+      const signal = (d.signal ?? {}) as Rec;
+      return [
+        {
+          title: "Counterfactual",
+          facts: [
+            { label: "Symbol", value: symbolOf(d) || "—" },
+            { label: "Grund", value: text(signal.policyReason) ?? "—", mono: true },
+            { label: "Policy", value: text(signal.policyVersion) ?? "—", mono: true },
+            { label: "Coverage", value: num(signal.coverage) !== null ? formatNumber(num(signal.coverage) as number, 2) : "unbekannt" },
+            { label: "MTM", value: num(signal.counterfactualPnl) !== null ? formatSigned(num(signal.counterfactualPnl) as number) : "nicht belegbar" },
+          ],
+        },
+      ];
+    },
+  },
+
+  SIGNAL_DECAY_CAPTURED: {
+    label: "Entry-Signal erfasst",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Unveränderlicher Entry-Signal-Snapshot (sig1) nach dem Fill. Danach ist die Spalte schreibgeschützt. NULL bleibt MISSING und löst keinen Signal-Exit aus.",
+    headline: (d) => [symbolOf(d), text(d.direction) ?? "ohne Richtung"].filter(Boolean).join(" · "),
+    explain: () => "Der Snapshot ist die Referenz für den späteren Vergleich. Er wird nicht nachträglich mit einem neueren Signal überschrieben.",
+    sections: (d) => [
+      {
+        title: "Entry-Signal",
+        facts: [
+          { label: "Symbol", value: symbolOf(d) || "—" },
+          { label: "Klasse", value: text(d.strategyClass) ?? "—" },
+          { label: "Richtung", value: text(d.direction) ?? "unbekannt" },
+          { label: "Stärke", value: num(d.strength) !== null ? formatNumber(num(d.strength) as number, 4) : "unbekannt" },
+          { label: "Konfidenz", value: num(d.confidence) !== null ? formatNumber(num(d.confidence) as number, 4) : "unbekannt" },
+          { label: "Coverage", value: num(d.coverage) !== null ? formatNumber(num(d.coverage) as number, 2) : "unbekannt" },
+          { label: "Semantik", value: text(d.semanticsVersion) ?? "—" },
+          { label: "Verfügbar ab", value: text(d.availableAt) ?? "—" },
         ],
       },
     ],
