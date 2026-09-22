@@ -1,7 +1,7 @@
 # RMA-P2-03: Deterministische Multi-Timeframe-Konfluenz
 
 - **Antwort:** Teilweise
-- **Tracking-Status:** `PARTIAL`
+- **Tracking-Status:** `FIXED` (v1.62.0, PR [#160](https://github.com/Kryschuuu/ai-trading-firm/pull/160), Commit `4ffee0d`)
 - **Severity:** `MEDIUM`
 - **Quick Estimate Restaufwand:** **3–5 PT**
 - **Umsetzungs-Prompt:** [`PROMPT-P2-03`](../prompts/PROMPT-P2-03-multi-timeframe-confluence.md)
@@ -38,3 +38,22 @@ Mehrere Timeframes sind verfügbar und werden sprachlich vom Agenten zusammengef
 - Methode: statische Pfad-/Symbolprüfung, Schema- und Testabgleich; keine reine
   Dokumentationsbehauptung als Implementierungsbeleg.
 - Tracking: [`../remediation/TRACKING.md`](../remediation/TRACKING.md)
+
+## Umsetzung (v1.62.0)
+
+- Reine Formel `mtf-confluence@1` (`src/confluence/`): as-of-Ausrichtung
+  (`barEnd ≤ asOf`, `availableAt ≤ asOf`), drei bounded Features je
+  Timeframe, Coverage/Conflict/Confidence, ABSTAIN fail-closed
+  (`null` statt `0`), `snapshotKey` als Idempotency-Kennung.
+- Trusted-Data-Integration im technischen Step (`analysis.confluence`,
+  `confluenceMeta`) und im Analysten (`agentMessages.meta.confluence`);
+  der Validator verwirft LLM-Override-Versuche strukturell.
+- Bounded Metrik `confluence_runs_total{result,source}`, Audit-Event
+  `confluence_computed`, keine DB-Migration (versionierte Artefakte),
+  Rollback via `CONFLUENCE_ENABLED=false`.
+- Tests: `tests/confluence.{unit,adapters,cycle}.test.ts` (38) +
+  Golden-Fixture; Doku: `docs/MTF_CONFLUENCE.md`.
+- Akzeptanzkriterien: keine offene HTF-Kerze (Look-ahead-Tests) ·
+  deterministischer Score (Golden/Parität) · sichtbarer Konflikt
+  (`conflict-high`, DEGRADED) · kein stilles Überschreiben
+  (Validator- + Step-Tests).
