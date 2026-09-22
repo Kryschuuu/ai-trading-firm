@@ -418,6 +418,28 @@ export const telemetry = {
       telemetry.crossSectional.rankConflicts.reset();
     },
   },
+  /**
+   * Kalibrierbare strukturierte Sentiment-Outputs (RMA-P2-05, v1.64.0).
+   *
+   * Labels sind ausschließlich Code-konstante Ergebniswerte
+   * (`status`: ACTIVE | ABSTAIN, `direction`: BULLISH | BEARISH | NEUTRAL | none,
+   * `horizon`: 4h | 24h | 72h, `result`: captured | duplicate | skipped | unique | syndicated_duplicate) —
+   * KEINE Instrument- oder Headline-IDs als Labels.
+   */
+  sentiment: {
+    /** Sentiment-Auswertungen je Status, Richtung und Horizont. */
+    evaluations: new LabelCounter("sentiment_evaluations_total"),
+    /** Persistierte Sentiment-Forecasts je Ergebnis. */
+    captures: new LabelCounter("sentiment_captures_total"),
+    /** Syndikations-Deduplikationen je Ausgang (unique | syndicated_duplicate). */
+    deduplications: new LabelCounter("sentiment_deduplications_total"),
+    /** alle Zähler der Sentiment-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.sentiment.evaluations.reset();
+      telemetry.sentiment.captures.reset();
+      telemetry.sentiment.deduplications.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -671,4 +693,5 @@ export function resetTelemetryForTests(): void {
   telemetry.backtest.reset();
   telemetry.confluence.reset();
   telemetry.crossSectional.reset();
+  telemetry.sentiment.reset();
 }
