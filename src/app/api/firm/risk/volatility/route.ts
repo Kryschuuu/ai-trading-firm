@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdaptiveRiskStatus, updateAdaptiveRisk } from "@/lib/adaptiveRisk";
 import { getVolatilityTargetingStatus } from "@/lib/volatilityTargeting";
+import { getDrawdownScalingStatus } from "@/lib/drawdownScaling";
 import { guardWrite } from "@/lib/apiAuth";
 import { publicErrorMessage } from "@/lib/secrets";
 
@@ -22,6 +23,10 @@ export const dynamic = "force-dynamic";
  *   config / bounds            aktive Schwellwerte + erlaubtes Fenster
  *   lastUpdate / lastChange    ISO-Zeitstempel
  *   stale                      true, wenn die letzte Bewertung > 5 Min alt
+ *   drawdownScaling            (RMA-P5-04, v1.68.0) additiver Abschnitt des
+ *                              hysteretischen Drawdown-Risk-Scalings:
+ *                              Stufe/Faktor/PAUSE, High-Water-Mark, Drawdown,
+ *                              Cashflow-Attribution, Policyversion
  *
  * Dauerhafte Historie: Audit-Log-Events `RISK_ADAPTIVE`
  * (siehe GET /api/firm? → auditLog, bzw. DB-Tabelle audit_log).
@@ -32,10 +37,14 @@ export async function GET() {
   // Portfolio-Volatility-Targeting (dieselbe Kaskade, zweiter Faktor).
   // Fehlt, wenn noch nie eine Bewertung stattfand (rückwärtskompatibel).
   const vt = getVolatilityTargetingStatus();
+  // RMA-P5-04 (v1.68.0): additiver Abschnitt für das hysteretische
+  // Drawdown-Risk-Scaling (dritter Faktor derselben Kaskade).
+  const dds = getDrawdownScalingStatus();
   return NextResponse.json({
     ok: true,
     adaptive: status,
     volatilityTargeting: vt ?? null,
+    drawdownScaling: dds ?? null,
     hint:
       status == null
         ? "Noch keine Bewertung erfolgt — der Monitor-Tick (60 s) oder ein POST hier starten sie."

@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.67.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.68.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,36 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.68.0] — 2026-09-22 · Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04)
+
+### Hinzugefügt
+
+- **Pure, deterministische Drawdown-Policy (`src/portfolio/drawdownScaling.ts`):** versionierte, monotone Kurve `f(dd)` (1 unter der Soft-Schwelle, linear bis `minFactor` an der Hard-Schwelle, Boden darüber; stetig, `NaN`/∞ ⇒ Boden), Stufen `NORMAL/SOFT/DEEP/PAUSE`, Pflicht-Reihenfolge **Equity-Plausibilität → Zeitachse (Zukunft/Staleness) → Reconciliation-Gate → Cashflow-Residuum → HWM/Drawdown → Kurve + Hysterese** — uhrfrei (Zeit injiziert), ohne Seiteneffekte, mit `ddp1:`-Policy-, `dd1:`-Daten- und `dsc1:`-Idempotency-Hashes.
+- **Hysterese (kein Flapping):** Degradation wirkt sofort im selben Schritt; Erholung nur nach vollständigem Cooldown (`recoveryCooldownMs`, Default 6 h) **und** `recoveryConfirmations` (Default 3) aufeinanderfolgenden Erholungsbewertungen **nach** dem Cooldown, höchstens `recoveryStep` (Default 0.05) je Schritt und nie über den Kurvenwert. Bewertungen während des Cooldowns zählen nicht (die Erholung ist damit garantiert mindestens so konservativ wie die Degradation). Erneuter Rückfall setzt die Zählung auf 0.
+- **Cashflow-Behandlung:** Ein-/Auszahlungen werden als Residuum zwischen Equity-Δ und Trading-PnL-Δ (realisiert + Mark-to-Market offener Positionen, Short invertiert) erkannt und als `cumulativeNetFlow` geführt; der High-Water-Mark wird auf der cashflow-bereinigten Equity gebildet (Einzahlung hebt ihn nicht, Auszahlung erzeugt keinen Schein-Drawdown). Unverifizierte Attribution (fehlende/`null`-PnL, zu alte Vorbewertung) neutralisiert **nichts** — ein nicht erkannter Zufluss erhöht dann den HWM und wirkt nur risikosenkend.
+- **Fail-closed statt stiller Neutralität:** fehlende/nicht-positive Equity (`NO_EQUITY`/`INVALID_EQUITY`), Zukunft-Zeitstempel (`FUTURE_EQUITY`), Staleness (`STALE_EQUITY`) und fehlende/kritische/veraltete Reconciliation (`RECONCILIATION_MISSING|FAILED|STALE`) setzen den Faktor sofort auf `minFactor`, lassen `drawdownPct` `null` (unbekannt ≠ 0) und behaupten **keine** PAUSE; der HWM bleibt erhalten.
+- **Live-Orchestrator + Feature-Flag (`src/lib/drawdownScaling.ts`):** `DRAWDOWN_SCALING_MODE` ∈ `off|monitor|active` (Default `monitor` = Bewertung + Persistenz + Reporting, **keine** Wirkung; unbekannt ⇒ `monitor`) + `dsp.enabled` und bounds-geklemmte `dsp.*`-Parameter in `risk_config`; autoritative Equity aus `equity_snapshots` → Paper-Ledger-Fallback → `null`; Single-Flight + 60-s-Intervall; Audit `RISK_DRAWDOWN_SCALING` + bounded Metriken.
+- **Risk-Guard-Composition (`src/lib/riskGuard.ts`):** dritter Faktor in der Kaskade `Code-Ceilings → Basis-Limit → Regime × VolTarget × Drawdown → Code-Boden`; multiplikativ (alle ≤ 1 ⇒ Produkt ≤ 1, Basis-Limit wird **niemals** überschritten), hart auf (0, 1] geklemmt, `null` hebt auf, keine Kumulation bei DB-Neuladung; `drawdownPauseState()` + stabiler Guardrail `drawdown-pause:new-entries-blocked` in `validateOrder` blockiert **neue** Einstiege (Exits unberührt); widersprüchliche Zustände (`paused` ohne `PAUSE`) werden verworfen.
+- **Persistenz + idempotente Migration (`src/db/schema.ts`, `drizzle/2026-09-22_drawdown_scaling.sql`):** append-only Tabelle `drawdown_scaling_snapshots` (Modus/Status/Reason, Equity + Verfügbarkeitszeit, cashflow-bereinigte Equity, HWM, Drawdown, Ziel-/angewendeter Faktor, Stufe/PAUSE, Transition, Cashflow-Attribution, Reconciliation-Gate, Equity-Quelle/-Alter, **Zustandsprojektion** für die Neustart-Rekonstruktion, drei Zeitachsen), UNIQUE `snapshot_id` + `ON CONFLICT DO NOTHING` ⇒ Retry/Restart ohne doppelte Zeile, 16 CHECK-Constraints (Enums, `applied/prev_factor ∈ (0,1]`, `computed_at ≥ as_of`, `paused = (stage='PAUSE')`, Hash-Regexe). Aktivwerte `dsp.activeFactor`/`dsp.activeAt`/`dsp.pause` für den Mikro-Executor (nur `active`).
+- **Neustart-Rekonstruktion:** Der Policy-Zustand (HWM, Faktor, Cashflow-Basis, Cooldown-Basis, Bestätigungszählung, Stufe, Policyversion) wird beim ersten Lauf nach einem Neustart aus der jüngsten Snapshot-Zeile rekonstruiert — **kein HWM-Reset durch Deployment**; die Zustandsprojektion ist von der Beobachtung getrennt, damit eine `CONSERVATIVE`-Zeile die Cashflow-Basis nicht verschiebt.
+- **Monitoring & API:** `GET/POST /api/firm/risk/drawdown-scaling` (Status inkl. `riskBudget { base, effective }`; POST mit `firm.write` erzwingt einen Lauf), `GET /api/firm/risk/volatility` + `drawdownScaling`, `GET /api/firm/risk` + `drawdownFactor`/`drawdownStage`/`drawdownPaused`/`drawdownPolicyVersion`; dritte Dashboard-Sektion `drawdown` in `effectiveConfigView()` (`dsp.*` mit Bounds + Defaults); Monitor-Tick-Hook vor `getLimits()` mit `TickResult.drawdownScaling`; Audit-Renderer `RISK_DRAWDOWN_SCALING` in `src/lib/auditView.ts`.
+- **Dokumentation:** neues [`docs/DRAWDOWN_SCALING.md`](docs/DRAWDOWN_SCALING.md) (Kurve/Stufen, Hysterese-Regeln, Equity-/Zeitsemantik, Cashflow-Erkennung, Fail-closed-Matrix, Persistenz/Idempotenz/Neustart, Observability, Composition, Migration/Rollback, Test-Matrix, Annahmen), `CONFIGURATION.md` (§ Drawdown-Risk-Scaling), `.env.example`, `docs/README.md`, Root-`README.md`.
+- **Tests (Pflicht-Matrix):** `tests/portfolio.drawdownScaling.test.ts` (Kurve exakt/monoton/stetig, Stufen, Bootstrap/kein HWM-Reset, Monotonie in der Zeit, Cooldown + Bestätigungen + begrenzte Schritte, Ein-/Auszahlungs-Fixtures, unverifizierte Attribution, Fail-closed-Matrix, PAUSE, Konfigurationsklemmung, Determinismus, Policyversion/Idempotency-Key, Zustands-Roundtrip), `tests/riskGuard.drawdownScaling.test.ts` (Monitor-only ändert nichts, Komposition Regime × VolTarget × Drawdown überschreitet Basis/Ceilings nie, Boden, keine Kumulation, PAUSE-Veto + Widerspruch), `tests/drawdownScaling.engine.test.ts` (Modi, PAUSE-Veto über `validateOrder`, Fail-closed-Paths, Ein-/Auszahlung, Idempotenz, Min-Interval, Persistenz-Fail-Safe, Neustart-Identität, Status-API), `tests/drawdownScaling.db.test.ts` (embedded Postgres: Migration zweifach ausführbar, Roundtrip über den echten Persistenzpfad, Retry ⇒ eine Zeile, Neustart über den echten Lesepfad, CHECK-Constraints).
+
+### Geändert
+
+- `src/lib/monitor.ts`: `doTick` ruft `updateDrawdownScaling()` vor `getLimits()` auf (Fehler landen in `TickResult.errors`, brechen den Tick nie ab); `TickResult.drawdownScaling`.
+- `src/lib/microExecutor.ts`: `ensureRuntimeLimitsLoaded()` liest zusätzlich `dsp.activeFactor`/`dsp.activeAt`/`dsp.pause` und wendet sie nur in eigenem `active`-Modus und bei frischem Zustand an (sonst Rücknahme).
+- `src/lib/riskConfigService.ts`: dritter Namensraum `drawdown` in `effectiveConfigView()`; `setConfigValue` schreibt `dsp.*` geklemmt (Audit `CONFIG_CHANGED` mit `namespace: "drawdown"`) und stößt eine Neubewertung an.
+- `src/lib/telemetry.ts`: Zähler `drawdown_scaling_*` (bounded, nur Code-Konstanten als Labels).
+- `src/lib/stateRegistry.ts`: Slot `drawdownState`.
+- `src/portfolio/index.ts`: Exporte der Drawdown-Policy.
+
+### Sicherheit
+
+- Kein automatischer Kapitaltransfer, kein HWM-Reset durch Deployment, kein Ersatz der Kill-Switches (`maxEquityDrawdownPct`/`dailyLossLimitPct` bleiben unverändert und greifen weiter zusätzlich).
+- Keine Secrets/PII/Broker-Payloads im Audit: `equitySource` ist eine Code-Konstante, Reason-Texte sind numerisch; Audit-Detail ohne Konto-/Order-IDs.
 
 ## [1.67.0] — 2026-09-22 · Kontinuierliches Portfolio-Volatility-Targeting (RMA-P5-01)
 

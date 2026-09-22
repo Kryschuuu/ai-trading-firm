@@ -281,6 +281,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/CROSS_SECTIONAL_RANKING.md` | Point-in-Time Cross-Sectional Momentum Ranking (PIT-Snapshots, Rang/Perzentil, Gewicht-0-Scanner-Faktor; RMA-P2-04, v1.63.0) |
 | `docs/SENTIMENT.md` | Kalibrierbare strukturierte Sentiment-Outputs (Forecast-Envelopes, Trennung p/Coverage, Deduplikation, P3.1-Link; RMA-P2-05, v1.64.0) |
 | `docs/VOLATILITY_TARGETING.md` | Kontinuierliches Portfolio-Volatility-Targeting: as-of-sichere Forecast-Volatilität gegen Ziel, Risikomultiplikator hart ≤ 1, `monitor`/`active`/`off`-Rollout, idempotente Snapshot-Persistenz, Live & Backtest teilen den pure Kern (RMA-P5-01, v1.67.0) |
+| `docs/DRAWDOWN_SCALING.md` | Hysteretisches Drawdown-Risk-Scaling: reconcilte Equity gegen persistierten High-Water-Mark, monotoner Faktor hart ≤ 1, sofortige Degradation + bestätigte Recovery, optionales PAUSE-Veto für neue Einstiege, cashflow-neutrale HWM-Führung (RMA-P5-04, v1.68.0) |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
 | `docs/CONFIGURATION.md` / `CONFIGURATION.md` | Env-Flags mit sicheren Defaults (kanonisch) |
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |

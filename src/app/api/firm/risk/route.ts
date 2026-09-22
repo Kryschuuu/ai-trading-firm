@@ -3,7 +3,14 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { positions } from "@/db/schema";
 import { correlationClusters } from "@/portfolio";
-import { getAdaptiveRiskState, getBaseLimits, getLimits } from "@/lib/riskGuard";
+import {
+  drawdownPauseState,
+  getAdaptiveRiskState,
+  getBaseLimits,
+  getDrawdownScalingState,
+  getLimits,
+  getVolatilityTargetingState,
+} from "@/lib/riskGuard";
 import {
   KELLY_STATS_TTL_MS,
   SIZING_CONFIG_BOUNDS,
@@ -124,6 +131,14 @@ export async function GET() {
         defaultStopLossPct: limits.defaultStopLossPct,
         adaptiveRegime: adaptive?.regime ?? null,
         adaptiveFactor: adaptive?.factor ?? null,
+        // RMA-P5-04 (v1.68.0): die beiden weiteren Faktoren der Kaskade sind
+        // hier sichtbar, damit jede Sizingentscheidung den angewendeten
+        // Drawdown-Faktor (und einen aktiven PAUSE-Block) referenzieren kann.
+        volTargetFactor: getVolatilityTargetingState()?.factor ?? null,
+        drawdownFactor: getDrawdownScalingState()?.factor ?? null,
+        drawdownStage: getDrawdownScalingState()?.stage ?? null,
+        drawdownPaused: drawdownPauseState().blocked,
+        drawdownPolicyVersion: getDrawdownScalingState()?.policyVersion ?? null,
       },
     },
     clusterGuardrail: {

@@ -31,6 +31,7 @@ import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
 import { updateVolatilityTargeting } from "./volatilityTargeting";
+import { updateDrawdownScaling } from "./drawdownScaling";
 import { refreshInstrumentRegimes } from "./marketRegime";
 import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
 import { scheduleRegimeSnapshotPersist } from "./regimeSnapshotStore";
@@ -101,6 +102,22 @@ export type TickResult = {
     targetAnnualizedVol: number;
     forecastAnnualizedVol: number | null;
     targetError: number | null;
+  } | null;
+  /**
+   * RMA-P5-04 (v1.68.0): Zustand des hysteretischen Drawdown-Risk-Scalings
+   * nach diesem Tick (best-effort; null bei noch keinem Lauf). `factor` ist
+   * der angewendete Multiplikator (1 = neutral, ≤ 1); `paused` ist true, wenn
+   * die PAUSE-Stufe neue Einstiege blockiert (nur im Modus `active` wirksam).
+   */
+  drawdownScaling: {
+    mode: string;
+    active: boolean;
+    stage: string;
+    status: string | null;
+    reasonCode: string | null;
+    drawdownPct: number | null;
+    appliedFactor: number;
+    paused: boolean;
   } | null;
   /**
    * GAP-06 (v1.46.0): Markt-Regime der offenen Positionen nach diesem Tick
@@ -183,6 +200,28 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     };
   } catch (e) {
     errors.push(`Volatility-Targeting fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
+  }
+
+  // RMA-P5-04 (v1.68.0): Hysteretisches Drawdown-Risk-Scaling — reduziert das
+  // Risikobudget VOR dem Kill-Switch anhand des laufenden High-Water-Mark-
+  // Drawdowns (Monitor-only per Default) und kann in der PAUSE-Stufe neue
+  // Einstiege blockieren. Fehler bleiben lokal (Fail-Safe): ein Fehler setzt
+  // den Faktor nicht auf „neutral“, sondern der vorherige Zustand bleibt.
+  let drawdownScaling: TickResult["drawdownScaling"] = null;
+  try {
+    const dd = await updateDrawdownScaling();
+    drawdownScaling = {
+      mode: dd.mode,
+      active: dd.active,
+      stage: dd.stage,
+      status: dd.status,
+      reasonCode: dd.reasonCode,
+      drawdownPct: dd.drawdownPct,
+      appliedFactor: dd.appliedFactor,
+      paused: dd.paused,
+    };
+  } catch (e) {
+    errors.push(`Drawdown-Scaling fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
   }
 
   const limits = getLimits();
@@ -462,6 +501,7 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     errors,
     adaptiveRisk,
     volatilityTargeting,
+    drawdownScaling,
     marketRegimes,
   };
 }

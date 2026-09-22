@@ -47,6 +47,11 @@
  *                               adaptiver Marktfaktor (reine RAM-Projektion).
  *   - `adaptiveState`           Aktuelle Volatilitaets-Bewertung (RAM); ein
  *                               persistierter Faktor (`PERSISTED`) liegt in der DB.
+ *   - `volTargetState`          Aktueller Volatility-Targeting-Faktor (RAM);
+ *                               persistiert in `risk_config` (`vtp.*`).
+ *   - `drawdownState`           Aktueller Drawdown-Scaling-Faktor + Stufe/PAUSE
+ *                               (RAM); Policy-Zustand in
+ *                               `drawdown_scaling_snapshots` + `risk_config` (`dsp.*`).
  *   - `brokerAdapters`          Adapter-/Ledger-Singleton-Cache der Broker-Factory.
  *   - `paperBrokerLedger`       Papier-Ledger (RAM); offene Positionen/Kill-
  *                               Status werden aus der DB hydriert.
@@ -64,7 +69,12 @@
 // Typ-Abhaengigkeiten werden nur als `import type` geholt (compiler-elektiv
 // entfernt) — die Registry hat KEINE Runtime-Importe, es entsteht also kein
 // Modul-Zyklus mit den Besitzern (`riskGuard`, `engine`, …).
-import type { RiskLimits, AdaptiveRiskState, VolatilityTargetingState } from "./riskGuard";
+import type {
+  RiskLimits,
+  AdaptiveRiskState,
+  VolatilityTargetingState,
+  DrawdownRiskState,
+} from "./riskGuard";
 import type { CircuitBreakerLatch } from "./circuitBreaker";
 import type { BrokerAdapter, BrokerVenueId } from "../contracts/broker";
 import type { PaperBroker } from "./broker";
@@ -221,6 +231,16 @@ export const state = {
    * nur senken, nie erhöhen).
    */
   volTargetState: ref<VolatilityTargetingState | null>("volTargetState"),
+  /**
+   * RMA-P5-04 (v1.68.0): Aktueller Drawdown-Scaling-Faktor + Stufe/PAUSE
+   * (RAM; der persistente Zustand — High-Water-Mark, Faktor, Cashflow-Basis,
+   * Hysterese — liegt in `drawdown_scaling_snapshots` plus `risk_config`
+   * `dsp.*`). Wird in `recomputeCurrent()` mit `adaptiveState` und
+   * `volTargetState` multiplikativ komponiert (alle Faktoren ∈ (0, 1] ⇒
+   * Ergebnis kann das Basis-Limit nur senken) und blockiert in der Stufe
+   * `PAUSE` neue Einstiege (`validateOrder`-Guardrail).
+   */
+  drawdownState: ref<DrawdownRiskState | null>("drawdownState"),
   /**
    * GAP-10 (v1.45.0): Latch des Auto-Circuit-Breakers. LATCHING heisst: einmal
    * ausgeloest bleibt ausgeloest, bis ein Mensch den Not-Halt ueber den

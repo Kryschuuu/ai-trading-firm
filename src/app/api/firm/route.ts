@@ -87,6 +87,10 @@ export async function GET(req: Request) {
       riskCeilings: LIMIT_CEILINGS,
       riskConfig: effectiveConfigView().limits,
       volatilityConfig: effectiveConfigView().volatility,
+      // RMA-P5-04 (v1.68.0): dritter Namensraum des Dashboards — die
+      // drawdown-Parameter (`dsp.*`) mit Code-Bounds und Defaults. Rein
+      // additiv; die bestehenden Sektionen bleiben unverändert.
+      drawdownConfig: effectiveConfigView().drawdown,
       // Adaptives Risk-Limit-System: Regime, wirksames maxRiskPerTrade,
       // Indikatorwerte + Trigger-Event-Historie (Details:
       // GET /api/firm/risk/volatility).

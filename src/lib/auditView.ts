@@ -2237,6 +2237,136 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  RISK_DRAWDOWN_SCALING: {
+    label: "Drawdown-Risk-Scaling",
+    category: "risk",
+    description:
+      "Das hysteretische Drawdown-Risk-Scaling (RMA-P5-04, v1.68.0) hat die reconciled Equity gegen den persistierten High-Water-Mark bewertet und daraus einen monotonen Risikofaktor (minFactor … 1) abgeleitet. Der Faktor skaliert das Risikobudget maxRiskPerTrade NUR senkend (hart ≤ 1) und wird mit Regime- und Volatility-Targeting-Faktor multiplikativ komponiert. Status CONSERVATIVE (WARN) heißt: fehlende, stale, invalide oder nicht abgeglichene Equity — der Faktor springt sofort auf den Boden (fail-closed), nicht auf neutral. Die Stufe PAUSE blockiert zusätzlich NEUE Einstiege (kein Multiplikator, sondern ein Veto). Ein-/Auszahlungen werden über das Trading-PnL-Residuum erkannt und verändern den High-Water-Mark nicht; im Modus monitor wird nichts angewendet, nur persistiert und berichtet.",
+    headline: (d) => {
+      const status = text(d.status)?.toUpperCase();
+      const stage = text(d.stage)?.toUpperCase();
+      const applied = num(d.appliedFactor);
+      const dd = num(d.drawdownPct);
+      const parts = [
+        status === "CONSERVATIVE"
+          ? `Konservativ (${text(d.reasonCode) ?? "unbekannt"})`
+          : status === "BOOTSTRAP"
+            ? "Bootstrap (High-Water-Mark etabliert)"
+            : status === "OK"
+              ? "Bewertung OK"
+              : "Bewertung",
+        stage ? `Stufe ${stage}${text(d.paused) === "true" ? " (PAUSE)" : ""}` : "",
+        dd !== null ? `Drawdown ${formatNumber(dd * 100, 2)} %` : "",
+        applied !== null ? formatKnownValue("factor", d.appliedFactor) : "",
+      ];
+      return parts.filter(Boolean).join(" · ");
+    },
+    explain: (d) => {
+      const status = text(d.status)?.toUpperCase();
+      const transition = text(d.transition)?.toUpperCase();
+      const reason = text(d.reason);
+      const parts: string[] = [];
+      if (status === "CONSERVATIVE") {
+        parts.push(
+          `Die Equity war nicht belastbar (fehlend/stale/invalide/nicht abgeglichen) — der Risikofaktor wurde sofort auf den Boden gesetzt (fail-closed, unbekannt ≠ neutral). ${reason ? `Grund: ${reason}` : ""}`
+        );
+      } else if (status === "BOOTSTRAP") {
+        parts.push(
+          "Erste Bewertung: Der High-Water-Mark wurde aus der Startbasis (Startkapital) abgeleitet — ein bestehendes Konto startet nicht mit Drawdown 0, und ein Deployment setzt ihn nicht zurück."
+        );
+      } else if (transition === "DEGRADE") {
+        parts.push("Der Drawdown ist gestiegen — der Faktor wurde im selben Schritt gesenkt (Degradation ist immer sofort).");
+      } else if (transition === "RECOVER") {
+        parts.push("Der Drawdown hat sich bestätigt erholt — der Faktor wurde um einen begrenzten Schritt angehoben (Cooldown + Bestätigungen).");
+      } else if (status === "OK") {
+        parts.push("Bewertung im Normalpfad — Faktor unverändert (Hysterese hält die Stufe).");
+      }
+      const det = num(d.cashflowDetected);
+      if (det !== null && Math.abs(det) > 0) {
+        parts.push(
+          `Externer Cashflow erkannt (${formatSigned(det)}): der High-Water-Mark wurde nicht verfälscht — Ein-/Auszahlungen sind keine Performance.`
+        );
+      }
+      if (text(d.cashflowVerification) === "unverified") {
+        parts.push(
+          "Cashflow-Attribution war nicht verifizierbar (Trading-PnL unvollständig oder Vorbewertung zu alt): es wurde NICHT neutralisiert — ein nicht erkannter Zufluss erhöht dann den High-Water-Mark und wirkt nur risiko-senkend."
+        );
+      }
+      if (text(d.mode) === "monitor") {
+        parts.push("Modus monitor: keine Größenänderung — der Faktor ist reine Beobachtung.");
+      }
+      return parts.length > 0 ? `${parts.join(" ")} ` : "Keine Bewertung protokolliert.";
+    },
+    sections: (d) => [
+      {
+        title: "Bewertung",
+        facts: [
+          { label: "Betriebsmodus", value: text(d.mode) ?? "—", hint: "monitor = keine Änderung, active = Faktor/PAUSE wirken, off = inaktiv." },
+          { label: "Status", value: text(d.status) ?? "—" },
+          { label: "Grund-Code", value: text(d.reasonCode) ?? "—", mono: true },
+          { label: "Begründung", value: text(d.reason) ?? "—" },
+          { label: "Stufe", value: formatKnownValue("stage", d.stage), hint: "NORMAL ≤ Soft-Schwelle, SOFT dazwischen, DEEP ≥ Hard-Schwelle, PAUSE blockiert neue Einstiege." },
+          { label: "Vorherige Stufe", value: formatKnownValue("stage", d.prevStage) },
+          { label: "PAUSE aktiv", value: text(d.paused) === "true" ? "ja (neue Einstiege blockiert)" : "nein" },
+          { label: "Transition", value: text(d.transition) ?? "—" },
+          { label: "Beobachtete Equity", value: num(d.equity) !== null ? formatNumber(num(d.equity) as number, 2) : "nicht beobachtbar" },
+          { label: "Cashflow-bereinigt", value: num(d.adjustedEquity) !== null ? formatNumber(num(d.adjustedEquity) as number, 2) : "nicht berechenbar" },
+          { label: "High-Water-Mark", value: num(d.hwm) !== null ? formatNumber(num(d.hwm) as number, 2) : "—" },
+          { label: "Drawdown", value: num(d.drawdownPct) !== null ? `${formatNumber(num(d.drawdownPct) as number * 100, 2)} %` : "nicht messbar (null ≠ 0)" },
+          { label: "Ziel-Faktor (Kurve)", value: num(d.targetFactor) !== null ? `${formatNumber(num(d.targetFactor) as number, 4)}×` : "— (fail-closed)" },
+          { label: "Vorheriger Faktor", value: num(d.prevFactor) !== null ? `${formatNumber(num(d.prevFactor) as number, 4)}×` : "—" },
+          { label: "Risiko-Faktor", value: formatKnownValue("factor", d.appliedFactor), hint: FIELD_HINTS.factor },
+          { label: "Netto-Cashflow (kumuliert)", value: num(d.cumulativeNetFlow) !== null ? formatSigned(num(d.cumulativeNetFlow) as number) : "—" },
+          { label: "Cashflow in diesem Schritt", value: num(d.cashflowDetected) !== null ? formatSigned(num(d.cashflowDetected) as number) : "—" },
+          { label: "Cashflow-Attribution", value: text(d.cashflowVerification) ?? "—" },
+          { label: "Equity-Quelle", value: formatKnownValue("source", d.equitySource), mono: true },
+          { label: "Equity-Alter", value: num(d.equityAgeMs) !== null ? `${formatNumber((num(d.equityAgeMs) as number) / 60_000, 1)} min` : "—" },
+          { label: "Recon-Alter", value: num(d.reconciliationAgeMs) !== null ? `${formatNumber((num(d.reconciliationAgeMs) as number) / 60_000, 1)} min` : "—" },
+          { label: "Erholungs-Bestätigungen", value: num(d.recoveryStreak) !== null ? String(num(d.recoveryStreak)) : "—" },
+          { label: "Policyversion", value: formatKnownValue("policyVersion", d.policyVersion), mono: true },
+          { label: "Berechnet am", value: text(d.computedAt) ? formatTimestampUtc(text(d.computedAt)) : "—" },
+        ],
+      },
+    ],
+    check: (d) => {
+      const issues: AuditIssue[] = [];
+      const applied = num(d.appliedFactor);
+      if (applied !== null && applied > 1) {
+        issues.push({
+          severity: "error",
+          title: "Widerspruch: Faktor erhöht das Risiko",
+          detail: `Faktor ${formatNumber(applied, 4)}× übersteigt 1,00. Der Drawdown-Faktor darf das Basis-Risikobudget niemals überschreiten — Klemmung prüfen.`,
+        });
+      }
+      const status = text(d.status)?.toUpperCase();
+      const dd = num(d.drawdownPct);
+      if (status === "CONSERVATIVE" && dd !== null) {
+        issues.push({
+          severity: "error",
+          title: "Widerspruch: konservativer Zustand mit Drawdown-Wert",
+          detail: "Bei CONSERVATIVE muss drawdownPct null sein (fail-closed: unbekannt ≠ 0). Ein Zahlenwert deutet auf einen fehlerhaften Write hin.",
+        });
+      }
+      const paused = text(d.paused) === "true";
+      const stage = text(d.stage)?.toUpperCase();
+      if (paused && stage !== "PAUSE") {
+        issues.push({
+          severity: "error",
+          title: "Widerspruch: PAUSE ohne PAUSE-Stufe",
+          detail: "Der Block neuer Einstiege ist ausschließlich an die Stufe PAUSE gebunden.",
+        });
+      }
+      if (status === "BOOTSTRAP" && num(d.hwm) === null) {
+        issues.push({
+          severity: "warn",
+          title: "Bootstrap ohne High-Water-Mark",
+          detail: "Der Bootstrap muss einen High-Water-Mark etablieren — fehlender Wert prüfen.",
+        });
+      }
+      return issues;
+    },
+  },
+
   REGIME_CHANGE: {
     label: "Markt-Regime gewechselt",
     category: "risk",

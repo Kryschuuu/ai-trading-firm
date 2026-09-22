@@ -486,6 +486,37 @@ export const telemetry = {
       telemetry.volatilityTargeting.snapshots.reset();
     },
   },
+  /**
+   * Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04, v1.68.0).
+   *
+   * Labels sind ausschließlich Code-konstante Kategorien:
+   *   * `result`     = bootstrap | ok | conservative | disabled
+   *   * `mode`       = monitor | active
+   *   * `stage`      = normal | soft | deep | pause
+   *   * `transition` = none | degrade | recover | bootstrap
+   *   * `reason`     = geschlossener `DrawdownScalingReasonCode` (bounded)
+   *
+   * Keine Instrument-/Trade-/Order-IDs und keine Konto-IDs als Label
+   * (Kardinalitätsregel wie oben); Equity/HWM stehen in der Snapshot-Tabelle
+   * und im Audit-Event, nicht in Metriken.
+   */
+  drawdownScaling: {
+    /** Bewertungs-Läufe je Ergebnis und Modus. */
+    updates: new LabelCounter("drawdown_scaling_updates_total"),
+    /** Faktor-/Stufenwechsel je Transition und Stufe. */
+    transitions: new LabelCounter("drawdown_scaling_transitions_total"),
+    /** Fail-closed-Bewertungen je geschlossenem Reason-Code. */
+    conservative: new LabelCounter("drawdown_scaling_conservative_total"),
+    /** Persistierte Snapshots je Ergebnis (written | duplicate | failed). */
+    snapshots: new LabelCounter("drawdown_scaling_snapshots_total"),
+    /** alle Zähler der Drawdown-Scaling-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.drawdownScaling.updates.reset();
+      telemetry.drawdownScaling.transitions.reset();
+      telemetry.drawdownScaling.conservative.reset();
+      telemetry.drawdownScaling.snapshots.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */

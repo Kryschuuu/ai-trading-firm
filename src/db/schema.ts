@@ -2378,3 +2378,170 @@ export const volatilityTargetingSnapshots = pgTable(
     ),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04, v1.68.0) — append-only
+//
+// Eine Tabelle, ausschließlich additiv (Migration
+// `drizzle/2026-09-22_drawdown_scaling.sql`):
+//
+//   drawdown_scaling_snapshots  EINE Zeile je Bewertung der Drawdown-Policy
+//                               (Equity-Beobachtung + High-Water-Mark +
+//                               Drawdown + Faktor + Stufe + Hysterese-Zustand),
+//                               append-only und idempotent.
+//
+// Zeitsemantik (drei getrennte Zeitachsen — kein Look-ahead):
+//   equity_available_at = Verfügbarkeitszeit der Equity (Snapshot-Zeit `ts`);
+//                         nie in der Zukunft (Policy-Guard FUTURE_EQUITY).
+//   as_of               = Entscheidungszeitpunkt (Monitor-Tick).
+//   computed_at         = Berechnungszeit, immer ≥ as_of (CHECK).
+//
+// Zustands-Projektion (Neustart-Rekonstruktion): `last_equity`,
+// `last_observation_at`, `last_trading_pnl`, `last_degrade_at`,
+// `last_transition_at`, `recovery_streak` tragen den Policy-Zustand NACH
+// dieser Bewertung — auch wenn die Beobachtung selbst fail-closed war. Aus der
+// jüngsten Zeile rekonstruiert der Prozess nach einem Neustart denselben
+// High-Water-Mark und denselben Faktor (kein Reset durch Deployment).
+//
+// Fail-closed: `drawdown_pct`/`target_factor` sind NULL, wenn keine gültige
+// Messung möglich war (unbekannt ≠ 0); `applied_factor` ist IMMER endlich und
+// in (0, 1] (CHECK-Constraint) — der Faktor kann das Basis-Risikobudget nie
+// überschreiten.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const drawdownScalingSnapshots = pgTable(
+  "drawdown_scaling_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `dsc1:<sha256>` — deterministischer Idempotency-Key (Retry ⇒ No-Op). */
+    snapshotId: text("snapshot_id").notNull(),
+    /** Betriebsmodus: `monitor` (keine Größenänderung) | `active`. */
+    mode: text("mode").notNull(),
+    /** `BOOTSTRAP` (erste Bewertung) | `OK` | `CONSERVATIVE` (fail-closed). */
+    status: text("status").notNull(),
+    /** Geschlossener Reason-Code (bounded, z. B. `OK`, `STALE_EQUITY`). */
+    reasonCode: text("reason_code").notNull(),
+    /** Menschenlesbare Begründung (Audit/Status). */
+    reason: text("reason").notNull(),
+    /** Entscheidungszeitpunkt (timestamptz). */
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    /** Berechnungszeit (timestamptz), immer ≥ as_of. */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    /** Verfügbarkeitszeit der Equity (timestamptz) — NULL wenn nicht beobachtbar. */
+    equityAvailableAt: timestamp("equity_available_at", { withTimezone: true }),
+    /** Beobachtete Equity (Kontowährung) — NULL wenn nicht beobachtbar. */
+    equity: numeric("equity"),
+    /** Cashflow-bereinigte Equity (`equity − cumulative_net_flow`). */
+    adjustedEquity: numeric("adjusted_equity"),
+    /** Cashflow-bereinigter High-Water-Mark (nie fallend, neustartfest). */
+    hwm: numeric("hwm"),
+    /** Drawdown ∈ [0, 1] — NULL wenn nicht messbar (unbekannt ≠ 0). */
+    drawdownPct: numeric("drawdown_pct"),
+    /** Kurvenwert (Ziel-Faktor ∈ [0, 1]) — NULL wenn nicht berechenbar. */
+    targetFactor: numeric("target_factor"),
+    /** Vorheriger Faktor ∈ (0, 1]. */
+    prevFactor: numeric("prev_factor").notNull(),
+    /** Angewendeter Faktor ∈ (0, 1] — IMMER endlich (fail-closed). */
+    appliedFactor: numeric("applied_factor").notNull(),
+    /** Stufe: NORMAL | SOFT | DEEP | PAUSE. */
+    stage: text("stage").notNull(),
+    /** true = neue Einstiege blockiert (nur PAUSE-Stufe). */
+    paused: boolean("paused").notNull(),
+    /** Transition: NONE | DEGRADE | RECOVER | BOOTSTRAP. */
+    transition: text("transition").notNull(),
+    /** Stufe der Vorbewertung (NULL = Bootstrap). */
+    prevStage: text("prev_stage"),
+    /** Policyversion `ddp1:<sha256>` — Policyänderung ⇒ neue Version. */
+    policyVersion: text("policy_version").notNull(),
+    /** Daten-Hash `dd1:<sha256>` (Reproduzierbarkeit/Idempotenz). */
+    dataHash: text("data_hash").notNull(),
+    /** Kumulierte erkannte Netto-Externcashflows (+ = Einzahlung). */
+    cumulativeNetFlow: numeric("cumulative_net_flow").notNull(),
+    /** In dieser Bewertung erkannter Cashflow (Residuum). */
+    cashflowDetected: numeric("cashflow_detected").notNull(),
+    /** `verified` | `unverified` (ohne verifizierte Attribution keine Neutralisierung). */
+    cashflowVerification: text("cashflow_verification").notNull(),
+    /** Zeitpunkt des Reconciliation-Reports (NULL = keiner). */
+    reconciliationAt: timestamp("reconciliation_at", { withTimezone: true }),
+    /** true = letzter Reconciliation-Lauf ohne kritische Diskrepanz. */
+    reconciliationClean: boolean("reconciliation_clean"),
+    /** Alter des Reconciliation-Reports (ms) zum Berechnungszeitpunkt. */
+    reconciliationAgeMs: numeric("reconciliation_age_ms"),
+    /** Herkunft der Equity (Code-Konstante, z. B. `db-snapshot:TICK`). */
+    equitySource: text("equity_source"),
+    /** Alter der Equity (ms) zum Berechnungszeitpunkt. */
+    equityAgeMs: numeric("equity_age_ms"),
+    /** Equity der letzten gültigen Bewertung (Cashflow-Residuen-Basis). */
+    lastEquity: numeric("last_equity"),
+    /** Zeitpunkt der letzten gültigen Bewertung (Residuen-Frische). */
+    lastObservationAt: timestamp("last_observation_at", { withTimezone: true }),
+    /** Trading-PnL (realized+unrealized) der letzten Bewertung — NULL = unattributierbar. */
+    lastTradingPnl: numeric("last_trading_pnl"),
+    /** Zeitpunkt der letzten Degradation (Cooldown-Basis). */
+    lastDegradeAt: timestamp("last_degrade_at", { withTimezone: true }),
+    /** Zeitpunkt der letzten Faktor-/Stufentransition. */
+    lastTransitionAt: timestamp("last_transition_at", { withTimezone: true }),
+    /** Aufeinanderfolgende bestätigte Erholungsbewertungen. */
+    recoveryStreak: integer("recovery_streak").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("drawdown_scaling_snapshots_id_unique").on(t.snapshotId),
+    index("drawdown_scaling_snapshots_asof_idx").on(t.asOf),
+    index("drawdown_scaling_snapshots_status_idx").on(t.status),
+    index("drawdown_scaling_snapshots_stage_idx").on(t.stage),
+    index("drawdown_scaling_snapshots_policy_idx").on(t.policyVersion),
+    check("drawdown_scaling_snapshots_mode_check", sql`${t.mode} IN ('monitor','active')`),
+    check(
+      "drawdown_scaling_snapshots_status_check",
+      sql`${t.status} IN ('BOOTSTRAP','OK','CONSERVATIVE')`
+    ),
+    check(
+      "drawdown_scaling_snapshots_stage_check",
+      sql`${t.stage} IN ('NORMAL','SOFT','DEEP','PAUSE')`
+    ),
+    check(
+      "drawdown_scaling_snapshots_prev_stage_check",
+      sql`${t.prevStage} IS NULL OR ${t.prevStage} IN ('NORMAL','SOFT','DEEP','PAUSE')`
+    ),
+    check(
+      "drawdown_scaling_snapshots_transition_check",
+      sql`${t.transition} IN ('NONE','DEGRADE','RECOVER','BOOTSTRAP')`
+    ),
+    check(
+      "drawdown_scaling_snapshots_cashflow_verification_check",
+      sql`${t.cashflowVerification} IN ('verified','unverified')`
+    ),
+    check("drawdown_scaling_snapshots_time_check", sql`${t.computedAt} >= ${t.asOf}`),
+    check(
+      "drawdown_scaling_snapshots_applied_factor_check",
+      sql`${t.appliedFactor} > 0 AND ${t.appliedFactor} <= 1`
+    ),
+    check(
+      "drawdown_scaling_snapshots_prev_factor_check",
+      sql`${t.prevFactor} > 0 AND ${t.prevFactor} <= 1`
+    ),
+    check(
+      "drawdown_scaling_snapshots_target_factor_check",
+      sql`${t.targetFactor} IS NULL OR (${t.targetFactor} >= 0 AND ${t.targetFactor} <= 1)`
+    ),
+    check(
+      "drawdown_scaling_snapshots_drawdown_check",
+      sql`${t.drawdownPct} IS NULL OR (${t.drawdownPct} >= 0 AND ${t.drawdownPct} <= 1)`
+    ),
+    check(
+      "drawdown_scaling_snapshots_pause_stage_check",
+      sql`${t.paused} = (${t.stage} = 'PAUSE')`
+    ),
+    check("drawdown_scaling_snapshots_recovery_streak_check", sql`${t.recoveryStreak} >= 0`),
+    check(
+      "drawdown_scaling_snapshots_snapshot_id_check",
+      sql`${t.snapshotId} ~ '^dsc1:[0-9a-f]{64}$'`
+    ),
+    check(
+      "drawdown_scaling_snapshots_policy_version_check",
+      sql`${t.policyVersion} ~ '^ddp1:[0-9a-f]{64}$'`
+    ),
+    check("drawdown_scaling_snapshots_data_hash_check", sql`${t.dataHash} ~ '^dd1:[0-9a-f]{64}$'`),
+  ]
+);

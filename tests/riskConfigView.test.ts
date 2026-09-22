@@ -5,7 +5,7 @@
  * Getestet wird der DB-FREIE Teil des Moduls:
  *   - `CONFIG_KEYS` als stabiler Metadaten-Vertrag (Vollständigkeit,
  *     Eindeutigkeit, Verankerung in LIMIT_CEILINGS/DEFAULT_LIMITS)
- *   - `effectiveConfigView()`: beide Namensräume (limits + volatility),
+ *   - `effectiveConfigView()`: drei Namensräume (limits + volatility + drawdown),
  *     Werte innerhalb der Code-Ceilings, Locked-Flag nur bei requireStopLoss
  *   - Zusammenspiel mit `applyRuntimeLimits`: effektive Werte erscheinen im
  *     View, Ausreißer werden an den Ceilings geklemmt (Code entscheidet)
@@ -16,6 +16,11 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { CONFIG_KEYS, effectiveConfigView } from "../src/lib/riskConfigService";
+import { DSP_CONFIG_KEYS } from "../src/lib/drawdownScaling";
+import {
+  DEFAULT_DRAWDOWN_SCALING_CONFIG,
+  DRAWDOWN_SCALING_BOUNDS,
+} from "../src/portfolio/drawdownScaling";
 import {
   DEFAULT_LIMITS,
   LIMIT_CEILINGS,
@@ -180,6 +185,49 @@ describe("effectiveConfigView: Volatility-Namensraum (adp.*)", () => {
   test("kein Volatility-Eintrag ist gelockt (alles ist Operator-justierbar)", () => {
     const view = effectiveConfigView();
     for (const entry of view.volatility) {
+      assert.equal(entry.locked, false, `${entry.key} darf nicht gelockt sein`);
+    }
+  });
+});
+
+describe("effectiveConfigView: Drawdown-Namensraum (dsp.*)", () => {
+  test("liefert einen Eintrag je DSP_CONFIG_KEYS-Schlüssel", () => {
+    const view = effectiveConfigView();
+    assert.equal(view.drawdown.length, DSP_CONFIG_KEYS.length, "der View muss alle dsp.*-Keys zeigen");
+    const keys = view.drawdown.map((e) => e.key);
+    for (const { key } of DSP_CONFIG_KEYS) {
+      assert.ok(keys.includes(key), `${key} fehlt im Drawdown-View`);
+    }
+  });
+
+  test("Keys tragen das dsp.*-Präfix und sind von den anderen Namensräumen getrennt", () => {
+    const view = effectiveConfigView();
+    const other = new Set([...view.limits, ...view.volatility].map((e) => e.key));
+    for (const entry of view.drawdown) {
+      assert.ok(entry.key.startsWith("dsp."), `${entry.key} muss das dsp.*-Präfix tragen`);
+      assert.ok(!other.has(entry.key), `${entry.key} darf nicht in zwei Namensräumen stehen`);
+    }
+  });
+
+  test("Defaults liegen im Bounds-Fenster (Code entscheidet)", () => {
+    const view = effectiveConfigView();
+    for (const entry of view.drawdown) {
+      const meta = DSP_CONFIG_KEYS.find((k) => k.key === entry.key);
+      assert.ok(meta, `${entry.key} braucht einen DSP_CONFIG_KEYS-Eintrag`);
+      const [min, max] = DRAWDOWN_SCALING_BOUNDS[meta.field];
+      assert.equal(entry.min, min, `${entry.key}: min muss das Bounds-Fenster spiegeln`);
+      assert.equal(entry.max, max, `${entry.key}: max muss das Bounds-Fenster spiegeln`);
+      assert.equal(entry.defaultValue, DEFAULT_DRAWDOWN_SCALING_CONFIG[meta.field],
+        `${entry.key}: defaultValue muss der Konfigurations-Default sein`);
+      const value = Number(entry.value);
+      assert.ok(value >= min && value <= max,
+        `${entry.key}: effektiver Wert ${value} liegt außerhalb [${min}, ${max}]`);
+    }
+  });
+
+  test("kein Drawdown-Eintrag ist gelockt (geklemmt wird auf Code-Seite)", () => {
+    const view = effectiveConfigView();
+    for (const entry of view.drawdown) {
       assert.equal(entry.locked, false, `${entry.key} darf nicht gelockt sein`);
     }
   });
