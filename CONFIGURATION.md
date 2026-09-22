@@ -658,6 +658,30 @@ wieder her. Details: [`docs/MTF_CONFLUENCE.md`](docs/MTF_CONFLUENCE.md).
 | `CONFLUENCE_ENABLED` | `true` | Step-Anhängung an/aus. Nur `false`/`0`/`off`/`no` schalten ab (Rollback-Pfad: Legacy-Output, additiv kompatibel); unbekannte Werte warnen und lassen die Konfluenz an (fail-laut). |
 | `CONFLUENCE_CONFIG_FILE` | `—` | Pfad einer JSON-Config (Defaults + validierte Overrides: 1–5 Timeframes, Gewichtssumme exakt 1, bounded Schwellen/Perioden, Warmup ≤ `maxBars`). Unlesbar/ungültig ⇒ harter Fehler (kein still schwächeres Verhalten). |
 
+### Cross-Sectional Momentum Ranking (RMA-P2-04, v1.63.0)
+
+Point-in-Time universumsweites Momentum-Ranking (`cross-sectional@1`,
+as-of-sicher, Policy `ingested`: `barEnd ≤ asOf` **und** `fetchedAt ≤ asOf`)
+mit deterministischer Snapshot-ID, DB- + Artefakt-Persistenz, Read-only-API
+(`GET /api/research/cross-sectional`) und Scanner-Diagnose-Faktor
+`crossSectionalMomentum` (**Score-Gewicht 0** — kein Doppeltzählen des
+instrument-lokalen `momentum`; ein fehlender Rang ist explizit
+`unavailable` mit Neutralwert 0.5, nie 0). Ohne Konfiguration läuft das
+System mit den eingebauten Defaults (1h, Horizonte h72/h168/h336 mit
+Gewichten 0.2/0.3/0.5, Winsorize [0.01, 0.99], `minCandles` 168,
+`minVolume24h` 100 000, Max-Snapshot-Alter 7 Tage, Stability Top-K 10).
+Details: [`docs/CROSS_SECTIONAL_RANKING.md`](docs/CROSS_SECTIONAL_RANKING.md),
+CLI `npm run research:cross-sectional`.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `CROSS_SECTIONAL_ENABLED` | `true` | Scanner-Artefakt-Lesepfad an/aus; CLI-Lauf bleibt möglich. Nur `false`/`0`/`off`/`no` schaltet ab (Rollback-Pfad: exaktes Vor-Verhalten, additiv kompatibel); unbekannte Werte warnen und lassen die Funktion an (fail-laut). |
+| `CROSS_SECTIONAL_CONFIG_FILE` | `—` | Pfad einer JSON-Config (Defaults + validierte Overrides: 1–5 Horizonte auf dem 1h-Raster, Gewichtssumme exakt 1, bounded Schwellen/Universums-Cap, Staleness ≤ 30 Tage). Unlesbar/ungültig ⇒ harter Fehler `CROSS_SECTIONAL_CONFIG_ERROR` (kein still schwächeres Verhalten). |
+
+Migration: `psql \"$DATABASE_URL\" -f drizzle/2026-09-22_cross_sectional_ranking.sql`
+(append-only, idempotent; neue Tabellen `cross_sectional_snapshots` +
+`cross_sectional_rankings`, keine Änderungen an bestehenden Tabellen).
+
 ### Perpetual-Daten (RMA-P2-02, v1.54.0)
 
 Historische Funding-Raten, Open Interest und Liquidationen in eigenen

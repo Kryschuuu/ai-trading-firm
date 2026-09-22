@@ -1999,7 +1999,7 @@ Jeder Lauf erzeugt datierte und atomar geschriebene Artefakt-Dateien:
 
 Ausführliche Feldbeschreibungen, Formeln und Risikohinweise im 3-Ebenen-Schema (`kurzinfo`, `technischeInfo`, `risiko`):
 - **`docs/help/cycle.help.json`**: Daily Candidate List, Deep Analysis, Shortlist-Limits, Weekly-Klassen (CORE/ROTATION/DISCOVERY/EXCLUDED), Backtest-Kennzahlen.
-- **`docs/help/scanner.help.json`**: Die 14 Faktoren des deterministischen Markt-Scanners und der 5-Stufen-Trichter.
+- **`docs/help/scanner.help.json`**: Die 15 Faktoren des deterministischen Markt-Scanners und der 5-Stufen-Trichter.
 - **`docs/help/portfolio.help.json`**: Kovarianz, Korrelationen, Sharpe, Sortino, Drawdown und Portfolio-Guardrails.
 
 en-Trichter.

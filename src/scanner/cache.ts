@@ -2,7 +2,7 @@
  * Faktor-Cache (Skalierungsregel 4).
  *
  * Zwischenergebnisse werden pro **Instrument × Datenstand** gehalten: Ein
- * zweiter Scan mit unveränderten Kerzen rechnet die 14 Faktoren nicht erneut.
+ * zweiter Scan mit unveränderten Kerzen rechnet die 15 Faktoren nicht erneut.
  * Der Schlüssel enthält die Konfigurationsversion und eine Datenversion
  * (Kerzenzahl + erster/letzter Zeitstempel + letzter Close + `asOf`), damit
  * neue Daten **nie** einen alten Wert treffen.
@@ -33,6 +33,9 @@ export function dataVersionOf(input: FactorInput): string {
     benchmark,
     news,
     derivatives,
+    // v1.63.0: der Cross-Sectional-Rang ist Teil der Scan-Eingabe (neuer
+    // Snapshot ⇒ neue Identität, kein Cache-Treffer auf fremden Stand).
+    input.crossSectional ? input.crossSectional.snapshotId : "-",
     input.instrument.lastSeen,
     input.instrument.volume24h ?? "-",
     input.instrument.spread ?? "-",

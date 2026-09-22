@@ -41,7 +41,7 @@ Weekly Reviews (die kommt in einem späteren Task und konsumiert das hier erzeug
                          │ scanUniverse()  pipeline.ts   │  asOf wird injiziert
                          └───────────────┬───────────────┘
                                          ▼
-   ① Faktoren        14 Module × je 1 FactorValue        (factors/*, cache.ts)
+   ① Faktoren        15 Module × je 1 FactorValue        (factors/*, cache.ts)
                      raw · normalized ∈ [0,1] · available · detail
                                          ▼
    ② Regime          annualisierte RV → LOW/NORMAL/HIGH/EXTREME        (regime.ts)
@@ -73,7 +73,7 @@ Einstiegspunkte:
 
 ## 3. Faktor-Katalog
 
-Alle 14 Module implementieren dasselbe Interface:
+Alle 15 Module implementieren dasselbe Interface:
 
 ```ts
 interface Factor<C = unknown> {
@@ -105,10 +105,12 @@ interface FactorValue {
 | 12 | `funding` | `|fundingRate| × 8760/intervalHours` (sonst 1095) | `DerivativeContext.fundingRate` | invers linear `0 → 1`, `0.5 p. a. → 0`; Spot = 1 | Diagnose |
 | 13 | `openInterest` | `raw = openInterest` (Quote) | `DerivativeContext.openInterest` | logarithmisch `1e5 → 0`, `5e9 → 1`; Spot = 0.5 | Diagnose |
 | 14 | `executionCost` | `2×takerFee (+ spread)` Roundturn, Modi `taker|maker|blend` | Registry-Gebühren (+ Spread) | invers linear `5 bp → 1`, `50 bp → 0` | **5 %** (`execution`) |
+| 15 | `crossSectionalMomentum` | universumsweiter Momentum-Rang: `raw = composite`, `normalized = percentile` des Instruments im jüngsten Point-in-Time-Cross-Sectional-Snapshot (Policy `ingested`, kein Look-ahead) | `CrossSectionalRankContext` (Scanner injiziert die Karte aus dem jüngsten Artefakt) | Perzentil ∈ (0,1] bereits skaliert | Diagnose (Gewicht 0) |
 
 **Neutralwerte bei `available: false`:** in der Regel `0` (Unwissen darf nie belohnen).
 Ausnahmen mit fachlicher Begründung: `correlation` 0.5, `openInterest` 0.5,
-`funding` 0.5 (Spot 1), `news` 0.75.
+`funding` 0.5 (Spot 1), `news` 0.75, `crossSectionalMomentum` 0.5 (Median des
+Querschnitts — ein fehlender Rang geht **nie** still als 0-Momentum ein).
 
 **Edge Cases** (per Test abgedeckt): leere Serie, Einzelwert, konstante Preise,
 `NaN`/`Infinity` in Kerzen, Nullvolumen, fehlende Registry-Felder, Benchmark ohne
@@ -122,8 +124,11 @@ rund ein Fünftel des ersten (24 ms statt 136 ms bei 2.000 Instrumenten).
 
 ## 4. Market Score
 
-Neun der 14 Faktoren tragen Gewicht; die fünf Diagnose-Faktoren fließen in
+Neun der 15 Faktoren tragen Gewicht; die sechs Diagnose-Faktoren fließen in
 Filter, Stops und Weekly-Begründungen ein, nicht in die Note.
+(`crossSectionalMomentum` ist bewusst **ohne Score-Gewicht** — die gewichtete
+Momentum-Komponente bleibt der instrument-lokale Faktor `momentum`, kein
+stilles Doppeltzählen; Details: [`CROSS_SECTIONAL_RANKING.md`](CROSS_SECTIONAL_RANKING.md).)
 
 | Komponente | Faktor | Gewicht |
 | --- | --- | --- |
@@ -349,7 +354,7 @@ mit `items[]` = validierte Weekly-Einträge.
 * `instrumentId` URL-kodiert, max. 64 Zeichen; `~` wird als `/` interpretiert
   (`KRAKEN:BTC~USD` ⇒ `KRAKEN:BTC/USD`), Groß-/Kleinschreibung egal.
 * Antwort `{ ok, asOf, configVersion, weights, score, levels, rejection }` —
-  `score.breakdown` hat 9 Einträge, `score.factors` alle 14 Faktorwerte,
+  `score.breakdown` hat 9 Einträge, `score.factors` alle 15 Faktorwerte,
   `levels` sagt, in welchen Trichterstufen das Instrument steht,
   `rejection` nennt bei Ausschluss die greifende Regel (`ruleId`, `message`
   und `dataQuality` — fehlende Daten vs. fachlicher Ausschluss).

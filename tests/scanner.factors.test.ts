@@ -1,5 +1,5 @@
 /**
- * Unit-Tests der 14 Faktor-Module (Task 04).
+ * Unit-Tests der 15 Faktor-Module (Task 04).
  *
  * Jeder Faktor wird mit einer **kurzen, hand-verifizierten Zeitreihe** gegen
  * einen Golden-Wert geprüft; anschließend die Edge Cases leere Serie,
@@ -60,10 +60,10 @@ function input(overrides: Partial<FactorInput> = {}): FactorInput {
 
 // ── 0: Modul-Inventar ────────────────────────────────────────────────────────
 
-test("Faktoren: genau 14 Module, IDs eindeutig und vollständig", () => {
-  assert.equal(FACTOR_IDS.length, 14);
-  assert.equal(FACTOR_LIST.length, 14);
-  assert.equal(new Set(FACTOR_LIST.map((f) => f.id)).size, 14);
+test("Faktoren: genau 15 Module, IDs eindeutig und vollständig", () => {
+  assert.equal(FACTOR_IDS.length, 15);
+  assert.equal(FACTOR_LIST.length, 15);
+  assert.equal(new Set(FACTOR_LIST.map((f) => f.id)).size, 15);
   for (const id of FACTOR_IDS) {
     assert.equal(
       FACTORS[id].id,

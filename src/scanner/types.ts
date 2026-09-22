@@ -16,6 +16,7 @@
  */
 
 import type { MarketCandle } from "@/lib/marketdata/types";
+import type { CrossSectionalRankContext } from "@/crossSectional/types";
 import type { AssetClass, MarketInstrument } from "@/universe/types";
 import type { ScannerConfig } from "./config";
 
@@ -34,7 +35,8 @@ export type FactorId =
   | "news"
   | "funding"
   | "openInterest"
-  | "executionCost";
+  | "executionCost"
+  | "crossSectionalMomentum";
 
 /** Alle Faktor-IDs in kanonischer Reihenfolge (Doku, Tests, Breakdown-Sortierung). */
 export const FACTOR_IDS: readonly FactorId[] = [
@@ -52,6 +54,10 @@ export const FACTOR_IDS: readonly FactorId[] = [
   "funding",
   "openInterest",
   "executionCost",
+  // v1.63.0 (RMA-P2-04): universumsweiter Momentum-Rang als Diagnose-Faktor
+  // OHNE Score-Gewicht (die gewichtete Momentum-Komponente bleibt der
+  // instrument-lokale Faktor `momentum` — kein Doppeltzählen).
+  "crossSectionalMomentum",
 ];
 
 /** Die neun gewichteten Komponenten des Market Scores. */
@@ -140,6 +146,13 @@ export interface FactorInput {
   derivatives?: DerivativeContext | null;
   /** Deterministischer News-Kontext, optional. */
   news?: NewsRiskContext | null;
+  /**
+   * Cross-Sectional-Momentum-Rang des Instruments aus dem jüngsten
+   * Point-in-Time-Snapshot (RMA-P2-04, v1.63.0). **Optional und injiziert**
+   * (Service-Layer): `null`/`undefined` ⇒ der Faktor `crossSectionalMomentum`
+   * meldet explizit `unavailable` (Neutralwert 0.5 — nie 0-Momentum).
+   */
+  crossSectional?: CrossSectionalRankContext | null;
   /** Auswertungszeitpunkt (Unix-Epoch ms) — injizierte Uhr. */
   asOf: number;
   /** Versionierte Scanner-Konfiguration. */
@@ -228,7 +241,7 @@ export interface InstrumentScore {
   regime: VolatilityRegime;
   /** Beiträge je Score-Komponente in kanonischer Reihenfolge. */
   breakdown: ScoreBreakdownEntry[];
-  /** Alle 14 Faktorwerte (auch die nicht gewichteten Diagnose-Faktoren). */
+  /** Alle 15 Faktorwerte (auch die nicht gewichteten Diagnose-Faktoren). */
   factors: Readonly<Record<FactorId, FactorValue>>;
   /** Auswertungszeitpunkt als ISO-8601-UTC. */
   asOf: string;

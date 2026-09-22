@@ -278,6 +278,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/ARCHITECTURE.md` | Zielbild, Decoupling, Execution Modes, Glossar, Docs-Pflege |
 | `docs/SYMBOLS.md` | Zentrale, venue-aware Symbol-Normalisierung (SYM-007) |
 | `docs/MARKET_DATA_PIPELINE.md` | Discovery, Enrichment, Candle-Backfill, Scanner-Grenze |
+| `docs/CROSS_SECTIONAL_RANKING.md` | Point-in-Time Cross-Sectional Momentum Ranking (PIT-Snapshots, Rang/Perzentil, Gewicht-0-Scanner-Faktor; RMA-P2-04, v1.63.0) |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
 | `docs/CONFIGURATION.md` / `CONFIGURATION.md` | Env-Flags mit sicheren Defaults (kanonisch) |
 | `docs/HANDBUCH.md` | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
