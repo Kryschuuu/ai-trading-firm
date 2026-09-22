@@ -1065,3 +1065,48 @@ geklemmt — Details und Bounds in
 Status/API), dann `active`. Rollback: `PORTFOLIO_VOL_TARGETING_MODE=off` +
 Restart — keine Datenbereinigung nötig (Snapshots bleiben lesbar).
 
+## Drawdown-Risk-Scaling (RMA-P5-04, v1.68.0)
+
+Hysteretische Risikoschicht: die reconcilte Equity wird gegen den persistierten
+High-Water-Mark (HWM) bewertet; aus dem Drawdown folgt über eine monotone,
+versionierte Kurve ein Risikofaktor, der `maxRiskPerTrade` **nur senkend**
+skaliert (Faktor hart ≤ 1). Degradation wirkt sofort, Erholung nur nach
+Cooldown **und** Bestätigungen (kein Flapping); optional blockiert die Stufe
+`PAUSE` neue Einstiege. Ein-/Auszahlungen sind keine Performance (der HWM wird
+cashflow-bereinigt geführt). Vollständige Doku:
+[`docs/DRAWDOWN_SCALING.md`](docs/DRAWDOWN_SCALING.md).
+Migration (append-only, idempotent) vor Aktivierung anwenden:
+`npx drizzle-kit push` (oder
+`psql "$DATABASE_URL" -f drizzle/2026-09-22_drawdown_scaling.sql`).
+
+| Variable | Standard | Erlaubte Werte | Bedeutung |
+| --- | --- | --- | --- |
+| `DRAWDOWN_SCALING_MODE` | `monitor` | `off`, `monitor`, `active` | Betriebsmodus. `monitor` (Default): Bewertung + Persistenz + Reporting, **keine** Ordergrößenänderung und kein PAUSE-Block. `active`: Faktor wirkt (≤ 1) und die Stufe `PAUSE` blockiert neue Einstiege. `off`: inaktiv, gesetzter Faktor und PAUSE werden zurückgenommen (Rollback). Unbekannt ⇒ `monitor`. |
+
+Die übrigen Parameter liegen in `risk_config` unter `dsp.*` (Master-Schalter
+`dsp.enabled`, Default 1), werden gegen feste Bounds geklemmt und sind im
+Dashboard als dritte Sektion `drawdown` sichtbar
+(`effectiveConfigView()`):
+
+| Schlüssel | Standard | Fenster | Bedeutung |
+| --- | --- | --- | --- |
+| `dsp.softThresholdPct` | 5 | 0.1 … 50 | Drawdown (%), ab dem die Reduktion beginnt. |
+| `dsp.hardThresholdPct` | 12 | 1 … 80 | Drawdown (%), ab dem der Boden erreicht ist (wird auf `> soft` normalisiert). |
+| `dsp.minFactor` | 0.25 | 0.05 … 1 | Untergrenze des Risikofaktors (`> 0`, hart ≤ 1). |
+| `dsp.pauseThresholdPct` | 0 (aus) | 0 … 100 | Drawdown (%), ab dem neue Einstiege blockiert werden (wird auf `≥ hard` normalisiert). |
+| `dsp.maxEquityStalenessMinutes` | 15 | 1 … 1440 | Maximales Alter der Equity-Beobachtung; älter ⇒ konservativer Faktor. |
+| `dsp.requireReconciliation` | 1 | 0/1 | 1 = ohne aktuellen, sauberen Broker↔DB-Abgleich gilt der konservative Faktor. |
+| `dsp.reconciliationMaxAgeMinutes` | 360 | 5 … 10080 | Maximales Alter des letzten Reconciliation-Berichts. |
+| `dsp.recoveryCooldownMinutes` | 360 | 0 … 10080 | Wartezeit nach einer Degradation, bevor der Faktor steigen darf. |
+| `dsp.recoveryConfirmations` | 3 | 1 … 240 | Bestätigte Erholungsbewertungen **nach** dem Cooldown vor dem ersten Recovery-Schritt. |
+| `dsp.recoveryStep` | 0.05 | 0.01 … 1 | Maximaler Faktorzuwachs je bestätigtem Recovery-Schritt. |
+| `dsp.cashflowToleranceAbs` | 0.05 | 0 … 1e6 | Absolute Toleranz der Cashflow-Erkennung (Kontowährung). |
+| `dsp.cashflowTolerancePct` | 0.001 | 0 … 0.05 | Relative Toleranz (Anteil der Equity). |
+| `dsp.bootstrapFromBaseline` | 1 | 0/1 | 1 = beim ersten Lauf ist der HWM ≥ Startkapital (kein Reset durch Deployment). |
+
+**Rollout:** zuerst `monitor` beobachten (Stufe, Faktor, Grund-Codes,
+Reconciliation-Gate in `GET /api/firm/risk/drawdown-scaling`), dann `active`.
+Rollback: `DRAWDOWN_SCALING_MODE=monitor` oder `=off` (+ optional
+`dsp.enabled=0`) + Restart — Faktor und PAUSE werden sofort zurückgenommen,
+keine Datenbereinigung nötig (Snapshots bleiben lesbar).
+

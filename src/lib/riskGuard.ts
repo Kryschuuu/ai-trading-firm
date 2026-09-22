@@ -23,7 +23,21 @@
  *   Code-Ceilings → Basis-Limit (DB/Dashboard)
  *     → Regime-Faktor (diskret) × VolTarget-Faktor (kontinuierlich)
  *     → Code-Boden.
+ *
+ * DRAWDOWN-SCALING-ÜBERLAGERUNG (RMA-P5-04, v1.68.0): src/lib/drawdownScaling.ts
+ * fügt einen DRITTEN Faktor aus dem laufenden High-Water-Mark-Drawdown hinzu
+ * (hysteretisch, mit Cooldown). Er wird exakt wie die anderen beiden
+ * multiplikativ komponiert (jeweils ≤ 1 ⇒ Produkt ≤ 1) und kann zusätzlich in
+ * der Stufe `PAUSE` NEUE EINSTIEGE blockieren (`validateOrder`-Guardrail
+ * `drawdown-pause`). Die Authority Chain lautet damit:
+ *   Code-Ceilings → Basis-Limit
+ *     → Regime-Faktor × VolTarget-Faktor × Drawdown-Faktor
+ *     → Code-Boden;  PAUSE blockiert neue Einstiege vollständig.
+ * Keine Stufe kann eine spätere aufweiten: jeder Faktor ist ≤ 1 und der
+ * PAUSE-Block ist ein Veto (kein Multiplikator).
  */
+
+import type { DrawdownStage } from "@/portfolio/drawdownScaling";
 
 import { state } from "./stateRegistry";
 
@@ -148,15 +162,45 @@ export type VolatilityTargetingState = {
   mode: "active" | "persisted";
 };
 
+/**
+ * RMA-P5-04 (v1.68.0): Hysteretisches Drawdown-Risk-Scaling.
+ *
+ * Der Faktor stammt aus dem laufenden Drawdown gegenüber dem persisteden
+ * High-Water-Mark (`src/portfolio/drawdownScaling.ts`, pure Policy) und ist
+ * monoton nicht-steigend in Drawdown, hart ∈ [minFactor, 1]. Er wirkt exakt
+ * wie die anderen Marktfaktoren: multiplikativ auf `maxRiskPerTrade`, nur
+ * senkend. Zusätzlich blockiert die Stufe `PAUSE` (optional, konfigurierbar)
+ * NEUE Einstiege — ein Veto, das keine spätere Stufe aufheben kann.
+ */
+export type DrawdownRiskState = {
+  /** 0 < factor ≤ 1 — Multiplikator auf das Basis-Limit maxRiskPerTrade. */
+  factor: number;
+  /** Stufe der Policy: NORMAL | SOFT | DEEP | PAUSE. */
+  stage: DrawdownStage;
+  /** true = neue Einstiege blockiert (nur wirksam im Modus `active`). */
+  paused: boolean;
+  /** Drawdown ∈ [0,1] oder null (unbekannt — nie still 0). */
+  drawdownPct: number | null;
+  /** Cashflow-bereinigter High-Water-Mark oder null. */
+  hwm: number | null;
+  at: string;
+  asOf: string | null;
+  reason: string;
+  mode: "active" | "persisted";
+  /** Policyversion `ddp1:<sha256>` (Policyänderung ⇒ neue Version). */
+  policyVersion: string;
+};
+
 // S2 (v1.36.22): baseLimits/currentLimits/adaptiveState liegen jetzt in der
 // zentralen State-Registry (Wahrheit von `baseLimits` = risk_config/Default;
-// `currentLimits` = Basis + adaptiver Marktfaktor). Defaults werden hier
+// `currentLimits` = Basis + kombinierter Marktfaktor). Defaults werden hier
 // registriert, damit `__resetAllSingletonsForTests()` deterministisch in den
 // Ausgangszustand zuruecksetzt.
 state.baseLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
 state.currentLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
 state.adaptiveState.setDefault(() => null);
 state.volTargetState.setDefault(() => null);
+state.drawdownState.setDefault(() => null);
 
 /** maxRiskPerTrade nach Anwendung des kombinierten Marktfaktors (Boden = Code-Minimum). */
 function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
@@ -168,14 +212,16 @@ function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
 }
 
 /**
- * Kombiniert beide Marktfaktoren (RMA-P5-01, v1.67.0):
- * Regime-Faktor × VolTarget-Faktor, jeweils hart auf (0, 1] geklemmt.
- * Ohne einen Faktor = 1 (neutral). Das Produkt ist damit immer ≤ 1 —
- * das Ergebnis kann das Basis-Limit nie überschreiten.
+ * Kombiniert die Marktfaktoren (RMA-P5-01, v1.67.0; RMA-P5-04, v1.68.0):
+ * Regime-Faktor × VolTarget-Faktor × Drawdown-Faktor, jeweils hart auf (0, 1]
+ * geklemmt. Ohne einen Faktor = 1 (neutral). Das Produkt ist damit immer ≤ 1 —
+ * das Ergebnis kann das Basis-Limit nie überschreiten, und keine spätere Stufe
+ * kann eine frühere aufweiten (Authority Chain).
  */
 function combinedMarketFactor(): number {
   const adaptive = state.adaptiveState.get();
   const volTarget = state.volTargetState.get();
+  const drawdown = state.drawdownState.get();
   let f = 1;
   if (adaptive != null && Number.isFinite(adaptive.factor) && adaptive.factor > 0) {
     f *= Math.min(adaptive.factor, 1);
@@ -183,12 +229,15 @@ function combinedMarketFactor(): number {
   if (volTarget != null && Number.isFinite(volTarget.factor) && volTarget.factor > 0) {
     f *= Math.min(volTarget.factor, 1);
   }
+  if (drawdown != null && Number.isFinite(drawdown.factor) && drawdown.factor > 0) {
+    f *= Math.min(drawdown.factor, 1);
+  }
   return f;
 }
 
 /**
  * currentLimits = baseLimits × kombinierter Marktfaktor
- * (Regime-Faktor × VolTarget-Faktor, beide ≤ 1).
+ * (Regime-Faktor × VolTarget-Faktor × Drawdown-Faktor, alle ≤ 1).
  */
 function recomputeCurrent(): RiskLimits {
   const base = state.baseLimits.get()!;
@@ -252,6 +301,54 @@ export function applyVolatilityTargeting(snapshot: VolatilityTargetingState | nu
 export function getVolatilityTargetingState(): Readonly<VolatilityTargetingState> | null {
   const current = state.volTargetState.get();
   return current ? { ...current } : null;
+}
+
+/**
+ * RMA-P5-04 (v1.68.0): Wendet den Drawdown-Scaling-Faktor an.
+ *
+ * `null` hebt die Reduktion UND einen etwaigen PAUSE-Block auf (Rollback- und
+ * Monitor-Pfad). Der Faktor wird hart auf (0, 1] geklemmt — ein
+ * Konfigurations- oder Übermittlungsfehler kann das Basis-Limit niemals
+ * überschreiten (der Boden bleibt `LIMIT_CEILINGS.maxRiskPerTrade[0]`).
+ * Wie die anderen `apply*`-Funktionen rechnet `recomputeCurrent()` aus dem
+ * FRISCHEN Basiswert (keine Kumulation bei DB-Neuladungen).
+ */
+export function applyDrawdownScaling(snapshot: DrawdownRiskState | null): RiskLimits {
+  state.drawdownState.set(
+    snapshot != null && Number.isFinite(snapshot.factor) && snapshot.factor > 0
+      ? {
+          ...snapshot,
+          factor: Math.min(snapshot.factor, 1),
+          // PAUSE ist nur in der PAUSE-Stufe gültig — ein inkonsistenter
+          // Zustand (paused ohne Stufe) würde sonst still blockieren.
+          paused: snapshot.paused === true && snapshot.stage === "PAUSE",
+        }
+      : null
+  );
+  return recomputeCurrent();
+}
+
+/** Aktive Drawdown-Reduktion (oder null), z. B. für Observability. */
+export function getDrawdownScalingState(): Readonly<DrawdownRiskState> | null {
+  const current = state.drawdownState.get();
+  return current ? { ...current } : null;
+}
+
+/**
+ * Veto-Auskunft für neue Einstiege (RMA-P5-04, v1.68.0).
+ *
+ * `blocked = true` genau dann, wenn der aktive Drawdown-Zustand die Stufe
+ * `PAUSE` trägt. Der Block ist bewusst KEIN Multiplikator: ein Faktor > 0
+ * könnte eine Order nur verkleinern, PAUSE verhindert sie ganz. Der
+ * Kill-Switch (`killSwitch.isArmed()`) bleibt davon unberührt und gilt
+ * weiterhin zusätzlich.
+ */
+export function drawdownPauseState(): { blocked: boolean; stage: DrawdownStage | null; reason: string | null } {
+  const current = state.drawdownState.get();
+  if (current != null && current.paused === true && current.stage === "PAUSE") {
+    return { blocked: true, stage: current.stage, reason: current.reason };
+  }
+  return { blocked: false, stage: current?.stage ?? null, reason: current?.reason ?? null };
 }
 
 /**
@@ -378,6 +475,16 @@ export function riskValidationReason(e: unknown): string {
 
 export function validateOrder(ctx: ValidateContext): GuardrailResult {
   const blockedBy: string[] = [];
+
+  // RMA-P5-04 (v1.68.0): Drawdown-PAUSE blockiert NEUE EINSTIEGE vollständig.
+  // `submit()`-Pfade sind Einstiegspfade (Exits laufen über die Schließ-Logik
+  // des Brokers/Monitors), daher ist dieser Guardrail das zentrale Veto der
+  // Drawdown-Policy. Der Block gilt nur, wenn der Zustand im Modus `active`
+  // gesetzt wurde (`applyDrawdownScaling(null)` nimmt ihn zurück).
+  const pause = drawdownPauseState();
+  if (pause.blocked) {
+    blockedBy.push("drawdown-pause:new-entries-blocked");
+  }
 
   // H9 FIX: Alle numerischen Guardrail-Eingaben werden fail-closed geprüft.
   // NaN/Infinity/≤0 wirft — Vergleiche gegen NaN sind immer false und würden

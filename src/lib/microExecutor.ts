@@ -30,6 +30,7 @@ import { PaperBroker } from "./broker";
 import {
   ADAPTIVE_STATE_MAX_AGE_MS,
   applyAdaptiveRisk,
+  applyDrawdownScaling,
   applyVolatilityTargeting,
   getAdaptiveRiskState,
   getLimits,
@@ -37,9 +38,12 @@ import {
   validateOrder,
   applyRuntimeLimits,
   riskValidationReason,
+  type DrawdownRiskState,
   type RiskLimits,
 } from "./riskGuard";
 import { resolveVolTargetingMode } from "./volatilityTargeting";
+import { resolveDrawdownScalingMode } from "./drawdownScaling";
+import type { DrawdownStage } from "@/portfolio/drawdownScaling";
 // GAP-04 (v1.48.0): Vol-basiertes Sizing (ATR-Fallback-Stop + Fractional-Kelly)
 // und Cluster-Exposure-Guardrail (Schicht 3) — LLM-frei (nur Portfolio-Mathe,
 // LocalStore, DB/Audit).
@@ -512,6 +516,10 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
     // RMA-P5-01 (v1.67.0): persistierter Volatility-Targeting-Faktor.
     let vtpFactor: number | null = null;
     let vtpAtMs: number | null = null;
+    // RMA-P5-04 (v1.68.0): persistierter Drawdown-Scaling-Faktor + PAUSE-Stufe.
+    let ddpFactor: number | null = null;
+    let ddpAtMs: number | null = null;
+    let ddpPause: number | null = null;
     for (const r of rows) {
       const n = Number(r.value);
       if (!Number.isFinite(n)) continue;
@@ -519,6 +527,9 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
       else if (r.key === "adp.activeAt") activeAtMs = n * 1000;
       else if (r.key === "vtp.activeFactor") vtpFactor = n;
       else if (r.key === "vtp.activeAt") vtpAtMs = n * 1000;
+      else if (r.key === "dsp.activeFactor") ddpFactor = n;
+      else if (r.key === "dsp.activeAt") ddpAtMs = n * 1000;
+      else if (r.key === "dsp.pause") ddpPause = n;
       else raw[r.key] = n;
     }
     applyRuntimeLimits(raw as Partial<RiskLimits>);
@@ -560,6 +571,37 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
         } else {
           applyVolatilityTargeting(null);
         }
+      }
+    }
+
+    // RMA-P5-04 (v1.68.0): Drawdown-Scaling-Faktor + PAUSE. Der Mikro-Prozess
+    // wendet beides NUR an, wenn sein eigener Modus `active` ist
+    // (Feature-Flag-Parität mit dem Main-Prozess) und die Persistenz frisch
+    // ist (ADAPTIVE_STATE_MAX_AGE_MS). Ein abgelaufener PAUSE-Block wird
+    // explizit zurückgenommen — ein Block darf nie ohne gültige Messung
+    // weiterleben (fail-closed bleibt der Faktor selbst: er ist ≤ 1).
+    if (resolveDrawdownScalingMode() === "active") {
+      const fresh = ddpAtMs != null && Date.now() - ddpAtMs < ADAPTIVE_STATE_MAX_AGE_MS;
+      if (ddpFactor != null && ddpAtMs != null && ddpFactor > 0 && ddpFactor <= 1 && fresh) {
+        const stage: DrawdownStage = ddpPause === 1 ? "PAUSE" : ddpFactor >= 0.999 ? "NORMAL" : "DEEP";
+        const snapshot: DrawdownRiskState = {
+          factor: ddpFactor,
+          stage,
+          paused: stage === "PAUSE",
+          drawdownPct: null,
+          hwm: null,
+          reason: "persistierter Drawdown-Scaling-Faktor des Main-Prozesses",
+          at: new Date(ddpAtMs).toISOString(),
+          asOf: null,
+          mode: "persisted",
+          // Die Policyversion ist kein Mikro-Executor-Wissen (kein DB-Read im
+          // Hot-Path) — der Faktor selbst ist die Wahrheit; die Version steht
+          // in der Snapshot-Tabelle und im Audit des Main-Prozesses.
+          policyVersion: "persisted",
+        };
+        applyDrawdownScaling(snapshot);
+      } else {
+        applyDrawdownScaling(null);
       }
     }
     G.__microLimitsLoadedAt = Date.now();

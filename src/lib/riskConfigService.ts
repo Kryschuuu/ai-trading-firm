@@ -15,6 +15,16 @@ import { riskConfig } from "@/db/schema";
 import { applyRuntimeLimits, getBaseLimits, getLimits, DEFAULT_LIMITS, LIMIT_CEILINGS, type RiskLimits } from "./riskGuard";
 import { logAudit } from "./engine";
 import {
+  DSP_CONFIG_KEYS,
+  applyDrawdownScalingPolicy,
+  currentDrawdownScalingPolicy,
+  updateDrawdownScaling,
+} from "./drawdownScaling";
+import {
+  DEFAULT_DRAWDOWN_SCALING_CONFIG,
+  DRAWDOWN_SCALING_BOUNDS,
+} from "@/portfolio/drawdownScaling";
+import {
   DEFAULT_VOLATILITY_CONFIG,
   VOLATILITY_CONFIG_BOUNDS,
   VOLATILITY_KEYS,
@@ -95,7 +105,7 @@ export async function refreshRuntimeLimits(force = false): Promise<void> {
 export type ConfigEntryView = {
   key: string;
   label: string;
-  unit: "%" | "x" | "count" | "bool" | "rr" | "idx";
+  unit: "%" | "x" | "count" | "bool" | "rr" | "idx" | "min";
   description: string;
   value: number | boolean;
   min: number;
@@ -105,11 +115,16 @@ export type ConfigEntryView = {
 };
 
 /**
- * Effektive Limits + Ceiling-Fenster für das Dashboard. Zwei Namensräume:
- * `limits` (klassische Risk-Limits) und `volatility` (adaptives
- * Volatilitäts-System, Keys `adp.*`).
+ * Effektive Limits + Ceiling-Fenster für das Dashboard. Drei Namensräume:
+ * `limits` (klassische Risk-Limits), `volatility` (adaptives
+ * Volatilitäts-System, Keys `adp.*`) und `drawdown` (hysteretisches
+ * Drawdown-Risk-Scaling, Keys `dsp.*` — RMA-P5-04).
  */
-export function effectiveConfigView(): { limits: ConfigEntryView[]; volatility: ConfigEntryView[] } {
+export function effectiveConfigView(): {
+  limits: ConfigEntryView[];
+  volatility: ConfigEntryView[];
+  drawdown: ConfigEntryView[];
+} {
   const limits = getLimits();
   const limitsView: ConfigEntryView[] = CONFIG_KEYS.map(({ key, label, unit, description }) => ({
     key,
@@ -136,7 +151,28 @@ export function effectiveConfigView(): { limits: ConfigEntryView[]; volatility: 
     defaultValue: DEFAULT_VOLATILITY_CONFIG[field],
   }));
 
-  return { limits: limitsView, volatility: volView };
+  // RMA-P5-04 (v1.68.0): Policy-Fenster des Drawdown-Risk-Scalings. Die
+  // angezeigten Werte sind die RESOLVED (geklemmten) Policy-Werte; die Bounds
+  // stammen aus `DRAWDOWN_SCALING_BOUNDS` (Code entscheidet).
+  const ddPolicy = currentDrawdownScalingPolicy();
+  const ddView: ConfigEntryView[] = DSP_CONFIG_KEYS.map(({ key, field, label, unit, description }) => {
+    const bounds = DRAWDOWN_SCALING_BOUNDS[field];
+    const raw = ddPolicy[field];
+    const value = typeof raw === "boolean" ? raw : (raw as number);
+    return {
+      key,
+      label,
+      unit,
+      description,
+      value,
+      min: bounds[0],
+      max: bounds[1],
+      locked: false,
+      defaultValue: DEFAULT_DRAWDOWN_SCALING_CONFIG[field] as number | boolean,
+    };
+  });
+
+  return { limits: limitsView, volatility: volView, drawdown: ddView };
 }
 
 /**
@@ -226,6 +262,44 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
     // Mit der neuen Konfiguration sofort neu bewerten (Best-Effort; bei
     // Netzwerk-Problem greift der nächste Tick innerhalb von 60 s).
     void updateAdaptiveRisk({ force: true }).catch(() => {});
+    return { ok: true, effective: after };
+  }
+
+  // ── Namensraum 3: Drawdown-Risk-Scaling (dsp.*, RMA-P5-04) ──
+  const dspKey = DSP_CONFIG_KEYS.find((k) => k.key === key);
+  if (dspKey) {
+    const before = currentDrawdownScalingPolicy()[dspKey.field];
+    const num = Number(value);
+    if (!Number.isFinite(num)) return { ok: false, error: "Wert ist keine Zahl" };
+    // Boolesche Policy-Felder kommen als 0/1 aus dem Dashboard.
+    const requested: number | boolean =
+      typeof before === "boolean" ? num >= 0.5 : asFraction(num, dspKey.unit);
+    applyDrawdownScalingPolicy({ [dspKey.field]: requested });
+    const after = currentDrawdownScalingPolicy()[dspKey.field];
+
+    await db
+      .insert(riskConfig)
+      .values({ key, value: toDbValue(after as number | boolean), description: dspKey.description })
+      .onConflictDoUpdate({
+        target: riskConfig.key,
+        set: { value: toDbValue(after as number | boolean), updatedAt: new Date() },
+      });
+    GLOBAL.__riskCfgLoadedAt = Date.now();
+
+    if (String(before) !== String(after)) {
+      await logAudit("CONFIG_CHANGED", "WARN", {
+        key,
+        before,
+        after,
+        clamped: String(requested) !== String(after),
+        requested: num,
+        namespace: "drawdown",
+        source: "dashboard",
+      });
+    }
+
+    // Mit der neuen Policy sofort neu bewerten (Best-Effort; sonst nächster Tick).
+    void updateDrawdownScaling({ force: true }).catch(() => {});
     return { ok: true, effective: after };
   }
 
