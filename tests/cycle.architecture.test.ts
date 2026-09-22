@@ -72,10 +72,10 @@ test("Architektur: Das Cycle-Modul ruft keine Order-Ausführung oder Broker-Orde
   }
 });
 
-test("Architektur: Alle 8 Tages-Steps und Weekly-Review haben feste Rollen und Zeitfenster", () => {
+test("Architektur: Alle Tages-Steps und Weekly-Review haben feste Rollen und Zeitfenster", () => {
   const daily = createDailySteps();
-  assert.equal(daily.length, 8);
-  assert.equal(DAILY_CYCLE_SCHEDULE.length, 8);
+  assert.equal(daily.length, 9);
+  assert.equal(DAILY_CYCLE_SCHEDULE.length, 9);
 
   // Scanner darf kein LLM nutzen
   assert.equal(daily[0].llmAllowed, false);
@@ -84,6 +84,10 @@ test("Architektur: Alle 8 Tages-Steps und Weekly-Review haben feste Rollen und Z
   // Backtest-Verifikation darf kein LLM nutzen (reine Arithmetik)
   assert.equal(daily[7].llmAllowed, false);
   assert.equal(daily[7].role, "BACKTEST_VERIFICATION");
+
+  // Devil's Advocate
+  assert.equal(daily[8].llmAllowed, true);
+  assert.equal(daily[8].role, "DEVILS_ADVOCATE");
 
   const weekly = createWeeklySteps();
   assert.equal(weekly.length, 1);

@@ -364,6 +364,7 @@ export const ROLE_TASK_MAP: Readonly<Record<string, RoutingTask>> = {
   RISK_MANAGER: "simple_risk_decision",
   RESEARCH: "research",
   BACKTEST_VERIFICATION: "json_classification",
+  DEVILS_ADVOCATE: "conflicting_evidence",
   WEEKLY_REVIEW: "weekly_report",
 };
 

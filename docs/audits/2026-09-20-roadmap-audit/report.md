@@ -169,11 +169,9 @@ PnL oder Kosten pro Prompt-Version.
 
 → [Detail](findings/RMA-P3-02-prompt-performance.md) · [Prompt](prompts/PROMPT-P3-02-prompt-performance.md)
 
-### P3.3 Devil’s Advocate — OPEN
+### P3.3 Devil’s Advocate — FIXED (v1.66.0)
 
-Risk- und CEO-Schritte prüfen Vorschläge, sind aber keine unabhängige,
-strukturierte Gegenhypothese mit verpflichtender Evidenz, Falsifikatoren,
-Disagreement-Score und persistiertem Einfluss auf die finale Entscheidung.
+Einführung einer unabhängigen, adversarialen Kontrollinstanz (`DEVILS_ADVOCATE`, Step `07b-devils-advocate`) mit strukturiertem Falsifikations-Schema (`da1`), Gegenhypothese, Falsifikatoren, Failure Modes, deterministischem Disagreement-Score und revisioniertem Snapshot-Eintrag.
 
 → [Detail](findings/RMA-P3-03-devils-advocate.md) · [Prompt](prompts/PROMPT-P3-03-devils-advocate.md)
 

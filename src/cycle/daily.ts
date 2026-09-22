@@ -21,9 +21,10 @@ import { newsStep } from "./steps/newsStep";
 import { riskStep } from "./steps/riskStep";
 import { researchStep } from "./steps/researchStep";
 import { backtestStep } from "./steps/backtestStep";
+import { devilsAdvocateStep } from "./steps/devilsAdvocateStep";
 
 /**
- * Erzeugt die geordnete Liste aller 8 Schritte der Tagespipeline.
+ * Erzeugt die geordnete Liste aller 9 Schritte der Tagespipeline.
  */
 export function createDailySteps(): StepDefinition[] {
   return [
@@ -35,6 +36,7 @@ export function createDailySteps(): StepDefinition[] {
     riskStep as unknown as StepDefinition,
     researchStep as unknown as StepDefinition,
     backtestStep as unknown as StepDefinition,
+    devilsAdvocateStep as unknown as StepDefinition,
   ];
 }
 
@@ -48,4 +50,5 @@ export const DAILY_CYCLE_SCHEDULE = [
   { stepId: "06-risk-manager", role: "RISK_MANAGER", timeWindow: "10:00-11:00", llmAllowed: true },
   { stepId: "07-research", role: "RESEARCH", timeWindow: "11:00-12:00", llmAllowed: true },
   { stepId: "08-backtest-verification", role: "BACKTEST_VERIFICATION", timeWindow: "12:00-13:00", llmAllowed: false },
+  { stepId: "07b-devils-advocate", role: "DEVILS_ADVOCATE", timeWindow: "12:00-13:00", llmAllowed: true },
 ] as const;

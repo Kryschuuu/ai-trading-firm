@@ -30,7 +30,7 @@
 | P2.5 Strukturierte Sentiment-Outputs | PARTIAL | 2–3 PT | [RMA-P2-05](findings/RMA-P2-05-structured-sentiment.md) | [PROMPT-P2-05](prompts/PROMPT-P2-05-structured-sentiment.md) |
 | P3.1 Brier Score / Kalibrierung | OPEN | 5–8 PT | [RMA-P3-01](findings/RMA-P3-01-forecast-calibration.md) | [PROMPT-P3-01](prompts/PROMPT-P3-01-forecast-calibration.md) |
 | P3.2 Prompt-Version-Metrikvergleich | PARTIAL | 3–5 PT | [RMA-P3-02](findings/RMA-P3-02-prompt-performance.md) | [PROMPT-P3-02](prompts/PROMPT-P3-02-prompt-performance.md) |
-| P3.3 Devil’s Advocate | OPEN | 2–4 PT | [RMA-P3-03](findings/RMA-P3-03-devils-advocate.md) | [PROMPT-P3-03](prompts/PROMPT-P3-03-devils-advocate.md) |
+| P3.3 Devil’s Advocate | FIXED | 2–4 PT | [RMA-P3-03](findings/RMA-P3-03-devils-advocate.md) | [PROMPT-P3-03](prompts/PROMPT-P3-03-devils-advocate.md) |
 | P4.1 Execution-Benchmarking | PARTIAL | 4–6 PT | [RMA-P4-01](findings/RMA-P4-01-execution-benchmarking.md) | [PROMPT-P4-01](prompts/PROMPT-P4-01-execution-benchmarking.md) |
 | P4.2 Post-Only + Timeout + Market-Fallback | PARTIAL | 3–5 PT | [RMA-P4-02](findings/RMA-P4-02-post-only-fallback.md) | [PROMPT-P4-02](prompts/PROMPT-P4-02-post-only-fallback.md) |
 | P4.3 TWAP / Depth-Ausführung | OPEN | 5–8 PT | [RMA-P4-03](findings/RMA-P4-03-twap-depth.md) | [PROMPT-P4-03](prompts/PROMPT-P4-03-twap-depth.md) |

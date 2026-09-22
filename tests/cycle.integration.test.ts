@@ -143,9 +143,9 @@ test("Integration: Vollzyklus im Zeitraffer (24h in Sekunden) inkl. Artefakte & 
     // 1. TAGESLAUF IM ZEITRAFFER
     const dailyRecord = await scheduler.runDaily();
     assert.equal(dailyRecord.status, "COMPLETED");
-    assert.equal(dailyRecord.steps.length, 8);
+    assert.equal(dailyRecord.steps.length, 9);
 
-    // Alle 8 Schritte müssen COMPLETED sein
+    // Alle 9 Schritte müssen COMPLETED sein
     const expectedSteps = [
       "01-market-scanner",
       "02-macro-analyst",
@@ -155,6 +155,7 @@ test("Integration: Vollzyklus im Zeitraffer (24h in Sekunden) inkl. Artefakte & 
       "06-risk-manager",
       "07-research",
       "08-backtest-verification",
+      "07b-devils-advocate",
     ];
     for (let i = 0; i < expectedSteps.length; i++) {
       assert.equal(dailyRecord.steps[i].stepId, expectedSteps[i]);
