@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-21** · Code-Version **1.59.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.60.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,18 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.60.0] — 2026-09-22 · Train-Select-Freeze-Test Walk-Forward (RMA-P1-02)
+
+### Hinzugefügt
+
+- **Candidate Contract & Validation (`src/backtest/walkforward.ts`):** Definiert beschränkte Walk-Forward-Kandidaten mit stabiler ID, Strategie-/Regel-Version und serialisierbarer Config (`WalkForwardCandidate`). Die Validierung (`validateCandidates`) erzwingt strikt 1..100 Kandidaten, eindeutige IDs, unlösbare NaN/Infinity-Werte abzuweisen und verhindert unbegrenzte Suchräume (`walkforward:unbounded-candidate-space`, `walkforward:invalid-candidate-config`).
+- **IS-Selector & Deterministic Tie-Breaking (`selectBestCandidate`):** Ausgewählt wird ausschließlich auf In-Sample (IS) Daten basierend auf konfigurierbaren Zielmetriken (`targetMetric`: Sharpe Ratio, Sortino Ratio, Net PnL, Win Rate, Profit Factor, maxDrawdownPct) und harten Mindestgates (`gates`, z.B. minSharpeRatio). Bei Gleichstand greift eine deterministische, dokumentierte Sortierung (Zielmetrik ↓ → Net PnL ↓ → Trades ↓ → lexikographisch auf Candidate ID ↑). OOS- und Holdout-Daten sind im Selektor-Code strukturell unerreichbar.
+- **Freeze Artifact (`createFreezeArtifact`):** Nach der IS-Auswahl wird je Fenster ein unmanipulierbares Freeze-Artefakt erzeugt, das ausgewählten Kandidaten, vollständige Ranking-/Score-Tabelle, Datenmanifest (sha256 über Name, Periode, Kerzenanzahl und OHLCV-Hashes), Code-/Config-/Kandidaten-Hashes, Seed sowie IS/OOS-Cutoffs kapselt. Der `freezeHash` (sha256 über stableStringify) reagiert empfindlich auf jede Änderung an Kandidat, Daten oder Selector-Konfiguration.
+- **OOS & Final Holdout Evaluation:** Das ausgewählte Kandidaten-Modell wird für die OOS-Ausführung des jeweiligen Fensters eingefroren. Nach Abschluss aller Fenster-Entscheidungen wird ein optionales finales Holdout-Segment (`holdout: { holdoutDays }`) strikt im Anschluss ausgewertet. Holdout-Daten sind vor Abschluss aller Window-Auswahlen strukturell isoliert.
+- **Point-in-Time Safe Leakage Protection (`filterCandlesWithLeakageProtection`):** Prüft Point-in-Time-Sicherheit an Segmentgrenzen für horizonüberlappende Labels (`availableAt`, `labelHorizonEnd`). Im `strict: true`-Modus wird bei Leaks `walkforward:leakage-detected` ausgelöst; im `strict: false`-Modus werden leckende Kerzen vor der Ausführung gepurged.
+- **CLI & DB-Persistenz-Erweiterungen:** CLI `scripts/run-backtest.ts` erweitert um `--candidates-file`, `--target-metric`, `--min-sharpe`, `--min-win-rate`, `--min-trades`, `--holdout-days`, `--embargo-hours`, `--purge-leakage` und renderungsfähige Markdown-Artefakte für Candidate Freeze Tables und Holdout Summaries. `toBacktestRunInsert` speichert Selection, Freeze-Artefakte und Holdout-Zusammenfassungen in `paramsJson`, und `backtestRunIdempotencyKey` schützt die Selektion sowie den Freeze-Hash vor Duplikaten.
+- **Umfassende Unit-Test-Suite (`tests/backtest.trainSelectFreeze.test.ts`):** 9 neue, vollständig bestandene Testfälle zur Absicherung von Mutationsinvarianz, stabilen Tie-Breakers, Freeze-Hash-Empfindlichkeit, Candidate-Match in OOS, Leakage-Protection, Holdout-Isolierung, Gate-Fail-Closed-Fehlern und DB/Idempotenz-Roundtrips.
 
 ## [1.59.0] — 2026-09-21 · Multi-Venue-Market-Data-Sync (alle 6 Venues) + Warnung vor verwaisten Instrumenten
 

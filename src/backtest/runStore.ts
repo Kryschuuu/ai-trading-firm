@@ -93,10 +93,9 @@ export function toBacktestRunInsert(
       walkforward: report.walkforward,
       costProfile: report.costProfile,
       createdAt: report.createdAt,
-      // RMA-P1-01 (v1.58.0, additiv): Reproduzierbarkeits-Evidenz des
-      // event_replay-Pfads — Datenmanifest (Input-Hashes), aufgelöste
-      // Friktionskonfiguration (inkl. Seed + Modellversion), Event-Coverage
-      // und degradierte Annahmen. Fehlt bei paper-Läufen (Alt-Semantik).
+      ...(report.selection ? { selection: report.selection } : {}),
+      ...(report.freezeArtifacts ? { freezeArtifacts: report.freezeArtifacts } : {}),
+      ...(report.holdout ? { holdout: report.holdout } : {}),
       ...(report.replayEvidence ? { replayEvidence: report.replayEvidence } : {}),
     },
     metricsJson: {
