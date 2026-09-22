@@ -3,7 +3,7 @@
   "id": "scanner",
   "version": 1,
   "title": "Markt-Scanner, Market Score und Trichter — Feldhilfe",
-  "description": "Hilfetexte zu allen 14 Faktoren, den neun Score-Komponenten, den vier Trichterebenen, den Volatilitätsregimen und den Weekly-Klassen im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Wird vom Operations Center (Task 10) als Tooltip gerendert. Der Scanner arbeitet vollständig deterministisch und ohne LLM.",
+  "description": "Hilfetexte zu allen 15 Faktoren, den neun Score-Komponenten, den vier Trichterebenen, den Volatilitätsregimen und den Weekly-Klassen im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko). Wird vom Operations Center (Task 10) als Tooltip gerendert. Der Scanner arbeitet vollständig deterministisch und ohne LLM.",
   "source": "src/scanner/",
   "fields": {
     "liquidity": {
@@ -75,6 +75,11 @@
       "kurzinfo": "Was ein vollständiger Roundturn kostet — Gebühren plus Spread.",
       "technischeInfo": "feeMode taker (Default) ergibt 2 mal takerFee, maker 2 mal makerFee, blend maker plus taker; dazu der Spread, falls includeSpread aktiv ist. Gebühren stammen aus der Registry. Invers linear: bestCost 0,0005 ergibt 1, worstCost 0,005 ergibt 0. Score-Gewicht 5 Prozent (Komponente execution).",
       "risiko": "Kosten sind der einzige sichere Teil eines Trades; bei kurzen Haltedauern entscheiden sie allein über Gewinn oder Verlust."
+    },
+    "crossSectionalMomentum": {
+      "kurzinfo": "Universumsweiter Momentum-Rang des Instruments im Point-in-Time-Querschnitt (gemeinsamer As-of-Cutoff).",
+      "technischeInfo": "Gewichtete Momentum-Renditen ueber versionierte Horizonte (Default 3/7/14 Tage auf 1h-Kerzen), universumsweit winsorisiert und als z-Score zu einem Composite aggregiert; Perzentil = Anteil des Universums mit gleichem oder schlechterem Rang. Diagnose-Faktor OHNE Score-Gewicht (kein Doppeleffekt zum instrument-lokalen Momentum-Faktor); Quelle ist der Cross-Sectional-Snapshot (npm run research:cross-sectional).",
+      "risiko": "Ohne aktuellen Snapshot (fehlend, stale oder Feature-Flag aus) meldet der Faktor explizit unavailable mit Neutralwert 0,5 — ein fehlender Rang wird nie als 0-Momentum behandelt. Der Querschnitt reflektiert nur die aktuelle Registry-Membership (Survivorship-Grenze, im Snapshot ausgewiesen)."
     },
     "marketScore": {
       "kurzinfo": "Gesamtnote eines Instruments von 0 bis 100, zusammengesetzt aus neun gewichteten Komponenten.",

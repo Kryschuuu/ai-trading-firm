@@ -2,7 +2,7 @@
  * Registry aller Faktor-Module.
  *
  * Ein Faktor = eine Datei = ein Export. Diese Datei ist die einzige Stelle, an
- * der die 14 Faktoren zusammengeführt werden; Ranker, Pipeline, Tests und
+ * der die 15 Faktoren zusammengeführt werden; Ranker, Pipeline, Tests und
  * Dokumentation lesen ausschließlich von hier.
  */
 import { FACTOR_IDS, type Factor, type FactorId, type FactorInput, type FactorValue } from "../types";
@@ -20,6 +20,7 @@ import { newsFactor } from "./news";
 import { fundingFactor } from "./funding";
 import { openInterestFactor } from "./openInterest";
 import { executionCostFactor } from "./executionCost";
+import { crossSectionalMomentumFactor } from "./crossSectionalMomentum";
 
 export * from "./helpers";
 export { liquidityFactor } from "./liquidity";
@@ -36,6 +37,7 @@ export { newsFactor } from "./news";
 export { fundingFactor } from "./funding";
 export { openInterestFactor } from "./openInterest";
 export { executionCostFactor } from "./executionCost";
+export { crossSectionalMomentumFactor, CROSS_SECTIONAL_MOMENTUM_NEUTRAL } from "./crossSectionalMomentum";
 
 /** Alle Faktoren, indiziert über ihre ID. */
 export const FACTORS: Readonly<Record<FactorId, Factor>> = Object.freeze({
@@ -53,13 +55,14 @@ export const FACTORS: Readonly<Record<FactorId, Factor>> = Object.freeze({
   funding: fundingFactor,
   openInterest: openInterestFactor,
   executionCost: executionCostFactor,
+  crossSectionalMomentum: crossSectionalMomentumFactor,
 });
 
 /** Alle Faktoren in kanonischer Reihenfolge. */
 export const FACTOR_LIST: readonly Factor[] = FACTOR_IDS.map((id) => FACTORS[id]);
 
 /**
- * Berechnet alle 14 Faktoren für eine Eingabe.
+ * Berechnet alle 15 Faktoren für eine Eingabe.
  * Reihenfolge und Rundung sind fix ⇒ byte-identische Ergebnisse.
  */
 export function computeAllFactors(input: FactorInput): Record<FactorId, FactorValue> {

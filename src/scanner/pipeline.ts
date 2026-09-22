@@ -4,7 +4,7 @@
  * ```text
  * Instrumente (Registry)
  *   → Datenanbindung (Kerzen, Benchmark, Derivate, News-Zähler)   [injiziert]
- *   → 14 Faktoren (gecacht)
+ *   → 15 Faktoren (gecacht)
  *   → Regime + Eignungsfilter
  *   → Market Score + Breakdown
  *   → Trichter (geeignet → interessant → daily → deep)
@@ -14,6 +14,7 @@
  * und ruft nichts Externes auf. Jede Zeitabhängigkeit kommt über `asOf` herein.
  */
 
+import type { CrossSectionalRankContext } from "@/crossSectional/types";
 import type { MarketCandle } from "@/lib/marketdata/types";
 import type { MarketInstrument } from "@/universe/types";
 import { FactorCache, type CacheStats } from "./cache";
@@ -51,6 +52,13 @@ export interface ScanDataProvider {
   derivatives?(instrument: MarketInstrument): DerivativeContext | null;
   /** Deterministische News-Zähler (optional). */
   news?(instrument: MarketInstrument): NewsRiskContext | null;
+  /**
+   * Cross-Sectional-Momentum-Rang (RMA-P2-04, v1.63.0; optional, **sync**):
+   * der Rang des Instruments im jüngsten Point-in-Time-Snapshot. `null` ⇒
+   * der Faktor `crossSectionalMomentum` meldet explizit `unavailable`
+   * (Neutralwert 0.5, nie 0-Momentum).
+   */
+  crossSectional?(instrument: MarketInstrument): CrossSectionalRankContext | null;
 }
 
 /** Optionen eines Scan-Laufs. */
@@ -186,6 +194,9 @@ export function scanUniverse(options: ScanOptions): ScanResult {
       benchmarkCandles: data?.benchmarkCandles?.(instrument) ?? null,
       derivatives: data?.derivatives?.(instrument) ?? null,
       news: data?.news?.(instrument) ?? null,
+      // v1.63.0 (RMA-P2-04): Cross-Sectional-Rang (optional, sync). Ohne
+      // Provider-Kallback ⇒ `null` ⇒ Faktor meldet explizit `unavailable`.
+      crossSectional: data?.crossSectional?.(instrument) ?? null,
       asOf: asOfMs,
       config,
     };

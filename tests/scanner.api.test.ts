@@ -295,7 +295,10 @@ test("GET /api/universe/score/{id} liefert vollständigen Breakdown", async () =
   assert.equal(body.ok, true);
   assert.equal(body.score.instrumentId, "BINANCE:BTCUSDT");
   assert.equal(body.score.breakdown.length, 9);
-  assert.equal(Object.keys(body.score.factors).length, 14);
+  // 15 Faktoren (v1.63.0: + crossSectionalMomentum als Diagnose-Faktor OHNE Score-Gewicht —
+  // der gewichtete Breakdown bleibt 9 Komponenten, die Momentum-Komponente stammt
+  // weiterhin vom instrument-lokalen Faktor `momentum`).
+  assert.equal(Object.keys(body.score.factors).length, 15);
   const sum = body.score.breakdown.reduce((a, e) => a + e.contribution, 0);
   assert.ok(Math.abs(sum - body.score.score) < 1e-9);
   assert.equal(body.levels.eligible, true);

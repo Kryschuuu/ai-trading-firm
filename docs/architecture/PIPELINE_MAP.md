@@ -33,7 +33,7 @@ flowchart TD
     end
 
     subgraph ScannerLayer["2. Deterministischer Scanner & Funnel"]
-        B1[scanUniverse\nsrc/scanner/pipeline.ts] -->|14 Faktoren| B2[Factor Engine\nsrc/scanner/factors/*]
+        B1[scanUniverse\nsrc/scanner/pipeline.ts] -->|15 Faktoren| B2[Factor Engine\nsrc/scanner/factors/*]
         B2 -->|Regime-Klassifikation| B3[Regime Classifier\nsrc/scanner/regime.ts]
         B2 -->|10 Eignungsfilter| B4[Eligibility Filters\nsrc/scanner/filters.ts]
         B2 -->|9 gewichtete Komponenten| B5[Ranker & Score\nsrc/scanner/ranker.ts]
@@ -135,7 +135,7 @@ flowchart TD
   - `src/scanner/service.ts` (`ScannerService`)
   - `src/scanner/filters.ts` (10 Eignungsfilter)
   - `src/scanner/regime.ts` (`classifyRegime`)
-  - `src/scanner/factors/*` (14 Faktoren: `liquidity`, `spread`, `atr`, `volatility`, `momentum`, `trend`, `volumeRatio`, `rsi`, `drawdown`, `correlation`, `news`, `funding`, `openInterest`, `executionCost`)
+  - `src/scanner/factors/*` (15 Faktoren: `liquidity`, `spread`, `atr`, `volatility`, `momentum`, `trend`, `volumeRatio`, `rsi`, `drawdown`, `correlation`, `news`, `funding`, `openInterest`, `executionCost`, `crossSectionalMomentum` — letzter als Diagnose ohne Score-Gewicht, v1.63.0)
   - `src/scanner/cache.ts` (`FactorCache`)
   - `src/scanner/warmup.ts` (`assessDataReadiness`, `requiredWarmupCandles`)
 - **Eingabe-Typen:**

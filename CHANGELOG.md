@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.62.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.63.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,31 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.63.0] — 2026-09-22 · Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04)
+
+### Hinzugefügt
+
+- **Cross-Sectional-Modul `src/crossSectional/` (Code-Version `cross-sectional@1`, Config v1):** universumsweites, as-of-sicheres Momentum-Ranking als reine Funktion aus (Kandidaten, Kerzen, as-of, Config, Code-Version) — kein LLM, kein Netzwerk, keine Orders. Pipeline: Universe-Eligibility (Registry, geschlossene Exclusion-Gründe `INACTIVE`…`INVALID_INPUT`) → Momentum-Renditen über versionierte Horizonte (Default `h72`/`h168`/`h336` auf dem 1h-Raster, Gewichte 0.2/0.3/0.5, optionaler Skip-Period) → Querschnitt (Winsorize [0.01, 0.99] → z-Score → gewichtetes Composite → Rang mit kanonischem ID-Tie-Break, Perzentil `(n−rank+1)/n`) → Snapshot mit Provenance.
+- **Point-in-Time ohne Look-ahead (Policy `ingested`):** eine Kerze fließt nur ein, wenn sie geschlossen **und** zu ihrem Ingestionszeitpunkt verfügbar war (`barEnd ≤ asOf` **und** `fetchedAt ≤ asOf`). Späterer Backfill (`fetchedAt > asOf`) ist für alle früheren as-of-Zeitpunkte strukturell unsichtbar — historische Snapshots ändern sich durch spätere Daten nie (getestet). `computedAt` und der Idempotenz-Key sind von der Datenverfügbarkeit getrennt.
+- **Deterministische Identität & Persistenz:** Snapshot-ID `xs1:<sha256(v1|timeframe|asOfMs|universeHash|dataHash|configHash|codeVersion)>` (`xu1:`/`xd1:`/`xc1:`-Hashes); gleicher fachlicher Key ⇒ gleiche ID, Idempotenz-Key = 64-hex. Append-only, zweifach anwendbare Migration [`drizzle/2026-09-22_cross_sectional_ranking.sql`](drizzle/2026-09-22_cross_sectional_ranking.sql): `cross_sectional_snapshots` (Provenance, Coverage ≤ 1 via CHECK, Exclusion-Counts, Survivorship-Note, Stabilität) + `cross_sectional_rankings` (je Mitglied eine Zeile, `value_hash`-Konflikt-Guard: abweichende Zeilen werden protokolliert, **nie** überschrieben — fail-closed). PIT-Load (`as_of ≤ asOf`), Stabilität/Turnover gegen den Vorgänger (Top-K-Overlap, Rank-Shift, Common-Count, Default Top-K 10), Retention-Pruning mit FK-Cascade (keine Orphane). Parallel dazu deterministische Datei-Artefakte `artifacts/cross-sectional/YYYY-MM-DD/<snapshotId>.json` (atomar, nicht in Git) als Cross-Prozess-Medium der Scanner-Integration.
+- **Scanner-Integration (additiv, Gewicht 0):** neuer Diagnose-Faktor `crossSectionalMomentum` (einer von 15): `normalized = percentile`, `raw = composite`, Provenienz im Detail. Explizites `unavailable` (Neutralwert 0.5, `raw: null`) ohne Snapshot/stale/Feature-Flag aus — ein fehlender Rang geht **nie** still als 0-Momentum ein. Dokumentierte Gewichtsentscheidung: Score-Gewicht 0 (wie `atr`/`rsi`/`funding`); die gewichtete Momentum-Komponente bleibt der instrument-lokale Faktor `momentum` — Scanner-Scan mit/ohne Cross-Sectional-Karte erzeugt **identische Scores/Breakdowns** (getestet, kein stilles Doppeltzählen). Der Scanner führt keine I/O dafür selbst aus; der Web-Prozess liest das jüngste Artefakt (Staleness ≤ `maxSnapshotAgeMs`, Default 7 Tage).
+- **CLI & API:** `npm run research:cross-sectional` (`--as-of=<ISO>`, `--dry`, `--top=N`; Exit 0 = Snapshot mit ≥ 1 geranktem Instrument bzw. Flag aus, 1 = harter Fehler oder 0 gerankte Instrumente — der Zustand wird persistiert und laut gemeldet). Read-only `GET /api/research/cross-sectional` (PIT über `?asOf`, `?instrumentId`, `?timeframe`, `?top` 1…200, `?exclusions`): 200 mit Snapshot+Items+Member bzw. `NO_SNAPSHOT`, 400 `VALIDATION_ERROR`, 503 `STORAGE_UNAVAILABLE` (generisch).
+- **Observability (bounded):** Metriken `cross_sectional_runs_total{result}`, `cross_sectional_persist_total{persist}`, `cross_sectional_rank_conflicts_total` — ausschließlich Code-konstante Labels, **keine** Instrument-/Snapshot-IDs; IDs und Details stehen in den strukturierten Audit-Events `cross_sectional_snapshot_persisted` und `cross_sectional_ranking_conflict`.
+- **Tests (50 neue):** `tests/crossSectional.unit.test.ts` (22: exakte Rang-/Perzentil-Fixtures, Permutationsinvarianz, Look-ahead/Late-Backfill-Invarianz, Eligibility-Gründe, Degeneration, Winsorize/z-/volAdjusted-Formeln, Artefakt-Roundtrip/Byte-Identität), `tests/crossSectional.db.test.ts` (8, eingebettete Postgres: Migration zweifach idempotent, Roundtrip/Zeitsemantik, Idempotenz Retry ×3, Restart frischer Pool, PIT-Sichtbarkeit, CHECK-Constraints, Konflikt-Guard, Stabilität, Retention+Orphan-Check), `tests/crossSectional.api.test.ts` (16: 400-Verträge, NO_SNAPSHOT-Form, Antwort-Aufbau, HTTP-Pfad gegen eingebettete Postgres inkl. PIT über `?asOf`), `tests/crossSectional.scanner.test.ts` (4: explizites Unavailable 0.5 nie 0, Provenienz, **Score-Invarianz bei Gewicht 0**).
+- **Dokumentation:** neues [`docs/CROSS_SECTIONAL_RANKING.md`](docs/CROSS_SECTIONAL_RANKING.md) (Architektur, Zeitsemantik, Eligibility-Tabelle, Formeln, Identität/Persistenz/Idempotenz, Scanner-Integration, Operations, Monitoring, Testmatrix, dokumentierte Grenzen), `CONFIGURATION.md` (§ Cross-Sectional), `.env.example`, `README.md`, `docs/README.md`.
+
+### Konfiguration
+
+| Flag | Default |
+| --- | --- |
+| `CROSS_SECTIONAL_ENABLED` | `true` (Rollback: `false` ⇒ exaktes Vor-Verhalten des Scanner-Pfads) |
+| `CROSS_SECTIONAL_CONFIG_FILE` | `—` (JSON-Config, validierte Overrides; ungültig ⇒ harter Fehler `CROSS_SECTIONAL_CONFIG_ERROR`) |
+
+### Kompatibilität
+
+- Rein additiv: neue Tabellen (append-only Migration, idempotent), neues optionales Scanner-Faktor-Detail, neue read-only-API, neue bounded Metriken/Audit-Events. **Keine Änderungen an bestehenden Tabellen, Patches oder Scores** — der Market Score ist nachweislich unverändert (Gewicht 0). Rollback: Redeploy auf v1.62.0 ODER `CROSS_SECTIONAL_ENABLED=false` (Scanner-Pfad) — Persistierte Snapshots bleiben lesbar/harmlos.
+- Bekannte, dokumentierte Grenzen: Survivorship-Bias (Universum aus der aktuellen Registry; Survivorship-Note je Snapshot; bias-freie Rekonstruktion out of scope), < 2 rankbare Mitglieder ⇒ `CROSS_SECTION_DEGENERATE` (σ undefined), kein Order-Pfad.
 
 ## [1.62.0] — 2026-09-22 · Deterministische Multi-Timeframe-Konfluenz (RMA-P2-03)
 

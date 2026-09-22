@@ -28,6 +28,12 @@ import { qualityStrictDataErrorsForScan } from "@/marketdata/quality";
 import { resolveRuntimePath } from "@/lib/appPaths";
 import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
+import { loadCrossSectionalConfig, isCrossSectionalEnabled } from "@/crossSectional/config";
+import {
+  loadLatestCrossSectionalArtifact,
+  rankContextOf,
+} from "@/crossSectional/artifact";
+import type { CrossSectionalRankContext } from "@/crossSectional/types";
 import { loadScannerConfig, type ScannerConfig } from "./config";
 import {
   scanUniverse,
@@ -304,6 +310,12 @@ export interface ScannerServiceOptions {
    * (injizierbar) — der Service greift nie auf die statische Wanduhr zu.
    */
   cacheTtlMs?: number;
+  /**
+   * Cross-Sectional-Momentum-Kontext je Instrument (RMA-P2-04, v1.63.0).
+   * Default: das jüngste Cross-Sectional-Artefakt (Staleness-begrenzt).
+   * `() => null` deaktiviert den Faktor explizit (Tests/Rollback).
+   */
+  crossSectional?: () => ReadonlyMap<string, CrossSectionalRankContext> | null;
 }
 
 /** Hält Scan-Ergebnis und Weekly-Review für die API bereit. */
@@ -380,6 +392,42 @@ export class ScannerService {
   }
 
   /**
+   * Cross-Sectional-Momentum-Kontext für den aktuellen Lauf (RMA-P2-04,
+   * v1.63.0): injizierte Quelle, sonst das **Artefakt** des
+   * Cross-Sectional-Laufs (`artifacts/cross-sectional/...`, as-of-gelesen,
+   * Staleness-begrenzt über `maxSnapshotAgeMs` der Cross-Sectional-Config).
+   *
+   * Fail-closed und fail-soft zugleich: Feature-Flag aus, kein Artefakt oder
+   * stale Artefakt ⇒ `null` ⇒ der Faktor meldet explizit `unavailable`
+   * (Neutralwert 0.5 — ein fehlender Rang geht nie still als 0-Momentum ein).
+   * Der Scan bricht daran NIEMALS ab (reiner Zusatz-Lesepfad).
+   */
+  private crossSectionalForScan(): ReadonlyMap<string, CrossSectionalRankContext> | null {
+    if (this.options.crossSectional) {
+      return this.options.crossSectional() ?? null;
+    }
+    if (!isCrossSectionalEnabled()) return null;
+    let snapshot;
+    try {
+      const cfg = loadCrossSectionalConfig();
+      snapshot = loadLatestCrossSectionalArtifact({
+        nowMs: this.clockNow(),
+        maxAgeMs: cfg.maxSnapshotAgeMs,
+      });
+    } catch {
+      return null; // Lese-/Validierungsfehler ⇒ Faktor unavailable (nie Score-0)
+    }
+    if (!snapshot) return null;
+    const map = new Map<string, CrossSectionalRankContext>();
+    for (const member of snapshot.members) {
+      if (member.status !== "RANKED") continue;
+      const ctx = rankContextOf(snapshot, member.instrumentId);
+      if (ctx) map.set(member.instrumentId, ctx);
+    }
+    return map.size > 0 ? map : null;
+  }
+
+  /**
    * Derivate-Kontext für den aktuellen Lauf: injizierte Quelle, sonst das
    * Sync-Artefakt (as-of-gelesen, Staleness-begrenzt). `null` ⇒ Provider kennt
    * keinen Derivatetzweig ⇒ Factor-Neutralität (kein `0`).
@@ -409,17 +457,23 @@ export class ScannerService {
   refresh(asOf?: number | Date | string): ScanResult {
     const config = this.options.config ?? loadScannerConfig();
     const instruments = this.currentInstruments();
+    const crossSectional = this.crossSectionalForScan();
     const data =
       this.options.data ??
       // Instrumente werden für die venue-agnostische Benchmark-Auflösung
       // mitgereicht (sonst bleibt der Korrelationsfaktor bei Venue-Umstellungen
       // dauerhaft „unbekannt“).
-      historicalStoreProvider(
-        new HistoricalStore(),
-        config.factors.correlation.benchmarkInstrumentId,
-        instruments,
-        this.derivativesForScan()
-      );
+      {
+        ...historicalStoreProvider(
+          new HistoricalStore(),
+          config.factors.correlation.benchmarkInstrumentId,
+          instruments,
+          this.derivativesForScan()
+        ),
+        // v1.63.0 (RMA-P2-04): Cross-Sectional-Rang (additiv; ohne Karte ⇒
+        // Faktor meldet `unavailable` — exakt das Verhalten vor v1.63.0).
+        ...(crossSectional ? { crossSectional: (instrument: MarketInstrument) => crossSectional.get(instrument.id) ?? null } : {}),
+      };
     const now = this.options.now ?? (() => new Date());
     const effectiveNow = asOf ?? now();
     // MDERR-006: Datenfehler-Manifest (Sync-Prozess) → Readiness ERROR statt

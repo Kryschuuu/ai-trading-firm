@@ -152,7 +152,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   scanner: {
     file: "docs/DAILY_WEEKLY_RESEARCH.md",
     title: "Daily & Weekly Research",
-    subtitle: "Deterministischer Markt-Scanner — 14 Faktoren, Market Score, Trichter, API (v1.12)",
+    subtitle: "Deterministischer Markt-Scanner — 15 Faktoren, Market Score, Trichter, API (v1.12)",
   },
   portfolio: {
     file: "docs/PORTFOLIO_ANALYTICS.md",

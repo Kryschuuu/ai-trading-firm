@@ -1885,3 +1885,137 @@ export const regimeSnapshots = pgTable(
     check("regime_snapshots_idem_check", sql`${t.idempotencyKey} ~ '^[a-f0-9]{64}$'`),
   ]
 );
+
+/**
+ * Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04, v1.63.0) —
+ * append-only Snapshots universumsweiter Momentum-Perzentile am gemeinsamen
+ * As-of-Cutoff mit vollständiger Provenance (Universe-/Data-/Config-Hash).
+ *
+ * `crossSectionalSnapshots`: EINE Zeile je Snapshot-Lauf; `snapshotId`
+ * (`xs1:<sha256>`) ist die DETERMINISTISCHE Snapshot-Identität und
+ * `idempotencyKey` (derselbe Hex-Hash) macht Retries/Restarts zu No-Ops.
+ * `stability` ist NULL beim ersten Snapshot, danach gebounded Turnover.
+ *
+ * `crossSectionalRankings`: EINE Zeile je (Snapshot, Instrument): RANKED
+ * (Rang/Perzentil/Composite) oder EXCLUDED (geschlossener Grund; nie still 0).
+ * FK mit ON DELETE CASCADE (Retention entfernt Snapshot + Mitglieder).
+ */
+export const crossSectionalSnapshots = pgTable(
+  "cross_sectional_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Deterministische Snapshot-Identität `xs1:<sha256>`. */
+    snapshotId: text("snapshot_id").notNull(),
+    /** SHA-256-Idempotenz-Key (hex) über die fachliche Snapshot-Identität. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** Gemeinsamer As-of-Cutoff (Ereigniszeit). */
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    /** Berechnungszeit (Persistenzzeitpunkt) — nie Zulässigkeitskriterium. */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    codeVersion: text("code_version").notNull(),
+    configVersion: integer("config_version").notNull(),
+    configHash: text("config_hash").notNull(),
+    universeHash: text("universe_hash").notNull(),
+    dataHash: text("data_hash").notNull(),
+    timeframe: text("timeframe").notNull(),
+    availabilityPolicy: text("availability_policy").notNull(),
+    universeSize: integer("universe_size").notNull(),
+    rankedCount: integer("ranked_count").notNull(),
+    excludedCount: integer("excluded_count").notNull(),
+    /** `rankedCount / universeSize` ∈ [0,1]. */
+    coverage: numeric("coverage").notNull(),
+    /** Ausschlusszähler je Grund (gebounded, nur Gründe > 0). */
+    exclusionCounts: jsonb("exclusion_counts").notNull(),
+    /** Turnover-/Stabilitätsmessung; NULL beim ersten Snapshot. */
+    stability: jsonb("stability"),
+    /** Sichtbar dokumentierte Survivorship-Grenze. */
+    survivorshipNote: text("survivorship_note").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("cross_sectional_snapshots_idem_unique").on(t.idempotencyKey),
+    uniqueIndex("cross_sectional_snapshots_snapshot_id_unique").on(t.snapshotId),
+    index("cross_sectional_snapshots_asof_idx").on(t.asOf),
+    check("cross_sectional_snapshots_computed_check", sql`${t.computedAt} >= ${t.asOf}`),
+    check("cross_sectional_snapshots_schema_check", sql`${t.schemaVersion} >= 1`),
+    check(
+      "cross_sectional_snapshots_counts_check",
+      sql`${t.universeSize} >= 0 AND ${t.rankedCount} >= 0 AND ${t.excludedCount} >= 0
+        AND ${t.rankedCount} <= ${t.universeSize}
+        AND ${t.rankedCount} + ${t.excludedCount} = ${t.universeSize}`
+    ),
+    check("cross_sectional_snapshots_coverage_check", sql`${t.coverage} >= 0 AND ${t.coverage} <= 1`),
+    check("cross_sectional_snapshots_snapshot_id_check", sql`${t.snapshotId} ~ '^xs1:[0-9a-f]{64}$'`),
+    check("cross_sectional_snapshots_idem_check", sql`${t.idempotencyKey} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "cross_sectional_snapshots_hash_check",
+      sql`${t.configHash} ~ '^xc1:[0-9a-f]{64}$' AND ${t.universeHash} ~ '^xu1:[0-9a-f]{64}$'
+        AND ${t.dataHash} ~ '^xd1:[0-9a-f]{64}$'`
+    ),
+    check(
+      "cross_sectional_snapshots_timeframe_check",
+      sql`${t.timeframe} IN ('1m','3m','5m','15m','30m','1h','2h','4h','1d','5d')`
+    ),
+    check("cross_sectional_snapshots_policy_check", sql`${t.availabilityPolicy} IN ('ingested','bar_close')`),
+  ]
+);
+
+export const crossSectionalRankings = pgTable(
+  "cross_sectional_rankings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    snapshotId: text("snapshot_id")
+      .notNull()
+      .references(() => crossSectionalSnapshots.snapshotId, { onDelete: "cascade" }),
+    instrumentId: text("instrument_id").notNull(),
+    /** `RANKED` | `EXCLUDED` (geschlossene Liste, CHECK). */
+    status: text("status").notNull(),
+    /** Rang (1 = beste), nur bei RANKED. */
+    rank: integer("rank"),
+    /** Perzentil ∈ (0,1], nur bei RANKED. */
+    percentile: numeric("percentile"),
+    /** Composite (gewichtete z-Score-Summe), nur bei RANKED. */
+    composite: numeric("composite"),
+    /** Rohrenditen je Horizont (explizite NULLs, nie 0). */
+    rawReturns: jsonb("raw_returns").notNull(),
+    zScores: jsonb("z_scores").notNull(),
+    winsorized: jsonb("winsorized").notNull(),
+    /** Anteil verfügbarer Horizonte [0,1]. */
+    horizonCoverage: numeric("horizon_coverage").notNull(),
+    /** barEnd der jüngsten genutzten Kerze (Ereigniszeit). */
+    lastBarTs: timestamp("last_bar_ts", { withTimezone: true }),
+    /** availableAt (Ingestionszeit) dieser Kerze. */
+    lastAvailableAt: timestamp("last_available_at", { withTimezone: true }),
+    barsUsed: integer("bars_used").notNull().default(0),
+    /** Geschlossener Ausschlussgrund, nur bei EXCLUDED. */
+    exclusionReason: text("exclusion_reason"),
+    /** SHA-256 der zeilengen Fachinhalte (Konflikt-Guard statt Überschreiben). */
+    valueHash: text("value_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("cross_sectional_rankings_snapshot_instrument_unique").on(t.snapshotId, t.instrumentId),
+    index("cross_sectional_rankings_snapshot_rank_idx").on(t.snapshotId, t.rank),
+    check("cross_sectional_rankings_status_check", sql`${t.status} IN ('RANKED','EXCLUDED')`),
+    check(
+      "cross_sectional_rankings_ranked_check",
+      sql`(${t.status} = 'RANKED') = (${t.rank} IS NOT NULL)
+        AND ((${t.status} = 'EXCLUDED') = (${t.exclusionReason} IS NOT NULL))`
+    ),
+    check(
+      "cross_sectional_rankings_percentile_check",
+      sql`${t.percentile} IS NULL OR (${t.percentile} > 0 AND ${t.percentile} <= 1)`
+    ),
+    check("cross_sectional_rankings_coverage_check", sql`${t.horizonCoverage} >= 0 AND ${t.horizonCoverage} <= 1`),
+    check(
+      "cross_sectional_rankings_reason_check",
+      sql`${t.exclusionReason} IS NULL OR ${t.exclusionReason} IN
+        ('INACTIVE','NOT_IN_ASSET_CLASSES','NO_LIQUIDITY_DATA','BELOW_MIN_VOLUME',
+         'UNIVERSE_CAP','NO_BARS_AT_CUTOFF','STALE_DATA','INSUFFICIENT_HISTORY',
+         'INSUFFICIENT_HORIZON_COVERAGE','CROSS_SECTION_DEGENERATE','INVALID_INPUT')`
+    ),
+    check("cross_sectional_rankings_hash_check", sql`${t.valueHash} ~ '^[0-9a-f]{64}$'`),
+    check("cross_sectional_rankings_bars_check", sql`${t.barsUsed} >= 0 AND (${t.lastBarTs} IS NULL OR ${t.barsUsed} > 0)`),
+  ]
+);

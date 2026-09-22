@@ -105,7 +105,7 @@ test("Architektur: Schreibzugriffe existieren ausschließlich in artifacts.ts", 
 test("Architektur: je Faktor genau eine Datei mit TSDoc-Formelblock", () => {
   const factorDir = path.join(SCANNER_DIR, "factors");
   const files = readdirSync(factorDir).filter((f) => f.endsWith(".ts") && !["index.ts", "helpers.ts"].includes(f));
-  assert.equal(files.length, 14, `erwartet 14 Faktor-Dateien, gefunden ${files.length}`);
+  assert.equal(files.length, 15, `erwartet 15 Faktor-Dateien, gefunden ${files.length}`);
   for (const file of files) {
     const source = readFileSync(path.join(factorDir, file), "utf8");
     assert.match(source, /\/\*\*[\s\S]*Formel[ (:]/, `${file}: TSDoc mit Formel fehlt`);

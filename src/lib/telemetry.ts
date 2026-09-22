@@ -394,6 +394,30 @@ export const telemetry = {
       telemetry.confluence.runs.reset();
     },
   },
+  /**
+   * Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04, v1.63.0).
+   *
+   * Labels sind ausschließlich Code-konstante Ergebniswerte
+   * (`result`: ok | empty | error | store-error, `outcome`: persisted |
+   * idempotent | pruned, `persist`: written | duplicate | pruned) —
+   * KEINE Instrument-/Snapshot-IDs als Label (Kardinalitätsregel wie oben);
+   * IDs stehen im strukturierten Audit-Event
+   * `cross_sectional_snapshot_persisted`.
+   */
+  crossSectional: {
+    /** Snapshot-Läufe je Ergebnis/Ausgang. */
+    runs: new LabelCounter("cross_sectional_runs_total"),
+    /** Persistenzschreibungen (written | duplicate | pruned). */
+    persist: new LabelCounter("cross_sectional_persist_total"),
+    /** Abweichende Mitglieder-Zeilen (fail-closed protokolliert). */
+    rankConflicts: new LabelCounter("cross_sectional_rank_conflicts_total"),
+    /** alle Zähler der Cross-Sectional-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.crossSectional.runs.reset();
+      telemetry.crossSectional.persist.reset();
+      telemetry.crossSectional.rankConflicts.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -554,6 +578,9 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.regime.persist.exposition(),
     telemetry.regime.boosts.exposition(),
     telemetry.confluence.runs.exposition(),
+    telemetry.crossSectional.runs.exposition(),
+    telemetry.crossSectional.persist.exposition(),
+    telemetry.crossSectional.rankConflicts.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -643,4 +670,5 @@ export function resetTelemetryForTests(): void {
   telemetry.firm.reset();
   telemetry.backtest.reset();
   telemetry.confluence.reset();
+  telemetry.crossSectional.reset();
 }
