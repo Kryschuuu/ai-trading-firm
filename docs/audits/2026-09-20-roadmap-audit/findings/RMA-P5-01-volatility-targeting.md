@@ -1,7 +1,7 @@
 # RMA-P5-01: Portfolio-Volatility-Targeting
 
-- **Antwort:** Teilweise
-- **Tracking-Status:** `PARTIAL`
+- **Antwort:** Ja (v1.67.0)
+- **Tracking-Status:** `FIXED` (v1.67.0, PR #166)
 - **Severity:** `MEDIUM`
 - **Quick Estimate Restaufwand:** **2–4 PT**
 - **Umsetzungs-Prompt:** [`PROMPT-P5-01`](../prompts/PROMPT-P5-01-volatility-targeting.md)

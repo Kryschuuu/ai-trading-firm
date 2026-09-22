@@ -13,8 +13,16 @@
  * ADAPTIVER ÜBERLAGERUNGSSCHICHT (v1.7.0): maxRiskPerTrade ist zusätzlich
  * volatilitätsgetrieben anpassbar — src/lib/adaptiveRisk.ts multipliziert das
  * konfigurierte BASIS-Limit mit einem Faktor ∈ (0, 1] (can only lower, never
- * raise). Die dreistufige Kaskade bleibt die Sandbox:
- *   Code-Ceilings → Basis-Limit (DB/Dashboard) → adaptiver Marktfaktor.
+ * raise).
+ *
+ * VOLATILITY-TARGETING-ÜBERLAGERUNG (RMA-P5-01, v1.67.0): src/lib/
+ * volatilityTargeting.ts fügt einen ZWEITEN, kontinuierlichen Faktor hinzu
+ * (Portfolio-Volatilitätsforecast gegen konfiguriertes Ziel). Beide Faktoren
+ * sind unabhängig und werden MULTIPLIKATIV komponiert (jeweils ≤ 1, das
+ * Produkt damit ≤ 1). Die Kaskade bleibt die Sandbox:
+ *   Code-Ceilings → Basis-Limit (DB/Dashboard)
+ *     → Regime-Faktor (diskret) × VolTarget-Faktor (kontinuierlich)
+ *     → Code-Boden.
  */
 
 import { state } from "./stateRegistry";
@@ -107,6 +115,39 @@ export type AdaptiveRiskState = {
 /** Max. Alter eines persistierten adaptiven Faktors (Micro-Prozess-Sicht). */
 export const ADAPTIVE_STATE_MAX_AGE_MS = 15 * 60_000;
 
+/**
+ * RMA-P5-01 (v1.67.0): Volatility-Targeting-Überschlag.
+ *
+ * Der Faktor ist der ANGEWENDETE Multiplikator des kontinuierlichen
+ * Portfolio-Volatility-Targetings (Kern: `src/portfolio/volatilityTargeting.ts`).
+ * Er wirkt exakt wie der adaptive Regime-Faktor — multiplikativ auf
+ * `maxRiskPerTrade`, nur senkend (Faktor ∈ (0, 1]). Die Kaskade lautet:
+ *
+ *   Code-Ceilings (LIMIT_CEILINGS)
+ *     └─ Basis-Limit (risk_config / Dashboard)
+ *          └─ × Regime-Faktor (diskret, adaptiveRisk.ts)
+ *               └─ × VolTarget-Faktor (kontinuierlich, volatilityTargeting.ts)
+ *                    └─ Code-Boden (LIMIT_CEILINGS.maxRiskPerTrade[0])
+ *
+ * Multiplikative Komposition: beide Faktoren ≤ 1 ⇒ ihr Produkt ≤ jeder
+ * Faktor ≤ 1 ⇒ das Ergebnis kann das konfigurierte Basis-Limit niemals
+ * überschreiten. Die beiden Faktoren sind unabhängig (Regime = Markt-Furcht,
+ * VolTarget = Portfolio-Volatilitätsziel) und stacken daher.
+ *
+ * `mode` dokumentiert die Herkunft:
+ *   - `active`    — vom Live-Orchestrator gesetzt (Monitor-only ist null).
+ *   - `persisted` — aus `risk_config` übernommen (Mikro-Executor-Prozess).
+ */
+export type VolatilityTargetingState = {
+  /** 0 < factor ≤ 1 — Multiplikator auf das Basis-Limit maxRiskPerTrade. */
+  factor: number;
+  at: string;
+  /** As-of-Zeitstempel des Forecasts (ISO), null wenn nicht anwendbar. */
+  asOf: string | null;
+  reason: string;
+  mode: "active" | "persisted";
+};
+
 // S2 (v1.36.22): baseLimits/currentLimits/adaptiveState liegen jetzt in der
 // zentralen State-Registry (Wahrheit von `baseLimits` = risk_config/Default;
 // `currentLimits` = Basis + adaptiver Marktfaktor). Defaults werden hier
@@ -115,8 +156,9 @@ export const ADAPTIVE_STATE_MAX_AGE_MS = 15 * 60_000;
 state.baseLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
 state.currentLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
 state.adaptiveState.setDefault(() => null);
+state.volTargetState.setDefault(() => null);
 
-/** maxRiskPerTrade nach Anwendung des adaptiven Faktors (Boden = Code-Minimum). */
+/** maxRiskPerTrade nach Anwendung des kombinierten Marktfaktors (Boden = Code-Minimum). */
 function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
   const floor = LIMIT_CEILINGS.maxRiskPerTrade[0];
   // Faktor > 1 wäre risikosteigernd — das System darf per Marktzustand
@@ -125,11 +167,33 @@ function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
   return { ...limits, maxRiskPerTrade: Math.max(limits.maxRiskPerTrade * f, floor) };
 }
 
-/** currentLimits = baseLimits + (ggf.) aktive adaptive Reduktion. */
+/**
+ * Kombiniert beide Marktfaktoren (RMA-P5-01, v1.67.0):
+ * Regime-Faktor × VolTarget-Faktor, jeweils hart auf (0, 1] geklemmt.
+ * Ohne einen Faktor = 1 (neutral). Das Produkt ist damit immer ≤ 1 —
+ * das Ergebnis kann das Basis-Limit nie überschreiten.
+ */
+function combinedMarketFactor(): number {
+  const adaptive = state.adaptiveState.get();
+  const volTarget = state.volTargetState.get();
+  let f = 1;
+  if (adaptive != null && Number.isFinite(adaptive.factor) && adaptive.factor > 0) {
+    f *= Math.min(adaptive.factor, 1);
+  }
+  if (volTarget != null && Number.isFinite(volTarget.factor) && volTarget.factor > 0) {
+    f *= Math.min(volTarget.factor, 1);
+  }
+  return f;
+}
+
+/**
+ * currentLimits = baseLimits × kombinierter Marktfaktor
+ * (Regime-Faktor × VolTarget-Faktor, beide ≤ 1).
+ */
 function recomputeCurrent(): RiskLimits {
   const base = state.baseLimits.get()!;
-  const adaptive = state.adaptiveState.get();
-  state.currentLimits.set(adaptive ? applyFactorToRisk(base, adaptive.factor) : { ...base });
+  const factor = combinedMarketFactor();
+  state.currentLimits.set(factor < 1 ? applyFactorToRisk(base, factor) : { ...base });
   return state.currentLimits.get()!;
 }
 
@@ -163,6 +227,30 @@ export function applyAdaptiveRisk(snapshot: AdaptiveRiskState | null): RiskLimit
 /** Aktive adaptive Reduktion (oder null), z. B. für Observability. */
 export function getAdaptiveRiskState(): Readonly<AdaptiveRiskState> | null {
   const current = state.adaptiveState.get();
+  return current ? { ...current } : null;
+}
+
+/**
+ * RMA-P5-01 (v1.67.0): Wendet den Volatility-Targeting-Faktor an.
+ *
+ * `null` hebt die Reduktion auf (Rollback- und Monitor-Pfad). Der Faktor
+ * wird hart auf (0, 1] geklemmt — eine Konfigurations- oder Übermittlungs-
+ * fehler kann das Basis-Limit niemals überschreiten. Wie `applyAdaptiveRisk`
+ * rechnet `recomputeCurrent()` aus dem FRESCHEN Basiswert (keine Kumulation
+ * bei DB-Neuladungen).
+ */
+export function applyVolatilityTargeting(snapshot: VolatilityTargetingState | null): RiskLimits {
+  state.volTargetState.set(
+    snapshot != null && Number.isFinite(snapshot.factor) && snapshot.factor > 0
+      ? { ...snapshot, factor: Math.min(snapshot.factor, 1) }
+      : null
+  );
+  return recomputeCurrent();
+}
+
+/** Aktive Volatility-Targeting-Reduktion (oder null), z. B. für Observability. */
+export function getVolatilityTargetingState(): Readonly<VolatilityTargetingState> | null {
+  const current = state.volTargetState.get();
   return current ? { ...current } : null;
 }
 

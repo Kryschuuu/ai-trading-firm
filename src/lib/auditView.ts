@@ -2147,6 +2147,96 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     },
   },
 
+  RISK_VOL_TARGETING: {
+    label: "Volatility-Targeting-Bewertung",
+    category: "risk",
+    description:
+      "Das kontinuierliche Portfolio-Volatility-Targeting (RMA-P5-01, v1.67.0) hat die annualisierte Portfolio-Volatilität aus as-of-sicheren Returns gegen das konfigurierte Ziel bewertet und den Risikomultiplikator berechnet. Der Faktor skaliert das Risikobudget maxRiskPerTrade NUR senkend (hart ≤ 1). Status FALLBACK (WARN) heißt: fehlende/stale/invalide Daten — der Faktor springt sofort auf das Minimum (fail-closed), nicht auf neutral. Im Modus monitor wird der Faktor nicht auf Orders angewendet (keine Größenänderung), er wird nur persistiert und berichtet.",
+    headline: (d) => {
+      const status = text(d.status)?.toUpperCase();
+      const applied = num(d.appliedMultiplier);
+      const code = text(d.reasonCode);
+      const parts = [
+        status === "FALLBACK" ? `Fallback (${code ?? "unbekannt"})` : status === "NO_EXPOSURE" ? "Keine Exposure (neutral)" : status === "OK" ? "Forecast OK" : "Bewertung",
+        applied !== null ? formatKnownValue("factor", applied) : "",
+      ];
+      return parts.filter(Boolean).join(" · ");
+    },
+    explain: (d) => {
+      const status = text(d.status)?.toUpperCase();
+      const applied = num(d.appliedMultiplier);
+      const reason = text(d.reason);
+      const parts: string[] = [];
+      if (status === "FALLBACK") {
+        parts.push(`Fehlerhafte oder unzureichende Daten — der Faktor wurde sofort auf das Minimum (konservativ ≤ 1) gesetzt. ${reason ? `Grund: ${reason}` : ""}`);
+      } else if (status === "NO_EXPOSURE") {
+        parts.push("Keine offenen Positionen — das Portfolio ist Cash, es gibt kein Risiko zu dämpfen (Faktor 1, neutral).");
+      } else if (applied !== null && applied >= 1) {
+        parts.push("Volatilität im Zielbereich oder darunter — volles Risikobudget bleibt bestehen.");
+      } else if (applied !== null) {
+        parts.push(`Die Forecast-Volatilität liegt über dem Ziel — das Risikobudget wurde auf ${Math.round(applied * 100)} % des Basiswerts gesenkt.`);
+      }
+      const realized = num(d.realizedAnnualizedVol);
+      const target = num(d.targetAnnualizedVol);
+      const error = num(d.targetError);
+      if (realized !== null && target !== null) {
+        parts.push(`Realisiert: ${Math.round(realized * 100)} % p. a. vs. Ziel ${Math.round(target * 100)} % p. a. (${error !== null ? (error > 0 ? "unter" : "über") + " dem Ziel" : "Abweichung unbestimmt"}).`);
+      }
+      return parts.length > 0 ? `${parts.join(" ")} ` : "Keine Bewertung protokolliert.";
+    },
+    sections: (d) => [
+      {
+        title: "Bewertung",
+        facts: [
+          { label: "Betriebsmodus", value: text(d.mode) ?? "—", hint: "monitor = keine Ordergrößenänderung, active = Faktor wirkt auf das Risikobudget, off = inaktiv." },
+          { label: "Status", value: text(d.status) ?? "—" },
+          { label: "Grund-Code", value: text(d.reasonCode) ?? "—", mono: true },
+          { label: "Begründung", value: text(d.reason) ?? "—" },
+          { label: "Ziel (p. a.)", value: num(d.targetAnnualizedVol) !== null ? `${formatNumber(num(d.targetAnnualizedVol) as number * 100, 1)} %` : "—" },
+          { label: "Forecast (p. a.)", value: num(d.forecastAnnualizedVol) !== null ? `${formatNumber(num(d.forecastAnnualizedVol) as number * 100, 1)} %` : "nicht berechenbar (null ≠ 0)" },
+          { label: "Realisiert (p. a.)", value: num(d.realizedAnnualizedVol) !== null ? `${formatNumber(num(d.realizedAnnualizedVol) as number * 100, 1)} %` : "nicht berechenbar" },
+          { label: "Target-Error", value: num(d.targetError) !== null ? `${formatSigned(num(d.targetError) as number * 100)} % (realisiert − Ziel)` : "nicht berechenbar" },
+          { label: "Roh-Multiplikator", value: num(d.rawMultiplier) !== null ? `${formatNumber(num(d.rawMultiplier) as number, 4)}×` : "— (Fallback)" },
+          { label: "Vorheriger Multiplikator", value: num(d.prevMultiplier) !== null ? `${formatNumber(num(d.prevMultiplier) as number, 4)}×` : "—" },
+          { label: "Risiko-Multiplikator", value: formatKnownValue("factor", d.appliedMultiplier), hint: FIELD_HINTS.factor },
+          { label: "Datenabdeckung", value: num(d.coverage) !== null ? `${formatNumber(num(d.coverage) as number * 100, 1)} %` : "—" },
+          { label: "Beobachtungen", value: num(d.observations) !== null ? String(num(d.observations)) : "—" },
+          { label: "Symbole im Forecast", value: formatKnownValue("usedSymbols", d.usedSymbols), mono: true },
+          { label: "Berechnet am", value: text(d.computedAt) ? formatTimestampUtc(text(d.computedAt)) : "—" },
+        ],
+      },
+    ],
+    check: (d) => {
+      const issues: AuditIssue[] = [];
+      const applied = num(d.appliedMultiplier);
+      if (applied !== null && applied > 1) {
+        issues.push({
+          severity: "error",
+          title: "Widerspruch: Multiplikator erhöht das Risiko",
+          detail: `Faktor ${formatNumber(applied, 4)}× übersteigt 1,00. Der Volatility-Targeting-Faktor darf das Basis-Risikobudget niemals überschreiten — Klemmung prüfen.`,
+        });
+      }
+      const status = text(d.status)?.toUpperCase();
+      const forecast = num(d.forecastAnnualizedVol);
+      if (status === "FALLBACK" && forecast !== null) {
+        issues.push({
+          severity: "error",
+          title: "Widerspruch: Fallback mit Forecast-Wert",
+          detail: "Bei FALLBACK muss forecastAnnualizedVol null sein (fail-closed: unbekannt ≠ 0). Ein Zahlenwert deutet auf einen fehlerhaften Write hin.",
+        });
+      }
+      const coverage = num(d.coverage);
+      if (coverage !== null && (coverage < 0 || coverage > 1)) {
+        issues.push({
+          severity: "error",
+          title: "Abdeckung außerhalb [0, 1]",
+          detail: `Coverage ${coverage} ist kein Anteil — Persistenz prüfen.`,
+        });
+      }
+      return issues;
+    },
+  },
+
   REGIME_CHANGE: {
     label: "Markt-Regime gewechselt",
     category: "risk",

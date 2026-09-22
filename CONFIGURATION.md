@@ -1040,3 +1040,28 @@ unklare Orders beim Venue abgleichen. [Migration, Vertrag, API und Formeln](src/
 | `DEVILS_ADVOCATE_HUMAN_REVIEW_THRESHOLD` | `0.70` | `0.40` .. `1.00` | Ab diesem Disagreement-Score wird eine manuelle Prüfung erzwungen und der Trade pausiert. |
 | `DEVILS_ADVOCATE_SCALE_DOWN_FACTOR` | `0.50` | `0.10` .. `0.90` | Risikofaktor bei moderatem Dissens. |
 
+## Portfolio-Volatility-Targeting (RMA-P5-01, v1.67.0)
+
+Kontinuierliche Risikoschicht: annualisierte Portfolio-Volatilität gegen ein
+Ziel, Risikobudget `maxRiskPerTrade` wird **nur senkend** skaliert (Faktor
+hart ≤ 1). Vollständige Doku: [`docs/VOLATILITY_TARGETING.md`](docs/VOLATILITY_TARGETING.md).
+Migration (append-only, idempotent) vor Aktivierung anwenden:
+`npx drizzle-kit push` (oder
+`psql "$DATABASE_URL" -f drizzle/2026-09-22_volatility_targeting.sql`).
+
+| Variable | Standard | Erlaubte Werte | Bedeutung |
+| --- | --- | --- | --- |
+| `PORTFOLIO_VOL_TARGETING_MODE` | `monitor` | `off`, `monitor`, `active` | Betriebsmodus. `monitor` (Default): Forecast + Persistenz + Reporting, **keine** Ordergrößenänderung. `active`: Faktor wirkt auf das Risikobudget. `off`: inaktiv, gesetzter Faktor wird zurückgenommen (Rollback). Unbekannt ⇒ `monitor`. |
+| `PORTFOLIO_VOL_TARGETING_TIMEFRAME` | `1h` | `5m`, `15m`, `30m`, `1h`, `4h`, `1d` | Timeframe der Forecast-Kerzen. Unbekannt ⇒ `1h`. |
+
+Die übrigen Parameter (Ziel, Lookback, Multiplikator-Bounds, Smoothing,
+Staleness, Coverage, Shrinkage) liegen in `risk_config` unter `vtp.*`
+(Master-Schalter `vtp.enabled`, Default 1) und werden gegen feste Bounds
+geklemmt — Details und Bounds in
+[`docs/VOLATILITY_TARGETING.md`](docs/VOLATILITY_TARGETING.md) und
+`src/portfolio/volatilityTargeting.ts` (`VOLATILITY_TARGETING_BOUNDS`).
+
+**Rollout:** zuerst `monitor` beobachten (realisierte Vol + Target-Error im
+Status/API), dann `active`. Rollback: `PORTFOLIO_VOL_TARGETING_MODE=off` +
+Restart — keine Datenbereinigung nötig (Snapshots bleiben lesbar).
+

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdaptiveRiskStatus, updateAdaptiveRisk } from "@/lib/adaptiveRisk";
+import { getVolatilityTargetingStatus } from "@/lib/volatilityTargeting";
 import { guardWrite } from "@/lib/apiAuth";
 import { publicErrorMessage } from "@/lib/secrets";
 
@@ -27,9 +28,14 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   const status = getAdaptiveRiskStatus();
+  // RMA-P5-01 (v1.67.0): additiver Abschnitt für das kontinuierliche
+  // Portfolio-Volatility-Targeting (dieselbe Kaskade, zweiter Faktor).
+  // Fehlt, wenn noch nie eine Bewertung stattfand (rückwärtskompatibel).
+  const vt = getVolatilityTargetingStatus();
   return NextResponse.json({
     ok: true,
     adaptive: status,
+    volatilityTargeting: vt ?? null,
     hint:
       status == null
         ? "Noch keine Bewertung erfolgt — der Monitor-Tick (60 s) oder ein POST hier starten sie."

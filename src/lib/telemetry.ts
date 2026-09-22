@@ -461,6 +461,31 @@ export const telemetry = {
       telemetry.prompt.queries.reset();
     },
   },
+  /**
+   * Portfolio-Volatility-Targeting (RMA-P5-01, v1.67.0).
+   *
+   * Labels sind ausschließlich Code-konstante Kategorien:
+   *   * `result` = ok | fallback | no_exposure | disabled | error
+   *   * `reason` = geschlossener `VolatilityTargetingReasonCode` (bounded)
+   *   * `mode`   = monitor | active
+   *
+   * Keine Instrument-/Trade-/Order-IDs als Label (Kardinalitätsregel wie
+   * oben); Symbole stehen im Audit-Event und in der Snapshot-Tabelle.
+   */
+  volatilityTargeting: {
+    /** Neubewertungs-Läufe je Ergebnis und Modus. */
+    updates: new LabelCounter("volatility_targeting_updates_total"),
+    /** Fallbacks je geschlossener Grund (stale_data, low_coverage, …). */
+    fallbacks: new LabelCounter("volatility_targeting_fallbacks_total"),
+    /** Persistierte Snapshots je Ergebnis (written | duplicate | failed). */
+    snapshots: new LabelCounter("volatility_targeting_snapshots_total"),
+    /** alle Zähler der VolTarget-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.volatilityTargeting.updates.reset();
+      telemetry.volatilityTargeting.fallbacks.reset();
+      telemetry.volatilityTargeting.snapshots.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -635,6 +660,9 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.prompt.artifacts.exposition(),
     telemetry.prompt.runs.exposition(),
     telemetry.prompt.queries.exposition(),
+    telemetry.volatilityTargeting.updates.exposition(),
+    telemetry.volatilityTargeting.fallbacks.exposition(),
+    telemetry.volatilityTargeting.snapshots.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -728,4 +756,5 @@ export function resetTelemetryForTests(): void {
   telemetry.sentiment.reset();
   telemetry.forecasts.reset();
   telemetry.prompt.reset();
+  telemetry.volatilityTargeting.reset();
 }
