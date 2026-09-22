@@ -215,6 +215,15 @@ export interface AgentInvocationSpec<TOutput> {
   complexity?: "low" | "medium" | "high" | "critical";
   /** Strukturierte externe Nutzdaten (Prompt-Injection-Schutz) */
   untrustedData?: unknown;
+  /**
+   * Autoritative, deterministisch berechnete Daten (RMA-P2-03, v1.62.0) —
+   * z. B. der MTF-Konfluenzsnapshot. Wird als GETRENNTER `TRUSTED`-Block in
+   * den Prompt übernommen (nicht als `UNTRUSTED`): das Modell darf ihn
+   * erläutern, aber nicht neu berechnen oder überschreiben. Die Werte werden
+   * nach dem LLM-Aufruf serverseitig angehängt — ein `trustedData`-Feld in
+   * der LLM-Antwort wird vom Schema-Validator verworfen (kein Override-Pfad).
+   */
+  trustedData?: unknown;
   /** JSON-Schema-Validierer für die Ausgabe */
   schemaValidator: (parsed: unknown) => { valid: boolean; data?: TOutput; error?: string };
   /** Sicherer Fallback bei ungültiger oder verweigerter Modellausgabe */

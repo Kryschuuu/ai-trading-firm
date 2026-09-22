@@ -378,6 +378,22 @@ export const telemetry = {
       telemetry.forecasts.queries.reset();
     },
   },
+  /**
+   * Deterministische Multi-Timeframe-Konfluenz (RMA-P2-03, v1.62.0).
+   *
+   * Labels sind ausschließlich Code-konstant (`result` = ok | degraded |
+   * abstain, `source` = cycle | analyst | backtest | scanner | api) — keine
+   * Instrument-, Order- oder Trade-IDs als Label (Kardinalitätsregel wie
+   * oben); IDs stehen im strukturierten Audit-Event `confluence_computed`.
+   */
+  confluence: {
+    /** Snapshot-Berechnungen je Ergebnis und Quelle. */
+    runs: new LabelCounter("confluence_runs_total"),
+    /** alle Zähler der Konfluenz-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.confluence.runs.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -537,6 +553,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.perp.asOfQueries.exposition(),
     telemetry.regime.persist.exposition(),
     telemetry.regime.boosts.exposition(),
+    telemetry.confluence.runs.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -625,4 +642,5 @@ export function resetTelemetryForTests(): void {
   telemetry.audit.reset();
   telemetry.firm.reset();
   telemetry.backtest.reset();
+  telemetry.confluence.reset();
 }

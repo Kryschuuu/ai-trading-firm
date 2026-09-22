@@ -1,0 +1,65 @@
+{
+  "formulaVersion": "mtf-confluence@1",
+  "configVersion": 1,
+  "instrumentId": "BITUNIX:BTCUSDT",
+  "asOf": "2026-01-05T00:00:00.000Z",
+  "asOfMs": 1767571200000,
+  "computedAt": "2026-01-05T00:00:00.000Z",
+  "snapshotKey": "mtf1:98cb133cc5e75280",
+  "status": "OK",
+  "direction": 0.7,
+  "strength": 0.7,
+  "bias": "BULLISH",
+  "confidence": 0.58,
+  "coverage": 1,
+  "conflict": 0.42,
+  "contributions": [
+    {
+      "timeframe": "15m",
+      "weight": 0.2,
+      "effectiveWeight": 0.2,
+      "direction": 1,
+      "strength": 1,
+      "features": {
+        "trend": 1,
+        "momentum": 1,
+        "volatility": 0.2790697674
+      },
+      "barEndMs": 1767571200000,
+      "barEnd": "2026-01-05T00:00:00.000Z",
+      "barsUsed": 30
+    },
+    {
+      "timeframe": "1h",
+      "weight": 0.3,
+      "effectiveWeight": 0.3,
+      "direction": 0,
+      "strength": 0,
+      "features": {
+        "trend": 0,
+        "momentum": 0,
+        "volatility": 0.02
+      },
+      "barEndMs": 1767571200000,
+      "barEnd": "2026-01-05T00:00:00.000Z",
+      "barsUsed": 30
+    },
+    {
+      "timeframe": "4h",
+      "weight": 0.5,
+      "effectiveWeight": 0.5,
+      "direction": 1,
+      "strength": 1,
+      "features": {
+        "trend": 1,
+        "momentum": 1,
+        "volatility": 0.2790697674
+      },
+      "barEndMs": 1767571200000,
+      "barEnd": "2026-01-05T00:00:00.000Z",
+      "barsUsed": 30
+    }
+  ],
+  "missing": [],
+  "reasons": []
+}
