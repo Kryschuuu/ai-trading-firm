@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.61.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.62.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,29 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.62.0] — 2026-09-22 · Deterministische Multi-Timeframe-Konfluenz (RMA-P2-03)
+
+### Hinzugefügt
+
+- **Konfluenzmodul `src/confluence/` (Formel `mtf-confluence@1`, Config v1):** eine einzige reine Funktion (`computeConfluence`) beantwortet, ob die konfigurierten Timeframes (Default 15m/1h/4h, Gewichte 0.2/0.3/0.5) zum Entscheidungszeitpunkt gleichgerichtet sind — kein LLM, keine Uhr, kein Zufall. Je Timeframe drei bounded, warmup-geprüfte Features (Trend = normalisierte EMA-Lücke, Momentum = gewichtete Rate-of-Change, Volatilität = ATR-Anteil; Warmup 22 Bars), danach Coverage, Richtung, Stärke, Konflikt (gewichtete mittlere Abweichung), Confidence (`coverage × (1 − conflict) × volFactor`) und Status (`OK`/`DEGRADED`/`ABSTAIN`).
+- **As-of-Ausrichtung ohne Look-ahead:** nur Kerzen mit `barEnd ≤ asOf` **und** `availableAt ≤ asOf` fließen ein — die noch offene HTF-Kerze und späterer Backfill (`fetchedAt > asOf`) sind strukturell ausgeschlossen. Stale-Reihen (> 2 Perioden), invalide Kerzen, Warmup-Mangel und fehlende Reihen melden geschlossene Gründe (`stale`/`invalid`/`warmup`/`no-closed-bars`/`unavailable`).
+- **Fail-closed-Aggregation:** unter `minCoverage` (0.5) ist das Signal `null` (nicht `0`), `confidence` exakt `0`; fehlende Timeframes re-normalisieren nur oberhalb der Mindestcoverage und senken die Confidence strikt. Jede Outputzahl ist auf `contributions[]` (Gewichte, Richtung, Features, `barEndMs`, `barsUsed`) und `missing[]` zurückführbar; `snapshotKey` (`mtf1:<sha256>`) ist der stabile Idempotency-Schlüssel für Retries/Restarts.
+- **Versionierte Config (`src/confluence/config.ts`):** 1–5 Timeframes (Allowlist, eindeutig), Gewichtssumme exakt 1, bounded Schwellen/Perioden, Warmup ≤ `maxBars`; Datei-Override via `CONFLUENCE_CONFIG_FILE` (ungültig ⇒ harter Fehler), Schalter `CONFLUENCE_ENABLED` (Default `true`, Rollback-Pfad). Gewichte stammen ausschließlich aus der Config — keine Runtime-Prompt-Manipulation.
+- **Zyklus-Integration (Trusted-Data):** der technische Step rechnet je Kandidat (max. 40, Store-Batch mit einer Datei-Ladung) VOR dem LLM einen Snapshot, übergibt ihn als GETRENNTEN `trustedData`-Block (`AgentInvocationSpec.trustedData`, Rendering in `ports.ts`) und hängt ihn NACH der Validierung serverseitig an (`analysis.confluence`, `confluenceMeta` in `04-technical-analyst.json`). Die Schema-Validierung verwirft LLM-seitige `confluence`-Felder strukturell — das Modell erläutert, überschreibt aber nie.
+- **Analyst-Integration:** `runTechnicalAnalyst` nutzt dieselbe pure Funktion über den Live-Kerzen-Adapter (Promptblock + `agentMessages.meta.confluence`, additiv). Scanner/Backtest teilen die Funktion über die Adapter; die Scanner-Gesamtrangfolge bleibt unverändert.
+- **Observability:** bounded Metrik `confluence_runs_total{result,source}` (keine Instrument-IDs als Label) und strukturiertes Audit-Event `confluence_computed` (Status, Richtung, Confidence/Coverage/Konflikt, Versionen, Snapshot-Key; `ABSTAIN` = `warn`).
+- **Tests (38 neue):** `tests/confluence.unit.test.ts` (22: Features/Bounds/Warmup, offene HTF-Bar, PIT-Verfügbarkeit, gleich-/gegenläufig/fehlend, Reihenfolge-Invarianz, stale/warmup/invalid/no-closed-bars, Key-Stabilität, Determinismus, Golden-Fixture, Config-Bounds, LLM-Override-Schutz, Trusted-Block), `tests/confluence.adapters.test.ts` (10: Store-Batch, Backtest-/Live-Parität, Analyst-Adapter, ABSTAIN-Batch, PIT-Backfill, Retry-Idempotenz, Telemetrie-Labels, Audit-Event, Roundtrip, Store-Look-ahead-Guard), `tests/confluence.cycle.test.ts` (6: Step-Anhängung, Override-Ersetzung, Fallback, ABSTAIN-Sichtbarkeit, Flag-Pfad, Artefakt-Roundtrip) plus Golden-Fixture `tests/fixtures/confluence-golden.json`.
+- **Dokumentation:** neues [`docs/MTF_CONFLUENCE.md`](docs/MTF_CONFLUENCE.md) (Architektur, Zeitsemantik, Formeln/Einheiten, Fallbacks, Trusted-Data, Konfiguration, Observability, Migration/Rollback), `CONFIGURATION.md` (§ MTF-Konfluenz), `.env.example`, `docs/README.md`.
+
+### Kompatibilität
+
+- Rein additiv: neue optionale Felder (`confluence`, `confluenceMeta`, `trustedData`), neue bounded Metrik, neues Audit-Event. **Keine DB-Migration erforderlich** (Persistenz über versionierte Zyklus-Artefakte + `agentMessages.meta`); Alt-Artefakte ohne Snapshot bleiben lesbar. Scanner-Ranking, Risk-Ceilings, Kill-Switches, Authority Chains und Live-Gates sind unberührt. Rollback: Redeploy ODER `CONFLUENCE_ENABLED=false` (Legacy-Output ohne Code-Änderung).
+
+### Bewusst nicht Teil (Scope-Grenze PROMPT-P2-03)
+
+Kein LLM-Modelltraining, kein Ersatz der Scanner-Gesamtrangfolge, keine
+Nutzung unvollständiger höherer Timeframekerzen.
 
 ## [1.61.0] — 2026-09-22 · Mehrdimensionale, point-in-time-sichere Regime-Erkennung (RMA-P2-01)
 

@@ -8,6 +8,7 @@
  */
 
 import { MAX_SHORTLIST_LIMIT } from "./types";
+import type { ConfluenceSnapshot } from "@/confluence/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Macro Analyst Schemata
@@ -158,6 +159,32 @@ export function validateSelectionOutput(input: unknown): { valid: boolean; data?
 // 3. Technical Analyst Schemata
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Deterministischer MTF-Konfluenzsnapshot je Analyse (RMA-P2-03, v1.62.0).
+ *
+ * Der Snapshot ist die AUTORITATIVE, codeseitig berechnete Deterministik
+ * (`mtf-confluence@1`) — kein LLM-Feld. Er wird vom technischen Step NACH
+ * dem LLM-Aufruf serverseitig angehängt; ein `confluence`-Feld in der
+ * LLM-Antwort verwirft der Validator (kein Override-Pfad: das Modell darf
+ * den Snapshot erläutern, aber nicht überschreiben).
+ */
+export type TechnicalConfluenceAttachment = ConfluenceSnapshot;
+
+/** Aggregierte Konfluenz-Metadaten des technischen Steps (Artefakt). */
+export interface TechnicalConfluenceMeta {
+  /** Formelversion (z. B. `mtf-confluence@1`). */
+  formulaVersion: string;
+  /** Config-Schema-Version. */
+  configVersion: number;
+  /** Gemeinsamer Entscheidungszeitpunkt (ISO-UTC). */
+  asOf: string;
+  /** Snapshots je Status (Zähler, keine IDs). */
+  computed: number;
+  ok: number;
+  degraded: number;
+  abstained: number;
+}
+
 export interface InstrumentTechnicalAnalysis {
   instrumentId: string;
   bias: "BULLISH" | "BEARISH" | "NEUTRAL";
@@ -170,11 +197,20 @@ export interface InstrumentTechnicalAnalysis {
     resistance: number;
   };
   thesis: string;
+  /**
+   * Deterministischer Konfluenzsnapshot (RMA-P2-03, additiv, optional).
+   * Fehlt bei `CONFLUENCE_ENABLED=false` (Rollback-Pfad) — Alt-Artefakte
+   * ohne Feld bleiben lesbar, neue Konsumenten behandeln `undefined` als
+   * „kein Snapshot" (nie als neutralen Score).
+   */
+  confluence?: TechnicalConfluenceAttachment;
 }
 
 export interface TechnicalStepOutput {
   analyses: InstrumentTechnicalAnalysis[];
   analyzedCount: number;
+  /** Aggregierte Konfluenz-Metadaten (additiv, optional, s. o.). */
+  confluenceMeta?: TechnicalConfluenceMeta;
 }
 
 export function validateTechnicalOutput(input: unknown): { valid: boolean; data?: TechnicalStepOutput; error?: string } {
@@ -202,6 +238,9 @@ export function validateTechnicalOutput(input: unknown): { valid: boolean; data?
           }
         : { support: 0, resistance: 0 };
 
+      // RMA-P2-03: Ein `confluence`-Feld der LLM-Antwort wird hier bewusst
+      // NICHT übernommen (kein Override-Pfad). Der technische Step hängt den
+      // autoritativen Snapshot nach der Validierung serverseitig an.
       analyses.push({
         instrumentId: item.instrumentId.trim(),
         bias,

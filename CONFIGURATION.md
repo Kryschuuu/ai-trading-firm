@@ -644,6 +644,20 @@ exakt wie vorher** (Modus `log`, Aggregation/Cross-Check aus). Details:
 | `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in — Rate-Limits!). Nur wirksam, wenn der Adapter die optionale Methode `getCrosscheckCandles()` implementiert (Adapter-Registry-Muster); ohne Implementierung no-op. Bei `on` ein zusätzlicher Request je Reihe (Rate-Limit-Bucket bleibt autoritativ). |
 | `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in Prozent (Abweichung der Schlusskurse auf gemeinsamen Zeitstempeln, relativ zum Primärkurs). **Streng** größer ⇒ `QUALITY_CROSSCHECK`-Befund + Log. Bounds [0.1, 10], Clamp mit Log-Warnung. 0 gemeinsame Zeitstempel = kein Befund (kein Vergleich ≠ Abweichung). |
 
+### MTF-Konfluenz (RMA-P2-03, v1.62.0)
+
+Deterministischer Multi-Timeframe-Konfluenzsnapshot (`mtf-confluence@1`,
+as-of-ausgerichtet, nur geschlossene Bars) als Trusted-Data für den
+technischen Step und den Analysten. Ohne Konfiguration läuft das System mit
+den eingebauten Defaults (15m/1h/4h, Gewichte 0.2/0.3/0.5, `minCoverage`
+0.5); `CONFLUENCE_ENABLED=false` stellt den Legacy-Output ohne Snapshot
+wieder her. Details: [`docs/MTF_CONFLUENCE.md`](docs/MTF_CONFLUENCE.md).
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `CONFLUENCE_ENABLED` | `true` | Step-Anhängung an/aus. Nur `false`/`0`/`off`/`no` schalten ab (Rollback-Pfad: Legacy-Output, additiv kompatibel); unbekannte Werte warnen und lassen die Konfluenz an (fail-laut). |
+| `CONFLUENCE_CONFIG_FILE` | `—` | Pfad einer JSON-Config (Defaults + validierte Overrides: 1–5 Timeframes, Gewichtssumme exakt 1, bounded Schwellen/Perioden, Warmup ≤ `maxBars`). Unlesbar/ungültig ⇒ harter Fehler (kein still schwächeres Verhalten). |
+
 ### Perpetual-Daten (RMA-P2-02, v1.54.0)
 
 Historische Funding-Raten, Open Interest und Liquidationen in eigenen

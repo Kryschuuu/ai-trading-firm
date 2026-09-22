@@ -32,6 +32,13 @@ import { perpAnalystSnapshotLinesFromCache } from "@/perpdata/consumers";
 // RMA-P3-01: Forecast-Capture — schmales Modul statt Barrel, damit die
 // Abhängigkeitsrichtung (lib → forecasts → db) erhalten bleibt.
 import { captureAnalystForecast } from "@/forecasts/service";
+// RMA-P2-03: Deterministische MTF-Konfluenz — schmale Module statt Barrel
+// (lib → confluence, keine Zyklen). Dieselbe reine Funktion wie im
+// Tageszyklus (`technicalStep`), nur über den Live-Kerzen-Adapter.
+import { confluenceFromLibCandles } from "@/confluence/adapters";
+import { loadConfluenceConfig } from "@/confluence/config";
+import { formatConfluenceLine } from "@/confluence/confluence";
+import type { ConfluenceSnapshot } from "@/confluence/types";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __analystBusy?: boolean;
@@ -221,9 +228,13 @@ async function runOneAnalyst(
 
 export async function runTechnicalAnalyst(symbol: string): Promise<void> {
   const lines: string[] = [];
+  // RMA-P2-03: Rohkerzen je Timeframe für die deterministische Konfluenz
+  // (dieselbe reine Funktion wie im Tageszyklus, Live-Adapter).
+  const seriesByTimeframe = new Map<string, Candle[]>();
   for (const tf of ["15m", "1h", "4h"] as const) {
     try {
       const candles = await getCandles(symbol, tf, 120);
+      seriesByTimeframe.set(tf, candles);
       const snap = snapshot(symbol, candles);
       if (!snap) continue;
       lines.push(
@@ -252,6 +263,34 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
 
   if (lines.length === 0) return;
 
+  // RMA-P2-03: Deterministischer Konfluenzsnapshot (as-of = jetzt, nur
+  // geschlossene Bars — die noch offene HTF-Kerze fällt strukturell heraus).
+  // Der Snapshot ist TRUSTED-Deterministik: das Modell darf ihn erläutern,
+  // aber nicht überschreiben. Schlägt die Berechnung fehl (nur bei
+  // Fehlkonfiguration möglich), läuft die Analyse ohne Snapshot weiter —
+  // laut geloggt, nie still geschluckt.
+  let confluence: ConfluenceSnapshot | null = null;
+  try {
+    const asOfMs = Date.now();
+    confluence = confluenceFromLibCandles(symbol, asOfMs, seriesByTimeframe, loadConfluenceConfig(), {
+      source: "analyst",
+      computedAtMs: asOfMs,
+    });
+  } catch (e) {
+    structuredLog("warn", "confluence_analyst_failed", {
+      role: "TECHNICAL_ANALYST",
+      symbol,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+  const confluenceLines = confluence
+    ? [
+        ``,
+        `TRUSTED DETERMINISTIC CONFLUENCE (precomputed, authoritative — explain it, do NOT recompute or override):`,
+        formatConfluenceLine(confluence),
+      ]
+    : [];
+
   const userPrompt = [
     `You are the Technical Analyst of an autonomous trading firm.`,
     ANTI_INJECTION,
@@ -259,8 +298,14 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
     `Multi-timeframe data for ${symbol}:`,
     ...lines,
     ...(perpLines.length > 0 ? [``, `Perpetual derivatives (canonical store, as-of):`, ...perpLines] : []),
+    ...confluenceLines,
     ``,
     `Assess trend alignment across timeframes (RSI zones, EMA9/21 relationship, ATR volatility regime).`,
+    ...(confluence
+      ? [
+          `The TRUSTED CONFLUENCE line above is deterministic ground truth: stay consistent with an ABSTAIN status (no signal) and do not contradict a high-confidence direction without explicit justification.`,
+        ]
+      : []),
     `Respond ONLY with JSON: {"view":"BULLISH|BEARISH|NEUTRAL","confidence":0..1,"thesis":"<=200 chars","recommendation":null}`,
     `Example: {"view":"BULLISH","confidence":0.6,"thesis":"All TFs aligned up, RSI 58 not overbought","recommendation":null}`,
   ].join("\n");
@@ -273,11 +318,22 @@ export async function runTechnicalAnalyst(symbol: string): Promise<void> {
   );
   if (!result) return;
   const a = normalizeAnalysis(result.parsed);
+  // RMA-P2-03: Der deterministische Snapshot wird additiv persistiert
+  // (Meta + Berichtszeile) — versioniert, mit Coverage/Conflict/Missing.
+  const confluenceContent = confluence ? `\n${formatConfluenceLine(confluence)}` : "";
   await recordAnalysis(await findAgentByRole("TECHNICAL_ANALYST"), "TECHNICAL_ANALYST", undefined,
-    `[TECH ${symbol} ${new Date().toISOString()}]\n${[...lines, ...perpLines].join("\n")}\n→ ${a.view}: ${a.thesis}`.trim(),
+    `[TECH ${symbol} ${new Date().toISOString()}]\n${[...lines, ...perpLines].join("\n")}${confluenceContent}\n→ ${a.view}: ${a.thesis}`.trim(),
     // `symbol` ist Teil der Metadaten (additiv): das Forecast-Ledger
     // (RMA-P3-01) braucht das Ziel-Entity der Analyse.
-    { kind: "ANALYSIS", symbol, view: a.view, confidence: a.confidence, thesis: a.thesis, data: [...lines, ...perpLines] },
+    {
+      kind: "ANALYSIS",
+      symbol,
+      view: a.view,
+      confidence: a.confidence,
+      thesis: a.thesis,
+      data: [...lines, ...perpLines],
+      ...(confluence ? { confluence } : {}),
+    },
     result
   );
 }
