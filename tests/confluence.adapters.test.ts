@@ -31,7 +31,7 @@ const ID_B = "BITUNIX:ETHUSDT";
 let dir: string;
 let logEntries: StructuredLogEntry[];
 
-function toMarketCandles(tf: keyof typeof TF_MS, drift: 1 | -1): MarketCandle[] {
+function toMarketCandles(tf: keyof typeof TF_MS, drift: 1 | -1): LibMarketCandle[] {
   const bars = drift === 1 ? upBars(tf, 30) : downBars(tf, 30);
   return bars.map((c) => ({
     time: c.time,

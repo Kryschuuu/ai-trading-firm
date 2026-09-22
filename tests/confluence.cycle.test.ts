@@ -14,7 +14,7 @@ import { technicalStep } from "../src/cycle/steps/technicalStep";
 import type { StepExecutionContext } from "../src/cycle/types";
 import type { SupportedTimeframe } from "../src/lib/marketdata/historicalStore";
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
-import type { MarketCandle } from "../src/marketdata/types";
+import type { MarketCandle } from "../src/lib/marketdata/types";
 import { ASOF_MS, upBars } from "./confluence.helpers";
 
 const PROV = { venue: "BITUNIX", feed: "BITUNIX:rest" };
