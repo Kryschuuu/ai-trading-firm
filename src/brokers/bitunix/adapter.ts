@@ -16,6 +16,7 @@
  * Paper: echte Public-Kurse, lokales Ledger, keine Private-API.
  */
 import { mapBitunixOrderStatus } from "./privateClient";
+import { executionCapabilitiesFor } from "../../execution/capabilities";
 import { captureOrder } from "../../executionQuality/runtime";
 import { VENUE_CAPABILITIES } from "../capabilities";
 import {
@@ -33,6 +34,7 @@ import {
   type MarketCandle,
   type MarketOrderBook,
   type MarketTicker,
+  type OrderExecutionCapabilities,
 } from "../../contracts/broker";
 import type { MarketInstrument } from "../../universe/types";
 import { getRegistry, type InstrumentRegistry } from "../../universe";
@@ -155,6 +157,15 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
    *                             TRADE ließe sich nur per echter Order beweisen.
    *   - `permissionsVerified`   true = geprüft statt angenommen.
    */
+  /**
+   * RMA-P4-02: BITUNIX meldet natives Post-Only (`effect: POST_ONLY`) und
+   * Einzel-Cancel mit Verify — aber KEIN atomares Replace (der Controller
+   * cancelt, verifiziert und reicht neu ein).
+   */
+  getExecutionCapabilities(): OrderExecutionCapabilities {
+    return executionCapabilitiesFor(this.id);
+  }
+
   async credentialStatus(opts?: { verify?: boolean }): Promise<BitunixCredentialStatus> {
     const creds = await this.loadCreds();
     const base: BitunixCredentialStatus = {

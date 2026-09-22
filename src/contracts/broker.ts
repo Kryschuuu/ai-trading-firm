@@ -101,6 +101,23 @@ export interface BrokerCapabilities {
   stopAtVenue: boolean;
 }
 
+/**
+ * RMA-P4-02 (v1.70.0): typisierte Ausführungsfähigkeiten für den
+ * Post-Only-/Cancel-/Replace-Pfad. Jede Venue meldet ehrlich, was ihr
+ * Adapter-Code kann — `false` ist ein explizites „nicht vorhanden“, kein
+ * weggelassenes Flag. Der Execution-Policy-Controller (`src/execution`)
+ * failt bei fehlender Fähigkeit oder nutzt die in der Policy explizit
+ * konfigurierte sichere Alternative.
+ */
+export interface OrderExecutionCapabilities {
+  /** Native Post-Only-Limits (Maker-or-Reject) verfügbar. */
+  postOnly: boolean;
+  /** Einzel-Cancel mit verifizierbarer Bestätigung verfügbar. */
+  cancelSingle: boolean;
+  /** Atomares Cancel/Replace ohne offenes Fenster verfügbar. */
+  cancelReplaceAtomic: boolean;
+}
+
 /** Health-Status eines Brokers. */
 export type BrokerHealthStatus = "online" | "degraded" | "offline";
 
@@ -224,6 +241,14 @@ export interface BrokerOrderRequest {
   side: "LONG" | "SHORT";
   qty: number;
   limitPrice?: number;
+  /**
+   * RMA-P4-02 (v1.70.0): Post-Only-Anforderung (Maker-or-Reject). Additiv und
+   * default-false-kompatibel (`undefined` = keine Anforderung, Verhalten wie
+   * bisher). `true` verlangt ein natives Post-Only-Limit; meldet das Venue
+   * `postOnly=false` (siehe `OrderExecutionCapabilities`), wirft der Serializer
+   * `POST_ONLY_UNSUPPORTED` — das Flag wird NIE still fallengelassen.
+   */
+  postOnly?: boolean;
   /**
    * Mark-/Quote-Preis (Hinweis), wenn keine feste Limit-Preis-Order vorliegt.
    * Markt-Order haben keinen festen Entry; die Adapter nutzen diesen Hinweis
@@ -440,6 +465,13 @@ export interface BrokerAdapter {
   cancelAllOpenOrders?(): Promise<EmergencyCancelResult>;
   closeAllPositions?(reason: string): Promise<EmergencyCloseFill[]>;
   verifyFlat?(): Promise<boolean>;
+  /**
+   * RMA-P4-02 (v1.70.0): Ausführungsfähigkeiten des Adapters (Post-Only,
+   * Einzel-Cancel, atomares Replace). Optional — fehlt die Methode, meldet
+   * der Adapter KEINE Fähigkeiten (fail-closed: der Controller behandelt das
+   * wie alles-false).
+   */
+  getExecutionCapabilities?(): OrderExecutionCapabilities;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

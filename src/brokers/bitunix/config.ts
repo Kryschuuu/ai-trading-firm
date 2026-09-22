@@ -145,6 +145,14 @@ export const BITUNIX_PATHS = {
   orderDetail: "/api/v1/futures/trade/get_order_detail",
   /** H3: Ausführungen (Trades) — Basis des echten avgPrice. */
   historyTrades: "/api/v1/futures/trade/get_history_trades",
+  /**
+   * RMA-P4-02 (v1.70.0): Einzel-/Batch-Cancel (`symbol` + `orderList` mit
+   * `orderId` ODER `clientId`). Die Erfolgsantwort beweist NICHT den Cancel
+   * (Venue-Doku: „please use the websocket push message as an accurate
+   * judgment“) — der Venue-Port verifiziert via `orderDetail`, bis dahin gilt
+   * der Status als UNKNOWN und blockiert jeden Market-Fallback.
+   */
+  cancelOrders: "/api/v1/futures/trade/cancel_orders",
   /** H7 (v1.36.20): Alle offenen Orders stornieren (Not-Halt). */
   cancelAllOrders: "/api/v1/futures/trade/cancel_all_orders",
   /** H7 (v1.36.20): Alle Positionen schließen (Not-Halt). */

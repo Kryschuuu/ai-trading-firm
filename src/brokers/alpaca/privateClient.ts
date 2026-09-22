@@ -208,6 +208,60 @@ export class AlpacaPrivateClient {
   }
 
   /**
+   * RMA-P4-02 (v1.70.0): Storniert EINE Order (`DELETE /v2/orders/{id}`).
+   * 404 (unbekannte Order) wird als `{ found: false }` zurückgegeben — kein
+   * Wurf, damit der Venue-Port den UNKNOWN-Pfad sauber fahren kann. Jede andere
+   * Antwort wird verifiziert: erst `GET /v2/orders/{id}` mit Status `canceled`
+   * beweist den Cancel.
+   */
+  async cancelOrder(orderId: string): Promise<{ found: boolean }> {
+    if (!orderId) throw new AlpacaApiError("validation", "Alpaca cancelOrder ohne Order-ID.");
+    try {
+      await this.authedRequest({
+        method: "DELETE",
+        path: `${ALPACA_TRADE_PATHS.orders}/${encodeURIComponent(orderId)}`,
+        idempotent: true,
+      });
+      await recordAlpacaPrivateCall({ method: "DELETE", path: ALPACA_TRADE_PATHS.orders, outcome: "OK", errorCode: null });
+      return { found: true };
+    } catch (e) {
+      if (e instanceof AlpacaApiError && /404|not.?found/i.test(e.message)) {
+        return { found: false };
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * RMA-P4-02 (v1.70.0): Atomares Replace (`PATCH /v2/orders/{id}`) — Menge
+   * und/oder Limit ohne offenes Fenster zwischen Cancel und Re-Submit. Nur für
+   * offene Orders; der Aufrufer (Venue-Port) verifiziert das Ergebnis via GET.
+   */
+  async replaceOrder(
+    orderId: string,
+    patch: { qty?: number; limitPrice?: number; clientOrderId?: string }
+  ): Promise<AlpacaOrder> {
+    if (!orderId) throw new AlpacaApiError("validation", "Alpaca replaceOrder ohne Order-ID.");
+    if (patch.qty === undefined && patch.limitPrice === undefined) {
+      throw new AlpacaApiError("validation", "Alpaca replaceOrder ohne qty/limitPrice.");
+    }
+    const body: Record<string, string> = {};
+    if (patch.qty !== undefined) body.qty = String(patch.qty);
+    if (patch.limitPrice !== undefined) body.limit_price = String(patch.limitPrice);
+    if (patch.clientOrderId) body.client_order_id = patch.clientOrderId;
+    const res = await this.authedRequest({
+      method: "PATCH",
+      path: `${ALPACA_TRADE_PATHS.orders}/${encodeURIComponent(orderId)}`,
+      body: JSON.stringify(body),
+    });
+    await recordAlpacaPrivateCall({ method: "PATCH", path: ALPACA_TRADE_PATHS.orders, outcome: "OK", errorCode: null });
+    if (!res.json || typeof res.json !== "object") {
+      throw new AlpacaApiError("unknown", "Alpaca PATCH /v2/orders/{id} lieferte kein JSON.");
+    }
+    return res.json as AlpacaOrder;
+  }
+
+  /**
    * H7 (v1.36.20): Storniert alle offenen Orders (`DELETE /v2/orders`) —
    * Notfall-Schritt 1 des Kill-Flatten. Im Effekt idempotent (stornieren
    * bereits stornierter Orders ist ein No-Op).

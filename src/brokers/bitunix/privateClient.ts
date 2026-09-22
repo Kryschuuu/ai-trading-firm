@@ -495,6 +495,64 @@ export class BitunixPrivateClient {
   }
 
   /**
+   * RMA-P4-02 (v1.70.0): Storniert EINE Order (`cancel_orders` mit genau einem
+   * Listeneintrag — `orderId` gewinnt, sonst `clientId`).
+   *
+   * WICHTIG (Venue-Semantik): Eine Erfolgsantwort beweist NICHT den Cancel —
+   * die Venue-Doku verlangt die WS-Push-Nachricht als genaues Urteil. Der
+   * Rückgabewert meldet daher nur die Transport-/Annahme-Ebene
+   * (`accepted`/`rejected`/`unknown`); ob die Order wirklich storniert ist,
+   * entscheidet ausschließlich `getOrder` (Status CANCELED). Bis dahin gilt
+   * der Cancel-Status als UNKNOWN und blockiert jeden Market-Fallback.
+   */
+  async cancelOrder(args: {
+    symbol: string;
+    orderId?: string;
+    clientId?: string;
+  }): Promise<{ outcome: "accepted" | "rejected" | "unknown"; venueCode: string | null }> {
+    const symbol = args.symbol.trim().toUpperCase();
+    const orderId = (args.orderId ?? "").trim();
+    const clientId = (args.clientId ?? "").trim();
+    if (!symbol || (!orderId && !clientId)) {
+      throw new BitunixApiError("payload", "Bitunix cancel_orders braucht symbol + orderId/clientId.");
+    }
+    const entry: Record<string, string> = {};
+    if (orderId) entry.orderId = orderId;
+    else entry.clientId = clientId;
+    const body = JSON.stringify({ symbol, orderList: [entry] });
+    let res;
+    try {
+      res = await this.signed("POST", BITUNIX_PATHS.cancelOrders, undefined, body);
+    } catch (e) {
+      if (e instanceof BitunixApiError && e.kind === "ambiguous") {
+        return { outcome: "unknown", venueCode: null };
+      }
+      throw e;
+    }
+    const data = envelopeData<{
+      successList?: Array<{ orderId?: string; clientId?: string }>;
+      failureList?: Array<{ orderId?: string; clientId?: string; errorMsg?: string; errorCode?: string }>;
+    } | null>(res.json);
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return { outcome: "unknown", venueCode: null };
+    }
+    const key = orderId || clientId;
+    const inSuccess = (data.successList ?? []).some(
+      (x) => String(x?.orderId ?? "") === key || String(x?.clientId ?? "") === key || String(x?.orderId ?? "") === orderId
+    );
+    if (inSuccess) return { outcome: "accepted", venueCode: null };
+    const failure = (data.failureList ?? []).find(
+      (x) => String(x?.orderId ?? "") === key || String(x?.clientId ?? "") === key || (!key && false)
+    ) ?? (data.failureList ?? [])[0];
+    if (failure) {
+      return { outcome: "rejected", venueCode: String(failure.errorCode ?? "") || null };
+    }
+    // Leere Listen: Annahme unklar (Venue meldet nichts) — UNKNOWN.
+    if ((data.successList ?? []).length === 0) return { outcome: "unknown", venueCode: null };
+    return { outcome: "accepted", venueCode: null };
+  }
+
+  /**
    * H7 (v1.36.20): Storniert ALLE offenen Orders (optional je Symbol) —
    * Notfall-Schritt 1 des Kill-Flatten. `cancel_all_orders` ist im Effekt
    * idempotent (bereits stornierte Orders sind keine offenen Orders mehr).
