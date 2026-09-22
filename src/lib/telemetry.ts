@@ -440,6 +440,27 @@ export const telemetry = {
       telemetry.sentiment.deduplications.reset();
     },
   },
+  /**
+   * Prompt-Version-Metrikvergleich (RMA-P3-02, v1.65.0).
+   *
+   * Labels sind ausschließlich Code-konstante Kategorien (`result`,
+   * `role`, `status`) — keine Prompt-IDs, Texte oder Instrumente als Label
+   * (Kardinalitätsregel wie oben). IDs stehen im strukturierten Audit-Event.
+   */
+  prompt: {
+    /** Prompt-Artefakte je Ergebnis (created | duplicate). */
+    artifacts: new LabelCounter("prompt_artifacts_total"),
+    /** Agent-Runs (Provenanz) je Ergebnis (ok | error) und Provider. */
+    runs: new LabelCounter("prompt_runs_total"),
+    /** Metriken-/Vergleichs-Abfragen je Ergebnis (ok | invalid | unavailable | truncated). */
+    queries: new LabelCounter("prompt_metrics_queries_total"),
+    /** alle Zähler der Prompt-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.prompt.artifacts.reset();
+      telemetry.prompt.runs.reset();
+      telemetry.prompt.queries.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -603,6 +624,17 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.crossSectional.runs.exposition(),
     telemetry.crossSectional.persist.exposition(),
     telemetry.crossSectional.rankConflicts.exposition(),
+    telemetry.sentiment.evaluations.exposition(),
+    telemetry.sentiment.captures.exposition(),
+    telemetry.sentiment.deduplications.exposition(),
+    telemetry.forecasts.captures.exposition(),
+    telemetry.forecasts.resolutions.exposition(),
+    telemetry.forecasts.runs.exposition(),
+    telemetry.forecasts.feeds.exposition(),
+    telemetry.forecasts.queries.exposition(),
+    telemetry.prompt.artifacts.exposition(),
+    telemetry.prompt.runs.exposition(),
+    telemetry.prompt.queries.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -694,4 +726,6 @@ export function resetTelemetryForTests(): void {
   telemetry.confluence.reset();
   telemetry.crossSectional.reset();
   telemetry.sentiment.reset();
+  telemetry.forecasts.reset();
+  telemetry.prompt.reset();
 }

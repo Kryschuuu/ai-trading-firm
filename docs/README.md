@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.64.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.65.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -72,6 +72,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[MTF_CONFLUENCE.md](MTF_CONFLUENCE.md)** | Deterministische Multi-Timeframe-Konfluenz: as-of-Ausrichtung, Features, Gewichtung, Trusted-Data-Integration, Ops/Rollback (RMA-P2-03, v1.62.0) |
 | **[CROSS_SECTIONAL_RANKING.md](CROSS_SECTIONAL_RANKING.md)** | Point-in-Time Cross-Sectional Momentum Ranking: Universumsweite, as-of-sichere Momentum-Perzentile (Policy `ingested`), deterministische Snapshot-ID/Provenance, DB + Artefakt-Persistenz, Scanner-Diagnose-Faktor Gewicht 0, Read-only-API, Retention/Turnover (RMA-P2-04, v1.63.0) |
 | **[SENTIMENT.md](SENTIMENT.md)** | Kalibrierbare strukturierte Sentiment-Outputs: Forecast-Envelopes (`sentiment@1`), Trennung Wahrscheinlichkeit/Coverage, NEUTRAL vs. ABSTAIN, Syndikations-Deduplikation, PIT-Invarianz, P3.1-Outcome-Link (RMA-P2-05, v1.64.0) |
+| **[PROMPT_PERFORMANCE.md](PROMPT_PERFORMANCE.md)** | Prompt-Version-Metrikvergleich: immutable Prompt-Artefakte `pp1:<sha256>` (LF-normalisiert), Run-Provenanz `pr1:<sha256>`, PIT-Metriken (Brier/ECE/HitRate, Attribution, Latenz/Kosten) mit CIs & Segmenten, fairer Baseline-vs-Kandidat-Vergleich mit ECE-Wächter + Human-Gate, Bounded-Queries (RMA-P3-02, v1.65.0) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
 | **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler, Firmen-Metriken, Auto-Circuit-Breaker, Alerts, Heartbeat (§9–12) |
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE` |
@@ -270,4 +271,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.62.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.65.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

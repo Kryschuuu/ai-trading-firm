@@ -703,6 +703,34 @@ Migration: `psql \"$DATABASE_URL\" -f drizzle/2026-09-22_structured_sentiment.sq
 (append-only, idempotent; neue Tabelle `sentiment_forecasts`, keine Änderungen an
 bestehenden Tabellen).
 
+### Prompt-Performance & Version-Metrikvergleich (RMA-P3-02, v1.65.0)
+
+Jeder LLM-Aufruf erzeugt ein immutable Prompt-Artefakt (`pp1:<sha256>` über
+LF-kanonisierten Text) + eine Run-Provenanz (Provider/Modell/Params/Timing/
+Tokens/Cost/Success, ohne Secrets, `pr1:<sha256>`-Idempotenz). Outcomes stammen
+aus dem P3.1-Forecast-Ledger (`forecast_resolutions`) und der P1.6-Attribution
+(`trade_attribution_entries`); Metriken binden strikt über `promptVersion`,
+`PENDING` zählt nie als Gewinn/Verlust, `UNKNOWN` ist immer sichtbar
+(`promptVersion=null`, `promptHash="UNKNOWN"`), und ein Vergleich legt
+**identische** Filter über beide Versionen (sonst `MISMATCHED_FILTERS`).
+Promotion ist **nur Empfehlung hinter Human-Gate** (`GATED`) mit ECE-Wächter
+(≥ 0.02 schlechter kalibriert ⇒ kein Gewinn allein wegen PnL). Details, Formeln,
+Einheiten (`ms`/`count`/`USD`) und Zeitsemantik (`eventTime=asOf/startedAt`,
+`availableAt=availabilityDeadline`, `computedAt` nie Zulässigkeitskriterium): 
+[`docs/PROMPT_PERFORMANCE.md`](docs/PROMPT_PERFORMANCE.md), SQL
+`drizzle/2026-09-22_prompt_performance.sql`.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `PROMPT_PERFORMANCE_ENABLED` | `true` | Artefakt- + Provenanz-Schreibpfad an/aus. `false` unterdrückt `ensurePromptArtifact`+`recordPromptRun` (`DISABLED`, sofort gefangen — der Agenten-Turn läuft trotzdem), bestehende Zeilen bleiben lesbar (Rollback). Nur exakt `false`/`0` schaltet ab; unbekannte Werte ⇒ an (fail-laut). |
+
+Migration: `psql "$DATABASE_URL" -f drizzle/2026-09-22_prompt_performance.sql`
+(append-only, idempotent; zwei neue Tabellen `prompt_artifacts`+
+`agent_prompt_runs`, Trigger sperren `UPDATE`/`DELETE`/`TRUNCATE`, keine
+Änderungen an bestehenden Tabellen) **oder** `npx drizzle-kit push`. APIs:
+`GET /api/firm/prompts/artifacts|runs|metrics|compare` (je `firm.read`,
+`no-store`, bounded `truncated`/`X-Truncated`, `units` ms/count/USD).
+
 ### Perpetual-Daten (RMA-P2-02, v1.54.0)
 
 Historische Funding-Raten, Open Interest und Liquidationen in eigenen

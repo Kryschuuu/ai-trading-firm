@@ -2134,3 +2134,114 @@ export const sentimentForecasts = pgTable(
     ),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Prompt-Version-Metrikvergleich (RMA-P3-02, v1.65.0) — append-only
+//
+// Zwei Tabellen, ausschließlich additiv (Migration
+// `drizzle/2026-09-22_prompt_performance.sql`):
+//
+//   prompt_artifacts        immutable Prompt-Versionen je Agent (hash + Text)
+//   agent_prompt_runs       Provenanz je LLM-Aufruf (Artifact + Modell + Tokens)
+//
+// Zeitsemantik je Run: `started_at`/`ended_at` (Ereigniszeit des LLM-Aufrufs),
+// `created_at` (Persistenz). Eine historische Analyse bleibt über ihren
+// `prompt_hash` unverändert zuordenbar, auch nach späteren Prompt-Änderungen.
+// `null` ist nie `0`: fehlende Tokens/Kosten bleiben null, nicht 0.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Immutable Prompt-Artefakt: eine Version eines Agenten-Prompts.
+ *
+ * Historische Zeilen werden nie überschrieben — ein Prompt-Update erzeugt
+ * eine NEUE Zeile mit neuer Version und neuem Hash. Der Hash `pp1:<sha256>`
+ * ist deterministisch kanonisiert (Zeilenenden → LF) und stabil über
+ * Plattformen.
+ */
+export const promptArtifacts = pgTable(
+  "prompt_artifacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id").references(() => agents.id),
+    role: text("role").notNull(),
+    version: integer("version").notNull(),
+    /** `pp1:<sha256>` über den kanonischen Prompttext. */
+    promptHash: text("prompt_hash").notNull(),
+    /** Kanonischer Prompttext (nur berechtigt abrufbar, nie als Metriklabel). */
+    canonicalPrompt: text("canonical_prompt").notNull(),
+    /** Template-Schemaversion (z. B. "1"), bounded. */
+    templateSchemaVersion: text("template_schema_version").notNull().default("1"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("prompt_artifacts_agent_version_unique").on(t.agentId, t.version),
+    uniqueIndex("prompt_artifacts_agent_hash_unique").on(t.agentId, t.promptHash),
+    index("prompt_artifacts_role_idx").on(t.role, t.version),
+    index("prompt_artifacts_hash_idx").on(t.promptHash),
+    check("prompt_artifacts_version_check", sql`${t.version} >= 1`),
+    check("prompt_artifacts_hash_check", sql`${t.promptHash} ~ '^pp1:[0-9a-f]{64}$'`),
+    check("prompt_artifacts_role_check", sql`length(${t.role}) > 0 AND length(${t.role}) <= 64`),
+    check("prompt_artifacts_template_check", sql`length(${t.templateSchemaVersion}) > 0 AND length(${t.templateSchemaVersion}) <= 16`),
+  ]
+);
+
+/**
+ * Provenanz eines einzelnen LLM-Aufrufs (append-only).
+ *
+ * Jeder Agentenaufruf referenziert exakt ein Prompt-Artefakt (oder UNKNOWN bei
+ * historischer Lücke) samt Provider/Modell, Sampling-Parametern, Tool-/Schema-
+ * Version, Start/Ende, Tokenverbrauch, Kostenstatus und Success/Failure.
+ * Geheimnisse und rohe sensitive Payloads werden nie gespeichert.
+ *
+ * Idempotenz: `idempotency_key` `pr1:<sha256>` über Artifact + Zeitpunkt +
+ * Modell + Versuch — Retries/Restarts erzeugen keinen zweiten Run.
+ */
+export const agentPromptRuns = pgTable(
+  "agent_prompt_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Artefakt-Referenz (null = UNKNOWN, historische Lücke sichtbar). */
+    artifactId: uuid("artifact_id").references(() => promptArtifacts.id),
+    agentId: uuid("agent_id").references(() => agents.id),
+    role: text("role").notNull(),
+    /** `pp1:<sha256>` oder `UNKNOWN` (bounded, nie voller Prompt). */
+    promptHash: text("prompt_hash").notNull(),
+    /** Prompt-Version (null = UNKNOWN). */
+    promptVersion: integer("prompt_version"),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    temperature: numeric("temperature"),
+    maxTokens: integer("max_tokens"),
+    toolSchemaVersion: text("tool_schema_version"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+    latencyMs: integer("latency_ms").notNull(),
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    totalTokens: integer("total_tokens"),
+    costUsd: numeric("cost_usd"),
+    /** billed | free | unknown — Einheit klar, bounded. */
+    costStatus: text("cost_status").notNull(),
+    success: boolean("success").notNull(),
+    errorCode: text("error_code"),
+    /** `pr1:<sha256>` — stabiler Retry-Schlüssel. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("agent_prompt_runs_idempotency_unique").on(t.idempotencyKey),
+    index("agent_prompt_runs_role_version_idx").on(t.role, t.promptVersion, t.startedAt),
+    index("agent_prompt_runs_hash_idx").on(t.promptHash, t.startedAt),
+    index("agent_prompt_runs_artifact_idx").on(t.artifactId),
+    index("agent_prompt_runs_started_idx").on(t.startedAt),
+    check("agent_prompt_runs_version_check", sql`${t.promptVersion} IS NULL OR ${t.promptVersion} >= 0`),
+    check("agent_prompt_runs_hash_check", sql`${t.promptHash} ~ '^(pp1:[0-9a-f]{64}|UNKNOWN)$'`),
+    check("agent_prompt_runs_provider_check", sql`${t.provider} IN ('ollama','openai','gemini','anthropic','fallback','unknown')`),
+    check("agent_prompt_runs_latency_check", sql`${t.latencyMs} >= 0`),
+    check("agent_prompt_runs_time_check", sql`${t.endedAt} >= ${t.startedAt}`),
+    check("agent_prompt_runs_tokens_check", sql`(${t.promptTokens} IS NULL OR ${t.promptTokens} >= 0) AND (${t.completionTokens} IS NULL OR ${t.completionTokens} >= 0) AND (${t.totalTokens} IS NULL OR ${t.totalTokens} >= 0)`),
+    check("agent_prompt_runs_cost_check", sql`${t.costUsd} IS NULL OR ${t.costUsd}::numeric >= 0`),
+    check("agent_prompt_runs_cost_status_check", sql`${t.costStatus} IN ('billed','free','unknown')`),
+    check("agent_prompt_runs_idempotency_check", sql`${t.idempotencyKey} ~ '^pr1:[0-9a-f]{64}$'`),
+  ]
+);
