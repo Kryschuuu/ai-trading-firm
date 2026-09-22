@@ -65,12 +65,15 @@ import { ruleAudit } from "./ruleService";
 import { startOfBerlinDay } from "./time";
 // GAP-06 (v1.46.0): Regime-Gate als DATENKONTEXT — nur RAM-Lesezugriff im
 // Ausführungspfad (`resolveRegimeGateForExecution`), kein LLM, keine IO.
+// RMA-P2-01 (v1.61.0): dieselben Feature-Familien wie Engine/Monitor.
 import {
   evaluateInstrumentRegime,
   resolveRegimeGateForExecution,
   strategyClassOfTemplate,
   type StrategyClass,
 } from "./marketRegime";
+import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
+import { telemetry } from "./telemetry";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Basistypen
@@ -658,6 +661,10 @@ export function createPaperRuleAdapter(opts?: {
         const gatedRiskBudgetPct = regimeGate.applied
           ? ctx.spec.action.riskBudgetPct * regimeGate.factor
           : ctx.spec.action.riskBudgetPct;
+        // RMA-P2-01: Boost-Entscheidungen mit bounded Labels zählen —
+        // blockierte Risiko-Boosts bleiben sichtbar, ohne Symbol-Labels.
+        if (regimeGate.boostBlocked) telemetry.regime.boosts.inc({ result: "blocked" });
+        else if (regimeGate.applied && regimeGate.factor > 1) telemetry.regime.boosts.inc({ result: "applied" });
 
         const price = broker.quote(symbol);
         if (price === null || price <= 0) {
@@ -955,6 +962,9 @@ export function createPaperRuleAdapter(opts?: {
               regime: regimeGate.regime,
               strategyClass: ctx.strategyClass ?? null,
               factor: regimeGate.factor,
+              // RMA-P2-01 (additiv): Coverage-Dimension des Snapshots.
+              coverage: regimeGate.coverage,
+              degraded: regimeGate.degraded,
               riskBudgetPctBefore: ctx.spec.action.riskBudgetPct,
               riskBudgetPctAfter: gatedRiskBudgetPct,
               code: `regime-gate:${symbol}:${ctx.strategyClass ?? "?"}:${regimeGate.regime}`,
@@ -1102,8 +1112,10 @@ export class MicroExecutor {
             // bestimmen (reine Arithmetik; Audit nur bei Wechsel, best-effort).
             // Damit besitzt auch ein separater Mikro-Executor-Prozess ab Start
             // einen Regime-Stand — der Gate-Faktor bleibt sonst fail-safe 1.
+            // RMA-P2-01: Feature-Familien aus denselben Artefakten wie die
+            // Engine (kanonischer Snapshot; Loader bricht nie).
             try {
-              evaluateInstrumentRegime(symbol, candles);
+              evaluateInstrumentRegime(symbol, candles, { families: loadRegimeFamilyInputs(symbol) });
             } catch {
               /* Regime-Klassifikation darf den Seed nie brechen. */
             }

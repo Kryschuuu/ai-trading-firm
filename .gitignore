@@ -97,3 +97,6 @@ next-env.d.ts
 
 # Perp-Qualitätsreport (RMA-P2-02, Laufzeit-Artefakt)
 /data/perpdata
+
+# Regime-Snapshot-Evaluation (RMA-P2-01, Laufzeit-Artefakt)
+/data/regime-eval

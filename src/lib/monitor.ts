@@ -31,6 +31,8 @@ import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
 import { refreshInstrumentRegimes } from "./marketRegime";
+import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
+import { scheduleRegimeSnapshotPersist } from "./regimeSnapshotStore";
 import { realizedPnlToday, writeEquitySnapshot, pruneEquitySnapshots } from "./equity";
 import { FundingAccrualEngine, loadFundingConfig, runFundingAccrual } from "./funding";
 import { completeJournalRow } from "./journal";
@@ -170,12 +172,18 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
   // Best-effort + fail-soft: versorgt Ops-Center, Cycle-Artefakte und das
   // Regime-Gate mit aktuellen Ständen. Bewusst NUR ohne injizierte Kurse
   // (opts.quotes = Test-/Determinismus-Pfad) — dort gibt es keine Kerzen.
+  // RMA-P2-01: dieselben Feature-Familien wie Engine (kanonischer Snapshot)
+  // + geboundedes Persistenz-Scheduling für Stabilitäts-/OOS-Auswertung.
   // Fehler je Symbol bleiben lokal; der Tick läuft immer weiter.
   let marketRegimes: TickResult["marketRegimes"] = [];
   if (!opts.quotes) {
     try {
-      const snaps = await refreshInstrumentRegimes(openRows.map((p) => p.symbol), { now: now.getTime() });
+      const snaps = await refreshInstrumentRegimes(openRows.map((p) => p.symbol), {
+        now: now.getTime(),
+        loadFamilies: (symbol, nowMs) => loadRegimeFamilyInputs(symbol, { nowMs }),
+      });
       marketRegimes = snaps.map((s) => ({ symbol: s.symbol, regime: s.regime }));
+      for (const snap of snaps) scheduleRegimeSnapshotPersist(snap, { nowMs: now.getTime() });
     } catch (e) {
       errors.push(`Markt-Regime fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
     }

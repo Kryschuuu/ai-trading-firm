@@ -570,15 +570,27 @@ test("Cycle-Artefakt: regime-history.json-Payload mit Verlauf je Instrument", ()
 
   const artifact = collectRegimeHistoryArtifact(c);
   assert.ok(artifact);
-  assert.equal(artifact.schemaVersion, 1);
+  // RMA-P2-01 (v1.61.0): SchemaVersion 2 — Confidence/Coverage/Degraded/
+  // Versionen sind im Artefakt sichtbar (additive Felder, Historie gebounded).
+  assert.equal(artifact.schemaVersion, 2);
   assert.equal(artifact.mode, "monitor");
+  assert.equal(artifact.featureMode, c.featureMode);
+  assert.equal(artifact.featureVersion, "regime-features@1");
+  assert.equal(artifact.modelVersion, "regime-rules@1");
   const entry = (artifact.instruments as Array<Record<string, unknown>>)[0];
   assert.equal(entry.symbol, "HIST/USD");
   assert.equal(entry.regime, "CRASH");
-  const history = entry.history as Array<{ code: string }>;
+  assert.equal(entry.rawRegime, "CRASH");
+  assert.equal(typeof entry.coverage, "number");
+  assert.equal(entry.degraded, true, "ohne erweiterte Familien ⇒ Degraded Mode");
+  assert.equal(typeof entry.confidence, "number");
+  assert.ok(Array.isArray(entry.topDrivers));
+  assert.ok(Array.isArray(entry.families));
+  const history = entry.history as Array<{ code: string; coverage: number }>;
   assert.equal(history.length, 2);
   assert.equal(history[0].code, "regime:HIST/USD:UNKNOWN→TREND_UP");
   assert.equal(history[1].code, "regime:HIST/USD:TREND_UP→CRASH");
+  assert.equal(typeof history[1].coverage, "number", "Wechselereignis trägt Coverage");
 });
 
 test("Prompt-Kontext: monitor Zeile ohne Wirkung, off leer, enforce Wirkzeile", () => {
@@ -628,9 +640,15 @@ test("Cycle-Artefakt-Verdrahtung: saveDailyCycleArtifacts schreibt regime-histor
   const res = saveDailyCycleArtifacts(record as never, {}, root);
   const regimeFile = res.filesWritten.find((f) => f.endsWith("regime-history.json"));
   assert.ok(regimeFile, "regime-history.json muss geschrieben werden, wenn Instrumente bewertet sind");
-  const payload = readJsonSafe<{ schemaVersion: number; instruments: { symbol: string }[] }>(regimeFile!);
-  assert.equal(payload?.schemaVersion, 1);
+  const payload = readJsonSafe<{
+    schemaVersion: number;
+    instruments: { symbol: string; coverage?: number; degraded?: boolean }[];
+  }>(regimeFile!);
+  assert.equal(payload?.schemaVersion, 2);
   assert.ok(payload?.instruments.some((i) => i.symbol === "ART/USD"));
+  const artEntry = payload?.instruments.find((i) => i.symbol === "ART/USD");
+  assert.equal(typeof artEntry?.coverage, "number");
+  assert.equal(artEntry?.degraded, true, "Cycle-Artefakt weist Degraded Mode aus");
 
   // Ohne Bewertungen im Prozess: kein (leeres) Artefakt.
   __resetMarketRegimeForTests();

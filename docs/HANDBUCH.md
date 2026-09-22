@@ -1119,17 +1119,27 @@ Alle `adp.*`-Werte werden gegen `VOLATILITY_CONFIG_BOUNDS` geklemmt
 `CONFIG_CHANGED` (Namespace `volatility`) protokolliert. Im Dashboard:
 Reiter **Risiko** → Panels „Adaptives Risiko“ und „Volatilitäts-Schwellwerte“.
 
-### 9.4 Markt-Regime & Regime-Gate (GAP-06, v1.46.0)
+### 9.4 Markt-Regime & Regime-Gate (GAP-06, v1.46 · multidimensional v1.61)
 
 Zusätzlich zum Volatilitäts-Regime (9.3) klassifiziert die Firma je
 Instrument das **Markt-Regime** — TREND_UP/TREND_DOWN/RANGE/HIGH_VOL/CRASH —
 und dämpft darüber Signalgewichte je Strategieklasse (z. B. Mean-Reversion
 in Trendmärkten ×0.5). Deterministisch (kein LLM), mit Hysterese gegen
 Whipsaws, standardmäßig im **monitor**-Modus (Ausweis + Audit, keine
-Wirkung). Sichtbar in der Ops-Center-Risk-Sektion (`Regime SYMBOL`), im
-Agenten-Protokoll (Schicht „REGIME-GATE“), im Cycle-Artefakt
-`regime-history.json` und im Audit-Log (`REGIME_CHANGE`). Konfiguration und
-Details: [`REGIME_GATE.md`](REGIME_GATE.md), Flags in
+Wirkung). Seit **v1.61.0 (RMA-P2-01)** ist die Erkennung **mehrdimensional
+und point-in-time-sicher**: neben dem OHLCV-Kern fließen versionierte
+Preis-, Volatilitäts-, Liquiditäts-, Perp- und optionale Makro-Familien
+ein; jedes Snapshot weist **Klasse + Confidence + Coverage + Top-Treiber**
+aus. Fehlende oder spät verfügbare Familien bleiben sichtbar `MISSING`
+(keine Nullsubstitution), degradieren auf den OHLCV-Pfad und können die
+Risiko-Position über das Gate **nie erhöhen**. Snapshots werden idempotent
+in `regime_snapshots` persistiert (Retention 90 Tage); Auswertung über
+`npm run regime:eval` (Stabilität, Transitions, Coverage, regimebezogene
+OOS-Returns). Sichtbar in der Ops-Center-Risk-Sektion (`Regime SYMBOL ·
+Conf · Cov · degraded`), im Agenten-Protokoll (Schicht „REGIME-GATE“),
+im Cycle-Artefakt `regime-history.json` (Schema v2) und im Audit-Log
+(`REGIME_CHANGE`). Konfiguration und Details:
+[`REGIME_GATE.md`](REGIME_GATE.md), Flags in
 [`CONFIGURATION.md`](../CONFIGURATION.md) §„Regime-Gate“.
 
 ### 9.5 Vol-Sizing & Cluster-Limits im Order-Pfad (GAP-04, v1.48.0)

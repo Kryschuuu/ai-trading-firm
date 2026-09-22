@@ -18,6 +18,22 @@
  *      Zeitmaske: die Klassifikation nutzt ausschließlich die übergebenen
  *      (abgeschlossenen) Kerzen ≤ t — kein Lookahead.
  *
+ *   D1b MULTIDIM (RMA-P2-01, v1.61.0)  classifyMarketRegimeMultidim()
+ *      erweitert den Kern additiv um den versionierten Feature-Vertrag
+ *      (`regimeFeatures.ts`: Preis/Volatilität/Liquidität/Perp/optional
+ *      Makro) und liefert JEDES Snapshot zusätzlich Confidence, Coverage,
+ *      Top-Treiber sowie Feature-/Modellversion:
+ *        - Eskalations-Votes aus OK-Familien dürfen die Klasse NUR zum
+ *          sichereren HIGH_VOL heben (nie CRASH erfinden, nie Trendrichtung
+ *          drehen) — OHLCV-only bleibt identisch zum Altklassifikat
+ *          (`featureMode: "ohlcv"` bzw. fehlende Familien ⇒ Degraded Mode).
+ *        - Rohklassifikation (raw) und Confidence sind vom bestätigten
+ *          Zustand der Hysterese getrennt; flackernde Familien erzeugen
+ *          durch Eskalations-/Bestätigungssemantik kein Flapping.
+ *        - Point-in-Time: Samples mit `availableAt > asOf` werden verworfen
+ *          (kein Look-ahead), fehlende/stale/invalid bleiben `null`-Sample
+ *          mit Grundcode (keine Nullsubstitution).
+ *
  *   HYSTERESE  MarketRegimeStateMachine — Muster an adaptiveRisk
  *      (RegimeStateMachine) angelehnt: Eskalation (höhere Schwere) ist
  *      SOFORT (sichere Richtung), Seitwärts-/De-Eskalation erst nach
@@ -51,6 +67,15 @@
 import { adx } from "./indicators";
 import { auditWrite } from "./auditSink";
 import { getCandles, type Candle } from "./marketData";
+import {
+  REGIME_FEATURE_VERSION,
+  REGIME_MODEL_VERSION,
+  assembleRegimeFeatureVector,
+  type RegimeFamilyInputs,
+  type RegimeFamilyState,
+  type RegimeFeatureFamily,
+  type RegimeFeatureMode,
+} from "./regimeFeatures";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typen
@@ -124,6 +149,25 @@ export type MarketRegimeConfig = {
   gateMode: RegimeGateMode;
   /** Dämpfungsfaktoren je Regime × Strategieklasse, geklemmt [0, 2]. */
   gateFactors: Record<MarketRegime, Record<StrategyClass, number>>;
+  // ── RMA-P2-01 (v1.61.0): multidimensionale Feature-Ebene ──────────────────
+  /**
+   * `multidim` (Default): Feature-Vertrag wird konsultiert (Eskalations-
+   * votes, Confidence, Coverage). `ohlcv`: expliziter Degraded-/Legacy-Pfad —
+   * Klassifikation identisch zum OHLCV-Kern, Familien `FAMILY_DISABLED`.
+   */
+  featureMode: RegimeFeatureMode;
+  /** Spread-Schwelle in %, ab der die Liquiditätsfamilie HIGH_VOL stimmt. */
+  liquiditySpreadHighPct: number;
+  /** |Funding|-Schwelle (fraction je Intervall) für den Perp-HIGH_VOL-Vote. */
+  perpFundingAbsThreshold: number;
+  /** VIX-Level, ab dem die Makrofamilie HIGH_VOL stimmt (optional). */
+  macroVixHigh: number;
+  /**
+   * Mindest-Coverage, ab der ein Gate-Faktor > 1 (Risiko-Boost) wirken darf.
+   * Unterhalb (oder bei Degraded Mode) wird jeder risikoerhöhende Faktor auf
+   * 1 geklemmt — Dämpfungen ≤ 1 bleiben jederzeit zulässig (fail-closed).
+   */
+  minBoostCoverage: number;
 };
 
 export const DEFAULT_MARKET_REGIME_CONFIG: MarketRegimeConfig = {
@@ -134,6 +178,11 @@ export const DEFAULT_MARKET_REGIME_CONFIG: MarketRegimeConfig = {
   trendAdx: 25,
   trendSlopePct: 0.05,
   gateMode: "monitor",
+  featureMode: "multidim",
+  liquiditySpreadHighPct: 0.5,
+  perpFundingAbsThreshold: 0.001,
+  macroVixHigh: 30,
+  minBoostCoverage: 1,
   gateFactors: {
     // Vorschlag aus GAP-06: Mean-Reversion in Trends dämpfen, Breakouts in
     // der Range — alles andere ×1 (keine versteckte Boost-/Veto-Logik).
@@ -147,7 +196,7 @@ export const DEFAULT_MARKET_REGIME_CONFIG: MarketRegimeConfig = {
 
 /** Erlaubtes Fenster je Schwelle — Env-/Override-Werte werden geklemmt. */
 export const MARKET_REGIME_BOUNDS: Record<
-  Exclude<keyof MarketRegimeConfig, "gateMode" | "gateFactors">,
+  Exclude<keyof MarketRegimeConfig, "gateMode" | "gateFactors" | "featureMode">,
   [min: number, max: number]
 > = {
   lookbackCandles: [20, 500],
@@ -156,6 +205,10 @@ export const MARKET_REGIME_BOUNDS: Record<
   confirmCandles: [1, 20],
   trendAdx: [10, 60],
   trendSlopePct: [0.005, 1],
+  liquiditySpreadHighPct: [0.01, 10],
+  perpFundingAbsThreshold: [0.00001, 0.05],
+  macroVixHigh: [5, 120],
+  minBoostCoverage: [0, 1],
 };
 
 /** Bounds der Gate-Faktoren (D2): [0, 2] — Klemmung statt Fehler. */
@@ -217,6 +270,14 @@ function parseMode(raw: string | undefined): RegimeGateMode {
   return "monitor";
 }
 
+function parseFeatureMode(raw: string | undefined): RegimeFeatureMode {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "ohlcv" || v === "multidim") return v;
+  // Unbekannter Wert → dokumentierter Default (multidim mit Degraded-Fallback:
+  // fehlende Familien ⇒ OHLCV-Kern — nie ein stiller Legacy-Sonderweg).
+  return "multidim";
+}
+
 /**
  * Klemmt eine Partial-Konfiguration in die Bounds (Muster:
  * clampVolatilityConfig). Ungültige Werte behalten den Basiswert.
@@ -229,13 +290,19 @@ export function clampMarketRegimeConfig(
     ...base,
     gateFactors: { ...base.gateFactors },
   };
-  const numField = (field: Exclude<keyof MarketRegimeConfig, "gateMode" | "gateFactors">): void => {
+  type NumericKey = Exclude<keyof MarketRegimeConfig, "gateMode" | "gateFactors" | "featureMode">;
+  const numField = (field: NumericKey): void => {
     const v = raw[field];
     if (v === undefined || v === null) return;
     const n = Number(v);
     if (!Number.isFinite(n)) return;
     next[field] = clampNum(n, MARKET_REGIME_BOUNDS[field]);
-    if (field === "lookbackCandles" || field === "confirmCandles") next[field] = Math.round(next[field]);
+    if (
+      field === "lookbackCandles" ||
+      field === "confirmCandles"
+    ) {
+      next[field] = Math.round(next[field]);
+    }
   };
   numField("lookbackCandles");
   numField("crashDrawdownPct");
@@ -243,7 +310,12 @@ export function clampMarketRegimeConfig(
   numField("confirmCandles");
   numField("trendAdx");
   numField("trendSlopePct");
+  numField("liquiditySpreadHighPct");
+  numField("perpFundingAbsThreshold");
+  numField("macroVixHigh");
+  numField("minBoostCoverage");
   if (typeof raw.gateMode === "string") next.gateMode = parseMode(raw.gateMode);
+  if (typeof raw.featureMode === "string") next.featureMode = parseFeatureMode(raw.featureMode);
   return next;
 }
 
@@ -264,6 +336,11 @@ export function loadMarketRegimeConfig(
     trendAdx: env.REGIME_TREND_ADX,
     trendSlopePct: env.REGIME_TREND_SLOPE_PCT,
     gateMode: env.REGIME_GATE_MODE,
+    featureMode: env.REGIME_FEATURE_MODE,
+    liquiditySpreadHighPct: env.REGIME_LIQUIDITY_SPREAD_HIGH_PCT,
+    perpFundingAbsThreshold: env.REGIME_PERP_FUNDING_ABS,
+    macroVixHigh: env.REGIME_MACRO_VIX_HIGH,
+    minBoostCoverage: env.REGIME_MIN_BOOST_COVERAGE,
   });
   const { factors } = parseGateFactors(env.REGIME_GATE_FACTORS, base.gateFactors);
   base.gateFactors = factors;
@@ -444,6 +521,362 @@ export function classifyMarketRegime(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// D1b — Multidimensionale Klassifikation (RMA-P2-01, v1.61.0)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Einer der Top-Treiber des gewählten Roh-Regimes (deterministisch). */
+export interface RegimeTopDriver {
+  /** Feature-Schlüssel aus dem Vertrag bzw. dem OHLCV-Kern. */
+  key: string;
+  family: "price" | "volatility" | "liquidity" | "perp" | "macro";
+  /** Beitrag zu der Evidenz des gewählten Regimes (dokumentierte Formel). */
+  contribution: number;
+  /** Stabile, formatierte Anzeigezeile (keine Fremdtexte). */
+  display: string;
+}
+
+/**
+ * Multidimensionales Klassifikationsergebnis. Erweitert das bestehende
+ * `RegimeClassification` additiv: `regime` bleibt die ROHKLASSIFIKATION vor
+ * der Hysterese; `confidence`/`coverage`/`degraded`/`topDrivers`/Versionen
+ * sind die neuen Dimensionen (RMA-P2-01).
+ */
+export type MultidimRegimeClassification = RegimeClassification & {
+  /** Rohzustand vor Hysterese (identisch zu `regime`). */
+  rawRegime: MarketRegimeLabel;
+  /**
+   * Deterministische Confidence in [0.2, 0.99] = Evidenz des gewählten
+   * Regimes / Summe aller Evidenzen (ε-Anteil je Klasse). `null` bei UNKNOWN.
+   */
+  confidence: number | null;
+  /** Coverage des Feature-Vertrags in [0, 1] (siehe `regimeFeatures.ts`). */
+  coverage: number;
+  /** true = nicht alle Pflichtfamilien OK → Degraded Mode (OHLCV-Fallback). */
+  degraded: boolean;
+  mode: RegimeFeatureMode;
+  featureVersion: string;
+  modelVersion: string;
+  topDrivers: RegimeTopDriver[];
+  families: RegimeFamilyState[];
+  /** Event-/Verfügbarkeitszeit der Preisfamilie (letzte Kerze) oder `null`. */
+  dataAsOf: string | null;
+};
+
+type RegimeVote = {
+  family: RegimeFeatureFamily;
+  key: string;
+  display: string;
+};
+
+/** Evidenzpunkt je Eskalations-Vote einer OK-Familie (dokumentiert). */
+export const REGIME_VOTE_WEIGHT = 1;
+/** OI-Einbruch (24 h, fraction), ab dem die Perp-Familie HIGH_VOL stimmt. */
+export const PERP_OI_COLLAPSE_THRESHOLD = -0.3;
+/** Epsilon je Klasse in der Confidence-Rechnung (verhindert 0/0). */
+const CONFIDENCE_EPS = 0.01;
+const CONFIDENCE_MIN = 0.2;
+const CONFIDENCE_MAX = 0.99;
+
+const REGIME_KEYS: readonly MarketRegime[] = ["TREND_UP", "TREND_DOWN", "RANGE", "HIGH_VOL", "CRASH"];
+
+function clampUnit(v: number): number {
+  return Math.min(Math.max(v, 0), 1);
+}
+
+/**
+ * Deterministische Evidence-Scores je Klasse aus den OHLCV-Features
+ * ( dokumentierte Formeln — keine kalibrierten Gewichte, kein Online-Lernen):
+ *
+ *   CRASH      crashHit ? 1 + min(2, drawdownPct / (2·crashTh)) : 0
+ *   HIGH_VOL   highVolHit ? 1 + (volPercentile − volTh)/100 : 0   (zusätzlich + je Vote)
+ *   TREND_*    trendHit  ? 1 + min(1, (adx−adxTh)/adxTh)
+ *                        + min(1, (|slope|−slopeTh)/slopeTh) : 0  (Richtung via Slope-Vorzeichen)
+ *   RANGE      kein Trigger ? 1 + clamp((adxTh − adx)/adxTh, 0, 1) : 0
+ *
+ * Jede Klasse erhält zusätzlich ε, damit die Confidence nie durch 0/0
+ * entartet. Confidence = Evidenz[gewählt] / Σ Evidenzen, geklemmt [0.2, 0.99].
+ */
+function evidenceScores(
+  core: RegimeClassification,
+  votes: readonly RegimeVote[],
+  cfg: MarketRegimeConfig
+): Record<MarketRegime, number> {
+  const f = core.features;
+  const scores = Object.fromEntries(REGIME_KEYS.map((k) => [k, CONFIDENCE_EPS])) as Record<
+    MarketRegime,
+    number
+  >;
+  if (!core.known) return scores;
+
+  const adxV = f.adx;
+  const slopeV = f.slopePctPerCandle;
+  const crashHit =
+    f.drawdownPct != null && f.drawdownPct >= cfg.crashDrawdownPct && slopeV != null && slopeV < 0;
+  const highVolHit = f.volPercentile != null && f.volPercentile >= cfg.highVolPercentile;
+  const trendHit =
+    adxV != null && adxV >= cfg.trendAdx && slopeV != null && Math.abs(slopeV) >= cfg.trendSlopePct;
+
+  if (crashHit && f.drawdownPct != null) {
+    scores.CRASH += 1 + Math.min(2, f.drawdownPct / (2 * cfg.crashDrawdownPct));
+  }
+  if (highVolHit && f.volPercentile != null) {
+    scores.HIGH_VOL += 1 + (f.volPercentile - cfg.highVolPercentile) / 100;
+  }
+  if (trendHit && adxV != null && slopeV != null) {
+    const adxPart = clampUnit((adxV - cfg.trendAdx) / cfg.trendAdx);
+    const slopePart = clampUnit((Math.abs(slopeV) - cfg.trendSlopePct) / cfg.trendSlopePct);
+    const target: MarketRegime = slopeV > 0 ? "TREND_UP" : "TREND_DOWN";
+    scores[target] += 1 + adxPart + slopePart;
+  }
+  if (!crashHit && !highVolHit && !trendHit) {
+    const adxHeadroom = adxV != null ? clampUnit((cfg.trendAdx - adxV) / cfg.trendAdx) : 1;
+    scores.RANGE += 1 + adxHeadroom;
+  }
+  for (let i = 0; i < votes.length; i++) {
+    scores.HIGH_VOL += REGIME_VOTE_WEIGHT;
+  }
+  return scores;
+}
+
+/** Sammelt die Eskalations-Votes der OK-Familien (nur HIGH_VOL, nie CRASH). */
+function collectVotes(
+  cfg: MarketRegimeConfig,
+  vector: ReturnType<typeof assembleRegimeFeatureVector>
+): RegimeVote[] {
+  const votes: RegimeVote[] = [];
+  const family = (name: RegimeFamilyState["family"]): RegimeFamilyState | undefined =>
+    vector.families.find((f) => f.family === name);
+
+  const liq = family("liquidity");
+  if (liq?.status === "OK") {
+    const spread = liq.samples[0]?.value ?? null;
+    if (spread != null && spread * 100 >= cfg.liquiditySpreadHighPct) {
+      votes.push({
+        family: "liquidity",
+        key: "liquidity.relativeSpread",
+        display: `Spread ${(spread * 100).toFixed(3)} % ≥ ${cfg.liquiditySpreadHighPct} %`,
+      });
+    }
+  }
+
+  const perp = family("perp");
+  if (perp?.status === "OK") {
+    const funding = perp.samples.find((s) => s.key === "perp.fundingRate")?.value ?? null;
+    if (funding != null && Math.abs(funding) >= cfg.perpFundingAbsThreshold) {
+      votes.push({
+        family: "perp",
+        key: "perp.fundingRate",
+        display: `|Funding| ${Math.abs(funding).toFixed(5)} ≥ ${cfg.perpFundingAbsThreshold}`,
+      });
+    }
+    const oi = perp.samples.find((s) => s.key === "perp.openInterestChange24h")?.value ?? null;
+    if (oi != null && oi <= PERP_OI_COLLAPSE_THRESHOLD) {
+      votes.push({
+        family: "perp",
+        key: "perp.openInterestChange24h",
+        display: `OI-24h ${(oi * 100).toFixed(1)} % ≤ ${PERP_OI_COLLAPSE_THRESHOLD * 100} %`,
+      });
+    }
+  }
+
+  const macro = family("macro");
+  if (macro?.status === "OK") {
+    const vix = macro.samples[0]?.value ?? null;
+    if (vix != null && vix >= cfg.macroVixHigh) {
+      votes.push({
+        family: "macro",
+        key: "macro.vix",
+        display: `VIX ${vix.toFixed(1)} ≥ ${cfg.macroVixHigh}`,
+      });
+    }
+  }
+  // Deterministische Reihenfolge (Familienreihenfolge des Vertrags, dann Key).
+  const order: Record<RegimeVote["family"], number> = { price: 0, volatility: 1, liquidity: 2, perp: 3, macro: 4 };
+  return votes.sort((a, b) => order[a.family] - order[b.family] || a.key.localeCompare(b.key));
+}
+
+/** Top-Treiber des gewählten Regimes (Beiträge, absteigend, Tie-Break Key). */
+function topDriversFor(
+  chosen: MarketRegime,
+  core: RegimeClassification,
+  votes: readonly RegimeVote[],
+  cfg: MarketRegimeConfig
+): RegimeTopDriver[] {
+  const f = core.features;
+  const drivers: RegimeTopDriver[] = [];
+  const adxV = f.adx;
+  const slopeV = f.slopePctPerCandle;
+  const crashHit =
+    f.drawdownPct != null && f.drawdownPct >= cfg.crashDrawdownPct && slopeV != null && slopeV < 0;
+  const highVolHit = f.volPercentile != null && f.volPercentile >= cfg.highVolPercentile;
+  const trendHit =
+    adxV != null && adxV >= cfg.trendAdx && slopeV != null && Math.abs(slopeV) >= cfg.trendSlopePct;
+
+  if (chosen === "CRASH" && crashHit && f.drawdownPct != null) {
+    drivers.push({
+      key: "drawdownPct",
+      family: "price",
+      contribution: 1 + Math.min(2, f.drawdownPct / (2 * cfg.crashDrawdownPct)),
+      display: `Drawdown ${f.drawdownPct.toFixed(2)} %`,
+    });
+    if (slopeV != null) {
+      drivers.push({
+        key: "slopePctPerCandle",
+        family: "price",
+        contribution: CONFIDENCE_EPS,
+        display: `Slope ${slopeV.toFixed(3)} %/Kerze`,
+      });
+    }
+  } else if (chosen === "HIGH_VOL") {
+    if (highVolHit && f.volPercentile != null) {
+      drivers.push({
+        key: "volatility.realizedPercentile",
+        family: "volatility",
+        contribution: 1 + (f.volPercentile - cfg.highVolPercentile) / 100,
+        display: `Vol-Perzentil ${f.volPercentile.toFixed(1)}`,
+      });
+    }
+    for (const vote of votes) {
+      drivers.push({
+        key: vote.key,
+        family: vote.family,
+        contribution: REGIME_VOTE_WEIGHT,
+        display: vote.display,
+      });
+    }
+    if (drivers.length === 0 && f.volPercentile != null) {
+      drivers.push({
+        key: "volatility.realizedPercentile",
+        family: "volatility",
+        contribution: CONFIDENCE_EPS,
+        display: `Vol-Perzentil ${f.volPercentile.toFixed(1)}`,
+      });
+    }
+  } else if ((chosen === "TREND_UP" || chosen === "TREND_DOWN") && trendHit && adxV != null && slopeV != null) {
+    drivers.push({
+      key: "adx",
+      family: "price",
+      contribution: 1 + clampUnit((adxV - cfg.trendAdx) / cfg.trendAdx),
+      display: `ADX ${adxV.toFixed(1)}`,
+    });
+    drivers.push({
+      key: "slopePctPerCandle",
+      family: "price",
+      contribution: clampUnit((Math.abs(slopeV) - cfg.trendSlopePct) / cfg.trendSlopePct),
+      display: `Slope ${slopeV >= 0 ? "+" : ""}${slopeV.toFixed(3)} %/Kerze`,
+    });
+  } else if (chosen === "RANGE") {
+    const adxHeadroom = adxV != null ? clampUnit((cfg.trendAdx - adxV) / cfg.trendAdx) : 1;
+    drivers.push({
+      key: "adx",
+      family: "price",
+      contribution: 1 + adxHeadroom,
+      display: adxV != null ? `ADX ${adxV.toFixed(1)} (unter Schwellwerten)` : "ADX n/v",
+    });
+  }
+
+  return drivers
+    .sort((a, b) => b.contribution - a.contribution || a.key.localeCompare(b.key))
+    .slice(0, 5);
+}
+
+export type ClassifyMultidimOptions = {
+  /** As-of-Zeitpunkt (ms) der Bewertung — Defaults: letzte Kerzenzeit/0. */
+  asOfMs?: number;
+  /** Erweiterte Familien-Inputs (PIT-gefiltert). `null`/fehlend = OHLCV-Fallback. */
+  families?: RegimeFamilyInputs | null;
+};
+
+/**
+ * Multidimensionale, point-in-time-sichere Regime-Klassifikation (RMA-P2-01).
+ *
+ * Kompatibilitätsvertrag:
+ *   - OHLCV-Kern (`classifyMarketRegime`) liefert weiterhin die Basisklasse;
+ *     ohne verfügbare erweiterte Familien (oder `featureMode: "ohlcv"`) ist
+ *     das Ergebnis KLASSE-IDENTISCH zum Altklassifikat — nur die neuen
+ *     Dimensionen (Confidence/Coverage/…) kommen additiv dazu.
+ *   - OK-Familien dürfen die Klasse ausschließlich zu `HIGH_VOL` eskalieren
+ *     (sichere Richtung); `CRASH` und Trendrichtungen entstehen ausschließlich
+ *     aus abgeschlossenen Kerzen.
+ *   - Samples mit `availableAt > asOf` gelangen nie in die Entscheidung.
+ */
+export function classifyMarketRegimeMultidim(
+  candles: RegimeCandleLike[],
+  cfg: MarketRegimeConfig = DEFAULT_MARKET_REGIME_CONFIG,
+  opts: ClassifyMultidimOptions = {}
+): MultidimRegimeClassification {
+  const core = classifyMarketRegime(candles, cfg);
+  const list = Array.isArray(candles) ? candles : [];
+  const lastCandle = list.length > 0 ? list[list.length - 1] : null;
+  const asOfMs =
+    opts.asOfMs ?? (lastCandle && Number.isFinite(lastCandle.time) ? lastCandle.time : Date.now());
+
+  const vector = assembleRegimeFeatureVector({
+    asOfMs,
+    mode: cfg.featureMode,
+    price: lastCandle ? { close: lastCandle.close, eventTimeMs: lastCandle.time } : null,
+    volatility: {
+      volPercentile: core.features.volPercentile,
+      eventTimeMs: lastCandle ? lastCandle.time : null,
+    },
+    families: cfg.featureMode === "multidim" ? (opts.families ?? null) : null,
+  });
+
+  const coverage = vector.coverage;
+  const degraded = vector.degraded;
+
+  if (!core.known) {
+    return {
+      ...core,
+      rawRegime: "UNKNOWN",
+      confidence: null,
+      coverage,
+      degraded: true,
+      mode: cfg.featureMode,
+      featureVersion: REGIME_FEATURE_VERSION,
+      modelVersion: REGIME_MODEL_VERSION,
+      topDrivers: [],
+      families: vector.families,
+      dataAsOf: lastCandle ? new Date(lastCandle.time).toISOString() : null,
+    };
+  }
+
+  const votes = cfg.featureMode === "multidim" ? collectVotes(cfg, vector) : [];
+  const coreRegime = core.regime as MarketRegime;
+  // Eskalation nur zur sicheren Richtung: votes sind ausschließlich HIGH_VOL.
+  const escalates = votes.length > 0 && MARKET_REGIME_SEVERITY.HIGH_VOL > MARKET_REGIME_SEVERITY[coreRegime];
+  const raw: MarketRegime = escalates ? "HIGH_VOL" : coreRegime;
+
+  const scores = evidenceScores(core, votes, cfg);
+  const total = REGIME_KEYS.reduce((sum, k) => sum + scores[k], 0);
+  const confidenceRaw = total > 0 ? scores[raw] / total : 0.5;
+  const confidence = Math.round(Math.min(Math.max(confidenceRaw, CONFIDENCE_MIN), CONFIDENCE_MAX) * 1e4) / 1e4;
+
+  const topDrivers = topDriversFor(raw, core, votes, cfg);
+  const reason =
+    escalates
+      ? `${core.reason} — Eskalation zu HIGH_VOL durch ${votes.map((v) => v.family).join("+")} (${votes.map((v) => v.display).join("; ")})`
+      : core.reason;
+
+  return {
+    regime: raw,
+    known: true,
+    features: core.features,
+    reason,
+    rawRegime: raw,
+    confidence,
+    coverage,
+    degraded,
+    mode: cfg.featureMode,
+    featureVersion: REGIME_FEATURE_VERSION,
+    modelVersion: REGIME_MODEL_VERSION,
+    topDrivers,
+    families: vector.families,
+    dataAsOf: lastCandle ? new Date(lastCandle.time).toISOString() : null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hysterese (Muster: adaptiveRisk RegimeStateMachine)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -539,6 +972,16 @@ export type RegimeGateApplication = {
   applied: boolean;
   /** true = Regime UNKNOWN (zu wenig Kerzen) — Faktor 1, nie still. */
   unknown: boolean;
+  /** Coverage des Feature-Vertrags (Default 1, wenn nicht übergeben). */
+  coverage: number;
+  /** true = Degraded Mode (nicht alle Pflichtfamilien OK). */
+  degraded: boolean;
+  /**
+   * true = ein konfigurierter Risiko-Boost (> 1) wurde wegen zu niedriger
+   * Coverage bzw. Degraded Mode auf 1 geklemmt (fail-closed, nie still:
+   * der Grund steht in `reason`).
+   */
+  boostBlocked: boolean;
   reason: string;
 };
 
@@ -563,6 +1006,13 @@ export function regimeGateFactor(
  *
  * UNKNOWN → Faktor 1 + unknown=true (fail-closed, nie still). Ohne
  * Strategieklasse kein Faktor (keine stillschweigende Klassifizierung).
+ *
+ * Coverage-Schutz (RMA-P2-01): Ein risikoerhöhender Faktor (> 1) wirkt nur,
+ * wenn `degraded !== true` UND `coverage ≥ minBoostCoverage` (Default 1.0).
+ * Unterhalb dieser Schwelle wird der Faktor auf 1 geklemmt (`boostBlocked`);
+ * Dämpfungen ≤ 1 bleiben davon nie betroffen. Fehlende Coverage-Angabe
+ * (Alt-Aufrufe) zählt als 1 / nicht degradiert — bestehende Defaults ändern
+ * sich dadurch nicht.
  */
 export function applyRegimeGate(input: {
   regime: MarketRegimeLabel;
@@ -570,15 +1020,36 @@ export function applyRegimeGate(input: {
   weight: number;
   mode?: RegimeGateMode;
   cfg?: MarketRegimeConfig;
+  /** Coverage des Snapshot (Default 1). */
+  coverage?: number;
+  /** Degraded-Flag des Snapshot (Default false). */
+  degraded?: boolean;
 }): RegimeGateApplication {
   const cfg = input.cfg ?? DEFAULT_MARKET_REGIME_CONFIG;
   const mode = input.mode ?? cfg.gateMode;
   const weight = Number.isFinite(input.weight) ? input.weight : 0;
   const unknown = input.regime === "UNKNOWN";
+  const coverage =
+    input.coverage != null && Number.isFinite(input.coverage)
+      ? Math.min(Math.max(input.coverage, 0), 1)
+      : 1;
+  const degraded = input.degraded === true;
+  const minBoostCoverage =
+    Number.isFinite(cfg.minBoostCoverage) && cfg.minBoostCoverage >= 0
+      ? Math.min(cfg.minBoostCoverage, 1)
+      : 1;
 
   let factor = 1;
   if (mode !== "off" && !unknown && input.strategyClass != null) {
     factor = regimeGateFactor(input.regime, input.strategyClass, cfg);
+  }
+
+  // Fail-closed Coverage-Klemmung: nie risikoerhöhend bei fehlender
+  // Abdeckung — vor der enforce-Anwendung, damit `applied` ehrlich bleibt.
+  let boostBlocked = false;
+  if (factor > 1 && (degraded || coverage < minBoostCoverage)) {
+    factor = 1;
+    boostBlocked = true;
   }
 
   const applied = mode === "enforce" && !unknown && input.strategyClass != null && factor !== 1;
@@ -586,6 +1057,8 @@ export function applyRegimeGate(input: {
 
   let reason: string;
   if (unknown) reason = "Regime UNKNOWN (zu wenig Kerzen) — Faktor 1, keine Dämpfung (nie still).";
+  else if (boostBlocked)
+    reason = `Coverage ${(coverage * 100).toFixed(0)} %${degraded ? " (Degraded Mode)" : ""} < Mindest-Coverage ${(minBoostCoverage * 100).toFixed(0)} % — risikoerhöhender Faktor auf 1 geklemmt (fail-closed).`;
   else if (input.strategyClass == null) reason = "Keine Strategieklasse ableitbar — Faktor 1.";
   else if (mode === "off") reason = "Gate-Modus off — keine Ausweisung, keine Wirkung.";
   else if (mode === "monitor")
@@ -608,6 +1081,9 @@ export function applyRegimeGate(input: {
     effectiveWeight,
     applied,
     unknown,
+    coverage,
+    degraded,
+    boostBlocked,
     reason,
   };
 }
@@ -633,12 +1109,18 @@ export type RegimeGateExecutionSnapshot = {
   factor: number;
   applied: boolean;
   unknown: boolean;
+  /** Coverage des zugrunde liegenden Regime-Snapshots (1, wenn keiner da). */
+  coverage: number;
+  degraded: boolean;
+  boostBlocked: boolean;
 };
 
 /**
  * Gate-Auflösung für den Mikro-Executor (nur LESERAM-Zugriff, keine IO):
  * wirkt ausschließlich im enforce-Modus; fehlendes Regime-Snapshot oder
- * UNKNOWN → Faktor 1 (fail-safe, kein Raten).
+ * UNKNOWN → Faktor 1 (fail-safe, kein Raten). Coverage/Degraded des
+ * Snapshots fließen mit ein — risikoerhörende Faktoren (> 1) werden bei
+ * zu niedriger Coverage wie in `applyRegimeGate` geklemmt.
  */
 export function resolveRegimeGateForExecution(
   symbol: string,
@@ -647,11 +1129,39 @@ export function resolveRegimeGateForExecution(
 ): RegimeGateExecutionSnapshot {
   const snapshot = getInstrumentRegime(symbol);
   const regime: MarketRegimeLabel = snapshot?.regime ?? "UNKNOWN";
+  const coverage = snapshot?.coverage ?? 1;
+  const degraded = snapshot?.degraded ?? false;
   if (cfg.gateMode !== "enforce") {
-    return { mode: cfg.gateMode, regime, factor: 1, applied: false, unknown: regime === "UNKNOWN" };
+    return {
+      mode: cfg.gateMode,
+      regime,
+      factor: 1,
+      applied: false,
+      unknown: regime === "UNKNOWN",
+      coverage,
+      degraded,
+      boostBlocked: false,
+    };
   }
-  const gate = applyRegimeGate({ regime, strategyClass, weight: 1, mode: "enforce", cfg });
-  return { mode: cfg.gateMode, regime, factor: gate.factor, applied: gate.applied, unknown: gate.unknown };
+  const gate = applyRegimeGate({
+    regime,
+    strategyClass,
+    weight: 1,
+    mode: "enforce",
+    cfg,
+    coverage,
+    degraded,
+  });
+  return {
+    mode: cfg.gateMode,
+    regime,
+    factor: gate.factor,
+    applied: gate.applied,
+    unknown: gate.unknown,
+    coverage,
+    degraded,
+    boostBlocked: gate.boostBlocked,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -666,6 +1176,13 @@ export type RegimeChangeEvent = {
   reason: string;
   /** Maschinenlesbarer Code: `regime:SYMBOL:VON→NACH`. */
   code: string;
+  // RMA-P2-01 (additiv): Dimensionen des auslösenden Snapshots.
+  rawRegime: MarketRegimeLabel;
+  confidence: number | null;
+  coverage: number;
+  degraded: boolean;
+  featureVersion: string;
+  modelVersion: string;
 };
 
 export type InstrumentRegimeSnapshot = {
@@ -677,12 +1194,28 @@ export type InstrumentRegimeSnapshot = {
   reason: string;
   lastChange: RegimeChangeEvent | null;
   changeCount: number;
+  // ── RMA-P2-01 (v1.61.0): multidimensionale Dimensionen (additiv) ──────────
+  /** Rohklassifikation vor Hysteresebestätigung. */
+  rawRegime: MarketRegimeLabel;
+  /** Confidence [0.2, 0.99] der Rohklassifikation; `null` bei UNKNOWN. */
+  confidence: number | null;
+  /** Coverage des Feature-Vertrags [0, 1]. */
+  coverage: number;
+  /** true = Degraded Mode (OHLCV-Fallback, nicht alle Pflichtfamilien OK). */
+  degraded: boolean;
+  mode: RegimeFeatureMode;
+  featureVersion: string;
+  modelVersion: string;
+  topDrivers: RegimeTopDriver[];
+  families: RegimeFamilyState[];
+  /** Event-/Verfügbarkeitszeit der Datenbasis (letzte Kerze) oder `null`. */
+  dataAsOf: string | null;
 };
 
 type InstrumentState = {
   machine: MarketRegimeStateMachine;
   regime: MarketRegimeLabel;
-  classification: RegimeClassification | null;
+  classification: MultidimRegimeClassification | null;
   lastEvalAt: number | null;
   history: RegimeChangeEvent[];
   changeCount: number;
@@ -714,6 +1247,16 @@ function snapshotOf(symbol: string, st: InstrumentState): InstrumentRegimeSnapsh
     reason: st.classification?.reason ?? "Noch keine Bewertung erfolgt.",
     lastChange: st.history.length > 0 ? st.history[st.history.length - 1] : null,
     changeCount: st.changeCount,
+    rawRegime: st.classification?.rawRegime ?? "UNKNOWN",
+    confidence: st.classification?.confidence ?? null,
+    coverage: st.classification?.coverage ?? 0,
+    degraded: st.classification?.degraded ?? true,
+    mode: st.classification?.mode ?? "multidim",
+    featureVersion: st.classification?.featureVersion ?? REGIME_FEATURE_VERSION,
+    modelVersion: st.classification?.modelVersion ?? REGIME_MODEL_VERSION,
+    topDrivers: st.classification?.topDrivers ? [...st.classification.topDrivers] : [],
+    families: st.classification?.families ? st.classification.families.map((f) => ({ ...f })) : [],
+    dataAsOf: st.classification?.dataAsOf ?? null,
   };
 }
 
@@ -730,10 +1273,16 @@ async function writeRegimeChangeAudit(event: RegimeChangeEvent): Promise<void> {
 
 export type EvaluateRegimeOptions = {
   cfg?: MarketRegimeConfig;
-  /** Fester Zeitstempel (ms) für Determinismus in Tests. */
+  /** Fester Zeitstempel (ms) für Determinismus in Tests; zugleich `asOf`. */
   now?: number;
   /** Audit unterdrücken (z. B. reine Unit-Tests). */
   audit?: boolean;
+  /**
+   * PIT-gefilterte Feature-Inputs der erweiterten Familien (vom Live-Loader
+   * `regimeFamilyInputs.ts` oder aus Backtest-Fixtures). `null`/fehlend ⇒
+   * Degraded Mode mit OHLCV-Kern (kein IO in diesem Modul).
+   */
+  families?: RegimeFamilyInputs | null;
 };
 
 /**
@@ -741,6 +1290,11 @@ export type EvaluateRegimeOptions = {
  * reine Arithmetik + Hysterese; Regime-Wechsel werden im Verlauf
  * protokolliert und (best-effort) auditiert (`regime:SYMBOL:VON→NACH`).
  * UNKNOWN bei zu wenig Kerzen berührt die Hysterese-Maschine nicht.
+ *
+ * Rohklassifikation (`rawRegime`) und Confidence kommen aus
+ * `classifyMarketRegimeMultidim`; die Maschine bestätigt wie zuvor mit
+ * `confirmCandles` (Eskalation sofort) — erweiterte Flacker-Familien können
+ * den bestätigten Zustand damit nicht hin- und herwerfen.
  */
 export function evaluateInstrumentRegime(
   symbolRaw: string,
@@ -749,6 +1303,7 @@ export function evaluateInstrumentRegime(
 ): InstrumentRegimeSnapshot {
   const symbol = String(symbolRaw ?? "").toUpperCase();
   const cfg = opts.cfg ?? loadMarketRegimeConfig();
+  const nowMs = opts.now ?? Date.now();
   const s = state();
   let st = s.instruments.get(symbol);
   if (!st) {
@@ -763,7 +1318,10 @@ export function evaluateInstrumentRegime(
     s.instruments.set(symbol, st);
   }
 
-  const classification = classifyMarketRegime(candles, cfg);
+  const classification = classifyMarketRegimeMultidim(candles, cfg, {
+    asOfMs: nowMs,
+    families: opts.families ?? null,
+  });
   const from = st.regime;
   let to: MarketRegimeLabel;
   if (!classification.known) {
@@ -773,7 +1331,7 @@ export function evaluateInstrumentRegime(
   }
 
   st.classification = classification;
-  st.lastEvalAt = opts.now ?? Date.now();
+  st.lastEvalAt = nowMs;
 
   if (to !== from) {
     const event: RegimeChangeEvent = {
@@ -783,6 +1341,12 @@ export function evaluateInstrumentRegime(
       to,
       reason: classification.reason,
       code: `regime:${symbol}:${from}→${to}`,
+      rawRegime: classification.rawRegime,
+      confidence: classification.confidence,
+      coverage: classification.coverage,
+      degraded: classification.degraded,
+      featureVersion: classification.featureVersion,
+      modelVersion: classification.modelVersion,
     };
     st.history.push(event);
     if (st.history.length > REGIME_HISTORY_LENGTH) st.history.shift();
@@ -808,6 +1372,12 @@ export async function refreshInstrumentRegimes(
     fetchCandles?: (symbol: string, limit: number) => Promise<Candle[]>;
     /** Audit unterdrücken (Tests). */
     audit?: boolean;
+    /**
+     * Erweiterte Feature-Familien je Symbol (LIVE-Loader aus
+     * `regimeFamilyInputs.ts` — bewusst injizierbar, damit dieses Modul
+     * ohne IO bleibt). Ohne Loader: Degraded Mode mit OHLCV-Kern.
+     */
+    loadFamilies?: (symbol: string, nowMs: number) => RegimeFamilyInputs | null | undefined;
   } = {}
 ): Promise<InstrumentRegimeSnapshot[]> {
   const cfg = opts.cfg ?? loadMarketRegimeConfig();
@@ -832,7 +1402,17 @@ export async function refreshInstrumentRegimes(
     }
     try {
       const candles = await fetcher(symbol, cfg.lookbackCandles);
-      out.push(evaluateInstrumentRegime(symbol, candles, { cfg, now: nowMs, audit: opts.audit }));
+      let families: RegimeFamilyInputs | null = null;
+      if (opts.loadFamilies) {
+        try {
+          families = opts.loadFamilies(symbol, nowMs) ?? null;
+        } catch {
+          families = null; // Loader-Fehler ⇒ Degraded Mode, nie ein Wurf.
+        }
+      }
+      out.push(
+        evaluateInstrumentRegime(symbol, candles, { cfg, now: nowMs, audit: opts.audit, families })
+      );
     } catch {
       // Datenfehler → letzten bekannten Stand ausweisen (nie raten, nie werfen).
       if (existing) out.push(snapshotOf(symbol, existing));
@@ -879,10 +1459,22 @@ export function getMarketRegimeStatus(cfg: MarketRegimeConfig = loadMarketRegime
  * Regime-Verlauf für die Cycle-Artefakte (Muster src/cycle/artifacts.ts):
  * `regime-history.json` im Tages-Artefaktverzeichnis. null = noch keine
  * Bewertung in diesem Prozess (dann wird kein Artefakt geschrieben).
+ *
+ * `schemaVersion: 2` (RMA-P2-01): je Instrument zusätzlich Rohklasse,
+ * Confidence, Coverage, Degraded, Feature-/Modellversion, Top-Treiber und
+ * Familienstatus — gebounded wie bisher (Historie ≤ REGIME_HISTORY_LENGTH).
  */
 export function collectRegimeHistoryArtifact(
   cfg: MarketRegimeConfig = loadMarketRegimeConfig()
-): { schemaVersion: number; asOf: string; mode: RegimeGateMode; instruments: unknown[] } | null {
+): {
+  schemaVersion: number;
+  asOf: string;
+  mode: RegimeGateMode;
+  featureMode: RegimeFeatureMode;
+  featureVersion: string;
+  modelVersion: string;
+  instruments: unknown[];
+} | null {
   const s = state();
   if (s.instruments.size === 0) return null;
   const instruments = [...s.instruments.entries()]
@@ -890,16 +1482,32 @@ export function collectRegimeHistoryArtifact(
     .map(([symbol, st]) => ({
       symbol,
       regime: st.regime,
+      rawRegime: st.classification?.rawRegime ?? "UNKNOWN",
+      confidence: st.classification?.confidence ?? null,
+      coverage: st.classification?.coverage ?? 0,
+      degraded: st.classification?.degraded ?? true,
+      featureVersion: st.classification?.featureVersion ?? REGIME_FEATURE_VERSION,
+      modelVersion: st.classification?.modelVersion ?? REGIME_MODEL_VERSION,
+      topDrivers: st.classification?.topDrivers ?? [],
+      families: (st.classification?.families ?? []).map((f) => ({
+        family: f.family,
+        status: f.status,
+        reason: f.reason,
+      })),
       lastEvalAt: st.lastEvalAt != null ? new Date(st.lastEvalAt).toISOString() : null,
+      dataAsOf: st.classification?.dataAsOf ?? null,
       reason: st.classification?.reason ?? null,
       features: st.classification?.features ?? null,
       changeCount: st.changeCount,
       history: [...st.history],
     }));
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     asOf: new Date().toISOString(),
     mode: cfg.gateMode,
+    featureMode: cfg.featureMode,
+    featureVersion: REGIME_FEATURE_VERSION,
+    modelVersion: REGIME_MODEL_VERSION,
     instruments,
   };
 }
@@ -911,6 +1519,8 @@ export function collectRegimeHistoryArtifact(
 /**
  * Deterministische Prompt-Zeile für den Approver-/Entscheidungskontext der
  * Engine (GAP-06). Leer bei Modus `off` (Prompt bleibt byte-identisch).
+ * Erweitert (RMA-P2-01) um Confidence, Coverage und Degraded-Kennzeichnung —
+ * nur in `monitor`/`enforce`, `off` bleibt leer.
  */
 export function formatRegimeGateContext(
   snapshot: InstrumentRegimeSnapshot,
@@ -925,6 +1535,12 @@ export function formatRegimeGateContext(
     `Drawdown ${f.drawdownPct != null ? `${f.drawdownPct.toFixed(2)} %` : "n/v"}`,
     `Vol-Perzentil ${f.volPercentile != null ? f.volPercentile.toFixed(0) : "n/v"}`,
   ].join(", ");
+  const dims = [
+    snapshot.confidence != null ? `Conf ${snapshot.confidence.toFixed(2)}` : "Conf n/v",
+    `Coverage ${(snapshot.coverage * 100).toFixed(0)} %`,
+    snapshot.degraded ? "Degraded (OHLCV-Fallback)" : "Full",
+    `Rohklasse ${snapshot.rawRegime}`,
+  ].join(" · ");
   const classPart = strategyClass != null ? ` · Strategieklasse ${strategyClass}` : " · keine Strategieklasse ableitbar";
   const effect =
     gate.mode === "monitor"
@@ -933,8 +1549,10 @@ export function formatRegimeGateContext(
         : " → keine Dämpfung (MONITOR: Ausweis + Audit, keine Wirkung)"
       : gate.applied
         ? ` → Faktor ${gate.factor.toFixed(2)} WIRKT: Signalgewicht × ${gate.factor.toFixed(2)} (enforce)`
-        : " → Faktor 1 (enforce: keine Dämpfung)";
-  return `REGIME-GATE ${snapshot.symbol}: Regime ${snapshot.regime} (${featureLine})${classPart}${effect}. Modi: off/monitor/enforce (REGIME_GATE_MODE).`;
+        : gate.boostBlocked
+          ? ` → Boost wegen Coverage geklemmt: Faktor 1 (enforce, fail-closed)`
+          : " → Faktor 1 (enforce: keine Dämpfung)";
+  return `REGIME-GATE ${snapshot.symbol}: Regime ${snapshot.regime} (${featureLine}) · ${dims}${classPart}${effect}. Modi: off/monitor/enforce (REGIME_GATE_MODE).`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

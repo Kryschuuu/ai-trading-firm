@@ -1819,3 +1819,69 @@ export const executionQualityCompleted = pgTable("execution_quality_completed", 
   intentId:text("intent_id").primaryKey().references(()=>executionQualityIntents.id),
   completedAt:timestamp("completed_at",{withTimezone:true}).notNull().defaultNow(),
 });
+
+/**
+ * Persistente Regime-Snapshots (RMA-P2-01, v1.61.0) — append-only Historie
+ * der multidimensionalen Regime-Bewertungen für Stabilitäts-/Coverage- und
+ * OOS-Auswertung (`src/lib/regimeEvaluation.ts`, `npm run regime:eval`).
+ *
+ * Idempotenz: `idempotency_key` (sha256 über Symbol|asOf|Rohklasse|
+ * bestätigte Klasse|Coverage|Versionen) — Retries/Restarts derselben
+ * Bewertung schreiben keine zweite Zeile. Neue Semantik ⇒ neue Keyteile,
+ * keine Überschreibungen.
+ */
+export const regimeSnapshots = pgTable(
+  "regime_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    symbol: text("symbol").notNull(),
+    /** As-of der Bewertung (Ereigniszeit des Snapshots). */
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    /** Berechnungszeit (Persistenzzeitpunkt der Zeile). */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    /** Rohklassifikation vor Hysterese. */
+    rawRegime: text("raw_regime").notNull(),
+    /** Bestätigter Zustand der Hysterese (Gate-relevant). */
+    confirmedRegime: text("confirmed_regime").notNull(),
+    /** Confidence [0,1]; NULL bei UNKNOWN (kein stiller 0-Wert). */
+    confidence: numeric("confidence"),
+    /** Coverage des Feature-Vertrags [0,1]. */
+    coverage: numeric("coverage").notNull(),
+    degraded: boolean("degraded").notNull(),
+    gateMode: text("gate_mode").notNull(),
+    featureMode: text("feature_mode").notNull(),
+    featureVersion: text("feature_version").notNull(),
+    modelVersion: text("model_version").notNull(),
+    /** Top-Treiber (≤5, gebounded) — keine Instrument-IDs als Metriklabels. */
+    topDrivers: jsonb("top_drivers").notNull(),
+    /** Familienstatus (≤5 Familien × Status/Reason). */
+    familyStatus: jsonb("family_status").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("regime_snapshots_idem_unique").on(t.idempotencyKey),
+    index("regime_snapshots_symbol_asof_idx").on(t.symbol, t.asOf),
+    index("regime_snapshots_asof_idx").on(t.asOf),
+    check(
+      "regime_snapshots_regime_check",
+      sql`${t.rawRegime} IN ('TREND_UP','TREND_DOWN','RANGE','HIGH_VOL','CRASH','UNKNOWN')
+        AND ${t.confirmedRegime} IN ('TREND_UP','TREND_DOWN','RANGE','HIGH_VOL','CRASH','UNKNOWN')`
+    ),
+    check(
+      "regime_snapshots_confidence_check",
+      sql`${t.confidence} IS NULL OR (${t.confidence} >= 0 AND ${t.confidence} <= 1)`
+    ),
+    check("regime_snapshots_coverage_check", sql`${t.coverage} >= 0 AND ${t.coverage} <= 1`),
+    check(
+      "regime_snapshots_gate_mode_check",
+      sql`${t.gateMode} IN ('off','monitor','enforce')`
+    ),
+    check(
+      "regime_snapshots_feature_mode_check",
+      sql`${t.featureMode} IN ('ohlcv','multidim')`
+    ),
+    check("regime_snapshots_idem_check", sql`${t.idempotencyKey} ~ '^[a-f0-9]{64}$'`),
+  ]
+);

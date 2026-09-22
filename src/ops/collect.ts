@@ -706,9 +706,12 @@ function collectRisk(firm: FirmResult): Draft {
     },
     ...regimeStatus.instruments.map((i) => ({
       label: `Regime ${i.symbol}`,
-      value: i.regime,
+      // RMA-P2-01: Confidence/Coverage/Degraded sind API-sichtbar (additiv).
+      value: `${i.regime} · Conf ${i.confidence != null ? i.confidence.toFixed(2) : "n/v"} · Cov ${(i.coverage * 100).toFixed(0)} %${i.degraded ? " · degraded" : ""}`,
       tone: toneForMarketRegime(i.regime),
-      hint: `${i.reason}${i.at ? ` · Stand ${formatTimestampUtc(i.at)}` : ""}`,
+      hint: `${i.reason}${i.at ? ` · Stand ${formatTimestampUtc(i.at)}` : ""}${
+        i.topDrivers.length > 0 ? ` · Treiber: ${i.topDrivers.map((d) => d.display).join(", ")}` : ""
+      }`,
     })),
   ];
   return {

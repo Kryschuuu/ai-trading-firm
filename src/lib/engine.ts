@@ -62,6 +62,9 @@ import {
   type InstrumentRegimeSnapshot,
   type StrategyClass,
 } from "./marketRegime";
+import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
+import { scheduleRegimeSnapshotPersist } from "./regimeSnapshotStore";
+import { telemetry } from "./telemetry";
 import { getHouseView } from "./analysts";
 import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
 import { writeEquitySnapshot } from "./equity";
@@ -592,7 +595,13 @@ export async function runAgentTurn(
   let regimeLabel: InstrumentRegimeSnapshot["regime"] = "UNKNOWN";
   if (regimeCfg.gateMode !== "off") {
     try {
-      const regimeSnap = evaluateInstrumentRegime(symbolHint, turnCandles, { cfg: regimeCfg });
+      // RMA-P2-01: dieselben PIT-gefilterten Feature-Familien wie Monitor/
+      // Ops — ein kanonischer Snapshot für Gate, Prompt und Persistenz.
+      const families = loadRegimeFamilyInputs(symbolHint);
+      const regimeSnap = evaluateInstrumentRegime(symbolHint, turnCandles, {
+        cfg: regimeCfg,
+        families,
+      });
       regimeLabel = regimeSnap.regime;
       const missionClass: StrategyClass | null = strategyClassOfTemplate(mission.templateId);
       const gate = applyRegimeGate({
@@ -601,15 +610,23 @@ export async function runAgentTurn(
         weight: 1,
         mode: regimeCfg.gateMode,
         cfg: regimeCfg,
+        coverage: regimeSnap.coverage,
+        degraded: regimeSnap.degraded,
       });
       regimeGateFactorEffective = gate.factor;
       regimeApplied = gate.applied;
       regimeContext = formatRegimeGateContext(regimeSnap, missionClass, gate);
+      if (gate.boostBlocked) telemetry.regime.boosts.inc({ result: "blocked" });
+      else if (gate.applied && gate.factor > 1) telemetry.regime.boosts.inc({ result: "applied" });
+      // Geboundedes Snapshot-Persistenz-Scheduling (Throttle/Idempotenz im Store).
+      scheduleRegimeSnapshotPersist(regimeSnap, {
+        cfg: { gateMode: regimeCfg.gateMode, featureMode: regimeCfg.featureMode },
+      });
       trace.push(
         step(
           "REGIME-GATE",
           true,
-          `Regime ${regimeSnap.regime} · Klasse ${missionClass ?? "n/v"} · Faktor ${gate.factor.toFixed(2)} (${regimeCfg.gateMode}${gate.applied ? ", wirkt" : ", ohne Wirkung"})`
+          `Regime ${regimeSnap.regime} · Klasse ${missionClass ?? "n/v"} · Faktor ${gate.factor.toFixed(2)} (${regimeCfg.gateMode}${gate.applied ? ", wirkt" : ", ohne Wirkung"}) · Coverage ${(regimeSnap.coverage * 100).toFixed(0)} %${regimeSnap.degraded ? " (degraded)" : ""}`
         )
       );
     } catch (e) {
