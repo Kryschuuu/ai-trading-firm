@@ -220,7 +220,9 @@ Messschleife:
 | `firm_open_positions` | Gauge | Paper-Ledger | offene Positionen |
 | `firm_realized_pnl_today` | Gauge | `realizedPnlToday()` (Berliner Tag) | realisiertes Tages-P&L |
 | `firm_metric_source{source}` | Gauge | — | Quelle des Zustands (`paper-broker` = 1, sonst `db-snapshot`) |
-| `firm_order_fills_total{kind,reason}` | Counter | Order-Pfad (`src/lib/broker.ts`) | Fills: `kind` = `OPEN`/`CLOSE`, `reason` = `ORDER`/`ORDER_PARTIAL` bzw. der Exit-Grund (`STOP_LOSS`, `TAKE_PROFIT`, `TRAILING_STOP`, `TIME_STOP`, …) |
+| `firm_order_fills_total{kind,reason}` | Counter | Order-Pfad (`src/lib/broker.ts`) | Fills: `kind` = `OPEN`/`CLOSE`, `reason` = `ORDER`/`ORDER_PARTIAL` bzw. der Exit-Grund (`STOP_LOSS`, `TAKE_PROFIT`, `TRAILING_STOP`, `TIME_STOP`, `SIGNAL_DECAY`, …) |
+| `signal_decay_evaluations_total{result,mode,strategy_class}` | Counter | Signal-Decay (`src/lib/signalDecayRuntime.ts`) | Bewertungen. Labels nur Code-Konstanten, keine Positions-IDs. |
+| `signal_decay_events_total{result,mode}` | Counter | Signal-Decay | `written` / `duplicate` / `conflict` / `failed`. |
 | `firm_order_rejects_total{reason}` | Counter | Ablehnungs-Funnel (`reject()`) | Rejects je Grund-**Klasse** (`INSUFFICIENT_CASH`, `KILL_SWITCH_ARMED`, `GUARDRAIL`, …) |
 | `llm_calls_total{provider,outcome}` | Counter | Routing-Schicht (`src/routing/adapter.ts`) | LLM-Aufrufe je Provider; `outcome` = `ok`/`error`/`fallback` |
 | `llm_latency_ms_sum{provider}` | Counter | Routing-Schicht (Latenz fällt dort ohnehin an) | Summe der Latenzen; Mittelwert = `llm_latency_ms_sum / llm_calls_total{outcome="ok"}` |

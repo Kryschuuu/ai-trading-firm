@@ -14,6 +14,8 @@ import { db } from "@/db";
 import { riskConfig } from "@/db/schema";
 import { applyRuntimeLimits, getBaseLimits, getLimits, DEFAULT_LIMITS, LIMIT_CEILINGS, type RiskLimits } from "./riskGuard";
 import { logAudit } from "./engine";
+import { previewSignalDecayOverride } from "./signalDecay";
+import { resetSignalDecayRuntimeForTests } from "./signalDecayRuntime";
 import {
   DSP_CONFIG_KEYS,
   applyDrawdownScalingPolicy,
@@ -301,6 +303,29 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
     // Mit der neuen Policy sofort neu bewerten (Best-Effort; sonst nächster Tick).
     void updateDrawdownScaling({ force: true }).catch(() => {});
     return { ok: true, effective: after };
+  }
+
+  // ── Namensraum 4: Signal-Decay (sdc.*, RMA-P5-05) ──
+  if (key.startsWith("sdc.")) {
+    const preview = previewSignalDecayOverride(key, num);
+    if (!preview.ok) return preview;
+    await db
+      .insert(riskConfig)
+      .values({ key, value: toDbValue(preview.stored), description: `Signal-Decay ${preview.strategyClass}.${preview.field}` })
+      .onConflictDoUpdate({
+        target: riskConfig.key,
+        set: { value: toDbValue(preview.stored), updatedAt: new Date() },
+      });
+    GLOBAL.__riskCfgLoadedAt = Date.now();
+    resetSignalDecayRuntimeForTests();
+    await logAudit("CONFIG_CHANGED", "WARN", {
+      key,
+      after: preview.stored,
+      requested: num,
+      namespace: "signal-decay",
+      source: "dashboard",
+    });
+    return { ok: true, effective: preview.stored };
   }
 
   return { ok: false, error: `Unbekannter Konfigurationsschlüssel: ${key}` };

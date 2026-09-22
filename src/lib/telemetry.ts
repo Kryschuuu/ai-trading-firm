@@ -517,6 +517,25 @@ export const telemetry = {
       telemetry.drawdownScaling.snapshots.reset();
     },
   },
+  /**
+   * Signal-Decay-Exits (RMA-P5-05, v1.69.0).
+   *
+   * Labels sind ausschließlich Code-Konstanten:
+   *   * `result`         = would_exit | hold | skipped | suppressed | conflict | written | duplicate | failed
+   *   * `mode`           = monitor | active
+   *   * `strategy_class` = mean-reversion | trend | breakout | unclassified
+   *
+   * Keine Instrument-, Trade- oder Order-IDs als Label. Scores und
+   * Positionen stehen im Audit-Event und in `signal_decay_events`.
+   */
+  signalDecay: {
+    evaluations: new LabelCounter("signal_decay_evaluations_total"),
+    events: new LabelCounter("signal_decay_events_total"),
+    reset(): void {
+      telemetry.signalDecay.evaluations.reset();
+      telemetry.signalDecay.events.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */

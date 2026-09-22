@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.68.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.69.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -75,6 +75,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[PROMPT_PERFORMANCE.md](PROMPT_PERFORMANCE.md)** | Prompt-Version-Metrikvergleich: immutable Prompt-Artefakte `pp1:<sha256>` (LF-normalisiert), Run-Provenanz `pr1:<sha256>`, PIT-Metriken (Brier/ECE/HitRate, Attribution, Latenz/Kosten) mit CIs & Segmenten, fairer Baseline-vs-Kandidat-Vergleich mit ECE-Wächter + Human-Gate, Bounded-Queries (RMA-P3-02, v1.65.0) |
 | **[VOLATILITY_TARGETING.md](VOLATILITY_TARGETING.md)** | Kontinuierliches Portfolio-Volatility-Targeting: as-of-sichere Forecast-Volatilität `√(wᵀΣ^A w)` gegen Ziel, Risikomultiplikator hart ≤ 1 (nur senkend), Fail-closed-Fallbacks, `monitor`/`active`/`off`-Rollout, idempotente Snapshot-Persistenz `vt1:<sha256>`, Realisierung + Target-Error, Live & Backtest teilen den pure Kern (RMA-P5-01, v1.67.0) |
 | **[DRAWDOWN_SCALING.md](DRAWDOWN_SCALING.md)** | Hysteretisches Drawdown-Risk-Scaling: reconcilte Equity gegen persistierten High-Water-Mark, monotone Kurve mit Soft/Hard-Schwelle + optionaler PAUSE, sofortige Degradation, Recovery nur nach Cooldown + Bestätigungen, cashflow-neutrale HWM-Führung, fail-closed ohne Equity/Reconciliation, `monitor`/`active`/`off`-Rollout, idempotente Snapshot-Persistenz `dsc1:<sha256>` und Neustart-Rekonstruktion (RMA-P5-04, v1.68.0) |
+| **[SIGNAL_DECAY.md](SIGNAL_DECAY.md)** | Versionierte Signal-Decay-Exits: unveränderlicher Entry-Snapshot, point-in-time Current-Signal, Klassen-Policy default-off, Hysterese, `SIGNAL_DECAY` nach den Safety-Exits, Monitor-Counterfactual, Live und Backtest teilen `decideExit` (RMA-P5-05, v1.69.0) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
 | **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler, Firmen-Metriken, Auto-Circuit-Breaker, Alerts, Heartbeat (§9–12) |
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE` |
@@ -273,4 +274,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.67.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.69.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

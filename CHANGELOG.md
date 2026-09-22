@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.68.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.69.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,32 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.69.0] — 2026-09-22 · Versionierte Signal-Decay-Exits (RMA-P5-05)
+
+### Hinzugefügt
+
+- **Pure Exit-Erweiterung (`src/lib/signalDecay.ts`, `decideExit`):** `SIGNAL_DECAY` ist von `TIME_STOP` und `MANUAL_FLATTEN` getrennt. Priorität bleibt Safety zuerst: Kill-Switch → Stop → Take-Profit → Trailing → Time-Stop → Signal-Decay. Fehlendes, stales, invalides oder versionsfremdes Signal ist UNKNOWN und schließt nicht (`null` ≠ 0). Zukunftssignale werden verworfen und erscheinen nicht im Audit.
+- **Vertrag `sig1` / Semantik `mkt-sig-1`:** Richtung, Stärke und Konfidenz in [0, 1], Coverage, `calculatedAsOf` / `availableAt` / `computedAt`, Feature-/Modell-/Config-Version. Live filtert Kerzen mit Open-Zeit + 15m; der Backtest behandelt `candle.time` als Close-Verfügbarkeit. Dieselbe Funktion in Monitor und Backtest.
+- **Policy default-off:** `SIGNAL_DECAY_MODE` (`off` | `monitor` | `active`, unbekannt ⇒ `monitor`). Jede Klasse (`trend`, `mean-reversion`, `breakout`, `unclassified`) bleibt aus, bis sie explizit an ist. Schwellen bounded (`sdc.*` in `risk_config`). Bestätigung, Mindesthaltedauer, optionale Halbwertszeit, Duplikat-Beobachtung zählt nicht zweimal, Policywechsel setzt den Zähler zurück.
+- **Persistenz (`drizzle/2026-09-22_signal_decay.sql`):** unveränderlicher Entry-Snapshot, Hysterese-Spalten (Neustart), append-only `signal_decay_events` mit idempotentem `sde1`-Schlüssel. Migration vor dem Deploy — `positions` wird vollständig selektiert.
+- **Counterfactual:** Monitor-Modus schließt nicht, schreibt WOULD_EXIT und den Rollup (`additionalPnl` / `avoidedPnl` / `triggerCoverage`; 0 Bewertungen ⇒ Coverage `null`).
+- **API:** `GET/POST /api/firm/risk/signal-decay`. Audit `SIGNAL_DECAY_CAPTURED`, `SIGNAL_DECAY_COUNTERFACTUAL`, `SIGNAL_DECAY_EXIT`. Metrik-Labels nur Code-Konstanten.
+- **Dokumentation:** [`docs/SIGNAL_DECAY.md`](docs/SIGNAL_DECAY.md).
+
+### Geändert
+
+- Engine und Mikro-Executor erfassen den Entry-Snapshot best-effort nach dem Fill (geschlossene Kerzen). Ein Fehler bricht den Fill nicht ab.
+- Backtest-Engine (`legacy`/`paper`) wendet Signal-Decay nur an, wenn `config.signalDecay` gesetzt ist. Default-Läufe bekommen das Feld nicht. `event_replay` und `src/backtest/simulator.ts` bleiben unangetastet. `TradeExitReason` enthält additiv `SIGNAL_DECAY`.
+
+### Abweichung von der Audit-Basis
+
+Befundbasis war `df3163e` / v1.51.1. Umgesetzt auf v1.68.0: der Exit hängt an der bestehenden `decideExit`-Kette, nicht an einem parallelen Schließer.
+
+### Sicherheit
+
+- Kein Exit aus fehlenden Daten. Kill-Switch und Preis-/Zeit-Exits bleiben vorrangig.
+- Rollback: `SIGNAL_DECAY_MODE=off` oder Klassenflags auf 0. Details in `docs/SIGNAL_DECAY.md`.
 
 ## [1.68.0] — 2026-09-22 · Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04)
 

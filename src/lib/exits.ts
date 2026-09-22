@@ -20,12 +20,22 @@
  * Verhalten, wenn alle Flags „aus“).
  */
 
-/** Maschinenlesbare Exit-Gründe (Taxonomie, ergänzt in `src/db/schema.ts`). */
+import { evaluateSignalDecay, type SignalDecayEvaluation, type SignalDecayInput } from "./signalDecay";
+
+/**
+ * Maschinenlesbare Exit-Gründe (Taxonomie, ergänzt in `src/db/schema.ts`).
+ *
+ * `SIGNAL_DECAY` (RMA-P5-05) ist von `TIME_STOP` und von Freitext-Gründen
+ * wie `MANUAL_FLATTEN` getrennt. Priorität, Safety zuerst:
+ * Kill-Switch (außerhalb dieser Funktion, unterdrückt SIGNAL_DECAY) →
+ * STOP_LOSS → TAKE_PROFIT → TRAILING_STOP → TIME_STOP → SIGNAL_DECAY.
+ */
 export type ExitReason =
   | "STOP_LOSS"
   | "TAKE_PROFIT"
   | "TRAILING_STOP"
-  | "TIME_STOP";
+  | "TIME_STOP"
+  | "SIGNAL_DECAY";
 
 /** Exit-Konfiguration — alle Schwellen mit sicherem Default. */
 export type ExitConfig = {
@@ -144,6 +154,11 @@ export type ExitDecisionInput = {
   createdAtMs: number;
   /** Aktueller Zeitstempel in ms (für die Haltedauer-Prüfung). */
   nowMs: number;
+  /**
+   * Optionale Signal-Decay-Eingabe (RMA-P5-05). Fehlt sie, bleibt die
+   * Entscheidung byte-identisch zum Preis-/Zeit-Pfad (SL/TP/Trailing/Time).
+   */
+  signal?: SignalDecayInput | null;
 };
 
 /** Ergebnis der Exit-Entscheidung — inkl. zu persistierendem Trailing-Zustand. */
@@ -158,6 +173,12 @@ export type ExitDecision = {
   trailingChanged: boolean;
   /** SL und TP wurden im selben Tick gleichzeitig berührt (SL hat Vorrang). */
   bothHit: boolean;
+  /**
+   * Signal-Decay-Bewertung dieses Ticks, oder `null` wenn kein Signal-Kontext
+   * übergeben wurde. `shouldExit` ist bereits in `reason` berücksichtigt und
+   * verliert gegen jeden Safety-/Preis-/Zeit-Exit.
+   */
+  signalDecay: SignalDecayEvaluation | null;
 };
 
 /**
@@ -172,10 +193,16 @@ export type ExitDecision = {
  *       * Kurs ≤ Stop (LONG) bzw. ≥ Stop (SHORT) → Auslösung (TRAILING_STOP).
  *   - Time-Stop (nur wenn `config.timeStopHours > 0`): Haltedauer ≥ Limit → TIME_STOP.
  *
- * Priorität der Auslöser: SL → TP → Trailing → Time-Stop (preisbasiert vor
- * Zeit). Es wird **höchstens ein** Grund geliefert — das ist die OCO-
- * Semantik auf Entscheidungsebene; die echte Atomarität (zwei parallele Ticks)
- * liegt im Conditional-UPDATE des Monitors.
+ * Priorität der Auslöser: SL → TP → Trailing → Time-Stop → SIGNAL_DECAY.
+ * Preis- und Zeit-Exits bleiben vorrangig; ein bewaffneter Kill-Switch
+ * unterdrückt SIGNAL_DECAY bereits in `evaluateSignalDecay` (der Flatten
+ * besitzt den Close). Es wird **höchstens ein** Grund geliefert — das ist die
+ * OCO-Semantik auf Entscheidungsebene; die echte Atomarität (zwei parallele
+ * Ticks) liegt im Conditional-UPDATE des Monitors.
+ *
+ * Ohne `input.signal` (oder bei Modus `off` / deaktivierter Klasse, die der
+ * Aufrufer dann gar nicht übergibt) ist das Ergebnis bis auf das additive
+ * Feld `signalDecay: null` identisch zum bisherigen SL/TP/Trailing/Time-Pfad.
  */
 export function decideExit(input: ExitDecisionInput, config: ExitConfig): ExitDecision {
   const {
@@ -225,11 +252,15 @@ export function decideExit(input: ExitDecisionInput, config: ExitConfig): ExitDe
   const ageHours = (nowMs - createdAtMs) / HOUR_MS;
   const timeStopHit = config.timeStopHours > 0 && ageHours >= config.timeStopHours;
 
+  const signalDecay = input.signal ? evaluateSignalDecay(input.signal) : null;
+  const signalExit = signalDecay?.shouldExit === true;
+
   let reason: ExitReason | null = null;
   if (slHit) reason = "STOP_LOSS";
   else if (tpHit) reason = "TAKE_PROFIT";
   else if (trailingHit) reason = "TRAILING_STOP";
   else if (timeStopHit) reason = "TIME_STOP";
+  else if (signalExit) reason = "SIGNAL_DECAY";
 
   const trailingChanged =
     armed !== trailingArmed || (stop ?? null) !== (trailingStop ?? null);
@@ -240,5 +271,6 @@ export function decideExit(input: ExitDecisionInput, config: ExitConfig): ExitDe
     trailingStop: stop ?? null,
     trailingChanged,
     bothHit: slHit && tpHit,
+    signalDecay,
   };
 }

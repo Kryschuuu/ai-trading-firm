@@ -21,6 +21,14 @@ import { and, eq } from "drizzle-orm";
 import { getBroker, logAudit } from "./engine";
 import type { PaperBroker, Fill } from "./broker";
 import { decideExit, loadExitConfig, type ExitReason } from "./exits";
+import { buildMarketSignal, classKey, type SignalDecayAudit, type SignalSnapshot } from "./signalDecay";
+import {
+  commitSignalDecay,
+  LIVE_SIGNAL_BAR_MS,
+  LIVE_SIGNAL_INTERVAL,
+  loadRuntimeSignalDecayConfig,
+  signalInputForPosition,
+} from "./signalDecayRuntime";
 import { getLimits, killSwitch } from "./riskGuard";
 import { checkCircuitBreaker, type CircuitBreakerOutcome } from "./circuitBreaker";
 import { state } from "./stateRegistry";
@@ -124,6 +132,17 @@ export type TickResult = {
    * (best-effort; leer bei injizierten Test-Kursen oder ohne Positionen).
    */
   marketRegimes: { symbol: string; regime: string }[];
+  /**
+   * RMA-P5-05 (v1.69.0): Signal-Decay dieses Ticks. null = Modus aus oder
+   * keine Klasse aktiv (Preis-Exits unverändert). `exits` zählt nur echte
+   * SIGNAL_DECAY-Closes; `wouldExit` zählt bestätigte Counterfactuals.
+   */
+  signalDecay: {
+    mode: string;
+    evaluated: number;
+    wouldExit: number;
+    exits: number;
+  } | null;
 };
 
 /**
@@ -138,6 +157,12 @@ export type TickOptions = {
   quotes?: Record<string, number>;
   /** Marktscan unterdrücken (Tests, um Netzwerk-Zugriff zu vermeiden). */
   skipScan?: boolean;
+  /**
+   * RMA-P5-05: vorab bekannte Current-Signale (Symbol → Snapshot oder null).
+   * Ohne dieses Feld und mit `quotes` wird kein Kerzenabruf versucht — der
+   * Preis-Exit-Pfad bleibt der Test-Default.
+   */
+  currentSignals?: Record<string, SignalSnapshot | null>;
 };
 
 /**
@@ -269,6 +294,13 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
 
   const closedThisTick = new Set<string>();
   const exitConfig = loadExitConfig();
+  const signalConfig = await loadRuntimeSignalDecayConfig().catch(() => null);
+  const signalActive = signalConfig != null && signalConfig.mode !== "off" && Object.values(signalConfig.classes).some((c) => c.enabled);
+  const skipSignalFetch = opts.quotes != null && opts.currentSignals == null;
+  const signalDecay: TickResult["signalDecay"] = signalActive
+    ? { mode: signalConfig.mode, evaluated: 0, wouldExit: 0, exits: 0 }
+    : null;
+  const currentSignalCache = new Map<string, SignalSnapshot | null>();
   for (const row of openRows) {
     const price = priceOf.get(row.symbol.toUpperCase()) ?? Number(row.currentPrice ?? row.entryPrice);
     if (!Number.isFinite(price)) continue;
@@ -284,7 +316,55 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
       .set({ currentPrice: String(price), updatedAt: now })
       .where(eq(positions.id, row.id));
 
-    // Reine, deterministische Exit-Entscheidung (SL/TP/Trailing/Time-Stop).
+    // Reine, deterministische Exit-Entscheidung (SL/TP/Trailing/Time-Stop,
+    // danach SIGNAL_DECAY). Ohne Signal-Kontext bleibt der Preis-Pfad
+    // unverändert. Fehlende/stale/inkompatible Signale erzwingen keinen Exit.
+    let signalInput = null;
+    if (signalActive && signalConfig && !skipSignalFetch) {
+      try {
+        const strategyClass = classKey(row.strategyClass);
+        const cacheKey = row.symbol.toUpperCase();
+        let current = currentSignalCache.get(cacheKey) ?? null;
+        if (!currentSignalCache.has(cacheKey)) {
+          const injected = opts.currentSignals?.[cacheKey] ?? opts.currentSignals?.[row.symbol];
+          if (opts.currentSignals && (cacheKey in opts.currentSignals || row.symbol in opts.currentSignals)) {
+            current = injected ?? null;
+          } else {
+            const candles = await getCandles(row.symbol, LIVE_SIGNAL_INTERVAL, 120);
+            current = buildMarketSignal({
+              candles,
+              asOfMs: now.getTime(),
+              barDurationMs: LIVE_SIGNAL_BAR_MS,
+              timeBasis: "open",
+              strategyClass,
+              computedAtMs: now.getTime(),
+            });
+          }
+          currentSignalCache.set(cacheKey, current);
+        } else {
+          current = currentSignalCache.get(cacheKey) ?? null;
+        }
+        signalInput = signalInputForPosition({
+          entry: row.entrySignal,
+          current,
+          openedAtMs: new Date(row.createdAt).getTime(),
+          asOfMs: now.getTime(),
+          side,
+          qty: Number(row.qty),
+          entryPrice: entry,
+          markPrice: price,
+          strategyClass: row.strategyClass,
+          streak: row.signalDecayStreak ?? 0,
+          lastKey: row.signalDecayLastKey ?? null,
+          policyVersion: row.signalDecayPolicyVersion ?? null,
+          config: signalConfig,
+          killSwitchArmed: killSwitch.isArmed(),
+        });
+      } catch (e) {
+        errors.push(`Signal-Decay ${row.symbol}: ${e instanceof Error ? e.message : e}`);
+        signalInput = null;
+      }
+    }
     const decision = decideExit(
       {
         side,
@@ -296,9 +376,45 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
         trailingArmed: row.trailingArmed === true,
         createdAtMs: new Date(row.createdAt).getTime(),
         nowMs: now.getTime(),
+        signal: signalInput,
       },
       exitConfig,
     );
+    if (decision.signalDecay && signalInput && signalDecay) {
+      signalDecay.evaluated += 1;
+      if (decision.signalDecay.wouldExit || decision.signalDecay.reasonCode === "SUPPRESSED_KILL_SWITCH") {
+        signalDecay.wouldExit += 1;
+      }
+      try {
+        await commitSignalDecay({
+          positionId: row.id,
+          evaluation: decision.signalDecay,
+          audit: decision.signalDecay.audit,
+          expected: {
+            lastKey: row.signalDecayLastKey ?? null,
+            policyVersion: row.signalDecayPolicyVersion ?? null,
+          },
+          asOfMs: now.getTime(),
+          entrySignalHash: row.entrySignalHash ?? null,
+          confirmationRequired: signalConfig?.classes[classKey(row.strategyClass)].confirmationCount ?? 1,
+        });
+      } catch (e) {
+        errors.push(`Signal-Decay-Zustand ${row.symbol}: ${e instanceof Error ? e.message : e}`);
+      }
+      if (
+        decision.reason !== "SIGNAL_DECAY" &&
+        decision.signalDecay.newlyConfirmed &&
+        (decision.signalDecay.wouldExit || decision.signalDecay.reasonCode === "SUPPRESSED_KILL_SWITCH")
+      ) {
+        await logAudit("SIGNAL_DECAY_COUNTERFACTUAL", "INFO", {
+          symbol: row.symbol,
+          side,
+          markPrice: price,
+          signal: decision.signalDecay.audit,
+          code: `signal-decay:${row.symbol}:${decision.signalDecay.reasonCode}`,
+        }, row.missionId ?? undefined);
+      }
+    }
 
     // Trailing-Zustand persistieren, wenn er sich geändert hat (Ratchet → nur
     // erweitern, nie verengen — konservativ, siehe src/lib/exits.ts).
@@ -351,8 +467,10 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
       createdAt: row.createdAt,
       now,
       triggerPrice: price,
+      signalAudit: decision.reason === "SIGNAL_DECAY" ? decision.signalDecay?.audit ?? null : null,
       onError: (m) => errors.push(m),
     });
+    if (res.closed && decision.reason === "SIGNAL_DECAY" && signalDecay) signalDecay.exits += 1;
     if (res.closed) {
       closedThisTick.add(row.id);
       stopsTriggered.push({
@@ -503,6 +621,7 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     volatilityTargeting,
     drawdownScaling,
     marketRegimes,
+    signalDecay,
   };
 }
 
@@ -535,6 +654,8 @@ export async function applyExit(params: {
   createdAt: Date;
   now: Date;
   triggerPrice?: number;
+  /** RMA-P5-05: Scores/Version/Coverage nur für SIGNAL_DECAY. */
+  signalAudit?: SignalDecayAudit | null;
   /** Fehler-Sammler (z. B. Monitor-`errors`) — bei direktem Testaufruf weglassbar. */
   onError?: (msg: string) => void;
 }): Promise<{ closed: boolean; fill?: Fill & { realizedPnl: number } }> {
@@ -565,27 +686,32 @@ export async function applyExit(params: {
   // 4) Revisionssicheres Audit — maschinenlesbarer Grund für JEDEN Exit.
   //    Die Anordnung der Zweige ist kein Stilfehler: Der Katalog-Wächter
   //    (tests/auditView.test.ts) erwartet das Literal-Paar TAKE_PROFIT_HIT/
-  //    STOP_LOSS_HIT direkt am Aufruf — die Legacy-Events stehen deshalb
-  //    zuletzt als benachbarte Zweige, die neuen (GAP-05) vorne.
-  await logAudit(
-    params.reason === "TRAILING_STOP" ? "TRAILING_STOP_HIT"
-    : params.reason === "TIME_STOP" ? "TIME_STOP_HIT"
-    : params.reason === "TAKE_PROFIT" ? "TAKE_PROFIT_HIT"
-    : "STOP_LOSS_HIT",
-    "INFO",
-    {
-      symbol: params.symbol,
-      entry: params.entryPrice,
-      exit: exitPrice,
-      qty: params.qty,
-      side: params.side,
-      realizedPnl,
-      triggerPrice: params.triggerPrice ?? exitPrice,
-      // Maschinenlesbarer Grund (OCO-Audit): "exit:SYMBOL:grund".
-      code: `exit:${params.symbol}:${params.reason}`,
-    },
-    params.missionId ?? undefined,
-  );
+  //    STOP_LOSS_HIT innerhalb von 200 Zeichen am Aufruf. SIGNAL_DECAY steht
+  //    deshalb in einem eigenen Literal-Aufruf und nicht in dieser Ternary.
+  const exitDetail = {
+    symbol: params.symbol,
+    entry: params.entryPrice,
+    exit: exitPrice,
+    qty: params.qty,
+    side: params.side,
+    realizedPnl,
+    triggerPrice: params.triggerPrice ?? exitPrice,
+    code: `exit:${params.symbol}:${params.reason}`,
+    ...(params.reason === "SIGNAL_DECAY" && params.signalAudit ? { signal: params.signalAudit } : {}),
+  };
+  if (params.reason === "SIGNAL_DECAY") {
+    await logAudit("SIGNAL_DECAY_EXIT", "INFO", exitDetail, params.missionId ?? undefined);
+  } else {
+    await logAudit(
+      params.reason === "TRAILING_STOP" ? "TRAILING_STOP_HIT"
+      : params.reason === "TIME_STOP" ? "TIME_STOP_HIT"
+      : params.reason === "TAKE_PROFIT" ? "TAKE_PROFIT_HIT"
+      : "STOP_LOSS_HIT",
+      "INFO",
+      exitDetail,
+      params.missionId ?? undefined,
+    );
+  }
 
   // 5) Trade-Journal + Equity-Snapshot (fehlertolerant, wie der bisherige Pfad).
   try {

@@ -58,6 +58,7 @@ export const TRADE_EXIT_REASONS: readonly TradeExitReason[] = [
   "MAX_HOLDING",
   "RISK_STOP",
   "END_OF_DATA",
+  "SIGNAL_DECAY",
 ] as const;
 
 export const WALK_FORWARD_SEGMENTS: readonly WalkForwardSegment[] = ["IS", "OOS"] as const;

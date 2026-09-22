@@ -330,7 +330,7 @@ export const backtestTrades = pgTable("backtest_trades", {
   check("backtest_trades_duration_check", sql`${t.durationBars} >= 1`),
   check(
     "backtest_trades_exit_reason_check",
-    sql`${t.exitReason} IN ('STOP_LOSS', 'TAKE_PROFIT', 'SIGNAL_EXIT', 'MAX_HOLDING', 'RISK_STOP', 'END_OF_DATA')`
+    sql`${t.exitReason} IN ('STOP_LOSS', 'TAKE_PROFIT', 'SIGNAL_EXIT', 'MAX_HOLDING', 'RISK_STOP', 'END_OF_DATA', 'SIGNAL_DECAY')`
   ),
 ]);
 
@@ -378,10 +378,11 @@ export const positions = pgTable("positions", {
    */
   fundingPaid: numeric("funding_paid").notNull().default("0"),
   /**
-   * Exit-Grund (Taxonomie, GAP-05 / v1.44.0 erweitert):
-   *   STOP_LOSS | TAKE_PROFIT | TRAILING_STOP | TIME_STOP |
+   * Exit-Grund (Taxonomie, GAP-05 / v1.44.0, RMA-P5-05 / v1.69.0):
+   *   STOP_LOSS | TAKE_PROFIT | TRAILING_STOP | TIME_STOP | SIGNAL_DECAY |
    *   MANUAL_FLATTEN | AGENT_CLOSE | RULE_EXECUTION | null bei offen.
-   * TRAILING_STOP / TIME_STOP sind neu (server-seitiges Exit-Management).
+   * SIGNAL_DECAY ist von TIME_STOP und von manuellen Freitext-Gründen
+   * getrennt. Safety-Exits bleiben vorrangig.
    */
   exitReason: text("exit_reason"),
   /**
@@ -401,6 +402,31 @@ export const positions = pgTable("positions", {
    * `trailing_stop` crash-safe persistiert.
    */
   trailingArmed: boolean("trailing_armed").notNull().default(false),
+  /**
+   * RMA-P5-05 (v1.69.0): unveränderlicher Entry-Signal-Snapshot (`sig1`).
+   * Einmal gesetzt, darf die Spalte nicht mehr geändert werden (Trigger
+   * `positions_entry_signal_immutable`). NULL = Altbestand / nicht erfasst
+   * — das ist MISSING, nie eine Stärke 0. Migration:
+   * `drizzle/2026-09-22_signal_decay.sql`.
+   */
+  entrySignal: jsonb("entry_signal"),
+  /** `sig1:<sha256>` des Entry-Snapshots. NULL solange kein Snapshot steht. */
+  entrySignalHash: text("entry_signal_hash"),
+  /**
+   * Bestätigungszähler der Signal-Decay-Hysterese. Überlebt Neustarts.
+   * Default 0 = keine laufende Bestätigung (verhaltensneutral).
+   */
+  signalDecayStreak: integer("signal_decay_streak").notNull().default(0),
+  /** Observation-Key der letzten gezählten Beobachtung (`sdo1:<sha256>`). */
+  signalDecayLastKey: text("signal_decay_last_key"),
+  /** Policyversion, unter der die Zählung entstanden ist (`sdp1:<sha256>`). */
+  signalDecayPolicyVersion: text("signal_decay_policy_version"),
+  /**
+   * Strategieklasse zum Entry (`mean-reversion` | `trend` | `breakout` |
+   * `unclassified`). NULL = nicht ableitbar → Klasse `unclassified`
+   * (Policy default-off).
+   */
+  strategyClass: text("strategy_class"),
   broker: text("broker").notNull(),
   status: text("status").notNull().default("OPEN"), // OPEN | CLOSED
   missionId: uuid("mission_id").references(() => missions.id),
@@ -2544,4 +2570,89 @@ export const drawdownScalingSnapshots = pgTable(
     ),
     check("drawdown_scaling_snapshots_data_hash_check", sql`${t.dataHash} ~ '^dd1:[0-9a-f]{64}$'`),
   ]
+);
+
+/**
+ * Signal-Decay-Ereignisse (RMA-P5-05, v1.69.0).
+ *
+ * Append-only Nachweis jeder gezählten Beobachtung (Idempotenz über
+ * `event_id` = `sde1:<sha256>` aus Position, Observation-Key und
+ * Policyversion). Monitor-only-Counterfactuals und echte Exits teilen die
+ * Tabelle. Keine Instrument-IDs als Metrik-Label — die Tabelle ist die
+ * Audit-Quelle, Metriken bleiben auf geschlossene Reason-Codes beschränkt.
+ *
+ * Zeitsemantik: `as_of` = Entscheidungszeit, `available_at` /
+ * `calculated_as_of` = Signalzeiten (nie nach `as_of`), `computed_at` =
+ * Schreibzeit ≥ `as_of`. Migration: `drizzle/2026-09-22_signal_decay.sql`.
+ */
+export const signalDecayEvents = pgTable(
+  "signal_decay_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: text("event_id").notNull(),
+    positionId: uuid("position_id")
+      .notNull()
+      .references(() => positions.id),
+    strategyClass: text("strategy_class").notNull(),
+    mode: text("mode").notNull(),
+    outcome: text("outcome").notNull(),
+    policyVersion: text("policy_version").notNull(),
+    policyReason: text("policy_reason").notNull(),
+    entryStrength: numeric("entry_strength"),
+    currentStrength: numeric("current_strength"),
+    entryConfidence: numeric("entry_confidence"),
+    currentConfidence: numeric("current_confidence"),
+    entryDirection: text("entry_direction"),
+    currentDirection: text("current_direction"),
+    coverage: numeric("coverage"),
+    semanticsVersion: text("semantics_version"),
+    featureVersion: text("feature_version"),
+    modelVersion: text("model_version"),
+    configVersion: text("config_version"),
+    migrationId: text("migration_id"),
+    confirmStreak: integer("confirm_streak").notNull(),
+    confirmationRequired: integer("confirmation_required").notNull(),
+    counterfactualPnl: numeric("counterfactual_pnl"),
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }),
+    calculatedAsOf: timestamp("calculated_as_of", { withTimezone: true }),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    entrySignalHash: text("entry_signal_hash"),
+    observationKey: text("observation_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("signal_decay_events_event_id_unique").on(t.eventId),
+    index("signal_decay_events_position_asof_idx").on(t.positionId, t.asOf),
+    index("signal_decay_events_outcome_asof_idx").on(t.outcome, t.asOf),
+    check("signal_decay_events_mode_check", sql`${t.mode} IN ('monitor', 'active')`),
+    check(
+      "signal_decay_events_outcome_check",
+      sql`${t.outcome} IN ('MISSING_ENTRY', 'MISSING_CURRENT', 'STALE', 'INCOMPATIBLE', 'INVALID', 'FUTURE', 'LOW_COVERAGE', 'MIN_HOLD', 'HOLD', 'CONFIRMING', 'WOULD_EXIT', 'EXIT', 'SUPPRESSED_KILL_SWITCH')`,
+    ),
+    check(
+      "signal_decay_events_class_check",
+      sql`${t.strategyClass} IN ('mean-reversion', 'trend', 'breakout', 'unclassified')`,
+    ),
+    check("signal_decay_events_streak_check", sql`${t.confirmStreak} >= 0 AND ${t.confirmationRequired} >= 1`),
+    check(
+      "signal_decay_events_coverage_check",
+      sql`${t.coverage} IS NULL OR (${t.coverage} >= 0 AND ${t.coverage} <= 1)`,
+    ),
+    check(
+      "signal_decay_events_strength_check",
+      sql`(${t.entryStrength} IS NULL OR (${t.entryStrength} >= 0 AND ${t.entryStrength} <= 1)) AND (${t.currentStrength} IS NULL OR (${t.currentStrength} >= 0 AND ${t.currentStrength} <= 1)) AND (${t.entryConfidence} IS NULL OR (${t.entryConfidence} >= 0 AND ${t.entryConfidence} <= 1)) AND (${t.currentConfidence} IS NULL OR (${t.currentConfidence} >= 0 AND ${t.currentConfidence} <= 1))`,
+    ),
+    check("signal_decay_events_time_check", sql`${t.computedAt} >= ${t.asOf}`),
+    check(
+      "signal_decay_events_available_check",
+      sql`${t.availableAt} IS NULL OR ${t.availableAt} <= ${t.asOf}`,
+    ),
+    check(
+      "signal_decay_events_calculated_check",
+      sql`${t.calculatedAsOf} IS NULL OR ${t.availableAt} IS NULL OR ${t.calculatedAsOf} <= ${t.availableAt}`,
+    ),
+    check("signal_decay_events_event_id_check", sql`${t.eventId} ~ '^sde1:[0-9a-f]{64}$'`),
+    check("signal_decay_events_policy_check", sql`${t.policyVersion} ~ '^sdp1:[0-9a-f]{64}$'`),
+  ],
 );

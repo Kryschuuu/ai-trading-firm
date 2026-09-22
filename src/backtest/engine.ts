@@ -22,7 +22,7 @@ import type {
   MultiAssetCandleMap,
 } from "./types";
 import { BacktestPortfolio } from "./portfolio";
-import { evaluateExit, simulateEntry } from "./simulator";
+import { calculateSlippageBps, evaluateExit, simulateEntry } from "./simulator";
 import {
   createPaperExecutionRuntime,
   detectExitTrigger,
@@ -61,6 +61,14 @@ import type {
 } from "./types";
 import { metricLabel, telemetry } from "../lib/telemetry";
 import type { TradeSetupProposal } from "../cycle/schemas";
+import {
+  createBacktestSignalDecayRuntime,
+  signalAtBar,
+  stepBacktestSignalDecay,
+  type BacktestSignalDecayRuntime,
+} from "./signalDecay";
+import { policyVersionOf, type SignalSnapshot } from "../lib/signalDecay";
+import { DEFAULT_EXIT_CONFIG, type ExitConfig } from "../lib/exits";
 
 /** Standard-Konfiguration der Engine. */
 export const DEFAULT_BACKTEST_CONFIG: BacktestEngineConfig = {
@@ -227,6 +235,42 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
   const vtRiskBudget = (budget: number | undefined): number | undefined =>
     vtRuntime ? (budget ?? config.maxRiskPerTrade) * vtRuntime.currentFactor : budget;
 
+  // RMA-P5-05 (v1.69.0): Signal-Decay nur wenn explizit konfiguriert.
+  const sdRuntime = createBacktestSignalDecayRuntime(
+    config.signalDecay,
+    SUPPORTED_TIMEFRAME_MS[config.timeframe] ?? 3_600_000,
+  );
+  const signalExitConfig: ExitConfig = {
+    ...DEFAULT_EXIT_CONFIG,
+    trailingEnabled: false,
+    timeStopHours: 0,
+  };
+  const stampEntrySignal = (
+    position: {
+      symbol: string;
+      side: "LONG" | "SHORT";
+      entrySignal?: SignalSnapshot | null;
+      signalDecayStreak?: number;
+      signalDecayLastKey?: string | null;
+      signalDecayPolicyVersion?: string | null;
+      strategyClass?: BacktestSignalDecayRuntime["strategyClass"];
+    },
+    asOfMs: number,
+    series: readonly CandleLike[],
+  ): void => {
+    if (!sdRuntime) return;
+    position.entrySignal = signalAtBar(sdRuntime, {
+      symbol: position.symbol,
+      side: position.side,
+      asOfMs,
+      candles: series,
+    });
+    position.signalDecayStreak = 0;
+    position.signalDecayLastKey = null;
+    position.signalDecayPolicyVersion = null;
+    position.strategyClass = sdRuntime.strategyClass;
+  };
+
   // GAP-01: Paper-Einstieg (Regel- und Setup-Pfad teilen sich diese Abwicklung).
   const openPaperEntry = (
     strategyId: string,
@@ -243,7 +287,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     const fill = paper.fillEntry(symbol, side, notional, candle.close, atTime, strategyId);
     // Fail-closed: Simulator-Reject ⇒ kein Einstieg (kein erfundener Fill).
     if (!fill) return;
-    portfolio.openPosition(
+    const opened = portfolio.openPosition(
       strategyId,
       symbol,
       side,
@@ -258,6 +302,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       stopLoss,
       takeProfit
     );
+    stampEntrySignal(opened, atTime, (candlesIndexed.get(symbol) ?? []).slice(0, atBar + 1));
   };
 
   // 4. Haupt-Event-Schleife: Schrittweise entlang der synchronisierten Zeitachse
@@ -290,7 +335,9 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       replay.beginBar(currentTime, barStep, bars, currentPrices, portfolio);
     }
 
-    // b) Exits für alle offenen Positionen prüfen (Stop Loss / Take Profit)
+    // b) Exits für alle offenen Positionen prüfen (Stop Loss / Take Profit,
+    //    danach — nur wenn konfiguriert — SIGNAL_DECAY). Safety-Exits zuerst.
+    //    event_replay bleibt in dieser Version ohne Signal-Decay.
     for (const pos of replay ? [] : portfolio.openPositionsList) {
       const candleInfo = currentCandleBySymbol.get(pos.symbol);
       if (!candleInfo) continue;
@@ -298,31 +345,111 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       if (paper) {
         // Paper-Pfad: Trigger = Marktstruktur (Stop-Vorrang), Fill = Simulator.
         const trigger = detectExitTrigger(pos, candleInfo.candle);
-        if (!trigger) continue;
+        if (trigger) {
+          const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
+          const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, trigger.price, currentTime, pos.strategyId);
+          // Fail-closed: Simulator-Reject ⇒ Position bleibt offen (kein
+          // erfundener Ausstiegspreis; mit Default-Konfig unerreichbar).
+          if (!fill) continue;
+          portfolio.closePosition(
+            pos.symbol,
+            {
+              triggered: true,
+              exitPrice: fill.fillPrice,
+              reason: trigger.reason,
+              fees: fill.fees,
+              slippage: fill.slippageCost,
+            },
+            currentTime,
+            barStep
+          );
+          continue;
+        }
+      } else {
+        const exitEval = evaluateExit(pos, candleInfo.candle, config);
+        if (exitEval && exitEval.triggered) {
+          portfolio.closePosition(pos.symbol, exitEval, currentTime, barStep);
+          continue;
+        }
+      }
+
+      if (!sdRuntime) continue;
+      const series = candlesIndexed.get(pos.symbol) ?? [];
+      const slice = series.slice(0, candleInfo.index + 1);
+      const currentSignal = signalAtBar(sdRuntime, {
+        symbol: pos.symbol,
+        side: pos.side,
+        asOfMs: currentTime,
+        candles: slice,
+      });
+      const step = stepBacktestSignalDecay({
+        runtime: sdRuntime,
+        position: {
+          side: pos.side,
+          qty: pos.qty,
+          entryPrice: pos.entryPrice,
+          openedAtMs: pos.entryTime,
+          entrySignal: pos.entrySignal ?? null,
+          streak: pos.signalDecayStreak ?? 0,
+          lastKey: pos.signalDecayLastKey ?? null,
+          policyVersion: pos.signalDecayPolicyVersion ?? null,
+          strategyClass: pos.strategyClass ?? sdRuntime.strategyClass,
+        },
+        current: currentSignal,
+        asOfMs: currentTime,
+        markPrice: candleInfo.candle.close,
+        exitConfig: signalExitConfig,
+      });
+      pos.signalDecayStreak = step.evaluation.streak;
+      pos.signalDecayLastKey = step.evaluation.observationKey;
+      pos.signalDecayPolicyVersion = step.evaluation.policyVersion;
+      if (!step.close) continue;
+
+      if (paper) {
         const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
-        const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, trigger.price, currentTime, pos.strategyId);
-        // Fail-closed: Simulator-Reject ⇒ Position bleibt offen (kein
-        // erfundener Ausstiegspreis; mit Default-Konfig unerreichbar).
+        const fill = paper.fillExit(
+          pos.symbol,
+          closingSide,
+          pos.qty,
+          candleInfo.candle.close,
+          currentTime,
+          pos.strategyId,
+        );
         if (!fill) continue;
         portfolio.closePosition(
           pos.symbol,
           {
             triggered: true,
             exitPrice: fill.fillPrice,
-            reason: trigger.reason,
+            reason: "SIGNAL_DECAY",
             fees: fill.fees,
             slippage: fill.slippageCost,
           },
           currentTime,
-          barStep
+          barStep,
         );
         continue;
       }
 
-      const exitEval = evaluateExit(pos, candleInfo.candle, config);
-      if (exitEval && exitEval.triggered) {
-        portfolio.closePosition(pos.symbol, exitEval, currentTime, barStep);
-      }
+      const slipBps = calculateSlippageBps(config);
+      const slipRate = slipBps / 10_000;
+      const executionPrice = pos.side === "LONG"
+        ? candleInfo.candle.close * (1 - slipRate)
+        : candleInfo.candle.close * (1 + slipRate);
+      const fees = pos.qty * executionPrice * config.feeModel.takerFee;
+      const slippage = Math.abs(candleInfo.candle.close - executionPrice) * pos.qty;
+      portfolio.closePosition(
+        pos.symbol,
+        {
+          triggered: true,
+          exitPrice: executionPrice,
+          reason: "SIGNAL_DECAY",
+          fees: Number(fees.toFixed(4)),
+          slippage: Number(slippage.toFixed(4)),
+        },
+        currentTime,
+        barStep,
+      );
     }
 
     // c-vt) RMA-P5-01: Volatility-Targeting-Faktor für diesen Bar-Schritt
@@ -415,7 +542,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
             } else if (notional > 0) {
               const fill = simulateEntry(candleInfo.candle, spec.action.side, notional, config);
               if (fill) {
-                portfolio.openPosition(
+                const opened = portfolio.openPosition(
                   strat.id,
                   strat.symbol,
                   spec.action.side,
@@ -425,6 +552,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
                   stopLoss,
                   takeProfit
                 );
+                stampEntrySignal(opened, currentTime, series.slice(0, candleInfo.index + 1));
               }
             }
           }
@@ -473,7 +601,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
             } else if (notional > 0) {
               const fill = simulateEntry(candleInfo.candle, evalItem.side, notional, config);
               if (fill) {
-                portfolio.openPosition(
+                const opened = portfolio.openPosition(
                   strat.id,
                   strat.symbol,
                   evalItem.side,
@@ -483,6 +611,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
                   evalItem.stopLoss,
                   evalItem.takeProfit
                 );
+                stampEntrySignal(opened, currentTime, series.slice(0, candleInfo.index + 1));
               }
             }
           }
@@ -587,6 +716,23 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     executionDurationMs: Number((performance.now() - startTime).toFixed(2)),
     // RMA-P5-01 (v1.67.0): Volatility-Targeting-Evidenz (nur wenn aktiviert).
     ...(vtRuntime ? { volatilityTargeting: buildVtSummary(vtRuntime, factorByBar) } : {}),
+    ...(sdRuntime
+      ? {
+          signalDecay: {
+            mode: sdRuntime.config.mode === "active" ? "active" as const : "monitor" as const,
+            strategyClass: sdRuntime.strategyClass,
+            policyVersion: policyVersionOf(sdRuntime.config),
+            evaluations: sdRuntime.evaluations,
+            compatible: sdRuntime.compatible,
+            triggerCoverage: sdRuntime.evaluations > 0
+              ? sdRuntime.compatible / sdRuntime.evaluations
+              : null,
+            wouldExit: sdRuntime.wouldExit,
+            exits: sdRuntime.exits,
+            counterfactualPnl: sdRuntime.wouldExit > 0 ? sdRuntime.counterfactualPnl : null,
+          },
+        }
+      : {}),
   };
 }
 

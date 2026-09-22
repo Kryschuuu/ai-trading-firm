@@ -14,6 +14,7 @@ import type { CandleLike } from "../lib/ruleEngine";
 import type { PaperBacktestOptions } from "./paperExecution";
 import type { EventReplayOptions, EventReplayRunSummary } from "./replayEvents";
 import type { VolatilityTargetingConfig } from "../portfolio/volatilityTargeting";
+import type { ClassDecayPolicy, SignalSnapshot, StrategyClassKey } from "../lib/signalDecay";
 
 export type SlippageModel = "fixed" | "spread_relative" | "none";
 
@@ -89,6 +90,41 @@ export interface BacktestEngineConfig {
    * 24/7-Krypto: `msPerYear / timeframeMs`).
    */
   volatilityTargeting?: BacktestVolatilityTargetingConfig;
+  /**
+   * RMA-P5-05 (v1.69.0): versionierte Signal-Decay-Exits.
+   *
+   * `undefined` (Default) = deaktiviert — der Lauf ist byte-identisch zu
+   * bisherigen Ausführungen. Ein Objekt aktiviert dieselbe pure Funktion wie
+   * der Monitor (`decideExit` + `evaluateSignalDecay`). `mode: "monitor"`
+   * schließt nicht, zählt aber Counterfactuals. Safety-Exits (SL/TP) bleiben
+   * vorrangig. Der `event_replay`-Pfad wendet Signal-Decay in dieser Version
+   * nicht an (Partial-Fill-Lifecycle bleibt unangetastet).
+   */
+  signalDecay?: BacktestSignalDecayConfig;
+}
+
+/** Opt-in-Konfiguration der Signal-Decay-Exits im Backtest. */
+export interface BacktestSignalDecayConfig {
+  mode: "monitor" | "active";
+  /** Default `unclassified` (Policy nur aktiv, weil dieses Objekt die Klasse einschaltet). */
+  strategyClass?: StrategyClassKey;
+  /** Schwellen-Override der gewählten Klasse (wird auf Bounds geklemmt). */
+  policy?: Partial<ClassDecayPolicy>;
+  /**
+   * `close` (Default): `candle.time` ist der Moment, zu dem der Close der
+   * Engine bekannt ist. `open`: verfügbar erst bei time + Bar-Dauer.
+   */
+  timeBasis?: "open" | "close";
+  /**
+   * Optionaler Point-in-Time-Lieferant. Fehlt er, baut die Engine `mkt-sig-1`
+   * aus Kerzen mit time ≤ asOf. Der Lieferant darf keine Zukunft liefern —
+   * `availableAt > asOf` wird von der pure Funktion verworfen.
+   */
+  signalAt?: (args: {
+    symbol: string;
+    asOfMs: number;
+    side: "LONG" | "SHORT" | null;
+  }) => SignalSnapshot | null;
 }
 
 /** Teilkonfiguration des Backtest-Volatility-Targetings (additiv, Opt-in). */
@@ -147,6 +183,15 @@ export interface BacktestOpenPosition {
   realizedGrossPnl?: number;
   exitFees?: number;
   exitSlippage?: number;
+  /**
+   * RMA-P5-05: Entry-Signal und Hysterese-Zustand. Fehlen bei Läufen ohne
+   * `signalDecay` (Legacy/Paper/Replay unverändert).
+   */
+  entrySignal?: SignalSnapshot | null;
+  signalDecayStreak?: number;
+  signalDecayLastKey?: string | null;
+  signalDecayPolicyVersion?: string | null;
+  strategyClass?: StrategyClassKey;
 }
 
 /** Grund für die Schließung eines Trades. */
@@ -156,7 +201,8 @@ export type TradeExitReason =
   | "SIGNAL_EXIT"
   | "MAX_HOLDING"
   | "RISK_STOP"
-  | "END_OF_DATA";
+  | "END_OF_DATA"
+  | "SIGNAL_DECAY";
 
 /** Vollständig abgeschlossener Trade im Backtest-Log. */
 export interface BacktestTradeLog {
@@ -289,6 +335,26 @@ export interface MultiAssetBacktestResult {
    * Risikobudget angewendete Multiplikator am Bar-Schritt t (1 = neutral).
    */
   volatilityTargeting?: BacktestVolatilityTargetingSummary;
+  /**
+   * RMA-P5-05: Signal-Decay-Evidenz. Fehlt, wenn das Feature nicht gesetzt
+   * war — Default-Läufe bekommen das Feld nicht.
+   */
+  signalDecay?: BacktestSignalDecaySummary;
+}
+
+/** Zusammenfassung eines Signal-Decay-Backtests. */
+export interface BacktestSignalDecaySummary {
+  mode: "monitor" | "active";
+  strategyClass: StrategyClassKey;
+  policyVersion: string;
+  evaluations: number;
+  compatible: number;
+  /** compatible / evaluations; null, wenn nichts bewertet wurde. */
+  triggerCoverage: number | null;
+  wouldExit: number;
+  exits: number;
+  /** Summe der MTM-Counterfactuals an Would-Exit-Schritten. null = keine. */
+  counterfactualPnl: number | null;
 }
 
 /** Zusammenfassung des Volatility-Targetings eines Backtest-Laufs. */

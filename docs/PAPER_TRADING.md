@@ -236,8 +236,8 @@ Determinismus).
 
 Exits dürfen nie von LLM-Latenz oder Provider-Ausfall abhängen. Der
 Monitor-Tick (`src/lib/monitor.ts`, alle 60 s oder manuell via
-`POST /api/firm/tick`) prüft je offener Position **vier komplementäre
-Exit-Bedingungen** und schließt genau einmal:
+`POST /api/firm/tick`) prüft je offener Position **fünf komplementäre
+Exit-Bedingungen** und schließt genau einmal. Safety zuerst:
 
 | Bedingung | Auslösung | `exitReason` | Konfiguration |
 | --- | --- | --- | --- |
@@ -245,6 +245,7 @@ Exit-Bedingungen** und schließt genau einmal:
 | Take-Profit | Kurs ≥ TP (LONG) bzw. ≤ TP (SHORT) | `TAKE_PROFIT` | wie bisher je Order |
 | **Trailing-Stop** | bewaffneter Ratchet-Stop berührt | `TRAILING_STOP` | `RISK_TRAILING_*` (Default aus) |
 | **Time-Stop** | Haltedauer ≥ Limit | `TIME_STOP` | `RISK_TIME_STOP_HOURS` (Default 0 = aus) |
+| **Signal-Decay** | bestätigter, versionierter Signalverfall | `SIGNAL_DECAY` | `SIGNAL_DECAY_MODE` + Klasse (Default aus) |
 
 **Trailing-Stop.** Ab `RISK_TRAILING_ACTIVATION_PCT` Prozent Gewinn (vom
 Einstieg, seitenrichtig für LONG/SHORT) wird die Position *bewaffnet*; der
@@ -262,6 +263,12 @@ nachvollziehbar.
 **Time-Stop.** `RISK_TIME_STOP_HOURS > 0` begrenzt die Haltedauer unabhängig
 vom Kurs (Kapitalbindung, Haltekosten, Signalentropie). Ablauf → Close mit
 `exitReason = TIME_STOP` + Audit. Default `0` = komplett inaktiv.
+
+**Signal-Decay (RMA-P5-05, v1.69.0).** Nur wenn `SIGNAL_DECAY_MODE=active` und
+die Strategieklasse explizit an ist. Der Monitor vergleicht den unveränderlichen
+Entry-Snapshot mit einem Signal aus geschlossenen 15m-Kerzen. Fehlende, stale
+oder fremde Versionen schließen nicht. `monitor` schreibt nur den
+Counterfactual. Details: [`SIGNAL_DECAY.md`](SIGNAL_DECAY.md).
 
 **OCO-Exklusivität (genau ein Exit).** Kritischer Fall: zwei parallele Ticks
 — oder sogar zwei Prozessinstanzen — entscheiden dieselbe Position

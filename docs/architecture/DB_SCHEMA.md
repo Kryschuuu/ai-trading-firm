@@ -184,7 +184,13 @@ Regelwerk des Makro-Zyklus. Jede Zeile ist unveränderlich (Immutable Version).
 | `take_profit` | `numeric` | `string` | Ja | `null` | Take-Profit-Preis |
 | `exit_price` | `numeric` | `string` | Ja | `null` | Ausführungspreis beim Ausstieg |
 | `realized_pnl` | `numeric` | `string` | Ja | `null` | Realisierter Gewinn/Verlust |
-| `exit_reason` | `text` | `string` | Ja | `null` | `STOP_LOSS`, `TAKE_PROFIT`, `MANUAL_FLATTEN`, `AGENT_CLOSE`, `RULE_EXECUTION` |
+| `exit_reason` | `text` | `string` | Ja | `null` | `STOP_LOSS`, `TAKE_PROFIT`, `TRAILING_STOP`, `TIME_STOP`, `SIGNAL_DECAY`, `MANUAL_FLATTEN`, `AGENT_CLOSE`, `RULE_EXECUTION` |
+| `entry_signal` | `jsonb` | `object` | Ja | `null` | Unveränderlicher Entry-Signal-Snapshot `sig1` (RMA-P5-05). NULL = nicht erfasst. |
+| `entry_signal_hash` | `text` | `string` | Ja | `null` | Hash des Entry-Snapshots. |
+| `signal_decay_streak` | `integer` | `number` | Nein | `0` | Bestätigungszähler, überlebt Neustart. |
+| `signal_decay_last_key` | `text` | `string` | Ja | `null` | Letzte gezählte Beobachtung. |
+| `signal_decay_policy_version` | `text` | `string` | Ja | `null` | Policyversion der laufenden Zählung. |
+| `strategy_class` | `text` | `string` | Ja | `null` | `mean-reversion`, `trend`, `breakout`, `unclassified`. |
 | `broker` | `text` | `string` | Nein | — | Venue-ID (`PAPER`, `BITUNIX`, etc.) |
 | `status` | `text` | `string` | Nein | `'OPEN'` | `OPEN` oder `CLOSED` |
 | `mission_id` | `uuid` | `string` | Ja | `null` | FK → `missions.id` |
