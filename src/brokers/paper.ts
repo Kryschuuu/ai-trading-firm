@@ -14,6 +14,7 @@
  * Alle Execution-Modi (backtest/paper) teilen sich diesen EINEN Ledger —
  * es entsteht nie eine zweite, unhydratierte Buchhaltung.
  */
+import { executionCapabilitiesFor } from "../execution/capabilities";
 import { captureOrder } from "../executionQuality/runtime";
 import { PaperBroker, type Fill, type Order } from "../lib/broker";
 import { getCandlesWithFallback, getQuote } from "../lib/marketData";
@@ -30,6 +31,7 @@ import type {
   ExecutionMode,
   MarketCandle,
   MarketTicker,
+  OrderExecutionCapabilities,
 } from "../contracts/broker";
 
 export class PaperBrokerAdapter implements BrokerAdapter {
@@ -43,6 +45,14 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   constructor(paperBroker: PaperBroker, mode: ExecutionMode = "paper") {
     this.paperBroker = paperBroker;
     this.mode = mode;
+  }
+
+  /**
+   * RMA-P4-02: PAPER simuliert Post-Only, Einzel-Cancel und atomares Replace
+   * deterministisch (siehe `PaperVenuePort` in `src/execution/ports.ts`).
+   */
+  getExecutionCapabilities(): OrderExecutionCapabilities {
+    return executionCapabilitiesFor(this.id);
   }
 
   /**

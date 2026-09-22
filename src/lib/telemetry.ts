@@ -536,6 +536,35 @@ export const telemetry = {
       telemetry.signalDecay.events.reset();
     },
   },
+  /**
+   * Execution-Policy-Controller (RMA-P4-02, v1.70.0).
+   *
+   * Labels sind ausschließlich Code-Konstanten:
+   *   * `from`/`to` = Workflow-Zustände (geschlossene Liste)
+   *   * `reason`    = geschlossene Reason-Codes (kein Venue-Freitext)
+   *   * `venue`     = Venue-ID (7 Werte)
+   *   * `code`      = geschlossene Reject-Codes
+   *   * `outcome`   = SUBMITTED | BLOCKED | FILLED | FAILED
+   *
+   * Keine Instrument-, Trade- oder Order-IDs als Label — die stehen im
+   * Audit-Event `EXECUTION_POLICY_TRANSITION` und in den Workflow-Tabellen.
+   */
+  executionPolicy: {
+    /** Zustandswechsel je Kante und Reason. */
+    transitions: new LabelCounter("execution_policy_transitions_total"),
+    /** Venue-Rejects je Venue und geschlossenem Code. */
+    rejects: new LabelCounter("execution_policy_rejects_total"),
+    /** Market-Fallbacks je Venue und Outcome. */
+    fallbacks: new LabelCounter("execution_policy_fallback_total"),
+    /** Überfüllungs-Befunde je Venue (sollte immer 0 bleiben). */
+    overfills: new LabelCounter("execution_policy_overfill_total"),
+    reset(): void {
+      telemetry.executionPolicy.transitions.reset();
+      telemetry.executionPolicy.rejects.reset();
+      telemetry.executionPolicy.fallbacks.reset();
+      telemetry.executionPolicy.overfills.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -807,4 +836,5 @@ export function resetTelemetryForTests(): void {
   telemetry.forecasts.reset();
   telemetry.prompt.reset();
   telemetry.volatilityTargeting.reset();
+  telemetry.executionPolicy.reset();
 }

@@ -2656,3 +2656,218 @@ export const signalDecayEvents = pgTable(
     check("signal_decay_events_policy_check", sql`${t.policyVersion} ~ '^sdp1:[0-9a-f]{64}$'`),
   ],
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-Only-/Timeout-/Market-Fallback-State-Machine (RMA-P4-02, v1.70.0)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Drei Tabellen, ausschließlich additiv (Migration
+// `drizzle/2026-09-22_post_only_fallback.sql`):
+//
+//   execution_workflows        EIN Workflow je Maker-Versuch (Zustand +
+//                              optimistische Version + Policy-Snapshot +
+//                              externe IDs für die Restart-Rekonstruktion).
+//   execution_workflow_events  append-only Schritt-Log (Zustandskanten,
+//                              Fills, Gates, Gründe — mit Policyversion).
+//   execution_workflow_fills   bestätigte Fills (mengen-/fee-genaue Wahrheit;
+//                              `fee_quote` NULL = unbekannt, nie still 0).
+//
+// Idempotenz: `workflow_key` (`eow1:<sha256>`) ist UNIQUE — Retries erzeugen
+// keinen zweiten Workflow und damit keine zweite Order. Fills sind idempotent
+// über `(workflow_id, fill_id)`; die Mengenwahrheit ist `SUM(fills.qty)`.
+// Jede Mutation vergleicht `version` atomar (optimistic locking).
+//
+// Zeitsemantik je Event: `event_time` (Ereignis) ≤ `available_at`
+// (Bekanntheit) ≤ `computed_at` (Persistenz) — CHECK-Constraints.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ein Maker-Versuch des Execution-Policy-Controllers.
+ *
+ * `policy_json` ist der eingefrorene Policy-Snapshot (inkl. `policyVersion`);
+ * ein Retry mit anderer Policy unter demselben Key wird fail-closed
+ * abgewiesen (`POLICY_MISMATCH`), nie „umkonfiguriert“.
+ */
+export const executionWorkflows = pgTable(
+  "execution_workflows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `eow1:<sha256>` — stabiler Idempotency-Key (Retry ⇒ derselbe Workflow). */
+    workflowKey: text("workflow_key").notNull(),
+    venue: text("venue").notNull(),
+    /** backtest | paper | testnet | live */
+    mode: text("mode").notNull(),
+    symbol: text("symbol").notNull(),
+    /** LONG | SHORT */
+    side: text("side").notNull(),
+    /** Zielmenge in Basiseinheiten (> 0). */
+    targetQty: numeric("target_qty").notNull(),
+    /** Bestätigte Füllmenge (`SUM(fills.qty)`, nie über Ziel). */
+    filledQty: numeric("filled_qty").notNull().default("0"),
+    /** Gebühren-Summe in Quote; NULL = unbekannt (nie still 0). */
+    feeQuoteTotal: numeric("fee_quote_total"),
+    /** Workflow-Zustand (State-Machine, siehe src/execution/stateMachine.ts). */
+    state: text("state").notNull().default("NEW"),
+    /** Optimistische Version (steigt bei JEDEM Schritt). */
+    version: integer("version").notNull().default(1),
+    /** Policyversion `eop1:<sha256>`. */
+    policyVersion: text("policy_version").notNull(),
+    /** Eingefrorener Policy-Snapshot (ohne Secrets). */
+    policyJson: jsonb("policy_json").notNull(),
+    /** Laufende Limit-Attempt-Nummer (0 = Erstversuch). */
+    attempt: integer("attempt").notNull().default(0),
+    /** Verbrauchtes Reprice-Budget (≤ policy.maxReprices). */
+    repricesUsed: integer("reprices_used").notNull().default(0),
+    /** Cancel-/Verify-Versuche der laufenden Cancel-Phase. */
+    cancelAttempts: integer("cancel_attempts").notNull().default(0),
+    /** Deterministische Client-Order-Basis (`EOW<hash12>`). */
+    clientOrderBase: text("client_order_base").notNull(),
+    // Stop-Loss-Intent des Signals (unveränderlich; Reprice-/Fallback-Gates).
+    hasStopLoss: boolean("has_stop_loss").notNull().default(false),
+    /** Venue-Order-ID des laufenden Limit-Versuchs (NULL = mehrdeutig). */
+    activeOrderId: text("active_order_id"),
+    /** Client-Key des laufenden Limit-Versuchs (Recovery-Anker). */
+    activeClientOrderId: text("active_client_order_id"),
+    /** Venue-Order-ID des Market-Fallbacks (NULL = keiner/mehrdeutig). */
+    fallbackOrderId: text("fallback_order_id"),
+    /** Client-Key des Market-Fallbacks. */
+    fallbackClientOrderId: text("fallback_client_order_id"),
+    /** Aktuelles Limit (NULL = noch nicht bepreist). */
+    limitPrice: numeric("limit_price"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    ackAt: timestamp("ack_at", { withTimezone: true }),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+    cancelConfirmedAt: timestamp("cancel_confirmed_at", { withTimezone: true }),
+    /** Geschlossener Fehler-/Reason-Code (bounded, metrikfähig). */
+    errorCode: text("error_code"),
+    /** Letzter Workflow-Reason (geschlossenes Vokabular). */
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("execution_workflows_key_unique").on(t.workflowKey),
+    index("execution_workflows_open_idx")
+      .on(t.venue, t.symbol)
+      .where(sql`${t.state} NOT IN ('DONE', 'FAILED')`),
+    index("execution_workflows_updated_idx").on(t.updatedAt),
+    index("execution_workflows_state_idx").on(t.state),
+    check("execution_workflows_mode_check", sql`${t.mode} IN ('backtest', 'paper', 'testnet', 'live')`),
+    check("execution_workflows_side_check", sql`${t.side} IN ('LONG', 'SHORT')`),
+    check(
+      "execution_workflows_state_check",
+      sql`${t.state} IN ('NEW', 'SUBMITTED', 'ACK', 'PARTIAL', 'CANCEL_PENDING', 'CANCELLED', 'FALLBACK_SUBMITTED', 'DONE', 'REJECTED', 'FAILED')`
+    ),
+    check("execution_workflows_target_check", sql`${t.targetQty} > 0`),
+    check("execution_workflows_filled_check", sql`${t.filledQty} >= 0 AND ${t.filledQty} <= ${t.targetQty} + 0.000000001`),
+    check("execution_workflows_fee_check", sql`${t.feeQuoteTotal} IS NULL OR ${t.feeQuoteTotal} >= 0`),
+    check("execution_workflows_version_check", sql`${t.version} >= 1`),
+    check("execution_workflows_attempt_check", sql`${t.attempt} >= 0`),
+    check("execution_workflows_reprices_check", sql`${t.repricesUsed} >= 0`),
+    check("execution_workflows_cancel_attempts_check", sql`${t.cancelAttempts} >= 0`),
+    check("execution_workflows_limit_check", sql`${t.limitPrice} IS NULL OR ${t.limitPrice} > 0`),
+    check("execution_workflows_key_check", sql`${t.workflowKey} ~ '^eow1:[0-9a-f]{64}$'`),
+    check("execution_workflows_policy_check", sql`${t.policyVersion} ~ '^eop1:[0-9a-f]{64}$'`),
+    check(
+      "execution_workflows_venue_check",
+      sql`${t.venue} IN ('PAPER', 'ALPACA', 'IBKR', 'BINANCE', 'KRAKEN', 'DYDX', 'BITUNIX')`
+    ),
+  ]
+);
+
+/**
+ * Append-only Schritt-Log eines Workflows (Zustandskanten, Fill-Ereignisse,
+ * Gate-Entscheidungen). `from_state` NULL = Erstellungs-/Wiederherstellungs-
+ * Ereignis ohne Kante; sonst gilt die Kante der zentralen State-Machine.
+ */
+export const executionWorkflowEvents = pgTable(
+  "execution_workflow_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => executionWorkflows.id),
+    /** 1-basierte Sequenz je Workflow (UNIQUE). */
+    seq: integer("seq").notNull(),
+    /** `eoe1:<sha256>` — Inhaltsfingerprint (Idempotenz-/Revisionskennung). */
+    eventId: text("event_id").notNull(),
+    fromState: text("from_state"),
+    toState: text("to_state").notNull(),
+    /** Geschlossener Reason-Code (bounded). */
+    reason: text("reason").notNull(),
+    /** Policyversion des Workflows zum Ereigniszeitpunkt. */
+    policyVersion: text("policy_version").notNull(),
+    orderId: text("order_id"),
+    clientOrderId: text("client_order_id"),
+    filledQtyDelta: numeric("filled_qty_delta"),
+    filledQtyTotal: numeric("filled_qty_total"),
+    feeDelta: numeric("fee_delta"),
+    quoteMid: numeric("quote_mid"),
+    spreadBps: numeric("spread_bps"),
+    /** Ereigniszeit (Fill-/Entscheidungszeit). */
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    /** Bekanntheitszeit (≥ event_time). */
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    /** Persistenzzeit (≥ available_at). */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    /** Sanitiertes Detail (keine Secrets, keine Venue-Rohtexte als Freitext). */
+    detail: jsonb("detail").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("execution_workflow_events_workflow_seq_unique").on(t.workflowId, t.seq),
+    uniqueIndex("execution_workflow_events_event_id_unique").on(t.eventId),
+    index("execution_workflow_events_workflow_idx").on(t.workflowId, t.seq),
+    index("execution_workflow_events_reason_idx").on(t.reason),
+    check("execution_workflow_events_seq_check", sql`${t.seq} >= 1`),
+    check(
+      "execution_workflow_events_to_state_check",
+      sql`${t.toState} IN ('NEW', 'SUBMITTED', 'ACK', 'PARTIAL', 'CANCEL_PENDING', 'CANCELLED', 'FALLBACK_SUBMITTED', 'DONE', 'REJECTED', 'FAILED')`
+    ),
+    check(
+      "execution_workflow_events_from_state_check",
+      sql`${t.fromState} IS NULL OR ${t.fromState} IN ('NEW', 'SUBMITTED', 'ACK', 'PARTIAL', 'CANCEL_PENDING', 'CANCELLED', 'FALLBACK_SUBMITTED', 'DONE', 'REJECTED', 'FAILED')`
+    ),
+    check("execution_workflow_events_time_check", sql`${t.availableAt} >= ${t.eventTime} AND ${t.computedAt} >= ${t.availableAt}`),
+    check("execution_workflow_events_event_id_check", sql`${t.eventId} ~ '^eoe1:[0-9a-f]{64}$'`),
+    check("execution_workflow_events_policy_check", sql`${t.policyVersion} ~ '^eop1:[0-9a-f]{64}$'`),
+    check("execution_workflow_events_reason_check", sql`length(${t.reason}) > 0 AND length(${t.reason}) <= 64`),
+  ]
+);
+
+/**
+ * Bestätigte Fills eines Workflows — die mengen-/fee-genaue Wahrheit.
+ * Idempotent über `(workflow_id, fill_id)`; die Workflow-Menge ist
+ * `SUM(qty)` über diese Tabelle. `fee_quote` NULL = Gebühr unbekannt.
+ */
+export const executionWorkflowFills = pgTable(
+  "execution_workflow_fills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => executionWorkflows.id),
+    /** Venue-/Sim-Fill-ID (UNIQUE je Workflow). */
+    fillId: text("fill_id").notNull(),
+    orderId: text("order_id").notNull(),
+    qty: numeric("qty").notNull(),
+    price: numeric("price").notNull(),
+    /** Gebühr in Quote; NULL = unbekannt (nie still 0). */
+    feeQuote: numeric("fee_quote"),
+    /** Ausführungszeit (Venue-/Sim-Ereignis). */
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    /** Bekanntheitszeit (≥ event_time). */
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("execution_workflow_fills_workflow_fill_unique").on(t.workflowId, t.fillId),
+    index("execution_workflow_fills_workflow_idx").on(t.workflowId, t.eventTime),
+    index("execution_workflow_fills_order_idx").on(t.orderId),
+    check("execution_workflow_fills_qty_check", sql`${t.qty} > 0`),
+    check("execution_workflow_fills_price_check", sql`${t.price} > 0`),
+    check("execution_workflow_fills_fee_check", sql`${t.feeQuote} IS NULL OR ${t.feeQuote} >= 0`),
+    check("execution_workflow_fills_time_check", sql`${t.availableAt} >= ${t.eventTime}`),
+    check("execution_workflow_fills_fill_id_check", sql`length(${t.fillId}) > 0 AND length(${t.fillId}) <= 128`),
+  ]
+);

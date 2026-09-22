@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.69.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.70.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,32 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.70.0] — 2026-09-22 · Post-Only-Ausführung mit Market-Fallback (RMA-P4-02)
+
+### Hinzugefügt
+
+- **Execution-Policy-Controller (`src/execution/`):** versionierte Maker-Policy (`eop1`-Hash, bounded Felder, fail-closed statt Klemmen), State-Machine NEW → SUBMITTED → ACK/PARTIAL → CANCEL_PENDING → CANCELLED → FALLBACK_SUBMITTED → DONE mit REJECTED/FAILED, Optimistic Locking, bounded Repricing (deterministisch wachsender Offset, Venue-Tick-Rundung), Market-Fallback nur per Opt-in und nur nach bestätigtem Cancel.
+- **Idempotenz:** Workflow-Keys `eow1`, Event-Ids `eoe1`, Client-Order-Basis `eoc1` (Attempt-Suffixe `L0…`/`M0…`); Retries und Restarts lösen per Client-Key auf, statt doppelt zu senden; `POLICY_MISMATCH` bei Policywechsel unter demselben Key.
+- **Venue-Fähigkeiten ohne stilles Dropping:** `OrderExecutionCapabilities` + `BrokerAdapter.getExecutionCapabilities()` (`src/contracts/broker.ts`); PAPER alles-ja, BITUNIX Post-Only ohne atomares Replace, ALPACA explizit kein Post-Only (`POST_ONLY_UNSUPPORTED`, optional explizites Limit via `postOnlyFallback`).
+- **Serializer/Clients:** Bitunix sendet `effect: POST_ONLY` (Post-Only ohne Limit wirft), `cancel_orders`-Pfad + `cancelOrder`-Outcome (angenommen/abgelehnt/unklar); Alpaca wirft `POST_ONLY_UNSUPPORTED`, `cancelOrder` (404 ⇒ nicht gefunden) + `replaceOrder` (PATCH).
+- **Harte Gates:** Kill-Switch, Lifecycle, Risk-Guard (inkl. Stop-Loss-Pflicht), Live-Gate, Quote (vorhanden/frisch/nicht zukünftig), Spread, Konto, Notional (Risk-Guard + Policy-Cap), Minimum/Step — vor Erst-Submit, Reprice und Fallback; Fallback zusätzlich mit Opt-in-, Cancel- und Slippage-Gates.
+- **Fill-Genauigkeit:** Restmenge = Ziel − Σ Fills auf den Step abgerundet; Überfüllung terminal (`OVERFILL_DETECTED`); Gebühren `null` bei unbekanntem Fill; Staub-Rest ⇒ `DONE`/`DUST_REMAINDER` ohne Market-Dust.
+- **Paper-Simulation:** deterministischer `PaperVenuePort` (ehrliche Maker-Rejects, Preis-Zeit-Priorität, idempotente Cancels); Golden-Test sichert byte-identische Event-/Fill-Sequenzen.
+- **Persistenz (`drizzle/2026-09-22_post_only_fallback.sql`):** `execution_workflows`, append-only `execution_workflow_events`/`execution_workflow_fills`, DB-CHECKs (Zustände, Key-Formate, `filled ≤ Ziel`, Zeit-Semantik), Migration idempotent.
+- **API:** `/api/firm/execution/policy` — `GET` Status (`firm.read`), `POST start`/`poll`/`recover` (`firm.write`, Flag-pflichtig, `no-store`, bounded Antworten, klassifizierte Codes).
+- **Dokumentation:** [`docs/POST_ONLY_FALLBACK.md`](docs/POST_ONLY_FALLBACK.md), Flag-Referenz in `CONFIGURATION.md`.
+
+### Geändert
+
+- `src/contracts/broker.ts`: `BrokerOrderRequest.postOnly?` (opt-in, Default `false`-kompatibel); neue Typen `OrderExecutionCapabilities`, Adapter-Methode `getExecutionCapabilities?()`.
+- `src/db/schema.ts`: drei Execution-Tabellen (Drizzle-Spiegel der Migration).
+- Version `1.69.0` → `1.70.0` (minor: neues Modul, keine Breaking Changes).
+
+### Sicherheit
+
+- Fail-closed überall: fehlende Capabilities ⇒ alles-nein, unklarer Cancel-Status blockiert den Market-Fallback, Kill-Switch/Stale-Quote stoppen vor dem Fallback, kein Submit ohne Preis/Instrument/Konto.
+- Rollback: `EXECUTION_POLICY_ENABLED=false` (Default) deaktiviert alle schreibenden Pfade; Lesen bleibt möglich. Details in `docs/POST_ONLY_FALLBACK.md`.
 
 ## [1.69.0] — 2026-09-22 · Versionierte Signal-Decay-Exits (RMA-P5-05)
 

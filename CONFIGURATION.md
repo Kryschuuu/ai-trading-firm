@@ -1001,6 +1001,14 @@ Hinweise:
 | --- | --- | --- |
 | `MICRO_HEALTH_PORT` | — | Health-Port des Micro-Executors |
 
+### Execution-Policy mit Market-Fallback (RMA-P4-02, v1.70.0)
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `EXECUTION_POLICY_ENABLED` | `false` | Gibt `start`/`poll`/`recover` der Execution-Policy frei (`false` = 503, nur Lesen; ungültige Werte werfen) |
+
+Details: [`docs/POST_ONLY_FALLBACK.md`](docs/POST_ONLY_FALLBACK.md).
+
 ## Migration & Deploy
 
 Empfohlene Deploy-Kette: `git pull` → `rm -rf .next node_modules/.cache` →

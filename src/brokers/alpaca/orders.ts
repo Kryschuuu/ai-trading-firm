@@ -42,6 +42,12 @@ export function makeClientOrderId(prefix: string, ts: number = Date.now()): stri
  *     (nur sinnvoll bei Market-Orders auf Alpaca)
  */
 export function serializePlaceOrder(req: BrokerOrderRequest, ts: number = Date.now()): AlpacaOrderRequest {
+  // RMA-P4-02: Alpaca Trade-API v2 kennt kein Post-Only-Flag. Ein verlangtes
+  // Post-Only wird EXPLIZIT abgelehnt — nie still als normales Limit gesendet
+  // (kein Flag-Dropping; der Controller wählt den Fallback explizit).
+  if (req.postOnly === true) {
+    throw new OrderSerializationError("POST_ONLY_UNSUPPORTED: Alpaca meldet postOnly=false (Trade-API v2 ohne Maker-or-Reject).");
+  }
   if (!req.symbol || typeof req.symbol !== "string") {
     throw new OrderSerializationError("Symbol fehlt.");
   }

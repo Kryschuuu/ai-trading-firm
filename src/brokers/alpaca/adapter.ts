@@ -16,6 +16,7 @@
  * weiter `LiveTradingGateError`, bis die State-Machine LIVE_ENABLED + Flags
  * + Suite + Control Plane freigibt (docs/LIVE_TRADING.md).
  */
+import { executionCapabilitiesFor } from "../../execution/capabilities";
 import { captureOrder } from "../../executionQuality/runtime";
 import { VENUE_CAPABILITIES } from "../capabilities";
 import {
@@ -32,6 +33,7 @@ import {
   type ExecutionMode,
   type MarketCandle,
   type MarketTicker,
+  type OrderExecutionCapabilities,
 } from "../../contracts/broker";
 import type { MarketInstrument } from "../../universe/types";
 import { getRegistry, type InstrumentRegistry } from "../../universe";
@@ -135,6 +137,15 @@ export class AlpacaBrokerAdapter implements BrokerAdapter {
    *   - permissions: nur belegte Rechte; ohne verify leer; mit verify mindestens READ
    *   - permissionsVerified: true = geprüft statt angenommen
    */
+  /**
+   * RMA-P4-02: ALPACA meldet KEIN natives Post-Only (Trade-API v2 kennt kein
+   * Post-Only-Flag) — der Controller failt oder nutzt den expliziten
+   * Limit-Fallback. Einzel-Cancel und atomares Replace sind verfügbar.
+   */
+  getExecutionCapabilities(): OrderExecutionCapabilities {
+    return executionCapabilitiesFor(this.id);
+  }
+
   async credentialStatus(opts?: { verify?: boolean }): Promise<import("./types").AlpacaCredentialStatus> {
     const creds = await this.loadCreds();
     const base: import("./types").AlpacaCredentialStatus = {

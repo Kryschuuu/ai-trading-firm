@@ -114,6 +114,12 @@ export function serializePlaceOrder(
     }
   }
 
+  // RMA-P4-02: Post-Only verlangt ein natives Maker-Limit. Ohne Limitpreis
+  // gibt es nichts „Makeriges“ — fail-closed statt stiller Market-Order.
+  if (req.postOnly === true && !finitePositive(req.limitPrice)) {
+    throw new OrderSerializationError("postOnly verlangt einen Limitpreis (Maker-or-Reject ohne Limit ist undefiniert)");
+  }
+
   const body: BitunixPlaceOrderBody = {
     symbol,
     qty: String(req.qty),
@@ -131,7 +137,8 @@ export function serializePlaceOrder(
     (req.orderIntentId ? buildClientOrderId(req.orderIntentId) : clientOrderIdFor(req, opts?.ts, opts?.rand));
   if (finitePositive(req.limitPrice)) {
     body.price = String(req.limitPrice);
-    body.effect = "GTC";
+    // RMA-P4-02: natives Post-Only via Wire-Effect (Maker-or-Reject).
+    body.effect = req.postOnly === true ? "POST_ONLY" : "GTC";
   }
   if (finitePositive(req.takeProfit)) {
     body.tpPrice = String(req.takeProfit);
