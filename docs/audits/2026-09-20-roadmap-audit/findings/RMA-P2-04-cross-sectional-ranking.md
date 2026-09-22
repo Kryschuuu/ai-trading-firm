@@ -82,7 +82,7 @@ Der Scanner kann Instrumente insgesamt sortieren und besitzt Momentum als einen 
   `tests/crossSectional.api.test.ts` (16), `tests/crossSectional.scanner.test.ts`
   (4). Gesamtsuite: `npm test` 3120 Tests: 3084 pass / 0 fail / 36 Skip
   (Umgebungs-DB); typecheck/lint (0 Errors)/docs:validate grün.
-- **Doku:** [`docs/CROSS_SECTIONAL_RANKING.md`](../../CROSS_SECTIONAL_RANKING.md)
+- **Doku:** [`docs/CROSS_SECTIONAL_RANKING.md`](../../../CROSS_SECTIONAL_RANKING.md)
   (Architektur, Zeitsemantik, Eligibility, Formeln, Identität/Persistenz,
   Scanner-Integration, Operations, Monitoring, Testmatrix, Grenzen),
   `docs/DAILY_WEEKLY_RESEARCH.md` (15. Faktor, Gewicht 0),
