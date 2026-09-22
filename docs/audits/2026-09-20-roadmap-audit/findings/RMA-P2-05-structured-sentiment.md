@@ -1,7 +1,7 @@
 # RMA-P2-05: Strukturierte Sentiment-Outputs
 
 - **Antwort:** Ja (v1.64.0)
-- **Tracking-Status:** `FIXED` (v1.64.0, PR #162)
+- **Tracking-Status:** `FIXED` (v1.64.0, Commit `8ca2fab`, PR #162)
 - **Severity:** `MEDIUM`
 - **Quick Estimate Restaufwand:** **2–3 PT**
 - **Umsetzungs-Prompt:** [`PROMPT-P2-05`](../prompts/PROMPT-P2-05-structured-sentiment.md)
