@@ -682,6 +682,27 @@ Migration: `psql \"$DATABASE_URL\" -f drizzle/2026-09-22_cross_sectional_ranking
 (append-only, idempotent; neue Tabellen `cross_sectional_snapshots` +
 `cross_sectional_rankings`, keine Änderungen an bestehenden Tabellen).
 
+### Strukturierte Sentiment-Outputs (RMA-P2-05, v1.64.0)
+
+Kalibrierbare strukturierte Sentiment-Outputs (`sentiment@1`) mit expliziter
+Horizont-, Event-, Quellen- und Unsicherheitssemantik. Strikte Trennung von
+direktionaler Wahrscheinlichkeit (`probability` ∈ [0.01, 0.99]) und
+Quellenabdeckung (`coverage` ∈ [0, 1]). Unterscheidet echtes `NEUTRAL` mit
+Quellennachweis von `ABSTAIN` (Enthaltung bei 0 oder veralteten Quellen).
+Schützt vor künstlicher Konfidenzerhöhung durch syndizierte Presse- und Wire-Meldungen
+über Content-Hashing und Paraphrasen-Erkennung. Persistiert append-only in
+`sentiment_forecasts` mit deterministischer Idempotenz (`sf1:<sha256>`) und
+Outcome-Link zum P3.1-Ledger (ohne Preisspeicherung beim Erzeugen). Details:
+[`docs/SENTIMENT.md`](docs/SENTIMENT.md), API `GET /api/analysis/sentiment`.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `STRUCTURED_SENTIMENT_ENABLED` | `true` | Persistenz strukturierter Sentiment-Outputs an/aus. Bei `false`/`0` wird die Persistenz in `sentiment_forecasts` übersprungen; der Cycle und die bestehenden Berichte laufen unbeeinträchtigt im Speicher weiter (Rollback-Pfad). |
+
+Migration: `psql \"$DATABASE_URL\" -f drizzle/2026-09-22_structured_sentiment.sql`
+(append-only, idempotent; neue Tabelle `sentiment_forecasts`, keine Änderungen an
+bestehenden Tabellen).
+
 ### Perpetual-Daten (RMA-P2-02, v1.54.0)
 
 Historische Funding-Raten, Open Interest und Liquidationen in eigenen

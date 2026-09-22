@@ -2019,3 +2019,118 @@ export const crossSectionalRankings = pgTable(
     check("cross_sectional_rankings_bars_check", sql`${t.barsUsed} >= 0 AND (${t.lastBarTs} IS NULL OR ${t.barsUsed} > 0)`),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RMA-P2-05 (v1.64.0): Kalibrierbare strukturierte Sentiment-Outputs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Persistente Sentiment-Forecast-Historie (append-only).
+ *
+ * Ein unveränderlicher Forecast-Envelope je (Entity, Auswertungszeitpunkt, Horizont)
+ * mit strikter Trennung von direktionaler Wahrscheinlichkeit und Quellenabdeckung.
+ *
+ * Natürlicher Schlüssel: `forecast_id` (`sf1:<sha256>`).
+ * Bei Retries/Restarts identischer Läufe sorgt der Unique-Constraint für Idempotenz.
+ */
+export const sentimentForecasts = pgTable(
+  "sentiment_forecasts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `sf1:<sha256>` — deterministischer, natürlicher Schlüssel (Idempotenz). */
+    forecastId: text("forecast_id").notNull(),
+    /** Kanonische Entity-ID (z. B. `BINANCE:BTCUSDT` oder `PAPER:BTC`). */
+    entityId: text("entity_id").notNull(),
+    /** Symbol (z. B. `BTC` oder `BTCUSDT`). */
+    symbol: text("symbol").notNull(),
+    /** Richtung: `BULLISH` | `BEARISH` | `NEUTRAL` (NULL bei ABSTAIN). */
+    direction: text("direction"),
+    /** Status: `ACTIVE` | `ABSTAIN` (geschlossen). */
+    status: text("status").notNull(),
+    /** Direktionale Wahrscheinlichkeit UP ∈ [0.01, 0.99] (NULL bei ABSTAIN). */
+    probability: numeric("probability"),
+    /** Direktionale Konfidenz ∈ [0, 1] (0 bei ABSTAIN). */
+    confidence: numeric("confidence").notNull(),
+    /** Explizites Enthaltungsflag. */
+    abstain: boolean("abstain").notNull().default(false),
+    /** Geschlossener Grund für ABSTAIN (`NO_SOURCES` | `INSUFFICIENT_SOURCES` | `CONFLICTING_SIGNALS` | `LOW_QUALITY` | `STALE_SOURCES` | `FILTERED`). */
+    abstainReason: text("abstain_reason"),
+    /** Horizont-ID (`4h` | `24h` | `72h`). */
+    horizon: text("horizon").notNull(),
+    /** Horizont in Minuten (240 | 1440 | 4320). */
+    horizonMinutes: integer("horizon_minutes").notNull(),
+    /** Event-Typ (`MACRO` | `EARNINGS` | `REGULATORY` | `PRODUCT` | `SECURITY` | `MARKET_STRUCTURE` | `GENERAL`). */
+    eventType: text("event_type").notNull().default("GENERAL"),
+    /** Eindeutige, deduplizierte Quellen-Anzahl. */
+    sourceCount: integer("source_count").notNull(),
+    /** Rohe Quellen-Anzahl vor Syndikations-Deduplikation. */
+    rawSourceCount: integer("raw_source_count").notNull(),
+    /** Quellen-Abdeckung / Coverage ∈ [0, 1]. */
+    coverage: numeric("coverage").notNull(),
+    /** Veröffentlichungszeitpunkt der maßgeblichen Quelle (Ereigniszeit). */
+    sourceEventTime: timestamp("source_event_time", { withTimezone: true }),
+    /** Früheste Quellenzeit. */
+    sourceEarliestAt: timestamp("source_earliest_at", { withTimezone: true }),
+    /** Späteste Quellenzeit. */
+    sourceLatestAt: timestamp("source_latest_at", { withTimezone: true }),
+    /** Analyse- und Erfassungszeitpunkt (`as_of`). */
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    /** Horizontende / Auswertungszeitpunkt (`valid_until` = asOf + horizon). */
+    validUntil: timestamp("valid_until", { withTimezone: true }).notNull(),
+    /** Prompt-Version des Agenten. */
+    promptVersion: integer("prompt_version").notNull(),
+    /** Modell-Tag des ausführenden LLM. */
+    model: text("model").notNull(),
+    /** Schema-Version (z. B. `sentiment@1`). */
+    schemaVersion: text("schema_version").notNull(),
+    /** Fingerprint der deduplizierten Quellen (`sd1:<sha256>`). */
+    sourceDeduplicationHash: text("source_deduplication_hash").notNull(),
+    /** Fachlicher Content-Hash (`sc1:<sha256>`). */
+    contentHash: text("content_hash").notNull(),
+    /** Optionaler Link zum P3.1 Forecast-Ledger (z. B. `fk1:<sha256>`). */
+    ledgerForecastId: text("ledger_forecast_id"),
+    /** Zusammenfassung / These. */
+    summary: text("summary").notNull(),
+    /** Risikoflags als JSON-Array (max. 5 Einträge). */
+    riskFlags: jsonb("risk_flags").notNull().$type<readonly string[]>(),
+    /** Numerischer Impact-Score ∈ [0, 100]. */
+    impactScore: numeric("impact_score").notNull(),
+    /** Provenienz / Metadaten (Deduplikationsdetails, Syndikationszähler, etc.). */
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sentiment_forecasts_forecast_id_unique").on(t.forecastId),
+    index("sentiment_forecasts_entity_asof_idx").on(t.entityId, t.asOf),
+    index("sentiment_forecasts_asof_status_idx").on(t.asOf, t.status),
+    index("sentiment_forecasts_status_horizon_idx").on(t.status, t.horizon),
+    check("sentiment_forecasts_status_check", sql`${t.status} IN ('ACTIVE','ABSTAIN')`),
+    check(
+      "sentiment_forecasts_direction_check",
+      sql`${t.direction} IS NULL OR ${t.direction} IN ('BULLISH','BEARISH','NEUTRAL')`
+    ),
+    check(
+      "sentiment_forecasts_abstain_check",
+      sql`(${t.status} = 'ABSTAIN') = (${t.abstain} = true)
+        AND (${t.abstain} = true) = (${t.abstainReason} IS NOT NULL)
+        AND (${t.abstain} = true) = (${t.probability} IS NULL)
+        AND (${t.abstain} = true) = (${t.direction} IS NULL)`
+    ),
+    check(
+      "sentiment_forecasts_probability_check",
+      sql`${t.probability} IS NULL OR (${t.probability} >= 0.01 AND ${t.probability} <= 0.99)`
+    ),
+    check("sentiment_forecasts_confidence_check", sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
+    check("sentiment_forecasts_coverage_check", sql`${t.coverage} >= 0 AND ${t.coverage} <= 1`),
+    check("sentiment_forecasts_horizon_check", sql`${t.horizon} IN ('4h','24h','72h')`),
+    check("sentiment_forecasts_valid_until_check", sql`${t.validUntil} > ${t.asOf}`),
+    check(
+      "sentiment_forecasts_source_count_check",
+      sql`${t.sourceCount} >= 0 AND ${t.rawSourceCount} >= ${t.sourceCount}`
+    ),
+    check(
+      "sentiment_forecasts_forecast_id_check",
+      sql`${t.forecastId} ~ '^sf1:[0-9a-f]{64}$'`
+    ),
+  ]
+);

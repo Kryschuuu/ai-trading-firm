@@ -273,6 +273,36 @@ export interface InstrumentNewsAnalysis {
   impactScore: number;
   riskFlags: string[];
   summary: string;
+
+  // RMA-P2-05: Kalibrierbarer strukturierter Sentiment-Envelope
+  forecastId?: string;
+  entityId?: string;
+  symbol?: string;
+  direction?: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
+  status?: "ACTIVE" | "ABSTAIN";
+  probability?: number | null;
+  confidence?: number;
+  abstain?: boolean;
+  abstainReason?: string | null;
+  horizon?: "4h" | "24h" | "72h";
+  horizonMinutes?: number;
+  eventType?: string;
+  sourceCount?: number;
+  rawSourceCount?: number;
+  coverage?: number;
+  sourceEventTime?: Date | null;
+  sourceEarliestAt?: Date | null;
+  sourceLatestAt?: Date | null;
+  asOf?: Date;
+  validUntil?: Date;
+  promptVersion?: number;
+  model?: string;
+  schemaVersion?: string;
+  sourceDeduplicationHash?: string;
+  contentHash?: string;
+  ledgerForecastId?: string | null;
+  view?: "BULLISH" | "BEARISH" | "NEUTRAL";
+  thesis?: string;
 }
 
 export interface NewsStepOutput {
@@ -298,17 +328,79 @@ export function validateNewsOutput(input: unknown): { valid: boolean; data?: New
   for (let i = 0; i < rawList.length && i < MAX_SHORTLIST_LIMIT; i++) {
     const item = rawList[i] as Record<string, unknown>;
     if (typeof item.instrumentId === "string" && item.instrumentId) {
-      const sentiment = typeof item.sentiment === "string" && ["BULLISH", "BEARISH", "NEUTRAL"].includes(item.sentiment.toUpperCase())
+      const instrumentId = item.instrumentId.trim();
+      const isAbstain = item.status === "ABSTAIN" || item.abstain === true;
+
+      const rawSentiment = typeof item.sentiment === "string" && ["BULLISH", "BEARISH", "NEUTRAL"].includes(item.sentiment.toUpperCase())
         ? (item.sentiment.toUpperCase() as InstrumentNewsAnalysis["sentiment"])
         : "NEUTRAL";
 
-      analyses.push({
-        instrumentId: item.instrumentId.trim(),
-        sentiment,
-        impactScore: typeof item.impactScore === "number" ? item.impactScore : 50,
-        riskFlags: Array.isArray(item.riskFlags) ? item.riskFlags.map(String).slice(0, 5) : [],
-        summary: typeof item.summary === "string" ? item.summary.slice(0, 300) : "Keine wesentlichen Nachrichten",
-      });
+      const impactScore = typeof item.impactScore === "number" && Number.isFinite(item.impactScore)
+        ? Math.max(0, Math.min(100, item.impactScore))
+        : 50;
+      const riskFlags = Array.isArray(item.riskFlags) ? item.riskFlags.map(String).slice(0, 5) : [];
+      const summary = typeof item.summary === "string" ? item.summary.slice(0, 500) : "Keine wesentlichen Nachrichten";
+
+      if (isAbstain) {
+        // Enthaltung: Direktionale Wahrscheinlichkeit ist NULL, nicht fälschlich neutral
+        analyses.push({
+          instrumentId,
+          sentiment: "NEUTRAL",
+          impactScore,
+          riskFlags,
+          summary,
+          status: "ABSTAIN",
+          abstain: true,
+          abstainReason: typeof item.abstainReason === "string" ? item.abstainReason : "NO_SOURCES",
+          direction: null,
+          probability: null,
+          confidence: 0,
+          coverage: typeof item.coverage === "number" && Number.isFinite(item.coverage) ? Math.max(0, Math.min(1, item.coverage)) : 0,
+          sourceCount: typeof item.sourceCount === "number" ? Math.max(0, item.sourceCount) : 0,
+          rawSourceCount: typeof item.rawSourceCount === "number" ? Math.max(0, item.rawSourceCount) : 0,
+          horizon: typeof item.horizon === "string" && ["4h", "24h", "72h"].includes(item.horizon) ? (item.horizon as "4h" | "24h" | "72h") : "24h",
+          forecastId: typeof item.forecastId === "string" ? item.forecastId : undefined,
+          view: "NEUTRAL",
+          thesis: summary,
+        });
+      } else {
+        const direction = typeof item.direction === "string" && ["BULLISH", "BEARISH", "NEUTRAL"].includes(item.direction.toUpperCase())
+          ? (item.direction.toUpperCase() as "BULLISH" | "BEARISH" | "NEUTRAL")
+          : rawSentiment;
+
+        const confidence = typeof item.confidence === "number" && Number.isFinite(item.confidence)
+          ? Math.max(0, Math.min(1, item.confidence))
+          : Math.abs(impactScore - 50) / 50;
+
+        let probability: number | null = null;
+        if (typeof item.probability === "number" && Number.isFinite(item.probability)) {
+          probability = Math.max(0.01, Math.min(0.99, item.probability));
+        } else {
+          const sign = direction === "BULLISH" ? 1 : direction === "BEARISH" ? -1 : 0;
+          probability = Math.max(0.01, Math.min(0.99, Number((0.5 + sign * confidence / 2).toFixed(6))));
+        }
+
+        analyses.push({
+          instrumentId,
+          sentiment: direction,
+          impactScore,
+          riskFlags,
+          summary,
+          status: "ACTIVE",
+          abstain: false,
+          abstainReason: null,
+          direction,
+          probability,
+          confidence,
+          coverage: typeof item.coverage === "number" && Number.isFinite(item.coverage) ? Math.max(0, Math.min(1, item.coverage)) : 1.0,
+          sourceCount: typeof item.sourceCount === "number" ? Math.max(0, item.sourceCount) : 1,
+          rawSourceCount: typeof item.rawSourceCount === "number" ? Math.max(0, item.rawSourceCount) : 1,
+          horizon: typeof item.horizon === "string" && ["4h", "24h", "72h"].includes(item.horizon) ? (item.horizon as "4h" | "24h" | "72h") : "24h",
+          forecastId: typeof item.forecastId === "string" ? item.forecastId : undefined,
+          view: direction,
+          thesis: summary,
+        });
+      }
     }
   }
 

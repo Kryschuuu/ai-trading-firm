@@ -39,6 +39,11 @@ import { confluenceFromLibCandles } from "@/confluence/adapters";
 import { loadConfluenceConfig } from "@/confluence/config";
 import { formatConfluenceLine } from "@/confluence/confluence";
 import type { ConfluenceSnapshot } from "@/confluence/types";
+// RMA-P2-05: Kalibrierbare strukturierte Sentiment-Outputs — schmale Module
+// (lib → sentiment, keine Zyklen).
+import { deduplicateNewsSources } from "@/sentiment/deduplication";
+import { evaluateSentimentForEntities } from "@/sentiment/service";
+import type { StructuredSentimentForecast } from "@/sentiment/types";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __analystBusy?: boolean;
@@ -403,9 +408,23 @@ export async function runNewsAnalyst(focusSymbols: string[] = []): Promise<void>
   const items = await fetchMarketNews(focusSymbols);
   if (items.length === 0) return;
 
-  const headlineBlock = items
+  const asOf = new Date();
+  const targetSymbols = focusSymbols.length > 0 ? focusSymbols : ["BTC", "ETH", "SPY"];
+
+  // RMA-P2-05: Syndikations-Deduplikation vor LLM-Übergabe
+  const deduplicated = deduplicateNewsSources(
+    items.map((it) => ({
+      headline: it.title,
+      source: it.source,
+      publishedAt: it.publishedAt,
+      link: it.link,
+    })),
+    { asOf, targetEntities: targetSymbols }
+  );
+
+  const headlineBlock = deduplicated
     .slice(0, 14)
-    .map((n, i) => `${i + 1}. [${n.source}] ${n.title}`)
+    .map((n, i) => `${i + 1}. [${n.primarySource}${n.syndicationCount > 1 ? ` + ${n.syndicationCount - 1} syndicated` : ""}] ${n.rawHeadline}`)
     .join("\n");
 
   const userPrompt = [
@@ -419,6 +438,7 @@ export async function runNewsAnalyst(focusSymbols: string[] = []): Promise<void>
     `Respond ONLY with JSON: {"view":"BULLISH|BEARISH|NEUTRAL","confidence":0..1,"thesis":"sentiment summary","recommendation":null}`,
   ].join("\n");
 
+  const agent = await findAgentByRole("NEWS_ANALYST");
   const result = await runOneAnalyst(
     "NEWS_ANALYST",
     process.env.MODEL_NEWS || "qwen2.5:3b-instruct-q4_K_M",
@@ -427,9 +447,48 @@ export async function runNewsAnalyst(focusSymbols: string[] = []): Promise<void>
   );
   if (!result) return;
   const n = normalizeAnalysis(result.parsed);
-  await recordAnalysis(await findAgentByRole("NEWS_ANALYST"), "NEWS_ANALYST", undefined,
+
+  // RMA-P2-05: Strukturierte Sentiment-Forecasts für Ziel-Symbole erzeugen & persistieren
+  let structuredSentiment: StructuredSentimentForecast[] = [];
+  try {
+    structuredSentiment = await evaluateSentimentForEntities(
+      targetSymbols,
+      items.map((it) => ({
+        headline: it.title,
+        source: it.source,
+        publishedAt: it.publishedAt,
+        link: it.link,
+      })),
+      targetSymbols.map((sym) => ({
+        instrumentId: sym,
+        sentiment: n.view,
+        confidence: n.confidence,
+        summary: n.thesis,
+      })),
+      {
+        asOf,
+        horizon: "24h",
+        promptVersion: agent?.version ?? 1,
+        model: agent?.model ?? "hubble-sentiment",
+        persist: true,
+      }
+    );
+  } catch (err) {
+    structuredLog("warn", "sentiment_forecast_eval_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  await recordAnalysis(agent, "NEWS_ANALYST", undefined,
     `[NEWS ${new Date().toISOString()}] ${n.view}: ${n.thesis}`.trim(),
-    { kind: "ANALYSIS", view: n.view, confidence: n.confidence, thesis: n.thesis, headlines: items.slice(0, 14).map((x) => x.title) },
+    {
+      kind: "ANALYSIS",
+      view: n.view,
+      confidence: n.confidence,
+      thesis: n.thesis,
+      headlines: items.slice(0, 14).map((x) => x.title),
+      sentimentForecasts: structuredSentiment,
+    },
     result
   );
 }

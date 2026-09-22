@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.63.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.64.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,31 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.64.0] — 2026-09-22 · Kalibrierbare strukturierte Sentiment-Outputs (RMA-P2-05)
+
+### Hinzugefügt
+
+- **Strukturiertes Sentiment-Modul `src/sentiment/` (Code-Version `sentiment@1`, Schemavariante `v1`):** kalibrierbare strukturierte Sentiment-Outputs (`StructuredSentimentForecast`) mit expliziter Horizont-, Event-, Quellen- und Unsicherheitssemantik. Strikte Trennung von direktionaler Wahrscheinlichkeit (`probability` ∈ [0.01, 0.99]) und Quellenabdeckung (`coverage` ∈ [0, 1]).
+- **Strikte Unterscheidung von `NEUTRAL` und `ABSTAIN`:** Liegen valide, ausgewogene Nachrichten vor, meldet der Forecast `status: "ACTIVE"` mit Richtung `"NEUTRAL"` und `probability: 0.50`. Liegen keine oder veraltete Quellen vor, wird zwingend der Fail-Closed-Status `status: "ABSTAIN"` mit `coverage: 0`, `probability: null` und explizitem `abstainReason` (`NO_SOURCES`, `STALE_SOURCES`) gemeldet — keine Schein-Neutralität bei Informationsmangel.
+- **Syndikations-Deduplikation & Paraphrasen-Erkennung (`deduplicateNewsSources`):** Bereinigung von Feed-Zusätzen (`[CoinDesk]`, `(Reuters)` etc.), Normalisierung, Content-Fingerprinting (SHA-256) und Paraphrasen-Erkennung (Token-Jaccard ≥ 0.80 im gleitenden 24h-Fenster). Syndizierte Wire-Meldungen über mehrere Feeds erhöhen den `syndicationCount`, werden jedoch als genau eine Quelle gewertet, um künstliche Konfidenzblähung zu verhindern.
+- **Multi-Entity-Isolation:** Übergreifende Meldungen werden allen betroffenen Entitäten isoliert mit eigener kanonischer `entityId` und deterministischer `forecastId` zugeordnet.
+- **Deterministische Identität & Idempotenz:** Snapshot-ID `sf1:<sha256(schemaVersion|model|asOf|entityId|dedupHash)>` (`sf1:`, `sd1:`, `sc1:`). Idempotente und append-only Datenbank-Migration [`drizzle/2026-09-22_structured_sentiment.sql`](drizzle/2026-09-22_structured_sentiment.sql) für `sentiment_forecasts` mit `ON CONFLICT (forecast_id) DO NOTHING` und DB CHECK-Constraints für Wahrscheinlichkeitsgrenzen, Zeit-Invariante (`valid_until > as_of`) und Status-Konsistenz.
+- **Outcome-Link zum P3.1-Forecast-Ledger:** Verknüpfung über `buildP31ForecastPayload()` zur späteren Auswertung über Brier-Score und Proper Scoring Rules — strukturell ohne Speicherung des aktuellen Kurses oder späterer Marktergebnisse beim Erzeugen des Forecasts.
+- **Zyklus- & Analysten-Integration:** Step 5 (`newsStep`) und Hubble (`runNewsAnalyst`, `recordAnalysis`) erzeugen nun vollständige Forecast-Envelopes. Bestehende Felder (`sentiment`, `confidence`, `summary`, `riskFlags`) bleiben rückwärtskompatibel erhalten.
+- **API & Observability:** Read-only Endpunkt `GET /api/analysis/sentiment` mit Parameter-Validierung (`entityId`, `status`, `horizon`, `from`, `to`, `limit`), no-store-Caching sowie bounded Metriken `sentiment_runs_total{result,source}` und strukturierten Audit-Events `sentiment_forecast_persisted`.
+- **Tests (35 neue Tests):** `tests/sentiment.unit.test.ts` (20 Tests: Deduplikation, Multi-Entity, NEUTRAL vs. ABSTAIN, Wahrscheinlichkeiten, PIT-Invarianz, Injection-Schutz, P3.1-Link, Bounds), `tests/sentiment.db.test.ts` (5 Tests: Migration, Roundtrip, Idempotenz, CHECK-Constraints, Filterung gegen Embedded Postgres), `tests/sentiment.cycle.test.ts` (3 Tests: Step-Anreicherung, Fallback-Envelopes, Risk-Manager-Konsum), `tests/sentiment.api.test.ts` (7 Tests: GET-Endpunkt, Statuscodes, Parameter-Validierung, Cache-Control).
+- **Dokumentation:** [`docs/SENTIMENT.md`](docs/SENTIMENT.md), Aktualisierung von `docs/HANDBUCH.md`, `docs/DAILY_WEEKLY_RESEARCH.md`, `CONFIGURATION.md`, `TRACKING.md` und Finding `RMA-P2-05-structured-sentiment.md`.
+
+### Konfiguration
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `STRUCTURED_SENTIMENT_ENABLED` | `true` | Persistenz strukturierter Sentiment-Outputs an/aus. Bei `false` wird die Persistenz übersprungen; der Zyklus läuft im Speicher weiter (Rollback-Pfad). |
+
+### Kompatibilität
+
+- Vollständig rückwärtskompatibel: bestehende Konsumenten lesen weiterhin `sentiment`, `confidence`, `summary` und `riskFlags`. Keine Änderungen an bestehenden Tabellen. Rollback durch `STRUCTURED_SENTIMENT_ENABLED=false` sofort möglich.
 
 ## [1.63.0] — 2026-09-22 · Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04)
 

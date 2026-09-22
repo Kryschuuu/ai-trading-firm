@@ -13,6 +13,12 @@ import type { StepDefinition, StepExecutionContext } from "../types";
 import { type NewsStepOutput, validateNewsOutput } from "../schemas";
 import { assertShortlistLimit, sanitizeExternalText } from "../security";
 import type { SelectionStepOutput } from "../schemas";
+import {
+  deduplicateNewsSources,
+  filterSourcesForEntity,
+} from "../../sentiment/deduplication";
+import { buildStructuredSentimentForecast } from "../../sentiment/semantics";
+import { evaluateSentimentForEntities } from "../../sentiment/service";
 
 export interface NewsItem {
   headline: string;
@@ -81,13 +87,31 @@ export const newsStep: StepDefinition<NewsStepInput, NewsStepOutput> = {
       publishedAt: n.publishedAt,
     }));
 
-    const defaultAnalyses = symbols.map((sym) => ({
-      instrumentId: sym,
-      sentiment: "NEUTRAL" as const,
-      impactScore: 50,
-      riskFlags: [],
-      summary: "Keine wesentlichen negativen oder überhitzten Nachrichten (Deterministischer Fallback)",
-    }));
+    // RMA-P2-05: Deduplikation von Syndikationsquellen im asOf-Zeitfenster
+    const deduplicatedSources = deduplicateNewsSources(sanitizedNews, {
+      asOf: context.asOf,
+      targetEntities: symbols,
+    });
+
+    // Deterministischer Fallback: Fehlen Quellen, wird explizit ABSTAIN mit coverage=0
+    // erzeugt statt erfundener Neutralität
+    const defaultAnalyses = symbols.map((sym) => {
+      const symbolSources = filterSourcesForEntity(deduplicatedSources, sym);
+      return buildStructuredSentimentForecast({
+        entityId: sym,
+        symbol: sym.replace(/^(?:BINANCE:|BITUNIX:|PAPER:|ALPACA:)/i, ""),
+        sources: symbolSources,
+        asOf: context.asOf,
+        horizon: "24h",
+        direction: "NEUTRAL",
+        confidence: 0,
+        impactScore: 50,
+        riskFlags: [],
+        summary: symbolSources.length === 0
+          ? "Keine Quellen vorhanden für dieses Instrument (Deterministischer Fallback / ABSTAIN)"
+          : "Ruhige Nachrichtenlage (Deterministischer Fallback)",
+      });
+    });
 
     const fallback: NewsStepOutput = {
       analyses: defaultAnalyses,
@@ -115,6 +139,9 @@ JSON schema:
     {
       "instrumentId": "string",
       "sentiment": "BULLISH|BEARISH|NEUTRAL",
+      "direction": "BULLISH|BEARISH|NEUTRAL",
+      "confidence": 0.0..1.0,
+      "status": "ACTIVE|ABSTAIN",
       "impactScore": 60.0,
       "riskFlags": ["string"],
       "summary": "concise summary"
@@ -142,6 +169,33 @@ JSON schema:
 
     assertShortlistLimit(res.output.analyses, 40);
 
-    return res.output;
+    // RMA-P2-05: Strukturierte Forecast-Envelopes anreichern und persistieren
+    try {
+      const enrichedForecasts = await evaluateSentimentForEntities(
+        symbols,
+        sanitizedNews,
+        res.output.analyses.map((a) => ({
+          instrumentId: a.instrumentId,
+          sentiment: a.sentiment,
+          impactScore: a.impactScore,
+          riskFlags: a.riskFlags,
+          summary: a.summary,
+          confidence: a.confidence,
+        })),
+        {
+          asOf: context.asOf,
+          horizon: "24h",
+          persist: true,
+        }
+      );
+
+      return {
+        analyses: enrichedForecasts,
+        systemicRisk: res.output.systemicRisk,
+      };
+    } catch {
+      // Bei unerwartetem Anreicherungsfehler bleibt der validierte Agentenoutput erhalten
+      return res.output;
+    }
   },
 };
