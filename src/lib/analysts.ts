@@ -25,6 +25,7 @@ import { getCandles, yahooScreener, type Candle, type ScreenerCandidate } from "
 import { MarketDataFetchError } from "./marketDataErrors";
 import { structuredLog } from "./logger";
 import { snapshot, ema, rsi } from "./indicators";
+import { resolveArtifactIdempotent, emitAgentRun } from "@/promptPerformance/provenance";
 import { fetchMarketNews } from "./news";
 // RMA-P2-02: Derivatekontext für den Technical Analyst. Das schmale Modul
 // (nicht der Barrel) hält die Abhängigkeit richtungsrein: lib → perpdata.
@@ -212,18 +213,78 @@ async function runOneAnalyst(
 ): Promise<AnalystRun | null> {
   const agent = await findAgentByRole(role);
   const model = agent?.model ?? fallbackModel;
+  const promptStartedAt = new Date();
+  let brain: ReasonResult | null = null;
+  let success = true;
+  let errorCode: string | null = null;
   try {
     // Wichtig: das ANALYSTEN-Schema erzwingen, nicht das Trade-Entscheidungsschema.
-    const brain = await localReason(model, systemPrompt, userPrompt, role, {
+    brain = await localReason(model, systemPrompt, userPrompt, role, {
       schema: analysisSchema(),
       temperature: 0.2,
     });
-    // KORRIGIERT (v1.4.0): Analysten-Payloads (view/thesis/recommendation) sind
-    // kein AgentDecision — parseDecision würde Extra-Felder verwerfen.
-    const parsed = extractJsonObject(brain.raw) ?? {};
-    return { ...brain, prompt: userPrompt, parsed };
-  } catch {
+  } catch (e) {
+    success = false;
+    errorCode = e instanceof Error ? e.message.slice(0, 64) : String(e).slice(0, 64);
     return null;
+  } finally {
+    const promptEndedAt = new Date();
+    // RMA-P3-02 (v1.65.0): Provenanz je Analystenaufruf — nie Secrets, bounded.
+    // Auch fehlgeschlagene Aufrufe werden als Failure persistiert (fail-closed).
+    // Ein Fehler hier bricht niemals den Analystenlauf ab.
+    if (brain || !success) {
+      try {
+        const artifact = await resolveArtifactIdempotent({
+          agentId: agent?.id ?? null,
+          role,
+          version: agent?.version ?? null,
+          // Analysten ohne registrierten Agenten: Fallback-Prompt (bounded, kein Secret)
+          promptText: agent ? (await resolveAnalystPrompt(agent, systemPrompt)) : systemPrompt,
+        });
+        await emitAgentRun({
+          artifact,
+          agent: { id: agent?.id ?? null, role },
+          llm: {
+            provider: brain?.provider ?? "unknown",
+            model: brain?.model ?? model,
+            temperature: 0.2,
+            maxTokens: null,
+            toolSchemaVersion: "analysis@1",
+            promptTokens: (brain?.usage as unknown as Record<string, number> | null)?.promptTokens ?? null,
+            completionTokens: (brain?.usage as unknown as Record<string, number> | null)?.completionTokens ?? null,
+            totalTokens: (brain?.usage as unknown as Record<string, number> | null)?.totalTokens ?? null,
+            costUsd: brain?.costUsd ?? null,
+          },
+          timing: {
+            startedAt: promptStartedAt,
+            endedAt: promptEndedAt,
+            latencyMs: brain?.latencyMs ?? (promptEndedAt.getTime() - promptStartedAt.getTime()),
+          },
+          outcome: { success, errorCode },
+        });
+      } catch {
+        // Provenanz darf den Analystenlauf nie fehlschlagen lassen.
+      }
+    }
+  }
+  if (!brain) return null;
+  // KORRIGIERT (v1.4.0): Analysten-Payloads (view/thesis/recommendation) sind
+  // kein AgentDecision — parseDecision würde Extra-Felder verwerfen.
+  const parsed = extractJsonObject(brain.raw) ?? {};
+  return { ...brain, prompt: userPrompt, parsed };
+}
+
+/**
+ * Lädt den kanonischen Prompt für den Artefakt-Hash: bei registriertem Agenten
+ * die DB-Prompt (Truth), sonst der übergebene Fallback (Tests/analysten ohne Zeile).
+ */
+async function resolveAnalystPrompt(agent: AgentRowLite, fallback: string): Promise<string> {
+  try {
+    const rows = await db.select().from(agentTable).where(eq(agentTable.id, agent.id)).limit(1);
+    const txt = rows[0]?.systemPrompt;
+    return typeof txt === "string" && txt.length > 0 ? txt : fallback;
+  } catch {
+    return fallback;
   }
 }
 

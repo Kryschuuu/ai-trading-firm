@@ -286,5 +286,31 @@ export async function ensureSeeded(): Promise<{
       armed: false,
     });
   }
+
+  // ── RMA-P3-02 (v1.65.0): Prompt-Artefakte für Historie ────────────────────
+  // Jede Agentenversion wird als immutable Artefakt (`pp1:<sha256>`) fixiert,
+  // damit jede Analyse eine unveränderliche Prompt-Provenanz trägt (append-only).
+  // Bestandsagenten ohne Artefakt sind als UNKNOWN sichtbar (fail-closed).
+  // Der Seed ist idempotent: Retry/Restart schreiben kein zweites Artefakt.
+  try {
+    const { ensurePromptArtifact } = await import("@/promptPerformance/store");
+    const allAgents = await db.select().from(agents);
+    for (const a of allAgents) {
+      try {
+        await ensurePromptArtifact({
+          agentId: a.id,
+          role: a.role,
+          version: a.version,
+          promptText: a.systemPrompt,
+        });
+      } catch (e) {
+        console.warn(`[seed] prompt artifact failed for ${a.name}:`, e instanceof Error ? e.message : String(e));
+      }
+    }
+  } catch {
+    // Store/DB gerade nicht verfügbar (z. B. Migrationslag) — Seed bleibt ok,
+    // Lücke ist als UNKNOWN sichtbar; Artefakte entstehen beim nächsten PUT.
+  }
+
   return { ok: true, missionsMigrated };
 }

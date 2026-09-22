@@ -7,6 +7,8 @@ import { validatePromptInput } from "@/lib/workshop";
 import { logAudit } from "@/lib/engine";
 import { flagMissedAudit } from "@/lib/auditSink";
 import { publicErrorMessage } from "@/lib/secrets";
+import { ensurePromptArtifact } from "@/promptPerformance/store";
+import { structuredLog } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -126,11 +128,49 @@ export async function PUT(req: Request) {
       );
     }
 
+    // ── RMA-P3-02 (v1.65.0): Prompt-Artefakt (immutable, append-only) ───────
+    // Jede Prompt-Version wird genau einmal als `prompt_artifacts`-Zeile mit
+    // kanonischem Hash `pp1:<sha256>` fixiert. Historische Analysen bleiben
+    // damit unverändert zuordenbar (append-only, idempotent). Ein Fehler beim
+    // Artefakt darf den erfolgreichen Prompt-Update nicht zurückrollen — die
+    // Lücke ist als UNKNOWN sichtbar, nie still.
+    let promptArtifact: { id: string; promptHash: string } | null = null;
+    try {
+      const { artifact, created } = await ensurePromptArtifact({
+        agentId,
+        role: existing.role,
+        version: updated[0].version,
+        promptText: systemPrompt,
+      });
+      promptArtifact = { id: artifact.id, promptHash: artifact.promptHash };
+      structuredLog("info", "prompt_artifact_put", {
+        agentId,
+        role: existing.role,
+        version: artifact.version,
+        hash: artifact.promptHash,
+        created,
+      });
+    } catch (e) {
+      flagMissedAudit("PROMPT_ARTIFACT_FAILED", {
+        agent: existing.name,
+        agentId,
+        version: updated[0].version,
+        reason: publicErrorMessage(e).slice(0, 200),
+        policy: "prompt gespeichert, artefakt-loecke gemeldet (P3-02)",
+      });
+      warnings.push(
+        "Prompt gespeichert, aber das Prompt-Artefakt konnte nicht persistiert werden — " +
+          "nachfolgende Runs dieser Version erscheinen bis zum Retry als UNKNOWN. " +
+          "Operations-Center prüfen (P3-02)."
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       agent: updated[0],
       /** Neue Optimistic-Lock-Version (W2) — nächster PUT muss sie als expectedVersion senden. */
       version: updated[0].version,
+      promptArtifact,
       warnings,
       audit: {
         durable: audited.durable,

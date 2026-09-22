@@ -41,6 +41,7 @@ import { VENUE_CAPABILITIES } from "../brokers/capabilities";
 import { platformLiveFromEnv, venueEnabledFromEnv, venueLiveFlagFromEnv } from "../live-gate/config";
 import type { EmergencyBroker, EmergencyCloseFill } from "../contracts/broker";
 import { localReason } from "./ollama";
+import { resolveArtifactIdempotent, emitAgentRun } from "@/promptPerformance/provenance";
 import { getCandles, getQuote, sanitizeSymbol, type Candle } from "./marketData";
 import { getProductionMarketDataManager, wirePaperExecution } from "./marketdata/production";
 import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
@@ -729,7 +730,64 @@ export async function runAgentTurn(
     `{"type":"TRADE|HOLD|REPORT|APPROVE|REJECT","symbol":"${symbolHint}","side":"${limits.allowShort ? "LONG|SHORT" : "LONG"}","stopLossPct":${snap?.atrPercent != null ? Math.max(1, Math.min(20, snap.atrPercent * limits.atrStopMultiplier)).toFixed(1) : 5},"reason":"kurze Begründung","riskScore":0.4}`,
   ].join("\n");
 
-  const brain = await localReason(agent.model, agent.systemPrompt, userPrompt, agent.role);
+  // ── RMA-P3-02 (v1.65.0): Prompt-Provenanz (append-only, fail-closed) ─────
+  // Jeder LLM-Aufruf wird mit Prompt-Artefakt, Modell/Sampling,
+  // Zeitstempeln, Tokens und Kosten gebunden — nie Secrets, nie Rohpayloads.
+  // Ein Fehler im Provenanz-Store bricht niemals die Agentenentscheidung ab.
+  const promptStartedAt = new Date();
+  let brain: Awaited<ReturnType<typeof localReason>>;
+  let brainError: unknown = null;
+  try {
+    brain = await localReason(agent.model, agent.systemPrompt, userPrompt, agent.role);
+  } catch (e) {
+    brainError = e;
+    // Fallback-Gehirn, damit der Agenten-Turn fail-closed als HOLD enden kann;
+    // die Provenanz wird trotzdem als Failure persistiert.
+    brain = {
+      raw: String((e as Error)?.message ?? String(e)).slice(0, 500),
+      source: "fallback" as const,
+      model: agent.model,
+      latencyMs: Date.now() - promptStartedAt.getTime(),
+    } as Awaited<ReturnType<typeof localReason>>;
+  }
+  const promptEndedAt = new Date();
+  try {
+    const artifact = await resolveArtifactIdempotent({
+      agentId: agent.id,
+      role: agent.role,
+      version: agent.version,
+      promptText: agent.systemPrompt,
+    });
+    await emitAgentRun({
+      artifact,
+      agent: { id: agent.id, role: agent.role },
+      llm: {
+        provider: brain.provider ?? "unknown",
+        model: brain.model,
+        temperature: null,
+        maxTokens: null,
+        toolSchemaVersion: null,
+        promptTokens: (brain.usage as unknown as Record<string, number> | null)?.promptTokens ?? null,
+        completionTokens: (brain.usage as unknown as Record<string, number> | null)?.completionTokens ?? null,
+        totalTokens: (brain.usage as unknown as Record<string, number> | null)?.totalTokens ?? null,
+        costUsd: brain.costUsd ?? null,
+      },
+      timing: {
+        startedAt: promptStartedAt,
+        endedAt: promptEndedAt,
+        latencyMs: brain.latencyMs ?? (promptEndedAt.getTime() - promptStartedAt.getTime()),
+      },
+      outcome: { success: brainError == null && brain.source !== "fallback", errorCode: brainError ? String((brainError as Error)?.message ?? "LLM_ERROR").slice(0, 64) : (brain.source === "fallback" ? "FALLBACK" : null) },
+    });
+  } catch {
+    // Provenanz ist fehlertolerant (siehe provenance.ts): Fehler hier dürfen
+    // niemals den Hauptpfad abbrechen — Entscheidung und Protokoll laufen weiter.
+  }
+  if (brainError && brain.source === "fallback") {
+    // Fallback-Erfolgspfad wurde oben bereits mit Provenanz gebunden; jetzt
+    // wird wie bei einem gefallenen localReason die normale Hold-Pfadlogik
+    // durchlaufen (kein Wurf hier — blocked-Trace wird weiter unten gebaut).
+  }
   const decision = parseDecision(brain.raw);
 
   await db.insert(agentMessages).values({
