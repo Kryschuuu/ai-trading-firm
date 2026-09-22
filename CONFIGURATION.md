@@ -586,8 +586,12 @@ Perzentil + Drawdown vom Fensterhoch) mit Hysterese gegen Whipsaws; das Gate
 dämpft Signalgewichte je Strategieklasse (mean-reversion/trend/breakout) als
 **Datenkontext** — nie als hartes Veto. Rollout bewusst **monitor-first**:
 Default ist Ausweis + Audit ohne Wirkung. Alle Flags sind optional — ohne
-Konfiguration läuft das System exakt wie vorher (nur Ausweis). Doku:
-[`docs/REGIME_GATE.md`](docs/REGIME_GATE.md).
+Konfiguration läuft das System exakt wie vorher (nur Ausweis). Seit
+**v1.61.0 (RMA-P2-01)** ist die Erkennung multidimensional und
+point-in-time-sicher: versionierte Preis-/Volatilitäts-/Liquiditäts-/Perp-
+(+ optionale Makro-)Familien mit Confidence, Coverage und Top-Treibern;
+fehlende/stale Familien degradieren auf den OHLCV-Pfad und können das
+Risiko nie erhöhen. Doku: [`docs/REGIME_GATE.md`](docs/REGIME_GATE.md).
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
@@ -599,6 +603,13 @@ Konfiguration läuft das System exakt wie vorher (nur Ausweis). Doku:
 | `REGIME_TREND_ADX` | `25` | ADX-Schwelle (Wilder, Periode 14) für `TREND_UP`/`TREND_DOWN`. Bounds [10, 60]. |
 | `REGIME_TREND_SLOPE_PCT` | `0.05` | Mindest-|Regressions-Slope| in % pro Kerze für `TREND_*` (darunter `RANGE`). Bounds [0.005, 1]. |
 | `REGIME_GATE_FACTORS` | s. u. | Dämpfungsfaktoren je Regime × Strategieklasse, Grammatik `REGIME:klasse=faktor,…` (z. B. `TREND_UP:mean-reversion=0.25`). Werte geklemmt auf [0, 2]; kaputte Einträge werden übersprungen. Defaults: mean-reversion × 0.5 in TREND_UP/TREND_DOWN, breakout × 0.5 in RANGE, sonst × 1. |
+| `REGIME_FEATURE_MODE` | `multidim` | Feature-Modus der Erkennung (v1.61.0): `multidim` (OHLCV-Kern + Preis/Volatilität/Liquidität/Perp/optional Makro, `regime-features@1`) oder `ohlcv` (nur die Basisklassifikation, alle Zusatzfamilien `DISABLED` — Legacy-Modus, ohne zusätzliche Votes). Unbekannter Wert → `multidim` (Default), nie still `ohlcv`. |
+| `REGIME_MIN_COVERAGE` | `0.5` | Mindest-Coverage der Pflichtfamilien (Gewichte: Preis 0.3 / Vol 0.3 / Liquidität 0.2 / Perp 0.2). Darunter: `degraded=true` und der Gate-Faktor darf nicht über 1 (Boosten blockiert). Bounds [0, 1]; Coverage = OK-Gewichte / 1.00. |
+| `REGIME_LIQUIDITY_SPREAD_HIGH_PCT` | `0.5` | Spread-Vote: relativer Spread in % ab dem die Rohklasse zu `HIGH_VOL` eskaliert (nur wenn die Liquiditätsfamilie `OK` ist). Bounds [0.01, 100]. |
+| `REGIME_PERP_FUNDING_ABS` | `0.001` | Funding-Vote: absoluter Funding-Satz ab dem eskaliert wird (zusätzlich: OI-Einbruch ≤ −30 % ist fest verdrahtet). Bounds [0.00001, 0.1]. |
+| `REGIME_MACRO_VIX_HIGH` | `30` | Makro-Vote: adaptiver VIX-Zustand ab dem eskaliert wird (nur wenn die optionale Makro-Familie `OK` ist). Bounds [10, 100]. |
+| `REGIME_SNAPSHOT_RETENTION_DAYS` | `90` | Aufbewahrung der `regime_snapshots`-Zeilen (unterbrochene Prozesse bereinigen beim nächsten Persistenz-Schub). Bounds [7, 365]. |
+| `PERP_DATA_ENABLED` | `false` | Schaltet die Perp-Datenfamilie der Regime-Erkennung (und der Derivatik-Ansicht) frei. Ohne `true` ist die Familie `MISSING` — sie wird nie still als `0`-Funding gewertet. Bounds: boolsche Env-Var. |
 
 Zusätzlich hart verdrahtet (kein Flag):
 

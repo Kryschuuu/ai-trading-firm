@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.60.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.61.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,28 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.61.0] — 2026-09-22 · Mehrdimensionale, point-in-time-sichere Regime-Erkennung (RMA-P2-01)
+
+### Hinzugefügt
+
+- **Versionierter Feature-Vertrag (`src/lib/regimeFeatures.ts`, `regime-features@1`):** Preis-, Volatilitäts-, Liquiditäts-, Perp- und optionale Makro-Familien mit Zeitsemantik (`eventTime`, `availableAt`, `computedAt` getrennt), Kein-Ersatz-Regeln (stale/invalid/missing bleiben `MISSING`/`STALE`) und Coverage-Gewichten (0.3/0.3/0.2/0.2). Rein und client-sicher.
+- **Multidimensionale Klassifikation (`classifyMarketRegimeMultidim`):** Ergänzt den OHLCV-Kern um Voting-Familien (Spread/Funding/OI/VIX → ausschließlich zum sichereren `HIGH_VOL`), liefert Roh- und bestätigte Klasse mit Confidence [0.2, 0.99] (`null` bei `UNKNOWN`), Coverage, Top-Treibern und Feature-/Modellversion (`regime-rules@1`). `REGIME_FEATURE_MODE=multidim|ohlcv` erzwingt optional den Legacy-Pfad.
+- **Point-in-time-sichere Live-Loader (`src/lib/regimeFamilyInputs.ts`):** Spread-Cache, Perp-Cache (nur `PERP_DATA_ENABLED=true`) und adaptiver VIX-Zustand, fail-soft (nie werfend), ohne FS-/DB-Importe im Kernpfad; externe Samples nur bei `eventTime ≤ asOf` **und** `availableAt ≤ asOf` (Backtest sieht keine später verfügbaren Makro-/Perp-Daten).
+- **Persistenz & Evaluation:** append-only Migration `drizzle/2026-09-22_regime_snapshots.sql` (Tabelle `regime_snapshots`, CHECK-Constraints, Idempotenz-Schlüssel = SHA-256), `src/lib/regimeSnapshotStore.ts` (ON-CONFLICT-Write, Throttle 15 min/Regime-Wechsel, Retention `REGIME_SNAPSHOT_RETENTION_DAYS=90`, fail-soft mit Telemetrie), `src/lib/regimeEvaluation.ts` (Stabilität/Transitions/Confidence/Coverage/bestätigte-vs-Roh-Vergleiche, OOS ohne Null-Substitution) und CLI `npm run regime:eval` (`scripts/regime-eval.ts`, Report nach `data/regime-eval/`, Exit 1 bei Store-Fehlern).
+- **Tests:** `tests/regimeMultidim.test.ts` (37 Fälle: Feature-Fixture→Klasse/Confidence/Treiber, Stale→Coverage-↓ ohne Risiko-↑, Determinismus, Flapping, OHLCV-Parität, Artefakt-Schema v2, Loader, Bounds, Evaluation) und `tests/regimeSnapshot.db.test.ts` (7 Fälle: Migration idempotent, Roundtrip, Retry/Restart-Eindeutigkeit, Constraints, Retention gegen eingebettete Postgres).
+
+### Geändert
+
+- **Ein Snapshot für alle Konsumenten:** Engine-Turn, Monitor-Tick, Mikro-Executor-Seed und Candidate-Refresh rufen dieselbe `evaluateInstrumentRegime`; `resolveRegimeGateForExecution`/`formatRegimeGateContext` weisen Coverage/Degraded/Confidence/Versionen aus. `REGIME_CHANGE`-Audit trägt `conf/cov/feature_version/model_version/families`; `REGIME_GATE_APPLIED` zusätzlich `coverage/degraded`; Ops-Center zeigt `Regime · Conf · Cov % · degraded`.
+- **Gate-Sicherheitsregel:** Coverage < `REGIME_MIN_COVERAGE` (0.5) blockiert Boosts (`applyRegimeGate` nie über 1 bei Degraded/geringer Coverage) — geringe Coverage erhöht das Risiko strukturell nie.
+- **`regime-history.json` Schema-Version 2** (rohe + bestätigte Klasse, Confidence, Coverage, Degraded, Feature-/Modellversion, Familienstatus je Zeile; Abwärtskompatibel über erweiterte Felder).
+- **Dokumentation:** `docs/REGIME_GATE.md` (neue §1b Feature-/Coverage-/Persistenz-Abschnitte), `CONFIGURATION.md` (sieben neue Regime-Flags), `.env.example`, `docs/HANDBUCH.md` §9.4.
+
+### Bewusst nicht Teil (Scope-Grenze PROMPT-P2-01)
+
+Unversioniertes Online-Training, Ersetzen harter Risiko-Ceilings durch
+Modell-Wahrscheinlichkeiten und ein Pflicht-Makro-Datenabruf.
 
 ## [1.60.0] — 2026-09-22 · Train-Select-Freeze-Test Walk-Forward (RMA-P1-02)
 

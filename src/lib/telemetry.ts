@@ -333,6 +333,23 @@ export const telemetry = {
     },
   },
   /**
+   * Multidimensionale Regime-Erkennung (RMA-P2-01, v1.61.0).
+   *
+   * Labels sind ausschließlich Code-konstant (`result`) — keine Symbol-,
+   * Order- oder Trade-IDs (Kardinalitätsregel wie überall).
+   */
+  regime: {
+    /** Snapshot-Persistenz je Ergebnis (written | duplicate | skipped | error). */
+    persist: new LabelCounter("regime_snapshot_persist_total"),
+    /** Gate-Boost-Entscheidungen je Ergebnis (applied | blocked). */
+    boosts: new LabelCounter("regime_gate_boost_total"),
+    /** alle Counter der Regime-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.regime.persist.reset();
+      telemetry.regime.boosts.reset();
+    },
+  },
+  /**
    * Forecast-Ledger und Kalibrierung (RMA-P3-01, v1.55.0).
    *
    * Labels sind ausschließlich Code-konstante Kategorien (`result`,
@@ -518,6 +535,8 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.perp.qualityFindings.exposition(),
     telemetry.perp.revisions.exposition(),
     telemetry.perp.asOfQueries.exposition(),
+    telemetry.regime.persist.exposition(),
+    telemetry.regime.boosts.exposition(),
   ];
 
   let firm: FirmMetricState | null;
