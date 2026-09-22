@@ -30,6 +30,7 @@ import { MarketDataFetchError } from "./marketDataErrors";
 import { snapshot, snapshotLine } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import { updateAdaptiveRisk } from "./adaptiveRisk";
+import { updateVolatilityTargeting } from "./volatilityTargeting";
 import { refreshInstrumentRegimes } from "./marketRegime";
 import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
 import { scheduleRegimeSnapshotPersist } from "./regimeSnapshotStore";
@@ -84,6 +85,22 @@ export type TickResult = {
     baseMaxRiskPerTrade: number;
     effectiveMaxRiskPerTrade: number;
     reason: string;
+  } | null;
+  /**
+   * RMA-P5-01 (v1.67.0): Zustand des Portfolio-Volatility-Targetings nach
+   * diesem Tick (best-effort; null bei noch keinem Lauf). `mode` ist der
+   * effektiv wirksame Modus (Env × vtp.enabled); `applied` ist der
+   * angewendete Multiplikator (1 = neutral, ≤ 1).
+   */
+  volatilityTargeting: {
+    mode: string;
+    active: boolean;
+    status: string | null;
+    reasonCode: string | null;
+    appliedMultiplier: number;
+    targetAnnualizedVol: number;
+    forecastAnnualizedVol: number | null;
+    targetError: number | null;
   } | null;
   /**
    * GAP-06 (v1.46.0): Markt-Regime der offenen Positionen nach diesem Tick
@@ -146,6 +163,26 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     };
   } catch (e) {
     errors.push(`Adaptives-Risiko fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
+  }
+
+  // RMA-P5-01 (v1.67.0): Portfolio-Volatility-Targeting — kontinuierlicher
+  // Faktor auf maxRiskPerTrade (Monitor-only per Default). Fehler bleiben
+  // lokal (Fail-Safe), der Faktor kann das Basis-Limit nie überschreiten.
+  let volatilityTargeting: TickResult["volatilityTargeting"] = null;
+  try {
+    const vt = await updateVolatilityTargeting();
+    volatilityTargeting = {
+      mode: vt.mode,
+      active: vt.active,
+      status: vt.forecast?.status ?? null,
+      reasonCode: vt.forecast?.reasonCode ?? null,
+      appliedMultiplier: vt.appliedMultiplier,
+      targetAnnualizedVol: vt.targetAnnualizedVol,
+      forecastAnnualizedVol: vt.forecast?.forecastAnnualizedVol ?? null,
+      targetError: vt.targetError,
+    };
+  } catch (e) {
+    errors.push(`Volatility-Targeting fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
   }
 
   const limits = getLimits();
@@ -424,6 +461,7 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     marketScan,
     errors,
     adaptiveRisk,
+    volatilityTargeting,
     marketRegimes,
   };
 }

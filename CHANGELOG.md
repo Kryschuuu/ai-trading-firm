@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.66.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.67.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,32 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.67.0] — 2026-09-22 · Kontinuierliches Portfolio-Volatility-Targeting (RMA-P5-01)
+
+### Hinzugefügt
+
+- **Pure, geteilte Forecast-/Multiplikatorfunktion (`src/portfolio/volatilityTargeting.ts`):** Annualisierte Portfolio-Volatilität aus as-of-sicheren Log-Returns als `σ̂_a = √(wᵀΣ^A w)` mit `Σ^A_ij = Σ*_ij·√(A_i·A_j)` (Asset-spezifische Annualisierung: Krypto 365 d, Aktien 252 d; einheitliches `A` reduziert auf die klassische √A-Skalierung), regularisierte Kovarianz `Σ* = (1−κ)Σ + κ·μ·I` (Shrinkage, Default 0.1), Symmetrie-/PSD-Check via Cholesky mit Ridge-Sicherheitsnetz (1e-6). LIVE (Monitor-Tick) und BACKTEST teilen exakt dieselbe Funktion — keine Formel-Duplikate. Multiplikator: `raw = target/σ̂_a` → Clamp (max hart ≤ 1) → EMA-Smoothing → Max-Step; **Fallback-Short-Circuit** springt sofort auf `minMultiplier` (bypassed Smoothing/Step, sichere Richtung). Fail-closed: `forecastAnnualizedVol = null` bei Fallback (nie 0), 12 geschlossene Reason-Codes, Per-Serie-Verwendbarkeit (eine defekte Quelle tötet das Targeting nicht, zählt in die gewichtete Abdeckung), Event-Zeiten in der Zukunft = harter `INVALID_EVENT_TIMES`-Fehler (Look-ahead strukturell ausgeschlossen). Deterministische Reproduktions-Hashes `cfg1:`/`data1:<sha256>` und Idempotency-Key `vt1:<sha256>(Minute|configHash|dataHash)`.
+- **Live-Orchestrator + Feature-Flag (`src/lib/volatilityTargeting.ts`):** `PORTFOLIO_VOL_TARGETING_MODE` ∈ `off|monitor|active` (Default `monitor` = Forecast + Persistenz + Reporting, **keine** Ordergrößenänderung; unbekannt ⇒ `monitor`) + `PORTFOLIO_VOL_TARGETING_TIMEFRAME` (Default `1h`; `5m 15m 30m 1h 4h 1d`), Master-Schalter `vtp.enabled` + Bounds-geklemmte `vtp.*`-Parameter in `risk_config`. Nur GESCHLOSSENE Kerzen (`time + tfMs ≤ now`); Single-Flight + 5-min-Intervall; Positionen → Notional-Gewichte → as-of-Returns → pure Kern → Persistenz → Anwendung (nur `active`) → Audit `RISK_VOL_TARGETING` (Fallback = WARN/security) + bounded Metriken.
+- **Risk-Guard-Composition (`src/lib/riskGuard.ts`):** zweiter, kontinuierlicher Faktor in der Kaskade `Code-Ceilings → Basis-Limit → Regime-Faktor × VolTarget-Faktor → Code-Boden`; multiplikativ (beide ≤ 1 ⇒ Produkt ≤ 1, das Basis-Limit wird **niemals überschritten**), hart auf (0, 1] geklemmt, null hebt auf (Monitor/Rollback), keine Kumulation bei DB-Neuladung.
+- **Persistenz + idempotente Migration (`src/db/schema.ts`, `drizzle/2026-09-22_volatility_targeting.sql`):** append-only Tabelle `volatility_targeting_snapshots` (22 Spalten: Status/Reason, Ziel, Forecast, **realisierte Vol + Target-Error**, **raw/applied Multiplikator**, Coverage, Beobachtungen, Annualisierung, Shrinkage, Regularisierung, Gewichte-JSONB, drei getrennte Zeitstempel `as_of`/`computed_at`/`event_time`, Modus, Hashes), UNIQUE `snapshot_id` (`ON CONFLICT DO NOTHING` ⇒ Retry/Restart ohne doppelte Zeile) + 12 CHECK-Constraints (u. a. `applied_multiplier ∈ (0,1]`, `monitor_only = (mode='monitor')`, `computed_at ≥ as_of`, Hash-Regex). Aktivfaktor zusätzlich in `risk_config` (`vtp.activeFactor`/`vtp.activeAt`) für den separaten Mikro-Executor-Prozess (nur `active` + frischer als `ADAPTIVE_STATE_MAX_AGE_MS`).
+- **Monitoring & API:** Monitor-Tick-Hook nach `updateAdaptiveRisk()` (`TickResult.volatilityTargeting`), `GET /api/firm/risk/volatility-targeting` (Status inkl. Target-Error; `firm.read`), `POST` (forced Update, `firm.write`), `GET /api/firm/risk/volatility` +`volatilityTargeting`. Soll-Ist-Monitoring: realisierte Volatilität (ohne Shrinkage) + `targetError = realized − target` je Snapshot.
+- **Backtest-Integration (`src/backtest/engine.ts`):** Opt-in `config.volatilityTargeting { config?, annualization? }`; `undefined` ⇒ Byte-identische Default-Läufe (kein stilles Verhalten). In jedem Bar-Schritt derselbe pure Kern; Faktor skaliert das Risikobudget (`≤ 1`); Ergebnis `result.volatilityTargeting` mit `factorByBar`, `fallbacksByReason` u. a.; as-of = Bar-Pointer (kein Look-ahead).
+- **Dokumentation:** neues [`docs/VOLATILITY_TARGETING.md`](docs/VOLATILITY_TARGETING.md) (Mathematik, Fail-closed-Matrix, Zeitsemantik, Annualisierung, Persistenz/Idempotenz, Observability, Migration/Rollback, Test-Matrix, Annahmen), `CONFIGURATION.md` (§ Portfolio-Volatility-Targeting), `.env.example`, `docs/README.md`.
+- **Tests (Pflicht-Matrix):** `tests/portfolio.volatilityTargeting.test.ts` (exakte closed-form Forecasts für diagonale/korrelierte Kovarianz, Monotonie, Clamp/Smoothing/Max-Step, NaN/singulär/stale/geringe Coverage ⇒ konservativer Fallback, Annualisierung Asset/Timeframe inkl. 5m-Krypto-Regression 105.120, Realisierung + Target-Error, Look-ahead/As-of, Determinismus, Idempotency-Key/Hash-Stabilität), `tests/riskGuard.volTargeting.test.ts` (Monitor-only ändert nichts, kombinierter Faktor überschreitet Basis/Ceilings nie, Boden, keine Kumulation), `tests/volatilityTargeting.engine.test.ts` (Modi, Fail-closed-Paths, Idempotenz, Single-Flight/Min-Interval, Status-API), `tests/volatilityTargeting.db.test.ts` (embedded Postgres: Migration idempotent, Roundtrip über den echten Persistenzpfad, Retry ⇒ keine doppelte Zeile, CHECK-Constraints), `tests/backtest.volatilityTargeting.test.ts` (undefined ⇒ byte-identisch + kein Summary-Feld, Determinismus, höhere Vol ⇒ kleinerer Sizing, kein Look-ahead im `factorByBar`).
+
+### Geändert
+
+- `src/portfolio/config.ts`: `validateAnnualization`-Obergrenze 100.000 → 200.000 Perioden/Jahr (5-Minuten-Krypto = 105.120 war zuvor unplausibilisiert und hätte jede 5m-Serie unbrauchbar gemacht).
+- `src/lib/monitor.ts`: `doTick` ruft `updateVolatilityTargeting()` auf (Fehler landen in `TickResult.errors`, brechen den Tick nie ab).
+- `src/lib/microExecutor.ts`: `ensureRuntimeLimitsLoaded` hydratiert den persistierten Faktor (nur `active` + frisch).
+- `src/lib/telemetry.ts`: bounded Counter `volatilityTargeting.{updates,fallbacks,snapshots}` (Labels `result`/`mode`/`reason`, keine Instrument-/Order-IDs).
+
+### Migration / Rollback
+
+- Migration: `npx drizzle-kit push` oder `psql "$DATABASE_URL" -f drizzle/2026-09-22_volatility_targeting.sql` (idempotent, zweifach ausführbar). Keine bestehende Tabelle wird verändert, kein Backfill.
+- Deployment-Default ist `monitor`: nach dem Deploy ändert sich **nichts** an den Ordergrößen, bis `PORTFOLIO_VOL_TARGETING_MODE=active` gesetzt wird.
+- Rollback: `PORTFOLIO_VOL_TARGETING_MODE=off` (oder `monitor`) + Restart — Faktor sofort zurückgenommen, Snapshots bleiben als Historie lesbar; optional `DROP TABLE IF EXISTS "volatility_targeting_snapshots" CASCADE;` (nur ohne laufenden v1.67.0-Code).
 
 ## [1.66.0] — 2026-09-22 · Strukturierter Devil’s-Advocate-Agent (RMA-P3-03)
 

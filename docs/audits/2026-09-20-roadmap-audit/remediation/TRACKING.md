@@ -3,7 +3,7 @@
 **Single Source of Truth für den Status dieses Auditzyklus.**
 Audit-Basis: `df3163e` / `v1.51.1`
 Audit-Paket: [PR #148](https://github.com/Kryschuuu/ai-trading-firm/pull/148), Commit `c8dded3`, Zielversion `v1.51.3`
-Letzte Aktualisierung: 2026-09-22 (RMA-P2-05 → FIXED, v1.64.0)
+Letzte Aktualisierung: 2026-09-22 (RMA-P5-01 → FIXED, v1.67.0)
 
 ## Statusmodell
 
@@ -48,7 +48,7 @@ codebasierten Detailbefund.
 | RMA-P4-01 | Execution-Benchmarking | FIXED | [P4-01](../prompts/PROMPT-P4-01-execution-benchmarking.md) | [#153](https://github.com/Kryschuuu/ai-trading-firm/pull/153) | `99919bc`, `fb295ab` | `v1.56.0` | Automatischer Paper-/Broker-/Backtest-Pfad, durable Retry-Recovery, As-of-Markouts; 25/25 gezielt; Gesamtsuite 2798 bestanden/30 Skips/0 Fehler; Typecheck/Lint/Docs/Build/Bundle-Scan erfolgreich |
 | RMA-P4-02 | Post-Only-Fallback | PARTIAL | [P4-02](../prompts/PROMPT-P4-02-post-only-fallback.md) | — | — | — | Auditbefund |
 | RMA-P4-03 | TWAP/Depth | OPEN | [P4-03](../prompts/PROMPT-P4-03-twap-depth.md) | — | — | — | Auditbefund |
-| RMA-P5-01 | Volatility Targeting | PARTIAL | [P5-01](../prompts/PROMPT-P5-01-volatility-targeting.md) | — | — | — | Auditbefund |
+| RMA-P5-01 | Volatility Targeting | FIXED | [P5-01](../prompts/PROMPT-P5-01-volatility-targeting.md) | [#166](https://github.com/Kryschuuu/ai-trading-firm/pull/166) | `64e3d87` | v1.67.0 | `tests/portfolio.volatilityTargeting.test.ts` (37: exakte closed-form Forecasts diagonal/korreliert, Monotonie, Clamp/Smoothing/Max-Step, NaN/singulär/stale/LOW_COVERAGE ⇒ konservativer Fallback, Annualisierung Asset/Timeframe inkl. 5m-Krypto-Regression 105.120, Realisierung+Target-Error, Look-ahead/As-of, Determinismus, Idempotency-Key/Hash-Stabilität), `tests/riskGuard.volTargeting.test.ts` (15: Monitor-only ändert nichts, kombinierter Faktor ≤ Basis/Ceilings, Boden, keine Kumulation, persisted-Modus), `tests/volatilityTargeting.engine.test.ts` (13: Modi monitor/active/off, Fail-closed-Paths, Idempotenz, Single-Flight/Min-Interval, Status-API), `tests/volatilityTargeting.db.test.ts` (5, eingebettete Postgres: Migration zweifach idempotent, Roundtrip über echten Persistenzpfad, Retry ⇒ keine doppelte Zeile, CHECK-Constraints), `tests/backtest.volatilityTargeting.test.ts` (6: undefined ⇒ byte-identisch + kein Summary-Feld, Determinismus, höhere Vol ⇒ kleinerer Sizing, kein Look-ahead im factorByBar, Fallback-Zählung); alle 76 neuen VT-Tests grün; typecheck/lint/docs:validate grün; `npm test`-Volllauf: nur 4 vorbestehende, nicht-VT-Failures (auditReliability×2, sentiment-API — isoliert grün, auf Basis dd0679f reproduzierbar) |
 | RMA-P5-02 | Fractional Kelly | VERIFIED | — | — | `df3163e` | v1.51.1 | `tests/positionSizing.test.ts` |
 | RMA-P5-03 | Cluster-Limits | VERIFIED | — | — | `df3163e` | v1.51.1 | Portfolio-Risk-Guard-Tests |
 | RMA-P5-04 | Drawdown-Scaling | PARTIAL | [P5-04](../prompts/PROMPT-P5-04-drawdown-scaling.md) | — | — | — | Auditbefund |

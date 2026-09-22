@@ -30,6 +30,7 @@ import { PaperBroker } from "./broker";
 import {
   ADAPTIVE_STATE_MAX_AGE_MS,
   applyAdaptiveRisk,
+  applyVolatilityTargeting,
   getAdaptiveRiskState,
   getLimits,
   killSwitch,
@@ -38,6 +39,7 @@ import {
   riskValidationReason,
   type RiskLimits,
 } from "./riskGuard";
+import { resolveVolTargetingMode } from "./volatilityTargeting";
 // GAP-04 (v1.48.0): Vol-basiertes Sizing (ATR-Fallback-Stop + Fractional-Kelly)
 // und Cluster-Exposure-Guardrail (Schicht 3) — LLM-frei (nur Portfolio-Mathe,
 // LocalStore, DB/Audit).
@@ -507,11 +509,16 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
     const raw: Record<string, number> = {};
     let activeFactor: number | null = null;
     let activeAtMs: number | null = null;
+    // RMA-P5-01 (v1.67.0): persistierter Volatility-Targeting-Faktor.
+    let vtpFactor: number | null = null;
+    let vtpAtMs: number | null = null;
     for (const r of rows) {
       const n = Number(r.value);
       if (!Number.isFinite(n)) continue;
       if (r.key === "adp.activeFactor") activeFactor = n;
       else if (r.key === "adp.activeAt") activeAtMs = n * 1000;
+      else if (r.key === "vtp.activeFactor") vtpFactor = n;
+      else if (r.key === "vtp.activeAt") vtpAtMs = n * 1000;
       else raw[r.key] = n;
     }
     applyRuntimeLimits(raw as Partial<RiskLimits>);
@@ -532,6 +539,27 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
         });
       } else {
         applyAdaptiveRisk(null);
+      }
+    }
+
+    // RMA-P5-01 (v1.67.0): Volatility-Targeting-Faktor. Der Mikro-Prozess
+    // wendet den persistierten Faktor NUR an, wenn sein eigener Modus
+    // `active` ist (Feature-Flag-Parität mit dem Main-Prozess) und der
+    // Faktor frisch ist. Im Modus `monitor`/`off` bleibt er wirkungslos —
+    // die Reduktion ist dann reine Beobachtung.
+    if (resolveVolTargetingMode() === "active") {
+      if (vtpFactor != null && vtpAtMs != null && vtpFactor > 0 && vtpFactor <= 1) {
+        if (Date.now() - vtpAtMs < ADAPTIVE_STATE_MAX_AGE_MS) {
+          applyVolatilityTargeting({
+            factor: vtpFactor,
+            reason: "persistierter Volatility-Targeting-Faktor des Main-Prozesses",
+            at: new Date(vtpAtMs).toISOString(),
+            asOf: null,
+            mode: "persisted",
+          });
+        } else {
+          applyVolatilityTargeting(null);
+        }
       }
     }
     G.__microLimitsLoadedAt = Date.now();

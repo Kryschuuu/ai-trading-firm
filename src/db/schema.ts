@@ -2245,3 +2245,136 @@ export const agentPromptRuns = pgTable(
     check("agent_prompt_runs_idempotency_check", sql`${t.idempotencyKey} ~ '^pr1:[0-9a-f]{64}$'`),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Portfolio-Volatility-Targeting (RMA-P5-01, v1.67.0) — append-only
+//
+// Eine Tabelle, ausschließlich additiv (Migration
+// `drizzle/2026-09-22_volatility_targeting.sql`):
+//
+//   volatility_targeting_snapshots  EINE Zeile je Volatility-Targeting-Snapshot
+//                                   (Forecast + angewendeter Multiplikator +
+//                                   Soll-Ist-Abgleich), append-only.
+//
+// Zeitsemantik:
+//   as_of        = Entscheidungszeitpunkt (ms-epoch, timestamptz). Alle
+//                  Returns stammen aus Kerzen mit Event-Time ≤ as_of.
+//   computed_at  = Berechnungszeit des Snapshots. NIEMALS älter als as_of.
+//   event_time   = jüngstes Event der ÄLTESTEN Komponente (ms-epoch) —
+//                  Frischegrenze des Forecasts. NULL ohne Daten (Fallback).
+//
+// Fail-closed: `forecast_annualized_vol` ist NULL bei Fallback (nicht 0);
+// `raw_multiplier` ist NULL, wenn der rohe Wert nicht berechenbar ist.
+// `applied_multiplier` ist IMMER endlich und ≤ 1 (CHECK-Constraint).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const volatilityTargetingSnapshots = pgTable(
+  "volatility_targeting_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `vt1:<sha256>` — deterministischer Idempotency-Key (Retry ⇒ No-Op). */
+    snapshotId: text("snapshot_id").notNull(),
+    /** Betriebsmodus: `monitor` (keine Ordergrößenänderung) | `active`. */
+    mode: text("mode").notNull(),
+    /** `true` wenn Mode = `monitor` (redundant mit `mode`, CHECK-geprüft). */
+    monitorOnly: boolean("monitor_only").notNull(),
+    /** Status: `OK` | `FALLBACK` | `NO_EXPOSURE` (geschlossen). */
+    status: text("status").notNull(),
+    /** Geschlossener Grund-Code (bounded, z. B. `STALE_DATA`, `OK`). */
+    reasonCode: text("reason_code").notNull(),
+    /** Menschenlesbare Begründung (Audit/Status). */
+    reason: text("reason").notNull(),
+    /** Entscheidungszeitpunkt (timestamptz). */
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    /** Berechnungszeit (timestamptz), immer ≥ as_of. */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    /** Jüngstes Event der ältesten Komponente (timestamptz) — NULL bei Fallback. */
+    eventTime: timestamp("event_time", { withTimezone: true }),
+    /** Annualisiertes Volatilitätsziel (dezimal, 0.30 = 30 % p. a.). */
+    targetAnnualizedVol: numeric("target_annualized_vol").notNull(),
+    /** Annualisierte Forecast-Volatilität (dezimal) — NULL bei Fallback. */
+    forecastAnnualizedVol: numeric("forecast_annualized_vol"),
+    /** Annualisierte realisierte Volatilität (dezimal) — NULL wenn nicht berechenbar. */
+    realizedAnnualizedVol: numeric("realized_annualized_vol"),
+    /** Target Error = realisiert − Ziel (dezimal) — NULL wenn realisiert null. */
+    targetError: numeric("target_error"),
+    /** Roher Multiplikator (vor Clamp/Smoothing/Step) — NULL bei Fallback. */
+    rawMultiplier: numeric("raw_multiplier"),
+    /** Letzter angewendeter Multiplikator (vor diesem Schritt). */
+    prevMultiplier: numeric("prev_multiplier").notNull(),
+    /** Tatsächlich angewendeter Multiplikator (IMMER endlich, ≤ 1, > 0). */
+    appliedMultiplier: numeric("applied_multiplier").notNull(),
+    /** Gewichtete Datenabdeckung ∈ [0, 1]. */
+    coverage: numeric("coverage").notNull(),
+    /** Anzahl Perioden T (0 bei Fallback). */
+    observations: integer("observations").notNull(),
+    /** Effektive Annualisierung (Perioden/Jahr). */
+    annualization: numeric("annualization").notNull(),
+    /** Angewendete Shrinkage κ. */
+    shrinkage: numeric("shrinkage").notNull(),
+    /** Angewendete Regularisierung: `none` | `ridge` | `skipped`. */
+    regularization: text("regularization").notNull(),
+    /** Normalisierte Zielgewichte (Instrument-ID → Anteil), jsonb. */
+    weights: jsonb("weights").notNull().$type<Record<string, number>>(),
+    /** Konfigurations-Hash `cfg1:<sha256>` (Reproduzierbarkeit). */
+    configHash: text("config_hash").notNull(),
+    /** Daten-Hash `data1:<sha256>` (Reproduzierbarkeit). */
+    dataHash: text("data_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("volatility_targeting_snapshots_id_unique").on(t.snapshotId),
+    index("volatility_targeting_snapshots_asof_idx").on(t.asOf),
+    index("volatility_targeting_snapshots_status_idx").on(t.status),
+    index("volatility_targeting_snapshots_mode_idx").on(t.mode),
+    check("volatility_targeting_snapshots_mode_check", sql`${t.mode} IN ('monitor','active')`),
+    check(
+      "volatility_targeting_snapshots_monitor_only_check",
+      sql`${t.monitorOnly} = (${t.mode} = 'monitor')`
+    ),
+    check(
+      "volatility_targeting_snapshots_status_check",
+      sql`${t.status} IN ('OK','FALLBACK','NO_EXPOSURE')`
+    ),
+    check(
+      "volatility_targeting_snapshots_time_check",
+      sql`${t.computedAt} >= ${t.asOf}`
+    ),
+    check(
+      "volatility_targeting_snapshots_multiplier_check",
+      sql`${t.appliedMultiplier} > 0 AND ${t.appliedMultiplier} <= 1`
+    ),
+    check(
+      "volatility_targeting_snapshots_raw_multiplier_check",
+      sql`${t.rawMultiplier} IS NULL OR ${t.rawMultiplier} > 0`
+    ),
+    check(
+      "volatility_targeting_snapshots_prev_multiplier_check",
+      sql`${t.prevMultiplier} > 0 AND ${t.prevMultiplier} <= 1`
+    ),
+    check(
+      "volatility_targeting_snapshots_coverage_check",
+      sql`${t.coverage} >= 0 AND ${t.coverage} <= 1`
+    ),
+    check(
+      "volatility_targeting_snapshots_observations_check",
+      sql`${t.observations} >= 0`
+    ),
+    check(
+      "volatility_targeting_snapshots_regularization_check",
+      sql`${t.regularization} IN ('none','ridge','skipped')`
+    ),
+    check(
+      "volatility_targeting_snapshots_snapshot_id_check",
+      sql`${t.snapshotId} ~ '^vt1:[0-9a-f]{64}$'`
+    ),
+    check(
+      "volatility_targeting_snapshots_config_hash_check",
+      sql`${t.configHash} ~ '^cfg1:[0-9a-f]{64}$'`
+    ),
+    check(
+      "volatility_targeting_snapshots_data_hash_check",
+      sql`${t.dataHash} ~ '^data1:[0-9a-f]{64}$'`
+    ),
+  ]
+);

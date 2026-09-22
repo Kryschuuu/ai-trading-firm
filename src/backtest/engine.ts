@@ -47,6 +47,18 @@ import {
   type HistoricalStore,
   type SupportedTimeframe,
 } from "../lib/marketdata/historicalStore";
+import {
+  DEFAULT_VOLATILITY_TARGETING_CONFIG,
+  computeVolatilityTargetingFromInput,
+  resolveVolatilityTargetingConfig,
+  type VolatilityForecastInput,
+  type VolatilityForecastSeries,
+  type VolatilityTargetingConfig,
+} from "../portfolio/volatilityTargeting";
+import type {
+  BacktestVolatilityTargetingConfig,
+  BacktestVolatilityTargetingSummary,
+} from "./types";
 import { metricLabel, telemetry } from "../lib/telemetry";
 import type { TradeSetupProposal } from "../cycle/schemas";
 
@@ -205,6 +217,16 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
 
   const currentPrices = new Map<string, number>();
 
+  // RMA-P5-01 (v1.67.0): Volatility-Targeting-Laufzeit (Opt-in).
+  // `undefined` (Default) ⇒ komplett inaktiv: gleicher Code-Pfad wie vor
+  // v1.67.0, Byte-identische Default-Läufe.
+  const vtRuntime = createVolatilityTargetingRuntime(config.volatilityTargeting, config.timeframe);
+  const factorByBar = vtRuntime
+    ? new Array<number>(timeline.length).fill(1)
+    : [];
+  const vtRiskBudget = (budget: number | undefined): number | undefined =>
+    vtRuntime ? (budget ?? config.maxRiskPerTrade) * vtRuntime.currentFactor : budget;
+
   // GAP-01: Paper-Einstieg (Regel- und Setup-Pfad teilen sich diese Abwicklung).
   const openPaperEntry = (
     strategyId: string,
@@ -303,6 +325,22 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       }
     }
 
+    // c-vt) RMA-P5-01: Volatility-Targeting-Faktor für diesen Bar-Schritt
+    // (einmal je Bar, deterministisch; as-of = currentTime, identisch zur
+    // Verfügbarkeitskonvention der Engine: Kerzen mit time ≤ currentTime).
+    if (vtRuntime) {
+      const factor = computeVtFactorForBar({
+        runtime: vtRuntime,
+        portfolio,
+        candlesIndexed,
+        symbolPointers,
+        currentPrices,
+        currentTime,
+      });
+      vtRuntime.currentFactor = factor;
+      factorByBar[barStep - 1] = factor;
+    }
+
     // c) Signal-Prüfung & Neueinstiege
     // Nur nach Warmup-Phase
     if (barStep >= config.warmupBars) {
@@ -343,7 +381,9 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
               currentEquity,
               entryPrice,
               stopLoss,
-              spec.action.riskBudgetPct,
+              // RMA-P5-01: Volatility-Targeting-Faktor skaliert das
+              // Risikobudget (≤ 1 — kann nur senken).
+              vtRiskBudget(spec.action.riskBudgetPct),
               spec.action.maxPositionPct
             );
 
@@ -399,7 +439,9 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
               currentEquity,
               entryPrice,
               evalItem.stopLoss,
-              evalItem.riskBudgetPct,
+              // RMA-P5-01: Volatility-Targeting-Faktor skaliert das
+              // Risikobudget (≤ 1 — kann nur senken).
+              vtRiskBudget(evalItem.riskBudgetPct),
               config.maxPositionPct
             );
 
@@ -543,6 +585,8 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
     perSymbolStats,
     perStrategyStats,
     executionDurationMs: Number((performance.now() - startTime).toFixed(2)),
+    // RMA-P5-01 (v1.67.0): Volatility-Targeting-Evidenz (nur wenn aktiviert).
+    ...(vtRuntime ? { volatilityTargeting: buildVtSummary(vtRuntime, factorByBar) } : {}),
   };
 }
 
@@ -622,4 +666,202 @@ export function runSetupsBacktest(
     strategies,
     config: { ...options, timeframe },
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RMA-P5-01 (v1.67.0): Volatility-Targeting für den Backtest
+//
+// Teilt mit dem Live-Pfad die PURE Kernfunktion `computeVolatilityTargetingFromInput`
+// (`src/portfolio/volatilityTargeting.ts`). Die Engine unterscheidet sich nur
+// im Datenzugriff (replay aus `candlesIndexed` statt DB/Kerzen-Fetcher) und
+// der Zeitsemantik: as-of = `currentTime`, identisch zur Verfügbarkeits-
+// konvention der Engine (Kerzen mit `time ≤ currentTime` sind verfügbar).
+//
+// Determinismus: gleicher Input ⇒ bit-identischer Faktor-Verlauf (reine
+// Funktion, keine Uhr, kein Zufall). Fail-closed: stale/ill-conditioned/
+// geringe Abdeckung ⇒ minMultiplier (konservativ ≤ 1).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Laufzeit-Zustand des Backtest-Volatility-Targetings (pro Lauf). */
+interface VtRuntime {
+  config: VolatilityTargetingConfig;
+  /** Annualisierung für alle Serien (Perioden/Jahr). */
+  annualization: number;
+  /** Letzter angewendeter Multiplikator (Smoothing-/Step-Anker). */
+  prevMultiplier: number;
+  /** Multiplikator für den aktuellen Bar-Schritt (1 = neutral). */
+  currentFactor: number;
+  /** Anzahl berechneter Bar-Schritte. */
+  updates: number;
+  /** Anzahl Fallback-Schritte. */
+  fallbacks: number;
+  /** Fallbacks je geschlossenen Grund-Code. */
+  fallbacksByReason: Record<string, number>;
+  /** Anzahl NO_EXPOSURE-Schritte. */
+  noExposureSteps: number;
+  /** Letzter Forecast (null wenn nie berechenbar). */
+  lastForecast: number | null;
+}
+
+/**
+ * Erzeugt die VT-Laufzeit aus der (optionalen) Konfiguration.
+ * `undefined` ⇒ `null` (Feature deaktiviert, Byte-kompatible Default-Läufe).
+ */
+function createVolatilityTargetingRuntime(
+  input: BacktestVolatilityTargetingConfig | undefined,
+  timeframe: SupportedTimeframe
+): VtRuntime | null {
+  if (!input) return null;
+  const tfMs = SUPPORTED_TIMEFRAME_MS[timeframe];
+  const annualization =
+    input.annualization && Number.isFinite(input.annualization) && input.annualization > 0
+      ? input.annualization
+      : (365 * 86_400_000) / tfMs; // 24/7-Krypto-Default (Perioden/Jahr)
+  const config = resolveVolatilityTargetingConfig({
+    ...(input.config ?? {}),
+    // Der Backtest wendet den Faktor an, wenn dieses Objekt gesetzt ist —
+    // `mode` ist im Backtest-Kontext ohne Bedeutung und wird neutralisiert.
+    enabled: true,
+    mode: "active" as const,
+  });
+  return {
+    config,
+    annualization,
+    prevMultiplier: config.maxMultiplier,
+    currentFactor: 1,
+    updates: 0,
+    fallbacks: 0,
+    fallbacksByReason: {},
+    noExposureSteps: 0,
+    lastForecast: null,
+  };
+}
+
+/**
+ * Berechnet den Volatility-Targeting-Faktor für einen Bar-Schritt.
+ *
+ * Input: aktuelle offenen Positionen (Gewichte = Notional-Anteile,
+ * Long-only Total-Exposure) + as-of-sichere Returns aus `candlesIndexed`
+ * (nur Kerzen mit `time ≤ currentTime`). Derselbe pure Kern wie Live.
+ */
+function computeVtFactorForBar(args: {
+  runtime: VtRuntime;
+  portfolio: BacktestPortfolio;
+  candlesIndexed: Map<string, CandleLike[]>;
+  symbolPointers: Map<string, number>;
+  currentPrices: Map<string, number>;
+  currentTime: number;
+}): number {
+  const { runtime, portfolio, candlesIndexed, symbolPointers, currentPrices, currentTime } = args;
+  const cfg = runtime.config;
+
+  // 1) Gewichte aus offenen Positionen (Notional-Anteile, |qty| × Preis).
+  const posList = portfolio.openPositionsList;
+  if (posList.length === 0) {
+    runtime.noExposureSteps++;
+    runtime.currentFactor = cfg.maxMultiplier;
+    runtime.prevMultiplier = cfg.maxMultiplier;
+    return cfg.maxMultiplier;
+  }
+  const notional: Record<string, number> = {};
+  for (const p of posList) {
+    const price = currentPrices.get(p.symbol) ?? p.entryPrice;
+    const px = Number.isFinite(price) && price > 0 ? price : p.entryPrice;
+    const n = Math.abs(p.qty) * px;
+    if (!Number.isFinite(n) || n <= 0) continue;
+    notional[p.symbol] = (notional[p.symbol] ?? 0) + n;
+  }
+  const totalNotional = Object.values(notional).reduce((a, b) => a + b, 0);
+  if (totalNotional <= 0) {
+    runtime.noExposureSteps++;
+    runtime.currentFactor = cfg.maxMultiplier;
+    runtime.prevMultiplier = cfg.maxMultiplier;
+    return cfg.maxMultiplier;
+  }
+
+  // 2) Returns aus as-of-sicheren Kerzen (time ≤ currentTime).
+  const lookback = cfg.lookbackPeriods;
+  const series: VolatilityForecastSeries[] = [];
+  for (const sym of Object.keys(notional).sort()) {
+    const candles = candlesIndexed.get(sym) ?? candlesIndexed.get(nativeSymbolOf(sym));
+    if (!candles || candles.length === 0) continue;
+    const ptr = symbolPointers.get(sym) ?? symbolPointers.get(nativeSymbolOf(sym)) ?? 0;
+    // Letztens (lookback+1) Kerze vor dem Pointer (index-aligned, kein Look-ahead).
+    const from = Math.max(0, ptr - (lookback + 1));
+    const window = candles.slice(from, ptr);
+    if (window.length < 2) continue;
+    const returns: number[] = [];
+    const eventTimes: number[] = [];
+    for (let i = 1; i < window.length; i++) {
+      const prev = window[i - 1].close;
+      const cur = window[i].close;
+      if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) continue;
+      returns.push(Math.log(cur / prev));
+      eventTimes.push(window[i].time);
+    }
+    if (returns.length === 0) continue;
+    series.push({
+      symbol: sym,
+      weight: notional[sym] / totalNotional,
+      annualization: runtime.annualization,
+      logReturns: returns,
+      eventTimes,
+    });
+  }
+
+  // 3) Gemeinsame Länge (index-aligned vom jüngsten Zeitpunkt).
+  if (series.length > 0) {
+    const commonLength = Math.min(...series.map((s) => s.logReturns.length));
+    if (commonLength >= 2) {
+      for (const s of series) {
+        s.logReturns = s.logReturns.slice(-commonLength);
+        s.eventTimes = s.eventTimes.slice(-commonLength);
+      }
+    }
+  }
+
+  // 4) Pure Forecast + Multiplikator (gemeinsam mit Live).
+  const input: VolatilityForecastInput = {
+    series,
+    asOf: currentTime,
+    computedAt: currentTime,
+    config: cfg,
+  };
+  const result = computeVolatilityTargetingFromInput(input, runtime.prevMultiplier);
+
+  runtime.updates++;
+  runtime.prevMultiplier = result.appliedMultiplier;
+  runtime.lastForecast = result.forecast.forecastAnnualizedVol;
+  if (result.outcome === "fallback") {
+    runtime.fallbacks++;
+    const code = result.forecast.reasonCode;
+    runtime.fallbacksByReason[code] = (runtime.fallbacksByReason[code] ?? 0) + 1;
+  } else if (result.outcome === "no_exposure") {
+    runtime.noExposureSteps++;
+  }
+
+  return result.appliedMultiplier;
+}
+
+/** Löst ein Symbol auf den venue-nativen Teil auf (für Candle-Map-Lookup). */
+function nativeSymbolOf(symbol: string): string {
+  const idx = symbol.indexOf(":");
+  return idx > 0 && idx < symbol.length - 1 ? symbol.slice(idx + 1) : symbol;
+}
+
+/** Baut die Summary für das Ergebnis-Objekt. */
+function buildVtSummary(
+  runtime: VtRuntime,
+  factorByBar: number[]
+): BacktestVolatilityTargetingSummary {
+  return {
+    config: { ...runtime.config },
+    updates: runtime.updates,
+    fallbacks: runtime.fallbacks,
+    fallbacksByReason: { ...runtime.fallbacksByReason },
+    noExposureSteps: runtime.noExposureSteps,
+    lastForecastAnnualizedVol: runtime.lastForecast,
+    lastAppliedMultiplier: runtime.currentFactor,
+    factorByBar: factorByBar.slice(),
+  };
 }

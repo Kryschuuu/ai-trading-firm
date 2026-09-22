@@ -235,14 +235,18 @@ export function validateRegimeThresholds(input: RegimeThresholds): RegimeThresho
 }
 
 /**
- * Validiert einen Annualisierungsfaktor (≥ 1 Periode pro Jahr, ≤ 100.000).
+ * Validiert einen Annualisierungsfaktor (≥ 1 Periode pro Jahr, ≤ 200.000).
+ *
+ * Die Obergrenze muss die plausibelste reale Kombination tragen:
+ * 5-Minuten-Krypto = 288 Perioden/Tag × 365 Tage = 105.120 (RMA-P5-01,
+ * v1.67.0). Höhere Werte wären physikalisch unplausibel.
  *
  * @throws PortfolioError `INVALID_INPUT`.
  */
 export function validateAnnualization(value: number): number {
   const v = requireFiniteAtLeast(value, 1, "annualization");
-  if (v > 100_000) {
-    throw new PortfolioError("INVALID_INPUT", "annualization > 100000 ist unplausibel", {
+  if (v > 200_000) {
+    throw new PortfolioError("INVALID_INPUT", "annualization > 200000 ist unplausibel", {
       field: "annualization",
     });
   }

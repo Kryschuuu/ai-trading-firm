@@ -13,6 +13,7 @@ import type { TradeSetupProposal } from "../cycle/schemas";
 import type { CandleLike } from "../lib/ruleEngine";
 import type { PaperBacktestOptions } from "./paperExecution";
 import type { EventReplayOptions, EventReplayRunSummary } from "./replayEvents";
+import type { VolatilityTargetingConfig } from "../portfolio/volatilityTargeting";
 
 export type SlippageModel = "fixed" | "spread_relative" | "none";
 
@@ -74,6 +75,38 @@ export interface BacktestEngineConfig {
    * Ereignisse, Order-TTL, Seed. Siehe `./replayEvents.ts`.
    */
   replay?: EventReplayOptions;
+  /**
+   * RMA-P5-01 (v1.67.0): Portfolio-Volatility-Targeting für den Backtest.
+   *
+   * `undefined` (Default) = DEAKTIVIERT — der Lauf ist Byte-identisch zu
+   * allen bisherigen Ausführungen (kein stilles Verhalten). Ein Objekt
+   * aktiviert den kontinuierlichen Risikomultiplikator: in jedem Bar-Schritt
+   * wird derselbe pure Kern (`src/portfolio/volatilityTargeting.ts`) wie im
+   * Live-Pfad auf die aktuellen offenen Positionen + as-of-sicheren Returns
+   * angewendet; der resultierende Faktor (≤ 1) skaliert das Risikobudget.
+   *
+   * `annualization` überschreibt die Auto-Ableitung (Perioden/Jahr, Default
+   * 24/7-Krypto: `msPerYear / timeframeMs`).
+   */
+  volatilityTargeting?: BacktestVolatilityTargetingConfig;
+}
+
+/** Teilkonfiguration des Backtest-Volatility-Targetings (additiv, Opt-in). */
+export interface BacktestVolatilityTargetingConfig {
+  /**
+   * Volle Konfiguration des pure Kernels (Default:
+   * `DEFAULT_VOLATILITY_TARGETING_CONFIG` mit `mode: "active"`). `mode` wird
+   * hier bewusst ignoriert — die Engine wendet den Faktor an, wenn dieses
+   * Objekt gesetzt ist (Rollout-Flag ist die Anwesenheit).
+   */
+  config?: Partial<VolatilityTargetingConfig>;
+  /**
+   * Annualisierungsfaktor (Perioden/Jahr) für ALLE Serien. Default:
+   * `msPerYear / timeframeMs` (24/7, z. B. 8760 für 1h). Überschreibt die
+   * Live-Ableitung (Asset-Klasse), weil die Backtest-Engine keine
+   * Asset-Klassenzuordnung pro Symbol kennt.
+   */
+  annualization?: number;
 }
 
 /** Teilkonfiguration für Aufrufer mit sinnvollen Defaults. */
@@ -249,6 +282,36 @@ export interface MultiAssetBacktestResult {
   perSymbolStats: Record<string, SymbolBacktestStats>;
   perStrategyStats: Record<string, StrategyBacktestStats>;
   executionDurationMs: number;
+  /**
+   * RMA-P5-01 (v1.67.0): Volatility-Targeting-Evidenz (additiv; fehlt bei
+   * deaktiviertem Feature — Byte-kompatible Default-Läufe). Deterministisch:
+   * gleicher Input ⇒ identisches Objekt. `factorByBar[t]` ist der auf das
+   * Risikobudget angewendete Multiplikator am Bar-Schritt t (1 = neutral).
+   */
+  volatilityTargeting?: BacktestVolatilityTargetingSummary;
+}
+
+/** Zusammenfassung des Volatility-Targetings eines Backtest-Laufs. */
+export interface BacktestVolatilityTargetingSummary {
+  /** Konfiguration des Laufs (resolved). */
+  config: VolatilityTargetingConfig;
+  /** Anzahl Bar-Schritte, in denen ein Faktor berechnet wurde. */
+  updates: number;
+  /** Anzahl der Fallback-Schritte (fail-closed → minMultiplier). */
+  fallbacks: number;
+  /** Fallbacks je geschlossenem Grund-Code. */
+  fallbacksByReason: Record<string, number>;
+  /** Anzahl der NO_EXPOSURE-Schritte (keine offenen Positionen). */
+  noExposureSteps: number;
+  /** Letzter Forecast (null wenn nie berechenbar). */
+  lastForecastAnnualizedVol: number | null;
+  /** Letzter angewendeter Multiplikator. */
+  lastAppliedMultiplier: number;
+  /**
+   * Multiplikator je Bar-Schritt (Index = barStep − 1; 1 = kein Schritt
+   * berechnet / neutral). Bounded durch die Laufdauer.
+   */
+  factorByBar: number[];
 }
 
 /** Eingabe-Kerzenzuordnung für die Engine: Symbol -> Kerzen. */
