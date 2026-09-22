@@ -202,6 +202,7 @@ function temperatureForRole(role: string): number {
     case "RISK_MANAGER":
     case "APPROVER":
     case "BACKTEST":
+    case "DEVILS_ADVOCATE":
       return 0.1;
     default:
       return 0.3;
@@ -332,6 +333,25 @@ export function fallbackReason(role: string, prompt: string): string {
         type: "APPROVE",
         reason: "Vorschlag entspricht Mandat und harten Limits. Freigegeben.",
         riskScore: 0.3,
+      });
+
+    case "DEVILS_ADVOCATE":
+      return JSON.stringify({
+        analyses: [
+          {
+            instrumentId: symbol || "BTC",
+            side: "LONG",
+            abstain: false,
+            counterThesis: `Gegenhypothese für ${symbol || "BTC"}: Starker Widerstand und nachlassendes Volumen signalisieren Erschöpfung.`,
+            strongestOpposingEvidence: "Volumendivergenz auf höheren Zeitebenen und überhitztes Orderbuch.",
+            missingEvidence: "Bestätigter Ausbruch mit institutionellem Folgevolumen fehlt.",
+            falsifiers: ["Schlusskurs unter EMA21", "Volumeneinbruch an der Range-Kante"],
+            failureModes: ["Bullentrap", "Liquidations-Squeeze der Spätkäufer"],
+            citations: ["EMA21", "Orderbuch-Tiefe"],
+            confidence: 0.65,
+            severity: 0.60,
+          },
+        ],
       });
 
     case "EXECUTOR":

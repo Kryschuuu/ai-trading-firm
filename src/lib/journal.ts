@@ -58,7 +58,7 @@ export type JournalAttribution = "PROPOSAL" | "RULE" | "UNKNOWN";
 export interface JournalVote {
   /** Agentenname zum Zeitpunkt des Turns (Audit-Snapshot, rename-resistent). */
   name: string;
-  /** Agentenrolle (CEO | RESEARCH | BACKTEST | RISK_MANAGER | APPROVER | EXECUTOR | …). */
+  /** Agentenrolle (CEO | RESEARCH | BACKTEST | RISK_MANAGER | APPROVER | EXECUTOR | DEVILS_ADVOCATE | …). */
   role: string;
   /** Entscheidungstyp des Turns (TRADE | HOLD | APPROVE | REJECT | REPORT | KILL | …). */
   vote: string;
@@ -113,6 +113,19 @@ export interface DecisionSnapshotVersions {
    * hat keine Daten übergeben (sichtbare Lücke, nichts geraten).
    */
   dataFingerprint: string | null;
+  /**
+   * RMA-P3-03: Devil's-Advocate-Falsifikationsnachweis (additiv, optional).
+   */
+  devilsAdvocate?: {
+    schemaVersion: string;
+    disagreementScore: number;
+    recommendedAction: string;
+    riskScaleFactor: number;
+    abstain: boolean;
+    counterThesis: string;
+    falsifiers: string[];
+    failureModes: string[];
+  } | null;
 }
 
 /**
@@ -170,6 +183,7 @@ export function unknownSnapshot(source: JournalSource = "UNKNOWN"): DecisionSnap
       ruleKey: null,
       policyVersion: null,
       dataFingerprint: null,
+      devilsAdvocate: null,
     },
   };
   return { ...snapshot, snapshotHash: fingerprint("js2", snapshot) };
@@ -184,6 +198,7 @@ function buildVersions(overrides: Partial<DecisionSnapshotVersions>): DecisionSn
     ruleKey: null,
     policyVersion: safePolicyFingerprint(),
     dataFingerprint: null,
+    devilsAdvocate: null,
     ...overrides,
   };
 }
@@ -309,6 +324,8 @@ export async function buildProposalSnapshot(args: {
   promptVersion?: number | null;
   /** Entscheidungsdaten der Engine (z. B. Markt-Snapshot) für den Fingerprint. */
   decisionData?: unknown;
+  /** RMA-P3-03: Optionaler Devil's Advocate Falsifikations-Befund */
+  devilsAdvocate?: DecisionSnapshotVersions["devilsAdvocate"];
 }): Promise<DecisionSnapshot> {
   const loaded = await safe<{ votes: JournalVote[]; agentVersions: Record<string, number> }>(
     { votes: [], agentVersions: {} },
@@ -338,6 +355,7 @@ export async function buildProposalSnapshot(args: {
       agentVersions: loaded.agentVersions,
       dataFingerprint:
         args.decisionData === undefined ? null : fingerprint("df1", args.decisionData),
+      devilsAdvocate: args.devilsAdvocate ?? null,
     }),
   };
   return { ...snapshot, snapshotHash: fingerprint("js2", snapshot) };

@@ -1029,3 +1029,14 @@ Er liest ausschließlich Venue-Fakten; unklare Submissions dürfen nie durch ein
 neue Order „repariert“ werden. Fehlende/stale Benchmarks bleiben null mit Reason.
 Rollback: Capture deaktivieren, Worker stoppen, Audit-Tabellen behalten; zunächst
 unklare Orders beim Venue abgleichen. [Migration, Vertrag, API und Formeln](src/executionQuality/README.md).
+
+## Devil’s Advocate (RMA-P3-03)
+
+| Variable | Standard | Erlaubte Werte | Bedeutung |
+| --- | --- | --- | --- |
+| `DEVILS_ADVOCATE_ENABLED` | `true` | `true`, `false`, `1`, `0` | Aktiviert oder deaktiviert den Devil’s-Advocate-Step. |
+| `DEVILS_ADVOCATE_SHADOW` | `false` | `true`, `false`, `1`, `0` | Im Shadow-Modus wird die Falsifikation vollständig berechnet und auditiert, verändert jedoch niemals das reale Risikobudget (`NO_OP`). |
+| `DEVILS_ADVOCATE_SCALE_DOWN_THRESHOLD` | `0.40` | `0.10` .. `0.90` | Ab diesem Disagreement-Score wird die Positionsgröße bzw. das Risiko reduziert. |
+| `DEVILS_ADVOCATE_HUMAN_REVIEW_THRESHOLD` | `0.70` | `0.40` .. `1.00` | Ab diesem Disagreement-Score wird eine manuelle Prüfung erzwungen und der Trade pausiert. |
+| `DEVILS_ADVOCATE_SCALE_DOWN_FACTOR` | `0.50` | `0.10` .. `0.90` | Risikofaktor bei moderatem Dissens. |
+

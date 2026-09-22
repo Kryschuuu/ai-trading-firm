@@ -37,6 +37,7 @@ export const PROMPT_ROLES = [
   "SWING_RESEARCHER",
   "SCOUT",
   "DILIGENCE",
+  "DEVILS_ADVOCATE",
 ] as const;
 
 export type PromptRole = (typeof PROMPT_ROLES)[number];

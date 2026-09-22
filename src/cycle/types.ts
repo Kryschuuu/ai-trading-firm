@@ -24,6 +24,7 @@ export type CycleStepRole =
   | "RISK_MANAGER"
   | "RESEARCH"
   | "BACKTEST_VERIFICATION"
+  | "DEVILS_ADVOCATE"
   | "WEEKLY_REVIEW";
 
 /** Status eines Zyklen-Laufs */

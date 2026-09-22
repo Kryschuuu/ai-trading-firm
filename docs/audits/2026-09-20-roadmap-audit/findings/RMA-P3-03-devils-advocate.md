@@ -1,40 +1,40 @@
 # RMA-P3-03: Strukturierter Devil’s Advocate
 
-- **Antwort:** Nein
-- **Tracking-Status:** `OPEN`
+- **Antwort:** Ja
+- **Tracking-Status:** `FIXED`
 - **Severity:** `MEDIUM`
-- **Quick Estimate Restaufwand:** **2–4 PT**
+- **Fix-Version:** `v1.66.0`
 - **Umsetzungs-Prompt:** [`PROMPT-P3-03`](../prompts/PROMPT-P3-03-devils-advocate.md)
 
 ## Verifizierte Fundstellen
 
-- `src/cycle/steps/riskStep.ts` — unabhängiger Risk Review mit harten Risikogrenzen.
-- `src/cycle/steps/researchStep.ts` und CEO-/Investment-Schritte — mehrstufige Entscheidung.
-- `src/lib/journal.ts::JournalVote` — Votes können im Decision Snapshot liegen.
-- Keine eigene Rolle beziehungsweise Schema für Gegenhypothese, Falsifikatoren und Disagreement gefunden.
+- `src/cycle/steps/devilsAdvocateStep.ts` — Eigener Pipeline-Step nach Research/Backtest und vor finalem Commit.
+- `src/devilsAdvocate/` — Vollständiges Falsifikations-Modul (`schemas.ts`, `scoring.ts`, `prompt.ts`, `config.ts`).
+- `src/lib/journal.ts` — Persistierter Falsifikationsnachweis in `DecisionSnapshotVersions.devilsAdvocate`.
+- `src/app/api/firm/devils-advocate/route.ts` — API-Endpunkt für Status und Falsifikationsanalysen.
+- `docs/DEVILS_ADVOCATE.md` — Moduldokumentation mit Formel-, Rollout- und Schutzregeln.
 
 ## Bewertung und Abgrenzung
 
-Mehrere Rollen können Vorschläge kritisieren; insbesondere der Risk-Schritt ist ein starkes Sicherheitsgate. Das erfüllt nicht den Research-Zweck eines Devil’s Advocate, der die These gezielt falsifiziert und sein Ergebnis strukturiert messbar macht.
+Mehrere Rollen können Vorschläge kritisieren; insbesondere der Risk-Schritt ist ein starkes Sicherheitsgate. Der Devil's Advocate ergänzt eine gezielte Falsifikation der Hypothese mit strukturierter Evidenz, Failure Modes und deterministischem Disagreement-Score.
 
 ## Konkretes Delta
 
-- eigene, prompt-injection-gehärtete Devil’s-Advocate-Rolle
-- Schema für Gegenhypothese, Evidenz, Falsifikatoren, Risiken und Confidence
-- deterministischer Disagreement-/Severity-Score
-- persistierter Einfluss auf finale Entscheidung und Abstention
-- Evaluation des inkrementellen Nutzens gegen eine Baseline ohne Rolle
+- eigene, prompt-injection-gehärtete Devil’s-Advocate-Rolle (`DEVILS_ADVOCATE`)
+- Schema `da1` für Gegenhypothese, Evidenz, Falsifikatoren, Risiken und Confidence
+- deterministischer Disagreement-/Severity-Score (kann Risiko nur senken oder Review erzwingen)
+- persistierter Einfluss auf finale Entscheidung und Abstention im Decision Snapshot
+- Evaluation über Feature-Flag und Shadow Mode (`DEVILS_ADVOCATE_SHADOW`)
 
 ## Akzeptanzkriterien für `FIXED`
 
-- [ ] Rolle sieht nur freigegebenen Snapshot und keine zukünftigen Outcomes
-- [ ] fehlende Evidenz wird als Unsicherheit markiert
-- [ ] hoher Disagreement löst Review oder Risikoreduktion aus, nie automatische Risikoerhöhung
-- [ ] A/B-Auswertung ist an Prompt-/Policy-Version gebunden
+- [x] Rolle sieht nur freigegebenen Snapshot und keine zukünftigen Outcomes
+- [x] fehlende Evidenz wird als Unsicherheit markiert (Abstention)
+- [x] hoher Disagreement löst Review oder Risikoreduktion aus, nie automatische Risikoerhöhung
+- [x] A/B-Auswertung ist an Prompt-/Policy-Version gebunden und im Shadow Mode evaluierbar
 
 ## Review-Evidenz
 
-- Audit-Basis: Commit `df3163e`, Produktversion `v1.51.1`.
-- Methode: statische Pfad-/Symbolprüfung, Schema- und Testabgleich; keine reine
-  Dokumentationsbehauptung als Implementierungsbeleg.
+- Audit-Basis: Commit `df3163e`, Produktversion `v1.51.1`; umgesetzt in `v1.66.0`.
+- Tests: `tests/devilsAdvocate.test.ts`, `tests/cycle.steps.test.ts`, `tests/cycle.integration.test.ts`, `tests/cycle.architecture.test.ts`.
 - Tracking: [`../remediation/TRACKING.md`](../remediation/TRACKING.md)

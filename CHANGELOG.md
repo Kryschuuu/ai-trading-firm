@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.65.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.66.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,19 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.66.0] — 2026-09-22 · Strukturierter Devil’s-Advocate-Agent (RMA-P3-03)
+
+### Hinzugefügt
+
+- **Strukturierter Devil’s-Advocate-Step & Agentenrolle (`src/cycle/steps/devilsAdvocateStep.ts`, `src/devilsAdvocate/`, Schema `da1`):** Einführung einer unabhängigen, adversalen Falsifikationsrolle (`DEVILS_ADVOCATE`, Step `07b-devils-advocate`) vor dem finalen Risikocommit. Verpflichtendes Schema mit Gegenhypothese (`counterThesis`), stärkster Gegenevidenz (`strongestOpposingEvidence`), fehlender Evidenz (`missingEvidence`), Falsifikatoren (`falsifiers`), Fehlerszenarien (`failureModes`), Quellenangaben (`citations`), Konfidenz und Schadensmaß (`severity`).
+- **Deterministischer Disagreement- & Severity-Score (`src/devilsAdvocate/scoring.ts`):** Rein mathematische Formel auf Code-Ebene ($S = 0.6 \cdot \text{confidence} + 0.4 \cdot \text{severity} + \text{Bonus}$). Hohes Disagreement kann das Risiko ausschließlich defensiv verringern (`SCALE_DOWN`, Multiplikator $\le 0.50$) oder die Freigabe sperren (`REQUIRE_HUMAN_REVIEW` / `REJECT`). Eine automatische Risikoerhöhung ist ausgeschlossen.
+- **Fail-Closed-Abstention:** Bei fehlender Evidenz oder Unsicherheit enthält sich der Devil’s Advocate explizit (`abstain: true`). Der Disagreement-Score ist in diesem Fall $0$, und das Risikomaß bleibt ohne willkürliche Strafen unberührt (`NO_OP`).
+- **Prompt-Injection-Schutz & Untrusted Data Isolation:** Alle übergebenen Thesen, Marktberichte und News werden als geschützte `UNTRUSTED DATA`-Blöcke übergeben. Direkte Steuerbefehle in Datenfeldern werden strikt ignoriert.
+- **Persistenz im Decision Snapshot (`src/lib/journal.ts`):** Revisionssichere Ablage der Falsifikationsergebnisse im unveränderlichen Journal-Snapshot unter `versions.devilsAdvocate`.
+- **Shadow Mode & Konfiguration:** `DEVILS_ADVOCATE_SHADOW=true` erlaubt risikolose Evaluation im produktiven Pipeline-Lauf (Berechnung und Logging aktiv, Aktion bleibt `NO_OP`). `DEVILS_ADVOCATE_ENABLED=false` bietet einen sicheren Rollback-Pfad.
+- **API & Doku:** Endpunkt `GET /api/firm/devils-advocate`, Dokumentation [`docs/DEVILS_ADVOCATE.md`](docs/DEVILS_ADVOCATE.md), `CONFIGURATION.md`, `.env.example`.
+- **Tests:** `tests/devilsAdvocate.test.ts` (Scoring, Invarianten, Bounds, Injection-Schutz, Shadow-Mode), Ergänzung in `tests/cycle.steps.test.ts`, `tests/cycle.architecture.test.ts` und `tests/cycle.integration.test.ts`.
 
 ## [1.65.0] — 2026-09-22 · Prompt-Performance & Version-Metrikvergleich (RMA-P3-02)
 

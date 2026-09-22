@@ -287,3 +287,65 @@ test("Step 8 (Backtest-Verifikation): prüft Setups deterministisch (MaxDD, Shar
     else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
   }
 });
+
+test("Step 7b (Devil's Advocate): falsifiziert Setups strukturiert und berechnet Disagreement", async () => {
+  const { devilsAdvocateStep } = await import("../src/cycle/steps/devilsAdvocateStep");
+  const ports = createTestPorts();
+  ports.agent.setResponseForRole("DEVILS_ADVOCATE", {
+    analyses: [
+      {
+        instrumentId: "BINANCE:BTCUSDT",
+        side: "LONG",
+        abstain: false,
+        counterThesis: "Starke Makro-Divergenz und fehlendes Breakout-Volumen",
+        strongestOpposingEvidence: "Volumen sinkt seit 3 Tagen, Orderbuch zeigt massive Sell-Walls",
+        missingEvidence: "Bestätigung durch Spot-Käufe fehlt",
+        falsifiers: ["Schlusskurs unter 63000", "RSI fällt unter 45"],
+        failureModes: ["Bulltrap mit anschließender Long-Liquidation"],
+        citations: ["RSI 4h", "Orderbuch BINANCE"],
+        confidence: 0.8,
+        severity: 0.7,
+      },
+    ],
+  });
+
+  const verifiedSetups = [
+    {
+      setup: {
+        instrumentId: "BINANCE:BTCUSDT",
+        side: "LONG" as const,
+        entryPrice: 65000,
+        stopLoss: 63000,
+        takeProfit: 71000,
+        riskScore: 0.4,
+        timeframe: "4h",
+        thesis: "Long Setup",
+        isProposal: true as const,
+      },
+      verified: true,
+      verdict: "PASSED" as const,
+      status: "OK" as const,
+      metrics: {
+        maxDrawdownPct: 10,
+        profitFactor: 2.0,
+        sharpeRatio: 1.5,
+        sortinoRatio: 2.0,
+        regimeRobustness: 0.8,
+      },
+    },
+  ];
+
+  const ctx = mockContext({}, ports, {
+    "08-backtest-verification": { verifiedSetups },
+  });
+
+  const result = await devilsAdvocateStep.execute(ctx);
+  assert.equal(result.schemaVersion, "da1");
+  assert.equal(result.analyses.length, 1);
+  assert.equal(result.analyses[0].instrumentId, "BINANCE:BTCUSDT");
+  assert.equal(result.analyses[0].abstain, false);
+  assert.ok(result.analyses[0].disagreementScore > 0.5);
+  assert.ok(result.analyses[0].riskScaleFactor < 1.0);
+  assert.equal(result.summary.total, 1);
+  assert.equal(result.disclaimer, "FALSIFICATION_ONLY_STRICT_DEFENSIVE_ACTION");
+});

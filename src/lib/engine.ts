@@ -674,7 +674,7 @@ export async function runAgentTurn(
   const COOLDOWN_AFTER_N_LOSSES = 3;
   const inCooldown = consecLosses >= COOLDOWN_AFTER_N_LOSSES;
 
-  const HOUSE_VIEW_ROLES = ["CEO", "RESEARCH", "RISK_MANAGER", "APPROVER"];
+  const HOUSE_VIEW_ROLES = ["CEO", "RESEARCH", "RISK_MANAGER", "APPROVER", "DEVILS_ADVOCATE"];
   let houseContext = "";
   if (HOUSE_VIEW_ROLES.includes(agent.role)) {
     try {
@@ -1608,7 +1608,7 @@ export async function runPipeline(missionId: string) {
   }
   state.pipelineBusy.set(true);
   try {
-    const phases = ["CEO", "RESEARCH", "BACKTEST", "RISK_MANAGER", "APPROVER"];
+    const phases = ["CEO", "RESEARCH", "BACKTEST", "DEVILS_ADVOCATE", "RISK_MANAGER", "APPROVER"];
     const team = await db.select().from(agentTable);
     const results: { agent: string; role: string; result: TurnResult }[] = [];
 
