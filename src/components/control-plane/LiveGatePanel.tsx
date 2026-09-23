@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Live-Gate-Panel (Task 11) — Anzeige + Kill-Switch im „Brokers & Venues"-Tab.
  *
@@ -13,6 +14,7 @@
  * docs/LIVE_TRADING.md (API/CLI), damit kein Klick-Fehler Live öffnet.
  * XSS-sicher: nur JSX-Text, kein innerHTML.
  */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchLiveGateState,

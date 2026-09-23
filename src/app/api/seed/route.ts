@@ -1,3 +1,9 @@
+/**
+ * API-Route `POST /api/seed` — Seed/Reset der Firmendaten (setup-only).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { ensureSeeded, checkSchema } from "@/lib/seed";
 import { killSwitch } from "@/lib/riskGuard";

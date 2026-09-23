@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Info-Icon mit Hover-/Focus-Erklärung für Formular- und Fachbegriffe.
  *
@@ -9,6 +10,7 @@
  * hängt zusätzlich als visuell versteckter Text im DOM (Screen Reader lesen
  * ihn unabhängig vom Focus-Zustand).
  */
+
 export default function InfoTip({
   text,
   label,

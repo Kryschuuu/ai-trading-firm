@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST /api/firm/risk/signal-decay` — Signal-Decay-Exits (Status/Policy).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { guardWrite } from "@/lib/apiAuth";
 import { publicErrorMessage } from "@/lib/secrets";

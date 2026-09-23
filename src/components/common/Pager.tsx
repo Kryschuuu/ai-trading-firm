@@ -1,5 +1,15 @@
 "use client";
 
+
+/**
+ * Gemeinsamer Paging-Zustand für Audit-Trail und Protokoll.
+ *
+ * Produktanforderung: Default 20 Einträge, wählbar 20/50/100/200.
+ * Der Zustand lebt in der UI, die Seite wird serverseitig geschnitten
+ * (`/api/firm/log?page=…&limit=…`), damit auch Historie jenseits der ersten
+ * 200 Zeilen erreichbar bleibt.
+ */
+
 import { useCallback, useState } from "react";
 import {
   DEFAULT_PAGE_SIZE,
@@ -11,14 +21,6 @@ import {
   type PageSize,
 } from "@/lib/paging";
 
-/**
- * Gemeinsamer Paging-Zustand für Audit-Trail und Protokoll.
- *
- * Produktanforderung: Default 20 Einträge, wählbar 20/50/100/200.
- * Der Zustand lebt in der UI, die Seite wird serverseitig geschnitten
- * (`/api/firm/log?page=…&limit=…`), damit auch Historie jenseits der ersten
- * 200 Zeilen erreichbar bleibt.
- */
 export function usePagination(initialTotal = 0) {
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(1);

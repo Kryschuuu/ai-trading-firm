@@ -1,10 +1,11 @@
+/** The backtest engine indexes candles by OPEN time. Quality observations are
+ * anchored at the completed bar boundary, not at that open timestamp. Costs and
+ * trading decisions remain byte-compatible; only evidence time is normalized. */
+
 import { BROKER_VENUE_IDS, type BrokerVenueId } from "../contracts/broker";
 import type { SimulatedFill } from "../lib/marketdata/simulator";
 import { digest, parseBatch, type Batch, type Benchmark } from "./model";
 import { unavailable } from "./capture";
-/** The backtest engine indexes candles by OPEN time. Quality observations are
- * anchored at the completed bar boundary, not at that open timestamp. Costs and
- * trading decisions remain byte-compatible; only evidence time is normalized. */
 export function simulatedBatch(input: {
   symbol: string;
   venue: string;

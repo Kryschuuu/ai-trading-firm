@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Settings-Panel einer Broker-Karte (Task 08): read-only Flag-Anzeige.
  *
@@ -8,6 +9,7 @@
  * Nichts hier ist editierbar — der einzige mutierende Pfad ist das
  * Loeschen (Bestaetigungsdialog, ConfirmDialog.tsx).
  */
+
 import { useState } from "react";
 import {
   deleteVenueCredentials,

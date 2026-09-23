@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-19** ·
-> Code-Version **1.47.0** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
+> Code-Version **v0.1.0 (Beta)** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize` ·
 > Qualitäts-Layer & Aggregation: §14)
@@ -765,7 +765,7 @@ geteilter `TokenBucket(8, 8)` pro Lauf und reicht ihn an jeden erzeugten
 PublicClient durch — das dokumentierte IP-Budget (10 req/s/IP, Code 8) bleibt
 damit autoritativ, auch wenn später mehrere Venues derselben API-Infrastruktur
 in einem Lauf registriert sind (Verhaltens-Test in
-`test/marketdata/adapters/bitunix.test.ts`).
+`tests/marketdata/adapters/bitunix.test.ts`).
 
 ## 11. Symbol-Normalisierung und Instrument-IDs (SYM-007, v1.28.0)
 
@@ -925,7 +925,7 @@ Stage/Taxonomie und die Wiederholbarkeits-Bilanz:
 
 Geloggt werden dabei ausschließlich Zähler und klassifizierte Ursachen — keine
 Rohmeldungen (die Venue-/Symboltexte enthalten können; Security-Guard:
-`test/marketdata/security.test.ts`). Der ursächliche Klassifizierer liest seit
+`tests/marketdata/security.test.ts`). Der ursächliche Klassifizierer liest seit
 v1.39.1 die `cause`-Kette der Transportfehler: ein `fetch failed` mit
 `ECONNREFUSED` dahinter erscheint als `NETWORK` statt `UNKNOWN`.
 
@@ -1048,7 +1048,7 @@ mtime-Änderung sofort nach — kein Neustart nötig.
 
 | Punkt | Ticket | Umsetzung | Warum |
 | --- | --- | --- | --- |
-| Tests | `test/marketdata/`, `test/integration/` | zusätzlich dort, **und** Migration der drei bestehenden Dateien unter `src/marketdata/__tests__/` | der Repo-Test-Glob läuft über `tests/` + `src/**/*.test.ts`; beide Pfade müssen grün sein |
+| Tests | `tests/marketdata/`, `tests/integration/` | zusätzlich dort, **und** Migration der drei bestehenden Dateien unter `src/marketdata/__tests__/` | der Repo-Test-Glob läuft über `tests/` + `src/**/*.test.ts`; beide Pfade müssen grün sein |
 | Adapter-Registry | eine Datei `src/marketdata/adapterRegistry.ts` | Kern in `registerAdapters.ts`, `adapterRegistry.ts` als Wrapper | Testbarkeit der Gates ohne Singleton; der Name des Tickets bleibt als Importpfad erhalten |
 | Skript | `npm run market-sync` | `market:sync` **und** `market-sync` (Alias) | der bestehende `market-sync`-Aufruf im Betrieb soll nicht brechen |
 | Kerzenfeld | `ts` | `MarketCandle.time` (Store schreibt `ts`) | `time` ist im ganzen Repo Setter (Scanner, MicroExecutor); Umbenennung wäre eine Repositories-ändernde Aktion gewesen. Lesend normalisiert `candleTimeMs()` beide Formen |

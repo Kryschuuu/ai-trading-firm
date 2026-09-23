@@ -34,6 +34,25 @@ import type {
   OrderExecutionCapabilities,
 } from "../contracts/broker";
 
+/**
+ * PAPER-Broker-Adapter — der deterministische Simulations-Broker.
+ *
+ * Implementiert den `BrokerAdapter`-Vertrag (`src/contracts/broker.ts`) über
+ * den lokalen `PaperBroker`-Ledger: Fill-Simulation (Gebühren, Spread,
+ * Slippage, Partial Fills), Positionen, Equity, Funding-Accrual. Kein
+ * Netzwerk, keine Credentials — der Health-Status ist "online", solange der
+ * Prozess läuft.
+ *
+ * **Rolle:** Default-Broker der Firma (`getBroker()` ohne Live-Freigabe),
+ * Referenz-Basis für Backtests (die `FillSimulator`-Klasse wird geteilt) und
+ * Gegenstück der Live-Adapter (Bitunix/Alpaca) — dieselben Contracts,
+ * dieselben Capability-Flags (siehe `capabilities`).
+ *
+ * **Post-Only (RMA-P4-02):** PAPER simuliert Post-Only, Einzel-Cancel und
+ * atomares Replace deterministisch (deterministisches `PaperVenuePort` in
+ * `src/execution/ports.ts`) — Golden-Tests sichern byte-identische
+ * Event-/Fill-Sequenzen.
+ */
 export class PaperBrokerAdapter implements BrokerAdapter {
   readonly id = "PAPER" as const;
   readonly mode: ExecutionMode;

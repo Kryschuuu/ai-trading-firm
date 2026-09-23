@@ -1,3 +1,9 @@
+/**
+ * API-Route `POST /api/firm/run` — Ganze Pipeline ausführen (Workshop).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { agents as agentTable, missions } from "@/db/schema";

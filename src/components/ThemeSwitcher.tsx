@@ -1,5 +1,43 @@
 "use client";
 
+
+/**
+ * Theme-Wähler der Oberfläche (dark/light/sepia/midnight/nord/forest).
+ *
+ * Zweck: schaltet das Daten-Theme per data-theme-Attribut auf <html> und
+ * persistiert die Wahl in localStorage (STORAGE_KEY). Der Server-Render zeigt
+ * Default "dark"; ein Inline-Script im Layout verhindert Flackern.
+ * Abhängigkeiten: React, THEMES-Konstante (Theme-Id-Whitelist).
+ */
+
+/**
+ * Theme-Wähler der Oberfläche (dark/light/sepia/midnight/nord/forest).
+ *
+ * Zweck: schaltet das Daten-Theme per data-theme-Attribut auf <html> und
+ * persistiert die Wahl in localStorage (STORAGE_KEY). Der Server-Render zeigt
+ * Default "dark"; ein Inline-Script im Layout verhindert Flackern.
+ * Abhängigkeiten: React, THEMES-Konstante (Theme-Id-Whitelist).
+ */
+
+/**
+ * Theme-Wähler der Oberfläche (dark/light/sepia/midnight/nord/forest).
+ *
+ * Zweck: schaltet das Daten-Theme per data-theme-Attribut auf <html> und
+ * persistiert die Wahl in localStorage (STORAGE_KEY). Der Server-Render zeigt
+ * Default "dark"; ein Inline-Script im Layout verhindert Flackern.
+ * Abhängigkeiten: React, THEMES-Konstante (Theme-Id-Whitelist).
+ */
+
+/**
+ * Theme-Wähler der Oberfläche (dark/light/sepia/midnight/nord/forest).
+ *
+ * Zweck: schaltet das Daten-Theme per data-theme-Attribut auf <html> und
+ * persistiert die Wahl in localStorage (STORAGE_KEY). Der Server-Render zeigt
+ * Default "dark"; ein Inline-Script im Layout verhindert Flackern.
+ * Abhängigkeiten: React, THEMES-Konstante (Theme-Id-Whitelist).
+ */
+
+
 import { useEffect, useState } from "react";
 
 type ThemeId = "dark" | "light" | "sepia" | "midnight" | "nord" | "forest";

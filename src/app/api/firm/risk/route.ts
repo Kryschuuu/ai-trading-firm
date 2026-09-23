@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET /api/firm/risk` — Risk-Limits und -Status (Lese-API).
+ *
+ * Teil der Firm-API (Next.js App Router). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";

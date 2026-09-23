@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST /api/firm/macro` — Makro-Zyklus: Status abrufen / starten.
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("strategy.rules.activate") — Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { runMacroCycle, macroCycleStatus } from "@/lib/macroCycle";
 import { checkRateLimit } from "@/lib/apiAuth";

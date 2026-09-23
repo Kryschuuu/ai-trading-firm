@@ -1,7 +1,3 @@
-import { notFound, redirect } from "next/navigation";
-import { resolveDoc } from "@/lib/docsCatalog";
-import DocsView from "@/components/docs/DocsView";
-
 /**
  * Kanonische Doku-Seite (`/docs/<Datei>.md`).
  *
@@ -10,6 +6,11 @@ import DocsView from "@/components/docs/DocsView";
  * weiter. Nicht katalogisierte, aber vorhandene `docs/*.md`-Dateien werden
  * über den Existenz-Fallback dennoch gerendert — nie ein lokaler 404.
  */
+
+import { notFound, redirect } from "next/navigation";
+import { resolveDoc } from "@/lib/docsCatalog";
+import DocsView from "@/components/docs/DocsView";
+
 export default async function DocPage({
   params,
 }: {

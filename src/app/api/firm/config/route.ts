@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `PUT /api/firm/config` — Wirksame Risk-Konfiguration (Lesen + geschriebene Overrides mit Bounds).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { effectiveConfigView, refreshRuntimeLimits, setConfigValue } from "@/lib/riskConfigService";
 import { guardWrite } from "@/lib/apiAuth";

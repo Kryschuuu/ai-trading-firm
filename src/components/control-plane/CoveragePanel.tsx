@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Coverage-Panel „Venues & Coverage" (Operations Center).
  *
@@ -16,6 +17,7 @@
  * Liest ausschließlich GET /api/brokers/coverage (reine Projektion der
  * Capability-SSoT + Live-Gate). XSS-sicher: kein innerHTML, alles JSX-Text.
  */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchBrokerCoverage,

@@ -1,3 +1,9 @@
+/**
+ * API-Route `POST /api/firm/rules/[id]` — Strategie-Regel (Lifecycle-Aktionen je RBAC-Rolle).
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("strategy.rules.write") — Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import {
   activateRule,

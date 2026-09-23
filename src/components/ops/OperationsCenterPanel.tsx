@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Operations Center (Task 10) — die Control Plane der Firma.
  *
@@ -16,6 +17,7 @@
  * XSS-sicher: kein innerHTML, alles JSX-Text. Loading / Error / Empty sind
  * eigene Zustände, damit ein Teilausfall nie als „alles gut“ erscheint.
  */
+
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, readJson } from "@/lib/apiClient";

@@ -1,18 +1,5 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import InfoTip from "./InfoTip";
-import MissionTemplatePicker from "./MissionTemplatePicker";
-import { apiFetch, readJson } from "@/lib/apiClient";
-import type {
-  MissionMutationResponse,
-  MissionRow,
-  MissionScopeDto,
-  MissionSegmentDto,
-  MissionTemplateDto,
-  MissionsIndexResponse,
-} from "@/lib/types";
-import { missionScopeLabel } from "@/lib/missionTemplates";
 
 /**
  * Schritt 1 (Handbuch 5.1–5.4): Mission anlegen und bearbeiten — ersetzt das
@@ -30,6 +17,21 @@ import { missionScopeLabel } from "@/lib/missionTemplates";
  *      Instrument-Registry.
  *   4. **Budgets + speichern** — POST/PUT `/api/firm/missions`.
  */
+
+import { useEffect, useMemo, useState } from "react";
+import InfoTip from "./InfoTip";
+import MissionTemplatePicker from "./MissionTemplatePicker";
+import { apiFetch, readJson } from "@/lib/apiClient";
+import type {
+  MissionMutationResponse,
+  MissionRow,
+  MissionScopeDto,
+  MissionSegmentDto,
+  MissionTemplateDto,
+  MissionsIndexResponse,
+} from "@/lib/types";
+import { missionScopeLabel } from "@/lib/missionTemplates";
+
 
 const FALLBACK_SYMBOLS = ["AAPL", "BTC", "ETH", "MSFT", "NVDA", "QQQ", "SOL", "SPY"];
 const FALLBACK_LIMITS = { riskBudget: [0.002, 0.05] as [number, number], maxPositionPct: [0.01, 0.5] as [number, number] };

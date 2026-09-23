@@ -1,7 +1,8 @@
 # Arena-Tasks — Task-Tracker (1–12)
 
 > **Status-Header (Task 12):** **Implementiert** (Task 12, Doku) ·
-> **2026-08-29** · Version **1.23.0** · Branch: `arena/01a049f7-ai-trading-firm`
+> **2026-09-23** · Version **v0.1.0 (Beta)** (Legacy-Zählung `v1.x.x` ist
+> archiviert — Zuordnung: [`CHANGELOG.md`](../CHANGELOG.md)) · Branch: `arena/01a049f7-ai-trading-firm`
 >
 > **Nachtrag 2026-08-29 (v1.23.0):** Task 10 wurde nachgeprüft. Das Operations
 > Center war im Code eine Phase-1-Hülle (sieben Karten, fünf davon `stub`),
@@ -342,8 +343,8 @@ Echo des Rohsymbols), Venue-/Meldungs-Sanitizer gegen Log-Injection
 (`[url]`, 160 Zeichen, Kontrollzeichen entfernt), keine Pfad-Interpolation aus
 Fremdinput, `/api/markets` bleibt GET-only.
 
-**Testbericht:** 58 neue Tests — `test/marketdata/{spread:10,sync:21,security:12,
-cli:12}.test.ts` und `test/integration/{warm-scanner:2,cli-sync-e2e:1}.test.ts`;
+**Testbericht:** 58 neue Tests — `tests/marketdata/{spread:10,sync:21,security:12,
+cli:12}.test.ts` und `tests/integration/{warm-scanner:2,cli-sync-e2e:1}.test.ts`;
 die drei bestehenden Suite-Dateien unter `src/marketdata/__tests__/` (30) auf das
 neue `SyncResult` migriert; `tests/history/*` (31) gegen den geänderten
 Schreibpfad unkorruptiert grün. Gesamtsuite **1389/1389**.

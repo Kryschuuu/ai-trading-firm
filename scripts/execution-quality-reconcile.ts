@@ -1,3 +1,15 @@
+/**
+ * Read-only Reconciliation-Worker des Execution-Quality-Ledgers.
+ *
+ * Zweck: sammelt echte Fill-Fakten + zeitpunktgerechte Markouts einer Venue
+ * (ALPACA testnet / BITUNIX) in das append-only Quality-Ledger
+ * (src/executionQuality/reconcile.ts); --watch läuft dauerhaft. Liest Broker-
+ * Rohdaten NIE als Schreibquelle — unbekannte Submissions werden nur lesend
+ * rekonstruiert und niemals erneut gesendet.
+ * Aufruf: npm run execution:reconcile -- <VENUE> <MODE> [--watch]
+ * Abhängigkeiten: ../src/brokers/factory, ../src/executionQuality/*, ../src/db.
+ */
+
 import "dotenv/config";
 import { setTimeout } from "node:timers/promises";
 import { getBroker, normalizeVenue } from "../src/brokers/factory";

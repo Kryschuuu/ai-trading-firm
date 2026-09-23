@@ -1,6 +1,6 @@
 # Alpaca-Adapter (Task 12) — 8. Venue, US-Aktien/ETFs/Crypto
 
-**Stand:** v1.36.32 · **Modul:** `src/brokers/alpaca/` · **Contract:** `BrokerAdapter`
+**Stand:** v0.1.0 (Beta) · **Modul:** `src/brokers/alpaca/` · **Contract:** `BrokerAdapter`
 **Status:** Public REST (Market Data v2) + Private Trading API (Basic-Auth) +
 Paper (Modus B) ausführbar. Live-Ausführung über den zentralen Live-Gate-Enforcer
 (Task 11) und eine **getrennte Broker-Ausführungs-Engine** (s. §5) — ohne

@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST /api/firm/risk/volatility` — Adaptives Risk-System + Volatility-Status (Lese-API).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { getAdaptiveRiskStatus, updateAdaptiveRisk } from "@/lib/adaptiveRisk";
 import { getVolatilityTargetingStatus } from "@/lib/volatilityTargeting";

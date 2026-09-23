@@ -1,7 +1,13 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-18** · Code-Version **1.40.0**
+> Dokumentationsstand **2026-09-23** · Code-Version **v0.1.0 (Beta)**
+>
+> **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema
+> (Beta). Ältere Status-Header und Abschnitte nennen teils die interne
+> Legacy-Zählung `v1.x.x` — Zuordnung: [`CHANGELOG.md`](CHANGELOG.md)
+> (§ Versions-Zuordnung), Archiv:
+> [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md).
 
 Dieses Dokument beschreibt das Setup inkl. **aller Env-Flags mit sicheren
 Defaults** (Flag-Tabelle unten). Eine vollständige Schritt-für-Schritt-Anleitung

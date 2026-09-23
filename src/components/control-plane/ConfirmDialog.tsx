@@ -1,11 +1,13 @@
 "use client";
 
+
 /**
  * Bestaetigungsdialog (Task 08) — Pflicht vor dem Loeschen von Credentials.
  *
  * XSS-sicher: alle Inhalte als React-Text (kein innerHTML). Das Overlay
  * faengt Klicks ausserhalb ab (Abbrechen), Escape schliesst.
  */
+
 import { useEffect } from "react";
 
 export default function ConfirmDialog({

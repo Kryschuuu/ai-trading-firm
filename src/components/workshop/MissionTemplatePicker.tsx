@@ -1,8 +1,5 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import InfoTip from "./InfoTip";
-import type { MissionTemplateDto } from "@/lib/types";
 
 /**
  * Vorlagen-Auswahl des Workshops (v1.35.0).
@@ -14,6 +11,11 @@ import type { MissionTemplateDto } from "@/lib/types";
  * Die Liste kommt vom Server (`GET /api/firm/missions` → `templates`), damit UI
  * und Validierung immer denselben Katalog nutzen (`src/lib/missionTemplates.ts`).
  */
+
+import { useMemo, useState } from "react";
+import InfoTip from "./InfoTip";
+import type { MissionTemplateDto } from "@/lib/types";
+
 export default function MissionTemplatePicker({
   templates,
   onApply,

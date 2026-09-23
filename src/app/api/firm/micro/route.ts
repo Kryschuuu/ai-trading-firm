@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET /api/firm/micro` — Mikro-Executor: Status/Steuerung.
+ *
+ * Teil der Firm-API (Next.js App Router). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { getActiveRules, listRuleExecutions } from "@/lib/ruleService";
 import { publicErrorMessage } from "@/lib/secrets";

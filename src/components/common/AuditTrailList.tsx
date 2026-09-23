@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import type { AuditFact, AuditSection, AuditTrailSummary, AuditView, IssueSeverity } from "@/lib/auditView";
 
 /**
  * Audit-Trail als lesbare Liste: jeder Eintrag ist ein aufklappbarer Container
@@ -11,6 +9,10 @@ import type { AuditFact, AuditSection, AuditTrailSummary, AuditView, IssueSeveri
  * Die gesamte Aufbereitung (deutsche Titel, Feldlabels, Plausibilitätsprüfung)
  * kommt aus `src/lib/auditView.ts` — die Komponente rendert nur.
  */
+
+import { useState } from "react";
+import type { AuditFact, AuditSection, AuditTrailSummary, AuditView, IssueSeverity } from "@/lib/auditView";
+
 
 const TONE_BADGE: Record<AuditView["tone"], string> = {
   info: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",

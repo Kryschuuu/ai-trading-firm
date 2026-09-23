@@ -1,6 +1,3 @@
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-
 /**
  * Datenbank-Zugang (Lazy-Init).
  *
@@ -23,6 +20,10 @@ import { Pool } from "pg";
  *   - ssl:               für lokale PG nicht nötig; Cloud-Datenbanken sollten
  *                        ein CA-Zertifikat verwenden (PGSSLMODE=verify-full).
  */
+
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;

@@ -1,3 +1,9 @@
+/**
+ * API-Route `POST /api/firm/proposals/[id]/approve` — Proposal freigeben (Approver-Entscheidung).
+ *
+ * Teil der Firm-API (Next.js App Router). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { proposals } from "@/db/schema";

@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Zustands-Chip einer Control-Plane-Ebene (Task 08).
  *
@@ -7,6 +8,7 @@
  * XSS-sicher (nur JSX, kein innerHTML). Der `detail`-String kommt aus dem
  * Server, wird aber ausschliesslich als Text gerendert.
  */
+
 import type { LayerStateValue } from "@/lib/controlPlane";
 
 export const LAYER_LABELS: Record<string, string> = {

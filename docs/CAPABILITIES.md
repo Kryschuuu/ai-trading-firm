@@ -1,6 +1,6 @@
 # Capability-SSoT und Instrument-Projektion
 
-**Stand:** v1.36.0 · **Modul:** `src/universe/capabilityProjection.ts` · **SSoT:** `src/brokers/capabilities.ts`
+**Stand:** v0.1.0 (Beta) · **Modul:** `src/universe/capabilityProjection.ts` · **SSoT:** `src/brokers/capabilities.ts`
 
 Dieses Dokument definiert die einzige Laufzeit-Wahrheit für Venue-Fähigkeiten und
 die Instrument-Verfügbarkeit. Der Universe-Seed enthält **statische** Instrumentdaten

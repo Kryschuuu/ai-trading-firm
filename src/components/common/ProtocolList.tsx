@@ -1,5 +1,12 @@
 "use client";
 
+
+/**
+ * Protokoll-Liste (agent_messages) im selben Muster wie der Audit-Trail:
+ * Kurzfassung zugeklappt, vollständige lesbare Darstellung + Rohdaten-Reiter
+ * aufgeklappt. Kein Text wird abgeschnitten — lange Inhalte scrollen.
+ */
+
 import { useState } from "react";
 import {
   ROLE_LABELS,
@@ -14,11 +21,6 @@ import {
   type ProtocolEntryLike,
 } from "@/lib/auditView";
 
-/**
- * Protokoll-Liste (agent_messages) im selben Muster wie der Audit-Trail:
- * Kurzfassung zugeklappt, vollständige lesbare Darstellung + Rohdaten-Reiter
- * aufgeklappt. Kein Text wird abgeschnitten — lange Inhalte scrollen.
- */
 
 function decisionBadgeClass(entry: ProtocolEntryLike): string {
   if (entry.kind === "turn") {

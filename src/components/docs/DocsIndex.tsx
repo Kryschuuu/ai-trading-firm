@@ -1,16 +1,18 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import DocsMarkdown from "./DocsMarkdown";
-
-type DocListItem = { slug: string; title: string; subtitle: string; path: string };
 
 /**
  * Doku-Übersicht (`/docs`). Zeigt die README an und navigiert über die
  * Sidebar zu den kanonischen Einzelseiten (`d.path`), damit jede Doku-Datei
  * lokal unter `/docs/<Datei>.md` gerendert wird.
  */
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import DocsMarkdown from "./DocsMarkdown";
+
+type DocListItem = { slug: string; title: string; subtitle: string; path: string };
+
 export default function DocsIndex() {
   const [docs, setDocs] = useState<DocListItem[]>([]);
   const [content, setContent] = useState("");

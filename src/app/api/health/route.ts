@@ -1,3 +1,12 @@
+/**
+ * API-Route `GET /api/health` — Healthcheck der Firma.
+ *
+ * Antwortet IMMER mit HTTP 200 (Liveness); `schemaReady`, Audit-Dauer-
+ * haft und Heartbeat-Felder (monitorLastTickAt/stale) trennen Process-up
+ * von DB-ready/Scheduler-lebendig. Keine Autorisierung (kein Firm-Datum,
+ * keine Secrets); Details: docs/OBSERVABILITY.md § Heartbeat & Watchdog.
+ */
+
 import { auditDurabilitySnapshot } from "@/lib/auditSink";
 import { checkSchema } from "@/lib/seed";
 import { APP_NAME, APP_VERSION } from "@/lib/version";

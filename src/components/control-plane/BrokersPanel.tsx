@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * "Brokers & Venues" — Control-Plane-UI (Task 08).
  *
@@ -11,6 +12,7 @@
  * Zustaende: Loading (Skeleton), Error (Banner + Retry), Empty (keine
  * Broker), Daten (Karten-Grid). XSS-sicher: kein innerHTML, alles JSX-Text.
  */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchBrokerList,

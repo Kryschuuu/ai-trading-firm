@@ -1,7 +1,3 @@
-import { redirect } from "next/navigation";
-import { resolveDoc } from "@/lib/docsCatalog";
-import DocsIndex from "@/components/docs/DocsIndex";
-
 /**
  * Doku-Übersicht.
  *
@@ -10,6 +6,11 @@ import DocsIndex from "@/components/docs/DocsIndex";
  *   `/docs/<Datei>.md`, damit altbekannte Help-Links (Operations Center,
  *   OPS-Sektionen) ohne 404 auf der gerenderten Seite landen.
  */
+
+import { redirect } from "next/navigation";
+import { resolveDoc } from "@/lib/docsCatalog";
+import DocsIndex from "@/components/docs/DocsIndex";
+
 export default async function DocsPage({
   searchParams,
 }: {

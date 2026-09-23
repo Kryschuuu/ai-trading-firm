@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST /api/firm/risk/drawdown-scaling` — Drawdown-Risk-Scaling (Status/forcierte Neubewertung).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import {
   getDrawdownScalingStatus,

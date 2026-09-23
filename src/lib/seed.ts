@@ -1,3 +1,15 @@
+/**
+ * Seed-/Schema-Diagnose der Firmendaten (Setup- und Reset-Pfad).
+ *
+ * Zweck: prüft, ob das Schema angelegt ist (checkSchema — diagnostisch,
+ * ohne Änderung), seedet die Basis-Agenten und eine Beispiel-Mission
+ * (ensureSeeded, idempotent) und kann den Firmenzustand resetten. Wird vom
+ * Healthcheck, dem Seed-Endpunkt (POST /api/seed) und den Setup-Skripten
+ * genutzt.
+ * Abhängigkeiten: @/db, @/db/schema, ./riskGuard (Defaults),
+ * ./missionTemplates (Vorlagen).
+ */
+
 import { db } from "@/db";
 import { agents, missions, riskConfig, killSwitches } from "@/db/schema";
 import { count, eq, isNull, sql } from "drizzle-orm";

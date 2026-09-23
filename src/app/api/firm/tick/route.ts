@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST /api/firm/tick` — Monitor-Tick manuell ausführen (Debug/Betrieb).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { tick } from "@/lib/monitor";
 import { guardWrite } from "@/lib/apiAuth";

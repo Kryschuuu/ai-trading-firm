@@ -7,6 +7,7 @@
 ```
 docs/archive/
 ├── README.md
+├── CHANGELOG-legacy-v1.md   # Vollständige Legacy-Changelog-Historie (v1.x.x), unverändert
 └── task-plans/
     ├── task-03-IMPLEMENTATION_PLAN.md
     ├── task-04-IMPLEMENTATION_PLAN.md
@@ -20,6 +21,11 @@ docs/archive/
 
 ## Was gehört hierher?
 
+- **Legacy-Changelog** (`CHANGELOG-legacy-v1.md`): Die vollständige, unveränderte
+  Beta-Entwicklungs-Historie in der internen Zählung `v1.x.x` (v1.40.0–v1.73.1),
+  archiviert am 2026-09-23 mit dem Übergang auf das öffentliche v0.x.x-Schema.
+  `v1.73.1` ≙ `v0.1.0 (Beta)`. Das Archiv wird **nicht mehr gepflegt** — neue
+  Einträge gehören in das kanonische [`CHANGELOG.md`](../../CHANGELOG.md) im Root.
 - **Task-Implementation-Pläne** (`task-*.md`): Historische Pläne für Arena-Tasks 03-11. Aktueller Stand ist in `docs/ARENA_TASKS.md` und `CHANGELOG.md` dokumentiert.
 - **Alte Audit-Reports**, die durch neue Struktur ersetzt wurden (z. B. `AUDIT_REMEDIATION_2026-09.md` → `docs/audits/2026-09-03-peer-review/`)
 - **Deprecated Docs**, die durch konsolidierte Versionen ersetzt wurden

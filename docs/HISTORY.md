@@ -1,7 +1,7 @@
 # Historical Store — Schema, Schlüssel, Dedup & Migration
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.26.2** · Modul `src/lib/marketdata/historicalStore.ts` ·
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
+> Code-Version **v0.1.0 (Beta)** · Modul `src/lib/marketdata/historicalStore.ts` ·
 > Migration `scripts/migrate-history-timeframe.ts` / `npm run history:migrate`
 >
 > **Für Betrieb/Deployment** (Backup, Dry-Run, Anwenden, Validierung,

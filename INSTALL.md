@@ -1,9 +1,15 @@
 # Installation — Übersicht
 
+> ## ⚠️ BETA-PHASE (v0.x.x)
+>
+> Dieses Projekt ist **Beta** und **nicht produktionsreif** — konzipiert für
+> Bildungszwecke und private Nutzung **auf eigene Gefahr**. Kein echtes Geld,
+> keine Produktivumgebung. Details: [`README.md`](README.md).
+
 > **Status:** Kanonische Installationsanleitung ist jetzt in [`docs/INSTALL.md`](docs/INSTALL.md) (CachyOS, Variante A/B, Schritt für Schritt).  
 > **Flag-Referenz:** Alle Env-Flags mit sicheren Defaults stehen in [`CONFIGURATION.md`](CONFIGURATION.md).  
 > **Windows:** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)  
-> **Code-Version:** v1.36.31
+> **Code-Version:** v0.1.0 (Beta, 2026-09-23; Legacy-Zählung `v1.x.x` ist archiviert — siehe [`CHANGELOG.md`](CHANGELOG.md))
 
 Diese Datei ist ein kurzer Einstieg — Details in den verlinkten Dokumenten.
 

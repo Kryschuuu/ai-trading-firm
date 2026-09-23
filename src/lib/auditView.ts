@@ -3688,6 +3688,35 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
       },
     ],
   },
+  TWAP_EXECUTION: {
+    label: "TWAP-Execution (RMA-P4-03)",
+    category: "order",
+    expectedLevel: "INFO",
+    description:
+      "Zustandswechsel im TWAP-Scheduler (RMA-P4-03, v1.71.0): Start, Slice-Plan, Reprice, Cancel, Recovery oder Abschluss des Eltern-Workflows. Fail-closed — fehlende Tiefe, unbekanntes Volumen oder unbestätigter Cancel senden nichts. `to = FAILED` wird als WARN protokolliert.",
+    headline: (d) =>
+      [text(d.kind) ?? "TWAP-Event", text(d.from), text(d.to), text(d.reason)].filter(Boolean).join(" · "),
+    explain: () =>
+      "Der TWAP-Plan läuft über dieselben harten Gates wie normale Orders (Kill-Switch, Lifecycle, Risk-Guard, Live-Gate, Quote, Spread, Konto, Notional). Der Audit-Eintrag belegt den Zustandsübergang und die wirksame Policy-Version.",
+    sections: (d) => [
+      {
+        title: "Workflow",
+        facts: [
+          { label: "Eltern-Key", value: text(d.parentKey) ?? "—", mono: true },
+          { label: "Aktion", value: text(d.kind) ?? "—" },
+          { label: "Grund", value: text(d.reason) ?? "—", mono: true },
+        ],
+      },
+      {
+        title: "Zustandsübergang",
+        facts: [
+          { label: "Von", value: text(d.from) ?? "—" },
+          { label: "Nach", value: text(d.to) ?? "—" },
+          { label: "Policy-Version", value: text(d.policyVersion) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
 };
 
 /** Fallback für unbekannte Events — nie leer, nie abgeschnitten. */

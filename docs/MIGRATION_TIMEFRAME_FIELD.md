@@ -1,7 +1,7 @@
 # Migrations-Runbook — `timeframe`-Feld im Historical Store (Schema v1 → v2)
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-08-29** ·
-> Code-Version **1.26.2** · Zielgruppe: Betrieb & Deployment
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
+> Code-Version **v0.1.0 (Beta)** · Zielgruppe: Betrieb & Deployment
 >
 > Dieses Runbook ist die Schritt-für-Schritt-Anleitung für
 > **Produktionsumgebungen mit bestehender** `data/history/candles.ndjson`.

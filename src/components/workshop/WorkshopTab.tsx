@@ -1,11 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import type { AgentRow, MissionRow } from "@/lib/types";
-import MissionsPanel from "./MissionsPanel";
-import AgentRunPanel from "./AgentRunPanel";
-import PromptPanel from "./PromptPanel";
-import HitRatePanel from "./HitRatePanel";
 
 /**
  * Workshop — das UI-Pendant zu Handbuch Kapitel 5 (Missionen) und 6 (Prompts
@@ -13,6 +7,14 @@ import HitRatePanel from "./HitRatePanel";
  * Mission schreiben → EINEN Agent einzeln laufen lassen → GENAU EINE Sache
  * am Prompt ändern → zehnmal wiederholen und Trefferquote zählen.
  */
+
+import { useState } from "react";
+import type { AgentRow, MissionRow } from "@/lib/types";
+import MissionsPanel from "./MissionsPanel";
+import AgentRunPanel from "./AgentRunPanel";
+import PromptPanel from "./PromptPanel";
+import HitRatePanel from "./HitRatePanel";
+
 export type WorkshopStep = "missions" | "run" | "prompt" | "hitrate";
 
 const steps: { id: WorkshopStep; label: string; hint: string }[] = [

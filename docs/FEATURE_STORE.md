@@ -1,6 +1,6 @@
 # Point-in-Time Feature Store
 
-**Stand:** 2026-09-20 · **Modul:** `src/features/` · **Version:** `1.53.0` (RMA-P6-01) · **Status:** Implementiert (kleiner Slice)
+**Stand:** 2026-09-20 · **Modul:** `src/features/` · **Version:** `v0.1.0 (Beta)` (RMA-P6-01) · **Status:** Implementiert (kleiner Slice)
 
 Der Feature Store berechnet Scanner-Features **stabil reproduzierbar**, speichert
 sie mit vollständiger Provenienz und beantwortet Point-in-Time-Fragen: *„Welchen

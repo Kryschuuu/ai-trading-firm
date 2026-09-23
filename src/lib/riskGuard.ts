@@ -546,6 +546,33 @@ export function riskValidationReason(e: unknown): string {
   return e instanceof Error ? e.message.slice(0, 60) : "RISK_VALIDATION";
 }
 
+/**
+ * Zentrale Order-Validierung — die letzte harte Risikolinie vor dem Broker.
+ *
+ * Prüft eine geplante Order gegen alle wirksamen Guardrails (Code-Ceilings +
+ * zur Laufzeit getunete `risk_config`-Werte) und liefert eine deterministische,
+ * maschinenlesable Entscheidung. Reine Funktion: keine DB-, keine Seiteneffekte,
+ * keine Uhr — alle Inputs kommen über `ctx`.
+ *
+ * @param ctx - Validierungskontext: `notional` (Quote-Währung), `equity`,
+ *   `leverage`, `side`, optional `stopLossPct` (Pflicht laut Policy),
+ *   `riskPerTradePct`/`maxRiskPerTrade`-Relevanz und die wirksamen
+ *   `RISK_LIMITS` (Default: Code-Ceilings).
+ * @returns `GuardrailResult` — `allowed: true` mit leerem `reasons`, oder
+ *   `allowed: false` mit allen blockierenden Reason-Codes (stabil,
+ *   `schranke:wert`-Format, z. B. `position-size:max-25%-of-equity`).
+ * @throws {RiskValidationError} Bei nicht endlichem/negativem `notional`,
+ *   `equity` oder `leverage` (fail-closed: `NaN`/`∞`/`≤ 0` wird nie
+ *   geklemmt, sondern abgelehnt — Vergleiche gegen `NaN` wären sonst immer
+ *   `false`).
+ *
+ * Prüft in fester Reihenfolge: Drawdown-PAUSE-Veto (RMA-P5-04),
+ * Strategy-Lifecycle-PAUSE/REJECTED-Veto (RMA-P1-05), numerische
+ * Fail-closed-Guards, Positionsgröße gegen `maxPositionPct`, Notional-Deckel,
+ * Short-Verbot, Stop-Loss-Pflicht/-Plausibilität, Risiko pro Trade und
+ * Leverage-Deckel. Neue Veto-Ebenen dürfen nur vor den numerischen Checks
+ * ergänzt werden — die Reihenfolge ist Teil des Audit-Vertrags.
+ */
 export function validateOrder(ctx: ValidateContext): GuardrailResult {
   const blockedBy: string[] = [];
 

@@ -1,3 +1,9 @@
+/**
+ * API-Route `POST /api/firm/kill` — Firm-Not-Halt: Kill-Switch armen/entschärfen (Arm = write-Guard, Disarm = ADMIN + CSRF + Nonce).
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("live.gate") — Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { killSwitches, missions } from "@/db/schema";

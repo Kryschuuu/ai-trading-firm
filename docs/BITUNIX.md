@@ -1,6 +1,6 @@
 # Bitunix-Adapter (Task 07) — 7. Venue, USDT-M-Perpetuals
 
-**Stand:** v1.40.0 · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
+**Stand:** v0.1.0 (Beta) · **Modul:** `src/brokers/bitunix/` · **Contract:** `BrokerAdapter` (+ Public-Market-Data über den Wrapper `src/marketdata/adapters/bitunix.ts`)
 **Status:** Public REST/WS und Paper (Modus B) ausführbar. Live-Ausführung über den
 zentralen Live-Gate-Enforcer (Task 11) und eine **getrennte Broker-Ausführungs-Engine**
 (s. §5) — ohne bestandene Gate-Prüfung weiterhin `LiveTradingGateError`.
@@ -36,7 +36,7 @@ leben (Stand v1.32.0):
 | `run-scan.ts` | `scripts/run-scan.ts` | `--sync` (Default aus) = optionaler Warmstart VOR dem deterministischen Scan |
 | Env-Handling `BITUNIX_ENABLED` + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `src/brokers/bitunix/config.ts` (`bitunixEnabled`, nur exakt `"true"`; `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0) | geteilt zwischen Trading-Adapter und Market-Data-Sync; `.env.example` § Bitunix/Market-Data-Sync |
 | Symbol-SSoT (SYM-007) | `src/symbols/normalize.ts` (`normalizeVenueSymbol`) | Instrument-ID in **venue-nativer Speicherform** `BITUNIX:BTCUSDT` (docs/SYMBOLS.md §4) |
-| Fixtures (echte API-Responses) | `test/fixtures/bitunix/*.json` | Snapshot 2026-08-31; Provenanz siehe `test/fixtures/bitunix/README.md` |
+| Fixtures (echte API-Responses) | `tests/fixtures/bitunix/*.json` | Snapshot 2026-08-31; Provenanz siehe `tests/fixtures/bitunix/README.md` |
 
 ---
 
@@ -700,7 +700,7 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 - `tests/sec04.wsDependency.test.ts` — SEC-04: exakter `ws`-Pin, Override, Lockfile-/Installations-Konsistenz, CI-Verdrahtung
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
 - `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
-- `test/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`test/fixtures/bitunix/`), **v1.40.0 Chunking-Regression**: Gateway-Simulation lehnt >6 KB URLs ab – Chunking (50, ~1 KB) liefert trotzdem alle Symbole, Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler (3 neue Tests)
+- `tests/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`tests/fixtures/bitunix/`), **v1.40.0 Chunking-Regression**: Gateway-Simulation lehnt >6 KB URLs ab – Chunking (50, ~1 KB) liefert trotzdem alle Symbole, Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler (3 neue Tests)
 - `src/marketdata/__tests__/spread.test.ts` — `calculateRelativeSpread` (Golden 100/100.02 ≈ 0.00019998, Edge Cases: fehlend/invertiert/`0`/`NaN`/`null` ⇒ `null`)
 - `src/marketdata/__tests__/sync.test.ts` — `volume24h`-Enrichment, Orderbook-Spread-Upsert, Batch-Tickers, `quoteVol`-Fehlend-Fallback, Rate-Limiter-Zählung bei 180 Instrumenten
 - Factory 28er-Matrix, Contract-Suite, `GET /api/brokers` count=7

@@ -1,6 +1,6 @@
 # Market Universe — broker-unabhängige Instrumenten-Registry (Task 01)
 
-**Stand:** v1.30.0 · **Modul:** `src/universe/` + `src/capabilities/` · **API:** `/api/markets`
+**Stand:** v0.1.0 (Beta) · **Modul:** `src/universe/` + `src/capabilities/` · **API:** `/api/markets`
 **Status:** Fundament-Umbau 1 von 12 — ersetzt die Watchlist als Marktdefinition; `liveAvailable` ist Laufzeitprojektion (CAP-008), `liveTradable` ist Stammdaten.
 
 ---

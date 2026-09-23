@@ -146,7 +146,15 @@ export const defaultSyncLogger: SyncLogger = (level, line) => {
 
 /** Harte, nicht konfigurierbare Deckel (Security: kein Massen-Fetching). */
 export const MAX_INSTRUMENTS_CEILING = 1_000;
+
+/**
+ * Obergrenze für die Anzahl an Kerzen je `getHistoricalCandles`-Aufruf.
+ * Harte Grenze — auch konfigurierbare `maxCandles` darf sie nicht
+ * überschreiten (schützt die Venue-APIs vor überdimensionierten Requests).
+ */
 export const MAX_CANDLE_LIMIT = 2_000;
+
+/** Untergrenze der Sync-Concurrency (mindestens ein parallel laufender Worker). */
 export const MIN_CONCURRENCY = 1;
 /** Ticket-Vorgabe: Concurrency hart auf ≤ 8 begrenzt (Token-Bucket bleibt autoritativ). */
 export const MAX_CONCURRENCY = 8;
@@ -464,6 +472,30 @@ async function runPool<T, R>(
   return results;
 }
 
+/**
+ * MarketDataSyncService — der Multi-Venue-Marktdaten-Sync (MDSYNC-001).
+ *
+ * Einzige Komponente, die zu Venue-öffentliche REST-APIs spricht, um das
+ * Instrument-Universe zu entdecken und den Historical Store zu wärmen.
+ * Der Scanner und alle HTTP-Routen importieren diese Datei bewusst NICHT
+ * (wird statisch von `tests/marketdata/security.test.ts` erzwungen).
+ *
+ * **Pipeline:** Discovery (Ticker/Orderbuch) → Enrichment (Kerzen-Backfill)
+ * → Readiness (Warmup-Check: mindestens `requiredWarmupCandles` Kerzen).
+ * Alle Stufen sind chunked, fehlerisoliert und rate-limitiert
+ * (Token-Bucket je Venue, Concurrency hart ≤ 8).
+ *
+ * **Garantien:**
+ * - Deterministisch: gleicher Seed ⇒ gleiche Ergebnis-Struktur.
+ * - Fail-soft: ein fehlgeschlagener Chunk reißt die übrigen nicht mit;
+ *   Befunde werden klassifiziert (MDERR-Taxonomie) und im Fehler-Manifest
+ *   sichtbar.
+ * - Kein Look-ahead: Kerzen werden nur mit `fetchedAt ≤ now` aufgenommen.
+ *
+ * **Verwendung:** `new MarketDataSyncService(registry, history, adapters, opts)`
+ * und `syncVenue(venue, overrides?)` für einen Einzel-Venue-Lauf oder
+ * `syncAll()` für alle registrierten Venues.
+ */
 export class MarketDataSyncService {
   private readonly clock: () => Date;
   private readonly rateLimiter?: RateLimiter;

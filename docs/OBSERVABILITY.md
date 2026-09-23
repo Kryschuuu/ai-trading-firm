@@ -3,7 +3,7 @@
 > **Status-Header:** **Implementiert** (MDERR-006; GAP-10 v1.45.0 ergänzt
 > Firmen-Metriken, Auto-Circuit-Breaker, Alerting und Heartbeat; GAP-07
 > v1.47.0 ergänzt die Datenqualitäts-Klassen §2.1) ·
-> **2026-09-19** · Code-Version **1.47.0** · Module
+> **2026-09-19** · Code-Version **v0.1.0 (Beta)** · Module
 > `src/lib/marketDataErrors.ts`, `src/lib/telemetry.ts`,
 > `src/lib/alerts.ts`, `src/lib/circuitBreaker.ts`, `src/lib/heartbeat.ts`,
 > `src/lib/logger.ts`, `src/marketdata/dataErrors.ts`,
@@ -89,7 +89,7 @@ kein Abruf-Fehler. Deshalb drei Ausweiskanäle, aber kein Fetch-Manifest:
 **Redaction/Garantien:** Report-Felder sind stabile Codes (`instrumentId`,
 Klasse, Zeitstempel, kurze Details) — keine Rohmeldungen, keine URLs, keine
 Secrets. Die Historie-Datei wird vom Qualitäts-Layer **nie** berührt; die
-Eingabeserie wird nie mutiert (Freeze-Tests in `test/marketdata/quality.test.ts`).
+Eingabeserie wird nie mutiert (Freeze-Tests in `tests/marketdata/quality.test.ts`).
 Kein Outlier-Filter entfernt Daten: Befund ≠ Löschung, ein realistischer
 Flash-Move bleibt unterhalb der (bewusst großzügigen) 25×-Schwelle erhalten
 (Grenzwert getestet).

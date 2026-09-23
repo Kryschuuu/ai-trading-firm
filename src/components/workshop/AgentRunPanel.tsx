@@ -1,5 +1,14 @@
 "use client";
 
+
+/**
+ * Schritt 2 (Handbuch 6.2): EINEN Agenten gegen EINE Mission laufen lassen
+ * und die Antwort prüfen — ersetzt das psql-SELECT auf agent_messages.
+ * Zeigt das geparste Decision-JSON formatiert plus die letzten 3 echten
+ * Agenten-Turns mit Quelle und Latenz. Analysten- und Systemmeldungen stehen
+ * bewusst separat und lesbar im Protokoll-Tab.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import InfoTip from "./InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
@@ -13,13 +22,6 @@ import type {
   TurnResultDto,
 } from "@/lib/types";
 
-/**
- * Schritt 2 (Handbuch 6.2): EINEN Agenten gegen EINE Mission laufen lassen
- * und die Antwort prüfen — ersetzt das psql-SELECT auf agent_messages.
- * Zeigt das geparste Decision-JSON formatiert plus die letzten 3 echten
- * Agenten-Turns mit Quelle und Latenz. Analysten- und Systemmeldungen stehen
- * bewusst separat und lesbar im Protokoll-Tab.
- */
 
 const SOURCE_LABEL: Record<string, string> = {
   ollama: "Modell (ollama-kompatibel)",
