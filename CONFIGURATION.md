@@ -1006,8 +1006,9 @@ Hinweise:
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
 | `EXECUTION_POLICY_ENABLED` | `false` | Gibt `start`/`poll`/`recover` der Execution-Policy frei (`false` = 503, nur Lesen; ungültige Werte werfen) |
+| `TWAP_EXECUTION_ENABLED` | `false` | Gibt `start`/`tick`/`cancel`/`resume`/`recover` des TWAP-Schedulers frei (`false` = 503, nur Lesen; ungültige Werte werfen) |
 
-Details: [`docs/POST_ONLY_FALLBACK.md`](docs/POST_ONLY_FALLBACK.md).
+Details: [`docs/POST_ONLY_FALLBACK.md`](docs/POST_ONLY_FALLBACK.md), [`docs/TWAP_EXECUTION.md`](docs/TWAP_EXECUTION.md).
 
 ## Migration & Deploy
 

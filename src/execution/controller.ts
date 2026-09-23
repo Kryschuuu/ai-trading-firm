@@ -169,6 +169,9 @@ function recordsToFacts(fills: readonly WorkflowFillRecord[]): FillFact[] {
   return fills.map((f) => ({ fillId: f.fillId, orderId: f.orderId, qty: f.qty, price: f.price, feeQuote: f.feeQuote }));
 }
 
+/** Externe Cancel-Gründe. Kein Market-Fallback, solange die Policy ihn verbietet. */
+export type ExternalCancelReason = "KILL_SWITCH" | "DEADLINE" | "PARENT_CANCEL" | "EXTERNAL_CANCEL";
+
 export class ExecutionPolicyController {
   private readonly store: ExecutionStore;
   private readonly ports: Map<BrokerVenueId, VenueExecutionPort>;
@@ -675,10 +678,60 @@ export class ExecutionPolicyController {
     return record;
   }
 
+  /**
+   * Externer Abbruch (Kill-Switch, Deadline, Parent-Cancel) — kein Market-Pfad.
+   *
+   * Cancelt eine lebende Limit-Order und pollt bounded, bis der Workflow
+   * terminal ist. Ein Market-Fallback entsteht daraus nur, wenn die Policy ihn
+   * explizit erlaubt. TWAP-Kinder tragen `fallbackAllowed=false` und
+   * `maxReprices=0`: nach bestätigtem Cancel endet der Workflow als FAILED
+   * (`FALLBACK_DISABLED`), die Restmenge geht an den Parent zurück, nichts
+   * wird aggressiv nachgejagt.
+   *
+   * Unbestätigter Cancel bleibt CANCEL_PENDING/FAILED `CANCEL_UNRESOLVED` —
+   * der Aufrufer darf den Auftrag nicht als storniert behandeln.
+   */
+  async cancelOpen(
+    workflowId: string,
+    reason: ExternalCancelReason = "EXTERNAL_CANCEL"
+  ): Promise<WorkflowRecord> {
+    let record = await this.store.loadById(workflowId);
+    if (!record) throw new ExecutionControllerError("WORKFLOW_NOT_FOUND", `Workflow ${workflowId} unbekannt`);
+    if (record.state === "DONE" || record.state === "FAILED") return record;
+    if (record.state === "REJECTED" && record.repricesUsed >= record.policy.maxReprices) return record;
+    const port = this.ports.get(record.venue);
+    if (!port) throw new ExecutionControllerError("PORT_UNKNOWN", `kein Venue-Port für ${record.venue}`);
+    const instrument = this.getInstrument(record.venue, record.symbol);
+    if (!instrument) throw new ExecutionControllerError("INSTRUMENT_UNKNOWN", `${record.venue}:${record.symbol} unbekannt`);
+    const now = this.now();
+    if (record.state === "NEW") {
+      return this.transition(record, {
+        patch: { state: "FAILED", errorCode: reason, reason },
+        event: {
+          toState: "FAILED",
+          reason,
+          eventTime: now,
+          availableAt: now,
+          computedAt: now,
+          detail: { source: "external-cancel" },
+        },
+      });
+    }
+    if (record.state === "SUBMITTED" || record.state === "ACK" || record.state === "PARTIAL") {
+      record = await this.requestCancel(record, port, reason);
+    }
+    for (let i = 0; i < 4; i++) {
+      if (record.state === "DONE" || record.state === "FAILED") return record;
+      if (record.state === "REJECTED" && record.repricesUsed >= record.policy.maxReprices) return record;
+      record = await this.poll(record.id);
+    }
+    return record;
+  }
+
   private async requestCancel(
     record: WorkflowRecord,
     port: VenueExecutionPort,
-    trigger: "TTL_EXPIRED"
+    trigger: "TTL_EXPIRED" | ExternalCancelReason
   ): Promise<WorkflowRecord> {
     const now = this.now();
     const caps = port.getCapabilities();

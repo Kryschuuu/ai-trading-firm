@@ -2871,3 +2871,195 @@ export const executionWorkflowFills = pgTable(
     check("execution_workflow_fills_fill_id_check", sql`length(${t.fillId}) > 0 AND length(${t.fillId}) <= 128`),
   ]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TWAP / Depth-aware Execution (RMA-P4-03, v1.71.0)
+//
+// Append-only gegenüber bestehenden Tabellen. Kein FK-Cascade: Kinder- und
+// Event-Zeilen überleben einen versehentlichen Parent-Delete-Versuch (RESTRICT).
+// Events und Evaluationen sind unveränderlich. Numerische Unbekanntheit bleibt
+// NULL — nie ein stilles 0.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Eltern-Intent eines TWAP. Status und Lease sind mutierbar; der Key nicht. */
+export const executionTwapParents = pgTable(
+  "execution_twap_parents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `etp1:<sha256>` — ein Key, eine Policy. */
+    parentKey: text("parent_key").notNull(),
+    venue: text("venue").notNull(),
+    mode: text("mode").notNull(),
+    symbol: text("symbol").notNull(),
+    side: text("side").notNull(),
+    targetQty: numeric("target_qty").notNull(),
+    filledQty: numeric("filled_qty").notNull().default("0"),
+    /** Nicht eingeplante Restmenge. NULL = noch nicht geplant (≠ 0). */
+    unscheduledQty: numeric("unscheduled_qty"),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
+    sliceIntervalMs: integer("slice_interval_ms").notNull(),
+    policyVersion: text("policy_version").notNull(),
+    policyJson: jsonb("policy_json").notNull(),
+    jitterSeed: text("jitter_seed"),
+    status: text("status").notNull().default("PLANNED"),
+    reason: text("reason"),
+    cursorIndex: integer("cursor_index").notNull().default(0),
+    planVersion: integer("plan_version").notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseToken: text("lease_token"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    /** Eltern-Limit. NULL = kein Limit gesetzt (≠ 0). */
+    limitPrice: numeric("limit_price"),
+    arrivalMid: numeric("arrival_mid"),
+    arrivalEventTime: timestamp("arrival_event_time", { withTimezone: true }),
+    arrivalAvailableAt: timestamp("arrival_available_at", { withTimezone: true }),
+    hasStopLoss: boolean("has_stop_loss").notNull().default(false),
+    scope: text("scope").notNull().default("twap"),
+    quoteCurrency: text("quote_currency").notNull().default("USD"),
+    quantityStep: numeric("quantity_step").notNull(),
+    priceStep: numeric("price_step").notNull(),
+    minQuantity: numeric("min_quantity").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("execution_twap_parents_key_unique").on(t.parentKey),
+    index("execution_twap_parents_status_idx").on(t.status, t.createdAt),
+    check("execution_twap_parents_venue_check", sql`${t.venue} IN ('PAPER', 'ALPACA', 'IBKR', 'BINANCE', 'KRAKEN', 'DYDX', 'BITUNIX')`),
+    check("execution_twap_parents_mode_check", sql`${t.mode} IN ('backtest', 'paper', 'testnet', 'live')`),
+    check("execution_twap_parents_side_check", sql`${t.side} IN ('LONG', 'SHORT')`),
+    check(
+      "execution_twap_parents_status_check",
+      sql`${t.status} IN ('PLANNED', 'RUNNING', 'PAUSED', 'COMPLETED', 'EXPIRED', 'CANCELLED', 'FAILED')`,
+    ),
+    check("execution_twap_parents_target_check", sql`${t.targetQty} > 0`),
+    check("execution_twap_parents_filled_check", sql`${t.filledQty} >= 0`),
+    check("execution_twap_parents_window_check", sql`${t.deadlineAt} > ${t.startAt}`),
+    check("execution_twap_parents_interval_check", sql`${t.sliceIntervalMs} >= 1000`),
+    check("execution_twap_parents_key_check", sql`${t.parentKey} ~ '^etp1:[0-9a-f]{64}$'`),
+    check("execution_twap_parents_policy_check", sql`${t.policyVersion} ~ '^etw1:[0-9a-f]{64}$'`),
+    check("execution_twap_parents_reason_check", sql`${t.reason} IS NULL OR length(${t.reason}) BETWEEN 1 AND 64`),
+    check("execution_twap_parents_steps_check", sql`${t.quantityStep} > 0 AND ${t.priceStep} > 0 AND ${t.minQuantity} > 0`),
+  ],
+);
+
+/** Ein geplanter oder gesendeter Slice. Die Kind-Identität ist `child_key`, nicht die Menge. */
+export const executionTwapSlices = pgTable(
+  "execution_twap_slices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    parentId: uuid("parent_id")
+      .notNull()
+      .references(() => executionTwapParents.id),
+    sliceIndex: integer("slice_index").notNull(),
+    /** `etc1:<sha256>` aus Parent-Key und Index. */
+    childKey: text("child_key").notNull(),
+    planVersion: integer("plan_version").notNull(),
+    targetQty: numeric("target_qty").notNull(),
+    filledQty: numeric("filled_qty").notNull().default("0"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("PENDING"),
+    submitClaim: text("submit_claim"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    qtyFrozen: boolean("qty_frozen").notNull().default(false),
+    workflowKey: text("workflow_key"),
+    /** Controller-Workflow, ohne FK (die Execution-Tabellen sind eine eigene Migration). */
+    workflowId: text("workflow_id"),
+    /** Gesetztes Maker-Limit. NULL = noch nicht bepreist. */
+    limitPrice: numeric("limit_price"),
+    skipReason: text("skip_reason"),
+    /** Sichtbare Gegenseite zum Submit. NULL = nicht gemessen. */
+    depthQty: numeric("depth_qty"),
+    /** Geschätzter Take-Impact in bp. NULL = nicht gemessen (konservativer Fallback). */
+    impactBps: numeric("impact_bps"),
+    /** Participation-Cap in Basiseinheiten. NULL = Volumen unbekannt, nicht unbegrenzt. */
+    participationCap: numeric("participation_cap"),
+    version: integer("version").notNull().default(1),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("execution_twap_slices_parent_index_unique").on(t.parentId, t.sliceIndex),
+    uniqueIndex("execution_twap_slices_child_key_unique").on(t.childKey),
+    index("execution_twap_slices_parent_idx").on(t.parentId, t.status),
+    check("execution_twap_slices_index_check", sql`${t.sliceIndex} >= 0`),
+    check("execution_twap_slices_qty_check", sql`${t.targetQty} > 0 AND ${t.filledQty} >= 0`),
+    check(
+      "execution_twap_slices_status_check",
+      sql`${t.status} IN ('PENDING', 'SUBMITTED', 'PARTIAL', 'DONE', 'SKIPPED', 'CANCELLED')`,
+    ),
+    check("execution_twap_slices_child_key_check", sql`${t.childKey} ~ '^etc1:[0-9a-f]{64}$'`),
+    check("execution_twap_slices_reason_check", sql`${t.skipReason} IS NULL OR length(${t.skipReason}) BETWEEN 1 AND 64`),
+  ],
+);
+
+/** Append-only Audit eines Parent. Kein Update, kein Delete. */
+export const executionTwapEvents = pgTable(
+  "execution_twap_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    parentId: uuid("parent_id")
+      .notNull()
+      .references(() => executionTwapParents.id),
+    sliceId: uuid("slice_id").references(() => executionTwapSlices.id),
+    seq: integer("seq").notNull(),
+    eventId: text("event_id").notNull(),
+    kind: text("kind").notNull(),
+    reason: text("reason").notNull(),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status"),
+    detail: jsonb("detail").notNull().default({}),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    policyVersion: text("policy_version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("execution_twap_events_id_unique").on(t.eventId),
+    uniqueIndex("execution_twap_events_parent_seq_unique").on(t.parentId, t.seq),
+    index("execution_twap_events_parent_idx").on(t.parentId, t.seq),
+    check("execution_twap_events_seq_check", sql`${t.seq} >= 1`),
+    check("execution_twap_events_id_check", sql`${t.eventId} ~ '^ete1:[0-9a-f]{64}$'`),
+    check("execution_twap_events_policy_check", sql`${t.policyVersion} ~ '^etw1:[0-9a-f]{64}$'`),
+    check("execution_twap_events_reason_check", sql`length(${t.reason}) BETWEEN 1 AND 64`),
+    check("execution_twap_events_kind_check", sql`length(${t.kind}) BETWEEN 1 AND 32`),
+    check("execution_twap_events_time_check", sql`${t.availableAt} >= ${t.eventTime} AND ${t.computedAt} >= ${t.availableAt}`),
+  ],
+);
+
+/** Append-only Benchmark gegen die Sofort-Baseline. NULL-bps bleiben NULL. */
+export const executionTwapEvaluations = pgTable(
+  "execution_twap_evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    parentId: uuid("parent_id")
+      .notNull()
+      .references(() => executionTwapParents.id),
+    evalKey: text("eval_key").notNull(),
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    completion: numeric("completion"),
+    durationMs: integer("duration_ms"),
+    coverage: numeric("coverage"),
+    twapShortfallBps: numeric("twap_shortfall_bps"),
+    immediateShortfallBps: numeric("immediate_shortfall_bps"),
+    shortfallVsImmediateBps: numeric("shortfall_vs_immediate_bps"),
+    arrivalPrice: numeric("arrival_price"),
+    twapVwap: numeric("twap_vwap"),
+    immediateVwap: numeric("immediate_vwap"),
+    filledQty: numeric("filled_qty").notNull(),
+    targetQty: numeric("target_qty").notNull(),
+    reason: text("reason").notNull(),
+    detail: jsonb("detail").notNull().default({}),
+  },
+  (t) => [
+    uniqueIndex("execution_twap_evaluations_key_unique").on(t.evalKey),
+    index("execution_twap_evaluations_parent_idx").on(t.parentId, t.computedAt),
+    check("execution_twap_evaluations_key_check", sql`${t.evalKey} ~ '^etv1:[0-9a-f]{64}$'`),
+    check("execution_twap_evaluations_reason_check", sql`length(${t.reason}) BETWEEN 1 AND 64`),
+    check("execution_twap_evaluations_qty_check", sql`${t.filledQty} >= 0 AND ${t.targetQty} > 0`),
+    check("execution_twap_evaluations_time_check", sql`${t.computedAt} >= ${t.asOf}`),
+  ],
+);
