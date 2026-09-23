@@ -11,7 +11,7 @@ Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
 
-## [1.73.0] — 2026-09-23 · Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates (RMA-P1-05)
+## [1.73.0] — 2026-09-23 · Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates (RMA-P1-05) · PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171)
 
 ### Hinzugefügt
 

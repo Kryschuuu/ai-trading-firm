@@ -1,7 +1,7 @@
 # RMA-P1-05: Backtest↔Paper↔Live-Drift und Strategy-Lifecycle
 
 - **Antwort:** Nein
-- **Tracking-Status:** `OPEN`
+- **Tracking-Status:** `FIXED` (v1.73.0, [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171))
 - **Severity:** `CRITICAL`
 - **Quick Estimate Restaufwand:** **8–12 PT**
 - **Umsetzungs-Prompt:** [`PROMPT-P1-05`](../prompts/PROMPT-P1-05-lifecycle-drift.md)
@@ -38,5 +38,8 @@ Manuelle Regel- und Brokerzustände verhindern unkontrollierte Mutation. Sie mes
 - Methode: statische Pfad-/Symbolprüfung, Schema- und Testabgleich; keine reine
   Dokumentationsbehauptung als Implementierungsbeleg.
 - Umsetzung: v1.73.0 (`src/strategyLifecycle/`, `drizzle/2026-09-23_strategy_lifecycle.sql`,
-  `docs/STRATEGY_LIFECYCLE.md`); PR/Commit siehe Tracking (wird mit dem Fix-Evidenzblock gesetzt).
+  `docs/STRATEGY_LIFECYCLE.md`, API `/api/firm/lifecycle`).
+- Evidenz: PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171), Commit `a88b5c5`; Tests 49/49 (`tests/strategyLifecycle.test.ts` 43 +
+  `tests/strategyLifecycle.db.test.ts` 6); typecheck/lint/docs:validate grün;
+  `npm test` übersprungen (explizite Nutzeranweisung).
 - Tracking: [`../remediation/TRACKING.md`](../remediation/TRACKING.md)

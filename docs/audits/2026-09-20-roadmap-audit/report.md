@@ -87,6 +87,8 @@ Rule-Lifecycle ist nicht dasselbe wie evidenzbasierte Promotion.
 
 → [Detail](findings/RMA-P1-05-lifecycle-drift.md) · [Prompt](prompts/PROMPT-P1-05-lifecycle-drift.md) · [Doku](../../STRATEGY_LIFECYCLE.md)
 
+Behoben in **v1.73.0** (PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171), Commit `a88b5c5`) — siehe Tracking.
+
 ### P1.6 Trade-Attribution — PARTIAL
 
 Das Trade-Journal speichert Decision Snapshots, Votes sowie Proposal-/Rule-
