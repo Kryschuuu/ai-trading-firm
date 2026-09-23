@@ -10,6 +10,10 @@
  * — kanonischer Eventvertrag, Latenz-/Impact-/Funding-Friktionen und
  * Order-Lifecycle mit Partial-Fill-Restmengen (`executionModel:
  * "event_replay"`, explizites Opt-in).
+ * RMA-P6-02 (v1.72.0): Monte-Carlo-/Trade-Resampling (`./montecarlo` —
+ * reine, deterministische Simulation) und dessen Persistenz
+ * (`./monteCarloStore` — verifizierte Ledger-Quelle, idempotente
+ * `backtest_monte_carlo_runs`-Zeile, bounded Read-API).
  */
 
 export * from "./types";
@@ -24,3 +28,5 @@ export * from "./replayFunding";
 export * from "./walkforward";
 export * from "./runStore";
 export * from "./tradeLedger";
+export * from "./montecarlo";
+export * from "./monteCarloStore";
