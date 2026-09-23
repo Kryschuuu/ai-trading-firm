@@ -27,14 +27,16 @@ Manuelle Regel- und Brokerzustände verhindern unkontrollierte Mutation. Sie mes
 
 ## Akzeptanzkriterien für `FIXED`
 
-- [ ] kein direkter Übergang von DRAFT nach LIVE
-- [ ] jede Transition referenziert unveränderliche Evidenz und Policy-Version
-- [ ] Drift-Gates fail-closed bei fehlenden/stalen Daten
-- [ ] Degradation ist idempotent, auditiert und reduziert Risiko statt es zu erhöhen
+- [x] kein direkter Übergang von DRAFT nach LIVE
+- [x] jede Transition referenziert unveränderliche Evidenz und Policy-Version
+- [x] Drift-Gates fail-closed bei fehlenden/stalen Daten
+- [x] Degradation ist idempotent, auditiert und reduziert Risiko statt es zu erhöhen
 
 ## Review-Evidenz
 
 - Audit-Basis: Commit `df3163e`, Produktversion `v1.51.1`.
 - Methode: statische Pfad-/Symbolprüfung, Schema- und Testabgleich; keine reine
   Dokumentationsbehauptung als Implementierungsbeleg.
+- Umsetzung: v1.73.0 (`src/strategyLifecycle/`, `drizzle/2026-09-23_strategy_lifecycle.sql`,
+  `docs/STRATEGY_LIFECYCLE.md`); PR/Commit siehe Tracking (wird mit dem Fix-Evidenzblock gesetzt).
 - Tracking: [`../remediation/TRACKING.md`](../remediation/TRACKING.md)

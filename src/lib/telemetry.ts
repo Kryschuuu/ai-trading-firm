@@ -594,6 +594,29 @@ export const telemetry = {
       telemetry.monteCarlo.queries.reset();
     },
   },
+  /**
+   * Strategy-Lifecycle / Drift-Gates (RMA-P1-05, v1.73.0).
+   *
+   * Labels ausschließlich Code-konstant (`result`, `to`, `kind`, `verdict`,
+   * `action`, `code` via metricLabel) — KEINE Strategie-Keys, Order-/Trade-IDs
+   * oder Instrumente (Kardinalitätsregel).
+   */
+  strategyLifecycle: {
+    /** Zustandsübergänge je Ergebnis und Zielzustand. */
+    transitions: new LabelCounter("strategy_lifecycle_transitions_total"),
+    /** Evidence-Schreibungen je Art und Ergebnis. */
+    evidence: new LabelCounter("strategy_lifecycle_evidence_total"),
+    /** Drift-Bewertungen je Verdict und empfohlener Aktion. */
+    driftChecks: new LabelCounter("strategy_lifecycle_drift_checks_total"),
+    /** Order-Gate-Entscheidungen je Result und bounded Reason-Code. */
+    gateDecisions: new LabelCounter("strategy_lifecycle_gate_decisions_total"),
+    reset(): void {
+      telemetry.strategyLifecycle.transitions.reset();
+      telemetry.strategyLifecycle.evidence.reset();
+      telemetry.strategyLifecycle.driftChecks.reset();
+      telemetry.strategyLifecycle.gateDecisions.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -742,6 +765,10 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.backtest.replayDegraded.exposition(),
     telemetry.monteCarlo.runs.exposition(),
     telemetry.monteCarlo.queries.exposition(),
+    telemetry.strategyLifecycle.transitions.exposition(),
+    telemetry.strategyLifecycle.evidence.exposition(),
+    telemetry.strategyLifecycle.driftChecks.exposition(),
+    telemetry.strategyLifecycle.gateDecisions.exposition(),
     telemetry.executionQuality.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),
@@ -870,4 +897,5 @@ export function resetTelemetryForTests(): void {
   telemetry.executionPolicy.reset();
   telemetry.twap.reset();
   telemetry.monteCarlo.reset();
+  telemetry.strategyLifecycle.reset();
 }

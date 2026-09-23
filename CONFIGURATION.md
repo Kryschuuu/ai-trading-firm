@@ -1148,3 +1148,28 @@ schreibbar. Der Modus selbst ist nicht per API umschaltbar.
 `SIGNAL_DECAY_MODE=active`. Rollback: `SIGNAL_DECAY_MODE=off` oder die
 Klassenflags auf `false`. Die Event-Tabelle bleibt append-only.
 
+## Strategy-Lifecycle & Driftgates (RMA-P1-05, v1.73.0)
+
+Evidenzbasierte 9-Zustands-Promotion (DRAFT → BACKTEST_* → PAPER →
+LIVE_LIMITED → LIVE) mit immutabler Evidence, versionierten Promotion-Gates,
+Drift-Vergleich (Performance/Risk/Execution/Data Quality) und automatischer
+Degrationsleiter (Risiko senken → DEGRADED/LIVE_LIMITED → PAUSE). Der
+Lifecycle-Gate prüft vor Live-Orders **zusätzlich** zu Kill-Switch, Live-Gate
+und Risk-Ceilings und schwächt diese nie. Vollständige Doku:
+[`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md).
+Migration (append-only, idempotent) vor Aktivierung:
+`psql "$DATABASE_URL" -f drizzle/2026-09-23_strategy_lifecycle.sql`.
+
+| Variable | Standard | Erlaubte Werte | Bedeutung |
+| --- | --- | --- | --- |
+| `STRATEGY_LIFECYCLE_MODE` | `off` | `off`, `monitor`, `enforce` | `off` (Default): kein Order-Blocker, rückwärtskompatibel. `monitor`: Gates bewerten + Audit, blockieren Live-Orders nicht. `enforce`: Live-Orders ohne autorisierte Lifecycle-Erlaubnis werden abgelehnt (`LIFECYCLE_GATE_DENY`). Unbekannt ⇒ `off` + Warnung (nie still `enforce`). |
+| `STRATEGY_LIFECYCLE_RECOVERY_COOLDOWN_MS` | `21600000` (6 h) | 0 … 2592000000 (30 d) | Recovery-Cooldown nach Degradation; vor Ablauf blockieren Recovery-Edges (`COOLDOWN_ACTIVE`). |
+| `STRATEGY_LIFECYCLE_MIN_RISK_FACTOR` | `0.25` | 0.05 … 1 | Untergrenze des Lifecycle-Risikofaktors (hart ≤ 1, nur senkend). |
+
+**Rollout:** Migration, dann `STRATEGY_LIFECYCLE_MODE=monitor` in Paper
+beobachten (`GET /api/firm/lifecycle`), dann `enforce` für Live-Schlüssel.
+Rollback: `STRATEGY_LIFECYCLE_MODE=off` (+ optional
+`psql` DROP der drei `strategy_lifecycle_*`-Tabellen, siehe
+`docs/STRATEGY_LIFECYCLE.md` §8) + Restart — keine Datenbereinigung der
+bestehenden Ceilings/Kill-Switches nötig (die wirken unverändert weiter).
+

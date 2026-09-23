@@ -3128,3 +3128,184 @@ export const executionTwapEvaluations = pgTable(
     check("execution_twap_evaluations_time_check", sql`${t.computedAt} >= ${t.asOf}`),
   ],
 );
+
+/**
+ * Strategy-Lifecycle-Zustand je koncreter Strategieversion (RMA-P1-05, v1.73.0).
+ *
+ * EINE Zeile pro (strategy_key, strategy_version) mit optimistischem Lock
+ * (`state_seq`). Append-only Migration: `drizzle/2026-09-23_strategy_lifecycle.sql`.
+ * Kein Auto-Promotion-Pfad: Übergänge laufen ausschließlich über
+ * `strategy_lifecycle_transitions` in einer Transaktion mit FOR UPDATE.
+ */
+export const strategyLifecycleStates = pgTable(
+  "strategy_lifecycle_states",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    strategyKey: text("strategy_key").notNull(),
+    strategyVersion: integer("strategy_version").notNull(),
+    /** DRAFT | BACKTEST_PENDING | BACKTEST_PASSED | PAPER | LIVE_LIMITED | LIVE | DEGRADED | PAUSED | REJECTED */
+    state: text("state").notNull().default("DRAFT"),
+    /** Optimistische Sequenz — steigt bei JEDEM Zustandswechsel. */
+    stateSeq: integer("state_seq").notNull().default(0),
+    /** Aktive Promotion-/Drift-Policy `slp1:<sha256>`. */
+    policyVersion: text("policy_version").notNull(),
+    /** Risikofaktor ∈ (0,1] — nur senkend wirksam (Authority Chain). */
+    riskScale: numeric("risk_scale").notNull().default("1"),
+    /** Recovery-Cooldown nach Degradation/Pause (NULL = keiner). */
+    cooldownUntil: timestamp("cooldown_until", { withTimezone: true }),
+    /** Letzte gestützte Evidence (FK, nullable für Bootstrap). */
+    lastEvidenceId: uuid("last_evidence_id").references(
+      (): AnyPgColumn => strategyLifecycleEvidence.id
+    ),
+    /** Optionale Verknüpfung zur Regel-Identität (trade_rules.rule_key). */
+    ruleKey: uuid("rule_key"),
+    updatedBy: text("updated_by").notNull().default("system"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("strategy_lifecycle_states_key_unique").on(t.strategyKey, t.strategyVersion),
+    index("strategy_lifecycle_states_state_idx").on(t.state),
+    check(
+      "strategy_lifecycle_states_state_check",
+      sql`${t.state} IN ('DRAFT','BACKTEST_PENDING','BACKTEST_PASSED','PAPER','LIVE_LIMITED','LIVE','DEGRADED','PAUSED','REJECTED')`
+    ),
+    check("strategy_lifecycle_states_seq_check", sql`${t.stateSeq} >= 0`),
+    check(
+      "strategy_lifecycle_states_scale_check",
+      sql`${t.riskScale} > 0 AND ${t.riskScale} <= 1`
+    ),
+    check("strategy_lifecycle_states_version_check", sql`${t.strategyVersion} >= 1`),
+    check(
+      "strategy_lifecycle_states_key_shape",
+      sql`length(${t.strategyKey}) BETWEEN 1 AND 128 AND ${t.strategyKey} ~ '^[A-Za-z0-9._:@/-]+$'`
+    ),
+  ]
+);
+
+/**
+ * Immutable Evidence-Referenzen (RMA-P1-05). Kein Update-Pfad: Zeilen
+ * entstehen insert-only mit Content-Hash + Idempotency-Key und optionaler
+ * FK auf `backtest_runs`. Zeitsemantik: event_time / available_at / computed_at.
+ */
+export const strategyLifecycleEvidence = pgTable(
+  "strategy_lifecycle_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    strategyKey: text("strategy_key").notNull(),
+    strategyVersion: integer("strategy_version").notNull(),
+    /** BACKTEST_RUN | PAPER_WINDOW | RECONCILIATION | EXECUTION_QUALITY | DRIFT | RECOVERY | OVERRIDE | DATA_QUALITY */
+    kind: text("kind").notNull(),
+    /** PASS | FAIL | INCONCLUSIVE */
+    result: text("result").notNull(),
+    backtestRunId: uuid("backtest_run_id").references(() => backtestRuns.id),
+    promptVersion: text("prompt_version"),
+    codeVersion: text("code_version").notNull(),
+    dataVersion: text("data_version"),
+    ruleKey: uuid("rule_key"),
+    policyVersion: text("policy_version").notNull(),
+    sampleSize: integer("sample_size"),
+    windowStart: timestamp("window_start", { withTimezone: true }),
+    windowEnd: timestamp("window_end", { withTimezone: true }),
+    /** Geschlossene Metrik-Map; Werte number|null (null ≠ 0). */
+    metrics: jsonb("metrics").notNull().default({}),
+    detail: jsonb("detail").notNull().default({}),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+    contentHash: text("content_hash").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("strategy_lifecycle_evidence_idem_unique").on(t.idempotencyKey),
+    uniqueIndex("strategy_lifecycle_evidence_hash_unique").on(t.contentHash),
+    index("strategy_lifecycle_evidence_lookup_idx").on(
+      t.strategyKey,
+      t.strategyVersion,
+      t.kind,
+      t.availableAt
+    ),
+    index("strategy_lifecycle_evidence_backtest_idx").on(t.backtestRunId),
+    check(
+      "strategy_lifecycle_evidence_kind_check",
+      sql`${t.kind} IN ('BACKTEST_RUN','PAPER_WINDOW','RECONCILIATION','EXECUTION_QUALITY','DRIFT','RECOVERY','OVERRIDE','DATA_QUALITY')`
+    ),
+    check(
+      "strategy_lifecycle_evidence_result_check",
+      sql`${t.result} IN ('PASS','FAIL','INCONCLUSIVE')`
+    ),
+    check("strategy_lifecycle_evidence_sample_check", sql`${t.sampleSize} IS NULL OR ${t.sampleSize} >= 0`),
+    check(
+      "strategy_lifecycle_evidence_time_check",
+      sql`${t.availableAt} >= ${t.eventTime} AND ${t.computedAt} >= ${t.availableAt}`
+    ),
+    check(
+      "strategy_lifecycle_evidence_hash_check",
+      sql`${t.contentHash} ~ '^sle1:[0-9a-f]{64}$' AND ${t.idempotencyKey} ~ '^slei1:[0-9a-f]{64}$'`
+    ),
+    check(
+      "strategy_lifecycle_evidence_window_check",
+      sql`${t.windowStart} IS NULL OR ${t.windowEnd} IS NULL OR ${t.windowEnd} >= ${t.windowStart}`
+    ),
+  ]
+);
+
+/**
+ * Append-only Transitions-Log (RMA-P1-05). UNIQUE `transition_key` macht
+ * Retries/parallele Ausführungen idempotent — genau EIN Zustand, genau ein
+ * Audit-Ereignis je Key.
+ */
+export const strategyLifecycleTransitions = pgTable(
+  "strategy_lifecycle_transitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stateId: uuid("state_id")
+      .notNull()
+      .references(() => strategyLifecycleStates.id),
+    strategyKey: text("strategy_key").notNull(),
+    strategyVersion: integer("strategy_version").notNull(),
+    fromState: text("from_state").notNull(),
+    toState: text("to_state").notNull(),
+    /** `slt1:<sha256>` — stabiler Idempotency-Key. */
+    transitionKey: text("transition_key").notNull(),
+    /** operator | system | backtest | drift | recovery | override */
+    trigger: text("trigger").notNull(),
+    actor: text("actor").notNull(),
+    actorRole: text("actor_role").notNull(),
+    reason: text("reason").notNull(),
+    evidenceId: uuid("evidence_id"),
+    policyVersion: text("policy_version").notNull(),
+    riskScale: text("risk_scale").notNull(),
+    seqBefore: integer("seq_before").notNull(),
+    seqAfter: integer("seq_after").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("strategy_lifecycle_transitions_key_unique").on(t.transitionKey),
+    index("strategy_lifecycle_transitions_lookup_idx").on(
+      t.strategyKey,
+      t.strategyVersion,
+      t.createdAt
+    ),
+    index("strategy_lifecycle_transitions_state_idx").on(t.stateId),
+    check(
+      "strategy_lifecycle_transitions_states_check",
+      sql`${t.fromState} IN ('DRAFT','BACKTEST_PENDING','BACKTEST_PASSED','PAPER','LIVE_LIMITED','LIVE','DEGRADED','PAUSED','REJECTED') AND ${t.toState} IN ('DRAFT','BACKTEST_PENDING','BACKTEST_PASSED','PAPER','LIVE_LIMITED','LIVE','DEGRADED','PAUSED','REJECTED')`
+    ),
+    check(
+      "strategy_lifecycle_transitions_key_check",
+      sql`${t.transitionKey} ~ '^slt1:[0-9a-f]{64}$'`
+    ),
+    check(
+      "strategy_lifecycle_transitions_trigger_check",
+      sql`${t.trigger} IN ('operator','system','backtest','drift','recovery','override')`
+    ),
+    check(
+      "strategy_lifecycle_transitions_seq_check",
+      sql`${t.seqAfter} = ${t.seqBefore} + 1`
+    ),
+    check("strategy_lifecycle_transitions_scale_check", sql`length(${t.riskScale}) BETWEEN 1 AND 8`),
+    check("strategy_lifecycle_transitions_reason_check", sql`length(${t.reason}) BETWEEN 1 AND 500`),
+  ]
+);

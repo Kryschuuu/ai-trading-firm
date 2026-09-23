@@ -183,6 +183,19 @@ async function startWorkflow(body: Record<string, unknown>): Promise<Response> {
   }
   const hasStopLoss = body.hasStopLoss;
   if (hasStopLoss !== undefined && typeof hasStopLoss !== "boolean") return badRequest("INVALID_HAS_STOP_LOSS");
+  // RMA-P1-05: optionale Strategieversion (enforce-Modus: Pflicht für live).
+  const strategyKey = body.strategyKey;
+  if (strategyKey !== undefined && strategyKey !== null && typeof strategyKey !== "string") {
+    return badRequest("INVALID_STRATEGY_KEY");
+  }
+  const strategyVersion = body.strategyVersion;
+  if (
+    strategyVersion !== undefined &&
+    strategyVersion !== null &&
+    (typeof strategyVersion !== "number" || !Number.isInteger(strategyVersion) || strategyVersion < 1)
+  ) {
+    return badRequest("INVALID_STRATEGY_VERSION");
+  }
   const policy = body.policy === undefined ? DEFAULT_EXECUTION_POLICY : parseExecutionPolicy(body.policy);
   const controller = await controllerFor(venue, mode);
   const workflow = await controller.start({
@@ -195,6 +208,8 @@ async function startWorkflow(body: Record<string, unknown>): Promise<Response> {
     seed,
     ...(typeof limitPrice === "number" ? { limitPrice } : {}),
     ...(typeof hasStopLoss === "boolean" ? { hasStopLoss } : {}),
+    ...(typeof strategyKey === "string" ? { strategyKey } : {}),
+    ...(typeof strategyVersion === "number" ? { strategyVersion } : {}),
   });
   return NextResponse.json({ ok: true, workflow: sanitizeWorkflow(workflow as unknown as Record<string, unknown>) }, { headers: NO_STORE });
 }

@@ -23,6 +23,7 @@ export type GateReasonCode =
   | "OK"
   | "KILL_SWITCH_ARMED"
   | "LIVE_GATE_DENY"
+  | "LIFECYCLE_GATE_DENY"
   | "QUOTE_MISSING"
   | "QUOTE_STALE"
   | "QUOTE_FUTURE"
@@ -75,6 +76,22 @@ export interface GateContext {
   quantityStep: number;
   /** Injizierbare Live-Gate-Prüfung (Default: zentraler Enforcer, nur live). */
   liveGateAllowed?: (venue: BrokerVenueId) => { allowed: boolean; code: string };
+  /**
+   * RMA-P1-05: Strategy-Lifecycle-Gate für Live-Orders (zusätzlich zum
+   * Broker-/Risk-Gate). Default ohne Injektion: fail-closed nur, wenn der
+   * Lifecycle-Modus `enforce` ist — `off`/`monitor` bleiben kompatibel.
+   * Liefert die autorisierte Strategieversion + Lifecycle-Zustand für Audit.
+   */
+  lifecycleGate?: () => {
+    allowed: boolean;
+    code: string;
+    strategyKey?: string | null;
+    strategyVersion?: number | null;
+    lifecycleState?: string | null;
+  };
+  /** Strategieversion, die diese Order referenziert (enforce: Pflicht). */
+  strategyKey?: string | null;
+  strategyVersion?: number | null;
 }
 
 export interface GateDecision {
@@ -105,6 +122,17 @@ export function evaluateSubmitGates(ctx: GateContext, purpose: "SUBMIT" | "REPRI
     const decision = check(ctx.venue);
     if (!decision.allowed) {
       return deny("LIVE_GATE_DENY", `${purpose}: Live-Gate verweigert (${decision.code}).`);
+    }
+    // RMA-P1-05: Strategy-Lifecycle zusätzlich zum Broker-/Risk-Gate.
+    const lifecycle = ctx.lifecycleGate;
+    if (lifecycle) {
+      const life = lifecycle();
+      if (!life.allowed) {
+        return deny(
+          "LIFECYCLE_GATE_DENY",
+          `${purpose}: Lifecycle-Gate verweigert (${life.code}).`
+        );
+      }
     }
   }
   const q = ctx.quote;
