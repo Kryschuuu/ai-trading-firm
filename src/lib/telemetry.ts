@@ -565,6 +565,20 @@ export const telemetry = {
       telemetry.executionPolicy.overfills.reset();
     },
   },
+  /**
+   * TWAP-/Depth-Scheduler (RMA-P4-03, v1.71.0).
+   *
+   * Labels sind Code-Konstanten (`outcome`, `kind`, `reason`) — keine
+   * Parent-Keys, Slice-Indizes oder Instrumente.
+   */
+  twap: {
+    ticks: new LabelCounter("twap_ticks_total"),
+    events: new LabelCounter("twap_events_total"),
+    reset(): void {
+      telemetry.twap.ticks.reset();
+      telemetry.twap.events.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -837,4 +851,5 @@ export function resetTelemetryForTests(): void {
   telemetry.prompt.reset();
   telemetry.volatilityTargeting.reset();
   telemetry.executionPolicy.reset();
+  telemetry.twap.reset();
 }

@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-22** · Code-Version **1.70.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.71.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,28 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.71.0] — 2026-09-23 · TWAP- und Depth-aware Execution (RMA-P4-03)
+
+### Hinzugefügt
+
+- **TWAP-Scheduler (`src/execution/twap/`):** persistentes Eltern-Intent, deterministischer Plan (Step, Mindestlos, Notional, Rundungsrest im letzten Slice, Jitter nur aus persistiertem Seed), Depth-/Participation-Gates (`null` ≠ 0 ≠ unbegrenzt), Lease/Claim gegen Doppel-Submit, Replan der Restmenge innerhalb der ursprünglichen Grenzen, kein Market-Chase außerhalb des Eltern-Limits.
+- **Kinder über P4.2:** `ExecutionPolicyController` mit `fallbackAllowed=false` und `maxReprices=0`. `cancelOpen` cancelt eine lebende Limit-Order und pollt, bis der Workflow terminal ist — ohne Market-Fallback. Kind-Key `etc1` hängt nicht von der Menge ab; die Menge wird vor `start` eingefroren, damit ein Restart dieselbe Order trifft.
+- **Benchmark:** Shortfall gegen die Sofort-Baseline über dieselbe `cost()`-Funktion wie die Execution-Quality-Erfassung. Completion, Duration und Coverage werden persistiert. Fehlende Arrival- oder Fill-Daten bleiben `null`.
+- **Sicherheit:** Kill-Switch und Deadline canceln nur mit bestätigtem Cancel (`*_UNCONFIRMED` bleibt Pause). Disconnect und unbekannter Markt pausieren ohne Cancel. Stale/fehlende Tiefe pausiert, außer beim expliziten konservativen Fallback mit gesetztem `conservativeSliceQty` und Eltern-Limit.
+- **Persistenz (`drizzle/2026-09-23_twap_execution.sql`):** `execution_twap_parents|slices|events|evaluations`, append-only Events/Evaluationen, kein FK-Cascade, Migration idempotent. Numerische Unbekanntheit bleibt NULL.
+- **API:** `/api/firm/execution/twap` — `GET` Status (`firm.read`), `POST start`/`tick`/`cancel`/`resume`/`recover` (`firm.write`, Flag `TWAP_EXECUTION_ENABLED`, Default `false`).
+- **Dokumentation:** [`docs/TWAP_EXECUTION.md`](docs/TWAP_EXECUTION.md).
+
+### Geändert
+
+- `src/execution/controller.ts`: öffentliches `cancelOpen` (externer Cancel ohne Preisjagd).
+- Version `1.70.0` → `1.71.0` (minor: neues Modul, keine Breaking Changes).
+- Abweichung von der Audit-Basis `df3163e` / v1.51.1: Umsetzung auf v1.70.0, weil P4.2 dort bereits existiert.
+
+### Sicherheit
+
+- Fail-closed: fehlende Tiefe, unbekanntes Volumen, unbestätigter Cancel und unbekannter Markt senden nichts. Rollback: `TWAP_EXECUTION_ENABLED=false`. Details in `docs/TWAP_EXECUTION.md`.
 
 ## [1.70.0] — 2026-09-22 · Post-Only-Ausführung mit Market-Fallback (RMA-P4-02)
 
