@@ -4,6 +4,7 @@
 - **Tracking-Status:** `FIXED`
 - **Severity:** `MEDIUM`
 - **Fix-Version:** `v1.66.0`
+- **PR:** [#164](https://github.com/Kryschuuu/ai-trading-firm/pull/164) · Commit `d708ca8`
 - **Umsetzungs-Prompt:** [`PROMPT-P3-03`](../prompts/PROMPT-P3-03-devils-advocate.md)
 
 ## Verifizierte Fundstellen

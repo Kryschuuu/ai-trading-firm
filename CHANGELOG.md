@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.73.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.73.1**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,17 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.73.1] — 2026-09-23 · docs(audit): Roadmap-Remediation-Tracking abgeschlossen (21 FIXED + 4 VERIFIED)
+
+### Geändert
+
+- **Roadmap-Audit 2026-09-20 — Status-SSoT nachgezogen:** vier bereits gemergte Deltas standen in `TRACKING.md` noch auf `PARTIAL`/`OPEN` (RMA-P3-02 v1.65.0 [#163], RMA-P5-05 v1.69.0 [#167], RMA-P4-02 v1.70.0 [#168], RMA-P4-03 v1.71.0 [#169]). Commit-Belege korrigiert: RMA-P1-02 `#158`/`8fc03a0`, RMA-P3-03 `d708ca8` (statt `HEAD`), RMA-P5-01 `b914b1f` (statt ungültigem `64e3d87`). Verteilung jetzt **4 VERIFIED · 21 FIXED · 0 PARTIAL · 0 OPEN**; Zyklus CLOSED.
+- Audit-README, Report, Findings, Prompt-Index, `docs/README.md`, Root-`README.md`, `docsCatalog` und Changelog-Stub auf denselben Stand gebracht. Kein Laufzeitverhalten geändert.
+
+### Kompatibilität
+
+- Patch-Bump `1.73.0` → `1.73.1` (reine Dokumentation). Letztes Feature-Release bleibt v1.73.0 (RMA-P1-05).
 
 ## [1.73.0] — 2026-09-23 · Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates (RMA-P1-05) · PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171)
 
@@ -2023,6 +2034,22 @@ mit Verifikationspflicht, Testplan, Docs-Sync- und Changelog-Pflicht.
 ### Nicht enthalten (bewusst)
 
 - Keine Code-Änderung an der Trading-Logik: Umsetzung der Lücken erfolgt
+  je Prompt in eigenen Sessions/PRs (Reihenfolge + Abhängigkeiten siehe
+  [Prompt-Serie](docs/audits/2026-09-18-feature-gap/prompts/README.md)).
+
+## [1.40.0] — 2026-09-18 · fix(market-sync): Cross-Prozess-Sichtbarkeit, leere Kerzen als DATA_UNAVAILABLE, Registry-Race & Scanner-Cache (250 → WARMING-Bug)
+
+### Behoben
+
+- **Scanner-Fix 250 → WARMING (Regression):** Der Markt-Scanner fiel
+  sporadisch auf `WARMING (0/250)` zurück, wenn ein Worker-Tick den In-Memory-
+  Ringpuffer mit < 250 DB-Kerzen vorübergehend überschrieb. Der Zustand wird
+  jetzt transaktionssicher gesperrt, Kerzenanzahlen unter 250 führen zu
+  präzisen Fehlermeldungen statt silent state resets.
+- **Cross-Prozess-Cache-Invalidierung:** DB-Aktualisierungen von Kerzen
+  triggern jetzt zuverlässig die Invalidation der In-Memory-Stores über
+  Postgres `pg_notify` / Registry-Sync.
+ding-Logik: Umsetzung der Lücken erfolgt
   je Prompt in eigenen Sessions/PRs (Reihenfolge + Abhängigkeiten siehe
   [Prompt-Serie](docs/audits/2026-09-18-feature-gap/prompts/README.md)).
 

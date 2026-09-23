@@ -1,9 +1,9 @@
 # RMA-P5-05: Signal-Decay-Exits
 
-- **Antwort:** Ja
-- **Tracking-Status:** `FIXED`
+- **Antwort:** Ja (seit v1.69.0)
+- **Tracking-Status:** `FIXED` (v1.69.0, [#167](https://github.com/Kryschuuu/ai-trading-firm/pull/167), Commit `56ca2f5`)
 - **Severity:** `MEDIUM`
-- **Quick Estimate Restaufwand:** **3–5 PT**
+- **Quick Estimate Restaufwand:** **0 PT** (Audit-Schätzung war 3–5 PT)
 - **Umsetzungs-Prompt:** [`PROMPT-P5-05`](../prompts/PROMPT-P5-05-signal-decay-exits.md)
 
 ## Verifizierte Fundstellen

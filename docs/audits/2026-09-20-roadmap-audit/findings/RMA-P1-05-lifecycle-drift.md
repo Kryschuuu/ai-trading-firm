@@ -1,9 +1,9 @@
 # RMA-P1-05: Backtest↔Paper↔Live-Drift und Strategy-Lifecycle
 
-- **Antwort:** Nein
-- **Tracking-Status:** `FIXED` (v1.73.0, [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171))
+- **Antwort:** Ja (seit v1.73.0)
+- **Tracking-Status:** `FIXED` (v1.73.0, [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171), Commit `a88b5c5`)
 - **Severity:** `CRITICAL`
-- **Quick Estimate Restaufwand:** **8–12 PT**
+- **Quick Estimate Restaufwand:** **0 PT** (Audit-Schätzung war 8–12 PT)
 - **Umsetzungs-Prompt:** [`PROMPT-P1-05`](../prompts/PROMPT-P1-05-lifecycle-drift.md)
 
 ## Verifizierte Fundstellen

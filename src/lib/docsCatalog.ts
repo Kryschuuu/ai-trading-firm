@@ -228,7 +228,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   auditRoadmap20260920: {
     file: "docs/audits/2026-09-20-roadmap-audit/README.md",
     title: "Roadmap-Audit 2026-09-20",
-    subtitle: "25 Komponenten: 4 VERIFIED, 13 PARTIAL, 8 OPEN — 21 eigenständige Remediation-Prompts (v1.51.3)",
+    subtitle: "25 Komponenten: 4 VERIFIED, 21 FIXED — Remediation abgeschlossen (v1.73.0)",
   },
   peerReviews: {
     file: "docs/peer-reviews/README.md",

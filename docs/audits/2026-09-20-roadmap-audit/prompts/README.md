@@ -1,9 +1,11 @@
 # Eigenständige Umsetzungs-Prompts
 
 Dieses Verzeichnis enthält **21 produktionsreife, eigenständig ausführbare
-Prompts** für alle Roadmap-Komponenten mit Status `PARTIAL` oder `OPEN`.
-Komponenten mit `VERIFIED` erhalten bewusst keinen künstlichen
-Implementierungsauftrag; ihre Kontrollbefunde stehen unter `../findings/`.
+Prompts** für alle Roadmap-Komponenten, die auf der Audit-Basis `PARTIAL`
+oder `OPEN` waren. **Stand v1.73.0:** alle 21 Deltas sind `FIXED` (SSoT
+[`../remediation/TRACKING.md`](../remediation/TRACKING.md)). Komponenten mit
+`VERIFIED` erhalten bewusst keinen künstlichen Implementierungsauftrag; ihre
+Kontrollbefunde stehen unter `../findings/`.
 
 Jeder Prompt wiederholt Repository-Kontext, verbindlichen Scope,
 Produktions-/Sicherheitsregeln, konkrete Deliverables, Tests,
