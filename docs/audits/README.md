@@ -38,9 +38,15 @@ docs/audits/
 │   └── assets/
 │       └── Security-Review-GPT_01.pdf  # Original-PDF (falls vorhanden)
 ├── 2026-09-18-feature-gap/      # Abgeschlossen: GAP-01 … GAP-10
-└── 2026-09-20-roadmap-audit/    # 25 Befunde + 21 Umsetzungs-Prompts
+├── 2026-09-20-roadmap-audit/    # 25 Befunde + 21 Umsetzungs-Prompts
+│   ├── README.md
+│   ├── report.md
+│   ├── findings/
+│   ├── prompts/
+│   └── remediation/TRACKING.md
+└── 2026-09-23-verbesserungen-fahrplan/  # CLOSED v0.2.0
     ├── README.md
-    ├── report.md
+    ├── ROADMAP.md
     ├── findings/
     ├── prompts/
     └── remediation/TRACKING.md
@@ -50,6 +56,7 @@ docs/audits/
 
 | Zyklus | Scope | Status |
 |---|---|---|
+| [2026-09-23-verbesserungen-fahrplan](2026-09-23-verbesserungen-fahrplan/README.md) | Big-Pickle-Audit „Verbesserungen“ (O1–O6, W1–W5, Datenquellen) gegen den Code | **OPEN:** Fahrplan, nichts implementiert; [ROADMAP](2026-09-23-verbesserungen-fahrplan/ROADMAP.md), [Tracking](2026-09-23-verbesserungen-fahrplan/remediation/TRACKING.md) |
 | [2026-09-20-roadmap-audit](2026-09-20-roadmap-audit/README.md) | 25 Komponenten aus Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **CLOSED v1.73.0:** 4 VERIFIED, 21 FIXED; [Tracking](2026-09-20-roadmap-audit/remediation/TRACKING.md), [21 Umsetzungs-Prompts](2026-09-20-roadmap-audit/prompts/README.md) |
 | [2026-09-18-feature-gap](2026-09-18-feature-gap/README.md) | Zehn priorisierte Feature-Gaps | **CLOSED v1.51.1:** alle zehn Findings behoben; ENV-01 bleibt separates Low-Risk-Engineering-Thema |
 

@@ -20,6 +20,13 @@ import { isConfluenceEnabled, loadConfluenceConfig } from "@/confluence/config";
 import { CONFLUENCE_FORMULA_VERSION, type ConfluenceSnapshot } from "@/confluence/types";
 import { HistoricalStore } from "@/lib/marketdata/historicalStore";
 import { historyDir } from "@/lib/marketdata/config";
+import {
+  applyTrustedReadings,
+  indicatorPayload,
+  loadTrustedIndicators,
+  type TrustedIndicatorPayload,
+  type TrustedReading,
+} from "@/cycle/trustedIndicators";
 import type { StepDefinition, StepExecutionContext } from "../types";
 import {
   type TechnicalConfluenceMeta,
@@ -75,6 +82,8 @@ export const technicalStep: StepDefinition<TechnicalStepInput, TechnicalStepOutp
     // Step-Zeit. Fehlende/stale Reihen ergeben ehrliche ABSTAIN-Snapshots —
     // der Step läuft für die übrigen Kandidaten weiter (fail-closed je Reihe).
     const asOfMs = context.asOf instanceof Date ? context.asOf.getTime() : Date.now();
+    let sharedStore: HistoricalStore | null = null;
+    const openStore = (): HistoricalStore => (sharedStore ??= new HistoricalStore(historyDir()));
     let snapshots = new Map<string, ConfluenceSnapshot>();
     let confluenceMeta: TechnicalConfluenceMeta | undefined;
     const confluenceEnabled = isConfluenceEnabled(process.env, (line) =>
@@ -83,7 +92,7 @@ export const technicalStep: StepDefinition<TechnicalStepInput, TechnicalStepOutp
     if (confluenceEnabled && selection.length > 0) {
       try {
         const config = loadConfluenceConfig();
-        const store = new HistoricalStore(historyDir());
+        const store = openStore();
         snapshots = confluenceBatchFromStore(
           store,
           selection.map((c) => c.instrumentId),
@@ -127,17 +136,45 @@ export const technicalStep: StepDefinition<TechnicalStepInput, TechnicalStepOutp
       context.log("MTF-Konfluenz via CONFLUENCE_ENABLED=false deaktiviert (Legacy-Output).");
     }
 
+    // Trusted RSI/ATR/ADX/MACD unabhängig von CONFLUENCE_ENABLED. Ein
+    // Store-Fehler löscht die Messung — er erfindet kein rsi: 50.
+    let indicatorReadings = new Map<string, TrustedReading>();
+    let indicatorBlock: TrustedIndicatorPayload | undefined;
+    if (selection.length > 0) {
+      try {
+        indicatorReadings = loadTrustedIndicators(
+          openStore(),
+          selection.map((c) => c.instrumentId),
+          asOfMs,
+        );
+        indicatorBlock = indicatorPayload(indicatorReadings, asOfMs);
+        const measured = [...indicatorReadings.values()].filter((reading) => reading.rsi != null).length;
+        context.log(
+          `Trusted Indicators (${indicatorBlock.kind}): ${indicatorReadings.size} Instrumente, ` +
+            `${measured} mit gemessenen RSI (geschlossene 1h-Bars).`,
+        );
+      } catch (e) {
+        context.log(
+          `Trusted Indicators nicht lesbar (${e instanceof Error ? e.message : String(e)}) — RSI/ATR werden nicht erfunden.`,
+          "WARN",
+        );
+        indicatorReadings = new Map();
+        indicatorBlock = undefined;
+      }
+    }
+
     // Standard-Fallback für alle Kandidaten (mit autoritativen Snapshots).
+    // Kein rsi: 50 — das wäre eine erfundene Neutralmessung.
     const defaultAnalyses = selection.map((c) => ({
       instrumentId: c.instrumentId,
       bias: "NEUTRAL" as const,
       technicalScore: 50,
-      rsi: 50,
       trend: "neutral",
       keyLevels: { support: 0, resistance: 0 },
       thesis: "Reguläre Konsolidierung im 4h/1h-Chart (Deterministischer Fallback)",
       ...(snapshots.get(c.instrumentId) ? { confluence: snapshots.get(c.instrumentId)! } : {}),
     }));
+    applyTrustedReadings(defaultAnalyses, indicatorReadings);
 
     const fallback: TechnicalStepOutput = {
       analyses: defaultAnalyses,
@@ -154,9 +191,10 @@ Analyze the provided shortlist of market instruments (strictly bounded to max 40
 For each instrument, determine:
 - bias: BULLISH | BEARISH | NEUTRAL
 - technicalScore: 0 to 100
-- RSI and ATR estimates
 - trend and key support/resistance levels
 - concise technical thesis
+Do not invent RSI or ATR. Code overwrites those fields from closed 1h candles after validation. If trusted indicators are missing, omit the numbers — never substitute 50.
+ADX and MACD in the trusted block are measurements too. Explain them; do not recompute them.
 ${snapshots.size > 0 ? "A TRUSTED DETERMINISTIC DATA block carries the precomputed multi-timeframe confluence per instrument. Explain it in your thesis where relevant, but NEVER recompute or override its numbers — your bias/score must stay consistent with an ABSTAIN status (no signal) and must not contradict a high-confidence confluence direction without explicit justification." : ""}
 Respond strictly with valid JSON conforming to the schema.`;
 
@@ -182,10 +220,10 @@ JSON schema:
     // Trusted-Payload: kompakte Zeilen (Prompt-Ökonomie) + Voll-Snapshots
     // (Nachvollziehbarkeit). Das Schema kennt KEIN confluence-Feld — die
     // Validierung verwirft LLM-seitige Override-Versuche strukturell.
-    const trustedData =
+    const confluenceTrusted =
       snapshots.size > 0
         ? {
-            kind: "mtf-confluence",
+            kind: "mtf-confluence" as const,
             formulaVersion: confluenceMeta?.formulaVersion ?? "mtf-confluence@1",
             configVersion: confluenceMeta?.configVersion ?? 1,
             asOf: new Date(asOfMs).toISOString(),
@@ -193,6 +231,11 @@ JSON schema:
             snapshots: [...snapshots.values()],
           }
         : undefined;
+    // Konfluenz behält `kind`. Indikatoren hängen darunter. Ohne Konfluenz
+    // ist der Indikator-Block selbst trustedData — das Flag schaltet ihn nicht ab.
+    const trustedData = confluenceTrusted
+      ? { ...confluenceTrusted, ...(indicatorBlock ? { indicators: indicatorBlock } : {}) }
+      : indicatorBlock;
 
     const res = await context.ports.agent.invokeAgent<TechnicalStepOutput>({
       role: "TECHNICAL_ANALYST",
@@ -220,6 +263,7 @@ JSON schema:
         res.output.confluenceMeta = confluenceMeta;
       }
     }
+    applyTrustedReadings(res.output.analyses, indicatorReadings);
 
     return res.output;
   },

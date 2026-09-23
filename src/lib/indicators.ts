@@ -43,8 +43,57 @@ export function rsi(values: number[], period = 14): number {
 }
 
 /**
+ * MACD auf der rekursiven EMA dieser Datei (Seed = erster Schlusskurs,
+ * nicht die Lehrbuch-SMA). Linie = EMA(fast) − EMA(slow), Signal =
+ * EMA(signalPeriod) der Linie, Histogramm = Differenz.
+ *
+ * `null`, wenn die Perioden unsinnig sind oder weniger als
+ * `slow + signalPeriod` Schlusskurse vorliegen — vorher wäre die langsame
+ * EMA kaum vom Seed weg. Kein stilles 0.
+ */
+export interface MacdReading {
+  macd: number;
+  signal: number;
+  histogram: number;
+}
+
+export function macd(
+  closes: number[],
+  fast = 12,
+  slow = 26,
+  signalPeriod = 9,
+): MacdReading | null {
+  if (
+    !Array.isArray(closes) ||
+    !Number.isInteger(fast) || fast < 1 ||
+    !Number.isInteger(slow) || slow <= fast ||
+    !Number.isInteger(signalPeriod) || signalPeriod < 1 ||
+    closes.length < slow + signalPeriod
+  ) {
+    return null;
+  }
+  const fastEma = ema(closes, fast);
+  const slowEma = ema(closes, slow);
+  const line = fastEma.map((value, i) => value - slowEma[i]);
+  if (line.some((value) => !Number.isFinite(value))) return null;
+  const signalEma = ema(line, signalPeriod);
+  const macdValue = line[line.length - 1];
+  const signalValue = signalEma[signalEma.length - 1];
+  if (!Number.isFinite(macdValue) || !Number.isFinite(signalValue)) return null;
+  return {
+    macd: macdValue,
+    signal: signalValue,
+    histogram: macdValue - signalValue,
+  };
+}
+
+/**
  * Bollinger-Band-Breite (Bandwidth) als Anteil des mittleren Kurses:
  * (Oberband − Unterband) / SMA = 2 × mult × σ / SMA.
+ *
+ * Das ist ein Bruch (0.05 = 5 %), nicht Prozent. Regel-Snapshots speichern
+ * dieselbe Größe als `bbwPct` in Prozent, damit 5 im Regelwerk 5 % bedeutet
+ * und nicht mit dem Dashboard-Key `adp.bbwHighPct` (Bruch, Max 0.5) verwechselt wird.
  *
  * Die Bandbreite misst, wie breit das Preisband ist — ein etablierter
  * "Volatility Squeeze"/-Expansion-Indikator: enge Bänder → niedrige

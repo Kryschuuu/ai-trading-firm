@@ -208,6 +208,11 @@ const snap: RuleSnapshot = {
   changePct24h: -3.2,
   priceVsEma21Pct: -2.56,
   priceVsEma50Pct: -3.06,
+  adx14: 22,
+  bbwPct: 4.5,
+  macd: -0.4,
+  macdSignal: -0.2,
+  macdHist: -0.2,
 };
 
 test("compileRuleSpec: all/any, Zahlenvergleiche, between, in — ohne JSON-Parsing", () => {
@@ -258,6 +263,28 @@ test("buildSnapshotFromCandles: deterministisch, <25 Kerzen → null", () => {
   assert.ok(s.volumeRatio > 0);
   // Gleiche Eingabe → gleicher Snapshot (Determinismus).
   assert.deepEqual(buildSnapshotFromCandles("BTC", makeCandles(120), 20), s);
+});
+
+test("buildSnapshotFromCandles: kurze Historie setzt ADX/MACD auf null, Bedingung bleibt false", () => {
+  const short = buildSnapshotFromCandles("BTC", makeCandles(26));
+  assert.ok(short);
+  assert.equal(short.adx14, null);
+  assert.equal(short.macd, null);
+  assert.equal(short.macdSignal, null);
+  assert.equal(short.macdHist, null);
+  assert.ok(short.bbwPct != null && short.bbwPct >= 0);
+
+  const rule = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "adx14", op: "gt", value: 25 }, { field: "macdHist", op: "gt", value: 0 }] },
+  });
+  assert.equal(rule.ok, true);
+  if (!rule.ok) return;
+  assert.equal(compileRuleSpec(rule.spec).evaluate(short), false);
+
+  const long = buildSnapshotFromCandles("BTC", makeCandles(80))!;
+  assert.equal(typeof long.adx14, "number");
+  assert.equal(typeof long.macdHist, "number");
 });
 
 test("buildSnapshotFromCandles: Volumen-Ratio = letztes Volumen / 20er-Schnitt", () => {

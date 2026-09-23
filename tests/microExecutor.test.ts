@@ -153,6 +153,11 @@ const matchingSnap = {
   changePct24h: -3,
   priceVsEma21Pct: -2,
   priceVsEma50Pct: -3,
+  adx14: null,
+  bbwPct: null,
+  macd: null,
+  macdSignal: null,
+  macdHist: null,
 } as const;
 
 test("RuleCache.match: findet passende Regel, respektiert Cooldown und Tageslimit", () => {

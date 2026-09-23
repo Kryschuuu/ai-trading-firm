@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adx, rsi, ema, atrPct, bollingerBandWidthPct, returnStdDevPct, snapshot } from "../src/lib/indicators";
+import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, returnStdDevPct, snapshot } from "../src/lib/indicators";
 import type { Candle } from "../src/lib/marketData";
 
 test("RSI: stetiger Aufwärtslauf → überkauft (>70)", () => {
@@ -190,6 +190,29 @@ test("ADX: Trendstärke-Monotonie — Trendserie > Chop-Serie", () => {
   const trendAdx = adx(trend, 14)!;
   const chopAdx = adx(chop, 14)!;
   assert.ok(trendAdx > chopAdx, `Trend-ADX ${trendAdx} muss über Chop-ADX ${chopAdx} liegen`);
+});
+
+test("MACD: zu kurz oder ungültige Perioden → null", () => {
+  assert.equal(macd(Array.from({ length: 34 }, (_, i) => 100 + i)), null);
+  assert.equal(macd([], 12, 26, 9), null);
+  assert.equal(macd(Array.from({ length: 80 }, () => 100), 26, 12, 9), null);
+});
+
+test("MACD: flach → 0, steigend → positiv, Linie = EMA(fast) − EMA(slow)", () => {
+  const flat = Array.from({ length: 80 }, () => 100);
+  const flatMacd = macd(flat);
+  assert.ok(flatMacd);
+  assert.ok(Math.abs(flatMacd.macd) < 1e-9);
+  assert.ok(Math.abs(flatMacd.signal) < 1e-9);
+  assert.ok(Math.abs(flatMacd.histogram) < 1e-9);
+
+  const rising = Array.from({ length: 80 }, (_, i) => 100 + i * 0.5);
+  const reading = macd(rising);
+  assert.ok(reading);
+  const line = ema(rising, 12).at(-1)! - ema(rising, 26).at(-1)!;
+  assert.ok(Math.abs(reading.macd - line) < 1e-9);
+  assert.ok(reading.macd > 0);
+  assert.equal(reading.histogram, reading.macd - reading.signal);
 });
 
 test("ADX: zu wenige Kerzen (< 2·Periode+1) oder leere Eingabe → null", () => {
