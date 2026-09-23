@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.71.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.72.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -77,6 +77,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[DRAWDOWN_SCALING.md](DRAWDOWN_SCALING.md)** | Hysteretisches Drawdown-Risk-Scaling: reconcilte Equity gegen persistierten High-Water-Mark, monotone Kurve mit Soft/Hard-Schwelle + optionaler PAUSE, sofortige Degradation, Recovery nur nach Cooldown + Bestätigungen, cashflow-neutrale HWM-Führung, fail-closed ohne Equity/Reconciliation, `monitor`/`active`/`off`-Rollout, idempotente Snapshot-Persistenz `dsc1:<sha256>` und Neustart-Rekonstruktion (RMA-P5-04, v1.68.0) |
 | **[SIGNAL_DECAY.md](SIGNAL_DECAY.md)** | Versionierte Signal-Decay-Exits: unveränderlicher Entry-Snapshot, point-in-time Current-Signal, Klassen-Policy default-off, Hysterese, `SIGNAL_DECAY` nach den Safety-Exits, Monitor-Counterfactual, Live und Backtest teilen `decideExit` (RMA-P5-05, v1.69.0) |
 | **[POST_ONLY_FALLBACK.md](POST_ONLY_FALLBACK.md)** | Post-Only-Ausführung mit Market-Fallback: versionierte Maker-Policy `eop1:<sha256>`, State-Machine mit bounded Repricing, Fallback nur per Opt-in nach bestätigtem Cancel, Venue-Capabilities ohne stilles Dropping, harte Gates, fill-genaue Restmenge, deterministische Paper-Simulation, append-only Persistenz (RMA-P4-02, v1.70.0) |
+| **[MONTE_CARLO.md](MONTE_CARLO.md)** | Reproduzierbare Monte-Carlo-/Trade-Resampling-Analyse: IID-/Moving-/Stationary-Block-Bootstrap über das verifizierte Trade-Ledger, First-Order-Kostenstress, Quantile p05/p50/p95 (End-Equity, MaxDD, Ruin, Sharpe, Losing Streak) + Exceedance/MCSE, deterministischer Seed `mulberry32-v1`, idempotente bounded Persistenz `mcs1:<sha256>`, CLI + Read-API, keine Live-Risikofreigabe (RMA-P6-02, v1.72.0) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
 | **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler, Firmen-Metriken, Auto-Circuit-Breaker, Alerts, Heartbeat (§9–12) |
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE` |

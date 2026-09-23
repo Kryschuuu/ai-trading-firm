@@ -6,6 +6,7 @@ import {
   timestamp,
   numeric,
   integer,
+  bigint,
   jsonb,
   uuid,
   index,
@@ -332,6 +333,70 @@ export const backtestTrades = pgTable("backtest_trades", {
     "backtest_trades_exit_reason_check",
     sql`${t.exitReason} IN ('STOP_LOSS', 'TAKE_PROFIT', 'SIGNAL_EXIT', 'MAX_HOLDING', 'RISK_STOP', 'END_OF_DATA', 'SIGNAL_DECAY')`
   ),
+]);
+
+/**
+ * Monte-Carlo-/Trade-Resampling-Analysen (RMA-P6-02, v1.72.0).
+ *
+ * EINE Zeile je Analyselauf über einen unveränderlichen Walk-Forward-Quell-Run
+ * (`backtest_runs`): referenziert Quelle, Seed, Methode, Scenario, Config und
+ * eine BOUNDED Summary (Quantile p05/p50/p95, Exceedance-Wahrscheinlichkeiten,
+ * MCSE, Statistik-Hinweise, Caveats). Rohpfade (bis zu runs × n Equity-Punkte)
+ * werden bewusst NICHT persistiert — sie sind aus Seed + Config + Ledger
+ * deterministisch reproduzierbar (`scripts/run-montecarlo.ts`).
+ *
+ * Append-only: Zeilen entstehen ausschließlich über die CLI
+ * (`runMonteCarloAnalysis`, Idempotenz via abgeleiteten Key), es gibt keinen
+ * Update-/Löschpfad. Der Key `mcs1:<sha256>` ist NICHT überschreibbar — ein
+ * Retry/Restart derselben Analyse liefert die bestehende Zeile (UNIQUE-Index).
+ *
+ * Forschung, kein Trading-Pfad: KEINE Zeile dieser Tabelle fließt in
+ * Risk-Ceilings, Kill-Switches, Authority Chains oder Live-Gates.
+ * Migration: `drizzle/2026-09-23_monte_carlo.sql` (append-only, idempotent).
+ */
+export const backtestMonteCarloRuns = pgTable("backtest_monte_carlo_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Quell-Run (unveränderlich; FK ohne Cascade — kein stilles Mitlöschen). */
+  sourceRunId: uuid("source_run_id").notNull().references(() => backtestRuns.id),
+  /** `mcs1:<sha256>` — abgeleitet aus Quell-Run, Config, Seed, Eingabe-Hash. */
+  idempotencyKey: text("idempotency_key").notNull(),
+  /** iid | moving_block | stationary_block */
+  method: text("method").notNull(),
+  /** IS | OOS | ALL (Segment-Filter der Quell-Trades). */
+  segment: text("segment").notNull(),
+  /** baseline | stress (Kostenstress-Szenario). */
+  scenario: text("scenario").notNull(),
+  /** uint32-Seed (mulberry32). */
+  seed: bigint("seed", { mode: "number" }).notNull(),
+  /** PRNG-Version, z. B. `mulberry32-v1`. */
+  seedAlgorithm: text("seed_algorithm").notNull(),
+  /** Anzahl simulierter Pfade [100, 100 000]. */
+  runs: integer("runs").notNull(),
+  /** Blocklänge für Block-Methoden (NULL bei `iid`, sonst ≥ 2). */
+  blockLength: integer("block_length"),
+  /** Stichprobengröße (Trades nach Segment-Filter; ≥ MC-Minimum). */
+  sampleTrades: integer("sample_trades").notNull(),
+  /** sha256 über die kanonische Eingabe-Stichprobe (Datahash). */
+  inputTradesHash: text("input_trades_hash").notNull(),
+  /** Vollständige, reproduzierbare Konfiguration (ResolvedMonteCarloConfig). */
+  configJson: jsonb("config_json").notNull(),
+  /** Bounded Summary (keine Rohpfade). */
+  summaryJson: jsonb("summary_json").notNull(),
+  /** Code-Version des Analyselaufs (APP_VERSION). */
+  codeVersion: text("code_version").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("backtest_monte_carlo_runs_idempotency_key_unique").on(t.idempotencyKey),
+  index("backtest_monte_carlo_runs_source_idx").on(t.sourceRunId, t.createdAt),
+  check("backtest_monte_carlo_runs_method_check", sql`${t.method} IN ('iid', 'moving_block', 'stationary_block')`),
+  check("backtest_monte_carlo_runs_segment_check", sql`${t.segment} IN ('IS', 'OOS', 'ALL')`),
+  check("backtest_monte_carlo_runs_scenario_check", sql`${t.scenario} IN ('baseline', 'stress')`),
+  check("backtest_monte_carlo_runs_seed_check", sql`${t.seed} >= 0 AND ${t.seed} <= 4294967295`),
+  check("backtest_monte_carlo_runs_runs_check", sql`${t.runs} >= 100 AND ${t.runs} <= 100000`),
+  check("backtest_monte_carlo_runs_block_length_check", sql`${t.blockLength} IS NULL OR ${t.blockLength} >= 2`),
+  check("backtest_monte_carlo_runs_sample_trades_check", sql`${t.sampleTrades} >= 1`),
+  check("backtest_monte_carlo_runs_hash_check", sql`${t.inputTradesHash} ~ '^[0-9a-f]{64}$'`),
+  check("backtest_monte_carlo_runs_idempotency_key_check", sql`${t.idempotencyKey} ~ '^mcs1:[0-9a-f]{64}$'`),
 ]);
 
 /** Backtest-Läufe einer Regel gegen historische Kerzen (deterministisch). */

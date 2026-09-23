@@ -68,6 +68,11 @@ next-env.d.ts
 # Historie + Regel, nicht versioniert (Vergleich via backtest_runs/Read-API).
 /data/backtest
 
+# Monte-Carlo-Artefakte (RMA-P6-02, v1.72.0): `scripts/run-montecarlo.ts`
+# schreibt Result-JSON + MD-Zusammenfassung je Analyse — reproduzierbar aus
+# Seed + Config + Trade-Ledger, nicht versioniert (Vergleich via API).
+/data/montecarlo
+
 # Alert-Datei-Sink (GAP-10, v1.45.0; ignoriert seit v1.51.1): der
 # AlertDispatcher hängt jeden Alarm als NDJSON-Zeile an — Betriebsdaten
 # (Kill-Switch-Gründe, Heartbeat-Ausfälle), nicht versioniert.

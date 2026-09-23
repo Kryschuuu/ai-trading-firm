@@ -579,6 +579,21 @@ export const telemetry = {
       telemetry.twap.events.reset();
     },
   },
+  /**
+   * Monte-Carlo-/Trade-Resampling (RMA-P6-02, v1.72.0). Labels sind
+   * ausschließlich Code-konstante Werte: `result` = created | replayed |
+   * failed, `reason` = `metricLabel`-normalisierter Fehlercode, `method` =
+   * iid | moving_block | stationary_block (geschlossene Menge) — KEINE Run-/
+   * Instrument-/Trade-IDs als Labels (Kardinalitätsregel).
+   */
+  monteCarlo: {
+    runs: new LabelCounter("monte_carlo_runs_total"),
+    queries: new LabelCounter("monte_carlo_queries_total"),
+    reset(): void {
+      telemetry.monteCarlo.runs.reset();
+      telemetry.monteCarlo.queries.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -725,6 +740,8 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.backtest.runPersist.exposition(),
     telemetry.backtest.replayRuns.exposition(),
     telemetry.backtest.replayDegraded.exposition(),
+    telemetry.monteCarlo.runs.exposition(),
+    telemetry.monteCarlo.queries.exposition(),
     telemetry.executionQuality.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),
@@ -852,4 +869,5 @@ export function resetTelemetryForTests(): void {
   telemetry.volatilityTargeting.reset();
   telemetry.executionPolicy.reset();
   telemetry.twap.reset();
+  telemetry.monteCarlo.reset();
 }

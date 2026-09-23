@@ -498,6 +498,20 @@ mit `RECONCILED`-Ledger als persistiert.
   `tests/backtest.tradeLedger.test.ts` (Mapping, Abgleich, Idempotenz,
   Rollback, Cursor-API — DB-Teile ping → skip)
 
+## Monte-Carlo-/Trade-Resampling (RMA-P6-02, v1.72.0)
+
+Aufbauend auf dem persistierten Trade-Ledger (§5.1) simuliert
+`scripts/run-montecarlo.ts` (`npm run montecarlo`) aus den OOS-Trades eines
+Runs reproduzierbare IID- und blockweise Resamples sowie explizite
+Kostenstressszenarien und berichtet robuste Quantile (p05/p50/p95) für
+End-Equity, MaxDD, Ruin, Sharpe und Losing Streak inklusive
+Exceedance-Wahrscheinlichkeiten und Monte-Carlo-Standardfehler. Determinismus
+über persistierten Seed (`mulberry32-v1`) + Config + unveränderliche Quelle;
+idempotente Persistenz als bounded Summary in `backtest_monte_carlo_runs`
+(keine Rohpfade); Read-API `GET /api/firm/montecarlo`. Bewusst KEIN Ersatz
+für Walk-Forward/OOS und KEINE Live-Risikofreigabe — Modell, Formeln,
+Grenzen und Rollback: [MONTE_CARLO.md](MONTE_CARLO.md).
+
 ## Execution-Quality-Evidenz
 
 Mit `EXECUTION_QUALITY_ENABLED=true` erfasst der vorhandene Paper-Simulator

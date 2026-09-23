@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.71.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.72.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,38 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.72.0] — 2026-09-23 · Reproduzierbare Monte-Carlo-/Trade-Resampling-Analyse (RMA-P6-02)
+
+### Hinzugefügt
+
+- **Reine Simulations-Engine (`src/backtest/montecarlo.ts`):** IID-Trade-Bootstrap, Moving-Block-Bootstrap (überlappend, auf Horizont abgeschnitten) und Stationary-Block-Bootstrap (Politis/Romano, zirkulär) über die Netto-Trades eines verifizierten Walk-Forward-Runs. Renditebasis `r_i = pnlNet_i / E_{i-1}` auf realisierter Quell-Equity (Teleskop-Reproduktion des Quellpfads, dokumentierte Näherung zur Live-Sizing-Basis), Wipe-Semantik (Equity ≤ 0 ⇒ 0, MaxDD 100 %), Ruin als Erstdurchbruch unter `ruinThresholdPct` % des Startkapitals.
+- **Kostenstress als explizites Szenario:** `feeMultiplier`/`slippageMultiplier` ∈ [1, 100] (No-Op abgelehnt) ziehen je Trade zusätzliche Kosten ab — First-Order auf fester Sequenz und fester Exposurbasis; gleicher Seed ⇒ identische Ziehungen ⇒ End-Equity-Quantile und beobachtetes Nettoergebnis verschlechtern sich monoton, Ruin-Wahrscheinlichkeit wächst monoton (per Test gesichert).
+- **Robuste Berichterstattung:** Nearest-Rank-Quantile (Typ 1) p05/p50/p95 + Mittel für End-Equity, MaxDD, Sharpe (Trade-Level-Kernel, annualisiert aus der Quell-Spanne, fail-closed außerhalb [1, 200 000] Trades/Jahr) und Losing Streak; Exceedance-Wahrscheinlichkeiten (Ruin, End < Start, MaxDD ≥ 10/20/30/50 %) mit binomialem Monte-Carlo-Standardfehler; Statistik-Hinweise (Stichprobe, Horizont, Runzahl, Blockannahme, Annualisierung) und konstante Caveats. Das Ergebnis trennt empirische Beobachtung (`observed`), Stress-Anker (`observedStressed`) und Resampling-Verteilung (`resampled`).
+- **Determinismus & Idempotenz:** Repository-PRNG `mulberry32` (`mulberry32-v1`), EIN sequenzieller Stream, Algorithmusversion `mc1`; abgeleiteter Key `mcs1:<sha256>` über Quelle, Config, Seed und Eingabe-Hash (nicht überschreibbar). Gleicher Seed/Config/Input ⇒ byte-identische Summary; persistierte Config + Ledger ⇒ identisches Replay (per DB-Test gesichert).
+- **Eligibility-Gates (fail-closed):** nur Runs mit RECONCILED-Ledger (Alt-Runs vor v1.52.0: NULL ≠ 0), konsistente `seq`/Zeilenzahl, nicht-leeres Segment, Mindeststichprobe 30 Trades, ein Symbol je Analyse, endliche Zahlen, `exitTs ≥ entryTs`, positive realisierte Quell-Equity, ableitbare Spanne.
+- **Persistenz (`drizzle/2026-09-23_monte_carlo.sql`, append-only/idempotent):** Tabelle `backtest_monte_carlo_runs` — EINE bounded Summary-Zeile je Analyse (Quell-Run-FK ohne Cascade, Seed, Methode, Szenario, Config, Code-Version); KEINE Rohpfade in DB oder API; CHECK-Constraints spiegeln alle Code-Bounds; UNIQUE `idempotency_key` ⇒ Retry/Restart ohne Dublette.
+- **CLI:** `npm run montecarlo` (`scripts/run-montecarlo.ts`) — einziger Schreibpfad; Artefakte `data/montecarlo/<id>.json|.md` (gitignore), `--json` exportiert das Vollresultat inkl. Config für Replay, `--skip-db` überspringt nur den Write.
+- **API (additiv, nur lesend):** `GET /api/firm/montecarlo?run=<uuid>&limit=` und `GET /api/firm/montecarlo/[id]` (`firm.read`, no-store; 400/404/503 klassifiziert).
+- **Observability:** bounded Counter `monte_carlo_runs_total`/`monte_carlo_queries_total` (Labels nur aus geschlossenen Mengen — keine IDs) + Audit-Events `MONTE_CARLO_RUN_PERSISTED`/`_PERSIST_FAILED`.
+- **Dokumentation:** [`docs/MONTE_CARLO.md`](docs/MONTE_CARLO.md) (Modell, Formeln, Einheiten, Zeitsemantik, Grenzen, Migration/Rollback); Abschnitt in `docs/BACKTESTING.md`.
+
+### Geändert
+
+- `src/backtest/index.ts`: Exporte `./montecarlo`, `./monteCarloStore` (additiv).
+- `src/db/schema.ts`: Tabelle `backtestMonteCarloRuns` (Drizzle-Spiegel der Migration).
+- `src/lib/telemetry.ts`: Sektion `monteCarlo` + Prometheus-Exposition (additiv).
+- Version `1.71.0` → `1.72.0` (minor: neues Research-Modul, keine Breaking Changes).
+
+### Sicherheit
+
+- Forschung, kein Trading-Pfad: KEINE Zeile fließt in Risk-Ceilings, Kill-Switches, Authority Chains oder Live-Gates; Quantile sind Schätzer ohne Garantiecharakter (Caveats in jedem Result).
+- Fail-closed überall: fehlende/stale/valide-fehlende Quellen werden abgelehnt, nie als 0 neutralisiert; keine Secrets/Broker-Payloads/PII in der Persistenz.
+- Rollback: Tabelle ist rein additiv — `DROP TABLE backtest_monte_carlo_runs` stellt v1.71.x her (Details: `docs/MONTE_CARLO.md` §10).
+
+### Abweichung von der Audit-Basis
+
+Befundbasis war `df3163e` / v1.51.1. Umgesetzt auf v1.71.0: Quelle ist das seit v1.52.0 persistente Trade-Ledger (`backtest_trades`), nicht der In-Memory-`BacktestTradeLog` der Audit-Basis.
 
 ## [1.71.0] — 2026-09-23 · TWAP- und Depth-aware Execution (RMA-P4-03)
 
