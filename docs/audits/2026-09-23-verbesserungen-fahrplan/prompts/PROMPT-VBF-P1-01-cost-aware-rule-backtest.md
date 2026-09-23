@@ -1,6 +1,7 @@
 # VBF-P1-01 — Kostenbewusster Regel-Backtest
 
 > **Status:** umgesetzt in v0.2.0. Nicht erneut bauen.
+> Nachtrag: Die Store-ID ist nicht das Regel-Symbol. Auflösung in `src/lib/ruleBacktest.ts` (`resolvePaperInstrumentId`).
 > Befund: [`../findings/VBF-P1-01-cost-aware-rule-backtest.md`](../findings/VBF-P1-01-cost-aware-rule-backtest.md)
 
 ## Auftrag (historisch)

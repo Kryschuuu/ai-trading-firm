@@ -741,7 +741,7 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
  */
 export function runRuleSetBacktest(
   rules: RuleSpec[],
-  store: HistoricalStore,
+  store: Pick<HistoricalStore, "query">,
   options?: BacktestEngineOptions
 ): MultiAssetBacktestResult {
   const timeframe = options?.timeframe ?? DEFAULT_ANALYSIS_TIMEFRAME;

@@ -16,7 +16,10 @@ auf `model=paper` und liest nur den Historical Store. `model=reference`
 bleibt der gebührenfreie Altpfad über `backtestRule`. Der Default von
 `runMultiAssetBacktest` bleibt `"legacy"`, damit bestehende Engine-Läufe
 byte-gleich bleiben. Walk-Forward setzt `paper` selbst, ohne den
-Engine-Default umzulegen.
+Engine-Default umzulegen. Die Store-ID ist `VENUE:native`, nicht das
+Regel-Symbol. Ohne `instrumentId` nimmt die Route nur eine exakte oder
+eindeutig kanonische Reihe; sonst 422. Dieselbe Trennung wie die CLI unten
+(Regel-Symbol vs. `--instrument`), ohne stillen Tausch.
 
 ---
 

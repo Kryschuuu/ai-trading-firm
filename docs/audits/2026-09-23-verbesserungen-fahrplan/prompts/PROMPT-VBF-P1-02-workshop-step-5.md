@@ -17,4 +17,4 @@ Ein fünfter Workshop-Schritt prüft eine Regel gegen den Paper-Store und speich
 
 ## Nachweis
 
-`tests/workshop.test.ts`, `src/components/workshop/RuleCheck.tsx`, MISSIONS.md §4.
+`tests/workshop.test.ts`, `src/components/workshop/RuleBacktestPanel.tsx`, MISSIONS.md §4. Die Store-ID ist ein eigenes Feld, nicht das Regel-Symbol.

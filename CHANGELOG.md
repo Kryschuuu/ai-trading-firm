@@ -59,6 +59,13 @@ _Noch nicht freigegeben._
 - **Paritätstest** `detectExit` gegen `detectExitTrigger`. Die Funktionen
   werden nicht zusammengelegt (VBF-P3-01).
 
+### Behoben
+
+- **Regel-Backtest findet Store-Reihen.** Das Regel-Symbol (`BTC/USDT`) ist nicht
+  die Store-ID (`BITUNIX:BTCUSDT`). Der Paper-Pfad nimmt eine explizite
+  `instrumentId` oder genau eine passende Reihe. Mehrdeutigkeit ist 422, kein
+  stiller Tausch und kein Yahoo.
+
 ### Geändert
 
 - Handbuch (Kapitel 2.3, 6, 15.4, 19.1), `docs/MISSIONS.md`,

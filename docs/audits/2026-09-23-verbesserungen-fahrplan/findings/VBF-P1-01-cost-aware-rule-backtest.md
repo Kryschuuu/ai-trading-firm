@@ -13,7 +13,8 @@ kein Spread, kein Funding, und bei leerer Historie einen Yahoo-Fallback.
 Dieselbe Route. Default `model=paper` liest den Historical Store und den
 Fill-Simulator. Leerer Store ist 422, ohne Yahoo. `model=reference` bleibt
 der gebührenfreie Altpfad. `backtestRule` und der Engine-Default `"legacy"`
-sind unverändert.
+sind unverändert. Die Store-ID (`VENUE:native`) ist nicht das Regel-Symbol;
+ohne eindeutige Reihe oder gesetzte `instrumentId` bleibt es 422.
 
 ## Nachweis
 

@@ -195,7 +195,8 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    erneut; Budgets außerhalb der Code-Deckel werden abgelehnt.
 6. **Regel prüfen (Schritt 5 des Workshops)** — eigener Reiter, nicht Teil
    des Missionsformulars. Eine Regel lässt sich dort nur als `DRAFT` anlegen
-   und gegen den Paper-Store backtesten. Aktivierung bleibt
+   und gegen den Paper-Store backtesten. Die Store-ID (z. B. `BITUNIX:BTCUSDT`)
+   ist nicht das Regel-Symbol. Aktivierung bleibt
    `POST /api/firm/rules/[id]` mit Admin-Recht (Handbuch 15.4 und 17).
 
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung

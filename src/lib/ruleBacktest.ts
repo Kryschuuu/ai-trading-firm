@@ -4,8 +4,9 @@
  *
  * Zwei Pfade, beide explizit:
  *   - `paper` (Default): `runRuleSetBacktest` mit `executionModel: "paper"`.
- *     Kerzen kommen nur aus dem HistoricalStore. Fehlt die Reihe, ist das
- *     ein Fehler — kein stiller Yahoo-Call.
+ *     Kerzen kommen nur aus dem HistoricalStore. Die Store-ID
+ *     (`VENUE:native`) ist nicht das Regel-Symbol. Fehlt eine eindeutige
+ *     Reihe, ist das ein Fehler — kein stiller Yahoo-Call.
  *   - `reference`: der eingefrorene `backtestRule` ohne Gebühren. Nur für
  *     den Vergleich, nie als Default.
  *
@@ -17,7 +18,9 @@ import { runRuleSetBacktest } from "@/backtest/engine";
 import type { BacktestMetrics, MultiAssetBacktestResult } from "@/backtest/types";
 import {
   isSupportedTimeframe,
+  type HistoricalCandleEntry,
   type HistoricalStore,
+  type StoreQuery,
   type SupportedTimeframe,
 } from "@/lib/marketdata/historicalStore";
 import {
@@ -26,6 +29,7 @@ import {
   type CandleLike,
   type RuleSpec,
 } from "@/lib/ruleEngine";
+import { isValidInstrumentId, tryNormalizeVenueSymbol } from "@/symbols/normalize";
 
 export const RULE_BACKTEST_MIN_BARS = 40;
 export const RULE_BACKTEST_TRADE_CAP = 200;
@@ -58,6 +62,12 @@ export type RuleBacktestBody = {
   from: string | null;
   to: string | null;
   note: string;
+  /** PAPER-kanonisches Regel-Symbol. Nicht die Store-ID. */
+  ruleSymbol: string;
+  /** null im Referenzpfad: dort gibt es keine Store-Reihe. */
+  instrumentId: string | null;
+  /** Gesetzte Store-ID passt kanonisch nicht zum Regel-Symbol. Kein stiller Tausch. */
+  seriesWarning: string | null;
   result: {
     executionModel: RuleBacktestModel;
     stats: RuleBacktestStats;
@@ -89,6 +99,8 @@ export type ParsedRuleBacktestBody = {
   startingEquity: number;
   /** null, wenn der Client kein Intervall geschickt hat. */
   interval: string | null;
+  /** null, wenn der Client keine Store-ID geschickt hat. */
+  instrumentId: string | null;
 };
 
 const PAPER_NOTE =
@@ -123,7 +135,157 @@ export function parseRuleBacktestBody(raw: unknown): { ok: true; value: ParsedRu
   if (!Number.isFinite(equityRaw) || equityRaw <= 0) {
     return { ok: false, error: "startingEquity muss eine positive Zahl sein." };
   }
-  return { ok: true, value: { model, limit: Math.trunc(limit), startingEquity: equityRaw, interval } };
+  const instrumentId = parseOptionalInstrumentId(record.instrumentId);
+  if (!instrumentId.ok) return instrumentId;
+  return {
+    ok: true,
+    value: {
+      model,
+      limit: Math.trunc(limit),
+      startingEquity: equityRaw,
+      interval,
+      instrumentId: instrumentId.value,
+    },
+  };
+}
+
+const MAX_AMBIGUOUS_IDS = 5;
+
+/**
+ * Store-ID aus dem Request. Leer ist erlaubt (Auflösung über das Regel-Symbol).
+ * Gesetzt muss die ID `isValidInstrumentId` bestehen — keine Pfade, kein Raten.
+ */
+export function parseOptionalInstrumentId(
+  raw: unknown,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false, error: "instrumentId muss ein String sein." };
+  const trimmed = raw.normalize("NFKC").trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  const id = trimmed.toUpperCase();
+  if (
+    id.length > 64 ||
+    id.includes("..") ||
+    id.includes("\\") ||
+    /[\u0000-\u001f]/.test(id) ||
+    !isValidInstrumentId(id)
+  ) {
+    return {
+      ok: false,
+      error: "instrumentId muss die Form VENUE:SYMBOL haben (z. B. BITUNIX:BTCUSDT).",
+    };
+  }
+  return { ok: true, value: id };
+}
+
+/** Kanonische Form einer Store-ID, oder null wenn die ID nicht normalisierbar ist. */
+export function canonicalOfStoreId(id: string): string | null {
+  const idx = id.indexOf(":");
+  if (idx <= 0 || id.indexOf(":", idx + 1) >= 0) return null;
+  const norm = tryNormalizeVenueSymbol(id.slice(0, idx), id.slice(idx + 1));
+  return norm.ok ? norm.value.canonical : null;
+}
+
+function visibleBars(count: number, limit: number): number {
+  if (limit > 0) return Math.min(count, limit);
+  return count;
+}
+
+/**
+ * Welche Store-Reihe der Paper-Pfad lesen darf.
+ *
+ * 1. Gesetzte `instrumentId`: nur diese Reihe. Kein Fallback auf das Regel-Symbol.
+ * 2. Sonst eine Reihe, die exakt unter `ruleSymbol` liegt und genug Bars hat.
+ * 3. Sonst genau eine Reihe, deren kanonisches Symbol `ruleSymbol` ist.
+ *    Mehrere ausreichende Reihen sind 422 — es wird keine Venue geraten.
+ */
+export function resolvePaperInstrumentId(args: {
+  entries: readonly Pick<HistoricalCandleEntry, "instrumentId" | "timeframe">[];
+  ruleSymbol: string;
+  timeframe: string;
+  limit: number;
+  instrumentId: string | null;
+}): { ok: true; instrumentId: string } | { ok: false; status: 422; error: string } {
+  const counts = new Map<string, number>();
+  for (const entry of args.entries) {
+    if (entry.timeframe !== args.timeframe) continue;
+    counts.set(entry.instrumentId, (counts.get(entry.instrumentId) ?? 0) + 1);
+  }
+  const enough = (id: string): boolean =>
+    visibleBars(counts.get(id) ?? 0, args.limit) >= RULE_BACKTEST_MIN_BARS;
+
+  if (args.instrumentId) {
+    if (!enough(args.instrumentId)) {
+      return {
+        ok: false,
+        status: 422,
+        error: historyTooShortMessage(
+          args.instrumentId,
+          args.timeframe,
+          visibleBars(counts.get(args.instrumentId) ?? 0, args.limit),
+        ),
+      };
+    }
+    return { ok: true, instrumentId: args.instrumentId };
+  }
+
+  if (enough(args.ruleSymbol)) return { ok: true, instrumentId: args.ruleSymbol };
+
+  const matches = [...counts.keys()]
+    .filter((id) => id !== args.ruleSymbol && canonicalOfStoreId(id) === args.ruleSymbol && enough(id))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (matches.length === 1) return { ok: true, instrumentId: matches[0] };
+  if (matches.length > 1) {
+    const shown = matches.slice(0, MAX_AMBIGUOUS_IDS);
+    const extra = matches.length - shown.length;
+    return {
+      ok: false,
+      status: 422,
+      error:
+        `Mehrere Store-Reihen passen zum Regel-Symbol ${args.ruleSymbol} im Timeframe ${args.timeframe}: ` +
+        `${shown.join(", ")}${extra > 0 ? ` (+${extra})` : ""}. ` +
+        "instrumentId setzen (Form VENUE:SYMBOL, z. B. BITUNIX:BTCUSDT). " +
+        "Es wird keine Reihe geraten und keine Kursquelle nachgeladen.",
+    };
+  }
+  return {
+    ok: false,
+    status: 422,
+    error: historyTooShortMessage(
+      args.ruleSymbol,
+      args.timeframe,
+      visibleBars(counts.get(args.ruleSymbol) ?? 0, args.limit),
+    ),
+  };
+}
+
+function seriesWarning(ruleSymbol: string, instrumentId: string): string | null {
+  if (instrumentId === ruleSymbol || canonicalOfStoreId(instrumentId) === ruleSymbol) return null;
+  return (
+    `Store-ID ${instrumentId} ist nicht das Regel-Symbol ${ruleSymbol}. ` +
+    "Die Messung benutzt nur die genannte Store-Reihe; die Regel bleibt beim gespeicherten Symbol."
+  );
+}
+
+/**
+ * `runRuleSetBacktest` fragt den Store mit `rule.symbol`. Liegt die Reihe unter
+ * einer anderen ID, liefert diese Sicht genau diese Reihe — ohne die Engine
+ * und ohne andere Symbole anzufassen.
+ */
+function storeAliasedTo(
+  store: Pick<HistoricalStore, "query">,
+  ruleSymbol: string,
+  instrumentId: string,
+): Pick<HistoricalStore, "query"> {
+  if (ruleSymbol === instrumentId) return store;
+  return {
+    query(q: StoreQuery) {
+      return store.query({
+        ...q,
+        instrumentId: q.instrumentId === ruleSymbol ? instrumentId : q.instrumentId,
+      });
+    },
+  };
 }
 
 export function downsampleSeries<T>(points: readonly T[], max: number): T[] {
@@ -200,7 +362,8 @@ export function historyTooShortMessage(symbol: string, timeframe: string, found:
     `Keine ausreichende Historie für ${symbol} im Timeframe ${timeframe} ` +
     `(gefunden: ${found}, nötig: ${RULE_BACKTEST_MIN_BARS}). ` +
     "Der Paper-Pfad liest nur den HistoricalStore und ruft keine Kursquelle nach. " +
-    "Historie synchronisieren und prüfen, dass die Store-ID dem Regel-Symbol entspricht."
+    "Historie synchronisieren. Die Store-ID hat die Form VENUE:SYMBOL (z. B. BITUNIX:BTCUSDT) " +
+    "und ist nicht dasselbe wie das PAPER-kanonische Regel-Symbol."
   );
 }
 
@@ -228,6 +391,9 @@ export async function executeRuleBacktest(args: {
     const trades = result.trades.slice(0, RULE_BACKTEST_TRADE_CAP);
     const detail = {
       executionModel: "reference" as const,
+      ruleSymbol: spec.symbol,
+      instrumentId: null,
+      seriesWarning: null,
       from: isoOrNull(fromMs),
       to: isoOrNull(toMs),
       note: REFERENCE_NOTE,
@@ -246,6 +412,9 @@ export async function executeRuleBacktest(args: {
         from: isoOrNull(fromMs),
         to: isoOrNull(toMs),
         note: REFERENCE_NOTE,
+        ruleSymbol: spec.symbol,
+        instrumentId: null,
+        seriesWarning: null,
         result: { executionModel: "reference", stats, equityCurve, trades },
       },
     };
@@ -257,15 +426,28 @@ export async function executeRuleBacktest(args: {
     return { ok: false, status: 422, error: `Timeframe ${spec.window.timeframe} ist kein Historical-Store-Timeframe.` };
   }
   const timeframe: SupportedTimeframe = spec.window.timeframe;
+  const resolved = resolvePaperInstrumentId({
+    entries: args.store.readAll(),
+    ruleSymbol: spec.symbol,
+    timeframe,
+    limit: request.limit,
+    instrumentId: request.instrumentId,
+  });
+  if (!resolved.ok) return resolved;
   const entries = args.store.query({
-    instrumentId: spec.symbol,
+    instrumentId: resolved.instrumentId,
     timeframe,
     limit: request.limit,
   });
   if (entries.length < RULE_BACKTEST_MIN_BARS) {
-    return { ok: false, status: 422, error: historyTooShortMessage(spec.symbol, timeframe, entries.length) };
+    return {
+      ok: false,
+      status: 422,
+      error: historyTooShortMessage(resolved.instrumentId, timeframe, entries.length),
+    };
   }
-  const paper: MultiAssetBacktestResult = runRuleSetBacktest([spec], args.store, {
+  const warning = seriesWarning(spec.symbol, resolved.instrumentId);
+  const paper: MultiAssetBacktestResult = runRuleSetBacktest([spec], storeAliasedTo(args.store, spec.symbol, resolved.instrumentId), {
     executionModel: "paper",
     timeframe,
     warmupBars: 30,
@@ -296,6 +478,9 @@ export async function executeRuleBacktest(args: {
   }));
   const detail = {
     executionModel: "paper" as const,
+    ruleSymbol: spec.symbol,
+    instrumentId: resolved.instrumentId,
+    seriesWarning: warning,
     from: isoOrNull(fromMs),
     to: isoOrNull(toMs),
     note: PAPER_NOTE,
@@ -314,6 +499,9 @@ export async function executeRuleBacktest(args: {
       from: isoOrNull(fromMs),
       to: isoOrNull(toMs),
       note: PAPER_NOTE,
+      ruleSymbol: spec.symbol,
+      instrumentId: resolved.instrumentId,
+      seriesWarning: warning,
       result: { executionModel: "paper", stats, equityCurve, trades },
     },
   };

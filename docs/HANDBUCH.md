@@ -475,7 +475,7 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `PUT` | `/api/firm/agents` | `{agentId, systemPrompt}` | `{ok, agent, warnings?}` |
 | `GET/POST` | `/api/firm/rules` | – / `{rule, activate?}` | Lesen: `firm.read`, `private, no-store`; Draft: `strategy.rules.write`; `activate: true`: zusätzlich `strategy.rules.activate` |
 | `POST` | `/api/firm/rules/[id]` | `{action: activate\|pause\|archive\|rollback\|reject, reason?}` | `strategy.rules.write`; activate/rollback/archive zusätzlich administrativ (Kap. 17). Kein client-geliefertes `by` |
-| `POST` | `/api/firm/rules/[id]/backtest` | `{interval?, limit?, startingEquity?, model?}` | bestehende Route: Default `model=paper` (Store, Gebühren/Spread/Slippage/Funding); `model=reference` ist der gebührenfreie Altpfad. Keine neue Route |
+| `POST` | `/api/firm/rules/[id]/backtest` | `{interval?, limit?, startingEquity?, model?, instrumentId?}` | bestehende Route: Default `model=paper` (Store, Gebühren/Spread/Slippage/Funding). `instrumentId` ist die Store-ID (`BITUNIX:BTCUSDT`), nicht das Regel-Symbol. Fehlt sie und passen mehrere Reihen, ist die Antwort 422. `model=reference` ist der gebührenfreie Altpfad. Keine neue Route |
 | `POST/GET` | `/api/firm/macro` | `{missionId?}` | Makro-Zyklus jetzt ausführen (`POST`: `strategy.rules.activate`) / Status |
 | `GET` | `/api/firm/micro` | – | Executor-Prozess-Status + aktive Regeln + letzte Ausführungen |
 | `GET` | `/api/docs?name=…` | – | `{content}` (Markdown) |
@@ -1696,24 +1696,32 @@ Rückkanal zum CEO (`ruleFeedback()` → nächster Makro-Zyklus).
 ### 15.4 Regel prüfen, bevor sie live geht — Backtest
 
 Seit v0.2.0 ist der Default dieser **bestehenden** Route `model: "paper"`:
-Kerzen kommen nur aus dem Historical Store, fills laufen durch denselben
+Kerzen kommen nur aus dem Historical Store, Fills laufen durch denselben
 Fill-Simulator wie der Mikro-Executor (Taker-Gebühr, Spread, Slippage,
 Funding). Fehlen Kerzen, antwortet die Route `422` — sie holt nicht still
 bei Yahoo nach. `model: "reference"` bleibt der gebührenfreie Altpfad
 (`backtestRule`, `totalFeesPaid: null`, leere Equity-Kurve). Der
 Walk-Forward-Engine-Default bleibt `"legacy"`.
 
-**Über die Oberfläche (Workshop → „5 · Regel prüfen“):** Symbol, Bedingung
-und Risiko eintragen, Paper-Backtest starten, danach **nur als Entwurf
-speichern** (`activate` fehlt bzw. ist falsch). Die Aktivierung bleibt der
-administrative Weg aus Kapitel 17.
+Das Regel-Symbol (`BTC/USDT`) ist nicht die Store-ID (`BITUNIX:BTCUSDT`).
+Ohne `instrumentId` gilt eine Reihe nur, wenn sie exakt unter dem
+Regel-Symbol liegt oder als einzige Reihe dasselbe kanonische Symbol hat.
+Mehrere Venues sind `422` — es wird keine Reihe geraten. Mit gesetzter
+`instrumentId` wird nur diese Reihe gelesen; beide IDs stehen in der Antwort.
+`interval` im Body wird auf dem Paper-Pfad ignoriert: das Fenster steht in
+der Regel.
+
+**Über die Oberfläche (Workshop → „5 · Regel prüfen“):** Symbol, optionale
+Store-ID, Bedingung und Risiko eintragen, dann **als Entwurf speichern und
+messen**. `activate` wird nicht gesendet. „Erneut messen“ benutzt dieselbe
+Regel-ID. Die Aktivierung bleibt der administrative Weg aus Kapitel 17.
 
 ```bash
 RULE=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm/rules | jq -r '.rules[0].id')
 
 curl -s -X POST localhost:3369/api/firm/rules/$RULE/backtest \
   -H 'Content-Type: application/json' \
-  -d '{"model":"paper","interval":"15m","limit":400}' | jq '.result.stats'
+  -d '{"model":"paper","instrumentId":"BITUNIX:BTCUSDT","limit":400}' | jq '.result.stats'
 ```
 
 ```json

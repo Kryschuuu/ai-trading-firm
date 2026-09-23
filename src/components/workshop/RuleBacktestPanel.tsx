@@ -32,6 +32,8 @@ type BacktestBody = {
   interval?: string;
   candles?: number;
   note?: string;
+  instrumentId?: string | null;
+  seriesWarning?: string | null;
   result?: {
     stats?: {
       trades?: number;
@@ -62,7 +64,8 @@ function emptyCondition(): ConditionDraft {
 
 export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [name, setName] = useState("Workshop-Entwurf");
-  const [symbol, setSymbol] = useState("BTC");
+  const [symbol, setSymbol] = useState("BTC/USDT");
+  const [storeId, setStoreId] = useState("");
   const [timeframe, setTimeframe] = useState("15m");
   const [stopLossPct, setStopLossPct] = useState("5");
   const [takeProfitRR, setTakeProfitRR] = useState("1.5");
@@ -119,7 +122,11 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
       await apiFetch(`/api/firm/rules/${id}/backtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "paper", limit: 300 }),
+        body: JSON.stringify({
+          model: "paper",
+          limit: 300,
+          ...(storeId.trim() ? { instrumentId: storeId.trim() } : {}),
+        }),
       }),
       "Backtest fehlgeschlagen",
     );
@@ -198,21 +205,31 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
         <InfoTip
           id="rule-backtest-title"
           label="Regel-Entwurf"
-          text="Speichert eine DRAFT-Regel und misst sie gegen den HistoricalStore mit Paper-Kosten. Aktiviert nichts und lädt keine Kurse nach."
+          text="Speichert eine DRAFT-Regel und misst sie gegen eine Historical-Store-Reihe mit Paper-Kosten. Die Store-ID ist nicht das Regel-Symbol. Aktiviert nichts und lädt keine Kurse nach."
         />
       </div>
       <p className="text-xs text-slate-500">
-        „Als Entwurf speichern und messen“ schreibt `activate: false`. „Erneut messen“ benutzt dieselbe ID und speichert keine zweite Regel.
+        „Als Entwurf speichern und messen“ schreibt `activate: false`. „Erneut messen“ benutzt dieselbe Regel und die aktuelle Store-ID, ohne eine zweite Regel zu speichern.
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-xs font-semibold text-slate-300">
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100" />
         </label>
         <label className="text-xs font-semibold text-slate-300">
-          Symbol (Store-ID)
+          Symbol
           <input value={symbol} onChange={(e) => setSymbol(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100" />
+        </label>
+        <label className="text-xs font-semibold text-slate-300">
+          Store-ID
+          <input
+            value={storeId}
+            onChange={(e) => setStoreId(e.target.value)}
+            placeholder="BITUNIX:BTCUSDT"
+            aria-describedby="store-id-hint"
+            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+          />
         </label>
         <label className="text-xs font-semibold text-slate-300">
           Fenster
@@ -221,6 +238,9 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
           </select>
         </label>
       </div>
+      <p id="store-id-hint" className="text-xs text-slate-500">
+        Symbol ist die Regel, zum Beispiel BTC/USDT. Store-ID ist der Schlüssel im Historical Store, zum Beispiel BITUNIX:BTCUSDT. Leer lassen nur, wenn genau eine Reihe zu diesem Symbol existiert.
+      </p>
 
       <div className="space-y-2">
         {conditions.map((condition) => (
@@ -328,6 +348,9 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
             <svg viewBox="0 0 280 72" className="h-20 w-full rounded border border-slate-800 bg-slate-950" role="img" aria-label="Equity-Kurve des Paper-Laufs">
               <path d={curvePath} fill="none" stroke="#38bdf8" strokeWidth="1.5" />
             </svg>
+          )}
+          {measure?.seriesWarning && (
+            <p role="status" className="rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-200 lg:col-span-2">{measure.seriesWarning}</p>
           )}
           {measure?.note && <p className="text-[11px] leading-relaxed text-slate-500 lg:col-span-2">{measure.note}</p>}
         </div>

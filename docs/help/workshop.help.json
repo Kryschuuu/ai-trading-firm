@@ -1,7 +1,7 @@
 {
   "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
   "id": "workshop",
-  "version": 2,
+  "version": 3,
   "title": "Workshop: Missionen, Markt-Scans und Vorlagen — Feldhilfe",
   "description": "Hilfetexte im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko) für den Workshop: Missionen, Agenten-Turns, Prompt-Iteration, Trefferquote und den Entwurf-Backtest (v0.2.0). Dieselben Texte stehen als Tooltips (i-Symbol) im Dashboard und in docs/MISSIONS.md.",
   "source": "src/lib/missionTemplates.ts, src/lib/missionUniverse.ts, src/lib/workshop.ts, src/lib/ruleBacktest.ts, src/components/workshop/",
@@ -107,8 +107,8 @@
       "risiko": "Ungeprüfter Modelltext als System-Prompt kann widersprüchliche Anweisungen enthalten. Erst lesen, dann speichern — nie automatisch übernehmen."
     },
     "ruleDraftBacktest": {
-      "kurzinfo": "Schritt 5 prüft eine Regel gegen den Paper-Store und speichert sie nur als Entwurf.",
-      "technischeInfo": "Dieselbe Route POST /api/firm/rules/[id]/backtest, Default model=paper. Kerzen nur aus dem Historical Store; fehlen sie, ist die Antwort 422, ohne Yahoo. activate wird nicht gesendet. model=reference bleibt der gebührenfreie Altpfad.",
+      "kurzinfo": "Schritt 5 speichert eine Regel nur als Entwurf und misst sie gegen eine Store-Reihe, nicht gegen eine nachgeladene Kursquelle.",
+      "technischeInfo": "Dieselbe Route POST /api/firm/rules/[id]/backtest, Default model=paper. Das Regel-Symbol (PAPER-kanonisch, z. B. BTC/USDT) ist nicht die Store-ID (z. B. BITUNIX:BTCUSDT). Ohne instrumentId gilt nur eine exakte oder eindeutig kanonische Reihe; sonst 422, ohne Yahoo. activate wird nicht gesendet. model=reference bleibt der gebührenfreie Altpfad.",
       "risiko": "Ein grüner Paper-Backtest ist keine Aktivierung und kein Walk-Forward. Die Regel bleibt DRAFT, bis ein Admin sie ausdrücklich freigibt."
     }
   }

@@ -37,3 +37,6 @@ Prompts nur für FIXED: [`../prompts/README.md`](../prompts/README.md).
 | VBF-live-exit | `detectExit` ersetzen | WONTFIX | — | nur Paritätstest |
 
 Keine neue API-Route. `backtestRule` bleibt der gebührenfreie Referenzpfad.
+Paper-Pfad: Store-Schlüssel ist `VENUE:native` (z. B. `BITUNIX:BTCUSDT`), nicht
+das PAPER-kanonische Regel-Symbol. Explizites `instrumentId` oder genau eine
+passende Reihe; sonst 422, kein Raten.
