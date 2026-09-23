@@ -1,12 +1,5 @@
 "use client";
 
-import type { SessionSnapshot } from "@/lib/firmSession";
-import {
-  describeSession,
-  formatSessionCountdown,
-  sessionMaxLifeRemainingS,
-  sessionRemainingS,
-} from "@/lib/firmSession";
 
 /**
  * Hinweisbalken mit An-, Ab- und Verlängerung der Browser-Session
@@ -23,6 +16,15 @@ import {
  * (`session.state` inkl. Restzeit). An-, Ab- und Verlängern sitzen direkt
  * daneben, statt sich hinter einer Fehlermeldung zu verstecken.
  */
+
+import type { SessionSnapshot } from "@/lib/firmSession";
+import {
+  describeSession,
+  formatSessionCountdown,
+  sessionMaxLifeRemainingS,
+  sessionRemainingS,
+} from "@/lib/firmSession";
+
 export function SessionNoticeBar({
   notice,
   showTokenField,

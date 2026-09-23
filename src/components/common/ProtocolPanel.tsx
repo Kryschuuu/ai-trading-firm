@@ -1,10 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProtocolEntryDto } from "@/lib/types";
-import { summarizeProtocolEntry, type ProtocolEntryLike } from "@/lib/auditView";
-import { ProtocolList } from "./ProtocolList";
-import { Pager, usePagination } from "./Pager";
 
 /**
  * Protokoll-Bereich (agent_messages) mit demselben Paging-System wie der
@@ -13,6 +8,13 @@ import { Pager, usePagination } from "./Pager";
  * Die Liste zeigt Turns, Analystenberichte und Systemmeldungen — jeweils mit
  * Kurzfassung, vollständigen lesbaren Details und einem Rohdaten-Reiter.
  */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ProtocolEntryDto } from "@/lib/types";
+import { summarizeProtocolEntry, type ProtocolEntryLike } from "@/lib/auditView";
+import { ProtocolList } from "./ProtocolList";
+import { Pager, usePagination } from "./Pager";
+
 export function ProtocolPanel({
   title = "Protokoll — Entscheidungen, Analysen und Systemmeldungen",
   hint = "Jeder Eintrag ist aufklappbar: Kurzfassung, vollständige Details und der originale Datenbank-Eintrag.",

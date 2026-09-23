@@ -1,6 +1,6 @@
 # Post-Only-Ausführung mit Market-Fallback (RMA-P4-02)
 
-**Version:** `v1.70.0` · **Status:** produktiv, schreibende Pfade hinter
+**Version:** `v0.1.0 (Beta)` · **Status:** produktiv, schreibende Pfade hinter
 `EXECUTION_POLICY_ENABLED=true` · **Modul:** `src/execution/`
 
 Der Execution-Policy-Controller platziert Maker-Limits (Post-Only) mit

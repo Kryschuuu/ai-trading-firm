@@ -1,3 +1,9 @@
+/**
+ * API-Route `PUT /api/firm/agents` — Agenten-Register (Lese-API).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { agents } from "@/db/schema";

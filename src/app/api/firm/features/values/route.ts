@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET /api/firm/features/values` — Point-in-Time Feature-Werte (Lese-API, as-of).
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("firm.read") — Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 
 import { requirePermission } from "@/auth";

@@ -1,3 +1,13 @@
+/**
+ * Normalisierung der heterogenen `agent_messages`-Historie für das Protokoll.
+ *
+ * Eine Tabellenzeile ist nicht automatisch ein Agenten-Turn: Analysten schreiben
+ * ANALYSIS/RECOMMENDATION, der Monitor schreibt MARKET_SCAN. Früher wurden alle
+ * Zeilen als `decision` gerendert; dadurch entstanden Status `?` und `NaN s`.
+ * Diese Datei ist bewusst DB- und React-frei, damit die Klassifizierung für neue
+ * und bereits gespeicherte Einträge deterministisch getestet werden kann.
+ */
+
 import type {
   AgentDecisionDto,
   ProtocolActorDto,
@@ -8,15 +18,6 @@ import type {
   TurnLogEntryDto,
 } from "./types";
 
-/**
- * Normalisierung der heterogenen `agent_messages`-Historie für das Protokoll.
- *
- * Eine Tabellenzeile ist nicht automatisch ein Agenten-Turn: Analysten schreiben
- * ANALYSIS/RECOMMENDATION, der Monitor schreibt MARKET_SCAN. Früher wurden alle
- * Zeilen als `decision` gerendert; dadurch entstanden Status `?` und `NaN s`.
- * Diese Datei ist bewusst DB- und React-frei, damit die Klassifizierung für neue
- * und bereits gespeicherte Einträge deterministisch getestet werden kann.
- */
 
 export type StoredProtocolMessage = {
   id: string;

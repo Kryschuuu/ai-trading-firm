@@ -1,6 +1,6 @@
 # How-to: Laufende Firma nach `git pull` aktualisieren
 
-**Stand:** v1.40.0 · **Zielgruppe:** Betreiber einer laufenden Instanz (Paper oder Live)
+**Stand:** v0.1.0 (Beta) · **Zielgruppe:** Betreiber einer laufenden Instanz (Paper oder Live)
 · **Dauer:** 3–10 Minuten (der Build ist der längste Teil)
 
 Dieses Runbook beantwortet eine einzige Frage: *Ich habe lokal `git pull` gemacht —

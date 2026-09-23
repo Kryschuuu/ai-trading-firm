@@ -1,6 +1,6 @@
 # Devil’s Advocate (Strukturierte Falsifikationsrolle)
 
-> **Status:** Produktionsreif · **Version:** `1.66.0` (`da1`) · **Audit-Referenz:** [`RMA-P3-03`](audits/2026-09-20-roadmap-audit/findings/RMA-P3-03-devils-advocate.md)
+> **Status:** Produktionsreif · **Version:** `v0.1.0 (Beta)` (Schema `da1`) · **Audit-Referenz:** [`RMA-P3-03`](audits/2026-09-20-roadmap-audit/findings/RMA-P3-03-devils-advocate.md)
 
 ---
 

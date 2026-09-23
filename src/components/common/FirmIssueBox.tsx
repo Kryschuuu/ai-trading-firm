@@ -1,6 +1,5 @@
 "use client";
 
-import type { FirmIssue } from "@/lib/firmSession";
 
 /**
  * Hinweisbox für einen fehlgeschlagenen Firm-Load (v1.36.41).
@@ -12,6 +11,9 @@ import type { FirmIssue } from "@/lib/firmSession";
  * `kind: "database"`; ein `401` nach Session-Ablauf zeigt stattdessen den
  * nächsten Schritt (Anmeldung), statt die Datenbank zu beschuldigen.
  */
+
+import type { FirmIssue } from "@/lib/firmSession";
+
 export function FirmIssueBox({ issue }: { issue: FirmIssue }) {
   const authRelated = issue.needsLogin;
   return (

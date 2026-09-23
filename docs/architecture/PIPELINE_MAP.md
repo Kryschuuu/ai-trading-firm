@@ -1,6 +1,6 @@
 # Pipeline-Architektur & Ausführungskarte (v1.41.0)
 
-> **Dokumenten-Status:** Master-Architekturkarte · **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
+> **Dokumenten-Status:** Master-Architekturkarte · **Stand:** 2026-09-18 · **Code-Version:** v0.1.0 (Beta)  
 > **Verbindliche Referenz:** `docs/architecture/PIPELINE_MAP.md`
 
 ---

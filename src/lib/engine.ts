@@ -405,6 +405,23 @@ export interface LogAuditOptions {
   spool?: boolean;
 }
 
+/**
+ * Audit-Beleg schreiben (Konvenienz-Hülle um `writeAuditRecord`).
+ *
+ * @param event - Audit-Event-Code (geschlossenes Vokabular, z. B.
+ *   `KILL_SWITCH`, `ORDER_REJECTED`); neue Codes immer in
+ *   `src/lib/auditView.ts` (Katalog) beschreiben.
+ * @param level - `INFO` | `WARN` | `CRITICAL`.
+ * @param detail - Fakten-Objekt (bounded: keine Secrets/PII/Broker-Rohdaten,
+ *   keine IDs als freie Textfelder — Details werden beim Rendern gekürzt).
+ * @param missionId - Optionaler Bezug zur Mission (Audit-Kontext).
+ * @param agentId - Optionaler Bezug zum Agenten (Audit-Kontext).
+ * @param opts - `auditClass` (Default `security` = at-least-once mit Retry +
+ *   persistenter Spool), `failClosed` (Mutation verweigern, wenn kein
+ *   Beleg durable ist), `spool` (Spool-Fallback, nur Tests/Drills abschaltbar).
+ * @returns `AuditWriteOutcome` — persistiert/spooled mit Metadaten; wirft nur
+ *   im `failClosed`-Modus, wenn weder DB noch Spool den Beleg aufnehmen.
+ */
 export async function logAudit(
   event: string,
   level: "INFO" | "WARN" | "CRITICAL",
@@ -1682,4 +1699,9 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+/**
+ * Test-/Debug-Helfer (bewusst exportiert): `and`/`sql` aus `drizzle-orm` für
+ * die wenigen DB-nahen Tests, die die Query-Komposition der Engine prüfen.
+ * Kein Teil der öffentlichen API — keine Produktionslogik gehört hier hinein.
+ */
 export const _internal = { and, sql };

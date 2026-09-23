@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET /api/firm/journal` — Trade-Journal mit Agenten-Attribution (Lese-API).
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("firm.read") — Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/auth";
 import { computeJournalSummary, registrySymbolGroupResolver } from "@/lib/journalAnalytics";

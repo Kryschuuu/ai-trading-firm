@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET /api/firm/equity` — Equity-Kurve (Lese-API).
+ *
+ * Teil der Firm-API (Next.js App Router). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { positions } from "@/db/schema";

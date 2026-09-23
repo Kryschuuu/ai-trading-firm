@@ -1,3 +1,11 @@
+/**
+ * Startseite (Root) des Dashboards.
+ *
+ * Zweck: Einstiegspunkt nach dem Login — zeigt Versionsstand (SSoT
+ * src/lib/version.ts) und führt auf die Dashboard- und Doku-Ansichten.
+ * Abhängigkeiten: @/lib/version, @/components (Dashboard-Teile).
+ */
+
 import FirmDashboard from "@/components/FirmDashboard";
 import { ensureSeeded, checkSchema } from "@/lib/seed";
 import { APP_VERSION } from "@/lib/version";

@@ -1,6 +1,6 @@
 # Prompt-Performance & Version-Metrikvergleich (RMA-P3-02, v1.65.0)
 
-> **Status-Header:** **Implementiert** · **v1.65.0** · **2026-09-22** · Branch `arena/01a0c912-ai-trading-firm`  
+> **Status-Header:** **Implementiert** · **v0.1.0 (Beta)** · **2026-09-23** · Branch `arena/01a0c912-ai-trading-firm`  
 > Basis: Roadmap-Audit [PROMPT-P3-02](audits/2026-09-20-roadmap-audit/prompts/PROMPT-P3-02-prompt-performance.md) (v1.64.0, `df3163e`)
 
 Dieses Dokument ist die kanonische Referenz für die Prompt-Performance-Pipeline: von der **immutable Prompt-Version** bis zur **fairen Metrik-Gegenüberstellung** hinter Human-Gate.

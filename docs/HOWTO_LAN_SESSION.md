@@ -244,8 +244,8 @@ ein Alt-Cookie ohne passendes `firm_csrf` (zuvor **Abmelden**, neu anmelden).
 gar nicht, deshalb half bisher nur der Neustart mit Schlüssel.
 
 Nachweise im Repo: `tests/sessionRenewal.test.ts` (Policy, Verlängerung,
-Nachfrist, beide neuen Routen), `test/ui/SessionStatusBar.test.tsx` und
-`test/ui/FirmSessionBox.test.tsx` (Anzeige), `tests/w1.sessionCookie.test.ts`
+Nachfrist, beide neuen Routen), `tests/ui/SessionStatusBar.test.tsx` und
+`tests/ui/FirmSessionBox.test.tsx` (Anzeige), `tests/w1.sessionCookie.test.ts`
 (Cookie-Attribute), `tests/sec01.sessionSecurity.test.ts` (Payload v3).
 
 ---

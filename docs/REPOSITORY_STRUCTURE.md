@@ -1,156 +1,179 @@
-# Repository-Struktur — Zielbild & Pflegeanleitung (2026-09-05)
+# Repository-Struktur — Übersicht & Pflegeanleitung
 
-> Status: Implementiert (Repo-Cleanup 2026-09-05) · Version 1.36.26
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
+> Code-Version **v0.1.0 (Beta)** · Vorherige Konsolidierung: 2026-09-05 (Legacy v1.36.26)
 
 ## Ziele
 
-- Ordnung schaffen: dediziertes Verzeichnis für Audit-/Security-Findings, skaliert für wiederkehrende Audits
-- Neuer Ordner für Peer-Review-Patches mit bidirektionaler Verlinkung
-- Doppelte MDs entfernen, Überflüssiges entrümpeln
-- Verlinkungen aktualisieren und testen (docs-validate grün)
-- Langfristige Wartbarkeit, perfekte Dokumentation
+- Logische, wartbare, selbsterklärende Verzeichnisstruktur
+- Ein eindeutiger Ort pro Art von Inhalt (Code, Tests, Doku, Migrations, Betrieb)
+- Keine redundanten Dateien; Historie wird archiviert, nicht gelöscht
+- Verlinkungen stabil (`docs:validate` prüft alle relativen Links)
 
-## Zielstruktur
+## Reorganisation 2026-09-23 (v0.1.0, Beta-Baseline)
+
+| Änderung | Von | Nach | Begründung |
+| --- | --- | --- | --- |
+| Testverzeichnis zusammengeführt | `test/` (32 Dateien) + `tests/` | nur `tests/` (`marketdata/`, `integration/`, `ops/`, `ui/`, `fixtures/bitunix/` hinzugefügt) | Doppeltes Testverzeichnis war verwirrend; `npm test` und alle Coverage-Skripte referenzieren jetzt ausschließlich `tests/**` (außer modulinternen `src/marketdata/__tests__/`) |
+| Veraltetes Template-File entfernt | `.ignore` (Root) | — | Kontradiktorisch zu `.gitignore` (es „ignorierte" versionierte Verzeichnisse wie `tests/`, `scripts/`, `deploy/`); reines Template-Relikt |
+| Changelog aufgeteilt | `CHANGELOG.md` (Root, 168 KB, Legacy v1.x.x) | `CHANGELOG.md` (Root, v0.x.x, neu) + `docs/archive/CHANGELOG-legacy-v1.md` (vollständige Legacy-Historie, unverändert) | Öffentliche v0.x.x-Baseline; Historie bleibt nachlesbar (Zuordnung im Changelog) |
+| Versions-Metadaten neu | — | `VERSION.md` (Root) | Kanonische Version/Datum/Status/Komponenten-Übersicht |
+| Beitrags-Leitfaden neu | — | `CONTRIBUTING.md` (Root) | Konventionen und Pflicht-Checks für Contributors |
+| README überarbeitet | `README.md` (v1.73.1-Stand) | `README.md` mit prominentem Beta-Disclaimer (erste Zeile), Schnellstart, Struktur, Doku-Index | Beta-Positionierung, Rechtsklarheit, Übersichtlichkeit |
+
+Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
+`deploy/`, `data/` (nur Seed-Daten versioniert), `.github/` (Spiegel von
+`docs/ci/`).
+
+## Struktur-Übersicht (aktuell)
 
 ```
 /
-├── README.md                 # Projekt-README (GitHub-Einstieg)
-├── CHANGELOG.md              # Kanonisch detailliert (Root, Keep a Changelog)
-├── CONFIGURATION.md          # Env-Flags (ehemals Root INSTALL.md Flag-Referenz)
-├── INSTALL.md                # Wrapper → docs/INSTALL.md + CONFIGURATION.md
-├── docs/
-│   ├── README.md             # Doku-Index (neue Struktur)
-│   ├── REPOSITORY_STRUCTURE.md # Diese Datei
-│   ├── INSTALL.md            # CachyOS-Guide (kanonisch)
-│   ├── CHANGELOG.md          # Stub → ../CHANGELOG.md
-│   ├── ARCHITECTURE.md, HANDBUCH.md, ...
-│   ├── audits/               # NEU: alle Audits chronologisch
-│   │   ├── README.md         # Workflow, Naming, Status-Modell
-│   │   ├── TEMPLATE/         # Vorlage für neuen Audit
-│   │   ├── 2026-09-03-peer-review/  # CLOSED, H1-H10 etc.
-│   │   └── 2026-09-05-security-review-gpt01/  # OPEN, SEC-01..
-│   ├── peer-reviews/         # NEU: Patches gesammelt
-│   │   ├── README.md
-│   │   ├── 2026-08-26-live-trading-readiness/
-│   │   ├── 2026-08-26-bitunix-execution/
-│   │   └── 2026-08-26-routing-overrides/
-│   ├── security/             # NEU: Security-Übersicht
-│   │   ├── README.md
-│   │   └── SECURITY_AUDIT.md
-│   ├── archive/              # NEU: historische Docs
-│   │   └── task-plans/
-│   ├── ci/ + help/
-│   ├── AUDIT_REMEDIATION_2026-09.md  # Stub
-│   ├── SECURITY_AUDIT.md     # Stub
-│   └── PEER_REVIEW_*.md      # Stubs
+├── README.md                  # Projekt-README — beginnt mit dem prominenten Beta-Disclaimer
+├── CHANGELOG.md               # Kanonischer Changelog (Keep a Changelog, öffentliches v0.x.x-Schema)
+├── VERSION.md                 # Versions-Metadaten (v0.1.0, Beta, 2026-09-23) + Komponenten-Übersicht
+├── CONTRIBUTING.md            # Beitrags-Leitfaden, Konventionen, Pflicht-Checks
+├── LICENSE                    # GPL-3.0-only
+├── INSTALL.md                 # Installations-Übersicht (Wrapper → docs/INSTALL.md + CONFIGURATION.md)
+├── CONFIGURATION.md           # Verbindliche Env-Flag-Referenz (Defaults, Bounds)
+├── package.json               # Version-SSoT ("version": "0.1.0"), Scripts, Abhängigkeiten
+├── .env.example               # Alle Flags mit sicheren Defaults (Referenz, kein Klartext-Secret)
+├── next.config.ts             # Next.js-Konfiguration (App Router, Standalone-Details)
+├── tsconfig.json              # TypeScript strict
+├── eslint.config.mjs          # ESLint (next-core)
+├── drizzle.config.ts          # Drizzle-Konfiguration (Migrations → drizzle/)
+│
+├── src/                       # ── Anwendung ────────────────────────────────────────────
+│   ├── app/                   # Next.js App Router: Seiten, Dashboard, /docs-Viewer, REST-API
+│   │   ├── api/               #   API-Routen (/api/firm/*, /api/marketdata/*, /api/auth/*, …)
+│   │   ├── docs/              #   In-Browser-Doku-Viewer (docsCatalog)
+│   │   └── *.tsx              #   Layout, Startseite
+│   ├── components/            # React-Komponenten (Dashboard, Control-Plane, Operations, Docs)
+│   ├── cycle/                 # Agenten-Zyklus: Steps (Technical/News/Macro/Research/Risk/…),
+│   │   │                      #   Orchestrierung, Plausibilitäts-Schicht, Artefakte
+│   │   └── steps/             #   ein Datei-Step je Agentenrolle
+│   ├── scanner/               # Deterministischer Market-Scanner (Faktoren, Scoring, Ranking)
+│   │   └── factors/           #   je Faktor eine Datei (ATR, RSI, Momentum, Funding, …)
+│   ├── marketdata/            # Markt-Daten-Pipeline: Sync-Service, Readiness, Aggregation,
+│   │   ├── adapters/          #   Qualitäts-Layer; Adapter je Venue (bitunix, binance, kraken, …)
+│   │   └── __tests__/         #   modulinterna Tests (ausnahmsweise am Ort, siehe npm test)
+│   ├── brokers/               # Broker-Schicht: paper/ (Fill-Simulation), bitunix/, alpaca/,
+│   │   │                      #   control-plane/, reconciliation, EmergencyBroker-Schnittstelle
+│   │   └── …                  #   Venue-Adapter & Capability-Modell
+│   ├── execution/             # Ausführungspolitik: Order-Gates, post-only/ (Fallback),
+│   │   └── twap/              #   Policy-Controller, TWAP-Engine (Parent/Slice)
+│   ├── live-gate/             # Harte Freigabeschicht für Live-Pfade (States, Stamps, Audit)
+│   ├── backtest/              # Backtest-Engines (engine, paperExecution, replay, montecarlo,
+│   │                          #   walkforward, tradeLedger, runStore)
+│   ├── portfolio/             # Portfolio-Engine: Kennzahlen, Kovarianz/Cluster,
+│   │                          #   volatilityTargeting, drawdownScaling (pure Policies)
+│   ├── forecasts/             # Forecast-Ledger: Capture, Resolver, Scoring (Brier/ECE)
+│   ├── features/              # Point-in-Time Feature Store (Registry, Materialisierung, PIT)
+│   ├── perpdata/              # Historische Perpetual-Daten (Funding/OI/Liquidationen, Sync)
+│   ├── sentiment/             # Strukturierte Sentiment-Outputs (Forecast-Envelopes)
+│   ├── crossSectional/        # Point-in-Time Cross-Sectional Momentum Ranking
+│   ├── confluence/            # Deterministische Multi-Timeframe-Konfluenz
+│   ├── strategyLifecycle/     # 9-Zustands-Lifecycle mit Driftgates (Backtest↔Paper↔Live)
+│   ├── devilsAdvocate/        # Adversaler Falsifikations-Step (Scoring, Schemata)
+│   ├── promptPerformance/     # Prompt-Artefakte, Run-Provenanz, Version-Metriken
+│   ├── routing/               # LLM-Model-Router, Provider-Adapter, Turn-Budget, Overrides
+│   ├── auth/                  # Auth-Modi, Session-Handling, RBAC
+│   ├── universe/              # Instrument-Universe-Registry (venue-aware)
+│   ├── attribution/           # Deterministische Trade-PnL-Attribution
+│   ├── executionQuality/      # Venueübergreifendes Execution-Benchmarking (Ledger)
+│   ├── capabilities/          # Capability-SSoT (discovery/marketData/trading)
+│   ├── history/               # Historical Store (append-only OHLCV, Kerzen-Queries)
+│   ├── contracts/             # Broker-Contract-Verträge (Adapter-Interface)
+│   ├── db/                    # Drizzle-Schema & Pool
+│   ├── ops/                   # Operations-Zentrale (Status, Diagnose)
+│   ├── lib/                   # Gemeinsame Kernlogik: riskGuard, riskConfig, adaptiveRisk,
+│   │                          #   positionSizing, clusterExposure, volatilityTargeting,
+│   │                          #   drawdownScaling, signalDecay, circuitBreaker, exits,
+│   │                          #   funding, indicators, engine (Makro), microExecutor (Mikro),
+│   │                          #   broker (Schleuse), monitor, journal, audit(Sink/View),
+│   │                          #   telemetry, alerts, heartbeat, killSwitch, llmProvider,
+│   │                          #   ollama, clientIp, version (SSoT), …
+│   └── instrumentation.ts     # Next.js-Instrumentierung (Scheduler: Monitor-Tick, Reconciliation,
+│                              #   Forecast-Resolver, Perp-Sync, …)
+│
+├── tests/                     # ── Test-Suite (einziger Test-Ort; node:test + assert/strict) ──
+│   ├── *.test.ts              # Unit-/Integrations-Tests je Modul (benannt nach dem Modul)
+│   ├── fixtures/              # Test-Fixtures (golden/, bitunix/, Market-/Venue-Servers, …)
+│   ├── helpers/               # geteilte Test-Helfer
+│   ├── history/               # Historical-Store-Tests
+│   ├── symbols/               # Symbol-Normalisierungs-Tests
+│   ├── marketdata/            # Marktdaten-Pipeline-Tests (+ adapters/)
+│   ├── integration/           # End-to-End-Integrationstests
+│   ├── ops/                   # Operations-Tests
+│   └── ui/                    # React-Komponenten-Tests (.tsx)
+│
+├── scripts/                   # ── CLI & Betrieb ────────────────────────────────────────────
+│   ├── setup-cachyos.sh       # idempotentes CachyOS-Setup (10 Schritte, 18 Checks)
+│   ├── setup-windows.ps1      # Windows-Installer
+│   ├── validate-setup.sh      # 18 Setup-Validierungs-Checks
+│   ├── run-scan.ts            # deterministischer Scan
+│   ├── run-market-sync.ts / market-sync.ts   # Markt-Daten-Sync (Systemd-timer)
+│   ├── run-backtest.ts / run-montecarlo.ts / run-cross-sectional.ts   # Research-CLI
+│   ├── seed-universe.ts / seed-market-universe.ts   # Universe-Seeds
+│   ├── micro-executor.ts      # Mikro-Zyklus als separater Prozess (npm run micro)
+│   ├── watchdog.ts            # Alarm-First-Watchdog (keine Mutation)
+│   ├── live-kill.ts / live-security-stamp.ts   # Notfall-/Freigabe-Tools
+│   ├── reconcile.ts / feature-materialize.ts / perp-sync.ts / …  # Wartungs-Jobs
+│   ├── docs-validate.ts       # Docs-as-Code-Wächter (npm run docs:validate)
+│   └── lib/                   # geteilte Skript-Helfer
+│
+├── drizzle/                   # SQL-Migrations (append-only, idempotent, datiert: YYYY-MM-DD_*.sql)
+├── deploy/                    # systemd-Units: ai-trading-firm, market-sync(+full), micro-executor,
+│                              #   ollama-lan
+├── data/                      # Nur Seed-Daten versioniert (universe/instruments.ndjson);
+│                              #   alle Laufzeitdaten (history, secrets, cache, Reports) gitignored
+├── docs/                      # ── Dokumentation (Index: docs/README.md) ─────────────────────
+│   ├── README.md              # Doku-Index (alle Module, Audits, Versionierung)
+│   ├── REPOSITORY_STRUCTURE.md  # diese Datei
+│   ├── CHANGELOG.md           # Stub → ../CHANGELOG.md
+│   ├── INSTALL.md / INSTALL-WINDOWS.md   # Installation (kanonisch)
+│   ├── ARCHITECTURE.md        # Zielbild, Makro-/Mikro-Zyklen, Decoupling, Glossar
+│   ├── HANDBUCH.md            # Bedienung, Runbooks, Troubleshooting
+│   ├── <Modul>.md             # je Fachmodul eine Doku (BACKTESTING, BITUNIX, LIVE_TRADING, …)
+│   ├── audits/                # Audit-Zyklen chronologisch (README, TEMPLATE, 5 Audits)
+│   ├── peer-reviews/          # Peer-Review-Reports & Patches (3 Reviews)
+│   ├── security/              # Security-Übersicht (README) + SECURITY_AUDIT.md
+│   ├── architecture/          # DB_SCHEMA, INTEGRATION_POINTS, PIPELINE_MAP
+│   ├── help/                  # 3-Ebenen-Hilfe-JSONs der UI (+ Schema)
+│   ├── ci/                    # Versionierte Quellen der CI-Workflows (Spiegel: .github/workflows/)
+│   └── archive/               # Historische Dokumente
+│       ├── task-plans/        # task-03…11-Implementationspläne
+│       └── CHANGELOG-legacy-v1.md   # vollständige Legacy-Changelog-Historie (v1.x.x)
+│
+└── .github/workflows/         # CI: docs-validate, security-live-gate (1:1-Spiegel von docs/ci/)
 ```
 
-## Naming-Konventionen
+## Regeln für die Pflege
 
-**Audit-Ordner:** `YYYY-MM-DD-<quelle>-<kurzname>`
-
-- Datum = Audit-Datum, Quelle = peer-review/security-review/scanner/external, Kurzname = gpt01, live-trading
-- Beispiele: `2026-09-03-peer-review`, `2026-09-05-security-review-gpt01`, `2026-10-12-scanner-dependabot`
-
-**Finding-Dateien:** `<ID>-<slug>.md` — ID aus Original (SEC-01, H1) beibehalten, Slug kebab-case
-
-**Peer-Review-Ordner:** `YYYY-MM-DD-<thema>`, **Patch-Dateien:** `PATCH-<NNN>-<slug>.md`
-
-## Chronologisch vs. Status?
-
-**Entscheidung:** Chronologisch als Primärschlüssel, Status als Sekundärdimension in `remediation/TRACKING.md`.
-
-Begründung: Audits sind Ereignisse (Datum, Quelle), Status ändert sich (OPEN→FIXED). Chronologisch bewahrt Historie, TRACKING.md ist einzige Wahrheit für Status, `security/README.md` aggregiert offene Critical/High.
-
-Alternative (nach Status: open/fixed) verworfen — würde Historie zerstören.
-
-## Verknüpfung Patches ↔ Findings
-
-Bidirektionale Links (Beispiele, in Code-Fences damit Validator sie ignoriert, real existierende Ziele):
-
-```markdown
-# In einem Finding (z. B. SEC-01):
-**Peer-Review-Patch:** [PATCH-001](../../peer-reviews/2026-08-26-routing-overrides/patches/PATCH-001-routing-overrides.md)
-
-# In einem Patch (z. B. PATCH-001):
-**Related Finding:** [SEC-01](../../../audits/2026-09-05-security-review-gpt01/findings/SEC-01-privilege-escalation.md)
-```
-
-Frontmatter im Patch:
-
-```yaml
-related_findings: [SEC-01]
-audit: 2026-09-05-security-review-gpt01
-status: IMPLEMENTED
-```
-
-## Duplikate — identifiziert & entfernt
-
-Methode: `basename` + `sha256` + manuelle Prüfung.
-
-| Alt | Neu |
-|-----|-----|
-| `CHANGELOG.md` Root (1723 Summary) + `docs/CHANGELOG.md` (5833 detailliert) | Root = kanonisch detailliert (5833), docs = Stub |
-| `INSTALL.md` Root (411 Flag-Ref) + `docs/INSTALL.md` (898 CachyOS) | `CONFIGURATION.md` Root = Flag-Ref, docs/INSTALL = CachyOS, Root INSTALL = Wrapper |
-| `audit-remediation/` Root (21 Files) | `docs/audits/2026-09-03-peer-review/findings/` |
-| `docs/PEER_REVIEW_*.md` (3) | `docs/peer-reviews/*/review.md` + patches/ |
-| `docs/AUDIT_REMEDIATION_2026-09.md` | `docs/audits/2026-09-03-peer-review/report.md` |
-| `docs/SECURITY_AUDIT.md` | `docs/security/SECURITY_AUDIT.md` + Stub |
-| `docs/task-*.md` (8) | `docs/archive/task-plans/` |
-
-Stubs enthalten `Weiterleitung` und <1500 Zeichen — docs-validate ignoriert sie.
-
-## Überflüssiges
-
-- `audit-remediation/` entfernt (migriert)
-- `docs/task-*.md` aus Root entfernt (archiviert)
-- `docs/ci/` ist **kein** Duplikat — Quelle der Workflows (Arena-Bot darf .github/workflows nicht schreiben), siehe `docs/ci/README.md`
-
-## Verlinkungen — aktualisiert & getestet
-
-Aktualisiert: `README.md`, `docs/README.md`, `ARCHITECTURE.md`, `INSTALL.md`, `docsCatalog.ts`, `docs-validate.ts`
-
-Getestet: `npm run docs:validate` → 8 Checks, 10 Hilfe-Dateien, OK grün
-
-- Link-Check ignoriert Code-Fences
-- Secret-Scan False-Positive gefixt
-- API-Routen: `[venue]` Placeholder
-- Version: nur Root CHANGELOG kanonisch
-
-## Wartbarkeit — Schema für zukünftige Audits
-
-```bash
-# Neuer Audit
-NEW="2026-10-20-security-review-gpt02"
-cp -r docs/audits/TEMPLATE docs/audits/$NEW
-# PDF nach assets/, Findings in findings/, TRACKING.md pflegen
-# In docs/README.md + security/README.md eintragen
-npm run docs:validate
-
-# Neuer Peer-Review
-NEW="2026-10-20-market-data-reliability"
-mkdir -p docs/peer-reviews/$NEW/patches
-# review.md, README.md, patches/...
-```
-
-## Dokumentations-Prinzipien
-
-Alle neuen READMEs: Zweck oben, Warum Struktur?, Ordner-Schema, Naming, Workflow (copy-paste), Status-Modell, Verknüpfung, FAQ. Deutsch, professionell, klar.
-
-## Migration — optimal vorgehen
-
-1. Analyse Duplikate (basename + sha256)
-2. Zielstruktur entwerfen (audits/ chronologisch + peer-reviews/ + security/ + archive/)
-3. TEMPLATEs erstellen
-4. Migrieren via cp (nicht mv), erst nach Validierung löschen
-5. Duplikate konsolidieren (CHANGELOG Root kanonisch, INSTALL → CONFIGURATION + Wrapper, Stubs)
-6. Code aktualisieren (docsCatalog.ts + docs-validate.ts)
-7. Links aktualisieren
-8. Testen (docs-validate, typecheck, build)
-9. Alte Dateien entfernen
-10. Dokumentieren (diese Datei + audits/README + peer-reviews/README + security/README)
+1. **Tests:** neue Testdateien gehören nach `tests/` (bzw. das dazugehörige
+   Unterverzeichnis); modulinterna Tests nur ausnahmsweise im Modul
+   (aktuell: `src/marketdata/__tests__/`), dann im `test`-Skript von
+   `package.json` aufführen.
+2. **Doku:** neues Fachmodul ⇒ Doku `docs/<MODUL>.md` + Eintrag in
+   `docs/README.md` + `docsCatalog` (in `src/app/docs/`); Status-Header
+   (Datum, Code-Version, Modul) oben.
+3. **Migrations:** `drizzle/YYYY-MM-DD_<slug>.sql`, append-only + idempotent,
+   Drizzle-Spiegel in `src/db/schema.ts`, Rollback-Hinweis in der Modul-Doku.
+4. **CI-Workflows:** Quelle ist `docs/ci/`, Spiegel `.github/workflows/` —
+   beide müssen byte-identisch sein (CI-Prüfung).
+5. **Audit/Peer-Review:** Naming `YYYY-MM-DD-<quelle>-<name>` in
+   `docs/audits/` bzw. `docs/peer-reviews/`; Status nur in
+   `remediation/TRACKING.md`; Vorlage `docs/audits/TEMPLATE/`.
+6. **Laufzeitdaten:** nichts aus `data/` (außer Seed-Files) committen;
+   `.gitignore` ist die SSoT (das alte `.ignore` wurde 2026-09-23 entfernt).
+7. **Versionsänderung:** `package.json` + `CHANGELOG.md` + `VERSION.md` +
+   betroffene Status-Header im selben PR (Details: `CONTRIBUTING.md`).
 
 ## Referenzen
 
-- audits/README.md, peer-reviews/README.md, security/README.md, archive/README.md, ci/README.md
-- ../README.md, ../CHANGELOG.md, ../CONFIGURATION.md
+- [../README.md](../README.md) · [../CHANGELOG.md](../CHANGELOG.md) ·
+  [../VERSION.md](../VERSION.md) · [../CONTRIBUTING.md](../CONTRIBUTING.md)
+- [README.md](README.md) (Doku-Index) · [audits/README.md](audits/README.md) ·
+  [peer-reviews/README.md](peer-reviews/README.md) ·
+  [security/README.md](security/README.md) · [archive/README.md](archive/README.md) ·
+  [ci/README.md](ci/README.md)

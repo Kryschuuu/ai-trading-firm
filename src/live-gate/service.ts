@@ -132,7 +132,19 @@ export interface LiveGateOverview {
 
 const REASON_MIN_CHARS = 8;
 const APPROVER_MIN_CHARS = 3;
+
+/**
+ * Bestätigungsphrase für das Aktivieren (ARM) des Live-Gate-Kill-Switches.
+ * Muss exakt eingegeben werden — Schutz gegen versehentliches Auslösen.
+ */
 export const KILL_CONFIRM_PHRASE = "KILL";
+
+/**
+ * Bestätigungsphrase für das Aufheben (CLEAR) eines ausgelösten
+ * Kill-Switches. Strikter als das ARM: verlangt zusätzlich die
+ * ADMIN-Permission `live.gate` + CSRF-Header + single-use Nonce
+ * (Befund C3, v1.36.15).
+ */
 export const KILL_CLEAR_CONFIRM_PHRASE = "CLEAR_KILL";
 
 function requireReason(reason: string | undefined): string {
@@ -146,6 +158,23 @@ function requireReason(reason: string | undefined): string {
   return trimmed;
 }
 
+/**
+ * Live-Gate-Service — die einzige Freigabeschicht für Live-Trading.
+ *
+ * Verwaltet die State-Machine je Venue (9 Zustände, 8 legale Übergänge;
+ * kanonische Matrix in `states.ts`). Jeder Übergang ist auditiert
+ * (append-only NDJSON mit Hash-Kette), erfordert eine Begründung
+ * (≥ 8 Zeichen) und, bei sensiblen Schritten, die ADMIN-Permission
+ * `live.gate` + CSRF + ggf. single-use Nonce.
+ *
+ * **Fail-safe:** Kein registrierter Readiness-Provider →
+ * `CONTROL_PLANE_UNKNOWN` → DENY. Kill-Switch-Datei (`killFile.ts`) ist
+ * persistente Failsafe-Sperre — auch nach Neustart bleibt der Halt aktiv.
+ *
+ * **Methoden:** `transition()`, `disable()`, `kill()`, `clearKill()`,
+ * `history()` — alle werfen `LiveGateError` bei illegalen Übergängen oder
+ * fehlenden Permissions (fail-closed).
+ */
 export class LiveGateService {
   constructor(
     private readonly runtime: LiveGateRuntime = getLiveGateRuntime(),

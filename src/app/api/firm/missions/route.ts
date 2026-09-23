@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST`, `PUT /api/firm/missions` — Missionen (Lese- + Schreib-API).
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { missions } from "@/db/schema";

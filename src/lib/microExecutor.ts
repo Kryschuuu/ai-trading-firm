@@ -611,6 +611,20 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
   }
 }
 
+/**
+ * Erzeugt den PAPER-Adapter für Regel-Execution im Mikro-Zyklus.
+ *
+ * Führt eine abgefangene (kompilierte) Strategie-Regel gegen den lokalen
+ * Paper-Broker aus — deterministische Fill-Simulation, keine Netzwerk-I/O.
+ * Wird vom Mikro-Executor (eigener Prozess, `npm run micro`) und den
+ * Tests verwendet, um den regelbasierten Mikro-Pfad ohne Live-Venue zu
+ * üben.
+ *
+ * @param opts.onFired - Optionaler Callback, der nach erfolgreicher
+ *   Execution mit der `ruleId` aufgerufen wird (z. B. für Auditing/Telemetrie).
+ * @returns Ein `RuleExecutionAdapter` mit `name: "PAPER_RULE"` und einer
+ *   asynchronen `execute(ctx)`-Methode, die das `ExecutionOutcome` liefert.
+ */
 export function createPaperRuleAdapter(opts?: {
   onFired?: (ruleId: string) => void;
 }): RuleExecutionAdapter {
@@ -1122,6 +1136,26 @@ export type MicroStatus = {
   seed: { requested: number; failed: number; lastError: string | null };
 };
 
+/**
+ * Mikro-Executor — der schnelle, LLM-freie Regel-Executor.
+ *
+ * Läuft als separater Prozess (`npm run micro`) neben der Web-App. Empfängt
+ * WebSocket-Ticks, pflegt die Rolling-Serien je Instrument/Timeframe, wertet
+ * die kompilierten Strategie-Regeln (aus `RuleCache`) in Mikrosekunden aus
+ * und führt erkannte Matches über den konfigurierten `RuleExecutionAdapter`
+ * (Paper oder Live hinter Live-Gate) aus.
+ *
+ * **Garantien:**
+ * - Kein LLM im Ausführungspfad (deterministisch, ~20–100 µs je Tick).
+ * - Alle Risk-Limits werden vor der Execution erneut geprüft (fail-closed).
+ * - Warmstart: REST-Historie für die Rolling-Serien; Fehler sind sichtbar
+ *   (MDERR-006), nicht still verschluckt.
+ * - Kill-Switch: bei aktivem Halt werden keine neuen Orders ausgeführt.
+ *
+ * **Lebenszyklus:** `start()` verbindet die Feeds und startet den Tick-Loop;
+ * `stop()` trennt sauber. `status()` liefert Diagnose (Ticks, Matches,
+ * Execution-Counts, p95-Eval-Latenz, Serien-Füllung, Seed-Fehler).
+ */
 export class MicroExecutor {
   private readonly cache: RuleCache;
   private readonly adapter: RuleExecutionAdapter;

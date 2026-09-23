@@ -3,8 +3,19 @@
 Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, Research, Backtest, Risk, Approver, Executor), das ein Handelsziel autonom bearbeitet — komplett auf eigener Hardware, mit einer **abstrakten LLM-Provider-Schicht** (Ollama, jeder OpenAI-kompatible Endpunkt wie `llama.cpp`/LM Studio/vLLM, Google Gemini, Anthropic Claude), **PostgreSQL** als institutionellem Gedächtnis und **harten Risikogrenzen im Code**.
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
+>
+> **BETA-PHASE:** Das Projekt ist **v0.x.x (Beta)** und nicht produktionsreif;
+> es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
+> (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v1.73.1` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.1.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+
+**Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
+2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
+Legacy-Zählung `v1.x.x` — sie ist **nicht** öffentlich, `v1.73.1` ≙ `v0.1.0`;
+Zuordnung: [../CHANGELOG.md](../CHANGELOG.md) § Versions-Zuordnung,
+vollständige Historie:
+[archive/CHANGELOG-legacy-v1.md](archive/CHANGELOG-legacy-v1.md).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -220,37 +231,46 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ## Projektstruktur (aktualisiert 2026-09-05)
 
 ```
-├── README.md                 ← Projekt-README (GitHub-Einstieg)
-├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, Root)
-├── CONFIGURATION.md          ← Env-Flags mit Defaults (ehemals Root INSTALL.md)
+├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
+├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
+├── VERSION.md                ← Versions-Metadaten (v0.1.0, Beta) + Komponenten-Übersicht
+├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
+├── LICENSE                   ← GPL-3.0-only
+├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)
 ├── INSTALL.md                ← Wrapper: zeigt auf docs/INSTALL.md + CONFIGURATION.md
-├── docs/
-│   ├── README.md             ← diese Datei (Doku-Index)
-│   ├── INSTALL.md            ← CachyOS-Installation A+B (kanonisch)
-│   ├── CHANGELOG.md          ← Stub → ../CHANGELOG.md
-│   ├── ARCHITECTURE.md, HANDBUCH.md, ...
-│   ├── audits/               ← NEU: alle Audits chronologisch
-│   │   ├── README.md         ← erklärt Naming, Workflow, Status-Modell
-│   │   ├── TEMPLATE/         ← Vorlage für neuen Audit
-│   │   ├── 2026-09-03-peer-review/  ← Peer-Review-Audit (CLOSED)
-│   │   ├── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01–10 FIXED bis v1.36.36)
-│   │   ├── 2026-09-08-arena-prompts/  ← Arena-Review-Serie (RESTORE-01 FIXED v1.36.37)
-│   │   ├── 2026-09-18-feature-gap/    ← Feature-Gap-Audit (GAP-01…GAP-10, abgeschlossen v1.51.1)
-│   │   └── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Umsetzungs-Prompts (CLOSED v1.73.0)
-│   ├── peer-reviews/         ← NEU: Peer-Review-Patches gesammelt
-│   │   ├── README.md
-│   │   ├── 2026-08-26-live-trading-readiness/
-│   │   ├── 2026-08-26-bitunix-execution/
-│   │   └── 2026-08-26-routing-overrides/
-│   ├── security/             ← NEU: Security-Übersicht
-│   │   ├── README.md
-│   │   └── SECURITY_AUDIT.md
-│   ├── archive/              ← NEU: historische Docs
-│   │   └── task-plans/
-│   ├── ci/
-│   └── help/
-├── src/
-└── ...
+├── src/                      ← Anwendung (Modul-Verzeichnis, siehe REPOSITORY_STRUCTURE.md)
+├── tests/                    ← gesamte Test-Suite (einziges Testverzeichnis; node:test)
+├── scripts/                  ← CLI-/Betriebsskripte (Setup, Sync, Scan, Backtest, Watchdog)
+├── drizzle/                  ← SQL-Migrations (append-only, idempotent)
+├── deploy/                   ← systemd-Units
+├── data/                     ← versionierte Seed-Daten (Universe); Laufzeitdaten gitignored
+└── docs/
+    ├── README.md             ← diese Datei (Doku-Index)
+    ├── REPOSITORY_STRUCTURE.md ← Verzeichnisstruktur & Zwecke aller Ordner
+    ├── INSTALL.md            ← CachyOS-Installation A+B (kanonisch)
+    ├── CHANGELOG.md          ← Stub → ../CHANGELOG.md
+    ├── ARCHITECTURE.md, HANDBUCH.md, ...
+    ├── audits/               ← alle Audits chronologisch
+    │   ├── README.md         ← erklärt Naming, Workflow, Status-Modell
+    │   ├── TEMPLATE/         ← Vorlage für neuen Audit
+    │   ├── 2026-09-03-peer-review/  ← Peer-Review-Audit (CLOSED)
+    │   ├── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01–10 FIXED)
+    │   ├── 2026-09-08-arena-prompts/  ← Arena-Review-Serie (RESTORE-01 FIXED)
+    │   ├── 2026-09-18-feature-gap/    ← Feature-Gap-Audit (GAP-01…GAP-10, abgeschlossen)
+    │   └── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Prompts (CLOSED)
+    ├── peer-reviews/         ← Peer-Review-Patches gesammelt
+    │   ├── README.md
+    │   ├── 2026-08-26-live-trading-readiness/
+    │   ├── 2026-08-26-bitunix-execution/
+    │   └── 2026-08-26-routing-overrides/
+    ├── security/             ← Security-Übersicht
+    │   ├── README.md
+    │   └── SECURITY_AUDIT.md
+    ├── archive/              ← historische Docs
+    │   ├── task-plans/       ← task-*.md
+    │   └── CHANGELOG-legacy-v1.md ← vollständige Legacy-Historie (v1.x.x ≙ v0.x.x)
+    ├── ci/
+    └── help/
 ```
 
 ---
@@ -279,4 +299,6 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.73.1` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v0.1.0 (Beta)` (siehe `package.json`, [../VERSION.md](../VERSION.md) +
+[../CHANGELOG.md](../CHANGELOG.md)). Legacy-Historie (`v1.x.x`, intern):
+[archive/CHANGELOG-legacy-v1.md](archive/CHANGELOG-legacy-v1.md).

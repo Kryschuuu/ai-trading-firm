@@ -1,6 +1,6 @@
 # Live-Trading-Gate — auditierte State-Machine (Task 11)
 
-**Stand:** v1.19.0 · **Modul:** `src/live-gate/**` ·
+**Stand:** v0.1.0 (Beta) · **Modul:** `src/live-gate/**` ·
 **API:** `GET /api/live/state`, `POST /api/live/transition`, `POST /api/live/kill` ·
 **CLI:** `npm run live:kill` · **CI:** Job `security-live-gate`
 

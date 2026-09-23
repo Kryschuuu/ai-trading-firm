@@ -1,6 +1,6 @@
 # Missionen, Markt-Scans und Vorlagen
 
-> **Version:** v1.35.0 · **Module:** `src/lib/missionTemplates.ts`,
+> **Version:** v0.1.0 (Beta) · **Module:** `src/lib/missionTemplates.ts`,
 > `src/lib/missionUniverse.ts`, `src/lib/workshop.ts`, `src/lib/seed.ts` ·
 > **UI:** Dashboard → Reiter **🛠 Workshop** → *1 · Mission anlegen*
 

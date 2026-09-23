@@ -1,5 +1,14 @@
 "use client";
 
+
+/**
+ * Audit-Trail mit Server-Paging (20/50/100/200 pro Seite), Level-/Event-Filter
+ * und vollständiger, lesbarer Darstellung pro Eintrag.
+ *
+ * Wird an zwei Stellen verwendet — „Firm Overview" und „Protokoll" — damit
+ * beide exakt dasselbe Verhalten zeigen.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   describeAuditTrail,
@@ -10,13 +19,6 @@ import {
 import { AuditTrailList } from "./AuditTrailList";
 import { Pager, usePagination } from "./Pager";
 
-/**
- * Audit-Trail mit Server-Paging (20/50/100/200 pro Seite), Level-/Event-Filter
- * und vollständiger, lesbarer Darstellung pro Eintrag.
- *
- * Wird an zwei Stellen verwendet — „Firm Overview" und „Protokoll" — damit
- * beide exakt dasselbe Verhalten zeigen.
- */
 export function AuditTrailPanel({
   title = "Audit-Trail",
   hint = "Revisionssichere Ereignisse der Firma: Entscheidungen, Orders, Risiko- und Regeländerungen.",

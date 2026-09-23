@@ -1,7 +1,7 @@
 # Operations — Runbooks: „Funnel ist leer“ & „Auto-Breaker hat ausgelöst“
 
 > **Status-Header:** **Implementiert** (OPS-011; §4 ergänzt durch GAP-10) ·
-> **2026-09-18** · Code-Version **1.45.0** · Module
+> **2026-09-18** · Code-Version **v0.1.0 (Beta)** · Module
 > `src/ops/collectMarketData.ts`, `src/marketdata/syncStatus.ts`,
 > `src/components/ops/MarketDataPanel.tsx`, `src/lib/circuitBreaker.ts`,
 > `src/lib/alerts.ts`, `src/lib/heartbeat.ts`, `scripts/watchdog.ts` ·

@@ -1,3 +1,7 @@
+/** Capture wraps the existing gated executor; it never replaces it or retries it.
+ * Persisted claims survive process death. Read-only reconciliation resolves an
+ * uncertain acknowledgement; absent evidence fails closed on every retry. */
+
 import type {
   BrokerOrderRequest,
   BrokerOrderResult,
@@ -28,9 +32,6 @@ export interface CaptureStore {
     elapsed: number | null,
   ): Promise<void>;
 }
-/** Capture wraps the existing gated executor; it never replaces it or retries it.
- * Persisted claims survive process death. Read-only reconciliation resolves an
- * uncertain acknowledgement; absent evidence fails closed on every retry. */
 export async function captureOrder(opts: {
   venue: BrokerVenueId;
   mode: ExecutionMode;

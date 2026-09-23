@@ -30,7 +30,7 @@
  * geteilten Token-Buckets.
  *
  * Fixtures: echte, am 2026-08-31 gezogene Responses der öffentlichen
- * Bitunix-API (test/fixtures/bitunix/*.json, Provenanz siehe README.md dort)
+ * Bitunix-API (tests/fixtures/bitunix/*.json, Provenanz siehe README.md dort)
  * plus eine schema-idente Edge-Status-Datei (STOP/CANCEL_ONLY/isApiSupported
  * false/DELISTED) für die nicht handelbaren Symbole.
  */
@@ -71,9 +71,9 @@ import { mockBitunixPublicClient } from "../../../tests/fixtures/bitunixMockClie
 
 const execFileAsync = promisify(execFile);
 const ROOT = process.cwd();
-const FIXTURE_DIR = path.join(ROOT, "test", "fixtures", "bitunix");
+const FIXTURE_DIR = path.join(ROOT, "tests", "fixtures", "bitunix");
 
-/** Echte Fixture-Responses (siehe test/fixtures/bitunix/README.md). */
+/** Echte Fixture-Responses (siehe tests/fixtures/bitunix/README.md). */
 function loadFixture<T>(name: string): T {
   return JSON.parse(readFileSync(path.join(FIXTURE_DIR, name), "utf8")) as T;
 }

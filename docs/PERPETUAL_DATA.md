@@ -1,7 +1,7 @@
 # Perpetual-Daten — Funding, Open Interest, Liquidationen (historisch, point-in-time)
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-20** ·
-> Code-Version **1.54.0** · Modul `src/perpdata/` · CLI `npm run perp:sync`
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
+> Code-Version **v0.1.0 (Beta)** · Modul `src/perpdata/` · CLI `npm run perp:sync`
 > (Status: `npm run perp:sync:status`, Offline-Validierung:
 > `npm run perp:sync:fixture`) · Befund RMA-P2-02 des
 > [Straßenbegradigungs-Audits](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md)

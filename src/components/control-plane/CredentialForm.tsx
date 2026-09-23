@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Maskiertes Credential-Formular (Task 08).
  *
@@ -19,6 +20,7 @@
  * Datenfluss (verbindlich): masked form → POST /api/brokers/{venue}/credentials
  * → verschluesselter Secret-Store → Adapter. Antwort ist status-only.
  */
+
 import { useState } from "react";
 import { saveVenueCredentials, type BrokerStatusDto } from "@/lib/controlPlane";
 

@@ -1,6 +1,6 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v1.36.2 · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+**Stand:** v0.1.0 (Beta) · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
 (inkl. `control-plane/` seit Task 08, `src/brokers/alpaca/` seit v1.36.0),
 `src/lib/broker.ts` (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
 `GET /api/brokers`, `GET /api/brokers/coverage`,

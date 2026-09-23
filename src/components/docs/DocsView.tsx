@@ -1,8 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import DocsMarkdown from "./DocsMarkdown";
 
 /**
  * Einzelne Doku-Seite (kanonische URL `/docs/<Datei>.md`).
@@ -10,6 +7,11 @@ import DocsMarkdown from "./DocsMarkdown";
  * Lädt den Inhalt über `GET /api/docs?name=<Datei>` und rendert ihn mit
  * Link-Rewriting. Der Header bietet immer den Rücksprung zur Übersicht.
  */
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import DocsMarkdown from "./DocsMarkdown";
+
 export default function DocsView({
   name,
   title,

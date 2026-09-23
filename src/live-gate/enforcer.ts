@@ -94,10 +94,26 @@ export type VenueReadinessProvider = (venue: string) => { active: boolean } | nu
 
 let venueReadinessProvider: VenueReadinessProvider | null = null;
 
+/**
+ * Readiness-Provider registrieren (Dependency Inversion).
+ *
+ * @param provider - Funktion, die für eine Venue `active: true/false` (oder
+ *   `null` = unbekannt) liefert; `null` entfernt die Registrierung.
+ *   Wird einmalig beim Boot von der Control-Plane-Bridge
+ *   (`controlPlaneBridge.ts`) gesetzt — der Enforcer selbst kennt die
+ *   Control Plane nicht.
+ */
 export function setVenueReadinessProvider(provider: VenueReadinessProvider | null): void {
   venueReadinessProvider = provider;
 }
 
+/**
+ * Prüfen, ob ein Readiness-Provider registriert ist.
+ *
+ * @returns `true`, wenn der Enforcer Venue-Readiness aus der Control Plane
+ *   abfragen kann; `false` bedeutet fail-safe `CONTROL_PLANE_UNKNOWN` →
+ *   jede Live-Order wird verweigert, bis die Bridge verbunden ist.
+ */
 export function venueReadinessProviderRegistered(): boolean {
   return venueReadinessProvider !== null;
 }

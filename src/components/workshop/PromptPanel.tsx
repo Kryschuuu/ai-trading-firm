@@ -1,9 +1,5 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import InfoTip from "./InfoTip";
-import { apiFetch, readJson } from "@/lib/apiClient";
-import type { AgentPromptResponse, AgentRow } from "@/lib/types";
 
 /**
  * Schritt 3 (Handbuch 6.3): system_prompt eines Agenten in der UI ändern —
@@ -15,6 +11,12 @@ import type { AgentPromptResponse, AgentRow } from "@/lib/types";
  * fremde Stand neu geladen und der eigene Entwurf verworfen — kein stilles
  * Überschreiben von Trading-Agent-Prompts mehr.
  */
+
+import { useMemo, useState } from "react";
+import InfoTip from "./InfoTip";
+import { apiFetch, readJson } from "@/lib/apiClient";
+import type { AgentPromptResponse, AgentRow } from "@/lib/types";
+
 
 /** Das Antwortformat aus Handbuch 6.3 — unverändert. */
 const JSON_FORMAT_SPEC =

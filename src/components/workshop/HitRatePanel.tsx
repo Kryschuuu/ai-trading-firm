@@ -1,5 +1,13 @@
 "use client";
 
+
+/**
+ * Schritt 4 (Handbuch 6.4): Testschleife — ersetzt die for/i-Schleife mit
+ * curl | jq. Läuft sequenziell (ein Agent, ein Turn nach dem anderen),
+ * klassifiziert jedes Ergebnis mit derselben Logik wie die Tests
+ * (classifyTurnOutcome) und zeigt die Verteilung live als Balken.
+ */
+
 import { useRef, useState } from "react";
 import InfoTip from "./InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
@@ -13,12 +21,6 @@ import {
   type OutcomeCategory,
 } from "@/lib/workshop";
 
-/**
- * Schritt 4 (Handbuch 6.4): Testschleife — ersetzt die for/i-Schleife mit
- * curl | jq. Läuft sequenziell (ein Agent, ein Turn nach dem anderen),
- * klassifiziert jedes Ergebnis mit derselben Logik wie die Tests
- * (classifyTurnOutcome) und zeigt die Verteilung live als Balken.
- */
 
 const MAX_RUNS = 20;
 const DEFAULT_RUNS = 10;

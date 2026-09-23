@@ -1,7 +1,7 @@
 # Docs-Code-Sync-Audit (Task 12)
 
-> **Status-Header:** **Implementiert** (Task 12) · **2026-08-29** ·
-> Code-Version **1.23.0**
+> **Status-Header:** **Implementiert** (Task 12) · **2026-09-23** ·
+> Code-Version **v0.1.0 (Beta)**
 >
 > Systematisches Audit: **jede dokumentierte Behauptung gegen den Code geprüft**.
 > Diskrepanz → Fix (Priorität: Code anpassen, wenn Doku das Zielbild korrekt

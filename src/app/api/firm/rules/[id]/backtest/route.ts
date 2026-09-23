@@ -1,3 +1,9 @@
+/**
+ * API-Route `POST /api/firm/rules/[id]/backtest` — Regel-Backtest ausführen.
+ *
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { getRule, rowToSpec, saveBacktest } from "@/lib/ruleService";
 import { backtestRule } from "@/lib/ruleEngine";

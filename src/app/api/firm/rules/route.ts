@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET`, `POST /api/firm/rules` — Strategie-Regeln (Lese- + Schreib-API, RBAC je Aktion).
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("firm.read", "strategy.rules.write", "strategy.rules.activate") — Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { sanitizeRuleSpec } from "@/lib/ruleEngine";
 import {

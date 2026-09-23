@@ -1,5 +1,59 @@
 "use client";
 
+
+/**
+ * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
+ *
+ * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
+ * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
+ * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
+ * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
+ * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
+ * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
+ * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
+ * @/lib/types, React.
+ */
+
+/**
+ * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
+ *
+ * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
+ * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
+ * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
+ * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
+ * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
+ * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
+ * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
+ * @/lib/types, React.
+ */
+
+/**
+ * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
+ *
+ * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
+ * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
+ * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
+ * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
+ * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
+ * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
+ * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
+ * @/lib/types, React.
+ */
+
+/**
+ * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
+ *
+ * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
+ * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
+ * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
+ * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
+ * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
+ * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
+ * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
+ * @/lib/types, React.
+ */
+
+
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";

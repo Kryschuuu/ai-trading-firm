@@ -1,3 +1,12 @@
+/**
+ * Root-Layout der App (Next.js App Router).
+ *
+ * Zweck: globales HTML-Frame — Metadaten (Titel/Description), Theme-Attribut,
+ * globals.css und die App-Komponenten. Enthält zudem das Inline-Theme-Script
+ * (verhindert Theme-Flackern beim ersten Client-Render).
+ * Abhängigkeiten: ./globals.css, @/lib (Version für Metadaten).
+ */
+
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";

@@ -1,3 +1,9 @@
+/**
+ * API-Route `GET /api/firm/montecarlo` — Monte-Carlo-Resampling: Analyse starten/listen.
+ *
+ * Teil der Firm-API (Next.js App Router). Autorisierung: requirePermission("firm.read") — Auth-Modell und RBAC: docs/security/README.md.
+ */
+
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/auth";
 import { validateRunId } from "@/backtest/runStore";

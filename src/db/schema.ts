@@ -1,3 +1,18 @@
+/**
+ * Drizzle-Datenbankschema (SSoT für Tabellen-Definitionen im Code).
+ *
+ * Zweck: spiegelt die SQL-Migrations aus drizzle/ als Typsichere Tabellen-
+ * Definitionen (drizzle-orm). Enthält das institutionelle Gedächtnis:
+ * agents, agent_messages, missions, positions, proposals, audit_log,
+ * kill_switches, risk_config, equity_snapshots, trade_rules, rule_executions,
+ * rule_backtests, trade_journal, backtest_runs/-trades, forecasts, features,
+ * perp-*, execution-*, risk-snapshots u. a. (append-only-Konvention,
+ * CHECK-Constraints).
+ * ACHTUNG: Die *wirksamen* Risk-Limits stehen in src/lib/riskGuard.ts
+ * (Code, nicht DB); risk_config ist nur beschreibend/tunbar.
+ * Abhängigkeiten: drizzle-orm/pg-core, drizzle-orm (sql).
+ */
+
 import {
   pgTable,
   type AnyPgColumn,

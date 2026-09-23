@@ -80,6 +80,15 @@ import {
   type WorkflowRecord,
 } from "./store";
 
+/**
+ * Fehler aus dem Execution-Policy-Controller (RMA-P4-02).
+ *
+ * Jeder Fehler trägt einen stabilen, maschinenlesbaren `code`
+ * (z. B. `INVALID_INPUT`, `INSTRUMENT_UNKNOWN`, `PORT_UNKNOWN`,
+ * `WORKFLOW_NOT_FOUND`, Gate- und Policy-Codes aus `./gates.ts`), der von
+ * der API-Schicht in den HTTP-Status und von den Tests exakt geprüft wird.
+ * `detail` ist menschenlesbar und bounded (keine Secrets).
+ */
 export class ExecutionControllerError extends Error {
   readonly code: string;
   constructor(code: string, detail: string) {
@@ -191,6 +200,32 @@ function recordsToFacts(fills: readonly WorkflowFillRecord[]): FillFact[] {
 /** Externe Cancel-Gründe. Kein Market-Fallback, solange die Policy ihn verbietet. */
 export type ExternalCancelReason = "KILL_SWITCH" | "DEADLINE" | "PARENT_CANCEL" | "EXTERNAL_CANCEL";
 
+/**
+ * Execution-Policy-Controller (RMA-P4-02) — Post-Only mit Market-Fallback.
+ *
+ * Führt eine Order unter einer versionierten Maker-Policy aus: State-Machine
+ * (`./stateMachine.ts`) NEW → SUBMITTED → ACK/PARTIAL → CANCEL_PENDING →
+ * CANCELLED → FALLBACK_SUBMITTED → DONE, bounded Repricing (deterministisch
+ * wachsender Offset, Venue-Tick-Rundung), Market-Fallback nur per Opt-in und
+ * nur nach bestätigtem Cancel.
+ *
+ * **Harte Gates** (vor Erst-Submit, Reprice und Fallback): Kill-Switch,
+ * Strategy-Lifecycle, Risk-Guard (inkl. Stop-Loss-Pflicht), Live-Gate,
+ * Quote (vorhanden/frisch/nicht-zukünftig), Spread, Konto, Notional
+ * (Risk-Guard + Policy-Cap), Minimum/Step. Fail-closed: fehlende Daten
+ * blockieren, statt zu raten.
+ *
+ * **Idempotenz:** Workflow-Keys `eow1`, Event-Ids `eoe1`, Client-Order-Basis
+ * `eoc1` (Attempt-Suffixe) — Retries und Restarts lösen per Client-Key auf,
+ * statt doppelt zu senden.
+ *
+ * **Methoden:** `start()` (Workflow anlegen + Erst-Submit), `poll()`
+ * (Zustand vorantreiben), `recover()` (nach Neustart offene Workflows),
+ * `cancelOpen()` (externer Cancel ohne Preisjagd, z. B. TWAP-Kind).
+ *
+ * @throws {ExecutionControllerError} Mit stabilem Code bei ungültiger
+ *   Eingabe, fehlendem Port/Instrument/Workflow oder gate-blockiertem Submit.
+ */
 export class ExecutionPolicyController {
   private readonly store: ExecutionStore;
   private readonly ports: Map<BrokerVenueId, VenueExecutionPort>;

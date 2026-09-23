@@ -1,7 +1,7 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-08-29** · Code-Version **1.23.0**
+> Dokumentationsstand **2026-09-23** · Code-Version **v0.1.0 (Beta)**
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine

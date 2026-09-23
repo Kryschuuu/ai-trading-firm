@@ -1,5 +1,6 @@
 "use client";
 
+
 /**
  * Broker-Karte "Brokers & Venues" (Task 08).
  *
@@ -16,6 +17,7 @@
  * nach vollständigem auditierbarem Durchlauf der State-Machine. Die UI kann
  * den Zustand niemals direkt setzen (nur Kill über LiveGatePanel).
  */
+
 import { useState } from "react";
 import {
   testVenueConnection,

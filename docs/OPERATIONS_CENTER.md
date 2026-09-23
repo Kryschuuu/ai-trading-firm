@@ -1,7 +1,7 @@
 # Operations Center — Market-Data-Readiness & Funnel-Diagnose
 
 > **Status-Header:** **Implementiert** (OPS-010) · **2026-08-30** ·
-> Code-Version **1.27.0** · Module `src/ops/`, `src/scanner/eligibilityDiagnostics.ts`,
+> Code-Version **v0.1.0 (Beta)** · Module `src/ops/`, `src/scanner/eligibilityDiagnostics.ts`,
 > `src/components/ops/OperationsCenterPanel.tsx` · Endpunkt `GET /api/ops`
 
 Das Operations Center ist die Control Plane der Firma: zehn Sektionen
