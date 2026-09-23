@@ -32,9 +32,13 @@
  * `drawdown-pause`). Die Authority Chain lautet damit:
  *   Code-Ceilings → Basis-Limit
  *     → Regime-Faktor × VolTarget-Faktor × Drawdown-Faktor
- *     → Code-Boden;  PAUSE blockiert neue Einstiege vollständig.
+ *     → Code-Boden;  PAUSE (Drawdown oder Strategy-Lifecycle) blockiert neue Einstiege.
  * Keine Stufe kann eine spätere aufweiten: jeder Faktor ist ≤ 1 und der
  * PAUSE-Block ist ein Veto (kein Multiplikator).
+ *
+ * STRATEGY-LIFECYCLE (RMA-P1-05, v1.73.0): src/strategyLifecycle/ speist einen
+ * VIERTEN, nur senkenden Faktor ein (Drift-Degradation) und ein PAUSE-/REJECTED-
+ * Veto für neue Einstiege (`strategy-lifecycle-pause`).
  */
 
 import type { DrawdownStage } from "@/portfolio/drawdownScaling";
@@ -172,6 +176,25 @@ export type VolatilityTargetingState = {
  * senkend. Zusätzlich blockiert die Stufe `PAUSE` (optional, konfigurierbar)
  * NEUE Einstiege — ein Veto, das keine spätere Stufe aufheben kann.
  */
+/**
+ * RMA-P1-05 (v1.73.0): Strategy-Lifecycle-Risikofaktor.
+ *
+ * Factor ∈ (0,1] — multiplikativ, nur senkend. `paused=true` wenn die
+ * Strategy-Version PAUSED/REJECTED ist (Veto auf neue Einstiege). Die
+ * persistente Wahrheit steht in `strategy_lifecycle_states`; dieser
+ * Prozesszustand ist die RAM-Projektion für die Authority Chain.
+ */
+export type LifecycleRiskState = {
+  factor: number;
+  paused: boolean;
+  at: string;
+  reason: string;
+  mode: "active" | "monitor";
+  policyVersion: string;
+  /** Letzter bekannter Lifecycle-Zustand (Anzeige/Audit, kein Zähler-Label). */
+  state: string;
+};
+
 export type DrawdownRiskState = {
   /** 0 < factor ≤ 1 — Multiplikator auf das Basis-Limit maxRiskPerTrade. */
   factor: number;
@@ -201,6 +224,7 @@ state.currentLimits.setDefault(() => ({ ...DEFAULT_LIMITS }));
 state.adaptiveState.setDefault(() => null);
 state.volTargetState.setDefault(() => null);
 state.drawdownState.setDefault(() => null);
+state.strategyLifecycleState.setDefault(() => null);
 
 /** maxRiskPerTrade nach Anwendung des kombinierten Marktfaktors (Boden = Code-Minimum). */
 function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
@@ -212,8 +236,8 @@ function applyFactorToRisk(limits: RiskLimits, factor: number): RiskLimits {
 }
 
 /**
- * Kombiniert die Marktfaktoren (RMA-P5-01, v1.67.0; RMA-P5-04, v1.68.0):
- * Regime-Faktor × VolTarget-Faktor × Drawdown-Faktor, jeweils hart auf (0, 1]
+ * Kombiniert die Marktfaktoren (RMA-P5-01, RMA-P5-04, RMA-P1-05):
+ * Regime × VolTarget × Drawdown × Strategy-Lifecycle, jeweils hart auf (0, 1]
  * geklemmt. Ohne einen Faktor = 1 (neutral). Das Produkt ist damit immer ≤ 1 —
  * das Ergebnis kann das Basis-Limit nie überschreiten, und keine spätere Stufe
  * kann eine frühere aufweiten (Authority Chain).
@@ -222,6 +246,7 @@ function combinedMarketFactor(): number {
   const adaptive = state.adaptiveState.get();
   const volTarget = state.volTargetState.get();
   const drawdown = state.drawdownState.get();
+  const lifecycle = state.strategyLifecycleState.get();
   let f = 1;
   if (adaptive != null && Number.isFinite(adaptive.factor) && adaptive.factor > 0) {
     f *= Math.min(adaptive.factor, 1);
@@ -232,12 +257,15 @@ function combinedMarketFactor(): number {
   if (drawdown != null && Number.isFinite(drawdown.factor) && drawdown.factor > 0) {
     f *= Math.min(drawdown.factor, 1);
   }
+  if (lifecycle != null && Number.isFinite(lifecycle.factor) && lifecycle.factor > 0) {
+    f *= Math.min(lifecycle.factor, 1);
+  }
   return f;
 }
 
 /**
  * currentLimits = baseLimits × kombinierter Marktfaktor
- * (Regime-Faktor × VolTarget-Faktor × Drawdown-Faktor, alle ≤ 1).
+ * (Regime × VolTarget × Drawdown × Strategy-Lifecycle, alle ≤ 1).
  */
 function recomputeCurrent(): RiskLimits {
   const base = state.baseLimits.get()!;
@@ -349,6 +377,51 @@ export function drawdownPauseState(): { blocked: boolean; stage: DrawdownStage |
     return { blocked: true, stage: current.stage, reason: current.reason };
   }
   return { blocked: false, stage: current?.stage ?? null, reason: current?.reason ?? null };
+}
+
+/**
+ * RMA-P1-05 (v1.73.0): Wendet den Strategy-Lifecycle-Risikofaktor an.
+ *
+ * `null` hebt Reduktion UND PAUSE-Block auf (Monitor-/Rollback-Pfad). Der
+ * Faktor wird hart auf (0, 1] geklemmt — eine Degradation kann das Basis-Limit
+ * nur senken, nie steigern. `paused=true` (Zustand PAUSED/REJECTED) blockiert
+ * zusätzliche NEUE Einstiege als Veto in `validateOrder`.
+ */
+export function applyStrategyLifecycleScale(snapshot: LifecycleRiskState | null): RiskLimits {
+  state.strategyLifecycleState.set(
+    snapshot != null && Number.isFinite(snapshot.factor) && snapshot.factor > 0
+      ? { ...snapshot, factor: Math.min(snapshot.factor, 1), paused: snapshot.paused === true }
+      : null
+  );
+  return recomputeCurrent();
+}
+
+/** Aktiver Strategy-Lifecycle-Zustand (oder null), z. B. für Observability. */
+export function getStrategyLifecycleState(): Readonly<LifecycleRiskState> | null {
+  const current = state.strategyLifecycleState.get();
+  return current ? { ...current } : null;
+}
+
+/**
+ * Veto-Auskunft für neue Einstiege der Strategy-Lifecycle (RMA-P1-05).
+ * `blocked = true` genau dann, wenn der aktive Lifecycle-Zustand pausiert/
+ * abgelehnt ist. Kill-Switch und Drawdown-PAUSE bleiben unberührt und gelten
+ * zusätzlich.
+ */
+export function strategyLifecyclePauseState(): {
+  blocked: boolean;
+  reason: string | null;
+  state: string | null;
+} {
+  const current = state.strategyLifecycleState.get();
+  if (current != null && current.paused === true) {
+    return { blocked: true, reason: current.reason, state: current.state };
+  }
+  return {
+    blocked: false,
+    reason: current?.reason ?? null,
+    state: current?.state ?? null,
+  };
 }
 
 /**
@@ -484,6 +557,13 @@ export function validateOrder(ctx: ValidateContext): GuardrailResult {
   const pause = drawdownPauseState();
   if (pause.blocked) {
     blockedBy.push("drawdown-pause:new-entries-blocked");
+  }
+
+  // RMA-P1-05 (v1.73.0): Strategy-Lifecycle-PAUSE/REJECTED vetot neue
+  // Einstiege derselben Authority Chain — unabhängig vom Drawdown-Pfad.
+  const lifecyclePause = strategyLifecyclePauseState();
+  if (lifecyclePause.blocked) {
+    blockedBy.push("strategy-lifecycle-pause:new-entries-blocked");
   }
 
   // H9 FIX: Alle numerischen Guardrail-Eingaben werden fail-closed geprüft.

@@ -77,7 +77,7 @@ aber keine abfragbare Trade-Wahrheitsquelle.
 
 → [Detail](findings/RMA-P1-04-backtest-trades.md) · [Prompt](prompts/PROMPT-P1-04-backtest-trades.md)
 
-### P1.5 Lifecycle und Backtest↔Paper↔Live-Drift — OPEN 🔴
+### P1.5 Lifecycle und Backtest↔Paper↔Live-Drift — FIXED (v1.73.0)
 
 Es existieren immutable Regelversionen und Zustände wie DRAFT/ACTIVE/PAUSED.
 Es gibt aber keine Lifecycle-State-Machine `BACKTEST_PASSED → PAPER → LIVE`,
@@ -85,7 +85,9 @@ keine standardisierten Drift-Fenster/-Metriken und keine automatische
 Degradation bei Performance- oder Execution-Abweichung. Ein manuelles
 Rule-Lifecycle ist nicht dasselbe wie evidenzbasierte Promotion.
 
-→ [Detail](findings/RMA-P1-05-lifecycle-drift.md) · [Prompt](prompts/PROMPT-P1-05-lifecycle-drift.md)
+→ [Detail](findings/RMA-P1-05-lifecycle-drift.md) · [Prompt](prompts/PROMPT-P1-05-lifecycle-drift.md) · [Doku](../../STRATEGY_LIFECYCLE.md)
+
+Behoben in **v1.73.0** (PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171), Commit `a88b5c5`) — siehe Tracking.
 
 ### P1.6 Trade-Attribution — PARTIAL
 

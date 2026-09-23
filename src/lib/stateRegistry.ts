@@ -74,6 +74,7 @@ import type {
   AdaptiveRiskState,
   VolatilityTargetingState,
   DrawdownRiskState,
+  LifecycleRiskState,
 } from "./riskGuard";
 import type { CircuitBreakerLatch } from "./circuitBreaker";
 import type { BrokerAdapter, BrokerVenueId } from "../contracts/broker";
@@ -242,6 +243,13 @@ export const state = {
    */
   drawdownState: ref<DrawdownRiskState | null>("drawdownState"),
   /**
+   * RMA-P1-05 (v1.73.0): Aktueller Strategy-Lifecycle-Risikofaktor + PAUSE-
+   * Veto (RAM; persistente Wahrheit: `strategy_lifecycle_states`). Wird in
+   * `recomputeCurrent()` multiplikativ komponiert (Faktor ∈ (0,1] ⇒ nur
+   * senkend) und blockiert in PAUSED/REJECTED neue Einstiege.
+   */
+  strategyLifecycleState: ref<LifecycleRiskState | null>("strategyLifecycleState"),
+  /**
    * GAP-10 (v1.45.0): Latch des Auto-Circuit-Breakers. LATCHING heisst: einmal
    * ausgeloest bleibt ausgeloest, bis ein Mensch den Not-Halt ueber den
    * Disarm-Pfad (Challenge-Nonce) loest — es gibt bewusst KEINE Auto-Re-Arm-
@@ -310,6 +318,8 @@ export function __resetAllSingletonsForTests(): void {
   state.currentLimits.reset();
   state.adaptiveState.reset();
   state.volTargetState.reset();
+  state.drawdownState.reset();
+  state.strategyLifecycleState.reset();
   state.circuitBreakerLatch.reset();
   // Monitor
   state.monitorLastTickAt.reset();

@@ -52,6 +52,7 @@ import {
   evaluateFallbackGates,
   evaluateSubmitGates,
   type GateAccount,
+  type GateContext,
   type GateQuote,
 } from "./gates";
 import type { ExecutionPolicy, ExecutionPolicyInput } from "./policy";
@@ -116,6 +117,21 @@ export interface ExecutionControllerDeps {
   getAccount: (venue: BrokerVenueId, mode: ExecutionMode) => Promise<AccountSnapshot | null>;
   getInstrument: (venue: BrokerVenueId, symbol: string) => InstrumentSpec | null;
   liveGateAllowed?: (venue: BrokerVenueId) => { allowed: boolean; code: string };
+  /**
+   * RMA-P1-05: asynchroner Strategy-Lifecycle-Check vor Live-Submit.
+   * Liefert eine synchrone Closure für die Gates (frischer State dicht am
+   * Submit — Race-Schutz gegen Degradation zwischen Prüfung und Order).
+   */
+  resolveLifecycleGate?: (
+    strategyKey?: string | null,
+    strategyVersion?: number | null
+  ) => Promise<{
+    allowed: boolean;
+    code: string;
+    strategyKey?: string | null;
+    strategyVersion?: number | null;
+    lifecycleState?: string | null;
+  } | null>;
   now?: () => number;
   audit?: ExecutionAuditWriter;
 }
@@ -134,6 +150,9 @@ export interface StartExecutionInput {
   /** Explizites Limit (sonst Mid ± Offset); wird auf den Tick gerundet. */
   limitPrice?: number;
   hasStopLoss?: boolean;
+  /** RMA-P1-05: autorisierte Strategieversion der Order (enforce: Pflicht). */
+  strategyKey?: string | null;
+  strategyVersion?: number | null;
 }
 
 const REPRICE_OFFSET_STEP_BPS = 10;
@@ -179,6 +198,12 @@ export class ExecutionPolicyController {
   private readonly getAccount: ExecutionControllerDeps["getAccount"];
   private readonly getInstrument: ExecutionControllerDeps["getInstrument"];
   private readonly liveGateAllowed: ExecutionControllerDeps["liveGateAllowed"];
+  private readonly resolveLifecycleGate: ExecutionControllerDeps["resolveLifecycleGate"];
+  /** Strategieversion je Workflow (RMA-P1-05) — für Reprice/Fallback-Gates. */
+  private readonly strategyByWorkflow = new Map<
+    string,
+    { key: string | null; version: number | null }
+  >();
   private readonly now: () => number;
   private readonly audit: ExecutionAuditWriter | undefined;
 
@@ -189,8 +214,25 @@ export class ExecutionPolicyController {
     this.getAccount = deps.getAccount;
     this.getInstrument = deps.getInstrument;
     this.liveGateAllowed = deps.liveGateAllowed;
+    this.resolveLifecycleGate = deps.resolveLifecycleGate;
     this.now = deps.now ?? (() => Date.now());
     this.audit = deps.audit;
+  }
+
+  /**
+   * RMA-P1-05: Lifecycle-Gate Closure für `evaluateSubmitGates`.
+   * Bei `live` wird der persistierte Zustand FRISCH vor dem Submit gelesen
+   * (Race: Degradation zwischen Start und Order gewinnt immer).
+   */
+  private async buildLifecycleGate(
+    mode: string,
+    strategyKey?: string | null,
+    strategyVersion?: number | null
+  ): Promise<GateContext["lifecycleGate"]> {
+    if (mode !== "live" || !this.resolveLifecycleGate) return undefined;
+    const decision = await this.resolveLifecycleGate(strategyKey ?? null, strategyVersion ?? null);
+    if (!decision) return undefined;
+    return () => decision;
   }
 
   // ── Start (idempotent) ───────────────────────────────────────────────────
@@ -295,6 +337,11 @@ export class ExecutionPolicyController {
       });
       return rejected;
     }
+    this.strategyByWorkflow.set(record.id, {
+      key: input.strategyKey ?? null,
+      version: input.strategyVersion ?? null,
+    });
+    const lifecycleGate1 = await this.buildLifecycleGate(input.mode, input.strategyKey ?? null, input.strategyVersion ?? null);
     const gates = evaluateSubmitGates(
       {
         venue: input.venue,
@@ -313,6 +360,7 @@ export class ExecutionPolicyController {
         minQuantity: instrument.minQuantity,
         quantityStep: instrument.quantityStep,
         liveGateAllowed: this.liveGateAllowed,
+        lifecycleGate: lifecycleGate1,
       },
       "SUBMIT"
     );
@@ -954,6 +1002,8 @@ export class ExecutionPolicyController {
     }
     const offsetBps = record.policy.priceOffsetBps + REPRICE_OFFSET_STEP_BPS * record.repricesUsed;
     const limitPrice = limitPriceFromMid(record.side, quote.mid, offsetBps, instrument.priceStep);
+    const strat2 = this.strategyByWorkflow.get(record.id);
+    const lifecycleGate2 = await this.buildLifecycleGate(record.mode, strat2?.key ?? null, strat2?.version ?? null);
     const gates = evaluateSubmitGates(
       {
         venue: record.venue,
@@ -972,6 +1022,7 @@ export class ExecutionPolicyController {
         minQuantity: instrument.minQuantity,
         quantityStep: instrument.quantityStep,
         liveGateAllowed: this.liveGateAllowed,
+        lifecycleGate: lifecycleGate2,
       },
       "REPRICE"
     );
@@ -1087,6 +1138,8 @@ export class ExecutionPolicyController {
         event: { toState: "FAILED", reason: "QUOTE_MISSING", eventTime: now, availableAt: now, computedAt: now, detail: { phase: "fallback" } },
       });
     }
+    const strat3 = this.strategyByWorkflow.get(record.id);
+    const lifecycleGate3 = await this.buildLifecycleGate(record.mode, strat3?.key ?? null, strat3?.version ?? null);
     const submitGates = evaluateSubmitGates(
       {
         venue: record.venue,
@@ -1105,6 +1158,7 @@ export class ExecutionPolicyController {
         minQuantity: instrument.minQuantity,
         quantityStep: instrument.quantityStep,
         liveGateAllowed: this.liveGateAllowed,
+        lifecycleGate: lifecycleGate3,
       },
       "FALLBACK"
     );

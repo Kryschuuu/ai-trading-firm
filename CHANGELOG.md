@@ -1,6 +1,6 @@
 # Changelog — Autonome KI-Trading-Firma
 
-> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.72.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
+> **Status-Header:** Konsolidierter Überblick · **2026-09-23** · Code-Version **1.73.0**. Vollständige, detaillierte Einträge je Release (Keep a Changelog + SemVer) — kanonische Datei im Root (ehemals `docs/CHANGELOG.md` als Duplikat, jetzt konsolidiert).
 
 # Changelog — Autonome KI-Trading-Firma
 
@@ -10,6 +10,42 @@ werden in dieser Datei dokumentiert.
 Das Format basiert auf
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung folgt
 [SemVer](https://semver.org/lang/de/).
+
+## [1.73.0] — 2026-09-23 · Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates (RMA-P1-05) · PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171)
+
+### Hinzugefügt
+
+- **Lifecycle-State-Machine (`src/strategyLifecycle/`):** 9 Zustände (`DRAFT`, `BACKTEST_PENDING`, `BACKTEST_PASSED`, `PAPER`, `LIVE_LIMITED`, `LIVE`, `DEGRADED`, `PAUSED`, `REJECTED`) mit zentraler Transitions-Tabelle (Rollen, Trigger, Evidence-Pflicht, Ziel-Risk-Scale hart ≤ 1). Kein `DRAFT→LIVE` (und kein `BACKTEST_*→LIVE`); Recovery nur mit Cooldown + frischer Evidenz, **kein** automatisches Re-Promotion.
+- **Immutable Evidence (`strategy_lifecycle_evidence`):** FK auf `backtest_runs`, Content-Hash `sle1:`/Idempotency-Key `slei1:`, Zeitsemantik `event_time ≤ available_at ≤ computed_at`, Metriken `number|null` (`null` ≠ `0`) — keine lockeren JSON-Claims.
+- **Versionierte Promotion-Gates (`slp1:`):** Mindest-Trades/-Dauer, OOS-Metriken, Drawdown, Data-Quality, Paper-Reconciliation, Execution-Quality; fehlende/stale Evidenz blockiert (`EVIDENCE_REQUIRED`).
+- **Drift-Vergleich (`sld1:`):** Baseline- vs. Current-Fenster über Segmente Performance/Risk/Execution/Data Quality mit Absolut-/Relativ-Toleranz und Confidence; fail-closed (`INCONCLUSIVE` ⇒ empfohlener Scale-down, nie „OK“).
+- **Automatische Degrationsleiter:** risk scale-down → `LIVE_LIMITED`/`DEGRADED` → `PAUSE`; idempotente Zielzustände (kein Flapping), auditiert; Wirkung über `riskGuard.applyStrategyLifecycleScale` (Faktor ≤ 1) und `strategy-lifecycle-pause`-Veto.
+- **Order-Gate-Integration:** `LIFECYCLE_GATE_DENY` in `src/execution/gates.ts` nach `liveGate` (Erstsubmit, Reprice, Fallback); AND-Bedingung, schwächt Broker-/Kill-Switch-/Risk-Ceilings nie; race-safe über optimistisches `state_seq`.
+- **Persistenz (`drizzle/2026-09-23_strategy_lifecycle.sql`):** append-only/idempotent — `strategy_lifecycle_states|evidence|transitions` mit CHECK/UNIQUE/FK; Rollback = 3× `DROP TABLE IF EXISTS` (Reihenfolge FK).
+- **Operations-API:** `GET|POST /api/firm/lifecycle` — Status/Evidence/Transitions (`firm.read`), `ensure`/`evidence`/`transition`/`override` mit CSRF, Rate-Limit, RBAC, Four-Eyes (`approvedBy` ≠ Actor), TTL-Override.
+- **Observability:** bounded Telemetrie `strategyLifecycle.*` (keine Strategy-Keys als Labels); 9 Audit-Codes `STRATEGY_LIFECYCLE_*` in `auditView.ts`.
+- **Feature-Flags:** `STRATEGY_LIFECYCLE_MODE=off|monitor|enforce` (Default `off`, Unbekannt → `off`), `STRATEGY_LIFECYCLE_RECOVERY_COOLDOWN_MS`, `STRATEGY_LIFECYCLE_MIN_RISK_FACTOR`.
+- **Dokumentation:** [`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md); Abschnitte in `CONFIGURATION.md` und `.env.example`.
+- **Tests:** `tests/strategyLifecycle.test.ts` (43 Unit-Tests: volle Transitions-Tabelle, DRAFT→LIVE, Gates, Drift, Order-Gate, Risk-Guard, Keys) + `tests/strategyLifecycle.db.test.ts` (6, eingebettetes Postgres: Migration 2× idempotent, Roundtrip, parallele Transitions ⇒ genau 1 Zeile, Degradation idempotent, Cooldown/Order-Gate).
+
+### Geändert
+
+- `src/execution/controller.ts` / `src/execution/service.ts` / `src/app/api/firm/execution/policy/route.ts`: optionale `strategyKey`/`strategyVersion` + `resolveLifecycleGate` an allen drei Gate-Sites.
+- `src/lib/riskGuard.ts` / `src/lib/stateRegistry.ts`: Lifecycle-Faktor in der Autoritätskette (nur senkend ≤ 1) und PAUSE-Veto.
+- `src/db/schema.ts`, `src/lib/telemetry.ts`, `src/lib/auditView.ts`: Schema-/Metrik-/Audit-Katalog-Einträge (additiv).
+- Version `1.72.0` → `1.73.0` (minor: neues Lifecycle-Modul, Default `off`, rückwärtskompatibel).
+
+### Sicherheit
+
+- Feature-flagged: Default `off` ändert kein Bestandsverhalten; `monitor` bewertet/auditiert nur; `enforce` lehnt Live-Orders ohne Lifecycle-Autorisierung ab.
+- Fail-closed: fehlende/stale Evidenz und unbekannte Modi blockieren bzw. fallen auf `off`; `null` wird nie als `0`/erfüllt gewertet.
+- Kein Aufweichen bestehender Gates: Lifecycle ist zusätzliche UND-Bedingung nach `liveGate`; Risk-Faktor hart ≤ 1; PAUSE vetoit nur neue Einstiege.
+- Rollback: `STRATEGY_LIFECYCLE_MODE=off` + optionales DROP der drei Tabellen (Details `docs/STRATEGY_LIFECYCLE.md` §8).
+- Keine Secrets/PII; Telemetrie-Labels aus geschlossenen Mengen.
+
+### Abweichung von der Audit-Basis
+
+Befundbasis war `df3163e` / v1.51.1 (im Clone nicht auflösbar). Umgesetzt auf v1.73.0 mit den damals verifizierten Strukturen (`tradeRules`, Control-Plane-Zuständen) als Referenz.
 
 ## [1.72.0] — 2026-09-23 · Reproduzierbare Monte-Carlo-/Trade-Resampling-Analyse (RMA-P6-02)
 

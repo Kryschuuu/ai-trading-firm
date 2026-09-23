@@ -19,6 +19,8 @@ import type { BrokerVenueId, ExecutionMode } from "../contracts/broker";
 import { pool } from "../db";
 import { getQuote } from "../lib/marketData";
 import { evaluateLiveOrder } from "../live-gate/enforcer";
+import { authorizeLiveOrder } from "../strategyLifecycle/service";
+import { strategyLifecycleConfig } from "../strategyLifecycle/config";
 import { getRegistry } from "../universe";
 import { AlpacaBrokerAdapter } from "../brokers/alpaca/adapter";
 import { BitunixBrokerAdapter } from "../brokers/bitunix/adapter";
@@ -46,6 +48,20 @@ export interface ExecutionServiceDeps {
   getAccount?: (venue: BrokerVenueId, mode: ExecutionMode) => Promise<AccountSnapshot | null>;
   getInstrument?: (venue: BrokerVenueId, symbol: string) => InstrumentSpec | null;
   liveGateAllowed?: (venue: BrokerVenueId) => { allowed: boolean; code: string };
+  /**
+   * RMA-P1-05: Strategy-Lifecycle-Gate (Default: DB-Lesepfad über
+   * `authorizeLiveOrder`, Modus aus `STRATEGY_LIFECYCLE_MODE`).
+   */
+  resolveLifecycleGate?: (
+    strategyKey?: string | null,
+    strategyVersion?: number | null
+  ) => Promise<{
+    allowed: boolean;
+    code: string;
+    strategyKey?: string | null;
+    strategyVersion?: number | null;
+    lifecycleState?: string | null;
+  } | null>;
   env?: Record<string, string | undefined>;
   now?: () => number;
 }
@@ -156,6 +172,38 @@ export function createExecutionController(deps: ExecutionServiceDeps = {}): Exec
       ((venue: BrokerVenueId) => {
         const decision = evaluateLiveOrder(venue, { env, audit: false });
         return { allowed: decision.allowed, code: decision.code };
+      }),
+    resolveLifecycleGate:
+      deps.resolveLifecycleGate ??
+      (async (strategyKey?: string | null, strategyVersion?: number | null) => {
+        try {
+          const decision = await authorizeLiveOrder({
+            strategyKey: strategyKey ?? null,
+            strategyVersion: strategyVersion ?? null,
+            env,
+          });
+          return {
+            allowed: decision.allowed,
+            code: decision.code,
+            strategyKey: decision.strategyKey,
+            strategyVersion: decision.strategyVersion,
+            lifecycleState: decision.lifecycleState,
+          };
+        } catch (e) {
+          const mode = strategyLifecycleConfig(env).mode;
+          const deny = mode === "enforce";
+          console.error(
+            "[execution] strategy-lifecycle gate error:",
+            e instanceof Error ? e.message : e
+          );
+          return {
+            allowed: !deny,
+            code: deny ? "LIFECYCLE_ERROR" : "LIFECYCLE_MONITOR_ALLOW",
+            strategyKey: strategyKey ?? null,
+            strategyVersion: strategyVersion ?? null,
+            lifecycleState: null,
+          };
+        }
       }),
     now: deps.now,
   });

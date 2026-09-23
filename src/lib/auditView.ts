@@ -3480,6 +3480,214 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     ],
   },
 
+  STRATEGY_LIFECYCLE_BOOTSTRAPPED: {
+    label: "Strategy-Lifecycle gebootstrapt",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Eine neue Strategieversion wurde als DRAFT in die Strategy-Lifecycle-State-Machine aufgenommen (RMA-P1-05). Die Zeile ist der Ausgangspunkt der Evidenzkette Backtest → Paper → Live; ein direkter Sprung nach LIVE ist strukturell nicht möglich.",
+    headline: (d) =>
+      [text(d.strategyKey) ?? "Strategie", num(d.strategyVersion) !== null ? `v${num(d.strategyVersion)}` : "", text(d.state)]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Bootstrap ist idempotent: existiert die Version bereits, wird sie nicht überschrieben. Promotion erfordert anschließend frische Backtest- und Paper-Evidenz.",
+    sections: (d) => [
+      {
+        title: "Lifecycle",
+        facts: [
+          { label: "Strategie", value: text(d.strategyKey) ?? "—", mono: true },
+          { label: "Version", value: num(d.strategyVersion) !== null ? String(num(d.strategyVersion)) : "—" },
+          { label: "Zustand", value: text(d.state) ?? "—" },
+          { label: "Policy", value: text(d.policyVersion) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_EVIDENCE_RECORDED: {
+    label: "Strategy-Evidenz erfasst",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Immutable Evidence für die Strategy-Lifecycle wurde persistiert (Hash + Idempotency-Key). Event-, Verfügbarkeits- und Berechnungszeit sind getrennt; Kennzahlen mit null bleiben null und zählen nie als 0.",
+    headline: (d) =>
+      [text(d.strategyKey) ?? "Strategie", text(d.kind), text(d.result)].filter(Boolean).join(" · "),
+    explain: () =>
+      "Retries mit identischem Inhalt erzeugen keine zweite Zeile (Content-Hash). Die Evidenz stützt Promotion-Gates und Drift-Bewertungen.",
+    sections: (d) => [
+      {
+        title: "Evidenz",
+        facts: [
+          { label: "Art", value: text(d.kind) ?? "—" },
+          { label: "Ergebnis", value: text(d.result) ?? "—" },
+          { label: "Stichprobe", value: num(d.sampleSize) !== null ? String(num(d.sampleSize)) : "—" },
+          { label: "Content-Hash", value: text(d.contentHash) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_TRANSITION: {
+    label: "Strategy-Lifecycle-Übergang",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Eine erlaubte Kante der Strategy-Lifecycle-State-Machine wurde atomar ausgeführt (Optimistic Lock + idempotenter Transition-Key). Jede Transition referenziert Policy-Version, Actor, Reason und optional Evidenz.",
+    headline: (d) =>
+      [text(d.from), "→", text(d.to), text(d.strategyKey)].filter(Boolean).join(" "),
+    explain: () =>
+      "Verbotene Übergänge (z. B. DRAFT → LIVE) werden als TRANSITION_DENIED protokolliert und nie still ausgeführt.",
+    sections: (d) => [
+      {
+        title: "Transition",
+        facts: [
+          { label: "Von", value: text(d.from) ?? "—" },
+          { label: "Nach", value: text(d.to) ?? "—" },
+          { label: "Trigger", value: text(d.trigger) ?? "—" },
+          { label: "Actor", value: text(d.actor) ?? "—" },
+          { label: "Grund", value: text(d.reason) ?? "—" },
+          { label: "Key", value: text(d.transitionKey) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_PROMOTED: {
+    label: "Strategy-Lifecycle-Promotion",
+    category: "risk",
+    expectedLevel: "INFO",
+    description:
+      "Eine Strategieversion wurde evidenzbasiert in einen Live-Zustand (LIVE_LIMITED oder LIVE) promotet. Promotion-Gates prüfen Mindesttrades/-dauer, OOS-Kennzahlen, Drawdown, Datenqualität, Paper-Reconciliation und Execution-Qualität gegen frische Evidenz.",
+    headline: (d) =>
+      [text(d.strategyKey) ?? "Strategie", text(d.from), "→", text(d.to)].filter(Boolean).join(" "),
+    explain: () =>
+      "Fehlende oder stale Evidenz blockiert die Promotion (fail-closed). Der Risikofaktor der Ziel-Zeile bestimmt die sofort wirksame Skalierung in der Authority Chain.",
+    sections: (d) => [
+      {
+        title: "Promotion",
+        facts: [
+          { label: "Von", value: text(d.from) ?? "—" },
+          { label: "Nach", value: text(d.to) ?? "—" },
+          { label: "Evidence-ID", value: text(d.evidenceId) ?? "—", mono: true },
+          { label: "Risk-Scale", value: text(d.riskScale) ?? "—" },
+          { label: "Policy", value: text(d.policyVersion) ?? "—", mono: true },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_DEGRADED: {
+    label: "Strategy-Lifecycle degradiert",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Automatisierte oder operatorseitige Degradation (Drift oder Override): Das Risiko der Strategieversion wurde gesenkt und/oder der Zustand in DEGRADED/PAUSED bewegt. Es gibt keine automatische Wieder-Promotion — Recovery verlangt Cooldown, neue Evidenz und Audit.",
+    headline: (d) =>
+      [text(d.strategyKey) ?? "Strategie", text(d.from), "→", text(d.to)].filter(Boolean).join(" "),
+    explain: () =>
+      "Degradation kann Risiko niemals erhöhen: Der Lifecycle-Faktor ist hart ≤ 1 und wird multiplikativ in die bestehende Authority Chain komponiert.",
+    sections: (d) => [
+      {
+        title: "Degradation",
+        facts: [
+          { label: "Von", value: text(d.from) ?? "—" },
+          { label: "Nach", value: text(d.to) ?? "—" },
+          { label: "Grund", value: text(d.reason) ?? "—" },
+          { label: "Risk-Scale", value: text(d.riskScale) ?? "—" },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_PROMOTION_BLOCKED: {
+    label: "Strategy-Promotion blockiert",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Der Promotion-Gate hat die Zustandsänderung abgelehnt: Evidenz fehlt, ist stale, zu klein oder erfüllt die Policy-Schwellen nicht (fail-closed).",
+    headline: (d) =>
+      [text(d.strategyKey) ?? "Strategie", "→", text(d.to), text(d.reason)].filter(Boolean).join(" · "),
+    explain: () =>
+      "Ohne belastbare Backtest-/Paper-Evidenz gibt es keinen Live-Zustand — null/unbekannte Kennzahlen zählen nie als 0 und bestehen das Gate nicht.",
+    sections: (d) => [
+      {
+        title: "Ablehnung",
+        facts: [
+          { label: "Ziel", value: text(d.to) ?? "—" },
+          { label: "Grund", value: text(d.reason) ?? "—" },
+          {
+            label: "Fehlend",
+            value: Array.isArray(d.missingEvidence)
+              ? (d.missingEvidence as unknown[]).join(", ")
+              : "—",
+          },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_TRANSITION_DENIED: {
+    label: "Strategy-Übergang abgelehnt",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Eine angeforderte Lifecycle-Transition wurde abgelehnt (verbotene Kante, Rolle, Trigger, fehlende/stale Evidenz oder aktiver Recovery-Cooldown). Der Zustand bleibt unverändert.",
+    headline: (d) => [text(d.to), text(d.code)].filter(Boolean).join(" · "),
+    explain: () =>
+      "DRAFT → LIVE und andere Sprünge ohne Evidenzkette sind strukturell unmöglich und werden hier sichtbar.",
+    sections: (d) => [
+      {
+        title: "Ablehnung",
+        facts: [
+          { label: "Code", value: text(d.code) ?? "—" },
+          { label: "Ziel", value: text(d.to) ?? "—" },
+          { label: "Detail", value: text(d.error) ?? "—" },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_DRIFT_OBSERVED: {
+    label: "Strategy-Drift beobachtet",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Backtest↔Paper↔Live-Driftbewertung (Segmente performance/risk/execution/dataQuality) mit Verdict OK/BREACH/INCONCLUSIVE. Im Modus monitor wird nur beobachtet und protokolliert; enforce degradiert abgestuft (Scale-down → DEGRADED → PAUSED).",
+    headline: (d) =>
+      [text(d.strategyKey) ?? "Strategie", text(d.verdict), text(d.recommendedAction)]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Fehlende, stale oder zu kleine Stichproben sind INCONCLUSIVE und senken das Risiko (fail-closed), statt es still zu erhalten oder zu erhöhen.",
+    sections: (d) => [
+      {
+        title: "Drift",
+        facts: [
+          { label: "Verdict", value: text(d.verdict) ?? "—" },
+          { label: "Aktion", value: text(d.recommendedAction) ?? "—" },
+          {
+            label: "Confidence",
+            value: num(d.confidence) !== null ? num(d.confidence)!.toFixed(2) : "—",
+          },
+        ],
+      },
+    ],
+  },
+  STRATEGY_LIFECYCLE_ORDER_DENIED: {
+    label: "Live-Order durch Lifecycle blockiert",
+    category: "risk",
+    expectedLevel: "WARN",
+    description:
+      "Im Modus enforce hat das Strategy-Lifecycle-Gate eine Live-Order abgelehnt: keine autorisierte Strategieversion, fehlender Zustand, kein Live-Zustand, aktiver Cooldown oder PAUSED/DEGRADED. Fail-closed — die Broker- und Risk-Gates bleiben zusätzlich wirksam.",
+    headline: (d) => [text(d.code), text(d.strategyKey), text(d.lifecycleState)].filter(Boolean).join(" · "),
+    explain: () =>
+      "Jede Live-Order referenziert autorisierte Strategieversion und Lifecycle-Zustand; Degradation wirkt atomar vor dem Submit.",
+    sections: (d) => [
+      {
+        title: "Order-Gate",
+        facts: [
+          { label: "Code", value: text(d.code) ?? "—" },
+          { label: "Strategie", value: text(d.strategyKey) ?? "—", mono: true },
+          { label: "Zustand", value: text(d.lifecycleState) ?? "—" },
+          { label: "Modus", value: text(d.mode) ?? "—" },
+        ],
+      },
+    ],
+  },
 };
 
 /** Fallback für unbekannte Events — nie leer, nie abgeschnitten. */

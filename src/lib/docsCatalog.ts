@@ -255,6 +255,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Windows-Installation",
     subtitle: "PowerShell-One-Liner, PostgreSQL, Ollama und Workarounds",
   },
+  strategyLifecycle: {
+    file: "docs/STRATEGY_LIFECYCLE.md",
+    title: "Strategy-Lifecycle & Driftgates",
+    subtitle: "9-Zustands-Promotion Backtest↔Paper↔Live, immutable Evidence, Degrationsleiter, Order-Gate (RMA-P1-05, v1.73.0)",
+  },
   paperTrading: {
     file: "docs/PAPER_TRADING.md",
     title: "Paper-Market-Data",

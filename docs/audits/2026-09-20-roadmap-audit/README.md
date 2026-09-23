@@ -21,7 +21,7 @@
 | P1.2 90d/30d Walk-Forward | PARTIAL | 4–6 PT | [RMA-P1-02](findings/RMA-P1-02-walk-forward-training.md) | [PROMPT-P1-02](prompts/PROMPT-P1-02-walk-forward-training.md) |
 | P1.3 Backtest-Kennzahlen | VERIFIED | 0 PT | [RMA-P1-03](findings/RMA-P1-03-backtest-metrics.md) | — |
 | P1.4 `backtest_runs` / `backtest_trades` | FIXED (v1.52.0, [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149)) | 0 PT | [RMA-P1-04](findings/RMA-P1-04-backtest-trades.md) | [PROMPT-P1-04](prompts/PROMPT-P1-04-backtest-trades.md) |
-| P1.5 Backtest↔Paper↔Live-Drift und Strategy-Lifecycle | OPEN | 8–12 PT | [RMA-P1-05](findings/RMA-P1-05-lifecycle-drift.md) | [PROMPT-P1-05](prompts/PROMPT-P1-05-lifecycle-drift.md) |
+| P1.5 Backtest↔Paper↔Live-Drift und Strategy-Lifecycle | FIXED (v1.73.0, [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171)) | 0 PT | [RMA-P1-05](findings/RMA-P1-05-lifecycle-drift.md) | [PROMPT-P1-05](prompts/PROMPT-P1-05-lifecycle-drift.md) |
 | P1.6 Trade-Attribution | PARTIAL | 3–5 PT | [RMA-P1-06](findings/RMA-P1-06-trade-attribution.md) | [PROMPT-P1-06](prompts/PROMPT-P1-06-trade-attribution.md) |
 | P2.1 Regime-Erkennung | PARTIAL | 2–4 PT | [RMA-P2-01](findings/RMA-P2-01-regime-detection.md) | [PROMPT-P2-01](prompts/PROMPT-P2-01-regime-detection.md) |
 | P2.2 Perpetual-Daten | PARTIAL | 5–8 PT | [RMA-P2-02](findings/RMA-P2-02-perpetual-data.md) | [PROMPT-P2-02](prompts/PROMPT-P2-02-perpetual-data.md) |
@@ -44,13 +44,16 @@
 | P6.3 Data-Quality-Checks | VERIFIED | 0 PT | [RMA-P6-03](findings/RMA-P6-03-data-quality.md) | — |
 
 **Verteilung (Audit-Basis):** 4 VERIFIED · 13 PARTIAL · 8 OPEN.
-**Stand v1.52.0:** 4 VERIFIED · **1 FIXED** (RMA-P1-04) · 12 PARTIAL · 8 OPEN — Status-SSoT: [remediation/TRACKING.md](remediation/TRACKING.md).
+**Stand v1.52.0:** 4 VERIFIED · **1 FIXED** (RMA-P1-04) · 12 PARTIAL · 8 OPEN. **Stand v1.73.0:** Status-SSoT [remediation/TRACKING.md](remediation/TRACKING.md) inkl. **RMA-P1-05 FIXED**.
 **Schätzung:** 76–124 PT für alle Deltas bei sequenzieller Umsetzung (Audit-Basis); davon 2–3 PT durch RMA-P1-04 erledigt.
 
 ## TOP-3-Gating-Faktoren
 
 1. **RMA-P1-05 — Strategy-Lifecycle und Drift:** Keine kontrollierte Promotion
    oder automatische Degradation zwischen Backtest, Paper und Live.
+   → **FIXED in v1.73.0** (PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171)): 9-Zustands-Machine ohne DRAFT→LIVE, immutable
+   Evidence, Drift-Gates fail-closed, idempotente auditierte Degradation,
+   Order-Gate vor Live-Submits.
 2. **RMA-P1-02 — echtes Walk-Forward-Training:** Vorhanden ist ein sauberer
    Split-and-Replay, aber keine IS-Selektion mit eingefrorenem OOS-Test und
    finalem Holdout.
