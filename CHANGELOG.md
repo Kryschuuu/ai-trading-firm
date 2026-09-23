@@ -21,12 +21,63 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-23** · Code-Version **0.1.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-23** · Code-Version **0.2.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
 _Noch nicht freigegeben._
+
+## [0.2.0] — 2026-09-23 · Kostenwahrheit im Regel-Backtest, Workshop-Schritt 5, Trusted-Indikatoren
+
+> **Status: Beta.** Additiver Schnitt aus dem Audit
+> [Verbesserungen 2026-09-23](docs/audits/2026-09-23-verbesserungen-fahrplan/README.md).
+> `backtestRule` bleibt byte-identisch. Der Default von `runMultiAssetBacktest`
+> bleibt `"legacy"`. Keine neue API-Route.
+
+### Hinzugefügt
+
+- **Paper-Default auf der bestehenden Regel-Backtest-Route**
+  (`POST /api/firm/rules/[id]/backtest`): Gebühren, Spread, Slippage und
+  Funding über den Fill-Simulator, Kerzen nur aus dem Historical Store.
+  Fehlende Historie ist 422, ohne stilles Yahoo. `model=reference` behält
+  den gebührenfreien Altpfad (VBF-P1-01).
+- **Workshop-Schritt 5** prüft eine Regel und speichert sie nur als `DRAFT`.
+  `activate` wird nicht gesendet (VBF-P1-02).
+- **Trusted-Block:** RSI(14), ATR(14) und MACD kommen aus
+  `src/lib/indicators.ts` und überschreiben Modellzahlen. Ist die Konfluenz
+  aus, bleibt die Herkunft `trusted-indicators@1` (VBF-P2-01).
+- **Regelfelder** `macd`, `macdSignal`, `macdHist` plus `adx14` und `bbwPct`
+  in der Whitelist, mit Ceiling (VBF-P2-02).
+- **Wilson-95-%-Intervall** der Trefferquote (`src/lib/stats.ts`) und
+  Warnung ab 2000 Prompt-Zeichen. Speichern bleibt bis 8000 möglich
+  (VBF-P2-03).
+- **Warnung** ab 75 % des Positionsdeckels. Abgelehnt wird nur der Deckel
+  selbst (VBF-P3-02).
+- **Rohantwort in den Prompt-Editor**, ohne automatisches Speichern
+  (VBF-P3-03).
+- **Paritätstest** `detectExit` gegen `detectExitTrigger`. Die Funktionen
+  werden nicht zusammengelegt (VBF-P3-01).
+
+### Behoben
+
+- **Regel-Backtest findet Store-Reihen.** Das Regel-Symbol (`BTC/USDT`) ist nicht
+  die Store-ID (`BITUNIX:BTCUSDT`). Der Paper-Pfad nimmt eine explizite
+  `instrumentId` oder genau eine passende Reihe. Mehrdeutigkeit ist 422, kein
+  stiller Tausch und kein Yahoo.
+
+### Geändert
+
+- Handbuch (Kapitel 2.3, 6, 15.4, 19.1), `docs/MISSIONS.md`,
+  `docs/BACKTESTING.md` und `docs/help/workshop.help.json` beschreiben die
+  fünf Workshop-Schritte und den Paper-Default der bestehenden Route.
+
+### Nicht enthalten
+
+- Kein K-Fold, kein Ulcer-Index, kein Regime-Regelfeld, kein Binomialtest,
+  keine Prompt-Historie, keine neuen Daten-Adapter (Polygon, FRED, Finnhub,
+  Alpha Vantage), kein stilles Yahoo auf dem Paper-Pfad, kein Wechsel des
+  Engine-Defaults, kein Ersatz von `detectExit`.
 
 ## [0.1.0] — 2026-09-23 · Beta-Baseline: Re-Versionierung, Struktur-Reorganisation, Dokumentationskonsolidierung
 
@@ -216,6 +267,7 @@ Zuordnung lesbar:
 
 | Öffentlich (v0.x.x) | Intern (Legacy, v1.x.x) | Datum | Bedeutung |
 | --- | --- | --- | --- |
+| **v0.2.0** (Beta) | — | 2026-09-23 | Regel-Backtest mit Paper-Kosten, Workshop-Schritt 5, Trusted-Indikatoren |
 | **v0.1.0** (Beta) | v1.73.1 | 2026-09-23 | Beta-Baseline: vollständiger Funktionsstand + Re-Versionierung/Struktur/Doku |
 
 Legacy-Verweise auf `v1.40.0` … `v1.73.0` in Audits, Peers-Reviews und der

@@ -1,13 +1,20 @@
 /**
  * API-Route `POST /api/firm/rules/[id]/backtest` — Regel-Backtest ausführen.
  *
- * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard). Auth-Modell und RBAC: docs/security/README.md.
+ * Teil der Firm-API (Next.js App Router). Zusätzlich guardWrite (API-Guard).
+ * Auth-Modell und RBAC: docs/security/README.md.
+ *
+ * Default seit v0.2.0: Paper-Fill über den HistoricalStore
+ * (`executionModel: "paper"`). `model: "reference"` behält den gebührenfreien
+ * `backtestRule`-Pfad. Der Engine-Default bleibt `"legacy"`.
  */
 
 import { NextResponse } from "next/server";
 import { getRule, rowToSpec, saveBacktest } from "@/lib/ruleService";
-import { backtestRule } from "@/lib/ruleEngine";
-import { getCandles, sanitizeInterval } from "@/lib/marketData";
+import { executeRuleBacktest, parseRuleBacktestBody } from "@/lib/ruleBacktest";
+import { HistoricalStore } from "@/lib/marketdata/historicalStore";
+import { historyDir } from "@/lib/marketdata/config";
+import { getCandles } from "@/lib/marketData";
 import { MarketDataFetchError } from "@/lib/marketDataErrors";
 import { guardWrite } from "@/lib/apiAuth";
 import { publicErrorMessage } from "@/lib/secrets";
@@ -16,12 +23,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Deterministischer Backtest einer Regel gegen historische Kerzen (KEIN LLM).
- *
- * Signal am Kerzenschluss, Einstieg zum Schlusskurs, Stop/Take-Profit über
- * Folgekerzen (Stop bei Gleichzeitigkeit zuerst). Das Ergebnis wird in
- * `rule_backtests` gespeichert und im Antwortobjekt zurückgegeben — die
- * Entscheidung „live gehen oder nicht“ trifft das Review-Gate, nie die Regel.
+ * Deterministischer Backtest einer Regel. Der Default bucht Paper-Kosten
+ * aus Store-Kerzen. Fehlende Historie ist 422, kein stiller Yahoo-Call.
+ * `model=reference` bleibt der gebührenfreie Vergleich und darf Kerzen
+ * live laden — der Fehler ist dann 503, nicht eine erfundene Reihe.
  */
 export async function POST(
   req: Request,
@@ -36,43 +41,29 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "Regel nicht gefunden" }, { status: 404 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as {
-      interval?: string;
-      limit?: number;
-      startingEquity?: number;
-      warmup?: number;
-    };
-    const spec = rowToSpec(rule);
-    const interval = sanitizeInterval(body.interval, spec.window.timeframe);
-    const limit = Math.min(Math.max(Number(body.limit ?? 300) || 300, 60), 1000);
-
-    const candles = await getCandles(spec.symbol, interval, limit);
-    if (candles.length < 40) {
-      return NextResponse.json(
-        { ok: false, error: `Zu wenige historische Kerzen für ${spec.symbol} (${candles.length})` },
-        { status: 422 }
-      );
+    const parsed = parseRuleBacktestBody(await req.json().catch(() => ({})));
+    if (!parsed.ok) {
+      return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
     }
 
-    const result = backtestRule(spec, candles, {
-      startingEquity: Number(body.startingEquity ?? 10_000),
-      warmup: Number(body.warmup ?? 30),
+    const spec = rowToSpec(rule);
+    const run = await executeRuleBacktest({
+      spec,
+      request: parsed.value,
+      store: new HistoricalStore(historyDir()),
+      loadReferenceCandles: (symbol, interval, limit) => getCandles(symbol, interval, limit),
     });
-    await saveBacktest(rule.id, result);
+    if (!run.ok) {
+      return NextResponse.json({ ok: false, error: run.error }, { status: run.status });
+    }
 
+    await saveBacktest(rule.id, run.persist);
     return NextResponse.json({
-      ok: true,
-      rule: { id: rule.id, name: rule.name, version: rule.version, symbol: rule.symbol },
-      interval,
-      candles: candles.length,
-      result,
-      note:
-        "Papier-Referenz-Backtest: Signal am Kerzenschluss, Stop-Vorrang bei Gleichzeitigkeit. " +
-        "Keine Anlageberatung; vor Live-Aktivierung Peer-Review (siehe HANDBUCH Kap. 18).",
+      ...run.body,
+      rule: { id: rule.id, name: rule.name, version: rule.version, symbol: rule.symbol, status: rule.status },
     });
   } catch (e) {
     if (e instanceof MarketDataFetchError) {
-      // Typisierter, redigierter Fehler (toJSON: keine Stacktraces/Credentials).
       return NextResponse.json(
         { ok: false, error: "MARKET_DATA_UNAVAILABLE", reason: e.reason, ...e.toJSON() },
         { status: 503 },

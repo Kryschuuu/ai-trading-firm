@@ -12,7 +12,7 @@
  * Überschreiben von Trading-Agent-Prompts mehr.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import InfoTip from "./InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import type { AgentPromptResponse, AgentRow } from "@/lib/types";
@@ -34,14 +34,21 @@ const FORMAT_FIELDS: { name: string; help: string }[] = [
   { name: "riskScore", help: "Eigene Unsicherheitseinschätzung 0.0 (sicher) bis 1.0 (sehr unsicher). Ein hoher Score ist kein Fehler — Raten ist der Fehler." },
 ];
 
+export type PromptDraftSeed = { nonce: number; text: string };
+
+const DRAFT_COPY_LIMIT = 4000;
+
 export default function PromptPanel({
   agents,
   onChanged,
   onUnauthorized,
+  draftSeed,
 }: {
   agents: AgentRow[];
   onChanged: () => void;
   onUnauthorized: () => void;
+  /** Rohantwort aus Schritt 2. Füllt nur den Entwurf, speichert nicht. */
+  draftSeed?: PromptDraftSeed | null;
 }) {
   // Explizite Auswahl ("" = noch nichts gewählt) + abgeleitete Vorauswahl.
   const [agentId, setAgentId] = useState("");
@@ -58,10 +65,27 @@ export default function PromptPanel({
   // Format-Warnungen, weil sie den Erfolgsfall betrifft (Änderung wirksam,
   // Beleg fehlt). Die Response trägt `audit` seit S1 immer mit.
   const [auditGap, setAuditGap] = useState<string | null>(null);
+  const [seedNote, setSeedNote] = useState("");
 
   const agent = useMemo(() => agents.find((a) => a.id === effAgentId) ?? null, [agents, effAgentId]);
   const prompt = draft ?? agent?.systemPrompt ?? "";
   const dirty = draft !== null && prompt !== (agent?.systemPrompt ?? "");
+
+  useEffect(() => {
+    if (!draftSeed) return;
+    const id = window.setTimeout(() => {
+      setDraft(draftSeed.text.slice(0, DRAFT_COPY_LIMIT));
+      setOkMsg("");
+      setError("");
+      setWarnings([]);
+      setSeedNote(
+        draftSeed.text.length > DRAFT_COPY_LIMIT
+          ? "Entwurf aus Rohantwort, auf 4000 Zeichen gekürzt — nicht gespeichert."
+          : "Entwurf aus Rohantwort — nicht gespeichert. Speichern bleibt ein eigener Schritt.",
+      );
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [draftSeed]);
 
   function selectAgent(id: string) {
     setAgentId(id);
@@ -223,6 +247,7 @@ export default function PromptPanel({
             Zurücksetzen
           </button>
           {dirty && <span className="text-[11px] text-amber-300">ungespeicherte Änderungen</span>}
+          {seedNote && <span className="text-[11px] text-sky-300">{seedNote}</span>}
         </div>
 
         <div aria-live="polite" className="mt-3 space-y-2">

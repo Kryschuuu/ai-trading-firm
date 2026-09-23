@@ -5,11 +5,11 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.1.0` |
+| **Version** | `v0.2.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Release-Datum** | 2026-09-23 |
-| **Quellbasiert** | `package.json` (`version: "0.1.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.2.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -17,7 +17,9 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 `v0.1.0` ist die **Beta-Baseline**: Sie bündelt den gesamten bis dahin
 erreichten Funktionsstand der Beta-Entwicklung (interne Zählung bis `v1.73.1`)
-und etabliert das öffentliche v0.x.x-Schema. In der 0.x-Reihe dürfen
+und etabliert das öffentliche v0.x.x-Schema. `v0.2.0` ergänzt den
+kostenbewussten Regel-Backtest, den Workshop-Schritt 5 und die
+Trusted-Indikatoren, ohne den Engine-Default zu ändern. In der 0.x-Reihe dürfen
 Breaking Changes eingeführt werden, wenn sie im Changelog dokumentiert sind.
 
 **Beta-Hinweis:** Das Projekt ist für Bildungszwecke und private Nutzung auf

@@ -2,26 +2,28 @@
 
 
 /**
- * Workshop — das UI-Pendant zu Handbuch Kapitel 5 (Missionen) und 6 (Prompts
- * iterieren). Vier Schritte, passend zur Iterations-Schleife aus 6.1:
- * Mission schreiben → EINEN Agent einzeln laufen lassen → GENAU EINE Sache
- * am Prompt ändern → zehnmal wiederholen und Trefferquote zählen.
+ * Workshop — das UI-Pendant zu Handbuch Kapitel 5 (Missionen), 6 (Prompts)
+ * und 15.4 (Regel-Entwurf). Fünf Schritte: Mission schreiben → EINEN Agent
+ * einzeln laufen lassen → GENAU EINE Sache am Prompt ändern → Trefferquote
+ * zählen → Regel als DRAFT speichern und gegen den Store messen.
  */
 
 import { useState } from "react";
 import type { AgentRow, MissionRow } from "@/lib/types";
 import MissionsPanel from "./MissionsPanel";
 import AgentRunPanel from "./AgentRunPanel";
-import PromptPanel from "./PromptPanel";
+import PromptPanel, { type PromptDraftSeed } from "./PromptPanel";
 import HitRatePanel from "./HitRatePanel";
+import RuleBacktestPanel from "./RuleBacktestPanel";
 
-export type WorkshopStep = "missions" | "run" | "prompt" | "hitrate";
+export type WorkshopStep = "missions" | "run" | "prompt" | "hitrate" | "rulebacktest";
 
 const steps: { id: WorkshopStep; label: string; hint: string }[] = [
   { id: "missions", label: "1 · Mission anlegen", hint: "Handbuch 5.1–5.4 — Vorlage übernehmen, Missions-Typ wählen (Einzel-Symbol oder Markt-Scan), Auftrag definieren, bevor irgendein Agent läuft." },
   { id: "run", label: "2 · Agent ausführen", hint: "Handbuch 6.2 — einen Agenten einzeln laufen lassen und die Rohantwort prüfen." },
   { id: "prompt", label: "3 · Prompt iterieren", hint: "Handbuch 6.3 — genau eine Sache am Prompt ändern, wirkt sofort." },
   { id: "hitrate", label: "4 · Trefferquote", hint: "Handbuch 6.4 — Testschleife starten und die Verteilung zählen." },
+  { id: "rulebacktest", label: "5 · Regel prüfen", hint: "Handbuch 15.4 — Bedingungen setzen, als DRAFT speichern und den Paper-Store messen. Keine Aktivierung." },
 ];
 
 export default function WorkshopTab({
@@ -41,6 +43,7 @@ export default function WorkshopTab({
   onOpenProtocol: () => void;
 }) {
   const [step, setStep] = useState<WorkshopStep>("missions");
+  const [promptSeed, setPromptSeed] = useState<PromptDraftSeed | null>(null);
   const active = steps.find((s) => s.id === step)!;
 
   return (
@@ -50,7 +53,8 @@ export default function WorkshopTab({
         <p className="mt-1 text-xs leading-relaxed text-slate-400">
           Alles aus Handbuch Kapitel 5 und 6 als Oberfläche: Missionen aus Vorlagen anlegen
           (Einzel-Symbol oder Markt-Scan über ein Segment), einen Agenten einzeln prüfen, Prompts
-          iterieren, Trefferquote messen. Die Schleife bleibt wie in 6.1:{" "}
+          iterieren, Trefferquote messen, eine Regel nur als Entwurf gegen den Store prüfen.
+          Die Schleife bleibt wie in 6.1:{" "}
           <span className="text-slate-200">ein Agent pro Test, eine Änderung pro Iteration.</span>{" "}
           Guardrails sind bewusst nicht von hier änderbar — sie leben im Code (Risk-&amp;-Guardrails-Tab).
         </p>
@@ -83,10 +87,19 @@ export default function WorkshopTab({
           agents={agents}
           missions={missions}
           onUnauthorized={onUnauthorized}
+          onCopyRaw={(text) => {
+            setPromptSeed({ nonce: Date.now(), text });
+            setStep("prompt");
+          }}
         />
       )}
       {step === "prompt" && (
-        <PromptPanel agents={agents} onChanged={onChanged} onUnauthorized={onUnauthorized} />
+        <PromptPanel
+          agents={agents}
+          onChanged={onChanged}
+          onUnauthorized={onUnauthorized}
+          draftSeed={promptSeed}
+        />
       )}
       {step === "hitrate" && (
         <HitRatePanel
@@ -96,6 +109,7 @@ export default function WorkshopTab({
           onOpenProtocol={onOpenProtocol}
         />
       )}
+      {step === "rulebacktest" && <RuleBacktestPanel onUnauthorized={onUnauthorized} />}
     </div>
   );
 }

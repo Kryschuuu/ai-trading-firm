@@ -69,6 +69,12 @@ export const PROMPT_LIMITS = {
   max: 8000,
 } as const;
 
+/** Weiche Warnung, sobald der Prompt diese Länge überschreitet. Speichern bleibt bis `PROMPT_LIMITS.max` möglich. */
+export const PROMPT_LENGTH_WARN_CHARS = 2000;
+
+/** Warnung, sobald ein Budget diesen Anteil der Code-Obergrenze überschreitet. Keine Ablehnung. */
+export const CEILING_WARN_FRACTION = 0.75;
+
 export type MissionInput = {
   title: string;
   objective: string;
@@ -229,6 +235,17 @@ export function validateMissionInput(raw: unknown): ValidationResult<MissionInpu
     };
   }
 
+  if (riskBudget > riskMax * CEILING_WARN_FRACTION) {
+    warnings.push(
+      `Risikobudget liegt über ${Math.round(CEILING_WARN_FRACTION * 100)} % der Code-Obergrenze (${(riskMax * 100).toFixed(1)} %). Erlaubt, aber nah am Deckel.`,
+    );
+  }
+  if (maxPositionPct > posMax * CEILING_WARN_FRACTION) {
+    warnings.push(
+      `Positionsgröße liegt über ${Math.round(CEILING_WARN_FRACTION * 100)} % der Code-Obergrenze (${(posMax * 100).toFixed(0)} %). Erlaubt, aber nah am Deckel.`,
+    );
+  }
+
   const statusRaw = typeof body.status === "string" ? body.status.toUpperCase() : "PENDING";
   if (!(MISSION_STATUSES as readonly string[]).includes(statusRaw)) {
     return { ok: false, error: `Status: erlaubt sind ${MISSION_STATUSES.join(", ")}.` };
@@ -304,6 +321,11 @@ export function validatePromptInput(raw: unknown): ValidationResult<PromptInput>
   }
   if (!systemPrompt.includes("{")) {
     warnings.push("Der Prompt enthält kein Beispiel-Objekt. Ein einziges vollständiges JSON-Beispiel wirkt Wunder (Handbuch 6.4).");
+  }
+  if (systemPrompt.length > PROMPT_LENGTH_WARN_CHARS) {
+    warnings.push(
+      `Prompt länger als ${PROMPT_LENGTH_WARN_CHARS} Zeichen. Kleine Modelle verlieren die Struktur. Speichern bleibt bis ${PROMPT_LIMITS.max} Zeichen möglich.`,
+    );
   }
   return { ok: true, value: { agentId, systemPrompt, expectedVersion }, warnings };
 }

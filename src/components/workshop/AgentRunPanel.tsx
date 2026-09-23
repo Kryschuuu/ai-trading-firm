@@ -59,10 +59,13 @@ export default function AgentRunPanel({
   agents,
   missions,
   onUnauthorized,
+  onCopyRaw,
 }: {
   agents: AgentRow[];
   missions: MissionRow[];
   onUnauthorized: () => void;
+  /** Kopiert die letzte Rohantwort in den Prompt-Entwurf. Speichert nicht. */
+  onCopyRaw?: (text: string) => void;
 }) {
   const runnable = missions.filter((m) => m.status !== "KILLED");
   // Explizite Auswahl (leer = noch nichts gewählt) …
@@ -126,6 +129,7 @@ export default function AgentRunPanel({
   }
 
   const decision: AgentDecisionDto | null = result?.decision ?? null;
+  const copyText = lastMessages.find((turn) => turn.rawResponse)?.rawResponse ?? "";
   const agent = agents.find((a) => a.id === effAgentId);
   const mission = missions.find((m) => m.id === effMissionId);
 
@@ -316,6 +320,16 @@ export default function AgentRunPanel({
             {showRaw ? "Rohdaten ausblenden" : "Rohdaten des Turns anzeigen (JSON)"}
           </button>
         )}
+        <button
+          type="button"
+          disabled={!copyText || !onCopyRaw}
+          onClick={() => {
+            if (copyText && onCopyRaw) onCopyRaw(copyText);
+          }}
+          className="mb-4 ml-2 rounded border border-sky-700 px-2 py-1 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+        >
+          In Prompt-Entwurf kopieren
+        </button>
 
         {lastMessages.length === 0 ? (
           <p className="text-xs text-slate-500">Noch keine Nachrichten — links einen Turn starten.</p>

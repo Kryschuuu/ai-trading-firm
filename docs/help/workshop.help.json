@@ -1,10 +1,10 @@
 {
   "$schema": "https://ai-trading-firm.local/schemas/help-3-ebenen.json",
   "id": "workshop",
-  "version": 1,
+  "version": 3,
   "title": "Workshop: Missionen, Markt-Scans und Vorlagen — Feldhilfe",
-  "description": "Hilfetexte im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko) für den Workshop-Schritt 1 „Mission anlegen“ (v1.35.0): Missions-Typen, neun Marktsegmente, wiederverwendbare Vorlagen, Risikoprofile und die Mandatsprüfung der Engine. Dieselben Texte stehen als Tooltips (i-Symbol) im Dashboard und in docs/MISSIONS.md.",
-  "source": "src/lib/missionTemplates.ts, src/lib/missionUniverse.ts, src/lib/workshop.ts, src/components/workshop/",
+  "description": "Hilfetexte im 3-Ebenen-Schema (kurzinfo, technischeInfo, risiko) für den Workshop: Missionen, Agenten-Turns, Prompt-Iteration, Trefferquote und den Entwurf-Backtest (v0.2.0). Dieselben Texte stehen als Tooltips (i-Symbol) im Dashboard und in docs/MISSIONS.md.",
+  "source": "src/lib/missionTemplates.ts, src/lib/missionUniverse.ts, src/lib/workshop.ts, src/lib/ruleBacktest.ts, src/components/workshop/",
   "fields": {
     "missionScope": {
       "kurzinfo": "Der Missions-Typ entscheidet, ob die Firma genau ein Instrument handelt oder ein ganzes Marktsegment scannt.",
@@ -85,6 +85,31 @@
       "kurzinfo": "Die Trefferquote zählt, wie oft ein Agent TRADE, HOLD, kaputtes JSON oder einen Fehler liefert.",
       "technischeInfo": "Workshop Schritt 4: ein Agent läuft mehrfach gegen dieselbe Mission; classifyTurnOutcome() und aggregateOutcomes() (src/lib/workshop.ts) zählen die Kategorien und zeigen Debug-Tipps ab 2 Fällen und 20 % INVALID_JSON.",
       "risiko": "Eine hohe TRADE-Quote ist kein Erfolg: Ohne Mandats- und Guardrail-Prüfung bedeutet sie nur, dass das Modell selten „weiß ich nicht“ sagt."
+    },
+    "wilsonInterval": {
+      "kurzinfo": "Das Wilson-Intervall zeigt, wie unsicher die Trefferquote bei wenigen Läufen noch ist.",
+      "technischeInfo": "Workshop Schritt 4 ruft wilsonInterval() aus src/lib/stats.ts auf (95 %, zweiseitig). Dieselbe Funktion nutzt der Forecast-Ledger. n=0 liefert null, nie ein erfundenes Intervall. Es gibt keinen Binomialtest gegen 50 %.",
+      "risiko": "Ein enges Intervall bei n≤20 ist selten. Die Spanne ist die Aussage, nicht die nackte Prozentzahl — und sie ist kein Freigabe-Kriterium für Live-Handel."
+    },
+    "promptLengthWarning": {
+      "kurzinfo": "Ab 2000 Zeichen warnt der Prompt-Editor, weil kleine Modelle die Struktur verlieren.",
+      "technischeInfo": "Die Warnung sitzt im Workshop-Schritt 3. Der Server speichert weiter bis zur harten Grenze von 8000 Zeichen (PROMPT_LIMITS). Die Warnung blockiert das Speichern nicht.",
+      "risiko": "Ein zu langer System-Prompt erhöht kaputtes JSON. Kürzen ist die Abhilfe; die Warnung allein ändert keine Order und kein Guardrail."
+    },
+    "positionCeilingWarning": {
+      "kurzinfo": "Liegt die maximale Positionsgröße über 75 % des Code-Deckels, warnt das Formular.",
+      "technischeInfo": "Schwelle ist 0,75 mal LIMIT_CEILINGS.maxPositionPct. Abgelehnt wird nur, was den Deckel selbst verletzt (validateMissionInput). Die Warnung ändert keine Ordergröße.",
+      "risiko": "Nahe am Deckel bleibt wenig Puffer für Slippage und mehrere offene Positionen. Die Warnung ist kein Ersatz für das Tagesverlust-Limit."
+    },
+    "copyRawPrompt": {
+      "kurzinfo": "Die Rohantwort eines Agenten lässt sich in den Prompt-Editor kopieren, ohne sie zu speichern.",
+      "technischeInfo": "Workshop Schritt 2 setzt nur den Editor von Schritt 3. Ein Speichern bleibt der ausdrückliche PUT auf /api/firm/agents. Die Modellantwort ist Daten, kein Auftrag.",
+      "risiko": "Ungeprüfter Modelltext als System-Prompt kann widersprüchliche Anweisungen enthalten. Erst lesen, dann speichern — nie automatisch übernehmen."
+    },
+    "ruleDraftBacktest": {
+      "kurzinfo": "Schritt 5 speichert eine Regel nur als Entwurf und misst sie gegen eine Store-Reihe, nicht gegen eine nachgeladene Kursquelle.",
+      "technischeInfo": "Dieselbe Route POST /api/firm/rules/[id]/backtest, Default model=paper. Das Regel-Symbol (PAPER-kanonisch, z. B. BTC/USDT) ist nicht die Store-ID (z. B. BITUNIX:BTCUSDT). Ohne instrumentId gilt nur eine exakte oder eindeutig kanonische Reihe; sonst 422, ohne Yahoo. activate wird nicht gesendet. model=reference bleibt der gebührenfreie Altpfad.",
+      "risiko": "Ein grüner Paper-Backtest ist keine Aktivierung und kein Walk-Forward. Die Regel bleibt DRAFT, bis ein Admin sie ausdrücklich freigibt."
     }
   }
 }

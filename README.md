@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.1.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.2.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -34,7 +34,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.1.0** (Beta-Baseline, 2026-09-23) |
+| Version | **v0.2.0** (Beta, 2026-09-23; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog) — mit Meilenstein-Übersicht der Beta-Entwicklung |
@@ -165,12 +165,12 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.1.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.2.0, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.1.0), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.2.0), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)

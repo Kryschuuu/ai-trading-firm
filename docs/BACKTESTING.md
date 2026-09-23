@@ -1,6 +1,6 @@
 # Regelbasierte Backtesting-Engine mit Walk-Forward-Validierung (GAP-01)
 
-**Stand:** 2026-09-21 · **Modul:** `src/backtest/` · **Version:** `v0.1.0 (Beta)` · **Status:** Implementiert
+**Stand:** 2026-09-23 · **Modul:** `src/backtest/` · **Version:** `v0.2.0 (Beta)` · **Status:** Implementiert
 
 Diese Datei beschreibt die Walk-Forward-Erweiterung der Backtest-Engine:
 strikte Zeitmaske, Paper-Ausführung über den Paper-Fill-Simulator,
@@ -9,6 +9,17 @@ Trade-Ledger (`backtest_trades`, RMA-P1-04) und die CLI.
 Die Engine-Basis (Event-Schleife, Portfolio, Legacy-Kostenmodell) steht in
 [BACKTEST_ENGINE.md](BACKTEST_ENGINE.md); das Kostenmodell im Paper-Betrieb
 in [PAPER_TRADING.md](PAPER_TRADING.md) (§3).
+
+Der Quick-Check einer einzelnen Regel ist **nicht** dieser Walk-Forward.
+`POST /api/firm/rules/[id]/backtest` (Handbuch 15.4) defaultet seit v0.2.0
+auf `model=paper` und liest nur den Historical Store. `model=reference`
+bleibt der gebührenfreie Altpfad über `backtestRule`. Der Default von
+`runMultiAssetBacktest` bleibt `"legacy"`, damit bestehende Engine-Läufe
+byte-gleich bleiben. Walk-Forward setzt `paper` selbst, ohne den
+Engine-Default umzulegen. Die Store-ID ist `VENUE:native`, nicht das
+Regel-Symbol. Ohne `instrumentId` nimmt die Route nur eine exakte oder
+eindeutig kanonische Reihe; sonst 422. Dieselbe Trennung wie die CLI unten
+(Regel-Symbol vs. `--instrument`), ohne stillen Tausch.
 
 ---
 

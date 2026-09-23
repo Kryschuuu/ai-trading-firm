@@ -8,6 +8,8 @@ import {
   JSON_DEBUG_TIPS,
   JSON_TIPS_MIN_COUNT,
   JSON_TIPS_MIN_SHARE,
+  CEILING_WARN_FRACTION,
+  PROMPT_LENGTH_WARN_CHARS,
   validateMissionInput,
   validatePromptInput,
   type OutcomeCategory,
@@ -278,6 +280,30 @@ test("isUuid: kanonische UUIDs ja, kaputte/Injection-Strings nein", () => {
   assert.equal(isUuid("abc"), false);
   assert.equal(isUuid("'; DROP TABLE agents;--"), false);
   assert.equal(isUuid("9b2f0d5a-1111-4222-8333-44445555666"), false); // zu kurz
+});
+
+test("validateMissionInput: warnt über 75 % der Ceilings, lehnt die Obergrenze selbst nicht ab", () => {
+  assert.equal(CEILING_WARN_FRACTION, 0.75);
+  const quiet = validateMissionInput({ ...validMission, riskBudget: 0.02, maxPositionPct: 0.15 });
+  assert.equal(quiet.ok, true);
+  assert.equal(quiet.warnings.length, 0);
+
+  const nearRisk = validateMissionInput({ ...validMission, riskBudget: 0.04 });
+  assert.equal(nearRisk.ok, true);
+  assert.equal(nearRisk.warnings.length, 1);
+  assert.match(nearRisk.warnings[0], /Risikobudget/);
+
+  const atCeiling = validateMissionInput({ ...validMission, riskBudget: 0.05, maxPositionPct: 0.5 });
+  assert.equal(atCeiling.ok, true);
+});
+
+test("validatePromptInput: warnt über 2000 Zeichen, blockiert erst über 8000", () => {
+  assert.equal(PROMPT_LENGTH_WARN_CHARS, 2000);
+  const longEnough = `${goodPrompt}\n${"x".repeat(2001)}`;
+  const warned = validatePromptInput({ agentId: UUID, systemPrompt: longEnough, expectedVersion: 1 });
+  assert.equal(warned.ok, true);
+  assert.equal(warned.warnings.length, 1);
+  assert.match(warned.warnings[0], /2000/);
 });
 
 test("JSON_DEBUG_TIPS: die vier Handbuch-Tipps sind vollständig", () => {

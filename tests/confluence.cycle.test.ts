@@ -241,7 +241,8 @@ test("CONFLUENCE_ENABLED=false: Legacy-Output ohne Snapshot (Rollback-Pfad)", as
   const out = await technicalStep.execute(ctx);
   assert.ok(!("confluence" in out.analyses[0]));
   assert.equal(out.confluenceMeta, undefined);
-  assert.equal(ports.agent.lastSpecFor("TECHNICAL_ANALYST")?.trustedData, undefined);
+  const trusted = ports.agent.lastSpecFor("TECHNICAL_ANALYST")?.trustedData as { kind?: string } | undefined;
+  assert.equal(trusted?.kind, "trusted-indicators@1");
 });
 
 test("Artefakt-Roundtrip: Output mit Snapshots überlebt JSON-Persistenz", async () => {

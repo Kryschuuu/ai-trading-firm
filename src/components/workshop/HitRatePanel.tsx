@@ -20,6 +20,7 @@ import {
   OUTCOME_CATEGORIES,
   type OutcomeCategory,
 } from "@/lib/workshop";
+import { wilsonInterval } from "@/lib/stats";
 
 
 const MAX_RUNS = 20;
@@ -68,6 +69,7 @@ export default function HitRatePanel({
   const failuresRef = useRef<HTMLDivElement | null>(null);
 
   const stats = aggregateOutcomes(runs.map((r) => r.category));
+  const tradeWilson = stats.total > 0 ? wilsonInterval(stats.counts.TRADE, stats.total) : null;
   const failures = runs.filter((r) => r.category === "ERROR" || r.category === "INVALID_JSON");
 
   function stop() {

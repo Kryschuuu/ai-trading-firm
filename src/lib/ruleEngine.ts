@@ -20,7 +20,8 @@
  * Berechnung über 120 Kerzen < 100 µs; bewusste NULL DB-/Netzwerk-IO.
  */
 
-import { ema, rsi, atrPct } from "./indicators";
+import { adx, atrPct, bollingerBandWidthPct, ema, macd, rsi } from "./indicators";
+import { RULE_FIELDS } from "./ruleFieldCatalog";
 import { LIMIT_CEILINGS, riskAdjustedSize } from "./riskGuard";
 import { tryNormalizeVenueSymbol } from "../symbols/normalize";
 
@@ -42,21 +43,7 @@ export interface CandleLike {
  * Felder, die eine Regel abfragen darf. Alles, was ein LLM sonst noch
  * erfindet (orderId, apiKey, executable, …), fällt durch die Whitelist.
  */
-export const RULE_FIELDS = {
-  price: "number",
-  rsi14: "number",
-  ema9: "number",
-  ema21: "number",
-  ema50: "number",
-  trend: "trend",
-  atrPct: "number",
-  volume: "number",
-  volumeMa20: "number",
-  volumeRatio: "number",
-  changePct24h: "number",
-  priceVsEma21Pct: "number",
-  priceVsEma50Pct: "number",
-} as const;
+export { RULE_FIELDS };
 
 export type RuleField = keyof typeof RULE_FIELDS;
 export type TrendValue = "UP" | "DOWN" | "FLAT";
@@ -132,6 +119,14 @@ export interface RuleSnapshot {
   ema50: number;
   trend: TrendValue;
   atrPct: number | null;
+  /** Wilder-ADX(14). null, solange weniger als 29 Kerzen vorliegen. */
+  adx14: number | null;
+  /** Bollinger-Breite in Prozent (5 = 5 %). null bei zu wenig Historie. */
+  bbwPct: number | null;
+  /** MACD-Linie in Preiseinheiten. null unter 35 Schlusskursen. */
+  macd: number | null;
+  macdSignal: number | null;
+  macdHist: number | null;
   volume: number;
   volumeMa20: number;
   volumeRatio: number;
@@ -474,6 +469,11 @@ function accessor(field: RuleField): (s: RuleSnapshot) => number | string | null
     case "ema50": return (s) => s.ema50;
     case "trend": return (s) => s.trend;
     case "atrPct": return (s) => s.atrPct;
+    case "adx14": return (s) => s.adx14;
+    case "bbwPct": return (s) => s.bbwPct;
+    case "macd": return (s) => s.macd;
+    case "macdSignal": return (s) => s.macdSignal;
+    case "macdHist": return (s) => s.macdHist;
     case "volume": return (s) => s.volume;
     case "volumeMa20": return (s) => s.volumeMa20;
     case "volumeRatio": return (s) => s.volumeRatio;
@@ -588,6 +588,10 @@ export function buildSnapshotFromCandles(
 
   const changeBase = candles.length > 1 ? closes[Math.max(0, closes.length - 97)] : price;
   const changePct24h = changeBase > 0 ? ((price - changeBase) / changeBase) * 100 : null;
+  const atrFraction = atrPct(candles);
+  const adxValue = adx(candles);
+  const bbwFraction = bollingerBandWidthPct(closes);
+  const macdValue = macd(closes);
 
   return {
     symbol: symbol.toUpperCase(),
@@ -598,7 +602,12 @@ export function buildSnapshotFromCandles(
     ema21: e21[e21.length - 1],
     ema50: e50[e50.length - 1],
     trend,
-    atrPct: atrPct(candles) != null ? Number((atrPct(candles as never)! * 100).toFixed(2)) : null,
+    atrPct: atrFraction != null ? Number((atrFraction * 100).toFixed(2)) : null,
+    adx14: adxValue != null ? Number(adxValue.toFixed(2)) : null,
+    bbwPct: bbwFraction != null ? Number((bbwFraction * 100).toFixed(4)) : null,
+    macd: macdValue != null ? Number(macdValue.macd.toFixed(6)) : null,
+    macdSignal: macdValue != null ? Number(macdValue.signal.toFixed(6)) : null,
+    macdHist: macdValue != null ? Number(macdValue.histogram.toFixed(6)) : null,
     volume,
     volumeMa20,
     volumeRatio: volumeMa20 > 0 ? volume / volumeMa20 : 0,

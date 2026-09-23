@@ -1,6 +1,6 @@
 # Missionen, Markt-Scans und Vorlagen
 
-> **Version:** v0.1.0 (Beta) · **Module:** `src/lib/missionTemplates.ts`,
+> **Version:** v0.2.0 (Beta) · **Module:** `src/lib/missionTemplates.ts`,
 > `src/lib/missionUniverse.ts`, `src/lib/workshop.ts`, `src/lib/seed.ts` ·
 > **UI:** Dashboard → Reiter **🛠 Workshop** → *1 · Mission anlegen*
 
@@ -193,6 +193,11 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    Instrumenten erscheint die Abhilfe (`universe:seed:markets` / `market:sync`).
 5. **Speichern** — `POST` (neu) bzw. `PUT` (bearbeiten). Der Server validiert
    erneut; Budgets außerhalb der Code-Deckel werden abgelehnt.
+6. **Regel prüfen (Schritt 5 des Workshops)** — eigener Reiter, nicht Teil
+   des Missionsformulars. Eine Regel lässt sich dort nur als `DRAFT` anlegen
+   und gegen den Paper-Store backtesten. Die Store-ID (z. B. `BITUNIX:BTCUSDT`)
+   ist nicht das Regel-Symbol. Aktivierung bleibt
+   `POST /api/firm/rules/[id]` mit Admin-Recht (Handbuch 15.4 und 17).
 
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung
 (`src/components/workshop/InfoTip.tsx`), zusätzlich hängt der Text als

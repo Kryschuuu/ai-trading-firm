@@ -29,7 +29,6 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   ruleSignature,
   type RuleSpec,
-  type BacktestResult,
 } from "./ruleEngine";
 import { getLimits } from "./riskGuard";
 import { writeAuditRecord, type AuditWriteOutcome } from "./auditSink";
@@ -479,27 +478,45 @@ export async function listRuleExecutions(
 // Backtests
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function saveBacktest(ruleId: string, result: BacktestResult): Promise<void> {
+/**
+ * Persistenz eines Regel-Backtests. `from`/`to` sind Kerzenzeiten, nicht
+ * `new Date()`. `detail.executionModel` unterscheidet paper und reference;
+ * alte Zeilen ohne das Feld gelten als reference (unbekannt ≠ paper).
+ */
+export type SavedBacktestInput = {
+  symbol: string;
+  timeframe: string;
+  trades: number;
+  wins: number;
+  pnl: number;
+  profitFactor: number | null;
+  maxDrawdownPct: number;
+  from: Date;
+  to: Date;
+  detail: unknown;
+};
+
+export async function saveBacktest(ruleId: string, input: SavedBacktestInput): Promise<void> {
   await db.insert(ruleBacktests).values({
     ruleId,
     missionId: null,
-    symbol: result.symbol,
-    timeframe: result.timeframe,
-    from: new Date(),
-    to: new Date(),
-    trades: result.stats.trades,
-    wins: result.stats.wins,
-    pnl: String(result.stats.pnl),
-    profitFactor: result.stats.profitFactor != null ? String(result.stats.profitFactor) : null,
-    maxDrawdownPct: String(result.stats.maxDrawdownPct),
-    detail: result as unknown as object,
+    symbol: input.symbol,
+    timeframe: input.timeframe,
+    from: input.from,
+    to: input.to,
+    trades: input.trades,
+    wins: input.wins,
+    pnl: String(input.pnl),
+    profitFactor: input.profitFactor != null ? String(input.profitFactor) : null,
+    maxDrawdownPct: String(input.maxDrawdownPct),
+    detail: input.detail as object,
   });
   await ruleAudit("RULE_BACKTESTED", "INFO", {
     ruleId,
-    symbol: result.symbol,
-    trades: result.stats.trades,
-    pnl: result.stats.pnl,
-    profitFactor: result.stats.profitFactor,
+    symbol: input.symbol,
+    trades: input.trades,
+    pnl: input.pnl,
+    profitFactor: input.profitFactor,
   });
 }
 
