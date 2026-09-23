@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen Live-Broker-Adapter im Auslieferungszustand. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-**Version:** `v1.73.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v1.73.1` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
 **Sitzungsdauer v1.39.0:** Die Browser-Sitzung läuft bis zum Fenster-Schließen und
 verlängert sich selbst; `GET /api/auth/status` zeigt im Dashboard, ob Firm-Tokens
 eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
@@ -77,6 +77,8 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[DRAWDOWN_SCALING.md](DRAWDOWN_SCALING.md)** | Hysteretisches Drawdown-Risk-Scaling: reconcilte Equity gegen persistierten High-Water-Mark, monotone Kurve mit Soft/Hard-Schwelle + optionaler PAUSE, sofortige Degradation, Recovery nur nach Cooldown + Bestätigungen, cashflow-neutrale HWM-Führung, fail-closed ohne Equity/Reconciliation, `monitor`/`active`/`off`-Rollout, idempotente Snapshot-Persistenz `dsc1:<sha256>` und Neustart-Rekonstruktion (RMA-P5-04, v1.68.0) |
 | **[SIGNAL_DECAY.md](SIGNAL_DECAY.md)** | Versionierte Signal-Decay-Exits: unveränderlicher Entry-Snapshot, point-in-time Current-Signal, Klassen-Policy default-off, Hysterese, `SIGNAL_DECAY` nach den Safety-Exits, Monitor-Counterfactual, Live und Backtest teilen `decideExit` (RMA-P5-05, v1.69.0) |
 | **[POST_ONLY_FALLBACK.md](POST_ONLY_FALLBACK.md)** | Post-Only-Ausführung mit Market-Fallback: versionierte Maker-Policy `eop1:<sha256>`, State-Machine mit bounded Repricing, Fallback nur per Opt-in nach bestätigtem Cancel, Venue-Capabilities ohne stilles Dropping, harte Gates, fill-genaue Restmenge, deterministische Paper-Simulation, append-only Persistenz (RMA-P4-02, v1.70.0) |
+| **[TWAP_EXECUTION.md](TWAP_EXECUTION.md)** | TWAP- und Depth-aware Execution: persistentes Eltern-Intent, deterministischer Slice-Plan, Depth-/Participation-Gates, Kinder über P4.2 ohne Market-Chase, Shortfall-Benchmark, Flag `TWAP_EXECUTION_ENABLED` (RMA-P4-03, v1.71.0) |
+| **[DEVILS_ADVOCATE.md](DEVILS_ADVOCATE.md)** | Strukturierter Devil’s-Advocate-Agent: Schema `da1`, deterministischer Disagreement-Score, fail-closed Abstention, Shadow Mode, Step `07b` (RMA-P3-03, v1.66.0) |
 | **[MONTE_CARLO.md](MONTE_CARLO.md)** | Reproduzierbare Monte-Carlo-/Trade-Resampling-Analyse: IID-/Moving-/Stationary-Block-Bootstrap über das verifizierte Trade-Ledger, First-Order-Kostenstress, Quantile p05/p50/p95 (End-Equity, MaxDD, Ruin, Sharpe, Losing Streak) + Exceedance/MCSE, deterministischer Seed `mulberry32-v1`, idempotente bounded Persistenz `mcs1:<sha256>`, CLI + Read-API, keine Live-Risikofreigabe (RMA-P6-02, v1.72.0) |
 | **[STRATEGY_LIFECYCLE.md](STRATEGY_LIFECYCLE.md)** | Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates: 9-Zustands-State-Machine, immutable Evidence `sle1:`, versionierte Promotion-Gates, Drift-Segmente Performance/Risk/Execution/Data Quality, automatische Degrationsleiter, Order-Gate `LIFECYCLE_GATE_DENY`, feature-geflaggt `STRATEGY_LIFECYCLE_MODE` (RMA-P1-05, v1.73.0) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
@@ -101,7 +103,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | [audits/2026-09-05-security-review-gpt01/](audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 bis SEC-10 (Session-Autorisierung, GETs, next/ws, Rule-Audit, Env-Fallback) | SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | [audits/2026-09-08-arena-prompts/](audits/2026-09-08-arena-prompts/) | Arena-Review-Serie (Prompts) — RESTORE-01: Restore des Firmenzustands pro Aufrufer | RESTORE-01 FIXED v1.36.37 |
 | [audits/2026-09-18-feature-gap/](audits/2026-09-18-feature-gap/) | Feature-Gap-Audit (Co-Audit) — 10 Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie | **Abgeschlossen (v1.51.1): alle 10 FIXED** — GAP-02 v1.42.0, GAP-03 v1.43.0, GAP-05 v1.44.0, GAP-10 v1.45.0, GAP-06 v1.46.0, GAP-07 v1.47.0, GAP-04 v1.48.0 (+ Audit-Katalog-Nachtrag v1.51.1), GAP-08 v1.49.0, GAP-09 v1.50.0, GAP-01 v1.51.0 (PRs #136–#145); offen nur ENV-01 (Test-Isolation, LOW) — [Prompt-Serie](audits/2026-09-18-feature-gap/prompts/README.md), Stand in [TRACKING.md](audits/2026-09-18-feature-gap/remediation/TRACKING.md), Abschluss-Abgleich in [STATUS-REVIEW-2026-09-19.md](audits/2026-09-18-feature-gap/remediation/STATUS-REVIEW-2026-09-19.md) |
-| [audits/2026-09-20-roadmap-audit/](audits/2026-09-20-roadmap-audit/) | 25-Punkte-Roadmap-Audit für Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **IN ARBEIT (v1.73.0): 4 VERIFIED, 17 FIXED (inkl. RMA-P1-05 v1.73.0), 2 PARTIAL, 2 OPEN** — [vollständiger Bericht](audits/2026-09-20-roadmap-audit/report.md), [21 eigenständige Umsetzungs-Prompts](audits/2026-09-20-roadmap-audit/prompts/README.md), [Tracking](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md) |
+| [audits/2026-09-20-roadmap-audit/](audits/2026-09-20-roadmap-audit/) | 25-Punkte-Roadmap-Audit für Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **CLOSED (v1.73.0): 4 VERIFIED, 21 FIXED, 0 PARTIAL, 0 OPEN** — [vollständiger Bericht](audits/2026-09-20-roadmap-audit/report.md), [21 eigenständige Umsetzungs-Prompts](audits/2026-09-20-roadmap-audit/prompts/README.md), [Tracking](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md) |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
@@ -234,7 +236,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 │   │   ├── 2026-09-05-security-review-gpt01/  ← Security-Audit (SEC-01–10 FIXED bis v1.36.36)
 │   │   ├── 2026-09-08-arena-prompts/  ← Arena-Review-Serie (RESTORE-01 FIXED v1.36.37)
 │   │   ├── 2026-09-18-feature-gap/    ← Feature-Gap-Audit (GAP-01…GAP-10, abgeschlossen v1.51.1)
-│   │   └── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Umsetzungs-Prompts (OPEN)
+│   │   └── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Umsetzungs-Prompts (CLOSED v1.73.0)
 │   ├── peer-reviews/         ← NEU: Peer-Review-Patches gesammelt
 │   │   ├── README.md
 │   │   ├── 2026-08-26-live-trading-readiness/
@@ -277,4 +279,4 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v1.73.0` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).
+`v1.73.1` (siehe `package.json` + [../CHANGELOG.md](../CHANGELOG.md)).

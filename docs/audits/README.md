@@ -50,7 +50,7 @@ docs/audits/
 
 | Zyklus | Scope | Status |
 |---|---|---|
-| [2026-09-20-roadmap-audit](2026-09-20-roadmap-audit/README.md) | 25 Komponenten aus Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **OPEN:** 4 VERIFIED, 13 PARTIAL, 8 OPEN; [21 Umsetzungs-Prompts](2026-09-20-roadmap-audit/prompts/README.md) |
+| [2026-09-20-roadmap-audit](2026-09-20-roadmap-audit/README.md) | 25 Komponenten aus Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **CLOSED v1.73.0:** 4 VERIFIED, 21 FIXED; [Tracking](2026-09-20-roadmap-audit/remediation/TRACKING.md), [21 Umsetzungs-Prompts](2026-09-20-roadmap-audit/prompts/README.md) |
 | [2026-09-18-feature-gap](2026-09-18-feature-gap/README.md) | Zehn priorisierte Feature-Gaps | **CLOSED v1.51.1:** alle zehn Findings behoben; ENV-01 bleibt separates Low-Risk-Engineering-Thema |
 
 ### Naming-Konvention

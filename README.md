@@ -4,7 +4,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 
 > **Wichtig:** Das System läuft ausschließlich im **Paper-Trading-Modus**. Es gibt keinen aktiven Live-Broker-Pfad. Kein echtes Geld ist im Spiel — genau so soll man anfangen.
 
-> **Dokumentationsstand:** v1.57.0 (2026-09-21) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), aktueller [25-Punkte-Roadmap-Audit](docs/audits/2026-09-20-roadmap-audit/README.md) mit [21 eigenständigen Umsetzungs-Prompts](docs/audits/2026-09-20-roadmap-audit/prompts/README.md), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
+> **Dokumentationsstand:** v1.73.1 (2026-09-23) · Vollständige code-synchronisierte Docs in [`docs/`](docs/) (neue Struktur: [`docs/audits/`](docs/audits/) + [`docs/peer-reviews/`](docs/peer-reviews/) + [`docs/security/`](docs/security/)), aktueller [25-Punkte-Roadmap-Audit](docs/audits/2026-09-20-roadmap-audit/README.md) (**CLOSED:** 4 VERIFIED + 21 FIXED) mit [21 eigenständigen Umsetzungs-Prompts](docs/audits/2026-09-20-roadmap-audit/prompts/README.md), Task-Tracker in [`docs/ARENA_TASKS.md`](docs/ARENA_TASKS.md), Audit-Report in [`docs/DOCS_SYNC_AUDIT.md`](docs/DOCS_SYNC_AUDIT.md), Setup-Befunde in [`docs/SETUP_BUGS.md`](docs/SETUP_BUGS.md), LAN-/Session-Howto in [`docs/HOWTO_LAN_SESSION.md`](docs/HOWTO_LAN_SESSION.md), Security-Übersicht in [`docs/security/README.md`](docs/security/README.md).
 
 ## Quickstart
 
@@ -284,6 +284,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/DRAWDOWN_SCALING.md` | Hysteretisches Drawdown-Risk-Scaling: reconcilte Equity gegen persistierten High-Water-Mark, monotoner Faktor hart ≤ 1, sofortige Degradation + bestätigte Recovery, optionales PAUSE-Veto für neue Einstiege, cashflow-neutrale HWM-Führung (RMA-P5-04, v1.68.0) |
 | `docs/SIGNAL_DECAY.md` | Versionierte Signal-Decay-Exits: Entry-Snapshot gegen point-in-time Current-Signal, default-off je Klasse, Hysterese, Safety-Exits bleiben vorrangig (RMA-P5-05, v1.69.0) |
 | `docs/POST_ONLY_FALLBACK.md` | Post-Only-Ausführung mit Market-Fallback: versionierte Maker-Policy, State-Machine mit bounded Repricing, Fallback nur per Opt-in nach bestätigtem Cancel, harte Gates, Paper-Simulation (RMA-P4-02, v1.70.0) |
+| `docs/TWAP_EXECUTION.md` | TWAP- und Depth-aware Execution: Parent-/Child-Scheduler, Depth-Gates, kein Market-Chase (RMA-P4-03, v1.71.0) |
 | `docs/STRATEGY_LIFECYCLE.md` | Strategy-Lifecycle & Driftgates: 9-Zustands-Machine, Evidence, Promotion, automatische Degradation, Order-Gate (RMA-P1-05, v1.73.0) |
 | `docs/INSTALL.md` | Installation auf CachyOS, beide Varianten |
 | `docs/CONFIGURATION.md` / `CONFIGURATION.md` | Env-Flags mit sicheren Defaults (kanonisch) |
@@ -296,7 +297,7 @@ Decoupling-Prinzipien: **LLM = Interpretation · Mathematik = Berechnung · Risk
 | `docs/audits/2026-09-05-security-review-gpt01/` | Security-Audit GPT_01: SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | `docs/audits/2026-09-08-arena-prompts/` | Arena-Review-Serie (Prompt 13): RESTORE-01 FIXED v1.36.37 — Restore des Firmenzustands gebündelt, gedeckelt und indexgestützt |
 | `docs/audits/2026-09-18-feature-gap/` | Feature-Gap-Audit (Co-Audit): 10 Lücken (GAP-01…GAP-10), abgeschlossen v1.51.1 |
-| `docs/audits/2026-09-20-roadmap-audit/` | 25-Punkte-Roadmap-Audit: 4 VERIFIED, 17 FIXED (inkl. RMA-P1-05 v1.73.0), 2 PARTIAL, 2 OPEN; 21 vollständige Remediation-Prompts |
+| `docs/audits/2026-09-20-roadmap-audit/` | 25-Punkte-Roadmap-Audit: **CLOSED v1.73.0** — 4 VERIFIED, 21 FIXED, 0 PARTIAL, 0 OPEN; 21 vollständige Remediation-Prompts |
 | `docs/peer-reviews/` | Peer-Review-Patches: gesammelt, verknüpft, nachvollziehbar |
 | `docs/ARENA_TASKS.md` | Task-Tracker (1–12) mit Status, PR, Security, Review |
 | `docs/DOCS_SYNC_AUDIT.md` | Docs-Code-Sync-Audit-Report (Task 12) |

@@ -5,7 +5,7 @@
 **Audit-Basis:** `df3163e` (`main`, Produktversion `v1.51.1`)
 **Audit-PR:** [#148](https://github.com/Kryschuuu/ai-trading-firm/pull/148) vom Branch `arena/01a0bba7-ai-trading-firm`
 **Scope:** Backtesting, Research-Signale, Agenten-Evaluation, Execution, Risiko und Datenfundament
-**Status:** OPEN — 21 konkrete Deltas sind über eigenständige Umsetzungs-Prompts geplant; vier Komponenten sind bereits verifiziert erfüllt.
+**Status:** CLOSED (v1.73.0) — alle 21 Deltas `FIXED`; vier Komponenten waren auf der Audit-Basis `VERIFIED`. SSoT: [`remediation/TRACKING.md`](remediation/TRACKING.md).
 
 > Dieses Audit ersetzt das abgeschlossene Audit
 > [`2026-09-18-feature-gap`](../2026-09-18-feature-gap/README.md) nicht. Es prüft
@@ -17,35 +17,35 @@
 
 | Komponente | Status | Aufwand | Finding | Umsetzungs-Prompt |
 |---|---|---:|---|---|
-| P1.1 Event-Replay mit realistischen Friktionen | PARTIAL | 5–8 PT | [RMA-P1-01](findings/RMA-P1-01-event-replay-frictions.md) | [PROMPT-P1-01](prompts/PROMPT-P1-01-event-replay-frictions.md) |
-| P1.2 90d/30d Walk-Forward | PARTIAL | 4–6 PT | [RMA-P1-02](findings/RMA-P1-02-walk-forward-training.md) | [PROMPT-P1-02](prompts/PROMPT-P1-02-walk-forward-training.md) |
+| P1.1 Event-Replay mit realistischen Friktionen | FIXED (v1.58.0, [#155](https://github.com/Kryschuuu/ai-trading-firm/pull/155)) | 0 PT | [RMA-P1-01](findings/RMA-P1-01-event-replay-frictions.md) | [PROMPT-P1-01](prompts/PROMPT-P1-01-event-replay-frictions.md) |
+| P1.2 90d/30d Walk-Forward | FIXED (v1.60.0, [#158](https://github.com/Kryschuuu/ai-trading-firm/pull/158)) | 0 PT | [RMA-P1-02](findings/RMA-P1-02-walk-forward-training.md) | [PROMPT-P1-02](prompts/PROMPT-P1-02-walk-forward-training.md) |
 | P1.3 Backtest-Kennzahlen | VERIFIED | 0 PT | [RMA-P1-03](findings/RMA-P1-03-backtest-metrics.md) | — |
 | P1.4 `backtest_runs` / `backtest_trades` | FIXED (v1.52.0, [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149)) | 0 PT | [RMA-P1-04](findings/RMA-P1-04-backtest-trades.md) | [PROMPT-P1-04](prompts/PROMPT-P1-04-backtest-trades.md) |
 | P1.5 Backtest↔Paper↔Live-Drift und Strategy-Lifecycle | FIXED (v1.73.0, [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171)) | 0 PT | [RMA-P1-05](findings/RMA-P1-05-lifecycle-drift.md) | [PROMPT-P1-05](prompts/PROMPT-P1-05-lifecycle-drift.md) |
-| P1.6 Trade-Attribution | PARTIAL | 3–5 PT | [RMA-P1-06](findings/RMA-P1-06-trade-attribution.md) | [PROMPT-P1-06](prompts/PROMPT-P1-06-trade-attribution.md) |
-| P2.1 Regime-Erkennung | PARTIAL | 2–4 PT | [RMA-P2-01](findings/RMA-P2-01-regime-detection.md) | [PROMPT-P2-01](prompts/PROMPT-P2-01-regime-detection.md) |
-| P2.2 Perpetual-Daten | PARTIAL | 5–8 PT | [RMA-P2-02](findings/RMA-P2-02-perpetual-data.md) | [PROMPT-P2-02](prompts/PROMPT-P2-02-perpetual-data.md) |
-| P2.3 Multi-Timeframe-Konfluenz | PARTIAL | 3–5 PT | [RMA-P2-03](findings/RMA-P2-03-multi-timeframe-confluence.md) | [PROMPT-P2-03](prompts/PROMPT-P2-03-multi-timeframe-confluence.md) |
-| P2.4 Cross-Sectional Ranking | OPEN | 3–5 PT | [RMA-P2-04](findings/RMA-P2-04-cross-sectional-ranking.md) | [PROMPT-P2-04](prompts/PROMPT-P2-04-cross-sectional-ranking.md) |
-| P2.5 Strukturierte Sentiment-Outputs | PARTIAL | 2–3 PT | [RMA-P2-05](findings/RMA-P2-05-structured-sentiment.md) | [PROMPT-P2-05](prompts/PROMPT-P2-05-structured-sentiment.md) |
-| P3.1 Brier Score / Kalibrierung | OPEN | 5–8 PT | [RMA-P3-01](findings/RMA-P3-01-forecast-calibration.md) | [PROMPT-P3-01](prompts/PROMPT-P3-01-forecast-calibration.md) |
-| P3.2 Prompt-Version-Metrikvergleich | PARTIAL | 3–5 PT | [RMA-P3-02](findings/RMA-P3-02-prompt-performance.md) | [PROMPT-P3-02](prompts/PROMPT-P3-02-prompt-performance.md) |
-| P3.3 Devil’s Advocate | FIXED | 2–4 PT | [RMA-P3-03](findings/RMA-P3-03-devils-advocate.md) | [PROMPT-P3-03](prompts/PROMPT-P3-03-devils-advocate.md) |
-| P4.1 Execution-Benchmarking | PARTIAL | 4–6 PT | [RMA-P4-01](findings/RMA-P4-01-execution-benchmarking.md) | [PROMPT-P4-01](prompts/PROMPT-P4-01-execution-benchmarking.md) |
-| P4.2 Post-Only + Timeout + Market-Fallback | PARTIAL | 3–5 PT | [RMA-P4-02](findings/RMA-P4-02-post-only-fallback.md) | [PROMPT-P4-02](prompts/PROMPT-P4-02-post-only-fallback.md) |
-| P4.3 TWAP / Depth-Ausführung | OPEN | 5–8 PT | [RMA-P4-03](findings/RMA-P4-03-twap-depth.md) | [PROMPT-P4-03](prompts/PROMPT-P4-03-twap-depth.md) |
-| P5.1 Volatility Targeting | PARTIAL | 2–4 PT | [RMA-P5-01](findings/RMA-P5-01-volatility-targeting.md) | [PROMPT-P5-01](prompts/PROMPT-P5-01-volatility-targeting.md) |
+| P1.6 Trade-Attribution | FIXED (v1.57.0, [#154](https://github.com/Kryschuuu/ai-trading-firm/pull/154)) | 0 PT | [RMA-P1-06](findings/RMA-P1-06-trade-attribution.md) | [PROMPT-P1-06](prompts/PROMPT-P1-06-trade-attribution.md) |
+| P2.1 Regime-Erkennung | FIXED (v1.61.0, [#159](https://github.com/Kryschuuu/ai-trading-firm/pull/159)) | 0 PT | [RMA-P2-01](findings/RMA-P2-01-regime-detection.md) | [PROMPT-P2-01](prompts/PROMPT-P2-01-regime-detection.md) |
+| P2.2 Perpetual-Daten | FIXED (v1.54.0, [#151](https://github.com/Kryschuuu/ai-trading-firm/pull/151)) | 0 PT | [RMA-P2-02](findings/RMA-P2-02-perpetual-data.md) | [PROMPT-P2-02](prompts/PROMPT-P2-02-perpetual-data.md) |
+| P2.3 Multi-Timeframe-Konfluenz | FIXED (v1.62.0, [#160](https://github.com/Kryschuuu/ai-trading-firm/pull/160)) | 0 PT | [RMA-P2-03](findings/RMA-P2-03-multi-timeframe-confluence.md) | [PROMPT-P2-03](prompts/PROMPT-P2-03-multi-timeframe-confluence.md) |
+| P2.4 Cross-Sectional Ranking | FIXED (v1.63.0, [#161](https://github.com/Kryschuuu/ai-trading-firm/pull/161)) | 0 PT | [RMA-P2-04](findings/RMA-P2-04-cross-sectional-ranking.md) | [PROMPT-P2-04](prompts/PROMPT-P2-04-cross-sectional-ranking.md) |
+| P2.5 Strukturierte Sentiment-Outputs | FIXED (v1.64.0, [#162](https://github.com/Kryschuuu/ai-trading-firm/pull/162)) | 0 PT | [RMA-P2-05](findings/RMA-P2-05-structured-sentiment.md) | [PROMPT-P2-05](prompts/PROMPT-P2-05-structured-sentiment.md) |
+| P3.1 Brier Score / Kalibrierung | FIXED (v1.55.0, [#152](https://github.com/Kryschuuu/ai-trading-firm/pull/152)) | 0 PT | [RMA-P3-01](findings/RMA-P3-01-forecast-calibration.md) | [PROMPT-P3-01](prompts/PROMPT-P3-01-forecast-calibration.md) |
+| P3.2 Prompt-Version-Metrikvergleich | FIXED (v1.65.0, [#163](https://github.com/Kryschuuu/ai-trading-firm/pull/163)) | 0 PT | [RMA-P3-02](findings/RMA-P3-02-prompt-performance.md) | [PROMPT-P3-02](prompts/PROMPT-P3-02-prompt-performance.md) |
+| P3.3 Devil’s Advocate | FIXED (v1.66.0, [#164](https://github.com/Kryschuuu/ai-trading-firm/pull/164)) | 0 PT | [RMA-P3-03](findings/RMA-P3-03-devils-advocate.md) | [PROMPT-P3-03](prompts/PROMPT-P3-03-devils-advocate.md) |
+| P4.1 Execution-Benchmarking | FIXED (v1.56.0, [#153](https://github.com/Kryschuuu/ai-trading-firm/pull/153)) | 0 PT | [RMA-P4-01](findings/RMA-P4-01-execution-benchmarking.md) | [PROMPT-P4-01](prompts/PROMPT-P4-01-execution-benchmarking.md) |
+| P4.2 Post-Only + Timeout + Market-Fallback | FIXED (v1.70.0, [#168](https://github.com/Kryschuuu/ai-trading-firm/pull/168)) | 0 PT | [RMA-P4-02](findings/RMA-P4-02-post-only-fallback.md) | [PROMPT-P4-02](prompts/PROMPT-P4-02-post-only-fallback.md) |
+| P4.3 TWAP / Depth-Ausführung | FIXED (v1.71.0, [#169](https://github.com/Kryschuuu/ai-trading-firm/pull/169)) | 0 PT | [RMA-P4-03](findings/RMA-P4-03-twap-depth.md) | [PROMPT-P4-03](prompts/PROMPT-P4-03-twap-depth.md) |
+| P5.1 Volatility Targeting | FIXED (v1.67.0, [#165](https://github.com/Kryschuuu/ai-trading-firm/pull/165)) | 0 PT | [RMA-P5-01](findings/RMA-P5-01-volatility-targeting.md) | [PROMPT-P5-01](prompts/PROMPT-P5-01-volatility-targeting.md) |
 | P5.2 Fractional Kelly | VERIFIED | 0 PT | [RMA-P5-02](findings/RMA-P5-02-fractional-kelly.md) | — |
 | P5.3 Korrelations-/Cluster-Limits | VERIFIED | 0 PT | [RMA-P5-03](findings/RMA-P5-03-cluster-limits.md) | — |
-| P5.4 Drawdown-Scaling | PARTIAL | 2–3 PT | [RMA-P5-04](findings/RMA-P5-04-drawdown-scaling.md) | [PROMPT-P5-04](prompts/PROMPT-P5-04-drawdown-scaling.md) |
-| P5.5 Signal-Decay-Exits | OPEN | 3–5 PT | [RMA-P5-05](findings/RMA-P5-05-signal-decay-exits.md) | [PROMPT-P5-05](prompts/PROMPT-P5-05-signal-decay-exits.md) |
-| P6.1 Point-in-Time Feature Store | OPEN | 7–12 PT | [RMA-P6-01](findings/RMA-P6-01-point-in-time-feature-store.md) | [PROMPT-P6-01](prompts/PROMPT-P6-01-point-in-time-feature-store.md) |
-| P6.2 Monte-Carlo-Simulation | OPEN | 3–5 PT | [RMA-P6-02](findings/RMA-P6-02-monte-carlo.md) | [PROMPT-P6-02](prompts/PROMPT-P6-02-monte-carlo.md) |
+| P5.4 Drawdown-Scaling | FIXED (v1.68.0, [#166](https://github.com/Kryschuuu/ai-trading-firm/pull/166)) | 0 PT | [RMA-P5-04](findings/RMA-P5-04-drawdown-scaling.md) | [PROMPT-P5-04](prompts/PROMPT-P5-04-drawdown-scaling.md) |
+| P5.5 Signal-Decay-Exits | FIXED (v1.69.0, [#167](https://github.com/Kryschuuu/ai-trading-firm/pull/167)) | 0 PT | [RMA-P5-05](findings/RMA-P5-05-signal-decay-exits.md) | [PROMPT-P5-05](prompts/PROMPT-P5-05-signal-decay-exits.md) |
+| P6.1 Point-in-Time Feature Store | FIXED (v1.53.0, [#150](https://github.com/Kryschuuu/ai-trading-firm/pull/150)) | 0 PT | [RMA-P6-01](findings/RMA-P6-01-point-in-time-feature-store.md) | [PROMPT-P6-01](prompts/PROMPT-P6-01-point-in-time-feature-store.md) |
+| P6.2 Monte-Carlo-Simulation | FIXED (v1.72.0, [#170](https://github.com/Kryschuuu/ai-trading-firm/pull/170)) | 0 PT | [RMA-P6-02](findings/RMA-P6-02-monte-carlo.md) | [PROMPT-P6-02](prompts/PROMPT-P6-02-monte-carlo.md) |
 | P6.3 Data-Quality-Checks | VERIFIED | 0 PT | [RMA-P6-03](findings/RMA-P6-03-data-quality.md) | — |
 
-**Verteilung (Audit-Basis):** 4 VERIFIED · 13 PARTIAL · 8 OPEN.
-**Stand v1.52.0:** 4 VERIFIED · **1 FIXED** (RMA-P1-04) · 12 PARTIAL · 8 OPEN. **Stand v1.73.0:** Status-SSoT [remediation/TRACKING.md](remediation/TRACKING.md) inkl. **RMA-P1-05 FIXED**.
-**Schätzung:** 76–124 PT für alle Deltas bei sequenzieller Umsetzung (Audit-Basis); davon 2–3 PT durch RMA-P1-04 erledigt.
+**Verteilung (Audit-Basis `df3163e` / v1.51.1):** 4 VERIFIED · 13 PARTIAL · 8 OPEN.
+**Stand v1.73.0:** **4 VERIFIED · 21 FIXED · 0 PARTIAL · 0 OPEN** — Status-SSoT [`remediation/TRACKING.md`](remediation/TRACKING.md). Zyklus CLOSED.
+**Schätzung:** 76–124 PT für alle Deltas (Audit-Basis); Restaufwand jetzt 0 PT.
 
 ## TOP-3-Gating-Faktoren
 

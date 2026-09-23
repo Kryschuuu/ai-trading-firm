@@ -29,10 +29,11 @@ PARTIAL-/OPEN-Befunde besitzen einen eigenständigen Implementierungs-Prompt.
 | **Gesamt** | **4** | **13** | **8** | **76–124 PT** |
 
 Die vollständige 25-Zeilen-Tabelle mit Links steht in [`README.md`](README.md).
+Aktueller Remediation-Stand (v1.73.0): **4 VERIFIED · 21 FIXED · 0 PARTIAL · 0 OPEN** — SSoT [`remediation/TRACKING.md`](remediation/TRACKING.md). Die folgenden Abschnitte bewahren den Audit-Ist-Stand der Basis `df3163e` und verweisen auf die Fixes.
 
 ## 3. Priorität 1 — belastbarer Backtest und Trade-Wahrheit
 
-### P1.1 Event-Replay mit Friktionen — PARTIAL
+### P1.1 Event-Replay mit Friktionen — FIXED (v1.58.0)
 
 `runMultiAssetBacktest()` verarbeitet sortierte Bar-Events deterministisch;
 `createPaperExecutionRuntime()` modelliert über `fillEntry()`/`fillExit()`
@@ -46,7 +47,9 @@ zeitpunktgenaues Perp-Replay.
 
 → [Detail](findings/RMA-P1-01-event-replay-frictions.md) · [Prompt](prompts/PROMPT-P1-01-event-replay-frictions.md)
 
-### P1.2 90d/30d Walk-Forward — PARTIAL
+Behoben in **v1.58.0** (PR [#155](https://github.com/Kryschuuu/ai-trading-firm/pull/155), Commit `5ad77f8`) — siehe Tracking.
+
+### P1.2 90d/30d Walk-Forward — FIXED (v1.60.0)
 
 `computeWalkForwardWindows()` baut konfigurierbare IS-/OOS-Fenster und
 `runWalkForward()` rechnet beide Abschnitte deterministisch. Der gleiche
@@ -56,6 +59,8 @@ unberührten Holdout. Das ist Split-and-Replay, noch kein echter
 Train-Select-Freeze-Test-Prozess.
 
 → [Detail](findings/RMA-P1-02-walk-forward-training.md) · [Prompt](prompts/PROMPT-P1-02-walk-forward-training.md)
+
+Behoben in **v1.60.0** (PR [#158](https://github.com/Kryschuuu/ai-trading-firm/pull/158), Commit `8fc03a0`) — siehe Tracking.
 
 ### P1.3 Kennzahlen — VERIFIED
 
@@ -67,7 +72,7 @@ und in diesem PR korrigiert; die Roadmap-Komponente als Ganzes ist vorhanden.
 
 → [Detail](findings/RMA-P1-03-backtest-metrics.md)
 
-### P1.4 Persistente Runs und Trades — PARTIAL
+### P1.4 Persistente Runs und Trades — FIXED (v1.52.0)
 
 `backtest_runs`, `insertBacktestRun()` und die Backtest-APIs persistieren
 Run-Konfiguration, Metriken, Hashes und Zeitfenster. Ein relationaler
@@ -76,6 +81,8 @@ Attributionsreferenzen fehlt. Trade-Hashes beweisen Reproduzierbarkeit, ersetzen
 aber keine abfragbare Trade-Wahrheitsquelle.
 
 → [Detail](findings/RMA-P1-04-backtest-trades.md) · [Prompt](prompts/PROMPT-P1-04-backtest-trades.md)
+
+Behoben in **v1.52.0** (PR [#149](https://github.com/Kryschuuu/ai-trading-firm/pull/149), Commit `88161dc`) — siehe Tracking.
 
 ### P1.5 Lifecycle und Backtest↔Paper↔Live-Drift — FIXED (v1.73.0)
 
@@ -89,7 +96,7 @@ Rule-Lifecycle ist nicht dasselbe wie evidenzbasierte Promotion.
 
 Behoben in **v1.73.0** (PR [#171](https://github.com/Kryschuuu/ai-trading-firm/pull/171), Commit `a88b5c5`) — siehe Tracking.
 
-### P1.6 Trade-Attribution — PARTIAL
+### P1.6 Trade-Attribution — FIXED (v1.57.0)
 
 Das Trade-Journal speichert Decision Snapshots, Votes sowie Proposal-/Rule-
 Zuordnung und berechnet gruppierte Agentenstatistiken. Es fehlt eine
@@ -100,9 +107,11 @@ oder deterministisch definierte PnL-Attribution.
 
 → [Detail](findings/RMA-P1-06-trade-attribution.md) · [Prompt](prompts/PROMPT-P1-06-trade-attribution.md)
 
+Behoben in **v1.57.0** (PR [#154](https://github.com/Kryschuuu/ai-trading-firm/pull/154), Commit `fd7fdbc`) — siehe Tracking.
+
 ## 4. Priorität 2 — Research-Signale
 
-### P2.1 Regime-Erkennung — PARTIAL
+### P2.1 Regime-Erkennung — FIXED (v1.61.0)
 
 `classifyMarketRegime()`, `MarketRegimeStateMachine` und `applyRegimeGate()`
 liefern Trend-/Range-/High-Vol-/Crash-Regime mit Hysterese und produktivem
@@ -112,7 +121,9 @@ OHLCV-basiert.
 
 → [Detail](findings/RMA-P2-01-regime-detection.md) · [Prompt](prompts/PROMPT-P2-01-regime-detection.md)
 
-### P2.2 Perpetual-Daten — PARTIAL
+Behoben in **v1.61.0** (PR [#159](https://github.com/Kryschuuu/ai-trading-firm/pull/159), Commit `2cd5aed`) — siehe Tracking.
+
+### P2.2 Perpetual-Daten — FIXED (v1.54.0)
 
 Funding- und Open-Interest-Faktoren sind im Scanner modelliert und das
 Paper-Ledger kann Funding verbuchen. Adapter liefern jedoch keine
@@ -122,7 +133,9 @@ reproduzierbar.
 
 → [Detail](findings/RMA-P2-02-perpetual-data.md) · [Prompt](prompts/PROMPT-P2-02-perpetual-data.md)
 
-### P2.3 Multi-Timeframe-Konfluenz — PARTIAL
+Behoben in **v1.54.0** (PR [#151](https://github.com/Kryschuuu/ai-trading-firm/pull/151), Commit `985b0a8`) — siehe Tracking.
+
+### P2.3 Multi-Timeframe-Konfluenz — FIXED (v1.62.0)
 
 Der technische Analyst fordert Multi-Timeframe-Views an, der Marketdata-Store
 kann mehrere Timeframes halten, und Artefakte werden versioniert. Eine
@@ -132,7 +145,9 @@ ist nicht gleich reproduzierbare MTF-Feature-Berechnung.
 
 → [Detail](findings/RMA-P2-03-multi-timeframe-confluence.md) · [Prompt](prompts/PROMPT-P2-03-multi-timeframe-confluence.md)
 
-### P2.4 Cross-Sectional Momentum Ranking — OPEN
+Behoben in **v1.62.0** (PR [#160](https://github.com/Kryschuuu/ai-trading-firm/pull/160), Commit `4ffee0d`) — siehe Tracking.
+
+### P2.4 Cross-Sectional Momentum Ranking — FIXED (v1.63.0)
 
 Der Scanner rangiert Instrumente nach einem gewichteten Multi-Faktor-Score.
 Das ist ein Querschnittsranking, aber kein dedizierter, universumsweit
@@ -141,7 +156,9 @@ Liquidity-Eligibility und as-of-sicherer Persistenz.
 
 → [Detail](findings/RMA-P2-04-cross-sectional-ranking.md) · [Prompt](prompts/PROMPT-P2-04-cross-sectional-ranking.md)
 
-### P2.5 Strukturierte Sentiment-Outputs — PARTIAL
+Behoben in **v1.63.0** (PR [#161](https://github.com/Kryschuuu/ai-trading-firm/pull/161), Commit `c03ee05`) — siehe Tracking.
+
+### P2.5 Strukturierte Sentiment-Outputs — FIXED (v1.64.0)
 
 News- und Analystenpfade normalisieren Richtung, Confidence und These in JSON.
 Es fehlen belastbare Felder für Zeithorizont, Ereignistyp, Quellenabdeckung,
@@ -150,9 +167,11 @@ Outcome-Link zur späteren Kalibrierung.
 
 → [Detail](findings/RMA-P2-05-structured-sentiment.md) · [Prompt](prompts/PROMPT-P2-05-structured-sentiment.md)
 
+Behoben in **v1.64.0** (PR [#162](https://github.com/Kryschuuu/ai-trading-firm/pull/162), Commit `8ca2fab`) — siehe Tracking.
+
 ## 5. Priorität 3 — Agenten-Evaluation
 
-### P3.1 Brier Score und Kalibrierung — OPEN
+### P3.1 Brier Score und Kalibrierung — FIXED (v1.55.0)
 
 Confidence-Werte werden persistiert, aber nicht als zeitgebundene probabilistische
 Forecasts mit binärem oder kategorialem Outcome aufgelöst. Ohne
@@ -161,7 +180,9 @@ Kalibrierungsmessung möglich.
 
 → [Detail](findings/RMA-P3-01-forecast-calibration.md) · [Prompt](prompts/PROMPT-P3-01-forecast-calibration.md)
 
-### P3.2 Prompt-Version-Metrikvergleich — PARTIAL
+Behoben in **v1.55.0** (PR [#152](https://github.com/Kryschuuu/ai-trading-firm/pull/152), Commit `c7f9c50`) — siehe Tracking.
+
+### P3.2 Prompt-Version-Metrikvergleich — FIXED (v1.65.0)
 
 Agenten und Regelkonfigurationen sind versioniert; Analysen und Journal-Votes
 werden persistiert. Die konkrete Prompt-Version beziehungsweise ein stabiler
@@ -171,6 +192,8 @@ PnL oder Kosten pro Prompt-Version.
 
 → [Detail](findings/RMA-P3-02-prompt-performance.md) · [Prompt](prompts/PROMPT-P3-02-prompt-performance.md)
 
+Behoben in **v1.65.0** (PR [#163](https://github.com/Kryschuuu/ai-trading-firm/pull/163), Commit `040eb9b`) — siehe Tracking.
+
 ### P3.3 Devil’s Advocate — FIXED (v1.66.0)
 
 Einführung einer unabhängigen, adversarialen Kontrollinstanz (`DEVILS_ADVOCATE`, Step `07b-devils-advocate`) mit strukturiertem Falsifikations-Schema (`da1`), Gegenhypothese, Falsifikatoren, Failure Modes, deterministischem Disagreement-Score und revisioniertem Snapshot-Eintrag.
@@ -179,7 +202,7 @@ Einführung einer unabhängigen, adversarialen Kontrollinstanz (`DEVILS_ADVOCATE
 
 ## 6. Priorität 4 — Execution
 
-### P4.1 Execution-Benchmarking — PARTIAL
+### P4.1 Execution-Benchmarking — FIXED (v1.56.0)
 
 Broker-Resultate und Auditpfade enthalten Fills, Gebühren sowie teilweise
 Slippage-/Latenzinformationen. Es fehlt ein venueübergreifendes
@@ -189,7 +212,9 @@ Vergleichen zwischen Backtest, Paper und Live.
 
 → [Detail](findings/RMA-P4-01-execution-benchmarking.md) · [Prompt](prompts/PROMPT-P4-01-execution-benchmarking.md)
 
-### P4.2 Post-Only + Timeout + Market-Fallback — PARTIAL
+Behoben in **v1.56.0** (PR [#153](https://github.com/Kryschuuu/ai-trading-firm/pull/153)) — siehe Tracking.
+
+### P4.2 Post-Only + Timeout + Market-Fallback — FIXED (v1.70.0)
 
 Limitorders und venue-spezifische Ordertypen sind vorhanden. Keine gemeinsame,
 persistierbare Policy steuert Post-Only-Reject, TTL, Cancel/Replace und einen
@@ -197,7 +222,9 @@ risikobegrenzten Market-Fallback idempotent über Alpaca, Bitunix und Paper.
 
 → [Detail](findings/RMA-P4-02-post-only-fallback.md) · [Prompt](prompts/PROMPT-P4-02-post-only-fallback.md)
 
-### P4.3 TWAP / Depth — OPEN
+Behoben in **v1.70.0** (PR [#168](https://github.com/Kryschuuu/ai-trading-firm/pull/168), Commit `548e901`) — siehe Tracking.
+
+### P4.3 TWAP / Depth — FIXED (v1.71.0)
 
 Orderbuch-Snapshots können abgefragt werden, aber es existiert kein Child-Order-
 Scheduler, Participation Cap, Depth-Impact-Modell oder persistenter Parent-
@@ -206,9 +233,11 @@ Ausführung.
 
 → [Detail](findings/RMA-P4-03-twap-depth.md) · [Prompt](prompts/PROMPT-P4-03-twap-depth.md)
 
+Behoben in **v1.71.0** (PR [#169](https://github.com/Kryschuuu/ai-trading-firm/pull/169), Commit `624e3fe`) — siehe Tracking.
+
 ## 7. Priorität 5 — Risiko und Exits
 
-### P5.1 Volatility Targeting — PARTIAL
+### P5.1 Volatility Targeting — FIXED (v1.67.0)
 
 Adaptive Risk dämpft globale Limits anhand diskreter Volatilitätsregime. Das
 ist sinnvolle Risikoadaption, aber kein kontinuierliches Portfolio-Volatility-
@@ -216,6 +245,8 @@ Target mit prognostizierter Kovarianz, Leverage-Bounds und nachgewiesener
 Realisierungsabweichung.
 
 → [Detail](findings/RMA-P5-01-volatility-targeting.md) · [Prompt](prompts/PROMPT-P5-01-volatility-targeting.md)
+
+Behoben in **v1.67.0** (PR [#165](https://github.com/Kryschuuu/ai-trading-firm/pull/165)) — siehe Tracking.
 
 ### P5.2 Fractional Kelly — VERIFIED
 
@@ -234,7 +265,7 @@ Cluster werden im Portfolio-/Zykluspfad berechnet und weitergereicht.
 
 → [Detail](findings/RMA-P5-03-cluster-limits.md)
 
-### P5.4 Drawdown-Scaling — PARTIAL
+### P5.4 Drawdown-Scaling — FIXED (v1.68.0)
 
 Max-Drawdown wird gemessen und Daily-Loss-/Risk-Ceilings existieren. Eine
 kontinuierliche, hysteretische Skalierungsfunktion aus aktuellem
@@ -243,7 +274,9 @@ fehlt.
 
 → [Detail](findings/RMA-P5-04-drawdown-scaling.md) · [Prompt](prompts/PROMPT-P5-04-drawdown-scaling.md)
 
-### P5.5 Signal-Decay-Exits — OPEN
+Behoben in **v1.68.0** (PR [#166](https://github.com/Kryschuuu/ai-trading-firm/pull/166), Commit `ba0cf1d`) — siehe Tracking.
+
+### P5.5 Signal-Decay-Exits — FIXED (v1.69.0)
 
 `decideExit()` unterstützt SL, TP, Trailing und Time Stop. Der ursprüngliche
 Signalzustand wird aber nicht gegen einen aktuellen Score beziehungsweise eine
@@ -253,7 +286,7 @@ Halbwertszeit geprüft; daher gibt es keinen Exit bei Alpha-Verfall.
 
 ## 8. Priorität 6 — Datenfundament und Robustheit
 
-### P6.1 Point-in-Time Feature Store — OPEN
+### P6.1 Point-in-Time Feature Store — FIXED (v1.53.0)
 
 Der Historical Store ist zeit- und timeframebewusst und speichert Provenance.
 Er speichert jedoch Rohkerzen, keine versionierten Featurewerte mit
@@ -262,7 +295,9 @@ Ein Candle Store verhindert Look-ahead nicht automatisch auf Feature-Ebene.
 
 → [Detail](findings/RMA-P6-01-point-in-time-feature-store.md) · [Prompt](prompts/PROMPT-P6-01-point-in-time-feature-store.md)
 
-### P6.2 Monte Carlo — OPEN
+Behoben in **v1.53.0** (PR [#150](https://github.com/Kryschuuu/ai-trading-firm/pull/150), Commit `2bf46c8`) — siehe Tracking.
+
+### P6.2 Monte Carlo — FIXED (v1.72.0)
 
 Es gibt deterministische Backtests und Walk-Forward-Aggregate, aber keine
 Trade-/Block-Resampling-Engine, keine reproduzierbaren Seeds und keine

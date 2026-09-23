@@ -1,9 +1,9 @@
 # RMA-P4-03: TWAP und Depth-aware Execution
 
-- **Antwort:** Ja
-- **Tracking-Status:** `FIXED`
+- **Antwort:** Ja (seit v1.71.0)
+- **Tracking-Status:** `FIXED` (v1.71.0, [#169](https://github.com/Kryschuuu/ai-trading-firm/pull/169), Commit `624e3fe`)
 - **Severity:** `MEDIUM`
-- **Quick Estimate Restaufwand:** **5–8 PT**
+- **Quick Estimate Restaufwand:** **0 PT** (Audit-Schätzung war 5–8 PT)
 - **Umsetzungs-Prompt:** [`PROMPT-P4-03`](../prompts/PROMPT-P4-03-twap-depth.md)
 
 ## Verifizierte Fundstellen

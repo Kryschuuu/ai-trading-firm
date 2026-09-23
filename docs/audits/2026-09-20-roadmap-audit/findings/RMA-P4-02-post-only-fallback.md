@@ -1,9 +1,9 @@
 # RMA-P4-02: Post-Only + Timeout + Market-Fallback
 
-- **Antwort:** Teilweise
-- **Tracking-Status:** `PARTIAL`
+- **Antwort:** Ja (seit v1.70.0)
+- **Tracking-Status:** `FIXED` (v1.70.0, [#168](https://github.com/Kryschuuu/ai-trading-firm/pull/168), Commit `548e901`)
 - **Severity:** `HIGH`
-- **Quick Estimate Restaufwand:** **3–5 PT**
+- **Quick Estimate Restaufwand:** **0 PT** (Audit-Schätzung war 3–5 PT)
 - **Umsetzungs-Prompt:** [`PROMPT-P4-02`](../prompts/PROMPT-P4-02-post-only-fallback.md)
 
 ## Verifizierte Fundstellen
@@ -27,14 +27,21 @@ Limit- und Marketorders sind verfügbar; venueabhängige Parameter können seria
 
 ## Akzeptanzkriterien für `FIXED`
 
-- [ ] Fallback kann niemals mehr als die offene Restmenge handeln
-- [ ] keine Marketorder vor bestätigtem Cancel oder venue-sicherem Replace
-- [ ] Post-Only-Reject ist explizit von sonstigen Rejects unterscheidbar
-- [ ] Restart setzt eine Order idempotent aus persistiertem Zustand fort
+- [x] Fallback kann niemals mehr als die offene Restmenge handeln
+- [x] keine Marketorder vor bestätigtem Cancel oder venue-sicherem Replace
+- [x] Post-Only-Reject ist explizit von sonstigen Rejects unterscheidbar
+- [x] Restart setzt eine Order idempotent aus persistiertem Zustand fort
+
+## Umsetzung (v1.70.0)
+
+- **Execution-Policy-Controller `src/execution/`:** versionierte Maker-Policy `eop1`, State-Machine NEW→…→DONE, Market-Fallback nur Opt-in nach bestätigtem Cancel, Venue-Capabilities ohne stilles Dropping.
+- **Persistenz:** `drizzle/2026-09-22_post_only_fallback.sql` (Workflows/Events/Fills, append-only, CHECK-Constraints).
+- **API:** `/api/firm/execution/policy` hinter `EXECUTION_POLICY_ENABLED` (Default `false`).
+- **Doku:** [`docs/POST_ONLY_FALLBACK.md`](../../../POST_ONLY_FALLBACK.md).
 
 ## Review-Evidenz
 
-- Audit-Basis: Commit `df3163e`, Produktversion `v1.51.1`.
-- Methode: statische Pfad-/Symbolprüfung, Schema- und Testabgleich; keine reine
-  Dokumentationsbehauptung als Implementierungsbeleg.
+- Audit-Basis: Commit `df3163e`, Produktversion `v1.51.1`. Umsetzung auf v1.69.0 → Fix `v1.70.0`.
+- Fix: Commit `548e901`, [PR #168](https://github.com/Kryschuuu/ai-trading-firm/pull/168).
+- Tests: `tests/executionPolicy.unit.test.ts` (35), `tests/executionPolicy.controller.test.ts` (24), `tests/executionPolicy.db.test.ts` (7).
 - Tracking: [`../remediation/TRACKING.md`](../remediation/TRACKING.md)
