@@ -263,6 +263,8 @@ interface InstrumentOutcome {
   tickerEnriched: boolean;
   orderbookEnriched: boolean;
   spreadUnknown: boolean;
+  /** v0.4.0: `bookDepthUsd` blieb `null` (kein/zu dünnes/alte Buch). */
+  bookDepthUnknown: boolean;
   /** Vom Universe-Policy-Ausschluss betroffene Sätze (fachlich, kein Datenfehler). */
   policyExcluded: number;
   /**
@@ -597,6 +599,7 @@ export class MarketDataSyncService {
         tickersEnriched: 0,
         orderbooksEnriched: 0,
         spreadsUnknown: 0,
+        bookDepthMeasured: 0,
         policyExcluded: 0,
         barsByTimeframe: zeroBars,
         instrumentsWithBars: zeroInstruments,
@@ -734,6 +737,7 @@ export class MarketDataSyncService {
     // Werte aus dem persistenten Spread-Cache werden GAR NICHT abgefragt —
     // die Depth-Stage ist der teuerste Request-Typ des Syncs.
     let spreadBySymbol = new Map<string, number | null>();
+    const bookDepthBySymbol = new Map<string, number | null>();
     let orderbookReport: EnrichmentReport = {
       attempted: 0,
       succeeded: 0,
@@ -746,6 +750,12 @@ export class MarketDataSyncService {
       const cached = this.spreadCache?.fresh(instrument.id, cacheNowMs);
       if (cached !== undefined) {
         spreadBySymbol.set(instrument.symbol, cached);
+        // v0.4.0: Tiefe kommt aus DENSELBEN Depth-Call und liegt im Cache
+        // neben dem Spread — beide oder keiner (ein Halb-Artefakt ist nutzlos).
+        bookDepthBySymbol.set(
+          instrument.symbol,
+          this.spreadCache?.freshDepth(instrument.id, cacheNowMs) ?? null,
+        );
         cachedSpreadSymbols += 1;
         return false;
       }
@@ -770,10 +780,19 @@ export class MarketDataSyncService {
         const measured = enrich.spreadBySymbol.get(instrument.symbol);
         if (typeof measured === "number" && Number.isFinite(measured)) {
           this.spreadCache?.record(instrument.id, measured, this.clock());
+          // Tiefe nur in einen vorhandenen Spread-Eintrag schreiben (derselbe
+          // Depth-Call) — ein einsamer depth-Wert wäre ein Halb-Artefakt.
+          const depth = enrich.bookDepthBySymbol.get(instrument.symbol);
+          if (typeof depth === "number" && Number.isFinite(depth)) {
+            this.spreadCache?.recordDepth(instrument.id, depth, this.clock());
+          }
         }
       }
       for (const [symbol, spread] of enrich.spreadBySymbol) {
         spreadBySymbol.set(symbol, spread);
+      }
+      for (const [symbol, depth] of enrich.bookDepthBySymbol) {
+        bookDepthBySymbol.set(symbol, depth);
       }
       orderbookReport = enrich.report;
       for (const f of orderbookReport.failures) {
@@ -846,6 +865,18 @@ export class MarketDataSyncService {
       if (sp === null || sp === undefined) spreadsUnknown += 1;
     }
 
+    // v0.4.0 (IAD-T-06): belastbare Orderbuch-Tiefe (Qualitätsgrenze je Venue).
+    // Der Zähler wandert (wie spread/spolicy/failures) in `finish`→`SyncResult`
+    // und wird in `formatSyncLog` nur bei >0 als Zeile geführt — konsistent zur
+    // bestehenden Zähler-Logik, kein Sonder-Info-Log im Service.
+    let bookDepthMeasured = 0;
+    for (const s of selected) {
+      const depth = bookDepthBySymbol.get(s.symbol);
+      if (typeof depth === "number" && Number.isFinite(depth) && depth > 0) {
+        bookDepthMeasured += 1;
+      }
+    }
+
     // Kontextabhängige Warnung (P1): Spread unavailable → Data-Quality, nicht Kosten
     if (spreadsUnknown > 0) {
       this.logger(
@@ -883,12 +914,14 @@ export class MarketDataSyncService {
       async (instrument) => {
         const volume = volumeBySymbol.get(instrument.symbol) ?? null;
         const spread = spreadBySymbol.get(instrument.symbol) ?? null;
+        const depth = bookDepthBySymbol.get(instrument.symbol) ?? null;
         const outcome = await this.syncInstrumentWithEnrichment(
           key,
           adapter,
           instrument,
           volume,
           spread,
+          depth,
           opts,
           abort,
           lastBarBySeries,
@@ -945,6 +978,7 @@ export class MarketDataSyncService {
       tickersEnriched,
       orderbooksEnriched,
       spreadsUnknown,
+      bookDepthMeasured,
       policyExcluded,
       barsByTimeframe,
       instrumentsWithBars,
@@ -1062,6 +1096,7 @@ export class MarketDataSyncService {
     instrument: MarketInstrument,
     volume24h: number | null,
     spread: number | null,
+    bookDepthUsd: number | null,
     opts: ResolvedSyncOptions,
     aborted: () => boolean,
     lastBarBySeries: ReadonlyMap<string, number>,
@@ -1075,6 +1110,7 @@ export class MarketDataSyncService {
       tickerEnriched: volume24h !== null,
       orderbookEnriched: true, // wird in syncVenue gezählt
       spreadUnknown: spread === null,
+      bookDepthUnknown: bookDepthUsd === null,
       policyExcluded: 0,
       candlesByTimeframe: new Map(),
       freshTimeframes: [],
@@ -1094,6 +1130,7 @@ export class MarketDataSyncService {
           symbol,
           volume24h,
           spread,
+          bookDepthUsd,
           lastSeen: this.clock().toISOString(),
         },
         `sync:${venueKey}`,
@@ -1303,6 +1340,7 @@ export class MarketDataSyncService {
       tickersEnriched: number;
       orderbooksEnriched: number;
       spreadsUnknown: number;
+      bookDepthMeasured: number;
       policyExcluded: number;
       barsByTimeframe: Map<SupportedTimeframe, number>;
       instrumentsWithBars: Map<SupportedTimeframe, number>;
@@ -1370,6 +1408,9 @@ export class MarketDataSyncService {
       tickersEnriched: stats.tickersEnriched,
       orderbooksEnriched: stats.orderbooksEnriched,
       spreadsUnknown: stats.spreadsUnknown,
+      ...(stats.bookDepthMeasured > 0
+        ? { bookDepthMeasured: stats.bookDepthMeasured }
+        : {}),
       policyExcluded: stats.policyExcluded,
       candlesByTimeframe,
       ...(freshTotal > 0 ? { freshCandlesByTimeframe } : {}),
@@ -1540,6 +1581,11 @@ export function formatSyncLog(
     `[market-sync] tickers enriched: ${result.tickersEnriched}`,
     `[market-sync] orderbooks enriched: ${result.orderbooksEnriched}`,
   ];
+  if ((result.bookDepthMeasured ?? 0) > 0) {
+    lines.push(
+      `[market-sync] book depth measured: ${result.bookDepthMeasured} instruments (v0.4.0, Qualitätsgrenze je Venue)`,
+    );
+  }
   const tfs = timeframes.length ? timeframes : [...SYNC_TIMEFRAMES];
   for (const tf of tfs) {
     const stats = result.candlesByTimeframe[tf as SupportedTimeframe];

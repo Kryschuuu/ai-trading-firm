@@ -48,6 +48,14 @@ export const RULE_FIELDS = {
    * zentrale Kosten-/Liquiditätsgröße — hoher Spread frisst die Edge.
    */
   spreadPct: "number",
+  /**
+   * Orderbuch-Tiefe der abriegelnden Seite in Quote-Währung (USDT/USD):
+   * min(Σ bid×qty, Σ ask×qty). null = keine belastbare Tiefe (kein Buch,
+   * zu dünn, unter der Venue-Qualitätsgrenze). Zusammen mit `spreadPct` die
+   * Liquiditätsprüfung des Daytradings — ein enger Spread ohne Tiefe ist
+   * trotzdem teuer, sobald man größenordnungsmäßig handelt.
+   */
+  bookDepthUsd: "number",
 } as const;
 
 export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
@@ -76,4 +84,5 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   macdHist: "MACD-Histogramm",
   vwapPct: "Kurs vs. Tages-VWAP, Prozent (positiv = über dem VWAP)",
   spreadPct: "Spread in Prozent (0,04 = 0,04 % = 4 bp, null = kein Orderbuch)",
+  bookDepthUsd: "Orderbuch-Tiefe der schwächeren Seite in USD (null = keine belastbare Tiefe)",
 };

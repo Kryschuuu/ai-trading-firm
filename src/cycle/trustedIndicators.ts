@@ -8,6 +8,8 @@
 
 import { adx, atr, atrPct, macd, rsi, sessionVwap } from "@/lib/indicators";
 import type { Candle } from "@/lib/marketData";
+import type { MarketInstrument } from "@/universe/types";
+import { bookDepthVerdict } from "@/lib/bookDepthProvenance";
 import type { HistoricalStore } from "@/lib/marketdata/historicalStore";
 
 export const TRUSTED_INDICATOR_VERSION = "trusted-indicators@1";
@@ -36,6 +38,12 @@ export type TrustedReading = {
   vwapPct: number | null;
   /** Spread in Prozent (0.04 = 0,04 % = 4 bp). null = kein Orderbuch. */
   spreadPct: number | null;
+  /**
+   * Orderbuch-Tiefe der abriegelnden Seite in Quote-Währung (v0.4.0).
+   * null = keine belastbare Tiefe (kein Buch oder unter der
+   * Venue-Qualitätsgrenze) — der Analyst darf daraus keine Tiefe erraten.
+   */
+  bookDepthUsd: number | null;
   macd: number | null;
   macdSignal: number | null;
   macdHist: number | null;
@@ -78,7 +86,8 @@ export function readingFromCandles(
   instrumentId: string,
   candles: readonly Candle[],
   asOfMs: number,
-  spread: number | null = null
+  spread: number | null = null,
+  bookDepthUsd: number | null = null
 ): TrustedReading {
   const closes = candles.map((candle) => candle.close);
   // rsi() liefert bei zu wenig Daten still 50. Das darf hier keine Messung werden.
@@ -95,10 +104,38 @@ export function readingFromCandles(
     adx: roundOrNull(adx(candles as Candle[], 14), 2),
     vwapPct: roundOrNull(sessionVwap(candles as Candle[])?.priceVsVwapPct ?? null, 4),
     spreadPct: roundOrNull(spread != null && spread >= 0 && spread <= 0.5 ? spread * 100 : null, 4),
+    bookDepthUsd: roundOrNull(bookDepthUsd != null && bookDepthUsd > 0 ? bookDepthUsd : null, 2),
     macd: roundOrNull(macdValue?.macd ?? null, 6),
     macdSignal: roundOrNull(macdValue?.signal ?? null, 6),
     macdHist: roundOrNull(macdValue?.histogram ?? null, 6),
   };
+}
+
+/**
+ * Liest die belastbare Orderbuch-Tiefe eines Instruments aus der Registry und
+ * prüft sie gegen die Venue-Qualitätsgrenze (v0.4.0, IAD-T-06).
+ *
+ * Die Grenze setzt auf die ERHEBUNG, nicht auf den Messwert: Nur `depth`-Venues
+ * (BINANCE/BITUNIX/KRAKEN) mit ≥ N gemessenen Levels und einem frischen
+ * Snapshot liefern `VERIFIED` — sonst `UNQUALIFIED` und damit `null` heraus
+ * (Regel-Snapshot blockiert, Analyst bekommt keinen erfundenen Wert). Die
+ * Registry-Tiefe selbst ist die abriegelnde Summe `min(bid, ask)`.
+ */
+export function readBookDepth(
+  instrument: MarketInstrument | null | undefined,
+  levels: number | null = null,
+  ageMs: number | null = null,
+): number | null {
+  if (!instrument || typeof instrument.bookDepthUsd !== "number") return null;
+  if (!Number.isFinite(instrument.bookDepthUsd) || instrument.bookDepthUsd <= 0) return null;
+  const verdict = bookDepthVerdict(instrument.venue, {
+    // Default: die Registry-Tiefe gilt als ≥ Mindest-Levels erhoben, wenn die
+    // Erhebung keine expliziten Level-/Alter-Angaben mitführt (sync setzt
+    // beides nicht in den Registry-Vertrag — dort wurde bereits gefiltert).
+    levels: levels ?? Number.MAX_SAFE_INTEGER,
+    maxAgeMs: ageMs,
+  });
+  return verdict === "VERIFIED" ? instrument.bookDepthUsd : null;
 }
 
 export function loadTrustedIndicators(

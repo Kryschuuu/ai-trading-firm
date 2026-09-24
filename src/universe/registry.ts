@@ -151,7 +151,6 @@ export class InstrumentRegistry {
         // `NdjsonStore` hält den absoluten Pfad in `instrumentsPath`.
         // Stat-Prüfung ist billig (kein File-Read) und deckt den
         // Cross-Prozess-Fall ab: CLI schreibt, Server liest.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { statSync, existsSync } = require("node:fs") as typeof import("node:fs");
         const p = this.store.instrumentsPath;
         if (!existsSync(p)) {
@@ -188,7 +187,6 @@ export class InstrumentRegistry {
     this.skippedOnLoad = result.skipped;
     this.loaded = true;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { statSync, existsSync } = require("node:fs") as typeof import("node:fs");
       const p = this.store.instrumentsPath;
       if (existsSync(p)) {
@@ -213,7 +211,6 @@ export class InstrumentRegistry {
       // Nach dem Schreiben Metadaten aktualisieren, damit das nächste
       // `load()` ohne Force den frisch geschriebenen Stand als aktuell
       // erkennt (kein unnötiges Re-Read).
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { statSync } = require("node:fs") as typeof import("node:fs");
       const st = statSync(this.store.instrumentsPath);
       this.lastMtimeMs = st.mtimeMs;
@@ -253,7 +250,7 @@ export class InstrumentRegistry {
    * Konfliktverhalten (Upsert-Merge):
    *   - Angegebene Felder überschreiben den Bestand.
    *   - Nicht angegebene Felder bleiben erhalten (kein Zurücksetzen auf Defaults).
-   *   - `null` bei Metriken (`volume24h`, `spread`, `volatility`) bedeutet
+   *   - `null` bei Metriken (`volume24h`, `spread`, `bookDepthUsd`, `volatility`) bedeutet
    *     „kein neuer Wert“ und lässt den Bestandswert stehen; nur ein
    *     expliziter Zahlenwert überschreibt.
    *   - `lastSeen` wird auf den Eingabewert bzw. „jetzt“ gesetzt.
@@ -443,7 +440,7 @@ export class InstrumentRegistry {
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;
       // Metriken: null = „kein neuer Wert“, Bestand bleibt erhalten.
-      if (value === null && (key === "volume24h" || key === "spread" || key === "volatility")) continue;
+      if (value === null && (key === "volume24h" || key === "spread" || key === "bookDepthUsd" || key === "volatility")) continue;
       merged[key] = value;
     }
     merged.lastSeen = input.lastSeen ?? this.now().toISOString();

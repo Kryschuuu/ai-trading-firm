@@ -65,7 +65,6 @@ function fileMtimeMs(file: string): number {
     // `DATA_DIR`/`HISTORY_DIR` und den Next.js-cwd, identisch zu
     // `HistoricalStore`/`InstrumentRegistry`).
     const resolved = resolveRuntimePath(file);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { existsSync, statSync } = require("node:fs") as typeof import("node:fs");
     if (!existsSync(resolved)) return 0;
     return statSync(resolved).mtimeMs;

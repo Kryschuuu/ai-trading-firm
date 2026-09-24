@@ -225,6 +225,7 @@ export function validateInstrument(raw: unknown): MarketInstrument {
     liveAvailable: projected.liveAvailable,
     volume24h: optionalMetric("volume24h", o.volume24h),
     spread: optionalMetric("spread", o.spread, 1),
+    bookDepthUsd: optionalMetric("bookDepthUsd", o.bookDepthUsd),
     volatility: optionalMetric("volatility", o.volatility, 100),
     lastSeen: new Date(lastSeen as string).toISOString(),
   };

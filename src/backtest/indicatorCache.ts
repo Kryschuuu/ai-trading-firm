@@ -305,7 +305,8 @@ export function snapshotFromCache(
   cache: IndicatorCache,
   idx: number,
   volumeWindow = 20,
-  spread: number | null = null
+  spread: number | null = null,
+  bookDepthUsd: number | null = null
 ): import("../lib/ruleEngine").RuleSnapshot | null {
   if (idx < 24 || idx >= candles.length) return null;
   const price = cache.closes[idx];
@@ -382,6 +383,10 @@ export function snapshotFromCache(
     macdHist: macdHistVal != null ? Number(macdHistVal.toFixed(6)) : null,
     vwapPct: vwapPct != null ? Number(vwapPct.toFixed(4)) : null,
     spreadPct: spread != null && Number.isFinite(spread) && spread >= 0 ? Number((spread * 100).toFixed(4)) : null,
+    bookDepthUsd:
+      bookDepthUsd != null && Number.isFinite(bookDepthUsd) && bookDepthUsd > 0
+        ? bookDepthUsd
+        : null,
     volume,
     volumeMa20: volumeMa,
     volumeRatio: volumeMa > 0 ? volume / volumeMa : 0,

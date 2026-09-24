@@ -58,6 +58,7 @@ function instrument(symbol: string, venue = "BITUNIX"): MarketInstrument {
     liveAvailable: false,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: "2026-08-01T00:00:00.000Z",
   };
@@ -951,4 +952,72 @@ test("enrichWithTickers: INVALID_SYMBOL allowlist violation carries code", async
   const { report } = await enrichWithTickers([bad], adapter);
   assert.equal(report.failures.length, 1);
   assert.equal(report.failures[0].code, "INVALID_SYMBOL");
+});
+
+// ── bookDepthUsd (v0.4.0, IAD-T-06) ─────────────────────────────────────────
+
+test("enrichWithOrderBooks: bookDepthUsd nur bei belastbarer Tiefe (Qualitätsgrenze)", async () => {
+  const instruments = [instrument("BTCUSDT")]; // Venue BITUNIX ⇒ depth, ≥ 3 Levels
+  const levels = [
+    [100.0, 10],
+    [99.9, 20],
+    [99.8, 30],
+  ];
+  const asks = [
+    [100.1, 5],
+    [100.2, 15],
+    [100.3, 25],
+  ];
+  const { adapter } = mockAdapter({
+    instruments,
+    book: async (sym) => ({
+      symbol: sym,
+      bids: levels.map(([p, q]) => ({ price: p, qty: q })),
+      asks: asks.map(([p, q]) => ({ price: p, qty: q })),
+      ts: Date.now(),
+    }),
+  });
+  const { spreadBySymbol, bookDepthBySymbol } = await enrichWithOrderBooks(
+    instruments,
+    adapter,
+    { depthLimit: 5, concurrency: 1 },
+  );
+  assert.ok(spreadBySymbol.get("BTCUSDT") !== null);
+  const depth = bookDepthBySymbol.get("BTCUSDT");
+  assert.ok(depth !== null && depth !== undefined && depth > 0, `erwartet belastbare Tiefe, erhielt ${depth}`);
+});
+
+test("enrichWithOrderBooks: dünnes/altes Buch ⇒ bookDepthUsd null (fail-closed)", async () => {
+  const instruments = [instrument("BTCUSDT")];
+  // 1 Level je Seite → unter der Mindest-Level-Grenze.
+  const { adapter } = mockAdapter({
+    instruments,
+    book: async () => book("BTCUSDT", 100, 100.02),
+  });
+  const { spreadBySymbol, bookDepthBySymbol } = await enrichWithOrderBooks(
+    instruments,
+    adapter,
+    { depthLimit: 5, concurrency: 1 },
+  );
+  assert.ok(spreadBySymbol.get("BTCUSDT") !== null);
+  assert.equal(bookDepthBySymbol.get("BTCUSDT"), null);
+});
+
+test("enrichWithOrderBooks: Yahoo-Top-of-Book hat nie Tiefe (top-Venue)", async () => {
+  const instruments = [instrument("SPY", "YAHOO")];
+  // Yahoo liefert Preise mit qty 0 → keine belegbare Tiefe.
+  const { adapter } = mockAdapter({
+    instruments,
+    book: async (sym) => ({
+      symbol: sym,
+      bids: [{ price: 100, qty: 0 }, { price: 99.9, qty: 0 }, { price: 99.8, qty: 0 }],
+      asks: [{ price: 100.1, qty: 0 }, { price: 100.2, qty: 0 }, { price: 100.3, qty: 0 }],
+      ts: Date.now(),
+    }),
+  });
+  const { bookDepthBySymbol } = await enrichWithOrderBooks(instruments, adapter, {
+    depthLimit: 5,
+    concurrency: 1,
+  });
+  assert.equal(bookDepthBySymbol.get("SPY"), null);
 });

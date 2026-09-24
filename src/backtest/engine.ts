@@ -518,26 +518,30 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
           let snap: ReturnType<typeof buildSnapshotFromCandles> = null;
           const cacheKey = candlesIndexed.has(strat.symbol) ? strat.symbol : strat.nativeSymbol;
           const cache = indicatorCaches.get(cacheKey);
-          const spread = (() => {
+          // v0.4.0 (IAD-T-06): Spread UND Orderbuch-Tiefe aus demselben
+          // Instrument — ein Regel-Backtest wertet beide Liquiditätsgrößen.
+          // `bookDepthUsd` ist die abriegelnde Summe `min(bid, ask)` und nur
+          // bei depth-Venues gesetzt (`null` = nicht belastbar, fail-closed).
+          const { spread, bookDepthUsd } = (() => {
             try {
               if (paper) {
                 const instr = paper.instrumentOf(strat.symbol) ?? paper.instrumentOf(strat.nativeSymbol);
-                return instr?.spread ?? null;
+                return { spread: instr?.spread ?? null, bookDepthUsd: instr?.bookDepthUsd ?? null };
               }
               if (replay) {
                 // replay hat keinen direkten instrumentOf, aber über config
                 // versuchen wir, aus der Paper-Config zu lesen — sonst null
-                return null;
+                return { spread: null, bookDepthUsd: null };
               }
-              return null;
+              return { spread: null, bookDepthUsd: null };
             } catch {
-              return null;
+              return { spread: null, bookDepthUsd: null };
             }
           })();
           if (cache) {
-            snap = snapshotFromCache(strat.symbol, series, cache, candleInfo.index, spec.window.volumeWindow, spread);
+            snap = snapshotFromCache(strat.symbol, series, cache, candleInfo.index, spec.window.volumeWindow, spread, bookDepthUsd);
           } else {
-            snap = buildSnapshotFromCandles(strat.symbol, subSeries, spec.window.volumeWindow, spread);
+            snap = buildSnapshotFromCandles(strat.symbol, subSeries, spec.window.volumeWindow, spread, bookDepthUsd);
           }
           if (!snap) continue;
 

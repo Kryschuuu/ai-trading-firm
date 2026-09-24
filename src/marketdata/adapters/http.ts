@@ -154,13 +154,13 @@ export class SyncHttpClient {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       if (this.limiter) await this.limiter.take();
       try {
-        // eslint-disable-next-line no-await-in-loop -- sequenzieller Retry ist beabsichtigt.
+        // Sequenzieller Retry ist beabsichtigt (kein Parallel-Fan-out).
         return await this.fetchOnce<T>(url);
       } catch (err) {
         lastErr = err;
         const waitMs = this.retryWaitMs(err, attempt);
         if (waitMs === null) throw err;
-        // eslint-disable-next-line no-await-in-loop -- Backoff zwischen den Versuchen.
+        // Backoff zwischen den Versuchen.
         await this.sleep(waitMs);
       }
     }

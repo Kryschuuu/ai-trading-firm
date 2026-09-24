@@ -41,6 +41,7 @@ export function instrument(overrides: Partial<MarketInstrument> = {}): MarketIns
     liveAvailable: false,
     volume24h: 1_000_000_000,
     spread: 0.0002,
+    bookDepthUsd: null,
     volatility: 0.5,
     lastSeen: AS_OF,
   };

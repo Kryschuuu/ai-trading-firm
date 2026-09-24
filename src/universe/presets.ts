@@ -398,6 +398,7 @@ function presetBase(
     // Metriken bleiben bewusst `null` — die Registry erfindet keine Marktdaten.
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: PRESET_TIMESTAMP,
   };

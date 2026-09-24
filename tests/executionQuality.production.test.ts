@@ -41,9 +41,13 @@ test("backtest capture is deterministic, modeled and uses the completed candle b
     const a = run(),
       b = run();
     assert.deepEqual(a, b);
+    // Golden-Pin: v0.4.0 erweitert den `MarketInstrument`-Contract um
+    // `bookDepthUsd` — die Evidence hasht das Instrument als Entscheidungsinput
+    // mit, der Inhalt ist also berechtigt neu (deterministisch belegt durch
+    // `assert.deepEqual(a, b)` oben).
     assert.equal(
       digest(a),
-      "40573013c0c461cdf11f952ff72dad8f3bc73a2646973ab06bbd7d3cec11035c",
+      "51ac7b5c29e945003a97cd10cf30273d8663cf2541d2ee0465bfdd2f34c8e7b4",
       "pinned execution-evidence golden",
     );
     assert.equal(a.length, 2);
