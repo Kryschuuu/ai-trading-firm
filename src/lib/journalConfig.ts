@@ -33,8 +33,8 @@ export const JOURNAL_BOUNDS = {
   /**
    * Mindest-Stichprobe (abgeschlossene, attributede Trades je Agent×Regime-
    * Gruppe), ab der Kennzahlen und Gewichte wirksam werden. Darunter:
-   * "insufficient-sample" — NIE als Faktor. Default 20 (auditfest: < 20
-   * Trades sind für eine Trefferquote statistisch kaum mehr als Münzwurf).
+   * "insufficient-sample" — NIE als Faktor. Default 100 (n ≥ 100 für
+   * statistisch belastbare Trefferquote; < 20 war Münzwurf-Niveau).
    */
   minTrades: { min: 5, max: 200 },
   /**
@@ -58,7 +58,7 @@ export const JOURNAL_BOUNDS = {
 /** Sichere Defaults (Bound-Werte = heutiges Audit-Kalkül). */
 export const JOURNAL_DEFAULTS = {
   feedbackMode: "off" as JournalFeedbackMode,
-  minTrades: 20,
+  minTrades: 100,
   weightMin: 0.5,
   weightMax: 1.5,
   maxWeightDelta: 0.1,

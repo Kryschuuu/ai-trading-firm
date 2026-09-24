@@ -26,12 +26,12 @@ function bar(i: number, close: number, low = close * 0.998, high = close * 1.002
   return { time: T0 + i * H, open: close, high, low, close, volume: 1000 };
 }
 
-/** Ein Dip unter 95, danach Erholung über das Ziel — genau ein abgeschlossener Trade. */
+/** Ein Dip unter 95, danach Erholung über das Ziel — genau ein abgeschlossener Trade. n ≥ 100 für Paper. */
 function oneDip(): CandleLike[] {
   const out: CandleLike[] = [];
-  for (let i = 0; i < 45; i++) out.push(bar(i, 100));
-  out.push(bar(45, 90, 89, 91));
-  for (let i = 46; i < 70; i++) out.push(bar(i, 110, 100, 112));
+  for (let i = 0; i < 100; i++) out.push(bar(i, 100));
+  out.push(bar(100, 90, 89, 91));
+  for (let i = 101; i < 130; i++) out.push(bar(i, 110, 100, 112));
   return out;
 }
 

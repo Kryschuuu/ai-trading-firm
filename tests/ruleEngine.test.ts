@@ -214,6 +214,7 @@ const snap: RuleSnapshot = {
   macdSignal: -0.2,
   macdHist: -0.2,
   vwapPct: 1.25,
+  spreadPct: 0.04,
 };
 
 test("compileRuleSpec: all/any, Zahlenvergleiche, between, in — ohne JSON-Parsing", () => {

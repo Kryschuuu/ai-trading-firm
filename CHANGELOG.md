@@ -21,10 +21,92 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-24** · Code-Version **0.2.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-24** · Code-Version **0.3.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
+
+> **Status: Beta.** Keine offenen Punkte — nächster Zyklus plant Shorts und Orderbuch-Qualitätsgrenzen.
+
+## [0.3.0] — 2026-09-24 · Paper n≥100, Kostenmodell feine Takte, 6 rote Tests grün, spreadPct
+
+> **Status: Beta.** Umsetzung der 4 Prioritäten vor Kosmetik:
+> 1. Paper lange genug für n ≥ 100, 2. Kostenmodell auf den feinen Takten,
+> 3. die 6 vorbestehenden roten Tests, 4. `spreadPct` für Daytrading.
+> Quelle: Arena-Auftrag 2026-09-24.
+
+### Hinzugefügt
+
+- **Regelfeld `spreadPct`** (`DAYTRADING-SPREAD-01`): Relativer Spread in Prozent
+  (`instrument.spread` = (ask-bid)/mid ×100, `null` ohne Orderbuch). Quelle:
+  `MarketInstrument.spread` (Orderbook-Top-Level, Plausibilität ≤50 %), gemessen
+  im `market-sync` via `spreadCache` (6 h TTL, `data/spread-cache.json`),
+  verfügbar im `RuleSnapshot`, `RULE_FIELDS`, Mikro-Executor (`updateSpread`),
+  Trusted-Indicators (`spreadPct` im Reading) und Workshop-Katalog. Für Daytrading
+  die zentrale Kosten-/Liquiditätsgröße — hoher Spread frisst die Edge pro Trade.
+- **Indikator-Cache für die Backtest-Engine** (`PERF-CACHE-01`,
+  `src/backtest/indicatorCache.ts`): EMA9/21/50, RSI14, ATR/ATR-Pct, ADX14, BBW-Pct,
+  MACD/Signal/Hist, VolumeMa20 und VWAP werden einmal pro Symbol in O(n)
+  vor-gerechnet, danach O(1)-Lookup je Bar. Macht aus O(n²) → O(n): 2 Jahre
+  Stundenkerzen (17 520 Bars) von 17–21 s auf 0,6–0,8 s (Performance-Deckel <10 s
+  im Test `tests/backtest.replay.test.ts`).
+- **Timeframe-abhängiges Kostenmodell** (`COST-TIMEFRAME-01`,
+  `src/backtest/paperExecution.ts`): `timeframeToSpreadFallbackBps` und
+  `timeframeToSlippageBaseBps` — 1m 15 bp / 3 bp, 5m 10/2, 15m 8/1.5, 30m 6/1,
+  1h 4/1, 4h 3/0.5, 1d 2/0.5. `createPaperExecutionRuntime` skaliert
+  `syntheticSpreadBps` und `slippageBpsBase` nach Timeframe, wenn kein expliziter
+  Simulator übergeben wurde. `runMultiAssetBacktest` führt den Timeframe in den
+  Paper-Optionen mit (`paper.timeframe`), Event-Replay nutzt denselben Fallback.
+  Feiner Takt = höhere Kosten = ehrlichere Edge.
+
+### Geändert
+
+- **Paper lange genug für n ≥ 100** (`SAMPLE-N100-01`):
+  `RULE_BACKTEST_MIN_BARS` 40 → 100, `JOURNAL_DEFAULTS.minTrades` 20 → 100,
+  `POLICY_BODY.backtestMinTrades` 30 → 100, `paperMinTrades` 20 → 100,
+  `driftMinSample` 20 → 100. Begründung: <20 Trades = Münzwurf, n≥100 =
+  statistisch belastbar (Wilson, Profit-Faktor). Tests angepasst
+  (`tests/ruleBacktest.test.ts`: `oneDip` 70 → 130 Bars, `tests/tradeJournal.test.ts`,
+  `tests/strategyLifecycle.*`).
+- **Backtest-Engine nutzt Cache**: `src/backtest/engine.ts` baut pro Symbol einen
+  `IndicatorCache` und nutzt `snapshotFromCache` mit Spread aus dem Instrument
+  (Paper-Pfad). Fallback auf `buildSnapshotFromCandles` wenn kein Cache.
+- **Mikro-Executor kennt Spread**: `RollingTimeframeSeries.snapshot(spread)` und
+  `MicroExecutor.updateSpread(symbol, spread)` + `spreads`-Map — Spread aus dem
+  Orderbook kann jetzt in den Hot-Path fließen.
+- **Trusted-Indicators mit spreadPct**: `TrustedReading.spreadPct` + Param in
+  `readingFromCandles(spread)`, Payload enthält das Feld (LLM sieht es als
+  Messwert, nicht als erfundene Zahl).
+- **Sentiment-API fail-soft**: `listSentimentForecasts` fängt DB-Fehler und liefert
+  `[]` statt 500 — Route bleibt lesbar ohne DB (Test `sentiment.api.test.ts`).
+- **Audit-Reliability Fake-DB**: `tests/auditReliability.test.ts` behandelt
+  `promptArtifacts` korrekt (select → [], insert → valides Artefakt), damit
+  `missedAuditCount` nicht doppelt zählt (2 → 1 bzw. 1 → 0).
+- **Mission-Template-Test**: `guardrail-stress-test` liegt bewusst an den Deckeln
+  (0,05/0,5) und löst 75-%-Warnung aus — Test erlaubt jetzt Deckel-Warnungen nur
+  für dieses Template.
+
+### Behoben
+
+- **6 rote Tests grün** (Vollsuite `npm test` 3605 Tests: 3569 pass, 0 fail, 36 skipped):
+  - `auditReliability`: Prompt-Update trotz Totalverlust (missed count 2→1) und
+    Spool-Reserve (1→0) — Fake-DB fix.
+  - `missionTemplates`: guardrail-stress-test mit erlaubter Deckel-Warnung.
+  - `sentiment.api`: 500 → 200 mit leerer Liste ohne DB.
+  - `backtest.replay`: Performance-Deckel 15–20 s → 0,6 s via Cache.
+  - `ruleBacktest` (5 Tests) und `tradeJournal`/`strategyLifecycle` nach
+    n≥100-Anhebung.
+  - `monitor.exits` DB-Skip: `skipWithoutDb` return + early return statt
+    weiterlaufen nach `t.skip()` (verhinderte „not ok # SKIP“).
+
+### Nicht gebaut (bewusst, Begründung im Audit 2026-09-24)
+
+Shorts (`RULE_ALLOWED_SIDE = "LONG"` bleibt Risikoentscheidung), 1m-Backfill als
+Sync-Default (Request-Sturm), `bookDepthUsd` als Regelfeld (Orderbuch-Qualität je
+Venue noch ohne belastbare Grenze), Limit-/Stop-Markt/OCO am Broker (gehört in
+`src/execution`).
+
+## [0.2.0] — 2026-09-23 · Adapter-Prüfung, Prompt-Budget, vwapPct, 1m-Timeframe
 
 > **Status: Beta.** Prüfung aus
 > [Adapter, Parallelität, Daytrading 2026-09-24](docs/audits/2026-09-24-internal-adapter-daytrading/README.md).

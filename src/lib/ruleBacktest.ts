@@ -31,7 +31,7 @@ import {
 } from "@/lib/ruleEngine";
 import { isValidInstrumentId, tryNormalizeVenueSymbol } from "@/symbols/normalize";
 
-export const RULE_BACKTEST_MIN_BARS = 40;
+export const RULE_BACKTEST_MIN_BARS = 100;
 export const RULE_BACKTEST_TRADE_CAP = 200;
 export const RULE_BACKTEST_EQUITY_CAP = 120;
 

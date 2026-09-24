@@ -34,6 +34,8 @@ export type TrustedReading = {
    * keine Tagesmessung, und 0 wäre eine erfundene VWAP-Neutralität.
    */
   vwapPct: number | null;
+  /** Spread in Prozent (0.04 = 0,04 % = 4 bp). null = kein Orderbuch. */
+  spreadPct: number | null;
   macd: number | null;
   macdSignal: number | null;
   macdHist: number | null;
@@ -72,7 +74,12 @@ export function closedCandles(
     }));
 }
 
-export function readingFromCandles(instrumentId: string, candles: readonly Candle[], asOfMs: number): TrustedReading {
+export function readingFromCandles(
+  instrumentId: string,
+  candles: readonly Candle[],
+  asOfMs: number,
+  spread: number | null = null
+): TrustedReading {
   const closes = candles.map((candle) => candle.close);
   // rsi() liefert bei zu wenig Daten still 50. Das darf hier keine Messung werden.
   const rsiValue = closes.length >= 15 ? rsi(closes) : null;
@@ -87,6 +94,7 @@ export function readingFromCandles(instrumentId: string, candles: readonly Candl
     atrPct: roundOrNull(atrPct(candles as Candle[], 14) == null ? null : atrPct(candles as Candle[], 14)! * 100, 4),
     adx: roundOrNull(adx(candles as Candle[], 14), 2),
     vwapPct: roundOrNull(sessionVwap(candles as Candle[])?.priceVsVwapPct ?? null, 4),
+    spreadPct: roundOrNull(spread != null && spread >= 0 && spread <= 0.5 ? spread * 100 : null, 4),
     macd: roundOrNull(macdValue?.macd ?? null, 6),
     macdSignal: roundOrNull(macdValue?.signal ?? null, 6),
     macdHist: roundOrNull(macdValue?.histogram ?? null, 6),

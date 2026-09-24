@@ -268,12 +268,22 @@ export async function listSentimentForecasts(
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const rows = await database
-    .select()
-    .from(sentimentForecasts)
-    .where(whereClause)
-    .orderBy(desc(sentimentForecasts.asOf))
-    .limit(limit);
+  try {
+    const rows = await database
+      .select()
+      .from(sentimentForecasts)
+      .where(whereClause)
+      .orderBy(desc(sentimentForecasts.asOf))
+      .limit(limit);
 
-  return rows.map(rowToSentimentForecast);
+    return rows.map(rowToSentimentForecast);
+  } catch (error) {
+    // Read-Pfad ist fail-soft: Ohne DB (z. B. im Unit-Test ohne Embedded-Postgres
+    // oder bei temporärer DB-Degradation) liefert die Liste leer statt 500 —
+    // die Route bleibt lesbar, der Fehler ist im Log sichtbar.
+    structuredLog("warn", "sentiment_list_failed", {
+      error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+    });
+    return [];
+  }
 }

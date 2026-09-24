@@ -5,11 +5,11 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.2.0` |
+| **Version** | `v0.3.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
-| **Release-Datum** | 2026-09-23 |
-| **Quellbasiert** | `package.json` (`version: "0.2.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-09-24 |
+| **Quellbasiert** | `package.json` (`version: "0.3.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -19,8 +19,24 @@ in Code und Doku leiten sich von diesem Stand ab.
 erreichten Funktionsstand der Beta-Entwicklung (interne Zählung bis `v1.73.1`)
 und etabliert das öffentliche v0.x.x-Schema. `v0.2.0` ergänzt den
 kostenbewussten Regel-Backtest, den Workshop-Schritt 5 und die
-Trusted-Indikatoren, ohne den Engine-Default zu ändern. In der 0.x-Reihe dürfen
-Breaking Changes eingeführt werden, wenn sie im Changelog dokumentiert sind.
+Trusted-Indikatoren, ohne den Engine-Default zu ändern. `v0.3.0` liefert:
+
+- **Paper lange genug für n ≥ 100**: `RULE_BACKTEST_MIN_BARS` 40 → 100,
+  `JOURNAL_MIN_TRADES` 20 → 100, `backtestMinTrades`/`paperMinTrades`/
+  `driftMinSample` 30/20/20 → 100/100/100 — statistisch belastbare Stichproben.
+- **Kostenmodell auf den feinen Takten**: Spread- und Slippage-Fallback
+  timeframe-abhängig (1m 15 bp, 5m 10 bp, 15m 8 bp, 30m 6 bp, 1h 4 bp, 4h 3 bp,
+  1d 2 bp) — feiner Takt frisst mehr Edge, das Modell rechnet das jetzt ehrlich.
+- **6 rote Tests grün**: Audit-Reliability (Fake-DB für Prompt-Artefakte),
+  Mission-Template (guardrail-stress-test mit erlaubter Deckel-Warnung),
+  Sentiment-API (fail-soft ohne DB), Performance-Deckel (O(n²) → O(n) via
+  Indikator-Cache, 17 s → 0,6 s für 2 Jahre 1h).
+- **spreadPct als Regelfeld**: Orderbuch-Spread als Prozentfeld
+  (`instrument.spread` ×100), verfügbar in `RuleSnapshot`, `RULE_FIELDS`,
+  Mikro-Executor (`updateSpread`), Trusted-Indicators und Workshop.
+
+In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
+Changelog dokumentiert sind.
 
 **Beta-Hinweis:** Das Projekt ist für Bildungszwecke und private Nutzung auf
 eigene Gefahr konzipiert. Kein Teil davon ist für produktive Handelsumgebungen
@@ -40,12 +56,12 @@ bestimmt (Details: Disclaimer im [`README.md`](README.md)).
 | `src/live-gate/` | Harte Freigabeschicht für jeden Live-Pfad (Flags, Security-Stamps, Kill-Switch-Kopplung) |
 | `src/risk` (in `src/lib/`) | `riskGuard`, `adaptiveRisk`, `positionSizing`, `clusterExposure`, `volatilityTargeting`, `drawdownScaling`, `signalDecay`, `circuitBreaker`, `exits` |
 | `src/portfolio/` | Portfolio-Engine: Kennzahlen, Korrelations-Cluster, Volatility-Targeting-Policy, Drawdown-Policy |
-| `src/backtest/` | Backtest-Engines (legacy/paper/event_replay), Walk-Forward, Monte-Carlo, Trade-Ledger |
+| `src/backtest/` | Backtest-Engines (legacy/paper/event_replay), Walk-Forward, Monte-Carlo, Trade-Ledger, Indikator-Cache (v0.3.0) |
 | `src/forecasts/` | Forecast-Ledger: point-in-time Resolving, Brier-Score, Kalibrierung |
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live) |
+| `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |
 | `src/routing/` | LLM-Model-Router (Ollama/OpenAI/Gemini/Claude), Overrides, Turn-Budgets |

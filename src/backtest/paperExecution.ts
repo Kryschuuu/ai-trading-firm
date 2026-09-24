@@ -53,8 +53,61 @@ import type { MarketSnapshot } from "../lib/marketdata/types";
 import type { CandleLike } from "../lib/ruleEngine";
 import type { BacktestOpenPosition, TradeExitReason } from "./types";
 
+/** Timeframe → Spread-Fallback in Basispunkten (feiner Takt = höhere Kosten). */
+export function timeframeToSpreadFallbackBps(timeframe: string): number {
+  switch (timeframe) {
+    case "1m":
+      return 15; // 0,15 % — 1m hat das höchste Rauschen, engste Edge
+    case "5m":
+      return 10;
+    case "15m":
+      return 8;
+    case "30m":
+      return 6;
+    case "1h":
+      return 4;
+    case "4h":
+      return 3;
+    case "1d":
+      return 2;
+    case "1w":
+    case "1mo":
+      return 2;
+    default:
+      return 4;
+  }
+}
+
+/** Timeframe → Slippage-Basis in Basispunkten (feiner Takt = mehr Slippage). */
+export function timeframeToSlippageBaseBps(timeframe: string): number {
+  switch (timeframe) {
+    case "1m":
+      return 3;
+    case "5m":
+      return 2;
+    case "15m":
+      return 1.5;
+    case "30m":
+      return 1;
+    case "1h":
+      return 1;
+    case "4h":
+      return 0.5;
+    case "1d":
+      return 0.5;
+    default:
+      return 1;
+  }
+}
+
 /** Kostenprofil des Paper-Ausführungspfads (D1 „Kostenprofil“). */
 export interface PaperBacktestOptions {
+  /**
+   * Timeframe des Laufs (z. B. "1m", "1h"). Wenn gesetzt, wird der
+   * Spread-/Slippage-Fallback timeframe-abhängig skaliert (feiner Takt =
+   * höhere Kosten, weil die Edge pro Bar kleiner ist). Default: "1h".
+   */
+  timeframe?: string;
   /**
    * Simulator-Konfiguration. Default: `calibrateSimulatorConfig(
    * loadSimulatorConfig())` — exakt dieselbe Quelle wie der PaperBroker
@@ -239,7 +292,18 @@ export function createPaperExecutionRuntime(
   const qualityBatches: Batch[] = [];
   const captureQuality = qualityEnabled();
   // DIESELBE Quelle wie der PaperBroker: Legacy-PAPER_SIM_* + GAP-02-Overlay.
-  const simulatorConfig = opts.simulator ?? calibrateSimulatorConfig(loadSimulatorConfig());
+  // Timeframe-abhängige Skalierung (v0.3.0): feiner Takt = höhere Kosten.
+  const baseSimulatorConfig = opts.simulator ?? calibrateSimulatorConfig(loadSimulatorConfig());
+  const tf = opts.timeframe ?? "1h";
+  const tfSpread = timeframeToSpreadFallbackBps(tf);
+  const tfSlippage = timeframeToSlippageBaseBps(tf);
+  const simulatorConfig: FillSimulatorConfig = {
+    ...baseSimulatorConfig,
+    // Wenn kein expliziter Simulator übergeben wurde, skalieren wir Basis-Slippage
+    // und synthetischen Spread nach Timeframe — feiner Takt frisst mehr Edge.
+    slippageBpsBase: opts.simulator ? baseSimulatorConfig.slippageBpsBase : Math.max(baseSimulatorConfig.slippageBpsBase, tfSlippage),
+    syntheticSpreadBps: opts.simulator ? baseSimulatorConfig.syntheticSpreadBps : Math.max(baseSimulatorConfig.syntheticSpreadBps, tfSpread),
+  };
   const simulator = new FillSimulator(simulatorConfig);
   const spreadFallbackBps = opts.spreadBpsFallback ?? simulatorConfig.syntheticSpreadBps;
 
