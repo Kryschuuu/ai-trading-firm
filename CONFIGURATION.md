@@ -1,7 +1,8 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-23** · Code-Version **v0.1.0 (Beta)**
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.2.0** (Prompt-Budget
+> und Batch-Analyse nachgezogen, §5)
 >
 > **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema
 > (Beta). Ältere Status-Header und Abschnitte nennen teils die interne
