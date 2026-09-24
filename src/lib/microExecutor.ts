@@ -49,6 +49,8 @@ import type { DrawdownStage } from "@/portfolio/drawdownScaling";
 // LocalStore, DB/Audit).
 import { computePositionSize, loadSizingConfig, resolveKellyEdge } from "./positionSizing";
 import { checkClusterExposure, loadClusterLimitsConfig } from "./clusterExposure";
+import { computeBookDepth, type BookLevelInput } from "./bookDepth";
+import { bookDepthVerdict } from "./bookDepthProvenance";
 import { getCandles, sanitizeSymbol } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
 import { structuredLog } from "./logger";
@@ -88,7 +90,30 @@ import { LIVE_SIGNAL_BAR_MS, persistClosedEntrySignal } from "./signalDecayRunti
 
 export type FeedTick =
   | { kind: "trade"; symbol: string; ts: number; price: number; qty: number }
-  | { kind: "candle"; symbol: string; ts: number; candle: CandleLike; closed: boolean };
+  | { kind: "candle"; symbol: string; ts: number; candle: CandleLike; closed: boolean }
+  | {
+      /** Orderbuch-Snapshot (v0.4.0): updateSpread-Fortsetzung (IAD-T-06). */
+      kind: "book";
+      symbol: string;
+      venue: string;
+      ts: number;
+      bids: readonly (readonly [unknown, unknown])[];
+      asks: readonly (readonly [unknown, unknown])[];
+    };
+
+/**
+ * Roher Orderbuch-Input an {@link MicroExecutor.updateBook}. `venue` ist
+ * Pflicht — nur über die Venue-Provenienz ist die Tiefe belastbar
+ * (`src/lib/bookDepthProvenance.ts`).
+ */
+export interface BookDepthInput {
+  venue: string;
+  bids: readonly (readonly [unknown, unknown])[] | readonly BookLevelInput[];
+  asks: readonly (readonly [unknown, unknown])[] | readonly BookLevelInput[];
+}
+
+/** Buch-Levels, die zur Tiefe gewertet werden (Security-Kappe). */
+const MAX_BOOK_LEVELS = 10;
 
 export interface FeedStatus {
   name: string;
@@ -249,13 +274,17 @@ export class RollingTimeframeSeries {
   }
 
   /** Aktueller Snapshot (0–1 Kerzen Genauigkeit, keine IO). */
-  snapshot(volumeWindow = 20, spread: number | null = null): RuleSnapshot | null {
+  snapshot(
+    volumeWindow = 20,
+    spread: number | null = null,
+    bookDepthUsd: number | null = null,
+  ): RuleSnapshot | null {
     const buf: CandleLike[] = this.finalized.slice(-159);
     if (this.openAgg) {
       buf.push({ ...this.openAgg, time: this.openAgg.time });
     }
     if (buf.length < 25) return null;
-    return buildSnapshotFromCandles(this.symbol, buf, volumeWindow, spread);
+    return buildSnapshotFromCandles(this.symbol, buf, volumeWindow, spread, bookDepthUsd);
   }
 
   size(): number {
@@ -1167,6 +1196,8 @@ export class MicroExecutor {
   private feeds: MarketFeed[] = [];
   private series = new Map<string, RollingTimeframeSeries>();
   private spreads = new Map<string, number>();
+  /** Buch-Tiefe je Symbol (v0.4.0, IAD-T-06) — `depthUsd`, null = nicht verifiziert. */
+  private books = new Map<string, number>();
   private running = false;
   private ticks = 0;
   private evalCount = 0;
@@ -1214,6 +1245,45 @@ export class MicroExecutor {
       this.spreads.set(symbol, spread);
     } else {
       this.spreads.delete(symbol);
+    }
+  }
+
+  /**
+   * Orderbuch-Tiefe für ein Symbol aktualisieren (v0.4.0, IAD-T-06).
+   *
+   * Die Qualitätsgrenze greift HIER (am Messpunkt), nicht in der Engine:
+   * die Regeln/der Backtest bleiben venue-agnostisch und erhalten pro Symbol
+   * ausschließlich ein `bookDepthUsd`, das die Venue-Grenze `VERIFIED`
+   * bestanden hat. `book` ist `null`, wenn die Levels die Qualitätsgrenze
+   * nicht erreichen ODER das Buch nicht levant ist — es wird NIE als „0
+   * Tiefe“ abgelegt, die Regelbedingung liest dann `null` und bleibt stehen.
+   */
+  updateBook(symbolRaw: string, book: BookDepthInput | null): void {
+    const symbol = sanitizeSymbol(symbolRaw);
+    if (!symbol) return;
+    if (!book) {
+      this.books.delete(symbol);
+      return;
+    }
+    const depth = computeBookDepth(book.bids, book.asks, MAX_BOOK_LEVELS);
+    if (depth.depthUsd === null) {
+      this.books.delete(symbol);
+      return;
+    }
+    const venue = book.venue ? String(book.venue).trim().toUpperCase() : book.venue ?? "";
+    const ok =
+      venue.length > 0 &&
+      depth.depthUsd > 0 &&
+      depth.bidLevels > 0 &&
+      depth.askLevels > 0 &&
+      (bookDepthVerdict(venue, {
+        levels: Math.min(depth.bidLevels, depth.askLevels),
+        maxAgeMs: null,
+      }) === "VERIFIED");
+    if (ok) {
+      this.books.set(symbol, depth.depthUsd);
+    } else {
+      this.books.delete(symbol);
     }
   }
 
@@ -1295,17 +1365,25 @@ export class MicroExecutor {
     const symbol = sanitizeSymbol(tick.symbol);
     if (!symbol) return;
 
+    // v0.4.0: Buch-Tick → Tiefen-Cache im RAM aktualisieren (kein Kostenpfad).
+    if (tick.kind === "book") {
+      this.updateBook(symbol, { venue: tick.venue, bids: tick.bids, asks: tick.asks });
+    }
+
     // Keine Regel für dieses Symbol geladen → Zero-Cost-Tick.
     if (this.cache.candidatesBySymbol(symbol).length === 0) return;
+    // Buch-Ticks tragen keine Preise — sie aktualisieren nur die Tiefe.
+    if (tick.kind === "book") return;
 
     const spread = this.spreads.get(symbol) ?? null;
+    const bookDepthUsd = this.books.get(symbol) ?? null;
     for (const [key, series] of this.series) {
       const [sym, timeframe] = key.split(":");
       if (sym !== symbol) continue;
       if (tick.kind === "trade") series.touch(tick.price, tick.ts, tick.qty);
       else series.applyCandle(tick.candle, tick.closed);
 
-      const snap = series.snapshot(undefined, spread);
+      const snap = series.snapshot(undefined, spread, bookDepthUsd);
       if (!snap) continue; // noch nicht genug Historie → weiter wärmen
 
       const t0 = performance.now();
@@ -1433,8 +1511,12 @@ export class BinanceTradeFeed implements MarketFeed {
     const valid = symbols
       .map((s) => s.toUpperCase())
       .filter((s) => BINANCE_SYMBOLS.includes(s));
+    // v0.4.0 (IAD-T-06): zusätzlich `@depth5` — der Partial-Book-Snapshot
+    // liefert die 5 besten Levels je Seite (~1000 ms Push), genug für die
+    // Venue-Qualitätsgrenze (≥ 3 Levels) und die `min(bid,ask)`-Tiefe.
     const streams = valid.map(
-      (s) => `${s.toLowerCase()}usdt@trade/${s.toLowerCase()}usdt@kline_1m`
+      (s) =>
+        `${s.toLowerCase()}usdt@trade/${s.toLowerCase()}usdt@kline_1m/${s.toLowerCase()}usdt@depth5`
     );
     this.urlHint = `wss://stream.binance.com:9443/stream?streams=${streams.join("/")}`;
   }
@@ -1473,12 +1555,31 @@ export class BinanceTradeFeed implements MarketFeed {
                 p?: string;
                 q?: string;
                 T?: number;
+                b?: unknown[][] | null;
+                a?: unknown[][] | null;
                 k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
               };
             };
             const data = msg.data;
             if (!data) return;
             const symbol = (data.s ?? "").toUpperCase().replace(/USDT$/, "");
+            // v0.4.0: Partial-Book-Depth-Push → Tiefen-Snapshot (nur falls
+            // beide Seiten vorliegen; der Executor prüft die Qualitätsgrenze).
+            if (data.e === "depthUpdate" && Array.isArray(data.b) && Array.isArray(data.a)) {
+              const ts = Number(data.T ?? Date.now());
+              const tick: FeedTick = {
+                kind: "book",
+                symbol,
+                venue: "BINANCE",
+                ts,
+                bids: data.b as unknown as readonly (readonly [unknown, unknown])[],
+                asks: data.a as unknown as readonly (readonly [unknown, unknown])[],
+              };
+              this.tickCount++;
+              this.lastTickAt = new Date(ts).toISOString();
+              onTick(tick);
+              return;
+            }
             if (data.e === "trade" && data.p) {
               const ts = Number(data.T ?? Date.now());
               const tick: FeedTick = {

@@ -21,6 +21,8 @@
  * ```
  */
 
+import { bookDepthVerdict } from "../lib/bookDepthProvenance";
+import { computeBookDepth, type BookLevelInput } from "../lib/bookDepth";
 import { calculateRelativeSpread } from "./spread";
 import {
   SYNC_LIMITS,
@@ -393,12 +395,14 @@ export async function enrichWithTickers(
 }
 
 /**
- * Enrichment-Stage 2: Spread aus Orderbook-Top-Level.
+ * Enrichment-Stage 2: Spread **und Orderbuch-Tiefe** aus dem Depth-Endpoint.
  *
  * Die Bitunix-Ticker-API liefert kein Bid/Ask. Der relative Spread wird
- * deshalb aus dem Orderbook-Top-Level (`/market/depth`, limit=5) berechnet.
- * Das kostet N zusätzliche Requests und ist der teuerste Teil des Syncs —
- * daher Concurrency-Begrenzung und Token-Bucket.
+ * deshalb aus dem Orderbook-Top-Level (`/market/depth`) berechnet. Seit
+ * v0.4.0 (IAD-T-06) wird aus denselben Levels auch `bookDepthUsd` gemessen
+ * (Summe über price × qty der abriegelnden Seite, Grenze je Venue in
+ * `src/lib/bookDepthProvenance.ts`). Das kostet weiterhin N Requests und ist
+ * der teuerste Teil des Syncs — daher Concurrency-Begrenzung und Token-Bucket.
  *
  * Formel: `spread = (ask - bid) / mid` mit `mid = (ask + bid) / 2`.
  * `0.0004` = 4 bp. Ungültige/fehlende Book-Daten liefern `null` (unbekannt —
@@ -406,7 +410,8 @@ export async function enrichWithTickers(
  *
  * Plausibilitätsprüfung: `spread > 0.5` (50 %) wird als `null` + Warnung
  * behandelt (defektes/leeres Buch), damit kein Müllwert in Risikoentscheidungen
- * fließt.
+ * fließt. Die Tiefe greift die Venue-Qualitätsgrenze (Levels/Alter) — wer sie
+ * nicht erfüllt, bekommt `bookDepthUsd: null` (fail-closed).
  *
  * Security:
  *   - `depthLimit` gekappt (max. 50), Arrays gekappt.
@@ -421,6 +426,8 @@ export async function enrichWithOrderBooks(
   opts: EnrichOrderBooksOptions,
 ): Promise<{
   spreadBySymbol: Map<string, number | null>;
+  /** `depthUsd` = min(Bid, Ask) in Quote-Währung; `null` = unter Qualitätsgrenze. */
+  bookDepthBySymbol: Map<string, number | null>;
   report: EnrichmentReport;
 }> {
   const depthLimit = Math.max(
@@ -441,12 +448,14 @@ export async function enrichWithOrderBooks(
   const cappedInstruments = instruments.slice(0, MAX_INSTRUMENTS_CEILING);
   const attempted = cappedInstruments.length;
   const spreadBySymbol = new Map<string, number | null>();
+  const bookDepthBySymbol = new Map<string, number | null>();
   const missing: string[] = [];
   const failures: EnrichmentReport["failures"] = [];
 
   if (attempted === 0) {
     return {
       spreadBySymbol,
+      bookDepthBySymbol,
       report: { attempted: 0, succeeded: 0, missing: [], failures: [] },
     };
   }
@@ -457,6 +466,7 @@ export async function enrichWithOrderBooks(
     const safe = safeSymbol(inst.symbol);
     if (!safe) {
       spreadBySymbol.set(inst.symbol, null);
+      bookDepthBySymbol.set(inst.symbol, null);
       missing.push(inst.id ?? inst.symbol);
       failures.push({ symbol: inst.symbol, reason: "INVALID_SYMBOL", code: "INVALID_SYMBOL" });
       continue;
@@ -491,6 +501,20 @@ export async function enrichWithOrderBooks(
 
           const spread = calculateRelativeSpread(bestBid, bestAsk);
 
+          // v0.4.0 (IAD-T-06): Orderbuch-Tiefe aus denselben Levels, nur
+          // übernommen, wenn die Venue-Qualitätsgrenze greift (≥ N Levels
+          // je Seite, kein überaltetes Buch). `null` = nicht belastbar.
+          const rawBookTs = (book as { ts?: unknown })?.ts;
+          const bookAgeMs =
+            typeof rawBookTs === "number" && Number.isFinite(rawBookTs) && rawBookTs > 0
+              ? Math.max(0, Date.now() - rawBookTs)
+              : null;
+          const depth = computeBookDepth(
+            bids as BookLevelInput[],
+            asks as BookLevelInput[],
+            depthLimit,
+          );
+
           if (spread === null) {
             // Leeres Buch oder gekreuztes Buch (ask < bid) → null
             if (bids.length === 0 || asks.length === 0) {
@@ -511,6 +535,7 @@ export async function enrichWithOrderBooks(
             return {
               symbol,
               spread: null as number | null,
+              depth: null as number | null,
               ok: true,
               reason: null,
             };
@@ -525,12 +550,23 @@ export async function enrichWithOrderBooks(
             return {
               symbol,
               spread: null as number | null,
+              depth: null as number | null,
               ok: true,
               reason: "IMPLAUSIBLE_SPREAD",
             };
           }
 
-          return { symbol, spread, ok: true, reason: null };
+          const depthUsd =
+            depth.depthUsd !== null
+              ? bookDepthVerdict(instrument.venue, {
+                  levels: Math.min(depth.bidLevels, depth.askLevels),
+                  maxAgeMs: bookAgeMs,
+                }) === "VERIFIED"
+                ? depth.depthUsd
+                : null
+              : null;
+
+          return { symbol, spread, depth: depthUsd, ok: true, reason: null };
         } catch (e) {
           lastError = e;
           if (attempt < MAX_RETRIES) {
@@ -545,14 +581,14 @@ export async function enrichWithOrderBooks(
           // `cause` durchreichen: Der Sync klassifiziert daraus die echte
           // Ursache (NETWORK/UPSTREAM_5XX/RATE_LIMITED/…) statt pauschal
           // SCHEMA_MISMATCH zu melden (Fehlklassifikations-Fix).
-          return { symbol, spread: null as number | null, ok: false, reason, cause: e };
+          return { symbol, spread: null as number | null, depth: null as number | null, ok: false, reason, cause: e };
         }
       }
       const reason =
         lastError instanceof Error
           ? lastError.message.slice(0, 120)
           : String(lastError ?? "unknown").slice(0, 120);
-      return { symbol, spread: null as number | null, ok: false, reason, cause: lastError };
+      return { symbol, spread: null as number | null, depth: null as number | null, ok: false, reason, cause: lastError };
     },
   );
 
@@ -560,6 +596,7 @@ export async function enrichWithOrderBooks(
   for (const res of results) {
     if (!res) continue;
     spreadBySymbol.set(res.symbol, res.spread);
+    bookDepthBySymbol.set(res.symbol, res.depth);
     if (res.spread !== null) {
       succeeded += 1;
     } else {
@@ -588,6 +625,7 @@ export async function enrichWithOrderBooks(
 
   return {
     spreadBySymbol,
+    bookDepthBySymbol,
     report: { attempted, succeeded, missing, failures },
   };
 }

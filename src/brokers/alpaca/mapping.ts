@@ -96,6 +96,7 @@ export function mapAsset(raw: AlpacaAsset, now: Date = new Date()): MarketInstru
     liveAvailable: false, // bleibt systemseitig false bis Live-Gate öffnet
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: now.toISOString(),
   };

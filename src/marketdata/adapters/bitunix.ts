@@ -173,6 +173,7 @@ export function mapTradingPairToInstrument(
     liveAvailable: false,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: now.toISOString(),
   };

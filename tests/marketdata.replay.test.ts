@@ -35,6 +35,7 @@ const instrument: MarketInstrument = {
   liveAvailable: false,
   volume24h: 2_000_000_000,
   spread: 0.0004,
+  bookDepthUsd: null,
   volatility: null,
   lastSeen: "2026-08-27T00:00:00.000Z",
 };

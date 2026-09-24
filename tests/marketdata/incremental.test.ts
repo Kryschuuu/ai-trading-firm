@@ -142,16 +142,28 @@ test("Inkrementell: Ein älterer Zwischenstand (nur alte Kerzen) wird ergänzt, 
 
 /** Einfacher In-Memory-Cache für die Service-Tests. */
 class MemorySpreadCache implements SpreadCache {
-  private readonly entries = new Map<string, { spread: number; at: Date }>();
+  private readonly entries = new Map<string, { spread: number; at: Date; depth?: number }>();
   flushes = 0;
   constructor(private readonly ttlMs: number) {}
-  fresh(instrumentId: string, nowMs: number): number | undefined {
+  private freshEntry(instrumentId: string, nowMs: number) {
     const e = this.entries.get(instrumentId);
     if (!e) return undefined;
-    return nowMs - e.at.getTime() <= this.ttlMs ? e.spread : undefined;
+    return nowMs - e.at.getTime() <= this.ttlMs ? e : undefined;
+  }
+  fresh(instrumentId: string, nowMs: number): number | undefined {
+    return this.freshEntry(instrumentId, nowMs)?.spread;
+  }
+  freshDepth(instrumentId: string, nowMs: number): number | undefined {
+    return this.freshEntry(instrumentId, nowMs)?.depth;
   }
   record(instrumentId: string, spread: number, at: Date): void {
-    this.entries.set(instrumentId, { spread, at });
+    const existing = this.entries.get(instrumentId);
+    this.entries.set(instrumentId, { spread, at, depth: existing?.depth });
+  }
+  recordDepth(instrumentId: string, bookDepthUsd: number, at: Date): void {
+    const existing = this.entries.get(instrumentId);
+    if (!existing) return;
+    this.entries.set(instrumentId, { ...existing, depth: bookDepthUsd, at });
   }
   flush(): void {
     this.flushes += 1;

@@ -62,6 +62,7 @@ function instrument(symbol: string, venue = SIM_PERP_VENUE, marketType: MarketIn
     liveAvailable: false,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: NOW.toISOString(),
   };

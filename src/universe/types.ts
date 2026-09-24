@@ -134,6 +134,17 @@ export interface MarketInstrument {
    * Plausibilität: >50% wird als null behandelt (defektes/leeres Buch).
    */
   spread: number | null;
+  /**
+   * Orderbuch-Tiefe der abriegelnden Seite in Quote-Währung (v0.4.0,
+   * IAD-T-06): `min(Σ bid price×qty, Σ ask price×qty)` über die gültigen
+   * Levels, die auf der richtigen Seite des Mid liegen. `null` = keine
+   * belastbare Tiefe gemessen (kein/gekreuztes Buch, einseitiges Buch,
+   * nur Null-Mengen) — niemals 0 als „leeres Buch“.
+   * Qualitätsgrenze je Venue in `src/lib/bookDepthProvenance.ts`: nur
+   * `depth`-Venues (BINANCE/BITUNIX/KRAKEN) liefern belastbare Tiefe;
+   * `top`-Venues (YAHOO) haben Preise ohne Lotgröße ⇒ `null`.
+   */
+  bookDepthUsd: number | null;
   /** Annualisierte Volatilität als Dezimalanteil; `null` bis befüllt. */
   volatility: number | null;
   /** Zeitpunkt der letzten Bestätigung durch eine Quelle, ISO-8601 UTC. */
@@ -162,6 +173,7 @@ export const INSTRUMENT_FIELDS: readonly (keyof MarketInstrument)[] = [
   "liveAvailable",
   "volume24h",
   "spread",
+  "bookDepthUsd",
   "volatility",
   "lastSeen",
 ];

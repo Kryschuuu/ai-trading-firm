@@ -245,6 +245,12 @@ export interface SyncResult {
   orderbooksEnriched: number;
   /** Instrumente, deren Spread `null` blieb (Data-Quality, kein Fachablehnung). */
   spreadsUnknown: number;
+  /**
+   * Instrumente, für die `bookDepthUsd` gemessen wurde (v0.4.0): Orderbuch
+   * vorhanden UND Qualitätsgrenze der Venue erfüllt. `null` heißt „kein/zu
+   * dünnes Buch“, nicht „leer“.
+   */
+  bookDepthMeasured?: number;
   /** Vom Universe-Policy-Ausschluss abgelehnte Sätze (fachlich, kein Datenfehler). */
   policyExcluded: number;
   /** Bars/Instrumente je Timeframe. */

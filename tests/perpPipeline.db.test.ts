@@ -61,6 +61,7 @@ const BTC: MarketInstrument = {
   liveAvailable: false,
   volume24h: null,
   spread: null,
+  bookDepthUsd: null,
   volatility: null,
   lastSeen: NOW.toISOString(),
 };

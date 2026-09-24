@@ -1,7 +1,7 @@
 # Changelog — Weiterleitung
 
 > **Hinweis:** Der vollständige Changelog liegt kanonisch im Root:
-> [`../CHANGELOG.md`](../CHANGELOG.md) (aktuell: **v0.3.0, Beta** —
+> [`../CHANGELOG.md`](../CHANGELOG.md) (aktuell: **v0.4.0, Beta** —
 > Keep a Changelog 1.1.0 + SemVer 0.x).
 >
 > Die historische, detailgetreue Beta-Entwicklungs-Historie in der internen

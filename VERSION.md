@@ -5,11 +5,11 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.3.0` |
+| **Version** | `v0.4.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Release-Datum** | 2026-09-24 |
-| **Quellbasiert** | `package.json` (`version: "0.3.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.4.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -34,6 +34,18 @@ Trusted-Indikatoren, ohne den Engine-Default zu ändern. `v0.3.0` liefert:
 - **spreadPct als Regelfeld**: Orderbuch-Spread als Prozentfeld
   (`instrument.spread` ×100), verfügbar in `RuleSnapshot`, `RULE_FIELDS`,
   Mikro-Executor (`updateSpread`), Trusted-Indicators und Workshop.
+
+`v0.4.0` liefert die logische Fortsetzung von `spreadPct`:
+
+- **bookDepthUsd als Regelfeld** (IAD-T-06): Orderbuch-Tiefe der abriegelnden
+  Seite `min(Σ bid×qty, Σ ask×qty)` in Quote-Währung — gemessen im
+  `market-sync`, live im Mikro-Executor (`updateBook`, Binance `@depth5`),
+  verfügbar im `RuleSnapshot`/`RULE_FIELDS`, `TrustedReading` und Backtest.
+  `null` = keine belastbare Tiefe (fail-closed, nie eine erfundene 0).
+- **Orderbuch-Qualitätsgrenze je Venue** (`src/lib/bookDepthProvenance.ts`):
+  `depth`-Venues (BINANCE/BITUNIX/KRAKEN, ≥ 3 Levels, Snapshot ≤ 5 s) liefern
+  `VERIFIED`; `top`-Venues (YAHOO) und `none` bleiben `UNQUALIFIED` — der
+  Schutz gegen Fake-Liquidität auf dünnen Büchern.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

@@ -215,6 +215,7 @@ const snap: RuleSnapshot = {
   macdHist: -0.2,
   vwapPct: 1.25,
   spreadPct: 0.04,
+  bookDepthUsd: null,
 };
 
 test("compileRuleSpec: all/any, Zahlenvergleiche, between, in — ohne JSON-Parsing", () => {
@@ -473,4 +474,46 @@ test("backtestRule: ohne erfüllte Bedingung keine Trades", () => {
   const result = backtestRule(r.spec, makeCandles(150));
   assert.equal(result.stats.trades, 0);
   assert.equal(result.stats.pnl, 0);
+});
+
+// ── bookDepthUsd (v0.4.0, IAD-T-06) ─────────────────────────────────────────
+
+test("buildSnapshotFromCandles: bookDepthUsd wird durchgereicht und fail-closed validiert", () => {
+  const candles = makeCandles(120);
+  // Tiefe positiv → im Snapshot als Zahl.
+  const withDepth = buildSnapshotFromCandles("BTC", candles, 20, 0.0004, 42_000)!;
+  assert.equal(withDepth.bookDepthUsd, 42_000);
+  // Tiefe null / 0 / negativ → null (nie eine erfundene Tiefe).
+  assert.equal(buildSnapshotFromCandles("BTC", candles, 20, 0.0004, null)!.bookDepthUsd, null);
+  assert.equal(buildSnapshotFromCandles("BTC", candles, 20, 0.0004, 0)!.bookDepthUsd, null);
+  assert.equal(buildSnapshotFromCandles("BTC", candles, 20, 0.0004, -1)!.bookDepthUsd, null);
+  // Ohne expliziten Wert (Default) bleibt null.
+  assert.equal(buildSnapshotFromCandles("BTC", candles, 20)!.bookDepthUsd, null);
+});
+
+test("bookDepthUsd-Bedingung feuert nur bei belastbarer Tiefe (fail-closed null)", () => {
+  const candles = makeCandles(120);
+  const rule = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "bookDepthUsd", op: "gt", value: 10_000 }] },
+  });
+  assert.equal(rule.ok, true);
+  if (!rule.ok) return;
+
+  // Ohne Tiefe → null → Bedingung blockiert (false), keine Ausführung.
+  const nullSnap = buildSnapshotFromCandles("BTC", candles, 20, null, null)!;
+  assert.equal(compileRuleSpec(rule.spec).evaluate(nullSnap), false);
+
+  // Tiefe unter der Schwelle → false.
+  const thinSnap = buildSnapshotFromCandles("BTC", candles, 20, null, 5_000)!;
+  assert.equal(compileRuleSpec(rule.spec).evaluate(thinSnap), false);
+
+  // Tiefe über der Schwelle → true.
+  const deepSnap = buildSnapshotFromCandles("BTC", candles, 20, null, 42_000)!;
+  assert.equal(compileRuleSpec(rule.spec).evaluate(deepSnap), true);
+});
+
+test("bookDepthUsd ist ein katalogisiertes Whitelist-Feld", async () => {
+  const { RULE_FIELDS } = await import("../src/lib/ruleFieldCatalog");
+  assert.equal(RULE_FIELDS.bookDepthUsd, "number");
 });

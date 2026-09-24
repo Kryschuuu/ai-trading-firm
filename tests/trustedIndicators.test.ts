@@ -67,3 +67,36 @@ test("loadTrustedIndicators überschreibt RSI und erfindet bei zu wenig Bars kei
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("readingFromCandles: bookDepthUsd wird fail-closed durchgereicht", async () => {
+  const { readingFromCandles, readBookDepth } = await import("../src/cycle/trustedIndicators");
+  const candles = Array.from({ length: 40 }, (_, i) => ({
+    time: ASOF - (40 - i) * HOUR,
+    open: 100 + i,
+    high: 101 + i,
+    low: 99 + i,
+    close: 100 + i,
+    volume: 10,
+  }));
+  const withDepth = readingFromCandles("X", candles, ASOF, 0.0004, 42_000.123);
+  assert.equal(withDepth.bookDepthUsd, 42_000.12); // gerundet auf 2 Nachkommastellen
+  const without = readingFromCandles("X", candles, ASOF, 0.0004, null);
+  assert.equal(without.bookDepthUsd, null);
+  const invalid = readingFromCandles("X", candles, ASOF, 0.0004, 0);
+  assert.equal(invalid.bookDepthUsd, null);
+
+  // readBookDepth: Registry-Tiefe nur bei depth-Venue belastbar.
+  const binanceInst = {
+    id: "BINANCE:BTCUSDT", venue: "BINANCE", symbol: "BTCUSDT",
+    base: "BTC", quote: "USDT", assetClass: "crypto" as const,
+    marketType: "perpetual" as const, status: "active" as const,
+    minQuantity: 0.001, priceStep: 0.1, quantityStep: 0.001,
+    makerFee: 0.0002, takerFee: 0.0006, leverageAvailable: true,
+    shortAvailable: true, paperAvailable: true, liveTradable: true,
+    liveAvailable: false, volume24h: null, spread: 0.0004,
+    bookDepthUsd: 42_000, volatility: null, lastSeen: "2026-08-01T00:00:00.000Z",
+  };
+  assert.equal(readBookDepth(binanceInst, 3, null), 42_000);
+  assert.equal(readBookDepth({ ...binanceInst, venue: "YAHOO" }, 3, null), null);
+  assert.equal(readBookDepth({ ...binanceInst, bookDepthUsd: null }, 3, null), null);
+});

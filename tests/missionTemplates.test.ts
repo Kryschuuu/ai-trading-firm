@@ -143,6 +143,7 @@ test("Segmente: Zusatzfilter arbeiten wie dokumentiert", () => {
     liveAvailable: true,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: "2026-08-31T00:00:00.000Z",
   };

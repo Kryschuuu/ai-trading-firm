@@ -76,6 +76,7 @@ function instrument(symbol: string, venue = "BITUNIX"): MarketInstrument {
     liveAvailable: false,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: "2026-08-01T00:00:00.000Z",
   };

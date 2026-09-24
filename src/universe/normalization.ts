@@ -176,6 +176,7 @@ export function normalizeInstrument(input: InstrumentInput, now: Date = new Date
     liveAvailable: false,
     volume24h: input.volume24h ?? null,
     spread: input.spread ?? null,
+    bookDepthUsd: input.bookDepthUsd ?? null,
     volatility: input.volatility ?? null,
     lastSeen: input.lastSeen ?? now.toISOString(),
   };

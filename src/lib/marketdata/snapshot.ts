@@ -108,6 +108,7 @@ export function fallbackInstrument(
     }).liveAvailable,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: new Date(0).toISOString(),
     ...overrides,

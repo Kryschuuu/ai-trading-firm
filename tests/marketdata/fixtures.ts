@@ -63,6 +63,7 @@ export function instrumentOf(symbol: string, venue = "BITUNIX"): MarketInstrumen
     liveAvailable: false,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: "2026-08-01T00:00:00.000Z",
   };

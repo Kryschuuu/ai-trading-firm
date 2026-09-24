@@ -76,6 +76,7 @@ function paperInstrument(symbol: string, assetClass: InstrumentInput["assetClass
     liveTradable: false,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: SEED_TIMESTAMP,
   };
@@ -117,6 +118,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
       liveTradable: true,
       volume24h: null,
       spread: null,
+      bookDepthUsd: null,
       volatility: null,
       lastSeen: SEED_TIMESTAMP,
     });
@@ -139,6 +141,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
       liveTradable: true,
       volume24h: null,
       spread: null,
+      bookDepthUsd: null,
       volatility: null,
       lastSeen: SEED_TIMESTAMP,
     });
@@ -166,6 +169,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
         liveTradable: true,
         volume24h: null,
         spread: null,
+        bookDepthUsd: null,
         volatility: null,
         lastSeen: SEED_TIMESTAMP,
       });
@@ -192,6 +196,7 @@ export function buildSeedInstruments(): InstrumentInput[] {
     liveTradable: true,
     volume24h: null,
     spread: null,
+    bookDepthUsd: null,
     volatility: null,
     lastSeen: SEED_TIMESTAMP,
   });

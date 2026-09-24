@@ -87,3 +87,46 @@ test("spreadCacheTtlMs: Default, 0/negativ = aus, unparsbar fällt zurück auf D
   assert.equal(spreadCacheTtlMs({ [SPREAD_CACHE_TTL_ENV]: "3600000" }), HOUR);
   assert.equal(spreadCacheTtlMs({ [SPREAD_CACHE_TTL_ENV]: "garnicht" }), DEFAULT_SPREAD_CACHE_TTL_MS);
 });
+
+test("bookDepthUsd: recordDepth schreibt nur in vorhandenen Spread-Eintrag (kein Halb-Artefakt)", () => {
+  const file = cacheFile();
+  const cache = new FileSpreadCache(file, 6 * HOUR);
+  // Tiefe ohne vorherigen Spread → wird NICHT geschrieben (beide stammen aus
+  // demselben Depth-Call; ein einsamer depth-Wert wäre nutzlos).
+  cache.recordDepth("BITUNIX:BTCUSDT", 42_000, new Date(T0));
+  cache.flush(new Date(T0));
+  assert.equal(existsSync(file), false, "kein Write ohne Spread-Eintrag");
+
+  // Regulär: erst Spread, dann Tiefe → Roundtrip.
+  cache.record("BITUNIX:BTCUSDT", 0.0001, new Date(T0));
+  cache.recordDepth("BITUNIX:BTCUSDT", 42_000, new Date(T0));
+  cache.flush(new Date(T0));
+  const reloaded = new FileSpreadCache(file, 6 * HOUR);
+  assert.equal(reloaded.freshDepth("BITUNIX:BTCUSDT", T0 + HOUR), 42_000);
+  assert.equal(reloaded.fresh("BITUNIX:BTCUSDT", T0 + HOUR), 0.0001);
+
+  // negative/nicht-endliche Tiefe wird verworfen.
+  cache.recordDepth("BITUNIX:BTCUSDT", -1, new Date(T0));
+  cache.flush(new Date(T0));
+  const again = new FileSpreadCache(file, 6 * HOUR);
+  assert.equal(again.freshDepth("BITUNIX:BTCUSDT", T0 + HOUR), 42_000);
+});
+
+test("bookDepthUsd: alte Cache-Dateien OHNE depth bleiben lesbar (Abwärtskompatibilität)", () => {
+  const file = cacheFile();
+  // Eine v0.3.0-Datei: entries mit `spread`/`at`, ohne `bookDepthUsd`.
+  writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      writtenAt: new Date(T0).toISOString(),
+      entries: {
+        "BITUNIX:BTCUSDT": { spread: 0.0001, at: new Date(T0).toISOString() },
+      },
+    }),
+    { mode: 0o600 },
+  );
+  const cache = new FileSpreadCache(file, 6 * HOUR);
+  assert.equal(cache.fresh("BITUNIX:BTCUSDT", T0 + HOUR), 0.0001);
+  assert.equal(cache.freshDepth("BITUNIX:BTCUSDT", T0 + HOUR), undefined);
+});

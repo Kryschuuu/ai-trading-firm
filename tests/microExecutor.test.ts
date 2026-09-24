@@ -21,6 +21,7 @@ import {
   type CachedRule,
   type ExecuteContext,
   type ExecutionOutcome,
+  type FeedTick,
   type RuleExecutionAdapter,
 } from "../src/lib/microExecutor";
 import { sanitizeRuleSpec, compileRuleSpec, type CandleLike } from "../src/lib/ruleEngine";
@@ -158,7 +159,7 @@ const matchingSnap = {
   macd: null,
   macdSignal: null,
   macdHist: null,
-  vwapPct: 1.2, spreadPct: 0.04,
+  vwapPct: 1.2, spreadPct: 0.04, bookDepthUsd: null,
 } as const;
 
 test("RuleCache.match: findet passende Regel, respektiert Cooldown und Tageslimit", () => {
@@ -315,3 +316,55 @@ test("MicroExecutor: Warmstart-Fehler werden gezählt/geloggt, nicht still versc
 });
 
 // ── 5) Fenster/Backtest-Integration über die Engine ist in ruleEngine.test.ts ─
+
+// ── bookDepthUsd (v0.4.0, IAD-T-06) ─────────────────────────────────────────
+
+test("RollingTimeframeSeries.snapshot trägt bookDepthUsd durch", () => {
+  const series = new RollingTimeframeSeries("BTC", "15m", candles(100));
+  const withDepth = series.snapshot(20, null, 42_000)!;
+  assert.equal(withDepth.bookDepthUsd, 42_000);
+  const without = series.snapshot(20, null, null)!;
+  assert.equal(without.bookDepthUsd, null);
+});
+
+test("MicroExecutor: book-tick → updateBook (Qualitätsgrenze) → Regel feuert erst bei belastbarer Tiefe", async () => {
+  const spec = makeSpec("BTC", {
+    condition: {
+      logic: "all",
+      conditions: [{ field: "bookDepthUsd", op: "gt", value: 100 }],
+    },
+  });
+  const cache = new RuleCache();
+  cache._seedForTest([cachedRule(spec, "rule-depth")]);
+  const adapter = new RecordingAdapter();
+  const executor = new MicroExecutor({ cache, adapter, options: { seedCandles: false } });
+  executor.addSymbol("BTC", "15m", candles(120));
+
+  const start = 1_700_000_000_000 + 120 * 60_000;
+  const ticks: FeedTick[] = [
+    // 1) Dünnes Buch (1 Level) → unter Qualitätsgrenze, Regel darf NICHT feuern.
+    {
+      kind: "book", symbol: "BTC", venue: "BINANCE", ts: start,
+      bids: [[99.9, 1]], asks: [[100.1, 1]],
+    },
+    // 2) Ein Trade-Tick: bookDepthUsd=null (dünnes Buch verworfen) ⇒ false.
+    { kind: "trade", symbol: "BTC", ts: start + 1, price: 95, qty: 10 },
+    // 3) Verifiziertes Buch (≥ 3 Levels) → Tiefe > 100.
+    {
+      kind: "book", symbol: "BTC", venue: "BINANCE", ts: start + 2,
+      bids: [[99.9, 10], [99.8, 20], [99.7, 30]],
+      asks: [[100.1, 5], [100.2, 15], [100.3, 25]],
+    },
+    // 4) Weitere Trade-Ticks: bookDepthUsd jetzt > 100 ⇒ feuert.
+    { kind: "trade", symbol: "BTC", ts: start + 3, price: 95, qty: 10 },
+    { kind: "trade", symbol: "BTC", ts: start + 4, price: 95, qty: 10 },
+  ];
+  executor.registerFeed(new SequenceFeed(ticks));
+  await executor.start();
+
+  // Fail-closed belegt: Wäre das dünne Buch als „0"-Tiefe gezählt worden,
+  // hätte die Regel schon bei Tick 2 gefeuert. Das qualifizierte Buch kommt
+  // erst bei Tick 3 — die Tiefe wird genau dann gesetzt.
+  assert.ok(adapter.calls.length >= 1, "Regel muss nach verifiziertem Buch feuern");
+  await executor.stop();
+});

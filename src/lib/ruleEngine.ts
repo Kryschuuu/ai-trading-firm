@@ -142,6 +142,15 @@ export interface RuleSnapshot {
    * Spread frisst die Edge pro Trade.
    */
   spreadPct: number | null;
+  /**
+   * Orderbuch-Tiefe der abriegelnden Seite in Quote-Währung (v0.4.0,
+   * IAD-T-06): `min(Σ bid×qty, Σ ask×qty)` gemessen am Buch. `null`, wenn
+   * keine belastbare Tiefe vorliegt (kein/zu dünnes Buch unter der
+   * Venue-Qualitätsgrenze) — `null` blockiert die Bedingung fail-closed,
+   * eine 0 wäre eine erfundene Tiefe. Zusammen mit `spreadPct` die
+   * Liquiditätsprüfung des Daytradings.
+   */
+  bookDepthUsd: number | null;
   volume: number;
   volumeMa20: number;
   volumeRatio: number;
@@ -491,6 +500,7 @@ function accessor(field: RuleField): (s: RuleSnapshot) => number | string | null
     case "macdHist": return (s) => s.macdHist;
     case "vwapPct": return (s) => s.vwapPct;
     case "spreadPct": return (s) => s.spreadPct;
+    case "bookDepthUsd": return (s) => s.bookDepthUsd;
     case "volume": return (s) => s.volume;
     case "volumeMa20": return (s) => s.volumeMa20;
     case "volumeRatio": return (s) => s.volumeRatio;
@@ -584,7 +594,8 @@ export function buildSnapshotFromCandles(
   symbol: string,
   candles: CandleLike[],
   volumeWindow = 20,
-  spread: number | null = null
+  spread: number | null = null,
+  bookDepthUsd: number | null = null
 ): RuleSnapshot | null {
   if (candles.length < 25) return null;
   const closes = candles.map((c) => c.close);
@@ -639,6 +650,10 @@ export function buildSnapshotFromCandles(
     macdHist: macdValue != null ? Number(macdValue.histogram.toFixed(6)) : null,
     vwapPct: vwapValue != null ? Number(vwapValue.priceVsVwapPct.toFixed(4)) : null,
     spreadPct: spread != null && Number.isFinite(spread) && spread >= 0 ? Number((spread * 100).toFixed(4)) : null,
+    bookDepthUsd:
+      bookDepthUsd != null && Number.isFinite(bookDepthUsd) && bookDepthUsd > 0
+        ? bookDepthUsd
+        : null,
     volume,
     volumeMa20,
     volumeRatio: volumeMa20 > 0 ? volume / volumeMa20 : 0,
