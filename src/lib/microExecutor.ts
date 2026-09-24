@@ -249,13 +249,13 @@ export class RollingTimeframeSeries {
   }
 
   /** Aktueller Snapshot (0–1 Kerzen Genauigkeit, keine IO). */
-  snapshot(volumeWindow = 20): RuleSnapshot | null {
+  snapshot(volumeWindow = 20, spread: number | null = null): RuleSnapshot | null {
     const buf: CandleLike[] = this.finalized.slice(-159);
     if (this.openAgg) {
       buf.push({ ...this.openAgg, time: this.openAgg.time });
     }
     if (buf.length < 25) return null;
-    return buildSnapshotFromCandles(this.symbol, buf, volumeWindow);
+    return buildSnapshotFromCandles(this.symbol, buf, volumeWindow, spread);
   }
 
   size(): number {
@@ -1166,6 +1166,7 @@ export class MicroExecutor {
   private readonly adapter: RuleExecutionAdapter;
   private feeds: MarketFeed[] = [];
   private series = new Map<string, RollingTimeframeSeries>();
+  private spreads = new Map<string, number>();
   private running = false;
   private ticks = 0;
   private evalCount = 0;
@@ -1202,6 +1203,17 @@ export class MicroExecutor {
     const key = `${symbol}:${timeframe}`;
     if (!this.series.has(key)) {
       this.series.set(key, new RollingTimeframeSeries(symbol, timeframe, history));
+    }
+  }
+
+  /** Orderbuch-Spread für ein Symbol aktualisieren (für spreadPct-Regeln). */
+  updateSpread(symbolRaw: string, spread: number | null): void {
+    const symbol = sanitizeSymbol(symbolRaw);
+    if (!symbol) return;
+    if (spread != null && Number.isFinite(spread) && spread >= 0 && spread <= 0.5) {
+      this.spreads.set(symbol, spread);
+    } else {
+      this.spreads.delete(symbol);
     }
   }
 
@@ -1286,13 +1298,14 @@ export class MicroExecutor {
     // Keine Regel für dieses Symbol geladen → Zero-Cost-Tick.
     if (this.cache.candidatesBySymbol(symbol).length === 0) return;
 
+    const spread = this.spreads.get(symbol) ?? null;
     for (const [key, series] of this.series) {
       const [sym, timeframe] = key.split(":");
       if (sym !== symbol) continue;
       if (tick.kind === "trade") series.touch(tick.price, tick.ts, tick.qty);
       else series.applyCandle(tick.candle, tick.closed);
 
-      const snap = series.snapshot();
+      const snap = series.snapshot(undefined, spread);
       if (!snap) continue; // noch nicht genug Historie → weiter wärmen
 
       const t0 = performance.now();

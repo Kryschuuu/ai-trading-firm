@@ -252,7 +252,17 @@ test("Vorlagen: jede einzelne wird von validateMissionInput akzeptiert", () => {
       assert.equal(res.value.templateId, t.id);
       assert.equal(res.value.status, "PENDING");
       // Scan-Vorlagen nennen Zahlen im Zieltext → keine Vagheits-Warnung.
-      assert.equal(res.warnings.length, 0, `${t.id} erzeugt Warnungen: ${res.warnings.join(" | ")}`);
+      // Ausnahme: guardrail-stress-test liegt bewusst an den Code-Obergrenzen
+      // (0.05 / 0.5) und löst damit die 75-%-Deckel-Warnung aus — das ist
+      // beabsichtigt (Test der Guardrails) und kein Vagheitsfehler.
+      if (t.id === "guardrail-stress-test") {
+        assert.ok(
+          res.warnings.length >= 1 && res.warnings.every((w) => /Code-Obergrenze/.test(w)),
+          `${t.id} sollte nur Deckel-Warnungen erzeugen, kam: ${res.warnings.join(" | ")}`
+        );
+      } else {
+        assert.equal(res.warnings.length, 0, `${t.id} erzeugt Warnungen: ${res.warnings.join(" | ")}`);
+      }
     }
   }
 });

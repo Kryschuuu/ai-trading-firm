@@ -1,8 +1,7 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.2.0** (VWAP-Feld und
-> `1m`-Takt nachgezogen)
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.3.0** (spreadPct, n≥100, Kostenmodell feine Takte, Indikator-Cache)
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine

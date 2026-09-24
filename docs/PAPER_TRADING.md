@@ -159,11 +159,32 @@ schlimmer als eine abgewiesene Konfiguration).
 | Maker-Gebühr | `PAPER_MAKER_FEE_PCT` | `0.04` (= 4 bp) | [0, 10] % | Maker-Fallback, falls Registry-Feld fehlt |
 | Taker-Gebühr | `PAPER_TAKER_FEE_PCT` | `0.1` (= 10 bp) | [0, 10] % | Taker-Gebühr für Market-Fills (overrides `PAPER_SIM_TAKER_FEE`) |
 | Basis-Slippage | `PAPER_SLIPPAGE_BPS` | `1` bp | [0, 10000] bp | Slippage bei Ordergröße → 0 (overrides `PAPER_SIM_SLIPPAGE_BPS_BASE`) |
-| Spread-Fallback | `PAPER_SPREAD_FALLBACK_BPS` | `2` bp | [0, 10000] bp | synthetischer Bid/Ask-Spread für ticker-basierte Snapshots (overrides `PAPER_SIM_SYNTHETIC_SPREAD_BPS`) |
+| Spread-Fallback | `PAPER_SPREAD_FALLBACK_BPS` | `2` bp | [0, 10000] bp | synthetischer Bid/Ask-Spread für ticker-basierte Snapshots (overrides `PAPER_SIM_SYNTHETIC_SPREAD_BPS`). **v0.3.0**: Wenn nicht gesetzt, nutzt die Backtest-Engine einen timeframe-abhängigen Fallback (1m 15 bp, 5m 10, 15m 8, 30m 6, 1h 4, 4h 3, 1d 2) — feiner Takt = höhere Kosten. |
+
 
 Einheiten: `_PCT`-Flags sind **Prozent** (`0.04` = 0,04 % ⇒ 0.0004 als
 Dezimalanteil), `_BPS`-Flags sind Basispunkte. Beispiel:
 `PAPER_TAKER_FEE_PCT=0.05` ⇒ jede Market-Order zahlt 5 bp Taker-Gebühr.
+
+### 3.1a Timeframe-abhängiges Kostenmodell (v0.3.0)
+
+Feine Takte haben pro Bar eine kleinere Edge, aber dieselben absoluten Kosten
+(Gebühren + Spread + Slippage). Das Modell skaliert deshalb den Fallback:
+
+- **Spread-Fallback**: 1m 15 bp, 5m 10 bp, 15m 8 bp, 30m 6 bp, 1h 4 bp, 4h 3 bp, 1d 2 bp
+- **Slippage-Basis**: 1m 3 bp, 5m 2 bp, 15m 1,5 bp, 30m 1 bp, 1h 1 bp, 4h 0,5 bp, 1d 0,5 bp
+
+Implementierung: `timeframeToSpreadFallbackBps()` / `timeframeToSlippageBaseBps()`
+in `src/backtest/paperExecution.ts`, verdrahtet in `createPaperExecutionRuntime`
+und `runMultiAssetBacktest` (Paper-Option `timeframe`). Wenn ein expliziter
+Simulator übergeben wurde (`paper.simulator`), bleibt er unverändert — kein
+Verhaltensbruch für kalibrierte Läufe. Für Live-Paper (Broker) gilt derselbe
+`FillSimulator` — die Skalierung ist damit konsistent über Backtest und Paper.
+
+Für Daytrading ist zusätzlich `spreadPct` als Regelfeld verfügbar
+(`instrument.spread` ×100, `null` ohne Orderbuch) — siehe `src/lib/ruleFieldCatalog.ts`
+und `docs/ARCHITECTURE.md`.
+
 
 ### 3.2 Funding-Accrual für Perpetuals (GAP-02, v1.42.0)
 

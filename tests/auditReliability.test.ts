@@ -45,7 +45,7 @@ import {
 } from "../src/lib/auditSink";
 import { setStructuredLogSinkForTests, type StructuredLogEntry } from "../src/lib/logger";
 import { telemetry } from "../src/lib/telemetry";
-import { agents as agentsTable, auditLog } from "../src/db/schema";
+import { agents as agentsTable, auditLog, promptArtifacts } from "../src/db/schema";
 import { recordBitunixPrivateCall, readBitunixAuditDegradedCount, clearBitunixPrivateAuditForTests, readBitunixPrivateAudit } from "../src/brokers/bitunix/audit";
 
 // ── Infrastruktur für Tests ─────────────────────────────────────────────────
@@ -384,15 +384,33 @@ function installFakeDb(calls: FakeDbCalls): void {
     systemPrompt: "alter Prompt",
     status: "IDLE",
     updatedAt: new Date(),
+    version: 1,
   };
-  const updatedRow = { ...agentRow, systemPrompt: "neuer Prompt — handle nur nach Mandat" };
+  const updatedRow = { ...agentRow, systemPrompt: "neuer Prompt — handle nur nach Mandat", version: 2 };
   /** thenable + `returning()` — die Route awaited beides, je nach Pfad. */
   const result = (rows: unknown[]) => ({
     then: (resolve: (value: unknown[]) => void) => resolve(rows),
     returning: () => rows,
   });
   const fake = {
-    select: () => ({ from: () => ({ where: () => [agentRow], limit: () => [agentRow] }) }),
+    select: () => ({
+      from: (table: unknown) => ({
+        where: () => {
+          if (table === promptArtifacts) {
+            const empty: unknown[] = [];
+            return {
+              limit: () => empty,
+              then: (resolve: (v: unknown[]) => void) => resolve(empty),
+            };
+          }
+          const rows = [agentRow];
+          return {
+            limit: () => rows,
+            then: (resolve: (v: unknown[]) => void) => resolve(rows),
+          };
+        },
+      }),
+    }),
     update: (table: unknown) => ({
       set: () => ({
         where: () => {
@@ -410,6 +428,19 @@ function installFakeDb(calls: FakeDbCalls): void {
         if (table === auditLog) {
           calls.auditInserts += 1;
           throw new Error("forced audit insert failure (S1-Route-Test)");
+        }
+        if (table === promptArtifacts) {
+          const artifactRow = {
+            id: "00000000-0000-4000-8000-000000000000",
+            agentId: row.agentId,
+            role: row.role,
+            version: row.version,
+            promptHash: row.promptHash,
+            canonicalPrompt: row.canonicalPrompt,
+            templateSchemaVersion: row.templateSchemaVersion ?? "1",
+            createdAt: new Date(),
+          };
+          return result([artifactRow]);
         }
         calls.killSwitchInserts += 1;
         return result([row]);

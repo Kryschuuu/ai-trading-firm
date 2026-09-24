@@ -270,10 +270,10 @@ test("Multi-Zyklus: schrittweise Annäherung, kein Sprung (5 Zyklen → Bound)",
 
 // ── 3b) Konfiguration: Defaults + Bounds-Clamp (rein, Env injiziert) ───────
 
-test("Journal-Config: Defaults (off, 20, [0.5,1.5], Δ=0.1, 1h)", () => {
+test("Journal-Config: Defaults (off, 100, [0.5,1.5], Δ=0.1, 1h)", () => {
   const cfg = loadJournalConfig({});
   assert.equal(cfg.feedbackMode, "off");
-  assert.equal(cfg.minTrades, 20);
+  assert.equal(cfg.minTrades, 100);
   assert.equal(cfg.weightMin, 0.5);
   assert.equal(cfg.weightMax, 1.5);
   assert.equal(cfg.maxWeightDelta, 0.1);

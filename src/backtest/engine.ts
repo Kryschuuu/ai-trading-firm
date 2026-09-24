@@ -41,6 +41,8 @@ import {
   type CandleLike,
   type RuleSpec,
 } from "../lib/ruleEngine";
+import { buildIndicatorCache, snapshotFromCache } from "./indicatorCache";
+import { timeframeToSpreadFallbackBps } from "./paperExecution";
 import {
   DEFAULT_ANALYSIS_TIMEFRAME,
   SUPPORTED_TIMEFRAME_MS,
@@ -170,9 +172,15 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
 
   // GAP-01: Paper-Laufzeit EINMAL pro Lauf erzeugen (frischer Simulator-seq
   // ⇒ deterministische Order-IDs; Legacy-Läufe bleiben unberührt).
+  // v0.3.0: Timeframe wird in den Paper-Optionen mitgeführt, damit der
+  // Kosten-Fallback (Spread/Slippage) feine Takte teurer rechnet.
   const paper: PaperExecutionRuntime | null =
     config.executionModel === "paper"
-      ? createPaperExecutionRuntime(config.paper ?? {}, config.feeModel, SUPPORTED_TIMEFRAME_MS[config.timeframe])
+      ? createPaperExecutionRuntime(
+          { ...(config.paper ?? {}), timeframe: config.timeframe },
+          config.feeModel,
+          SUPPORTED_TIMEFRAME_MS[config.timeframe]
+        )
       : null;
 
   // RMA-P1-01: Event-Replay-Laufzeit (Order-Lifecycle, Latenz, Depth-Impact,
@@ -181,7 +189,10 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
   const replay: EventReplayRuntime | null =
     config.executionModel === "event_replay"
       ? createEventReplayRuntime({
-          options: config.replay ?? {},
+          options: {
+            ...(config.replay ?? {}),
+            spreadBpsFallback: (config.replay as any)?.spreadBpsFallback ?? timeframeToSpreadFallbackBps(config.timeframe),
+          },
           engineFeeModel: config.feeModel,
           barMs: SUPPORTED_TIMEFRAME_MS[config.timeframe],
           candlesBySymbol: candlesIndexed,
@@ -216,6 +227,17 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       };
     }
   });
+
+  // Performance-Optimierung v0.3.0: Indikatoren einmal pro Symbol in O(n)
+  // vorrechnen statt pro Bar O(n) neu — macht aus O(n²) → O(n) und bringt
+  // 2-Jahres-Stundenkerzen von 15–20 s auf <10 s (10-s-Deckel im Test).
+  const indicatorCaches = new Map<string, ReturnType<typeof buildIndicatorCache>>();
+  for (const sym of symbols) {
+    const series = candlesIndexed.get(sym) ?? [];
+    if (series.length >= 25) {
+      indicatorCaches.set(sym, buildIndicatorCache(series));
+    }
+  }
 
   // Zeiger auf aktuelle Kerzenindizes je Symbol
   const symbolPointers = new Map<string, number>();
@@ -492,7 +514,31 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
           const spec = strat.spec;
           if ((spec.action.side as string) === "SHORT" && !config.enableShorts) continue;
 
-          const snap = buildSnapshotFromCandles(strat.symbol, subSeries, spec.window.volumeWindow);
+          // Fast-Path v0.3.0: Cache nutzen wenn vorhanden, sonst Fallback auf Original
+          let snap: ReturnType<typeof buildSnapshotFromCandles> = null;
+          const cacheKey = candlesIndexed.has(strat.symbol) ? strat.symbol : strat.nativeSymbol;
+          const cache = indicatorCaches.get(cacheKey);
+          const spread = (() => {
+            try {
+              if (paper) {
+                const instr = paper.instrumentOf(strat.symbol) ?? paper.instrumentOf(strat.nativeSymbol);
+                return instr?.spread ?? null;
+              }
+              if (replay) {
+                // replay hat keinen direkten instrumentOf, aber über config
+                // versuchen wir, aus der Paper-Config zu lesen — sonst null
+                return null;
+              }
+              return null;
+            } catch {
+              return null;
+            }
+          })();
+          if (cache) {
+            snap = snapshotFromCache(strat.symbol, series, cache, candleInfo.index, spec.window.volumeWindow, spread);
+          } else {
+            snap = buildSnapshotFromCandles(strat.symbol, subSeries, spec.window.volumeWindow, spread);
+          }
           if (!snap) continue;
 
           if (!isWindowOpen(spec, snap.ts)) continue;

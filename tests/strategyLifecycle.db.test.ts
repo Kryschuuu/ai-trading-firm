@@ -465,33 +465,33 @@ describe("strategy_lifecycle (Postgres): Migration, Roundtrip, Idempotenz", () =
     const pairs = [
       {
         key: "maxDrawdownPct",
-        baseline: drift.metricWindow(10, 50, now - 3600_000, now),
-        current: drift.metricWindow(40, 50, now - 1000, now),
+        baseline: drift.metricWindow(10, 100, now - 3600_000, now),
+        current: drift.metricWindow(40, 100, now - 1000, now),
       },
       {
         key: "winRate",
-        baseline: drift.metricWindow(0.55, 50, now - 3600_000, now),
-        current: drift.metricWindow(0.55, 50, now - 1000, now),
+        baseline: drift.metricWindow(0.55, 100, now - 3600_000, now),
+        current: drift.metricWindow(0.55, 100, now - 1000, now),
       },
       {
         key: "profitFactor",
-        baseline: drift.metricWindow(1.2, 50, now - 3600_000, now),
-        current: drift.metricWindow(1.2, 50, now - 1000, now),
+        baseline: drift.metricWindow(1.2, 100, now - 3600_000, now),
+        current: drift.metricWindow(1.2, 100, now - 1000, now),
       },
       {
         key: "avgTradePnl",
-        baseline: drift.metricWindow(0.001, 50, now - 3600_000, now),
-        current: drift.metricWindow(0.001, 50, now - 1000, now),
+        baseline: drift.metricWindow(0.001, 100, now - 3600_000, now),
+        current: drift.metricWindow(0.001, 100, now - 1000, now),
       },
       {
         key: "avgSlippageBps",
-        baseline: drift.metricWindow(5, 50, now - 3600_000, now),
-        current: drift.metricWindow(5, 50, now - 1000, now),
+        baseline: drift.metricWindow(5, 100, now - 3600_000, now),
+        current: drift.metricWindow(5, 100, now - 1000, now),
       },
       {
         key: "dataQualityScore",
-        baseline: drift.metricWindow(0.95, 50, now - 3600_000, now),
-        current: drift.metricWindow(0.95, 50, now - 1000, now),
+        baseline: drift.metricWindow(0.95, 100, now - 3600_000, now),
+        current: drift.metricWindow(0.95, 100, now - 1000, now),
       },
     ];
 

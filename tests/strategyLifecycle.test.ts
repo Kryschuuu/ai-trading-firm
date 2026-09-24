@@ -195,7 +195,7 @@ describe("promotion gates: fail-closed", () => {
     const g = evaluateBacktestGate(
       {
         ...freshWindow,
-        trades: 50,
+        trades: 100,
         winRate: 0.55,
         profitFactor: 1.2,
         maxDrawdownPct: 10,
@@ -271,7 +271,7 @@ describe("promotion gates: fail-closed", () => {
     const g = evaluateBacktestGate(
       {
         ...freshWindow,
-        trades: 40,
+        trades: 100,
         winRate: 0.5,
         profitFactor: 1.0,
         maxDrawdownPct: 40,
@@ -293,7 +293,7 @@ describe("promotion gates: fail-closed", () => {
         windowStartMs: NOW - 10 * 24 * 3600_000,
         windowEndMs: NOW - 1000,
         availableAtMs: NOW - 3600_000,
-        trades: 30,
+        trades: 100,
         reconClean: null,
         reconAtMs: null,
         avgSlippageBps: 5,
@@ -311,7 +311,7 @@ describe("promotion gates: fail-closed", () => {
         windowStartMs: NOW - 10 * 24 * 3600_000,
         windowEndMs: NOW - 1000,
         availableAtMs: NOW - 3600_000,
-        trades: 30,
+        trades: 100,
         reconClean: true,
         reconAtMs: NOW - 3600_000,
         avgSlippageBps: 5,

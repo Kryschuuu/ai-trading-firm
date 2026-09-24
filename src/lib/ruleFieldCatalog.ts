@@ -42,6 +42,12 @@ export const RULE_FIELDS = {
    * verschiedenen Kursniveaus läuft.
    */
   vwapPct: "number",
+  /**
+   * Relativer Spread in Prozent (0.04 = 0,04 % = 4 bp). Orderbuch-Top-Level
+   * (ask-bid)/mid. null = kein Orderbuch gemessen. Für Daytrading die
+   * zentrale Kosten-/Liquiditätsgröße — hoher Spread frisst die Edge.
+   */
+  spreadPct: "number",
 } as const;
 
 export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
@@ -58,7 +64,7 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   // 97 Perioden — auf `1h` also ~4 Tage, auf `5m` ~8 Stunden, auf `1m` ~1,6 h.
   // Label und Doku sagen das jetzt; die Rechnung bleibt (eine Korrektur würde
   // bestehende Regeln und ihre Backtests still umwerten — Versionssache, kein
-  // Nebenprodukt dieses Zyklus, siehe Audit „Offene Punkte").
+  // Nebenprodukt dieses Zyklus, siehe Audit „Offene Punkte“).
   changePct24h: "Änderung ggü. der Kerze vor 97 Perioden, Prozent (nicht 24 h)",
   priceVsEma21Pct: "Kurs vs. EMA 21, Prozent",
   priceVsEma50Pct: "Kurs vs. EMA 50, Prozent",
@@ -69,4 +75,5 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   macdSignal: "MACD-Signal (9)",
   macdHist: "MACD-Histogramm",
   vwapPct: "Kurs vs. Tages-VWAP, Prozent (positiv = über dem VWAP)",
+  spreadPct: "Spread in Prozent (0,04 = 0,04 % = 4 bp, null = kein Orderbuch)",
 };

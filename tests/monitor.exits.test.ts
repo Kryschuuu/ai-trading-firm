@@ -141,8 +141,12 @@ before(async () => {
   }
 });
 
-function skipWithoutDb(t: { skip: (msg: string) => void }): void {
-  if (!dbAvailable) t.skip(`realer DB-Lauf übersprungen — ${dbProbeNote}`);
+function skipWithoutDb(t: { skip: (msg: string) => void }): boolean {
+  if (!dbAvailable) {
+    t.skip(`realer DB-Lauf übersprungen — ${dbProbeNote}`);
+    return true;
+  }
+  return false;
 }
 
 /** Test-Symbol (kanonische Form wie sie submitAtomic persistiert). */
@@ -452,7 +456,7 @@ test("GAP-05 D1: hydrate trägt Trailing-Zustand ein (Ledger-Spiegel der DB)", (
 // ═════════════════════════════════════════════════════════════════════════
 
 test("GAP-05 D1 (DB): Trailing-Lifecycle im tick() — Bewaffnung persists, Ratchet nach oben, Exit TRAILING_STOP", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   setExitEnv({
     RISK_TRAILING_ENABLED: "true",
@@ -504,7 +508,7 @@ test("GAP-05 D1 (DB): Trailing-Lifecycle im tick() — Bewaffnung persists, Ratc
 });
 
 test("GAP-05 D1 (DB): Restart-Persistenz — nach invalidateBrokerCache rehydriert der Ledger den bewaffneten Stop aus der DB", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   setExitEnv({
     RISK_TRAILING_ENABLED: "true",
@@ -532,7 +536,7 @@ test("GAP-05 D1 (DB): Restart-Persistenz — nach invalidateBrokerCache rehydrie
 });
 
 test("GAP-05 D2 (DB): Time-Stop — Ablauf schließt via tick(), 0 lässt die Position unberührt", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   setExitEnv({ RISK_TIME_STOP_HOURS: "24" });
   // 25 h alte Position, Preis ohne Trigger (SL weit weg, kein TP).
@@ -553,7 +557,7 @@ test("GAP-05 D2 (DB): Time-Stop — Ablauf schließt via tick(), 0 lässt die Po
 });
 
 test("GAP-05 D3 (DB): OCO-Race — zwei parallele applyExit-Aufrufe (SL/TP) schließen GENAU einmal", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   const id = await seedPosition({ price: 100, stopLoss: 95, takeProfit: 105 });
   await tickAt(1, 100); // stellt die Broker-Hydration sicher (Ledger kennt die Position)
@@ -591,7 +595,7 @@ test("GAP-05 D3 (DB): OCO-Race — zwei parallele applyExit-Aufrufe (SL/TP) schl
 });
 
 test("GAP-05 D3 (DB): zwei parallele tick()-Aufrufe (Promise.all) → ein Exit, zweiter Zyklus no-op", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   const id = await seedPosition({ price: 100, stopLoss: 95, takeProfit: null });
 
@@ -621,7 +625,7 @@ test("GAP-05 D3 (DB): zwei parallele tick()-Aufrufe (Promise.all) → ein Exit, 
 });
 
 test("GAP-05 D3 (DB): Multi-Instanz-Race — zwei echte Postgres-Transaktionen claims, genau ein Exit", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   const id = await seedPosition({ price: 100, stopLoss: 95 });
 
@@ -649,7 +653,7 @@ test("GAP-05 D3 (DB): Multi-Instanz-Race — zwei echte Postgres-Transaktionen c
 });
 
 test("GAP-05 D4 (DB): alle Flags aus → nur SL/TP wie bisher, Trailing-Spalten bleiben unangetastet", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   setExitEnv({}); // Default: alles aus
   // Gewinn +2 % (würde bei Trailing-An bewaffnen) und TP/SL daneben.
@@ -670,7 +674,7 @@ test("GAP-05 D4 (DB): alle Flags aus → nur SL/TP wie bisher, Trailing-Spalten 
 });
 
 test("GAP-05 Audit (DB): Journal-Zeile erhält den Exit-Grund (TRAILING_STOP sichtbar)", async (t) => {
-  skipWithoutDb(t);
+  if (skipWithoutDb(t)) return;
   await cleanDb();
   setExitEnv({
     RISK_TRAILING_ENABLED: "true",

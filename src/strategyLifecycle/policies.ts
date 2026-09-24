@@ -53,20 +53,20 @@ function sha256(input: string): string {
 
 /** Roh-Objekt OHNE `version` — die Version wird daraus abgeleitet (kein Kreis). */
 const POLICY_BODY = {
-  backtestMinTrades: 30,
+  backtestMinTrades: 100,
   backtestMinDurationMs: 14 * 24 * 60 * 60 * 1000,
   backtestMaxDrawdownPct: 25,
   backtestMinWinRate: null as number | null,
   backtestMinProfitFactor: 0.9 as number | null,
   backtestMinDataQuality: 0.8,
   backtestEvidenceMaxAgeMs: 30 * 24 * 60 * 60 * 1000,
-  paperMinTrades: 20,
+  paperMinTrades: 100,
   paperMinDurationMs: 7 * 24 * 60 * 60 * 1000,
   paperRequireCleanRecon: true,
   paperReconMaxAgeMs: 24 * 60 * 60 * 1000,
   paperMaxAvgSlippageBps: 25 as number | null,
   paperEvidenceMaxAgeMs: 14 * 24 * 60 * 60 * 1000,
-  driftMinSample: 20,
+  driftMinSample: 100,
   recoveryCooldownMs: 6 * 60 * 60 * 1000,
 } as const;
 

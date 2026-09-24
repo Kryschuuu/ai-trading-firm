@@ -134,6 +134,14 @@ export interface RuleSnapshot {
    * (ein 0.0 wäre eine erfundene VWAP-Neutralität).
    */
   vwapPct: number | null;
+  /**
+   * Relativer Spread in Prozent (0.04 = 0,04 % = 4 bp). Quelle ist das
+   * Orderbuch-Top-Level (`instrument.spread` = (ask-bid)/mid). `null`, wenn
+   * kein Orderbuch gemessen wurde — dünne Bücher sind kein 0-Spread.
+   * Für Daytrading ist das die zentrale Kosten-/Liquiditätsgröße: Hoher
+   * Spread frisst die Edge pro Trade.
+   */
+  spreadPct: number | null;
   volume: number;
   volumeMa20: number;
   volumeRatio: number;
@@ -482,6 +490,7 @@ function accessor(field: RuleField): (s: RuleSnapshot) => number | string | null
     case "macdSignal": return (s) => s.macdSignal;
     case "macdHist": return (s) => s.macdHist;
     case "vwapPct": return (s) => s.vwapPct;
+    case "spreadPct": return (s) => s.spreadPct;
     case "volume": return (s) => s.volume;
     case "volumeMa20": return (s) => s.volumeMa20;
     case "volumeRatio": return (s) => s.volumeRatio;
@@ -574,7 +583,8 @@ export function compileRuleSpec(spec: RuleSpec): CompiledRule {
 export function buildSnapshotFromCandles(
   symbol: string,
   candles: CandleLike[],
-  volumeWindow = 20
+  volumeWindow = 20,
+  spread: number | null = null
 ): RuleSnapshot | null {
   if (candles.length < 25) return null;
   const closes = candles.map((c) => c.close);
@@ -628,6 +638,7 @@ export function buildSnapshotFromCandles(
     macdSignal: macdValue != null ? Number(macdValue.signal.toFixed(6)) : null,
     macdHist: macdValue != null ? Number(macdValue.histogram.toFixed(6)) : null,
     vwapPct: vwapValue != null ? Number(vwapValue.priceVsVwapPct.toFixed(4)) : null,
+    spreadPct: spread != null && Number.isFinite(spread) && spread >= 0 ? Number((spread * 100).toFixed(4)) : null,
     volume,
     volumeMa20,
     volumeRatio: volumeMa20 > 0 ? volume / volumeMa20 : 0,
