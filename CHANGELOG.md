@@ -21,12 +21,52 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-24** · Code-Version **0.3.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-24** · Code-Version **0.4.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Keine offenen Punkte — nächster Zyklus plant Shorts und Orderbuch-Qualitätsgrenzen.
+> **Status: Beta.** Offen für den nächsten Zyklus (aus den Audits): `IAD-T-07`
+> Limit-/Stop-Markt/OCO am Broker (`src/execution`), `IAD-T-08` Session-VWAP
+> mit börsenlokaler Tagesgrenze (Exchange-Kalender), Shorts
+> (`RULE_ALLOWED_SIDE=LONG`) bleiben Risikoentscheidung.
+
+## [0.4.0] — 2026-09-24 · bookDepthUsd + Orderbuch-Qualitätsgrenze je Venue
+
+> **Status: Beta.** Logische Fortsetzung von `spreadPct` (IAD-T-06): Die
+> Orderbuch-**Tiefe** wird zum Regelfeld, abgesichert durch eine
+> **Qualitätsgrenze je Venue** — ein Feld auf dünnen Büchern wäre eine
+> Fehlentscheidungs-Maschine. Quelle: Arena-Auftrag 2026-09-24.
+
+### Hinzugefügt
+
+- **`bookDepthUsd` als Regelfeld** (`IAD-T-06`): Orderbuch-Tiefe der
+  abriegelnden Seite `min(Σ bid×qty, Σ ask×qty)` in Quote-Währung. Verfügbar in
+  `MarketInstrument.bookDepthUsd` (Registry + sync-Upsert + Spread-/Depth-Cache
+  `data/spread-cache.json`, abwärtskompatibel), `RuleSnapshot`, `RULE_FIELDS`,
+  `buildSnapshotFromCandles`/`snapshotFromCache`, `microExecutor.updateBook`
+  (Live-Buch aus dem Binance-`@depth5`-Stream), `TrustedReading.bookDepthUsd`.
+  `null` blockiert die Bedingung (fail-closed) — eine 0 wäre eine erfundene Tiefe.
+- **Orderbuch-Qualitätsgrenze je Venue** (`src/lib/bookDepthProvenance.ts`):
+  Nur `depth`-Venues (BINANCE/BITUNIX/KRAKEN) liefern `VERIFIED`-Tiefe
+  (≥ 3 Levels je Seite, Snapshot ≤ 5 s alt). `top`-Venues (YAHOO — Preise ohne
+  Lotgröße) und `none` (PAPER-Presets) bleiben `UNQUALIFIED`. Unbekannte Venues
+  fallen auf `none` (nie auf `depth`).
+- **`src/lib/bookDepth.ts`**: deterministische Tiefenberechnung
+  (`computeBookDepth`), Rohlevel-Sanitisierung mit harter Kappung
+  (Security) und ordnungsunabhängigem Best-Bid/Ask.
+
+### Geändert
+
+- `MarketInstrument` + `INSTRUMENT_FIELDS` + Normalisierung/Validierung um
+  `bookDepthUsd` (NULL-Metrik-Semantik wie `volume24h`/`spread`).
+- `enrichWithOrderBooks` misst Tiefe aus denselben Depth-Levels (kein Extra-Request).
+- `formatSyncLog` führt bei Messungen die Zählerzeile `book depth measured`.
+- Tech-Debt/Kosmetik: 6 ungenutzte `eslint-disable`-Directiven entfernt
+  (`lint` jetzt 0 warnings), redundanter Seitenfilter in der Tiefenberechnung
+  gestrichen.
+- Execution-Quality-Golden-Pin neu gesetzt: der Evidence-Hash deckt jetzt
+  `bookDepthUsd` als Entscheidungsinput ab.
 
 ## [0.3.0] — 2026-09-24 · Paper n≥100, Kostenmodell feine Takte, 6 rote Tests grün, spreadPct
 

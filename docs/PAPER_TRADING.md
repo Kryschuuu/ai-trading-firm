@@ -181,8 +181,10 @@ Simulator übergeben wurde (`paper.simulator`), bleibt er unverändert — kein
 Verhaltensbruch für kalibrierte Läufe. Für Live-Paper (Broker) gilt derselbe
 `FillSimulator` — die Skalierung ist damit konsistent über Backtest und Paper.
 
-Für Daytrading ist zusätzlich `spreadPct` als Regelfeld verfügbar
-(`instrument.spread` ×100, `null` ohne Orderbuch) — siehe `src/lib/ruleFieldCatalog.ts`
+Für Daytrading sind zusätzlich `spreadPct` (relativer Orderbuch-Spread) und
+`bookDepthUsd` (Orderbuch-Tiefe der schwächeren Seite, v0.4.0) als Regelfeld
+verfügbar — beide `null` ohne belastbares Buch, mit Qualitätsgrenze je Venue
+(`src/lib/bookDepthProvenance.ts`). Siehe `src/lib/ruleFieldCatalog.ts`
 und `docs/ARCHITECTURE.md`.
 
 

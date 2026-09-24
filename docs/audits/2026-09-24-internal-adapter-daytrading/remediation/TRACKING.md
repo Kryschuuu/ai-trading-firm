@@ -26,7 +26,7 @@ Befunde und Messungen: [`../README.md`](../README.md).
 | IAD-T-03 | VWAP als Messwert in den Trusted-Block | GEBAUT | `src/cycle/trustedIndicators.ts` (`vwapPct` im Reading) |
 | IAD-T-04 | Shorts im Regelwerk freigeben | VERWORFEN | `RULE_ALLOWED_SIDE = "LONG"` ist eine Risikoentscheidung (unbegrenzter Verlust, Leihgebühr, Margin); braucht Sizing/Exits/Backtest/Kosten-Pfade zuerst |
 | IAD-T-05 | `1m`-Backfill als Sync-Default | VERWORFEN | Request-Sturm gegen eine einzige Produktionsleserin (`1h`); explizit: `npm run market:sync -- --timeframes=1m,5m,15m,1h` |
-| IAD-T-06 | `spreadPct`/`bookDepthUsd` als Regelfeld | OFFEN | höchster Daytrading-Nutzen unter den offenen Ideen, braucht Orderbuch-Qualitätsgrenze je Venue (README §7.3) |
+| IAD-T-06 | `spreadPct`/`bookDepthUsd` als Regelfeld | GEBAUT (v0.4.0) | `spreadPct` seit v0.3.0; `bookDepthUsd` + Venue-Qualitätsgrenze (`src/lib/bookDepthProvenance.ts`, `src/lib/bookDepth.ts`) seit v0.4.0 — siehe `../2026-09-24-bookdepth-venue-quality/` |
 | IAD-T-07 | Limit-/Stop-Markt/OCO am Broker | OFFEN | gehört in `src/execution` + Broker-Verträge, nicht in die Regel-DSL |
 | IAD-T-08 | Session-VWAP mit börsenlokaler Tagesgrenze | OFFEN | UTC-Anker ist dokumentierte Konvention; Präzisierung braucht Exchange-Kalender im Store |
 | IAD-E-01 | Engine-Default, `backtestRule`, Whitelist-Semantik | UNVERÄNDERT | Auftrag: „Bewusst nicht gebaut" — stimmt und bleibt so |

@@ -1,7 +1,7 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.3.0** (spreadPct, n≥100, Kostenmodell feine Takte, Indikator-Cache)
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.4.0** (bookDepthUsd + Venue-Qualitätsgrenze, spreadPct, n≥100, Kostenmodell feine Takte)
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine
@@ -154,13 +154,24 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
 * **Felder (Whitelist):** `price, rsi14, ema9, ema21, ema50, trend,
   atrPct, volume, volumeMa20, volumeRatio, changePct24h,
   priceVsEma21Pct, priceVsEma50Pct, adx14, bbwPct, macd, macdSignal,
-  macdHist, vwapPct` (SSoT: `src/lib/ruleFieldCatalog.ts`; die Workshop-Oberfläche
-  liest genau diese Liste, ein Feld ohne Eintrag ist dort nicht wählbar).
+  macdHist, vwapPct, spreadPct, bookDepthUsd` (SSoT:
+  `src/lib/ruleFieldCatalog.ts`; die Workshop-Oberfläche liest genau diese
+  Liste, ein Feld ohne Eintrag ist dort nicht wählbar).
   `vwapPct` (CYCLE-DAYTRADE-01) ist der Kurs gegen den **Tages-VWAP** in
   Prozent — positiv = über dem volumen-gewichteten Tagesdurchschnitt, die
   Referenzgröße des Daytradings. Anker ist die UTC-Kalendertagesscheibe der
   letzten Kerze; ohne Volumen in der Serie bleibt das Feld `null` und die
   Bedingung feuert nicht (fail-closed statt erfundener Neutralität).
+* **Kosten-/Liquiditätsfelder (v0.4.0):** `spreadPct` (relativer
+  Orderbuch-Spread `(ask-bid)/mid` ×100) beantwortet „wie teuer ist der
+  Touch?“, `bookDepthUsd` (Tiefe der abriegelnden Seite
+  `min(Σ bid×qty, Σ ask×qty)` in Quote-Währung) beantwortet „wie viel liegt
+  wirklich dahinter?“. Die Tiefe trägt eine **Qualitätsgrenze je Venue**
+  (`src/lib/bookDepthProvenance.ts`): nur `depth`-Venues
+  (BINANCE/BITUNIX/KRAKEN, ≥ 3 Levels, Snapshot ≤ 5 s) werden `VERIFIED`;
+  `top`-Venues (YAHOO) und `none` bleiben `UNQUALIFIED`. Beide Felder sind
+  `null`, wenn das Buch nicht belastbar ist — `null` blockiert die Bedingung
+  (fail-closed), nie wird eine erfundene 0 geliefert.
 * **Operatoren:** `lt, lte, gt, gte, eq, between, in`.
 * **Action:** `side` (nur `LONG`), `stopLossPct`, `takeProfitRR`,
   `riskBudgetPct`, `maxPositionPct` — jeder Wert wird gegen
