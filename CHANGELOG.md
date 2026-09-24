@@ -26,7 +26,82 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-_Noch nicht freigegeben._
+> **Status: Beta.** Prüfung aus
+> [Adapter, Parallelität, Daytrading 2026-09-24](docs/audits/2026-09-24-internal-adapter-daytrading/README.md).
+> `backtestRule` bleibt unverändert, der Engine-Default bleibt `"legacy"`,
+> keine neue API-Route, keine neuen Datenadapter (Begründung im Audit).
+
+### Hinzugefügt
+
+- **Prompt-Budget-Planung der Analysten** (`CYCLE-BATCH-01`,
+  `src/cycle/promptBudget.ts`): der Technical Step misst seinen Prompt mit
+  derselben Baufunktion, die der Agent-Port sendet, und zerfällt bei Bedarf in
+  deterministisch gepackte Batches. Der Grund ist Korrektheit, nicht
+  Geschwindigkeit: Bei 40 Kandidaten mass der Einzelaufruf **92 449 Zeichen
+  (~25 700 Tokens) gegen `OLLAMA_NUM_CTX=4096` und `LLM_MAX_TOKENS=512`** —
+  Antwort abgeschnitten, JSON unvollständig, der Lauf endete mit
+  `NEUTRAL`/Score 50 für **alle** 40 Kandidaten. Jetzt: 10 Aufrufe
+  à ≤ 1 650 Tokens und ≤ 4 Analysen, Merge in Eingabereihenfolge.
+- **News-Schritt genauso geplant** (`05-news-analyst`): 40 Instrumente mit
+  120 Headlines bauten **31 594 Zeichen ≈ 8 800 Tokens** gegen ein 4 096er
+  Fenster — dieselbe Abschneide-Kette, Ergebnis war ABSTAIN für alle („ruhige
+  Nachrichtenlage"). Headline ohne Symbolbezug steht jetzt in JEDEM Batch
+  (sonst übersieht ein Batch die Markt-Krise), das systemische Risiko wird über
+  die Batches nach **Schwere** gemerged (MAX, nicht Mehrheitsvotum), und die
+  Injection-Hülle ist unverändert: der fremde Text bleibt in `untrustedData`
+  (Nachweis im Test).
+- **Nebenläufigkeit mit Sinn** (`CYCLE_ANALYST_CONCURRENCY`): Default 1 bei
+  lokaler Inferenz (ein Slot — Parallelität wäre nur Warteschlange), 2 bei
+  `openai`/`gemini`/`anthropic`; `mapBounded` hält die Ergebnisreihenfolge und
+  das Limit ein.
+- **Regelfeld `vwapPct`** (`CYCLE-DAYTRADE-01`): Kurs gegen den Tages-VWAP in
+  Prozent (`sessionVwap`, UTC-Tagesanker, `null` ohne Volumen ⇒ Bedingung
+  feuert nicht). Die Referenzgröße des Daytradens fehlte komplett — alle
+  bestehenden Felder vergleichen mit Zeitmitteln (EMA), keiner mit dem
+  Volumenmittel. Workshop-Feldauswahl übernimmt es automatisch aus dem Katalog.
+- **`1m` als Regel-Timeframe**: Whitelist, JSON-Schema,
+  `TIMEFRAME_MS` im Mikro-Executor, Workshop-Port. Vorher hätte
+  `?? TIMEFRAME_MS["15m"]` eine 1m-Regel **still auf 15 Minuten
+  aggregiert** — die Regel wäre auf einem anderen Takt gelaufen, als sie
+  unterschrieben hat.
+- **Flags** `CYCLE_PROMPT_RESERVE_TOKENS`,
+  `CYCLE_PROMPT_INPUT_BUDGET_TOKENS`, `CYCLE_ANALYST_BATCH_SIZE`,
+  `CYCLE_ANALYST_CONCURRENCY` (`CONFIGURATION.md`, `.env.example`).
+
+### Geändert
+
+- **Kein stilles Neutral mehr:** Fällt ein Batch aus, überdeckt nur DIESER
+  Batch sich selbst, und der Schritt meldet `promptFit.failedBatches` /
+  `fallbackInstruments` / `incomplete` im Artefakt statt 40 Nichtaussagen als
+  Analyse auszuliefern.
+- **Redundanz-Hebel vor Aufteilung:** die Voll-Snapshots der MTF-Konfluenz
+  waren 64 % des Prompts und duplicated die kompakte Zeilenform. Sie fliegen
+  je Batch einzeln raus (nur wenn DAS Fenster zu klein ist) — im Artefakt
+  stehen sie weiterhin vollständig, die Autorität bleibt bei der
+  serverseitigen Anhängung.
+- **`validateTechnicalOutput` lässt `confluenceMeta` und `promptFit` durch**
+  (sanitized, keine Fremdschlüssel). Vorher schluckte die Validierung beide
+  Meta-Blöcke im Engine-Handoff — `confluenceMeta` erreichte Research-Schritt
+  und Tages-Artefakt nie.
+
+### Gefunden, nicht geändert
+
+- **`changePct24h` ist keine 24-Stunden-Größe.** Die Snapshot-Rechnung bezieht
+  die Kerze vor **97 Perioden** — auf `1h` ~4 Tage, auf `5m` ~8 Stunden, auf
+  `1m` ~1,6 Stunden. Label und Code-Kommentar sagen das jetzt; die Rechnung
+  bleibt, weil jede Korrektur bestehende Regeln und ihre Backtests still
+  umwerten würde. Das gehört in eine dokumentierte Snapshot-/Formelversion,
+  nicht in einen Nebenbefund (Audit §7.4).
+
+### Nicht gebaut (bewusst, Begründung im Audit)
+
+Yahoo-Adapter (produktiv vorhanden: ALPACA/IBKR/PAPER via
+`src/marketdata/adapters/yahoo.ts`), Polygon- und FRED-Adapter,
+`RULE_FIELDS`-Erweiterung um ADX/BBW/MACD (seit v0.2.0 da), MACD in
+`indicators.ts` (da), Pre-Compute im Technical Step (ist als strengere
+Variante da: Code **überschreibt** Modellzahlen), Binomialtest (Wilson reicht),
+Shorts im Regelwerk (`RULE_ALLOWED_SIDE = "LONG"` ist eine
+Risikoentscheidung, keine Zeile Code).
 
 ## [0.2.0] — 2026-09-23 · Kostenwahrheit im Regel-Backtest, Workshop-Schritt 5, Trusted-Indikatoren
 

@@ -56,7 +56,8 @@ docs/audits/
 
 | Zyklus | Scope | Status |
 |---|---|---|
-| [2026-09-23-verbesserungen-fahrplan](2026-09-23-verbesserungen-fahrplan/README.md) | Big-Pickle-Audit „Verbesserungen“ (O1–O6, W1–W5, Datenquellen) gegen den Code | **OPEN:** Fahrplan, nichts implementiert; [ROADMAP](2026-09-23-verbesserungen-fahrplan/ROADMAP.md), [Tracking](2026-09-23-verbesserungen-fahrplan/remediation/TRACKING.md) |
+| [2026-09-24-internal-adapter-daytrading](2026-09-24-internal-adapter-daytrading/README.md) | Datenadapter (Yahoo/Polygon/FRED), Parallelität der Agenten, Daytrading-Fähigkeit — Prüfung eines Werk-Auftrags gegen `v0.2.0` | **UMGESETZT (Teilmenge):** Prompt-Budget/Batching + `vwapPct` + `1m` gebaut, Adapter abgelehnt; [Tracking](2026-09-24-internal-adapter-daytrading/remediation/TRACKING.md) |
+| [2026-09-23-verbesserungen-fahrplan](2026-09-23-verbesserungen-fahrplan/README.md) | Big-Pickle-Audit „Verbesserungen“ (O1–O6, W1–W5, Datenquellen) gegen den Code | **CLOSED v0.2.0:** 8 FIXED, 4 VERIFIED, 14 WONTFIX; [ROADMAP](2026-09-23-verbesserungen-fahrplan/ROADMAP.md), [Tracking](2026-09-23-verbesserungen-fahrplan/remediation/TRACKING.md) |
 | [2026-09-20-roadmap-audit](2026-09-20-roadmap-audit/README.md) | 25 Komponenten aus Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **CLOSED v1.73.0:** 4 VERIFIED, 21 FIXED; [Tracking](2026-09-20-roadmap-audit/remediation/TRACKING.md), [21 Umsetzungs-Prompts](2026-09-20-roadmap-audit/prompts/README.md) |
 | [2026-09-18-feature-gap](2026-09-18-feature-gap/README.md) | Zehn priorisierte Feature-Gaps | **CLOSED v1.51.1:** alle zehn Findings behoben; ENV-01 bleibt separates Low-Risk-Engineering-Thema |
 
