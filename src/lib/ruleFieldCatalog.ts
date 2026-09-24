@@ -34,6 +34,14 @@ export const RULE_FIELDS = {
   macdSignal: "number",
   /** Histogramm = MACD − Signal. */
   macdHist: "number",
+  /**
+   * Kurs gegen den Session-VWAP in Prozent (1.5 = 1,5 % über dem
+   * volumen-gewichteten Tagesdurchschnitt). Tagesanker ist der
+   * UTC-Kalendertag der letzten Kerze — die Referenz des Daytradings,
+   * bewusst relativ (über/unter VWAP), damit eine Regel über Märkte mit
+   * verschiedenen Kursniveaus läuft.
+   */
+  vwapPct: "number",
 } as const;
 
 export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
@@ -46,7 +54,12 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   volume: "Volumen der letzten Kerze",
   volumeMa20: "Volumen-Schnitt (20)",
   volumeRatio: "Volumen / 20er-Schnitt",
-  changePct24h: "Änderung über 24 Kerzen, Prozent",
+  // Der Name ist historisch, die Rechnung nicht: bezogen wird die Kerze vor
+  // 97 Perioden — auf `1h` also ~4 Tage, auf `5m` ~8 Stunden, auf `1m` ~1,6 h.
+  // Label und Doku sagen das jetzt; die Rechnung bleibt (eine Korrektur würde
+  // bestehende Regeln und ihre Backtests still umwerten — Versionssache, kein
+  // Nebenprodukt dieses Zyklus, siehe Audit „Offene Punkte").
+  changePct24h: "Änderung ggü. der Kerze vor 97 Perioden, Prozent (nicht 24 h)",
   priceVsEma21Pct: "Kurs vs. EMA 21, Prozent",
   priceVsEma50Pct: "Kurs vs. EMA 50, Prozent",
   trend: "Trend (UP, DOWN, FLAT)",
@@ -55,4 +68,5 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   macd: "MACD-Linie (12/26)",
   macdSignal: "MACD-Signal (9)",
   macdHist: "MACD-Histogramm",
+  vwapPct: "Kurs vs. Tages-VWAP, Prozent (positiv = über dem VWAP)",
 };

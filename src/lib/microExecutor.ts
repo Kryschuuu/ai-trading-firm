@@ -146,6 +146,11 @@ export interface RuleExecutionAdapter {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const TIMEFRAME_MS: Record<string, number> = {
+  // CYCLE-DAYTRADE-01: 1m ist der feinste Takt, den die Rule-Engine zulässt.
+  // Ohne diesen Eintrag würde `?? TIMEFRAME_MS["15m"]` eine 1m-Regel still auf
+  // 15-Minuten-Kerzen aggregieren — die Regel würde auf einem anderen Takt
+  // laufen, als sie unterschrieben hat.
+  "1m": 60_000,
   "5m": 5 * 60_000,
   "15m": 15 * 60_000,
   "30m": 30 * 60_000,

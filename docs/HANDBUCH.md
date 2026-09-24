@@ -1587,7 +1587,7 @@ den Erfolg als jede Modellwahl.
 | **Mikro-Zyklus** | Executor ohne LLM, pro Preis-Tick; wertet aktive Regeln im RAM aus |
 | **Regel (Rule)** | Statisches, versioniertes Bedingungs-Werk aus dem Makro-Zyklus in `trade_rules` |
 | **RuleCache** | Kompilierte ACTIVE-Regeln im RAM des Mikro-Executors |
-| **Rolling-Serie** | In-Memory-Kerzen (1m→5m/15m/30m/1h) für die Indikatorberechnung |
+| **Rolling-Serie** | In-Memory-Kerzen (1m→1m/5m/15m/30m/1h) für die Indikatorberechnung; max. 160 Kerzen je Reihe — ein Tages-VWAP (`vwapPct`) deckt auf `1m` damit ~2,7 h des Tages ab, auf 5m/15m den vollen Handelstag |
 | **latency_micros** | Bewertungslatenz des Mikro-Hot-Paths (ohne Fill) |
 | **Advisory-Lock** | Postgres-Sperre pro Symbol; verhindert Doppel-Fills über Instanzen hinweg |
 

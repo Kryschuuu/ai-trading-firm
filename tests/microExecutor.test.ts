@@ -158,6 +158,7 @@ const matchingSnap = {
   macd: null,
   macdSignal: null,
   macdHist: null,
+  vwapPct: 1.2,
 } as const;
 
 test("RuleCache.match: findet passende Regel, respektiert Cooldown und Tageslimit", () => {

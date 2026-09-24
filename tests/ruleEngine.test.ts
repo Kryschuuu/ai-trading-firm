@@ -213,6 +213,7 @@ const snap: RuleSnapshot = {
   macd: -0.4,
   macdSignal: -0.2,
   macdHist: -0.2,
+  vwapPct: 1.25,
 };
 
 test("compileRuleSpec: all/any, Zahlenvergleiche, between, in — ohne JSON-Parsing", () => {
@@ -293,6 +294,104 @@ test("buildSnapshotFromCandles: Volumen-Ratio = letztes Volumen / 20er-Schnitt",
   const s = buildSnapshotFromCandles("BTC", candles, 20)!;
   const ma = candles.slice(-20).reduce((a, c) => a + c.volume, 0) / 20;
   assert.ok(Math.abs(s.volumeRatio - last / ma) < 1e-9);
+});
+
+test("buildSnapshotFromCandles: vwapPct = Kurs gegen Tages-VWAP (UTC-Anker)", () => {
+  // Kerzen bewusst IN EINEM UTC-Tag: 2026-01-05T06:00Z … (1-Minuten-Takt).
+  const dayStart = Date.UTC(2026, 0, 5);
+  const candles: CandleLike[] = Array.from({ length: 40 }, (_, i) => {
+    const close = 100 + i;
+    return {
+      time: dayStart + 6 * 3_600_000 + i * 60_000,
+      open: close,
+      high: close,
+      low: close,
+      close,
+      volume: 10,
+    };
+  });
+  const s = buildSnapshotFromCandles("BTC", candles, 20)!;
+  // HLC3 = close, Volumen konstant ⇒ VWAP = Mittelwert der Closes = 119,5.
+  const expectedVwap = (100 + 139) / 2;
+  const last = candles[candles.length - 1].close;
+  assert.ok(s.vwapPct != null);
+  // Snapshot-Rundung auf 4 Nachkommastellen (wie alle Regel-Felder).
+  assert.ok(
+    Math.abs(s.vwapPct - ((last - expectedVwap) / expectedVwap) * 100) < 1e-3,
+    `vwapPct ${s.vwapPct} vs. Handrechnung ${((last - expectedVwap) / expectedVwap) * 100}`,
+  );
+});
+
+test("buildSnapshotFromCandles: ohne Volumen kein VWAP — null statt erfundener Neutralität", () => {
+  const dayStart = Date.UTC(2026, 0, 5);
+  const candles: CandleLike[] = Array.from({ length: 40 }, (_, i) => ({
+    time: dayStart + 6 * 3_600_000 + i * 60_000,
+    open: 100 + i,
+    high: 101 + i,
+    low: 99 + i,
+    close: 100 + i,
+    volume: 0,
+  }));
+  const s = buildSnapshotFromCandles("BTC", candles, 20)!;
+  assert.equal(s.vwapPct, null);
+
+  // null blockiert die Bedingung (fail-closed), statt „unter dem VWAP" zu vorzutäuschen.
+  const rule = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "vwapPct", op: "lt", value: 0 }] },
+  });
+  assert.equal(rule.ok, true);
+  if (!rule.ok) return;
+  assert.equal(compileRuleSpec(rule.spec).evaluate(s), false);
+});
+
+test("vwapPct-Bedingung feuert nur in der richtigen Richtung", () => {
+  const dayStart = Date.UTC(2026, 0, 5);
+  // Fallende Serie ⇒ letzter Close unter dem Tages-VWAP ⇒ vwapPct < 0.
+  const candles: CandleLike[] = Array.from({ length: 40 }, (_, i) => ({
+    time: dayStart + 6 * 3_600_000 + i * 60_000,
+    open: 200 - i,
+    high: 200 - i,
+    low: 200 - i,
+    close: 200 - i,
+    volume: 10,
+  }));
+  const s = buildSnapshotFromCandles("BTC", candles, 20)!;
+  assert.ok(s.vwapPct != null && s.vwapPct < 0, `erwartet negativ, erhielt ${s.vwapPct}`);
+
+  const under = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "vwapPct", op: "lt", value: 0 }] },
+  });
+  assert.equal(under.ok, true);
+  if (!under.ok) return;
+  assert.equal(compileRuleSpec(under.spec).evaluate(s), true);
+
+  const over = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "vwapPct", op: "gt", value: 0 }] },
+  });
+  assert.equal(over.ok, true);
+  if (!over.ok) return;
+  assert.equal(compileRuleSpec(over.spec).evaluate(s), false);
+});
+
+test("window.timeframe: 1m ist erlaubt (Daytrading-Takt), Unbekanntes fällt auf 15m", () => {
+  const with1m = sanitizeRuleSpec({
+    ...validInput,
+    window: { ...validInput.window, timeframe: "1m" },
+  });
+  assert.equal(with1m.ok, true);
+  if (!with1m.ok) return;
+  assert.equal(with1m.spec.window.timeframe, "1m");
+
+  const unknown = sanitizeRuleSpec({
+    ...validInput,
+    window: { ...validInput.window, timeframe: "2m" },
+  });
+  assert.equal(unknown.ok, true);
+  if (!unknown.ok) return;
+  assert.equal(unknown.spec.window.timeframe, "15m", "unbekannter Takt ⇒ sicherer Default 15m");
 });
 
 // ── Signatur & Fenster ───────────────────────────────────────────────────────

@@ -142,6 +142,90 @@ export function returnStdDevPct(closes: number[], n = 20): number | null {
 }
 
 /**
+ * Tagesanker für den Session-VWAP: Anfang der UTC-Kalendertagesscheibe, in
+ * der `timeMs` liegt. Deterministisch und zeitzonenfrei — der Deal ist eine
+ * dokumentierte Konvention, nicht die Lokalzeit des Servers. Für
+ * Index-/Aktien-Sessions mit anderer Tagesgrenze kann der Aufrufer einen
+ * expliziten Anker übergeben.
+ */
+export function utcDayAnchorMs(timeMs: number): number {
+  if (!Number.isFinite(timeMs)) return 0;
+  return Math.floor(timeMs / 86_400_000) * 86_400_000;
+}
+
+export interface VwapReading {
+  /** Volumen-gewichteter Durchschnittskurs der Session. */
+  vwap: number;
+  /** Kurs der letzten Kerze gegen den VWAP in Prozent (1.5 = 1,5 % darüber). */
+  priceVsVwapPct: number;
+  /** Kerzen, die in die Rechnung eingegangen sind. */
+  samples: number;
+  /** Aufsummiertes Volumen der Session (0 ist kein gültiger VWAP → null). */
+  totalVolume: number;
+  /** Zeitstempel des Session-Ankers (Epoch-ms). */
+  anchoredAt: number;
+}
+
+/**
+ * Session-VWAP (Volume Weighted Average Price) aus Kerzen.
+ *
+ * Der VWAP ist DER Referenzkurs des Daytradings: über ihm gilt der Markt als
+ * von Käufern kontrolliert, unter ihm von Verkäufern; Institutionen
+ * messen ihre Fills daran. Er fehlt in dieser Engine komplett — alle
+ * vorhandenen Felder vergleichen mit Zeitmittelwerten (EMA), nicht mit dem
+ * volumen-gewichteten Tagesdurchschnitt. Deshalb dieses Feld und nicht noch
+ * ein Oszillator.
+ *
+ * Rechnung (Standard, HLC3):
+ *   tp_i  = (high + low + close) / 3
+ *   vwap  = Σ(tp_i · volume_i) / Σ(volume_i)   über die Session-Kerzen
+ *
+ * Session = alle Kerzen ab {@link utcDayAnchorMs} des letzten Kerzenstempels,
+ * oder ab einem expliziten `anchorMs`. Eine offene Kerze ist ausdrücklich
+ * erlaubt (der VWAP lebt vom laufenden Tag); wer nur geschlossene Kerzen
+ * will, schneidet sie vor dem Aufruf ab.
+ *
+ * `null` — nie eine 0 erfinden — bei: < 2 Kerzen, Nicht-Endlichen Werten,
+ * oder Gesamtvolumen ≤ 0 (dünke Serien ohne Volumen sind kein VWAP).
+ */
+export function sessionVwap(
+  candles: readonly Candle[],
+  anchorMs?: number
+): VwapReading | null {
+  if (!Array.isArray(candles) || candles.length < 2) return null;
+  const last = candles[candles.length - 1];
+  if (!last || !Number.isFinite(last.time) || !Number.isFinite(last.close) || last.close <= 0) return null;
+  const anchor =
+    anchorMs !== undefined && Number.isFinite(anchorMs) ? anchorMs : utcDayAnchorMs(last.time);
+
+  let pv = 0;
+  let vol = 0;
+  let samples = 0;
+  for (const candle of candles) {
+    if (!Number.isFinite(candle.time) || candle.time < anchor) continue;
+    const tp = (candle.high + candle.low + candle.close) / 3;
+    const size = Number.isFinite(candle.volume) && candle.volume > 0 ? candle.volume : 0;
+    if (!Number.isFinite(tp) || tp <= 0) continue;
+    // Kerzen ohne Volumen zählen im Nenner nicht mit; haben WIR gar kein
+    // Volumen, gibt es keinen VWAP (Prüfung unten).
+    pv += tp * size;
+    vol += size;
+    samples += 1;
+  }
+  if (samples < 2 || vol <= 0 || !Number.isFinite(pv)) return null;
+
+  const vwap = pv / vol;
+  if (!Number.isFinite(vwap) || vwap <= 0) return null;
+  return {
+    vwap,
+    priceVsVwapPct: ((last.close - vwap) / vwap) * 100,
+    samples,
+    totalVolume: vol,
+    anchoredAt: anchor,
+  };
+}
+
+/**
  * Average Directional Index (Wilder) — TrendSTÄRKE ohne Richtungsbezug.
  *
  * Deterministische Referenzimplementierung (kein LLM, keine Bibliothek):

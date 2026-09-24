@@ -62,7 +62,7 @@ Der LLM rechnet nicht mehr *mit*, er rechnet *vor*.
 │  WebSocket-Feed (Binance @trade + @kline_1m   oder Simulator)           │
 │      │  ms-genaue Preis-/Volumen-Ticks                                  │
 │      ▼                                                                  │
-│  RollingTimeframeSeries  (1m→5m/15m/30m/1h, REST-Seed, RAM only)        │
+│  RollingTimeframeSeries  (1m→1m/5m/15m/30m/1h, REST-Seed, RAM only)     │
 │      ▼  ~10–100 µs                                                      │
 │  RuleSnapshot (RSI, EMA9/21/50, ATR, Volumen, Volume-Ratio, …)          │
 │      ▼  ~1 µs pro Regel                                                 │
@@ -153,7 +153,14 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
 
 * **Felder (Whitelist):** `price, rsi14, ema9, ema21, ema50, trend,
   atrPct, volume, volumeMa20, volumeRatio, changePct24h,
-  priceVsEma21Pct, priceVsEma50Pct`.
+  priceVsEma21Pct, priceVsEma50Pct, adx14, bbwPct, macd, macdSignal,
+  macdHist, vwapPct` (SSoT: `src/lib/ruleFieldCatalog.ts`; die Workshop-Oberfläche
+  liest genau diese Liste, ein Feld ohne Eintrag ist dort nicht wählbar).
+  `vwapPct` (CYCLE-DAYTRADE-01) ist der Kurs gegen den **Tages-VWAP** in
+  Prozent — positiv = über dem volumen-gewichteten Tagesdurchschnitt, die
+  Referenzgröße des Daytradings. Anker ist die UTC-Kalendertagesscheibe der
+  letzten Kerze; ohne Volumen in der Serie bleibt das Feld `null` und die
+  Bedingung feuert nicht (fail-closed statt erfundener Neutralität).
 * **Operatoren:** `lt, lte, gt, gte, eq, between, in`.
 * **Action:** `side` (nur `LONG`), `stopLossPct`, `takeProfitRR`,
   `riskBudgetPct`, `maxPositionPct` — jeder Wert wird gegen

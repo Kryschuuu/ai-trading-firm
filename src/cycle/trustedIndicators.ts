@@ -6,7 +6,7 @@
  * Historie, bleiben die Felder weg — ein Fallback von 50 ist keine Messung.
  */
 
-import { adx, atr, atrPct, macd, rsi } from "@/lib/indicators";
+import { adx, atr, atrPct, macd, rsi, sessionVwap } from "@/lib/indicators";
 import type { Candle } from "@/lib/marketData";
 import type { HistoricalStore } from "@/lib/marketdata/historicalStore";
 
@@ -27,6 +27,13 @@ export type TrustedReading = {
   /** ATR in Prozent des letzten Kurses (2.5 = 2,5 %). */
   atrPct: number | null;
   adx: number | null;
+  /**
+   * Kurs gegen den Tages-VWAP in Prozent (positiv = über dem VWAP). Der
+   * Session-Anker ist der UTC-Tag der letzten geschlossenen Stunde; ist der
+   * Tag noch nicht vertreten, bleibt das Feld `null` — es gibt dann schlicht
+   * keine Tagesmessung, und 0 wäre eine erfundene VWAP-Neutralität.
+   */
+  vwapPct: number | null;
   macd: number | null;
   macdSignal: number | null;
   macdHist: number | null;
@@ -79,6 +86,7 @@ export function readingFromCandles(instrumentId: string, candles: readonly Candl
     atr: roundOrNull(atr(candles as Candle[], 14), 6),
     atrPct: roundOrNull(atrPct(candles as Candle[], 14) == null ? null : atrPct(candles as Candle[], 14)! * 100, 4),
     adx: roundOrNull(adx(candles as Candle[], 14), 2),
+    vwapPct: roundOrNull(sessionVwap(candles as Candle[])?.priceVsVwapPct ?? null, 4),
     macd: roundOrNull(macdValue?.macd ?? null, 6),
     macdSignal: roundOrNull(macdValue?.signal ?? null, 6),
     macdHist: roundOrNull(macdValue?.histogram ?? null, 6),

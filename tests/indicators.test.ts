@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, returnStdDevPct, snapshot } from "../src/lib/indicators";
+import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot } from "../src/lib/indicators";
 import type { Candle } from "../src/lib/marketData";
 
 test("RSI: stetiger Aufwärtslauf → überkauft (>70)", () => {
@@ -219,4 +219,74 @@ test("ADX: zu wenige Kerzen (< 2·Periode+1) oder leere Eingabe → null", () =>
   const few = Array.from({ length: 4 }, (_, i) => hlc(101 + i, 99 + i, 100 + i, i));
   assert.equal(adx(few, 2), null, "4 Kerzen < 2·2+1");
   assert.equal(adx([], 14), null);
+});
+
+// ── Session-VWAP (CYCLE-DAYTRADE-01) ─────────────────────────────────────────
+
+const VWAP_DAY = Date.UTC(2026, 0, 5);
+
+function vwapCandle(
+  minute: number,
+  high: number,
+  low: number,
+  close: number,
+  volume: number
+): Candle {
+  return { time: VWAP_DAY + minute * 60_000, open: close, high, low, close, volume };
+}
+
+test("sessionVwap: exakte Handrechnung (HLC3, volumen-gewichtet)", () => {
+  //   c0: H110 L100 C105, V10 → tp = (110+100+105)/3 = 105
+  //   c1: H120 L110 C115, V30 → tp = (120+110+115)/3 = 115
+  //   vwap = (105·10 + 115·30) / (10+30) = 4500/40 = 112.5
+  const candles = [vwapCandle(0, 110, 100, 105, 10), vwapCandle(1, 120, 110, 115, 30)];
+  const reading = sessionVwap(candles);
+  assert.ok(reading);
+  assert.ok(Math.abs(reading.vwap - 112.5) < 1e-9, `vwap=${reading.vwap}`);
+  assert.ok(
+    Math.abs(reading.priceVsVwapPct - ((115 - 112.5) / 112.5) * 100) < 1e-9,
+    `priceVsVwapPct=${reading.priceVsVwapPct}`,
+  );
+  assert.equal(reading.samples, 2);
+  assert.equal(reading.totalVolume, 40);
+  assert.equal(reading.anchoredAt, VWAP_DAY);
+});
+
+test("sessionVwap: flache Serie ⇒ VWAP = Kurs, Abweichung 0", () => {
+  const candles = Array.from({ length: 10 }, (_, i) => vwapCandle(i, 100, 100, 100, 5 + i));
+  const reading = sessionVwap(candles)!;
+  assert.ok(Math.abs(reading.vwap - 100) < 1e-9);
+  assert.ok(Math.abs(reading.priceVsVwapPct) < 1e-9);
+});
+
+test("sessionVwap: Kerzen vor dem Tagesanker zählen nicht (Tagesreset)", () => {
+  // Extreme Preise am Vortag: würden sie mitrechnen, wäre der VWAP ~953.
+  const prevDay = [vwapCandle(-600, 1000, 900, 950, 100), vwapCandle(-540, 1010, 910, 960, 100)];
+  const today = [vwapCandle(0, 110, 100, 105, 10), vwapCandle(1, 120, 110, 115, 30)];
+  const reading = sessionVwap([...prevDay, ...today]);
+  assert.ok(reading);
+  assert.ok(Math.abs(reading.vwap - 112.5) < 1e-9, `Vortag leakt in die Session: ${reading.vwap}`);
+  assert.equal(reading.samples, 2);
+});
+
+test("sessionVwap: null statt erfundener Werte (Volumen 0, 1 Kerze, NaN)", () => {
+  assert.equal(sessionVwap([vwapCandle(0, 110, 100, 105, 0), vwapCandle(1, 120, 110, 115, 0)]), null);
+  assert.equal(sessionVwap([vwapCandle(0, 110, 100, 105, 10)]), null, "eine Kerze ist keine Session");
+  assert.equal(sessionVwap([]), null);
+  assert.equal(sessionVwap([vwapCandle(0, Number.NaN, 100, 105, 10), vwapCandle(1, 120, 110, 115, 10)]), null);
+});
+
+test("sessionVwap: expliziter Anker überstimmt die UTC-Tagesscheibe", () => {
+  const candles = [vwapCandle(0, 110, 100, 105, 10), vwapCandle(1, 120, 110, 115, 30)];
+  // Anker auf Minute 1 ⇒ nur eine Kerze in der Session ⇒ kein VWAP (null).
+  assert.equal(sessionVwap(candles, VWAP_DAY + 60_000), null);
+  // Vollständiger Anker ⇒ beide Kerzen.
+  assert.equal(sessionVwap(candles, VWAP_DAY)?.samples, 2);
+});
+
+test("utcDayAnchorMs: rundet auf UTC-Mitternacht (nicht auf Lokalzeit)", () => {
+  assert.equal(utcDayAnchorMs(VWAP_DAY), VWAP_DAY);
+  assert.equal(utcDayAnchorMs(VWAP_DAY + 23 * 3_600_000 + 59 * 60_000), VWAP_DAY);
+  assert.equal(utcDayAnchorMs(VWAP_DAY + 24 * 3_600_000), VWAP_DAY + 86_400_000);
+  assert.equal(utcDayAnchorMs(Number.NaN), 0);
 });
