@@ -234,7 +234,7 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
         <label className="text-xs font-semibold text-slate-300">
           Fenster
           <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100">
-            {["5m", "15m", "30m", "1h"].map((tf) => <option key={tf} value={tf}>{tf}</option>)}
+            {["1m", "5m", "15m", "30m", "1h"].map((tf) => <option key={tf} value={tf}>{tf}</option>)}
           </select>
         </label>
       </div>

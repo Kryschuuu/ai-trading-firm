@@ -20,7 +20,7 @@
  * Berechnung über 120 Kerzen < 100 µs; bewusste NULL DB-/Netzwerk-IO.
  */
 
-import { adx, atrPct, bollingerBandWidthPct, ema, macd, rsi } from "./indicators";
+import { adx, atrPct, bollingerBandWidthPct, ema, macd, rsi, sessionVwap } from "./indicators";
 import { RULE_FIELDS } from "./ruleFieldCatalog";
 import { LIMIT_CEILINGS, riskAdjustedSize } from "./riskGuard";
 import { tryNormalizeVenueSymbol } from "../symbols/normalize";
@@ -84,7 +84,7 @@ export interface RuleAction {
 
 /** Ausführungsfenster: wann/wie oft die Regel feuern darf. */
 export interface RuleWindow {
-  timeframe: "5m" | "15m" | "30m" | "1h";
+  timeframe: "1m" | "5m" | "15m" | "30m" | "1h";
   validFrom: string | null;
   validUntil: string | null;
   maxExecutionsPerDay: number;
@@ -127,6 +127,13 @@ export interface RuleSnapshot {
   macd: number | null;
   macdSignal: number | null;
   macdHist: number | null;
+  /**
+   * Kurs gegen den Session-VWAP in Prozent (1.5 = 1,5 % darüber). null, wenn
+   * die Serie weniger als zwei Kerzen im Tag oder kein Volumen enthält —
+   * dann gibt es keinen Messwert, und `null` blockiert die Bedingung
+   * (ein 0.0 wäre eine erfundene VWAP-Neutralität).
+   */
+  vwapPct: number | null;
   volume: number;
   volumeMa20: number;
   volumeRatio: number;
@@ -178,7 +185,7 @@ const TREND_FIELDS = new Set<RuleField>(
 const NUMERIC_OPS: RuleOp[] = ["lt", "lte", "gt", "gte", "eq", "between", "in"];
 const TREND_OPS: RuleOp[] = ["eq", "in"];
 
-const ALLOWED_TIMEFRAMES = new Set<RuleWindow["timeframe"]>(["5m", "15m", "30m", "1h"]);
+const ALLOWED_TIMEFRAMES = new Set<RuleWindow["timeframe"]>(["1m", "5m", "15m", "30m", "1h"]);
 const ALLOWED_SOURCE_ROLES = new Set<RuleSpec["sourceRole"]>(["CEO", "RESEARCH", "MANUAL"]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -474,6 +481,7 @@ function accessor(field: RuleField): (s: RuleSnapshot) => number | string | null
     case "macd": return (s) => s.macd;
     case "macdSignal": return (s) => s.macdSignal;
     case "macdHist": return (s) => s.macdHist;
+    case "vwapPct": return (s) => s.vwapPct;
     case "volume": return (s) => s.volume;
     case "volumeMa20": return (s) => s.volumeMa20;
     case "volumeRatio": return (s) => s.volumeRatio;
@@ -586,12 +594,23 @@ export function buildSnapshotFromCandles(
   let trend: TrendValue = "FLAT";
   if (trendRel >= 0.001) trend = e9[e9.length - 1] > e21[e21.length - 1] ? "UP" : "DOWN";
 
+  // `changePct24h` ist KEIN 24-Stunden-Wert: gezählt werden 97 Perioden, nicht
+  // 24 Stunden. Auf `1h` sind das ~4 Tage, auf `15m` ~1 Tag, auf `1m` ~1,6 h.
+  // Bewusst nicht umgestellt (auf Zeitanker), weil jede bestehende Regel und
+  // ihr Backtest sich damit verschieben würde — das ist eine Version-Entscheidung,
+  // keine Nebenfolge. Wer den Wert auf einem feinen Takt nutzt, muss wissen,
+  // dass er eine kürzere Periode misst als der Name suggeriert.
   const changeBase = candles.length > 1 ? closes[Math.max(0, closes.length - 97)] : price;
   const changePct24h = changeBase > 0 ? ((price - changeBase) / changeBase) * 100 : null;
   const atrFraction = atrPct(candles);
   const adxValue = adx(candles);
   const bbwFraction = bollingerBandWidthPct(closes);
   const macdValue = macd(closes);
+  // Session-VWAP: Anker ist der UTC-Tag der letzten Kerze. Für den 1h-
+  // Snapshot sind das die seit Mitternacht gelaufenen Bars, für 5m/15m der
+  // ganze Handelstag — in beiden Fällen dieselbe Größe, die ein Daytrader
+  // im Chart sieht (Tages-VWAP), nicht ein rollender 20-Perioden-VWAP.
+  const vwapValue = sessionVwap(candles);
 
   return {
     symbol: symbol.toUpperCase(),
@@ -608,6 +627,7 @@ export function buildSnapshotFromCandles(
     macd: macdValue != null ? Number(macdValue.macd.toFixed(6)) : null,
     macdSignal: macdValue != null ? Number(macdValue.signal.toFixed(6)) : null,
     macdHist: macdValue != null ? Number(macdValue.histogram.toFixed(6)) : null,
+    vwapPct: vwapValue != null ? Number(vwapValue.priceVsVwapPct.toFixed(4)) : null,
     volume,
     volumeMa20,
     volumeRatio: volumeMa20 > 0 ? volume / volumeMa20 : 0,
@@ -834,7 +854,7 @@ export const RULE_LLM_SCHEMA: Record<string, unknown> = {
     window: {
       type: "object",
       properties: {
-        timeframe: { type: "string", enum: ["5m", "15m", "30m", "1h"] },
+        timeframe: { type: "string", enum: ["1m", "5m", "15m", "30m", "1h"] },
         validFrom: { type: ["string", "null"] },
         validUntil: { type: ["string", "null"] },
         maxExecutionsPerDay: { type: "number" },
