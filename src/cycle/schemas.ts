@@ -206,11 +206,47 @@ export interface InstrumentTechnicalAnalysis {
   confluence?: TechnicalConfluenceAttachment;
 }
 
+/**
+ * Planungs- und Fit-Metadaten des Technical Steps (CYCLE-BATCH-01, additiv).
+ *
+ * Der Block ist die Antwort auf die Frage „warum hat der Analyst für dieses
+ * Instrument nur NEUTRAL/50 geliefert?": er zeigt, ob ein Batch abgeschnitten
+ * oder ausgefallen ist, statt die Zahl als Analyse aussehen zu lassen.
+ */
+export interface TechnicalPromptFitMeta {
+  /** Veranschlagtes Eingabebudget in Tokens (`num_ctx` − `num_predict` − Puffer). */
+  inputTokens: number;
+  /** Davon abgeleitete Zeichenkappe je Aufruf. */
+  inputChars: number;
+  /** Erlaubte Fertigungsänge des Modells (`num_predict`). */
+  maxOutputTokens: number;
+  /** Kandidaten je Aufruf, die das Ausgabebudget zulässt. */
+  maxItemsPerBatch: number;
+  /** Was begrenzt hat: Budget, Env-Override oder keins von beiden. */
+  constrainedBy: "env-batch-size" | "output" | "input" | "unbounded";
+  /** Tatsächliche Zahl der LLM-Aufrufe (1 = Prompt passte in ein Fenster). */
+  calls: number;
+  /** Nebenläufigkeit der Aufrufe. */
+  concurrency: number;
+  /** `true`, wenn die Voll-Snapshots aus dem Prompt entfernt wurden (Redundanz zu `lines`). */
+  droppedFullSnapshots: boolean;
+  /** Batches, deren Antwort unbrauchbar war und neutral überdeckt wurde. */
+  failedBatches: number;
+  /** Instrumente, deren Analyse deshalb auf dem deterministischen Fallback sitzt. */
+  fallbackInstruments: number;
+  /** Empfohlenes `LLM_MAX_TOKENS`, damit alles in EINEN Aufruf gepasst hätte. */
+  recommendedMaxOutputTokens: number;
+  /** `true`, wenn mindestens ein Kandidat ohne Analyse aus dem Lauf herausgeht. */
+  incomplete: boolean;
+}
+
 export interface TechnicalStepOutput {
   analyses: InstrumentTechnicalAnalysis[];
   analyzedCount: number;
   /** Aggregierte Konfluenz-Metadaten (additiv, optional, s. o.). */
   confluenceMeta?: TechnicalConfluenceMeta;
+  /** Prompt-Fit/Batch-Plan (additiv, optional) — siehe {@link TechnicalPromptFitMeta}. */
+  promptFit?: TechnicalPromptFitMeta;
 }
 
 export function validateTechnicalOutput(input: unknown): { valid: boolean; data?: TechnicalStepOutput; error?: string } {
@@ -254,12 +290,72 @@ export function validateTechnicalOutput(input: unknown): { valid: boolean; data?
     }
   }
 
+  // Die Meta-Blöcke stammen vom CODE (Konfluenz-Zähler, Prompt-Fit-Plan),
+  // nicht vom Modell. Wer sie hier nicht durchlässt, verliert sie doppelt:
+  // die Engine schreibt das VALIDIERTE Output in `stepOutputs` — Nachfolger
+  // und Tages-Artefakt sehen also genau das, was diese Funktion zurückgibt.
+  // `confluenceMeta` war auf diesem Weg bereits verloren. Die Sanitizer unten
+  // lassen darum nur bekannte, endliche Werte zu: ein Modell kann über diesen
+  // Pfad nichts einschleusen, was nicht in die Metrik passt.
+  const confluenceMeta = normalizeConfluenceMeta(obj.confluenceMeta);
+  const promptFit = normalizePromptFit(obj.promptFit);
+
   return {
     valid: true,
     data: {
       analyses,
       analyzedCount: analyses.length,
+      ...(confluenceMeta ? { confluenceMeta } : {}),
+      ...(promptFit ? { promptFit } : {}),
     },
+  };
+}
+
+/** Endliche Zahl oder Fallback — für Zähler, die das Artefakt ehrlich zeigt. */
+function finiteOr(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function boolOr(value: unknown): boolean {
+  return value === true;
+}
+
+function normalizeConfluenceMeta(raw: unknown): TechnicalConfluenceMeta | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const m = raw as Record<string, unknown>;
+  return {
+    formulaVersion: typeof m.formulaVersion === "string" ? m.formulaVersion.slice(0, 40) : "mtf-confluence@1",
+    configVersion: Math.max(1, Math.trunc(finiteOr(m.configVersion, 1))),
+    asOf: typeof m.asOf === "string" ? m.asOf.slice(0, 40) : "",
+    computed: Math.max(0, Math.trunc(finiteOr(m.computed, 0))),
+    ok: Math.max(0, Math.trunc(finiteOr(m.ok, 0))),
+    degraded: Math.max(0, Math.trunc(finiteOr(m.degraded, 0))),
+    abstained: Math.max(0, Math.trunc(finiteOr(m.abstained, 0))),
+  };
+}
+
+const PROMPT_FIT_CONSTRAINED = new Set(["env-batch-size", "output", "input", "unbounded"]);
+
+function normalizePromptFit(raw: unknown): TechnicalPromptFitMeta | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const m = raw as Record<string, unknown>;
+  const constrained = PROMPT_FIT_CONSTRAINED.has(String(m.constrainedBy))
+    ? (String(m.constrainedBy) as TechnicalPromptFitMeta["constrainedBy"])
+    : "unbounded";
+  return {
+    inputTokens: Math.max(0, Math.trunc(finiteOr(m.inputTokens, 0))),
+    inputChars: Math.max(0, Math.trunc(finiteOr(m.inputChars, 0))),
+    maxOutputTokens: Math.max(0, Math.trunc(finiteOr(m.maxOutputTokens, 0))),
+    maxItemsPerBatch: Math.max(1, Math.trunc(finiteOr(m.maxItemsPerBatch, 1))),
+    constrainedBy: constrained,
+    calls: Math.max(0, Math.trunc(finiteOr(m.calls, 0))),
+    concurrency: Math.max(1, Math.trunc(finiteOr(m.concurrency, 1))),
+    droppedFullSnapshots: boolOr(m.droppedFullSnapshots),
+    failedBatches: Math.max(0, Math.trunc(finiteOr(m.failedBatches, 0))),
+    fallbackInstruments: Math.max(0, Math.trunc(finiteOr(m.fallbackInstruments, 0))),
+    recommendedMaxOutputTokens: Math.max(0, Math.trunc(finiteOr(m.recommendedMaxOutputTokens, 0))),
+    incomplete: boolOr(m.incomplete),
   };
 }
 
@@ -312,6 +408,33 @@ export interface NewsStepOutput {
     headline: string;
     affectedSectors: string[];
   };
+  /** Batch-Plan des News-Schritts (additiv, optional, CYCLE-BATCH-01). */
+  promptFit?: NewsPromptFitMeta;
+}
+
+/**
+ * Planungs-Metadaten des News-Schritts (CYCLE-BATCH-01, additiv).
+ *
+ * Der systemische Risiko-Block ist je Batch eine *Ganzmarkt*-Aussage. Viele
+ * Batches liefern viele Aussagen — gemerged wird nach Schwere (MAX), nicht
+ * nach Mehrheitsvotum: wer bei vier Batches dreimal LOW und einmal CRITICAL
+ * liest, hat ein CRITICAL-Problem. `systemicRiskSource` sagt, ob der Wert vom
+ * Modell kam oder aus dem Fallback stammen musste.
+ */
+export interface NewsPromptFitMeta {
+  inputTokens: number;
+  inputChars: number;
+  maxOutputTokens: number;
+  maxItemsPerBatch: number;
+  constrainedBy: "env-batch-size" | "output" | "input" | "unbounded";
+  calls: number;
+  concurrency: number;
+  failedBatches: number;
+  fallbackInstruments: number;
+  /** Headlines, die wegen des Batches in MEHREREN Prompts standen (systemische). */
+  systemicHeadlines: number;
+  systemicRiskSource: "model" | "fallback";
+  incomplete: boolean;
 }
 
 export function validateNewsOutput(input: unknown): { valid: boolean; data?: NewsStepOutput; error?: string } {
@@ -409,6 +532,8 @@ export function validateNewsOutput(input: unknown): { valid: boolean; data?: New
     ? (rawSys.level.toUpperCase() as NewsStepOutput["systemicRisk"]["level"])
     : "LOW";
 
+  const promptFit = normalizeNewsPromptFit(obj.promptFit);
+
   return {
     valid: true,
     data: {
@@ -416,9 +541,38 @@ export function validateNewsOutput(input: unknown): { valid: boolean; data?: New
       systemicRisk: {
         level,
         headline: typeof rawSys.headline === "string" ? rawSys.headline.slice(0, 200) : "Ruhige systemische Nachrichtenlage",
-        affectedSectors: Array.isArray(rawSys.affectedSectors) ? rawSys.affectedSectors.map(String) : [],
+        affectedSectors: Array.isArray(rawSys.affectedSectors) ? rawSys.affectedSectors.map(String).slice(0, 12) : [],
       },
+      // CYCLE-BATCH-01: dieselbe Handoff-Regel wie beim Technical Step — die
+      // Engine schreibt das validierte Output in `stepOutputs`, was hier
+      // fehlt, sieht weder das Artefakt noch ein Nachfolgeschritt.
+      ...(promptFit ? { promptFit } : {}),
     },
+  };
+}
+
+const NEWS_FIT_SOURCES = new Set(["model", "fallback"]);
+
+function normalizeNewsPromptFit(raw: unknown): NewsPromptFitMeta | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const m = raw as Record<string, unknown>;
+  return {
+    inputTokens: Math.max(0, Math.trunc(finiteOr(m.inputTokens, 0))),
+    inputChars: Math.max(0, Math.trunc(finiteOr(m.inputChars, 0))),
+    maxOutputTokens: Math.max(0, Math.trunc(finiteOr(m.maxOutputTokens, 0))),
+    maxItemsPerBatch: Math.max(1, Math.trunc(finiteOr(m.maxItemsPerBatch, 1))),
+    constrainedBy: PROMPT_FIT_CONSTRAINED.has(String(m.constrainedBy))
+      ? (String(m.constrainedBy) as NewsPromptFitMeta["constrainedBy"])
+      : "unbounded",
+    calls: Math.max(0, Math.trunc(finiteOr(m.calls, 0))),
+    concurrency: Math.max(1, Math.trunc(finiteOr(m.concurrency, 1))),
+    failedBatches: Math.max(0, Math.trunc(finiteOr(m.failedBatches, 0))),
+    fallbackInstruments: Math.max(0, Math.trunc(finiteOr(m.fallbackInstruments, 0))),
+    systemicHeadlines: Math.max(0, Math.trunc(finiteOr(m.systemicHeadlines, 0))),
+    systemicRiskSource: NEWS_FIT_SOURCES.has(String(m.systemicRiskSource))
+      ? (String(m.systemicRiskSource) as NewsPromptFitMeta["systemicRiskSource"])
+      : "fallback",
+    incomplete: m.incomplete === true,
   };
 }
 

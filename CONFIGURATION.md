@@ -868,6 +868,63 @@ Hinweise:
   Einzelaufruf-Limits (`LLM_MAX_TOKENS`/`LLM_TIMEOUT_MS`) bleiben unverändert;
   der Turn-Deckel schließt die Lücke für Multi-Call-Turns.
 
+### Prompt-Budget und Batch-Analyse (CYCLE-BATCH-01)
+
+Der Technical Analyst (Schritt 04) und der News Analyst (Schritt 05) erhalten
+bis zu 40 Kandidaten. Was er davon
+tatsächlich beantworten *kann*, bestimmen zwei Limits, die nichts
+miteinander abstimmen: `OLLAMA_NUM_CTX` (wie viel Prompt gelesen wird) und
+`LLM_MAX_TOKENS` (wie viel Antwort geschrieben werden darf). Der Prompt wächst
+mit jedem Kandidaten, die Antwort ebenfalls. Passt beides nicht, kürzt das
+Modell die Eingabe am Fensterrand, schneidet die Antwort bei `num_predict` ab,
+das JSON wird unvollständig — und der Agent-Port antwortet, wie für einen
+Ausfall gedacht, mit dem deterministischen Fallback: `bias: NEUTRAL`,
+`technicalScore: 50` für **alle** Kandidaten. Das ist kein Absturz, sondern
+stille Bedeutungslosigkeit, und sie ist der Grund, warum „mehr Märkte
+analysieren" ohne Budget-Planung kein Gewinn ist.
+
+Der Schritt vermisst deshalb vor jedem Aufruf den Prompt, den er tatsächlich
+senden wird (dieselbe Baufunktion, keine Zweit-Implementierung), und teilt die
+Shortlist in Batches, die nachweislich in beide Budgets passen. Beim
+News-Schritt gilt dasselbe für Headline-Material (Messung: 40 Instrumente mit
+120 Meldungen = 31 594 Zeichen ≈ 8 800 Tokens); symbollose Ganzmeldungen
+werden in jeden Batch wiederholt und das systemische Risiko über die Batches
+nach Schwere gemerged (MAX), nicht nach Mehrheitsvotum.
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `CYCLE_PROMPT_RESERVE_TOKENS` | `256` | Puffer, den die Planung zusätzlich zu `LLM_MAX_TOKENS` freihält (System-Prompt, Block-Überschriften, Rundung). Bounds [0, 8192]. |
+| `CYCLE_PROMPT_INPUT_BUDGET_TOKENS` | abgeleitet | Harte Kappe des Eingabebudgets je Aufruf. Ungesetzt: `OLLAMA_NUM_CTX − LLM_MAX_TOKENS − Reserve`, mindestens 512. Setzen überstimmt die Herleitung; ein unlesbarer Wert klemmt auf die konservative Untergrenze (mehr Batches, nie ein größerer Prompt als vorher). Bounds [512, 1000000]. |
+| `CYCLE_ANALYST_BATCH_SIZE` | aus `LLM_MAX_TOKENS` | Kandidaten je LLM-Aufruf. Default-Ableitung: `LLM_MAX_TOKENS · 0,85 ÷ 90` (≈ 90 Tokens je Analyseobjekt) ⇒ bei 512 also **4**. Bounds [1, 40] = Code-Shortlist-Limit. |
+| `CYCLE_ANALYST_CONCURRENCY` | providerabhängig | Wie viele Batches gleichzeitig laufen. `ollama`: **1** (eine Inferenz-Slot ⇒ Parallelität legt sich in die Warteschlange und verdrängt den KV-Cache, statt Zeit zu sparen); `openai`/`gemini`/`anthropic`: **2**. Bounds [1, 8]. Der Tages-Token-Deckel des Routers gilt unverändert über alle Batches. |
+
+Nachweis im Artefakt: `04-technical-analyst.promptFit` (Zähler, keine IDs) mit
+`calls`, `concurrency`, `maxItemsPerBatch`, `constrainedBy`
+(`output` = Antwortlänge, `input` = Kontextfenster, `env-batch-size` =
+Override), `droppedFullSnapshots`, `failedBatches`, `fallbackInstruments`,
+`incomplete` und `recommendedMaxOutputTokens` (was `LLM_MAX_TOKENS` bräuchte,
+damit alles in einen Aufruf gepasst hätte).
+
+Warum die Zahlen aus dem Realbetrieb (40 Kandidaten, Default-Flags):
+
+| | Prompt | gegen Budget | Ergebnis |
+| --- | --- | --- | --- |
+| vorher (ein Aufruf) | 92 449 Zeichen ≈ 25 700 Tokens | 3 328 Tokens Fenster, 512 Antwort | Antwort abgeschnitten → 40 × Neutral |
+| jetzt (geplant) | 10 Aufrufe à ≤ 5 939 Zeichen ≈ 1 650 Tokens, ≤ 4 Analysen | je Aufruf im Rahmen | 40 echte Analysen, Zähler im Artefakt |
+
+Größerer Prompt, mehr Information? Nein — zuerst billiger: 64 % der alten
+Prompt-Bytes waren die **doppelten** Konfluenzdaten (Voll-Snapshots *und*
+ihre kompakte Zeilenform, dieselben Zahlen). Wo das Budget reicht, bleiben die
+Voll-Snapshots im Prompt; wo nicht, fliegen sie je Batch einzeln — die
+Autorität leidet nicht, denn die Snapshots werden ohnehin serverseitig nach der
+Validierung an jede Analyse gehängt (`RMA-P2-03`) und stehen vollständig im
+Tages-Artefakt.
+
+Wer bewusst mehr pro Aufruf will, kalibriert die drei Regler gemeinsam, z. B.
+`OLLAMA_NUM_CTX=16384`, `LLM_MAX_TOKENS=4608`, `CYCLE_ANALYST_BATCH_SIZE=40`.
+RAM und Latenz hängen dann an `num_ctx` — auf einer CPU-Box ist das die
+eigentliche Rechnung, nicht die Zeile Code.
+
 ### Reconciliation & Idempotenz (GAP-09, v1.50.0)
 
 Periodischer Abgleich zwischen Broker und Datenbank (`src/brokers/reconciliation.ts`),

@@ -7,8 +7,26 @@
  * PROMPT-INJECTION-SCHUTZ: Externe Nachrichtentexte werden AUSSCHLIESSLICH als
  * strukturierte Daten im untrustedData-Payload transportiert, niemals in den
  * Prompt-Instruktionstext eingefügt.
+ *
+ * CYCLE-BATCH-01: Headlines sind lang und fremd — der Prompt wächst mit jedem
+ * Instrument UND mit jedem Text. Passt er nicht in `OLLAMA_NUM_CTX` (oder die
+ * Antwort nicht in `LLM_MAX_TOKENS`), wird geteilt; der Injection-Schutz bleibt
+ * unverändert (pro Batch dieselbe Hülle, nur die Teilmenge der Meldungen).
+ * Headline ohne Symbolbezug ist eine GANZMELDUNG und steht in JEDEM Batch —
+ * sonst übersieht ein Batch eine Markt-Krise. Das systemische Risiko wird über
+ * die Batches nach SCHWERE gemerged (MAX), nicht nach Mehrheitsvotum.
  */
 
+import { buildAgentPayloadPrompt } from "@/cycle/promptPayload";
+import {
+  loadPromptBudget,
+  mapBounded,
+  packBatches,
+  planBatchFit,
+  resolveConcurrency,
+  estimateTokens,
+} from "@/cycle/promptBudget";
+import { resolveProviderChain } from "@/lib/llmProvider";
 import type { StepDefinition, StepExecutionContext } from "../types";
 import { type NewsStepOutput, validateNewsOutput } from "../schemas";
 import { assertShortlistLimit, sanitizeExternalText } from "../security";
@@ -154,27 +172,187 @@ JSON schema:
   }
 }`;
 
-    const res = await context.ports.agent.invokeAgent<NewsStepOutput>({
-      role: "NEWS_ANALYST",
-      systemPrompt,
-      userPrompt,
-      // HIER liegt der Injection-Schutz: Externe Daten strikt isoliert in untrustedData
-      untrustedData: {
-        monitoredSymbols: symbols,
-        externalHeadlines: sanitizedNews,
-      },
-      schemaValidator: validateNewsOutput,
-      fallback,
+    // ── CYCLE-BATCH-01: Prompt-Budget je Aufruf ─────────────────────────────
+    // Dasselbe Problem wie im Technical Step, nur mit fremdem Text im Rucksack:
+    // 40 Instrumente + alle Headlines in EINEM Prompt sprengen
+    // `OLLAMA_NUM_CTX=4096`, die Antwort sprengt `LLM_MAX_TOKENS=512`, und der
+    // Lauf endet für alle 40 bei ABSTAIN — was nach „ruhige Nachrichtenlage"
+    // aussieht, aber eine abgeschnittene Antwort ist. Der Schritt misst
+    // deshalb und teilt, wenn es nicht passt.
+    const budget = loadPromptBudget(process.env);
+    const baseChars = buildAgentPayloadPrompt(userPrompt, undefined, undefined).length;
+    // Headline ohne Symbolbezug ist eine GANZMELDUNG — sie gehört in jeden
+    // Batch, sonst sähe kein Batch eine Markt-Krise.
+    const systemicHeadlines = sanitizedNews.filter((n) => !n.symbol).length;
+    const headlinesFor = (batchSymbols: readonly string[]): typeof sanitizedNews => {
+      const wanted = new Set(batchSymbols.map((sym) => sym.toLowerCase()));
+      return sanitizedNews.filter((n) => !n.symbol || wanted.has(String(n.symbol).toLowerCase()));
+    };
+    const payloadCharsFor = (batchSymbols: readonly string[]): number =>
+      baseChars +
+      buildAgentPayloadPrompt("", undefined, {
+        monitoredSymbols: batchSymbols,
+        externalHeadlines: headlinesFor(batchSymbols),
+      }).length;
+
+    const totalChars = payloadCharsFor(symbols);
+    const fit = planBatchFit(symbols.length, budget, process.env, totalChars);
+    const capacityChars = Math.max(1, budget.inputChars - baseChars);
+    const marginalCache = new Map<string, number>();
+    const marginalChars = (sym: string): number => {
+      const cached = marginalCache.get(sym);
+      if (cached !== undefined) return cached;
+      const size = Math.max(1, payloadCharsFor([sym]) - baseChars);
+      marginalCache.set(sym, size);
+      return size;
+    };
+    const singleFits = totalChars <= budget.inputChars && symbols.length <= fit.maxItemsPerBatch;
+    const batches: string[][] = singleFits
+      ? [symbols]
+      : packBatches(symbols, marginalChars, {
+          maxItemsPerBatch: fit.maxItemsPerBatch,
+          maxCharsPerBatch: capacityChars,
+        }).batches;
+    const concurrency = resolveConcurrency(process.env, resolveProviderChain(process.env)[0] ?? "ollama");
+
+    context.log(
+      singleFits
+        ? `Prompt-Fit News: ${totalChars} chars ≈ ${estimateTokens(totalChars)} tok — ein Aufruf (Budget ${budget.inputTokens} tok).`
+        : `Prompt-Fit News: ${batches.length} Aufrufe à ≤ ${fit.maxItemsPerBatch} Instrumente ` +
+          `(begrenzt durch ${fit.constrainedBy}, num_predict=${budget.maxOutputTokens}; ` +
+          `${systemicHeadlines} systemische Headline(s) in jedem Batch; ` +
+          `Nebenläufigkeit ${concurrency.concurrency}).`,
+      singleFits ? "INFO" : "WARN",
+    );
+
+    const SEVERITY: Record<NewsStepOutput["systemicRisk"]["level"], number> = {
+      LOW: 0,
+      MEDIUM: 1,
+      HIGH: 2,
+      CRITICAL: 3,
+    };
+
+    type BatchOutcome = {
+      output: NewsStepOutput;
+      usedFallback: boolean;
+    };
+    const runBatch = async (batchSymbols: readonly string[]): Promise<BatchOutcome> => {
+      const batchFallback: NewsStepOutput = {
+        analyses: defaultAnalyses.filter((a) => batchSymbols.includes(a.instrumentId)),
+        systemicRisk: fallback.systemicRisk,
+      };
+      const res = await context.ports.agent.invokeAgent<NewsStepOutput>({
+        role: "NEWS_ANALYST",
+        systemPrompt,
+        userPrompt,
+        // HIER liegt der Injection-Schutz: Externe Daten strikt isoliert in untrustedData
+        untrustedData: {
+          monitoredSymbols: batchSymbols,
+          externalHeadlines: headlinesFor(batchSymbols),
+        },
+        schemaValidator: validateNewsOutput,
+        fallback: batchFallback,
+      });
+      return {
+        output: { ...res.output, analyses: res.output.analyses ?? batchFallback.analyses },
+        usedFallback: res.usedFallback === true,
+      };
+    };
+
+    let failedBatches = 0;
+    let fallbackInstruments = 0;
+    let thrownError: unknown = null;
+    const outcomes = await mapBounded(batches, concurrency.concurrency, async (batchSymbols, index) => {
+      try {
+        const outcome = await runBatch(batchSymbols);
+        if (outcome.usedFallback) {
+          failedBatches += 1;
+          fallbackInstruments += batchSymbols.length;
+        }
+        return outcome;
+      } catch (err) {
+        // Einzelbatch: Wurf bleibt ein Schritt-Fehler (Retry/Abbruch wie bisher).
+        // Mehrere Batches: einer darf die anderen nicht entwerten.
+        if (batches.length === 1) throw err;
+        failedBatches += 1;
+        fallbackInstruments += batchSymbols.length;
+        thrownError ??= err;
+        context.log(
+          `News-Batch ${index + 1}/${batches.length} fehlgeschlagen ` +
+            `(${err instanceof Error ? err.message.slice(0, 160) : String(err)}) — ` +
+            `${batchSymbols.length} Instrumente auf ABSTAIN-Fallback.`,
+          failedBatches === batches.length ? "CRITICAL" : "WARN",
+        );
+        return {
+          output: {
+            analyses: defaultAnalyses.filter((a) => batchSymbols.includes(a.instrumentId)),
+            systemicRisk: fallback.systemicRisk,
+          },
+          usedFallback: true,
+        };
+      }
     });
 
-    assertShortlistLimit(res.output.analyses, 40);
+    // Merge: Instrumente in Eingabereihenfolge (erstes Vorkommen zählt),
+    // systemisches Risiko nach SCHWERE (MAX), nicht nach Mehrheitsvotum.
+    const mergedAnalyses: NewsStepOutput["analyses"] = [];
+    const seen = new Set<string>();
+    for (const outcome of outcomes) {
+      for (const analysis of outcome.output.analyses ?? []) {
+        if (seen.has(analysis.instrumentId)) continue;
+        seen.add(analysis.instrumentId);
+        mergedAnalyses.push(analysis);
+      }
+    }
+    const modelOutcomes = outcomes.filter((o) => !o.usedFallback && o.output.systemicRisk);
+    const systemicRisk =
+      modelOutcomes.length > 0
+        ? modelOutcomes.reduce(
+            (worst, o) => (SEVERITY[o.output.systemicRisk.level] > SEVERITY[worst.level] ? o.output.systemicRisk : worst),
+            modelOutcomes[0].output.systemicRisk,
+          )
+        : fallback.systemicRisk;
+    if (failedBatches > 0) {
+      context.log(
+        `Hinweis: ${fallbackInstruments} von ${symbols.length} News-Einschätzungen sind Fallback ` +
+          `(ABSTAIN), nicht Modellantwort — ${failedBatches} Batch(es) ohne verwertbare Antwort.`,
+        "WARN",
+      );
+    }
+    if (thrownError !== null) {
+      context.log(
+        `Erster Batch-Fehler dieses Laufs: ${thrownError instanceof Error ? thrownError.message.slice(0, 160) : String(thrownError)}`,
+        "WARN",
+      );
+    }
+
+    const res: NewsStepOutput = {
+      analyses: mergedAnalyses,
+      systemicRisk,
+      promptFit: {
+        inputTokens: budget.inputTokens,
+        inputChars: budget.inputChars,
+        maxOutputTokens: budget.maxOutputTokens,
+        maxItemsPerBatch: fit.maxItemsPerBatch,
+        constrainedBy: fit.constrainedBy,
+        calls: batches.length,
+        concurrency: concurrency.concurrency,
+        failedBatches,
+        fallbackInstruments,
+        systemicHeadlines,
+        systemicRiskSource: modelOutcomes.length > 0 ? "model" : "fallback",
+        incomplete: seen.size < symbols.length,
+      },
+    };
+
+    assertShortlistLimit(res.analyses, 40);
 
     // RMA-P2-05: Strukturierte Forecast-Envelopes anreichern und persistieren
     try {
       const enrichedForecasts = await evaluateSentimentForEntities(
         symbols,
         sanitizedNews,
-        res.output.analyses.map((a) => ({
+        res.analyses.map((a) => ({
           instrumentId: a.instrumentId,
           sentiment: a.sentiment,
           impactScore: a.impactScore,
@@ -191,11 +369,12 @@ JSON schema:
 
       return {
         analyses: enrichedForecasts,
-        systemicRisk: res.output.systemicRisk,
+        systemicRisk: res.systemicRisk,
+        ...(res.promptFit ? { promptFit: res.promptFit } : {}),
       };
     } catch {
       // Bei unerwartetem Anreicherungsfehler bleibt der validierte Agentenoutput erhalten
-      return res.output;
+      return res;
     }
   },
 };
