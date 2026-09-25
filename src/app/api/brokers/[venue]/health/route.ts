@@ -25,7 +25,9 @@ import { availableExecutionModes } from "@/brokers/capabilities";
 import { createAdapter, normalizeVenue } from "@/brokers/factory";
 import {
   REMOTE_HEALTHCHECK_FLAG,
+  REMOTE_HEALTHCHECK_SPEC,
   remoteHealthCheckEnabled,
+  resolveRemoteHealthcheck,
 } from "@/brokers/health";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +52,7 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
     }
 
     const remote = remoteHealthCheckEnabled();
+    const remoteResolution = resolveRemoteHealthcheck();
     const adapter = createAdapter(venue, "paper");
 
     let health: BrokerHealth;
@@ -69,7 +72,13 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
       health,
       capabilities: adapter.capabilities,
       executionModes: availableExecutionModes(venue),
-      remoteHealthCheck: { enabled: remote, flag: REMOTE_HEALTHCHECK_FLAG },
+      remoteHealthCheck: {
+        enabled: remote,
+        flag: REMOTE_HEALTHCHECK_FLAG,
+        // `runtime` = über die UI gesetzt, `env` = .env, `default` = aus.
+        source: remoteResolution.source,
+        toggleKey: REMOTE_HEALTHCHECK_SPEC.key,
+      },
     });
   } catch (e) {
     return Response.json(

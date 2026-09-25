@@ -170,14 +170,68 @@ export function collectMarketDataReadiness(input?: MarketDataSnapshotInput): Mar
 }
 
 /**
+ * Venue-Präfix einer Instrument-ID (`ALPACA:AAPL` → `ALPACA`).
+ * `null`, wenn die ID kein Venue-Präfix trägt.
+ */
+export function venueOfInstrumentId(instrumentId: string): string | null {
+  const raw = String(instrumentId ?? "");
+  if (!raw.includes(":")) return null; // keine Instrument-ID der Form VENUE:SYMBOL
+  const venue = raw.split(":")[0]?.trim().toUpperCase();
+  return venue && /^[A-Z0-9][A-Z0-9_-]{0,31}$/.test(venue) ? venue : null;
+}
+
+/**
+ * Sync-Kommandos für die betroffenen Venues — **ein Kommando je Venue**.
+ *
+ * `--venue` akzeptiert genau EINE Venue (`scripts/market-sync.ts`), deshalb
+ * ist die ehrliche Anleitung eine Liste und kein Sammelbefehl. Venues, die
+ * noch nie synchronisiert wurden, bekommen den Hinweis auf ihr Flag
+ * (`<VENUE>_ENABLED=true`) mit — ohne Freischaltung passiert dort nichts.
+ */
+export function syncCommandsFor(
+  venues: readonly string[],
+  rows: readonly MarketDataOpsVenue[] = []
+): string[] {
+  const byVenue = new Map(rows.map((r) => [r.venue, r] as const));
+  const seen = new Set<string>();
+  const commands: string[] = [];
+  for (const venue of venues) {
+    if (!venue || seen.has(venue)) continue;
+    seen.add(venue);
+    const row = byVenue.get(venue);
+    const command = `npm run market:sync -- --venue=${venue}`;
+    const never = row ? row.lastSyncAt === null : true;
+    commands.push(
+      never ? `${command} (Venue nie synchronisiert: ${venue}_ENABLED=true setzen)` : command
+    );
+  }
+  return commands;
+}
+
+/** Venues der worst offenders in Reihenfolge der Nennung (dedupliziert, gekappt). */
+export function offenderVenues(s: MarketDataOpsSnapshot, max = 3): string[] {
+  const out: string[] = [];
+  for (const offender of s.worstOffenders) {
+    const venue = venueOfInstrumentId(offender.instrumentId);
+    if (venue && !out.includes(venue)) out.push(venue);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
  * Kontextabhängiger Hilfetext — zentral, nicht in der JSX verstreut.
  * Genau ein Hinweis je dominierendem Blocker (Reihenfolge = Dominanz):
  *
  *  1. `ERROR`                       — Infrastruktur, häufigste Ursache benannt.
- *  2. `WARMING`, keine Historie     — Sync-Kommando + Herleitung des Sollwerts.
+ *  2. `WARMING`, keine Historie     — Sync-Kommando(s) + Herleitung des Sollwerts.
  *  3. `WARMING`, Spread fehlt       — depth-Enrichment, `rule=max-spread`.
  *  4. `WARMING`, Teil-Warmup        — fehlende Instrumente werden benannt.
  *  5. `READY`                       — leerer Funnel ist eine fachliche Aussage.
+ *
+ * Seit v0.4.x sind die Sync-Kommandos **venue-bewusst**: der Hinweis nennt die
+ * Venues der worst offenders (z. B. ALPACA) statt pauschal BITUNIX — genau der
+ * Fall, in dem Aktien-/ETF-Mandate mit „0 Kerzen" hängen blieben.
  */
 export function buildReadinessHint(s: MarketDataOpsSnapshot): string {
   if (s.readinessStatus === "ERROR") {
@@ -190,9 +244,13 @@ export function buildReadinessHint(s: MarketDataOpsSnapshot): string {
   }
   if (s.readinessStatus === "WARMING") {
     if (s.dataReady === 0) {
+      const venues = offenderVenues(s);
+      const commands = syncCommandsFor(venues, s.venues);
       return (
         `Es liegt noch keine Kerzenhistorie vor. ` +
-        `Fuehre npm run market:sync -- --venue=BITUNIX aus. ` +
+        (commands.length > 0
+          ? `Fuehre je Venue aus: ${commands.join(" · ")}. `
+          : `Fuehre npm run market:sync aus (alle freigegebenen Venues). `) +
         `Benoetigt werden ${s.requiredCandles} Kerzen je Instrument, weil der konfigurierte ` +
         `Faktorsatz eine EMA50 und einen Momentum-Lookback von 60 Perioden enthaelt.`
       );
@@ -208,10 +266,14 @@ export function buildReadinessHint(s: MarketDataOpsSnapshot): string {
       .slice(0, 3)
       .map((o) => `${o.instrumentId} (${o.candles}/${o.required} Kerzen)`)
       .join(", ");
+    const venues = offenderVenues(s);
+    const commands = syncCommandsFor(venues, s.venues);
     return (
       `Warmup unvollstaendig: ${s.warming} von ${s.registry} Instrument(en) ohne vollstaendige ` +
       `Datenbasis${missing ? ` - unvollstaendig: ${missing}` : ""}. ` +
-      `Fuehre npm run market:sync -- --venue=BITUNIX erneut aus. ` +
+      (commands.length > 0
+        ? `Naechster Schritt je Venue: ${commands.join(" · ")}. `
+        : `Naechster Schritt: npm run market:sync. `) +
       `Die Funnel-Nullen sind datenbedingt, keine Marktbewertung.`
     );
   }

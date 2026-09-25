@@ -66,7 +66,7 @@ test("Registry: Karten aus der Umgebung (Preise, Kontext, Deployment)", () => {
     ROUTING_BUDGET_OLLAMA_TOKENS: "1000",
   };
   const cards = buildDefaultRegistry(env);
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 5);
   const byId = new Map(cards.map((c) => [c.id, c]));
 
   const ollama = byId.get("ollama")!;
@@ -100,7 +100,7 @@ test("Registry: EnvProviderRegistry listet, bucht Verbrauch und überschreibt Zu
 
   assert.deepEqual(
     registry.list().map((p) => p.id),
-    ["ollama", "openai", "gemini", "anthropic"]
+    ["ollama", "openai", "gemini", "anthropic", "opencode"]
   );
   assert.equal(registry.get("nope" as never), undefined);
 
@@ -127,7 +127,7 @@ test("Registry: refresh() markiert nicht erreichbare Provider als offline (ohne 
     ROUTING_HEALTH_TIMEOUT_MS: "200",
   });
   const cards = await registry.refresh();
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 5);
   const ollama = cards.find((c) => c.id === "ollama")!;
   assert.equal(ollama.healthStatus, "offline");
   assert.ok((ollama.error ?? "").length > 0);

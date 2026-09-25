@@ -17,9 +17,10 @@
  *   - Netzwerkfehler, HTTP 429 und 5xx gelten als retryable; 4xx nicht.
  */
 
+import { filterEnabledProviders } from "../routing/providerToggles";
 import { publicErrorMessage } from "./secrets";
 
-export type LlmProviderName = "ollama" | "openai" | "gemini" | "anthropic";
+export type LlmProviderName = "ollama" | "openai" | "gemini" | "anthropic" | "opencode";
 
 export type LlmMessage = {
   role: "system" | "user" | "assistant";
@@ -99,7 +100,13 @@ export type LlmClient = {
 // Provider-Konfiguration aus der Umgebung
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const PROVIDER_NAMES: LlmProviderName[] = ["ollama", "openai", "gemini", "anthropic"];
+export const PROVIDER_NAMES: LlmProviderName[] = [
+  "ollama",
+  "openai",
+  "gemini",
+  "anthropic",
+  "opencode",
+];
 
 export function normalizeProvider(raw: string | undefined): LlmProviderName | null {
   const p = (raw ?? "").trim().toLowerCase();
@@ -110,6 +117,12 @@ export function normalizeProvider(raw: string | undefined): LlmProviderName | nu
  * Provider-Kette: primärer Provider + optionale Fallbacks
  * (`LLM_FALLBACK_PROVIDERS=gemini,anthropic`). Duplikate und Ungültiges werden
  * entfernt — die Reihenfolge bleibt stabil.
+ *
+ * Provider-Schalter (UI/`ROUTING_DISABLED_PROVIDERS`): ein abgeschalteter
+ * Provider wird NIE aufgerufen — auch nicht als Fallback. Ist der primäre
+ * Provider gesperrt, beginnt die Kette beim nächsten freigegebenen Eintrag;
+ * ist alles gesperrt, bleibt die Liste leer und `chatLlm` wirft (der Aufrufer
+ * nutzt dann die deterministische Regel-Engine).
  */
 export function resolveProviderChain(env: Record<string, string | undefined> = process.env): LlmProviderName[] {
   const primary = normalizeProvider(env.LLM_PROVIDER) ?? "ollama";
@@ -117,7 +130,7 @@ export function resolveProviderChain(env: Record<string, string | undefined> = p
     .split(",")
     .map(normalizeProvider)
     .filter((p): p is LlmProviderName => p !== null && p !== primary);
-  return [primary, ...fallbacks];
+  return filterEnabledProviders([primary, ...fallbacks], env);
 }
 
 export function resolveMaxTokens(req: LlmChatRequest, env: Record<string, string | undefined> = process.env): number {
@@ -137,6 +150,8 @@ const DEFAULT_BASE_URLS: Record<LlmProviderName, string> = {
   openai: "http://127.0.0.1:8080/v1",
   gemini: "https://generativelanguage.googleapis.com/v1beta",
   anthropic: "https://api.anthropic.com/v1",
+  // OpenCode Zen — gehostetes Modell-Gateway von OpenCode (OpenAI-kompatibel).
+  opencode: "https://opencode.ai/zen/v1",
 };
 
 const API_KEY_ENV: Record<LlmProviderName, string> = {
@@ -144,7 +159,39 @@ const API_KEY_ENV: Record<LlmProviderName, string> = {
   openai: "LLM_API_KEY",
   gemini: "GEMINI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
+  opencode: "OPENCODE_API_KEY",
 };
+
+/**
+ * OpenCode Zen — Free-Modelle (Stand 2026-09, dokumentarischer Snapshot).
+ *
+ * Die Free-Liste ist **promotional**: OpenCode stellt einzelne Modelle zeitweise
+ * kostenlos bereit und nimmt sie wieder heraus. Der Snapshot ist deshalb kein
+ * Filter, sondern (a) Default-Auswahl und (b) Anzeige-/Diagnosegrundlage —
+ * `OPENCODE_MODEL` überschreibt ihn jederzeit.
+ */
+export const OPENCODE_FREE_MODELS: readonly string[] = [
+  "big-pickle",
+  "nemotron-3-ultra-free",
+  "nemotron-3-lightning-free",
+  "mimo-free",
+  "ling-flash-free",
+  "muse-spark-free",
+  "deepseek-v4-flash-free",
+  "minimax-m3-free",
+  "qwen3.6-plus-free",
+  "north-mini-code-free",
+];
+
+/** Default-Modell, wenn `OPENCODE_MODEL`/`LLM_MODEL` leer sind. */
+export const OPENCODE_DEFAULT_MODEL = "big-pickle";
+
+/** true, wenn die ID wie ein kostenloses OpenCode-Zen-Modell aussieht. */
+export function isOpenCodeFreeModel(model: string | undefined | null): boolean {
+  const id = String(model ?? "").trim().toLowerCase();
+  if (!id) return false;
+  return id.endsWith("-free") || OPENCODE_FREE_MODELS.includes(id);
+}
 
 /** Baut die Client-Konfiguration aus der Umgebung (injizierbar für Tests). */
 export function providerConfigFromEnv(
@@ -158,14 +205,21 @@ export function providerConfigFromEnv(
         ? "GEMINI_BASE_URL"
         : provider === "anthropic"
           ? "ANTHROPIC_BASE_URL"
-          : "LLM_BASE_URL";
+          : provider === "opencode"
+            ? "OPENCODE_BASE_URL"
+            : "LLM_BASE_URL";
+  // OpenCode Zen: eigenes Modell-Env mit Free-Default, sonst gilt LLM_MODEL.
+  const model =
+    provider === "opencode"
+      ? env.OPENCODE_MODEL?.trim() || env.LLM_MODEL?.trim() || OPENCODE_DEFAULT_MODEL
+      : env.LLM_MODEL || undefined;
   return {
     provider,
     baseUrl: sanitizeBaseUrl(env[baseEnv] ?? DEFAULT_BASE_URLS[provider], DEFAULT_BASE_URLS[provider]),
     apiKey: env[API_KEY_ENV[provider]] || undefined,
     // KORRIGIERT (v1.4.0): LLM_MODEL gilt für alle Cloud-/kompatiblen Provider,
     // nicht nur openai — sonst ignorieren Gemini/Claude den konfigurierten Tag.
-    model: provider === "ollama" ? undefined : env.LLM_MODEL || undefined,
+    model: provider === "ollama" ? undefined : model,
     numCtx: Number(env.OLLAMA_NUM_CTX || 4096),
     keepAlive: env.OLLAMA_KEEP_ALIVE || undefined,
     maxTokens: resolveMaxTokens({ model: "", messages: [] }, env),
@@ -375,7 +429,8 @@ export function parseModelList(provider: LlmProviderName, data: unknown): string
     data?: { id?: string; name?: string }[];
   };
   const stripGemini = (name: string) => name.replace(/^models\//, "");
-  if (provider === "openai" || provider === "anthropic") {
+  // OpenCode Zen ist OpenAI-kompatibel: `{ data: [{ id }] }`.
+  if (provider === "openai" || provider === "anthropic" || provider === "opencode") {
     return (d.data ?? d.models ?? [])
       .map((m) => String(m.id ?? m.name ?? "").trim())
       .filter(Boolean);
@@ -481,6 +536,7 @@ async function listModels(cfg: LlmClientConfig, timeoutMs = 2500): Promise<strin
     openai: `${cfg.baseUrl}/models`,
     gemini: `${cfg.baseUrl}/models`,
     anthropic: `${cfg.baseUrl}/models`,
+    opencode: `${cfg.baseUrl}/models`,
   };
   const headers: Record<string, string> = { Accept: "application/json" };
   if (cfg.apiKey) {
@@ -577,7 +633,8 @@ export function createLlmClient(
       }
       return reqModel;
     }
-    // Gemini/Anthropic: LLM_MODEL (= cfg.model) oder Agenten-Tag direkt nutzen.
+    // Gemini/Anthropic/OpenCode: eigenes Modell-Env (= cfg.model) oder
+    // Agenten-Tag direkt nutzen.
     return cfg.model ?? reqModel;
   }
 
@@ -596,6 +653,9 @@ export function createLlmClient(
           attempt
         );
       case "openai":
+      // OpenCode Zen ist OpenAI-kompatibel (`POST /chat/completions`,
+      // Bearer-Auth, `response_format` für JSON) — derselbe Transport.
+      case "opencode":
         return doChat(
           cfg,
           `${cfg.baseUrl}/chat/completions`,
@@ -712,6 +772,10 @@ export const COST_USD_PER_MTOK: Record<LlmProviderName, { input: number; output:
   openai: { input: 0.15, output: 0.6 },
   gemini: { input: 0.125, output: 0.5 },
   anthropic: { input: 0.8, output: 4.0 },
+  // OpenCode Zen: Free-Modelle kosten 0 USD. Bezahlte Zen-Modelle sind NICHT
+  // Teil dieses Pfades; wer sie nutzt, setzt den Tarif explizit per Env:
+  //   LLM_COST_OPENCODE_INPUT_PER_MTOK / …_OUTPUT_PER_MTOK
+  opencode: { input: 0, output: 0 },
 };
 
 export function costPerMTok(

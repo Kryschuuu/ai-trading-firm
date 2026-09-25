@@ -56,7 +56,7 @@ test("Budget: komplett erschöpfte Provider ⇒ Rückstufung auf lokales Modell 
     agents: { RESEARCH: { mode: "automatic", defaultClass: "MODEL_C", allowCloud: true } },
   });
 
-  for (const provider of ["ollama", "openai", "gemini", "anthropic"] as const) {
+  for (const provider of ["ollama", "openai", "gemini", "anthropic", "opencode"] as const) {
     router.budget.consume({ provider, agent: "RESEARCH", tokens: 500_000 });
   }
 
@@ -95,7 +95,7 @@ test("Budget: Deckel gilt auch im manual-Modus", () => {
     agents: { RESEARCH: { mode: "manual", pinnedModel: "qwen2.5:14b-instruct-q4_K_M", defaultClass: "MODEL_C", allowCloud: true } },
   });
 
-  for (const provider of ["ollama", "openai", "gemini", "anthropic"] as const) {
+  for (const provider of ["ollama", "openai", "gemini", "anthropic", "opencode"] as const) {
     router.budget.consume({ provider, agent: "RESEARCH", tokens: 500_000 });
   }
 
@@ -119,7 +119,7 @@ test("Budget: Admin-Freigabe (budgetExempt) hebt den Deckel auf — und wird dok
       },
     },
   });
-  for (const provider of ["ollama", "openai", "gemini", "anthropic"] as const) {
+  for (const provider of ["ollama", "openai", "gemini", "anthropic", "opencode"] as const) {
     router.budget.consume({ provider, agent: "RESEARCH", tokens: 500_000 });
   }
   const decision = router.resolve(ctx({ agent: "RESEARCH", complexity: "low" }));

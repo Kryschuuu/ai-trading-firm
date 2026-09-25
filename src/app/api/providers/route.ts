@@ -81,6 +81,15 @@ export async function GET(req: Request): Promise<Response> {
         classes: MODEL_CLASSES.filter((cls) =>
           router.policy.classes[cls].providers.some((p) => p.provider === (id as ProviderId))
         ),
+        /**
+         * Provider-Schalter (UI): `enabled=false` ⇒ der Router wählt ihn nie
+         * und es findet kein Netzwerkverkehr statt. `toggleSource` sagt, wer
+         * entschieden hat (UI-Flag · Env-Sperrliste · Default). Umschalten
+         * erfolgt über `PUT /api/ops/toggles`.
+         */
+        enabled: descriptor.enabled ?? true,
+        toggleSource: descriptor.toggleSource ?? "default",
+        toggleKey: `provider.${id}.enabled`,
         lastCheckedAt: descriptor.lastCheckedAt ?? null,
         error: descriptor.error ?? null,
       };

@@ -38,6 +38,9 @@ import {
   buildReadinessHint,
   collectMarketDataReadiness,
   MAX_SNAPSHOT_OFFENDERS,
+  offenderVenues,
+  syncCommandsFor,
+  venueOfInstrumentId,
   type MarketDataSnapshotInput,
 } from "../../src/ops/collectMarketData";
 import { scannerCandleCounts } from "../../src/ops/marketDataReadiness";
@@ -364,6 +367,84 @@ test("hint text matches the dominant blocker", () => {
     assert.equal(s.hint, buildReadinessHint(s), `${c.name}: hint muss aus buildReadinessHint stammen`);
     c.expect(s.hint, s);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Venue-bewusster Sync-Hinweis (Fund: „Fuehre npm run market:sync -- --venue=BITUNIX
+// erneut aus" stand auch dann im Hinweis, wenn die worst offenders ALPACA waren)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function mixedUniverse(): MarketInstrument[] {
+  return [
+    // ALPACA ist im Scope, weil SPY eine Kerze hat — alle anderen ALPACA-Werte
+    // hängen mit „0 Kerzen" (genau das Bild aus dem Operations Center).
+    instrument({ venue: "ALPACA", symbol: "SPY", lastSeen: AS_OF }),
+    instrument({ venue: "ALPACA", symbol: "AAPL", lastSeen: AS_OF }),
+    instrument({ venue: "ALPACA", symbol: "MSFT", lastSeen: AS_OF }),
+    instrument({ venue: "BITUNIX", symbol: "BTCUSDT", lastSeen: AS_OF }),
+  ];
+}
+
+test("hint nennt die Venue der worst offenders statt pauschal BITUNIX", () => {
+  const s = collectMarketDataReadiness(
+    snapshotInput({
+      instruments: mixedUniverse(),
+      candleCounts: counts({
+        "ALPACA:SPY": 1,
+        "BITUNIX:BTCUSDT": REQUIRED,
+      }),
+      syncStatuses: [
+        {
+          venue: "BITUNIX",
+          lastSyncAt: AS_OF,
+          lastSyncDegraded: false,
+          instruments: 1,
+          failuresByReason: {},
+        },
+      ],
+    }),
+  );
+
+  assert.equal(s.readinessStatus, "WARMING");
+  assert.match(s.hint, /--venue=ALPACA/);
+  assert.match(
+    s.hint,
+    /ALPACA_ENABLED=true/,
+    "nie synchronisierte Venue nennt das Freigabe-Flag",
+  );
+  assert.doesNotMatch(s.hint, /--venue=BITUNIX/, "BITUNIX ist nicht der Blocker");
+});
+
+test("syncCommandsFor: ein Kommando je Venue, dedupliziert und gedeckelt", () => {
+  const s = collectMarketDataReadiness(
+    snapshotInput({
+      instruments: mixedUniverse(),
+      candleCounts: counts({ "ALPACA:SPY": 1, "BITUNIX:BTCUSDT": REQUIRED }),
+      syncStatuses: [
+        {
+          venue: "BITUNIX",
+          lastSyncAt: AS_OF,
+          lastSyncDegraded: false,
+          instruments: 1,
+          failuresByReason: {},
+        },
+      ],
+    }),
+  );
+
+  assert.deepEqual(offenderVenues(s), ["ALPACA"]);
+  const commands = syncCommandsFor(["ALPACA", "ALPACA", "IBKR"], s.venues);
+  assert.deepEqual(commands, [
+    "npm run market:sync -- --venue=ALPACA (Venue nie synchronisiert: ALPACA_ENABLED=true setzen)",
+    "npm run market:sync -- --venue=IBKR (Venue nie synchronisiert: IBKR_ENABLED=true setzen)",
+  ]);
+
+  // Bekannte Venue ohne Flag-Hinweis, wenn sie schon einmal synchronisiert wurde.
+  assert.deepEqual(syncCommandsFor(["BITUNIX"], s.venues), [
+    "npm run market:sync -- --venue=BITUNIX",
+  ]);
+  assert.equal(venueOfInstrumentId("ALPACA:AAPL"), "ALPACA");
+  assert.equal(venueOfInstrumentId("kaputt"), null);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

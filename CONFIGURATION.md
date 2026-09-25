@@ -408,7 +408,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `ollama` | `ollama` · `openai` · `gemini` · `anthropic` |
+| `LLM_PROVIDER` | `ollama` | `ollama` · `openai` · `gemini` · `anthropic` · `opencode` (OpenCode Zen, Free-Modelle) |
 | `LLM_BASE_URL` | abhängig | Basis-URL (OpenAI-kompatibel) |
 | `LLM_API_KEY` | *(leer)* | API-Key für Cloud-Provider |
 | `LLM_MODEL` | je Provider | Modellname |
@@ -434,6 +434,14 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `ANTHROPIC_BASE_URL` | — | Anthropic-Basis-URL |
 | `ANTHROPIC_MODEL` | — | Claude-Modell |
 | `ANTHROPIC_CONTEXT_SIZE` | — | Anthropic-Kontext |
+| `OPENCODE_API_KEY` | *(leer)* | OpenCode-Zen-Key (kostenlos, https://opencode.ai/auth) |
+| `OPENCODE_BASE_URL` | `https://opencode.ai/zen/v1` | OpenCode-Zen-Basis-URL (OpenAI-kompatibel) |
+| `OPENCODE_MODEL` | `big-pickle` | Zen-Modell (Free-Liste: siehe docs/PROVIDER_INTEGRATION.md); `LLM_MODEL` gilt als Fallback |
+| `OPENCODE_CONTEXT_SIZE` | `128000` | Kontextfenster der Zen-Free-Modelle |
+| `ROUTING_BUDGET_OPENCODE_TOKENS` | `250000` | Tages-Token-Deckel des Providers (Regel 3: Cloud immer gedeckelt) |
+| `LLM_COST_OPENCODE_INPUT_PER_MTOK` / `…_OUTPUT_PER_MTOK` | `0` | Kostenüberschreibung, falls bezahlte Zen-Modelle genutzt werden |
+| `ROUTING_DISABLED_PROVIDERS` | *(leer)* | Kommagetrennte Sperrliste (`gemini,opencode`); der UI-Schalter hat Vorrang |
+| `RUNTIME_FLAGS_FILE` | `data/runtime/flags.json` | Ablage der UI-Laufzeit-Schalter (nur Bool-Werte, chmod 600) |
 | `MODEL_CEO`, `MODEL_RESEARCH`, `MODEL_TECHNICAL`, `MODEL_NEWS`, `MODEL_MACRO`, `MODEL_RISK`, `MODEL_BACKTEST`, `MODEL_APPROVER`, `MODEL_DILIGENCE`, `MODEL_EXECUTOR`, `MODEL_SCOUT`, `MODEL_SWING` | je Agent | Modell je Agenten-Rolle |
 | `MODEL_ROUTING_OLLAMA_DEFAULT` | — | Default-Modellklasse beim Router |
 
@@ -1016,7 +1024,7 @@ Hinweise:
 | `BROKER_CREDENTIAL_BACKOFF_BASE_MS` | `2000` | Startwert des exponentiellen Backoffs ab dem 3. Credential-Fehlversuch (0 = Backoff aus) |
 | `BROKER_CREDENTIAL_BACKOFF_MAX_MS` | `900000` (15 min) | Deckel einer Backoff-Sperre |
 | `BROKER_ALLOW_ENV_FALLBACK` | `false` | **SEC-07 (v1.36.32):** Erlaubt Env-Fallback fuer Broker-Credentials (`BITUNIX_API_KEY` etc.) nur wenn `true` UND `NODE_ENV!=production`. In Produktion immer aus — fehlender Datensatz = null, Store-Fehler = HARD FAIL. |
-| `BROKER_HEALTHCHECK_REMOTE` | `false` | remote Health-Checks aktivieren |
+| `BROKER_HEALTHCHECK_REMOTE` | `false` | remote Health-Checks aktivieren; ohne Neustart umschaltbar im Operations Center → „Broker Operations" (Runtime-Flag `broker.healthcheck.remote`, hat Vorrang). ALPACA/IBKR prüfen dabei credential-frei ihre Sync-Quelle (Yahoo) und bleiben ohne Keys/Gateway `degraded`. |
 
 ### RBAC / Firm-API
 

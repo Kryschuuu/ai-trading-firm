@@ -2598,6 +2598,37 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     sections: (d) => clusterExposureSections(d),
   },
 
+  RUNTIME_FLAG_CHANGED: {
+    label: "Laufzeit-Schalter geändert",
+    category: "system",
+    expectedLevel: "WARN",
+    description:
+      "Ein Admin hat einen Laufzeit-Schalter über die Oberfläche geändert (PUT /api/ops/toggles). Solche Schalter wirken sofort und ohne Neustart: Sie geben LLM-Provider frei oder sperren sie (z. B. die OpenCode-Zen-Free-Modelle) bzw. erlauben oder verbieten die read-only Broker-Remote-Checks. Ausgesperrte Provider erhalten keine Anfragen mehr — auch keine Health-Pings.",
+    headline: (d) => {
+      const key = text(d.key) ?? "unbekannter Schalter";
+      const cleared = d.cleared === true;
+      const value = text(d.value);
+      if (cleared) return `${key} auf Default zurückgesetzt`;
+      return `${key} ${value === "true" ? "eingeschaltet" : "ausgeschaltet"}`;
+    },
+    explain: (d) =>
+      d.cleared === true
+        ? "Der UI-Wert wurde entfernt; es gilt wieder der .env-Default (BROKER_HEALTHCHECK_REMOTE bzw. ROUTING_DISABLED_PROVIDERS)."
+        : "Der Wert gilt ab sofort und überlebt Neustarts (data/runtime/flags.json). Der Schalter ist Teil der Sicherheits-Oberfläche: „Aus“ heißt kein Netzwerkverkehr zu diesem Provider und kein Remote-Ping für die Broker.",
+    sections: (d) => [
+      {
+        title: "Schalter",
+        facts: [
+          { label: "Schlüssel", value: (text(d.key) ?? "—") as string, mono: true },
+          { label: "Wert", value: d.cleared === true ? "Default" : (text(d.value) ?? "—") },
+          { label: "Quelle", value: text(d.source) ?? "unbekannt", hint: "runtime = UI-Schalter, env = .env, default = Code-Default." },
+          { label: "Actor", value: text(d.actor) ?? "unbekannt" },
+          ...(text(d.envVar) ? [{ label: "Env-Variable", value: text(d.envVar) as string, mono: true }] : []),
+        ],
+      },
+    ],
+  },
+
   KILL_SWITCH: {
     label: "Not-Halt ausgelöst",
     category: "risk",

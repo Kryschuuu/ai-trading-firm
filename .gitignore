@@ -54,6 +54,8 @@ next-env.d.ts
 
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
+# Laufzeit-Schalter (UI): data/runtime/flags.json — nur Bool-Werte.
+/data/runtime
 
 # Prompt-Eval-Reports (GAP-08, v1.49.0): `npm run eval:prompts` schreibt
 # JSON- + MD-Report je Lauf — reproduzierbar, nicht versioniert.

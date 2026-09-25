@@ -23,6 +23,8 @@ import {
   sanitizeBaseUrl,
   withRetry,
   clearModelListCache,
+  isOpenCodeFreeModel,
+  OPENCODE_DEFAULT_MODEL,
   type LlmChatRequest,
 } from "../src/lib/llmProvider";
 
@@ -373,6 +375,77 @@ test("Gemini-Client: API-Key im Header, nie in der URL (v1.4.0)", async () => {
   assert.match(calls[0].url, /\/models\/gemini-2\.0-flash:generateContent$/);
   const headers = calls[0].init?.headers as Record<string, string>;
   assert.equal(headers["x-goog-api-key"], "AIza-secret-key");
+});
+
+// ── OpenCode Zen (Cloud, Free-Modelle) ──────────────────────────────────────
+
+test("OpenCode: Konfiguration aus der Umgebung (Base-URL, Key, Free-Default)", () => {
+  const cfg = providerConfigFromEnv("opencode", {});
+  assert.equal(cfg.provider, "opencode");
+  assert.equal(cfg.baseUrl, "https://opencode.ai/zen/v1");
+  assert.equal(cfg.model, OPENCODE_DEFAULT_MODEL, "ohne Env gilt das Free-Default-Modell");
+  assert.equal(cfg.apiKey, undefined);
+
+  const withKey = providerConfigFromEnv("opencode", { OPENCODE_API_KEY: "oc-secret" });
+  assert.equal(withKey.apiKey, "oc-secret");
+
+  const custom = providerConfigFromEnv("opencode", {
+    OPENCODE_MODEL: "nemotron-3-ultra-free",
+    LLM_MODEL: "ignored",
+  });
+  assert.equal(custom.model, "nemotron-3-ultra-free", "OPENCODE_MODEL schlägt LLM_MODEL");
+
+  assert.equal(
+    providerConfigFromEnv("opencode", { OPENCODE_BASE_URL: "http://127.0.0.1:1/v1" }).baseUrl,
+    "http://127.0.0.1:1/v1"
+  );
+});
+
+test("OpenCode: Free-Modell-Erkennung (dokumentierter Snapshot, keine Sperre)", () => {
+  assert.equal(isOpenCodeFreeModel("big-pickle"), true);
+  assert.equal(isOpenCodeFreeModel("nemotron-3-ultra-free"), true);
+  assert.equal(isOpenCodeFreeModel("irgendein-neues-modell-free"), true, "Suffix -free genügt");
+  assert.equal(isOpenCodeFreeModel("deepseek-v4-pro"), false, "bezahlte Zen-Modelle sind nicht frei");
+  assert.equal(isOpenCodeFreeModel(""), false);
+  assert.equal(isOpenCodeFreeModel(undefined), false);
+});
+
+test("OpenCode-Client: OpenAI-kompatibler Pfad mit Bearer-Key, JSON-Schema und Kosten 0", async () => {
+  const { fn, calls } = fakeFetch([
+    new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "{\"ok\":true}" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+      { status: 200 }
+    ),
+  ]);
+  const client = createLlmClient("opencode", {
+    env: { OPENCODE_API_KEY: "oc-secret", OPENCODE_MODEL: "big-pickle" },
+    fetchFn: fn,
+  });
+  const res = await client.chat(REQ);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://opencode.ai/zen/v1/chat/completions");
+  const headers = calls[0].init?.headers as Record<string, string>;
+  assert.equal(headers.Authorization, "Bearer oc-secret");
+  const body = JSON.parse(String(calls[0].init?.body)) as Record<string, unknown>;
+  assert.equal(body.model, "big-pickle");
+  assert.deepEqual(body.response_format, {
+    type: "json_schema",
+    json_schema: { name: "decision", schema: { type: "object" } },
+  });
+  assert.equal(res.provider, "opencode");
+  assert.equal(res.costUsd, 0, "Free-Modelle kosten 0 USD");
+});
+
+test("OpenCode: Modellliste wird als OpenAI-Form geparst und im Status sichtbar", () => {
+  assert.deepEqual(
+    parseModelList("opencode", { data: [{ id: "big-pickle" }, { id: "nemotron-3-ultra-free" }] }),
+    ["big-pickle", "nemotron-3-ultra-free"]
+  );
+  assert.equal(normalizeProvider("OpenCode"), "opencode");
+  assert.equal(normalizeProvider("opencode"), "opencode");
 });
 
 test("Gemini/Anthropic: LLM_MODEL hat Vorrang vor dem Agenten-Tag (v1.4.0)", () => {

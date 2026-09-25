@@ -23,10 +23,14 @@ import {
   type ProviderRegistry,
   type ProviderRegistryOverrides,
 } from "./types";
-import { costPerMTok } from "@/lib/llmProvider";
+import {
+  costPerMTok,
+  OPENCODE_DEFAULT_MODEL,
+} from "@/lib/llmProvider";
+import { PROVIDER_DISABLED_REASON, isProviderEnabled, providerToggleView } from "./providerToggles";
 
 export const LOCAL_PROVIDERS: readonly ProviderId[] = ["ollama", "openai"];
-export const CLOUD_PROVIDERS: readonly ProviderId[] = ["gemini", "anthropic"];
+export const CLOUD_PROVIDERS: readonly ProviderId[] = ["gemini", "anthropic", "opencode"];
 
 /** Health-Prüfverhalten: off | local (Default) | all. */
 export const HEALTH_PROBE_ENV = "ROUTING_HEALTH_PROBE";
@@ -38,6 +42,9 @@ const DEFAULT_CONTEXT_SIZE: Record<ProviderId, number> = {
   openai: 8192,
   gemini: 32_768,
   anthropic: 200_000,
+  // OpenCode Zen: Free-Modelle dokumentiert mit 128k–200k Kontext; konservativ
+  // der kleinere belegte Wert (per OPENCODE_CONTEXT_SIZE anhebbar).
+  opencode: 128_000,
 };
 
 const DEFAULT_MODEL: Record<ProviderId, string> = {
@@ -45,6 +52,7 @@ const DEFAULT_MODEL: Record<ProviderId, string> = {
   openai: "local-model",
   gemini: "gemini-2.0-flash",
   anthropic: "claude-3-5-haiku-latest",
+  opencode: OPENCODE_DEFAULT_MODEL,
 };
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
@@ -52,6 +60,7 @@ const PROVIDER_LABEL: Record<ProviderId, string> = {
   openai: "OpenAI-kompatibel (lokal/compat)",
   gemini: "Google Gemini (Cloud)",
   anthropic: "Anthropic Claude (Cloud)",
+  opencode: "OpenCode Zen (Cloud · Free-Modelle)",
 };
 
 function envInt(
@@ -88,6 +97,7 @@ export function buildProviderDescriptor(
     openai: "LLM_CONTEXT_SIZE",
     gemini: "GEMINI_CONTEXT_SIZE",
     anthropic: "ANTHROPIC_CONTEXT_SIZE",
+    opencode: "OPENCODE_CONTEXT_SIZE",
   };
   const modelEnv =
     id === "ollama"
@@ -96,13 +106,16 @@ export function buildProviderDescriptor(
         ? env.GEMINI_MODEL ?? env.LLM_MODEL
         : id === "anthropic"
           ? env.ANTHROPIC_MODEL ?? env.LLM_MODEL
-          : env.LLM_MODEL;
+          : id === "opencode"
+            ? env.OPENCODE_MODEL ?? env.LLM_MODEL
+            : env.LLM_MODEL;
 
   const budgetEnv: Record<ProviderId, string> = {
     ollama: "ROUTING_BUDGET_OLLAMA_TOKENS",
     openai: "ROUTING_BUDGET_OPENAI_TOKENS",
     gemini: "ROUTING_BUDGET_GEMINI_TOKENS",
     anthropic: "ROUTING_BUDGET_ANTHROPIC_TOKENS",
+    opencode: "ROUTING_BUDGET_OPENCODE_TOKENS",
   };
 
   const keyEnv: Record<ProviderId, string | undefined> = {
@@ -110,6 +123,7 @@ export function buildProviderDescriptor(
     openai: "LLM_API_KEY",
     gemini: "GEMINI_API_KEY",
     anthropic: "ANTHROPIC_API_KEY",
+    opencode: "OPENCODE_API_KEY",
   };
   const keyName = keyEnv[id];
   const hasKey = keyName ? Boolean(env[keyName]) : true;
@@ -122,13 +136,9 @@ export function buildProviderDescriptor(
     models: [],
     defaultModel: modelEnv?.trim() || DEFAULT_MODEL[id],
     capabilities:
-      id === "ollama"
+      id === "ollama" || id === "openai"
         ? ["chat", "json", "schema"]
-        : id === "openai"
-          ? ["chat", "json", "schema"]
-          : id === "gemini"
-            ? ["chat", "json", "schema", "long-context"]
-            : ["chat", "json", "schema", "long-context"],
+        : ["chat", "json", "schema", "long-context"],
     contextSize: envInt(env[contextEnv[id]], DEFAULT_CONTEXT_SIZE[id], 512, 2_000_000),
     costPer1kIn: cloud ? costPer1k(id, "input", env) : 0,
     costPer1kOut: cloud ? costPer1k(id, "output", env) : 0,
@@ -136,10 +146,49 @@ export function buildProviderDescriptor(
     // gelten bis zur ersten Prüfung als „degraded“ (nie optimistisch online).
     healthStatus: cloud ? (hasKey ? "degraded" : "offline") : "degraded",
     latencyEma: 0,
-    tokenBudgetToday: envInt(env[budgetEnv[id]], id === "ollama" ? 5_000_000 : id === "openai" ? 500_000 : id === "gemini" ? 200_000 : 100_000, 0, 1_000_000_000),
+    tokenBudgetToday: envInt(
+      env[budgetEnv[id]],
+      // Cloud-Deckel (Regel 3): OpenCode Zen ist mit Free-Modellen gratis,
+      // aber rate-limited (Free-Tier) — deshalb ein eigener, kleinerer Deckel.
+      id === "ollama"
+        ? 5_000_000
+        : id === "openai"
+          ? 500_000
+          : id === "gemini"
+            ? 200_000
+            : id === "opencode"
+              ? 250_000
+              : 100_000,
+      0,
+      1_000_000_000
+    ),
     tokensUsedToday: 0,
     quotaRest: 100,
     ...(cloud && !hasKey ? { error: "Kein API-Key konfiguriert (Provider nicht nutzbar)." } : {}),
+  };
+}
+
+/**
+ * Projektion der Provider-Schalter auf eine Karte (Task 09-Erweiterung).
+ *
+ * Ein gesperrter Provider wird **offline** mit Begründung — dieselbe Sprache,
+ * die der Router für „nicht wählbar" kennt (Regel 2: keine Sonderfälle), und
+ * die UI zeigt den Grund direkt an der Karte.
+ */
+export function applyProviderToggle(
+  descriptor: ProviderDescriptor,
+  env: Record<string, string | undefined> = process.env
+): ProviderDescriptor {
+  const enabled = isProviderEnabled(descriptor.id, env);
+  const source = providerToggleView(descriptor.id, env).source;
+  if (enabled) return { ...descriptor, enabled: true, toggleSource: source };
+  return {
+    ...descriptor,
+    enabled: false,
+    toggleSource: source,
+    healthStatus: "offline",
+    quotaRest: 0,
+    error: PROVIDER_DISABLED_REASON,
   };
 }
 
@@ -172,6 +221,8 @@ function baseUrlFor(provider: ProviderId, env: Record<string, string | undefined
       return env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
     case "anthropic":
       return env.ANTHROPIC_BASE_URL || "https://api.anthropic.com/v1";
+    case "opencode":
+      return env.OPENCODE_BASE_URL || "https://opencode.ai/zen/v1";
   }
 }
 
@@ -185,6 +236,8 @@ function keyFor(provider: ProviderId, env: Record<string, string | undefined>): 
       return env.GEMINI_API_KEY;
     case "anthropic":
       return env.ANTHROPIC_API_KEY;
+    case "opencode":
+      return env.OPENCODE_API_KEY;
   }
 }
 
@@ -225,7 +278,8 @@ async function listProviderModels(
       .map((m) => m.name ?? m.model ?? "")
       .filter((name) => name.length > 0);
   }
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "opencode") {
+    // OpenCode Zen ist OpenAI-kompatibel (`GET /zen/v1/models`).
     const data = (await fetchJson(
       `${base}/models`,
       { method: "GET", headers: key ? { Authorization: `Bearer ${key}` } : {} },
@@ -375,17 +429,28 @@ export class EnvProviderRegistry implements ProviderRegistry {
   }
 
   list(): ProviderDescriptor[] {
-    return PROVIDER_IDS.map((id) => structuredClone(this.descriptors.get(id)!)).filter(Boolean);
+    return PROVIDER_IDS.map((id) => applyProviderToggle(structuredClone(this.descriptors.get(id)!), this.env)).filter(
+      Boolean
+    );
   }
 
   get(id: ProviderId): ProviderDescriptor | undefined {
     const found = this.descriptors.get(id);
-    return found ? structuredClone(found) : undefined;
+    return found ? applyProviderToggle(structuredClone(found), this.env) : undefined;
   }
 
+  /**
+   * Health-Prüfung aller **freigegebenen** Provider. Ein per Schalter
+   * gesperrter Provider wird nicht einmal abgefragt — „aus" heißt auch
+   * „kein Netzwerkverkehr" (gleiche Regel wie beim Broker-Remote-Check).
+   */
   async refresh(): Promise<ProviderDescriptor[]> {
     const probed = await Promise.all(
-      PROVIDER_IDS.map((id) => probeProviderHealth(this.descriptors.get(id)!, { env: this.env }))
+      PROVIDER_IDS.map(async (id) => {
+        const current = this.descriptors.get(id)!;
+        if (!isProviderEnabled(id, this.env)) return applyProviderToggle(current, this.env);
+        return applyProviderToggle(await probeProviderHealth(current, { env: this.env }), this.env);
+      })
     );
     this.descriptors = new Map(probed.map((d) => [d.id, d] as [ProviderId, ProviderDescriptor]));
     return this.list();

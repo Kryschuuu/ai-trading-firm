@@ -17,7 +17,11 @@ import path from "node:path";
 
 import { availableExecutionModes } from "@/brokers/capabilities";
 import { createAdapter } from "@/brokers/factory";
-import { REMOTE_HEALTHCHECK_FLAG, remoteHealthCheckEnabled } from "@/brokers/health";
+import {
+  REMOTE_HEALTHCHECK_FLAG,
+  remoteHealthCheckEnabled,
+  resolveRemoteHealthcheck,
+} from "@/brokers/health";
 import { BROKER_VENUE_IDS } from "@/contracts/broker";
 import { getCycleService } from "@/cycle/service";
 import { db } from "@/db";
@@ -568,6 +572,10 @@ async function collectBrokerOperations(): Promise<Draft> {
   const online = venues.filter((v) => v.health.status === "online").length;
   const liveCapable = venues.filter((v) => v.liveAvailable).length;
   const paperCapable = venues.filter((v) => v.paperAvailable).length;
+  // Quelle des Remote-Schalters: `runtime` = UI-Schalter (sofort wirksam),
+  // `env` = .env, `default` = aus. Die Sektion bleibt read-only; bedient wird
+  // der Schalter im Panel direkt über dieser Karte.
+  const remoteResolution = resolveRemoteHealthcheck();
   return {
     // Der lokale Health-Status ist vollständig — „Remote-Check aus“ ist der
     // dokumentierte Default, kein Defekt. Er steht daher im Hinweis, nicht
@@ -585,9 +593,15 @@ async function collectBrokerOperations(): Promise<Draft> {
       },
       {
         label: "Remote-Check",
-        value: remote ? "aktiv" : "aus (Default)",
+        value: remote ? "aktiv" : "aus",
         tone: remote ? "neutral" : "warn",
-        hint: `Env-Flag ${REMOTE_HEALTHCHECK_FLAG}`,
+        hint: `Schalter in dieser Sektion (${REMOTE_HEALTHCHECK_FLAG} / data/runtime/flags.json). Quelle: ${
+          remoteResolution.source === "runtime"
+            ? "UI"
+            : remoteResolution.source === "env"
+              ? ".env"
+              : "Default (aus)"
+        }.`,
       },
     ],
     items: venues.map((v) => ({
@@ -599,11 +613,11 @@ async function collectBrokerOperations(): Promise<Draft> {
     note:
       liveCapable > 0
         ? `Live-Capability ist eine Adapter-Eigenschaft, keine Freigabe: der Live-Pfad bleibt über das Live-Gate gesperrt.${
-            remote ? "" : ` Lokaler Health-Status ohne Remote-Prüfung (${REMOTE_HEALTHCHECK_FLAG} ist Default aus).`
+            remote ? "" : " Lokaler Health-Status ohne Remote-Prüfung — der Schalter steht direkt über dieser Karte."
           }`
         : remote
           ? null
-          : `Lokaler Health-Status ohne Remote-Prüfung (${REMOTE_HEALTHCHECK_FLAG} ist Default aus).`,
+          : "Lokaler Health-Status ohne Remote-Prüfung — der Schalter steht direkt über dieser Karte.",
   };
 }
 
@@ -616,9 +630,22 @@ async function collectLlmOperations(): Promise<Draft> {
   const ollama = await getOllamaStatus();
   const providers = snapshot.providers;
   const online = providers.filter((p) => p.healthStatus === "online").length;
+  // Provider-Schalter (UI): gesperrte Provider sind nicht wählbar und werden
+  // auch nicht abgefragt — das ist eine Betriebsaussage, keine Störung.
+  const disabled = providers.filter((p) => p.enabled === false);
   const budget = snapshot.budget.global;
   const decisions = Object.values(snapshot.lastDecisions);
   const budgetPct = budget.tokensPerDay > 0 ? budget.tokens / budget.tokensPerDay : 0;
+  const notes: string[] = [];
+  if (!ollama.available) {
+    notes.push("Kein lokaler Provider erreichbar — Routing fällt auf die Regel-Engine zurück.");
+  }
+  if (disabled.length > 0) {
+    notes.push(
+      `Abgeschaltet über Provider-Schalter: ${disabled.map((p) => p.id).join(", ")} — ` +
+        "keine Anfragen, keine Kosten (LLM-Provider-Schalter in dieser Sektion)."
+    );
+  }
   return {
     status: online > 0 || ollama.available ? "ready" : "degraded",
     asOf: snapshot.generatedAt,
@@ -626,6 +653,11 @@ async function collectLlmOperations(): Promise<Draft> {
       { label: "Routing-Policy", value: snapshot.policyVersion },
       { label: "Modus", value: snapshot.policy.defaultMode },
       { label: "Provider online", value: `${num(online, 0)} / ${num(providers.length, 0)}` },
+      {
+        label: "Provider freigegeben",
+        value: `${num(providers.length - disabled.length, 0)} / ${num(providers.length, 0)}`,
+        tone: disabled.length > 0 ? "warn" : "good",
+      },
       {
         label: "Lokales LLM",
         value: ollama.available ? `${countLabel(ollama.models.length, "Modell")}` : "nicht erreichbar",
@@ -644,7 +676,7 @@ async function collectLlmOperations(): Promise<Draft> {
       meta: `${d.modelClass} · ${d.trigger}`,
       tone: d.budgetBlocked ? "warn" : d.escalated ? "neutral" : "good",
     })),
-    note: ollama.available ? null : "Kein lokaler Provider erreichbar — Routing fällt auf die Regel-Engine zurück.",
+    note: notes.length > 0 ? notes.join(" ") : null,
   };
 }
 

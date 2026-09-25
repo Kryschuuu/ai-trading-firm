@@ -57,17 +57,17 @@ async function json(res: Response): Promise<Record<string, unknown>> {
 // GET /api/providers
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("API: GET /api/providers liefert Karten-Daten aller vier Provider", async () => {
+test("API: GET /api/providers liefert Karten-Daten aller fünf Provider", async () => {
   const res = await GET_PROVIDERS(new Request("http://localhost/api/providers"));
   assert.equal(res.status, 200);
   const body = await json(res);
   assert.equal(body.ok, true);
-  assert.equal(body.count, 4);
+  assert.equal(body.count, 5);
 
   const providers = body.providers as Array<Record<string, unknown>>;
   assert.deepEqual(
     providers.map((p) => p.id),
-    ["ollama", "openai", "gemini", "anthropic"]
+    ["ollama", "openai", "gemini", "anthropic", "opencode"]
   );
 
   for (const card of providers) {
@@ -157,7 +157,7 @@ test("API: GET /api/routing liefert Policy, Modi, Provider, Budget und Audit", a
   assert.equal(agents.CEO.mode, "automatic");
 
   assert.ok((body.modes as Record<string, string>).CEO);
-  assert.equal((body.providers as unknown[]).length, 4);
+  assert.equal((body.providers as unknown[]).length, 5);
   assert.ok((body.budget as Record<string, unknown>).global);
   assert.ok(((body.audit as unknown[]) ?? []).length >= 1);
   assert.ok((body.lastDecisions as Record<string, unknown>).CEO);
