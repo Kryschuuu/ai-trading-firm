@@ -33,7 +33,12 @@ import { publicErrorMessage } from "@/lib/secrets";
 import { BROKER_VENUE_IDS, type BrokerVenueId } from "@/contracts/broker";
 import { availableExecutionModes } from "@/brokers/capabilities";
 import { createAdapter } from "@/brokers/factory";
-import { REMOTE_HEALTHCHECK_FLAG, remoteHealthCheckEnabled } from "@/brokers/health";
+import {
+  REMOTE_HEALTHCHECK_FLAG,
+  REMOTE_HEALTHCHECK_SPEC,
+  remoteHealthCheckEnabled,
+  resolveRemoteHealthcheck,
+} from "@/brokers/health";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +80,10 @@ export async function GET(): Promise<Response> {
       remoteHealthCheck: {
         enabled: remoteHealthCheckEnabled(),
         flag: REMOTE_HEALTHCHECK_FLAG,
+        // Seit Task-02+ ist der Schalter ohne Neustart über die UI änderbar
+        // (`PUT /api/ops/toggles`, Sektion „Broker Operations“).
+        source: resolveRemoteHealthcheck().source,
+        toggleKey: REMOTE_HEALTHCHECK_SPEC.key,
       },
     });
   } catch (e) {

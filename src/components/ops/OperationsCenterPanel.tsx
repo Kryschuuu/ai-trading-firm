@@ -22,6 +22,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import MarketDataPanel from "@/components/ops/MarketDataPanel";
+import RuntimeTogglesPanel from "@/components/ops/RuntimeTogglesPanel";
 import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
 import type { OpsItem, OpsMetric, OpsPayload, OpsSection, OpsSectionStatus, OpsTone } from "@/ops/types";
 import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";

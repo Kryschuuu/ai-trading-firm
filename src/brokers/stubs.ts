@@ -115,9 +115,20 @@ export class StubBrokerAdapter implements BrokerAdapter {
       base.details.remoteCheck = "fehlgeschlagen";
       return base;
     }
+    // ALPACA/IBKR werden über ihre **Sync-/Datenquelle** geprüft (Yahoo),
+    // nicht über eine Trading-API — dort bleibt der venue-spezifische Grund
+    // (z. B. GATEWAY_REQUIRED) die Aussage über die Handelbarkeit, die Fakten
+    // der Datenquellen-Prüfung kommen additiv dazu (syncSource*). Bei den
+    // Venues mit echtem Public-API-Check (BINANCE/KRAKEN/BITUNIX) trägt
+    // dessen `reason` die Aussage.
+    const syncSourceVenues = new Set<string>(["ALPACA", "IBKR"]);
     base.status = result.status;
     base.details.remoteCheck = "read-only public endpoint";
-    Object.assign(base.details, result.details);
+    Object.assign(
+      base.details,
+      result.details,
+      syncSourceVenues.has(this.id) ? { reason: this.remoteReason() } : {}
+    );
     base.latencyMs = typeof result.details.latencyMs === "number"
       ? result.details.latencyMs
       : 0;

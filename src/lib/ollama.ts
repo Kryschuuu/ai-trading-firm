@@ -14,6 +14,7 @@
  *               LM Studio, vLLM, LocalAI — oder ein Cloud-Anbieter
  *   gemini    → Google Gemini (GEMINI_API_KEY)
  *   anthropic → Anthropic Claude (ANTHROPIC_API_KEY)
+ *   opencode  → OpenCode Zen, OpenAI-kompatibel, Free-Modelle (OPENCODE_API_KEY)
  *
  * Fallback-Kette primär + Fallbacks: LLM_PROVIDER + LLM_FALLBACK_PROVIDERS.
  * Ist kein Provider erreichbar, greift die deterministische Regel-Engine,
@@ -63,6 +64,8 @@ function configBaseUrl(provider: LlmProviderName): string {
       return process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
     case "anthropic":
       return process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com/v1";
+    case "opencode":
+      return process.env.OPENCODE_BASE_URL || "https://opencode.ai/zen/v1";
   }
 }
 

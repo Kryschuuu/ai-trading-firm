@@ -243,6 +243,7 @@ test("Eskalation: erschöpftes Budget der Zielklasse → denied (BUDGET_EXCEEDED
       openai: { tokensPerDay: 100, costUsdPerDay: 0 },
       gemini: { tokensPerDay: 100, costUsdPerDay: 1 },
       anthropic: { tokensPerDay: 100, costUsdPerDay: 1 },
+      opencode: { tokensPerDay: 100, costUsdPerDay: 0 },
     },
     agents: {},
     global: { tokensPerDay: 1000, costUsdPerDay: 5 },
@@ -251,7 +252,7 @@ test("Eskalation: erschöpftes Budget der Zielklasse → denied (BUDGET_EXCEEDED
     agents: { RESEARCH: { mode: "automatic", defaultClass: "MODEL_A", allowCloud: true } },
     policy: { budgets },
   });
-  for (const provider of ["ollama", "openai", "gemini", "anthropic"] as const) {
+  for (const provider of ["ollama", "openai", "gemini", "anthropic", "opencode"] as const) {
     router.budget.consume({ provider, tokens: 500 });
   }
   const outcome = router.requestEscalation({
@@ -269,7 +270,7 @@ test("Eskalation: erschöpftes Budget der Zielklasse → denied (BUDGET_EXCEEDED
 
 test("Eskalation: kein gesunder Provider → denied (NO_HEALTHY_PROVIDER)", () => {
   const { router, registry } = researchOnSmallModel();
-  for (const id of ["ollama", "openai", "gemini", "anthropic"] as const) {
+  for (const id of ["ollama", "openai", "gemini", "anthropic", "opencode"] as const) {
     registry.setHealth(id, "offline");
   }
   const outcome = router.requestEscalation({

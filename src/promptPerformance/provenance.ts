@@ -29,9 +29,24 @@ import { ensurePromptArtifact, recordPromptRun, runIdempotencyKey } from "./stor
 import { structuredLog } from "@/lib/logger";
 import { redactSecrets } from "@/lib/secrets";
 
-export type ProviderLabel = "ollama" | "openai" | "gemini" | "anthropic" | "fallback" | "unknown";
+export type ProviderLabel =
+  | "ollama"
+  | "openai"
+  | "gemini"
+  | "anthropic"
+  | "opencode"
+  | "fallback"
+  | "unknown";
 
-const ALLOWED_PROVIDERS = new Set<string>(["ollama","openai","gemini","anthropic","fallback","unknown"]);
+const ALLOWED_PROVIDERS = new Set<string>([
+  "ollama",
+  "openai",
+  "gemini",
+  "anthropic",
+  "opencode",
+  "fallback",
+  "unknown",
+]);
 
 function normalizeProvider(raw: string | undefined | null): ProviderLabel {
   const v = String(raw ?? "").trim().toLowerCase();

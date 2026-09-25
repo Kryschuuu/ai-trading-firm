@@ -25,6 +25,7 @@ export {
   type RoutingPolicyProvider,
 } from "./policy";
 export {
+  applyProviderToggle,
   CLOUD_PROVIDERS,
   EnvProviderRegistry,
   FakeProviderRegistry,
@@ -108,3 +109,17 @@ export {
   type RoutedChatResult,
   type RoutedChatSpec,
 } from "./adapter";
+export {
+  DISABLED_PROVIDERS_ENV,
+  PROVIDER_DISABLED_REASON,
+  PROVIDER_TOGGLE_PREFIX,
+  disabledProvidersFromEnv,
+  filterEnabledProviders,
+  isProviderEnabled,
+  providerToggleKey,
+  providerToggleSpec,
+  providerToggleSpecs,
+  providerToggleView,
+  providerToggleViews,
+  setProviderEnabled,
+} from "./providerToggles";

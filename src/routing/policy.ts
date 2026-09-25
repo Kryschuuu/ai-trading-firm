@@ -32,7 +32,7 @@ import {
 export const ROUTING_POLICY_ENV = "ROUTING_POLICY_PATH";
 
 /** Cloud-Provider — für sie ist ein Budget-Deckel PFLICHT (Regel 3). */
-const CLOUD_PROVIDER_IDS: readonly ProviderId[] = ["gemini", "anthropic"];
+const CLOUD_PROVIDER_IDS: readonly ProviderId[] = ["gemini", "anthropic", "opencode"];
 
 /** Version der Default-Policy — erscheint in JEDEM Audit-Eintrag. */
 export const DEFAULT_POLICY_VERSION = "1.0.0";
@@ -206,6 +206,12 @@ export const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
         { provider: "ollama", model: "qwen2.5:14b-instruct-q4_K_M" },
         { provider: "gemini", model: "gemini-2.0-flash" },
         { provider: "anthropic", model: "claude-3-5-haiku-latest" },
+        // OpenCode Zen (Cloud, Free-Modelle) — LETZTE Präferenz: der bestehende
+        // Pfad (lokal → Gemini → Claude) bleibt unverändert, OpenCode greift
+        // nur, wenn er freigegeben ist (UI-Schalter/Key) und die anderen
+        // Cloud-Provider offline, ohne Key oder über dem Quota-Deckel sind.
+        // Ohne `OPENCODE_API_KEY` ist die Karte `offline` — kein Verhaltenswechsel.
+        { provider: "opencode" },
       ],
     },
   },
@@ -254,6 +260,9 @@ export const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
       openai: { tokensPerDay: 500_000, costUsdPerDay: 5 },
       gemini: { tokensPerDay: 200_000, costUsdPerDay: 2 },
       anthropic: { tokensPerDay: 100_000, costUsdPerDay: 4 },
+      // OpenCode Zen: Free-Modelle kosten 0 USD, sind aber rate-limited —
+      // Deckel bewusst konservativ (Regel 3: Cloud nie unbegrenzt).
+      opencode: { tokensPerDay: 250_000, costUsdPerDay: 0 },
     },
     agents: {
       CEO: { tokensPerDay: 300_000 },
@@ -274,6 +283,10 @@ export const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
     "offline:gemini": ["ollama", "anthropic"],
     "offline:ollama": ["gemini", "anthropic"],
     "offline:openai": ["ollama", "gemini"],
+    // OpenCode Zen (Free-Modelle): fällt auf lokal → Gemini zurück.
+    "offline:opencode": ["ollama", "gemini"],
+    "quota:opencode": ["ollama", "gemini"],
+    "timeout:opencode": ["ollama", "gemini"],
     default: ["ollama", "gemini", "anthropic"],
   },
   quotaMinPercent: 5,

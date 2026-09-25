@@ -165,9 +165,23 @@ export type ModelCapability =
 // Provider-Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ProviderId = "ollama" | "openai" | "gemini" | "anthropic";
+/**
+ * Provider-IDs des MODEL_ROUTER.
+ *
+ * `opencode` = OpenCode Zen (OpenAI-kompatibles Cloud-Gateway mit
+ * kostenlosen Modellen, `OPENCODE_API_KEY`). Er ist ein **Cloud**-Provider:
+ * damit gilt Regel 3 (Budget-Deckel Pflicht) und die Sperrliste
+ * `ROUTING_DISABLED_PROVIDERS` bzw. der UI-Schalter `provider.opencode.enabled`.
+ */
+export type ProviderId = "ollama" | "openai" | "gemini" | "anthropic" | "opencode";
 
-export const PROVIDER_IDS: readonly ProviderId[] = ["ollama", "openai", "gemini", "anthropic"];
+export const PROVIDER_IDS: readonly ProviderId[] = [
+  "ollama",
+  "openai",
+  "gemini",
+  "anthropic",
+  "opencode",
+];
 
 export type HealthStatus = "online" | "degraded" | "offline";
 
@@ -206,6 +220,14 @@ export type ProviderDescriptor = {
   lastCheckedAt?: string;
   /** Redigierte Fehlermeldung der letzten Prüfung (niemals Keys). */
   error?: string;
+  /**
+   * Freigabe-Zustand des Providers (Provider-Schalter, `provider.<id>.enabled`).
+   * `false` ⇒ der Router wählt ihn nie und der Health-Poller fragt ihn nicht ab.
+   * Nicht gesetzt = nicht bewertet (z. B. Fake-Registry in Tests).
+   */
+  enabled?: boolean;
+  /** Quelle des Freigabe-Zustands (Runtime-Flag · Env-Sperrliste · Default). */
+  toggleSource?: "runtime" | "env" | "default";
 };
 
 export type ProviderRegistrySnapshot = {

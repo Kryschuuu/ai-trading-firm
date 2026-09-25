@@ -50,6 +50,9 @@ export {
   collectMarketDataReadiness as collectMarketDataSnapshot,
   MAX_SNAPSHOT_OFFENDERS,
   MAX_SNAPSHOT_VENUES,
+  offenderVenues,
+  syncCommandsFor,
+  venueOfInstrumentId,
   type MarketDataSnapshotInput,
 } from "./collectMarketData";
 export type {

@@ -49,6 +49,7 @@ import { AlpacaPrivateClient } from "./privateClient";
 import { AlpacaPaperLedger } from "./paper";
 import { BrokerExecutionEngine, PaperExecutionEngine, type ExecutionPort } from "./execution";
 import { createDefaultAlpacaSecretStore, loadAlpacaCredentials, type AlpacaCredentials, type SecretStore } from "./secrets";
+import { probeSyncSource } from "../health";
 import { createAlpacaLogger, type AlpacaLogger } from "./redactor";
 import { AlpacaHttp, TokenBucket } from "./http";
 import { mapAsset, mapAssets, mapOrderResult } from "./mapping";
@@ -197,14 +198,32 @@ export class AlpacaBrokerAdapter implements BrokerAdapter {
     if (opts?.remote) {
       // Alpacas Snapshot-Endpoint ist nicht credential-frei (IEX-Daten
       // verlangen Auth). Ohne Credentials liefert der Health-Click deshalb
-      // ehrlich "degraded" + CREDENTIALS_REQUIRED — wir starten gar nicht
-      // erst einen Network-Call. Das ist konsistent mit der Stub-Semantik
-      // (andere Venues ohne credential-freien Check verhalten sich gleich).
+      // ehrlich "degraded" + CREDENTIALS_REQUIRED — der Trading-Pfad wird
+      // NICHT geprüft.
+      //
+      // Zusätzlich (und credential-frei) wird die dokumentierte
+      // **Sync-Quelle** der Venue geprobt (Yahoo Finance, s.
+      // src/marketdata/adapters/yahoo.ts): Ohne sie bleibt der Datenstand
+      // „0 Kerzen" und jedes Aktien-/ETF-Mandat kann nicht handeln. Das
+      // Ergebnis ist ausdrücklich als Datenpfad gekennzeichnet und ändert den
+      // Status nicht (ein erreichbarer Datenpfad ist kein Online-Beweis).
       if (!creds) {
+        let syncDetails: Record<string, unknown> = {};
+        try {
+          const probe = await probeSyncSource("SPY");
+          syncDetails = { ...probe, syncSourceNote: "Datenpfad der Venue (Warmup); Trading-API ungeprüft." };
+        } catch {
+          syncDetails = { syncSourceReachable: false, syncSourceReason: "SYNC_SOURCE_UNREACHABLE" };
+        }
         return {
           status: "degraded",
           latencyMs,
-          details: { ...details, reason: "CREDENTIALS_REQUIRED", remoteCheck: "credentials erforderlich" },
+          details: {
+            ...details,
+            ...syncDetails,
+            reason: "CREDENTIALS_REQUIRED",
+            remoteCheck: "credentials erforderlich",
+          },
         };
       }
       try {

@@ -154,7 +154,8 @@ test("Fallback: Anthropic offline ⇒ Kette ollama → gemini", () => {
 
 test("Fallback: kompletter Provider-Ausfall ⇒ deterministische Regel-Engine + Audit", () => {
   const { router, registry, audit } = createTestRouter(RESEARCH_CLOUD);
-  for (const id of ["ollama", "openai", "gemini", "anthropic"] as const) {
+  // Inklusive opencode (Cloud-Free-Modelle) — „kompletter Ausfall" heißt alle.
+  for (const id of ["ollama", "openai", "gemini", "anthropic", "opencode"] as const) {
     registry.setHealth(id, "offline");
   }
 

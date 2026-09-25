@@ -217,32 +217,42 @@ test("API: Remote-Check AN: KRAKEN public Time → online (gestubbt)", async () 
   assert.equal(body.health.details.endpoint, "public-time");
 });
 
-test("API: Remote-Check AN: ALPACA/IBKR/DYDX → degraded mit Grund, KEIN Netzwerk", async () => {
+test("API: Remote-Check AN: ALPACA/IBKR prüfen die Datenquelle, DYDX bleibt lokal", async () => {
   process.env.BROKER_HEALTHCHECK_REMOTE = "true";
-  // ALPACA_ENABLED an, damit der Adapter die Remote-Snapshot-Abfrage starten
-  // würde — der Test stellt sicher, dass sie TROTZDEM nicht ausgeführt wird,
-  // weil keine Credentials hinterlegt sind (Alpaca-Snapshot ist nicht
-  // credential-frei, anders als die anderen Venues).
   process.env.ALPACA_ENABLED = "true";
   let fetchCalls = 0;
   globalThis.fetch = (async () => {
     fetchCalls++;
-    return new Response("ok", { status: 200 });
-  }) as typeof fetch;
+    // Antwort der dokumentierten Sync-Quelle (Yahoo-Chart) für ALPACA/IBKR.
+    return Response.json({ chart: { result: [{ timestamp: [1, 2, 3] }] } });
+  }) as unknown as typeof fetch;
 
-  const expectReason = async (venue: string, reason: string) => {
+  const expectDegraded = async (venue: string, reason: string) => {
     const res = await health(venue);
     assert.equal(res.status, 200, venue);
     const body = (await res.json()) as { health: { status: string; details: Record<string, unknown> } };
-    assert.equal(body.health.status, "degraded", `${venue}: degraded erwartet`);
+    assert.equal(body.health.status, "degraded", `${venue}: ohne Credentials nie 'online'`);
     assert.equal(body.health.details.reason, reason, venue);
+    return body.health.details;
   };
 
-  await expectReason("ALPACA", "CREDENTIALS_REQUIRED");
-  await expectReason("IBKR", "GATEWAY_REQUIRED");
-  await expectReason("DYDX", "REMOTE_CHECK_NOT_IMPLEMENTED");
-  // Credentials/Gateway-freie Venues stellen NIEMALS Requests:
-  assert.equal(fetchCalls, 0, "ALPACA/IBKR/DYDX dürfen ohne Credentials kein Netzwerk nutzen");
+  // ALPACA/IBKR: credential-freier Check der Sync-Quelle (Yahoo). Die
+  // Trading-API bleibt ohne Keys/Gateway ungeprüft — der venue-spezifische
+  // Grund bleibt daher stehen, `syncSourceReachable: true` ist die neue,
+  // zusätzliche Information über den Datenpfad (Warmup).
+  const alpaca = await expectDegraded("ALPACA", "CREDENTIALS_REQUIRED");
+  assert.equal(alpaca.syncSourceReachable, true, "Datenpfad der Venue ist erreichbar");
+  assert.equal(alpaca.syncSourceScope, "market-data-source");
+  assert.notEqual(alpaca.status, "online");
+  const ibkr = await expectDegraded("IBKR", "GATEWAY_REQUIRED");
+  assert.equal(ibkr.syncSourceReachable, true);
+  await expectDegraded("DYDX", "REMOTE_CHECK_NOT_IMPLEMENTED");
+  const callsAfterAll = fetchCalls;
+  assert.equal(callsAfterAll, 2, "genau zwei Datenquellen-Pings (ALPACA, IBKR)");
+
+  // DYDX bleibt vollständig lokal: kein weiterer Request.
+  await health("DYDX");
+  assert.equal(fetchCalls, callsAfterAll, "DYDX darf kein Netzwerk nutzen");
   delete process.env.ALPACA_ENABLED;
 });
 
