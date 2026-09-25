@@ -1,7 +1,7 @@
 # LLM-Modell-Routing — der MODEL_ROUTER (Task 09)
 
-**Stand:** 2026-08-29 · **Modul:** `src/routing/**` · **API:** `/api/providers`,
-`/api/routing`, `/api/routing/modes` · **Version:** `1.22.0`
+**Stand:** 2026-09-25 · **Modul:** `src/routing/**` · **API:** `/api/providers`,
+`/api/routing`, `/api/routing/modes`, `/api/ops/toggles` · **Version:** `1.22.0`
 **Status:** Governance-Baustein 9 von 12 — Modellwahl ist keine Agentenentscheidung mehr;
 Administratoren können ab 1.22.0 pro Agent einen expliziten Provider/Modell-Override
 setzen, der vor der Policy-/Modusauswertung greift.
@@ -11,7 +11,9 @@ setzen, der vor der Policy-/Modusauswertung greift.
 ## 1. Zielbild
 
 Die Plattform nutzt mehrere LLM-Provider (Ollama lokal, OpenAI-kompatibel,
-Google Gemini, Anthropic Claude — siehe [PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)).
+Google Gemini, Anthropic Claude, OpenCode Zen mit kostenlosen Modellen — siehe
+[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md)). Jeder Provider lässt sich
+zur Laufzeit über die UI sperren (siehe §7a).
 Ohne Governance könnte **jeder Agent selbst** das große, teure Cloud-Modell wählen:
 Kostenexplosion, unkontrollierter Datenabfluss, nicht reproduzierbare Entscheidungen.
 
@@ -424,6 +426,36 @@ npm run test:coverage:routing
 ```
 
 ---
+
+## 12a. Provider-Schalter (Laufzeit, UI + Env)
+
+Ein Provider kann **ohne Neustart** freigegeben oder gesperrt werden — im
+Operations Center (Sektion „LLM Operations" → Panel „LLM-Provider-Schalter")
+oder per `PUT /api/ops/toggles` mit
+`{ "key": "provider.<id>.enabled", "value": true|false|null }` (Admin + CSRF,
+Audit-Event `RUNTIME_FLAG_CHANGED`, Klasse `security`).
+
+| Ebene | Wirkung |
+| --- | --- |
+| Runtime-Flag (`data/runtime/flags.json`, UI) | höchste Priorität; `null` löscht die Entscheidung |
+| `ROUTING_DISABLED_PROVIDERS=gemini,opencode` | Default-Sperrliste für headless/Container-Betrieb |
+| Default | AN — kein Provider verschwindet von selbst |
+
+Durchsetzung (vierfach, damit „aus" wirklich „aus" bedeutet):
+
+1. **Registry:** `applyProviderToggle()` projiziert gesperrte Karten als
+   `offline` (`error = PROVIDER_DISABLED_REASON`, `quotaRest = 0`).
+2. **Router:** `selectProvider()` und `fallbackChainFor()` lehnen `offline`
+   bereits ab — ein gesperrter Provider wird weder Ziel noch Fallback.
+3. **Health-Poller:** `EnvProviderRegistry.refresh()` überspringt gesperrte
+   Provider vollständig — **kein Netzwerkverkehr**, auch kein Modelllisten-GET.
+4. **Direkte Kette:** `resolveProviderChain()` filtert gesperrte Provider, damit
+   auch der `chatLlm`-Pfad außerhalb des Routers nichts an einen gesperrten
+   Anbieter sendet (ist alles gesperrt, greift die deterministische Regel-Engine).
+
+`GET /api/providers` liefert je Karte `enabled`, `toggleSource` und `toggleKey`.
+Freigegeben wird z. B. OpenCode Zen (Cloud, Free-Modelle) — Details in
+[PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md) §4a/§4b.
 
 ## 13. Konfiguration
 

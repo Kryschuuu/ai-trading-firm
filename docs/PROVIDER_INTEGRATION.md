@@ -34,6 +34,7 @@ Agent (engine.ts)                Standardisierter Call               Adapter
 | **OpenAI-kompatibel** | `LLM_PROVIDER=openai` | `LLM_BASE_URL` → `http://127.0.0.1:8080/v1` | `LLM_API_KEY` (optional) | `LLM_MODEL` oder erstes angebotenes Modell |
 | **Google Gemini** | `LLM_PROVIDER=gemini` | `GEMINI_BASE_URL` → `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | `LLM_MODEL` (z. B. `gemini-2.0-flash`) |
 | **Anthropic Claude** | `LLM_PROVIDER=anthropic` | `ANTHROPIC_BASE_URL` → `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `LLM_MODEL` (z. B. `claude-3-5-haiku-latest`) |
+| **OpenCode Zen** | `LLM_PROVIDER=opencode` | `OPENCODE_BASE_URL` → `https://opencode.ai/zen/v1` (OpenAI-kompatibel) | `OPENCODE_API_KEY` (kostenlos) | `OPENCODE_MODEL` → `LLM_MODEL` → `big-pickle` |
 
 **Fallback-Kette:**
 
@@ -155,6 +156,55 @@ Modelle, Kontext, Latenz, Kosten, Tokens %, Restkontingent, Klassen). Seit SEC-0
 (v1.36.31) verlangt dieser Endpoint `firm.read` (Viewer, Operator oder Admin;
 Header-Credential oder gültige Browser-Session) und liefert `private, no-store`.
 
+## 4a. Provider ein- und ausschalten (UI + Env)
+
+Seit v0.5.0 lässt sich **jeder** Provider ohne `.env`-Bearbeitung und ohne
+Prozess-Neustart freigeben oder sperren:
+
+* **UI:** Operations Center → Sektion „LLM Operations" → Panel
+  **„LLM-Provider-Schalter"** (u. a. OpenCode Zen mit den Free-Modellen).
+* **API:** `GET /api/ops/toggles` (lesen, `firm.read`) ·
+  `PUT /api/ops/toggles` mit `{ "key": "provider.opencode.enabled", "value": false }`
+  (Admin + CSRF, auditiert als `RUNTIME_FLAG_CHANGED`, `value: null` setzt
+  zurück auf den Env-Default).
+* **Persistenz:** `data/runtime/flags.json` (`RUNTIME_FLAGS_FILE`), nur
+  Bool-Werte, chmod 600.
+* **Headless-Alternative:** `ROUTING_DISABLED_PROVIDERS=gemini,opencode`
+  (der UI-Wert hat Vorrang).
+
+Auflösung: **Runtime-Flag → `ROUTING_DISABLED_PROVIDERS` → Default (an)**.
+
+Ein gesperrter Provider ist für den MODEL_ROUTER **offline**: Er wird nie
+gewählt, nie als Fallback genutzt und **nie abgefragt** — auch der
+Health-Poller überspringt ihn (kein Netzwerkverkehr, keine Kosten, keine
+Datenabflüsse). Der `/api/providers`-Payload trägt dafür `enabled`,
+`toggleSource` und `toggleKey` je Karte.
+
+## 4b. OpenCode Zen (Cloud-Provider mit kostenlosen Modellen)
+
+OpenCode Zen ist ein OpenAI-kompatibles Gateway (`https://opencode.ai/zen/v1`)
+mit einer wechselnden Auswahl **kostenloser** Modelle. Der Adapter nutzt
+denselben Transport wie `openai` (`POST /chat/completions`, Bearer-Auth,
+`response_format` für JSON), kennt aber einen eigenen Free-Default und
+Kosten 0.
+
+* Kosten: `COST_USD_PER_MTOK.opencode = { input: 0, output: 0 }`. Wer
+  **bezahlte** Zen-Modelle einsetzt, setzt den Tarif explizit:
+  `LLM_COST_OPENCODE_INPUT_PER_MTOK=…` / `…_OUTPUT_PER_MTOK=…`.
+* Deckel: `ROUTING_BUDGET_OPENCODE_TOKENS` (Policy-Default 250 000/Tag) —
+  Regel 3 verlangt auch für gratis nutzbare Cloud-Provider einen Deckel.
+* Free-Liste (dokumentarischer Snapshot, `OPENCODE_FREE_MODELS`):
+  `big-pickle`, `nemotron-3-ultra-free`, `nemotron-3-lightning-free`,
+  `mimo-free`, `ling-flash-free`, `muse-spark-free`, `deepseek-v4-flash-free`,
+  `minimax-m3-free`, `qwen3.6-plus-free`, `north-mini-code-free`.
+  Die Liste ist **promotional** und ändert sich; `OPENCODE_MODEL` sticht sie.
+* `isOpenCodeFreeModel(id)` erkennt Free-IDs (Suffix `-free` oder Snapshot) für
+  Diagnose/Anzeige — es ist **kein** Filter und sperrt nichts.
+* Policy: OpenCode ist in `MODEL_C` als **letzte** Präferenz eingetragen und
+  nur wählbar, wenn er freigegeben ist (`provider.opencode.enabled`) **und**
+  ein Key gesetzt ist — ohne Key ist die Karte `offline`, das Verhalten
+  bestehender Installationen bleibt damit unverändert.
+
 ## 5. Einen neuen Provider hinzufügen
 
 1. `LlmProviderName` um den Namen erweitern (`src/lib/llmProvider.ts`) **und**
@@ -168,6 +218,11 @@ Header-Credential oder gültige Browser-Session) und liefert `private, no-store`
    zwingend einen Deckel > 0**) und `fallbackChains`.
 7. `.env.example` + diese Datei ergänzen; `tests/llmProvider.test.ts` und
    `tests/routing.registry.test.ts` erweitern.
+8. Provider-Schalter: `PROVIDER_IDS` genügt — `providerToggleSpecs()`
+   (`src/routing/providerToggles.ts`) erzeugt den UI-Schalter automatisch
+   (`provider.<id>.enabled`). Für Cloud-Provider zusätzlich `CLOUD_PROVIDERS`
+   und `CLOUD_PROVIDER_IDS` (Policy) ergänzen, damit der Budget-Deckel
+   validiert wird.
 
 ## 6. Sicherheit
 
@@ -191,6 +246,10 @@ Header-Credential oder gültige Browser-Session) und liefert `private, no-store`
   noch Registry-Defaults fest; die Modellwahl je Aufgabe trifft ausschliesslich
   der Router. Änderungen an Routing-Modi laufen über `PUT /api/routing/modes`
   (Admin-Token + CSRF + Audit).
+* **Provider-Schalter (v0.5.0):** Freigabe je Provider über UI/API
+  (`PUT /api/ops/toggles`, Admin + CSRF + Audit). Aus = der Provider ist
+  offline: keine Aufrufe, keine Fallbacks, **kein** Health-Ping. Details siehe
+  §4a.
 * **Provider/Modell-Overrides (v1.22.0):** Administratoren können pro Agent
   einen expliziten Provider + Modell festlegen (`overrides` in
   `PUT /api/routing/modes`), der vor der Policy-Auswertung greift. Overrides

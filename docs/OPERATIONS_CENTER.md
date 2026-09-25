@@ -173,6 +173,29 @@ Sektionen und Funnel-Metriken sind unverändert:
   vollzählig) — Antwortgröße und Rechenzeit sind damit nach oben
   beschränkt, unabhängig von der Universumsgröße.
 
+## 6. Bedienbare Panels (v0.5.0)
+
+Die Sektionskarten selbst bleiben **reine Lese-Aggregation** (kein Mutations-
+Pfad in `GET /api/ops`). Zwei Panels hängen additiv an ihren Sektionen und
+schreiben ausschließlich über den auditierten Admin-Pfad
+`PUT /api/ops/toggles` (Admin-Guard + CSRF, Audit-Event `RUNTIME_FLAG_CHANGED`):
+
+| Panel | Sektion | Wirkung |
+| --- | --- | --- |
+| **LLM-Provider-Schalter** | „LLM Operations" | Provider freigeben/sperren (u. a. `opencode` = OpenCode Zen mit Free-Modellen). Aus = nie wählbar, kein Fallback, **kein** Health-Ping. |
+| **Broker-Remote-Checks** | „Broker Operations" | Read-only Netzpings an öffentliche Venue-/Datenquellen-Endpunkte. Default **AUS** (Regel 4: kein Netzwerk ohne ausdrückliche Entscheidung). ALPACA/IBKR prüfen dabei credential-frei ihre Sync-Quelle (Yahoo) und bleiben ohne Keys/Gateway `degraded` (`syncSourceReachable` als Zusatzfakt). |
+
+Eigenschaften beider Panels:
+
+* Änderungen wirken **sofort**, ohne Prozess-Neustart; Persistenz in
+  `data/runtime/flags.json` (`RUNTIME_FLAGS_FILE`, nur Bool-Werte, chmod 600).
+* „auf Default" löscht die UI-Entscheidung — dann gilt wieder
+  `.env` (`BROKER_HEALTHCHECK_REMOTE`, `ROUTING_DISABLED_PROVIDERS`).
+* Jede Zeile zeigt den **effektiven** Zustand und seine Quelle
+  (`UI-Schalter` · `.env` · `Default`) — inklusive Zeitstempel und Actor.
+* Fehler werden inline angezeigt; es wird nie ein lokaler Zustand „geraten"
+  (die Server-Antwort ist die Wahrheit).
+
 ## Verwandte Dokumente
 
 * [OPERATIONS.md](OPERATIONS.md) — Runbook „Funnel ist leer“: Entscheidungsbaum + Sektion „Market Data“ oberhalb des Funnels (OPS-011, v1.33)

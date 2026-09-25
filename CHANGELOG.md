@@ -31,6 +31,59 @@ erlaubt, solange sie hier dokumentiert sind).
 > mit börsenlokaler Tagesgrenze (Exchange-Kalender), Shorts
 > (`RULE_ALLOWED_SIDE=LONG`) bleiben Risikoentscheidung.
 
+## [Unreleased] — ALPACA-Datenpfad, OpenCode Zen & Laufzeit-Schalter (2026-09-25)
+
+> **Status: Beta.** Quelle: Arena-Auftrag 2026-09-25 („nur 2 Symbole",
+> Alpaca-Integration, Remote-Check-Frage, OpenCode-Free-Modelle per UI).
+
+### Added
+
+* **OpenCode Zen als LLM-Provider** (`opencode`, `src/lib/llmProvider.ts`):
+  OpenAI-kompatibler Cloud-Provider mit kostenlosen Modellen
+  (`OPENCODE_API_KEY`, `OPENCODE_BASE_URL` → `https://opencode.ai/zen/v1`,
+  `OPENCODE_MODEL`, Default `big-pickle`). Free-Model-Snapshot
+  (`OPENCODE_FREE_MODELS`, `isOpenCodeFreeModel`), Kosten 0
+  (`LLM_COST_OPENCODE_*` für bezahlte Modelle), Token-Deckel
+  `ROUTING_BUDGET_OPENCODE_TOKENS` (Policy-Default 250 000/Tag), letzte
+  Präferenz in `MODEL_C`. Doku: `docs/PROVIDER_INTEGRATION.md` §4b.
+* **Laufzeit-Schalter (UI)** — `GET|PUT /api/ops/toggles` + Panel
+  `src/components/ops/RuntimeTogglesPanel.tsx`:
+  * je LLM-Provider `provider.<id>.enabled` (ein-/ausschalten ohne Neustart),
+  * `broker.healthcheck.remote` für die Broker-Remote-Checks.
+  Persistenz `data/runtime/flags.json` (`src/lib/runtimeFlags.ts`, nur
+  Bool-Werte, chmod 600, atomar, fail-soft). Admin-Guard + CSRF, Audit-Event
+  `RUNTIME_FLAG_CHANGED` (Katalog-Eintrag in `src/lib/auditView.ts`).
+* **Env-Sperrliste** `ROUTING_DISABLED_PROVIDERS`, effektiv per
+  `isProviderEnabled()`/`resolveProviderChain()`: gesperrte Provider werden nie
+  gewählt, nie als Fallback genutzt und **nie abgefragt** (auch kein
+  Health-Ping). `/api/providers` liefert `enabled`/`toggleSource`/`toggleKey`.
+* **ALPACA-Datenpfad dokumentiert und im Hinweis sichtbar:**
+  `docs/ALPACA.md` §1a/§1b (Sync über Yahoo, Aktivierungs-Checkliste,
+  Health-Semantik); `.env.example` dokumentiert `ALPACA_ENABLED` und den
+  Venue-Sync.
+
+### Changed
+
+* **Sync-Hinweis ist venue-bewusst** (`buildReadinessHint`,
+  `syncCommandsFor`, `offenderVenues` in `src/ops/collectMarketData.ts`): Der
+  Hinweis nennt die Venues der worst offenders (`npm run market:sync --
+  --venue=ALPACA …`, ein Kommando je Venue) plus den Flag-Hinweis
+  (`<VENUE>_ENABLED=true`), wenn eine Venue noch nie synchronisiert wurde —
+  vorher stand dort pauschal BITUNIX.
+* **Broker-Remote-Check** ist ohne Neustart umschaltbar; die Auflösung
+  (Runtime-Flag → Env → Default aus) ist als `source` in `/api/brokers` und
+  `/api/brokers/{venue}/health` sichtbar. ALPACA/IBKR prüfen credential-frei
+  ihre Sync-Quelle (Yahoo) und melden NIE `online` ohne Keys/Gateway: der
+  Status bleibt `degraded`, `syncSourceReachable` trägt die Zusatzinformation.
+* **LLM-Operations-Sektion** weist gesperrte Provider und deren Begründung aus
+  (Metrik „Provider freigegeben", Hinweiszeile).
+
+### Fixed
+
+* `.env.example` dokumentierte `ALPACA_ENABLED` nicht — die Venue ließ sich
+  damit nur durch Raten freischalten; Sync und Adapter waren für ALPACA
+  faktisch nicht erreichbar (`0/61 Kerzen`).
+
 ## [0.4.0] — 2026-09-24 · bookDepthUsd + Orderbuch-Qualitätsgrenze je Venue
 
 > **Status: Beta.** Logische Fortsetzung von `spreadPct` (IAD-T-06): Die

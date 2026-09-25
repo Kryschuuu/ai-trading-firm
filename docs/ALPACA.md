@@ -47,6 +47,67 @@ bleiben in diesem Ordner.
 * `ALPACA_ALLOW_INSECURE_HTTP` — nur für Loopback-Tests.
 * `ALPACA_RETRY_MAX` (Default 2) — nur für idempotente GET-Requests und 429.
 
+## 1a. Datenversorgung (Market-Data-Sync) — der häufigste „Alpaca ist nicht integriert"-Fall
+
+Alpacas Market-Data-API verlangt API-Keys. Der **Warmup** (Discovery →
+Enrichment → Backfill → Readiness, s. [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md))
+zieht Kerzen und Ticker für die ALPACA-Instrumente deshalb über
+**Yahoo Finance** — denselben credential-freien Pfad wie IBKR
+(`src/marketdata/adapters/yahoo.ts`, `createsYahooMarketDataAdapter({ venue: "ALPACA" })`).
+
+Daraus folgt die Aktivierungs-Reihenfolge, ohne die die 52 kuratierten
+US-Werte im Operations Center als „0 Kerzen / warming" erscheinen:
+
+```bash
+# 1) Venue freischalten (gilt für Sync UND Broker-Adapter):
+ALPACA_ENABLED=true
+
+# 2) Warmup fahren — eine Venue pro Aufruf (--venue nimmt genau eine):
+npm run market:sync -- --venue=ALPACA --timeframes=15m,1h,1d --candle-limit=61
+
+# 3) Kontrolle (rein lesend, kein Netzwerk):
+npm run market:sync -- --status
+```
+
+Danach sind die ALPACA-Instrumente `data-ready` und die Equity-/Index-Mandate
+(`EQUITIES`, `INDICES`) erhalten echte Marktdaten statt „keine Kerzendaten".
+
+**Ohne `ALPACA_ENABLED=true`** überspringt `registerAdapters()` die Venue
+vollständig (`SkippedAdapter` mit Grund `FLAG_OFF`) — es passiert kein
+Netzwerkverkehr, aber es entstehen eben auch keine Kerzen.
+
+Hinweise:
+
+* `--candle-limit` muss ≥ `requiredWarmupCandles` (Default **61**) sein, sonst
+  lehnt das CLI den Lauf mit `InsufficientCandleLimitError` ab (der
+  Obige Fehlertext stammt aus genau dieser Prüfung).
+* Der Hinweis in der Sektion „Market Data" nennt seit v0.5.0 **die Venue der
+  worst offenders** (`npm run market:sync -- --venue=ALPACA …`) statt pauschal
+  BITUNIX — plus den Flag-Hinweis, wenn die Venue noch nie synchronisiert wurde.
+* US-Handelstage: außerhalb der Börsenzeiten liefert Yahoo die letzten
+  Schlusskerzen; der Warmup funktioniert also auch am Wochenende.
+
+## 1b. Health-Status: was „degraded" bei ALPACA bedeutet
+
+`GET /api/brokers` / `GET /api/brokers/ALPACA/health` liefern für ALPACA
+weiterhin `online` **nur** mit echten Credentials (`getAccount` gelungen).
+Ohne Credentials bleibt der Status `degraded` mit `reason:
+CREDENTIALS_REQUIRED` — die Trading-API ist ungeprüft.
+
+Ist der Broker-Remote-Check aktiv (Default aus, ohne Neustart umschaltbar im
+Operations Center → „Broker Operations"), kommt die credential-freie
+Datenquellen-Prüfung additiv dazu:
+
+| Feld | Bedeutung |
+| --- | --- |
+| `syncSourceReachable` | `true` = Yahoo liefert Kerzen für SPY → der Warmup-Datenpfad der Venue funktioniert |
+| `syncSourceScope` | immer `market-data-source` — es wird **nicht** die Trading-API geprüft |
+| `syncSourceReason` | `TRADING_API_UNVERIFIED` (Quelle ok) · `SYNC_SOURCE_EMPTY` · `SYNC_SOURCE_UNREACHABLE` |
+| `syncSourceBars` / `syncSourceHttpStatus` | gelieferte Kerzen bzw. HTTP-Status der Fehlantwort |
+
+Ein erreichbarer Datenpfad ist **kein** Online-Beweis für die Venue — deshalb
+ändert er den Status nie auf `online`.
+
 ## 2. Public-Market-Data (credential-frei)
 
 Der `AlpacaPublicClient` ruft `GET /v2/stocks/{symbol}/snapshot` bzw.
@@ -167,14 +228,25 @@ Anfang an erfüllt.
 Kein Schema-Bruch, keine neuen Pflicht-Env-Variablen. Opt-in in `.env`:
 
 ```bash
-ALPACA_ENABLED=false            # Default aus
-ALPACA_API_KEY=…                # aus https://app.alpaca.markets (Paper!)
-ALPACA_API_SECRET=…
+ALPACA_ENABLED=true             # Default aus — ohne Flag kein Sync, kein Adapter
+ALPACA_KEY_ID=…                 # alternativ: Control-Plane-UI (Broker-Tab, empfohlen)
+ALPACA_SECRET_KEY=…
 ALPACA_USE_LIVE_ENDPOINTS=false # Default: Paper-API
 ALPACA_ALLOW_INSECURE_HTTP=false # nur Loopback-Tests
 ALPACA_RETRY_MAX=2              # Default
 BROKER_ALLOW_ENV_FALLBACK=false # SEC-07: Env-Fallback nur explizit Dev/Test
 ```
+
+**Reihenfolge für eine bestehende Installation** (das war der beobachtete
+Zustand „ALPACA nie synchronisiert, 0/61 Kerzen"):
+
+1. `ALPACA_ENABLED=true` setzen (Sync-Gate und Adapter-Gate).
+2. `npm run market:sync -- --venue=ALPACA --timeframes=15m,1h,1d` ausführen —
+   danach `npm run market:sync -- --status` zur Kontrolle.
+3. Optional Credentials im Broker-Tab hinterlegen; der Paper-Modus B
+   (`PAPER_MODE=broker-paper-api`, `PAPER_BROKER_API_VENUE=ALPACA`) nutzt sie.
+4. Optional Remote-Check einschalten (Operations Center → „Broker Operations"),
+   um die Datenquelle der Venue mitzuprüfen.
 
 `GET /api/brokers` zeigt ab v1.36.0 `count=8` Venues (PAPER + BITUNIX +
 ALPACA als reale Volladapter, fünf Stubs unverändert). Live bleibt
