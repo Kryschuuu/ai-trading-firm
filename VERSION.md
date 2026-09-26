@@ -5,11 +5,11 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.4.0` |
+| **Version** | `v0.5.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
-| **Release-Datum** | 2026-09-24 |
-| **Quellbasiert** | `package.json` (`version: "0.4.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-09-26 |
+| **Quellbasiert** | `package.json` (`version: "0.5.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -46,6 +46,18 @@ Trusted-Indikatoren, ohne den Engine-Default zu ändern. `v0.3.0` liefert:
   `depth`-Venues (BINANCE/BITUNIX/KRAKEN, ≥ 3 Levels, Snapshot ≤ 5 s) liefern
   `VERIFIED`; `top`-Venues (YAHOO) und `none` bleiben `UNQUALIFIED` — der
   Schutz gegen Fake-Liquidität auf dünnen Büchern.
+
+`v0.5.0` ergänzt den Market-Sync und die Scan-Missionsbrücke:
+
+- **Mehrere Missions-Venues warmziehen** (`npm run market:sync:mission-venues`)
+  synchronisiert IBKR, PAPER, BINANCE und KRAKEN separat, ohne Freigabe-Gates
+  zu umgehen, und berichtet den Gesamtstatus.
+- **Datenbewusster Missionsprompt**: bis zu fünf Scanner-/Volumen-gerankte
+  Kandidaten mit Preis, RSI, Trend und ATR%; Kandidaten ohne mindestens 25
+  Kerzen sind nicht handelbar (fail-closed).
+- **Fokusrotation** deterministisch je 15-Minuten-Zyklus und Missions-ID;
+  Scanner-Scores aus einem aktuellen READY-Artefakt haben Vorrang, Volumen ist
+  der Rückfall.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

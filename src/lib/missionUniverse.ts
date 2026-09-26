@@ -27,6 +27,7 @@
  */
 import { getRegistry } from "@/universe";
 import type { MarketInstrument } from "@/universe/types";
+import { latestArtifactDate, readDailyArtifact } from "@/scanner/artifacts";
 import { sanitizeSymbol } from "./marketData";
 import {
   MISSION_SCOPE_LABELS,
@@ -100,7 +101,8 @@ export interface MissionUniverseContext {
  */
 export function rankCandidateSymbols(
   instruments: readonly MarketInstrument[],
-  limit: number
+  limit: number,
+  scannerScores: ReadonlyMap<string, number> = new Map()
 ): { symbols: string[]; total: number } {
   const best = new Map<string, MarketInstrument>();
   for (const instrument of instruments) {
@@ -123,6 +125,15 @@ export function rankCandidateSymbols(
 
   const volumeOf = (i: MarketInstrument) => (typeof i.volume24h === "number" ? i.volume24h : -1);
   const entries = [...best.entries()].sort((a, b) => {
+    const rawScoreA = scannerScores.get(a[0].toUpperCase());
+    const rawScoreB = scannerScores.get(b[0].toUpperCase());
+    const scoreA = rawScoreA !== undefined && Number.isFinite(rawScoreA) ? rawScoreA : undefined;
+    const scoreB = rawScoreB !== undefined && Number.isFinite(rawScoreB) ? rawScoreB : undefined;
+    if (scoreA !== undefined || scoreB !== undefined) {
+      if (scoreA === undefined) return 1;
+      if (scoreB === undefined) return -1;
+      if (scoreA !== scoreB) return scoreB - scoreA;
+    }
     const byVolume = volumeOf(b[1]) - volumeOf(a[1]);
     if (byVolume !== 0) return byVolume;
     return a[0].localeCompare(b[0]);
@@ -169,6 +180,60 @@ export function focusSymbolFor(candidates: readonly string[], fallback: string):
 }
 
 /**
+ * Deterministische Rotation innerhalb eines Marktdaten-Zyklus.
+ * `cycleKey` ist typischerweise die UTC-15-Minuten-Bar-Nummer; `rotationKey`
+ * stabilisiert den Startversatz je Mission, damit alle Missionen nicht zugleich
+ * denselben Kandidaten fokussieren.
+ */
+export function focusSymbolForCycle(
+  candidates: readonly string[],
+  fallback: string,
+  cycleKey: number,
+  rotationKey = ""
+): string {
+  if (candidates.length === 0) return fallback;
+  let offset = 0;
+  for (let i = 0; i < rotationKey.length; i++) {
+    offset = (offset * 31 + rotationKey.charCodeAt(i)) >>> 0;
+  }
+  const cycle = Number.isFinite(cycleKey) ? Math.trunc(cycleKey) : 0;
+  const index = ((cycle + offset) % candidates.length + candidates.length) % candidates.length;
+  return candidates[index] || fallback;
+}
+
+/**
+ * Verwendet den jüngsten bereiten Scanner-Snapshot als optionale Rangquelle.
+ * Alte, nicht bereite oder fehlerhafte Artefakte werden ignoriert; das
+ * volumenbasierte Ranking bleibt der robustheitserhaltende Fallback.
+ */
+function latestScannerScores(
+  registry: ReturnType<typeof getRegistry>,
+  nowMs = Date.now()
+): ReadonlyMap<string, number> {
+  try {
+    const date = latestArtifactDate();
+    if (!date) return new Map();
+    const artifact = readDailyArtifact(date);
+    if (!artifact || artifact.readiness?.status !== "READY") return new Map();
+    const ageMs = nowMs - Date.parse(artifact.asOf);
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 48 * 60 * 60 * 1000) return new Map();
+    const scores = new Map<string, number>();
+    for (const entry of [...artifact.levels.deep, ...artifact.levels.daily, ...artifact.levels.interesting]) {
+      if (!Number.isFinite(entry.score)) continue;
+      const instrument = registry.get(entry.instrumentId);
+      const symbol = instrument ? sanitizeSymbol(instrument.symbol) : null;
+      if (!symbol) continue;
+      const key = symbol.toUpperCase();
+      const score = scores.get(key);
+      if (score === undefined || entry.score > score) scores.set(key, entry.score);
+    }
+    return scores;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
  * Prüft, ob ein Symbol vom Mandat der Mission gedeckt ist.
  *
  * * `enforceScope === false` (Alt-Mission ohne Symbol) → `true` (kein Mandat
@@ -195,7 +260,7 @@ export function isSymbolInMissionScope(
  */
 export async function missionUniverseContext(
   mission: MissionScopeInput,
-  options: { fallbackSymbol?: string } = {}
+  options: { fallbackSymbol?: string; focusCycleKey?: number; rotationKey?: string } = {}
 ): Promise<MissionUniverseContext> {
   const fallbackSymbol = options.fallbackSymbol ?? DEFAULT_FOCUS_SYMBOL;
   const scope: MissionScope = normalizeMissionScope(mission.scope) ?? "SINGLE_SYMBOL";
@@ -257,18 +322,29 @@ export async function missionUniverseContext(
     warning = `Instrument-Registry nicht lesbar (${e instanceof Error ? e.message : String(e)}) — keine Kandidaten.`;
   }
 
-  const ranked = rankCandidateSymbols(instruments, segment.maxCandidates);
+  let scannerScores: ReadonlyMap<string, number> = new Map();
+  try {
+    scannerScores = latestScannerScores(getRegistry());
+  } catch {
+    // Scanner-Artefakte sind nur eine Rangverbesserung, nie ein Verfügbarkeits-Gate.
+  }
+  const ranked = rankCandidateSymbols(instruments, segment.maxCandidates, scannerScores);
   if (ranked.symbols.length === 0 && !warning) {
     warning =
       `Segment „${segment.label}“ hat aktuell 0 Kandidaten in der Registry. ` +
       "Abhilfe: `npm run universe:seed:markets` (Presets) und `npm run market:sync` (Metriken).";
   }
 
-  const focusSymbol = focusSymbolFor(ranked.symbols, fallbackSymbol);
+  const focusSymbol = options.focusCycleKey === undefined
+    ? focusSymbolFor(ranked.symbols, fallbackSymbol)
+    : focusSymbolForCycle(ranked.symbols, fallbackSymbol, options.focusCycleKey, options.rotationKey);
+  const rankedByScanner = ranked.symbols.some((symbol) => scannerScores.has(symbol.toUpperCase()));
+  const rankLabel = rankedByScanner ? "Scanner-Score (Fallback: 24h-Volumen)" : "24h-Volumen";
   const promptLines: string[] = [
     `UNIVERSUM: ${segment.label} — ${ranked.total} Instrumente${
-      ranked.total > ranked.symbols.length ? `, Top ${ranked.symbols.length} nach 24h-Volumen` : ""
+      ranked.total > ranked.symbols.length ? `, Top ${ranked.symbols.length} nach ${rankLabel}` : ""
     }.`,
+    `KANDIDATEN-RANKING: ${rankedByScanner ? rankLabel : "24h-Volumen (kein aktueller Scanner-Score)"}.`,
     `SEGMENT-REGEL: ${segment.rule}`,
     ranked.symbols.length > 0
       ? `KANDIDATEN: ${ranked.symbols.join(", ")}`
