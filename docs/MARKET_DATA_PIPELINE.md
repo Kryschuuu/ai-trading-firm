@@ -828,7 +828,17 @@ sichtbaren Verhaltensänderungen: **[SYMBOLS.md](SYMBOLS.md)**.
 
 ## 12. Synchronisations-CLI (MDSYNC-001, v1.29.0)
 
+Das Erst-Warmup für Scan-Missionen nutzt die wiederholbare Vier-Venue-Brücke.
+Sie ruft den bestehenden, einzeln auditierbaren CLI-Lauf je Venue auf und setzt
+nicht die Env-Gates außer Kraft. `IBKR_ENABLED`, `PAPER_ENABLED`,
+`BINANCE_ENABLED` und `KRAKEN_ENABLED` müssen jeweils `true` sein; eine
+konfigurierte `MARKET_SYNC_VENUES`-Allowlist muss alle vier enthalten. Jeder
+Lauf wird trotz Fehlern der vorherigen Venues versucht; ein unvollständiger
+Gesamtlauf endet mit Exit 1.
+
 ```bash
+npm run market:sync:mission-venues
+npm run market:sync:mission-venues -- --dry-run
 npm run market:sync                                                     # BITUNIX, Default-Profil (nur 1h, siehe SYNC_TIMEFRAMES)
 npm run market:sync -- --venue=BITUNIX --timeframes=5m,15m,30m,1h        # nur bei Bedarf: kürzere Zeitrahmen ergänzen
 npm run market:sync -- --symbols=BTCUSDT,ETHUSDT --candle-limit=200

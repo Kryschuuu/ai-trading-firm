@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-24** · Code-Version **0.4.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-26** · Code-Version **0.5.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -83,6 +83,33 @@ erlaubt, solange sie hier dokumentiert sind).
 * `.env.example` dokumentierte `ALPACA_ENABLED` nicht — die Venue ließ sich
   damit nur durch Raten freischalten; Sync und Adapter waren für ALPACA
   faktisch nicht erreichbar (`0/61 Kerzen`).
+
+## [0.5.0] — 2026-09-26 · Multi-Venue-Warmup und datenbewusster Missionskontext
+
+> **Status: Beta.** Scan-Missionen erhalten belastbaren Multi-Kandidatenkontext,
+> rotierenden Fokus und handeln nur Kandidaten mit ausreichend Kerzen.
+
+### Hinzugefügt
+
+- **Mission-Venue-Warmup** (`npm run market:sync:mission-venues`): führt die
+  bestehenden public-only Syncs für IBKR, PAPER, BINANCE und KRAKEN aus,
+  setzt keine Sicherheits-/Env-Gates außer Kraft und versucht nach Venue-Fehlern
+  die restlichen Läufe trotzdem. Der Gesamtstatus ist nicht-null, wenn mindestens
+  ein Venue nicht warm wurde.
+- **Top-5 Multi-Kandidaten-Snapshots** im Missionsprompt: je Kandidat Preis,
+  RSI(14), Trend und ATR%; Kandidaten ohne mindestens 25 verwertbare Kerzen
+  werden aus dem Mandat entfernt. Ist kein Kandidat warm, wird HOLD angewiesen
+  und die Engine blockiert eine Trade-Entscheidung fail-closed.
+- **Deterministische Fokusrotation** je UTC-15-Minuten-Zyklus mit
+  missionsspezifischem Offset. Ein aktueller (max. 48 h), READY-Scanner-Snapshot
+  sortiert Kandidaten nach Scanner-Score; volumenbasiertes Ranking bleibt der
+  robuste Fallback.
+- Gezielte Tests für Fokusrotation und Scanner-Score-Ranking.
+
+### Geändert
+
+- Versionsstand auf `v0.5.0` angehoben; Setup- und Marktdaten-Dokumentation um
+  Venue-Gates, Warmup-Ablauf und Mandatssemantik ergänzt.
 
 ## [0.4.0] — 2026-09-24 · bookDepthUsd + Orderbuch-Qualitätsgrenze je Venue
 

@@ -44,7 +44,7 @@ import { localReason } from "./ollama";
 import { resolveArtifactIdempotent, emitAgentRun } from "@/promptPerformance/provenance";
 import { getCandles, getQuote, sanitizeSymbol, type Candle } from "./marketData";
 import { getProductionMarketDataManager, wirePaperExecution } from "./marketdata/production";
-import { snapshot, snapshotLine, type MarketSnapshot } from "./indicators";
+import { snapshot, type MarketSnapshot } from "./indicators";
 import { refreshRuntimeLimits } from "./riskConfigService";
 import {
   completeJournalRow,
@@ -68,7 +68,7 @@ import { scheduleRegimeSnapshotPersist } from "./regimeSnapshotStore";
 import { telemetry } from "./telemetry";
 import { LIVE_SIGNAL_BAR_MS, persistClosedEntrySignal } from "./signalDecayRuntime";
 import { getHouseView } from "./analysts";
-import { isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
+import { focusSymbolForCycle, isSymbolInMissionScope, missionUniverseContext } from "./missionUniverse";
 import { writeEquitySnapshot } from "./equity";
 import { startOfBerlinDay } from "./time";
 import { state } from "./stateRegistry";
@@ -573,32 +573,81 @@ export async function runAgentTurn(
   // SCAN_UNIVERSE-Missionen bekommen ihre Kandidaten aus der Instrument-
   // Registry (src/lib/missionUniverse.ts): Das Mandat lautet dann „nur dieses
   // Segment“, und die Engine blockt Trades außerhalb der Kandidatenliste.
-  const universe = await missionUniverseContext(
+  const missionCycleKey = Math.floor(Date.now() / (15 * 60 * 1000));
+  let universe = await missionUniverseContext(
     { symbol: mission.symbol, scope: mission.scope, segment: mission.segment },
-    { fallbackSymbol: "SPY" }
+    {
+      fallbackSymbol: "SPY",
+      focusCycleKey: missionCycleKey,
+      rotationKey: missionId,
+    }
   );
-  const symbolHint = universe.focusSymbol;
+  let symbolHint = universe.focusSymbol;
   if (universe.warning) {
     trace.push(step("MISSIONS-UNIVERSUM", false, universe.warning));
   }
 
-  // --- Markt-Kontext: Indikatoren für das Missionssymbol + Multi-Market-Blick ---
-  let marketContext = "";
-  let snap: MarketSnapshot | null = null;
-  let turnCandles: Candle[] = [];
-  try {
-    const candles = await getCandles(symbolHint, "15m", 120);
-    turnCandles = candles;
-    snap = snapshot(symbolHint, candles);
-    if (snap) {
-      trace.push(step("MARKET_DATA", true, `Kurs ${snap.price}, RSI ${snap.rsi14}, Trend ${snap.trend}${snap.atrPercent != null ? `, ATR ${snap.atrPercent}%` : ""}`));
-      marketContext += `\nMARKTDATEN ${symbolHint}: ${snapshotLine(snap)}\n`;
-    } else {
-      marketContext += `\nMARKTDATEN ${symbolHint}: keine Kerzendaten verfügbar.\n`;
+  // --- Markt-Kontext: Top-5 Snapshots. Ohne mindestens 25 Kerzen ist ein
+  // Symbol nicht mandatsfähig; die gleiche Kandidaten-Whitelist wird später
+  // erneut hart gegen die Modellentscheidung geprüft.
+  const snapshotLimit = 5;
+  const snapshotSymbols = universe.scope === "SCAN_UNIVERSE"
+    ? universe.candidates.slice(0, snapshotLimit)
+    : (universe.candidates.length > 0 ? universe.candidates : [symbolHint]).slice(0, 1);
+  const candleSets = await Promise.all(snapshotSymbols.map(async (symbol) => {
+    try {
+      const candles = await getCandles(symbol, "15m", 120);
+      return { symbol, candles, snapshot: snapshot(symbol, candles), error: null as string | null };
+    } catch (e) {
+      return { symbol, candles: [] as Candle[], snapshot: null, error: e instanceof Error ? e.message : String(e) };
     }
-  } catch (e) {
-    trace.push(step("MARKET_DATA", false, `Kein Marktkontext: ${e instanceof Error ? e.message : e}`));
+  }));
+  const readySets = candleSets.filter((item) => item.snapshot !== null);
+  const readySymbols = readySets.map((item) => item.symbol);
+  const activeFocus = universe.scope === "SCAN_UNIVERSE"
+    ? focusSymbolForCycle(readySymbols, symbolHint, missionCycleKey, missionId)
+    : (readySymbols[0] ?? symbolHint);
+  const focusedSet = readySets.find((item) => item.symbol === activeFocus);
+  symbolHint = activeFocus;
+  universe = {
+    ...universe,
+    candidates: readySymbols,
+    total: readySymbols.length,
+    focusSymbol: symbolHint,
+    enforceScope: true,
+    warning: readySymbols.length === 0
+      ? "Keine Missionskandidaten mit mindestens 25 auswertbaren Kerzen — neue Trades bleiben gesperrt."
+      : universe.warning,
+    promptLines: universe.promptLines.map((line) =>
+      line.startsWith("KANDIDATEN:")
+        ? readySymbols.length > 0
+          ? `KANDIDATEN MIT KERZENDATEN: ${readySymbols.join(", ")}`
+          : "KANDIDATEN MIT KERZENDATEN: keine (mindestens 25 Kerzen erforderlich) — antworte HOLD."
+        : line
+    ),
+  };
+  const snap: MarketSnapshot | null = focusedSet?.snapshot ?? null;
+  const turnCandles: Candle[] = focusedSet?.candles ?? [];
+  let marketContext = "";
+  if (readySets.length > 0) {
+    marketContext += "\nMULTI-KANDIDATEN-SNAPSHOT (Preis, RSI, Trend, ATR%):\n";
+    for (const item of readySets) {
+      const s = item.snapshot!;
+      marketContext += `${s.symbol}: Preis ${s.price} | RSI ${s.rsi14} | Trend ${s.trend} | ATR% ${s.atrPercent ?? "n/a"}${s.symbol === symbolHint ? " | FOKUS" : ""}\n`;
+    }
+  } else {
+    marketContext += "\nKEINE KERZENDATEN: mindestens 25 Kerzen je Symbol erforderlich; antworte HOLD.\n";
   }
+  for (const item of candleSets) {
+    if (item.error) trace.push(step("MARKET_DATA", false, `${item.symbol}: ${item.error}`));
+  }
+  trace.push(step(
+    "MARKET_DATA",
+    readySets.length > 0,
+    readySets.length > 0
+      ? `${readySets.length}/${snapshotSymbols.length} Kandidaten mit Kerzen; Fokus ${symbolHint}`
+      : "Keine auswertbaren Kerzen — Trade-Mandat geschlossen"
+  ));
   marketContext += `(Regel: RSI>70 überkauft, RSI<30 überverkauft, EMA9>EMA21=Aufwärtstrend)\n`;
 
   // --- GAP-06 (v1.46.0): Markt-Regime + Regime-Gate als Datenkontext ---
@@ -807,6 +856,8 @@ export async function runAgentTurn(
     // durchlaufen (kein Wurf hier — blocked-Trace wird weiter unten gebaut).
   }
   const decision = parseDecision(brain.raw);
+  const selectedSymbol = sanitizeSymbol(decision.symbol ?? symbolHint);
+  const decisionSnap = readySets.find((item) => item.symbol.toUpperCase() === selectedSymbol?.toUpperCase())?.snapshot ?? null;
 
   await db.insert(agentMessages).values({
     agentId,
@@ -947,7 +998,7 @@ export async function runAgentTurn(
       // ist nicht erfüllt, indem stattdessen irgendetwas anderes gekauft wird.
       if (!isSymbolInMissionScope(universe, symbol)) {
         const reason =
-          universe.scope === "SCAN_UNIVERSE" && universe.candidates.length === 0
+          universe.enforceScope && universe.candidates.length === 0
             ? "MISSION_SCOPE_EMPTY"
             : "MISSION_SCOPE_VIOLATION";
         await logAudit(
@@ -1009,7 +1060,7 @@ export async function runAgentTurn(
       const modelStopPct = Number.isFinite(rawModelStop)
         ? clamp(rawModelStop, 0.5, 50)
         : null;
-      const atrStop = snap?.atrPercent != null ? snap.atrPercent * limits.atrStopMultiplier : null;
+      const atrStop = decisionSnap?.atrPercent != null ? decisionSnap.atrPercent * limits.atrStopMultiplier : null;
       const stopPctPrelim = modelStopPct ?? atrStop ?? limits.defaultStopLossPct * 100;
       const stopPct = clamp(stopPctPrelim, 0.5, 50) / 100;
 
@@ -1038,7 +1089,7 @@ export async function runAgentTurn(
         equity: broker.accountEquity,
         riskPerTradePct: Math.min(missionRisk, limits.maxRiskPerTrade),
         entryPrice: price,
-        atr: snap?.atrPercent != null ? (snap.atrPercent / 100) * price : null,
+        atr: decisionSnap?.atrPercent != null ? (decisionSnap.atrPercent / 100) * price : null,
         stopLoss: side === "LONG" ? price * (1 - stopPct) : price * (1 + stopPct),
         side,
         missionMaxPositionPct: missionMaxPos,
@@ -1258,7 +1309,7 @@ export async function runAgentTurn(
             // Snapshots — Promptversion des vorschlagenden Agenten + Markt-
             // Snapshot als Daten-Fingerprint (Point-in-Time, unveränderlich).
             promptVersion: agent.version,
-            decisionData: snap,
+            decisionData: decisionSnap,
           });
           await recordJournalOpen({
             positionId: journalPosRef.value.id,

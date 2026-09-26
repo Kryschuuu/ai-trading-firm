@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.4.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.5.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -34,7 +34,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.4.0** (Beta, 2026-09-24; Baseline war v0.1.0) |
+| Version | **v0.5.0** (Beta, 2026-09-26; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog) — mit Meilenstein-Übersicht der Beta-Entwicklung |
@@ -82,8 +82,8 @@ npm ci
 npx drizzle-kit push        # Schema einspielen
 npm run universe:seed:markets  # 354 Preset-Instrumente
 npm run universe:seed       # Basis-Universum (26 Instrumente)
-npm run market:sync -- --dry-run   # Marktdaten-Warmup prüfen
-BITUNIX_ENABLED=true npm run market:sync   # Registry + Historie persistent füllen
+npm run market:sync:mission-venues # IBKR, PAPER, BINANCE, KRAKEN (Flags in .env freigeben)
+npm run market:sync -- --dry-run --venue=BINANCE # einzelnes Venue-Warmup prüfen
 npm run scan -- --sync-first       # deterministischer Scan auf dem Warmup
 rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm run build
@@ -94,6 +94,22 @@ npm run start               # http://0.0.0.0:3369
 Details: [INSTALL.md](INSTALL.md) (Übersicht) → [docs/INSTALL.md](docs/INSTALL.md)
 (CachyOS, Schritt für Schritt, Variante A/B) + [CONFIGURATION.md](CONFIGURATION.md)
 (vollständige Env-Flag-Referenz).
+
+## Missionskontext und Daten-Warmup
+
+Scan-Missionen verwenden bis zu fünf gerankte Kandidaten mit Live-Historie im
+Prompt (Preis, RSI, Trend, ATR%). Ein Symbol wird nur dann als handelbarer
+Kandidat zugelassen, wenn mindestens 25 Kerzen verfügbar sind; ohne Kerzen gilt
+HOLD und die Engine blockiert Trades. Der Fokus rotiert deterministisch je
+15-Minuten-Zyklus und Mission. Ein frischer, READY-Scanner-Snapshot (max. 48 h)
+ordnet Kandidaten nach Scanner-Score; fehlt er, greift das volumenbasierte
+Fallback.
+
+Das Erst-Warmup der vier Missions-Venues erfolgt mit
+`npm run market:sync:mission-venues`. Es läuft für IBKR, PAPER, BINANCE und
+KRAKEN einzeln und setzt die jeweiligen `<VENUE>_ENABLED=true`-Freigaben sowie
+`MARKET_SYNC_ENABLED=true` voraus; alle Läufe werden versucht, auch wenn ein
+Venue fehlschlägt.
 
 ## Architektur in Kürze
 
@@ -165,12 +181,12 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.4.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.5.0, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.4.0), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.5.0), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)

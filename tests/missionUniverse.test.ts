@@ -25,6 +25,7 @@ import type { InstrumentInput, MarketInstrument } from "../src/universe/types";
 import {
   DEFAULT_FOCUS_SYMBOL,
   focusSymbolFor,
+  focusSymbolForCycle,
   isSymbolInMissionScope,
   missionFocusSymbol,
   missionUniverseContext,
@@ -141,6 +142,17 @@ test("rankCandidateSymbols: sortiert nach 24h-Volumen, unbekannte Metrik zuletzt
   );
   assert.deepEqual(ranked.symbols, ["HIGH", "MID", "LOW", "UNKNOWN"]);
   assert.equal(ranked.total, 4);
+
+  const scannerRanked = rankCandidateSymbols(
+    [
+      instrument({ symbol: "LOW", volume24h: 1_000 }),
+      instrument({ symbol: "HIGH", volume24h: 9_000_000 }),
+      instrument({ symbol: "UNSCORED", volume24h: 99_000_000 }),
+    ],
+    10,
+    new Map([["LOW", 0.9], ["HIGH", 0.2]])
+  );
+  assert.deepEqual(scannerRanked.symbols, ["LOW", "HIGH", "UNSCORED"]);
 });
 
 test("rankCandidateSymbols: kürzt auf das Limit und verwirft nicht normalisierbare Symbole", () => {
@@ -165,6 +177,14 @@ test("focusSymbolFor: erster Kandidat, sonst Fallback", () => {
   assert.equal(focusSymbolFor([], "SPY"), "SPY");
   assert.equal(focusSymbolFor(["  "], "SPY"), "SPY");
   assert.equal(DEFAULT_FOCUS_SYMBOL, "SPY");
+});
+
+test("focusSymbolForCycle: deterministische Rotation mit missionsspezifischem Offset", () => {
+  const candidates = ["BTC", "ETH", "SOL"];
+  const first = focusSymbolForCycle(candidates, "SPY", 10, "mission-a");
+  assert.equal(focusSymbolForCycle(candidates, "SPY", 10, "mission-a"), first);
+  assert.notEqual(focusSymbolForCycle(candidates, "SPY", 11, "mission-a"), first);
+  assert.equal(focusSymbolForCycle([], "SPY", 11, "mission-a"), "SPY");
 });
 
 test("isSymbolInMissionScope: Einzel-Symbol, Scan, leere Liste und Legacy", () => {
