@@ -113,6 +113,10 @@ erlaubt, solange sie hier dokumentiert sind).
   stehen zusätzlich als Literale in `signalDecay.ts`, `signalDecayRuntime.ts` und im CHECK von
   `signal_decay_events`; `VolatilityRegime` ist in `adaptiveRisk.ts`, `src/portfolio/types.ts` und
   `src/scanner/types.ts` dreifach definiert. Neuer Code importiert die bestehenden Konstanten.
+  Außerdem löst der In-App-Doku-Viewer (`/docs/<Datei>.md`, `GET /api/docs`) über `resolveDoc`
+  (`src/lib/docsCatalog.ts`) weder `docs/architecture/` noch `docs/roadmap/` auf — das betrifft auch
+  `STRATEGY_STACK.md` und den ADR-Log (im Repo und auf GitHub lesbar, im Browser-Viewer nicht).
+  Die Behebung wäre eine Code-Änderung (zwei Suchpfade) und ist nicht Teil dieses Doku-Release.
 
 ## [0.6.0] — Backtest-Performance-Baseline (2026-09-29)
 
