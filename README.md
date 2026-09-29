@@ -30,6 +30,15 @@ Risikogrenzen im Code**.
 > [Live-Gate](docs/LIVE_TRADING.md) (Flags + Security-Stamps + Kill-Switch-Kopplung)
 > gesperrt. Selbst im Paper-Modus gilt: **Beta, auf eigene Gefahr.**
 
+> **Ausbau ändert daran nichts.** Die Strategie-Roadmap
+> ([`docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md))
+> liefert versionierte Strategie-Artefakte, systematisches Screening, einen
+> deterministischen Validator und eine **Paper-only**-Copy-Simulation. Sie
+> liefert die *Werkzeuge*, um Produktionsreife zu prüfen — nicht deren
+> *Nachweise*. Auch alle 32 Prompts durchlaufen zu haben, verlässt die
+> Beta-Phase **nicht**: Was dafür nötig wäre, steht in
+> [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md).
+
 ## Versions-Status
 
 | Feld | Wert |
@@ -37,6 +46,7 @@ Risikogrenzen im Code**.
 | Version | **v0.5.0** (Beta, 2026-09-26; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
+| Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog) — mit Meilenstein-Übersicht der Beta-Entwicklung |
 | Historie | Interne Legacy-Zählung `v1.x.x` archiviert: [docs/archive/CHANGELOG-legacy-v1.md](docs/archive/CHANGELOG-legacy-v1.md) |
 
@@ -182,6 +192,7 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
 ├── VERSION.md                ← Versions-Metadaten (v0.5.0, Beta) + Komponenten-Übersicht
+├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)

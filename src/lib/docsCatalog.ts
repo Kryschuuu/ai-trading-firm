@@ -235,6 +235,20 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Audit: Verbesserungen 2026-09-23",
     subtitle: "Regel-Backtest mit Paper-Kosten, Workshop-Schritt 5, Trusted-Indikatoren — CLOSED v0.2.0",
   },
+  auditStrategyTemplate20260929: {
+    file: "docs/audits/2026-09-29-strategy-template-ausbau/README.md",
+    title: "Audit: Strategie-Template-Ausbau 2026-09-29",
+    subtitle:
+      "19 Findings + 32 Prompts in 8 Phasen, Release-Plan v0.5.1 bis v0.11.2 — " +
+      "bleibt ausdruecklich Beta (BETA_STATUS.md)",
+  },
+  betaStatus: {
+    file: "docs/BETA_STATUS.md",
+    title: "Beta-Status und Exit-Kriterien",
+    subtitle:
+      "Verbindliche Beta-Zusage: Kriterien B1 bis B8, verbotene Handlungen, " +
+      "Review-Kadenz — kein Roadmap-Exit",
+  },
   peerReviews: {
     file: "docs/peer-reviews/README.md",
     title: "Peer-Review-Patches — Zentrale Sammlung",

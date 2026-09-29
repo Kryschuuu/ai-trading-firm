@@ -1,7 +1,19 @@
 # Roadmap — Strategie-Templates, Screening, Validator, Copy-Trading
 
 > Grundlage: [`report.md`](report.md) · Findings: [`findings/`](findings/) ·
+> Versionierung: [`VERSIONING.md`](VERSIONING.md) ·
 > Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
+
+## ⚠️ Diese Roadmap beendet die Beta-Phase nicht
+
+> **Selbst nach vollständiger Umsetzung aller 32 Prompts bleibt das Projekt in der
+> Beta-Phase.** Die Roadmap liefert die **Werkzeuge**, um Produktionsreife zu prüfen —
+> nicht deren **Nachweise**. Keine der acht Phasen erfüllt ein Beta-Exit-Kriterium.
+> Kriterien `B1…B8`: [`../../BETA_STATUS.md`](../../BETA_STATUS.md) · Begründung:
+> [`report.md` §8](report.md#8-beta-positionierung-der-roadmap).
+
+Alle geplanten Releases liegen in `0.x` (`v0.5.1` … `v0.11.2`) — siehe
+[`VERSIONING.md`](VERSIONING.md).
 
 ## 0. Grundregeln für alle Prompts
 

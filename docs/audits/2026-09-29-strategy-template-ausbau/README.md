@@ -3,6 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
+- **Audit-Version:** `v1.0.0` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md))
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -13,6 +14,8 @@
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
 - **Code-Version:** `package.json` v0.5.0 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0
 - **Status:** OPEN
+- **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
+  nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
 ## Severity-Übersicht
 
@@ -81,12 +84,24 @@ Die Roadmap in [`ROADMAP.md`](ROADMAP.md) dreht die Reihenfolge gegenüber dem D
 
 ## Remediation-Plan
 
-Siehe [`ROADMAP.md`](ROADMAP.md) (8 Phasen, 32 Prompts) und
+Siehe [`ROADMAP.md`](ROADMAP.md) (8 Phasen, 32 Prompts),
+[`VERSIONING.md`](VERSIONING.md) (Release-Plan `v0.5.1` … `v0.11.2`, alle Beta) und
 [`remediation/TRACKING.md`](remediation/TRACKING.md).
+
+## Beta-Positionierung
+
+> **Die vollständige Umsetzung dieser Roadmap beendet die Beta-Phase nicht.**
+> Keine der acht Phasen erfüllt ein Beta-Exit-Kriterium. Die Roadmap liefert die
+> **Werkzeuge**, um Produktionsreife zu prüfen — nicht deren **Nachweise**.
+> Kriterien `B1…B8`, Reihenfolge und Review-Kadenz: [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
+
+Alle in [`VERSIONING.md`](VERSIONING.md) geplanten Releases liegen in `0.x`. Ein
+Versionssprung auf `1.0` ist durch diese Roadmap **nicht** begründbar.
 
 ## Referenzen
 
 - Ausbaudokument (Quelle dieses Audits) — liegt nicht im Repo vor
+- Beta-Zusage und Exit-Kriterien: [`../../BETA_STATUS.md`](../../BETA_STATUS.md)
 - Bestehende Audit-Konvention: [`../TEMPLATE/`](../TEMPLATE/)
 - Letzter vergleichbarer Audit: [`../2026-09-23-verbesserungen-fahrplan/`](../2026-09-23-verbesserungen-fahrplan/)
 - Architektur-SSoT: [`../../architecture/PIPELINE_MAP.md`](../../architecture/PIPELINE_MAP.md),

@@ -374,3 +374,83 @@ Kafka (→ bestätigt nicht); Alpaca-WS (→ Voraussetzung ist ein eigener Adapt
 | Kein Kafka | ✅ **bestätigt** |
 | Parquet/DuckDB | ⚠️ **P3** — erst messen (00-01), dann entscheiden |
 | OpenCode-Routing-Klassen | ⚠️ **als Policy-Flag, nicht als harte Klassen** — Free-Tier rotiert (STX-13) |
+
+---
+
+## 8. Beta-Positionierung der Roadmap
+
+> **Selbst nach vollständiger Umsetzung aller 32 Prompts bleibt das Projekt in der
+> Beta-Phase.** Diese Aussage ist verbindlich in
+> [`../../BETA_STATUS.md`](../../BETA_STATUS.md) festgeschrieben.
+
+### 8.1 Warum die Roadmap kein Beta-Exit ist
+
+Das Ausbaudokument beschreibt ausschließlich **Infrastruktur**: Strategie-Artefakte,
+Screening, Validierung, Copy-Engine. Jedes dieser Elemente ist ein **Messgerät**.
+
+```
+Markt → Scanner → Kandidat → Strategie → Backtest → Validator → Paper
+        └──────────────────── MESSGERÄT ───────────────────────┘
+                                                    │
+                                                    ▼
+                                    ERGEBNIS: FAIL / INCONCLUSIVE / PASS
+```
+
+Der typische, gesunde Ausgang dieses Prozesses ist eine **Ablehnung**. Eine Pipeline,
+die nur `PASS` produziert, hat einen Fehler — typischerweise einen zu laschen Filter
+oder ein zu kleines Testfenster. Die Roadmap ist deshalb so gebaut, dass sie
+**brauchbare Strategien verwirft**: `INCONCLUSIVE` schlägt `FAIL` (06-04), Annahmen-
+Verletzungen blockieren, Holdout-Kontamination wird erkannt (06-02).
+
+### 8.2 Zuordnung Roadmap → Beta-Exit-Kriterien
+
+| Phase | Liefert | Berührt | Erfüllt? |
+|---|---|---|---|
+| 0 — Messung & ADRs | Performance-Baseline, SSoT, 3 Vokabular-Entscheidungen | — | **nein** |
+| 1 — Timeframe-Angleichung | `4h`/`1d` regelformulierbar | — | **nein** |
+| 2 — Indikatoren | 4 neue Regel-Felder | — | **nein** |
+| 3 — Template-Kern | 6 versionierte Strategie-Artefakte | Instrument für `B2` | **nein** |
+| 4 — Versionierte Persistenz | rekonstruierbare Strategieversionen | Instrument für `B1` | **nein** |
+| 5 — Candidate Matrix | systematische Versuchsplanung | Instrument für `B1`/`B2` | **nein** |
+| 6 — Validator | deterministische Gates + erklärender Agent | Instrument für `B1`/`B2` | **nein** |
+| 7 — Copy-Trading | `SIMULATE_ONLY`-Simulation | macht `B5` **sichtbar** | **nein** |
+
+**Ergebnis: 0 von 8 Kriterien, 0 von 8 Phasen.** Das ist kein Mangel der Roadmap,
+sondern ihr korrektes Zielbild. Die Kriterien `B1` (Out-of-Sample über 12 Monate
+Live-Paper), `B3` (Live-Readiness-Audit über 8 Wochen realer Verkehr), `B5`
+(Rechtsprüfung) und `B7` (unabhängige Drittprüfung) verlangen **externe Evidenz**.
+Eine Codebasis kann sie nicht selbst erzeugen — das ist die Grenze jedes
+selbst-prüfenden Systems.
+
+### 8.3 Die Kopplung, die die Roadmap ausdrücklich verhindert
+
+Phase 7 (Copy-Trading) ist die einzige Stelle, an der diese Roadmap das Produktprofil
+tatsächlich verschieben könnte: aus „die Firma handelt für sich" zu „die Firma handelt
+für Dritte". Deshalb:
+
+- `CopyMode` ist ein **Enum mit genau einem Wert** (`SIMULATE_ONLY`), kein Env-Flag
+  (STX-16, Prompt 07-01)
+- der `mode`-CHECK erzwingt das **auf DB-Ebene** (07-02)
+- Phase 7 ist **organisatorisch** getrennt: sie erfüllt `B5` nicht, sie macht die
+  Frage sichtbar, die `B5` beantworten muss
+
+Eine Roadmap, die am Ende ein Live-Copy-Feature ausliefert, hätte die
+Beta-Positionierung stillschweigend aufgehoben — ohne dass ein Kriterium erfüllt
+worden wäre. Deshalb steht das Verbot **in den Prompts**, nicht nur hier.
+
+### 8.4 Versionsplan
+
+Alle Releases aus [`VERSIONING.md`](VERSIONING.md) liegen in `0.x`
+(`v0.5.1` … `v0.11.2`). SemVer: `0.x` heißt in diesem Projekt **Beta**; ein Sprung auf
+`1.0` wäre eine Behauptung, die keine Phase dieser Roadmap einlöst.
+
+---
+
+## 9. Verwandte Dokumente
+
+- [`README.md`](README.md) — Audit-Index, Findings-Übersicht
+- [`VERSIONING.md`](VERSIONING.md) — Audit-Version, Release-Plan, Bruchstellen
+- [`ROADMAP.md`](ROADMAP.md) — 8 Phasen, Gates, Abhängigkeitsgraph
+- [`prompts/`](prompts/) — 32 kopierfertige Prompts
+- [`remediation/TRACKING.md`](remediation/TRACKING.md) — Status, Gates, offene Punkte
+- [`../../BETA_STATUS.md`](../../BETA_STATUS.md) — Beta-Zusage, Kriterien `B1…B8`
