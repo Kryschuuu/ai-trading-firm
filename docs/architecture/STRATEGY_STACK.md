@@ -1,0 +1,91 @@
+# Strategie-Stack — Single Source of Truth (SSoT)
+
+> **Status:** Ist-Zustand · **Stand:** 2026-09-29 · **Code-Version:** v0.6.0 (Beta)  
+> **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
+> **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`
+
+## Zweck
+
+Diese Karte fixiert den **Ist-Zustand** des Strategie-Stacks — welcher Baustein wofür
+zuständig ist und wo neue Arbeit hingehört. Sie korrigiert die Fehleinschätzung aus
+dem Ausbaudokument (Feature Store = 3 Features, kein „zentraler Layer"; Regime =
+bereits 5+1; Strategieklasse = bereits vorhanden; Alpaca-WS = nicht vorhanden).
+
+Kein Code, keine Bewertung, nur Verortung. Details zu Datenflüssen:
+`PIPELINE_MAP.md`, Tabellen: `DB_SCHEMA.md`, Erweiterungspunkte: `INTEGRATION_POINTS.md`.
+
+## 1. Komponenten-Tabelle — SSoT je Thema
+
+| Thema | SSoT | Nicht hier |
+|---|---|---|
+| Rule-Felder (Whitelist) | `src/lib/ruleFieldCatalog.ts` | — |
+| Rule-Ausführung + Sanitize | `src/lib/ruleEngine.ts` | nicht im Strategie-Modul |
+| Indikator-Formeln | `src/lib/indicators.ts` + `src/backtest/indicatorCache.ts` | — |
+| Strategieklasse | `src/lib/signalDecay.ts` (`STRATEGY_CLASS_KEYS`) | nicht neu in `src/strategies/` |
+| Regime | `src/lib/marketRegime.ts` (`MarketRegime`) + `regime_snapshots` | kein zweites Vokabular |
+| Regime-Auswertung | `src/lib/regimeEvaluation.ts` | — |
+| Universe-Mitgliedschaft | `src/universe/*` + `crossSectional/types.ts` (`EligibilityConfig`) | kein zweites Eligibility |
+| Cross-Sectional-Ranking | `src/crossSectional/*` | keine neue Spec |
+| Scanner-Faktoren | `src/scanner/scanner.config.json` (**14 aktive**) | nicht die Dateiliste |
+| Feature Store | `src/features/*` (3 Features) | nicht „zentraler Layer" |
+| Backtest / WF / MC | `src/backtest/*` | keine zweite Engine |
+| Kostenmodell | `BacktestEngineConfig.feeModel` + `MonteCarloStressConfig` | kein drittes |
+| Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
+| Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
+| Fill-Reconciliation | `src/brokers/reconciliation.ts` + `src/executionQuality/` | kein Copy-Reconciler |
+| Broker-WS | nur `src/brokers/bitunix/ws.ts` | Alpaca hat **keinen** |
+
+### Erläuterungen (Ist-Zustand, stichprobenweise verifiziert)
+
+- **Rule-Felder:** `src/lib/ruleFieldCatalog.ts` exportiert `RULE_FIELDS` (Whitelist). `src/lib/ruleEngine.ts` re-exportiert und nutzt sie in `sanitizeRuleSpec()`. Keine zweite Whitelist.
+- **Rule-Ausführung:** `src/lib/ruleEngine.ts` enthält `compileRuleSpec`, `evaluateRule`, `sanitizeRuleSpec`, `RULE_CEILINGS`. Kein Import von LLM-Modulen (bewusst isoliert).
+- **Indikatoren:** `src/lib/indicators.ts` = reine Formeln (EMA, RSI, ADX, ATR, Bollinger, MACD, VWAP). `src/backtest/indicatorCache.ts` = O(n)-Cache derselben Formeln für den Backtest (Parität, kein neues Modell).
+- **Strategieklasse:** `src/lib/signalDecay.ts` definiert `STRATEGY_CLASS_KEYS = ["mean-reversion", "trend", "breakout", "unclassified"]` und `DEFAULT_CLASS_POLICIES`. `StrategyClass` stammt aus `src/lib/marketRegime.ts`. Kein Verzeichnis `src/strategies/` vorhanden.
+- **Regime:** `src/lib/marketRegime.ts` definiert `MarketRegime = "TREND_UP" | "TREND_DOWN" | "RANGE" | "HIGH_VOL" | "CRASH"` plus `UNKNOWN` als `MarketRegimeLabel` (5+1). Persistenz: Tabelle `regime_snapshots` (`src/db/schema.ts`, `src/lib/regimeSnapshotStore.ts`). Kein zweites Vokabular.
+- **Regime-Auswertung:** `src/lib/regimeEvaluation.ts` = reine Auswertung persistenter Snapshots (Stabilität, Transitionen, Coverage, OOS-Kennzahlen), kein IO.
+- **Universe-Mitgliedschaft:** `src/universe/*` = Registry, Normalisierung, Policy (`policy.ts`, `policy.default.json`), `EligibilityConfig` liegt in `src/crossSectional/types.ts` (zentraler Eligibility-Vertrag). Kein zweites Eligibility-Modell.
+- **Cross-Sectional-Ranking:** `src/crossSectional/*` = Momentum-Horizonte, Winsorize, z-Score, Composite, Rang/Perzentil, Provenance. Keine zusätzliche Spec-Datei.
+- **Scanner-Faktoren:** `src/scanner/scanner.config.json` (versioniert, `version: 2`) konfiguriert **14 aktive** Faktoren: `liquidity`, `spread`, `atr`, `volatility`, `momentum`, `trend`, `volumeRatio`, `rsi`, `drawdown`, `correlation`, `news`, `funding`, `openInterest`, `execution`. Implementierung: `src/scanner/factors/*` (15 Dateien inkl. `helpers.ts` + `crossSectionalMomentum` als Diagnose). SSoT ist die Config, nicht die Dateiliste.
+- **Feature Store:** `src/features/*` = Registry, Materialisierung, PIT-Query, Validierung. Aktueller Slice (RMA-P6-01): 3 Features `scanner.rsi`, `scanner.atr`, `scanner.atr_band` (`src/features/definitions.ts` `FEATURE_IDS`). Kein „zentraler Layer", der Scanner/Backtest ersetzt — zusätzlicher Lesepfad.
+- **Backtest / WF / MC:** `src/backtest/*` = `engine.ts`, `portfolio.ts`, `simulator.ts`, `walkforward.ts`, `montecarlo.ts`, `indicatorCache.ts`, `tradeLedger.ts`, `runStore.ts`, etc. Keine zweite Engine.
+- **Kostenmodell:** `BacktestEngineConfig.feeModel` (`src/backtest/types.ts` `{ makerFee, takerFee, feeMode }`) + `MonteCarloStressConfig` (`src/backtest/montecarlo.ts` `{ feeMultiplier, slippageMultiplier }`). Kein drittes Modell.
+- **Lifecycle + Evidenz:** `src/strategyLifecycle/*` = 9 Zustände (`states.ts`), Drift-Gates (`drift.ts`), Evidenz (`evidence.ts`), Order-Gate, Policies, Service.
+- **Symbol-SSoT:** `src/symbols/normalize.ts` = `tryNormalizeVenueSymbol`, `normalizeSymbol`, Venue-Profile. Kein String-Replace an anderer Stelle.
+- **Fill-Reconciliation:** `src/brokers/reconciliation.ts` + `src/executionQuality/` (`capture.ts`, `reconcile.ts`, `model.ts`, `store.ts`). Kein Copy-Reconciler.
+- **Broker-WS:** Nur `src/brokers/bitunix/ws.ts` existiert. `src/brokers/alpaca/` enthält keinen WS-Client (Alpaca hat **keinen** WS in diesem Repo).
+
+## 2. Nicht vorhanden — explizite Lücken
+
+Folgende Pfade/Tabellen existieren **nicht** im Ist-Zustand (geprüft via `ls` / `grep`).
+Sie sind in der Roadmap vorgesehen — siehe `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`
+und `../audits/2026-09-29-strategy-template-ausbau/report.md`:
+
+| Nicht vorhanden | Status | Roadmap-Verweis |
+|---|---|---|
+| `src/strategies/` | Verzeichnis fehlt | `ROADMAP.md` Phase 3 — Template-Kern (`03-01` `types.ts`, `03-02` `catalog.ts`, `03-09` `compiler.ts`) |
+| `src/screening/` | Verzeichnis fehlt | `ROADMAP.md` Phase 5 — Candidate Matrix / Screening (`05-01` Typen, `05-02` Matrix-Builder) |
+| `src/copy/` | Verzeichnis fehlt | `ROADMAP.md` Phase 7 — Copy-Trading (`07-01` Typen) |
+| `strategy_definitions` | Tabelle fehlt | `ROADMAP.md` Phase 4 — `04-01` Migration `strategy_definitions` + `strategy_versions` |
+| `strategy_versions` | Tabelle fehlt | `ROADMAP.md` Phase 4 — `04-01` Migration, `04-02` Service |
+| `strategy_screening_runs` | Tabelle fehlt | `ROADMAP.md` Phase 5 — `05-03` Persistenz + Idempotenz |
+| `strategy_market_results` | Tabelle fehlt | `ROADMAP.md` Phase 5 — `05-03` je Zelle (FK auf Screening-Run, `strategy_version_id`) |
+
+Hinweis: Die Roadmap bleibt in `v0.x` (Beta) — keine Beta-Exit-Kriterien erfüllt.
+Siehe `../BETA_STATUS.md`.
+
+## 3. Wo kommt neues dazu? — 5-zeilige Entscheidungsregel
+
+1. **Neues Rule-Feld / Indikator:** Erweitere `src/lib/ruleFieldCatalog.ts` + `src/lib/indicators.ts` + `src/backtest/indicatorCache.ts` (Parität wahren); nie ohne Whitelist in `src/lib/ruleEngine.ts`.
+2. **Neue Strategieklasse / Regime / Eligibility / Kosten:** Erweitere bestehende SSoT (`src/lib/signalDecay.ts` `STRATEGY_CLASS_KEYS`, `src/lib/marketRegime.ts` `MarketRegime`, `src/universe/*` + `crossSectional/types.ts` `EligibilityConfig`, `src/backtest/types.ts` `BacktestEngineConfig.feeModel` + `src/backtest/montecarlo.ts` `MonteCarloStressConfig`); kein zweites Vokabular, kein drittes Kostenmodell.
+3. **Neues Scanner-/Ranking-Verhalten:** Erweitere `src/scanner/*` (Faktor in `factors/` + Gewicht in `scanner.config.json`) bzw. `src/crossSectional/*`; keine neue Spec-Datei, SSoT bleibt Config + bestehende Typen.
+4. **Neues Lifecycle-/Evidenz-/Fill-/Symbol-Verhalten:** Erweitere `src/strategyLifecycle/*`, `src/executionQuality/` + `src/brokers/reconciliation.ts`, `src/symbols/normalize.ts`; kein Copy-Reconciler, kein String-Replace.
+5. **Völlig neue Domäne (Templates, Screening, Copy, Persistenz):** Existiert nicht — siehe Roadmap `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`; keine vorzeitige Anlage unter `src/strategies/`, `src/screening/`, `src/copy/` oder Tabellen `strategy_definitions`, `strategy_versions`, `strategy_screening_runs`, `strategy_market_results` ohne Phase 0–4 Gates.
+
+## 4. Verweise
+
+- Pipeline: `PIPELINE_MAP.md`
+- DB-Schema: `DB_SCHEMA.md`
+- Integrationspunkte: `INTEGRATION_POINTS.md`
+- Repository-Struktur: `../REPOSITORY_STRUCTURE.md`
+- Roadmap (Lücken): `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`
+- Findings (STX-10): `../audits/2026-09-29-strategy-template-ausbau/findings/STX-10-featurestore-ist-slice.md`

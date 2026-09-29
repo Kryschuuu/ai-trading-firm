@@ -563,3 +563,5 @@ Der Bitunix-Adapter (`src/brokers/bitunix/orders.ts`) mappt standardisierte `Bro
 ## 7. Status & Ausblick
 
 Diese Architekturkarte bildet das verifizierte Fundament des Systems ab. Alle nachfolgenden Funktionsblöcke (Backtest-Engine, Perp-Daten-Ingestion, Trade-Attribution, Portfolio-Sizing) klinken sich über die in `docs/architecture/INTEGRATION_POINTS.md` definierten Schnittstellen ein.
+
+Die **Entscheidungskarte** für Regel-Felder, Strategieklassen, Regime, Eligibility, Kostenmodelle und Evidenz liegt in [STRATEGY_STACK.md](STRATEGY_STACK.md) — SSoT je Thema, explizite Lücken und 5-zeilige Einordnungsregel.
