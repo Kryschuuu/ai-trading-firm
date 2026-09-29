@@ -24,6 +24,71 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status-Header:** **Beta** · Dokumentationsstand **2026-09-26** · Code-Version **0.5.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
+## [Unreleased] — Strategie-Roadmap-Audit, Versionierung & Beta-Zusage (2026-09-29)
+
+> **Status: Beta — und bleibt Beta.** Dieser Eintrag enthält **ausschließlich
+> Dokumentation**: kein Produktivcode, keine Migration, keine Schema-Änderung.
+> Deshalb bleibt `package.json` bei `v0.5.0`; der Release-Plan in
+> [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md)
+> sieht den Doku-Startpunkt als **nächstes** Release `v0.5.1` vor, gefolgt von
+> `v0.6.0` … `v0.11.2` — sämtlich in `0.x`.
+
+### Added
+
+* **Audit 2026-09-29 — Strategie-Template-Ausbau** (`docs/audits/2026-09-29-strategy-template-ausbau/`):
+  Code-verifizierende Prüfung eines externen Ausbaudokuments gegen `main` @ `e3509fd`.
+  **19 Findings** (0 CRITICAL, 5 HIGH, 7 MEDIUM, 4 LOW, 3 INFO) und eine **Roadmap aus
+  32 kopierfertigen Prompts** in 8 Phasen mit Abhängigkeitsgraph, Gates (G0–G8) und
+  globalen Gesperrt-Klauseln. Siehe [`report.md`](docs/audits/2026-09-29-strategy-template-ausbau/report.md).
+* **`docs/BETA_STATUS.md` (neu, kanonisch):** verbindliche Beta-Zusage. Kriterien
+  `B1…B8` für einen Beta-Exit (Out-of-Sample über 12 Monate Live-Paper, Regime-Abdeckung,
+  Live-Readiness-Audit, Security, Compliance, Betriebsreife, **unabhängige**
+  Drittprüfung, bewusste Haftungsentscheidung), verbotene Handlungen, Review-Kadenz
+  und die Zuordnung Roadmap → Kriterien.
+* **`docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md` (neu):**
+  Audit-Versionsschema (`audit-2026-09-29 v1.0.0`) mit Bump-Regeln und
+  **Release-Plan `v0.5.1` … `v0.11.2`** — ein Minor-Release je Phase bzw. Template,
+  sämtlich in `0.x`. Enthält außerdem die drei erwarteten Bruchstellen in `0.x`
+  (Timeframe-Erweiterung, Snapshot-Wachstum, neues Copy-Modul) und die
+  Abwärtskompatibilitätsregeln.
+
+### Changed
+
+* **Beta-Positionierung in `README.md` und `VERSION.md` verstärkt und
+  operationalisiert:** beide nennen jetzt explizit, dass die vollständige Umsetzung
+  der Strategie-Roadmap die Beta-Phase **nicht** beendet. In `VERSION.md` als
+  eigene Zeile `Beta-Zusage` in der Metadatentabelle, in `README.md` als Zeile
+  `Beta-Exit` in der Versions-Status-Tabelle plus ein hervorgehobener Hinweis.
+* **Doku-Indizes ergänzt** (`docs/README.md`, `docs/audits/README.md`): neuer
+  Eintrag für das Audit 2026-09-29 und Verweis auf `BETA_STATUS.md`.
+
+### Findings (Auszug, Details je Datei unter `findings/`)
+
+* **STX-01 (HIGH)** — `RuleWindow.timeframe` ist auf `1m|5m|15m|30m|1h` begrenzt,
+  während `SUPPORTED_TIMEFRAMES` bis `5d` reicht. Ohne Angleichung sind sämtliche
+  Screening- und Cross-Sectional-Ziele **nicht ausdrückbar**.
+* **STX-05 (HIGH)** — der vorgeschlagene `buildRule(ctx)`-Builder erzeugt zur Laufzeit
+  eine fertige `RuleSpec` und würde damit `sanitizeRuleSpec()` und `RULE_CEILINGS`
+  umgehen — also genau die Kette, die das Sicherheitsmodell „Code entscheidet" trägt.
+  Korrektur: pure Funktion der **Parameter**, Rückgabetyp `RuleSpecInput`.
+* **STX-02/03/04 (HIGH)** — `StrategyClass`, `MarketRegime` und `CrossSectionalConfig`
+  existieren bereits; das Ausbaudokument hätte dafür je ein zweites Vokabular
+  angelegt. Kein neues Klassifikations-, Regime- oder Eligibility-Modell.
+* **STX-08 (MEDIUM)** — `src/brokers/alpaca/` enthält **keinen** WebSocket; der
+  Alpaca-Adapter ist REST-only. Alpaca ist deshalb **nicht** Teil der Copy-Roadmap.
+* **STX-12 (MEDIUM)** — `backtestRule()` ist O(n²) (`ruleEngine.ts:787`); nur die
+  Multi-Asset-Engine nutzt `IndicatorCache`. Bestimmt, ob eine Matrix mit Tausenden
+  Zellen überhaupt lauffähig ist → Benchmark ist Phase 0.
+* **STX-16 (LOW, organisatorisch hoch)** — Copy-Trading verschiebt das
+  Haftungsprofil. Deshalb `CopyMode` als Enum mit **genau einem** Wert
+  (`SIMULATE_ONLY`) und DB-CHECK, kein Env-Flag.
+
+### Documentation
+
+* **Faktenkorrektur im Umfeld:** Der Scanner hat **14** aktive Faktoren
+  (`src/scanner/scanner.config.json`), nicht „15+". Das Audit dokumentiert die
+  SSoT-Verweise statt Dateizahlen.
+
 ## [Unreleased]
 
 > **Status: Beta.** Offen für den nächsten Zyklus (aus den Audits): `IAD-T-07`

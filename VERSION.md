@@ -8,6 +8,7 @@ in Code und Doku leiten sich von diesem Stand ab.
 | **Version** | `v0.5.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
+| **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-09-26 |
 | **Quellbasiert** | `package.json` (`version: "0.5.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
@@ -66,6 +67,18 @@ Changelog dokumentiert sind.
 eigene Gefahr konzipiert. Kein Teil davon ist für produktive Handelsumgebungen
 bestimmt (Details: Disclaimer im [`README.md`](README.md)).
 
+**Beta-Exit:** Das Verlassen der `0.x` ist **kein** Feature-Ziel und wird nicht
+per Roadmap ausgelöst. Maßgeblich sind acht Kriterien `B1…B8` (Out-of-Sample
+über 12 Monate Live-Paper, Regime-Abdeckung, Live-Readiness-Audit, Security,
+Compliance, Betriebsreife, **unabhängige** Drittprüfung, bewusste
+Haftungsentscheidung) in [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md).
+
+**Ausdrücklich gilt:** Auch die vollständige Umsetzung der Strategie-Roadmap
+([`docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md),
+32 Prompts, Releases `v0.5.1` … `v0.11.2`) **beendet die Beta-Phase nicht**.
+Sie liefert die Messgeräte, nicht die Messung — und keine Phase erfüllt ein
+Kriterium. Begründung: `report.md` §8 des Audits.
+
 ## Komponenten-Übersicht
 
 ### Kernmodule (`src/`)
@@ -73,7 +86,7 @@ bestimmt (Details: Disclaimer im [`README.md`](README.md)).
 | Modul | Zweck |
 | --- | --- |
 | `src/cycle/` | Agenten-Zyklus (Daily/Weekly): sequenzielle Schritte der KI-Agenten (Technical/News/Macro → Research → Risk → Portfolio → Approver → Executor) |
-| `src/scanner/` | Deterministischer Market-Scanner (Liquidität/Volatilität/Korrelation, 15+ Faktoren, point-in-time) |
+| `src/scanner/` | Deterministischer Market-Scanner (Liquidität/Volatilität/Korrelation, **14 aktive** Faktoren laut `scanner.config.json`, point-in-time) |
 | `src/marketdata/` | Markt-Daten-Pipeline: Multi-Venue-Sync, Candle-Backfill, Qualitäts-Layer, Aggregation, Readiness |
 | `src/brokers/` | Broker-Schicht: Paper-Broker (Fill-Simulation), Bitunix/Alpaca-Adapter, Reconciliation, Emergency-Broker-Schnittstelle |
 | `src/execution/` | Ausführungspolitik: Order-Gates, Post-Only-Fallback, TWAP-Engine, Policy-Controller |
