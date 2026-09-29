@@ -184,6 +184,11 @@ export async function runMacroCycle(opts?: { missionId?: string }): Promise<Macr
     const knownRules = await listRules();
 
     // ── RESEARCH: Regelvorschlag ────────────────────────────────────────────
+    // Die Constraint-Zeilen im Prompt nennen bewusst eine konservative Teilmenge
+    // der Felder und Timeframes (Timeframes: nur Intraday, den der Mikro-Executor
+    // live auswertet). Die harte Grenze ist `sanitizeRuleSpec`; `RULE_LLM_SCHEMA`
+    // (weiche Schicht) führt die volle Allowlist (`RULE_ALLOWED_TIMEFRAMES`, seit
+    // STX-01 alle zehn) — ein längerer Timeframe wird vom Timeframe-Guard abgewiesen.
     const researchAgent = (await db.select().from(agentTable).where(eq(agentTable.role, "RESEARCH")))[0];
     const researchPrompt = [
       `You are the Research Agent of an autonomous PAPER trading firm.`,

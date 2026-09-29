@@ -260,18 +260,23 @@ export function nativeSymbolOf(instrumentId: string): string {
 /**
  * Baut die Bench-Regel über die Sanitize-Kette (keine hand-gebaute `RuleSpec`).
  *
- * Zwei bewusste Zuweisungen NACH der Sanitize-Kette, beide mit Vorbild im Repo:
+ * Der gemessene Timeframe läuft durch die Sanitize-Kette selbst: seit STX-01
+ * (v0.6.2) akzeptiert die `RuleWindow`-Allowlist jeden Store-Timeframe
+ * (`RULE_ALLOWED_TIMEFRAMES`), der frühere Cast nach der Sanitize-Kette ist weg.
+ *
+ * Eine bewusste Zuweisung NACH der Sanitize-Kette, mit Vorbild im Repo:
  *   - `symbol` = Instrument-ID: die Engine löst Strategien über die Keys der
  *     Candle-Map auf (`engine.ts` `strat.symbol`), und `run-backtest.ts:363`
  *     setzt genau dafür `{ ...spec, symbol: instrumentId }`. Die Sanitize-
  *     Kette selbst akzeptiert nur venue-freie Symbolformen.
- *   - `window.timeframe` = gemessener Timeframe: die `RuleWindow`-Allowlist ist
- *     bis STX-01 (Prompt 01-01) auf `1m…1h` begrenzt; der Benchmark darf daran
- *     nicht scheitern, weil er nur den Indikator-/Engine-Pfad messen soll.
  */
 export function buildBenchSpec(instrumentId: string, timeframe: SupportedTimeframe): RuleSpec {
   const parsed = sanitizeRuleSpec(
-    { ...BENCH_RULE_INPUT, symbol: nativeSymbolOf(instrumentId) },
+    {
+      ...BENCH_RULE_INPUT,
+      symbol: nativeSymbolOf(instrumentId),
+      window: { ...BENCH_RULE_INPUT.window, timeframe },
+    },
     "MANUAL",
   );
   if (!parsed.ok) {
@@ -279,12 +284,7 @@ export function buildBenchSpec(instrumentId: string, timeframe: SupportedTimefra
       `Bench-Regel ungültig (Instrument "${instrumentId}"): ${parsed.errors.join("; ")}`,
     );
   }
-  // Bis STX-01 (Prompt 01-01) ist `RuleWindow.timeframe` auf `1m…1h` typisiert;
-  // der Benchmark misst JEDEN Store-Timeframe. Der Cast ist lokal auf dieses
-  // Messskript begrenzt (kein Produktivpfad, keine Engine-Änderung) und fällt
-  // mit 01-01 ersatzlos weg.
-  const windowTimeframe = timeframe as RuleSpec["window"]["timeframe"];
-  return { ...parsed.spec, symbol: instrumentId, window: { ...parsed.spec.window, timeframe: windowTimeframe } };
+  return { ...parsed.spec, symbol: instrumentId };
 }
 
 /** Store-Einträge → `CandleLike[]` (der Vertrag der gemessenen Pfade). */

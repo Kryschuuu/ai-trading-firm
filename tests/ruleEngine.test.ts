@@ -517,3 +517,424 @@ test("bookDepthUsd ist ein katalogisiertes Whitelist-Feld", async () => {
   const { RULE_FIELDS } = await import("../src/lib/ruleFieldCatalog");
   assert.equal(RULE_FIELDS.bookDepthUsd, "number");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STX-01-01 — Rule-Timeframes aus SUPPORTED_TIMEFRAMES (v0.6.2)
+//
+// Die Tests hier sind rein additiv: kein bestehender Test wurde angefasst. Den
+// Beweis „1m…1h unverändert“ führt der Golden-Test mit der Sanitize-Ausgabe
+// des Codes VOR der Timeframe-Angleichung (Stand v0.6.1).
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  RULE_ALLOWED_SIDE,
+  RULE_ALLOWED_TIMEFRAMES,
+  RULE_FIELDS,
+  RULE_LLM_SCHEMA,
+} from "../src/lib/ruleEngine";
+import { sessionVwap } from "../src/lib/indicators";
+import { buildIndicatorCache, snapshotFromCache } from "../src/backtest/indicatorCache";
+import { SUPPORTED_TIMEFRAMES, isSupportedTimeframe } from "../src/lib/marketdata/historicalStore";
+import { telemetry } from "../src/lib/telemetry";
+import { setStructuredLogSinkForTests, type StructuredLogEntry } from "../src/lib/logger";
+import type {
+  CachedRule,
+  ExecuteContext,
+  ExecutionOutcome,
+  RuleExecutionAdapter,
+} from "../src/lib/microExecutor";
+
+const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+
+/** `validInput` mit anderem `window.timeframe` (roh, ungeprüft). */
+function withTimeframe(timeframe: unknown) {
+  return { ...validInput, window: { ...validInput.window, timeframe } };
+}
+
+/** Timeframe, den `sanitizeRuleSpec` für einen rohen Eingabewert liefert. */
+function sanitizedTimeframe(raw: unknown): string {
+  const r = sanitizeRuleSpec(withTimeframe(raw), "RESEARCH");
+  assert.equal(r.ok, true, `Spec muss gültig bleiben (Timeframe ${JSON.stringify(raw)})`);
+  if (!r.ok) throw new Error("unreachable");
+  return r.spec.window.timeframe;
+}
+
+/** Kerzen auf beliebigem Raster: `makeCandles`-Verlauf, Zeitstempel neu gesetzt. */
+function seriesAt(n: number, stepMs: number, startMs: number): CandleLike[] {
+  return makeCandles(n).map((c, i) => ({ ...c, time: startMs + i * stepMs }));
+}
+
+/** `n` Kerzen, deren letzte `barsOnLastDay`-te Kerze ihres UTC-Tages ist (Tag: 2026-01-10). */
+function seriesEndingOnBar(n: number, stepMs: number, barsOnLastDay: number): CandleLike[] {
+  const lastTime = Date.UTC(2026, 0, 10) + (barsOnLastDay - 1) * stepMs;
+  return seriesAt(n, stepMs, lastTime - (n - 1) * stepMs);
+}
+
+// ── Single Source of Truth ───────────────────────────────────────────────────
+
+test("STX-01: RULE_ALLOWED_TIMEFRAMES ist aus SUPPORTED_TIMEFRAMES abgeleitet (kein zweites Vokabular)", () => {
+  assert.deepEqual([...RULE_ALLOWED_TIMEFRAMES], [...SUPPORTED_TIMEFRAMES]);
+  assert.equal(RULE_ALLOWED_TIMEFRAMES.length, 10);
+
+  // Das LLM-Schema liest dieselbe Liste (nicht handgepflegt) — als Kopie, damit
+  // kein Schema-Konsument die Allowlist über ein Alias verändern kann.
+  const schema = RULE_LLM_SCHEMA as {
+    properties: { window: { properties: { timeframe: { enum: string[] } } } };
+  };
+  const schemaEnum = schema.properties.window.properties.timeframe.enum;
+  assert.deepEqual(schemaEnum, [...RULE_ALLOWED_TIMEFRAMES]);
+  assert.notEqual(schemaEnum, RULE_ALLOWED_TIMEFRAMES as unknown);
+});
+
+test("STX-01: Regel-Pfad, Mikro-Executor und Workshop-Panel pflegen keine eigene Timeframe-Liste", () => {
+  // Zwei aufeinanderfolgende Timeframe-Literale sind eine handgepflegte Liste —
+  // genau der Fehler, den STX-01 beseitigt (früher `ALLOWED_TIMEFRAMES`,
+  // `TIMEFRAME_MS`, Panel-Optionen, Schema-Enum).
+  const literal = `["'](?:1m|3m|5m|15m|30m|1h|2h|4h|1d|5d)["']`;
+  const handMaintainedList = new RegExp(`${literal}\\s*,\\s*${literal}`);
+  for (const file of [
+    "src/lib/ruleEngine.ts",
+    "src/lib/microExecutor.ts",
+    "src/components/workshop/RuleBacktestPanel.tsx",
+  ]) {
+    const source = readFileSync(resolve(process.cwd(), file), "utf8");
+    assert.doesNotMatch(source, handMaintainedList, `${file}: handgepflegte Timeframe-Liste`);
+    assert.doesNotMatch(source, /\bTIMEFRAME_MS\b/, `${file}: zweite Periodentabelle`);
+  }
+});
+
+// ── sanitizeRuleSpec: Allowlist ──────────────────────────────────────────────
+
+test("STX-01: sanitizeRuleSpec akzeptiert jeden SupportedTimeframe — insbesondere 4h und 1d", () => {
+  assert.equal(sanitizedTimeframe("4h"), "4h");
+  assert.equal(sanitizedTimeframe("1d"), "1d");
+  for (const timeframe of SUPPORTED_TIMEFRAMES) {
+    assert.equal(sanitizedTimeframe(timeframe), timeframe, `${timeframe} muss erhalten bleiben`);
+  }
+});
+
+test("STX-01: sanitizeRuleSpec bleibt fail-closed außerhalb der Allowlist — nie ein durchgereichter Rohwert", () => {
+  // „Verwerfen“ heißt hier wie bisher: der Rohwert kommt nicht durch; die Regel
+  // läuft auf dem sicheren Default 15m (siehe Test „Unbekanntes fällt auf 15m“).
+  const outside: unknown[] = ["2h ", " 1h", "7d", "1w", "2m", "", null, undefined, 15];
+  for (const raw of outside) {
+    assert.equal(sanitizedTimeframe(raw), "15m", `${JSON.stringify(raw)} ⇒ sicherer Default 15m`);
+  }
+});
+
+test("STX-01: die Schreibweise wird normalisiert, nicht verworfen (unverändert: \"1H\" → \"1h\")", () => {
+  // Bestehende Semantik (per Prompt gesperrt): `sanitizeRuleSpec` kleinschreibt,
+  // bevor es gegen die Allowlist prüft. Die strenge Store-Allowlist dagegen lehnt
+  // \"1H\" ab — das schützt Reihen vor stiller Vermischung.
+  assert.equal(sanitizedTimeframe("1H"), "1h");
+  assert.equal(sanitizedTimeframe("4H"), "4h");
+  assert.equal(sanitizedTimeframe("1D"), "1d");
+  assert.equal(isSupportedTimeframe("1H"), false);
+  assert.equal(isSupportedTimeframe("1h"), true);
+});
+
+// ── Golden: 1m…1h byte-identisch ─────────────────────────────────────────────
+
+/** Reiche Eingabe: Klemmung aller Ceilings, Normalisierung (Symbol, Trend, Schreibweisen), alle Fensterfelder. */
+function goldenInput(timeframe: string) {
+  return {
+    name: "  Golden — Mean-Reversion mit VWAP/Volumen  ",
+    symbol: "eth",
+    missionId: " mission-golden ",
+    rationale: "  Kaufe überverkaufte Rücksetzer oberhalb der EMA50 bei steigendem Volumen.  ",
+    condition: {
+      logic: "any",
+      conditions: [
+        { field: "rsi14", op: "lt", value: 28.5 },
+        { field: "volumeRatio", op: "gte", value: "1.3" },
+        { field: "trend", op: "in", value: ["up", "flat"] },
+        { field: "adx14", op: "between", value: [15, 40] },
+        { field: "priceVsEma50Pct", op: "lte", value: -1.5 },
+        { field: "vwapPct", op: "lt", value: -0.4 },
+        { field: "spreadPct", op: "lt", value: 0.1 },
+      ],
+    },
+    action: { side: "long", stopLossPct: 999, takeProfitRR: 99, riskBudgetPct: 0.99, maxPositionPct: 0.99 },
+    window: {
+      timeframe,
+      validFrom: "2030-01-01T00:00:00Z",
+      validUntil: "2030-06-01T00:00:00Z",
+      maxExecutionsPerDay: 99,
+      cooldownMinutes: 5,
+      volumeWindow: 7.9,
+    },
+    riskScore: 0.42,
+    sourceRole: "research",
+    unknownKey: "wird verworfen",
+  };
+}
+
+/**
+ * Golden-Fixture: `JSON.stringify(sanitizeRuleSpec(goldenInput(tf), "MANUAL"))` des
+ * UNVERÄNDERTEN Codes (v0.6.1, vor STX-01) — mit dem Stand `6e2ebde` erzeugt, nicht
+ * mit dem Code unter Test. `%TF%` ist der einzige timeframe-abhängige Teil; die
+ * fünf Originalausgaben für 1m|5m|15m|30m|1h unterscheiden sich nur dort.
+ */
+const GOLDEN_SANITIZE_OUTPUT = `{"ok":true,"spec":{"name":"Golden — Mean-Reversion mit VWAP/Volumen","symbol":"ETH","missionId":"mission-golden","condition":{"logic":"any","conditions":[{"field":"rsi14","op":"lt","value":28.5},{"field":"volumeRatio","op":"gte","value":1.3},{"field":"trend","op":"in","value":["UP","FLAT"]},{"field":"adx14","op":"between","value":[15,40]},{"field":"priceVsEma50Pct","op":"lte","value":-1.5},{"field":"vwapPct","op":"lt","value":-0.4},{"field":"spreadPct","op":"lt","value":0.1}]},"action":{"side":"LONG","stopLossPct":20,"takeProfitRR":5,"riskBudgetPct":0.05,"maxPositionPct":0.5,"positionSizeMode":"risk"},"window":{"timeframe":"%TF%","validFrom":"2030-01-01T00:00:00Z","validUntil":"2030-06-01T00:00:00Z","maxExecutionsPerDay":10,"cooldownMinutes":5,"volumeWindow":7},"rationale":"Kaufe überverkaufte Rücksetzer oberhalb der EMA50 bei steigendem Volumen.","sourceRole":"RESEARCH","riskScore":0.42}}`;
+/** `ruleSignature` dieser Regel im Stand v0.6.1 (das Fenster geht nicht ein). */
+const GOLDEN_SIGNATURE = "14pm7dk";
+
+test("STX-01 Golden: Sanitize-Ausgabe für 1m|5m|15m|30m|1h ist byte-identisch zum Stand vor der Angleichung", () => {
+  for (const timeframe of ["1m", "5m", "15m", "30m", "1h"]) {
+    const result = sanitizeRuleSpec(goldenInput(timeframe), "MANUAL");
+    assert.equal(
+      JSON.stringify(result),
+      GOLDEN_SANITIZE_OUTPUT.replace("%TF%", timeframe),
+      `${timeframe}: Sanitize-Ausgabe weicht vom Stand vor STX-01 ab`,
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(ruleSignature(result.spec), GOLDEN_SIGNATURE, `${timeframe}: Regel-Signatur verändert`);
+  }
+});
+
+test("STX-01: der Timeframe ist der einzige Unterschied — Ceilings, LONG-Zwang und Felder gelten auf allen zehn gleich", () => {
+  const stripTimeframe = (spec: { window: object }) => ({ ...spec, window: { ...spec.window, timeframe: "*" } });
+  const reference = sanitizeRuleSpec(goldenInput("15m"), "MANUAL");
+  assert.equal(reference.ok, true);
+  if (!reference.ok) return;
+  for (const timeframe of SUPPORTED_TIMEFRAMES) {
+    const r = sanitizeRuleSpec(goldenInput(timeframe), "MANUAL");
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.deepEqual(stripTimeframe(r.spec), stripTimeframe(reference.spec), `${timeframe}: weicht jenseits des Timeframes ab`);
+  }
+  // Shorts bleiben global gesperrt — auch auf den neuen Timeframes.
+  for (const timeframe of ["4h", "1d"]) {
+    const short = sanitizeRuleSpec(
+      { ...withTimeframe(timeframe), action: { ...validInput.action, side: "SHORT" } },
+      "RESEARCH",
+    );
+    assert.equal(short.ok, false, `SHORT auf ${timeframe} muss abgelehnt werden`);
+  }
+});
+
+test("STX-01: RULE_ALLOWED_SIDE, RULE_CEILINGS und die bekannten RULE_FIELDS sind unverändert", () => {
+  assert.equal(RULE_ALLOWED_SIDE, "LONG");
+  assert.deepEqual(JSON.parse(JSON.stringify(RULE_CEILINGS)), {
+    stopLossPct: [0.5, 20],
+    takeProfitRR: [0.5, 5],
+    riskBudgetPct: [0.002, 0.05],
+    maxPositionPct: [0.01, 0.5],
+    fixedNotional: [0, 1_000_000],
+    maxExecutionsPerDay: [1, 10],
+    cooldownMinutes: [0, 1440],
+    volumeWindow: [5, 200],
+    maxConditions: 12,
+    maxConditionItems: 24,
+  });
+  // Additiv geprüft: Kein Feld darf verschwinden oder den Typ wechseln; neue
+  // Felder (Phase 2 der Strategie-Roadmap) bleiben dadurch möglich.
+  const known: Record<string, string> = {
+    price: "number", rsi14: "number", ema9: "number", ema21: "number", ema50: "number",
+    atrPct: "number", volume: "number", volumeMa20: "number", volumeRatio: "number",
+    changePct24h: "number", priceVsEma21Pct: "number", priceVsEma50Pct: "number",
+    trend: "trend", adx14: "number", bbwPct: "number", macd: "number", macdSignal: "number",
+    macdHist: "number", vwapPct: "number", spreadPct: "number", bookDepthUsd: "number",
+  };
+  for (const [field, kind] of Object.entries(known)) {
+    assert.equal((RULE_FIELDS as Record<string, string>)[field], kind, `RULE_FIELDS.${field}`);
+  }
+});
+
+// ── vwapPct auf hohen Timeframes (fail-closed) ───────────────────────────────
+
+test("STX-01: vwapPct === null auf 1d und 5d — eine Kerze je UTC-Tag ergibt keinen VWAP", () => {
+  for (const stepMs of [DAY_MS, 5 * DAY_MS]) {
+    const candles = seriesAt(60, stepMs, Date.UTC(2026, 0, 1));
+    const snapshot = buildSnapshotFromCandles("BTC", candles, 20);
+    assert.ok(snapshot, "der Snapshot selbst bleibt gültig");
+    assert.equal(snapshot.vwapPct, null, "null — nie 0");
+    assert.notEqual(snapshot.vwapPct, 0);
+    assert.equal(sessionVwap(candles), null);
+    assert.ok(Number.isFinite(snapshot.rsi14) && Number.isFinite(snapshot.volumeRatio), "übrige Felder unberührt");
+  }
+});
+
+test("STX-01: vwapPct ist null, solange weniger als zwei Kerzen am UTC-Tag liegen — ab der zweiten gibt es einen Wert", () => {
+  const steps: Record<string, number> = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": HOUR_MS, "2h": 2 * HOUR_MS, "4h": 4 * HOUR_MS };
+  for (const [timeframe, stepMs] of Object.entries(steps)) {
+    const firstBar = buildSnapshotFromCandles("BTC", seriesEndingOnBar(60, stepMs, 1), 20);
+    assert.ok(firstBar, timeframe);
+    assert.equal(firstBar.vwapPct, null, `${timeframe}: erste Kerze des UTC-Tages ⇒ kein VWAP`);
+
+    const secondBar = buildSnapshotFromCandles("BTC", seriesEndingOnBar(60, stepMs, 2), 20);
+    assert.ok(secondBar, timeframe);
+    assert.equal(typeof secondBar.vwapPct, "number", `${timeframe}: ab der zweiten Kerze ein Messwert`);
+  }
+});
+
+test("STX-01: eine vwapPct-Bedingung ist auf 1d fail-closed (null blockiert), auf Intraday-Daten erfüllbar", () => {
+  const rule = sanitizeRuleSpec({
+    ...withTimeframe("1d"),
+    condition: { logic: "all", conditions: [{ field: "vwapPct", op: "lt", value: 50 }] },
+  });
+  assert.equal(rule.ok, true);
+  if (!rule.ok) return;
+  const compiled = compileRuleSpec(rule.spec);
+
+  const daily = buildSnapshotFromCandles("BTC", seriesAt(60, DAY_MS, Date.UTC(2026, 0, 1)), 20)!;
+  assert.equal(compiled.evaluate(daily), false, "1d: kein VWAP ⇒ Bedingung bleibt false");
+
+  const hourly = buildSnapshotFromCandles("BTC", seriesEndingOnBar(60, HOUR_MS, 12), 20)!;
+  assert.equal(compiled.evaluate(hourly), true, "1h: VWAP vorhanden ⇒ Bedingung auswertbar");
+
+  // Und im Backtest: dieselbe Regel auf Tageskerzen handelt nie, auf Stundenkerzen schon.
+  const onDaily = backtestRule(rule.spec, seriesAt(200, DAY_MS, Date.UTC(2026, 0, 1)));
+  assert.equal(onDaily.stats.trades, 0, "1d-Backtest läuft, aber vwapPct blockiert jede Bedingung");
+  const onHourly = backtestRule(rule.spec, seriesAt(200, HOUR_MS, Date.UTC(2026, 0, 1)));
+  assert.ok(onHourly.stats.trades > 0, "Kontrolle: auf Stundenkerzen handelt dieselbe Regel");
+});
+
+test("STX-01: der Engine-Pfad (snapshotFromCache) stimmt mit buildSnapshotFromCandles überein — 1d/5d beide null", () => {
+  for (const [stepMs, expectNull] of [[DAY_MS, true], [5 * DAY_MS, true], [HOUR_MS, false]] as const) {
+    const candles = seriesAt(120, stepMs, Date.UTC(2026, 0, 1));
+    const cache = buildIndicatorCache(candles);
+    for (const idx of [60, 100, 119]) {
+      const viaCache = snapshotFromCache("BTC", candles, cache, idx, 20);
+      const direct = buildSnapshotFromCandles("BTC", candles.slice(0, idx + 1), 20);
+      assert.ok(viaCache && direct, `idx ${idx}`);
+      if (expectNull) {
+        assert.equal(viaCache.vwapPct, null);
+        assert.equal(direct.vwapPct, null);
+      } else {
+        assert.ok(viaCache.vwapPct !== null && direct.vwapPct !== null);
+        assert.ok(Math.abs(viaCache.vwapPct - direct.vwapPct) <= 1e-4, `idx ${idx}: VWAP-Parität`);
+      }
+    }
+  }
+});
+
+test("STX-01: RULE_CEILINGS.volumeWindow (5…200) bleibt auf 1d sinnvoll — das Fenster zählt Kerzen, nicht Stunden", () => {
+  assert.deepEqual([...RULE_CEILINGS.volumeWindow], [5, 200]);
+  const daily = seriesAt(60, DAY_MS, Date.UTC(2026, 0, 1));
+  for (const volumeWindow of [5, 20, 200]) {
+    const snapshot = buildSnapshotFromCandles("BTC", daily, volumeWindow)!;
+    const used = daily.slice(-Math.min(volumeWindow, daily.length));
+    const mean = used.reduce((sum, c) => sum + c.volume, 0) / used.length;
+    assert.ok(Math.abs(snapshot.volumeMa20 - mean) < 1e-9, `Fenster ${volumeWindow}`);
+    assert.ok(Math.abs(snapshot.volumeRatio - daily[daily.length - 1].volume / mean) < 1e-9);
+  }
+  // Die Klemmung der Regel selbst ist timeframe-unabhängig: 5 Tageskerzen = eine Handelswoche.
+  for (const [raw, expected] of [[1, 5], [1000, 200]] as const) {
+    const r = sanitizeRuleSpec({ ...withTimeframe("1d"), window: { ...validInput.window, timeframe: "1d", volumeWindow: raw } });
+    assert.equal(r.ok && r.spec.window.volumeWindow, expected);
+  }
+});
+
+// ── Micro-Executor-Guard: längerer Timeframe als das Ausführungsintervall ───
+
+/** Zeichnet Aufrufe auf — kein Broker, keine DB. */
+class RecordingRuleAdapter implements RuleExecutionAdapter {
+  readonly name = "recording";
+  readonly calls: ExecuteContext[] = [];
+  async execute(ctx: ExecuteContext): Promise<ExecutionOutcome> {
+    this.calls.push(ctx);
+    return { status: "TRIGGERED", ruleId: ctx.ruleId, symbol: ctx.snapshot.symbol, at: new Date().toISOString() };
+  }
+}
+
+/** Regel, die auf jedem Snapshot greift (`price > 0`) — der Timeframe entscheidet allein. */
+function alwaysMatchingRule(timeframe: string, id: string): CachedRule {
+  const r = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "price", op: "gt", value: 0 }] },
+    window: { timeframe, maxExecutionsPerDay: 10, cooldownMinutes: 0, volumeWindow: 20 },
+  });
+  assert.equal(r.ok, true);
+  if (!r.ok) throw new Error("unreachable");
+  return {
+    rowId: id,
+    ruleKey: id,
+    version: 1,
+    symbol: r.spec.symbol,
+    missionId: null,
+    name: r.spec.name,
+    spec: r.spec,
+    compiled: compileRuleSpec(r.spec),
+    executionsToday: 0,
+    firedAt: 0,
+    cooldownMs: 0,
+  };
+}
+
+test("STX-01 Micro-Executor-Guard: 1d-Regel auf 1m-Ausführungsintervall → keine Order, genau ein Telemetrie-Counter", async () => {
+  // Erst hier geladen: microExecutor zieht das DB-Modul (ohne Verbindungsaufbau) —
+  // alle übrigen Tests dieser Datei bleiben im Import-Graph DB-frei.
+  const { MicroExecutor, RuleCache, SequenceFeed } = await import("../src/lib/microExecutor");
+
+  const minute = 60_000;
+  const history = seriesAt(120, minute, 1_700_000_000_000);
+  const firstTick = history[history.length - 1].time + minute;
+  // Ein Minutenraster: pro Minute mehrere Trades (Preis fällt), 30 Minuten lang.
+  const ticks = Array.from({ length: 30 * 4 }, (_, i) => ({
+    kind: "trade" as const,
+    symbol: "BTC",
+    ts: firstTick + Math.floor(i / 4) * minute + (i % 4) * 1000,
+    price: 100 - i * 0.01,
+    qty: 10,
+  }));
+
+  async function run(timeframe: string) {
+    const logs: StructuredLogEntry[] = [];
+    setStructuredLogSinkForTests((entry) => logs.push(entry));
+    telemetry.microExecutor.reset();
+    try {
+      const cache = new RuleCache();
+      cache._seedForTest([alwaysMatchingRule(timeframe, `rule-${timeframe}`)]);
+      const adapter = new RecordingRuleAdapter();
+      const executor = new MicroExecutor({ cache, adapter, options: { seedCandles: false, executionInterval: "1m" } });
+      executor.addSymbol("BTC", "1m", history); // das Intervall-Raster des Executors
+      executor.registerFeed(new SequenceFeed(ticks));
+      await executor.start();
+      const status = executor.status();
+      await executor.stop();
+      return {
+        orders: adapter.calls.length,
+        counter: telemetry.microExecutor.ruleBlocked.total(),
+        byLabel: telemetry.microExecutor.ruleBlocked.byLabel(),
+        logs: logs.filter((entry) => entry.event === "micro_executor_rule_blocked"),
+        status,
+      };
+    } finally {
+      setStructuredLogSinkForTests(null);
+    }
+  }
+
+  const blocked = await run("1d");
+  assert.equal(blocked.orders, 0, "keine Position aus einer Regel, die länger als das Intervall ist");
+  assert.equal(blocked.counter, 1, "genau ein Telemetrie-Counter — je Regel einmal, nicht je Tick");
+  assert.deepEqual(blocked.byLabel, { "reason=timeframe_exceeds_interval,timeframe=1d": 1 });
+  assert.equal(blocked.logs.length, 1, "genau ein strukturierter Log-Eintrag");
+  assert.equal(blocked.logs[0].level, "warn");
+  assert.deepEqual(blocked.logs[0].fields, {
+    ruleId: "rule-1d",
+    ruleKey: "rule-1d",
+    version: 1,
+    symbol: "BTC",
+    timeframe: "1d",
+    executionInterval: "1m",
+    reason: "timeframe_exceeds_interval",
+    effect: "Regel wird nicht ausgewertet; aus ihr wird keine Position eröffnet.",
+  });
+  assert.ok(blocked.status.ticksProcessed > 0, "der Feed lief — die Regel wurde bewusst nicht bewertet");
+  assert.deepEqual(blocked.status.ruleGuard, {
+    executionInterval: "1m",
+    blocked: [{ ruleId: "rule-1d", symbol: "BTC", timeframe: "1d", reason: "timeframe_exceeds_interval" }],
+  });
+
+  // Kontrolle: dieselbe Regel auf dem Raster des Intervalls (1m) handelt auf demselben Feed —
+  // das Ausbleiben der Order oben ist also der Guard, nicht ein toter Testaufbau.
+  const control = await run("1m");
+  assert.ok(control.orders > 0, "Kontrolle: die 1m-Regel löst auf demselben Feed aus");
+  assert.equal(control.counter, 0, "kein Counter, wenn nichts abgewiesen wurde");
+  assert.equal(control.logs.length, 0);
+});

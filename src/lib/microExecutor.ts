@@ -15,6 +15,12 @@
  *     → RuleSnapshot (Indikatoren, ~10–100 µs)
  *     → RuleCache.match() (kompilierte ACTIVE-Regeln, Cooldown/Tageslimit im RAM)
  *     → RuleExecutionAdapter (Kill-Switch, Sperren, Guardrails, Fill, Feedback)
+ *
+ * Ausführungsintervall (STX-01, v0.6.2): Der Loop bewertet eine Regel gegen den
+ * Snapshot ihres Timeframes — inklusive der noch laufenden Kerze. Das trägt
+ * Intraday (Default-Obergrenze `1h`); eine `2h`/`4h`/`1d`/`5d`-Regel bekäme einen
+ * teilweise abgelaufenen Snapshot. Der Timeframe-Guard (`ruleTimeframeBlockReason`)
+ * weist sie fail-closed ab — sichtbar (Counter, Log, `status().ruleGuard`), nie still.
  */
 import { digest as executionInputHash } from "../executionQuality/model";
 import { db, getPool } from "@/db";
@@ -53,6 +59,11 @@ import { computeBookDepth, type BookLevelInput } from "./bookDepth";
 import { bookDepthVerdict } from "./bookDepthProvenance";
 import { getCandles, sanitizeSymbol } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
+import {
+  SUPPORTED_TIMEFRAME_MS,
+  isSupportedTimeframe,
+  type SupportedTimeframe,
+} from "./marketdata/timeframes";
 import { structuredLog } from "./logger";
 import { writeEquitySnapshot } from "./equity";
 // GAP-03 (v1.43.0): Journal-Attribution für regelförmige Eröffnungen.
@@ -167,25 +178,59 @@ export interface RuleExecutionAdapter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RollingTimeframeSeries — Kerzenhaltung + Aggregation ohne IO
+// Ausführungsintervall & Timeframe-Guard (STX-01, v0.6.2) — fail-closed
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TIMEFRAME_MS: Record<string, number> = {
-  // CYCLE-DAYTRADE-01: 1m ist der feinste Takt, den die Rule-Engine zulässt.
-  // Ohne diesen Eintrag würde `?? TIMEFRAME_MS["15m"]` eine 1m-Regel still auf
-  // 15-Minuten-Kerzen aggregieren — die Regel würde auf einem anderen Takt
-  // laufen, als sie unterschrieben hat.
-  "1m": 60_000,
-  "5m": 5 * 60_000,
-  "15m": 15 * 60_000,
-  "30m": 30 * 60_000,
-  "1h": 60 * 60_000,
-};
+/**
+ * Standard-Ausführungsintervall: der LÄNGSTE Regel-Timeframe, den der
+ * Mikro-Executor auswertet. `1h` ist das bisherige Maximum — Regeln von `1m`
+ * bis `1h` verhalten sich unverändert. Überschreibbar über
+ * {@link MicroExecutorOptions.executionInterval}.
+ */
+export const MICRO_EXECUTION_INTERVAL_DEFAULT: SupportedTimeframe = "1h";
+
+/**
+ * Warum der Mikro-Executor eine Regel nicht auswertet — geschlossenes
+ * Vokabular (Label des Counters `micro_executor_rule_blocked_total` und Feld
+ * `reason` des Logs `micro_executor_rule_blocked`):
+ *   - `timeframe_exceeds_interval`: Timeframe länger als das Ausführungsintervall.
+ *   - `timeframe_unsupported`: kein `SupportedTimeframe` (z. B. beschädigte,
+ *     nicht re-sanitisierte DB-Zeile) — die Periode ist unbekannt.
+ */
+export type RuleTimeframeBlockReason = "timeframe_exceeds_interval" | "timeframe_unsupported";
+
+/**
+ * Fail-closed Timeframe-Guard: die EINE Stelle, die entscheidet, ob der
+ * Mikro-Executor eine Regel dieses Timeframes auswerten darf. `null` = ja,
+ * sonst der Grund des „Nein“.
+ *
+ * Auswertbar ist nur ein bekannter Timeframe bis einschließlich zum
+ * Ausführungsintervall. Alles andere bleibt draußen, statt still auf einen
+ * anderen Takt zu fallen: eine Regel auf einem Tages-Snapshot aus einer
+ * halben Tageskerze sähe einen Messwert, den weder ihr Autor noch der Backtest
+ * je gesehen haben.
+ */
+export function ruleTimeframeBlockReason(
+  timeframe: unknown,
+  executionInterval: SupportedTimeframe,
+): RuleTimeframeBlockReason | null {
+  if (!isSupportedTimeframe(timeframe)) return "timeframe_unsupported";
+  return SUPPORTED_TIMEFRAME_MS[timeframe] > SUPPORTED_TIMEFRAME_MS[executionInterval]
+    ? "timeframe_exceeds_interval"
+    : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RollingTimeframeSeries — Kerzenhaltung + Aggregation ohne IO
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Hält eine Kerzenreihe eines Symbols für EIN Timeframe im RAM.
  * Gestartet mit REST-Historie (Seed), danach live via Trade-Ticks und
  * 1m-Kerzen-Closes fortgeschrieben. Aggregation 1m → Nm ist deterministisch.
+ * Die Serie aggregiert jeden `SupportedTimeframe` exakt auf dessen Periode;
+ * welche Timeframes der Executor zulässt, entscheidet der Guard
+ * ({@link ruleTimeframeBlockReason}), nicht die Serie.
  */
 export class RollingTimeframeSeries {
   readonly symbol: string;
@@ -198,9 +243,18 @@ export class RollingTimeframeSeries {
   private openAgg: CandleLike | null = null;
 
   constructor(symbol: string, timeframe: string, history: CandleLike[] = []) {
+    // Kein stiller Fallback auf einen anderen Takt (früher `?? 15m`): Die Regel
+    // liefe sonst auf Kerzen, die sie nie unterschrieben hat — bei `1m`
+    // (CYCLE-DAYTRADE-01) ebenso wie bei `3m`…`5d` (STX-01). Die Perioden kommen
+    // aus der kanonischen Tabelle; der Executor hat keine zweite.
+    if (!isSupportedTimeframe(timeframe)) {
+      throw new RangeError(
+        `Unbekannter Timeframe "${String(timeframe).slice(0, 20)}" — Rolling-Serie nicht aufbaubar.`,
+      );
+    }
     this.symbol = symbol.toUpperCase();
     this.timeframe = timeframe;
-    this.bucketMs = TIMEFRAME_MS[timeframe] ?? TIMEFRAME_MS["15m"];
+    this.bucketMs = SUPPORTED_TIMEFRAME_MS[timeframe];
     this.finalized = history.slice(-160);
   }
 
@@ -1148,6 +1202,16 @@ export function createPaperRuleAdapter(opts?: {
 export type MicroExecutorOptions = {
   refreshMs?: number;
   seedCandles?: boolean;
+  /**
+   * Ausführungsintervall: der längste Regel-Timeframe, den dieser Executor
+   * auswertet (Default {@link MICRO_EXECUTION_INTERVAL_DEFAULT} = `1h`). Regeln
+   * mit längerem Timeframe nimmt der Guard beim Start sichtbar heraus; eine
+   * Serie oberhalb des Intervalls lässt sich nicht anlegen (`addSymbol` wirft).
+   * Werte über `1h` sind eine Policy-Entscheidung (Audit-Tracking OP-1), keine
+   * reine Konfiguration: Der Loop bewertet die laufende Kerze, und der REST-Seed
+   * (`getCandles`) kennt `5d` nicht.
+   */
+  executionInterval?: SupportedTimeframe;
 };
 
 export type MicroStatus = {
@@ -1165,6 +1229,15 @@ export type MicroStatus = {
   avgEvalMicros: number | null;
   p95EvalMicros: number | null;
   series: { symbol: string; timeframe: string; candles: number }[];
+  /**
+   * Timeframe-Guard (STX-01): das Ausführungsintervall und die Regeln, die er
+   * aktuell abweist (aus dem RuleCache abgeleitet — auch nach dem Start
+   * aktivierte Regeln erscheinen hier; ausgewertet werden sie nie).
+   */
+  ruleGuard: {
+    executionInterval: SupportedTimeframe;
+    blocked: { ruleId: string; symbol: string; timeframe: string; reason: RuleTimeframeBlockReason }[];
+  };
   lastError: string | null;
   /** Warmstart (REST-Historie): Fehler sind sichtbar, nicht still verschluckt (MDERR-006). */
   seed: { requested: number; failed: number; lastError: string | null };
@@ -1185,6 +1258,9 @@ export type MicroStatus = {
  * - Warmstart: REST-Historie für die Rolling-Serien; Fehler sind sichtbar
  *   (MDERR-006), nicht still verschluckt.
  * - Kill-Switch: bei aktivem Halt werden keine neuen Orders ausgeführt.
+ * - Timeframe-Guard (STX-01): Eine Regel mit Timeframe oberhalb des
+ *   Ausführungsintervalls wird nie ausgewertet und eröffnet nie eine Position —
+ *   fail-closed, aber sichtbar (Counter, Log, `status().ruleGuard`).
  *
  * **Lebenszyklus:** `start()` verbindet die Feeds und startet den Tick-Loop;
  * `stop()` trennt sauber. `status()` liefert Diagnose (Ticks, Matches,
@@ -1212,6 +1288,7 @@ export class MicroExecutor {
   private seedFailed = 0;
   private seedLastError: string | null = null;
   private readonly options: MicroExecutorOptions;
+  private readonly executionInterval: SupportedTimeframe;
 
   constructor(opts?: {
     cache?: RuleCache;
@@ -1222,6 +1299,13 @@ export class MicroExecutor {
     this.adapter =
       opts?.adapter ?? createPaperRuleAdapter({ onFired: (id) => this.cache.noteFired(id) });
     this.options = opts?.options ?? {};
+    this.executionInterval = this.options.executionInterval ?? MICRO_EXECUTION_INTERVAL_DEFAULT;
+    if (!isSupportedTimeframe(this.executionInterval)) {
+      // Ein unbekanntes Intervall würde den Guard unbemerkt aushebeln — lieber beim Start scheitern.
+      throw new RangeError(
+        `executionInterval "${String(this.executionInterval).slice(0, 20)}" ist kein SupportedTimeframe.`,
+      );
+    }
   }
 
   registerFeed(feed: MarketFeed): void {
@@ -1231,6 +1315,15 @@ export class MicroExecutor {
   addSymbol(symbolRaw: string, timeframe: string, history: CandleLike[] = []): void {
     const symbol = sanitizeSymbol(symbolRaw);
     if (!symbol) return;
+    // Der Guard greift an der einzigen Stelle, an der Serien entstehen:
+    // `RuleCache.match` filtert exakt auf den Timeframe der Serie — ohne Serie
+    // eines Timeframes wird keine Regel dieses Timeframes ausgewertet.
+    const blocked = ruleTimeframeBlockReason(timeframe, this.executionInterval);
+    if (blocked) {
+      throw new RangeError(
+        `Serie ${symbol}:${String(timeframe).slice(0, 20)} abgelehnt (${blocked}, Ausführungsintervall ${this.executionInterval}).`,
+      );
+    }
     const key = `${symbol}:${timeframe}`;
     if (!this.series.has(key)) {
       this.series.set(key, new RollingTimeframeSeries(symbol, timeframe, history));
@@ -1293,10 +1386,14 @@ export class MicroExecutor {
     this.startedAt = Date.now();
     await this.cache.load();
 
-    // Für JEDE aktive Regel eine Rolling-Serie ihres Timeframes sicherstellen
-    // (auch 30m/1h — nicht nur die Standard-Timeframes).
+    // Für JEDE auswertbare aktive Regel eine Rolling-Serie ihres Timeframes
+    // sicherstellen (auch 30m/1h — nicht nur die Standard-Timeframes). Der
+    // Timeframe-Guard nimmt die übrigen sichtbar heraus: für sie entsteht keine
+    // Serie, also wird nie ein Snapshot gegen sie bewertet (STX-01).
     for (const rule of this.cache.allRules()) {
-      this.addSymbol(rule.symbol, rule.spec.window.timeframe);
+      const reason = this.blockReasonOf(rule);
+      if (reason) this.announceBlockedRule(rule, reason);
+      else this.addSymbol(rule.symbol, rule.spec.window.timeframe);
     }
 
     // Seed: Historie pro (Symbol, Timeframe) aus dem REST-Cache holen, damit
@@ -1357,6 +1454,33 @@ export class MicroExecutor {
     this.running = false;
     await this.cache.stop();
     for (const feed of this.feeds) await feed.stop();
+  }
+
+  private blockReasonOf(rule: CachedRule): RuleTimeframeBlockReason | null {
+    return ruleTimeframeBlockReason(rule.spec.window.timeframe, this.executionInterval);
+  }
+
+  /**
+   * Das sichtbare „Nein“ des Timeframe-Guards: Counter (ohne Symbol/Regel-ID als
+   * Label — Kardinalitätsregel) plus strukturiertes Log mit allen Bezügen. Läuft
+   * je Regel genau einmal, beim Start — nicht je Tick.
+   */
+  private announceBlockedRule(rule: CachedRule, reason: RuleTimeframeBlockReason): void {
+    const timeframe = String(rule.spec.window.timeframe);
+    telemetry.microExecutor.ruleBlocked.inc({
+      reason,
+      timeframe: isSupportedTimeframe(timeframe) ? timeframe : "OTHER",
+    });
+    structuredLog("warn", "micro_executor_rule_blocked", {
+      ruleId: rule.rowId,
+      ruleKey: rule.ruleKey,
+      version: rule.version,
+      symbol: rule.symbol,
+      timeframe,
+      executionInterval: this.executionInterval,
+      reason,
+      effect: "Regel wird nicht ausgewertet; aus ihr wird keine Position eröffnet.",
+    });
   }
 
   private handleTick(tick: FeedTick): void {
@@ -1453,6 +1577,15 @@ export class MicroExecutor {
         timeframe: s.timeframe,
         candles: s.size(),
       })),
+      ruleGuard: {
+        executionInterval: this.executionInterval,
+        blocked: this.cache.allRules().flatMap((rule) => {
+          const reason = this.blockReasonOf(rule);
+          return reason
+            ? [{ ruleId: rule.rowId, symbol: rule.symbol, timeframe: String(rule.spec.window.timeframe), reason }]
+            : [];
+        }),
+      },
       lastError: this.lastError,
       seed: {
         requested: this.seedRequested,

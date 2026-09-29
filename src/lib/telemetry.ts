@@ -617,6 +617,24 @@ export const telemetry = {
       telemetry.strategyLifecycle.gateDecisions.reset();
     },
   },
+  /**
+   * Mikro-Executor-Guards (STX-01, v0.6.2).
+   *
+   * Labels ausschließlich Code-konstant (`reason` = geschlossener
+   * `RuleTimeframeBlockReason`, `timeframe` = Element von `SUPPORTED_TIMEFRAMES`
+   * bzw. `OTHER`) — KEINE Regel-IDs oder Symbole als Label (Kardinalitätsregel
+   * wie oben); die stehen im strukturierten Log `micro_executor_rule_blocked`.
+   * Der Zähler lebt im Mikro-Executor-Prozess; sichtbar ist er dort über
+   * `status().ruleGuard` (`GET /api/firm/micro`) und das Log.
+   */
+  microExecutor: {
+    /** Regeln, die der Timeframe-Guard beim Start verworfen hat — je Regel genau einmal. */
+    ruleBlocked: new LabelCounter("micro_executor_rule_blocked_total"),
+    /** alle Zähler der Mikro-Executor-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.microExecutor.ruleBlocked.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -800,6 +818,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.volatilityTargeting.updates.exposition(),
     telemetry.volatilityTargeting.fallbacks.exposition(),
     telemetry.volatilityTargeting.snapshots.exposition(),
+    telemetry.microExecutor.ruleBlocked.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -898,4 +917,5 @@ export function resetTelemetryForTests(): void {
   telemetry.twap.reset();
   telemetry.monteCarlo.reset();
   telemetry.strategyLifecycle.reset();
+  telemetry.microExecutor.reset();
 }
