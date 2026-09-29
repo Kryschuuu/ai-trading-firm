@@ -61,13 +61,27 @@ Jeder: Kontext, Optionen, **Entscheidung**, Konsequenzen, Auswirkung auf die Roa
 
 ## Akzeptanzkriterien
 
-- [ ] Drei ADRs mit je Kontext/Optionen/Entscheidung/Konsequenzen
-- [ ] Jede Roadmap-Phase, die ein Vokabular berührt, verweist auf die ADR-Nummer
-- [ ] Die im Ausbaudokument vorgeschlagenen Alternativen stehen als **verworfen** drin,
+- [x] Drei ADRs mit je Kontext/Optionen/Entscheidung/Konsequenzen
+- [x] Jede Roadmap-Phase, die ein Vokabular berührt, verweist auf die ADR-Nummer
+- [x] Die im Ausbaudokument vorgeschlagenen Alternativen stehen als **verworfen** drin,
       mit Begründung — damit die Entscheidung nicht in 3 Monaten neu diskutiert wird
-- [ ] `npm run docs:validate` grün, kein Code geändert
+- [x] `npm run docs:validate` grün, kein Laufzeit-Code geändert (Nicht-Doku-Änderungen: nur die
+      lesenden Tests `tests/adrVocabulary.test.ts` und `tests/docsVersioning.test.ts` sowie das
+      Versionsfeld in `package.json`/`package-lock.json`)
 
 ## Gesperrt
 
 - Keine Code-Änderung in diesem Prompt.
 - Keine „vielleicht später"-Formulierungen: jede ADR endet in **einer** Entscheidung.
+
+## Ergebnis (umgesetzt in `v0.6.1`, 2026-09-29)
+
+Die Entscheidungen stehen als [ADR-008 (E1)](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009 (E2)](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) und [ADR-010 (E3)](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) in
+[`docs/roadmap/DECISIONS.md`](../../../roadmap/DECISIONS.md). Gate **G0** ist erfüllt. Beim Verifizieren gegen den Code sind
+drei Vorgaben dieses Prompts präzisiert worden (Details in den ADRs):
+
+| Vorgabe dieses Prompts | Befund gegen den Code | Niederschlag |
+|---|---|---|
+| E1: `StrategyClass` in `marketRegime.ts:86` | steht in `marketRegime.ts:91`; Regeln tragen keine Klasse (Ableitung über das Mission-Template), der Backtest wendet kein Regime-Gate an | ADR-008 „Wirkungsgrenze“ |
+| E2: „`evaluateRegimeOos` misst regimebezogene OOS-Kennzahlen“ | misst **Markt**-Forward-Returns und weist `UNKNOWN` als eigenen Bucket aus; „Strategie je Regime“ fehlt | ADR-009: Aggregator in 06-04, `evaluateRegimeOos` bleibt unverändert |
+| E3: „`CrossSectionalConfig` deckt `selection` ab“, „Bounds aus `volatilityTargeting.ts`“ | `topN` ist nicht gedeckt (`UNIVERSE_CAP` kappt nach Volumen); die Bounds begrenzen den Risiko-Multiplikator, nicht Gewichte | ADR-010: `topN` ist Parameter der `PortfolioConstruction`; Exposure über `VOLATILITY_TARGETING_BOUNDS`, Per-Asset-Schranken über `WeightBounds` |

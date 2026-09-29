@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.6.0` |
+| **Version** | `v0.6.1` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-09-29 |
-| **Quellbasiert** | `package.json` (`version: "0.6.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.6.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -78,6 +78,23 @@ Trusted-Indikatoren, ohne den Engine-Default zu ändern. `v0.3.0` liefert:
   Entscheidung: Screening läuft über `runMultiAssetBacktest()`, STX-12 wird Patch-Task.
 - **Kein Laufzeitverhalten geändert:** `ruleEngine.ts`, `engine.ts` und
   `indicatorCache.ts` bleiben unberührt; Audit-Doku auf Stand `v1.1.0`.
+
+`v0.6.1` liefert die **Strategie-Stack-SSoT** und die **drei Vokabular-Entscheidungen**
+(Prompts 00-02/00-03, Findings STX-02/03/04) — Doku, kein Laufzeit-Code:
+
+- **[`docs/architecture/STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md)** (00-02, mit
+  PR #182 gemergt und hier nachträglich versioniert): SSoT-Karte „welcher Baustein ist wofür
+  zuständig“ mit expliziten Lücken und Einordnungsregel; im selben Zug gegen den Code
+  nachverifiziert und korrigiert.
+- **ADR-008 bis ADR-010** in [`docs/roadmap/DECISIONS.md`](docs/roadmap/DECISIONS.md):
+  Strategieklasse (`StrategyTemplate.class` Pflicht aus `STRATEGY_CLASS_KEYS`, `unclassified` ist
+  ein Fehler, keine neue Klasse), Regime (`MarketRegime` + `UNKNOWN` fail-closed, 7er-Taxonomie
+  verworfen) und Universe (keine `MultiAssetStrategySpec`; `PortfolioConstruction` liest den
+  `CrossSectionalConfig`-Snapshot).
+- **Gate G0 der Strategie-Roadmap erfüllt:** Phase 1 (`v0.6.2`, Timeframe-Angleichung) darf starten.
+- **`tests/adrVocabulary.test.ts`:** hält die ADRs gegen Code, Roadmap und Prompts fest (nur lesend).
+- **Kein Laufzeitverhalten geändert:** `src/`, `scripts/` und `drizzle/` bleiben unberührt; Audit-Doku
+  auf Stand `v1.1.1`.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

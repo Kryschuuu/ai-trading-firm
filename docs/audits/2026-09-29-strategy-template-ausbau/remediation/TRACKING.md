@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-09-29 · **00-01 abgeschlossen** (`v0.6.0`) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md)
+- **Stand:** 2026-09-29 · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 ## Legende
 
@@ -15,20 +15,20 @@
 | ID | Severity | Status | Behoben durch |
 |---|---|---|---|
 | STX-01 Timeframe-Blocker | HIGH | ☐ | 01-01 |
-| STX-02 `StrategyClass`-Duplikat | HIGH | ☐ | 00-03 (ADR-E1) → 03-01 |
-| STX-03 Regime-Vokabular-Konflikt | HIGH | ☐ | 00-03 (ADR-E2) → 06-04 |
-| STX-04 `MultiAssetStrategySpec`-Duplikat | HIGH | ☐ | 00-03 (ADR-E3) |
+| STX-02 `StrategyClass`-Duplikat | HIGH | ◐ | 00-03 ☑ ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), `v0.6.1`) → 03-01 |
+| STX-03 Regime-Vokabular-Konflikt | HIGH | ◐ | 00-03 ☑ ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), `v0.6.1`) → 06-04 |
+| STX-04 `MultiAssetStrategySpec`-Duplikat | HIGH | ☑ | 00-03 ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), `v0.6.1`); Sizing-Schicht bewusst außerhalb der Roadmap |
 | STX-05 Builder umgeht Sanitize | HIGH | ☐ | 03-01 → 03-09 |
 | STX-06 Keine Versions-Persistenz | MEDIUM | ☐ | 04-01 → 04-02 |
 | STX-07 `backtest_runs`-Scope | MEDIUM | ☐ | 05-03 |
 | STX-08 Alpaca ohne WS | MEDIUM | ☐ | 07-03 (Bewusst: Alpaca ausgeschlossen) |
 | STX-09 Copy-Reconciliation-Duplikat | MEDIUM | ☐ | 07-02 |
-| STX-10 Feature Store ist Slice | MEDIUM | ☐ | 00-02 (Doku) → 02-04 (optional) |
-| STX-11 Cost-Stress existiert | MEDIUM | ☐ | 00-02 (Doku) → 06-03 (Andocken) |
+| STX-10 Feature Store ist Slice | MEDIUM | ◐ | 00-02 ☑ (Doku, `v0.6.1`) → 02-04 (optional) |
+| STX-11 Cost-Stress existiert | MEDIUM | ◐ | 00-02 ☑ (Doku, `v0.6.1`) → 06-03 (Andocken) |
 | STX-12 `backtestRule` O(n²) | MEDIUM | ◐ | 00-01 (Messung ✓, `v0.6.0`) → Folge-Patch mit Paritätstest |
 | STX-13 OpenCode-Free-Tier | LOW | ☐ | 06-05 |
 | STX-14 `changePct24h`-Semantik | LOW | ☐ | 03-01 (Doku) → 06-01 (Prüfung) |
-| STX-15 Faktorzahl (14 ≠ 15+) | LOW | ☐ | 00-02 |
+| STX-15 Faktorzahl (14 ≠ 15+) | LOW | ☑ | 00-02 (`v0.6.1`) |
 | STX-16 Copy-Compliance | LOW | ☐ | 07-01 → 07-02 (`SIMULATE_ONLY`) |
 | STX-17 Validator kompatibel | INFO | ☐ | bestätigt — 06-04 |
 | STX-18 `RuleSpec` trägt 5/7 Templates | INFO | ☐ | bestätigt — 03-03…03-08 |
@@ -41,8 +41,8 @@
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
 | 00-01 | [Backtest-Perfenz-Baseline](../prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | ☑ | STX-12 | [`v0.6.0`](BENCH-BASELINE.md) |
-| 00-02 | [Strategie-Stack-SSoT](../prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | ☐ | STX-10/11/15 | — |
-| 00-03 | [Vokabular-ADR](../prompts/PROMPT-STX-00-03-vokabular-adr.md) | ☐ | STX-02/03/04 | — |
+| 00-02 | [Strategie-Stack-SSoT](../prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | ☑ | STX-10/11/15 | [`v0.6.1`](../../../architecture/STRATEGY_STACK.md) |
+| 00-03 | [Vokabular-ADR](../prompts/PROMPT-STX-00-03-vokabular-adr.md) | ☑ | STX-02/03/04 | [`v0.6.1`](../../../roadmap/DECISIONS.md) |
 
 ### Phase 1 — Blocker
 
@@ -115,9 +115,10 @@
 | Vorschlag | Entscheidung | Begründung | Dokumentiert in |
 |---|---|---|---|
 | Kafka | ✗ abgelehnt | STX-19 | `ROADMAP.md` §Abgelehnt |
-| `MultiAssetStrategySpec` | ✗ abgelehnt | STX-04 | 00-03 (ADR-E3) |
-| Regime-Taxonomie (7er) | ✗ abgelehnt | STX-03 | 00-03 (ADR-E2) |
-| Eigene Strategieklasse | ✗ abgelehnt | STX-02 | 00-03 (ADR-E1) |
+| `MultiAssetStrategySpec` | ✗ abgelehnt | STX-04 | 00-03 ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) |
+| `PortfolioConstruction`-Schicht (Universe-Gewichte) | ⊘ eigener Prompt außerhalb der 32 | STX-04 (Sizing-Lücke) | [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) |
+| Regime-Taxonomie (7er) | ✗ abgelehnt | STX-03 | 00-03 ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)) |
+| Eigene Strategieklasse / neue Klasse (`momentum`) | ✗ abgelehnt | STX-02 | 00-03 ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)) |
 | Copy-Reconciler | ✗ abgelehnt | STX-09 | 07-02 |
 | Slippage-Cancel nach Fill | ✗ abgelehnt | STX-09 | 07-02 |
 | Alpaca-Leader | ⊘ zurückgestellt | STX-08 (kein WS) | `ROADMAP.md` §Abgelehnt |
@@ -130,7 +131,7 @@
 
 | Gate | Bedingung | Prompts dahinter |
 |---|---|---|
-| **G0** | 00-03 abgeschlossen (3 ADRs fixiert) | 01-01, 02-01, 03-01, 07-01 |
+| **G0** | ✅ **erfüllt** (00-03: 3 ADRs fixiert, `v0.6.1` — [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) | 01-01, 02-01, 03-01, 07-01 |
 | **G1** | 01-01 grün (Timeframes, Intraday byte-identisch) | 02-02, 02-03, 03-01, 05-02 |
 | **G2** | 02-02/02-03 grün (neue Felder + Parität) | 03-06, 03-08 |
 | **G3** | 03-10 grün (6 Templates vertraglich abgesichert) | 04-01 |
@@ -146,12 +147,12 @@
   der Live-Executor Intraday-only und `4h`+ gilt nur für Backtest/Screening?
   (Entscheidung nötig; 01-01 implementiert die Guard-Schicht, aber die Policy-Frage
   bleibt offen.)
-- **OP-2:** `unclassified` als Template-Status — 03-01/03-02 lehnen ihn ab. Ist das die
-  gewünschte Policy, oder soll ein „unclassified"-Template erlaubt sein, das
-  automatisch als `BLOCKED` endet?
+- **OP-2:** ✅ **beantwortet** durch [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) (2026-09-29): `unclassified` ist **kein** Template-Status — ein
+  Template ohne Klasse oder mit `unclassified` ist ein Fehler (Validierung 03-02, Compiler 03-09, DB-CHECK 04-01).
 - **OP-3:** Sollen `strategy_versions` an die `regime_snapshots`/`feature_store` des
   jeweiligen Laufs gebunden werden (Data-Version-Provenienz), oder reicht
-  `data_version` als Freitext?
+  `data_version` als Freitext? ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) legt nur fest, dass Per-Regime-Ergebnisse
+  `featureVersion`/`modelVersion` der verwendeten Snapshots tragen; die Frage für `strategy_versions` bleibt offen.)
 - **OP-4:** Kopieren-Projekt: Wer trägt die rechtliche Prüfung für den Fall, dass aus
   `SIMULATE_ONLY` später doch Live werden soll? (STX-16 — nicht Teil dieses Repos.)
 - **OP-5:** 02-04 (Feature-Store-Slice) — nachholen, wenn die Matrix-Größe den

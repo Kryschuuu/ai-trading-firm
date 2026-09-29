@@ -4,7 +4,7 @@
 - **Severity:** LOW
 - **Bereich:** Doku
 - **Quelle:** Ausbaudokument §0 („15+ Faktoren")
-- **Status:** OPEN
+- **Status:** FIXED — Faktenkorrektur dokumentiert (00-02, `v0.6.1`, [STRATEGY_STACK.md](../../../architecture/STRATEGY_STACK.md)); Verweis auf `scanner.config.json` statt Dateizahlen
 - **Datei(en):** `src/scanner/scanner.config.json`, `src/scanner/factors/`
 
 ## Beweis

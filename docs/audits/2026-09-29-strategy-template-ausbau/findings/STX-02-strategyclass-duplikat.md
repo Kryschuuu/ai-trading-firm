@@ -4,7 +4,7 @@
 - **Severity:** HIGH
 - **Bereich:** Architektur / Domänenmodell
 - **Quelle:** Ausbaudokument §1.2, §15 (nicht erwähnt)
-- **Status:** OPEN
+- **Status:** IN ARBEIT — entschieden mit [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) (00-03, `v0.6.1`); Umsetzung in 03-01, 03-02, 03-09
 - **Datei(en):** `src/lib/marketRegime.ts`, `src/lib/signalDecay.ts`
 
 ## Beschreibung
@@ -16,7 +16,7 @@ sogar **durchgeschaltet bis zur Order-Ausführung**.
 ## Beweis
 
 ```ts
-// src/lib/marketRegime.ts:86
+// src/lib/marketRegime.ts:91
 export type StrategyClass = "mean-reversion" | "trend" | "breakout";
 
 // src/lib/signalDecay.ts:102-112
@@ -31,21 +31,28 @@ Wirkt bereits auf:
 - `resolveRegimeGateForExecution(symbol, strategyClass)` (`microExecutor.ts:779`)
 - `DEFAULT_CLASS_POLICIES` (Decay-Schwellen je Klasse, `signalDecay.ts:361`)
 
-Ein `StrategyTemplate` ohne `class`-Feld erzeugt Regeln, die im Regime-Gate und im
-Decay-Pfad auf `"unclassified"` fallen — d. h. **stille Abschwächung** der Risiko-Logik.
+Ein `StrategyTemplate` ohne `class`-Feld erzeugt Regeln, die im Regime-Gate (dort heißt „keine Klasse“
+`null`, Faktor 1) und im Decay-Pfad (`"unclassified"`, Policy default-off) ihre Klassen-Logik verlieren —
+d. h. **stille Abschwächung** der Risiko-Logik.
+
+Präzisierung ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)): Regeln tragen heute **keine**
+Klasse; zur Laufzeit wird sie aus dem *Mission*-Template abgeleitet (`strategyClassOfTemplate`,
+Namens-Heuristik). Der Backtest wendet kein Regime-Gate an — nur die Decay-Policy nutzt dort die Klasse.
 
 ## Remediation
 
 1. `StrategyTemplate.class: StrategyClassKey` als **Pflichtfeld**, typisiert gegen
-   `STRATEGY_CLASS_KEYS` (kein eigener Union-Typ).
-2. Der Compiler setzt `strategyClass` aus dem Template in den Backtest-/Runtime-Kontext.
+   `STRATEGY_CLASS_KEYS` (kein eigener Union-Typ); `unclassified` ist ein Fehler, keine neue Klasse.
+2. Der Compiler gibt `strategyClass` im `CompileResult` zurück (Backtest-/Decay-Kontext). Die Live-Wirkung
+   bleibt bei der Mission-Ableitung — `RuleSpec`/`trade_rules` tragen weiterhin keine Klasse.
 3. Kein neuer Klassen-Vokabular-Typ im Template-Modul.
 
 ## Akzeptanzkriterien
 
-- [ ] Jedes Template deklariert eine Klasse aus `STRATEGY_CLASS_KEYS`
-- [ ] Test: Compiler setzt `strategyClass` durch bis `regimeGateFactor`
-- [ ] Kein zweites Klassen-Enum im Repo
+- [x] Entscheidung schriftlich fixiert ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), `v0.6.1`); Kontrakt-Invariante und Guard für `src/strategies/` in `tests/adrVocabulary.test.ts`
+- [ ] Jedes Template deklariert eine Klasse aus `STRATEGY_CLASS_KEYS` (ohne `unclassified`)
+- [ ] Test: `CompileResult.strategyClass` ist für alle Templates eine Klasse aus `STRATEGY_CLASSES`, und `regimeGateFactor(regime, strategyClass)` liefert für alle fünf Regimes einen definierten Faktor
+- [ ] Kein zweites Klassen-Enum in `src/strategies/` (bestehende Literal-Listen in `signalDecay*.ts` sind dokumentierte Altlast, [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1))
 
 ## Versions-Hinweis
 

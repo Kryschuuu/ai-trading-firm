@@ -4,7 +4,7 @@
 - **Severity:** HIGH
 - **Bereich:** Architektur / Domänenmodell
 - **Quelle:** Ausbaudokument §3.6
-- **Status:** OPEN
+- **Status:** IN ARBEIT — entschieden mit [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) (00-03, `v0.6.1`); Aggregator in 06-04
 - **Datei(en):** `src/lib/marketRegime.ts`, `src/lib/regimeEvaluation.ts`, `drizzle/2026-09-22_regime_snapshots.sql`
 
 ## Beschreibung
@@ -22,26 +22,30 @@ export type MarketRegimeLabel = MarketRegime | "UNKNOWN";
 ```
 
 Bereits vorhanden und *wired*:
-- Klassifikator: `classifyMultidim` (`marketRegime.ts:807`)
+- Klassifikator: `classifyMarketRegimeMultidim` (`marketRegime.ts:803`)
 - Gate: `REGIME_GATE_MODE` `off|monitor|enforce`, `regimeGateFactor` (`:989`)
 - Persistenz: Tabelle `regime_snapshots` + `src/lib/regimeSnapshotStore.ts`
 - Auswertung: `evaluateRegimeStability`, `evaluateRegimeOos` (`regimeEvaluation.ts`)
 
-Hinweis: `evaluateRegimeOos` misst bereits **regimebezogene OOS-Kennzahlen** — genau das,
-was §3.6 fordert, nur mit dem vorhandenen Vokabular.
+Hinweis (korrigiert mit [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)): `evaluateRegimeOos` misst **Markt**-Forward-Returns je bestätigtem
+Regime (`RegimeEvalRow.forwardReturnPct`) — nicht die Leistung einer Strategie. Es liefert Vokabular
+(`REGIME_EVAL_LABELS`) und Zeilenformat; die Auswertung „Strategie je Regime“ fehlt noch und entsteht als
+Aggregator in 06-04. `UNKNOWN` weist `evaluateRegimeOos` als eigenen Mess-Bucket aus.
 
 ## Remediation
 
 1. **Ablehnen** der 7er-Taxonomie.
-2. Strategie-Per-Regime-Auswertung über `regime_snapshots` + `evaluateRegimeOos`
-   realisieren (neuer Aggregator, **kein** neues Vokabular).
+2. Strategie-Per-Regime-Auswertung über `regime_snapshots` und das Zeilenformat/Vokabular von
+   `regimeEvaluation.ts` realisieren (neuer Aggregator in 06-04, **kein** neues Vokabular;
+   `evaluateRegimeOos` bleibt unverändert).
 3. `UNKNOWN` ist fail-closed auszuschließen, nie als eigene Regime-Leistung zu zählen.
 
 ## Akzeptanzkriterien
 
-- [ ] Kein zweites Regime-Vokabular im Repo
-- [ ] `STRATEGY_LIFECYCLE`/`drift.ts` nutzt dieselben Labels wie `marketRegime.ts`
-- [ ] Test: `evaluateRegimeOos` schließt `UNKNOWN` aus
+- [x] Entscheidung schriftlich fixiert ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), `v0.6.1`); Vokabular, `regime_snapshots`-CHECK und das `evaluateRegimeOos`-Ist-Verhalten in `tests/adrVocabulary.test.ts` festgehalten
+- [ ] Kein zweites Regime-Vokabular im Repo (die `VolatilityRegime`-Typen sind Volatilitäts-Stufen, kein Markt-Regime)
+- [ ] Verwender der Regime-Labels außerhalb von `marketRegime.ts` (künftig 06-04 im Evidenz-`detail`) nutzen dieselben Labels — `src/strategyLifecycle/` kennt heute kein Regime
+- [ ] Test: der Aggregator (06-04) schließt `UNKNOWN` aus und zählt es nie als „Regime ohne Edge“
 
 ## Versions-Hinweis
 

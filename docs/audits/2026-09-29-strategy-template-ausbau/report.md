@@ -74,6 +74,11 @@ Abstraktionen zuerst gegen bestehende Domänenmodelle abgegrenzt werden müssen.
 | *„Cost Stress ×1/×2/×3 ist neu"* | `MonteCarloStressConfig { feeMultiplier, slippageMultiplier }` existiert in `montecarlo.ts:171`; Bound `[1,100]`; `MC_STRESS_MULTIPLIER_BOUNDS`. Zusätzlich Scanner-Faktor `executionCost` | **STX-11** — nicht neu, aber **an anderer Stelle** (post-hoc auf Trade-Logs, nicht im Backtest) |
 | *„Parameter-Sensitivität fehlt"* | `WalkForwardCandidate` + `SelectorGates` + `CandidateScoreRow` + `FreezeArtifact` erzeugen bereits eine **volle Score-Tabelle je Fenster** | teilweise vorhanden; es fehlt nur die *Breite* des stabilen Bereichs (Plateau-Messung) |
 
+> **Präzisierungen nach 00-03 (Audit `v1.1.1`):** Regeln tragen **keine** Strategieklasse (zur Laufzeit wird sie aus dem
+> Mission-Template abgeleitet), und der Backtest wendet kein Regime-Gate an ([ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)); `evaluateRegimeOos` misst
+> **Markt**-Forward-Returns und weist `UNKNOWN` als eigenen Bucket aus — „Strategie je Regime“ fehlt noch ([ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)).
+> `StrategyClass` steht in `marketRegime.ts:91`.
+
 ### 1.3 Falsch
 
 | Aussage | Realität | Beleg |
@@ -92,6 +97,10 @@ Konsequenz: Das Dokument schlägt eine Candidate Matrix über „mehrere Timefra
 `MultiAssetStrategySpec` mit `rebalance.timeframe: "1d"` und ein Screening „× 3 Timeframes" —
 **keiner dieser Vorschläge ist mit der aktuellen `RuleSpec` ausdrückbar.** Das ist der
 einzige echte **Blocker** des Vorhabens. → **STX-01**
+
+> **Korrektur ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), Audit `v1.1.1`):** Der Cross-Sectional-Rebalance selbst ist nicht blockiert —
+> `CrossSectionalConfig.timeframe` akzeptiert bereits alle zehn `SUPPORTED_TIMEFRAMES`. Blockiert sind
+> regelbasierte Strategien und die Candidate Matrix jenseits von `1h`.
 
 ---
 
@@ -168,6 +177,11 @@ ist als **Rechenlast-Priorisierung** richtig eingeschätzt (kein Handelssignal).
 Eine zweite Spec für denselben Zweck erzeugt **zwei Wahrheiten** über
 Universe-Mitgliedschaft. Der einzige echte Zugewinn ist das **Sizing** — und dafür
 existiert bereits `src/portfolio/volatilityTargeting.ts`. → **STX-04**
+
+> **Korrektur ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), Audit `v1.1.1`):** Zwei Zeilen der Tabelle sind präziser zu lesen.
+> `selection.topN` ist durch `maxUniverseSize` **nicht** gedeckt — `UNIVERSE_CAP` kappt nach `volume24h`, nicht
+> nach Rang. Und `volatilityTargeting.ts` liefert keine Gewichte, sondern einen Risiko-Multiplikator (Bounds ≤ 1):
+> Das Sizing ist die Lücke, die die `PortfolioConstruction`-Schicht aus [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) schließt (nicht Teil der 32 Prompts).
 
 ### 2.4 `StrategyValidationReport` — **bestätigt, mit Kompatibilitätsnachweis**
 

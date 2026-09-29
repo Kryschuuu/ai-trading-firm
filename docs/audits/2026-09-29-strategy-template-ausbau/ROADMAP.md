@@ -32,7 +32,7 @@ außer er nennt ihn explizit als Voraussetzung.
 | Append-only Migrationen | Repo-Konvention (alle `drizzle/*.sql`) |
 | Kein Kafka, kein NATS, kein Redis, kein DuckDB | STX-19 — `ws` bleibt einzige neue Runtime-Dependency (die auch schon da ist) |
 | `changePct24h` nicht umrechnen | STX-14 |
-| Kein Strategie-Klassen-Vokabular, kein Regime-Vokabular, keine Eligibility-Spec, kein Kostenmodell neu erfinden | STX-02, STX-03, STX-04, STX-11 |
+| Kein Strategie-Klassen-Vokabular, kein Regime-Vokabular, keine Eligibility-Spec, kein Kostenmodell neu erfinden | STX-02 ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)), STX-03 ([ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)), STX-04 ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)), STX-11 |
 | Bestehende Tests, `npm run typecheck`, `npm run lint`, `npm run docs:validate` bleiben grün | `CONTRIBUTING.md` |
 
 ---
@@ -47,11 +47,17 @@ außer er nennt ihn explizit als Voraussetzung.
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
 | 00-01 | [Backtest-Perfenz-Baseline](prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | ✅ [`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md) — `backtestRule` O(n^1,99) = 54,1 Kernstunden/7 500 Zellen, Engine O(n^1,01) = 0,44 | — |
-| 00-02 | [Strategie-Stack-SSoT](prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | `docs/architecture/STRATEGY_STACK.md` | — |
-| 00-03 | [Vokabular-ADR](prompts/PROMPT-STX-00-03-vokabular-adr.md) | `docs/roadmap/DECISIONS.md`-Einträge | 00-02 |
+| 00-02 | [Strategie-Stack-SSoT](prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | ✅ [`docs/architecture/STRATEGY_STACK.md`](../../architecture/STRATEGY_STACK.md) (`v0.6.1`) | — |
+| 00-03 | [Vokabular-ADR](prompts/PROMPT-STX-00-03-vokabular-adr.md) | ✅ [ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) in [`docs/roadmap/DECISIONS.md`](../../roadmap/DECISIONS.md) (`v0.6.1`) | 00-02 |
 
 **Gate Phase 0 → 1:** 00-03 ist abgeschlossen und die drei Entscheidungen sind
 schriftlich fixiert. Ohne dieses Gate wird Phase 1 **nicht** gestartet.
+
+**Ergebnis 00-02/00-03 (2026-09-29, `v0.6.1`):** Gate **G0** ist erfüllt. Die Entscheidungen im Überblick:
+[ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) — Klasse ist Pflichtfeld aus `STRATEGY_CLASS_KEYS`, `unclassified` ist ein Fehler, keine neue Klasse ·
+[ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) — `MarketRegime` (5) + `UNKNOWN` fail-closed, 7er-Taxonomie verworfen ·
+[ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) — keine `MultiAssetStrategySpec`, `PortfolioConstruction` liest den Snapshot
+(nicht Teil der 32 Prompts). Die Karte der Bausteine: [`STRATEGY_STACK.md`](../../architecture/STRATEGY_STACK.md).
 
 **Zwischenergebnis 00-01 (2026-09-29):** Die Messung ist abgeschlossen; das
 Screening-Gate **G5** ist erfüllt — der Single-Rule-Pfad ist quadratisch
@@ -69,6 +75,9 @@ Screening-Gate **G5** ist erfüllt — der Single-Rule-Pfad ist quadratisch
 **Warum das der härteste Punkt der Roadmap ist:** `RuleWindow.timeframe` ist heute auf
 `1m|5m|15m|30m|1h` beschränkt (`ruleEngine.ts:87,205,883`). Ohne diesen Prompt sind
 **alle** Screening- und Validator-Ziele unerreichbar.
+
+**Abgrenzung ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)):** Die Universe-Strategie braucht diesen Prompt nicht — `CrossSectionalConfig.timeframe`
+akzeptiert bereits alle zehn `SUPPORTED_TIMEFRAMES`. 01-01 gilt für Einzel-Symbol-Regeln (`4h`/`1d`).
 
 **Gate Phase 1 → 2:** `sanitizeRuleSpec` akzeptiert `4h`/`1d`, verwirft weiterhin
 Unbekanntes, und ein Test beweist, dass `1m…1h` unverändert bleibt.
@@ -114,8 +123,11 @@ bewusst **einzeln** — jedes ist ~60 Zeilen, liefert sofort einen lauffähigen
 Katalogeintrag und hat keine Abhängigkeit von den anderen. 03-09 kommt **vor** 03-10,
 weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren.
 
+**Vokabular-Bindung:** `class: StrategyClassKey` (Pflicht, `unclassified` = Fehler, `CompileResult.strategyClass`) nach [ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1);
+`expectedRegimes: readonly MarketRegime[]` (ohne `UNKNOWN`) nach [ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2); `scope: "SINGLE_SYMBOL"` nach [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3).
+
 **Was hier bewusst NICHT gebaut wird:** Sequenz-Trigger `RECLAIM`/`CROSS` (STX-18) und
-`MultiAssetStrategySpec` (STX-04).
+`MultiAssetStrategySpec` (STX-04, [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)).
 
 ---
 
@@ -125,6 +137,8 @@ weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren.
 |---|---|---|---|
 | 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | 2 append-only Tabellen | 03-09 |
 | 04-02 | [Service + Lifecycle-Bridging](prompts/PROMPT-STX-04-02-strategy-service.md) | `src/strategies/service.ts` | 04-01, 00-02 |
+
+**Vokabular-Bindung:** `strategy_class` mit CHECK auf die drei Klassen, ohne `unclassified` ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)).
 
 **Warum nicht im Dokument priorisiert, sondern hier:** Das Dokument nennt die Tabellen in
 §7, führt sie aber nicht als P0. Ohne sie hat der Lifecycle-Key
@@ -140,6 +154,9 @@ weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren.
 | 05-02 | [Matrix-Builder](prompts/PROMPT-STX-05-02-matrix-builder.md) | Matrix aus Scanner-Funnel | 05-01, 01-01 |
 | 05-03 | [Persistenz + Idempotenz](prompts/PROMPT-STX-05-03-screening-persistenz.md) | 2 Tabellen | 05-02, 04-01 |
 | 05-04 | [CLI + Backtest-Job-Adapter](prompts/PROMPT-STX-05-04-screening-cli.md) | `scripts/run-screening.ts` | 05-03, 00-01 |
+
+**Vokabular-Bindung:** `strategyClass: StrategyClassKey` in den Screening-Typen ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)); `crossSectionalMomentum` bleibt ein
+optionaler, lesender Faktor (`CrossSectionalRankContext`), keine zweite Eligibility ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)).
 
 **Die 0.30/0.25/0.20/…-Gewichte aus §4.3 des Dokuments werden in 05-01 konfigurierbar
 gemacht** (Muster `src/scanner/config.ts`) und mit einem Invarianztest festgeschrieben.
@@ -171,7 +188,8 @@ Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschli
 - `WalkForwardCandidate` + `SelectorGates` + `CandidateScoreRow` + `FreezeArtifact` (Plateau-Messung)
 - `MonteCarloStressConfig { feeMultiplier, slippageMultiplier }` (post-hoc)
 - `BacktestEngineConfig.feeModel` / `slippageModel` (in-engine)
-- `evaluateRegimeOos` (STX-03 — bestehendes Vokabular)
+- `regimeEvaluation.ts`: Vokabular und `RegimeEvalRow` ([ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)) — `evaluateRegimeOos` misst den Markt, die Strategie je Regime
+  misst der Aggregator in 06-04; `UNKNOWN` wird ausgeschlossen
 
 ---
 
@@ -186,6 +204,9 @@ Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschli
 | 07-01 | [Copy-Typen, Mapping, Sizing](prompts/PROMPT-STX-07-01-copy-domain.md) | `src/copy/{types,mapping,sizing}.ts` (rein) | 00-02 |
 | 07-02 | [Policy-Engine + Order-Links](prompts/PROMPT-STX-07-02-copy-policy.md) | `policy.ts` + `copy_order_links` | 07-01 |
 | 07-03 | [Bitunix-Leader-Adapter](prompts/PROMPT-STX-07-03-copy-leader-bitunix.md) | Leader-Quelle + Simulate-only-Follower | 07-02 |
+
+**Abgrenzung ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)):** Das `SizingMode` aus 07-01 (Follower-Notional) gehört zur Copy-Domäne und ist nicht
+`PortfolioConstruction`.
 
 **Alpaca ist NICHT in dieser Roadmap** (STX-08: kein WS vorhanden → eigener Adapter-Audit).
 **Kein Reconciler** (STX-09: `executionQuality` existiert). **Kein Slippage-Cancel**
@@ -222,8 +243,10 @@ Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschli
 |---|---|---|
 | Kafka | ❌ | STX-19 |
 | Parquet/DuckDB | ⏸ P3 | 00-01 gemessen: Store+Cache tragen die Matrix — kein Bedarf, offen für spätere Zellzahlen |
-| `MultiAssetStrategySpec` | ❌ | STX-04 — `src/crossSectional/` erweitern |
-| Regime-Taxonomie (7er) | ❌ | STX-03 — bestehendes Vokabular |
+| `MultiAssetStrategySpec` | ❌ | STX-04, [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) — `CrossSectionalConfig` bleibt die Wahrheit; `PortfolioConstruction` liest den Snapshot |
+| `PortfolioConstruction`-Schicht (Universe-Gewichte) | ⏸ eigener Prompt außerhalb der 32 | [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3) — Form fixiert, nicht Teil dieser Roadmap |
+| Regime-Taxonomie (7er) | ❌ | STX-03, [ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) — bestehendes `MarketRegime` |
+| Eigene/neue Strategieklasse (z. B. `momentum`) | ❌ | STX-02, [ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) — `STRATEGY_CLASS_KEYS` |
 | Sequence-Trigger `RECLAIM`/`CROSS` | ⏸ eigener Audit | STX-18 — zustandsloser Evaluator |
 | `DerivativeStrategySpec` (Shorts) | ⏸ eigener Audit | §13 des Dokuments, bestätigt richtig |
 | Alpaca-Leader | ⏸ eigener Adapter-Audit | STX-08 |

@@ -36,7 +36,8 @@ Lege `src/strategies/types.ts` an. Reine Typen, keine Logik, keine IO, kein DB-I
 import type { StrategyClassKey } from "@/lib/signalDecay";
 import type { SupportedTimeframe } from "@/lib/marketdata/historicalStore";
 import type { RuleSpecInput } from "@/lib/ruleEngine";
-import type { MarketRegimeLabel } from "@/lib/marketRegime";
+import type { MarketRegime } from "@/lib/marketRegime";
+import type { MissionScope } from "@/lib/missionTemplates";
 
 /** Eine abstrahierte, versionierte Annahme einer Strategie. */
 export interface StrategyAssumption {
@@ -81,8 +82,8 @@ export interface StrategyTemplate {
   /** ADR-E1: Pflicht, aus dem BESTEHENDEN Vokabular. */
   class: StrategyClassKey;
 
-  /** 03-xx: nur SINGLE_SYMBOL. UNIVERSE ist ADR-E3 (abgelehnt in dieser Roadmap). */
-  scope: "SINGLE_SYMBOL";
+  /** 03-xx: nur SINGLE_SYMBOL, abgeleitet aus dem bestehenden `MissionScope`. Ein UNIVERSE-Scope entfällt (ADR-010, ADR-E3). */
+  scope: Extract<MissionScope, "SINGLE_SYMBOL">;
 
   /** Aus `SUPPORTED_TIMEFRAMES` abgeleitet, nie eigenes Vokabular. */
   supportedTimeframes: readonly SupportedTimeframe[];
@@ -101,8 +102,8 @@ export interface StrategyTemplate {
   /** Was diese Strategie annimmt — wird 06-01 auditiert. */
   assumptions: readonly StrategyAssumption[];
 
-  /** Regime, in denen die Strategie plausibel ist (ADR-E2: bestehendes Vokabular). */
-  expectedRegimes: readonly MarketRegimeLabel[];
+  /** Regime, in denen die Strategie plausibel ist (ADR-009, ADR-E2: bestehendes Vokabular, ohne `UNKNOWN`). */
+  expectedRegimes: readonly MarketRegime[];
 }
 ```
 
@@ -126,6 +127,7 @@ export interface StrategyTemplate {
       (nach 02-02/02-03: `bbZScore`, `donchianBreakoutPct` …)
 - [ ] Kein `StrategyContext`, kein `ctx`, kein Marktdatenparameter in irgendeiner Signatur
 - [ ] Kein eigener Klassen-/Regime-/Timeframe-Typ definiert
+- [ ] `expectedRegimes` ist `readonly MarketRegime[]` (kein `UNKNOWN`, ADR-009); `scope` leitet sich aus `MissionScope` ab (ADR-010)
 
 ## Gesperrt
 

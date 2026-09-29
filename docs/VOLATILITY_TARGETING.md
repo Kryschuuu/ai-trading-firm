@@ -27,6 +27,9 @@ Risikobudget bei hoher Forecast-Volatilität reduziert wird.
 - Keine Erwartungsrendite-Optimierung (nur Volatilität, keine Return-Schätzung).
 - Kein Ersatz für Kill-Switches, Authority-Chains oder Live-Gates — das
   Volatility-Targeting wirkt **innerhalb** der bestehenden Sandbox.
+- Keine Gewichtserzeugung: die Bounds (`VOLATILITY_TARGETING_BOUNDS`) begrenzen den
+  Risiko-Multiplikator, nicht einzelne Gewichte. Universe-Gewichte erzeugt die
+  `PortfolioConstruction`-Schicht aus [ADR-010](roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3); sie nutzt diese Bounds, statt eigene zu definieren.
 
 ## 2. Betriebsmodi (Feature-Flag `PORTFOLIO_VOL_TARGETING_MODE`)
 

@@ -18,11 +18,17 @@ aufwärtstrend, in dem der RSI niedrig bleibt.
 
 Die bestehende Infrastruktur weiß das bereits:
 `regimeGateFactor(regime, strategyClass, cfg)` **reduziert** das Risikobudget dieser
-Klasse in den Regimen, in denen sie nicht gehört (`microExecutor.ts:779-786`).
+Klasse in den Regimen, in denen sie nicht gehört (`microExecutor.ts:779-786`, nur im Modus
+`enforce`).
 
-**Deshalb:** dieses Template ist der Testfall dafür, ob ADR-E1 wirklich durchgeschaltet
-wird. Ein Template, das `class` nicht setzt, fällt auf `"unclassified"` und verliert
-diesen Schutz **still**.
+**Deshalb:** dieses Template ist der Testfall dafür, ob ADR-E1 (ADR-008) trägt: `mean-reversion`
+muss in `TREND_UP`/`TREND_DOWN` einen Gate-Faktor < 1 ergeben (Kontrakt-Invariante,
+`tests/adrVocabulary.test.ts`). Ein Template, das `class` nicht setzt (oder `"unclassified"`),
+verliert Gate und Decay-Policy der Klasse **still** — deshalb ist es ein Fehler.
+
+**Wirkungsgrenze (ADR-008):** Live wirkt das Gate über die Mission-Ableitung, nicht über die
+Regel; der Backtest wendet kein Regime-Gate an. Dieses Template beweist die **Wertebereichs-
+Passung** (Klasse ↔ Gate-Faktoren ↔ Decay-Policy), nicht eine neue Live-Verdrahtung.
 
 ## Auftrag
 
@@ -79,6 +85,7 @@ Mean-Reversion, sondern ein „Catching the falling knife"-System.
 - [ ] **Test: `adx14`-Operator ist `lte`, nicht `gte`** — Regression gegen die
       Trend-Vorlage
 - [ ] **Test: `class === "mean-reversion"`** und `class !== "unclassified"`
+- [ ] **Test:** `regimeGateFactor("TREND_UP", template.class) < 1` und `regimeGateFactor("RANGE", template.class) === 1` (die Klasse trägt, ADR-008)
 - [ ] Ein Eintrag in `STRATEGY_TEMPLATES`
 - [ ] `npm run typecheck && npm run lint && npm test` grün
 

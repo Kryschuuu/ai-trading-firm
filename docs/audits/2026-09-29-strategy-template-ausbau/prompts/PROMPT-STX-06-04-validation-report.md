@@ -56,7 +56,7 @@ export interface StrategyValidationReport {
                  multipleTestingWarning: boolean; lookaheadWarning: boolean;
                  holdoutIntegrity: "CLEAN" | "CONTAMINATED" | "UNKNOWN"; };
   assumptions: readonly { id: string; status: string; evidence: string }[];
-  regimes: readonly { regime: MarketRegimeLabel; trades: number; sharpe: number | null }[];
+  regimes: readonly { regime: MarketRegime; trades: number; sharpe: number | null }[];
   /** Freitext nur für menschliche Leser; nie maschinell ausgewertet. */
   notes: readonly string[];
   evidenceHash: string;   // = content_hash
@@ -65,8 +65,13 @@ export interface StrategyValidationReport {
 }
 ```
 
-**`regimes`** nutzt `evaluateRegimeOos` und **das bestehende Vokabular** (ADR-E2).
-`UNKNOWN` wird ausgeschlossen, nie als „Regime ohne Edge" gezählt.
+**`regimes`** kommt aus einem **Aggregator** (Trades → letzter bestätigter `regime_snapshots`-Eintrag
+mit `asOf ≤ Entry`, point-in-time) auf dem **bestehenden Vokabular** und Zeilenformat
+(`REGIME_EVAL_LABELS`, `RegimeEvalRow` — ADR-009, ADR-E2). `evaluateRegimeOos` selbst misst den Markt
+und bleibt unverändert. `UNKNOWN` und Trades ohne zuordenbaren Snapshot werden ausgeschlossen und als
+Zähler ausgewiesen, nie als „Regime ohne Edge" gezählt (nie auf `RANGE` abgebildet); Kennzahlen ohne
+ausreichende Stichprobe sind `null`, nie `0`. Jedes Ergebnis trägt `featureVersion`/`modelVersion`
+der verwendeten Snapshots.
 
 ### 2. **Entscheidungslogik — deterministisch, in dieser Reihenfolge**
 
@@ -120,6 +125,7 @@ Flags: `--template`, `--params=<json>`, `--timeframe`, `--from/--to`,
 - [ ] `content_hash`/`idempotency_key` erzeugt mit `strategyLifecycle/evidence.ts`
 - [ ] Doppelter Lauf ⇒ **eine** Evidenzzeile (UNIQUE greift)
 - [ ] `INCONCLUSIVE` schlägt `FAIL` (Test)
+- [ ] Test: `UNKNOWN` erzeugt keine `regimes[]`-Zeile; ein Trade ohne Snapshot wird ausgeschlossen (ADR-009)
 - [ ] Keine `requestTransition`-Aufrufe im Validator
 - [ ] `tests/strategyValidation.report.test.ts`: ≥ 8 Gate-Szenarien (1× pro Regel)
 - [ ] `tests/strategyValidation.persist.test.ts` (DB, Muster `tests/*Strategy*.db.test.ts`)

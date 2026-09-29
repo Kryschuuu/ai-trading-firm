@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Backtest / Validierung
 - **Quelle:** Ausbaudokument §3.5
-- **Status:** OPEN
+- **Status:** IN ARBEIT — Einordnung dokumentiert (00-02, `v0.6.1`, [STRATEGY_STACK.md](../../../architecture/STRATEGY_STACK.md)); Andocken in 06-03
 - **Datei(en):** `src/backtest/montecarlo.ts`, `src/scanner/factors/executionCost.ts`
 
 ## Beschreibung

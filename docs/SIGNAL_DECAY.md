@@ -84,7 +84,9 @@ Modus `SIGNAL_DECAY_MODE`: `off` | `monitor` | `active`. Unbekannt ⇒ `monitor`
 
 Jede Klasse (`trend`, `mean-reversion`, `breakout`, `unclassified`) ist
 **default aus**, auch in `active`. `unclassified` wird nie automatisch
-eingeschaltet. Schwellen in `risk_config` als `sdc.<klasse>.<feld>` (Klasse
+eingeschaltet. Das Klassen-Vokabular ist in [ADR-008](roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) festgeschrieben:
+`unclassified` ist die Nicht-Klasse für Regeln ohne Klassen-Herkunft (kein Template-Status),
+es gibt keine weitere Klasse, und Strategie-Templates deklarieren ihre Klasse als `StrategyClassKey`. Schwellen in `risk_config` als `sdc.<klasse>.<feld>` (Klasse
 `mean_reversion` wird als `mean-reversion` gelesen) und auf Bounds geklemmt.
 
 | Feld | Bounds | Default (Trend) | Bedeutung |
