@@ -28,7 +28,7 @@ Lege `src/strategies/compiler.ts` an.
 
    ```ts
    type CompileResult =
-     | { ok: true; spec: RuleSpec; fingerprint: string }
+     | { ok: true; spec: RuleSpec; strategyClass: StrategyClassKey; fingerprint: string }
      | { ok: false; errors: string[] };
    ```
 
@@ -46,6 +46,10 @@ Lege `src/strategies/compiler.ts` an.
    9. `spec.sourceRole` auf `"RESEARCH"` forcieren, wenn das Template nicht
       ausdrücklich etwas anderes verlangt (Templates sind nie `MANUAL`)
   10. `ruleWithinRuntimeLimits(spec)` prüfen (existiert in `ruleService.ts`)
+
+   `strategyClass` ist **immer** `template.class` (ADR-008): der einzige Weg, auf dem die Klasse aus dem
+   Template-Pfad in Backtest-/Decay-Kontext (`BacktestEngineConfig.signalDecay.strategyClass`) und in
+   Screening-/Report-Typen gelangt. Eine zweite Klassenquelle gibt es nicht.
 
    **Punkt 8 ist der Kern.** Wenn `sanitizeRuleSpec` einen Fehler liefert, ist das
    `{ok:false, errors}` — **kein** Fallback auf die Rohform.
@@ -81,6 +85,7 @@ Lege `src/strategies/compiler.ts` an.
 - [ ] Kein Pfad im Compiler erzeugt eine `RuleSpec` **ohne** vorherigen
       `sanitizeRuleSpec()`-Aufruf
 - [ ] `{ok:false}`-Fälle geben **Fehlerstrings** zurück, werfen nicht
+- [ ] `CompileResult.strategyClass === template.class` für alle sechs Templates (ADR-008)
 - [ ] `fingerprint` ist über Prozessgrenzen stabil (kein `Date.now()`, keine Objekt-Reihenfolge)
 - [ ] `exportTemplates()` läuft ohne DB und ohne Netz
 - [ ] `npm run typecheck && npm run lint && npm test` grün

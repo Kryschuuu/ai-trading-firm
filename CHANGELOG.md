@@ -21,14 +21,102 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Offen für den nächsten Release — als Nächstes die Phase-0-Prompts
-> 00-02/00-03 (`v0.6.1`), danach der Timeframe-Blocker 01-01 (`v0.6.2`). Release-Plan:
+> **Status: Beta.** Offen für den nächsten Release — als Nächstes der Timeframe-Blocker
+> 01-01 (`v0.6.2`). Release-Plan:
 > [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2.
+
+## [0.6.1] — Strategie-Stack-SSoT & Vokabular-ADRs (2026-09-29)
+
+> **Status: Beta — und bleibt Beta.** Dieser Release bündelt die Prompts **00-02**
+> (Strategie-Stack-SSoT — mit PR #182 ohne Changelog, Version und Tracking gemergt und hier
+> nachträglich versioniert) und **00-03** (drei Vokabular-ADRs). Er ändert **kein**
+> Laufzeitverhalten: kein Eintrag in `src/`, `scripts/` oder `drizzle/` wurde angefasst, es
+> gibt keine Migration und keine Schema-Änderung. `package.json` folgt dem Release-Plan
+> [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2; Gate
+> **G0** der Strategie-Roadmap ist erfüllt, Phase 1 darf starten.
+
+### Added
+
+* **ADR-008, ADR-009, ADR-010** in [`docs/roadmap/DECISIONS.md`](docs/roadmap/DECISIONS.md)
+  (Prompt 00-03, Findings STX-02/03/04). Jeder Eintrag folgt dem Schema Status · Kontext ·
+  Optionen (Verworfenes mit Begründung) · Entscheidung · Konsequenzen · Auswirkung auf die Roadmap:
+  * **ADR-008 (ADR-E1) Strategie-Klassifikation:** `StrategyTemplate.class` ist ein Pflichtfeld
+    vom Typ `StrategyClassKey` (aus `STRATEGY_CLASS_KEYS`, kein eigener Union-Typ);
+    `unclassified` ist kein Template-Status, sondern ein Fehler; **keine neue Klasse** —
+    MACD → `trend`, RSI → `mean-reversion`; Zuordnung aller sechs Templates.
+  * **ADR-009 (ADR-E2) Regime-Vokabular:** `MarketRegime` (5) + `UNKNOWN`, persistiert in
+    `regime_snapshots`; die 7er-Taxonomie des Ausbaudokuments ist **verworfen**; `UNKNOWN` wird
+    fail-closed ausgeschlossen; High-/Low-Volume ist der Scanner-Faktor `volumeRatio`, kein Regime.
+  * **ADR-010 (ADR-E3) Universe-Strategie:** **keine** `MultiAssetStrategySpec`; eine
+    `PortfolioConstruction`-Schicht (`EQUAL_WEIGHT`/`INVERSE_VOLATILITY`) liest den
+    `CrossSectionalConfig`-Snapshot, die Exposure bleibt über `VOLATILITY_TARGETING_BOUNDS`
+    geklemmt, Rebalance-Frequenz = `CrossSectionalConfig.timeframe`; die Schicht selbst ist
+    bewusst **nicht** Teil der 32 Prompts.
+* **`docs/architecture/STRATEGY_STACK.md`** (Prompt 00-02, PR #182 — nachträglich versioniert):
+  Single-Source-of-Truth-Karte „welcher Baustein ist wofür zuständig“, explizite Lücken
+  (`src/strategies/`, `src/screening/`, `src/copy/`) und 5-zeilige Einordnungsregel.
+* **`tests/adrVocabulary.test.ts` (neu, nur lesend, 36 Tests):** nagelt die ADRs statisch fest —
+  Form (Schema, genau eine Entscheidung, jede Alternative „verworfen“ mit Begründung, keine
+  Vorbehalte), Code-Fakten (Klassenliste, Gate-Faktoren je Regime × Klasse, `regime_snapshots`-CHECK,
+  `evaluateRegimeOos`-Verhalten, `UNIVERSE_CAP`, Vol-Targeting-Bounds, `AUTHORITY_CHAIN`),
+  Guards für künftigen Code (keine eigene Klassenliste in `src/strategies/`, keine
+  `MultiAssetStrategySpec`) und die Verweise in Roadmap, Tracking und Prompts.
+* **`tests/docsVersioning.test.ts`:** neuer Test, dass `VERSION.md` und das Root-`README.md`
+  dieselbe Version wie `package.json` nennen (die Bump-Checkliste, die bei PR #182 fehlte).
+
+### Changed
+
+* **Strategie-Audit nachgezogen** (`docs/audits/2026-09-29-strategy-template-ausbau/`): Audit-Version
+  `v1.1.1`; Phase 0 abgeschlossen (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Gate **G0** erfüllt,
+  OP-2 beantwortet; STX-02/03 in Arbeit (Entscheidung gefallen, Umsetzung in Phase 3/6), STX-04 und
+  STX-15 behoben, STX-10/11 dokumentiert. `ROADMAP.md` nennt die ADR-Nummer in jeder Phase, die ein
+  Vokabular berührt (Phasen 0, 1, 3, 4, 5, 6, 7) und führt `MultiAssetStrategySpec`, die 7er-Taxonomie
+  und neue Klassen als verworfen.
+* **Prompts an die Entscheidungen angeglichen:** 03-01/03-02/03-10 (`expectedRegimes` ist
+  `readonly MarketRegime[]`, `UNKNOWN` ist ein Validierungsfehler; `scope` leitet sich aus
+  `MissionScope` ab), 03-05 (Wirkungsgrenze der Klasse), 03-09 (`CompileResult.strategyClass`),
+  06-04 (Aggregator „Strategie je Regime“ statt `evaluateRegimeOos`), 01-01 (Cross-Sectional-Rebalance
+  ist nicht blockiert).
+* **Doku-Indizes und Verweise** (`docs/README.md`, `docs/audits/README.md`,
+  `docs/REPOSITORY_STRUCTURE.md`, `docs/architecture/PIPELINE_MAP.md`, `README.md`):
+  `STRATEGY_STACK.md` und der ADR-Log sind auffindbar; `docs/REGIME_GATE.md`, `docs/SIGNAL_DECAY.md`,
+  `docs/CROSS_SECTIONAL_RANKING.md` und `docs/VOLATILITY_TARGETING.md` verweisen auf ihre ADR.
+
+### Documentation
+
+* **Korrekturen an `STRATEGY_STACK.md`** (gegen den Code verifiziert): `evaluateRule` existiert nicht
+  (`CompiledRule.evaluate` via `compileRuleSpec`); Bollinger gibt es nur als Bandbreite
+  (`bollingerBandWidthPct`), `bollingerBands`/`donchianChannel` liefert erst 02-01;
+  `BacktestEngineConfig.feeModel` hat kein `feeMode`; die Funktion heißt `normalizeVenueSymbol`
+  (nicht `normalizeSymbol`); `src/scanner/factors/` hat 17 Dateien (15 Faktormodule + `helpers.ts` +
+  `index.ts`); Eligibility gibt es in drei Stufen (Registry-Policy, Scanner-Trichter,
+  Snapshot-Membership), nicht als „zentralen Vertrag“.
+* **Faktenkorrekturen in Indizes und Glossar:** `README.md` nennt die **14 aktiven** Scanner-Faktoren
+  (statt „15+“, STX-15); das Glossar in `docs/ARCHITECTURE.md` trennt „Volatilitäts-Regime“
+  (NORMAL/ELEVATED/EXTREME, Risikofaktor) von „Markt-Regime“ (`MarketRegime`) und führt
+  Strategieklasse und Cross-Sectional-Snapshot auf; der Severity-Zähler im Audit-README war
+  inkonsistent (INFO-Zeile) und ist korrigiert.
+* **Präzisierungen an den Befunden STX-01…STX-04** (Details: ADR-008 bis ADR-010):
+  `evaluateRegimeOos` misst **Markt**-Forward-Returns und weist `UNKNOWN` als eigenen Bucket aus
+  (der Befund-Test „schließt `UNKNOWN` aus“ gilt dem künftigen Aggregator); `selection.topN` ist durch
+  `maxUniverseSize` **nicht** gedeckt (`UNIVERSE_CAP` kappt nach Volumen); die Bounds in
+  `volatilityTargeting.ts` begrenzen den Risiko-Multiplikator, keine Gewichte; Regeln tragen keine
+  Strategieklasse (Ableitung über das Mission-Template), und der Backtest wendet kein Regime-Gate an;
+  der Cross-Sectional-Rebalance hängt nicht an `RuleWindow.timeframe` (der Hinweis zu STX-01 im
+  Eintrag `0.6.0` gilt nur für regelbasierte Strategien).
+* **Bekannte Altlasten, bewusst unverändert** (kein Code in diesem Release): die vier Klassenwerte
+  stehen zusätzlich als Literale in `signalDecay.ts`, `signalDecayRuntime.ts` und im CHECK von
+  `signal_decay_events`; `VolatilityRegime` ist in `adaptiveRisk.ts`, `src/portfolio/types.ts` und
+  `src/scanner/types.ts` dreifach definiert. Neuer Code importiert die bestehenden Konstanten.
+  Außerdem löst der In-App-Doku-Viewer (`/docs/<Datei>.md`, `GET /api/docs`) über `resolveDoc`
+  (`src/lib/docsCatalog.ts`) weder `docs/architecture/` noch `docs/roadmap/` auf — das betrifft auch
+  `STRATEGY_STACK.md` und den ADR-Log (im Repo und auf GitHub lesbar, im Browser-Viewer nicht).
+  Die Behebung wäre eine Code-Änderung (zwei Suchpfade) und ist nicht Teil dieses Doku-Release.
 
 ## [0.6.0] — Backtest-Performance-Baseline (2026-09-29)
 

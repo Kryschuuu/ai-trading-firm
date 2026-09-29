@@ -1,7 +1,7 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.4.0** (bookDepthUsd + Venue-Qualitätsgrenze, spreadPct, n≥100, Kostenmodell feine Takte)
+> Dokumentationsstand **2026-09-29** · Code-Version **v0.6.1** (Glossar um Markt-Regime, Strategieklasse und Universe-Snapshot ergänzt, ADR-008…010; zuvor v0.4.0: bookDepthUsd + Venue-Qualitätsgrenze, spreadPct, n≥100, Kostenmodell feine Takte)
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine
@@ -780,7 +780,10 @@ GET /api/ops
 | `latency_micros` | Bewertungszeit des Hot-Paths (ohne Fill) |
 | Feedback-Loop | `rule_executions` + `positions.rule_id` → CEO-Prompt |
 | Adaptiver Faktor | ∈ (0,1]-Multiplikator auf `maxRiskPerTrade` (NUR senkend), aus dem Volatilitäts-Regime |
-| Regime (NORMAL/ELEVATED/EXTREME) | Klassifizierung der Marktvolatilität (VIX/ATR/BBW/StdDev) |
+| Volatilitäts-Regime (NORMAL/ELEVATED/EXTREME) | Klassifizierung der Marktvolatilität (VIX/ATR/BBW/StdDev) in `adaptiveRisk.ts` — reiner **Risikofaktor**, kein `MarketRegime` ([ADR-009](roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)) |
+| Markt-Regime (`MarketRegime`) | `TREND_UP`/`TREND_DOWN`/`RANGE`/`HIGH_VOL`/`CRASH` (+ `UNKNOWN` als Zustandslabel), aus Kerzen klassifiziert, in `regime_snapshots` persistiert — das **einzige** Regime-Vokabular für Regime-Gate und Strategie-Auswertung ([ADR-009](roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)) |
+| Strategieklasse (`StrategyClassKey`) | `mean-reversion`/`trend`/`breakout` (+ `unclassified` als Nicht-Klasse) — steuert Regime-Gate und Decay-Policy; Strategie-Templates deklarieren sie ([ADR-008](roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)) |
+| Cross-Sectional-Snapshot | Point-in-Time-Ranking eines Universums (`src/crossSectional/`, order-frei); Gewichte daraus erzeugt nur die `PortfolioConstruction`-Schicht ([ADR-010](roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), nicht gebaut) |
 | Hysterese / Anti-Flapping | Eskalation sofort, De-Eskalation erst nach N ruhigen Ticks |
 | Fail-Open (Daten) | Indikator ohne Daten triggert nie — Risiko kann nie steigen |
 | Instrument | handelbarer Kontrakt an genau einer Venue, ID `VENUE:SYMBOL` |

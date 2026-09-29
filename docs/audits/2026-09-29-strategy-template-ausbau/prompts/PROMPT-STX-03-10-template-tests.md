@@ -19,7 +19,8 @@ Lege `tests/strategies.templates.test.ts` an. Teste für **jedes** Template im K
 - `requiredFields ⊆ RULE_FIELDS`; jedes `mapsTo ∈ RULE_FIELDS`
 - `class ∈ STRATEGY_CLASS_KEYS` und `≠ "unclassified"`
 - `supportedTimeframes ⊆ SUPPORTED_TIMEFRAMES`; nicht leer; keine Duplikate
-- jedes `expectedRegimes` ist ein gültiges `MarketRegimeLabel`
+- jedes `expectedRegimes` ist ein `MarketRegime` (fünf Werte, **ohne** `UNKNOWN` — ADR-009)
+- Kontrakt-Invariante (ADR-008): `regimeGateFactor(regime, class)` ist für alle fünf Regimes definiert und `DEFAULT_CLASS_POLICIES[class]` existiert
 - jede `assumptions.id` eindeutig; mindestens eine `critical: true` **pro** Template
 
 ### 2. Compiler-Parität

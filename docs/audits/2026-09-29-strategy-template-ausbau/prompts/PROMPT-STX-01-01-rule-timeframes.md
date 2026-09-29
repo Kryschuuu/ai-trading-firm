@@ -6,9 +6,10 @@
 ## Zweck
 
 `RuleWindow.timeframe` ist heute auf `1m|5m|15m|30m|1h` beschränkt, der Historical Store
-unterstützt `1m…5d`. Damit sind **alle** Screening-Ziele (Multi-Timeframe), die
-Tages-Rebalance des Cross-Sectional-Moduls und jede Strategie jenseits von 1 h
-**technisch nicht ausdrückbar**. Dieser Prompt hebt den Blocker.
+unterstützt `1m…5d`. Damit sind **alle** Screening-Ziele (Multi-Timeframe) und jede
+regelbasierte Strategie jenseits von 1 h **technisch nicht ausdrückbar**. Dieser Prompt hebt den
+Blocker. *(Der Tages-Rebalance des Cross-Sectional-Moduls ist davon nicht betroffen:
+`CrossSectionalConfig.timeframe` akzeptiert bereits alle `SUPPORTED_TIMEFRAMES` — [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3).)*
 
 ## Kontext
 
@@ -37,8 +38,8 @@ export const SUPPORTED_TIMEFRAMES = ["1m","3m","5m","15m","30m","1h","2h","4h","
 
    `RuleWindow["timeframe"]` wird `SupportedTimeframe`. `ALLOWED_TIMEFRAMES` entfällt
    zugunsten der abgeleiteten Menge.
-   *Begründung:* Zwei Vokabulare sind genau der Fehler, den 00-03 bei den Strategie- und
-   Regimeklassen verhindert — er darf nicht neu entstehen.
+   *Begründung:* Zwei Vokabulare sind genau der Fehler, den 00-03 (ADR-008 bis ADR-010) bei den
+   Strategie- und Regimeklassen verhindert — er darf nicht neu entstehen.
 
 2. **Fail-closed für `vwapPct` auf hohen Timeframes.** `sessionVwap` verankert am
    UTC-Kalendertag (`indicators.ts:151 utcDayAnchorMs`). Auf `1d` ist das **eine** Kerze

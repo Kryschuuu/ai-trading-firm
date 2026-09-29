@@ -7,7 +7,10 @@
  * Versionszeile `docs/README.md`). Drift dort ist für Betrieb und Deployment
  * unsichtbar — ein Release kann älter wirken, als er ist. Diese Tests
  * sichern die Konsistenz statisch ab; `npm run docs:validate` prüft dasselbe
- * als CI-Check („Version-Konsistenz“).
+ * als CI-Check („Version-Konsistenz“). Zusätzlich verlangt die Bump-Checkliste
+ * (`docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md` §3), dass
+ * `VERSION.md` und das Root-`README.md` im selben Commit mitziehen — das prüft
+ * nur dieser Test (PR #182 hatte sie vergessen).
  *
  * Zweiter Teil: das Migrations-Runbook zum `timeframe`-Feld muss vorhanden,
  * im Doku-Katalog (`GET /api/docs`) registriert und aus den beiden
@@ -63,6 +66,18 @@ test("CHANGELOG.md-Status-Header und docs/README.md nennen dieselbe Version", ()
     read("docs/README.md").includes(`**Version:** \`v${VERSION}\``),
     `docs/README.md: Versionszeile muss 'v${VERSION}' nennen`,
   );
+});
+
+test("VERSION.md und README.md nennen dieselbe Version wie package.json (Bump-Checkliste)", () => {
+  const versionMd = read("VERSION.md");
+  assert.ok(versionMd.includes(`| **Version** | \`v${VERSION}\` |`), `VERSION.md: Metadatentabelle muss 'v${VERSION}' nennen`);
+  assert.ok(
+    versionMd.includes(`(\`version: "${VERSION}"\`)`),
+    `VERSION.md: Zeile 'Quellbasiert' muss version: "${VERSION}" nennen`,
+  );
+  const readme = read("README.md");
+  assert.ok(readme.includes(`**Version: v${VERSION} (Beta)**`), `README.md: Kopfzeile muss 'v${VERSION}' nennen`);
+  assert.ok(readme.includes(`| Version | **v${VERSION}** (Beta`), `README.md: Versions-Status-Tabelle muss 'v${VERSION}' nennen`);
 });
 
 test("Roadmap-Audit enthält 25 Findings, 21 Prompts und ist katalogisiert", () => {

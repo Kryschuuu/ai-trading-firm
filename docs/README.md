@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.6.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.6.1` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -55,6 +55,8 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | Dokument | Zweck |
 |----------|-------|
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Blaupause: Event-Driven **Makro-/Mikro-Zyklen**, Regelformat, Latenz, Skalierung, Security |
+| **[architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md)** | Strategie-Stack-SSoT: welcher Baustein ist wofür zuständig, explizite Lücken, Einordnungsregel (Prompt 00-02) |
+| **[roadmap/DECISIONS.md](roadmap/DECISIONS.md)** | ADR-Log: verbindliche Architekturentscheidungen ADR-001 … ADR-010 — u. a. ADR-008 Strategieklasse, ADR-009 Regime, ADR-010 Universe (Prompt 00-03) |
 | **[INSTALL.md](INSTALL.md)** | Installation Schritt für Schritt auf CachyOS, beide Varianten A/B |
 | **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)** | Windows-Installation mit PowerShell-One-Liner, PostgreSQL, Ollama, Workarounds |
 | **[CONFIGURATION.md](../CONFIGURATION.md)** | Env-Flags mit sicheren Defaults — verbindliche Flag-Referenz (ehemals Root `INSTALL.md`) |
@@ -117,7 +119,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | [audits/2026-09-18-feature-gap/](audits/2026-09-18-feature-gap/) | Feature-Gap-Audit (Co-Audit) — 10 Lücken (GAP-01…GAP-10) mit verifiziertem Ist-Stand + ausführbare Arena-Prompt-Serie | **Abgeschlossen (v1.51.1): alle 10 FIXED** — GAP-02 v1.42.0, GAP-03 v1.43.0, GAP-05 v1.44.0, GAP-10 v1.45.0, GAP-06 v1.46.0, GAP-07 v1.47.0, GAP-04 v1.48.0 (+ Audit-Katalog-Nachtrag v1.51.1), GAP-08 v1.49.0, GAP-09 v1.50.0, GAP-01 v1.51.0 (PRs #136–#145); offen nur ENV-01 (Test-Isolation, LOW) — [Prompt-Serie](audits/2026-09-18-feature-gap/prompts/README.md), Stand in [TRACKING.md](audits/2026-09-18-feature-gap/remediation/TRACKING.md), Abschluss-Abgleich in [STATUS-REVIEW-2026-09-19.md](audits/2026-09-18-feature-gap/remediation/STATUS-REVIEW-2026-09-19.md) |
 | [audits/2026-09-20-roadmap-audit/](audits/2026-09-20-roadmap-audit/) | 25-Punkte-Roadmap-Audit für Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **CLOSED (v1.73.0): 4 VERIFIED, 21 FIXED, 0 PARTIAL, 0 OPEN** — [vollständiger Bericht](audits/2026-09-20-roadmap-audit/report.md), [21 eigenständige Umsetzungs-Prompts](audits/2026-09-20-roadmap-audit/prompts/README.md), [Tracking](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md) |
 | [audits/2026-09-23-verbesserungen-fahrplan/](audits/2026-09-23-verbesserungen-fahrplan/) | Abgleich des Big-Pickle-Audits „Verbesserungen“ (O1–O6, W1–W5, Datenquellen) — Kosten im Regel-Backtest, Workshop-Schritt 5, Trusted-Indikatoren | **CLOSED (v0.2.0):** [Tracking](audits/2026-09-23-verbesserungen-fahrplan/remediation/TRACKING.md), [Befunde](audits/2026-09-23-verbesserungen-fahrplan/findings/README.md), [Prompts](audits/2026-09-23-verbesserungen-fahrplan/prompts/README.md) |
-| [audits/2026-09-29-strategy-template-ausbau/](audits/2026-09-29-strategy-template-ausbau/) | Audit des Strategie-Template-Ausbaus — externes Ausbaudokument gegen Code verifiziert: 19 Findings (5 HIGH) + 32 Umsetzungs-Prompts in 8 Phasen | **OPEN** (Audit v1.1.0, 00-01 umgesetzt) — [Bericht](audits/2026-09-29-strategy-template-ausbau/report.md), [Versionierung](audits/2026-09-29-strategy-template-ausbau/VERSIONING.md), [Prompts](audits/2026-09-29-strategy-template-ausbau/prompts/README.md), [Tracking](audits/2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [Bench-Baseline](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md). **Bleibt Beta** — [BETA_STATUS.md](BETA_STATUS.md) |
+| [audits/2026-09-29-strategy-template-ausbau/](audits/2026-09-29-strategy-template-ausbau/) | Audit des Strategie-Template-Ausbaus — externes Ausbaudokument gegen Code verifiziert: 19 Findings (5 HIGH) + 32 Umsetzungs-Prompts in 8 Phasen | **OPEN** (Audit v1.1.1, Phase 0 abgeschlossen: 00-01…00-03 umgesetzt, Gate G0 erfüllt) — [Bericht](audits/2026-09-29-strategy-template-ausbau/report.md), [Versionierung](audits/2026-09-29-strategy-template-ausbau/VERSIONING.md), [Prompts](audits/2026-09-29-strategy-template-ausbau/prompts/README.md), [Tracking](audits/2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [Bench-Baseline](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md), [ADR-008…010](roadmap/DECISIONS.md). **Bleibt Beta** — [BETA_STATUS.md](BETA_STATUS.md) |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
@@ -236,7 +238,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.6.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.6.1, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)
@@ -253,6 +255,8 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
     ├── INSTALL.md            ← CachyOS-Installation A+B (kanonisch)
     ├── CHANGELOG.md          ← Stub → ../CHANGELOG.md
     ├── ARCHITECTURE.md, HANDBUCH.md, ...
+    ├── architecture/         ← DB-Schema, Integrationspunkte, Pipeline-Karte, Strategie-Stack-SSoT
+    ├── roadmap/              ← ADR-Log (DECISIONS.md) + historischer TASK-Tracker (STATUS.md)
     ├── audits/               ← alle Audits chronologisch
     │   ├── README.md         ← erklärt Naming, Workflow, Status-Modell
     │   ├── TEMPLATE/         ← Vorlage für neuen Audit
@@ -261,7 +265,8 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
     │   ├── 2026-09-08-arena-prompts/  ← Arena-Review-Serie (RESTORE-01 FIXED)
     │   ├── 2026-09-18-feature-gap/    ← Feature-Gap-Audit (GAP-01…GAP-10, abgeschlossen)
     │   ├── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Prompts (CLOSED)
-    │   └── 2026-09-23-verbesserungen-fahrplan/  ← Verbesserungen, CLOSED v0.2.0
+    │   ├── 2026-09-23-verbesserungen-fahrplan/  ← Verbesserungen, CLOSED v0.2.0
+    │   └── 2026-09-29-strategy-template-ausbau/  ← Strategie-Template-Ausbau (19 Findings, 32 Prompts, OPEN)
     ├── peer-reviews/         ← Peer-Review-Patches gesammelt
     │   ├── README.md
     │   ├── 2026-08-26-live-trading-readiness/

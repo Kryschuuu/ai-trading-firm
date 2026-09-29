@@ -43,7 +43,7 @@ Lege `src/strategies/catalog.ts` an:
    | Builder | **kein** `action.side` ≠ `"LONG"` |
    | Builder | **kein** Zahlenwert außerhalb `RULE_CEILINGS` (ohne sanitize wäre das ein Bug) |
    | Assumptions | jede `id` eindeutig, `statement` nicht leer |
-   | `expectedRegimes` | jedes Element ein gültiges `MarketRegimeLabel` |
+   | `expectedRegimes` | jedes Element ein `MarketRegime` (fünf Werte, **ohne `UNKNOWN`** — ADR-009) |
 
 3. **`STRATEGY_TEMPLATES: readonly StrategyTemplate[]`** — zunächst leer.
    Ergänze einen **eingebauten Negativfall**: ein absichtlich kaputtes Template im
@@ -65,6 +65,7 @@ Lege `src/strategies/catalog.ts` an:
 - [ ] `tests/strategies.catalog.test.ts`: ≥ 10 Negativfälle, je ein erwarteter Fehler
 - [ ] `assertTemplatesValid()` wirft beim Negativ-Template
 - [ ] Ein Template mit `class: "unclassified"` wird abgelehnt
+- [ ] Ein Template mit `expectedRegimes: ["UNKNOWN"]` wird abgelehnt (ADR-009)
 - [ ] Ein Builder mit `stopLossPct: 999` wird abgelehnt
 - [ ] Ein Builder mit `action.side: "SHORT"` wird abgelehnt
 - [ ] Ein Builder, der ein Feld außerhalb `RULE_FIELDS` nutzt, wird abgelehnt

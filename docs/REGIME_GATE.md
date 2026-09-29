@@ -19,6 +19,11 @@ reiner **Risikofaktor**) und der Frage, *welche Strategieklasse zum Markt
 passt*: Mean-Reversion-Signale werden in Trendmärkten gedämpft und
 umgekehrt — als **Datenkontext**, niemals als hartes Veto.
 
+**Vokabular-Entscheidungen (verbindlich):** [ADR-008](roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) (Strategieklasse: `StrategyClassKey` aus
+`STRATEGY_CLASS_KEYS`, `unclassified` ist kein Template-Status, keine neue Klasse) und [ADR-009](roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)
+(Regime: `MarketRegime` + `UNKNOWN`, keine zweite Taxonomie, `UNKNOWN` wird bei Per-Regime-Auswertungen
+fail-closed ausgeschlossen).
+
 Seit **v1.61.0 (RMA-P2-01)** ist die Erkennung **mehrdimensional und
 point-in-time-sicher**: zusätzlich zum OHLCV-Kern fließen versionierte
 Preis-, Volatilitäts-, Liquiditäts-, Perp- und optionale Makro-Familien
@@ -260,7 +265,9 @@ Alle Schwellen: `CONFIGURATION.md` §„Regime-Gate“ und `.env.example`.
   eigenes Veto in den Risk-Step.
 - **Strategieklasse von Regeln:** Regeln tragen keine eigene Klasse; die
   Ableitung läuft über das Mission-Template. Regeln ohne Mission (MANUAL)
-  bleiben ungedämpft (Faktor 1).
+  bleiben ungedämpft (Faktor 1). Quantitative Strategie-Templates **deklarieren**
+  ihre Klasse, `unclassified` ist dort ein Fehler ([ADR-008](roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)); an der Live-Ableitung
+  ändert das nichts.
 - **Prozessgrenzen:** der Regime-Zustand ist RAM-pro-Prozess; der separate
   Mikro-Executor-Prozess füllt ihn beim Seed. Ohne Bewertung gilt immer
   fail-safe Faktor 1. Die Snapshots in `regime_snapshots` sind die

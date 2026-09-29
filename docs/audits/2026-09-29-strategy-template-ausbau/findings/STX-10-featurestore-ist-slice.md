@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Architektur / Features
 - **Quelle:** Ausbaudokument §4.8
-- **Status:** OPEN
+- **Status:** IN ARBEIT — Einordnung dokumentiert (00-02, `v0.6.1`, [STRATEGY_STACK.md](../../../architecture/STRATEGY_STACK.md)); Prompt 02-04 bleibt optional
 - **Datei(en):** `src/features/`
 
 ## Beschreibung

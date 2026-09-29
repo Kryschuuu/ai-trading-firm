@@ -17,6 +17,11 @@ ausdrückbar.**
 `RuleWindow.timeframe` ist eine geschlossene Union aus fünf Intraday-Werten. Der
 Historical Store unterstützt zehn Werte einschließlich `2h`, `4h`, `1d`, `5d`.
 
+> **Korrektur ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), `v0.6.1`):** Der Cross-Sectional-Rebalance hängt **nicht** an
+> `RuleWindow.timeframe` — `CrossSectionalConfig.timeframe` akzeptiert bereits alle zehn
+> `SUPPORTED_TIMEFRAMES` (Default `1h`). Blockiert sind Einzel-Symbol-Regeln und die Candidate Matrix
+> (`4h`/`1d`), nicht die Universe-Strategie.
+
 ## Beweis
 
 ```ts

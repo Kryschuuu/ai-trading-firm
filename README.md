@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.6.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.6.1 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.6.0** (Beta, 2026-09-29; Baseline war v0.1.0) |
+| Version | **v0.6.1** (Beta, 2026-09-29; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -143,7 +143,7 @@ Entscheidungsprotokoll: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | Modul | Zweck |
 | --- | --- |
 | `src/cycle/` | Agenten-Zyklus (Makro/Mikro): sequenzielle Agenten-Steps mit Validierung, Plausibilität und Audit |
-| `src/scanner/` | Deterministischer Market-Scanner (15+ Faktoren, point-in-time) |
+| `src/scanner/` | Deterministischer Market-Scanner (**14 aktive** Faktoren laut `scanner.config.json`, point-in-time) |
 | `src/marketdata/` | Multi-Venue-Sync (6 Venues), Candle-Backfill, Qualitäts-Layer, Readiness |
 | `src/brokers/` | Paper-Broker (realistische Fill-Simulation), Bitunix/Alpaca-Adapter, Reconciliation, Emergency-Flatten |
 | `src/execution/` | Order-Gates, Post-Only-Fallback, TWAP-Engine |
@@ -191,13 +191,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.6.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.6.1, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.6.0), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.6.1), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)
@@ -209,7 +209,8 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 │   ├── audits/               ← Audit-Zyklen chronologisch (Peer-Review, Security, Feature-Gap, Roadmap)
 │   ├── peer-reviews/         ← Peer-Review-Reports & Patches
 │   ├── security/             ← Security-Übersicht & Audit-Report
-│   ├── architecture/         ← DB-Schema, Integrationspunkte, Pipeline-Karte
+│   ├── architecture/         ← DB-Schema, Integrationspunkte, Pipeline-Karte, Strategie-Stack-SSoT
+│   ├── roadmap/              ← ADR-Log (DECISIONS.md) + historischer TASK-Tracker
 │   ├── help/                 ← 3-Ebenen-Hilfe-JSONs der UI
 │   ├── ci/                   ← versionierte Quellen der CI-Workflows
 │   └── archive/              ← historische Docs (inkl. Legacy-Changelog v1.x.x)
@@ -237,6 +238,7 @@ lesbar (kanonische URLs `/docs/<Datei>.md`). Index: [docs/README.md](docs/README
 | [docs/VOLATILITY_TARGETING.md](docs/VOLATILITY_TARGETING.md) / [docs/DRAWDOWN_SCALING.md](docs/DRAWDOWN_SCALING.md) / [docs/SIGNAL_DECAY.md](docs/SIGNAL_DECAY.md) | Risk-Scalierungs-Layer (RMA-P5-01/04/05) |
 | [docs/POST_ONLY_FALLBACK.md](docs/POST_ONLY_FALLBACK.md) / [docs/TWAP_EXECUTION.md](docs/TWAP_EXECUTION.md) | Execution-Strategien (RMA-P4-02/03) |
 | [docs/security/README.md](docs/security/README.md) | Security-Übersicht: Auth-Modell, RBAC, aggregierte Findings |
+| [docs/architecture/STRATEGY_STACK.md](docs/architecture/STRATEGY_STACK.md) / [docs/roadmap/DECISIONS.md](docs/roadmap/DECISIONS.md) | Strategie-Stack-SSoT (welcher Baustein ist wofür zuständig) und ADR-Log (ADR-001…010, u. a. Strategieklasse, Regime, Universe) |
 | [docs/audits/](docs/audits/README.md) | Audit-Verwaltung (chronologisch, mit Status-Modell) |
 | [docs/ARENA_TASKS.md](docs/ARENA_TASKS.md) | Task-Tracker (01–12+) mit Status und PRs |
 | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) / [docs/OPERATIONS.md](docs/OPERATIONS.md) | Metriken, Auto-Circuit-Breaker, Alerts, Runbooks |

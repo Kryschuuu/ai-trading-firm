@@ -260,3 +260,8 @@ persistiert (kein High-Cardinality-Zeitrahl-Problem).
   undefined ⇒ `CROSS_SECTION_DEGENERATE` (by design, nicht stumm 0).
 - **Kein Order-Pfad:** das Ranking ist Forschungs-/Diagnose-Eingabe; es
   erzeugt keine impliziten Orders und ersetzt nicht den Scanner-Ranker.
+- **Kein Sizing:** das Modul liefert Rang und Composite, keine Gewichte. Universe-Gewichte
+  (`EQUAL_WEIGHT`/`INVERSE_VOLATILITY`) erzeugt ausschließlich die
+  `PortfolioConstruction`-Schicht aus [ADR-010](roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3): sie liest den Snapshot und ändert
+  `CrossSectionalConfig` nicht (sonst änderte sich jede Snapshot-Identität) — Stand `v0.6.1`
+  ist sie **nicht gebaut**. Eine zweite `MultiAssetStrategySpec` ist verworfen.
