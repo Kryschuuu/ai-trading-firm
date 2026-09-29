@@ -301,7 +301,11 @@ test("renewSession braucht Double-Submit: fehlender oder falscher Header ⇒ 403
   const env = { ...BASE, FIRM_SESSION_IDLE_TTL_S: "120" };
   const { issued } = issue(env, OPERATOR, now);
   const token = issued.sessionToken;
-  for (const csrf of ["", "falsch", issued.csrf.slice(0, 63) + "0"]) {
+  // Der Token ist zufällig und endet in 1/16 der Läufe selbst auf "0": die letzte Stelle
+  // muss garantiert abweichen, sonst prüft der Test den gültigen Wert (Flake).
+  const tampered = issued.csrf.slice(0, 63) + (issued.csrf.endsWith("0") ? "1" : "0");
+  assert.notEqual(tampered, issued.csrf, "der manipulierte Wert muss sich vom gültigen unterscheiden");
+  for (const csrf of ["", "falsch", tampered]) {
     const result = renewSession(withSession(token, csrf), env, now + 110_000);
     assert.ok(!result.ok, `CSRF '${csrf}' darf nicht verlängern`);
     if (!result.ok) {

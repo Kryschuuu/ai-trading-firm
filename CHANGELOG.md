@@ -29,6 +29,18 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status: Beta.** Offen für den nächsten Release — als Nächstes der Timeframe-Blocker
 > 01-01 (`v0.6.2`). Release-Plan:
 > [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2.
+> Nachträge ohne eigenen Release (Doku, Tests) stehen hier und werden im nächsten Release
+> mitgeliefert (Präzedenz: `VERSIONING.md` V4).
+
+### Fixed
+
+* **Flaky Test in `tests/sessionRenewal.test.ts`** („renewSession braucht Double-Submit“): der
+  Negativfall „falscher CSRF-Header“ bildete den Wert als `csrf.slice(0, 63) + "0"`. Der Token ist
+  zufällig; endet er selbst auf `0` (1 von 16 Läufen), war der „falsche“ Wert der gültige, die
+  Verlängerung gelang und die Suite schlug zufällig fehl (gemessen: 7 von 160 Läufen, jeder
+  Fehltoken endete auf `0`). Die letzte Stelle weicht jetzt garantiert ab, und ein
+  `assert.notEqual` prüft die Prämisse (400 Läufe ohne Fehler). Nur Testcode: `src/lib/authSession.ts`
+  und die Refresh-Route bleiben unverändert.
 
 ## [0.6.1] — Strategie-Stack-SSoT & Vokabular-ADRs (2026-09-29)
 
