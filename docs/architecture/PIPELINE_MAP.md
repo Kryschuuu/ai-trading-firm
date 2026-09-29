@@ -466,7 +466,8 @@ flowchart TD
 - **Speicherort:** `data/history/candles.ndjson` (oder konfiguriert über `HISTORICAL_DATA_DIR`).
 - **Schema-Version:** **v2** (jede Zeile enthält `v: 2` und ein verpflichtendes `timeframe`-Feld).
 - **Zulässige Timeframes (`SupportedTimeframe`):**
-  `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `1d`, `5d`.
+  `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `1d`, `5d`
+  (SSoT: `src/lib/marketdata/timeframes.ts`, vom Store re-exportiert).
 - **Logischer Primärschlüssel:** `instrumentId + timeframe + ts`. Bei Kollision gewinnt der Datensatz mit dem jüngeren `fetchedAt`.
 - **Retention & Kompaktierung:**
   - `maxBarsPerSeries`: Standard **5.000 Kerzen** pro `(instrumentId, timeframe)`-Paar.

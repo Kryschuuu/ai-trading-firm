@@ -1,7 +1,7 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-09-29** · Code-Version **v0.6.1** (Glossar um Markt-Regime, Strategieklasse und Universe-Snapshot ergänzt, ADR-008…010; zuvor v0.4.0: bookDepthUsd + Venue-Qualitätsgrenze, spreadPct, n≥100, Kostenmodell feine Takte)
+> Dokumentationsstand **2026-09-29** · Code-Version **v0.6.2** (Rule-Timeframes `1m…5d` aus `SUPPORTED_TIMEFRAMES`, Timeframe-Guard im Mikro-Executor; zuvor v0.6.1: Glossar um Markt-Regime, Strategieklasse und Universe-Snapshot ergänzt, ADR-008…010; zuvor v0.4.0: bookDepthUsd + Venue-Qualitätsgrenze, spreadPct, n≥100, Kostenmodell feine Takte)
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine
@@ -62,7 +62,7 @@ Der LLM rechnet nicht mehr *mit*, er rechnet *vor*.
 │  WebSocket-Feed (Binance @trade + @kline_1m   oder Simulator)           │
 │      │  ms-genaue Preis-/Volumen-Ticks                                  │
 │      ▼                                                                  │
-│  RollingTimeframeSeries  (1m→1m/5m/15m/30m/1h, REST-Seed, RAM only)     │
+│  RollingTimeframeSeries  (1m→1m/3m/5m/15m/30m/1h, REST-Seed, RAM only)  │
 │      ▼  ~10–100 µs                                                      │
 │  RuleSnapshot (RSI, EMA9/21/50, ATR, Volumen, Volume-Ratio, …)          │
 │      ▼  ~1 µs pro Regel                                                 │
@@ -160,8 +160,16 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
   `vwapPct` (CYCLE-DAYTRADE-01) ist der Kurs gegen den **Tages-VWAP** in
   Prozent — positiv = über dem volumen-gewichteten Tagesdurchschnitt, die
   Referenzgröße des Daytradings. Anker ist die UTC-Kalendertagesscheibe der
-  letzten Kerze; ohne Volumen in der Serie bleibt das Feld `null` und die
+  letzten Kerze; ohne Volumen in der Serie oder mit weniger als zwei Kerzen an
+  diesem Tag — also auf `1d`/`5d` immer — bleibt das Feld `null` und die
   Bedingung feuert nicht (fail-closed statt erfundener Neutralität).
+* **Timeframes (STX-01, v0.6.2):** `window.timeframe` ist ein
+  `SupportedTimeframe` (`1m … 5d`, zehn Werte); `RULE_ALLOWED_TIMEFRAMES` und das
+  LLM-Schema leiten sich aus `SUPPORTED_TIMEFRAMES` ab (SSoT:
+  `src/lib/marketdata/timeframes.ts`). Backtests laufen auf allen Timeframes, der
+  Mikro-Executor wertet nur Regeln bis zu seinem Ausführungsintervall (Default `1h`)
+  aus und weist längere fail-closed und sichtbar ab. Welches Feld auf welchem
+  Timeframe was bedeutet: [BACKTESTING.md §1.1](BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062).
 * **Kosten-/Liquiditätsfelder (v0.4.0):** `spreadPct` (relativer
   Orderbuch-Spread `(ask-bid)/mid` ×100) beantwortet „wie teuer ist der
   Touch?“, `bookDepthUsd` (Tiefe der abriegelnden Seite

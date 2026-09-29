@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-09-29 · **Code-Version:** v0.6.1 (Beta)  
+> **Status:** Ist-Zustand · **Stand:** 2026-09-29 · **Code-Version:** v0.6.2 (Beta)  
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)
@@ -23,6 +23,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 |---|---|---|
 | Rule-Felder (Whitelist) | `src/lib/ruleFieldCatalog.ts` | — |
 | Rule-Ausführung + Sanitize | `src/lib/ruleEngine.ts` | nicht im Strategie-Modul |
+| Rule-Timeframes | `src/lib/marketdata/timeframes.ts` (`SUPPORTED_TIMEFRAMES`); `RULE_ALLOWED_TIMEFRAMES` in `ruleEngine.ts` leitet sich ab | kein zweites Vokabular (STX-01) |
 | Indikator-Formeln | `src/lib/indicators.ts` + `src/backtest/indicatorCache.ts` | — |
 | Strategieklasse | `src/lib/signalDecay.ts` (`STRATEGY_CLASS_KEYS`) | nicht neu in `src/strategies/` (ADR-008) |
 | Regime | `src/lib/marketRegime.ts` (`MarketRegime`) + `regime_snapshots` | kein zweites Vokabular (ADR-009) |
@@ -42,7 +43,8 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 ### Erläuterungen (Ist-Zustand, stichprobenweise verifiziert)
 
 - **Rule-Felder:** `src/lib/ruleFieldCatalog.ts` exportiert `RULE_FIELDS` (Whitelist). `src/lib/ruleEngine.ts` re-exportiert und nutzt sie in `sanitizeRuleSpec()`. Keine zweite Whitelist.
-- **Rule-Ausführung:** `src/lib/ruleEngine.ts` enthält `sanitizeRuleSpec`, `compileRuleSpec` (liefert `CompiledRule.evaluate`), `buildSnapshotFromCandles`, `backtestRule`, `RULE_CEILINGS`. Kein Import von LLM-Modulen (bewusst isoliert).
+- **Rule-Ausführung:** `src/lib/ruleEngine.ts` enthält `sanitizeRuleSpec`, `compileRuleSpec` (liefert `CompiledRule.evaluate`), `buildSnapshotFromCandles`, `backtestRule`, `RULE_CEILINGS`, `RULE_ALLOWED_TIMEFRAMES`. Kein Import von LLM-Modulen (bewusst isoliert).
+- **Rule-Timeframes (STX-01, v0.6.2):** `src/lib/marketdata/timeframes.ts` exportiert `SUPPORTED_TIMEFRAMES` (zehn Werte `1m … 5d`), `SUPPORTED_TIMEFRAME_MS` und `isSupportedTimeframe`; der Historical Store re-exportiert sie. `RuleWindow.timeframe` ist ein `SupportedTimeframe`, `RULE_ALLOWED_TIMEFRAMES` (`ruleEngine.ts`) und `RULE_LLM_SCHEMA` leiten sich daraus ab, die Workshop-UI liest dieselbe Liste. Der Mikro-Executor wertet nur Regeln bis zu seinem Ausführungsintervall aus (Default `1h`; `ruleTimeframeBlockReason` in `src/lib/microExecutor.ts`) und weist längere sichtbar ab. `vwapPct` ist auf `1d`/`5d` immer `null`. Tabelle: [BACKTESTING.md §1.1](../BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062).
 - **Indikatoren:** `src/lib/indicators.ts` = reine Formeln (`ema`, `rsi`, `macd`, `adx`, `atr`/`atrPct`, `bollingerBandWidthPct`, `sessionVwap`); Bollinger gibt es nur als Bandbreite — `bollingerBands` und `donchianChannel` liefert erst 02-01. `src/backtest/indicatorCache.ts` = O(n)-Cache derselben Formeln für den Backtest (Parität, kein neues Modell).
 - **Strategieklasse:** `src/lib/signalDecay.ts` definiert `STRATEGY_CLASS_KEYS = ["mean-reversion", "trend", "breakout", "unclassified"]` und `DEFAULT_CLASS_POLICIES`. `StrategyClass` (drei Werte, Liste `STRATEGY_CLASSES`) stammt aus `src/lib/marketRegime.ts`. Regeln tragen keine Klasse; zur Laufzeit wird sie aus dem Mission-Template abgeleitet (`strategyClassOfTemplate`). Kein Verzeichnis `src/strategies/` vorhanden. Verbindlich: ADR-008 (Klasse deklarieren, `unclassified` ist kein Template-Status, keine neue Klasse).
 - **Regime:** `src/lib/marketRegime.ts` definiert `MarketRegime = "TREND_UP" | "TREND_DOWN" | "RANGE" | "HIGH_VOL" | "CRASH"` plus `UNKNOWN` als `MarketRegimeLabel` (5+1). Persistenz: Tabelle `regime_snapshots` (`src/db/schema.ts`, `src/lib/regimeSnapshotStore.ts`). Kein zweites Vokabular (ADR-009); die `VolatilityRegime`-Typen (`adaptiveRisk.ts`, `src/portfolio/types.ts`, `src/scanner/types.ts`) sind Volatilitäts-Stufen, kein Markt-Regime.

@@ -143,6 +143,7 @@ market_data_fetch_failures_total{venue="binance",timeframe="15m",reason="RATE_LI
 | `market_data_unauthorized_public_endpoint` | `critical` | venue, symbol, timeframe, httpStatus |
 | `market_data_fetch_retry` | `warn` | reason, httpStatus, attempt, maxAttempts, venue |
 | `micro_executor_seed_fetch_failed` | `error` | symbol, timeframe, reason, retryable, httpStatus |
+| `micro_executor_rule_blocked` | `warn` | ruleId, ruleKey, version, symbol, timeframe, executionInterval, reason (`timeframe_exceeds_interval` \| `timeframe_unsupported`), effect — das sichtbare „Nein“ des Timeframe-Guards (STX-01, `v0.6.2`): je abgewiesener Regel einmal beim Start, nicht je Tick |
 | `market_sync_fetch_failures` | `error` | venue, count, byStage (nur Zähler, keine Symbole) |
 
 **Redaction/Garantien:**
@@ -227,6 +228,7 @@ Messschleife:
 | `llm_calls_total{provider,outcome}` | Counter | Routing-Schicht (`src/routing/adapter.ts`) | LLM-Aufrufe je Provider; `outcome` = `ok`/`error`/`fallback` |
 | `llm_latency_ms_sum{provider}` | Counter | Routing-Schicht (Latenz fällt dort ohnehin an) | Summe der Latenzen; Mittelwert = `llm_latency_ms_sum / llm_calls_total{outcome="ok"}` |
 | `backtest_run_persist_total{result,reason}` | Counter | Backtest-Persistenz (`persistBacktestRun`, RMA-P1-04) | Walk-Forward-Runs mit Trade-Ledger: `result` = `created`/`replayed`/`failed`; `reason` = `ok` bzw. Fehlercode-Klasse (`ledger:reconciliation-mismatch`, `ledger:idempotency-conflict`, `persist:db-error`, …) — nie Run-IDs oder Symbole |
+| `micro_executor_rule_blocked_total{reason,timeframe}` | Counter | Timeframe-Guard des Mikro-Executors (`src/lib/microExecutor.ts`, STX-01, `v0.6.2`) | Regeln, die der Executor nicht auswertet, weil ihr Timeframe länger als sein Ausführungsintervall (Default `1h`) oder unbekannt ist: `reason` = `timeframe_exceeds_interval`/`timeframe_unsupported`, `timeframe` = Element von `SUPPORTED_TIMEFRAMES` bzw. `OTHER` — nie Regel-IDs oder Symbole (die stehen im Log `micro_executor_rule_blocked`). Je Regel ein Schritt pro Start. Der Zähler lebt im **Mikro-Executor-Prozess**; dort ist die Liste der abgewiesenen Regeln auch über `ruleGuard` im Health-Payload (`GET /api/firm/micro` → `microProcess.ruleGuard`) einsehbar |
 
 **Kardinalitäts- und Secret-Regel** (wie beim Marktdaten-Counter): Labels sind
 ausschließlich **klassifizierte Codes** — `metricLabel()` verwirft alles, was
