@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.0.0` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.0` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Prompt 00-01 umgesetzt (`v0.6.0`) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -29,6 +29,7 @@
 | Version | Datum | Änderung |
 | --- | --- | --- |
 | `v1.0.0` | 2026-09-29 | Erstfassung: 19 Findings, 32 Prompts, 8 Phasen |
+| `v1.1.0` | 2026-09-29 | 00-01 gemessen (`v0.6.0`, [BENCH-BASELINE](remediation/BENCH-BASELINE.md)); Release-Plan verzahnt: `v0.6.0` = Benchmark, `v0.6.1` = SSoT + ADRs, 0.6.x-Folge nachgezogen; STX-12 auf „Patch mit Paritätstest“ herabgestuft |
 
 ## 2. Release-Plan der Roadmap
 
@@ -37,12 +38,13 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 
 | Release | Inhalt | Prompts | Typ | Status Beta |
 | --- | --- | --- | --- | --- |
-| `v0.5.1` | Audit + Roadmap (dieses PR) | — | Doku | **Beta** |
-| `v0.6.0` | Backtest-Benchmark + Strategie-Stack-SSoT + 3 ADRs | 00-01…00-03 | Doku + Mess-Skript | **Beta** |
-| `v0.6.1` | **Timeframe-Angleichung** (STX-01) | 01-01 | Minor (neue Felder im Vokabular) | **Beta** |
-| `v0.6.2` | Indikatoren: `bollingerBands`, `donchianChannel` | 02-01 | Minor (additive pure Funktionen) | **Beta** |
-| `v0.6.3` | Bollinger-Regelfelder + Parität | 02-02 | Minor (3 Felder) | **Beta** |
-| `v0.6.4` | Donchian-Regelfeld + Parität | 02-03 | Minor (1 Feld) | **Beta** |
+| `v0.5.1` | Audit + Roadmap (PR #180) — **in `v0.6.0` gefaltet**, kein eigener Release | — | Doku | **Beta** |
+| `v0.6.0` | **Backtest-Performance-Baseline** (00-01) + Audit-Doku aus PR #180 | 00-01 | Doku + Mess-Skript | **Beta** |
+| `v0.6.1` | Strategie-Stack-SSoT + 3 ADRs | 00-02, 00-03 | Doku | **Beta** |
+| `v0.6.2` | **Timeframe-Angleichung** (STX-01) | 01-01 | Minor (neue Felder im Vokabular) | **Beta** |
+| `v0.6.3` | Indikatoren: `bollingerBands`, `donchianChannel` | 02-01 | Minor (additive pure Funktionen) | **Beta** |
+| `v0.6.4` | Bollinger-Regelfelder + Parität | 02-02 | Minor (3 Felder) | **Beta** |
+| `v0.6.5` | Donchian-Regelfeld + Parität | 02-03 | Minor (1 Feld) | **Beta** |
 | `v0.7.0` | **Template-Vertrag** (`types.ts`, Katalog, Validierung) | 03-01, 03-02 | Minor (neue Domäne) | **Beta** |
 | `v0.7.1` | Template EMA/ADX + Compiler + Tests | 03-03, 03-09*, 03-10* | Minor | **Beta** |
 | `v0.7.2` | Template MACD | 03-04 | Minor | **Beta** |
@@ -105,8 +107,8 @@ Roadmap sind drei echte Bruchstellen vorgesehen — alle drei bewusst:
 
 | Bruchstelle | Release | Was bricht | Migrationspfad |
 | --- | --- | --- | --- |
-| `RuleWindow.timeframe` wird von 5 auf 10 Werte erweitert | `v0.6.1` | Code, der `ALLOWED_TIMEFRAMES` als geschlossene Menge behandelt | `RULE_ALLOWED_TIMEFRAMES` ist jetzt exportiert und aus `SUPPORTED_TIMEFRAMES` abgeleitet |
-| `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.3`/`v0.6.4` | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet |
+| `RuleWindow.timeframe` wird von 5 auf 10 Werte erweitert | `v0.6.2` | Code, der `ALLOWED_TIMEFRAMES` als geschlossene Menge behandelt | `RULE_ALLOWED_TIMEFRAMES` ist jetzt exportiert und aus `SUPPORTED_TIMEFRAMES` abgeleitet |
+| `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.4`/`v0.6.5` | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet |
 | `COPY_MODE`-Enum existiert | `v0.11.0` | Kein bestehender Code (Modul ist neu) | keine |
 
 ## 5. Offene Versionsfragen
@@ -116,7 +118,7 @@ Roadmap sind drei echte Bruchstellen vorgesehen — alle drei bewusst:
 | V1 | Muss ein Templates-Release auch eine `v1`-Version der Strategie-Bibliothek tragen? | Empfehlung: **nein** — `templateVersion` im Artefakt-Hash genügt (04-01). |
 | V2 | Wann wird `0.x` verlassen? | **Nicht durch diese Roadmap planbar.** Erst wenn `B1…B8` belegt sind, siehe [`BETA_STATUS.md`](../../BETA_STATUS.md). |
 | V3 | Braucht Phase 7 ein eigenes Release-Train? | Empfehlung: **nein**, sie folgt `v0.11.0–v0.11.2`, weil sie organisatorisch abhängig (`B5`) ist. |
-| V4 | Muss `v0.5.1` existieren, wenn nur Doku geändert wurde? | **Ja** — sonst hat die Roadmap keinen dokumentierten Startpunkt. Siehe `CHANGELOG.md`. |
+| V4 | Muss `v0.5.1` existieren, wenn nur Doku geändert wurde? | **Nein** — die Audit-Doku aus PR #180 wurde ohne eigenen Bump gemergt und ist in `v0.6.0` gefaltet (siehe `CHANGELOG.md`); so bleibt „ein Release = ein prüfbares Paket“ gewahrt. |
 
 ---
 

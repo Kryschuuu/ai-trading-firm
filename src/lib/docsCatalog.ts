@@ -239,7 +239,7 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     file: "docs/audits/2026-09-29-strategy-template-ausbau/README.md",
     title: "Audit: Strategie-Template-Ausbau 2026-09-29",
     subtitle:
-      "19 Findings + 32 Prompts in 8 Phasen, Release-Plan v0.5.1 bis v0.11.2 — " +
+      "19 Findings + 32 Prompts in 8 Phasen, Release-Plan v0.6.0 bis v0.11.2 — " +
       "bleibt ausdruecklich Beta (BETA_STATUS.md)",
   },
   betaStatus: {

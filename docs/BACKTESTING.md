@@ -474,6 +474,43 @@ zurückgerollt); die Artefakte werden unter der Kandidaten-UUID trotzdem
 geschrieben und der Exit-Code ist 1 (laut, nie still). Ein Lauf gilt erst
 mit `RECONCILED`-Ledger als persistiert.
 
+### 6.1 Performance-Baseline (`scripts/bench-backtest.ts`, STX-00-01 / `v0.6.0`)
+
+```sh
+# 3 Messpunkte x 3 Laeufe x 3 Pfade auf einer echten Store-Reihe (ohne DB, ohne Netz)
+npm run bench:backtest -- --instrument=BINANCE:BTCUSDT --dir=data/history
+```
+
+| Flag | Pflicht | Bedeutung |
+|---|---|---|
+| `--instrument` | ja | Instrument-ID im `HistoricalStore` |
+| `--timeframe` | nein (Default `1h`) | gemessener Timeframe (Store-Allowlist) |
+| `--dir` | nein (Default `data/history`) | Store-Verzeichnis (nur lesend) |
+| `--sizes` | nein (Default `1000,5000,17520`) | Messpunkte; nicht verfügbare Größen werden gemeldet und übersprungen (Fit braucht ≥ 2) |
+| `--repeat` | nein (Default `3`) | gemessene Läufe je Messpunkt (berichtet wird der Median plus alle Rohwerte) |
+| `--warmup-runs` | nein (Default `1`) | ungemessene Läufe je Messpunkt vor der Messung (`0` = Kaltmessung, misst den JIT-Sprung mit) |
+| `--warmup-bars` | nein (Default `30`) | Warmup-Kerzen der Messpfade |
+| `--paths` | nein | Teilmenge von `rule,multiAsset,cache` |
+| `--execution-model` | nein (Default `legacy`) | gilt nur für den `multiAsset`-Pfad (`legacy` = eingefrorener Default, `paper` = Fill-Simulator) |
+| `--out-dir` / `--no-write` | nein (Default `data/bench`) | Artefakt-Ziel bzw. „nur stdout" |
+
+Gemessen werden **auf derselben Kerzenreihe und mit derselben Regel**:
+`backtestRule()` (Single-Rule-Pfad je Bar über die volle Historie),
+`runMultiAssetBacktest()` (Engine, Indikator-Cache) und die reine
+`buildIndicatorCache()` + `snapshotFromCache()`-Schleife. Berichtet werden Median,
+`ms/1000 Kerzen`, der log-log-Fit-Exponent über die Messpunkte und die
+„1 Zelle Matrix"-Rechnung (Default 7 500 Zellen à 17 520 Kerzen → Kernstunden
+seriell). Es wird **kein** `src/db`-Modul importiert und nur nach `data/bench/`
+geschrieben (gitignoriert).
+
+**Gemessenes Ergebnis (2026-09-29, 2 vCPU, 17 520 Stundenkerzen):**
+`backtestRule()` Exponent **1,99** / 25 986 ms je Zelle ⇒ 54,14 Kernstunden für
+7 500 Zellen; Engine Exponent **1,01** / 213,5 ms ⇒ 0,44 Kernstunden (**121,7×**);
+Indikator-Cache 72,2 ms (**360,1×**). Konsequenz: Screening und Validator-Läufe
+fahren über die Engine bzw. den Cache, nicht über `backtestRule()`. Rohzahlen,
+Messaufbau und Grenzen:
+[BENCH-BASELINE.md](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md).
+
 ---
 
 ## 7. Anti-Overfitting-Grenzen (bewusst nicht enthalten)
@@ -497,6 +534,7 @@ mit `RECONCILED`-Ledger als persistiert.
 ## 8. Referenzen
 
 - Engine-Basis: [BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)
+- Performance-Baseline (STX-00-01): [audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)
 - Paper-Kostenmodell: [PAPER_TRADING.md](PAPER_TRADING.md) (§3), Funding:
   `src/lib/funding.ts`
 - Flags: [CONFIGURATION.md](../CONFIGURATION.md) („Walk-Forward-Backtesting“)

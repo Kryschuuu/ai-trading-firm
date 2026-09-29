@@ -53,7 +53,7 @@ docs/audits/
 └── 2026-09-29-strategy-template-ausbau/  # OPEN v1.0.0
     ├── README.md
     ├── report.md          # Haupt-Audit (7 Abschnitte + Beta-Positionierung)
-    ├── VERSIONING.md      # Audit-Version + Release-Plan v0.5.1 … v0.11.2
+    ├── VERSIONING.md      # Audit-Version + Release-Plan v0.6.0 … v0.11.2
     ├── ROADMAP.md         # 8 Phasen, Gates G0–G8
     ├── findings/          # STX-01 … STX-19 (je eine Datei)
     ├── prompts/           # 32 kopierfertige Prompts (00-01 … 07-03)
@@ -64,7 +64,7 @@ docs/audits/
 
 | Zyklus | Scope | Status |
 |---|---|---|
-| [2026-09-29-strategy-template-ausbau](2026-09-29-strategy-template-ausbau/README.md) | Strategie-Templates, Candidate Matrix, Validator-Agent, Copy-Trading — externes Ausbaudokument gegen `main` @ `e3509fd` verifiziert (23 geprüfte Behauptungen) | **OPEN (Audit v1.0.0):** 19 Findings (0 CRITICAL, 5 HIGH, 7 MEDIUM, 4 LOW, 3 INFO) + **32 Prompts in 8 Phasen**; Release-Plan `v0.5.1` … `v0.11.2`, **alle Beta**. [Bericht](2026-09-29-strategy-template-ausbau/report.md), [ROADMAP](2026-09-29-strategy-template-ausbau/ROADMAP.md), [VERSIONING](2026-09-29-strategy-template-ausbau/VERSIONING.md), [Tracking](2026-09-29-strategy-template-ausbau/remediation/TRACKING.md). **Bleibt Beta** — [BETA_STATUS.md](../BETA_STATUS.md) |
+| [2026-09-29-strategy-template-ausbau](2026-09-29-strategy-template-ausbau/README.md) | Strategie-Templates, Candidate Matrix, Validator-Agent, Copy-Trading — externes Ausbaudokument gegen `main` @ `e3509fd` verifiziert (23 geprüfte Behauptungen) | **OPEN (Audit v1.1.0, 00-01 umgesetzt):** 19 Findings (0 CRITICAL, 5 HIGH, 7 MEDIUM, 4 LOW, 3 INFO) + **32 Prompts in 8 Phasen**; Release-Plan `v0.6.0` … `v0.11.2`, **alle Beta**. [Bericht](2026-09-29-strategy-template-ausbau/report.md), [ROADMAP](2026-09-29-strategy-template-ausbau/ROADMAP.md), [VERSIONING](2026-09-29-strategy-template-ausbau/VERSIONING.md), [Tracking](2026-09-29-strategy-template-ausbau/remediation/TRACKING.md). **Bleibt Beta** — [BETA_STATUS.md](../BETA_STATUS.md) |
 | [2026-09-24-bookdepth-venue-quality](2026-09-24-bookdepth-venue-quality/README.md) | `bookDepthUsd` als Regelfeld + Orderbuch-Qualitätsgrenze je Venue (IAD-T-06, Fortsetzung von `spreadPct`) | **UMGESETZT v0.4.0:** [Tracking](2026-09-24-bookdepth-venue-quality/remediation/TRACKING.md) |
 | [2026-09-24-paper-n100-cost-spread](2026-09-24-paper-n100-cost-spread/README.md) | Paper n≥100, Kostenmodell feine Takte, 6 rote Tests, spreadPct | **UMGESETZT v0.3.0:** [Tracking](2026-09-24-paper-n100-cost-spread/remediation/TRACKING.md) |
 | [2026-09-24-internal-adapter-daytrading](2026-09-24-internal-adapter-daytrading/README.md) | Datenadapter (Yahoo/Polygon/FRED), Parallelität der Agenten, Daytrading-Fähigkeit — Prüfung eines Werk-Auftrags gegen `v0.2.0` | **UMGESETZT (Teilmenge):** Prompt-Budget/Batching + `vwapPct` + `1m` gebaut, Adapter abgelehnt; [Tracking](2026-09-24-internal-adapter-daytrading/remediation/TRACKING.md) |
