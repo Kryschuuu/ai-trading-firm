@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.6.1` |
+| **Version** | `v0.6.2` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-09-29 |
-| **Quellbasiert** | `package.json` (`version: "0.6.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.6.2"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -95,6 +95,27 @@ Trusted-Indikatoren, ohne den Engine-Default zu ändern. `v0.3.0` liefert:
 - **`tests/adrVocabulary.test.ts`:** hält die ADRs gegen Code, Roadmap und Prompts fest (nur lesend).
 - **Kein Laufzeitverhalten geändert:** `src/`, `scripts/` und `drizzle/` bleiben unberührt; Audit-Doku
   auf Stand `v1.1.1`.
+
+`v0.6.2` liefert die **Timeframe-Angleichung** (Prompt 01-01, Finding STX-01, Gate G1):
+
+- **Ein Vokabular:** `RuleWindow.timeframe` ist ein `SupportedTimeframe` — alle zehn Werte
+  `1m … 5d` (vorher fünf). `RULE_ALLOWED_TIMEFRAMES` (`ruleEngine.ts`) und das LLM-Schema leiten
+  sich aus `SUPPORTED_TIMEFRAMES` ab; die Liste lebt als reine, client-sichere Datei in
+  `src/lib/marketdata/timeframes.ts` (der Historical Store re-exportiert sie), der Workshop-Schritt 5
+  liest dieselbe Liste. `sanitizeRuleSpec`, `RULE_FIELDS`, `RuleAction`, `RULE_CEILINGS` und
+  `RULE_ALLOWED_SIDE` sind unverändert; Regeln mit `1m … 1h` liefern dieselben Bytes wie zuvor
+  (Golden-Test).
+- **Timeframe-Guard im Mikro-Executor (fail-closed, sichtbar):** Er wertet Regeln nur bis zu seinem
+  Ausführungsintervall aus (`MicroExecutorOptions.executionInterval`, Default `1h`). Längere Regeln
+  (`2h`, `4h`, `1d`, `5d`) bekommen keine Serie und lösen nie aus — Counter
+  `micro_executor_rule_blocked_total`, Log `micro_executor_rule_blocked` und `status().ruleGuard`
+  (`GET /api/firm/micro`) machen das „Nein“ sichtbar. Die Serien rechnen mit der kanonischen
+  Periodentabelle; `3m` läuft nicht mehr still auf 15-Minuten-Kerzen.
+- **`vwapPct` ist eine Intraday-Größe:** auf `1d`/`5d` immer `null` (nie `0`) — per Test belegt, in
+  [`docs/BACKTESTING.md`](docs/BACKTESTING.md) §1.1 tabelliert („Rule-Timeframe ↔ unterstützte Felder“).
+- **Bekannte Einschränkung:** Das Kosten-Fallback-Modell des Paper-Backtests ist für `3m`, `2h`, `5d`
+  nicht kalibriert (`3m` optimistisch) — bewusst unverändert, siehe dieselbe Tabelle.
+- **Audit-Doku auf Stand `v1.1.2`:** STX-01 behoben, Gate G1 erfüllt, Phase 2 darf starten.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

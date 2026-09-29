@@ -70,17 +70,24 @@ Screening-Gate **G5** ist erfüllt — der Single-Rule-Pfad ist quadratisch
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 01-01 | [Rule-Timeframes angleichen](prompts/PROMPT-STX-01-01-rule-timeframes.md) | `RuleSpec` auf `1m…5d` | 00-03 |
+| 01-01 | [Rule-Timeframes angleichen](prompts/PROMPT-STX-01-01-rule-timeframes.md) | ✅ `RuleSpec` auf `1m…5d`; Timeframe-Guard im Mikro-Executor (`v0.6.2`) | 00-03 |
 
-**Warum das der härteste Punkt der Roadmap ist:** `RuleWindow.timeframe` ist heute auf
-`1m|5m|15m|30m|1h` beschränkt (`ruleEngine.ts:87,205,883`). Ohne diesen Prompt sind
-**alle** Screening- und Validator-Ziele unerreichbar.
+**Warum das der härteste Punkt der Roadmap war:** `RuleWindow.timeframe` war bis `v0.6.1` auf
+`1m|5m|15m|30m|1h` beschränkt (`ruleEngine.ts:87,205,883`). Ohne diesen Prompt wären
+**alle** Screening- und Validator-Ziele unerreichbar geblieben.
 
 **Abgrenzung ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)):** Die Universe-Strategie braucht diesen Prompt nicht — `CrossSectionalConfig.timeframe`
 akzeptiert bereits alle zehn `SUPPORTED_TIMEFRAMES`. 01-01 gilt für Einzel-Symbol-Regeln (`4h`/`1d`).
 
 **Gate Phase 1 → 2:** `sanitizeRuleSpec` akzeptiert `4h`/`1d`, verwirft weiterhin
 Unbekanntes, und ein Test beweist, dass `1m…1h` unverändert bleibt.
+
+**Ergebnis 01-01 (2026-09-29, `v0.6.2`):** Gate **G1** ist erfüllt. `RULE_ALLOWED_TIMEFRAMES` leitet sich aus
+`SUPPORTED_TIMEFRAMES` ab (Heimat: `src/lib/marketdata/timeframes.ts`, ein Vokabular für Regel-Pfad, LLM-Schema,
+Mikro-Executor und Workshop-UI); ein Golden-Test belegt `1m…1h` byte-identisch. Der Mikro-Executor wertet nur bis
+zu seinem Ausführungsintervall (Default `1h`) aus und weist `2h…5d` sichtbar ab. Zwei Befundkorrekturen:
+`vwapPct` war auf `1d` bereits fail-closed (`null`), und „verwerfen“ heißt real „Default `15m`“. Die
+Feld-Tabelle je Timeframe: [`BACKTESTING.md` §1.1](../../BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062).
 
 ---
 

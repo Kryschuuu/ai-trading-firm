@@ -21,14 +21,110 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Offen für den nächsten Release — als Nächstes der Timeframe-Blocker
-> 01-01 (`v0.6.2`). Release-Plan:
+> **Status: Beta.** Offen für den nächsten Release — als Nächstes Phase 2 der Strategie-Roadmap:
+> die Indikator-Grundlage 02-01 (`v0.6.3`, `bollingerBands`/`donchianChannel`). Release-Plan:
 > [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2.
+
+## [0.6.2] — Timeframe-Angleichung (STX-01) (2026-09-29)
+
+> **Status: Beta — und bleibt Beta.** Prompt **01-01** der Strategie-Roadmap (Finding **STX-01**,
+> Gate **G1**): Der Regel-Pfad trägt jetzt alle zehn `SUPPORTED_TIMEFRAMES` (`1m … 5d`), und der
+> Mikro-Executor weist Regeln jenseits seines Ausführungsintervalls **fail-closed und sichtbar**
+> ab. Regeln mit `1m … 1h` bleiben **byte-identisch** (Golden-Test gegen die Sanitize-Ausgabe des
+> Stands `v0.6.1`, zusätzlich ein Differenzlauf über Snapshots und Backtests). Es gibt keine
+> Migration und keine Schema-Änderung; `RULE_FIELDS`, `RuleAction`, `RULE_CEILINGS` und
+> `RULE_ALLOWED_SIDE` sind unverändert — Shorts bleiben global gesperrt. `package.json` folgt dem
+> Release-Plan [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2.
+
+### Added
+
+* **`src/lib/marketdata/timeframes.ts`:** das Timeframe-Vokabular (`SUPPORTED_TIMEFRAMES`,
+  `SupportedTimeframe`, `SUPPORTED_TIMEFRAME_MS`, `isSupportedTimeframe`) als reine, client-sichere
+  Datei ohne Imports. Der Historical Store re-exportiert alles unverändert — alle bestehenden Importe
+  aus `historicalStore.ts` bleiben gültig. Grund für die eigene Datei: Regel-Engine und Workshop-UI
+  dürfen `node:fs` (Store-Persistenz) nicht in ihren Import-Graphen ziehen (die Workshop-Komponenten
+  liegen im Client-Bundle; `next build` ist grün).
+* **`RULE_ALLOWED_TIMEFRAMES`** (`ruleEngine.ts`): aus `SUPPORTED_TIMEFRAMES` abgeleitet — kein zweites
+  Vokabular. `sanitizeRuleSpec` und `RULE_LLM_SCHEMA` lesen genau diese Liste (ersetzt das private
+  `ALLOWED_TIMEFRAMES` und das handgepflegte Enum im LLM-Schema).
+* **Timeframe-Guard im Mikro-Executor (fail-closed, sichtbar):** Der Executor wertet eine Regel
+  gegen den Snapshot ihres Timeframes inklusive der noch laufenden Kerze aus; für `2h`/`4h`/`1d`/`5d`
+  wäre das ein teilweise abgelaufener Snapshot. Neu: `MicroExecutorOptions.executionInterval` (Default
+  `1h` = bisheriges Maximum, `MICRO_EXECUTION_INTERVAL_DEFAULT`) und die reine Funktion
+  `ruleTimeframeBlockReason` (`timeframe_exceeds_interval` | `timeframe_unsupported`). Eine
+  abgewiesene Regel bekommt keine Serie und löst nie eine Order aus; das „Nein“ ist sichtbar:
+  Counter `micro_executor_rule_blocked_total{reason,timeframe}` (Labels ohne Symbol/Regel-ID,
+  Kardinalitätsregel), strukturiertes Log `micro_executor_rule_blocked` (je Regel einmal beim Start,
+  nicht je Tick) und `ruleGuard` im Status des Executors (`GET /api/firm/micro` →
+  `microProcess.ruleGuard`).
+* **30 Tests, rein additiv (kein bestehender Test angepasst):**
+  `tests/ruleEngine.test.ts` (+14: `4h`/`1d` akzeptiert, Fail-closed-Tabelle, **Golden-Test** für
+  `1m|5m|15m|30m|1h`, Schema-Ableitung, Ceilings/LONG/Felder unverändert, `vwapPct === null` auf
+  `1d`/`5d` und bei < 2 Kerzen am UTC-Tag, Engine-Pfad-Parität, `volumeWindow` auf `1d`, Guard-Test
+  „`1d`-Regel auf 1m-Intervall → keine Order, genau ein Counter“),
+  `tests/microExecutor.test.ts` (+11: 10×10-Matrix des Guards, Fail-closed bei unbekanntem Timeframe,
+  Serien-Periode je Timeframe = kanonische Dauer, `3m`-Regression, Status, Konfiguration),
+  `tests/marketdata/timeframes.test.ts` (4: Invarianten, Re-Export, Client-Sicherheit),
+  `tests/ui/RuleBacktestPanel.test.tsx` (1: Workshop-Auswahl = Allowlist).
+
+### Changed
+
+* **`RuleWindow.timeframe` ist ein `SupportedTimeframe`** (vorher eine Union aus fünf Werten).
+  `sanitizeRuleSpec` nimmt jeden der zehn Werte an und bleibt sonst unverändert fail-safe: Die
+  Schreibweise wird kleingeschrieben (`"1H"` → `"1h"`), alles außerhalb der Allowlist (`"2h "`,
+  `"7d"`, `""`, `null`) fällt auf den sicheren Default `15m` — nie wird ein Rohwert durchgereicht.
+* **`RollingTimeframeSeries`** rechnet mit der kanonischen Periodentabelle
+  (`SUPPORTED_TIMEFRAME_MS`) statt mit einer zweiten, unvollständigen. `MicroExecutor.addSymbol` wirft
+  einen `RangeError` für Timeframes oberhalb des Ausführungsintervalls oder außerhalb des Vokabulars;
+  der Konstruktor von `MicroExecutor` wirft bei unbekanntem `executionInterval`.
+* **`MicroStatus`** hat ein zusätzliches Feld `ruleGuard` (`executionInterval`, `blocked[]`; additiv).
+* **Workshop-Schritt 5 (`RuleBacktestPanel`):** Die Auswahl „Fenster“ bietet alle zehn Timeframes
+  (aus `SUPPORTED_TIMEFRAMES`, nicht handgepflegt). Die Vorgabe „Workshop-Panel mitziehen“ stammt aus
+  dem `1m`-Präzedenzfall (`2026-09-24-internal-adapter-daytrading`).
+* **`scripts/bench-backtest.ts`:** der Cast nach der Sanitize-Kette in `buildBenchSpec` entfällt wie
+  angekündigt („fällt mit 01-01 ersatzlos weg“) — der gemessene Timeframe läuft durch die Kette selbst.
+* **Audit-Doku auf `v1.1.2`:** STX-01 behoben (`FIXED`), Gate **G1** erfüllt, Phase 1 abgeschlossen;
+  `ROADMAP.md`, `remediation/TRACKING.md`, Findings-Index und Prompt-Index nachgezogen.
+
+### Fixed
+
+* **Stiller 15m-Fallback im Mikro-Executor:** `TIMEFRAME_MS[tf] ?? TIMEFRAME_MS["15m"]` kannte nur
+  `1m…1h`. Mit der erweiterten Allowlist hätten `3m`/`2h`/`4h`/`1d`/`5d`-Regeln still auf
+  15-Minuten-Kerzen gelaufen — auf einem anderen Takt, als sie unterschrieben haben (derselbe Fehler,
+  der bei der Einführung von `1m` schon einmal auftrat, CYCLE-DAYTRADE-01). Die Serie nutzt jetzt die
+  kanonische Tabelle (`3m` aggregiert exakt auf 3 Minuten) und wirft bei einem unbekannten Timeframe
+  laut, statt zu fallen; bei Werten oberhalb des Ausführungsintervalls greift der Guard.
+
+### Documentation
+
+* **Tabelle „Rule-Timeframe ↔ unterstützte Felder“** in `docs/BACKTESTING.md` §1.1 (Kerzen je UTC-Tag,
+  `vwapPct`, `volumeWindow` in Zeit, `changePct24h`-Spanne, Live-Ausführbarkeit, Kostenmodell) samt
+  Begründung, warum `RULE_CEILINGS.volumeWindow` (5…200) unverändert bleibt; Verweise in
+  `docs/MISSIONS.md` (Workshop), `docs/ARCHITECTURE.md`, `docs/architecture/STRATEGY_STACK.md`
+  (SSoT-Zeile „Rule-Timeframes“), `docs/HISTORY.md`, `docs/architecture/PIPELINE_MAP.md`,
+  `docs/HANDBUCH.md` (Glossar „Rolling-Serie“/„Ausführungsintervall“, §15.3),
+  `docs/OBSERVABILITY.md` (Counter und Log) und `docs/REPOSITORY_STRUCTURE.md` (`ruleEngine` mit
+  Timeframe-Hinweis).
+* **Befundkorrekturen an STX-01:** (1) `sessionVwap` war auf `1d` bereits fail-closed — bei weniger
+  als zwei Kerzen am UTC-Tag liefert es `null` (nie `0`), ein VWAP über eine Einzelkerze entstand nie.
+  Es war kein Code-Fix nötig; die Eigenschaft ist jetzt per Test und Tabelle belegt. (2)
+  `sanitizeRuleSpec` „verwirft“ einen unbekannten Timeframe nicht, sondern fällt auf `15m` und
+  kleinschreibt vorher — der Prompt nennt `"1H"` als verworfen, real wird es zu `"1h"`. Die Semantik ist
+  vom Prompt als gesperrt markiert und bleibt; getestet ist das Ist-Verhalten.
+* **Bekannte Altlasten, bewusst unverändert** (kein Teil dieses Releases, beim Fixen beobachtet):
+  das Kosten-Fallback-Modell des Paper-Backtests (`paperExecution.ts`) ist für `3m`, `2h`, `5d` nicht
+  kalibriert (`3m` rechnet mit 4 bp/1 bp und ist damit optimistisch gegenüber `1m`/`5m`); die
+  `RollingTimeframeSeries.touch()`-Aggregation addiert das kumulierte 1m-Volumen bei jedem Tick erneut
+  (`volume` wächst statt 1, 2, 3 als 1, 3, 6 — live überhöht `volumeRatio`); und Serien entstehen nur
+  beim Start bzw. für `MICRO_SYMBOLS` (`5m`/`15m`): eine später aktivierte Regel mit neuer
+  Symbol-/Timeframe-Kombination wird erst nach einem Neustart ausgewertet, obwohl das Handbuch „kein
+  Neustart nötig“ sagt. Jeder dieser Punkte ändert bestehende Ergebnisse und braucht ein eigenes
+  Versionsereignis.
 
 ## [0.6.1] — Strategie-Stack-SSoT & Vokabular-ADRs (2026-09-29)
 
