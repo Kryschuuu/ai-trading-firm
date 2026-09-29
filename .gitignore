@@ -35,6 +35,12 @@ next-env.d.ts
 /data/history
 /data/history/*.tmp
 
+# Backtest-Benchmark (STX-00-01, v0.6.0): `npm run bench:backtest` schreibt
+# Rohprotokoll (JSON) + Messprotokoll (MD) und — beim Offline-Seeding über
+# `npm run history:import-csv -- --dir=data/bench/history` — die Messreihe
+# selbst. Alles reproduzierbar aus Store + Skript, nie versioniert.
+/data/bench
+
 # Marktdaten-Fehler-Manifest (MDERR-006): Laufzeit-Artefakt des Sync-Jobs,
 # vom Scanner/Operations Center gelesen — nicht versioniert
 /data/market-data-errors.json
