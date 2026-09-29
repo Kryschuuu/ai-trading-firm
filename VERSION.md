@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.5.0` |
+| **Version** | `v0.6.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-09-26 |
-| **Quellbasiert** | `package.json` (`version: "0.5.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-09-29 |
+| **Quellbasiert** | `package.json` (`version: "0.6.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -60,6 +60,25 @@ Trusted-Indikatoren, ohne den Engine-Default zu ändern. `v0.3.0` liefert:
   Scanner-Scores aus einem aktuellen READY-Artefakt haben Vorrang, Volumen ist
   der Rückfall.
 
+`v0.6.0` liefert die **Backtest-Performance-Baseline** (Prompt 00-01, Finding STX-12)
+— Messung, keine Optimierung:
+
+- **`npm run bench:backtest`** (`scripts/bench-backtest.ts`): misst auf einer echten,
+  aus dem `HistoricalStore` gelesenen Reihe drei Pfade (`backtestRule`,
+  `runMultiAssetBacktest`, `buildIndicatorCache`+`snapshotFromCache`) bei
+  n ∈ {1 000, 5 000, 17 520} Kerzen, je 1 Warmlauf + 3 Läufen (Median), mit
+  `ms/1000 Kerzen`, log-log-Fit-Exponent und der „1 Zelle Matrix"-Rechnung. Ohne Netz,
+  ohne Datenbank; schreibt nur nach `data/bench/` (gitignoriert).
+- **`npm run history:import-csv`** (`scripts/import-history-csv.ts`): netzfreier
+  CSV-Import in den Store (Dry-Run als Default, `--apply`, `--from`/`--to`, `--max-bars`),
+  damit die Messreihe reproduzierbar ist.
+- **Ergebnis** ([`BENCH-BASELINE.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)):
+  `backtestRule()` wächst mit Exponent **1,99** (54,14 Kernstunden für 7 500 Zellen),
+  die Engine mit **1,01** (0,44 Kernstunden) — **121,7×** bzw. **360,1×** schneller.
+  Entscheidung: Screening läuft über `runMultiAssetBacktest()`, STX-12 wird Patch-Task.
+- **Kein Laufzeitverhalten geändert:** `ruleEngine.ts`, `engine.ts` und
+  `indicatorCache.ts` bleiben unberührt; Audit-Doku auf Stand `v1.1.0`.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -75,10 +94,9 @@ Haftungsentscheidung) in [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md).
 
 **Ausdrücklich gilt:** Auch die vollständige Umsetzung der Strategie-Roadmap
 ([`docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md),
-32 Prompts, Releases `v0.5.1` … `v0.11.2`) **beendet die Beta-Phase nicht**.
+32 Prompts, Releases `v0.6.0` … `v0.11.2`) **beendet die Beta-Phase nicht**.
 Sie liefert die Messgeräte, nicht die Messung — und keine Phase erfüllt ein
 Kriterium. Begründung: `report.md` §8 des Audits.
-
 ## Komponenten-Übersicht
 
 ### Kernmodule (`src/`)

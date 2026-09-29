@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-09-29 · alle Einträge `OPEN`
+- **Stand:** 2026-09-29 · **00-01 abgeschlossen** (`v0.6.0`) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md)
 
 ## Legende
 
@@ -25,7 +25,7 @@
 | STX-09 Copy-Reconciliation-Duplikat | MEDIUM | ☐ | 07-02 |
 | STX-10 Feature Store ist Slice | MEDIUM | ☐ | 00-02 (Doku) → 02-04 (optional) |
 | STX-11 Cost-Stress existiert | MEDIUM | ☐ | 00-02 (Doku) → 06-03 (Andocken) |
-| STX-12 `backtestRule` O(n²) | MEDIUM | ☐ | 00-01 (messen) → ggf. Folge-Prompt |
+| STX-12 `backtestRule` O(n²) | MEDIUM | ◐ | 00-01 (Messung ✓, `v0.6.0`) → Folge-Patch mit Paritätstest |
 | STX-13 OpenCode-Free-Tier | LOW | ☐ | 06-05 |
 | STX-14 `changePct24h`-Semantik | LOW | ☐ | 03-01 (Doku) → 06-01 (Prüfung) |
 | STX-15 Faktorzahl (14 ≠ 15+) | LOW | ☐ | 00-02 |
@@ -40,7 +40,7 @@
 
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
-| 00-01 | [Backtest-Perfenz-Baseline](../prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | ☐ | STX-12 | — |
+| 00-01 | [Backtest-Perfenz-Baseline](../prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | ☑ | STX-12 | [`v0.6.0`](BENCH-BASELINE.md) |
 | 00-02 | [Strategie-Stack-SSoT](../prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | ☐ | STX-10/11/15 | — |
 | 00-03 | [Vokabular-ADR](../prompts/PROMPT-STX-00-03-vokabular-adr.md) | ☐ | STX-02/03/04 | — |
 
@@ -135,7 +135,7 @@
 | **G2** | 02-02/02-03 grün (neue Felder + Parität) | 03-06, 03-08 |
 | **G3** | 03-10 grün (6 Templates vertraglich abgesichert) | 04-01 |
 | **G4** | 04-02 grün (Versionen referenzierbar) | 05-03, 06-02, 06-04 |
-| **G5** | 00-01 abgeschlossen (Pfad-Entscheidung getroffen) | 05-04 |
+| **G5** | ✅ **erfüllt** (00-01: Screening über `runMultiAssetBacktest`, [BENCH-BASELINE.md](BENCH-BASELINE.md)) | 05-04 |
 | **G6** | 05-04 Pilotlauf < 1 Kernstunde/50 Zellen | Phase 6 |
 | **G7** | 06-04 grün (deterministischer Report) | 06-05 |
 | **G8** | 07-01/07-02 grün | 07-03 |

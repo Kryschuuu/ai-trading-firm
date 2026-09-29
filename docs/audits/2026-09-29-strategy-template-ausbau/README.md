@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.0.0` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md))
+- **Audit-Version:** `v1.1.0` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); `v1.1.0` = 00-01 gemessen und Release-Plan verzahnt)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.5.0 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0
-- **Status:** OPEN
+- **Code-Version:** `package.json` v0.6.0 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0
+- **Status:** OPEN — Phase 0 begonnen: Prompt 00-01 abgeschlossen (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md))
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -23,10 +23,10 @@
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 0 | 0 | 0 | 0 |
 | HIGH | 5 | 5 | 0 | 0 |
-| MEDIUM | 7 | 7 | 0 | 0 |
+| MEDIUM | 7 | 6 | 1 | 0 |
 | LOW | 4 | 4 | 0 | 0 |
 | INFO | 3 | 3 | 3 | 0 |
-| **Σ** | **19** | **19** | **3** | **0** |
+| **Σ** | **19** | **18** | **4** | **0** |
 
 > **Kein CRITICAL.** Das Ausbaudokument enthält **keinen** Vorschlag, der eine bestehende
 > Sicherheitsgrenze weicht. Die HIGH-Funde sind **Integrations- und Duplikationsrisiken**,
@@ -47,7 +47,7 @@
 | [STX-09](findings/STX-09-copysystem-duplikat-reconciliation.md) | Copy-Reconciler würde bestehende Fill-Reconciliation duplizieren | MEDIUM | OPEN |
 | [STX-10](findings/STX-10-featurestore-ist-slice.md) | Feature Store ist ein 3-Feature-Slice, kein „zentraler Feature-Layer" | MEDIUM | OPEN |
 | [STX-11](findings/STX-11-cost-stress-existiert.md) | Cost-/Slippage-Stress existiert bereits (MonteCarlo + executionCost-Faktor) | MEDIUM | OPEN |
-| [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | `backtestRule()` ist O(n²) — der Matrix-Runner würde daran scheitern | MEDIUM | OPEN |
+| [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | `backtestRule()` ist O(n²) — der Matrix-Runner würde daran scheitern | MEDIUM | IN ARBEIT (00-01 gemessen) |
 | [STX-13](findings/STX-13-opencode-free-tier.md) | OpenCode-Zen-Free-Tier ist rotierend und nicht verlässlich als Routing-Klasse | LOW | OPEN |
 | [STX-14](findings/STX-14-changepct24h-semantik.md) | `changePct24h` misst 97 Perioden — Fallstrick für Tagesstrategien | LOW | OPEN |
 | [STX-15](findings/STX-15-scanner-faktorzahl.md) | Faktenkorrektur: 14 aktive Faktoren, nicht „15+" | LOW | OPEN |
@@ -85,8 +85,14 @@ Die Roadmap in [`ROADMAP.md`](ROADMAP.md) dreht die Reihenfolge gegenüber dem D
 ## Remediation-Plan
 
 Siehe [`ROADMAP.md`](ROADMAP.md) (8 Phasen, 32 Prompts),
-[`VERSIONING.md`](VERSIONING.md) (Release-Plan `v0.5.1` … `v0.11.2`, alle Beta) und
+[`VERSIONING.md`](VERSIONING.md) (Release-Plan `v0.6.0` … `v0.11.2`, alle Beta) und
 [`remediation/TRACKING.md`](remediation/TRACKING.md).
+
+**Umsetzungsstand:** Prompt 00-01 ist abgeschlossen — die Messung
+([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md)) belegt Exponent
+**1,99** (O(n²)) für `backtestRule()` und **1,01** (O(n)) für
+`runMultiAssetBacktest()`; 7 500 Zellen kosten 54,14 vs. 0,44 Kernstunden. Gate **G5**
+ist damit erfüllt, das Screening (05-04) fährt über die Engine.
 
 ## Beta-Positionierung
 

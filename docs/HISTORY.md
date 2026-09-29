@@ -179,6 +179,41 @@ chmod 600 data/history/candles.ndjson
 # 4. Migration nach Korrektur ggf. erneut mit --dry-run prüfen.
 ```
 
+### 6.1 Offline-Import aus CSV (`npm run history:import-csv`, `v0.6.0`)
+
+Wenn kein Re-Fetch möglich ist und die Historie als CSV-Export vorliegt (Venue-Dump,
+Datenanbieter, eigenes Archiv), importiert
+[`scripts/import-history-csv.ts`](../scripts/import-history-csv.ts) die Datei direkt
+in den Store — **ohne Netz**:
+
+```bash
+# Dry-Run ist der Default (Exit 2): es wird nichts geschrieben
+npm run history:import-csv -- --file=<pfad.csv> --instrument=BINANCE:BTCUSDT \
+  --timeframe=1h --dir=data/history --from=2019-06-01 --to=2021-06-10 --max-bars=25000
+
+# Schreiben erst mit --apply (Store-Dedup + atomarer Write)
+npm run history:import-csv -- --file=<pfad.csv> --instrument=BINANCE:BTCUSDT \
+  --timeframe=1h --dir=data/history --from=2019-06-01 --to=2021-06-10 --max-bars=25000 --apply
+```
+
+* **Spalten werden aus der Kopfzeile aufgelöst** (`unix|time|timestamp|date`,
+  `open|high|low|close`, erste `volume`-Spalte = Basis-Volumen); Zeitstempel
+  werden als Epoch-Sekunden, Epoch-Millisekunden oder ISO-8601 gelesen.
+* **Dry-Run als Default** (wie `history:migrate`): ohne `--apply` Exit **2**;
+  Abbruch (unlesbare Datei, keine gültige Zeile, ungültige Argumente) Exit **1**.
+* **Dedup und Validierung bleiben beim Store**: doppelte `instrumentId+timeframe+ts`
+  werden nach der Store-Regel zusammengeführt (jüngstes `fetchedAt`), ungültige
+  Werte abgelehnt — beides wird gezählt und gemeldet, nie still ersetzt.
+  Für eine lückenlose Messreihe beides prüfen (die Store-Reihe zählt Lücken nicht).
+* **`--max-bars`** (Default 25 000) setzt die Kompaktierungsgrenze dieser Reihe —
+  sie muss größer als die längste benötigte Historie sein, sonst schneidet der
+  Store die ältesten Bars ab (Store-Default: 5 000).
+* **`--strict`** bricht bei der ersten ungültigen Zeile ab (für kuratierte Dateien).
+
+Anwendung: Die Backtest-Performance-Baseline (STX-00-01) nutzt genau diesen Pfad,
+um eine **echte** Kerzenreihe offline bereitzustellen — siehe
+[audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md).
+
 ## 7. Sicherheit / Robustheit
 
 * **Kein Path Traversal:** `instrumentId`, `timeframe`, `feed` werden nie in

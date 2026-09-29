@@ -21,17 +21,25 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-26** · Code-Version **0.5.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased] — Strategie-Roadmap-Audit, Versionierung & Beta-Zusage (2026-09-29)
+## [Unreleased]
 
-> **Status: Beta — und bleibt Beta.** Dieser Eintrag enthält **ausschließlich
-> Dokumentation**: kein Produktivcode, keine Migration, keine Schema-Änderung.
-> Deshalb bleibt `package.json` bei `v0.5.0`; der Release-Plan in
-> [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md)
-> sieht den Doku-Startpunkt als **nächstes** Release `v0.5.1` vor, gefolgt von
-> `v0.6.0` … `v0.11.2` — sämtlich in `0.x`.
+> **Status: Beta.** Offen für den nächsten Release — als Nächstes die Phase-0-Prompts
+> 00-02/00-03 (`v0.6.1`), danach der Timeframe-Blocker 01-01 (`v0.6.2`). Release-Plan:
+> [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2.
+
+## [0.6.0] — Backtest-Performance-Baseline (2026-09-29)
+
+> **Status: Beta — und bleibt Beta.** Dieser Release bündelt die mit PR #180 gemergte
+> Audit-/Beta-Dokumentation und den ersten umgesetzten Roadmap-Prompt **00-01**
+> (Backtest-Performance-Baseline). Es ändert **kein** Laufzeitverhalten: die
+> gemessenen Pfade (`src/lib/ruleEngine.ts` `backtestRule()`, `src/backtest/engine.ts`,
+> `src/backtest/indicatorCache.ts`) bleiben unverändert, es gibt keine Migration und
+> keine Schema-Änderung. `package.json` folgt dem Release-Plan
+> [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2
+> (`v0.5.1` ist in `v0.6.0` gefaltet; alle Releases liegen in `0.x`).
 
 ### Added
 
@@ -46,11 +54,32 @@ erlaubt, solange sie hier dokumentiert sind).
   Drittprüfung, bewusste Haftungsentscheidung), verbotene Handlungen, Review-Kadenz
   und die Zuordnung Roadmap → Kriterien.
 * **`docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md` (neu):**
-  Audit-Versionsschema (`audit-2026-09-29 v1.0.0`) mit Bump-Regeln und
-  **Release-Plan `v0.5.1` … `v0.11.2`** — ein Minor-Release je Phase bzw. Template,
+  Audit-Versionsschema (`audit-2026-09-29`, aktuell `v1.1.0`) mit Bump-Regeln und
+  **Release-Plan `v0.6.0` … `v0.11.2`** — ein Minor-Release je Phase bzw. Template,
   sämtlich in `0.x`. Enthält außerdem die drei erwarteten Bruchstellen in `0.x`
   (Timeframe-Erweiterung, Snapshot-Wachstum, neues Copy-Modul) und die
   Abwärtskompatibilitätsregeln.
+
+* **`scripts/bench-backtest.ts` + `npm run bench:backtest` (neu, Prompt 00-01 / STX-12):**
+  Messprotokoll der Backtest-Performance-Baseline. Misst auf **einer** echten,
+  aus dem `HistoricalStore` gelesenen Reihe (keine synthetischen Bars) drei Pfade —
+  `backtestRule()` (Single-Rule), `runMultiAssetBacktest()` (Engine) und
+  `buildIndicatorCache()` + `snapshotFromCache()` (Indikator-Pfad) — bei
+  n ∈ {1 000, 5 000, 17 520} Kerzen, je 1 ungemessenem Warmlauf + 3 Läufen (Median),
+  inklusive `ms/1000 Kerzen`, log-log-Fit-Exponent und der „1 Zelle Matrix"-Rechnung
+  (7 500 Zellen → Kernstunden seriell). Braucht **keine** Datenbank und kein Netz,
+  schreibt nur nach `data/bench/` (gitignoriert).
+* **`scripts/import-history-csv.ts` + `npm run history:import-csv` (neu):** netzfreier
+  CSV-Import in den `HistoricalStore` (Kopfzeilen-Aliasing, Zeit in Sekunden/ms/ISO,
+  `--from`/`--to`-Fenster, `--max-bars`, Dry-Run als Default mit Exit 2, `--apply`).
+  Dedup und Validierung bleiben beim Store — verworfene und doppelte Zeilen werden
+  gemeldet, nie still ersetzt.
+* **`docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md` (neu):**
+  Messprotokoll mit allen Rohwerten. Kernergebnis: `backtestRule()` wächst mit
+  Exponent **1,99** und kostet bei 17 520 Stundenkerzen **25 986 ms je Zelle**
+  (7 500 Zellen = **54,14 Kernstunden** seriell), `runMultiAssetBacktest()` mit
+  Exponent **1,01** und **213,5 ms** je Zelle (**0,44 Kernstunden** für die volle
+  Matrix) — **121,7×** bzw. **360,1×** schneller als der Single-Rule-Pfad.
 
 ### Changed
 
@@ -61,6 +90,13 @@ erlaubt, solange sie hier dokumentiert sind).
   `Beta-Exit` in der Versions-Status-Tabelle plus ein hervorgehobener Hinweis.
 * **Doku-Indizes ergänzt** (`docs/README.md`, `docs/audits/README.md`): neuer
   Eintrag für das Audit 2026-09-29 und Verweis auf `BETA_STATUS.md`.
+
+* **Entscheidung aus der Messung (Gate G5 erfüllt):** Screening, Template-Compiler-Tests
+  und Validator-Läufe fahren über `runMultiAssetBacktest()` (bzw. direkt über den
+  Indikator-Cache); `backtestRule()` bleibt der Einzel-/Referenzpfad. STX-12 ist damit
+  von „Blocker der Matrix" auf **Patch-Task mit Paritätstest** herabgestuft, `worker_threads`
+  ist keine Voraussetzung für 05-04. Die Audit-Doku wurde nachgezogen (STX-12, Roadmap,
+  Tracking, Audit-Version `v1.1.0`).
 
 ### Findings (Auszug, Details je Datei unter `findings/`)
 
@@ -79,6 +115,9 @@ erlaubt, solange sie hier dokumentiert sind).
 * **STX-12 (MEDIUM)** — `backtestRule()` ist O(n²) (`ruleEngine.ts:787`); nur die
   Multi-Asset-Engine nutzt `IndicatorCache`. Bestimmt, ob eine Matrix mit Tausenden
   Zellen überhaupt lauffähig ist → Benchmark ist Phase 0.
+  **Gemessen in diesem Release:** Exponent **1,99** (O(n²)) für `backtestRule()`
+  gegen **1,01** (O(n)) für die Engine; siehe
+  [`BENCH-BASELINE.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md).
 * **STX-16 (LOW, organisatorisch hoch)** — Copy-Trading verschiebt das
   Haftungsprofil. Deshalb `CopyMode` als Enum mit **genau einem** Wert
   (`SIMULATE_ONLY`) und DB-CHECK, kein Env-Flag.

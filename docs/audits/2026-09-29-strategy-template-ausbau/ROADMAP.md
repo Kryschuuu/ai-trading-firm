@@ -12,7 +12,7 @@
 > Kriterien `B1…B8`: [`../../BETA_STATUS.md`](../../BETA_STATUS.md) · Begründung:
 > [`report.md` §8](report.md#8-beta-positionierung-der-roadmap).
 
-Alle geplanten Releases liegen in `0.x` (`v0.5.1` … `v0.11.2`) — siehe
+Alle geplanten Releases liegen in `0.x` (`v0.6.0` … `v0.11.2`) — siehe
 [`VERSIONING.md`](VERSIONING.md).
 
 ## 0. Grundregeln für alle Prompts
@@ -46,12 +46,17 @@ außer er nennt ihn explizit als Voraussetzung.
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 00-01 | [Backtest-Perfenz-Baseline](prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | Messprotokoll + Artefakt | — |
+| 00-01 | [Backtest-Perfenz-Baseline](prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | ✅ [`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md) — `backtestRule` O(n^1,99) = 54,1 Kernstunden/7 500 Zellen, Engine O(n^1,01) = 0,44 | — |
 | 00-02 | [Strategie-Stack-SSoT](prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | `docs/architecture/STRATEGY_STACK.md` | — |
 | 00-03 | [Vokabular-ADR](prompts/PROMPT-STX-00-03-vokabular-adr.md) | `docs/roadmap/DECISIONS.md`-Einträge | 00-02 |
 
 **Gate Phase 0 → 1:** 00-03 ist abgeschlossen und die drei Entscheidungen sind
 schriftlich fixiert. Ohne dieses Gate wird Phase 1 **nicht** gestartet.
+
+**Zwischenergebnis 00-01 (2026-09-29):** Die Messung ist abgeschlossen; das
+Screening-Gate **G5** ist erfüllt — der Single-Rule-Pfad ist quadratisch
+(Exponent 1,99), die Engine-linear (1,01). 05-04 fährt über
+`runMultiAssetBacktest()`; Einzelheiten: [`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md).
 
 ---
 
@@ -140,8 +145,10 @@ weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren.
 gemacht** (Muster `src/scanner/config.ts`) und mit einem Invarianztest festgeschrieben.
 
 **Skalierungs-Gate:** 05-04 startet mit `--dry-run` und einem harten
-`--max-cells`-Bound. Erst wenn 00-01 gezeigt hat, dass ein Lauf ≤ Zeitbudget liegt, wird
-der echte Backtest-Adapter freigeschaltet.
+`--max-cells`-Bound. 00-01 hat gezeigt, dass ein Lauf ≤ Zeitbudget liegt — **aber nur
+über `runMultiAssetBacktest()`** (7 500 Zellen = 0,44 Kernstunden; über `backtestRule()`
+wären es 54,14). Der echte Backtest-Adapter wird freigeschaltet, wenn er am
+Engine-Pfad hängt ([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md) §6).
 
 ---
 
@@ -214,7 +221,7 @@ Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschli
 | Vorschlag | Status | Begründung |
 |---|---|---|
 | Kafka | ❌ | STX-19 |
-| Parquet/DuckDB | ⏸ P3 | Erst nach 00-01 messen |
+| Parquet/DuckDB | ⏸ P3 | 00-01 gemessen: Store+Cache tragen die Matrix — kein Bedarf, offen für spätere Zellzahlen |
 | `MultiAssetStrategySpec` | ❌ | STX-04 — `src/crossSectional/` erweitern |
 | Regime-Taxonomie (7er) | ❌ | STX-03 — bestehendes Vokabular |
 | Sequence-Trigger `RECLAIM`/`CROSS` | ⏸ eigener Audit | STX-18 — zustandsloser Evaluator |

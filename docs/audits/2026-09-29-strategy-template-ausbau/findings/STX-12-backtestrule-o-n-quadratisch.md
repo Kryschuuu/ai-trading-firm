@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Performance
 - **Quelle:** Ausbaudokument §4.9 (nicht erkannt)
-- **Status:** OPEN
+- **Status:** IN ARBEIT — Messung abgeschlossen (00-01, `v0.6.0`), Code bewusst unverändert
 - **Datei(en):** `src/lib/ruleEngine.ts:729-800`, `src/backtest/indicatorCache.ts`
 
 ## Beschreibung
@@ -48,12 +48,33 @@ verwendet — **nicht** in `backtestRule()`.
 3. `worker_threads` **erst danach** — Parallelisierung auf O(n²) vervielfacht nur den
    Speicher, nicht die Zeit.
 
+## Messung (2026-09-29, Prompt 00-01, `v0.6.0`)
+
+Das Benchmark-Protokoll liegt in
+[`../remediation/BENCH-BASELINE.md`](../remediation/BENCH-BASELINE.md); gemessen wurde
+auf einer echten `BINANCE:BTCUSDT`-1h-Reihe (17 749 Kerzen, 3 Messpunkte × 3 Läufe ×
+3 Pfade, Median nach einem ungemessenen Warmlauf).
+
+| Pfad | n = 1 000 | n = 5 000 | n = 17 520 | Exponent |
+| --- | ---: | ---: | ---: | ---: |
+| `backtestRule` | 85,8 ms | 1 772,0 ms | 25 986,2 ms | **1,99** |
+| `runMultiAssetBacktest` | 11,5 ms | 42,5 ms | 213,5 ms | **1,01** |
+| `buildIndicatorCache` + `snapshotFromCache` | 3,6 ms | 12,6 ms | 72,2 ms | **1,04** |
+
+- Faktor `backtestRule`/Engine: **121,7×**; `backtestRule`/Cache: **360,1×** (bei 17 520 Kerzen).
+- **7 500 Zellen × 1h-Zelle:** `backtestRule` = **54,14 Kernstunden** seriell,
+  `runMultiAssetBacktest` = **0,44 Kernstunden**, Cache-Pfad = 0,15 Kernstunden.
+- Entscheidung: Screening läuft über `runMultiAssetBacktest()`; `backtestRule()` wird
+  **nicht** in die Matrix eingebunden, solange es O(n²) ist. Damit ist dieser Befund
+  ein **Patch-Task mit Paritätstest** — kein Roadmap-Blocker.
+
 ## Akzeptanzkriterien
 
-- [ ] Benchmark-Artefakt mit Zahlen für n ∈ {5 000, 17 520} × {rule, multiAsset}
+- [x] Benchmark-Artefakt mit Zahlen für n ∈ {1 000, 5 000, 17 520} × {rule, multiAsset, cache} (00-01, `v0.6.0`)
 - [ ] Falls Umstellung: Paritätstest gegen die alte Implementierung
 - [ ] Keine Verhaltensänderung des Backtest-Ergebnisses
 
 ## Versions-Hinweis
 
-Patch/Minor.
+Patch/Minor — Messung in `v0.6.0`, die Umstellung selbst ist ein Folge-Patch (Prompt 03-09/05-04
+nutzen den Cache; die Migration von `backtestRule` bleibt separat).

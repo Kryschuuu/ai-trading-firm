@@ -441,7 +441,7 @@ worden wäre. Deshalb steht das Verbot **in den Prompts**, nicht nur hier.
 ### 8.4 Versionsplan
 
 Alle Releases aus [`VERSIONING.md`](VERSIONING.md) liegen in `0.x`
-(`v0.5.1` … `v0.11.2`). SemVer: `0.x` heißt in diesem Projekt **Beta**; ein Sprung auf
+(`v0.6.0` … `v0.11.2`, verzahnt mit [VERSIONING.md](VERSIONING.md) §2). SemVer: `0.x` heißt in diesem Projekt **Beta**; ein Sprung auf
 `1.0` wäre eine Behauptung, die keine Phase dieser Roadmap einlöst.
 
 ---
