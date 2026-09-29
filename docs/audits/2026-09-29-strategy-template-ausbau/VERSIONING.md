@@ -7,7 +7,7 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.1` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.2` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
@@ -31,6 +31,7 @@
 | `v1.0.0` | 2026-09-29 | Erstfassung: 19 Findings, 32 Prompts, 8 Phasen |
 | `v1.1.0` | 2026-09-29 | 00-01 gemessen (`v0.6.0`, [BENCH-BASELINE](remediation/BENCH-BASELINE.md)); Release-Plan verzahnt: `v0.6.0` = Benchmark, `v0.6.1` = SSoT + ADRs, 0.6.x-Folge nachgezogen; STX-12 auf „Patch mit Paritätstest“ herabgestuft |
 | `v1.1.1` | 2026-09-29 | 00-02/00-03 umgesetzt (`v0.6.1`): ADR-008…010, Gate G0 erfüllt; STX-04/15 behoben, STX-02/03/10/11 in Arbeit; Präzisierungen an STX-01…04 (Findings, Prompts, `report.md`); Severity-Tabelle im Audit-README korrigiert |
+| `v1.1.2` | 2026-09-30 | Nachtrag zu Phase 0 (ohne Projekt-Release, Eintrag unter `[Unreleased]`): bekannte Code-Altlasten im TRACKING geführt (OP-6); `PR_SUMMARY.md` als Schnappschuss markiert; `report.md` §6 P0-a nachgezogen |
 
 ## 2. Release-Plan der Roadmap
 

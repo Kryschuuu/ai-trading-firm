@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-09-29 · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
+- **Stand:** 2026-09-30 · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 ## Legende
 
@@ -141,6 +141,16 @@
 | **G7** | 06-04 grün (deterministischer Report) | 06-05 |
 | **G8** | 07-01/07-02 grün | 07-03 |
 
+## Bekannte Code-Altlasten (durch 00-03 aufgedeckt, nicht Teil der 32 Prompts)
+
+00-03 sperrt Code-Änderungen; diese Punkte sind deshalb dokumentiert und **nicht** still korrigiert. Jeder ist eine kleine, eigenständige Code-Änderung (eigener Prompt, Patch-Release). Ob und wann sie folgen, steht als OP-6 unten.
+
+| Altlast | Fundort | Risiko | Details |
+|---|---|---|---|
+| Die vier Klassenwerte stehen als Literale statt nur aus `STRATEGY_CLASS_KEYS` | `src/lib/signalDecay.ts` (`isStrategyClassKey`, `classOf`), `src/lib/signalDecayRuntime.ts`, CHECKs `positions_strategy_class_check` und `signal_decay_events_class_check` (`drizzle/2026-09-22_signal_decay.sql`) | Eine künftige Klasse müsste an allen Stellen zugleich ergänzt werden (ADR-008: nur per neuem ADR) | [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), Konsequenzen |
+| `VolatilityRegime` ist dreifach definiert (Volatilitäts-Stufen, kein Markt-Regime) | `src/lib/adaptiveRisk.ts`, `src/portfolio/types.ts`, `src/scanner/types.ts` | Namensnähe zu `MarketRegime`; kein Laufzeitfehler | [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), Kontext |
+| In-App-Doku-Viewer löst `docs/architecture/` und `docs/roadmap/` nicht auf | `resolveDoc` in `src/lib/docsCatalog.ts` | `STRATEGY_STACK.md`, `PIPELINE_MAP.md` und der ADR-Log sind nur im Repo und auf GitHub lesbar, nicht im Browser-Viewer | [`CHANGELOG.md`](../../../../CHANGELOG.md), Eintrag `0.6.1` |
+
 ## Offene Punkte für den Reviewer
 
 - **OP-1:** Soll `4h`/`1d` im Micro-Executor überhaupt je erreichbar sein, oder bleibt
@@ -157,3 +167,5 @@
   `SIMULATE_ONLY` später doch Live werden soll? (STX-16 — nicht Teil dieses Repos.)
 - **OP-5:** 02-04 (Feature-Store-Slice) — nachholen, wenn die Matrix-Größe den
   Snapshot-Pfad tatsächlich zum Engpass macht, oder dauerhaft verwerfen?
+- **OP-6:** Sollen die [bekannten Code-Altlasten](#bekannte-code-altlasten-durch-00-03-aufgedeckt-nicht-teil-der-32-prompts)
+  als eigene Prompts/Patch-Releases folgen oder bleiben sie dokumentiert und ungeplant?

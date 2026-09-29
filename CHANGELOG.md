@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -41,6 +41,21 @@ erlaubt, solange sie hier dokumentiert sind).
   Fehltoken endete auf `0`). Die letzte Stelle weicht jetzt garantiert ab, und ein
   `assert.notEqual` prüft die Prämisse (400 Läufe ohne Fehler). Nur Testcode: `src/lib/authSession.ts`
   und die Refresh-Route bleiben unverändert.
+
+### Documentation
+
+* **Bekannte Code-Altlasten im Audit-Tracking** (`remediation/TRACKING.md`, Audit `v1.1.2`): die drei
+  mit `0.6.1` dokumentierten Altlasten (Klassenwerte als Literale, dreifaches `VolatilityRegime`,
+  `resolveDoc` ohne `docs/architecture/` und `docs/roadmap/`) stehen jetzt dort, wo offene Arbeit
+  geplant wird, und warten als **OP-6** auf die Entscheidung, ob und wann sie als eigene Prompts
+  folgen. ADR-008 nennt genauer, wo die Klassenwerte stehen: auch der CHECK von `positions`
+  (`positions_strategy_class_check`) trägt sie, nicht nur der von `signal_decay_events`.
+* **Audit-Stand nachgezogen** (`v1.1.2`): `PR_SUMMARY.md` ist als Schnappschuss der Audit-Übergabe
+  gekennzeichnet und verweist auf Tracking und ADR-008…010; `report.md` §6 nennt die Phase-0-Fragen
+  nicht mehr „offen“.
+* **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0` und im
+  Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf die Überschrift
+  `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
 
 ## [0.6.1] — Strategie-Stack-SSoT & Vokabular-ADRs (2026-09-29)
 
@@ -585,7 +600,7 @@ Risikoentscheidung, keine Zeile Code).
   alle „aktuellen“ Versionsverweise in der Dokumentation auf `v0.1.0`
   umgestellt. Historische Verweise auf die alte Zählung `v1.x.x` bleiben in
   Archiv-/Audit-Dokumenten erhalten und werden über die
-  [Versions-Zuordnung](#versionszuordnung-v0xx--v1xx) lesbar gemacht.
+  [Versions-Zuordnung](#versions-zuordnung-v0xx--v1xx) lesbar gemacht.
 - **Repository-Struktur konsolidiert:**
   - Doppeltes Testverzeichnis `test/` in `tests/` **zusammengeführt**
     (`tests/marketdata/`, `tests/integration/`, `tests/ops/`, `tests/ui/`,
@@ -625,7 +640,7 @@ Zusammenfassung der Beta-Entwicklung. Die **vollständigen, detailgetreuen
 Einträge** (mit Formeln, Migrations- und Rollback-Runbooks, Testmatrizen) stehen
 im Archiv: [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md).
 Klammer: interne Legacy-Nummer, auf die sich ältere Dokumente und Audit-Reports
-beziehen (siehe [Versions-Zuordnung](#versionszuordnung-v0xx--v1xx)).
+beziehen (siehe [Versions-Zuordnung](#versions-zuordnung-v0xx--v1xx)).
 
 ### Phase 1 — Fundament, Agenten-Zyklus & Paper-Trading (Frühe Beta, v1.0.0–v1.39.x)
 

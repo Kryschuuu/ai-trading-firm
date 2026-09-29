@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.1` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); `v1.1.1` = Phase 0 abgeschlossen: 00-02/00-03, ADR-008…010, Gate G0)
+- **Audit-Version:** `v1.1.2` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); `v1.1.2` = Nachtrag zu Phase 0: bekannte Code-Altlasten im Tracking, OP-6; `v1.1.1` = Phase 0 abgeschlossen: 00-02/00-03, ADR-008…010, Gate G0)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,

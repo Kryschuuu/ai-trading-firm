@@ -1,5 +1,9 @@
 # PR-Summary — Audit 2026-09-29
 
+> **Schnappschuss der Audit-Übergabe (`v1.0.0`).** Den Umsetzungsstand führt [`remediation/TRACKING.md`](remediation/TRACKING.md):
+> Phase 0 ist abgeschlossen, und die drei Entscheidungen aus „Strategische Richtung“ sind seit `v0.6.1` als
+> [ADR-008 … ADR-010](../../roadmap/DECISIONS.md) fixiert (Gate G0 erfüllt).
+
 **Titel:** docs(audit): Validierung des Strategie-Template-Ausbaus + Roadmap (32 Prompts, 8 Phasen)
 
 ---
