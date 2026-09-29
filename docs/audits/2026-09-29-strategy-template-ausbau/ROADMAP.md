@@ -1,0 +1,213 @@
+# Roadmap — Strategie-Templates, Screening, Validator, Copy-Trading
+
+> Grundlage: [`report.md`](report.md) · Findings: [`findings/`](findings/) ·
+> Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
+
+## 0. Grundregeln für alle Prompts
+
+**Jeder Prompt ist eine eigene, kleine, abgeschlossene Aufgabe.** Ein Prompt = ein PR
+(oder eine Commit-Reihe), der für sich grün ist. Kein Prompt baut auf einem anderen auf,
+außer er nennt ihn explizit als Voraussetzung.
+
+### Global gesperrt (in **jedem** Prompt gilt das)
+
+| Gesperrt | Begründung |
+|---|---|
+| `RuleEngine` darf kein LLM importieren | `ruleEngine.ts:1-25` — „DIE Datei, die bewusst NICHTS über LLMs weiß" |
+| Jede erzeugte `RuleSpec` läuft durch `sanitizeRuleSpec()` | STX-05 |
+| `RuleAction.side` bleibt `LONG` | `RULE_ALLOWED_SIDE` — Shorts global gesperrt |
+| Bestehende Backtest-Läufe bleiben byte-identisch | `executionModel` defaultet auf `"legacy"` |
+| Append-only Migrationen | Repo-Konvention (alle `drizzle/*.sql`) |
+| Kein Kafka, kein NATS, kein Redis, kein DuckDB | STX-19 — `ws` bleibt einzige neue Runtime-Dependency (die auch schon da ist) |
+| `changePct24h` nicht umrechnen | STX-14 |
+| Kein Strategie-Klassen-Vokabular, kein Regime-Vokabular, keine Eligibility-Spec, kein Kostenmodell neu erfinden | STX-02, STX-03, STX-04, STX-11 |
+| Bestehende Tests, `npm run typecheck`, `npm run lint`, `npm run docs:validate` bleiben grün | `CONTRIBUTING.md` |
+
+---
+
+## Phase 0 — Messung & Entscheidungen (kein Produktivcode)
+
+> **Warum zuerst:** Drei Fragen sind offen, deren Antwort jede spätere Architekturentscheidung
+> prägt. Phase 0 ändert **kein** Laufzeitverhalten — sie ist die billigste Phase der ganzen
+> Roadmap und verhindert die beiden teuersten Fehler (Timeframe-Blocker STX-01,
+> Duplikat-Vokabulare STX-02/03/04).
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 00-01 | [Backtest-Perfenz-Baseline](prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) | Messprotokoll + Artefakt | — |
+| 00-02 | [Strategie-Stack-SSoT](prompts/PROMPT-STX-00-02-strategy-stack-ssot.md) | `docs/architecture/STRATEGY_STACK.md` | — |
+| 00-03 | [Vokabular-ADR](prompts/PROMPT-STX-00-03-vokabular-adr.md) | `docs/roadmap/DECISIONS.md`-Einträge | 00-02 |
+
+**Gate Phase 0 → 1:** 00-03 ist abgeschlossen und die drei Entscheidungen sind
+schriftlich fixiert. Ohne dieses Gate wird Phase 1 **nicht** gestartet.
+
+---
+
+## Phase 1 — Blocker: Timeframe-Abdeckung
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 01-01 | [Rule-Timeframes angleichen](prompts/PROMPT-STX-01-01-rule-timeframes.md) | `RuleSpec` auf `1m…5d` | 00-03 |
+
+**Warum das der härteste Punkt der Roadmap ist:** `RuleWindow.timeframe` ist heute auf
+`1m|5m|15m|30m|1h` beschränkt (`ruleEngine.ts:87,205,883`). Ohne diesen Prompt sind
+**alle** Screening- und Validator-Ziele unerreichbar.
+
+**Gate Phase 1 → 2:** `sanitizeRuleSpec` akzeptiert `4h`/`1d`, verwirft weiterhin
+Unbekanntes, und ein Test beweist, dass `1m…1h` unverändert bleibt.
+
+---
+
+## Phase 2 — Indikator-Grundlage
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 02-01 | [Bollinger-Bänder + Donchian](prompts/PROMPT-STX-02-01-indikatoren.md) | 2 pure Funktionen in `indicators.ts` | 00-03 |
+| 02-02 | [Bollinger-Regelfelder](prompts/PROMPT-STX-02-02-bollinger-felder.md) | `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` | 02-01, 01-01 |
+| 02-03 | [Donchian-Regelfeld](prompts/PROMPT-STX-02-03-donchian-feld.md) | `donchianBreakoutPct` | 02-01, 01-01 |
+| 02-04 | *optional* [Feature-Store-Slice `rule.*`](prompts/PROMPT-STX-02-04-featurestore-rule-slice.md) | PIT-Materialisierung + Parität | 02-02, 02-03 |
+
+**Reihenfolge-Logik:** 02-01 ist die Voraussetzung für 02-02 **und** 02-03. Ohne
+02-02/02-03 sind die Templates 03-06 (Bollinger) und 03-08 (Donchian) nicht
+referenzierbar. 02-04 ist **optional** und blockiert nichts (STX-10).
+
+**Achtung Parität:** Jede neue Formel muss **zwei** Implementierungen deckungsgleich halten —
+`buildSnapshotFromCandles` (`ruleEngine.ts`) und `buildIndicatorCache`
+(`src/backtest/indicatorCache.ts`). Der Cache ist **nicht** automatisch mitgepflegt.
+
+---
+
+## Phase 3 — Template-Kern (die eigentliche Diagnose des Dokuments)
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 03-01 | [Template-Typen](prompts/PROMPT-STX-03-01-template-types.md) | `src/strategies/types.ts` | 01-01, 00-03 |
+| 03-02 | [Katalog + Validierung](prompts/PROMPT-STX-03-02-catalog.md) | `src/strategies/catalog.ts` | 03-01 |
+| 03-03 | [Template: EMA/ADX Trend](prompts/PROMPT-STX-03-03-template-ema-adx.md) | 1 Template | 03-02 |
+| 03-04 | [Template: MACD Momentum](prompts/PROMPT-STX-03-04-template-macd.md) | 1 Template | 03-02 |
+| 03-05 | [Template: RSI Mean-Reversion](prompts/PROMPT-STX-03-05-template-rsi.md) | 1 Template | 03-02 |
+| 03-06 | [Template: Bollinger Squeeze](prompts/PROMPT-STX-03-06-template-bollinger.md) | 1 Template | 03-02, 02-02 |
+| 03-07 | [Template: VWAP (Snapshot)](prompts/PROMPT-STX-03-07-template-vwap.md) | 1 Template | 03-02 |
+| 03-08 | [Template: Donchian Breakout](prompts/PROMPT-STX-03-08-template-donchian.md) | 1 Template | 03-02, 02-03 |
+| 03-09 | [Compiler + Sanitize-Nachweis](prompts/PROMPT-STX-03-09-compiler.md) | `src/strategies/compiler.ts` | 03-03…03-08 |
+| 03-10 | [Template-Tests](prompts/PROMPT-STX-03-10-template-tests.md) | `tests/strategies.*.test.ts` | 03-09 |
+
+**Reihenfolge-Logik:** 03-01 → 03-02 ist das Fundament. Die fünf Template-Prompts sind
+bewusst **einzeln** — jedes ist ~60 Zeilen, liefert sofort einen lauffähigen
+Katalogeintrag und hat keine Abhängigkeit von den anderen. 03-09 kommt **vor** 03-10,
+weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren.
+
+**Was hier bewusst NICHT gebaut wird:** Sequenz-Trigger `RECLAIM`/`CROSS` (STX-18) und
+`MultiAssetStrategySpec` (STX-04).
+
+---
+
+## Phase 4 — Versionierte Persistenz
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | 2 append-only Tabellen | 03-09 |
+| 04-02 | [Service + Lifecycle-Bridging](prompts/PROMPT-STX-04-02-strategy-service.md) | `src/strategies/service.ts` | 04-01, 00-02 |
+
+**Warum nicht im Dokument priorisiert, sondern hier:** Das Dokument nennt die Tabellen in
+§7, führt sie aber nicht als P0. Ohne sie hat der Lifecycle-Key
+`("ema-adx", 3)` keinen auflösbaren Inhalt — Version 3 wäre nicht rekonstruierbar.
+
+---
+
+## Phase 5 — Candidate Matrix / Screening
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 05-01 | [Screening-Typen + Priorität](prompts/PROMPT-STX-05-01-screening-types.md) | `src/screening/types.ts` + `priority.ts` | 00-01, 03-01 |
+| 05-02 | [Matrix-Builder](prompts/PROMPT-STX-05-02-matrix-builder.md) | Matrix aus Scanner-Funnel | 05-01, 01-01 |
+| 05-03 | [Persistenz + Idempotenz](prompts/PROMPT-STX-05-03-screening-persistenz.md) | 2 Tabellen | 05-02, 04-01 |
+| 05-04 | [CLI + Backtest-Job-Adapter](prompts/PROMPT-STX-05-04-screening-cli.md) | `scripts/run-screening.ts` | 05-03, 00-01 |
+
+**Die 0.30/0.25/0.20/…-Gewichte aus §4.3 des Dokuments werden in 05-01 konfigurierbar
+gemacht** (Muster `src/scanner/config.ts`) und mit einem Invarianztest festgeschrieben.
+
+**Skalierungs-Gate:** 05-04 startet mit `--dry-run` und einem harten
+`--max-cells`-Bound. Erst wenn 00-01 gezeigt hat, dass ein Lauf ≤ Zeitbudget liegt, wird
+der echte Backtest-Adapter freigeschaltet.
+
+---
+
+## Phase 6 — Validator
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 06-01 | [Annahmen-Audit (deterministisch)](prompts/PROMPT-STX-06-01-assumptions-audit.md) | `src/strategies/validator/assumptions.ts` | 03-09 |
+| 06-02 | [Overfit & Robustheit](prompts/PROMPT-STX-06-02-overfit.md) | `overfit.ts` | 06-01, 04-02 |
+| 06-03 | [Cost-Stress-Runner](prompts/PROMPT-STX-06-03-cost-stress.md) | `stress.ts` | 06-01 |
+| 06-04 | [Report + Evidence + CLI](prompts/PROMPT-STX-06-04-validation-report.md) | `report.ts` + `scripts/run-validate-strategy.ts` | 06-02, 06-03, 04-02 |
+| 06-05 | [Validator-Agent (LLM)](prompts/PROMPT-STX-06-05-validator-agent.md) | `agent.ts` + Routing-Klassen | 06-04 |
+
+**Reihenfolge-Logik:** Der Agent kommt **zuletzt**. Ein LLM-Auditor über einen
+nicht-deterministischen Report ist wertlos. 06-01…06-04 sind reine Funktionen ohne
+Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschließlich
+`detail jsonb` schreiben, nie `result`.
+
+**Was 06-02/06-03 wiederverwenden (nicht neu bauen):**
+- `WalkForwardCandidate` + `SelectorGates` + `CandidateScoreRow` + `FreezeArtifact` (Plateau-Messung)
+- `MonteCarloStressConfig { feeMultiplier, slippageMultiplier }` (post-hoc)
+- `BacktestEngineConfig.feeModel` / `slippageModel` (in-engine)
+- `evaluateRegimeOos` (STX-03 — bestehendes Vokabular)
+
+---
+
+## Phase 7 — Copy-Trading (Paper-only, Bitunix-first)
+
+> **Unabhängig** von Phase 1–6. Kann parallel laufen. **Organisatorisch** die riskanteste
+> Arbeit des Projekts (STX-16) — `README.md` positioniert die Firma als Paper-Trading,
+> „nicht produktionsreif, educational purposes only".
+
+| # | Prompt | Ergebnis | Hängt ab von |
+|---|---|---|---|
+| 07-01 | [Copy-Typen, Mapping, Sizing](prompts/PROMPT-STX-07-01-copy-domain.md) | `src/copy/{types,mapping,sizing}.ts` (rein) | 00-02 |
+| 07-02 | [Policy-Engine + Order-Links](prompts/PROMPT-STX-07-02-copy-policy.md) | `policy.ts` + `copy_order_links` | 07-01 |
+| 07-03 | [Bitunix-Leader-Adapter](prompts/PROMPT-STX-07-03-copy-leader-bitunix.md) | Leader-Quelle + Simulate-only-Follower | 07-02 |
+
+**Alpaca ist NICHT in dieser Roadmap** (STX-08: kein WS vorhanden → eigener Adapter-Audit).
+**Kein Reconciler** (STX-09: `executionQuality` existiert). **Kein Slippage-Cancel**
+(nachträglich messen, nicht stornieren).
+
+---
+
+## Reihenfolge- und Abhängigkeitsübersicht
+
+```
+00-01 ─────────────────────────────▶ 05-04 (Skalierungs-Gate)
+00-02 ──▶ 00-03 ──┬──▶ 01-01 ──┬──▶ 02-02 ──▶ 03-06 ─┐
+                  │             └──▶ 02-03 ──▶ 03-08 ─┤
+                  ├──▶ 02-01 ──┘                       │
+                  └──▶ 03-01 ──▶ 03-02 ──▶ 03-03…03-07 ┴──▶ 03-09 ──▶ 03-10
+                                    │                        │
+                                    └──▶ 04-01 ──▶ 04-02 ──┴──▶ 05-01 ──▶ 05-02 ──▶ 05-03
+                                                                                    │
+                                    03-09 ──▶ 06-01 ──▶ 06-02 ──▶ 06-04 ◀──────────┘
+                                            └──────▶ 06-03 ─────┘       │
+                                                                      06-05
+00-02 ──▶ 07-01 ──▶ 07-02 ──▶ 07-03      (vollständig unabhängig)
+```
+
+**Kritischer Pfad:** `00-03 → 01-01 → 03-01 → 03-02 → 03-09 → 04-01 → 04-02 → 05-… → 06-04`
+**Längster Pfad:** `00-01 → 05-01 → 05-02 → 05-03 → 05-04` (Screening)
+**Schnellster greifbarer Nutzen:** `03-03` (EMA/ADX-Template) nach 5 Voraussetzungen
+
+---
+
+## Abgelehnte / vertagte Vorschläge
+
+| Vorschlag | Status | Begründung |
+|---|---|---|
+| Kafka | ❌ | STX-19 |
+| Parquet/DuckDB | ⏸ P3 | Erst nach 00-01 messen |
+| `MultiAssetStrategySpec` | ❌ | STX-04 — `src/crossSectional/` erweitern |
+| Regime-Taxonomie (7er) | ❌ | STX-03 — bestehendes Vokabular |
+| Sequence-Trigger `RECLAIM`/`CROSS` | ⏸ eigener Audit | STX-18 — zustandsloser Evaluator |
+| `DerivativeStrategySpec` (Shorts) | ⏸ eigener Audit | §13 des Dokuments, bestätigt richtig |
+| Alpaca-Leader | ⏸ eigener Adapter-Audit | STX-08 |
+| Copy-Reconciler | ❌ | STX-09 — `executionQuality` erweitern |
+| Live-Copy | ❌ | STX-16 |
+| Neues Kosten-/Stressmodell | ❌ | STX-11 — vorhandene Semantik nutzen |
