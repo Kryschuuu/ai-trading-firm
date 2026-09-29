@@ -138,7 +138,7 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 │   ├── audits/                # Audit-Zyklen chronologisch (README, TEMPLATE, 5 Audits)
 │   ├── peer-reviews/          # Peer-Review-Reports & Patches (3 Reviews)
 │   ├── security/              # Security-Übersicht (README) + SECURITY_AUDIT.md
-│   ├── architecture/          # DB_SCHEMA, INTEGRATION_POINTS, PIPELINE_MAP
+│   ├── architecture/          # DB_SCHEMA, INTEGRATION_POINTS, PIPELINE_MAP, STRATEGY_STACK
 │   ├── help/                  # 3-Ebenen-Hilfe-JSONs der UI (+ Schema)
 │   ├── ci/                    # Versionierte Quellen der CI-Workflows (Spiegel: .github/workflows/)
 │   └── archive/               # Historische Dokumente
@@ -177,3 +177,7 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
   [peer-reviews/README.md](peer-reviews/README.md) ·
   [security/README.md](security/README.md) · [archive/README.md](archive/README.md) ·
   [ci/README.md](ci/README.md)
+- [architecture/PIPELINE_MAP.md](architecture/PIPELINE_MAP.md) ·
+  [architecture/DB_SCHEMA.md](architecture/DB_SCHEMA.md) ·
+  [architecture/INTEGRATION_POINTS.md](architecture/INTEGRATION_POINTS.md) ·
+  [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md)
