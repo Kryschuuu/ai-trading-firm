@@ -1979,6 +1979,10 @@ Vor jeder Änderung an der Regel-Engine oder vor jeder Live-Aktivierung:
 - [ ] Rollback-Ziel dokumentiert (vorherige Version bleibt erhalten).
 - [ ] `maxExecutionsPerDay` und `cooldownMinutes` bewusst gewählt (Spam-Schutz).
 - [ ] Kein Feld/Operator genutzt, das nicht in `RULE_FIELDS` steht (wird sonst verworfen).
+- [ ] `window.timeframe` liegt im Ausführungsintervall des Mikro-Executors (Default `1h`): Längere
+      Timeframes (`2h … 5d`) laufen nur im Backtest, live weist der Executor sie sichtbar ab
+      (`ruleGuard.blocked`). Felder je Timeframe: `docs/BACKTESTING.md` §1.1 — `vwapPct` ist auf
+      `1d`/`5d` immer `null`.
 - [ ] Bei `REQUIRE_HUMAN_APPROVAL=true`: Regel blieb DRAFT bis zur manuellen Freigabe.
 
 **Code-Ebene (Peer-Review vor GitHub)**
