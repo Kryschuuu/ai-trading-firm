@@ -26,11 +26,70 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-04 … 03-08 und
+> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-05 … 03-08 und
 > der Compiler 03-09 (`v0.7.0`); offen bleibt die optionale Feature-Store-Parität 02-04.
 
 ### Added
 
+* **Zweites Strategie-Template: MACD Momentum** (`src/strategies/templates/macd-momentum.ts`,
+  STX-03-04, Phase 3) — das **Referenztemplate für 06-02 (Overfit)**: die
+  wenigsten Parameter (vier) und die klarste Ökonomie. Auch dieses Artefakt
+  braucht nichts Neues — `macdHist`, `priceVsEma50Pct` und `adx14` stehen längst
+  im Snapshot.
+  * `buildMacdMomentum()` liefert ein `StrategyTemplate` (`class: "trend"` nach
+    ADR-008, `version: 1`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes:
+    ["1h", "4h"]`, `requiredFields: macdHist | priceVsEma50Pct | adx14 | atrPct`);
+    `STRATEGY_TEMPLATES` führt den Eintrag an zweiter Stelle (Roadmap-Reihenfolge)
+    und validiert ihn **beim Import**.
+  * Die Regel: `condition.logic = "all"` über drei Bedingungen — `macdHist gt 0`,
+    `priceVsEma50Pct gt ema50BufferPct` (strikt: „über EMA 50“, nicht „auf
+    EMA 50“), `adx14 gte adxMin`. Action und Fenster wie 03-03 (`side LONG` über
+    `RULE_ALLOWED_SIDE`, `stopLossPct`, `takeProfitRR`, `riskBudgetPct 0.01`,
+    `maxPositionPct 0.15`, `1h`, 2 Ausführungen/Tag, 240 min Abklingzeit), dazu
+    `sourceRole: "RESEARCH"`, `missionId: null`, `riskScore: 0.5` und ein
+    deutschsprachiges, parametergeprägtes `rationale`.
+  * **Keine Magnitude-Bedingung auf `macdHist`** — die wichtigste Aussage des
+    Files: `macdHist` ist `macd − signal` in **Preiseinheiten**, ein Schwellwert
+    `macdHist > X` mit `X > 0` ist deshalb **nicht** marktübergreifend (dieselbe
+    `0.5` bedeutet für BTC etwas anderes als für einen 5-stelligen Aktienkurs —
+    die Verwechslung von Momentum und Volatilität, die die Analyse prüft). Die
+    einzige Bedingung auf dem Feld ist `gt 0` (das Vorzeichen ist skalenfrei);
+    der skalenfreie Ersatz für jede Stärkefrage ist `priceVsEma50Pct` (Prozent).
+    Ein Test greppt den Builder-Output über das **ganze** Parameterraster: genau
+    eine `macdHist`-Bedingung, und sie ist `gt 0`.
+  * Vier Parameter mit `step` als Sensitivitätsraster (06-02): `adxMin` 20
+    (14…35, Schritt 1), `ema50BufferPct` 0.0 (−1…3, Schritt 0.1 — `min` bewusst
+    negativ, damit 06-02 den frühen Impuls auch **unter** dem EMA 50 messen
+    kann), `stopLossPct` 4 (1…12, Schritt 0.5), `takeProfitRR` 2 (1…4,
+    Schritt 0.25). Der **gesamte** Bereich liegt innerhalb `RULE_CEILINGS`
+    (`stopLossPct [0.5, 20]`, `takeProfitRR [0.5, 5]`, aus `LIMIT_CEILINGS`
+    abgeleitet) — kein Rasterpunkt wird je geklemmt.
+  * Sechs `assumptions` (06-01) mit `category` und `critical`: MARKET „das
+    Histogramm-Vorzeichen dreht vor dem Trend“ (nicht kritisch); MARKET
+    **kritisch** „`macdHist` wird ausdrücklich nicht als Stärke-Metrik
+    verwendet“ (Preiseinheiten, nicht skalenfrei); DATA **kritisch**
+    „MACD(12/26/9) braucht 35 Schlusskurse, darunter `null`“ (`slow 26 + signal 9`);
+    COST „häufige Histogramm-Wechsel werden durch Cooldown und Tageslimit
+    gedämpft“; dazu REGIME (`TREND_UP`) und eine zweite DATA-Annahme zur
+    EMA-50-Warm-up-Falle. `expectedRegimes: ["TREND_UP"]` — ohne `UNKNOWN`
+    (ADR-009).
+  * **Bewusst nicht getan** (Sperren des Prompts): kein `SHORT` (die negative
+    MACD-Variante bräuchte einen `side`-Wert, den die Engine nicht kennt), keine
+    Bedingung auf `macd`/`macdSignal` (dieselbe Preiseinheiten-Falle), kein
+    `bbZScore` (03-06), keine Sequenz-/Reclaim-Logik, kein Backtest-Lauf (03-10)
+    — und unverändert: `indicators.ts`, `ruleEngine.ts`, `RULE_CEILINGS`,
+    `RULE_FIELDS`.
+  * **Tests:** `tests/strategies.macdMomentum.test.ts` (56 Fälle) — Vertrag,
+    Prompt-Treue Zeile für Zeile, Klemmfreiheit über **jedem** Rasterpunkt
+    (`validateTemplate` + `sanitizeRuleSpec` im Verbund), der Magnitude-Grep über
+    Builder-Output **und** Quelltext, Reinheit/Determinismus und die Semantik
+    über den echten Snapshot-Pfad: Aufwärtstrend ab 35 Kerzen löst aus, bei 34
+    Kerzen schweigt die Regel (`macdHist = null`, fail-closed — obwohl ADX und
+    EMA-50-Abstand längst erfüllt wären), Seitwärtsphase nicht (Histogramm exakt
+    0, `gt` nicht `gte`), und in der fallenden Reihe trägt allein
+    `priceVsEma50Pct` die Ablehnung. Dazu die neuen Kopf-Invarianten:
+    `histogram = macd − signal` (Preiseinheiten) und `macdHist` im Snapshot
+    unskaliert (nur auf 6 Stellen gerundet).
 * **Erstes Strategie-Template: EMA/ADX Trend** (`src/strategies/templates/ema-adx-trend.ts`,
   STX-03-03, Phase 3) — der Katalog ist keine leere Registry mehr. Das Artefakt
   braucht genau nichts Neues: keine Felder, keine Indikatoren, keine

@@ -135,8 +135,14 @@ describe("Akzeptanz: validateTemplate(buildEmaAdxTrend()) liefert []", () => {
     assert.ok(entry, "ema-adx-trend muss im Katalog stehen");
     assert.equal(entry, listTemplates()[0], "Roadmap-Reihenfolge: 03-03 steht zuerst");
     assert.equal(JSON.stringify(entry), JSON.stringify(buildEmaAdxTrend()));
-    assert.equal(STRATEGY_TEMPLATES.length, 1, "in 03-03 kommt genau ein Template dazu");
-    assert.equal(getTemplate("macd-momentum"), null, "03-04 ist noch nicht gebaut — null, nie ein Default");
+    // Seit 03-04 steht ein zweites Template daneben (macd-momentum); welche
+    // Dateien registriert sind, prüft `tests/strategies.catalog.test.ts` gegen
+    // das Verzeichnis — dieser Test bleibt deshalb bei der **relativen**
+    // Aussage: dieses Artefakt ist da, an erster Stelle, unverfälscht.
+    assert.ok(
+      STRATEGY_TEMPLATES.some((template) => template.id === EMA_ADX_TREND_ID),
+      "das Artefakt muss in der Registry stehen",
+    );
   });
 
   test("die deklarierte Klasse stimmt mit der ADR-008-Ableitung überein", () => {
