@@ -24,21 +24,32 @@
  * `configHash` und damit eine andere Definitionsversion — nicht eine
  * Umschreibung bestehender Werte.
  */
-import { DEFAULT_ANALYSIS_TIMEFRAME } from "../lib/marketdata/historicalStore";
+import { DEFAULT_ANALYSIS_TIMEFRAME, type SupportedTimeframe } from "../lib/marketdata/historicalStore";
 import { DEFAULT_SCANNER_CONFIG } from "../scanner/config";
+import { BOLLINGER_PERIOD, BOLLINGER_MULT, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD } from "../lib/indicators";
 import { FEATURE_EXECUTORS } from "./compute";
 import { FeatureRegistry } from "./registry";
 import type { FeatureDefinitionInput } from "./types";
 
-/** Stabile Kennung der Slice-Features (Schema `namespace.name`). */
+/** Stabile Kennung der Scanner-Slice-Features (Schema `namespace.name`). */
 export const FEATURE_IDS = {
   rsi: "scanner.rsi",
   atr: "scanner.atr",
   atrBand: "scanner.atr_band",
 } as const;
 
+/** Stabile Kennung der Rule-Slice-Features (Schema `namespace.name`). */
+export const RULE_FEATURE_IDS = {
+  bbZScore: "rule.bb_zscore",
+  priceVsUpperBbPct: "rule.price_vs_upper_bb_pct",
+  donchianBreakoutPct: "rule.donchian_breakout_pct",
+} as const;
+
 /** Owner der Slice-Features (Betriebsübergabe: wer die Semantik verantwortet). */
 export const FEATURE_OWNER = "scanner";
+
+/** Owner der Rule-Slice-Features. */
+export const RULE_FEATURE_OWNER = "rule";
 
 /**
  * Konfiguration des Slices. Defaults **sind** die Scanner-Defaults; jeder
@@ -153,4 +164,121 @@ let sliceRegistry: FeatureRegistry | null = null;
 export function getSliceRegistry(): FeatureRegistry {
   sliceRegistry ??= createSliceRegistry();
   return sliceRegistry;
+}
+
+/**
+ * Konfiguration des Rule-Slices. Defaults spiegeln die kanonischen
+ * Indikator-Konstanten aus `src/lib/indicators.ts`.
+ */
+export interface RuleSliceConfig {
+  bollingerPeriod?: number;
+  bollingerMult?: number;
+  donchianEntryPeriod?: number;
+  donchianExitPeriod?: number;
+  timeframe?: SupportedTimeframe;
+}
+
+/** Default-Konfiguration des Rule-Slices. */
+export const RULE_SLICE_DEFAULTS: Readonly<Required<RuleSliceConfig>> = Object.freeze({
+  bollingerPeriod: BOLLINGER_PERIOD,
+  bollingerMult: BOLLINGER_MULT,
+  donchianEntryPeriod: DONCHIAN_ENTRY_PERIOD,
+  donchianExitPeriod: DONCHIAN_EXIT_PERIOD,
+  timeframe: DEFAULT_ANALYSIS_TIMEFRAME,
+});
+
+/**
+ * Deklariert die Rule-Slice-Definitionen (`rule.bb_zscore`,
+ * `rule.price_vs_upper_bb_pct`, `rule.donchian_breakout_pct`).
+ *
+ * Vollständige Semantik-Doku konsistent zu `definitions.ts`:
+ * - `rule.bb_zscore`: Kurs vs. Bollinger-Mitte in Standardabweichungen
+ * - `rule.price_vs_upper_bb_pct`: Kurs vs. obere Bollinger-Kante in Prozent
+ * - `rule.donchian_breakout_pct`: Kurs vs. Hoch der vorigen 20 Kerzen in Prozent
+ */
+export function ruleSliceDefinitions(
+  config: RuleSliceConfig = RULE_SLICE_DEFAULTS
+): readonly FeatureDefinitionInput[] {
+  const bollingerPeriod = config.bollingerPeriod ?? BOLLINGER_PERIOD;
+  const bollingerMult = config.bollingerMult ?? BOLLINGER_MULT;
+  const donchianEntryPeriod = config.donchianEntryPeriod ?? DONCHIAN_ENTRY_PERIOD;
+  const donchianExitPeriod = config.donchianExitPeriod ?? DONCHIAN_EXIT_PERIOD;
+  const timeframe = config.timeframe ?? DEFAULT_ANALYSIS_TIMEFRAME;
+
+  return [
+    {
+      featureId: RULE_FEATURE_IDS.bbZScore,
+      version: 1,
+      label: "Bollinger Z-Score (20/2σ)",
+      description:
+        "Kurs gegen die Bollinger-Mitte (20 Kerzen, 2 σ) in Standardabweichungen: " +
+        "(close − middle) / σ. Typisch ±0…3. null bei zu wenig Historie (unter 20 Kerzen), " +
+        "middle <= 0 oder σ == 0 (flache Kerzenreihe hat keine Lage im Band). " +
+        "Identisch zu RuleSnapshot.bbZScore.",
+      dtype: "number",
+      enumValues: null,
+      unit: "std_devs",
+      valueDecimals: 4,
+      entityType: "instrument",
+      timeframe,
+      lookbackBars: bollingerPeriod,
+      dependencies: [],
+      computeKey: "rule.bb_zscore@1",
+      config: { period: bollingerPeriod, mult: bollingerMult },
+      owner: RULE_FEATURE_OWNER,
+    },
+    {
+      featureId: RULE_FEATURE_IDS.priceVsUpperBbPct,
+      version: 1,
+      label: "Kurs vs. obere Bollinger-Kante (20/2σ, %)",
+      description:
+        "Kurs gegen die obere Bollinger-Kante (20 Kerzen, 2 σ) in Prozent des Kurses: " +
+        "(close − upper) / close · 100. Typisch ≤ 0 (unterhalb der Kante), > 0 bei Ausbruch. " +
+        "null bei zu wenig Historie oder middle <= 0. Identisch zu RuleSnapshot.priceVsUpperBbPct.",
+      dtype: "number",
+      enumValues: null,
+      unit: "percent_of_close",
+      valueDecimals: 4,
+      entityType: "instrument",
+      timeframe,
+      lookbackBars: bollingerPeriod,
+      dependencies: [],
+      computeKey: "rule.price_vs_upper_bb_pct@1",
+      config: { period: bollingerPeriod, mult: bollingerMult },
+      owner: RULE_FEATURE_OWNER,
+    },
+    {
+      featureId: RULE_FEATURE_IDS.donchianBreakoutPct,
+      version: 1,
+      label: "Donchian-Ausbruch (20 Kerzen vorher, %)",
+      description:
+        "Kurs gegen das Hoch der vorigen 20 Kerzen (Donchian-Kanal ohne aktuelle Signalkerze) " +
+        "in Prozent: (close / upper − 1) · 100. > 0 bedeutet Ausbruch über das bekannte Kanalhoch. " +
+        "null bei weniger als 21 Kerzen oder upper <= 0. Identisch zu RuleSnapshot.donchianBreakoutPct.",
+      dtype: "number",
+      enumValues: null,
+      unit: "percent_of_channel",
+      valueDecimals: 4,
+      entityType: "instrument",
+      timeframe,
+      lookbackBars: donchianEntryPeriod + 1,
+      dependencies: [],
+      computeKey: "rule.donchian_breakout_pct@1",
+      config: { entryPeriod: donchianEntryPeriod, exitPeriod: donchianExitPeriod },
+      owner: RULE_FEATURE_OWNER,
+    },
+  ];
+}
+
+/** Registry für den Rule-Slice. */
+export function createRuleSliceRegistry(config: RuleSliceConfig = RULE_SLICE_DEFAULTS): FeatureRegistry {
+  return FeatureRegistry.create(ruleSliceDefinitions(config), FEATURE_EXECUTORS);
+}
+
+/** Alle Slice-Definitionen kombiniert (Scanner-Slice + Rule-Slice). */
+export function allSliceDefinitions(
+  scannerConfig: FeatureSliceConfig = FEATURE_SLICE_DEFAULTS,
+  ruleConfig: RuleSliceConfig = RULE_SLICE_DEFAULTS
+): readonly FeatureDefinitionInput[] {
+  return [...sliceDefinitions(scannerConfig), ...ruleSliceDefinitions(ruleConfig)];
 }

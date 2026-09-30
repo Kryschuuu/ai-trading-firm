@@ -87,7 +87,25 @@ Die Formeln existieren **einmal** (`src/scanner/factors/{rsi,atr}.ts`) und werde
 von Scanner und Feature Store gemeinsam genutzt; der Feature-Wert ist damit per
 Konstruktion paritätisch zum Faktor.
 
-### 3.2 Null-Gründe (`null` ≠ `0`)
+### 3.2 Slice `rule.*@1` (Regel-Features, STX-02-04)
+
+Der Slice `rule.*` materialisiert Regelfeatures in den Store, damit Scanner,
+Regeln und Backtest dieselben Größen aus einer konsistenten Datenbasis lesen
+können. Alle drei Features rufen exakt die Formeln aus `src/lib/indicators.ts`
+auf (`bollingerBands`, `bollingerPosition`, `donchianChannel`,
+`donchianBreakoutPct`) — es gibt keine zweite Formelimplementierung.
+
+| Feature | Dtype | Einheit | Fenster | Wert |
+|---------|-------|---------|---------|------|
+| `rule.bb_zscore@1` | number | `std_devs` | `period` = 20 Kerzen | Kurs gegen Bollinger-Mitte (20/2σ) in Standardabweichungen: `(close − middle) / σ`. `null` bei flacher Reihe (σ == 0, `NOT_COMPUTABLE`), middle <= 0 oder < 20 Kerzen. Exakt identisch zu `RuleSnapshot.bbZScore`. |
+| `rule.price_vs_upper_bb_pct@1` | number | `percent_of_close` | `period` = 20 Kerzen | Kurs gegen obere Bollinger-Kante in Prozent: `(close − upper) / close · 100`, gerundet auf 4 Dezimalstellen. `null` bei middle <= 0 oder < 20 Kerzen. Exakt identisch zu `RuleSnapshot.priceVsUpperBbPct`. |
+| `rule.donchian_breakout_pct@1` | number | `percent_of_channel` | `entryPeriod + 1` = 21 Kerzen | Kurs gegen Hoch der vorigen 20 Kerzen (ohne Signalkerze) in Prozent: `(close / upper − 1) · 100`, gerundet auf 4 Dezimalstellen. `null` bei < 21 Kerzen oder upper <= 0. Exakt identisch zu `RuleSnapshot.donchianBreakoutPct`. |
+
+Owner aller drei Definitionen ist `"rule"` (`RULE_FEATURE_OWNER`).
+Paritätstests in `tests/ruleFeatureStoreParity.test.ts` erzwingen exakte
+(bit-identische) Gleichheit über alle unterstützten Timeframes (z. B. 15m, 1h, 4h).
+
+### 3.3 Null-Gründe (`null` ≠ `0`)
 
 Eine Wertzeile trägt **entweder** einen Wert **oder** einen Grund — nie beides,
 nie nichts:
