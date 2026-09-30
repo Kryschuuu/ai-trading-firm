@@ -49,6 +49,14 @@ erlaubt, solange sie hier dokumentiert sind).
   (Exit höchstens Entry); `null` bei unzureichenden oder nicht-berechenbaren Daten.
   Tests decken Randfälle, Klemmung, exakte BBW-Parität und steigenden Breakout ab.
 
+### Fixed
+
+* **Security-Audit:** transitive `brace-expansion`-Versionen im Lockfile auf
+  `1.1.21` (über ESLint/minimatch) und `5.0.12` (über typescript-eslint/minimatch)
+  aktualisiert. Damit sind die gemeldeten High-DoS-Advisories behoben;
+  `npm audit --audit-level=high` meldet keine Schwachstellen. Keine Änderung
+  an direkten Abhängigkeiten oder am Laufzeitcode.
+
 ### Documentation
 
 * Version/Strategie-Stack, Root-/Docs-README und Audit-Tracking auf 02-01 nachgezogen.
