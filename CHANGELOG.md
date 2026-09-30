@@ -31,6 +31,67 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Added
 
+* **Drittes Strategie-Template: RSI Mean-Reversion** (`src/strategies/templates/rsi-mean-reversion.ts`,
+  STX-03-05, Phase 3) — das **erste Artefakt mit `class: "mean-reversion"`** und damit der
+  Testfall, ob ADR-E1 (ADR-008) trägt: Erst diese Klasse wird im Regime-Gate tatsächlich
+  gedämpft (`TREND_UP`/`TREND_DOWN` Faktor **0.5**, `RANGE` **1** — gelesen aus
+  `DEFAULT_MARKET_REGIME_CONFIG.gateFactors`, nicht gesetzt). Auch dieses Template braucht
+  nichts Neues: `rsi14`, `priceVsEma21Pct`, `adx14`, `volumeRatio` und `atrPct` stehen
+  längst im Snapshot.
+  * `buildRsiMeanReversion()` liefert ein `StrategyTemplate` (`class: "mean-reversion"`,
+    `version: 1`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes: ["15m", "1h", "4h"]`,
+    `expectedRegimes: ["RANGE"]`); `STRATEGY_TEMPLATES` führt den Eintrag an dritter
+    Stelle (Roadmap-Reihenfolge) und validiert ihn **beim Import**.
+  * Die Regel: `condition.logic = "all"` über vier Bedingungen — `rsi14 lte rsiOversold`,
+    `priceVsEma21Pct lte -ema21GapPct`, **`adx14 lte adxMax`** und `volumeRatio gte
+    volumeRatioMin`. Action und Fenster wie 03-03/03-04 (`side LONG` über
+    `RULE_ALLOWED_SIDE`, `riskBudgetPct 0.01`, `maxPositionPct 0.15`, `1h`, 2
+    Ausführungen/Tag, 240 min Abklingzeit), dazu `sourceRole: "RESEARCH"`,
+    `missionId: null`, `riskScore: 0.5` und ein deutschsprachiges, parametergeprägtes
+    `rationale`.
+  * **`adx14` ist hier ein Deckel (`lte`), kein Boden** — der load-bearing Unterschied zur
+    Trendfolge: Ohne diesen Filter ist das Template kein Mean-Reversion-, sondern ein
+    „Catching the falling knife"-System (in einer monoton fallenden Reihe stehen RSI(14)
+    bei ~0 und der Kurs weit unter dem EMA 21 — nur der ADX hält die Regel zurück). Der
+    Test hält den Operator über das **ganze** Raster fest und kontrastiert ihn mit
+    `gte` in 03-03/03-04.
+  * Sechs Parameter mit `step` als Sensitivitätsraster (06-02): `rsiOversold` 30
+    (15…40, Schritt 1), `ema21GapPct` 1.0 (0.3…5, Schritt 0.1 — in der Regel negiert,
+    weil `priceVsEma21Pct` das Vorzeichen trägt), `adxMax` 20 (10…30, Schritt 1),
+    `volumeRatioMin` 1.1 (0.8…2.5, Schritt 0.05), `stopLossPct` 5 (1…15, Schritt 0.5),
+    `takeProfitRR` **1.5** (1…4, Schritt 0.25). Der **gesamte** Bereich liegt innerhalb
+    `RULE_CEILINGS` — kein Rasterpunkt wird je geklemmt.
+  * Warum `takeProfitRR` hier **1.5** statt 2 ist: Mean-Reversion hat das begrenzte Ziel
+    (Rückkehr zum Mittel) und die schlechtere Trefferquote; das kleinere
+    Chance/Risiko-Verhältnis kompensiert das Odds-Ratio. Dasselbe Argument trägt die
+    eigene Decay-Policy der Klasse (Halbwertszeit 4 h statt 24 h bei `trend`).
+  * Sieben `assumptions` (06-01), drei davon `critical: true`: REGIME „funktioniert in
+    RANGE; in TREND_UP/TREND_DOWN greift nur das Regime-Gate", COST „höhere
+    Turnover-Rate ⇒ Gebühren-/Slippage-Annahme besonders lastend", DATA „RSI(14) braucht
+    15 Schlusskurse" — plus MARKET („überverkauft ist keine Bodenbildung", EMA 21 als
+    Mittel), DATA (ADX-Warm-up 29 Kerzen) und EXECUTION (Fill in der Signalkerze,
+    adverse Selection).
+  * **Bewusst nicht getan** (Sperren des Prompts): **kein `bbZScore`** — der Z-Score ist
+    normalisiert und damit die bessere Überdehnungs-Metrik, braucht aber
+    `bollingerBands` (STX-02-02); dieses Template ist so gebaut, dass es **vor** 02-02
+    funktioniert, und das Bollinger-Template 03-06 ist der Ort der Lage-Metrik (die
+    Reihenfolge-Abhängigkeit steht im Kopf, eine Nachrüstung wäre eine
+    **Versionserhöhung**). Kein `SHORT` (Mean-Reversion wäre short-seitig die
+    natürlichere Variante — eigener Audit), **keine Regime-Gate-Änderung** (das Template
+    nutzt es nur), keine Änderung an `rsi` in `indicators.ts` — und unverändert:
+    `ruleEngine.ts`, `RULE_CEILINGS`, `RULE_FIELDS`, `marketRegime.ts`.
+  * **Tests:** `tests/strategies.rsiMeanReversion.test.ts` (66 Fälle) — Vertrag,
+    Prompt-Treue Zeile für Zeile, Klemmfreiheit über **jedem** Rasterpunkt
+    (`validateTemplate` + `sanitizeRuleSpec` im Verbund), der ADX-Operator-Grep über
+    Builder-Output **und** Quelltext (mit Kontrast zu 03-03/03-04), die
+    ADR-008-Invarianten (`class !== "unclassified"`,
+    `regimeGateFactor("TREND_UP", …) < 1`, `regimeGateFactor("RANGE", …) === 1`,
+    Gate-Faktoren vor/nach jedem Aufruf unverändert) und die Semantik über den echten
+    Snapshot-Pfad: Range-Abverkauf löst aus, die monoton fallende Reihe **nicht** (nur
+    der ADX-Filter bremst — mit `adx14 = 15` auf demselben Snapshot würde sie
+    auslösen), flache Range nicht. Dazu die RSI-Warm-up-Falle: `rsi()` liefert unter 15
+    Schlusskursen nicht `null`, sondern **50** — der gesamte `rsiOversold`-Bereich
+    (≤ 40) liegt darunter, die Regel kann also nie auf dem Ersatzwert handeln.
 * **Zweites Strategie-Template: MACD Momentum** (`src/strategies/templates/macd-momentum.ts`,
   STX-03-04, Phase 3) — das **Referenztemplate für 06-02 (Overfit)**: die
   wenigsten Parameter (vier) und die klarste Ökonomie. Auch dieses Artefakt

@@ -51,8 +51,9 @@
  * ── Die Registry, nicht die Templates ──────────────────────────────────────
  * `STRATEGY_TEMPLATES` führt **eine Zeile pro Template-Datei** aus
  * `src/strategies/templates/` — keine Template-Logik in dieser Datei. Seit
- * 03-03 steht dort `ema-adx-trend`, seit 03-04 `macd-momentum`; die übrigen vier
- * folgen in 03-05 … 03-08. Die IDs stehen seit 03-02 als geschlossene Union fest —
+ * 03-03 steht dort `ema-adx-trend`, seit 03-04 `macd-momentum`, seit 03-05
+ * `rsi-mean-reversion`; die übrigen drei folgen in 03-06 … 03-08. Die IDs
+ * stehen seit 03-02 als geschlossene Union fest —
  * `getTemplate()` nimmt ausschließlich sie an, damit ein Tippfehler nicht auf
  * einen stillen Default läuft. Welche Datei eingetragen ist, prüft
  * `tests/strategies.catalog.test.ts` gegen das Verzeichnis: eine fehlende oder
@@ -78,6 +79,7 @@ import { SUPPORTED_TIMEFRAMES } from "@/lib/marketdata/timeframes";
 
 import { buildEmaAdxTrend } from "./templates/ema-adx-trend";
 import { buildMacdMomentum } from "./templates/macd-momentum";
+import { buildRsiMeanReversion } from "./templates/rsi-mean-reversion";
 
 import type { StrategyTemplate } from "./types";
 
@@ -500,9 +502,11 @@ function collectCeilingViolations(value: unknown, path: string, out: string[]): 
 /**
  * Der Katalog: **eine Zeile pro Template-Datei** unter
  * `src/strategies/templates/`. Bewusst leer in 03-02, seit 03-03 mit dem
- * ersten Eintrag (`ema-adx-trend`) und seit 03-04 mit dem zweiten
- * (`macd-momentum`); die übrigen vier Templates folgen in 03-05 … 03-08 und
- * tragen dort ihre Klasse aus der ADR-008-Tabelle.
+ * ersten Eintrag (`ema-adx-trend`), seit 03-04 mit dem zweiten
+ * (`macd-momentum`) und seit 03-05 mit dem dritten (`rsi-mean-reversion` —
+ * die erste Klasse `mean-reversion`, also das erste Artefakt, das im
+ * Regime-Gate tatsächlich gedämpft wird); die übrigen drei Templates folgen in
+ * 03-06 … 03-08 und tragen dort ihre Klasse aus der ADR-008-Tabelle.
  *
  * Die Einträge sind hier **Konstruktionen, keine Literale**: Jede Datei liefert
  * ein `build<Name>()`, das das Artefakt frisch zusammensetzt. Ein Export des
@@ -517,6 +521,7 @@ function collectCeilingViolations(value: unknown, path: string, out: string[]): 
 export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [
   buildEmaAdxTrend(),
   buildMacdMomentum(),
+  buildRsiMeanReversion(),
 ];
 
 /** ID → Template. Unbekannte IDs liefern `null` — nie einen stillen Default. */

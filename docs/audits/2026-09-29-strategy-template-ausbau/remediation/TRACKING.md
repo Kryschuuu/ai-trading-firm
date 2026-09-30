@@ -67,7 +67,7 @@
 | 03-02 | [Katalog + Validierung](../prompts/PROMPT-STX-03-02-catalog.md) | ☐ | STX-02/05 | — |
 | 03-03 | [Template: EMA/ADX Trend](../prompts/PROMPT-STX-03-03-template-ema-adx.md) | ☐ | STX-18 | — |
 | 03-04 | [Template: MACD Momentum](../prompts/PROMPT-STX-03-04-template-macd.md) | ☐ | STX-18 | — |
-| 03-05 | [Template: RSI Mean-Reversion](../prompts/PROMPT-STX-03-05-template-rsi.md) | ☐ | STX-18 | — |
+| 03-05 | [Template: RSI Mean-Reversion](../prompts/PROMPT-STX-03-05-template-rsi.md) | ☑ | STX-18 | — |
 | 03-06 | [Template: Bollinger Squeeze](../prompts/PROMPT-STX-03-06-template-bollinger.md) | ☐ | STX-18 | — |
 | 03-07 | [Template: VWAP (Snapshot)](../prompts/PROMPT-STX-03-07-template-vwap.md) | ☐ | STX-18 | — |
 | 03-08 | [Template: Donchian Breakout](../prompts/PROMPT-STX-03-08-template-donchian.md) | ☐ | STX-18 | — |
