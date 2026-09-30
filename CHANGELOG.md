@@ -26,10 +26,72 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: die optionale Feature-Store-Parität 02-04 und
-> der Template-Vertrag ab 03-01 (`v0.7.0`).
+> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-04 … 03-08 und
+> der Compiler 03-09 (`v0.7.0`); offen bleibt die optionale Feature-Store-Parität 02-04.
 
 ### Added
+
+* **Erstes Strategie-Template: EMA/ADX Trend** (`src/strategies/templates/ema-adx-trend.ts`,
+  STX-03-03, Phase 3) — der Katalog ist keine leere Registry mehr. Das Artefakt
+  braucht genau nichts Neues: keine Felder, keine Indikatoren, keine
+  Engine-Änderung. Damit ist STX-18 auch praktisch beantwortet (bestätigt:
+  `RuleSpec` trägt Templates).
+  * `buildEmaAdxTrend()` liefert ein `StrategyTemplate` (`class: "trend"` nach
+    ADR-008, `version: 1`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes:
+    ["1h", "4h"]`, `requiredFields: trend | priceVsEma50Pct | adx14 |
+    volumeRatio | atrPct`); `STRATEGY_TEMPLATES` nimmt den Eintrag auf und
+    validiert ihn **beim Import** (`assertTemplatesValid()`).
+  * Die Regel: `condition.logic = "all"` über vier Bedingungen — `trend eq "UP"`,
+    `priceVsEma50Pct gte ema50BufferPct`, `adx14 gte adxMin`, `volumeRatio gte
+    volumeRatioMin`. Action: `side LONG` (über `RULE_ALLOWED_SIDE`, nicht als
+    abgeschriebenes Literal), `stopLossPct`, `takeProfitRR`, `riskBudgetPct
+    0.01`, `maxPositionPct 0.15`, `positionSizeMode "risk"`. Fenster: `1h`, 2
+    Ausführungen/Tag, 240 min Abklingzeit, 20-Kerzen-Volumenfenster. Dazu
+    `sourceRole: "RESEARCH"`, `missionId: null`, `riskScore: 0.5` und ein
+    deutschsprachiges, parametergeprägtes `rationale`.
+  * **`symbol` ist Pflicht des Aufrufers, nicht des Builders**: Die Rohform hat
+    bewusst kein Symbol; der Compiler (03-09) setzt es vor `sanitizeRuleSpec()`.
+    Ohne Symbol bleibt die Rohform eine Rohform — `sanitizeRuleSpec` lehnt ab,
+    statt einen Markt zu erfinden.
+  * Fünf Parameter mit `step` als Sensitivitätsraster (06-02): `adxMin` 22
+    (15…35, Schritt 1), `ema50BufferPct` 0.2 (0…3, Schritt 0.1), `volumeRatioMin`
+    1.0 (0.8…2.0, Schritt 0.05), `stopLossPct` 4 (1…12, Schritt 0.5),
+    `takeProfitRR` 2 (1…4, Schritt 0.25). Der **gesamte** Bereich liegt innerhalb
+    `RULE_CEILINGS` (`stopLossPct [0.5, 20]`, `takeProfitRR [0.5, 5]`, aus
+    `LIMIT_CEILINGS` abgeleitet) — kein Rasterpunkt wird je geklemmt, sonst
+    messen die Sweeps die Klemmung statt der Edge.
+  * Zwei fachliche Grenzen im Kopf der Datei, beide am Code festgemacht:
+    `1m`/`5m` sind ausgeschlossen, weil `adx()` 29 Kerzen verlangt
+    (`2 * period + 1`) und eine Trendreihenfolge über 29 Fünf-Minuten-Kerzen ein
+    anderes Maß ist als über 29 Stunden; `ema50BufferPct` muss über der
+    `trend`-Hysterese liegen (`|EMA9 − EMA21| / price ≥ 0.001`, also 0,1 % —
+    sonst filtert die Bedingung nichts, was `trend` nicht schon gefiltert hätte).
+    Der Default (0,2 %) ist die Invariante, `min: 0` bleibt messbar.
+  * Fünf `assumptions` (06-01) mit `category` und `critical`: MARKET, DATA
+    (**kritisch**: ohne ADX kein Trend — `adx14` ist `null`, die Bedingung
+    scheitert fail-closed), COST, REGIME (`TREND_UP`; in RANGE degradiert die
+    ADX-Bedingung) und eine zweite DATA-Annahme zur EMA-50-Warm-up-Falle
+    (`buildSnapshotFromCandles` rechnet `min(50, Kerzenzahl)`).
+    `expectedRegimes: ["TREND_UP"]` — ohne `UNKNOWN` (ADR-009).
+  * **Bewusst nicht getan** (Sperren des Prompts): kein `SHORT`, kein `vwapPct`
+    (Tagesanker auf `1h` nicht belastbar, STX-01), keine Sequenz-/Reclaim-Logik,
+    kein ATR-skalierter Stop, kein Backtest-Lauf (03-10) — und unverändert:
+    `ruleEngine.ts`, `RULE_CEILINGS`, `indicators.ts`.
+* **Tests:** `tests/strategies.emaAdxTrend.test.ts` (47 Fälle) — Vertrag,
+  Prompt-Treue Zeile für Zeile, Klemmfreiheit über **jedem** Rasterpunkt
+  (`validateTemplate` + `sanitizeRuleSpec` im Verbund), der Nachweis, dass
+  `adxMin: 99` in `validateTemplate` scheitert und den Sanitizer
+  **unbehelligt** ließe (kein Deckel auf `adx14`), Reinheit/Determinismus,
+  Statik-Wächter für die Doku-Pflichten und die Sperren. Dazu Semantik über den
+  echten Snapshot-Pfad: Aufwärtstrend löst aus, unter 29 Kerzen nicht
+  (`adx14 = null`, fail-closed), Seitwärtsphase nicht, Volumenschwäche nicht, und
+  die Margin-Kerze zwischen 0 und 0,2 % genau dann, wenn der Buffer auf `min`
+  steht.
+* `tests/strategies.catalog.test.ts`: Die Registry-Prüfung vergleicht
+  `STRATEGY_TEMPLATES` jetzt mit dem Verzeichnis
+  `src/strategies/templates/` statt eine leere Liste zu erwarten — eine fehlende
+  oder doppelte Registrierung ist damit ein Testfehler, und 03-04 … 03-08 ziehen
+  den Test nicht mehr nach.
 
 * **Template-Katalog + Registry-Validierung** (`src/strategies/catalog.ts`,
   STX-03-02, Phase 3) — der Katalog prüft Templates **beim Import**, nicht erst
