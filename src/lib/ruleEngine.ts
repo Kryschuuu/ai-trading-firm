@@ -20,8 +20,20 @@
  * Berechnung über 120 Kerzen < 100 µs; bewusste NULL DB-/Netzwerk-IO.
  */
 
-import { adx, atrPct, bollingerBandWidthPct, ema, macd, rsi, sessionVwap } from "./indicators";
-import { RULE_FIELDS } from "./ruleFieldCatalog";
+import {
+  BOLLINGER_MULT,
+  BOLLINGER_PERIOD,
+  adx,
+  atrPct,
+  bollingerBandWidthPct,
+  bollingerBands,
+  bollingerPosition,
+  ema,
+  macd,
+  rsi,
+  sessionVwap,
+} from "./indicators";
+import { RULE_FIELDS, RULE_FIELD_SCHEMA_HINTS } from "./ruleFieldCatalog";
 import { LIMIT_CEILINGS, riskAdjustedSize } from "./riskGuard";
 import { tryNormalizeVenueSymbol } from "../symbols/normalize";
 import { SUPPORTED_TIMEFRAMES, type SupportedTimeframe } from "./marketdata/timeframes";
@@ -127,8 +139,34 @@ export interface RuleSnapshot {
   atrPct: number | null;
   /** Wilder-ADX(14). null, solange weniger als 29 Kerzen vorliegen. */
   adx14: number | null;
-  /** Bollinger-Breite in Prozent (5 = 5 %). null bei zu wenig Historie. */
+  /**
+   * Bollinger-Breite in Prozent (5 = 5 %). null bei zu wenig Historie.
+   * Beschreibt die BREITE des Bandes; die Position des Kurses darin steht in
+   * `bbZScore`/`priceVsUpperBbPct`/`priceVsLowerBbPct` (STX-02-02).
+   */
   bbwPct: number | null;
+  /**
+   * Kurs gegen die Bollinger-Mitte (20 Kerzen, 2 σ) in Standardabweichungen:
+   * `(close − middle) / σ`, typisch ±0…3. null bei zu wenig Historie
+   * (weniger als 20 Schlusskurse), `middle <= 0` oder **σ == 0**: Eine flache
+   * Kerzenreihe hat keine Lage im Band — 0 wäre eine erfundene Neutralität.
+   * Dimensionslos und damit marktübergreifend vergleichbar.
+   */
+  bbZScore: number | null;
+  /**
+   * Kurs gegen die obere Bollinger-Kante in Prozent des Kurses:
+   * `(close − upper) / close · 100`, typisch ≤ 0 (unter der Kante). null bei
+   * zu wenig Historie oder `middle <= 0` — dann gibt es kein Band. Die Kante
+   * selbst bleibt auch bei σ == 0 definiert (dann 0 %).
+   */
+  priceVsUpperBbPct: number | null;
+  /**
+   * Kurs gegen die untere Bollinger-Kante in Prozent des Kurses:
+   * `(close − lower) / close · 100`, typisch ≥ 0 (über der Kante). null bei
+   * zu wenig Historie oder `middle <= 0` — dann gibt es kein Band. Die Kante
+   * selbst bleibt auch bei σ == 0 definiert (dann 0 %).
+   */
+  priceVsLowerBbPct: number | null;
   /** MACD-Linie in Preiseinheiten. null unter 35 Schlusskursen. */
   macd: number | null;
   macdSignal: number | null;
@@ -520,6 +558,9 @@ function accessor(field: RuleField): (s: RuleSnapshot) => number | string | null
     case "atrPct": return (s) => s.atrPct;
     case "adx14": return (s) => s.adx14;
     case "bbwPct": return (s) => s.bbwPct;
+    case "bbZScore": return (s) => s.bbZScore;
+    case "priceVsUpperBbPct": return (s) => s.priceVsUpperBbPct;
+    case "priceVsLowerBbPct": return (s) => s.priceVsLowerBbPct;
     case "macd": return (s) => s.macd;
     case "macdSignal": return (s) => s.macdSignal;
     case "macdHist": return (s) => s.macdHist;
@@ -651,6 +692,14 @@ export function buildSnapshotFromCandles(
   const atrFraction = atrPct(candles);
   const adxValue = adx(candles);
   const bbwFraction = bollingerBandWidthPct(closes);
+  // Position im Band (STX-02-02): dasselbe Band (20/2σ) wie `bbwPct`, aber die
+  // LAGE des Kurses statt der Breite. Gerundet wird wie bei `bbwPct` auf vier
+  // Dezimalstellen; die Null-Semantik steht in `bollingerPosition` an genau
+  // einer Stelle und gilt für Cache- und Direktpfad gleich. `bbwPct` behält
+  // bewusst seinen eigenen Rechenweg (`bollingerBandWidthPct`) — dessen Wert
+  // darf sich nicht ändern, nur weil die Bandlage dazukommt.
+  const bands = bollingerBands(closes, BOLLINGER_PERIOD, BOLLINGER_MULT);
+  const position = bands ? bollingerPosition(price, bands, BOLLINGER_MULT) : null;
   const macdValue = macd(closes);
   // Session-VWAP: Anker ist der UTC-Tag der letzten Kerze. Für den 1h-
   // Snapshot sind das die seit Mitternacht gelaufenen Bars, für 5m/15m der
@@ -673,6 +722,9 @@ export function buildSnapshotFromCandles(
     atrPct: atrFraction != null ? Number((atrFraction * 100).toFixed(2)) : null,
     adx14: adxValue != null ? Number(adxValue.toFixed(2)) : null,
     bbwPct: bbwFraction != null ? Number((bbwFraction * 100).toFixed(4)) : null,
+    bbZScore: position?.zScore != null ? Number(position.zScore.toFixed(4)) : null,
+    priceVsUpperBbPct: position != null ? Number(position.priceVsUpperPct.toFixed(4)) : null,
+    priceVsLowerBbPct: position != null ? Number(position.priceVsLowerPct.toFixed(4)) : null,
     macd: macdValue != null ? Number(macdValue.macd.toFixed(6)) : null,
     macdSignal: macdValue != null ? Number(macdValue.signal.toFixed(6)) : null,
     macdHist: macdValue != null ? Number(macdValue.histogram.toFixed(6)) : null,
@@ -862,6 +914,24 @@ export function backtestRule(
 // JSON-Schema für den LLM-Output des Makro-Zyklus (weiche Schicht)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Einheiten-Hinweis für das LLM-Schema: nur Felder mit erklärungsbedürftiger
+ * Einheit (SSoT: `RULE_FIELD_SCHEMA_HINTS` im Feldkatalog). Das `enum` bleibt
+ * `Object.keys(RULE_FIELDS)` — der Text erklärt, er erweitert nicht.
+ */
+const RULE_FIELD_SCHEMA_HINT_TEXT = Object.entries(RULE_FIELD_SCHEMA_HINTS)
+  .map(([field, hint]) => `${field} = ${hint}`)
+  .join("; ");
+
+const RULE_FIELD_SCHEMA_DESCRIPTION =
+  "Messwert-Feld der Bedingung. Erlaubte Felder stehen im enum. " +
+  "Alle Werte sind marktneutral (Prozent, Verhältnis oder Standardabweichung), " +
+  "damit dieselbe Regel über Instrumente mit verschiedenen Kursniveaus läuft. " +
+  `Einheiten und typische Werte: ${RULE_FIELD_SCHEMA_HINT_TEXT}. ` +
+  "Bollinger-Felder sind null, wenn kein Band vorliegt (zu wenig Historie oder " +
+  "Mitte <= 0) — bbZScore zusätzlich bei σ == 0 (flache Kerzenreihe); null " +
+  "erfüllt keine Bedingung (fail-closed), es ist keine 0.";
+
 /** Beschreibt die erwartete Regel-Form für ollama/OpenAI structured output. */
 export const RULE_LLM_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -881,6 +951,7 @@ export const RULE_LLM_SCHEMA: Record<string, unknown> = {
               field: {
                 type: "string",
                 enum: Object.keys(RULE_FIELDS),
+                description: RULE_FIELD_SCHEMA_DESCRIPTION,
               },
               op: {
                 type: "string",

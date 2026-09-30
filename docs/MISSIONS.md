@@ -205,6 +205,23 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    `vwapPct` ist auf `1d`/`5d` immer `null`. Welches Feld auf welchem Timeframe
    was bedeutet, steht in der Tabelle
    [Rule-Timeframe ↔ unterstützte Felder](BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062).
+   Im Feld-Dropdown stehen seit `v0.6.4` zusätzlich die drei **Bollinger-Lagefelder**
+   (STX-02-02) — sie beschreiben, *wo* der Kurs im Band steht, während
+   `Bollinger-Breite, Prozent` nur sagt, *wie weit* das Band ist:
+
+   | Feld (Label im Workshop) | Bedeutung / Einheit |
+   | --- | --- |
+   | **Kurs vs. Bollinger-Mitte (20/2σ), Standardabweichungen** (`bbZScore`) | `(close − middle)/σ`; 0 = Bandmitte, 2 = obere Kante, −2 = untere Kante |
+   | **Kurs vs. obere Bollinger-Kante, Prozent** (`priceVsUpperBbPct`) | Abstand zur oberen Kante in Prozent des Kurses; > 0 = Ausbruch darüber |
+   | **Kurs vs. untere Bollinger-Kante, Prozent** (`priceVsLowerBbPct`) | Abstand zur unteren Kante in Prozent des Kurses; < 0 = Ausbruch darunter |
+
+   **Beispiel-Workflow „Squeeze → Breakout“:** Bedingung *Bollinger-Breite, Prozent* `< 5`
+   **und** *Kurs vs. obere Bollinger-Kante, Prozent* `> 0`. Beide Werte werden auf
+   **derselben** geschlossenen Kerze gemessen — eine Sequenz „erst Squeeze, später
+   Ausbruch“ kann die Regel-DSL bewusst nicht ausdrücken. Dass der Ausbruch das Band
+   selbst weiter aufzieht (und die Squeeze-Schwelle deshalb mitdenken muss), steht
+   samt Beispielwerten in
+   [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064).
 
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung
 (`src/components/workshop/InfoTip.tsx`), zusätzlich hängt der Text als

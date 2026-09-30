@@ -26,6 +26,8 @@ export const RULE_FIELDS = {
   /**
    * Bollinger-Bandbreite in Prozent (5 = 5 %). Nicht der Bruch aus
    * `bollingerBandWidthPct` und nicht der Dashboard-Key `adp.bbwHighPct`.
+   * Misst die BREITE des Bandes — die Position des Kurses darin liefern
+   * `bbZScore`, `priceVsUpperBbPct` und `priceVsLowerBbPct` (STX-02-02).
    */
   bbwPct: "number",
   /** MACD-Linie (12/26), Preiseinheiten. */
@@ -56,7 +58,48 @@ export const RULE_FIELDS = {
    * trotzdem teuer, sobald man größenordnungsmäßig handelt.
    */
   bookDepthUsd: "number",
+  /**
+   * Position des Kurses im Bollinger-Band (20 Kerzen, 2 σ) in
+   * Standardabweichungen: `(close − middle) / σ`. Dimensionslos, typisch
+   * ±0…3; 0 = Bandmitte, ±2 = Bandkante. null bei zu wenig Historie,
+   * `middle <= 0` oder σ == 0 (flache Kerzenreihe ⇒ keine Lage im Band).
+   * Marktübergreifend, weil kein absoluter Kurs verglichen wird — das
+   * Regelwerk bleibt „Messwert gegen Schwelle".
+   */
+  bbZScore: "number",
+  /**
+   * Abstand des Kurses zur OBEREN Bollinger-Kante (20 Kerzen, 2 σ) in Prozent
+   * des Kurses: `(close − upper) / close · 100`. Typisch ≤ 0 (unterhalb der
+   * Kante); > 0 heißt „Kurs bricht die obere Kante". null bei zu wenig
+   * Historie oder `middle <= 0`.
+   */
+  priceVsUpperBbPct: "number",
+  /**
+   * Abstand des Kurses zur UNTEREN Bollinger-Kante (20 Kerzen, 2 σ) in Prozent
+   * des Kurses: `(close − lower) / close · 100`. Typisch ≥ 0 (oberhalb der
+   * Kante); < 0 heißt „Kurs bricht die untere Kante". null bei zu wenig
+   * Historie oder `middle <= 0`.
+   */
+  priceVsLowerBbPct: "number",
 } as const;
+
+/**
+ * Einheit + typische Werte je Feld für das LLM-Schema (`RULE_LLM_SCHEMA`).
+ *
+ * Bewusst nur für Felder, deren Einheit sich nicht von selbst liest — die
+ * Aufzählung selbst bleibt `Object.keys(RULE_FIELDS)`. Der Text steht hier
+ * neben dem UI-Label, damit Einheit, Label und LLM-Hinweis nicht auseinander
+ * laufen (SSoT des Feldkatalogs); die Workshop-Oberfläche und das Schema lesen
+ * beide aus dieser Datei.
+ */
+export const RULE_FIELD_SCHEMA_HINTS: Partial<Record<keyof typeof RULE_FIELDS, string>> = {
+  bbZScore:
+    "Kurs minus 20er-Mitte in Standardabweichungen (0 = Mitte, 2 = obere Kante, −2 = untere Kante; typisch −3…3)",
+  priceVsUpperBbPct:
+    "Kurs minus obere Bollinger-Kante in Prozent des Kurses (0 = genau auf der Kante, 0.4 = 0,4 % darüber; typisch −5…1)",
+  priceVsLowerBbPct:
+    "Kurs minus untere Bollinger-Kante in Prozent des Kurses (0 = genau auf der Kante, −0.4 = 0,4 % darunter; typisch −1…5)",
+};
 
 export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   price: "Letzter Kurs",
@@ -85,4 +128,7 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   vwapPct: "Kurs vs. Tages-VWAP, Prozent (positiv = über dem VWAP)",
   spreadPct: "Spread in Prozent (0,04 = 0,04 % = 4 bp, null = kein Orderbuch)",
   bookDepthUsd: "Orderbuch-Tiefe der schwächeren Seite in USD (null = keine belastbare Tiefe)",
+  bbZScore: "Kurs vs. Bollinger-Mitte (20/2σ), Standardabweichungen (0 = Mitte, 2 = obere Kante)",
+  priceVsUpperBbPct: "Kurs vs. obere Bollinger-Kante, Prozent (positiv = über der Kante)",
+  priceVsLowerBbPct: "Kurs vs. untere Bollinger-Kante, Prozent (negativ = unter der Kante)",
 };

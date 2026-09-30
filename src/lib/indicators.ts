@@ -158,6 +158,63 @@ export function bollingerBands(closes: number[], period = 20, mult = 2): Bolling
 }
 
 /**
+ * Standard-Parameter der Bollinger-Regel-Felder (`bbwPct`, `bbZScore`,
+ * `priceVsUpperBbPct`, `priceVsLowerBbPct`): Periode 20, 2 σ (STX-02-02).
+ * Bewusst keine Regelfelder und keine Template-Parameter: Jedes dieser Felder
+ * bedeutet im Snapshot per Definition *dieses* Band, sonst wäre derselbe
+ * Feldwert je Strategie etwas anderes.
+ */
+export const BOLLINGER_PERIOD = 20;
+export const BOLLINGER_MULT = 2;
+
+/**
+ * Position des Kurses im Bollinger-Band (STX-02-02) — das Gegenstück zu
+ * `bbwPct`: Die Breite beschreibt, WIE WEIT das Band ist, diese Werte
+ * beschreiben, WO der Kurs darin steht. Alle drei sind marktneutral und damit
+ * über Instrumente mit verschiedenen Kursniveaus vergleichbar:
+ *
+ *   zScore          = (close − middle) / σ      — 0 = Mitte, ±mult = Bandkante
+ *   priceVsUpperPct = (close − upper) / close · 100
+ *   priceVsLowerPct = (close − lower) / close · 100
+ *
+ * `null`, wenn das Reading unbrauchbar ist (zu wenig Historie, `middle <= 0`
+ * oder Kurs nicht positiv). `zScore` ist zusätzlich `null` bei `σ == 0`: Eine
+ * flache Kerzenreihe hat keine Lage IM Band — eine 0 wäre eine erfundene
+ * Neutralität. Die beiden Prozentwerte bleiben dort gültig (0 = Kurs genau
+ * auf der Kante), weil sie keinen Bezug auf σ nehmen.
+ *
+ * σ wird aus der Bandgeometrie gelesen (`upper = middle + mult·σ`) statt
+ * erneut aus der Varianz gerechnet: eine Quelle der Wahrheit, exakt dieselben
+ * Zahlen wie in `bollingerBands`, und `σ == 0` ist exakt erkennbar.
+ *
+ * Für das Regelwerk werden die Werte einheitlich auf 4 Dezimalstellen
+ * gerundet — dieselbe Stelle wie `bbwPct` (`snapshotFromCache`,
+ * `buildSnapshotFromCandles`).
+ */
+export interface BollingerPositionReading {
+  zScore: number | null;
+  priceVsUpperPct: number;
+  priceVsLowerPct: number;
+}
+
+export function bollingerPosition(
+  close: number,
+  reading: BollingerReading,
+  mult = BOLLINGER_MULT,
+): BollingerPositionReading | null {
+  if (!Number.isFinite(close) || close <= 0) return null;
+  if (!reading || ![reading.upper, reading.middle, reading.lower].every(Number.isFinite)) return null;
+  if (reading.middle <= 0) return null;
+  const scale = Number.isFinite(mult) && mult > 0 ? mult : BOLLINGER_MULT;
+  const sigma = Math.abs(reading.upper - reading.middle) / scale;
+  const zScore = sigma > 0 ? (close - reading.middle) / sigma : null;
+  const priceVsUpperPct = ((close - reading.upper) / close) * 100;
+  const priceVsLowerPct = ((close - reading.lower) / close) * 100;
+  if (![priceVsUpperPct, priceVsLowerPct].every(Number.isFinite)) return null;
+  return { zScore, priceVsUpperPct, priceVsLowerPct };
+}
+
+/**
  * Donchian-Kanal für Higher-Timeframe-Ausbrüche/Trendfolge (Template 03-08
  * muss einen Mindest-Timeframe definieren). Einheit: Kurswerte.
  * upper = max(high) der vorherigen entryPeriod Kerzen;

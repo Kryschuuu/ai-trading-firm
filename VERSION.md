@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.6.3` |
+| **Version** | `v0.6.4` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-09-30 |
-| **Quellbasiert** | `package.json` (`version: "0.6.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.6.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -124,6 +124,18 @@ gibt es `null`. Donchian verlangt bei Template 03-08 einen Higher-Timeframe-Guar
 Noch keine neuen `RULE_FIELDS`, Rule-Snapshots oder Cache-Felder; 02-02/02-03
 folgen separat.
 
+`v0.6.4` schließt die erste Hälfte davon: Die **Bollinger-Bandlage** wird
+regelfähig. Drei additive `RULE_FIELDS` — `bbZScore` (`(close − middle)/σ`,
+dimensionslos), `priceVsUpperBbPct` und `priceVsLowerBbPct` (Abstand zur Kante in
+Prozent des Kurses) — beschreiben die **Position** im Band, während `bbwPct` die
+**Breite** misst. Bandparameter fest 20/2σ; `null` bei fehlender Historie,
+`middle <= 0` und (nur `bbZScore`) σ == 0 — nie eine erfundene 0. Beide
+Snapshot-Pfade liefern dieselben Werte (`buildSnapshotFromCandles` und
+`buildIndicatorCache`/`snapshotFromCache`), geprüft in
+`tests/backtest.multiAsset.test.ts`; ein Golden-Hash belegt, dass Läufe ohne
+Bollinger-Feld byte-identisch zu `v0.6.3` bleiben. Das Donchian-Feld folgt in
+`v0.6.5` (02-03); Templates beginnen mit `v0.7.0`.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -156,7 +168,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/live-gate/` | Harte Freigabeschicht für jeden Live-Pfad (Flags, Security-Stamps, Kill-Switch-Kopplung) |
 | `src/risk` (in `src/lib/`) | `riskGuard`, `adaptiveRisk`, `positionSizing`, `clusterExposure`, `volatilityTargeting`, `drawdownScaling`, `signalDecay`, `circuitBreaker`, `exits` |
 | `src/portfolio/` | Portfolio-Engine: Kennzahlen, Korrelations-Cluster, Volatility-Targeting-Policy, Drawdown-Policy |
-| `src/lib/indicators.ts` | Reine Indikatoren inkl. Bollinger-Bandlevel und Donchian-Kanal (v0.6.3); noch keine neuen Rule-Felder |
+| `src/lib/indicators.ts` | Reine Indikatoren inkl. Bollinger-Bandlevel/`bollingerPosition` (v0.6.3/0.6.4) und Donchian-Kanal (v0.6.3); Bollinger-Lage seit v0.6.4 als Regelfeld (`bbZScore`, `priceVs*BbPct`) |
 | `src/backtest/` | Backtest-Engines (legacy/paper/event_replay), Walk-Forward, Monte-Carlo, Trade-Ledger, Indikator-Cache (v0.3.0) |
 | `src/forecasts/` | Forecast-Ledger: point-in-time Resolving, Brier-Score, Kalibrierung |
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
