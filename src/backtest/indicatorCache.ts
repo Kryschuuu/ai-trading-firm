@@ -12,7 +12,15 @@
  * „einmal alles“ umgestellt.
  */
 
-import { BOLLINGER_MULT, BOLLINGER_PERIOD, bollingerBands, bollingerPosition } from "../lib/indicators";
+import {
+  BOLLINGER_MULT,
+  BOLLINGER_PERIOD,
+  DONCHIAN_ENTRY_PERIOD,
+  DONCHIAN_EXIT_PERIOD,
+  bollingerBands,
+  bollingerPosition,
+  donchianBreakoutPct,
+} from "../lib/indicators";
 import type { CandleLike } from "../lib/ruleEngine";
 
 export interface IndicatorCache {
@@ -34,6 +42,15 @@ export interface IndicatorCache {
   bbZScore: (number | null)[];
   priceVsUpperBbPct: (number | null)[];
   priceVsLowerBbPct: (number | null)[];
+  /**
+   * Donchian-Kanalhoch je Bar (STX-02-03): das Maximum der Highs der VORIGEN
+   * `DONCHIAN_ENTRY_PERIOD` (20) Kerzen — ohne die Signalkerze, genau wie
+   * `donchianChannel(candles.slice(0, idx + 1)).upper`. `null`, solange das
+   * Fenster unvollständig oder ein High darin nicht endlich ist; die
+   * `upper <= 0`- und Rundungsregeln des Regelfelds wendet `snapshotFromCache`
+   * über `donchianBreakoutPct()` an (dieselbe Stelle wie der Direktpfad).
+   */
+  donchianUpper: (number | null)[];
   macd: (number | null)[];
   macdSignal: (number | null)[];
   macdHist: (number | null)[];
@@ -245,6 +262,73 @@ function bollingerPositionArrays(closes: number[]): {
   return { bbZScore, priceVsUpperBbPct, priceVsLowerBbPct };
 }
 
+/**
+ * Donchian-Kanalhoch je Bar (STX-02-03) — roh, ohne Rundung und ohne die
+ * `upper <= 0`-Regel; beides liegt in `donchianBreakoutPct` bzw.
+ * `snapshotFromCache` (eine Wahrheit für Direktpfad und Cache).
+ *
+ * Laufendes Maximum über ein festes Fenster mit monotoner Deque: Jeder Index
+ * wird genau einmal eingefügt und höchstens einmal entfernt, die innere
+ * while-Schleife läuft über alle Bars amortisiert O(n). **Bewusst kein
+ * `Math.max(...slice)` je Bar** — das wäre O(n · entryPeriod) und damit genau
+ * die STX-12-Regression im Backtest-Pfad. `deque` ist ein Ringpuffer mit
+ * Kopfzeiger, damit auch das Entfernen O(1) bleibt (`Array.shift` wäre O(n)).
+ *
+ * Semantik identisch zu `donchianChannel(candles.slice(0, i + 1)).upper`:
+ * Fenster = Highs der Indizes `[i - entryPeriod, i - 1]`, `null` bei
+ * `i < entryPeriod` sowie sobald ein High im Einstiegs- **oder** ein Low im
+ * Ausstiegsfenster nicht endlich ist — `donchianChannel` verwirft in dem Fall
+ * das ganze Reading, und beide Pfade müssen denselben Feldwert sehen.
+ */
+function donchianUpperArray(
+  candles: CandleLike[],
+  entryPeriod = DONCHIAN_ENTRY_PERIOD,
+  exitPeriod = DONCHIAN_EXIT_PERIOD
+): (number | null)[] {
+  const n = candles.length;
+  const out: (number | null)[] = new Array(n).fill(null);
+  if (n < entryPeriod + 1) return out;
+
+  const deque: number[] = new Array(n); // Indizes, High-Werte monoton fallend
+  let head = 0;
+  let tail = 0;
+  let invalidHighs = 0; // nicht-endliche Highs im Einstiegsfenster
+  let invalidLows = 0; // nicht-endliche Lows im Ausstiegsfenster (letzte exitPeriod Kerzen)
+
+  for (let i = 0; i < n; i++) {
+    // Fenster für Bar i = [i - entryPeriod, i - 1]:
+    // hinein kommt Index i - 1, heraus fällt Index i - 1 - entryPeriod.
+    const entering = i - 1;
+    if (entering >= 0) {
+      const high = candles[entering].high;
+      if (Number.isFinite(high)) {
+        while (tail > head && candles[deque[tail - 1]].high <= high) tail -= 1;
+        deque[tail] = entering;
+        tail += 1;
+      } else {
+        invalidHighs += 1;
+      }
+      if (!Number.isFinite(candles[entering].low)) invalidLows += 1;
+    }
+    const leavingHigh = i - 1 - entryPeriod;
+    if (leavingHigh >= 0) {
+      const high = candles[leavingHigh].high;
+      if (Number.isFinite(high)) {
+        if (tail > head && deque[head] === leavingHigh) head += 1;
+      } else {
+        invalidHighs -= 1;
+      }
+    }
+    const leavingLow = i - 1 - exitPeriod;
+    if (leavingLow >= 0 && !Number.isFinite(candles[leavingLow].low)) invalidLows -= 1;
+
+    if (i >= entryPeriod && invalidHighs === 0 && invalidLows === 0 && tail > head) {
+      out[i] = candles[deque[head]].high;
+    }
+  }
+  return out;
+}
+
 function macdArray(
   closes: number[],
   fast = 12,
@@ -315,6 +399,7 @@ export function buildIndicatorCache(candles: CandleLike[]): IndicatorCache {
   const adx14 = adxArray(candles, 14);
   const bbwRaw = bbwArray(closes, 20, 2);
   const bollingerPos = bollingerPositionArrays(closes);
+  const donchianUpper = donchianUpperArray(candles, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD);
   const { macd, signal, hist } = macdArray(closes, 12, 26, 9);
 
   const volumeMa20: (number | null)[] = new Array(n).fill(null);
@@ -340,6 +425,7 @@ export function buildIndicatorCache(candles: CandleLike[]): IndicatorCache {
     bbZScore: bollingerPos.bbZScore,
     priceVsUpperBbPct: bollingerPos.priceVsUpperBbPct,
     priceVsLowerBbPct: bollingerPos.priceVsLowerBbPct,
+    donchianUpper,
     macd,
     macdSignal: signal,
     macdHist: hist,
@@ -417,6 +503,11 @@ export function snapshotFromCache(
   const bbZVal = cache.bbZScore[idx];
   const bbUpperDistVal = cache.priceVsUpperBbPct[idx];
   const bbLowerDistVal = cache.priceVsLowerBbPct[idx];
+  // STX-02-03: Das Kanalhoch kommt aus dem O(n) vorberechneten Cache; die
+  // Prozent-Formel und die `null`-Semantik (`< 21 Kerzen`, `upper <= 0`) liefert
+  // `donchianBreakoutPct` — dieselbe Funktion wie `buildSnapshotFromCandles`,
+  // damit beide Pfade bit-identisch bleiben. Rundung: 4 Dezimalstellen wie `bbwPct`.
+  const donchianPct = donchianBreakoutPct(price, cache.donchianUpper[idx]);
   const macdVal = cache.macd[idx];
   const macdSigVal = cache.macdSignal[idx];
   const macdHistVal = cache.macdHist[idx];
@@ -436,6 +527,7 @@ export function snapshotFromCache(
     bbZScore: bbZVal != null ? Number(bbZVal.toFixed(4)) : null,
     priceVsUpperBbPct: bbUpperDistVal != null ? Number(bbUpperDistVal.toFixed(4)) : null,
     priceVsLowerBbPct: bbLowerDistVal != null ? Number(bbLowerDistVal.toFixed(4)) : null,
+    donchianBreakoutPct: donchianPct != null ? Number(donchianPct.toFixed(4)) : null,
     macd: macdVal != null ? Number(macdVal.toFixed(6)) : null,
     macdSignal: macdSigVal != null ? Number(macdSigVal.toFixed(6)) : null,
     macdHist: macdHistVal != null ? Number(macdHistVal.toFixed(6)) : null,

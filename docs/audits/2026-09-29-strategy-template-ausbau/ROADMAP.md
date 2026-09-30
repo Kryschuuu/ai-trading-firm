@@ -97,11 +97,13 @@ Feld-Tabelle je Timeframe: [`BACKTESTING.md` §1.1](../../BACKTESTING.md#11-rule
 |---|---|---|---|
 | 02-01 | [Bollinger-Bänder + Donchian](prompts/PROMPT-STX-02-01-indikatoren.md) | ✅ 2 pure Funktionen in `indicators.ts` (`v0.6.3`), BBW-Parität und Lookahead-Test | 00-03 |
 | 02-02 | [Bollinger-Regelfelder](prompts/PROMPT-STX-02-02-bollinger-felder.md) | ✅ `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` in Snapshot + Cache (`v0.6.4`), Paritätstest und Golden-Hash | 02-01, 01-01 |
-| 02-03 | [Donchian-Regelfeld](prompts/PROMPT-STX-02-03-donchian-feld.md) | `donchianBreakoutPct` | 02-01, 01-01 |
+| 02-03 | [Donchian-Regelfeld](prompts/PROMPT-STX-02-03-donchian-feld.md) | ✅ `donchianBreakoutPct` in Snapshot + Cache (`v0.6.5`), Lookahead-/O(n)-/Paritätstest | 02-01, 01-01 |
 | 02-04 | *optional* [Feature-Store-Slice `rule.*`](prompts/PROMPT-STX-02-04-featurestore-rule-slice.md) | PIT-Materialisierung + Parität | 02-02, 02-03 |
 
-**Stand 2026-09-30:** 02-01 und 02-02 abgeschlossen (Formeln + Bollinger-Regelfelder in
-Snapshot und Cache, Parität getestet); 02-03 (Donchian-Regelfeld) steht noch aus. Donchian-Template 03-08 muss mindestens `1h` erlauben, nicht
+**Stand 2026-09-30:** 02-01, 02-02 und 02-03 abgeschlossen (Formeln + Bollinger- **und**
+Donchian-Regelfeld in Snapshot und Cache, Parität getestet). Damit ist die Feldseite
+komplett; offen in Phase 2 ist nur der **optionale** Feature-Store-Slice 02-04
+(STX-10). Donchian-Template 03-08 muss mindestens `1h` erlauben, nicht
 niedrigere Timeframes (geplant: `1h`, `4h`).
 
 **Reihenfolge-Logik:** 02-01 ist die Voraussetzung für 02-02 **und** 02-03. Ohne
@@ -114,6 +116,10 @@ referenzierbar. 02-04 ist **optional** und blockiert nichts (STX-10).
 02-02 setzt das um: `tests/backtest.multiAsset.test.ts` vergleicht die drei Bollinger-Felder
 Bar für Bar über drei Symbole und hält über einen Golden-Hash fest, dass Läufe ohne
 Bollinger-Feld byte-identisch bleiben.
+02-03 setzt dasselbe für `donchianBreakoutPct` um (Bar-für-Bar-Parität über drei
+Symbole, Golden-Hash unverändert) und belegt zusätzlich per Lookahead-Test, dass das
+Kanalhoch ausschließlich aus den **vorigen** 20 Kerzen stammt, sowie per Quelle-Review-Test,
+dass der Cache das laufende Maximum in O(n) über eine monotone Deque führt.
 
 ---
 

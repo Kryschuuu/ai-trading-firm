@@ -155,7 +155,7 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
   atrPct, volume, volumeMa20, volumeRatio, changePct24h,
   priceVsEma21Pct, priceVsEma50Pct, adx14, bbwPct, macd, macdSignal,
   macdHist, vwapPct, spreadPct, bookDepthUsd, bbZScore,
-  priceVsUpperBbPct, priceVsLowerBbPct` (SSoT:
+  priceVsUpperBbPct, priceVsLowerBbPct, donchianBreakoutPct` (SSoT:
   `src/lib/ruleFieldCatalog.ts`; die Workshop-Oberfläche liest genau diese
   Liste, ein Feld ohne Eintrag ist dort nicht wählbar).
   `vwapPct` (CYCLE-DAYTRADE-01) ist der Kurs gegen den **Tages-VWAP** in
@@ -183,6 +183,17 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
   Quick-Check/Mikro-Executor, `snapshotFromCache` für den Multi-Asset-Backtest)
   liefern dieselben Werte — Paritätstest in `tests/backtest.multiAsset.test.ts`.
   Einheiten/Beispiele: [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064).
+* **Donchian-Ausbruch (STX-02-03, v0.6.5):** `donchianBreakoutPct` =
+  `(close / Kanalhoch − 1) · 100`, Bezug ist das Hoch der **vorigen** 20 Kerzen
+  (`donchianChannel`, ausdrücklich ohne die aktuelle Signalkerze) — `> 0` heißt
+  also „Ausbruch über den vorher bekannten Kanal“, kein Look-ahead. Marktneutral,
+  weil relativ. `null` unter 21 Kerzen oder bei `upper <= 0`; eine echte 0 heißt
+  „Schlusskurs exakt auf dem Kanalhoch“. Die Fensterlänge (20/10) ist
+  Snapshot-Definition und **kein Regelfeld** — das Donchian-Template (03-08)
+  parametrisiert den Kanal und muss einen Mindest-Timeframe erzwingen. Der
+  Indikator-Cache rechnet das Kanalhoch in O(n) vor (monotone Deque, kein
+  Fenster-`Math.max` je Bar, STX-12); beide Snapshot-Pfade sind Bar für Bar pari.
+  Einheiten/Beispiele: [BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065).
 * **Kosten-/Liquiditätsfelder (v0.4.0):** `spreadPct` (relativer
   Orderbuch-Spread `(ask-bid)/mid` ×100) beantwortet „wie teuer ist der
   Touch?“, `bookDepthUsd` (Tiefe der abriegelnden Seite

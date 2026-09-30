@@ -23,11 +23,15 @@
 import {
   BOLLINGER_MULT,
   BOLLINGER_PERIOD,
+  DONCHIAN_ENTRY_PERIOD,
+  DONCHIAN_EXIT_PERIOD,
   adx,
   atrPct,
   bollingerBandWidthPct,
   bollingerBands,
   bollingerPosition,
+  donchianBreakoutPct,
+  donchianChannel,
   ema,
   macd,
   rsi,
@@ -167,6 +171,17 @@ export interface RuleSnapshot {
    * selbst bleibt auch bei σ == 0 definiert (dann 0 %).
    */
   priceVsLowerBbPct: number | null;
+  /**
+   * Donchian-Ausbruch in Prozent des Kurses (STX-02-03):
+   * `(close / upper − 1) · 100`, wobei `upper` das Hoch der **vorigen**
+   * `DONCHIAN_ENTRY_PERIOD` (20) Kerzen ist — die aktuelle Signalkerze ist
+   * ausdrücklich nicht im Kanal (kein Look-ahead, STX-02-01). `> 0` = Ausbruch
+   * über das vorher bekannte Kanalhoch. null bei zu wenig Historie (unter 21
+   * Kerzen ⇒ kein Kanal) oder `upper <= 0` — nie eine 0 als Ersatz; eine echte
+   * 0 heißt „Kurs exakt auf dem Kanalhoch“. Die Fensterlänge ist kein
+   * Regelfeld, sondern Template-Parameter (03-08).
+   */
+  donchianBreakoutPct: number | null;
   /** MACD-Linie in Preiseinheiten. null unter 35 Schlusskursen. */
   macd: number | null;
   macdSignal: number | null;
@@ -561,6 +576,7 @@ function accessor(field: RuleField): (s: RuleSnapshot) => number | string | null
     case "bbZScore": return (s) => s.bbZScore;
     case "priceVsUpperBbPct": return (s) => s.priceVsUpperBbPct;
     case "priceVsLowerBbPct": return (s) => s.priceVsLowerBbPct;
+    case "donchianBreakoutPct": return (s) => s.donchianBreakoutPct;
     case "macd": return (s) => s.macd;
     case "macdSignal": return (s) => s.macdSignal;
     case "macdHist": return (s) => s.macdHist;
@@ -700,6 +716,16 @@ export function buildSnapshotFromCandles(
   // darf sich nicht ändern, nur weil die Bandlage dazukommt.
   const bands = bollingerBands(closes, BOLLINGER_PERIOD, BOLLINGER_MULT);
   const position = bands ? bollingerPosition(price, bands, BOLLINGER_MULT) : null;
+  // Donchian-Ausbruch (STX-02-03): Abstand zum Hoch der VORIGEN 20 Kerzen —
+  // `donchianChannel` schließt die Signalkerze per Definition aus (kein
+  // Look-ahead). Die Fensterlänge ist Snapshot-Definition
+  // (`DONCHIAN_ENTRY_PERIOD`), KEIN Regelfeld: Template 03-08 parametrisiert
+  // den Kanal, nicht dieses Feld. Die Null-Semantik (unter 21 Kerzen oder
+  // `upper <= 0`) steht in `donchianBreakoutPct` an genau einer Stelle und gilt
+  // für Direktpfad und Indikator-Cache gleich; gerundet wird auf 4
+  // Dezimalstellen wie `bbwPct`.
+  const donchian = donchianChannel(candles, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD);
+  const donchianPct = donchianBreakoutPct(price, donchian?.upper);
   const macdValue = macd(closes);
   // Session-VWAP: Anker ist der UTC-Tag der letzten Kerze. Für den 1h-
   // Snapshot sind das die seit Mitternacht gelaufenen Bars, für 5m/15m der
@@ -725,6 +751,7 @@ export function buildSnapshotFromCandles(
     bbZScore: position?.zScore != null ? Number(position.zScore.toFixed(4)) : null,
     priceVsUpperBbPct: position != null ? Number(position.priceVsUpperPct.toFixed(4)) : null,
     priceVsLowerBbPct: position != null ? Number(position.priceVsLowerPct.toFixed(4)) : null,
+    donchianBreakoutPct: donchianPct != null ? Number(donchianPct.toFixed(4)) : null,
     macd: macdValue != null ? Number(macdValue.macd.toFixed(6)) : null,
     macdSignal: macdValue != null ? Number(macdValue.signal.toFixed(6)) : null,
     macdHist: macdValue != null ? Number(macdValue.histogram.toFixed(6)) : null,
@@ -929,7 +956,9 @@ const RULE_FIELD_SCHEMA_DESCRIPTION =
   "damit dieselbe Regel über Instrumente mit verschiedenen Kursniveaus läuft. " +
   `Einheiten und typische Werte: ${RULE_FIELD_SCHEMA_HINT_TEXT}. ` +
   "Bollinger-Felder sind null, wenn kein Band vorliegt (zu wenig Historie oder " +
-  "Mitte <= 0) — bbZScore zusätzlich bei σ == 0 (flache Kerzenreihe); null " +
+  "Mitte <= 0) — bbZScore zusätzlich bei σ == 0 (flache Kerzenreihe); " +
+  "donchianBreakoutPct ist null, solange die vorigen 20 Kerzen nicht " +
+  "vollständig vorliegen (unter 21 Kerzen) oder das Kanalhoch <= 0 ist. null " +
   "erfüllt keine Bedingung (fail-closed), es ist keine 0.";
 
 /** Beschreibt die erwartete Regel-Form für ollama/OpenAI structured output. */

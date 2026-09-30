@@ -4,7 +4,7 @@
 - **Severity:** INFO
 - **Bereich:** Handelslogik
 - **Quelle:** Ausbaudokument §1.3–1.8
-- **Status:** OPEN (bestätigend)
+- **Status:** FELDSEITE GEKLÄRT (2026-09-30) — Bollinger-Regelfelder 02-02 (`v0.6.4`), Donchian-Regelfeld 02-03 (`v0.6.5`); Templates 03-03…03-08 offen
 
 ## Befund
 
@@ -17,7 +17,7 @@ Die Analyse des Dokuments zur Machbarkeit der einzelnen Strategien trifft zu:
 | RSI Mean Reversion | optional `bbZScore` (ohne: RSI+EMA+ADX reicht) | keine |
 | Bollinger Squeeze | **ja** — `bbZScore` oder `priceVsUpperBbPct` (STX-02/03) | keine |
 | VWAP Pullback (Snapshot-Variante) | **nein** — `trend`, `vwapPct`, `volumeRatio`, `priceVsEma21Pct` | keine |
-| Donchian Breakout | **ja** — `donchianBreakoutPct` (STX-04) | keine |
+| Donchian Breakout | **ja** — `donchianBreakoutPct` (02-03, `v0.6.5`) | keine |
 | Cross-Sectional Momentum | n/a — **kein** `RuleSpec` (siehe STX-05) | entfällt |
 
 **3 von 5 P0-Templates sind sofort umsetzbar.** Das ist die stärkste Bestätigung des

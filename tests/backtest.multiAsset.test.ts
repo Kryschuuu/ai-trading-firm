@@ -20,6 +20,7 @@ import type { BacktestStrategyItem, MultiAssetBacktestResult } from "../src/back
 import { buildIndicatorCache, snapshotFromCache } from "../src/backtest/indicatorCache";
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
 import { backtestRule, buildSnapshotFromCandles, fnv1a, type CandleLike, type RuleSpec } from "../src/lib/ruleEngine";
+import { donchianChannel } from "../src/lib/indicators";
 import type { TradeSetupProposal } from "../src/cycle/schemas";
 import { backtestStep } from "../src/cycle/steps/backtestStep";
 import { validateBacktestOutput } from "../src/cycle/schemas";
@@ -389,5 +390,77 @@ describe("Multi-Asset Backtest Engine", () => {
     const json = stableResultJson(result);
     assert.equal(json.length, 22415, "die serialisierte Länge hat sich verändert");
     assert.equal(fnv1a(json), "0uz3hqb", "Byte-Identität zu v0.6.3 verletzt");
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STX-02-03 — Donchian-Regelfeld: Parität Direktpfad ↔ Indikator-Cache
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it("STX-02-03: donchianBreakoutPct ist in beiden Snapshot-Pfaden bit-identisch", () => {
+    // Der Cache rechnet das Kanalhoch in O(n) vor (monotone Deque), der
+    // Direktpfad ruft `donchianChannel` über das Präfix. Beide müssen für jede
+    // Bar denselben Wert sehen — inklusive `null` vor der 21. Kerze.
+    const seriesBySymbol = [
+      ["BTCUSDT", btcCandles],
+      ["ETHUSDT", ethCandles],
+      ["SOLUSDT", solCandles],
+    ] as const;
+
+    for (const [symbol, series] of seriesBySymbol) {
+      const cache = buildIndicatorCache(series);
+      for (let idx = 20; idx < series.length; idx++) {
+        const reading = donchianChannel(series.slice(0, idx + 1));
+        assert.ok(reading, `idx ${idx}: Kanal vorhanden`);
+        assert.equal(cache.donchianUpper[idx], reading.upper, `idx ${idx}: Kanalhoch weicht ab`);
+      }
+      let compared = 0;
+      for (let idx = 24; idx < series.length; idx++) {
+        const viaCache = snapshotFromCache(symbol, series, cache, idx, 20);
+        const direct = buildSnapshotFromCandles(symbol, series.slice(0, idx + 1), 20);
+        assert.ok(viaCache && direct, `idx ${idx}`);
+        assert.equal(
+          viaCache.donchianBreakoutPct,
+          direct.donchianBreakoutPct,
+          `idx ${idx}: donchianBreakoutPct weicht zwischen den Pfaden ab`,
+        );
+        compared += 1;
+      }
+      assert.ok(compared > 0, "die Reihe deckt die Snapshot-Fenster ab");
+    }
+  });
+
+  it("STX-02-03: eine donchianBreakoutPct-Regel feuert über beide Engines auf identischen Kerzen", () => {
+    const series = generateTrendCandles("BTCUSDT", startTs, 400, 30000, 0.002);
+    const breakoutRule: RuleSpec = {
+      ...btcRule,
+      name: "Donchian-Breakout (donchianBreakoutPct)",
+      condition: { logic: "all", conditions: [{ field: "donchianBreakoutPct", op: "gt", value: 0 }] },
+    };
+
+    const single = backtestRule(breakoutRule, series, { warmup: 30 });
+    const multi = runMultiAssetBacktest({
+      candlesBySymbol: new Map<string, CandleLike[]>([["BTCUSDT", series]]),
+      strategies: [{ type: "rule", spec: breakoutRule, id: "R-DONCHIAN" }],
+      // Zählweise-Angleich wie beim Bollinger-Test: `backtestRule` startet bei
+      // Index `warmup`, die Engine prüft `subSeries.length >= warmupBars`.
+      config: { initialCapital: 10_000, warmupBars: 31, maxOpenPositions: 5 },
+    });
+
+    const singleEntries = single.trades.map((t) => t.entryAt);
+    const multiEntries = multi.trades.map((t) => t.entryTime);
+    assert.ok(singleEntries.length > 0, "Kontrolle: die Regel handelt auf dieser Reihe");
+    assert.deepEqual(
+      multiEntries.slice(0, singleEntries.length),
+      singleEntries,
+      "dieselben Signal-Kerzen in derselben Reihenfolge",
+    );
+    // Einzige zulässige Abweichung: Die Multi-Asset-Engine schließt eine am
+    // Reihenende noch offene Position als `END_OF_DATA`-Trade ab,
+    // `backtestRule` führt Positionen ohne Exit nicht in `trades`. Eine
+    // echte Feld-/Signal-Differenz würde die Präfix-Prüfung oben brechen.
+    assert.ok(
+      multiEntries.length === singleEntries.length || multiEntries.length === singleEntries.length + 1,
+      `Trade-Anzahl weicht ab: multi ${multiEntries.length} vs. single ${singleEntries.length}`,
+    );
   });
 });

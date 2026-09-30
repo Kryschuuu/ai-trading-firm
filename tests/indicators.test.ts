@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, bollingerBands, bollingerPosition, donchianChannel, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot, BOLLINGER_PERIOD, BOLLINGER_MULT } from "../src/lib/indicators";
+import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, bollingerBands, bollingerPosition, donchianBreakoutPct, donchianChannel, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot, BOLLINGER_PERIOD, BOLLINGER_MULT } from "../src/lib/indicators";
 import type { Candle } from "../src/lib/marketData";
 
 test("RSI: stetiger Aufwärtslauf → überkauft (>70)", () => {
@@ -141,6 +141,38 @@ test("Donchian: streng steigende Serie bricht über den vorherigen Kanal aus (ke
   assert.ok(reading);
   assert.ok(reading.upper < lastClose, `upper ${reading.upper} muss unter ${lastClose} liegen`);
   assert.equal(reading.upper, candles.at(-2)!.high);
+});
+
+test("Donchian-Ausbruch (STX-02-03): Prozentformel, kein Look-ahead, null statt 0", () => {
+  // Kanalhoch der VORIGEN 20 Kerzen (streng steigend = die Kerze davor).
+  const candles = candlesFrom(Array.from({ length: 22 }, (_, i) => 100 + 2 * i));
+  const reading = donchianChannel(candles, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD)!;
+  const close = candles.at(-1)!.close;
+  assert.equal(reading.upper, candles.at(-2)!.high);
+  assert.equal(
+    donchianBreakoutPct(close, reading.upper),
+    (close / candles.at(-2)!.high - 1) * 100,
+    "Formel (close / voriges Kanalhoch − 1) · 100",
+  );
+
+  // Zu wenig Historie: kein Kanal ⇒ null, ausdrücklich keine 0.
+  const short = candles.slice(0, DONCHIAN_ENTRY_PERIOD);
+  assert.equal(donchianChannel(short), null);
+  assert.equal(donchianBreakoutPct(short.at(-1)!.close, donchianChannel(short)?.upper), null);
+  assert.notEqual(donchianBreakoutPct(short.at(-1)!.close, donchianChannel(short)?.upper), 0);
+
+  // Kein Bezugswert (upper <= 0) bzw. kein sinnvoller Kurs ⇒ null.
+  assert.equal(donchianBreakoutPct(-5, -4), null);
+  assert.equal(donchianBreakoutPct(-5, 0), null);
+  assert.equal(donchianBreakoutPct(0, 100), null);
+  assert.equal(donchianBreakoutPct(100, Number.NaN), null);
+
+  // Echte 0 = Kurs exakt auf dem Kanalhoch (Messwert, kein Ausfall).
+  assert.equal(donchianBreakoutPct(100, 100), 0);
+  // Die kanonischen Fenster sind 20/10 — sie sind Snapshot-Definition und
+  // kein Regelfeld (Template 03-08 parametrisiert den Kanal).
+  assert.equal(DONCHIAN_ENTRY_PERIOD, 20);
+  assert.equal(DONCHIAN_EXIT_PERIOD, 10);
 });
 
 test("Donchian: Mindesthistorie nach Klemmung, exitPeriod höchstens entryPeriod", () => {

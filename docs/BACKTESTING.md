@@ -115,6 +115,7 @@ Die übrigen Felder sind auf jedem Timeframe definiert; was sich mit dem Timefra
 | `changePct24h` | Basis ist die Kerze 97 Positionen vor dem Serienende, also 96 Perioden zurück — **kein 24-h-Wert** außer auf `15m` (STX-14; bewusst nicht umgerechnet, das würde bestehende Regeln still umwerten) |
 | `spreadPct`, `bookDepthUsd` | Liquiditätsgrößen des Instruments bzw. des Live-Orderbuchs, vom Regel-Timeframe unabhängig; `null` ohne belastbares Buch blockiert die Bedingung |
 | `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` | Lage im selben 20/2σ-Band wie `bbwPct` (STX-02-02, `v0.6.4`); `null` ohne Band (`middle <= 0`), `bbZScore` zusätzlich bei σ == 0 — Details in [§1.2](#12-bollinger-bandlage-stx-02-02-v064) |
+| `donchianBreakoutPct` | Abstand zum Donchian-Kanalhoch der **vorigen 20 Kerzen** (ohne Signalkerze, STX-02-03, `v0.6.5`); `null` unter 21 Kerzen oder bei `upper <= 0`, nie eine erfundene 0 — Details in [§1.3](#13-donchian-ausbruch-stx-02-03-v065) |
 
 ### 1.2 Bollinger-Bandlage (STX-02-02, `v0.6.4`)
 
@@ -178,6 +179,74 @@ mitdenken (z. B. `lt 5`) oder ausschließlich `bbZScore`/`priceVsUpperBbPct` nut
 (`bbZScore gt 2` ist der Breakout bereits eingebaut). Wer eine echte
 „Squeeze, *danach* Ausbruch“-Sequenz braucht, findet sie heute **nicht** in der
 Regel-DSL; das ist eine bewusste Grenze (kein Trigger-/Sequenz-Ausbau).
+
+### 1.3 Donchian-Ausbruch (STX-02-03, `v0.6.5`)
+
+`donchianBreakoutPct` ist das letzte der sieben Strategie-Felder und die einzige
+Größe, die sich nicht aus einem bestehenden Feld ableiten ließ: Der Donchian-Ausbruch
+(Durchbruch des Hochs der letzten N Kerzen) ist ein **Breakout**-Signal, kein
+Abstand zu einem gleitenden Mittel wie `priceVsEma21Pct`/`priceVsUpperBbPct`.
+
+| Feld | Formel | Einheit | Typische Werte |
+| --- | --- | --- | --- |
+| `donchianBreakoutPct` | `(close / upper − 1) · 100`, `upper` = Kanalhoch der **vorigen** 20 Kerzen | Prozent des Kurses | −10 … +5; **> 0 = Ausbruch über den vorher bekannten Kanal** |
+
+**Kein Look-ahead.** Das Kanalhoch ist das Maximum der Highs der **20 Kerzen vor
+der Signalkerze** (`donchianChannel(candles, 20, 10)` aus
+`src/lib/indicators.ts`, STX-02-01). Die laufende Kerze ist ausdrücklich nicht im
+Kanal: Erst ihr Schlusskurs bestätigt den Ausbruch gegen den *vorher* bekannten
+Kanal. Wäre ihr High im `upper`, wäre der Ausbruch in derselben Kerze eingebaut —
+genau der Lookahead-Bug, den `tests/indicators.test.ts` und
+`tests/ruleEngine.test.ts` ausschließen. Entsprechend heißt `> 0` „der Schlusskurs
+liegt über dem Hoch der letzten 20 abgeschlossenen Kerzen“; „der Kurs macht gerade
+ein neues 20-Kerzen-Hoch“ wäre derselbe Tag, aber eine andere Aussage.
+
+**Fensterlänge = Snapshot-Definition, kein Regelfeld.** Periode 20 und
+Exit-Fenster 10 sind kanonisch (`DONCHIAN_ENTRY_PERIOD`/`DONCHIAN_EXIT_PERIOD`).
+Das Feld bedeutet in **jedem** Template „Hoch der vorigen 20 Kerzen“. Wer eine
+andere Fensterlänge handeln will, parametrisiert den Kanal im Template (03-08),
+nicht das Regelwerk — sonst wäre derselbe Feldwert je Strategie etwas anderes.
+
+**`null` ist ein Messwert-Ausfall, keine 0** (fail-closed, blockiert die Bedingung):
+
+- weniger als 21 Kerzen — das Kanalhoch der vorigen 20 Kerzen ist nicht vollständig
+  (praktisch irrelevant: Snapshots brauchen ≥ 25 Kerzen),
+- `upper <= 0` — es gibt kein Kanalhoch als Bezug (nicht-positive Kursreihe).
+
+Eine **echte `0`** bleibt möglich und heißt „Schlusskurs exakt auf dem Kanalhoch“;
+eine Reihe mit steigendem Kurs liefert Werte, sobald sie über das vorige Hoch
+schließt. Die `null`-Semantik steht in `donchianBreakoutPct()` an genau einer
+Stelle und gilt für beide Ausführungspfade.
+
+**Beide Engines, eine Zahl.** `buildSnapshotFromCandles` (Quick-Check
+`backtestRule`, Mikro-Executor) ruft `donchianChannel` über das Kerzen-Präfix; der
+Multi-Asset-Pfad liest `donchianUpper` aus `src/backtest/indicatorCache.ts`. Der
+Cache rechnet das laufende Maximum mit einer monotonen Deque in **O(n)** vor
+(jeder Index wird einmal eingefügt und höchstens einmal entfernt) — bewusst
+**kein** `Math.max(...slice)` je Bar, das wäre O(n·20) und damit die
+STX-12-Regression im Backtest-Pfad. Ein Test vergleicht beide Pfade Bar für Bar
+über drei Symbole (`tests/backtest.multiAsset.test.ts`); Läufe **ohne**
+Donchian-Feld bleiben byte-identisch (Golden-Hash).
+
+**Higher-Timeframe-Hinweis (Template 03-08).** Donchian ist per Definition
+HTF-Logik: Ein 20-Kerzen-Hoch ist auf `1m` 20 Minuten, auf `1d` fast ein Monat.
+Das Template muss deshalb einen Mindest-Timeframe erzwingen (geplant: `1h`/`4h`);
+das Feld selbst ist timeframe-unabhängig definiert.
+
+```json
+{
+  "name": "Donchian-Breakout (20 Kerzen, voriges Kanalhoch)",
+  "symbol": "BTC/USDT",
+  "condition": {
+    "logic": "all",
+    "conditions": [
+      { "field": "donchianBreakoutPct", "op": "gt", "value": 0 }
+    ]
+  },
+  "action": { "side": "LONG", "stopLossPct": 3, "takeProfitRR": 2, "riskBudgetPct": 0.02, "maxPositionPct": 0.25 },
+  "window": { "timeframe": "1h", "maxExecutionsPerDay": 3, "cooldownMinutes": 60, "volumeWindow": 20 }
+}
+```
 
 ---
 

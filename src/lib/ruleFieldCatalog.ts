@@ -81,6 +81,17 @@ export const RULE_FIELDS = {
    * Historie oder `middle <= 0`.
    */
   priceVsLowerBbPct: "number",
+  /**
+   * Abstand des Schlusskurses zum Donchian-Kanalhoch in Prozent des Kurses:
+   * `(close / upper − 1) · 100`. Bezug ist das Hoch der **vorigen** 20 Kerzen
+   * (`DONCHIAN_ENTRY_PERIOD`, ohne die aktuelle Signalkerze) — > 0 heißt
+   * „Ausbruch über den vorher bekannten Kanal“, kein Look-ahead.
+   * null bei zu wenig Historie (unter 21 Kerzen ⇒ kein Kanal) oder
+   * `upper <= 0` — nie eine 0 als Ersatz. Eine echte 0 = Kurs exakt am
+   * Kanalhoch. Die Fensterlänge ist KEIN Regelfeld: sie gehört als Parameter
+   * in das Donchian-Template (03-08), nicht in den Snapshot (STX-02-03).
+   */
+  donchianBreakoutPct: "number",
 } as const;
 
 /**
@@ -99,6 +110,8 @@ export const RULE_FIELD_SCHEMA_HINTS: Partial<Record<keyof typeof RULE_FIELDS, s
     "Kurs minus obere Bollinger-Kante in Prozent des Kurses (0 = genau auf der Kante, 0.4 = 0,4 % darüber; typisch −5…1)",
   priceVsLowerBbPct:
     "Kurs minus untere Bollinger-Kante in Prozent des Kurses (0 = genau auf der Kante, −0.4 = 0,4 % darunter; typisch −1…5)",
+  donchianBreakoutPct:
+    "Kurs gegen das Hoch der VORIGEN 20 Kerzen (Donchian-Kanal ohne Signalkerze) in Prozent des Kurses (0 = genau am Kanalhoch, 1 = 1 % darüber; typisch −10…5); positiv = Ausbruch über den vorher bekannten Kanal, null unter 21 Kerzen",
 };
 
 export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
@@ -131,4 +144,6 @@ export const RULE_FIELD_LABELS: Record<keyof typeof RULE_FIELDS, string> = {
   bbZScore: "Kurs vs. Bollinger-Mitte (20/2σ), Standardabweichungen (0 = Mitte, 2 = obere Kante)",
   priceVsUpperBbPct: "Kurs vs. obere Bollinger-Kante, Prozent (positiv = über der Kante)",
   priceVsLowerBbPct: "Kurs vs. untere Bollinger-Kante, Prozent (negativ = unter der Kante)",
+  donchianBreakoutPct:
+    "Kurs vs. Hoch der vorigen 20 Kerzen (Donchian), Prozent (positiv = Ausbruch darüber)",
 };
