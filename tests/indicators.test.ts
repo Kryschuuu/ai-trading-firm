@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, bollingerBands, donchianChannel, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot } from "../src/lib/indicators";
+import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, bollingerBands, bollingerPosition, donchianChannel, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot, BOLLINGER_PERIOD, BOLLINGER_MULT } from "../src/lib/indicators";
 import type { Candle } from "../src/lib/marketData";
 
 test("RSI: stetiger Aufwärtslauf → überkauft (>70)", () => {
@@ -367,4 +367,81 @@ test("utcDayAnchorMs: rundet auf UTC-Mitternacht (nicht auf Lokalzeit)", () => {
   assert.equal(utcDayAnchorMs(VWAP_DAY + 23 * 3_600_000 + 59 * 60_000), VWAP_DAY);
   assert.equal(utcDayAnchorMs(VWAP_DAY + 24 * 3_600_000), VWAP_DAY + 86_400_000);
   assert.equal(utcDayAnchorMs(Number.NaN), 0);
+});
+
+// ── Bollinger-Position (STX-02-02) ───────────────────────────────────────────
+//
+// Reine Formel-Ebene der drei Regel-Felder `bbZScore`, `priceVsUpperBbPct` und
+// `priceVsLowerBbPct`. Die Snapshot-/Cache-Parität prüfen `tests/ruleEngine.test.ts`
+// und `tests/backtest.multiAsset.test.ts`.
+
+/** Symmetrische Reihe um 100 mit ±10: Mittel 100, σ = 10 (Populationsform). */
+const symmetricBand = Array.from({ length: 20 }, (_, i) => (i % 2 ? 110 : 90));
+
+test("STX-02-02: bollingerPosition rechnet aus Bandgeometrie — Mitte 0, Kanten ±mult", () => {
+  const reading = bollingerBands(symmetricBand)!;
+  assert.equal(reading.middle, 100);
+  assert.equal(reading.upper, 120);
+  assert.equal(reading.lower, 80);
+
+  assert.deepEqual(bollingerPosition(100, reading), {
+    zScore: 0,
+    priceVsUpperPct: -20,
+    priceVsLowerPct: 20,
+  });
+  // Kurs exakt auf der oberen Kante: zScore = +mult (2), Abstand zur Kante 0.
+  // Der Abstand zur jeweils anderen Kante ist Prozent des KURSES, nicht des Bandes.
+  assert.deepEqual(bollingerPosition(120, reading), {
+    zScore: 2,
+    priceVsUpperPct: 0,
+    priceVsLowerPct: (40 / 120) * 100,
+  });
+  assert.deepEqual(bollingerPosition(80, reading), {
+    zScore: -2,
+    priceVsUpperPct: (-40 / 80) * 100,
+    priceVsLowerPct: 0,
+  });
+});
+
+test("STX-02-02: σ wird aus der Bandgeometrie gelesen (keine zweite Varianzrechnung)", () => {
+  const closes = Array.from({ length: 30 }, (_, i) => 100 + Math.sin(i / 2) * 4);
+  const reading = bollingerBands(closes)!;
+  const position = bollingerPosition(closes.at(-1)!, reading)!;
+  const sigma = (reading.upper - reading.middle) / BOLLINGER_MULT;
+  assert.ok(Math.abs(position.zScore! - (closes.at(-1)! - reading.middle) / sigma) < 1e-12);
+  // Identisch zum direkten Nachrechnen der Populations-σ über das Fenster.
+  const window = closes.slice(-BOLLINGER_PERIOD);
+  const mean = window.reduce((a, b) => a + b, 0) / BOLLINGER_PERIOD;
+  const sd = Math.sqrt(window.reduce((a, b) => a + (b - mean) ** 2, 0) / BOLLINGER_PERIOD);
+  assert.ok(Math.abs(sigma - sd) < 1e-9, `σ-Geometrie ${sigma} vs. Varianz ${sd}`);
+});
+
+test("STX-02-02: σ == 0 ⇒ zScore null, Prozentwerte bleiben 0 (Kurs liegt auf der Kante)", () => {
+  const flat = Array(20).fill(100);
+  const reading = bollingerBands(flat)!;
+  assert.equal(reading.width, 0, "flaches Band: echte Breite 0 (bestehende Semantik)");
+  assert.deepEqual(bollingerPosition(100, reading), {
+    zScore: null,
+    priceVsUpperPct: 0,
+    priceVsLowerPct: 0,
+  });
+});
+
+test("STX-02-02: unbrauchbares Reading oder Kurs ⇒ null statt erfundener Zahlen", () => {
+  const reading = bollingerBands(symmetricBand)!;
+  assert.equal(bollingerPosition(0, reading), null, "Kurs 0 ergibt keinen Prozentbezug");
+  assert.equal(bollingerPosition(-5, reading), null);
+  assert.equal(bollingerPosition(Number.NaN, reading), null);
+  assert.equal(bollingerPosition(Number.POSITIVE_INFINITY, reading), null);
+  // Zu wenig Historie: `bollingerBands` liefert null — die Position dazu gibt es nicht.
+  assert.equal(bollingerBands(Array(19).fill(100)), null);
+  assert.equal(bollingerPosition(100, { ...reading, middle: 0 }), null, "Mitte 0 ⇒ kein Bezug");
+  assert.equal(bollingerPosition(100, { ...reading, middle: Number.NaN }), null);
+});
+
+test("STX-02-02: Kantenabstände sind Prozent des Kurses (marktneutral, kein absoluter Preis)", () => {
+  // Dasselbe Muster auf zwei Kursniveaus: die Prozentwerte sind identisch.
+  const at100 = bollingerPosition(105, bollingerBands(symmetricBand)!);
+  const at30000 = bollingerPosition(105 * 300, bollingerBands(symmetricBand.map((c) => c * 300))!);
+  assert.deepEqual(at100, at30000);
 });

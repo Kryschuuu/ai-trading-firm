@@ -16,9 +16,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { runMultiAssetBacktest, runRuleSetBacktest, runSetupsBacktest } from "../src/backtest";
-import type { BacktestStrategyItem } from "../src/backtest/types";
+import type { BacktestStrategyItem, MultiAssetBacktestResult } from "../src/backtest/types";
+import { buildIndicatorCache, snapshotFromCache } from "../src/backtest/indicatorCache";
 import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
-import type { CandleLike, RuleSpec } from "../src/lib/ruleEngine";
+import { backtestRule, buildSnapshotFromCandles, fnv1a, type CandleLike, type RuleSpec } from "../src/lib/ruleEngine";
 import type { TradeSetupProposal } from "../src/cycle/schemas";
 import { backtestStep } from "../src/cycle/steps/backtestStep";
 import { validateBacktestOutput } from "../src/cycle/schemas";
@@ -55,6 +56,17 @@ function generateTrendCandles(
   }
 
   return candles;
+}
+
+/**
+ * Stabiler Fingerabdruck eines `MultiAssetBacktestResult` (STX-02-02):
+ * `executionDurationMs` ist die einzige nicht-deterministische Größe und wird
+ * entfernt; die Schlüsselreihenfolge bleibt sonst unangetastet.
+ */
+function stableResultJson(result: MultiAssetBacktestResult): string {
+  const { executionDurationMs: _duration, ...stable } = result;
+  void _duration;
+  return JSON.stringify(stable);
 }
 
 describe("Multi-Asset Backtest Engine", () => {
@@ -296,5 +308,86 @@ describe("Multi-Asset Backtest Engine", () => {
       else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STX-02-02 — Bollinger-Regelfelder: Parität Direktpfad ↔ Indikator-Cache
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it("STX-02-02: backtestRule und runMultiAssetBacktest sehen dieselben Feldwerte", () => {
+    // Zwei Snapshot-Pfade, eine Wahrheit: `backtestRule` baut den Snapshot über
+    // `buildSnapshotFromCandles`, die Multi-Asset-Engine liest `snapshotFromCache`.
+    // Ohne Parität würde dieselbe Regel im Einzel- und im Portfolio-Backtest
+    // verschiedene Zahlen sehen — genau der STX-02-02-Befund.
+    const seriesBySymbol = [
+      ["BTCUSDT", btcCandles],
+      ["ETHUSDT", ethCandles],
+      ["SOLUSDT", solCandles],
+    ] as const;
+
+    for (const [symbol, series] of seriesBySymbol) {
+      const cache = buildIndicatorCache(series);
+      let compared = 0;
+      for (let idx = 24; idx < series.length; idx++) {
+        const viaCache = snapshotFromCache(symbol, series, cache, idx, 20);
+        const direct = buildSnapshotFromCandles(symbol, series.slice(0, idx + 1), 20);
+        assert.ok(viaCache && direct, `idx ${idx}`);
+        for (const field of ["bbZScore", "priceVsUpperBbPct", "priceVsLowerBbPct"] as const) {
+          assert.equal(viaCache[field], direct[field], `idx ${idx}: ${field} weicht zwischen den Pfaden ab`);
+        }
+        compared += 1;
+      }
+      assert.ok(compared > 0, "die Reihe deckt die Snapshot-Fenster ab");
+    }
+  });
+
+  it("STX-02-02: eine bbZScore-Regel feuert über beide Engines auf identischen Kerzen", () => {
+    const series = generateTrendCandles("BTCUSDT", startTs, 400, 30000, 0.002);
+    const breakoutRule: RuleSpec = {
+      ...btcRule,
+      name: "Bollinger-Breakout (bbZScore)",
+      condition: { logic: "all", conditions: [{ field: "bbZScore", op: "gt", value: 1 }] },
+    };
+
+    const single = backtestRule(breakoutRule, series, { warmup: 30 });
+    const multi = runMultiAssetBacktest({
+      candlesBySymbol: new Map<string, CandleLike[]>([["BTCUSDT", series]]),
+      strategies: [{ type: "rule", spec: breakoutRule, id: "R-BB" }],
+      // Zählweise-Angleich: `backtestRule` startet bei Index `warmup`,
+      // die Engine prüft `subSeries.length >= warmupBars` (Index 29 bei 30).
+      config: { initialCapital: 10_000, warmupBars: 31, maxOpenPositions: 5 },
+    });
+
+    assert.ok(single.trades.length > 0, "Kontrolle: die Regel handelt auf dieser Reihe");
+    assert.equal(multi.trades.length, single.trades.length, "gleiche Anzahl Trades");
+    assert.deepEqual(
+      multi.trades.map((t) => t.entryTime),
+      single.trades.map((t) => t.entryAt),
+      "dieselben Signal-Kerzen",
+    );
+  });
+
+  it("STX-02-02: bestehende Multi-Asset-Ergebnisse bleiben byte-identisch (Golden)", () => {
+    const result = runMultiAssetBacktest({
+      candlesBySymbol: new Map<string, CandleLike[]>([
+        ["BTCUSDT", btcCandles],
+        ["ETHUSDT", ethCandles],
+      ]),
+      strategies: [
+        { type: "rule", spec: btcRule, id: "R-BTC" },
+        { type: "rule", spec: ethRule, id: "R-ETH" },
+      ],
+      config: { initialCapital: 10_000, warmupBars: 20, maxOpenPositions: 5 },
+    });
+
+    // Der Golden-Wert stammt vom Stand v0.6.3 (vor den Bollinger-Feldern). Kein
+    // Bollinger-Feld in der Regel ⇒ das Ergebnis darf sich um kein Byte ändern;
+    // `executionDurationMs` ist die einzige nicht-deterministische Größe.
+    assert.equal(result.barsProcessed, 100);
+    assert.equal(result.trades.length, 14);
+    assert.equal(result.metrics.endingEquity, 10476.09);
+    const json = stableResultJson(result);
+    assert.equal(json.length, 22415, "die serialisierte Länge hat sich verändert");
+    assert.equal(fnv1a(json), "0uz3hqb", "Byte-Identität zu v0.6.3 verletzt");
   });
 });

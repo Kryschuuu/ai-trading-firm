@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.6.3` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.6.4` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -49,8 +49,10 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 ---
 
 Die Indikator-Formeln `bollingerBands` und `donchianChannel` (v0.6.3) sind
-in [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md) dokumentiert;
-Rule-Felder und Templates sind noch nicht implementiert.
+in [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md) dokumentiert.
+Seit `v0.6.4` ist die Bollinger-Bandlage als Regelfeld nutzbar (`bbZScore`,
+`priceVsUpperBbPct`, `priceVsLowerBbPct` — [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064));
+ausführbare Templates folgen in Phase 3, das Donchian-Feld in 02-03.
 
 ## Inhaltsverzeichnis — Neue Struktur (2026-09-05)
 
@@ -242,7 +244,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.6.3, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.6.4, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)

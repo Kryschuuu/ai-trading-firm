@@ -93,7 +93,9 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 │   │                          #   wertet Regeln nur bis zum Ausführungsintervall 1h aus),
 │   │                          #   ruleEngine (Regel-Sanitizer/Snapshot/Backtest; Rule-Timeframes
 │   │                          #   = `SUPPORTED_TIMEFRAMES` `1m…5d`, SSoT `marketdata/timeframes.ts`;
-│   │                          #   `vwapPct` nur Intraday — auf `1d`/`5d` immer `null`),
+│   │                          #   `vwapPct` nur Intraday — auf `1d`/`5d` immer `null`;
+│   │                          #   Bollinger-Lage `bbZScore`/`priceVsUpperBbPct`/`priceVsLowerBbPct`
+│   │                          #   in Snapshot UND Indikator-Cache, Paritätstest in `tests/`),
 │   │                          #   broker (Schleuse), monitor, journal, audit(Sink/View),
 │   │                          #   telemetry, alerts, heartbeat, killSwitch, llmProvider,
 │   │                          #   ollama, clientIp, version (SSoT), …

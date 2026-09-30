@@ -154,7 +154,8 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
 * **Felder (Whitelist):** `price, rsi14, ema9, ema21, ema50, trend,
   atrPct, volume, volumeMa20, volumeRatio, changePct24h,
   priceVsEma21Pct, priceVsEma50Pct, adx14, bbwPct, macd, macdSignal,
-  macdHist, vwapPct, spreadPct, bookDepthUsd` (SSoT:
+  macdHist, vwapPct, spreadPct, bookDepthUsd, bbZScore,
+  priceVsUpperBbPct, priceVsLowerBbPct` (SSoT:
   `src/lib/ruleFieldCatalog.ts`; die Workshop-Oberfläche liest genau diese
   Liste, ein Feld ohne Eintrag ist dort nicht wählbar).
   `vwapPct` (CYCLE-DAYTRADE-01) ist der Kurs gegen den **Tages-VWAP** in
@@ -170,6 +171,18 @@ previous_version_id / superseded_by_id  ← Versionskette (Rollback)
   Mikro-Executor wertet nur Regeln bis zu seinem Ausführungsintervall (Default `1h`)
   aus und weist längere fail-closed und sichtbar ab. Welches Feld auf welchem
   Timeframe was bedeutet: [BACKTESTING.md §1.1](BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062).
+* **Bollinger-Bandlage (STX-02-02, v0.6.4):** `bbwPct` beschreibt die **Breite**
+  des Bands (20 Kerzen, 2 σ); `bbZScore` (`(close − middle)/σ`,
+  Standardabweichungen), `priceVsUpperBbPct` und `priceVsLowerBbPct`
+  (Abstand zur jeweiligen Kante in Prozent *des Kurses*) beschreiben die
+  **Position** darin. Alle drei sind marktneutral — dieselbe Schwelle gilt für
+  BTC und einen Penny-Stock. `null` bei fehlendem Band (zu wenig Historie,
+  `middle <= 0`); `bbZScore` zusätzlich bei σ == 0 (flache Reihe), denn 0 wäre
+  eine erfundene Bandmitte. `null` blockiert die Bedingung fail-closed.
+  Beide Snapshot-Pfade (`buildSnapshotFromCandles` für
+  Quick-Check/Mikro-Executor, `snapshotFromCache` für den Multi-Asset-Backtest)
+  liefern dieselben Werte — Paritätstest in `tests/backtest.multiAsset.test.ts`.
+  Einheiten/Beispiele: [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064).
 * **Kosten-/Liquiditätsfelder (v0.4.0):** `spreadPct` (relativer
   Orderbuch-Spread `(ask-bid)/mid` ×100) beantwortet „wie teuer ist der
   Touch?“, `bookDepthUsd` (Tiefe der abriegelnden Seite

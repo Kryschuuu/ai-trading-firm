@@ -12,6 +12,7 @@
  * „einmal alles“ umgestellt.
  */
 
+import { BOLLINGER_MULT, BOLLINGER_PERIOD, bollingerBands, bollingerPosition } from "../lib/indicators";
 import type { CandleLike } from "../lib/ruleEngine";
 
 export interface IndicatorCache {
@@ -24,6 +25,15 @@ export interface IndicatorCache {
   atrPct: (number | null)[];
   adx14: (number | null)[];
   bbwPct: (number | null)[];
+  /**
+   * Position im Bollinger-Band (STX-02-02), roh wie `bbwPct` — die Rundung auf
+   * 4 Dezimalstellen passiert erst in `snapshotFromCache`, genau wie im
+   * Direktpfad `buildSnapshotFromCandles`. `bbZScore` ist wie dort `null` bei
+   * fehlendem Band oder σ == 0.
+   */
+  bbZScore: (number | null)[];
+  priceVsUpperBbPct: (number | null)[];
+  priceVsLowerBbPct: (number | null)[];
   macd: (number | null)[];
   macdSignal: (number | null)[];
   macdHist: (number | null)[];
@@ -200,6 +210,41 @@ function bbwArray(closes: number[], period = 20, mult = 2): (number | null)[] {
   return out;
 }
 
+/**
+ * Position im Bollinger-Band je Bar (STX-02-02) — roh, ohne Rundung, damit
+ * `snapshotFromCache` dieselbe 4-Dezimal-Stelle anwendet wie der Direktpfad.
+ *
+ * Bewusst über `bollingerBands(...)` auf dem jeweiligen 20er-Fenster statt über
+ * eigene laufende Summen: Damit ist die Gleitkommareihenfolge **identisch** zum
+ * Direktpfad `buildSnapshotFromCandles` — der Multi-Asset-Backtest liest aus
+ * diesem Cache, der Single-Rule-Backtest rechnet direkt, und beide müssen
+ * denselben Feldwert sehen (`tests/backtest.multiAsset.test.ts`). Je Bar wird
+ * ein festes 20er-Fenster gelesen, also O(n · 20) = O(n) — kein wachsendes
+ * Fenster, kein O(n²) wie vor dem Indikator-Cache (STX-12).
+ */
+function bollingerPositionArrays(closes: number[]): {
+  bbZScore: (number | null)[];
+  priceVsUpperBbPct: (number | null)[];
+  priceVsLowerBbPct: (number | null)[];
+} {
+  const n = closes.length;
+  const bbZScore: (number | null)[] = new Array(n).fill(null);
+  const priceVsUpperBbPct: (number | null)[] = new Array(n).fill(null);
+  const priceVsLowerBbPct: (number | null)[] = new Array(n).fill(null);
+
+  for (let i = BOLLINGER_PERIOD - 1; i < n; i++) {
+    const window = closes.slice(i - BOLLINGER_PERIOD + 1, i + 1);
+    const reading = bollingerBands(window, BOLLINGER_PERIOD, BOLLINGER_MULT);
+    const position = reading ? bollingerPosition(closes[i], reading, BOLLINGER_MULT) : null;
+    if (!position) continue;
+    bbZScore[i] = position.zScore;
+    priceVsUpperBbPct[i] = position.priceVsUpperPct;
+    priceVsLowerBbPct[i] = position.priceVsLowerPct;
+  }
+
+  return { bbZScore, priceVsUpperBbPct, priceVsLowerBbPct };
+}
+
 function macdArray(
   closes: number[],
   fast = 12,
@@ -269,6 +314,7 @@ export function buildIndicatorCache(candles: CandleLike[]): IndicatorCache {
 
   const adx14 = adxArray(candles, 14);
   const bbwRaw = bbwArray(closes, 20, 2);
+  const bollingerPos = bollingerPositionArrays(closes);
   const { macd, signal, hist } = macdArray(closes, 12, 26, 9);
 
   const volumeMa20: (number | null)[] = new Array(n).fill(null);
@@ -291,6 +337,9 @@ export function buildIndicatorCache(candles: CandleLike[]): IndicatorCache {
     atrPct,
     adx14,
     bbwPct: bbwRaw,
+    bbZScore: bollingerPos.bbZScore,
+    priceVsUpperBbPct: bollingerPos.priceVsUpperBbPct,
+    priceVsLowerBbPct: bollingerPos.priceVsLowerBbPct,
     macd,
     macdSignal: signal,
     macdHist: hist,
@@ -362,6 +411,12 @@ export function snapshotFromCache(
   const atrPctVal = cache.atrPct[idx];
   const adxVal = cache.adx14[idx];
   const bbwVal = cache.bbwPct[idx];
+  // STX-02-02: dieselben 4 Dezimalstellen wie `buildSnapshotFromCandles`; die
+  // Rohwerte im Cache sind mit dem Direktpfad bit-identisch (gleiche Funktion,
+  // gleiches Fenster).
+  const bbZVal = cache.bbZScore[idx];
+  const bbUpperDistVal = cache.priceVsUpperBbPct[idx];
+  const bbLowerDistVal = cache.priceVsLowerBbPct[idx];
   const macdVal = cache.macd[idx];
   const macdSigVal = cache.macdSignal[idx];
   const macdHistVal = cache.macdHist[idx];
@@ -378,6 +433,9 @@ export function snapshotFromCache(
     atrPct: atrPctVal != null ? Number((atrPctVal * 100).toFixed(2)) : null,
     adx14: adxVal != null ? Number(adxVal.toFixed(2)) : null,
     bbwPct: bbwVal != null ? Number((bbwVal * 100).toFixed(4)) : null,
+    bbZScore: bbZVal != null ? Number(bbZVal.toFixed(4)) : null,
+    priceVsUpperBbPct: bbUpperDistVal != null ? Number(bbUpperDistVal.toFixed(4)) : null,
+    priceVsLowerBbPct: bbLowerDistVal != null ? Number(bbLowerDistVal.toFixed(4)) : null,
     macd: macdVal != null ? Number(macdVal.toFixed(6)) : null,
     macdSignal: macdSigVal != null ? Number(macdSigVal.toFixed(6)) : null,
     macdHist: macdHistVal != null ? Number(macdHistVal.toFixed(6)) : null,

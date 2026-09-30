@@ -210,6 +210,11 @@ const snap: RuleSnapshot = {
   priceVsEma50Pct: -3.06,
   adx14: 22,
   bbwPct: 4.5,
+  // STX-02-02: Pflichtfelder des Snapshots — ein Regel-Snapshot ohne
+  // Bandposition wäre nicht mehr der Snapshot, den die Engine baut.
+  bbZScore: -1.2,
+  priceVsUpperBbPct: -4.5,
+  priceVsLowerBbPct: 1.3,
   macd: -0.4,
   macdSignal: -0.2,
   macdHist: -0.2,
@@ -937,4 +942,205 @@ test("STX-01 Micro-Executor-Guard: 1d-Regel auf 1m-Ausführungsintervall → kei
   assert.ok(control.orders > 0, "Kontrolle: die 1m-Regel löst auf demselben Feed aus");
   assert.equal(control.counter, 0, "kein Counter, wenn nichts abgewiesen wurde");
   assert.equal(control.logs.length, 0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STX-02-02 — Bollinger-Regelfelder (bbZScore, priceVsUpperBbPct, priceVsLowerBbPct)
+//
+// Rein additiv: `bbwPct` und alle übrigen Felder bleiben unangetastet; die
+// neuen Felder beschreiben die POSITION im Band statt der Breite. Die
+// Parität Direktpfad ↔ Indikator-Cache prüft `tests/backtest.multiAsset.test.ts`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { RULE_FIELD_LABELS, RULE_FIELD_SCHEMA_HINTS } from "../src/lib/ruleFieldCatalog";
+import { bollingerBands, bollingerPosition } from "../src/lib/indicators";
+
+/** Reihe mit ±1 % um 100 — Bandbreite und Lage sind dort beide nichttrivial. */
+function bandCandles(n = 60): CandleLike[] {
+  return makeCandles(n).map((c, i) => {
+    const close = 100 + Math.sin(i / 2.5) * 1.2;
+    return {
+      ...c,
+      open: close * 0.999,
+      high: close * 1.005,
+      low: close * 0.995,
+      close,
+    };
+  });
+}
+
+/** Dieselbe Kerzenreihe, aber alle Schlusskurse identisch (σ == 0). */
+function flatCandles(n = 60, price = 100): CandleLike[] {
+  return makeCandles(n).map((c) => ({ ...c, open: price, high: price, low: price, close: price }));
+}
+
+test("STX-02-02: die drei Felder stehen in RULE_FIELDS, RULE_FIELD_LABELS und im LLM-Schema", () => {
+  for (const field of ["bbZScore", "priceVsUpperBbPct", "priceVsLowerBbPct"] as const) {
+    assert.equal(RULE_FIELDS[field], "number", `RULE_FIELDS.${field}`);
+    assert.ok(RULE_FIELDS[field] === "number" && RULE_FIELD_SCHEMA_HINTS[field], `${field}: LLM-Hinweis`);
+  }
+  // Deutsche Labels mit Einheit im Text (Muster `vwapPct`), keine nackten Feldnamen.
+  assert.match(RULE_FIELD_LABELS.bbZScore, /Standardabweichung/i);
+  assert.match(RULE_FIELD_LABELS.priceVsUpperBbPct, /Prozent/);
+  assert.match(RULE_FIELD_LABELS.priceVsLowerBbPct, /Prozent/);
+
+  const schema = RULE_LLM_SCHEMA as {
+    properties: {
+      condition: {
+        properties: { conditions: { items: { properties: { field: { enum: string[]; description: string } } } } };
+      };
+    };
+  };
+  const fieldProp = schema.properties.condition.properties.conditions.items.properties.field;
+  for (const field of ["bbZScore", "priceVsUpperBbPct", "priceVsLowerBbPct"]) {
+    assert.ok(fieldProp.enum.includes(field), `${field} fehlt im Schema-enum`);
+    assert.ok(fieldProp.description.includes(field), `${field} fehlt in der Schema-Beschreibung`);
+    assert.ok(fieldProp.description.includes(RULE_FIELD_SCHEMA_HINTS[field as "bbZScore"]!), `${field}: Beispielwerte/Einheit`);
+  }
+  // Bestehende Felder unverändert im enum — nichts entfernt, nichts umbenannt.
+  for (const field of ["bbwPct", "rsi14", "vwapPct", "bookDepthUsd"]) {
+    assert.ok(fieldProp.enum.includes(field));
+  }
+});
+
+test("STX-02-02: sanitizeRuleSpec akzeptiert die drei Felder (auch case-insensitiv) und klemmt weiter", () => {
+  const raw = {
+    ...validInput,
+    condition: {
+      logic: "all",
+      conditions: [
+        { field: "BBZSCORE", op: "gt", value: 2 },
+        { field: "priceVsUpperBbPct", op: "gte", value: 0 },
+        { field: "priceVsLowerBbPct", op: "between", value: [-1, 1] },
+      ],
+    },
+    // Ceilings: 999/99/0.99/0.99 sind außerhalb und werden geklemmt.
+    action: { side: "long", stopLossPct: 999, takeProfitRR: 99, riskBudgetPct: 0.99, maxPositionPct: 0.99 },
+  };
+  const r = sanitizeRuleSpec(raw, "RESEARCH");
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.deepEqual(
+    r.spec.condition.conditions.map((c) => [c.field, c.op, c.value]),
+    [
+      ["bbZScore", "gt", 2],
+      ["priceVsUpperBbPct", "gte", 0],
+      ["priceVsLowerBbPct", "between", [-1, 1]],
+    ],
+  );
+  assert.equal(r.spec.action.side, "LONG");
+  assert.deepEqual(
+    [r.spec.action.stopLossPct, r.spec.action.takeProfitRR, r.spec.action.riskBudgetPct, r.spec.action.maxPositionPct],
+    [RULE_CEILINGS.stopLossPct[1], RULE_CEILINGS.takeProfitRR[1], RULE_CEILINGS.riskBudgetPct[1], RULE_CEILINGS.maxPositionPct[1]],
+  );
+});
+
+test("STX-02-02: unbekannte Felder bleiben verworfen — auch die nahen Verwandten", () => {
+  for (const field of ["bbUpper", "bollingerUpper", "bbMiddle", "bbSigma", "priceVsUpperBb"]) {
+    const r = sanitizeRuleSpec({
+      ...validInput,
+      condition: { logic: "all", conditions: [{ field, op: "gt", value: 1 }] },
+    });
+    assert.equal(r.ok, false, `${field} darf nicht durchkommen`);
+    if (!r.ok) assert.ok(r.errors.some((e) => e.includes("unbekanntes Feld")), field);
+  }
+});
+
+test("STX-02-02: buildSnapshotFromCandles füllt die Lage im Band — auf 4 Dezimalstellen wie bbwPct", () => {
+  const candles = bandCandles(60);
+  const price = candles[candles.length - 1].close;
+  const snapshot = buildSnapshotFromCandles("BTC", candles, 20)!;
+  const reading = bollingerBands(candles.map((c) => c.close))!;
+  const expected = bollingerPosition(price, reading)!;
+
+  assert.equal(snapshot.bbZScore, Number(expected.zScore!.toFixed(4)));
+  assert.equal(snapshot.priceVsUpperBbPct, Number(expected.priceVsUpperPct.toFixed(4)));
+  assert.equal(snapshot.priceVsLowerBbPct, Number(expected.priceVsLowerPct.toFixed(4)));
+  // bbwPct bleibt der Breitenwert (unveränderte Semantik) und ist mit dem Band konsistent.
+  assert.ok(Math.abs(snapshot.bbwPct! - Number((reading.bandwidthPct * 100).toFixed(4))) < 1e-9);
+  // Die Kantenabstände liegen typisch ≤ 0 bzw. ≥ 0 — hier nicht an der Kante.
+  assert.ok(snapshot.priceVsUpperBbPct! <= 0 && snapshot.priceVsLowerBbPct! >= 0);
+});
+
+test("STX-02-02: Breakout über die obere Kante ist am Vorzeichen ablesbar", () => {
+  const candles = bandCandles(59);
+  // Ausbruchskerze: Schlusskurs deutlich über der oberen Kante der 20 Vorkerzen.
+  const prior = bollingerBands(candles.map((c) => c.close))!;
+  const breakout = prior.upper * 1.01;
+  const last = candles[candles.length - 1];
+  candles.push({ ...last, time: last.time + 60_000, open: last.close, high: breakout, low: last.close, close: breakout });
+  const snapshot = buildSnapshotFromCandles("BTC", candles, 20)!;
+  assert.equal(typeof snapshot.bbZScore, "number");
+  assert.ok(snapshot.bbZScore! > 2, `zScore ${snapshot.bbZScore} muss über der oberen Kante liegen`);
+  assert.ok(snapshot.priceVsUpperBbPct! > 0, "positiv = über der oberen Kante");
+});
+
+test("STX-02-02: σ == 0 ⇒ bbZScore null (nie 0), Kantenabstände bleiben gemessen", () => {
+  const flat = flatCandles(60);
+  const snapshot = buildSnapshotFromCandles("BTC", flat, 20)!;
+  assert.equal(snapshot.bbZScore, null, "flache Reihe: keine Lage im Band");
+  assert.notEqual(snapshot.bbZScore, 0);
+  assert.equal(snapshot.bbwPct, 0, "die Breite bleibt eine echte 0");
+  assert.equal(snapshot.priceVsUpperBbPct, 0);
+  assert.equal(snapshot.priceVsLowerBbPct, 0);
+});
+
+test("STX-02-02: middle <= 0 ⇒ alle drei Felder null (kein Band, keine Division)", () => {
+  const negative = makeCandles(60).map((c) => ({ ...c, open: -5, high: -4, low: -6, close: -5 }));
+  const snapshot = buildSnapshotFromCandles("BTC", negative, 20)!;
+  assert.equal(snapshot.bbwPct, null);
+  assert.equal(snapshot.bbZScore, null);
+  assert.equal(snapshot.priceVsUpperBbPct, null);
+  assert.equal(snapshot.priceVsLowerBbPct, null);
+});
+
+test("STX-02-02: zu wenig Historie ⇒ kein Snapshot (und damit keine erfundenen Bandwerte)", () => {
+  assert.equal(buildSnapshotFromCandles("BTC", bandCandles(24), 20), null);
+  assert.equal(buildSnapshotFromCandles("BTC", bandCandles(19), 20), null, "unter der Bollinger-Periode");
+  // Ab 25 Kerzen gibt es den Snapshot und damit auch die Bandlage.
+  const from25 = buildSnapshotFromCandles("BTC", bandCandles(25), 20)!;
+  assert.equal(typeof from25.bbZScore, "number");
+  assert.equal(typeof from25.priceVsUpperBbPct, "number");
+});
+
+test("STX-02-02: null blockiert die Bedingung fail-closed — eine 0 wäre eine erfundene Lage", () => {
+  for (const [field, op, value] of [
+    ["bbZScore", "gt", 0],
+    ["priceVsUpperBbPct", "gte", 0],
+    ["priceVsLowerBbPct", "lte", 0],
+  ] as const) {
+    const rule = sanitizeRuleSpec({
+      ...validInput,
+      condition: { logic: "all", conditions: [{ field, op, value }] },
+    });
+    assert.equal(rule.ok, true, field);
+    if (!rule.ok) return;
+    const compiled = compileRuleSpec(rule.spec);
+    // Flache Reihe: `bbZScore` ist null (blockiert), die Kantenabstände sind
+    // echte 0-Messwerte (feuern) — genau die im Feldkatalog dokumentierte Grenze.
+    const flat = buildSnapshotFromCandles("BTC", flatCandles(60), 20)!;
+    assert.equal(compiled.evaluate(flat), field !== "bbZScore", `${field} auf flacher Reihe`);
+  }
+});
+
+test("STX-02-02: Kompilierung liest die neuen Felder aus dem Snapshot (Accessor vorhanden)", () => {
+  const rule = sanitizeRuleSpec({
+    ...validInput,
+    condition: {
+      logic: "all",
+      conditions: [
+        { field: "bbZScore", op: "between", value: [-2, 0] },
+        { field: "priceVsUpperBbPct", op: "lt", value: 0 },
+        { field: "priceVsLowerBbPct", op: "gt", value: 0 },
+      ],
+    },
+  });
+  assert.equal(rule.ok, true);
+  if (!rule.ok) return;
+  const compiled = compileRuleSpec(rule.spec);
+  assert.equal(compiled.evaluate(snap), true, "snap-Fixture liegt innerhalb der Schwellen");
+  assert.equal(compiled.evaluate({ ...snap, bbZScore: null }), false);
+  assert.equal(compiled.evaluate({ ...snap, priceVsUpperBbPct: null }), false);
+  assert.equal(compiled.evaluate({ ...snap, priceVsLowerBbPct: null }), false);
+  assert.equal(compiled.evaluate({ ...snap, bbZScore: 0.5 }), false, "über der Obergrenze des between");
 });

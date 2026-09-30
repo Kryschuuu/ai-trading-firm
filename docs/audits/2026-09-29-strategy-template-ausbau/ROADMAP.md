@@ -96,12 +96,12 @@ Feld-Tabelle je Timeframe: [`BACKTESTING.md` §1.1](../../BACKTESTING.md#11-rule
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
 | 02-01 | [Bollinger-Bänder + Donchian](prompts/PROMPT-STX-02-01-indikatoren.md) | ✅ 2 pure Funktionen in `indicators.ts` (`v0.6.3`), BBW-Parität und Lookahead-Test | 00-03 |
-| 02-02 | [Bollinger-Regelfelder](prompts/PROMPT-STX-02-02-bollinger-felder.md) | `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` | 02-01, 01-01 |
+| 02-02 | [Bollinger-Regelfelder](prompts/PROMPT-STX-02-02-bollinger-felder.md) | ✅ `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` in Snapshot + Cache (`v0.6.4`), Paritätstest und Golden-Hash | 02-01, 01-01 |
 | 02-03 | [Donchian-Regelfeld](prompts/PROMPT-STX-02-03-donchian-feld.md) | `donchianBreakoutPct` | 02-01, 01-01 |
 | 02-04 | *optional* [Feature-Store-Slice `rule.*`](prompts/PROMPT-STX-02-04-featurestore-rule-slice.md) | PIT-Materialisierung + Parität | 02-02, 02-03 |
 
-**Stand 2026-09-30:** 02-01 abgeschlossen; 02-02/02-03 (Rule-Felder und Cache)
-stehen noch aus. Donchian-Template 03-08 muss mindestens `1h` erlauben, nicht
+**Stand 2026-09-30:** 02-01 und 02-02 abgeschlossen (Formeln + Bollinger-Regelfelder in
+Snapshot und Cache, Parität getestet); 02-03 (Donchian-Regelfeld) steht noch aus. Donchian-Template 03-08 muss mindestens `1h` erlauben, nicht
 niedrigere Timeframes (geplant: `1h`, `4h`).
 
 **Reihenfolge-Logik:** 02-01 ist die Voraussetzung für 02-02 **und** 02-03. Ohne
@@ -111,6 +111,9 @@ referenzierbar. 02-04 ist **optional** und blockiert nichts (STX-10).
 **Achtung Parität:** Jede neue Formel muss **zwei** Implementierungen deckungsgleich halten —
 `buildSnapshotFromCandles` (`ruleEngine.ts`) und `buildIndicatorCache`
 (`src/backtest/indicatorCache.ts`). Der Cache ist **nicht** automatisch mitgepflegt.
+02-02 setzt das um: `tests/backtest.multiAsset.test.ts` vergleicht die drei Bollinger-Felder
+Bar für Bar über drei Symbole und hält über einen Golden-Hash fest, dass Läufe ohne
+Bollinger-Feld byte-identisch bleiben.
 
 ---
 

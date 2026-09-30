@@ -1730,6 +1730,11 @@ der Regel.
 Store-ID, Bedingung und Risiko eintragen, dann **als Entwurf speichern und
 messen**. `activate` wird nicht gesendet. „Erneut messen“ benutzt dieselbe
 Regel-ID. Die Aktivierung bleibt der administrative Weg aus Kapitel 17.
+Das Bedingungs-Dropdown listet genau die Felder aus `src/lib/ruleFieldCatalog.ts`
+— seit `v0.6.4` auch die Bollinger-Lage (`bbZScore`,
+`priceVsUpperBbPct`, `priceVsLowerBbPct`; Einheiten, `null`-Fälle und der
+Beispiel-Workflow „Squeeze → Breakout“ in
+[BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)).
 
 ```bash
 RULE=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm/rules | jq -r '.rules[0].id')

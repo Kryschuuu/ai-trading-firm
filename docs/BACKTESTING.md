@@ -114,6 +114,70 @@ Die übrigen Felder sind auf jedem Timeframe definiert; was sich mit dem Timefra
 | `volume`, `volumeMa20`, `volumeRatio` | Mittel über `window.volumeWindow` **Kerzen** (5…200, geklemmt wie auf jedem Timeframe); die Spalte „`volumeWindow` ≙“ oben rechnet das in Zeit um. Auf `1d` sind 5 Kerzen eine Woche und 200 Kerzen das klassische 200-Tage-Fenster — `RULE_CEILINGS.volumeWindow` bleibt deshalb unverändert. Hat die Serie weniger Kerzen als das Fenster, mittelt der Snapshot über die vorhandenen. |
 | `changePct24h` | Basis ist die Kerze 97 Positionen vor dem Serienende, also 96 Perioden zurück — **kein 24-h-Wert** außer auf `15m` (STX-14; bewusst nicht umgerechnet, das würde bestehende Regeln still umwerten) |
 | `spreadPct`, `bookDepthUsd` | Liquiditätsgrößen des Instruments bzw. des Live-Orderbuchs, vom Regel-Timeframe unabhängig; `null` ohne belastbares Buch blockiert die Bedingung |
+| `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` | Lage im selben 20/2σ-Band wie `bbwPct` (STX-02-02, `v0.6.4`); `null` ohne Band (`middle <= 0`), `bbZScore` zusätzlich bei σ == 0 — Details in [§1.2](#12-bollinger-bandlage-stx-02-02-v064) |
+
+### 1.2 Bollinger-Bandlage (STX-02-02, `v0.6.4`)
+
+`bbwPct` misst die **Breite** des Bands, nicht die **Lage** des Kurses darin. Drei
+Felder schließen diese Lücke; alle sind relativ (Prozent bzw. σ-Einheiten) und
+damit über Instrumente mit verschiedenen Kursniveaus vergleichbar — der Dialekt
+bleibt „Messwert gegen Schwelle“:
+
+| Feld | Formel | Einheit | Typische Werte |
+| --- | --- | --- | --- |
+| `bbZScore` | `(close − middle) / σ` | Standardabweichungen (dimensionslos) | −3 … +3; 0 = Bandmitte, ±2 = Bandkante |
+| `priceVsUpperBbPct` | `(close − upper) / close · 100` | Prozent des Kurses | ≤ 0; **> 0 = Ausbruch über die obere Kante** |
+| `priceVsLowerBbPct` | `(close − lower) / close · 100` | Prozent des Kurses | ≥ 0; **< 0 = Ausbruch unter die untere Kante** |
+
+Bandparameter sind fest **20 Schlusskurse, 2 σ** (Population) — dieselben Werte,
+die `bbwPct` benutzt (`BOLLINGER_PERIOD`/`BOLLINGER_MULT` in
+`src/lib/indicators.ts`). Periode und Multiplikator sind **kein** Regelfeld: Der
+Snapshot definiert das Band, damit `bbZScore` in jedem Template dasselbe bedeutet.
+
+**`null` ist ein Messwert-Ausfall, keine 0** (fail-closed, blockiert die Bedingung):
+
+- weniger als 20 Schlusskurse — praktisch kein Snapshot (Snapshots brauchen ≥ 25 Kerzen),
+- `middle <= 0` — kein sinnvolles Band (z. B. Serie mit nicht-positiven Kursen),
+- **σ == 0 nur bei `bbZScore`**: Eine flache Kerzenreihe hat keine Lage *im* Band; 0 wäre eine
+  erfundene Neutralität. Die Kantenabstände bleiben dort echte 0-Werte (der Kurs liegt genau
+  auf der Kante) — sie nehmen keinen Bezug auf σ.
+
+Beide Ausführungspfade liefern dieselben Zahlen: `buildSnapshotFromCandles`
+(Quick-Check `backtestRule`, Mikro-Executor) und `snapshotFromCache`
+(Multi-Asset-Backtest, Walk-Forward). Ein Paritätstest vergleicht die Felder Bar für Bar
+(`tests/backtest.multiAsset.test.ts`); ein Golden-Hash beweist, dass Läufe **ohne**
+Bollinger-Feld byte-identisch zu `v0.6.3` bleiben.
+
+**Beispiel-Workflow „Squeeze → Breakout“.** Klassisch: enges Band (Squeeze), dann
+schließt der Kurs über der oberen Kante. Der Regeldialekt ist zustandslos — beide
+Bedingungen werden auf **derselben** geschlossenen Kerze gemessen (keine Sequenz,
+bewusst; siehe ROADMAP „Abgelehnt“):
+
+```json
+{
+  "name": "Squeeze-Breakout (Bollinger 20/2σ)",
+  "symbol": "BTC/USDT",
+  "condition": {
+    "logic": "all",
+    "conditions": [
+      { "field": "bbwPct", "op": "lt", "value": 5 },
+      { "field": "priceVsUpperBbPct", "op": "gt", "value": 0 }
+    ]
+  },
+  "action": { "side": "LONG", "stopLossPct": 3, "takeProfitRR": 2, "riskBudgetPct": 0.02, "maxPositionPct": 0.25 },
+  "window": { "timeframe": "1h", "maxExecutionsPerDay": 3, "cooldownMinutes": 60, "volumeWindow": 20 }
+}
+```
+
+Praktischer Hinweis aus der Messung: Der Ausbruch selbst **weitet** das Band, weil er
+in die 20er-Rechnung eingeht. In einer Beispielreihe (enge Range um 100, ein Sprung von
++3,5 %) liegt `bbwPct` vorher bei 0,31 % und an der Ausbruchskerze bei 3,18 %
+(`bbZScore` 4,34; `priceVsUpperBbPct` +1,80 %). Eine Schwelle wie `bbwPct lt 3` wäre
+also genau an der Ausbruchskerze verfehlt — die Squeeze-Schwelle muss den Ausbruch
+mitdenken (z. B. `lt 5`) oder ausschließlich `bbZScore`/`priceVsUpperBbPct` nutzen
+(`bbZScore gt 2` ist der Breakout bereits eingebaut). Wer eine echte
+„Squeeze, *danach* Ausbruch“-Sequenz braucht, findet sie heute **nicht** in der
+Regel-DSL; das ist eine bewusste Grenze (kein Trigger-/Sequenz-Ausbau).
 
 ---
 

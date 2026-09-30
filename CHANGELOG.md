@@ -21,13 +21,79 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.3** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.4** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: 02-02 (Bollinger-Regelfelder, `v0.6.4`) und
-> 02-03 (Donchian-Regelfeld, `v0.6.5`).
+> **Status: Beta.** Nächste Schritte: 02-03 (Donchian-Regelfeld, `v0.6.5`) und
+> der Template-Vertrag ab 03-01 (`v0.7.0`).
+
+## [0.6.4] — Bollinger-Regelfelder (STX-02-02) (2026-09-30)
+
+> **Status: Beta, nicht produktionsreif.** Additive Regel-Felder und ein additiv
+> gepflegter Indikator-Cache; **keine** Migration, keine Änderung an bestehenden
+> Feldern, Labels oder Werten, kein neues Verhalten ohne Bollinger-Feld.
+
+### Added
+
+* **Drei neue Regel-Felder** (`src/lib/ruleFieldCatalog.ts`, `src/lib/ruleEngine.ts`),
+  alle marktneutral und damit über Kursniveaus hinweg vergleichbar:
+  * `bbZScore` = `(close − middle) / σ` — Lage zur Bandmitte in
+    Standardabweichungen (0 = Mitte, ±2 = Kante, typisch ±3).
+  * `priceVsUpperBbPct` = `(close − upper) / close · 100` — Abstand zur oberen
+    Kante in Prozent des Kurses; `> 0` ist der Ausbruch über die Kante.
+  * `priceVsLowerBbPct` = `(close − lower) / close · 100` — Abstand zur unteren
+    Kante; `< 0` ist der Ausbruch darunter.
+  Bandparameter sind fest 20 Schlusskurse / 2 σ (Population), identisch zu `bbwPct`
+  (`BOLLINGER_PERIOD`/`BOLLINGER_MULT`) — die Periode bleibt Snapshot-Definition,
+  kein Regelfeld. Deutsche Labels mit Einheit im Text; `RULE_FIELD_SCHEMA_HINTS`
+  liefert Einheiten und typische Werte für die `field`-Beschreibung im
+  `RULE_LLM_SCHEMA` (Enum weiterhin `Object.keys(RULE_FIELDS)`).
+* **`bollingerPosition(close, reading, mult)`** in `src/lib/indicators.ts`: die drei
+  Werte an genau einer Stelle. σ wird aus der Bandgeometrie gelesen
+  (`upper = middle + mult·σ`) statt zweimal aus der Varianz gerechnet.
+* **`buildSnapshotFromCandles`** befüllt die Felder aus `bollingerBands(closes)`,
+  gerundet auf die 4. Dezimalstelle wie `bbwPct`.
+* **`indicatorCache`** wächst rein additiv um `bbZScore`, `priceVsUpperBbPct` und
+  `priceVsLowerBbPct`: `bollingerPositionArrays()` rechnet sie in O(n) vor
+  (festes 20er-Fenster je Bar), `snapshotFromCache` rundet wie der Direktpfad.
+  Gemessen: +17 ms für 17 520 Stundenkerzen — der Cache bleibt linear.
+
+### Fixed
+
+* **STX-02-02 / STX-18 (Bollinger-Teil):** „Preis bricht die obere Bandkante“ ist
+  regelformulierbar, ohne absolute Preise zu vergleichen. Vorher gab es nur
+  `bbwPct` (Bandbreite) — die Lage im Band existierte im Regel-Vokabular nicht.
+  Die Multi-Asset-Engine (liest aus dem Indikator-Cache) und der Single-Rule-Pfad
+  (`buildSnapshotFromCandles`) liefern jetzt **identische** Feldwerte; vorher wäre
+  ein nur im Direktpfad gepflegtes Feld im Portfolio-Backtest `null`/`undefined`
+  gewesen.
+
+### Documentation
+
+* `docs/BACKTESTING.md` §1.2: Einheiten, `null`-Fälle und der Beispiel-Workflow
+  **„Squeeze → Breakout“** inklusive der gemessenen Grenze, dass der Ausbruch das
+  Band selbst weiter aufzieht (Squeeze-Schwelle mitdenken) und dass der
+  Regel-Dialekt bewusst zustandslos bleibt (keine Sequenzen).
+* `docs/ARCHITECTURE.md` §2.2 (Feld-Whitelist), `docs/MISSIONS.md` §4
+  (Workshop-Dropdown + Beispielregel), `docs/architecture/STRATEGY_STACK.md`
+  (Ist-Zustand) und die Audit-Doku auf 02-02 nachgezogen.
+
+### Tests
+
+* **Paritätstest** in `tests/backtest.multiAsset.test.ts`: Bar-für-Bar-Vergleich
+  der drei Felder zwischen `buildSnapshotFromCandles` und `snapshotFromCache` über
+  drei Symbole; eine `bbZScore`-Regel liefert über `backtestRule` und
+  `runMultiAssetBacktest` dieselben Signal-Kerzen (18/18 Einstiege identisch).
+* **Byte-Identität**: Golden-Hash (FNV-1a, 22 415 Zeichen) eines
+  Multi-Asset-Laufs **ohne** Bollinger-Feld — unverändert gegenüber `v0.6.3`.
+* **`null`-Fälle** in `tests/ruleEngine.test.ts` (zu wenig Kerzen, flache Reihe
+  σ == 0, nicht-positive Mitte), Whitelist (unbekannte Felder wie `bbUpper`
+  fliegen weiter), `sanitizeRuleSpec`-Akzeptanz + `RULE_CEILINGS`-Klemmung und
+  Formel-/Geometrietests in `tests/indicators.test.ts`. Kein bestehender Test
+  wurde angepasst, um grün zu werden; nur Snapshot-Fixtures wuchsen um die drei
+  Pflichtfelder.
 
 ## [0.6.3] — Indikator-Grundlage (STX-02-01) (2026-09-30)
 

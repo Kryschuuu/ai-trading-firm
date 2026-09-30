@@ -156,6 +156,7 @@ const matchingSnap = {
   priceVsEma50Pct: -3,
   adx14: null,
   bbwPct: null,
+  bbZScore: null, priceVsUpperBbPct: null, priceVsLowerBbPct: null,
   macd: null,
   macdSignal: null,
   macdHist: null,
