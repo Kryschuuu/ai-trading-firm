@@ -48,12 +48,15 @@
  * Validator, der alles ablehnt, wäre genauso wertlos wie einer, der alles
  * durchlässt.
  *
- * ── Keine Templates hier ───────────────────────────────────────────────────
- * `STRATEGY_TEMPLATES` ist an dieser Stelle **leer**; die sechs Templates
- * (`ema-adx-trend` … `donchian-breakout`) kommen in 03-03 … 03-08. Die IDs
- * stehen aber schon jetzt als geschlossene Union fest — `getTemplate()` nimmt
- * ausschließlich sie an, damit ein Tippfehler nicht auf einen stillen Default
- * läuft.
+ * ── Die Registry, nicht die Templates ──────────────────────────────────────
+ * `STRATEGY_TEMPLATES` führt **eine Zeile pro Template-Datei** aus
+ * `src/strategies/templates/` — keine Template-Logik in dieser Datei. Seit
+ * 03-03 ist das erste eingetragen (`ema-adx-trend`), die übrigen fünf folgen in
+ * 03-04 … 03-08. Die IDs stehen seit 03-02 als geschlossene Union fest —
+ * `getTemplate()` nimmt ausschließlich sie an, damit ein Tippfehler nicht auf
+ * einen stillen Default läuft. Welche Datei eingetragen ist, prüft
+ * `tests/strategies.catalog.test.ts` gegen das Verzeichnis: eine fehlende oder
+ * eine doppelte Registrierung ist ein Testfehler, keine mündliche Absprache.
  *
  * ── Hinweis für spätere Client-Bundles ─────────────────────────────────────
  * Der Katalog liest `RULE_CEILINGS` aus `src/lib/ruleEngine.ts` — der einzigen
@@ -73,6 +76,8 @@ import { MARKET_REGIME_SEVERITY } from "@/lib/marketRegime";
 import { STRATEGY_CLASS_KEYS } from "@/lib/signalDecay";
 import { SUPPORTED_TIMEFRAMES } from "@/lib/marketdata/timeframes";
 
+import { buildEmaAdxTrend } from "./templates/ema-adx-trend";
+
 import type { StrategyTemplate } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,7 +89,8 @@ import type { StrategyTemplate } from "./types";
  *
  * Reihenfolge = Roadmap-Reihenfolge (03-03 … 03-08). Die Union ist
  * **geschlossen**: Ein siebter Eintrag ist ein neuer Prompt, keine stille
- * Ergänzung dieser Datei.
+ * Ergänzung dieser Datei. Seit 03-03 ist die erste ID nicht mehr nur geplant,
+ * sondern eingetragen — `STRATEGY_TEMPLATES` führt sie, validiert beim Import.
  */
 export const STRATEGY_TEMPLATE_IDS = [
   "ema-adx-trend",
@@ -490,13 +496,22 @@ function collectCeilingViolations(value: unknown, path: string, out: string[]): 
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Der Katalog. **Bewusst leer** in 03-02: Die sechs Templates kommen in
- * 03-03 … 03-08 und tragen dort ihre Klasse aus der ADR-008-Tabelle.
+ * Der Katalog: **eine Zeile pro Template-Datei** unter
+ * `src/strategies/templates/`. Bewusst leer in 03-02, seit 03-03 mit dem
+ * ersten Eintrag; die übrigen fünf Templates folgen in 03-04 … 03-08 und
+ * tragen dort ihre Klasse aus der ADR-008-Tabelle.
+ *
+ * Die Einträge sind hier **Konstruktionen, keine Literale**: Jede Datei liefert
+ * ein `build<Name>()`, das das Artefakt frisch zusammensetzt. Ein Export des
+ * fertigen Objekts statt einer Factory würde einen modulweiten, mutierbaren
+ * Zustand teilen — dieser Katalog wird validiert, verglichen und später
+ * gehasht (04-01), und eine versehentliche Mutation durch einen Konsumenten
+ * wäre ein Drift, den keine Prüfung mehr sieht.
  *
  * Jeder Eintrag durchläuft beim Import `validateTemplate()`; ein ungültiger
  * Eintrag lässt den Prozess nicht starten (`assertTemplatesValid()`).
  */
-export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [];
+export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [buildEmaAdxTrend()];
 
 /** ID → Template. Unbekannte IDs liefern `null` — nie einen stillen Default. */
 const TEMPLATE_MAP: ReadonlyMap<string, StrategyTemplate> = new Map(
@@ -507,7 +522,11 @@ const TEMPLATE_MAP: ReadonlyMap<string, StrategyTemplate> = new Map(
 // 6) Lese-Helfer (Workshop-UI, CLI, Tests)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Liefert ein Template oder `null` (unbekannte IDs werden nie erfunden). */
+/**
+ * Liefert ein Template oder `null` — unbekannte IDs werden nie erfunden und
+ * geplante, aber noch nicht gebaute (03-04 … 03-08) ebenso wenig: `null` ist
+ * hier „gibt es noch nicht“, niemals ein Default.
+ */
 export function getTemplate(id: StrategyTemplateId): StrategyTemplate | null {
   return TEMPLATE_MAP.get(id) ?? null;
 }
@@ -715,8 +734,8 @@ const __fixtures = {
  * Import-Zeit-Canary: Der Validator muss beide Fixtures richtig einordnen.
  *
  * Ohne diese Prüfung könnte `validateTemplate()` unbemerkt fail-open werden
- * (z. B. durch einen Tippfehler in einer Bedingung) — und der leere Katalog
- * würde weiterhin als „gültig" dastehen. Canary 1 verlangt, dass der
+ * (z. B. durch einen Tippfehler in einer Bedingung) — und ein kaputtes Template
+ * würde weiterhin als „gültig“ dastehen. Canary 1 verlangt, dass der
  * Negativfall beanstandet wird; Canary 2, dass die gültige Fixture
  * durchkommt. Beide würfen beim Import, nicht erst im Test.
  */

@@ -9,8 +9,11 @@
  * (ein zweiter Fehler würde bedeuten, dass die Prüfung unscharf ist).
  *
  * Was hier NICHT getestet wird: die sechs konkreten Templates (03-03 … 03-08)
- * und der Compiler inkl. `sanitizeRuleSpec()` (03-09). Der Katalog sanitized
- * nichts — er prüft nur, dass ein Builder innerhalb der Guardrails bleibt.
+ * und der Compiler inkl. `sanitizeRuleSpec()` (03-09). Jedes Template prüft
+ * sich in einer eigenen Datei (`tests/strategies.emaAdxTrend.test.ts` seit
+ * 03-03); hier geht es um die **Registry**: Was ist eingetragen, was nicht, und
+ * hält der Katalog seine eigenen Versprechen? Der Katalog sanitized nichts — er
+ * prüft nur, dass ein Builder innerhalb der Guardrails bleibt.
  *
  * Hinweis zur Testbasis: `baseTemplate()` unten ist eine eigene, minimal
  * gültige Fassung. Der Katalog hält seine Fixtures absichtlich **nicht**
@@ -19,7 +22,7 @@
  */
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -169,26 +172,66 @@ describe("STRATEGY_TEMPLATE_IDs — geschlossene Union der geplanten Templates",
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2) Katalog ist leer — Templates kommen in 03-03 … 03-08
+// 2) Registry-Zustand: eine Zeile pro Template-Datei (03-03 … 03-08)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("Katalog: leer, aber vollständig abfragbar", () => {
-  test("STRATEGY_TEMPLATES und listTemplates() sind leer (kein Template in 03-02)", () => {
-    assert.equal(STRATEGY_TEMPLATES.length, 0);
-    assert.deepEqual([...listTemplates()], []);
+/**
+ * Die Template-Dateien des Bestands — Dateinamen ohne Endung, sortiert.
+ *
+ * Das ist die **Unabhängigkeitsquelle** der Registry-Prüfung: Der Katalog sagt,
+ * was registriert ist; das Verzeichnis sagt, was existiert. Decken sich die
+ * Listen nicht, fehlt eine Registrierung (Template gebaut, aber nie gültig) oder
+ * steht ein Eintrag ohne Datei im Katalog. Beides wäre ein Drift, den keine
+ * andere Prüfung sieht — und weil die Prüfung die Liste vergleicht statt ihre
+ * Länge, bleibt sie für 03-04 … 03-08 gültig, ohne dass dieser Test mitgezogen
+ * werden muss.
+ */
+function templateFileIds(): string[] {
+  const dir = path.join(ROOT, "src/strategies/templates");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((entry) => entry.endsWith(".ts"))
+    .map((entry) => entry.slice(0, -3))
+    .sort();
+}
+
+describe("Katalog: eine Zeile pro Template-Datei, vollständig abfragbar", () => {
+  test("registrierte IDs = Template-Dateien (keine fehlende, keine erfundene)", () => {
+    const ids = STRATEGY_TEMPLATES.map((t) => t.id);
+    assert.deepEqual([...ids].sort(), templateFileIds());
+    assert.equal(new Set(ids).size, ids.length, "Katalog-IDs sind eindeutig");
+    for (const id of ids) assert.ok((STRATEGY_TEMPLATE_IDS as readonly string[]).includes(id), `${id} ist nicht geplant`);
   });
 
-  test("getTemplate liefert für jede geplante ID null — nie einen Default", () => {
-    for (const id of STRATEGY_TEMPLATE_IDS) assert.equal(getTemplate(id), null, id);
+  test("getTemplate liefert für jede geplante, aber ungebaute ID null — nie einen Default", () => {
+    const built = new Set(templateFileIds());
+    assert.ok(built.size > 0, "seit 03-03 steht mindestens ein Template im Katalog");
+    // Eine Zeile pro geplanter ID: gebaut ⇒ das Template, ungebaut ⇒ `null`.
+    // Beides in einem Durchlauf, damit eine neu gebaute Datei nicht einfach
+    // unter „nicht gebaut" durchrutscht.
+    for (const id of STRATEGY_TEMPLATE_IDS) {
+      if (built.has(id)) assert.equal(getTemplate(id)?.id, id, `${id} ist gebaut, aber nicht abfragbar`);
+      else assert.equal(getTemplate(id), null, `${id} ist nicht gebaut — getTemplate darf nichts erfinden`);
+    }
   });
 
   test("listTemplates() gibt genau den Katalog zurück (eine SSoT, keine Kopie)", () => {
     assert.equal(listTemplates(), STRATEGY_TEMPLATES);
   });
 
-  test("templateByField akzeptiert jedes Regel-Feld und liefert solange []", () => {
+  test("templateByField filtert das Katalogvokabular — kein Index, keine zweite Liste", () => {
     for (const field of Object.keys(RULE_FIELDS) as RuleField[]) {
-      assert.deepEqual([...templateByField(field)], [], `${field}`);
+      assert.deepEqual(
+        templateByField(field).map((t) => t.id),
+        STRATEGY_TEMPLATES.filter((t) => t.requiredFields.includes(field)).map((t) => t.id),
+        field,
+      );
+    }
+  });
+
+  test("jeder Katalogeintrag ist beim Import validiert (leere Fehlerliste)", () => {
+    for (const template of listTemplates()) {
+      assert.deepEqual(validateTemplate(template), [], template.id);
     }
   });
 });
@@ -582,7 +625,7 @@ describe("RULE_CEILINGS: der Katalog liest die lebenden Deckel", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("assertTemplatesValid — wirft beim Negativ-Template", () => {
-  test("wirft nicht für den leeren Katalog (03-02 liefert keine Templates)", () => {
+  test("wirft nicht für den aktuellen Katalog (und nicht für eine leere Liste)", () => {
     assert.doesNotThrow(() => assertTemplatesValid());
     assert.doesNotThrow(() => assertTemplatesValid([]));
   });
@@ -688,6 +731,8 @@ describe("assertTemplatesValid — wirft beim Negativ-Template", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 7) Modul-Struktur — Import-Zeit-Canary und gesperrte Pfade
 // ─────────────────────────────────────────────────────────────────────────────
+
+const ROOT = process.cwd();
 
 const CATALOG_SOURCE = readFileSync(
   path.join(process.cwd(), "src/strategies/catalog.ts"),
