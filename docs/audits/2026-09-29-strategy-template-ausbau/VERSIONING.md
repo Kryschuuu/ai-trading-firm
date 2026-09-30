@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.2` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.3` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 begonnen (02-01 `v0.6.3`) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -32,6 +32,7 @@
 | `v1.1.0` | 2026-09-29 | 00-01 gemessen (`v0.6.0`, [BENCH-BASELINE](remediation/BENCH-BASELINE.md)); Release-Plan verzahnt: `v0.6.0` = Benchmark, `v0.6.1` = SSoT + ADRs, 0.6.x-Folge nachgezogen; STX-12 auf „Patch mit Paritätstest“ herabgestuft |
 | `v1.1.1` | 2026-09-29 | 00-02/00-03 umgesetzt (`v0.6.1`): ADR-008…010, Gate G0 erfüllt; STX-04/15 behoben, STX-02/03/10/11 in Arbeit; Präzisierungen an STX-01…04 (Findings, Prompts, `report.md`); Severity-Tabelle im Audit-README korrigiert |
 | `v1.1.2` | 2026-09-29 | 01-01 umgesetzt (`v0.6.2`): STX-01 behoben, Gate G1 erfüllt; Befundkorrekturen an STX-01 (`sessionVwap` war auf `1d` bereits fail-closed; `sanitizeRuleSpec` fällt auf `15m` statt zu „verwerfen“ und kleinschreibt `"1H"`); OP-1 mit Default beantwortet |
+| `v1.1.3` | 2026-09-30 | 02-01 umgesetzt (`v0.6.3`): reine Bollinger-/Donchian-Formeln, Rule-Felder/Cache weiter offen; kein Finding geschlossen |
 
 ## 2. Release-Plan der Roadmap
 
@@ -44,7 +45,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.6.0` | **Backtest-Performance-Baseline** (00-01) + Audit-Doku aus PR #180 | 00-01 | Doku + Mess-Skript | **Beta** |
 | `v0.6.1` | Strategie-Stack-SSoT + 3 ADRs (ausgeliefert 2026-09-29) | 00-02, 00-03 | Doku (+ lesender ADR-Test) | **Beta** |
 | `v0.6.2` | **Timeframe-Angleichung** (STX-01, ausgeliefert 2026-09-29) | 01-01 | Minor (neue Felder im Vokabular) | **Beta** |
-| `v0.6.3` | Indikatoren: `bollingerBands`, `donchianChannel` | 02-01 | Minor (additive pure Funktionen) | **Beta** |
+| `v0.6.3` | Indikatoren: `bollingerBands`, `donchianChannel` (ausgeliefert 2026-09-30) | 02-01 | Minor (additive pure Funktionen) | **Beta** |
 | `v0.6.4` | Bollinger-Regelfelder + Parität | 02-02 | Minor (3 Felder) | **Beta** |
 | `v0.6.5` | Donchian-Regelfeld + Parität | 02-03 | Minor (1 Feld) | **Beta** |
 | `v0.7.0` | **Template-Vertrag** (`types.ts`, Katalog, Validierung) | 03-01, 03-02 | Minor (neue Domäne) | **Beta** |

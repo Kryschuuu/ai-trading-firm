@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.2` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); `v1.1.2` = Phase 1 abgeschlossen: 01-01, STX-01 behoben, Gate G1; davor `v1.1.1` = Phase 0: 00-02/00-03, ADR-008…010, Gate G0)
+- **Audit-Version:** `v1.1.3` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); 02-01 abgeschlossen, Phase 2 noch offen; Gate G1 seit `v1.1.2`)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.6.2 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); als Nächstes Phase 2 (02-01)
+- **Code-Version:** `package.json` v0.6.3 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
+- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 begonnen: 02-01 (`v0.6.3`, Formeln) abgeschlossen, 02-02/02-03 (Rule-Felder) offen
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -88,7 +88,9 @@ Siehe [`ROADMAP.md`](ROADMAP.md) (8 Phasen, 32 Prompts),
 [`VERSIONING.md`](VERSIONING.md) (Release-Plan `v0.6.0` … `v0.11.2`, alle Beta) und
 [`remediation/TRACKING.md`](remediation/TRACKING.md).
 
-**Umsetzungsstand:** Phase 1 ist abgeschlossen (Gate **G1** erfüllt, `v0.6.2`): 01-01 hob den Timeframe-Blocker —
+**Umsetzungsstand:** 02-01 (`v0.6.3`) liefert nun reine Bandlevel und den
+Donchian-Kanal ohne Signalkerze; Rule-Felder und Cache folgen erst in 02-02/02-03.
+Phase 1 ist abgeschlossen (Gate **G1** erfüllt, `v0.6.2`): 01-01 hob den Timeframe-Blocker —
 `RuleWindow.timeframe` trägt alle zehn `SUPPORTED_TIMEFRAMES` (ein Vokabular, `1m…1h` byte-identisch), der
 Mikro-Executor weist längere Timeframes fail-closed und sichtbar ab ([STX-01](findings/STX-01-rule-timeframe-blocker.md),
 Tabelle „Rule-Timeframe ↔ unterstützte Felder“ in [`BACKTESTING.md`](../../BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062)). Phase 0 ist abgeschlossen (Gate **G0** erfüllt, `v0.6.1`): 00-02 lieferte die

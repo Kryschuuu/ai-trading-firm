@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-09-29 · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
+- **Stand:** 2026-09-30 · 02-01 (`v0.6.3`) abgeschlossen, 02-02/02-03 offen · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 ## Legende
 
@@ -54,7 +54,7 @@
 
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
-| 02-01 | [Bollinger-Bänder + Donchian](../prompts/PROMPT-STX-02-01-indikatoren.md) | ☐ | STX-18 | — |
+| 02-01 | [Bollinger-Bänder + Donchian](../prompts/PROMPT-STX-02-01-indikatoren.md) | ☑ | STX-18 | `v0.6.3` |
 | 02-02 | [Bollinger-Regelfelder](../prompts/PROMPT-STX-02-02-bollinger-felder.md) | ☐ | STX-18 | — |
 | 02-03 | [Donchian-Regelfeld](../prompts/PROMPT-STX-02-03-donchian-feld.md) | ☐ | STX-18 | — |
 | 02-04 | [Feature-Store-Slice `rule.*` *(optional)*](../prompts/PROMPT-STX-02-04-featurestore-rule-slice.md) | ☐ | STX-10 | — |

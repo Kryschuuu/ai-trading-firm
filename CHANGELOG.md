@@ -21,14 +21,47 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-29** · Code-Version **0.6.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.3** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Offen für den nächsten Release — als Nächstes Phase 2 der Strategie-Roadmap:
-> die Indikator-Grundlage 02-01 (`v0.6.3`, `bollingerBands`/`donchianChannel`). Release-Plan:
-> [`VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md) §2.
+> **Status: Beta.** Nächste Schritte: 02-02 (Bollinger-Regelfelder, `v0.6.4`) und
+> 02-03 (Donchian-Regelfeld, `v0.6.5`).
+
+## [0.6.3] — Indikator-Grundlage (STX-02-01) (2026-09-30)
+
+> **Status: Beta, nicht produktionsreif.** Additive pure Funktionen aus Phase 2;
+> keine Rule-Felder, Cache-/Snapshot-Änderung, Migration oder ausführbaren Templates.
+
+### Added
+
+* `bollingerBands(closes, period = 20, mult = 2)` liefert `upper`, `middle`, `lower`,
+  `width` und `bandwidthPct`. Bandbreite ist ein **Bruch** (0.05 = 5 %), Populations-σ
+  und SMA wie bei der unveränderten Funktion `bollingerBandWidthPct`; fünf Fixtures
+  beweisen exakte Parität. Die mathematisch äquivalente Formel `2·mult·σ/SMA` vermeidet
+  Rundungsabweichung durch explizite Subtraktion der Bandlevel.
+* `donchianChannel(candles, entryPeriod = 20, exitPeriod = 10)` liefert das Hoch der
+  vorigen Entry-Kerzen und das Tief der vorigen Exit-Kerzen sowie deren Mitte.
+  Die aktuelle Kerze wird **ausgeschlossen** (Lookahead-Schutz). Template 03-08
+  muss einen Mindest-Timeframe für diese Higher-Timeframe-Logik festlegen.
+* Parametergrenzen für LLM-Vorschläge: Bollinger 5…200/1…4, Donchian 5…200/3…100
+  (Exit höchstens Entry); `null` bei unzureichenden oder nicht-berechenbaren Daten.
+  Tests decken Randfälle, Klemmung, exakte BBW-Parität und steigenden Breakout ab.
+
+### Fixed
+
+* **Security-Audit:** transitive `brace-expansion`-Versionen im Lockfile auf
+  `1.1.21` (über ESLint/minimatch) und `5.0.12` (über typescript-eslint/minimatch)
+  aktualisiert. Damit sind die gemeldeten High-DoS-Advisories behoben;
+  `npm audit --audit-level=high` meldet keine Schwachstellen. Keine Änderung
+  an direkten Abhängigkeiten oder am Laufzeitcode.
+
+### Documentation
+
+* Version/Strategie-Stack, Root-/Docs-README und Audit-Tracking auf 02-01 nachgezogen.
+  Die bislang bestehende BBW-Funktion sowie sämtliche bisherigen Indikatoren bleiben
+  unverändert. Rule-Felder und IndicatorCache-Parität folgen erst in 02-02/02-03.
 
 ## [0.6.2] — Timeframe-Angleichung (STX-01) (2026-09-29)
 

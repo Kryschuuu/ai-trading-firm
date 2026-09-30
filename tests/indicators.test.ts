@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot } from "../src/lib/indicators";
+import { adx, rsi, ema, macd, atrPct, bollingerBandWidthPct, bollingerBands, donchianChannel, returnStdDevPct, sessionVwap, utcDayAnchorMs, snapshot } from "../src/lib/indicators";
 import type { Candle } from "../src/lib/marketData";
 
 test("RSI: stetiger Aufwärtslauf → überkauft (>70)", () => {
@@ -81,6 +81,84 @@ test("BBW: zu wenig Daten → null (keine Division durch NULL/NaN)", () => {
 
 test("BBW: nicht-sinnvoller Mittelkurs (≤0) → null statt NaN", () => {
   assert.equal(bollingerBandWidthPct(Array(20).fill(0), 20, 2), null);
+});
+
+// ── Bollinger-Bänder und Donchian-Kanal (STX-02-01) ────────────────────────
+
+test("Bollinger: bekannte Populations-σ, Kurslevel und Bruch-Einheit", () => {
+  const closes = Array.from({ length: 20 }, (_, i) => i % 2 ? 120 : 80);
+  assert.deepEqual(bollingerBands(closes), {
+    upper: 140, middle: 100, lower: 60, width: 0.8, bandwidthPct: 0.8,
+  });
+  assert.equal(bollingerBands(Array(20).fill(100))?.width, 0, "flache gültige Serie: echte Null");
+});
+
+test("Bollinger: Bandbreite exakt identisch zur unveränderten BBW-Funktion (5 Fixtures)", () => {
+  const fixtures = [
+    Array(20).fill(100),
+    Array.from({ length: 20 }, (_, i) => i % 2 ? 120 : 80),
+    Array.from({ length: 29 }, (_, i) => 100 + i * 0.37),
+    Array.from({ length: 35 }, (_, i) => 90 + Math.sin(i / 3) * 7),
+    Array.from({ length: 20 }, (_, i) => 100 + (i === 19 ? 25 : 0)),
+  ];
+  for (const closes of fixtures) {
+    const reading = bollingerBands(closes);
+    assert.ok(reading);
+    assert.equal(reading.bandwidthPct, bollingerBandWidthPct(closes));
+    assert.equal(reading.width, reading.bandwidthPct);
+  }
+});
+
+test("Bollinger: fehlende/ungültige Historie, nichtpositiver SMA und Parameter-Klemmung", () => {
+  assert.equal(bollingerBands([]), null);
+  assert.equal(bollingerBands(Array(19).fill(100)), null);
+  assert.equal(bollingerBands(Array(20).fill(0)), null);
+  assert.equal(bollingerBands(Array(20).fill(-1)), null);
+  assert.equal(bollingerBands([...Array(19).fill(100), NaN]), null);
+  assert.equal(bollingerBands(Array(20).fill(100), NaN), null);
+  assert.equal(bollingerBands(Array(20).fill(100), 20, Infinity), null);
+  const closes = Array.from({ length: 25 }, (_, i) => 90 + i);
+  assert.deepEqual(bollingerBands(closes, 20, 0), bollingerBands(closes, 20, 1));
+  assert.deepEqual(bollingerBands(closes, 20, 99), bollingerBands(closes, 20, 4));
+  assert.deepEqual(bollingerBands(closes, -10), bollingerBands(closes, 5));
+  assert.equal(bollingerBands(closes, 999), null, "auf 200 geklemmt, daher zu wenig Daten");
+  assert.deepEqual(bollingerBands(Array(201).fill(100), 999), bollingerBands(Array(201).fill(100), 200));
+});
+
+test("Donchian: entry-High und exit-Low nutzen verschiedene Fenster, ohne aktuelle Kerze", () => {
+  const candles = candlesFrom([10, 11, 12, 13, 14, 15, 16, 17, 18]);
+  candles[3].high = 50; // im entry-, aber nicht im exit-Fenster
+  candles[5].low = 2;   // im exit-Fenster
+  candles[8].high = 1000; // aktueller High/Low darf nichts ändern
+  candles[8].low = -1000;
+  assert.deepEqual(donchianChannel(candles, 5, 3), { upper: 50, lower: 2, mid: 26 });
+});
+
+test("Donchian: streng steigende Serie bricht über den vorherigen Kanal aus (kein Lookahead)", () => {
+  const candles = candlesFrom(Array.from({ length: 21 }, (_, i) => 100 + 2 * i));
+  const lastClose = candles.at(-1)!.close;
+  const reading = donchianChannel(candles);
+  assert.ok(reading);
+  assert.ok(reading.upper < lastClose, `upper ${reading.upper} muss unter ${lastClose} liegen`);
+  assert.equal(reading.upper, candles.at(-2)!.high);
+});
+
+test("Donchian: Mindesthistorie nach Klemmung, exitPeriod höchstens entryPeriod", () => {
+  assert.equal(donchianChannel([]), null);
+  assert.equal(donchianChannel(candlesFrom(Array(20).fill(100))), null);
+  const candles = candlesFrom(Array.from({ length: 12 }, (_, i) => 100 + i));
+  assert.deepEqual(donchianChannel(candles, -1, 500), donchianChannel(candles, 5, 5));
+  assert.deepEqual(donchianChannel(candles, 5, -1), donchianChannel(candles, 5, 3));
+  assert.equal(donchianChannel(candles, 999), null);
+  const long = candlesFrom(Array.from({ length: 202 }, (_, i) => 100 + i));
+  assert.deepEqual(donchianChannel(long, 999, 999), donchianChannel(long, 200, 100));
+  assert.equal(donchianChannel(candles, NaN, 3), null);
+  assert.equal(donchianChannel(candles, 5, Infinity), null);
+  candles[9].high = NaN;
+  assert.equal(donchianChannel(candles, 5, 3), null);
+  candles[9].high = 110;
+  candles[10].low = NaN;
+  assert.equal(donchianChannel(candles, 5, 3), null);
 });
 
 // ── Return-Standardabweichung ────────────────────────────────────────────────
