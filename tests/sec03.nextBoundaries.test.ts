@@ -72,7 +72,7 @@ const caches: { kind: IncrementalCacheKind; root: string; data?: IncrementalCach
 ];
 
 for (const { kind, root, data } of caches) {
-  const getContext = kind === "FETCH" ? { kind } : { kind, isFallback: false };
+  const getContext = (kind === "FETCH" ? { kind } : { kind, isFallback: false }) as Parameters<ReturnType<typeof cacheHarness>["cache"]["get"]>[1];
   const setContext = kind === "FETCH" ? { fetchCache: true as const } : { fetchCache: false as const };
   const traversalKeys = [
     "../outside", "../../outside", "nested/../../outside",
