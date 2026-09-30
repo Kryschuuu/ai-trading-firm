@@ -1315,12 +1315,13 @@ test("STX-02-03: null bei zu wenig Historie bzw. upper <= 0 — nie eine erfunde
   assert.notEqual(snapshot.donchianBreakoutPct, 0);
 
   // Cache-Pfad: vor dem 21. Bar kein Kanalhoch — null, nie 0.
-  const cache = buildIndicatorCache(risingCandles(60));
+  const rising = risingCandles(60);
+  const cache = buildIndicatorCache(rising);
   for (let i = 0; i < DONCHIAN_ENTRY_PERIOD; i++) {
     assert.equal(cache.donchianUpper[i], null, `Cache idx ${i}`);
     assert.notEqual(cache.donchianUpper[i], 0, `Cache idx ${i}: nie 0`);
   }
-  assert.equal(cache.donchianUpper[DONCHIAN_ENTRY_PERIOD], risingCandles(60)[DONCHIAN_ENTRY_PERIOD - 1].high);
+  assert.equal(cache.donchianUpper[DONCHIAN_ENTRY_PERIOD], rising[DONCHIAN_ENTRY_PERIOD - 1].high);
 });
 
 test("STX-02-03: eine echte 0 bleibt ein Messwert — Kurs exakt auf dem Kanalhoch", () => {
