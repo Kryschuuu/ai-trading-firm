@@ -24,6 +24,12 @@ import { stableStringify } from "../lib/ruleEngine";
 import { SUPPORTED_TIMEFRAME_MS, type SupportedTimeframe } from "../lib/marketdata/historicalStore";
 import { computeAtrPct } from "../scanner/factors/atr";
 import { computeRsi } from "../scanner/factors/rsi";
+import {
+  bollingerBands,
+  bollingerPosition,
+  donchianBreakoutPct,
+  donchianChannel,
+} from "../lib/indicators";
 import { roundTo } from "../scanner/math";
 import {
   FEATURE_QUALITY_STATUSES,
@@ -292,6 +298,80 @@ function atrBandExecutor(ctx: FeatureComputeContext): FeatureComputeOutcome {
 }
 
 /**
+ * `rule.bb_zscore@1` — Kurs gegen die Bollinger-Mitte (20/2σ) in Standardabweichungen.
+ *
+ * Ruft dieselbe `bollingerBands` und `bollingerPosition` Formel wie
+ * `buildSnapshotFromCandles` auf.
+ * Fail-closed: `null` bei zu wenig Historie (`INSUFFICIENT_LOOKBACK`),
+ * unbrauchbaren Kerzen (`INVALID_INPUT`) oder flacher Kerzenreihe (σ == 0,
+ * `NOT_COMPUTABLE` — eine flache Reihe hat keine Lage im Band).
+ */
+function bbZScoreExecutor(ctx: FeatureComputeContext): FeatureComputeOutcome {
+  const period = numberParam(ctx.definition, "period");
+  const mult = numberParam(ctx.definition, "mult");
+  if (ctx.window.length < period) return { kind: "null", reason: "INSUFFICIENT_LOOKBACK" };
+  const closes = ctx.window.map((bar) => bar.close);
+  if (!closes.every((close) => Number.isFinite(close) && close > 0)) return { kind: "null", reason: "INVALID_INPUT" };
+  const bands = bollingerBands(closes, period, mult);
+  if (!bands) return { kind: "null", reason: "NOT_COMPUTABLE" };
+  const pos = bollingerPosition(closes[closes.length - 1], bands, mult);
+  if (!pos || pos.zScore === null) return { kind: "null", reason: "NOT_COMPUTABLE" };
+  return numericOutcome(ctx.definition, pos.zScore, "NOT_COMPUTABLE");
+}
+
+/**
+ * `rule.price_vs_upper_bb_pct@1` — Kurs gegen obere Bollinger-Kante in Prozent des Kurses.
+ *
+ * `(close − upper) / close · 100`, gerundet auf 4 Nachkommastellen.
+ * Identisch zum Regelfeld `RuleSnapshot.priceVsUpperBbPct`.
+ */
+function priceVsUpperBbPctExecutor(ctx: FeatureComputeContext): FeatureComputeOutcome {
+  const period = numberParam(ctx.definition, "period");
+  const mult = numberParam(ctx.definition, "mult");
+  if (ctx.window.length < period) return { kind: "null", reason: "INSUFFICIENT_LOOKBACK" };
+  const closes = ctx.window.map((bar) => bar.close);
+  if (!closes.every((close) => Number.isFinite(close) && close > 0)) return { kind: "null", reason: "INVALID_INPUT" };
+  const bands = bollingerBands(closes, period, mult);
+  if (!bands) return { kind: "null", reason: "NOT_COMPUTABLE" };
+  const pos = bollingerPosition(closes[closes.length - 1], bands, mult);
+  if (!pos || pos.priceVsUpperPct === null) return { kind: "null", reason: "NOT_COMPUTABLE" };
+  return numericOutcome(ctx.definition, pos.priceVsUpperPct, "NOT_COMPUTABLE");
+}
+
+/**
+ * `rule.donchian_breakout_pct@1` — Kurs gegen das Kanalhoch der vorigen 20 Kerzen in Prozent.
+ *
+ * `(close / upper − 1) · 100`, gerundet auf 4 Nachkommastellen.
+ * Identisch zum Regelfeld `RuleSnapshot.donchianBreakoutPct`.
+ */
+function donchianBreakoutPctExecutor(ctx: FeatureComputeContext): FeatureComputeOutcome {
+  const entryPeriod = numberParam(ctx.definition, "entryPeriod");
+  const exitPeriod = numberParam(ctx.definition, "exitPeriod");
+  if (ctx.window.length < entryPeriod + 1) return { kind: "null", reason: "INSUFFICIENT_LOOKBACK" };
+  const invalid = ctx.window.some(
+    (bar) =>
+      !Number.isFinite(bar.close) ||
+      bar.close <= 0 ||
+      !Number.isFinite(bar.high) ||
+      !Number.isFinite(bar.low)
+  );
+  if (invalid) return { kind: "null", reason: "INVALID_INPUT" };
+  const candles = ctx.window.map((bar) => ({
+    time: bar.time,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    volume: bar.volume,
+  }));
+  const reading = donchianChannel(candles, entryPeriod, exitPeriod);
+  if (!reading) return { kind: "null", reason: "NOT_COMPUTABLE" };
+  const lastClose = ctx.window[ctx.window.length - 1].close;
+  const val = donchianBreakoutPct(lastClose, reading.upper);
+  return numericOutcome(ctx.definition, val, "NOT_COMPUTABLE");
+}
+
+/**
  * Executor-Tabelle des Slices. Jeder `computeKey` einer Definition **muss**
  * hier stehen — die Registry verifiziert das beim Aufbau.
  */
@@ -299,4 +379,7 @@ export const FEATURE_EXECUTORS: FeatureExecutorTable = Object.freeze({
   "scanner.rsi@1": rsiExecutor,
   "scanner.atr@1": atrExecutor,
   "scanner.atr_band@1": atrBandExecutor,
+  "rule.bb_zscore@1": bbZScoreExecutor,
+  "rule.price_vs_upper_bb_pct@1": priceVsUpperBbPctExecutor,
+  "rule.donchian_breakout_pct@1": donchianBreakoutPctExecutor,
 });
