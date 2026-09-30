@@ -35,46 +35,19 @@ import {
 import path from "node:path";
 import { resolveRuntimePath } from "../../lib/appPaths";
 import type { MarketCandle } from "./types";
+import { SUPPORTED_TIMEFRAMES, isSupportedTimeframe, type SupportedTimeframe } from "./timeframes";
 
-/**
- * Alle im System zulässigen Kerzen-Periodizitäten (Allowlist).
- * Wird gegen externe/geparste Werte validiert — freie Strings werden
- * abgewiesen, damit ein Tippfehler (`"1H"` vs. `"1h"`) keine still
- * gemischte Reihe erzeugt.
- */
-export const SUPPORTED_TIMEFRAMES = [
-  "1m",
-  "3m",
-  "5m",
-  "15m",
-  "30m",
-  "1h",
-  "2h",
-  "4h",
-  "1d",
-  "5d",
-] as const;
-
-export type SupportedTimeframe = (typeof SUPPORTED_TIMEFRAMES)[number];
-
-/**
- * Periodenlänge je erlaubtem Timeframe in Millisekunden (kanonische, einzige
- * solche Tabelle im Store-Modul). Dient u. a. dem inkrementellen Sync
- * (Vergleich der jüngsten gespeicherten Kerze mit dem laufenden Periodenrand,
- * siehe `MarketDataSyncService`) und Alignment-Prüfungen.
- */
-export const SUPPORTED_TIMEFRAME_MS: Record<SupportedTimeframe, number> = {
-  "1m": 60_000,
-  "3m": 3 * 60_000,
-  "5m": 5 * 60_000,
-  "15m": 15 * 60_000,
-  "30m": 30 * 60_000,
-  "1h": 60 * 60_000,
-  "2h": 2 * 60 * 60_000,
-  "4h": 4 * 60 * 60_000,
-  "1d": 24 * 60 * 60_000,
-  "5d": 5 * 24 * 60 * 60_000,
-};
+// Die Timeframe-Allowlist (`SUPPORTED_TIMEFRAMES`), ihre Periodenlängen
+// (`SUPPORTED_TIMEFRAME_MS`) und `isSupportedTimeframe` leben seit v0.6.2 in
+// `./timeframes` (reine Daten, client-sicher — Regel-Engine, Mikro-Executor und
+// Workshop-UI lesen dieselbe Liste). Der Store re-exportiert sie unverändert:
+// bestehende Importe aus diesem Modul bleiben gültig.
+export {
+  SUPPORTED_TIMEFRAMES,
+  SUPPORTED_TIMEFRAME_MS,
+  isSupportedTimeframe,
+  type SupportedTimeframe,
+} from "./timeframes";
 
 /**
  * Marker für Zeilen im Legacy-Schema (v1, ohne `timeframe`). Solche Zeilen
@@ -188,11 +161,6 @@ export class HistoricalStoreError extends Error {
     super(message);
     this.name = new.target.name;
   }
-}
-
-/** Prüft einen Wert gegen die Timeframe-Allowlist. */
-export function isSupportedTimeframe(value: unknown): value is SupportedTimeframe {
-  return typeof value === "string" && (SUPPORTED_TIMEFRAMES as readonly string[]).includes(value);
 }
 
 /** Logischer Schlüssel einer Kerze. */

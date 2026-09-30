@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.6.1` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.6.2` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -67,7 +67,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data: Modi A/B/C, deterministischer Fill-Simulator, Failover, Replay |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
 | **[BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)** | Multi-Asset Backtest-Engine: synchronisierter Replay-Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0) |
-| **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0), Event-Replay mit realistischen Friktionen `event_replay` (RMA-P1-01 v1.58.0) |
+| **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0), Event-Replay mit realistischen Friktionen `event_replay` (RMA-P1-01 v1.58.0), Tabelle „Rule-Timeframe ↔ unterstützte Felder“ (`1m … 5d`, `vwapPct` nur Intraday; STX-01 v0.6.2) |
 | **[FEATURE_STORE.md](FEATURE_STORE.md)** | Point-in-Time Feature Store: Feature-Registry (immutable, versioniert), Wertmodell mit `event_time`/`available_at`/`computed_at`, idempotente Materialisierung mit Cursor, Look-ahead-freie PIT-Abfrage, Offline/Online-Parität, Quality-Propagation, Retention (RMA-P6-01, v1.53.0) |
 | **[FORECASTS.md](FORECASTS.md)** | Forecast-Ledger & Kalibrierung: immutable Forecast-Verträge aus Agenten-Analysen, append-only Auflösungen mit Point-in-Time-Resolver (Cursor, Settling-Frist, VOID-Policy), Brier/Brier-Skill/Log-Loss, Reliability-Bins mit Wilson-Intervallen, ECE, Coverage & Mindeststichprobe, Segment-API, versionierte Re-Resolution statt stiller Mutation (RMA-P3-01, v1.55.0) |
 | **[PERPETUAL_DATA.md](PERPETUAL_DATA.md)** | Historische Perpetual-Daten: kanonisches Schema für Funding/Open Interest/Liquidationen mit `event_time`/`available_at`/`fetched_at`, Capability-Ports (`unsupported` ≠ leer), append-only Sync mit Cursor + Idempotenz, Quality-Layer (`log`/`strict`), as-of-Query + API, Konsumenten (Derivatekontext, Funding-Replay, Analystensnapshot), CLI `npm run perp:sync` (RMA-P2-02, v1.54.0) |
@@ -95,7 +95,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 | **[MONTE_CARLO.md](MONTE_CARLO.md)** | Reproduzierbare Monte-Carlo-/Trade-Resampling-Analyse: IID-/Moving-/Stationary-Block-Bootstrap über das verifizierte Trade-Ledger, First-Order-Kostenstress, Quantile p05/p50/p95 (End-Equity, MaxDD, Ruin, Sharpe, Losing Streak) + Exceedance/MCSE, deterministischer Seed `mulberry32-v1`, idempotente bounded Persistenz `mcs1:<sha256>`, CLI + Read-API, keine Live-Risikofreigabe (RMA-P6-02, v1.72.0) |
 | **[STRATEGY_LIFECYCLE.md](STRATEGY_LIFECYCLE.md)** | Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates: 9-Zustands-State-Machine, immutable Evidence `sle1:`, versionierte Promotion-Gates, Drift-Segmente Performance/Risk/Execution/Data Quality, automatische Degrationsleiter, Order-Gate `LIFECYCLE_GATE_DENY`, feature-geflaggt `STRATEGY_LIFECYCLE_MODE` (RMA-P1-05, v1.73.0) |
 | **[MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md)** | Migration Runbook: timeframe-Feld — Backup, Dry-Run, Rollback |
-| **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler, Firmen-Metriken, Auto-Circuit-Breaker, Alerts, Heartbeat (§9–12) |
+| **[OBSERVABILITY.md](OBSERVABILITY.md)** | Marktdaten-Fehler, Firmen-Metriken (inkl. Timeframe-Guard des Mikro-Executors), Auto-Circuit-Breaker, Alerts, Heartbeat (§9–12) |
 | **[ERROR_HANDLING_MARKETDATA.md](ERROR_HANDLING_MARKETDATA.md)** | Entscheidungsbaum: Werfen vs. Cache vs. `DATA_UNAVAILABLE` |
 | **[BITUNIX.md](BITUNIX.md)** | Bitunix-Adapter: 7. Venue, Public REST/WS, Signing, Paper-Modus B, Live-Gate |
 | **[ALPACA.md](ALPACA.md)** | Alpaca-Adapter: 8. Venue, US-Aktien/ETFs/Crypto, Paper-API = Testnet |
@@ -238,7 +238,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.6.1, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.6.2, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)

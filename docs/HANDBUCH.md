@@ -1587,7 +1587,8 @@ den Erfolg als jede Modellwahl.
 | **Mikro-Zyklus** | Executor ohne LLM, pro Preis-Tick; wertet aktive Regeln im RAM aus |
 | **Regel (Rule)** | Statisches, versioniertes Bedingungs-Werk aus dem Makro-Zyklus in `trade_rules` |
 | **RuleCache** | Kompilierte ACTIVE-Regeln im RAM des Mikro-Executors |
-| **Rolling-Serie** | In-Memory-Kerzen (1m→1m/5m/15m/30m/1h) für die Indikatorberechnung; max. 160 Kerzen je Reihe — ein Tages-VWAP (`vwapPct`) deckt auf `1m` damit ~2,7 h des Tages ab, auf 5m/15m den vollen Handelstag |
+| **Rolling-Serie** | In-Memory-Kerzen (1m→1m/3m/5m/15m/30m/1h, bis zum Ausführungsintervall) für die Indikatorberechnung; max. 160 Kerzen je Reihe — ein Tages-VWAP (`vwapPct`) deckt auf `1m` damit ~2,7 h des Tages ab, auf 5m/15m den vollen Handelstag |
+| **Ausführungsintervall** | Längster Regel-Timeframe, den der Mikro-Executor auswertet (Default `1h`, Option `executionInterval`). Regeln mit längerem Timeframe (`2h`, `4h`, `1d`, `5d`) weist der Timeframe-Guard beim Start sichtbar ab — sie sind anlegbar und backtestbar, lösen live aber nie aus |
 | **latency_micros** | Bewertungslatenz des Mikro-Hot-Paths (ohne Fill) |
 | **Advisory-Lock** | Postgres-Sperre pro Symbol; verhindert Doppel-Fills über Instanzen hinweg |
 
@@ -1689,6 +1690,20 @@ Beispiel:
 * Der Prozess hält aktive Regeln im RAM und lädt sie alle
   `MICRO_RULE_REFRESH_MS` (30 s) neu. **Aktivierungen/Rollbacks** über die
   API wirken spätestens nach diesem Intervall — kein Neustart nötig.
+* **Ausführungsintervall (seit `v0.6.2`):** Der Executor wertet Regeln nur bis zu
+  einem Timeframe von `1h` aus. Eine Regel mit längerem Timeframe (`2h`, `4h`, `1d`,
+  `5d` — seit `v0.6.2` anlegbar und backtestbar) sähe einen teilweise abgelaufenen
+  Snapshot und wird deshalb **sichtbar abgewiesen** statt still ignoriert: Log
+  `micro_executor_rule_blocked`, Counter `micro_executor_rule_blocked_total`
+  (`reason`, `timeframe`) und die Liste `ruleGuard.blocked` im Health-Payload. Es
+  entsteht keine Serie, also nie eine Order aus dieser Regel. Log und Counter
+  entstehen beim Start (je Regel einmal, nicht je Tick). Eine erst danach
+  aktivierte Regel dieser Art wird ebenfalls nie ausgewertet und erscheint sofort in
+  `ruleGuard.blocked`; ihr Log-Eintrag folgt beim nächsten Start.
+
+  ```bash
+  curl -s localhost:3380/health | jq '.ruleGuard'
+  ```
 
 Jeder Match (auch ein **Block**) landet in `rule_executions` — das ist der
 Rückkanal zum CEO (`ruleFeedback()` → nächster Makro-Zyklus).
@@ -1964,6 +1979,10 @@ Vor jeder Änderung an der Regel-Engine oder vor jeder Live-Aktivierung:
 - [ ] Rollback-Ziel dokumentiert (vorherige Version bleibt erhalten).
 - [ ] `maxExecutionsPerDay` und `cooldownMinutes` bewusst gewählt (Spam-Schutz).
 - [ ] Kein Feld/Operator genutzt, das nicht in `RULE_FIELDS` steht (wird sonst verworfen).
+- [ ] `window.timeframe` liegt im Ausführungsintervall des Mikro-Executors (Default `1h`): Längere
+      Timeframes (`2h … 5d`) laufen nur im Backtest, live weist der Executor sie sichtbar ab
+      (`ruleGuard.blocked`). Felder je Timeframe: `docs/BACKTESTING.md` §1.1 — `vwapPct` ist auf
+      `1d`/`5d` immer `null`.
 - [ ] Bei `REQUIRE_HUMAN_APPROVAL=true`: Regel blieb DRAFT bis zur manuellen Freigabe.
 
 **Code-Ebene (Peer-Review vor GitHub)**

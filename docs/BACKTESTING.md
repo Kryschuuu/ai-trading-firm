@@ -50,6 +50,71 @@ Schichten-Trennung (bewusst):
   Kerzen, Instrumente und Kostenprofil werden injiziert. Dadurch ist jeder
   Lauf deterministisch testbar.
 
+### 1.1 Rule-Timeframe ↔ unterstützte Felder (STX-01, `v0.6.2`)
+
+`RuleWindow.timeframe` akzeptiert seit `v0.6.2` jeden Wert aus
+`SUPPORTED_TIMEFRAMES` (`1m … 5d`, zehn Werte). `RULE_ALLOWED_TIMEFRAMES`
+(`src/lib/ruleEngine.ts`) und das LLM-Schema `RULE_LLM_SCHEMA` leiten sich daraus
+ab — es gibt **ein** Vokabular (`src/lib/marketdata/timeframes.ts`; der
+Historical Store re-exportiert es). Vorher war der Regel-Pfad auf `1m … 1h`
+beschränkt, `4h`/`1d` waren nicht ausdrückbar. `sanitizeRuleSpec` ist
+unverändert: Die Schreibweise wird kleingeschrieben (`"1H"` → `"1h"`), alles
+außerhalb der Allowlist (`"2h "`, `"7d"`, `""`, `null`) fällt auf den sicheren
+Default `15m` — nie wird ein Rohwert durchgereicht. Regeln mit `1m … 1h`
+liefern dieselben Bytes wie vor `v0.6.2` (Golden-Test in `tests/ruleEngine.test.ts`).
+
+**Erlaubt heißt nicht live ausführbar.** Backtests laufen auf allen zehn
+Timeframes. Der Mikro-Executor wertet dagegen nur Regeln bis zu seinem
+**Ausführungsintervall** aus (Default `1h`, Option `executionInterval`): Er bewertet
+eine Regel gegen den Snapshot ihres Timeframes inklusive der noch laufenden Kerze —
+für `2h … 5d` wäre das ein teilweise abgelaufener Snapshot, den Backtest und
+Regelautor nie gesehen haben. Der Timeframe-Guard weist solche Regeln **fail-closed
+und sichtbar** ab (keine Serie, keine Position; Counter
+`micro_executor_rule_blocked_total`, Log `micro_executor_rule_blocked`,
+`status().ruleGuard` in `GET /api/firm/micro`; siehe
+[OBSERVABILITY.md](OBSERVABILITY.md) §9 und §4).
+
+| Timeframe | Kerzen je UTC-Tag | `vwapPct` | `volumeWindow` 5…200 Kerzen ≙ | `changePct24h` spannt ≈ | Mikro-Executor (live, Default) | Kostenmodell des Paper-Backtests |
+| --- | ---: | --- | --- | --- | --- | --- |
+| `1m` | 1 440 | ✅ ab der 2. Kerze des UTC-Tages | 5 min … 3,3 h | 1,6 h | ✅ | kalibriert |
+| `3m` | 480 | ✅ ab der 2. Kerze | 15 min … 10 h | 4,8 h | ✅ | generischer Fallback¹ |
+| `5m` | 288 | ✅ | 25 min … 16,7 h | 8 h | ✅ | kalibriert |
+| `15m` | 96 | ✅ | 1,25 h … 50 h | 24 h | ✅ | kalibriert |
+| `30m` | 48 | ✅ | 2,5 h … 4,2 d | 2 d | ✅ | kalibriert |
+| `1h` | 24 | ✅ | 5 h … 8,3 d | 4 d | ✅ (Default-Obergrenze) | kalibriert |
+| `2h` | 12 | ⚠️ grob: ab 02:00 UTC, 2–12 Stützstellen | 10 h … 16,7 d | 8 d | ❌ abgewiesen | generischer Fallback¹ |
+| `4h` | 6 | ⚠️ grob: ab 04:00 UTC, 2–6 Stützstellen | 20 h … 33 d | 16 d | ❌ abgewiesen | kalibriert |
+| `1d` | 1 | ❌ **immer `null`** | 5 d … 200 d | 96 d | ❌ abgewiesen | kalibriert |
+| `5d` | < 1 | ❌ **immer `null`** | 25 d … 1 000 d | 480 d | ❌ abgewiesen | generischer Fallback¹ |
+
+¹ `timeframeToSpreadFallbackBps` / `timeframeToSlippageBaseBps`
+(`src/backtest/paperExecution.ts`) sind nur für `1m`, `5m`, `15m`, `30m`, `1h`, `4h`,
+`1d` kalibriert; `3m`, `2h` und `5d` laufen auf dem generischen Fallback
+(4 bp Spread, 1 bp Slippage). Für `3m` ist das **optimistisch** (das feinere `1m` rechnet
+mit 15 bp / 3 bp) — Backtests auf `3m` bis zur Kalibrierung mit Vorsicht lesen. Das Modell
+wurde mit `v0.6.2` bewusst nicht angefasst (bestehende Ergebnisse bleiben byte-identisch).
+
+**`vwapPct` ist eine Intraday-Größe.** Anker ist der UTC-Kalendertag der letzten
+Kerze; `sessionVwap` liefert `null`, wenn dort weniger als zwei Kerzen liegen (oder kein
+Volumen). Auf `1d`/`5d` ist das konstruktionsbedingt immer der Fall, auf `2h`/`4h`
+bis zur zweiten Kerze des Tages. `null` ist dabei nie `0`: Eine `vwapPct`-Bedingung
+bleibt `false` (fail-closed), im Snapshot-Builder der Regel-Engine
+(`buildSnapshotFromCandles`) wie im Indikator-Cache der Backtest-Engine
+(`snapshotFromCache`), die dieselbe Null-Semantik teilen. Ein Template, das `vwapPct`
+nutzt, ist damit automatisch auf Intraday-Timeframes beschränkt.
+
+Die übrigen Felder sind auf jedem Timeframe definiert; was sich mit dem Timeframe
+ändert, ist die Bedeutung der **Kerzenzahl**:
+
+| Felder | Verhalten |
+| --- | --- |
+| `price`, `ema9`/`ema21`/`ema50`, `priceVsEma21Pct`/`priceVsEma50Pct`, `trend`, `rsi14`, `atrPct`, `bbwPct` | ab 25 Kerzen Historie; darunter gibt es keinen Snapshot (auf `1d` sind das 25 Tage, auf `5d` 125 Tage Vorlauf) |
+| `adx14` | ab 29 Kerzen, davor `null` |
+| `macd`, `macdSignal`, `macdHist` | ab 35 Schlusskursen, davor `null` |
+| `volume`, `volumeMa20`, `volumeRatio` | Mittel über `window.volumeWindow` **Kerzen** (5…200, geklemmt wie auf jedem Timeframe); die Spalte „`volumeWindow` ≙“ oben rechnet das in Zeit um. Auf `1d` sind 5 Kerzen eine Woche und 200 Kerzen das klassische 200-Tage-Fenster — `RULE_CEILINGS.volumeWindow` bleibt deshalb unverändert. Hat die Serie weniger Kerzen als das Fenster, mittelt der Snapshot über die vorhandenen. |
+| `changePct24h` | Basis ist die Kerze 97 Positionen vor dem Serienende, also 96 Perioden zurück — **kein 24-h-Wert** außer auf `15m` (STX-14; bewusst nicht umgerechnet, das würde bestehende Regeln still umwerten) |
+| `spreadPct`, `bookDepthUsd` | Liquiditätsgrößen des Instruments bzw. des Live-Orderbuchs, vom Regel-Timeframe unabhängig; `null` ohne belastbares Buch blockiert die Bedingung |
+
 ---
 
 ## 2. Zeitmaske (Lookahead-Garantie)

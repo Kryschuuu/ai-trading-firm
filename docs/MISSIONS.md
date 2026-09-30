@@ -198,6 +198,13 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    und gegen den Paper-Store backtesten. Die Store-ID (z. B. `BITUNIX:BTCUSDT`)
    ist nicht das Regel-Symbol. Aktivierung bleibt
    `POST /api/firm/rules/[id]` mit Admin-Recht (Handbuch 15.4 und 17).
+   Das Feld **Fenster** bietet seit `v0.6.2` alle zehn Rule-Timeframes
+   (`1m … 5d`, dieselbe Liste wie `SUPPORTED_TIMEFRAMES` — es gibt kein zweites
+   Vokabular). Backtests laufen auf allen; live ausgeführt werden nur Regeln bis
+   `1h` (Ausführungsintervall des Mikro-Executors), längere weist er sichtbar ab.
+   `vwapPct` ist auf `1d`/`5d` immer `null`. Welches Feld auf welchem Timeframe
+   was bedeutet, steht in der Tabelle
+   [Rule-Timeframe ↔ unterstützte Felder](BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062).
 
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung
 (`src/components/workshop/InfoTip.tsx`), zusätzlich hängt der Text als

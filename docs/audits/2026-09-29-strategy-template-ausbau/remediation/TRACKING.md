@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-09-29 · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
+- **Stand:** 2026-09-29 · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 ## Legende
 
@@ -14,7 +14,7 @@
 
 | ID | Severity | Status | Behoben durch |
 |---|---|---|---|
-| STX-01 Timeframe-Blocker | HIGH | ☐ | 01-01 |
+| STX-01 Timeframe-Blocker | HIGH | ☑ | 01-01 ☑ (`v0.6.2`) |
 | STX-02 `StrategyClass`-Duplikat | HIGH | ◐ | 00-03 ☑ ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), `v0.6.1`) → 03-01 |
 | STX-03 Regime-Vokabular-Konflikt | HIGH | ◐ | 00-03 ☑ ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), `v0.6.1`) → 06-04 |
 | STX-04 `MultiAssetStrategySpec`-Duplikat | HIGH | ☑ | 00-03 ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), `v0.6.1`); Sizing-Schicht bewusst außerhalb der Roadmap |
@@ -48,7 +48,7 @@
 
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
-| 01-01 | [Rule-Timeframes angleichen](../prompts/PROMPT-STX-01-01-rule-timeframes.md) | ☐ | STX-01 | — |
+| 01-01 | [Rule-Timeframes angleichen](../prompts/PROMPT-STX-01-01-rule-timeframes.md) | ☑ | STX-01 | [`v0.6.2`](../../../BACKTESTING.md#11-rule-timeframe--unterstützte-felder-stx-01-v062) |
 
 ### Phase 2 — Indikator-Grundlage
 
@@ -132,7 +132,7 @@
 | Gate | Bedingung | Prompts dahinter |
 |---|---|---|
 | **G0** | ✅ **erfüllt** (00-03: 3 ADRs fixiert, `v0.6.1` — [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) | 01-01, 02-01, 03-01, 07-01 |
-| **G1** | 01-01 grün (Timeframes, Intraday byte-identisch) | 02-02, 02-03, 03-01, 05-02 |
+| **G1** | ✅ **erfüllt** (01-01: Timeframes `1m…5d`, Intraday byte-identisch per Golden-Test, `v0.6.2`) | 02-02, 02-03, 03-01, 05-02 |
 | **G2** | 02-02/02-03 grün (neue Felder + Parität) | 03-06, 03-08 |
 | **G3** | 03-10 grün (6 Templates vertraglich abgesichert) | 04-01 |
 | **G4** | 04-02 grün (Versionen referenzierbar) | 05-03, 06-02, 06-04 |
@@ -145,8 +145,10 @@
 
 - **OP-1:** Soll `4h`/`1d` im Micro-Executor überhaupt je erreichbar sein, oder bleibt
   der Live-Executor Intraday-only und `4h`+ gilt nur für Backtest/Screening?
-  (Entscheidung nötig; 01-01 implementiert die Guard-Schicht, aber die Policy-Frage
-  bleibt offen.)
+  ◐ **Mit Default beantwortet, Policy offen:** 01-01 (`v0.6.2`) hat die Guard-Schicht gebaut — der
+  Executor wertet nur Regeln bis `executionInterval` aus (Default `1h`), längere weist er sichtbar ab.
+  `4h`+ gilt damit für Backtest/Screening. Eine Anhebung des Intervalls ist eine bewusste
+  Policy-Entscheidung, keine reine Konfiguration: Der Loop bewertet die laufende Kerze.
 - **OP-2:** ✅ **beantwortet** durch [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) (2026-09-29): `unclassified` ist **kein** Template-Status — ein
   Template ohne Klasse oder mit `unclassified` ist ein Fehler (Validierung 03-02, Compiler 03-09, DB-CHECK 04-01).
 - **OP-3:** Sollen `strategy_versions` an die `regime_snapshots`/`feature_store` des

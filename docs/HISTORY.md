@@ -59,6 +59,9 @@ trägt die Schema-Version `"v": 2`:
 
 **Timeframe-Allowlist** (`SUPPORTED_TIMEFRAMES`): `1m, 3m, 5m, 15m, 30m,
 1h, 2h, 4h, 1d, 5d`. Andere Werte werden beim Schreiben und Laden abgewiesen.
+Die Liste lebt seit `v0.6.2` in `src/lib/marketdata/timeframes.ts` (reine Daten,
+client-sicher) und wird vom Store unverändert re-exportiert; Regel-Engine,
+Mikro-Executor und Workshop-UI lesen dieselbe Liste.
 
 ## 3. Logischer Schlüssel & Deduplizierung
 

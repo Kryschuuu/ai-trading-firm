@@ -24,6 +24,7 @@ import { adx, atrPct, bollingerBandWidthPct, ema, macd, rsi, sessionVwap } from 
 import { RULE_FIELDS } from "./ruleFieldCatalog";
 import { LIMIT_CEILINGS, riskAdjustedSize } from "./riskGuard";
 import { tryNormalizeVenueSymbol } from "../symbols/normalize";
+import { SUPPORTED_TIMEFRAMES, type SupportedTimeframe } from "./marketdata/timeframes";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typen
@@ -84,7 +85,12 @@ export interface RuleAction {
 
 /** Ausführungsfenster: wann/wie oft die Regel feuern darf. */
 export interface RuleWindow {
-  timeframe: "1m" | "5m" | "15m" | "30m" | "1h";
+  /**
+   * Kerzen-Periodizität, auf der die Regel bewertet wird. Erlaubt ist jeder
+   * `SupportedTimeframe` (`RULE_ALLOWED_TIMEFRAMES`); live ausgeführt werden
+   * davon nur die bis zum Ausführungsintervall des Mikro-Executors.
+   */
+  timeframe: SupportedTimeframe;
   validFrom: string | null;
   validUntil: string | null;
   maxExecutionsPerDay: number;
@@ -131,7 +137,10 @@ export interface RuleSnapshot {
    * Kurs gegen den Session-VWAP in Prozent (1.5 = 1,5 % darüber). null, wenn
    * die Serie weniger als zwei Kerzen im Tag oder kein Volumen enthält —
    * dann gibt es keinen Messwert, und `null` blockiert die Bedingung
-   * (ein 0.0 wäre eine erfundene VWAP-Neutralität).
+   * (ein 0.0 wäre eine erfundene VWAP-Neutralität). „Tag“ ist der UTC-
+   * Kalendertag der letzten Kerze: auf `1d`/`5d` liegt dort konstruktionsbedingt
+   * genau eine Kerze, der Wert ist dort also immer `null` — ein Template mit
+   * `vwapPct` ist damit automatisch auf Intraday-Timeframes beschränkt.
    */
   vwapPct: number | null;
   /**
@@ -192,6 +201,22 @@ export const RULE_CEILINGS = {
 /** Nur LONG — Shorts sind global gesperrt, eine Regel darf das nicht ändern. */
 export const RULE_ALLOWED_SIDE = "LONG" as const;
 
+/**
+ * Timeframes, die eine Regel tragen darf — abgeleitet aus der Store-Allowlist
+ * (`SUPPORTED_TIMEFRAMES`), bewusst KEIN zweites Vokabular (STX-01, v0.6.2).
+ * `sanitizeRuleSpec` und `RULE_LLM_SCHEMA` lesen genau diese Liste; wer den
+ * Regel-Pfad künftig einschränken will, tut das an dieser einen Stelle.
+ *
+ * Erlaubt heißt nicht live ausführbar: Der Mikro-Executor wertet nur Regeln bis
+ * zu seinem Ausführungsintervall aus (Default `1h`) und weist längere sichtbar
+ * ab (`ruleTimeframeBlockReason`, `src/lib/microExecutor.ts`). Backtests laufen
+ * auf allen Timeframes.
+ */
+export const RULE_ALLOWED_TIMEFRAMES: readonly SupportedTimeframe[] = SUPPORTED_TIMEFRAMES;
+
+/** Sicherer Default, wenn `window.timeframe` fehlt oder nicht in der Allowlist steht. */
+const DEFAULT_RULE_TIMEFRAME: SupportedTimeframe = "15m";
+
 const NUMERIC_FIELDS = new Set<RuleField>(
   (Object.keys(RULE_FIELDS) as RuleField[]).filter((f) => RULE_FIELDS[f] === "number")
 );
@@ -202,7 +227,6 @@ const TREND_FIELDS = new Set<RuleField>(
 const NUMERIC_OPS: RuleOp[] = ["lt", "lte", "gt", "gte", "eq", "between", "in"];
 const TREND_OPS: RuleOp[] = ["eq", "in"];
 
-const ALLOWED_TIMEFRAMES = new Set<RuleWindow["timeframe"]>(["1m", "5m", "15m", "30m", "1h"]);
 const ALLOWED_SOURCE_ROLES = new Set<RuleSpec["sourceRole"]>(["CEO", "RESEARCH", "MANUAL"]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -385,10 +409,11 @@ export function sanitizeRuleSpec(
 
   // ── Fenster ───────────────────────────────────────────────────────────────
   const windowRaw = isRecord(input.window) ? input.window : {};
-  const timeframeRaw = String(windowRaw.timeframe ?? "15m").toLowerCase();
-  const timeframe = ALLOWED_TIMEFRAMES.has(timeframeRaw as RuleWindow["timeframe"])
-    ? (timeframeRaw as RuleWindow["timeframe"])
-    : "15m";
+  // Timeframe: Die Schreibweise wird normalisiert (`"1H"` → `"1h"`); alles
+  // außerhalb der Allowlist (auch `"2h "`, `"7d"`, `""`, `null`) fällt auf den
+  // sicheren Default — ein Rohwert wird nie durchgereicht.
+  const timeframeRaw = String(windowRaw.timeframe ?? DEFAULT_RULE_TIMEFRAME).toLowerCase();
+  const timeframe = RULE_ALLOWED_TIMEFRAMES.find((tf) => tf === timeframeRaw) ?? DEFAULT_RULE_TIMEFRAME;
   const maxExecutionsPerDay = clamp(
     finiteNumber(windowRaw.maxExecutionsPerDay) ?? 3,
     RULE_CEILINGS.maxExecutionsPerDay
@@ -631,6 +656,9 @@ export function buildSnapshotFromCandles(
   // Snapshot sind das die seit Mitternacht gelaufenen Bars, für 5m/15m der
   // ganze Handelstag — in beiden Fällen dieselbe Größe, die ein Daytrader
   // im Chart sieht (Tages-VWAP), nicht ein rollender 20-Perioden-VWAP.
+  // Hohe Timeframes (STX-01): Liegt nur EINE Kerze am UTC-Tag — auf `1d`/`5d`
+  // immer, auf `2h`/`4h` bis zur zweiten Kerze des Tages —, liefert
+  // `sessionVwap` `null`: nie 0 und nie ein „VWAP“ über eine Einzelkerze.
   const vwapValue = sessionVwap(candles);
 
   return {
@@ -880,7 +908,7 @@ export const RULE_LLM_SCHEMA: Record<string, unknown> = {
     window: {
       type: "object",
       properties: {
-        timeframe: { type: "string", enum: ["1m", "5m", "15m", "30m", "1h"] },
+        timeframe: { type: "string", enum: [...RULE_ALLOWED_TIMEFRAMES] },
         validFrom: { type: ["string", "null"] },
         validUntil: { type: ["string", "null"] },
         maxExecutionsPerDay: { type: "number" },

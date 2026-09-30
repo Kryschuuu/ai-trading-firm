@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-> **Stand:** 2026-09-29 · **Code-Version:** v0.6.1 (Beta)  
+> **Stand:** 2026-09-29 · **Code-Version:** v0.6.2 (Beta)  
 > **Verantwortlich:** `docs/roadmap/DECISIONS.md`
 
 Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen, Annahmen und Invarianten des Gesamtsystems.

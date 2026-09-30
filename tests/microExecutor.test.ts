@@ -368,3 +368,241 @@ test("MicroExecutor: book-tick → updateBook (Qualitätsgrenze) → Regel feuer
   assert.ok(adapter.calls.length >= 1, "Regel muss nach verifiziertem Buch feuern");
   await executor.stop();
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STX-01 (v0.6.2): Ausführungsintervall & Timeframe-Guard
+//
+// Der Loop bewertet eine Regel gegen den Snapshot ihres Timeframes inklusive der
+// laufenden Kerze. Eine Regel mit längerem Timeframe als das Ausführungsintervall
+// (Default 1h) würde einen teilweise abgelaufenen Snapshot sehen — der Guard weist
+// sie fail-closed ab und macht das „Nein“ sichtbar (Counter, Log, status()).
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  MICRO_EXECUTION_INTERVAL_DEFAULT,
+  ruleTimeframeBlockReason,
+} from "../src/lib/microExecutor";
+import { SUPPORTED_TIMEFRAMES, SUPPORTED_TIMEFRAME_MS } from "../src/lib/marketdata/historicalStore";
+import { prometheusMetrics, telemetry } from "../src/lib/telemetry";
+import { setStructuredLogSinkForTests, type StructuredLogEntry } from "../src/lib/logger";
+
+/**
+ * Regel mit beliebigem Timeframe, die auf jedem Snapshot greift (`price > 0`) —
+ * der Timeframe entscheidet allein. Der Wert wird NACH der Sanitize-Kette gesetzt:
+ * sie würde Unbekanntes auf 15m normalisieren, die DB-Zeile kann aber alles tragen.
+ */
+function ruleAt(timeframe: string, id: string, symbol = "BTC"): CachedRule {
+  const spec = makeSpec(symbol, {
+    condition: { logic: "all", conditions: [{ field: "price", op: "gt", value: 0 }] },
+    window: { timeframe, maxExecutionsPerDay: 10, cooldownMinutes: 0, volumeWindow: 20 },
+  });
+  return cachedRule({ ...spec, window: { ...spec.window, timeframe: timeframe as typeof spec.window.timeframe } }, id);
+}
+
+/** Führt `fn` mit leerem Counter und aufgefangenem strukturiertem Log aus. */
+async function withGuardObservation<T>(fn: (logs: StructuredLogEntry[]) => Promise<T>): Promise<T> {
+  const logs: StructuredLogEntry[] = [];
+  setStructuredLogSinkForTests((entry) => logs.push(entry));
+  telemetry.microExecutor.reset();
+  try {
+    return await fn(logs);
+  } finally {
+    setStructuredLogSinkForTests(null);
+    telemetry.microExecutor.reset();
+  }
+}
+
+const blockedLogs = (logs: StructuredLogEntry[]) => logs.filter((entry) => entry.event === "micro_executor_rule_blocked");
+
+test("ruleTimeframeBlockReason: nur ein Timeframe bis zum Ausführungsintervall ist auswertbar (10 × 10 Matrix)", () => {
+  // Orakel: der Index in der aufsteigend nach Dauer sortierten Allowlist (die
+  // Sortierung sichert tests/marketdata/timeframes.test.ts) — nicht dieselbe
+  // Millisekunden-Tabelle, die der Guard liest.
+  SUPPORTED_TIMEFRAMES.forEach((timeframe, t) => {
+    SUPPORTED_TIMEFRAMES.forEach((interval, i) => {
+      assert.equal(
+        ruleTimeframeBlockReason(timeframe, interval),
+        t > i ? "timeframe_exceeds_interval" : null,
+        `Regel ${timeframe} bei Ausführungsintervall ${interval}`,
+      );
+    });
+  });
+});
+
+test("ruleTimeframeBlockReason: alles außerhalb des Vokabulars ist fail-closed (timeframe_unsupported)", () => {
+  for (const raw of ["7d", "1H", "2h ", "", "1w", null, undefined, 15, {}, ["1h"]]) {
+    assert.equal(ruleTimeframeBlockReason(raw, "1h"), "timeframe_unsupported", JSON.stringify(raw));
+    assert.equal(ruleTimeframeBlockReason(raw, "5d"), "timeframe_unsupported", "auch beim größten Intervall");
+  }
+});
+
+test("Default-Ausführungsintervall ist 1h (bisheriges Maximum): 1m…1h werden ausgewertet, 2h…5d nicht", () => {
+  assert.equal(MICRO_EXECUTION_INTERVAL_DEFAULT, "1h");
+  const evaluable = SUPPORTED_TIMEFRAMES.filter(
+    (timeframe) => ruleTimeframeBlockReason(timeframe, MICRO_EXECUTION_INTERVAL_DEFAULT) === null,
+  );
+  assert.deepEqual(evaluable, ["1m", "3m", "5m", "15m", "30m", "1h"]);
+});
+
+test("Kein Schedule ist kürzer als die Timeframe-Dauer: jede Rolling-Serie aggregiert exakt auf die kanonische Periode", () => {
+  for (const timeframe of SUPPORTED_TIMEFRAMES) {
+    const ms = SUPPORTED_TIMEFRAME_MS[timeframe];
+    const t0 = 4_000 * ms; // auf die Periode ausgerichtet
+    const series = new RollingTimeframeSeries("BTC", timeframe);
+    // Bucket-Breite = Periode: die letzte Millisekunde gehört noch dazu, der Rand öffnet den nächsten.
+    assert.equal(series.bucketStart(t0 + ms - 1), t0, `${timeframe}: Ende des Buckets`);
+    assert.equal(series.bucketStart(t0 + ms), t0 + ms, `${timeframe}: Beginn des nächsten Buckets`);
+    // Verhalten: Ticks innerhalb der Periode bleiben EINE Kerze, erst der Periodenrand öffnet die nächste.
+    series.touch(100, t0, 1);
+    series.touch(100, t0 + ms - 60_000, 1);
+    assert.equal(series.size(), 1, `${timeframe}: noch dieselbe Kerze`);
+    series.touch(100, t0 + ms, 1);
+    assert.equal(series.size(), 2, `${timeframe}: der Periodenrand öffnet die nächste Kerze`);
+  }
+});
+
+test("Rolling-Serie: 3m läuft nicht still auf 15-Minuten-Kerzen; unbekannte Timeframes scheitern laut statt zu fallen", () => {
+  // Regression: `TIMEFRAME_MS[tf] ?? TIMEFRAME_MS["15m"]` kannte 3m/2h/4h/1d/5d nicht und
+  // hätte solche Regeln auf 15-Minuten-Kerzen ausgewertet — auf einem anderen Takt, als sie
+  // unterschrieben haben (derselbe Fehler wie bei 1m, CYCLE-DAYTRADE-01).
+  const threeMinutes = new RollingTimeframeSeries("BTC", "3m");
+  assert.equal(threeMinutes.bucketStart(179_999), 0);
+  assert.equal(threeMinutes.bucketStart(180_000), 180_000);
+  for (const unknown of ["7d", "", "1H", "1w"]) {
+    assert.throws(() => new RollingTimeframeSeries("BTC", unknown), RangeError, JSON.stringify(unknown));
+  }
+});
+
+test("Timeframe-Guard (Default 1h): 2h/4h/1d/5d werden sichtbar abgewiesen, 1m…1h bekommen ihre Serien", async () => {
+  await withGuardObservation(async (logs) => {
+    const cache = new RuleCache();
+    cache._seedForTest(SUPPORTED_TIMEFRAMES.map((timeframe) => ruleAt(timeframe, `rule-${timeframe}`)));
+    const executor = new MicroExecutor({ cache, adapter: new RecordingAdapter(), options: { seedCandles: false } });
+    await executor.start();
+    const status = executor.status();
+
+    assert.deepEqual(status.series.map((s) => s.timeframe).sort(), ["15m", "1h", "1m", "30m", "3m", "5m"]);
+    assert.equal(status.ruleGuard.executionInterval, "1h");
+    assert.deepEqual(
+      status.ruleGuard.blocked.map((b) => [b.ruleId, b.timeframe, b.reason]).sort(),
+      [
+        ["rule-1d", "1d", "timeframe_exceeds_interval"],
+        ["rule-2h", "2h", "timeframe_exceeds_interval"],
+        ["rule-4h", "4h", "timeframe_exceeds_interval"],
+        ["rule-5d", "5d", "timeframe_exceeds_interval"],
+      ],
+    );
+
+    // Je abgewiesener Regel genau ein Counter-Schritt und genau ein Log-Eintrag.
+    assert.equal(telemetry.microExecutor.ruleBlocked.total(), 4);
+    assert.deepEqual(telemetry.microExecutor.ruleBlocked.byLabel(), {
+      "reason=timeframe_exceeds_interval,timeframe=1d": 1,
+      "reason=timeframe_exceeds_interval,timeframe=2h": 1,
+      "reason=timeframe_exceeds_interval,timeframe=4h": 1,
+      "reason=timeframe_exceeds_interval,timeframe=5d": 1,
+    });
+    assert.deepEqual(blockedLogs(logs).map((entry) => entry.fields.timeframe).sort(), ["1d", "2h", "4h", "5d"]);
+
+    // Der Counter steht in der Exposition; Symbol und Regel-ID sind kein Label (Kardinalität).
+    const exposition = await prometheusMetrics({ firmState: null });
+    assert.match(
+      exposition,
+      /^micro_executor_rule_blocked_total\{reason="timeframe_exceeds_interval",timeframe="1d"\} 1$/m,
+    );
+    assert.doesNotMatch(exposition, /micro_executor_rule_blocked_total\{[^}]*(?:symbol|rule)/);
+    await executor.stop();
+  });
+});
+
+test("Timeframe-Guard: ein beschädigter Timeframe aus der DB wird fail-closed abgewiesen statt still auf 15m zu fallen", async () => {
+  await withGuardObservation(async (logs) => {
+    const cache = new RuleCache();
+    cache._seedForTest([ruleAt("7d", "rule-corrupt")]);
+    const adapter = new RecordingAdapter();
+    const executor = new MicroExecutor({ cache, adapter, options: { seedCandles: false } });
+    await executor.start();
+
+    assert.equal(executor.status().series.length, 0, "für einen unbekannten Timeframe entsteht keine Serie");
+    assert.deepEqual(telemetry.microExecutor.ruleBlocked.byLabel(), {
+      "reason=timeframe_unsupported,timeframe=OTHER": 1, // Label bleibt geschlossen: nie der Rohwert
+    });
+    const [entry] = blockedLogs(logs);
+    assert.equal(entry.fields.reason, "timeframe_unsupported");
+    assert.equal(entry.fields.timeframe, "7d", "der Rohwert steht im Log, nicht im Label");
+    await executor.stop();
+  });
+});
+
+test("addSymbol: Serien oberhalb des Ausführungsintervalls oder mit unbekanntem Timeframe lassen sich nicht anlegen", () => {
+  const executor = new MicroExecutor({ cache: new RuleCache(), adapter: new RecordingAdapter() });
+  assert.doesNotThrow(() => executor.addSymbol("BTC", "3m"));
+  assert.doesNotThrow(() => executor.addSymbol("BTC", "1h"));
+  for (const timeframe of ["2h", "4h", "1d", "5d", "7d", ""]) {
+    assert.throws(() => executor.addSymbol("BTC", timeframe), RangeError, JSON.stringify(timeframe));
+  }
+  assert.deepEqual(executor.status().series.map((s) => s.timeframe).sort(), ["1h", "3m"]);
+});
+
+test("executionInterval ist konfigurierbar; ein unbekanntes Intervall scheitert beim Bau statt den Guard auszuhebeln", async () => {
+  await withGuardObservation(async () => {
+    const cache = new RuleCache();
+    cache._seedForTest([ruleAt("5m", "rule-5m"), ruleAt("15m", "rule-15m")]);
+    const executor = new MicroExecutor({
+      cache,
+      adapter: new RecordingAdapter(),
+      options: { seedCandles: false, executionInterval: "5m" },
+    });
+    await executor.start();
+    const status = executor.status();
+    assert.deepEqual(status.series.map((s) => s.timeframe), ["5m"]);
+    assert.equal(status.ruleGuard.executionInterval, "5m");
+    assert.deepEqual(status.ruleGuard.blocked.map((b) => b.ruleId), ["rule-15m"]);
+    await executor.stop();
+  });
+  for (const bad of ["7d", "", "1H"]) {
+    assert.throws(
+      () => new MicroExecutor({ cache: new RuleCache(), adapter: new RecordingAdapter(), options: { executionInterval: bad as never } }),
+      RangeError,
+      JSON.stringify(bad),
+    );
+  }
+});
+
+test("Timeframe-Guard: bei gemischten Regeln eines Symbols feuert nur die auswertbare", async () => {
+  await withGuardObservation(async () => {
+    const cache = new RuleCache();
+    cache._seedForTest([ruleAt("1d", "rule-1d"), ruleAt("5m", "rule-5m")]);
+    const adapter = new RecordingAdapter();
+    const executor = new MicroExecutor({ cache, adapter, options: { seedCandles: false } });
+    executor.addSymbol("BTC", "5m", candles(120));
+
+    const start = 1_700_000_000_000 + 120 * 60_000;
+    executor.registerFeed(
+      new SequenceFeed(
+        Array.from({ length: 60 }, (_, i) => ({ kind: "trade" as const, symbol: "BTC", ts: start + i * 500, price: 97, qty: 10 })),
+      ),
+    );
+    await executor.start();
+
+    assert.ok(adapter.calls.length > 0, "die 5m-Regel feuert");
+    assert.deepEqual([...new Set(adapter.calls.map((call) => call.ruleId))], ["rule-5m"], "nie die 1d-Regel");
+    await executor.stop();
+  });
+});
+
+test("status().ruleGuard zeigt auch nach dem Start aktivierte Regeln — sie bekommen nie eine Serie", async () => {
+  await withGuardObservation(async () => {
+    const cache = new RuleCache();
+    cache._seedForTest([ruleAt("1m", "rule-1m")]);
+    const executor = new MicroExecutor({ cache, adapter: new RecordingAdapter(), options: { seedCandles: false } });
+    await executor.start();
+    assert.deepEqual(executor.status().ruleGuard.blocked, []);
+
+    // Cache-Refresh bringt eine 4h-Regel: sichtbar im Status, aber ohne Serie → nie ausgewertet.
+    cache._seedForTest([ruleAt("1m", "rule-1m"), ruleAt("4h", "rule-4h-late")]);
+    const status = executor.status();
+    assert.deepEqual(status.ruleGuard.blocked.map((b) => b.ruleId), ["rule-4h-late"]);
+    assert.deepEqual(status.series.map((s) => s.timeframe), ["1m"]);
+    await executor.stop();
+  });
+});
