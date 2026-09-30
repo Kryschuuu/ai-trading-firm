@@ -29,6 +29,54 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status: Beta.** Nächste Schritte: die optionale Feature-Store-Parität 02-04 und
 > der Template-Vertrag ab 03-01 (`v0.7.0`).
 
+### Added
+
+* **Template-Katalog + Registry-Validierung** (`src/strategies/catalog.ts`,
+  STX-03-02, Phase 3) — der Katalog prüft Templates **beim Import**, nicht erst
+  beim Backtest. Der gesamte Sicherheitswert hängt daran, dass eine kaputte
+  Strategie früher stirbt als eine kaputte Order.
+  * `STRATEGY_TEMPLATE_IDS` als **geschlossene Union** der sechs geplanten IDs
+    (`ema-adx-trend`, `macd-momentum`, `rsi-mean-reversion`,
+    `bollinger-squeeze`, `vwap-pullback`, `donchian-breakout`) plus
+    `StrategyTemplateId`, `isStrategyTemplateId()` und
+    `STRATEGY_TEMPLATE_ID_RE`. Die Templates selbst kommen in 03-03 … 03-08;
+    `STRATEGY_TEMPLATES` ist hier noch leer, aber bereits validiert.
+  * `validateTemplate(t)` liefert **fail-closed** eine Fehlerliste (leer =
+    gültig) über: ID-Format, Version (Ganzzahl ≥ 1), Klasse (in
+    `STRATEGY_CLASS_KEYS` **und** ungleich `unclassified`, ADR-008), Timeframes
+    (Allowlist, nicht leer, eindeutig), `requiredFields` (Whitelist), Params
+    (`min ≤ default ≤ max`, `step > 0`, eindeutiger `key`), `mapsTo`,
+    Assumptions (eindeutige ID, nicht leerer `statement`) und
+    `expectedRegimes` (genau die fünf `MarketRegime`, **ohne `UNKNOWN`** —
+    ADR-009).
+  * Der Builder wird als **reine Funktion der Parameter** geprüft (STX-05):
+    zweimal `buildRule(defaults)` muss tiefengleich sein, die Rückgabe ein
+    Objekt, jedes Bedingungs-`field` in `RULE_FIELDS`, `action.side`
+    ausschließlich `LONG` und **kein** Zahlenwert außerhalb `RULE_CEILINGS`.
+    Der Katalog liest die Deckel, er erweitert sie nicht — und er sanitized
+    nichts: `sanitizeRuleSpec()` (03-09) bleibt Pflicht.
+  * Lese-Helfer `getTemplate()`, `listTemplates()` und `templateByField()`
+    („welches Template nutzt `bbwPct`?“) — eine SSoT für Workshop-UI, CLI und
+    Tests.
+  * **Import-Zeit-Wächter:** `assertTemplatesValid()` läuft beim Modul-Import
+    und wirft bei einem ungültigen Template; ein kaputtes Template lässt den
+    Prozess nicht starten. Zusätzlich eine Canary gegen einen absichtlich
+    kaputten `__fixtures`-Fall — der Validator muss ihn beanstanden (sonst ist
+    er fail-open) und die gültige Fixture durchlassen (sonst überstreng).
+  * **Tests:** `tests/strategies.catalog.test.ts` mit 41 Negativfällen, je
+    genau einem erwarteten Fehler, plus Deckel-Grenztests gegen die **lebenden**
+    `RULE_CEILINGS` und Strukturwächtern (Fixtures nicht exportiert, kein
+    zweites Klassen-/Regime-Vokabular, kein LLM-/DB-Pfad).
+
+### Fixed
+
+* **ADR-010-Wächter** (`tests/adrVocabulary.test.ts`): Der Guard „keine
+  `MultiAssetStrategySpec` in `src/` und `scripts/`“ schlug seit 03-01 fehl —
+  ausgelöst von einem **Doc-Kommentar** in `src/strategies/types.ts`, der die
+  verworfene Spec beim Namen nannte. Der Kommentar verweist jetzt auf ADR-E3
+  (ADR-010) statt auf das Token; der Wächter selbst ist unverändert
+  vollstreng. `npm test` ist damit wieder grün.
+
 ## [0.6.5] — Donchian-Regelfeld (STX-02-03) (2026-09-30)
 
 > **Status: Beta, nicht produktionsreif.** Ein additives Regel-Feld und ein rein

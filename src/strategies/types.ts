@@ -33,7 +33,9 @@
  * definiert — Ableitungen (`Extract`) ja, neue Vokabulare nein.
  *
  * ── Warum KEIN `buildUniverseStrategy` (Entscheidung 3) ────────────────────
- * ADR-E3 (ADR-010) verweist `MultiAssetStrategySpec` aus diesem Repo:
+ * ADR-E3 (ADR-010) hat die Universe-Spec des Ausbaudokuments (§1.9) verworfen.
+ * (Der Wächter in `tests/adrVocabulary.test.ts` prüft jedes File unter `src/`
+ * auf deren Tokennamen — hier steht deshalb die Referenz, nicht der Token.)
  * Universe-Mitgliedschaft und Ranking besitzt `src/crossSectional/`
  * (versionierte, hash-identifizierte `CrossSectionalConfig` mit
  * `EligibilityConfig` und `horizons`, Point-in-Time-Snapshots, bewusst
