@@ -1,6 +1,9 @@
 /**
  * Technische Indikatoren für die Agenten-Prompts und dynamische Stops.
  * Bewusst klein und deterministisch — keine Bibliothek, kein Ballast.
+ * Donchian ist eine Higher-Timeframe-Logik für Ausbruchs-/Trendfolge-Systeme:
+ * Template 03-08 muss deshalb einen Mindest-Timeframe erzwingen. Der Kanal
+ * verwendet ausschließlich Kerzen VOR der aktuellen (Signal-)Kerze.
  */
 import type { Candle } from "./marketData";
 
@@ -115,6 +118,76 @@ export function bollingerBandWidthPct(
   const sd = Math.sqrt(Math.max(variance, 0));
   const width = (2 * mult * sd) / mean;
   return Number.isFinite(width) && width >= 0 ? width : null;
+}
+
+/**
+ * Bollinger-Bänder aus den letzten `period` Schlusskursen (inklusive der
+ * aktuellen Kerze). Einheit: Kurse für upper/middle/lower, Bruch für width
+ * und bandwidthPct (0.05 = 5 %, NICHT 5).
+ * SMA = Σ(close) / period; σ = √(Σ(close − SMA)² / period) (Population);
+ * upper/lower = SMA ± mult·σ; width = bandwidthPct = 2·mult·σ / SMA.
+ * Die letzte Form ist algebraisch (upper − lower) / middle und verwendet
+ * bewusst dieselbe Rechenreihenfolge wie bollingerBandWidthPct: so ist die
+ * Bandbreite bei gleichen gültigen Parametern bitgenau identisch, ohne die
+ * bestehende Funktion zu verändern (Rundung von upper − lower kann abweichen).
+ * LLM-Parameter werden geklemmt: period 5…200, mult 1…4.
+ */
+export interface BollingerReading {
+  upper: number;
+  middle: number;
+  lower: number;
+  width: number;
+  bandwidthPct: number;
+}
+
+export function bollingerBands(closes: number[], period = 20, mult = 2): BollingerReading | null {
+  if (!Array.isArray(closes) || !Number.isFinite(period) || !Number.isFinite(mult)) return null;
+  period = Math.trunc(Math.min(200, Math.max(5, period)));
+  mult = Math.min(4, Math.max(1, mult));
+  if (closes.length < period) return null;
+  const slice = closes.slice(-period);
+  const middle = slice.reduce((sum, close) => sum + close, 0) / period;
+  if (!Number.isFinite(middle) || middle <= 0) return null;
+  const variance = slice.reduce((sum, close) => sum + (close - middle) ** 2, 0) / period;
+  const sd = Math.sqrt(Math.max(variance, 0));
+  const upper = middle + mult * sd;
+  const lower = middle - mult * sd;
+  const width = (2 * mult * sd) / middle;
+  if (![upper, lower, width].every(Number.isFinite) || width < 0) return null;
+  return { upper, middle, lower, width, bandwidthPct: width };
+}
+
+/**
+ * Donchian-Kanal für Higher-Timeframe-Ausbrüche/Trendfolge (Template 03-08
+ * muss einen Mindest-Timeframe definieren). Einheit: Kurswerte.
+ * upper = max(high) der vorherigen entryPeriod Kerzen;
+ * lower = min(low) der vorherigen exitPeriod Kerzen; mid = (upper + lower) / 2.
+ * Die aktuelle Kerze bleibt ausdrücklich außen vor: erst ihr Schlusskurs
+ * bestätigt den Ausbruch gegen den *vorher* bekannten Kanal. Mit ihrem High
+ * im upper wäre der Breakout in derselben Kerze eingebaut (Lookahead-Bug).
+ * LLM-Parameter: entryPeriod 5…200, exitPeriod 3…100 und höchstens entryPeriod.
+ */
+export interface DonchianReading {
+  upper: number;
+  lower: number;
+  mid: number;
+}
+
+export function donchianChannel(
+  candles: Candle[], entryPeriod = 20, exitPeriod = 10,
+): DonchianReading | null {
+  if (!Array.isArray(candles) || !Number.isFinite(entryPeriod) || !Number.isFinite(exitPeriod)) return null;
+  entryPeriod = Math.trunc(Math.min(200, Math.max(5, entryPeriod)));
+  exitPeriod = Math.min(entryPeriod, Math.trunc(Math.min(100, Math.max(3, exitPeriod))));
+  if (candles.length < entryPeriod + 1) return null;
+  const previous = candles.slice(-(entryPeriod + 1), -1);
+  const exits = previous.slice(-exitPeriod);
+  if (previous.some((c) => !c || !Number.isFinite(c.high)) ||
+      exits.some((c) => !c || !Number.isFinite(c.low))) return null;
+  const upper = Math.max(...previous.map((c) => c.high));
+  const lower = Math.min(...exits.map((c) => c.low));
+  const mid = (upper + lower) / 2;
+  return Number.isFinite(mid) ? { upper, lower, mid } : null;
 }
 
 /**
