@@ -215,6 +215,8 @@ const snap: RuleSnapshot = {
   bbZScore: -1.2,
   priceVsUpperBbPct: -4.5,
   priceVsLowerBbPct: 1.3,
+  // STX-02-03: Pflichtfeld des Snapshots (Donchian-Ausbruch in Prozent).
+  donchianBreakoutPct: -1.4,
   macd: -0.4,
   macdSignal: -0.2,
   macdHist: -0.2,
@@ -1143,4 +1145,228 @@ test("STX-02-02: Kompilierung liest die neuen Felder aus dem Snapshot (Accessor 
   assert.equal(compiled.evaluate({ ...snap, priceVsUpperBbPct: null }), false);
   assert.equal(compiled.evaluate({ ...snap, priceVsLowerBbPct: null }), false);
   assert.equal(compiled.evaluate({ ...snap, bbZScore: 0.5 }), false, "über der Obergrenze des between");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STX-02-03 — Donchian-Regelfeld (donchianBreakoutPct)
+//
+// Ein Feld, vier Stellen: Katalog, `RuleSnapshot` + Direktpfad, LLM-Schema und
+// der Indikator-Cache. Bezug ist das Kanalhoch der VORIGEN 20 Kerzen
+// (`entryPeriod = 20`, STX-02-01) — die aktuelle Signalkerze ist nie Teil des
+// Kanals (kein Look-ahead). Die Fensterlänge ist kein Regelfeld, sondern
+// Template-Parameter (03-08). Die Parität Direktpfad ↔ Indikator-Cache prüft
+// `tests/backtest.multiAsset.test.ts`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  DONCHIAN_ENTRY_PERIOD,
+  DONCHIAN_EXIT_PERIOD,
+  donchianBreakoutPct,
+  donchianChannel,
+} from "../src/lib/indicators";
+
+/**
+ * Streng monoton steigende Kerzen. Die Schrittweite ist größer als der
+ * Docht-Aufschlag, deshalb liegt jeder Schlusskurs über dem Hoch der
+ * Vorkerze — in dieser Reihe ist die Kerze VOR dem Signal immer das Kanalhoch.
+ */
+function risingCandles(n: number, step = 2): CandleLike[] {
+  return Array.from({ length: n }, (_, i) => {
+    const close = 100 + step * i;
+    return {
+      time: 1_700_000_000_000 + i * 3_600_000,
+      open: close - step / 2,
+      high: close * 1.005,
+      low: close * 0.99,
+      close,
+      volume: 1000 + (i % 5) * 100,
+    };
+  });
+}
+
+test("STX-02-03: das Feld steht in RULE_FIELDS, RULE_FIELD_LABELS und im LLM-Schema", () => {
+  assert.equal(RULE_FIELDS.donchianBreakoutPct, "number");
+  assert.ok(RULE_FIELD_SCHEMA_HINTS.donchianBreakoutPct, "LLM-Hinweis (Einheit + typische Werte)");
+  // Das Label muss den Bezug auf die VORIGEN Kerzen nennen — der Wert liest
+  // sich sonst wie ein Intraday-Hoch der laufenden Kerze.
+  assert.match(RULE_FIELD_LABELS.donchianBreakoutPct, /vorigen 20 Kerzen/i);
+  assert.match(RULE_FIELD_LABELS.donchianBreakoutPct, /Prozent/);
+
+  const schema = RULE_LLM_SCHEMA as {
+    properties: {
+      condition: {
+        properties: { conditions: { items: { properties: { field: { enum: string[]; description: string } } } } };
+      };
+    };
+  };
+  const fieldProp = schema.properties.condition.properties.conditions.items.properties.field;
+  assert.ok(fieldProp.enum.includes("donchianBreakoutPct"), "Feld fehlt im Schema-enum");
+  assert.ok(fieldProp.description.includes("donchianBreakoutPct"), "Feld fehlt in der Schema-Beschreibung");
+  assert.ok(
+    fieldProp.description.includes(RULE_FIELD_SCHEMA_HINTS.donchianBreakoutPct!),
+    "Einheit/typische Werte fehlen in der Schema-Beschreibung",
+  );
+  // null-Semantik steht im Schema-Text (fail-closed, keine erfundene 0).
+  assert.match(fieldProp.description, /unter 21 Kerzen/);
+  assert.match(fieldProp.description, /keine 0/);
+  // Bestehende Felder unverändert im enum.
+  for (const field of ["bbwPct", "bbZScore", "priceVsUpperBbPct", "rsi14", "vwapPct"]) {
+    assert.ok(fieldProp.enum.includes(field), `${field} fehlt im enum`);
+  }
+});
+
+test("STX-02-03: sanitizeRuleSpec akzeptiert das Feld (case-insensitiv); Donchian-Nachbarn bleiben verworfen", () => {
+  const r = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "DONCHIANBREAKOUTPCT", op: "gt", value: 0 }] },
+  });
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.deepEqual(r.spec.condition.conditions, [{ field: "donchianBreakoutPct", op: "gt", value: 0 }]);
+
+  // Nur das eine Feld kommt durch: keine zweite Donchian-Variante, keine
+  // Fenster-Parameter im Regelwerk (die gehören ins Template 03-08).
+  for (const field of ["donchianBreakout", "donchianUpper", "donchianChannel", "donchianPct", "donchianPeriod"]) {
+    const bad = sanitizeRuleSpec({
+      ...validInput,
+      condition: { logic: "all", conditions: [{ field, op: "gt", value: 1 }] },
+    });
+    assert.equal(bad.ok, false, `${field} darf nicht durchkommen`);
+    if (!bad.ok) assert.ok(bad.errors.some((e) => e.includes("unbekanntes Feld")), field);
+  }
+});
+
+test("STX-02-03: Lookahead-Test — Wert erst ab der Kerze nach dem Kanalhoch, davor null (nie 0)", () => {
+  const candles = risingCandles(60);
+
+  // Vor der 21. Kerze gibt es keinen Kanal (entryPeriod + 1): null, nicht 0.
+  for (let i = 0; i < DONCHIAN_ENTRY_PERIOD; i++) {
+    const reading = donchianChannel(candles.slice(0, i + 1), DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD);
+    const value = donchianBreakoutPct(candles[i].close, reading?.upper);
+    assert.equal(reading, null, `idx ${i}: noch kein Kanal`);
+    assert.equal(value, null, `idx ${i}: null statt Wert`);
+    assert.notEqual(value, 0, `idx ${i}: nie 0`);
+  }
+
+  // Ab der Kerze NACH dem Kanalhoch (Index 20) ist der Wert positiv — und er
+  // bezieht sich exakt auf das Hoch der VORIGEN Kerze, nicht auf die aktuelle.
+  for (let i = DONCHIAN_ENTRY_PERIOD; i < candles.length; i++) {
+    const reading = donchianChannel(candles.slice(0, i + 1), DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD);
+    assert.ok(reading, `idx ${i}: Kanal vorhanden`);
+    assert.equal(reading.upper, candles[i - 1].high, `idx ${i}: Kanalhoch = Hoch der vorigen 20 Kerzen`);
+    const value = donchianBreakoutPct(candles[i].close, reading.upper);
+    assert.ok(value != null && value > 0, `idx ${i}: Ausbruch muss positiv sein, war ${value}`);
+    assert.equal(
+      Number(value!.toFixed(4)),
+      Number((((candles[i].close / candles[i - 1].high) - 1) * 100).toFixed(4)),
+      `idx ${i}: Formel (close / voriges Kanalhoch − 1) · 100`,
+    );
+  }
+
+  // Derselbe Wert im Snapshot, auf 4 Dezimalstellen wie `bbwPct`.
+  const snapshot = buildSnapshotFromCandles("BTC", candles, 20)!;
+  assert.equal(
+    snapshot.donchianBreakoutPct,
+    Number((((candles[59].close / candles[58].high) - 1) * 100).toFixed(4)),
+  );
+  assert.ok(snapshot.donchianBreakoutPct! > 0);
+});
+
+test("STX-02-03: kein Look-ahead — der Ausbruch der Signalkerze zählt nicht in den Kanal", () => {
+  // 24 flache Kerzen (Hoch 100,5) und eine Ausbruchskerze mit Hoch 130.
+  const flat = Array.from({ length: 24 }, (_, i) => ({
+    time: 1_700_000_000_000 + i * 3_600_000,
+    open: 100,
+    high: 100.5,
+    low: 99.5,
+    close: 100,
+    volume: 1000,
+  })) as CandleLike[];
+  const last = flat[flat.length - 1];
+  flat.push({ ...last, time: last.time + 3_600_000, open: 100, high: 130, low: 100, close: 125 });
+
+  const snapshot = buildSnapshotFromCandles("BTC", flat, 20)!;
+  // Bezug ist das vorige Kanalhoch (100,5), NICHT das Hoch der Signalkerze (130).
+  assert.equal(snapshot.donchianBreakoutPct, Number((((125 / 100.5) - 1) * 100).toFixed(4)));
+  assert.ok(snapshot.donchianBreakoutPct! > 20, "Ausbruch über den vorher bekannten Kanal");
+  assert.notEqual(
+    snapshot.donchianBreakoutPct,
+    Number((((125 / 130) - 1) * 100).toFixed(4)),
+    "Look-ahead (aktuelles Hoch im Kanal) würde den Ausbruch verstecken",
+  );
+});
+
+test("STX-02-03: null bei zu wenig Historie bzw. upper <= 0 — nie eine erfundene 0", () => {
+  // Kanal braucht entryPeriod + 1 = 21 Kerzen; darunter gibt es keinen Bezug.
+  const short = risingCandles(20);
+  assert.equal(donchianChannel(short, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD), null);
+  assert.equal(donchianBreakoutPct(short[short.length - 1].close, donchianChannel(short)?.upper), null);
+  assert.equal(donchianBreakoutPct(short[short.length - 1].close, undefined), null);
+  assert.notEqual(donchianBreakoutPct(short[short.length - 1].close, undefined), 0);
+
+  // Nicht-positives Kanalhoch ist kein Bezug (kein Kursniveau über 0).
+  assert.equal(donchianBreakoutPct(-5, -4), null);
+  assert.equal(donchianBreakoutPct(-5, 0), null);
+
+  // Negative Kursreihe: Snapshot existiert, das Donchian-Feld bleibt null.
+  const negative = makeCandles(60).map((c) => ({ ...c, open: -5, high: -4, low: -6, close: -5 }));
+  const snapshot = buildSnapshotFromCandles("BTC", negative, 20)!;
+  assert.equal(snapshot.donchianBreakoutPct, null);
+  assert.notEqual(snapshot.donchianBreakoutPct, 0);
+
+  // Cache-Pfad: vor dem 21. Bar kein Kanalhoch — null, nie 0.
+  const cache = buildIndicatorCache(risingCandles(60));
+  for (let i = 0; i < DONCHIAN_ENTRY_PERIOD; i++) {
+    assert.equal(cache.donchianUpper[i], null, `Cache idx ${i}`);
+    assert.notEqual(cache.donchianUpper[i], 0, `Cache idx ${i}: nie 0`);
+  }
+  assert.equal(cache.donchianUpper[DONCHIAN_ENTRY_PERIOD], risingCandles(60)[DONCHIAN_ENTRY_PERIOD - 1].high);
+});
+
+test("STX-02-03: eine echte 0 bleibt ein Messwert — Kurs exakt auf dem Kanalhoch", () => {
+  const flat = flatCandles(60);
+  const snapshot = buildSnapshotFromCandles("BTC", flat, 20)!;
+  assert.equal(snapshot.donchianBreakoutPct, 0, "0 = Kurs genau am Kanalhoch, kein Ausfall");
+});
+
+test("STX-02-03: der O(n)-Cache liefert Bar für Bar dasselbe Kanalhoch wie donchianChannel()", () => {
+  const seriesByName = [["steigend", risingCandles(80)], ["wellig", bandCandles(80)]] as const;
+  for (const [name, series] of seriesByName) {
+    const cache = buildIndicatorCache(series);
+    for (let i = 0; i < series.length; i++) {
+      const reading =
+        i + 1 >= DONCHIAN_ENTRY_PERIOD + 1
+          ? donchianChannel(series.slice(0, i + 1), DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD)
+          : null;
+      assert.equal(cache.donchianUpper[i], reading ? reading.upper : null, `${name} idx ${i}`);
+    }
+  }
+});
+
+test("STX-02-03: der Cache rechnet das Kanalhoch in O(n) — kein Fenster-Math.max je Bar", () => {
+  // Statischer Beleg (Muster Quelle-Review): Der Donchian-Block läuft über eine
+  // monotone Deque. Ein `Math.max(...fenster)` je Bar wäre O(n · 20) und würde
+  // die STX-12-Regression in den Backtest-Pfad zurückbringen.
+  const source = readFileSync(resolve(process.cwd(), "src/backtest/indicatorCache.ts"), "utf8");
+  const start = source.indexOf("function donchianUpperArray");
+  const end = source.indexOf("function macdArray");
+  assert.ok(start > 0 && end > start, "donchianUpperArray gefunden");
+  const body = source.slice(start, end);
+  assert.ok(body.includes("deque"), "laufendes Maximum über eine Deque");
+  assert.equal(/Math\.max\s*\(\s*\.\.\./.test(body), false, "kein Math.max(...slice) pro Bar");
+  assert.equal(body.includes(".slice("), false, "kein Fenster-Slice pro Bar");
+  assert.equal(body.includes(".shift("), false, "kein Array.shift (wäre O(n) je Bar)");
+});
+
+test("STX-02-03: Kompilierung liest das Feld aus dem Snapshot (Accessor) — null blockiert fail-closed", () => {
+  const rule = sanitizeRuleSpec({
+    ...validInput,
+    condition: { logic: "all", conditions: [{ field: "donchianBreakoutPct", op: "gt", value: 0 }] },
+  });
+  assert.equal(rule.ok, true);
+  if (!rule.ok) return;
+  const compiled = compileRuleSpec(rule.spec);
+  assert.equal(compiled.evaluate({ ...snap, donchianBreakoutPct: 1.5 }), true);
+  assert.equal(compiled.evaluate({ ...snap, donchianBreakoutPct: 0 }), false, "0 ist kein Ausbruch");
+  assert.equal(compiled.evaluate({ ...snap, donchianBreakoutPct: null }), false, "null blockiert (fail-closed)");
 });

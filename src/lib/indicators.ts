@@ -215,6 +215,21 @@ export function bollingerPosition(
 }
 
 /**
+ * Kanonische Donchian-Fenster (STX-02-01/02-03): 20 Kerzen für den Einstieg
+ * (Kanalhoch) und 10 für den Ausstieg (Kanaltief), jeweils ohne die aktuelle
+ * Signalkerze. Sie sind die **Snapshot-Definition** des Regelfelds
+ * `donchianBreakoutPct`: Der Wert bedeutet in jedem Template „Abstand zum Hoch
+ * der vorigen 20 Kerzen“.
+ *
+ * Die Periode ist ausdrücklich **kein Regelfeld**. Wer eine andere Fensterlänge
+ * handeln will, übergibt sie an den Kanal (`donchianChannel(..., entryPeriod)`)
+ * im Template 03-08 — sonst wäre derselbe Feldwert je Strategie etwas anderes.
+ * Das Feld selbst bleibt dadurch marktneutral und unverändert interpretierbar.
+ */
+export const DONCHIAN_ENTRY_PERIOD = 20;
+export const DONCHIAN_EXIT_PERIOD = 10;
+
+/**
  * Donchian-Kanal für Higher-Timeframe-Ausbrüche/Trendfolge (Template 03-08
  * muss einen Mindest-Timeframe definieren). Einheit: Kurswerte.
  * upper = max(high) der vorherigen entryPeriod Kerzen;
@@ -223,6 +238,8 @@ export function bollingerPosition(
  * bestätigt den Ausbruch gegen den *vorher* bekannten Kanal. Mit ihrem High
  * im upper wäre der Breakout in derselben Kerze eingebaut (Lookahead-Bug).
  * LLM-Parameter: entryPeriod 5…200, exitPeriod 3…100 und höchstens entryPeriod.
+ * Defaults sind die kanonischen Snapshot-Fenster `DONCHIAN_ENTRY_PERIOD` /
+ * `DONCHIAN_EXIT_PERIOD` (20/10).
  */
 export interface DonchianReading {
   upper: number;
@@ -231,7 +248,7 @@ export interface DonchianReading {
 }
 
 export function donchianChannel(
-  candles: Candle[], entryPeriod = 20, exitPeriod = 10,
+  candles: Candle[], entryPeriod = DONCHIAN_ENTRY_PERIOD, exitPeriod = DONCHIAN_EXIT_PERIOD,
 ): DonchianReading | null {
   if (!Array.isArray(candles) || !Number.isFinite(entryPeriod) || !Number.isFinite(exitPeriod)) return null;
   entryPeriod = Math.trunc(Math.min(200, Math.max(5, entryPeriod)));
@@ -245,6 +262,34 @@ export function donchianChannel(
   const lower = Math.min(...exits.map((c) => c.low));
   const mid = (upper + lower) / 2;
   return Number.isFinite(mid) ? { upper, lower, mid } : null;
+}
+
+/**
+ * Donchian-Ausbruch in Prozent — die Formel des Regelfelds
+ * `donchianBreakoutPct` (STX-02-03), hier an genau einer Stelle:
+ *
+ *   `(close / upper − 1) · 100`
+ *
+ * `upper` ist das Kanalhoch der **vorigen** `DONCHIAN_ENTRY_PERIOD` Kerzen
+ * (`donchianChannel(...)`, ohne Signalkerze). `> 0` heißt damit „Schlusskurs
+ * über dem vorher bekannten Kanalhoch“ — der Ausbruch am Folgetag, nicht ein
+ * Look-ahead auf das Hoch der aktuellen Kerze.
+ *
+ * `null` — nie eine erfundene 0 — bei: fehlendem Kanal (`upper == null`, also
+ * zu wenig Historie oder ungültige Werte im Fenster), `upper <= 0` (es gibt
+ * kein Kanalhoch als Bezug) oder nicht-positivem/nicht-endlichem `close`.
+ * Eine echte `0` bleibt möglich und heißt „Schlusskurs exakt auf dem
+ * Kanalhoch“ — ein Messwert, kein Ausfall.
+ *
+ * Der Rückgabewert ist roh (Prozent, ungerundet); die Snapshot-Pfade runden
+ * auf dieselbe 4. Dezimalstelle wie `bbwPct` (`buildSnapshotFromCandles`,
+ * `snapshotFromCache`).
+ */
+export function donchianBreakoutPct(close: number, upper: number | null | undefined): number | null {
+  if (upper == null || !Number.isFinite(upper) || upper <= 0) return null;
+  if (!Number.isFinite(close) || close <= 0) return null;
+  const pct = (close / upper - 1) * 100;
+  return Number.isFinite(pct) ? pct : null;
 }
 
 /**

@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.3` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); 02-01 abgeschlossen, Phase 2 noch offen; Gate G1 seit `v1.1.2`)
+- **Audit-Version:** `v1.1.5` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); 02-01…02-03 abgeschlossen — Phase 2 fachlich fertig, offen nur der optionale Slice 02-04; Gate G1 seit `v1.1.2`)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.6.4 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fortgeschritten: 02-01 (`v0.6.3`, Formeln) und 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) abgeschlossen, 02-03 (Donchian-Feld) offen
+- **Code-Version:** `package.json` v0.6.5 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
+- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fachlich abgeschlossen: 02-01 (`v0.6.3`, Formeln), 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) und 02-03 (`v0.6.5`, Donchian-Regelfeld + Paritätstest) umgesetzt; offen nur der optionale Feature-Store-Slice 02-04
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -25,8 +25,8 @@
 | HIGH | 5 | 1 | 2 | 2 |
 | MEDIUM | 7 | 4 | 3 | 0 |
 | LOW | 4 | 3 | 0 | 1 |
-| INFO | 3 | 2 | 1 | 0 |
-| **Σ** | **19** | **10** | **6** | **3** |
+| INFO | 3 | 2 | 0 | 1 |
+| **Σ** | **19** | **10** | **5** | **4** |
 
 > **Kein CRITICAL.** Das Ausbaudokument enthält **keinen** Vorschlag, der eine bestehende
 > Sicherheitsgrenze weicht. Die HIGH-Funde sind **Integrations- und Duplikationsrisiken**,
@@ -53,7 +53,7 @@
 | [STX-15](findings/STX-15-scanner-faktorzahl.md) | Faktenkorrektur: 14 aktive Faktoren, nicht „15+" | LOW | FIXED (00-02) |
 | [STX-16](findings/STX-16-copy-trading-compliance.md) | Copy-Trading verschiebt das Compliance-/Haftungsprofil des Projekts | LOW | OPEN |
 | STX-17 | Bestätigt: Validator-Agent passt in das bestehende Evidence-Modell | INFO | OPEN |
-| STX-18 | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | IN ARBEIT (Bollinger-Teil 02-02, `v0.6.4`; Donchian folgt 02-03) |
+| STX-18 | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT (Feldseite): Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); Templates 03-03…03-08 offen |
 | STX-19 | Bestätigt: kein Kafka empfohlen — Einwand des Dokuments trägt | INFO | OPEN |
 
 ## Executive Summary
@@ -91,8 +91,12 @@ Siehe [`ROADMAP.md`](ROADMAP.md) (8 Phasen, 32 Prompts),
 **Umsetzungsstand:** 02-01 (`v0.6.3`) liefert reine Bandlevel und den
 Donchian-Kanal ohne Signalkerze; 02-02 (`v0.6.4`) schließt den Bollinger-Teil der
 Rule-Felder an — `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` in beiden
-Snapshot-Pfaden, mit Paritätstest und Golden-Hash. Das Donchian-Feld (`donchianBreakoutPct`)
-folgt in 02-03; Templates bleiben der nächsten Phase vorbehalten.
+Snapshot-Pfaden, mit Paritätstest und Golden-Hash. 02-03 (`v0.6.5`) schließt den
+Donchian-Teil an: `donchianBreakoutPct` (Abstand zum Hoch der **vorigen** 20
+Kerzen, kein Look-ahead) in beiden Snapshot-Pfaden, mit Lookahead-Test,
+O(n)-Cache-Beleg und Paritätstest über drei Symbole. Damit ist die **Feldseite
+aller sieben Strategie-Vorschläge** abgedeckt; Templates bleiben der nächsten
+Phase vorbehalten (03-01…03-08), der Feature-Store-Slice 02-04 ist optional.
 Phase 1 ist abgeschlossen (Gate **G1** erfüllt, `v0.6.2`): 01-01 hob den Timeframe-Blocker —
 `RuleWindow.timeframe` trägt alle zehn `SUPPORTED_TIMEFRAMES` (ein Vokabular, `1m…1h` byte-identisch), der
 Mikro-Executor weist längere Timeframes fail-closed und sichtbar ab ([STX-01](findings/STX-01-rule-timeframe-blocker.md),

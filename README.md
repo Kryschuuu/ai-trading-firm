@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.6.4 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.6.5 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.6.4** (Beta, 2026-09-30; Baseline war v0.1.0) |
+| Version | **v0.6.5** (Beta, 2026-09-30; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -53,9 +53,11 @@ Risikogrenzen im Code**.
 Seit **v0.6.4** sind die Bollinger-Regelfelder `bbZScore`, `priceVsUpperBbPct` und
 `priceVsLowerBbPct` verfügbar (Lage im Band statt Breite; Einheiten, `null`-Semantik und
 „Squeeze → Breakout“: [BACKTESTING.md §1.2](docs/BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)).
-`src/lib/indicators.ts` liefert zusätzlich Bollinger-Bandlevel (`v0.6.3`) und den
-Donchian-Kanal ohne aktuelle Signalkerze; Letzteres wird erst mit 02-03 ein Regelfeld,
-ausführbare Templates folgen in Phase 3. Details:
+Seit **v0.6.5** ist auch der Donchian-Ausbruch regelformulierbar (`donchianBreakoutPct` =
+Abstand zum Hoch der **vorigen** 20 Kerzen, ohne Signalkerze — kein Look-ahead;
+[BACKTESTING.md §1.3](docs/BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065)).
+`src/lib/indicators.ts` liefert dazu Bollinger-Bandlevel und den Donchian-Kanal
+(`v0.6.3`); ausführbare Templates folgen in Phase 3. Details:
 [Strategie-Stack](docs/architecture/STRATEGY_STACK.md).
 
 ## Voraussetzungen
@@ -199,13 +201,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.6.4, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.6.5, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.6.4), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.6.5), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)

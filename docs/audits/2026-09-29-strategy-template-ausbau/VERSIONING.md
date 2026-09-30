@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.3` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.5` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fortgeschritten (02-01 `v0.6.3`, 02-02 `v0.6.4`) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -34,6 +34,7 @@
 | `v1.1.2` | 2026-09-29 | 01-01 umgesetzt (`v0.6.2`): STX-01 behoben, Gate G1 erfüllt; Befundkorrekturen an STX-01 (`sessionVwap` war auf `1d` bereits fail-closed; `sanitizeRuleSpec` fällt auf `15m` statt zu „verwerfen“ und kleinschreibt `"1H"`); OP-1 mit Default beantwortet |
 | `v1.1.3` | 2026-09-30 | 02-01 umgesetzt (`v0.6.3`): reine Bollinger-/Donchian-Formeln, Rule-Felder/Cache weiter offen; kein Finding geschlossen |
 | `v1.1.4` | 2026-09-30 | 02-02 umgesetzt (`v0.6.4`): Bollinger-Regelfelder + Paritäts-/Golden-Test; STX-18 zur Hälfte erledigt (Donchian folgt 02-03) |
+| `v1.1.5` | 2026-09-30 | 02-03 umgesetzt (`v0.6.5`): Donchian-Regelfeld + Lookahead-/O(n)-/Paritätstest; STX-18-Feldseite vollständig (Templates offen) |
 
 ## 2. Release-Plan der Roadmap
 
@@ -48,7 +49,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.6.2` | **Timeframe-Angleichung** (STX-01, ausgeliefert 2026-09-29) | 01-01 | Minor (neue Felder im Vokabular) | **Beta** |
 | `v0.6.3` | Indikatoren: `bollingerBands`, `donchianChannel` (ausgeliefert 2026-09-30) | 02-01 | Minor (additive pure Funktionen) | **Beta** |
 | `v0.6.4` | Bollinger-Regelfelder + Parität (ausgeliefert 2026-09-30) | 02-02 | Minor (3 Felder) | **Beta** |
-| `v0.6.5` | Donchian-Regelfeld + Parität | 02-03 | Minor (1 Feld) | **Beta** |
+| `v0.6.5` | **Donchian-Regelfeld + Parität** (ausgeliefert 2026-09-30) | 02-03 | Minor (1 Feld) | **Beta** |
 | `v0.7.0` | **Template-Vertrag** (`types.ts`, Katalog, Validierung) | 03-01, 03-02 | Minor (neue Domäne) | **Beta** |
 | `v0.7.1` | Template EMA/ADX + Compiler + Tests | 03-03, 03-09*, 03-10* | Minor | **Beta** |
 | `v0.7.2` | Template MACD | 03-04 | Minor | **Beta** |
@@ -112,7 +113,7 @@ Roadmap sind drei echte Bruchstellen vorgesehen — alle drei bewusst:
 | Bruchstelle | Release | Was bricht | Migrationspfad |
 | --- | --- | --- | --- |
 | `RuleWindow.timeframe` wird von 5 auf 10 Werte erweitert | `v0.6.2` (umgesetzt) | Code, der `ALLOWED_TIMEFRAMES` als geschlossene Menge behandelt | `RULE_ALLOWED_TIMEFRAMES` ist jetzt exportiert und aus `SUPPORTED_TIMEFRAMES` abgeleitet; der Mikro-Executor wertet weiter nur bis `1h` aus (Timeframe-Guard) |
-| `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.4`/`v0.6.5` | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet |
+| `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.4`/`v0.6.5` (umgesetzt) | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet (Bollinger- und Donchian-Feld, Bar für Bar) |
 | `COPY_MODE`-Enum existiert | `v0.11.0` | Kein bestehender Code (Modul ist neu) | keine |
 
 ## 5. Offene Versionsfragen

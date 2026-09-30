@@ -223,6 +223,19 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    samt Beispielwerten in
    [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064).
 
+   Seit `v0.6.5` steht dort zusätzlich das **Donchian-Feld** (STX-02-03):
+   *Kurs vs. Hoch der vorigen 20 Kerzen (Donchian), Prozent (positiv = Ausbruch
+   darüber)* (`donchianBreakoutPct`) = `(close / voriges Kanalhoch − 1) · 100`.
+   Der Name des Labels ist Programm: Bezug ist das Hoch der **vorigen** 20 Kerzen
+   — die laufende Kerze ist nicht im Kanal, der Wert ist also kein Intraday-Hoch
+   der aktuellen Kerze, sondern der Abstand zum *vorher bekannten* Kanal (kein
+   Look-ahead). `null` unter 21 Kerzen oder wenn das Kanalhoch nicht positiv ist —
+   null blockiert die Bedingung (fail-closed), es ist keine 0; eine echte 0 heißt
+   „Schlusskurs exakt auf dem Kanalhoch“. Die Periode (20) ist **kein Regelfeld**:
+   sie ist Snapshot-Definition, das Donchian-Template (03-08) parametrisiert den
+   Kanal und muss einen Mindest-Timeframe erzwingen. Details und Beispiel-Regel:
+   [BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065).
+
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung
 (`src/components/workshop/InfoTip.tsx`), zusätzlich hängt der Text als
 `sr-only`-Element im DOM und im nativen `title` — Screen Reader lesen ihn

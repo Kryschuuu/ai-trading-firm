@@ -157,6 +157,7 @@ const matchingSnap = {
   adx14: null,
   bbwPct: null,
   bbZScore: null, priceVsUpperBbPct: null, priceVsLowerBbPct: null,
+  donchianBreakoutPct: null,
   macd: null,
   macdSignal: null,
   macdHist: null,

@@ -21,13 +21,62 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.4** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.5** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: 02-03 (Donchian-Regelfeld, `v0.6.5`) und
+> **Status: Beta.** Nächste Schritte: die optionale Feature-Store-Parität 02-04 und
 > der Template-Vertrag ab 03-01 (`v0.7.0`).
+
+## [0.6.5] — Donchian-Regelfeld (STX-02-03) (2026-09-30)
+
+> **Status: Beta, nicht produktionsreif.** Ein additives Regel-Feld und ein rein
+> additiv gepflegter Indikator-Cache; **keine** Migration, keine Änderung an
+> bestehenden Feldern, Labels oder Werten, kein neues Verhalten ohne
+> Donchian-Feld.
+
+### Added
+
+* **Regel-Feld `donchianBreakoutPct`** (`src/lib/ruleFieldCatalog.ts`,
+  `src/lib/ruleEngine.ts`) — der letzte der sieben Strategie-Vorschläge, der
+  ohne neues Feld nicht ausdrückbar war:
+  * `(close / upper − 1) · 100`, wobei `upper` das **Donchian-Kanalhoch der
+    vorigen 20 Kerzen** ist (`DONCHIAN_ENTRY_PERIOD`, ausdrücklich ohne die
+    aktuelle Signalkerze — kein Look-ahead, STX-02-01). `> 0` = Ausbruch über
+    den vorher bekannten Kanal; marktneutral, weil relativ.
+  * Deutsche Labels mit Einheit im Text; der LLM-Hinweis in
+    `RULE_FIELD_SCHEMA_HINTS` nennt Bezug, typische Werte und die
+    `null`-Semantik (`Object.keys(RULE_FIELDS)` bleibt das Schema-`enum`).
+  * `null` — nie eine erfundene 0 — unter 21 Kerzen (kein Kanal) oder bei
+    `upper <= 0`. Eine echte `0` bleibt möglich und heißt „Schlusskurs exakt
+    auf dem Kanalhoch“.
+  * Die Fensterlänge ist **kein Regelfeld**: Sie gehört als Parameter in das
+    Donchian-Template (03-08), nicht in den Snapshot — sonst bedeutete
+    derselbe Feldwert je Strategie etwas anderes.
+* **`donchianBreakoutPct(close, upper)`** in `src/lib/indicators.ts`: Formel und
+  `null`-Semantik an genau einer Stelle, von beiden Snapshot-Pfaden genutzt.
+  Dazu die kanonischen Fenster `DONCHIAN_ENTRY_PERIOD = 20` /
+  `DONCHIAN_EXIT_PERIOD = 10` als Defaults von `donchianChannel` (Werte
+  unverändert, nur benannt).
+* **`indicatorCache`** wächst rein additiv um `donchianUpper`:
+  `donchianUpperArray()` rechnet das laufende Kanalhoch mit einer monotonen
+  Deque in **O(n)** vor (jeder Index wird einmal eingefügt und höchstens einmal
+  entfernt) — bewusst **kein** `Math.max(...slice)` je Bar, das wäre O(n·20) und
+  damit die STX-12-Regression im Backtest-Pfad. `snapshotFromCache` rundet auf
+  dieselben 4 Dezimalstellen wie `buildSnapshotFromCandles`.
+* **Tests:** Lookahead-Test (streng steigende Reihe: Wert erst ab der Kerze nach
+  dem Kanalhoch, vorher `null`, nie 0), Ausbruchskerze gegen den vorigen Kanal,
+  Bar-für-Bar-Parität Cache ↔ Direktpfad über drei Symbole, Engine-Parität
+  Single-Rule ↔ Multi-Asset, `null`-Fälle, statischer O(n)-Beleg und Accessor/
+  fail-closed-Prüfung (`tests/ruleEngine.test.ts`, `tests/indicators.test.ts`,
+  `tests/backtest.multiAsset.test.ts`).
+
+### Unverändert
+
+* Bestehende Felder, Labels, Werte und Ceilings — der Golden-Test
+  (`tests/backtest.multiAsset.test.ts`) belegt, dass Läufe ohne Donchian-Feld
+  weiter byte-identisch sind (`fnv1a` `0uz3hqb`).
 
 ## [0.6.4] — Bollinger-Regelfelder (STX-02-02) (2026-09-30)
 

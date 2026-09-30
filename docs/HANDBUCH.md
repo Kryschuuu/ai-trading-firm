@@ -1734,7 +1734,10 @@ Das Bedingungs-Dropdown listet genau die Felder aus `src/lib/ruleFieldCatalog.ts
 — seit `v0.6.4` auch die Bollinger-Lage (`bbZScore`,
 `priceVsUpperBbPct`, `priceVsLowerBbPct`; Einheiten, `null`-Fälle und der
 Beispiel-Workflow „Squeeze → Breakout“ in
-[BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)).
+[BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)),
+seit `v0.6.5` den Donchian-Ausbruch (`donchianBreakoutPct` = Abstand zum Hoch
+der **vorigen** 20 Kerzen, ohne Signalkerze; Details in
+[BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065)).
 
 ```bash
 RULE=$(curl -s -H "x-firm-token: $FIRM_API_TOKEN" localhost:3369/api/firm/rules | jq -r '.rules[0].id')
