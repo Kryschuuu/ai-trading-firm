@@ -1,7 +1,7 @@
 # Repository-Struktur — Übersicht & Pflegeanleitung
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
-> Code-Version **v0.1.0 (Beta)** · Vorherige Konsolidierung: 2026-09-05 (Legacy v1.36.26)
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-10-01** ·
+> Code-Version **v0.7.4 (Beta)** · Vorherige Konsolidierung: 2026-09-05 (Legacy v1.36.26)
 
 ## Ziele
 
@@ -31,12 +31,12 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 /
 ├── README.md                  # Projekt-README — beginnt mit dem prominenten Beta-Disclaimer
 ├── CHANGELOG.md               # Kanonischer Changelog (Keep a Changelog, öffentliches v0.x.x-Schema)
-├── VERSION.md                 # Versions-Metadaten (v0.1.0, Beta, 2026-09-23) + Komponenten-Übersicht
+├── VERSION.md                 # Versions-Metadaten (v0.7.4, Beta, 2026-10-01) + Komponenten-Übersicht
 ├── CONTRIBUTING.md            # Beitrags-Leitfaden, Konventionen, Pflicht-Checks
 ├── LICENSE                    # GPL-3.0-only
 ├── INSTALL.md                 # Installations-Übersicht (Wrapper → docs/INSTALL.md + CONFIGURATION.md)
 ├── CONFIGURATION.md           # Verbindliche Env-Flag-Referenz (Defaults, Bounds)
-├── package.json               # Version-SSoT ("version": "0.1.0"), Scripts, Abhängigkeiten
+├── package.json               # Version-SSoT ("version": "0.7.4"), Scripts, Abhängigkeiten
 ├── .env.example               # Alle Flags mit sicheren Defaults (Referenz, kein Klartext-Secret)
 ├── next.config.ts             # Next.js-Konfiguration (App Router, Standalone-Details)
 ├── tsconfig.json              # TypeScript strict
@@ -73,6 +73,9 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 │   ├── sentiment/             # Strukturierte Sentiment-Outputs (Forecast-Envelopes)
 │   ├── crossSectional/        # Point-in-Time Cross-Sectional Momentum Ranking
 │   ├── confluence/            # Deterministische Multi-Timeframe-Konfluenz
+│   ├── strategies/            # Versionierte Strategie-Artefakte (types.ts, catalog.ts,
+│   │                          #   4 Templates: EMA/ADX, MACD, RSI, Bollinger Squeeze;
+│   │                          #   Compiler 03-09 noch offen, SSoT: architecture/STRATEGY_STACK.md)
 │   ├── strategyLifecycle/     # 9-Zustands-Lifecycle mit Driftgates (Backtest↔Paper↔Live)
 │   ├── devilsAdvocate/        # Adversaler Falsifikations-Step (Scoring, Schemata)
 │   ├── promptPerformance/     # Prompt-Artefakte, Run-Provenanz, Version-Metriken

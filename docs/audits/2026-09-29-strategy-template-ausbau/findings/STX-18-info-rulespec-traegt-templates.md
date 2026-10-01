@@ -4,7 +4,7 @@
 - **Severity:** INFO
 - **Bereich:** Handelslogik
 - **Quelle:** Ausbaudokument §1.3–1.8
-- **Status:** FELDSEITE GEKLÄRT (2026-09-30) · TEMPLATES ZU 3/6 GEBAUT (2026-10-01) — Bollinger-Regelfelder 02-02 (`v0.6.4`), Donchian-Regelfeld 02-03 (`v0.6.5`); Templates 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) umgesetzt; 03-06…03-08 offen
+- **Status:** FELDSEITE GEKLÄRT (2026-09-30) · TEMPLATES ZU 4/6 GEBAUT (2026-10-01) — Bollinger-Regelfelder 02-02 (`v0.6.4`), Donchian-Regelfeld 02-03 (`v0.6.5`); Templates 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06 (`v0.7.4`) umgesetzt; 03-07/03-08 offen
 
 ## Befund
 
@@ -33,7 +33,25 @@ für Stops, Cooldowns und `maxExecutionsPerDay`.
 
 → **Eigener Audit**, nicht Teil dieser Roadmap.
 
-## Empfehlung
+## Umsetzung 03-06 (`v0.7.4`)
 
-Templates 03-03 (EMA/ADX), 03-04 (MACD), 03-05 (RSI) sofort. 03-06/03-08 nach den
-Feature-Prompts. 03-07 ohne Sequenz.
+Bollinger Squeeze Breakout ist als viertes Katalog-Template umgesetzt, mit
+`class: "breakout"`, Timeframes `1h`/`4h` und dem Feld `bbZScore` aus 02-02.
+Die vier `all`-Bedingungen und alle Parameter-Rasterpunkte überstehen die
+bestehende Sanitize-Kette ohne Klemmung; 25 Tests sichern Vertrag und Grenzen.
+
+Die σ-Rechnung des Auftrags ist korrigiert: An `upper = middle + 2·σ` gilt
+`z = (close − middle)/σ = 2`, nicht ungefähr 1,4. Default 0,5 bleibt als frühes
+Setup über der Bandmitte erhalten; kein redundanter Kantenfilter. Die
+6-%-Bandbreitenschwelle ist noch **nicht vermessen** und vor Live-Einsatz in
+06-01/06-02 markt-/timeframe-/regimespezifisch gegen den Store zu prüfen.
+Die Snapshot-Vereinfachung und Schlusskurs-Latenz sind explizite Annahmen;
+kein Sequenz-/Cross-Trigger und keine Engine-Änderung.
+
+Details: [Strategie-Stack §1.1](../../../architecture/STRATEGY_STACK.md#11-bollinger-squeeze-stx-03-06-v074).
+
+## Nächste Schritte
+
+03-07 (VWAP) ohne Sequenz und 03-08 (Donchian) auf dem Feld aus 02-03.
+Compiler 03-09 und Phase-3-Abnahme 03-10 bleiben offen; die Implementierung
+belegt keine wirtschaftliche Edge oder Live-Tauglichkeit.

@@ -21,14 +21,21 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.3** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.4** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** STX-03-06 ist implementiert, noch nicht veröffentlicht.
-> Nächste Schritte: die restlichen Templates 03-07/03-08, danach der Compiler
-> 03-09 und die Template-Tests 03-10; offen bleibt die optionale Feature-Store-Parität 02-04.
+> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-07/03-08
+> (`v0.7.5`/`v0.7.6`), danach der Compiler 03-09 und die Template-Tests 03-10;
+> offen bleibt die optionale Feature-Store-Parität 02-04.
+
+## [0.7.4] — Template Bollinger Squeeze Breakout (STX-03-06) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Ein additives Strategie-Artefakt mit
+> eigener Testsuite; keine Migration, keine neue Dependency und keine Änderung
+> an Indikatoren, Cache, Risiko-Deckeln oder Regel-DSL. Kalibrierung und
+> wirtschaftliche Validierung bleiben für 06-01/06-02 offen.
 
 ### Added
 
@@ -59,6 +66,18 @@ erlaubt, solange sie hier dokumentiert sind).
     Fail-closed bei fehlenden Parametern, Warm-up oder σ = 0.
   * Keine Änderungen an Indikatoren, Cache, `RULE_FIELDS`, `RULE_CEILINGS` oder
     Regel-DSL; keine Migration oder neue Dependency.
+
+### Changed
+
+* Projekt-Version auf **0.7.4** in `package.json` und `package-lock.json`;
+  Runtime-Version weiterhin ausschließlich aus `package.json` (`src/lib/version.ts`).
+* Versions-Metadaten, beide README-Dateien, Changelog-Weiterleitung,
+  Repository-Struktur und Strategie-Stack synchronisiert. Audit-Version
+  **v1.1.10**; STX-03-06 im Tracking als umgesetzt markiert (vier von sechs
+  Templates; Compiler 03-09 und Phase-3-Abnahme 03-10 bleiben offen).
+* Zwei RSI-Katalog-Assertions auf die relevanten Eigenschaften begrenzt:
+  weitere ADX-Nutzer und spätere Strategieklassen werden nicht ausgeschlossen,
+  RSI bleibt das erste Mean-Reversion-Template in Roadmap-Reihenfolge.
 
 ## [0.7.3] — Template RSI Mean-Reversion (STX-03-05) (2026-10-01)
 

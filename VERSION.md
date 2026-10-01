@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.7.3` |
+| **Version** | `v0.7.4` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-01 |
-| **Quellbasiert** | `package.json` (`version: "0.7.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.7.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -161,8 +161,33 @@ Engine-Änderung. `v0.7.3` ist dabei das erste Artefakt der Klasse
 `mean-reversion` und damit der Nachweis, dass die Klassifikation (ADR-008)
 trägt: Erst diese Klasse wird im Regime-Gate tatsächlich gedämpft
 (`TREND_UP`/`TREND_DOWN` Faktor 0.5, `RANGE` 1). Der Compiler (03-09) und die
-Template-Tests (03-10) folgen; die restlichen Templates 03-06 … 03-08 schließen
+Template-Tests (03-10) folgen; die restlichen Templates 03-07/03-08 schließen
 die Phase.
+
+`v0.7.4` ergänzt **Bollinger Squeeze Breakout** (STX-03-06):
+
+- Viertes Katalog-Artefakt, erstmals `class: "breakout"` und das neue Phase-2-Feld
+  `bbZScore`; Version 1 des Templates, `SINGLE_SYMBOL`, Timeframes `1h`/`4h`,
+  erwartete Regime `RANGE`/`TREND_UP`. Die Template-Version ist unabhängig von
+  der Projekt-Version.
+- Reine Parameterfunktion mit vier inklusiven `all`-Filtern: `bbwPct lte
+  bbwMaxPct`, `bbZScore gte bbZScoreMin`, `adx14 gte adxMin`, `volumeRatio gte
+  volumeRatioMin`. Defaults 6 % / 0,5 σ / ADX 22 / Volumen 1,2×, Stop 4 % und
+  Ziel 2,5× Chance/Risiko; alle Parametergrenzen sind sanitizer-klemmfrei.
+- **σ-Semantik:** `z = (close − middle) / σ`, `upper = middle + 2·σ` ⇒
+  an der oberen Kante `z = 2`, nicht ungefähr 1,4. Default **0,5** bedeutet
+  bewusst ein frühes Setup über der Bandmitte, keinen bestätigten Kantenbruch;
+  kein redundanter `priceVsUpperBbPct`-Filter und kein stiller Ersatz bei null.
+- **Kalibrierung ausstehend:** 6 % ist ein unvermessener Research-Startwert,
+  markt-, timeframe- und regimeabhängig. 06-01/06-02 prüft die 20. Perzentile
+  über 200 geschlossene Kerzen gegen den Store, `1h` und `4h` separat, vor
+  Live-Einsatz. Keine erfundene Kalibrierung oder Perzentilrechnung im Builder.
+- Sieben auditierbare Annahmen: insbesondere die bewusste Snapshot-Vereinfachung
+  statt „vorher eng, jetzt weit“ und die kritische Schlusskurs-Fill-/Live-Latenz.
+  25 neue Tests sichern Vertrag, Registrierung, Default < 2, alle Rasterpunkte,
+  64 Grenzkombinationen sowie Fail-closed bei fehlenden Daten oder σ = 0 ab.
+- Keine Engine-/Indikator-/Cache-Änderung, keine Migration oder neue Dependency.
+  Details: [Strategie-Stack §1.1](docs/architecture/STRATEGY_STACK.md#11-bollinger-squeeze-stx-03-06-v074).
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
@@ -202,7 +227,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2) und `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2) und `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (v0.7.4, Klasse `breakout`, erstes Phase-2-Feld `bbZScore`) |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |

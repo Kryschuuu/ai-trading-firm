@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.7.3` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.7.4` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -54,8 +54,13 @@ Seit `v0.6.4` ist die Bollinger-Bandlage als Regelfeld nutzbar (`bbZScore`,
 `priceVsUpperBbPct`, `priceVsLowerBbPct` — [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)),
 seit `v0.6.5` der Donchian-Ausbruch (`donchianBreakoutPct` — das Hoch der *vorigen*
 20 Kerzen, [BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065)).
-Damit sind alle sieben Strategie-Vorschläge des Audits regelformulierbar;
-ausführbare Templates folgen in Phase 3.
+Damit sind alle sieben Strategie-Vorschläge des Audits regelformulierbar.
+Seit **v0.7.4** sind vier Katalog-Templates gebaut: EMA/ADX Trend, MACD Momentum,
+RSI Mean-Reversion und **Bollinger Squeeze Breakout** (`1h`/`4h`, Klasse `breakout`).
+Default 0,5 σ ist ein frühes Setup über der Bandmitte; die 6-%-Bandbreitenschwelle
+ist noch nicht empirisch kalibriert. Compiler und Phase-3-Abnahme (03-09/03-10)
+bleiben offen. Parameter, Annahmen und Grenzen:
+[Strategie-Stack §1.1](architecture/STRATEGY_STACK.md#11-bollinger-squeeze-stx-03-06-v074).
 
 ## Inhaltsverzeichnis — Neue Struktur (2026-09-05)
 
@@ -247,7 +252,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.7.3, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.7.4, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)
