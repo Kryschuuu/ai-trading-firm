@@ -182,8 +182,10 @@ des ausdrücklichen Locks nicht Teil dieses freigegebenen Scopes.
 |---|---|---|---|
 | 05-01 | [Screening-Typen + Priorität](prompts/PROMPT-STX-05-01-screening-types.md) | `src/screening/types.ts` + `priority.ts` | 00-01, 03-01 |
 | 05-02 | [Matrix-Builder](prompts/PROMPT-STX-05-02-matrix-builder.md) | Matrix aus Scanner-Funnel | 05-01, 01-01 |
-| 05-03 | [Persistenz + Idempotenz](prompts/PROMPT-STX-05-03-screening-persistenz.md) | 2 Tabellen | 05-02, 04-01 |
+| 05-03 | [Persistenz + Idempotenz](prompts/PROMPT-STX-05-03-screening-persistenz.md) | ✅ Unreleased auf `v0.8.0`: 2 additive Tabellen, transaktionaler Store, `ssr1:`/`ssm1:`, immutable Zellen, monotone Fortschritte, DB-/Schema-Paritätstests | 05-02, 04-01 |
 | 05-04 | [CLI + Backtest-Job-Adapter](prompts/PROMPT-STX-05-04-screening-cli.md) | `scripts/run-screening.ts` | 05-03, 00-01 |
+
+**Ergebnis 05-03 (2026-10-01):** Screening-Persistenz liegt in eigenen Run-/Zelltabellen; `backtest_runs` bleibt single-instrument und unverändert. Strategieversions-FK ist Pflicht, Backtest-Link optional. Kein DELETE-/Prioritäts-Overwrite-Pfad. Details/Migration/Rollback: [STRATEGY_SCREENING.md](../../STRATEGY_SCREENING.md). Runner/CLI und Pilotlauf (05-04) bleiben offen.
 
 **Vokabular-Bindung:** `strategyClass: StrategyClassKey` in den Screening-Typen ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)); `crossSectionalMomentum` bleibt ein
 optionaler, lesender Faktor (`CrossSectionalRankContext`), keine zweite Eligibility ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)).

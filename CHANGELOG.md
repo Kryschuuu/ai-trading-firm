@@ -32,6 +32,24 @@ erlaubt, solange sie hier dokumentiert sind).
 > Nachträge ohne eigenen Release (Doku, Tests, Wächter-Korrekturen) stehen hier und
 > werden im nächsten Release mitgeliefert (Präzedenz: `VERSIONING.md` V4).
 
+### Added
+
+* **STX-05-03 — Screening-Persistenz + Idempotenz:** additive, idempotente
+  Migration `drizzle/2026-10-01_strategy_screening.sql` und deckungsgleiches
+  Drizzle-Schema für `strategy_screening_runs`/`strategy_market_results`.
+  Run-Config (Gewichte + Limits), gemeinsamer PIT-Cutoff und Provenienz bleiben
+  reproduzierbar; jede Zelle benötigt einen `strategy_versions`-FK und darf
+  ohne Backtest existieren. Bestehende Backtest-/Versions-/Lifecycle-Tabellen
+  bleiben unverändert (STX-07).
+* **Screening-Store und Keys:** `ssr1:`-/`ssm1:`-Hashes verwenden das gemeinsame
+  `canonicalJson`. Transaktionales Create-or-get, atomare Insert-only-Chunks,
+  zeilengesperrter monotoner Fortschritt und bounded Result-Reads (max. 200).
+  Kein DELETE-Pfad, keine Prioritäts-/Ergebnis-Überschreibung bei Retries.
+* **Screening-Tests und Runbook:** echte PostgreSQL-Tests einschließlich
+  Drizzle-Push-/SQL-Schema-Parität, paralleler Retries, FK-/Config-Constraints,
+  Chunk-Rollback und Fortschritts-/Paging-Grenzen; reine Key-/Bounds-Wächter.
+  Bedienung und Rollback in [`docs/STRATEGY_SCREENING.md`](docs/STRATEGY_SCREENING.md).
+
 ### Fixed
 
 * **Zwei rote Wächter aus 04-02 behoben** (die Suite auf `main` war dadurch rot,

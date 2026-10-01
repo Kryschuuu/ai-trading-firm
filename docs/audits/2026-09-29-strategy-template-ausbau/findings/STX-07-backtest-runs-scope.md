@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Persistenz
 - **Quelle:** Ausbaudokument §4.2
-- **Status:** OPEN
+- **Status:** FIXED — STX-05-03 (2026-10-01, Unreleased auf `v0.8.0`); Runner/CLI folgen in 05-04
 - **Datei(en):** `src/db/schema.ts:226`
 
 ## Beschreibung
@@ -41,14 +41,23 @@ Idempotenz-Hashes und alle Consumer (`/api/firm/backtests`, `backtestStep`) verf
   `status`, `metrics jsonb`, `idempotency_key` UNIQUE)
 
 Ein universe-scoped Lauf wird **nicht** in `backtest_runs` persistiert, sondern in
-`strategy_screening_runs` mit `metrics jsonb` — konsistent mit der bestehenden Trennung
+`strategy_screening_runs`; zellbezogene Metriken liegen in `strategy_market_results.metrics` — konsistent mit der bestehenden Trennung
 „instrument-scoped Run" vs. „Aggregat".
 
 ## Akzeptanzkriterien
 
-- [ ] Keine Änderung an `backtest_runs` oder seinen Indizes
-- [ ] `strategy_market_results` referenziert pro Zelle optional eine `backtest_runs`-ID
-- [ ] Wiederholter Screening-Lauf erzeugt keine Duplikate (Idempotenz-Key)
+- [x] Keine Änderung an `backtest_runs` oder seinen Indizes
+- [x] `strategy_market_results` referenziert pro Zelle optional eine `backtest_runs`-ID
+- [x] Wiederholter Screening-Lauf erzeugt keine Duplikate (Idempotenz-Key)
+
+## Implementierungsbeleg (STX-05-03)
+
+Migration `drizzle/2026-10-01_strategy_screening.sql`, deckungsgleiches Schema,
+`src/screening/keys.ts`/`store.ts` und `tests/strategyScreening.db.test.ts`:
+Run-/Zell-Idempotenz auch bei parallelen Retries, verpflichtender
+Strategieversions-FK, optionaler Backtest-Link, vollständige Config,
+immutable Prioritäten, monotone Fortschritte und SQL-/Drizzle-Push-Parität.
+Kein DELETE-Pfad. Anleitung/Rollback: [STRATEGY_SCREENING.md](../../../STRATEGY_SCREENING.md).
 
 ## Versions-Hinweis
 

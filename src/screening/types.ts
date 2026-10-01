@@ -11,6 +11,13 @@ import type { SupportedTimeframe } from "@/lib/marketdata/historicalStore";
 import type { StrategyClassKey } from "@/lib/signalDecay";
 import type { StrategyTemplateId } from "@/strategies/catalog";
 
+/** Laufarten und Laufstatus der Screening-Persistenz (STX-05-03). */
+export const SCREENING_RUN_KINDS = ["DISCOVERY", "MATRIX", "BACKTEST_BATCH"] as const;
+export type ScreeningRunKind = (typeof SCREENING_RUN_KINDS)[number];
+
+export const SCREENING_RUN_STATUSES = ["PENDING", "RUNNING", "DONE", "FAILED", "ABORTED"] as const;
+export type ScreeningRunStatus = (typeof SCREENING_RUN_STATUSES)[number];
+
 /** Status einer Strategie×Markt-Zelle (Backtest-/Validierungsschritte in 05-02). */
 export type CandidateStatus =
   | "DISCOVERED"

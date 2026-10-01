@@ -27,9 +27,11 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  foreignKey,
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { CandidateStatus, ScreeningRunKind, ScreeningRunStatus } from "@/screening/types";
 
 /**
  * Risikoparameter zur Anzeige/Dokumentation.
@@ -3215,6 +3217,76 @@ export const strategyVersions = pgTable(
       "strategy_versions_content_hash_check",
       sql`${t.contentHash} ~ '^stv1:[0-9a-f]{64}$'`
     ),
+  ]
+);
+
+/**
+ * Strategie×Markt-Screening-Lauf (STX-05-03): gemeinsamer PIT-Cutoff,
+ * reproduzierbare Config und monotone Fortschrittszähler. Ein Retry am
+ * selben Code liefert denselben Run. SQL: 2026-10-01_strategy_screening.sql.
+ * `backtest_runs` bleibt unverändert single-instrument.
+ */
+export const strategyScreeningRuns = pgTable(
+  "strategy_screening_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runKind: text("run_kind").$type<ScreeningRunKind>().notNull(),
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    candidateSetHash: text("candidate_set_hash").notNull(),
+    codeVersion: text("code_version").notNull(),
+    dataVersion: text("data_version"),
+    configJson: jsonb("config_json").notNull(),
+    status: text("status").$type<ScreeningRunStatus>().notNull(),
+    cellsTotal: integer("cells_total").notNull().default(0),
+    cellsDone: integer("cells_done").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("strategy_screening_runs_hash_code_unique").on(t.candidateSetHash, t.codeVersion),
+    check("strategy_screening_runs_kind_check", sql`${t.runKind} IN ('DISCOVERY','MATRIX','BACKTEST_BATCH')`),
+    check("strategy_screening_runs_hash_check", sql`${t.candidateSetHash} ~ '^ssr1:[0-9a-f]{64}$'`),
+    check("strategy_screening_runs_status_check", sql`${t.status} IN ('PENDING','RUNNING','DONE','FAILED','ABORTED')`),
+    check("strategy_screening_runs_counts_check", sql`${t.cellsTotal} >= 0 AND ${t.cellsDone} >= 0 AND ${t.cellsDone} <= ${t.cellsTotal}`),
+    check("strategy_screening_runs_config_check", sql`jsonb_typeof(${t.configJson}) = 'object'`),
+  ]
+);
+
+/**
+ * Immutable Screening-Zelle mit verpflichtendem Strategieversionsbezug.
+ * Der Backtest-Link ist optional: auch ungeprüfte/gesperrte Zellen sind
+ * legitime Ergebnisse. Kein Update-/Delete-Pfad; neue Bewertung ⇒ neuer Run.
+ */
+export const strategyMarketResults = pgTable(
+  "strategy_market_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").notNull(),
+    strategyVersionId: uuid("strategy_version_id").notNull(),
+    instrumentId: text("instrument_id").notNull(),
+    venue: text("venue").notNull(),
+    timeframe: text("timeframe").notNull(),
+    templateId: text("template_id").notNull(),
+    priority: numeric("priority"),
+    status: text("status").$type<CandidateStatus>().notNull(),
+    reasons: jsonb("reasons").notNull().default(sql`'[]'::jsonb`),
+    backtestRunId: uuid("backtest_run_id"),
+    metrics: jsonb("metrics").notNull().default(sql`'{}'::jsonb`),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Explizite Namen bleiben unter PostgreSQLs 63-Byte-Identifiergrenze.
+    foreignKey({ name: "strategy_market_results_run_fk", columns: [t.runId], foreignColumns: [strategyScreeningRuns.id] }),
+    foreignKey({ name: "strategy_market_results_strategy_version_fk", columns: [t.strategyVersionId], foreignColumns: [strategyVersions.id] }),
+    foreignKey({ name: "strategy_market_results_backtest_run_fk", columns: [t.backtestRunId], foreignColumns: [backtestRuns.id] }),
+    uniqueIndex("strategy_market_results_idem_unique").on(t.idempotencyKey),
+    index("strategy_market_results_run_status_idx").on(t.runId, t.status),
+    index("strategy_market_results_run_priority_idx").on(t.runId, t.priority.desc()),
+    check("strategy_market_results_idem_check", sql`${t.idempotencyKey} ~ '^ssm1:[0-9a-f]{64}$'`),
+    check("strategy_market_results_reasons_check", sql`jsonb_typeof(${t.reasons}) = 'array'`),
+    check("strategy_market_results_metrics_check", sql`jsonb_typeof(${t.metrics}) = 'object'`),
   ]
 );
 
