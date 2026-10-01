@@ -23,10 +23,10 @@
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 0 | 0 | 0 | 0 |
 | HIGH | 5 | 0 | 2 | 3 |
-| MEDIUM | 7 | 3 | 4 | 0 |
+| MEDIUM | 7 | 2 | 4 | 1 |
 | LOW | 4 | 3 | 0 | 1 |
 | INFO | 3 | 2 | 0 | 1 |
-| **Σ** | **19** | **8** | **6** | **5** |
+| **Σ** | **19** | **7** | **6** | **6** |
 
 > **Kein CRITICAL.** Das Ausbaudokument enthält **keinen** Vorschlag, der eine bestehende
 > Sicherheitsgrenze weicht. Die HIGH-Funde sind **Integrations- und Duplikationsrisiken**,
@@ -42,7 +42,7 @@
 | [STX-04](findings/STX-04-multiaset-spec-duplikat.md) | `MultiAssetStrategySpec` dupliziert `CrossSectionalConfig` | HIGH | FIXED ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) |
 | [STX-05](findings/STX-05-template-builder-umgeht-sanitize.md) | Builder umgeht „Code entscheidet" — `buildRule(ctx) => RuleSpec` würde Whitelist/`RULE_CEILINGS` überspringen | HIGH | FIXED (03-01 `v0.7.0` + 03-09 `v0.7.5`) |
 | [STX-06](findings/STX-06-keine-strategy-versions-persistenz.md) | Kein versioniertes Strategie-Artefakt wird über den Anwendungsdienst persistiert (Schemafundament vorhanden) | MEDIUM | IN ARBEIT (04-01 `v0.8.0`; 04-02 offen) |
-| [STX-07](findings/STX-07-backtest-runs-scope.md) | `backtest_runs.instrument_id NOT NULL` — universe-scoped Runs nicht persistierbar | MEDIUM | OPEN |
+| [STX-07](findings/STX-07-backtest-runs-scope.md) | `backtest_runs.instrument_id NOT NULL` — universe-scoped Runs brauchen eigene Persistenz | MEDIUM | FIXED (05-03, Unreleased auf `v0.8.0`) |
 | [STX-08](findings/STX-08-alpaca-ohne-websocket.md) | Alpaca hat **keinen** WebSocket — Leader-Adapter-Annahme des Dokuments trifft nicht zu | MEDIUM | OPEN |
 | [STX-09](findings/STX-09-copysystem-duplikat-reconciliation.md) | Copy-Reconciler würde bestehende Fill-Reconciliation duplizieren | MEDIUM | OPEN |
 | [STX-10](findings/STX-10-featurestore-ist-slice.md) | Feature Store ist ein 3-Feature-Slice, kein „zentraler Feature-Layer" | MEDIUM | IN ARBEIT (00-02 dokumentiert) |
@@ -84,6 +84,13 @@ angelegt. **Noch nicht** vorhanden ist der Anwendungsdienst, der diese Artefakte
 schreibt und rekonstruiert; daher bleibt STX-06 bis 04-02 in Arbeit. Screening
 und Copy-Trading sind weiterhin nicht implementiert. Die Roadmap in
 [`ROADMAP.md`](ROADMAP.md) bleibt die maßgebliche Reihenfolge.
+
+**Nachtrag STX-05-03 (2026-10-01):** Der obige 04-01-Stand ist durch den
+vorhandenen Katalog-Service und die Screening-Typen/Priorität/Matrix überholt.
+05-03 ergänzt jetzt die eigene Run-/Zellpersistenz und behebt STX-07, ohne
+`backtest_runs` umzubauen. Runner/CLI und Pilotlauf bleiben 05-04 vorbehalten;
+Copy-Trading bleibt offen. Beleg/Verträge/Rollback:
+[STRATEGY_SCREENING.md](../../STRATEGY_SCREENING.md).
 
 ## Remediation-Plan
 
