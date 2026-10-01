@@ -26,9 +26,39 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-06 … 03-08
-> (`v0.7.4` … `v0.7.6`), danach der Compiler 03-09 und die Template-Tests 03-10;
-> offen bleibt die optionale Feature-Store-Parität 02-04.
+> **Status: Beta.** STX-03-06 ist implementiert, noch nicht veröffentlicht.
+> Nächste Schritte: die restlichen Templates 03-07/03-08, danach der Compiler
+> 03-09 und die Template-Tests 03-10; offen bleibt die optionale Feature-Store-Parität 02-04.
+
+### Added
+
+* **Viertes Strategie-Template: Bollinger Squeeze Breakout** (STX-03-06,
+  `src/strategies/templates/bollinger-squeeze.ts`) — `class: "breakout"`,
+  `version: 1`, `scope: "SINGLE_SYMBOL"`, Timeframes `1h`/`4h`, erwartete Regime
+  `RANGE`/`TREND_UP`; einmalig an vierter Stelle im import-validierten Katalog.
+  * `logic: "all"`: `bbwPct lte bbwMaxPct`, `bbZScore gte bbZScoreMin`,
+    `adx14 gte adxMin`, `volumeRatio gte volumeRatioMin`. Sechs Parameter,
+    Defaults 6 % / 0,5 σ / 22 / 1,2× / 4 % Stop / 2,5× Chance/Risiko;
+    der ganze Parameterraum liegt innerhalb der bestehenden Risiko-Deckel.
+  * **Kalibrierung ausstehend:** `bbwMaxPct` ist markt-, timeframe- und
+    regimeabhängig. Die 6 % sind ein vorläufiger Research-Startwert, keine
+    behauptete Messung. 06-01/06-02 prüft die 20. Perzentile über 200 geschlossene
+    Kerzen gegen den Store, `1h` und `4h` getrennt, vor Live-Einsatz.
+  * **σ-Rechnung korrigiert gegenüber dem Auftrag:** Im bestehenden Feld gilt
+    `z = (close − middle) / σ`; an `upper = middle + 2·σ` ist `z = 2`, nicht
+    ungefähr 1,4. Der gewünschte Default 0,5 bleibt erhalten und bedeutet ein
+    frühes Setup über der **Bandmitte**, keinen bestätigten oberen Kantenbruch.
+    Kein zusätzlicher oder stiller Ersatzfilter auf `priceVsUpperBbPct`.
+  * Sieben explizite Annahmen einschließlich Kontraktion/Expansion,
+    Bandbreiten-Kalibrierung, Schlusskurs-/Live-Latenz, Kosten und bewusster
+    **Snapshot-Vereinfachung** (alle Filter auf derselben Kerze, kein
+    „vorher eng, jetzt weit“-Sequenznachweis).
+  * `tests/strategies.bollingerSqueeze.test.ts` prüft Vertrag, Registrierung,
+    `bbZScoreMin < 2`, die lebende σ-Rechnung, alle Parameter-Rasterpunkte und
+    Grenzkombinationen ohne Sanitizer-Klemmung, inklusive Filtergrenzen und
+    Fail-closed bei fehlenden Parametern, Warm-up oder σ = 0.
+  * Keine Änderungen an Indikatoren, Cache, `RULE_FIELDS`, `RULE_CEILINGS` oder
+    Regel-DSL; keine Migration oder neue Dependency.
 
 ## [0.7.3] — Template RSI Mean-Reversion (STX-03-05) (2026-10-01)
 

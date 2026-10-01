@@ -50,7 +50,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 - **Indikatoren:** `src/lib/indicators.ts` = reine Formeln (`ema`, `rsi`, `macd`, `adx`, `atr`/`atrPct`, `bollingerBandWidthPct`, `sessionVwap`); seit 02-01 (`v0.6.3`) auch `bollingerBands` (SMA ± mult·Populations-σ, `width`/`bandwidthPct` als Bruch, exakt BBW-paritätsgleich) und `donchianChannel` (High/Low der **vorherigen** entry-/exit-Perioden, ohne Signalkerze; HTF-Mindest-Timeframe in 03-08). Neue Parameter geklemmt; fehlende Werte = `null`. Seit 02-02 (`v0.6.4`) ist das Bollinger-Band über `bollingerPosition()` an die Regel-Felder `bbZScore`/`priceVsUpperBbPct`/`priceVsLowerBbPct` angeschlossen, seit 02-03 (`v0.6.5`) der Donchian-Kanal über `donchianBreakoutPct()` (`(close / Kanalhoch − 1) · 100`, Kanalhoch = Hoch der **vorigen** 20 Kerzen) — jeweils in **beiden** Snapshot-Pfaden (`buildSnapshotFromCandles` und `src/backtest/indicatorCache.ts`), mit feldweisem Paritätstest und Golden-Hash für unveränderte Bestandsläufe. Die Fensterlänge (20/10, `DONCHIAN_ENTRY_PERIOD`/`DONCHIAN_EXIT_PERIOD`) ist Snapshot-Definition, kein Regelfeld; das Template 03-08 parametrisiert den Kanal. Phase 2 ist damit fachlich abgeschlossen, offen bleibt nur der optionale Feature-Store-Slice 02-04.
 - **Strategieklasse:** `src/lib/signalDecay.ts` definiert `STRATEGY_CLASS_KEYS = ["mean-reversion", "trend", "breakout", "unclassified"]` und `DEFAULT_CLASS_POLICIES`. `StrategyClass` (drei Werte, Liste `STRATEGY_CLASSES`) stammt aus `src/lib/marketRegime.ts`. Regeln tragen keine Klasse; zur Laufzeit wird sie aus dem Mission-Template abgeleitet (`strategyClassOfTemplate`). Verbindlich: ADR-008 (Klasse deklarieren, `unclassified` ist kein Template-Status, keine neue Klasse). `src/strategies/` enthält **keine** eigene Klassenliste — der Katalog liest `STRATEGY_CLASS_KEYS` (Wächter: `tests/adrVocabulary.test.ts`).
 
-- **Strategie-Templates (Phase 3, 03-01/03-02 `v0.7.0`, 03-03 `v0.7.1`, 03-04 `v0.7.2`, 03-05 `v0.7.3`):** `src/strategies/types.ts` definiert den Vertrag `StrategyTemplate` (deklarierte `class: StrategyClassKey`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes`, `requiredFields`, `params`, `assumptions`, `expectedRegimes` und einen Builder `buildRule(params) => RuleSpecInput` als **reine Funktion der Parameter** — STX-05: kein `ctx`, kein Marktdatenzugriff). `src/strategies/catalog.ts` ist die **einzige** Template-Registry: `STRATEGY_TEMPLATES` führt **eine Zeile pro Datei** unter `src/strategies/templates/` (seit 03-03: `ema-adx-trend` — Trendfolge long über `trend`/`priceVsEma50Pct`/`adx14`/`volumeRatio`, Klasse `trend`, Timeframes `1h`/`4h`; seit 03-04: `macd-momentum` — `macdHist gt 0` als einziges Vorzeichen-Signal, `priceVsEma50Pct` als **skalenfreier** Ersatz für jede Magnitude-Frage (der Wert steht in Preiseinheiten), `adx14` als Richtungsbestätigung, dieselbe Klasse und Timeframes; seit 03-05: `rsi-mean-reversion` — **erste Klasse `mean-reversion`**, `rsi14 lte rsiOversold` als Überdehnung, `priceVsEma21Pct lte -ema21GapPct` als Abstand zum Mittel und **`adx14 lte adxMax` als Seitwärts-Deckel** (ohne ihn wäre es ein „Catching the falling knife"-System), Timeframes `15m`/`1h`/`4h`, `expectedRegimes: ["RANGE"]`; bewusst ohne `bbZScore` — die normalisierte Metrik hängt an 02-02 und gehört zu 03-06. Erst diese Klasse wird im Regime-Gate tatsächlich gedämpft (`TREND_UP`/`TREND_DOWN` Faktor 0.5, `RANGE` 1), das Template **nutzt** das Gate und verändert es nicht; 03-06 … 03-08 folgen), `STRATEGY_TEMPLATE_IDS` als geschlossene Union, `validateTemplate()` (fail-closed: ID-Format, Version, Klasse ungleich `unclassified`, Timeframe-Allowlist, `RULE_FIELDS`-Whitelist, Parametergrenzen, Builder-Determinismus, `side` nur LONG, `RULE_CEILINGS`, `expectedRegimes` ohne `UNKNOWN`) und `assertTemplatesValid()` **beim Import** — ein kaputtes Template lässt den Prozess nicht starten. Der Katalog sanitized nichts: `sanitizeRuleSpec()` (03-09) bleibt die einzige legale Transformation der Builder-Rohform. Keine zweite Template-Liste in UI, Seed, CLI oder Tests.
+- **Strategie-Templates (Phase 3, 03-01/03-02 `v0.7.0`, 03-03 `v0.7.1`, 03-04 `v0.7.2`, 03-05 `v0.7.3`, 03-06 Unreleased):** `src/strategies/types.ts` definiert den Vertrag `StrategyTemplate` (deklarierte `class: StrategyClassKey`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes`, `requiredFields`, `params`, `assumptions`, `expectedRegimes` und einen Builder `buildRule(params) => RuleSpecInput` als **reine Funktion der Parameter** — STX-05: kein `ctx`, kein Marktdatenzugriff). `src/strategies/catalog.ts` ist die **einzige** Template-Registry: `STRATEGY_TEMPLATES` führt **eine Zeile pro Datei** unter `src/strategies/templates/` (seit 03-03: `ema-adx-trend` — Trendfolge long über `trend`/`priceVsEma50Pct`/`adx14`/`volumeRatio`, Klasse `trend`, Timeframes `1h`/`4h`; seit 03-04: `macd-momentum` — `macdHist gt 0` als einziges Vorzeichen-Signal, `priceVsEma50Pct` als **skalenfreier** Ersatz für jede Magnitude-Frage (der Wert steht in Preiseinheiten), `adx14` als Richtungsbestätigung, dieselbe Klasse und Timeframes; seit 03-05: `rsi-mean-reversion` — **erste Klasse `mean-reversion`**, `rsi14 lte rsiOversold` als Überdehnung, `priceVsEma21Pct lte -ema21GapPct` als Abstand zum Mittel und **`adx14 lte adxMax` als Seitwärts-Deckel** (ohne ihn wäre es ein „Catching the falling knife"-System), Timeframes `15m`/`1h`/`4h`, `expectedRegimes: ["RANGE"]`; bewusst ohne `bbZScore` — die normalisierte Metrik hängt an 02-02 und gehört zu 03-06. Erst diese Klasse wird im Regime-Gate tatsächlich gedämpft (`TREND_UP`/`TREND_DOWN` Faktor 0.5, `RANGE` 1), das Template **nutzt** das Gate und verändert es nicht; seit 03-06 (Unreleased): `bollinger-squeeze` — erstes Template mit `class: "breakout"` und dem neuen Phase-2-Feld `bbZScore`, Timeframes `1h`/`4h`, `expectedRegimes: ["RANGE", "TREND_UP"]`, Details in §1.1; 03-07/03-08 folgen), `STRATEGY_TEMPLATE_IDS` als geschlossene Union, `validateTemplate()` (fail-closed: ID-Format, Version, Klasse ungleich `unclassified`, Timeframe-Allowlist, `RULE_FIELDS`-Whitelist, Parametergrenzen, Builder-Determinismus, `side` nur LONG, `RULE_CEILINGS`, `expectedRegimes` ohne `UNKNOWN`) und `assertTemplatesValid()` **beim Import** — ein kaputtes Template lässt den Prozess nicht starten. Der Katalog sanitized nichts: `sanitizeRuleSpec()` (03-09) bleibt die einzige legale Transformation der Builder-Rohform. Keine zweite Template-Liste in UI, Seed, CLI oder Tests.
 - **Regime:** `src/lib/marketRegime.ts` definiert `MarketRegime = "TREND_UP" | "TREND_DOWN" | "RANGE" | "HIGH_VOL" | "CRASH"` plus `UNKNOWN` als `MarketRegimeLabel` (5+1). Persistenz: Tabelle `regime_snapshots` (`src/db/schema.ts`, `src/lib/regimeSnapshotStore.ts`). Kein zweites Vokabular (ADR-009); die `VolatilityRegime`-Typen (`adaptiveRisk.ts`, `src/portfolio/types.ts`, `src/scanner/types.ts`) sind Volatilitäts-Stufen, kein Markt-Regime.
 - **Regime-Auswertung:** `src/lib/regimeEvaluation.ts` = reine Auswertung persistenter Snapshots (Stabilität, Transitionen, Coverage, Markt-Forward-Returns je Regime — keine Strategie-Kennzahlen), kein IO.
 - **Universe-Mitgliedschaft:** drei Filterstufen mit je eigenem Zweck — Registry-Ausschluss-Policy (`src/universe/policy.ts`, `policy.default.json`), Scanner-Trichter (`checkEligibility` in `src/scanner/filters.ts`) und Snapshot-Membership für Cross-Sectional (`EligibilityConfig` in `src/crossSectional/types.ts`, angewendet in `universe.ts`). Für Universe-Strategien gilt die dritte; keine vierte Stufe, keine zweite Eligibility-Spec (ADR-010).
@@ -63,6 +63,44 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 - **Symbol-SSoT:** `src/symbols/normalize.ts` = `tryNormalizeVenueSymbol`, `normalizeVenueSymbol`, Venue-Profile. Kein String-Replace an anderer Stelle.
 - **Fill-Reconciliation:** `src/brokers/reconciliation.ts` + `src/executionQuality/` (`capture.ts`, `reconcile.ts`, `model.ts`, `store.ts`). Kein Copy-Reconciler.
 - **Broker-WS:** Nur `src/brokers/bitunix/ws.ts` existiert. `src/brokers/alpaca/` enthält keinen WS-Client (Alpaca hat **keinen** WS in diesem Repo).
+
+### 1.1 Bollinger-Squeeze (STX-03-06, Unreleased)
+
+`src/strategies/templates/bollinger-squeeze.ts` liefert eine reine Parameterfunktion
+und ist einmalig im Katalog registriert. Die Rohform bleibt `RuleSpecInput`:
+Symbol und gewählten unterstützten Timeframe setzt der Aufrufer, danach ist
+`sanitizeRuleSpec()` Pflicht. Keine Engine-/Indikator-/Cache-Änderung.
+
+| Parameter | Default | Bereich | Schritt | Feldbezug |
+|---|---|---|---|---|
+| `bbwMaxPct` | 6 % | 2…15 | 0,25 | `bbwPct` |
+| `bbZScoreMin` | 0,5 σ | 0…3 | 0,1 | `bbZScore` |
+| `adxMin` | 22 | 15…35 | 1 | `adx14` |
+| `volumeRatioMin` | 1,2× | 0,9…3 | 0,05 | `volumeRatio` |
+| `stopLossPct` | 4 % | 1…12 | 0,5 | `atrPct` (nur Risikodoku) |
+| `takeProfitRR` | 2,5× | 1…5 | 0,25 | kein eigenes Regelfeld; Pflicht-`mapsTo: atrPct` wie 03-03…03-05 |
+
+Die vier Feldvergleiche sind `bbwPct lte bbwMaxPct`, `bbZScore gte bbZScoreMin`,
+`adx14 gte adxMin`, `volumeRatio gte volumeRatioMin` mit `logic: "all"`.
+Die Bandbreitenschwelle ist **nicht marktübergreifend**, sondern markt-,
+timeframe- und regimeabhängig. 6 % ist ein **unvermessener Startwert**:
+06-01/06-02 prüft die 20. Perzentile über die letzten 200 geschlossenen Kerzen
+gegen den Store (`1h`/`4h` separat), vor Live-Einsatz. Keine dynamische
+Perzentilrechnung im Builder.
+
+**σ-Semantik:** `bbZScore = (close − middle) / σ`, `upper = middle + 2·σ` ⇒
+bei `close == upper` gilt `z = 2`, nicht ungefähr 1,4. Default 0,5 bedeutet
+`close >= middle + 0,5·σ`, also ein **frühes Setup über der Bandmitte**,
+keinen bestätigten Bruch der oberen Kante. `priceVsUpperBbPct gte 0` wäre ein
+alternativer Kantenfilter (bei σ > 0 äquivalent zu `bbZScore gte 2`), nicht
+zum Default 0,5; beide werden nicht kombiniert, bei null gibt es keinen Ersatz.
+
+Die Annahmen dokumentieren die bewusste **Snapshot-Vereinfachung**: alle vier
+Filter auf derselben geschlossenen Kerze, kein „vorher eng, jetzt weit“-Nachweis.
+Die Signalkerze steckt im Band und kann es bereits weiten. Schlusskurs-Fill
+nach Erkennung am Kerzenschluss ist im Live-Pfad eine kritische Latenzannahme.
+Der Test `tests/strategies.bollingerSqueeze.test.ts` hält diese Grenzen sowie
+Vertrag, Default < 2 und den gesamten Parameterraum ohne Klemmung fest.
 
 ## 2. Nicht vorhanden — explizite Lücken
 
