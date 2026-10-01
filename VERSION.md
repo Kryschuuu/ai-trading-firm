@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.7.5` |
+| **Version** | `v0.7.6` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-01 |
-| **Quellbasiert** | `package.json` (`version: "0.7.5"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.7.6"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -187,8 +187,24 @@ werden sie weiterhin im Order-Pfad. `ruleEngine.ts` bleibt **unverändert**.
 Der Pflicht-Beweis liegt in `tests/strategies.compiler.security.test.ts`
 (26 Tests, u. a. Sanitize-Spy, Ceiling-Klemmung, unbekanntes Feld, fremder
 Operator, `SHORT`, fehlendes `requiredFields`, ROLLOUT über alle sechs
-Templates). Offen ist damit nur noch 03-10 (Template-Vertragstests), das
-Phase-3-Gate.
+Templates).
+
+`v0.7.6` schließt die **Phase 3** ab (03-10, Finding STX-18): Die sechs
+Strategie-Artefakte sind jetzt nicht mehr nur kompilierbar, sondern
+**vertraglich abgesichert**. `tests/strategies.templates.test.ts` prüft je
+Template die Struktur (Params-Raster, `RULE_FIELDS`-Whitelist, Klasse ≠
+`unclassified`, `expectedRegimes` ohne `UNKNOWN`, Gate-/Policy-Kontrakt,
+Annahmen), die Compiler-Parität (Defaults ohne Klemmung, stabiler
+`stc1:`-Fingerprint, `symbol` vom Aufrufer, `sourceRole` `RESEARCH`),
+deterministische Positiv-Fixtures (kein totes Template) und
+Kurzhistorie-Fixtures (fehlende Lesewerte bleiben inert), je eine
+Negativ-Fixture pro Bedingung und Richtung (verletztes Feld, `null`,
+Raster-Extremwert) sowie die Katalog-Integrität. Die Engine-↔-Cache-Parität der
+Phase-2-Felder (`bbZScore`, `priceVs*BbPct`, `donchianBreakoutPct`) ist als
+Regression festgenagelt. `docs/STRATEGY_TEMPLATES.md` wird von
+`npm run docs:templates` **aus dem Katalog erzeugt** und im Test byteweise
+gegen den Generator geprüft. `ruleEngine.ts`, `sanitizeRuleSpec`,
+`indicators.ts`, `indicatorCache.ts` und der Katalog bleiben unverändert.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
@@ -228,7 +244,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09) |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09); seit v0.7.6 vertraglich abgesichert über `tests/strategies.templates.test.ts` und dokumentiert in der generierten [`docs/STRATEGY_TEMPLATES.md`](docs/STRATEGY_TEMPLATES.md) (03-10) |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |

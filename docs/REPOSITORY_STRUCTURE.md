@@ -188,4 +188,5 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
   [architecture/DB_SCHEMA.md](architecture/DB_SCHEMA.md) ·
   [architecture/INTEGRATION_POINTS.md](architecture/INTEGRATION_POINTS.md) ·
   [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md) ·
+  [STRATEGY_TEMPLATES.md](STRATEGY_TEMPLATES.md) (generiert: `npm run docs:templates`) ·
   [roadmap/DECISIONS.md](roadmap/DECISIONS.md) (ADR-Log)

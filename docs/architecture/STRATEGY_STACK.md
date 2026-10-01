@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-10-01 · **Code-Version:** v0.7.5 (Beta)
+> **Status:** Ist-Zustand · **Stand:** 2026-10-01 · **Code-Version:** v0.7.6 (Beta)
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)
@@ -37,6 +37,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Kostenmodell | `BacktestEngineConfig.feeModel` + `MonteCarloStressConfig` | kein drittes |
 | Strategie-Template-Vertrag | `src/strategies/types.ts` (`StrategyTemplate`) | — |
 | Strategie-Templates (Katalog) | `src/strategies/catalog.ts` (`STRATEGY_TEMPLATES`, Import-Zeit-Validierung) + `src/strategies/templates/*.ts` (eine Datei pro Artefakt) | keine zweite Template-Liste; Workshop-UI/CLI/Tests lesen hier |
+| Strategie-Template-Doku | `docs/STRATEGY_TEMPLATES.md` (**generiert** aus dem Katalog via `npm run docs:templates`) | keine handgepflegte zweite Tabelle; der Vertragstest vergleicht sie byteweise mit dem Generator |
 | Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
 | Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
 | Fill-Reconciliation | `src/brokers/reconciliation.ts` + `src/executionQuality/` | kein Copy-Reconciler |
@@ -163,6 +164,42 @@ gerade in die aktuelle Marktlage“.
 über alle `supportedTimeframes` (flache Liste Template × Takt) — ohne DB, ohne
 Netz, ohne Mutation; die Rollout-Probe für 03-10/06-01.
 
+### 1.3 Template-Vertragstests + generierte Doku (STX-03-10, v0.7.6)
+
+`tests/strategies.templates.test.ts` (60 Tests, DB-/LLM-/netzfrei) ist die
+**Abnahme von Phase 3** und prüft je Template:
+
+* **Struktur:** `validateTemplate() === []`, Params `min ≤ default ≤ max` auf dem
+  `step`-Raster, `requiredFields`/`mapsTo` ⊆ `RULE_FIELDS`, Klasse ≠
+  `unclassified` (ADR-008), Timeframes nicht leer/duplikatfrei/⊆
+  `SUPPORTED_TIMEFRAMES`, `expectedRegimes` ohne `UNKNOWN` (ADR-009),
+  `regimeGateFactor(regime, class)` + `DEFAULT_CLASS_POLICIES[class]` für alle
+  fünf Regimes, eindeutige Annahmen mit ≥ 1 × `critical`.
+* **Compiler-Parität:** Defaults ⇒ `{ok:true}` **ohne** `clamped`, stabiler
+  `stc1:`-Fingerprint, `symbol` nur vom Aufrufer, `sourceRole: "RESEARCH"`.
+* **Snapshot-Kompatibilität** je Template × Takt: deterministische
+  Kurzhistorie-Fixture (tragendes Feld `null`) bleibt **inert** — fail-closed,
+  kein Entry — und die Positiv-Fixture erzeugt mindestens einen Entry (kein
+  totes Template).
+* **Negativ-Fixtures:** eine um ein Feld verkürzte Bedingung, ein `null`-Feld
+  und der Raster-Extremwert je Schwelle erzeugen **keinen** Entry.
+* **Katalog-Integrität:** exakt sechs IDs, keine Duplikate,
+  `getTemplate("nicht-vorhanden") ⇒ null` (kein Wurf),
+  `templateByField("bbZScore") ⇒ ["bollinger-squeeze"]`,
+  `templateByField("donchianBreakoutPct") ⇒ ["donchian-breakout"]`.
+* **Engine ↔ Cache (Phase-2-Regression):** `buildSnapshotFromCandles` und
+  `snapshotFromCache(buildIndicatorCache(...))` liefern auf identischen Kerzen
+  **exakt gleiche** Werte für `bbZScore`, `priceVsUpperBbPct`,
+  `priceVsLowerBbPct` und `donchianBreakoutPct` (ohne Toleranz).
+* **Timeframe-Disziplin (STX-01):** `vwapPct`-Templates führen kein `1d`/`5d`.
+
+`docs/STRATEGY_TEMPLATES.md` wird von `scripts/gen-strategy-templates-doc.ts`
+aus `STRATEGY_TEMPLATES` erzeugt (`npm run docs:templates`) und im selben Test
+byteweise gegen `renderStrategyTemplatesDoc()` geprüft — Doku und Katalog können
+nicht auseinanderlaufen. Kein Produktivcode wurde für 03-10 geändert:
+`ruleEngine.ts`, `sanitizeRuleSpec`, `indicators.ts`, `indicatorCache.ts` und der
+Katalog bleiben unverändert.
+
 ## 2. Nicht vorhanden — explizite Lücken
 
 Folgende Pfade/Tabellen existieren **nicht** im Ist-Zustand (geprüft via `ls` / `grep`).
@@ -172,6 +209,7 @@ und `../audits/2026-09-29-strategy-template-ausbau/report.md`:
 | Nicht vorhanden | Status | Roadmap-Verweis |
 |---|---|---|
 | ~~`src/strategies/compiler.ts`~~ | ✅ existiert seit `v0.7.5` (03-09) | `ROADMAP.md` Phase 3 — **erledigt:** einziger Aufrufer von `buildRule` + `sanitizeRuleSpec()`, Details in §1.2; Beweis: `tests/strategies.compiler.security.test.ts`; `types.ts` (03-01) und `catalog.ts` (03-02) existieren |
+| ~~Template-Vertragstests~~ | ✅ existiert seit `v0.7.6` (03-10) | `ROADMAP.md` Phase 3 — **abgeschlossen:** Beweis: `tests/strategies.templates.test.ts` (60 Tests), Details in §1.3; generierte Doku `docs/STRATEGY_TEMPLATES.md` |
 | `src/screening/` | Verzeichnis fehlt | `ROADMAP.md` Phase 5 — Candidate Matrix / Screening (`05-01` Typen, `05-02` Matrix-Builder) |
 | `src/copy/` | Verzeichnis fehlt | `ROADMAP.md` Phase 7 — Copy-Trading (`07-01` Typen) |
 | `strategy_definitions` | Tabelle fehlt | `ROADMAP.md` Phase 4 — `04-01` Migration `strategy_definitions` + `strategy_versions` |
