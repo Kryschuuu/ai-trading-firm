@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.7.4` |
+| **Version** | `v0.7.5` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-01 |
-| **Quellbasiert** | `package.json` (`version: "0.7.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.7.5"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -167,10 +167,28 @@ Template-Reihe mit den drei verbleibenden Artefakten: `bollinger-squeeze`
 Pullback/Reclaim; `4h`/`1d` sind wegen des UTC-Tagesankers ausgeschlossen) und
 `donchian-breakout` (03-08, Higher-Timeframe-only `1h`/`4h`, ein Ausbruch pro
 Tag, `donchianBreakoutPct` aus 02-03; `entryPeriod` bleibt Snapshot-Definition).
-Der Katalog führt damit **alle sechs** geplanten Templates. Der Compiler (03-09)
-und die Template-Vertragstests (03-10) folgen; die drei Templates wurden
-gemeinsam als ein Release ausgeliefert (ein Versions-Bump pro PR), die
+Der Katalog führt damit **alle sechs** geplanten Templates; die drei Templates
+wurden gemeinsam als ein Release ausgeliefert (ein Versions-Bump pro PR), die
 unabhängige Prüfbarkeit bleibt über die je eigene Testdatei erhalten.
+
+`v0.7.5` schließt den **sicherheitskritischen Übergang** der Phase 3 und damit
+die Lücke, die Finding STX-05 beschreibt: `src/strategies/compiler.ts` ist der
+**einzige** Aufrufer von `buildRule()` und führt jede Rohform zwingend durch
+`sanitizeRuleSpec()` — es gibt keinen zweiten Weg zu einer `RuleSpec`. Der
+Compiler liefert `{ok:false}` mit Fehlerstrings (nie einen Wurf, nie einen
+Rückfall auf die Rohform), macht Klemmungen als `clamped`-Liste sichtbar
+(„`action.stopLossPct: 999 → 20`"), trägt `strategyClass` ausschließlich aus
+`template.class` (ADR-008, `unclassified` wird abgelehnt) und hasht die Eingabe
+zu einem prozessstabilen `stc1:<sha256>`-Fingerprint (Idempotenz 04-02, Cache
+05-04). Die dynamischen Laufzeit-Limits (`ruleWithinRuntimeLimits`) sind
+`warnings`, keine Compile-Fehler: Sie hängen an Regime-/VolTarget-/Drawdown-
+Faktoren und würden den Fingerprint sonst prozessabhängig machen; erzwungen
+werden sie weiterhin im Order-Pfad. `ruleEngine.ts` bleibt **unverändert**.
+Der Pflicht-Beweis liegt in `tests/strategies.compiler.security.test.ts`
+(26 Tests, u. a. Sanitize-Spy, Ceiling-Klemmung, unbekanntes Feld, fremder
+Operator, `SHORT`, fehlendes `requiredFields`, ROLLOUT über alle sechs
+Templates). Offen ist damit nur noch 03-10 (Template-Vertragstests), das
+Phase-3-Gate.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
@@ -210,7 +228,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09) |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |

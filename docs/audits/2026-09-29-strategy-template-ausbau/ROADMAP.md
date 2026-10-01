@@ -135,13 +135,15 @@ dass der Cache das laufende Maximum in O(n) über eine monotone Deque führt.
 | 03-06 | [Template: Bollinger Squeeze](prompts/PROMPT-STX-03-06-template-bollinger.md) | ✅ 1 Template (`v0.7.4`, erste Klasse `breakout`, `bbZScore` aus 02-02; σ-Korrektur siehe [SSoT §1.1](../../architecture/STRATEGY_STACK.md#11-bollinger-squeeze-stx-03-06-v074)) | 03-02, 02-02 |
 | 03-07 | [Template: VWAP (Snapshot)](prompts/PROMPT-STX-03-07-template-vwap.md) | ✅ 1 Template (`v0.7.4`, zustandsloser Tages-Bias, kein Pullback/Reclaim) | 03-02 |
 | 03-08 | [Template: Donchian Breakout](prompts/PROMPT-STX-03-08-template-donchian.md) | ✅ 1 Template (`v0.7.4`, Higher-Timeframe-only, `donchianBreakoutPct` aus 02-03) | 03-02, 02-03 |
-| 03-09 | [Compiler + Sanitize-Nachweis](prompts/PROMPT-STX-03-09-compiler.md) | `src/strategies/compiler.ts` | 03-03…03-08 |
+| 03-09 | [Compiler + Sanitize-Nachweis](prompts/PROMPT-STX-03-09-compiler.md) | ✅ `src/strategies/compiler.ts` (`v0.7.5`, STX-05 behoben: einziger Aufrufer von `buildRule` + `sanitizeRuleSpec()`, `clamped`-Nachweis, `stc1:`-Fingerprint, `exportTemplates()`; Beweis `tests/strategies.compiler.security.test.ts`) | 03-03…03-08 |
 | 03-10 | [Template-Tests](prompts/PROMPT-STX-03-10-template-tests.md) | `tests/strategies.*.test.ts` | 03-09 |
 
 **Reihenfolge-Logik:** 03-01 → 03-02 ist das Fundament. Die fünf Template-Prompts sind
 bewusst **einzeln** — jedes ist ~60 Zeilen, liefert sofort einen lauffähigen
 Katalogeintrag und hat keine Abhängigkeit von den anderen. 03-09 kommt **vor** 03-10,
-weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren.
+weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren; seit
+`v0.7.5` ist 03-09 umgesetzt (eigenes Release, weil der Übergang sicherheitskritisch
+und einzeln rollbackbar ist), offen bleibt 03-10 als Phase-3-Gate.
 
 **Vokabular-Bindung:** `class: StrategyClassKey` (Pflicht, `unclassified` = Fehler, `CompileResult.strategyClass`) nach [ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1);
 `expectedRegimes: readonly MarketRegime[]` (ohne `UNKNOWN`) nach [ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2); `scope: "SINGLE_SYMBOL"` nach [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3).
