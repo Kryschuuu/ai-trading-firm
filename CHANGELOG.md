@@ -26,11 +26,51 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-> **Status: Beta.** STX-03-06 ist implementiert, noch nicht veröffentlicht.
-> Nächste Schritte: die restlichen Templates 03-07/03-08, danach der Compiler
-> 03-09 und die Template-Tests 03-10; offen bleibt die optionale Feature-Store-Parität 02-04.
+> **Status: Beta.** STX-03-06, 03-07 und 03-08 sind implementiert, noch nicht
+> veröffentlicht. Nächste Schritte: der Compiler 03-09 und die Template-Tests
+> 03-10 (Abschluss von Phase 3); offen bleibt die optionale
+> Feature-Store-Parität 02-04.
 
 ### Added
+
+* **Sechstes und letztes Strategie-Template: Donchian Breakout** (STX-03-08,
+  `src/strategies/templates/donchian-breakout.ts`) — `class: "breakout"`,
+  `version: 1`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes: ["1h", "4h"]`
+  (Higher-Timeframe-only), `expectedRegimes: ["TREND_UP", "RANGE"]`; einmalig an
+  sechster Stelle im import-validierten Katalog — `STRATEGY_TEMPLATES` führt
+  damit alle sechs geplanten Templates.
+  * `logic: "all"`: `donchianBreakoutPct gte breakoutMinPct`, `adx14 gte adxMin`,
+    `volumeRatio gte volumeRatioMin`. Fünf Parameter, Defaults 0,3 % / 20 / 1,2× /
+    5 % Stop / 2× Chance/Risiko; der gesamte Parameterraum liegt innerhalb der
+    bestehenden Risiko-Deckel. `takeProfitRR` hat kein eigenes Regelfeld
+    (`mapsTo: atrPct`, nur Risikodoku).
+  * **Lookahead-Schutz aus 02-01/02-03 bleibt unangetastet:** `upper` stammt aus
+    den **vorigen** 20 Kerzen (`DONCHIAN_ENTRY_PERIOD = 20`). `entryPeriod` ist
+    kein Regelfeld und kein Template-Parameter — der Snapshot rechnet mit dem
+    kanonischen Default aus 02-03. Will 06-02 eine andere Periode testen, braucht
+    es dafür dann ein zusätzliches Feld; das ist als bewusste, dokumentierte
+    Grenze festgehalten, nicht als stiller Parameter gebaut.
+  * **Strukturkosten statt Parameterfehler:** Der Einstieg zum Schlusskurs nach
+    dem Ausbruch kauft typischerweise am lokalen Hoch. Deshalb
+    `maxExecutionsPerDay: 1` (dasselbe Breakout-Charset darf nicht mehrfach
+    kaufen) und `cooldownMinutes: 720`; `window.timeframe: "1h"`.
+    Präzisierung zum Auftrag: Das Raster setzt `takeProfitRR` mit 2 auf denselben
+    Wert wie 03-03/03-04 — die strukturelle Aussage verbietet ein Anheben über
+    die Trend-Werte, behauptet aber keine Differenz; 06-02 muss die realisierte
+    Ausführung (Fill vs. Signalkurs) messen.
+  * Sieben explizite Annahmen (MARKET/EXECUTION/DATA/COST) einschließlich
+    Regime-Wechsel-These, lokaler-Hoch-Einstieg, Vor-Kerzen-Lookahead-Schutz,
+    Spread am lokalen Hoch, ein Ausbruch pro Tag, entryPeriod-Grenze und
+    fail-closed-Warm-up.
+  * `tests/strategies.donchianBreakout.test.ts` prüft Vertrag, Registrierung
+    (sechster Platz, sechs Templates), Higher-Timeframe-Beschränkung, das
+    vollständige Parameterraster inklusive aller Rasterpunkte und 32
+    Eckkombinationen ohne Sanitizer-Klemmung, die Annahmen, die
+    Lookahead-Invariante (ein Intrabar-Spike der Signalkerze löst die Regel nicht
+    aus) und fail-closed bei `null`-Readings.
+  * Keine Änderung an `donchianChannel`/`donchianBreakoutPct`, `RULE_FIELDS`,
+    `RULE_CEILINGS`, `ruleEngine.ts` oder `indicators.ts`; kein
+    `entryPeriod`-Regelfeld, keine Short-Variante, keine Migration.
 
 * **Viertes Strategie-Template: Bollinger Squeeze Breakout** (STX-03-06,
   `src/strategies/templates/bollinger-squeeze.ts`) — `class: "breakout"`,
