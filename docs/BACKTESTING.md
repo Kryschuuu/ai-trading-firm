@@ -204,8 +204,11 @@ ein neues 20-Kerzen-Hoch“ wäre derselbe Tag, aber eine andere Aussage.
 **Fensterlänge = Snapshot-Definition, kein Regelfeld.** Periode 20 und
 Exit-Fenster 10 sind kanonisch (`DONCHIAN_ENTRY_PERIOD`/`DONCHIAN_EXIT_PERIOD`).
 Das Feld bedeutet in **jedem** Template „Hoch der vorigen 20 Kerzen“. Wer eine
-andere Fensterlänge handeln will, parametrisiert den Kanal im Template (03-08),
-nicht das Regelwerk — sonst wäre derselbe Feldwert je Strategie etwas anderes.
+andere Fensterlänge handeln will, braucht eine zusätzliche, versionierte
+Definition — Template 03-08 (`donchian-breakout`, `v0.7.4`) nutzt bewusst den
+kanonischen Snapshot-Default und dokumentiert eine andere Periode als bekannte
+Grenze (06-02); das Regelwerk bleibt unangetastet, sonst wäre derselbe Feldwert
+je Strategie etwas anderes.
 
 **`null` ist ein Messwert-Ausfall, keine 0** (fail-closed, blockiert die Bedingung):
 
@@ -230,8 +233,9 @@ Donchian-Feld bleiben byte-identisch (Golden-Hash).
 
 **Higher-Timeframe-Hinweis (Template 03-08).** Donchian ist per Definition
 HTF-Logik: Ein 20-Kerzen-Hoch ist auf `1m` 20 Minuten, auf `1d` fast ein Monat.
-Das Template muss deshalb einen Mindest-Timeframe erzwingen (geplant: `1h`/`4h`);
-das Feld selbst ist timeframe-unabhängig definiert.
+Das Template erzwingt ihn seit `v0.7.4` über
+`supportedTimeframes: ["1h", "4h"]`; das Feld selbst ist
+timeframe-unabhängig definiert.
 
 ```json
 {

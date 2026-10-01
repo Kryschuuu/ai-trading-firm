@@ -21,17 +21,88 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.3** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.4** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** STX-03-06, 03-07 und 03-08 sind implementiert, noch nicht
-> veröffentlicht. Nächste Schritte: der Compiler 03-09 und die Template-Tests
+> **Status: Beta.** Nächste Schritte: der Compiler 03-09 und die Template-Tests
 > 03-10 (Abschluss von Phase 3); offen bleibt die optionale
-> Feature-Store-Parität 02-04.
+> Feature-Store-Parität 02-04. Danach folgt Phase 4 (`strategy_definitions`/
+> `strategy_versions`, `v0.8.0`).
+
+## [0.7.4] — Templates Bollinger Squeeze, VWAP-Bias & Donchian Breakout (STX-03-06/03-07/03-08) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Drei additive Strategie-Artefakte mit
+> je eigenem Test; **keine** Migration, keine Änderung an `ruleEngine.ts`,
+> `RULE_CEILINGS`, `RULE_FIELDS`, `marketRegime.ts`, `indicators.ts` oder am
+> Indikator-Cache. Die sechs geplanten Templates sind damit vollständig gebaut;
+> die Abnahme über Compiler (03-09) und Template-Vertragstests (03-10) bleibt
+> offen. Geplant waren je Template eigene Releases (`v0.7.4`/`v0.7.5`/`v0.7.6`);
+> ausgeliefert werden sie als **ein** Release, weil ein Versions-Bump pro PR
+> gilt und die drei Artefakte zusammen abgenommen werden — die unabhängige
+> Prüfbarkeit bleibt über die je eigene Testdatei erhalten.
 
 ### Added
+
+* **Viertes Strategie-Template: Bollinger Squeeze Breakout** (STX-03-06,
+  `src/strategies/templates/bollinger-squeeze.ts`) — `class: "breakout"`,
+  `version: 1`, `scope: "SINGLE_SYMBOL"`, Timeframes `1h`/`4h`, erwartete Regime
+  `RANGE`/`TREND_UP`; einmalig an vierter Stelle im import-validierten Katalog.
+  * `logic: "all"`: `bbwPct lte bbwMaxPct`, `bbZScore gte bbZScoreMin`,
+    `adx14 gte adxMin`, `volumeRatio gte volumeRatioMin`. Sechs Parameter,
+    Defaults 6 % / 0,5 σ / 22 / 1,2× / 4 % Stop / 2,5× Chance/Risiko;
+    der ganze Parameterraum liegt innerhalb der bestehenden Risiko-Deckel.
+  * **Kalibrierung ausstehend:** `bbwMaxPct` ist markt-, timeframe- und
+    regimeabhängig. Die 6 % sind ein vorläufiger Research-Startwert, keine
+    behauptete Messung. 06-01/06-02 prüft die 20. Perzentile über 200 geschlossene
+    Kerzen gegen den Store, `1h` und `4h` getrennt, vor Live-Einsatz.
+  * **σ-Rechnung korrigiert gegenüber dem Auftrag:** Im bestehenden Feld gilt
+    `z = (close − middle) / σ`; an `upper = middle + 2·σ` ist `z = 2`, nicht
+    ungefähr 1,4. Der gewünschte Default 0,5 bleibt erhalten und bedeutet ein
+    frühes Setup über der **Bandmitte**, keinen bestätigten oberen Kantenbruch.
+    Kein zusätzlicher oder stiller Ersatzfilter auf `priceVsUpperBbPct`.
+  * Sieben explizite Annahmen einschließlich Kontraktion/Expansion,
+    Bandbreiten-Kalibrierung, Schlusskurs-/Live-Latenz, Kosten und bewusster
+    **Snapshot-Vereinfachung** (alle Filter auf derselben Kerze, kein
+    „vorher eng, jetzt weit“-Sequenznachweis).
+  * `tests/strategies.bollingerSqueeze.test.ts` prüft Vertrag, Registrierung,
+    `bbZScoreMin < 2`, die lebende σ-Rechnung, alle Parameter-Rasterpunkte und
+    Grenzkombinationen ohne Sanitizer-Klemmung, inklusive Filtergrenzen und
+    Fail-closed bei fehlenden Parametern, Warm-up oder σ = 0.
+  * Keine Änderungen an Indikatoren, Cache, `RULE_FIELDS`, `RULE_CEILINGS` oder
+    Regel-DSL; keine Migration oder neue Dependency.
+
+* **Fünftes Strategie-Template: VWAP-Bias (Snapshot)** (STX-03-07,
+  `src/strategies/templates/vwap-pullback.ts`) — trotz der stabilen ID
+  `vwap-pullback` ausdrücklich **kein** Pullback/Reclaim, sondern ein
+  zustandsloser Tages-Bias long; `class: "trend"`, `version: 1`,
+  `scope: "SINGLE_SYMBOL"`, Timeframes `5m`/`15m`/`1h`,
+  `expectedRegimes: ["TREND_UP"]`; einmalig an fünfter Stelle im
+  import-validierten Katalog.
+  * `logic: "all"`: `trend eq "UP"`, `vwapPct gte vwapMinPct` (0,10),
+    `priceVsEma21Pct gte ema21BufferPct` (0,10), `volumeRatio gte volumeRatioMin`
+    (1,1). Fenster `15m`, 3 Ausführungen/Tag, 120 Minuten Cooldown; Stop 3 %, Ziel
+    2× Chance/Risiko. Fünf Parameter, der gesamte Bereich liegt innerhalb
+    `RULE_CEILINGS`.
+  * **`4h`/`1d` sind ausgeschlossen:** `vwapPct` hängt am UTC-Tagesanker
+    (`utcDayAnchorMs`); auf `1d` enthält der Anker exakt eine Kerze (Wert `null`,
+    nie 0), auf `4h` sind es pro UTC-Tag zu wenige, stark an den UTC-Grenzen
+    hängende Beobachtungen. Die Eignungsmenge steht als
+    `VWAP_PCT_RELIABLE_TIMEFRAMES` im Modul; die unterstützten Takte sind per
+    Test eine Teilmenge davon.
+  * **Der echte Pullback bleibt offen:** Er bräuchte die Sequenz
+    „unter dem VWAP → zurück über dem VWAP" und damit Zustand im `MicroExecutor`
+    (Lebensdauer, Stops, Cooldowns, `maxExecutionsPerDay`) — eigener Audit
+    (STX-18), bewusst **kein** `RuleTrigger`/`CROSS`/`RECLAIM`.
+  * Fünf Annahmen (DATA/MARKET/EXECUTION/COST) einschließlich
+    UTC-Tag-statt-Börsensession, historischer VWAP ≠ Ausführungskurs,
+    Intraday-Kosten und Snapshot-statt-Reclaim.
+  * `tests/strategies.vwapPullback.test.ts` prüft Vertrag, Registrierung (fünfter
+    Platz), die Timeframe-Teilmenge, das Parameterraster, die unveränderte
+    Sanitize-Kette und die Fenster-/Risikowerte.
+  * Keine Änderung an `sessionVwap`, `utcDayAnchorMs` oder der
+    `vwapPct`-Berechnung; kein Zustand im `MicroExecutor`, keine Sequenz-Trigger.
 
 * **Sechstes und letztes Strategie-Template: Donchian Breakout** (STX-03-08,
   `src/strategies/templates/donchian-breakout.ts`) — `class: "breakout"`,
@@ -71,34 +142,6 @@ erlaubt, solange sie hier dokumentiert sind).
   * Keine Änderung an `donchianChannel`/`donchianBreakoutPct`, `RULE_FIELDS`,
     `RULE_CEILINGS`, `ruleEngine.ts` oder `indicators.ts`; kein
     `entryPeriod`-Regelfeld, keine Short-Variante, keine Migration.
-
-* **Viertes Strategie-Template: Bollinger Squeeze Breakout** (STX-03-06,
-  `src/strategies/templates/bollinger-squeeze.ts`) — `class: "breakout"`,
-  `version: 1`, `scope: "SINGLE_SYMBOL"`, Timeframes `1h`/`4h`, erwartete Regime
-  `RANGE`/`TREND_UP`; einmalig an vierter Stelle im import-validierten Katalog.
-  * `logic: "all"`: `bbwPct lte bbwMaxPct`, `bbZScore gte bbZScoreMin`,
-    `adx14 gte adxMin`, `volumeRatio gte volumeRatioMin`. Sechs Parameter,
-    Defaults 6 % / 0,5 σ / 22 / 1,2× / 4 % Stop / 2,5× Chance/Risiko;
-    der ganze Parameterraum liegt innerhalb der bestehenden Risiko-Deckel.
-  * **Kalibrierung ausstehend:** `bbwMaxPct` ist markt-, timeframe- und
-    regimeabhängig. Die 6 % sind ein vorläufiger Research-Startwert, keine
-    behauptete Messung. 06-01/06-02 prüft die 20. Perzentile über 200 geschlossene
-    Kerzen gegen den Store, `1h` und `4h` getrennt, vor Live-Einsatz.
-  * **σ-Rechnung korrigiert gegenüber dem Auftrag:** Im bestehenden Feld gilt
-    `z = (close − middle) / σ`; an `upper = middle + 2·σ` ist `z = 2`, nicht
-    ungefähr 1,4. Der gewünschte Default 0,5 bleibt erhalten und bedeutet ein
-    frühes Setup über der **Bandmitte**, keinen bestätigten oberen Kantenbruch.
-    Kein zusätzlicher oder stiller Ersatzfilter auf `priceVsUpperBbPct`.
-  * Sieben explizite Annahmen einschließlich Kontraktion/Expansion,
-    Bandbreiten-Kalibrierung, Schlusskurs-/Live-Latenz, Kosten und bewusster
-    **Snapshot-Vereinfachung** (alle Filter auf derselben Kerze, kein
-    „vorher eng, jetzt weit“-Sequenznachweis).
-  * `tests/strategies.bollingerSqueeze.test.ts` prüft Vertrag, Registrierung,
-    `bbZScoreMin < 2`, die lebende σ-Rechnung, alle Parameter-Rasterpunkte und
-    Grenzkombinationen ohne Sanitizer-Klemmung, inklusive Filtergrenzen und
-    Fail-closed bei fehlenden Parametern, Warm-up oder σ = 0.
-  * Keine Änderungen an Indikatoren, Cache, `RULE_FIELDS`, `RULE_CEILINGS` oder
-    Regel-DSL; keine Migration oder neue Dependency.
 
 ## [0.7.3] — Template RSI Mean-Reversion (STX-03-05) (2026-10-01)
 
