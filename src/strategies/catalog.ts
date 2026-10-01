@@ -52,9 +52,9 @@
  * `STRATEGY_TEMPLATES` führt **eine Zeile pro Template-Datei** aus
  * `src/strategies/templates/` — keine Template-Logik in dieser Datei. Seit
  * 03-03 steht dort `ema-adx-trend`, seit 03-04 `macd-momentum`, seit 03-05
- * `rsi-mean-reversion`, seit 03-06 `bollinger-squeeze`; die übrigen zwei
- * folgen in 03-07/03-08. Die IDs
- * stehen seit 03-02 als geschlossene Union fest —
+ * `rsi-mean-reversion`, seit 03-06 `bollinger-squeeze` und seit 03-07
+ * `vwap-pullback`; das letzte Template folgt in 03-08. Die IDs stehen seit
+ * 03-02 als geschlossene Union fest —
  * `getTemplate()` nimmt ausschließlich sie an, damit ein Tippfehler nicht auf
  * einen stillen Default läuft. Welche Datei eingetragen ist, prüft
  * `tests/strategies.catalog.test.ts` gegen das Verzeichnis: eine fehlende oder
@@ -82,6 +82,7 @@ import { buildEmaAdxTrend } from "./templates/ema-adx-trend";
 import { buildMacdMomentum } from "./templates/macd-momentum";
 import { buildRsiMeanReversion } from "./templates/rsi-mean-reversion";
 import { buildBollingerSqueeze } from "./templates/bollinger-squeeze";
+import { buildVwapPullback } from "./templates/vwap-pullback";
 
 import type { StrategyTemplate } from "./types";
 
@@ -509,8 +510,8 @@ function collectCeilingViolations(value: unknown, path: string, out: string[]): 
  * die erste Klasse `mean-reversion`, also das erste Artefakt, das im
  * Regime-Gate tatsächlich gedämpft wird). Seit 03-06 folgt der vierte Eintrag
  * (`bollinger-squeeze`, Klasse `breakout`, erstes Template mit `bbZScore` aus
- * 02-02); die übrigen zwei Templates folgen in 03-07/03-08 und tragen dort
- * ihre Klasse aus der ADR-008-Tabelle.
+ * 02-02); seit 03-07 der fünfte (`vwap-pullback`, fachlich ausdrücklich ein
+ * zustandsloser VWAP-Trend-Bias). Das letzte Template folgt in 03-08.
  *
  * Die Einträge sind hier **Konstruktionen, keine Literale**: Jede Datei liefert
  * ein `build<Name>()`, das das Artefakt frisch zusammensetzt. Ein Export des
@@ -527,6 +528,7 @@ export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [
   buildMacdMomentum(),
   buildRsiMeanReversion(),
   buildBollingerSqueeze(),
+  buildVwapPullback(),
 ];
 
 /** ID → Template. Unbekannte IDs liefern `null` — nie einen stillen Default. */
@@ -540,7 +542,7 @@ const TEMPLATE_MAP: ReadonlyMap<string, StrategyTemplate> = new Map(
 
 /**
  * Liefert ein Template oder `null` — unbekannte IDs werden nie erfunden und
- * geplante, aber noch nicht gebaute (03-07/03-08) ebenso wenig: `null` ist
+ * geplante, aber noch nicht gebaute (aktuell 03-08) ebenso wenig: `null` ist
  * hier „gibt es noch nicht“, niemals ein Default.
  */
 export function getTemplate(id: StrategyTemplateId): StrategyTemplate | null {
