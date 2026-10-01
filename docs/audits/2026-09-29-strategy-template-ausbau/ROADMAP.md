@@ -159,8 +159,14 @@ Sicherheitspfad und sind vertraglich abgesichert.
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | 2 append-only Tabellen | 03-09 ✅ |
+| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | ✅ `v0.8.0`: 2 append-only Tabellen + Drizzle-Schema + DB-/Rollback-Tests; kein Schreibpfad | 03-09 ✅ |
 | 04-02 | [Service + Lifecycle-Bridging](prompts/PROMPT-STX-04-02-strategy-service.md) | `src/strategies/service.ts` | 04-01, 00-02 |
+
+**Ergebnis 04-01 (2026-10-01, `v0.8.0`):** Das Schema für Definitionen und
+unveränderliche Strategie-Versionen ist idempotent angelegt. Es gibt keinen
+Backfill und keinen Anwendungsschreibpfad; STX-06 bleibt bis 04-02 in Arbeit.
+Die Lifecycle-Tabellen bleiben unangetastet; der optionale nullable FK ist wegen
+des ausdrücklichen Locks nicht Teil dieses freigegebenen Scopes.
 
 **Vokabular-Bindung:** `strategy_class` mit CHECK auf die drei Klassen, ohne `unclassified` ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)).
 

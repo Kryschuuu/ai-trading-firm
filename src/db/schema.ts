@@ -3145,7 +3145,81 @@ export const executionTwapEvaluations = pgTable(
 );
 
 /**
- * Strategy-Lifecycle-Zustand je koncreter Strategieversion (RMA-P1-05, v1.73.0).
+ * Persistierte Strategie-Definitionen (STX-04-01).
+ *
+ * `templateId` ist ein code-owned Katalog-Slug und deshalb absichtlich ohne
+ * FK. Drizzle-Properties in camelCase sind hier explizit an die
+ * snake_case-Spalten und SQL-Typen aus
+ * `drizzle/2026-10-01_strategy_catalog.sql` gebunden.
+ */
+export const strategyDefinitions = pgTable(
+  "strategy_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    templateId: text("template_id").notNull(),
+    strategyClass: text("strategy_class").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    createdBy: text("created_by").notNull().default("system"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("strategy_definitions_template_name_unique").on(t.templateId, t.name),
+    check(
+      "strategy_definitions_template_id_shape",
+      sql`${t.templateId} ~ '^[a-z0-9-]{3,64}$'`
+    ),
+    check(
+      "strategy_definitions_strategy_class_check",
+      sql`${t.strategyClass} IN ('mean-reversion','trend','breakout')`
+    ),
+  ]
+);
+
+/**
+ * Unveränderliche, rekonstruierbare Version eines Strategie-Artefakts
+ * (STX-04-01): kompilierte Parameter + sanitisiertes RuleSpec und
+ * Erzeugungs-Provenance. Der SQL-Spiegel liegt in
+ * `drizzle/2026-10-01_strategy_catalog.sql`.
+ */
+export const strategyVersions = pgTable(
+  "strategy_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    definitionId: uuid("definition_id")
+      .notNull()
+      .references(() => strategyDefinitions.id),
+    version: integer("version").notNull(),
+    paramsJson: jsonb("params_json").notNull(),
+    ruleSpecJson: jsonb("rule_spec_json").notNull(),
+    timeframe: text("timeframe").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    contentHash: text("content_hash").notNull(),
+    codeVersion: text("code_version").notNull(),
+    templateVersion: integer("template_version").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("strategy_versions_definition_version_unique").on(t.definitionId, t.version),
+    uniqueIndex("strategy_versions_fingerprint_unique").on(t.fingerprint),
+    // Gleicher Artefaktinhalt ist ein Retry/Replay, keine zweite persistierte Version.
+    uniqueIndex("strategy_versions_content_hash_unique").on(t.contentHash),
+    index("strategy_versions_definition_created_at_idx").on(t.definitionId, t.createdAt.desc()),
+    check("strategy_versions_version_check", sql`${t.version} >= 1`),
+    check(
+      "strategy_versions_timeframe_check",
+      sql`${t.timeframe} IN ('1m','3m','5m','15m','30m','1h','2h','4h','1d','5d')`
+    ),
+    check(
+      "strategy_versions_content_hash_check",
+      sql`${t.contentHash} ~ '^stv1:[0-9a-f]{64}$'`
+    ),
+  ]
+);
+
+/**
+ * Strategy-Lifecycle-Zustand je konkreter Strategieversion (RMA-P1-05, v1.73.0).
  *
  * EINE Zeile pro (strategy_key, strategy_version) mit optimistischem Lock
  * (`state_seq`). Append-only Migration: `drizzle/2026-09-23_strategy_lifecycle.sql`.

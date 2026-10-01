@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.12` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.13` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -42,6 +42,7 @@
 | `v1.1.10` | 2026-10-01 | 03-06/03-07/03-08 umgesetzt (`v0.7.4`): Templates Bollinger Squeeze, VWAP-Bias (Snapshot) und Donchian Breakout — sechs von sechs Templates gebaut, Phase-3-Abnahme über 03-09/03-10 offen |
 | `v1.1.11` | 2026-10-01 | 03-09 umgesetzt (`v0.7.5`): Compiler `Template → buildRule(params) → sanitizeRuleSpec() → RuleSpec` mit `clamped`-Nachweis, stabilem `stc1:`-Fingerprint und `exportTemplates()`; **STX-05 behoben** (HIGH), offen nur 03-10 |
 | `v1.1.12` | 2026-10-01 | 03-10 umgesetzt (`v0.7.6`): Template-Vertragstests (`tests/strategies.templates.test.ts`, 60 Tests) + generierte Doku `docs/STRATEGY_TEMPLATES.md`; **Phase 3 abgeschlossen**, Gate G3 erfüllt (STX-18 damit auf der Abnahmeseite geklärt) |
+| `v1.1.13` | 2026-10-01 | 04-01 umgesetzt (`v0.8.0`): append-only Schema für `strategy_definitions`/`strategy_versions` + DB-Tests; STX-06 teilweise remediated, bleibt bis 04-02-Service in Arbeit |
 
 ## 2. Release-Plan der Roadmap
 
@@ -64,7 +65,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.7.4` | Templates Bollinger Squeeze, VWAP (Snapshot) & Donchian Breakout — ausgeliefert 2026-10-01 (die geplanten Einzel-Releases `v0.7.5`/`v0.7.6` entfallen: ein Bump pro PR, die drei Artefakte wurden zusammen abgenommen) | 03-06, 03-07, 03-08 | Minor | **Beta** |
 | `v0.7.5` | **Compiler + Sanitize-Nachweis** — ausgeliefert 2026-10-01 (eigenes Release statt Faltung in ein Template-Release: der sicherheitskritische Übergang braucht einen eigenen, einzeln rollbackbaren Release-Punkt) | 03-09 | Minor (neues Modul) | **Beta** |
 | `v0.7.6` | **Template-Vertragstests + Katalog-Doku** — ausgeliefert 2026-10-01 (Phase-3-Abnahme: Struktur, Compiler-Parität, Positiv-/Negativ-Fixtures je Template × Takt, Katalog-Integrität, Engine-↔-Cache-Parität; `docs/STRATEGY_TEMPLATES.md` aus dem Katalog generiert) | 03-10 | Test + Doku (kein Produktivcode) | **Beta** |
-| `v0.8.0` | `strategy_definitions` + `strategy_versions` (Migration + Service) | 04-01, 04-02 | Minor (additive Migration) | **Beta** |
+| `v0.8.0` | Schemafundament `strategy_definitions` + `strategy_versions` (04-01); der App-Service/Schreibpfad aus 04-02 bleibt für die vollständige Phase-4-Abnahme erforderlich | 04-01 (04-02 folgt) | Minor (additive Migration) | **Beta — Schema ausgeliefert, Service offen** |
 | `v0.9.0` | Screening: Typen, Priorität, Matrix, Persistenz, CLI | 05-01…05-04 | Minor | **Beta** |
 | `v0.10.0` | Validator deterministisch: Annahmen, Overfit, Stress, Report + CLI | 06-01…06-04 | Minor | **Beta** |
 | `v0.10.1` | Validator-Agent (Shadow-Mode, erklärt nur) | 06-05 | Minor | **Beta** |
@@ -77,6 +78,10 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 ausgeliefert — der Compiler ist der sicherheitskritische Übergang (Finding
 STX-05) und bekommt damit einen eigenen Rollback-Punkt; 03-10 folgte als
 Template-Vertragstests in `v0.7.6` und schließt Phase 3 ab (Gate G3).
+
+**Entschieden (2026-10-01):** `v0.8.0` eröffnet Phase 4 mit 04-01 als
+Schemafundament. Die Migration kann Definitionen und Versionen speichern, aber
+ohne 04-02 existiert noch kein Anwendungspfad; STX-06 bleibt deshalb in Arbeit.
 
 ### 2.1 Warum eigene Releases je Template
 
