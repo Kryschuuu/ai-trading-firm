@@ -127,11 +127,11 @@ dass der Cache das laufende Maximum in O(n) über eine monotone Deque führt.
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 03-01 | [Template-Typen](prompts/PROMPT-STX-03-01-template-types.md) | `src/strategies/types.ts` | 01-01, 00-03 |
-| 03-02 | [Katalog + Validierung](prompts/PROMPT-STX-03-02-catalog.md) | `src/strategies/catalog.ts` | 03-01 |
-| 03-03 | [Template: EMA/ADX Trend](prompts/PROMPT-STX-03-03-template-ema-adx.md) | 1 Template | 03-02 |
-| 03-04 | [Template: MACD Momentum](prompts/PROMPT-STX-03-04-template-macd.md) | 1 Template | 03-02 |
-| 03-05 | [Template: RSI Mean-Reversion](prompts/PROMPT-STX-03-05-template-rsi.md) | 1 Template | 03-02 |
+| 03-01 | [Template-Typen](prompts/PROMPT-STX-03-01-template-types.md) | ✅ `src/strategies/types.ts` (`v0.7.0`) | 01-01, 00-03 |
+| 03-02 | [Katalog + Validierung](prompts/PROMPT-STX-03-02-catalog.md) | ✅ `src/strategies/catalog.ts` (`v0.7.0`) | 03-01 |
+| 03-03 | [Template: EMA/ADX Trend](prompts/PROMPT-STX-03-03-template-ema-adx.md) | ✅ 1 Template (`v0.7.1`) | 03-02 |
+| 03-04 | [Template: MACD Momentum](prompts/PROMPT-STX-03-04-template-macd.md) | ✅ 1 Template (`v0.7.2`) | 03-02 |
+| 03-05 | [Template: RSI Mean-Reversion](prompts/PROMPT-STX-03-05-template-rsi.md) | ✅ 1 Template (`v0.7.3`, erste Klasse `mean-reversion`) | 03-02 |
 | 03-06 | [Template: Bollinger Squeeze](prompts/PROMPT-STX-03-06-template-bollinger.md) | 1 Template | 03-02, 02-02 |
 | 03-07 | [Template: VWAP (Snapshot)](prompts/PROMPT-STX-03-07-template-vwap.md) | 1 Template | 03-02 |
 | 03-08 | [Template: Donchian Breakout](prompts/PROMPT-STX-03-08-template-donchian.md) | 1 Template | 03-02, 02-03 |

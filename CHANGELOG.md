@@ -21,13 +21,20 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-09-30** · Code-Version **0.6.5** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.3** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-05 … 03-08 und
-> der Compiler 03-09 (`v0.7.0`); offen bleibt die optionale Feature-Store-Parität 02-04.
+> **Status: Beta.** Nächste Schritte: die restlichen Templates 03-06 … 03-08
+> (`v0.7.4` … `v0.7.6`), danach der Compiler 03-09 und die Template-Tests 03-10;
+> offen bleibt die optionale Feature-Store-Parität 02-04.
+
+## [0.7.3] — Template RSI Mean-Reversion (STX-03-05) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Ein additives Strategie-Artefakt mit
+> eigenem Test; **keine** Migration, keine Änderung an `ruleEngine.ts`,
+> `RULE_CEILINGS`, `RULE_FIELDS`, `marketRegime.ts` oder `indicators.ts`.
 
 ### Added
 
@@ -92,6 +99,14 @@ erlaubt, solange sie hier dokumentiert sind).
     auslösen), flache Range nicht. Dazu die RSI-Warm-up-Falle: `rsi()` liefert unter 15
     Schlusskursen nicht `null`, sondern **50** — der gesamte `rsiOversold`-Bereich
     (≤ 40) liegt darunter, die Regel kann also nie auf dem Ersatzwert handeln.
+
+## [0.7.2] — Template MACD Momentum (STX-03-04) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Ein additives Strategie-Artefakt mit
+> eigenem Test; **keine** Migration, keine Engine-Änderung.
+
+### Added
+
 * **Zweites Strategie-Template: MACD Momentum** (`src/strategies/templates/macd-momentum.ts`,
   STX-03-04, Phase 3) — das **Referenztemplate für 06-02 (Overfit)**: die
   wenigsten Parameter (vier) und die klarste Ökonomie. Auch dieses Artefakt
@@ -151,6 +166,15 @@ erlaubt, solange sie hier dokumentiert sind).
     `priceVsEma50Pct` die Ablehnung. Dazu die neuen Kopf-Invarianten:
     `histogram = macd − signal` (Preiseinheiten) und `macdHist` im Snapshot
     unskaliert (nur auf 6 Stellen gerundet).
+
+## [0.7.1] — Template EMA/ADX Trend (STX-03-03) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Das erste Artefakt im neuen Katalog;
+> additiv, **keine** Migration, keine Engine-Änderung. Die Abnahme über den
+> Compiler (03-09) und die Template-Tests (03-10) folgt.
+
+### Added
+
 * **Erstes Strategie-Template: EMA/ADX Trend** (`src/strategies/templates/ema-adx-trend.ts`,
   STX-03-03, Phase 3) — der Katalog ist keine leere Registry mehr. Das Artefakt
   braucht genau nichts Neues: keine Felder, keine Indikatoren, keine
@@ -212,6 +236,27 @@ erlaubt, solange sie hier dokumentiert sind).
   `src/strategies/templates/` statt eine leere Liste zu erwarten — eine fehlende
   oder doppelte Registrierung ist damit ein Testfehler, und 03-04 … 03-08 ziehen
   den Test nicht mehr nach.
+
+## [0.7.0] — Template-Vertrag und Katalog (STX-03-01/03-02) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Neue, additive Domäne
+> `src/strategies/` (reine Typen + Registry mit Import-Zeit-Validierung);
+> **keine** Migration, keine Änderung an `ruleEngine.ts` oder `RULE_FIELDS`.
+
+### Added
+
+* **Template-Vertrag** (`src/strategies/types.ts`, STX-03-01, Phase 3) — die
+  verbindliche Form eines Strategie-Artefakts: `StrategyTemplate` mit `id`,
+  `name`, `description`, `version`, `class` (Pflicht, aus dem **bestehenden**
+  `StrategyClassKey`, ADR-008), `scope` (nur `SINGLE_SYMBOL`, ADR-010),
+  `supportedTimeframes` (aus `SUPPORTED_TIMEFRAMES`), `requiredFields`
+  (Whitelist `RULE_FIELDS`), `params` (`ParamSpec` mit `min ≤ default ≤ max`,
+  `step` als Sensitivitätsraster und `mapsTo`), `buildRule(params) =>
+  RuleSpecInput` als **reine Funktion der Parameter** (STX-05: kein `ctx`, kein
+  Marktdatenzugriff), `assumptions` (`StrategyAssumption` mit `category` und
+  `critical`) und `expectedRegimes` (bestehendes `MarketRegime`-Vokabular, ohne
+  `UNKNOWN`, ADR-009). Reine Typen: ausschließlich `import type`, keine Logik,
+  keine IO, kein DB-Import — das Modul erzeugt zur Laufzeit null Bytes.
 
 * **Template-Katalog + Registry-Validierung** (`src/strategies/catalog.ts`,
   STX-03-02, Phase 3) — der Katalog prüft Templates **beim Import**, nicht erst

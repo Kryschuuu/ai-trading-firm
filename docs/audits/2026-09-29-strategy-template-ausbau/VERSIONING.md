@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.5` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.9` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), Phase 3 begonnen (03-01/03-02 `v0.7.0`, 03-03 `v0.7.1`, 03-04 `v0.7.2`, 03-05 `v0.7.3`; offen 03-06 … 03-10) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -35,6 +35,10 @@
 | `v1.1.3` | 2026-09-30 | 02-01 umgesetzt (`v0.6.3`): reine Bollinger-/Donchian-Formeln, Rule-Felder/Cache weiter offen; kein Finding geschlossen |
 | `v1.1.4` | 2026-09-30 | 02-02 umgesetzt (`v0.6.4`): Bollinger-Regelfelder + Paritäts-/Golden-Test; STX-18 zur Hälfte erledigt (Donchian folgt 02-03) |
 | `v1.1.5` | 2026-09-30 | 02-03 umgesetzt (`v0.6.5`): Donchian-Regelfeld + Lookahead-/O(n)-/Paritätstest; STX-18-Feldseite vollständig (Templates offen) |
+| `v1.1.6` | 2026-10-01 | 03-01/03-02 umgesetzt (`v0.7.0`): Template-Vertrag (`src/strategies/types.ts`) + Katalog mit Import-Zeit-Validierung |
+| `v1.1.7` | 2026-10-01 | 03-03 umgesetzt (`v0.7.1`): Template EMA/ADX Trend + eigene Testsuite |
+| `v1.1.8` | 2026-10-01 | 03-04 umgesetzt (`v0.7.2`): Template MACD Momentum, Referenztemplate für 06-02 |
+| `v1.1.9` | 2026-10-01 | 03-05 umgesetzt (`v0.7.3`): Template RSI Mean-Reversion — erste Klasse `mean-reversion`, Nachweis dass das Regime-Gate (ADR-008) trägt |
 
 ## 2. Release-Plan der Roadmap
 
@@ -50,10 +54,10 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.6.3` | Indikatoren: `bollingerBands`, `donchianChannel` (ausgeliefert 2026-09-30) | 02-01 | Minor (additive pure Funktionen) | **Beta** |
 | `v0.6.4` | Bollinger-Regelfelder + Parität (ausgeliefert 2026-09-30) | 02-02 | Minor (3 Felder) | **Beta** |
 | `v0.6.5` | **Donchian-Regelfeld + Parität** (ausgeliefert 2026-09-30) | 02-03 | Minor (1 Feld) | **Beta** |
-| `v0.7.0` | **Template-Vertrag** (`types.ts`, Katalog, Validierung) | 03-01, 03-02 | Minor (neue Domäne) | **Beta** |
-| `v0.7.1` | Template EMA/ADX + Compiler + Tests | 03-03, 03-09*, 03-10* | Minor | **Beta** |
-| `v0.7.2` | Template MACD | 03-04 | Minor | **Beta** |
-| `v0.7.3` | Template RSI Mean-Reversion | 03-05 | Minor | **Beta** |
+| `v0.7.0` | **Template-Vertrag** (`types.ts`, Katalog, Validierung) — ausgeliefert 2026-10-01 | 03-01, 03-02 | Minor (neue Domäne) | **Beta** |
+| `v0.7.1` | Template EMA/ADX — ausgeliefert 2026-10-01 (Compiler 03-09/Template-Tests 03-10 offen) | 03-03, 03-09*, 03-10* | Minor | **Beta** |
+| `v0.7.2` | Template MACD — ausgeliefert 2026-10-01 | 03-04 | Minor | **Beta** |
+| `v0.7.3` | Template RSI Mean-Reversion — ausgeliefert 2026-10-01 | 03-05 | Minor | **Beta** |
 | `v0.7.4` | Template Bollinger Squeeze | 03-06 | Minor | **Beta** |
 | `v0.7.5` | Template VWAP (Snapshot) | 03-07 | Minor | **Beta** |
 | `v0.7.6` | Template Donchian Breakout | 03-08 | Minor | **Beta** |
