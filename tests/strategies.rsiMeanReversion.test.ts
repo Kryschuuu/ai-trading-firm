@@ -300,7 +300,10 @@ describe("Akzeptanz: validateTemplate(buildRsiMeanReversion()) liefert []", () =
       [RSI_MEAN_REVERSION_ID],
     );
     // `adx14` teilt es mit beiden Trend-Vorlagen — mit einem anderen Operator.
-    assert.equal(templateByField("adx14").length, 3);
+    // Weitere ADX-Nutzer (seit 03-06 auch Bollinger) ändern diesen Vertrag nicht.
+    for (const id of ["ema-adx-trend", "macd-momentum"]) {
+      assert.ok(templateByField("adx14").some((template) => template.id === id), `${id} nutzt weiterhin ADX`);
+    }
   });
 });
 
@@ -486,8 +489,9 @@ describe("ADR-008: `class: \"mean-reversion\"` trägt Gate und Decay-Policy", ()
     assert.notEqual(template.class, "unclassified", "ohne Klasse wäre der Gate-Faktor still 1");
     assert.ok((STRATEGY_CLASSES as readonly string[]).includes(template.class), "Klasse aus dem Bestandsvokabular");
     // Dieses Template ist das ERSTE mit dieser Klasse — der Katalog führt bis
-    // hierher nur `trend`.
-    assert.deepEqual([...new Set(listTemplates().map((t) => t.class))], ["trend", "mean-reversion"]);
+    // hierher nur `trend`. Spätere Templates dürfen weitere Klassen ergänzen.
+    const throughRsi = listTemplates().slice(0, listTemplates().findIndex((t) => t.id === RSI_MEAN_REVERSION_ID) + 1);
+    assert.deepEqual([...new Set(throughRsi.map((t) => t.class))], ["trend", "mean-reversion"]);
     // Und die ADR-008-Namens-Heuristik sieht dasselbe.
     assert.equal(strategyClassOfTemplate(template.id), template.class);
   });
