@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "STX-05-01: versionierte Startwerte für die Priorisierung von Strategie×Markt-Jobs. Gewichte sind keine Optima; Kalibrierung anhand echter Screening-Läufe folgt.",
+  "weights": {
+    "dataQuality": 0.3,
+    "liquidity": 0.25,
+    "freshness": 0.2,
+    "strategyFit": 0.15,
+    "volatilityOpportunity": 0.1
+  },
+  "correlationPenaltyWeight": 1,
+  "thresholds": {
+    "minDataQuality": 0.5,
+    "minLiquidity": 0.5
+  },
+  "bounds": {
+    "weights": {
+      "dataQuality": { "min": 0, "max": 1 },
+      "liquidity": { "min": 0, "max": 1 },
+      "freshness": { "min": 0, "max": 1 },
+      "strategyFit": { "min": 0, "max": 1 },
+      "volatilityOpportunity": { "min": 0, "max": 1 }
+    },
+    "correlationPenaltyWeight": { "min": 0, "max": 1 },
+    "thresholds": {
+      "minDataQuality": { "min": 0, "max": 1 },
+      "minLiquidity": { "min": 0, "max": 1 }
+    }
+  }
+}
