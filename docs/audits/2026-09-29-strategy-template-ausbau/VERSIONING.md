@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.9` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.10` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), Phase 3 begonnen (03-01/03-02 `v0.7.0`, 03-03 `v0.7.1`, 03-04 `v0.7.2`, 03-05 `v0.7.3`; offen 03-06 … 03-10) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), Phase 3: Template-Reihe vollständig (03-01/03-02 `v0.7.0`, 03-03 `v0.7.1`, 03-04 `v0.7.2`, 03-05 `v0.7.3`, 03-06/03-07/03-08 `v0.7.4`; offen 03-09/03-10) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -39,6 +39,7 @@
 | `v1.1.7` | 2026-10-01 | 03-03 umgesetzt (`v0.7.1`): Template EMA/ADX Trend + eigene Testsuite |
 | `v1.1.8` | 2026-10-01 | 03-04 umgesetzt (`v0.7.2`): Template MACD Momentum, Referenztemplate für 06-02 |
 | `v1.1.9` | 2026-10-01 | 03-05 umgesetzt (`v0.7.3`): Template RSI Mean-Reversion — erste Klasse `mean-reversion`, Nachweis dass das Regime-Gate (ADR-008) trägt |
+| `v1.1.10` | 2026-10-01 | 03-06/03-07/03-08 umgesetzt (`v0.7.4`): Templates Bollinger Squeeze, VWAP-Bias (Snapshot) und Donchian Breakout — sechs von sechs Templates gebaut, Phase-3-Abnahme über 03-09/03-10 offen |
 
 ## 2. Release-Plan der Roadmap
 
@@ -58,9 +59,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.7.1` | Template EMA/ADX — ausgeliefert 2026-10-01 (Compiler 03-09/Template-Tests 03-10 offen) | 03-03, 03-09*, 03-10* | Minor | **Beta** |
 | `v0.7.2` | Template MACD — ausgeliefert 2026-10-01 | 03-04 | Minor | **Beta** |
 | `v0.7.3` | Template RSI Mean-Reversion — ausgeliefert 2026-10-01 | 03-05 | Minor | **Beta** |
-| `v0.7.4` | Template Bollinger Squeeze | 03-06 | Minor | **Beta** |
-| `v0.7.5` | Template VWAP (Snapshot) | 03-07 | Minor | **Beta** |
-| `v0.7.6` | Template Donchian Breakout | 03-08 | Minor | **Beta** |
+| `v0.7.4` | Templates Bollinger Squeeze, VWAP (Snapshot) & Donchian Breakout — ausgeliefert 2026-10-01 (die geplanten Einzel-Releases `v0.7.5`/`v0.7.6` entfallen: ein Bump pro PR, die drei Artefakte wurden zusammen abgenommen) | 03-06, 03-07, 03-08 | Minor | **Beta** |
 | `v0.8.0` | `strategy_definitions` + `strategy_versions` (Migration + Service) | 04-01, 04-02 | Minor (additive Migration) | **Beta** |
 | `v0.9.0` | Screening: Typen, Priorität, Matrix, Persistenz, CLI | 05-01…05-04 | Minor | **Beta** |
 | `v0.10.0` | Validator deterministisch: Annahmen, Overfit, Stress, Report + CLI | 06-01…06-04 | Minor | **Beta** |

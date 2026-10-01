@@ -232,8 +232,10 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    Look-ahead). `null` unter 21 Kerzen oder wenn das Kanalhoch nicht positiv ist —
    null blockiert die Bedingung (fail-closed), es ist keine 0; eine echte 0 heißt
    „Schlusskurs exakt auf dem Kanalhoch“. Die Periode (20) ist **kein Regelfeld**:
-   sie ist Snapshot-Definition, das Donchian-Template (03-08) parametrisiert den
-   Kanal und muss einen Mindest-Timeframe erzwingen. Details und Beispiel-Regel:
+   sie ist Snapshot-Definition, das Donchian-Template (03-08, `v0.7.4`) nutzt den
+   kanonischen Default und erzwingt den Mindest-Timeframe über
+   `supportedTimeframes: ["1h", "4h"]` — eine andere Periode ist als bekannte
+   Grenze dokumentiert (06-02). Details und Beispiel-Regel:
    [BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065).
 
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung

@@ -457,6 +457,9 @@ worden wäre. Deshalb steht das Verbot **in den Prompts**, nicht nur hier.
 Alle Releases aus [`VERSIONING.md`](VERSIONING.md) liegen in `0.x`
 (`v0.6.0` … `v0.11.2`, verzahnt mit [VERSIONING.md](VERSIONING.md) §2). SemVer: `0.x` heißt in diesem Projekt **Beta**; ein Sprung auf
 `1.0` wäre eine Behauptung, die keine Phase dieser Roadmap einlöst.
+Die drei Template-Releases 03-06/03-07/03-08 wurden als **ein** Release
+(`v0.7.4`) ausgeliefert — ein Versions-Bump pro PR; die geplanten
+Einzel-Releases `v0.7.5`/`v0.7.6` entfallen.
 
 ---
 

@@ -52,9 +52,9 @@
  * `STRATEGY_TEMPLATES` führt **eine Zeile pro Template-Datei** aus
  * `src/strategies/templates/` — keine Template-Logik in dieser Datei. Seit
  * 03-03 steht dort `ema-adx-trend`, seit 03-04 `macd-momentum`, seit 03-05
- * `rsi-mean-reversion`, seit 03-06 `bollinger-squeeze` und seit 03-07
- * `vwap-pullback`; das letzte Template folgt in 03-08. Die IDs stehen seit
- * 03-02 als geschlossene Union fest —
+ * `rsi-mean-reversion`, seit 03-06 `bollinger-squeeze`, seit 03-07
+ * `vwap-pullback` und seit 03-08 `donchian-breakout`; die Reihe ist damit
+ * vollständig. Die IDs stehen seit 03-02 als geschlossene Union fest —
  * `getTemplate()` nimmt ausschließlich sie an, damit ein Tippfehler nicht auf
  * einen stillen Default läuft. Welche Datei eingetragen ist, prüft
  * `tests/strategies.catalog.test.ts` gegen das Verzeichnis: eine fehlende oder
@@ -83,6 +83,7 @@ import { buildMacdMomentum } from "./templates/macd-momentum";
 import { buildRsiMeanReversion } from "./templates/rsi-mean-reversion";
 import { buildBollingerSqueeze } from "./templates/bollinger-squeeze";
 import { buildVwapPullback } from "./templates/vwap-pullback";
+import { buildDonchianBreakout } from "./templates/donchian-breakout";
 
 import type { StrategyTemplate } from "./types";
 
@@ -95,9 +96,9 @@ import type { StrategyTemplate } from "./types";
  *
  * Reihenfolge = Roadmap-Reihenfolge (03-03 … 03-08). Die Union ist
  * **geschlossen**: Ein siebter Eintrag ist ein neuer Prompt, keine stille
- * Ergänzung dieser Datei. Seit 03-03 sind die ersten IDs nicht mehr nur
- * geplant, sondern eingetragen — `STRATEGY_TEMPLATES` führt sie, validiert
- * beim Import.
+ * Ergänzung dieser Datei. Seit 03-03 sind die IDs nicht mehr nur geplant,
+ * sondern eingetragen — seit 03-08 führt `STRATEGY_TEMPLATES` alle sechs,
+ * validiert beim Import.
  */
 export const STRATEGY_TEMPLATE_IDS = [
   "ema-adx-trend",
@@ -511,7 +512,9 @@ function collectCeilingViolations(value: unknown, path: string, out: string[]): 
  * Regime-Gate tatsächlich gedämpft wird). Seit 03-06 folgt der vierte Eintrag
  * (`bollinger-squeeze`, Klasse `breakout`, erstes Template mit `bbZScore` aus
  * 02-02); seit 03-07 der fünfte (`vwap-pullback`, fachlich ausdrücklich ein
- * zustandsloser VWAP-Trend-Bias). Das letzte Template folgt in 03-08.
+ * zustandsloser VWAP-Trend-Bias) und seit 03-08 der sechste und letzte
+ * (`donchian-breakout`, Klasse `breakout`, `donchianBreakoutPct` aus 02-03 —
+ * die Template-Reihe ist damit vollständig).
  *
  * Die Einträge sind hier **Konstruktionen, keine Literale**: Jede Datei liefert
  * ein `build<Name>()`, das das Artefakt frisch zusammensetzt. Ein Export des
@@ -529,6 +532,7 @@ export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [
   buildRsiMeanReversion(),
   buildBollingerSqueeze(),
   buildVwapPullback(),
+  buildDonchianBreakout(),
 ];
 
 /** ID → Template. Unbekannte IDs liefern `null` — nie einen stillen Default. */
@@ -541,9 +545,9 @@ const TEMPLATE_MAP: ReadonlyMap<string, StrategyTemplate> = new Map(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Liefert ein Template oder `null` — unbekannte IDs werden nie erfunden und
- * geplante, aber noch nicht gebaute (aktuell 03-08) ebenso wenig: `null` ist
- * hier „gibt es noch nicht“, niemals ein Default.
+ * Liefert ein Template oder `null` — unbekannte IDs werden nie erfunden
+ * (seit 03-08 sind alle sechs geplanten gebaut): `null` ist hier
+ * „gibt es nicht“, niemals ein Default.
  */
 export function getTemplate(id: StrategyTemplateId): StrategyTemplate | null {
   return TEMPLATE_MAP.get(id) ?? null;

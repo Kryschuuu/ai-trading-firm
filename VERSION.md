@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.7.3` |
+| **Version** | `v0.7.4` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-01 |
-| **Quellbasiert** | `package.json` (`version: "0.7.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.7.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -160,9 +160,17 @@ mit eigenem Test; jedes ist ein **reines Parameterraster über dem bestehenden
 Engine-Änderung. `v0.7.3` ist dabei das erste Artefakt der Klasse
 `mean-reversion` und damit der Nachweis, dass die Klassifikation (ADR-008)
 trägt: Erst diese Klasse wird im Regime-Gate tatsächlich gedämpft
-(`TREND_UP`/`TREND_DOWN` Faktor 0.5, `RANGE` 1). Der Compiler (03-09) und die
-Template-Tests (03-10) folgen; die restlichen Templates 03-06 … 03-08 schließen
-die Phase.
+(`TREND_UP`/`TREND_DOWN` Faktor 0.5, `RANGE` 1). `v0.7.4` schließt die
+Template-Reihe mit den drei verbleibenden Artefakten: `bollinger-squeeze`
+(03-06, erste Klasse `breakout`, erstes Template mit `bbZScore` aus 02-02),
+`vwap-pullback` (03-07, fachlich ein zustandsloser VWAP-Tages-Bias — kein
+Pullback/Reclaim; `4h`/`1d` sind wegen des UTC-Tagesankers ausgeschlossen) und
+`donchian-breakout` (03-08, Higher-Timeframe-only `1h`/`4h`, ein Ausbruch pro
+Tag, `donchianBreakoutPct` aus 02-03; `entryPeriod` bleibt Snapshot-Definition).
+Der Katalog führt damit **alle sechs** geplanten Templates. Der Compiler (03-09)
+und die Template-Vertragstests (03-10) folgen; die drei Templates wurden
+gemeinsam als ein Release ausgeliefert (ein Versions-Bump pro PR), die
+unabhängige Prüfbarkeit bleibt über die je eigene Testdatei erhalten.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
@@ -202,7 +210,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2) und `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |

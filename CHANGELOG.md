@@ -21,14 +21,27 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.3** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.4** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** STX-03-06 ist implementiert, noch nicht veröffentlicht.
-> Nächste Schritte: die restlichen Templates 03-07/03-08, danach der Compiler
-> 03-09 und die Template-Tests 03-10; offen bleibt die optionale Feature-Store-Parität 02-04.
+> **Status: Beta.** Nächste Schritte: der Compiler 03-09 und die Template-Tests
+> 03-10 (Abschluss von Phase 3); offen bleibt die optionale
+> Feature-Store-Parität 02-04. Danach folgt Phase 4 (`strategy_definitions`/
+> `strategy_versions`, `v0.8.0`).
+
+## [0.7.4] — Templates Bollinger Squeeze, VWAP-Bias & Donchian Breakout (STX-03-06/03-07/03-08) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Drei additive Strategie-Artefakte mit
+> je eigenem Test; **keine** Migration, keine Änderung an `ruleEngine.ts`,
+> `RULE_CEILINGS`, `RULE_FIELDS`, `marketRegime.ts`, `indicators.ts` oder am
+> Indikator-Cache. Die sechs geplanten Templates sind damit vollständig gebaut;
+> die Abnahme über Compiler (03-09) und Template-Vertragstests (03-10) bleibt
+> offen. Geplant waren je Template eigene Releases (`v0.7.4`/`v0.7.5`/`v0.7.6`);
+> ausgeliefert werden sie als **ein** Release, weil ein Versions-Bump pro PR
+> gilt und die drei Artefakte zusammen abgenommen werden — die unabhängige
+> Prüfbarkeit bleibt über die je eigene Testdatei erhalten.
 
 ### Added
 
@@ -59,6 +72,76 @@ erlaubt, solange sie hier dokumentiert sind).
     Fail-closed bei fehlenden Parametern, Warm-up oder σ = 0.
   * Keine Änderungen an Indikatoren, Cache, `RULE_FIELDS`, `RULE_CEILINGS` oder
     Regel-DSL; keine Migration oder neue Dependency.
+
+* **Fünftes Strategie-Template: VWAP-Bias (Snapshot)** (STX-03-07,
+  `src/strategies/templates/vwap-pullback.ts`) — trotz der stabilen ID
+  `vwap-pullback` ausdrücklich **kein** Pullback/Reclaim, sondern ein
+  zustandsloser Tages-Bias long; `class: "trend"`, `version: 1`,
+  `scope: "SINGLE_SYMBOL"`, Timeframes `5m`/`15m`/`1h`,
+  `expectedRegimes: ["TREND_UP"]`; einmalig an fünfter Stelle im
+  import-validierten Katalog.
+  * `logic: "all"`: `trend eq "UP"`, `vwapPct gte vwapMinPct` (0,10),
+    `priceVsEma21Pct gte ema21BufferPct` (0,10), `volumeRatio gte volumeRatioMin`
+    (1,1). Fenster `15m`, 3 Ausführungen/Tag, 120 Minuten Cooldown; Stop 3 %, Ziel
+    2× Chance/Risiko. Fünf Parameter, der gesamte Bereich liegt innerhalb
+    `RULE_CEILINGS`.
+  * **`4h`/`1d` sind ausgeschlossen:** `vwapPct` hängt am UTC-Tagesanker
+    (`utcDayAnchorMs`); auf `1d` enthält der Anker exakt eine Kerze (Wert `null`,
+    nie 0), auf `4h` sind es pro UTC-Tag zu wenige, stark an den UTC-Grenzen
+    hängende Beobachtungen. Die Eignungsmenge steht als
+    `VWAP_PCT_RELIABLE_TIMEFRAMES` im Modul; die unterstützten Takte sind per
+    Test eine Teilmenge davon.
+  * **Der echte Pullback bleibt offen:** Er bräuchte die Sequenz
+    „unter dem VWAP → zurück über dem VWAP" und damit Zustand im `MicroExecutor`
+    (Lebensdauer, Stops, Cooldowns, `maxExecutionsPerDay`) — eigener Audit
+    (STX-18), bewusst **kein** `RuleTrigger`/`CROSS`/`RECLAIM`.
+  * Fünf Annahmen (DATA/MARKET/EXECUTION/COST) einschließlich
+    UTC-Tag-statt-Börsensession, historischer VWAP ≠ Ausführungskurs,
+    Intraday-Kosten und Snapshot-statt-Reclaim.
+  * `tests/strategies.vwapPullback.test.ts` prüft Vertrag, Registrierung (fünfter
+    Platz), die Timeframe-Teilmenge, das Parameterraster, die unveränderte
+    Sanitize-Kette und die Fenster-/Risikowerte.
+  * Keine Änderung an `sessionVwap`, `utcDayAnchorMs` oder der
+    `vwapPct`-Berechnung; kein Zustand im `MicroExecutor`, keine Sequenz-Trigger.
+
+* **Sechstes und letztes Strategie-Template: Donchian Breakout** (STX-03-08,
+  `src/strategies/templates/donchian-breakout.ts`) — `class: "breakout"`,
+  `version: 1`, `scope: "SINGLE_SYMBOL"`, `supportedTimeframes: ["1h", "4h"]`
+  (Higher-Timeframe-only), `expectedRegimes: ["TREND_UP", "RANGE"]`; einmalig an
+  sechster Stelle im import-validierten Katalog — `STRATEGY_TEMPLATES` führt
+  damit alle sechs geplanten Templates.
+  * `logic: "all"`: `donchianBreakoutPct gte breakoutMinPct`, `adx14 gte adxMin`,
+    `volumeRatio gte volumeRatioMin`. Fünf Parameter, Defaults 0,3 % / 20 / 1,2× /
+    5 % Stop / 2× Chance/Risiko; der gesamte Parameterraum liegt innerhalb der
+    bestehenden Risiko-Deckel. `takeProfitRR` hat kein eigenes Regelfeld
+    (`mapsTo: atrPct`, nur Risikodoku).
+  * **Lookahead-Schutz aus 02-01/02-03 bleibt unangetastet:** `upper` stammt aus
+    den **vorigen** 20 Kerzen (`DONCHIAN_ENTRY_PERIOD = 20`). `entryPeriod` ist
+    kein Regelfeld und kein Template-Parameter — der Snapshot rechnet mit dem
+    kanonischen Default aus 02-03. Will 06-02 eine andere Periode testen, braucht
+    es dafür dann ein zusätzliches Feld; das ist als bewusste, dokumentierte
+    Grenze festgehalten, nicht als stiller Parameter gebaut.
+  * **Strukturkosten statt Parameterfehler:** Der Einstieg zum Schlusskurs nach
+    dem Ausbruch kauft typischerweise am lokalen Hoch. Deshalb
+    `maxExecutionsPerDay: 1` (dasselbe Breakout-Charset darf nicht mehrfach
+    kaufen) und `cooldownMinutes: 720`; `window.timeframe: "1h"`.
+    Präzisierung zum Auftrag: Das Raster setzt `takeProfitRR` mit 2 auf denselben
+    Wert wie 03-03/03-04 — die strukturelle Aussage verbietet ein Anheben über
+    die Trend-Werte, behauptet aber keine Differenz; 06-02 muss die realisierte
+    Ausführung (Fill vs. Signalkurs) messen.
+  * Sieben explizite Annahmen (MARKET/EXECUTION/DATA/COST) einschließlich
+    Regime-Wechsel-These, lokaler-Hoch-Einstieg, Vor-Kerzen-Lookahead-Schutz,
+    Spread am lokalen Hoch, ein Ausbruch pro Tag, entryPeriod-Grenze und
+    fail-closed-Warm-up.
+  * `tests/strategies.donchianBreakout.test.ts` prüft Vertrag, Registrierung
+    (sechster Platz, sechs Templates), Higher-Timeframe-Beschränkung, das
+    vollständige Parameterraster inklusive aller Rasterpunkte und 32
+    Eckkombinationen ohne Sanitizer-Klemmung, die Annahmen, die
+    Lookahead-Invariante (ein Intrabar-Spike der Signalkerze löst die Regel nicht
+    aus) und fail-closed bei `null`-Readings.
+  * Keine Änderung an `donchianChannel`/`donchianBreakoutPct`, `RULE_FIELDS`,
+    `RULE_CEILINGS`, `ruleEngine.ts` oder `indicators.ts`; kein
+    `entryPeriod`-Regelfeld, keine Short-Variante, keine Migration.
 
 ## [0.7.3] — Template RSI Mean-Reversion (STX-03-05) (2026-10-01)
 
