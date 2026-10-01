@@ -21,15 +21,104 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.5** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.6** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: die Template-Vertragstests 03-10
-> (Abschluss von Phase 3, Gate „6 Artefakte kompilieren über den unveränderten
-> Sicherheitspfad“); offen bleibt die optionale Feature-Store-Parität 02-04.
-> Danach folgt Phase 4 (`strategy_definitions`/`strategy_versions`, `v0.8.0`).
+> **Status: Beta.** Nächster Schritt ist Phase 4: `strategy_definitions` +
+> `strategy_versions` (Migration + Service, 04-01/04-02, `v0.8.0`) — ohne
+> Persistenz bleibt jede Strategie-Version ein Katalogeintrag im Code und ist
+> nicht rekonstruierbar. Offen bleibt daneben die optionale
+> Feature-Store-Parität 02-04. Die Phase-3-Abnahme (03-10) ist mit `v0.7.6`
+> abgeschlossen.
+
+## [0.7.6] — Template-Vertragstests + Katalog-Vollständigkeit (STX-03-10, Abschluss Phase 3) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Die **Phase-3-Abnahme** ist
+> geschlossen: Sechs versionierte Strategie-Artefakte existieren, kompilieren
+> über den **unveränderten** Sicherheitspfad (`buildRule(params)` →
+> `sanitizeRuleSpec()` → `RuleSpec`, 03-09) und sind gegen die Engine
+> vertraglich abgesichert. **Kein Produktivcode geändert:** Der Release besteht
+> ausschließlich aus Tests, dem Doku-Generator
+> `scripts/gen-strategy-templates-doc.ts`, der daraus erzeugten
+> `docs/STRATEGY_TEMPLATES.md` und den Versions-/Doku-Dateien.
+> `ruleEngine.ts`, `sanitizeRuleSpec`, `RULE_FIELDS`, `RULE_CEILINGS`,
+> `indicators.ts` und `indicatorCache.ts` bleiben unangetastet; es gibt
+> **keine** Fehlerkorrektur am Produktivcode. Die Engine-↔-Cache-Parität aus
+> Phase 2 (02-02/02-03) ist grün — **kein** Folge-Prompt nötig. Ohne 04-01
+> bleibt jede Version weiterhin nur ein Katalogeintrag im Code; erst die
+> Persistenz macht sie rekonstruierbar.
+
+### Added
+
+* **Template-Vertragstests `tests/strategies.templates.test.ts`** (STX-03-10,
+  Finding STX-18; 60 Tests über **alle sechs** Templates, DB-/LLM-/netzfrei,
+  Fixtures aus `tests/`, Muster `tests/backtest.unit.test.ts`):
+  * **Struktur-Invarianten:** `validateTemplate(t) === []`, Params
+    `min ≤ default ≤ max` **und** `default` auf dem `step`-Raster,
+    `requiredFields`/`mapsTo` ⊆ `RULE_FIELDS`, `class ∈ STRATEGY_CLASS_KEYS`
+    und ≠ `unclassified` (ADR-008), `supportedTimeframes` nicht leer,
+    duplikatfrei, ⊆ `SUPPORTED_TIMEFRAMES`, `expectedRegimes` = fünf
+    `MarketRegime`-Werte **ohne** `UNKNOWN` (ADR-009), Kontrakt-Invariante
+    `regimeGateFactor(regime, class)` für alle fünf Regimes +
+    `DEFAULT_CLASS_POLICIES[class]`, eindeutige Annahmen-IDs und mindestens
+    eine `critical: true` je Template.
+  * **Compiler-Parität:** Defaults kompilieren `{ok:true}` **ohne** `clamped`,
+    derselbe Aufruf liefert denselben `stc1:`-Fingerprint, `symbol` kommt
+    ausschließlich vom Aufrufer (`buildRule` liefert kein Symbol, das Symbol
+    steckt im Fingerprint), `sourceRole` ist immer `RESEARCH`.
+  * **Snapshot-Kompatibilität** je Template und **jedem** unterstützten
+    Timeframe: deterministische Positiv-Fixture (mindestens ein Entry — kein
+    totes Template, inkl. Long-only- und Trade-Zählungs-Invarianten) und
+    Kurzhistorie-Fixture, in der ein tragendes Feld `null` ist — jede bewertete
+    Kerze bleibt fail-closed, `backtestRule` erzeugt keinen Entry; der
+    Kontroll-Snapshot zeigt, dass nur die fehlenden Lesewerte blockieren.
+  * **Negativ-Fixtures:** Jede einzelne Bedingung ist tragend (ein um ein Feld
+    verletzter Snapshot feuert nicht), jedes nullable Bedingungsfeld blockiert
+    als `null` fail-closed, der Schwellwert am **Raster-Extremwert** blockiert
+    am Serien-Fixture (`adxMin = 35`, `bbwMaxPct = 2`, `rsiOversold = 15`,
+    `breakoutMinPct = 3`, `volumeRatioMin = 2.5`), und eine durchgängig
+    verletzte Einzelbedingung (fallendes Volumen bzw. gespiegelte
+    Abwärtsbewegung) erzeugt keinen Entry.
+  * **Katalog-Integrität:** genau die sechs erwarteten IDs in
+    `STRATEGY_TEMPLATE_IDS`/`STRATEGY_TEMPLATES`, keine Duplikate,
+    `assertTemplatesValid()` läuft beim Import und beim Aufruf,
+    `getTemplate("nicht-vorhanden") → null` (kein Wurf),
+    `templateByField("bbZScore") → ["bollinger-squeeze"]`,
+    `templateByField("donchianBreakoutPct") → ["donchian-breakout"]`.
+  * **Engine ↔ Cache (Phase-2-Regression festgenagelt):** Für
+    `bollinger-squeeze` und `donchian-breakout` liefern
+    `buildSnapshotFromCandles` und `snapshotFromCache(buildIndicatorCache(...))`
+    auf identischen Fixture-Kerzen **exakt gleiche** Werte für `bbZScore`,
+    `priceVsUpperBbPct`, `priceVsLowerBbPct` und `donchianBreakoutPct` — ohne
+    Toleranz; zusätzlich die Null-Semantik bei zu wenig Historie.
+  * **Zeitrahmen-Disziplin (STX-01):** Templates mit `vwapPct` in
+    `requiredFields` unterstützen weder `1d` noch `5d` und bleiben auf den
+    VWAP-tauglichen Takten (`VWAP_PCT_RELIABLE_TIMEFRAMES`).
+* **`scripts/gen-strategy-templates-doc.ts` + `npm run docs:templates`:** Der
+  Generator projiziert `STRATEGY_TEMPLATES` (Klasse, Timeframes, Regimes,
+  Version, Pflichtfelder, Bedingung, Parameterraster, Annahmen) in die Doku —
+  reine Projektion, kein Netz, keine DB, kein `sanitizeRuleSpec`-Umweg.
+* **`docs/STRATEGY_TEMPLATES.md` (generiert, 6 Templates):** Die Tabelle ist
+  keine handgepflegte Kopie; der Vertragstest vergleicht sie **byteweise** mit
+  der Renderer-Ausgabe, damit Doku und Katalog nicht auseinanderlaufen.
+
+### Changed
+
+* **Version `v0.7.6`** (Phase-3-Abschluss): `package.json`,
+  `VERSION.md`, `README.md`, `docs/README.md`, `docs/CHANGELOG.md`-Stub und
+  der Audit-Stand ziehen mit; die Phase-3-Abnahme ist damit ein eigener,
+  einzeln rollbackbarer Release-Punkt.
+
+### Notes
+
+* **Keine neuen Templates, keine neue Fachlogik, keine Migration.** Die
+  sechs Artefakte, ihre Bedingungen und ihre Raster bleiben unverändert; die
+  Tests prüfen sie nur. Ein rotes Ergebnis wäre ein Template- oder
+  Engine-Befund gewesen, kein Testfehler — es gab keinen.
+* Damit ist Gate **G3** („03-10 grün: 6 Templates vertraglich abgesichert“)
+  erfüllt; als Nächstes folgt Phase 4 mit 04-01 (Persistenz).
 
 ## [0.7.5] — Compiler: Template + Params → RuleSpec, mit Sanitize-Nachweis (STX-03-09) (2026-10-01)
 

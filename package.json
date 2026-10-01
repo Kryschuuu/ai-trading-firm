@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — BETA (v0.x), nicht produktionsreif. Local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude. Educational purposes only, use at your own risk.",
   "license": "GPL-3.0-only",
   "private": true,
@@ -33,6 +33,7 @@
     "market-sync:status": "node --import tsx scripts/market-sync.ts --status",
     "scan:secrets": "node --import tsx scripts/scan-secrets.ts",
     "docs:validate": "node --import tsx scripts/docs-validate.ts",
+    "docs:templates": "node --import tsx scripts/gen-strategy-templates-doc.ts",
     "eval:prompts": "node --import tsx scripts/eval-prompts.ts",
     "reconcile": "node --import tsx scripts/reconcile.ts",
     "backtest": "node --import tsx scripts/run-backtest.ts",

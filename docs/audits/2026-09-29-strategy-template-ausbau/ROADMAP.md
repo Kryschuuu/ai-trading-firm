@@ -136,14 +136,16 @@ dass der Cache das laufende Maximum in O(n) über eine monotone Deque führt.
 | 03-07 | [Template: VWAP (Snapshot)](prompts/PROMPT-STX-03-07-template-vwap.md) | ✅ 1 Template (`v0.7.4`, zustandsloser Tages-Bias, kein Pullback/Reclaim) | 03-02 |
 | 03-08 | [Template: Donchian Breakout](prompts/PROMPT-STX-03-08-template-donchian.md) | ✅ 1 Template (`v0.7.4`, Higher-Timeframe-only, `donchianBreakoutPct` aus 02-03) | 03-02, 02-03 |
 | 03-09 | [Compiler + Sanitize-Nachweis](prompts/PROMPT-STX-03-09-compiler.md) | ✅ `src/strategies/compiler.ts` (`v0.7.5`, STX-05 behoben: einziger Aufrufer von `buildRule` + `sanitizeRuleSpec()`, `clamped`-Nachweis, `stc1:`-Fingerprint, `exportTemplates()`; Beweis `tests/strategies.compiler.security.test.ts`) | 03-03…03-08 |
-| 03-10 | [Template-Tests](prompts/PROMPT-STX-03-10-template-tests.md) | `tests/strategies.*.test.ts` | 03-09 |
+| 03-10 | [Template-Tests](prompts/PROMPT-STX-03-10-template-tests.md) | ✅ `tests/strategies.templates.test.ts` (`v0.7.6`, 60 Tests: Struktur, Compiler-Parität, Positiv-/Negativ-Fixtures je Template × Takt, Katalog-Integrität, Engine-↔-Cache-Parität) + generierte Doku `docs/STRATEGY_TEMPLATES.md`; Beweis für Gate G3 | 03-09 |
 
 **Reihenfolge-Logik:** 03-01 → 03-02 ist das Fundament. Die fünf Template-Prompts sind
 bewusst **einzeln** — jedes ist ~60 Zeilen, liefert sofort einen lauffähigen
 Katalogeintrag und hat keine Abhängigkeit von den anderen. 03-09 kommt **vor** 03-10,
-weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren; seit
-`v0.7.5` ist 03-09 umgesetzt (eigenes Release, weil der Übergang sicherheitskritisch
-und einzeln rollbackbar ist), offen bleibt 03-10 als Phase-3-Gate.
+weil der Compiler die Sanitize-Kette beweisen muss, bevor Tests ihn fixieren; 03-09
+wurde mit `v0.7.5` ausgeliefert (eigenes Release, weil der Übergang sicherheitskritisch
+und einzeln rollbackbar ist), 03-10 mit `v0.7.6`. **Phase 3 ist damit abgeschlossen,
+Gate G3 erfüllt** — sechs Templates kompilieren über den unveränderten
+Sicherheitspfad und sind vertraglich abgesichert.
 
 **Vokabular-Bindung:** `class: StrategyClassKey` (Pflicht, `unclassified` = Fehler, `CompileResult.strategyClass`) nach [ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1);
 `expectedRegimes: readonly MarketRegime[]` (ohne `UNKNOWN`) nach [ADR-009 (E2)](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2); `scope: "SINGLE_SYMBOL"` nach [ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3).
@@ -157,7 +159,7 @@ und einzeln rollbackbar ist), offen bleibt 03-10 als Phase-3-Gate.
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | 2 append-only Tabellen | 03-09 |
+| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | 2 append-only Tabellen | 03-09 ✅ |
 | 04-02 | [Service + Lifecycle-Bridging](prompts/PROMPT-STX-04-02-strategy-service.md) | `src/strategies/service.ts` | 04-01, 00-02 |
 
 **Vokabular-Bindung:** `strategy_class` mit CHECK auf die drei Klassen, ohne `unclassified` ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)).
@@ -243,7 +245,7 @@ Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschli
 00-02 ──▶ 00-03 ──┬──▶ 01-01 ──┬──▶ 02-02 ──▶ 03-06 ─┐
                   │             └──▶ 02-03 ──▶ 03-08 ─┤
                   ├──▶ 02-01 ──┘                       │
-                  └──▶ 03-01 ──▶ 03-02 ──▶ 03-03…03-07 ┴──▶ 03-09 ──▶ 03-10
+                  └──▶ 03-01 ──▶ 03-02 ──▶ 03-03…03-07 ┴──▶ 03-09 ✅ ──▶ 03-10 ✅
                                     │                        │
                                     └──▶ 04-01 ──▶ 04-02 ──┴──▶ 05-01 ──▶ 05-02 ──▶ 05-03
                                                                                     │

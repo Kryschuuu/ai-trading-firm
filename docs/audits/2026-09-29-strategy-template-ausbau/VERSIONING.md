@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.11` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.12` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), Phase 3: Template-Reihe vollständig (03-01/03-02 `v0.7.0`, 03-03 `v0.7.1`, 03-04 `v0.7.2`, 03-05 `v0.7.3`, 03-06/03-07/03-08 `v0.7.4`) und Compiler umgesetzt (03-09 `v0.7.5`, STX-05 behoben); offen nur 03-10 (Template-Vertragstests) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -41,6 +41,7 @@
 | `v1.1.9` | 2026-10-01 | 03-05 umgesetzt (`v0.7.3`): Template RSI Mean-Reversion — erste Klasse `mean-reversion`, Nachweis dass das Regime-Gate (ADR-008) trägt |
 | `v1.1.10` | 2026-10-01 | 03-06/03-07/03-08 umgesetzt (`v0.7.4`): Templates Bollinger Squeeze, VWAP-Bias (Snapshot) und Donchian Breakout — sechs von sechs Templates gebaut, Phase-3-Abnahme über 03-09/03-10 offen |
 | `v1.1.11` | 2026-10-01 | 03-09 umgesetzt (`v0.7.5`): Compiler `Template → buildRule(params) → sanitizeRuleSpec() → RuleSpec` mit `clamped`-Nachweis, stabilem `stc1:`-Fingerprint und `exportTemplates()`; **STX-05 behoben** (HIGH), offen nur 03-10 |
+| `v1.1.12` | 2026-10-01 | 03-10 umgesetzt (`v0.7.6`): Template-Vertragstests (`tests/strategies.templates.test.ts`, 60 Tests) + generierte Doku `docs/STRATEGY_TEMPLATES.md`; **Phase 3 abgeschlossen**, Gate G3 erfüllt (STX-18 damit auf der Abnahmeseite geklärt) |
 
 ## 2. Release-Plan der Roadmap
 
@@ -57,11 +58,12 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.6.4` | Bollinger-Regelfelder + Parität (ausgeliefert 2026-09-30) | 02-02 | Minor (3 Felder) | **Beta** |
 | `v0.6.5` | **Donchian-Regelfeld + Parität** (ausgeliefert 2026-09-30) | 02-03 | Minor (1 Feld) | **Beta** |
 | `v0.7.0` | **Template-Vertrag** (`types.ts`, Katalog, Validierung) — ausgeliefert 2026-10-01 | 03-01, 03-02 | Minor (neue Domäne) | **Beta** |
-| `v0.7.1` | Template EMA/ADX — ausgeliefert 2026-10-01 (Compiler 03-09/Template-Tests 03-10 offen) | 03-03, 03-09*, 03-10* | Minor | **Beta** |
+| `v0.7.1` | Template EMA/ADX — ausgeliefert 2026-10-01 (Abnahme über 03-09 `v0.7.5` / 03-10 `v0.7.6` nachgezogen) | 03-03 | Minor | **Beta** |
 | `v0.7.2` | Template MACD — ausgeliefert 2026-10-01 | 03-04 | Minor | **Beta** |
 | `v0.7.3` | Template RSI Mean-Reversion — ausgeliefert 2026-10-01 | 03-05 | Minor | **Beta** |
 | `v0.7.4` | Templates Bollinger Squeeze, VWAP (Snapshot) & Donchian Breakout — ausgeliefert 2026-10-01 (die geplanten Einzel-Releases `v0.7.5`/`v0.7.6` entfallen: ein Bump pro PR, die drei Artefakte wurden zusammen abgenommen) | 03-06, 03-07, 03-08 | Minor | **Beta** |
 | `v0.7.5` | **Compiler + Sanitize-Nachweis** — ausgeliefert 2026-10-01 (eigenes Release statt Faltung in ein Template-Release: der sicherheitskritische Übergang braucht einen eigenen, einzeln rollbackbaren Release-Punkt) | 03-09 | Minor (neues Modul) | **Beta** |
+| `v0.7.6` | **Template-Vertragstests + Katalog-Doku** — ausgeliefert 2026-10-01 (Phase-3-Abnahme: Struktur, Compiler-Parität, Positiv-/Negativ-Fixtures je Template × Takt, Katalog-Integrität, Engine-↔-Cache-Parität; `docs/STRATEGY_TEMPLATES.md` aus dem Katalog generiert) | 03-10 | Test + Doku (kein Produktivcode) | **Beta** |
 | `v0.8.0` | `strategy_definitions` + `strategy_versions` (Migration + Service) | 04-01, 04-02 | Minor (additive Migration) | **Beta** |
 | `v0.9.0` | Screening: Typen, Priorität, Matrix, Persistenz, CLI | 05-01…05-04 | Minor | **Beta** |
 | `v0.10.0` | Validator deterministisch: Annahmen, Overfit, Stress, Report + CLI | 06-01…06-04 | Minor | **Beta** |
@@ -71,10 +73,10 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.11.2` | Bitunix-Leader + Simulate-only-Follower | 07-03 | Minor | **Beta** |
 | *(optional)* | Feature-Store-Slice `rule.*` | 02-04 | Minor | **Beta** |
 
-\* 03-09/03-10 werden technisch benötigt, um 03-03 abzunehmen. **Entschieden (2026-10-01):**
-03-09 wurde als eigenes Release `v0.7.5` ausgeliefert — der Compiler ist der
-sicherheitskritische Übergang (Finding STX-05) und bekommt damit einen eigenen
-Rollback-Punkt; 03-10 folgt als Template-Vertragstests im Anschluss.
+**Entschieden (2026-10-01):** 03-09 wurde als eigenes Release `v0.7.5`
+ausgeliefert — der Compiler ist der sicherheitskritische Übergang (Finding
+STX-05) und bekommt damit einen eigenen Rollback-Punkt; 03-10 folgte als
+Template-Vertragstests in `v0.7.6` und schließt Phase 3 ab (Gate G3).
 
 ### 2.1 Warum eigene Releases je Template
 
@@ -119,7 +121,7 @@ Roadmap sind drei echte Bruchstellen vorgesehen — alle drei bewusst:
 | Bruchstelle | Release | Was bricht | Migrationspfad |
 | --- | --- | --- | --- |
 | `RuleWindow.timeframe` wird von 5 auf 10 Werte erweitert | `v0.6.2` (umgesetzt) | Code, der `ALLOWED_TIMEFRAMES` als geschlossene Menge behandelt | `RULE_ALLOWED_TIMEFRAMES` ist jetzt exportiert und aus `SUPPORTED_TIMEFRAMES` abgeleitet; der Mikro-Executor wertet weiter nur bis `1h` aus (Timeframe-Guard) |
-| `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.4`/`v0.6.5` (umgesetzt) | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet (Bollinger- und Donchian-Feld, Bar für Bar) |
+| `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.4`/`v0.6.5` (umgesetzt) | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet (Bollinger- und Donchian-Feld, Bar für Bar; seit `v0.7.6` zusätzlich exakt in `tests/strategies.templates.test.ts` festgenagelt) |
 | `COPY_MODE`-Enum existiert | `v0.11.0` | Kein bestehender Code (Modul ist neu) | keine |
 
 ## 5. Offene Versionsfragen

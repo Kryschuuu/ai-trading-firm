@@ -259,7 +259,7 @@ Phase 2  Features ────────────────────�
                                                              │
 Phase 3  Template-Kern ────────────────────────────────────────┤
   03-01 types ──▶ 03-02 catalog ──▶ {03-03…03-08 Templates}    │
-                    └──▶ 03-09 compiler ──▶ 03-10 tests        │
+                    └──▶ 03-09 compiler ✅ ──▶ 03-10 tests ✅   │
                                                              │
 Phase 4  Persistenz ───────────────────────────────────────────┤
   04-01 Migration ──▶ 04-02 Service (bridged auf lifecycle)   │
@@ -462,7 +462,8 @@ Die drei Template-Releases 03-06/03-07/03-08 wurden als **ein** Release
 Einzel-Releases `v0.7.5`/`v0.7.6` entfallen. Der Compiler 03-09 erhielt
 stattdessen ein **eigenes** Release `v0.7.5` (2026-10-01): Der Übergang ist
 sicherheitskritisch (STX-05) und bekommt damit einen eigenen Rollback-Punkt;
-03-10 folgt als Phase-3-Abschluss.
+03-10 folgte als Phase-3-Abschluss (`v0.7.6`, Vertragstests + generierte Doku
+`docs/STRATEGY_TEMPLATES.md`, Gate G3).
 
 ---
 
