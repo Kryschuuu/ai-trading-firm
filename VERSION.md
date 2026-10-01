@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.6.5` |
+| **Version** | `v0.7.3` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-09-30 |
-| **Quellbasiert** | `package.json` (`version: "0.6.5"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-01 |
+| **Quellbasiert** | `package.json` (`version: "0.7.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -149,6 +149,21 @@ Bar-für-Bar pari (Test über drei Symbole), der Golden-Hash unveränderter
 Bestandsläufe bleibt bestehen. Damit sind alle sieben Strategie-Vorschläge des
 Audits regelformulierbar; Templates folgen ab `v0.7.0`.
 
+Die `v0.7.x`-Reihe liefert die **Strategie-Artefakte** selbst (Phase 3 des
+Audits). `v0.7.0` legt das Fundament: den reinen Typenvertrag
+`src/strategies/types.ts` (03-01) und den Katalog `src/strategies/catalog.ts`
+(03-02), der jedes Template **beim Import** validiert — ein kaputtes Template
+lässt den Prozess nicht starten. `v0.7.1` (`ema-adx-trend`), `v0.7.2`
+(`macd-momentum`) und `v0.7.3` (`rsi-mean-reversion`) liefern je ein Template
+mit eigenem Test; jedes ist ein **reines Parameterraster über dem bestehenden
+`RuleSpec`-Vertrag** — kein neues Regelfeld, kein neuer Indikator, keine
+Engine-Änderung. `v0.7.3` ist dabei das erste Artefakt der Klasse
+`mean-reversion` und damit der Nachweis, dass die Klassifikation (ADR-008)
+trägt: Erst diese Klasse wird im Regime-Gate tatsächlich gedämpft
+(`TREND_UP`/`TREND_DOWN` Faktor 0.5, `RANGE` 1). Der Compiler (03-09) und die
+Template-Tests (03-10) folgen; die restlichen Templates 03-06 … 03-08 schließen
+die Phase.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -187,6 +202,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2) und `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |
