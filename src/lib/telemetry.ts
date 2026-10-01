@@ -595,7 +595,7 @@ export const telemetry = {
     },
   },
   /**
-   * Strategy-Lifecycle / Drift-Gates (RMA-P1-05, v1.73.0).
+   * Strategy-Lifecycle / Drift-Gates (RMA-P1-05, v1.73.0) & Versionen (STX-04-02).
    *
    * Labels ausschließlich Code-konstant (`result`, `to`, `kind`, `verdict`,
    * `action`, `code` via metricLabel) — KEINE Strategie-Keys, Order-/Trade-IDs
@@ -610,11 +610,14 @@ export const telemetry = {
     driftChecks: new LabelCounter("strategy_lifecycle_drift_checks_total"),
     /** Order-Gate-Entscheidungen je Result und bounded Reason-Code. */
     gateDecisions: new LabelCounter("strategy_lifecycle_gate_decisions_total"),
+    /** Version-Persistierung je Ergebnis (created | duplicate | error). */
+    versions: new LabelCounter("strategy_versions_total"),
     reset(): void {
       telemetry.strategyLifecycle.transitions.reset();
       telemetry.strategyLifecycle.evidence.reset();
       telemetry.strategyLifecycle.driftChecks.reset();
       telemetry.strategyLifecycle.gateDecisions.reset();
+      telemetry.strategyLifecycle.versions.reset();
     },
   },
   /**
@@ -787,6 +790,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.strategyLifecycle.evidence.exposition(),
     telemetry.strategyLifecycle.driftChecks.exposition(),
     telemetry.strategyLifecycle.gateDecisions.exposition(),
+    telemetry.strategyLifecycle.versions.exposition(),
     telemetry.executionQuality.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),
