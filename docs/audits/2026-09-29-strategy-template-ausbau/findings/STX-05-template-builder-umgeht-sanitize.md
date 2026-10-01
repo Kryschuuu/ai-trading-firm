@@ -4,8 +4,8 @@
 - **Severity:** HIGH
 - **Bereich:** Sicherheit / Handelslogik
 - **Quelle:** Ausbaudokument §1.2
-- **Status:** OPEN
-- **Datei(en):** `src/lib/ruleEngine.ts`, `src/lib/ruleService.ts`
+- **Status:** FIXED (03-09, `v0.7.5`) — 03-01 legte den `params`-Builder fest, 03-09 schloss die Kette nachweislich
+- **Datei(en):** `src/lib/ruleEngine.ts`, `src/lib/ruleService.ts`, `src/strategies/compiler.ts` (neu, 03-09)
 
 ## Beschreibung
 
@@ -51,10 +51,31 @@ buildRule(params: Record<string, number>): RuleSpecInput;   // ✅ kein ctx
 
 ## Akzeptanzkriterien
 
-- [ ] `StrategyTemplate` hat **kein** `StrategyContext`/`ctx` im Builder
-- [ ] Rückgabetyp ist `RuleSpecInput`, nicht `RuleSpec`
-- [ ] Test: ein Builder-Output mit `stopLossPct: 999` wird auf das Ceiling geklemmt
-- [ ] Jedes erzeugte Spec wird persistiert, bevor es gehandelt wird
+- [x] `StrategyTemplate` hat **kein** `StrategyContext`/`ctx` im Builder — 03-01
+      (`v0.7.0`, `src/strategies/types.ts`: `buildRule(params: Readonly<Record<string, number>>): RuleSpecInput`)
+- [x] Rückgabetyp ist `RuleSpecInput`, nicht `RuleSpec` — 03-01, mit Begründung im
+      Vertrag (ein `RuleSpec`-Rückgabetyp würde den Sanitizer überspringbar machen)
+- [x] Test: ein Builder-Output mit `stopLossPct: 999` wird auf das Ceiling geklemmt —
+      03-09 (`v0.7.5`), `tests/strategies.compiler.security.test.ts`: Ergebnis hat den
+      Ceiling-Wert und `clamped` nennt „`action.stopLossPct: 999 → 20`"
+- [ ] Jedes erzeugte Spec wird persistiert, bevor es gehandelt wird — **offen
+      (04-02)**: Der Compiler schreibt bewusst nichts in die DB; die Persistenz
+      liefert der Strategie-Service, der `compileTemplate()` aufruft und den
+      `fingerprint` als Idempotenz-Schlüssel nutzt.
+
+## Behoben durch 03-09 (`v0.7.5`)
+
+`src/strategies/compiler.ts` ist der **einzige** Aufrufer von `buildRule()` und
+führt jede Rohform zwingend durch `sanitizeRuleSpec()`:
+
+- Schritt 8 der Kette ist Pflicht; ein Sanitize-Fehler ist `{ok:false}` mit
+  Fehlerstrings — **kein** Rückfall auf die Rohform (Test ersetzt den Sanitizer
+  durch einen Sentinel und beweist, dass genau dessen `spec` zurückkommt).
+- Klemmungen werden als `clamped: string[]` sichtbar gemacht, statt als stiller
+  Erfolg zu gelten.
+- `strategyClass` stammt ausschließlich aus `template.class` (ADR-008).
+- `ruleEngine.ts` bleibt **unverändert** — der Compiler liest `RULE_CEILINGS` und
+  `RULE_FIELDS`, er erweitert sie nicht.
 
 ## Versions-Hinweis
 

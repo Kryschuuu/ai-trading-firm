@@ -459,7 +459,10 @@ Alle Releases aus [`VERSIONING.md`](VERSIONING.md) liegen in `0.x`
 `1.0` wäre eine Behauptung, die keine Phase dieser Roadmap einlöst.
 Die drei Template-Releases 03-06/03-07/03-08 wurden als **ein** Release
 (`v0.7.4`) ausgeliefert — ein Versions-Bump pro PR; die geplanten
-Einzel-Releases `v0.7.5`/`v0.7.6` entfallen.
+Einzel-Releases `v0.7.5`/`v0.7.6` entfallen. Der Compiler 03-09 erhielt
+stattdessen ein **eigenes** Release `v0.7.5` (2026-10-01): Der Übergang ist
+sicherheitskritisch (STX-05) und bekommt damit einen eigenen Rollback-Punkt;
+03-10 folgt als Phase-3-Abschluss.
 
 ---
 

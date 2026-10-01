@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-10-01 · **Template-Reihe vollständig:** 03-01/03-02 (`v0.7.0`), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`) abgeschlossen — sechs von sechs Templates gebaut, Abnahme über 03-09 (Compiler) und 03-10 (Template-Tests) offen · 02-01 (`v0.6.3`), 02-02 (`v0.6.4`) und 02-03 (`v0.6.5`) abgeschlossen (offen nur der optionale Slice 02-04) · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
+- **Stand:** 2026-10-01 · **Compiler umgesetzt:** 03-09 (`v0.7.5`) schließt die Sanitize-Kette (`buildRule` → `sanitizeRuleSpec` → `RuleSpec`) und behebt **STX-05**; offen nur 03-10 (Template-Vertragstests) · **Template-Reihe vollständig:** 03-01/03-02 (`v0.7.0`), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`) abgeschlossen — sechs von sechs Templates gebaut · 02-01 (`v0.6.3`), 02-02 (`v0.6.4`) und 02-03 (`v0.6.5`) abgeschlossen (offen nur der optionale Slice 02-04) · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 ## Legende
 
@@ -18,7 +18,7 @@
 | STX-02 `StrategyClass`-Duplikat | HIGH | ◐ | 00-03 ☑ ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), `v0.6.1`) → 03-01 |
 | STX-03 Regime-Vokabular-Konflikt | HIGH | ◐ | 00-03 ☑ ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), `v0.6.1`) → 06-04 |
 | STX-04 `MultiAssetStrategySpec`-Duplikat | HIGH | ☑ | 00-03 ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), `v0.6.1`); Sizing-Schicht bewusst außerhalb der Roadmap |
-| STX-05 Builder umgeht Sanitize | HIGH | ☐ | 03-01 → 03-09 |
+| STX-05 Builder umgeht Sanitize | HIGH | ☑ | 03-01 ☑ (`v0.7.0`, `buildRule(params) => RuleSpecInput`, kein `ctx`) → 03-09 ☑ (`v0.7.5`, Compiler + Sanitize-Nachweis) |
 | STX-06 Keine Versions-Persistenz | MEDIUM | ☐ | 04-01 → 04-02 |
 | STX-07 `backtest_runs`-Scope | MEDIUM | ☐ | 05-03 |
 | STX-08 Alpaca ohne WS | MEDIUM | ☐ | 07-03 (Bewusst: Alpaca ausgeschlossen) |
@@ -31,7 +31,7 @@
 | STX-15 Faktorzahl (14 ≠ 15+) | LOW | ☑ | 00-02 (`v0.6.1`) |
 | STX-16 Copy-Compliance | LOW | ☐ | 07-01 → 07-02 (`SIMULATE_ONLY`) |
 | STX-17 Validator kompatibel | INFO | ☐ | bestätigt — 06-04 |
-| STX-18 `RuleSpec` trägt 5/7 Templates | INFO | ☑ (Feldseite) | bestätigt — Bollinger 02-02 ☑ (`v0.6.4`), Donchian 02-03 ☑ (`v0.6.5`); Templates 03-03 ☑ (`v0.7.1`), 03-04 ☑ (`v0.7.2`), 03-05 ☑ (`v0.7.3`), 03-06/03-07/03-08 ☑ (`v0.7.4`) — alle sechs gebaut; Abnahme 03-09/03-10 offen |
+| STX-18 `RuleSpec` trägt 5/7 Templates | INFO | ☑ (Feldseite) | bestätigt — Bollinger 02-02 ☑ (`v0.6.4`), Donchian 02-03 ☑ (`v0.6.5`); Templates 03-03 ☑ (`v0.7.1`), 03-04 ☑ (`v0.7.2`), 03-05 ☑ (`v0.7.3`), 03-06/03-07/03-08 ☑ (`v0.7.4`) — alle sechs gebaut; Compiler-Abnahme 03-09 ☑ (`v0.7.5`, sechs Templates ohne Klemmung durch den Sicherheitspfad), offen nur die Vertragstests 03-10 |
 | STX-19 Kafka-Einwand | INFO | ☐ | bestätigt — global gesperrt |
 
 ## Prompts
@@ -71,7 +71,7 @@
 | 03-06 | [Template: Bollinger Squeeze](../prompts/PROMPT-STX-03-06-template-bollinger.md) | ☑ | STX-18 | `v0.7.4` |
 | 03-07 | [Template: VWAP (Snapshot)](../prompts/PROMPT-STX-03-07-template-vwap.md) | ☑ | STX-18 | `v0.7.4` |
 | 03-08 | [Template: Donchian Breakout](../prompts/PROMPT-STX-03-08-template-donchian.md) | ☑ | STX-18 | `v0.7.4` |
-| 03-09 | [Compiler + Sanitize-Nachweis](../prompts/PROMPT-STX-03-09-compiler.md) | ☐ | STX-05 | — |
+| 03-09 | [Compiler + Sanitize-Nachweis](../prompts/PROMPT-STX-03-09-compiler.md) | ☑ | STX-05 | `v0.7.5` |
 | 03-10 | [Template-Tests](../prompts/PROMPT-STX-03-10-template-tests.md) | ☐ | STX-18 | — |
 
 ### Phase 4 — Versionierte Persistenz

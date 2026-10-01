@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.5` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); 02-01…02-03 abgeschlossen — Phase 2 fachlich fertig, offen nur der optionale Slice 02-04; Gate G1 seit `v1.1.2`)
+- **Audit-Version:** `v1.1.11` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); Phasen 0–2 abgeschlossen, Phase 3 fast fertig — sechs Templates + Compiler 03-09 (`v0.7.5`), offen nur 03-10)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.7.4 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fachlich abgeschlossen: 02-01 (`v0.6.3`, Formeln), 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) und 02-03 (`v0.6.5`, Donchian-Regelfeld + Paritätstest) umgesetzt; offen nur der optionale Feature-Store-Slice 02-04; **Phase 3 begonnen:** 03-01/03-02 (`v0.7.0`, Vertrag + Katalog), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`) und 03-05 (`v0.7.3`) umgesetzt; **Template-Reihe vollständig:** 03-06 (Bollinger-Squeeze), 03-07 (VWAP-Bias, Snapshot) und 03-08 (Donchian Breakout) mit `v0.7.4` ausgeliefert — sechs von sechs Templates gebaut; offen 03-09 (Compiler) und 03-10 (Template-Vertragstests)
+- **Code-Version:** `package.json` v0.7.5 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
+- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fachlich abgeschlossen: 02-01 (`v0.6.3`, Formeln), 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) und 02-03 (`v0.6.5`, Donchian-Regelfeld + Paritätstest) umgesetzt; offen nur der optionale Feature-Store-Slice 02-04; **Phase 3 begonnen:** 03-01/03-02 (`v0.7.0`, Vertrag + Katalog), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`) und 03-05 (`v0.7.3`) umgesetzt; **Template-Reihe vollständig:** 03-06 (Bollinger-Squeeze), 03-07 (VWAP-Bias, Snapshot) und 03-08 (Donchian Breakout) mit `v0.7.4` ausgeliefert — sechs von sechs Templates gebaut; **Compiler 03-09 mit `v0.7.5` ausgeliefert** (STX-05 behoben: `buildRule(params) → sanitizeRuleSpec() → RuleSpec` nachgewiesen, Compiler ohne Fallback auf die Rohform); offen nur 03-10 (Template-Vertragstests)
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -22,11 +22,11 @@
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 0 | 0 | 0 | 0 |
-| HIGH | 5 | 1 | 2 | 2 |
+| HIGH | 5 | 0 | 2 | 3 |
 | MEDIUM | 7 | 4 | 3 | 0 |
 | LOW | 4 | 3 | 0 | 1 |
 | INFO | 3 | 2 | 0 | 1 |
-| **Σ** | **19** | **10** | **5** | **4** |
+| **Σ** | **19** | **9** | **5** | **5** |
 
 > **Kein CRITICAL.** Das Ausbaudokument enthält **keinen** Vorschlag, der eine bestehende
 > Sicherheitsgrenze weicht. Die HIGH-Funde sind **Integrations- und Duplikationsrisiken**,
@@ -40,7 +40,7 @@
 | [STX-02](findings/STX-02-strategyclass-duplikat.md) | `StrategyClass` existiert bereits — `StrategyTemplate` würde ein zweites Klassifikationsmodell bauen | HIGH | IN ARBEIT (entschieden: [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)) |
 | [STX-03](findings/STX-03-regime-vokabular-konflikt.md) | Regime-Vokabular-Konflikt: 7er-Taxonomie des Dokuments vs. bestehendes 5+1-Modell | HIGH | IN ARBEIT (entschieden: [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2)) |
 | [STX-04](findings/STX-04-multiaset-spec-duplikat.md) | `MultiAssetStrategySpec` dupliziert `CrossSectionalConfig` | HIGH | FIXED ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) |
-| [STX-05](findings/STX-05-template-builder-umgeht-sanitize.md) | `buildRule(ctx)` als Runtime-Builder umgeht das Security-Modell „Code entscheidet" | HIGH | OPEN |
+| [STX-05](findings/STX-05-template-builder-umgeht-sanitize.md) | Builder umgeht „Code entscheidet" — `buildRule(ctx) => RuleSpec` würde Whitelist/`RULE_CEILINGS` überspringen | HIGH | FIXED (03-01 `v0.7.0` + 03-09 `v0.7.5`) |
 | [STX-06](findings/STX-06-keine-strategy-versions-persistenz.md) | Kein versioniertes Strategie-Artefakt persistiert (Lifecycle-Key ist freiform) | MEDIUM | OPEN |
 | [STX-07](findings/STX-07-backtest-runs-scope.md) | `backtest_runs.instrument_id NOT NULL` — universe-scoped Runs nicht persistierbar | MEDIUM | OPEN |
 | [STX-08](findings/STX-08-alpaca-ohne-websocket.md) | Alpaca hat **keinen** WebSocket — Leader-Adapter-Annahme des Dokuments trifft nicht zu | MEDIUM | OPEN |
@@ -53,7 +53,7 @@
 | [STX-15](findings/STX-15-scanner-faktorzahl.md) | Faktenkorrektur: 14 aktive Faktoren, nicht „15+" | LOW | FIXED (00-02) |
 | [STX-16](findings/STX-16-copy-trading-compliance.md) | Copy-Trading verschiebt das Compliance-/Haftungsprofil des Projekts | LOW | OPEN |
 | STX-17 | Bestätigt: Validator-Agent passt in das bestehende Evidence-Modell | INFO | OPEN |
-| STX-18 | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT: Feldseite Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); **alle sechs Templates gebaut** — 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06/03-07/03-08 (`v0.7.4`, σ-Korrektur 03-06 dokumentiert); Abnahme über 03-09/03-10 offen |
+| STX-18 | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT: Feldseite Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); **alle sechs Templates gebaut** — 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06/03-07/03-08 (`v0.7.4`, σ-Korrektur 03-06 dokumentiert); **Compiler-Abnahme 03-09 (`v0.7.5`)** — sechs Templates kompilieren ohne Klemmung; offen nur die Vertragstests 03-10 |
 | STX-19 | Bestätigt: kein Kafka empfohlen — Einwand des Dokuments trägt | INFO | OPEN |
 
 ## Executive Summary

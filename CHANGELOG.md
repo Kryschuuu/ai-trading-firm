@@ -21,15 +21,106 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.4** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.5** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächste Schritte: der Compiler 03-09 und die Template-Tests
-> 03-10 (Abschluss von Phase 3); offen bleibt die optionale
-> Feature-Store-Parität 02-04. Danach folgt Phase 4 (`strategy_definitions`/
-> `strategy_versions`, `v0.8.0`).
+> **Status: Beta.** Nächste Schritte: die Template-Vertragstests 03-10
+> (Abschluss von Phase 3, Gate „6 Artefakte kompilieren über den unveränderten
+> Sicherheitspfad“); offen bleibt die optionale Feature-Store-Parität 02-04.
+> Danach folgt Phase 4 (`strategy_definitions`/`strategy_versions`, `v0.8.0`).
+
+## [0.7.5] — Compiler: Template + Params → RuleSpec, mit Sanitize-Nachweis (STX-03-09) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Der sicherheitskritische Übergang der
+> Phase 3 ist geschlossen: `src/strategies/compiler.ts` ist der **einzige**
+> Aufrufer von `buildRule()` und leitet jede Rohform zwingend durch
+> `sanitizeRuleSpec()`. **Keine** Änderung an `ruleEngine.ts`, `sanitizeRuleSpec`,
+> `compileRuleSpec`, `RULE_CEILINGS` oder `RULE_FIELDS`; **keine** Migration,
+> **kein** DB-Schreibpfad (Persistenz ist 04-02), keine LLM-/Prompt-Logik. Die
+> Auslieferung erfolgt als eigenes Release, obwohl `VERSIONING.md` 03-09
+> ursprünglich in ein Template-Release falten wollte: Der Übergang ist
+> sicherheitskritisch genug für einen eigenen, einzeln rollbackbaren
+> Release-Punkt. Phase-3-Abnahme über 03-10 bleibt offen.
+
+### Added
+
+* **Strategie-Compiler `src/strategies/compiler.ts`** (STX-03-09, Finding STX-05):
+  `compileTemplate({ templateId, symbol, timeframe, params?, codeVersion? })`
+  liefert `{ ok: true; spec; strategyClass; fingerprint; clamped; warnings }`
+  oder `{ ok: false; errors; clamped }` — Fehler sind **Strings**, nie Würfe.
+  * **Die Reihenfolge ist Teil des Vertrags** (Schritte 1–10 des Prompts, keiner
+    zusammengefasst): Template via `getTemplate(id)` auflösen (unbekannt ⇒
+    Fehler) → `class === "unclassified"` ablehnen (ADR-008) → `timeframe ∈
+    template.supportedTimeframes` → Parametervalidierung → `buildRule(params)` im
+    `try` → Builder-Ausgabe erneut prüfen → Aufrufer-Werte einsetzen →
+    **`sanitizeRuleSpec()`** → `sourceRole` (nie `MANUAL`) →
+    `ruleWithinRuntimeLimits()`.
+  * **Kein Rückfall auf die Rohform:** Ist das Sanitize-Ergebnis `{ok:false}`,
+    gibt der Compiler `{ok:false}` zurück — es gibt keine zweite
+    Konstruktionsstelle einer `RuleSpec`. Ein Test ersetzt den Sanitizer durch
+    einen Sentinel und beweist, dass genau dessen `spec`-Objekt zurückkommt.
+  * **`clamped: string[]`** macht die Klemmung sichtbar („`action.stopLossPct:
+    999 → 20`“, Feld, Rohwert, Klemmwert) statt eines stillen Erfolgs; erfasst
+    `stopLossPct`, `takeProfitRR`, `riskBudgetPct`, `maxPositionPct`,
+    `maxExecutionsPerDay`, `cooldownMinutes`, `volumeWindow` und `riskScore`.
+    03-10 und 06-01 können daran erkennen, ob ein Template dauerhaft klemmt.
+  * **`fingerprint`** = `stc1:<sha256>` über
+    `canonicalJson({ templateId, version, params, timeframe, symbol, codeVersion })`
+    (Muster: `strategyLifecycle/evidence.ts`): sortierte Keys, kein `Date.now()`,
+    kein Zufall — stabil über Prozessgrenzen, der Schlüssel für Idempotenz (04-02)
+    und Cache (05-04). Parameter-Reihenfolge ist bedeutungslos, `codeVersion`
+    (Default `APP_VERSION`) nicht.
+  * **`strategyClass` ist immer `template.class`** (ADR-008) — genau eine
+    Klassenquelle; `unclassified` wird zur Laufzeit abgelehnt. Getestet für alle
+    sechs Templates inkl. `regimeGateFactor(regime, class)` über alle fünf Regime
+    und `DEFAULT_CLASS_POLICIES[class]`.
+  * **`exportTemplates(symbol?)`** kompiliert alle Katalog-Templates mit
+    Default-Params über alle `supportedTimeframes` zu einer flachen Liste
+    (Template × Takt) — ohne DB, ohne Netz, ohne Mutation.
+  * **Laufzeit-Limits sind Warnungen, keine Compile-Fehler.** `getLimits()` liefert
+    marktabhängige Limits (Basis-Limit × Regime-/VolTarget-/Drawdown-Faktor); sie
+    dürfen das Ergebnis nicht bestimmen, sonst wäre der Fingerprint nicht
+    prozessstabil und die Werkseinstellung (`takeProfitRR = 1.5` bei
+    Template-Defaults bis 2,5) würde fünf der sechs Templates dauerhaft
+    blockieren. Die Einhaltung wird deshalb als `warnings` ausgewiesen und im
+    Ausführungspfad erzwungen (`riskGateRule` im Makro-Zyklus, Sizing/
+    `validateOrder` bei der Order).
+  * **`requiredFields`-Deckung mit abgeleiteter Dokumentations-Ausnahme:**
+    Pflichtfelder müssen im Builder-Ergebnis als Bedingungsfeld vorkommen; die
+    Felder, die **kein** Katalog-Template filtert (`atrPct`, Risikodoku für
+    Stop/Ziel), sind ausgenommen — abgeleitet aus dem Katalog, nicht hartcodiert.
+* **Pflicht-Beweis `tests/strategies.compiler.security.test.ts`** (26 Tests):
+  Sanitize-Aufruf per Spy + Sentinel-Identität + Fehlerrückgabe; Klemmung
+  `stopLossPct: 999` ⇒ Ceiling und gefülltes `clamped`; unbekanntes Feld
+  (`field: "oracle"`) ⇒ `{ok:false}`; fremder Operator (`op: "exec"`) ⇒
+  `{ok:false}`; `action.side: "SHORT"` ⇒ `{ok:false}`; entferntes `adx14` ⇒
+  `{ok:false}` mit `requiredFields`-Fehler; Fingerprint-Stabilität inkl.
+  Reihenfolge-Unabhängigkeit und „andere `APP_VERSION` ⇒ anderer Fingerprint“;
+  ROLLOUT: `exportTemplates()` ⇒ 6 Templates über alle Takte, alle `ok:true`,
+  alle ohne `clamped`; `{ok:false}`-Fälle (fremde ID, `unclassified`, fremder
+  Takt, unbekannter Parameter, werfender Builder, ungültiges Symbol) liefern
+  Fehlerstrings statt Exceptions; `sourceRole` „CEO“ bleibt, `MANUAL` wird
+  `RESEARCH`.
+
+### Changed
+
+* **Doku:** [`docs/architecture/STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md)
+  beschreibt die Compiler-Kette als §1.2 und führt `src/strategies/compiler.ts`
+  nicht mehr als Lücke; `docs:validate` prüft die Versions-Konsistenz
+  (`package.json` ↔ Changelog ↔ Status-Header ↔ `docs/README.md`).
+
+### Ausdrücklich nicht geändert
+
+* `src/lib/ruleEngine.ts` ist **unverändert** (Diff leer) — `sanitizeRuleSpec`,
+  `compileRuleSpec`, `RULE_CEILINGS` und `RULE_FIELDS` bleiben die alleinige
+  Sicherheitsgrenze. Der Compiler liest sie nur.
+* Kein Schreiben in die Datenbank, kein Netzwerkzugriff: `exportTemplates()`
+  läuft DB-frei (der `ruleService`-Import zieht wegen dessen Lazy-DB-Init
+  keine Verbindung).
+* Die sechs Templates und ihre Parametergrenzen bleiben unangetastet; der
+  Compiler ändert kein Artefakt, er liest es durch den Sicherheitspfad.
 
 ## [0.7.4] — Templates Bollinger Squeeze, VWAP-Bias & Donchian Breakout (STX-03-06/03-07/03-08) (2026-10-01)
 
