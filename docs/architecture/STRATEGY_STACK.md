@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-10-01 · **Code-Version:** v0.7.6 (Beta)
+> **Status:** Ist-Zustand · **Stand:** 2026-10-01 · **Code-Version:** v0.8.0 (Beta)
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)
@@ -37,6 +37,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Kostenmodell | `BacktestEngineConfig.feeModel` + `MonteCarloStressConfig` | kein drittes |
 | Strategie-Template-Vertrag | `src/strategies/types.ts` (`StrategyTemplate`) | — |
 | Strategie-Templates (Katalog) | `src/strategies/catalog.ts` (`STRATEGY_TEMPLATES`, Import-Zeit-Validierung) + `src/strategies/templates/*.ts` (eine Datei pro Artefakt) | keine zweite Template-Liste; Workshop-UI/CLI/Tests lesen hier |
+| Strategie-Versionen (Schema, STX-04-01) | `strategyDefinitions`/`strategyVersions` in `src/db/schema.ts` + `drizzle/2026-10-01_strategy_catalog.sql` (`v0.8.0`) | noch kein App-Schreib-/Lesepfad; folgt in 04-02 |
 | Strategie-Template-Doku | `docs/STRATEGY_TEMPLATES.md` (**generiert** aus dem Katalog via `npm run docs:templates`) | keine handgepflegte zweite Tabelle; der Vertragstest vergleicht sie byteweise mit dem Generator |
 | Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
 | Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
@@ -200,9 +201,27 @@ nicht auseinanderlaufen. Kein Produktivcode wurde für 03-10 geändert:
 `ruleEngine.ts`, `sanitizeRuleSpec`, `indicators.ts`, `indicatorCache.ts` und der
 Katalog bleiben unverändert.
 
+### 1.4 Strategie-Persistenzschema (STX-04-01, v0.8.0)
+
+Die append-only Migration `drizzle/2026-10-01_strategy_catalog.sql` ergänzt
+`strategy_definitions` und `strategy_versions`; `src/db/schema.ts` ist der
+Drizzle-Spiegel. `template_id` bleibt ein code-owned Slug ohne FK. Eine Version
+trägt kompilierte `params_json`, die sanitisierte `rule_spec_json`, den
+System-Timeframe, Fingerprint, `stv1:`-Content-Hash sowie Code-/Template-
+Version und Ersteller. Eindeutigkeit gilt je `(definition_id, version)`, global
+für `fingerprint` und global für `content_hash` (Retry-/Replay-Idempotenz).
+
+**Abgrenzung:** Das ist bislang nur das Schemafundament. 04-02 muss den
+idempotenten Schreib-/Leseservice ergänzen, bevor Strategie-Artefakte über die
+Anwendung persistiert oder rekonstruiert werden können. Es gibt keinen Backfill;
+`strategy_lifecycle_*` bleibt in 04-01 unverändert und bestehende Lifecycle-
+Zeilen bleiben gültig. Ein direkter FK zu `strategy_versions.id` ist wegen des
+expliziten Lifecycle-Table-Locks ausgeschlossen; eine erneute Prüfung braucht
+einen separat abgestimmten Scope.
+
 ## 2. Nicht vorhanden — explizite Lücken
 
-Folgende Pfade/Tabellen existieren **nicht** im Ist-Zustand (geprüft via `ls` / `grep`).
+Folgende Pfade/Tabellen existieren **noch nicht** im Ist-Zustand (geprüft via `ls` / `grep`).
 Sie sind in der Roadmap vorgesehen — siehe `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`
 und `../audits/2026-09-29-strategy-template-ausbau/report.md`:
 
@@ -212,8 +231,6 @@ und `../audits/2026-09-29-strategy-template-ausbau/report.md`:
 | ~~Template-Vertragstests~~ | ✅ existiert seit `v0.7.6` (03-10) | `ROADMAP.md` Phase 3 — **abgeschlossen:** Beweis: `tests/strategies.templates.test.ts` (60 Tests), Details in §1.3; generierte Doku `docs/STRATEGY_TEMPLATES.md` |
 | `src/screening/` | Verzeichnis fehlt | `ROADMAP.md` Phase 5 — Candidate Matrix / Screening (`05-01` Typen, `05-02` Matrix-Builder) |
 | `src/copy/` | Verzeichnis fehlt | `ROADMAP.md` Phase 7 — Copy-Trading (`07-01` Typen) |
-| `strategy_definitions` | Tabelle fehlt | `ROADMAP.md` Phase 4 — `04-01` Migration `strategy_definitions` + `strategy_versions` |
-| `strategy_versions` | Tabelle fehlt | `ROADMAP.md` Phase 4 — `04-01` Migration, `04-02` Service |
 | `strategy_screening_runs` | Tabelle fehlt | `ROADMAP.md` Phase 5 — `05-03` Persistenz + Idempotenz |
 | `strategy_market_results` | Tabelle fehlt | `ROADMAP.md` Phase 5 — `05-03` je Zelle (FK auf Screening-Run, `strategy_version_id`) |
 
@@ -226,7 +243,7 @@ Siehe `../BETA_STATUS.md`.
 2. **Neue Strategieklasse / Regime / Eligibility / Kosten:** Erweitere bestehende SSoT (`src/lib/signalDecay.ts` `STRATEGY_CLASS_KEYS`, `src/lib/marketRegime.ts` `MarketRegime`, `src/universe/*` + `crossSectional/types.ts` `EligibilityConfig`, `src/backtest/types.ts` `BacktestEngineConfig.feeModel` + `src/backtest/montecarlo.ts` `MonteCarloStressConfig`); kein zweites Vokabular, kein drittes Kostenmodell. Klassen- und Regime-Vokabular ändert nur ein neues ADR (ADR-008, ADR-009), Universe-Gewichte nur die `PortfolioConstruction`-Schicht aus ADR-010.
 3. **Neues Scanner-/Ranking-Verhalten:** Erweitere `src/scanner/*` (Faktor in `factors/` + Gewicht in `scanner.config.json`) bzw. `src/crossSectional/*`; keine neue Spec-Datei, SSoT bleibt Config + bestehende Typen.
 4. **Neues Lifecycle-/Evidenz-/Fill-/Symbol-Verhalten:** Erweitere `src/strategyLifecycle/*`, `src/executionQuality/` + `src/brokers/reconciliation.ts`, `src/symbols/normalize.ts`; kein Copy-Reconciler, kein String-Replace.
-5. **Völlig neue Domäne (Screening, Copy, Persistenz):** Existiert nicht — siehe Roadmap `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`; keine vorzeitige Anlage unter `src/screening/`, `src/copy/` oder Tabellen `strategy_definitions`, `strategy_versions`, `strategy_screening_runs`, `strategy_market_results` ohne Phase 0–4 Gates. **Innerhalb** von `src/strategies/` gilt: Neue Templates gehen über `catalog.ts` + `templates/`; eine `RuleSpec` entsteht **ausschließlich** über `compiler.ts` (§1.2) — kein zweiter Aufrufer von `buildRule()`, kein `sanitizeRuleSpec()`-Aufruf außerhalb des Compilers für Template-Regeln.
+5. **Neue Domäne (Screening, Copy, Strategie-Persistenz):** Für Phase 4 existiert seit 04-01 (`v0.8.0`) das Schema `strategy_definitions`/`strategy_versions`; der App-Service folgt in 04-02. `src/screening/`, `src/copy/`, `strategy_screening_runs` und `strategy_market_results` fehlen weiterhin und werden nur gemäß Phase 5/7-Gates ergänzt. **Innerhalb** von `src/strategies/` gilt: Neue Templates gehen über `catalog.ts` + `templates/`; eine `RuleSpec` entsteht **ausschließlich** über `compiler.ts` (§1.2) — kein zweiter Aufrufer von `buildRule()`, kein `sanitizeRuleSpec()`-Aufruf außerhalb des Compilers für Template-Regeln.
 
 ## 4. Verweise
 

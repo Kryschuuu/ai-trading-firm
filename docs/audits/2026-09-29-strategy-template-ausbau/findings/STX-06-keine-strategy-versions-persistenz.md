@@ -1,51 +1,58 @@
-# STX-06 — Kein versioniertes Strategie-Artefakt persistiert
+# STX-06 — Kein versioniertes Strategie-Artefakt im Anwendungsdienst persistiert
 
 - **ID:** STX-06
 - **Severity:** MEDIUM
 - **Bereich:** Persistenz / Strategy-Lifecycle
 - **Quelle:** Ausbaudokument §7
-- **Status:** OPEN
-- **Datei(en):** `drizzle/2026-09-23_strategy_lifecycle.sql`, `src/strategyLifecycle/evidence.ts`
+- **Status:** IN ARBEIT — Schema 04-01 (`v0.8.0`) vorhanden; Service/Schreibpfad 04-02 offen
+- **Datei(en):** `drizzle/2026-10-01_strategy_catalog.sql`, `src/db/schema.ts`, `tests/strategyCatalog.db.test.ts`
 
 ## Beschreibung
 
-Die zentrale Diagnose des Dokuments ist **bestätigt**: `strategy_lifecycle_states` trägt
-`strategy_key` (Freitext, Shape-Constraint) und `strategy_version` (Integer ≥ 1) — aber
-**nirgends liegt das versionierte Strategie-Artefakt selbst.** Es gibt keine
-`strategy_definitions`-/`strategy_versions`-Tabelle.
+Die zentrale Diagnose war bestätigt: `strategy_lifecycle_states` trug
+`strategy_key` (Freitext) und `strategy_version` (Integer ≥ 1), aber kein
+rekonstruierbares Artefakt. 04-01 ergänzt nun `strategy_definitions` und
+`strategy_versions` als persistierbares Schema. **Noch fehlt** der Dienst, der
+kompilierte Templates dort idempotent speichert und wieder ausliest; daher ist
+die Diagnose erst teilweise behoben und STX-06 bleibt bis 04-02 in Arbeit.
 
-## Beweis
+## Beweis / aktueller Stand
 
 ```sql
--- strategy_lifecycle_states
-"strategy_key" text NOT NULL,
-"strategy_version" integer NOT NULL,
--- CHECK: length BETWEEN 1 AND 128 AND ~ '^[A-Za-z0-9._:@/-]+$'
+strategy_definitions (id, template_id, strategy_class, name, description, ...)
+strategy_versions (
+  id, definition_id, version, params_json, rule_spec_json, timeframe,
+  fingerprint, content_hash, code_version, template_version, ...
+)
 ```
 
-Der Key ist eine **Bezeichnung**, kein FK. `evidence` hat `content_hash` + `idempotency_key`
-+ `code_version` + `data_version` + `policy_version` — aber die *Strategie*, die evaluiert
-wurde, ist nicht referenziert.
+Die Tabellen sind leer zu bootstrappen. `template_id` ist ein code-owned Katalog-Slug,
+kein FK. `content_hash` und `fingerprint` sind UNIQUE; Versionen sind je Definition
+eindeutig. Bestehende `strategy_lifecycle_states`-Zeilen bleiben unverändert gültig.
+Ein Anwendungs-Schreib-/Lesepfad und die Zuordnung einer Lifecycle-Zeile zu
+`strategy_versions.id` gehören, falls umgesetzt, in 04-02.
 
 ## Remediation
 
-1. Neue, **append-only** Migration: `strategy_definitions` (id, `strategy_class`,
-   `template_id`, `scope`, `description`, `created_at`) und `strategy_versions`
-   (id, definition_id, `version`, `params_json`, `rule_spec_json`, **`content_hash`**,
-   `code_version`, `created_by`, `created_at`).
-2. `UNIQUE (definition_id, version)`; `UNIQUE (content_hash)` (analog zu
-   `strategy_lifecycle_evidence_hash_unique`).
-3. `strategy_lifecycle_states` erhält einen optionalen FK `strategy_version_id` (additiv,
-   bestehende Zeilen bleiben gültig — Bootstrap LEER, wie in der Lifecycle-Migration
-   dokumentiert).
+1. **Erledigt in 04-01 (`v0.8.0`):** Append-only, idempotente Migration für
+   `strategy_definitions` und `strategy_versions`, Drizzle-Spiegel und DB-Tests.
+2. **Erledigt in 04-01:** `UNIQUE (definition_id, version)`, `UNIQUE (fingerprint)`
+   und `UNIQUE (content_hash)`; der Content-Hash ist der Retry-/Replay-Anker.
+3. **Noch offen in 04-02:** Service für deterministische Persistenz und Rekonstruktion
+   aus den versionierten Spalten. Der optionale nullable FK `strategy_version_id`
+   auf `strategy_lifecycle_states` ist wegen des expliziten Locks auf
+   `strategy_lifecycle_*` bewusst ausgeschlossen; eine erneute Prüfung erfordert
+   einen separat abgestimmten Scope.
 
 ## Akzeptanzkriterien
 
-- [ ] Append-only; keine Änderung bestehender Migrationen
-- [ ] Ein `content_hash` genügt, um eine Version zu identifizieren
-- [ ] Bestehende `strategy_key`-Zeilen bleiben gültig (kein Backfill-Zwang)
-- [ ] Idempotenz: gleiche `(definition_id, params, code_version)` ⇒ dieselbe Version
+- [x] Append-only; keine Änderung bestehender Migrationen
+- [x] `content_hash` ist eindeutig und formatvalidiert
+- [x] Bestehende Lifecycle-Zeilen bleiben gültig; kein Backfill
+- [ ] Idempotenter App-Service: gleiche fachliche Eingabe ⇒ dieselbe Version
+- [ ] Versionierte Artefakte können über den Service rekonstruiert werden
 
 ## Versions-Hinweis
 
-Minor (rein additive Migration).
+`v0.8.0` liefert die additive Schema-Grundlage (04-01). STX-06 bleibt bis zum
+Schreib-/Leseservice aus 04-02 **in Arbeit**.

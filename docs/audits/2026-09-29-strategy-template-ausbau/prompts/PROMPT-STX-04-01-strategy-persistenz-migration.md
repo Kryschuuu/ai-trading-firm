@@ -52,10 +52,11 @@ Hash- und Idempotenz-Muster ebenfalls aus dieser Migration:
 2. **`src/db/schema.ts`**: Drizzle-Definitionen ergänzen, Spaltennamen/SQL-Typen
    deckungsgleich zur Migration. Kommentiere die Zuordnung.
 
-3. **Optionaler, additiver FK** auf `strategy_lifecycle_states`:
-   `strategy_version_id uuid REFERENCES strategy_versions(id)` — **nullable**, damit
-   bestehende Zeilen gültig bleiben. Kein Backfill-Zwang, kein `NOT NULL`.
-   *Wenn die Abhängigkeit 04-02 zu zyklisch macht, lass sie weg und hole sie in 04-02 nach.*
+3. **Lifecycle-FK ausdrücklich ausgelassen:** Der optionale Vorschlag
+   `strategy_version_id uuid REFERENCES strategy_versions(id)` auf
+   `strategy_lifecycle_states` kollidiert mit dem expliziten Lock auf
+   `strategy_lifecycle_*`. Ändere diese Tabellen nicht und ergänze den FK nicht.
+   Eine erneute Prüfung ist nur in einem separat abgestimmten Scope zulässig.
 
 4. **Rollback-Block** im SQL-Kommentar (Muster der Lifecycle-Migration):
    `DROP TABLE IF EXISTS …` in umgekehrter Reihenfolge, plus der Hinweis, dass der
@@ -66,7 +67,8 @@ Hash- und Idempotenz-Muster ebenfalls aus dieser Migration:
 - [ ] Migration ist idempotent (zweimal ausführbar, kein Fehler)
 - [ ] `psql -f` **und** `drizzle-kit push` führen zum selben Schema
 - [ ] Rollback-Block dokumentiert **und** getestet (auf einer Wegwerf-DB)
-- [ ] `strategy_lifecycle_states`-Zeilen bleiben gültig (kein NOT NULL, kein Backfill)
+- [ ] `strategy_lifecycle_states`-Zeilen bleiben gültig (kein NOT NULL, kein Backfill,
+      keine Schemaänderung an `strategy_lifecycle_*`)
 - [ ] `npm run typecheck && npm run lint` grün
 - [ ] **Kein** Backfill, **keine** Änderung bestehender Migrationen
 - [ ] Kommentar im SQL: **warum** `content_hash` UNIQUE ist (Idempotenz, keine Dubletten)

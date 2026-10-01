@@ -21,17 +21,52 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.7.6** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.8.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächster Schritt ist Phase 4: `strategy_definitions` +
-> `strategy_versions` (Migration + Service, 04-01/04-02, `v0.8.0`) — ohne
-> Persistenz bleibt jede Strategie-Version ein Katalogeintrag im Code und ist
-> nicht rekonstruierbar. Offen bleibt daneben die optionale
-> Feature-Store-Parität 02-04. Die Phase-3-Abnahme (03-10) ist mit `v0.7.6`
-> abgeschlossen.
+> **Status: Beta.** Nächster Schritt in Phase 4 ist 04-02 (Service +
+> Lifecycle-Bridging). Das in `v0.8.0` gelieferte Schema ist dafür die additive
+> Grundlage; bis der Service folgt, gibt es noch keinen Anwendungs-Schreib- oder
+> Leseweg für Strategie-Versionen. Optional bleibt Feature-Store-Parität 02-04.
+
+## [0.8.0] — Strategie-Persistenz: Schemafundament (STX-04-01) (2026-10-01)
+
+> **Status: Beta, nicht produktionsreif.** Dieses Release ergänzt ausschließlich
+> die additive Datenbank-Grundlage für rekonstruierbare Strategie-Versionen.
+> Es gibt keinen Backfill und noch keinen Service-Schreibpfad.
+
+### Added
+
+* **Migration `drizzle/2026-10-01_strategy_catalog.sql`** legt
+  `strategy_definitions` und `strategy_versions` append-only und idempotent an.
+  Template-Slug, Strategieklasse, Version, System-Timeframe-Allowlist und
+  `stv1:`-Content-Hash werden per CHECK validiert; Definition/Version,
+  Fingerprint und Content-Hash sind eindeutig. Der Content-Hash verhindert
+  doppelte Persistenz bei Retry/Replay.
+* **Drizzle-SSoT `src/db/schema.ts`** erhält deckungsgleiche Tabellen- und
+  Constraint-Definitionen. `template_id` bleibt ohne FK auf den code-owned
+  Template-Katalog.
+* **DB-Tests `tests/strategyCatalog.db.test.ts`** decken doppelte Migration,
+  Roundtrip, Constraints, Eindeutigkeit, Lifecycle-Kompatibilität und den
+  kommentierten Rollback auf einer Wegwerf-DB ab.
+
+### Changed
+
+* **Projektversion `v0.8.0`** (Schemafundament für Phase 4) und die kanonischen
+  Versions-/Projektstatus-Dokumente wurden aktualisiert.
+* **Audit-Tracking STX-06:** 04-01 ist abgeschlossen; der Befund bleibt bis zum
+  04-02-Service in Arbeit, weil noch kein Anwendungs-Schreib-/Lesepfad besteht.
+
+### Notes
+
+* **Bootstrap: LEER starten.** Es werden weder Strategie-Artefakte backgefüllt
+  noch Lifecycle-Zeilen verändert. Der optionale Lifecycle-FK wurde wegen des
+  ausdrücklichen Lifecycle-Table-Locks ausgelassen; eine erneute Prüfung braucht
+  einen separat abgestimmten Scope.
+* Die Migration ist ausführbar als SQL und über `drizzle-kit push`. Die neuen
+  Tabellen wurden isoliert gegen beide Schema-Pfade verglichen.
 
 ## [0.7.6] — Template-Vertragstests + Katalog-Vollständigkeit (STX-03-10, Abschluss Phase 3) (2026-10-01)
 

@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.7.6` |
+| **Version** | `v0.8.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-01 |
-| **Quellbasiert** | `package.json` (`version: "0.7.6"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.8.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -206,6 +206,17 @@ Regression festgenagelt. `docs/STRATEGY_TEMPLATES.md` wird von
 gegen den Generator geprüft. `ruleEngine.ts`, `sanitizeRuleSpec`,
 `indicators.ts`, `indicatorCache.ts` und der Katalog bleiben unverändert.
 
+`v0.8.0` ergänzt das **Schemafundament für versionierte Strategie-Persistenz**
+(STX-04-01): `drizzle/2026-10-01_strategy_catalog.sql` und `src/db/schema.ts`
+liefern `strategy_definitions` sowie `strategy_versions`, inklusive
+Template-/Klassen-/Timeframe-Checks, eindeutigen Fingerprints/Content-Hashes
+(`fingerprint`, `content_hash`) und Provenienz (`code_version`,
+`template_version`). Migration und `drizzle-kit push` erzeugen für diese beiden
+Tabellen dieselbe Struktur; sieben DB-Tests decken Idempotenz, Constraints,
+Duplikate und Rollback ab. **Abgrenzung:** Es gibt noch keinen App-Schreib- oder
+Lesepfad; der Service aus 04-02 wird benötigt, bevor der Befund STX-06 als
+behoben gelten kann. Kein Backfill und keine Änderung an `strategy_lifecycle_*`.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -253,7 +264,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/universe/` | Instrument-Universe-Registry (venue-aware) |
 | `src/attribution/` | Deterministische Trade-PnL-Attribution |
 | `src/executionQuality/` | Venueübergreifendes Execution-Benchmarking (append-only Ledger) |
-| `src/db/`, `src/history/`, `src/contracts/` | Drizzle-Schema, Historical Store (append-only OHLCV), Broker-Contracts |
+| `src/db/`, `src/history/`, `src/contracts/` | Drizzle-Schema (seit v0.8.0 auch `strategy_definitions`/`strategy_versions`), Historical Store (append-only OHLCV), Broker-Contracts |
 | `src/app/` | Next.js App Router: Dashboard, Operations Center, API-Routen |
 | `src/components/` | React-UI (Paper-Trading-Dashboard, Control-Plane, Docs-Viewer) |
 
