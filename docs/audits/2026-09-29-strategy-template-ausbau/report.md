@@ -350,7 +350,7 @@ Das Dokument setzt **P0** auf: (1) Strategy Catalog, (2) Candidate Matrix.
 
 | Rang | Arbeit | Begründung |
 |---|---|---|
-| **P0-a** | Messung + Vokabular-Entscheidung (00-01…00-03) | Drei offene Fragen, deren Antworten jede spätere Entscheidung prägen. Kein Code-Risiko. |
+| **P0-a** | Messung + Vokabular-Entscheidung (00-01…00-03) | Drei Fragen, deren Antworten jede spätere Entscheidung prägen — entschieden in [ADR-008 … ADR-010](../../roadmap/DECISIONS.md) (`v0.6.1`). Kein Code-Risiko. |
 | **P0-b** | Timeframe-Blocker (01-01) | Ohne ihn sind alle P0-Ziele des Dokuments unerreichbar. |
 | **P0-c** | Indikator-Grundlage (02-01…02-03) | Bedingung für 2 der 5 Templates, die das Dokument als P0 führt. |
 | **P1** | Template-Kern (03-01…03-10) | Die eigentliche Diagnose des Dokuments. |

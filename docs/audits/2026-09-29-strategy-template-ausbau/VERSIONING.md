@@ -7,7 +7,7 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.13` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.14` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
@@ -43,6 +43,7 @@
 | `v1.1.11` | 2026-10-01 | 03-09 umgesetzt (`v0.7.5`): Compiler `Template → buildRule(params) → sanitizeRuleSpec() → RuleSpec` mit `clamped`-Nachweis, stabilem `stc1:`-Fingerprint und `exportTemplates()`; **STX-05 behoben** (HIGH), offen nur 03-10 |
 | `v1.1.12` | 2026-10-01 | 03-10 umgesetzt (`v0.7.6`): Template-Vertragstests (`tests/strategies.templates.test.ts`, 60 Tests) + generierte Doku `docs/STRATEGY_TEMPLATES.md`; **Phase 3 abgeschlossen**, Gate G3 erfüllt (STX-18 damit auf der Abnahmeseite geklärt) |
 | `v1.1.13` | 2026-10-01 | 04-01 umgesetzt (`v0.8.0`): append-only Schema für `strategy_definitions`/`strategy_versions` + DB-Tests; STX-06 teilweise remediated, bleibt bis 04-02-Service in Arbeit |
+| `v1.1.14` | 2026-10-01 | Nachtrag ohne Projekt-Release (Eintrag unter `[Unreleased]`): bekannte Code-Altlasten im TRACKING geführt (OP-6); `PR_SUMMARY.md` als Schnappschuss markiert; `report.md` §6 P0-a nachgezogen; CSRF-Negativtest deterministisch; zwei rote Wächter aus 04-02 behoben (kopierte Klassenliste, fehlende Audit-Event-Beschreibung) |
 
 ## 2. Release-Plan der Roadmap
 

@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-> **Stand:** 2026-09-29 · **Code-Version:** v0.6.2 (Beta)  
+> **Stand:** 2026-10-01 · **Code-Version:** v0.8.0 (Beta) ·
 > **Verantwortlich:** `docs/roadmap/DECISIONS.md`
 
 Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen, Annahmen und Invarianten des Gesamtsystems.
@@ -99,7 +99,7 @@ Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen,
 - **Kontext:**
   - Das Repo besitzt bereits ein Klassen-Vokabular, das bis in die Ausführung wirkt (am 2026-09-29 gegen den Code verifiziert):
     - `StrategyClass = "mean-reversion" | "trend" | "breakout"` (`src/lib/marketRegime.ts`, Liste `STRATEGY_CLASSES`) steuert das Regime-Gate (`regimeGateFactor`: Faktor je Regime × Klasse, genutzt im Engine-Turn und im Mikro-Executor).
-    - `StrategyClassKey = StrategyClass | "unclassified"` mit `STRATEGY_CLASS_KEYS` (`src/lib/signalDecay.ts`) steuert die Decay-Policies (`DEFAULT_CLASS_POLICIES`, Backtest-`signalDecay`) und ist persistiert (`signal_decay_events.strategy_class` mit CHECK über die vier Werte, `positions.strategy_class`).
+    - `StrategyClassKey = StrategyClass | "unclassified"` mit `STRATEGY_CLASS_KEYS` (`src/lib/signalDecay.ts`) steuert die Decay-Policies (`DEFAULT_CLASS_POLICIES`, Backtest-`signalDecay`) und ist persistiert (`positions.strategy_class` und `signal_decay_events.strategy_class`, jeweils mit CHECK über die vier Werte: `drizzle/2026-09-22_signal_decay.sql`).
   - Eine Regel trägt heute **keine** Klasse. Sie wird aus dem *Mission*-Template abgeleitet (`strategyClassOfTemplate(mission.templateId)`, Namens-Heuristik auf `…mean-reversion…`, `…breakout…`, `…trend…`/`…momentum…`). Ohne Treffer gilt im Gate `null` (Faktor 1), im Decay-Pfad `unclassified` (Policy default-off).
   - Ein `StrategyTemplate` (Phase 3 der Strategie-Roadmap) ist ein deklariertes, versioniertes Artefakt. Ohne Festlegung entsteht ein zweites Klassen-Enum — oder ein Template, das **still** die Risiko-Logik seiner Klasse verliert.
 - **Optionen:**
@@ -128,7 +128,7 @@ Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen,
   - **Wirkungsgrenze (verifiziert):** Der Compiler reicht die Klasse als `strategyClass` im `CompileResult` weiter; Aufrufer setzen sie in den Backtest-Kontext (`BacktestEngineConfig.signalDecay.strategyClass`, Opt-in, Decay-Policy) sowie in die Screening- und Report-Typen. Der Backtest wendet **kein** Regime-Gate an — das Gate läuft nur im Engine-Turn und im Mikro-Executor. Die Live-Ausführung bleibt bei der Mission-Ableitung: `RuleSpec`/`trade_rules` tragen weiterhin keine Klasse, und der Strategie-Service (04-02) ist Registry, nicht Executor. Eine Regel ohne Mission läuft mit Gate-Faktor 1 (fail-safe); die Roadmap ändert dieses Verhalten **nicht**.
   - Begriffe: *Mission-Template* (`src/lib/missionTemplates.ts`, Prompt-Vorlage, Klasse per Namens-Heuristik) und *StrategyTemplate* (`src/strategies/`, quantitatives Artefakt, Klasse deklariert) sind verschiedene Dinge; beide liefern Werte aus demselben Vokabular.
   - Kontrakt-Invariante: Jede Klasse aus `STRATEGY_CLASSES` hat in **allen** fünf Regimes einen Gate-Faktor und eine Decay-Policy. `tests/adrVocabulary.test.ts` hält das fest, ebenso die Tabelle oben gegen die Template-Prompts.
-  - Bekannte Altlast (Verhalten unverändert, nicht Teil der Roadmap): die vier Klassenwerte stehen zusätzlich als Literale in `isStrategyClassKey`/`classOf` (`signalDecay.ts`), in `signalDecayRuntime.ts` und im CHECK von `signal_decay_events`. Neuer Code importiert `STRATEGY_CLASS_KEYS`/`STRATEGY_CLASSES`, statt die Werte zu kopieren.
+  - Bekannte Altlast (Verhalten unverändert, nicht Teil der Roadmap): die vier Klassenwerte stehen zusätzlich als Literale in `isStrategyClassKey`/`classOf` (`signalDecay.ts`), in `signalDecayRuntime.ts` und in den CHECKs von `positions` und `signal_decay_events`. Neuer Code importiert `STRATEGY_CLASS_KEYS`/`STRATEGY_CLASSES`, statt die Werte zu kopieren — der Strategie-Service (04-02) tut das seit `tests/adrVocabulary.test.ts` nachweislich. Der Stand der Altlasten wird im [Audit-Tracking](../audits/2026-09-29-strategy-template-ausbau/remediation/TRACKING.md) als OP-6 geführt.
 - **Auswirkung auf die Roadmap:**
   - **Phase 3:** 03-01 (`class: StrategyClassKey`, Pflicht) und 03-02 (Validierung: in `STRATEGY_CLASS_KEYS` und ungleich `unclassified`) setzen die Entscheidung um; 03-03 … 03-08 tragen die Klasse aus der Tabelle; 03-09 liefert `CompileResult.strategyClass` und lehnt `unclassified` ab; 03-10 prüft die Kontrakt-Invariante.
   - **Phase 4/5/6:** 04-01 legt `strategy_class` mit CHECK auf die drei Klassen an (ohne `unclassified`); 05-01 und 06-04 führen `class: StrategyClassKey` nur als lesendes Feld.

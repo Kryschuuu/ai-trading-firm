@@ -21,7 +21,8 @@ import EmbeddedPostgres from "embedded-postgres";
 import type { Pool as PoolType } from "pg";
 import { Pool } from "pg";
 
-import { STRATEGY_TEMPLATE_IDS } from "../src/strategies/catalog";
+import { STRATEGY_TEMPLATES, STRATEGY_TEMPLATE_IDS } from "../src/strategies/catalog";
+import { STRATEGY_CLASSES } from "../src/lib/marketRegime";
 import { normalizeStrategyKey } from "../src/strategyLifecycle/evidence";
 import { resetTelemetryForTests, telemetry } from "../src/lib/telemetry";
 import { setAuditTransportForTests } from "../src/lib/auditSink";
@@ -142,6 +143,31 @@ describe("STX-04-02: Strategy Catalog Service & Lifecycle Bridging", () => {
 
     assert.equal(d2.id, d1.id);
     assert.equal(d2.createdAt.toISOString(), d1.createdAt.toISOString());
+  });
+
+  it("ensureDefinition akzeptiert alle Klassen aus der gemeinsamen SSoT (ADR-008)", async () => {
+    for (const strategyClass of STRATEGY_CLASSES) {
+      const template = STRATEGY_TEMPLATES.find((candidate) => candidate.class === strategyClass);
+      assert.ok(template, `Katalog braucht ein Template für ${strategyClass}`);
+      const row = await svc.ensureDefinition({
+        templateId: template.id,
+        strategyClass,
+        name: `Explicit SSoT class ${strategyClass}`,
+      });
+      assert.equal(row.strategyClass, strategyClass);
+    }
+  });
+
+  it("ensureDefinition lehnt unclassified und Fremd-Klassen vor dem DB-Insert ab", async () => {
+    for (const strategyClass of ["unclassified", "momentum", "TREND", "__proto__"]) {
+      const name = `Rejected class ${strategyClass}`;
+      await assert.rejects(
+        svc.ensureDefinition({ templateId: "ema-adx-trend", strategyClass, name }),
+        /ensureDefinition: Ungültige oder fehlende strategyClass/
+      );
+      const rows = await pool!.query("SELECT id FROM strategy_definitions WHERE name = $1", [name]);
+      assert.equal(rows.rowCount, 0, "ungültige Klasse darf keine Definition erzeugen");
+    }
   });
 
   it("Idempotenz: 3x createVersion mit identischen Params erzeugt genau 1 Version und 1 Lifecycle-Draft", async () => {

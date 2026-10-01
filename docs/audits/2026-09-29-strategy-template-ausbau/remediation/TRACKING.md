@@ -141,6 +141,18 @@
 | **G7** | 06-04 grün (deterministischer Report) | 06-05 |
 | **G8** | 07-01/07-02 grün | 07-03 |
 
+## Bekannte Code-Altlasten (durch 00-03 aufgedeckt, nicht Teil der 32 Prompts)
+
+00-03 sperrte Code-Änderungen; diese Punkte sind deshalb dokumentiert und **nicht** still korrigiert. Jeder ist eine kleine, eigenständige Änderung an Laufzeit-Code (eigener Prompt, Patch-Release). Ob und wann sie folgen, steht als OP-6 unten. Stand geprüft am 2026-10-01 gegen `main`.
+
+| Altlast | Fundort | Risiko | Details |
+|---|---|---|---|
+| Die vier Klassenwerte stehen als Literale statt nur aus `STRATEGY_CLASS_KEYS` | `src/lib/signalDecay.ts` (`isStrategyClassKey`, `classOf`), `src/lib/signalDecayRuntime.ts`, CHECKs `positions_strategy_class_check` und `signal_decay_events_class_check` (`drizzle/2026-09-22_signal_decay.sql`) | Eine künftige Klasse müsste an allen Stellen zugleich ergänzt werden (ADR-008: nur per neuem ADR) | [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), Konsequenzen |
+| `VolatilityRegime` ist dreifach definiert (Volatilitäts-Stufen, kein Markt-Regime) | `src/lib/adaptiveRisk.ts` (`NORMAL`/`ELEVATED`/`EXTREME`), `src/portfolio/types.ts` und `src/scanner/types.ts` (`LOW`/`NORMAL`/`HIGH`/`EXTREME`) | Namensnähe zu `MarketRegime`; kein Laufzeitfehler | [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), Kontext |
+| In-App-Doku-Viewer löst `docs/architecture/` und `docs/roadmap/` nicht auf | `resolveDoc` in `src/lib/docsCatalog.ts` (Suchpfade ohne diese beiden Ordner) | `STRATEGY_STACK.md`, `PIPELINE_MAP.md` und der ADR-Log sind nur im Repo und auf GitHub lesbar, nicht im Browser-Viewer | [`CHANGELOG.md`](../../../../CHANGELOG.md), Eintrag `0.6.1` |
+
+Der in `src/strategies/service.ts` (04-02) entstandene **vierte** Fall — eine erneut kopierte Klassenliste — ist **behoben**: Der Service liest `STRATEGY_CLASSES` aus der SSoT, der Wächter `tests/adrVocabulary.test.ts` deckt ihn ab.
+
 ## Offene Punkte für den Reviewer
 
 - **OP-1:** Soll `4h`/`1d` im Micro-Executor überhaupt je erreichbar sein, oder bleibt
@@ -159,3 +171,5 @@
   `SIMULATE_ONLY` später doch Live werden soll? (STX-16 — nicht Teil dieses Repos.)
 - **OP-5:** 02-04 (Feature-Store-Slice) — nachholen, wenn die Matrix-Größe den
   Snapshot-Pfad tatsächlich zum Engpass macht, oder dauerhaft verwerfen?
+- **OP-6:** Sollen die [bekannten Code-Altlasten](#bekannte-code-altlasten-durch-00-03-aufgedeckt-nicht-teil-der-32-prompts)
+  als eigene Prompts/Patch-Releases folgen oder bleiben sie dokumentiert und ungeplant?
