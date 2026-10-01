@@ -26,6 +26,7 @@ import {
 import { writeAuditRecord, type AuditWriteOutcome } from "@/lib/auditSink";
 import { APP_VERSION } from "@/lib/version";
 import { telemetry } from "@/lib/telemetry";
+import { STRATEGY_CLASSES } from "@/lib/marketRegime";
 import { DEFAULT_PROMOTION_POLICY } from "@/strategyLifecycle/policies";
 import {
   canonicalJson,
@@ -183,7 +184,8 @@ export async function ensureDefinition(
     }
   }
 
-  if (!strategyClass || !["mean-reversion", "trend", "breakout"].includes(strategyClass)) {
+  // ADR-008: keine eigene Klassenliste; `unclassified` bleibt ausgeschlossen.
+  if (!strategyClass || !STRATEGY_CLASSES.some((cls) => cls === strategyClass)) {
     throw new Error(
       `ensureDefinition: Ungültige oder fehlende strategyClass „${strategyClass}“ für Template ${templateId}.`
     );

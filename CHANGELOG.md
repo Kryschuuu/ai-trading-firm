@@ -26,10 +26,54 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nächster Schritt in Phase 4 ist 04-02 (Service +
-> Lifecycle-Bridging). Das in `v0.8.0` gelieferte Schema ist dafür die additive
-> Grundlage; bis der Service folgt, gibt es noch keinen Anwendungs-Schreib- oder
-> Leseweg für Strategie-Versionen. Optional bleibt Feature-Store-Parität 02-04.
+> **Status: Beta.** Der Service aus 04-02 (Strategie-Katalog + Lifecycle-Bridging)
+> ist gemergt und baut auf dem Schema aus `v0.8.0` auf; er ist Registry, **kein**
+> Executor und keine Live-Freigabe. Optional bleibt Feature-Store-Parität 02-04.
+> Nachträge ohne eigenen Release (Doku, Tests, Wächter-Korrekturen) stehen hier und
+> werden im nächsten Release mitgeliefert (Präzedenz: `VERSIONING.md` V4).
+
+### Fixed
+
+* **Zwei rote Wächter aus 04-02 behoben** (die Suite auf `main` war dadurch rot,
+  `typecheck`/`lint`/`docs:validate` blieben grün und haben es nicht gezeigt):
+  * `src/strategies/service.ts` führte die Strategieklassen erneut als Literalliste
+    (`["mean-reversion", "trend", "breakout"]`) und verletzte damit ADR-008
+    (`tests/adrVocabulary.test.ts`, Guard für `src/strategies/`). Der Service liest
+    jetzt `STRATEGY_CLASSES` aus `src/lib/marketRegime.ts`; `unclassified` und
+    Fremdwerte werden weiterhin **vor** dem Insert abgelehnt — Verhalten unverändert,
+    nur die Quelle der Werte ist wieder einfach vorhanden.
+  * Das Audit-Event `STRATEGY_VERSION_CREATED` hatte keine Beschreibung im
+    UI-Katalog (`tests/auditView.test.ts`) und wäre im Dashboard als
+    „nicht hinterlegt“ gelandet. Es ist jetzt in `AUDIT_EVENT_CATALOG` beschrieben
+    (Template, Version-ID, Fingerprint, Ersteller) und ausdrücklich als
+    **Registrierung ohne Promotion oder Live-Freigabe** erklärt.
+* **Flaky Test in `tests/sessionRenewal.test.ts`** („renewSession braucht Double-Submit“):
+  der Negativfall „falscher CSRF-Header“ bildete den Wert als `csrf.slice(0, 63) + "0"`.
+  Der Token ist zufällig; endet er selbst auf `0` (1 von 16 Läufen), war der „falsche“
+  Wert der gültige, die Verlängerung gelang und die Suite schlug zufällig fehl. Die
+  letzte Stelle weicht jetzt garantiert ab (`assert.notEqual` prüft die Prämisse), und
+  ein neuer Test geht **alle 16** Hex-Endungen mit signierten Fixtures durch, statt auf
+  den Zufall zu warten. Nur Testcode: `src/lib/authSession.ts` und die Refresh-Route
+  bleiben unverändert.
+
+### Documentation
+
+* **Bekannte Code-Altlasten im Audit-Tracking** (`remediation/TRACKING.md`, Audit `v1.1.14`):
+  die drei mit `0.6.1` dokumentierten Altlasten (Klassenwerte als Literale, dreifaches
+  `VolatilityRegime`, `resolveDoc` ohne `docs/architecture/` und `docs/roadmap/`) stehen
+  jetzt dort, wo offene Arbeit geplant wird, und warten als **OP-6** auf die Entscheidung,
+  ob und wann sie als eigene Prompts folgen. Alle drei wurden gegen den aktuellen Stand
+  erneut geprüft; der in 04-02 hinzugekommene vierte Fall ist bereits behoben (siehe oben).
+  ADR-008 nennt genauer, wo die Klassenwerte stehen: auch der CHECK von `positions`
+  (`positions_strategy_class_check`) trägt sie, nicht nur der von `signal_decay_events`.
+* **Audit-Stand nachgezogen** (`v1.1.14`): `PR_SUMMARY.md` ist als Schnappschuss der
+  Audit-Übergabe gekennzeichnet und verweist auf Tracking und ADR-008…010; `report.md` §6
+  nennt die Phase-0-Fragen nicht mehr „offen“; die Audit-Indizes in `docs/README.md` und
+  `docs/audits/README.md` standen noch auf `v1.1.1`/`v1.1.2` und zeigen jetzt den
+  tatsächlichen Stand.
+* **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
+  und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
+  die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
 
 ## [0.8.0] — Strategie-Persistenz: Schemafundament (STX-04-01) (2026-10-01)
 
@@ -1420,7 +1464,7 @@ Risikoentscheidung, keine Zeile Code).
   alle „aktuellen“ Versionsverweise in der Dokumentation auf `v0.1.0`
   umgestellt. Historische Verweise auf die alte Zählung `v1.x.x` bleiben in
   Archiv-/Audit-Dokumenten erhalten und werden über die
-  [Versions-Zuordnung](#versionszuordnung-v0xx--v1xx) lesbar gemacht.
+  [Versions-Zuordnung](#versions-zuordnung-v0xx--v1xx) lesbar gemacht.
 - **Repository-Struktur konsolidiert:**
   - Doppeltes Testverzeichnis `test/` in `tests/` **zusammengeführt**
     (`tests/marketdata/`, `tests/integration/`, `tests/ops/`, `tests/ui/`,
@@ -1460,7 +1504,7 @@ Zusammenfassung der Beta-Entwicklung. Die **vollständigen, detailgetreuen
 Einträge** (mit Formeln, Migrations- und Rollback-Runbooks, Testmatrizen) stehen
 im Archiv: [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md).
 Klammer: interne Legacy-Nummer, auf die sich ältere Dokumente und Audit-Reports
-beziehen (siehe [Versions-Zuordnung](#versionszuordnung-v0xx--v1xx)).
+beziehen (siehe [Versions-Zuordnung](#versions-zuordnung-v0xx--v1xx)).
 
 ### Phase 1 — Fundament, Agenten-Zyklus & Paper-Trading (Frühe Beta, v1.0.0–v1.39.x)
 

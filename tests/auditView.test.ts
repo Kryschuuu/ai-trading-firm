@@ -474,6 +474,32 @@ test("Katalog: jedes im Code geschriebene Audit-Event ist lesbar beschrieben", (
   assert.deepEqual(missing, [], `Diese Audit-Events haben keine deutsche Beschreibung: ${missing.join(", ")}`);
 });
 
+test("STRATEGY_VERSION_CREATED: referenzierbares Artefakt, keine Promotion oder Live-Freigabe", () => {
+  const detail = {
+    action: "strategy_version_created",
+    templateId: "bollinger-squeeze",
+    versionId: "version-1",
+    fingerprint: "stc1:fixture-fingerprint",
+    createdBy: "researcher-1",
+  };
+  const view = describeAuditEntry(entry("STRATEGY_VERSION_CREATED", "INFO", detail), NOW);
+  assert.equal(view.eventLabel, "Strategieversion angelegt");
+  assert.equal(view.tone, "info");
+  assert.match(view.headline, /bollinger-squeeze · Version version-1/);
+  assert.match(view.eventDescription, /keine Promotion.*keine Freigabe für Live-Trading/);
+  assert.match(view.explanation, /identischer Retry.*bestehende Version/);
+  const facts = view.sections.flatMap((section) => section.facts);
+  for (const [label, value] of [
+    ["Template", detail.templateId],
+    ["Version-ID", detail.versionId],
+    ["Fingerprint", detail.fingerprint],
+    ["Erstellt durch", detail.createdBy],
+  ]) {
+    assert.equal(facts.find((fact) => fact.label === label)?.value, value);
+  }
+  assert.doesNotThrow(() => describeAuditEntry(entry("STRATEGY_VERSION_CREATED", "INFO", null), NOW));
+});
+
 test("GAP-04-Events (v1.51.1-Nachtrag): Sizing-UNKNOWN + Cluster-Exposure sind lesbar beschrieben", () => {
   // Regression: Mit v1.48.0 kamen vier Audit-Events ohne Katalog-Eintrag —
   // der Katalog-Wächter oben war seitdem rot, und die Guardrail-Entscheidungen

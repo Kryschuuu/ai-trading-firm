@@ -3511,6 +3511,30 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     ],
   },
 
+  STRATEGY_VERSION_CREATED: {
+    label: "Strategieversion angelegt",
+    category: "system",
+    expectedLevel: "INFO",
+    description:
+      "Der Strategie-Katalog hat ein unveränderliches Versionsartefakt gespeichert und mit einem Lifecycle-DRAFT verbunden. Das ist keine Promotion und keine Freigabe für Live-Trading.",
+    headline: (d) =>
+      [text(d.templateId) ?? "Strategie", text(d.versionId) ? `Version ${text(d.versionId)}` : "Version angelegt"]
+        .filter(Boolean)
+        .join(" · "),
+    explain: () =>
+      "Parameter und kompilierte Regel bleiben über Version-ID und Fingerprint referenzierbar. Ein identischer Retry verwendet die bestehende Version; Promotion erfordert separate Evidenz und Gates.",
+    sections: (d) => [
+      {
+        title: "Strategie-Artefakt",
+        facts: [
+          { label: "Template", value: text(d.templateId) ?? "—", mono: true },
+          { label: "Version-ID", value: text(d.versionId) ?? "—", mono: true },
+          { label: "Fingerprint", value: text(d.fingerprint) ?? "—", mono: true },
+          { label: "Erstellt durch", value: text(d.createdBy) ?? "—" },
+        ],
+      },
+    ],
+  },
   STRATEGY_LIFECYCLE_BOOTSTRAPPED: {
     label: "Strategy-Lifecycle gebootstrapt",
     category: "risk",

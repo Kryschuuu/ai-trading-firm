@@ -17,7 +17,7 @@
  */
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { resolveAuth } from "../src/auth/resolve";
 import { checkApiToken, resetRateLimiterForTests } from "../src/lib/apiAuth";
 import {
@@ -120,6 +120,15 @@ function withSession(token: string, csrf = "", extra: Record<string, string> = {
   headers.set("cookie", `${SESSION_COOKIE}=${token}`);
   if (csrf) headers.set("x-csrf-token", csrf);
   return new Request("https://localhost/api/auth/refresh", { method: "POST", headers });
+}
+
+/** Manipulierter Double-Submit-Wert für den CSRF-Negativfall. */
+function tamperCsrf(csrf: string): string {
+  // Der Zufallstoken endet in 1/16 der Läufe selbst auf "0": die letzte Stelle
+  // muss garantiert abweichen, sonst prüft der Negativfall den gültigen Wert.
+  const tampered = csrf.slice(0, -1) + (csrf.endsWith("0") ? "1" : "0");
+  assert.notEqual(tampered, csrf, "der manipulierte Wert muss sich vom gültigen unterscheiden");
+  return tampered;
 }
 
 // ── 1 · Cookie-Policy: Browser-Session statt Max-Age ────────────────────────
@@ -301,9 +310,35 @@ test("renewSession braucht Double-Submit: fehlender oder falscher Header ⇒ 403
   const env = { ...BASE, FIRM_SESSION_IDLE_TTL_S: "120" };
   const { issued } = issue(env, OPERATOR, now);
   const token = issued.sessionToken;
-  for (const csrf of ["", "falsch", issued.csrf.slice(0, 63) + "0"]) {
+  for (const csrf of ["", "falsch", tamperCsrf(issued.csrf)]) {
     const result = renewSession(withSession(token, csrf), env, now + 110_000);
     assert.ok(!result.ok, `CSRF '${csrf}' darf nicht verlängern`);
+    if (!result.ok) {
+      assert.equal(result.error, "CSRF_INVALID");
+      assert.equal(result.status, 403);
+    }
+  }
+});
+
+test("CSRF-Negativfall lehnt alle hexadezimalen Token-Endungen deterministisch ab", () => {
+  const now = Date.now();
+  const env = { ...BASE, FIRM_SESSION_IDLE_TTL_S: "120" };
+  const { issued, secret } = issue(env, OPERATOR, now);
+
+  // Gültige, mit dem Test-Secret signierte Fixtures: insbesondere das Ende "0"
+  // muss jedes Mal geprüft werden, nicht zufällig in 1/16 der Suite-Läufe.
+  for (const suffix of "0123456789abcdef") {
+    const csrf = "a".repeat(63) + suffix;
+    const payload = { ...decode(issued.sessionToken), csrf };
+    const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const signature = createHmac("sha256", secret).update(body).digest("base64url");
+    const token = `${body}.${signature}`;
+
+    const valid = renewSession(withSession(token, csrf), env, now + 110_000);
+    assert.ok(valid.ok && valid.renewed, `Fixture mit Ende '${suffix}' muss gültig sein`);
+
+    const result = renewSession(withSession(token, tamperCsrf(csrf)), env, now + 110_000);
+    assert.ok(!result.ok, `manipulierter CSRF mit Original-Ende '${suffix}' darf nicht verlängern`);
     if (!result.ok) {
       assert.equal(result.error, "CSRF_INVALID");
       assert.equal(result.status, 403);
