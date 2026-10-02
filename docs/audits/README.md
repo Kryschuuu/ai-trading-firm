@@ -50,7 +50,7 @@ docs/audits/
     ├── findings/
     ├── prompts/
     └── remediation/TRACKING.md
-└── 2026-09-29-strategy-template-ausbau/  # OPEN v1.1.14
+└── 2026-09-29-strategy-template-ausbau/  # OPEN v1.1.16
     ├── README.md
     ├── report.md          # Haupt-Audit (7 Abschnitte + Beta-Positionierung)
     ├── VERSIONING.md      # Audit-Version + Release-Plan v0.6.0 … v0.11.2

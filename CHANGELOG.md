@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.9.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -92,6 +92,79 @@ erlaubt, solange sie hier dokumentiert sind).
 * **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
   und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
   die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
+
+## [0.10.0] — Validator: deterministischer Annahmen-Audit (STX-06-01) (2026-10-02)
+
+> **Status: Beta, nicht produktionsreif.** Phase 6 (Validator) ist eröffnet:
+> `v0.10.0` liefert die **erste** der vier deterministischen Validator-Stufen
+> (06-01). Overfit-/Robustheits-Messung (06-02), Cost-Stress (06-03) und der
+> Report mit CLI (06-04) bleiben offen — für die vollständige Phase-6-Abnahme
+> sind sie erforderlich. Keine Metrik-Auswertung, kein LLM, kein Live-Pfad.
+
+### Added
+
+* **Deterministischer Annahmen-Audit** (`src/strategies/validator/assumptions.ts`,
+  STX-06-01): `auditAssumptions()` prüft, ob die deklarierten Annahmen eines
+  Templates (`StrategyTemplate.assumptions`) im konkreten Lauf **belegt** sind —
+  nicht, ob sie sinnvoll sind. Reine Funktion: keine IO, keine Uhr, keine DB,
+  ausschließlich injizierte `*Facts` (`BacktestRunFacts`, `CandleFacts`,
+  `RunConfigFacts`). Fehlende Fakten sind `UNKNOWN`, nie `HOLDS`.
+* **Elf Prüfungen mit fester Reihenfolge:** `FEE_NONZERO`, `SLIPPAGE_NONZERO`,
+  `SPREAD_MEASURED`, `DEPTH_SUFFICIENT`, `WARMUP_MET`, `TRADES_SUFFICIENT`,
+  `CAPS_RESPECTED`, `LEAKAGE_PROTECTED`, `INTRADAY_ONLY`,
+  `CHANGE_PCT_SEMANTICS` (die zehn Pflichtprüfungen des Prompts) plus
+  `FILLS_MODELLED` als begründete Ergänzung — die §3.4-Checkliste nennt
+  „instant fills", und ohne sie bliebe die Kategorie `EXECUTION` (bei vier der
+  sechs Templates **kritisch**) ungeprüft. Jede `evidence` enthält immer eine
+  Zahl, nie ein „vielleicht".
+* **`UNKNOWN` ist ein Ergebnis:** `TRADES_SUFFICIENT` liefert unter
+  `MC_MIN_SAMPLE_TRADES` (30) `UNKNOWN` und **niemals** `VIOLATED` — zu wenig
+  Stichprobe ist kein Gegenbeweis. Dasselbe gilt für jedes fehlende Faktum.
+* **`critical`-Regel und Drei-Werte-Urteil:** Eine kritische Template-Annahme
+  mit `VIOLATED` **oder** `UNKNOWN` macht das Gesamtergebnis zu `INCONCLUSIVE`
+  — ausdrücklich nicht zu `FAIL`. *Ein nicht prüfbarer Lauf ist kein Beweis
+  gegen die Strategie.* `FAIL` bleibt dem Fall vorbehalten, in dem eine
+  `BLOCKING`-Prüfung verletzt ist, ohne dass eine kritische Annahme betroffen
+  ist. Kritische Annahmen ohne Prüfungsbezug (heute: `REGIME`) stehen als Fakt
+  in `uncoveredCritical`, ohne den Status zu ändern.
+* **Metrik-Gate `assumptionGate()`:** drückt die Reihenfolge-Vorschrift des
+  Prompts in Code — 06-02/06-03/06-04 dürfen Metriken nur auswerten, wenn der
+  Audit `PASS` liefert. Ein Lauf mit verletzter Gebührenannahme hat keinen
+  informativen Sharpe.
+* **Konfigurierbare Schwellen mit harten Bounds**
+  (`maxMissingSpreadPct`/`maxMissingBookDepthPct` 20 %,
+  `minDepthToNotionalRatio` 1): Werte außerhalb werden **geworfen**, nicht
+  still geklemmt. Die übrigen Grenzen sind gelesene Code-Fakten statt zweiter
+  Wahrheiten (`MC_MIN_SAMPLE_TRADES`, `RULE_BACKTEST_TRADE_CAP` 200,
+  `RULE_BACKTEST_EQUITY_CAP` 120, `SUPPORTED_TIMEFRAME_MS`, `RULE_FIELD_LABELS`).
+* **38 Tests** (`tests/strategyValidation.assumptions.test.ts`): 1 HOLDS-Pfad,
+  17 `VIOLATED`-Pfade, 6 `UNKNOWN`-Pfade, die Verdict-/Mapping-Regeln,
+  Determinismus, Eingabe-Treue, Schwellen-Override und -Ablehnung, das Gate und
+  ein statischer IO-Wächter über den Modulquelltext. Keine DB, kein Netz, keine
+  Zeitabhängigkeit.
+
+### Documentation
+
+* **`docs/STRATEGY_VALIDATION.md`** (neu, im Doku-Index und im Katalog
+  `GET /api/docs` registriert): Auftrag, Fakten-Herkunft, Prüftabelle,
+  Verdict-Regeln, Schwellen, bewusst **nicht** geprüfte Annahmen (Funding,
+  Survivorship, Regime) und die fünf dokumentierten Abweichungen vom Prompt —
+  darunter `CAPS_RESPECTED` (der Prompt schreibt `CAPS_RESpected`) und
+  `INTRADAY_ONLY` auf `1h` als `WARNING` (`VWAP_PCT_RELIABLE_TIMEFRAMES` zählt
+  `1h` zur Intraday-Menge, der UTC-Anker trägt dort aber erst ab der zweiten
+  Kerze des Tages, STX-01).
+* **STX-14 bekommt seine Prüfung:** `changePct24h` in `requiredFields` oder in
+  der Regel ist jetzt ein `VIOLATED` mit `WARNING` — die periodenbasierte
+  Semantik (97 Perioden, nicht 24 h) wird aus `RULE_FIELD_LABELS` zitiert statt
+  nacherzählt. Keine Umrechnung, wie das Finding es verlangt.
+* **Audit-Tracking** (`v1.1.16`): 06-01 ist ☑, STX-14 hat seine Prüfung,
+  STX-17 bleibt bis 06-04 offen; Release-Plan und Versionshistorie nachgezogen.
+
+### Unverändert (Sperren des Prompts)
+
+* `montecarlo.ts`, `walkforward.ts`, `marketRegime.ts` — höchstens gelesen.
+* Keine LLM-Auswertung (06-05), keine Metrik-Auswertung (06-02/06-03).
+* Keine Erzeugung von Annahmen: geprüft werden ausschließlich die deklarierten.
 
 ## [0.9.0] — Screening: Matrix wird zu Jobs (STX-05-04) (2026-10-02)
 

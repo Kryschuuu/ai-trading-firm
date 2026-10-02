@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.9.0` |
+| **Version** | `v0.10.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-02 |
-| **Quellbasiert** | `package.json` (`version: "0.9.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.10.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -232,6 +232,23 @@ punkt-in-zeit und mit harter Kerzengrenze. `npm run screening` bedient es;
 Die Annahme von 05-04 steht unter dem Vorbehalt des verbindlichen Pilots
 (50 Zellen, > 1 Kernstunde ⇒ Ablehnung zugunsten von STX-12).
 
+`v0.10.0` eröffnet **Phase 6 (Validator)** mit dem deterministischen
+Annahmen-Audit (STX-06-01): `src/strategies/validator/assumptions.ts` prüft
+als reine Funktion über injizierte `*Facts`, ob die deklarierten Annahmen
+eines Templates (`StrategyTemplate.assumptions`) im konkreten Lauf belegt
+sind — elf Prüfungen in fester Reihenfolge (`FEE_NONZERO`,
+`SLIPPAGE_NONZERO`, `SPREAD_MEASURED`, `DEPTH_SUFFICIENT`, `WARMUP_MET`,
+`TRADES_SUFFICIENT`, `CAPS_RESPECTED`, `LEAKAGE_PROTECTED`,
+`INTRADAY_ONLY`, `CHANGE_PCT_SEMANTICS` plus `FILLS_MODELLED`), jede
+Evidenz mit Zahl. Unter 30 Trades (`MC_MIN_SAMPLE_TRADES`) liefert der
+Audit `UNKNOWN` statt `VIOLATED`; eine kritische Annahme mit `VIOLATED`
+**oder** `UNKNOWN` macht das Gesamtergebnis zu `INCONCLUSIVE`, nicht zu
+`FAIL` — ein nicht prüfbarer Lauf ist kein Beweis gegen die Strategie.
+`assumptionGate()` gibt Metriken (06-02/06-03) nur bei `PASS` frei.
+**Abgrenzung:** Overfit-/Robustheits-Messung, Cost-Stress und der Report
+mit CLI (06-02…06-04) fehlen noch; der Validator-Agent (06-05) ist der
+einzige Schritt mit LLM-Zugriff und bleibt offen.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -270,7 +287,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09); seit v0.7.6 vertraglich abgesichert über `tests/strategies.templates.test.ts` und dokumentiert in der generierten [`docs/STRATEGY_TEMPLATES.md`](docs/STRATEGY_TEMPLATES.md) (03-10) |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09); seit v0.7.6 vertraglich abgesichert über `tests/strategies.templates.test.ts` und dokumentiert in der generierten [`docs/STRATEGY_TEMPLATES.md`](docs/STRATEGY_TEMPLATES.md) (03-10); seit v0.10.0 `validator/assumptions.ts` — deterministischer Annahmen-Audit vor jeder Metrik-Auswertung ([`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md), STX-06-01) |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |

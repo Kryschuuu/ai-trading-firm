@@ -279,6 +279,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Strategy-Lifecycle & Driftgates",
     subtitle: "9-Zustands-Promotion Backtest↔Paper↔Live, immutable Evidence, Degrationsleiter, Order-Gate (RMA-P1-05, v1.73.0)",
   },
+  strategyValidation: {
+    file: "docs/STRATEGY_VALIDATION.md",
+    title: "Strategie-Validierung: Annahmen-Audit",
+    subtitle: "Elf deterministische Prüfungen vor jeder Metrik: UNKNOWN statt Scheingenauigkeit, critical ⇒ INCONCLUSIVE statt FAIL, Gate assumptionGate() (STX-06-01, v0.10.0)",
+  },
   paperTrading: {
     file: "docs/PAPER_TRADING.md",
     title: "Paper-Market-Data",

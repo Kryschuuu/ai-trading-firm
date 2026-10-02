@@ -2,9 +2,11 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-10-02 · **Phase 4 begonnen:** 04-01 (`v0.8.0`) ergänzt Migration + Drizzle-Schema für `strategy_definitions`/`strategy_versions`; App-Service, Lifecycle-Bridging und tatsächliche Schreib-/Lesepfade bleiben 04-02 vorbehalten · **Phase 3 abgeschlossen:** 03-09 (`v0.7.5`) schließt die Sanitize-Kette (`buildRule` → `sanitizeRuleSpec` → `RuleSpec`) und behebt **STX-05**; 03-10 (`v0.7.6`) liefert die Template-Vertragstests (60 Tests) und die generierte Doku `docs/STRATEGY_TEMPLATES.md` — **Gate G3 erfüllt** · **Template-Reihe vollständig:** 03-01/03-02 (`v0.7.0`), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`) abgeschlossen — sechs von sechs Templates gebaut · 02-01 (`v0.6.3`), 02-02 (`v0.6.4`) und 02-03 (`v0.6.5`) abgeschlossen (offen nur der optionale Slice 02-04) · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
+- **Stand:** 2026-10-02 · **Phase 6 begonnen:** 06-01 (`v0.10.0`) liefert den deterministischen Annahmen-Audit (`src/strategies/validator/assumptions.ts`) als Gate vor jeder Metrik-Auswertung; 06-02…06-05 bleiben offen · **Phase 4 begonnen:** 04-01 (`v0.8.0`) ergänzt Migration + Drizzle-Schema für `strategy_definitions`/`strategy_versions`; App-Service, Lifecycle-Bridging und tatsächliche Schreib-/Lesepfade bleiben 04-02 vorbehalten · **Phase 3 abgeschlossen:** 03-09 (`v0.7.5`) schließt die Sanitize-Kette (`buildRule` → `sanitizeRuleSpec` → `RuleSpec`) und behebt **STX-05**; 03-10 (`v0.7.6`) liefert die Template-Vertragstests (60 Tests) und die generierte Doku `docs/STRATEGY_TEMPLATES.md` — **Gate G3 erfüllt** · **Template-Reihe vollständig:** 03-01/03-02 (`v0.7.0`), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`) abgeschlossen — sechs von sechs Templates gebaut · 02-01 (`v0.6.3`), 02-02 (`v0.6.4`) und 02-03 (`v0.6.5`) abgeschlossen (offen nur der optionale Slice 02-04) · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 **Nachtrag 05-03 (2026-10-01):** Eigene Screening-Run-/Zelltabellen, transaktionale `ssr1:`-/`ssm1:`-Idempotenz, Pflicht-Strategieversions-FK, optionale Backtests, immutable Prioritäten, monotone Fortschritte und bounded Reads sind implementiert. DB-Tests beweisen SQL-/Drizzle-Parität; Runner/CLI bleiben 05-04 vorbehalten. [Runbook + Rollback](../../../STRATEGY_SCREENING.md).
+
+**Nachtrag 06-01 (2026-10-02, `v0.10.0`):** Der deterministische Annahmen-Audit ist umgesetzt — elf reine Prüfungen über injizierte `*Facts` (keine IO, keine Uhr, keine DB), `UNKNOWN` statt Scheingenauigkeit unter 30 Trades, `critical: true` + `VIOLATED`/`UNKNOWN` ⇒ Gesamt-Status `INCONCLUSIVE` (nie `FAIL`), `assumptionGate()` als ausdrückliche Reihenfolge-Naht vor 06-02/06-03. 38 Tests, darunter ein statischer IO-Wächter über den Modulquelltext. STX-14 hat damit seine Prüfung; STX-17 bleibt bis 06-04 offen. [Doku](../../../STRATEGY_VALIDATION.md).
 
 **Nachtrag 05-04 (2026-10-02, `v0.9.0`):** Runner (`runScreening()`), Backtest-Job-Adapter (`runMultiAssetBacktest()` als einziger Engine-Pfad) und CLI (`npm run screening`, `--dry-run` Default) sind umgesetzt und mit 38 Tests belegt — harte `maxCells`, Caps ⇒ `BLOCKED` statt Kappung, bounded Concurrency ohne `worker_threads`, bounded Telemetrie, Abbruch ⇒ `ABORTED` mit Fortsetzung über `--run-id`. `backtest_run_id` bleibt bewusst `null` (Naht: `persist`-Hook im Adapter). Die Annahme von 05-04 steht unter dem Vorbehalt des verbindlichen Pilots (50 Zellen) — [Pilot-Runbook](SCREENING-PILOT.md).
 
@@ -31,10 +33,10 @@
 | STX-11 Cost-Stress existiert | MEDIUM | ◐ | 00-02 ☑ (Doku, `v0.6.1`) → 06-03 (Andocken) |
 | STX-12 `backtestRule` O(n²) | MEDIUM | ◐ | 00-01 (Messung ✓, `v0.6.0`) → Screening umgeht den Pfad seit 05-04 (`v0.9.0`, `runMultiAssetBacktest()`); Folge-Patch mit Paritätstest für die Altpfade |
 | STX-13 OpenCode-Free-Tier | LOW | ☐ | 06-05 |
-| STX-14 `changePct24h`-Semantik | LOW | ☐ | 03-01 (Doku) → 06-01 (Prüfung) |
+| STX-14 `changePct24h`-Semantik | LOW | ◐ | 03-01 ☑ (Doku) → 06-01 ☑ (`v0.10.0`, Prüfung `CHANGE_PCT_SEMANTICS`: Nutzung ⇒ `VIOLATED` mit `WARNING`, Semantik aus `RULE_FIELD_LABELS`); offen bleibt die Feld-Deprekation (`changePctBars`) als eigenes Versionsereignis |
 | STX-15 Faktorzahl (14 ≠ 15+) | LOW | ☑ | 00-02 (`v0.6.1`) |
 | STX-16 Copy-Compliance | LOW | ☐ | 07-01 → 07-02 (`SIMULATE_ONLY`) |
-| STX-17 Validator kompatibel | INFO | ☐ | bestätigt — 06-04 |
+| STX-17 Validator kompatibel | INFO | ◐ | bestätigt — 06-01 ☑ (`v0.10.0`, deterministischer Annahmen-Audit) → 06-02/06-04 |
 | STX-18 `RuleSpec` trägt 5/7 Templates | INFO | ☑ | bestätigt und abgeschlossen — Bollinger 02-02 ☑ (`v0.6.4`), Donchian 02-03 ☑ (`v0.6.5`); Templates 03-03 ☑ (`v0.7.1`), 03-04 ☑ (`v0.7.2`), 03-05 ☑ (`v0.7.3`), 03-06/03-07/03-08 ☑ (`v0.7.4`) — alle sechs gebaut; Compiler-Abnahme 03-09 ☑ (`v0.7.5`, sechs Templates ohne Klemmung durch den Sicherheitspfad); Vertragstests 03-10 ☑ (`v0.7.6`, `tests/strategies.templates.test.ts`) |
 | STX-19 Kafka-Einwand | INFO | ☐ | bestätigt — global gesperrt |
 
@@ -98,7 +100,7 @@
 
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
-| 06-01 | [Annahmen-Audit](../prompts/PROMPT-STX-06-01-assumptions-audit.md) | ☐ | STX-17 | — |
+| 06-01 | [Annahmen-Audit](../prompts/PROMPT-STX-06-01-assumptions-audit.md) | ☑ | STX-14/17 | `v0.10.0` ([Doku](../../../STRATEGY_VALIDATION.md)) |
 | 06-02 | [Overfit & Robustheit](../prompts/PROMPT-STX-06-02-overfit.md) | ☐ | STX-17 | — |
 | 06-03 | [Cost-Stress-Runner](../prompts/PROMPT-STX-06-03-cost-stress.md) | ☐ | STX-11 | — |
 | 06-04 | [Report + Evidence + CLI](../prompts/PROMPT-STX-06-04-validation-report.md) | ☐ | STX-17 | — |
