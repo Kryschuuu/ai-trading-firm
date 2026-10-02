@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — BETA (v0.x), nicht produktionsreif. Local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude. Educational purposes only, use at your own risk.",
   "license": "GPL-3.0-only",
   "private": true,
@@ -38,6 +38,7 @@
     "reconcile": "node --import tsx scripts/reconcile.ts",
     "backtest": "node --import tsx scripts/run-backtest.ts",
     "screening": "node --import tsx scripts/run-screening.ts",
+    "validate:strategy": "node --import tsx scripts/run-validate-strategy.ts",
     "bench:backtest": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx scripts/bench-backtest.ts",
     "montecarlo": "node --import tsx scripts/run-montecarlo.ts",
     "test:coverage:controlplane": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test --experimental-test-coverage --test-coverage-include='src/brokers/control-plane/**' --test-coverage-include='src/app/api/brokers/**' 'tests/secretStore.test.ts' 'tests/controlPlane.*.test.ts'",
