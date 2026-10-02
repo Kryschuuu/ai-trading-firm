@@ -1,21 +1,24 @@
 # Strategie-Validierung — Annahmen-Audit, Overfit-Auswertung & Cost-Stress-Runner
 
-> **Stand:** `v0.10.3` ·
+> **Stand:** `v0.10.4` ·
 > **Module:** [`assumptions.ts`](../src/strategies/validator/assumptions.ts) (Teil 1, STX-06-01) ·
 > [`overfit.ts`](../src/strategies/validator/overfit.ts) (Teil 2, STX-06-02) ·
 > [`stress.ts`](../src/strategies/validator/stress.ts) (Teil 3, STX-06-03) ·
 > [`report.ts`](../src/strategies/validator/report.ts) + [`persist.ts`](../src/strategies/validator/persist.ts) (Teil 4, STX-06-04) ·
+> [`agent.ts`](../src/strategies/validator/agent.ts) + [`agentPrompt.ts`](../src/strategies/validator/agentPrompt.ts) (Teil 5, STX-06-05; erklärend, kein Write-Pfad) ·
 > **Tests:** [`tests/strategyValidation.assumptions.test.ts`](../tests/strategyValidation.assumptions.test.ts) (38) ·
 > [`tests/strategyValidation.overfit.test.ts`](../tests/strategyValidation.overfit.test.ts) (39) ·
 > [`tests/strategyValidation.stress.test.ts`](../tests/strategyValidation.stress.test.ts) (22) ·
 > [`tests/strategyValidation.report.test.ts`](../tests/strategyValidation.report.test.ts) (32) ·
 > [`tests/strategyValidation.persist.test.ts`](../tests/strategyValidation.persist.test.ts) (6) ·
+> [`tests/strategyValidation.agent.test.ts`](../tests/strategyValidation.agent.test.ts) (STX-06-05) ·
 > **CLI:** `npm run validate:strategy` ([`scripts/run-validate-strategy.ts`](../scripts/run-validate-strategy.ts)) ·
 > **Prompts:** [STX-06-01](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-01-assumptions-audit.md),
 > [STX-06-02](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-02-overfit.md),
 > [STX-06-03](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-03-cost-stress.md),
-> [STX-06-04](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-04-validation-report.md) ·
-> **Findings:** [STX-17](audits/2026-09-29-strategy-template-ausbau/findings/STX-17-info-validator-agent-kompatibel.md),
+> [STX-06-04](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-04-validation-report.md),
+> [STX-06-05](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-05-validator-agent.md) ·
+> **Findings:** [STX-13](audits/2026-09-29-strategy-template-ausbau/findings/STX-13-opencode-free-tier.md), [STX-17](audits/2026-09-29-strategy-template-ausbau/findings/STX-17-info-validator-agent-kompatibel.md),
 > [STX-01](audits/2026-09-29-strategy-template-ausbau/findings/STX-01-rule-timeframe-blocker.md),
 > [STX-14](audits/2026-09-29-strategy-template-ausbau/findings/STX-14-changepct24h-semantik.md),
 > [STX-11](audits/2026-09-29-strategy-template-ausbau/findings/STX-11-cost-stress-existiert.md)
@@ -274,7 +277,7 @@ Es werden **keine** Annahmen erzeugt — nur die deklarierten geprüft.
 | 06-02 Overfit & Robustheit | Plateau, IS/OOS-Lücke, Multiplizität, Holdout-Integrität | **umgesetzt** in [`overfit.ts`](../src/strategies/validator/overfit.ts) (Teil 2) — läuft **nach** dem Gate |
 | 06-03 Cost-Stress | `feeMultiplier`/`slippageMultiplier` | läuft **nach** dem Gate — ein Kostenstress auf einen Lauf ohne Kosten ist sinnlos |
 | 06-04 Report + CLI | bündelt alles, persistiert Evidence | konsumiert `AssumptionAudit` unverändert |
-| 06-05 Validator-Agent (LLM) | erklärt nur | schreibt ausschließlich `detail jsonb`, nie `result` |
+| 06-05 Validator-Agent (LLM) | erklärt nur | `agent.ts` liefert ein schema-validiertes `AgentInterpretation`; kein Zugriff auf den Evidence-Writer und nie ein `result`-Schreibpfad. Die Persistenzentscheidung bleibt beim Aufrufer. |
 
 Gesperrt bleiben: `montecarlo.ts`, `walkforward.ts`, `marketRegime.ts`
 (hier höchstens gelesen).
@@ -840,7 +843,7 @@ DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test node --import tsx --test t
 - **Hash/Guard:** Report-Hash ist stabil, Manipulation eines Feldes lässt
   `assertReportHashIntegrity`/`writeValidationEvidence` scheitern; statische
   Quelltext-Wächter (kein `Date.now`/`new Date`/Zufall/`@/db` in `report.ts`,
-  kein `requestTransition(`-Aufruf in allen sechs Validator-Modulen).
+  kein `requestTransition(`-Aufruf in den sechs deterministischen Validator-Modulen aus 06-01 bis 06-04).
 
 `tests/strategyValidation.persist.test.ts` (6 Fälle, echtes PostgreSQL): genau
 eine Evidenz-Zeile, `created true → false` beim Retry, parallele Schreiber
@@ -848,3 +851,57 @@ deduplizieren über UNIQUE, `content_hash`/`idempotency_key`/Zeitsemantik/
 `sample_size`/Metriken stimmen, `availability`-CHECK hält, `INCONCLUSIVE` wird
 ebenfalls geschrieben, und weder `strategy_lifecycle_transitions` noch
 `strategy_lifecycle_states` erhalten eine Zeile (kein `requestTransition`).
+
+## 31. Agent: Grenzen (STX-06-05)
+
+`runValidatorAgent(report)` aus [`agent.ts`](../src/strategies/validator/agent.ts)
+liest ausschließlich den bereits gebauten `StrategyValidationReport`. Die
+Funktion erzeugt eine **Allowlist-Projektion** aus aggregierten Metriken,
+Robustheits-/Overfit-Werten, Regime-Zählern, Annahmen- und Gate-Status. Sie
+kopiert weder `notes` noch Roh-Kerzen, Trade-Logs, Identitäts-Hashes oder
+sonstige Zusatzfelder. Die Projektion und das feste Ausgabeschema liegen unter
+[`agentPrompt.ts`](../src/strategies/validator/agentPrompt.ts); der Report wird
+als JSON im gekennzeichneten
+`<UNTRUSTED_VALIDATION_REPORT_DATA_JSON>`-Block übertragen. Tag-Zeichen in
+Datenwerten werden escaped.
+
+- **Kein Urteil:** Das Eingabe-`result` ist nur Lese-Kontext. Die Rückgabe
+  enthält kein `result`; es gibt weder einen Evidence-Writer- noch einen
+  Lifecycle-Schreibpfad. Provider-Ausfall liefert ausschließlich
+  `{ unavailable: true }` und lässt den Report unangetastet. Das erzeugt
+  insbesondere kein `INCONCLUSIVE`.
+- **Injection-Grenze:** `notes`, optionale `rationale`/`assumption.statement`
+  und Evidenztexte gelten als `UNTRUSTED DATA`. `notes` werden nicht versendet;
+  erkannte Grenz-Overrides blockieren den Modellaufruf und erzeugen ein
+  `INJECTION_ATTEMPT`-Finding ohne Übernahme des Freitexts.
+- **Schema:** Ausgabe wird als JSON geparst und gegen ein geschlossenes
+  Schema geprüft. Code-Felder, Schweregrade, Textlängen, Arraygrößen und
+  `evidenceRef` werden begrenzt. Parse-/Schemafehler ergeben
+  `{ unavailable: true }` mit `schema_error`; es gibt keinen Freitext-Fallback.
+  Der vollständige Report-Prompt ist hart auf < 8 KiB gedeckelt.
+- **Routing-Policy-Flags:** `VALIDATOR_AGENT_ROUTING_POLICY` ist standardmäßig
+  `LOCAL_FREE` (Ollama und lokaler OpenAI-kompatibler Endpoint/LM Studio).
+  Diese Route benutzt keine Cloud-Provider, auch nicht als Fallback. Der
+  Operator kann explizit `OPENCODE_FREE` setzen: OpenCode wird, sofern
+  konfiguriert und freigegeben, best-effort zuerst versucht; bei Ausfall wird
+  lokal weitergesucht. Es gibt keine Zusage für ein bestimmtes Free-Modell oder
+  dessen dauerhafte Verfügbarkeit. Provider-Schalter bleiben wirksam.
+- **Shadow-Default:** `VALIDATOR_AGENT_SHADOW` ist standardmäßig `true`.
+  `loadValidatorAgentConfig()` stellt den Modus für den Aufrufer bereit; die
+  Agent-Funktion kann selbst keine Workflow-Aktion auslösen. `false` muss
+  bewusst gesetzt werden und verleiht dem Agenten weiterhin keine Autorität
+  über `result`.
+- **Persistenz bleibt beim Aufrufer:** `AgentInterpretation` ist ein separater
+  Rückgabewert, den ein aufrufender Persistenzpfad bei Bedarf in `detail jsonb`
+  aufnehmen kann. `persist.ts` (06-04) wurde in diesem Paket nicht verändert;
+  dieser Abschnitt behauptet daher keine automatische Speicherung oder
+  Workflow-Verdrahtung.
+- **Telemetrie:** `validator_agent_runs_total{result}` zählt ausschließlich
+  die festen Labels `ok`, `unavailable`, `schema_error` und `blocked`.
+  Provider-Fehler und Modelltexte werden nie als Labels verwendet.
+
+Gezielte Sicherheitsprüfungen (ohne den Gesamtlauf `npm test`):
+
+```bash
+node --import tsx --test tests/strategyValidation.agent.test.ts
+```

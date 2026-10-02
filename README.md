@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.10.3 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.10.4 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.10.3** (Beta, 2026-10-02; Baseline war v0.1.0) |
+| Version | **v0.10.4** (Beta, 2026-10-02; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -113,6 +113,13 @@ ausgeschlossen (kein `RANGE`-Fallback). `writeValidationEvidence()` schreibt
 idempotent über `recordEvidence()` — der Validator **promoviert nie**; die CLI
 `npm run validate:strategy` endet nur bei `PASS` mit Exit 0
 ([`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md) Teil 4).
+Seit **v0.10.4** liefert `runValidatorAgent()` (STX-06-05) eine getrennte,
+streng schema-geprüfte Interpretation aus einer allowlisteten Aggregatprojektion.
+`notes`, Roh-Kerzen und Trade-Logs gehen nicht an den Provider; erkannte
+Prompt-Boundary-Overrides werden geblockt. Der Agent ändert weder `result` noch
+Evidenz. Die Interpretation wird by-value zurückgegeben; eine automatische
+Speicherung in `detail jsonb` ist bewusst nicht verdrahtet. Details und Grenzen:
+[`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md) Teil 5.
 
 ## Voraussetzungen
 
@@ -255,13 +262,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.10.3, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.10.4, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.10.3), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.10.4), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)
