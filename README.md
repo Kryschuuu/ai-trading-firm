@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.10.1** (Beta, 2026-10-02; Baseline war v0.1.0) |
+| Version | **v0.10.3** (Beta, 2026-10-02; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -101,6 +101,18 @@ Kandidaten und blockiert ab 21, und `holdoutIntegrity()` prüft, ob der Holdout
 wirklich unberührt ist (`CONTAMINATED` ⇒ `INCONCLUSIVE`). Reine Funktionen,
 keine IO, keine Uhr; fehlende Tabellen sind `UNKNOWN` mit Grund — nie
 „robust, weil nur ein Kandidat geprüft wurde“.
+Seit **v0.10.3** bündelt `src/strategies/validator/report.ts` (STX-06-04) die
+drei Vorstufen in **einem** Urteil: `PASS | FAIL | INCONCLUSIVE` über die
+achtstufige Kette (`ASSUMPTIONS → HOLDOUT_INTEGRITY → DATA_SUFFICIENCY →
+OOS_POLICY_GATES → TRAIN_OOS_GAP_AND_PLATEAU → COST_STRESS →
+MULTIPLE_TESTING → FINAL`). Die erste Stufe ohne `PASS` entscheidet, alle
+späteren stehen als `SKIPPED` im Protokoll — kein Score, keine Gewichtung;
+`PASS` nur, wenn alle sieben Prüfstufen bestanden sind. Die Regime-Aggregation
+ist point-in-time (ADR-009), `UNKNOWN`/Trades ohne Snapshot werden gezählt
+ausgeschlossen (kein `RANGE`-Fallback). `writeValidationEvidence()` schreibt
+idempotent über `recordEvidence()` — der Validator **promoviert nie**; die CLI
+`npm run validate:strategy` endet nur bei `PASS` mit Exit 0
+([`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md) Teil 4).
 
 ## Voraussetzungen
 
@@ -243,13 +255,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.10.1, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.10.3, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.10.1), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.10.3), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)
