@@ -4,7 +4,7 @@
 - **Severity:** INFO
 - **Bereich:** Strategy-Lifecycle / Validierung
 - **Quelle:** Ausbaudokument §3.1–3.7
-- **Status:** OPEN (bestätigend)
+- **Status:** CLOSED (bestätigend) — umgesetzt mit 06-01…06-04, abgeschlossen `v0.10.3`
 
 ## Befund
 
@@ -39,6 +39,20 @@ Kein neuer Evidenz-Typ, keine neue Ergebnisspalte.
 
 ## Akzeptanzkriterien
 
-- [ ] `StrategyValidationReport.result` ist typseitig an
-      `LifecycleEvidenceKind`-Ergebnisse gebunden
-- [ ] Kein Weg, auf dem ein LLM direkt einen Lifecycle-Transition auslöst
+- [x] `StrategyValidationReport.result` ist typseitig an
+      `LifecycleEvidenceKind`-Ergebnisse gebunden — `VALIDATION_RESULTS = ["PASS", "FAIL", "INCONCLUSIVE"]`
+      (`src/strategies/validator/report.ts`), laufzeitseitig über `assertValidationResult()`
+      abgesichert; `writeValidationEvidence()` schreibt über `recordEvidence()` in
+      `strategy_lifecycle_evidence` (CHECK `result IN ('PASS','FAIL','INCONCLUSIVE')`, `v0.10.3`)
+- [x] Kein Weg, auf dem ein LLM direkt einen Lifecycle-Transition auslöst — kein
+      `requestTransition(`-Aufruf in `src/strategies/validator/**` (statischer
+      Quelltext-Wächter in `tests/strategyValidation.report.test.ts`); 06-05 darf
+      ausschließlich `detail jsonb` ergänzen
+
+## Nachweis (06-04, `v0.10.3`)
+
+`report.ts` und `persist.ts` bestätigen den Befund praktisch: Der Report trägt
+`result`, `metrics`, `assumptions` und die Hashfelder, die `recordEvidence()`
+erwartet; die Evidenz-Zeile `kind = "BACKTEST_RUN"` entsteht ohne Schema-Änderung
+über den bestehenden Schreibpfad, und `strategy_lifecycle_transitions` bleibt
+durch den Validator leer (Test `strategyValidation.persist.test.ts`).

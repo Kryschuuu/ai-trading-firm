@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.18` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.19` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 begonnen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04…06-05 offen) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 begonnen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04 Report + Gate-Kette + Evidence-Writer + CLI `v0.10.3`, STX-17 geschlossen; nur 06-05 offen) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -48,6 +48,7 @@
 | `v1.1.16` | 2026-10-02 | 06-01 umgesetzt (`v0.10.0`): deterministischer Annahmen-Audit `src/strategies/validator/assumptions.ts` (elf Prüfungen, `UNKNOWN` statt Scheingenauigkeit, `critical` ⇒ `INCONCLUSIVE`, `assumptionGate()` vor 06-02/06-03) + 38 Tests + [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); STX-14 bekommt seine Prüfung, STX-17 bleibt bis 06-04 offen |
 | `v1.1.17` | 2026-10-02 | 06-02 umgesetzt (`v0.10.1`): Overfit- & Robustheitsauswertung `src/strategies/validator/overfit.ts` (Plateau-`robustShare`, IS/OOS-Lücke mit `BROKEN`/`SUSPECT`, Multiple-Testing-Warnung bis `BLOCKING` ab 21 Kandidaten, Holdout-Integrität `CLEAN`/`CONTAMINATED`/`UNKNOWN`) + 39 Tests + Teil 2 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); STX-17 bleibt bis 06-04 in Arbeit; 06-05-Planung von `v0.10.1` auf `v0.10.4` verschoben (06-02/06-03/06-04 ziehen als eigene Releases vor) |
 | `v1.1.18` | 2026-10-02 | 06-03 umgesetzt (`v0.10.2`): Cost- & Slippage-Stress-Runner `src/strategies/validator/stress.ts` (`COST_STRESS_SCENARIOS` 1×/2×/3× und 5/10/20 bp, `runInEngineStress()`, `summarizeStressSweep()` mit `degradationRatio` und linearer Interpolation von `breakevenMultiplier`, `runPostHocStress()` als Durchreiche an `runMonteCarloSimulation()`, `maxRuns = 45` / `--max-runs`) + 22 Tests + Teil 3 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); **STX-11 behoben** |
+| `v1.1.19` | 2026-10-02 | 06-04 umgesetzt (`v0.10.3`): Report + achtstufige Gate-Kette + Regime-Aggregation `src/strategies/validator/report.ts` (`VALIDATION_RESULTS`, `aggregateRegimeTrades()` point-in-time ohne `UNKNOWN`/`RANGE`-Fallback, `buildValidationReport()`, `assertReportHashIntegrity()`) und Evidence-Writer `persist.ts` (`recordEvidence()`, kein `requestTransition`), CLI `npm run validate:strategy` (`scripts/run-validate-strategy.ts`); `PROMOTION_POLICY_BOUNDS.validationMinPlateauShare` ergänzt; 32 + 6 Tests + Teil 4 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); **STX-17 geschlossen**, STX-03 abgeschlossen |
 
 ## 2. Release-Plan der Roadmap
 
@@ -75,7 +76,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.10.0` | Validator deterministisch, Stufe 1: Annahmen-Audit — ausgeliefert 2026-10-02 | 06-01 | Minor | **Beta — Overfit/Stress/Report offen** |
 | `v0.10.1` | Validator deterministisch, Stufe 2: Plateau, IS/OOS-Lücke, Multiple Testing, Holdout-Integrität — ausgeliefert 2026-10-02 | 06-02 | Minor (neues Modul) | **Beta — Stress/Report offen** |
 | `v0.10.2` | Validator deterministisch, Stufe 3: Cost- & Slippage-Stress-Runner — ausgeliefert 2026-10-02 | 06-03 | Minor (neues Modul) | **Beta — Report offen** |
-| `v0.10.3` | Validator-Report + Evidence-Writer + CLI — geplant | 06-04 | Minor | **Beta** |
+| `v0.10.3` | Validator-Report + Evidence-Writer + CLI — ausgeliefert 2026-10-02 | 06-04 | Minor | **Beta — nur Agent (06-05) offen** |
 | `v0.10.4` | Validator-Agent (Shadow-Mode, erklärt nur) — geplant | 06-05 | Minor | **Beta** |
 | `v0.11.0` | Copy-Domänenmodell (rein) | 07-01 | Minor | **Beta** |
 | `v0.11.1` | Copy-Policy + Order-Links (`SIMULATE_ONLY`) | 07-02 | Minor | **Beta** |

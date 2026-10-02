@@ -1,15 +1,20 @@
 # Strategie-Validierung — Annahmen-Audit, Overfit-Auswertung & Cost-Stress-Runner
 
-> **Stand:** `v0.10.2` ·
+> **Stand:** `v0.10.3` ·
 > **Module:** [`assumptions.ts`](../src/strategies/validator/assumptions.ts) (Teil 1, STX-06-01) ·
 > [`overfit.ts`](../src/strategies/validator/overfit.ts) (Teil 2, STX-06-02) ·
 > [`stress.ts`](../src/strategies/validator/stress.ts) (Teil 3, STX-06-03) ·
+> [`report.ts`](../src/strategies/validator/report.ts) + [`persist.ts`](../src/strategies/validator/persist.ts) (Teil 4, STX-06-04) ·
 > **Tests:** [`tests/strategyValidation.assumptions.test.ts`](../tests/strategyValidation.assumptions.test.ts) (38) ·
 > [`tests/strategyValidation.overfit.test.ts`](../tests/strategyValidation.overfit.test.ts) (39) ·
 > [`tests/strategyValidation.stress.test.ts`](../tests/strategyValidation.stress.test.ts) (22) ·
+> [`tests/strategyValidation.report.test.ts`](../tests/strategyValidation.report.test.ts) (32) ·
+> [`tests/strategyValidation.persist.test.ts`](../tests/strategyValidation.persist.test.ts) (6) ·
+> **CLI:** `npm run validate:strategy` ([`scripts/run-validate-strategy.ts`](../scripts/run-validate-strategy.ts)) ·
 > **Prompts:** [STX-06-01](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-01-assumptions-audit.md),
 > [STX-06-02](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-02-overfit.md),
-> [STX-06-03](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-03-cost-stress.md) ·
+> [STX-06-03](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-03-cost-stress.md),
+> [STX-06-04](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-04-validation-report.md) ·
 > **Findings:** [STX-17](audits/2026-09-29-strategy-template-ausbau/findings/STX-17-info-validator-agent-kompatibel.md),
 > [STX-01](audits/2026-09-29-strategy-template-ausbau/findings/STX-01-rule-timeframe-blocker.md),
 > [STX-14](audits/2026-09-29-strategy-template-ausbau/findings/STX-14-changepct24h-semantik.md),
@@ -636,3 +641,210 @@ node --import tsx --test tests/strategyValidation.stress.test.ts
   von `WalkForwardTradeRecord[]` und strikte Trennung von `inEngine` und `postHoc`
   in `buildStressReport`.
 
+
+## 24. Ein Report, drei Urteile — `StrategyValidationReport` (Teil 4)
+
+Teil 1–3 stellen drei methodische Fragen; **Teil 4 (STX-06-04) führt sie in
+genau eine Entscheidung zusammen und legt sie als Evidenz ab.** Der Report ist
+reine Ausgabe — keine Gewichtung, kein Score, kein „knapp bestanden":
+
+```ts
+export const VALIDATION_RESULTS = ["PASS", "FAIL", "INCONCLUSIVE"] as const;
+export type ValidationResult = (typeof VALIDATION_RESULTS)[number];
+```
+
+`buildValidationReport()` ist **rein** (keine Uhr, keine DB, kein Zufall) und
+liefert den vollständigen, tief gefrorenen Bericht. Die vom Prompt geforderte
+Form bleibt vollständig erhalten:
+
+| Feld | Bedeutung |
+| --- | --- |
+| `result` | `PASS` \| `FAIL` \| `INCONCLUSIVE` — Ergebnis der Kette, laufzeitseitig geprüft (`assertValidationResult`). |
+| `strategyKey`, `strategyVersion`, `strategyVersionId`, `templateId`, `templateVersion`, `class` | Identität und Provenienz des geprüften Stands (`StrategyClassKey`). |
+| `metrics` | `sharpe`, `sortino`, `maxDrawdownPct`, `winRate`, `profitFactor`, `expectancy`, `netPnl` (`number \| null`) und `tradeCount` (`number`) — nie `NaN`/`Infinity`. |
+| `robustness` | `parameterSensitivity` (= `1 − robustShare`), `costStress` (= `degradationRatio`), `slippageStress` (= Sharpe(3×)/Sharpe(2×), `null` statt Division durch 0), `regimeStability`. |
+| `overfitting` | `trainOosGap`, `parameterFragility` (= `1 − selectionStability`), `multipleTestingWarning`, `lookaheadWarning`, `holdoutIntegrity` (`CLEAN` \| `CONTAMINATED` \| `UNKNOWN`). |
+| `assumptions` | `{ id, status, evidence }[]` — die Prüfungen des Audits, unverändert durchgereicht. |
+| `regimes` | `{ regime, trades, sharpe }[]` — siehe § 27. |
+| `notes` | Freitext **nur für Menschen**; nie maschinell ausgewertet. |
+| `evidenceHash`, `idempotencyKey` | `sle1:<sha256>` aus `evidenceContentHash()` bzw. `slei1:<sha256>` aus `evidenceIdempotencyKey()` (`strategyLifecycle/evidence.ts`) — **keine eigene Hashfunktion**. |
+| `policyVersion`, `codeVersion`, `dataVersion` | `slp1:<sha256>` der Policy, `APP_VERSION`, Datenstand (oder `null`). |
+| `eventTime`, `availableAt`, `computedAt` | Zeit-Semantik der Evidenz-Zeile; `buildValidationReport` erzwingt `eventTime ≤ availableAt ≤ computedAt` (DB-CHECK). `computedAt` ist **nie** ein Zulässigkeitskriterium. |
+
+Additiv (Prompt-Form bleibt erhalten): `schemaVersion: "svr1"`, `windowStart`/`windowEnd`,
+`backtestRunId`, `symbol`, `timeframe`, `dataQualityScore`, `gates[]`
+(`{ id, step, status, evidence }` — auch die übersprungenen), `regimeEvidence`
+(Zähler + Feature-/Modellversionen), `auditVersion` und `summary`.
+
+`validationEvidenceInput()` übersetzt den Report in den `EvidenceInput`; das
+Metrik-Snapshot trägt dabei auch den `data.quality`-Wert, damit der Lifecycle
+sein eigenes Gate prüfen kann. Vor dem Schreiben prüft
+`assertReportHashIntegrity()` beide Hashfelder — ein nachträglich veränderter
+Report wird fail-closed abgewiesen.
+
+## 25. Die achtstufige Gate-Kette — deterministisch und in dieser Reihenfolge
+
+`VALIDATION_GATE_IDS` ist die Auswertungsreihenfolge. **Die erste Stufe, die
+nicht `PASS` liefert, entscheidet**; alle späteren Stufen stehen als `SKIPPED`
+im Protokoll und werden nicht ausgewertet. So kann kein sauberes Sharpe einen
+vorher gefundenen Bruch überstimmen, und ein `FAIL` an früher Stelle wird nie
+durch ein späteres „vielleicht" zu `INCONCLUSIVE` verwässert (und umgekehrt:
+`INCONCLUSIVE` wird nicht durch einen späteren `FAIL` überstimmt — er wird gar
+nicht mehr erreicht).
+
+| # | Gate | `INCONCLUSIVE` | `FAIL` | `PASS` |
+| --- | --- | --- | --- | --- |
+| 1 | `ASSUMPTIONS` | Audit fehlt; `verdict = INCONCLUSIVE` (kritische Annahme verletzt/UNKNOWN oder irgendein UNKNOWN) | `verdict = FAIL` (BLOCKING verletzt, keine kritische Annahme) | `verdict = PASS` |
+| 2 | `HOLDOUT_INTEGRITY` | Prüfung fehlt; `verdict = INCONCLUSIVE` (Status `CONTAMINATED` oder `UNKNOWN`) | — (Holdout-Kontamination ist ein „keine Aussage"-Fall, kein Edge-Beweis) | `verdict = CLEAR` |
+| 3 | `DATA_SUFFICIENCY` | `tradeCount < MC_MIN_SAMPLE_TRADES (30)`; `oosWindows < 1`/fehlt; `sharpe`/`maxDrawdownPct`/`profitFactor` `null` | — | Stichprobe, OOS-Fenster und Kennzahlen liegen vor |
+| 4 | `OOS_POLICY_GATES` | `evaluateBacktestGate` liefert `ok = false` ohne `FAIL`-Check (fehlende Fakten) | mindestens ein Check `FAIL` | `ok = true` (alle Checks `PASS`) |
+| 5 | `TRAIN_OOS_GAP_AND_PLATEAU` | `gap`/`plateau` fehlt; `gap.verdict = UNKNOWN`; `plateau.status = UNKNOWN` oder `robustShare = null` | `gap.verdict ∈ {BROKEN, SUSPECT}`; `robustShare < minPlateauRobustShare` | Lücke akzeptabel **und** Plateau ≥ Grenze |
+| 6 | `COST_STRESS` | Sweep fehlt (`stress = null`) | `verdict = COST_DEPENDENT` | `COST_ROBUST`/`COST_SENSITIVE` |
+| 7 | `MULTIPLE_TESTING` | Auswertung fehlt | `blocking = true` (> 20 Kandidaten) | `NONE`/`WARNING` |
+| 8 | `FINAL` | — | — | nur wenn alle sieben Stufen `PASS` waren (sonst `SKIPPED` mit Verweis auf die entscheidende Stufe) |
+
+Die Stufen 1–3 fragen „sind die Fakten überhaupt belastbar?", 4–7 fragen
+„trägt die Strategie die Bedingungen?". Fehlende Vorstufen (`null`) sind
+grundsätzlich **`INCONCLUSIVE`, nie stilles `PASS`** — ein unvollständiger Lauf
+darf nicht wie ein bestandener aussehen.
+
+## 26. Grenzen der Gates — eine Quelle, kein Duplikat
+
+Alle Schwellen kommen aus der bestehenden Promotion-Policy
+(`src/strategyLifecycle/policies.ts`); der Validator definiert keine zweiten
+Zahlen:
+
+- **Stufe 4** nutzt unverändert `evaluateBacktestGate()` mit
+  `DEFAULT_PROMOTION_POLICY`: `backtestMinTrades = 100`,
+  `backtestMaxDrawdownPct = 25`, `backtestMinProfitFactor = 0.9`
+  (`backtestMinWinRate = null`), `backtestMinDataQuality = 0.8`,
+  `backtestMinDurationMs = 14 Tage`, `backtestEvidenceMaxAgeMs = 30 Tage`.
+  Bewertungszeitpunkt ist `nowMs` (Default `availableAt`); die Frischeprüfung
+  gehört dem Lifecycle zum Antragszeitpunkt, nicht dem Validator.
+- **Stufe 3** nutzt `MC_MIN_SAMPLE_TRADES = 30` aus
+  `src/backtest/montecarlo.ts` (dieselbe Stichprobengrenze wie der
+  Post-hoc-Stress).
+- **Stufe 5** nutzt `plateauMetrics()`/`trainOosGap()` aus `overfit.ts`
+  (Gap: `BROKEN` bei `oosSharpe <= 0`, `SUSPECT` bei `gap > 0.5`) und die
+  Plateau-Grenze `minPlateauRobustShare` (Default **0.5**).
+  Deren **Gültigkeitsbereich** steht in der Lifecycle-Policy:
+  `PROMOTION_POLICY_BOUNDS.validationMinPlateauShare = [0, 1]`;
+  `resolveValidationGateBounds()` wirft außerhalb dieser Grenzen fail-closed.
+  Der Vorgabewert selbst gehört zum Gate — die Policy liefert nur den Rahmen
+  (Erweiterung aus 06-04, siehe Commit-Begründung).
+- **Stufe 6** nutzt `DEFAULT_STRESS_VERDICT_THRESHOLDS` aus `stress.ts`
+  (`robustMinRatio 0.6`, `sensitiveMinRatio 0.3`, `minTripleNetPnl 0`).
+- **Stufe 7** nutzt `multipleTestingWarning()` (`NONE ≤ 5`, `WARNING 6–20`,
+  `BLOCKING > 20`).
+
+## 27. Regime-Aggregation — point-in-time, ohne `RANGE`-Fallback (ADR-009/ADR-E2)
+
+`aggregateRegimeTrades()` ist rein und ordnet jedem Trade den **letzten
+bestätigten** `regime_snapshots`-Eintrag mit `asOf <= Entry` zu (sortiert nach
+`(asOf, featureVersion, modelVersion)`, deterministisch bei Gleichstand).
+`evaluateRegimeOos` bleibt unverändert — es vermisst den **Markt**, nicht die
+Strategie.
+
+- Zulässige Zellen sind ausschließlich `REGIME_EVAL_LABELS` **ohne `UNKNOWN`**;
+  ein `UNKNOWN`-Snapshot oder ein unbekanntes Label wird **ausgeschlossen und
+  gezählt** (`unknownRegimeTrades`) — es gibt keinen `RANGE`-Fallback.
+- Trades ohne passenden Snapshot sind `unattributedTrades`, ebenfalls gezählt
+  und ausgeschlossen; `returnlessTrades` zählt Trades ohne `pnlPct` und ohne
+  belastbares `pnl/notional`.
+- Eine Zeile `{ regime, trades, sharpe }` entsteht nur für Zellen mit ≥ 1 Trade.
+  `sharpe` ist `null` (nie `0`), solange die Zelle unter `minSampleTrades`
+  (Default 30, kleinster Wert 2) liegt oder keine Streuung hat; berechnet wird
+  der nicht annualisierte Per-Trade-Sharpe über dieselbe Kennzahl wie
+  `portfolio/metrics.ts`.
+- Das Aggregat trägt `featureVersions`/`modelVersions` der verwendeten
+  Snapshots; `regimeStability` ist der Anteil der Zellen mit positivem Sharpe.
+
+## 28. Evidenz schreiben und die CLI `npm run validate:strategy`
+
+`writeValidationEvidence(report)` / `writeValidationEvidenceDetailed(report)`
+rufen **ausschließlich** `recordEvidence()` aus `@/strategyLifecycle` auf — es
+gibt keinen direkten DB-Zugriff und kein `requestTransition` in der
+Validator-Domäne. Der Lifecycle-Schreibpfad garantiert Idempotenz: Ein zweiter
+Lauf mit identischem Inhalt liefert dieselbe Zeile (`created: false`), der
+UNIQUE-Index auf `content_hash`/`idempotency_key` hält, und parallele Schreiber
+werden über die `23505`-Behandlung zusammengeführt.
+
+Die CLI (`scripts/run-validate-strategy.ts`, `npm run validate:strategy -- …`):
+
+```bash
+npm run validate:strategy -- --strategy-version-id=<uuid> --from=<ISO|ms> --to=<ISO|ms>
+npm run validate:strategy -- --create --template=<id> --symbol=<id> --timeframe=<tf> \
+    --from=<ISO|ms> --to=<ISO|ms> [--params=<json>] [--max-runs=N] [--out=<pfad>] [--no-write]
+```
+
+- Genau eine Quelle: `--strategy-version-id` **oder** `--create`
+  (letzteres braucht `--template`/`--symbol`/`--timeframe` und schließt
+  `--no-write` aus, weil die angelegte Version über die Evidenz referenziert
+  wird). `--params` akzeptiert ein Objekt oder ein Array von Objekten
+  (Nachbarschafts-Scan, Obergrenze `MAX_STRESS_CANDIDATES = 5`).
+- Der Lauf lädt Kerzen aus dem `HistoricalStore`, ruft `runWalkForward`,
+  wertet 06-02 (Lücke/Plateau/Multiple Testing/Holdout), 06-03
+  (`runInEngineStress`, Fehler nur geloggt ⇒ `stress = null` ⇒ `INCONCLUSIVE`)
+  und 06-01 (`auditAssumptions`; Spread/Orderbuch-Tiefe bewusst `UNKNOWN`) aus
+  und baut den Report. `--out` schreibt den Report als JSON.
+- **Exit-Codes:** `0` nur bei `PASS`, `1` bei `FAIL`/`INCONCLUSIVE` oder
+  Laufzeitfehler, `2` bei Bedienfehlern (unbekanntes Argument, fehlendes
+  `--from`/`--to`, ungültige UUID …). `--max-runs` deckelt den Sweep (Default
+  45 = `3 × 3 × 5`) und wird vor dem ersten Lauf geprüft.
+- **Die CLI promoviert nie** — sie schreibt Evidenz und endet. Über Promotion
+  entscheidet der Lifecycle (`evaluatePromotionGate` + `requestTransition`).
+
+## 29. Entscheidungen und Präzisierungen gegenüber der Prompt-Skizze (Teil 4)
+
+1. **`FINAL` ist eine Protokollzeile, kein achtes Prüf-Gate.** Die vom Prompt
+   geforderte Kette endet logisch nach Schritt 7 (`else PASS`); `VALIDATION_GATE_IDS`
+   führt `FINAL` als achte Stufe, damit das Protokoll jeden Ausgang explizit
+   ausweist (bei `PASS` bestätigend, sonst `SKIPPED` mit Verweis).
+2. **Holdout-Kontamination ist `INCONCLUSIVE`, nicht `FAIL`.** `integrity.verdict`
+   kennt nur `CLEAR`/`INCONCLUSIVE`; ein kontaminierter oder unbekannter Holdout
+   ist ein „keine Aussage"-Fall (Prompt-Schritt 2), kein Nachweis fehlender Edge.
+3. **`slippageStress` als Verhältnis, `null` statt Division durch 0** — der
+   Report enthält nie `Infinity`/`NaN`.
+4. **Zusätzliche Felder sind additiv**, damit Provenienz (`backtestRunId`,
+   Fenster), Auditierbarkeit (`gates`, `auditVersion`) und der
+   Lifecycle-Check `data.quality` ohne zweiten Report möglich sind.
+5. **`validationMinPlateauShare` in `PROMOTION_POLICY_BOUNDS`** ist die einzige
+   Änderung an `src/strategyLifecycle/**`: Der Rahmen gehört zur Policy, der
+   Default zum Gate — Begründung im Commit.
+
+## 30. Tests (Teil 4)
+
+```bash
+node --import tsx --test tests/strategyValidation.report.test.ts
+DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test node --import tsx --test tests/strategyValidation.persist.test.ts
+```
+
+`tests/strategyValidation.report.test.ts` (32 Fälle):
+
+- **Ergebnismenge:** `result` ist typ- und laufzeitseitig auf
+  `PASS|FAIL|INCONCLUSIVE` begrenzt; `assertValidationResult` weist alles
+  andere ab.
+- **Je eine Regel der Kette:** Annahmen-FAIL, Annahmen-`INCONCLUSIVE`,
+  Holdout-Kontamination, zu wenige Trades, fehlende OOS-Fenster,
+  Policy-Gate-FAIL, fehlende Datenqualität, Gap `BROKEN`/`SUSPECT`/`UNKNOWN`,
+  Plateau unter/über der Grenze, fehlendes Plateau, `COST_DEPENDENT`,
+  `MULTIPLE_TESTING` blocking, vollständiger Durchlauf ⇒ `PASS`.
+- **`INCONCLUSIVE` schlägt `FAIL`:** unklarer Audit + Policy-Verstoß + zu
+  wenige Trades ⇒ `INCONCLUSIVE`, spätere Gates stehen als `SKIPPED`.
+- **Skip-Semantik:** Nach der ersten nicht-`PASS`-Stufe wird keine weitere
+  Stufe ausgewertet (auch kein späterer `FAIL` mehr gemeldet).
+- **Regime (ADR-009):** `UNKNOWN`-Snapshot erzeugt keine Zeile; ein Trade ohne
+  Snapshot wird gezählt und ausgeschlossen, nie `RANGE`; fehlende Streuung ⇒
+  `sharpe = null`, nie `0`; Point-in-time: ein Snapshot **nach** dem Entry
+  zählt nicht.
+- **Hash/Guard:** Report-Hash ist stabil, Manipulation eines Feldes lässt
+  `assertReportHashIntegrity`/`writeValidationEvidence` scheitern; statische
+  Quelltext-Wächter (kein `Date.now`/`new Date`/Zufall/`@/db` in `report.ts`,
+  kein `requestTransition(`-Aufruf in allen sechs Validator-Modulen).
+
+`tests/strategyValidation.persist.test.ts` (6 Fälle, echtes PostgreSQL): genau
+eine Evidenz-Zeile, `created true → false` beim Retry, parallele Schreiber
+deduplizieren über UNIQUE, `content_hash`/`idempotency_key`/Zeitsemantik/
+`sample_size`/Metriken stimmen, `availability`-CHECK hält, `INCONCLUSIVE` wird
+ebenfalls geschrieben, und weder `strategy_lifecycle_transitions` noch
+`strategy_lifecycle_states` erhalten eine Zeile (kein `requestTransition`).

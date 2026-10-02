@@ -208,7 +208,7 @@ Engine-Pfad hängt ([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE
 | 06-01 | [Annahmen-Audit (deterministisch)](prompts/PROMPT-STX-06-01-assumptions-audit.md) | ✅ `src/strategies/validator/assumptions.ts` (`v0.10.0`): elf Prüfungen über injizierte `*Facts`, `UNKNOWN` statt Scheingenauigkeit, `assumptionGate()` | 03-09 |
 | 06-02 | [Overfit & Robustheit](prompts/PROMPT-STX-06-02-overfit.md) | ✅ `src/strategies/validator/overfit.ts` (`v0.10.1`): Plateau-`robustShare`, IS/OOS-Lücke (`oosSharpe <= 0` ⇒ `BROKEN`), Multiple-Testing bis `BLOCKING` ab 21 Kandidaten, Holdout-Integrität (`CONTAMINATED` ⇒ `INCONCLUSIVE`) | 06-01, 04-02 |
 | 06-03 | [Cost-Stress-Runner](prompts/PROMPT-STX-06-03-cost-stress.md) | ✅ `src/strategies/validator/stress.ts` (`v0.10.2`): `COST_STRESS_SCENARIOS` (1×/2×/3×, 5/10/20 bp), `runInEngineStress()`, `summarizeStressSweep()` (`degradationRatio`, `breakevenMultiplier`), `runPostHocStress()`, `maxRuns = 45` (`--max-runs`) | 06-01 |
-| 06-04 | [Report + Evidence + CLI](prompts/PROMPT-STX-06-04-validation-report.md) | `report.ts` + `scripts/run-validate-strategy.ts` | 06-02, 06-03, 04-02 |
+| 06-04 | [Report + Evidence + CLI](prompts/PROMPT-STX-06-04-validation-report.md) | ✅ `src/strategies/validator/report.ts` + `persist.ts` (`v0.10.3`): achtstufige Gate-Kette (`PASS`/`FAIL`/`INCONCLUSIVE`, kein Score), Regime-Aggregation point-in-time, `recordEvidence()`-Writer, CLI `npm run validate:strategy` | 06-02, 06-03, 04-02 |
 | 06-05 | [Validator-Agent (LLM)](prompts/PROMPT-STX-06-05-validator-agent.md) | `agent.ts` + Routing-Klassen | 06-04 |
 
 **Ergebnis 06-01 (2026-10-02, `v0.10.0`):** Der Annahmen-Audit ist das Gate vor
@@ -232,7 +232,25 @@ linearer Interpolation von `breakevenMultiplier` (`null` ⇒ „hält mindestens
 und Verdikten `COST_ROBUST`/`COST_SENSITIVE`/`COST_DEPENDENT` sowie dünner
 Durchreiche `runPostHocStress()` an `runMonteCarloSimulation()` (im Report
 strikt getrennt). Laufzeit-Bounds: `DEFAULT_MAX_STRESS_RUNS = 45` (`--max-runs`).
-22 Tests; Report + CLI (06-04) und Agent (06-05) bleiben offen.
+22 Tests.
+
+**Ergebnis 06-04 (2026-10-02, `v0.10.3`):** Report, Gate-Kette und Evidenz
+sind implementiert. `buildValidationReport()` (rein, keine Uhr/DB/Zufall) fällt
+genau ein Urteil aus `PASS|FAIL|INCONCLUSIVE`; die acht Stufen laufen in fester
+Reihenfolge, die erste ohne `PASS` entscheidet und alle späteren stehen als
+`SKIPPED` im `gates[]`-Protokoll — kein Score, keine Gewichtung. Fehlende
+Vorstufen sind immer `INCONCLUSIVE` (nie stilles `PASS`), Schwellen kommen aus
+der SSoT (`evaluateBacktestGate()`, `MC_MIN_SAMPLE_TRADES`, `trainOosGap()`/
+`plateauMetrics()`, `DEFAULT_STRESS_VERDICT_THRESHOLDS`, `multipleTestingWarning()`);
+nur für die Plateau-Grenze wurde `PROMOTION_POLICY_BOUNDS.validationMinPlateauShare
+= [0, 1]` ergänzt (Default 0.5 am Gate). Die Regime-Aggregation ordnet Trades
+point-in-time dem letzten `regime_snapshots`-Eintrag mit `asOf <= Entry` zu,
+schließt `UNKNOWN`/nicht zuordenbare Trades gezählt aus (kein `RANGE`-Fallback)
+und lässt `evaluateRegimeOos` unverändert. `writeValidationEvidence()` schreibt
+idempotent über `recordEvidence()` (kein `requestTransition`, keine eigene
+Hashfunktion). CLI `npm run validate:strategy` mit Exit 0 nur bei `PASS`. 32 + 6
+Tests; **STX-17 geschlossen**, **STX-03 abgeschlossen**; nur der Validator-Agent
+(06-05) bleibt in Phase 6 offen.
 
 **Reihenfolge-Logik:** Der Agent kommt **zuletzt**. Ein LLM-Auditor über einen
 nicht-deterministischen Report ist wertlos. 06-01…06-04 sind reine Funktionen ohne

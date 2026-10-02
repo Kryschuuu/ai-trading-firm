@@ -1,7 +1,7 @@
 # PR-Summary — Audit 2026-09-29
 
 > **Schnappschuss der Audit-Übergabe (`v1.0.0`).** Den aktuellen Umsetzungsstand führt
-> [`remediation/TRACKING.md`](remediation/TRACKING.md): Die Phasen 0–3 sind abgeschlossen, Phase 4 läuft, und die drei
+> [`remediation/TRACKING.md`](remediation/TRACKING.md): Die Phasen 0–3 sind abgeschlossen, Phase 4/5 gemergt, Phase 6 bis auf den Validator-Agenten (06-05) umgesetzt, und die drei
 > Entscheidungen aus „Strategische Richtung“ sind seit `v0.6.1` als
 > [ADR-008 … ADR-010](../../roadmap/DECISIONS.md) fixiert (Gate G0 erfüllt).
 
