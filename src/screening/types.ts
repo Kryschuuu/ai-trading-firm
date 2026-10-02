@@ -28,6 +28,34 @@ export type CandidateStatus =
   | "BLOCKED";
 
 /**
+ * Geschlossenes Vokabular des Zell-Ergebnisses eines Screening-Laufs
+ * (STX-05-04). Es ist die **einzige** erlaubte Label-Dimension der Metrik
+ * `screening_cells_total{result}` — bewusst code-konstant und kurz:
+ *
+ * | Wert | Bedeutung |
+ * |---|---|
+ * | `discovered` | Zelle ohne Backtest persistiert (Matrix-/Discovery-Lauf) |
+ * | `backtested` | Zelle mit persistiertem Backtest + vergleichbaren Metriken |
+ * | `blocked` | Zelle war bereits durch die Matrix-Gates gesperrt |
+ * | `capped` | Zelle gesperrt, weil der Lauf die harten Caps überschritten hat |
+ * | `failed` | Zelle nicht verarbeitbar (z. B. keine Strategieversion) |
+ * | `skipped` | Zelle bereits in einem früheren Lauf erledigt (Fortsetzung) |
+ *
+ * Keine Instrument-IDs, Template-IDs, Prioritäten oder Fehlermeldungen als
+ * Label (Kardinalitätsregel des Repos, siehe `src/lib/telemetry.ts`) — die
+ * stehen im Zell-`reasons`-Array bzw. im strukturierten Log.
+ */
+export const SCREENING_CELL_RESULTS = [
+  "discovered",
+  "backtested",
+  "blocked",
+  "capped",
+  "failed",
+  "skipped",
+] as const;
+export type ScreeningCellResult = (typeof SCREENING_CELL_RESULTS)[number];
+
+/**
  * Eine Zelle der Strategie×Markt-Matrix.
  *
  * `instrumentId` folgt dem kanonischen `MarketInstrument.id`-Contract aus

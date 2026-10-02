@@ -1,6 +1,6 @@
 # Strategie×Markt-Screening — Persistenz und Idempotenz
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.8.0** · Modul **STX-05-03** · Migration **2026-10-01_strategy_screening.sql**
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.9.0** · Modul **STX-05-03/05-04** · Migration **2026-10-01_strategy_screening.sql**
 
 ## Zweck und Abgrenzung
 
@@ -13,9 +13,12 @@ bereits vorhandene `strategy_versions.id`; ein Backtest ist **optional**.
 Die reine Discovery aus `types.ts`/`matrix.ts` darf Kandidaten ohne
 Strategieversion liefern. Vor `upsertCells()` muss der Aufrufer die
 Strategieversion persistieren/auflösen. Der Store erfindet weder Versionen
-noch Universe-Pseudoinstrumente. Runner, CLI und Backtest-Ausführung sind
-**nicht** Bestandteil von 05-03 (folgen in 05-04). Keine Lifecycle-Promotion
-oder Live-Freigabe, keine neuen Runtime-Dependencies oder Env-Flags.
+noch Universe-Pseudoinstrumente. Keine Lifecycle-Promotion oder Live-Freigabe,
+keine neuen Runtime-Dependencies oder Env-Flags.
+
+Ab 05-04 (`v0.9.0`) kommen Runner, CLI und Backtest-Job-Adapter dazu; der
+**Store-Vertrag bleibt unverändert** — der Runner ist ein weiterer Aufrufer
+derselben vier Funktionen, keine zweite Persistenzschicht.
 
 ## Schema und Migration
 
@@ -120,12 +123,119 @@ const top = await listResults(run.id, { status: "READY", limit: 50 });
 als dezimale Strings zurückgegeben (Drizzle-/Postgres-Konvention).
 Es gibt **keinen DELETE-Pfad** und keinen Zell-UPDATE-Pfad im Store.
 
+## Runner, CLI und Backtest-Pfad (STX-05-04)
+
+[`src/screening/runner.ts`](../src/screening/runner.ts) fährt die Matrix als
+Jobs: `createOrGetRun()` → je Zelle `upsertCells()` → optionaler Backtest →
+Metriken. Er ist bewusst **ohne** `worker_threads` und ohne eigenen Thread-Pool:
+I/O-Nebenläufigkeit 4 (`SCREENING_DEFAULT_CONCURRENCY`, hart gedeckelt auf
+`SCREENING_MAX_CONCURRENCY` = 8), die Engine selbst läuft strikt **seriell** —
+CPU-Arbeit wird nicht vervielfacht.
+
+### Verträge
+
+| Zusicherung | Umsetzung |
+|---|---|
+| `maxCells` ist **hart** | Überschreitung ⇒ `{ ok: false }` mit `matrix too large: n > limit`; **kein** `createOrGetRun`, kein `upsertCells`, kein stilles Kürzen. Default `MAX_MATRIX_CELLS` = 5 000 |
+| Caps ⇒ vergleichbar oder geblockt | `checkScreeningCaps()` gegen `RULE_BACKTEST_MIN_BARS` (100), `RULE_BACKTEST_TRADE_CAP` (200), `RULE_BACKTEST_EQUITY_CAP` (120). Verstoß ⇒ Zelle `BLOCKED`, Grund `caps exceeded`, `metrics` leer, `backtest_run_id` `null`. **Nie** ein gekapptes Ergebnis. Unbekannte Größen (`null`) sind fail-closed ein Verstoß |
+| Kein Overwrite | Lauf-Identität aus `ssr1:`-Hash; gleicher Inhalt ⇒ gleicher Lauf, Replay ⇒ 0 neue Zellen. Anderer Inhalt (Cutoff, Limits, Gewichte) ⇒ neuer Lauf |
+| Fortschritt | `cells_done` monoton, Persistenz-Zyklus alle 25 Zellen (`SCREENING_PROGRESS_EVERY`); Ende `DONE` nur bei `cells_done = cells_total` |
+| Abbruch | `shouldAbort()` (CLI: SIGINT/SIGTERM) ⇒ Stand als `ABORTED`; Fortsetzung über denselben Inhalt überspringt den erledigten Prefix |
+| Telemetrie | `screening_cells_total{result}` mit dem **geschlossenen** Vokabular `discovered/backtested/blocked/capped/failed/skipped`. Kein Instrument, kein Template, keine Priorität im Label |
+| Fehler | Ein Persistenz-Fehler setzt den Lauf auf `FAILED`, nie auf `DONE` |
+
+### Backtest-Pfad (festgenagelt in 00-01)
+
+[`src/screening/backtestAdapter.ts`](../src/screening/backtestAdapter.ts) ruft
+**ausschließlich** `runMultiAssetBacktest()` auf
+(`SCREENING_BACKTEST_PATH = "multiAsset"`). Begründung und Messung:
+[`BENCH-BASELINE.md`](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)
+§6 — O(n) statt O(n²), 121,7× schneller, 7 500 Zellen in 0,44 Kernstunden.
+`backtestRule()` wird nicht angefasst.
+
+- **Punkt-in-Zeit:** nur Kerzen mit `ts ≤ asOf` gehen in den Lauf.
+- **Kostenbremse:** `maxCandlesPerCell` (Default
+  `SCREENING_MAX_CANDLES_PER_CELL` = 20 000, CLI-Flag `--max-candles`) wird hart
+  angewendet.
+- **Ein Lesevorgang je Reihe:** `HistoricalStore.query()` liest die ganze
+  ndjson neu; der Adapter cached die Reihe, damit N Zellen nicht N Dateilesen
+  bedeuten.
+- **Metriken bleiben geschlossen:** Skalare Kennzahlen + Provenienz, kein
+  Trade-Log, keine Equity-Kurve in `strategy_market_results.metrics`.
+- **`compileTemplate()` ist der einzige Sanitize-Pfad** und bekommt das
+  venue-native Symbol; `candlesBySymbol` ist nach `instrumentId` geschlüsselt.
+- **Zu wenige Kerzen** ⇒ `candles:too-few`, die Zelle landet über den
+  `min_bars`-Cap auf `capped`.
+
+### `backtest_run_id` bleibt in 05-04 `null`
+
+`persistBacktestRun()` erwartet einen vollständigen `WalkForwardReport`. Aus
+einem Einzelzellen-Engine-Lauf einen solchen Report zu bauen wäre eine **zweite
+Wahrheit** über Läufe — und `runMultiAssetBacktest()`/`backtestRule()` sind für
+05-04 gesperrt. Der optionale `persist`-Hook im Adapter ist die dokumentierte
+Naht für einen späteren Prompt. Die Spalte ist nullable (05-03), die Zellen
+bleiben gültig.
+
+### CLI
+
+```bash
+npm run screening                                  # --dry-run (Default): nur Matrix
+npm run screening -- --templates=a,b               # Template-Teilmenge
+npm run screening -- --timeframes=1h,4h            # Timeframe-Teilmenge
+npm run screening -- --max-instruments=100         # harte Instrumentengrenze (500)
+npm run screening -- --limit-cells=50 --execute    # echter Pilotlauf
+npm run screening -- --run-id=<uuid> --execute     # vorhandenen Lauf fortsetzen
+npm run screening -- --max-cells=1000              # harte Zellgrenze (5000)
+npm run screening -- --concurrency=8               # I/O-Nebenläufigkeit (4, max 8)
+npm run screening -- --as-of=2026-10-01T00:00:00Z  # gemeinsamer PIT-Cutoff
+npm run screening -- --max-candles=5000            # Kerzen je Zelle (20000)
+```
+
+`--dry-run` ist der Default; `--execute` ist der einzige Weg zu einem echten
+Lauf. Ausgabe: Tabelle `priority · template · instrument · tf · status ·
+reasons` plus Zusammenfassung je Ergebnis-Token, `BLOCKED`-Gründen und
+Cap-Zählern. Exit-Codes: 0 = grün (oder Dry-Run), 1 = Lauf fachlich nicht grün,
+2 = Bedienfehler.
+
+Die Metrik-Zuordnung der CLI ist **Verdrahtung, keine neue Formel-Wahrheit** —
+jede Zeile referenziert ihre bestehende Quelle (Tabelle im Kopf von
+[`scripts/run-screening.ts`](../scripts/run-screening.ts)): `dataQuality` aus der
+Store-Abdeckung, `liquidity`/`volatilityOpportunity`/`correlation` aus
+`InstrumentScore.factors.*.normalized`, `freshness` aus der
+`DEFAULT_STALE_HOURS`-Rampe in `src/marketdata/quality.ts`.
+
+`crossSectional` bleibt bewusst ungesetzt: der Scanner-Faktor
+`crossSectionalMomentum` ist **kein** Point-in-Time-Snapshot und hat keine
+`snapshotId`. Einen `CrossSectionalRankContext` daraus zu bauen wäre erfundene
+Provenienz; der Matrix-Bauer setzt seinen dokumentierten Neutralwert 0,5.
+
+### Pilot
+
+Der verbindliche Pilot nach dem Merge:
+`npm run screening -- --limit-cells=50 --execute`, ausgewertet in
+[`SCREENING-PILOT.md`](audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md).
+Über eine Kernstunde für 50 Zellen wird 05-04 abgelehnt und STX-12 vorgezogen.
+
 ## Tests und Rollback
 
 - [`tests/strategyScreening.keys.test.ts`](../tests/strategyScreening.keys.test.ts):
   genaue Hash-Formel, kanonische Schlüssel, Zeit-/UUID-Normalisierung,
   Identitätsänderungen, ungültige Inputs, Paging-Bounds und statischer
   Kein-DELETE-/Kein-Overwrite-Wächter.
+- [`tests/screening.runner.test.ts`](../tests/screening.runner.test.ts):
+  harte `maxCells` (Abbruch ohne Store-Zugriff), Caps ⇒ `BLOCKED` mit Grund
+  `caps exceeded` statt Kappung, Dry-Run-Äquivalent ohne Backtest-Job,
+  50 Zellen mit Stub << 30 s, bounded Concurrency (I/O parallel begrenzt,
+  Engine strikt seriell), bounded Telemetrie-Labels, Abbruch ⇒ `ABORTED` mit
+  konsistentem `cells_done` und Fortsetzung über denselben Inhalt, idempotentes
+  Replay (0 neue Zellen), fremde Run-ID ⇒ Abbruch, Persistenz-Fehler ⇒
+  `FAILED`. Keine Engine, keine Datenbank — Store und Backtest sind injizierte
+  Ports (Fixture: [`tests/screening.runner.fixtures.ts`](../tests/screening.runner.fixtures.ts)).
+- [`tests/screening.backtestAdapter.test.ts`](../tests/screening.backtestAdapter.test.ts):
+  Engine-Pfad `multiAsset` am gemeldeten Ergebnis, Punkt-in-Zeit-Filter
+  (Kerzen nach dem Cutoff bleiben draußen), harte Kerzengrenze, genau ein
+  Store-Lesevorgang je Reihe, fail-closed bei zu wenigen Kerzen und
+  unbekanntem Template, geschlossene Metrikmenge ohne Listen/Kurven.
 - [`tests/strategyScreening.db.test.ts`](../tests/strategyScreening.db.test.ts):
   embedded PostgreSQL, doppelte Migration, **echter Drizzle-Push** auf eine
   zweite Wegwerf-DB und Katalogvergleich (Spalten/Defaults/CHECKs/FKs/Indizes),

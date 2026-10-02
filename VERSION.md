@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.8.0` |
+| **Version** | `v0.9.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-01 |
-| **Quellbasiert** | `package.json` (`version: "0.8.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-02 |
+| **Quellbasiert** | `package.json` (`version: "0.9.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -216,6 +216,21 @@ Tabellen dieselbe Struktur; sieben DB-Tests decken Idempotenz, Constraints,
 Duplikate und Rollback ab. **Abgrenzung:** Es gibt noch keinen App-Schreib- oder
 Lesepfad; der Service aus 04-02 wird benötigt, bevor der Befund STX-06 als
 behoben gelten kann. Kein Backfill und keine Änderung an `strategy_lifecycle_*`.
+
+`v0.9.0` macht die **Screening-Matrix zu Jobs** (STX-05-04): `runScreening()`
+in `src/screening/runner.ts` fährt `createOrGetRun()` → je Zelle `upsertCells()`
+→ optionalen Backtest → Metriken, mit **hartem** `maxCells` (Default 5 000,
+Abbruch statt Kürzung), Caps-Prüfung statt Ergebnis-Kappung (`BLOCKED` mit
+Grund `caps exceeded`) und I/O-Nebenläufigkeit 4 (max 8) ohne `worker_threads`.
+`src/screening/backtestAdapter.ts` bindet ausschließlich
+`runMultiAssetBacktest()` an (`SCREENING_BACKTEST_PATH = "multiAsset"`,
+Entscheidung in `BENCH-BASELINE.md` §6: 121,7× schneller als `backtestRule()`),
+punkt-in-zeit und mit harter Kerzengrenze. `npm run screening` bedient es;
+`--dry-run` ist der Default, `--execute` der einzige Weg zu einem echten Lauf.
+`backtest_run_id` bleibt `null` — `persistBacktestRun()` braucht einen
+`WalkForwardReport`, und ein Einzelzellen-Lauf wäre eine zweite Lauf-Wahrheit.
+Die Annahme von 05-04 steht unter dem Vorbehalt des verbindlichen Pilots
+(50 Zellen, > 1 Kernstunde ⇒ Ablehnung zugunsten von STX-12).
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

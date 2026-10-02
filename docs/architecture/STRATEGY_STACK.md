@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-10-01 · **Code-Version:** v0.8.0 (Beta)
+> **Status:** Ist-Zustand · **Stand:** 2026-10-02 · **Code-Version:** v0.9.0 (Beta)
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)
@@ -38,7 +38,8 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Strategie-Template-Vertrag | `src/strategies/types.ts` (`StrategyTemplate`) | — |
 | Strategie-Templates (Katalog) | `src/strategies/catalog.ts` (`STRATEGY_TEMPLATES`, Import-Zeit-Validierung) + `src/strategies/templates/*.ts` (eine Datei pro Artefakt) | keine zweite Template-Liste; Workshop-UI/CLI/Tests lesen hier |
 | Strategie-Versionen (Schema, STX-04-01) | `strategyDefinitions`/`strategyVersions` in `src/db/schema.ts` + `drizzle/2026-10-01_strategy_catalog.sql` (`v0.8.0`) | noch kein App-Schreib-/Lesepfad; folgt in 04-02 |
-| Screening-Matrix + Persistenz (STX-05-01…03) | `src/screening/{types,config,priority,matrix,keys,store}.ts` + `strategy_screening_runs`/`strategy_market_results` | eigene Run-/Zelltabellen, kein Universe-Ergebnis in `backtest_runs`; Runner/CLI folgen in 05-04 |
+| Screening-Matrix + Persistenz (STX-05-01…03) | `src/screening/{types,config,priority,matrix,keys,store}.ts` + `strategy_screening_runs`/`strategy_market_results` | eigene Run-/Zelltabellen, kein Universe-Ergebnis in `backtest_runs` |
+| Screening-Runner + CLI (STX-05-04) | `src/screening/{runner,backtestAdapter}.ts` + `scripts/run-screening.ts` | keine zweite Engine (nur `runMultiAssetBacktest()`), keine `worker_threads`, kein `backtestRule()`-Aufruf, kein `persistBacktestRun()` im Screening-Pfad |
 | Strategie-Template-Doku | `docs/STRATEGY_TEMPLATES.md` (**generiert** aus dem Katalog via `npm run docs:templates`) | keine handgepflegte zweite Tabelle; der Vertragstest vergleicht sie byteweise mit dem Generator |
 | Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
 | Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
@@ -237,8 +238,38 @@ Prioritäts-/Ergebnisüberschreibung. `backtest_runs`, `strategy_versions` und
 rein; erst eine aufgelöste Version erlaubt die Zellpersistenz.
 
 Migration, Store-Verträge, SQL-/Drizzle-Parität und Rollback:
-[`../STRATEGY_SCREENING.md`](../STRATEGY_SCREENING.md). Runner/CLI (05-04) sind
-weiterhin offen; diese Schicht führt keine Backtests oder Live-Promotion aus.
+[`../STRATEGY_SCREENING.md`](../STRATEGY_SCREENING.md). Diese Schicht führt
+keine Live-Promotion aus.
+
+### 1.6 Screening-Runner + CLI (STX-05-04, v0.9.0)
+
+`src/screening/runner.ts` fährt die Matrix aus 05-01…03 als Jobs:
+`createOrGetRun()` → je Zelle `upsertCells()` → optionaler Backtest → Metriken.
+`maxCells` (Default 5 000) ist **hart**: eine Überschreitung bricht ab, nichts
+wird still gekürzt. `checkScreeningCaps()` prüft gegen die Hülle des
+Regel-Backtest-Pfads (`RULE_BACKTEST_MIN_BARS`/`TRADE_CAP`/`EQUITY_CAP`); ein
+Verstoß macht die Zelle `BLOCKED` mit Grund `caps exceeded` — ein gekapptes
+Ergebnis gibt es nicht. I/O-Nebenläufigkeit ist 4 (max 8), die Engine läuft
+strikt seriell, es gibt **keine** `worker_threads`.
+
+`src/screening/backtestAdapter.ts` ist die **einzige** Stelle, an der der
+Screening-Pfad eine Engine aufruft: `runMultiAssetBacktest()`
+(`SCREENING_BACKTEST_PATH = "multiAsset"`, Entscheidung in
+[`../audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md`](../audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)
+§6). `compileTemplate()` bleibt der einzige Sanitize-Pfad und bekommt das
+venue-native Symbol; Kerzen werden punkt-in-zeit gefiltert (`ts ≤ asOf`), je
+Reihe einmal gelesen und hart auf `SCREENING_MAX_CANDLES_PER_CELL` begrenzt.
+
+`scripts/run-screening.ts` (`npm run screening`) ist die Bedienung:
+`--dry-run` ist der Default, `--execute` der einzige Weg zu einem echten Lauf.
+Der verbindliche Pilot (50 Zellen, Auswertung in
+[`SCREENING-PILOT.md`](../audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md))
+entscheidet, ob 05-04 angenommen oder zugunsten von STX-12 verworfen wird.
+
+**Bewusst offen:** `backtest_run_id` bleibt `null`, weil
+`persistBacktestRun()` einen `WalkForwardReport` erwartet und ein Einzelzellen-
+Lauf keine zweite Lauf-Wahrheit begründen darf. Der `persist`-Hook im Adapter
+ist die dokumentierte Naht für einen späteren Prompt.
 
 ## 2. Nicht vorhanden — explizite Lücken
 
@@ -250,7 +281,8 @@ und `../audits/2026-09-29-strategy-template-ausbau/report.md`:
 |---|---|---|
 | ~~`src/strategies/compiler.ts`~~ | ✅ existiert seit `v0.7.5` (03-09) | `ROADMAP.md` Phase 3 — **erledigt:** einziger Aufrufer von `buildRule` + `sanitizeRuleSpec()`, Details in §1.2; Beweis: `tests/strategies.compiler.security.test.ts`; `types.ts` (03-01) und `catalog.ts` (03-02) existieren |
 | ~~Template-Vertragstests~~ | ✅ existiert seit `v0.7.6` (03-10) | `ROADMAP.md` Phase 3 — **abgeschlossen:** Beweis: `tests/strategies.templates.test.ts` (60 Tests), Details in §1.3; generierte Doku `docs/STRATEGY_TEMPLATES.md` |
-| `src/screening/runner.ts` / `scripts/run-screening.ts` | Runner/CLI fehlen; Typen/Priorität/Matrix und Persistenz sind vorhanden | `ROADMAP.md` Phase 5 — `05-04` CLI + Backtest-Job-Adapter |
+| ~~`src/screening/runner.ts` / `scripts/run-screening.ts`~~ | ✅ existiert seit `v0.9.0` (05-04) | `ROADMAP.md` Phase 5 — **erledigt:** Runner, Backtest-Job-Adapter (`runMultiAssetBacktest()`), CLI mit `--dry-run`/`--execute`; Details in §1.6; Beweis: `tests/screening.runner.test.ts`, `tests/screening.backtestAdapter.test.ts`. Pilot in [`SCREENING-PILOT.md`](../audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md) |
+| `src/screening/*` — Persistenz eines Engine-Laufs in `backtest_runs` | offen (bewusst): `backtest_run_id` ist in 05-04 `null`, der `persist`-Hook im Adapter ist die Naht | `ROADMAP.md` Phase 5 — eigener Prompt, da `persistBacktestRun()` einen `WalkForwardReport` braucht |
 | `src/copy/` | Verzeichnis fehlt | `ROADMAP.md` Phase 7 — Copy-Trading (`07-01` Typen) |
 
 Hinweis: Die Roadmap bleibt in `v0.x` (Beta) — keine Beta-Exit-Kriterien erfüllt.
@@ -262,7 +294,7 @@ Siehe `../BETA_STATUS.md`.
 2. **Neue Strategieklasse / Regime / Eligibility / Kosten:** Erweitere bestehende SSoT (`src/lib/signalDecay.ts` `STRATEGY_CLASS_KEYS`, `src/lib/marketRegime.ts` `MarketRegime`, `src/universe/*` + `crossSectional/types.ts` `EligibilityConfig`, `src/backtest/types.ts` `BacktestEngineConfig.feeModel` + `src/backtest/montecarlo.ts` `MonteCarloStressConfig`); kein zweites Vokabular, kein drittes Kostenmodell. Klassen- und Regime-Vokabular ändert nur ein neues ADR (ADR-008, ADR-009), Universe-Gewichte nur die `PortfolioConstruction`-Schicht aus ADR-010.
 3. **Neues Scanner-/Ranking-Verhalten:** Erweitere `src/scanner/*` (Faktor in `factors/` + Gewicht in `scanner.config.json`) bzw. `src/crossSectional/*`; keine neue Spec-Datei, SSoT bleibt Config + bestehende Typen.
 4. **Neues Lifecycle-/Evidenz-/Fill-/Symbol-Verhalten:** Erweitere `src/strategyLifecycle/*`, `src/executionQuality/` + `src/brokers/reconciliation.ts`, `src/symbols/normalize.ts`; kein Copy-Reconciler, kein String-Replace.
-5. **Neue Domäne (Screening, Copy, Strategie-Persistenz):** Für Phase 4 existiert seit 04-01 (`v0.8.0`) das Schema `strategy_definitions`/`strategy_versions`; der App-Service folgt in 04-02. `src/screening/` und die eigenen Screening-Run-/Zelltabellen sind vorhanden (§1.5); Runner/CLI folgen nur gemäß Phase-5-Gates. `src/copy/` fehlt weiterhin (Phase 7). **Innerhalb** von `src/strategies/` gilt: Neue Templates gehen über `catalog.ts` + `templates/`; eine `RuleSpec` entsteht **ausschließlich** über `compiler.ts` (§1.2) — kein zweiter Aufrufer von `buildRule()`, kein `sanitizeRuleSpec()`-Aufruf außerhalb des Compilers für Template-Regeln.
+5. **Neue Domäne (Screening, Copy, Strategie-Persistenz):** Für Phase 4 existiert seit 04-01 (`v0.8.0`) das Schema `strategy_definitions`/`strategy_versions`; der App-Service folgt in 04-02. `src/screening/` mit Matrix, Priorität, Persistenz, Runner, Backtest-Job-Adapter und CLI ist vorhanden (§1.5, §1.6); ein neuer Screening-Aufruf geht über `runScreening()` oder `npm run screening`, nie über einen eigenen Engine-Aufruf. `src/copy/` fehlt weiterhin (Phase 7). **Innerhalb** von `src/strategies/` gilt: Neue Templates gehen über `catalog.ts` + `templates/`; eine `RuleSpec` entsteht **ausschließlich** über `compiler.ts` (§1.2) — kein zweiter Aufrufer von `buildRule()`, kein `sanitizeRuleSpec()`-Aufruf außerhalb des Compilers für Template-Regeln.
 
 ## 4. Verweise
 
