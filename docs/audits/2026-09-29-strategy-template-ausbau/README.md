@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.17` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); Phasen 0–3 abgeschlossen; Phase 4 begonnen — 04-01 Schemafundament (`v0.8.0`), 04-02 Service gemergt; Phase 5 gestartet — 05-01…05-04 in `v0.9.0` (Runner + CLI, Annahme unter Pilot-Vorbehalt); Phase 6 begonnen — 06-01 Annahmen-Audit in `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung in `v0.10.1`, 06-03…06-05 offen; optionaler Slice 02-04 bleibt offen; `v1.1.17` = 06-02 umgesetzt, `v1.1.16` = 06-01 umgesetzt, `v1.1.15` = 05-04 umgesetzt)
+- **Audit-Version:** `v1.1.18` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); Phasen 0–3 abgeschlossen; Phase 4 begonnen — 04-01 Schemafundament (`v0.8.0`), 04-02 Service gemergt; Phase 5 gestartet — 05-01…05-04 in `v0.9.0` (Runner + CLI, Annahme unter Pilot-Vorbehalt); Phase 6 begonnen — 06-01 Annahmen-Audit in `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung in `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner in `v0.10.2`, 06-04…06-05 offen; optionaler Slice 02-04 bleibt offen; `v1.1.18` = 06-03 umgesetzt, `v1.1.17` = 06-02 umgesetzt, `v1.1.16` = 06-01 umgesetzt)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.8.0 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fachlich abgeschlossen: 02-01 (`v0.6.3`, Formeln), 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) und 02-03 (`v0.6.5`, Donchian-Regelfeld + Paritätstest) umgesetzt; offen nur der optionale Feature-Store-Slice 02-04; **Phase 3 begonnen:** 03-01/03-02 (`v0.7.0`, Vertrag + Katalog), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`) und 03-05 (`v0.7.3`) umgesetzt; **Template-Reihe vollständig:** 03-06 (Bollinger-Squeeze), 03-07 (VWAP-Bias, Snapshot) und 03-08 (Donchian Breakout) mit `v0.7.4` ausgeliefert — sechs von sechs Templates gebaut; **Compiler 03-09 mit `v0.7.5` ausgeliefert** (STX-05 behoben: `buildRule(params) → sanitizeRuleSpec() → RuleSpec` nachgewiesen, Compiler ohne Fallback auf die Rohform); **Vertragstests 03-10 mit `v0.7.6` ausgeliefert** — 60 Tests über alle sechs Templates × Takte (Struktur, Compiler-Parität, Positiv-/Negativ-Fixtures, Katalog-Integrität, Engine-↔-Cache-Parität), generierte Doku `docs/STRATEGY_TEMPLATES.md`, **Gate G3 erfüllt, Phase 3 abgeschlossen**; **Phase 4 begonnen:** 04-01 Schemafundament (`v0.8.0`) implementiert, 04-02 Service/Lifecycle-Bridging gemergt; **Phase 5 gestartet:** 05-03 Persistenz (Unreleased auf `v0.8.0`), 05-04 Runner + CLI (`v0.9.0`, Pilot offen); **Phase 6 begonnen:** 06-01 Annahmen-Audit (`v0.10.0`), 06-02 Overfit- & Robustheitsauswertung (`v0.10.1`), 06-03…06-05 offen; optionaler Slice 02-04 ebenfalls offen
+- **Code-Version:** `package.json` v0.10.2 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
+- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fachlich abgeschlossen: 02-01 (`v0.6.3`, Formeln), 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) und 02-03 (`v0.6.5`, Donchian-Regelfeld + Paritätstest) umgesetzt; offen nur der optionale Feature-Store-Slice 02-04; **Phase 3 begonnen:** 03-01/03-02 (`v0.7.0`, Vertrag + Katalog), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`) und 03-05 (`v0.7.3`) umgesetzt; **Template-Reihe vollständig:** 03-06 (Bollinger-Squeeze), 03-07 (VWAP-Bias, Snapshot) und 03-08 (Donchian Breakout) mit `v0.7.4` ausgeliefert — sechs von sechs Templates gebaut; **Compiler 03-09 mit `v0.7.5` ausgeliefert** (STX-05 behoben: `buildRule(params) → sanitizeRuleSpec() → RuleSpec` nachgewiesen, Compiler ohne Fallback auf die Rohform); **Vertragstests 03-10 mit `v0.7.6` ausgeliefert** — 60 Tests über alle sechs Templates × Takte (Struktur, Compiler-Parität, Positiv-/Negativ-Fixtures, Katalog-Integrität, Engine-↔-Cache-Parität), generierte Doku `docs/STRATEGY_TEMPLATES.md`, **Gate G3 erfüllt, Phase 3 abgeschlossen**; **Phase 4 begonnen:** 04-01 Schemafundament (`v0.8.0`) implementiert, 04-02 Service/Lifecycle-Bridging gemergt; **Phase 5 gestartet:** 05-03 Persistenz (Unreleased auf `v0.8.0`), 05-04 Runner + CLI (`v0.9.0`, Pilot offen); **Phase 6 begonnen:** 06-01 Annahmen-Audit (`v0.10.0`), 06-02 Overfit- & Robustheitsauswertung (`v0.10.1`), 06-03 Cost- & Slippage-Stress-Runner (`v0.10.2`), 06-04…06-05 offen; optionaler Slice 02-04 ebenfalls offen
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -23,10 +23,10 @@
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 0 | 0 | 0 | 0 |
 | HIGH | 5 | 0 | 2 | 3 |
-| MEDIUM | 7 | 2 | 4 | 1 |
+| MEDIUM | 7 | 2 | 3 | 2 |
 | LOW | 4 | 3 | 0 | 1 |
 | INFO | 3 | 2 | 0 | 1 |
-| **Σ** | **19** | **7** | **6** | **6** |
+| **Σ** | **19** | **7** | **5** | **7** |
 
 > **Kein CRITICAL.** Das Ausbaudokument enthält **keinen** Vorschlag, der eine bestehende
 > Sicherheitsgrenze weicht. Die HIGH-Funde sind **Integrations- und Duplikationsrisiken**,
@@ -46,7 +46,7 @@
 | [STX-08](findings/STX-08-alpaca-ohne-websocket.md) | Alpaca hat **keinen** WebSocket — Leader-Adapter-Annahme des Dokuments trifft nicht zu | MEDIUM | OPEN |
 | [STX-09](findings/STX-09-copysystem-duplikat-reconciliation.md) | Copy-Reconciler würde bestehende Fill-Reconciliation duplizieren | MEDIUM | OPEN |
 | [STX-10](findings/STX-10-featurestore-ist-slice.md) | Feature Store ist ein 3-Feature-Slice, kein „zentraler Feature-Layer" | MEDIUM | IN ARBEIT (00-02 dokumentiert) |
-| [STX-11](findings/STX-11-cost-stress-existiert.md) | Cost-/Slippage-Stress existiert bereits (MonteCarlo + executionCost-Faktor) | MEDIUM | IN ARBEIT (00-02 dokumentiert) |
+| [STX-11](findings/STX-11-cost-stress-existiert.md) | Cost-/Slippage-Stress existiert bereits (MonteCarlo + executionCost-Faktor) | MEDIUM | FIXED (06-03, `v0.10.2`) |
 | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | `backtestRule()` ist O(n²) — der Matrix-Runner würde daran scheitern | MEDIUM | IN ARBEIT (00-01 gemessen) |
 | [STX-13](findings/STX-13-opencode-free-tier.md) | OpenCode-Zen-Free-Tier ist rotierend und nicht verlässlich als Routing-Klasse | LOW | OPEN |
 | [STX-14](findings/STX-14-changepct24h-semantik.md) | `changePct24h` misst 97 Perioden — Fallstrick für Tagesstrategien | LOW | OPEN |

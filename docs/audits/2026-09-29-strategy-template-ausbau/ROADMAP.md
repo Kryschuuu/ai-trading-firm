@@ -207,7 +207,7 @@ Engine-Pfad hängt ([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE
 |---|---|---|---|
 | 06-01 | [Annahmen-Audit (deterministisch)](prompts/PROMPT-STX-06-01-assumptions-audit.md) | ✅ `src/strategies/validator/assumptions.ts` (`v0.10.0`): elf Prüfungen über injizierte `*Facts`, `UNKNOWN` statt Scheingenauigkeit, `assumptionGate()` | 03-09 |
 | 06-02 | [Overfit & Robustheit](prompts/PROMPT-STX-06-02-overfit.md) | ✅ `src/strategies/validator/overfit.ts` (`v0.10.1`): Plateau-`robustShare`, IS/OOS-Lücke (`oosSharpe <= 0` ⇒ `BROKEN`), Multiple-Testing bis `BLOCKING` ab 21 Kandidaten, Holdout-Integrität (`CONTAMINATED` ⇒ `INCONCLUSIVE`) | 06-01, 04-02 |
-| 06-03 | [Cost-Stress-Runner](prompts/PROMPT-STX-06-03-cost-stress.md) | `stress.ts` | 06-01 |
+| 06-03 | [Cost-Stress-Runner](prompts/PROMPT-STX-06-03-cost-stress.md) | ✅ `src/strategies/validator/stress.ts` (`v0.10.2`): `COST_STRESS_SCENARIOS` (1×/2×/3×, 5/10/20 bp), `runInEngineStress()`, `summarizeStressSweep()` (`degradationRatio`, `breakevenMultiplier`), `runPostHocStress()`, `maxRuns = 45` (`--max-runs`) | 06-01 |
 | 06-04 | [Report + Evidence + CLI](prompts/PROMPT-STX-06-04-validation-report.md) | `report.ts` + `scripts/run-validate-strategy.ts` | 06-02, 06-03, 04-02 |
 | 06-05 | [Validator-Agent (LLM)](prompts/PROMPT-STX-06-05-validator-agent.md) | `agent.ts` + Routing-Klassen | 06-04 |
 
@@ -222,7 +222,17 @@ den Optimum-Punkt; `trainOosGap()` lässt **nie** den IS-Sharpe allein entscheid
 Kandidaten; `holdoutIntegrity()` erkennt Kontamination (`INCONCLUSIVE`).
 Fehlende Score-Tabellen sind `UNKNOWN` mit Grund. Keine Änderung an
 `walkforward.ts`, keine Kandidatengenerierung, keine IO/Uhr — 39 Tests.
-Cost-Stress (06-03) und Report + CLI (06-04) bleiben offen.
+
+**Ergebnis 06-03 (2026-10-02, `v0.10.2`):** Der Cost- & Slippage-Stress-Runner
+(`src/strategies/validator/stress.ts`) schließt **STX-11** ohne drittes
+Kostenmodell: In-Engine-Walk-Forward-Sweep über `COST_STRESS_SCENARIOS`
+(`base` byte-identisch zum Referenzlauf, `slippageModel: "none"` ⇒ `{ ok: false }`,
+`executionModel` unverändert), `summarizeStressSweep()` mit `degradationRatio`,
+linearer Interpolation von `breakevenMultiplier` (`null` ⇒ „hält mindestens 3×")
+und Verdikten `COST_ROBUST`/`COST_SENSITIVE`/`COST_DEPENDENT` sowie dünner
+Durchreiche `runPostHocStress()` an `runMonteCarloSimulation()` (im Report
+strikt getrennt). Laufzeit-Bounds: `DEFAULT_MAX_STRESS_RUNS = 45` (`--max-runs`).
+22 Tests; Report + CLI (06-04) und Agent (06-05) bleiben offen.
 
 **Reihenfolge-Logik:** Der Agent kommt **zuletzt**. Ein LLM-Auditor über einen
 nicht-deterministischen Report ist wertlos. 06-01…06-04 sind reine Funktionen ohne

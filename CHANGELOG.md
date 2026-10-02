@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -92,6 +92,77 @@ erlaubt, solange sie hier dokumentiert sind).
 * **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
   und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
   die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
+
+## [0.10.2] — Validator: Cost- & Slippage-Stress-Runner (STX-06-03) (2026-10-02)
+
+> **Status: Beta, nicht produktionsreif.** Die dritte deterministische
+> Validator-Stufe (06-03) schließt Finding **STX-11** ohne drittes
+> Kostenmodell: `COST_STRESS_SCENARIOS` (`base`, `double`, `triple`) prüft, ob
+> eine Strategie bei 2×/3× Gebühren und 5/10/20 bp Slippage überlebt —
+> zweischichtig über einen echten In-Engine-Sweep (`runInEngineStress`,
+> `summarizeStressSweep`) und einen dünnen Post-hoc-Monte-Carlo-Wrapper
+> (`runPostHocStress`). Beide Schichten liegen im Report strikt getrennt.
+> Report + CLI (06-04) und der Validator-Agent (06-05) bleiben offen.
+
+### Added
+
+* **Versionierte Stress-Szenarien** (`src/strategies/validator/stress.ts`,
+  STX-06-03, `COST_STRESS_VERSION = "stx-06-03-cost-stress@1"`):
+  `COST_STRESS_SCENARIOS` exportiert `base` (`feeMultiplier: 1`,
+  `slippageBps: 5`, `"Basis"`), `double` (`feeMultiplier: 2`,
+  `slippageBps: 10`, `"2× Kosten"`) und `triple` (`feeMultiplier: 3`,
+  `slippageBps: 20`, `"3× Kosten"`). Im JSDoc ist dokumentiert, dass die
+  Bps-Werte normative Stress-Annahmen sind (keine Messwerte); die
+  tatsächlichen Kosten im Basislauf werden in 06-01 (`FEE_NONZERO`,
+  `SLIPPAGE_NONZERO`, `COST_NONZERO`) geprüft.
+* **Schicht 1 — In-Engine-Stress (`runInEngineStress`, `summarizeStressSweep`):**
+  Pro Szenario genau ein Walk-Forward-Lauf mit angepasstem
+  `BacktestEngineConfig` (`feeModel.{makerFee,takerFee}` skaliert,
+  `slippageModel: "fixed"`, `fixedSlippageBps`; `executionModel` bleibt der
+  des Referenzlaufs: `"legacy" | "paper" | "event_replay"`). `base` ist
+  byte-identisch zum Referenzlauf (`JSON.stringify`-geprüft inkl.
+  `configHash`/`captureHash`). `slippageModel: "none"` (oder 0-Kosten) im
+  Referenzlauf liefert `{ ok: false, errors: [...] }` ohne stilles
+  Hochrechnen. `summarizeStressSweep()` berechnet `degradationRatio =
+  OOS-Sharpe(triple) / OOS-Sharpe(base)`, interpoliert `breakevenMultiplier`
+  linear zwischen den Szenarien (`null` bei `triple.netPnl > 0` ⇒ „hält
+  mindestens 3×") und vergibt das Verdikt `COST_ROBUST`
+  (`degradationRatio >= 0.6` **und** `triple.netPnl > 0`), `COST_SENSITIVE`
+  (`degradationRatio ∈ [0.3, 0.6)` oder `>= 0.6` bei unprofitabler `triple`)
+  bzw. `COST_DEPENDENT` (`< 0.3` oder unprofitabler `base`).
+* **Schicht 2 — Post-hoc-Stress (`runPostHocStress`, `buildStressReport`):**
+  Dünner Wrapper um `runMonteCarloSimulation()` mit `stress: { feeMultiplier,
+  slippageMultiplier }` (keine eigene MC-Implementierung; `1×/1×` wird auf
+  `stress: null` normalisiert). In `StressSweepOk` und `StressReport` liegen
+  `inEngine` und `postHoc` strikt in getrennten Feldern.
+* **Harte Laufzeit-Bounds (`maxRuns` & `--max-runs`):**
+  `DEFAULT_MAX_STRESS_RUNS = 45` (`3 Szenarien × 3 Fenster × 5 Kandidaten`),
+  `maxRuns` als hartes Argument (Überschreitung bricht vor dem ersten
+  Runner-Aufruf mit `{ ok: false, errors }` ab) sowie CLI-Parser
+  `parseMaxRunsFlag(argv)` für `--max-runs` / `--max-runs=<n>`.
+* **22 Tests in 7 Suiten** (`tests/strategyValidation.stress.test.ts`):
+  Szenario-Katalog, echte Byte-Identität von `base` gegen `runWalkForward`,
+  Fail-Closed bei `slippageModel: "none"` und `maxRuns`-Überschreitung,
+  Erhalt von `executionModel` (`legacy`/`paper`/`event_replay`),
+  `summarizeStressSweep` (Ratio, Breakeven-Interpolation, `null` ⇒ „mindestens
+  3×", Verdikt-Schwellen), `runPostHocStress`-Weiterleitung an
+  `runMonteCarloSimulation` und getrennte Report-Sektionen.
+
+### Documentation
+
+* **[`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md) Teil 3 (§16–§23):**
+  Zweischicht-Architektur (In-Engine vs. Post-hoc), `COST_STRESS_SCENARIOS`,
+  `runInEngineStress`-Vertrag, `summarizeStressSweep`-Formeln (inkl.
+  Klarstellung der Ratio-Richtung `OOS-Sharpe(triple) / OOS-Sharpe(base)`),
+  `runPostHocStress` & Report-Trennung, Laufzeitbudget und Abgrenzung zu
+  06-04/06-05.
+* **Architektur, Pilot & Audit-Tracking (`v1.1.18`):**
+  [`docs/architecture/STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md)
+  (§1, §1.7, §1.9), Laufzeitbudget (`Zeit pro Lauf × Runs`) in
+  [`SCREENING-PILOT.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md),
+  Finding [`STX-11`](docs/audits/2026-09-29-strategy-template-ausbau/findings/STX-11-cost-stress-existiert.md)
+  auf `FIXED — STX-06-03 (2026-10-02, v0.10.2)` gesetzt sowie `ROADMAP.md`,
+  `TRACKING.md`, `VERSIONING.md` und `README.md` des Audits aktualisiert.
 
 ## [0.10.1] — Validator: Overfit- & Robustheitsauswertung (STX-06-02) (2026-10-02)
 

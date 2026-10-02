@@ -4,8 +4,8 @@
 - **Severity:** MEDIUM
 - **Bereich:** Backtest / Validierung
 - **Quelle:** Ausbaudokument §3.5
-- **Status:** IN ARBEIT — Einordnung dokumentiert (00-02, `v0.6.1`, [STRATEGY_STACK.md](../../../architecture/STRATEGY_STACK.md)); Andocken in 06-03
-- **Datei(en):** `src/backtest/montecarlo.ts`, `src/scanner/factors/executionCost.ts`
+- **Status:** FIXED — STX-06-03 (2026-10-02, `v0.10.2`) — angedockt in `src/strategies/validator/stress.ts` (`COST_STRESS_SCENARIOS`, `runInEngineStress`, `summarizeStressSweep`, `runPostHocStress`, `buildStressReport`); Tests in `tests/strategyValidation.stress.test.ts` (22 Tests), Doku in [`docs/STRATEGY_VALIDATION.md`](../../../STRATEGY_VALIDATION.md) Teil 3 + [`STRATEGY_STACK.md`](../../../architecture/STRATEGY_STACK.md) §1.9
+- **Datei(en):** `src/backtest/montecarlo.ts`, `src/scanner/factors/executionCost.ts`, `src/strategies/validator/stress.ts`
 
 ## Beschreibung
 
