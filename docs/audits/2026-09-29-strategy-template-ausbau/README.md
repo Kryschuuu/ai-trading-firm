@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.14` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); Phasen 0–3 abgeschlossen; Phase 4 begonnen — 04-01 Schemafundament (`v0.8.0`), 04-02 Service gemergt; optionaler Slice 02-04 bleibt offen; `v1.1.14` = Nachtrag: Code-Altlasten im Tracking als OP-6)
+- **Audit-Version:** `v1.1.15` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); Phasen 0–3 abgeschlossen; Phase 4 begonnen — 04-01 Schemafundament (`v0.8.0`), 04-02 Service gemergt; Phase 5 gestartet — 05-01…05-04 in `v0.9.0` (Runner + CLI, Annahme unter Pilot-Vorbehalt); optionaler Slice 02-04 bleibt offen; `v1.1.15` = 05-04 umgesetzt, `v1.1.14` = Nachtrag Code-Altlasten als OP-6)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,

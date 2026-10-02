@@ -40,6 +40,8 @@
  *                              (RMA-P1-01: ok × none | degraded)
  *   backtest_replay_degraded_total degradierte Replay-Annahmen je reason
  *                              (geschlossenes Vokabular ReplayDegradedReason)
+ *   screening_cells_total       Screening-Zellen je Ergebnis (STX-05-04;
+ *                              geschlossenes Vokabular SCREENING_CELL_RESULTS)
  *
  * Fehlertoleranz (Betriebsregel): Ist der Firmenzustand nicht lesbar
  * (z. B. DB weg, Ledger noch nicht hydratisiert), werden die betroffenen
@@ -638,6 +640,25 @@ export const telemetry = {
       telemetry.microExecutor.ruleBlocked.reset();
     },
   },
+  /**
+   * Strategie-Matrix-Screening (STX-05-04, v0.9.0).
+   *
+   * Ein Zähler je Zell-Ergebnis. `result` stammt ausschließlich aus dem
+   * **geschlossenen** Vokabular `SCREENING_CELL_RESULTS`
+   * (`src/screening/types.ts`) — keine Instrument-IDs, Template-IDs,
+   * Prioritäten, Run-UUIDs oder Fehlermeldungen als Label: ein
+   * 5 000-Zellen-Lauf würde sonst die Kardinalität (und damit den Speicher
+   * des Counters) unbegrenzt wachsen lassen. Welche Zelle wie ausgegangen
+   * ist, steht in `strategy_market_results.reasons` und im CLI-Tableau.
+   */
+  screening: {
+    /** Verarbeitete Screening-Zellen je Ergebnis (geschlossenes Vokabular). */
+    cells: new LabelCounter("screening_cells_total"),
+    /** alle Zähler der Screening-Sektion zurücksetzen (nur Tests) */
+    reset(): void {
+      telemetry.screening.cells.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -823,6 +844,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.volatilityTargeting.fallbacks.exposition(),
     telemetry.volatilityTargeting.snapshots.exposition(),
     telemetry.microExecutor.ruleBlocked.exposition(),
+    telemetry.screening.cells.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -922,4 +944,5 @@ export function resetTelemetryForTests(): void {
   telemetry.monteCarlo.reset();
   telemetry.strategyLifecycle.reset();
   telemetry.microExecutor.reset();
+  telemetry.screening.reset();
 }

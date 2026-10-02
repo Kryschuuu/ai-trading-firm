@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-01** · Code-Version **0.8.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.9.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -92,6 +92,88 @@ erlaubt, solange sie hier dokumentiert sind).
 * **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
   und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
   die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
+
+## [0.9.0] — Screening: Matrix wird zu Jobs (STX-05-04) (2026-10-02)
+
+> **Status: Beta, nicht produktionsreif.** Die Matrix aus 05-01…03 bekommt
+> einen Läufer, eine Engine-Anbindung und eine CLI. Kein Live-Pfad, keine
+> Lifecycle-Promotion, keine Änderung an `backtestRule()`,
+> `runMultiAssetBacktest()` oder der Engine selbst.
+
+### Added
+
+* **Screening-Runner** (`src/screening/runner.ts`): `runScreening()` fährt
+  `createOrGetRun()` → je Zelle `upsertCells()` → optionaler Backtest →
+  Metriken. `maxCells` ist **hart** — eine Überschreitung bricht mit
+  `matrix too large: n > limit` ab, ohne einen Store-Zugriff und ohne stilles
+  Kürzen. I/O-Nebenläufigkeit 4 (max 8), die Engine strikt seriell; **keine**
+  `worker_threads`.
+* **Backtest-Job-Adapter** (`src/screening/backtestAdapter.ts`): ruft
+  ausschließlich `runMultiAssetBacktest()` auf
+  (`SCREENING_BACKTEST_PATH = "multiAsset"` — Entscheidung aus
+  [`BENCH-BASELINE.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)
+  §6: O(n) statt O(n²), 121,7× schneller, 7 500 Zellen in 0,44 Kernstunden).
+  Kerzen werden punkt-in-zeit gefiltert (`ts ≤ asOf`), je Reihe einmal gelesen
+  und hart auf `SCREENING_MAX_CANDLES_PER_CELL` (20 000) begrenzt.
+  `compileTemplate()` bleibt der einzige Sanitize-Pfad und bekommt das
+  venue-native Symbol.
+* **Caps statt Kappung:** `checkScreeningCaps()` prüft gegen die Hülle des
+  Regel-Backtest-Pfads (`RULE_BACKTEST_MIN_BARS` 100, `RULE_BACKTEST_TRADE_CAP`
+  200, `RULE_BACKTEST_EQUITY_CAP` 120). Ein Verstoß macht die Zelle `BLOCKED`
+  mit Grund `caps exceeded` und **leeren Metriken** — ein gekapptes Ergebnis
+  gibt es nicht. Unbekannte Größen (`null`) sind fail-closed ein Verstoß.
+* **CLI `npm run screening`** (`scripts/run-screening.ts`): `--dry-run` ist der
+  Default, `--execute` der einzige Weg zu einem echten Lauf; dazu
+  `--templates`, `--timeframes`, `--max-instruments` (500), `--max-cells`
+  (5000), `--limit-cells`, `--concurrency` (4), `--as-of`, `--run-id` und die
+  Kostenbremse `--max-candles`. Ausgabe: Tabelle
+  `priority · template · instrument · tf · status · reasons` plus
+  Zusammenfassung je Ergebnis-Token, `BLOCKED`-Gründen und Cap-Zählern.
+  SIGINT/SIGTERM lassen den Lauf als `ABORTED` stehen — fortsetzbar mit
+  `--run-id`.
+* **Telemetrie** `screening_cells_total{result}` mit dem **geschlossenen**
+  Vokabular `discovered/backtested/blocked/capped/failed/skipped` — kein
+  Instrument, kein Template, keine Priorität im Label.
+* **Tests** `tests/screening.runner.test.ts` (27) und
+  `tests/screening.backtestAdapter.test.ts` (11): harte `maxCells`, Caps ⇒
+  `BLOCKED` statt Kappung, 50 Zellen mit Stub << 30 s, bounded Concurrency,
+  bounded Labels, Abbruch ⇒ `ABORTED` mit konsistentem `cells_done` +
+  Fortsetzung, idempotentes Replay. Store und Backtest sind injizierte Ports,
+  es läuft **keine** Engine und **keine** Datenbank.
+* **Pilot-Runbook**
+  [`SCREENING-PILOT.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md):
+  `npm run screening -- --limit-cells=50 --execute` ist nach dem Merge
+  verbindlich. Über eine Kernstunde für 50 Zellen wird 05-04 abgelehnt und
+  STX-12 (`backtestRule()` O(n²)) bekommt Vorrang.
+
+### Changed
+
+* **Projektversion `v0.9.0`** und die kanonischen Versions-/Projektstatus-
+  Dokumente wurden aktualisiert.
+* **Doku:** [`docs/STRATEGY_SCREENING.md`](docs/STRATEGY_SCREENING.md) um den
+  Abschnitt „Runner, CLI und Backtest-Pfad" erweitert;
+  [`docs/architecture/STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md)
+  §1.6 ergänzt und die Lücken-Tabelle aktualisiert (Runner/CLI existieren).
+* **Audit-Tracking:** 05-04 ist umgesetzt und testbelegt; die Annahme steht
+  unter dem Vorbehalt des Pilots.
+
+### Notes
+
+* **`backtest_run_id` bleibt in 05-04 `null`.** `persistBacktestRun()` erwartet
+  einen vollständigen `WalkForwardReport`; aus einem Einzelzellen-Engine-Lauf
+  einen solchen Report zu bauen wäre eine zweite Wahrheit über Läufe. Die
+  Spalte ist nullable (05-03), die Zellen bleiben gültig; der optionale
+  `persist`-Hook im Adapter ist die dokumentierte Naht für einen späteren
+  Prompt.
+* **`crossSectional` bleibt im CLI ungesetzt:** der Scanner-Faktor
+  `crossSectionalMomentum` ist kein Point-in-Time-Snapshot und hat keine
+  `snapshotId` — ein daraus gebauter `CrossSectionalRankContext` wäre erfundene
+  Provenienz. Der Matrix-Bauer setzt seinen dokumentierten Neutralwert 0,5.
+* **Die Equity-Cap wird auf echten Zellen greifen.** Die Equity-Kurve wächst
+  mit den verarbeiteten Kerzen (`RULE_BACKTEST_EQUITY_CAP` = 120); der Pilot
+  muss berichten, wie viele Zellen daran hängen, damit über die
+  Vergleichbarkeitshülle entschieden werden kann.
+* Keine neue Runtime-Dependency, kein neues Env-Flag, keine Migration.
 
 ## [0.8.0] — Strategie-Persistenz: Schemafundament (STX-04-01) (2026-10-01)
 
