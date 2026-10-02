@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -92,6 +92,75 @@ erlaubt, solange sie hier dokumentiert sind).
 * **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
   und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
   die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
+
+## [0.10.1] — Validator: Overfit- & Robustheitsauswertung (STX-06-02) (2026-10-02)
+
+> **Status: Beta, nicht produktionsreif.** Die zweite deterministische
+> Validator-Stufe (06-02): `robustShare` misst das **Plateau** des
+> Kandidatenraums statt des Optimum-Punkts, die IS/OOS-Lücke wird gegen
+> konfigurierbare Grenzen geprüft, der Kandidatenraum wird auf Multiplizität
+> (Multiple Testing) geprüft, und die Holdout-Integrität wird dreifach
+> verifiziert. Reine Funktionen über vorhandene Strukturen: keine IO, keine
+> Uhr, keine neue Kandidatengenerierung, keine LLM-Auswertung.
+> Cost-Stress (06-03), Report + CLI (06-04) und der Validator-Agent (06-05)
+> bleiben offen.
+
+### Added
+
+* **Plateau statt Optimum** (`src/strategies/validator/overfit.ts`, STX-06-02):
+  `plateauMetrics()` wertet die `CandidateScoreRow`-Tabellen eines
+  Walk-Forward-Laufs als Nachbarschafts-Scan aus — `robustShare` (Anteil der
+  Kandidaten mit `passedGates` in **allen** Fenstern), `neverShare`,
+  `stableCount` sowie Median-Rang und Stabilität des gewählten Kandidaten.
+  „19 von 20 Varianten funktionieren“ ist ein Plateaubefund; „19 von 20 sind
+  ein Ausreißer, den 1 nicht“ ist Fragilität — die Zahl macht den Unterschied
+  maschinenlesbar. Der Prompt-Shape bleibt enthalten; additive Felder
+  (`candidateCount`, `windowCount`, `status`, `summary`) tragen den Grund.
+* **IS/OOS-Lücke mit konfigurierbaren Grenzen:** `trainOosGap({ is, oos })`
+  liefert `{ isSharpe, oosSharpe, gap, verdict }` mit den Defaults
+  `gap > 0.5 ⇒ SUSPECT` und `oosSharpe <= 0 ⇒ BROKEN` (beide konfigurierbar,
+  harte Bounds, fail-closed). **`isSharpe` allein entscheidet nie** — ein
+  brillantes IS heilt keine kaputte OOS; ein Aggregat ohne Fenster liefert
+  `UNKNOWN` (nie „OK aus 0 Werten“).
+* **Multiple-Testing-Warnung:** `multipleTestingWarning(n)` — `n <= 5` ohne
+  Zuschlag, `6…20 ⇒ WARNING` im Report, `n > 20 ⇒ BLOCKING`. Die Begründung
+  steht im Doc-Kommentar (Familienfehler 1 − 0.95ⁿ, erwarteter Bestwert unter
+  der Null ≈ √(2·ln n) Standardfehler) und ist bewusst nicht
+  „wegoptimierbar“: Bei 50 Kandidaten ist der beste per Zufall gut.
+* **Holdout-Integrität:** `holdoutIntegrity(holdout, freeze, reference?)`
+  prüft `holdout.from >= freeze.oosTo`, `holdout.candidateId ===
+  freeze.selectedCandidateId` und `freeze.dataManifest.candlesHash`
+  (Existenz, sha256-Form, Referenzvergleich) ⇒
+  `CLEAN | CONTAMINATED | UNKNOWN`; `CONTAMINATED` ⇒ `INCONCLUSIVE`, `CLEAN`
+  bleibt ausdrücklich **kein** `PASS`. Ohne Referenz ist „unverändert“ nicht
+  beweisbar: der Befund ist dann `UNVERIFIED`, nicht still sauber.
+* **39 Tests** (`tests/strategyValidation.overfit.test.ts`): die drei
+  Plateau-Fixtures 1/5, 19/20, 20/20 (drei unterscheidbare Ergebnisse), die
+  strikte „in ALLEN Fenstern“-Semantik, `BROKEN` trotz brilliantem IS,
+  `BLOCKING` ab 21 Kandidaten, Kontamination durch überlappenden Holdout und
+  Hash-Abweichung, `UNKNOWN`-Pfade inklusive fehlender Score-Tabelle sowie der
+  statische IO-Wächter (keine Wert-Importe, keine Kandidatengenerierung).
+
+### Documentation
+
+* **`docs/STRATEGY_VALIDATION.md`** um Teil 2 („Overfit & Robustheit“)
+  erweitert: die vier Auswertungen mit Formeln und Grenzen, die
+  `UNKNOWN`-Regel, die dokumentierten Abweichungen von der Prompt-Skizze
+  (u. a. flache Tabelle = ein Fenster, optionaler `reference`-Hash) und die
+  Testabnahme.
+* **Audit-Tracking** (`v1.1.17`): 06-02 ist ☑, STX-17 bleibt bis 06-04 in
+  Arbeit; Release-Plan nachgezogen (06-02 als eigenes Release `v0.10.1`,
+  Stress 06-03 ⇒ `v0.10.2`, Report 06-04 ⇒ `v0.10.3`, Validator-Agent 06-05 ⇒
+  `v0.10.4`) und Versionshistorie ergänzt.
+
+### Unverändert (Sperren des Prompts)
+
+* `src/backtest/walkforward.ts` — nur gelesen (`CandidateScoreRow`,
+  `FreezeArtifact`, `HoldoutReport`, `WalkForwardAggregate` als Typen); keine
+  Änderung, keine zweite Sortier-/Selektions-Wahrheit außer der dokumentierten
+  Rangfolge-Spiegelung `compareScoreRows`.
+* Keine Kandidatengenerierung (bleibt `runWalkForward`), keine MC-/Cost-Stress-
+  Auswertung (06-03), keine LLM-Auswertung (06-05).
 
 ## [0.10.0] — Validator: deterministischer Annahmen-Audit (STX-06-01) (2026-10-02)
 

@@ -40,7 +40,8 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Strategie-Versionen (Schema, STX-04-01) | `strategyDefinitions`/`strategyVersions` in `src/db/schema.ts` + `drizzle/2026-10-01_strategy_catalog.sql` (`v0.8.0`) | noch kein App-Schreib-/Lesepfad; folgt in 04-02 |
 | Screening-Matrix + Persistenz (STX-05-01…03) | `src/screening/{types,config,priority,matrix,keys,store}.ts` + `strategy_screening_runs`/`strategy_market_results` | eigene Run-/Zelltabellen, kein Universe-Ergebnis in `backtest_runs` |
 | Screening-Runner + CLI (STX-05-04) | `src/screening/{runner,backtestAdapter}.ts` + `scripts/run-screening.ts` | keine zweite Engine (nur `runMultiAssetBacktest()`), keine `worker_threads`, kein `backtestRule()`-Aufruf, kein `persistBacktestRun()` im Screening-Pfad |
-| Annahmen-Audit (STX-06-01) | `src/strategies/validator/assumptions.ts` (`auditAssumptions()` + `assumptionGate()`) | keine Metrik-Auswertung (06-02/06-03), keine LLM-Auswertung (06-05), **keine** Erzeugung von Annahmen |
+| Annahmen-Audit (STX-06-01) | `src/strategies/validator/assumptions.ts` (`auditAssumptions()` + `assumptionGate()`) | keine Metrik-Auswertung (06-03), keine LLM-Auswertung (06-05), **keine** Erzeugung von Annahmen |
+| Overfit- & Robustheitsauswertung (STX-06-02) | `src/strategies/validator/overfit.ts` (`plateauMetrics()`, `trainOosGap()`, `multipleTestingWarning()`, `holdoutIntegrity()`) | keine Änderung an `walkforward.ts`, **keine** Kandidatengenerierung, keine MC-/Cost-Stress-Auswertung (06-03), keine LLM-Auswertung (06-05), keine IO |
 | Strategie-Template-Doku | `docs/STRATEGY_TEMPLATES.md` (**generiert** aus dem Katalog via `npm run docs:templates`) | keine handgepflegte zweite Tabelle; der Vertragstest vergleicht sie byteweise mit dem Generator |
 | Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
 | Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
@@ -293,9 +294,32 @@ Gelesene Konstanten statt zweiter Wahrheiten: `MC_MIN_SAMPLE_TRADES`,
 [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md); Beweis:
 `tests/strategyValidation.assumptions.test.ts` (38 Tests).
 
-**Bewusst offen:** Overfit/Robustheit (06-02), Cost-Stress (06-03), Report +
-CLI (06-04) und der Validator-Agent (06-05). Funding und Survivorship prüft
-dieses Modul nicht — dafür trägt `AuditInput` keine Instrument-Fakten.
+**Bewusst offen:** Cost-Stress (06-03), Report + CLI (06-04) und der
+Validator-Agent (06-05). Funding und Survivorship prüft dieses Modul nicht —
+dafür trägt `AuditInput` keine Instrument-Fakten.
+
+### 1.8 Overfit- & Robustheitsauswertung (STX-06-02, v0.10.1)
+
+`src/strategies/validator/overfit.ts` beantwortet die zweite methodische
+Frage — funktioniert die Strategie, oder funktioniert **das ausgewählte
+Parameterset**? Es liest die vorhandenen Walk-Forward-Strukturen
+(`CandidateScoreRow`, `FreezeArtifact`, `HoldoutReport`,
+`WalkForwardAggregate` als **Typen**) und baut nichts neu: keine IO, keine
+Uhr, keine Kandidatengenerierung, keine Änderung an `walkforward.ts`.
+
+`plateauMetrics()` misst die **Breite** des stabilen Bereichs statt des
+Optimum-Punkts: `robustShare` = Anteil der Kandidaten mit `passedGates` in
+**allen** Fenstern (1/5 ⇒ `0.2`, 19/20 ⇒ `0.95`), `neverShare` = in keinem
+Fenster bestanden, dazu Median-Rang und Stabilität des gewählten Kandidaten.
+`trainOosGap()` urteilt `gap > 0.5 ⇒ SUSPECT`, `oosSharpe <= 0 ⇒ BROKEN` —
+**`isSharpe` allein entscheidet nie**. `multipleTestingWarning()` warnt ab 6
+Kandidaten und blockiert ab 21 (bei 50 ist der beste per Zufall gut, begründet
+im Doc-Kommentar). `holdoutIntegrity()` prüft `holdout.from >= freeze.oosTo`,
+den eingefrorenen Kandidaten und den `candlesHash`-Stand
+(`CLEAN | CONTAMINATED | UNKNOWN`; `CONTAMINATED` ⇒ `INCONCLUSIVE`). Fehlende
+Tabellen/Fakten sind `UNKNOWN` mit Grund — nie „robust, weil nur ein Kandidat
+geprüft wurde". Details: [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md)
+Teil 2; Beweis: `tests/strategyValidation.overfit.test.ts` (39 Tests).
 
 ## 2. Nicht vorhanden — explizite Lücken
 

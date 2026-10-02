@@ -1,17 +1,26 @@
-# Strategie-Validierung — Deterministischer Annahmen-Audit
+# Strategie-Validierung — Annahmen-Audit & Overfit-Auswertung
 
-> **Stand:** `v0.10.0` · **Modul:** [`src/strategies/validator/assumptions.ts`](../src/strategies/validator/assumptions.ts) ·
-> **Tests:** [`tests/strategyValidation.assumptions.test.ts`](../tests/strategyValidation.assumptions.test.ts) ·
-> **Prompt:** [STX-06-01](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-01-assumptions-audit.md) ·
-> **Finding:** [STX-17](audits/2026-09-29-strategy-template-ausbau/findings/STX-17-info-validator-agent-kompatibel.md),
+> **Stand:** `v0.10.1` ·
+> **Module:** [`assumptions.ts`](../src/strategies/validator/assumptions.ts) (Teil 1, STX-06-01) ·
+> [`overfit.ts`](../src/strategies/validator/overfit.ts) (Teil 2, STX-06-02) ·
+> **Tests:** [`tests/strategyValidation.assumptions.test.ts`](../tests/strategyValidation.assumptions.test.ts) (38) ·
+> [`tests/strategyValidation.overfit.test.ts`](../tests/strategyValidation.overfit.test.ts) (39) ·
+> **Prompts:** [STX-06-01](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-01-assumptions-audit.md),
+> [STX-06-02](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-02-overfit.md) ·
+> **Findings:** [STX-17](audits/2026-09-29-strategy-template-ausbau/findings/STX-17-info-validator-agent-kompatibel.md),
 > [STX-01](audits/2026-09-29-strategy-template-ausbau/findings/STX-01-rule-timeframe-blocker.md),
 > [STX-14](audits/2026-09-29-strategy-template-ausbau/findings/STX-14-changepct24h-semantik.md)
 
 Jede Strategie behauptet **durch ihre Existenz**, dass bestimmte Annahmen gelten
-(`StrategyTemplate.assumptions`, STX-03-01). Der Annahmen-Audit prüft, ob diese
-Annahmen im **konkreten Lauf belegt** sind — nicht, ob sie sinnvoll sind (das
-entscheidet ein Mensch), und nicht, ob die Strategie Geld verdient (das messen
-06-02/06-03).
+(`StrategyTemplate.assumptions`, STX-03-01). Der Annahmen-Audit (Teil 1) prüft,
+ob diese Annahmen im **konkreten Lauf belegt** sind — nicht, ob sie sinnvoll
+sind (das entscheidet ein Mensch), und nicht, ob die Strategie Geld verdient
+(das messen 06-02/06-03).
+
+Die Overfit-Auswertung (Teil 2) stellt die zweite methodische Frage: ob nicht
+das **Parameterset, das man ausgewählt hat**, funktioniert — statt der
+Strategie selbst. Sie liest den vorhandenen Walk-Forward-Nachbarschafts-Scan,
+baut aber nichts neu.
 
 Die Frage ist eng: **Hält der Backtest die Bedingungen ein, unter denen die
 Strategie überhaupt eine Aussage ist?**
@@ -246,7 +255,7 @@ Es werden **keine** Annahmen erzeugt — nur die deklarierten geprüft.
 
 | Schritt | Aufgabe | Verhältnis zum Audit |
 |---|---|---|
-| 06-02 Overfit & Robustheit | Plateau, Parameter-Sensitivität | läuft **nach** dem Gate |
+| 06-02 Overfit & Robustheit | Plateau, IS/OOS-Lücke, Multiplizität, Holdout-Integrität | **umgesetzt** in [`overfit.ts`](../src/strategies/validator/overfit.ts) (Teil 2) — läuft **nach** dem Gate |
 | 06-03 Cost-Stress | `feeMultiplier`/`slippageMultiplier` | läuft **nach** dem Gate — ein Kostenstress auf einen Lauf ohne Kosten ist sinnlos |
 | 06-04 Report + CLI | bündelt alles, persistiert Evidence | konsumiert `AssumptionAudit` unverändert |
 | 06-05 Validator-Agent (LLM) | erklärt nur | schreibt ausschließlich `detail jsonb`, nie `result` |
@@ -256,7 +265,7 @@ Gesperrt bleiben: `montecarlo.ts`, `walkforward.ts`, `marketRegime.ts`
 
 ---
 
-## 8. Tests
+## 8. Tests des Annahmen-Audits
 
 ```bash
 node --import tsx --test tests/strategyValidation.assumptions.test.ts
@@ -275,3 +284,167 @@ node --import tsx --test tests/strategyValidation.assumptions.test.ts
 - Determinismus, Eingabe-Treue, `evidence` immer mit Zahl, feste Reihenfolge,
   Schwellen-Override und -Ablehnung, Gate-Verhalten und der statische
   IO-Wächter über den Modulquelltext.
+
+---
+
+# Teil 2 — Overfit & Robustheit (`overfit.ts`, STX-06-02)
+
+Die zentrale methodische Frage: Funktioniert die **Strategie** — oder
+funktioniert **das Parameterset, das man ausgewählt hat**? Der Walk-Forward
+liefert mit `FreezeArtifact.scoreTable` bereits einen vollständigen
+**Nachbarschafts-Scan** (eine Score-Zeile je Kandidat und Fenster, mit
+`passedGates`, `rejectionReason` und vollen Metriken). Teil 2 wertet ihn aus:
+die **Breite** des stabilen Bereichs, nicht den Optimum-Punkt. Reine
+Funktionen über die Typen aus `src/backtest/walkforward.ts` — das Modul wird
+**gelesen**, nie geändert; Kandidaten erzeugt weiterhin nur `runWalkForward`.
+
+## 9. Plateau statt Optimum — `plateauMetrics()`
+
+```ts
+plateauMetrics(scoreTable, { selectedCandidateId? })
+```
+
+| Eingabe | Bedeutung |
+|---|---|
+| flache Tabelle (`CandidateScoreRow[]`) | **ein** Fenster (z. B. `FreezeArtifact.scoreTable`) |
+| verschachtelt (`CandidateScoreRow[][]`) | Tabellen **aller** Fenster in Fenster-Reihenfolge (`freezeArtifacts.map(f => f.scoreTable)`) |
+| `selectedCandidateId` | der eingefrorene Kandidat (Default: Erstplatzierter des **letzten** Fensters = Holdout-Kandidat aus `runWalkForward`); `null` schaltet die Rangauswertung ab |
+
+| Feld | Bedeutung |
+|---|---|
+| `robustShare` | Anteil der Kandidaten mit `passedGates` in **allen** Fenstern — die Plateau-Breite |
+| `neverShare` | Anteil der Kandidaten, die in **keinem** Fenster bestanden |
+| `stableCount` | Anzahl stabiler Kandidaten |
+| `selectedRankMedian` | Median-Rang des gewählten Kandidaten über die Fenster |
+| `selectionStability` | `1 − (Median-Rang − 1) / (Feldgröße − 1)`, geklemmt auf `[0, 1]` |
+
+**„19 von 20 Varianten funktionieren" ist ein Plateaubefund. „19 von 20 sind
+ein Ausreißer, den 1 nicht" ist Fragilität.** Genau diesen Unterschied macht
+`robustShare` maschinenlesbar: 1/5 ⇒ `0.2`, 19/20 ⇒ `0.95`, 20/20 ⇒ `1.0`.
+
+Strikt ist dabei „in ALLEN Fenstern": Ein Kandidat, der in einem Fenster fehlt
+oder dort die Gates verletzt, ist **nicht** stabil — zwei von drei Fenstern
+genügen nicht. Die Rangfolge spiegelt die deterministische Sortierkette des
+Walk-Forwards (`compareScoreRows`: Gates vor Score, dann NetPnl ↓, Trades ↓,
+Max-Drawdown ↑, Kandidaten-ID ↑); eine flache Verkettung mehrerer Fenster wird
+abgewiesen (doppelte `candidateId`), weil Fenstergrenzen ohne `windowIndex`
+nicht rekonstruierbar sind — lieber ein Fehler als ein falscher Median.
+
+## 10. IS/OOS-Lücke — `trainOosGap()`
+
+```ts
+trainOosGap({ is, oos, thresholds? })
+// ⇒ { isSharpe, oosSharpe, gap, verdict: "OK" | "SUSPECT" | "BROKEN" | "UNKNOWN",
+//      thresholds, evidence }
+```
+
+| Regel | Default | Begründung |
+|---|---|---|
+| `gap > suspectGap` ⇒ `SUSPECT` | `0.5` | Eine annualisierte Sharpe-Lücke über 0.5 ist größer als das, was Sampling-Rauschen bei 30-Tage-Fenstern typischerweise erklärt — die Selektion hat sich an IS-Eigenheiten angepasst. |
+| `oosSharpe <= brokenOosAtOrBelow` ⇒ `BROKEN` | `0` | Die eingefrorene Konfiguration verdient ihr Risiko out-of-sample nicht. Das entscheidet **immer**. |
+| Aggregat ohne Fenster | — | `UNKNOWN` mit Grund; `gap: null`. 0 Werte sind keine Aussage — nie „OK aus 0 Werten". |
+
+**`isSharpe` allein entscheidet nie.** Ein brillantes `isSharpe = 9.5` mit
+`oosSharpe = 0` ist `BROKEN`; ein negatives IS mit besserer OOS (`gap` negativ)
+ist `OK`. Die IS-Zahl geht ausschließlich als Minuend in die Lücke ein — die
+Aussage trägt immer die OOS-Seite. Grenzen sind konfigurierbar, aber
+fail-closed: Werte außerhalb von `[0, 100]` bzw. `[-100, 100]` werden
+geworfen, nicht geklemmt.
+
+## 11. Multiple Testing — `multipleTestingWarning()`
+
+| Kandidaten | Ergebnis |
+|---|---|
+| `n <= 5` | keine Warnung |
+| `6…20` | `WARNING` im Report |
+| `n > 20` | `WARNING` **BLOCKING** |
+
+Die Begründung steht im Modul-Doc-Kommentar und ist bewusst **nicht**
+konfigurierbar (`MULTIPLE_TESTING_THRESHOLDS`), damit sie niemand
+„wegoptimiert": Die Selektion nimmt das **Maximum** über n Varianten. Unter der
+Null wächst der erwartete Bestwert mit `√(2·ln n)` Standardfehlern
+(`n = 5` ⇒ ≈ 1.79, `n = 20` ⇒ ≈ 2.45, `n = 50` ⇒ ≈ 2.80), und der
+Familienfehler bei nominal 5 % je Test ist `1 − 0.95ⁿ` (≈ 23 % / 64 % / 92 %).
+Bei 50 Kandidaten ist der beste per Zufall gut — `BLOCKING` heißt: kein `PASS`
+ohne multiplizitätsfeste Evidenz (Plateau **und** OOS **und** unberührter
+Holdout). Das ist keine Übervorsicht, das ist Statistik.
+
+## 12. Holdout-Integrität — `holdoutIntegrity()`
+
+```ts
+holdoutIntegrity(holdout, freeze, reference?)   // freeze = letztes Freeze-Artefakt
+```
+
+| Prüfung | `CONTAMINATED`, wenn … |
+|---|---|
+| `HOLDOUT_AFTER_OOS` | `holdout.from < freeze.oosTo` — der Holdout überlappt die IS/OOS-Entscheidungen |
+| `SELECTION_FROZEN` | `holdout.candidateId !== freeze.selectedCandidateId` — nach dem Holdout wurde (re)selektiert |
+| `CANDLES_HASH` | `reference.candlesHash` übergeben und `freeze.dataManifest.candlesHash` weicht ab — die Kerzenreihe wurde nach dem Freeze verändert |
+
+Ergebnis: `CLEAN | CONTAMINATED | UNKNOWN`; `CONTAMINATED` und `UNKNOWN`
+ergeben `verdict: "INCONCLUSIVE"`, `CLEAN` ergibt `"CLEAR"` — und `CLEAR` ist
+ausdrücklich **kein PASS**, die übrigen Gates entscheiden. Fehlende Artefakte,
+fehlende oder nicht-sha256-förmige Hashes ⇒ `UNKNOWN` (nie „clean aus 0
+Prüfungen"); `CONTAMINATED` schlägt `UNKNOWN`.
+
+**Ohne `reference` ist „unverändert" nicht beweisbar.** Der Befund
+`CANDLES_HASH` ist dann `UNVERIFIED` (Hash vorhanden, 64 Hex-Zeichen, 0
+Vergleiche) und beeinflusst den Gesamtstatus nicht — die Evidenz sagt das
+ausdrücklich, statt den Hash stillschweigend als sauber zu verbuchen.
+
+## 13. Vollständigkeitsgrenze: `UNKNOWN` statt Scheinrobustheit
+
+| Situation | Ergebnis |
+|---|---|
+| keine Score-Tabelle (`null`, `undefined`, leer) | `plateauMetrics().status === "UNKNOWN"` mit Grund; `robustShare: null` — **nicht** „robust, weil nur ein Kandidat geprüft wurde" |
+| weniger als 2 Kandidaten oder leere Fenster-Tabelle | `UNKNOWN`; ein einzelner Kandidat ist kein Nachbarschafts-Scan |
+| IS- oder OOS-Aggregat ohne Fenster | `trainOosGap().verdict === "UNKNOWN"`, `gap: null` |
+| Holdout/Freeze oder Pflichtfelder fehlen | `holdoutIntegrity().status === "UNKNOWN"` ⇒ `INCONCLUSIVE` |
+
+Kennzahlen ohne Stichprobe sind `null`, nie `0` — dieselbe Konvention, die der
+Report (06-04) für `parameterFragility`/`Regime`-Zellen anwendet.
+
+## 14. Abweichungen von der Prompt-Skizze
+
+1. **`trainOosGap({ is, oos })` statt eines einzelnen Aggregats:** Die Lücke
+   braucht **beide** Seiten; ein `WalkForwardAggregate` trägt genau einen
+   Sharpe.
+2. **Flache Tabelle = ein Fenster:** Die Auswertung über alle Fenster braucht
+   die verschachtelte Form; eine flache Verkettung wird abgewiesen.
+3. **`robustShare`/`neverShare` sind `number | null`:** `null` steht für „nicht
+   auswertbar" (Regel aus 06-04: keine Stichprobe ⇒ `null`, nie `0`).
+4. **`holdoutIntegrity(..., reference?)`:** „unverändert" ist nur gegen eine
+   Referenz prüfbar; ohne sie `UNVERIFIED` statt stilles `CLEAN`.
+5. **`TrainOosGap.verdict` kennt `UNKNOWN`** als vierten Wert (Aggregat ohne
+   Fenster).
+6. **Additive Felder** (`candidateCount`, `windowCount`, `status`, `summary`,
+   `thresholds`, `evidence`, `blocking`) tragen den Grund im Report; der
+   Prompt-Shape bleibt jeweils enthalten.
+
+## 15. Tests
+
+```bash
+node --import tsx --test tests/strategyValidation.overfit.test.ts
+```
+
+39 Fälle, keine DB, kein Netz, keine Zeitabhängigkeit, kein
+`runWalkForward`-Aufruf:
+
+- **Plateau:** die drei Fixtures 1/5, 19/20, 20/20 mit drei unterscheidbaren
+  `robustShare`-Werten; strikte „in ALLEN Fenstern"-Semantik; flache Tabelle
+  als Ein-Fenster-Fall; Rangfolge inklusive Gates-vor-Score und Tie-Breakern;
+  Standard-Auswahl (letztes Fenster) und expliziter Kandidat;
+  `UNKNOWN`-Pfade (leer/`null`/ein Kandidat/leere Fenster-Tabelle); Ablehnung
+  verketteter Fenster und unbekannter Kandidaten-IDs.
+- **Lücke:** `BROKEN` trotz `isSharpe = 9.5`; `SUSPECT` ab 0.51, `OK` bei genau
+  0.5; negatives IS mit besserer OOS ⇒ `OK`; Schwellen-Override; `UNKNOWN` bei
+  0 Fenstern; fail-closed bei falschen Schwellen/Feldern.
+- **Multiplizität:** `NONE`/`WARNING`/`BLOCKING` an den Grenzen 5/6 und 20/21
+  sowie bei 50/100; ungültige Eingaben werden geworfen.
+- **Integrität:** Überlappung ⇒ `CONTAMINATED` + `INCONCLUSIVE`; Grenze
+  `from == oosTo` ⇒ `CLEAN`; Kandidatenwechsel; Referenz-Hash gleich/ungleich;
+  `UNVERIFIED` ohne Referenz; `UNKNOWN` bei fehlenden/kaputten Fakten;
+  `CONTAMINATED` schlägt `UNKNOWN`; feste Prüf-Reihenfolge.
+- **Struktur:** Determinismus, Eingabe-Treue und ein statischer Wächter über
+  den Modulquelltext — keine Uhr/Zufall/DB/Datei, **keine Wert-Importe** (nur
+  Typen aus `walkforward.ts`) und keine Kandidatengenerierung.

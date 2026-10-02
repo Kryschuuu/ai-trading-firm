@@ -205,11 +205,24 @@ Engine-Pfad hängt ([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 06-01 | [Annahmen-Audit (deterministisch)](prompts/PROMPT-STX-06-01-assumptions-audit.md) | `src/strategies/validator/assumptions.ts` | 03-09 |
-| 06-02 | [Overfit & Robustheit](prompts/PROMPT-STX-06-02-overfit.md) | `overfit.ts` | 06-01, 04-02 |
+| 06-01 | [Annahmen-Audit (deterministisch)](prompts/PROMPT-STX-06-01-assumptions-audit.md) | ✅ `src/strategies/validator/assumptions.ts` (`v0.10.0`): elf Prüfungen über injizierte `*Facts`, `UNKNOWN` statt Scheingenauigkeit, `assumptionGate()` | 03-09 |
+| 06-02 | [Overfit & Robustheit](prompts/PROMPT-STX-06-02-overfit.md) | ✅ `src/strategies/validator/overfit.ts` (`v0.10.1`): Plateau-`robustShare`, IS/OOS-Lücke (`oosSharpe <= 0` ⇒ `BROKEN`), Multiple-Testing bis `BLOCKING` ab 21 Kandidaten, Holdout-Integrität (`CONTAMINATED` ⇒ `INCONCLUSIVE`) | 06-01, 04-02 |
 | 06-03 | [Cost-Stress-Runner](prompts/PROMPT-STX-06-03-cost-stress.md) | `stress.ts` | 06-01 |
 | 06-04 | [Report + Evidence + CLI](prompts/PROMPT-STX-06-04-validation-report.md) | `report.ts` + `scripts/run-validate-strategy.ts` | 06-02, 06-03, 04-02 |
 | 06-05 | [Validator-Agent (LLM)](prompts/PROMPT-STX-06-05-validator-agent.md) | `agent.ts` + Routing-Klassen | 06-04 |
+
+**Ergebnis 06-01 (2026-10-02, `v0.10.0`):** Der Annahmen-Audit ist das Gate vor
+jeder Metrik-Auswertung — 38 Tests, [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md).
+
+**Ergebnis 06-02 (2026-10-02, `v0.10.1`):** Die Overfit- & Robustheitsauswertung
+liest den vorhandenen Walk-Forward-Nachbarschafts-Scan, statt ihn neu zu bauen:
+`plateauMetrics()` misst die Breite des stabilen Bereichs (`robustShare`), nicht
+den Optimum-Punkt; `trainOosGap()` lässt **nie** den IS-Sharpe allein entscheiden
+(`oosSharpe <= 0` ⇒ `BROKEN`); `multipleTestingWarning()` blockiert ab 21
+Kandidaten; `holdoutIntegrity()` erkennt Kontamination (`INCONCLUSIVE`).
+Fehlende Score-Tabellen sind `UNKNOWN` mit Grund. Keine Änderung an
+`walkforward.ts`, keine Kandidatengenerierung, keine IO/Uhr — 39 Tests.
+Cost-Stress (06-03) und Report + CLI (06-04) bleiben offen.
 
 **Reihenfolge-Logik:** Der Agent kommt **zuletzt**. Ein LLM-Auditor über einen
 nicht-deterministischen Report ist wertlos. 06-01…06-04 sind reine Funktionen ohne
