@@ -97,6 +97,16 @@ export const PROMOTION_POLICY_BOUNDS = {
   paperEvidenceMaxAgeMs: [60_000, 90 * 24 * 60 * 60 * 1000] as const,
   driftMinSample: [1, 10_000] as const,
   recoveryCooldownMs: [0, 30 * 24 * 60 * 60 * 1000] as const,
+  /**
+   * Gültigkeitsbereich des Plateau-Gates der Validierung (STX-06-04, Schritt 5):
+   * Mindest-`robustShare` der Parametervarianten über alle Walk-Forward-Fenster.
+   * Der **Default** (`0.5`) lebt im Validator (`validator/report.ts`), weil dort
+   * das Gate liegt; hier steht nur der Wertebereich, damit die Grenze nicht an
+   * zwei Stellen definiert wird (Prompt: „Falls etwas fehlt: Policy erweitern,
+   * nicht duplizieren"). Kein `POLICY_BODY`-Feld: die Promotion-Gates selbst
+   * lesen den Plateau-Anteil nicht, sie bewerten die resultierende Evidenz.
+   */
+  validationMinPlateauShare: [0, 1] as const,
 } as const;
 
 function clamp(v: number, [min, max]: readonly [number, number]): number {

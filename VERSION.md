@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.2` |
+| **Version** | `v0.10.3` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-02 |
-| **Quellbasiert** | `package.json` (`version: "0.10.2"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.10.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -291,6 +291,35 @@ durch; im kombinierten Report (`buildStressReport()`) stehen `inEngine` und
 `DEFAULT_MAX_STRESS_RUNS = 45` (`3 × 3 × 5`), CLI-Flag `--max-runs`
 (`parseMaxRunsFlag()`). **Abgrenzung:** Report + CLI (06-04) und der
 Validator-Agent (06-05) bleiben offen.
+
+`v0.10.3` liefert die **vierte** Validator-Stufe (STX-06-04) und schließt
+Finding **STX-17** (`src/strategies/validator/report.ts` + `persist.ts`):
+`buildValidationReport()` ist rein (keine Uhr, keine DB, kein Zufall) und
+fällt genau ein Urteil aus `PASS | FAIL | INCONCLUSIVE` über die achtstufige
+Kette `ASSUMPTIONS → HOLDOUT_INTEGRITY → DATA_SUFFICIENCY → OOS_POLICY_GATES →
+TRAIN_OOS_GAP_AND_PLATEAU → COST_STRESS → MULTIPLE_TESTING → FINAL`. Die erste
+Stufe ohne `PASS` entscheidet, alle späteren stehen als `SKIPPED` im
+`gates[]`-Protokoll — kein Score, keine Gewichtung; ein `INCONCLUSIVE` wird
+nicht durch einen späteren `FAIL` überstimmt, und ein `PASS` entsteht nur,
+wenn alle sieben Prüfstufen bestanden sind. Fehlende Vorstufen sind immer
+`INCONCLUSIVE`, nie stilles `PASS`. Schwellen kommen aus der SSoT
+(`evaluateBacktestGate()`/`DEFAULT_PROMOTION_POLICY`, `MC_MIN_SAMPLE_TRADES`,
+`trainOosGap()`/`plateauMetrics()`, `DEFAULT_STRESS_VERDICT_THRESHOLDS`,
+`multipleTestingWarning()`); nur für die Plateau-Grenze wurde
+`PROMOTION_POLICY_BOUNDS.validationMinPlateauShare = [0, 1]` ergänzt (Default
+0.5 am Gate). `aggregateRegimeTrades()` ordnet Trades point-in-time dem letzten
+`regime_snapshots`-Eintrag mit `asOf <= Entry` zu, liest ausschließlich
+`REGIME_EVAL_LABELS` ohne `UNKNOWN`, schließt `UNKNOWN`/nicht zuordenbare
+Trades gezählt aus (**kein `RANGE`-Fallback**, `sharpe` `null` statt `0` unter
+der Mindeststichprobe) und lässt `evaluateRegimeOos` unverändert.
+`writeValidationEvidence()` schreibt idempotent über `recordEvidence()` aus
+`@/strategyLifecycle` (keine eigene Hashfunktion, kein `requestTransition`).
+Die CLI `npm run validate:strategy` (`scripts/run-validate-strategy.ts`) fährt
+Walk-Forward + 06-01/02/03, schreibt Report (`--out`) und Evidenz (`--no-write`
+unterdrückt sie) und endet nur bei `PASS` mit Exit 0 (1 = `FAIL`/
+`INCONCLUSIVE`/Laufzeitfehler, 2 = Bedienfehler). **Abgrenzung:** Nur der
+Validator-Agent (06-05, Shadow-Mode, erklärt nur) bleibt offen; er darf
+ausschließlich `detail jsonb` ergänzen, nie `result`.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

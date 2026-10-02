@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.3** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -92,6 +92,87 @@ erlaubt, solange sie hier dokumentiert sind).
 * **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
   und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
   die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
+
+## [0.10.3] — Validator: Report, Gate-Kette & Evidenz (STX-06-04) (2026-10-02)
+
+> **Status: Beta, nicht produktionsreif.** Die vierte deterministische
+> Validator-Stufe (06-04) führt Annahmen-Audit (06-01), Overfit-Auswertung
+> (06-02) und Cost-Stress (06-03) in **einem** Urteil zusammen und legt es als
+> Evidenz ab: `result` kennt genau `PASS | FAIL | INCONCLUSIVE` — kein Score,
+> keine Gewichtung, kein „knapp bestanden". Der Validator promoviert nie; er
+> schreibt ausschließlich über `recordEvidence()`. Nur der Validator-Agent
+> (06-05) bleibt offen.
+
+### Added
+
+* **Report + achtstufige Gate-Kette** (`src/strategies/validator/report.ts`,
+  STX-06-04): `buildValidationReport()` ist rein (keine Uhr, keine DB, kein
+  Zufall) und liefert `StrategyValidationReport` mit `result`, Identität
+  (`strategyKey`/`strategyVersion`/`strategyVersionId`/`templateId`/
+  `templateVersion`/`class`), `metrics` (Sharpe, Sortino, Drawdown, Win-Rate,
+  Profit-Faktor, Erwartungswert, Trades, Netto-PnL), `robustness`,
+  `overfitting`, `assumptions`, `regimes`, `notes`, `evidenceHash`,
+  `policyVersion`/`codeVersion`/`dataVersion` und der Zeit-Trias
+  `eventTime ≤ availableAt ≤ computedAt`. Die Kette läuft in fester
+  Reihenfolge `ASSUMPTIONS → HOLDOUT_INTEGRITY → DATA_SUFFICIENCY →
+  OOS_POLICY_GATES → TRAIN_OOS_GAP_AND_PLATEAU → COST_STRESS →
+  MULTIPLE_TESTING → FINAL`: die erste Stufe ohne `PASS` entscheidet, alle
+  späteren stehen als `SKIPPED` im `gates[]`-Protokoll; `PASS` gibt es nur,
+  wenn alle sieben Prüfstufen bestanden sind. Fehlende Vorstufen (`null`) sind
+  immer `INCONCLUSIVE`, nie stilles `PASS`; ein `INCONCLUSIVE` wird nicht
+  durch einen späteren `FAIL` überstimmt. Schwellen kommen unverändert aus der
+  SSoT (`evaluateBacktestGate()`/`DEFAULT_PROMOTION_POLICY`,
+  `MC_MIN_SAMPLE_TRADES`, `trainOosGap()`/`plateauMetrics()`,
+  `DEFAULT_STRESS_VERDICT_THRESHOLDS`, `multipleTestingWarning()`).
+  `assertReportHashIntegrity()` prüft beide Hashfelder fail-closed.
+* **Regime-Aggregation (ADR-009/ADR-E2)** (`aggregateRegimeTrades()`): ordnet
+  jeden Trade point-in-time dem letzten bestätigten `regime_snapshots`-Eintrag
+  mit `asOf <= Entry` zu (deterministisch sortiert nach
+  `(asOf, featureVersion, modelVersion)`), liest ausschließlich
+  `REGIME_EVAL_LABELS` ohne `UNKNOWN` und schließt `UNKNOWN`-Snapshots sowie
+  Trades ohne Snapshot **gezählt** aus (kein `RANGE`-Fallback). `sharpe` ist
+  `null` statt `0`, solange eine Zelle unter `minSampleTrades` (Default 30,
+  kleinster Wert 2) liegt oder keine Streuung hat; `regimeStability` und die
+  Feature-/Modellversionen der verwendeten Snapshots stehen im Report.
+  `evaluateRegimeOos` (Marktvermessung) bleibt unverändert.
+* **Evidence-Writer** (`src/strategies/validator/persist.ts`):
+  `writeValidationEvidence()`/`writeValidationEvidenceDetailed()` rufen
+  ausschließlich `recordEvidence()` aus `@/strategyLifecycle` auf —
+  idempotent über `sle1:`-`content_hash`/`slei1:`-`idempotency_key` (UNIQUE,
+  Retry und parallele Läufe liefern genau eine Zeile), mit Report-Hash-Prüfung
+  vor jedem Schreibversuch. **Kein `requestTransition`**, keine eigene
+  Hashfunktion, kein direkter DB-Zugriff.
+* **CLI + npm-Skript** (`scripts/run-validate-strategy.ts`,
+  `npm run validate:strategy`): `--strategy-version-id` XOR `--create`,
+  `--template/--symbol/--timeframe`, `--params=<json>` (Objekt oder
+  Nachbarschafts-Array ≤ 5), `--from/--to` (Pflicht), `--max-runs`,
+  `--holdout-days`, `--embargo-hours`, `--out=<pfad>`, `--no-write`, `--help`;
+  Exit 0 nur bei `PASS`, 1 bei `FAIL`/`INCONCLUSIVE`/Laufzeitfehler, 2 bei
+  Bedienfehlern.
+* **Barrel + Doku:** `src/strategies/validator/index.ts` (fünf Module, eine
+  Richtung); Teil 4 in [`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md)
+  (Report-Felder, Gate-Kette, Grenzen, Regime-Aggregation, CLI) und §1.10 in
+  [`docs/architecture/STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md).
+* **Tests:** `tests/strategyValidation.report.test.ts` (32 Fälle — eine Regel
+  je Gate, `INCONCLUSIVE`-schlägt-`FAIL`, Skip-Semantik, ADR-009-Regimefälle,
+  Hash-/IO-Wächter) und `tests/strategyValidation.persist.test.ts` (6 Fälle auf
+  echtem PostgreSQL — genau eine Zeile je Inhalt, Retry/Parallel-Dedupe,
+  Zeitsemantik-CHECK, keine Transition-/State-Zeile).
+
+### Changed
+
+* **`PROMOTION_POLICY_BOUNDS.validationMinPlateauShare = [0, 1]`**
+  (`src/strategyLifecycle/policies.ts`): Der Gültigkeitsbereich der
+  Plateau-Grenze gehört zur Policy, der Default (`0.5`) bleibt am Gate
+  (`DEFAULT_VALIDATION_GATE_BOUNDS`); `resolveValidationGateBounds()` wirft
+  außerhalb des Rahmens fail-closed. Dies ist die **einzige** Änderung an
+  `src/strategyLifecycle/**` in diesem Release.
+
+### Docs
+
+* **Audit-Stand `v1.1.19`:** STX-17 geschlossen, STX-03 abgeschlossen
+  (Regime-Naht); `ROADMAP.md`, `VERSIONING.md`, `README.md` und
+  `remediation/TRACKING.md` nachgezogen.
 
 ## [0.10.2] — Validator: Cost- & Slippage-Stress-Runner (STX-06-03) (2026-10-02)
 

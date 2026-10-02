@@ -353,6 +353,49 @@ ohne ein drittes Kostenmodell:
   [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md) Teil 3; Beweis:
   `tests/strategyValidation.stress.test.ts` (22 Tests).
 
+### 1.10 Validierungs-Report, Gate-Kette & Evidenz (STX-06-04, v0.10.3)
+
+`src/strategies/validator/report.ts` + `persist.ts` führen Teil 1–3 in **einem**
+Urteil zusammen und legen es als Evidenz ab (`result` ⊆
+`PASS | FAIL | INCONCLUSIVE`, kein Score, keine Gewichtung):
+
+- **Achtstufige Kette, feste Reihenfolge:**
+  `ASSUMPTIONS → HOLDOUT_INTEGRITY → DATA_SUFFICIENCY → OOS_POLICY_GATES →
+  TRAIN_OOS_GAP_AND_PLATEAU → COST_STRESS → MULTIPLE_TESTING → FINAL`.
+  Die erste Stufe ohne `PASS` entscheidet; alle späteren stehen als `SKIPPED`
+  im `gates[]`-Protokoll und werden nicht ausgewertet. `INCONCLUSIVE` (fehlende
+  oder unklare Fakten) wird nie durch einen späteren `FAIL` überstimmt, weil
+  dieser gar nicht mehr erreicht wird; `PASS` gibt es nur, wenn alle sieben
+  Prüfstufen bestanden sind. Fehlende Vorstufen (`null`) sind immer
+  `INCONCLUSIVE`, nie stilles `PASS`.
+- **Schwellen aus der SSoT:** Stufe 4 ruft unverändert `evaluateBacktestGate()`
+  (`DEFAULT_PROMOTION_POLICY`: 100 Trades, 25 % Drawdown, Profit-Faktor 0.9,
+  Datenqualität 0.8, 14 Tage Fenster, 30 Tage Evidenzalter);
+  Stufe 3 nutzt `MC_MIN_SAMPLE_TRADES` (30), Stufe 5 `trainOosGap()`/
+  `plateauMetrics()` (Default `minPlateauRobustShare` 0.5), Stufe 6
+  `DEFAULT_STRESS_VERDICT_THRESHOLDS`, Stufe 7 `multipleTestingWarning()`.
+  Für die Plateau-Grenze wurde `PROMOTION_POLICY_BOUNDS.validationMinPlateauShare
+  = [0, 1]` ergänzt (einzige Lifecycle-Änderung; Rahmen dort, Default am Gate).
+- **Regime-Aggregation (ADR-009/ADR-E2):** `aggregateRegimeTrades()` ordnet
+  jeden Trade dem letzten `regime_snapshots`-Eintrag mit `asOf <= Entry` zu
+  (point-in-time, sortiert nach `(asOf, featureVersion, modelVersion)`),
+  ausschließlich über `REGIME_EVAL_LABELS` ohne `UNKNOWN`. `UNKNOWN`-Snapshots
+  und Trades ohne Snapshot werden gezählt und ausgeschlossen — **kein
+  `RANGE`-Fallback**; `sharpe` ist `null` unter der Mindeststichprobe, nie `0`.
+  `evaluateRegimeOos()` (Marktvermessung) bleibt unverändert.
+- **Ein Schreibpfad:** `writeValidationEvidence()` ruft `recordEvidence()` aus
+  `@/strategyLifecycle` auf (idempotent über `sle1:`/`slei1:`-Hashes und
+  UNIQUE-Indizes). Es gibt **keinen** `requestTransition`-Aufruf im Validator:
+  Evidenz schreiben ≠ promovieren.
+- **CLI:** `npm run validate:strategy` (`scripts/run-validate-strategy.ts`) löst
+  eine Version auf oder legt sie an (`--create`), fährt Walk-Forward + 06-01/02/03,
+  schreibt Report (`--out`) und Evidenz (`--no-write` unterdrückt sie) und endet
+  mit Exit 0 nur bei `PASS` (1 = `FAIL`/`INCONCLUSIVE`/Laufzeitfehler,
+  2 = Bedienfehler). Details:
+  [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md) Teil 4; Beweise:
+  `tests/strategyValidation.report.test.ts` (32 Tests),
+  `tests/strategyValidation.persist.test.ts` (6 Tests).
+
 ## 2. Nicht vorhanden — explizite Lücken
 
 Folgende Pfade/Tabellen existieren **noch nicht** im Ist-Zustand (geprüft via `ls` / `grep`).
