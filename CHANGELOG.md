@@ -21,10 +21,43 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.4** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.5** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
+
+## [0.10.5] — Copy-Domänenmodell, Symbol-Mapping, Sizing (STX-07-01) (2026-10-02)
+
+> **Status: Beta.** Reines Domänenmodell des Copy-Tradings (Phase 7 · Paket
+> 00-02). Keine IO, keine DB, kein Netz, kein Leader-Adapter, keine
+> Policy-Engine — bewusst auf die fachliche Form beschränkt. STX-16: der
+> einzige Copy-Modus ist `SIMULATE_ONLY` (kein Live-Pfad).
+
+### Added
+
+* **STX-07-01 — Copy-Domänenmodell (rein):** `src/copy/types.ts`,
+  `src/copy/mapping.ts`, `src/copy/sizing.ts` (barrel `src/copy/index.ts`).
+  - `NormalizedLeaderTrade` normalisiert auf die **Handlungsabsicht**
+    `action: OPEN | INCREASE | DECREASE | CLOSE` (nicht auf Order-Übertragung).
+  - `CopyMode = "SIMULATE_ONLY"` — Enum mit **genau einem Wert** (STX-16,
+    organisatorisch hoch); kein Env-Flag, kein Schalter, kein Live-Pfad.
+  - `mapLeaderSymbol(venue, raw)` nutzt die SSoT `tryNormalizeVenueSymbol`
+    (`@/symbols/normalize`) und leitet die **venue-übergreifende** ID ab
+    (Stablecoin-Quote ≡ USD). Kein `String.replace` auf den Roh-Input;
+    unauflösbar ⇒ `{ok:false}` mit Grund, **kein** Fallback.
+  - `computeFollowerNotional` mit `FIXED_AMOUNT` / `FIXED_RATIO` /
+    `EQUITY_RATIO` — fail-closed, **kein** stiller Moduswechsel
+    (EQUITY_RATIO ohne `leaderEquity` ⇒ `{ok:false}`). `CLOSE` ⇒ Notional 0,
+    Intent bleibt bestehen.
+  - `applyLeveragePolicy` (`FOLLOW_LEADER` klemmt auf `cap` statt abzulehnen,
+    `CAP`, `IGNORE`, `RISK_NORMALIZED`).
+
+### Tests
+
+* **STX-07-01:** `tests/copy.domain.test.ts` (rein, keine DB) deckt
+  EQUITY_RATIO-Prozentrechnung, `leaderEquity: 0`/`null`, CLOSE-Intent,
+  FOLLOW_LEADER-Clamp (10×→3×), Mapping der vier Schreibweisen auf dieselbe
+  cross-venue-ID sowie unauflösbares Symbol ab.
 
 ## [0.10.4] — Validator-Agent: erklärende Shadow-Auswertung (STX-06-05) (2026-10-02)
 

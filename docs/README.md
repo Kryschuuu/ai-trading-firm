@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.10.4` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.10.5` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
