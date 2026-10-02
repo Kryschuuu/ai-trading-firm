@@ -40,6 +40,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Strategie-Versionen (Schema, STX-04-01) | `strategyDefinitions`/`strategyVersions` in `src/db/schema.ts` + `drizzle/2026-10-01_strategy_catalog.sql` (`v0.8.0`) | noch kein App-Schreib-/Lesepfad; folgt in 04-02 |
 | Screening-Matrix + Persistenz (STX-05-01…03) | `src/screening/{types,config,priority,matrix,keys,store}.ts` + `strategy_screening_runs`/`strategy_market_results` | eigene Run-/Zelltabellen, kein Universe-Ergebnis in `backtest_runs` |
 | Screening-Runner + CLI (STX-05-04) | `src/screening/{runner,backtestAdapter}.ts` + `scripts/run-screening.ts` | keine zweite Engine (nur `runMultiAssetBacktest()`), keine `worker_threads`, kein `backtestRule()`-Aufruf, kein `persistBacktestRun()` im Screening-Pfad |
+| Annahmen-Audit (STX-06-01) | `src/strategies/validator/assumptions.ts` (`auditAssumptions()` + `assumptionGate()`) | keine Metrik-Auswertung (06-02/06-03), keine LLM-Auswertung (06-05), **keine** Erzeugung von Annahmen |
 | Strategie-Template-Doku | `docs/STRATEGY_TEMPLATES.md` (**generiert** aus dem Katalog via `npm run docs:templates`) | keine handgepflegte zweite Tabelle; der Vertragstest vergleicht sie byteweise mit dem Generator |
 | Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
 | Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
@@ -271,6 +272,31 @@ entscheidet, ob 05-04 angenommen oder zugunsten von STX-12 verworfen wird.
 Lauf keine zweite Lauf-Wahrheit begründen darf. Der `persist`-Hook im Adapter
 ist die dokumentierte Naht für einen späteren Prompt.
 
+### 1.7 Annahmen-Audit (STX-06-01, v0.10.0)
+
+`src/strategies/validator/assumptions.ts` ist das Gate **vor** jeder
+Metrik-Auswertung: `auditAssumptions()` prüft als **reine** Funktion über
+injizierte `*Facts` (keine IO, keine Uhr, keine DB), ob die deklarierten
+Annahmen eines Templates (`StrategyTemplate.assumptions`, 03-01) im konkreten
+Lauf belegt sind. Elf Prüfungen in fester Reihenfolge — Gebühren, Slippage,
+Spread, Buchtiefe, Warmup, Stichprobe, Deckel, Leakage, Intraday-Anker,
+`changePct24h` (STX-14) und Fill-Modell —, jede Evidenz mit Zahl.
+
+Zwei Regeln tragen das Modul: Unter `MC_MIN_SAMPLE_TRADES` (30) liefert
+`TRADES_SUFFICIENT` `UNKNOWN` und **nie** `VIOLATED`; eine kritische
+Template-Annahme mit `VIOLATED` **oder** `UNKNOWN` macht das Gesamtergebnis zu
+`INCONCLUSIVE`, nicht zu `FAIL` — ein nicht prüfbarer Lauf ist kein Beweis
+gegen die Strategie. `assumptionGate()` gibt 06-02/06-03 nur bei `PASS` frei.
+Gelesene Konstanten statt zweiter Wahrheiten: `MC_MIN_SAMPLE_TRADES`,
+`RULE_BACKTEST_TRADE_CAP`/`EQUITY_CAP`, `SUPPORTED_TIMEFRAME_MS`,
+`RULE_FIELD_LABELS`. Details und die fünf dokumentierten Prompt-Abweichungen:
+[`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md); Beweis:
+`tests/strategyValidation.assumptions.test.ts` (38 Tests).
+
+**Bewusst offen:** Overfit/Robustheit (06-02), Cost-Stress (06-03), Report +
+CLI (06-04) und der Validator-Agent (06-05). Funding und Survivorship prüft
+dieses Modul nicht — dafür trägt `AuditInput` keine Instrument-Fakten.
+
 ## 2. Nicht vorhanden — explizite Lücken
 
 Folgende Pfade/Tabellen existieren **noch nicht** im Ist-Zustand (geprüft via `ls` / `grep`).
@@ -294,7 +320,7 @@ Siehe `../BETA_STATUS.md`.
 2. **Neue Strategieklasse / Regime / Eligibility / Kosten:** Erweitere bestehende SSoT (`src/lib/signalDecay.ts` `STRATEGY_CLASS_KEYS`, `src/lib/marketRegime.ts` `MarketRegime`, `src/universe/*` + `crossSectional/types.ts` `EligibilityConfig`, `src/backtest/types.ts` `BacktestEngineConfig.feeModel` + `src/backtest/montecarlo.ts` `MonteCarloStressConfig`); kein zweites Vokabular, kein drittes Kostenmodell. Klassen- und Regime-Vokabular ändert nur ein neues ADR (ADR-008, ADR-009), Universe-Gewichte nur die `PortfolioConstruction`-Schicht aus ADR-010.
 3. **Neues Scanner-/Ranking-Verhalten:** Erweitere `src/scanner/*` (Faktor in `factors/` + Gewicht in `scanner.config.json`) bzw. `src/crossSectional/*`; keine neue Spec-Datei, SSoT bleibt Config + bestehende Typen.
 4. **Neues Lifecycle-/Evidenz-/Fill-/Symbol-Verhalten:** Erweitere `src/strategyLifecycle/*`, `src/executionQuality/` + `src/brokers/reconciliation.ts`, `src/symbols/normalize.ts`; kein Copy-Reconciler, kein String-Replace.
-5. **Neue Domäne (Screening, Copy, Strategie-Persistenz):** Für Phase 4 existiert seit 04-01 (`v0.8.0`) das Schema `strategy_definitions`/`strategy_versions`; der App-Service folgt in 04-02. `src/screening/` mit Matrix, Priorität, Persistenz, Runner, Backtest-Job-Adapter und CLI ist vorhanden (§1.5, §1.6); ein neuer Screening-Aufruf geht über `runScreening()` oder `npm run screening`, nie über einen eigenen Engine-Aufruf. `src/copy/` fehlt weiterhin (Phase 7). **Innerhalb** von `src/strategies/` gilt: Neue Templates gehen über `catalog.ts` + `templates/`; eine `RuleSpec` entsteht **ausschließlich** über `compiler.ts` (§1.2) — kein zweiter Aufrufer von `buildRule()`, kein `sanitizeRuleSpec()`-Aufruf außerhalb des Compilers für Template-Regeln.
+5. **Neue Domäne (Screening, Copy, Strategie-Persistenz):** Für Phase 4 existiert seit 04-01 (`v0.8.0`) das Schema `strategy_definitions`/`strategy_versions`; der App-Service folgt in 04-02. `src/screening/` mit Matrix, Priorität, Persistenz, Runner, Backtest-Job-Adapter und CLI ist vorhanden (§1.5, §1.6); ein neuer Screening-Aufruf geht über `runScreening()` oder `npm run screening`, nie über einen eigenen Engine-Aufruf. Eine Validierungsprüfung gehört in `src/strategies/validator/` und läuft **vor** den Metriken (`assumptionGate()`, §1.7); sie erzeugt keine Annahmen, sondern prüft die deklarierten. `src/copy/` fehlt weiterhin (Phase 7). **Innerhalb** von `src/strategies/` gilt: Neue Templates gehen über `catalog.ts` + `templates/`; eine `RuleSpec` entsteht **ausschließlich** über `compiler.ts` (§1.2) — kein zweiter Aufrufer von `buildRule()`, kein `sanitizeRuleSpec()`-Aufruf außerhalb des Compilers für Template-Regeln.
 
 ## 4. Verweise
 
