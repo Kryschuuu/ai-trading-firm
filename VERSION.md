@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.1` |
+| **Version** | `v0.10.2` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-02 |
-| **Quellbasiert** | `package.json` (`version: "0.10.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.10.2"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -264,8 +264,33 @@ entscheidet nie**. `multipleTestingWarning(n)` warnt ab 6 Kandidaten und
 `holdout.candidateId === freeze.selectedCandidateId` und den
 `candlesHash`-Stand (`CLEAN | CONTAMINATED | UNKNOWN`; `CONTAMINATED` ⇒
 `INCONCLUSIVE`). Fehlende Tabellen/Fakten liefern `UNKNOWN` mit Grund — nie
-„robust, weil nur ein Kandidat geprüft wurde“. **Abgrenzung:** Cost-Stress
-(06-03), Report + CLI (06-04) und der Validator-Agent (06-05) bleiben offen.
+„robust, weil nur ein Kandidat geprüft wurde“.
+
+`v0.10.2` liefert die **dritte** Validator-Stufe (STX-06-03) mit
+`src/strategies/validator/stress.ts` und schließt Finding **STX-11** ohne
+drittes Kostenmodell: `COST_STRESS_SCENARIOS` definiert die drei
+versionierten Szenarien `base` (1× Gebühren, 5 bp Slippage), `double`
+(2× Gebühren, 10 bp Slippage) und `triple` (3× Gebühren, 20 bp Slippage;
+Bps-Werte als normative Stress-Annahmen dokumentiert, tatsächliche Kosten im
+Basislauf prüft 06-01). Schicht 1 (`runInEngineStress()`,
+`summarizeStressSweep()`) fährt pro Szenario genau **einen** Walk-Forward-Lauf
+mit angepasstem `BacktestEngineConfig` (`feeModel` skaliert,
+`slippageModel: "fixed"`, `fixedSlippageBps`; `executionModel` bleibt der des
+Referenzlaufs: `"legacy" | "paper" | "event_replay"`). `base` ist
+byte-identisch zum Referenzlauf; `slippageModel: "none"` im Referenzlauf wird
+fail-closed mit `{ ok: false, errors }` abgewiesen (kein stilles Hochrechnen).
+`summarizeStressSweep()` bestimmt `degradationRatio =
+OOS-Sharpe(triple) / OOS-Sharpe(base)`, interpoliert `breakevenMultiplier`
+linear zwischen den Szenarien (`null` bei `triple.netPnl > 0` ⇒ „hält
+mindestens 3×") und vergibt das Verdikt `COST_ROBUST` (`>= 0.6` **und**
+`triple.netPnl > 0`), `COST_SENSITIVE` (`[0.3, 0.6)`) oder `COST_DEPENDENT`
+(`< 0.3`). Schicht 2 (`runPostHocStress()`) reicht das Trade-Log dünn an
+`runMonteCarloSimulation()` mit `stress: { feeMultiplier, slippageMultiplier }`
+durch; im kombinierten Report (`buildStressReport()`) stehen `inEngine` und
+`postHoc` strikt getrennt. Harte Laufzeit-Bounds:
+`DEFAULT_MAX_STRESS_RUNS = 45` (`3 × 3 × 5`), CLI-Flag `--max-runs`
+(`parseMaxRunsFlag()`). **Abgrenzung:** Report + CLI (06-04) und der
+Validator-Agent (06-05) bleiben offen.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
@@ -305,7 +330,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/features/` | Point-in-Time Feature Store (versionierte Featurewerte) |
 | `src/perpdata/` | Historische Perpetual-Daten (Funding, Open Interest, Liquidationen) |
 | `src/sentiment/`, `src/crossSectional/`, `src/confluence/` | Research-Schicht: strukturiertes Sentiment, Cross-Sectional Ranking, MTF-Konfluenz |
-| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09); seit v0.7.6 vertraglich abgesichert über `tests/strategies.templates.test.ts` und dokumentiert in der generierten [`docs/STRATEGY_TEMPLATES.md`](docs/STRATEGY_TEMPLATES.md) (03-10); seit v0.10.0 `validator/assumptions.ts` — deterministischer Annahmen-Audit vor jeder Metrik-Auswertung (STX-06-01); seit v0.10.1 `validator/overfit.ts` — Plateau (`robustShare`), IS/OOS-Lücke, Multiple-Testing-Warnung und Holdout-Integrität ([`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md), STX-06-02) |
+| `src/strategies/` | **Neu seit v0.7.0:** versionierte Strategie-Artefakte — `types.ts` (Vertrag, reine Typen) und `catalog.ts` (eine Registry, Validierung beim Import); `templates/` mit `ema-adx-trend` (v0.7.1), `macd-momentum` (v0.7.2), `rsi-mean-reversion` (v0.7.3, Klasse `mean-reversion`) sowie `bollinger-squeeze` (Klasse `breakout`), `vwap-pullback` und `donchian-breakout` (alle v0.7.4) — **alle sechs** geplanten Templates; seit v0.7.5 `compiler.ts` als einziger Aufrufer von `buildRule()` + `sanitizeRuleSpec()` (STX-05/03-09); seit v0.7.6 vertraglich abgesichert über `tests/strategies.templates.test.ts` und dokumentiert in der generierten [`docs/STRATEGY_TEMPLATES.md`](docs/STRATEGY_TEMPLATES.md) (03-10); seit v0.10.0 `validator/assumptions.ts` — deterministischer Annahmen-Audit vor jeder Metrik-Auswertung (STX-06-01); seit v0.10.1 `validator/overfit.ts` — Plateau (`robustShare`), IS/OOS-Lücke, Multiple-Testing-Warnung und Holdout-Integrität (STX-06-02); seit v0.10.2 `validator/stress.ts` — zweischichtiger Cost- & Slippage-Stress-Runner (`runInEngineStress`, `summarizeStressSweep`, `runPostHocStress`; [`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md), STX-06-03) |
 | `src/strategyLifecycle/` | 9-Zustands-Lifecycle-Strategie mit Driftgates (Backtest↔Paper↔Live), n ≥ 100 |
 | `src/devilsAdvocate/` | Adversaler Falsifikations-Step (nur defensive Risiko-Wirkung) |
 | `src/promptPerformance/` | Prompt-Artefakte, Run-Provenanz, Metriken je Prompt-Version |

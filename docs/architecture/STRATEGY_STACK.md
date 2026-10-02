@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-10-02 · **Code-Version:** v0.9.0 (Beta)
+> **Status:** Ist-Zustand · **Stand:** 2026-10-02 · **Code-Version:** v0.10.2 (Beta)
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)
@@ -42,6 +42,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Screening-Runner + CLI (STX-05-04) | `src/screening/{runner,backtestAdapter}.ts` + `scripts/run-screening.ts` | keine zweite Engine (nur `runMultiAssetBacktest()`), keine `worker_threads`, kein `backtestRule()`-Aufruf, kein `persistBacktestRun()` im Screening-Pfad |
 | Annahmen-Audit (STX-06-01) | `src/strategies/validator/assumptions.ts` (`auditAssumptions()` + `assumptionGate()`) | keine Metrik-Auswertung (06-03), keine LLM-Auswertung (06-05), **keine** Erzeugung von Annahmen |
 | Overfit- & Robustheitsauswertung (STX-06-02) | `src/strategies/validator/overfit.ts` (`plateauMetrics()`, `trainOosGap()`, `multipleTestingWarning()`, `holdoutIntegrity()`) | keine Änderung an `walkforward.ts`, **keine** Kandidatengenerierung, keine MC-/Cost-Stress-Auswertung (06-03), keine LLM-Auswertung (06-05), keine IO |
+| Cost- & Slippage-Stress-Runner (STX-06-03) | `src/strategies/validator/stress.ts` (`COST_STRESS_SCENARIOS`, `runInEngineStress()`, `summarizeStressSweep()`, `runPostHocStress()`, `buildStressReport()`) | **kein** drittes Kostenmodell (STX-11), keine eigene Monte-Carlo-Implementierung (`runMonteCarloSimulation`), keine Änderung an `montecarlo.ts`/`BacktestEngineConfig`/`FillSimulator` |
 | Strategie-Template-Doku | `docs/STRATEGY_TEMPLATES.md` (**generiert** aus dem Katalog via `npm run docs:templates`) | keine handgepflegte zweite Tabelle; der Vertragstest vergleicht sie byteweise mit dem Generator |
 | Lifecycle + Evidenz | `src/strategyLifecycle/*` | — |
 | Symbol-SSoT | `src/symbols/normalize.ts` | kein String-Replace |
@@ -294,9 +295,9 @@ Gelesene Konstanten statt zweiter Wahrheiten: `MC_MIN_SAMPLE_TRADES`,
 [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md); Beweis:
 `tests/strategyValidation.assumptions.test.ts` (38 Tests).
 
-**Bewusst offen:** Cost-Stress (06-03), Report + CLI (06-04) und der
-Validator-Agent (06-05). Funding und Survivorship prüft dieses Modul nicht —
-dafür trägt `AuditInput` keine Instrument-Fakten.
+**Bewusst offen:** Report + CLI (06-04) und der Validator-Agent (06-05);
+Cost-Stress (06-03) steht in §1.9. Funding und Survivorship prüft dieses Modul
+nicht — dafür trägt `AuditInput` keine Instrument-Fakten.
 
 ### 1.8 Overfit- & Robustheitsauswertung (STX-06-02, v0.10.1)
 
@@ -320,6 +321,37 @@ den eingefrorenen Kandidaten und den `candlesHash`-Stand
 Tabellen/Fakten sind `UNKNOWN` mit Grund — nie „robust, weil nur ein Kandidat
 geprüft wurde". Details: [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md)
 Teil 2; Beweis: `tests/strategyValidation.overfit.test.ts` (39 Tests).
+
+### 1.9 Cost- & Slippage-Stress-Runner (STX-06-03, v0.10.2)
+
+`src/strategies/validator/stress.ts` schließt Finding
+[STX-11](../audits/2026-09-29-strategy-template-ausbau/findings/STX-11-cost-stress-existiert.md)
+ohne ein drittes Kostenmodell:
+
+- **Schicht 1 — In-Engine-Stress (`runInEngineStress`, `summarizeStressSweep`):**
+  Führt pro Szenario aus `COST_STRESS_SCENARIOS` (`base` 1×/5 bp, `double`
+  2×/10 bp, `triple` 3×/20 bp) genau **einen** Walk-Forward-Lauf mit
+  angepasstem `BacktestEngineConfig` aus (`feeModel` skaliert,
+  `slippageModel: "fixed"`, `fixedSlippageBps`; `executionModel` bleibt der des
+  Referenzlaufs: `"legacy" | "paper" | "event_replay"`). `base` ist
+  byte-identisch zum Referenzlauf. Ist im Referenzlauf `slippageModel: "none"`
+  (oder 0-Kosten) konfiguriert, bricht der Runner fail-closed mit
+  `{ ok: false, errors }` ab — kein stilles Hochrechnen. `summarizeStressSweep()`
+  berechnet `degradationRatio = OOS-Sharpe(triple) / OOS-Sharpe(base)`,
+  interpoliert `breakevenMultiplier` linear zwischen den Szenarien (`null` bei
+  `triple.netPnl > 0` ⇒ „hält mindestens 3×") und vergibt das Verdikt
+  `COST_ROBUST` (`>= 0.6` **und** `triple.netPnl > 0`), `COST_SENSITIVE`
+  (`[0.3, 0.6)`) oder `COST_DEPENDENT` (`< 0.3`).
+- **Schicht 2 — Post-hoc-Stress (`runPostHocStress`):** Dünner Durchreiche-Adapter
+  auf `runMonteCarloSimulation` (`src/backtest/montecarlo.ts`) mit
+  `stress: { feeMultiplier, slippageMultiplier }` — keine eigene
+  Monte-Carlo-Implementierung. Im kombinierten Report (`buildStressReport()`)
+  stehen `inEngine` und `postHoc` strikt getrennt.
+- **Laufzeit-Bounds:** Default `DEFAULT_MAX_STRESS_RUNS = 45` (`3 Szenarien ×
+  3 Fenster × 5 Kandidaten`), hartes `maxRuns`-Argument und CLI-Parser
+  `parseMaxRunsFlag()` für `--max-runs`. Details:
+  [`../STRATEGY_VALIDATION.md`](../STRATEGY_VALIDATION.md) Teil 3; Beweis:
+  `tests/strategyValidation.stress.test.ts` (22 Tests).
 
 ## 2. Nicht vorhanden — explizite Lücken
 

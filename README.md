@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.10.1 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.10.2 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 

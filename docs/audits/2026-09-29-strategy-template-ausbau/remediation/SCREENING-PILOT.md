@@ -126,3 +126,24 @@ Der Pilot verändert **nichts**: kein `backtestRule()`, kein `runMultiAssetBackt
 keine Engine-Datei, keine Migration. Gemessen wird, was 05-04 zusammenschaltet.
 Ergebnisse und Laufzeiten gehören in den Audit-Tracker
 [`TRACKING.md`](TRACKING.md) (Phase 5, 05-04).
+
+## Laufzeitbudget Cost- & Slippage-Stress-Runner (STX-06-03, `v0.10.2`)
+
+Der In-Engine-Cost-Stress-Runner (`src/strategies/validator/stress.ts`,
+[`docs/STRATEGY_VALIDATION.md`](../../../STRATEGY_VALIDATION.md) Teil 3)
+multipliziert `Szenarien × Walk-Forward-Fenster × Kandidaten`. Aus der
+Messbasis in [`BENCH-BASELINE.md`](BENCH-BASELINE.md) (`~2,4–5,0 ms` je
+Einzelkandidaten-Fensterlauf auf 500–900 Kerzen) ergibt sich folgendes
+Laufzeitbudget (`Zeit pro Lauf × Runs`), das im Pilotbetrieb **bewusst nicht
+ausgereizt** wird:
+
+| Profil | Formel (`Szenarien × Fenster × Kandidaten`) | Runs | Zeit pro Lauf × Runs (p50 / p95) | Auslastung von `maxRuns = 45` |
+|---|---|---|---|---|
+| **Pilot-Standard (1 eingefrorener Siegerkandidat)** | `3 × 3 × 1` | **9** | `9 × ~2,5 ms ≈ 22 ms` (`< 45 ms` p95) | **20 %** (Regelbetrieb im Pilot) |
+| **Nachbarschafts-Stichprobe (3 Kandidaten)** | `3 × 3 × 3` | **27** | `27 × ~2,5 ms ≈ 68 ms` (`< 135 ms` p95) | **60 %** |
+| **Harter Default-Deckel (`--max-runs=45`)** | `3 × 3 × 5` | **45** | `45 × ~2,5 ms ≈ 115 ms` (`< 225 ms` p95) | **100 % (Abbruchschwelle)** |
+
+Überschreitet ein angeforderter Lauf `maxRuns` (Default `45`, CLI-Flag
+`--max-runs`), bricht `runInEngineStress` vor dem ersten Engine-Aufruf
+fail-closed mit `stress:max-runs-exceeded` ab.
+

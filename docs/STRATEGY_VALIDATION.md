@@ -1,15 +1,19 @@
-# Strategie-Validierung — Annahmen-Audit & Overfit-Auswertung
+# Strategie-Validierung — Annahmen-Audit, Overfit-Auswertung & Cost-Stress-Runner
 
-> **Stand:** `v0.10.1` ·
+> **Stand:** `v0.10.2` ·
 > **Module:** [`assumptions.ts`](../src/strategies/validator/assumptions.ts) (Teil 1, STX-06-01) ·
 > [`overfit.ts`](../src/strategies/validator/overfit.ts) (Teil 2, STX-06-02) ·
+> [`stress.ts`](../src/strategies/validator/stress.ts) (Teil 3, STX-06-03) ·
 > **Tests:** [`tests/strategyValidation.assumptions.test.ts`](../tests/strategyValidation.assumptions.test.ts) (38) ·
 > [`tests/strategyValidation.overfit.test.ts`](../tests/strategyValidation.overfit.test.ts) (39) ·
+> [`tests/strategyValidation.stress.test.ts`](../tests/strategyValidation.stress.test.ts) (22) ·
 > **Prompts:** [STX-06-01](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-01-assumptions-audit.md),
-> [STX-06-02](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-02-overfit.md) ·
+> [STX-06-02](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-02-overfit.md),
+> [STX-06-03](audits/2026-09-29-strategy-template-ausbau/prompts/PROMPT-STX-06-03-cost-stress.md) ·
 > **Findings:** [STX-17](audits/2026-09-29-strategy-template-ausbau/findings/STX-17-info-validator-agent-kompatibel.md),
 > [STX-01](audits/2026-09-29-strategy-template-ausbau/findings/STX-01-rule-timeframe-blocker.md),
-> [STX-14](audits/2026-09-29-strategy-template-ausbau/findings/STX-14-changepct24h-semantik.md)
+> [STX-14](audits/2026-09-29-strategy-template-ausbau/findings/STX-14-changepct24h-semantik.md),
+> [STX-11](audits/2026-09-29-strategy-template-ausbau/findings/STX-11-cost-stress-existiert.md)
 
 Jede Strategie behauptet **durch ihre Existenz**, dass bestimmte Annahmen gelten
 (`StrategyTemplate.assumptions`, STX-03-01). Der Annahmen-Audit (Teil 1) prüft,
@@ -21,6 +25,13 @@ Die Overfit-Auswertung (Teil 2) stellt die zweite methodische Frage: ob nicht
 das **Parameterset, das man ausgewählt hat**, funktioniert — statt der
 Strategie selbst. Sie liest den vorhandenen Walk-Forward-Nachbarschafts-Scan,
 baut aber nichts neu.
+
+Der Cost- & Slippage-Stress-Runner (Teil 3) beantwortet die dritte Frage in
+zwei strikt getrennten Schichten ohne drittes Kostenmodell: ob die Edge nach
+skalierten Gebühren und Slippage **im echten Engine-Lauf** (`runInEngineStress`)
+noch trägt — und wie empfindlich die Trade-Pfadverteilung gegen
+Ergebnisrauschen ist (`runPostHocStress` als dünner Durchreiche-Adapter auf
+`runMonteCarloSimulation`).
 
 Die Frage ist eng: **Hält der Backtest die Bedingungen ein, unter denen die
 Strategie überhaupt eine Aussage ist?**
@@ -448,3 +459,180 @@ node --import tsx --test tests/strategyValidation.overfit.test.ts
 - **Struktur:** Determinismus, Eingabe-Treue und ein statischer Wächter über
   den Modulquelltext — keine Uhr/Zufall/DB/Datei, **keine Wert-Importe** (nur
   Typen aus `walkforward.ts`) und keine Kandidatengenerierung.
+
+---
+
+# Teil 3 — Cost- & Slippage-Stress-Runner (`stress.ts`, STX-06-03, `v0.10.2`)
+
+> **Modul:** [`src/strategies/validator/stress.ts`](../src/strategies/validator/stress.ts) (`COST_STRESS_VERSION = "stx06-cost-stress-v1"`) ·
+> **Tests:** [`tests/strategyValidation.stress.test.ts`](../tests/strategyValidation.stress.test.ts) ·
+> **Finding:** [STX-11](audits/2026-09-29-strategy-template-ausbau/findings/STX-11-cost-stress-existiert.md)
+
+## 16. Zweischichtige Architektur — kein drittes Kostenmodell
+
+Im Repository existieren bereits zwei Kosten-Schichten ([STX-11](audits/2026-09-29-strategy-template-ausbau/findings/STX-11-cost-stress-existiert.md)):
+
+| Schicht | Baustein | Fachliche Frage |
+|---|---|---|
+| **Schicht 1 — In-Engine-Stress** | `runInEngineStress` + `summarizeStressSweep` über `BacktestEngineConfig` (`feeModel`, `slippageModel: "fixed"`, `fixedSlippageBps`) | **„Ist die Edge nach realen/gestressten Kosten noch da?"** — Ein geänderter Slippage-/Fee-Satz kann im echten Engine-Lauf andere Fills, Stop-Loss-Auslösungen oder Drawdown-Schwellen erzeugen als eine reine Nachberechnung auf bestehenden Trades |
+| **Schicht 2 — Post-hoc-Stress** | `runPostHocStress` als dünner Durchreiche-Adapter auf `runMonteCarloSimulation` (`src/backtest/montecarlo.ts`, `MonteCarloStressConfig`) | **„Wie empfindlich ist die Pfadverteilung gegen Ergebnisrauschen unter skalierten Kosten?"** — Keine eigene Monte-Carlo-Implementierung |
+
+Beide Ergebnisse stehen im kombinierten Report (`StressReport` / `StressSweepOk`)
+unter den Schlüsseln `inEngine` und `postHoc` **strikt getrennt** nebeneinander
+und werden niemals miteinander verrechnet.
+
+## 17. Versionierter Szenario-Katalog (`COST_STRESS_SCENARIOS`)
+
+```ts
+export const COST_STRESS_SCENARIOS = [
+  { id: "base",   feeMultiplier: 1, slippageBps: 5,  label: "Basis" },
+  { id: "double", feeMultiplier: 2, slippageBps: 10, label: "2× Kosten" },
+  { id: "triple", feeMultiplier: 3, slippageBps: 20, label: "3× Kosten" },
+] as const;
+```
+
+**Annahmen vs. Messung:** Die `slippageBps`-Werte (`5 / 10 / 20 bp`) sind
+normative Stress-Annahmen für den In-Engine-Sweep (`slippageModel: "fixed"`,
+`fixedSlippageBps`), **keine** aus Live-/Paper-Fills gemessenen
+Ausführungs-Slippages. Ob der Referenzlauf (`base`) tatsächlich Gebühren > 0
+(`FEE_NONZERO`), Slippage > 0 (`SLIPPAGE_NONZERO`) und Gesamtkosten > 0
+(`COST_NONZERO`) angesetzt hat, prüft vorab das deterministische
+Annahmen-Audit aus Teil 1 ([§2](#2-die-elf-prüfungen), `STX-06-01`).
+
+## 18. In-Engine-Sweep (`runInEngineStress`) & Fail-Closed-Regeln
+
+Pro Szenario aus `COST_STRESS_SCENARIOS` führt `runInEngineStress(input)` genau
+**einen** Walk-Forward-Lauf aus:
+
+- **`base` ist byte-identisch zum Referenzlauf:** Für `base` (`feeMultiplier = 1`,
+  `slippageBps = 5`) bleibt die Referenzkonfiguration unverändert (eigener
+  flacher Klon ohne Mutation), sodass `WalkForwardReport`, `configHash`,
+  `freezeArtifacts` und Trade-Liste byte-identisch zum Referenzlauf sind.
+- **`double` & `triple` skalieren bestehende Konfigurationsfelder:**
+  `feeModel.makerFee` und `feeModel.takerFee` werden mit `feeMultiplier` (`2×`,
+  `3×`) skaliert; `slippageModel` wird auf `"fixed"` mit
+  `fixedSlippageBps = scenario.slippageBps` (`10`, `20`) gesetzt.
+- **`executionModel` bleibt unverändert:** Das Ausführungsmodell des
+  Referenzlaufs (`"legacy" | "paper" | "event_replay"`) wird in allen drei
+  Szenarien beibehalten.
+- **Fail-Closed ohne stilles Hochrechnen (`validateReferenceCostConfig`):**
+  - `slippageModel: "none"` im Referenzlauf ⇒ `{ ok: false, errors: ["stress:slippage-none — ..."] }`, **0 Runner-Aufrufe**.
+  - `slippageModel: "fixed"` mit `fixedSlippageBps <= 0` oder `slippageModel: "spread_relative"` mit `spreadSlippageFactor <= 0` ⇒ `{ ok: false, errors: ["stress:slippage-zero — ..."] }`.
+  - `feeModel` mit `makerFee === 0 && takerFee === 0` oder negativen Gebühren ⇒ `{ ok: false, errors: ["stress:fee-zero — ..."] }`, da `0 × 2 = 0` den Gebühren-Stress still neutralisieren würde.
+
+## 19. Zusammenfassung, `breakevenMultiplier` & Verdikt-Grenzen (`summarizeStressSweep`)
+
+`summarizeStressSweep(results, options?)` verdichtet die Szenarien zu
+`StressSummary`:
+
+| Feld | Formel / Semantik |
+|---|---|
+| `scenarios` | `readonly { id, sharpe, netPnl, maxDrawdownPct, trades }[]` aus `aggregateOos` je Szenario |
+| `degradationRatio` | Erhaltener OOS-Sharpe-Anteil unter 3× Kosten: `round4(OOS-Sharpe(triple) / OOS-Sharpe(base))`. Ist `base.sharpe <= 0` (oder fehlt `base`/`triple`), ist `degradationRatio = null` |
+| `breakevenMultiplier` | Gebühren-Multiplikator, ab dem `netPnl` auf `0` fällt, bestimmt per **linearer Interpolation** zwischen benachbarten Szenarien `(m_i, pnl_i > 0)` und `(m_{i+1}, pnl_{i+1} <= 0)`: $m_{\text{be}} = m_i + \frac{\text{pnl}_i}{\text{pnl}_i - \text{pnl}_{i+1}} \cdot (m_{i+1} - m_i)$. Ist `triple.netPnl > 0`, ist `breakevenMultiplier = null` — dokumentiert als **„hält mindestens 3×"**. Ist schon `base.netPnl < 0`, wird `0` (bzw. `1` bei `base.netPnl === 0`) geliefert, damit `null` eindeutig für „mindestens 3×" reserviert bleibt |
+| `verdict` | `"COST_ROBUST" \| "COST_SENSITIVE" \| "COST_DEPENDENT"` gemäß `DEFAULT_STRESS_VERDICT_THRESHOLDS` |
+
+### Verdikt-Schwellen (`DEFAULT_STRESS_VERDICT_THRESHOLDS`, konfigurierbar)
+
+| Verdikt | Bedingung | Fachliche Bedeutung |
+|---|---|---|
+| `COST_ROBUST` | `degradationRatio >= 0.6` **und** `triple.netPnl > 0` | Mindestens 60 % des Basis-OOS-Sharpe bleiben unter 3× Gebühren / 20 bp Slippage erhalten und die Strategie verdient auch bei 3× Kosten noch Geld (`breakevenMultiplier === null`) |
+| `COST_SENSITIVE` | `degradationRatio ∈ [0.3, 0.6)` (oder `degradationRatio >= 0.6`, aber `triple.netPnl <= 0`) | Spürbare Kostenerosion; Strategie bricht zwischen 2× und 3× Kosten Richtung Breakeven ein |
+| `COST_DEPENDENT` | `degradationRatio < 0.3` oder `degradationRatio === null` | Scheinbare Edge hängt an niedrigen Kostenannahmen oder war schon im Basislauf nicht positiv |
+
+## 20. Post-hoc-Stress (`runPostHocStress`) & Report-Trennung (`buildStressReport`)
+
+- `runPostHocStress(inputOrTrades, options?)` akzeptiert `MonteCarloTradeInput[]`,
+  `BacktestTradeLog[]` oder `WalkForwardTradeRecord[]` (standardmäßig auf Segment
+  `"OOS"` gefiltert) und reicht sie direkt an `runMonteCarloSimulation`
+  (`src/backtest/montecarlo.ts`) mit `stress: { feeMultiplier, slippageMultiplier }`
+  durch.
+- Für das 1×/1×-Basisszenario (`feeMultiplier === 1 && slippageMultiplier === 1`)
+  übergibt `runPostHocStress` kanonisch `stress: null`, da
+  `resolveMonteCarloConfig` ein explizites `{ feeMultiplier: 1, slippageMultiplier: 1 }`
+  als No-Op ablehnt.
+- `buildStressReport({ inEngine, postHoc })` legt beide Schichten unter getrennten
+  Top-Level-Feldern (`report.inEngine` vs. `report.postHoc`) ab; `postHoc`
+  verändert niemals `inEngine.verdict`, `inEngine.degradationRatio` oder
+  `inEngine.breakevenMultiplier`.
+
+## 21. Laufzeitkosten, `--max-runs` & Pilot-Budget
+
+Ein Sweep über `Szenarien × Walk-Forward-Fenster × Kandidaten` multipliziert die
+Backtest-Kosten. Deshalb gelten harte Obergrenzen:
+
+- **Default-Bound (`DEFAULT_MAX_STRESS_RUNS = 45`):**
+  `MAX_STRESS_SCENARIOS (3) × MAX_STRESS_WINDOWS (3) × MAX_STRESS_CANDIDATES (5) = 45` Läufe.
+- **Hartes `maxRuns`-Argument:** Überschreitet `plannedRuns = scenarioCount × windowCount × candidateCount`
+  den Wert `maxRuns`, bricht `runInEngineStress` **vor** dem ersten Runner-Aufruf
+  mit `{ ok: false, errors: ["stress:max-runs-exceeded — ..."] }` ab.
+- **CLI-Flag `--max-runs` (`parseMaxRunsFlag`):** Unterstützt `--max-runs=45`
+  und `--max-runs 45` (Default `45`); Werte `< 1` oder Nicht-Ganzzahlen werden
+  fail-closed mit `{ ok: false, errors }` abgewiesen.
+
+### Laufzeitbudget im Pilot (nicht ausgereizt)
+
+Gemäß [BENCH-BASELINE.md](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)
+und [SCREENING-PILOT.md](audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md)
+dauert ein einzelner Walk-Forward-Fensterlauf auf 500–900 Kerzen in-memory
+ca. **2,4–5,0 ms** (ein kompletter 3-Fenster-Walk-Forward ca. **5,9–14,2 ms**):
+
+| Modus | Rechnung (`Szenarien × Fenster × Kandidaten`) | Geplante Läufe | Geschätzte Laufzeit (Zeit pro Lauf × Runs) | Anteil am Cap (`maxRuns = 45`) |
+|---|---|---|---|---|
+| **Pilot-Standard (1 eingefrorener Siegerkandidat)** | `3 × 3 × 1` | **9** | `9 × ~2,5 ms ≈ 22 ms` (p95 `< 45 ms`) | **20 %** (bewusst nicht ausgereizt) |
+| **Kleiner Nachbarschafts-Check (3 Kandidaten)** | `3 × 3 × 3` | **27** | `27 × ~2,5 ms ≈ 68 ms` (p95 `< 135 ms`) | **60 %** |
+| **Harter Default-Deckel (`DEFAULT_MAX_STRESS_RUNS`)** | `3 × 3 × 5` | **45** | `45 × ~2,5 ms ≈ 115 ms` (p95 `< 225 ms`) | **100 % (Obergrenze)** |
+
+## 22. Entscheidungen und Präzisierungen gegenüber der Prompt-Skizze (Teil 3)
+
+1. **Richtung von `degradationRatio` (`OOS-Sharpe(triple) / OOS-Sharpe(base)`):**
+   Der Kurzkommentar in Punkt 3 des Prompts notiert verkürzt
+   `Ratio OOS-Sharpe(base) / OOS-Sharpe(3×)`, während Punkt 5 verbindlich
+   `COST_ROBUST: degradationRatio >= 0.6`, `COST_SENSITIVE: [0.3, 0.6)` und
+   `COST_DEPENDENT: darunter` vorschreibt. Da höhere Gebühren und Slippage den
+   Sharpe senken (`Sharpe(3×) <= Sharpe(base)`), wäre `Sharpe(base) / Sharpe(3×)`
+   für jeden positiven 3×-Sharpe stets `>= 1.0` und würde bei schrumpfendem
+   3×-Sharpe gegen `Infinity` streben. Implementiert ist daher der **erhaltene
+   Sharpe-Anteil** `OOS-Sharpe(triple) / OOS-Sharpe(base)`.
+2. **`breakevenMultiplier` für bereits im Basislauf unprofitablen Lauf (`<= 1` statt `null`):**
+   Da `breakevenMultiplier: null` laut Akzeptanzkriterium ausdrücklich für
+   **„hält mindestens 3×"** (`triple.netPnl > 0`) steht, liefert ein bereits bei
+   `base` (`1×`) unprofitabler Lauf `0` (bei `base.netPnl < 0`) bzw. `1` (bei
+   `base.netPnl === 0`), damit `null` niemals mehrdeutig ist.
+3. **1×/1×-Durchreiche in `runPostHocStress`:**
+   `resolveMonteCarloConfig` in `src/backtest/montecarlo.ts` weist
+   `stress: { feeMultiplier: 1, slippageMultiplier: 1 }` als No-Op zurück und
+   verlangt für das Basisszenario `stress: null`. `runPostHocStress` bildet
+   `1×/1×` deshalb automatisch auf `stress: null` ab, ohne `montecarlo.ts` zu
+   verändern.
+
+## 23. Tests (Teil 3)
+
+```bash
+node --import tsx --test tests/strategyValidation.stress.test.ts
+```
+
+22 Testfälle in 7 Suites (mit injiziertem Runner-Stub sowie echtem
+`runWalkForward`-Abgleich):
+
+- **Katalog & Architektur-Guards:** `COST_STRESS_SCENARIOS`, `DEFAULT_MAX_STRESS_RUNS = 45`,
+  statischer Quelltext-Check (nur `runMonteCarloSimulation`, kein eigener RNG,
+  Verweis auf `FEE_NONZERO`/`SLIPPAGE_NONZERO`).
+- **Szenario-Skalierung & `executionModel`:** Skalierung von `feeModel` (`1×/2×/3×`
+  ohne IEEE-754-Drift) und `fixedSlippageBps` (`5/10/20 bp`), Beibehaltung von
+  `"legacy"`, `"paper"` und `"event_replay"`.
+- **Byte-Identität von `base`:** sowohl gegen den injizierten Runner-Stub als
+  auch gegen einen echten `runWalkForward`-Lauf auf synthetischen Kerzen.
+- **Fail-Closed:** `slippageModel: "none"`, `fixedSlippageBps: 0`,
+  `spreadSlippageFactor: 0` und `feeModel: { makerFee: 0, takerFee: 0 }` liefern
+  `{ ok: false, errors }` bei 0 Runner-Aufrufen.
+- **Zusammenfassung & Interpolation:** `COST_ROBUST`, `COST_SENSITIVE` (inkl.
+  Abstufung bei `triple.netPnl <= 0`), `COST_DEPENDENT`, lineare Interpolation
+  von `breakevenMultiplier` über alle Stützstellen sowie Schwellen-Override.
+- **Laufzeit-Bounds:** Grenze 45 (`3 × 3 × 5`), Abbruch bei 54 (`3 × 3 × 6`) und
+  explizitem `maxRuns`, CLI-Parser `parseMaxRunsFlag` für `--max-runs`.
+- **Post-hoc-Durchreiche & Report-Trennung:** Byte-Gleichheit von
+  `runPostHocStress` mit direktem `runMonteCarloSimulation`-Aufruf, Konvertierung
+  von `WalkForwardTradeRecord[]` und strikte Trennung von `inEngine` und `postHoc`
+  in `buildStressReport`.
+
