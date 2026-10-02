@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.3` |
+| **Version** | `v0.10.4` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-02 |
-| **Quellbasiert** | `package.json` (`version: "0.10.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.10.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -317,9 +317,19 @@ der Mindeststichprobe) und lässt `evaluateRegimeOos` unverändert.
 Die CLI `npm run validate:strategy` (`scripts/run-validate-strategy.ts`) fährt
 Walk-Forward + 06-01/02/03, schreibt Report (`--out`) und Evidenz (`--no-write`
 unterdrückt sie) und endet nur bei `PASS` mit Exit 0 (1 = `FAIL`/
-`INCONCLUSIVE`/Laufzeitfehler, 2 = Bedienfehler). **Abgrenzung:** Nur der
-Validator-Agent (06-05, Shadow-Mode, erklärt nur) bleibt offen; er darf
-ausschließlich `detail jsonb` ergänzen, nie `result`.
+`INCONCLUSIVE`/Laufzeitfehler, 2 = Bedienfehler). **Abgrenzung (Stand v0.10.3):**
+06-05 war zu diesem Releasezeitpunkt noch offen und wurde in `v0.10.4` ergänzt.
+Die Agent-Funktion gibt nur eine Interpretation by-value zurück; automatische
+Persistenz in `detail jsonb` ist nicht verdrahtet.
+
+`v0.10.4` liefert den erklärenden Validator-Agenten (STX-06-05): eine separate
+`AgentInterpretation` aus explizit allowlisteten aggregierten Report-Daten,
+strenge JSON-Schema-Prüfung und Injection-Grenze bei einem Prompt unter 8 KiB.
+`LOCAL_FREE` bleibt cloud-frei; `OPENCODE_FREE` ist opt-in und Best-Effort.
+Shadow-Modus ist standardmäßig aktiv. Der Agent kann `result` weder verändern
+noch Evidenz schreiben; Provider-/Schema-Ausfälle lassen den Report unverändert.
+Eine automatische Speicherung der Interpretation in `detail jsonb` ist nicht
+verdrahtet — darüber entscheidet ein künftiger Aufrufer/Persistenzpfad.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.1.19` |
+| **Audit-Version** | `audit-2026-09-29 v1.1.20` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 begonnen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04 Report + Gate-Kette + Evidence-Writer + CLI `v0.10.3`, STX-17 geschlossen; nur 06-05 offen) |
+| **Status** | `OPEN` — 19 Findings, davon 5 HIGH; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 abgeschlossen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04 Report + Gate-Kette + Evidence-Writer + CLI `v0.10.3`, STX-17 geschlossen; 06-05 Validator-Agent `v0.10.4` umgesetzt, STX-13 geschlossen) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -50,6 +50,8 @@
 | `v1.1.18` | 2026-10-02 | 06-03 umgesetzt (`v0.10.2`): Cost- & Slippage-Stress-Runner `src/strategies/validator/stress.ts` (`COST_STRESS_SCENARIOS` 1×/2×/3× und 5/10/20 bp, `runInEngineStress()`, `summarizeStressSweep()` mit `degradationRatio` und linearer Interpolation von `breakevenMultiplier`, `runPostHocStress()` als Durchreiche an `runMonteCarloSimulation()`, `maxRuns = 45` / `--max-runs`) + 22 Tests + Teil 3 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); **STX-11 behoben** |
 | `v1.1.19` | 2026-10-02 | 06-04 umgesetzt (`v0.10.3`): Report + achtstufige Gate-Kette + Regime-Aggregation `src/strategies/validator/report.ts` (`VALIDATION_RESULTS`, `aggregateRegimeTrades()` point-in-time ohne `UNKNOWN`/`RANGE`-Fallback, `buildValidationReport()`, `assertReportHashIntegrity()`) und Evidence-Writer `persist.ts` (`recordEvidence()`, kein `requestTransition`), CLI `npm run validate:strategy` (`scripts/run-validate-strategy.ts`); `PROMOTION_POLICY_BOUNDS.validationMinPlateauShare` ergänzt; 32 + 6 Tests + Teil 4 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); **STX-17 geschlossen**, STX-03 abgeschlossen |
 
+| `v1.1.20` | 2026-10-02 | 06-05 umgesetzt (`v0.10.4`): erklärender Validator-Agent mit allowlisteter Report-Projektion, Injection-Block, strengem JSON-Schema, Shadow-Default, `LOCAL_FREE`/opt-in `OPENCODE_FREE` und bounded Telemetrie; 8 fokussierte Tests + Teil 5 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); STX-13 geschlossen. Interpretation by-value; Persistenz/Workflow bleibt beim Aufrufer. |
+
 ## 2. Release-Plan der Roadmap
 
 Die Roadmap wird in **kleinen Minor-Releases** umgesetzt. Jede Phase bzw. jedes
@@ -77,7 +79,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.10.1` | Validator deterministisch, Stufe 2: Plateau, IS/OOS-Lücke, Multiple Testing, Holdout-Integrität — ausgeliefert 2026-10-02 | 06-02 | Minor (neues Modul) | **Beta — Stress/Report offen** |
 | `v0.10.2` | Validator deterministisch, Stufe 3: Cost- & Slippage-Stress-Runner — ausgeliefert 2026-10-02 | 06-03 | Minor (neues Modul) | **Beta — Report offen** |
 | `v0.10.3` | Validator-Report + Evidence-Writer + CLI — ausgeliefert 2026-10-02 | 06-04 | Minor | **Beta — nur Agent (06-05) offen** |
-| `v0.10.4` | Validator-Agent (Shadow-Mode, erklärt nur) — geplant | 06-05 | Minor | **Beta** |
+| `v0.10.4` | Validator-Agent (Shadow-Mode, erklärt nur) — umgesetzt 2026-10-02 | 06-05 | Minor | **Beta — Phase 6 abgeschlossen** |
 | `v0.11.0` | Copy-Domänenmodell (rein) | 07-01 | Minor | **Beta** |
 | `v0.11.1` | Copy-Policy + Order-Links (`SIMULATE_ONLY`) | 07-02 | Minor | **Beta** |
 | `v0.11.2` | Bitunix-Leader + Simulate-only-Follower | 07-03 | Minor | **Beta** |
@@ -97,7 +99,9 @@ ausgeliefert (ein Prompt = ein Bump, wie in Phase 3). Damit verschiebt sich die
 Planung der restlichen Phase-6-Prompts: Cost-Stress (06-03) ⇒ `v0.10.2`,
 Report + CLI (06-04) ⇒ `v0.10.3`, Validator-Agent (06-05) ⇒ `v0.10.4`. Grund:
 Die Validator-Stufen sind einzeln prüf- und rollbackbare Artefakte; ein
-Sammel-Release würde den Rollback-Punkt verwischen.
+Sammel-Release würde den Rollback-Punkt verwischen. 06-05 ist mit `v0.10.4`
+umgesetzt; der Agent gibt ausschließlich eine Interpretation zurück, eine
+automatische Persistenz in `detail jsonb` ist nicht Teil dieses Releases.
 
 ### 2.1 Warum eigene Releases je Template
 

@@ -209,7 +209,7 @@ Engine-Pfad hängt ([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE
 | 06-02 | [Overfit & Robustheit](prompts/PROMPT-STX-06-02-overfit.md) | ✅ `src/strategies/validator/overfit.ts` (`v0.10.1`): Plateau-`robustShare`, IS/OOS-Lücke (`oosSharpe <= 0` ⇒ `BROKEN`), Multiple-Testing bis `BLOCKING` ab 21 Kandidaten, Holdout-Integrität (`CONTAMINATED` ⇒ `INCONCLUSIVE`) | 06-01, 04-02 |
 | 06-03 | [Cost-Stress-Runner](prompts/PROMPT-STX-06-03-cost-stress.md) | ✅ `src/strategies/validator/stress.ts` (`v0.10.2`): `COST_STRESS_SCENARIOS` (1×/2×/3×, 5/10/20 bp), `runInEngineStress()`, `summarizeStressSweep()` (`degradationRatio`, `breakevenMultiplier`), `runPostHocStress()`, `maxRuns = 45` (`--max-runs`) | 06-01 |
 | 06-04 | [Report + Evidence + CLI](prompts/PROMPT-STX-06-04-validation-report.md) | ✅ `src/strategies/validator/report.ts` + `persist.ts` (`v0.10.3`): achtstufige Gate-Kette (`PASS`/`FAIL`/`INCONCLUSIVE`, kein Score), Regime-Aggregation point-in-time, `recordEvidence()`-Writer, CLI `npm run validate:strategy` | 06-02, 06-03, 04-02 |
-| 06-05 | [Validator-Agent (LLM)](prompts/PROMPT-STX-06-05-validator-agent.md) | `agent.ts` + Routing-Klassen | 06-04 |
+| 06-05 | [Validator-Agent (LLM)](prompts/PROMPT-STX-06-05-validator-agent.md) | ✅ `agent.ts` + `agentPrompt.ts` (`v0.10.4`): allowlistete Aggregatprojektion, striktes JSON-Schema, Injection-Block, Shadow-Default, `LOCAL_FREE` / opt-in `OPENCODE_FREE`, bounded Telemetrie; keine Verdict- oder Persistenzänderung | 06-04 |
 
 **Ergebnis 06-01 (2026-10-02, `v0.10.0`):** Der Annahmen-Audit ist das Gate vor
 jeder Metrik-Auswertung — 38 Tests, [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md).
@@ -252,10 +252,21 @@ Hashfunktion). CLI `npm run validate:strategy` mit Exit 0 nur bei `PASS`. 32 + 6
 Tests; **STX-17 geschlossen**, **STX-03 abgeschlossen**; nur der Validator-Agent
 (06-05) bleibt in Phase 6 offen.
 
+**Ergebnis 06-05 (2026-10-02, `v0.10.4`):** Der Validator-Agent ist die einzige
+LLM-Stelle in Phase 6. `runValidatorAgent()` sendet ausschließlich allowlistete
+aggregierte Report-Daten (Prompt < 8 KiB), escaped untrusted content und blockt
+erkannte Prompt-Boundary-Overrides als `INJECTION_ATTEMPT`. Die Ausgabe ist
+striktes JSON; Provider-/Schema-Ausfälle liefern `{ unavailable: true }` und
+verändern `result` nicht. `LOCAL_FREE` bleibt cloud-frei, `OPENCODE_FREE` ist
+opt-in und Best-Effort. Shadow-Mode ist default-on; Telemetrie nutzt feste
+Ergebnis-Labels. Acht fokussierte Tests. `AgentInterpretation` wird by-value
+zurückgegeben; automatische Speicherung in `detail jsonb` und Workflow-Verdrahtung
+sind nicht enthalten — die Entscheidung bleibt beim Aufrufer.
+
 **Reihenfolge-Logik:** Der Agent kommt **zuletzt**. Ein LLM-Auditor über einen
 nicht-deterministischen Report ist wertlos. 06-01…06-04 sind reine Funktionen ohne
-Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff — und sie darf ausschließlich
-`detail jsonb` schreiben, nie `result`.
+Netzwerk; 06-05 ist die einzige Stelle mit LLM-Zugriff und gibt eine separate
+Interpretation zurück. Es gibt keinen Schreibpfad zu `result` oder Evidence-Writer.
 
 **Was 06-02/06-03 wiederverwenden (nicht neu bauen):**
 - `WalkForwardCandidate` + `SelectorGates` + `CandidateScoreRow` + `FreezeArtifact` (Plateau-Messung)

@@ -21,16 +21,16 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.3** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.4** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
+## [0.10.4] — Validator-Agent: erklärende Shadow-Auswertung (STX-06-05) (2026-10-02)
+
 > **Status: Beta.** Der Service aus 04-02 (Strategie-Katalog + Lifecycle-Bridging)
 > ist gemergt und baut auf dem Schema aus `v0.8.0` auf; er ist Registry, **kein**
 > Executor und keine Live-Freigabe. Optional bleibt Feature-Store-Parität 02-04.
-> Nachträge ohne eigenen Release (Doku, Tests, Wächter-Korrekturen) stehen hier und
-> werden im nächsten Release mitgeliefert (Präzedenz: `VERSIONING.md` V4).
 
 ### Added
 
@@ -49,6 +49,15 @@ erlaubt, solange sie hier dokumentiert sind).
   Drizzle-Push-/SQL-Schema-Parität, paralleler Retries, FK-/Config-Constraints,
   Chunk-Rollback und Fortschritts-/Paging-Grenzen; reine Key-/Bounds-Wächter.
   Bedienung und Rollback in [`docs/STRATEGY_SCREENING.md`](docs/STRATEGY_SCREENING.md).
+* **Validator-Agent (STX-06-05):** `runValidatorAgent()` liefert eine separate,
+  strikt schema-geprüfte Interpretation des deterministischen Reports. Nur eine
+  explizite Allowlist aggregierter Werte wird zum Provider gesendet; `notes`,
+  Roh-Kerzen und Trade-Logs bleiben ausgeschlossen. Der Prompt bleibt unter
+  8 KiB. Erkannte Boundary-Overrides werden als `INJECTION_ATTEMPT` geblockt;
+  Provider- und Schema-Ausfälle liefern `{ unavailable: true }` ohne Freitext-Fallback.
+  `LOCAL_FREE` nutzt ausschließlich lokale Provider; `OPENCODE_FREE` ist opt-in
+  und Best-Effort. Shadow-Modus ist standardmäßig aktiv, Telemetrie-Labels sind
+  begrenzt. Acht fokussierte Tests sichern die Grenzen ab.
 
 ### Fixed
 
@@ -92,6 +101,13 @@ erlaubt, solange sie hier dokumentiert sind).
 * **Tote Anker repariert:** die beiden Verweise „Versions-Zuordnung“ im Eintrag `0.1.0`
   und im Abschnitt „v0 — Beta-Meilensteine“ zeigten auf `#versionszuordnung-…` statt auf
   die Überschrift `Versions-Zuordnung: v0.x.x ↔ v1.x.x` (`#versions-zuordnung-v0xx--v1xx`).
+
+* **STX-06-05 dokumentiert und versioniert:** `docs/STRATEGY_VALIDATION.md` beschreibt
+  Prompt-Grenzen, Routing, Shadow-Default und bounded Telemetrie. Der Agent gibt die
+  Interpretation nur by-value zurück; `persist.ts` blieb unberührt, daher ist keine
+  automatische Speicherung in `detail jsonb` oder Workflow-Verdrahtung enthalten.
+  Audit-Roadmap, Tracking, Finding STX-13 und kanonische Versionsmetadaten stehen auf
+  `v0.10.4` (`v1.1.20` im audit-internen Schema).
 
 ## [0.10.3] — Validator: Report, Gate-Kette & Evidenz (STX-06-04) (2026-10-02)
 

@@ -659,6 +659,16 @@ export const telemetry = {
       telemetry.screening.cells.reset();
     },
   },
+  /**
+   * Strategie-Validierungs-Agent (STX-06-05). `result` ist auf
+   * ok | unavailable | schema_error | blocked beschränkt; niemals Freitext.
+   */
+  validatorAgent: {
+    runs: new LabelCounter("validator_agent_runs_total"),
+    reset(): void {
+      telemetry.validatorAgent.runs.reset();
+    },
+  },
 };
 
 /** Snapshot für Ops/UI (inkl. Aufschlüsselung nach venue/timeframe/reason). */
@@ -845,6 +855,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.volatilityTargeting.snapshots.exposition(),
     telemetry.microExecutor.ruleBlocked.exposition(),
     telemetry.screening.cells.exposition(),
+    telemetry.validatorAgent.runs.exposition(),
   ];
 
   let firm: FirmMetricState | null;
@@ -945,4 +956,5 @@ export function resetTelemetryForTests(): void {
   telemetry.strategyLifecycle.reset();
   telemetry.microExecutor.reset();
   telemetry.screening.reset();
+  telemetry.validatorAgent.reset();
 }

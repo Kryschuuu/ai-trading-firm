@@ -4,7 +4,7 @@
 - **Severity:** LOW
 - **Bereich:** Routing / LLM
 - **Quelle:** Ausbaudokument §3.8, §14
-- **Status:** OPEN
+- **Status:** FIXED (06-05, `v0.10.4`)
 - **Datei(en):** `src/routing/`, `src/lib/llmProvider.ts`
 
 ## Beschreibung
@@ -46,17 +46,18 @@ mit `costPer1kIn/Out = 0` … geführt."*
 1. `LOCAL_FREE` (Ollama) bleibt die **einzige** harte Garantie.
 2. `OPENCODE_FREE` wird kein Routing-Typ, sondern ein **Provider-Feature-Flag** mit
    „best effort"-Semantik — vorhandener Toggle-Mechanismus genügt.
-3. Der Validator-Agent darf bei Provider-Ausfall `INCONCLUSIVE` liefern, **nicht** `FAIL`
-   und **nicht** `PASS`. Das ist die eigentliche Absicherung.
+3. Provider-Ausfall liefert `{ unavailable: true }`; der Agent erzeugt daraus weder
+   `INCONCLUSIVE` noch `FAIL`/`PASS`. Die deterministische Report-Entscheidung bleibt
+   unverändert; das ist die Absicherung gegen ein Urteil aus Nichtwissen.
 4. `big-pickle` als Default ist aktuell gültig, sollte aber als **konfigurierbar** bleiben
    (ist es: `OPENCODE_MODEL`).
 
 ## Akzeptanzkriterien
 
-- [ ] `LOCAL_FREE`-Pfad funktioniert vollständig ohne Cloud-Credentials (bestehender Test)
-- [ ] Provider-Ausfall ⇒ `INCONCLUSIVE`, nie `FAIL`
-- [ ] Keine Free-Modell-Liste im Code, die als garantie dokumentiert wird
+- [x] `LOCAL_FREE`-Pfad funktioniert vollständig ohne Cloud-Credentials (Test)
+- [x] Provider-Ausfall ⇒ `{ unavailable: true }`; weder `INCONCLUSIVE` noch ein Verdict
+- [x] Keine Free-Modell-Liste im Code, die als Garantie dokumentiert wird
 
 ## Versions-Hinweis
 
-N/A (Doku/Einordnung).
+Umgesetzt mit `v0.10.4` (STX-06-05).
