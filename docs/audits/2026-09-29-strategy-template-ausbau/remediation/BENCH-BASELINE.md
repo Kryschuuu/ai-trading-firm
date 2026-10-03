@@ -1,5 +1,9 @@
 # BENCH-BASELINE — Backtest-Performance vor dem Screening-Runner (Prompt 00-01)
 
+> **Historische Ausgangsmessung, nicht überschreiben:** §§1–10 halten die
+> echte HistoricalStore-Messung vom 2026-09-29 (damaliger O(n²)-Code) unverändert
+> fest. Die append-only Folgemessung nach STX-08-04 steht in §11.
+
 - **Prompt:** [`00-01`](../prompts/PROMPT-STX-00-01-backtest-perf-baseline.md) · **Finding:** [STX-12](../findings/STX-12-backtestrule-o-n-quadratisch.md)
 - **Phase:** 0 (Messung, kein Produktivcode) · **Datum:** 2026-09-29 · **Release:** `v0.6.0`
 - **Status:** ABGESCHLOSSEN — Entscheidung getroffen, Gate **G5** erfüllt
@@ -229,3 +233,62 @@ Optionen für Wiederholungen: `--sizes=1000,5000,17520`, `--repeat=3`,
 - Werkzeuge: `scripts/bench-backtest.ts`, `scripts/import-history-csv.ts`
 - Store-Vertrag (Dedup, Lücken, Schema): [`../../../HISTORY.md`](../../../HISTORY.md)
 - Backtest-CLI-Referenz: [`../../../BACKTESTING.md`](../../../BACKTESTING.md)
+
+## 11. Folgemessung STX-08-04 — einmaliger Indicator-Cache in `backtestRule()`
+
+**Ergebnis, nur als ergänzende synthetische Messung:** Der alte direkte Pfad
+wurde gegen den geänderten `backtestRule()`-Pfad auf exakt denselben
+synthetischen OHLCV-Präfixen ausgeführt. Bei 17 520 Bars sank der Median von
+**20 253,605 ms** auf **64,489 ms**, entsprechend **314,1×**. Die Rückgaben
+waren für alle drei Größen mit `assert.deepEqual` identisch; bei 17 520 Bars
+enthielten sie 156 Signale und 155 Trades.
+
+> **Nicht mit §§1–10 als gleiche Reihe oder als offizielle Reproduktion
+> vergleichen.** Die echte HistoricalStore-Exportreihe aus der Messung vom
+> 2026-09-29 ist in diesem Checkout nicht vorhanden. Die offizielle Baseline
+> von 25 986,2 ms und ihre Rohdaten bleiben unverändert. Diese Sektion ist ein
+> transparenter zusätzlicher Alt-vs-Neu-Test, keine Neuberechnung dieser
+> Baseline und kein Resultat auf echten Marktdaten.
+
+### Methode und Umgebung
+
+- **Datensatz:** deterministisch generierte synthetische 1h-OHLCV-Reihe mit
+  17 520 Bars, ohne Zufall; erster/letzter Unix-Zeitstempel
+  `1560171600000`/`1623240000000`; SHA-256 beginnt `9e9e2dbdb4e5`. Dieselben
+  erzeugten Candles und Regeln wurden beiden Implementierungen übergeben.
+- **Codepfade:** alter `backtestRule()`-Direktpfad (wiederhergestellter
+  Pre-Migration-Code) und aktueller Cache-Pfad. Für den neuen Pfad wird der
+  bestehende `IndicatorCache` einmal aufgebaut; die alte Referenz wird nur im
+  temporären Messlauf verwendet, nicht als produktiver Zweitpfad eingebaut.
+- **Parameter:** `executionModel: "legacy"`, Startkapital 10 000, Warmup 30;
+  ein ungemessener Warmlauf, danach drei Messläufe je Größe. Median der drei
+  Rohzeiten; alle Ergebnisobjekte pro Größe waren byte-strukturell
+  deep-equal.
+- **Maschine:** Node `v22.22.3`, Linux x64, Intel Xeon 2,60 GHz, zwei CPUs.
+- **Rohartefakt:** `data/bench/stx-08-04-comparison-synthetic.json` (lokales,
+  gitignoriertes JSON; nicht im PR enthalten und nicht zur historischen
+  Baseline-Datei zusammengeführt). Die Rohzeiten sind in der Tabelle oben
+  festgehalten.
+
+| Bars | Alter Direktpfad, Median | Cache-Pfad, Median | Speedup | Identische Ergebnisse: Signale / Trades |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 000 | 78,609 ms | 9,639 ms | 8,15× | 11 / 10 |
+| 5 000 | 1 372,414 ms | 22,313 ms | 61,51× | 48 / 47 |
+| 17 520 | 20 253,605 ms | 64,489 ms | 314,06× | 156 / 155 |
+
+| Bars | Alter Direktpfad, drei Läufe (ms) | Cache-Pfad, drei Läufe (ms) |
+| ---: | --- | --- |
+| 1 000 | 76,161 · 78,609 · 80,503 | 14,498 · 9,639 · 8,543 |
+| 5 000 | 1 372,414 · 1 382,987 · 1 298,182 | 22,313 · 31,793 · 16,858 |
+| 17 520 | 20 085,611 · 20 253,605 · 20 567,220 | 79,628 · 64,489 · 62,580 |
+
+### Aussage und Grenze
+
+Diese Messung belegt den großen Laufzeitgewinn und exakte Parität für diese
+synthetische Reihe, aber nicht die offizielle Performancezahl des
+HistoricalStore-Datensatzes. Die Cacheskalierung enthält bei kleinen Reihen
+Initialisierungs- und JIT-Fixkosten; die Faktoren in der Tabelle sind
+konkrete Messpunktvergleiche, keine universellen Speedup-Versprechen. Die
+Strukturanforderung bleibt: Indikatoren werden in `backtestRule()` vor der
+Bar-Schleife einmal berechnet, statt für jeden Bar den wachsenden Präfix erneut
+zu berechnen.

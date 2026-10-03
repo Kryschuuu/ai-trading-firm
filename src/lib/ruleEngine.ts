@@ -37,6 +37,7 @@ import {
   rsi,
   sessionVwap,
 } from "./indicators";
+import { buildIndicatorCache, snapshotFromCache } from "../backtest/indicatorCache";
 import { RULE_FIELDS, RULE_FIELD_SCHEMA_HINTS } from "./ruleFieldCatalog";
 import { LIMIT_CEILINGS, riskAdjustedSize } from "./riskGuard";
 import { tryNormalizeVenueSymbol } from "../symbols/normalize";
@@ -841,6 +842,7 @@ export function backtestRule(
   const compiler = compileRuleSpec(spec);
   const startingEquity = opts?.startingEquity ?? 10_000;
   const warmup = opts?.warmup ?? 30;
+  const indicatorCache = buildIndicatorCache(candles);
 
   let equity = startingEquity;
   let peakEquity = startingEquity;
@@ -891,7 +893,7 @@ export function backtestRule(
     }
 
     // Signalprüfung auf aktueller (geschlossener) Kerze.
-    const snap = buildSnapshotFromCandles(spec.symbol, candles.slice(0, i + 1), spec.window.volumeWindow);
+    const snap = snapshotFromCache(spec.symbol, candles, indicatorCache, i, spec.window.volumeWindow);
     if (!snap) continue;
     const windowOpen = isWindowOpen(spec, snap.ts);
     if (!windowOpen || open) continue;

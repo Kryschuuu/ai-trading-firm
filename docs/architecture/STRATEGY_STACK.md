@@ -267,7 +267,9 @@ Reihe einmal gelesen und hart auf `SCREENING_MAX_CANDLES_PER_CELL` begrenzt.
 `--dry-run` ist der Default, `--execute` der einzige Weg zu einem echten Lauf.
 Der verbindliche Pilot (50 Zellen, Auswertung in
 [`SCREENING-PILOT.md`](../audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md))
-entscheidet, ob 05-04 angenommen oder zugunsten von STX-12 verworfen wird.
+bleibt als Gate G6 offen. Bei mehr als einer Kernstunde wird der Pilot blockiert
+und der Store-/Adapter-/Engine-Pfad untersucht; STX-12 wurde inzwischen in
+`v0.11.0` behoben und ist kein ausstehender Vorrang-Task.
 
 **Bewusst offen:** `backtest_run_id` bleibt `null`, weil
 `persistBacktestRun()` einen `WalkForwardReport` erwartet und ein Einzelzellen-

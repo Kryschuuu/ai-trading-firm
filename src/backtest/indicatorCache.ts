@@ -1,5 +1,5 @@
 /**
- * Indikator-Cache für die Backtest-Engine (Performance-Optimierung, v0.3.0).
+ * Indikator-Cache für die Backtest-Engine und `backtestRule()` (O(n), v0.3.0/v0.11.0).
  *
  * Problem: `buildSnapshotFromCandles` rechnet pro Bar alle Indikatoren aus
  * der gesamten Historie neu (EMA über alle Closes, ADX über alle Kerzen, …).
@@ -393,7 +393,10 @@ export function buildIndicatorCache(candles: CandleLike[]): IndicatorCache {
   for (let i = 0; i < n; i++) {
     const a = atr[i];
     const close = closes[i];
-    if (a != null && close > 0) atrPct[i] = a / close;
+    // Match atrPct() -> atr(): a zero/invalid ATR is unavailable (null), not
+    // a measured 0 %. This matters for flat candles and keeps both snapshot
+    // paths fail-closed for rules such as `atrPct eq 0`.
+    if (a != null && Number.isFinite(a) && a > 0 && close > 0) atrPct[i] = a / close;
   }
 
   const adx14 = adxArray(candles, 14);

@@ -696,22 +696,24 @@ npm run bench:backtest -- --instrument=BINANCE:BTCUSDT --dir=data/history
 | `--execution-model` | nein (Default `legacy`) | gilt nur für den `multiAsset`-Pfad (`legacy` = eingefrorener Default, `paper` = Fill-Simulator) |
 | `--out-dir` / `--no-write` | nein (Default `data/bench`) | Artefakt-Ziel bzw. „nur stdout" |
 
-Gemessen werden **auf derselben Kerzenreihe und mit derselben Regel**:
-`backtestRule()` (Single-Rule-Pfad je Bar über die volle Historie),
-`runMultiAssetBacktest()` (Engine, Indikator-Cache) und die reine
-`buildIndicatorCache()` + `snapshotFromCache()`-Schleife. Berichtet werden Median,
-`ms/1000 Kerzen`, der log-log-Fit-Exponent über die Messpunkte und die
-„1 Zelle Matrix"-Rechnung (Default 7 500 Zellen à 17 520 Kerzen → Kernstunden
-seriell). Es wird **kein** `src/db`-Modul importiert und nur nach `data/bench/`
-geschrieben (gitignoriert).
+Der aktuelle Benchmark misst **auf derselben verfügbaren Kerzenreihe und mit
+derselben Regel** drei Pfade: `backtestRule()` (Single-Rule, seit `v0.11.0`
+mit einem Cache-Aufbau vor der Schleife), `runMultiAssetBacktest()` (Engine,
+Indikator-Cache) und die reine `buildIndicatorCache()` +
+`snapshotFromCache()`-Schleife. Berichtet werden Median, `ms/1000 Kerzen`, der
+log-log-Fit-Exponent über die Messpunkte und die „1 Zelle Matrix"-Rechnung
+(Default 7 500 Zellen à 17 520 Kerzen → Kernstunden seriell). Es wird **kein**
+`src/db`-Modul importiert und nur nach `data/bench/` geschrieben (gitignoriert).
 
-**Gemessenes Ergebnis (2026-09-29, 2 vCPU, 17 520 Stundenkerzen):**
-`backtestRule()` Exponent **1,99** / 25 986 ms je Zelle ⇒ 54,14 Kernstunden für
-7 500 Zellen; Engine Exponent **1,01** / 213,5 ms ⇒ 0,44 Kernstunden (**121,7×**);
-Indikator-Cache 72,2 ms (**360,1×**). Konsequenz: Screening und Validator-Läufe
-fahren über die Engine bzw. den Cache, nicht über `backtestRule()`. Rohzahlen,
-Messaufbau und Grenzen:
-[BENCH-BASELINE.md](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md).
+**Historisches Ergebnis vor dem Cache (2026-09-29, 2 vCPU, 17 520 echte
+Stundenkerzen):** das damalige `backtestRule()` maß Exponent **1,99** / 25 986 ms
+je Zelle ⇒ 54,14 Kernstunden für 7 500 Zellen; Engine Exponent **1,01** /
+213,5 ms ⇒ 0,44 Kernstunden (121,7×); Indikator-Cache 72,2 ms (360,1×).
+Die Screening-Entscheidung über die Multi-Asset-Engine bleibt bestehen. Die
+Original-HistoricalStore-Reihe fehlt in diesem Checkout; der ergänzende
+synthetische Same-Series-Vergleich nach 08-04 (20 253,6 ms → 64,5 ms, 314,1×)
+ist **keine** Wiederholung oder Ersatz der historischen Zahl. Rohzahlen,
+Messaufbau, Folgemessung und Grenzen: [BENCH-BASELINE.md](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md) §11.
 
 ---
 

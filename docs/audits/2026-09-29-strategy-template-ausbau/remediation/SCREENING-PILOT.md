@@ -9,15 +9,18 @@
 Der Prompt 05-04 liefert die Maschine. Ob sie sich **lohnt**, entscheidet eine
 Messung, nicht eine Schätzung: der Pilot fährt 50 Zellen durch die
 `multiAsset`-Engine und stoppt die Uhr. Übersteigt der Lauf **eine Kernstunde**,
-ist 05-04 abzulehnen und **STX-12** (`backtestRule()` O(n²)) bekommt Vorrang vor
-jedem weiteren Screening-Ausbau.
+ist der Pilot blockiert und die Ursache muss geprüft werden, bevor weiterer
+Screening-Ausbau freigegeben wird. STX-12 ist inzwischen mit dem Cache-Fix
+(`v0.11.0`) geschlossen; es ist kein ausstehender Vorrang-Task.
 
-Die Messlatte stammt aus der Baseline
-[`BENCH-BASELINE.md`](BENCH-BASELINE.md) §6: `runMultiAssetBacktest()` misst
-213,5 ms/Zelle bei 17 520 1h-Kerzen (Exponent 1,01), `backtestRule()` 26,0 s/Zelle
-(Exponent 1,99). 50 Zellen × 213,5 ms ≈ **10,7 s**. Eine Kernstunde wäre das
-**336-fache** — der Pilot trennt also „Pfad stimmt" von „Pfad ist falsch
-verkabelt" (z. B. durch den seriellen Fallback oder eine ungecachte Store-Lese).
+Die Messlatte stammt aus der historischen Baseline
+[`BENCH-BASELINE.md`](BENCH-BASELINE.md) §6: der damalige `runMultiAssetBacktest()`
+maß 213,5 ms/Zelle bei 17 520 1h-Kerzen (Exponent 1,01), der damalige
+Pre-Cache-`backtestRule()` 26,0 s/Zelle (Exponent 1,99). 50 Zellen × 213,5 ms ≈
+**10,7 s**. Eine Kernstunde wäre das **336-fache** — der Pilot trennt also
+„Pfad stimmt" von „Pfad ist falsch verkabelt" (z. B. durch seriellen Fallback
+oder ungecachte Store-Lese). Diese alten Pfadwerte bleiben historische Messwerte;
+die Screening-Engine wurde in 08-04 nicht verändert.
 
 ## Voraussetzungen
 
@@ -95,7 +98,7 @@ Der Pilot akzeptiert jede Maschine; verglichen wird der **Durchsatz**
 | Beobachtung | Konsequenz |
 |---|---|
 | ≤ 1 Kernstunde für 50 Zellen | 05-04 annehmen; nächster Schritt: Ausbau der Matrix-Breite, `backtest_run_id` bleibt die dokumentierte offene Naht |
-| > 1 Kernstunde für 50 Zellen | **05-04 ablehnen.** Ursache suchen (ungewollter serieller Fallback? Store wird je Zelle komplett gelesen? Engine-Pfad nicht `multiAsset`?), STX-12 wird Patch-Task und bekommt Vorrang |
+| > 1 Kernstunde für 50 Zellen | Pilot nicht freigeben; Ursache im Store-/Adapter-/Engine-Pfad untersuchen (serieller Fallback? vollständige Store-Lese je Zelle? Engine-Pfad nicht `multiAsset`?). STX-12 ist in `v0.11.0` bereits behoben und kein offener Folgeauftrag. |
 
 ### Meldepflicht des Equity-Caps
 

@@ -4,30 +4,42 @@
 - **Severity:** MEDIUM
 - **Bereich:** Performance
 - **Quelle:** Ausbaudokument §4.9 (nicht erkannt)
-- **Status:** PARTIAL — Abgleich 2026-10-03: Messung (00-01) und Screening-Umweg (05-04) vorhanden; `backtestRule()` selbst bleibt O(n²)
+- **Status:** FIXED — STX-08-04 in `v0.11.0` (`backtestRule()` nutzt den vorhandenen Indicator-Cache; eingefrorene Golden-Hashes und Bar-für-Bar-Parität grün). PR: wird nach Validierung ergänzt.
 - **Datei(en):** `src/lib/ruleEngine.ts:729-800`, `src/backtest/indicatorCache.ts`
 
-## Abgleich 2026-10-03
+## Abschluss 2026-10-03 — STX-08-04 (`v0.11.0`)
+
+`backtestRule()` erstellt den bestehenden `IndicatorCache` einmal vor der Bar-Schleife und nutzt `snapshotFromCache()` pro Bar. Der Aufrufpfad über `ruleBacktest.ts` und die API bleibt bestehen; `src/screening/**` ist unverändert und verwendet weiter `runMultiAssetBacktest()`.
+
+**Nachweise:**
+
+- `tests/ruleBacktest.cacheGolden.test.ts`: sechs SHA-256-Goldens (3 Symbole × 2 Timeframes), vor der Codeänderung festgeschrieben und unverändert; vollständige Backtest-Rückgaben und Direkt-Snapshots.
+- `tests/ruleEngine.indicatorCacheParity.test.ts`: alle `RULE_FIELDS` bar-für-bar exakt (576 Snapshots), Null-/Ungültigsemantik einschließlich Null-ATR, Tages-VWAP, Spread/Buch-Tiefe, Bollinger und Donchian.
+- Fokussierte Backtest-/Engine-/Template-Tests: 144 bestanden. `typecheck`, `lint` und `docs:validate` werden für diesen PR separat ausgeführt. **Die vollständige `npm test`-Suite wurde auf ausdrückliche Nutzeranweisung übersprungen** und wird nicht als gelaufen behauptet.
+- Ergänzende synthetische 17 520-Bar-Messung: alter Direktpfad 20 253,605 ms vs. Cache 64,489 ms Median (**314,1×**, gleiche Reihe, tiefengleiche Rückgabe). Die Originalreihe des HistoricalStore-Benchmarks fehlt; die offizielle 25 986,2-ms-Baseline bleibt unverändert und wird nicht als gleichartige Messung ausgegeben. Details: [`BENCH-BASELINE.md` §11](../remediation/BENCH-BASELINE.md#11-folgemessung-stx-08-04--einmaliger-indicator-cache-in-backtestrule).
+- Release: `v0.11.0`; PR: wird nach Validierung ergänzt.
+
+## Erstabgleich 2026-10-03 (vor STX-08-04)
 
 - **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
 - **Eingestuft:** `◐` **PARTIAL** — Messung und Umweg belegt, Code-Fix offen
 - **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
 
-**Nachweise**
+**Nachweise des Erstabgleichs (vor STX-08-04; historischer Zustand)**
 
-- **Weiter quadratisch:** `src/lib/ruleEngine.ts:894` — `buildSnapshotFromCandles(spec.symbol, candles.slice(0, i + 1), …)`; `grep -n "indicatorCache\|snapshotFromCache\|buildIndicatorCache" src/lib/ruleEngine.ts` → **0 Treffer**
+- **Damals weiter quadratisch:** `src/lib/ruleEngine.ts:894` — `buildSnapshotFromCandles(spec.symbol, candles.slice(0, i + 1), …)`; `grep -n "indicatorCache\|snapshotFromCache\|buildIndicatorCache" src/lib/ruleEngine.ts` → **0 Treffer**
 - **Umweg belegt:** `src/screening/backtestAdapter.ts:54` importiert `runMultiAssetBacktest` aus `@/backtest/engine`; `SCREENING_BACKTEST_PATH = "multiAsset"`, Begründung mit Messzahlen im Modulkopf (`backtestAdapter.ts:16-20`, `runner.ts:22-25`)
 - **Altpfad lebt weiter:** `src/lib/ruleBacktest.ts:385` ruft `backtestRule()`; darüber liegt `src/app/api/firm/rules/[id]/backtest/route.ts`
 - Messung unverändert gültig: [`../remediation/BENCH-BASELINE.md`](../remediation/BENCH-BASELINE.md) — Exponent 1,99 vs. 1,01, Faktor 121,7×
 - Folge-Prompt mit Paritätsnachweis: [08-04](../prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md)
 
-## Beschreibung
+## Ursprüngliche Beschreibung (vor Fix)
 
 §4.9 fordert Parallelisierung via `worker_threads` und bounded async concurrency. Bevor
 parallelisiert wird, muss der Einzel-Lauf gemessen werden — und der **Single-Rule-Pfad ist
 quadratisch**.
 
-## Beweis
+## Ursprünglicher Beweis (vor Fix)
 
 ```ts
 // src/lib/ruleEngine.ts:787  (in backtestRule)
@@ -52,15 +64,11 @@ Lösung: Indikatoren einmal pro Symbol in O(n) vorrechnen, danach O(1)-Lookup je
 `buildIndicatorCache` / `snapshotFromCache` werden in `src/backtest/engine.ts:234,238,520`
 verwendet — **nicht** in `backtestRule()`.
 
-## Remediation
+## Abgeschlossene Remediation
 
-1. **Erst messen** (Prompt 00-01): Laufzeit von `backtestRule` vs.
-   `runMultiAssetBacktest` bei 5.000 / 17.520 Kerzen.
-2. Danach entscheiden: entweder `backtestRule` auf `IndicatorCache` umstellen
-   (byte-identische Parität fordern) oder das Screening ausschließlich über die
-   Multi-Asset-Engine fahren.
-3. `worker_threads` **erst danach** — Parallelisierung auf O(n²) vervielfacht nur den
-   Speicher, nicht die Zeit.
+1. 00-01 lieferte die historische Messung; 05-04 beließ das Screening auf `runMultiAssetBacktest()`.
+2. STX-08-04 stellte `backtestRule()` auf `buildIndicatorCache()` + `snapshotFromCache()` um, ohne den Regel-/Handelsablauf zu verändern.
+3. Vorab eingefrorene Golden-Hashes, vollständige `RULE_FIELDS`-Parität und Nullsemantik decken den Wechsel ab. Es wurde keine Parallelisierung eingeführt.
 
 ## Messung (2026-09-29, Prompt 00-01, `v0.6.0`)
 
@@ -84,11 +92,18 @@ auf einer echten `BINANCE:BTCUSDT`-1h-Reihe (17 749 Kerzen, 3 Messpunkte × 3 L�
 
 ## Akzeptanzkriterien
 
-- [x] Benchmark-Artefakt mit Zahlen für n ∈ {1 000, 5 000, 17 520} × {rule, multiAsset, cache} (00-01, `v0.6.0`)
-- [ ] Falls Umstellung: Paritätstest gegen die alte Implementierung
-- [ ] Keine Verhaltensänderung des Backtest-Ergebnisses
+- [x] Benchmark-Artefakt für n ∈ {1 000, 5 000, 17 520} × {rule, multiAsset, cache} (00-01, `v0.6.0`); historische Zahlen unverändert
+- [x] Vorab eingefrorene Goldens bleiben unverändert: 3 Symbole × 2 Timeframes, Stops/Targets/Cooldown, komplette Trades/Metriken/Snapshots
+- [x] Bar-für-Bar-Parität für alle aktuellen `RULE_FIELDS`, 3 Symbole × 2 Timeframes; Null-/Ungültigsemantik geprüft
+- [x] `backtestRule()` baut den bestehenden Cache einmal vor der Schleife auf; kein `candles.slice(0, i + 1)` mehr
+- [x] Ergänzender Same-Series-Test bei 17 520 synthetischen Bars: 314,1× schneller und tiefengleiche Ergebnisse; Originaldatenreihe nicht verfügbar, daher kein Ersatz der offiziellen Messung
+- [x] `ruleBacktest.ts`, API-Pfad, Multi-Asset-Engine und Template-Tests fokussiert geprüft
+- [x] Fokussierte Tests (144), `typecheck`, `lint` und `docs:validate` grün; vollständiges `npm test` auf ausdrückliche Nutzeranweisung übersprungen
+- [x] STX-12 geschlossen in `v0.11.0`; PR-Link nach Eröffnung ergänzen
 
 ## Versions-Hinweis
 
-Patch/Minor — Messung in `v0.6.0`, die Umstellung selbst ist ein Folge-Patch (Prompt 03-09/05-04
-nutzen den Cache; die Migration von `backtestRule` bleibt separat).
+Die Messung aus 00-01 bleibt unverändert in `v0.6.0`; die Migration ist ein eigener
+Release `v0.11.0` (08-04). Screening bleibt weiter über `runMultiAssetBacktest()`.
+Paritätsnachweis, synthetische Folgemessung und Caveat stehen in
+[`BENCH-BASELINE.md` §11](../remediation/BENCH-BASELINE.md#11-folgemessung-stx-08-04--einmaliger-indicator-cache-in-backtestrule).
