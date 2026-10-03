@@ -98,13 +98,13 @@ Feld-Tabelle je Timeframe: [`BACKTESTING.md` §1.1](../../BACKTESTING.md#11-rule
 | 02-01 | [Bollinger-Bänder + Donchian](prompts/PROMPT-STX-02-01-indikatoren.md) | ✅ 2 pure Funktionen in `indicators.ts` (`v0.6.3`), BBW-Parität und Lookahead-Test | 00-03 |
 | 02-02 | [Bollinger-Regelfelder](prompts/PROMPT-STX-02-02-bollinger-felder.md) | ✅ `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct` in Snapshot + Cache (`v0.6.4`), Paritätstest und Golden-Hash | 02-01, 01-01 |
 | 02-03 | [Donchian-Regelfeld](prompts/PROMPT-STX-02-03-donchian-feld.md) | ✅ `donchianBreakoutPct` in Snapshot + Cache (`v0.6.5`), Lookahead-/O(n)-/Paritätstest | 02-01, 01-01 |
-| 02-04 | *optional* [Feature-Store-Slice `rule.*`](prompts/PROMPT-STX-02-04-featurestore-rule-slice.md) | PIT-Materialisierung + Parität | 02-02, 02-03 |
+| 02-04 | *optional* [Feature-Store-Slice `rule.*`](prompts/PROMPT-STX-02-04-featurestore-rule-slice.md) | ✅ `rule.*@1` Slice (commit `7995822`, PR #188-Vorstufe, Doku `docs/FEATURE_STORE.md` §3.2): `rule.bb_zscore`, `rule.price_vs_upper_bb_pct`, `rule.donchian_breakout_pct` in `src/features/definitions.ts` + `compute.ts`, PIT-Materialisierung, Paritätstest `tests/ruleFeatureStoreParity.test.ts` | 02-02, 02-03 |
 
-**Stand 2026-09-30:** 02-01, 02-02 und 02-03 abgeschlossen (Formeln + Bollinger- **und**
-Donchian-Regelfeld in Snapshot und Cache, Parität getestet). Damit ist die Feldseite
-komplett; offen in Phase 2 ist nur der **optionale** Feature-Store-Slice 02-04
-(STX-10). Donchian-Template 03-08 muss mindestens `1h` erlauben, nicht
-niedrigere Timeframes (geplant: `1h`, `4h`).
+**Stand 2026-10-03:** 02-01, 02-02, 02-03 **und** 02-04 abgeschlossen (Formeln + Bollinger- **und**
+Donchian-Regelfeld in Snapshot und Cache, Parität getestet, **inkl. optionalem** Feature-Store-Slice 02-04
+— commit `7995822` `feat(features): add rule.* feature store slice`, STX-10 damit umgesetzt). Damit ist die
+Feldseite inkl. Store-Anbindung komplett; Phase 2 ist vollständig. Donchian-Template 03-08 muss mindestens `1h`
+erlauben, nicht niedrigere Timeframes (geplant: `1h`, `4h`).
 
 **Reihenfolge-Logik:** 02-01 ist die Voraussetzung für 02-02 **und** 02-03. Ohne
 02-02/02-03 sind die Templates 03-06 (Bollinger) und 03-08 (Donchian) nicht
@@ -159,14 +159,24 @@ Sicherheitspfad und sind vertraglich abgesichert.
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | ✅ `v0.8.0`: 2 append-only Tabellen + Drizzle-Schema + DB-/Rollback-Tests; kein Schreibpfad | 03-09 ✅ |
-| 04-02 | [Service + Lifecycle-Bridging](prompts/PROMPT-STX-04-02-strategy-service.md) | `src/strategies/service.ts` | 04-01, 00-02 |
+| 04-01 | [Migration `strategy_definitions`/`strategy_versions`](prompts/PROMPT-STX-04-01-strategy-persistenz-migration.md) | ✅ `v0.8.0` (commit `7f28e82`, PR #201): 2 append-only Tabellen + Drizzle-Schema + DB-/Rollback-Tests; kein Schreibpfad | 03-09 ✅ |
+| 04-02 | [Service + Lifecycle-Bridging](prompts/PROMPT-STX-04-02-strategy-service.md) | ✅ `src/strategies/service.ts` (`v0.10.4`, commit `66be0c6`, PR #202, Fix `9d73aeb` PR #203): `ensureDefinition()`, `createVersion()`, `calculateVersionContentHash()` (`stv1:`/`stc1:`), Lifecycle-Bridging über `recordEvidence()`, `STRATEGY_CLASSES` aus SSoT, Audit `STRATEGY_VERSION_CREATED` | 04-01, 00-02 |
 
-**Ergebnis 04-01 (2026-10-01, `v0.8.0`):** Das Schema für Definitionen und
+**Ergebnis 04-01 (2026-10-01, `v0.8.0`, commit `7f28e82`):** Das Schema für Definitionen und
 unveränderliche Strategie-Versionen ist idempotent angelegt. Es gibt keinen
 Backfill und keinen Anwendungsschreibpfad; STX-06 bleibt bis 04-02 in Arbeit.
 Die Lifecycle-Tabellen bleiben unangetastet; der optionale nullable FK ist wegen
 des ausdrücklichen Locks nicht Teil dieses freigegebenen Scopes.
+
+**Ergebnis 04-02 (2026-10-02, `v0.10.4`, commit `66be0c6` PR #202, Fix `9d73aeb` PR #203):** Der Service ist
+Registry, kein Executor: `ensureDefinition()` legt `strategy_definitions` idempotent an,
+`createVersion()` kompiliert über `compileTemplate()` und persistiert `strategy_versions` mit
+`fingerprint = stc1:<sha256>` und `content_hash = stv1:<sha256>` (Idempotenzanker für 05-03/05-04).
+`calculateVersionContentHash()` nutzt `canonicalJson`. Lifecycle-Bridging erfolgt ausschließlich
+über `recordEvidence()` (kein `requestTransition`). `STRATEGY_CLASSES` wird aus der SSoT
+`src/lib/marketRegime.ts` gelesen (vierter Altlast-Fall aus 00-03 damit behoben). Audit-Event
+`STRATEGY_VERSION_CREATED` ist im `AUDIT_EVENT_CATALOG` beschrieben. Tests:
+`tests/strategyCatalog.db.test.ts` + `tests/strategyCatalog.service.test.ts` + `tests/adrVocabulary.test.ts`.
 
 **Vokabular-Bindung:** `strategy_class` mit CHECK auf die drei Klassen, ohne `unclassified` ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)).
 
@@ -180,24 +190,46 @@ des ausdrücklichen Locks nicht Teil dieses freigegebenen Scopes.
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 05-01 | [Screening-Typen + Priorität](prompts/PROMPT-STX-05-01-screening-types.md) | `src/screening/types.ts` + `priority.ts` | 00-01, 03-01 |
-| 05-02 | [Matrix-Builder](prompts/PROMPT-STX-05-02-matrix-builder.md) | Matrix aus Scanner-Funnel | 05-01, 01-01 |
-| 05-03 | [Persistenz + Idempotenz](prompts/PROMPT-STX-05-03-screening-persistenz.md) | ✅ Unreleased auf `v0.8.0`: 2 additive Tabellen, transaktionaler Store, `ssr1:`/`ssm1:`, immutable Zellen, monotone Fortschritte, DB-/Schema-Paritätstests | 05-02, 04-01 |
-| 05-04 | [CLI + Backtest-Job-Adapter](prompts/PROMPT-STX-05-04-screening-cli.md) | `scripts/run-screening.ts` | 05-03, 00-01 |
+| 05-01 | [Screening-Typen + Priorität](prompts/PROMPT-STX-05-01-screening-types.md) | ✅ `src/screening/types.ts` + `priority.ts` (`v0.9.0`-Vorstufe, commit `a90fa62`, PR #204): `SCREENING_RUN_KINDS`, `CandidateStatus`, `SCREENING_CELL_RESULTS`, `StrategyMarketCandidate`, konfigurierbare Gewichte mit Invarianztest | 00-01, 03-01 |
+| 05-02 | [Matrix-Builder](prompts/PROMPT-STX-05-02-matrix-builder.md) | ✅ `src/screening/matrix.ts` (`v0.9.0`-Vorstufe, commit `4267715`, PR #205): Matrix aus Scanner-Funnel, `buildCandidateMatrix()`, Filterung nach Datenqualität/Liquidität/Freshness, bounded Reads | 05-01, 01-01 |
+| 05-03 | [Persistenz + Idempotenz](prompts/PROMPT-STX-05-03-screening-persistenz.md) | ✅ `v0.9.0`-Vorstufe / Unreleased auf `v0.8.0` (commit `211e022`, PR #206): 2 additive Tabellen `strategy_screening_runs`/`strategy_market_results`, transaktionaler Store, `ssr1:`/`ssm1:` (`canonicalJson`), immutable Zellen, monotone Fortschritte, DB-/Schema-Paritätstests | 05-02, 04-01 |
+| 05-04 | [CLI + Backtest-Job-Adapter](prompts/PROMPT-STX-05-04-screening-cli.md) | ✅ `src/screening/{runner,backtestAdapter}.ts` + `scripts/run-screening.ts` (`v0.9.0`, commit `c797ae7`, PR #207): `runScreening()`, `runMultiAssetBacktest()` als einziger Engine-Pfad (`SCREENING_BACKTEST_PATH = "multiAsset"`), CLI `npm run screening` mit `--dry-run` Default, `--max-cells`, bounded Concurrency, Pilot-Runbook | 05-03, 00-01 |
 
-**Ergebnis 05-03 (2026-10-01):** Screening-Persistenz liegt in eigenen Run-/Zelltabellen; `backtest_runs` bleibt single-instrument und unverändert. Strategieversions-FK ist Pflicht, Backtest-Link optional. Kein DELETE-/Prioritäts-Overwrite-Pfad. Details/Migration/Rollback: [STRATEGY_SCREENING.md](../../STRATEGY_SCREENING.md). Runner/CLI und Pilotlauf (05-04) bleiben offen.
+**Ergebnis 05-01 (2026-10-01, commit `a90fa62`):** Screening-Typen und Prioritätsbewertung sind reine Verträge
+(`types.ts` + `priority.ts`), ohne Scanner-/Store-/Registry-Importe. `scoreCandidate()` bleibt `null` bei
+nicht belegbaren Metriken; Korrelationszuschlag `null` = kein Zuschlag. Gewichte aus §4.3 des Dokuments sind
+konfigurierbar (Muster `src/scanner/config.ts`) und per Invarianztest fixiert.
+
+**Ergebnis 05-02 (2026-10-01, commit `4267715`):** `buildCandidateMatrix()` baut die Strategie×Markt-Matrix aus dem
+Scanner-Funnel (READY-Artefakt + Volumen-Rückfall), klassifiziert nach Datenqualität/Liquidität/Freshness und
+liefert `StrategyMarketCandidate` mit `priority` und `reasons`. Bounded Reads, keine Prioritäts-Überschreibung.
+
+**Ergebnis 05-03 (2026-10-01, commit `211e022`):** Screening-Persistenz liegt in eigenen Run-/Zelltabellen
+(`strategy_screening_runs`/`strategy_market_results`); `backtest_runs` bleibt single-instrument und unverändert.
+Strategieversions-FK ist Pflicht, Backtest-Link optional. `ssr1:`/`ssm1:`-Idempotenz über `canonicalJson`,
+transaktionaler Store, monotone Fortschritte, kein DELETE-/Prioritäts-Overwrite-Pfad. Details/Migration/Rollback:
+[STRATEGY_SCREENING.md](../../STRATEGY_SCREENING.md). DB-Tests beweisen SQL-/Drizzle-Parität.
+
+**Ergebnis 05-04 (2026-10-02, `v0.9.0`, commit `c797ae7`):** Runner (`runScreening()`), Backtest-Job-Adapter
+(`runMultiAssetBacktest()` als einziger Engine-Pfad, Entscheidung `BENCH-BASELINE.md` §6: 121,7× schneller als
+`backtestRule()`) und CLI (`npm run screening`, `--dry-run` Default, `--execute` für echten Lauf) sind umgesetzt
+und mit 38 Tests belegt — harte `maxCells`, Caps ⇒ `BLOCKED` statt Kappung, bounded Concurrency ohne
+`worker_threads`, bounded Telemetrie, Abbruch ⇒ `ABORTED` mit Fortsetzung über `--run-id`. `backtest_run_id`
+bleibt bewusst `null` (Naht: `persist`-Hook im Adapter). Pilot-Runbook: `remediation/SCREENING-PILOT.md`
+(50 Zellen, >1 Kernstunde ⇒ Ablehnung zugunsten von STX-12). Gate G5 erfüllt, G6 Pilot offen.
 
 **Vokabular-Bindung:** `strategyClass: StrategyClassKey` in den Screening-Typen ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)); `crossSectionalMomentum` bleibt ein
 optionaler, lesender Faktor (`CrossSectionalRankContext`), keine zweite Eligibility ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)).
 
 **Die 0.30/0.25/0.20/…-Gewichte aus §4.3 des Dokuments werden in 05-01 konfigurierbar
-gemacht** (Muster `src/scanner/config.ts`) und mit einem Invarianztest festgeschrieben.
+gemacht** (Muster `src/scanner/config.ts`) und mit einem Invarianztest festgeschrieben (commit `a90fa62`).
 
-**Skalierungs-Gate:** 05-04 startet mit `--dry-run` und einem harten
+**Skalierungs-Gate (erfüllt):** 05-04 startet mit `--dry-run` und einem harten
 `--max-cells`-Bound. 00-01 hat gezeigt, dass ein Lauf ≤ Zeitbudget liegt — **aber nur
 über `runMultiAssetBacktest()`** (7 500 Zellen = 0,44 Kernstunden; über `backtestRule()`
-wären es 54,14). Der echte Backtest-Adapter wird freigeschaltet, wenn er am
-Engine-Pfad hängt ([`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md) §6).
+wären es 54,14). Der echte Backtest-Adapter ist freigeschaltet und hängt am
+Engine-Pfad (`src/screening/backtestAdapter.ts`, `SCREENING_BACKTEST_PATH = "multiAsset"`,
+Entscheidung in [`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md) §6, commit `c797ae7`).
 
 ---
 
@@ -249,10 +281,10 @@ schließt `UNKNOWN`/nicht zuordenbare Trades gezählt aus (kein `RANGE`-Fallback
 und lässt `evaluateRegimeOos` unverändert. `writeValidationEvidence()` schreibt
 idempotent über `recordEvidence()` (kein `requestTransition`, keine eigene
 Hashfunktion). CLI `npm run validate:strategy` mit Exit 0 nur bei `PASS`. 32 + 6
-Tests; **STX-17 geschlossen**, **STX-03 abgeschlossen**; nur der Validator-Agent
-(06-05) bleibt in Phase 6 offen.
+Tests; **STX-17 geschlossen**, **STX-03 abgeschlossen**; Phase 6 ist mit 06-05
+(2026-10-02, `v0.10.4`, commit `4812f21`) vollständig — Gate G7 erfüllt.
 
-**Ergebnis 06-05 (2026-10-02, `v0.10.4`):** Der Validator-Agent ist die einzige
+**Ergebnis 06-05 (2026-10-02, `v0.10.4`, commit `4812f21` PR #212):** Der Validator-Agent ist die einzige
 LLM-Stelle in Phase 6. `runValidatorAgent()` sendet ausschließlich allowlistete
 aggregierte Report-Daten (Prompt < 8 KiB), escaped untrusted content und blockt
 erkannte Prompt-Boundary-Overrides als `INJECTION_ATTEMPT`. Die Ausgabe ist
@@ -285,34 +317,72 @@ Interpretation zurück. Es gibt keinen Schreibpfad zu `result` oder Evidence-Wri
 
 | # | Prompt | Ergebnis | Hängt ab von |
 |---|---|---|---|
-| 07-01 | [Copy-Typen, Mapping, Sizing](prompts/PROMPT-STX-07-01-copy-domain.md) | `src/copy/{types,mapping,sizing}.ts` (rein) | 00-02 |
-| 07-02 | [Policy-Engine + Order-Links](prompts/PROMPT-STX-07-02-copy-policy.md) | `policy.ts` + `copy_order_links` | 07-01 |
-| 07-03 | [Bitunix-Leader-Adapter](prompts/PROMPT-STX-07-03-copy-leader-bitunix.md) | Leader-Quelle + Simulate-only-Follower | 07-02 |
+| 07-01 | [Copy-Typen, Mapping, Sizing](prompts/PROMPT-STX-07-01-copy-domain.md) | ✅ `src/copy/{types,mapping,sizing}.ts` (rein, `v0.10.5`, commit `b0bfcce`, PR #213): `NormalizedLeaderTrade`, `CopyMode=SIMULATE_ONLY`, SSoT-Mapping `mapLeaderSymbol()`, Sizing `FIXED_AMOUNT`/`FIXED_RATIO`/`EQUITY_RATIO` | 00-02 |
+| 07-02 | [Policy-Engine + Order-Links](prompts/PROMPT-STX-07-02-copy-policy.md) | ✅ `policy.ts` + `copy_order_links` + `copy_subscriptions` (`v0.10.6`, commit `f5af325`, PR #214): `cpl1:`-Versionen, `evaluatePolicy()` fail-closed, `copy_order_links` + `copy_subscriptions` Tabellen, `SIMULATE_ONLY` CHECK, `store.ts` idempotent | 07-01 |
+| 07-03 | [Bitunix-Leader-Adapter](prompts/PROMPT-STX-07-03-copy-leader-bitunix.md) | ✅ `src/copy/{leader/bitunix, follower/simulated, engine}.ts` + `scripts/run-copy-paper.ts` (commit `5f437d8`, PR #215, Unreleased auf `v0.10.6`, `npm run copy:paper`): Bitunix-WS-Order-Frames → Normalisierung → Policy → Simulate-only-Follower auf Paper-Ledger, Baseline-Snapshot-Gate `NO_BASELINE`, Heartbeat-Pause, dedup über `copy_order_links` | 07-02 |
+
+**Ergebnis 07-01 (2026-10-02, `v0.10.5`, commit `b0bfcce` PR #213):** Reines Domänenmodell
+(`src/copy/types.ts`, `mapping.ts`, `sizing.ts`): `NormalizedLeaderTrade` normalisiert auf Handlungsabsicht
+`OPEN|INCREASE|DECREASE|CLOSE`, `CopyMode = "SIMULATE_ONLY"` (Enum mit genau einem Wert, STX-16, kein Live-Pfad),
+`mapLeaderSymbol()` nutzt SSoT `tryNormalizeVenueSymbol` (kein `String.replace`), `computeFollowerNotional()`
+mit `FIXED_AMOUNT`/`FIXED_RATIO`/`EQUITY_RATIO` fail-closed, `applyLeveragePolicy()` mit
+`FOLLOW_LEADER`/`CAP`/`IGNORE`/`RISK_NORMALIZED`. Keine IO/DB/Netz. Test `tests/copy.domain.test.ts`.
+
+**Ergebnis 07-02 (2026-10-03, `v0.10.6`, commit `f5af325` PR #214):** Versionierte Copy-Policy
+(`cpl1:<sha256>` in `src/copy/config.ts`) und fail-closed Vorabprüfung `evaluatePolicy()` in `policy.ts`
+gegen `HALTED`, Notional/Day-Limits, Spread (`spreadPct`/`scannerSpread`), Positionen, Tagesverlust, Hebel und
+Mapping (`NO_MAPPING`). Additive Migration `drizzle/2026-10-03_copy_subscriptions.sql`: `copy_subscriptions`
+(`enabled=false`, CHECK `mode='SIMULATE_ONLY'`) und `copy_order_links` (`UNIQUE(leader_event_id,follower_intent_id)`,
+`UNIQUE(follower_intent_id)`, Status-/Policy-CHECKs, FK auf `execution_quality_intents.id` TEXT). `store.ts`:
+`createIntent()` insert-or-return-existing, Transitionen vorwärts über Zeilensperren, `FILLED`-Retry No-Op,
+`DIVERGED` terminal, `follower_notional` gemessen nicht storniert. Tests `copy.policy.test.ts` + `copy.db.test.ts`.
+
+**Ergebnis 07-03 (2026-10-03, commit `5f437d8` PR #215, Unreleased auf `v0.10.6`, `npm run copy:paper`):**
+Erster lauffähiger Copy-Loop Paper-only, Bitunix-first: `src/copy/leader/bitunix.ts` nutzt ausschließlich
+vorhandene Bitunix-Infrastruktur (`BitunixPublicWs` + `openHardenedWs`, `orders.ts:clientOrderIdFor`,
+`privateClient.ts`, `secrets.ts`, `redactor.ts`), kein zweiter WS-Client. Reihenfolge: erst Baseline-Snapshot
+(`getPositions` + Equity), dann Frame-Strom; ohne Baseline kein `LIVE` — `connect()` wirft `BASELINE_UNAVAILABLE`,
+Engine-Gate `NO_BASELINE`, keine Zeile geschrieben. Heartbeat-Lücke ⇒ `PAUSED_NO_HEARTBEAT`. Dekodiert
+`ch:"order"`-Frames deterministisch zu `OPEN`/`INCREASE`/`DECREASE`/`CLOSE` (Net- und Hedge-Modus), filtert
+`INIT`/`NEW`/`CANCELED`/`PART_FILLED_CANCELED`. `src/copy/follower/simulated.ts`: `SIMULATE_ONLY`-Follower auf
+Paper-Ledger (`PaperBroker.submit()`/`close()`), Ergebnisse über `executionQuality` in `execution_quality_intents`,
+kein `BrokerAdapter`, kein Venue-Order-Pfad. `src/copy/engine.ts`: Orchestrierung mit persistenter Dedupe über
+`copy_order_links` (`followerIntentIdFor(leader_event_id)`), Leader-Tor (LIVE + Baseline), SSoT-Mapping, Sizing,
+`evaluatePolicy`, Follower-Simulation, `SENT`/`PARTIAL`/`FILLED`, fail-closed je Schritt mit Audit + Telemetrie
+(`copy.events`, `copy.latency`, `copy.leader`). Migration `drizzle/2026-10-04_copy_engine_gates.sql`: `NO_BASELINE`
+in CHECK, Spalte `follower_notional` + CHECK (0…1e15) als Basis für `maxNotionalPerDay`. CLI
+`scripts/run-copy-paper.ts` mit `--leader-account`, `--symbols`, `--duration`, `--max-events`,
+`--policy`, `--dry-run` (Default), `--write`/`--no-write`, `--replay`. Tests `tests/copy.engine.test.ts`
+(20 Tests, kein Netzwerk, injizierte Frames, Baseline-Reihenfolge, Heartbeat-Pause, Doppelzustellung inkl.
+Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte Venue“).
 
 **Abgrenzung ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)):** Das `SizingMode` aus 07-01 (Follower-Notional) gehört zur Copy-Domäne und ist nicht
 `PortfolioConstruction`.
 
 **Alpaca ist NICHT in dieser Roadmap** (STX-08: kein WS vorhanden → eigener Adapter-Audit).
 **Kein Reconciler** (STX-09: `executionQuality` existiert). **Kein Slippage-Cancel**
-(nachträglich messen, nicht stornieren).
+(nachträglich messen, nicht stornieren). **Kein Live-Copy** (STX-16: `SIMULATE_ONLY` per DB-CHECK).
+
+**Phase 7 damit abgeschlossen (2026-10-03):** 07-01 (`v0.10.5`), 07-02 (`v0.10.6`), 07-03 (commit `5f437d8`, Unreleased auf `v0.10.6`) — Gate G8 erfüllt.
 
 ---
 
 ## Reihenfolge- und Abhängigkeitsübersicht
 
 ```
-00-01 ─────────────────────────────▶ 05-04 (Skalierungs-Gate)
-00-02 ──▶ 00-03 ──┬──▶ 01-01 ──┬──▶ 02-02 ──▶ 03-06 ─┐
-                  │             └──▶ 02-03 ──▶ 03-08 ─┤
-                  ├──▶ 02-01 ──┘                       │
-                  └──▶ 03-01 ──▶ 03-02 ──▶ 03-03…03-07 ┴──▶ 03-09 ✅ ──▶ 03-10 ✅
-                                    │                        │
-                                    └──▶ 04-01 ──▶ 04-02 ──┴──▶ 05-01 ──▶ 05-02 ──▶ 05-03
-                                                                                    │
-                                    03-09 ──▶ 06-01 ──▶ 06-02 ──▶ 06-04 ◀──────────┘
-                                            └──────▶ 06-03 ─────┘       │
-                                                                      06-05
-00-02 ──▶ 07-01 ──▶ 07-02 ──▶ 07-03      (vollständig unabhängig)
+00-01 ─────────────────────────────▶ 05-04 ✅ (Skalierungs-Gate)
+00-02 ──▶ 00-03 ✅─┬──▶ 01-01 ✅─┬──▶ 02-02 ✅ ──▶ 03-06 ✅─┐
+                  │             └──▶ 02-03 ✅ ──▶ 03-08 ✅─┤
+                  ├──▶ 02-01 ✅─┘                          │
+                  └──▶ 03-01 ✅ ──▶ 03-02 ✅ ──▶ 03-03…03-07 ✅┴──▶ 03-09 ✅ ──▶ 03-10 ✅
+                                    │                           │
+                                    └──▶ 04-01 ✅ ──▶ 04-02 ✅ ──┴──▶ 05-01 ✅ ──▶ 05-02 ✅ ──▶ 05-03 ✅
+                                                                                       │
+                                    03-09 ✅ ──▶ 06-01 ✅ ──▶ 06-02 ✅ ──▶ 06-04 ✅ ◀──────────┘
+                                               └──────▶ 06-03 ✅ ─────┘       │
+                                                                         06-05 ✅
+00-02 ✅ ──▶ 07-01 ✅ ──▶ 07-02 ✅ ──▶ 07-03 ✅      (vollständig unabhängig, Gate G8 erfüllt)
+02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
 ```
 
 **Kritischer Pfad:** `00-03 → 01-01 → 03-01 → 03-02 → 03-09 → 04-01 → 04-02 → 05-… → 06-04`
