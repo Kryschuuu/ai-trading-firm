@@ -21,38 +21,63 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.10.9** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.11.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
 
-> **Status: Beta.** Nachtrag zu PR #215 (2026-10-03), im Changelog
-> nachgereicht am 2026-10-03. Die Copy-Engine aus 07-03 wird dokumentiert; die
-> Projekt-Code-Version bleibt `0.10.6` (kein Versions-Bump).
+## [0.11.0] — Indicator-Cache für `backtestRule()` (STX-08-04) + Copy-Engine (PR #221, 2026-10-03)
+
+> **Status: Beta.** Minor-Release. Die vor der Cache-Umstellung eingefrorenen
+> Golden-Hashes für sechs Symbol-/Timeframe-Kombinationen bleiben unverändert.
 
 ### Added
 
-* **Copy-Engine (07-03, PR #215):** `src/copy/engine.ts` orchestriert Leader-Tor,
-  Policy, Sizing und persistente Dedupe über `copy_order_links` (im `--write`-Modus).
-  `src/copy/leader/bitunix.ts` normalisiert Bitunix-WebSocket-Order-Frames zu
-  `NormalizedLeaderTrade`; `src/copy/follower/simulated.ts` führt sie als
-  `SIMULATE_ONLY`-Follower ausschließlich auf dem Paper-Ledger aus — kein
-  `BrokerAdapter`, keine Venue-Order.
-* **CLI `npm run copy:paper`:** `--dry-run` ist der Default; `--write` aktiviert
-  Persistenz, `--no-write` ist ein Alias für `--dry-run`. `--replay` spielt Frames
-  offline ab und erzwingt `--dry-run`. Unterstützte Optionen: `--leader-account`,
-  `--symbols`, `--duration`, `--max-events` und `--policy`. Ohne Baseline blockiert
-  das Gate `NO_BASELINE`; bei fehlendem Heartbeat pausiert die Engine mit
+* **Copy-Engine (07-03, PR #215; Changelog-Nachtrag 08-01):** `src/copy/engine.ts`
+  orchestriert Leader-Tor, Policy, Sizing und persistente Dedupe über
+  `copy_order_links` (im `--write`-Modus). Bitunix-WebSocket-Order-Frames werden
+  zu `NormalizedLeaderTrade` normalisiert und ausschließlich als
+  `SIMULATE_ONLY` auf dem Paper-Ledger verarbeitet — kein `BrokerAdapter`, keine
+  Venue-Order.
+* **CLI `npm run copy:paper`:** `--dry-run` ist Default; `--write` aktiviert
+  Persistenz, `--no-write` ist ein Alias für `--dry-run`, `--replay` spielt
+  offline Frames ab und erzwingt `--dry-run`. Ohne Baseline blockiert
+  `NO_BASELINE`; bei fehlendem Heartbeat pausiert die Engine mit
   `PAUSED_NO_HEARTBEAT`.
-* **Additive Migration** (`drizzle/2026-10-04_copy_engine_gates.sql`): ergänzt
-  `NO_BASELINE` als zulässigen Policy-Code und fügt `follower_notional` zu
-  `copy_order_links` hinzu.
+* **Additive Migration** `drizzle/2026-10-04_copy_engine_gates.sql`: ergänzt
+  `NO_BASELINE` und fügt `follower_notional` zu `copy_order_links` hinzu.
+
+### Changed
+
+* **`backtestRule()` (`src/lib/ruleEngine.ts`)** baut den vorhandenen
+  `IndicatorCache` genau einmal vor der Bar-Schleife und liest jeden Snapshot
+  über `snapshotFromCache()` — kein wachsendes `candles.slice(0, i + 1)` mehr.
+  Handelslogik, `executionModel`-Default (`legacy`), `RULE_FIELDS`,
+  `sanitizeRuleSpec` und `RuleAction` bleiben unverändert.
+* **ATR-Nullsemantik im Cache:** `atrPct` ist bei ATR = 0/ungültig jetzt
+  `null`, wie im bestehenden Direktpfad (`atrPct()` → `atr()`). Das behebt die
+  zuvor nachgewiesene Abweichung `null` vs. `0`; auf dem gemeinsam genutzten
+  Cache-Pfad blockiert damit auch `atrPct eq 0` bei flachen Kerzen fail-closed.
+  Das ist eine enge Korrektur am Engine-Snapshot, keine Änderung am
+  Screening-Code.
+* **Benchmark:** Auf einer deterministischen synthetischen 17 520-Bar-Reihe
+  lief der alte Direktpfad im Median **20 253,6 ms**, der Cache-Pfad **64,5 ms**
+  (314,1× auf derselben Reihe; Ergebnisobjekte identisch). Diese ergänzende
+  Messung ersetzt nicht die historische echte `HistoricalStore`-Baseline — die
+  dafür verwendete Datenreihe lag in diesem Checkout nicht vor. Details und
+  Rohwerte: [`BENCH-BASELINE.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md).
 
 ### Tests
 
-* `tests/copy.engine.test.ts`: 20 Tests ohne Netzwerk mit injizierten Frames,
-  einschließlich Baseline-Gate, Heartbeat-Pause und Dedupe nach Doppelzustellung
-  bzw. Neustart (20/20 lokal grün).
+* `tests/ruleBacktest.cacheGolden.test.ts`: sechs vor der Codeänderung
+  eingefrorene SHA-256-Goldenläufe über Trades, Kennzahlen und vollständige
+  Direkt-Snapshots; alle Hashes bleiben gleich.
+* `tests/ruleEngine.indicatorCacheParity.test.ts`: jedes `RULE_FIELDS`-Feld
+  Bar für Bar über 3 Symbole × 2 Timeframes sowie explizite Nullfälle für ATR,
+  VWAP, Spread, Buch-Tiefe, Donchian und Bollinger.
+* Fokussierter Lauf der sechs Backtest-/Engine-/Template-Testdateien: **144 Tests bestanden**.
+* `tests/copy.engine.test.ts` deckt den Paper-only-Copy-Pfad ab (20 lokale Tests aus 07-03).
+* Die vollständige `npm test`-Suite wurde in diesem Patchlauf auf ausdrückliche Nutzeranweisung nicht ausgeführt; sie wird nicht als grün behauptet.
 
 ## [0.10.9] — Strategie-Klassen in `signalDecay*` aus der SSoT (STX-08-03) (2026-10-03)
 

@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.2.2` |
+| **Audit-Version** | `audit-2026-09-29 v1.2.4` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — **21 Findings** (19 Ursprung + STX-20/STX-21 aus dem Abgleich 2026-10-03), davon 5 HIGH; **vollständig abgeglichen gegen `main` @ `3d13161`** ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)): 17 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14), 2 offen (STX-08, STX-21); **alle 32 Ursprungs-Prompts umgesetzt**, Phase 8 ergänzt 5 Folge-Prompts, 08-01 erledigt (Doku-Nachtrag ohne Bump), 08-02 erledigt (`v0.10.8`, Altlast 3); Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 abgeschlossen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04 Report + Gate-Kette + Evidence-Writer + CLI `v0.10.3`, STX-17 geschlossen; 06-05 Validator-Agent `v0.10.4` umgesetzt, STX-13 geschlossen) |
+| **Status** | `OPEN` — 21 Findings: 18 FIXED, 1 PARTIAL (STX-14), 2 OPEN (STX-08, STX-21); historischer Vollabgleich gegen `main` @ `3d13161` ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)); alle 32 Ursprungs-Prompts umgesetzt; Phase 8: 08-01…08-04 erledigt, 08-05 offen; aktueller Code-Stand `v0.11.0` (08-04 schließt STX-12) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -55,6 +55,7 @@
 | `v1.2.1` | 2026-10-03 | **PATCH — STX-20 behoben:** Prompt 08-01 ergänzt den Changelog-Nachtrag zu PR #215 unter `[Unreleased]` (Form A), mit Code-Version `0.10.6`; kein Projektversions-Bump, `[0.10.6]` bleibt unverändert. 21 Findings: 17 verifiziert umgesetzt, 2 teilweise, 2 offen (STX-08, STX-21). Ein Phase-8-Prompt erledigt, 4 offen |
 | `v1.2.2` | 2026-10-03 | **PATCH — Altlast 3 behoben:** Prompt 08-02 ergänzt im Doku-Viewer (`resolveDoc()` in `src/lib/docsCatalog.ts`) die Suchpfade `docs/architecture/` und `docs/roadmap/` (nach `docs/security/`, vor `docs/archive/`) — Projekt-Release `v0.10.8` (Patch), `0.10.7` bleibt frei (08-01 als Form A ohne Bump). Parent-Referenzen (`..`) werden im Existenz-Fallback zusätzlich abgewiesen, `DOCS_CATALOG` bleibt unverändert; 8 neue Tests in `tests/docsCatalog.test.ts`. Ein Phase-8-Prompt zusätzlich erledigt, 3 offen |
 | `v1.2.3` | 2026-10-03 | **PATCH — Altlast 1 behoben:** Prompt 08-03 leitet `STRATEGY_CLASS_KEYS` in `src/lib/signalDecay.ts` aus `STRATEGY_CLASSES` ab (`[...STRATEGY_CLASSES, "unclassified"]`), ersetzt die Literalvergleiche in `isStrategyClassKey()`, in der lokalen Closure `classOf()` (Risk-Config-Overrides `sdc.<klasse>.<feld>`) und in `metricClass()` (`src/lib/signalDecayRuntime.ts`) durch einen Lookup gegen die SSoT-Liste und ergänzt einen Quelltext-Wächter in `tests/adrVocabulary.test.ts` — die Muster werden aus `STRATEGY_CLASS_KEYS` gebaut, damit eine per ADR ergänzte fünfte Klasse sofort mitgeprüft wird; Projekt-Release `v0.10.9` (Patch). Typ, Reihenfolge und Werte unverändert, kein Verhaltenswechsel; **STX-02-Rest abgeschlossen, Altlast 1 behoben**, einzige dokumentierte Literalstelle bleiben die append-only DB-CHECKs. Zwei Phase-8-Prompts zusätzlich erledigt (08-01, 08-02, 08-03), 2 offen |
+| `v1.2.4` | 2026-10-03 | **PATCH — STX-12 behoben:** 08-04 stellt `backtestRule()` in Projekt-Version `v0.11.0` auf den bestehenden Indicator-Cache um. Vorab eingefrorene sechs Golden-Hashes unverändert; alle `RULE_FIELDS` bar-für-bar für 3 Symbole × 2 Timeframes, Null-/Ungültigsemantik und ATR=0 geprüft. Synthetische Same-Series-Folgemessung bei 17 520 Bars: 314,1×; Original-HistoricalStore-Reihe fehlt, historische Baseline unverändert. 144 fokussierte Tests, `typecheck`, `lint`, `docs:validate`; vollständiges `npm test` auf Nutzeranweisung übersprungen. 08-04 geschlossen, 08-05/STX-21 bleibt offen; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221). |
 
 ## 2. Release-Plan der Roadmap
 
@@ -84,14 +85,12 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.10.2` | Validator deterministisch, Stufe 3: Cost- & Slippage-Stress-Runner — ausgeliefert 2026-10-02 | 06-03 | Minor (neues Modul) | **Beta — Report offen** |
 | `v0.10.3` | Validator-Report + Evidence-Writer + CLI — ausgeliefert 2026-10-02 | 06-04 | Minor | **Beta — nur Agent (06-05) offen** |
 | `v0.10.4` | Validator-Agent (Shadow-Mode, erklärt nur) — umgesetzt 2026-10-02 | 06-05 | Minor | **Beta — Phase 6 abgeschlossen** |
-| `v0.11.0` | Copy-Domänenmodell (rein) | 07-01 | Minor | **Beta** |
-| `v0.11.1` | Copy-Policy + Order-Links (`SIMULATE_ONLY`) | 07-02 | Minor | **Beta** |
-| `v0.11.2` | Bitunix-Leader + Simulate-only-Follower | 07-03 | Minor | **Beta** |
-| `[Unreleased]` (kein Projektversions-Bump) | Changelog-Nachtrag Copy-Engine 07-03 — [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md), 08-01 erledigt am 2026-10-03; Code-Version `0.10.6` | 08-01 | Doku | **Beta** |
+| `v0.10.5` | Copy-Domänenmodell (`SIMULATE_ONLY`) — ausgeliefert 2026-10-02 | 07-01 | Minor | **Beta** |
+| `v0.10.6` | Copy-Policy + Order-Links — ausgeliefert 2026-10-03 | 07-02 | Minor | **Beta** |
 | `v0.10.8` | Doku-Viewer-Suchpfade `docs/architecture/` + `docs/roadmap/` (Altlast 3) — ausgeliefert 2026-10-03 | 08-02 | Patch | **Beta** |
 | `v0.10.9` | Klassen-Literale in `signalDecay*` aus der SSoT (STX-02-Rest, Altlast 1) — ausgeliefert 2026-10-03 | 08-03 | Patch | **Beta** |
-| `v0.10.10` *(vorgeschlagen)* | `LOCAL_FREE`-Endpunkt absichern — [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | 08-05 | Patch | **Beta** |
-| `v0.11.0` *(vorgezogen)* | `backtestRule()` auf den Indicator-Cache mit Paritätsnachweis — [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md); **Kollision mit dem geplanten Copy-Release `v0.11.0`** — Nummer beim Umsetzen neu vergeben | 08-04 | Minor (Handelslogik, byte-identisch) | **Beta** |
+| `v0.11.0` | `backtestRule()`-Indicator-Cache (STX-12) + 07-03 Copy-Engine (PR #215; 08-01 Changelog-Nachtrag), Release in PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221) | 08-04, 07-03/08-01 | Minor (Performance/Cache-Parität) | **Beta** |
+| `v0.11.1` *(vorgeschlagen)* | `LOCAL_FREE`-Endpunkt absichern — [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | 08-05 | Patch | **Beta** |
 | *(optional)* | Feature-Store-Slice `rule.*` | 02-04 | Minor | **Beta** |
 
 **Entschieden (2026-10-01):** 03-09 wurde als eigenes Release `v0.7.5`
@@ -103,19 +102,23 @@ Template-Vertragstests in `v0.7.6` und schließt Phase 3 ab (Gate G3).
 Schemafundament. Die Migration kann Definitionen und Versionen speichern, aber
 ohne 04-02 existiert noch kein Anwendungspfad; STX-06 bleibt deshalb in Arbeit.
 
-**Entschieden (2026-10-03):** 08-01 folgt **Form A**: Der Nachtrag für 07-03
-steht unter `[Unreleased]`; es gibt keinen Projektversions-Bump, und der
-Projekt-Code-Stand bleibt `0.10.6`. STX-20 ist mit Audit-PATCH `v1.2.1`
-geschlossen.
+**Entschieden (2026-10-03, historischer Zwischenstand):** 08-01 folgte zunächst
+**Form A**: Der Nachtrag für 07-03 stand unter `[Unreleased]`; damals gab es
+keinen Projektversions-Bump und der Code-Stand blieb `0.10.6`. STX-20 wurde mit
+Audit-PATCH `v1.2.1` geschlossen. Mit der folgenden Release-Vergabe wurde der
+Nachtrag in `v0.11.0` aufgenommen.
 
 **Entschieden (2026-10-03):** 08-03 wird wie geplant als `v0.10.9` ausgeliefert
 (Patch — `src/lib/signalDecay.ts`/`src/lib/signalDecayRuntime.ts` plus Wächter,
 kein Schema, kein Verhaltenswechsel).
 
-**Entschieden (2026-10-03):** Wegen Form A bleibt `v0.10.7` unbenutzt; 08-02
-wird im vorliegend geplanten Slot `v0.10.8` ausgeliefert (Patch — nur
-`src/lib/docsCatalog.ts` plus Tests). Die Nummern der übrigen Phase-8-Prompts
-(`v0.10.9` 08-03, `v0.10.10` 08-05, 08-04 Minor) bleiben damit gültig.
+**Entschieden (2026-10-03, aktualisiert nach 08-04):** Wegen Form A blieb
+`v0.10.7` unbenutzt; 08-02 ging als `v0.10.8`, 08-03 als `v0.10.9`.
+STX-08-04 erhält den aktuellen Release-Slot `v0.11.0` (Minor), wodurch die
+frühere Zuordnung `v0.10.10` für 08-05 überholt ist. 08-05/STX-21 ist nun für
+`v0.11.1` (Patch) vorgeschlagen. Die Copy-Releases 07-01/07-02 wurden tatsächlich
+als `v0.10.5`/`v0.10.6` ausgeliefert; 07-03 und der 08-01-Nachtrag sind in
+`v0.11.0` enthalten.
 
 **Entschieden (2026-10-02):** 06-02 wurde als eigenes Release `v0.10.1`
 ausgeliefert (ein Prompt = ein Bump, wie in Phase 3). Damit verschiebt sich die
@@ -142,7 +145,7 @@ Annahme-Kette. Ein Release je Template bedeutet:
 | --- | --- |
 | Alle 32 Prompts `☑` | **Kein** Beta-Exit. Siehe [`BETA_STATUS.md`](../../BETA_STATUS.md). |
 | Alle 6 Templates `PASS` im Validator | **Kein** Beta-Exit. Ein `PASS` ist ein Filterergebnis, kein Nachweis. |
-| `v0.11.2` erreicht | **Kein** Beta-Exit. `SIMULATE_ONLY` bleibt `SIMULATE_ONLY`. |
+| `v0.11.0` erreicht | **Kein** Beta-Exit. `SIMULATE_ONLY` bleibt `SIMULATE_ONLY`; ein Versionserreichen ist kein Beta-Nachweis. |
 | Sicherheitsaudit ohne offene Findings | **Kein** Beta-Exit. Erfüllt allein `B4`. |
 
 ## 3. Versionsregeln für die Umsetzung
@@ -170,7 +173,7 @@ Roadmap sind drei echte Bruchstellen vorgesehen — alle drei bewusst:
 | --- | --- | --- | --- |
 | `RuleWindow.timeframe` wird von 5 auf 10 Werte erweitert | `v0.6.2` (umgesetzt) | Code, der `ALLOWED_TIMEFRAMES` als geschlossene Menge behandelt | `RULE_ALLOWED_TIMEFRAMES` ist jetzt exportiert und aus `SUPPORTED_TIMEFRAMES` abgeleitet; der Mikro-Executor wertet weiter nur bis `1h` aus (Timeframe-Guard) |
 | `RuleSnapshot` und `IndicatorCache` wachsen um 4 Felder | `v0.6.4`/`v0.6.5` (umgesetzt) | Code, der `RuleSnapshot` als geschlossene Union typisiert | Felder sind additiv, aber die **Parität** beider Snapshot-Pfade wird jetzt getestet (Bollinger- und Donchian-Feld, Bar für Bar; seit `v0.7.6` zusätzlich exakt in `tests/strategies.templates.test.ts` festgenagelt) |
-| `COPY_MODE`-Enum existiert | `v0.11.0` | Kein bestehender Code (Modul ist neu) | keine |
+| `COPY_MODE`-Enum existiert | `v0.10.5` | Kein bestehender Code (Modul ist neu) | keine |
 
 ## 5. Offene Versionsfragen
 
@@ -178,7 +181,7 @@ Roadmap sind drei echte Bruchstellen vorgesehen — alle drei bewusst:
 | --- | --- | --- |
 | V1 | Muss ein Templates-Release auch eine `v1`-Version der Strategie-Bibliothek tragen? | Empfehlung: **nein** — `templateVersion` im Artefakt-Hash genügt (04-01). |
 | V2 | Wann wird `0.x` verlassen? | **Nicht durch diese Roadmap planbar.** Erst wenn `B1…B8` belegt sind, siehe [`BETA_STATUS.md`](../../BETA_STATUS.md). |
-| V3 | Braucht Phase 7 ein eigenes Release-Train? | Empfehlung: **nein**, sie folgt `v0.11.0–v0.11.2`, weil sie organisatorisch abhängig (`B5`) ist. |
+| V3 | Braucht Phase 7 ein eigenes Release-Train? | **Nein.** 07-01/07-02 wurden in `v0.10.5`/`v0.10.6` ausgeliefert; 07-03 (PR #215) ist bereits umgesetzt und mit dem nächsten Release `v0.11.0` dokumentiert. Kein separater Release-Train. |
 | V4 | Muss `v0.5.1` existieren, wenn nur Doku geändert wurde? | **Nein** — die Audit-Doku aus PR #180 wurde ohne eigenen Bump gemergt und ist in `v0.6.0` gefaltet (siehe `CHANGELOG.md`); so bleibt „ein Release = ein prüfbares Paket“ gewahrt. |
 
 ---

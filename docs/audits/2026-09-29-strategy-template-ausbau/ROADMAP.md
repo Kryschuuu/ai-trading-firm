@@ -4,15 +4,13 @@
 > Versionierung: [`VERSIONING.md`](VERSIONING.md) ·
 > Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
 >
-> **Abgleich 2026-10-03** (Audit `v1.2.2`, einschließlich Nachtrag 08-01 und Fix 08-02): alle 19 Ursprungs-Findings plus 2 neue
-> gegen `main` @ `3d13161` verifiziert —
-> [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md).
-> Ergebnis: **21 Findings** — 17 verifiziert umgesetzt, 2 teilweise
-> ([STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md),
-> [STX-14](findings/STX-14-changepct24h-semantik.md)), 2 offen
-> ([STX-08](findings/STX-08-alpaca-ohne-websocket.md),
+> **Vollabgleich 2026-10-03 + STX-08-04-Abschluss** (Audit `v1.2.4`): der historische Abgleich
+> verifizierte alle 21 Findings gegen `main` @ `3d13161` —
+> [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md). Nach dem
+> 08-04-Fix: **21 Findings** — 18 FIXED, 1 PARTIAL ([STX-14](findings/STX-14-changepct24h-semantik.md)),
+> 2 OPEN ([STX-08](findings/STX-08-alpaca-ohne-websocket.md),
 > [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Alle 32 Ursprungs-Prompts
-> sind umgesetzt.** Von den fünf Folge-Prompts in **Phase 8** ist 08-01 erledigt; vier bleiben offen.
+> umgesetzt.** In **Phase 8** sind 08-01…08-04 erledigt; 08-05/STX-21 bleibt offen.
 
 ## ⚠️ Diese Roadmap beendet die Beta-Phase nicht
 
@@ -22,7 +20,7 @@
 > Kriterien `B1…B8`: [`../../BETA_STATUS.md`](../../BETA_STATUS.md) · Begründung:
 > [`report.md` §8](report.md#8-beta-positionierung-der-roadmap).
 
-Alle geplanten Releases liegen in `0.x` (`v0.6.0` … `v0.11.2`) — siehe
+Alle geplanten Releases liegen in `0.x` (`v0.6.0` … `v0.11.1`) — siehe
 [`VERSIONING.md`](VERSIONING.md).
 
 ## 0. Grundregeln für alle Prompts
@@ -221,12 +219,11 @@ transaktionaler Store, monotone Fortschritte, kein DELETE-/Prioritäts-Overwrite
 [STRATEGY_SCREENING.md](../../STRATEGY_SCREENING.md). DB-Tests beweisen SQL-/Drizzle-Parität.
 
 **Ergebnis 05-04 (2026-10-02, `v0.9.0`, commit `c797ae7`):** Runner (`runScreening()`), Backtest-Job-Adapter
-(`runMultiAssetBacktest()` als einziger Engine-Pfad, Entscheidung `BENCH-BASELINE.md` §6: 121,7× schneller als
-`backtestRule()`) und CLI (`npm run screening`, `--dry-run` Default, `--execute` für echten Lauf) sind umgesetzt
+(`runMultiAssetBacktest()` als einziger Screening-Engine-Pfad; laut damaliger Prä-Cache-Messung in `BENCH-BASELINE.md` §6 121,7× schneller als das damalige `backtestRule()`) und CLI (`npm run screening`, `--dry-run` Default, `--execute` für echten Lauf) sind umgesetzt
 und mit 38 Tests belegt — harte `maxCells`, Caps ⇒ `BLOCKED` statt Kappung, bounded Concurrency ohne
 `worker_threads`, bounded Telemetrie, Abbruch ⇒ `ABORTED` mit Fortsetzung über `--run-id`. `backtest_run_id`
 bleibt bewusst `null` (Naht: `persist`-Hook im Adapter). Pilot-Runbook: `remediation/SCREENING-PILOT.md`
-(50 Zellen, >1 Kernstunde ⇒ Ablehnung zugunsten von STX-12). Gate G5 erfüllt, G6 Pilot offen.
+(50 Zellen, >1 Kernstunde ⇒ Pilot blockiert und Ursache untersucht; STX-12 ist seit `v0.11.0` geschlossen). Gate G5 erfüllt, G6 Pilot offen.
 
 **Vokabular-Bindung:** `strategyClass: StrategyClassKey` in den Screening-Typen ([ADR-008 (E1)](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)); `crossSectionalMomentum` bleibt ein
 optionaler, lesender Faktor (`CrossSectionalRankContext`), keine zweite Eligibility ([ADR-010 (E3)](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)).
@@ -235,9 +232,9 @@ optionaler, lesender Faktor (`CrossSectionalRankContext`), keine zweite Eligibil
 gemacht** (Muster `src/scanner/config.ts`) und mit einem Invarianztest festgeschrieben (commit `a90fa62`).
 
 **Skalierungs-Gate (erfüllt):** 05-04 startet mit `--dry-run` und einem harten
-`--max-cells`-Bound. 00-01 hat gezeigt, dass ein Lauf ≤ Zeitbudget liegt — **aber nur
-über `runMultiAssetBacktest()`** (7 500 Zellen = 0,44 Kernstunden; über `backtestRule()`
-wären es 54,14). Der echte Backtest-Adapter ist freigeschaltet und hängt am
+`--max-cells`-Bound. Die historische 00-01-Messung vor 08-04 zeigte, dass ein Lauf ≤ Zeitbudget liegt — **aber nur
+über `runMultiAssetBacktest()`** (7 500 Zellen = 0,44 Kernstunden; das damalige O(n²)-`backtestRule()`
+wurde mit 54,14 Kernstunden hochgerechnet). Heute nutzt `backtestRule()` den Cache; der Screening-Adapter bleibt unverändert. Der echte Backtest-Adapter ist freigeschaltet und hängt am
 Engine-Pfad (`src/screening/backtestAdapter.ts`, `SCREENING_BACKTEST_PATH = "multiAsset"`,
 Entscheidung in [`remediation/BENCH-BASELINE.md`](remediation/BENCH-BASELINE.md) §6, commit `c797ae7`).
 
@@ -381,12 +378,12 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 > **Herkunft:** der Vollabgleich [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 > hat 21 Findings gegen `main` @ `3d13161` verifiziert. Die 32 Ursprungs-Prompts sind
-> umgesetzt; 08-01, 08-02 und 08-03 sind am 2026-10-03 erledigt, zwei der fünf Folge-Prompts bleiben offen. Jeder ist ein
-> eigenständiger, abgegrenzter Auftrag mit Ziel, betroffenen Dateien, Randbedingungen,
-> Abnahmekriterien und Tests — ohne Rückfragen ausführbar.
+> umgesetzt; 08-01…08-04 sind am 2026-10-03 erledigt, 08-05/STX-21 bleibt als
+> einziger Phase-8-Prompt offen. Jeder Prompt ist ein eigenständiger, abgegrenzter
+> Auftrag mit Ziel, betroffenen Dateien, Randbedingungen, Abnahmekriterien und Tests.
 >
-> **Reihenfolge-Empfehlung:** 08-01/08-02/08-03 sind erledigt; weiter 08-05 → 08-04.
-> Die kleinen Folge-Pakete zuerst, das hochriskante Paket 08-04 zuletzt und allein.
+> **Ausführungsreihenfolge:** 08-04 wurde nach 08-01…08-03 als hochriskantes Paket
+> zuletzt und allein umgesetzt; 08-05 ist unabhängig davon offen.
 
 | # | Prompt | Finding | Risiko | Ergebnis | Hängt ab von |
 |---|---|---|---|---|---|
@@ -394,7 +391,7 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ✅ erledigt: `v0.10.8` + `tests/docsCatalog.test.ts` (8 Tests), Altlast 3 behoben | — |
 | 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ✅ erledigt: `v0.10.9` — `STRATEGY_CLASS_KEYS` aus `STRATEGY_CLASSES` abgeleitet, Lookup statt Literale, Quelltext-Wächter in `tests/adrVocabulary.test.ts`, Altlast 1 behoben | — |
 | 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
-| 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ⏳ offen | 00-01 (Messung), 02-02/02-03 (Paritätsmuster) |
+| 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ✅ erledigt: `v0.11.0`, einmaliger Cache-Aufbau, Goldens unverändert, vollständige Feldparität, 144 fokussierte Tests; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221) | 00-01, 02-02/02-03 |
 
 **Warum diese fünf und in dieser Reihenfolge:**
 
@@ -406,9 +403,11 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
   Browser lesbar; eine neue Klasse braucht künftig nur noch ein ADR).
 - **08-05** schließt die Lücke zwischen dem **Namen** `LOCAL_FREE` und seiner
   **Garantie**. Unabhängig von allem anderen, kleiner Testaufwand.
-- **08-04 zuletzt und allein**, weil er als einziger Handelslogik anfasst und
-  Byte-Identität verlangt. Er hat den größten messbaren Nutzen (121,7×) und das
-  größte Regressionsrisiko — beides Gründe, ihn nicht mit Kleinkram zu mischen.
+- **08-04 wurde zuletzt und allein ausgeführt**, weil er als einziger Handelslogik
+  anfasst und Byte-Identität verlangt. Die offizielle Messung vom 00-01 beschreibt
+  den damaligen Direktpfad; die ergänzende synthetische Same-Series-Messung unter
+  [`BENCH-BASELINE.md` §11](remediation/BENCH-BASELINE.md#11-folgemessung-stx-08-04--einmaliger-indicator-cache-in-backtestrule)
+  zeigt 314,1×, ersetzt aber nicht die echte HistoricalStore-Baseline.
 
 **Abhängigkeiten:** 08-01…08-03 und 08-05 haben **keine** untereinander. 08-04
 braucht die Messmethode aus 00-01 und das Paritätsmuster aus 02-02/02-03 — beides
@@ -433,9 +432,10 @@ vorhanden. Kein Prompt dieser Phase blockiert einen anderen.
 00-02 ✅ ──▶ 07-01 ✅ ──▶ 07-02 ✅ ──▶ 07-03 ✅      (vollständig unabhängig, Gate G8 erfüllt)
 02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
 
-Phase 8 (Abgleich 2026-10-03, alle voneinander unabhängig):
+Phase 8 (Abgleich 2026-10-03; 08-04 abgeschlossen):
   08-01 ✅ (STX-20 Doku)   08-02 ✅ (Altlast 3)   08-03 ✅ (Altlast 1)
-  08-05 ⏳ (STX-21)        08-04 ⏳ (STX-12)  ← zuletzt und allein (Handelslogik)
+  08-04 ✅ (STX-12, v0.11.0; Handelslogik, zuletzt und allein)
+  08-05 ⏳ (STX-21)
 ```
 
 **Kritischer Pfad:** `00-03 → 01-01 → 03-01 → 03-02 → 03-09 → 04-01 → 04-02 → 05-… → 06-04`
@@ -477,7 +477,7 @@ nicht als Phase-8-Prompt ausgeschrieben, mit dem jeweiligen Blocker:
 | **`strategy_lifecycle_states.strategy_version_id`** (FK) | gesperrt | In 04-01 **ausdrücklich** ausgeschlossen („wegen des expliziten Locks auf `strategy_lifecycle_*` … eine erneute Prüfung erfordert einen separat abgestimmten Scope"). Ohne diese Scope-Abstimmung kein Prompt. |
 | **`PortfolioConstruction`-Schicht** ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) | außerhalb | Die einzige echte Lücke aus STX-04 (Universe-Gewichte, `INVERSE_VOLATILITY`). ADR-010 fixiert die Form, erklärt sie aber ausdrücklich **nicht** zum Teil dieser Roadmap. |
 | **Feature-Store-Ausbau auf alle `RULE_FIELDS`** | kein Befund | STX-10 ist mit `rule.*@1` (drei Felder) geschlossen. Eine Ausweitung auf 22 Felder verdoppelt die Paritätsfläche ohne aktuellen Engpass — das ist eine Kapazitätsfrage, kein Audit-Finding. |
-| **`worker_threads`-Parallelisierung** | nach 08-04 | Parallelisierung auf einem O(n²)-Pfad vervielfacht nur den Speicher. Erst 08-04, dann messen, dann ggf. eigener Prompt. |
+| **`worker_threads`-Parallelisierung** | nicht Teil von 08-04; nur nach eigener Messung neu bewerten | `backtestRule()` nutzt jetzt den einmaligen O(n)-Cache-Pfad. Es gibt keinen Parallelisierungsauftrag; falls ein neuer Engpass belegt wird, braucht er einen separat abgegrenzten Prompt. |
 | **Parquet/DuckDB** | Phase 3 | 00-01 hat gezeigt: Store + Cache tragen die Matrix. Kein Bedarf belegt. |
 
 **Faustregel dieser Roadmap:** Ein Punkt wird erst dann ein Prompt, wenn (a) der

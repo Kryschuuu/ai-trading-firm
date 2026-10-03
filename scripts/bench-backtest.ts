@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Backtest-Performance-Baseline (STX-00-01, v0.6.0) — Messprotokoll für STX-12.
+ * Backtest-Performance-Benchmark (STX-00-01, v0.6.0; Folgemessung STX-08-04).
  *
- * Beantwortet die Frage, VOR der ein Screening-Runner gebaut wird: Was kostet
- * ein Backtest-Lauf heute, und trägt der O(n²)-Pfad in `backtestRule()` die
- * 7.500-Zellen-Matrix aus Prompt 05-04?
+ * Das Protokoll misst weiterhin dieselben drei Pfade und dieselbe echte
+ * HistoricalStore-Reihe. Die Messung von 2026-09-29 friert den damaligen
+ * O(n²)-Stand von `backtestRule()` ein; seit STX-08-04 nutzt dessen aktueller
+ * Stand `buildIndicatorCache`/`snapshotFromCache` und ist O(n).
  *
- * Gemessen werden auf DERSELBEN echten Kerzenreihe und mit DERSELBEN Regel
- * drei Pfade je Kerzenzahl n ∈ {1000, 5000, 17520}:
+ * Gemessen werden je Kerzenzahl n ∈ {1000, 5000, 17520}:
  *
- *   1. `rule`       — `backtestRule(spec, candles)` (Single-Rule/O(n²)-Pfad,
- *                     baut je Bar einen Snapshot über die volle Historie).
+ *   1. `rule`       — `backtestRule(spec, candles)` (Single-Rule mit einmaligem
+ *                     Cache-Aufbau und Cache-Snapshot je Bar).
  *   2. `multiAsset` — `runMultiAssetBacktest(...)` mit derselben Regel
  *                     (nutzt intern `buildIndicatorCache`/`snapshotFromCache`).
  *   3. `cache`      — reine `buildIndicatorCache` + `snapshotFromCache`-Schleife
@@ -18,8 +18,8 @@
  *
  * Je (Pfad, n) wird `--repeat` mal gemessen (Default 3), berichtet werden
  * alle Rohwerte und der Median; zusätzlich `ms/1000 Kerzen` und der Exponent
- * eines log-log-Fits über die drei Messpunkte (Erwartung: ≈ 2 für `rule`,
- * ≈ 1 für `cache`). Abgeschlossen wird mit der „1 Zelle Matrix"-Rechnung:
+ * eines log-log-Fits über die drei Messpunkte (Erwartung: ≈ 1 für alle drei
+ * aktuellen Pfade). Abgeschlossen wird mit der „1 Zelle Matrix"-Rechnung:
  * 7.500 Zellen × Median-Laufzeit einer 1h-Zelle in Kernstunden seriell.
  *
  * Projektregeln, die dieses Skript einhält:
@@ -27,8 +27,6 @@
  *     gespeicherte Serie; keine synthetischen Random-Bars).
  *   - KEIN Netz, KEINE Datenbank: es wird kein `src/db`-Modul importiert und
  *     nichts nach `data/` außerhalb von `data/bench/` geschrieben.
- *   - Die gemessenen Pfade werden NICHT verändert (`ruleEngine.ts`,
- *     `indicatorCache.ts`, `engine.ts` bleiben unberührt).
  *
  * Aufruf:
  *   npm run bench:backtest -- --instrument=BINANCE:BTCUSDT [--timeframe=1h] \
@@ -86,7 +84,7 @@ export const BENCH_PATHS = ["rule", "multiAsset", "cache"] as const;
 export type BenchPath = (typeof BENCH_PATHS)[number];
 
 export const BENCH_PATH_LABELS: Record<BenchPath, string> = {
-  rule: "backtestRule (Single-Rule, O(n²)-Historie je Bar)",
+  rule: "backtestRule (Single-Rule, Indicator-Cache, O(n))",
   multiAsset: "runMultiAssetBacktest (Engine, Indikator-Cache)",
   cache: "buildIndicatorCache + snapshotFromCache (reiner Indikator-Pfad)",
 };

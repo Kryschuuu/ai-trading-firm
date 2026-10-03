@@ -40,10 +40,12 @@
  * | `correlationPenalty` | `InstrumentScore.factors.correlation` (normiert) | [0,1] |
  *
  * ── Backtest-Pfad ─────────────────────────────────────────────────────────
- * Ausschließlich `runMultiAssetBacktest()` (Engine-Pfad). Die Entscheidung ist
- * in 00-01 gemessen und in `BENCH-BASELINE.md` §6 festgehalten: O(n) statt
- * O(n²), 121,7× schneller, 7 500 Zellen in 0,44 Kernstunden. `backtestRule()`
- * wird nicht angefasst. Details: `src/screening/backtestAdapter.ts`.
+ * Ausschließlich `runMultiAssetBacktest()` (Engine-Pfad); der Screening-Pfad
+ * bleibt davon getrennt. Die Entscheidung aus 00-01 / `BENCH-BASELINE.md` §6
+ * basierte auf der historischen Prä-Cache-Messung von `backtestRule()`
+ * (121,7×, 7 500 Zellen in 0,44 Kernstunden für die Engine). Seit `v0.11.0`
+ * nutzt auch `backtestRule()` den Indicator-Cache. `src/screening/**` und sein
+ * Aufrufpfad bleiben unverändert. Details: `src/screening/backtestAdapter.ts`.
  *
  * Exit-Codes: 0 = Lauf grün (oder Dry-Run), 1 = Lauf fachlich nicht grün
  * (Fehler, abgebrochen, `maxCells` verletzt), 2 = Bedienfehler.

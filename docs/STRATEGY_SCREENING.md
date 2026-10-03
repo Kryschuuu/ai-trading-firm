@@ -214,7 +214,7 @@ Provenienz; der Matrix-Bauer setzt seinen dokumentierten Neutralwert 0,5.
 Der verbindliche Pilot nach dem Merge:
 `npm run screening -- --limit-cells=50 --execute`, ausgewertet in
 [`SCREENING-PILOT.md`](audits/2026-09-29-strategy-template-ausbau/remediation/SCREENING-PILOT.md).
-Über eine Kernstunde für 50 Zellen wird 05-04 abgelehnt und STX-12 vorgezogen.
+Bei über einer Kernstunde für 50 Zellen wird der Pilot blockiert und die Ursache im Store-/Adapter-/Engine-Pfad geprüft. STX-12 ist mit `v0.11.0` bereits behoben; das Screening bleibt unverändert auf `runMultiAssetBacktest()`.
 
 ## Tests und Rollback
 

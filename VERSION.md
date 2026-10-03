@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.9` |
+| **Version** | `v0.11.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-03 |
-| **Quellbasiert** | `package.json` (`version: "0.10.9"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.11.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -223,14 +223,17 @@ in `src/screening/runner.ts` fährt `createOrGetRun()` → je Zelle `upsertCells
 Abbruch statt Kürzung), Caps-Prüfung statt Ergebnis-Kappung (`BLOCKED` mit
 Grund `caps exceeded`) und I/O-Nebenläufigkeit 4 (max 8) ohne `worker_threads`.
 `src/screening/backtestAdapter.ts` bindet ausschließlich
-`runMultiAssetBacktest()` an (`SCREENING_BACKTEST_PATH = "multiAsset"`,
-Entscheidung in `BENCH-BASELINE.md` §6: 121,7× schneller als `backtestRule()`),
+`runMultiAssetBacktest()` an (`SCREENING_BACKTEST_PATH = "multiAsset"`; die
+historische Prä-Cache-Messung in `BENCH-BASELINE.md` §6 ergab damals 121,7×
+gegenüber `backtestRule()`). Seit `v0.11.0` nutzt auch `backtestRule()` den
+Cache; der Screening-Pfad bleibt unverändert auf der Multi-Asset-Engine,
 punkt-in-zeit und mit harter Kerzengrenze. `npm run screening` bedient es;
 `--dry-run` ist der Default, `--execute` der einzige Weg zu einem echten Lauf.
 `backtest_run_id` bleibt `null` — `persistBacktestRun()` braucht einen
 `WalkForwardReport`, und ein Einzelzellen-Lauf wäre eine zweite Lauf-Wahrheit.
-Die Annahme von 05-04 steht unter dem Vorbehalt des verbindlichen Pilots
-(50 Zellen, > 1 Kernstunde ⇒ Ablehnung zugunsten von STX-12).
+Gate G6 verlangt weiterhin den verbindlichen 50-Zellen-Pilot. Über einer
+Kernstunde wird der Pilot blockiert und der Store-/Adapter-/Engine-Pfad geprüft;
+STX-12 ist bereits behoben.
 
 `v0.10.0` eröffnet **Phase 6 (Validator)** mit dem deterministischen
 Annahmen-Audit (STX-06-01): `src/strategies/validator/assumptions.ts` prüft
@@ -388,6 +391,38 @@ append-only DB-CHECKs `positions_strategy_class_check` und
 ([`drizzle/2026-09-22_signal_decay.sql`](drizzle/2026-09-22_signal_decay.sql)).
 `DEFAULT_CLASS_POLICIES`, Env-Namen und Schwellen bleiben unangetastet.
 
+`v0.11.0` (STX-08-04, PR #221, 2026-10-03) stellt `backtestRule()` auf den bestehenden
+`IndicatorCache` um: `buildIndicatorCache(candles)` läuft einmal vor der
+Backtest-Schleife; pro Bar liefert `snapshotFromCache()` den Snapshot. Der
+wachsende Präfix-Slice entfällt. Die vor der Änderung festgehaltenen Golden-
+Hashes (3 Symbole × 2 Timeframes; Trades, Kennzahlen und Snapshots) bleiben
+identisch. `executionModel` bleibt `"legacy"`; `sanitizeRuleSpec`,
+`RULE_FIELDS`, `RULE_CEILINGS`, `RULE_ALLOWED_SIDE` und `RuleAction` wurden nicht
+verändert.
+
+Der vollständige Paritätstest prüft jedes aktuelle `RULE_FIELDS`-Feld exakt für
+576 Bars über drei Symbole und zwei Timeframes. Zusätzliche Fixtures fixieren
+`atrPct` bei ATR = 0 als `null` (statt des bisherigen Cache-Werts `0`),
+`vwapPct` bei weniger als zwei Bars am UTC-Tag, `spreadPct`/`bookDepthUsd`, die
+Bollinger-Nullfälle und `donchianBreakoutPct`. Die ATR-Korrektur vereinheitlicht
+den gemeinsam genutzten Engine-Cache mit dem bereits bestehenden Direktpfad;
+`atrPct eq 0` feuert bei flachen Kerzen daher fail-closed.
+
+**Performance-Nachweis:** Die Originalreihe der echten `HistoricalStore`-
+Baseline ist in diesem Checkout nicht vorhanden. Als ergänzende, nicht direkt
+mit ihr vergleichbare Kontrollmessung wurde deshalb eine deterministische
+synthetische 1h-Reihe mit 17 520 Bars sowohl mit dem alten Direktcode als auch
+mit dem Cache-Pfad gemessen: **20 253,6 ms → 64,5 ms Median (314,1×)** bei
+identischen Backtest-Ergebnissen. Originale Messwerte und Methode bleiben in
+[`BENCH-BASELINE.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md)
+als Folgemessung dokumentiert.
+
+`v0.11.0` enthält außerdem den bereits implementierten Copy-Engine-Lauf aus
+07-03 (PR #215), zunächst unter `[Unreleased]` dokumentiert und mit dem
+08-01-Nachtrag in diesen Release übernommen: Bitunix-Leader, `SIMULATE_ONLY`-
+Follower ausschließlich auf dem Paper-Ledger, Baseline-/Heartbeat-Gates und
+`npm run copy:paper`. Details und Grenzen stehen im Changelog.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -403,7 +438,7 @@ Haftungsentscheidung) in [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md).
 
 **Ausdrücklich gilt:** Auch die vollständige Umsetzung der Strategie-Roadmap
 ([`docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md),
-32 Prompts, Releases `v0.6.0` … `v0.11.2`) **beendet die Beta-Phase nicht**.
+32 Prompts, Releases `v0.6.0` … `v0.11.1`) **beendet die Beta-Phase nicht**.
 Sie liefert die Messgeräte, nicht die Messung — und keine Phase erfüllt ein
 Kriterium. Begründung: `report.md` §8 des Audits.
 ## Komponenten-Übersicht
