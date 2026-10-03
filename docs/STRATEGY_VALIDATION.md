@@ -881,11 +881,29 @@ Datenwerten werden escaped.
   Der vollständige Report-Prompt ist hart auf < 8 KiB gedeckelt.
 - **Routing-Policy-Flags:** `VALIDATOR_AGENT_ROUTING_POLICY` ist standardmäßig
   `LOCAL_FREE` (Ollama und lokaler OpenAI-kompatibler Endpoint/LM Studio).
-  Diese Route benutzt keine Cloud-Provider, auch nicht als Fallback. Der
-  Operator kann explizit `OPENCODE_FREE` setzen: OpenCode wird, sofern
-  konfiguriert und freigegeben, best-effort zuerst versucht; bei Ausfall wird
-  lokal weitergesucht. Es gibt keine Zusage für ein bestimmtes Free-Modell oder
-  dessen dauerhafte Verfügbarkeit. Provider-Schalter bleiben wirksam.
+  Diese Route benutzt keine Cloud-Provider, auch nicht als Fallback — und sie
+  **setzt** das seit STX-08-05 (STX-21) durch: Ein Provider fällt aus der
+  Kandidatenliste, wenn sein **effektiver** Basis-URL nicht lokal ist. Geprüft
+  wird der Endpunkt, den der Client tatsächlich anspricht (`LLM_BASE_URL` für
+  `openai`, `OLLAMA_BASE_URL` für `ollama`, sonst der Default aus
+  `DEFAULT_BASE_URLS`) — nicht der Provider-Name. Lokal heißt: Loopback
+  (`127.0.0.0/8`, `::1`), `localhost`/`*.localhost` oder ein öffentlich nicht
+  auflösbarer Testname (`.test`/`.invalid`, RFC 6761); die Prüfung ist rein
+  literal, ohne DNS-Lookup (`src/routing/localEndpoint.ts`). Diesen Endpunkt
+  bestimmt ausschließlich die Konfiguration: Zeigt `LLM_BASE_URL` auf eine
+  Cloud-URL, wird `openai` ausgesondert statt still dorthin zu senden; der
+  Vorgang ist über `validator_agent_provider_excluded_total{policy,provider}`
+  sichtbar (geschlossene Labels: Policy und Provider-ID, nie eine URL). Bleibt
+  danach keine Kandidatenliste übrig, antwortet der Agent weiterhin
+  `{ unavailable: true }` — es gibt kein Ausweichen auf einen Cloud-Provider
+  und keine Änderung an `result`. Der Operator kann explizit `OPENCODE_FREE`
+  setzen: OpenCode wird, sofern konfiguriert und freigegeben, best-effort
+  zuerst versucht (Cloud-Opt-in, deshalb ohne Endpunkt-Prüfung); bei Ausfall
+  wird lokal weitergesucht, und diese lokalen Fallbacks unterliegen derselben
+  Endpunkt-Prüfung. Es gibt keine Zusage für ein bestimmtes Free-Modell oder
+  dessen dauerhafte Verfügbarkeit. Provider-Schalter bleiben wirksam (eine
+  Toggle-Sperre ist kein Endpunkt-Ausschluss und wird nicht in diesem Zähler
+  geführt).
 - **Shadow-Default:** `VALIDATOR_AGENT_SHADOW` ist standardmäßig `true`.
   `loadValidatorAgentConfig()` stellt den Modus für den Aufrufer bereit; die
   Agent-Funktion kann selbst keine Workflow-Aktion auslösen. `false` muss
@@ -898,10 +916,14 @@ Datenwerten werden escaped.
   Workflow-Verdrahtung.
 - **Telemetrie:** `validator_agent_runs_total{result}` zählt ausschließlich
   die festen Labels `ok`, `unavailable`, `schema_error` und `blocked`.
-  Provider-Fehler und Modelltexte werden nie als Labels verwendet.
+  `validator_agent_provider_excluded_total{policy,provider}` zählt die
+  Endpunkt-Ausschlüsse unter `LOCAL_FREE`/`OPENCODE_FREE` (STX-08-05); `policy`
+  und `provider` sind geschlossene Code-Konstanten — keine Basis-URL, kein
+  Hostname, kein Modellname. Provider-Fehler und Modelltexte werden nie als
+  Labels verwendet.
 
 Gezielte Sicherheitsprüfungen (ohne den Gesamtlauf `npm test`):
 
 ```bash
-node --import tsx --test tests/strategyValidation.agent.test.ts
+node --import tsx --test tests/strategyValidation.agent.test.ts tests/routing.localEndpoint.test.ts
 ```
