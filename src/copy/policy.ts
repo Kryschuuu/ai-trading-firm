@@ -23,6 +23,17 @@ export interface CopyPolicy {
   halted: boolean;
 }
 
+/**
+ * Ablehnungsgründe. Die ersten acht sind Pre-Submit-Policy-Entscheidungen und
+ * dürfen als `copy_order_links.policy_code` persistiert werden (die
+ * DB-CHECK-Constraint enumeriert genau diese Menge).
+ *
+ * `NO_BASELINE` (07-03) ist ein **Leader-Zustands-Gate**: ohne
+ * Baseline-Snapshot des Leaders gibt es keinen Copy — und **keine** Zeile in
+ * `copy_order_links`. Ein Leader-Zustand ohne belastbare Evidenz darf keinen
+ * Seiteneffekt haben; ein "No-Op mit Seiteneffekt" wäre genau der Fehler, den
+ * die Baseline verhindern soll.
+ */
 export type PolicyCode =
   | "HALTED"
   | "MAX_EVENT_NOTIONAL"
@@ -31,7 +42,8 @@ export type PolicyCode =
   | "MAX_POSITIONS"
   | "MAX_DAILY_LOSS"
   | "MAX_LEVERAGE"
-  | "NO_MAPPING";
+  | "NO_MAPPING"
+  | "NO_BASELINE";
 
 export type PolicyDecision =
   | { allowed: true }

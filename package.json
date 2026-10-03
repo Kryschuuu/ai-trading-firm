@@ -67,7 +67,8 @@
     "regime:eval": "node --import tsx scripts/regime-eval.ts",
     "execution:ingest": "node --import tsx scripts/execution-quality.ts",
     "execution:reconcile": "node --import tsx scripts/execution-quality-reconcile.ts",
-    "attribution:backfill": "node --import tsx scripts/attribution-backfill.ts"
+    "attribution:backfill": "node --import tsx scripts/attribution-backfill.ts",
+    "copy:paper": "node --import tsx scripts/run-copy-paper.ts"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",

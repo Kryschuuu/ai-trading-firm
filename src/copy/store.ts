@@ -22,6 +22,13 @@ export const COPY_ORDER_LINK_STATES = [
 ] as const;
 export type CopyOrderLinkState = (typeof COPY_ORDER_LINK_STATES)[number];
 
+/**
+ * Persistierbare Policy-Codes — deckungsgleich mit der DB-CHECK-Constraint
+ * `copy_order_links_policy_code_check` (drizzle/2026-10-03_copy_subscriptions.sql
+ * bzw. 2026-10-04_copy_engine_gates.sql). `NO_BASELINE` (07-03) ist enthalten,
+ * wird von der Engine aber bewusst NIE geschrieben: ohne Baseline entsteht
+ * keine Zeile.
+ */
 const POLICY_CODES: readonly PolicyCode[] = [
   "HALTED",
   "MAX_EVENT_NOTIONAL",
@@ -31,6 +38,7 @@ const POLICY_CODES: readonly PolicyCode[] = [
   "MAX_DAILY_LOSS",
   "MAX_LEVERAGE",
   "NO_MAPPING",
+  "NO_BASELINE",
 ];
 const SAFE_ID = /^[A-Za-z0-9_.:/-]{1,128}$/;
 const TERMINAL_STATES: readonly CopyOrderLinkState[] = ["FILLED", "FAILED", "DIVERGED"];
@@ -50,6 +58,12 @@ export interface CreateCopyIntentInput {
   readonly followerIntentId: string;
   /** Existing execution_quality_intents.id; this store never creates it. */
   readonly executionQualityIntentId?: string | null;
+  /**
+   * Follower-Notional dieses Events (07-03). Nur Messwert für das kumulative
+   * Tages-Notional der Copy-Policy (`maxNotionalPerDay`); es ist **keine**
+   * Order und kein Receipt. `null` bis der Follower gerechnet hat.
+   */
+  readonly followerNotional?: number | null;
 }
 
 export interface CopyOrderLink {
@@ -60,6 +74,8 @@ export interface CopyOrderLink {
   readonly state: CopyOrderLinkState;
   readonly policyCode: PolicyCode | null;
   readonly observedDeviationBps: number | null;
+  /** Follower-Notional des Events (Messwert, keine Order). */
+  readonly followerNotional: number | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -70,6 +86,7 @@ export type CopyStoreErrorCode =
   | "INVALID_DEVIATION"
   | "LINK_NOT_FOUND"
   | "LINK_IDENTITY_CONFLICT"
+  | "INVALID_FOLLOWER_NOTIONAL"
   | "ILLEGAL_TRANSITION"
   | "TERMINAL_STATE"
   | "CORRUPT_ROW";
@@ -89,6 +106,7 @@ type DbLink = {
   state: string;
   policy_code: string | null;
   observed_deviation_bps: string | null;
+  follower_notional: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -116,6 +134,13 @@ function mapRow(row: DbLink | undefined): CopyOrderLink {
   if (deviation !== null && !Number.isFinite(deviation)) {
     throw new CopyStoreError("CORRUPT_ROW");
   }
+  const followerNotional =
+    row.follower_notional === null || row.follower_notional === undefined
+      ? null
+      : Number(row.follower_notional);
+  if (followerNotional !== null && !Number.isFinite(followerNotional)) {
+    throw new CopyStoreError("CORRUPT_ROW");
+  }
   return {
     id: row.id,
     leaderEventId: row.leader_event_id,
@@ -124,6 +149,8 @@ function mapRow(row: DbLink | undefined): CopyOrderLink {
     state: row.state as CopyOrderLinkState,
     policyCode: row.policy_code as PolicyCode | null,
     observedDeviationBps: deviation,
+    followerNotional:
+      row.follower_notional === null ? null : Number(row.follower_notional),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -146,6 +173,13 @@ export class CopyStore {
     validateId(input?.followerIntentId);
     const executionQualityIntentId = input.executionQualityIntentId ?? null;
     if (executionQualityIntentId !== null) validateId(executionQualityIntentId);
+    const followerNotional = input.followerNotional ?? null;
+    if (
+      followerNotional !== null &&
+      (!Number.isFinite(followerNotional) || followerNotional < 0 || followerNotional > 1e15)
+    ) {
+      throw new CopyStoreError("INVALID_FOLLOWER_NOTIONAL");
+    }
 
     const client = await this.connection.connect();
     let row: DbLink | undefined;
@@ -155,19 +189,19 @@ export class CopyStore {
       await client.query("SET LOCAL statement_timeout = '5s'");
       const inserted = await client.query<DbLink>(
         `INSERT INTO copy_order_links
-          (leader_event_id, follower_intent_id, execution_quality_intent_id, state)
-        VALUES ($1, $2, $3, 'PENDING')
+          (leader_event_id, follower_intent_id, execution_quality_intent_id, state, follower_notional)
+        VALUES ($1, $2, $3, 'PENDING', $4)
         ON CONFLICT DO NOTHING
         RETURNING id, leader_event_id, follower_intent_id, execution_quality_intent_id,
-          state, policy_code, observed_deviation_bps, created_at, updated_at`,
-        [input.leaderEventId, input.followerIntentId, executionQualityIntentId],
+          state, policy_code, observed_deviation_bps, follower_notional, created_at, updated_at`,
+        [input.leaderEventId, input.followerIntentId, executionQualityIntentId, followerNotional],
       );
       created = inserted.rowCount === 1;
       row = inserted.rows[0];
       if (!row) {
         const existing = await client.query<DbLink>(
           `SELECT id, leader_event_id, follower_intent_id, execution_quality_intent_id,
-            state, policy_code, observed_deviation_bps, created_at, updated_at
+            state, policy_code, observed_deviation_bps, follower_notional, created_at, updated_at
           FROM copy_order_links WHERE follower_intent_id = $1 FOR UPDATE`,
           [input.followerIntentId],
         );
@@ -204,11 +238,31 @@ export class CopyStore {
     validateId(followerIntentId);
     const result = await this.connection.query<DbLink>(
       `SELECT id, leader_event_id, follower_intent_id, execution_quality_intent_id,
-        state, policy_code, observed_deviation_bps, created_at, updated_at
+        state, policy_code, observed_deviation_bps, follower_notional, created_at, updated_at
       FROM copy_order_links WHERE follower_intent_id = $1`,
       [followerIntentId],
     );
     return result.rows[0] ? mapRow(result.rows[0]) : null;
+  }
+
+  /**
+   * Kumuliertes Follower-Notional der aktiven Links **seit Tagesbeginn** (UTC).
+   *
+   * Basis der Copy-Policy-Prüfung `maxNotionalPerDay`. Bewusst aus derselben
+   * Tabelle gelesen statt aus einer neuen: es gibt keine vierte Copy-Tabelle,
+   * und der Wert überlebt einen Neustart — ein Tageslimit, das ein Restart
+   * zurücksetzt, wäre kein Limit.
+   */
+  async dayNotional(now: Date = new Date()): Promise<number> {
+    const result = await this.connection.query<{ total: string | null }>(
+      `SELECT COALESCE(SUM(follower_notional), 0)::text AS total
+       FROM copy_order_links
+       WHERE created_at >= date_trunc('day', $1::timestamptz)
+         AND state IN ('PENDING', 'SENT', 'PARTIAL', 'FILLED')`,
+      [now],
+    );
+    const total = Number(result.rows[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
   }
 
   /** PENDING → SENT. Replaying this call after PARTIAL is a no-op, never a rewind. */
@@ -272,7 +326,7 @@ export class CopyStore {
       await client.query("SET LOCAL statement_timeout = '5s'");
       const selected = await client.query<DbLink>(
         `SELECT id, leader_event_id, follower_intent_id, execution_quality_intent_id,
-          state, policy_code, observed_deviation_bps, created_at, updated_at
+          state, policy_code, observed_deviation_bps, follower_notional, created_at, updated_at
         FROM copy_order_links WHERE follower_intent_id = $1 FOR UPDATE`,
         [followerIntentId],
       );
@@ -304,7 +358,7 @@ export class CopyStore {
           SET state = $2, policy_code = $3, observed_deviation_bps = $4, updated_at = now()
           WHERE id = $1
           RETURNING id, leader_event_id, follower_intent_id, execution_quality_intent_id,
-            state, policy_code, observed_deviation_bps, created_at, updated_at`,
+            state, policy_code, observed_deviation_bps, follower_notional, created_at, updated_at`,
           [current.id, target, policyCode, observedDeviation],
         );
         updated = mapRow(result.rows[0]);

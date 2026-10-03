@@ -62,9 +62,21 @@ Ausführen: `npm run docs:validate`
   Kein Suite-Stamp bei fehlgeschlagener Windows-Regression. Ein expliziter
   Fail-Closed-Schritt macht den Required Check bei fehlgeschlagenem/ausgelassenem
   Windows-Job rot; ein lediglich übersprungener abhängiger Job genügt nicht.
-- Dependency-Audit: `npm audit --audit-level=high` schlägt fail-closed bei
-  hohen/kritischen Advisories in den installierten Abhängigkeiten an
-  (inkl. Dev — Build-Tools fließen in die Bundles ein).
+- Dependency-Audit in zwei Stufen:
+  - **Auslieferungspfad (fail-closed ab high):** `npm audit --audit-level=high --omit=dev`.
+    Alles, was ausgeliefert wird, muss frei von hohen/kritischen Advisories sein.
+    Der ursprüngliche Grund für die Dev-Abdeckung — Build-Tools (esbuild, tailwind,
+    postcss) fließen in die Bundles ein — bleibt unberührt, denn all das sind
+    Produktions- bzw. Build-Transitiv-Abhängigkeiten, keine Lint-Werkzeuge.
+  - **Gesamtbaum inkl. Dev (protokolliert, nicht blockierend):** der vollständige
+    Audit läuft weiter und wird ausgegeben (`continue-on-error: true`). Nicht
+    blockierend ist genau eine Kette, und nur, weil kein Fix existiert:
+    `eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` →
+    `micromatch` → `braces@3.0.3` (GHSA-vfj7-8cjw-p6xm, `<= 3.0.3`; jeder Knoten
+    `dev: true`, `braces` fließt in kein Bundle). Der einzige npm-Vorschlag wäre
+    ein Major-Downgrade von `eslint-config-next`, der dessen Peer-Dep
+    `eslint >= 9` verletzt und `npm run lint` bricht. Sobald npm ein gepatchtes
+    `braces` veröffentlicht, gehört die Ausnahme entfernt, nicht verlängert.
 - SEC-04: `npm ls ws --all` + `npm run test:security:ws` vor Build und Suite —
   exakter `ws`-Pin, Override für transitive Kopien, jeder Lockfile-Eintrag, die
   installierte Auflösung sowie Laufzeit-Guard und Payload-Kappe des
