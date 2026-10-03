@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.5` |
+| **Version** | `v0.10.6` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-02 |
-| **Quellbasiert** | `package.json` (`version: "0.10.5"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-03 |
+| **Quellbasiert** | `package.json` (`version: "0.10.6"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -331,6 +331,22 @@ noch Evidenz schreiben; Provider-/Schema-Ausfälle lassen den Report unveränder
 Eine automatische Speicherung der Interpretation in `detail jsonb` ist nicht
 verdrahtet — darüber entscheidet ein künftiger Aufrufer/Persistenzpfad.
 
+`v0.10.5` (STX-07-01) ergänzt das reine Copy-Domänenmodell:
+Handlungsabsichts-Typen, SSoT-gestütztes cross-venue Symbol-Mapping,
+`FIXED_AMOUNT`/`FIXED_RATIO`/`EQUITY_RATIO` und Leverage-Policy. Es entstehen
+noch keine Tabellen, keine Policy-Engine und kein Adapter.
+
+`v0.10.6` (STX-07-02, 2026-10-03) ergänzt die versionierte Copy-Policy
+(`cpl1:<sha256>`) und die fail-closed Vorabprüfung gegen Copy-Limits, Spread,
+Equity-Verlust, offene Positionen und Hebel. Die additive Migration legt genau
+`copy_subscriptions` und `copy_order_links` an: `SIMULATE_ONLY` ist per DB-CHECK
+erzwungen, Abonnements starten deaktiviert und doppelte Follower-Intent-Keys
+werden unique. Order-Link-Zustände laufen vorwärts; wiederholtes `markFilled`
+ist ein No-Op. Ausführung, Receipts und Reconciliation bleiben bei der
+bestehenden Execution-Quality-/Broker-Reconciliation-Kette. Die FK-Spalte zur
+bestehenden `execution_quality_intents.id` ist TEXT, weil deren tatsächlich
+vorhandener Primärschlüssel TEXT ist — ein UUID-FK wäre in PostgreSQL ungültig.
+
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
 
@@ -378,6 +394,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/universe/` | Instrument-Universe-Registry (venue-aware) |
 | `src/attribution/` | Deterministische Trade-PnL-Attribution |
 | `src/executionQuality/` | Venueübergreifendes Execution-Benchmarking (append-only Ledger) |
+| `src/copy/` | Reines Copy-Domänenmodell, versionierte fail-closed Policy und idempotente `copy_order_links` (SIMULATE_ONLY, kein Live-Pfad) |
 | `src/db/`, `src/history/`, `src/contracts/` | Drizzle-Schema (seit v0.8.0 auch `strategy_definitions`/`strategy_versions`), Historical Store (append-only OHLCV), Broker-Contracts |
 | `src/app/` | Next.js App Router: Dashboard, Operations Center, API-Routen |
 | `src/components/` | React-UI (Paper-Trading-Dashboard, Control-Plane, Docs-Viewer) |

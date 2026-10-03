@@ -2097,6 +2097,26 @@ export const AUDIT_EVENT_CATALOG: Record<string, EventSpec> = {
     explain: () => "Identische Wiederholungen erzeugen keine weiteren Fillzeilen. Konflikte werden nicht überschrieben.",
     sections: (d) => [{title:"Import",facts:recordToFacts(d)}],
   },
+  COPY_ORDER_LINK_TRANSITION: {
+    label: "Copy-Order-Link-Übergang",
+    category: "order",
+    description:
+      "Idempotenter Zustandswechsel des Copy-Order-Links. Er protokolliert nur die Zuordnung und den Fortschritt eines bestehenden Follower-Intents; er erzeugt keine zweite Intent-/Receipt-Tabelle und sendet selbst keine Order.",
+    headline: (d) => [text(d.from) ?? "NONE", "→", text(d.to), text(d.copyOrderLinkId)].filter(Boolean).join(" "),
+    explain: (d) =>
+      d.to === "FILLED"
+        ? "Der Fill und eine eventuelle Abweichung sind Beobachtungen. Aus realisiertem Slippage wird kein Cancel ausgelöst; die Execution-Quality-Reconciliation bleibt zuständig."
+        : "Der Link läuft nur vorwärts; FILLED, FAILED und DIVERGED sind terminal. Metriklabels enthalten keine IDs.",
+    sections: (d) => [{
+      title: "Copy-Link",
+      facts: [
+        { label: "Von", value: text(d.from) ?? "NONE" },
+        { label: "Nach", value: text(d.to) ?? "—" },
+        { label: "Policy-Code", value: text(d.policyCode) ?? "—", mono: true },
+        { label: "Beobachtete Abweichung (bp)", value: num(d.observedDeviationBps) !== null ? String(num(d.observedDeviationBps)) : "—" },
+      ],
+    }],
+  },
 
   BACKTEST_RUN_PERSISTED: {
     label: "Backtest-Run persistiert",

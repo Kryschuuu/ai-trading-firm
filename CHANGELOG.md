@@ -21,10 +21,55 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.10.5** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.10.6** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
+
+## [0.10.6] — Copy-Policy-Engine + Order-Links (STX-07-02) (2026-10-03)
+
+> **Status: Beta.** Versionierte fail-closed Copy-Risikogrenzen und eine
+> minimale, idempotente Order-Link-Persistenz. Kein Adapter, kein eigener
+> Reconciler, keine eigene Intent-/Receipt-Tabelle und kein Live-Pfad.
+> `SIMULATE_ONLY` bleibt auf Datenbankebene festgeschrieben.
+
+### Added
+
+* **Versionierte Policy-Konfiguration** (`src/copy/config.ts`, `policy.ts`):
+  `cpl1:<sha256>`-Versionen für gespeichertes `policy_json`, strikte
+  Validierung und `evaluatePolicy()` mit Fail-Closed-Entscheidungen
+  (`HALTED`, Notional/Day-Limits, erwarteter Spread, Positionen, Tagesverlust,
+  Hebel, Mapping). Die Bps-Prüfung nutzt vor dem Submit den erwarteten Spread
+  (`RuleSnapshot.spreadPct` bzw. Scanner-`spread`), niemals einen bereits
+  realisierten Fill. Copy-Caps sind an `LIMIT_CEILINGS` gebunden oder strenger.
+* **Zwei additive Copy-Tabellen** (`drizzle/2026-10-03_copy_subscriptions.sql`):
+  `copy_subscriptions` mit `enabled=false` und DB-CHECK `mode='SIMULATE_ONLY'`;
+  `copy_order_links` mit `UNIQUE (leader_event_id, follower_intent_id)` und
+  `UNIQUE (follower_intent_id)`, Status-/Policy-CHECKs und FK auf die bestehende
+  `execution_quality_intents`-Tabelle. Keine weiteren Phase-7-Tabellen.
+* **Order-Link-Store** (`src/copy/store.ts`): `createIntent()` ist
+  insert-or-return-existing, Transitionen laufen über Zeilensperren nur
+  vorwärts, `FILLED`-Retries sind No-Ops und `DIVERGED` ist terminal. Die
+  beobachtete Fill-Abweichung wird gespeichert, nicht gegen das Pre-Submit-
+  Limit geprüft und löst keinen Cancel aus. Geschlossene Metriklabels plus
+  `COPY_ORDER_LINK_TRANSITION`-Audit.
+* **Explizite Modulgrenze** (`src/copy/index.ts`, `docs/COPY_TRADING.md`):
+  Execution-Quality-Intents, Receipts und Reconciliation bleiben vollständig
+  bei `src/executionQuality/` und `src/brokers/reconciliation.ts`.
+
+### Tests
+
+* `tests/copy.policy.test.ts` und `tests/copy.db.test.ts`: Version/Bounds,
+  fail-closed Gating, Spread-Units, DB-Migration/Constraints, parallele
+  Idempotenz, FK, Transitionen, terminale Zustände und Fill-No-Op.
+
+### Compatibility note
+
+* Das Ticket verlangte für `execution_quality_intent_id` den Typ UUID. Die
+  vorhandene `execution_quality_intents.id`-Spalte ist im Repository jedoch
+  TEXT (`eq-…`). Die neue FK-Spalte ist deshalb TEXT, damit PostgreSQL die
+  Referenz tatsächlich erzwingen kann; die Execution-Quality-Tabelle bleibt
+  unberührt.
 
 ## [0.10.5] — Copy-Domänenmodell, Symbol-Mapping, Sizing (STX-07-01) (2026-10-02)
 

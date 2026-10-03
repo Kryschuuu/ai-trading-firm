@@ -14,8 +14,8 @@
  * CLOSE`) und berechnet daraus eine neue Follower-Order. Deshalb normalisieren
  * wir auf `action`, nicht auf eine Order-Übertragung.
  *
- * Alle weiteren Bestandteile (Policy-Engine, Tabellen, Leader-Adapter) sind
- * ausdrücklich gesperrt (07-02, 07-03).
+ * Die Policy-Engine und die minimale Link-Persistenz folgen in 07-02;
+ * Leader-/Follower-Adapter bleiben ausdrücklich gesperrt (07-03).
  */
 
 import type { BrokerVenueId } from "@/contracts/broker";

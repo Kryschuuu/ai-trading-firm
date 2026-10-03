@@ -163,6 +163,17 @@ export class LabelCounter {
 export const telemetry = {
   /** Execution-quality outcomes only; never free-form identifiers. */
   executionQuality: new LabelCounter("execution_quality_total"),
+  /** Copy-link persistence outcomes; labels are closed result/state enums only. */
+  copy: {
+    linkWrites: new LabelCounter("copy_order_link_writes_total"),
+    transitions: new LabelCounter("copy_order_link_transitions_total"),
+    auditWrites: new LabelCounter("copy_order_link_audit_writes_total"),
+    reset(): void {
+      telemetry.copy.linkWrites.reset();
+      telemetry.copy.transitions.reset();
+      telemetry.copy.auditWrites.reset();
+    },
+  },
   /**
    * Trade-PnL-Attribution (RMA-P1-06, v1.57.0). Labels sind ausschließlich
    * Code-konstante Ergebniswerte (`result`: attributed | unattributable |
@@ -823,6 +834,9 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.strategyLifecycle.gateDecisions.exposition(),
     telemetry.strategyLifecycle.versions.exposition(),
     telemetry.executionQuality.exposition(),
+    telemetry.copy.linkWrites.exposition(),
+    telemetry.copy.transitions.exposition(),
+    telemetry.copy.auditWrites.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),
     telemetry.features.pitQueries.exposition(),
@@ -951,6 +965,7 @@ export function resetTelemetryForTests(): void {
   telemetry.prompt.reset();
   telemetry.volatilityTargeting.reset();
   telemetry.executionPolicy.reset();
+  telemetry.copy.reset();
   telemetry.twap.reset();
   telemetry.monteCarlo.reset();
   telemetry.strategyLifecycle.reset();

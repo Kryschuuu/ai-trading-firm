@@ -1928,6 +1928,60 @@ export const executionQualityCompleted = pgTable("execution_quality_completed", 
   completedAt:timestamp("completed_at",{withTimezone:true}).notNull().defaultNow(),
 });
 
+/** Copy-trading subscriptions and idempotency links (STX-07-02).
+ * The SQL migration is additive; `mode` stays SIMULATE_ONLY at DB level.
+ * The execution-quality link is TEXT because its existing SSoT key is TEXT. */
+export const copySubscriptions = pgTable("copy_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  followerAccount: text("follower_account").notNull(),
+  leaderVenue: text("leader_venue").notNull(),
+  leaderAccount: text("leader_account").notNull(),
+  leaderSymbol: text("leader_symbol").notNull(),
+  followerInstrumentId: text("follower_instrument_id"),
+  sizingMode: text("sizing_mode").notNull(),
+  sizingParams: jsonb("sizing_params").$type<Record<string, unknown>>().notNull(),
+  leveragePolicy: text("leverage_policy").notNull(),
+  policyJson: jsonb("policy_json").$type<import("../copy/policy").CopyPolicy>().notNull(),
+  policyVersion: text("policy_version").notNull(),
+  mode: text("mode").notNull().default("SIMULATE_ONLY"),
+  enabled: boolean("enabled").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("copy_subscriptions_identity_unique").on(
+    t.followerAccount,
+    t.leaderVenue,
+    t.leaderAccount,
+    t.leaderSymbol,
+  ),
+  check("copy_subscriptions_sizing_mode_check", sql`${t.sizingMode} IN ('FIXED_AMOUNT', 'FIXED_RATIO', 'EQUITY_RATIO')`),
+  check("copy_subscriptions_leverage_policy_check", sql`${t.leveragePolicy} IN ('FOLLOW_LEADER', 'CAP', 'IGNORE', 'RISK_NORMALIZED')`),
+  check("copy_subscriptions_mode_check", sql`${t.mode} = 'SIMULATE_ONLY'`),
+  check("copy_subscriptions_sizing_params_check", sql`jsonb_typeof(${t.sizingParams}) = 'object'`),
+  check("copy_subscriptions_policy_json_check", sql`jsonb_typeof(${t.policyJson}) = 'object'`),
+  check("copy_subscriptions_policy_version_check", sql`${t.policyVersion} ~ '^cpl1:[0-9a-f]{64}$'`),
+]);
+
+export const copyOrderLinks = pgTable("copy_order_links", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leaderEventId: text("leader_event_id").notNull(),
+  followerIntentId: text("follower_intent_id").notNull(),
+  executionQualityIntentId: text("execution_quality_intent_id").references(() => executionQualityIntents.id),
+  state: text("state").notNull(),
+  policyCode: text("policy_code"),
+  observedDeviationBps: numeric("observed_deviation_bps"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("copy_order_links_event_follower_unique").on(t.leaderEventId, t.followerIntentId),
+  uniqueIndex("copy_order_links_follower_intent_unique").on(t.followerIntentId),
+  index("copy_order_links_state_idx").on(t.state),
+  index("copy_order_links_leader_event_idx").on(t.leaderEventId),
+  check("copy_order_links_state_check", sql`${t.state} IN ('PENDING', 'SENT', 'PARTIAL', 'FILLED', 'FAILED', 'DIVERGED')`),
+  check("copy_order_links_policy_code_check", sql`${t.policyCode} IS NULL OR ${t.policyCode} IN ('HALTED', 'MAX_EVENT_NOTIONAL', 'MAX_DAY_NOTIONAL', 'MAX_SLIPPAGE', 'MAX_POSITIONS', 'MAX_DAILY_LOSS', 'MAX_LEVERAGE', 'NO_MAPPING')`),
+  check("copy_order_links_policy_code_state_check", sql`${t.policyCode} IS NULL OR ${t.state} = 'FAILED'`),
+]);
+
 /**
  * Persistente Regime-Snapshots (RMA-P2-01, v1.61.0) — append-only Historie
  * der multidimensionalen Regime-Bewertungen für Stabilitäts-/Coverage- und
