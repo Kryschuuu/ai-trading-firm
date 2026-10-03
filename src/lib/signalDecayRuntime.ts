@@ -15,6 +15,7 @@ import { getPool } from "../db";
 import { telemetry } from "./telemetry";
 import { writeAuditRecord } from "./auditSink";
 import {
+  STRATEGY_CLASS_KEYS,
   applyRiskConfigNumbers,
   buildMarketSignal,
   classKey,
@@ -491,8 +492,7 @@ function metricResult(code: string): string {
 }
 
 function metricClass(value: string): string {
-  if (value === "mean-reversion" || value === "trend" || value === "breakout" || value === "unclassified") return value;
-  return "unclassified";
+  return (STRATEGY_CLASS_KEYS as readonly string[]).includes(value) ? value : "unclassified";
 }
 
 export async function readSignalDecayRollup(store: SignalDecayStore = createPgSignalDecayStore()): Promise<SignalDecayRollup> {

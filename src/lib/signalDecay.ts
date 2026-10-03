@@ -83,7 +83,7 @@
 
 import { fingerprint } from "../attribution/hashes";
 import { ema, rsi } from "./indicators";
-import type { StrategyClass } from "./marketRegime";
+import { STRATEGY_CLASSES, type StrategyClass } from "./marketRegime";
 
 export const SIGNAL_CONTRACT_VERSION = "sig1" as const;
 export const SIGNAL_SEMANTICS_VERSION = "mkt-sig-1";
@@ -104,12 +104,13 @@ export type SignalDecayMode = "off" | "monitor" | "active";
 export type ThresholdMode = "absolute" | "relative" | "either" | "both";
 export type CandleTimeBasis = "open" | "close";
 
-export const STRATEGY_CLASS_KEYS: readonly StrategyClassKey[] = [
-  "mean-reversion",
-  "trend",
-  "breakout",
-  "unclassified",
-];
+/**
+ * Klassen-Vokabular des Decay-Pfads: die echten Klassen aus der SSoT
+ * (`STRATEGY_CLASSES`, ADR-008) plus die Nicht-Klasse `unclassified`.
+ * Die Reihenfolge `mean-reversion`, `trend`, `breakout`, `unclassified` ist
+ * Vertrag (`tests/adrVocabulary.test.ts`).
+ */
+export const STRATEGY_CLASS_KEYS: readonly StrategyClassKey[] = [...STRATEGY_CLASSES, "unclassified"];
 
 export type SignalSnapshot = {
   contractVersion: typeof SIGNAL_CONTRACT_VERSION;
@@ -430,7 +431,7 @@ function round6(value: number): number {
 }
 
 export function isStrategyClassKey(value: unknown): value is StrategyClassKey {
-  return value === "mean-reversion" || value === "trend" || value === "breakout" || value === "unclassified";
+  return typeof value === "string" && (STRATEGY_CLASS_KEYS as readonly string[]).includes(value);
 }
 
 export function classKey(value: unknown): StrategyClassKey {
@@ -1542,9 +1543,8 @@ export function applyRiskConfigNumbers(
     }
   };
   const classOf = (token: string): StrategyClassKey | null => {
-    if (token === "trend" || token === "breakout" || token === "unclassified" || token === "mean-reversion") return token;
     if (token === "mean_reversion") return "mean-reversion";
-    return null;
+    return isStrategyClassKey(token) ? token : null;
   };
   for (const row of rows) {
     if (!row.key.startsWith("sdc.") || !Number.isFinite(row.value)) continue;
