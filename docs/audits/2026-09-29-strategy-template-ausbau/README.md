@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.2.0` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md)) — **Vollabgleich 2026-10-03** gegen `main` @ `3d13161`: alle 21 Findings verifiziert, **alle 32 Ursprungs-Prompts umgesetzt**, Phase 8 ergänzt 5 Folge-Prompts; Abgleich-Bericht [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
+- **Audit-Version:** `v1.2.1` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md)) — **Vollabgleich 2026-10-03** gegen `main` @ `3d13161`: alle 21 Findings verifiziert, **alle 32 Ursprungs-Prompts umgesetzt**; Prompt 08-01 schließt STX-20 mit einem Nachtrag unter `[Unreleased]` (Projekt-Code-Version `0.10.6`, kein Bump), 4 Phase-8-Prompts bleiben offen; Abgleich-Bericht [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -13,7 +13,7 @@
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
 - **Code-Version:** `package.json` v0.10.6 (Beta) · geprüft am 2026-10-03 gegen `main` @ `3d13161` · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — **Abgleich 2026-10-03 abgeschlossen** ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)): **Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt** (Phase 0 `v0.6.0`/`v0.6.1` · Phase 1 `v0.6.2` · Phase 2 `v0.6.3`–`v0.6.5` inkl. optionalem Slice 02-04 `7995822` · Phase 3 `v0.7.0`–`v0.7.6`, Gate G3 · Phase 4 `v0.8.0` + `v0.10.4`, Gate G4 · Phase 5 `v0.9.0`, Gate G5 — **G6 Pilotlauf offen** · Phase 6 `v0.10.0`–`v0.10.4`, Gate G7 · Phase 7 `v0.10.5`/`v0.10.6` + `5f437d8`, Gate G8). **21 Findings:** 16 verifiziert umgesetzt, 2 teilweise ([STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md), [STX-14](findings/STX-14-changepct24h-semantik.md)), 3 offen ([STX-08](findings/STX-08-alpaca-ohne-websocket.md), [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md), [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Phase 8** ([`ROADMAP.md`](ROADMAP.md#phase-8--folge-prompts-aus-dem-abgleich-2026-10-03)) hält 5 Folge-Prompts für die Restpunkte bereit; was bewusst **nicht** ansteht und warum, steht in [`ROADMAP.md` §Zurückgestellt](ROADMAP.md#zurückgestellt--warum-jetzt-nicht-sinnvoll)
+- **Status:** OPEN — **Abgleich 2026-10-03 abgeschlossen** ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)): **Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt** (Phase 0 `v0.6.0`/`v0.6.1` · Phase 1 `v0.6.2` · Phase 2 `v0.6.3`–`v0.6.5` inkl. optionalem Slice 02-04 `7995822` · Phase 3 `v0.7.0`–`v0.7.6`, Gate G3 · Phase 4 `v0.8.0` + `v0.10.4`, Gate G4 · Phase 5 `v0.9.0`, Gate G5 — **G6 Pilotlauf offen** · Phase 6 `v0.10.0`–`v0.10.4`, Gate G7 · Phase 7 `v0.10.5`/`v0.10.6` + `5f437d8`, Gate G8). **21 Findings:** 17 verifiziert umgesetzt, 2 teilweise ([STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md), [STX-14](findings/STX-14-changepct24h-semantik.md)), 2 offen ([STX-08](findings/STX-08-alpaca-ohne-websocket.md), [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Phase 8** ([`ROADMAP.md`](ROADMAP.md#phase-8--folge-prompts-aus-dem-abgleich-2026-10-03)): 08-01 erledigt, 4 Folge-Prompts offen; was bewusst **nicht** ansteht und warum, steht in [`ROADMAP.md` §Zurückgestellt](ROADMAP.md#zurückgestellt--warum-jetzt-nicht-sinnvoll)
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -24,13 +24,14 @@
 | CRITICAL | 0 | 0 | 0 | 0 |
 | HIGH | 5 | 0 | 0 | 5 |
 | MEDIUM | 7 | 1 | 1 | 5 |
-| LOW | 6 | 2 | 1 | 3 |
+| LOW | 6 | 1 | 1 | 4 |
 | INFO | 3 | 0 | 0 | 3 |
-| **Σ** | **21** | **3** | **2** | **16** |
+| **Σ** | **21** | **2** | **2** | **17** |
 
-> **Stand 2026-10-03** ([Abgleich](remediation/RECONCILE-2026-10-03.md)): gezählt nach dem
+> **Stand 2026-10-03** ([Abgleich](remediation/RECONCILE-2026-10-03.md), Nachtrag 08-01 / Audit `v1.2.1`): gezählt nach dem
 > verifizierten Code-Stand auf `main` @ `3d13161`. „In Arbeit" = `PARTIAL`
-> (STX-12, STX-14). „Offen" = STX-08, STX-20, STX-21. Gegenüber dem Stand vor dem
+> (STX-12, STX-14). „Offen" = STX-08, STX-21. STX-20 wurde am 2026-10-03 durch
+> den Changelog-Nachtrag unter `[Unreleased]` geschlossen. Gegenüber dem Stand vor dem
 > Abgleich wurden 7 Findings hochgestuft und 1 korrigiert; kein Finding wurde
 > zurückgenommen.
 
@@ -61,7 +62,7 @@
 | [STX-17](findings/STX-17-info-validator-agent-kompatibel.md) | Bestätigt: Validator-Agent passt in das bestehende Evidence-Modell | INFO | FIXED (06-01 `v0.10.0`, 06-02 `v0.10.1`, 06-04 `v0.10.3`: Report + `recordEvidence()`-Writer + CLI ohne Schema-Änderung) |
 | [STX-18](findings/STX-18-info-rulespec-traegt-templates.md) | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT: Feldseite Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); **alle sechs Templates gebaut** — 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06/03-07/03-08 (`v0.7.4`, σ-Korrektur 03-06 dokumentiert); **Compiler-Abnahme 03-09 (`v0.7.5`)** — sechs Templates kompilieren ohne Klemmung; **Vertragstests 03-10 (`v0.7.6`)** — alle sechs über alle Takte abgesichert |
 | [STX-19](findings/STX-19-info-kafka-einwand.md) | Bestätigt: kein Kafka empfohlen — Einwand des Dokuments trägt | INFO | VERIFIED (global gesperrt; Abgleich: kein Kafka/NATS/Redis/DuckDB in `dependencies`, 0 Treffer in `src/`) |
-| [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | **Neu (Abgleich 2026-10-03):** Copy-Engine 07-03 ist gemergt, aber nicht im Changelog | LOW | OPEN → [08-01](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) |
+| [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | **Neu (Abgleich 2026-10-03):** Copy-Engine 07-03 war gemergt, aber nicht im Changelog | LOW | FIXED (08-01, `[Unreleased]`, Code-Version `0.10.6`; 2026-10-03) |
 | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | **Neu (Abgleich 2026-10-03):** `LOCAL_FREE` garantiert „lokal" nur per Default-Konfiguration | LOW | OPEN → [08-05](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) |
 
 ## Executive Summary

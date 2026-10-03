@@ -26,6 +26,34 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
+> **Status: Beta.** Nachtrag zu PR #215 (2026-10-03), im Changelog
+> nachgereicht am 2026-10-03. Die Copy-Engine aus 07-03 wird dokumentiert; die
+> Projekt-Code-Version bleibt `0.10.6` (kein Versions-Bump).
+
+### Added
+
+* **Copy-Engine (07-03, PR #215):** `src/copy/engine.ts` orchestriert Leader-Tor,
+  Policy, Sizing und persistente Dedupe über `copy_order_links` (im `--write`-Modus).
+  `src/copy/leader/bitunix.ts` normalisiert Bitunix-WebSocket-Order-Frames zu
+  `NormalizedLeaderTrade`; `src/copy/follower/simulated.ts` führt sie als
+  `SIMULATE_ONLY`-Follower ausschließlich auf dem Paper-Ledger aus — kein
+  `BrokerAdapter`, keine Venue-Order.
+* **CLI `npm run copy:paper`:** `--dry-run` ist der Default; `--write` aktiviert
+  Persistenz, `--no-write` ist ein Alias für `--dry-run`. `--replay` spielt Frames
+  offline ab und erzwingt `--dry-run`. Unterstützte Optionen: `--leader-account`,
+  `--symbols`, `--duration`, `--max-events` und `--policy`. Ohne Baseline blockiert
+  das Gate `NO_BASELINE`; bei fehlendem Heartbeat pausiert die Engine mit
+  `PAUSED_NO_HEARTBEAT`.
+* **Additive Migration** (`drizzle/2026-10-04_copy_engine_gates.sql`): ergänzt
+  `NO_BASELINE` als zulässigen Policy-Code und fügt `follower_notional` zu
+  `copy_order_links` hinzu.
+
+### Tests
+
+* `tests/copy.engine.test.ts`: 20 Tests ohne Netzwerk mit injizierten Frames,
+  einschließlich Baseline-Gate, Heartbeat-Pause und Dedupe nach Doppelzustellung
+  bzw. Neustart (20/20 lokal grün).
+
 ## [0.10.6] — Copy-Policy-Engine + Order-Links (STX-07-02) (2026-10-03)
 
 > **Status: Beta.** Versionierte fail-closed Copy-Risikogrenzen und eine
