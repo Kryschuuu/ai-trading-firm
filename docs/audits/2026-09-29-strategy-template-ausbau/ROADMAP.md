@@ -4,16 +4,15 @@
 > Versionierung: [`VERSIONING.md`](VERSIONING.md) ·
 > Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
 >
-> **Abgleich 2026-10-03** (Audit `v1.2.0`): alle 19 Ursprungs-Findings plus 2 neue
+> **Abgleich 2026-10-03** (Audit `v1.2.1`, einschließlich des Nachtrags 08-01): alle 19 Ursprungs-Findings plus 2 neue
 > gegen `main` @ `3d13161` verifiziert —
 > [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md).
-> Ergebnis: **21 Findings** — 16 verifiziert umgesetzt, 2 teilweise
+> Ergebnis: **21 Findings** — 17 verifiziert umgesetzt, 2 teilweise
 > ([STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md),
-> [STX-14](findings/STX-14-changepct24h-semantik.md)), 3 offen
+> [STX-14](findings/STX-14-changepct24h-semantik.md)), 2 offen
 > ([STX-08](findings/STX-08-alpaca-ohne-websocket.md),
-> [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md),
 > [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Alle 32 Ursprungs-Prompts
-> sind umgesetzt.** Die verbleibenden Restpunkte sind als **Phase 8** unten ausgeschrieben.
+> sind umgesetzt.** Von den fünf Folge-Prompts in **Phase 8** ist 08-01 erledigt; vier bleiben offen.
 
 ## ⚠️ Diese Roadmap beendet die Beta-Phase nicht
 
@@ -330,7 +329,7 @@ Interpretation zurück. Es gibt keinen Schreibpfad zu `result` oder Evidence-Wri
 |---|---|---|---|
 | 07-01 | [Copy-Typen, Mapping, Sizing](prompts/PROMPT-STX-07-01-copy-domain.md) | ✅ `src/copy/{types,mapping,sizing}.ts` (rein, `v0.10.5`, commit `b0bfcce`, PR #213): `NormalizedLeaderTrade`, `CopyMode=SIMULATE_ONLY`, SSoT-Mapping `mapLeaderSymbol()`, Sizing `FIXED_AMOUNT`/`FIXED_RATIO`/`EQUITY_RATIO` | 00-02 |
 | 07-02 | [Policy-Engine + Order-Links](prompts/PROMPT-STX-07-02-copy-policy.md) | ✅ `policy.ts` + `copy_order_links` + `copy_subscriptions` (`v0.10.6`, commit `f5af325`, PR #214): `cpl1:`-Versionen, `evaluatePolicy()` fail-closed, `copy_order_links` + `copy_subscriptions` Tabellen, `SIMULATE_ONLY` CHECK, `store.ts` idempotent | 07-01 |
-| 07-03 | [Bitunix-Leader-Adapter](prompts/PROMPT-STX-07-03-copy-leader-bitunix.md) | ✅ `src/copy/{leader/bitunix, follower/simulated, engine}.ts` + `scripts/run-copy-paper.ts` (commit `5f437d8`, PR #215, Unreleased auf `v0.10.6`, `npm run copy:paper`): Bitunix-WS-Order-Frames → Normalisierung → Policy → Simulate-only-Follower auf Paper-Ledger, Baseline-Snapshot-Gate `NO_BASELINE`, Heartbeat-Pause, dedup über `copy_order_links` | 07-02 |
+| 07-03 | [Bitunix-Leader-Adapter](prompts/PROMPT-STX-07-03-copy-leader-bitunix.md) | ✅ `src/copy/{leader/bitunix, follower/simulated, engine}.ts` + `scripts/run-copy-paper.ts` (commit `5f437d8`, PR #215, Unreleased auf `v0.10.6`, Changelog-Nachtrag 08-01 am 2026-10-03, kein Versions-Bump): `npm run copy:paper`, Bitunix-WS-Order-Frames → Normalisierung → Policy → Simulate-only-Follower auf Paper-Ledger, Baseline-Snapshot-Gate `NO_BASELINE`, Heartbeat-Pause, Dedupe über `copy_order_links` | 07-02 |
 
 **Ergebnis 07-01 (2026-10-02, `v0.10.5`, commit `b0bfcce` PR #213):** Reines Domänenmodell
 (`src/copy/types.ts`, `mapping.ts`, `sizing.ts`): `NormalizedLeaderTrade` normalisiert auf Handlungsabsicht
@@ -348,7 +347,7 @@ Mapping (`NO_MAPPING`). Additive Migration `drizzle/2026-10-03_copy_subscription
 `createIntent()` insert-or-return-existing, Transitionen vorwärts über Zeilensperren, `FILLED`-Retry No-Op,
 `DIVERGED` terminal, `follower_notional` gemessen nicht storniert. Tests `copy.policy.test.ts` + `copy.db.test.ts`.
 
-**Ergebnis 07-03 (2026-10-03, commit `5f437d8` PR #215, Unreleased auf `v0.10.6`, `npm run copy:paper`):**
+**Ergebnis 07-03 (2026-10-03, commit `5f437d8` PR #215, Unreleased auf `v0.10.6`, Changelog-Nachtrag 08-01 am 2026-10-03, `npm run copy:paper`):**
 Erster lauffähiger Copy-Loop Paper-only, Bitunix-first: `src/copy/leader/bitunix.ts` nutzt ausschließlich
 vorhandene Bitunix-Infrastruktur (`BitunixPublicWs` + `openHardenedWs`, `orders.ts:clientOrderIdFor`,
 `privateClient.ts`, `secrets.ts`, `redactor.ts`), kein zweiter WS-Client. Reihenfolge: erst Baseline-Snapshot
@@ -374,7 +373,7 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 **Kein Reconciler** (STX-09: `executionQuality` existiert). **Kein Slippage-Cancel**
 (nachträglich messen, nicht stornieren). **Kein Live-Copy** (STX-16: `SIMULATE_ONLY` per DB-CHECK).
 
-**Phase 7 damit abgeschlossen (2026-10-03):** 07-01 (`v0.10.5`), 07-02 (`v0.10.6`), 07-03 (commit `5f437d8`, Unreleased auf `v0.10.6`) — Gate G8 erfüllt.
+**Phase 7 damit abgeschlossen (2026-10-03):** 07-01 (`v0.10.5`), 07-02 (`v0.10.6`), 07-03 (commit `5f437d8`, Unreleased auf `v0.10.6`, Changelog-Nachtrag 08-01; kein Projektversions-Bump) — Gate G8 erfüllt.
 
 ---
 
@@ -382,17 +381,16 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 > **Herkunft:** der Vollabgleich [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 > hat 21 Findings gegen `main` @ `3d13161` verifiziert. Die 32 Ursprungs-Prompts sind
-> umgesetzt; was **wirklich** offen bleibt, sind die fünf Punkte unten. Jeder ist ein
+> umgesetzt; 08-01 ist am 2026-10-03 erledigt, vier der fünf Folge-Prompts bleiben offen. Jeder ist ein
 > eigenständiger, abgegrenzter Auftrag mit Ziel, betroffenen Dateien, Randbedingungen,
 > Abnahmekriterien und Tests — ohne Rückfragen ausführbar.
 >
-> **Reihenfolge-Empfehlung:** 08-01 → 08-02 → 08-03 → 08-05 → 08-04.
-> Die vier kleinen zuerst (je ein Patch-Release, voneinander unabhängig), das
-> hochriskante Paket 08-04 zuletzt und allein.
+> **Reihenfolge-Empfehlung:** 08-01 ist erledigt; weiter 08-02 → 08-03 → 08-05 → 08-04.
+> Die drei kleinen Folge-Pakete zuerst, das hochriskante Paket 08-04 zuletzt und allein.
 
 | # | Prompt | Finding | Risiko | Ergebnis | Hängt ab von |
 |---|---|---|---|---|---|
-| 08-01 | [Changelog-Nachtrag Copy-Engine](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | minimal (Doku) | ⏳ offen | — |
+| 08-01 | [Changelog-Nachtrag Copy-Engine](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | minimal (Doku) | ✅ erledigt: `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03; kein Projekt-Bump) | — |
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ⏳ offen | — |
 | 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ⏳ offen | — |
 | 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
@@ -400,9 +398,9 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 **Warum diese fünf und in dieser Reihenfolge:**
 
-- **08-01 zuerst**, weil er nichts kaputtmachen kann und eine echte Lücke schließt:
-  `npm run copy:paper` und die Migration `2026-10-04_copy_engine_gates.sql` sind in
-  `main`, stehen aber in keinem Changelog-Eintrag.
+- **08-01 zuerst und am 2026-10-03 erledigt:** Der Nachtrag zu `npm run copy:paper` und
+  `2026-10-04_copy_engine_gates.sql` steht jetzt unter `[Unreleased]`; es gab keinen
+  Projektversions-Bump und der veröffentlichte Block `[0.10.6]` blieb unverändert.
 - **08-02 und 08-03** räumen zwei der drei dokumentierten Code-Altlasten (OP-6) ab —
   beides kleine, isolierte Änderungen mit sofortigem Nutzen (ADR-Log im Browser lesbar;
   eine neue Klasse braucht künftig nur noch ein ADR).
@@ -436,7 +434,7 @@ vorhanden. Kein Prompt dieser Phase blockiert einen anderen.
 02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
 
 Phase 8 (Abgleich 2026-10-03, alle voneinander unabhängig):
-  08-01 ⏳ (STX-20 Doku)   08-02 ⏳ (Altlast 3)   08-03 ⏳ (STX-02-Rest)
+  08-01 ✅ (STX-20 Doku)   08-02 ⏳ (Altlast 3)   08-03 ⏳ (STX-02-Rest)
   08-05 ⏳ (STX-21)        08-04 ⏳ (STX-12)  ← zuletzt und allein (Handelslogik)
 ```
 

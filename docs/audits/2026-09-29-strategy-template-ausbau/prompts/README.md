@@ -15,13 +15,14 @@
 | 5 — Screening | [05-01](PROMPT-STX-05-01-screening-types.md) [05-02](PROMPT-STX-05-02-matrix-builder.md) [05-03](PROMPT-STX-05-03-screening-persistenz.md) [05-04](PROMPT-STX-05-04-screening-cli.md) | 05-01 ☑ (`v0.9.0`-Vorstufe `a90fa62` PR #204), 05-02 ☑ (`4267715` PR #205), 05-03 ☑ (Unreleased auf `v0.8.0` / `v0.9.0`-Vorstufe `211e022` PR #206 — `ssr1:`/`ssm1:`), 05-04 ☑ (`v0.9.0` `c797ae7` PR #207 — `runScreening()`, `runMultiAssetBacktest()`, `npm run screening`) — Phase 5 abgeschlossen, Gate G5 erfüllt, G6 Pilot offen (`remediation/SCREENING-PILOT.md`) |
 | 6 — Validator | [06-01](PROMPT-STX-06-01-assumptions-audit.md) [06-02](PROMPT-STX-06-02-overfit.md) [06-03](PROMPT-STX-06-03-cost-stress.md) [06-04](PROMPT-STX-06-04-validation-report.md) [06-05](PROMPT-STX-06-05-validator-agent.md) | ☑ (`v0.10.0` `0915c20` — Annahmen-Audit, `v0.10.1` `a2de401` — Overfit, `v0.10.2` `a34744b` — Cost-Stress STX-11, `v0.10.3` `0ab0d0a` — Report/Gate-Kette STX-17/STX-03, `v0.10.4` `4812f21` — Validator-Agent STX-13) — Phase 6 abgeschlossen, Gate G7 erfüllt |
 | 7 — Copy | [07-01](PROMPT-STX-07-01-copy-domain.md) [07-02](PROMPT-STX-07-02-copy-policy.md) [07-03](PROMPT-STX-07-03-copy-leader-bitunix.md) | 07-01 ☑ (`v0.10.5` `b0bfcce` PR #213 — Domänenmodell `SIMULATE_ONLY`), 07-02 ☑ (`v0.10.6` `f5af325` PR #214 — Policy `cpl1:` + Order-Links), 07-03 ☑ (`5f437d8` PR #215 Unreleased auf `v0.10.6` — Bitunix-Leader + Simulate-only-Follower + Engine + `npm run copy:paper`, `NO_BASELINE`) — Phase 7 abgeschlossen, Gate G8 erfüllt |
-| 8 — Folge-Prompts (Abgleich 2026-10-03) | [08-01](PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) [08-02](PROMPT-STX-08-02-docscatalog-suchpfade.md) [08-03](PROMPT-STX-08-03-signaldecay-klasse-ssot.md) [08-04](PROMPT-STX-08-04-backtestrule-indicatorcache.md) [08-05](PROMPT-STX-08-05-localfree-endpoint-haertung.md) | alle ☐ offen — 08-01 Changelog-Nachtrag Copy-Engine (STX-20, Doku), 08-02 Doku-Viewer-Suchpfade `docs/architecture/` + `docs/roadmap/` (Altlast 3), 08-03 Klassen-Literale in `signalDecay*` aus der SSoT (STX-02-Rest), 08-05 `LOCAL_FREE`-Endpunkt absichern (STX-21), 08-04 `backtestRule()` auf den Indicator-Cache mit Paritätsnachweis (STX-12, **hohes Risiko — zuletzt und allein**). Keine Abhängigkeiten untereinander außer 08-04 nach 00-01/02-02/02-03 |
+| 8 — Folge-Prompts (Abgleich 2026-10-03) | [08-01](PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) [08-02](PROMPT-STX-08-02-docscatalog-suchpfade.md) [08-03](PROMPT-STX-08-03-signaldecay-klasse-ssot.md) [08-04](PROMPT-STX-08-04-backtestrule-indicatorcache.md) [08-05](PROMPT-STX-08-05-localfree-endpoint-haertung.md) | 08-01 ☑ (`[Unreleased]`, Code-Version `0.10.6`, kein Projekt-Bump; STX-20 FIXED), 08-02/08-03/08-04/08-05 ☐ offen — Doku-Viewer-Suchpfade (Altlast 3), Klassen-Literale in `signalDecay*` aus der SSoT (STX-02-Rest), `LOCAL_FREE`-Endpunkt absichern (STX-21), `backtestRule()` auf den Indicator-Cache mit Paritätsnachweis (STX-12, **hohes Risiko — zuletzt und allein**). Keine Abhängigkeiten untereinander außer 08-04 nach 00-01/02-02/02-03 |
 
 Jeder Prompt ist kopierfertig und enthält Zweck, Kontext, Auftrag, Akzeptanzkriterien
 und die **Gesperrt-Klauseln**.
 
-**Stand nach dem Abgleich 2026-10-03** (`main` @ `3d13161`, Code-Version `0.10.6`):
-alle **32** Ursprungs-Prompts sind umgesetzt; die **5** Phase-8-Prompts sind offen.
-Von 21 Findings sind 16 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14) und 3 offen
-(STX-08, STX-20, STX-21). Einzelbelege je Finding:
-[`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md).
+**Stand nach dem Abgleich und dem Nachtrag 08-01 am 2026-10-03**
+(Audit `v1.2.1`, `main` @ `3d13161`, Code-Version `0.10.6`): alle **32**
+Ursprungs-Prompts sind umgesetzt; 08-01 ist erledigt und **4** Phase-8-Prompts
+bleiben offen. Von 21 Findings sind 17 verifiziert umgesetzt, 2 teilweise
+(STX-12, STX-14) und 2 offen (STX-08, STX-21). Der Vollabgleich als
+Zeitaufnahme: [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md).
