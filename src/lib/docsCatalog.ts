@@ -279,6 +279,11 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Strategy-Lifecycle & Driftgates",
     subtitle: "9-Zustands-Promotion Backtest↔Paper↔Live, immutable Evidence, Degrationsleiter, Order-Gate (RMA-P1-05, v1.73.0)",
   },
+  copyTrading: {
+    file: "docs/COPY_TRADING.md",
+    title: "Copy-Trading — Policy & Order-Links",
+    subtitle: "Versionierte fail-closed Limits, SIMULATE_ONLY-DB-Zwang, idempotente Order-Links und Abgrenzung zur Execution-Quality-Reconciliation (STX-07-02)",
+  },
   strategyValidation: {
     file: "docs/STRATEGY_VALIDATION.md",
     title: "Strategie-Validierung: Annahmen-Audit",
