@@ -16,6 +16,20 @@
  *   - PEER_REVIEW Dateien nach docs/peer-reviews/ Unterordner review.md
  *   - task- Dateien nach docs/archive/task-plans/
  *   - Neue Katalog-Eintraege fuer audits/, peer-reviews/, security/, archive/
+ *
+ * Suchpfade-Update 2026-10-03 (STX-08-02, Altlast 3):
+ *   - Der Existenz-Fallback findet zusaetzlich docs/architecture/ (SSoT-Karte,
+ *     Pipeline-/Schema-/Integrationskarte) und docs/roadmap/ (ADR-Log,
+ *     Status-Tracker). Damit sind STRATEGY_STACK.md, PIPELINE_MAP.md,
+ *     DB_SCHEMA.md, INTEGRATION_POINTS.md und DECISIONS.md ohne Repo-Wechsel
+ *     im Browser-Viewer lesbar.
+ *   - Bewusst KEINE neuen Katalog-Eintraege: Der Fallback reicht, und ein
+ *     Katalogeintrag wuerde Schritt 2 (Dateiname-Matching) fuer diese Dateien
+ *     oeffnen — dann loeste auch die pfadfoermige Eingabe
+ *     `../architecture/STRATEGY_STACK.md` auf, was die Abnahme ausschliesst.
+ *   - Die dreistufige Aufloesung bleibt unveraendert (kein `docs/**`-Walk);
+ *     zusaetzlich werden Parent-Referenzen (`..`) im Existenz-Fallback
+ *     abgewiesen (Verteidigung in der Tiefe, `basename()` bleibt).
  */
 import { existsSync } from "node:fs";
 
@@ -343,10 +357,13 @@ export type ResolvedDoc = {
  * Löst einen Namen (Slug ODER Dateiname mit/ohne `.md`) zu einem Dokument auf.
  *
  * Zuerst die Whitelist (`DOCS_CATALOG`), danach ein Existenz-Fallback innerhalb
- * von `docs/` + `.md`, damit auch nicht katalogisierte Doku-Dateien (z. B.
- * `audits/README.md` oder `security/README.md`) lokal ohne 404
+ * von `docs/` + bekannten Unterordnern + `.md`, damit auch nicht katalogisierte
+ * Doku-Dateien (z. B. `audits/README.md`, `security/README.md`,
+ * `architecture/STRATEGY_STACK.md` oder `roadmap/DECISIONS.md`) lokal ohne 404
  * gerendert werden. Der Pfad wird ausschließlich über ein bereinigtes
  * Basename konstruiert — Path-Traversal bleibt strukturell ausgeschlossen.
+ * Parent-Referenzen (`..`) erreichen den Existenz-Fallback nicht; einfache
+ * Trenner werden wie bisher über `basename()` normalisiert.
  */
 export function resolveDoc(name: string): ResolvedDoc | null {
   const raw = (name ?? "").trim();
@@ -369,15 +386,27 @@ export function resolveDoc(name: string): ResolvedDoc | null {
     }
   }
 
-  // 3) Existenz-Fallback: echte Datei unter docs/ oder Unterordnern (z. B. audits/, peer-reviews/, security/)
+  // 3) Existenz-Fallback: echte Datei unter docs/ oder Unterordnern
+  // (z. B. audits/, peer-reviews/, security/, architecture/, roadmap/).
   // Nur .md, keine Trenner außerhalb docs/
   if (!safeBase.endsWith(".md") || safeBase.includes("/") || safeBase.includes("\\") || safeBase === "..") return null;
-  // Suche in bekannten Unterordnern
+  // STX-08-02: Parent-Referenzen (`..`) erreichen den Existenz-Fallback nicht —
+  // `../architecture/STRATEGY_STACK.md` bleibt `null`, obwohl der aufgelöste
+  // Dateiname existiert. Reine Trenner innerhalb eines Dateinamens werden
+  // weiterhin über `basename()` normalisiert (bestehende Auflösungen wie
+  // `audits/README.md` bleiben unverändert). Die Schritte 1/2 (Slug bzw.
+  // Katalog-Dateiname) und das Traversal-Verbot der Pfadkonstruktion bleiben
+  // unangetastet.
+  if (raw.split(/[/\\]+/).includes("..")) return null;
+  // Suche in bekannten Unterordnern (Reihenfolge = Priorität; architecture/ und
+  // roadmap/ stehen alphabetisch-neutral nach security/ und vor archive/).
   const searchPaths = [
     `docs/${safeBase}`,
     `docs/audits/${safeBase}`,
     `docs/peer-reviews/${safeBase}`,
     `docs/security/${safeBase}`,
+    `docs/architecture/${safeBase}`,
+    `docs/roadmap/${safeBase}`,
     `docs/archive/${safeBase}`,
     safeBase, // Root-Dateien wie CHANGELOG.md, CONFIGURATION.md
   ];

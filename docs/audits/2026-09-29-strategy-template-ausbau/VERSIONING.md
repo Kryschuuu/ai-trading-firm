@@ -7,11 +7,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| **Audit-Version** | `audit-2026-09-29 v1.2.1` |
+| **Audit-Version** | `audit-2026-09-29 v1.2.2` |
 | **Schema** | `MAJOR.MINOR.PATCH` für den **Audit-Inhalt**, unabhängig von der Projekt-Version |
 | **Gültig ab** | Commit `d734fe1` (Erstfassung), fortgeführt in diesem PR |
 | **Projekt-Version bei Erstellung** | `v0.5.0` (Beta) |
-| **Status** | `OPEN` — **21 Findings** (19 Ursprung + STX-20/STX-21 aus dem Abgleich 2026-10-03), davon 5 HIGH; **vollständig abgeglichen gegen `main` @ `3d13161`** ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)): 17 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14), 2 offen (STX-08, STX-21); **alle 32 Ursprungs-Prompts umgesetzt**, Phase 8 ergänzt 5 Folge-Prompts, 08-01 erledigt; Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 abgeschlossen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04 Report + Gate-Kette + Evidence-Writer + CLI `v0.10.3`, STX-17 geschlossen; 06-05 Validator-Agent `v0.10.4` umgesetzt, STX-13 geschlossen) |
+| **Status** | `OPEN` — **21 Findings** (19 Ursprung + STX-20/STX-21 aus dem Abgleich 2026-10-03), davon 5 HIGH; **vollständig abgeglichen gegen `main` @ `3d13161`** ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)): 17 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14), 2 offen (STX-08, STX-21); **alle 32 Ursprungs-Prompts umgesetzt**, Phase 8 ergänzt 5 Folge-Prompts, 08-01 erledigt (Doku-Nachtrag ohne Bump), 08-02 erledigt (`v0.10.8`, Altlast 3); Phase 0 umgesetzt (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`), Phase 1 umgesetzt (01-01 `v0.6.2`, STX-01 behoben), Phase 2 fachlich abgeschlossen (02-01 `v0.6.3`, 02-02 `v0.6.4`, 02-03 `v0.6.5`; offen nur der optionale Slice 02-04), **Phase 3 abgeschlossen** (Template-Reihe 03-01…03-08, Compiler 03-09 `v0.7.5`, Vertragstests 03-10 `v0.7.6`; Gate G3 erfüllt); **Phase 4 begonnen** (04-01 Schema `v0.8.0`; 04-02 Service/Schreibpfad offen; STX-06 in Arbeit); **Phase 6 abgeschlossen** (06-01 Annahmen-Audit `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner `v0.10.2`, STX-11 behoben; 06-04 Report + Gate-Kette + Evidence-Writer + CLI `v0.10.3`, STX-17 geschlossen; 06-05 Validator-Agent `v0.10.4` umgesetzt, STX-13 geschlossen) |
 
 ### 1.1 Audit-Versionsregeln
 
@@ -53,6 +53,7 @@
 | `v1.1.20` | 2026-10-02 | 06-05 umgesetzt (`v0.10.4`): erklärender Validator-Agent mit allowlisteter Report-Projektion, Injection-Block, strengem JSON-Schema, Shadow-Default, `LOCAL_FREE`/opt-in `OPENCODE_FREE` und bounded Telemetrie; 8 fokussierte Tests + Teil 5 in [`docs/STRATEGY_VALIDATION.md`](../../STRATEGY_VALIDATION.md); STX-13 geschlossen. Interpretation by-value; Persistenz/Workflow bleibt beim Aufrufer. |
 | `v1.2.0` | 2026-10-03 | **Vollabgleich aller Findings gegen den Code-Stand** (`main` @ `3d13161`, Code-Version `0.10.6`) — [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md). (a) **MINOR — neue Befunde:** [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) (07-03 gemergt, aber ohne Changelog-Eintrag) und [STX-21](findings/STX-21-localfree-cloud-endpoint.md) (`LOCAL_FREE` garantiert Lokalität nur per Default-Konfiguration). (b) **MINOR — neue Phase:** Phase 8 mit 5 Folge-Prompts (08-01…08-05). (c) 7 Findings hochgestuft (STX-02, STX-06, STX-09, STX-10, STX-16, STX-19; STX-05 präzisiert), 1 korrigiert (STX-14 `OPEN` → `PARTIAL`), 0 zurückgenommen. (d) `TRACKING.md`, `ROADMAP.md`, Audit-`README.md` und die beiden Doku-Indizes auf denselben Stand gezogen — vorher wichen `ROADMAP`/`prompts/README` (PR #216) von `TRACKING` und den Findings ab. (e) **Kein Projekt-Release** (reine Doku, §5 V4; Präzedenz PR #216) |
 | `v1.2.1` | 2026-10-03 | **PATCH — STX-20 behoben:** Prompt 08-01 ergänzt den Changelog-Nachtrag zu PR #215 unter `[Unreleased]` (Form A), mit Code-Version `0.10.6`; kein Projektversions-Bump, `[0.10.6]` bleibt unverändert. 21 Findings: 17 verifiziert umgesetzt, 2 teilweise, 2 offen (STX-08, STX-21). Ein Phase-8-Prompt erledigt, 4 offen |
+| `v1.2.2` | 2026-10-03 | **PATCH — Altlast 3 behoben:** Prompt 08-02 ergänzt im Doku-Viewer (`resolveDoc()` in `src/lib/docsCatalog.ts`) die Suchpfade `docs/architecture/` und `docs/roadmap/` (nach `docs/security/`, vor `docs/archive/`) — Projekt-Release `v0.10.8` (Patch), `0.10.7` bleibt frei (08-01 als Form A ohne Bump). Parent-Referenzen (`..`) werden im Existenz-Fallback zusätzlich abgewiesen, `DOCS_CATALOG` bleibt unverändert; 8 neue Tests in `tests/docsCatalog.test.ts`. Ein Phase-8-Prompt zusätzlich erledigt, 3 offen |
 
 ## 2. Release-Plan der Roadmap
 
@@ -86,7 +87,7 @@ Prompt-Paket ist ein eigener Release. **Kein Release überschreitet `0.x`.**
 | `v0.11.1` | Copy-Policy + Order-Links (`SIMULATE_ONLY`) | 07-02 | Minor | **Beta** |
 | `v0.11.2` | Bitunix-Leader + Simulate-only-Follower | 07-03 | Minor | **Beta** |
 | `[Unreleased]` (kein Projektversions-Bump) | Changelog-Nachtrag Copy-Engine 07-03 — [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md), 08-01 erledigt am 2026-10-03; Code-Version `0.10.6` | 08-01 | Doku | **Beta** |
-| `v0.10.8` *(vorgeschlagen)* | Doku-Viewer-Suchpfade `docs/architecture/` + `docs/roadmap/` (Altlast 3) | 08-02 | Patch | **Beta** |
+| `v0.10.8` | Doku-Viewer-Suchpfade `docs/architecture/` + `docs/roadmap/` (Altlast 3) — ausgeliefert 2026-10-03 | 08-02 | Patch | **Beta** |
 | `v0.10.9` *(vorgeschlagen)* | Klassen-Literale in `signalDecay*` aus der SSoT (STX-02-Rest, Altlast 1) | 08-03 | Patch | **Beta** |
 | `v0.10.10` *(vorgeschlagen)* | `LOCAL_FREE`-Endpunkt absichern — [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | 08-05 | Patch | **Beta** |
 | `v0.11.0` *(vorgezogen)* | `backtestRule()` auf den Indicator-Cache mit Paritätsnachweis — [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md); **Kollision mit dem geplanten Copy-Release `v0.11.0`** — Nummer beim Umsetzen neu vergeben | 08-04 | Minor (Handelslogik, byte-identisch) | **Beta** |
@@ -105,6 +106,11 @@ ohne 04-02 existiert noch kein Anwendungspfad; STX-06 bleibt deshalb in Arbeit.
 steht unter `[Unreleased]`; es gibt keinen Projektversions-Bump, und der
 Projekt-Code-Stand bleibt `0.10.6`. STX-20 ist mit Audit-PATCH `v1.2.1`
 geschlossen.
+
+**Entschieden (2026-10-03):** Wegen Form A bleibt `v0.10.7` unbenutzt; 08-02
+wird im vorliegend geplanten Slot `v0.10.8` ausgeliefert (Patch — nur
+`src/lib/docsCatalog.ts` plus Tests). Die Nummern der übrigen Phase-8-Prompts
+(`v0.10.9` 08-03, `v0.10.10` 08-05, 08-04 Minor) bleiben damit gültig.
 
 **Entschieden (2026-10-02):** 06-02 wurde als eigenes Release `v0.10.1`
 ausgeliefert (ein Prompt = ein Bump, wie in Phase 3). Damit verschiebt sich die

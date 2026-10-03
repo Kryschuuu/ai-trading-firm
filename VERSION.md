@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.6` |
+| **Version** | `v0.10.8` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-03 |
-| **Quellbasiert** | `package.json` (`version: "0.10.6"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.10.8"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -346,6 +346,25 @@ ist ein No-Op. Ausführung, Receipts und Reconciliation bleiben bei der
 bestehenden Execution-Quality-/Broker-Reconciliation-Kette. Die FK-Spalte zur
 bestehenden `execution_quality_intents.id` ist TEXT, weil deren tatsächlich
 vorhandener Primärschlüssel TEXT ist — ein UUID-FK wäre in PostgreSQL ungültig.
+
+`v0.10.8` (STX-08-02, 2026-10-03) schließt Altlast 3 aus dem Audit-Abgleich:
+Der Browser-Doku-Viewer löst `docs/architecture/` und `docs/roadmap/` auf. Der
+Existenz-Fallback in `resolveDoc()` (`src/lib/docsCatalog.ts`) sucht zusätzlich
+`docs/architecture/${safeBase}` und `docs/roadmap/${safeBase}` — nach
+`docs/security/` und vor `docs/archive/`, die bestehenden Prioritäten bleiben
+unverändert. Damit sind
+[`STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md),
+[`PIPELINE_MAP.md`](docs/architecture/PIPELINE_MAP.md),
+[`DB_SCHEMA.md`](docs/architecture/DB_SCHEMA.md),
+[`INTEGRATION_POINTS.md`](docs/architecture/INTEGRATION_POINTS.md) und der
+ADR-Log [`DECISIONS.md`](docs/roadmap/DECISIONS.md) (ADR-008…ADR-010) im Viewer
+unter `/docs/<Datei>.md` lesbar. Die dreistufige Auflösung bleibt: kein
+`docs/**`-Walk, kein Pfad-Parameter; der Pfad entsteht weiterhin nur aus
+`basename()` + fester Liste. Parent-Referenzen (`../…`) werden im
+Existenz-Fallback zusätzlich abgewiesen, `DOCS_CATALOG` bleibt unverändert
+(keine neuen Slugs — ein Katalogeintrag würde die Pfadform auflösen).
+`0.10.7` bleibt frei: 08-01 wurde als `[Unreleased]`-Nachtrag ohne Bump
+nachgereicht.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.
