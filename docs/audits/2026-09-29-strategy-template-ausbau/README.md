@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.1.20` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md); Phasen 0–3 abgeschlossen; Phase 4 begonnen — 04-01 Schemafundament (`v0.8.0`), 04-02 Service gemergt; Phase 5 gestartet — 05-01…05-04 in `v0.9.0` (Runner + CLI, Annahme unter Pilot-Vorbehalt); Phase 6 abgeschlossen — 06-01 Annahmen-Audit in `v0.10.0`, 06-02 Overfit- & Robustheitsauswertung in `v0.10.1`, 06-03 Cost- & Slippage-Stress-Runner in `v0.10.2`, 06-04 Report + Gate-Kette + Evidence-Writer + CLI in `v0.10.3`, 06-05 Validator-Agent in `v0.10.4` umgesetzt (STX-13 geschlossen); optionaler Slice 02-04 bleibt offen; `v1.1.20` = 06-05 umgesetzt, `v1.1.19` = 06-04 umgesetzt (STX-17 geschlossen), `v1.1.18` = 06-03 umgesetzt, `v1.1.17` = 06-02 umgesetzt, `v1.1.16` = 06-01 umgesetzt)
+- **Audit-Version:** `v1.2.0` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md)) — **Vollabgleich 2026-10-03** gegen `main` @ `3d13161`: alle 21 Findings verifiziert, **alle 32 Ursprungs-Prompts umgesetzt**, Phase 8 ergänzt 5 Folge-Prompts; Abgleich-Bericht [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.10.4 (Beta) · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — Phase 0 abgeschlossen: 00-01 (`v0.6.0`, [Bench-Baseline](remediation/BENCH-BASELINE.md)), 00-02/00-03 (`v0.6.1`, [SSoT-Karte](../../architecture/STRATEGY_STACK.md) + [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)); Phase 1 abgeschlossen: 01-01 (`v0.6.2`, [STX-01](findings/STX-01-rule-timeframe-blocker.md), Gate G1); Phase 2 fachlich abgeschlossen: 02-01 (`v0.6.3`, Formeln), 02-02 (`v0.6.4`, Bollinger-Regelfelder + Paritätstest) und 02-03 (`v0.6.5`, Donchian-Regelfeld + Paritätstest) umgesetzt; offen nur der optionale Feature-Store-Slice 02-04; **Phase 3 begonnen:** 03-01/03-02 (`v0.7.0`, Vertrag + Katalog), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`) und 03-05 (`v0.7.3`) umgesetzt; **Template-Reihe vollständig:** 03-06 (Bollinger-Squeeze), 03-07 (VWAP-Bias, Snapshot) und 03-08 (Donchian Breakout) mit `v0.7.4` ausgeliefert — sechs von sechs Templates gebaut; **Compiler 03-09 mit `v0.7.5` ausgeliefert** (STX-05 behoben: `buildRule(params) → sanitizeRuleSpec() → RuleSpec` nachgewiesen, Compiler ohne Fallback auf die Rohform); **Vertragstests 03-10 mit `v0.7.6` ausgeliefert** — 60 Tests über alle sechs Templates × Takte (Struktur, Compiler-Parität, Positiv-/Negativ-Fixtures, Katalog-Integrität, Engine-↔-Cache-Parität), generierte Doku `docs/STRATEGY_TEMPLATES.md`, **Gate G3 erfüllt, Phase 3 abgeschlossen**; **Phase 4 begonnen:** 04-01 Schemafundament (`v0.8.0`) implementiert, 04-02 Service/Lifecycle-Bridging gemergt; **Phase 5 gestartet:** 05-03 Persistenz (Unreleased auf `v0.8.0`), 05-04 Runner + CLI (`v0.9.0`, Pilot offen); **Phase 6 abgeschlossen:** 06-01 Annahmen-Audit (`v0.10.0`), 06-02 Overfit- & Robustheitsauswertung (`v0.10.1`), 06-03 Cost- & Slippage-Stress-Runner (`v0.10.2`), 06-04 Report + Gate-Kette + Evidence-Writer + CLI (`v0.10.3`, **STX-17 geschlossen**), 06-05 Validator-Agent (`v0.10.4`, STX-13 geschlossen); optionaler Slice 02-04 ebenfalls offen
+- **Code-Version:** `package.json` v0.10.6 (Beta) · geprüft am 2026-10-03 gegen `main` @ `3d13161` · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
+- **Status:** OPEN — **Abgleich 2026-10-03 abgeschlossen** ([`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)): **Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt** (Phase 0 `v0.6.0`/`v0.6.1` · Phase 1 `v0.6.2` · Phase 2 `v0.6.3`–`v0.6.5` inkl. optionalem Slice 02-04 `7995822` · Phase 3 `v0.7.0`–`v0.7.6`, Gate G3 · Phase 4 `v0.8.0` + `v0.10.4`, Gate G4 · Phase 5 `v0.9.0`, Gate G5 — **G6 Pilotlauf offen** · Phase 6 `v0.10.0`–`v0.10.4`, Gate G7 · Phase 7 `v0.10.5`/`v0.10.6` + `5f437d8`, Gate G8). **21 Findings:** 16 verifiziert umgesetzt, 2 teilweise ([STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md), [STX-14](findings/STX-14-changepct24h-semantik.md)), 3 offen ([STX-08](findings/STX-08-alpaca-ohne-websocket.md), [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md), [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Phase 8** ([`ROADMAP.md`](ROADMAP.md#phase-8--folge-prompts-aus-dem-abgleich-2026-10-03)) hält 5 Folge-Prompts für die Restpunkte bereit; was bewusst **nicht** ansteht und warum, steht in [`ROADMAP.md` §Zurückgestellt](ROADMAP.md#zurückgestellt--warum-jetzt-nicht-sinnvoll)
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -22,11 +22,17 @@
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 0 | 0 | 0 | 0 |
-| HIGH | 5 | 0 | 2 | 3 |
-| MEDIUM | 7 | 2 | 3 | 2 |
-| LOW | 4 | 2 | 0 | 2 |
-| INFO | 3 | 2 | 0 | 1 |
-| **Σ** | **19** | **6** | **5** | **8** |
+| HIGH | 5 | 0 | 0 | 5 |
+| MEDIUM | 7 | 1 | 1 | 5 |
+| LOW | 6 | 2 | 1 | 3 |
+| INFO | 3 | 0 | 0 | 3 |
+| **Σ** | **21** | **3** | **2** | **16** |
+
+> **Stand 2026-10-03** ([Abgleich](remediation/RECONCILE-2026-10-03.md)): gezählt nach dem
+> verifizierten Code-Stand auf `main` @ `3d13161`. „In Arbeit" = `PARTIAL`
+> (STX-12, STX-14). „Offen" = STX-08, STX-20, STX-21. Gegenüber dem Stand vor dem
+> Abgleich wurden 7 Findings hochgestuft und 1 korrigiert; kein Finding wurde
+> zurückgenommen.
 
 > **Kein CRITICAL.** Das Ausbaudokument enthält **keinen** Vorschlag, der eine bestehende
 > Sicherheitsgrenze weicht. Die HIGH-Funde sind **Integrations- und Duplikationsrisiken**,
@@ -37,24 +43,26 @@
 | ID | Titel | Severity | Status |
 |----|-------|----------|--------|
 | [STX-01](findings/STX-01-rule-timeframe-blocker.md) | `RuleWindow.timeframe` blockiert 2h/4h/1d/5d — harter Blocker für Swing & Screening (Cross-Sectional nicht betroffen, [ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) | HIGH | FIXED (01-01, `v0.6.2`) |
-| [STX-02](findings/STX-02-strategyclass-duplikat.md) | `StrategyClass` existiert bereits — `StrategyTemplate` würde ein zweites Klassifikationsmodell bauen | HIGH | IN ARBEIT (entschieden: [ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1)) |
+| [STX-02](findings/STX-02-strategyclass-duplikat.md) | `StrategyClass` existiert bereits — `StrategyTemplate` würde ein zweites Klassifikationsmodell bauen | HIGH | FIXED ([ADR-008](../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) + 03-01/03-02/03-09; Abgleich: sechs Templates mit Klasse, `CompileResult.strategyClass` getestet) |
 | [STX-03](findings/STX-03-regime-vokabular-konflikt.md) | Regime-Vokabular-Konflikt: 7er-Taxonomie des Dokuments vs. bestehendes 5+1-Modell | HIGH | FIXED ([ADR-009](../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) + 06-04 `v0.10.3`: `aggregateRegimeTrades()` liest `REGIME_EVAL_LABELS`, kein `RANGE`-Fallback) |
 | [STX-04](findings/STX-04-multiaset-spec-duplikat.md) | `MultiAssetStrategySpec` dupliziert `CrossSectionalConfig` | HIGH | FIXED ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) |
 | [STX-05](findings/STX-05-template-builder-umgeht-sanitize.md) | Builder umgeht „Code entscheidet" — `buildRule(ctx) => RuleSpec` würde Whitelist/`RULE_CEILINGS` überspringen | HIGH | FIXED (03-01 `v0.7.0` + 03-09 `v0.7.5`) |
-| [STX-06](findings/STX-06-keine-strategy-versions-persistenz.md) | Kein versioniertes Strategie-Artefakt wird über den Anwendungsdienst persistiert (Schemafundament vorhanden) | MEDIUM | IN ARBEIT (04-01 `v0.8.0`; 04-02 offen) |
+| [STX-06](findings/STX-06-keine-strategy-versions-persistenz.md) | Kein versioniertes Strategie-Artefakt wird über den Anwendungsdienst persistiert | MEDIUM | FIXED (04-01 `v0.8.0` + 04-02 `v0.10.4`: `ensureDefinition()`, `createVersion()`, `stv1:`/`stc1:`; DB-Idempotenz im Abgleich nicht ausführbar) |
 | [STX-07](findings/STX-07-backtest-runs-scope.md) | `backtest_runs.instrument_id NOT NULL` — universe-scoped Runs brauchen eigene Persistenz | MEDIUM | FIXED (05-03, Unreleased auf `v0.8.0`) |
 | [STX-08](findings/STX-08-alpaca-ohne-websocket.md) | Alpaca hat **keinen** WebSocket — Leader-Adapter-Annahme des Dokuments trifft nicht zu | MEDIUM | OPEN |
-| [STX-09](findings/STX-09-copysystem-duplikat-reconciliation.md) | Copy-Reconciler würde bestehende Fill-Reconciliation duplizieren | MEDIUM | OPEN |
-| [STX-10](findings/STX-10-featurestore-ist-slice.md) | Feature Store ist ein 3-Feature-Slice, kein „zentraler Feature-Layer" | MEDIUM | IN ARBEIT (00-02 dokumentiert) |
+| [STX-09](findings/STX-09-copysystem-duplikat-reconciliation.md) | Copy-Reconciler würde bestehende Fill-Reconciliation duplizieren | MEDIUM | FIXED (07-02 `f5af325` + 07-03 `5f437d8`: kein Reconciler, `executionQuality`-Intents, `copy_order_links.state` exakt 6 Werte, kein Cancel nach Fill) |
+| [STX-10](findings/STX-10-featurestore-ist-slice.md) | Feature Store ist ein 3-Feature-Slice, kein „zentraler Feature-Layer" | MEDIUM | FIXED (00-02 + 02-04 `7995822`: `rule.bb_zscore`, `rule.price_vs_upper_bb_pct`, `rule.donchian_breakout_pct` + Paritätstest) |
 | [STX-11](findings/STX-11-cost-stress-existiert.md) | Cost-/Slippage-Stress existiert bereits (MonteCarlo + executionCost-Faktor) | MEDIUM | FIXED (06-03, `v0.10.2`) |
-| [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | `backtestRule()` ist O(n²) — der Matrix-Runner würde daran scheitern | MEDIUM | IN ARBEIT (00-01 gemessen) |
-| [STX-13](findings/STX-13-opencode-free-tier.md) | OpenCode-Zen-Free-Tier ist rotierend und nicht verlässlich als Routing-Klasse | LOW | FIXED (06-05, `v0.10.4`; Best-Effort, keine Dauer-Garantie) |
-| [STX-14](findings/STX-14-changepct24h-semantik.md) | `changePct24h` misst 97 Perioden — Fallstrick für Tagesstrategien | LOW | OPEN |
+| [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | `backtestRule()` ist O(n²) — der Matrix-Runner würde daran scheitern | MEDIUM | PARTIAL (00-01 gemessen, Screening umgeht den Pfad seit 05-04; **Code unverändert quadratisch** — `ruleEngine.ts:894`, Altpfad in `ruleBacktest.ts:385` → [08-04](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md)) |
+| [STX-13](findings/STX-13-opencode-free-tier.md) | OpenCode-Zen-Free-Tier ist rotierend und nicht verlässlich als Routing-Klasse | LOW | FIXED (06-05, `v0.10.4`; Best-Effort, keine Dauer-Garantie) — Restpunkt der Lokalitäts-Garantie → [STX-21](findings/STX-21-localfree-cloud-endpoint.md) |
+| [STX-14](findings/STX-14-changepct24h-semantik.md) | `changePct24h` misst 97 Perioden — Fallstrick für Tagesstrategien | LOW | PARTIAL (Prüfung `CHANGE_PCT_SEMANTICS` in `v0.10.0`; Feld-Deprekation offen — kein Template nutzt das Feld, zurückgestellt) |
 | [STX-15](findings/STX-15-scanner-faktorzahl.md) | Faktenkorrektur: 14 aktive Faktoren, nicht „15+" | LOW | FIXED (00-02) |
-| [STX-16](findings/STX-16-copy-trading-compliance.md) | Copy-Trading verschiebt das Compliance-/Haftungsprofil des Projekts | LOW | OPEN |
-| STX-17 | Bestätigt: Validator-Agent passt in das bestehende Evidence-Modell | INFO | FIXED (06-01 `v0.10.0`, 06-02 `v0.10.1`, 06-04 `v0.10.3`: Report + `recordEvidence()`-Writer + CLI ohne Schema-Änderung) |
-| STX-18 | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT: Feldseite Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); **alle sechs Templates gebaut** — 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06/03-07/03-08 (`v0.7.4`, σ-Korrektur 03-06 dokumentiert); **Compiler-Abnahme 03-09 (`v0.7.5`)** — sechs Templates kompilieren ohne Klemmung; **Vertragstests 03-10 (`v0.7.6`)** — alle sechs über alle Takte abgesichert |
-| STX-19 | Bestätigt: kein Kafka empfohlen — Einwand des Dokuments trägt | INFO | OPEN |
+| [STX-16](findings/STX-16-copy-trading-compliance.md) | Copy-Trading verschiebt das Compliance-/Haftungsprofil des Projekts | LOW | FIXED (07-01/07-02: `CopyMode` mit **einem** Wert, DB-CHECK `mode='SIMULATE_ONLY'`, Follower nur `PaperBroker`; rechtliche Prüfung bleibt außerhalb) |
+| [STX-17](findings/STX-17-info-validator-agent-kompatibel.md) | Bestätigt: Validator-Agent passt in das bestehende Evidence-Modell | INFO | FIXED (06-01 `v0.10.0`, 06-02 `v0.10.1`, 06-04 `v0.10.3`: Report + `recordEvidence()`-Writer + CLI ohne Schema-Änderung) |
+| [STX-18](findings/STX-18-info-rulespec-traegt-templates.md) | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT: Feldseite Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); **alle sechs Templates gebaut** — 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06/03-07/03-08 (`v0.7.4`, σ-Korrektur 03-06 dokumentiert); **Compiler-Abnahme 03-09 (`v0.7.5`)** — sechs Templates kompilieren ohne Klemmung; **Vertragstests 03-10 (`v0.7.6`)** — alle sechs über alle Takte abgesichert |
+| [STX-19](findings/STX-19-info-kafka-einwand.md) | Bestätigt: kein Kafka empfohlen — Einwand des Dokuments trägt | INFO | VERIFIED (global gesperrt; Abgleich: kein Kafka/NATS/Redis/DuckDB in `dependencies`, 0 Treffer in `src/`) |
+| [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | **Neu (Abgleich 2026-10-03):** Copy-Engine 07-03 ist gemergt, aber nicht im Changelog | LOW | OPEN → [08-01](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) |
+| [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | **Neu (Abgleich 2026-10-03):** `LOCAL_FREE` garantiert „lokal" nur per Default-Konfiguration | LOW | OPEN → [08-05](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) |
 
 ## Executive Summary
 
