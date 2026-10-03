@@ -2,7 +2,7 @@
 
 - **Phase:** 8 · **Paket:** eigenständig, aber **nach** 08-01…08-03 · **Finding:** [STX-12](../findings/STX-12-backtestrule-o-n-quadratisch.md)
 - **Risiko:** **hoch** (Handelslogik, Ergebnis-Byte-Identität gefordert)
-- **Abschluss:** erledigt in `v0.11.0`; STX-12 FIXED; PR wird nach Validierung verlinkt.
+- **Abschluss:** erledigt in `v0.11.0`; STX-12 FIXED; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221).
 
 ## Ergebnis (2026-10-03)
 
@@ -93,7 +93,7 @@ Beobachtung, `grep indicatorCache src/lib/ruleEngine.ts` → 0 Treffer).
 - [x] Same-Series-Benchmark bei 17 520 Bars: 314,1×; echte HistoricalStore-Reihe fehlt, synthetische Folgemessung ist ausdrücklich kein Ersatz der offiziellen 25 986,2-ms-Baseline
 - [x] `src/lib/ruleBacktest.ts`, API-/Referenzpfad und Screening-Pfad unverändert angebunden; fokussierte Regressionstests grün
 - [x] 144 fokussierte Tests sowie typecheck, lint und docs:validate grün; das vollständige `npm test` wurde auf ausdrückliche Nutzeranweisung übersprungen
-- [x] [STX-12](../findings/STX-12-backtestrule-o-n-quadratisch.md) auf `FIXED`, Version `v0.11.0`; PR-Link nach Eröffnung ergänzen
+- [x] [STX-12](../findings/STX-12-backtestrule-o-n-quadratisch.md) auf `FIXED`, Version `v0.11.0`; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)
 
 ## Tests
 

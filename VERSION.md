@@ -391,7 +391,7 @@ append-only DB-CHECKs `positions_strategy_class_check` und
 ([`drizzle/2026-09-22_signal_decay.sql`](drizzle/2026-09-22_signal_decay.sql)).
 `DEFAULT_CLASS_POLICIES`, Env-Namen und Schwellen bleiben unangetastet.
 
-`v0.11.0` (STX-08-04, 2026-10-03) stellt `backtestRule()` auf den bestehenden
+`v0.11.0` (STX-08-04, PR #221, 2026-10-03) stellt `backtestRule()` auf den bestehenden
 `IndicatorCache` um: `buildIndicatorCache(candles)` läuft einmal vor der
 Backtest-Schleife; pro Bar liefert `snapshotFromCache()` den Snapshot. Der
 wachsende Präfix-Slice entfällt. Die vor der Änderung festgehaltenen Golden-

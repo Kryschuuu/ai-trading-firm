@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Performance
 - **Quelle:** Ausbaudokument §4.9 (nicht erkannt)
-- **Status:** FIXED — STX-08-04 in `v0.11.0` (`backtestRule()` nutzt den vorhandenen Indicator-Cache; eingefrorene Golden-Hashes und Bar-für-Bar-Parität grün). PR: wird nach Validierung ergänzt.
+- **Status:** FIXED — STX-08-04 in `v0.11.0` (`backtestRule()` nutzt den vorhandenen Indicator-Cache; eingefrorene Golden-Hashes und Bar-für-Bar-Parität grün). PR: [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221).
 - **Datei(en):** `src/lib/ruleEngine.ts:729-800`, `src/backtest/indicatorCache.ts`
 
 ## Abschluss 2026-10-03 — STX-08-04 (`v0.11.0`)
@@ -17,7 +17,7 @@
 - `tests/ruleEngine.indicatorCacheParity.test.ts`: alle `RULE_FIELDS` bar-für-bar exakt (576 Snapshots), Null-/Ungültigsemantik einschließlich Null-ATR, Tages-VWAP, Spread/Buch-Tiefe, Bollinger und Donchian.
 - Fokussierte Backtest-/Engine-/Template-Tests: 144 bestanden. `typecheck`, `lint` und `docs:validate` werden für diesen PR separat ausgeführt. **Die vollständige `npm test`-Suite wurde auf ausdrückliche Nutzeranweisung übersprungen** und wird nicht als gelaufen behauptet.
 - Ergänzende synthetische 17 520-Bar-Messung: alter Direktpfad 20 253,605 ms vs. Cache 64,489 ms Median (**314,1×**, gleiche Reihe, tiefengleiche Rückgabe). Die Originalreihe des HistoricalStore-Benchmarks fehlt; die offizielle 25 986,2-ms-Baseline bleibt unverändert und wird nicht als gleichartige Messung ausgegeben. Details: [`BENCH-BASELINE.md` §11](../remediation/BENCH-BASELINE.md#11-folgemessung-stx-08-04--einmaliger-indicator-cache-in-backtestrule).
-- Release: `v0.11.0`; PR: wird nach Validierung ergänzt.
+- Release: `v0.11.0`; PR: [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221).
 
 ## Erstabgleich 2026-10-03 (vor STX-08-04)
 
@@ -99,7 +99,7 @@ auf einer echten `BINANCE:BTCUSDT`-1h-Reihe (17 749 Kerzen, 3 Messpunkte × 3 L�
 - [x] Ergänzender Same-Series-Test bei 17 520 synthetischen Bars: 314,1× schneller und tiefengleiche Ergebnisse; Originaldatenreihe nicht verfügbar, daher kein Ersatz der offiziellen Messung
 - [x] `ruleBacktest.ts`, API-Pfad, Multi-Asset-Engine und Template-Tests fokussiert geprüft
 - [x] Fokussierte Tests (144), `typecheck`, `lint` und `docs:validate` grün; vollständiges `npm test` auf ausdrückliche Nutzeranweisung übersprungen
-- [x] STX-12 geschlossen in `v0.11.0`; PR-Link nach Eröffnung ergänzen
+- [x] STX-12 geschlossen in `v0.11.0`; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)
 
 ## Versions-Hinweis
 

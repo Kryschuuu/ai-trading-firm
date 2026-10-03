@@ -26,7 +26,7 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
-## [0.11.0] — Indicator-Cache für `backtestRule()` (STX-08-04) + Copy-Engine (2026-10-03)
+## [0.11.0] — Indicator-Cache für `backtestRule()` (STX-08-04) + Copy-Engine (PR #221, 2026-10-03)
 
 > **Status: Beta.** Minor-Release. Die vor der Cache-Umstellung eingefrorenen
 > Golden-Hashes für sechs Symbol-/Timeframe-Kombinationen bleiben unverändert.

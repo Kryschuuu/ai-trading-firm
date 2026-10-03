@@ -391,7 +391,7 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ✅ erledigt: `v0.10.8` + `tests/docsCatalog.test.ts` (8 Tests), Altlast 3 behoben | — |
 | 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ✅ erledigt: `v0.10.9` — `STRATEGY_CLASS_KEYS` aus `STRATEGY_CLASSES` abgeleitet, Lookup statt Literale, Quelltext-Wächter in `tests/adrVocabulary.test.ts`, Altlast 1 behoben | — |
 | 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
-| 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ✅ erledigt: `v0.11.0`, einmaliger Cache-Aufbau, Goldens unverändert, vollständige Feldparität, 144 fokussierte Tests; PR wird ergänzt | 00-01, 02-02/02-03 |
+| 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ✅ erledigt: `v0.11.0`, einmaliger Cache-Aufbau, Goldens unverändert, vollständige Feldparität, 144 fokussierte Tests; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221) | 00-01, 02-02/02-03 |
 
 **Warum diese fünf und in dieser Reihenfolge:**
 
