@@ -27,7 +27,7 @@ N150) und **Variante B** (N150 + Desktop als Modellserver). Unterschiede sind mi
 15. [Makro-/Mikro-Zyklen: Event-Driven-Trading (v1.6)](#15-makro-mikro-zyklen-event-driven-trading-v16)
 16. [Agenten-Register: alle zwölf Rollen](#16-agenten-register-alle-zwölf-rollen)
 17. [Regelwerk-API (Rules, Macro, Micro, Backtest)](#17-regelwerk-api-rules-macro-micro-backtest)
-18. [Review- & Security-Checkliste für neue Regeln](#18-review--security-checkliste-für-neue-regeln)
+18. [Review- & Security-Checkliste für neue Regeln](#18-review---security-checkliste-für-neue-regeln)
 19. [Tagesroutine der Mitarbeiter (Agenten-Zyklus)](#19-tagesroutine-der-mitarbeiter-agenten-zyklus)
 20. [Trade-Journal: Wer hat was warum entschieden? (v1.43.0)](#20-trade-journal-wer-hat-was-warum-entschieden-v1430)
 

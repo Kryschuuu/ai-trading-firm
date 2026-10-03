@@ -29,10 +29,21 @@
  */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
+import GithubSlugger from "github-slugger";
+import { extractMarkdownLinks, resolveDocLink, splitAnchor } from "../src/lib/docsLinks";
 
 const ROOT = process.cwd();
 const DOCS = path.join(ROOT, "docs");
 const SRC = path.join(ROOT, "src");
+/**
+ * Markdown-Dateien im Repo-Root, die von der Doku verlinkt werden.
+ * Sie gehoeren zur Link-Pruefung dazu (Befund C3): `docs/README.md` verlinkt
+ * `../CHANGELOG.md`, `docs/BACKTESTING.md` verlinkt `../CONFIGURATION.md#…` —
+ * beides war vorher ungeprueft.
+ */
+const ROOT_MD = ["CHANGELOG.md", "CONFIGURATION.md", "CONTRIBUTING.md", "INSTALL.md", "README.md", "VERSION.md"]
+  .map((f) => path.join(ROOT, f))
+  .filter((f) => existsSync(f));
 
 let failures: string[] = [];
 let checksRun = 0;
@@ -91,68 +102,206 @@ function validateHelpFile(file: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// B) Link-Check (relative Links innerhalb docs/)
+// B) Link-Check (relative Links innerhalb docs/ + Root-Dateien)
 // ---------------------------------------------------------------------------
-/** GitHub-aehnlicher Heading-Anker ("## 2.1 Schema (x)" -> "21-schema-x"). */
+/**
+ * Anker einer Ueberschrift — exakt der Algorithmus von `github-slugger`
+ * (und damit von `rehype-slug`, das der Viewer benutzt).
+ *
+ * Vorher stand hier ein „github-aehnlicher“ Nachbau, der `[^\w\s-]` entfernte
+ * und damit auch Umlaute killte (`über` -> `ber`). Ergebnis: der Check
+ * verglich zwei verschiedene Algorithmen und war halb aussagekraeftig
+ * (Befund C2). Jetzt ist es dieselbe Bibliothek, die auch rendert.
+ */
 function headingSlug(h: string): string {
-  return h
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "") // entfernt Satzzeichen, auch Em-Dash
-    .replace(/[\s-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  return new GithubSlugger().slug(headingText(h));
 }
 
+/**
+ * Ueberschrift ohne ATX-Prefix und ohne Inline-Markdown.
+ *
+ * Wichtig: `_` bleibt erhalten — `github-slugger` zaehlt es zu den
+ * Wortzeichen (`AUTH_MODE` -> `auth_mode`). `*` und Backticks fallen weg.
+ */
+function headingText(h: string): string {
+  return h
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/\s+#+\s*$/, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // [Text](ziel) -> Text
+    .replace(/\*\*|__/g, "")
+    .replace(/\*/g, "")
+    .replace(/`/g, "")
+    .trim();
+}
+
+/**
+ * Alle Anker-IDs einer Datei in Dokumentreihenfolge — inklusive der
+ * `-1`/`-2`-Suffixe, die `github-slugger` bei doppelten Titeln vergibt.
+ */
+function headingSlugs(content: string): string[] {
+  const slugger = new GithubSlugger();
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of content.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (m) out.push(slugger.slug(headingText(m[2])));
+  }
+  return out;
+}
+
+const slugCache = new Map<string, string[]>();
+function slugsOf(file: string): string[] {
+  const cached = slugCache.get(file);
+  if (cached) return cached;
+  let slugs: string[] = [];
+  try {
+    slugs = headingSlugs(readFileSync(file, "utf8"));
+  } catch {
+    slugs = [];
+  }
+  slugCache.set(file, slugs);
+  return slugs;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * B) Link-Check — die **GitHub-Sicht**: existiert das Ziel auf der Platte?
+ *
+ * Zusaetzlich zu frueher: Root-Dateien (Befund C3) und reine In-Page-Anker
+ * werden geprueft. Fuer die Browser-Sicht ist {@link checkAppLinks} zustaendig.
+ */
 function checkLinks() {
-  const files = mdFiles(DOCS);
+  const files = [...mdFiles(DOCS), ...ROOT_MD];
   const dead: string[] = [];
   for (const file of files) {
     const base = path.dirname(file);
-    const raw = readFileSync(file, "utf8");
-    // Code-Fences ignorieren (``` und ~~~) — Links in Code-Beispielen sind keine echten Links
-    // Zusätzlich: Inline-Code (`...`) entfernen und Platzhalter `...` ignorieren
-    const lines = raw.split("\n");
-    let inFence = false;
-    let filtered = "";
-    for (const line of lines) {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
+    const rel = path.relative(ROOT, file);
+    for (const target of extractMarkdownLinks(readFileSync(file, "utf8"))) {
+      const [p, anchor] = splitAnchor(target);
+      const resolved = p ? path.resolve(base, safeDecode(p)) : file;
+
+      if (p && !existsSync(resolved)) {
+        dead.push(`${rel}: toter Link -> ${target}`);
         continue;
       }
-      if (!inFence) {
-        const withoutInline = line.replace(/`[^`]*`/g, "");
-        filtered += withoutInline + "\n";
-      }
-    }
-    const re = /\]\(([^)]+)\)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(filtered)) !== null) {
-      const target = m[1].trim();
-      if (/^(https?:|mailto:|#)/.test(target)) continue; // extern / Anker
-      if (target.includes("...")) continue; // Platzhalter-Beispiel
-      const [p, anchor] = target.split("#");
-      if (!p) continue;
-      // Nur relative Pfade prüfen, die auf .md oder Unterordner zeigen
-      // Absolute Pfade oder ohne Extension werden als externe ignoriert, wenn sie nicht existieren? Nein, wir prüfen alle.
-      const resolved = path.resolve(base, decodeURIComponent(p));
-      if (!existsSync(resolved)) {
-        dead.push(`${path.relative(ROOT, file)}: toter Link -> ${target}`);
-        continue;
-      }
-      if (anchor) {
-        try {
-          const content = readFileSync(resolved, "utf8");
-          const want = headingSlug(anchor);
-          const headings = [...content.matchAll(/^#{1,6}\s+(.+)$/gm)].map((hm) => headingSlug(hm[1]));
-          if (!headings.includes(want))
-            dead.push(`${path.relative(ROOT, file)}: toter Anker -> ${target}`);
-        } catch {
-          // Falls resolved ein Verzeichnis ist, Anker ignorieren
-        }
+      if (!anchor) continue;
+      const slugs = slugsOf(resolved);
+      if (!slugs.includes(safeDecode(anchor))) {
+        dead.push(`${rel}: toter Anker -> ${target}`);
       }
     }
   }
   report("Link-Check", dead.length === 0, dead.length ? dead.slice(0, 25).join(" | ") : "");
+}
+
+// ---------------------------------------------------------------------------
+// B2) App-Link-Check — die **Browser-Sicht** (Befund C1)
+// ---------------------------------------------------------------------------
+/**
+ * Simuliert die Aufloesung des Viewers und vergleicht sie mit der GitHub-Sicht.
+ *
+ * Genau diese Pruefung haette die 903 toten und 127 falschen Treffer des
+ * Ausgangsbefunds gefunden: der bisherige Check pruefte nur, ob die Datei
+ * existiert — nicht, ob `/docs/<Ziel>` im Browser dort landet.
+ *
+ * Verlangt wird die Aufloesung nur fuer **Markdown-Ziele**. Alles andere stellt
+ * der Viewer absichtlich als nicht klickbaren Code-Text dar (Befund B7) und
+ * zaehlt nur als Statistik: Ziele ausserhalb von `docs/` (`../src/db/schema.ts`,
+ * `../drizzle/*.sql`), Nicht-Markdown-Dateien (`help/*.help.json`, `*.csv`) und
+ * Verzeichnisse ohne `README.md` (`findings/`, `patches/`, `task-plans/`).
+ */
+function checkAppLinks() {
+  const files = [...mdFiles(DOCS), ...ROOT_MD];
+  const fsProbe = {
+    isFile: (f: string) => {
+      try {
+        return statSync(path.join(ROOT, f)).isFile();
+      } catch {
+        return false;
+      }
+    },
+    isDir: (d: string) => {
+      try {
+        return statSync(path.join(ROOT, d)).isDirectory();
+      } catch {
+        return false;
+      }
+    },
+  };
+
+  const broken: string[] = []; // App zeigt 404
+  const wrong: string[] = []; // App zeigt ein anderes Dokument
+  let resolved = 0;
+  let outside = 0;
+
+  for (const file of files) {
+    const rel = path.relative(ROOT, file);
+    for (const target of extractMarkdownLinks(readFileSync(file, "utf8"))) {
+      const [p] = splitAnchor(target);
+      if (!p) continue; // reiner Anker (von checkLinks geprueft)
+
+      const expected = path.relative(ROOT, path.resolve(path.dirname(file), safeDecode(p)));
+      const insideDocs = expected.startsWith("docs/");
+      const isRootMd = !expected.includes("/") && expected.endsWith(".md");
+      if (!insideDocs && !isRootMd) {
+        outside++;
+        continue;
+      }
+      if (!expected.endsWith(".md")) {
+        // Verzeichnis-Ziel: der Viewer verlinkt `<dir>/README.md`, wenn sie
+        // existiert — sonst bleibt es Code-Text. Beides ist kein Fehler.
+        const readme = `${expected}/README.md`;
+        outside++;
+        if (fsProbe.isFile(readme)) {
+          const resolution = resolveDocLink(target, rel, fsProbe);
+          if (resolution.kind !== "doc" || resolution.file !== readme) {
+            wrong.push(
+              `${rel}: Verzeichnisziel loest nicht auf sein README auf -> ${target} (erwartet ${readme})`,
+            );
+          } else {
+            resolved++;
+          }
+        }
+        continue;
+      }
+      const want = expected;
+
+      const resolution = resolveDocLink(target, rel, fsProbe);
+      if (resolution.kind !== "doc") {
+        broken.push(`${rel}: in der App nicht erreichbar -> ${target}`);
+      } else if (path.relative(ROOT, path.resolve(ROOT, resolution.file)) !== want) {
+        wrong.push(
+          `${rel}: zeigt auf das falsche Dokument -> ${target} (erwartet ${want}, App liefert ${resolution.file})`,
+        );
+      } else {
+        resolved++;
+      }
+    }
+  }
+
+  report(
+    "App-Link-Check",
+    broken.length === 0 && wrong.length === 0,
+    broken.length || wrong.length
+      ? [...broken, ...wrong].slice(0, 25).join(" | ")
+      : "",
+  );
+  console.log(
+    `[docs-validate] App-Link-Check: ${resolved} korrekt aufgelöst, ` +
+      `${outside} außerhalb von docs/ (bewusst als Code-Text).`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +595,7 @@ function main() {
   report("Help-Schema", helpErrs.length === 0, helpErrs.length ? helpErrs.slice(0, 30).join(" | ") : "");
 
   checkLinks();
+  checkAppLinks();
   checkMarkdown();
   checkSecrets();
   checkEnvFlags();

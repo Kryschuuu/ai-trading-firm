@@ -383,8 +383,7 @@ ausschließlich Ebene 1 — ein Credential-Flood darf die Sicherheitsaktion nie
 blockieren.
 
 Details: Befund C2 in
-[`docs/AUDIT_REMEDIATION_2026-09.md`](docs/AUDIT_REMEDIATION_2026-09.md) und
-[`audit-remediation/C2-forwarded-ip.md`](audit-remediation/C2-forwarded-ip.md).
+[`docs/audits/2026-09-03-peer-review/findings/C2-forwarded-ip.md`](docs/audits/2026-09-03-peer-review/findings/C2-forwarded-ip.md).
 
 ## Env-Flag-Referenz (sichere Defaults)
 

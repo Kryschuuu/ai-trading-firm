@@ -4,18 +4,19 @@
 /**
  * Doku-Übersicht (`/docs`). Zeigt die README an und navigiert über die
  * Sidebar zu den kanonischen Einzelseiten (`d.path`), damit jede Doku-Datei
- * lokal unter `/docs/<Datei>.md` gerendert wird.
+ * lokal unter `/docs/<Pfad>.md` gerendert wird.
  */
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import DocsMarkdown from "./DocsMarkdown";
+import DocsMarkdown, { type DocLinkMap } from "./DocsMarkdown";
 
 type DocListItem = { slug: string; title: string; subtitle: string; path: string };
 
 export default function DocsIndex() {
   const [docs, setDocs] = useState<DocListItem[]>([]);
   const [content, setContent] = useState("");
+  const [links, setLinks] = useState<DocLinkMap>({});
   const [loading, setLoading] = useState(true);
 
   const loadDocs = useCallback(() => {
@@ -29,7 +30,10 @@ export default function DocsIndex() {
     setLoading(true);
     fetch("/api/docs?name=readme")
       .then((r) => r.json())
-      .then((d) => setContent(d.content ?? `> ${d.error ?? "Dokument nicht verfügbar."}`))
+      .then((d) => {
+        setContent(d.content ?? `> ${d.error ?? "Dokument nicht verfügbar."}`);
+        setLinks((d.links ?? {}) as DocLinkMap);
+      })
       .catch(() => setContent("> Dokument konnte nicht geladen werden."))
       .finally(() => setLoading(false));
   }, []);
@@ -85,10 +89,9 @@ export default function DocsIndex() {
               </Link>
             ))}
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-[11px] leading-relaxed text-slate-500">
-              Die Dateien liegen im Projekt unter <code>docs/README.md</code>,{" "}
-              <code>docs/INSTALL.md</code>, <code>docs/HANDBUCH.md</code>,{" "}
-              <code>docs/CHANGELOG.md</code> und <code>docs/SECURITY_AUDIT.md</code> — sie
-              sind also auch offline im Repo lesbar.
+              Die Dateien liegen im Projekt unter <code>docs/</code> (Root-Dateien
+              wie <code>CHANGELOG.md</code> unter <code>/docs/root/</code>) — sie sind
+              also auch offline im Repo lesbar.
             </div>
           </nav>
 
@@ -96,7 +99,7 @@ export default function DocsIndex() {
             {loading ? (
               <p className="text-sm text-slate-500">Lade Dokument…</p>
             ) : (
-              <DocsMarkdown content={content} />
+              <DocsMarkdown content={content} links={links} />
             )}
           </article>
         </div>

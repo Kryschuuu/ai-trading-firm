@@ -505,7 +505,7 @@ normative Stress-Annahmen für den In-Engine-Sweep (`slippageModel: "fixed"`,
 Ausführungs-Slippages. Ob der Referenzlauf (`base`) tatsächlich Gebühren > 0
 (`FEE_NONZERO`), Slippage > 0 (`SLIPPAGE_NONZERO`) und Gesamtkosten > 0
 (`COST_NONZERO`) angesetzt hat, prüft vorab das deterministische
-Annahmen-Audit aus Teil 1 ([§2](#2-die-elf-prüfungen), `STX-06-01`).
+Annahmen-Audit aus Teil 1 ([§2](#3-die-elf-prüfungen), `STX-06-01`).
 
 ## 18. In-Engine-Sweep (`runInEngineStress`) & Fail-Closed-Regeln
 
