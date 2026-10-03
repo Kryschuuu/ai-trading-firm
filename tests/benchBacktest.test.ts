@@ -148,7 +148,20 @@ test("runBench: drei Pfade, Rohwerte je Wiederholung, Exponent und Matrix-Kosten
   assert.ok(typeof result.exponents.cache === "number");
   assert.ok((result.comparison.speedupMultiAsset ?? 0) > 0);
   assert.equal(result.matrix.cells, MATRIX_CELLS);
-  assert.ok(result.matrix.perPath.rule.coreHours > result.matrix.perPath.multiAsset.coreHours);
+  // Protokoll-Vertrag: Jeder Pfad liefert eine **positive** Matrix-Kostenangabe.
+  // Kein Ordnungsvergleich `rule > multiAsset` mehr: Diese Aussage stammte aus
+  // der Baseline vor STX-12 und ist seit 08-04 (`v0.11.0`) überholt —
+  // `backtestRule()` nutzt denselben Indicator-Cache wie der Engine-Pfad. Bei
+  // den Spielzeuggrößen dieser Suite (200/400 Bars, zwei Wiederholungen)
+  // dominieren JIT-/Startkosten, die Reihenfolge kippt zwischen Läufen. Die
+  // belastbare Aussage steht in `BENCH-BASELINE.md` (§§1–11), nicht hier.
+  for (const benchPath of BENCH_PATHS) {
+    const perPath = result.matrix.perPath[benchPath];
+    assert.ok(perPath, `${benchPath} muss in der Matrix erscheinen`);
+    assert.ok(perPath.cellMs > 0, `${benchPath}: Zellkosten müssen positiv sein`);
+    assert.ok(perPath.coreHours > 0, `${benchPath}: Kernstunden müssen positiv sein`);
+    assert.ok(perPath.pilotCoreHours > 0, `${benchPath}: Pilot-Kernstunden müssen positiv sein`);
+  }
   assert.equal(result.config.repeats, 2);
   assert.equal(result.config.warmupRuns, 1);
 
