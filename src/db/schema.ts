@@ -1970,6 +1970,8 @@ export const copyOrderLinks = pgTable("copy_order_links", {
   state: text("state").notNull(),
   policyCode: text("policy_code"),
   observedDeviationBps: numeric("observed_deviation_bps"),
+  /** Simulated follower notional of one event (07-03); measurement, not an order. */
+  followerNotional: numeric("follower_notional"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
@@ -1978,8 +1980,9 @@ export const copyOrderLinks = pgTable("copy_order_links", {
   index("copy_order_links_state_idx").on(t.state),
   index("copy_order_links_leader_event_idx").on(t.leaderEventId),
   check("copy_order_links_state_check", sql`${t.state} IN ('PENDING', 'SENT', 'PARTIAL', 'FILLED', 'FAILED', 'DIVERGED')`),
-  check("copy_order_links_policy_code_check", sql`${t.policyCode} IS NULL OR ${t.policyCode} IN ('HALTED', 'MAX_EVENT_NOTIONAL', 'MAX_DAY_NOTIONAL', 'MAX_SLIPPAGE', 'MAX_POSITIONS', 'MAX_DAILY_LOSS', 'MAX_LEVERAGE', 'NO_MAPPING')`),
+  check("copy_order_links_policy_code_check", sql`${t.policyCode} IS NULL OR ${t.policyCode} IN ('HALTED', 'MAX_EVENT_NOTIONAL', 'MAX_DAY_NOTIONAL', 'MAX_SLIPPAGE', 'MAX_POSITIONS', 'MAX_DAILY_LOSS', 'MAX_LEVERAGE', 'NO_MAPPING', 'NO_BASELINE')`),
   check("copy_order_links_policy_code_state_check", sql`${t.policyCode} IS NULL OR ${t.state} = 'FAILED'`),
+  check("copy_order_links_follower_notional_check", sql`${t.followerNotional} IS NULL OR (${t.followerNotional} >= 0 AND ${t.followerNotional} <= 1e15)`),
 ]);
 
 /**

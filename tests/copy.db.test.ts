@@ -48,9 +48,15 @@ before(async () => {
       "utf8",
     );
     const copyMigration = await readFile("drizzle/2026-10-03_copy_subscriptions.sql", "utf8");
+    const copyGatesMigration = await readFile(
+      "drizzle/2026-10-04_copy_engine_gates.sql",
+      "utf8",
+    );
     await connection.query(executionQualityMigration);
     await connection.query(copyMigration);
+    await connection.query(copyGatesMigration);
     await connection.query(copyMigration); // additive/idempotent
+    await connection.query(copyGatesMigration); // additive/idempotent
   } catch (error) {
     startupError = error instanceof Error ? error : new Error(String(error));
   }
@@ -122,6 +128,66 @@ test("migration is idempotent and creates only the two phase-7 copy tables", asy
       [JSON.stringify(DEFAULT_COPY_POLICY_CONFIG.policy), DEFAULT_COPY_POLICY_CONFIG.policyVersion],
     ),
     /copy_subscriptions_mode_check|check constraint/i,
+  );
+});
+
+test("follower_notional is persisted and the widened policy-code CHECK accepts NO_BASELINE", async (t) => {
+  const database = requirePostgres(t);
+  if (!database) return;
+  const store = new CopyStore(database, async () => ({ durable: true }));
+
+  await store.createIntent({
+    leaderEventId: "leader-event-notional",
+    followerIntentId: "follower-intent-notional",
+    followerNotional: 250.75,
+  });
+  const created = await database.query<{ follower_notional: string | null }>(
+    "SELECT follower_notional FROM copy_order_links WHERE follower_intent_id = $1",
+    ["follower-intent-notional"],
+  );
+  assert.equal(Number(created.rows[0].follower_notional), 250.75);
+
+  // NO_BASELINE ist seit 07-03 ein gültiger Policy-Code (Engine-Gate, das
+  // keine eigene Zeile schreibt — hier nur als Constraint-Akzeptanz geprüft).
+  await store.markFailed("follower-intent-notional", "NO_BASELINE");
+  const failed = await database.query<{ policy_code: string | null }>(
+    "SELECT policy_code FROM copy_order_links WHERE follower_intent_id = $1",
+    ["follower-intent-notional"],
+  );
+  assert.equal(failed.rows[0].policy_code, "NO_BASELINE");
+
+  // Ein erfundener Code bleibt ausgeschlossen.
+  await assert.rejects(
+    () => database.query(
+      `INSERT INTO copy_order_links (leader_event_id, follower_intent_id, state, policy_code)
+       VALUES ('leader-event-bogus', 'follower-intent-bogus', 'FAILED', 'BOGUS_CODE')`,
+    ),
+    /copy_order_links_policy_code_check|check constraint/i,
+  );
+
+  // dayNotional() summiert die offenen/gefüllten Links des UTC-Tages — die
+  // Basis für maxNotionalPerDay über einen Prozessneustart hinweg.
+  await store.createIntent({
+    leaderEventId: "leader-event-day-1",
+    followerIntentId: "follower-intent-day-1",
+    followerNotional: 100,
+  });
+  await store.createIntent({
+    leaderEventId: "leader-event-day-2",
+    followerIntentId: "follower-intent-day-2",
+    followerNotional: 50,
+  });
+  await store.markFailed("follower-intent-day-2", "MAX_SLIPPAGE");
+  const day = await store.dayNotional();
+  assert.equal(day, 100, "nur PENDING|SENT|PARTIAL|FILLED zählen zum Tagesnotional");
+
+  // follower_notional bleibt ein Betrag: negativ und über der Decke abgelehnt.
+  await assert.rejects(
+    () => database.query(
+      `INSERT INTO copy_order_links (leader_event_id, follower_intent_id, state, follower_notional)
+       VALUES ('leader-event-neg', 'follower-intent-neg', 'PENDING', -1)`,
+    ),
+    /copy_order_links_follower_notional_check|check constraint/i,
   );
 });
 

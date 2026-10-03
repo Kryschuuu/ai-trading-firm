@@ -168,10 +168,27 @@ export const telemetry = {
     linkWrites: new LabelCounter("copy_order_link_writes_total"),
     transitions: new LabelCounter("copy_order_link_transitions_total"),
     auditWrites: new LabelCounter("copy_order_link_audit_writes_total"),
+    /**
+     * Engine-Outcomes je Leader-Event (STX-07-03). Label `result` ist eine
+     * geschlossene Menge (copied | duplicate | blocked) — kein Symbol, kein
+     * Konto, keine Event-ID.
+     */
+    events: new LabelCounter("copy_engine_events_total"),
+    /**
+     * Leader→Follower-Latenz in **Buckets** (within_threshold | slow | stale).
+     * Bewusst keine Roh-Millisekunden als Label: das wäre unbegrenzte
+     * Kardinalität in einem Label-Counter.
+     */
+    latency: new LabelCounter("copy_engine_latency_buckets_total"),
+    /** Leader-Adapter-Zustandsübergänge (connected | heartbeat_lost | …). */
+    leader: new LabelCounter("copy_leader_events_total"),
     reset(): void {
       telemetry.copy.linkWrites.reset();
       telemetry.copy.transitions.reset();
       telemetry.copy.auditWrites.reset();
+      telemetry.copy.events.reset();
+      telemetry.copy.latency.reset();
+      telemetry.copy.leader.reset();
     },
   },
   /**
@@ -837,6 +854,9 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.copy.linkWrites.exposition(),
     telemetry.copy.transitions.exposition(),
     telemetry.copy.auditWrites.exposition(),
+    telemetry.copy.events.exposition(),
+    telemetry.copy.latency.exposition(),
+    telemetry.copy.leader.exposition(),
     telemetry.features.materializationValues.exposition(),
     telemetry.features.materializationRuns.exposition(),
     telemetry.features.pitQueries.exposition(),

@@ -1,5 +1,4 @@
-/**
- * Copy-Trading — public module (Phase 7 · STX-07-01/02).
+/** Copy-Trading — public module (Phase 7 · STX-07-01/02/03).
  *
  * `types`, `mapping`, `sizing`, `config` and `policy` hold domain/configuration
  * logic; `store` persists only idempotency links around existing follower
@@ -12,6 +11,11 @@
  * evidence. Realized deviation is measurement-only and never a slippage-cancel
  * trigger. STX-16: `SIMULATE_ONLY` is enforced by the database CHECK, enabled
  * defaults to false, and no flag or live-order path exists here.
+ *
+ * STX-07-03 adds the first runnable loop: `leader/bitunix.ts` reads a leader
+ * account (WS events, never polling), `follower/simulated.ts` executes on the
+ * existing `PaperBroker`, and `engine.ts` orchestrates the fail-closed
+ * pipeline with persistent `leader_event_id` dedupe.
  */
 
 export * from "./types";
@@ -20,3 +24,6 @@ export * from "./sizing";
 export * from "./config";
 export * from "./policy";
 export * from "./store";
+export * from "./leader/bitunix";
+export * from "./follower/simulated";
+export * from "./engine";
