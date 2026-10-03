@@ -21,10 +21,105 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.11.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.12.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
+
+## [0.12.0] — Claude Trading Indicator (CTI) + Signalstrategien im Backtest (2026-10-03)
+
+> **Status: Beta.** Minor-Release. Neues Modul `src/signals/`: die
+> 1:1-Portierung des Pine-Script-v6-Indikators „Claude Trading Indicator"
+> (shorttitle `CTI`) samt Anbindung an die Multi-Asset-Backtest-Engine und
+> eine IO-freie Trading-Engine. Dabei wurde ein Vorzeichenfehler in der
+> Kassenführung von Leerverkäufen im Backtest-Portfolio behoben.
+
+### Added
+
+* **Pine-Primitiven** [`src/signals/pine.ts`](src/signals/pine.ts): `ta.sma`,
+  `ta.ema`, `ta.rma`, `ta.stdev`, `ta.highest`/`ta.lowest`, `ta.change`,
+  `ta.tr`, `ta.atr`, `ta.rsi`, `ta.macd`, `ta.stoch`, `ta.obv`,
+  `ta.supertrend`, `ta.dmi` und Bollinger-Bänder als **Streaming-Akkumulatoren**
+  mit Pine-treuer `na`-Semantik (`null` ist nie eine stille 0). Keine neue
+  Laufzeit-Abhängigkeit — keine TA-Bibliothek.
+* **CTI-Rechenkern** [`src/signals/cti/runtime.ts`](src/signals/cti/runtime.ts):
+  inkrementeller Zustandsautomat (`CtiRuntime.push(candle) → CtiBar`) mit
+  Zwei-Stufen-Konsens über Trend / Momentum / Volatilität / Volumen,
+  Persistenzfilter (`persistBars`, Gleichheitsprüfung wie in Pine),
+  Sperrfrist (`minBarsBetween`, ohne Nachholen) und eingefrorenen ATR-Stops.
+  `computeCtiSeries()` ist eine reine Faltung über denselben Automaten —
+  **eine** Implementierung für Backtest, Live und CLI.
+* **Parameter & Aufwärmbedarf** [`src/signals/cti/params.ts`](src/signals/cti/params.ts):
+  nur die im Skript einstellbaren Inputs, alle Komponenten-Perioden als
+  interne Konstanten; `resolveCtiParams()` klemmt sichtbar (`clamped[]`),
+  `ctiWarmupBars()` liefert den Bedarf (Default **201** Kerzen, EMA 200).
+* **Dashboard/Alerts** [`src/signals/cti/dashboard.ts`](src/signals/cti/dashboard.ts):
+  Tabellenzeilen und Alert-Wortlaute wortgleich zum Skript.
+* **Signalstrategien in der Backtest-Engine**
+  ([`src/backtest/types.ts`](src/backtest/types.ts),
+  [`src/backtest/engine.ts`](src/backtest/engine.ts)): dritter Strategietyp
+  `{ type: "signal" }` mit `BacktestSignalBar` (genau **eine** geschlossene
+  Kerze, keine Reihe) und `BacktestSignalDecision`
+  (`LONG`/`SHORT`/`FLAT`, Stop, Ziel, Risikobudget, `closeOpposite`).
+  `event_replay` lehnt Signalstrategien fail-closed ab.
+* **CTI-Backtest-Adapter** [`src/signals/cti/backtest.ts`](src/signals/cti/backtest.ts):
+  `createCtiSignalStrategy()`, `ctiStrategyItem()`, `runCtiBacktest()`
+  (Default: Paper-Ausführung, `warmupBars ≥ ctiWarmupBars()`, Shorts gemäß
+  `tradeShorts`) inklusive getrennter Signal-Statistik je Symbol.
+* **CTI-Trading-Engine** [`src/signals/cti/engine.ts`](src/signals/cti/engine.ts):
+  `CtiTradingEngine` erzeugt Absichten (`ENTER` / `EXIT` / `ADJUST_STOP`) mit
+  Gründen `SIGNAL`, `OPPOSITE_SIGNAL`, `STOP_LOSS`, `REARM_STOP`; Schutz vor
+  Signal, Stop erst ab der Folgekerze, Zustandswechsel **nur** nach Freigabe
+  durch den injizierten `CtiExecutionPort` (werfender Port = Ablehnung).
+  IO-frei: kein DB-, Broker- oder LLM-Import.
+* **CLI** `npm run cti` ([`scripts/run-cti.ts`](scripts/run-cti.ts)):
+  Dashboard + Signalliste aus dem HistoricalStore, optional Backtest
+  (`--mode=backtest`) und JSON-Report (`--out=`). Schreibt nicht in die
+  Datenbank und löst keine Order aus.
+* **Doku** [`docs/CLAUDE_TRADING_INDICATOR.md`](docs/CLAUDE_TRADING_INDICATOR.md)
+  (Konsensmodell, Parameter, Stops, Aufwärmphase, Backtest-Vertrag,
+  Trading-Engine, CLI, bewusste Abweichungen vom Original).
+
+### Fixed
+
+* **Leerverkäufe im Backtest-Portfolio vorzeichenrichtig verbucht**
+  ([`src/backtest/portfolio.ts`](src/backtest/portfolio.ts)): Bisher wurde
+  **jede** Position wie ein Kauf gebucht (Cash − Notional beim Öffnen,
+  + Notional beim Schließen). Für Shorts lief die Equity-Kurve damit
+  gegenläufig zum geloggten Trade-PnL — ein gewinnender Short senkte das
+  Eigenkapital. Jetzt bucht ein Short beim Öffnen nur Gebühren (die
+  Sicherheit bleibt im Cash), wird über `unrealizedPnl` bewertet und beim
+  Schließen mit dem realisierten Ergebnis verrechnet. Es gilt wieder
+  `endingEquity − startingEquity = Σ trades.pnl`. Long-Läufe sind
+  arithmetisch unverändert. Betroffen war u. a. die Zyklus-Verifikation
+  (`src/cycle/steps/backtestStep.ts`, `enableShorts: true`).
+
+### Tests
+
+* `tests/signals.pine.test.ts` (21): Primitiven gegen unabhängige
+  Referenzformeln, `na`-Verhalten, Supertrend-Aufwärmspur, fail-closed
+  Perioden.
+* `tests/cti.indicator.test.ts` (35): Konsens-Invarianten über die gesamte
+  Reihe, Persistenz/Sperrfrist, Präfix-Gleichheit (kein Look-ahead),
+  Streaming == Batch, Stops, Eingabeprüfung, Parameter-Klemmung,
+  Dashboard/Alerts.
+* `tests/cti.backtest.test.ts` (19): Vertrag `BacktestSignalBar`, kein
+  Look-ahead, Determinismus (auch Paper-Pfad), Signal ⇒ Trade, Stop- und
+  Umkehr-Ausstiege, Guardrails (`enableShorts`, `maxOpenPositions`,
+  `closeOpposite`), Kostenwirkung, `Equity-Delta == Σ Trade-PnL`.
+* `tests/cti.engine.test.ts` (17): Absichten und ihre Reihenfolge,
+  Port-Ablehnung/-Fehler, Reconciliation, Parität Live ↔ Backtest,
+  IO-Freiheit des Moduls.
+* `tests/backtest.unit.test.ts`: Regression „bucht Leerverkäufe
+  vorzeichenrichtig (Cash-Bewegung == Trade-PnL)".
+
+### Notes
+
+* **Bewusst nicht portiert:** Intrabar-Repainting (der Port arbeitet
+  ausschließlich auf Bar-Schluss) und die reinen Visuals des Skripts.
+  Dashboard-Texte und Alert-Wortlaute sind wortgleich übernommen.
+* **Kein Kursziel:** Das Skript definiert keines; `takeProfit` bleibt `null`,
+  sofern der Aufrufer nicht ausdrücklich `takeProfitRR` setzt.
 
 ## [0.11.1] — `LOCAL_FREE`-Endpunkt durchgesetzt (STX-08-05 / STX-21) (2026-10-03)
 

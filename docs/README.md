@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.11.1` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.12.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -76,6 +76,7 @@ ausführbare Templates folgen in Phase 3.
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data: Modi A/B/C, deterministischer Fill-Simulator, Failover, Replay |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
 | **[BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)** | Multi-Asset Backtest-Engine: synchronisierter Replay-Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0) |
+| **[CLAUDE_TRADING_INDICATOR.md](CLAUDE_TRADING_INDICATOR.md)** | Claude Trading Indicator (CTI): 1:1-Portierung des Pine-Script-v6-Indikators — Zwei-Stufen-Konsens über vier Dimensionen, ein gemeinsamer Rechenkern für Backtest und Live, Signalstrategien in der Backtest-Engine, ATR-Stops, CLI `npm run cti` (v0.12.0) |
 | **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0), Event-Replay mit realistischen Friktionen `event_replay` (RMA-P1-01 v1.58.0), Tabelle „Rule-Timeframe ↔ unterstützte Felder“ (`1m … 5d`, `vwapPct` nur Intraday; STX-01 v0.6.2) |
 | **[FEATURE_STORE.md](FEATURE_STORE.md)** | Point-in-Time Feature Store: Feature-Registry (immutable, versioniert), Wertmodell mit `event_time`/`available_at`/`computed_at`, idempotente Materialisierung mit Cursor, Look-ahead-freie PIT-Abfrage, Offline/Online-Parität, Quality-Propagation, Retention (RMA-P6-01, v1.53.0) |
 | **[FORECASTS.md](FORECASTS.md)** | Forecast-Ledger & Kalibrierung: immutable Forecast-Verträge aus Agenten-Analysen, append-only Auflösungen mit Point-in-Time-Resolver (Cursor, Settling-Frist, VOID-Policy), Brier/Brier-Skill/Log-Loss, Reliability-Bins mit Wilson-Intervallen, ECE, Coverage & Mindeststichprobe, Segment-API, versionierte Re-Resolution statt stiller Mutation (RMA-P3-01, v1.55.0) |
