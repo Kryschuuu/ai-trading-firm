@@ -239,6 +239,43 @@ describe("Backtest Portfolio Manager", () => {
     assert.equal(p.trades.length, 1);
     assert.ok(p.currentCash > 10_000); // Gewinn realisiert
   });
+
+  it("bucht Leerverkäufe vorzeichenrichtig (Cash-Bewegung == Trade-PnL)", () => {
+    // Regression: Vorher wurde ein SHORT wie ein Kauf gebucht (Cash −Notional
+    // beim Öffnen, +Notional beim Schließen). Die Equity-Kurve lief damit
+    // exakt gegenläufig zum geloggten Trade-PnL.
+    const p = new BacktestPortfolio(config);
+    const candle: CandleLike = { time: 1000, open: 100, high: 105, low: 95, close: 100, volume: 100 };
+    const fill = simulateEntry(candle, "SHORT", 1000, config)!;
+    p.openPosition("S1", "BTCUSDT", "SHORT", fill, candle, 1, 110, 90);
+
+    // Die Sicherheit bleibt stehen — nur die Gebühr verlässt das Cash.
+    assert.ok(Math.abs(p.currentCash - (10_000 - fill.fees)) < 1e-9);
+
+    // Mark-to-Market: fallender Kurs ⇒ Gewinn der Leerposition.
+    const equityDown = p.computeCurrentEquity(new Map([["BTCUSDT", 90]]));
+    assert.ok(equityDown > 10_000 - fill.fees, "fallender Kurs muss den Short begünstigen");
+    const equityUp = p.computeCurrentEquity(new Map([["BTCUSDT", 110]]));
+    assert.ok(equityUp < 10_000 - fill.fees, "steigender Kurs muss den Short belasten");
+
+    const cashBefore = p.currentCash;
+    const trade = p.closePosition(
+      "BTCUSDT",
+      { triggered: true, exitPrice: 90, reason: "TAKE_PROFIT" as const, fees: 0.2, slippage: 0 },
+      2000,
+      5,
+    );
+    assert.ok(trade);
+    assert.equal(trade.side, "SHORT");
+    assert.ok(trade.pnl > 0, "Short mit fallendem Kurs muss Gewinn zeigen");
+    assert.ok(
+      // `trade.pnl` ist auf 4 Nachkommastellen gerundet — Toleranz 1e-3.
+      Math.abs(p.currentCash - cashBefore - (trade.pnl + fill.fees)) < 1e-3,
+      "Cash-Bewegung weicht vom realisierten PnL ab",
+    );
+    // Eigenkapital nach dem Schließen = Start + PnL (keine Position mehr).
+    assert.ok(Math.abs(p.computeCurrentEquity(new Map()) - (10_000 + trade.pnl)) < 1e-3);
+  });
 });
 
 describe("Backtest Metrics Computation", () => {

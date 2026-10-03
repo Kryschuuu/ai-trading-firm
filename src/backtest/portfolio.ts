@@ -81,7 +81,7 @@ export class BacktestPortfolio {
    * Berechnet das aktuelle Mark-to-Market-Eigenkapital anhand aktueller Kurse.
    */
   computeCurrentEquity(currentPrices: Map<string, number>): number {
-    let openNotional = 0;
+    let openValue = 0;
     let unrealized = 0;
 
     for (const pos of this.positions.values()) {
@@ -93,10 +93,15 @@ export class BacktestPortfolio {
 
       pos.unrealizedPnl = Number(posPnl.toFixed(4));
       unrealized += pos.unrealizedPnl;
-      openNotional += pos.qty * price;
+      // LONG: Der Kaufpreis hat das Cash verlassen, die Ware steht zum
+      // Marktwert im Depot. SHORT: Das Cash ist als Sicherheit stehen
+      // geblieben (siehe `openPosition`) — bewertet wird nur der Gewinn
+      // bzw. Verlust der Leerposition. Beides zusammen mit `cash` ergibt
+      // dasselbe Eigenkapital, das `closePosition` später realisiert.
+      openValue += pos.side === "LONG" ? pos.qty * price : pos.unrealizedPnl;
     }
 
-    const equity = this.cash + openNotional;
+    const equity = this.cash + openValue;
     return Number(equity.toFixed(4));
   }
 
@@ -169,8 +174,13 @@ export class BacktestPortfolio {
     const id = `POS-${this.posSeq++}`;
     const notional = fill.qty * fill.fillPrice;
 
-    // Cash abziehen (Kaufpreis + Gebühren)
-    this.cash -= notional + fill.fees;
+    // Cash abziehen: LONG bezahlt die Ware, SHORT nicht — der Leerverkaufs-
+    // erlös ersetzt keine Ware, das Kapital bleibt als Sicherheit stehen und
+    // wird über `unrealizedPnl` bewertet. Gebühren fallen in beiden Fällen an.
+    // (Vorher wurde auch der Short wie ein Kauf gebucht ⇒ Equity-Kurve und
+    // Trade-PnL liefen bei Leerpositionen mit umgekehrtem Vorzeichen
+    // auseinander.)
+    this.cash -= (side === "LONG" ? notional : 0) + fill.fees;
     this.totalFees += fill.fees;
     this.totalSlippage += fill.slippage;
 
@@ -220,7 +230,8 @@ export class BacktestPortfolio {
       return false;
     }
     const addNotional = fill.qty * fill.fillPrice;
-    this.cash -= addNotional + fill.fees;
+    // Gleiche Kassenlogik wie in `openPosition` (LONG zahlt, SHORT stellt).
+    this.cash -= (pos.side === "LONG" ? addNotional : 0) + fill.fees;
     this.totalFees += fill.fees;
     this.totalSlippage += fill.slippage;
 
@@ -268,7 +279,9 @@ export class BacktestPortfolio {
     const grossPartial =
       pos.side === "LONG" ? qty * (fill.price - pos.entryPrice) : qty * (pos.entryPrice - fill.price);
 
-    this.cash += proceeds - fill.fees;
+    // LONG verkauft die Ware (Erlös), SHORT deckt ein (nur das Ergebnis der
+    // Teilmenge bewegt das Cash — die Sicherheit lag ohnehin schon dort).
+    this.cash += (pos.side === "LONG" ? proceeds : grossPartial) - fill.fees;
     this.totalFees += fill.fees;
     this.totalSlippage += fill.slippage;
 
@@ -363,8 +376,10 @@ export class BacktestPortfolio {
     const tradeFunding = pos.fundingPaid ?? 0;
     const netPnl = grossPnl - totalTradeFees + tradeFunding;
 
-    // Cash gutschreiben (Verkaufserlös minus Ausstiegsgebühren)
-    this.cash += exitNotional - exitEval.fees;
+    // Cash gutschreiben: LONG bekommt den Verkaufserlös, SHORT den
+    // realisierten Gewinn/Verlust (die Sicherheit war nie abgeflossen).
+    // So entspricht die Cash-Bewegung exakt dem geloggten Trade-PnL.
+    this.cash += (pos.side === "LONG" ? exitNotional : grossPnl) - exitEval.fees;
     this.realizedPnl += netPnl;
     this.totalFees += exitEval.fees;
     this.totalSlippage += exitEval.slippage;

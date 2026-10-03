@@ -17,9 +17,12 @@
 import type {
   BacktestEngineConfig,
   BacktestEngineOptions,
+  BacktestOpenPosition,
+  BacktestSignalDecision,
   BacktestStrategyItem,
   MultiAssetBacktestResult,
   MultiAssetCandleMap,
+  TradeExitReason,
 } from "./types";
 import { BacktestPortfolio } from "./portfolio";
 import { calculateSlippageBps, evaluateExit, simulateEntry } from "./simulator";
@@ -199,8 +202,33 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
         })
       : null;
 
+  // CTI-01: Signal-Strategien drehen Positionen (Flip) und brauchen dafür
+  // einen atomaren Close→Open-Schritt. Der Event-Replay-Pfad kennt nur den
+  // Order-Lifecycle mit Teilmengen — ein Flip wäre dort stillschweigend
+  // etwas anderes. Deshalb fail-closed ablehnen statt still abweichen.
+  if (config.executionModel === "event_replay" && input.strategies.some((item) => item.type === "signal")) {
+    throw new Error(
+      "backtest: executionModel \"event_replay\" unterstützt keine Signal-Strategien " +
+        "(Flip-Semantik ist im Order-Lifecycle nicht abgebildet). Nutze \"paper\" oder \"legacy\".",
+    );
+  }
+
   // 3. Strategien kompilieren & vorbereiten
   const compiledRules = input.strategies.map((item, idx) => {
+    if (item.type === "signal") {
+      // CTI-01: zustandsbehaftete Signalquelle (z. B. `src/signals/cti/`).
+      // Sie bekommt JEDE Kerze ihres Symbols — auch im Warmup — damit ihr
+      // interner Zustand identisch zum Live-Pfad entsteht.
+      const strategy = item.signal;
+      const symbol = strategy.symbol;
+      return {
+        type: "signal" as const,
+        id: item.id ?? strategy.id ?? `SIGNAL-${idx + 1}-${symbol}`,
+        symbol,
+        nativeSymbol: symbol.includes(":") ? symbol.split(":")[1] : symbol,
+        strategy,
+      };
+    }
     if (item.type === "rule") {
       const spec = item.spec;
       const compiler = compileRuleSpec(spec);
@@ -325,6 +353,134 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       takeProfit
     );
     stampEntrySignal(opened, atTime, (candlesIndexed.get(symbol) ?? []).slice(0, atBar + 1));
+  };
+
+  // CTI-01: Glattstellen einer Position zum Schlusskurs des aktuellen Bars.
+  // Verwendet exakt dasselbe Kostenmodell wie der Signal-Decay-Ausstieg
+  // (Paper ⇒ Fill-Simulator, Legacy ⇒ Slippage-Rate + Taker-Fee), damit ein
+  // Umkehrsignal nicht billiger abgerechnet wird als jeder andere Exit.
+  // Rückgabe `false` = Fill abgelehnt ⇒ Position bleibt offen (fail-closed).
+  const closeSignalPosition = (
+    pos: BacktestOpenPosition,
+    candle: CandleLike,
+    now: number,
+    atBar: number,
+    reason: TradeExitReason,
+  ): boolean => {
+    if (paper) {
+      const closingSide = pos.side === "LONG" ? "SHORT" : "LONG";
+      const fill = paper.fillExit(pos.symbol, closingSide, pos.qty, candle.close, now, pos.strategyId);
+      if (!fill) return false;
+      portfolio.closePosition(
+        pos.symbol,
+        {
+          triggered: true,
+          exitPrice: fill.fillPrice,
+          reason,
+          fees: fill.fees,
+          slippage: fill.slippageCost,
+        },
+        now,
+        atBar,
+      );
+      return true;
+    }
+    const slipRate = calculateSlippageBps(config) / 10_000;
+    const executionPrice =
+      pos.side === "LONG" ? candle.close * (1 - slipRate) : candle.close * (1 + slipRate);
+    const fees = pos.qty * executionPrice * config.feeModel.takerFee;
+    const slippage = Math.abs(candle.close - executionPrice) * pos.qty;
+    portfolio.closePosition(
+      pos.symbol,
+      {
+        triggered: true,
+        exitPrice: executionPrice,
+        reason,
+        fees: Number(fees.toFixed(4)),
+        slippage: Number(slippage.toFixed(4)),
+      },
+      now,
+      atBar,
+    );
+    return true;
+  };
+
+  // CTI-01: Umsetzung einer Signal-Entscheidung unter den Engine-Guardrails.
+  //   1. SHORT nur mit `enableShorts` (sonst verfällt die Entscheidung).
+  //   2. Gleiche Richtung bereits offen ⇒ kein Nachkauf (keine Pyramide).
+  //   3. Gegenposition offen ⇒ `SIGNAL_EXIT` zum Schluss, danach drehen.
+  //   4. Erst dann greifen Cash-Puffer, `maxOpenPositions` und Sizing.
+  const executeSignalDecision = (args: {
+    strategyId: string;
+    symbol: string;
+    decision: BacktestSignalDecision;
+    candle: CandleLike;
+    candleIndex: number;
+    series: readonly CandleLike[];
+    now: number;
+    atBar: number;
+  }): void => {
+    const { strategyId, symbol, decision, candle, candleIndex, series, now, atBar } = args;
+    // Ein SHORT ohne Short-Freigabe wird zu FLAT herabgestuft, NICHT einfach
+    // verworfen: Der Guardrail darf Risiko nur senken — eine Long-Position
+    // gegen ein Verkaufssignal offen zu lassen, würde es erhöhen.
+    const side = decision.side === "SHORT" && !config.enableShorts ? "FLAT" : decision.side;
+
+    const open = portfolio.getOpenPosition(symbol);
+    if (open) {
+      if (open.side === side) {
+        // Gleiche Richtung: KEIN Nachkauf (die Engine kennt eine Position je
+        // Symbol), aber Stop/Ziel werden auf den neuen Stand gesetzt — ein
+        // erneutes Signal ist eine neue Risikoaussage, kein Rauschen.
+        open.stopLoss = decision.stopLoss;
+        open.takeProfit = decision.takeProfit;
+        return;
+      }
+      if (decision.closeOpposite === false) return;
+      if (!closeSignalPosition(open, candle, now, atBar, "SIGNAL_EXIT")) return;
+    }
+    if (side === "FLAT") return;
+
+    const equity = portfolio.computeCurrentEquity(currentPrices);
+    if (!portfolio.canOpenPosition(symbol, equity).allowed) return;
+
+    const entryPrice = candle.close;
+    const notional = portfolio.calculatePositionSize(
+      equity,
+      entryPrice,
+      decision.stopLoss,
+      vtRiskBudget(decision.riskBudgetPct),
+      decision.maxPositionPct,
+    );
+
+    if (paper) {
+      openPaperEntry(
+        strategyId,
+        symbol,
+        side,
+        notional,
+        candle,
+        now,
+        atBar,
+        decision.stopLoss,
+        decision.takeProfit,
+      );
+      return;
+    }
+    if (notional <= 0) return;
+    const fill = simulateEntry(candle, side, notional, config);
+    if (!fill) return;
+    const opened = portfolio.openPosition(
+      strategyId,
+      symbol,
+      side,
+      fill,
+      candle,
+      atBar,
+      decision.stopLoss,
+      decision.takeProfit,
+    );
+    stampEntrySignal(opened, now, series.slice(0, candleIndex + 1));
   };
 
   // 4. Haupt-Event-Schleife: Schrittweise entlang der synchronisierten Zeitachse
@@ -474,6 +630,27 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
       );
     }
 
+    // b3) CTI-01: Signal-Strategien mit der soeben geschlossenen Kerze
+    //     füttern — JEDE Kerze, auch während des Warmups und unabhängig von
+    //     Guardrails. Nur so baut der Indikator denselben Zustand auf wie im
+    //     Live-Betrieb (EMA-Rekursionen, Streaks, Sperrfristen). Gehandelt
+    //     wird erst in Schritt (c), nach dem Warmup.
+    const signalDecisions = new Map<string, BacktestSignalDecision>();
+    for (const strat of compiledRules) {
+      if (strat.type !== "signal") continue;
+      const candleInfo = currentCandleBySymbol.get(strat.symbol) ?? currentCandleBySymbol.get(strat.nativeSymbol);
+      if (!candleInfo) continue;
+      const decision = strat.strategy.onBar({
+        symbol: strat.symbol,
+        index: candleInfo.index,
+        barStep,
+        time: currentTime,
+        candle: candleInfo.candle,
+        warmup: barStep < config.warmupBars,
+      });
+      if (decision) signalDecisions.set(strat.id, decision);
+    }
+
     // c-vt) RMA-P5-01: Volatility-Targeting-Faktor für diesen Bar-Schritt
     // (einmal je Bar, deterministisch; as-of = currentTime, identisch zur
     // Verfügbarkeitskonvention der Engine: Kerzen mit time ≤ currentTime).
@@ -500,6 +677,28 @@ export function runMultiAssetBacktest(input: MultiAssetBacktestInput): MultiAsse
         if (!candleInfo) continue;
 
         const series = candlesIndexed.get(strat.symbol) ?? candlesIndexed.get(strat.nativeSymbol) ?? [];
+
+        // CTI-01: Signal-Strategien haben ihren eigenen Ablauf (Flip =
+        // Gegenposition schließen, dann drehen) und werden deshalb VOR der
+        // gemeinsamen `canOpenPosition`-Prüfung behandelt — die würde einen
+        // Flip blockieren, weil das Symbol noch eine offene Position hat.
+        // Der Regel-/Setup-Pfad darunter bleibt unverändert.
+        if (strat.type === "signal") {
+          const decision = signalDecisions.get(strat.id);
+          if (!decision) continue;
+          executeSignalDecision({
+            strategyId: strat.id,
+            symbol: strat.symbol,
+            decision,
+            candle: candleInfo.candle,
+            candleIndex: candleInfo.index,
+            series,
+            now: currentTime,
+            atBar: barStep,
+          });
+          continue;
+        }
+
         const subSeries = series.slice(0, candleInfo.index + 1);
         if (subSeries.length < config.warmupBars) continue;
 

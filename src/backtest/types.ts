@@ -383,7 +383,93 @@ export interface BacktestVolatilityTargetingSummary {
 /** Eingabe-Kerzenzuordnung für die Engine: Symbol -> Kerzen. */
 export type MultiAssetCandleMap = Map<string, CandleLike[]> | Record<string, CandleLike[]>;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Signal-Strategien (CTI-01) — zustandsbehaftete Indikatoren im Backtest
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ein Bar, wie ihn die Engine einer Signal-Strategie übergibt.
+ *
+ * Die Strategie bekommt AUSSCHLIESSLICH die soeben geschlossene Kerze —
+ * keine Serie, keinen Index in ein Array mit Zukunft. Damit ist ein
+ * Look-ahead strukturell unmöglich: Woher ein Indikator seine Historie
+ * nimmt, ist seine Sache (eigener Zustand), aber die Zukunft bekommt er
+ * nirgends her.
+ */
+export interface BacktestSignalBar {
+  /** Symbol, wie es in der Kerzen-Map steht. */
+  symbol: string;
+  /** 0-basierter Index innerhalb der Kerzenreihe dieses Symbols. */
+  index: number;
+  /** 1-basierter Schritt der globalen Zeitachse (`barStep` der Engine). */
+  barStep: number;
+  /** Zeitstempel dieses Schritts (= `candle.time`). */
+  time: number;
+  /** Die geschlossene Kerze dieses Symbols zu diesem Zeitstempel. */
+  candle: CandleLike;
+  /** `true`, solange die Engine in der Warmup-Phase ist (`barStep < warmupBars`). */
+  warmup: boolean;
+}
+
+/**
+ * Entscheidung einer Signal-Strategie für GENAU diesen Bar.
+ *
+ * `null` (kein Objekt) heißt „nichts tun". Eine Entscheidung ist immer eine
+ * gewünschte Zielrichtung; die Engine setzt sie unter ihren Guardrails um
+ * (Cash-Puffer, `maxOpenPositions`, Short-Freigabe, Positionsgröße).
+ */
+export interface BacktestSignalDecision {
+  /**
+   * Zielrichtung: `LONG`/`SHORT` = Position in dieser Richtung halten,
+   * `FLAT` = eine offene Position glattstellen und KEINE neue eröffnen
+   * (z. B. ein Verkaufssignal in einem Long-only-Lauf).
+   */
+  side: "LONG" | "SHORT" | "FLAT";
+  /** Absoluter Stop-Preis (nicht Prozent). `null` = kein Stop. */
+  stopLoss: number | null;
+  /** Absoluter Zielpreis. `null` = kein Ziel (z. B. CTI: Pine kennt keines). */
+  takeProfit: number | null;
+  /** Risikobudget dieses Einstiegs (Default: `config.maxRiskPerTrade`). */
+  riskBudgetPct?: number;
+  /** Positionsdeckel dieses Einstiegs (Default: `config.maxPositionPct`). */
+  maxPositionPct?: number;
+  /**
+   * Eine offene GEGENposition zuerst glattstellen (`SIGNAL_EXIT`) und dann
+   * drehen. Default `true` — ein Umkehrsignal, das die alte Position stehen
+   * ließe, wäre kein Umkehrsignal. `false` lässt die bestehende Position
+   * unangetastet und verwirft den Einstieg.
+   *
+   * Hinweis zur GLEICHEN Richtung: Dort wird nie aufgestockt (eine Position
+   * je Symbol). Die Engine übernimmt aber `stopLoss`/`takeProfit` der neuen
+   * Entscheidung — ein erneutes Signal ist eine neue Risikoaussage.
+   */
+  closeOpposite?: boolean;
+}
+
+/**
+ * Zustandsbehaftete Signalquelle (z. B. der Claude Trading Indicator,
+ * `src/signals/cti/`).
+ *
+ * Vertrag:
+ *   1. `onBar` wird für JEDE Kerze des Symbols genau einmal und streng
+ *      chronologisch aufgerufen — auch während des Warmups, damit der
+ *      interne Zustand (EMA-Rekursionen, Streaks, Sperrfristen) identisch
+ *      zum Live-Betrieb aufgebaut wird.
+ *   2. Die Funktion MUSS deterministisch sein: gleiche Bar-Folge ⇒ gleiche
+ *      Entscheidungen. Keine Uhr, kein Zufall, keine IO.
+ *   3. Entscheidungen aus der Warmup-Phase verwirft die Engine (`warmup`
+ *      ist im Bar markiert) — der Zustandsaufbau bleibt davon unberührt.
+ */
+export interface BacktestSignalStrategy {
+  /** Stabile ID für Trade-Log und Per-Strategie-Statistik. */
+  readonly id: string;
+  /** Symbol, das diese Strategie handelt (Schlüssel der Kerzen-Map). */
+  readonly symbol: string;
+  onBar(bar: BacktestSignalBar): BacktestSignalDecision | null;
+}
+
 /** Vereinheitlichter Strategie-Kandidat für die Backtest-Engine. */
 export type BacktestStrategyItem =
   | { type: "rule"; spec: RuleSpec; id?: string }
-  | { type: "setup"; setup: TradeSetupProposal; id?: string };
+  | { type: "setup"; setup: TradeSetupProposal; id?: string }
+  | { type: "signal"; signal: BacktestSignalStrategy; id?: string };

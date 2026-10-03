@@ -78,6 +78,44 @@ Einstiegskurse:
 
 Trifft eine extrem volatile Kerze innerhalb desselben Intervalls sowohl das Stop-Loss- als auch das Take-Profit-Niveau (z. B. $\text{Low} \le \text{SL}$ und $\text{High} \ge \text{TP}$), wird **ausnahmslos und zwingend der STOP-LOSS ausgeführt**. Dies verhindert Schönrechnungen in volatilen Marktphasen.
 
+### 3.4 Kassenführung bei Leerverkäufen (korrigiert in v0.12.0)
+
+Bis v0.11.1 verbuchte `BacktestPortfolio` **jede** Position wie einen Kauf:
+Cash − Notional beim Öffnen, Cash + Notional beim Schließen. Für
+Leerverkäufe lief die Equity-Kurve damit exakt **gegenläufig** zum geloggten
+Trade-PnL (ein gewinnender Short senkte das Eigenkapital). Betroffen waren
+alle Läufe mit `enableShorts: true` — unter anderem die Verifikation im
+Analyse-Zyklus (`src/cycle/steps/backtestStep.ts`).
+
+Seit v0.12.0 gilt:
+
+| Ereignis | LONG | SHORT |
+|---|---|---|
+| Öffnen | `cash −= notional + fees` | `cash −= fees` (Sicherheit bleibt im Cash) |
+| Mark-to-Market | `+ qty × price` | `+ unrealizedPnl` = `qty × (entry − price)` |
+| Schließen | `cash += qty × exit − fees` | `cash += grossPnl − fees` |
+
+Damit entspricht die Cash-Bewegung exakt dem geloggten Trade-PnL, und es
+gilt `endingEquity − startingEquity = Σ trades.pnl`. Long-Läufe sind
+arithmetisch unverändert (Byte-Kompatibilität bestehender Ergebnisse).
+Regressionstest: `tests/backtest.unit.test.ts` („bucht Leerverkäufe
+vorzeichenrichtig").
+
+### 3.5 Signalstrategien (`type: "signal"`, v0.12.0)
+
+Neben `rule` und `setup` akzeptiert die Engine **zustandsbehaftete
+Signalstrategien**: Sie bekommen pro Schritt genau eine geschlossene Kerze
+(`BacktestSignalBar`) und liefern optional eine Entscheidung
+(`BacktestSignalDecision` mit `LONG` / `SHORT` / `FLAT`). Dadurch sind
+richtungswechselnde Indikatoren abbildbar, ohne dass eine Strategie Zugriff
+auf die Kerzenreihe — und damit auf die Zukunft — bekommt.
+
+Regeln: `SHORT` ohne `enableShorts` wird zu `FLAT` herabgestuft (nie eine
+offene Gegenposition), gleiche Richtung schärft Stop/Ziel nach statt
+aufzustocken, Umkehr schließt zuerst (`SIGNAL_EXIT`) und dreht dann;
+`executionModel: "event_replay"` lehnt Signalstrategien ab. Erstanwender:
+[CLAUDE_TRADING_INDICATOR.md](CLAUDE_TRADING_INDICATOR.md).
+
 ---
 
 ## 4. Berechnete Metriken & Kennzahlen

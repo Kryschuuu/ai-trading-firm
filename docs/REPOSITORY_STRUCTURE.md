@@ -65,6 +65,9 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 │   ├── live-gate/             # Harte Freigabeschicht für Live-Pfade (States, Stamps, Audit)
 │   ├── backtest/              # Backtest-Engines (engine, paperExecution, replay, montecarlo,
 │   │                          #   walkforward, tradeLedger, runStore)
+│   ├── signals/               # Eigenständige Signalquellen mit Bar-Zustand: pine.ts
+│   │                          #   (Pine-`ta.*`-Primitiven) und cti/ (Claude Trading
+│   │                          #   Indicator: Rechenkern, Backtest-Adapter, Trading-Engine)
 │   ├── portfolio/             # Portfolio-Engine: Kennzahlen, Kovarianz/Cluster,
 │   │                          #   volatilityTargeting, drawdownScaling (pure Policies)
 │   ├── forecasts/             # Forecast-Ledger: Capture, Resolver, Scoring (Brier/ECE)
