@@ -4,8 +4,21 @@
 - **Severity:** HIGH
 - **Bereich:** Handelslogik / Rule-Engine
 - **Quelle:** Ausbaudokument §1.9, §4.2 (nicht erwähnt)
-- **Status:** FIXED — 01-01, [`v0.6.2`](../../../../CHANGELOG.md) (Audit `v1.1.2`)
+- **Status:** FIXED — bestätigt im Abgleich 2026-10-03 (01-01, [`v0.6.2`](../../../../CHANGELOG.md), Audit `v1.1.2`)
 - **Datei(en):** `src/lib/ruleEngine.ts`, `src/lib/marketdata/historicalStore.ts` (seit `v0.6.2`: `src/lib/marketdata/timeframes.ts`), `src/lib/microExecutor.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/lib/marketdata/timeframes.ts:22-59` — `SUPPORTED_TIMEFRAMES`, `SUPPORTED_TIMEFRAME_MS`, `isSupportedTimeframe` als Heimat des Vokabulars
+- `src/lib/ruleEngine.ts:268` — `export const RULE_ALLOWED_TIMEFRAMES: readonly SupportedTimeframe[] = SUPPORTED_TIMEFRAMES;` (abgeleitet, kein zweites Vokabular); `RuleWindow.timeframe: SupportedTimeframe` (`:109`); LLM-Schema liest dieselbe Liste (`:1011`)
+- `src/lib/microExecutor.ts:215-218` — Guard `SUPPORTED_TIMEFRAME_MS[timeframe] > SUPPORTED_TIMEFRAME_MS[executionInterval]`; Default `1h` (`:1302`), sichtbar über `status().ruleGuard` (`:1237`)
+- Tests im Paket `adrVocabulary`, `strategies.templates`, `strategies.compiler.security`, `strategies.catalog` ausgeführt: **195 Tests, 0 Fehler**
 
 ## Beschreibung
 

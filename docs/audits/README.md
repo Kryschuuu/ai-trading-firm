@@ -50,21 +50,25 @@ docs/audits/
     ├── findings/
     ├── prompts/
     └── remediation/TRACKING.md
-└── 2026-09-29-strategy-template-ausbau/  # OPEN v1.1.16
+└── 2026-09-29-strategy-template-ausbau/  # OPEN v1.2.0
     ├── README.md
     ├── report.md          # Haupt-Audit (7 Abschnitte + Beta-Positionierung)
     ├── VERSIONING.md      # Audit-Version + Release-Plan v0.6.0 … v0.11.2
-    ├── ROADMAP.md         # 8 Phasen, Gates G0–G8
-    ├── findings/          # STX-01 … STX-19 (je eine Datei)
-    ├── prompts/           # 32 kopierfertige Prompts (00-01 … 07-03)
-    └── remediation/TRACKING.md
+    ├── ROADMAP.md         # 8 Phasen + Phase 8 (Folge-Prompts), Gates G0–G8
+    ├── findings/          # STX-01 … STX-21 (je eine Datei)
+    ├── prompts/           # 37 kopierfertige Prompts (00-01 … 07-03, 08-01 … 08-05)
+    └── remediation/
+        ├── TRACKING.md            # Status-Wahrheit (Findings + Prompts + Gates)
+        ├── RECONCILE-2026-10-03.md # Vollabgleich Findings ↔ Code-Stand
+        ├── BENCH-BASELINE.md      # Messprotokoll 00-01
+        └── SCREENING-PILOT.md     # Pilot-Runbook Gate G6
 ```
 
 ## Aktive und jüngste Auditzyklen
 
 | Zyklus | Scope | Status |
 |---|---|---|
-| [2026-09-29-strategy-template-ausbau](2026-09-29-strategy-template-ausbau/README.md) | Strategie-Templates, Candidate Matrix, Validator-Agent, Copy-Trading — externes Ausbaudokument gegen `main` @ `e3509fd` verifiziert (23 geprüfte Behauptungen) | **OPEN (Audit v1.1.14, Phasen 0–3 abgeschlossen — Gates G0…G3 erfüllt, STX-01/05 behoben; Phase 4 begonnen: Schema 04-01 `v0.8.0`, Service 04-02 gemergt, optionaler Slice 02-04 offen):** 19 Findings (0 CRITICAL, 5 HIGH, 7 MEDIUM, 4 LOW, 3 INFO) + **32 Prompts in 8 Phasen**; Release-Plan `v0.6.0` … `v0.11.2`, **alle Beta**. [Bericht](2026-09-29-strategy-template-ausbau/report.md), [ROADMAP](2026-09-29-strategy-template-ausbau/ROADMAP.md), [VERSIONING](2026-09-29-strategy-template-ausbau/VERSIONING.md), [Tracking](2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [ADR-008…010](../roadmap/DECISIONS.md). **Bleibt Beta** — [BETA_STATUS.md](../BETA_STATUS.md) |
+| [2026-09-29-strategy-template-ausbau](2026-09-29-strategy-template-ausbau/README.md) | Strategie-Templates, Candidate Matrix, Validator-Agent, Copy-Trading — externes Ausbaudokument gegen `main` @ `e3509fd` verifiziert (23 geprüfte Behauptungen) | **OPEN (Audit v1.2.0 — Vollabgleich 2026-10-03 gegen `main` @ `3d13161`, [Abgleich-Bericht](2026-09-29-strategy-template-ausbau/remediation/RECONCILE-2026-10-03.md)): Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt, Gates G0…G5 und G7/G8 erfüllt (G6 Pilotlauf offen):** **21 Findings** (0 CRITICAL, 5 HIGH, 7 MEDIUM, 6 LOW, 3 INFO) — 16 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14), 3 offen (STX-08, STX-20, STX-21); **Phase 8** ergänzt 5 Folge-Prompts. [Bericht](2026-09-29-strategy-template-ausbau/report.md), [ROADMAP](2026-09-29-strategy-template-ausbau/ROADMAP.md), [VERSIONING](2026-09-29-strategy-template-ausbau/VERSIONING.md), [Tracking](2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [ADR-008…010](../roadmap/DECISIONS.md). **Bleibt Beta** — [BETA_STATUS.md](../BETA_STATUS.md) |
 | [2026-09-24-bookdepth-venue-quality](2026-09-24-bookdepth-venue-quality/README.md) | `bookDepthUsd` als Regelfeld + Orderbuch-Qualitätsgrenze je Venue (IAD-T-06, Fortsetzung von `spreadPct`) | **UMGESETZT v0.4.0:** [Tracking](2026-09-24-bookdepth-venue-quality/remediation/TRACKING.md) |
 | [2026-09-24-paper-n100-cost-spread](2026-09-24-paper-n100-cost-spread/README.md) | Paper n≥100, Kostenmodell feine Takte, 6 rote Tests, spreadPct | **UMGESETZT v0.3.0:** [Tracking](2026-09-24-paper-n100-cost-spread/remediation/TRACKING.md) |
 | [2026-09-24-internal-adapter-daytrading](2026-09-24-internal-adapter-daytrading/README.md) | Datenadapter (Yahoo/Polygon/FRED), Parallelität der Agenten, Daytrading-Fähigkeit — Prüfung eines Werk-Auftrags gegen `v0.2.0` | **UMGESETZT (Teilmenge):** Prompt-Budget/Batching + `vwapPct` + `1m` gebaut, Adapter abgelehnt; [Tracking](2026-09-24-internal-adapter-daytrading/remediation/TRACKING.md) |

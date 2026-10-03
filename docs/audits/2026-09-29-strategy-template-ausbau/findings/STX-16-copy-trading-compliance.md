@@ -4,8 +4,22 @@
 - **Severity:** LOW (organisatorisch hoch)
 - **Bereich:** Organisation / Produkt
 - **Quelle:** Ausbaudokument §2 (kein Abschnitt dazu)
-- **Status:** OPEN
+- **Status:** FIXED — Abgleich 2026-10-03: Phase 7 ausschließlich `SIMULATE_ONLY` umgesetzt (07-01 `b0bfcce`, 07-02 `f5af325`, 07-03 `5f437d8`)
 - **Datei(en):** `README.md`, `package.json` (`description`)
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — von `OPEN` hochgestuft (technische Kriterien; rechtliche Prüfung bleibt außerhalb des Repos)
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/copy/types.ts:32` — `export type CopyMode = "SIMULATE_ONLY";`; `:39` — `export const COPY_MODES: readonly CopyMode[] = ["SIMULATE_ONLY"];` (Enum mit **einem** Wert, keine Konstante)
+- Datenbankebene: `drizzle/2026-10-03_copy_subscriptions.sql:39` — `CHECK (mode = 'SIMULATE_ONLY')`, zusätzlich `enabled=false` als Default
+- Kein Live-Follower-Pfad: `src/copy/follower/simulated.ts:14` („keinen `BrokerAdapter`, keinen Venue-Order-Pfad"), Füllung ausschließlich über `PaperBroker.submit()`/`close()` (`:360`)
+- Test `tests/copy.engine.test.ts` ausgeführt: **20 Tests, 0 Fehler** — enthält die Baseline-Reihenfolge, Heartbeat-Pause, Doppelzustellung und `HALTED`-Blockade
+- **Offen bleibt** [OP-4](../remediation/TRACKING.md#offene-punkte-für-den-reviewer): die rechtliche Prüfung für einen möglichen späteren Live-Betrieb liegt außerhalb dieses Repos
 
 ## Beschreibung
 

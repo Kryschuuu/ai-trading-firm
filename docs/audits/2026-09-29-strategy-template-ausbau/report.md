@@ -471,7 +471,17 @@ sicherheitskritisch (STX-05) und bekommt damit einen eigenen Rollback-Punkt;
 
 - [`README.md`](README.md) — Audit-Index, Findings-Übersicht
 - [`VERSIONING.md`](VERSIONING.md) — Audit-Version, Release-Plan, Bruchstellen
-- [`ROADMAP.md`](ROADMAP.md) — 8 Phasen, Gates, Abhängigkeitsgraph
-- [`prompts/`](prompts/) — 32 kopierfertige Prompts
+- [`ROADMAP.md`](ROADMAP.md) — 8 Phasen + Phase 8 (Folge-Prompts), Gates, Abhängigkeitsgraph
+- [`prompts/`](prompts/) — 37 kopierfertige Prompts (00-01 … 07-03, 08-01 … 08-05)
 - [`remediation/TRACKING.md`](remediation/TRACKING.md) — Status, Gates, offene Punkte
+- [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md) — **Vollabgleich
+  aller Findings gegen den Code-Stand** `main` @ `3d13161`, mit Belegen je Finding
 - [`../../BETA_STATUS.md`](../../BETA_STATUS.md) — Beta-Zusage, Kriterien `B1…B8`
+
+> **Hinweis zum Status (2026-10-03):** Dieser Bericht ist die **Originalaufnahme** vom
+> 2026-09-29 gegen `main` @ `e3509fd` und bleibt als solche unverändert. Der
+> **verbindliche Ist-Stand** steht in [`remediation/TRACKING.md`](remediation/TRACKING.md)
+> (Status-Wahrheit) und ist im
+> [Abgleich-Bericht](remediation/RECONCILE-2026-10-03.md) mit Dateipfaden, Commits und
+> Tests belegt. Abweichungen zwischen beiden sind damit auflösbar, ohne diesen Bericht
+> rückwirkend umzuschreiben.

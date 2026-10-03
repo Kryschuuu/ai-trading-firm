@@ -4,8 +4,20 @@
 - **Severity:** MEDIUM
 - **Bereich:** Backtest / Validierung
 - **Quelle:** Ausbaudokument §3.5
-- **Status:** FIXED — STX-06-03 (2026-10-02, `v0.10.2`) — angedockt in `src/strategies/validator/stress.ts` (`COST_STRESS_SCENARIOS`, `runInEngineStress`, `summarizeStressSweep`, `runPostHocStress`, `buildStressReport`); Tests in `tests/strategyValidation.stress.test.ts` (22 Tests), Doku in [`docs/STRATEGY_VALIDATION.md`](../../../STRATEGY_VALIDATION.md) Teil 3 + [`STRATEGY_STACK.md`](../../../architecture/STRATEGY_STACK.md) §1.9
+- **Status:** FIXED — bestätigt im Abgleich 2026-10-03 (06-03, `v0.10.2`, `a34744b`)
 - **Datei(en):** `src/backtest/montecarlo.ts`, `src/scanner/factors/executionCost.ts`, `src/strategies/validator/stress.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/strategies/validator/stress.ts:95` — `COST_STRESS_SCENARIOS` (`base`/`double`/`triple`); `:130` — `DEFAULT_MAX_STRESS_RUNS = 45`
+- Zwei getrennte Schichten: `runInEngineStress`/`summarizeStressSweep` (in-engine) und `runPostHocStress` (Durchreiche an `runMonteCarloSimulation`) — kein drittes Kostenmodell
+- Tests `tests/strategyValidation.stress.test.ts` ausgeführt: **grün**
 
 ## Beschreibung
 

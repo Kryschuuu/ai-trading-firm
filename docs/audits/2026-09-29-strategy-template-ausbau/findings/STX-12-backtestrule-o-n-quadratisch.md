@@ -4,8 +4,22 @@
 - **Severity:** MEDIUM
 - **Bereich:** Performance
 - **Quelle:** Ausbaudokument §4.9 (nicht erkannt)
-- **Status:** IN ARBEIT — Messung abgeschlossen (00-01, `v0.6.0`), Code bewusst unverändert
+- **Status:** PARTIAL — Abgleich 2026-10-03: Messung (00-01) und Screening-Umweg (05-04) vorhanden; `backtestRule()` selbst bleibt O(n²)
 - **Datei(en):** `src/lib/ruleEngine.ts:729-800`, `src/backtest/indicatorCache.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `◐` **PARTIAL** — Messung und Umweg belegt, Code-Fix offen
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- **Weiter quadratisch:** `src/lib/ruleEngine.ts:894` — `buildSnapshotFromCandles(spec.symbol, candles.slice(0, i + 1), …)`; `grep -n "indicatorCache\|snapshotFromCache\|buildIndicatorCache" src/lib/ruleEngine.ts` → **0 Treffer**
+- **Umweg belegt:** `src/screening/backtestAdapter.ts:54` importiert `runMultiAssetBacktest` aus `@/backtest/engine`; `SCREENING_BACKTEST_PATH = "multiAsset"`, Begründung mit Messzahlen im Modulkopf (`backtestAdapter.ts:16-20`, `runner.ts:22-25`)
+- **Altpfad lebt weiter:** `src/lib/ruleBacktest.ts:385` ruft `backtestRule()`; darüber liegt `src/app/api/firm/rules/[id]/backtest/route.ts`
+- Messung unverändert gültig: [`../remediation/BENCH-BASELINE.md`](../remediation/BENCH-BASELINE.md) — Exponent 1,99 vs. 1,01, Faktor 121,7×
+- Folge-Prompt mit Paritätsnachweis: [08-04](../prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md)
 
 ## Beschreibung
 

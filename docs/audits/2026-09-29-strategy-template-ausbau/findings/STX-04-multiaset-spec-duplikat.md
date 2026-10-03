@@ -4,8 +4,20 @@
 - **Severity:** HIGH
 - **Bereich:** Architektur / Domänenmodell
 - **Quelle:** Ausbaudokument §1.9
-- **Status:** FIXED — durch Entscheidung ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), 00-03, `v0.6.1`); die Sizing-Schicht liegt bewusst außerhalb der Roadmap
+- **Status:** FIXED — bestätigt im Abgleich 2026-10-03 ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), `v0.6.1`)
 - **Datei(en):** `src/crossSectional/types.ts`, `src/portfolio/volatilityTargeting.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `grep -rn "MultiAssetStrategySpec" src/ tests/ scripts/` → **kein** Vorkommen in Produktivcode; einzige Treffer sind der Wächter selbst
+- Wächter `tests/adrVocabulary.test.ts:410-412` — „keine `MultiAssetStrategySpec` in `src/` und `scripts/` (verworfen)", ausgeführt und grün
+- `PortfolioConstruction` bleibt bewusst außerhalb dieser Roadmap (ADR-010)
 
 ## Beschreibung
 

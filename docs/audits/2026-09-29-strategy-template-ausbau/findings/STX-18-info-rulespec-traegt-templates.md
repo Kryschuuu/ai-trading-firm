@@ -4,7 +4,20 @@
 - **Severity:** INFO
 - **Bereich:** Handelslogik
 - **Quelle:** Ausbaudokument §1.3–1.8
-- **Status:** GEKLÄRT / ABGESCHLOSSEN (2026-10-01) — FELDSEITE GEKLÄRT (2026-09-30): Bollinger-Regelfelder 02-02 (`v0.6.4`), Donchian-Regelfeld 02-03 (`v0.6.5`); ALLE 6 TEMPLATES GEBAUT: 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`); COMPILER-ABNAHME ERBRACHT: 03-09 (`v0.7.5`) kompiliert alle sechs über `buildRule` → `sanitizeRuleSpec` ohne Klemmung; VERTRAGSTESTS 03-10 (`v0.7.6`): `tests/strategies.templates.test.ts` sichert alle sechs über alle unterstützten Takte ab (Phase-3-Gate G3)
+- **Status:** VERIFIED — Abgleich 2026-10-03: alle sechs Templates gebaut, kompiliert und vertraglich abgesichert (03-01…03-10)
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **VERIFIED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- Sechs Templates in `src/strategies/templates/`: `ema-adx-trend`, `macd-momentum`, `rsi-mean-reversion`, `bollinger-squeeze`, `vwap-pullback`, `donchian-breakout`
+- Generierte Doku `docs/STRATEGY_TEMPLATES.md:21-28` — Übersicht mit Klasse, Timeframes, erwarteten Regimes, Versions- und Parameterzahl
+- Vertragstests `tests/strategies.templates.test.ts` ausgeführt: **grün** (im Paket 195 Tests, 0 Fehler)
+- **„Nicht bestätigt" bleibt gültig:** `RECLAIM`/`CROSS` als `RuleTrigger` sind kein `RULE_FIELDS`-Patch — der Evaluator ist zustandslos; eigener Audit
 
 ## Befund
 
