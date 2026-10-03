@@ -3,6 +3,17 @@
 > Grundlage: [`report.md`](report.md) · Findings: [`findings/`](findings/) ·
 > Versionierung: [`VERSIONING.md`](VERSIONING.md) ·
 > Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
+>
+> **Abgleich 2026-10-03** (Audit `v1.2.0`): alle 19 Ursprungs-Findings plus 2 neue
+> gegen `main` @ `3d13161` verifiziert —
+> [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md).
+> Ergebnis: **21 Findings** — 16 verifiziert umgesetzt, 2 teilweise
+> ([STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md),
+> [STX-14](findings/STX-14-changepct24h-semantik.md)), 3 offen
+> ([STX-08](findings/STX-08-alpaca-ohne-websocket.md),
+> [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md),
+> [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Alle 32 Ursprungs-Prompts
+> sind umgesetzt.** Die verbleibenden Restpunkte sind als **Phase 8** unten ausgeschrieben.
 
 ## ⚠️ Diese Roadmap beendet die Beta-Phase nicht
 
@@ -367,6 +378,46 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 ---
 
+## Phase 8 — Folge-Prompts aus dem Abgleich 2026-10-03
+
+> **Herkunft:** der Vollabgleich [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
+> hat 21 Findings gegen `main` @ `3d13161` verifiziert. Die 32 Ursprungs-Prompts sind
+> umgesetzt; was **wirklich** offen bleibt, sind die fünf Punkte unten. Jeder ist ein
+> eigenständiger, abgegrenzter Auftrag mit Ziel, betroffenen Dateien, Randbedingungen,
+> Abnahmekriterien und Tests — ohne Rückfragen ausführbar.
+>
+> **Reihenfolge-Empfehlung:** 08-01 → 08-02 → 08-03 → 08-05 → 08-04.
+> Die vier kleinen zuerst (je ein Patch-Release, voneinander unabhängig), das
+> hochriskante Paket 08-04 zuletzt und allein.
+
+| # | Prompt | Finding | Risiko | Ergebnis | Hängt ab von |
+|---|---|---|---|---|---|
+| 08-01 | [Changelog-Nachtrag Copy-Engine](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | minimal (Doku) | ⏳ offen | — |
+| 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ⏳ offen | — |
+| 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ⏳ offen | — |
+| 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
+| 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ⏳ offen | 00-01 (Messung), 02-02/02-03 (Paritätsmuster) |
+
+**Warum diese fünf und in dieser Reihenfolge:**
+
+- **08-01 zuerst**, weil er nichts kaputtmachen kann und eine echte Lücke schließt:
+  `npm run copy:paper` und die Migration `2026-10-04_copy_engine_gates.sql` sind in
+  `main`, stehen aber in keinem Changelog-Eintrag.
+- **08-02 und 08-03** räumen zwei der drei dokumentierten Code-Altlasten (OP-6) ab —
+  beides kleine, isolierte Änderungen mit sofortigem Nutzen (ADR-Log im Browser lesbar;
+  eine neue Klasse braucht künftig nur noch ein ADR).
+- **08-05** schließt die Lücke zwischen dem **Namen** `LOCAL_FREE` und seiner
+  **Garantie**. Unabhängig von allem anderen, kleiner Testaufwand.
+- **08-04 zuletzt und allein**, weil er als einziger Handelslogik anfasst und
+  Byte-Identität verlangt. Er hat den größten messbaren Nutzen (121,7×) und das
+  größte Regressionsrisiko — beides Gründe, ihn nicht mit Kleinkram zu mischen.
+
+**Abhängigkeiten:** 08-01…08-03 und 08-05 haben **keine** untereinander. 08-04
+braucht die Messmethode aus 00-01 und das Paritätsmuster aus 02-02/02-03 — beides
+vorhanden. Kein Prompt dieser Phase blockiert einen anderen.
+
+---
+
 ## Reihenfolge- und Abhängigkeitsübersicht
 
 ```
@@ -383,6 +434,10 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
                                                                          06-05 ✅
 00-02 ✅ ──▶ 07-01 ✅ ──▶ 07-02 ✅ ──▶ 07-03 ✅      (vollständig unabhängig, Gate G8 erfüllt)
 02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
+
+Phase 8 (Abgleich 2026-10-03, alle voneinander unabhängig):
+  08-01 ⏳ (STX-20 Doku)   08-02 ⏳ (Altlast 3)   08-03 ⏳ (STX-02-Rest)
+  08-05 ⏳ (STX-21)        08-04 ⏳ (STX-12)  ← zuletzt und allein (Handelslogik)
 ```
 
 **Kritischer Pfad:** `00-03 → 01-01 → 03-01 → 03-02 → 03-09 → 04-01 → 04-02 → 05-… → 06-04`
@@ -407,3 +462,27 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 | Copy-Reconciler | ❌ | STX-09 — `executionQuality` erweitern |
 | Live-Copy | ❌ | STX-16 |
 | Neues Kosten-/Stressmodell | ❌ | STX-11 — vorhandene Semantik nutzen |
+
+---
+
+## Zurückgestellt — warum jetzt nicht sinnvoll
+
+Nicht alles Offene ist auch **jetzt** sinnvoll. Die folgenden Punkte sind bewusst
+nicht als Phase-8-Prompt ausgeschrieben, mit dem jeweiligen Blocker:
+
+| Punkt | Status | Warum jetzt nicht |
+|---|---|---|
+| **Alpaca-WebSocket** ([STX-08](findings/STX-08-alpaca-ohne-websocket.md)) | offen | Der Adapter ist REST-only (0 WS-Treffer in `src/brokers/alpaca/`). Ein Leader-Adapter bräuchte einen eigenen WS-Client mit Reconnect, Heartbeat und Backfill — das ist ein **eigener Adapter-Audit**, kein Anhängsel. Phase 7 ist über Bitunix abgeschlossen und braucht Alpaca nicht. |
+| **`changePctBars` + Deprekation von `changePct24h`** ([STX-14](findings/STX-14-changepct24h-semantik.md)) | teilweise | Die Semantik-Prüfung `CHANGE_PCT_SEMANTICS` ist da (`v0.10.0`); die 97-Perioden-Rechnung bleibt unverändert. Ein **neues** `RULE_FIELDS`-Feld ist ein Versionsereignis mit Migrationsimplikationen für bestehende `trade_rules` — und aktuell nutzt **kein** Template `changePct24h`. Ohne Konsumenten ist der Nutzen null, das Risiko positiv. |
+| **`VolatilityRegime`-Konsolidierung** (Altlast 2, OP-6) | dokumentiert | Drei gleichnamige Typen in `adaptiveRisk.ts`, `portfolio/types.ts`, `scanner/types.ts`. Kein Laufzeitfehler, Nutzen rein kosmetisch — aber die Berührungsfläche (drei Domänen, öffentliche Typen) ist größer als bei Altlast 1 und 3. Erst nach 08-03, und nur mit vollständiger Testabdeckung. |
+| **Screening-Pilot, Gate G6** | ausstehend | Verlangt 50 echte Zellen gegen echte Marktdaten **und** PostgreSQL. In einer Abgleich-Umgebung nicht ausführbar; das Ergebnis wäre eine Zahl ohne Aussage. Runbook liegt vor: [`remediation/SCREENING-PILOT.md`](remediation/SCREENING-PILOT.md). |
+| **`strategy_lifecycle_states.strategy_version_id`** (FK) | gesperrt | In 04-01 **ausdrücklich** ausgeschlossen („wegen des expliziten Locks auf `strategy_lifecycle_*` … eine erneute Prüfung erfordert einen separat abgestimmten Scope"). Ohne diese Scope-Abstimmung kein Prompt. |
+| **`PortfolioConstruction`-Schicht** ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) | außerhalb | Die einzige echte Lücke aus STX-04 (Universe-Gewichte, `INVERSE_VOLATILITY`). ADR-010 fixiert die Form, erklärt sie aber ausdrücklich **nicht** zum Teil dieser Roadmap. |
+| **Feature-Store-Ausbau auf alle `RULE_FIELDS`** | kein Befund | STX-10 ist mit `rule.*@1` (drei Felder) geschlossen. Eine Ausweitung auf 22 Felder verdoppelt die Paritätsfläche ohne aktuellen Engpass — das ist eine Kapazitätsfrage, kein Audit-Finding. |
+| **`worker_threads`-Parallelisierung** | nach 08-04 | Parallelisierung auf einem O(n²)-Pfad vervielfacht nur den Speicher. Erst 08-04, dann messen, dann ggf. eigener Prompt. |
+| **Parquet/DuckDB** | Phase 3 | 00-01 hat gezeigt: Store + Cache tragen die Matrix. Kein Bedarf belegt. |
+
+**Faustregel dieser Roadmap:** Ein Punkt wird erst dann ein Prompt, wenn (a) der
+Nutzen benennbar ist, (b) die Abgrenzung ohne Rückfragen klar ist und (c) kein
+Blocker aus einer früheren Entscheidung dagegensteht. Alles andere bleibt hier
+stehen — sichtbar, aber nicht als Auftrag getarnt.
