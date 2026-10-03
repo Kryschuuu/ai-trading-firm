@@ -457,6 +457,21 @@ Durchsetzung (vierfach, damit „aus" wirklich „aus" bedeutet):
 Freigegeben wird z. B. OpenCode Zen (Cloud, Free-Modelle) — Details in
 [PROVIDER_INTEGRATION.md](PROVIDER_INTEGRATION.md) §4a/§4b.
 
+**Zusätzlich zum Schalter — Endpunkt-Prüfung im Validator-Agenten (STX-21,
+`v0.11.1`):** Die Policy `LOCAL_FREE` des erklärenden Validator-Agenten
+(`VALIDATOR_AGENT_ROUTING_POLICY`) verlässt sich nicht auf den Provider-Namen,
+sondern prüft den **effektiven** Basis-URL: `LLM_BASE_URL` überschreibt für
+`openai` den Default `http://127.0.0.1:8080/v1`, `OLLAMA_BASE_URL` analog für
+`ollama`. Ist der Endpunkt nicht lokal (Loopback `127.0.0.0/8`, `::1`,
+`localhost`/`*.localhost`, öffentlich nicht auflösbare `.test`/`.invalid`),
+fällt der Provider aus der Kandidatenliste; sichtbar wird das über
+`validator_agent_provider_excluded_total{policy,provider}` — geschlossene
+Labels, keine URL. Ein Provider-Schalter (`ROUTING_DISABLED_PROVIDERS`,
+Runtime-Flag) bleibt davon unabhängig wirksam — gesperrt bleibt gesperrt. Für
+den Rest des Systems (Router, Agenten) gilt diese Endpunkt-Prüfung **nicht**;
+dort entscheidet weiterhin die Routing-Policy und die Budget-/Toggle-Logik.
+Siehe [STRATEGY_VALIDATION.md](STRATEGY_VALIDATION.md) §31.
+
 ## 13. Konfiguration
 
 | Variable | Default | Bedeutung |

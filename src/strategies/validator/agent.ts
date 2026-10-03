@@ -5,12 +5,40 @@
  * deterministischen Report, baut daraus eine feste Aggregat-Projektion und
  * gibt ausschließlich eine validierte Interpretation zurück. Sie enthält
  * keinen Evidence-Writer und keinen Lifecycle-Zugriff.
+ *
+ * ── Was `LOCAL_FREE` garantiert (STX-21 / STX-08-05) ────────────────────────
+ * Die Policy `LOCAL_FREE` (Default) sendet den Report ausschließlich an
+ * Provider, deren **effektiver** Basis-URL lokal ist. Als lokal zählt die
+ * literale Host-Prüfung aus `@/routing/localEndpoint`: Loopback
+ * (`127.0.0.0/8`, `::1`), `localhost`/`*.localhost` sowie die öffentlich nicht
+ * auflösbaren Namensräume `.test`/`.invalid` (RFC 6761). Kein DNS-Lookup.
+ *
+ * Der Endpunkt ist dabei **nicht** der Provider-Name, sondern der Wert, den der
+ * Client tatsächlich anspricht: `LLM_BASE_URL` überschreibt für `openai` den
+ * Default `http://127.0.0.1:8080/v1`, `OLLAMA_BASE_URL` analog für `ollama`
+ * (`DEFAULT_BASE_URLS` in `@/lib/llmProvider`; dort sind Defaults, Env-Namen
+ * und Provider-Liste unverändert). Zeigt ein solcher Override auf eine
+ * Cloud-URL, fällt der Provider aus der Kandidatenliste —
+ * `validator_agent_provider_excluded_total{policy,provider}` zählt den
+ * Ausschluss mit geschlossenen Labels, es gibt keinen stillen Wechsel und
+ * keinen Ersatz durch einen Cloud-Provider. Ist die Liste danach leer,
+ * antwortet der Agent weiterhin `{ unavailable: true }` (niemals `result`,
+ * `gates[]`, `assumptions` oder den deterministischen Report verändern).
+ *
+ * `OPENCODE_FREE` bleibt davon unberührt der ausdrückliche Cloud-Opt-in: Die
+ * Karte `opencode` wird (mit `OPENCODE_API_KEY`) best-effort zuerst versucht;
+ * die lokalen Fallbacks (`ollama`, `openai`) unterliegen derselben
+ * Endpunkt-Prüfung, damit auch der Rückfallpfad keine Cloud-URL anspricht.
+ * Es gibt weiterhin **keine** Zusage für ein bestimmtes Free-Modell oder
+ * dessen dauerhafte Verfügbarkeit (STX-13).
  */
 import { buildProviderDescriptor } from "@/routing/registry";
 import { filterEnabledProviders } from "@/routing/providerToggles";
+import { isLocalEndpointBaseUrl } from "@/routing/localEndpoint";
 import { telemetry } from "@/lib/telemetry";
 import {
   chatLlm,
+  providerConfigFromEnv,
   type LlmChatRequest,
   type LlmProviderName,
 } from "@/lib/llmProvider";
@@ -52,6 +80,9 @@ const VALIDATION_RESULT_WORDS = /\b(?:PASS|FAIL|INCONCLUSIVE)\b/i;
 
 /** Geschlossene Ergebnislabels; Freitext gelangt nie in diesen Counter. */
 type ValidatorAgentRunResult = "ok" | "unavailable" | "schema_error" | "blocked";
+
+/** Geschlossene Policy-Labels; ein unbekannter Wert fällt auf `LOCAL_FREE` zurück. */
+export type ValidatorAgentRoutingPolicy = "LOCAL_FREE" | "OPENCODE_FREE";
 
 export interface ValidatorAgentConfig {
   readonly shadowMode: boolean;
@@ -420,14 +451,41 @@ function injectionBlocked(sourceRef: string): AgentInterpretationResult {
   });
 }
 
+/** Unbekannte/typo-Policies laufen weiterhin lokal — nie in einen Cloud-Pfad. */
+function normalizedRoutingPolicy(config: ValidatorAgentConfig): ValidatorAgentRoutingPolicy {
+  return config.routingPolicy === "OPENCODE_FREE" ? "OPENCODE_FREE" : "LOCAL_FREE";
+}
+
+/**
+ * Endpunkt-Garantie der lokalen Kandidaten (STX-21).
+ *
+ * `opencode` ist der ausdrückliche Cloud-Opt-in von `OPENCODE_FREE` und wird
+ * hier nicht geprüft. Jeder andere Kandidat behauptet, lokal zu sein — geprüft
+ * wird der **effektive** Basis-URL (Env-Override oder Default), nicht der
+ * Provider-Name. Ein nicht-lokaler Endpunkt fällt sichtbar heraus: Zähler mit
+ * geschlossenen Labels, niemals eine URL oder ein Modellname.
+ */
+function isLocalProviderEndpoint(
+  provider: LlmProviderName,
+  env: Record<string, string | undefined>,
+): boolean {
+  return isLocalEndpointBaseUrl(providerConfigFromEnv(provider, env).baseUrl);
+}
+
 function allowedProviderOrder(
   config: ValidatorAgentConfig,
   env: Record<string, string | undefined>,
 ): LlmProviderName[] {
-  const candidates = config.routingPolicy === "OPENCODE_FREE"
+  const policy = normalizedRoutingPolicy(config);
+  const candidates = policy === "OPENCODE_FREE"
     ? (env.OPENCODE_API_KEY?.trim() ? OPENCODE_FREE_PROVIDER_ORDER : LOCAL_FREE_PROVIDERS)
     : LOCAL_FREE_PROVIDERS;
-  return filterEnabledProviders(candidates, env);
+  return filterEnabledProviders(candidates, env).filter((provider) => {
+    if (!LOCAL_FREE_PROVIDERS.includes(provider)) return true;
+    if (isLocalProviderEndpoint(provider, env)) return true;
+    telemetry.validatorAgent.providerExcluded.inc({ policy, provider });
+    return false;
+  });
 }
 
 function stringArray(value: unknown, maxItems: number, maxLength: number): readonly string[] | null {

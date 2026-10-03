@@ -42,6 +42,10 @@
  *                              (geschlossenes Vokabular ReplayDegradedReason)
  *   screening_cells_total       Screening-Zellen je Ergebnis (STX-05-04;
  *                              geschlossenes Vokabular SCREENING_CELL_RESULTS)
+ *   validator_agent_provider_excluded_total
+ *                              unter `LOCAL_FREE` wegen nicht-lokalem Endpunkt
+ *                              ausgeschlossene Provider je policy/provider
+ *                              (STX-08-05/STX-21, geschlossene Labels)
  *
  * Fehlertoleranz (Betriebsregel): Ist der Firmenzustand nicht lesbar
  * (z. B. DB weg, Ledger noch nicht hydratisiert), werden die betroffenen
@@ -690,11 +694,22 @@ export const telemetry = {
   /**
    * Strategie-Validierungs-Agent (STX-06-05). `result` ist auf
    * ok | unavailable | schema_error | blocked beschränkt; niemals Freitext.
+   *
+   * `providerExcluded` (STX-08-05 / STX-21) zählt Provider, die unter
+   * `LOCAL_FREE` wegen eines nicht-lokalen **effektiven** Endpunkts aus der
+   * Kandidatenliste fallen (`LLM_BASE_URL`/`OLLAMA_BASE_URL` zeigt nicht auf
+   * Loopback/`localhost`). Labels sind geschlossene Code-Konstanten:
+   * `policy` ∈ {LOCAL_FREE, OPENCODE_FREE}, `provider` ∈ `LlmProviderName` —
+   * keine Basis-URL, kein Hostname, kein Modellname (Kardinalitätsregel).
+   * Der Ausschluss ist die einzige Wirkung: Der Agent weicht nicht auf einen
+   * Cloud-Provider aus, sondern bleibt bei `{ unavailable: true }`.
    */
   validatorAgent: {
     runs: new LabelCounter("validator_agent_runs_total"),
+    providerExcluded: new LabelCounter("validator_agent_provider_excluded_total"),
     reset(): void {
       telemetry.validatorAgent.runs.reset();
+      telemetry.validatorAgent.providerExcluded.reset();
     },
   },
 };
@@ -890,6 +905,7 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
     telemetry.microExecutor.ruleBlocked.exposition(),
     telemetry.screening.cells.exposition(),
     telemetry.validatorAgent.runs.exposition(),
+    telemetry.validatorAgent.providerExcluded.exposition(),
   ];
 
   let firm: FirmMetricState | null;

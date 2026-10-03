@@ -269,3 +269,121 @@ test("agent.ts enthält keinen Evidence- oder Lifecycle-Schreibpfad", () => {
   );
   assert.doesNotMatch(source, /recordEvidence|requestTransition/);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STX-08-05 / STX-21 — LOCAL_FREE setzt den lokalen Endpunkt durch
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("LOCAL_FREE sendet mit Cloud-LLM_BASE_URL nur an lokale Endpunkte und zählt den Ausschluss", async () => {
+  const requests: string[] = [];
+  const env = localEnv({
+    LLM_BASE_URL: "https://api.openai.com/v1",
+    LLM_API_KEY: "test-key-not-used-by-local-client",
+  });
+  const fetchFn: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(`${url.host}${url.pathname}`);
+    // Ein Cloud-Endpunkt wäre hier ein Fehler, kein Testfall: Der Aufruf darf
+    // gar nicht erst entstehen.
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+      throw new Error(`LOCAL_FREE hat einen nicht-lokalen Endpunkt angefragt: ${url.host}`);
+    }
+    if (url.pathname === "/api/tags") {
+      return new Response(JSON.stringify({ models: [{ name: "qwen2.5:3b-instruct-q4_K_M" }] }), { status: 200 });
+    }
+    if (url.pathname === "/api/chat") {
+      return new Response(JSON.stringify({ message: { content: JSON.stringify(VALID_OUTPUT) } }), { status: 200 });
+    }
+    throw new Error(`unexpected provider URL: ${url.href}`);
+  };
+
+  const result = await runValidatorAgent(buildReport(), { env, fetchFn });
+
+  assert.equal("unavailable" in result, false);
+  assert.deepEqual(requests, ["127.0.0.1:11434/api/tags", "127.0.0.1:11434/api/chat"]);
+  assert.ok(
+    !requests.some((request) => request.includes("api.openai.com")),
+    "openai darf mit Cloud-Endpunkt unter LOCAL_FREE nicht angefragt werden",
+  );
+  assert.deepEqual(telemetry.validatorAgent.providerExcluded.byDimension("provider"), { openai: 1 });
+  assert.deepEqual(telemetry.validatorAgent.providerExcluded.byDimension("policy"), { LOCAL_FREE: 1 });
+  assert.match(
+    telemetry.validatorAgent.providerExcluded.exposition(),
+    /^validator_agent_provider_excluded_total\{policy="LOCAL_FREE",provider="openai"\} 1$/,
+  );
+  assert.deepEqual(telemetry.validatorAgent.runs.byDimension("result"), { ok: 1 });
+});
+
+test("LOCAL_FREE lässt openai mit Loopback-Override nutzbar (kein Ausschluss)", async () => {
+  const calls: { request: LlmChatRequest; providers: readonly LlmProviderName[] }[] = [];
+  const env = localEnv({ LLM_BASE_URL: "http://127.0.0.1:9999/v1" });
+  const result = await runValidatorAgent(buildReport(), {
+    env,
+    chatFn: fakeChat((_, providers) => {
+      if (providers[0] === "ollama") throw new Error("lokaler Ollama nicht erreichbar");
+      return JSON.stringify(VALID_OUTPUT);
+    }, calls),
+  });
+
+  assert.equal("unavailable" in result, false);
+  assert.deepEqual(calls.map((call) => call.providers[0]), ["ollama", "openai"]);
+  assert.equal(telemetry.validatorAgent.providerExcluded.total(), 0);
+  assert.deepEqual(telemetry.validatorAgent.runs.byDimension("result"), { ok: 1 });
+});
+
+test("Sind unter LOCAL_FREE alle Provider ausgeschlossen, bleibt die Antwort { unavailable: true }", async () => {
+  const report = buildReport();
+  const before = JSON.stringify(report);
+  let modelCalls = 0;
+  const env = localEnv({
+    LLM_BASE_URL: "https://api.openai.com/v1",
+    OLLAMA_BASE_URL: "https://ollama.cloud.example.com:11434",
+  });
+  const result = await runValidatorAgent(report, {
+    env,
+    chatFn: fakeChat(() => {
+      modelCalls += 1;
+      return JSON.stringify(VALID_OUTPUT);
+    }),
+  });
+
+  assert.deepEqual(result, { unavailable: true });
+  assert.equal(modelCalls, 0, "kein Provider darf nach dem Ausschluss aufgerufen werden");
+  assert.equal(report.result, "INCONCLUSIVE", "der deterministische Report bleibt unverändert");
+  assert.equal(JSON.stringify(report), before);
+  assert.deepEqual(telemetry.validatorAgent.providerExcluded.byDimension("provider"), { ollama: 1, openai: 1 });
+  assert.deepEqual(telemetry.validatorAgent.runs.byDimension("result"), { unavailable: 1 });
+});
+
+test("OPENCODE_FREE bleibt Cloud-Opt-in und prüft nur die lokalen Fallbacks", async () => {
+  const calls: { request: LlmChatRequest; providers: readonly LlmProviderName[] }[] = [];
+  const env = localEnv({
+    [VALIDATOR_AGENT_ROUTING_POLICY_ENV]: "OPENCODE_FREE",
+    ROUTING_DISABLED_PROVIDERS: "gemini,anthropic",
+    OPENCODE_API_KEY: "test-key-not-used-by-fake-provider",
+    OPENCODE_BASE_URL: "https://opencode.ai/zen/v1",
+    LLM_BASE_URL: "https://api.openai.com/v1",
+  });
+  const result = await runValidatorAgent(buildReport(), {
+    env,
+    chatFn: fakeChat(() => JSON.stringify(VALID_OUTPUT), calls),
+  });
+
+  assert.equal("unavailable" in result, false);
+  assert.deepEqual(calls.map((call) => call.providers[0]), ["opencode"]);
+  assert.deepEqual(telemetry.validatorAgent.providerExcluded.byDimension("policy"), { OPENCODE_FREE: 1 });
+  assert.deepEqual(telemetry.validatorAgent.providerExcluded.byDimension("provider"), { openai: 1 });
+});
+
+test("Ein per Toggle gesperrter Provider ist kein Endpunkt-Ausschluss und zählt nicht", async () => {
+  const calls: { request: LlmChatRequest; providers: readonly LlmProviderName[] }[] = [];
+  const env = localEnv({ ROUTING_DISABLED_PROVIDERS: "gemini,anthropic,opencode,openai" });
+  const result = await runValidatorAgent(buildReport(), {
+    env,
+    chatFn: fakeChat(() => JSON.stringify(VALID_OUTPUT), calls),
+  });
+
+  assert.equal("unavailable" in result, false);
+  assert.deepEqual(calls[0].providers, ["ollama"]);
+  assert.equal(telemetry.validatorAgent.providerExcluded.total(), 0);
+});

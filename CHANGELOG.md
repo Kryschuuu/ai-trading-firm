@@ -21,10 +21,90 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.11.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.11.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
+
+## [0.11.1] — `LOCAL_FREE`-Endpunkt durchgesetzt (STX-08-05 / STX-21) (2026-10-03)
+
+> **Status: Beta.** Patch-Release. `LOCAL_FREE` sendet den Validator-Report nur
+> noch an Endpunkte, die literal als lokal klassifiziert sind. Das
+> Default-Verhalten bleibt unverändert — die Defaults
+> `http://127.0.0.1:11434` (`ollama`) und `http://127.0.0.1:8080/v1` (`openai`)
+> sind lokal; erst ein Cloud-Override über `LLM_BASE_URL`/`OLLAMA_BASE_URL`
+> fällt sichtbar aus der Kandidatenliste.
+
+### Added
+
+* **Lokalitäts-Klassifikation** [`src/routing/localEndpoint.ts`](src/routing/localEndpoint.ts)
+  (STX-21): reine, deterministische Prüfung eines Basis-URLs **ohne DNS-Lookup**
+  — lokal sind Loopback `127.0.0.0/8`, IPv6 `::1` (auch ausgeschrieben und
+  IPv4-gemappt), `localhost`/`*.localhost` sowie die öffentlich nicht
+  auflösbaren RFC-6761-Namensräume `.test`/`.invalid`; alles andere (öffentliche
+  Domains, private Netze, Container-Kurznamen, Credentials in der URL,
+  Fremdschemata, Unparsebares) ist fail-closed **nicht** lokal.
+* **Zähler** `validator_agent_provider_excluded_total{policy,provider}`
+  (Labels geschlossen: `LOCAL_FREE`/`OPENCODE_FREE` und `LlmProviderName` — nie
+  eine Basis-URL, ein Hostname oder ein Modellname), exponiert über
+  `prometheusMetrics()`.
+
+### Changed
+
+* **`allowedProviderOrder()`** ([`src/strategies/validator/agent.ts`](src/strategies/validator/agent.ts))
+  prüft jeden lokalen Kandidaten (`ollama`, `openai`) gegen seinen
+  **effektiven** Basis-URL (`providerConfigFromEnv()`: Env-Override oder Default)
+  und entfernt nicht-lokale Einträge sichtbar statt still. `opencode` bleibt als
+  ausdrücklicher Cloud-Opt-in von `OPENCODE_FREE` ungeprüft; die lokalen
+  Fallbacks dieser Policy unterliegen derselben Prüfung.
+* **Modulkopf + [`docs/STRATEGY_VALIDATION.md`](docs/STRATEGY_VALIDATION.md) §31**
+  benennen die Garantie ausdrücklich: `LOCAL_FREE` ist keine
+  Namenskonvention mehr, sondern eine durchgesetzte Eigenschaft des
+  konfigurierten Endpunkts.
+* Unverändert: `result`, `gates[]`, `assumptions` und der deterministische
+  Report; eine leere Kandidatenliste beantwortet der Agent weiterhin mit
+  `{ unavailable: true }`. Kein Ausweichen auf einen Cloud-Provider. Ebenfalls
+  unverändert: `DEFAULT_BASE_URLS`, `API_KEY_ENV`, die Provider-Liste in
+  `src/lib/llmProvider.ts` und `src/routing/policy.ts`.
+
+### Tests
+
+* `tests/routing.localEndpoint.test.ts` (6 Tests): Loopback-IPv4/-IPv6
+  (inkl. `127.0.0.2`, `[::1]`, gemappter Form), `localhost`/`*.localhost`,
+  `.test`/`.invalid`, öffentliche Domains, private Netze, Kurznamen,
+  Credentials, Fremdschemata und Unparsebares.
+* `tests/strategyValidation.agent.test.ts` (13 Tests, 5 neu): Cloud-`LLM_BASE_URL`
+  ⇒ `openai` fällt aus, Zähler `excluded{policy="LOCAL_FREE",provider="openai"} 1`,
+  und ein Fetch-Spy weist jeden nicht-lokalen Host zurück (es wird nur
+  `127.0.0.1:11434` angefragt); Loopback-Override ⇒ `openai` bleibt nutzbar;
+  beide Endpunkte cloud ⇒ `{ unavailable: true }` ohne Modellaufruf und mit
+  byte-identischem Report; eine Toggle-Sperre zählt **nicht** als
+  Endpunkt-Ausschluss.
+* Die Bestandstests `LOCAL_FREE läuft ohne Cloud-Credentials …` (`:143`) und
+  `LOCAL_FREE durchläuft den echten Ollama-Client ohne Cloud-Schlüssel` (`:186`)
+  bleiben unverändert und grün.
+
+### Notes
+
+* **Vorbestehender Flake behoben (gefunden im geforderten vollen `npm test`):**
+  `tests/benchBacktest.test.ts` erwartete in der Matrix-Kostenprüfung die
+  Reihenfolge `rule > multiAsset`. Diese Aussage stammt aus der Baseline vor
+  STX-12 und ist seit 08-04 (`v0.11.0`) überholt — `backtestRule()` nutzt
+  denselben Indicator-Cache wie der Engine-Pfad. Bei den Spielzeuggrößen der
+  Suite (200/400 Bars, zwei Wiederholungen) dominieren JIT-/Startkosten, die
+  Reihenfolge kippte in 4 von 5 lokalen Läufen. Der Test prüft jetzt den
+  Protokoll-Vertrag (jeder Pfad liefert positive Zell-/Kernstunden-Kosten) und
+  überlässt die vergleichende Aussage der Baseline
+  [`BENCH-BASELINE.md`](docs/audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md).
+  Der PR #221 hatte die volle Suite ausdrücklich übersprungen; hier wurde sie
+  ausgeführt und der rote Bestandstest sichtbar gemacht.
+* **Gewählter Weg:** durchsetzen statt umbenennen (Weg 1 der Prompt-Vorlage) —
+  `OPENCODE_FREE` bleibt der einzige Cloud-Pfad, `LOCAL_FREE` bleibt eine
+  Zusage. Abweichung zur Prompt-Skizze: `.test`/`.invalid` gelten als lokal
+  („nicht öffentlich auflösbar"), sonst hätte die bestehende gemockte
+  Ollama-Testreihe (`http://ollama.test:11434`) gesperrt werden müssen.
+  Container-/Intranet-Kurznamen (`http://ollama:11434`) und private Netze gelten
+  bewusst nicht als lokal — der Ausschluss ist am Zähler sichtbar.
 
 ## [0.11.0] — Indicator-Cache für `backtestRule()` (STX-08-04) + Copy-Engine (PR #221, 2026-10-03)
 

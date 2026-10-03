@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.11.0` |
+| **Version** | `v0.11.1` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-03 |
-| **Quellbasiert** | `package.json` (`version: "0.11.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.11.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -390,6 +390,25 @@ append-only DB-CHECKs `positions_strategy_class_check` und
 `signal_decay_events_class_check`
 ([`drizzle/2026-09-22_signal_decay.sql`](drizzle/2026-09-22_signal_decay.sql)).
 `DEFAULT_CLASS_POLICIES`, Env-Namen und Schwellen bleiben unangetastet.
+
+`v0.11.1` (STX-08-05 / STX-21, 2026-10-03) setzt die Zusage der
+Validator-Agent-Policy `LOCAL_FREE` durch: Der Agent sendet den Report nur an
+Provider, deren **effektiver** Basis-URL literal als lokal klassifiziert ist
+(Loopback `127.0.0.0/8`, IPv6 `::1` inkl. IPv4-gemappter Form, `localhost`/
+`*.localhost` sowie die öffentlich nicht auflösbaren RFC-6761-Namensräume
+`.test`/`.invalid`; kein DNS-Lookup —
+[`src/routing/localEndpoint.ts`](src/routing/localEndpoint.ts)). Den Endpunkt
+bestimmt die Konfiguration: `LLM_BASE_URL` überschreibt für `openai` den Default
+`http://127.0.0.1:8080/v1`, `OLLAMA_BASE_URL` analog für `ollama`. Zeigt ein
+solcher Override auf eine Cloud-URL, fällt der Provider aus der Kandidatenliste
+und wird über `validator_agent_provider_excluded_total{policy,provider}`
+gezählt (geschlossene Labels). Bleibt die Liste leer, antwortet der Agent
+weiterhin `{ unavailable: true }`; `result`, Gates, Annahmen und der
+deterministische Report bleiben unangetastet. `OPENCODE_FREE` bleibt der
+ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfung.
+`DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
+[`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
+[`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
 
 `v0.11.0` (STX-08-04, PR #221, 2026-10-03) stellt `backtestRule()` auf den bestehenden
 `IndicatorCache` um: `buildIndicatorCache(candles)` läuft einmal vor der
