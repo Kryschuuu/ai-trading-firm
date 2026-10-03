@@ -62,9 +62,14 @@ Ausführen: `npm run docs:validate`
   Kein Suite-Stamp bei fehlgeschlagener Windows-Regression. Ein expliziter
   Fail-Closed-Schritt macht den Required Check bei fehlgeschlagenem/ausgelassenem
   Windows-Job rot; ein lediglich übersprungener abhängiger Job genügt nicht.
-- Dependency-Audit: `npm audit --audit-level=high` schlägt fail-closed bei
-  hohen/kritischen Advisories in den installierten Abhängigkeiten an
-  (inkl. Dev — Build-Tools fließen in die Bundles ein).
+- Dependency-Audit: `npm run security:audit` wertet `npm audit --audit-level=high`
+  fail-closed für den vollständigen Abhängigkeitsbaum aus (Prod + Dev). Einzige
+  Ausnahme ist GHSA-vfj7-8cjw-p6xm: `braces` hat am 2026-10-03 noch keine
+  gepatchte Veröffentlichung (`first_patched_version: null`) und kommt hier
+  ausschließlich über den dokumentierten, vollständig dev-only ESLint-Globs-
+  Pfad. Die Ausnahme ist auf exakte Pakete/Versionen und Lockfile-Kanten begrenzt,
+  läuft am **2026-10-17** ab und schlägt danach absichtlich fehl. Jeder andere
+  High-/Critical-Fund blockiert unverändert. Details: [befristete Audit-Ausnahme](../security/README.md#dependency-audit-ausnahme-ghsa-vfj7-8cjw-p6xm).
 - SEC-04: `npm ls ws --all` + `npm run test:security:ws` vor Build und Suite —
   exakter `ws`-Pin, Override für transitive Kopien, jeder Lockfile-Eintrag, die
   installierte Auflösung sowie Laufzeit-Guard und Payload-Kappe des

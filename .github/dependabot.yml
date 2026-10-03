@@ -14,8 +14,9 @@
 # Bewusst NUR Oekosystem `github-actions`: npm-Abhaengigkeiten werden kuratiert
 # und mit Runbook + Regressionssuite aktualisiert (siehe Next.js-Upgrade-Runbook
 # in docs/security/README.md) — automatische Dependency-PRs wuerden diesen
-# geprüften Release-Prozess umgehen. Advisories zusaetzlich faengt der
-# fail-closed-Schritt `npm audit --audit-level=high` im security-live-gate-Job.
+# geprüften Release-Prozess umgehen. Advisories faengt der fail-closed-Schritt
+# `npm run security:audit` im security-live-gate-Job (vollstaendiger npm-audit,
+# mit einer eng begrenzten, am 2026-10-17 ablaufenden GHSA-Ausnahme).
 # =============================================================================
 version: 2
 updates:

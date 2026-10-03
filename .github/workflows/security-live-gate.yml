@@ -133,12 +133,15 @@ jobs:
       - name: Abhaengigkeiten (npm ci, exakt aus package-lock.json)
         run: npm ci
 
-      - name: Dependency-Audit (fail-closed ab Security-Level high)
-        # Supply-Chain-Gate: schlaegt bei high/critical Advisories in den
-        # INSTALLIERTEN Abhaengigkeiten an — inkl. Dev-Abhaengigkeiten, da
-        # Build-Tools (esbuild, tailwind, postcss) direkt in die ausgelieferten
-        # Bundles einflieszen. Baseline aktuell: 0 Funde (2026-09-06).
-        run: npm audit --audit-level=high
+      - name: Dependency-Audit (fail-closed; befristete GHSA-Ausnahme)
+        # Vollstaendiger Audit (Prod + Dev). Erlaubt ausschliesslich das exakt
+        # verifizierte, dev-only CVE-2026-93687-Globs-Tooling bis zum Ablauf
+        # der dokumentierten Ausnahme; jedes andere High/Critical-Finding bleibt
+        # merge-blockierend. Kein `npm audit fix --force`: npm schlaegt sonst
+        # einen inkompatiblen Downgrade von eslint-config-next auf 14.x vor.
+        run: |
+          npm run test:security:dependency-audit
+          npm run security:audit
 
       - name: SEC-04 ws-Supply-Chain-Gate (Pin, Lockfile, Laufzeit)
         # Root Cause von SEC-04 war eine SemVer-Range, die verwundbare

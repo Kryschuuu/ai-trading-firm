@@ -29,9 +29,39 @@
 
 > Quelle: `docs/audits/*/remediation/TRACKING.md` — hier nur aggregierte Sicht, Details in jeweiligen Audit-Ordnern.
 
-Derzeit enthält die aggregierte Sicht **keine offenen Critical- oder High-Findings**.
+Derzeit enthält die aggregierte Sicht der Produkt-Sicherheitsaudits **keine offenen Critical- oder High-Findings**.
 Offene Medium-/Low-Themen bleiben im jeweiligen Audit-Tracking erfasst und sind
-kein Freigabesignal für Live-Trading.
+kein Freigabesignal für Live-Trading. Die separate befristete High-Severity-
+Abhängigkeitsausnahme ist unten dokumentiert.
+
+### Dependency-Audit-Ausnahme: GHSA-vfj7-8cjw-p6xm
+
+Der aktuelle Audit-Befund ist der High-Severity-Stack-Exhaustion-Fund
+[CVE-2026-93687 / GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+für `braces <=3.0.3`. Am 2026-10-03 gibt es noch keine gepatchte npm-Version
+(`first_patched_version` ist null; 3.0.3 ist die neueste veröffentlichte Version).
+
+Im aktuellen Lockfile liegt der einzige betroffene Pfad in der
+**Development-Abhängigkeit** für ESLint:
+`eslint-config-next@16.2.6` → `@next/eslint-plugin-next@16.2.6` →
+`fast-glob@3.3.1` → `micromatch@4.0.8` → `braces@3.0.3`. Jeder Knoten dieses
+Pfads ist im Lockfile als `dev: true` markiert; es gibt keinen betroffenen
+Produktions-Abhängigkeitspfad. Das ist keine Behebung des Advisory: PR-Inhalte
+können weiterhin die CI-Lint-/Glob-Verarbeitung beeinflussen, daher bleibt ein
+begrenztes CI-Verfügbarkeitsrisiko.
+
+Der Security-Workflow führt weiterhin einen vollständigen Audit von Prod- und
+Dev-Abhängigkeiten aus. `scripts/dependency-audit.mjs` erlaubt nur dieses
+Advisory, und nur solange Advisory-ID, Schweregrad, alle fünf Paketversionen,
+Abhängigkeitskanten und Dev-only-Lockfile-Marker exakt übereinstimmen. Jeder
+weitere High-/Critical-Fund, geänderte Kettenknoten, fehlende Audit-Antwort oder
+abgelaufene Ausnahme blockiert CI. Die Ausnahme in
+[`.github/dependency-audit-exceptions.json`](../../.github/dependency-audit-exceptions.json)
+läuft am **2026-10-17** ab. Danach wird der Gate absichtlich rot, bis das
+Upstream-Update eingespielt und die Ausnahme entfernt oder nach erneuter
+Sicherheitsprüfung befristet erneuert wurde. `npm audit fix --force` ist keine
+sichere Abhilfe: npm schlägt hier einen inkompatiblen Downgrade von
+`eslint-config-next` auf 14.x vor.
 
 **SEC-02 ist seit v1.36.31 FIXED:** [sensible Dashboard-Reads](../audits/2026-09-05-security-review-gpt01/findings/SEC-02-unauthenticated-get-apis.md) verlangen `firm.read` und werden `private, no-store` ausgeliefert.
 

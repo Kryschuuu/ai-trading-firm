@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "ghsaId": "GHSA-vfj7-8cjw-p6xm",
+      "expiresOn": "2026-10-17",
+      "reason": "No patched braces release is published yet (first_patched_version is null). The finding is confined to the exact dev-only eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces chain. This temporary exception expires on 2026-10-17 because PR-controlled content can still affect CI lint/glob processing."
+    }
+  ]
+}
