@@ -5,9 +5,40 @@
  * Server-Module — z. B. die Help-Sektion des Operations Centers
  * (`src/ops/collect.ts`) — dieselbe Liste lesen können, ohne sie zu duplizieren.
  *
- * SICHERHEIT: Nur diese Dateien sind lesbar. Es gibt bewusst keine
- * Pfadübergabe von außen — der Schlüssel ist ein fester Slug, kein Pfad.
- * Damit ist Path-Traversal strukturell ausgeschlossen.
+ * URL-SCHEMA (Doku-Rendering-Fix, 2026-10-03)
+ * -------------------------------------------
+ * Die Doku ist für **GitHub** geschrieben: relative Links wie
+ * `[Kapitel](audits/2026-09-18-feature-gap/README.md)` lösen gegenüber dem
+ * Verzeichnis der Quelldatei auf. Der Browser-Viewer muss dasselbe tun.
+ * Deshalb trägt die kanonische URL den **Pfad innerhalb von `docs/`**:
+ *
+ *   docs/README.md                             → /docs/README.md
+ *   docs/security/README.md                    → /docs/security/README.md
+ *   docs/audits/2026-09-18-feature-gap/README.md
+ *                                              → /docs/audits/2026-09-18-feature-gap/README.md
+ *   CHANGELOG.md (Repo-Root)                   → /docs/root/CHANGELOG.md
+ *
+ * Der Pfad ist damit eindeutig. Vorher wurde nur der **Dateiname** benutzt;
+ * bei ~31 `README.md` im Baum lieferte `/docs/README.md` je nach Aufrufer
+ * lautlos das falsche Dokument (Befund B5).
+ *
+ * Repo-Root-Dateien (`CHANGELOG.md`, `CONFIGURATION.md`, …) stehen unter dem
+ * reservierten Segment `root/`, weil sie sonst mit gleichnamigen Dateien unter
+ * `docs/` kollidieren (`docs/CHANGELOG.md` ist ein Weiterleitungs-Stub,
+ * `docs/INSTALL.md` die CachyOS-Anleitung — beide existieren auch im Root).
+ *
+ * SICHERHEIT — Path-Traversal
+ * ---------------------------
+ * Auflösbar sind **ausschließlich** Dateien, die
+ *   1. unter `docs/` liegen (`docs/**`), oder
+ *   2. eine Markdown-Datei direkt im Repo-Root sind (`<Name>.md`, kein `/`).
+ * Alles andere wird abgewiesen. Zusätzlich bleibt die Altlast-Regel bestehen:
+ * eine Eingabe, die ein `..`-Segment enthält, wird komplett abgewiesen, auch
+ * wenn der normalisierte Pfad wieder innerhalb von `docs/` landen würde
+ * (Verteidigung in der Tiefe — die Abnahme verlangt genau das).
+ * Damit ist der Viewer kein File-Reader für das gesamte Repository: Ziele
+ * außerhalb von `docs/` (z. B. `../src/db/schema.ts`, `../drizzle/*.sql`)
+ * werden gar nicht erst in eine URL übersetzt (Befund B7).
  *
  * Struktur-Update 2026-09-05:
  *   - CHANGELOG.md kanonisch im Root, docs/CHANGELOG.md ist Stub
@@ -16,24 +47,31 @@
  *   - PEER_REVIEW Dateien nach docs/peer-reviews/ Unterordner review.md
  *   - task- Dateien nach docs/archive/task-plans/
  *   - Neue Katalog-Eintraege fuer audits/, peer-reviews/, security/, archive/
- *
- * Suchpfade-Update 2026-10-03 (STX-08-02, Altlast 3):
- *   - Der Existenz-Fallback findet zusaetzlich docs/architecture/ (SSoT-Karte,
- *     Pipeline-/Schema-/Integrationskarte) und docs/roadmap/ (ADR-Log,
- *     Status-Tracker). Damit sind STRATEGY_STACK.md, PIPELINE_MAP.md,
- *     DB_SCHEMA.md, INTEGRATION_POINTS.md und DECISIONS.md ohne Repo-Wechsel
- *     im Browser-Viewer lesbar.
- *   - Bewusst KEINE neuen Katalog-Eintraege: Der Fallback reicht, und ein
- *     Katalogeintrag wuerde Schritt 2 (Dateiname-Matching) fuer diese Dateien
- *     oeffnen — dann loeste auch die pfadfoermige Eingabe
- *     `../architecture/STRATEGY_STACK.md` auf, was die Abnahme ausschliesst.
- *   - Die dreistufige Aufloesung bleibt unveraendert (kein `docs/**`-Walk);
- *     zusaetzlich werden Parent-Referenzen (`..`) im Existenz-Fallback
- *     abgewiesen (Verteidigung in der Tiefe, `basename()` bleibt).
  */
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 
 import { resolveRuntimePath } from "./appPaths";
+import {
+  ROOT_DOC_SEGMENT,
+  basename,
+  decodePathSegment,
+  canonicalPathForFile,
+  fileFromCanonicalPath,
+  hasParentRef,
+  isServableDocFile,
+  normalizeSlashes,
+} from "./docsLinks";
+
+// Re-Export: das URL-Schema liegt bewusst im reinen Modul `docsLinks`
+// (Client-Bundle darf kein `node:fs` enthalten). Katalog-Konsumenten
+// (`src/auth/ops.ts`, API-Route, Tests) importieren weiter von hier.
+export {
+  ROOT_DOC_SEGMENT,
+  basename,
+  canonicalPathForFile,
+  fileFromCanonicalPath,
+  isServableDocFile,
+};
 
 export type DocsEntry = {
   /** Dateipfad relativ zum Projektstamm. */
@@ -313,6 +351,135 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Archiv — Historische Dokumente",
     subtitle: "Veraltete Task-Pläne, alte Audit-Reports — nicht Teil des aktiven Katalogs",
   },
+
+  // ── Kataloglücken geschlossen (Befund B6, 2026-10-03) ────────────────────
+  // Diese docs/*.md existieren, tauchten aber in keiner Navigation auf: sie
+  // waren nur über den Basename-Fallback erreichbar. Jetzt regulär geführt.
+  auditRemediation202609: {
+    file: "docs/AUDIT_REMEDIATION_2026-09.md",
+    title: "Audit-Remediation 2026-09 — Weiterleitung",
+    subtitle: "Weiterleitung; aktueller Stand unter audits/2026-09-03-peer-review/",
+  },
+  crossSectionalRanking: {
+    file: "docs/CROSS_SECTIONAL_RANKING.md",
+    title: "Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04, v1.63.0)",
+    subtitle: "Wo steht ein Symbol im Querschnitt — Rangbildung, Point-in-Time-Freeze, API",
+  },
+  devilsAdvocate: {
+    file: "docs/DEVILS_ADVOCATE.md",
+    title: "Devil’s Advocate (Strukturierte Falsifikationsrolle)",
+    subtitle: "Adversariale Kontrollinstanz vor dem finalen Risikocommit",
+  },
+  docsSyncAudit: {
+    file: "docs/DOCS_SYNC_AUDIT.md",
+    title: "Docs-Code-Sync-Audit (Task 12)",
+    subtitle: "Geprüfte Dokumentations-Behauptungen gegen den Code",
+  },
+  drawdownScaling: {
+    file: "docs/DRAWDOWN_SCALING.md",
+    title: "Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04, v1.68.0)",
+    subtitle: "Autoritative Vertrauensskalierung auf Basis der reconcilten Equity",
+  },
+  featureStore: {
+    file: "docs/FEATURE_STORE.md",
+    title: "Point-in-Time Feature Store",
+    subtitle: "Stabil reproduzierbare Scanner-Features, versioniert und point-in-time",
+  },
+  forecasts: {
+    file: "docs/FORECASTS.md",
+    title: "Forecast-Ledger & Kalibrierung (RMA-P3-01, v1.55.0)",
+    subtitle: "Unveränderliche Forecast-Verträge und Kalibrierungsauswertung",
+  },
+  frontendControlPlane: {
+    file: "docs/FRONTEND_CONTROL_PLANE.md",
+    title: "Broker Control Plane — Frontend & Credential-Manager (Task 08)",
+    subtitle: "API-Fläche, Credential-Manager und Freigabe-Fläche je Venue",
+  },
+  howToBitunixSync: {
+    file: "docs/HOW_TO_BITUNIX_SYNC.md",
+    title: "How-to: BITUNIX freischalten und Kerzen-Warmup nachziehen",
+    subtitle: "Vier Gates für BITUNIX_ENABLED und das Warmup bei laufender Firma",
+  },
+  monteCarlo: {
+    file: "docs/MONTE_CARLO.md",
+    title: "Monte-Carlo-/Trade-Resampling (RMA-P6-02)",
+    subtitle: "Reproduzierbare Monte-Carlo-Analyse über die Trades eines Walk-Forward-Runs",
+  },
+  mtfConfluence: {
+    file: "docs/MTF_CONFLUENCE.md",
+    title: "Deterministische Multi-Timeframe-Konfluenz (RMA-P2-03, v1.62.0)",
+    subtitle: "Zeigen die konfigurierten Timeframes dasselbe? — Konfluenz-Score und API",
+  },
+  peerReviewBitunixExecutionLegacy: {
+    file: "docs/PEER_REVIEW_BITUNIX_EXECUTION.md",
+    title: "Peer-Review: Bitunix-Execution — Weiterleitung",
+    subtitle: "Weiterleitung; neuer Stand unter peer-reviews/2026-08-26-bitunix-execution/",
+  },
+  peerReviewLiveTradingLegacy: {
+    file: "docs/PEER_REVIEW_LIVE_TRADING.md",
+    title: "Peer-Review: Live-Trading — Weiterleitung",
+    subtitle: "Weiterleitung; neuer Stand unter peer-reviews/2026-08-26-live-trading-readiness/",
+  },
+  peerReviewRoutingOverridesLegacy: {
+    file: "docs/PEER_REVIEW_ROUTING_OVERRIDES.md",
+    title: "Peer-Review: Routing-Overrides — Weiterleitung",
+    subtitle: "Weiterleitung; neuer Stand unter peer-reviews/2026-08-26-routing-overrides/",
+  },
+  perpetualData: {
+    file: "docs/PERPETUAL_DATA.md",
+    title: "Perpetual-Daten — Funding, Open Interest, Liquidationen",
+    subtitle: "Historische, point-in-time Derivate-Wahrheit für Backtest und Research",
+  },
+  postOnlyFallback: {
+    file: "docs/POST_ONLY_FALLBACK.md",
+    title: "Post-Only-Ausführung mit Market-Fallback (RMA-P4-02)",
+    subtitle: "Maker-First-Ausführung mit deterministischem Fallback-Pfad",
+  },
+  promptPerformance: {
+    file: "docs/PROMPT_PERFORMANCE.md",
+    title: "Prompt-Performance & Version-Metrikvergleich (RMA-P3-02, v1.65.0)",
+    subtitle: "Immutable Prompt-Versionen und fairer Metrik-Vergleich",
+  },
+  repositoryStructure: {
+    file: "docs/REPOSITORY_STRUCTURE.md",
+    title: "Repository-Struktur — Übersicht & Pflegeanleitung",
+    subtitle: "Logische, wartbare, selbsterklärende Verzeichnisstruktur",
+  },
+  sentiment: {
+    file: "docs/SENTIMENT.md",
+    title: "Kalibrierbare strukturierte Sentiment-Outputs (RMA-P2-05)",
+    subtitle: "Strukturierte, kalibrierbare Sentiment-Signale aus Nachrichten und Kommentaren",
+  },
+  signalDecay: {
+    file: "docs/SIGNAL_DECAY.md",
+    title: "Signal-Decay-Exits (RMA-P5-05, v1.69.0)",
+    subtitle: "Versionierte, deterministische Exits bei abklingendem Entry-Signal",
+  },
+  strategyTemplates: {
+    file: "docs/STRATEGY_TEMPLATES.md",
+    title: "Strategie-Templates — Katalog (aus dem Code generiert)",
+    subtitle: "Versionierte Strategie-Artefakte incl. Parameter und Abnahmekriterien",
+  },
+  twapExecution: {
+    file: "docs/TWAP_EXECUTION.md",
+    title: "TWAP- und Depth-aware Execution (RMA-P4-03, v1.71.0)",
+    subtitle: "Zeitlich gestaffelte Maker-Kinder mit Orderbuch-Tiefen-Logik",
+  },
+  volatilityTargeting: {
+    file: "docs/VOLATILITY_TARGETING.md",
+    title: "Portfolio-Volatility-Targeting (RMA-P5-01, v1.67.0)",
+    subtitle: "Kontinuierliches Volatilitäts-Targeting als zweite Risikoebene",
+  },
+  claudeTradingIndicator: {
+    file: "docs/CLAUDE_TRADING_INDICATOR.md",
+    title: "Claude Trading Indicator (CTI)",
+    subtitle: "Signalschicht `src/signals/`, CLI `npm run cti`",
+  },
+  strategyScreening: {
+    file: "docs/STRATEGY_SCREENING.md",
+    title: "Strategie×Markt-Screening — Persistenz und Idempotenz",
+    subtitle: "Candidate Matrix, Persistenz und Idempotenz des Screenings (STX-05-03/05-04)",
+  },
 };
 
 export type DocsListItem = { slug: string; title: string; subtitle: string; path: string };
@@ -327,21 +494,49 @@ export function listDocs(): DocsListItem[] {
   }));
 }
 
-/** Letztes Pfadsegment einer Datei (`docs/ARCHITECTURE.md` → `ARCHITECTURE.md`). */
-function basename(file: string): string {
-  return file.split("/").pop() ?? file;
+// ---------------------------------------------------------------------------
+// Pfad- und URL-Helfer
+// ---------------------------------------------------------------------------
+
+/**
+ * Kanonischer URL-Pfad eines Dokuments — akzeptiert einen Katalog-Slug oder
+ * einen Dateipfad (`docs/audits/…/README.md`, `CHANGELOG.md`).
+ */
+export function docCanonicalPath(slugOrFile: string): string | null {
+  const raw = (slugOrFile ?? "").trim();
+  if (!raw) return null;
+  const entry = DOCS_CATALOG[raw];
+  return canonicalPathForFile(entry ? entry.file : raw);
 }
 
-/** Kanonischer URL-Pfad eines Dokuments (`/docs/ARCHITECTURE.md`). */
-export function docCanonicalPath(slugOrFile: string): string | null {
-  const entry = DOCS_CATALOG[slugOrFile];
-  const file = entry ? entry.file : slugOrFile;
-  // Unterstützt sowohl docs/ als auch Root-Dateien (CHANGELOG.md, CONFIGURATION.md)
-  if (!file.endsWith(".md")) return null;
-  if (file.startsWith("docs/")) return `/docs/${basename(file)}`;
-  // Root-Dateien wie CHANGELOG.md, CONFIGURATION.md
-  if (!file.includes("/")) return `/docs/${basename(file)}`;
+/** Katalog-Slug zu einer Datei (falls katalogisiert). */
+export function slugForFile(file: string): string | null {
+  for (const [slug, entry] of Object.entries(DOCS_CATALOG)) {
+    if (normalizeSlashes(entry.file) === normalizeSlashes(file)) return slug;
+  }
   return null;
+}
+
+/**
+ * Slug für nicht katalogisierte Dateien: `docs/roadmap/STATUS.md` →
+ * `roadmap-status`, `CHANGELOG.md` → `root-changelog`.
+ *
+ * Kollidiert das Ergebnis mit einem echten Katalog-Slug (möglich bei
+ * gleichnamigen Dateien, z. B. `docs/CHANGELOG.md` vs. Katalog-Slug
+ * `changelog` → Root-Datei), bekommt es das Präfix `docs-`. Zwei verschiedene
+ * Dateien dürfen nie denselben Slug tragen.
+ */
+function fallbackSlug(file: string): string {
+  const p = normalizeSlashes(file);
+  const rel = p.startsWith("docs/") ? p.slice(5) : `${ROOT_DOC_SEGMENT}-${p}`;
+  const slug = rel.replace(/\.md$/i, "").replace(/\//g, "-").toLowerCase();
+  const clash = DOCS_CATALOG[slug];
+  if (clash && normalizeSlashes(clash.file) !== p) return `docs-${slug}`;
+  return slug;
+}
+
+function entryFor(file: string): DocsEntry {
+  return { file, title: basename(file).replace(/\.md$/i, ""), subtitle: "" };
 }
 
 export type ResolvedDoc = {
@@ -349,21 +544,54 @@ export type ResolvedDoc = {
   entry: DocsEntry;
   /** Dateipfad relativ zum Projektstamm (z. B. `docs/ARCHITECTURE.md`). */
   file: string;
-  /** Kanonische Browser-URL (z. B. `/docs/ARCHITECTURE.md`). */
+  /** Kanonische Browser-URL (z. B. `/docs/security/README.md`). */
   canonicalPath: string;
 };
 
+function build(file: string): ResolvedDoc | null {
+  const canonicalPath = canonicalPathForFile(file);
+  if (!canonicalPath) return null;
+  const slug = slugForFile(file) ?? fallbackSlug(file);
+  return { slug, entry: DOCS_CATALOG[slug] ?? entryFor(file), file, canonicalPath };
+}
+
 /**
- * Löst einen Namen (Slug ODER Dateiname mit/ohne `.md`) zu einem Dokument auf.
+ * Wie {@link resolveDoc}, akzeptiert zusätzlich eine kanonische URL
+ * (`/docs/root/CHANGELOG.md`) — die Form, in der `DocsView` und die API-Route
+ * ein Dokument anfordern. Der URL-Präfix wird vor der Auflösung entfernt;
+ * die Traversal-Schranke aus {@link resolveDoc} bleibt unverändert wirksam.
+ */
+export function resolveDocRequest(name: string): ResolvedDoc | null {
+  const raw = (name ?? "").trim();
+  const stripped = raw.startsWith("/docs/") ? raw.slice("/docs/".length) : raw;
+  // Next.js reicht URL-Segmente teils kodiert durch (`Security%20Review.md`).
+  // Erst der Rohwert, dann segmentweise dekodiert probieren — ein kodiertes
+  // `/` bleibt dabei innerhalb seines Segments.
+  const decoded = stripped.split("/").map(decodePathSegment).join("/");
+  return resolveDoc(stripped) ?? (decoded === stripped ? null : resolveDoc(decoded));
+}
+
+function existsFile(file: string): boolean {
+  try {
+    return existsSync(resolveRuntimePath(file)) && statSync(resolveRuntimePath(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Löst eine Anfrage zu einem Dokument auf.
  *
- * Zuerst die Whitelist (`DOCS_CATALOG`), danach ein Existenz-Fallback innerhalb
- * von `docs/` + bekannten Unterordnern + `.md`, damit auch nicht katalogisierte
- * Doku-Dateien (z. B. `audits/README.md`, `security/README.md`,
- * `architecture/STRATEGY_STACK.md` oder `roadmap/DECISIONS.md`) lokal ohne 404
- * gerendert werden. Der Pfad wird ausschließlich über ein bereinigtes
- * Basename konstruiert — Path-Traversal bleibt strukturell ausgeschlossen.
- * Parent-Referenzen (`..`) erreichen den Existenz-Fallback nicht; einfache
- * Trenner werden wie bisher über `basename()` normalisiert.
+ * Eingaben (in dieser Reihenfolge):
+ *   1. Katalog-Slug                    `security`, `auditFeatureGap`
+ *   2. Pfad innerhalb von `docs/`      `audits/2026-09-18-feature-gap/README.md`
+ *      (auch mit vorangestelltem `docs/`)
+ *   3. Root-Datei                      `CHANGELOG.md` oder `root/CHANGELOG.md`
+ *   4. Altlast-Fallback per Basename   `README.md`, `STATUS.md` (bekannte Unterordner)
+ *
+ * Schritt 4 existiert nur für alte Lesezeichen und handgetippte URLs. Er darf
+ * **nie** vor Schritt 2 greifen — sonst liefert `audits/README.md` wieder
+ * `docs/README.md` (Befund B5).
  */
 export function resolveDoc(name: string): ResolvedDoc | null {
   const raw = (name ?? "").trim();
@@ -372,34 +600,45 @@ export function resolveDoc(name: string): ResolvedDoc | null {
   // 1) Katalog: exakter Slug.
   if (DOCS_CATALOG[raw]) {
     const entry = DOCS_CATALOG[raw];
-    return { slug: raw, entry, file: entry.file, canonicalPath: docCanonicalPath(raw)! };
+    return build(entry.file);
   }
 
-  // Bereinigtes Basename (nur Dateiname, keine Pfadkomponenten).
-  const safeBase = basename(raw).replace(/\\/g, "/").split("/").pop() ?? "";
+  // Altlast-Regel: `..`-Segmente werden grundsätzlich abgewiesen — auch dann,
+  // wenn der normalisierte Pfad wieder innerhalb von docs/ landen würde.
+  if (hasParentRef(raw)) return null;
 
-  // 2) Katalog: Dateiname (mit oder ohne `.md`), case-insensitiv.
-  for (const [slug, entry] of Object.entries(DOCS_CATALOG)) {
-    const file = basename(entry.file);
-    if (file.toLowerCase() === safeBase.toLowerCase() || file.replace(/\.md$/i, "").toLowerCase() === safeBase.replace(/\.md$/i, "").toLowerCase()) {
-      return { slug, entry, file: entry.file, canonicalPath: docCanonicalPath(slug)! };
-    }
+  const normalized = normalizeSlashes(raw);
+  const candidates: string[] = [];
+
+  if (normalized.startsWith("docs/")) {
+    candidates.push(normalized);
+  } else if (normalized.startsWith(`${ROOT_DOC_SEGMENT}/`)) {
+    // /docs/root/CHANGELOG.md → CHANGELOG.md
+    candidates.push(normalized.slice(ROOT_DOC_SEGMENT.length + 1));
+  } else if (normalized.includes("/")) {
+    // 2) Pfad innerhalb von docs/
+    candidates.push(`docs/${normalized}`);
+  } else {
+    // 3) Nackter Dateiname: docs/ zuerst, dann Repo-Root.
+    candidates.push(`docs/${normalized}`, normalized);
   }
 
-  // 3) Existenz-Fallback: echte Datei unter docs/ oder Unterordnern
-  // (z. B. audits/, peer-reviews/, security/, architecture/, roadmap/).
-  // Nur .md, keine Trenner außerhalb docs/
-  if (!safeBase.endsWith(".md") || safeBase.includes("/") || safeBase.includes("\\") || safeBase === "..") return null;
-  // STX-08-02: Parent-Referenzen (`..`) erreichen den Existenz-Fallback nicht —
-  // `../architecture/STRATEGY_STACK.md` bleibt `null`, obwohl der aufgelöste
-  // Dateiname existiert. Reine Trenner innerhalb eines Dateinamens werden
-  // weiterhin über `basename()` normalisiert (bestehende Auflösungen wie
-  // `audits/README.md` bleiben unverändert). Die Schritte 1/2 (Slug bzw.
-  // Katalog-Dateiname) und das Traversal-Verbot der Pfadkonstruktion bleiben
-  // unangetastet.
-  if (raw.split(/[/\\]+/).includes("..")) return null;
-  // Suche in bekannten Unterordnern (Reihenfolge = Priorität; architecture/ und
-  // roadmap/ stehen alphabetisch-neutral nach security/ und vor archive/).
+  for (const candidate of candidates) {
+    if (!isServableDocFile(candidate)) continue;
+    if (!existsFile(candidate)) continue;
+    const resolved = build(candidate);
+    if (resolved) return resolved;
+  }
+
+  // 4) Altlast-Fallback: nur der **nackte** Dateiname, gesucht in bekannten
+  //    Unterordnern (Reihenfolge = Priorität; siehe tests/docsCatalog.test.ts).
+  //    Enthielt die Anfrage einen Verzeichnisanteil, der nicht aufgelöst werden
+  //    konnte, wird abgewiesen statt geraten: `tests/fixtures/golden/README.md`
+  //    darf nicht lautlos `docs/README.md` liefern (Befund B5).
+  if (normalized.includes("/")) return null;
+
+  const safeBase = basename(normalized);
+  if (!safeBase.endsWith(".md") || safeBase.includes("/") || safeBase === "..") return null;
   const searchPaths = [
     `docs/${safeBase}`,
     `docs/audits/${safeBase}`,
@@ -411,16 +650,11 @@ export function resolveDoc(name: string): ResolvedDoc | null {
     safeBase, // Root-Dateien wie CHANGELOG.md, CONFIGURATION.md
   ];
   for (const file of searchPaths) {
-    // B4-Folgefix (Befund B8): identisch zu `path.join(process.cwd(), file)`,
-    // aber ohne Turbopack-Projekt-Tracing (Opt-out liegt in `./appPaths`).
-    if (existsSync(resolveRuntimePath(file))) {
-      const entry: DocsEntry = { file, title: safeBase.replace(/\.md$/, ""), subtitle: "" };
-      return { slug: safeBase.replace(/\.md$/, "").toLowerCase(), entry, file, canonicalPath: `/docs/${safeBase}` };
-    }
+    if (!isServableDocFile(file)) continue;
+    if (!existsFile(file)) continue;
+    const resolved = build(file);
+    if (resolved) return resolved;
   }
-  // Fallback: docs/* rekursiv? Nur wenn explizit erlaubt — hier nur docs/
-  const file = `docs/${safeBase}`;
-  if (!existsSync(resolveRuntimePath(file))) return null;
-  const entry: DocsEntry = { file, title: safeBase.replace(/\.md$/, ""), subtitle: "" };
-  return { slug: safeBase.replace(/\.md$/, "").toLowerCase(), entry, file, canonicalPath: `/docs/${safeBase}` };
+
+  return null;
 }

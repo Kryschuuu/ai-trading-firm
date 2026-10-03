@@ -5,7 +5,7 @@
 
 **Status:** **BETA — nicht produktionsreif**
 **Gilt ab:** `v0.1.0` (2026-09-23), unverändert für alle `v0.x.x`
-**Nächste Review:** siehe [§5](#5-review-kadenz)
+**Nächste Review:** siehe [§5](#6-review-kadenz)
 
 ---
 

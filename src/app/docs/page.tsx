@@ -8,7 +8,7 @@
  */
 
 import { redirect } from "next/navigation";
-import { resolveDoc } from "@/lib/docsCatalog";
+import { resolveDocRequest } from "@/lib/docsCatalog";
 import DocsIndex from "@/components/docs/DocsIndex";
 
 export default async function DocsPage({
@@ -19,7 +19,7 @@ export default async function DocsPage({
   const sp = await searchParams;
   const name = typeof sp.name === "string" ? sp.name.trim() : "";
   if (name) {
-    const resolved = resolveDoc(name);
+    const resolved = resolveDocRequest(name);
     if (resolved) redirect(resolved.canonicalPath);
   }
   return <DocsIndex />;

@@ -5,7 +5,11 @@
 # docs:validate` aus, das scripts/docs-validate.ts ruft:
 #   - Hilfe-Schema-Validierung aller docs/help/*.help.json gegen
 #     docs/help/help.schema.json (3-Ebenen-Systematik kurzinfo/technischeInfo/risiko),
-#   - relativer Link-Check innerhalb docs/ (0 tote relative Links/Anker),
+#   - relativer Link-Check innerhalb docs/ und der Root-Markdown-Dateien
+#     (0 tote relative Links/Anker),
+#   - App-Link-Check: dieselben Links aus Sicht des Doku-Viewers — jeder
+#     `.md`-Link muss unter `/docs/<Pfad>.md` beim richtigen Dokument landen
+#     (0 tote Links, 0 Verwechslungen durch gleichnamige Dateien),
 #   - Markdown-Lint (repo-konform: Code-Fences, ATX-Header, Trailing-Whitespace),
 #   - Secret-Scan ueber Docs (0 API-Keys/Tokens/private Schluessel/interne Hosts/PPI),
 #   - Konsistenz-Checks gegen den Code:

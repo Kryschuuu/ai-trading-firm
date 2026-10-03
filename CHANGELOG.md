@@ -26,6 +26,46 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ## [Unreleased]
 
+### Fixed — Doku-Rendering & Docs-Links (2026-10-03)
+
+Der Doku-Viewer (`/docs/…`) hat relative Links nur über den **Dateinamen**
+aufgelöst und Überschriften ohne `id` gerendert. Gemessener Ausgangsbefund:
+99 Überschriften ohne `id`, 1447 relative `.md`-Links, davon 878 in der App
+tot und 101 auf dem falschen Dokument (Kollisionen wie `README.md`, das es 31×
+im Baum gibt).
+
+* **Kapitel-Sprünge funktionieren wieder.** `rehype-slug` vergibt
+  GitHub-kompatible Anker-IDs (Umlaute bleiben erhalten), `DocsView` holt den
+  Sprung nach, nachdem der per `fetch` geladene Inhalt im DOM steht. Zusätzlich
+  zeigt ein Inhaltsverzeichnis mit Scroll-Spy das aktive Kapitel.
+* **Die kanonische URL trägt jetzt den Pfad** innerhalb von `docs/`
+  (`/docs/audits/2026-09-18-feature-gap/README.md`) statt nur den Dateinamen.
+  Markdown direkt im Repo-Root liegt unter `/docs/root/` (`/docs/root/CHANGELOG.md`),
+  weil sonst Root- und `docs/`-Dateien gleichen Namens kollidieren.
+  Route ist `src/app/docs/[...path]` statt `src/app/docs/[name]`.
+* **Namenskollisionen aufgelöst.** `audits/README.md` liefert nicht mehr
+  lautlos `docs/README.md`. Eine Anfrage mit Verzeichnisanteil, die nicht
+  auflöst, wird abgewiesen statt geraten.
+* **Link-Auflösung doc-bewusst.** Relative Ziele werden gegenüber dem
+  Verzeichnis der Quelldatei gelöst — wie auf GitHub. Verzeichnis-Links gehen
+  auf ihr `README.md`.
+* **Ziele außerhalb der Doku** (`../src/db/schema.ts`, `../drizzle/*.sql`,
+  `*.pdf`, `*.csv`, `*.json`) werden als nicht klickbarer Code-Text gerendert
+  statt als toter Link. Der Viewer bleibt damit kein Repo-File-Reader:
+  ausgeliefert wird ausschließlich Markdown unter `docs/` bzw. im Root.
+* **Katalog vervollständigt:** 25 `docs/*.md` standen in keiner Navigation und
+  waren nur über einen Fallback erreichbar (u. a. `CROSS_SECTIONAL_RANKING`,
+  `MONTE_CARLO`, `SENTIMENT`, `TWAP_EXECUTION`).
+* **`npm run docs:validate` verschärft:** neuer Check `App-Link-Check`
+  simuliert die Auflösung des Viewers und vergleicht sie mit der GitHub-Sicht
+  — genau die Prüfung, die den Ausgangsbefund gefunden hätte. Der Anker-Check
+  benutzt jetzt `github-slugger` statt eines Nachbaus (der entfernte Umlaute),
+  prüft auch In-Page-Anker und zusätzlich die Markdown-Dateien im Repo-Root
+  (`CHANGELOG.md`, `CONFIGURATION.md`, …).
+* Drei veraltete In-Page-Anker und ein toter Link in `CONFIGURATION.md`
+  korrigiert (waren vorher unsichtbar, weil der Check den falschen
+  Slug-Algorithmus benutzte).
+
 ## [0.12.0] — Claude Trading Indicator (CTI) + Signalstrategien im Backtest (2026-10-03)
 
 > **Status: Beta.** Minor-Release. Neues Modul `src/signals/`: die
