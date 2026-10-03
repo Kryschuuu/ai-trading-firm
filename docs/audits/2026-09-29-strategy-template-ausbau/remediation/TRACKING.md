@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-10-03 · Historische Vollabgleichsbasis: `main` @ `3d13161` ([`RECONCILE-2026-10-03.md`](RECONCILE-2026-10-03.md)); aktueller Remediation-Stand: `v0.11.0` / 08-04. **21 Findings:** 18 FIXED, 1 PARTIAL (STX-14), 2 OPEN (STX-08, STX-21). **Alle 32 Ursprungs-Prompts umgesetzt**; in Phase 8 sind 08-01…08-04 abgeschlossen, 08-05 bleibt offen. STX-12 ist durch den Cache-Fix geschlossen. DB-Tests mit PostgreSQL bleiben außerhalb der hier ausgeführten fokussierten Prüfung nicht verifizierbar.
+- **Stand:** 2026-10-03 · Historische Vollabgleichsbasis: `main` @ `3d13161` ([`RECONCILE-2026-10-03.md`](RECONCILE-2026-10-03.md)); aktueller Remediation-Stand: `v0.11.1` / 08-05. **21 Findings:** 19 FIXED, 1 PARTIAL (STX-14), 1 OPEN (STX-08). **Alle 32 Ursprungs-Prompts umgesetzt**; Phase 8 ist mit 08-01…08-05 abgeschlossen. STX-12 ist durch den Cache-Fix geschlossen, STX-21 durch die Endpunkt-Härtung. DB-Tests mit PostgreSQL bleiben außerhalb der hier ausgeführten fokussierten Prüfung nicht verifizierbar.
 
 **Nachtrag 08-01 (2026-10-03, zunächst `[Unreleased]`, Code-Version damals `0.10.6`):**
 Der Copy-Engine-Eintrag zu PR #215 wurde in diesem Release unter `v0.11.0`
@@ -52,6 +52,38 @@ die einzige dokumentierte Literalstelle. **Altlast 1 behoben; Audit-Version `v1.
 
 **Nachtrag 08-04 (2026-10-03, `v0.11.0`, STX-12):** `backtestRule()` baut `buildIndicatorCache(candles)` einmal vor der Bar-Schleife und ruft je Bar `snapshotFromCache()` auf. Die sechs SHA-256-Goldenwerte aus `bbfc799` bleiben unverändert; `tests/ruleEngine.indicatorCacheParity.test.ts` prüft alle `RULE_FIELDS` an 576 Snapshots (3 Symbole × 2 Timeframes) plus Null-/Ungültigfälle. Fokussierte Backtest-/Engine-/Template-Tests: 144/144 grün. `npm run typecheck`, `npm run lint` und `npm run docs:validate` sind grün. Vollständiges `npm test` wurde ausdrücklich auf Nutzeranweisung übersprungen. Die historische HistoricalStore-Reihe fehlt; die ergänzende synthetische 17 520-Bar-Messung (20 253,605 ms → 64,489 ms, 314,1×) ist **kein** Ersatz für die offizielle 25 986,2-ms-Baseline. Rohwerte/Methodik: [`BENCH-BASELINE.md` §11](BENCH-BASELINE.md#11-folgemessung-stx-08-04--einmaliger-indicator-cache-in-backtestrule). STX-12 geschlossen; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221).
 
+**Nachtrag 08-05 (2026-10-03, `v0.11.1`, STX-21):** `LOCAL_FREE` setzt seinen
+lokalen Endpunkt jetzt durch (Weg 1, keine Umbenennung). Neu ist
+`src/routing/localEndpoint.ts` — eine reine, deterministische Klassifikation
+eines Basis-URLs: Loopback `127.0.0.0/8`, IPv6 `::1` (inkl. gemappter Form),
+`localhost`/`*.localhost` sowie die öffentlich nicht auflösbaren RFC-6761-Namen
+`.test`/`.invalid`; kein DNS-Lookup, keine Auflösung. `allowedProviderOrder()`
+in `src/strategies/validator/agent.ts` prüft jeden lokalen Kandidaten
+(`ollama`, `openai`) gegen seinen **effektiven** Basis-URL (`providerConfigFromEnv()`,
+also `OLLAMA_BASE_URL`/`LLM_BASE_URL` oder Default) und entfernt nicht-lokale
+Einträge sichtbar über `validator_agent_provider_excluded_total{policy,provider}`
+(geschlossene Labels: `LOCAL_FREE`/`OPENCODE_FREE` und Provider-ID — keine URL,
+kein Modellname). `OPENCODE_FREE` bleibt Cloud-Opt-in; nur seine lokalen
+Fallbacks werden geprüft. Eine leere Liste ändert nichts: weiterhin
+`{ unavailable: true }`, `result`/`gates[]`/`assumptions` bleiben unangetastet.
+`DEFAULT_BASE_URLS`, `API_KEY_ENV`, die Provider-Liste in
+`src/lib/llmProvider.ts` und `src/routing/policy.ts` sind unverändert. Neue
+Tests: `tests/routing.localEndpoint.test.ts` (6) und fünf zusätzliche Fälle in
+`tests/strategyValidation.agent.test.ts` (13 gesamt) — u. a. Cloud-`LLM_BASE_URL`
+⇒ `openai` ausgeschlossen, Zähler `excluded{policy="LOCAL_FREE",provider="openai"} 1`,
+kein Request an `api.openai.com` (Fetch-Spy weist jeden nicht-lokalen Host
+zurück); Loopback-Override ⇒ `openai` bleibt nutzbar; beide Endpunkte cloud ⇒
+`unavailable` ohne Modellaufruf und mit byte-identischem Report. `npm run
+typecheck`, `npm run lint`, `npm test` und `npm run docs:validate` sind grün.
+Der volle `npm test`-Lauf hat zusätzlich einen **vorbestehenden** roten Test aus
+08-04 sichtbar gemacht: `tests/benchBacktest.test.ts` erwartete in der
+Matrix-Kostenprüfung die Reihenfolge `rule > multiAsset`, die der
+Indicator-Cache seit `v0.11.0` aufhebt — bei Spielzeuggrößen (200/400 Bars)
+kippte sie in 4 von 5 lokalen Läufen. Der Test prüft jetzt den
+Protokoll-Vertrag (positive Zell-/Kernstunden-Kosten je Pfad); die
+vergleichende Aussage bleibt in [`BENCH-BASELINE.md`](BENCH-BASELINE.md).
+**STX-21 geschlossen; Audit-Version `v1.2.5`.**
+
 **Nachtrag 06-05 (2026-10-02, `v0.10.4`):** `runValidatorAgent()` liefert eine
 separate, strikt schema-geprüfte Interpretation aus allowlisteten aggregierten
 Reportdaten; `notes` und Rohdaten gehen nicht an den Provider. Boundary-Overrides
@@ -97,7 +129,7 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 | STX-10 Feature Store ist Slice | MEDIUM | ☑ | 00-02 ☑ (Doku, `v0.6.1`) → 02-04 ☑ (optional umgesetzt, `7995822` PR #189: `rule.bb_zscore`, `rule.price_vs_upper_bb_pct`, `rule.donchian_breakout_pct` + Paritätstest) |
 | STX-11 Cost-Stress existiert | MEDIUM | ☑ | 00-02 ☑ (Doku, `v0.6.1`) → 06-03 ☑ (`v0.10.2`, `src/strategies/validator/stress.ts`) |
 | STX-12 `backtestRule` O(n²) | MEDIUM | ☑ | FIXED in `v0.11.0` / 08-04: einmaliger `buildIndicatorCache()` + `snapshotFromCache()`; `ruleBacktest.ts`/API bleiben angebunden; eingefrorene Goldens und jedes `RULE_FIELDS`-Feld bar-für-bar exakt. Benchmark-Folgemessung ist synthetisch und nicht Ersatz der HistoricalStore-Baseline; vollständiges `npm test` auf Nutzeranweisung übersprungen. PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221). |
-| STX-13 OpenCode-Free-Tier | LOW | ☑ | 06-05 (`v0.10.4`): best effort statt Verfügbarkeitsgarantie; Ausfall bleibt `unavailable`. Restpunkt Lokalitäts-Garantie ausgegliedert → [STX-21](../findings/STX-21-localfree-cloud-endpoint.md) |
+| STX-13 OpenCode-Free-Tier | LOW | ☑ | 06-05 (`v0.10.4`): best effort statt Verfügbarkeitsgarantie; Ausfall bleibt `unavailable`. Restpunkt Lokalitäts-Garantie ausgegliedert → [STX-21](../findings/STX-21-localfree-cloud-endpoint.md), mit 08-05 (`v0.11.1`) geschlossen |
 | STX-14 `changePct24h`-Semantik | LOW | ◐ | 03-01 ☑ (Doku) → 06-01 ☑ (`v0.10.0`, Prüfung `CHANGE_PCT_SEMANTICS`: Nutzung ⇒ `VIOLATED` mit `WARNING`, Semantik aus `RULE_FIELD_LABELS`); offen bleibt die Feld-Deprekation (`changePctBars`) — **ohne aktuellen Konsumenten** (kein Template nutzt das Feld), zurückgestellt |
 | STX-15 Faktorzahl (14 ≠ 15+) | LOW | ☑ | 00-02 (`v0.6.1`); [Abgleich](RECONCILE-2026-10-03.md) nachgezählt: 14 Faktoren in `scanner.config.json` |
 | STX-16 Copy-Compliance | LOW | ☑ | 07-01 ☑ (`b0bfcce`) → 07-02 ☑ (`f5af325`): `CopyMode` mit **einem** Wert, DB-CHECK `mode='SIMULATE_ONLY'`, Follower nur `PaperBroker`; rechtliche Prüfung bleibt außerhalb ([OP-4](#offene-punkte-für-den-reviewer)) |
@@ -105,7 +137,7 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 | STX-18 `RuleSpec` trägt 5/7 Templates | INFO | ☑ | bestätigt und abgeschlossen — Bollinger 02-02 ☑ (`v0.6.4`), Donchian 02-03 ☑ (`v0.6.5`); Templates 03-03 ☑ (`v0.7.1`), 03-04 ☑ (`v0.7.2`), 03-05 ☑ (`v0.7.3`), 03-06/03-07/03-08 ☑ (`v0.7.4`) — alle sechs gebaut; Compiler-Abnahme 03-09 ☑ (`v0.7.5`, sechs Templates ohne Klemmung durch den Sicherheitspfad); Vertragstests 03-10 ☑ (`v0.7.6`, `tests/strategies.templates.test.ts`) |
 | STX-19 Kafka-Einwand | INFO | ☑ | bestätigt und **erfüllt** — global gesperrt ([`../ROADMAP.md`](../ROADMAP.md) §0); [Abgleich](RECONCILE-2026-10-03.md): kein Kafka/NATS/Redis/DuckDB in `dependencies`, 0 Treffer in `src/` |
 | STX-20 Changelog-Nachtrag Copy-Engine | LOW | ☑ | 08-01 erledigt (2026-10-03): Eintrag unter `[Unreleased]`, Projekt-Code-Version `0.10.6` ohne Bump; Details im [Finding](../findings/STX-20-changelog-nachtrag-copy-engine.md) |
-| STX-21 `LOCAL_FREE`-Endpunkt | LOW | ☐ | neu im [Abgleich](RECONCILE-2026-10-03.md): `LOCAL_FREE_PROVIDERS` enthält `openai` mit konfigurierbarer `LLM_BASE_URL`; Filter prüft nur Toggles → [08-05](../prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) |
+| STX-21 `LOCAL_FREE`-Endpunkt | LOW | ☑ | 08-05 erledigt (`v0.11.1`, 2026-10-03): `src/routing/localEndpoint.ts` klassifiziert den effektiven Basis-URL (Loopback/`localhost`/`.test`/`.invalid`, kein DNS); `allowedProviderOrder()` sondert nicht-lokale `ollama`/`openai`-Endpunkte aus und zählt `validator_agent_provider_excluded_total{policy,provider}`; leere Liste ⇒ `{ unavailable: true }`, Report unverändert. Details im [Finding](../findings/STX-21-localfree-cloud-endpoint.md) |
 
 ## Prompts
 
@@ -186,8 +218,9 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 
 > Entstanden aus dem Vollabgleich [`RECONCILE-2026-10-03.md`](RECONCILE-2026-10-03.md).
 > Jeder Prompt ist eigenständig, abgegrenzt und ohne Rückfragen ausführbar.
-> Reihenfolge: 08-01…08-04 sind erledigt; 08-04 war das hochriskante, zuletzt
-> und isoliert ausgeführte Paket. 08-05/STX-21 bleibt unabhängig offen.
+> Reihenfolge: 08-01…08-05 sind erledigt; 08-04 war das hochriskante, zuletzt
+> und isoliert ausgeführte Paket, 08-05 schließt STX-21 ab. Phase 8 ist damit
+> vollständig.
 
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
@@ -195,7 +228,7 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](../prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | ☑ | Altlast 3 (OP-6) | `v0.10.8` (`tests/docsCatalog.test.ts`, 8 Tests; Altlast 3 behoben) |
 | 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](../prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | ☑ | STX-02-Rest / Altlast 1 | `v0.10.9` (`STRATEGY_CLASS_KEYS` aus `STRATEGY_CLASSES`, Lookup statt Literale, Quelltext-Wächter in `tests/adrVocabulary.test.ts`; Altlast 1 behoben) |
 | 08-04 | [`backtestRule()` auf den Indicator-Cache](../prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | ☑ | STX-12 | `v0.11.0`; frozen Goldens + vollständige RULE_FIELDS-Parität; 144 fokussierte Tests, typecheck/lint/docs:validate (PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)) |
-| 08-05 | [`LOCAL_FREE`-Endpunkt absichern](../prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | ☐ | STX-21 | — |
+| 08-05 | [`LOCAL_FREE`-Endpunkt absichern](../prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | ☑ | STX-21 | `v0.11.1` — Endpunkt-Prüfung (`src/routing/localEndpoint.ts`), Ausschlusszähler, `unavailable` bei leerer Liste; 6 + 5 neue Tests; STX-21 geschlossen |
 
 ---
 

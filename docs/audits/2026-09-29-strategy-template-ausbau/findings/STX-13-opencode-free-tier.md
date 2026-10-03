@@ -4,13 +4,13 @@
 - **Severity:** LOW
 - **Bereich:** Routing / LLM
 - **Quelle:** Ausbaudokument §3.8, §14
-- **Status:** FIXED (06-05, `v0.10.4`) — bestätigt im Abgleich 2026-10-03; Restpunkt der Lokalitäts-Garantie als [STX-21](STX-21-localfree-cloud-endpoint.md) erfasst
+- **Status:** FIXED (06-05, `v0.10.4`; Restpunkt mit 08-05, `v0.11.1`) — bestätigt im Abgleich 2026-10-03; der Restpunkt der Lokalitäts-Garantie wurde als [STX-21](STX-21-localfree-cloud-endpoint.md) erfasst und mit 08-05 (`v0.11.1`) geschlossen
 - **Datei(en):** `src/routing/`, `src/lib/llmProvider.ts`
 
 ## Abgleich 2026-10-03
 
 - **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
-- **Eingestuft:** `☑` **FIXED** — Restpunkt ausgegliedert nach STX-21
+- **Eingestuft:** `☑` **FIXED** — Restpunkt ausgegliedert nach STX-21 und dort mit 08-05 (`v0.11.1`, Endpunkt-Prüfung) geschlossen
 - **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
 
 **Nachweise**
@@ -19,7 +19,7 @@
 - Ausfall ⇒ `{ unavailable: true }`: `agent.ts:183-184`, `:541`; `result` wird nie verändert
 - Keine Free-Modell-Liste als Garantie im Code
 - Tests ausgeführt und grün: `tests/strategyValidation.agent.test.ts:143` („läuft ohne Cloud-Credentials"), `:186` („echter Ollama-Client ohne Cloud-Schlüssel"), `:262` (unbekannte Policy ⇒ `LOCAL_FREE`)
-- **Restpunkt → [STX-21](STX-21-localfree-cloud-endpoint.md):** `LOCAL_FREE_PROVIDERS` (`agent.ts:44`) enthält `openai`, dessen Endpunkt über `LLM_BASE_URL` konfigurierbar ist (`src/lib/llmProvider.ts:150,210`); `filterEnabledProviders` (`src/routing/providerToggles.ts:105-110`) filtert nur Toggles. Die Abnahmekriterien dieses Findings bleiben erfüllt; die **Garantie** „lokal" ist es nicht.
+- **Restpunkt → [STX-21](STX-21-localfree-cloud-endpoint.md) — mit 08-05 (`v0.11.1`) geschlossen:** `LOCAL_FREE_PROVIDERS` (`agent.ts:44`) enthält `openai`, dessen Endpunkt über `LLM_BASE_URL` konfigurierbar ist (`src/lib/llmProvider.ts:150,210`); `filterEnabledProviders` (`src/routing/providerToggles.ts:105-110`) filtert nur Toggles. Seit 08-05 prüft `allowedProviderOrder()` zusätzlich den **effektiven** Endpunkt gegen `src/routing/localEndpoint.ts` und sondert nicht-lokale Provider sichtbar über `validator_agent_provider_excluded_total{policy,provider}` aus; `{ unavailable: true }` bei leerer Liste bleibt. Die Abnahmekriterien dieses Findings bleiben erfüllt — jetzt auch die **Garantie** „lokal".
 
 ## Beschreibung
 

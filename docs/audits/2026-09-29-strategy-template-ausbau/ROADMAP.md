@@ -4,13 +4,13 @@
 > Versionierung: [`VERSIONING.md`](VERSIONING.md) ·
 > Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
 >
-> **Vollabgleich 2026-10-03 + STX-08-04-Abschluss** (Audit `v1.2.4`): der historische Abgleich
+> **Vollabgleich 2026-10-03 + Abschluss 08-04/08-05** (Audit `v1.2.5`): der historische Abgleich
 > verifizierte alle 21 Findings gegen `main` @ `3d13161` —
-> [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md). Nach dem
-> 08-04-Fix: **21 Findings** — 18 FIXED, 1 PARTIAL ([STX-14](findings/STX-14-changepct24h-semantik.md)),
-> 2 OPEN ([STX-08](findings/STX-08-alpaca-ohne-websocket.md),
-> [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Alle 32 Ursprungs-Prompts
-> umgesetzt.** In **Phase 8** sind 08-01…08-04 erledigt; 08-05/STX-21 bleibt offen.
+> [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md). Nach 08-04
+> (STX-12) und 08-05 (STX-21): **21 Findings** — 19 FIXED,
+> 1 PARTIAL ([STX-14](findings/STX-14-changepct24h-semantik.md)),
+> 1 OPEN ([STX-08](findings/STX-08-alpaca-ohne-websocket.md)). **Alle 32 Ursprungs-Prompts
+> umgesetzt.** **Phase 8** ist mit 08-01…08-05 **vollständig abgeschlossen**.
 
 ## ⚠️ Diese Roadmap beendet die Beta-Phase nicht
 
@@ -378,19 +378,20 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 > **Herkunft:** der Vollabgleich [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 > hat 21 Findings gegen `main` @ `3d13161` verifiziert. Die 32 Ursprungs-Prompts sind
-> umgesetzt; 08-01…08-04 sind am 2026-10-03 erledigt, 08-05/STX-21 bleibt als
-> einziger Phase-8-Prompt offen. Jeder Prompt ist ein eigenständiger, abgegrenzter
+> umgesetzt; 08-01…08-05 sind am 2026-10-03 erledigt — Phase 8 ist damit
+> abgeschlossen. Jeder Prompt ist ein eigenständiger, abgegrenzter
 > Auftrag mit Ziel, betroffenen Dateien, Randbedingungen, Abnahmekriterien und Tests.
 >
 > **Ausführungsreihenfolge:** 08-04 wurde nach 08-01…08-03 als hochriskantes Paket
-> zuletzt und allein umgesetzt; 08-05 ist unabhängig davon offen.
+> zuletzt und allein umgesetzt; 08-05 folgte danach unabhängig (Endpunkt-Härtung,
+> `v0.11.1`). Phase 8 ist damit abgeschlossen.
 
 | # | Prompt | Finding | Risiko | Ergebnis | Hängt ab von |
 |---|---|---|---|---|---|
 | 08-01 | [Changelog-Nachtrag Copy-Engine](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | minimal (Doku) | ✅ erledigt: `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03; kein Projekt-Bump) | — |
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ✅ erledigt: `v0.10.8` + `tests/docsCatalog.test.ts` (8 Tests), Altlast 3 behoben | — |
 | 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ✅ erledigt: `v0.10.9` — `STRATEGY_CLASS_KEYS` aus `STRATEGY_CLASSES` abgeleitet, Lookup statt Literale, Quelltext-Wächter in `tests/adrVocabulary.test.ts`, Altlast 1 behoben | — |
-| 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
+| 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ✅ erledigt: `v0.11.1` — Weg 1 (durchsetzen), `src/routing/localEndpoint.ts`, Ausschlusszähler `validator_agent_provider_excluded_total`, 6 + 5 neue Tests; STX-21 geschlossen | — |
 | 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ✅ erledigt: `v0.11.0`, einmaliger Cache-Aufbau, Goldens unverändert, vollständige Feldparität, 144 fokussierte Tests; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221) | 00-01, 02-02/02-03 |
 
 **Warum diese fünf und in dieser Reihenfolge:**
@@ -401,8 +402,11 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 - **08-02 und 08-03 haben am 2026-10-03 zwei der drei dokumentierten Code-Altlasten (OP-6)
   abgeräumt** — beides kleine, isolierte Änderungen mit sofortigem Nutzen (ADR-Log im
   Browser lesbar; eine neue Klasse braucht künftig nur noch ein ADR).
-- **08-05** schließt die Lücke zwischen dem **Namen** `LOCAL_FREE` und seiner
-  **Garantie**. Unabhängig von allem anderen, kleiner Testaufwand.
+- **08-05 ist am 2026-10-03 erledigt** (`v0.11.1`) und schließt die Lücke zwischen dem
+  **Namen** `LOCAL_FREE` und seiner **Garantie**: Ein nicht-lokaler Endpunkt fällt
+  aus der Kandidatenliste und wird gezählt, statt still dorthin zu senden. Weg 1
+  (durchsetzen) statt Umbenennung — der Name bleibt eine Zusage. Unabhängig von
+  allem anderen, kleiner Testaufwand.
 - **08-04 wurde zuletzt und allein ausgeführt**, weil er als einziger Handelslogik
   anfasst und Byte-Identität verlangt. Die offizielle Messung vom 00-01 beschreibt
   den damaligen Direktpfad; die ergänzende synthetische Same-Series-Messung unter
@@ -432,10 +436,10 @@ vorhanden. Kein Prompt dieser Phase blockiert einen anderen.
 00-02 ✅ ──▶ 07-01 ✅ ──▶ 07-02 ✅ ──▶ 07-03 ✅      (vollständig unabhängig, Gate G8 erfüllt)
 02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
 
-Phase 8 (Abgleich 2026-10-03; 08-04 abgeschlossen):
+Phase 8 (Abgleich 2026-10-03; vollständig abgeschlossen):
   08-01 ✅ (STX-20 Doku)   08-02 ✅ (Altlast 3)   08-03 ✅ (Altlast 1)
   08-04 ✅ (STX-12, v0.11.0; Handelslogik, zuletzt und allein)
-  08-05 ⏳ (STX-21)
+  08-05 ✅ (STX-21, v0.11.1; LOCAL_FREE-Endpunkt durchgesetzt)
 ```
 
 **Kritischer Pfad:** `00-03 → 01-01 → 03-01 → 03-02 → 03-09 → 04-01 → 04-02 → 05-… → 06-04`

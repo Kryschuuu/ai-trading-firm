@@ -3,7 +3,7 @@
 ## Metadaten
 
 - **Datum:** 2026-09-29
-- **Audit-Version:** `v1.2.4` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md)) — **Vollabgleich 2026-10-03** gegen `main` @ `3d13161` plus Abschluss 08-04: alle 21 Findings verifiziert, **alle 32 Ursprungs-Prompts umgesetzt**; 08-01 schließt STX-20 (Changelog-Nachtrag), 08-02 löst Altlast 3 (`v0.10.8`), 08-03 Altlast 1 (`v0.10.9`), 08-04 schließt STX-12 (`v0.11.0`, Indicator-Cache, unveränderte Goldens/Parität), 08-05/STX-21 bleibt offen; [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md) dokumentiert den historischen Abgleich
+- **Audit-Version:** `v1.2.5` (Schema + Versionsregeln: [`VERSIONING.md`](VERSIONING.md)) — **Vollabgleich 2026-10-03** gegen `main` @ `3d13161` plus Abschluss 08-04/08-05: alle 21 Findings verifiziert, **alle 32 Ursprungs-Prompts umgesetzt**; 08-01 schließt STX-20 (Changelog-Nachtrag), 08-02 löst Altlast 3 (`v0.10.8`), 08-03 Altlast 1 (`v0.10.9`), 08-04 schließt STX-12 (`v0.11.0`, Indicator-Cache, unveränderte Goldens/Parität), 08-05 schließt STX-21 (`v0.11.1`, `LOCAL_FREE`-Endpunkt durchgesetzt); [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md) dokumentiert den historischen Abgleich
 - **Quelle:** External (ChatGPT-Analyse „Analyse und Ausbaukonzept für `ai-trading-firm`")
 - **Reviewer:** Arena Agent Mode (Code-verifizierendes Audit gegen `main` @ `e3509fd`)
 - **Scope:** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`, `src/lib/indicators.ts`,
@@ -12,8 +12,8 @@
   `src/lib/regimeEvaluation.ts`, `src/brokers/alpaca/**`, `src/brokers/bitunix/**`,
   `src/routing/**`, `src/db/schema.ts`, `drizzle/**`
 - **Branch/Commit:** `arena/01a0ee47-ai-trading-firm` · `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Code-Version:** `package.json` v0.11.0 (Beta; STX-08-04) · Audit-Basis des Vollabgleichs: `main` @ `3d13161` · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
-- **Status:** OPEN — Vollabgleich plus STX-08-04-Abschluss (2026-10-03): **Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt** (Phase 0 `v0.6.0`/`v0.6.1` · Phase 1 `v0.6.2` · Phase 2 `v0.6.3`–`v0.6.5` inkl. optionalem Slice 02-04 · Phase 3 `v0.7.0`–`v0.7.6` · Phase 4 `v0.8.0` + `v0.10.4` · Phase 5 `v0.9.0`, Gate G5; G6-Pilotlauf offen · Phase 6 `v0.10.0`–`v0.10.4` · Phase 7 `v0.10.5`/`v0.10.6` + 07-03). **21 Findings:** 18 FIXED, 1 PARTIAL ([STX-14](findings/STX-14-changepct24h-semantik.md)), 2 OPEN ([STX-08](findings/STX-08-alpaca-ohne-websocket.md), [STX-21](findings/STX-21-localfree-cloud-endpoint.md)). **Phase 8:** 08-01…08-04 erledigt (08-04 `v0.11.0`, schließt STX-12), 08-05 offen; Details in [`ROADMAP.md`](ROADMAP.md#phase-8--folge-prompts-aus-dem-abgleich-2026-10-03) und [`remediation/TRACKING.md`](remediation/TRACKING.md).
+- **Code-Version:** `package.json` v0.11.1 (Beta; STX-08-05) · Audit-Basis des Vollabgleichs: `main` @ `3d13161` · Doku-Stand `docs/roadmap/STATUS.md` v1.73.0 (historischer TASK-Tracker; Entscheidungen: [`DECISIONS.md`](../../roadmap/DECISIONS.md))
+- **Status:** OPEN — Vollabgleich plus Abschluss 08-04/08-05 (2026-10-03): **Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt** (Phase 0 `v0.6.0`/`v0.6.1` · Phase 1 `v0.6.2` · Phase 2 `v0.6.3`–`v0.6.5` inkl. optionalem Slice 02-04 · Phase 3 `v0.7.0`–`v0.7.6` · Phase 4 `v0.8.0` + `v0.10.4` · Phase 5 `v0.9.0`, Gate G5; G6-Pilotlauf offen · Phase 6 `v0.10.0`–`v0.10.4` · Phase 7 `v0.10.5`/`v0.10.6` + 07-03). **21 Findings:** 19 FIXED, 1 PARTIAL ([STX-14](findings/STX-14-changepct24h-semantik.md)), 1 OPEN ([STX-08](findings/STX-08-alpaca-ohne-websocket.md)). **Phase 8:** 08-01…08-05 erledigt (08-04 `v0.11.0` schließt STX-12, 08-05 `v0.11.1` schließt STX-21); Details in [`ROADMAP.md`](ROADMAP.md#phase-8--folge-prompts-aus-dem-abgleich-2026-10-03) und [`remediation/TRACKING.md`](remediation/TRACKING.md).
 - **Beta-Positionierung:** Diese Roadmap ist **kein** Weg aus der Beta-Phase — auch nicht
   nach vollständiger Umsetzung aller 32 Prompts. Siehe [`../../BETA_STATUS.md`](../../BETA_STATUS.md).
 
@@ -24,14 +24,15 @@
 | CRITICAL | 0 | 0 | 0 | 0 |
 | HIGH | 5 | 0 | 0 | 5 |
 | MEDIUM | 7 | 1 | 0 | 6 |
-| LOW | 6 | 1 | 1 | 4 |
+| LOW | 6 | 0 | 1 | 5 |
 | INFO | 3 | 0 | 0 | 3 |
-| **Σ** | **21** | **2** | **1** | **18** |
+| **Σ** | **21** | **1** | **1** | **19** |
 
-> **Stand 2026-10-03** (Audit `v1.2.4`, Vollabgleich plus 08-04): 21 Findings,
-> davon 18 `FIXED`, 1 `PARTIAL` (STX-14) und 2 `OPEN` (STX-08, STX-21).
-> „In Arbeit" = STX-14; „Offen" = STX-08 und STX-21. STX-12 ist durch
-> `backtestRule()`-Cache-Migration `v0.11.0` geschlossen; STX-20 bleibt durch
+> **Stand 2026-10-03** (Audit `v1.2.5`, Vollabgleich plus 08-04/08-05): 21 Findings,
+> davon 19 `FIXED`, 1 `PARTIAL` (STX-14) und 1 `OPEN` (STX-08).
+> „In Arbeit" = STX-14; „Offen" = STX-08 (Alpaca-WebSocket, eigener Adapter-Audit).
+> STX-12 ist durch die `backtestRule()`-Cache-Migration `v0.11.0` geschlossen,
+> STX-21 durch die `LOCAL_FREE`-Endpunkt-Härtung `v0.11.1`; STX-20 bleibt durch
 > den 08-01-Changelog-Nachtrag geschlossen. Der Abgleich-Bericht dokumentiert
 > weiterhin den früheren `main`-Stand @ `3d13161`.
 
@@ -55,7 +56,7 @@
 | [STX-10](findings/STX-10-featurestore-ist-slice.md) | Feature Store ist ein 3-Feature-Slice, kein „zentraler Feature-Layer" | MEDIUM | FIXED (00-02 + 02-04 `7995822`: `rule.bb_zscore`, `rule.price_vs_upper_bb_pct`, `rule.donchian_breakout_pct` + Paritätstest) |
 | [STX-11](findings/STX-11-cost-stress-existiert.md) | Cost-/Slippage-Stress existiert bereits (MonteCarlo + executionCost-Faktor) | MEDIUM | FIXED (06-03, `v0.10.2`) |
 | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | `backtestRule()` war O(n²) — der Matrix-Runner würde daran scheitern | MEDIUM | FIXED (`v0.11.0`, 08-04: einmaliger Indicator-Cache; sechs unveränderte Goldens, alle `RULE_FIELDS` bar-für-bar paritätisch; synthetischer 17 520-Bar-Vergleich 314,1×; vollständiges `npm test` auf Nutzeranweisung übersprungen; PR [#221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)) |
-| [STX-13](findings/STX-13-opencode-free-tier.md) | OpenCode-Zen-Free-Tier ist rotierend und nicht verlässlich als Routing-Klasse | LOW | FIXED (06-05, `v0.10.4`; Best-Effort, keine Dauer-Garantie) — Restpunkt der Lokalitäts-Garantie → [STX-21](findings/STX-21-localfree-cloud-endpoint.md) |
+| [STX-13](findings/STX-13-opencode-free-tier.md) | OpenCode-Zen-Free-Tier ist rotierend und nicht verlässlich als Routing-Klasse | LOW | FIXED (06-05, `v0.10.4`; Best-Effort, keine Dauer-Garantie) — Restpunkt der Lokalitäts-Garantie mit [STX-21](findings/STX-21-localfree-cloud-endpoint.md)/08-05 (`v0.11.1`) geschlossen |
 | [STX-14](findings/STX-14-changepct24h-semantik.md) | `changePct24h` misst 97 Perioden — Fallstrick für Tagesstrategien | LOW | PARTIAL (Prüfung `CHANGE_PCT_SEMANTICS` in `v0.10.0`; Feld-Deprekation offen — kein Template nutzt das Feld, zurückgestellt) |
 | [STX-15](findings/STX-15-scanner-faktorzahl.md) | Faktenkorrektur: 14 aktive Faktoren, nicht „15+" | LOW | FIXED (00-02) |
 | [STX-16](findings/STX-16-copy-trading-compliance.md) | Copy-Trading verschiebt das Compliance-/Haftungsprofil des Projekts | LOW | FIXED (07-01/07-02: `CopyMode` mit **einem** Wert, DB-CHECK `mode='SIMULATE_ONLY'`, Follower nur `PaperBroker`; rechtliche Prüfung bleibt außerhalb) |
@@ -63,7 +64,7 @@
 | [STX-18](findings/STX-18-info-rulespec-traegt-templates.md) | Bestätigt: `RuleSpec`-/Sanitize-Kette trägt die 5 Templates ohne Engine-Umbau | INFO | GEKLÄRT: Feldseite Bollinger 02-02 (`v0.6.4`), Donchian 02-03 (`v0.6.5`); **alle sechs Templates gebaut** — 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`), 03-06/03-07/03-08 (`v0.7.4`, σ-Korrektur 03-06 dokumentiert); **Compiler-Abnahme 03-09 (`v0.7.5`)** — sechs Templates kompilieren ohne Klemmung; **Vertragstests 03-10 (`v0.7.6`)** — alle sechs über alle Takte abgesichert |
 | [STX-19](findings/STX-19-info-kafka-einwand.md) | Bestätigt: kein Kafka empfohlen — Einwand des Dokuments trägt | INFO | VERIFIED (global gesperrt; Abgleich: kein Kafka/NATS/Redis/DuckDB in `dependencies`, 0 Treffer in `src/`) |
 | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | **Neu (Abgleich 2026-10-03):** Copy-Engine 07-03 war gemergt, aber nicht im Changelog | LOW | FIXED (08-01, `[Unreleased]`, Code-Version `0.10.6`; 2026-10-03) |
-| [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | **Neu (Abgleich 2026-10-03):** `LOCAL_FREE` garantiert „lokal" nur per Default-Konfiguration | LOW | OPEN → [08-05](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) |
+| [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | **Neu (Abgleich 2026-10-03):** `LOCAL_FREE` garantiert „lokal" nur per Default-Konfiguration | LOW | FIXED (08-05 `v0.11.1`: effektiver Basis-URL wird literal klassifiziert — Loopback/`localhost`/`.test`/`.invalid`; nicht-lokale `ollama`/`openai`-Endpunkte fallen aus der Liste und werden über `validator_agent_provider_excluded_total` gezählt; leere Liste ⇒ `{ unavailable: true }`) |
 
 ## Executive Summary
 
