@@ -4,8 +4,20 @@
 - **Severity:** MEDIUM
 - **Bereich:** Broker / Copy-Trading
 - **Quelle:** Ausbaudokument §2.3, §2.8
-- **Status:** OPEN
+- **Status:** OPEN — bestätigt im Abgleich 2026-10-03 (kein Alpaca-WebSocket; bewusst eigener Adapter-Audit)
 - **Datei(en):** `src/brokers/alpaca/`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☐` **OPEN** — Befund unverändert gültig
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `grep -rniE "wss://|websocket" src/brokers/alpaca/` → **0 Treffer** (16 Dateien, REST-only)
+- `src/brokers/bitunix/ws.ts` existiert — Bitunix-first bleibt richtig, Phase 7 ist darüber abgeschlossen (07-01…07-03)
+- Konsequenz: Alpaca als Copy-Leader bleibt außerhalb dieser Roadmap; ein Leader-Adapter hätte einen eigenen WS-Client mit Reconnect/Heartbeat/Backfill zur Voraussetzung
 
 ## Beschreibung
 

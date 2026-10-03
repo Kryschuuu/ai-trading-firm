@@ -4,8 +4,22 @@
 - **Severity:** LOW
 - **Bereich:** Routing / LLM
 - **Quelle:** Ausbaudokument §3.8, §14
-- **Status:** FIXED (06-05, `v0.10.4`)
+- **Status:** FIXED (06-05, `v0.10.4`) — bestätigt im Abgleich 2026-10-03; Restpunkt der Lokalitäts-Garantie als [STX-21](STX-21-localfree-cloud-endpoint.md) erfasst
 - **Datei(en):** `src/routing/`, `src/lib/llmProvider.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — Restpunkt ausgegliedert nach STX-21
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/strategies/validator/agent.ts:175` — Policy-Flag statt Routing-Typ (`LOCAL_FREE`/`OPENCODE_FREE`); `:427-429` — `OPENCODE_FREE` nur mit `OPENCODE_API_KEY`, sonst lokale Liste
+- Ausfall ⇒ `{ unavailable: true }`: `agent.ts:183-184`, `:541`; `result` wird nie verändert
+- Keine Free-Modell-Liste als Garantie im Code
+- Tests ausgeführt und grün: `tests/strategyValidation.agent.test.ts:143` („läuft ohne Cloud-Credentials"), `:186` („echter Ollama-Client ohne Cloud-Schlüssel"), `:262` (unbekannte Policy ⇒ `LOCAL_FREE`)
+- **Restpunkt → [STX-21](STX-21-localfree-cloud-endpoint.md):** `LOCAL_FREE_PROVIDERS` (`agent.ts:44`) enthält `openai`, dessen Endpunkt über `LLM_BASE_URL` konfigurierbar ist (`src/lib/llmProvider.ts:150,210`); `filterEnabledProviders` (`src/routing/providerToggles.ts:105-110`) filtert nur Toggles. Die Abnahmekriterien dieses Findings bleiben erfüllt; die **Garantie** „lokal" ist es nicht.
 
 ## Beschreibung
 

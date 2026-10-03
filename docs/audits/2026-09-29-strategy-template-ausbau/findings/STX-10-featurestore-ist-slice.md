@@ -4,8 +4,21 @@
 - **Severity:** MEDIUM
 - **Bereich:** Architektur / Features
 - **Quelle:** Ausbaudokument §4.8
-- **Status:** IN ARBEIT — Einordnung dokumentiert (00-02, `v0.6.1`, [STRATEGY_STACK.md](../../../architecture/STRATEGY_STACK.md)); Prompt 02-04 bleibt optional
+- **Status:** FIXED — Abgleich 2026-10-03: Einordnung dokumentiert (00-02) **und** optionaler Slice 02-04 umgesetzt (`7995822` PR #189)
 - **Datei(en):** `src/features/`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — von `IN ARBEIT` hochgestuft
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/features/definitions.ts:42-46` — `RULE_FEATURE_IDS = { bbZScore: "rule.bb_zscore", priceVsUpperBbPct: "rule.price_vs_upper_bb_pct", donchianBreakoutPct: "rule.donchian_breakout_pct" }`; Definitionen `:210-266` mit `computeKey` `rule.*@1`
+- `src/features/compute.ts:382-384` — drei Executors registriert; Implementierungen `:301`, `:323`, `:342`
+- Paritätstest `tests/ruleFeatureStoreParity.test.ts` vorhanden und **grün** (ausgeführt)
+- Die drei `scanner.*`-Features (`FEATURE_IDS`, `definitions.ts:35`) bleiben unverändert — der Store ist weiter ein Slice, jetzt mit `rule.*`-Anteil
 
 ## Beschreibung
 

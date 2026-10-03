@@ -4,8 +4,22 @@
 - **Severity:** HIGH
 - **Bereich:** Architektur / Domänenmodell
 - **Quelle:** Ausbaudokument §1.2, §15 (nicht erwähnt)
-- **Status:** IN ARBEIT — entschieden mit [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) (00-03, `v0.6.1`); Umsetzung in 03-01, 03-02, 03-09
+- **Status:** FIXED — Abgleich 2026-10-03: [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1) (00-03, `v0.6.1`) + Umsetzung 03-01/03-02/03-09 bestätigt
 - **Datei(en):** `src/lib/marketRegime.ts`, `src/lib/signalDecay.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — von `IN ARBEIT` hochgestuft
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- Alle sechs Templates deklarieren `class` aus `STRATEGY_CLASS_KEYS`: `trend` (`ema-adx-trend.ts:427`, `macd-momentum.ts:470`, `vwap-pullback.ts:258`), `breakout` (`bollinger-squeeze.ts:328`, `donchian-breakout.ts:370`), `mean-reversion` (`rsi-mean-reversion.ts:638`) — **keines** `unclassified`
+- `src/strategies/compiler.ts:633` — `return { ok: true, spec, strategyClass: template.class, … }`; `strategyClass` ist immer `template.class`, kein Aufrufer-Parameter (`compiler.ts:34`)
+- Kein zweites Klassen-Enum in `src/strategies/`: `grep` findet nur Template-Slugs und Klassenzuweisungen, keine eigene Union
+- Tests: `tests/strategies.templates.test.ts:472-478` (Klasse aus `STRATEGY_CLASS_KEYS`, nie `unclassified`), `:518-530` (`regimeGateFactor` für **alle** Regimes endlich und in `[0, 2]`), `:561` (`CompileResult.strategyClass === template.class`); `tests/adrVocabulary.test.ts:200-212` (genau eine Quelle je Liste) — ausgeführt, **grün**
+- **Restpunkt (nicht Teil der Abnahmekriterien):** Klassenliterale in `src/lib/signalDecay.ts` / `signalDecayRuntime.ts` — dokumentierte Altlast, eigener Prompt [08-03](../prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md)
 
 ## Beschreibung
 

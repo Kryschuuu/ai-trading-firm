@@ -4,7 +4,20 @@
 - **Severity:** INFO
 - **Bereich:** Strategy-Lifecycle / Validierung
 - **Quelle:** Ausbaudokument §3.1–3.7
-- **Status:** CLOSED (bestätigend) — umgesetzt mit 06-01…06-04, abgeschlossen `v0.10.3`
+- **Status:** CLOSED (bestätigend) — bestätigt im Abgleich 2026-10-03 (06-01…06-04, `v0.10.3`; 06-05 nutzt denselben Vertrag)
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED/CLOSED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/strategies/validator/report.ts:117` — `VALIDATION_RESULTS = ["PASS","FAIL","INCONCLUSIVE"]`; `:130-135` `assertValidationResult()`; `:929` Prüfung im Bauweg
+- `src/strategies/validator/persist.ts:30` — `import { recordEvidence } from "@/strategyLifecycle";`; Modulkopf `:18-20` — kein `requestTransition`, kein Import dieser Funktion
+- Statischer Wächter ausgeführt und grün: `tests/strategyValidation.report.test.ts:540-545` (kein `requestTransition(`-Aufruf in der Validator-Domäne)
+- **Nicht verifizierbar:** `tests/strategyValidation.persist.test.ts` (PostgreSQL fehlt) — Evidence-Idempotenz laufzeitseitig ungeprüft
 
 ## Befund
 

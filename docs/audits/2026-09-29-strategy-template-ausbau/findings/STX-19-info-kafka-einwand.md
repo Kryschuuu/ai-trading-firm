@@ -4,7 +4,21 @@
 - **Severity:** INFO
 - **Bereich:** Infrastruktur
 - **Quelle:** Ausbaudokument §4.6
-- **Status:** OPEN (bestätigend)
+- **Status:** VERIFIED — Abgleich 2026-10-03: Einwand trägt, kein Kafka/NATS/Redis/DuckDB im Baum
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **VERIFIED** — von `OPEN` umgestuft (bestätigender Befund, nichts umzusetzen)
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `package.json` `dependencies`: `@tailwindcss/typography`, `dotenv`, `drizzle-orm`, `next`, `pg`, `react`, `react-dom`, `react-markdown`, `remark-gfm`, `ws` — **kein** Kafka, NATS, Redis, DuckDB, Parquet-Reader
+- `grep -rniE "\bkafka\b|\bnats\b|\bredis\b|\bduckdb\b" src/` → **0 Treffer**
+- `ws` bleibt die einzige zusätzliche Laufzeitabhängigkeit; `src/brokers/bitunix/ws.ts` der einzige WS-Pfad
+- **Korrektur am Befund:** die ursprüngliche Beweisliste nannte `react`, nicht `react-dom` — beide sind vorhanden; für die Aussage ohne Belang
+- Umstufung begründet: Der Befund bestätigt den Einwand des Dokuments und verlangt, **nichts** zu bauen. Die globale Sperre steht in [`../ROADMAP.md`](../ROADMAP.md) §0. Damit ist er erfüllt, nicht offen.
 
 ## Befund
 

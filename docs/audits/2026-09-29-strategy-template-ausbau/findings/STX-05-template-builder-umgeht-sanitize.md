@@ -4,8 +4,21 @@
 - **Severity:** HIGH
 - **Bereich:** Sicherheit / Handelslogik
 - **Quelle:** Ausbaudokument §1.2
-- **Status:** FIXED (03-09, `v0.7.5`) — 03-01 legte den `params`-Builder fest, 03-09 schloss die Kette nachweislich
+- **Status:** FIXED (03-09, `v0.7.5`) — bestätigt im Abgleich 2026-10-03; Kriterium 5 präzisiert (kein Live-Template-Pfad)
 - **Datei(en):** `src/lib/ruleEngine.ts`, `src/lib/ruleService.ts`, `src/strategies/compiler.ts` (neu, 03-09)
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — Kriterium 5 präzisiert, nicht neu abgehakt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/strategies/compiler.ts:4-12` — Modulkopf: einziger Aufrufer von `buildRule()`, jeder Rückgabewert ist Ergebnis von `sanitizeRuleSpec()`, kein Rückfall auf die Rohform
+- `compiler.ts:633` — `{ ok: true, spec, strategyClass, fingerprint, clamped, warnings }`; Klemmungen als `clamped: string[]` sichtbar
+- Nachweis `tests/strategies.compiler.security.test.ts` (ausgeführt, grün)
+- **Kriterium 5 (Persistenz vor Ausführung) — Präzisierung:** `src/strategies/service.ts` ist ausdrücklich **Registry, nicht Executor** (Modulkopf Zeile 12: „Live-Ausführung bleibt beim `trade_rules`-Pfad"). Die zwei vorhandenen Pfade persistieren vor dem Lauf: `scripts/run-screening.ts:671-694` und `scripts/run-validate-strategy.ts:461-484` (`compileTemplate()` → `ensureDefinition()` → `createVersion()`). Ein Live-/Executor-Pfad, der Template-Specs handelt, existiert **nicht** (`grep "@/strategies" src/lib/microExecutor.ts src/cycle/ src/app/api/` → 0 Treffer).
 
 ## Beschreibung
 

@@ -4,8 +4,22 @@
 - **Severity:** LOW
 - **Bereich:** Handelslogik / Semantik
 - **Quelle:** Ausbaudokument (nicht erwähnt)
-- **Status:** OPEN
+- **Status:** PARTIAL — Abgleich 2026-10-03: Semantik-Prüfung im Validator vorhanden (06-01, `v0.10.0`); Feld-Deprekation offen
 - **Datei(en):** `src/lib/ruleEngine.ts`, `src/lib/ruleFieldCatalog.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `◐` **PARTIAL** — von `OPEN` korrigiert: die Prüfung existiert, die Deprekation nicht
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- Prüfung vorhanden: `src/strategies/validator/assumptions.ts:156` (`CHANGE_PCT_SEMANTICS` in der Prüfungsliste), `:181` (Kategorie `DATA`), `:208` (Severity `WARNING`), `:903-920` (Implementierung), `:968` (Registrierung); Semantik-Text aus `RULE_FIELD_LABELS`
+- Test `tests/strategyValidation.assumptions.test.ts:536` („genutztes Feld ⇒ VIOLATED (WARNING, STX-14)"), ausgeführt und **grün**
+- **Keine** stille Umrechnung: `src/lib/ruleEngine.ts:700-706` — 97-Perioden-Rechnung unverändert, mit erklärendem Kommentar
+- **Offen:** `changePctBars` existiert nicht (`grep -rn "changePctBars" src/` → 0 Treffer)
+- **Einordnung:** keines der sechs Templates nutzt `changePct24h` (`grep` in `src/strategies/` findet nur die Validator-Prüfung). Die Deprekation ist damit ohne aktuellen Konsumenten — bewusst zurückgestellt, siehe [`../ROADMAP.md`](../ROADMAP.md) §„Zurückgestellt — warum jetzt nicht sinnvoll"
 
 ## Beschreibung
 

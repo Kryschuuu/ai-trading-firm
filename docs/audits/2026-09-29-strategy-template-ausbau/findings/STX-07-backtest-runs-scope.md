@@ -4,8 +4,22 @@
 - **Severity:** MEDIUM
 - **Bereich:** Persistenz
 - **Quelle:** Ausbaudokument §4.2
-- **Status:** FIXED — STX-05-03 (2026-10-01, Unreleased auf `v0.8.0`); Runner/CLI folgen in 05-04
+- **Status:** FIXED — bestätigt im Abgleich 2026-10-03 (05-03, `211e022` PR #206; Runner/CLI 05-04, `v0.9.0`)
 - **Datei(en):** `src/db/schema.ts:226`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/db/schema.ts:3286` `strategyScreeningRuns` und `:3317` `strategyMarketResults`, mit CHECKs `run_kind`, `status`, `counts` und Hash-Format `^ssr1:[0-9a-f]{64}$`
+- `src/db/schema.ts:230` — `backtestRuns.instrumentId` ist weiter `text("instrument_id").notNull()`; `backtest_runs` **unverändert**
+- `drizzle/2026-10-01_strategy_screening.sql` vorhanden; Runner `src/screening/runner.ts`, Adapter `src/screening/backtestAdapter.ts`
+- Tests `screening.{priority,matrix,runner,backtestAdapter,keys}` + `strategyScreening.keys` ausgeführt: **grün**
+- **Nicht verifizierbar:** `tests/strategyScreening.db.test.ts` (PostgreSQL fehlt) — DB-Idempotenz unter parallelem Retry laufzeitseitig ungeprüft
 
 ## Beschreibung
 

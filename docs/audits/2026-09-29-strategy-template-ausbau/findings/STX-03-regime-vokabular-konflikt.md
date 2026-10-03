@@ -4,8 +4,22 @@
 - **Severity:** HIGH
 - **Bereich:** Architektur / Domänenmodell
 - **Quelle:** Ausbaudokument §3.6
-- **Status:** IN ARBEIT — entschieden mit [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2) (00-03, `v0.6.1`); Aggregator in 06-04
+- **Status:** FIXED — bestätigt im Abgleich 2026-10-03 ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), `v0.6.1`; Aggregator 06-04, `v0.10.3`)
 - **Datei(en):** `src/lib/marketRegime.ts`, `src/lib/regimeEvaluation.ts`, `drizzle/2026-09-22_regime_snapshots.sql`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — unverändert bestätigt
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/strategies/validator/report.ts:438` — `aggregateRegimeTrades()` ordnet Trades point-in-time dem letzten bestätigten `regime_snapshots`-Eintrag zu
+- `report.ts:387-390` — Zulässigkeitsfunktion über `REGIME_EVAL_LABELS` **ohne** `UNKNOWN` und **ohne** `RANGE`-Fallback; `report.ts:484` — Kommentar und Code schließen `UNKNOWN`/Unbekanntes aus
+- `report.ts:80` — `import { REGIME_EVAL_LABELS } from "@/lib/regimeEvaluation";` (ein Vokabular)
+- Wächter `tests/adrVocabulary.test.ts` grün (ausgeführt)
+- **Restpunkt:** `VolatilityRegime` ist weiter dreifach definiert (`src/lib/adaptiveRisk.ts:242`, `src/portfolio/types.ts:23`, `src/scanner/types.ts:207`) — Volatilitäts-Stufen, kein Markt-Regime; dokumentierte Altlast (OP-6)
 
 ## Beschreibung
 

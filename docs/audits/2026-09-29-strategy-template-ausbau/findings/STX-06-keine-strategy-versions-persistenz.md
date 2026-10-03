@@ -4,8 +4,22 @@
 - **Severity:** MEDIUM
 - **Bereich:** Persistenz / Strategy-Lifecycle
 - **Quelle:** Ausbaudokument §7
-- **Status:** IN ARBEIT — Schema 04-01 (`v0.8.0`) vorhanden; Service/Schreibpfad 04-02 offen
+- **Status:** FIXED — Abgleich 2026-10-03: Schema 04-01 (`v0.8.0`) **und** Service 04-02 (`v0.10.4`, `66be0c6` PR #202, Fix `9d73aeb` PR #203) vorhanden
 - **Datei(en):** `drizzle/2026-10-01_strategy_catalog.sql`, `src/db/schema.ts`, `tests/strategyCatalog.db.test.ts`
+
+## Abgleich 2026-10-03
+
+- **Geprüfter Stand:** `main` @ `3d13161` · Code-Version `0.10.6` (Beta)
+- **Eingestuft:** `☑` **FIXED** — von `IN ARBEIT` hochgestuft; Idempotenz-Nachweis **nicht verifizierbar**
+- **Abgleich-Bericht:** [`../remediation/RECONCILE-2026-10-03.md`](../remediation/RECONCILE-2026-10-03.md)
+
+**Nachweise**
+
+- `src/strategies/service.ts` — `calculateVersionContentHash()` `:95-113` (`stv1:<sha256>` über `canonicalJson`), `ensureDefinition()` `:147`, `getVersionByFingerprint()` `:260`, `createVersion()` `:328`, `checkTemplateDrift()` `:492`
+- Modulkopf `service.ts:10-13` — kein Update/Delete auf `strategy_versions`, kein `requestTransition`, Live-Ausführung bleibt beim `trade_rules`-Pfad
+- `STRATEGY_CLASSES` wird aus der SSoT `src/lib/marketRegime.ts` gelesen (Import `service.ts:30`) — der vierte Altlast-Fall aus 00-03 ist behoben
+- Aufrufer: `scripts/run-screening.ts:671-694`, `scripts/run-validate-strategy.ts:461-484`
+- **Nicht verifizierbar:** `tests/strategyCatalog.service.test.ts` und `tests/strategyCatalog.db.test.ts` benötigen PostgreSQL, das in der Abgleich-Umgebung nicht installiert ist (`pg_isready` fehlt). Die Abnahmekriterien „gleiche fachliche Eingabe ⇒ dieselbe Version" und „Rekonstruktion über den Service" sind deshalb **code-seitig benannt, laufzeitseitig ungeprüft**.
 
 ## Beschreibung
 
