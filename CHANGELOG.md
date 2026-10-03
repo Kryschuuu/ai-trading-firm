@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.10.6** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.10.8** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -53,6 +53,58 @@ erlaubt, solange sie hier dokumentiert sind).
 * `tests/copy.engine.test.ts`: 20 Tests ohne Netzwerk mit injizierten Frames,
   einschließlich Baseline-Gate, Heartbeat-Pause und Dedupe nach Doppelzustellung
   bzw. Neustart (20/20 lokal grün).
+
+## [0.10.8] — Doku-Viewer: `docs/architecture/` + `docs/roadmap/` (STX-08-02) (2026-10-03)
+
+> **Status: Beta.** Patch-Release (Altlast 3 aus OP-6, Finding ohne STX-Nummer).
+> Der Browser-Doku-Viewer löst die Single-Source-of-Truth-Dokumente des
+> Strategie-Stacks jetzt auf — kein neues Sicherheitsmodell, keine
+> Laufzeit-Dependency, keine Schema-Änderung.
+>
+> **Hinweis zur Versionsnummer:** `0.10.7` bleibt frei. Prompt 08-01 wurde am
+> 2026-10-03 bewusst als `[Unreleased]`-Nachtrag **ohne** Projekt-Bump
+> nachgereicht (Audit-Entscheidung „Form A“); der Release-Plan in
+> [`docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md`](docs/audits/2026-09-29-strategy-template-ausbau/VERSIONING.md)
+> führt 08-02 unter `v0.10.8`.
+
+### Fixed
+
+* **Doku-Viewer (`resolveDoc()` in `src/lib/docsCatalog.ts`):** Der
+  Existenz-Fallback sucht zusätzlich in `docs/architecture/${safeBase}` und
+  `docs/roadmap/${safeBase}` — in der Reihenfolge nach `docs/security/` und vor
+  `docs/archive/`, ohne bestehende Prioritäten zu verschieben. Im
+  Browser-Viewer (`/docs/<Datei>.md`, `GET /api/docs?name=…`) sind damit
+  [`STRATEGY_STACK.md`](docs/architecture/STRATEGY_STACK.md),
+  [`PIPELINE_MAP.md`](docs/architecture/PIPELINE_MAP.md),
+  [`DB_SCHEMA.md`](docs/architecture/DB_SCHEMA.md),
+  [`INTEGRATION_POINTS.md`](docs/architecture/INTEGRATION_POINTS.md) und der
+  ADR-Log [`DECISIONS.md`](docs/roadmap/DECISIONS.md) (ADR-008…ADR-010) lesbar;
+  `STATUS.md` fällt unter denselben Suchpfad.
+* **Pfadabwehr unverändert:** Der Pfad entsteht weiterhin ausschließlich aus
+  `basename()` + fester Ordnerliste (kein `docs/**`-Walk, kein
+  Pfad-Parameter). Zusätzlich weist der Existenz-Fallback Parent-Referenzen
+  (`../…`, `..\\…`) ab — `resolveDoc("../architecture/STRATEGY_STACK.md")` und
+  `resolveDoc("architecture/STRATEGY_STACK")` bleiben `null`. Bewusst **keine**
+  neuen `DOCS_CATALOG`-Einträge: Ein Katalogeintrag würde das
+  Dateiname-Matching (Schritt 2) für diese Dateien öffnen und genau diese
+  Negativfälle auflösen; der Fallback reicht für die Anzeige. Bestehende
+  Auflösungen (`audits/README.md`, `security/README.md`, `CHANGELOG.md`) sind
+  unverändert.
+
+### Tests
+
+* `tests/docsCatalog.test.ts` (neu, 8 Tests): Auflösbarkeit der sechs
+  `architecture/`-/`roadmap/`-Dokumente inkl. `canonicalPath`,
+  Suchpfad-Reihenfolge, Traversal-Negativfälle (`..`, `\`, `.md`-lose Namen),
+  Containment des aufgelösten Pfads und Regression der bestehenden Auflösungen.
+
+### Docs
+
+* `docs/audits/2026-09-29-strategy-template-ausbau/`: Phase-8-Tabelle
+  (`TRACKING.md`, `ROADMAP.md`, `prompts/README.md`) markiert 08-02 als
+  erledigt, Altlast 3 ist im Abschnitt „Bekannte Code-Altlasten“ als behoben
+  geführt (OP-6 teilweise abgeräumt); `VERSIONING.md` erhält den
+  Release-Plan-Eintrag und den Historieneintrag (`v1.2.2`).
 
 ## [0.10.6] — Copy-Policy-Engine + Order-Links (STX-07-02) (2026-10-03)
 

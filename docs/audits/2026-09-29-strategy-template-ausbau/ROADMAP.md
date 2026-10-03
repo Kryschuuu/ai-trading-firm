@@ -4,7 +4,7 @@
 > Versionierung: [`VERSIONING.md`](VERSIONING.md) ·
 > Status: [`remediation/TRACKING.md`](remediation/TRACKING.md) · Ausgangs-Commit `e3509fd`
 >
-> **Abgleich 2026-10-03** (Audit `v1.2.1`, einschließlich des Nachtrags 08-01): alle 19 Ursprungs-Findings plus 2 neue
+> **Abgleich 2026-10-03** (Audit `v1.2.2`, einschließlich Nachtrag 08-01 und Fix 08-02): alle 19 Ursprungs-Findings plus 2 neue
 > gegen `main` @ `3d13161` verifiziert —
 > [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md).
 > Ergebnis: **21 Findings** — 17 verifiziert umgesetzt, 2 teilweise
@@ -381,17 +381,17 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 > **Herkunft:** der Vollabgleich [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 > hat 21 Findings gegen `main` @ `3d13161` verifiziert. Die 32 Ursprungs-Prompts sind
-> umgesetzt; 08-01 ist am 2026-10-03 erledigt, vier der fünf Folge-Prompts bleiben offen. Jeder ist ein
+> umgesetzt; 08-01 und 08-02 sind am 2026-10-03 erledigt, drei der fünf Folge-Prompts bleiben offen. Jeder ist ein
 > eigenständiger, abgegrenzter Auftrag mit Ziel, betroffenen Dateien, Randbedingungen,
 > Abnahmekriterien und Tests — ohne Rückfragen ausführbar.
 >
-> **Reihenfolge-Empfehlung:** 08-01 ist erledigt; weiter 08-02 → 08-03 → 08-05 → 08-04.
+> **Reihenfolge-Empfehlung:** 08-01/08-02 sind erledigt; weiter 08-03 → 08-05 → 08-04.
 > Die drei kleinen Folge-Pakete zuerst, das hochriskante Paket 08-04 zuletzt und allein.
 
 | # | Prompt | Finding | Risiko | Ergebnis | Hängt ab von |
 |---|---|---|---|---|---|
 | 08-01 | [Changelog-Nachtrag Copy-Engine](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | minimal (Doku) | ✅ erledigt: `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03; kein Projekt-Bump) | — |
-| 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ⏳ offen | — |
+| 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ✅ erledigt: `v0.10.8` + `tests/docsCatalog.test.ts` (8 Tests), Altlast 3 behoben | — |
 | 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ⏳ offen | — |
 | 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
 | 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ⏳ offen | 00-01 (Messung), 02-02/02-03 (Paritätsmuster) |
@@ -434,7 +434,7 @@ vorhanden. Kein Prompt dieser Phase blockiert einen anderen.
 02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
 
 Phase 8 (Abgleich 2026-10-03, alle voneinander unabhängig):
-  08-01 ✅ (STX-20 Doku)   08-02 ⏳ (Altlast 3)   08-03 ⏳ (STX-02-Rest)
+  08-01 ✅ (STX-20 Doku)   08-02 ✅ (Altlast 3)   08-03 ⏳ (STX-02-Rest)
   08-05 ⏳ (STX-21)        08-04 ⏳ (STX-12)  ← zuletzt und allein (Handelslogik)
 ```
 
