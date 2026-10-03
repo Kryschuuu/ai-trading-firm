@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Roadmap:** [`../ROADMAP.md`](../ROADMAP.md)
 - **Commit-Baseline:** `e3509fd9e84fc45c80817f04e6fe74c0c5fd8f67`
-- **Stand:** 2026-10-03 · **Vollabgleich aller Findings gegen `main` @ `3d13161`** ([`RECONCILE-2026-10-03.md`](RECONCILE-2026-10-03.md), Audit `v1.2.2`): **21 Findings** — 17 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14), 2 offen (STX-08, STX-21). **Alle 32 Ursprungs-Prompts sind umgesetzt**; von den 5 Phase-8-Folge-Prompts sind 08-01 (Nachtrag ohne Bump) und 08-02 (`v0.10.8`, Altlast 3) erledigt, 3 bleiben offen. 7 Findings wurden hochgestuft (STX-02/06/09/10/16/19, Präzisierung STX-05), 1 korrigiert (STX-14), 2 neu erfasst (STX-20, STX-21). **Nicht verifizierbar:** alle `*.db.test.ts` — in der Abgleich-Umgebung fehlt PostgreSQL. · **Phase 6 abgeschlossen:** 06-01 (`v0.10.0`) liefert den deterministischen Annahmen-Audit (`src/strategies/validator/assumptions.ts`) als Gate vor jeder Metrik-Auswertung, 06-02 (`v0.10.1`) die Overfit- & Robustheitsauswertung (`src/strategies/validator/overfit.ts`), 06-03 (`v0.10.2`) den zweischichtigen Cost- & Slippage-Stress-Runner (`src/strategies/validator/stress.ts`, schließt **STX-11**), 06-04 (`v0.10.3`) Report, achtstufige Gate-Kette, Regime-Aggregation, Evidence-Writer und CLI (`src/strategies/validator/report.ts` + `persist.ts`, `npm run validate:strategy`, schließt **STX-17** und die Regime-Naht aus **STX-03**); 06-05 (`v0.10.4`) erklärt nur und lässt `result` unverändert; STX-13 geschlossen · **Phase 5 abgeschlossen:** 05-01 (`a90fa62` PR #204) Screening-Typen + konfigurierbare Priorität, 05-02 (`4267715` PR #205) Matrix-Builder, 05-03 (`211e022` PR #206) Persistenz mit `ssr1:`/`ssm1:`-Idempotenz, 05-04 (`v0.9.0`, `c797ae7` PR #207) Runner + `runMultiAssetBacktest()` + `npm run screening` — **Gate G5 erfüllt, G6 (Pilotlauf) bleibt offen** · **Phase 7 abgeschlossen:** 07-01 (`v0.10.5`, `b0bfcce` PR #213) Domänenmodell mit `CopyMode = "SIMULATE_ONLY"`, 07-02 (`v0.10.6`, `f5af325` PR #214) Policy + `copy_order_links`, 07-03 (`5f437d8` PR #215) Bitunix-Leader + Simulate-only-Follower + Engine + `npm run copy:paper` — **Gate G8 erfüllt**, **STX-09**, **STX-16** und **STX-20** geschlossen; Changelog-Nachtrag 08-01 unter `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03) · · **Phase 4 abgeschlossen:** 04-01 (`v0.8.0`) liefert Migration + Drizzle-Schema für `strategy_definitions`/`strategy_versions`, 04-02 (`v0.10.4`, `66be0c6` PR #202) den App-Service mit `ensureDefinition()`/`createVersion()`, Lifecycle-Bridging über `recordEvidence()` und `stv1:`/`stc1:`-Hashes — **Gate G4 erfüllt**, STX-06 geschlossen · **Phase 3 abgeschlossen:** 03-09 (`v0.7.5`) schließt die Sanitize-Kette (`buildRule` → `sanitizeRuleSpec` → `RuleSpec`) und behebt **STX-05**; 03-10 (`v0.7.6`) liefert die Template-Vertragstests (60 Tests) und die generierte Doku `docs/STRATEGY_TEMPLATES.md` — **Gate G3 erfüllt** · **Template-Reihe vollständig:** 03-01/03-02 (`v0.7.0`), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`) abgeschlossen — sechs von sechs Templates gebaut · 02-01 (`v0.6.3`), 02-02 (`v0.6.4`) und 02-03 (`v0.6.5`) abgeschlossen (inkl. optionalem Slice 02-04, `7995822` PR #189) · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
+- **Stand:** 2026-10-03 · **Vollabgleich aller Findings gegen `main` @ `3d13161`** ([`RECONCILE-2026-10-03.md`](RECONCILE-2026-10-03.md), Audit `v1.2.3`): **21 Findings** — 17 verifiziert umgesetzt, 2 teilweise (STX-12, STX-14), 2 offen (STX-08, STX-21). **Alle 32 Ursprungs-Prompts sind umgesetzt**; von den 5 Phase-8-Folge-Prompts sind 08-01 (Nachtrag ohne Bump), 08-02 (`v0.10.8`, Altlast 3) und 08-03 (`v0.10.9`, Altlast 1) erledigt, 2 bleiben offen. 7 Findings wurden hochgestuft (STX-02/06/09/10/16/19, Präzisierung STX-05), 1 korrigiert (STX-14), 2 neu erfasst (STX-20, STX-21). **Nicht verifizierbar:** alle `*.db.test.ts` — in der Abgleich-Umgebung fehlt PostgreSQL. · **Phase 6 abgeschlossen:** 06-01 (`v0.10.0`) liefert den deterministischen Annahmen-Audit (`src/strategies/validator/assumptions.ts`) als Gate vor jeder Metrik-Auswertung, 06-02 (`v0.10.1`) die Overfit- & Robustheitsauswertung (`src/strategies/validator/overfit.ts`), 06-03 (`v0.10.2`) den zweischichtigen Cost- & Slippage-Stress-Runner (`src/strategies/validator/stress.ts`, schließt **STX-11**), 06-04 (`v0.10.3`) Report, achtstufige Gate-Kette, Regime-Aggregation, Evidence-Writer und CLI (`src/strategies/validator/report.ts` + `persist.ts`, `npm run validate:strategy`, schließt **STX-17** und die Regime-Naht aus **STX-03**); 06-05 (`v0.10.4`) erklärt nur und lässt `result` unverändert; STX-13 geschlossen · **Phase 5 abgeschlossen:** 05-01 (`a90fa62` PR #204) Screening-Typen + konfigurierbare Priorität, 05-02 (`4267715` PR #205) Matrix-Builder, 05-03 (`211e022` PR #206) Persistenz mit `ssr1:`/`ssm1:`-Idempotenz, 05-04 (`v0.9.0`, `c797ae7` PR #207) Runner + `runMultiAssetBacktest()` + `npm run screening` — **Gate G5 erfüllt, G6 (Pilotlauf) bleibt offen** · **Phase 7 abgeschlossen:** 07-01 (`v0.10.5`, `b0bfcce` PR #213) Domänenmodell mit `CopyMode = "SIMULATE_ONLY"`, 07-02 (`v0.10.6`, `f5af325` PR #214) Policy + `copy_order_links`, 07-03 (`5f437d8` PR #215) Bitunix-Leader + Simulate-only-Follower + Engine + `npm run copy:paper` — **Gate G8 erfüllt**, **STX-09**, **STX-16** und **STX-20** geschlossen; Changelog-Nachtrag 08-01 unter `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03) · · **Phase 4 abgeschlossen:** 04-01 (`v0.8.0`) liefert Migration + Drizzle-Schema für `strategy_definitions`/`strategy_versions`, 04-02 (`v0.10.4`, `66be0c6` PR #202) den App-Service mit `ensureDefinition()`/`createVersion()`, Lifecycle-Bridging über `recordEvidence()` und `stv1:`/`stc1:`-Hashes — **Gate G4 erfüllt**, STX-06 geschlossen · **Phase 3 abgeschlossen:** 03-09 (`v0.7.5`) schließt die Sanitize-Kette (`buildRule` → `sanitizeRuleSpec` → `RuleSpec`) und behebt **STX-05**; 03-10 (`v0.7.6`) liefert die Template-Vertragstests (60 Tests) und die generierte Doku `docs/STRATEGY_TEMPLATES.md` — **Gate G3 erfüllt** · **Template-Reihe vollständig:** 03-01/03-02 (`v0.7.0`), 03-03 (`v0.7.1`), 03-04 (`v0.7.2`), 03-05 (`v0.7.3`) und 03-06/03-07/03-08 (`v0.7.4`) abgeschlossen — sechs von sechs Templates gebaut · 02-01 (`v0.6.3`), 02-02 (`v0.6.4`) und 02-03 (`v0.6.5`) abgeschlossen (inkl. optionalem Slice 02-04, `7995822` PR #189) · **Phase 0 abgeschlossen** (00-01 `v0.6.0`, 00-02/00-03 `v0.6.1`) · **Phase 1 abgeschlossen** (01-01 `v0.6.2`, Gate G1) — Pfad-Entscheidung in [`BENCH-BASELINE.md`](BENCH-BASELINE.md), Vokabular-Entscheidungen in [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), [ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)
 
 **Nachtrag 08-01 (2026-10-03, `[Unreleased]`, Projekt-Code-Version `0.10.6`):**
 Der Copy-Engine-Eintrag zu PR #215 steht im Changelog; Form A wurde gewählt,
@@ -29,6 +29,25 @@ auflösen). `tests/docsCatalog.test.ts` deckt Auflösung, Suchpfad-Reihenfolge,
 Traversal-Negativfälle und die unveränderten Bestandsauflösungen ab (8 Tests);
 `npm run typecheck`, `npm run lint`, `npm test` und `npm run docs:validate`
 sind grün. **Altlast 3 behoben; Audit-Version `v1.2.2`.**
+
+**Nachtrag 08-03 (2026-10-03, `v0.10.9`, Altlast 1):**
+Die Strategieklassen des Signal-Decay-Pfads werden aus der SSoT abgeleitet:
+`STRATEGY_CLASS_KEYS = [...STRATEGY_CLASSES, "unclassified"]` (Reihenfolge und
+Typ `StrategyClassKey` unverändert). `isStrategyClassKey()`, die lokale Closure
+`classOf()` (Risk-Config-Overrides `sdc.<klasse>.<feld>`) und `metricClass()`
+in `src/lib/signalDecayRuntime.ts` prüfen über einen Lookup gegen diese Liste;
+der Token-Alias `mean_reversion` → `mean-reversion` bleibt als Format erhalten.
+Ein neuer Quelltext-Wächter in `tests/adrVocabulary.test.ts` verbietet
+Klassennamen als Vergleichs- oder Listenliteral in `src/lib/signalDecay.ts` und
+`src/lib/signalDecayRuntime.ts`; sein Muster entsteht aus der SSoT, damit eine
+per ADR ergänzte fünfte Klasse sofort mitgeprüft wird. Negativprobe ausgeführt:
+Literal-Vergleich und simulierte fünfte Klasse (`momentum` in
+`STRATEGY_CLASSES`) werden rot, danach zurückgenommen. `npm run typecheck`,
+`npm run lint` und `npm test` (4.490 Tests, 4.454 grün, 0 rot, 36 skipped)
+sind grün; `tests/adrVocabulary.test.ts` führt 37 Tests. Kein
+Verhaltenswechsel, keine Schema-Änderung; die append-only DB-CHECKs
+(`positions_strategy_class_check`, `signal_decay_events_class_check`) bleiben
+die einzige dokumentierte Literalstelle. **Altlast 1 behoben; Audit-Version `v1.2.3`.**
 
 **Nachtrag 06-05 (2026-10-02, `v0.10.4`):** `runValidatorAgent()` liefert eine
 separate, strikt schema-geprüfte Interpretation aus allowlisteten aggregierten
@@ -64,7 +83,7 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 | ID | Severity | Status | Behoben durch |
 |---|---|---|---|
 | STX-01 Timeframe-Blocker | HIGH | ☑ | 01-01 ☑ (`v0.6.2`) — [Abgleich](RECONCILE-2026-10-03.md) bestätigt: `RULE_ALLOWED_TIMEFRAMES = SUPPORTED_TIMEFRAMES` |
-| STX-02 `StrategyClass`-Duplikat | HIGH | ☑ | 00-03 ☑ ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), `v0.6.1`) → 03-01/03-02 ☑ (`v0.7.0`) → 03-09 ☑ (`v0.7.5`); [Abgleich](RECONCILE-2026-10-03.md): sechs Templates deklarieren `class`, keines `unclassified`, `CompileResult.strategyClass` getestet. Restpunkt Klassenliterale in `signalDecay*` → [08-03](../prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) |
+| STX-02 `StrategyClass`-Duplikat | HIGH | ☑ | 00-03 ☑ ([ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), `v0.6.1`) → 03-01/03-02 ☑ (`v0.7.0`) → 03-09 ☑ (`v0.7.5`); [Abgleich](RECONCILE-2026-10-03.md): sechs Templates deklarieren `class`, keines `unclassified`, `CompileResult.strategyClass` getestet. Restpunkt Klassenliterale in `signalDecay*` → **mit [08-03](../prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) (`v0.10.9`, 2026-10-03) abgeschlossen**: `STRATEGY_CLASS_KEYS` wird aus `STRATEGY_CLASSES` abgeleitet, Lookup statt Literalvergleiche, Quelltext-Wächter in `tests/adrVocabulary.test.ts` |
 | STX-03 Regime-Vokabular-Konflikt | HIGH | ☑ | 00-03 ☑ ([ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), `v0.6.1`) → 06-04 ☑ (`v0.10.3`: `aggregateRegimeTrades()` liest `REGIME_EVAL_LABELS` ohne `UNKNOWN`, kein `RANGE`-Fallback, point-in-time) |
 | STX-04 `MultiAssetStrategySpec`-Duplikat | HIGH | ☑ | 00-03 ([ADR-010](../../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3), `v0.6.1`); Sizing-Schicht bewusst außerhalb der Roadmap; Wächter `tests/adrVocabulary.test.ts:410` |
 | STX-05 Builder umgeht Sanitize | HIGH | ☑ | 03-01 ☑ (`v0.7.0`, `buildRule(params) => RuleSpecInput`, kein `ctx`) → 03-09 ☑ (`v0.7.5`, Compiler + Sanitize-Nachweis); [Abgleich](RECONCILE-2026-10-03.md): Kriterium 5 präzisiert — Service ist Registry, kein Live-Template-Pfad |
@@ -165,13 +184,13 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 > Entstanden aus dem Vollabgleich [`RECONCILE-2026-10-03.md`](RECONCILE-2026-10-03.md).
 > Jeder Prompt ist eigenständig, abgegrenzt und ohne Rückfragen ausführbar.
 > Reihenfolge-Empfehlung: 08-01 → 08-02 → 08-03 → 08-05 → 08-04 (das
-> hochriskante Paket zuletzt).
+> hochriskante Paket zuletzt). 08-01…08-03 sind erledigt.
 
 | # | Titel | Status | Finding | Version |
 |---|---|---|---|---|
 | 08-01 | [Changelog-Nachtrag Copy-Engine](../prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | ☑ | STX-20 | `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03; kein Projekt-Bump) |
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](../prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | ☑ | Altlast 3 (OP-6) | `v0.10.8` (`tests/docsCatalog.test.ts`, 8 Tests; Altlast 3 behoben) |
-| 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](../prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | ☐ | STX-02-Rest / Altlast 1 | — |
+| 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](../prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | ☑ | STX-02-Rest / Altlast 1 | `v0.10.9` (`STRATEGY_CLASS_KEYS` aus `STRATEGY_CLASSES`, Lookup statt Literale, Quelltext-Wächter in `tests/adrVocabulary.test.ts`; Altlast 1 behoben) |
 | 08-04 | [`backtestRule()` auf den Indicator-Cache](../prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | ☐ | STX-12 | — |
 | 08-05 | [`LOCAL_FREE`-Endpunkt absichern](../prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | ☐ | STX-21 | — |
 
@@ -210,11 +229,11 @@ Workflow-Verdrahtung bleiben beim Aufrufer.
 
 ## Bekannte Code-Altlasten (durch 00-03 aufgedeckt, nicht Teil der 32 Prompts)
 
-00-03 sperrte Code-Änderungen; diese Punkte sind deshalb dokumentiert und **nicht** still korrigiert. Jeder ist eine kleine, eigenständige Änderung an Laufzeit-Code (eigener Prompt, Patch-Release). Ob und wann sie folgen, steht als OP-6 unten. **Stand 2026-10-03:** Altlast 3 ist mit 08-02 (`v0.10.8`) abgeräumt; Altlast 1 folgt mit 08-03, Altlast 2 bleibt ohne eigenen Prompt. Stand geprüft am 2026-10-01 gegen `main`.
+00-03 sperrte Code-Änderungen; diese Punkte sind deshalb dokumentiert und **nicht** still korrigiert. Jeder ist eine kleine, eigenständige Änderung an Laufzeit-Code (eigener Prompt, Patch-Release). Ob und wann sie folgen, steht als OP-6 unten. **Stand 2026-10-03:** Altlast 3 ist mit 08-02 (`v0.10.8`) abgeräumt, Altlast 1 mit 08-03 (`v0.10.9`) — die **append-only DB-CHECKs bleiben die einzige dokumentierte Literalstelle**; Altlast 2 bleibt ohne eigenen Prompt. Stand geprüft am 2026-10-01 gegen `main`, Altlast-Status am 2026-10-03 nachgezogen.
 
 | Altlast | Fundort | Risiko | Details |
 |---|---|---|---|
-| Die vier Klassenwerte stehen als Literale statt nur aus `STRATEGY_CLASS_KEYS` | `src/lib/signalDecay.ts` (`STRATEGY_CLASS_KEYS` `:107`, `isStrategyClassKey` `:433`, lokale Closure `classOf` `:1545` — exportiert ist `classKey()` `:435`), `src/lib/signalDecayRuntime.ts:494`, CHECKs `positions_strategy_class_check` und `signal_decay_events_class_check` (`drizzle/2026-09-22_signal_decay.sql`) | Eine künftige Klasse müsste an allen Stellen zugleich ergänzt werden (ADR-008: nur per neuem ADR) | [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), Konsequenzen |
+| Die vier Klassenwerte stehen als Literale statt nur aus `STRATEGY_CLASS_KEYS` — **behoben mit 08-03 (`v0.10.9`, 2026-10-03): `STRATEGY_CLASS_KEYS = [...STRATEGY_CLASSES, "unclassified"]`, Lookup in `isStrategyClassKey()`/`classOf()`/`metricClass()`, Quelltext-Wächter in `tests/adrVocabulary.test.ts`**; einzig verbleibende dokumentierte Literalstelle sind die append-only CHECKs `positions_strategy_class_check` und `signal_decay_events_class_check` (`drizzle/2026-09-22_signal_decay.sql`, unangetastet) | Eine künftige Klasse müsste an allen Stellen zugleich ergänzt werden (ADR-008: nur per neuem ADR) | [ADR-008](../../../roadmap/DECISIONS.md#adr-008-strategie-klassifikation-adr-e1), Konsequenzen |
 | `VolatilityRegime` ist dreifach definiert (Volatilitäts-Stufen, kein Markt-Regime) | `src/lib/adaptiveRisk.ts` (`NORMAL`/`ELEVATED`/`EXTREME`), `src/portfolio/types.ts` und `src/scanner/types.ts` (`LOW`/`NORMAL`/`HIGH`/`EXTREME`) | Namensnähe zu `MarketRegime`; kein Laufzeitfehler | [ADR-009](../../../roadmap/DECISIONS.md#adr-009-regime-vokabular-adr-e2), Kontext |
 | In-App-Doku-Viewer löst `docs/architecture/` und `docs/roadmap/` nicht auf | `resolveDoc` in `src/lib/docsCatalog.ts` (Suchpfade ohne diese beiden Ordner) | `STRATEGY_STACK.md`, `PIPELINE_MAP.md` und der ADR-Log sind nur im Repo und auf GitHub lesbar, nicht im Browser-Viewer — **behoben mit 08-02 (`v0.10.8`, 2026-10-03): Suchpfade ergänzt, Parent-Referenzen abgewiesen, `tests/docsCatalog.test.ts`** | [`CHANGELOG.md`](../../../../CHANGELOG.md), Eintrag `0.10.8` |
 
@@ -242,8 +261,10 @@ Der in `src/strategies/service.ts` (04-02) entstandene **vierte** Fall — eine 
   auf die übrigen `RULE_FIELDS` ist kein Befund mehr, sondern eine Kapazitätsfrage.
 - **OP-6:** Sollen die [bekannten Code-Altlasten](#bekannte-code-altlasten-durch-00-03-aufgedeckt-nicht-teil-der-32-prompts)
   als eigene Prompts/Patch-Releases folgen oder bleiben sie dokumentiert und ungeplant?
-  ◐ **Teilweise abgeräumt:** Altlast 3 (Doku-Viewer-Suchpfade) ist mit
-  08-02 (`v0.10.8`, 2026-10-03) behoben; Altlast 1 (Klassen-Literale in
-  `signalDecay*`) folgt mit 08-03 (`v0.10.9` vorgeschlagen). Altlast 2
-  (`VolatilityRegime` dreifach definiert) bleibt ungeplant — sie ist ein
-  Benennungs-/Konsolidierungsthema ohne Laufzeitfehler.
+  ◐ **Weitgehend abgeräumt:** Altlast 3 (Doku-Viewer-Suchpfade) ist mit
+  08-02 (`v0.10.8`, 2026-10-03) behoben, Altlast 1 (Klassen-Literale in
+  `signalDecay*`) mit 08-03 (`v0.10.9`, 2026-10-03) — einzige verbleibende
+  dokumentierte Literalstelle sind die append-only DB-CHECKs aus
+  `drizzle/2026-09-22_signal_decay.sql`. Altlast 2 (`VolatilityRegime` dreifach
+  definiert) bleibt ungeplant — sie ist ein Benennungs-/Konsolidierungsthema
+  ohne Laufzeitfehler.

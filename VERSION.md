@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.10.8` |
+| **Version** | `v0.10.9` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-03 |
-| **Quellbasiert** | `package.json` (`version: "0.10.8"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.10.9"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -365,6 +365,28 @@ Existenz-Fallback zusätzlich abgewiesen, `DOCS_CATALOG` bleibt unverändert
 (keine neuen Slugs — ein Katalogeintrag würde die Pfadform auflösen).
 `0.10.7` bleibt frei: 08-01 wurde als `[Unreleased]`-Nachtrag ohne Bump
 nachgereicht.
+
+`v0.10.9` (STX-08-03, 2026-10-03) räumt Altlast 1 aus dem Audit-Abgleich ab:
+Die Strategieklassen des Signal-Decay-Pfads stehen nicht mehr als vier
+unabhängige Literalstellen im Code, sondern werden aus der Single Source of
+Truth `STRATEGY_CLASSES` ([`src/lib/marketRegime.ts`](src/lib/marketRegime.ts),
+ADR-008) abgeleitet — `STRATEGY_CLASS_KEYS = [...STRATEGY_CLASSES,
+"unclassified"]`. `isStrategyClassKey()`, die lokale Closure `classOf()`
+(Risk-Config-Overrides `sdc.<klasse>.<feld>`) und `metricClass()` im
+Laufzeitpfad prüfen über einen Lookup gegen diese Liste; der Token-Alias
+`mean_reversion` → `mean-reversion` bleibt als Format erhalten. Typ
+`StrategyClassKey`, Reihenfolge und Werte sind unverändert, es gibt keinen
+Verhaltenswechsel. Ein neuer Quelltext-Wächter in
+[`tests/adrVocabulary.test.ts`](tests/adrVocabulary.test.ts) verbietet
+Klassennamen als Vergleichs- oder Listenliteral in
+[`src/lib/signalDecay.ts`](src/lib/signalDecay.ts) und
+[`src/lib/signalDecayRuntime.ts`](src/lib/signalDecayRuntime.ts); er baut sein
+Muster aus der SSoT und greift damit auch für eine künftig per ADR ergänzte
+Klasse. Einzige verbleibende, dokumentierte Literalstelle sind die
+append-only DB-CHECKs `positions_strategy_class_check` und
+`signal_decay_events_class_check`
+([`drizzle/2026-09-22_signal_decay.sql`](drizzle/2026-09-22_signal_decay.sql)).
+`DEFAULT_CLASS_POLICIES`, Env-Namen und Schwellen bleiben unangetastet.
 
 In der 0.x-Reihe dürfen Breaking Changes eingeführt werden, wenn sie im
 Changelog dokumentiert sind.

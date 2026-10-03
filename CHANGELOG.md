@@ -21,7 +21,7 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.10.8** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.10.9** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased]
@@ -53,6 +53,52 @@ erlaubt, solange sie hier dokumentiert sind).
 * `tests/copy.engine.test.ts`: 20 Tests ohne Netzwerk mit injizierten Frames,
   einschließlich Baseline-Gate, Heartbeat-Pause und Dedupe nach Doppelzustellung
   bzw. Neustart (20/20 lokal grün).
+
+## [0.10.9] — Strategie-Klassen in `signalDecay*` aus der SSoT (STX-08-03) (2026-10-03)
+
+> **Status: Beta.** Patch-Release (STX-02-Rest, Altlast 1 aus OP-6). Die vier
+> Klassenwerte des Signal-Decay-Pfads werden aus der Single Source of Truth
+> [`STRATEGY_CLASSES`](src/lib/marketRegime.ts) (`ADR-008`) abgeleitet; es gibt
+> **keinen Verhaltenswechsel** — gleiche Werte, gleiche Reihenfolge, gleiche
+> Typen, gleiche Schwellen. Eine per neuem ADR ergänzte Strategieklasse muss
+> künftig nur noch im ADR und in der SSoT eingetragen werden.
+
+### Changed
+
+* **`STRATEGY_CLASS_KEYS` (`src/lib/signalDecay.ts`)** leitet sich jetzt aus
+  `STRATEGY_CLASSES` ab: `[...STRATEGY_CLASSES, "unclassified"]`. Der
+  exportierte Typ `StrategyClassKey` und die Reihenfolge
+  (`mean-reversion`, `trend`, `breakout`, `unclassified`) bleiben unverändert.
+* **Validierung ohne Literalvergleiche:** `isStrategyClassKey()` prüft über
+  einen Lookup gegen `STRATEGY_CLASS_KEYS`; die lokale Closure `classOf()`
+  (Risk-Config-Overrides `sdc.<klasse>.<feld>`) nutzt dieselbe Prüfung. Der
+  Token-Alias `mean_reversion` → `mean-reversion` bleibt erhalten (Token-Format,
+  kein Vokabular).
+* **`metricClass()` (`src/lib/signalDecayRuntime.ts`)** nutzt denselben Lookup;
+  unbekannte Werte fallen weiterhin auf `unclassified`.
+
+### Tests
+
+* Neuer Quelltext-Wächter in `tests/adrVocabulary.test.ts`: in
+  `src/lib/signalDecay.ts` und `src/lib/signalDecayRuntime.ts` darf kein
+  Klassenname mehr als Vergleichs- oder Listenliteral stehen. Die Namen werden
+  aus der SSoT aufgebaut — eine per ADR ergänzte fünfte Klasse ist damit sofort
+  mitgeprüft. Gegenprobe dokumentiert: Literal-Vergleich (alt) und fünfte
+  Klasse `momentum` (ADR-Simulation) werden rot; danach zurückgenommen.
+* `tests/adrVocabulary.test.ts` (37 Tests) und `tests/strategyLifecycle.test.ts`
+  grün; `npm run typecheck`, `npm run lint` und `npm test` (4.490 Tests,
+  4.454 grün, 0 rot, 36 skipped) ebenso.
+
+### Notes
+
+* **Keine** neue Klasse, kein `momentum`; `unclassified` bleibt die
+  Nicht-Klasse (ADR-008). `DEFAULT_CLASS_POLICIES`-Inhalte, Env-Namen
+  (`SIGNAL_DECAY_CLASS_*`), Schwellen und Decay-Logik sind unverändert.
+* Verbleibende, dokumentierte Literalstelle sind allein die **append-only**
+  DB-CHECKs `positions_strategy_class_check` und
+  `signal_decay_events_class_check` in
+  [`drizzle/2026-09-22_signal_decay.sql`](drizzle/2026-09-22_signal_decay.sql);
+  sie bleiben unangetastet.
 
 ## [0.10.8] — Doku-Viewer: `docs/architecture/` + `docs/roadmap/` (STX-08-02) (2026-10-03)
 

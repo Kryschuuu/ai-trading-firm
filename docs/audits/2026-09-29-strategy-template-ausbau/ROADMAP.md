@@ -381,18 +381,18 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 
 > **Herkunft:** der Vollabgleich [`remediation/RECONCILE-2026-10-03.md`](remediation/RECONCILE-2026-10-03.md)
 > hat 21 Findings gegen `main` @ `3d13161` verifiziert. Die 32 Ursprungs-Prompts sind
-> umgesetzt; 08-01 und 08-02 sind am 2026-10-03 erledigt, drei der fünf Folge-Prompts bleiben offen. Jeder ist ein
+> umgesetzt; 08-01, 08-02 und 08-03 sind am 2026-10-03 erledigt, zwei der fünf Folge-Prompts bleiben offen. Jeder ist ein
 > eigenständiger, abgegrenzter Auftrag mit Ziel, betroffenen Dateien, Randbedingungen,
 > Abnahmekriterien und Tests — ohne Rückfragen ausführbar.
 >
-> **Reihenfolge-Empfehlung:** 08-01/08-02 sind erledigt; weiter 08-03 → 08-05 → 08-04.
-> Die drei kleinen Folge-Pakete zuerst, das hochriskante Paket 08-04 zuletzt und allein.
+> **Reihenfolge-Empfehlung:** 08-01/08-02/08-03 sind erledigt; weiter 08-05 → 08-04.
+> Die kleinen Folge-Pakete zuerst, das hochriskante Paket 08-04 zuletzt und allein.
 
 | # | Prompt | Finding | Risiko | Ergebnis | Hängt ab von |
 |---|---|---|---|---|---|
 | 08-01 | [Changelog-Nachtrag Copy-Engine](prompts/PROMPT-STX-08-01-changelog-nachtrag-copy-engine.md) | [STX-20](findings/STX-20-changelog-nachtrag-copy-engine.md) | minimal (Doku) | ✅ erledigt: `[Unreleased]` (Code-Version `0.10.6`, 2026-10-03; kein Projekt-Bump) | — |
 | 08-02 | [Doku-Viewer: `docs/architecture/` + `docs/roadmap/`](prompts/PROMPT-STX-08-02-docscatalog-suchpfade.md) | Altlast 3 (OP-6) | minimal | ✅ erledigt: `v0.10.8` + `tests/docsCatalog.test.ts` (8 Tests), Altlast 3 behoben | — |
-| 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ⏳ offen | — |
+| 08-03 | [Klassen-Literale in `signalDecay*` aus der SSoT](prompts/PROMPT-STX-08-03-signaldecay-klasse-ssot.md) | [STX-02](findings/STX-02-strategyclass-duplikat.md)-Rest / Altlast 1 | gering | ✅ erledigt: `v0.10.9` — `STRATEGY_CLASS_KEYS` aus `STRATEGY_CLASSES` abgeleitet, Lookup statt Literale, Quelltext-Wächter in `tests/adrVocabulary.test.ts`, Altlast 1 behoben | — |
 | 08-05 | [`LOCAL_FREE`-Endpunkt absichern](prompts/PROMPT-STX-08-05-localfree-endpoint-haertung.md) | [STX-21](findings/STX-21-localfree-cloud-endpoint.md) | gering | ⏳ offen | — |
 | 08-04 | [`backtestRule()` auf den Indicator-Cache](prompts/PROMPT-STX-08-04-backtestrule-indicatorcache.md) | [STX-12](findings/STX-12-backtestrule-o-n-quadratisch.md) | **hoch** | ⏳ offen | 00-01 (Messung), 02-02/02-03 (Paritätsmuster) |
 
@@ -401,9 +401,9 @@ Neustart, `HALTED`-Blockade, Latenz-Finding, Grep „kein `submit()` gegen echte
 - **08-01 zuerst und am 2026-10-03 erledigt:** Der Nachtrag zu `npm run copy:paper` und
   `2026-10-04_copy_engine_gates.sql` steht jetzt unter `[Unreleased]`; es gab keinen
   Projektversions-Bump und der veröffentlichte Block `[0.10.6]` blieb unverändert.
-- **08-02 und 08-03** räumen zwei der drei dokumentierten Code-Altlasten (OP-6) ab —
-  beides kleine, isolierte Änderungen mit sofortigem Nutzen (ADR-Log im Browser lesbar;
-  eine neue Klasse braucht künftig nur noch ein ADR).
+- **08-02 und 08-03 haben am 2026-10-03 zwei der drei dokumentierten Code-Altlasten (OP-6)
+  abgeräumt** — beides kleine, isolierte Änderungen mit sofortigem Nutzen (ADR-Log im
+  Browser lesbar; eine neue Klasse braucht künftig nur noch ein ADR).
 - **08-05** schließt die Lücke zwischen dem **Namen** `LOCAL_FREE` und seiner
   **Garantie**. Unabhängig von allem anderen, kleiner Testaufwand.
 - **08-04 zuletzt und allein**, weil er als einziger Handelslogik anfasst und
@@ -434,7 +434,7 @@ vorhanden. Kein Prompt dieser Phase blockiert einen anderen.
 02-04 ✅ (optional, `rule.*@1`, commit 7995822) — fachlich Phase 2 vollständig
 
 Phase 8 (Abgleich 2026-10-03, alle voneinander unabhängig):
-  08-01 ✅ (STX-20 Doku)   08-02 ✅ (Altlast 3)   08-03 ⏳ (STX-02-Rest)
+  08-01 ✅ (STX-20 Doku)   08-02 ✅ (Altlast 3)   08-03 ✅ (Altlast 1)
   08-05 ⏳ (STX-21)        08-04 ⏳ (STX-12)  ← zuletzt und allein (Handelslogik)
 ```
 
@@ -472,7 +472,7 @@ nicht als Phase-8-Prompt ausgeschrieben, mit dem jeweiligen Blocker:
 |---|---|---|
 | **Alpaca-WebSocket** ([STX-08](findings/STX-08-alpaca-ohne-websocket.md)) | offen | Der Adapter ist REST-only (0 WS-Treffer in `src/brokers/alpaca/`). Ein Leader-Adapter bräuchte einen eigenen WS-Client mit Reconnect, Heartbeat und Backfill — das ist ein **eigener Adapter-Audit**, kein Anhängsel. Phase 7 ist über Bitunix abgeschlossen und braucht Alpaca nicht. |
 | **`changePctBars` + Deprekation von `changePct24h`** ([STX-14](findings/STX-14-changepct24h-semantik.md)) | teilweise | Die Semantik-Prüfung `CHANGE_PCT_SEMANTICS` ist da (`v0.10.0`); die 97-Perioden-Rechnung bleibt unverändert. Ein **neues** `RULE_FIELDS`-Feld ist ein Versionsereignis mit Migrationsimplikationen für bestehende `trade_rules` — und aktuell nutzt **kein** Template `changePct24h`. Ohne Konsumenten ist der Nutzen null, das Risiko positiv. |
-| **`VolatilityRegime`-Konsolidierung** (Altlast 2, OP-6) | dokumentiert | Drei gleichnamige Typen in `adaptiveRisk.ts`, `portfolio/types.ts`, `scanner/types.ts`. Kein Laufzeitfehler, Nutzen rein kosmetisch — aber die Berührungsfläche (drei Domänen, öffentliche Typen) ist größer als bei Altlast 1 und 3. Erst nach 08-03, und nur mit vollständiger Testabdeckung. |
+| **`VolatilityRegime`-Konsolidierung** (Altlast 2, OP-6) | dokumentiert | Drei gleichnamige Typen in `adaptiveRisk.ts`, `portfolio/types.ts`, `scanner/types.ts`. Kein Laufzeitfehler, Nutzen rein kosmetisch — aber die Berührungsfläche (drei Domänen, öffentliche Typen) ist größer als bei Altlast 1 und 3. 08-03 (Altlast 1) ist erledigt; die Konsolidierung bleibt dokumentiert und ungeplant (kein Laufzeitfehler). |
 | **Screening-Pilot, Gate G6** | ausstehend | Verlangt 50 echte Zellen gegen echte Marktdaten **und** PostgreSQL. In einer Abgleich-Umgebung nicht ausführbar; das Ergebnis wäre eine Zahl ohne Aussage. Runbook liegt vor: [`remediation/SCREENING-PILOT.md`](remediation/SCREENING-PILOT.md). |
 | **`strategy_lifecycle_states.strategy_version_id`** (FK) | gesperrt | In 04-01 **ausdrücklich** ausgeschlossen („wegen des expliziten Locks auf `strategy_lifecycle_*` … eine erneute Prüfung erfordert einen separat abgestimmten Scope"). Ohne diese Scope-Abstimmung kein Prompt. |
 | **`PortfolioConstruction`-Schicht** ([ADR-010](../../roadmap/DECISIONS.md#adr-010-universe-strategie-adr-e3)) | außerhalb | Die einzige echte Lücke aus STX-04 (Universe-Gewichte, `INVERSE_VOLATILITY`). ADR-010 fixiert die Form, erklärt sie aber ausdrücklich **nicht** zum Teil dieser Roadmap. |

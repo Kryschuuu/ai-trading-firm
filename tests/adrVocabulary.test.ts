@@ -273,6 +273,35 @@ describe("ADR-008 (E1): Strategie-Klassifikation — Code-Fakten", () => {
       assert.match(read("src/strategies/types.ts"), /\bclass\s*:\s*StrategyClassKey\b/, "StrategyTemplate.class muss StrategyClassKey sein (ADR-008)");
     }
   });
+
+  test("Guard für signalDecay*: keine Klassen-Literale in Vergleichen oder Listen — die Klasse kommt aus STRATEGY_CLASSES/STRATEGY_CLASS_KEYS (STX-08-03)", () => {
+    // Quelltext-Muster wie beim src/strategies/-Wächter. Die Namen kommen aus
+    // der SSoT: eine per ADR ergänzte fünfte Klasse wird sofort mitgeprüft,
+    // `unclassified` ist als Nicht-Klasse enthalten.
+    const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const classLiteral = `(?:${STRATEGY_CLASS_KEYS.map(escape).join("|")})`;
+    const patterns: ReadonlyArray<[RegExp, string]> = [
+      [new RegExp(`(?:===|!==|==|!=)\\s*["']${classLiteral}["']`), "Vergleich gegen ein Klassenliteral"],
+      [new RegExp(`["']${classLiteral}["']\\s*(?:===|!==|==|!=)`), "Vergleich gegen ein Klassenliteral"],
+      [new RegExp(`\\[\\s*["']${classLiteral}["']`), "eigene Klassenliste"],
+      [new RegExp(`["']${classLiteral}["']\\s*,\\s*["']${classLiteral}["']`), "eigene Klassenliste"],
+    ];
+    for (const file of ["src/lib/signalDecay.ts", "src/lib/signalDecayRuntime.ts"]) {
+      const source = read(file);
+      for (const [pattern, what] of patterns) {
+        assert.doesNotMatch(
+          source,
+          pattern,
+          `${file}: ${what} — die Klassenliste ist aus STRATEGY_CLASSES abzuleiten (ADR-008)`,
+        );
+      }
+    }
+    assert.match(
+      read("src/lib/signalDecay.ts"),
+      /export const STRATEGY_CLASS_KEYS:[^=]*=\s*\[\.\.\.STRATEGY_CLASSES,\s*"unclassified"\s*\]/,
+      "STRATEGY_CLASS_KEYS muss aus STRATEGY_CLASSES abgeleitet sein (ADR-008)",
+    );
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
