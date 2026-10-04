@@ -230,3 +230,106 @@
   --tw-prose-td-borders: var(--color-slate-800);
   --tw-prose-kbd: var(--color-slate-200);
 }
+
+/* ---- Druck / PDF ------------------------------------------------------
+   Der Report ist als PDF/ Ausdruck gedacht (Button „Druck / PDF“ im
+   Reports-Tab). Zwei Dinge fehlen einem dunklen Dashboard auf Papier:
+   (1) das Theme — dunkle Flächen drucken entweder schwarz (Tonersparnis
+   ade) oder gar nicht; (2) die Bedienelemente — Buttons/Selects gehören
+   nicht in einen Report. Dieser Block erzwingt daher die Light-Palette
+   (dieselben Werte wie :root[data-theme="light"], nur für @media print)
+   und blendet Interaktives aus. `print:hidden`/`print:block` an den
+   Komponenten ergänzt das. */
+@media print {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+  --color-slate-50: #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #334155;
+  --color-slate-400: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-600: #94a3b8;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+  --color-slate-950: #f8fafc;
+  /* emerald */
+  --color-emerald-50: #022c22;
+  --color-emerald-100: #064e3b;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #34d399;
+  --color-emerald-800: #6ee7b7;
+  --color-emerald-900: #a7f3d0;
+  --color-emerald-950: #ecfdf5;
+  /* sky */
+  --color-sky-50: #082f49;
+  --color-sky-100: #0c4a6e;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0284c7;
+  --color-sky-500: #0ea5e9;
+  --color-sky-600: #0284c7;
+  --color-sky-700: #38bdf8;
+  --color-sky-800: #7dd3fc;
+  --color-sky-900: #bae6fd;
+  --color-sky-950: #f0f9ff;
+  /* amber */
+  --color-amber-50: #451a03;
+  --color-amber-100: #78350f;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #fbbf24;
+  --color-amber-800: #fcd34d;
+  --color-amber-900: #fde68a;
+  --color-amber-950: #fffbeb;
+  /* red */
+  --color-red-50: #450a0a;
+  --color-red-100: #7f1d1d;
+  --color-red-200: #991b1b;
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #f87171;
+  --color-red-800: #fca5a5;
+  --color-red-900: #fecaca;
+  --color-red-950: #fef2f2;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  /* Keine Schatten/Filter, die den Drucker belasten. */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Report-Blöcke nicht über Seitenumbrüche zerreißen. */
+  .print-break-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Diagramme und Tabellen immer vollständig. */
+  table,
+  svg,
+  figure {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 12mm;
+  }
+}

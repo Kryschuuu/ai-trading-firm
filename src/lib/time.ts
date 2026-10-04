@@ -80,12 +80,48 @@ export function startOfBerlinMonth(at: Date = new Date()): Date {
   return startOfBerlinDay(firstApprox);
 }
 
-export type Period = "day" | "week" | "month";
+/** UTC-Instant des 1. des Quartals 00:00 Berliner Zeit (Jan/Apr/Jul/Okt). */
+export function startOfBerlinQuarter(at: Date = new Date()): Date {
+  const [y, m] = berlinDayKey(at).split("-").map(Number);
+  const firstMonthOfQuarter = m - ((m - 1) % 3);
+  const approx = new Date(Date.UTC(y, firstMonthOfQuarter - 1, 1, 12));
+  return startOfBerlinDay(approx);
+}
+
+/** UTC-Instant des 1. Januar bzw. 1. Juli 00:00 Berliner Zeit. */
+export function startOfBerlinHalfYear(at: Date = new Date()): Date {
+  const [y, m] = berlinDayKey(at).split("-").map(Number);
+  const firstMonth = m <= 6 ? 1 : 7;
+  const approx = new Date(Date.UTC(y, firstMonth - 1, 1, 12));
+  return startOfBerlinDay(approx);
+}
+
+/** UTC-Instant des 1. Januar 00:00 Berliner Zeit. */
+export function startOfBerlinYear(at: Date = new Date()): Date {
+  const [y] = berlinDayKey(at).split("-").map(Number);
+  return startOfBerlinDay(new Date(Date.UTC(y, 0, 1, 12)));
+}
+
+/**
+ * Auswertungsfenster des Reports/Kurven-Charts. Alle Grenzen liegen auf
+ * Berliner Kalendergrenzen (Tag/Woche/Monat/Quartal/Halbjahr/Jahr), damit
+ * „dieser Monat“ überall dasselbe bedeutet.
+ */
+export type Period = "day" | "week" | "month" | "quarter" | "halfyear" | "year";
+
+export const PERIODS: readonly Period[] = ["day", "week", "month", "quarter", "halfyear", "year"];
+
+export function isPeriod(value: string): value is Period {
+  return (PERIODS as readonly string[]).includes(value);
+}
 
 export function periodStart(period: Period, at: Date = new Date()): Date {
   switch (period) {
     case "day": return startOfBerlinDay(at);
     case "week": return startOfBerlinWeek(at);
     case "month": return startOfBerlinMonth(at);
+    case "quarter": return startOfBerlinQuarter(at);
+    case "halfyear": return startOfBerlinHalfYear(at);
+    case "year": return startOfBerlinYear(at);
   }
 }

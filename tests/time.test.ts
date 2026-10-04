@@ -5,6 +5,10 @@ import {
   startOfBerlinDay,
   startOfBerlinWeek,
   startOfBerlinMonth,
+  startOfBerlinQuarter,
+  startOfBerlinHalfYear,
+  startOfBerlinYear,
+  isPeriod,
   periodStart,
 } from "../src/lib/time";
 
@@ -57,4 +61,30 @@ test("periodStart mappt korrekt", () => {
   assert.deepEqual(periodStart("day", now), startOfBerlinDay(now));
   assert.deepEqual(periodStart("week", now), startOfBerlinWeek(now));
   assert.deepEqual(periodStart("month", now), startOfBerlinMonth(now));
+});
+
+test("startOfBerlinQuarter liefert den Quartalsersten (Jan/Apr/Jul/Okt)", () => {
+  // 20.05.2026 → Q2 beginnt am 1. April 00:00 CEST = 31.03. 22:00 UTC.
+  assert.equal(startOfBerlinQuarter(new Date("2026-05-20T09:00:00Z")).toISOString(), "2026-03-31T22:00:00.000Z");
+  // 02.01.2026 → Q1 beginnt am 1. Januar 00:00 MEZ = 31.12. 23:00 UTC.
+  assert.equal(startOfBerlinQuarter(new Date("2026-01-02T09:00:00Z")).toISOString(), "2025-12-31T23:00:00.000Z");
+  // 01.10.2026 → Q4 beginnt am 1. Oktober.
+  assert.equal(startOfBerlinQuarter(new Date("2026-10-01T09:00:00Z")).toISOString(), "2026-09-30T22:00:00.000Z");
+});
+
+test("startOfBerlinHalfYear und startOfBerlinYear liegen auf dem 1.1./1.7.", () => {
+  assert.equal(startOfBerlinHalfYear(new Date("2026-03-15T12:00:00Z")).toISOString(), "2025-12-31T23:00:00.000Z");
+  assert.equal(startOfBerlinHalfYear(new Date("2026-08-15T12:00:00Z")).toISOString(), "2026-06-30T22:00:00.000Z");
+  assert.equal(startOfBerlinYear(new Date("2026-08-15T12:00:00Z")).toISOString(), "2025-12-31T23:00:00.000Z");
+});
+
+test("periodStart kennt Quartal, Halbjahr und Jahr; isPeriod ist die Wache", () => {
+  const now = new Date("2026-05-20T09:00:00Z");
+  assert.deepEqual(periodStart("quarter", now), startOfBerlinQuarter(now));
+  assert.deepEqual(periodStart("halfyear", now), startOfBerlinHalfYear(now));
+  assert.deepEqual(periodStart("year", now), startOfBerlinYear(now));
+
+  assert.equal(isPeriod("quarter"), true);
+  assert.equal(isPeriod("all"), false);
+  assert.equal(isPeriod(""), false);
 });

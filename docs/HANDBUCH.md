@@ -211,7 +211,8 @@ Minuten Wartezeit, bei Variante B mit unter einer Minute.
 
 > **Read-Zugriff im Token-Betrieb (SEC-02, v1.36.31):** Die sensitiven
 > Dashboard-APIs `/api/firm`, `/api/firm/log`, `/api/firm/report`,
-> `/api/firm/rules`, `/api/providers` und `/api/routing` verlangen `firm.read`.
+> `/api/firm/equity`, `/api/firm/rules`, `/api/providers` und `/api/routing`
+> verlangen `firm.read`.
 > Die folgenden Terminalbeispiele verwenden deshalb `FIRM_API_TOKEN` als
 > Operator-Credential. Ein `FIRM_VIEWER_TOKEN` mit `x-viewer-token` ist für reine
 > Leseabfragen ebenfalls geeignet; die Browser-Oberfläche nutzt nach Login ihre

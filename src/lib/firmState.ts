@@ -33,6 +33,8 @@ import { desc } from "drizzle-orm";
 import { db } from "@/db";
 import { equitySnapshots } from "@/db/schema";
 import { realizedPnlToday as readRealizedToday } from "./equity";
+// Startkapital zentral (v0.13.0): eine Definition statt dreier Kopien.
+import { readStartingEquity } from "./startingEquity";
 import { state } from "./stateRegistry";
 import { setFirmMetricStateReader, type FirmMetricState } from "./telemetry";
 
@@ -88,12 +90,6 @@ export async function collectFirmMetricState(): Promise<FirmMetricState> {
     realizedPnlToday,
     source: "db-snapshot",
   };
-}
-
-/** Startkapital wie im Paper-Ledger-Default (`STARTING_EQUITY`, Default 10000). */
-function readStartingEquity(env: Record<string, string | undefined> = process.env): number {
-  const raw = Number(env.STARTING_EQUITY);
-  return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
 }
 
 /** Registriert den Leser bei `telemetry.ts` (idempotent, nur Server-Code). */

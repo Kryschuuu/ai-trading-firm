@@ -9,8 +9,11 @@ import { requirePermission } from "@/auth";
 import { db } from "@/db";
 import { agentMessages, agents, auditLog, positions } from "@/db/schema";
 import { and, desc, gte } from "drizzle-orm";
-import { periodStart, type Period } from "@/lib/time";
+import { isPeriod, periodStart, type Period } from "@/lib/time";
 import { BLOCK_EXPLANATIONS } from "@/lib/engine";
+import { readEquitySeriesWindow } from "@/lib/equity";
+import { drawdownEpisodes, timeWeightedReturn } from "@/lib/equityAnalytics";
+import { readStartingEquity } from "@/lib/startingEquity";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +26,12 @@ type SymbolStat = {
 
 /**
  * Menschen lesbarer Report für Führungsperspektive.
- *   ?period=day|week|month   (Standard: day, Grenzen in Europe/Berlin)
+ *   ?period=day|week|month|quarter|halfyear|year  (Standard: day, Grenzen in Europe/Berlin)
  *
- * Enthält: KPIs, Symbol-Breakdown, Entscheidungs-/Blockstatistik,
- * SL/TP-/Kill-/Config-Ereignisse, laufende Empfehlungen des Hauses
- * und eine regelbasierte Boss-Zusammenfassung.
+ * Enthält: KPIs (inkl. **echtem Equity-Drawdown** Peak-to-Trough aus den
+ * Snapshots — siehe docs/EQUITY_CURVE.md), Symbol-Breakdown,
+ * Entscheidungs-/Blockstatistik, SL/TP-/Kill-/Config-Ereignisse, laufende
+ * Empfehlungen des Hauses und eine regelbasierte Boss-Zusammenfassung.
  */
 export async function GET(req: Request) {
   // SEC-02: performance, drawdown and recommendations require an authenticated reader.
@@ -36,12 +40,11 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const periodRaw = (url.searchParams.get("period") ?? "day").toLowerCase();
-  const period: Period = (["day", "week", "month"] as const).includes(periodRaw as Period)
-    ? (periodRaw as Period)
-    : "day";
+  const period: Period = isPeriod(periodRaw) ? periodRaw : "day";
   const since = periodStart(period);
+  const until = new Date();
 
-  const [closedRows, auditRows, msgRows, agentRows] = await Promise.all([
+  const [closedRows, auditRows, msgRows, agentRows, equityWindow] = await Promise.all([
     db
       .select()
       .from(positions)
@@ -50,6 +53,11 @@ export async function GET(req: Request) {
     db.select().from(auditLog).where(gte(auditLog.createdAt, since)).orderBy(desc(auditLog.createdAt)),
     db.select().from(agentMessages).where(gte(agentMessages.createdAt, since)).orderBy(desc(agentMessages.createdAt)).limit(400),
     db.select({ id: agents.id, name: agents.name, role: agents.role }).from(agents),
+    // Equity-Kurve des Zeitraums: Basis für den echten Drawdown (Peak-to-Trough)
+    // inklusive Referenz-Höchststand aus der Zeit VOR dem Zeitraum. Der
+    // Drawdown wurde vorher aus der Summe der realisierten P&L gerechnet und
+    // stand dadurch fast immer auf 0 % (Peak ≤ 0 → keine Berechnung).
+    readEquitySeriesWindow({ since, until, maxPoints: 2000, startEquity: readStartingEquity() }),
   ]);
 
   // ── KPIs aus geschlossenen Trades des Zeitraums ──────────────────────────
@@ -59,14 +67,41 @@ export async function GET(req: Request) {
   const losses = pnls.filter((p) => p <= 0);
   const grossProfit = wins.reduce((a, b) => a + b, 0);
   const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
-  let peak = Number.NEGATIVE_INFINITY;
-  let maxDrawdownPct = 0;
-  let running = 0;
+  // ── Drawdown aus der Equity-Kurve (Peak-to-Trough), nicht aus der P&L-Summe ─
+  const equityStats = equityWindow.stats;
+  const maxDrawdownPct = equityStats.maxDrawdownPct;
+  // Zeitgewichtete Rendite (verkettete Tagesrenditen) und die fünf tiefsten
+  // Drawdown-Phasen — dieselbe reine Mathematik wie im Chart/Endpoint.
+  const twr = timeWeightedReturn(equityWindow.points);
+  const episodes = drawdownEpisodes(equityWindow.points, { topN: 5, minPct: 0.05 });
+
+  // ── Trade-Statistik (Gewinner/Verlierer, Serien, Haltedauer) ────────────
+  const profitValues = wins.reduce((a, b) => a + b, 0);
+  const lossValues = Math.abs(losses.reduce((a, b) => a + b, 0));
+  const avgWin = wins.length ? profitValues / wins.length : null;
+  const avgLoss = losses.length ? lossValues / losses.length : null;
+  const expectancy = closed.length ? pnls.reduce((a, b) => a + b, 0) / closed.length : null;
+  let maxWinStreak = 0;
+  let maxLossStreak = 0;
+  let winStreak = 0;
+  let lossStreak = 0;
   for (const p of [...closed].reverse()) {
-    running += Number(p.realizedPnl ?? 0);
-    peak = Math.max(peak, running);
-    if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, ((running - peak) / peak) * 100);
+    if (Number(p.realizedPnl ?? 0) > 0) {
+      winStreak += 1;
+      lossStreak = 0;
+      maxWinStreak = Math.max(maxWinStreak, winStreak);
+    } else {
+      lossStreak += 1;
+      winStreak = 0;
+      maxLossStreak = Math.max(maxLossStreak, lossStreak);
+    }
   }
+  const holdHours = closed
+    .map((p) => (p.createdAt && p.updatedAt ? (p.updatedAt.getTime() - p.createdAt.getTime()) / 3_600_000 : null))
+    .filter((h): h is number => h !== null && Number.isFinite(h) && h >= 0);
+  const avgHoldHours = holdHours.length
+    ? Number((holdHours.reduce((a, b) => a + b, 0) / holdHours.length).toFixed(2))
+    : null;
 
   const kpis = {
     trades: closed.length,
@@ -87,7 +122,35 @@ export async function GET(req: Request) {
             return { symbol: closed[idx].symbol, pnl: pnls[idx] };
           })()
         : null,
-    maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
+    maxDrawdownPct,
+    /** Drawdown-Details (Peak → Trough, Erholung) aus der Equity-Kurve. */
+    maxDrawdownAbs: equityStats.maxDrawdownAbs,
+    currentDrawdownPct: equityStats.currentDrawdownPct,
+    maxDrawdownFrom: equityStats.maxDrawdownFrom,
+    maxDrawdownTo: equityStats.maxDrawdownTo,
+    recoveredAt: equityStats.recoveredAt,
+    grossProfit: Number(profitValues.toFixed(2)),
+    grossLoss: Number(lossValues.toFixed(2)),
+    avgWin: avgWin !== null ? Number(avgWin.toFixed(2)) : null,
+    avgLoss: avgLoss !== null ? Number(avgLoss.toFixed(2)) : null,
+    /** Erwartungswert je Trade (realisiertes P&L / Anzahl). */
+    expectancy: expectancy !== null ? Number(expectancy.toFixed(2)) : null,
+    /** Gewinn-/Verlust-Verhältnis der Durchschnitte (null, wenn kein Verlust). */
+    payoffRatio: avgWin !== null && avgLoss !== null && avgLoss > 0 ? Number((avgWin / avgLoss).toFixed(2)) : null,
+    maxWinStreak,
+    maxLossStreak,
+    avgHoldHours,
+    /**
+     * Zeitgewichtete Rendite im Zeitraum (verkettete Tagesrenditen). `flows`
+     * ist `false`, solange das Paper-Konto keine Cashflow-Spur führt — dann
+     * entspricht sie der Kettenrendite ohne Bereinigung (dokumentiert).
+     */
+    twrPct: twr.twrPct,
+    twrSimplePct: twr.simplePct,
+    twrDays: twr.days,
+    twrCashflowApplied: twr.flows.applied,
+    /** Die tiefsten Drawdown-Phasen (Peak → Tief → Erholung). */
+    drawdownEpisodes: episodes.length,
     stopLossHits: closed.filter((p) => p.exitReason === "STOP_LOSS").length,
     takeProfitHits: closed.filter((p) => p.exitReason === "TAKE_PROFIT").length,
   };
@@ -190,8 +253,13 @@ export async function GET(req: Request) {
   if (topBlock) {
     bullets.push(`Häufigster Block: ${topBlock.reason} (${topBlock.count}×).`);
   }
-  if (kpis.maxDrawdownPct > 10) {
-    bullets.push(`Max. Drawdown im Zeitraum ${kpis.maxDrawdownPct} % — Positionsgrößen prüfen.`);
+  if (kpis.maxDrawdownPct > 0) {
+    const dd =
+      `Max. Drawdown (Equity, Peak-to-Trough) ${kpis.maxDrawdownPct} %` +
+      (kpis.currentDrawdownPct > 0
+        ? `, aktuell ${kpis.currentDrawdownPct} % unter dem Höchststand`
+        : ", aktuell auf dem Höchststand");
+    bullets.push(`${dd}${kpis.maxDrawdownPct > 10 ? " — Positionsgrößen prüfen." : "."}`);
   }
   if (recommendations.length > 0) {
     bullets.push(`${recommendations.length} Empfehlung(en) aktiv, u. a. ${recommendations.slice(0, 3).map((r) => r.symbol).join(", ")}.`);
@@ -201,8 +269,20 @@ export async function GET(req: Request) {
     ok: true,
     period,
     since: since.toISOString(),
-    until: new Date().toISOString(),
+    until: until.toISOString(),
+    /** Equity-Kurve des Zeitraums (verdichtet) + Kennzahlen für das Chart. */
+    equity: {
+      series: equityWindow.points,
+      stats: equityStats,
+      resolution: equityWindow.resolution,
+      bucketSeconds: equityWindow.bucketSeconds,
+      startingEquity: equityStats.startEquity,
+      historyStart: equityWindow.meta.earliestTs,
+    },
     kpis,
+    /** Kennzahlen-Objekt für die Liste der Drawdown-Episoden (Top 5). */
+    drawdownEpisodes: episodes,
+    twr,
     symbols,
     turnsByRole,
     decisionsByType,
