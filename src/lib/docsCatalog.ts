@@ -61,6 +61,7 @@ import {
   isServableDocFile,
   normalizeSlashes,
 } from "./docsLinks";
+import { type DocsSectionId, sectionForSlug } from "./docsNav";
 
 // Re-Export: das URL-Schema liegt bewusst im reinen Modul `docsLinks`
 // (Client-Bundle darf kein `node:fs` enthalten). Katalog-Konsumenten
@@ -83,8 +84,9 @@ export type DocsEntry = {
 export const DOCS_CATALOG: Record<string, DocsEntry> = {
   readme: {
     file: "docs/README.md",
-    title: "README",
-    subtitle: "Überblick, Architektur und Schnellstart — neue Struktur 2026-09-05",
+    title: "Überblick & Schnellstart",
+    subtitle:
+      "Grundprinzip, Architektur in Kurzform, Projektstruktur und das vollständige Inhaltsverzeichnis der Doku",
   },
   install: {
     file: "docs/INSTALL.md",
@@ -473,16 +475,52 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
   claudeTradingIndicator: {
     file: "docs/CLAUDE_TRADING_INDICATOR.md",
     title: "Claude Trading Indicator (CTI)",
-    subtitle: "Signalschicht `src/signals/`, CLI `npm run cti`",
+    subtitle:
+      "Pine-Script-v6-Portierung: acht Grundindikatoren → vier Dimensionen, ein Rechenkern für Backtest und Live, CLI `npm run cti`",
   },
   strategyScreening: {
     file: "docs/STRATEGY_SCREENING.md",
     title: "Strategie×Markt-Screening — Persistenz und Idempotenz",
     subtitle: "Candidate Matrix, Persistenz und Idempotenz des Screenings (STX-05-03/05-04)",
   },
+
+  // ── Indikatoren-Katalog (2026-10-04) ─────────────────────────────────────
+  // Zentraler Einstieg in alle Rechenkerne: Engine-Formeln, CTI-Dimensionen,
+  // Scanner-Faktoren und der externe Research-Rank. Vorher gab es dafür keinen
+  // Katalogeintrag — die Formeln lagen verstreut in BACKTESTING.md,
+  // architecture/STRATEGY_STACK.md und CLAUDE_TRADING_INDICATOR.md.
+  indicators: {
+    file: "docs/INDICATORS.md",
+    title: "Indikatoren-Katalog (Engine, CTI, Scanner)",
+    subtitle:
+      "Alle Formeln mit Defaults, Quelle im Code, Verwendung und Grenzen — EMA/RSI/MACD/Bollinger/Donchian/ADX/ATR/VWAP, CTI-Konsens, Scanner-Faktoren",
+  },
+  indicatorRanking: {
+    file: "docs/research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md",
+    title: "Research: Indikator-Ranking Crypto-Daytrading",
+    subtitle:
+      "Externe AlgoTrade-Pro-Auswertung (30m/1h) mit Gebühren-Check — inkl. Einordnung des CTI („Claude Indicator“)",
+  },
+
+  // Nachtrag 2026-10-04: Die Datei existierte und wurde aus docs/README.md und
+  // CHANGELOG.md verlinkt, fehlte aber im Katalog — sie war nur über den
+  // Basename-Fallback erreichbar.
+  equityCurve: {
+    file: "docs/EQUITY_CURVE.md",
+    title: "Equity-Kurve & Drawdown",
+    subtitle:
+      "Datenquelle `equity_snapshots`, Benchmark-Vergleich, TWR, Drawdown-Episoden, Heatmap, Alarme und CSV-Export (v0.13.0)",
+  },
 };
 
-export type DocsListItem = { slug: string; title: string; subtitle: string; path: string };
+export type DocsListItem = {
+  slug: string;
+  title: string;
+  subtitle: string;
+  path: string;
+  /** Themen-Abschnitt für die Navigation (siehe `src/lib/docsNav.ts`). */
+  section: DocsSectionId;
+};
 
 /** Alle Einträge in Katalogreihenfolge (für Listen und die Help-Sektion). */
 export function listDocs(): DocsListItem[] {
@@ -491,6 +529,7 @@ export function listDocs(): DocsListItem[] {
     title: d.title,
     subtitle: d.subtitle,
     path: docCanonicalPath(slug) ?? `/docs/${basename(d.file)}`,
+    section: sectionForSlug(slug),
   }));
 }
 

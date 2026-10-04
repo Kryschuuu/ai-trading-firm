@@ -23,7 +23,7 @@ eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
 ein unabhängiges `FIRM_SESSION_SECRET`; alle Instanzen neu starten und erneut
 anmelden. [Konfiguration und Migration](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 
-**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js 16.3.4 und gepatchte
+**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js ≥ 16.3.4 (im Lockfile aktuell 16.3.8) und gepatchte
 native Bildverarbeitung. Für Linux und Windows: `npm ci`,
 `npm run test:security:next`, frischer Build und Neustart aller Instanzen.
 [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
@@ -44,18 +44,24 @@ gepatchter Bibliothek und kappt Nachrichtengrößen hart. `npm ci`,
 `npm run test:security:ws`, Neustart aller Prozesse.
 [Upgrade-Runbook](security/README.md#ws-upgrade-sec-04).
 
-Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar (kanonische URLs `/docs/<Datei>.md`).
+Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar (kanonische URLs `/docs/<Datei>.md`). Seit 2026-10-04 ist `/docs` ein themensortierter Katalog-Hub mit Suche, Sprungleiste und vollständigem Dateibaum; jede Dokuseite bringt dieselbe Navigation in der Sidebar mit.
 
 ---
 
-Die Indikator-Formeln `bollingerBands` und `donchianChannel` (v0.6.3) sind
-in [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md) dokumentiert.
-Seit `v0.6.4` ist die Bollinger-Bandlage als Regelfeld nutzbar (`bbZScore`,
-`priceVsUpperBbPct`, `priceVsLowerBbPct` — [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)),
-seit `v0.6.5` der Donchian-Ausbruch (`donchianBreakoutPct` — das Hoch der *vorigen*
-20 Kerzen, [BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065)).
-Damit sind alle sieben Strategie-Vorschläge des Audits regelformulierbar;
-ausführbare Templates folgen in Phase 3.
+**Indikatoren:** Der zentrale Einstieg ist seit 2026-10-04 der
+[**Indikatoren-Katalog**](INDICATORS.md) — alle Formeln aus
+`src/lib/indicators.ts` (EMA, RSI, MACD, Bollinger, Donchian, ADX, ATR, VWAP),
+die 25 Regelfelder, der **Claude Trading Indicator (CTI)**, die 15
+Scanner-Faktoren und die Grenzen der einzelnen Verfahren. Einzelvertiefungen:
+`bollingerBands`/`donchianChannel` in
+[architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md), die
+Regelfelder `bbwPct`, `bbZScore`, `priceVsUpperBbPct`, `priceVsLowerBbPct`
+in [BACKTESTING.md §1.2](BACKTESTING.md#12-bollinger-bandlage-stx-02-02-v064)
+und `donchianBreakoutPct` (Hoch der *vorigen* 20 Kerzen) in
+[BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065).
+Das CTI-Fachdokument steht in [CLAUDE_TRADING_INDICATOR.md](CLAUDE_TRADING_INDICATOR.md);
+das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
+[research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md](research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md).
 
 ## Inhaltsverzeichnis — Neue Struktur (2026-09-05)
 
@@ -77,6 +83,8 @@ ausführbare Templates folgen in Phase 3.
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
 | **[EQUITY_CURVE.md](EQUITY_CURVE.md)** | Equity-Kurve & Drawdown: Datenquelle `equity_snapshots`, zweistufige Aufbewahrung (`EQUITY_RAW_RETENTION_DAYS`/`EQUITY_RETENTION_DAYS`), Zeiträume 1 T…Max, Auflösung, Drawdown-Definition (Peak-to-Trough, Referenz-Peak), Benchmark-Referenzlinie (`?compare=`, nur echte Kurshistorie), zeitgewichtete Rendite (TWR, ohne Cashflow-Spur gekennzeichnet), Top-5-Drawdown-Episoden mit Erholungszeiten, Monats-Heatmap, Vorperioden-Vergleich (`?from`/`?until`), Log-Achse, Druck/PDF, Equity-Alarme (`EQUITY_ALERT_*`), Report-Zeiträume, Hover/Tooltips, CSV-Export (v0.13.0) |
 | **[BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)** | Multi-Asset Backtest-Engine: synchronisierter Replay-Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0) |
+| **[INDICATORS.md](INDICATORS.md)** | **Indikatoren-Katalog**: alle Engine-Formeln (`src/lib/indicators.ts`) mit Defaults und Grenzen, die 25 Regelfelder, CTI-Kompendium, 15 Scanner-Faktoren, adaptives Risiko, Trusted Indicators, Prüfpfad (2026-10-04) |
+| **[research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md](research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md)** | Fremd-Ranking (AlgoTrade Pro) für Crypto-Daytrading inkl. Gebühren-Check und Einordnung des CTI („Claude Indicator“, Rang 3) — Recherche-Notiz, nicht nachgerechnet |
 | **[CLAUDE_TRADING_INDICATOR.md](CLAUDE_TRADING_INDICATOR.md)** | Claude Trading Indicator (CTI): 1:1-Portierung des Pine-Script-v6-Indikators — Zwei-Stufen-Konsens über vier Dimensionen, ein gemeinsamer Rechenkern für Backtest und Live, Signalstrategien in der Backtest-Engine, ATR-Stops, CLI `npm run cti` (v0.12.0) |
 | **[BACKTESTING.md](BACKTESTING.md)** | Walk-Forward-Backtesting: Zeitmaske, Paper-Ausführung, IS/OOS-Fenster, persistierte Runs + Trade-Ledger `backtest_trades` (atomar, idempotent, paginierte Read-API), CLI (GAP-01 v1.51.0, RMA-P1-04 v1.52.0), Event-Replay mit realistischen Friktionen `event_replay` (RMA-P1-01 v1.58.0), Tabelle „Rule-Timeframe ↔ unterstützte Felder“ (`1m … 5d`, `vwapPct` nur Intraday; STX-01 v0.6.2) |
 | **[FEATURE_STORE.md](FEATURE_STORE.md)** | Point-in-Time Feature Store: Feature-Registry (immutable, versioniert), Wertmodell mit `event_time`/`available_at`/`computed_at`, idempotente Materialisierung mit Cursor, Look-ahead-freie PIT-Abfrage, Offline/Online-Parität, Quality-Propagation, Retention (RMA-P6-01, v1.53.0) |
@@ -153,6 +161,7 @@ ausführbare Templates folgen in Phase 3.
 
 | Verzeichnis | Zweck |
 |-------------|-------|
+| [research/](research/) | Externe Research-Notizen — u. a. das [Indikator-Ranking für Crypto-Daytrading](research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md) (AlgoTrade Pro) inkl. Gebühren-Check und CTI-Einordnung |
 | [ci/](ci/) | CI-Workflows: `docs-validate`, `security-live-gate` |
 | [help/](help/) | Help-JSONs für UI: brokers, cycle, live-gate, market-universe, ops, paper-trading, portfolio, routing, scanner, workshop |
 
@@ -253,7 +262,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.8.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.13.0, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)

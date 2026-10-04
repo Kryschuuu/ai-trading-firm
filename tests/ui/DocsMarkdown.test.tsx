@@ -68,3 +68,40 @@ test("Ohne Link-Map bleibt der Link unverändert (kein stiller Bruch)", () => {
   const html = render("[Kapitel](#kapitel)");
   assert.match(html, /href="#kapitel"/);
 });
+
+/**
+ * Tabellen-Overflow (2026-10-04): Breite Tabellen — z. B. die 11-spaltige
+ * Faktorübersicht in `DAILY_WEEKLY_RESEARCH.md` — ragten aus dem Artikel heraus
+ * bis unter das Inhaltsverzeichnis bzw. über den Viewport-Rand. Der Renderer
+ * setzt deshalb jede Tabelle in einen Scroll-Container (`.docs-table-scroll`);
+ * die CSS-Regeln dazu liegen in `src/app/globals.css`.
+ */
+test("Tabellen sitzen in einem horizontal scrollbaren Container", () => {
+  const html = render("| A | B |\n| --- | --- |\n| 1 | 2 |");
+  assert.match(html, /class="docs-table-scroll"/, `Scroll-Container fehlt: ${html}`);
+  assert.match(html, /role="region"/);
+  assert.match(html, /tabindex="0"/, "Container muss per Tastatur scrollbar sein");
+  // Die Tabelle selbst bleibt eine echte Tabelle innerhalb des Containers.
+  assert.match(html, /<div class="docs-table-scroll"[^>]*>\s*<table>/);
+});
+
+test("Der Scroll-Container bekommt den Dokumentpfad als Datenattribut", () => {
+  const html = renderToStaticMarkup(
+    createElement(DocsMarkdown, { content: "Text", docPath: "/docs/README.md" }),
+  );
+  assert.match(html, /data-doc="\/docs\/README\.md"/);
+});
+
+/**
+ * Der mdast-Knoten von react-markdown darf **nicht** im DOM landen.
+ *
+ * Befund 2026-10-04: `<a node="[object Object]">` bzw. `<table
+ * node="[object Object]">` — ungültige DOM-Attribute, die React in der Konsole
+ * verwirft und die im serverseitig gerenderten HTML sichtbar waren. Der
+ * `node`-Prop wird in den Komponenten explizit verworfen.
+ */
+test("Kein `node`-Attribut im gerenderten HTML (Links und Tabellen)", () => {
+  const html = render("Siehe [Kapitel](#kapitel).\n\n| A | B |\n| --- | --- |\n| 1 | 2 |");
+  assert.doesNotMatch(html, /node="\[object Object\]"/, `node-Prop leckt ins DOM: ${html}`);
+  assert.doesNotMatch(html, /\snode=/);
+});

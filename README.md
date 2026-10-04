@@ -57,7 +57,11 @@ Seit **v0.6.5** ist auch der Donchian-Ausbruch regelformulierbar (`donchianBreak
 Abstand zum Hoch der **vorigen** 20 Kerzen, ohne Signalkerze — kein Look-ahead;
 [BACKTESTING.md §1.3](docs/BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065)).
 `src/lib/indicators.ts` liefert dazu Bollinger-Bandlevel und den Donchian-Kanal
-(`v0.6.3`). Seit **v0.7.4** stehen alle sechs versionierten Strategie-Templates
+(`v0.6.3`). Der **Indikatoren-Katalog**
+([`docs/INDICATORS.md`](docs/INDICATORS.md)) listet seit `v0.13.0` alle
+Engine-Formeln mit Defaults und Grenzen, die Regelfelder, den
+**Claude Trading Indicator (CTI)** aus `src/signals/` und die 15
+Scanner-Faktoren. Seit **v0.7.4** stehen alle sechs versionierten Strategie-Templates
 im import-validierten Katalog (`src/strategies/templates/`): `ema-adx-trend`,
 `macd-momentum`, `rsi-mean-reversion`, `bollinger-squeeze`, `vwap-pullback` und
 `donchian-breakout` — je mit eigenem Test, ohne Engine-/Indikator-Änderung.
@@ -249,7 +253,8 @@ wichtigste Eigenschaften:
 - **Daurable Audit-Trail:** sicherheitsrelevante Schreibvorgänge mit Retry und
   persistenter Spool (at-least-once), fail-closed wo die Mutation vermeidbar
   ist; Metrik + API zeigen Audit-Lücken.
-- **Gepinnte Framework-Versionen:** Next.js 16.3.4, `ws` 8.21.3 exakt
+- **Gepinnte Framework-Versionen:** Next.js 16.3.8 (SEC-03-Mindeststand 16.3.3),
+  `ws` 8.21.3 exakt
   (Regressionstests `test:security:next` / `test:security:ws`, CI-Gate
   `security:live-gate`).
 
@@ -276,7 +281,8 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ├── drizzle/                  ← SQL-Migrations (append-only, idempotent)
 ├── deploy/                   ← systemd-Units (Firma, Market-Sync, Mikro-Executor)
 ├── data/                     ← versionierte Seed-Daten (Universe); Laufzeitdaten gitignored
-├── docs/                     ← vollständige Dokumentation (Index: docs/README.md)
+├── docs/                     ← vollständige Dokumentation (Index: docs/README.md; im Browser:
+│                                /docs als themensortierter Katalog mit Suche + Dateibaum)
 │   ├── audits/               ← Audit-Zyklen chronologisch (Peer-Review, Security, Feature-Gap, Roadmap)
 │   ├── peer-reviews/         ← Peer-Review-Reports & Patches
 │   ├── security/             ← Security-Übersicht & Audit-Report
