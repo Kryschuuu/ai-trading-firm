@@ -183,7 +183,7 @@ export function registerPerpAdapters(
       options.bitunixPublicClient ??
       new BitunixPublicClient({
         config: bitunixConfig,
-        // Eigener, bewusst untergeordneter Bucket: der Kerzen-Sync fährt 8 req/s
+        // Eigener, bewusst untergeordneter Bucket: der Kerzen-Sync fährt 4 req/s
         // auf demselben IP-Limit (10 req/s) — die Summe darf das Limit nicht reißen.
         bucket: new TokenBucket(BITUNIX_PERP_RATE_PER_SEC, BITUNIX_PERP_RATE_PER_SEC),
       });

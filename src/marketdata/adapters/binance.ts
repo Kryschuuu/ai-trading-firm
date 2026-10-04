@@ -14,7 +14,8 @@
  *              EINEM Request (~150 KB, Gewicht 80 — bewusst kein
  *              `?symbols=[…]`, dessen Gewicht mit der Anzahl skaliert).
  *   Depth      `GET /api/v3/depth?symbol=X&limit=5` — Top-of-Book für Spread.
- *   Klines     `GET /api/v3/klines?symbol=X&interval=1h&limit=150` — OHLCV.
+ *   Klines     `GET /api/v3/klines?symbol=X&interval=1h&limit≤1000&endTime=…` —
+ *              OHLCV; ältere Seiten werden bis zum begrenzten Serienlimit gesammelt.
  *
  * SICHERHEIT: Symbol-Allowlist vor URL (`normalizeSyncSymbol`), numerische
  * Felder per `Number.isFinite()` geprüft, Arrays gekappt. Fehler bleiben
@@ -26,9 +27,10 @@ import type { SupportedTimeframe } from "../../lib/marketdata/historicalStore";
 import { normalizeSyncSymbol } from "../errors";
 import { UnsupportedTimeframeError } from "../errors";
 import type { MarketDataAdapter } from "../sync";
-import type { MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
+import type { CandleRange, MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
 import type { InstrumentStatus } from "../../universe/types";
 import { SyncHttpClient } from "./http";
+import { fetchCandlesBackward } from "./candlePagination";
 
 /** Venue-Key, unter dem der Wrapper registriert wird (`registerAdapters.ts`). */
 export const BINANCE_MARKET_DATA_VENUE = "BINANCE" as const;
@@ -38,6 +40,8 @@ export const BINANCE_SYNC_BASE_URL = "https://api.binance.com" as const;
 
 /** Konservative Sync-Rate (Binance-Limit: 6000 Gewicht/Min/IP; wir bleiben weit darunter). */
 export const BINANCE_SYNC_RATE_PER_SEC = 8;
+/** Official maximum rows per Binance Spot klines response. */
+export const BINANCE_KLINE_MAX_PAGE_SIZE = 1_000;
 
 /**
  * Vollständiges Timeframe-Mapping `SupportedTimeframe → Binance-Intervall`.
@@ -133,11 +137,15 @@ export class BinanceSyncClient {
     return this.http.getJson<BinanceDepth>("/api/v3/depth", { symbol, limit: String(limit) });
   }
 
-  async klines(symbol: string, interval: string, limit: number): Promise<BinanceKlineRow[]> {
+  async klines(symbol: string, interval: string, limit: number, endTimeMs?: number): Promise<BinanceKlineRow[]> {
     const raw = await this.http.getJson<unknown>("/api/v3/klines", {
       symbol,
       interval,
-      limit: String(limit),
+      limit: String(Math.min(BINANCE_KLINE_MAX_PAGE_SIZE, Math.max(1, Math.floor(limit)))),
+      endTime:
+        Number.isSafeInteger(endTimeMs) && (endTimeMs as number) >= 0
+          ? String(Math.floor(endTimeMs as number))
+          : undefined,
     });
     return Array.isArray(raw) ? (raw as BinanceKlineRow[]) : [];
   }
@@ -310,17 +318,23 @@ export function createBinanceMarketDataAdapter(deps: BinanceMarketAdapterDeps): 
       };
     },
 
-    async getCandles(symbol: string, timeframe: SupportedTimeframe, limit: number): Promise<MarketCandle[]> {
+    async getCandles(
+      symbol: string,
+      timeframe: SupportedTimeframe,
+      limit: number,
+      range?: CandleRange,
+    ): Promise<MarketCandle[]> {
       const interval = toBinanceInterval(timeframe);
-      // Binance liefert maximal 1000 Bars je Call — das Sync-Limit (150)
-      // liegt weit darunter, kein Paging nötig.
-      const rows = await client.klines(symbol.toUpperCase(), interval, limit);
-      const out: MarketCandle[] = [];
-      for (const row of rows) {
-        const mapped = mapBinanceKline(row);
-        if (mapped) out.push(mapped);
-      }
-      return out;
+      return fetchCandlesBackward({
+        limit,
+        pageSize: BINANCE_KLINE_MAX_PAGE_SIZE,
+        nowMs: now().getTime(),
+        range,
+        fetchPage: async (pageLimit, endTimeMs) => {
+          const rows = await client.klines(symbol.toUpperCase(), interval, pageLimit, endTimeMs);
+          return rows.map(mapBinanceKline).filter((c): c is MarketCandle => c !== null);
+        },
+      });
     },
   };
 }

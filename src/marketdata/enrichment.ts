@@ -78,7 +78,7 @@ const MAX_RESPONSE_ROWS = 10_000;
 /**
  * Parallelität der Einzel-Ticker, wenn der Bulk Lücken lässt (oder die
  * Venue keinen Bulk unterstützt). Die Token-Bucket-Drossel des HTTP-Layers
- * (8 req/s bei Bitunix) bleibt auch damit autoritativ — die Parallelität
+ * (4 req/s bei Bitunix) bleibt auch damit autoritativ — die Parallelität
  * beseitigt nur das serielle Warten je Aufruf (vorher N × Roundtrip
  * hintereinander, bei 250 Instrumenten mehr als 30 s reiner Latenz).
  */
@@ -333,7 +333,7 @@ export async function enrichWithTickers(
       // Einzel-Ticker versucht (Symbol-Guard), gepoolt mit fester Parallelität.
       // Ein serieller N+1-Pfad kostete bei 250 Instrumenten mehr als 30 s
       // reine Roundtrip-Latenz; der Token-Bucket des HTTP-Layers drosselt die
-      // tatsächliche Rate (8 req/s) auch bei Parallelität autoritativ.
+      // tatsächliche Rate (venue-spezifisch) auch bei Parallelität autoritativ.
       const bulkGaps = validInstruments.filter(
         (inst) => !tickerMap.has(inst.symbol),
       );

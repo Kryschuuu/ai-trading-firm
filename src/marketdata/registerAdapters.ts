@@ -216,8 +216,8 @@ export function registerAdapters(options: RegisterAdaptersOptions = {}): Registe
     ? options.venues.map((v) => sanitizeVenue(v).toUpperCase())
     : [...KNOWN_SYNC_VENUES];
 
-  // EIN Token-Bucket je Host und Registrierungs-Lauf: Bitunix teilt 8 req/s
-  // pro IP, Binance 8/s, Kraken und Yahoo je 2/s. Venues derselben
+  // EIN Token-Bucket je Host und Registrierungs-Lauf: Bitunix teilt 4 req/s
+  // pro IP, Binance 8/s, Kraken 1/s und Yahoo 2/s. Venues derselben
   // API-Infrastruktur (ALPACA + IBKR + PAPER-Yahoo-Bein; BINANCE +
   // PAPER-Binance-Bein) teilen sich EINEN Bucket — die Rate addiert sich
   // nicht, sondern bleibt pro Host authoritativ.

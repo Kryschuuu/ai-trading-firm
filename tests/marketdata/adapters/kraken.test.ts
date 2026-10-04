@@ -227,6 +227,18 @@ test("Funnel: Discovery (BTC/USD) → Bulk → Depth → OHLC", async () => {
   assert.deepEqual(fx.credentialLeaks(), []);
 });
 
+test("Kraken OHLC never claims more than the 720-entry historical API ceiling", async () => {
+  const { fx, adapter } = await harness();
+  fx.krakenOhlcCount = 800;
+  const candles = await adapter.getCandles("BTC/USD", "1h", 800);
+
+  assert.equal(candles.length, 720);
+  assert.ok(candles.every((candle, i) => i === 0 || (candles[i - 1]!.time ?? 0) < (candle.time ?? 0)));
+  const pages = fx.requests.filter((request) => request.path === "/0/public/OHLC");
+  assert.equal(pages.length, 1, "`since` is not used to imply arbitrary older-history pagination");
+  assert.ok(Number(pages[0]!.query.since) > 0);
+});
+
 test("Bulk-Chunking: 55 Paare ⇒ 2 Ticker-Calls", async () => {
   const { fx, adapter } = await harness();
   for (let i = 0; i < 52; i++) {

@@ -16,6 +16,7 @@ export {
   resolveSyncOptions,
   defaultRequiredWarmupCandles,
   MAX_CANDLE_LIMIT,
+  MAX_TOTAL_CANDLES_PER_RUN,
   MAX_CONCURRENCY,
   MAX_INSTRUMENTS_CEILING,
   MIN_CONCURRENCY,
@@ -49,6 +50,7 @@ export {
   SYNC_CANDLE_LIMIT,
   SYNC_LIMITS,
   SYNC_TIMEFRAMES,
+  type CandleRange,
   type MarketCandle,
   type MarketInstrument,
   type MarketOrderBook,
@@ -62,6 +64,12 @@ export {
   type SyncTimeframe,
   type TimeframeSyncStats,
 } from "./types";
+export {
+  DEFAULT_MAX_BARS_PER_SERIES,
+  MAX_CANDLE_PAGES_PER_SERIES,
+  MAX_CANDLES_PER_SERIES,
+  MAX_CANDLES_PER_SYNC_RUN,
+} from "../lib/marketdata/limits";
 export {
   AdapterRegistry,
   createAdapterRegistry,

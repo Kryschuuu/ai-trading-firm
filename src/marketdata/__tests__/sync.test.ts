@@ -26,6 +26,7 @@ import {
 import { UnsupportedVenueError } from "../errors";
 import { calculateRelativeSpread } from "../spread";
 import {
+  SYNC_CANDLE_LIMIT,
   SYNC_TIMEFRAMES,
   type MarketCandle,
   type MarketInstrument,
@@ -251,7 +252,7 @@ test("für jedes Instrument: getTicker, getOrderBook, getCandles je Default-Time
   assert.equal(calls.candles.length, 2 * SYNC_TIMEFRAMES.length);
   for (const tf of SYNC_TIMEFRAMES) {
     assert.equal(calls.candles.filter((c) => c.timeframe === tf).length, 2);
-    assert.ok(calls.candles.every((c) => c.limit === 150));
+    assert.ok(calls.candles.every((c) => c.limit === SYNC_CANDLE_LIMIT));
     assert.equal(result.candlesByTimeframe[tf]?.bars, 4); // 2 instruments × 2 candles
   }
   assert.equal(result.tickersEnriched, 2);

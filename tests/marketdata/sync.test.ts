@@ -19,10 +19,13 @@ import {
   formatDegradedLog,
   formatSyncLog,
   InsufficientCandleLimitError,
+  MAX_CANDLE_LIMIT,
+  MAX_TOTAL_CANDLES_PER_RUN,
   MarketDataSyncService,
   rankInstruments,
   resolveSyncOptions,
   SyncPartialFailureError,
+  SYNC_CANDLE_LIMIT,
   SYNC_TIMEFRAMES,
   UnsupportedVenueError,
   type MarketDataAdapter,
@@ -257,7 +260,7 @@ test("adapter failure on single symbol does not abort sync (continueOnError)", a
   assert.equal(result.synced, 5);
   assert.equal(
     barsOf(history, `BITUNIX:${failing}`, "1h"),
-    150,
+    SYNC_CANDLE_LIMIT,
     "Candle-Backfill läuft trotz Depth-Fehler",
   );
   assert.ok(
@@ -359,8 +362,11 @@ test("continueOnError=false bricht mit SyncPartialFailureError ab", async () => 
     instruments: symbols(4).map((s) => instrumentOf(s)),
     failCandlesFor: ["SYM000USDT"],
   });
+  const lines: string[] = [];
   const { service } = syncHarness(adapter, "BITUNIX", {
     continueOnError: false,
+    concurrency: 1,
+    logger: (_level, line) => lines.push(line),
   });
 
   await assert.rejects(
@@ -381,6 +387,11 @@ test("continueOnError=false bricht mit SyncPartialFailureError ab", async () => 
     },
   );
   assert.equal(calls.discover, 1);
+  assert.equal(calls.candles.length, 1, "strict mode stopped after the first candle failure");
+  assert.ok(
+    lines.includes(`[market-sync] 1h candles: 0/1 (0/${SYNC_CANDLE_LIMIT} fetched bars; 0 new, 0 deduplicated)`),
+    `the log denominator counts actual adapter attempts, not the full selection:\n${lines.join("\n")}`,
+  );
 });
 
 // ── 8 ───────────────────────────────────────────────────────────────────────
@@ -479,12 +490,69 @@ test("candleLimit below requiredWarmupCandles is rejected with actionable error"
 
   // Grenzwert-exakt erlaubt: required == limit.
   assert.equal(resolveSyncOptions({ candleLimit: 61 }, 61).candleLimit, 61);
-  // Default = max(150, required).
-  assert.equal(resolveSyncOptions({}, 61).candleLimit, 150);
+  // Default preserves CTI EMA-200 warmup; scanner's 61-bar readiness stays separate.
+  assert.equal(SYNC_CANDLE_LIMIT, 201);
+  assert.equal(resolveSyncOptions({}, 61).candleLimit, 201);
   assert.equal(resolveSyncOptions({}, 400).candleLimit, 400);
+  assert.equal(resolveSyncOptions({ candleLimit: 61 }, 61).candleLimit, 61, "scanner-only override remains valid");
+});
+
+test("date-range defaults cover the requested bars, validate caps, and force historical fetches", () => {
+  const now = Date.parse("2026-10-04T00:00:00.000Z");
+  const from = Date.parse("2026-10-03T00:00:00.000Z");
+  const resolved = resolveSyncOptions(
+    { timeframes: ["5m", "1h"], candleRange: { from }, maxInstruments: 1 },
+    61,
+    now,
+  );
+  assert.equal(resolved.candleLimit, 289, "5m is the finest requested interval and spans one UTC day");
+  assert.equal(resolved.fullRefresh, true, "a historical range bypasses the incremental current-bar skip");
+  assert.deepEqual(resolved.candleRange, { from });
+
+  assert.throws(
+    () => resolveSyncOptions({ timeframes: ["1h"], candleRange: { from }, candleLimit: 20 }, 61, now),
+    /deckt den angeforderten Zeitraum nicht vollständig ab/,
+  );
+  assert.throws(
+    () => resolveSyncOptions({ timeframes: ["1m"], candleRange: { from: 0 } }, 1, now),
+    new RegExp(`harte Obergrenze ${MAX_CANDLE_LIMIT}`),
+  );
+  assert.throws(
+    () =>
+      resolveSyncOptions(
+        { candleLimit: MAX_CANDLE_LIMIT, maxInstruments: 3, timeframes: ["1m", "3m", "5m", "15m", "30m"] },
+        1,
+        now,
+      ),
+    new RegExp(`Laufbudget ${MAX_TOTAL_CANDLES_PER_RUN}`),
+  );
 });
 
 // ── 10 ──────────────────────────────────────────────────────────────────────
+test("sync enforces inclusive candle-range bounds even if an adapter returns extra history", async () => {
+  const all = trendingCandles(0, 100);
+  const from = all[10]!.time!;
+  const to = all[70]!.time!;
+  const { adapter } = mockMarketDataAdapter({
+    instruments: [instrumentOf("BTCUSDT")],
+    candlesFor: () => all,
+  });
+  const { service, history } = syncHarness(adapter, "BITUNIX", {
+    timeframes: ["1h"],
+    candleLimit: 61,
+    candleRange: { from, to },
+  });
+
+  const result = await service.syncVenue("BITUNIX");
+  const stored = history.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" });
+
+  assert.equal(stored.length, 61);
+  assert.equal(stored[0]!.ts, from, "`from` is inclusive");
+  assert.equal(stored.at(-1)!.ts, to, "`to` is inclusive");
+  assert.equal(result.candlesByTimeframe["1h"]?.fetchedBars, 61);
+  assert.equal(result.candlesByTimeframe["1h"]?.bars, 61);
+});
+
 test("sync is idempotent: second run does not duplicate bars", async () => {
   const { adapter } = mockMarketDataAdapter({
     instruments: [instrumentOf("BTCUSDT")],
@@ -506,6 +574,12 @@ test("sync is idempotent: second run does not duplicate bars", async () => {
     0,
     "zweiter Lauf schreibt 0 neue Bars",
   );
+  assert.equal(first.candlesByTimeframe["1h"]?.attemptedInstruments, 1);
+  assert.equal(first.candlesByTimeframe["1h"]?.fetchedBars, SYNC_CANDLE_LIMIT);
+  assert.equal(first.candlesByTimeframe["1h"]?.deduplicatedBars, 0);
+  assert.equal(second.candlesByTimeframe["1h"]?.attemptedInstruments, 1);
+  assert.equal(second.candlesByTimeframe["1h"]?.fetchedBars, SYNC_CANDLE_LIMIT);
+  assert.equal(second.candlesByTimeframe["1h"]?.deduplicatedBars, SYNC_CANDLE_LIMIT);
   assert.ok(
     first.candlesByTimeframe["1h"]!.bars > 0,
     "erster Lauf schreibt Bars",
@@ -615,12 +689,13 @@ test("Logformat: discovery/tickers/orderbooks/candles-Zeilen mit Zählern", asyn
   assert.ok(lines.includes("[market-sync] tickers enriched: 4"));
   assert.ok(lines.includes("[market-sync] orderbooks enriched: 4"));
   // Pro Default-Timeframe (SYNC_TIMEFRAMES, seit v1.37.0 nur noch „1h“) eine
-  // Zählerzeile im Format „instruments/total (bars/expected)“.
+  // Zählerzeile im Format „geholt / Ziel; neu / dedupliziert“.
+  const expectedBars = 4 * SYNC_CANDLE_LIMIT;
   for (const tf of SYNC_TIMEFRAMES) {
     assert.ok(
       lines.some((l) =>
         new RegExp(
-          `^\\[market-sync\\] ${tf} candles: 4/4 \\(600/600 bars\\)$`,
+          `^\\[market-sync\\] ${tf} candles: 4/4 \\(${expectedBars}/${expectedBars} fetched bars; ${expectedBars} new, 0 deduplicated\\)$`,
         ).test(l),
       ),
       `${tf}-candles-Zeile im Format "instruments/total (bars/expected)" erwartet:\n${lines.join("\n")}`,
@@ -635,6 +710,38 @@ test("Logformat: discovery/tickers/orderbooks/candles-Zeilen mit Zählern", asyn
     "Logs nennen keine Symbole",
   );
   assert.equal(formatSyncLog(result).length, lines.length);
+});
+
+test("Backfill-Zähler decken die beobachteten Timeframes separat ab", async () => {
+  const timeframes = ["5m", "15m", "30m", "1h", "4h", "1d"] as const;
+  const lines: string[] = [];
+  const { adapter } = mockMarketDataAdapter({
+    instruments: [instrumentOf("BTCUSDT")],
+    candlesFor: () => trendingCandles(0, 2),
+  });
+  const { service } = syncHarness(adapter, "BITUNIX", {
+    timeframes,
+    candleLimit: 61,
+    maxInstruments: 1,
+    logger: (_level, line) => lines.push(line),
+  });
+
+  const result = await service.syncVenue("BITUNIX");
+
+  for (const timeframe of timeframes) {
+    assert.deepEqual(result.candlesByTimeframe[timeframe], {
+      instruments: 1,
+      bars: 2,
+      attemptedInstruments: 1,
+      fetchedInstruments: 1,
+      fetchedBars: 2,
+      deduplicatedBars: 0,
+    });
+    assert.ok(
+      lines.includes(`[market-sync] ${timeframe} candles: 1/1 (2/61 fetched bars; 2 new, 0 deduplicated)`),
+      `${timeframe} muss eigene Fetch-/Store-Zähler ausgeben`,
+    );
+  }
 });
 
 test("symbolAllowlist begrenzt die Synchronisation auf die genannten Symbole", async () => {
@@ -701,22 +808,21 @@ test("ungültige Discovery-Symbole werden abgelehnt, bevor sie in eine URL gelan
   assert.equal(JSON.stringify(result.failures).includes("debug=1"), false);
 });
 
-test("Kerzen-Cap: ein Response mit 10k Kerzen wird auf das Sync-Limit gekappt", async () => {
+test("Adapter-Ergebnis-Cap bleibt 100k; HTTP-Page-Caps gelten nicht als aggregiertes Serienlimit", async () => {
   const { adapter } = mockMarketDataAdapter({
     instruments: [instrumentOf("BTCUSDT")],
-    candlesFor: () => trendingCandles(0, 10_000),
+    candlesFor: () => trendingCandles(0, MAX_CANDLE_LIMIT + 1),
   });
   const { service, history } = syncHarness(adapter, "BITUNIX", {
     timeframes: ["1h"],
-    candleLimit: 150,
+    candleLimit: MAX_CANDLE_LIMIT,
+    maxInstruments: 1,
   });
 
   const result = await service.syncVenue("BITUNIX");
 
-  assert.ok(
-    result.candlesByTimeframe["1h"]!.bars <= 2_000,
-    "maxCandlesPerResponse greift",
-  );
+  assert.equal(result.candlesByTimeframe["1h"]!.fetchedBars, MAX_CANDLE_LIMIT);
+  assert.equal(result.candlesByTimeframe["1h"]!.bars, MAX_CANDLE_LIMIT, "alle gekappten Bars werden persistiert");
   assert.equal(
     history.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" }).length,
     result.candlesByTimeframe["1h"]!.bars,
@@ -769,7 +875,7 @@ test("HistoricalStore-Schlüssel == Registry-Schlüssel (der Kern des Fehlers)",
   );
   assert.equal(
     history.query({ instrumentId: stored[0].id, timeframe: "1h" }).length,
-    150,
+    SYNC_CANDLE_LIMIT,
     "Kerzen liegen unter genau der ID, die der Scanner benutzt",
   );
 });

@@ -6,9 +6,8 @@
  * Network I/O lives HERE, not in the scanner. `scanUniverse()` remains a
  * pure function over already-persisted local data.
  *
- * Request-Budget pro Venue-Lauf (Bitunix: 10 req/s/IP, HTTP-Layer drosselt auf
- * 8 req/s — das Budget ist darauf ausgelegt, nie über einen einzelnen Lauf
- * hinaus zu wachsen):
+ * Request-Budget je Venue (Bitunix: offiziell 10 req/s/IP, Public-Sync-Bucket
+ * konservativ 4 req/s; zusätzliche Venue-Buckets werden im Adapter-Layer geteilt):
  *
  *   1 × trading_pairs      Discovery
  *   1 × tickers   (bulk)   24h-Volumen für ALLE Instrumente in einem Request
@@ -34,6 +33,7 @@ import {
   type SupportedTimeframe,
 } from "../lib/marketdata/historicalStore";
 import type { MarketCandle as StoreCandle } from "../lib/marketdata/types";
+import { MAX_CANDLES_PER_SERIES, MAX_CANDLES_PER_SYNC_RUN } from "../lib/marketdata/limits";
 import {
   classifyMarketDataError,
   isMarketDataErrorReason,
@@ -74,6 +74,7 @@ import {
   SYNC_CANDLE_LIMIT,
   SYNC_LIMITS,
   SYNC_TIMEFRAMES,
+  type CandleRange,
   type MarketCandle,
   type MarketInstrument,
   type MarketOrderBook,
@@ -108,10 +109,17 @@ export interface MarketDataAdapter {
   /** BULK, nicht pro Symbol: ein Request für alle angefragten Symbole. */
   getTickers?(symbols?: string[]): Promise<MarketTicker[]>;
   getOrderBook(symbol: string): Promise<MarketOrderBook>;
+  /**
+   * Returns at most `limit` candles, oldest to newest. `limit` is the
+   * aggregate series target, not a single HTTP page size; implementations
+   * page or select a bounded history window as their venue permits. When
+   * supplied, `range` is inclusive UTC epoch milliseconds.
+   */
   getCandles(
     symbol: string,
     timeframe: SupportedTimeframe,
     limit: number,
+    range?: CandleRange,
   ): Promise<MarketCandle[]>;
   /**
    * (Optional, GAP-07) Zweitquelle für den opt-in Cross-Check
@@ -124,6 +132,7 @@ export interface MarketDataAdapter {
     symbol: string,
     timeframe: SupportedTimeframe,
     limit: number,
+    range?: CandleRange,
   ): Promise<MarketCandle[]>;
 }
 
@@ -152,7 +161,9 @@ export const MAX_INSTRUMENTS_CEILING = 1_000;
  * Harte Grenze — auch konfigurierbare `maxCandles` darf sie nicht
  * überschreiten (schützt die Venue-APIs vor überdimensionierten Requests).
  */
-export const MAX_CANDLE_LIMIT = 2_000;
+export const MAX_CANDLE_LIMIT = MAX_CANDLES_PER_SERIES;
+/** Aggregate work ceiling before any venue request (instrument × timeframe × bars). */
+export const MAX_TOTAL_CANDLES_PER_RUN = MAX_CANDLES_PER_SYNC_RUN;
 
 /** Untergrenze der Sync-Concurrency (mindestens ein parallel laufender Worker). */
 export const MIN_CONCURRENCY = 1;
@@ -163,21 +174,24 @@ const MAX_RESPONSE_ROWS = 10_000;
 
 /**
  * Optionen eines Sync-Laufs. Alle Felder sind auch pro `syncVenue()`-Aufruf
- * überschreibbar; die Defaults stammen aus dem Ticket (MDSYNC-001 §3.3).
+ * überschreibbar; Defaults sind zentralisiert und von Scanner-Warmup,
+ * angeforderter Range sowie gemeinsamen Serien-/Lauflimits abgeleitet.
  */
 export interface SyncOptions {
   /** Zu backfillende Periodizitäten. Default: `[\"5m\",\"15m\",\"30m\",\"1h\"]`. */
   timeframes: readonly SupportedTimeframe[];
   /**
    * Anzahl je Timeframe zu ladender Kerzen. Default:
-   * `max(150, requiredWarmupCandles(config))`. Muss ≥ dem abgeleiteten
-   * Warmup-Bedarf sein, sonst bleibt der Scanner im Zustand `WARMING`.
+   * `max(SYNC_CANDLE_LIMIT, requiredWarmupCandles(config), requested range)`.
+   * Muss Scanner-Warmup und explizite Datums-Range abdecken.
    */
   candleLimit: number;
   /** Sicherheits-Cap der synchronisierten Instrumente je Venue. Default 250. */
   maxInstruments: number;
   /** Wenn gesetzt: nur diese Symbole synchronisieren (venue-nativ, Großbuchstaben). */
   symbolAllowlist?: readonly string[];
+  /** Optionaler, inklusiver UTC-Epoch-ms-Backfillbereich. Ein Bereich deaktiviert den inkrementellen Skip. */
+  candleRange?: CandleRange;
   /** Parallelität der Instrumenten-Bearbeitung. Default 4, hart begrenzt auf ≤ 8. */
   concurrency: number;
   /** `true` (Default): Einzelfehler degradieren, der Lauf läuft weiter. */
@@ -196,7 +210,7 @@ export interface SyncOptions {
   clock?: () => Date;
   /** Alias von `clock` (bestehende Aufrufer). */
   now?: () => Date;
-  /** Globaler Token-Bucket; der Bitunix-HTTP-Layer hat einen eigenen (8 req/s). */
+  /** Optionaler zusätzlicher Orchestrator-Limiter; jeder Venue-HTTP-Client besitzt außerdem einen geteilten Rate-Bucket. */
   rateLimiter?: RateLimiter;
   /**
    * Persistenter Spread-Cache (Depth-Stage). Frische, innerhalb der TTL
@@ -236,6 +250,7 @@ export interface ResolvedSyncOptions {
   readonly candleLimit: number;
   readonly maxInstruments: number;
   readonly symbolAllowlist: readonly string[] | null;
+  readonly candleRange?: CandleRange;
   readonly concurrency: number;
   readonly continueOnError: boolean;
   /** Siehe {@link SyncOptions.fullRefresh}. */
@@ -274,6 +289,10 @@ interface InstrumentOutcome {
    * komplett atomar umschreiben (O(n²) I/O).
    */
   candlesByTimeframe: Map<SupportedTimeframe, StoreCandle[]>;
+  /** Timeframes for which the adapter's getCandles() method was invoked. */
+  attemptedTimeframes: SupportedTimeframe[];
+  /** Normalized, valid rows returned by the adapter (independent of store dedup). */
+  fetchedBarsByTimeframe: Map<SupportedTimeframe, number>;
   /**
    * Timeframes, für die der Kline-Request inkrementell übersprungen wurde
    * (Store hält bereits die Kerze des laufenden Zeitraums).
@@ -302,6 +321,7 @@ export function defaultRequiredWarmupCandles(): number {
 export function resolveSyncOptions(
   input: Partial<SyncOptions> = {},
   requiredWarmup: number = defaultRequiredWarmupCandles(),
+  nowMs: number = Date.now(),
 ): ResolvedSyncOptions {
   const timeframes = (input.timeframes ?? SYNC_TIMEFRAMES) as readonly string[];
   if (timeframes.length === 0) {
@@ -325,8 +345,20 @@ export function resolveSyncOptions(
     seen.add(tf);
   }
 
-  const candleLimit =
-    input.candleLimit ?? Math.max(SYNC_CANDLE_LIMIT, requiredWarmup);
+  const candleRange = normalizeCandleRange(input.candleRange);
+  if (candleRange?.from !== undefined && candleRange.from > nowMs) {
+    throw new Error("--from liegt in der Zukunft; es gibt für diesen Zeitraum noch keine Kerzen.");
+  }
+  const rangeBars = requiredBarsForRange(candleRange, timeframes as readonly SupportedTimeframe[], nowMs);
+  if (rangeBars !== null && rangeBars > MAX_CANDLE_LIMIT) {
+    throw new Error(
+      `Der angeforderte Datumsbereich umfasst bis zu ${rangeBars} Bars je Reihe und übersteigt ` +
+        `die harte Obergrenze ${MAX_CANDLE_LIMIT}. Begrenze den Zeitraum; der HistoricalStore ` +
+        `bewahrt maximal ${MAX_CANDLE_LIMIT} Bars je Instrument und Timeframe.`,
+    );
+  }
+  const defaultLimit = Math.max(SYNC_CANDLE_LIMIT, requiredWarmup, rangeBars ?? 0);
+  const candleLimit = input.candleLimit ?? defaultLimit;
   if (!Number.isInteger(candleLimit) || candleLimit <= 0) {
     throw new Error(
       `SyncOptions.candleLimit muss eine positive Ganzzahl sein (war ${String(input.candleLimit)}).`,
@@ -336,6 +368,12 @@ export function resolveSyncOptions(
     throw new Error(
       `SyncOptions.candleLimit=${candleLimit} übersteigt die harte Obergrenze ${MAX_CANDLE_LIMIT} ` +
         `(Payload-/Speicher-Schutz). Reduziere das Limit.`,
+    );
+  }
+  if (rangeBars !== null && candleLimit < rangeBars) {
+    throw new Error(
+      `candleLimit=${candleLimit} deckt den angeforderten Zeitraum nicht vollständig ab ` +
+        `(bis zu ${rangeBars} Bars je Timeframe). Erhöhe --candle-limit oder begrenze --from/--to.`,
     );
   }
   if (candleLimit < requiredWarmup) {
@@ -373,6 +411,16 @@ export function resolveSyncOptions(
     allowlist = normalized;
   }
 
+  const budgetInstrumentCount = Math.min(maxInstruments, allowlist?.length ?? maxInstruments);
+  const requestedCandleBudget = budgetInstrumentCount * timeframes.length * candleLimit;
+  if (requestedCandleBudget > MAX_TOTAL_CANDLES_PER_RUN) {
+    throw new Error(
+      `Angeforderter Kerzenumfang ${requestedCandleBudget} übersteigt das Laufbudget ` +
+        `${MAX_TOTAL_CANDLES_PER_RUN} (${budgetInstrumentCount} Instrumente × ${timeframes.length} Timeframes × ${candleLimit} Bars). ` +
+        `Reduziere --max-instruments/--timeframes/--candle-limit oder nutze --symbols.`,
+    );
+  }
+
   const concurrency = Math.min(
     MAX_CONCURRENCY,
     Math.max(
@@ -401,15 +449,57 @@ export function resolveSyncOptions(
     candleLimit,
     maxInstruments,
     symbolAllowlist: allowlist,
+    ...(candleRange ? { candleRange } : {}),
     concurrency,
     continueOnError,
-    fullRefresh: input.fullRefresh === true,
+    // Date-range backfills must not be skipped because newer data exists locally.
+    fullRefresh: Boolean(input.fullRefresh || candleRange),
     requiredWarmup,
     qualityMode,
     outlierAtrMult,
     crosscheck,
     crosscheckTolerancePct,
   };
+}
+
+/** Validates and copies inclusive UTC epoch-millisecond candle range bounds. */
+function normalizeCandleRange(range: CandleRange | undefined): CandleRange | undefined {
+  if (range === undefined) return undefined;
+  if (!range || typeof range !== "object" || Array.isArray(range)) {
+    throw new Error("candleRange muss ein Objekt mit from/to-Zeitstempeln sein.");
+  }
+  const normalized: CandleRange = {};
+  for (const [key, value] of [["from", range.from], ["to", range.to]] as const) {
+    if (value === undefined) continue;
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`candleRange.${key} muss ein nicht-negativer UTC-Epoch-ms-Ganzzahlwert sein.`);
+    }
+    normalized[key] = value;
+  }
+  if (normalized.from === undefined && normalized.to === undefined) return undefined;
+  if (normalized.from !== undefined && normalized.to !== undefined && normalized.from > normalized.to) {
+    throw new Error("candleRange.from darf nicht nach candleRange.to liegen.");
+  }
+  return normalized;
+}
+
+/** Bars needed to cover the explicit start date across every requested timeframe. */
+function requiredBarsForRange(
+  range: CandleRange | undefined,
+  timeframes: readonly SupportedTimeframe[],
+  nowMs: number,
+): number | null {
+  if (range?.from === undefined) return null;
+  const upper = Math.min(range.to ?? nowMs, nowMs);
+  if (upper < range.from) return 0;
+  let required = 0;
+  for (const timeframe of timeframes) {
+    const intervalMs = SUPPORTED_TIMEFRAME_MS[timeframe];
+    if (intervalMs > 0) {
+      required = Math.max(required, Math.floor((upper - range.from) / intervalMs) + 1);
+    }
+  }
+  return required;
 }
 
 /** Rekonstruiert den dominanten Lookback aus dem Warmup-Bedarf (nur für die Meldung). */
@@ -518,6 +608,7 @@ export class MarketDataSyncService {
     this.options = resolveSyncOptions(
       options,
       options.requiredWarmupCandles ?? defaultRequiredWarmupCandles(),
+      this.clock().getTime(),
     );
     if (
       options.maxInstruments !== undefined &&
@@ -565,6 +656,7 @@ export class MarketDataSyncService {
       ? resolveSyncOptions(
           { ...this.instanceDefaults(), ...options },
           options.requiredWarmupCandles ?? this.options.requiredWarmup,
+          this.clock().getTime(),
         )
       : this.options;
     const key = sanitizeVenue(venue).toUpperCase();
@@ -586,10 +678,18 @@ export class MarketDataSyncService {
       failures.push(this.toFailure("discovery", e));
       const zeroBars = new Map<SupportedTimeframe, number>();
       const zeroInstruments = new Map<SupportedTimeframe, number>();
+      const zeroFetchedBars = new Map<SupportedTimeframe, number>();
+      const zeroAttemptedInstruments = new Map<SupportedTimeframe, number>();
+      const zeroFetchedInstruments = new Map<SupportedTimeframe, number>();
+      const zeroDeduplicated = new Map<SupportedTimeframe, number>();
       const zeroFresh = new Map<SupportedTimeframe, number>();
       for (const tf of opts.timeframes) {
         zeroBars.set(tf, 0);
         zeroInstruments.set(tf, 0);
+        zeroFetchedBars.set(tf, 0);
+        zeroAttemptedInstruments.set(tf, 0);
+        zeroFetchedInstruments.set(tf, 0);
+        zeroDeduplicated.set(tf, 0);
         zeroFresh.set(tf, 0);
       }
       return this.finalize(key, startedAt, startedAtMs, opts, {
@@ -603,6 +703,10 @@ export class MarketDataSyncService {
         policyExcluded: 0,
         barsByTimeframe: zeroBars,
         instrumentsWithBars: zeroInstruments,
+        fetchedBarsByTimeframe: zeroFetchedBars,
+        attemptedInstrumentsByTimeframe: zeroAttemptedInstruments,
+        fetchedInstrumentsByTimeframe: zeroFetchedInstruments,
+        deduplicatedBarsByTimeframe: zeroDeduplicated,
         freshByTimeframe: zeroFresh,
         failures,
         qualityReports: [],
@@ -888,9 +992,17 @@ export class MarketDataSyncService {
     // ── 6. Upsert + Candle-Backfill je Instrument (concurrency-begrenzt) ────
     const barsByTimeframe = new Map<SupportedTimeframe, number>();
     const instrumentsWithBars = new Map<SupportedTimeframe, number>();
+    const fetchedBarsByTimeframe = new Map<SupportedTimeframe, number>();
+    const attemptedInstrumentsByTimeframe = new Map<SupportedTimeframe, number>();
+    const fetchedInstrumentsByTimeframe = new Map<SupportedTimeframe, number>();
+    const deduplicatedBarsByTimeframe = new Map<SupportedTimeframe, number>();
     for (const tf of opts.timeframes) {
       barsByTimeframe.set(tf, 0);
       instrumentsWithBars.set(tf, 0);
+      fetchedBarsByTimeframe.set(tf, 0);
+      attemptedInstrumentsByTimeframe.set(tf, 0);
+      fetchedInstrumentsByTimeframe.set(tf, 0);
+      deduplicatedBarsByTimeframe.set(tf, 0);
     }
 
     let policyExcluded = 0;
@@ -945,6 +1057,21 @@ export class MarketDataSyncService {
       // Falls InstrumentOutcome spreadUnknown true, aber bereits gezählt, nicht doppelt zählen.
       policyExcluded += outcome.policyExcluded;
       for (const report of outcome.qualityReports) qualityReports.push(report);
+      for (const timeframe of outcome.attemptedTimeframes) {
+        attemptedInstrumentsByTimeframe.set(
+          timeframe,
+          (attemptedInstrumentsByTimeframe.get(timeframe) ?? 0) + 1,
+        );
+      }
+      for (const [timeframe, fetchedBars] of outcome.fetchedBarsByTimeframe) {
+        fetchedBarsByTimeframe.set(timeframe, (fetchedBarsByTimeframe.get(timeframe) ?? 0) + fetchedBars);
+        if (fetchedBars > 0) {
+          fetchedInstrumentsByTimeframe.set(
+            timeframe,
+            (fetchedInstrumentsByTimeframe.get(timeframe) ?? 0) + 1,
+          );
+        }
+      }
       for (const [timeframe, candles] of outcome.candlesByTimeframe) {
         groups.push({
           candles,
@@ -962,6 +1089,7 @@ export class MarketDataSyncService {
       failures,
       barsByTimeframe,
       instrumentsWithBars,
+      deduplicatedBarsByTimeframe,
     );
 
     if (!opts.continueOnError && failures.length > 0) runState.aborted = true;
@@ -982,6 +1110,10 @@ export class MarketDataSyncService {
       policyExcluded,
       barsByTimeframe,
       instrumentsWithBars,
+      fetchedBarsByTimeframe,
+      attemptedInstrumentsByTimeframe,
+      fetchedInstrumentsByTimeframe,
+      deduplicatedBarsByTimeframe,
       freshByTimeframe,
       failures,
       qualityReports,
@@ -1113,6 +1245,8 @@ export class MarketDataSyncService {
       bookDepthUnknown: bookDepthUsd === null,
       policyExcluded: 0,
       candlesByTimeframe: new Map(),
+      attemptedTimeframes: [],
+      fetchedBarsByTimeframe: new Map(),
       freshTimeframes: [],
       qualityReports: [],
     };
@@ -1177,15 +1311,18 @@ export class MarketDataSyncService {
       }
       try {
         await this.limit();
+        outcome.attemptedTimeframes.push(timeframe);
         const candles = await adapter.getCandles(
           symbol,
           timeframe,
           opts.candleLimit,
+          opts.candleRange,
         );
         const rows = normalizeCandles(candles, timeframe, failures, {
           instrumentId,
           symbol,
-        });
+        }, opts.candleRange);
+        if (rows.length > 0) outcome.fetchedBarsByTimeframe.set(timeframe, rows.length);
         if (rows.length === 0) {
           // Leere oder komplett unbrauchbare Antwort ist kein stiller Erfolg:
           // Ohne Kerzen bleibt das Instrument im WARMING und der Scanner leer.
@@ -1228,6 +1365,7 @@ export class MarketDataSyncService {
               symbol,
               timeframe,
               opts.candleLimit,
+              opts.candleRange,
             );
             const cc = crosscheckCandles(
               rows,
@@ -1267,6 +1405,7 @@ export class MarketDataSyncService {
     failures: SyncFailure[],
     barsByTimeframe: Map<SupportedTimeframe, number>,
     instrumentsWithBars: Map<SupportedTimeframe, number>,
+    deduplicatedBarsByTimeframe: Map<SupportedTimeframe, number>,
   ): void {
     if (groups.length === 0) return;
     let batch;
@@ -1290,6 +1429,10 @@ export class MarketDataSyncService {
       barsByTimeframe.set(
         owner.timeframe,
         (barsByTimeframe.get(owner.timeframe) ?? 0) + stats.written,
+      );
+      deduplicatedBarsByTimeframe.set(
+        owner.timeframe,
+        (deduplicatedBarsByTimeframe.get(owner.timeframe) ?? 0) + stats.deduplicated,
       );
       if (stats.written > 0) {
         instrumentsWithBars.set(
@@ -1319,6 +1462,7 @@ export class MarketDataSyncService {
       ...(this.options.symbolAllowlist
         ? { symbolAllowlist: this.options.symbolAllowlist }
         : {}),
+      ...(this.options.candleRange ? { candleRange: this.options.candleRange } : {}),
       concurrency: this.options.concurrency,
       continueOnError: this.options.continueOnError,
       fullRefresh: this.options.fullRefresh,
@@ -1344,6 +1488,10 @@ export class MarketDataSyncService {
       policyExcluded: number;
       barsByTimeframe: Map<SupportedTimeframe, number>;
       instrumentsWithBars: Map<SupportedTimeframe, number>;
+      fetchedBarsByTimeframe: Map<SupportedTimeframe, number>;
+      attemptedInstrumentsByTimeframe: Map<SupportedTimeframe, number>;
+      fetchedInstrumentsByTimeframe: Map<SupportedTimeframe, number>;
+      deduplicatedBarsByTimeframe: Map<SupportedTimeframe, number>;
       freshByTimeframe: Map<SupportedTimeframe, number>;
       failures: SyncFailure[];
       qualityReports: QualitySeriesReport[];
@@ -1383,6 +1531,10 @@ export class MarketDataSyncService {
       candlesByTimeframe[tf] = {
         instruments: stats.instrumentsWithBars.get(tf) ?? 0,
         bars,
+        attemptedInstruments: stats.attemptedInstrumentsByTimeframe.get(tf) ?? 0,
+        fetchedInstruments: stats.fetchedInstrumentsByTimeframe.get(tf) ?? 0,
+        fetchedBars: stats.fetchedBarsByTimeframe.get(tf) ?? 0,
+        deduplicatedBars: stats.deduplicatedBarsByTimeframe.get(tf) ?? 0,
       };
     }
     // Nur Timeframes mit tatsächlichen Überspringungen erscheinen im
@@ -1516,21 +1668,22 @@ function normalizeCandles(
   timeframe: SupportedTimeframe,
   failures: SyncFailure[],
   ctx: { instrumentId: string; symbol: string },
+  range?: CandleRange,
 ): StoreCandle[] {
   const rows = Array.isArray(candles) ? candles : [];
-  if (rows.length > SYNC_LIMITS.maxCandlesPerResponse) {
+  if (rows.length > SYNC_LIMITS.maxCandlesPerAdapterResult) {
     failures.push({
       stage: "candles",
       ...ctx,
       timeframe,
-      message: `Kerzen-Response gekappt: ${rows.length} > ${SYNC_LIMITS.maxCandlesPerResponse} (Payload-Schutz).`,
+      message: `Kerzen-Response gekappt: ${rows.length} > ${SYNC_LIMITS.maxCandlesPerAdapterResult} (Payload-Schutz).`,
       reason: "SCHEMA_MISMATCH",
       retryable: false,
     });
   }
   const out: StoreCandle[] = [];
   let dropped = 0;
-  for (const c of rows.slice(0, SYNC_LIMITS.maxCandlesPerResponse)) {
+  for (const c of rows.slice(0, SYNC_LIMITS.maxCandlesPerAdapterResult)) {
     const time = candleTimeMs(c);
     const ok =
       time !== null &&
@@ -1542,6 +1695,11 @@ function normalizeCandles(
       c.volume >= 0;
     if (!ok) {
       dropped += 1;
+      continue;
+    }
+    // Defense in depth: adapter pages must honor the range, but a custom or
+    // misbehaving adapter must never persist candles outside the requested window.
+    if ((range?.from !== undefined && time < range.from) || (range?.to !== undefined && time > range.to)) {
       continue;
     }
     out.push({
@@ -1590,18 +1748,21 @@ export function formatSyncLog(
   for (const tf of tfs) {
     const stats = result.candlesByTimeframe[tf as SupportedTimeframe];
     const bars = stats?.bars ?? 0;
-    const instruments = stats?.instruments ?? 0;
-    const total = Math.max(result.synced, instruments);
+    const fetchedBars = stats?.fetchedBars ?? 0;
+    const fetchedInstruments = stats?.fetchedInstruments ?? 0;
+    const deduplicatedBars = stats?.deduplicatedBars ?? 0;
+    const fresh = result.freshCandlesByTimeframe?.[tf as SupportedTimeframe] ?? 0;
+    const attempted = stats?.attemptedInstruments ?? Math.max(0, result.synced - fresh);
+    const requestedBars = attempted * candleLimit;
     lines.push(
-      `[market-sync] ${tf} candles: ${instruments}/${total}` +
-        ` (${bars}/${total * candleLimit} bars)`,
+      `[market-sync] ${tf} candles: ${fetchedInstruments}/${attempted}` +
+        ` (${fetchedBars}/${requestedBars} fetched bars; ${bars} new, ${deduplicatedBars} deduplicated)`,
     );
     // Inkrementeller Lauf: wie viele Reihen bereits aktuell waren und keinen
     // Kline-Request benötigten (Audit der tatsächlichen Request-Zahl).
-    const fresh = result.freshCandlesByTimeframe?.[tf as SupportedTimeframe] ?? 0;
     if (fresh > 0) {
       lines.push(
-        `[market-sync] ${tf} candles aktuell, keine Anfrage: ${fresh}/${Math.max(result.synced, instruments + fresh)}`,
+        `[market-sync] ${tf} candles aktuell, keine Anfrage: ${fresh}/${Math.max(result.synced, fresh)}`,
       );
     }
   }

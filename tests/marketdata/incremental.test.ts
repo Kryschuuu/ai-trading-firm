@@ -50,6 +50,7 @@ test("Inkrementell: Zweiter Lauf innerhalb desselben Zeitraums stellt KEINE Klin
 
   const r1 = await harness.service.syncVenue("BITUNIX");
   assert.equal(first.calls.candles.length, 2, "Erstlauf: ein Kline-Abruf je Instrument");
+  assert.equal(r1.candlesByTimeframe["1h"]?.attemptedInstruments, 2);
   assert.equal(r1.freshCandlesByTimeframe, undefined, "Erstlauf hat nichts übersprungen");
   assert.equal((r1.candlesByTimeframe["1h"]?.bars ?? 0) > 0, true);
 
@@ -63,6 +64,7 @@ test("Inkrementell: Zweiter Lauf innerhalb desselben Zeitraums stellt KEINE Klin
   ) as typeof harness.service;
   const r2 = await service2.syncVenue("BITUNIX");
   assert.equal(second.calls.candles.length, 0, "die Reihen sind aktuell — null Kline-Requests");
+  assert.equal(r2.candlesByTimeframe["1h"]?.attemptedInstruments, 0);
   assert.equal(r2.freshCandlesByTimeframe?.["1h"], 2, "beide Instrumente als frisch gezählt");
 
   // Discovery/Ticker/Depth laufen weiter (dort gibt es keinen Kerzen-Cache).

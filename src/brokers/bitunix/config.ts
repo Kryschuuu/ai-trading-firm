@@ -31,8 +31,8 @@ export const DEFAULT_WS_URL = `wss://${BITUNIX_WS_HOST}/public/`;
 export const BITUNIX_DEFAULT_MAKER_FEE = 0.0002;
 export const BITUNIX_DEFAULT_TAKER_FEE = 0.0006;
 
-/** Öffentliche Rate-Limits laut Doku: 10 req/s/IP — konservativ 8. */
-export const BITUNIX_PUBLIC_RATE_PER_SEC = 8;
+/** Public-Data-Sync: 4 req/s against the documented 10 req/s/IP ceiling. */
+export const BITUNIX_PUBLIC_RATE_PER_SEC = 4;
 /** Private: 10 req/s/uid — konservativ 8. */
 export const BITUNIX_PRIVATE_RATE_PER_SEC = 8;
 
@@ -119,8 +119,8 @@ export function loadBitunixConfig(env: EnvLike = process.env): BitunixRuntimeCon
  * Kappe für die Größe EINER REST-Antwort (Bytes, am Stream durchgesetzt).
  *
  * `fetchImpl` ist injectbar (Tests/Mocks) — deshalb gilt die Kappe auch dort:
- * ein zu großer Payload wird abgebrochen, bevor er im Prozess puffert. Selbst
- * `limit=2000` Kerzen (≈ 2000 × ~120 Bytes) bleiben deutlich darunter.
+ * ein zu großer Payload wird abgebrochen, bevor er im Prozess puffert. Eine
+ * venue-gemäß begrenzte Kline-Seite (max. 200 Kerzen) bleibt deutlich darunter.
  */
 export const BITUNIX_MAX_RESPONSE_BYTES = 5_242_880;
 
@@ -178,13 +178,11 @@ export const BITUNIX_PATHS = {
 /**
  * Rate-Limit des Perp-Daten-Syncs (RMA-P2-02).
  *
- * Der Kerzen-Sync nutzt bereits 8 req/s des dokumentierten Limits von
- * 10 req/s/IP. Beide Syncs können parallel laufen (getrennte Prozesse,
- * getrennte Token-Buckets) — der Perp-Pfad fährt deshalb bewusst
- * **untergeordnet** (4 req/s), damit die Summe das Venue-Limit auch bei
- * gleichzeitigem Lauf nicht reißt.
+ * Public-Candle- und Perp-Syncs können parallel laufen (getrennte Prozesse,
+ * getrennte Token-Buckets). Defaults 4 + 3 req/s lassen Reserve bis zur
+ * dokumentierten Obergrenze von 10 req/s/IP — auch für weitere Public-Calls.
  */
-export const BITUNIX_PERP_RATE_PER_SEC = 4;
+export const BITUNIX_PERP_RATE_PER_SEC = 3;
 
 /** Maximale Zeilen je Funding-History-Request (Venue-Doku: Maximum 200). */
 export const BITUNIX_FUNDING_HISTORY_MAX_LIMIT = 200;

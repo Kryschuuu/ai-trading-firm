@@ -36,6 +36,7 @@ import path from "node:path";
 import { resolveRuntimePath } from "../../lib/appPaths";
 import type { MarketCandle } from "./types";
 import { SUPPORTED_TIMEFRAMES, isSupportedTimeframe, type SupportedTimeframe } from "./timeframes";
+import { DEFAULT_MAX_BARS_PER_SERIES } from "./limits";
 
 // Die Timeframe-Allowlist (`SUPPORTED_TIMEFRAMES`), ihre Periodenlängen
 // (`SUPPORTED_TIMEFRAME_MS`) und `isSupportedTimeframe` leben seit v0.6.2 in
@@ -319,7 +320,7 @@ export class HistoricalStore {
     // Path-Traversal).
     this.dir = resolveRuntimePath(dir ?? "data/history");
     this.filePath = path.join(this.dir, "candles.ndjson");
-    this.maxBarsPerSeries = Math.max(1, Math.floor(opts.maxBarsPerSeries ?? 5000));
+    this.maxBarsPerSeries = Math.max(1, Math.floor(opts.maxBarsPerSeries ?? DEFAULT_MAX_BARS_PER_SERIES));
   }
 
   /**
@@ -330,7 +331,7 @@ export class HistoricalStore {
    * zuletzt gelesene/geschriebene. Die Datei wird je Append atomar
    * umgeschrieben (`tmp`+`rename`), damit Duplikate nicht als Zeilen
    * akkumulieren; wachsende Reihen werden bei Bedarf auf `maxBarsPerSeries`
-   * (Default 5000) kompaktiert.
+   * (Default `DEFAULT_MAX_BARS_PER_SERIES`, aktuell 100.000) kompaktiert.
    *
    * `timeframe` ist ein expliziter, Pflicht-Parameter: es gibt KEINE
    * überladene alte Signatur mehr, damit TypeScript jeden Aufrufer zur
@@ -449,16 +450,16 @@ export class HistoricalStore {
       list.push(e);
       bySeries.set(k, list);
     }
+    const drop = new Set<HistoricalCandleEntry>();
     for (const list of bySeries.values()) {
       if (list.length <= this.maxBarsPerSeries) continue;
-      list.sort((a, b) => a.ts - b.ts || (a.fetchedAt < b.fetchedAt ? -1 : 1));
-      const drop = list.slice(0, list.length - this.maxBarsPerSeries);
-      const dropSet = new Set(drop);
-      for (const d of dropSet) {
-        const idx = entries.indexOf(d);
-        if (idx >= 0) entries.splice(idx, 1);
-      }
+      list.sort((a, b) => a.ts - b.ts || (a.fetchedAt < b.fetchedAt ? -1 : a.fetchedAt > b.fetchedAt ? 1 : 0));
+      for (let i = 0; i < list.length - this.maxBarsPerSeries; i++) drop.add(list[i]);
     }
+    if (drop.size === 0) return;
+    const retained = entries.filter((entry) => !drop.has(entry));
+    entries.length = 0;
+    for (const entry of retained) entries.push(entry);
   }
 
   /**

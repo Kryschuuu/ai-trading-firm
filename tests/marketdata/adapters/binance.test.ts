@@ -194,6 +194,17 @@ test("Funnel: Discovery → Bulk → Depth → Klines", async () => {
   assert.deepEqual(fx.credentialLeaks(), []);
 });
 
+test("Binance Klines aggregate venue-bounded pages up to the requested limit", async () => {
+  const { fx, adapter } = await harness();
+  const candles = await adapter.getCandles("BTCUSDT", "1h", 1_001);
+
+  assert.equal(candles.length, 1_001);
+  assert.ok(candles.every((candle, i) => i === 0 || (candles[i - 1]!.time ?? 0) < (candle.time ?? 0)));
+  const pages = fx.requests.filter((request) => request.path === "/api/v3/klines");
+  assert.deepEqual(pages.map((request) => request.query.limit), ["1000", "1"]);
+  assert.ok(Number(pages[1]!.query.endTime) < Number(pages[0]!.query.endTime));
+});
+
 test("unbekanntes Symbol: Binance-400 bleibt typisiert (→ INVALID_SYMBOL)", async () => {
   const { adapter } = await harness();
   const err = (await adapter.getTicker("NOPEUSDT").then(

@@ -21,7 +21,7 @@ import type { InstrumentInput } from "../../universe/types";
 import { normalizeSyncSymbol } from "../errors";
 import type { MarketDataAdapter } from "../sync";
 import type { SupportedTimeframe } from "../../lib/marketdata/historicalStore";
-import type { MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
+import type { CandleRange, MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
 import { BinanceSyncClient, createBinanceMarketDataAdapter } from "./binance";
 import { taggedSyncError } from "./http";
 import { seededToMarketInstrument } from "./seeded";
@@ -192,13 +192,18 @@ export function createPaperMarketDataAdapter(deps: PaperMarketAdapterDeps): Mark
       return { ...book, symbol: upper };
     },
 
-    async getCandles(symbol: string, timeframe: SupportedTimeframe, limit: number): Promise<MarketCandle[]> {
+    async getCandles(
+      symbol: string,
+      timeframe: SupportedTimeframe,
+      limit: number,
+      range?: CandleRange,
+    ): Promise<MarketCandle[]> {
       const upper = symbol.toUpperCase();
       const route = resolveRoute(upper);
       if (route.leg === "yahoo") {
-        return yahooLeg.getCandles(upper, timeframe, limit);
+        return yahooLeg.getCandles(upper, timeframe, limit, range);
       }
-      return binanceLeg.getCandles(route.binanceSymbol, timeframe, limit);
+      return binanceLeg.getCandles(route.binanceSymbol, timeframe, limit, range);
     },
   };
 }

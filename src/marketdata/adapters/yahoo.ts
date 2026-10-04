@@ -22,12 +22,12 @@
  * die Abbildung steht in {@link toYahooSymbol} (+ {@link YAHOO_INDEX_MAP}).
  */
 
-import type { SupportedTimeframe } from "../../lib/marketdata/historicalStore";
+import { SUPPORTED_TIMEFRAME_MS, type SupportedTimeframe } from "../../lib/marketdata/historicalStore";
 import type { AssetClass } from "../../universe/types";
 import type { InstrumentInput } from "../../universe/types";
 import { normalizeSyncSymbol, UnsupportedTimeframeError } from "../errors";
 import type { MarketDataAdapter } from "../sync";
-import type { MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
+import type { CandleRange, MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
 import { SyncHttpClient, taggedSyncError } from "./http";
 import { seededToMarketInstrument } from "./seeded";
 
@@ -285,11 +285,18 @@ export class YahooSyncClient {
     return Array.isArray(result) ? (result as YahooQuoteRow[]) : [];
   }
 
-  /** OHLCV-Chart (eine Range, client-seitig auf `limit` geschnitten). */
-  async chart(yahooSymbol: string, interval: string, range: string): Promise<YahooChartResult | null> {
+  /** OHLCV chart: named Yahoo range by default, explicit period1/period2 for date backfills. */
+  async chart(
+    yahooSymbol: string,
+    interval: string,
+    range?: string,
+    dateRange?: CandleRange,
+  ): Promise<YahooChartResult | null> {
+    const period1 = dateRange?.from === undefined ? undefined : String(Math.floor(dateRange.from / 1000));
+    const period2 = dateRange?.to === undefined ? undefined : String(Math.floor(dateRange.to / 1000) + 1);
     const raw = await this.http.getJson<{ chart?: { result?: unknown; error?: unknown } }>(
       `/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`,
-      { interval, range, includePrePost: "false" },
+      { interval, range, period1, period2, includePrePost: "false" },
     );
     const results = raw?.chart?.result;
     if (!Array.isArray(results) || results.length === 0) return null;
@@ -498,13 +505,40 @@ export function createYahooMarketDataAdapter(deps: YahooMarketAdapterDeps): Mark
       };
     },
 
-    async getCandles(symbol: string, timeframe: SupportedTimeframe, limit: number): Promise<MarketCandle[]> {
+    async getCandles(
+      symbol: string,
+      timeframe: SupportedTimeframe,
+      limit: number,
+      range?: CandleRange,
+    ): Promise<MarketCandle[]> {
       const interval = toYahooInterval(timeframe);
       const upper = symbol.toUpperCase();
       const yahoo = resolveYahoo(upper);
-      const result = await client.chart(yahoo, interval, yahooRangeFor(interval, limit));
+      const hasDateRange = range?.from !== undefined || range?.to !== undefined;
+      const intervalMs = SUPPORTED_TIMEFRAME_MS[timeframe];
+      const dateRange: CandleRange | undefined = hasDateRange
+        ? {
+            ...(range?.from !== undefined
+              ? { from: range.from }
+              : range?.to !== undefined
+                ? { from: Math.max(0, range.to - intervalMs * Math.max(1, limit)) }
+                : {}),
+            ...(range?.to !== undefined ? { to: range.to } : {}),
+          }
+        : undefined;
+      const result = await client.chart(
+        yahoo,
+        interval,
+        hasDateRange ? undefined : yahooRangeFor(interval, limit),
+        dateRange,
+      );
       if (!result) return [];
-      return mapYahooChart(result).slice(-Math.max(limit, 0));
+      return mapYahooChart(result)
+        .filter((candle) =>
+          (range?.from === undefined || (candle.time ?? 0) >= range.from) &&
+          (range?.to === undefined || (candle.time ?? 0) <= range.to),
+        )
+        .slice(-Math.max(limit, 0));
     },
   };
 }

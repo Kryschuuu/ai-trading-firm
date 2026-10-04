@@ -131,6 +131,8 @@ export class SyncVenuesFixtureServer {
       ],
     },
   ];
+  /** Number of synthetic OHLC rows returned by the Kraken fixture. */
+  krakenOhlcCount = 200;
   /** Kraken-Katalog (Default: 3 Seed-Paare; Tests dürfen erweitern). */
   krakenPairs: Record<
     string,
@@ -306,7 +308,14 @@ export class SyncVenuesFixtureServer {
     if (intervalMs === null) return json(res, 400, { code: -1120, msg: "Invalid interval." });
     const limit = Math.min(Math.max(Number(query.limit ?? "150") || 150, 1), 1000);
     const seed = [...symbol].reduce((a, c) => a + c.charCodeAt(0), 0);
-    const rows = syncFixturePrices(seed, limit, intervalMs, priceBase(symbol));
+    const rawEnd = Number(query.endTime);
+    const endAnchor = Number.isFinite(rawEnd) && rawEnd > 0 ? rawEnd : SYNC_FIXTURE_NOW_MS;
+    const alignedEnd = Math.floor(endAnchor / intervalMs) * intervalMs;
+    const shift = alignedEnd - SYNC_FIXTURE_NOW_MS;
+    const rows = syncFixturePrices(seed, limit, intervalMs, priceBase(symbol)).map((c) => ({
+      ...c,
+      time: c.time + shift,
+    }));
     json(
       res,
       200,
@@ -361,21 +370,28 @@ export class SyncVenuesFixtureServer {
       return json(res, 200, { error: ["EGeneral:Invalid arguments"] });
     }
     const seed = [...key].reduce((a, c) => a + c.charCodeAt(0), 0);
-    const rows = syncFixturePrices(seed, 200, intervalMin * 60_000, priceBase(key));
+    const intervalMs = intervalMin * 60_000;
+    const rows = syncFixturePrices(seed, this.krakenOhlcCount, intervalMs, priceBase(key));
+    const since = Number(query.since);
+    const pageRows = rows
+      .filter((c) => !Number.isFinite(since) || Math.round(c.time / 1000) >= since)
+      .slice(0, 720);
+    const mappedRows = pageRows.map((c) => [
+      Math.round(c.time / 1000),
+      String(c.open),
+      String(c.high),
+      String(c.low),
+      String(c.close),
+      String(round((c.open + c.close) / 2, 5)),
+      String(c.volume),
+      42,
+    ]);
+    const lastRow = mappedRows[mappedRows.length - 1];
     json(res, 200, {
       error: [],
       result: {
-        [key]: rows.map((c) => [
-          Math.round(c.time / 1000),
-          String(c.open),
-          String(c.high),
-          String(c.low),
-          String(c.close),
-          String(round((c.open + c.close) / 2, 5)),
-          String(c.volume),
-          42,
-        ]),
-        last: 1_700_000_000,
+        [key]: mappedRows,
+        last: lastRow ? Number(lastRow[0]) + intervalMin * 60 : (Number.isFinite(since) ? since : 1_700_000_000),
       },
     });
   }
@@ -433,7 +449,16 @@ export class SyncVenuesFixtureServer {
     const intervalMs = parseYahooInterval(query.interval ?? "1h");
     if (intervalMs === null) return json(res, 400, { chart: { result: null, error: { code: "Bad Request" } } });
     const seed = [...symbol].reduce((a, c) => a + c.charCodeAt(0), 0);
-    const rows = syncFixturePrices(seed, 200, intervalMs, priceBase(symbol));
+    const rawPeriod2 = Number(query.period2);
+    const requestedEnd = Number.isFinite(rawPeriod2) && rawPeriod2 > 0
+      ? Math.min(rawPeriod2 * 1000 - 1, SYNC_FIXTURE_NOW_MS)
+      : SYNC_FIXTURE_NOW_MS;
+    const alignedLastOpen = Math.floor(requestedEnd / intervalMs) * intervalMs;
+    const shift = alignedLastOpen - (SYNC_FIXTURE_NOW_MS - intervalMs);
+    const rows = syncFixturePrices(seed, 200, intervalMs, priceBase(symbol)).map((c) => ({
+      ...c,
+      time: c.time + shift,
+    }));
     json(res, 200, {
       chart: {
         result: [

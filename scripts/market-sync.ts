@@ -66,6 +66,8 @@ const VALUE_FLAGS = [
   "candle-limit",
   "max-instruments",
   "symbols",
+  "from",
+  "to",
   "concurrency",
 ] as const;
 const BOOLEAN_FLAGS = ["strict", "dry-run", "json", "no-manifest", "status", "help", "full", "aggregate"] as const;
@@ -105,14 +107,20 @@ Optionen:
         )} —
         ein ungültiger Wert würde Reihen verschiedener Länge mischen.
         Default: 1h (seit v1.37.0 — der einzige von Scanner/Analytics
-        ausgewertete Zeitrahmen; 150 Bars je Instrument). Kürzere Zeitrahmen
-        bei Bedarf: --timeframes=5m,15m,30m,1h.
+        ausgewertete Zeitrahmen; standardmäßig ${SYNC_CANDLE_LIMIT} Bars je Reihe).
+        Kürzere Zeitrahmen bei Bedarf: --timeframes=5m,15m,30m,1h.
+  --from=DATUM / --to=DATUM
+        Inklusive UTC-Backfillgrenzen: YYYY-MM-DD (ganzer UTC-Tag) oder ISO-8601
+        mit Zeitzone. Nur --from reicht bis jetzt. Der Default candle-limit wird
+        aus dem Bereich und dem feinsten Timeframe abgeleitet; ein explizites
+        --candle-limit muss den ganzen Bereich abdecken. Ein Datumsbereich lädt
+        auch dann, wenn neuere Bars schon im Store liegen.
   --candle-limit=N
-        Anzahl je Timeframe zu ladender Kerzen. Muss >= requiredWarmupCandles
-        sein (aktuell ${required} bei Default-Faktoren: EMA50 → 50 Kerzen,
-        Momentum-Lookback 60 → 61 Kerzen), sonst bleibt der Scanner im Zustand
-        WARMING. Default: max(${SYNC_CANDLE_LIMIT}, requiredWarmupCandles);
-        hartes Maximum ${MAX_CANDLE_LIMIT} (Payload-Schutz).
+        Maximale Anzahl je Timeframe zu ladender Kerzen. Muss >= scanner
+        requiredWarmupCandles sein (aktuell ${required}; der Scanner-Warmup bleibt
+        unabhängig vom CTI). Default: max(${SYNC_CANDLE_LIMIT} für CTI EMA-200,
+        requiredWarmupCandles, Datumsbereich). Maximal ${MAX_CANDLE_LIMIT} Bars je
+        Reihe; Gesamtlauf höchstens 1.000.000 angeforderte Bars.
   --max-instruments=N
         Sicherheits-Cap der Instrumente je Venue (Default 250, hartes Maximum
         ${MAX_INSTRUMENTS_CEILING}). Gekappt wird deterministisch nach 24h-Volumen
@@ -124,16 +132,17 @@ Optionen:
         Zeichen — alles andere wird abgelehnt, bevor es in eine URL gelangt.
   --concurrency=N
         Parallelität der Instrumenten-Bearbeitung (Default 4, hart begrenzt auf
-        ${MAX_CONCURRENCY}). Der Token-Bucket des HTTP-Layers (8 req/s) bleibt
-        autoritativ: Parallelität erzeugt Requests, kein Recht auf mehr.
+        ${MAX_CONCURRENCY}). Der Venue-Token-Bucket bleibt autoritativ
+        (Bitunix 4, Binance 8, Kraken 1, Yahoo 2 req/s); Parallelität erhöht
+        das Rate-Limit nicht.
   --strict
         Abbruch beim ersten Fehler statt degradiertem Lauf (Exit 1); bereits
         persistierte Daten bleiben erhalten (Append-only + Dedup).
   --full
-        Vollen Kerzen-Abruf erzwingen. Default ist inkrementell: Reihen, die
-        bereits die Kerze des laufenden Zeitraums halten, werden ohne Request
-        übersprungen (ideal für den Stundentimer; der Erst-Warmup läuft immer
-        vollständig, weil noch nichts im Store liegt).
+        Vollen Abruf des konfigurierten candle-limit erzwingen. Default ist
+        inkrementell: aktuelle Reihen werden ohne Request übersprungen. --from/
+        --to erzwingen automatisch einen Backfill. Die Venue-Historie und der
+        Store bleiben durch ihre dokumentierten Obergrenzen begrenzt.
   --aggregate
         Multi-TF-Aggregation (GAP-07, Default off, Env: MARKET_SYNC_AGGREGATE):
         nach dem Backfill werden die persistierten 1h-Reihen deterministisch
@@ -164,6 +173,22 @@ Exit-Codes:
 
 Beispiel:
   BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --timeframes=5m,15m,30m,1h`;
+}
+
+const UTC_DAY_MS = 86_400_000;
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_WITH_ZONE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/** Date-only `--to` is inclusive through 23:59:59.999 UTC. */
+function parseUtcDateBound(raw: string, bound: "from" | "to"): number | null {
+  const value = raw.trim();
+  if (!DATE_ONLY_RE.test(value) && !ISO_WITH_ZONE_RE.test(value)) return null;
+  const datePart = value.slice(0, 10);
+  const midnight = Date.parse(`${datePart}T00:00:00.000Z`);
+  if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== datePart) return null;
+  const parsed = DATE_ONLY_RE.test(value) ? midnight : Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return DATE_ONLY_RE.test(value) && bound === "to" ? parsed + UTC_DAY_MS - 1 : parsed;
 }
 
 /** Reines Parsing — kein I/O, damit es in Tests direkt prüfbar ist. */
@@ -206,6 +231,24 @@ export function parseSyncArgs(argv: readonly string[]): ParseResult {
   };
 
   const options: MarketSyncRunOptions = { venue: "BITUNIX" };
+
+  const fromRaw = take("from");
+  const toRaw = take("to");
+  const range: { from?: number; to?: number } = {};
+  if (fromRaw !== undefined) {
+    const parsed = parseUtcDateBound(fromRaw, "from");
+    if (parsed === null) return usage("--from muss YYYY-MM-DD oder ein ISO-8601-Zeitstempel mit Zeitzone sein.");
+    range.from = parsed;
+  }
+  if (toRaw !== undefined) {
+    const parsed = parseUtcDateBound(toRaw, "to");
+    if (parsed === null) return usage("--to muss YYYY-MM-DD oder ein ISO-8601-Zeitstempel mit Zeitzone sein.");
+    range.to = parsed;
+  }
+  if (range.from !== undefined && range.to !== undefined && range.from > range.to) {
+    return usage("--from darf nicht nach --to liegen.");
+  }
+  if (range.from !== undefined || range.to !== undefined) options.candleRange = range;
 
   const venueRaw = take("venue");
   if (venueRaw !== undefined) {
@@ -279,7 +322,7 @@ export function parseSyncArgs(argv: readonly string[]): ParseResult {
     if (value > MAX_CONCURRENCY) {
       return usage(
         `--concurrency=${value} übersteigt die harte Grenze ${MAX_CONCURRENCY} ` +
-          `(Public-Budget 8 req/s — mehr Parallelität ändert die Rate nicht, nur den Burst).`
+          `(venue-spezifische Public-Rate — mehr Parallelität ändert das Limit nicht).`
       );
     }
     options.concurrency = value;
@@ -311,7 +354,7 @@ export function parseSyncArgs(argv: readonly string[]): ParseResult {
   // `--status` liest nur; welche Venue man synchronisieren würde, ist dort
   // ohne Bedeutung — ein ignoriertes Flag wäre eine stille Fehlaussage.
   if (status) {
-    const extra = argv.filter((a) => /^--(venue|timeframes|symbols|candle-limit|max-instruments|concurrency|strict)=/.test(a));
+    const extra = argv.filter((a) => /^--(venue|timeframes|symbols|from|to|candle-limit|max-instruments|concurrency|strict)(=|$)/.test(a));
     if (extra.length > 0) {
       return usage(`--status kombiniert keine Sync-Optionen (weggelassen: ${extra.map((a) => a.split("=")[0]).join(", ")}).`);
     }

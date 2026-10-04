@@ -138,11 +138,24 @@ export class BitunixPublicClient {
     return mapTicker(row);
   }
 
-  async fetchKlines(symbol: string, interval: string, limit = 100): Promise<MarketCandle[]> {
+  async fetchKlines(
+    symbol: string,
+    interval: string,
+    limit = 100,
+    range?: { startTime?: number; endTime?: number },
+  ): Promise<MarketCandle[]> {
+    const startTime = safeEpochMs(range?.startTime);
+    const endTime = safeEpochMs(range?.endTime);
     const res = await this.http.request({
       method: "GET",
       path: BITUNIX_PATHS.kline,
-      query: { symbol, interval: mapInterval(interval), limit: Math.min(Math.max(limit, 1), 200) },
+      query: {
+        symbol,
+        interval: mapInterval(interval),
+        limit: Math.min(Math.max(Math.floor(limit), 1), 200),
+        ...(startTime !== undefined ? { startTime } : {}),
+        ...(endTime !== undefined ? { endTime } : {}),
+      },
     });
     const data = envelopeData<unknown>(res.json);
     const rows = Array.isArray(data) ? (data as BitunixKlineRaw[]) : [];
@@ -276,6 +289,10 @@ export function mapTicker(row: BitunixTickerRaw): MarketTicker {
     high: num(row.high),
     low: num(row.low),
   };
+}
+
+function safeEpochMs(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? Math.floor(value as number) : undefined;
 }
 
 function mapKline(row: BitunixKlineRaw): MarketCandle | null {

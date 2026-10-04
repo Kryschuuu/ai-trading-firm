@@ -26,7 +26,15 @@ test("CLI gegen Fixture-Server: Public-only, Zähler im Log, degradiert bei Lüc
   let lines: string[] = [];
   try {
     const run = await runMarketSyncCli(
-      ["--venue=BITUNIX", "--dry-run", "--json", "--timeframes=1h", "--candle-limit=61"],
+      [
+        "--venue=BITUNIX",
+        "--dry-run",
+        "--json",
+        "--timeframes=1h",
+        "--candle-limit=61",
+        "--from=2023-11-14",
+        "--to=2023-11-14",
+      ],
       {
         env: {
           BITUNIX_ENABLED: "true",
@@ -68,9 +76,9 @@ test("CLI gegen Fixture-Server: Public-only, Zähler im Log, degradiert bei Lüc
   assert.match(text, /\[market-sync\] BITUNIX discovery: 2 instruments/);
   assert.match(text, /DEGRADED: 1 isolierte\(r\) Fehler/);
   assert.match(text, /\[market-sync\] orderbooks enriched: 2/);
-  // 4 von 122 erwarteten Bars: die Zeile beziffert die Lücke (Limit 61 × 2
-  // Instrumente), statt sie als „fertig“ auszugeben.
-  assert.match(text, /\[market-sync\] 1h candles: 2\/2 \(4\/122 bars\)/);
+  // 4 von 122 erwarteten Bars: API-Fetch, Store-Neuzugänge und Dedup sind
+  // separat ausgewiesen (Limit 61 × 2 Instrumente).
+  assert.match(text, /\[market-sync\] 1h candles: 2\/2 \(4\/122 fetched bars; 4 new, 0 deduplicated\)/);
   assert.match(text, /DRY-RUN: 2 Instrumente geplant, 4 Bars — nichts in data\/ geschrieben\./);
   assert.doesNotMatch(text, /https?:\/\//i);
 
@@ -90,12 +98,15 @@ test("CLI gegen Fixture-Server: Public-only, Zähler im Log, degradiert bei Lüc
   assert.equal(server.privateCalls, 0);
   assert.deepEqual(server.requests.find((r) => r.credentialHeaders.length > 0) ?? null, null);
   // Budget: 1 trading_pairs + 1 tickers (bulk) + 1 tickers (Lücken-Fallback
-  // für ETHUSDT, das im bulk fehlt) + 2 depth + 2 kline.
+  // für ETHUSDT, das im bulk fehlt) + 2 depth + 4 kline. Der Range-Backfill
+  // prüft nach der kurzen Fixture-Seite noch einmal auf ältere Bars.
   assert.deepEqual(
     [...paths].sort(),
     [
       "/api/v1/futures/market/depth",
       "/api/v1/futures/market/depth",
+      "/api/v1/futures/market/kline",
+      "/api/v1/futures/market/kline",
       "/api/v1/futures/market/kline",
       "/api/v1/futures/market/kline",
       "/api/v1/futures/market/tickers",

@@ -25,6 +25,7 @@ import {
   isSyncableSymbol,
   sanitizeSyncErrorMessage,
   sanitizeVenue,
+  SYNC_CANDLE_LIMIT,
   SYNC_LIMITS,
   type RateLimiter,
 } from "../../src/marketdata";
@@ -257,7 +258,7 @@ test("200 Instrumente: Concurrency ≤ 8 und effektive Rate < 10 req/s", async (
 
 test("Array-Caps begrenzen Ticker-Batch, Orderbook-Levels und Discovery-Zeilen", async () => {
   assert.ok(SYNC_LIMITS.maxBookLevels > 0 && SYNC_LIMITS.maxBookLevels <= 1000);
-  assert.ok(SYNC_LIMITS.maxCandlesPerResponse <= 2000);
+  assert.ok(SYNC_LIMITS.maxCandlesPerAdapterResult <= 100_000);
   assert.ok(SYNC_LIMITS.maxTickerBatch <= 1000);
   assert.ok(SYNC_LIMITS.maxInstruments <= 1000);
 
@@ -305,7 +306,10 @@ test("HistoricalStore schreibt ausschließlich candles.ndjson unter dir/", async
   assert.deepEqual(written, ["candles.ndjson"], "keine weitere Datei — instrumentId wird nie zum Pfad");
   assert.equal(existsSync(path.join(dir, "..", "cron.d")), false, "nichts außerhalb des Store-Verzeichnisses");
   // Die Bars liegen unter der kanonischen ID, nicht unter der Einschleusung.
-  assert.equal(history.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" }).length, 150);
+  assert.equal(
+    history.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" }).length,
+    SYNC_CANDLE_LIMIT,
+  );
 });
 
 // ── 7. Architektur: keine Netzwerkpfade in Scanner und API ──────────────────
