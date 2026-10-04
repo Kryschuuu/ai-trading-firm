@@ -37,6 +37,8 @@ import {
 /** Struktureller Limiter-Kontrakt — `TokenBucket`-kompatibel. */
 export interface SyncHttpLimiter {
   take(): Promise<void>;
+  /** Optional venue-wide cooldown feedback after HTTP 429. */
+  pause?(milliseconds: number): void;
 }
 
 export interface SyncHttpClientOptions {
@@ -207,27 +209,24 @@ export class SyncHttpClient {
     if (!res.ok) {
       const httpErr = new MarketDataHttpError(res.status, host);
       if (res.status === 429) {
-        // `Retry-After` (s) wird respektiert (gedeckelt in `retryWaitMs`).
+        // Respect Retry-After and cool down the shared host bucket so concurrent
+        // workers do not keep hitting the venue while this request retries.
         const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
         if (retryAfter !== null) {
           (httpErr as unknown as { retryAfterMs?: number }).retryAfterMs = retryAfter;
         }
+        this.limiter?.pause?.(Math.min(MAX_RETRY_AFTER_MS, Math.max(1000, retryAfter ?? 0)));
       }
       throw httpErr;
     }
     let text: string;
     try {
-      text = await res.text();
+      text = await readCappedBody(res, this.maxResponseBytes, host);
     } catch (err) {
       if (isTimeoutAbort(err)) {
         throw new MarketDataTimeoutError(`GET ${host} (Body) nach ${this.timeoutMs} ms`);
       }
       throw err;
-    }
-    if (text.length > this.maxResponseBytes) {
-      throw new MarketDataSchemaError(
-        `GET ${host}: Antwort ${text.length} Bytes über der Payload-Kappe ${this.maxResponseBytes} (nicht erneut angefragt).`,
-      );
     }
     try {
       return JSON.parse(text) as T;
@@ -293,12 +292,73 @@ function assertPublicScheme(url: URL): void {
   throw new Error(`SyncHttpClient: Schema ${url.protocol} nicht erlaubt (nur https, http nur für Loopback).`);
 }
 
+/**
+ * Enforce a per-HTTP-response byte cap while streaming. The paginated candle
+ * target is independent; each venue page remains bounded before JSON parsing.
+ */
+async function readCappedBody(res: Response, maxBytes: number, host: string): Promise<string> {
+  const declared = Number(res.headers.get("content-length") ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new MarketDataSchemaError(
+      `GET ${host}: Antwort ${declared} Bytes über der Payload-Kappe ${maxBytes} (nicht erneut angefragt).`,
+    );
+  }
+  if (!res.body) {
+    const text = await res.text();
+    const bytes = new TextEncoder().encode(text).byteLength;
+    if (bytes > maxBytes) {
+      throw new MarketDataSchemaError(
+        `GET ${host}: Antwort ${bytes} Bytes über der Payload-Kappe ${maxBytes} (nicht erneut angefragt).`,
+      );
+    }
+    return text;
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // Stream may already have closed.
+        }
+        throw new MarketDataSchemaError(
+          `GET ${host}: Antwort überschreitet die Payload-Kappe ${maxBytes} (nicht erneut angefragt).`,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // A canceled stream may already release its reader.
+    }
+  }
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
 /** `Retry-After` (Delta-Sekunden) → ms; HTTP-Datum/Unsinn ⇒ null. */
 function parseRetryAfter(raw: string | null): number | null {
   if (raw === null) return null;
-  const seconds = Number(raw.trim());
-  if (!Number.isFinite(seconds) || seconds < 0) return null;
-  return Math.round(seconds * 1000);
+  const value = raw.trim();
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
 }
 
 function isLoopback(hostname: string): boolean {

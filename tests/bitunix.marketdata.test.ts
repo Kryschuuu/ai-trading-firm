@@ -212,9 +212,9 @@ test("Security Audit: /depth (Public) sendet keine Credential-Header", async () 
   }
 });
 
-test("Rate-Limit-Eskalation: N Depth-Calls laufen über den Token-Bucket (8 req/s), nicht als Burst", async () => {
+test("Rate-Limit-Eskalation: N Depth-Calls laufen über den Token-Bucket (4 req/s), nicht als Burst", async () => {
   const { fetchImpl, calls } = createMockBitunixFetch();
-  // Produktions-Default: TokenBucket(publicRatePerSec = 8, burst = 8).
+  // Produktions-Default: TokenBucket(publicRatePerSec = 4, burst = 4).
   const client = mockBitunixPublicClient({ fetchImpl });
 
   const t0 = Date.now();
@@ -226,7 +226,7 @@ test("Rate-Limit-Eskalation: N Depth-Calls laufen über den Token-Bucket (8 req/
     12,
     "alle Depth-Calls kamen an",
   );
-  // burst 8 sofort, danach 4 × 125 ms ⇒ ≥ 500 ms; konservativ 400 ms Schwelle.
+  // Burst 4 sofort, danach 8 × 250 ms ⇒ mindestens etwa 2 s; konservativ 1.6 s.
   assert.ok(elapsed >= 400, `Drosselung fehlt: 12 Calls in ${elapsed} ms (erwartet ≥ 400 ms)`);
 });
 

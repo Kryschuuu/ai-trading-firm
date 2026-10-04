@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.15.1` |
+| **Version** | `v0.16.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-04 |
-| **Quellbasiert** | `package.json` (`version: "0.15.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.16.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -409,6 +409,27 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.16.0` (2026-10-04) ergänzt historischen Marktdaten-Backfill für längere
+Backtests und Indikator-Warmups:
+
+- `market:sync` akzeptiert inklusive `--from`/`--to`-Grenzen als UTC-Datum oder
+  ISO-8601 mit Zeitzone, leitet das Candle-Limit aus der angeforderten Range ab
+  und zwingt bei Bereichen einen Full-Backfill statt des inkrementellen Skips.
+- Binance- und Bitunix-Adapter paginieren Klines rückwärts; Kraken verwendet
+  `since`, bleibt aber auf die jüngsten 720 OHLC-Einträge begrenzt. Yahoo fragt
+  begrenzte `period1`/`period2`-Zeitfenster ab.
+- Sync- und Store-Limits sind auf 100.000 Bars je Reihe angehoben, pro Lauf sind
+  höchstens 1.000.000 Bars angefordert. Der Default 201 deckt CTI-EMA-200 ab;
+  das separate Scanner-Warmup bleibt bei 61.
+- CLI/Sync-Zähler trennen tatsächliche Kline-Adapteraufrufe, valide
+  abgerufene, neu gespeicherte und deduplizierte Bars; der Ziel-Nenner enthält
+  auch bei Strict-Abbruch nur tatsächlich gestartete Reihen. Der Sync filtert
+  außerdem stets selbst auf den angefragten Candle-Bereich.
+- Bitunix Public-Market-Sync ist auf 4 req/s/IP gesetzt und respektiert einen
+  gemeinsamen 429-`Retry-After`-Cooldown.
+- Tests decken venue-bounded Pagination, CLI-Datumsbereiche, Range-Filter,
+  Deduplizierung und Lauf-/Serienlimits ab.
 
 `v0.15.1` (2026-10-04) ist ein stabilisierender Patch nach der UI-Überarbeitung:
 

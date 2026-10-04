@@ -46,8 +46,9 @@ function stubFetch(
 function clientFor(
   fetch: FetchFn,
   overrides: Record<string, unknown> = {},
-): { client: SyncHttpClient; sleeps: number[]; took: () => number } {
+): { client: SyncHttpClient; sleeps: number[]; pauses: number[]; took: () => number } {
   const sleeps: number[] = [];
+  const pauses: number[] = [];
   let takes = 0;
   const client = new SyncHttpClient({
     baseUrl: "https://api.example.com",
@@ -55,10 +56,13 @@ function clientFor(
     sleep: async (ms: number) => {
       sleeps.push(ms);
     },
-    limiter: { take: async () => { takes += 1; } },
+    limiter: {
+      take: async () => { takes += 1; },
+      pause: (ms: number) => { pauses.push(ms); },
+    },
     ...(overrides as Record<string, never>),
   });
-  return { client, sleeps, took: () => takes };
+  return { client, sleeps, pauses, took: () => takes };
 }
 
 // ── 1) Erfolg + Encoding ─────────────────────────────────────────────────────
@@ -148,6 +152,7 @@ test("429/503: Retry mit exponentiellem Backoff, dann Erfolg", async () => {
   assert.deepEqual(body, { ok: true });
   assert.equal(calls.length, 3);
   assert.deepEqual(ctx.sleeps, [250, 500]);
+  assert.deepEqual(ctx.pauses, [1000], "429 kühlt den gemeinsamen Limiter mindestens eine Sekunde ab");
   assert.equal(ctx.took(), 3, "ein Token je Versuch, auch bei Retries");
 });
 
@@ -161,6 +166,7 @@ test("429 mit Retry-After wartet mindestens so lange (gedeckelt)", async () => {
   const ctx = clientFor(fetch);
   await ctx.client.getJson("/x");
   assert.deepEqual(ctx.sleeps, [2000]);
+  assert.deepEqual(ctx.pauses, [2000], "Retry-After wird an den gemeinsamen Limiter weitergereicht");
 
   // Deckel: 3600 s Retry-After parken den Sync nicht eine Stunde.
   let m = 0;
@@ -172,6 +178,21 @@ test("429 mit Retry-After wartet mindestens so lange (gedeckelt)", async () => {
   const ctx2 = clientFor(capped.fetch);
   await ctx2.client.getJson("/x");
   assert.deepEqual(ctx2.sleeps, [10_000]);
+  assert.deepEqual(ctx2.pauses, [10_000], "auch die geteilte Venue-Pause ist auf 10 s begrenzt");
+
+  // HTTP-date Retry-After wird ebenfalls geparst und gedeckelt.
+  let dateCalls = 0;
+  const dateResponse = stubFetch(() => {
+    dateCalls += 1;
+    if (dateCalls === 1) {
+      return stubResponse(429, "{}", { "retry-after": new Date(Date.now() + 60_000).toUTCString() });
+    }
+    return stubResponse(200, "{}");
+  });
+  const ctx3 = clientFor(dateResponse.fetch);
+  await ctx3.client.getJson("/x");
+  assert.deepEqual(ctx3.sleeps, [10_000]);
+  assert.deepEqual(ctx3.pauses, [10_000]);
 });
 
 test("4xx außer 429: SOFORT werfen, kein Retry, kein Sleep", async () => {
@@ -244,6 +265,39 @@ test("Antwort über der Payload-Kappe wirft (kein Retry, kein OOM)", async () =>
   )) as MarketDataSchemaError;
   assert.ok(err instanceof MarketDataSchemaError);
   assert.match(err.message, /Payload-Kappe/);
+});
+
+test("Chunked-Payload wird vor vollständigem Lesen an der Byte-Kappe abgebrochen", async () => {
+  let canceled = false;
+  let textReads = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(64));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const response = {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body,
+    text: async () => {
+      textReads += 1;
+      return "should not be used";
+    },
+  } as unknown as Response;
+  const { fetch } = stubFetch(() => response);
+  const ctx = clientFor(fetch, { maxResponseBytes: 100 });
+  const err = await ctx.client.getJson("/x").then(
+    () => null,
+    (e: unknown) => e,
+  );
+  assert.ok(err instanceof MarketDataSchemaError);
+  assert.match((err as Error).message, /Payload-Kappe/);
+  assert.equal(textReads, 0, "der komplette Response.text() wird nie materialisiert");
+  assert.equal(canceled, true, "überschrittener Stream wird sofort abgebrochen");
 });
 
 // ── 5) Redaktion + taggedSyncError ───────────────────────────────────────────

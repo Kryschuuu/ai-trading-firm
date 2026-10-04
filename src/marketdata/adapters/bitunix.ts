@@ -31,11 +31,15 @@ import type { BitunixDepthRaw, BitunixTradingPair } from "../../brokers/bitunix/
 import { normalizeVenueSymbol, type CanonicalSymbol } from "../../symbols/normalize";
 import { UnsupportedTimeframeError } from "../errors";
 import type { MarketDataAdapter } from "../sync";
-import type { MarketCandle, MarketInstrument, MarketOrderBook, MarketOrderBookLevel, MarketTicker } from "../types";
+import type { CandleRange, MarketCandle, MarketInstrument, MarketOrderBook, MarketOrderBookLevel, MarketTicker } from "../types";
+import { fetchCandlesBackward } from "./candlePagination";
 import type { InstrumentStatus } from "../../universe/types";
 
 /** Venue-Key, unter dem der Wrapper registriert wird (`registerAdapters.ts`). */
 export const BITUNIX_MARKET_DATA_VENUE = "BITUNIX" as const;
+
+/** Official maximum rows per Bitunix kline HTTP response. */
+export const BITUNIX_KLINE_MAX_PAGE_SIZE = 200;
 
 /**
  * Vollständiges, explizites Timeframe-Mapping `SupportedTimeframe → Bitunix-Interval`.
@@ -306,13 +310,21 @@ export function createBitunixMarketDataAdapter(deps: BitunixMarketAdapterDeps): 
       };
     },
 
-    async getCandles(symbol: string, timeframe: SupportedTimeframe, limit: number): Promise<MarketCandle[]> {
+    async getCandles(
+      symbol: string,
+      timeframe: SupportedTimeframe,
+      limit: number,
+      range?: CandleRange,
+    ): Promise<MarketCandle[]> {
       const interval = toBitunixInterval(timeframe);
-      // Die Venue liefert maximal 200 Bars je kline-Call (Doku); der Client
-      // klemmt das Limit entsprechend. Ein höheres candleLimit würde ein
-      // Paging (mehrere Calls je Reihe) erfordern — bewusst out of scope
-      // dieses Wrappers, dokumentiert in docs/MARKET_DATA_PIPELINE.md §10.
-      return client.fetchKlines(symbol.toUpperCase(), interval, limit);
+      return fetchCandlesBackward({
+        limit,
+        pageSize: BITUNIX_KLINE_MAX_PAGE_SIZE,
+        nowMs: now().getTime(),
+        range,
+        fetchPage: (pageLimit, endTimeMs) =>
+          client.fetchKlines(symbol.toUpperCase(), interval, pageLimit, { endTime: endTimeMs }),
+      });
     },
   };
 }

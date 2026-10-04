@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.15.1` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.16.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -49,7 +49,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 Das Layout-System der Oberfläche — Seitenhüllen und Ränder, Breakpoints bis
 Ultrawide (`3xl`/`4xl`), `DataTable` mit mobiler Kartenansicht, Reiterleisten und
 die UI-Bausteine in `src/components/ui/` — ist in
-[UI_LAYOUT.md](UI_LAYOUT.md) beschrieben (Stand v0.15.1: Dashboard und
+[UI_LAYOUT.md](UI_LAYOUT.md) beschrieben (Stand 2026-10-04: Dashboard und
 Broker-Seite nutzen wie der Doku-Viewer die volle Bildschirmbreite).
 
 ---
@@ -83,7 +83,8 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[CONFIGURATION.md](../CONFIGURATION.md)** | Env-Flags mit sicheren Defaults — verbindliche Flag-Referenz (ehemals Root `INSTALL.md`) |
 | **[HANDBUCH.md](HANDBUCH.md)** | Bedienung, Beispiele, Runbooks, Troubleshooting, Agenten-Register |
 | **[BROKER_ARCHITECTURE.md](BROKER_ARCHITECTURE.md)** | Broker-Capability-Modell: Adapter-Vertrag, Capability-Matrix, Execution Modes, Factory, Live-Gate, Health-API |
-| **[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)** | MarketDataSyncService + `npm run market:sync`: Discovery, Enrichment, Candle-Backfill, Gates, Limits |
+| **[MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md)** | MarketDataSyncService + `npm run market:sync`: Venue-Paging, historische `--from`/`--to`-Backfills, Fetch-/Dedup-Zähler, Gates und Limits |
+| **[HOW_TO_BITUNIX_SYNC.md](HOW_TO_BITUNIX_SYNC.md)** | Betreiber-How-to: Bitunix Public-Sync, lange Kerzenhistorie, Rate-Limits und Troubleshooting |
 | **[LIVE_TRADING.md](LIVE_TRADING.md)** | Live-Trading-Gate (Task 11): State-Machine, Enforcement, Kill-Switch, Audit-Kette, CI |
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data: Modi A/B/C, deterministischer Fill-Simulator, Failover, Replay |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
@@ -106,7 +107,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[FRONTEND_CONTROL_PLANE.md](FRONTEND_CONTROL_PLANE.md)** | Control Plane: Brokers & Venues UI, Credential-Manager, Secret-Store |
 | **[OPERATIONS.md](OPERATIONS.md)** | Runbooks: „Funnel ist leer“ (§1–3) und „Auto-Breaker hat ausgelöst“ (§4) |
 | **[OPERATIONS_CENTER.md](OPERATIONS_CENTER.md)** | Operations Center: Market-Data-Readiness-Diagnose |
-| **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup, Migration |
+| **[HISTORY.md](HISTORY.md)** | Historical Store: Kerzen-Schema v2, Timeframe-Schlüssel, Dedup, 100.000-Bar-Retention, Migration |
 | **[MTF_CONFLUENCE.md](MTF_CONFLUENCE.md)** | Deterministische Multi-Timeframe-Konfluenz: as-of-Ausrichtung, Features, Gewichtung, Trusted-Data-Integration, Ops/Rollback (RMA-P2-03, v1.62.0) |
 | **[CROSS_SECTIONAL_RANKING.md](CROSS_SECTIONAL_RANKING.md)** | Point-in-Time Cross-Sectional Momentum Ranking: Universumsweite, as-of-sichere Momentum-Perzentile (Policy `ingested`), deterministische Snapshot-ID/Provenance, DB + Artefakt-Persistenz, Scanner-Diagnose-Faktor Gewicht 0, Read-only-API, Retention/Turnover (RMA-P2-04, v1.63.0) |
 | **[SENTIMENT.md](SENTIMENT.md)** | Kalibrierbare strukturierte Sentiment-Outputs: Forecast-Envelopes (`sentiment@1`), Trennung Wahrscheinlichkeit/Coverage, NEUTRAL vs. ABSTAIN, Syndikations-Deduplikation, PIT-Invarianz, P3.1-Outcome-Link (RMA-P2-05, v1.64.0) |
@@ -270,7 +271,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.15.1, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.16.0, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)

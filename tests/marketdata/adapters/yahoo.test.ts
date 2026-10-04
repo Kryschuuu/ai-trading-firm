@@ -170,6 +170,20 @@ test("mapYahooChart: Null-Lücken übersprungen, Volumen-null ⇒ 0, sortiert", 
 
 // ── 4) Funnel gegen den Fixture-Server ───────────────────────────────────────
 
+test("Yahoo-Datumsbereich nutzt period1/period2 und filtert inklusiv auf die Range", async () => {
+  const { fx, adapter } = await harness("IBKR", inputs([{ symbol: "AAPL", assetClass: "equity" }]));
+  const from = Date.parse("2026-08-28T00:00:00.000Z");
+  const to = Date.parse("2026-08-28T06:00:00.000Z");
+  const candles = await adapter.getCandles("AAPL", "1h", 20, { from, to });
+
+  assert.equal(candles.length, 7, "beide Grenzen sind inklusiv");
+  assert.ok(candles.every((candle) => candle.time! >= from && candle.time! <= to));
+  const chartReq = fx.requests.find((request) => request.path.startsWith("/v8/finance/chart/"))!;
+  assert.equal(chartReq.query.period1, String(Math.floor(from / 1000)));
+  assert.equal(chartReq.query.period2, String(Math.floor(to / 1000) + 1));
+  assert.equal(chartReq.query.range, undefined, "Datumspaar ersetzt die benannte Yahoo-Range");
+});
+
 test("Funnel: Discovery → Bulk → Depth-aus-Quote → Chart", async () => {
   const { fx, adapter } = await harness(
     "IBKR",

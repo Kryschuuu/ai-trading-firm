@@ -3,9 +3,9 @@
  * (`scripts/market-sync.ts`, `scripts/run-market-sync.ts`, `scripts/run-scan.ts --sync`).
  *
  * Einzige Instanzierungsstelle der Adapter ist `registerAdapters()`
- * (`src/marketdata/registerAdapters.ts`): public-only — es wird ausschließlich
- * der credential-freie `BitunixPublicClient` (adaptiert über den Wrapper
- * `src/marketdata/adapters/bitunix.ts`) erzeugt, gated durch die Feature-Flags
+ * (`src/marketdata/registerAdapters.ts`): ausschließlich credential-freie
+ * Public-Clients (Bitunix, Binance, Kraken, Yahoo und Paper/Seed) werden erzeugt,
+ * gated durch die Feature-Flags
  * `MARKET_SYNC_ENABLED`, `MARKET_SYNC_VENUES` und `<VENUE>_ENABLED` sowie die
  * Capability-Matrix (`capabilities.<VENUE>.marketData === true`).
  *
@@ -27,6 +27,7 @@ import {
   MARKET_SYNC_VENUES_FLAG,
   MarketDataSyncService,
   resolveSyncOptions,
+  type CandleRange,
   type SkippedAdapter,
   type SyncLogger,
   type SyncResult,
@@ -48,12 +49,14 @@ export interface MarketSyncRunOptions {
    * Zeitrahmen). Kürzere Zeitrahmen explizit: `--timeframes=5m,15m,30m,1h`.
    */
   timeframes?: readonly SupportedTimeframe[];
-  /** Kerzen je Timeframe; Default `max(150, requiredWarmupCandles)`. */
+  /** Kerzen je Timeframe; Default `max(SYNC_CANDLE_LIMIT, requiredWarmupCandles, requested range)`. */
   candleLimit?: number;
   /** Sicherheits-Cap der Instrumente je Venue; Default 250. */
   maxInstruments?: number;
   /** Nur diese Symbole synchronisieren (venue-nativ). */
   symbols?: readonly string[];
+  /** Inclusive UTC date/time bounds; enables a historical range backfill. */
+  candleRange?: CandleRange;
   /** Parallelität (hart ≤ 8); Default 4. */
   concurrency?: number;
   /** `true` ⇒ Abbruch beim ersten Fehler (kein degradierter Lauf). */
@@ -112,6 +115,7 @@ export async function runMarketSyncDetailed(options: MarketSyncRunOptions): Prom
     ...(options.candleLimit !== undefined ? { candleLimit: options.candleLimit } : {}),
     ...(options.maxInstruments !== undefined ? { maxInstruments: options.maxInstruments } : {}),
     ...(options.symbols ? { symbolAllowlist: options.symbols } : {}),
+    ...(options.candleRange ? { candleRange: options.candleRange } : {}),
     ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
     ...(options.strict !== undefined ? { strict: options.strict } : {}),
     ...(options.fullRefresh !== undefined ? { fullRefresh: options.fullRefresh } : {}),

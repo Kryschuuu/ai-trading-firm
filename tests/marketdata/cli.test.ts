@@ -87,6 +87,29 @@ test("parseSyncArgs: nur genannte Flags landen im Optionsobjekt", () => {
   assert.equal(full.parsed.manifest, false);
 });
 
+test("parseSyncArgs: inclusive UTC date ranges support date-only and ISO timestamps", () => {
+  const parsed = parseSyncArgs([
+    "--from=2026-09-01",
+    "--to=2026-09-03T12:00:00+02:00",
+    "--timeframes=5m,1h",
+  ]);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.parsed.options.candleRange, {
+    from: Date.parse("2026-09-01T00:00:00.000Z"),
+    to: Date.parse("2026-09-03T10:00:00.000Z"),
+  });
+  assert.equal(parsed.parsed.options.fullRefresh, undefined, "range backfill is forced by the service");
+
+  const fullUtcDay = parseSyncArgs(["--to=2026-09-01"]);
+  assert.equal(fullUtcDay.ok, true);
+  if (!fullUtcDay.ok) return;
+  assert.equal(fullUtcDay.parsed.options.candleRange?.to, Date.parse("2026-09-01T23:59:59.999Z"));
+
+  assert.equal(parseSyncArgs(["--from=2026-09-01T00:00:00"]).ok, false, "datetimes must carry a timezone");
+  assert.equal(parseSyncArgs(["--from=2026-09-01", "--to=2026-08-31"]).ok, false);
+});
+
 test("parseSyncArgs: --aggregate (GAP-07) ist ein Boolean-Schalter (Default off)", () => {
   const off = parseSyncArgs([]);
   assert.equal(off.ok, true);
@@ -127,7 +150,11 @@ test("parseSyncArgs: Bedienfehler werden abgelehnt, bevor ein Request möglich i
     [["--timeframes=,"], /mindestens einen Wert/],
     [["--candle-limit=abc"], /positive Ganzzahl/],
     [["--candle-limit=0"], /positive Ganzzahl/],
-    [["--candle-limit=2001"], /harte Obergrenze 2000/],
+    [["--candle-limit=100001"], /harte Obergrenze 100000/],
+    [["--from=2026-02-30"], /--from muss/],
+    [["--from=0001-01-01"], /--from muss/],
+    [["--to=2026-09-01T00:00:00"], /--to muss/],
+    [["--from=2026-09-02", "--to=2026-09-01"], /--from darf nicht nach --to/],
     [["--max-instruments=-1"], /positive Ganzzahl/],
     [["--max-instruments=1001"], /harte Obergrenze 1000/],
     [["--concurrency=9"], /harte Grenze 8/],
@@ -176,6 +203,8 @@ test("buildHelpText erklärt jede Option, die Gates und die Exit-Codes", () => {
   for (const needle of [
     "--venue=",
     "--timeframes=",
+    "--from=",
+    "--to=",
     "--symbols=",
     "--candle-limit=",
     "--max-instruments=",
@@ -186,7 +215,7 @@ test("buildHelpText erklärt jede Option, die Gates und die Exit-Codes", () => {
     "--no-manifest",
     "--help",
     "BITUNIX_ENABLED=true",
-    "8 req/s",
+    "Bitunix 4",
     "requiredWarmupCandles",
     "Exit-Codes:",
     "sauberer Lauf",
@@ -268,6 +297,9 @@ test("parseSyncArgs: --status ist read-only und duldet keine Sync-Optionen", () 
   if (mixed.ok) return;
   assert.match(mixed.error, /--status kombiniert keine Sync-Optionen/);
   assert.match(mixed.error, /--venue, --timeframes/);
+  const rangeMixed = parseSyncArgs(["--status", "--from=2026-09-01"]);
+  assert.equal(rangeMixed.ok, false);
+  if (!rangeMixed.ok) assert.match(rangeMixed.error, /--from/);
 
   const help = buildHelpText();
   assert.ok(help.includes("--status"), "Hilfe erklärt den Status-Modus");

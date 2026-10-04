@@ -2,8 +2,8 @@
  * Adapter-facing market-data contracts for `MarketDataSyncService` (MDSYNC-001).
  *
  * These types are the venue-agnostic boundary between public REST adapters
- * (Bitunix, Binance, Bitfinex, …) and persistence (`InstrumentRegistry`,
- * `HistoricalStore`). They are intentionally independent of private trading
+ * (Bitunix, Binance, Kraken and Yahoo-backed venues) and persistence
+ * (`InstrumentRegistry`, `HistoricalStore`). They are intentionally independent of private trading
  * APIs — no credentials, no order payloads, no account state.
  *
  * `MarketInstrument` is the universe contract (single source of truth) so a
@@ -22,11 +22,12 @@
  *    liefern beide Schreibweisen, die Normalisierung liegt an der Adapter-
  *    grenze, nicht in jedem Adapter.
  *  - `SupportedTimeframe` ist die Store-Allowlist (Superset der im Ticket
- *    genannten sieben Periodizitäten) — siehe `MARKET_SYNC_TIMEFRAMES` für die
- *    von Bitunix nachweislich bedienten Intervalle.
+ *    genannten sieben Periodizitäten); die Venue-Adapter enthalten jeweils
+ *    eine explizite Timeframe-Map und lehnen nicht unterstützte Intervalle ab.
  */
 
 import type { SupportedTimeframe as StoreSupportedTimeframe } from "../lib/marketdata/historicalStore";
+import { MAX_CANDLES_PER_SERIES } from "../lib/marketdata/limits";
 // Nur `import type` (kein Runtime-Zyklus): `quality.ts` importiert
 // `candleTimeMs` von hier; diese typisierte Rückverweisung wird zur
 // Compilezeit eliminiert.
@@ -43,7 +44,8 @@ export type SupportedTimeframe = StoreSupportedTimeframe;
 /**
  * Zeitrahmen, die die Public-Kline-Endpunkte der angebundenen Venues nachweislich
  * bedienen (Venue Capability Matrix, `docs/MARKET_DATA_PIPELINE.md` §10).
- * Nur diese Werte sind für einen Backfill über Bitunix vorgesehen.
+ * Konservative Schnittmenge für gebräuchliche Syncs; die Adapter jeder Venue
+ * lehnen zusätzlich ihre eigenen nicht unterstützten Intervalle explizit ab.
  */
 export const MARKET_SYNC_TIMEFRAMES: readonly SupportedTimeframe[] = [
   "1m",
@@ -75,8 +77,12 @@ export const MARKET_SYNC_TIMEFRAMES: readonly SupportedTimeframe[] = [
 export const SYNC_TIMEFRAMES = ["1h"] as const;
 export type SyncTimeframe = (typeof SYNC_TIMEFRAMES)[number];
 
-/** Default candle page size per instrument × timeframe. */
-export const SYNC_CANDLE_LIMIT = 150;
+/**
+ * Default candle count per instrument × timeframe. The 201-bar baseline covers
+ * CTI's default EMA-200 warmup; scanner readiness is still derived separately
+ * from its own configured factors (normally 61 bars).
+ */
+export const SYNC_CANDLE_LIMIT = 201;
 
 /**
  * Harte Obergrenzen gegen Payload-Bombing (Security).
@@ -88,8 +94,12 @@ export const SYNC_CANDLE_LIMIT = 150;
 export const SYNC_LIMITS = {
   /** Max. Instrumente pro Venue-Lauf (Sicherheits-Cap, Default). */
   maxInstruments: 250,
-  /** Max. Kerzen je Response (`getCandles`) — darüber hinaus wird verworfen und gemeldet. */
-  maxCandlesPerResponse: 2000,
+  /**
+   * Max. Bars in the aggregate result of one adapter getCandles() call.
+   * This is NOT an HTTP-page cap: paginated adapters may aggregate pages up
+   * to the per-series limit; each HTTP response stays bounded by its client.
+   */
+  maxCandlesPerAdapterResult: MAX_CANDLES_PER_SERIES,
   /** Max. Orderbook-Levels je Seite, die ausgewertet werden. */
   maxBookLevels: 200,
   /** Max. Symbole in einem `getTickers`-Batch-Filter. */
@@ -203,12 +213,26 @@ export interface SyncError {
 /** Ticket-Kontrakt: `failures: Array<{ stage, symbol?, reason }>`. */
 export type SyncFailure = SyncError;
 
+/** Inclusive UTC-epoch-millisecond bounds passed from the CLI to venue adapters. */
+export interface CandleRange {
+  from?: number;
+  to?: number;
+}
+
 /** Backfill-Statistik eines Timeframes (Ticket: `candlesByTimeframe`). */
 export interface TimeframeSyncStats {
-  /** Instrumente, in deren Reihe Bars geschrieben wurden. */
+  /** Instruments with at least one new unique bar accepted by the store. */
   instruments: number;
-  /** Effektiv geschriebene (deduplizierte) Bars. */
+  /** New unique bars accepted by the store (legacy field; not all fetched bars). */
   bars: number;
+  /** Instruments for which getCandles() was actually invoked (including empty/error responses). */
+  attemptedInstruments?: number;
+  /** Instruments for which the adapter returned at least one valid candle. */
+  fetchedInstruments?: number;
+  /** Valid candles returned by the adapter, including candles already in the store. */
+  fetchedBars?: number;
+  /** Fetched bars matching existing store keys (re-runs/backfills). */
+  deduplicatedBars?: number;
 }
 
 /**

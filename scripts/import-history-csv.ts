@@ -58,7 +58,7 @@ Optionen:
   --dir=<pfad>         Store-Verzeichnis. Default: data/history
   --max-bars=<n>       Kompaktierungsgrenze je Reihe (Default 25000). Muss größer
                        als die größte zu messende Kerzenzahl sein, sonst schneidet
-                       der Store die ältesten Bars ab (Store-Default: 5000).
+                       der Store die ältesten Bars ab (Store-Default: 100000).
   --from=<ISO|ms>      Nur Zeilen ab diesem Zeitpunkt importieren.
   --to=<ISO|ms>        Nur Zeilen bis zu diesem Zeitpunkt importieren.
   --venue=<name>       Provenienz-Venue. Default: Präfix der Instrument-ID.

@@ -19,16 +19,34 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
 export class TokenBucket {
   private tokens: number;
   private last = Date.now();
+  private blockedUntil = 0;
 
   constructor(
     private readonly ratePerSec: number,
     private readonly burst: number
   ) {
+    if (!Number.isFinite(ratePerSec) || ratePerSec <= 0) throw new Error("TokenBucket: ratePerSec muss > 0 sein.");
+    if (!Number.isFinite(burst) || burst < 1) throw new Error("TokenBucket: burst muss >= 1 sein.");
     this.tokens = burst;
+  }
+
+  /** Pause all clients sharing this bucket after a venue-wide 429. */
+  pause(milliseconds: number): void {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return;
+    const cooldown = Math.min(Math.floor(milliseconds), 60_000);
+    this.blockedUntil = Math.max(this.blockedUntil, Date.now() + cooldown);
+    // Resume at the configured rate instead of releasing a full burst.
+    this.tokens = 0;
+    this.last = this.blockedUntil;
   }
 
   async take(): Promise<void> {
     for (;;) {
+      const now = Date.now();
+      if (now < this.blockedUntil) {
+        await sleep(Math.min(this.blockedUntil - now, 2000));
+        continue;
+      }
       this.refill();
       if (this.tokens >= 1) {
         this.tokens -= 1;
@@ -41,7 +59,7 @@ export class TokenBucket {
 
   private refill(): void {
     const now = Date.now();
-    const elapsed = (now - this.last) / 1000;
+    const elapsed = Math.max(0, (now - this.last) / 1000);
     this.last = now;
     this.tokens = Math.min(this.burst, this.tokens + elapsed * this.ratePerSec);
   }
@@ -134,6 +152,16 @@ function buildUrl(
   return assertUrlAllowed(url.toString(), cfg);
 }
 
+function retryAfterCooldownMs(value: string | null): number {
+  if (value) {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, Math.max(1000, Math.ceil(seconds * 1000)));
+    const date = Date.parse(value);
+    if (Number.isFinite(date)) return Math.min(60_000, Math.max(1000, date - Date.now()));
+  }
+  return 1000;
+}
+
 export class BitunixHttp {
   private readonly cfg: BitunixRuntimeConfig;
   private readonly logger: BitunixLogger;
@@ -182,6 +210,21 @@ export class BitunixHttp {
           cache: "no-store",
           redirect: "error",
         });
+        if (res.status === 429) {
+          // Cool the shared venue bucket from headers immediately. Do not read a
+          // potentially oversized/throttled error body before making this
+          // feedback effective.
+          this.bucket.pause(retryAfterCooldownMs(res.headers.get("retry-after")));
+          try {
+            await res.body?.cancel();
+          } catch {
+            /* body already closed */
+          }
+          const classified = classifyBitunixFailure({ httpStatus: res.status });
+          throw new BitunixApiError(classified.kind, classified.message, {
+            httpStatus: res.status,
+          });
+        }
         const text = await readCapped(res, BITUNIX_MAX_RESPONSE_BYTES);
         let json: unknown = null;
         try {
@@ -199,7 +242,7 @@ export class BitunixHttp {
             venueCode: readCode(json),
           });
         }
-        if (res.status === 429 || res.status >= 500) {
+        if (res.status >= 500) {
           const classified = classifyBitunixFailure({ httpStatus: res.status, venueMsg: readMsg(json) });
           last = new BitunixApiError(classified.kind, classified.message, {
             httpStatus: res.status,
@@ -236,7 +279,10 @@ export class BitunixHttp {
           if (e.kind === "ambiguous") throw e;
           // Idempotenter Pfad: rate-limit/maintenance/unknown wiederholen.
           if (idempotent) {
-            if (e.kind === "rate-limit") continue;
+            if (e.kind === "rate-limit") {
+              if (e.httpStatus !== 429) this.bucket.pause(1000);
+              continue;
+            }
             if (e.kind === "maintenance" || e.kind === "unknown") continue;
             throw e;
           }

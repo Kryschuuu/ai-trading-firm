@@ -21,8 +21,32 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.15.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.16.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.16.0] — Historischer Marktdaten-Backfill und längere Reihen (2026-10-04)
+
+### Added
+
+- **CLI-Datumsbereiche:** `market:sync` akzeptiert inklusive `--from`-/`--to`-Grenzen als UTC-Datum (`YYYY-MM-DD`) oder ISO-8601-Zeitstempel mit Zeitzone. Bereiche umgehen den inkrementellen „aktuelle Kerze vorhanden“-Skip; das Kerzenlimit wird aus der benötigten Range und dem feinsten Timeframe abgeleitet.
+- **Venue-spezifischer historischer Abruf:** Binance und Bitunix paginieren Klines rückwärts; Kraken verwendet `since`, bleibt aber auf die jüngsten 720 OHLC-Einträge begrenzt. Yahoo fragt begrenzte `period1`/`period2`-Fenster ab.
+- **Getrennte Backfill-Metriken:** Sync-Ergebnisse unterscheiden tatsächliche `getCandles`-Adapteraufrufe, valide abgerufene Bars, neu gespeicherte Bars und deduplizierte Bars; der Ziel-Nenner zählt auch bei Strict-Abbruch nur wirklich gestartete Reihen.
+
+### Changed
+
+- Der Sync-Default steigt von 150 auf **201 Kerzen** (CTI-EMA-200-Warmup); der unabhängige Scanner-Warmup bleibt bei 61.
+- Historische Seriengrenze und Store-Retention werden auf **100.000 Bars je Instrument/Timeframe** angehoben. Ein Sync-Lauf ist auf **1.000.000 angeforderte Bars** und 1.000 Seiten je Reihe begrenzt.
+- Bitunix Public Market-Sync wird auf 4 Requests/s begrenzt (unter dem dokumentierten 10-req/s-IP-Limit); 429-`Retry-After` kühlt den geteilten Token-Bucket. Das Perp-Datenlimit bleibt separat bei 3 req/s.
+- Bitunix-Kline-Antworten werden mit venue-konformer Seitengröße geladen; der HTTP-Transport kappt übergroße Antworten während des Streams.
+
+### Fixed
+
+- Kerzen außerhalb eines angeforderten `--from`/`--to`-Fensters werden selbst dann nicht gespeichert, wenn ein Adapter die Grenzen nicht beachtet.
+- Wiederholte Historien-Läufe unterscheiden nun sauber zwischen abgerufen, neu gespeichert und dedupliziert, statt geringe Store-Neuzugänge mit geringer API-Abdeckung gleichzusetzen.
+
+### Tests
+
+- Regressionen für Bitunix-Seiten (200/200/5), Binance (1000/1), Kraken (720er-Seitengrenze), inklusive Range-Filterung, Datumvalidierung, Serien-/Lauflimits und Sync-Zähler.
 
 ## [0.15.1] — Reports-UI bleibt bei abgelaufener Session erreichbar (2026-10-04)
 

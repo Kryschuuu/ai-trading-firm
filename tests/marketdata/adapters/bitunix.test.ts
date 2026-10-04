@@ -189,6 +189,8 @@ interface FixtureFetchOptions {
   depthFailTimes?: number;
   /** Erzwungener HTTP-Status auf `/kline` für ALLE Calls. */
   klineStatus?: number;
+  /** Dynamische Kline-Serie zum Testen von Zeit-Cursor und mehrseitigem Backfill. */
+  klineCandles?: readonly { time: number; open: number; high: number; low: number; close: number; volume: number }[];
   /**
    * Gateway-Simulation: `/tickers`-Requests, deren `symbols`-Query mehr als
    * `maxTickerSymbolsPerUrl` Symbole trägt, werden abgelehnt (wie der echte
@@ -236,6 +238,22 @@ function fixtureFetch(opts: FixtureFetchOptions = {}): { fetchImpl: typeof fetch
     }
     if (url.pathname === BITUNIX_PATHS.kline) {
       if (opts.klineStatus !== undefined) return respond(opts.klineStatus, null);
+      if (opts.klineCandles) {
+        const endTime = Number(url.searchParams.get("endTime"));
+        const limit = Number(url.searchParams.get("limit")) || 200;
+        const page = opts.klineCandles
+          .filter((candle) => !Number.isFinite(endTime) || candle.time < endTime)
+          .slice(-limit)
+          .map((candle) => ({
+            time: candle.time,
+            open: String(candle.open),
+            high: String(candle.high),
+            low: String(candle.low),
+            close: String(candle.close),
+            baseVol: String(candle.volume),
+          }));
+        return respond(200, page);
+      }
       return respond(200, KLINE.data);
     }
     return respond(404, null);
@@ -491,6 +509,25 @@ test("timeframe mapping covers every SupportedTimeframe", () => {
   assert.equal(BITUNIX_SUPPORTED_INTERVALS.includes("5d"), false);
 });
 
+test("Bitunix Klines aggregate 200-row pages for an inclusive historical range", async () => {
+  const intervalMs = 60 * 60_000;
+  const end = Math.floor(Date.now() / intervalMs) * intervalMs - intervalMs;
+  const count = 405;
+  const start = end - (count - 1) * intervalMs;
+  const source = Array.from({ length: count }, (_, i) => {
+    const time = start + i * intervalMs;
+    return { time, open: 100, high: 101, low: 99, close: 100.5, volume: 1 };
+  });
+  const { adapter, calls } = wrapperFromFetch({ klineCandles: source });
+  const candles = await adapter.getCandles("BTCUSDT", "1h", count, { from: start, to: end });
+
+  assert.deepEqual(candles.map((candle) => candle.time), source.map((candle) => candle.time));
+  const pages = calls.filter((call) => call.path === BITUNIX_PATHS.kline);
+  assert.deepEqual(pages.map((page) => page.query.limit), ["200", "200", "5"]);
+  assert.ok(Number(pages[1].query.endTime) < Number(pages[0].query.endTime));
+  assert.ok(Number(pages[2].query.endTime) < Number(pages[1].query.endTime));
+});
+
 test("unknown timeframe throws UnsupportedTimeframeError", async () => {
   const { adapter, calls } = wrapperFromFetch();
 
@@ -669,8 +706,39 @@ test("HTTP-Regression: 429 → Retry mit Backoff, dann Erfolg", async () => {
 
   assert.equal(calls.filter((c) => c.path === BITUNIX_PATHS.depth).length, 3, "2×429 + 1×200");
   assert.ok(book.bids.length >= 2 && book.asks.length >= 2, "nach Retry liefert der Call Daten");
-  // Backoff 200 ms + 400 ms (exponentiell) — der Client muss wirklich warten.
-  assert.ok(elapsed >= 400, `Backoff fehlt (nur ${elapsed} ms)`);
+  // 429-Cooldowns (je 1 s ohne Header) plus exponentieller Backoff.
+  assert.ok(elapsed >= 2_000, `Retry-After-Cooldown fehlt (nur ${elapsed} ms)`);
+});
+
+test("HTTP-429 respektiert Retry-After und kühlt den Shared Bucket vor dem Payload-Read", async () => {
+  const config = loadBitunixConfig({ BITUNIX_ENABLED: "true", BITUNIX_RETRY_MAX: "1" });
+  class RecordingBucket extends TokenBucket {
+    readonly pauses: number[] = [];
+    override pause(milliseconds: number): void {
+      this.pauses.push(milliseconds);
+    }
+    override async take(): Promise<void> {}
+  }
+  const bucket = new RecordingBucket(config.publicRatePerSec, config.publicRatePerSec);
+  let canceled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(64));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const fetchImpl = (async () =>
+    new Response(body, { status: 429, headers: { "retry-after": "2" } })) as typeof fetch;
+  const client = new BitunixPublicClient({ config, bucket, fetchImpl });
+
+  await assert.rejects(
+    () => client.fetchOrderBook("BTCUSDT"),
+    (error: unknown) => error instanceof BitunixApiError && error.kind === "rate-limit",
+  );
+  assert.deepEqual(bucket.pauses, [2_000]);
+  assert.equal(canceled, true, "429-Body wird nicht komplett gelesen, der Shared-Bucket aber sofort gekühlt");
 });
 
 test("HTTP-Regression: 5xx → Retry, endliches Budget (kein Endlos-Loop)", async () => {
@@ -760,7 +828,7 @@ test("Fehler- und Log-Ausgaben enthalten keine Header/Secrets (Redaction)", asyn
   }
 });
 
-test("Rate-Limit: 8 req/s bleiben autoritativ, auch mit mehreren Adaptern (geteilter Bucket)", async () => {
+test("Rate-Limit: 4 req/s bleiben autoritativ, auch mit mehreren Adaptern (geteilter Bucket)", async () => {
   const { fetchImpl } = fixtureFetch();
   const config = loadBitunixConfig({
     BITUNIX_ENABLED: "true",
@@ -783,12 +851,13 @@ test("Rate-Limit: 8 req/s bleiben autoritativ, auch mit mehreren Adaptern (getei
   for (let i = 0; i < 6; i += 1) await adapterB.getOrderBook("BTCUSDT");
   const elapsed = Date.now() - startedAt;
 
-  // 12 Calls gegen einen 8er-Burst/8-pro-s-Bucket: 8 sofort, 4 × ~125 ms
-  // ⇒ ≥ 500 ms. Zwei unabhängige Buckets wären in ~0 ms durch.
-  assert.ok(elapsed >= 400, `geteilter Bucket drosselt nicht (12 Calls in ${elapsed} ms)`);
+  // 12 Calls gegen einen 4er-Burst/4-pro-s-Bucket: 4 sofort, danach 8 × 250 ms.
+  // Die konservative Schwelle lässt Scheduler-Jitter zu. Zwei unabhängige
+  // Buckets würden deutlich schneller durchlaufen.
+  assert.ok(elapsed >= 1_600, `geteilter Bucket drosselt nicht (12 Calls in ${elapsed} ms)`);
 
-  // Die Produktions-Registrierung drosselt mit dem dokumentierten Limit …
-  assert.equal(config.publicRatePerSec, 8, "BITUNIX_PUBLIC_RATE_PER_SEC = 8 (dokumentiert 10, konservativ 8)");
+  // Die Produktions-Registrierung drosselt mit dem konservativen Public-Limit …
+  assert.equal(config.publicRatePerSec, 4, "BITUNIX_PUBLIC_RATE_PER_SEC = 4 (unter der dokumentierten Venue-Grenze)");
   // … und buildt den Bucket zentral pro Lauf (statischer Nachweis):
   const registerSrc = codeWithoutComments(path.join("src", "marketdata", "registerAdapters.ts"));
   assert.match(registerSrc, /new TokenBucket\(BITUNIX_PUBLIC_RATE_PER_SEC, BITUNIX_PUBLIC_RATE_PER_SEC\)/);

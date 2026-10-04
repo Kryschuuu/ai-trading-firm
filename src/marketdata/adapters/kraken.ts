@@ -30,13 +30,14 @@
  * unavailable`/`Internal error` ⇒ UPSTREAM_5XX, Rest ⇒ UNKNOWN).
  */
 
-import type { SupportedTimeframe } from "../../lib/marketdata/historicalStore";
+import { SUPPORTED_TIMEFRAME_MS, type SupportedTimeframe } from "../../lib/marketdata/historicalStore";
 import { FIAT_CODES } from "../../symbols/venueProfiles";
 import type { AssetClass } from "../../universe/types";
 import { normalizeSyncSymbol, UnsupportedTimeframeError } from "../errors";
 import type { MarketDataAdapter } from "../sync";
-import type { MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
+import type { CandleRange, MarketCandle, MarketInstrument, MarketOrderBook, MarketTicker } from "../types";
 import { SyncHttpClient, taggedSyncError } from "./http";
+import { fetchCandlesForward } from "./candlePagination";
 
 /** Venue-Key, unter dem der Wrapper registriert wird (`registerAdapters.ts`). */
 export const KRAKEN_MARKET_DATA_VENUE = "KRAKEN" as const;
@@ -45,10 +46,12 @@ export const KRAKEN_MARKET_DATA_VENUE = "KRAKEN" as const;
 export const KRAKEN_SYNC_BASE_URL = "https://api.kraken.com" as const;
 
 /**
- * Konservative Sync-Rate (Kraken drosselt Public-GETs per Zähler; 2/s bleibt
+ * Konservative Sync-Rate (Kraken drosselt Public-GETs per Zähler; 1/s bleibt
  * weit unter jeder dokumentierten Grenze und schont den geteilten Bucket).
  */
-export const KRAKEN_SYNC_RATE_PER_SEC = 2;
+export const KRAKEN_SYNC_RATE_PER_SEC = 1;
+/** Kraken OHLC returns at most 720 rows per response (hard venue cap). */
+export const KRAKEN_OHLC_MAX_PAGE_SIZE = 720;
 
 /** Paare je `Ticker`-Bulk-Call (~9 Zeichen/Key ⇒ ~450 Zeichen Query). */
 export const KRAKEN_TICKER_CHUNK_SIZE = 50;
@@ -118,6 +121,12 @@ export interface KrakenTickerRow {
 /** `OHLC`-Zeile: `[Zeit(s), o, h, l, c, vwap, Volumen(base), Trades]`. */
 export type KrakenOhlcRow = [number, string, string, string, string, string, string, number];
 
+/** OHLC page plus Kraken's cursor for a subsequent `since` request. */
+export interface KrakenOhlcPage {
+  rows: KrakenOhlcRow[];
+  last?: number;
+}
+
 /** `Depth`-Seite: `[Preis, Menge, Zeitstempel]` (Strings). */
 export type KrakenDepthRow = [string, string, number];
 
@@ -141,17 +150,25 @@ export class KrakenSyncClient {
     return unwrapKraken(raw, "Ticker");
   }
 
-  async ohlc(key: string, interval: number): Promise<KrakenOhlcRow[]> {
+  async ohlc(key: string, interval: number, sinceSeconds?: number): Promise<KrakenOhlcPage> {
     const raw = await this.http.getJson<KrakenEnvelope<Record<string, unknown>>>("/0/public/OHLC", {
       pair: key,
       interval: String(interval),
+      since:
+        Number.isSafeInteger(sinceSeconds) && (sinceSeconds as number) >= 0
+          ? String(Math.floor(sinceSeconds as number))
+          : undefined,
     });
     const result = unwrapKraken(raw, "OHLC");
     // `{ <Key>: [...], last: <n> }` — die Reihen-Key ist der einzige
     // Nicht-`last`-Eintrag (robust gegen Key-Normalisierung der Venue).
     const rowsKey = Object.keys(result).find((k) => k !== "last");
-    const rows = rowsKey ? result[rowsKey] : undefined;
-    return Array.isArray(rows) ? (rows as KrakenOhlcRow[]) : [];
+    const rawRows = rowsKey ? result[rowsKey] : undefined;
+    const rawLast = Number(result.last);
+    return {
+      rows: Array.isArray(rawRows) ? (rawRows as KrakenOhlcRow[]) : [],
+      ...(Number.isSafeInteger(rawLast) && rawLast >= 0 ? { last: rawLast } : {}),
+    };
   }
 
   async depth(key: string, count = 5): Promise<{ asks: KrakenDepthRow[]; bids: KrakenDepthRow[] }> {
@@ -480,22 +497,29 @@ export function createKrakenMarketDataAdapter(deps: KrakenMarketAdapterDeps): Ma
       };
     },
 
-    async getCandles(symbol: string, timeframe: SupportedTimeframe, limit: number): Promise<MarketCandle[]> {
+    async getCandles(
+      symbol: string,
+      timeframe: SupportedTimeframe,
+      limit: number,
+      range?: CandleRange,
+    ): Promise<MarketCandle[]> {
       const interval = toKrakenInterval(timeframe);
       const upper = symbol.toUpperCase();
       const key = await resolveKey(upper);
-      // Kraken liefert immer die letzten 720 Kerzen (inkl. laufender) —
-      // Schnitt auf `limit` client-seitig. Die laufende Kerze wird NICHT
-      // verworfen (konsistent zu Binance/Bitunix: der inkrementelle Sync
-      // erkennt sie am Periodenrand und spart den nächsten Call).
-      const rows = await client.ohlc(key, interval);
-      const out: MarketCandle[] = [];
-      for (const row of rows) {
-        const mapped = mapKrakenOhlc(row);
-        if (mapped) out.push(mapped);
-      }
-      out.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-      return out.slice(-Math.max(limit, 0));
+      return fetchCandlesForward({
+        // Kraken explicitly exposes only its most recent 720 OHLC entries;
+        // `since` is an incremental cursor, not a way to page arbitrary history.
+        limit: Math.min(Math.max(0, Math.floor(limit)), KRAKEN_OHLC_MAX_PAGE_SIZE),
+        pageSize: KRAKEN_OHLC_MAX_PAGE_SIZE,
+        intervalMs: SUPPORTED_TIMEFRAME_MS[timeframe],
+        nowMs: now().getTime(),
+        range,
+        fetchPage: async (sinceSeconds) => {
+          const page = await client.ohlc(key, interval, sinceSeconds);
+          const candles = page.rows.map(mapKrakenOhlc).filter((c): c is MarketCandle => c !== null);
+          return { candles, nextSinceSeconds: page.last };
+        },
+      });
     },
   };
 }
