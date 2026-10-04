@@ -395,7 +395,13 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
 | `DATABASE_URL` | *(Pflicht)* | `postgresql://user:pass@host:5432/db` |
-| `STARTING_EQUITY` | `10000` | Startkapital des Paper-Depots |
+| `STARTING_EQUITY` | `10000` | Startkapital des Paper-Depots (Bezug für „seit Start“ und die Drawdown-Limits; die Kurve rechnet Peak-to-Trough, siehe [docs/EQUITY_CURVE.md](docs/EQUITY_CURVE.md)) |
+| `NEXT_ALLOWED_DEV_ORIGINS` | *(leer)* | Nur Dev: kommagetrennte Origins (inkl. `*.beispiel.dev`), die `/_next/*` laden dürfen — für Zugriff über Proxy/LAN/Vorschau. Leer = keine Ausnahme; Produktionsbuilds ignorieren die Liste |
+| `EQUITY_RAW_RETENTION_DAYS` | `90` | Tage mit unverdichteten 60-s-Equity-Snapshots (7…3650). Ältere Rohdaten werden auf zwei Punkte je Berliner Tag verdichtet (Tief + Tagesschluss) statt gelöscht |
+| `EQUITY_RETENTION_DAYS` | `730` | Gesamtfenster der Equity-Kurve in Tagen (30…3650, nie kleiner als `EQUITY_RAW_RETENTION_DAYS`). Jenseits davon werden Snapshots gelöscht |
+| `EQUITY_ALERTS_ENABLED` | `true` | `false` schaltet die Equity-Alarme des Monitors ab (neue Hochs, Drawdown-Schwellen; [docs/EQUITY_CURVE.md](docs/EQUITY_CURVE.md) §6) |
+| `EQUITY_ALERT_DRAWDOWN_PCT` | `5,10,20` | Drawdown-Schwellen in Prozent für Alarme (Komma/Leerzeichen-getrennt, max. 20 Werte; ungültige oder ≤ 0 fallen weg). Meldet beim ersten Über-/Unterschreiten je Schwelle |
+| `EQUITY_ALERT_PEAK_MIN_PCT` | `0,5` | Mindestabstand über dem letzten Alarm-Hoch, bevor `equity:new-high` feuert (0 schaltet die Rauschgrenze ab) |
 | `TICK_INTERVAL_MS` | je nach Config | Mikro-Zyklus-Takt (Executor) |
 | `ANALYST_INTERVAL_MIN` | je nach Config | Analysten-Rhythmus |
 | `MACRO_CYCLE_INTERVAL_MIN` | je nach Config | Makro-Zyklus-Takt |

@@ -9,7 +9,25 @@ import type { NextConfig } from "next";
  * 'unsafe-inline' für Scripts/Styles ist bei Next.js (inline Bootstrap-Hydration)
  * erforderlich. Im Dev-Modus bleibt alles offen, damit HMR funktioniert.
  */
+/**
+ * Entwicklungs-Origins für `/_next/*`-Assets (Next.js-Default-Härtung).
+ *
+ * Im Dev-Modus blockiert Next Anfragen, deren `Origin` nicht zur Dev-Adresse
+ * passt. Wer das Dashboard über einen Proxy, im LAN oder in einer
+ * Vorschau-Umgebung öffnet, bekäme sonst 403 auf Skripte/Styles — die Seite
+ * bliebe leer, obwohl der Server läuft.
+ *
+ * Leer (Default) = keine Ausnahme. Setzen:
+ *   NEXT_ALLOWED_DEV_ORIGINS="192.168.1.20,*.example.dev"
+ * Nur im Dev-Modus wirksam; Produktions-Builds ignorieren die Liste.
+ */
+const allowedDevOrigins = (process.env.NEXT_ALLOWED_DEV_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
+  allowedDevOrigins,
   async redirects() {
     // Lokale Doku: Top-Level-*.md (z. B. `/ARCHITECTURE.md`) auf die gerenderte
     // kanonische Seite `/docs/<Datei>.md` umleiten, damit die relativen

@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.12.0` |
+| **Version** | `v0.13.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-03 |
-| **Quellbasiert** | `package.json` (`version: "0.12.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-04 |
+| **Quellbasiert** | `package.json` (`version: "0.13.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -409,6 +409,19 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.13.0` (2026-10-04) macht den Reports-Tab zur vollständigen
+Performance-Ansicht: **Benchmark-Referenzlinie** aus der echten Kurshistorie
+(`?compare=BTC|ETH|SPY|QQQ`, ohne Daten `null` statt erfundener Kurve),
+**zeitgewichtete Rendite (TWR)** mit Cashflow-Bereinigung und ehrlicher
+Kennzeichnung, wenn keine Cashflow-Spur existiert, **Top-5-Drawdown-Episoden**
+mit Abstiegs-/Erholungsdauer, **Monatsrendite-Heatmap** über die gesamte
+Aufbewahrung, **Druck-/PDF-Ansicht** (Light-Palette erzwungen), **Equity-Alarme**
+im 60-s-Tick (neue Hochs, Drawdown-Schwellen 5/10/20 %),
+**logarithmische y-Achse** (1/2/5-Raster je Zehnerpotenz) und der **Vergleich
+zweier Zeiträume** (Vorperiode bzw. Ø der letzten drei, über `?from`/`?until`).
+Definitionen, Formeln und Grenzen: [`docs/EQUITY_CURVE.md`](docs/EQUITY_CURVE.md)
+§5–§7; Flags: [`CONFIGURATION.md`](CONFIGURATION.md).
 
 `v0.12.0` (2026-10-03) portiert den Pine-Script-v6-Indikator „Claude Trading
 Indicator" (`CTI`) nach TypeScript ([`src/signals/`](src/signals/)) und bindet

@@ -92,6 +92,8 @@ import { auditWrite } from "./auditSink";
 import { structuredLog } from "./logger";
 import { applyDrawdownScaling, getBaseLimits, getLimits } from "./riskGuard";
 import { state } from "./stateRegistry";
+// Startkapital zentral (v0.13.0): eine Definition statt dreier Kopien.
+import { readStartingEquity } from "./startingEquity";
 import { telemetry } from "./telemetry";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,12 +122,6 @@ export const DRAWDOWN_SCALING_UPDATE_MIN_INTERVAL_MS = 60_000;
 
 /** Reconciliation-Report-Datei (identisch zum Reconciliation-Job). */
 export const DRAWDOWN_SCALING_RECON_REPORT_FILE = "data/reconciliation/last-report.json";
-
-/** Startkapital-Default (identisch zum Paper-Ledger, `STARTING_EQUITY`). */
-function readStartingEquity(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.STARTING_EQUITY);
-  return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Konfiguration (risk_config `dsp.*`, geklemmt)

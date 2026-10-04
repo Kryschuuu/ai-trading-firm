@@ -131,6 +131,12 @@ mit Audit, ungültige Eingaben, Rate-Limit und Single-Admin-Kompatibilität.
 `/api/routing`. Sie prüfen vor jeder Datenbank-, Router- oder Providerarbeit die
 bestehende Permission `firm.read`.
 
+**Nachtrag (v0.13.0):** `GET /api/firm/equity` (Equity-Kurve inkl.
+Drawdown-Kennzahlen und Trade-Markern) gehört derselben Klasse an und prüft
+`firm.read` ebenfalls **vor** dem ersten DB-Zugriff; die Antwort ist
+`private, no-store`. Die Kurve war zuvor ohne Autorisierung lesbar — Portfolio-
+und P&L-Daten sind aber genauso sensibel wie der Report.
+
 ### Berechtigung und Browser-Kompatibilität
 
 - **Viewer, Operator und Admin** besitzen `firm.read`; ein vorhandenes Header-

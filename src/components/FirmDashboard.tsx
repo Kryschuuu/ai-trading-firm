@@ -75,6 +75,8 @@ import { missionScopeLabel } from "@/lib/missionTemplates";
 import WorkshopTab from "./workshop/WorkshopTab";
 import BrokersPanel from "./control-plane/BrokersPanel";
 import OperationsCenterPanel from "./ops/OperationsCenterPanel";
+import EquityPanel from "./report/EquityPanel";
+import InfoTip from "./workshop/InfoTip";
 import ThemeSwitcher from "./ThemeSwitcher";
 import AuditTrailPanel from "./common/AuditTrailPanel";
 import { FirmIssueBox } from "./common/FirmIssueBox";
@@ -687,19 +689,29 @@ export default function FirmDashboard() {
       />
 
       {/* Status strip */}
-      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Stat label="Paper-Equity" value={`$${data.account.equity.toLocaleString()}`} />
-        <Stat label="Freies Cash" value={`$${data.account.freeCash.toLocaleString()}`} />
+      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+        <Stat
+          label="Paper-Equity"
+          value={`$${data.account.equity.toLocaleString()}`}
+          hint="Kontostand des Paper-Depots: freies Cash + Marktwert aller offenen Positionen. Basis der Kurve im Tab „Reports“."
+        />
+        <Stat
+          label="Freies Cash"
+          value={`$${data.account.freeCash.toLocaleString()}`}
+          hint="Nicht investiertes Guthaben. Neue Positionen können nur aus diesem Betrag finanziert werden."
+        />
         <Stat
           label="Drawdown"
           value={`${data.account.drawdownPct.toFixed(2)} %`}
           danger={data.account.drawdownPct >= Number(data.riskLimits.maxEquityDrawdownPct ?? 0.15) * 100}
+          hint={`Abstand zum Startkapital ($${Number(data.account.startingEquity).toLocaleString()}) — die Grenze für den Circuit-Breaker ist ${(Number(data.riskLimits.maxEquityDrawdownPct ?? 0.15) * 100).toFixed(0)} %. Der Drawdown vom Höchststand (Peak-to-Trough) steht im Report.`}
         />
-        <Stat label="Offene Positionen" value={`${data.account.openPositions}`} />
+        <Stat label="Offene Positionen" value={`${data.account.openPositions}`} hint="Aktuell gehaltene Positionen. Sie zählen mit ihrem Marktwert in die Equity." />
         <Stat
           label="Not-Halt"
           value={data.killSwitchArmed ? "AKTIV" : "sicher"}
           danger={data.killSwitchArmed}
+          hint="Kill-Switch: blockiert neue Einstiege, lässt aber Stop-Loss/Take-Profit und das Schließen offener Positionen weiterlaufen."
         />
         <Stat
           label="Monitor"
@@ -711,11 +723,13 @@ export default function FirmDashboard() {
                 : "wartet"
           }
           danger={!data.scheduler.enabled}
+          hint="Hintergrund-Takt (60 s): Kurse aktualisieren, SL/TP prüfen, Equity-Snapshot schreiben. Ohne Takt steht die Kurve still."
         />
         <Stat
           label="Lokales LLM"
           value={data.ollama.available ? `Ollama (${data.ollama.models.length})` : "Regel-Engine"}
           danger={!data.ollama.available}
+          hint="Ob ein lokales Modell über Ollama erreichbar ist. Ohne Modell entscheidet die deterministische Regel-Engine — das ist ein gültiger, nur weniger kreativer Betrieb."
         />
       </section>
 
@@ -791,11 +805,25 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "architecture", label: "Design Decisions / Guide" },
 ];
 
-function Stat({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+function Stat({
+  label,
+  value,
+  danger,
+  hint,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+  /** Kurzdefinition für Hover/InfoTip — Kennzahlen ohne Erklärung sind im Betrieb wertlos. */
+  hint?: string;
+}) {
   return (
     <div className={`rounded-xl border px-4 py-3 ${danger ? "border-red-700 bg-red-950/40" : "border-slate-800 bg-slate-900/60"}`}>
-      <p className="text-[11px] uppercase tracking-wider text-slate-400">{label}</p>
-      <p className={`mt-1 text-lg font-bold ${danger ? "text-red-400" : "text-slate-100"}`}>{value}</p>
+      <p className="flex items-center text-[11px] uppercase tracking-wider text-slate-400">
+        {label}
+        {hint && <InfoTip label={label} text={hint} />}
+      </p>
+      <p className={`mt-1 text-lg font-bold tabular-nums ${danger ? "text-red-400" : "text-slate-100"}`}>{value}</p>
     </div>
   );
 }
@@ -919,7 +947,18 @@ function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: a
 
 // ───────────────────────── Reports (Boss-Sicht) ─────────────────────────────
 
-type EquityPoint = { ts: string; equity: number; trigger?: string };
+/** Zeiträume der Report-Kennzahlen (Berliner Kalendergrenzen, siehe @/lib/time). */
+type PeriodId = "day" | "week" | "month" | "quarter" | "halfyear" | "year";
+
+const PERIOD_OPTIONS: { id: PeriodId; label: string; title: string }[] = [
+  { id: "day", label: "Heute", title: "Heutiger Berliner Kalendertag ab 00:00" },
+  { id: "week", label: "Woche", title: "Diese Woche ab Montag 00:00 (Berliner Zeit)" },
+  { id: "month", label: "Monat", title: "Dieser Monat ab dem 1. um 00:00 (Berliner Zeit)" },
+  { id: "quarter", label: "Quartal", title: "Dieses Quartal ab 1. Jan/Apr/Jul/Okt" },
+  { id: "halfyear", label: "Halbjahr", title: "Dieses Halbjahr ab 1. Januar bzw. 1. Juli" },
+  { id: "year", label: "Jahr", title: "Dieses Kalenderjahr ab 1. Januar" },
+];
+
 type ReportData = {
   ok: boolean;
   period: string;
@@ -931,7 +970,23 @@ type ReportData = {
     profitFactor: number | null;
     bestTrade: { symbol: string; pnl: number } | null;
     worstTrade: { symbol: string; pnl: number } | null;
+    /** Größter Rückgang vom Höchststand (Peak-to-Trough) aus der Equity-Kurve. */
     maxDrawdownPct: number;
+    maxDrawdownAbs?: number;
+    currentDrawdownPct?: number;
+    maxDrawdownFrom?: string | null;
+    maxDrawdownTo?: string | null;
+    recoveredAt?: string | null;
+    grossProfit?: number;
+    grossLoss?: number;
+    avgWin?: number | null;
+    avgLoss?: number | null;
+    /** Erwartungswert je Trade (realisiertes P&L / Anzahl Trades). */
+    expectancy?: number | null;
+    payoffRatio?: number | null;
+    maxWinStreak?: number;
+    maxLossStreak?: number;
+    avgHoldHours?: number | null;
     stopLossHits: number;
     takeProfitHits: number;
   };
@@ -949,81 +1004,50 @@ type ReportData = {
   summary: string[];
 };
 
-/** Handgeschriebene SVG-Equity-Kurve — keine Chart-Dependency. */
-function EquityChart({
-  series,
-  height = 220,
+/**
+ * KPI-Kachel im Report. Jede Kennzahl trägt eine Kurzdefinition (InfoTip +
+ * natives `title`) — vorher standen nackte Zahlen ohne Einheit und ohne
+ * Erklärung im Raum („Max Drawdown 0.0 %“ war nicht von „nicht berechnet“
+ * zu unterscheiden).
+ */
+function KpiTile({
+  label,
+  value,
+  tone,
+  hint,
+  sub,
 }: {
-  series: EquityPoint[];
-  height?: number;
+  label: string;
+  value: string;
+  tone?: "good" | "bad";
+  hint?: string;
+  sub?: string;
 }) {
-  if (series.length < 2) {
-    return (
-      <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-8 text-center text-sm text-slate-400">
-        Noch zu wenig Historie für die Kurve — der Monitor schreibt bei jedem Tick einen Punkt.
-      </p>
-    );
-  }
-  const W = 1000;
-  const PAD_Y = 18;
-  const values = series.map((p) => p.equity);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const x = (i: number) => (i / (series.length - 1)) * W;
-  const y = (v: number) => PAD_Y + (1 - (v - min) / span) * (height - 2 * PAD_Y);
-  const points = series.map((p, i) => `${x(i).toFixed(1)},${y(p.equity).toFixed(1)}`).join(" ");
-  const areaPoints = `0,${height} ${points} ${W},${height}`;
-  const up = values[values.length - 1] >= values[0];
-  const stroke = up ? "#34d399" : "#f87171";
-  const last = values[values.length - 1];
-
-  return (
-    <div className="relative rounded-xl border border-slate-800 bg-slate-900/50 p-2">
-      <svg viewBox={`0 0 ${W} ${height}`} className="w-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-        {/* Startwert-Baseline */}
-        <line
-          x1="0" x2={W}
-          y1={y(values[0])} y2={y(values[0])}
-          stroke="#64748b" strokeDasharray="4 4" strokeWidth="1"
-        />
-        <polygon points={areaPoints} fill="url(#eqfill)" />
-        <polyline points={points} fill="none" stroke={stroke} strokeWidth="2" />
-      </svg>
-      <div className="pointer-events-none absolute inset-x-3 top-1 flex justify-between text-[11px] text-slate-500">
-        <span>{new Date(series[0].ts).toLocaleDateString("de-DE")} · Start {values[0].toFixed(0)}</span>
-        <span style={{ color: stroke }} className="font-bold">
-          {last.toFixed(2)} ({last >= values[0] ? "+" : ""}{(last - values[0]).toFixed(2)})
-        </span>
-        <span>{new Date(series[series.length - 1].ts).toLocaleTimeString("de-DE")}</span>
-      </div>
-    </div>
-  );
-}
-
-function KpiTile({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-      <p className="text-[11px] uppercase tracking-wider text-slate-400">{label}</p>
-      <p className={`mt-1 text-lg font-bold ${
+      <p className="flex items-center text-[11px] uppercase tracking-wider text-slate-400">
+        {label}
+        {hint && <InfoTip label={label} text={hint} />}
+      </p>
+      <p className={`mt-1 text-lg font-bold tabular-nums ${
         tone === "good" ? "text-emerald-400" : tone === "bad" ? "text-red-400" : "text-slate-100"
       }`}>
         {value}
       </p>
+      {sub && <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{sub}</p>}
     </div>
   );
 }
 
+/**
+ * Reports-Tab (Führungssicht). Links die Kennzahlen des Zeitraums (aus
+ * `GET /api/firm/report`), darunter das eigenständige Kurven-Panel
+ * (`EquityPanel`) mit eigenem Zeitraum-Schalter, Drawdown-Verlauf,
+ * Trade-Markern und Export.
+ */
 function ReportsTab() {
-  const [period, setPeriod] = useState<"day" | "week" | "month">("day");
+  const [period, setPeriod] = useState<PeriodId>("day");
   const [report, setReport] = useState<ReportData | null>(null);
-  const [equitySeries, setEquitySeries] = useState<EquityPoint[]>([]);
   const [loadingRep, setLoadingRep] = useState(true);
 
   useEffect(() => {
@@ -1031,17 +1055,12 @@ function ReportsTab() {
     // async booten (kein synchrones setState im Effect)
     const t = setTimeout(async () => {
       try {
-        const [r1, r2] = await Promise.all([
-          fetch(`/api/firm/report?period=${period}`),
-          fetch(`/api/firm/equity?range=${period === "day" ? "day" : period}`),
-        ]);
-        const j1 = await r1.json();
-        const j2 = await r2.json();
+        const res = await fetch(`/api/firm/report?period=${period}`, { cache: "no-store" });
+        const json = await res.json();
         if (!alive) return;
-        setReport(j1);
-        setEquitySeries(j2.series ?? []);
+        setReport(json);
       } catch {
-        /* ignore */
+        /* ignore — der Fehlerzustand bleibt sichtbar über den letzten Stand */
       } finally {
         if (alive) setLoadingRep(false);
       }
@@ -1053,25 +1072,33 @@ function ReportsTab() {
   }, [period, setLoadingRep]);
 
   const k = report?.kpis;
+  const pct = (v: number | null | undefined, digits = 2) =>
+    v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(digits)} %`;
+  const money = (v: number | null | undefined) =>
+    v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}`;
   // "fresh" kommt serverseitig aus der Report-API (kein Date.now() im Render).
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2">
-        {(["day", "week", "month"] as const).map((p) => (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Kennzahlen-Zeitraum</span>
+        {PERIOD_OPTIONS.map((p) => (
           <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${
-              period === p ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            key={p.id}
+            type="button"
+            title={p.title}
+            aria-pressed={period === p.id}
+            onClick={() => setPeriod(p.id)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              period === p.id ? "bg-emerald-500 text-slate-950" : "border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
-            {p === "day" ? "Heute" : p === "week" ? "Diese Woche" : "Dieser Monat"}
+            {p.label}
           </button>
         ))}
         {report && (
           <span className="ml-auto self-center text-xs text-slate-500">
-            ab {new Date(report.since).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+            ab {new Date(report.since).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} (Europe/Berlin)
           </span>
         )}
       </div>
@@ -1086,39 +1113,114 @@ function ReportsTab() {
         </section>
       )}
 
-      {/* KPI-Kacheln */}
+      {/* KPI-Kacheln: Ergebnis */}
       {k && (
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          <KpiTile label="Trades" value={String(k.trades)} />
-          <KpiTile
-            label="Realisiertes P&L"
-            value={`${k.realizedPnl >= 0 ? "+" : ""}${k.realizedPnl.toFixed(2)}`}
-            tone={k.realizedPnl > 0 ? "good" : k.realizedPnl < 0 ? "bad" : undefined}
-          />
-          <KpiTile label="Win-Rate" value={k.winRate != null ? `${k.winRate} %` : "—"} />
-          <KpiTile
-            label="Profit-Faktor"
-            value={k.profitFactor != null ? (k.profitFactor === Infinity ? "∞" : k.profitFactor.toFixed(2)) : "—"}
-          />
-          <KpiTile
-            label="Max Drawdown"
-            value={`${k.maxDrawdownPct.toFixed(1)} %`}
-            tone={k.maxDrawdownPct > 10 ? "bad" : undefined}
-          />
-          <KpiTile label="Stops ausgelöst" value={String(k.stopLossHits)} tone={k.stopLossHits > 0 ? "bad" : undefined} />
-          <KpiTile label="TPs erreicht" value={String(k.takeProfitHits)} tone={k.takeProfitHits > 0 ? "good" : undefined} />
+        <section>
+          <h2 className="mb-2 flex items-center text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Ergebnis (abgeschlossene Trades)
+            <InfoTip
+              label="Ergebnis"
+              text="Alle Kacheln dieser Zeile beziehen sich auf Trades, die im gewählten Zeitraum geschlossen wurden. Schwebende Positionen zählen erst nach dem Schließen."
+            />
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            <KpiTile
+              label="Trades"
+              value={String(k.trades)}
+              hint="Anzahl geschlossener Positionen im Zeitraum (nicht die offenen)."
+              sub={k.avgHoldHours != null ? `Ø Haltedauer ${k.avgHoldHours.toFixed(1)} h` : undefined}
+            />
+            <KpiTile
+              label="Realisiertes P&L"
+              value={money(k.realizedPnl)}
+              tone={k.realizedPnl > 0 ? "good" : k.realizedPnl < 0 ? "bad" : undefined}
+              hint="Summe des realisierten Gewinns/Verlusts aller geschlossenen Trades im Zeitraum (Kontowährung, ohne schwebende Positionen)."
+              sub={
+                k.grossProfit != null && k.grossLoss != null
+                  ? `Gewinne +${k.grossProfit.toFixed(2)} · Verluste −${k.grossLoss.toFixed(2)}`
+                  : undefined
+              }
+            />
+            <KpiTile
+              label="Trefferquote"
+              value={k.winRate != null ? `${k.winRate} %` : "—"}
+              tone={k.winRate != null && k.winRate >= 50 ? "good" : k.winRate != null ? "bad" : undefined}
+              hint="Anteil der Trades mit positivem realisiertem P&L. Eine hohe Trefferquote allein sagt nichts über die Profitabilität — dafür sind Profit-Faktor und Erwartungswert da."
+              sub={k.trades > 0 ? `${Math.round((k.winRate ?? 0) / 100 * k.trades)} von ${k.trades} gewonnen` : undefined}
+            />
+            <KpiTile
+              label="Profit-Faktor"
+              value={k.profitFactor != null ? (k.profitFactor === Infinity ? "∞" : k.profitFactor.toFixed(2)) : "—"}
+              tone={k.profitFactor != null && k.profitFactor >= 1.5 ? "good" : k.profitFactor != null && k.profitFactor < 1 ? "bad" : undefined}
+              hint="Bruttogewinne ÷ Bruttoverluste. > 1 ist profitabel, < 1 verliert Geld; ∞ heißt: es gab keinen Verlusttrade."
+            />
+            <KpiTile
+              label="Erwartungswert / Trade"
+              value={money(k.expectancy ?? null)}
+              tone={k.expectancy != null && k.expectancy > 0 ? "good" : k.expectancy != null && k.expectancy < 0 ? "bad" : undefined}
+              hint="Durchschnittlicher Gewinn/Verlust je Trade. Die pragmatischste Kennzahl: positiv heißt, das System verdient pro Trade Geld."
+              sub={k.payoffRatio != null ? `Gewinn/Verlust-Verhältnis ${k.payoffRatio.toFixed(2)}` : undefined}
+            />
+            <KpiTile
+              label="Max. Drawdown"
+              value={k.maxDrawdownPct != null ? `−${k.maxDrawdownPct.toFixed(2)} %` : "—"}
+              tone={k.maxDrawdownPct > 10 ? "bad" : undefined}
+              hint="Größter Rückgang des Kontostands vom bisherigen Höchststand (Peak-to-Trough) im Zeitraum — aus den Equity-Snapshots, nicht aus der P&L-Summe. Der Höchststand vor dem Zeitraum zählt mit."
+              sub={
+                k.maxDrawdownFrom && k.maxDrawdownTo
+                  ? `${new Date(k.maxDrawdownFrom).toLocaleDateString("de-DE")} → ${new Date(k.maxDrawdownTo).toLocaleDateString("de-DE")}`
+                  : "kein Rückgang im Zeitraum"
+              }
+            />
+            <KpiTile
+              label="Aktueller Drawdown"
+              value={pct(-(k.currentDrawdownPct ?? 0))}
+              tone={(k.currentDrawdownPct ?? 0) > 0 ? "bad" : "good"}
+              hint="Abstand zum laufenden Höchststand (High-Water-Mark) am Ende des Zeitraums. 0 % = das Konto steht auf oder über seinem Hoch."
+              sub={k.recoveredAt ? `erholt am ${new Date(k.recoveredAt).toLocaleDateString("de-DE")}` : (k.maxDrawdownPct ?? 0) > 0 ? "noch nicht erholt" : undefined}
+            />
+            <KpiTile
+              label="Serien"
+              value={`${k.maxWinStreak ?? 0} / ${k.maxLossStreak ?? 0}`}
+              hint="Längste Gewinnserie / längste Verlustserie in Trades. Verlustserien sind der Realitätstest für die Nerven — und für den Circuit-Breaker."
+              sub="Gewinne / Verluste in Folge"
+            />
+            <KpiTile
+              label="Stops ausgelöst"
+              value={String(k.stopLossHits)}
+              tone={k.stopLossHits > 0 ? "bad" : undefined}
+              hint="Trades, die über den Stop-Loss beendet wurden. Viele Stops ohne Take-Profits deuten auf zu enge Stops oder ein unpassendes Regime."
+            />
+            <KpiTile
+              label="TPs erreicht"
+              value={String(k.takeProfitHits)}
+              tone={k.takeProfitHits > 0 ? "good" : undefined}
+              hint="Trades, die über das Take-Profit-Ziel beendet wurden."
+            />
+            <KpiTile
+              label="Bester / schwächster Trade"
+              value={
+                k.bestTrade && k.worstTrade
+                  ? `${money(k.bestTrade.pnl)} / ${money(k.worstTrade.pnl)}`
+                  : "—"
+              }
+              hint="Größter Einzelgewinn und größter Einzelverlust im Zeitraum (Symbol in der Unterzeile)."
+              sub={
+                k.bestTrade && k.worstTrade
+                  ? `${k.bestTrade.symbol} · ${k.worstTrade.symbol}`
+                  : undefined
+              }
+            />
+          </div>
         </section>
       )}
 
-      {/* Equity-Kurve */}
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">📈 Equity-Kurve</h2>
-        {loadingRep ? (
-          <p className="text-sm text-slate-400">Lade Kurve…</p>
-        ) : (
-          <EquityChart series={equitySeries} />
-        )}
-      </section>
+      {/* Equity-Kurve: eigenes Panel mit Zeiträumen, Drawdown, Markern, Export */}
+      <EquityPanel />
+
+      {loadingRep && !report && (
+        <p className="text-sm text-slate-400">Lade Report-Kennzahlen…</p>
+      )}
 
       {/* Empfehlungen des Hauses */}
       {report && report.recommendations.length > 0 && (

@@ -21,10 +21,146 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-03** · Code-Version **0.12.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.13.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased]
+## [0.13.0] — Reports-Tab: Benchmark, TWR, Drawdown-Episoden, Heatmap, Druck, Alarme, Log-Achse & Zeitraumvergleich (2026-10-04)
+
+### Added — Equity-Analytik: Benchmark, TWR, Episoden, Heatmap, Log-Achse, Zeitraumvergleich, Druck & Alarme (2026-10-04)
+
+Die acht Ausbaupunkte aus der Review des Reports-Tabs. Alle Kennzahlen liegen in
+reinen Funktionen (`src/lib/equityAnalytics.ts`, `src/lib/equityBenchmark.ts`)
+und sind in `tests/equityAnalytics.test.ts`, `tests/equityAlerts.test.ts` und
+`tests/ui/EquityCurveChart.test.tsx` festgehalten; Definitionen, Formeln und
+Grenzen stehen in [`docs/EQUITY_CURVE.md`](docs/EQUITY_CURVE.md) §5–§7.
+
+1. **Referenz-Vergleichslinie (Benchmark).** `GET /api/firm/equity?compare=BTC|ETH|SPY|QQQ`
+   liefert eine Buy-and-Hold-Linie **aus dem `HistoricalStore`**
+   (`src/lib/equityBenchmark.ts`: Registry mit Instrument-Kandidaten und
+   Timeframes 1 d → 4 h → 1 h, Skalierung auf den Kontostand am Fensterstart).
+   Es werden **keine** Kurse aus dem Netz geholt oder erfunden: ohne Historie
+   (`npm run market:sync`) ist `benchmark` `null` und die UI sagt „keine Daten“.
+2. **Zeitgewichtete Rendite (TWR).** `timeWeightedReturn()` verkettet
+   Tagesrenditen und bereinigt Kapitalzu-/abflüsse (`basis = Vortagesschluss +
+   Zufluss`). Die Antwort enthält `twr` mit `twrPct`, `simplePct`, `days`,
+   `flows {count,total,applied}`, `bestDayPct`, `worstDayPct`; der Report liefert
+   `kpis.twrPct`/`twrSimplePct`/`twrDays`/`twrCashflowApplied`. **Ehrlich
+   gekennzeichnet:** Das Paper-Konto führt keine persistierte Cashflow-Spur,
+   `flows.applied` bleibt daher `false` und die UI weist die Kennzahl als „ohne
+   Cashflow-Spur“ aus, statt eine Bereinigung zu behaupten.
+3. **Drawdown-Episoden mit Erholungszeiten.** `drawdownEpisodes(points, {topN, minPct})`
+   liefert Peak, Tief, Tiefe, `recoveredAt`, Abstiegs-, Erholungs- und
+   Gesamtdauer sowie `open`. Die API liefert die Top 5 (ab 0,1 %), der Report
+   zusätzlich `drawdownEpisodes` als Anzahl; das Panel zeigt eine Tabelle mit
+   deutschen Dauerangaben („5 h 20 min“, „3 T 4 h“), offene Episoden als
+   „noch offen“. Liegt der Peak **vor** dem Fenster, ist `peakTs` `null` —
+   kein erfundenes Datum.
+4. **Monatsrendite-Heatmap.** `readMonthlyEquity()` aggregiert in SQL über die
+   **gesamte** Aufbewahrung (erster/letzter Stand je Berliner Monat,
+   `max(equity)` als Referenz), `finalizeMonthlyReturns()` macht daraus
+   Rendite + Anschnitt-Flag (`partial`, 24-h-Toleranz an den Rändern) und
+   `monthlySummary()` die Fußnote (x positiv / y negativ, bester/schlechtester
+   Monat). Das Panel zeigt Monate als Zellen mit Intensität, Jahre als Zeilen,
+   dazu die verkettete Jahresrendite.
+5. **Druck-/PDF-Report.** Button „Druck / PDF“ (`window.print()`), Report-Kopf
+   `hidden print:block`, Bedienelemente `print:hidden`. `globals.css` erzwingt
+   unter `@media print` die **Light-Palette** (unabhängig vom gewählten Theme —
+   ein Midnight-Theme druckte sonst schwarze Seiten), entfernt Schatten, hält
+   Tabellen/SVG/`.print-break-avoid`-Blöcke zusammen und setzt
+   `@page { margin: 12mm }`.
+6. **Equity-Alarme im Monitor.** Der 60-s-Tick prüft zusätzlich neue Höchststände
+   (`equity:new-high`, Default ab +0,5 %) und Drawdown-Schwellen
+   (`equity:drawdown-5`/`-10`/`-20` als `info`/`warning`/`critical`) über die
+   bestehenden Alert-Senken. Schwellen ratschen (Reset bei Erholung/neuem Hoch)
+   und kleine Anstiege heben den Peak still nach, damit kein Alarm-Flood
+   entsteht; Fehler der Senke landen fail-soft in der Fehlerliste des Ticks.
+   Neue Flags: `EQUITY_ALERTS_ENABLED`, `EQUITY_ALERT_DRAWDOWN_PCT`,
+   `EQUITY_ALERT_PEAK_MIN_PCT` ([`CONFIGURATION.md`](CONFIGURATION.md)).
+7. **Logarithmische y-Achse.** Schalter „linear/log“: Skalierung linear in
+   `log₁₀(equity)` mit 1/2/5-Ticks je Zehnerpotenz (`niceLogTicks`), nur bei
+   strikt positiven Werten (sonst linear statt unbrauchbarer Achse). Der Rand
+   ist multiplikativ, das Label „· log“ erscheint erst ab einer vollen
+   Zehnerpotenz Spanne — darunter sind log und linear deckungsgleich.
+8. **Zwei Zeiträume vergleichen.** „Vorperiode“ und „Ø der letzten 3“ laden das
+   vorgehende Fenster über die neuen Parameter `?from`/`?until` (ISO; ersetzt
+   `range`, damit der Server kein zweites Zeitraum-Vokabular braucht) und
+   zeichnen die Reihen indexiert auf 100 auf der Zeitachse der aktuellen Kurve
+   (fehlende Stützstellen linear interpoliert, nicht fortgeschrieben).
+
+**Außerdem:** Die API liefert `calendarSince` (Anfang des Kalenderfensters aus
+`range` — bei `?from`/`?until` unabhängig vom effektiven `since`, das Panel nutzt
+es für die Fußnote) und
+`?compare=off|none|keine` schaltet den Benchmark explizit ab; der CSV-Export
+enthält bei aktivem Vergleich eine Referenzspalte.
+
+### Added — Equity-Kurve: Zeiträume, Drawdown, Achsen & Tooltips (2026-10-03)
+
+Der Reports-Tab zeigte eine nackte SVG-Linie ohne Achsenbeschriftung, mit
+„Heute / Woche / Monat“ als einzigem Zoom, ohne Drawdown und ohne Export. Der
+Report-KPI „Max Drawdown“ stand praktisch immer auf **0 %** — er wurde aus der
+Summe der realisierten P&L gerechnet (Reihe beginnt bei 0, `if (peak > 0)`
+greift nie) statt aus dem Kontostand. Beides ist behoben, die Definitionen
+stehen in [`docs/EQUITY_CURVE.md`](docs/EQUITY_CURVE.md).
+
+* **Drawdown wird berechnet — Peak-to-Trough.** `GET /api/firm/report` liest
+  jetzt dieselbe Equity-Kurve wie das Chart und liefert `maxDrawdownPct`,
+  `maxDrawdownAbs`, `currentDrawdownPct`, `maxDrawdownFrom`, `maxDrawdownTo`
+  und `recoveredAt`. Der Höchststand aus der Zeit **vor** dem Zeitraum zählt
+  mit (Referenz-Peak), sonst begänne ein Fenster im Drawdown bei 0 %.
+* **Neue Kennzahlen im Report:** Bruttogewinn/-verlust, Ø Gewinn, Ø Verlust,
+  Erwartungswert je Trade, Gewinn/Verlust-Verhältnis, längste Gewinn-/
+  Verlustserie und durchschnittliche Haltedauer. Report-Zeiträume um Quartal,
+  Halbjahr und Jahr erweitert (Berliner Kalendergrenzen).
+* **Mehr Zeiträume im Chart:** 1 T · 1 W · 1 M · 3 M · 6 M · 1 J · Max
+  (`/api/firm/equity?range=…`, Aliase wie `1d/7d/3m/1y/max`). Die API liefert
+  Auflösung, effektive Bucket-Breite, Aufbewahrungsgrenze und eine ehrliche
+  Kennzeichnung, wenn der Zeitraum über die Historie hinausreicht.
+* **Lange Historien ohne Datenmüll:** Die Retention löscht ältere Rohdaten
+  nicht mehr, sondern verdichtet sie in SQL auf zwei Punkte je Berliner
+  Kalendertag (Tiefstand + Tagesschluss) — Drawdown-Extrema bleiben erhalten.
+  Neue Flags `EQUITY_RAW_RETENTION_DAYS` (Default 90) und
+  `EQUITY_RETENTION_DAYS` (Default 730). Die Kurve liest in SQL-Buckets mit
+  Extremwert-Erhalt statt „jeder n-te Punkt“.
+* **Achsen & Beschriftung:** y-Achse mit „schönen“ 1/2/5-Ticks in Kontowährung
+  (umschaltbar auf Index „Start = 100“), x-Achse auf **echter Zeitachse** mit
+  Berliner Labels (Uhrzeit → Datum → Monat/Jahr), Basislinie auf dem
+  Zeitraumstart, Achsentitel „Equity (USD)“ und „Zeit (Europe/Berlin)“.
+* **Hover & Tastatur:** Tooltip je Punkt (Zeit, Equity, Abstand zum
+  Zeitraumstart, Drawdown in Prozent und absolut, Höchststand,
+  Snapshot-Auslöser), Unterwasser-Kurve für den Drawdown-Verlauf,
+  Max-Drawdown-Band (Peak → Tief), Trade-Marker (▲ Einstieg, ● Ausstieg mit
+  P&L), CSV-Export. Bedienbar per Maus/Touch, `←`/`→` (mit `Shift` in
+  10er-Schritten), `Pos1`/`Ende`, `Esc`; `aria-live`-Text und `aria-label`
+  für Screenreader.
+* **Beschreibungen statt nackter Zahlen:** Jede Kennzahl im Reports-Tab (und
+  die Statusleiste im Overview) trägt eine Kurzdefinition als InfoTip —
+  insbesondere die Unterscheidung „Drawdown gegenüber Startkapital“ (Risiko-
+  Limit) vs. „Drawdown vom Höchststand“ (Kurve).
+* **Sicherheit:** `GET /api/firm/equity` verlangt jetzt `firm.read` vor dem
+  ersten DB-Zugriff und antwortet `Cache-Control: private, no-store`
+  (SEC-02-Klasse: Portfolio- und P&L-Daten). Der SEC-02-Test deckt die Route ab.
+* **Beim Verifizieren gegen echte Daten gefunden und behoben** (die
+  Unit-Tests sahen die gemappten Felder nicht):
+  - Die Bucket-Abfrage lieferte `ts_first`/`eq_min` in snake_case, die
+    JS-Seite las `tsFirst`/`eqMin` → `undefined` in `new Date(...)`
+    (`RangeError: Invalid time value`). Die Zeilen werden jetzt explizit
+    gemappt, Zeitstempel als Epoch-Millisekunden aus SQL.
+  - Der Filter in `bucketsToPoints` ließ nur aufsteigende Zeitstempel in
+    Einfüge-Reihenfolge durch. Da das Bucket-Maximum erst nach dem Tief
+    eingefügt wird, verschwand es — der Hochpunkt fehlte in der Kurve und der
+    Drawdown fiel zu groß aus. Jetzt: erst sortieren, dann exakte Duplikate
+    verwerfen (Regressionstest in `tests/equityAnalytics.test.ts`).
+  - Fehlender `maxPoints`-Parameter wurde als `0` gelesen und auf 20 geklemmt
+    — die Kurve war ohne Angabe unnötig grob.
+  - Die Drawdown-Achse beschriftete 0,43 %/0,86 % als „0 %“/„1 %“; kleine
+    Prozentwerte bekommen jetzt Nachkommastellen (`formatPercentTick`).
+
+* **Refactor:** `readStartingEquity()` liegt einmal in `src/lib/startingEquity.ts`
+  (vorher dreimal kopiert); Perioden-/Zeitachsen-Helfer und die reine
+  Kurvenmathematik (`src/lib/equityAnalytics.ts`, `src/lib/equityRange.ts`)
+  sind ohne DB, Uhr und Zufall und durch `tests/equityAnalytics.test.ts`,
+  `tests/equityRange.test.ts`, `tests/time.test.ts` sowie
+  `tests/ui/EquityCurveChart.test.tsx` abgedeckt.
 
 ### Fixed — Doku-Rendering & Docs-Links (2026-10-03)
 

@@ -38,6 +38,7 @@ before(async () => {
   const firm = (await import("../src/app/api/firm/route")).GET as unknown as GetHandler;
   const log = (await import("../src/app/api/firm/log/route")).GET as GetHandler;
   const report = (await import("../src/app/api/firm/report/route")).GET as GetHandler;
+  const equity = (await import("../src/app/api/firm/equity/route")).GET as GetHandler;
   const rules = (await import("../src/app/api/firm/rules/route")).GET as unknown as GetHandler;
   const providers = (await import("../src/app/api/providers/route")).GET as GetHandler;
   const routing = (await import("../src/app/api/routing/route")).GET as unknown as GetHandler;
@@ -46,6 +47,7 @@ before(async () => {
     { path: "/api/firm?include=positions,auditLog,riskLimits", source: "src/app/api/firm/route.ts", get: firm },
     { path: "/api/firm/log?limit=200&event=ORDER_REJECTED", source: "src/app/api/firm/log/route.ts", get: log },
     { path: "/api/firm/report?period=month", source: "src/app/api/firm/report/route.ts", get: report },
+    { path: "/api/firm/equity?range=month", source: "src/app/api/firm/equity/route.ts", get: equity },
     { path: "/api/firm/rules", source: "src/app/api/firm/rules/route.ts", get: rules },
     { path: "/api/providers?refresh=1", source: "src/app/api/providers/route.ts", get: providers },
     { path: "/api/routing", source: "src/app/api/routing/route.ts", get: routing },

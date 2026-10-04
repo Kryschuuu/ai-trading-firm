@@ -47,6 +47,8 @@ import { realizedPnlToday, writeEquitySnapshot, pruneEquitySnapshots } from "./e
 import { FundingAccrualEngine, loadFundingConfig, runFundingAccrual } from "./funding";
 import { completeJournalRow } from "./journal";
 import { getProductionMarketDataManager } from "./marketdata/production";
+import { emitAlert } from "./alerts";
+import { envNumber } from "./env";
 
 const GLOBAL = globalThis as typeof globalThis & {
   __lastTickAt?: number;
@@ -56,6 +58,8 @@ const GLOBAL = globalThis as typeof globalThis & {
   __tickLock?: Promise<TickResult> | null;
   /** GAP-02: Accrual-Engine (Periodenwechsel-Zustand) — pro Prozess einmal. */
   __fundingEngine?: FundingAccrualEngine;
+  __equityAlertState?: { peak: number; threshold: number };
+  __equityAlertStats?: { peaks: number; thresholds: number };
 };
 
 const SCAN_EVERY_TICKS = 15; // alle 15 Minuten ein Marktbericht
@@ -556,12 +560,31 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
     errors.push(`Snapshot fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
   }
 
+  // --- 3b) Alarme auf neue Hochs und Drawdown-Schwellen ---
+  // Bewusst an den bereits berechneten Tick-Werten aufgehängt (kein
+  // zusätzlicher DB-Lesevorgang) und über den Alert-Adapter mit Debounce —
+  // der Operator bekommt „neues Hoch“ bzw. „Drawdown über X %“ genau einmal,
+  // nicht 1440-mal am Tag. Fehler dürfen den Tick nicht brechen.
+  try {
+    await checkEquityAlerts({ equity, drawdownPct: broker.drawdownPct, errors });
+  } catch (e) {
+    errors.push(`Equity-Alarme fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
+  }
+
   // --- 4) Multi-Market-Scan ins institutionelle Gedächtnis ---
   GLOBAL.__tickCount = (GLOBAL.__tickCount ?? 0) + 1;
   if (GLOBAL.__tickCount % PRUNE_EVERY_TICKS === 0) {
     try {
-      const removed = await pruneEquitySnapshots(90);
-      if (removed > 0) console.log(`[monitor] Retention: ${removed} alte Equity-Snapshots gelöscht`);
+      // Zweistufig (v0.13.0): Rohdaten altern lassen, ältere Tagesstände
+      // verdichten (Tief + Tagesschluss), erst danach hart löschen.
+      const pruned = await pruneEquitySnapshots();
+      if (pruned.downsampled > 0 || pruned.deleted > 0) {
+        console.log(
+          `[monitor] Equity-Retention: ${pruned.downsampled} Snapshots zu Tagespunkten verdichtet, ` +
+            `${pruned.deleted} jenseits von ${pruned.retentionDays} Tagen gelöscht ` +
+            `(Rohdaten: ${pruned.rawDays} Tage)`
+        );
+      }
     } catch (e) {
       errors.push(`Retention fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
     }
@@ -792,3 +815,122 @@ export async function ensureQuote(symbol: string): Promise<number | null> {
     return null;
   }
 }
+
+// ───────────────────────── Equity-Alarme (v0.13.0) ───────────────────────────
+
+/** Env-Namen der Equity-Alarme (zentral, für Doku und Tests). */
+export const EQUITY_ALERT_ENV = {
+  /** Drawdown-Schwellen in Prozent, kommagetrennt (Default `5,10,20`). */
+  THRESHOLDS_PCT: "EQUITY_ALERT_DRAWDOWN_PCT",
+  /** Alarme komplett abschalten (`false`). */
+  ENABLED: "EQUITY_ALERTS_ENABLED",
+} as const;
+
+/** Default-Schwellen: 5 %, 10 %, 20 % Rückgang vom Höchststand. */
+export const EQUITY_ALERT_DEFAULT_THRESHOLDS = [5, 10, 20] as const;
+
+/**
+ * Parst die Schwellen-Liste: positive Zahlen, sortiert, dedupliziert,
+ * auf 20 Werte begrenzt. Ungültige Einträge fallen weg (nie eine Schwelle
+ * „0 %“ erfinden, die bei jedem Tick feuern würde).
+ */
+export function parseEquityAlertThresholds(raw: string | undefined): number[] {
+  if (raw === undefined) return [...EQUITY_ALERT_DEFAULT_THRESHOLDS];
+  const list = raw
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0 && n <= 100);
+  return [...new Set(list)].sort((a, b) => a - b).slice(0, 20);
+}
+
+/**
+ * Meldet (a) ein neues Allzeithoch und (b) den Überschritt einer
+ * Drawdown-Schwelle.
+ *
+ * Der Zustand liegt im Prozess (`GLOBAL.__equityAlertState`): der höchste
+ * gesehene Kontostand und die zuletzt gemeldete Schwelle. Damit gilt:
+ *
+ *   - Ein neues Hoch wird **je Hoch** einmal gemeldet; das nächste Hoch ist
+ *     erst wieder über dem gemerkten Wert ein „neues Hoch“ (plus
+ *     `EQUITY_ALERT_PEAK_MIN_PCT`, Default 0,5 %, damit Mini-Schwankungen
+ *     keinen Alarm auslösen).
+ *   - Schwellen sind **ratchet-artig**: 5 % → Alarm, 10 % → Alarm; fällt der
+ *     Drawdown unter 5 %, wird die gemeldete Schwelle zurückgesetzt, sodass
+ *     ein erneuter 5-%-Rückgang wieder meldet.
+ *
+ * Der Alert-Adapter (D3) debounced zusätzlich je `code` — doppelte Meldungen
+ * sind also auch bei Prozess-Neustart nicht zu befürchten.
+ */
+export async function checkEquityAlerts(params: {
+  equity: number;
+  drawdownPct: number;
+  errors?: string[];
+  /** Injektion für Tests. */
+  emit?: typeof emitAlert;
+  state?: EquityAlertState;
+}): Promise<{ peak: boolean; threshold: number | null }> {
+  const errors = params.errors ?? [];
+  const enabled = (process.env[EQUITY_ALERT_ENV.ENABLED] ?? "true").trim().toLowerCase() !== "false";
+  const equity = Number(params.equity);
+  const drawdownPct = Number(params.drawdownPct);
+  if (!enabled || !Number.isFinite(equity) || equity <= 0) return { peak: false, threshold: null };
+
+  const minPeakPct = envNumber("EQUITY_ALERT_PEAK_MIN_PCT", 0.5, 0, 50);
+  const thresholds = parseEquityAlertThresholds(process.env[EQUITY_ALERT_ENV.THRESHOLDS_PCT]);
+  const state = params.state ?? (GLOBAL.__equityAlertState ??= { peak: equity, threshold: 0 });
+  const emit = params.emit ?? emitAlert;
+
+  let peakAlert = false;
+  let thresholdAlert: number | null = null;
+
+  if (equity > state.peak * (1 + minPeakPct / 100)) {
+    state.peak = equity;
+    state.threshold = 0; // neues Hoch: Schwellen neu bewerten
+    peakAlert = true;
+  } else if (equity > state.peak) {
+    state.peak = equity; // leise nachziehen (unter der Meldeschwelle)
+  }
+
+  const finiteDrawdown = Number.isFinite(drawdownPct) && drawdownPct > 0 ? drawdownPct : 0;
+  if (finiteDrawdown < state.threshold) state.threshold = 0;
+  const crossed = thresholds.filter((t) => finiteDrawdown >= t && t > state.threshold);
+  if (crossed.length > 0) {
+    thresholdAlert = crossed[crossed.length - 1];
+    state.threshold = thresholdAlert;
+  }
+
+  const sends: Array<{ code: string; severity: "info" | "warning" | "critical"; message: string; meta: Record<string, unknown> }> = [];
+  if (peakAlert) {
+    sends.push({
+      code: "equity:new-high",
+      severity: "info",
+      message: `Neues Equity-Hoch: ${equity.toFixed(2)} (vorher ${state.peak.toFixed(2)}) — Konto über dem bisherigen Höchststand.`,
+      meta: { equity: Number(equity.toFixed(2)), thresholdPct: minPeakPct },
+    });
+  }
+  if (thresholdAlert !== null) {
+    sends.push({
+      code: `equity:drawdown-${thresholdAlert}`,
+      severity: thresholdAlert >= 20 ? "critical" : thresholdAlert >= 10 ? "warning" : "info",
+      message: `Equity-Drawdown ${finiteDrawdown.toFixed(2)} % — Schwelle ${thresholdAlert} % erreicht (Rückgang vom Höchststand).`,
+      meta: { drawdownPct: Number(finiteDrawdown.toFixed(2)), equity: Number(equity.toFixed(2)), thresholdPct: thresholdAlert },
+    });
+  }
+
+  for (const alert of sends) {
+    try {
+      await emit(alert);
+    } catch (e) {
+      errors.push(`Alert ${alert.code}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  if (sends.length > 0) {
+    const stats = (GLOBAL.__equityAlertStats ??= { peaks: 0, thresholds: 0 });
+    if (peakAlert) stats.peaks += 1;
+    if (thresholdAlert !== null) stats.thresholds += 1;
+  }
+  return { peak: peakAlert, threshold: thresholdAlert };
+}
+
+/** Prozess-Zustand der Equity-Alarme (Hochwasser + gemeldete Schwelle). */
+export type EquityAlertState = { peak: number; threshold: number };
