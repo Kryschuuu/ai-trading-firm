@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.14.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.15.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.14.0** (Beta, 2026-10-04; Baseline war v0.1.0) |
+| Version | **v0.15.0** (Beta, 2026-10-04; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -267,13 +267,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.14.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.15.0, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.14.0), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.15.0), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)
@@ -294,6 +294,30 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 └── .github/workflows/        ← CI (Spiegel von docs/ci/): docs-validate, security-live-gate
 ```
 
+## Oberfläche (Layout & Design-System)
+
+Die UI nutzt auf **allen** Seiten die volle Bildschirmbreite — nur der
+Seitenrand wächst mit dem Monitor (`px-3 sm:px-5 lg:px-8 2xl:px-10 3xl:px-12`),
+und zwei zusätzliche Breakpoints (`3xl` = 1920 px, `4xl` = 2560 px) lassen
+Statusleiste, Kennzahlen, Agenten-, Broker- und Katalogkarten bis Ultrawide
+mitwachsen. Lesetext bleibt bei 90 Zeichen pro Block; datendichte Tabellen
+(Positionen, Risikofelder, Coverage, Monatsrenditen) bekommen die zusätzliche
+Breite.
+
+- **Ein Layout-System** (`src/components/ui/`): `PageShell` (Seitenhülle mit
+  Kopf), `DataTable` (Tabellen mit sticky Spaltenköpfen, Tastatur-Scroll und
+  beschrifteter Kartenansicht auf Mobile), `TabBar`/`TabPanel`
+  (WAI-ARIA-Reiter mit Pfeiltasten und Zähler-Badges), `MetricTile`, `Chip`,
+  `Button`, `InfoTip` und die Layout-Konstanten in
+  [`src/components/ui/layout.ts`](src/components/ui/layout.ts).
+- **Sechs Themes** (`data-theme` auf `<html>`: dark, light, sepia, midnight,
+  nord, forest) — umschaltbar über den Theme-Wähler im Dashboard-Kopf.
+- **Barrierefrei bedienbar:** sichtbare Fokusringe, Tabellen-Scrollbereiche mit
+  Rolle und Namen, Reiter per Pfeiltaste/`Home`/`End`, Statusfarben immer
+  zusätzlich als Text.
+- **Regeln für neue Seiten und alle Breakpoints:**
+  [docs/UI_LAYOUT.md](docs/UI_LAYOUT.md).
+
 ## Dokumentation
 
 Alle Dokumente sind auch im laufenden System unter **`/docs`** im Browser
@@ -306,6 +330,7 @@ lesbar (kanonische URLs `/docs/<Datei>.md`). Index: [docs/README.md](docs/README
 | [docs/INSTALL.md](docs/INSTALL.md) / [docs/INSTALL-WINDOWS.md](docs/INSTALL-WINDOWS.md) | Installation (CachyOS A/B, Windows) |
 | [CONFIGURATION.md](CONFIGURATION.md) | Alle Env-Flags mit sicheren Defaults (verbindlich) |
 | [docs/HANDBUCH.md](docs/HANDBUCH.md) | Bedienung, Runbooks, Troubleshooting, Agenten-Register |
+| [docs/UI_LAYOUT.md](docs/UI_LAYOUT.md) | Layout- und Design-System der Oberfläche: Seitenhülle, Breakpoints bis Ultrawide, DataTable, Reiter, UI-Bausteine |
 | [docs/BROKER_ARCHITECTURE.md](docs/BROKER_ARCHITECTURE.md) | Broker-Adapter-Vertrag, Capability-Matrix, Execution Modes |
 | [docs/MARKET_DATA_PIPELINE.md](docs/MARKET_DATA_PIPELINE.md) | Discovery, Enrichment, Candle-Backfill, Scanner-Grenze |
 | [docs/BACKTESTING.md](docs/BACKTESTING.md) / [docs/BACKTEST_ENGINE.md](docs/BACKTEST_ENGINE.md) | Walk-Forward-Backtests, Multi-Asset-Engine, Trade-Ledger, Monte-Carlo |

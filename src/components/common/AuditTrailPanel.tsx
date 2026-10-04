@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Audit-Trail mit Server-Paging (20/50/100/200 pro Seite), Level-/Event-Filter
  * und vollständiger, lesbarer Darstellung pro Eintrag.
@@ -18,6 +17,7 @@ import {
 } from "@/lib/auditView";
 import { AuditTrailList } from "./AuditTrailList";
 import { Pager, usePagination } from "./Pager";
+import { SECTION_TITLE } from "@/components/ui/layout";
 
 export function AuditTrailPanel({
   title = "Audit-Trail",
@@ -93,11 +93,11 @@ export function AuditTrailPanel({
     <section className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
+          <h2 className={SECTION_TITLE}>{title}</h2>
           <p className="mt-1 text-xs text-slate-500">{hint}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="audit-level-filter" className="text-[11px] text-slate-500">
+          <label htmlFor="audit-level-filter" className="text-xs text-slate-500">
             Stufe
           </label>
           <select
@@ -115,7 +115,7 @@ export function AuditTrailPanel({
             <option value="CRITICAL">CRITICAL — Kritisch</option>
           </select>
 
-          <label htmlFor="audit-event-filter" className="text-[11px] text-slate-500">
+          <label htmlFor="audit-event-filter" className="text-xs text-slate-500">
             Ereignis
           </label>
           <select

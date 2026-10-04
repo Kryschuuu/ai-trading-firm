@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Schritt 4 (Handbuch 6.4): Testschleife — ersetzt die for/i-Schleife mit
  * curl | jq. Läuft sequenziell (ein Agent, ein Turn nach dem anderen),
@@ -9,7 +8,7 @@
  */
 
 import { useRef, useState } from "react";
-import InfoTip from "./InfoTip";
+import InfoTip from "@/components/ui/InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import { missionScopeLabel } from "@/lib/missionTemplates";
 import type { AgentRow, MissionRow, RunTurnResponse, TurnResultDto } from "@/lib/types";
@@ -21,6 +20,7 @@ import {
   type OutcomeCategory,
 } from "@/lib/workshop";
 import { wilsonInterval } from "@/lib/stats";
+import { PANEL } from "../ui/layout";
 
 
 const MAX_RUNS = 20;
@@ -128,7 +128,7 @@ export default function HitRatePanel({
   return (
     <div className="space-y-4">
       {/* ── Steuerung ────────────────────────────────────────────── */}
-      <section aria-labelledby="hitrate-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="hitrate-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex items-center">
           <h3 id="hitrate-title" className="text-sm font-bold text-slate-100">Testschleife starten</h3>
           <InfoTip
@@ -234,7 +234,7 @@ export default function HitRatePanel({
       </section>
 
       {/* ── Balkendiagramm ───────────────────────────────────────── */}
-      <section aria-labelledby="hitrate-chart-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="hitrate-chart-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex items-center">
           <h3 id="hitrate-chart-title" className="text-sm font-bold text-slate-100">
             Verteilung {phase === "running" ? "(live)" : runs.length > 0 ? "(Endergebnis)" : ""}
@@ -257,7 +257,7 @@ export default function HitRatePanel({
                 const style = CATEGORY_STYLE[cat];
                 return (
                   <div key={cat} className="flex items-center gap-2">
-                    <span className="flex w-36 shrink-0 items-center text-[11px] font-semibold text-slate-400" title={style.help}>
+                    <span className="flex w-36 shrink-0 items-center text-xs font-semibold text-slate-400" title={style.help}>
                       {style.label}
                       <InfoTip id={`bar-${cat}`} label={style.label} text={style.help} />
                     </span>
@@ -267,7 +267,7 @@ export default function HitRatePanel({
                         style={{ width: `${Math.max(stats.pct[cat], stats.counts[cat] > 0 ? 2 : 0)}%` }}
                       />
                     </div>
-                    <span className={`w-24 shrink-0 text-right text-[11px] font-bold ${style.text}`}>
+                    <span className={`w-24 shrink-0 text-right text-xs font-bold ${style.text}`}>
                       {stats.counts[cat]} · {stats.pct[cat]} %
                     </span>
                   </div>
@@ -282,7 +282,7 @@ export default function HitRatePanel({
             <p className="text-xs font-bold text-amber-300">
               ⚠ „HOLD · kaputtes JSON“ häuft sich ({stats.counts.INVALID_JSON} von {stats.total} = {stats.pct.INVALID_JSON} %) — dein Modell liefert unlesbares JSON. Dann:
             </p>
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-[11px] leading-relaxed text-amber-200">
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs leading-relaxed text-amber-200">
               {JSON_DEBUG_TIPS.map((tip) => (
                 <li key={tip}>{tip}</li>
               ))}
@@ -292,7 +292,7 @@ export default function HitRatePanel({
       </section>
 
       {/* ── Läufe + Fehlschläge ──────────────────────────────────── */}
-      <section ref={failuresRef} aria-labelledby="hitrate-runs-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section ref={failuresRef} aria-labelledby="hitrate-runs-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <h3 id="hitrate-runs-title" className="text-sm font-bold text-slate-100">Einzelne Läufe</h3>
           <InfoTip
@@ -303,7 +303,7 @@ export default function HitRatePanel({
           {failures.length > 0 && (
             <button
               onClick={onOpenProtocol}
-              className="ml-auto rounded border border-red-700 px-2.5 py-1 text-[11px] font-semibold text-red-300 hover:bg-red-500/10"
+              className="ml-auto rounded border border-red-700 px-2.5 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/10"
               aria-label="Fehlgeschlagene Läufe im Protokoll-Tab nachschlagen"
             >
               ↗ {failures.length} Fehlschläge im Protokoll nachschlagen
@@ -328,26 +328,26 @@ export default function HitRatePanel({
                   <details>
                     <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs">
                       <span className="font-mono text-slate-500">#{r.index}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${style.text}`}>{style.label}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold ${style.text}`}>{style.label}</span>
                       <span className="text-slate-400">{r.status}</span>
                       {r.latencyMs != null && (
-                        <span className="text-[11px] text-slate-500">{(r.latencyMs / 1000).toFixed(1)} s</span>
+                        <span className="text-xs text-slate-500">{(r.latencyMs / 1000).toFixed(1)} s</span>
                       )}
-                      <span className="ml-auto max-w-full truncate text-[11px] text-slate-500">{r.reason}</span>
+                      <span className="ml-auto max-w-full truncate text-xs text-slate-500">{r.reason}</span>
                     </summary>
                     <div className="mt-2 space-y-2">
                       {r.error && (
-                        <p className="rounded border border-red-800 bg-red-950/40 px-2 py-1.5 text-[11px] text-red-300">Fehler: {r.error}</p>
+                        <p className="rounded border border-red-800 bg-red-950/40 px-2 py-1.5 text-xs text-red-300">Fehler: {r.error}</p>
                       )}
                       {r.result && (
                         <>
-                          <pre className="overflow-x-auto rounded bg-slate-950 p-2 font-mono text-[11px] text-emerald-300">
+                          <pre className="overflow-x-auto rounded bg-slate-950 p-2 font-mono text-xs text-emerald-300">
                             {JSON.stringify(r.result.decision, null, 2)}
                           </pre>
                           {r.result.trace && r.result.trace.length > 0 && (
                             <ul className="space-y-0.5">
                               {r.result.trace.map((t, i) => (
-                                <li key={i} className={`text-[11px] ${t.ok ? "text-emerald-300" : "text-red-300"}`}>
+                                <li key={i} className={`text-xs ${t.ok ? "text-emerald-300" : "text-red-300"}`}>
                                   {t.ok ? "✔" : "✖"} {t.layer}: {t.detail}
                                 </li>
                               ))}

@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Settings-Panel einer Broker-Karte (Task 08): read-only Flag-Anzeige.
  *
@@ -17,12 +16,13 @@ import {
   type BrokerStatusDto,
 } from "@/lib/controlPlane";
 import ConfirmDialog from "./ConfirmDialog";
+import { PANEL } from "../ui/layout";
 
 function Flag({ ok, label, hint }: { ok: boolean; label: string; hint?: string }) {
   return (
     <span
       title={hint ?? label}
-      className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+      className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${
         ok
           ? "border-emerald-800/60 bg-emerald-500/10 text-emerald-300"
           : "border-slate-800 bg-slate-900/60 text-slate-600"
@@ -77,12 +77,12 @@ export default function SettingsPanel({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+    <div className={`mt-4 ${PANEL} p-4`}>
       <p className="text-xs font-semibold text-slate-300">Einstellungen (read-only)</p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <section>
-          <p className="text-[11px] uppercase tracking-wider text-slate-500">
+          <p className="text-xs uppercase tracking-wider text-slate-500">
             Capabilities (Adapter-SSoT)
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -97,7 +97,7 @@ export default function SettingsPanel({
         </section>
 
         <section>
-          <p className="text-[11px] uppercase tracking-wider text-slate-500">
+          <p className="text-xs uppercase tracking-wider text-slate-500">
             Markttypen
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -110,7 +110,7 @@ export default function SettingsPanel({
       </div>
 
       <section className="mt-3">
-        <p className="text-[11px] uppercase tracking-wider text-slate-500">
+        <p className="text-xs uppercase tracking-wider text-slate-500">
           Execution-Modi
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -118,7 +118,7 @@ export default function SettingsPanel({
             <span
               key={mode}
               title={info.reason ?? MODE_LABELS[mode]}
-              className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+              className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${
                 info.available
                   ? "border-emerald-800/60 bg-emerald-500/10 text-emerald-300"
                   : "border-slate-800 bg-slate-900/60 text-slate-600"
@@ -131,7 +131,7 @@ export default function SettingsPanel({
       </section>
 
       <section className="mt-3">
-        <p className="text-[11px] uppercase tracking-wider text-slate-500">
+        <p className="text-xs uppercase tracking-wider text-slate-500">
           Credentials
         </p>
         <p className="mt-1 text-xs text-slate-300">
@@ -157,13 +157,13 @@ export default function SettingsPanel({
         <p className="flex items-center gap-2 text-xs font-bold text-red-300">
           <span aria-hidden="true">🔒</span> Live-Trading gesperrt
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-red-200/80">
+        <p className="mt-1 text-xs leading-relaxed text-red-200/80">
           liveEnabled: {String(status?.liveEnabled ?? false)} — dieser Wert wird
           ausschliesslich aus der Gate-Service-Meldung uebernommen und ist in
           diesem Stadium immer false. Es gibt keine Moeglichkeit, Live hier
           freizuschalten (erst Task 11: Live-Trading-Gate).
         </p>
-        <p className="mt-1 font-mono text-[10px] text-red-300/60">
+        <p className="mt-1 font-mono text-[11px] text-red-300/60">
           {status?.liveReason ?? "LIVE_GATE_LOCKED"}
         </p>
       </section>

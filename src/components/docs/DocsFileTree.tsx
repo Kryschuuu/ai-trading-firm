@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { ChevronIcon, FileIcon, SearchIcon } from "./DocsIcons";
+import { PANEL_LARGE } from "@/components/ui/layout";
 
 type TreeNode = {
   name: string;
@@ -77,7 +78,7 @@ function TreeBranch({
                   className={`h-2.5 w-2.5 shrink-0 text-slate-500 transition-transform ${open ? "rotate-90" : ""}`}
                 />
                 <span className="font-medium">{node.title}</span>
-                <span className="text-[10px] text-slate-500">({countFiles(node.children ?? [])})</span>
+                <span className="text-[11px] text-slate-500">({countFiles(node.children ?? [])})</span>
               </button>
               {open && (
                 <div className="mt-0.5">
@@ -179,7 +180,7 @@ export default function DocsFileTree() {
   return (
     <section
       aria-labelledby="docs-tree-heading"
-      className="mt-8 rounded-2xl border border-slate-800 bg-slate-900/40"
+      className={`mt-8 ${PANEL_LARGE}`}
     >
       <button
         type="button"
@@ -194,7 +195,7 @@ export default function DocsFileTree() {
           <span id="docs-tree-heading" className="block text-sm font-semibold text-slate-100">
             Vollständiger Dateibaum (docs/)
           </span>
-          <span className="mt-0.5 block text-[11.5px] text-slate-500">
+          <span className="mt-0.5 block text-xs text-slate-500">
             Alle Markdown-Dateien inkl. Audit-Findings, Prompts und Archiv — auch die, die nicht im Katalog stehen.
           </span>
         </span>
@@ -220,7 +221,7 @@ export default function DocsFileTree() {
           {!loading && filteredTree && filteredTree.length > 0 && (
             <>
               {searching && (
-                <p className="mb-2 text-[11px] text-slate-500">
+                <p className="mb-2 text-xs text-slate-500">
                   {countFiles(filteredTree)} Treffer
                 </p>
               )}

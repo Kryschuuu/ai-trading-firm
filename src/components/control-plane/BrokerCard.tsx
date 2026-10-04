@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Broker-Karte "Brokers & Venues" (Task 08).
  *
@@ -27,6 +26,7 @@ import {
 import StateChip from "./StateChip";
 import CredentialForm from "./CredentialForm";
 import SettingsPanel from "./SettingsPanel";
+import { PANEL } from "../ui/layout";
 
 const LAYER_ORDER = [
   "connection",
@@ -110,7 +110,7 @@ export default function BrokerCard({
           />
           <div>
             <h3 className="text-sm font-bold text-slate-100">{entry.label}</h3>
-            <p className="font-mono text-[11px] text-slate-500">{entry.id}</p>
+            <p className="font-mono text-xs text-slate-500">{entry.id}</p>
           </div>
         </div>
         <div className="flex gap-1.5">
@@ -120,7 +120,7 @@ export default function BrokerCard({
               setPanel("connect");
             }}
             disabled={busy || (isPaper && panel === "connect")}
-            className="rounded-lg bg-sky-500 px-3 py-1.5 text-[11px] font-bold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-bold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Verbinden
           </button>
@@ -132,7 +132,7 @@ export default function BrokerCard({
                 ? "Verbindungstest (read-only Probe)"
                 : "Erst Zugangsdaten hinterlegen"
             }
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy && panel === "none" ? "Teste …" : "Test"}
           </button>
@@ -141,7 +141,7 @@ export default function BrokerCard({
               setFeedback(null);
               setPanel(panel === "settings" ? "none" : "settings");
             }}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800"
           >
             Einstellungen
           </button>
@@ -149,40 +149,40 @@ export default function BrokerCard({
       </header>
 
       {/* Status-LED-Text */}
-      <p className="mt-1.5 text-[11px] text-slate-500">{led.label}</p>
+      <p className="mt-1.5 text-xs text-slate-500">{led.label}</p>
 
       {/* Kennzahlen: Maerkte + Markttypen + Permissions */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+        <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-xs font-semibold text-slate-300">
           Maerkte:{" "}
           {status && status.discovery.state === "active"
             ? status.discovery.count
             : "—"}
         </span>
         {entry.capabilities.instrumentTypes.spot && (
-          <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+          <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-xs font-semibold text-slate-300">
             Spot
           </span>
         )}
         {entry.capabilities.instrumentTypes.perpetual && (
-          <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+          <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-xs font-semibold text-slate-300">
             Perpetuals
           </span>
         )}
         {entry.capabilities.instrumentTypes.future && (
-          <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+          <span className="rounded-lg border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-xs font-semibold text-slate-300">
             Futures
           </span>
         )}
         {status?.permissions?.map((permission) => (
           <span
             key={permission}
-            className="rounded-lg border border-emerald-800/60 bg-emerald-500/10 px-2.5 py-1 font-mono text-[11px] font-bold text-emerald-300"
+            className="rounded-lg border border-emerald-800/60 bg-emerald-500/10 px-2.5 py-1 font-mono text-xs font-bold text-emerald-300"
           >
             {permission}
           </span>
         ))}
-        <span className="ml-auto font-mono text-[10px] text-slate-600">
+        <span className="ml-auto font-mono text-[11px] text-slate-600">
           {entry.health.status} · {entry.health.latencyMs} ms
         </span>
       </div>
@@ -243,7 +243,7 @@ export default function BrokerCard({
       )}
 
       {panel === "connect" && isPaper && (
-        <p className="mt-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-xs text-slate-400">
+        <p className={`mt-4 ${PANEL} p-4 text-xs text-slate-400`}>
           PAPER ist der interne Simulator — er benoetigt keine Zugangsdaten.
           Die Verbindung wird ueber den Button <strong>Test</strong> geprueft.
         </p>

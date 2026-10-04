@@ -16,6 +16,7 @@
  * Reine Darstellung — keine Hooks, kein Netz: testbar per
  * `renderToStaticMarkup` (test/ui/MarketDataPanel.test.tsx).
  */
+import DataTable from "@/components/ui/DataTable";
 import type { MarketDataOpsSnapshot, MarketDataReadinessStatus, OpsTone } from "@/ops/types";
 import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
 
@@ -140,7 +141,7 @@ export default function MarketDataPanel({
       <div className="mb-2 flex items-start justify-between gap-2">
         <h3 className="text-sm font-bold text-slate-100">Market Data</h3>
         {/* Ampel: farb- UND textkodiert (Accessibility) */}
-        <span role="status" className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${meta.chip}`}>
+        <span role="status" className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${meta.chip}`}>
           {s.readinessStatus} · {meta.label}
         </span>
       </div>
@@ -153,7 +154,7 @@ export default function MarketDataPanel({
       <dl className="mt-3 space-y-1.5">
         {rows.map((row) => (
           <div key={row.label} className="flex items-baseline justify-between gap-3">
-            <dt className="text-[11px] uppercase tracking-wider text-slate-500" title={row.hint}>
+            <dt className="text-xs uppercase tracking-wider text-slate-500" title={row.hint}>
               {row.label}
             </dt>
             <dd className={`font-mono text-xs font-semibold ${TONE_CLASS[row.tone]}`} title={row.hint}>
@@ -165,12 +166,12 @@ export default function MarketDataPanel({
 
       {/* Kontextabhängiger, handlungsleitender Hinweis (buildReadinessHint) */}
       {s.hint && (
-        <p className={`mt-3 rounded-lg border px-3 py-2 text-[11px] leading-relaxed ${meta.box}`}>{s.hint}</p>
+        <p className={`mt-3 rounded-lg border px-3 py-2 text-xs leading-relaxed ${meta.box}`}>{s.hint}</p>
       )}
 
       {/* Funnel-Bezug: bei WARMING/ERROR sind dessen Nullen datenbedingt */}
       {s.readinessStatus !== "READY" && (
-        <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+        <p className="mt-2 text-xs leading-relaxed text-slate-400">
           Der Scanner-Funnel darunter bleibt sichtbar — seine Nullen sind in diesem Zustand
           datenbedingt und keine Marktbewertung.
         </p>
@@ -178,14 +179,14 @@ export default function MarketDataPanel({
 
       {s.venues.length > 0 && (
         <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
-          <p className="text-[11px] font-semibold text-slate-400">Letzter Sync je Venue</p>
+          <p className="text-xs font-semibold text-slate-400">Letzter Sync je Venue</p>
           <ul className="mt-1.5 space-y-1">
             {s.venues.map((venue) => {
               const failures = Object.entries(venue.failuresByReason).sort((a, b) =>
                 a[0] < b[0] ? -1 : 1,
               );
               return (
-                <li key={venue.venue} className="text-[11px]">
+                <li key={venue.venue} className="text-xs">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="min-w-0 truncate font-semibold text-slate-300">{venue.venue}</span>
                     <span className="shrink-0 text-slate-400">
@@ -216,41 +217,35 @@ export default function MarketDataPanel({
 
       {s.worstOffenders.length > 0 && (
         <details className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
-          <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-200">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
             Worst offenders ({s.worstOffenders.length}) — Instrumente mit den wenigsten Kerzen
           </summary>
-          <table className="mt-2 w-full text-left text-[11px]">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-slate-500">
-                <th scope="col" className="pb-1 font-semibold">Instrument</th>
-                <th scope="col" className="pb-1 text-right font-semibold">Kerzen</th>
-                <th scope="col" className="pb-1 text-right font-semibold">Soll</th>
-              </tr>
-            </thead>
-            <tbody>
-              {s.worstOffenders.map((offender) => (
-                <tr key={offender.instrumentId}>
-                  <td className="truncate pr-2 text-slate-300" title={offender.instrumentId}>
-                    {offender.instrumentId}
-                  </td>
-                  <td className="text-right font-mono text-amber-300">{offender.candles}</td>
-                  <td className="text-right font-mono text-slate-400">{offender.required}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            label="Instrumente mit den wenigsten Kerzen"
+            stack={false}
+            className="mt-2 rounded-lg bg-transparent"
+            align={["left", "right", "right"]}
+            head={["Instrument", "Kerzen", "Soll"]}
+            rows={s.worstOffenders.map((offender) => [
+              <span key="instrument" className="block max-w-[22rem] truncate text-slate-300" title={offender.instrumentId}>
+                {offender.instrumentId}
+              </span>,
+              <span key="candles" className="font-mono tabular-nums text-amber-300">{offender.candles}</span>,
+              <span key="required" className="font-mono tabular-nums text-slate-400">{offender.required}</span>,
+            ])}
+          />
         </details>
       )}
 
       {diagnostics && diagnostics.total > 0 && (
         <details className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
-          <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-200">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
             Ablehnungs-Diagnose ({diagnostics.total}
             {diagnostics.truncated ? `, erste ${diagnostics.items.length}` : ""})
           </summary>
           <ul className="mt-2 space-y-1.5">
             {diagnostics.items.map((item) => (
-              <li key={item.instrument} className="text-[11px]">
+              <li key={item.instrument} className="text-xs">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 truncate text-slate-300" title={item.instrument}>
                     {item.instrument}
@@ -279,7 +274,7 @@ export default function MarketDataPanel({
             ))}
           </ul>
           {diagnostics.truncated && (
-            <p className="mt-2 text-[10px] text-slate-500">
+            <p className="mt-2 text-[11px] text-slate-500">
               … und {diagnostics.total - diagnostics.items.length} weitere (Ausgabe gedeckelt).
             </p>
           )}

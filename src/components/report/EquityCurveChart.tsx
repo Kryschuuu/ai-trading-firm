@@ -429,13 +429,13 @@ export default function EquityCurveChart({
               x={chart.innerLeft - 8}
               y={chart.y(tick) + 3}
               textAnchor="end"
-              className="fill-slate-500 text-[10px] tabular-nums"
+              className="fill-slate-500 text-[11px] tabular-nums"
             >
               {mode === "percent" ? tick.toFixed(1) : formatAxisValue(tick)}
             </text>
           </g>
         ))}
-        <text x={4} y={12} className="fill-slate-500 text-[10px] font-semibold uppercase tracking-wider">
+        <text x={4} y={12} className="fill-slate-500 text-[11px] font-semibold uppercase tracking-wider">
           {mode === "absolute" ? "Equity (USD)" : "Index (Start = 100)"}
           {/* „log“ nur ausweisen, wenn die Achse sichtbar anders skaliert —
               innerhalb einer Dekade sind log und linear deckungsgleich. */}
@@ -461,7 +461,7 @@ export default function EquityCurveChart({
               className="stroke-slate-700/30"
               strokeWidth="1"
             />
-            <text x={chart.x(tick)} y={chart.innerBottom + 14} textAnchor="middle" className="fill-slate-500 text-[10px]">
+            <text x={chart.x(tick)} y={chart.innerBottom + 14} textAnchor="middle" className="fill-slate-500 text-[11px]">
               {formatTimeTick(tick, spanMs)}
             </text>
           </g>
@@ -470,7 +470,7 @@ export default function EquityCurveChart({
           x={chart?.innerRight ?? 0}
           y={(chart?.innerBottom ?? 0) + 24}
           textAnchor="end"
-          className="fill-slate-500 text-[10px]"
+          className="fill-slate-500 text-[11px]"
         >
           Zeit (Europe/Berlin)
         </text>
@@ -501,7 +501,7 @@ export default function EquityCurveChart({
           x={(chart?.innerRight ?? 0) - 4}
           y={(chart?.baselineY ?? 0) - 4}
           textAnchor="end"
-          className="fill-slate-400 text-[10px] tabular-nums"
+          className="fill-slate-400 text-[11px] tabular-nums"
         >
           {mode === "absolute" ? `Start ${formatAxisValue(chart?.baselineValue ?? 0)}` : "Start = 100"}
         </text>
@@ -604,7 +604,7 @@ export default function EquityCurveChart({
         {/* ── Unterwasser-Kurve (Drawdown) ─────────────────────────────── */}
         {showDrawdown && chart && (
           <g>
-            <text x={4} y={chart.ddTop - 4} className="fill-slate-500 text-[10px] font-semibold uppercase tracking-wider">
+            <text x={4} y={chart.ddTop - 4} className="fill-slate-500 text-[11px] font-semibold uppercase tracking-wider">
               Drawdown vom Höchststand
             </text>
             {[0, chart.maxDd / 2, chart.maxDd].map((tick, i) => (
@@ -621,7 +621,7 @@ export default function EquityCurveChart({
                   x={chart.innerLeft - 8}
                   y={chart.ddY(tick) + 3}
                   textAnchor="end"
-                  className="fill-red-300/80 text-[10px] tabular-nums"
+                  className="fill-red-300/80 text-[11px] tabular-nums"
                 >
                   {`−${formatPercentTick(tick)}`}
                 </text>
@@ -640,7 +640,7 @@ export default function EquityCurveChart({
       {active && chart && (
         <div
           role="tooltip"
-          className="pointer-events-none absolute z-20 w-64 rounded-lg border border-slate-700 bg-slate-950/95 px-3 py-2 text-[11px] leading-snug text-slate-200 shadow-xl"
+          className="pointer-events-none absolute z-20 w-64 rounded-lg border border-slate-700 bg-slate-950/95 px-3 py-2 text-xs leading-snug text-slate-200 shadow-xl"
           style={{
             // Die SVG ist im Container auf `max-w-full` begrenzt; der Faktor
             // rechnet die SVG-Koordinaten auf die tatsächliche Containerbreite
@@ -697,7 +697,7 @@ export default function EquityCurveChart({
               {active.marker.exitReason ? ` · ${active.marker.exitReason}` : ""}
             </p>
           )}
-          <p className="mt-1 text-[10px] text-slate-500">← → bewegt die Auswahl, Esc schließt.</p>
+          <p className="mt-1 text-[11px] text-slate-500">← → bewegt die Auswahl, Esc schließt.</p>
         </div>
       )}
 
@@ -705,7 +705,7 @@ export default function EquityCurveChart({
         {activeText}
       </div>
 
-      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
         <span className="flex items-center gap-1">
           <span className={`inline-block h-0.5 w-4 ${trendUp ? "bg-emerald-400" : "bg-red-400"}`} /> Equity
         </span>

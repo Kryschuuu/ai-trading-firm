@@ -103,6 +103,12 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Missionen, Markt-Scans & Vorlagen",
     subtitle: "Missions-Typen (Einzel-Symbol / Markt-Scan), Segmente, 18 Vorlagen, Mandatsprüfung (v1.35.0)",
   },
+  uiLayout: {
+    file: "docs/UI_LAYOUT.md",
+    title: "UI-Layout & Design-System",
+    subtitle:
+      "Seitenhüllen und Ränder, Breakpoints bis Ultrawide (3xl/4xl), DataTable mit mobiler Kartenansicht, Reiterleisten, UI-Bausteine und Testabsicherung",
+  },
   docsViewer: {
     file: "docs/DOCS_VIEWER.md",
     title: "Doku-Viewer (/docs) — Aufbau & Pflege",

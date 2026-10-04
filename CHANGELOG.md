@@ -21,8 +21,114 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.14.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.15.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.15.0] — UI-Überarbeitung: volle Bildschirmbreite überall, ein Layout-System für alle Seiten, responsive Tabellen & Reiter (2026-10-04)
+
+### Changed — Volle Breite und ein gemeinsames Layout-System (2026-10-04)
+
+Bis v0.14.0 nutzte **nur** der Doku-Viewer die volle Bildschirmbreite; Dashboard
+und Broker-Seite endeten bei `mx-auto max-w-7xl` (1280 px). Auf 27"–34"-Monitoren
+blieben mehrere hundert Pixel ungenutzt, obwohl genau dort die datendichten
+Tabellen (offene Positionen mit 10 Spalten, Risikofelder, Coverage-Matrix,
+Monatsrenditen) und die Equity-Kurve stehen. Jede Seite entschied Breite,
+Kartenstil, Tabellenverhalten und Reiter-Navigation für sich — die Stile
+drifteten entsprechend.
+
+1. **Ein Layout-System** (`src/components/ui/layout.ts`): `PAGE_GUTTER`
+   (`px-3 sm:px-5 lg:px-8 2xl:px-10 3xl:px-12`), `PAGE_GUTTER_BLEED` für
+   randlos klebende Leisten, `PANEL`/`PANEL_PADDED`/`PANEL_HEADER`,
+   `SECTION_TITLE`, `LABEL`, `PROSE_MEASURE`, `MUTED_TEXT`, `BUTTON_*` und die
+   inhaltsangepassten Raster `AUTO_FIT_CARDS` (17 rem), `AUTO_FIT_PANELS`
+   (22 rem) und `AUTO_FIT_WIDE` (30 rem). Alle Seiten und Panels beziehen ihre
+   Rahmen-, Karten- und Textklassen von hier; `PageShell` bündelt die
+   Seitenhülle inklusive einheitlichem Kopf (Überzeile, Titel, Untertitel,
+   Aktionen, Toolbar).
+2. **Zwei zusätzliche Breakpoints** (`3xl` = 120 rem/1920 px, `4xl` =
+   160 rem/2560 px) in `src/app/globals.css`. Statt fester Spaltenzahlen wachsen
+   Statusleiste (bis 7 Spalten), Report-Kennzahlen (bis 6), Agentenkarten (bis
+   4), Doku-Katalogkarten (bis 5) und das Guide (zweispaltig) mit dem Monitor —
+   auf Mobile bleibt es bei einer bzw. zwei Spalten.
+3. **Ein Tabellen-Baustein** (`DataTable`): echte `<table>`-Semantik,
+   Spaltenköpfe als `scope="col"`, optional sticky mit `maxHeight`, Zahlen
+   rechtsbündig. Der Scrollbereich ist per Tastatur fokussierbar und benannt
+   (`role="region"`, `aria-label`, `tabIndex=0`, sichtbarer Fokusring) — dieselbe
+   Mechanik wie im Doku-Viewer. Unterhalb `sm` stapelt `.fs-table-stack` jede
+   Zeile zu einer **beschrifteten** Karte (`data-label` +
+   `td::before { content: attr(data-label) }`), statt Spalten aus dem Viewport
+   laufen zu lassen. Für Konfigurationsmatrizen mit Eingabefeldern bleibt mit
+   `stack={false}` das horizontale Scrollen (Feld und Bedeutung bleiben
+   zusammen). Die alten Einzel-Tabellen (`Table`, `Stat`, `KpiTile`, fünf rohe
+   `<table>`-Blöcke) sind ersetzt.
+4. **Eine Reiter-Navigation** (`TabBar`/`TabPanel`): `role="tablist"`,
+   `aria-selected`, `aria-controls`, Roving Tabindex, Pfeiltasten/`Home`/`End`,
+   Zähler-Badges (offene Positionen, Agenten, Audit-Einträge, Venues), auf
+   Mobile horizontal scrollbar statt mehrzeilig, sticky unter dem Fensterrand.
+   Der Doku-Viewer behält seine eigene Navigation, nutzt aber denselben
+   Seitenrand.
+5. **Kein Null-Blitz beim Start:** Statusleiste und aktiver Reiter existieren
+   schon vor `GET /api/firm`. Statt irreführender Nullen („Paper-Equity 0 $“,
+   „Drawdown 0 %“) zeigt `MetricTile` mit `loading` einen pulsierenden
+   Platzhalter, während Label und InfoTip stehen bleiben; der aktive Bereich
+   trägt ein Skelett im Raster der echten Panels (und `aria-controls` zeigt
+   nicht mehr ins Leere).
+6. **Konsolidierung der Flächen und Texte:** Der Kartenrahmen
+   (`rounded-xl border border-slate-800 …`) stand 37-mal wörtlich in 20 Dateien,
+   die Abschnittsfläche 7-mal in zwei Varianten. Beide liegen jetzt als
+   `PANEL`/`PANEL_PADDED`/`PANEL_LARGE` in `layout.ts`; die Opazitäts- und
+   Radius-Varianten (`/40`, `/60`, `/70`, `rounded-2xl`) sind darauf
+   zusammengeführt. Ebenso wurde der Mikro-Text auf eine gemeinsame Skala
+   gehoben (`text-[10px]` → `text-[11px]`, `text-[11px]`/`text-[11.5px]` → `text-xs`,
+   246 Stellen in 33 Dateien) — kein Fließtext unter 11 px, Tabellenlabels und
+   Badges 12 px. Lange Absätze laufen nicht mehr über die volle Ultrawide-Breite
+   (`PROSE_MEASURE` = 90 ch je Textblock, Guide zweispaltig), Zahlen bleiben
+   tabellarisch (`tabular-nums`).
+7. **Doku-Viewer und Broker-Seite** teilen jetzt dieselben Rand-Konstanten wie
+   das Dashboard; die Doku-Katalogkarten und die Sprungleiste nutzen
+   `3xl`/`4xl` bzw. `PAGE_GUTTER_BLEED` statt eigener Zwischenwerte
+   (`min-[1900px]`).
+
+### Added — Layout-Vertrag als Test (2026-10-04)
+
+`tests/ui/Layout.test.tsx` (17 Tests, `renderToStaticMarkup` — kein Browser,
+kein Netz) sichert den Vertrag ab: volle Breite ohne `max-w-7xl`-Hülle (inkl.
+Quelltext-Scan über `src/**`), Seitenkopf, Tabellen-Rollen/`data-label`/
+Leerzustand, Reiter-ARIA-Muster und Roving Tabindex, Kennzahl-/Chip-/Button-
+Zustände, der Ladezustand ohne Falschwerte samt verknüpftem aktivem Reiter, die
+`3xl`/`4xl`-Rasterstufen der Seiten sowie die `globals.css`-Regeln für
+Breakpoints, Stapelung und Druck.
+Für den Umbau verifiziert: `npx next build` erzeugt die Raster-, Spalten- und
+Tabellen-Klassen (CSS-Audit der Build-Chunks), `npm test` und
+`npm run docs:validate` sind grün.
+
+### Fixed — beim Umbau gefundene Fehler (2026-10-04)
+
+- **Tailwind v4 erzeugte kein CSS für `autoFit("22rem")`:** Die Rasterklasse
+  wurde zur Laufzeit zusammengesetzt; da Tailwind Kandidaten **statisch** aus
+  dem Quelltext liest, enthielten die Build-Chunks **null** `repeat(auto-fit…)`
+  — die Kacheln blieben einspaltig. Jetzt stehen die vollständigen Klassennamen
+  als `AUTO_FIT_*`-Literale in `layout.ts`; ein Test verbietet Rückfälle.
+- **Doppelte Komponente:** `src/components/workshop/InfoTip.tsx` war eine
+  Zweitimplementierung von `src/components/ui/InfoTip.tsx` (unterschiedliche
+  Props, driftende Darstellung) — gelöscht, alle Aufrufer nutzen die Kit-Version.
+- **Doppelte/verwaiste JSDoc-Blöcke:** `ThemeSwitcher.tsx` trug seinen
+  Modulkommentar vierfach, `FirmDashboard.tsx` mehrfach, elf Panels je einen
+  leeren Doppelblock nach `"use client";` — zusammengeführt.
+- **Doppelter Import:** `OperationsCenterPanel.tsx` importierte
+  `AUTO_FIT_PANELS` zweimal.
+- **Toter Code:** Die Duplikate `Stat`, `Table` und `KpiTile` in
+  `FirmDashboard.tsx` sowie ein ungenutztes `badAgents` sind entfernt; die
+  Aufgaben liegen bei `MetricTile`/`DataTable`.
+- **Reiter-Vertrag:** Die Workshop-Schritte deklarierten `hint:`, das
+  `TabDef`-Type kannte nur `title:` (Typfehler bzw. unsichtbare Beschreibung) —
+  vereinheitlicht auf `title` mit sichtbarer Hinweiszeile.
+- **Verschwundener Hinweis im Risiko-Tab:** Der Statusblock
+  (`msg && …`, Rückmeldung nach dem Speichern eines Limits) fehlte im Markup —
+  wiederhergestellt.
+- **Monatsrenditen-Heatmap:** Der Scrollbereich der 14-spaltigen Matrix hatte
+  weder Namen noch Tastaturzugang → `role="region"` + `aria-label` +
+  `tabIndex=0` wie bei allen Tabellen.
 
 ## [0.14.0] — Doku-Viewer: volle Breite, themensortierte Navigation, scrollbare Tabellen & Indikatoren-Katalog (2026-10-04)
 

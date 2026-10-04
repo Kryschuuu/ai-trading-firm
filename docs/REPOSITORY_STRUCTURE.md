@@ -49,6 +49,7 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 │   │   ├── docs/              #   In-Browser-Doku-Viewer (Katalog + Dateibaum, siehe DOCS_VIEWER.md)
 │   │   └── *.tsx              #   Layout, Startseite
 │   ├── components/            # React-Komponenten (Dashboard, Control-Plane, Operations, Docs)
+│   │   └── ui/                # Layout-/Design-System: PageShell, DataTable, TabBar, MetricTile, Chip, Button, InfoTip
 │   ├── cycle/                 # Agenten-Zyklus: Steps (Technical/News/Macro/Research/Risk/…),
 │   │   │                      #   Orchestrierung, Plausibilitäts-Schicht, Artefakte
 │   │   └── steps/             #   ein Datei-Step je Agentenrolle

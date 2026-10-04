@@ -25,6 +25,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DOCS_SECTIONS, docsSection, type DocsNavItem, type DocsSection } from "@/lib/docsNav";
+import { PANEL, PAGE_GUTTER } from "@/components/ui/layout";
 import DocsMarkdown, { type DocLinkMap } from "./DocsMarkdown";
 import { MenuIcon } from "./DocsIcons";
 import { DocsNavList } from "./DocsNav";
@@ -155,7 +156,7 @@ export default function DocsView({
     <main className="min-h-screen bg-slate-950">
       {/* ── Kopf / Breadcrumb ──────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 backdrop-blur print:hidden">
-        <div className="flex w-full flex-wrap items-center gap-3 px-3 py-3 sm:px-5 lg:px-8 2xl:px-10">
+        <div className={`flex w-full flex-wrap items-center gap-3 py-3 ${PAGE_GUTTER}`}>
           <button
             type="button"
             onClick={() => setMenuOpen(true)}
@@ -168,7 +169,7 @@ export default function DocsView({
           </button>
 
           <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
-            <ol className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+            <ol className="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
               <li className="shrink-0">
                 <Link href="/docs" className="hover:text-emerald-400">
                   Dokumentation
@@ -216,7 +217,7 @@ export default function DocsView({
 
         {/* Mobiles Inhaltsverzeichnis (aufklappbar) */}
         {tocOpen && headings.length >= 3 && (
-          <nav aria-label="Inhaltsverzeichnis" className="border-t border-slate-800 px-3 py-3 sm:px-5 lg:px-8 2xl:hidden">
+          <nav aria-label="Inhaltsverzeichnis" className={`border-t border-slate-800 py-3 2xl:hidden ${PAGE_GUTTER}`}>
             <ul className="max-h-[45vh] space-y-0.5 overflow-y-auto">
               {headings.map((h) => (
                 <li key={h.id}>
@@ -236,7 +237,7 @@ export default function DocsView({
         )}
       </header>
 
-      <div className="flex w-full gap-6 px-3 py-5 sm:px-5 lg:px-8 2xl:px-10">
+      <div className={`flex w-full gap-6 py-5 ${PAGE_GUTTER}`}>
         {/* ── Sidebar (Desktop) ────────────────────────────────────────── */}
         <aside className="hidden w-[260px] shrink-0 lg:block 2xl:w-[290px]">
           <div className="sticky top-[76px] flex max-h-[calc(100vh-100px)] flex-col print:hidden">
@@ -247,9 +248,9 @@ export default function DocsView({
         {/* ── Inhalt ───────────────────────────────────────────────────── */}
         <div className="min-w-0 flex-1">
           {(subtitle || docPath) && (
-            <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-slate-500 print:hidden">
+            <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 print:hidden">
               {subtitle && <span className="min-w-0 flex-1">{subtitle}</span>}
-              <code className="rounded bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-500">{docPath}</code>
+              <code className="rounded bg-slate-900 px-1.5 py-0.5 text-xs text-slate-500">{docPath}</code>
             </div>
           )}
 
@@ -268,7 +269,7 @@ export default function DocsView({
                 className="hidden w-[230px] shrink-0 2xl:block print:hidden"
               >
                 <div className="sticky top-[76px] max-h-[calc(100vh-100px)] overflow-y-auto pr-1">
-                  <p className="mb-2 text-[11px] uppercase tracking-[0.15em] text-slate-500">Auf dieser Seite</p>
+                  <p className="mb-2 text-xs uppercase tracking-[0.15em] text-slate-500">Auf dieser Seite</p>
                   <ul className="space-y-0.5 border-l border-slate-800">
                     {headings.map((h) => (
                       <li key={h.id}>
@@ -298,9 +299,9 @@ export default function DocsView({
               {previous ? (
                 <Link
                   href={previous.path}
-                  className="min-w-0 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/40"
+                  className={`min-w-0 ${PANEL} px-4 py-3 hover:border-emerald-500/40`}
                 >
-                  <span className="block text-[11px] uppercase tracking-[0.12em] text-slate-500">← Vorher</span>
+                  <span className="block text-xs uppercase tracking-[0.12em] text-slate-500">← Vorher</span>
                   <span className="mt-0.5 block truncate text-sm text-slate-200">{previous.title}</span>
                 </Link>
               ) : (
@@ -309,16 +310,16 @@ export default function DocsView({
               {next && (
                 <Link
                   href={next.path}
-                  className="min-w-0 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-right hover:border-emerald-500/40 sm:text-right"
+                  className={`min-w-0 ${PANEL} px-4 py-3 text-right hover:border-emerald-500/40 sm:text-right`}
                 >
-                  <span className="block text-[11px] uppercase tracking-[0.12em] text-slate-500">Weiter →</span>
+                  <span className="block text-xs uppercase tracking-[0.12em] text-slate-500">Weiter →</span>
                   <span className="mt-0.5 block truncate text-sm text-slate-200">{next.title}</span>
                 </Link>
               )}
             </nav>
           )}
 
-          <p className="mt-4 text-[11px] text-slate-600 print:hidden">
+          <p className="mt-4 text-xs text-slate-600 print:hidden">
             {DOCS_SECTIONS.length} Themenbereiche · {nav.docs.length} Katalog-Dokumente · Quelle:{" "}
             <code>src/lib/docsCatalog.ts</code>
           </p>

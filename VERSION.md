@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.14.0` |
+| **Version** | `v0.15.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-04 |
-| **Quellbasiert** | `package.json` (`version: "0.14.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.15.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -409,6 +409,23 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.15.0` (2026-10-04) überarbeitet die **gesamte Oberfläche**. Bis dahin nutzte
+nur der Doku-Viewer die volle Bildschirmbreite; Dashboard und Broker-Seite
+endeten bei `max-w-7xl` (1280 px). Jetzt beziehen alle Seiten ihre Ränder,
+Kartenflächen und Textstile aus einem gemeinsamen Layout-System
+([`src/components/ui/layout.ts`](src/components/ui/layout.ts), `PageShell`), und
+zwei neue Breakpoints (`3xl` 1920 px, `4xl` 2560 px) lassen Statusleiste,
+Kennzahlen, Agenten-, Broker- und Katalogkarten bis Ultrawide mitwachsen.
+Tabellen laufen über den Baustein `DataTable` (sticky Spaltenköpfe, per
+Tastatur scrollbar, unterhalb `sm` beschriftete Karten je Zeile statt
+Viewport-Überlauf), die Bereiche über `TabBar`/`TabPanel` (WAI-ARIA-Muster,
+Pfeiltasten, Zähler-Badges, auf Mobile scrollbar statt mehrzeilig). Der
+Mikro-Text steigt auf eine gemeinsame Skala ohne Werte unter 11 px
+(246 Stellen), Lange Texte bleiben bei 90 ch je Block. Regeln, Breakpoints und
+Beispiele für neue Seiten: [`docs/UI_LAYOUT.md`](docs/UI_LAYOUT.md);
+Layout-Vertrag als Test: `tests/ui/Layout.test.tsx`. Details:
+[`CHANGELOG.md`](CHANGELOG.md).
 
 `v0.14.0` (2026-10-04) baut den **Doku-Viewer** um und schließt die
 Indikator-Dokumentation. Der Viewer (`/docs`) nutzt jetzt die volle

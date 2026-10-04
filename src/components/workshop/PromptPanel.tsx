@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Schritt 3 (Handbuch 6.3): system_prompt eines Agenten in der UI ändern —
  * ersetzt das psql-UPDATE auf agents. Änderungen wirken sofort (Prompts
@@ -13,9 +12,10 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import InfoTip from "./InfoTip";
+import InfoTip from "@/components/ui/InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import type { AgentPromptResponse, AgentRow } from "@/lib/types";
+import { PANEL } from "../ui/layout";
 
 
 /** Das Antwortformat aus Handbuch 6.3 — unverändert. */
@@ -159,7 +159,7 @@ export default function PromptPanel({
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {/* ── Editor ───────────────────────────────────────────────── */}
-      <section aria-labelledby="prompt-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="prompt-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex items-center">
           <h3 id="prompt-title" className="text-sm font-bold text-slate-100">System-Prompt bearbeiten</h3>
           <InfoTip
@@ -193,7 +193,7 @@ export default function PromptPanel({
             ))}
           </select>
           {agent && (
-            <p className="mt-1 text-[11px] text-slate-500">
+            <p className="mt-1 text-xs text-slate-500">
               Modell: <code className="font-mono">{agent.model}</code> · geändert: {new Date(agent.updatedAt).toLocaleString("de-DE")}
               {typeof agent.version === "number" && <> · Version <code className="font-mono">{agent.version}</code></>}
             </p>
@@ -209,7 +209,7 @@ export default function PromptPanel({
               text="Änderungen wirken sofort — Prompts stehen in der Datenbank, kein Neubau nötig. Guardrails dagegen brauchen einen Neubau: weiche vs. harte Schicht."
             />
           </label>
-          <span className="ml-auto text-[11px] text-slate-500">{prompt.trim().length}/8000</span>
+          <span className="ml-auto text-xs text-slate-500">{prompt.trim().length}/8000</span>
         </div>
         <textarea
           id="prompt-text"
@@ -246,8 +246,8 @@ export default function PromptPanel({
           >
             Zurücksetzen
           </button>
-          {dirty && <span className="text-[11px] text-amber-300">ungespeicherte Änderungen</span>}
-          {seedNote && <span className="text-[11px] text-sky-300">{seedNote}</span>}
+          {dirty && <span className="text-xs text-amber-300">ungespeicherte Änderungen</span>}
+          {seedNote && <span className="text-xs text-sky-300">{seedNote}</span>}
         </div>
 
         <div aria-live="polite" className="mt-3 space-y-2">
@@ -275,7 +275,7 @@ export default function PromptPanel({
       </section>
 
       {/* ── Format-Hilfe ─────────────────────────────────────────── */}
-      <section aria-labelledby="prompt-format-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="prompt-format-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex items-center">
           <h3 id="prompt-format-title" className="text-sm font-bold text-slate-100">Das Antwortformat (JSON)</h3>
           <InfoTip
@@ -287,11 +287,11 @@ export default function PromptPanel({
         <p className="mb-3 text-xs text-slate-400">
           Das Soll-Format für RESEARCH/EXECUTOR — vollständig und unverändert in den Prompt übernehmen:
         </p>
-        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-emerald-300">
+        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-xs leading-relaxed text-emerald-300">
 {JSON_FORMAT_SPEC}
         </pre>
         <p className="mb-2 mt-4 text-xs font-semibold text-slate-300">Vollständiges Beispiel:</p>
-        <pre className="overflow-x-auto rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-3 font-mono text-[11px] leading-relaxed text-emerald-200">
+        <pre className="overflow-x-auto rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-3 font-mono text-xs leading-relaxed text-emerald-200">
 {JSON_FORMAT_EXAMPLE}
         </pre>
         <button
@@ -303,7 +303,7 @@ export default function PromptPanel({
             );
             setOkMsg("");
           }}
-          className="mt-2 rounded border border-emerald-700 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10"
+          className="mt-2 rounded border border-emerald-700 px-2.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10"
           aria-label="Beispiel-JSON an den Prompt anhängen"
         >
           + Beispiel an Prompt anhängen
@@ -316,12 +316,12 @@ export default function PromptPanel({
                 <code className="font-mono text-sky-300">{f.name}</code>
                 <InfoTip id={`fmt-${f.name}`} label={f.name} text={f.help} />
               </dt>
-              <dd className="mt-0.5 text-[11px] leading-snug text-slate-400">{f.help}</dd>
+              <dd className="mt-0.5 text-xs leading-snug text-slate-400">{f.help}</dd>
             </div>
           ))}
         </dl>
 
-        <p className="mt-4 rounded-lg border border-sky-800/60 bg-sky-500/5 px-3 py-2 text-[11px] leading-relaxed text-sky-200">
+        <p className="mt-4 rounded-lg border border-sky-800/60 bg-sky-500/5 px-3 py-2 text-xs leading-relaxed text-sky-200">
           <strong>Regeln für gute Prompts:</strong> side ist immer „LONG“ (Shorts gesperrt) · stopLossPct zwischen 2 und 10 ·
           bei unklarer Lage <code className="font-mono">{"{\"type\":\"HOLD\"}"}</code> · niemals Kurse oder Kennzahlen erfinden ·
           keine Erklärung außerhalb des JSON.

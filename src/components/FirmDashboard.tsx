@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
  *
@@ -10,49 +9,15 @@
  * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
  * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
  * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
- * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
- * @/lib/types, React.
- */
-
-/**
- * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
  *
- * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
- * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
- * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
- * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
- * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
- * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
- * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
- * @/lib/types, React.
- */
-
-/**
- * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
+ * Layout seit v0.15.0: volle Bildschirmbreite (`PageShell`) statt
+ * `max-w-7xl`, eine Reiterleiste mit Rollen/Tastatursteuerung (`TabBar`),
+ * Kennzahlen als `MetricTile` und alle Tabellen als `DataTable`
+ * (Mobile: gestapelte Karten, Desktop: sticky Spaltenköpfe).
  *
- * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
- * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
- * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
- * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
- * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
- * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
  * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
- * @/lib/types, React.
+ * @/lib/types, @/components/ui/*.
  */
-
-/**
- * Firm-Dashboard — Hauptansicht der Paper-Trading-Firma.
- *
- * Zweck: aggregiert die Zustände (Firm-Load, Positionen, Equity, Risk-Limits,
- * adaptives Risk-System, Kill-Switch) in einer ansichtsweisen Oberfläche und
- * stellt die Betriebsaktionen bereit (Pipeline starten, Tick, Seed/Reset,
- * Not-Halt). Sämtliche Schreibaktionen laufen über die autorisierte API
- * (csrfHeaderValue aus @/lib/browserSession); Token/Secrets bleiben im
- * HttpOnly-Cookie bzw. auf dem Server (kein localStorage).
- * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
- * @/lib/types, React.
- */
-
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -76,7 +41,14 @@ import WorkshopTab from "./workshop/WorkshopTab";
 import BrokersPanel from "./control-plane/BrokersPanel";
 import OperationsCenterPanel from "./ops/OperationsCenterPanel";
 import EquityPanel from "./report/EquityPanel";
-import InfoTip from "./workshop/InfoTip";
+import InfoTip from "./ui/InfoTip";
+import DataTable from "./ui/DataTable";
+import MetricTile from "./ui/MetricTile";
+import Chip from "./ui/Chip";
+import Button from "./ui/Button";
+import TabBar, { TabPanel, type TabDef } from "./ui/Tabs";
+import { PageShell } from "./ui/PageShell";
+import { AUTO_FIT_CARDS, PANEL, PANEL_LARGE, PANEL_PADDED, SECTION_TITLE } from "./ui/layout";
 import ThemeSwitcher from "./ThemeSwitcher";
 import AuditTrailPanel from "./common/AuditTrailPanel";
 import { FirmIssueBox } from "./common/FirmIssueBox";
@@ -548,8 +520,6 @@ export default function FirmDashboard() {
     load();
   }
 
-  const badAgents = data.agents;
-  const openPositions = data.positions.filter((p) => p.status === "OPEN");
   /**
    * v1.36.41: Ein `401`/`403` beim Laden blendet das Token-Feld sofort ein —
    * auch ohne vorherige Aktion. `needToken` bleibt der manuelle Pfad
@@ -563,70 +533,90 @@ export default function FirmDashboard() {
    */
   const showTokenField = needToken || sessionExpired || sessionNeedsLogin(session);
 
+  /**
+   * Reiter mit Zählern: Die Zahl am Reiter beantwortet die Frage „wo passiert
+   * gerade etwas?“ ohne Klick (offene Positionen, Agenten, registrierte
+   * Venues). Die Beschreibungen landen als `title` am Reiter.
+   */
+  const tabDefs: TabDef<Tab>[] = TAB_DEFS.map((def) => ({
+    ...def,
+    badge:
+      def.id === "overview"
+        ? data.account.openPositions
+        : def.id === "agents"
+          ? data.agents.length
+          : def.id === "protocol"
+            ? data.auditLog.length
+            : def.id === "brokers"
+              ? Object.keys(data.brokers).length
+              : undefined,
+  }));
+
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      {/* Header */}
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.15em] text-emerald-400">
-            Open-Source · Local-First · No Cloud
-          </p>
-          <h1 className="mt-1 text-3xl font-bold text-slate-50">
-            Autonomous AI Trading Firm
-          </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Reference implementation for Ollama · PostgreSQL · Drizzle on your own hardware
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      eyebrow="Open-Source · Local-First · No Cloud"
+      title="Autonomous AI Trading Firm"
+      subtitle="Referenz-Implementierung für Ollama · PostgreSQL · Drizzle auf eigener Hardware — ausschließlich Paper-Trading."
+      actions={
+        <>
           <ThemeSwitcher />
-          <Link
-            href="/docs"
-            className="rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
-          >
+          <Link href="/docs" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950">
             📖 Doku &amp; Installation
           </Link>
-          <button
-            onClick={() => runTick()}
-            disabled={running !== null}
-            className="rounded-lg border border-sky-700/50 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-50"
-          >
+          <Button variant="info" onClick={() => runTick()} busy={running === "tick"} disabled={running !== null}>
             {running === "tick" ? "Tick läuft…" : "⟳ Markt-Tick"}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => runPipeline()}
+            busy={running === "pipeline"}
             disabled={running !== null}
-            className={`rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-60 ${
-              running === "pipeline"
-                ? "animate-pulse border-emerald-500/80 bg-emerald-500/20 text-emerald-300"
-                : "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
-            }`}
+            className={running === "pipeline" ? "animate-pulse" : undefined}
           >
             {running === "pipeline" ? "Pipeline läuft…" : "▶▶ Ganze Pipeline"}
-          </button>
-          <button
-            onClick={() => seed()}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
-          >
+          </Button>
+          <Button variant="subtle" onClick={() => seed()}>
             Seed / Reset
-          </button>
+          </Button>
           {data.killSwitchArmed ? (
-            <button
-              onClick={() => kill(false)}
-              className="rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-slate-600"
-            >
+            <Button variant="subtle" onClick={() => kill(false)} title="Not-Halt nach Admin-Challenge entschärfen">
               Disarm Kill Switch
-            </button>
+            </Button>
           ) : (
-            <button
-              onClick={() => kill(true)}
-              className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg hover:bg-red-500"
-            >
+            <Button variant="danger" onClick={() => kill(true)} title="Blockiert sofort alle neuen Orders und stellt offene Positionen glatt">
               🛑 Pull Kill Switch
-            </button>
+            </Button>
           )}
-        </div>
-      </header>
+        </>
+      }
+    >
+      {/* Betriebsstatus in einer Zeile — die drei Aussagen, die man im
+          Betrieb immer sehen will, ohne in einen Tab zu wechseln. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Chip tone="good" title="Es ist zu keinem Zeitpunkt echtes Kapital im Spiel">
+          Paper-Trading
+        </Chip>
+        <Chip tone="bad" title="Live-Gate ist gesperrt — kein UI-Pfad kann das ändern (docs/LIVE_TRADING.md)">
+          Live gesperrt
+        </Chip>
+        <Chip
+          tone={data.killSwitchArmed ? "bad" : "neutral"}
+          title="Kill-Switch: blockiert neue Einstiege, lässt Stop-Loss/Take-Profit und Schließen weiterlaufen"
+        >
+          {data.killSwitchArmed ? "Not-Halt aktiv" : "Not-Halt bereit"}
+        </Chip>
+        <Chip
+          tone={data.scheduler.enabled ? "good" : "warn"}
+          title="Hintergrund-Takt (60 s): Kurse, SL/TP, Equity-Snapshot"
+        >
+          {data.scheduler.enabled ? "Monitor aktiv" : "Monitor aus"}
+        </Chip>
+        {data.timestamp && (
+          <span className="ml-auto text-xs text-slate-500">
+            Stand {new Date(data.timestamp).toLocaleTimeString("de-DE")}
+          </span>
+        )}
+      </div>
 
       {/* Pipeline-Statusleiste — bei laufender/neu gestarteter Pipeline
           pulsierender Emerald-Block mit Glow; nach Abschluss grün (20 s),
@@ -635,7 +625,7 @@ export default function FirmDashboard() {
         <div
           role="status"
           aria-live="polite"
-          className={`mb-6 flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
+          className={`mb-4 flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
             pipeline.phase === "failed"
               ? "border-red-500/70 bg-red-500/15 shadow-[0_0_20px_-6px_var(--color-red-500)]"
               : pipeline.phase === "running"
@@ -661,7 +651,7 @@ export default function FirmDashboard() {
               {pipeline.phase === "failed" && "Pipeline fehlgeschlagen"}
             </p>
             <p
-              className={`mt-0.5 truncate text-xs ${
+              className={`mt-0.5 text-xs ${
                 pipeline.phase === "failed" ? "text-red-200/80" : "text-emerald-200/70"
               }`}
             >
@@ -688,32 +678,59 @@ export default function FirmDashboard() {
         now={sessionNow}
       />
 
-      {/* Status strip */}
-      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-        <Stat
+      {firmIssue && (
+        <div className="mt-4">
+          <FirmIssueBox issue={firmIssue} />
+        </div>
+      )}
+
+      {/* Status strip — Raster nach Inhaltsbreite: mobil zwei Spalten,
+          auf Ultrawide alle sieben nebeneinander (statt fester Stufen).
+          Während des ersten Loads stehen hier Platzhalter statt Nullen: eine
+          „0“ in Paper-Equity oder Drawdown wäre schlicht falsch und würde
+          beim Blick auf den Bildschirm Fehlalarm auslösen. */}
+      <section
+        className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 3xl:grid-cols-7"
+        aria-label="Betriebskennzahlen"
+        aria-busy={loading}
+      >
+        <MetricTile
           label="Paper-Equity"
           value={`$${data.account.equity.toLocaleString()}`}
           hint="Kontostand des Paper-Depots: freies Cash + Marktwert aller offenen Positionen. Basis der Kurve im Tab „Reports“."
+          loading={loading}
         />
-        <Stat
+        <MetricTile
           label="Freies Cash"
           value={`$${data.account.freeCash.toLocaleString()}`}
           hint="Nicht investiertes Guthaben. Neue Positionen können nur aus diesem Betrag finanziert werden."
+          loading={loading}
         />
-        <Stat
+        <MetricTile
           label="Drawdown"
           value={`${data.account.drawdownPct.toFixed(2)} %`}
-          danger={data.account.drawdownPct >= Number(data.riskLimits.maxEquityDrawdownPct ?? 0.15) * 100}
+          tone={
+            data.account.drawdownPct >= Number(data.riskLimits.maxEquityDrawdownPct ?? 0.15) * 100
+              ? "bad"
+              : "neutral"
+          }
           hint={`Abstand zum Startkapital ($${Number(data.account.startingEquity).toLocaleString()}) — die Grenze für den Circuit-Breaker ist ${(Number(data.riskLimits.maxEquityDrawdownPct ?? 0.15) * 100).toFixed(0)} %. Der Drawdown vom Höchststand (Peak-to-Trough) steht im Report.`}
+          loading={loading}
         />
-        <Stat label="Offene Positionen" value={`${data.account.openPositions}`} hint="Aktuell gehaltene Positionen. Sie zählen mit ihrem Marktwert in die Equity." />
-        <Stat
+        <MetricTile
+          label="Offene Positionen"
+          value={`${data.account.openPositions}`}
+          hint="Aktuell gehaltene Positionen. Sie zählen mit ihrem Marktwert in die Equity."
+          loading={loading}
+        />
+        <MetricTile
           label="Not-Halt"
           value={data.killSwitchArmed ? "AKTIV" : "sicher"}
-          danger={data.killSwitchArmed}
+          alarm={data.killSwitchArmed}
           hint="Kill-Switch: blockiert neue Einstiege, lässt aber Stop-Loss/Take-Profit und das Schließen offener Positionen weiterlaufen."
+          loading={loading}
         />
-        <Stat
+        <MetricTile
           label="Monitor"
           value={
             !data.scheduler.enabled
@@ -722,50 +739,61 @@ export default function FirmDashboard() {
                 ? `Tick ${new Date(data.scheduler.lastTickAt).toLocaleTimeString("de-DE")}`
                 : "wartet"
           }
-          danger={!data.scheduler.enabled}
+          tone={data.scheduler.enabled ? "neutral" : "warn"}
           hint="Hintergrund-Takt (60 s): Kurse aktualisieren, SL/TP prüfen, Equity-Snapshot schreiben. Ohne Takt steht die Kurve still."
+          loading={loading}
         />
-        <Stat
+        <MetricTile
           label="Lokales LLM"
           value={data.ollama.available ? `Ollama (${data.ollama.models.length})` : "Regel-Engine"}
-          danger={!data.ollama.available}
+          tone={data.ollama.available ? "neutral" : "warn"}
           hint="Ob ein lokales Modell über Ollama erreichbar ist. Ohne Modell entscheidet die deterministische Regel-Engine — das ist ein gültiger, nur weniger kreativer Betrieb."
+          loading={loading}
         />
       </section>
 
-      {/* Tabs */}
-      <nav className="mb-6 flex flex-wrap gap-2">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              tab === t.id
-                ? "bg-emerald-500 text-slate-950"
-                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      {firmIssue && <FirmIssueBox issue={firmIssue} />}
+      {/* Reiter — sticky, mit Pfeiltasten bedienbar, auf Mobile scrollbar. */}
+      <div className="mt-5">
+        <TabBar tabs={tabDefs} active={tab} onChange={setTab} ariaLabel="Dashboard-Bereiche" />
+      </div>
 
       {loading ? (
-        <p className="py-16 text-center text-slate-400">Loading firm state…</p>
+        // Der aktive Reiter existiert schon (sonst zeigte `aria-controls` ins
+        // Leere) und trägt das Skelett; so bleibt die Reiterleiste während des
+        // Ladens bedienbar statt auf einen leeren Bereich zu zeigen.
+        <TabPanel id={tab} idPrefix="tab">
+          <div className="grid gap-4 lg:grid-cols-2" aria-busy="true" role="status" aria-label="Firmenzustand wird geladen">
+            <div className={`${PANEL_PADDED} h-40`}>
+              <div className="h-3 w-32 rounded bg-slate-800" />
+              <div className="mt-3 h-2.5 w-full rounded bg-slate-800/70" />
+              <div className="mt-2 h-2.5 w-4/5 rounded bg-slate-800/70" />
+            </div>
+            <div className={`${PANEL_PADDED} h-40`}>
+              <div className="h-3 w-24 rounded bg-slate-800" />
+              <div className="mt-3 h-2.5 w-full rounded bg-slate-800/70" />
+              <div className="mt-2 h-2.5 w-3/5 rounded bg-slate-800/70" />
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">Firmenzustand wird geladen …</p>
+        </TabPanel>
       ) : (
         <>
-          {tab === "overview" && (
-            <OverviewTab data={data} openPositions={openPositions} />
-          )}
-          {tab === "reports" && <ReportsTab />}
-          {tab === "protocol" && <ProtocolTab />}
-          {tab === "agents" && <AgentsTab data={data} running={running} onRun={runAgent} />}
-          {tab === "ops" && (
+          <TabPanel id="overview">
+            <OverviewTab data={data} />
+          </TabPanel>
+          <TabPanel id="reports">
+            <ReportsTab />
+          </TabPanel>
+          <TabPanel id="protocol">
+            <ProtocolTab />
+          </TabPanel>
+          <TabPanel id="agents">
+            <AgentsTab data={data} running={running} onRun={runAgent} />
+          </TabPanel>
+          <TabPanel id="ops">
             <OperationsCenterPanel onOpenTab={(target) => setTab(target as Tab)} />
-          )}
-          {tab === "workshop" && (
+          </TabPanel>
+          <TabPanel id="workshop">
             <WorkshopTab
               agents={data.agents}
               missions={data.missions}
@@ -776,165 +804,147 @@ export default function FirmDashboard() {
               }}
               onOpenProtocol={() => setTab("protocol")}
             />
-          )}
-          {tab === "brokers" && (
+          </TabPanel>
+          <TabPanel id="brokers">
             <BrokersPanel
               onUnauthorized={() => {
                 setNeedToken(true);
                 setNotice("🔒 Diese Aktion braucht den API-Token (FIRM_API_TOKEN/FIRM_ADMIN_TOKEN).");
               }}
             />
-          )}
-          {tab === "risk" && <RiskTab data={data} onChanged={load} />}
-          {tab === "architecture" && <ArchitectureTab />}
+          </TabPanel>
+          <TabPanel id="risk">
+            <RiskTab data={data} onChanged={load} />
+          </TabPanel>
+          <TabPanel id="architecture">
+            <ArchitectureTab />
+          </TabPanel>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }
 
-const tabs: { id: Tab; label: string }[] = [
-  { id: "overview", label: "Firm Overview" },
-  { id: "reports", label: "📊 Reports" },
-  { id: "protocol", label: "📋 Protokoll" },
-  { id: "agents", label: "Agents ↗ Orchestrator" },
-  { id: "workshop", label: "🛠 Workshop" },
-  { id: "ops", label: "🧭 Operations Center" },
-  { id: "brokers", label: "🌐 Brokers & Venues" },
-  { id: "risk", label: "Risk & Guardrails" },
-  { id: "architecture", label: "Design Decisions / Guide" },
+/**
+ * Reiter-Definitionen des Dashboards — Reihenfolge = Arbeitsablauf der Firma
+ * (Überblick → Auswertung → Protokoll → Agenten → Werkstatt → Betrieb →
+ * Broker → Risiko → Design). `title` erklärt den Bereich beim Überfahren.
+ */
+const TAB_DEFS: readonly TabDef<Tab>[] = [
+  { id: "overview", label: "Firm Overview", icon: "🏛", title: "Missionen, Positionen, Approval-Queue und Audit-Trail" },
+  { id: "reports", label: "Reports", icon: "📊", title: "Kennzahlen je Zeitraum, Equity-Kurve, Empfehlungen" },
+  { id: "protocol", label: "Protokoll", icon: "📋", title: "Agenten-Turns, Analysen und revisionssicheres Audit-Log" },
+  { id: "agents", label: "Agents & Orchestrator", icon: "🤖", title: "Team, Rollen und einzelne Agenten-Turns starten" },
+  { id: "workshop", label: "Workshop", icon: "🛠", title: "Missionen, Prompts, Regel-Backtests und Hit-Rate" },
+  { id: "ops", label: "Operations Center", icon: "🧭", title: "Zehn Sektionen: Universum, Scanner, Portfolio, Broker, LLM, Risiko …" },
+  { id: "brokers", label: "Brokers & Venues", icon: "🌐", title: "Verbindungsstatus, Berechtigungen, Coverage je Venue" },
+  { id: "risk", label: "Risk & Guardrails", icon: "🛡", title: "Risikolimits, Volatilitäts-Schwellen und Kill-Switch-Historie" },
+  { id: "architecture", label: "Design & Guide", icon: "📐", title: "Grundprinzip, Sicherheitsschichten, Hardware und Broker-Stand" },
 ];
 
-function Stat({
-  label,
-  value,
-  danger,
-  hint,
-}: {
-  label: string;
-  value: string;
-  danger?: boolean;
-  /** Kurzdefinition für Hover/InfoTip — Kennzahlen ohne Erklärung sind im Betrieb wertlos. */
-  hint?: string;
-}) {
-  return (
-    <div className={`rounded-xl border px-4 py-3 ${danger ? "border-red-700 bg-red-950/40" : "border-slate-800 bg-slate-900/60"}`}>
-      <p className="flex items-center text-[11px] uppercase tracking-wider text-slate-400">
-        {label}
-        {hint && <InfoTip label={label} text={hint} />}
-      </p>
-      <p className={`mt-1 text-lg font-bold tabular-nums ${danger ? "text-red-400" : "text-slate-100"}`}>{value}</p>
-    </div>
-  );
-}
-
-function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
-            {head.map((h) => (
-              <th key={h} className="px-4 py-2 font-semibold">{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-b border-slate-800/60 last:border-0">
-              {r.map((c, j) => (
-                <td key={j} className="px-4 py-2 text-slate-300">{c}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function OverviewTab({ data, openPositions }: { data: FirmData; openPositions: any[] }) {
+/**
+ * Überblick: Missionen, Positionen, Approval-Queue, Audit-Trail.
+ *
+ * Anordnung seit v0.15.0 nach Informationswert statt nach Eingangsreihenfolge:
+ * Die **Positionen** stehen zuerst und über die volle Breite (10 Spalten,
+ * auf Ultrawide ohne Umbruch lesbar), darunter **Missionen** und
+ * **Approval-Queue** nebeneinander — das sind die beiden Listen, die man
+ * beim Durchsehen vergleicht. Der Audit-Trail bleibt am Ende (Detailtiefe).
+ */
+function OverviewTab({ data }: { data: FirmData }) {
   return (
     <div className="space-y-6">
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Missions</h2>
-        <Table
-          head={["Titel", "Ziel", "Symbol / Segment", "Risikobudget", "Status"]}
-          rows={data.missions.map((m) => [
-            <span key={m.id} className="font-semibold text-slate-200">{m.title}</span>,
-            // Auf Wortgrenze gekürzt, vollständiger Text im Tooltip — kein harter Schnitt mitten im Wort.
-            <span key={`${m.id}-objective`} title={m.objective} className="block max-w-xl">
-              {firstSentence(m.objective, 120)}
+        <h2 className={SECTION_TITLE}>
+          Positionen
+          <InfoTip
+            label="Positionen"
+            text="Alle vom Executor eröffneten Positionen inklusive Marktwert, Stop-Loss, Take-Profit und schwebendem P&L. Gezeigt werden die ersten 15 Datensätze."
+          />
+        </h2>
+        <DataTable
+          label="Positionen"
+          maxHeight="70vh"
+          stickyHead
+          head={["Status", "Symbol", "Side", "Menge", "Einstieg", "SL", "TP", "Kurs", "PnL", "Exit-Grund"]}
+          empty="Keine Positionen. Pipeline oder Executor gegen eine aktive Mission laufen lassen."
+          rows={data.positions.slice(0, 15).map((p) => [
+            p.status,
+            <span key={`${p.id}-symbol`} className="font-semibold text-slate-200">{p.symbol}</span>,
+            p.side,
+            p.qty,
+            p.entryPrice,
+            p.stopLoss ?? "—",
+            p.takeProfit ?? "—",
+            p.lastPrice ?? "—",
+            <span
+              key={p.id}
+              className={(Number(p.unrealizedPnl) >= 0 ? "text-emerald-400" : "text-red-400") + " font-semibold tabular-nums"}
+            >
+              {(Number(p.unrealizedPnl) >= 0 ? "+" : "") + Number(p.unrealizedPnl).toFixed(2)}
             </span>,
-            // Missions-Typ (v1.35.0): Einzel-Symbol oder „Markt-Scan: <Segment>“.
-            <span key={`${m.id}-scope`} title={m.symbol ?? missionScopeLabel(m)}>
-              {missionScopeLabel(m)}
-            </span>,
-            `${(Number(m.riskBudget) * 100).toFixed(0)} %`,
-            m.status,
+            p.exitReason ?? "—",
           ])}
         />
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Positionen</h2>
-        {data.positions.length === 0 ? (
-          <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">
-            Keine Positionen. Pipeline oder Executor gegen eine aktive Mission laufen lassen.
-          </p>
-        ) : (
-          <Table
-            head={["Status", "Symbol", "Side", "Qty", "Entry", "SL", "TP", "Kurs", "PnL", "Exit-Grund"]}
-            rows={data.positions.slice(0, 15).map((p) => [
-              p.status,
-              p.symbol,
-              p.side,
-              p.qty,
-              p.entryPrice,
-              p.stopLoss ?? "—",
-              p.takeProfit ?? "—",
-              p.lastPrice ?? "—",
-              <span
-                key={p.id}
-                className={(Number(p.unrealizedPnl) >= 0 ? "text-emerald-400" : "text-red-400") + " font-semibold"}
-              >
-                {(Number(p.unrealizedPnl) >= 0 ? "+" : "") + Number(p.unrealizedPnl).toFixed(2)}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <section>
+          <h2 className={SECTION_TITLE}>Missionen</h2>
+          <DataTable
+            label="Missionen"
+            head={["Titel", "Ziel", "Symbol / Segment", "Risikobudget", "Status"]}
+            empty="Keine Mission angelegt — „Seed / Reset“ im Kopfbereich legt das Standard-Team an."
+            rows={data.missions.map((m) => [
+              <span key={m.id} className="font-semibold text-slate-200">{m.title}</span>,
+              // Auf Wortgrenze gekürzt, vollständiger Text im Tooltip — kein harter Schnitt mitten im Wort.
+              <span key={`${m.id}-objective`} title={m.objective} className="block">
+                {firstSentence(m.objective, 120)}
               </span>,
-              p.exitReason ?? "—",
+              // Missions-Typ (v1.35.0): Einzel-Symbol oder „Markt-Scan: <Segment>“.
+              <span key={`${m.id}-scope`} title={m.symbol ?? missionScopeLabel(m)}>
+                {missionScopeLabel(m)}
+              </span>,
+              `${(Number(m.riskBudget) * 100).toFixed(0)} %`,
+              <Chip key={`${m.id}-status`} tone={m.status === "ACTIVE" ? "good" : "neutral"}>
+                {m.status}
+              </Chip>,
             ])}
           />
-        )}
-      </section>
+        </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Approval Queue</h2>
-        <Table
-          head={["Aktion", "Vorgeschlagene Order", "Risiko-Score", "Status"]}
-          rows={data.proposals.map((p) => {
-            const detail = p.proposedDetail ?? {};
-            const summary = [
-              detail.symbol ? String(detail.symbol) : null,
-              detail.side ? String(detail.side).toUpperCase() : null,
-              detail.reason ? String(detail.reason) : null,
-            ]
-              .filter((part): part is string => Boolean(part))
-              .join(" · ");
-            return [
-              p.action,
-              <details key={p.id} className="max-w-xl">
-                <summary className="cursor-pointer text-slate-300">
-                  {summary || "Details anzeigen"}
-                </summary>
-                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-2 font-mono text-[11px] text-slate-300">
-                  {JSON.stringify(detail, null, 2)}
-                </pre>
-              </details>,
-              p.riskScore,
-              p.status,
-            ];
-          })}
-        />
-      </section>
+        <section>
+          <h2 className={SECTION_TITLE}>Approval Queue</h2>
+          <DataTable
+            label="Approval Queue"
+            head={["Aktion", "Vorgeschlagene Order", "Risiko-Score", "Status"]}
+            empty="Keine offenen Vorschläge."
+            rows={data.proposals.map((p) => {
+              const detail = p.proposedDetail ?? {};
+              const summary = [
+                detail.symbol ? String(detail.symbol) : null,
+                detail.side ? String(detail.side).toUpperCase() : null,
+                detail.reason ? String(detail.reason) : null,
+              ]
+                .filter((part): part is string => Boolean(part))
+                .join(" · ");
+              return [
+                p.action,
+                <details key={p.id}>
+                  <summary className="cursor-pointer text-slate-300">
+                    {summary || "Details anzeigen"}
+                  </summary>
+                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-2 font-mono text-xs text-slate-300">
+                    {JSON.stringify(detail, null, 2)}
+                  </pre>
+                </details>,
+                p.riskScore,
+                <Chip key={`${p.id}-status`} tone="info">{p.status}</Chip>,
+              ];
+            })}
+          />
+        </section>
+      </div>
 
       {/* Audit-Trail: aufklappbar, vollständig geparst, mit Paging (20/50/100/200). */}
       <AuditTrailPanel
@@ -1003,41 +1013,6 @@ type ReportData = {
   }[];
   summary: string[];
 };
-
-/**
- * KPI-Kachel im Report. Jede Kennzahl trägt eine Kurzdefinition (InfoTip +
- * natives `title`) — vorher standen nackte Zahlen ohne Einheit und ohne
- * Erklärung im Raum („Max Drawdown 0.0 %“ war nicht von „nicht berechnet“
- * zu unterscheiden).
- */
-function KpiTile({
-  label,
-  value,
-  tone,
-  hint,
-  sub,
-}: {
-  label: string;
-  value: string;
-  tone?: "good" | "bad";
-  hint?: string;
-  sub?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-      <p className="flex items-center text-[11px] uppercase tracking-wider text-slate-400">
-        {label}
-        {hint && <InfoTip label={label} text={hint} />}
-      </p>
-      <p className={`mt-1 text-lg font-bold tabular-nums ${
-        tone === "good" ? "text-emerald-400" : tone === "bad" ? "text-red-400" : "text-slate-100"
-      }`}>
-        {value}
-      </p>
-      {sub && <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{sub}</p>}
-    </div>
-  );
-}
 
 /**
  * Reports-Tab (Führungssicht). Links die Kennzahlen des Zeitraums (aus
@@ -1116,21 +1091,21 @@ function ReportsTab() {
       {/* KPI-Kacheln: Ergebnis */}
       {k && (
         <section>
-          <h2 className="mb-2 flex items-center text-sm font-semibold uppercase tracking-wider text-slate-400">
+          <h2 className={`mb-2 ${SECTION_TITLE}`}>
             Ergebnis (abgeschlossene Trades)
             <InfoTip
               label="Ergebnis"
               text="Alle Kacheln dieser Zeile beziehen sich auf Trades, die im gewählten Zeitraum geschlossen wurden. Schwebende Positionen zählen erst nach dem Schließen."
             />
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            <KpiTile
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 3xl:grid-cols-6">
+            <MetricTile
               label="Trades"
               value={String(k.trades)}
               hint="Anzahl geschlossener Positionen im Zeitraum (nicht die offenen)."
               sub={k.avgHoldHours != null ? `Ø Haltedauer ${k.avgHoldHours.toFixed(1)} h` : undefined}
             />
-            <KpiTile
+            <MetricTile
               label="Realisiertes P&L"
               value={money(k.realizedPnl)}
               tone={k.realizedPnl > 0 ? "good" : k.realizedPnl < 0 ? "bad" : undefined}
@@ -1141,27 +1116,27 @@ function ReportsTab() {
                   : undefined
               }
             />
-            <KpiTile
+            <MetricTile
               label="Trefferquote"
               value={k.winRate != null ? `${k.winRate} %` : "—"}
               tone={k.winRate != null && k.winRate >= 50 ? "good" : k.winRate != null ? "bad" : undefined}
               hint="Anteil der Trades mit positivem realisiertem P&L. Eine hohe Trefferquote allein sagt nichts über die Profitabilität — dafür sind Profit-Faktor und Erwartungswert da."
               sub={k.trades > 0 ? `${Math.round((k.winRate ?? 0) / 100 * k.trades)} von ${k.trades} gewonnen` : undefined}
             />
-            <KpiTile
+            <MetricTile
               label="Profit-Faktor"
               value={k.profitFactor != null ? (k.profitFactor === Infinity ? "∞" : k.profitFactor.toFixed(2)) : "—"}
               tone={k.profitFactor != null && k.profitFactor >= 1.5 ? "good" : k.profitFactor != null && k.profitFactor < 1 ? "bad" : undefined}
               hint="Bruttogewinne ÷ Bruttoverluste. > 1 ist profitabel, < 1 verliert Geld; ∞ heißt: es gab keinen Verlusttrade."
             />
-            <KpiTile
+            <MetricTile
               label="Erwartungswert / Trade"
               value={money(k.expectancy ?? null)}
               tone={k.expectancy != null && k.expectancy > 0 ? "good" : k.expectancy != null && k.expectancy < 0 ? "bad" : undefined}
               hint="Durchschnittlicher Gewinn/Verlust je Trade. Die pragmatischste Kennzahl: positiv heißt, das System verdient pro Trade Geld."
               sub={k.payoffRatio != null ? `Gewinn/Verlust-Verhältnis ${k.payoffRatio.toFixed(2)}` : undefined}
             />
-            <KpiTile
+            <MetricTile
               label="Max. Drawdown"
               value={k.maxDrawdownPct != null ? `−${k.maxDrawdownPct.toFixed(2)} %` : "—"}
               tone={k.maxDrawdownPct > 10 ? "bad" : undefined}
@@ -1172,32 +1147,32 @@ function ReportsTab() {
                   : "kein Rückgang im Zeitraum"
               }
             />
-            <KpiTile
+            <MetricTile
               label="Aktueller Drawdown"
               value={pct(-(k.currentDrawdownPct ?? 0))}
               tone={(k.currentDrawdownPct ?? 0) > 0 ? "bad" : "good"}
               hint="Abstand zum laufenden Höchststand (High-Water-Mark) am Ende des Zeitraums. 0 % = das Konto steht auf oder über seinem Hoch."
               sub={k.recoveredAt ? `erholt am ${new Date(k.recoveredAt).toLocaleDateString("de-DE")}` : (k.maxDrawdownPct ?? 0) > 0 ? "noch nicht erholt" : undefined}
             />
-            <KpiTile
+            <MetricTile
               label="Serien"
               value={`${k.maxWinStreak ?? 0} / ${k.maxLossStreak ?? 0}`}
               hint="Längste Gewinnserie / längste Verlustserie in Trades. Verlustserien sind der Realitätstest für die Nerven — und für den Circuit-Breaker."
               sub="Gewinne / Verluste in Folge"
             />
-            <KpiTile
+            <MetricTile
               label="Stops ausgelöst"
               value={String(k.stopLossHits)}
               tone={k.stopLossHits > 0 ? "bad" : undefined}
               hint="Trades, die über den Stop-Loss beendet wurden. Viele Stops ohne Take-Profits deuten auf zu enge Stops oder ein unpassendes Regime."
             />
-            <KpiTile
+            <MetricTile
               label="TPs erreicht"
               value={String(k.takeProfitHits)}
               tone={k.takeProfitHits > 0 ? "good" : undefined}
               hint="Trades, die über das Take-Profit-Ziel beendet wurden."
             />
-            <KpiTile
+            <MetricTile
               label="Bester / schwächster Trade"
               value={
                 k.bestTrade && k.worstTrade
@@ -1225,33 +1200,33 @@ function ReportsTab() {
       {/* Empfehlungen des Hauses */}
       {report && report.recommendations.length > 0 && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+          <h2 className={`mb-2 ${SECTION_TITLE}`}>
             💡 Empfehlungen des Hauses
           </h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className={AUTO_FIT_CARDS}>
             {(report?.recommendations ?? []).map((r, i) => {
               return (
-                <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+                <div key={i} className={`${PANEL} p-4`}>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-slate-100">{r.symbol}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                    <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold ${
                       r.side === "LONG" ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
                     }`}>
                       {r.side}
                     </span>
-                    {r.horizon && <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-300">{r.horizon}</span>}
-                    {!r.fresh && <span className="text-[10px] text-amber-400">⚠️ älter als 24 h</span>}
-                    <span className="ml-auto text-[11px] text-slate-500">{r.role}</span>
+                    {r.horizon && <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[11px] text-sky-300">{r.horizon}</span>}
+                    {!r.fresh && <span className="text-[11px] text-amber-400">⚠️ älter als 24 h</span>}
+                    <span className="ml-auto text-xs text-slate-500">{r.role}</span>
                   </div>
                   {r.thesis && <p className="mt-1 text-xs text-slate-300">{r.thesis}</p>}
-                  <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-400">
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400">
                     {r.entryZone && <span>Einstieg: <b className="text-slate-200">{r.entryZone}</b></span>}
                     {r.stopLoss && <span>Stop: <b className="text-red-300">{r.stopLoss}</b></span>}
                     {r.target && <span>Ziel: <b className="text-emerald-300">{r.target}</b></span>}
                     {typeof r.confidence === "number" && <span>Konfidenz: {(r.confidence * 100).toFixed(0)} %</span>}
                   </div>
                   {r.riskFlags && r.riskFlags.length > 0 && (
-                    <p className="mt-1 text-[11px] text-amber-400">⚠️ Risiken: {r.riskFlags.join(", ")}</p>
+                    <p className="mt-1 text-xs text-amber-400">⚠️ Risiken: {r.riskFlags.join(", ")}</p>
                   )}
                 </div>
               );
@@ -1262,41 +1237,35 @@ function ReportsTab() {
 
       {/* Symbol-Breakdown + Blocks */}
       {report && (
-        <section className="grid gap-6 lg:grid-cols-2">
+        <section className="grid gap-6 xl:grid-cols-2">
           <div>
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Pro Symbol</h2>
-            <Table
+            <h2 className={`mb-2 ${SECTION_TITLE}`}>Pro Symbol</h2>
+            <DataTable
+              label="Ergebnis pro Symbol"
               head={["Symbol", "Trades", "Gewinner", "P&L"]}
+              empty="Keine geschlossenen Trades im Zeitraum."
               rows={report.symbols.map((s) => [
                 s.symbol,
                 s.trades,
                 `${s.wins}/${s.trades}`,
-                <span key={s.symbol} className={(s.pnl >= 0 ? "text-emerald-400" : "text-red-400") + " font-semibold"}>
+                <span key={s.symbol} className={(s.pnl >= 0 ? "text-emerald-400" : "text-red-400") + " font-semibold tabular-nums"}>
                   {(s.pnl >= 0 ? "+" : "") + s.pnl.toFixed(2)}
                 </span>,
               ])}
             />
-            {report.symbols.length === 0 && (
-              <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 text-xs text-slate-500">
-                Keine geschlossenen Trades im Zeitraum.
-              </p>
-            )}
           </div>
           <div>
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">Blöcke & Gründe</h2>
-            <Table
+            <h2 className={`mb-2 ${SECTION_TITLE}`}>Blöcke & Gründe</h2>
+            <DataTable
+              label="Blockierte Orders und Gründe"
               head={["Grund", "Anzahl", "Bedeutung"]}
+              empty="Keine blockierten Orders im Zeitraum."
               rows={report.blocks.map((b) => [
-                <code key={b.reason} className="font-mono text-[11px] text-amber-300">{b.reason}</code>,
+                <code key={b.reason} className="font-mono text-xs text-amber-300">{b.reason}</code>,
                 b.count,
                 b.explanation ?? "—",
               ])}
             />
-            {report.blocks.length === 0 && (
-              <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 text-xs text-slate-500">
-                Keine blockierten Orders im Zeitraum.
-              </p>
-            )}
           </div>
         </section>
       )}
@@ -1304,10 +1273,11 @@ function ReportsTab() {
       {/* Bemerkenswerte Ereignisse */}
       {report && report.notableEvents.length > 0 && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+          <h2 className={`mb-2 ${SECTION_TITLE}`}>
             Wichtige Ereignisse (SL/TP, Kill-Switch, Konfiguration)
           </h2>
-          <Table
+          <DataTable
+            label="Wichtige Ereignisse im Zeitraum"
             head={["Zeit", "Ereignis", "Stufe", "Was ist passiert?"]}
             rows={report.notableEvents.map((e) => {
               // Derselbe Aufbereiter wie im Audit-Trail — keine abgeschnittene JSON.
@@ -1324,7 +1294,7 @@ function ReportsTab() {
                 </span>,
                 <span key={`${e.event}-${e.at}-event`}>
                   <span className="block font-semibold text-slate-200">{view.eventLabel}</span>
-                  <code className="text-[11px] text-slate-500">{e.event}</code>
+                  <code className="text-xs text-slate-500">{e.event}</code>
                 </span>,
                 <span
                   key={`${e.event}-${e.at}-level`}
@@ -1340,8 +1310,8 @@ function ReportsTab() {
                 </span>,
                 <details key={`${e.event}-${e.at}-detail`} className="max-w-xl">
                   <summary className="cursor-pointer text-slate-300">{view.headline}</summary>
-                  <p className="mt-1 text-[11px] text-slate-400">{view.explanation}</p>
-                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-2 font-mono text-[11px] text-slate-300">
+                  <p className="mt-1 text-xs text-slate-400">{view.explanation}</p>
+                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-2 font-mono text-xs text-slate-300">
                     {view.raw}
                   </pre>
                 </details>,
@@ -1364,7 +1334,7 @@ function ReportsTab() {
  */
 function ProtocolTab() {
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <ProtocolPanel />
       <AuditTrailPanel
         title="Audit-Trail"
@@ -1384,13 +1354,13 @@ function AgentsTab({
   onRun: (id: string) => void;
 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
       {data.agents.map((a) => (
         <div key={a.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-100">{a.name}</h3>
             <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+              className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${
                 a.status === "RUNNING"
                   ? "bg-amber-500/20 text-amber-300"
                   : a.status === "BLOCKED"
@@ -1432,11 +1402,11 @@ function AdaptiveRiskPanel({ data }: { data: FirmData }) {
 
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+      <h2 className={`mb-2 ${SECTION_TITLE}`}>
         Adaptives Risiko — volatilitätsgetriebene Limit-Anpassung
       </h2>
       {!a ? (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+        <div className={`${PANEL} p-4`}>
           <p className="text-sm text-slate-400">
             Noch keine Bewertung. Der nächste Monitor-Tick (≈60 s) startet das adaptive
             System automatisch — oder löse manuell aus via{" "}
@@ -1447,15 +1417,15 @@ function AdaptiveRiskPanel({ data }: { data: FirmData }) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-2 3xl:grid-cols-3">
           {/* Regime + wirksames Limit */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <div className={`${PANEL} p-4`}>
             <div className="mb-3 flex items-center justify-between">
               <span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${regimeStyle[a.regime] ?? regimeStyle.NORMAL}`}>
                 {regimeLabel[a.regime] ?? a.regime}
               </span>
               {a.stale && (
-                <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">stale</span>
+                <span className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-400">stale</span>
               )}
             </div>
             <div className="space-y-1 text-sm">
@@ -1469,48 +1439,48 @@ function AdaptiveRiskPanel({ data }: { data: FirmData }) {
               <p className="text-xs text-slate-500">Faktor {a.factor} · Basis {a.baseMaxRiskPerTrade}</p>
               <p className="text-xs text-slate-400">{a.reason}</p>
               {a.lastUpdate && (
-                <p className="pt-1 text-[11px] text-slate-500">
+                <p className="pt-1 text-xs text-slate-500">
                   Aktualisiert {new Date(a.lastUpdate).toLocaleTimeString()}
                   {a.lastChange && a.lastChange !== a.lastUpdate ? ` · letzte Änderung ${new Date(a.lastChange).toLocaleTimeString()}` : ""}
                 </p>
               )}
-              {a.lastError && <p className="text-[11px] text-amber-400">Quelle: {a.lastError}</p>}
+              {a.lastError && <p className="text-xs text-amber-400">Quelle: {a.lastError}</p>}
             </div>
           </div>
 
           {/* Indikatoren */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <div className={`${PANEL} p-4`}>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Indikatoren</h3>
-            <table className="w-full text-left text-xs">
-              <tbody>
-                {a.indicators.map((ind) => (
-                  <tr key={ind.name} className="border-b border-slate-800/60 last:border-0">
-                    <td className="py-1.5 pr-2 font-medium text-slate-300">{ind.name}</td>
-                    <td className="py-1.5 pr-2 font-mono text-slate-400">
-                      {ind.value != null
-                        ? ind.name === "VIX" ? ind.value.toFixed(1) : `${(ind.value * 100).toFixed(2)} %`
-                        : "n/v"}
-                    </td>
-                    <td className="py-1.5 pr-2 font-mono text-slate-600">
-                      {ind.name === "VIX" ? ind.threshold : `${(ind.threshold * 100).toFixed(2)} %`}
-                    </td>
-                    <td className="py-1.5 text-right">
-                      {!ind.available ? (
-                        <span className="text-slate-600">—</span>
-                      ) : ind.triggered ? (
-                        <span className="font-bold text-amber-300">⚠ triggered</span>
-                      ) : (
-                        <span className="text-emerald-400">✓</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              label="Volatilitäts-Indikatoren und Schwellen"
+              className="-mx-1"
+              stack={false}
+              head={["Indikator", "Wert", "Schwelle", "Status"]}
+              align={["left", "right", "right", "right"]}
+              empty="Keine Indikatoren gemeldet."
+              rows={a.indicators.map((ind) => [
+                <span key={`${ind.name}-name`} className="font-medium text-slate-300">{ind.name}</span>,
+                <span key={`${ind.name}-value`} className="font-mono tabular-nums text-slate-400">
+                  {ind.value != null
+                    ? ind.name === "VIX" ? ind.value.toFixed(1) : `${(ind.value * 100).toFixed(2)} %`
+                    : "n/v"}
+                </span>,
+                <span key={`${ind.name}-threshold`} className="font-mono text-slate-500">
+                  {ind.name === "VIX" ? ind.threshold : `${(ind.threshold * 100).toFixed(2)} %`}
+                </span>,
+                !ind.available ? (
+                  <span key={`${ind.name}-state`} className="text-slate-600">nicht verfügbar</span>
+                ) : ind.triggered ? (
+                  <span key={`${ind.name}-state`} className="font-bold text-amber-300">⚠ ausgelöst</span>
+                ) : (
+                  <span key={`${ind.name}-state`} className="text-emerald-400">✓ unter Schwelle</span>
+                ),
+              ])}
+            />
           </div>
 
           {/* Letztes Event */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <div className={`${PANEL} p-4`}>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Letztes Trigger-Event</h3>
             {a.events.length === 0 ? (
               <p className="text-xs text-slate-500">Keine Ereignisse seit Prozessstart.</p>
@@ -1535,7 +1505,7 @@ function AdaptiveRiskPanel({ data }: { data: FirmData }) {
                 );
               })()
             )}
-            <p className="mt-3 text-[11px] text-slate-600">
+            <p className="mt-3 text-xs text-slate-600">
               Vollständige Historie: <code className="text-slate-500">GET /api/firm/risk/volatility</code> und
               Audit-Log <code className="text-slate-500">RISK_ADAPTIVE</code>.
             </p>
@@ -1554,90 +1524,84 @@ type VolSectionProps = {
   save: (key: string, raw: string) => void;
 };
 
+/**
+ * Volatilitäts-Schwellen & Faktoren (Runtime-Konfiguration).
+ *
+ * Wie die Risikotabelle: viele Spalten mit Eingabefeldern, deshalb `stack={false}`
+ * — auf schmalen Bildschirmen scrollt die Tabelle horizontal, statt Zeilen in
+ * Karten zu verwandeln, in denen Eingabefeld und Bedeutung auseinanderfallen.
+ */
 function VolatilityConfigSection(props: VolSectionProps) {
   const { data, drafts, setDrafts, saving, save } = props;
   const rows = data.volatilityConfig ?? [];
   if (rows.length === 0) return null;
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+      <h2 className={`mb-2 ${SECTION_TITLE}`}>
         Volatilitäts-Schwellwerte &amp; Faktoren — zur Laufzeit änderbar
       </h2>
-      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
-              <th className="px-4 py-2 font-semibold">Parameter</th>
-              <th className="px-4 py-2 font-semibold">Wirksam</th>
-              <th className="px-4 py-2 font-semibold">Fenster</th>
-              <th className="px-4 py-2 font-semibold">Ändern</th>
-              <th className="px-4 py-2 font-semibold">Bedeutung</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => {
-              const isPct = c.unit === "%";
-              const isBool = c.unit === "bool";
-              const fmtVal = isBool
-                ? (c.value ? "an" : "aus")
-                : isPct
-                  ? `${(Number(c.value) * 100).toFixed(2)} %`
-                  : String(c.value);
-              const fmtBound = (v: number) => (isPct ? `${v * 100}%` : String(v));
-              const draft = drafts[c.key] ?? "";
-              return (
-                <tr key={c.key} className="border-b border-slate-800/60 last:border-0">
-                  <td className="px-4 py-2 font-medium text-slate-200">{c.label}</td>
-                  <td className="px-4 py-2 font-bold text-emerald-300">{fmtVal}</td>
-                  <td className="px-4 py-2 text-xs text-slate-500">
-                    {fmtBound(c.min)} – {fmtBound(c.max)}
-                  </td>
-                  <td className="px-4 py-2">
-                    {isBool ? (
-                      <select
-                        value={String(Number(c.value) >= 0.5)}
-                        onChange={(e) => save(c.key, e.target.value)}
-                        disabled={saving === c.key}
-                        className="w-20 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-slate-200"
-                      >
-                        <option value="1">an</option>
-                        <option value="0">aus</option>
-                      </select>
-                    ) : (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="any"
-                          placeholder={String(isPct ? (Number(c.value) * 100).toFixed(2) : c.value)}
-                          value={draft}
-                          onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
-                          onKeyDown={(e) => e.key === "Enter" && draft !== "" && save(c.key, draft)}
-                          className="w-24 rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200"
-                        />
-                        {isPct && <span className="text-xs text-slate-500">%</span>}
-                        <button
-                          onClick={() => draft !== "" && save(c.key, draft)}
-                          disabled={saving === c.key || draft === ""}
-                          className="rounded bg-emerald-600/80 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
-                        >
-                          ✓
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-400">{c.description}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-3 rounded-lg border border-sky-700/50 bg-sky-950/30 px-4 py-3 text-xs text-sky-300">
-        Diese Parameter steuern das adaptive Risiko (Regime NORMAL/ELEVATED/EXTREME) und wirken ab dem
-        nächsten Tick (≈60 s) bzw. sofort bei Neubewertung — ohne Neustart. Jede Änderung wird im
-        Audit-Log als <code className="font-mono">CONFIG_CHANGED</code> (Namespace{" "}
-        <code className="font-mono">volatility</code>) protokolliert. Prozentwerte als Zahl eingeben
-        (z. B. 1 = 1 %).
+      <DataTable
+        label="Volatilitäts-Konfiguration"
+        stack={false}
+        stickyHead
+        maxHeight="70vh"
+        head={["Parameter", "Wirksam", "Fenster", "Ändern", "Bedeutung"]}
+        rows={rows.map((c) => {
+          const isPct = c.unit === "%";
+          const isBool = c.unit === "bool";
+          const fmtVal = isBool
+            ? (c.value ? "an" : "aus")
+            : isPct
+              ? `${(Number(c.value) * 100).toFixed(2)} %`
+              : String(c.value);
+          const fmtBound = (v: number) => (isPct ? `${v * 100}%` : String(v));
+          const draft = drafts[c.key] ?? "";
+          return [
+            <span key={`${c.key}-label`} className="font-medium text-slate-200">{c.label}</span>,
+            <span key={`${c.key}-value`} className="font-bold tabular-nums text-emerald-300">{fmtVal}</span>,
+            <span key={`${c.key}-bounds`} className="text-xs tabular-nums text-slate-500">
+              {fmtBound(c.min)} – {fmtBound(c.max)}
+            </span>,
+            c.locked ? (
+              <span key={`${c.key}-locked`} className="text-xs text-slate-500">🔒 gesperrt</span>
+            ) : (
+              <div key={`${c.key}-editor`} className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="any"
+                  aria-label={`${c.label} neuer Wert`}
+                  placeholder={String(typeof c.value === "number" && isPct ? (Number(c.value) * 100).toFixed(2) : c.value)}
+                  value={draft}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && draft !== "" && save(c.key, draft)}
+                  className={`w-28 rounded border bg-slate-800 px-2 py-1 text-xs text-slate-200 ${
+                    draft !== "" && Number(draft.replace(",", ".")) > (isPct ? c.max * 100 : c.max)
+                      ? "border-red-600"
+                      : "border-slate-700"
+                  }`}
+                />
+                {isPct && <span className="text-xs text-slate-500">%</span>}
+                <Button
+                  variant="primary"
+                  size="sm"
+                  aria-label={`${c.label} speichern`}
+                  onClick={() => draft !== "" && save(c.key, draft)}
+                  disabled={saving === c.key || draft === ""}
+                >
+                  ✓
+                </Button>
+              </div>
+            ),
+            <span key={`${c.key}-description`} className="text-xs text-slate-400">{c.description}</span>,
+          ];
+        })}
+      />
+      <p className="mt-3 rounded-lg border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-300">
+        Werte wirken ab dem nächsten Turn/Tick ohne Neustart. Jede Änderung landet revisionssicher
+        im Audit-Log (<code className="font-mono">CONFIG_CHANGED</code>). Die absoluten Grenzen
+        (<code className="font-mono">LIMIT_CEILINGS</code> in <code className="font-mono">riskGuard.ts</code>)
+        bleiben im kompilierten Code — auch eine kompromittierte Datenbank kann sie nicht aufweichen.
+        Prozentwerte werden als Zahl eingegeben (z. B. 30 für 30 %).
       </p>
     </section>
   );
@@ -1679,92 +1643,84 @@ function RiskTab({ data, onChanged }: { data: FirmData; onChanged: () => void })
   return (
     <div className="space-y-6">
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
+        <h2 className={`mb-2 ${SECTION_TITLE}`}>
           Risikokonfiguration — zur Laufzeit änderbar, im Code begrenzt
         </h2>
-        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
-                <th className="px-4 py-2 font-semibold">Limit</th>
-                <th className="px-4 py-2 font-semibold">Wirksam</th>
-                <th className="px-4 py-2 font-semibold">Erlaubtes Fenster</th>
-                <th className="px-4 py-2 font-semibold">Ändern</th>
-                <th className="px-4 py-2 font-semibold">Bedeutung</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.riskConfig.map((c) => {
-                const isPct = c.unit === "%";
-                const fmtVal = typeof c.value === "boolean"
-                  ? (c.value ? "ja" : "nein")
-                  : isPct
-                    ? `${(Number(c.value) * 100).toFixed(1)} %`
-                    : String(c.value);
-                const fmtBound = (v: number) => (isPct ? `${v * 100}%` : v);
-                const draft = drafts[c.key] ?? "";
-                return (
-                  <tr key={c.key} className="border-b border-slate-800/60 last:border-0">
-                    <td className="px-4 py-2 font-medium text-slate-200">{c.label}</td>
-                    <td className="px-4 py-2 font-bold text-emerald-300">{fmtVal}</td>
-                    <td className="px-4 py-2 text-xs text-slate-500">
-                      {fmtBound(c.min)} – {fmtBound(c.max)}
-                    </td>
-                    <td className="px-4 py-2">
-                      {c.locked ? (
-                        <span className="text-xs text-slate-500">🔒 gesperrt</span>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          {c.unit === "bool" ? (
-                            <select
-                              value={String(c.value)}
-                              onChange={(e) => save(c.key, e.target.value)}
-                              disabled={saving === c.key}
-                              className="w-24 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-slate-200"
-                            >
-                              <option value={typeof c.value === "boolean" ? String(c.value) : String(Number(c.value) >= 0.5)}>
-                                aktuell
-                              </option>
-                              <option value="1">an</option>
-                              <option value="0">aus</option>
-                            </select>
-                          ) : (
-                            <>
-                              <input
-                                type="number"
-                                step="any"
-                                placeholder={String(typeof c.value === "number" && isPct ? (Number(c.value) * 100).toFixed(1) : c.value)}
-                                value={draft}
-                                onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
-                                onKeyDown={(e) => e.key === "Enter" && draft !== "" && save(c.key, draft)}
-                                className={`w-28 rounded border bg-slate-800 px-2 py-1 text-xs text-slate-200 ${
-                                  draft !== "" && Number(draft.replace(",", ".")) > (isPct ? c.max * 100 : c.max)
-                                    ? "border-red-600"
-                                    : "border-slate-700"
-                                }`}
-                              />
-                              {isPct && <span className="text-xs text-slate-500">%</span>}
-                              <button
-                                onClick={() => draft !== "" && save(c.key, draft)}
-                                disabled={saving === c.key || draft === ""}
-                                className="rounded bg-emerald-600/80 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40"
-                              >
-                                ✓
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-xs text-slate-400">{c.description}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          label="Risikokonfiguration"
+          stack={false}
+          stickyHead
+          maxHeight="70vh"
+          head={["Limit", "Wirksam", "Erlaubtes Fenster", "Ändern", "Bedeutung"]}
+          rows={data.riskConfig.map((c) => {
+            const isPct = c.unit === "%";
+            const fmtVal = typeof c.value === "boolean"
+              ? (c.value ? "ja" : "nein")
+              : isPct
+                ? `${(Number(c.value) * 100).toFixed(1)} %`
+                : String(c.value);
+            const fmtBound = (v: number) => (isPct ? `${v * 100}%` : v);
+            const draft = drafts[c.key] ?? "";
+            return [
+              <span key={`${c.key}-label`} className="font-medium text-slate-200">{c.label}</span>,
+              <span key={`${c.key}-value`} className="font-bold tabular-nums text-emerald-300">{fmtVal}</span>,
+              <span key={`${c.key}-bounds`} className="text-xs tabular-nums text-slate-500">
+                {fmtBound(c.min)} – {fmtBound(c.max)}
+              </span>,
+              c.locked ? (
+                <span key={`${c.key}-locked`} className="text-xs text-slate-500">🔒 gesperrt</span>
+              ) : (
+                <div key={`${c.key}-editor`} className="flex items-center gap-1">
+                  {c.unit === "bool" ? (
+                    <select
+                      aria-label={`${c.label} umschalten`}
+                      value={String(c.value)}
+                      onChange={(e) => save(c.key, e.target.value)}
+                      disabled={saving === c.key}
+                      className="w-24 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-slate-200"
+                    >
+                      <option value={typeof c.value === "boolean" ? String(c.value) : String(Number(c.value) >= 0.5)}>
+                        aktuell
+                      </option>
+                      <option value="1">an</option>
+                      <option value="0">aus</option>
+                    </select>
+                  ) : (
+                    <>
+                      <input
+                        type="number"
+                        step="any"
+                        aria-label={`${c.label} neuer Wert`}
+                        placeholder={String(typeof c.value === "number" && isPct ? (Number(c.value) * 100).toFixed(1) : c.value)}
+                        value={draft}
+                        onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && draft !== "" && save(c.key, draft)}
+                        className={`w-28 rounded border bg-slate-800 px-2 py-1 text-xs text-slate-200 ${
+                          draft !== "" && Number(draft.replace(",", ".")) > (isPct ? c.max * 100 : c.max)
+                            ? "border-red-600"
+                            : "border-slate-700"
+                        }`}
+                      />
+                      {isPct && <span className="text-xs text-slate-500">%</span>}
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        aria-label={`${c.label} speichern`}
+                        onClick={() => draft !== "" && save(c.key, draft)}
+                        disabled={saving === c.key || draft === ""}
+                      >
+                        ✓
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ),
+              <span key={`${c.key}-description`} className="text-xs text-slate-400">{c.description}</span>,
+            ];
+          })}
+        />
         {msg && (
-          <p className="mt-2 rounded-lg border border-sky-700/50 bg-sky-950/30 px-3 py-2 text-xs text-sky-300">{msg}</p>
+          <p role="status" className="mt-2 rounded-lg border border-sky-700/50 bg-sky-950/30 px-3 py-2 text-xs text-sky-300">{msg}</p>
         )}
         <p className="mt-3 rounded-lg border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-300">
           Werte wirken ab dem nächsten Turn/Tick ohne Neustart. Jede Änderung landet revisionssicher
@@ -1780,41 +1736,76 @@ function RiskTab({ data, onChanged }: { data: FirmData; onChanged: () => void })
       <VolatilityConfigSection data={data} drafts={drafts} setDrafts={setDrafts} saving={saving} save={save} />
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
-          Ollama status
+        <h2 className={`mb-2 ${SECTION_TITLE}`}>
+          Ollama-Status
+          <InfoTip
+            label="Ollama-Status"
+            text="Lokaler LLM-Server für die Agenten-Rollen. Ist er nicht erreichbar, entscheidet die deterministische Regel-Engine weiter — Betrieb bleibt möglich, nur ohne Modell-Freiheitsgrade."
+          />
         </h2>
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-          <p className="text-sm text-slate-300">
-            Available:{" "}
-            <span className={data.ollama.available ? "text-emerald-400" : "text-red-400"}>
-              {data.ollama.available ? "yes" : "no"}
-            </span>
-          </p>
-          <p className="text-sm text-slate-300">Endpoint: {data.ollama.baseUrl || "http://127.0.0.1:11434"}</p>
-          {data.ollama.error && <p className="text-sm text-red-400">Error: {data.ollama.error}</p>}
-          {data.ollama.models.length > 0 && (
-            <p className="mt-2 text-sm text-slate-400">Models: {data.ollama.models.join(", ")}</p>
-          )}
-          <p className="mt-2 text-xs text-slate-500">
-            When Ollama is unreachable the firm falls back to a deterministic rules engine so the
-            full orchestration + guardrail pipeline stays demonstrable.
+        <div className={PANEL_PADDED}>
+          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <div className="flex items-baseline gap-2">
+              <dt className="text-slate-400">Erreichbar:</dt>
+              <dd className={data.ollama.available ? "text-emerald-400" : "text-red-400"}>
+                {data.ollama.available ? "ja" : "nein"}
+              </dd>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <dt className="text-slate-400">Endpunkt:</dt>
+              <dd className="font-mono text-xs text-slate-300">{data.ollama.baseUrl || "http://127.0.0.1:11434"}</dd>
+            </div>
+            {data.ollama.error && (
+              <div className="flex items-baseline gap-2 sm:col-span-2">
+                <dt className="text-slate-400">Fehler:</dt>
+                <dd className="text-red-400">{data.ollama.error}</dd>
+              </div>
+            )}
+            {data.ollama.models.length > 0 && (
+              <div className="flex items-baseline gap-2 sm:col-span-2">
+                <dt className="text-slate-400">Modelle:</dt>
+                <dd className="text-slate-300">{data.ollama.models.join(", ")}</dd>
+              </div>
+            )}
+          </dl>
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+            Ohne erreichbares Ollama fällt die Firma auf die deterministische Regel-Engine zurück —
+            Orchestrierung und Guardrail-Pipeline bleiben damit vollständig vorführbar.
           </p>
         </div>
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
-          Kill-switch history
+        <h2 className={`mb-2 ${SECTION_TITLE}`}>
+          Kill-Switch-Historie
+          <InfoTip
+            label="Kill-Switch-Historie"
+            text="Jede Auslösung und Entschärfung des Not-Halts mit Auslöser und Begründung — revisionssicher im Audit-Log gespiegelt."
+          />
         </h2>
-        <Table
-          head={["Triggered By", "Reason", "Armed"]}
-          rows={data.killSwitches.map((k) => [k.triggeredBy, k.reason, k.armed ? "yes" : "no"])}
+        <DataTable
+          label="Kill-Switch-Historie"
+          head={["Ausgelöst von", "Grund", "Scharf"]}
+          empty="Noch keine Kill-Switch-Ereignisse — der Not-Halt wurde nie gezogen."
+          rows={data.killSwitches.map((k) => [
+            k.triggeredBy,
+            k.reason,
+            <Chip key={`${k.triggeredBy}-${k.reason}`} tone={k.armed ? "bad" : "neutral"}>
+              {k.armed ? "ja" : "nein"}
+            </Chip>,
+          ])}
         />
       </section>
     </div>
   );
 }
 
+/**
+ * Design-/Guide-Tab: Der Inhalt ist Lesetext, kein Datenraster. Auf großen
+ * Monitoren läuft er deshalb in **zwei Spalten** (ab `3xl`), statt als eine
+ * 3000 px breite Zeile auseinanderzufallen; die Karten bleiben dabei
+ * ungeteilt (`break-inside-avoid`).
+ */
 function ArchitectureTab() {
   return (
     <div className="prose prose-invert max-w-none">
@@ -1825,8 +1816,8 @@ function ArchitectureTab() {
 
 function Guide() {
   return (
-    <div className="space-y-8 text-slate-300">
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+    <div className="columns-1 gap-6 text-slate-300 3xl:columns-2 [&>section]:mb-6 [&>section]:break-inside-avoid [&>section]:not-prose">
+      <section className={PANEL_LARGE}>
         <h2 className="mb-1 text-lg font-bold text-slate-50">1 · Grundprinzip (Ist-Stand)</h2>
         <p className="mb-3 text-sm text-slate-400">
           Die KI schlägt vor — der Code entscheidet. Orchestrierung ist ein
@@ -1841,29 +1832,23 @@ function Guide() {
         </ul>
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <section className={PANEL_LARGE}>
         <h2 className="mb-1 text-lg font-bold text-slate-50">2 · 12-Aufgaben-Programm</h2>
         <p className="mb-3 text-sm text-slate-400">Was bereits im Code liegt — nicht was irgendwann geplant war:</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 text-[11px] uppercase text-slate-400">
-                <th className="py-1 pr-3">Task</th>
-                <th className="py-1 pr-3">Thema</th>
-                <th className="py-1">Status</th>
-              </tr>
-            </thead>
-            <tbody className="text-slate-300">
-              <tr className="border-b border-slate-800"><td className="py-1 pr-3">01–06</td><td className="py-1 pr-3">Universum, Broker-Contract, Paper-Market-Data, Scanner, Portfolio, Zyklus</td><td className="py-1">geliefert</td></tr>
-              <tr className="border-b border-slate-800"><td className="py-1 pr-3">07–09</td><td className="py-1 pr-3">Bitunix, Control Plane, MODEL_ROUTER</td><td className="py-1">geliefert</td></tr>
-              <tr className="border-b border-slate-800"><td className="py-1 pr-3">10</td><td className="py-1 pr-3">Operations Center + RBAC (dieser Stand: Kern + leerer Tab)</td><td className="py-1">in Arbeit</td></tr>
-              <tr><td className="py-1 pr-3">11</td><td className="py-1 pr-3">Live-Trading-Gate</td><td className="py-1">gesperrt — `LiveTradingGateError`</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          label="12-Aufgaben-Programm"
+          stack={false}
+          head={["Task", "Thema", "Status"]}
+          rows={[
+            ["01–06", "Universum, Broker-Contract, Paper-Market-Data, Scanner, Portfolio, Zyklus", "geliefert"],
+            ["07–09", "Bitunix, Control Plane, MODEL_ROUTER", "geliefert"],
+            ["10", "Operations Center + RBAC (dieser Stand: Kern + leerer Tab)", "in Arbeit"],
+            ["11", "Live-Trading-Gate", <span key="gate">gesperrt — <code>LiveTradingGateError</code></span>],
+          ]}
+        />
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <section className={PANEL_LARGE}>
         <h2 className="mb-1 text-lg font-bold text-slate-50">3 · Sicherheit &amp; Risikokontrolle</h2>
         <p className="mb-3 text-sm text-slate-400">Defense-in-Depth — mehrschichtig, in Code verankert:</p>
         <ol className="ml-5 list-decimal space-y-2 text-sm">
@@ -1874,7 +1859,7 @@ function Guide() {
         </ol>
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <section className={PANEL_LARGE}>
         <h2 className="mb-1 text-lg font-bold text-slate-50">4 · Paper-Trading (Ist)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
           <li><b>Default-Modus B</b> (<code className="font-mono">broker-market-data</code>): echte Kurse (Broker-Feed → Binance/Yahoo), Fills lokal im Simulator. Kein statisches Kursbuch — das ist nur noch <code className="font-mono">PAPER_STATIC_FALLBACK=true</code>.</li>
@@ -1884,7 +1869,7 @@ function Guide() {
         </ul>
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <section className={PANEL_LARGE}>
         <h2 className="mb-1 text-lg font-bold text-slate-50">5 · Hardware (Variante A / B)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
           <li><b>Variante A — Solo-Node:</b> N150, 16 GB, alles lokal. 3B-Q4, Pipeline 2–6 min. Empfohlener Start.</li>
@@ -1894,7 +1879,7 @@ function Guide() {
         </ul>
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <section className={PANEL_LARGE}>
         <h2 className="mb-1 text-lg font-bold text-slate-50">6 · Broker (Ist)</h2>
         <ul className="ml-5 list-disc space-y-2 text-sm">
           <li><b>7 Venues registriert</b> hinter <code className="font-mono">BrokerAdapter</code>: PAPER (interner Simulator, vollständig), BITUNIX (Public REST/WS + Paper-Modus B), ALPACA/IBKR/BINANCE/KRAKEN/DYDX als ehrliche Stubs. <b>Registriert ≠ abgedeckt:</b> das Operations Center trennt registrierte Venues von tatsächlicher Discovery-/Market-Data-/Paper-/Testnet-/Live-Coverage (<code className="font-mono">GET /api/brokers/coverage</code>).</li>

@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Theme-Wähler der Oberfläche (dark/light/sepia/midnight/nord/forest).
  *

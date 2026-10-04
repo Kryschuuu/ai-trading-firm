@@ -2,6 +2,20 @@
 @plugin "@tailwindcss/typography";
 
 /* ============================================================
+   Zusätzliche Breakpoints für große und sehr breite Monitore.
+
+   Tailwind endet standardmäßig bei `2xl` (1536 px). Die Nutzer lesen
+   datendichte Tabellen und Kurven und arbeiten teils auf 27"–34"-Monitoren;
+   `3xl`/`4xl` schalten dort eine weitere Spalte bzw. größere Seitenränder
+   frei, statt den Inhalt in einer schmalen Mitte stehen zu lassen.
+   `sm`–`2xl` bleiben unverändert (Tailwind-Defaults).
+   ============================================================ */
+@theme {
+  --breakpoint-3xl: 120rem; /* 1920 px */
+  --breakpoint-4xl: 160rem; /* 2560 px */
+}
+
+/* ============================================================
    THEMES — umschaltbar über das Attribut  data-theme  auf <html>.
 
    Strategie: Tailwind v4 definiert jede Farbe als CSS-Variable
@@ -231,23 +245,25 @@
   --tw-prose-kbd: var(--color-slate-200);
 }
 
-/* ---- Doku-Viewer: breite Tabellen & Code scrollen statt überzulaufen ---
-   Befund 2026-10-04: Die Doku enthält Tabellen mit bis zu 11 Spalten
-   (z. B. `DAILY_WEEKLY_RESEARCH.md` §Scanner-Faktoren, `MARKET_UNIVERSE.md`).
-   Die ragten aus dem Artikel heraus bis unter das Inhaltsverzeichnis bzw.
-   hinter den Viewport-Rand, weil `prose` Tabellen nur `width: 100%` gibt:
-   Sobald der min-content-Bedarf (lange Env-Namen, Pfade, Code-Spans) größer
-   als die Spalte ist, wächst die Tabelle über ihren Container hinaus.
+/* ---- Daten-Tabellen: nie überlaufen, auf Mobile lesbar -----------------
+   Ein System für zwei Einsatzorte:
 
-   Lösung: Jede Tabelle sitzt in `.docs-table-scroll` (siehe `DocsMarkdown.tsx`)
-   mit `overflow-x: auto`. Die Tabelle füllt die Breite, wenn sie passt, und
-   scrollt ansonsten horizontal — sie kann nie mehr über die rechte Spalte
-   (Inhaltsverzeichnis) oder aus dem Fenster laufen. `overflow-wrap: break-word`
-   verhindert zusätzlich, dass ein einzelnes langes Token die Spalte sprengt. */
-.docs-content .docs-table-scroll {
+   * `.docs-table-scroll` — Tabellen im Doku-Viewer (`DocsMarkdown.tsx`).
+     Befund 2026-10-04: Die Doku enthält Tabellen mit bis zu 11 Spalten
+     (z. B. `DAILY_WEEKLY_RESEARCH.md` §Scanner-Faktoren, `MARKET_UNIVERSE.md`).
+     Sie ragten aus dem Artikel heraus bis unter das Inhaltsverzeichnis bzw.
+     hinter den Viewport-Rand, weil `prose` Tabellen nur `width: 100%` gibt.
+   * `.fs-table-scroll` — alle Dashboards-Tabellen (`src/components/ui/DataTable.tsx`):
+     Positionsliste, Risikofelder, Coverage, Monatsrenditen, Kill-Switch-Historie.
+
+   Beide scrollen horizontal (die Tabelle füllt die Breite, wenn sie passt),
+   sind per Tastatur fokussierbar und tragen denselben Fokusring. Unterhalb
+   von `sm` stapelt `.fs-table-stack` jede Zeile zu einer beschrifteten Karte
+   (`data-label`) — dann liegt keine Spalte mehr außerhalb des Viewports. */
+.docs-content .docs-table-scroll,
+.fs-table-scroll {
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
   border: 1px solid var(--color-slate-800);
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--color-slate-950) 45%, transparent);
@@ -256,12 +272,14 @@
   scrollbar-color: var(--color-slate-700) transparent;
 }
 
-.docs-content .docs-table-scroll:focus-visible {
+.docs-content .docs-table-scroll:focus-visible,
+.fs-table-scroll:focus-visible {
   outline: 2px solid var(--color-emerald-500);
   outline-offset: 2px;
 }
 
-.docs-content .docs-table-scroll > table {
+.docs-content .docs-table-scroll > table,
+.fs-table {
   width: 100%;
   margin: 0;
   border-collapse: collapse;
@@ -269,33 +287,113 @@
 }
 
 .docs-content .docs-table-scroll th,
-.docs-content .docs-table-scroll td {
+.docs-content .docs-table-scroll td,
+.fs-table th,
+.fs-table td {
   padding: 0.4rem 0.6rem;
   vertical-align: top;
   overflow-wrap: break-word;
   word-break: normal;
 }
 
-.docs-content .docs-table-scroll thead th {
+.docs-content .docs-table-scroll thead th,
+.fs-table thead th {
   background: color-mix(in srgb, var(--color-slate-800) 60%, transparent);
   color: var(--color-slate-200);
   font-weight: 600;
   white-space: nowrap;
 }
 
-.docs-content .docs-table-scroll tbody tr:nth-child(even) {
+.fs-table thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.6875rem;
+}
+
+/* Zusätzlich klebender Kopf für lange Listen (DataTable → stickyHead). */
+.fs-table thead.fs-table-sticky th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-slate-900);
+}
+
+.docs-content .docs-table-scroll tbody tr:nth-child(even),
+.fs-table tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--color-slate-800) 22%, transparent);
 }
 
-.docs-content .docs-table-scroll tbody tr:hover {
+.docs-content .docs-table-scroll tbody tr:hover,
+.fs-table tbody tr:hover {
   background: color-mix(in srgb, var(--color-emerald-500) 9%, transparent);
 }
 
+.fs-table tbody tr {
+  border-top: 1px solid color-mix(in srgb, var(--color-slate-800) 70%, transparent);
+}
+
 /* Code in Tabellenzellen darf umbrechen (lange Env-Namen, Pfade). */
-.docs-content .docs-table-scroll code {
+.docs-content .docs-table-scroll code,
+.fs-table code {
   white-space: normal;
   overflow-wrap: anywhere;
   font-size: 0.78em;
+}
+
+/* ---- Mobile Kartenansicht der Dashboards-Tabellen -----------------------
+   Unter `sm` (640 px) wird jede Zeile zu einer Karte: Spaltenkopf links,
+   Wert rechts. Die `<thead>` bleibt für Screen Reader im DOM (visuell
+   versteckt, nicht `display: none`), damit die Tabellensemantik erhalten
+   bleibt. Nur Tabellen mit `stack` (DataTable-Default) werden gestapelt —
+   breite Konfigurationsmatrizen mit Eingabefeldern scrollen weiterhin. */
+@media (max-width: 639.98px) {
+  .fs-table-stack {
+    overflow-x: visible;
+  }
+
+  .fs-table-stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .fs-table-stack tbody tr {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-slate-800) 80%, transparent);
+  }
+
+  .fs-table-stack tbody tr:first-child {
+    border-top: 0;
+  }
+
+  .fs-table-stack tbody td {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 38%) minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+    border: 0;
+  }
+
+  .fs-table-stack tbody td::before {
+    content: attr(data-label);
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-slate-500);
+  }
+
+  /* Leere Zellen (z. B. „—“ fehlt) erzeugen keine leeren Label-Zeilen. */
+  .fs-table-stack tbody td:empty {
+    display: none;
+  }
 }
 
 /* Sehr lange Tokens (URLs, Hashes) dürfen den Artikel nicht sprengen. */
@@ -410,13 +508,39 @@
   }
 
   /* Der Bildschirm-Scrollcontainer darf beim Druck nichts abschneiden:
-     Papier kennt kein horizontales Scrollen. */
-  .docs-content .docs-table-scroll {
+     Papier kennt kein horizontales Scrollen. Die mobile Kartenansicht
+     (`fs-table-stack`) wird dabei auf die echte Tabellendarstellung
+     zurückgesetzt — ein Ausdruck ist nie „schmal“. */
+  .docs-content .docs-table-scroll,
+  .fs-table-scroll {
     overflow: visible !important;
     max-width: none !important;
     border: 0;
     border-radius: 0;
     background: transparent;
+  }
+
+  .fs-table-stack tbody tr,
+  .fs-table-stack tbody td {
+    display: table-row;
+  }
+
+  .fs-table-stack tbody td {
+    display: table-cell;
+  }
+
+  .fs-table-stack thead {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  .fs-table-stack tbody td::before {
+    content: none;
   }
 
   @page {

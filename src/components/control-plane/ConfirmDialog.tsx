@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Bestaetigungsdialog (Task 08) — Pflicht vor dem Loeschen von Credentials.
  *

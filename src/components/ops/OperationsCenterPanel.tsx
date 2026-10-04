@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Operations Center (Task 10) — die Control Plane der Firma.
  *
@@ -23,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import MarketDataPanel from "@/components/ops/MarketDataPanel";
 import RuntimeTogglesPanel from "@/components/ops/RuntimeTogglesPanel";
+import { AUTO_FIT_PANELS } from "@/components/ui/layout";
 import type { MarketDataReadinessReport } from "@/ops/marketDataReadiness";
 import type { OpsItem, OpsMetric, OpsPayload, OpsSection, OpsSectionStatus, OpsTone } from "@/ops/types";
 import type { EligibilityDiagnosticsSummary } from "@/scanner/eligibilityDiagnostics";
@@ -147,7 +147,7 @@ export function OperationsCenterView({
       <div className="rounded-xl border border-emerald-800/50 bg-emerald-500/5 px-4 py-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-bold text-emerald-300">Operations Center</h2>
-          <span className="text-[11px] text-slate-500">
+          <span className="text-xs text-slate-500">
             {payload ? `v${payload.version} · Stand ${clockUtc(payload.generatedAt)}` : ""}
           </span>
         </div>
@@ -159,31 +159,31 @@ export function OperationsCenterView({
           <button
             onClick={() => onReload?.()}
             disabled={loading}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
           >
             {loading ? "Lade …" : "↻ Aktualisieren"}
           </button>
           {actor ? (
-            <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+            <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300">
               Rolle: {ROLE_LABEL[actor.effectiveRole] ?? actor.effectiveRole}
               {actor.elevated ? " (Single-Admin)" : ""}
               {actor.source ? ` · ${SOURCE_LABEL[actor.source] ?? actor.source}` : ""}
             </span>
           ) : (
             !loading && (
-              <span className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-500">
+              <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-500">
                 nicht angemeldet
               </span>
             )
           )}
           <span
-            className="rounded-full border border-red-700/50 bg-red-500/10 px-2.5 py-1 text-[11px] font-semibold text-red-300"
+            className="rounded-full border border-red-700/50 bg-red-500/10 px-2.5 py-1 text-xs font-semibold text-red-300"
             title={payload?.liveLockedReason ?? ""}
           >
             Live: {liveEnabled ? "freigegeben" : "gesperrt"}
           </span>
           {health && (
-            <span className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-400">
+            <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-400">
               {health.ready}/{health.total} Sektionen bereit
               {health.unavailable > 0 ? ` · ${health.unavailable} nicht verfügbar` : ""}
               {health.locked > 0 ? ` · ${health.locked} gesperrt` : ""}
@@ -193,20 +193,20 @@ export function OperationsCenterView({
           )}
           <Link
             href="/docs?name=handbuch"
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800"
           >
             Handbuch
           </Link>
         </div>
         {payload && !liveEnabled && (
-          <p className="mt-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+          <p className="mt-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs leading-relaxed text-red-200">
             Live-Sperre aktiv — {payload.liveLockedReason}
           </p>
         )}
       </div>
 
       {loading && !payload && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className={AUTO_FIT_PANELS}>
           {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="h-44 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/40" />
           ))}
@@ -220,7 +220,7 @@ export function OperationsCenterView({
           {onReload && (
             <button
               onClick={() => onReload()}
-              className="mt-3 rounded-lg border border-red-700/60 px-3 py-1.5 text-[11px] font-semibold text-red-200 hover:bg-red-900/40"
+              className="mt-3 rounded-lg border border-red-700/60 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-900/40"
             >
               Erneut versuchen
             </button>
@@ -242,7 +242,7 @@ export function OperationsCenterView({
       )}
 
       {sections.length > 0 && (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className={AUTO_FIT_PANELS}>
           {ordered.map((section) => (
             <FragmentWithMarketData
               key={section.id}
@@ -313,12 +313,12 @@ function SectionCard({
       <p className="text-xs leading-relaxed text-slate-400">{section.summary}</p>
 
       {section.error && (
-        <p className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+        <p className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs leading-relaxed text-red-200">
           {section.error}
         </p>
       )}
       {!section.error && section.note && (
-        <p className="mt-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+        <p className="mt-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs leading-relaxed text-amber-200">
           {section.note}
         </p>
       )}
@@ -333,7 +333,7 @@ function SectionCard({
 
       {section.items.length > 0 && (
         <details className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
-          <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-200">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
             {section.items.length} Einträge anzeigen
           </summary>
           <ul className="mt-2 space-y-1">
@@ -344,7 +344,7 @@ function SectionCard({
         </details>
       )}
 
-      <div className="mt-auto flex flex-wrap items-center gap-3 pt-3 text-[11px]">
+      <div className="mt-auto flex flex-wrap items-center gap-3 pt-3 text-xs">
         {target && onOpenTab && (
           <button
             onClick={() => onOpenTab(target)}
@@ -360,7 +360,7 @@ function SectionCard({
         )}
         <details className="ml-auto">
           <summary className="cursor-pointer text-slate-500 hover:text-slate-300">Quellen</summary>
-          <ul className="mt-1 max-w-xs space-y-0.5 text-[10px] text-slate-500">
+          <ul className="mt-1 max-w-xs space-y-0.5 text-[11px] text-slate-500">
             {section.sources.map((source) => (
               <li key={source}>{source}</li>
             ))}
@@ -493,7 +493,7 @@ export function MarketDataReadinessCard({
       <div className="mb-2 flex items-start justify-between gap-2">
         <h3 className="text-sm font-bold text-slate-100">Market Data</h3>
         <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+          className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${
             report.scannerReady ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"
           }`}
         >
@@ -508,7 +508,7 @@ export function MarketDataReadinessCard({
       <dl className="mt-3 space-y-1.5">
         {rows.map((row) => (
           <div key={row.label} className="flex items-baseline justify-between gap-3">
-            <dt className="text-[11px] uppercase tracking-wider text-slate-500" title={row.hint}>
+            <dt className="text-xs uppercase tracking-wider text-slate-500" title={row.hint}>
               {row.label}
             </dt>
             <dd
@@ -522,7 +522,7 @@ export function MarketDataReadinessCard({
       </dl>
 
       {!report.scannerReady && (
-        <p className="mt-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+        <p className="mt-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs leading-relaxed text-amber-200">
           Scanner nicht bereit: kein Instrument mit vollständigen Daten. Ursache entlang der Zeilen
           oben eingrenzen (Discovery → Candles → Ticker/Spread) — Walkthrough:
           docs/OPERATIONS_CENTER.md.
@@ -531,13 +531,13 @@ export function MarketDataReadinessCard({
 
       {diagnostics && diagnostics.total > 0 && (
         <details className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
-          <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-200">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-200">
             Ablehnungs-Diagnose ({diagnostics.total}
             {diagnostics.truncated ? `, erste ${diagnostics.items.length}` : ""})
           </summary>
           <ul className="mt-2 space-y-1.5">
             {diagnostics.items.map((item) => (
-              <li key={item.instrument} className="text-[11px]">
+              <li key={item.instrument} className="text-xs">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 truncate text-slate-300" title={item.instrument}>
                     {item.instrument}
@@ -564,7 +564,7 @@ export function MarketDataReadinessCard({
             ))}
           </ul>
           {diagnostics.truncated && (
-            <p className="mt-2 text-[10px] text-slate-500">
+            <p className="mt-2 text-[11px] text-slate-500">
               … und {diagnostics.total - diagnostics.items.length} weitere (Ausgabe gedeckelt).
             </p>
           )}
@@ -577,7 +577,7 @@ export function MarketDataReadinessCard({
 function MetricRow({ metric }: { metric: OpsMetric }) {
   return (
     <div className="min-w-0">
-      <dt className="truncate text-[10px] uppercase tracking-wider text-slate-500" title={metric.hint ?? metric.label}>
+      <dt className="truncate text-[11px] uppercase tracking-wider text-slate-500" title={metric.hint ?? metric.label}>
         {metric.label}
       </dt>
       <dd className={`truncate text-xs font-semibold ${TONE_CLASS[metric.tone ?? "neutral"]}`} title={metric.value}>
@@ -589,7 +589,7 @@ function MetricRow({ metric }: { metric: OpsMetric }) {
 
 function ItemRow({ item }: { item: OpsItem }) {
   return (
-    <li className="flex items-baseline justify-between gap-2 text-[11px]">
+    <li className="flex items-baseline justify-between gap-2 text-xs">
       <span className="min-w-0 truncate text-slate-300" title={item.label}>
         {item.label}
       </span>
@@ -613,7 +613,7 @@ function StatusChip({ status }: { status: OpsSectionStatus }) {
           ? "bg-slate-700/60 text-slate-300"
           : "bg-red-500/20 text-red-300";
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${className}`}>
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${className}`}>
       {STATUS_LABEL[status]}
     </span>
   );

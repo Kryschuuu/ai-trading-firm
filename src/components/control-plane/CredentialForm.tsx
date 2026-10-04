@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Maskiertes Credential-Formular (Task 08).
  *
@@ -23,6 +22,7 @@
 
 import { useState } from "react";
 import { saveVenueCredentials, type BrokerStatusDto } from "@/lib/controlPlane";
+import { PANEL } from "../ui/layout";
 
 export default function CredentialForm({
   venue,
@@ -79,12 +79,12 @@ export default function CredentialForm({
       onSubmit={handleSubmit}
       noValidate
       autoComplete="off"
-      className="mt-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4"
+      className={`mt-4 ${PANEL} p-4`}
     >
       <p className="text-xs font-semibold text-slate-300">
         Zugangsdaten fuer {label} hinterlegen (einmalig, read-only Probe)
       </p>
-      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
         Das Secret wird genau einmal an das Backend uebertragen, dort mit
         AES-256-GCM verschluesselt (AAD = Venue-ID) und danach NUR als
         Referenz gefuehrt. Es ist spaeter nicht mehr abrufbar oder anzeigbar.
@@ -141,7 +141,7 @@ export default function CredentialForm({
         >
           {busy ? "Speichere & pruefe …" : "Speichern & verbinden"}
         </button>
-        <p className="text-[11px] text-slate-600">
+        <p className="text-xs text-slate-600">
           {canSubmit
             ? "Senden loest genau eine read-only Probe aus (kein Trade)."
             : "Bitte beide Felder ausfuellen (mind. 16 Zeichen)."}

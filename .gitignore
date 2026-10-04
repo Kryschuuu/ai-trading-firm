@@ -41,6 +41,10 @@ next-env.d.ts
 # selbst. Alles reproduzierbar aus Store + Skript, nie versioniert.
 /data/bench
 
+# Lokaler Entwicklungs-Postgres (embedded-postgres, `data/pg-ui`);
+# entsteht nur beim manuellen UI-Test und gehört nicht ins Repo.
+/data/pg-ui/
+
 # Marktdaten-Fehler-Manifest (MDERR-006): Laufzeit-Artefakt des Sync-Jobs,
 # vom Scanner/Operations Center gelesen — nicht versioniert
 /data/market-data-errors.json
