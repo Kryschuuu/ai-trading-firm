@@ -10,10 +10,11 @@
  */
 
 import { useState } from "react";
-import InfoTip from "./InfoTip";
+import InfoTip from "@/components/ui/InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import { RULE_FIELD_LABELS, RULE_FIELDS } from "@/lib/ruleFieldCatalog";
 import { SUPPORTED_TIMEFRAMES } from "@/lib/marketdata/timeframes";
+import { PANEL } from "../ui/layout";
 
 type FieldName = keyof typeof RULE_FIELDS;
 type Op = "lt" | "lte" | "gt" | "gte" | "eq" | "between";
@@ -202,7 +203,7 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
     : "";
 
   return (
-    <section aria-labelledby="rule-backtest-title" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+    <section aria-labelledby="rule-backtest-title" className={`space-y-4 ${PANEL} p-5`}>
       <div className="flex items-center">
         <h3 id="rule-backtest-title" className="text-sm font-bold text-slate-100">Regel prüfen, nur als Entwurf</h3>
         <InfoTip
@@ -355,7 +356,7 @@ export default function RuleBacktestPanel({ onUnauthorized }: { onUnauthorized: 
           {measure?.seriesWarning && (
             <p role="status" className="rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-200 lg:col-span-2">{measure.seriesWarning}</p>
           )}
-          {measure?.note && <p className="text-[11px] leading-relaxed text-slate-500 lg:col-span-2">{measure.note}</p>}
+          {measure?.note && <p className="text-xs leading-relaxed text-slate-500 lg:col-span-2">{measure.note}</p>}
         </div>
       )}
     </section>

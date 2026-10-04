@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Schritt 2 (Handbuch 6.2): EINEN Agenten gegen EINE Mission laufen lassen
  * und die Antwort prüfen — ersetzt das psql-SELECT auf agent_messages.
@@ -10,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import InfoTip from "./InfoTip";
+import InfoTip from "@/components/ui/InfoTip";
 import { apiFetch, readJson } from "@/lib/apiClient";
 import { missionScopeLabel } from "@/lib/missionTemplates";
 import type {
@@ -21,6 +20,7 @@ import type {
   RunTurnResponse,
   TurnResultDto,
 } from "@/lib/types";
+import { PANEL } from "../ui/layout";
 
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -47,7 +47,7 @@ function DecisionField({
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
       <div className="flex items-center">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{name}</span>
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{name}</span>
         <InfoTip id={`dec-${name}`} label={name} text={help} />
       </div>
       <p className="mt-0.5 font-mono text-sm text-slate-100">{value}</p>
@@ -136,7 +136,7 @@ export default function AgentRunPanel({
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {/* ── Steuerung + Ergebnis ─────────────────────────────────── */}
-      <section aria-labelledby="run-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="run-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex items-center">
           <h3 id="run-title" className="text-sm font-bold text-slate-100">Agent einzeln ausführen</h3>
           <InfoTip
@@ -170,7 +170,7 @@ export default function AgentRunPanel({
                 </option>
               ))}
             </select>
-            {agent && <p className="mt-1 text-[11px] text-slate-500">Modell: <code className="font-mono">{agent.model}</code> · Status: {agent.status}</p>}
+            {agent && <p className="mt-1 text-xs text-slate-500">Modell: <code className="font-mono">{agent.model}</code> · Status: {agent.status}</p>}
           </div>
           <div>
             <label htmlFor="run-mission" className="mb-1 block text-xs font-semibold text-slate-300">
@@ -195,7 +195,7 @@ export default function AgentRunPanel({
                 </option>
               ))}
             </select>
-            {mission && <p className="mt-1 text-[11px] text-slate-500">Ziel: {mission.objective.slice(0, 60)}{mission.objective.length > 60 ? "…" : ""}</p>}
+            {mission && <p className="mt-1 text-xs text-slate-500">Ziel: {mission.objective.slice(0, 60)}{mission.objective.length > 60 ? "…" : ""}</p>}
           </div>
         </div>
 
@@ -222,7 +222,7 @@ export default function AgentRunPanel({
             <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span
-                  className={`rounded px-2 py-0.5 text-[11px] font-bold ${
+                  className={`rounded px-2 py-0.5 text-xs font-bold ${
                     result.status === "EXECUTED" ? "bg-emerald-500/20 text-emerald-300"
                     : result.status === "BLOCKED" ? "bg-red-500/20 text-red-300"
                     : "bg-slate-600/40 text-slate-200"
@@ -230,11 +230,11 @@ export default function AgentRunPanel({
                 >
                   {result.status}
                 </span>
-                <span className="text-[11px] text-slate-500">
+                <span className="text-xs text-slate-500">
                   {SOURCE_LABEL[result.source] ?? result.source} · Modell <code className="font-mono">{result.model}</code> · {formatLatency(result.latencyMs)}
                 </span>
                 {result.guardrail && (
-                  <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                  <span className="rounded bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">
                     Guardrail: {result.guardrail}
                   </span>
                 )}
@@ -282,7 +282,7 @@ export default function AgentRunPanel({
                   </summary>
                   <ul className="mt-2 space-y-1">
                     {result.trace.map((t, i) => (
-                      <li key={i} className={`text-[11px] ${t.ok ? "text-emerald-300" : "text-red-300"}`}>
+                      <li key={i} className={`text-xs ${t.ok ? "text-emerald-300" : "text-red-300"}`}>
                         {t.ok ? "✔" : "✖"} {t.layer}: {t.detail}
                       </li>
                     ))}
@@ -295,7 +295,7 @@ export default function AgentRunPanel({
       </section>
 
       {/* ── Letzte 3 echte Agenten-Turns ─────────────────────────── */}
-      <section aria-labelledby="run-msgs-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="run-msgs-title" className={`${PANEL} p-5`}>
         <div className="mb-1 flex items-center">
           <h3 id="run-msgs-title" className="text-sm font-bold text-slate-100">Letzte 3 Agenten-Turns</h3>
           <InfoTip
@@ -307,14 +307,14 @@ export default function AgentRunPanel({
         <p className="mb-4 text-xs text-slate-500">Quelle „Regel-Engine“ heißt: Es antwortet gerade kein Modell — du testest die Pipeline, nicht die KI.</p>
 
         {showRaw && result && (
-          <pre className="mb-4 max-h-48 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] text-slate-400">
+          <pre className="mb-4 max-h-48 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-400">
             {JSON.stringify(result, null, 2)}
           </pre>
         )}
         {result && (
           <button
             onClick={() => setShowRaw((v) => !v)}
-            className="mb-4 rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+            className="mb-4 rounded border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
             aria-expanded={showRaw}
           >
             {showRaw ? "Rohdaten ausblenden" : "Rohdaten des Turns anzeigen (JSON)"}
@@ -326,7 +326,7 @@ export default function AgentRunPanel({
           onClick={() => {
             if (copyText && onCopyRaw) onCopyRaw(copyText);
           }}
-          className="mb-4 ml-2 rounded border border-sky-700 px-2 py-1 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+          className="mb-4 ml-2 rounded border border-sky-700 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
         >
           In Prompt-Entwurf kopieren
         </button>
@@ -338,28 +338,28 @@ export default function AgentRunPanel({
             {lastMessages.map((t, i) => (
               <li key={t.id} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-bold text-sky-300">#{i + 1}</span>
+                  <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-bold text-sky-300">#{i + 1}</span>
                   <span className="text-xs font-semibold text-slate-200">{t.agent}</span>
-                  <span className="text-[11px] text-slate-500">{t.role}</span>
-                  <span className="ml-auto text-[11px] text-slate-500">
+                  <span className="text-xs text-slate-500">{t.role}</span>
+                  <span className="ml-auto text-xs text-slate-500">
                     {new Date(t.at).toLocaleTimeString("de-DE")} · {SOURCE_LABEL[t.source ?? ""] ?? t.source ?? "—"} · {formatLatency(t.latencyMs)}
                   </span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-300">{t.content ?? t.decision?.reason ?? "(leere Nachricht)"}</p>
                 {t.decision && (
                   <details className="mt-1.5">
-                    <summary className="cursor-pointer text-[11px] font-semibold text-slate-500">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-500">
                       Geparste Entscheidung: {t.decision.type}
                       {t.decision.symbol ? ` · ${t.decision.symbol}` : ""}
                       {t.decision.side ? ` · ${t.decision.side}` : ""}
                     </summary>
-                    <pre className="mt-1 overflow-x-auto rounded bg-slate-950 p-2 font-mono text-[11px] text-emerald-300">
+                    <pre className="mt-1 overflow-x-auto rounded bg-slate-950 p-2 font-mono text-xs text-emerald-300">
                       {JSON.stringify(t.decision, null, 2)}
                     </pre>
                     {t.rawResponse && (
                       <>
-                        <p className="mt-1.5 text-[11px] font-semibold text-slate-500">Rohergebnis des Modells ({t.model ?? "Modell nicht protokolliert"}):</p>
-                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-slate-950 p-2 font-mono text-[11px] text-slate-400">
+                        <p className="mt-1.5 text-xs font-semibold text-slate-500">Rohergebnis des Modells ({t.model ?? "Modell nicht protokolliert"}):</p>
+                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-slate-950 p-2 font-mono text-xs text-slate-400">
                           {t.rawResponse}
                         </pre>
                       </>

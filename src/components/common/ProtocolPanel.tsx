@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Protokoll-Bereich (agent_messages) mit demselben Paging-System wie der
  * Audit-Trail: 20/50/100/200 Einträge pro Seite, Default 20.
@@ -14,6 +13,7 @@ import type { ProtocolEntryDto } from "@/lib/types";
 import { summarizeProtocolEntry, type ProtocolEntryLike } from "@/lib/auditView";
 import { ProtocolList } from "./ProtocolList";
 import { Pager, usePagination } from "./Pager";
+import { SECTION_TITLE } from "@/components/ui/layout";
 
 export function ProtocolPanel({
   title = "Protokoll — Entscheidungen, Analysen und Systemmeldungen",
@@ -91,16 +91,16 @@ export function ProtocolPanel({
     <section className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
+          <h2 className={SECTION_TITLE}>{title}</h2>
           <p className="mt-1 text-xs text-slate-500">{hint}</p>
         </div>
-        <label className="flex items-center gap-2 text-[11px] text-slate-500">
-          Suche in dieser Seite
+        <label className="flex w-full items-center gap-2 text-xs text-slate-500 sm:w-auto">
+          <span className="shrink-0">Suche in dieser Seite</span>
           <input
             value={query}
             onChange={(change) => setQuery(change.target.value)}
             placeholder="z. B. BTC, HOLD, Cassini"
-            className="w-56 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600"
+            className="w-full min-w-0 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 sm:w-56"
           />
         </label>
       </div>

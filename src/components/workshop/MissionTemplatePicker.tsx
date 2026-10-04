@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Vorlagen-Auswahl des Workshops (v1.35.0).
  *
@@ -13,8 +12,9 @@
  */
 
 import { useMemo, useState } from "react";
-import InfoTip from "./InfoTip";
+import InfoTip from "@/components/ui/InfoTip";
 import type { MissionTemplateDto } from "@/lib/types";
+import { PANEL } from "../ui/layout";
 
 export default function MissionTemplatePicker({
   templates,
@@ -58,7 +58,7 @@ export default function MissionTemplatePicker({
 
   if (templates.length === 0) {
     return (
-      <section aria-labelledby="mission-template-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+      <section aria-labelledby="mission-template-title" className={`${PANEL} p-5`}>
         <h3 id="mission-template-title" className="text-sm font-bold text-slate-100">
           Vorlagen
         </h3>
@@ -72,7 +72,7 @@ export default function MissionTemplatePicker({
   }
 
   return (
-    <section aria-labelledby="mission-template-title" className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+    <section aria-labelledby="mission-template-title" className={`${PANEL} p-5`}>
       <div className="mb-1 flex items-center">
         <h3 id="mission-template-title" className="text-sm font-bold text-slate-100">
           1 · Vorlage wählen
@@ -82,7 +82,7 @@ export default function MissionTemplatePicker({
           label="Missions-Vorlagen"
           text="Wiederverwendbare Blaupausen: Eine Vorlage füllt das Formular voraus (Titel, Ziel, Missions-Typ, Budgets). Gespeichert wird erst durch „Mission anlegen“ — du kannst jedes Feld vorher ändern."
         />
-        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate-400">
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
           <input
             type="checkbox"
             checked={showInstalledOnly}
@@ -142,37 +142,37 @@ export default function MissionTemplatePicker({
         <div className="mt-3 space-y-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-100">{effSelected.name}</span>
-            <span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-slate-200">
+            <span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[11px] font-semibold text-slate-200">
               {effSelected.riskProfileLabel}
             </span>
-            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300">
               {effSelected.scopeLabel}
               {effSelected.scope === "SCAN_UNIVERSE" && effSelected.segmentLabel ? `: ${effSelected.segmentLabel}` : ""}
               {effSelected.symbol ? `: ${effSelected.symbol}` : ""}
             </span>
-            <span className="text-[10px] text-slate-400">
+            <span className="text-[11px] text-slate-400">
               Risiko {(effSelected.riskBudget * 100).toFixed(2)} % · max. Position{" "}
               {(effSelected.maxPositionPct * 100).toFixed(0)} %
             </span>
             {effSelected.seeded && (
-              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
                 wird mitinstalliert
               </span>
             )}
           </div>
-          <p className="text-[11px] leading-relaxed text-slate-400">{effSelected.why}</p>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-xs leading-relaxed text-slate-400">{effSelected.why}</p>
+          <p className="text-xs text-slate-500">
             <span className="font-semibold text-slate-400">Risikoprofil:</span> {effSelected.riskProfileHint}
           </p>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-xs text-slate-500">
             <span className="font-semibold text-slate-400">Erfolg prüfbar über:</span>{" "}
-            <code className="font-mono text-[10px]">{effSelected.successCriteria}</code>
+            <code className="font-mono text-[11px]">{effSelected.successCriteria}</code>
           </p>
           <details className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-            <summary className="cursor-pointer text-[11px] font-semibold text-sky-300">
+            <summary className="cursor-pointer text-xs font-semibold text-sky-300">
               Hilfe zu dieser Vorlage (Kurzinfo · Technik · Risiko)
             </summary>
-            <dl className="mt-2 space-y-1.5 text-[11px] leading-relaxed">
+            <dl className="mt-2 space-y-1.5 text-xs leading-relaxed">
               <div>
                 <dt className="font-semibold text-slate-300">Kurzinfo</dt>
                 <dd className="text-slate-400">{effSelected.help.kurzinfo}</dd>

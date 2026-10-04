@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Gemeinsamer Paging-Zustand für Audit-Trail und Protokoll.
  *
@@ -11,6 +10,7 @@
  */
 
 import { useCallback, useState } from "react";
+import Button from "@/components/ui/Button";
 import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
@@ -20,6 +20,7 @@ import {
   pageWindow,
   type PageSize,
 } from "@/lib/paging";
+import { PANEL } from "../ui/layout";
 
 export function usePagination(initialTotal = 0) {
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
@@ -58,7 +59,7 @@ export function Pager({ pagination, label = "Einträge" }: { pagination: Paginat
   const { pageSize, page, pages, window: win } = pagination;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs">
+    <div className={`flex flex-wrap items-center justify-between gap-3 ${PANEL} px-3 py-2 text-xs`}>
       <div className="flex items-center gap-2">
         <label htmlFor={`page-size-${label}`} className="text-slate-400">
           {label} pro Seite
@@ -78,25 +79,15 @@ export function Pager({ pagination, label = "Einträge" }: { pagination: Paginat
       </div>
 
       <div className="flex items-center gap-2 text-slate-400">
-        <button
-          type="button"
-          onClick={() => pagination.goTo(page - 1)}
-          disabled={page <= 1}
-          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 font-semibold text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <Button type="button" size="sm" onClick={() => pagination.goTo(page - 1)} disabled={page <= 1}>
           ← Zurück
-        </button>
+        </Button>
         <span className="tabular-nums text-slate-300">
           Seite {page} von {pages}
         </span>
-        <button
-          type="button"
-          onClick={() => pagination.goTo(page + 1)}
-          disabled={page >= pages}
-          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 font-semibold text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <Button type="button" size="sm" onClick={() => pagination.goTo(page + 1)} disabled={page >= pages}>
           Weiter →
-        </button>
+        </Button>
       </div>
 
       <span className="text-slate-500 tabular-nums">

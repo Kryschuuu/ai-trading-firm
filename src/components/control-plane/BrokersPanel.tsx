@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * "Brokers & Venues" — Control-Plane-UI (Task 08).
  *
@@ -20,6 +19,7 @@ import {
   type BrokerListEntry,
   type BrokerStatusDto,
 } from "@/lib/controlPlane";
+import { AUTO_FIT_WIDE } from "@/components/ui/layout";
 import BrokerCard from "./BrokerCard";
 import CoveragePanel from "./CoveragePanel";
 import LiveGatePanel from "./LiveGatePanel";
@@ -103,11 +103,11 @@ export default function BrokersPanel({
           <button
             onClick={() => void load()}
             disabled={loading}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
           >
             {loading ? "Lade …" : "↻ Aktualisieren"}
           </button>
-          <p className="text-[11px] text-slate-600">
+          <p className="text-xs text-slate-600">
             Statuswerte: GET /api/brokers + GET /api/brokers/{"{venue}"}/status
           </p>
         </div>

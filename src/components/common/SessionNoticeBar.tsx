@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Hinweisbalken mit An-, Ab- und Verlängerung der Browser-Session
  * (v1.36.41 aus `FirmDashboard` ausgelagert; Statuszeile seit v1.39.0).

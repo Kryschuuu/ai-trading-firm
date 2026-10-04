@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Coverage-Panel „Venues & Coverage" (Operations Center).
  *
@@ -23,6 +22,9 @@ import {
   fetchBrokerCoverage,
   type BrokerCoverageResponse,
 } from "@/lib/controlPlane";
+import Chip from "@/components/ui/Chip";
+import DataTable from "@/components/ui/DataTable";
+import { PANEL } from "../ui/layout";
 
 function pluralVenue(n: number): string {
   return n === 1 ? "Venue" : "Venues";
@@ -49,7 +51,7 @@ function Headline({
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
       <p className={`text-2xl font-black tabular-nums ${toneClass}`}>{value}</p>
-      <p className="mt-0.5 text-[11px] leading-tight text-slate-400">{label}</p>
+      <p className="mt-0.5 text-xs leading-tight text-slate-400">{label}</p>
     </div>
   );
 }
@@ -76,8 +78,8 @@ function CoverageBar({
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-semibold text-slate-300">{label}</span>
-        <span className="font-mono text-[11px] text-slate-400">
+        <span className="text-xs font-semibold text-slate-300">{label}</span>
+        <span className="font-mono text-xs text-slate-400">
           {covered}/{total} · {pct}%
         </span>
       </div>
@@ -160,7 +162,7 @@ export default function CoveragePanel() {
         <button
           onClick={() => void load()}
           disabled={loading}
-          className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
         >
           {loading ? "Lade …" : "↻ Aktualisieren"}
         </button>
@@ -171,7 +173,7 @@ export default function CoveragePanel() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-20 animate-pulse rounded-xl border border-slate-800 bg-slate-900/40"
+              className={`h-20 animate-pulse ${PANEL}`}
             />
           ))}
         </div>
@@ -187,7 +189,7 @@ export default function CoveragePanel() {
       {data && (
         <>
           {/* Headline-Kennzahlen */}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 3xl:grid-cols-5">
             <Headline
               value={data.registeredVenues}
               label={`${pluralVenue(data.registeredVenues)} registriert (Adapter vorhanden)`}
@@ -215,14 +217,14 @@ export default function CoveragePanel() {
               tone={data.liveEnabledVenues > 0 ? "warn" : "locked"}
             />
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-xs text-slate-500">
             Headline-Zahlen zählen <strong>reale externe</strong> Venues; der
             interne PAPER-Simulator ({data.internalVenues}) ist in der Tabelle
             transparent als <em>intern</em> markiert.
           </p>
 
           {/* Coverage-Balken */}
-          <div className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 sm:grid-cols-2 lg:grid-cols-3 3xl:grid-cols-4">
             {data.metrics.map((m) => (
               <CoverageBar
                 key={m.id}
@@ -233,84 +235,39 @@ export default function CoveragePanel() {
             ))}
           </div>
 
-          {/* Detailtabelle */}
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full min-w-[640px] text-left text-xs">
-              <thead className="bg-slate-950/60 text-[10px] uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Venue</th>
-                  <th className="px-3 py-2 font-semibold">Typ</th>
-                  <th className="px-3 py-2 text-center font-semibold">Discovery</th>
-                  <th className="px-3 py-2 text-center font-semibold">
-                    Market Data
-                  </th>
-                  <th className="px-3 py-2 text-center font-semibold">Paper</th>
-                  <th className="px-3 py-2 text-center font-semibold">Testnet</th>
-                  <th className="px-3 py-2 text-center font-semibold">
-                    Live (Fähigkeit)
-                  </th>
-                  <th className="px-3 py-2 text-center font-semibold">
-                    Live (aktiv)
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/70">
-                {data.rows.map((r) => (
-                  <tr key={r.venue} className="hover:bg-slate-900/40">
-                    <td className="px-3 py-2">
-                      <span className="font-semibold text-slate-200">
-                        {r.label}
-                      </span>
-                      <span className="ml-1.5 font-mono text-[10px] text-slate-500">
-                        {r.venue}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      {r.internal ? (
-                        <span className="rounded border border-slate-700 bg-slate-800/60 px-1.5 py-0.5 text-[10px] text-slate-400">
-                          intern
-                        </span>
-                      ) : (
-                        <span className="rounded border border-sky-800/60 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300">
-                          extern
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <CapCell on={r.discovery} />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <CapCell on={r.marketData} />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <CapCell on={r.paperExecution} />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <CapCell on={r.testnetExecution} />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <CapCell on={r.liveCapable} />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {r.liveEnabled ? (
-                        <span className="text-amber-300" title={r.liveReason}>
-                          aktiv
-                        </span>
-                      ) : (
-                        <span
-                          className="text-red-400"
-                          title={r.liveReason}
-                        >
-                          gesperrt
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-[11px] text-slate-500">
+          {/* Detailtabelle: 8 Spalten mit Ja/Nein-Zuständen. `stack={false}` —
+              auf schmalen Bildschirmen ist horizontales Scrollen hier
+              übersichtlicher als acht Zeilen pro Venue. */}
+          <DataTable
+            label="Coverage je Venue"
+            stack={false}
+            stickyHead
+            maxHeight="60vh"
+            align={["left", "left", "center", "center", "center", "center", "center", "center"]}
+            head={["Venue", "Typ", "Discovery", "Market Data", "Paper", "Testnet", "Live (Fähigkeit)", "Live (aktiv)"]}
+            rows={data.rows.map((r) => [
+              <span key="venue">
+                <span className="font-semibold text-slate-200">{r.label}</span>
+                <span className="ml-1.5 font-mono text-[11px] text-slate-500">{r.venue}</span>
+              </span>,
+              r.internal ? (
+                <Chip key="type">intern</Chip>
+              ) : (
+                <Chip key="type" tone="info">extern</Chip>
+              ),
+              <CapCell key="discovery" on={r.discovery} />,
+              <CapCell key="marketData" on={r.marketData} />,
+              <CapCell key="paper" on={r.paperExecution} />,
+              <CapCell key="testnet" on={r.testnetExecution} />,
+              <CapCell key="liveCapable" on={r.liveCapable} />,
+              r.liveEnabled ? (
+                <span key="live" className="text-amber-300" title={r.liveReason}>aktiv</span>
+              ) : (
+                <span key="live" className="text-red-400" title={r.liveReason}>gesperrt</span>
+              ),
+            ])}
+          />
+          <p className="text-xs text-slate-500">
             <strong>Live (Fähigkeit)</strong> = der Adapter kann technisch
             Live-Orders serialisieren. <strong>Live (aktiv)</strong> = das
             zentrale Live-Gate gibt reale Orders frei — Default gesperrt, bis die

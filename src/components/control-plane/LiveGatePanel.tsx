@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Live-Gate-Panel (Task 11) — Anzeige + Kill-Switch im „Brokers & Venues"-Tab.
  *
@@ -23,6 +22,7 @@ import {
   type LiveGateVenueSnapshotDto,
 } from "@/lib/liveGate";
 import ConfirmDialog from "./ConfirmDialog";
+import { PANEL } from "../ui/layout";
 
 const STATE_ORDER: LiveGateVenueSnapshotDto["state"][] = [
   "DISCONNECTED",
@@ -163,7 +163,7 @@ export default function LiveGatePanel({
 
       {overview && (
         <>
-          <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
+          <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <span
               className={`rounded-md border px-2 py-0.5 font-semibold ${
                 overview.killSwitch.active
@@ -204,11 +204,11 @@ export default function LiveGatePanel({
             {venues.map((v) => {
               const rank = STATE_ORDER.indexOf(v.state);
               return (
-                <div key={v.venue} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                <div key={v.venue} className={`${PANEL} p-3`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-200">{v.venue}</span>
                     <span
-                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${stateColor(v.state)}`}
+                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold ${stateColor(v.state)}`}
                       title={`Deny-Code: ${v.denyCodeIfAny ?? "—"}`}
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
@@ -221,7 +221,7 @@ export default function LiveGatePanel({
                       style={{ width: `${((rank + 1) / STATE_ORDER.length) * 100}%` }}
                     />
                   </div>
-                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-400">
                     <div>
                       Flags: {v.flags.venueEnabled ? "venue✓" : "venue✗"} ·{" "}
                       {v.flags.platformLive ? "platform✓" : "platform✗"} ·{" "}
@@ -245,7 +245,7 @@ export default function LiveGatePanel({
               );
             })}
           </div>
-          <p className="mt-3 text-[11px] text-slate-500">
+          <p className="mt-3 text-xs text-slate-500">
             Runbook für Freigaben: docs/LIVE_TRADING.md (API <code>POST /api/live/transition</code>{" "}
             bzw. CLI) — jedes Opening ist ein auditierter Admin-Akt mit Begründung.
           </p>

@@ -116,7 +116,7 @@ export function DocsNavList({
       )}
 
       {searching && (
-        <p className="mb-2 shrink-0 text-[11px] text-slate-500">
+        <p className="mb-2 shrink-0 text-xs text-slate-500">
           {filtered.length} Treffer in {groups.length} Bereichen
         </p>
       )}
@@ -137,13 +137,13 @@ export function DocsNavList({
                     onClick={() => toggle(section.id)}
                     aria-expanded={expanded}
                     title={section.description}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400 transition hover:bg-slate-800/50 hover:text-slate-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-emerald-400"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-400 transition hover:bg-slate-800/50 hover:text-slate-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-emerald-400"
                   >
                     <ChevronIcon
                       className={`h-2.5 w-2.5 shrink-0 text-slate-500 transition-transform ${expanded ? "rotate-90" : ""}`}
                     />
                     <span className="min-w-0 flex-1 truncate">{section.label}</span>
-                    <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
+                    <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-0.5 text-[11px] font-medium text-slate-400">
                       {items.length}
                     </span>
                   </button>
@@ -167,7 +167,7 @@ export function DocsNavList({
                             >
                               <span className="block break-words">{doc.title}</span>
                               {(showAllSubtitles || active) && doc.subtitle && (
-                                <span className="mt-0.5 block text-[11px] font-normal leading-snug text-slate-500 line-clamp-2">
+                                <span className="mt-0.5 block text-xs font-normal leading-snug text-slate-500 line-clamp-2">
                                   {doc.subtitle}
                                 </span>
                               )}

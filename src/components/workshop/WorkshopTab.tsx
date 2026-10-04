@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Workshop — das UI-Pendant zu Handbuch Kapitel 5 (Missionen), 6 (Prompts)
  * und 15.4 (Regel-Entwurf). Fünf Schritte: Mission schreiben → EINEN Agent
@@ -10,6 +9,7 @@
 
 import { useState } from "react";
 import type { AgentRow, MissionRow } from "@/lib/types";
+import TabBar, { TabPanel, type TabDef } from "@/components/ui/Tabs";
 import MissionsPanel from "./MissionsPanel";
 import AgentRunPanel from "./AgentRunPanel";
 import PromptPanel, { type PromptDraftSeed } from "./PromptPanel";
@@ -18,12 +18,17 @@ import RuleBacktestPanel from "./RuleBacktestPanel";
 
 export type WorkshopStep = "missions" | "run" | "prompt" | "hitrate" | "rulebacktest";
 
-const steps: { id: WorkshopStep; label: string; hint: string }[] = [
-  { id: "missions", label: "1 · Mission anlegen", hint: "Handbuch 5.1–5.4 — Vorlage übernehmen, Missions-Typ wählen (Einzel-Symbol oder Markt-Scan), Auftrag definieren, bevor irgendein Agent läuft." },
-  { id: "run", label: "2 · Agent ausführen", hint: "Handbuch 6.2 — einen Agenten einzeln laufen lassen und die Rohantwort prüfen." },
-  { id: "prompt", label: "3 · Prompt iterieren", hint: "Handbuch 6.3 — genau eine Sache am Prompt ändern, wirkt sofort." },
-  { id: "hitrate", label: "4 · Trefferquote", hint: "Handbuch 6.4 — Testschleife starten und die Verteilung zählen." },
-  { id: "rulebacktest", label: "5 · Regel prüfen", hint: "Handbuch 15.4 — Bedingungen setzen, als DRAFT speichern und den Paper-Store messen. Keine Aktivierung." },
+/**
+ * Die fünf Workshop-Schritte. `hint` steht als Tooltip am Reiter und als
+ * Erklärzeile darunter — die Reihenfolge ist die Arbeitsreihenfolge und
+ * entspricht Handbuch 5, 6 und 15.4.
+ */
+const steps: readonly TabDef<WorkshopStep>[] = [
+  { id: "missions", label: "1 · Mission anlegen", title: "Handbuch 5.1–5.4 — Vorlage übernehmen, Missions-Typ wählen (Einzel-Symbol oder Markt-Scan), Auftrag definieren, bevor irgendein Agent läuft." },
+  { id: "run", label: "2 · Agent ausführen", title: "Handbuch 6.2 — einen Agenten einzeln laufen lassen und die Rohantwort prüfen." },
+  { id: "prompt", label: "3 · Prompt iterieren", title: "Handbuch 6.3 — genau eine Sache am Prompt ändern, wirkt sofort." },
+  { id: "hitrate", label: "4 · Trefferquote", title: "Handbuch 6.4 — Testschleife starten und die Verteilung zählen." },
+  { id: "rulebacktest", label: "5 · Regel prüfen", title: "Handbuch 15.4 — Bedingungen setzen, als DRAFT speichern und den Paper-Store messen. Keine Aktivierung." },
 ];
 
 export default function WorkshopTab({
@@ -60,29 +65,23 @@ export default function WorkshopTab({
         </p>
       </div>
 
-      <nav aria-label="Workshop-Schritte" className="flex flex-wrap gap-2">
-        {steps.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setStep(s.id)}
-            aria-current={step === s.id ? "step" : undefined}
-            title={s.hint}
-            className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              step === s.id
-                ? "bg-sky-500 text-slate-950"
-                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </nav>
-      <p className="text-xs text-slate-500">{active.hint}</p>
+      {/* Die Schritte sind eine zweite Ebene unter der Dashboard-Reiterleiste:
+          gleiche Bedienung (Pfeiltasten, ARIA), aber nicht sticky — sonst
+          überlagerten sich die beiden Leisten. */}
+      <TabBar
+        tabs={steps}
+        active={step}
+        onChange={setStep}
+        ariaLabel="Workshop-Schritte"
+        idPrefix="workshop"
+        sticky={false}
+      />
+      <p className="-mt-2 text-xs text-slate-500">{active.title}</p>
 
-      {step === "missions" && (
+      <TabPanel id="missions" idPrefix="workshop">
         <MissionsPanel missions={missions} onChanged={onChanged} onUnauthorized={onUnauthorized} />
-      )}
-      {step === "run" && (
+      </TabPanel>
+      <TabPanel id="run" idPrefix="workshop">
         <AgentRunPanel
           agents={agents}
           missions={missions}
@@ -92,24 +91,26 @@ export default function WorkshopTab({
             setStep("prompt");
           }}
         />
-      )}
-      {step === "prompt" && (
+      </TabPanel>
+      <TabPanel id="prompt" idPrefix="workshop">
         <PromptPanel
           agents={agents}
           onChanged={onChanged}
           onUnauthorized={onUnauthorized}
           draftSeed={promptSeed}
         />
-      )}
-      {step === "hitrate" && (
+      </TabPanel>
+      <TabPanel id="hitrate" idPrefix="workshop">
         <HitRatePanel
           agents={agents}
           missions={missions}
           onUnauthorized={onUnauthorized}
           onOpenProtocol={onOpenProtocol}
         />
-      )}
-      {step === "rulebacktest" && <RuleBacktestPanel onUnauthorized={onUnauthorized} />}
+      </TabPanel>
+      <TabPanel id="rulebacktest" idPrefix="workshop">
+        <RuleBacktestPanel onUnauthorized={onUnauthorized} />
+      </TabPanel>
     </div>
   );
 }

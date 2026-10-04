@@ -3,12 +3,15 @@
  *
  * Zweck: Einstiegspunkt nach dem Login — zeigt Versionsstand (SSoT
  * src/lib/version.ts) und führt auf die Dashboard- und Doku-Ansichten.
- * Abhängigkeiten: @/lib/version, @/components (Dashboard-Teile).
+ * Die Fußzeile nutzt seit v0.15.0 denselben fluiden Seitenrand wie das
+ * Dashboard (`PAGE_GUTTER`) statt einer eigenen `max-w-7xl`-Mitte.
+ * Abhängigkeiten: @/lib/version, @/components (Dashboard-Teile), @/components/ui/layout.
  */
 
 import FirmDashboard from "@/components/FirmDashboard";
 import { ensureSeeded, checkSchema } from "@/lib/seed";
 import { APP_VERSION } from "@/lib/version";
+import { PANEL, PAGE_GUTTER } from "@/components/ui/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +39,8 @@ export default async function HomePage() {
 
   if (!schemaOk) {
     return (
-      <main className="min-h-screen bg-slate-950 flex items-center justify-center p-8">
-        <div className="max-w-2xl w-full rounded-2xl border border-red-700/50 bg-red-950/30 p-8">
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4 sm:p-8">
+        <div className="w-full max-w-3xl rounded-2xl border border-red-700/50 bg-red-950/30 p-6 sm:p-8">
           <p className="text-xs uppercase tracking-widest text-red-400 mb-2">Setup erforderlich</p>
           <h1 className="text-2xl font-bold text-slate-50 mb-4">
             Datenbanktabellen fehlen
@@ -78,7 +81,7 @@ sudo systemctl restart ai-trading-firm   # Produktion (systemd)`}
             </pre>
           </details>
 
-          <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-xs text-slate-400 leading-relaxed">
+          <div className={`mt-6 ${PANEL} p-4 text-xs text-slate-400 leading-relaxed`}>
             <strong className="text-slate-200">Häufige Ursache (Variante B):</strong><br/>
             Das Setup-Skript hat <code className="text-emerald-400">drizzle-kit push</code> ausgeführt,
             bevor <code className="text-emerald-400">.env</code> mit der richtigen{" "}
@@ -96,7 +99,7 @@ sudo systemctl restart ai-trading-firm   # Produktion (systemd)`}
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900">
       <FirmDashboard />
-      <footer className="mx-auto max-w-7xl px-4 pb-10 pt-4 text-center text-xs text-slate-600">
+      <footer className={`${PAGE_GUTTER} pb-10 pt-4 text-center text-xs text-slate-600`}>
         Lokale autonome Trading-Firma · Next.js + Drizzle + PostgreSQL + Ollama ·
         Ausschließlich Paper-Trading — es ist zu keiner Zeit echtes Kapital im Spiel.
         {/* Versionsnummer aus package.json (einziger Wahrheitsort: src/lib/version.ts) */}

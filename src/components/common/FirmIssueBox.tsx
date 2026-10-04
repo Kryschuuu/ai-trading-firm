@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Hinweisbox für einen fehlgeschlagenen Firm-Load (v1.36.41).
  *

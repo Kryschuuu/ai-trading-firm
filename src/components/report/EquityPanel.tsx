@@ -28,7 +28,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import InfoTip from "@/components/workshop/InfoTip";
+import InfoTip from "@/components/ui/InfoTip";
+import DataTable from "@/components/ui/DataTable";
 import EquityCurveChart, { type ComparisonSeries } from "./EquityCurveChart";
 import {
   EQUITY_RANGE_LABELS,
@@ -55,6 +56,7 @@ import {
   BENCHMARKS,
   type BenchmarkId,
 } from "@/lib/equityBenchmarkCatalog";
+import { PANEL } from "../ui/layout";
 
 type EquityResponse = {
   ok: boolean;
@@ -409,7 +411,7 @@ export default function EquityPanel() {
             </button>
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-500">
+        <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
           {updatedAt && <span title="Letzte erfolgreiche Aktualisierung">Stand {updatedAt.toLocaleTimeString("de-DE")}</span>}
           <button
             type="button"
@@ -440,7 +442,7 @@ export default function EquityPanel() {
       </div>
 
       {/* ── Kennzahlen ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 3xl:grid-cols-6">
         <Metric
           label="Rendite im Zeitraum"
           value={stats?.returnPct != null ? formatPct(stats.returnPct) : "—"}
@@ -631,7 +633,7 @@ export default function EquityPanel() {
             <option value="last3">Ø letzte 3 Perioden</option>
           </select>
           {compareMode !== "off" && (
-            <span className="text-[11px] text-slate-500">
+            <span className="text-xs text-slate-500">
               {compareSeries ? "indexiert auf den Start" : compareWindows.length === 0 ? "lade Vorperioden…" : "keine Daten"}
             </span>
           )}
@@ -640,7 +642,7 @@ export default function EquityPanel() {
 
       {/* ── Chart ───────────────────────────────────────────────────────── */}
       {loading && points.length === 0 ? (
-        <div className="flex h-48 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/50 text-sm text-slate-400">
+        <div className={`flex h-48 items-center justify-center ${PANEL} text-sm text-slate-400`}>
           Lade Kurve…
         </div>
       ) : error ? (
@@ -682,46 +684,31 @@ export default function EquityPanel() {
               text="Jede Phase läuft vom Höchststand über das Tief bis zur Erholung (Rückkehr auf den Höchststand). „offen“ heißt: die Erholung steht noch aus — dann ist keine Erholungszeit bekannt und die Gesamtdauer läuft bis zum letzten Kurvenpunkt."
             />
           </h3>
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/70 text-[11px] uppercase tracking-wider text-slate-400">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">#</th>
-                  <th className="px-3 py-2 font-semibold">Rückgang</th>
-                  <th className="px-3 py-2 font-semibold">Höchststand → Tief</th>
-                  <th className="px-3 py-2 font-semibold">Absolut</th>
-                  <th className="px-3 py-2 font-semibold">Abstieg</th>
-                  <th className="px-3 py-2 font-semibold">Erholung</th>
-                  <th className="px-3 py-2 font-semibold">Gesamt</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800 text-slate-300">
-                {episodes.map((episode, index) => (
-                  <tr key={`${episode.troughTs}-${index}`} className="hover:bg-slate-900/40">
-                    <td className="px-3 py-2 text-slate-500">{index + 1}</td>
-                    <td className="px-3 py-2 font-semibold text-red-300">{formatPct(-episode.drawdownPct)}</td>
-                    <td className="px-3 py-2">
-                      {episode.peakTs ? formatTimestamp(episode.peakTs) : "vor dem Zeitraum"}{" "}
-                      <span className="text-slate-500">→</span> {formatTimestamp(episode.troughTs)}
-                    </td>
-                    <td className="px-3 py-2 font-mono tabular-nums">{formatMoney(-episode.drawdownAbs)}</td>
-                    <td className="px-3 py-2">{formatDuration(episode.declineMs)}</td>
-                    <td className="px-3 py-2">
-                      {episode.recoveredAt ? (
-                        <>
-                          {formatDuration(episode.recoveryMs)}{" "}
-                          <span className="text-slate-500">bis {formatTimestamp(episode.recoveredAt)}</span>
-                        </>
-                      ) : (
-                        <span className="text-amber-300">offen</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{formatDuration(episode.totalMs)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            label="Die fünf tiefsten Drawdown-Phasen"
+            stack={false}
+            align={["left", "right", "left", "right", "left", "left", "left"]}
+            head={["#", "Rückgang", "Höchststand → Tief", "Absolut", "Abstieg", "Erholung", "Gesamt"]}
+            rows={episodes.map((episode, index) => [
+              <span key="idx" className="text-slate-500">{index + 1}</span>,
+              <span key="dd" className="font-semibold tabular-nums text-red-300">{formatPct(-episode.drawdownPct)}</span>,
+              <span key="range">
+                {episode.peakTs ? formatTimestamp(episode.peakTs) : "vor dem Zeitraum"}{" "}
+                <span className="text-slate-500">→</span> {formatTimestamp(episode.troughTs)}
+              </span>,
+              <span key="abs" className="font-mono tabular-nums">{formatMoney(-episode.drawdownAbs)}</span>,
+              <span key="decline">{formatDuration(episode.declineMs)}</span>,
+              episode.recoveredAt ? (
+                <span key="recovery">
+                  {formatDuration(episode.recoveryMs)}{" "}
+                  <span className="text-slate-500">bis {formatTimestamp(episode.recoveredAt)}</span>
+                </span>
+              ) : (
+                <span key="recovery" className="text-amber-300">offen</span>
+              ),
+              <span key="total">{formatDuration(episode.totalMs)}</span>,
+            ])}
+          />
         </section>
       )}
 
@@ -735,8 +722,17 @@ export default function EquityPanel() {
               text="Rendite je Kalendermonat aus dem ersten und letzten Snapshot des Monats (aus der Tabelle, nicht aus der verdichteten Chart-Kurve). Der erste und der letzte Monat sind oft angeschnitten und mit * markiert. Die Farbintensität entspricht der Stärke zwischen −10 % und +10 %."
             />
           </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-separate border-spacing-1 text-left text-[11px]">
+          {/* Kalender-Matrix (14 Spalten): bewusst keine `DataTable` — hier
+              zählt die Fläche als Ganzes. Stattdessen derselbe Vertrag für
+              Tastatur und Screen Reader: fokussierbarer Scrollbereich mit
+              Namen (`role="region"` + `tabIndex`). */}
+          <div
+            className="fs-table-scroll"
+            role="region"
+            aria-label="Monatsrenditen je Jahr (horizontal scrollbar)"
+            tabIndex={0}
+          >
+            <table className="w-full min-w-[640px] border-separate border-spacing-1 text-left text-xs">
               <thead>
                 <tr className="text-slate-500">
                   <th className="w-12 font-semibold">Jahr</th>
@@ -790,7 +786,7 @@ export default function EquityPanel() {
               </tbody>
             </table>
           </div>
-          <p className="mt-1 text-[11px] text-slate-500">
+          <p className="mt-1 text-xs text-slate-500">
             {monthSummary.months} Monate · {monthSummary.positive} positiv / {monthSummary.negative} negativ
             {monthSummary.best ? ` · bester ${monthSummary.best.ym} ${formatPct(monthSummary.best.pct)}` : ""}
             {monthSummary.worst ? ` · schwächster ${monthSummary.worst.ym} ${formatPct(monthSummary.worst.pct)}` : ""}
@@ -800,7 +796,7 @@ export default function EquityPanel() {
       )}
 
       {/* ── Fußnote: Definitionen + Datenlage ───────────────────────────── */}
-      <p className="text-[11px] leading-relaxed text-slate-500">
+      <p className="text-xs leading-relaxed text-slate-500">
         Equity = freies Cash + Marktwert offener Positionen. Drawdown = Rückgang vom bisherigen Höchststand
         (Peak-to-Trough), {data ? `Höchststand vor dem Zeitraum: ${data.retention.priorPeak != null ? formatMoney(data.retention.priorPeak) : "unbekannt"}` : "…"}.
         Startkapital {data ? formatMoney(data.startingEquity) : "—"} · Zeitzone Europe/Berlin ·{" "}
@@ -828,8 +824,8 @@ function Metric({
   tone?: "good" | "bad";
 }) {
   return (
-    <div className="print-break-avoid rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-      <p className="flex items-center text-[11px] uppercase tracking-wider text-slate-400">
+    <div className={`print-break-avoid ${PANEL} px-4 py-3`}>
+      <p className="flex items-center text-xs uppercase tracking-wider text-slate-400">
         {label}
         <InfoTip label={label} text={hint} />
       </p>
@@ -840,7 +836,7 @@ function Metric({
       >
         {value}
       </p>
-      {sub && <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p>}
+      {sub && <p className="mt-0.5 text-[11px] text-slate-500">{sub}</p>}
     </div>
   );
 }

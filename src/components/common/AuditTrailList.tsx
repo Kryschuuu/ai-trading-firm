@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Audit-Trail als lesbare Liste: jeder Eintrag ist ein aufklappbarer Container
  * mit Kurzfassung (zugeklappt) bzw. vollständiger, beschrifteter Darstellung
@@ -12,6 +11,7 @@
 
 import { useState } from "react";
 import type { AuditFact, AuditSection, AuditTrailSummary, AuditView, IssueSeverity } from "@/lib/auditView";
+import { PANEL } from "../ui/layout";
 
 
 const TONE_BADGE: Record<AuditView["tone"], string> = {
@@ -42,12 +42,12 @@ const FACT_TONE: Record<NonNullable<AuditFact["tone"]>, string> = {
 function FactRow({ fact }: { fact: AuditFact }) {
   return (
     <div className="grid grid-cols-1 gap-1 border-b border-slate-800/60 py-1.5 last:border-0 sm:grid-cols-[minmax(9rem,14rem)_1fr] sm:gap-3">
-      <dt className="text-[11px] uppercase tracking-wide text-slate-400">{fact.label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-slate-400">{fact.label}</dt>
       <dd className="min-w-0">
-        <span className={`block break-words text-slate-200 ${fact.mono ? "font-mono text-[11px]" : ""} ${FACT_TONE[fact.tone ?? "neutral"]}`}>
+        <span className={`block break-words text-slate-200 ${fact.mono ? "font-mono text-xs" : ""} ${FACT_TONE[fact.tone ?? "neutral"]}`}>
           {fact.value}
         </span>
-        {fact.hint && <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{fact.hint}</span>}
+        {fact.hint && <span className="mt-0.5 block text-xs leading-snug text-slate-500">{fact.hint}</span>}
       </dd>
     </div>
   );
@@ -56,8 +56,8 @@ function FactRow({ fact }: { fact: AuditFact }) {
 function Section({ section }: { section: AuditSection }) {
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2">
-      <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{section.title}</h4>
-      {section.note && <p className="mb-1 text-[11px] text-amber-300">{section.note}</p>}
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">{section.title}</h4>
+      {section.note && <p className="mb-1 text-xs text-amber-300">{section.note}</p>}
       <dl>
         {section.facts.map((fact, index) => (
           <FactRow key={`${section.title}-${fact.label}-${index}`} fact={fact} />
@@ -75,7 +75,7 @@ function IssueList({ issues }: { issues: AuditView["issues"] }) {
         const style = ISSUE_STYLE[issue.severity];
         return (
           <li key={`${issue.title}-${index}`} className={`rounded-lg border px-3 py-2 ${style.box}`}>
-            <p className="text-[11px] font-bold uppercase tracking-wide">
+            <p className="text-xs font-bold uppercase tracking-wide">
               <span aria-hidden="true" className="mr-1">{style.icon}</span>
               {style.label}: {issue.title}
             </p>
@@ -108,21 +108,21 @@ function AuditTrailRow({
         aria-expanded={isOpen}
         className="flex w-full items-start gap-3 px-3 py-2 text-left transition hover:bg-slate-800/40"
       >
-        <span className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${TONE_BADGE[view.tone]}`}>
+        <span className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-bold uppercase ${TONE_BADGE[view.tone]}`}>
           {view.levelLabel}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-xs font-semibold text-slate-100">{view.eventLabel}</span>
-            <code className="text-[10px] text-slate-500">{view.event}</code>
-            {hasErrors && <span className="text-[10px] font-bold uppercase text-red-400">⛔ Widerspruch</span>}
-            {!hasErrors && hasWarnings && <span className="text-[10px] font-bold uppercase text-amber-400">⚠ Hinweis</span>}
+            <code className="text-[11px] text-slate-500">{view.event}</code>
+            {hasErrors && <span className="text-[11px] font-bold uppercase text-red-400">⛔ Widerspruch</span>}
+            {!hasErrors && hasWarnings && <span className="text-[11px] font-bold uppercase text-amber-400">⚠ Hinweis</span>}
           </span>
           <span className="mt-0.5 block break-words text-xs text-slate-300">{view.headline}</span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="block whitespace-nowrap text-[11px] tabular-nums text-slate-300">{view.atLabel}</span>
-          <span className="block whitespace-nowrap text-[10px] text-slate-500">{view.relative}</span>
+          <span className="block whitespace-nowrap text-xs tabular-nums text-slate-300">{view.atLabel}</span>
+          <span className="block whitespace-nowrap text-[11px] text-slate-500">{view.relative}</span>
         </span>
         <span aria-hidden="true" className="mt-1 shrink-0 text-slate-500">
           {isOpen ? "▾" : "▸"}
@@ -132,7 +132,7 @@ function AuditTrailRow({
       {isOpen && (
         <div className="space-y-3 border-t border-slate-800 px-3 py-3">
           <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Was ist passiert?</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Was ist passiert?</p>
             <p className="mt-1 text-xs leading-relaxed text-slate-300">{view.eventDescription}</p>
             <p className="mt-2 text-xs leading-relaxed text-emerald-200/90">{view.explanation}</p>
           </div>
@@ -150,7 +150,7 @@ function AuditTrailRow({
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`rounded-t-lg border border-b-0 px-3 py-1 text-[11px] font-semibold transition ${
+                className={`rounded-t-lg border border-b-0 px-3 py-1 text-xs font-semibold transition ${
                   tab === id
                     ? "border-slate-700 bg-slate-800 text-slate-100"
                     : "border-transparent text-slate-500 hover:text-slate-300"
@@ -171,10 +171,10 @@ function AuditTrailRow({
             </div>
           ) : (
             <div>
-              <p className="mb-1 text-[11px] text-slate-500">
+              <p className="mb-1 text-xs text-slate-500">
                 Vollständiger Datenbank-Eintrag aus <code>audit_log</code> — ungekürzt und unverändert.
               </p>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-800 bg-slate-950/60 p-3 font-mono text-[11px] leading-relaxed text-slate-300">
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-800 bg-slate-950/60 p-3 font-mono text-xs leading-relaxed text-slate-300">
                 {view.raw}
               </pre>
             </div>
@@ -215,7 +215,7 @@ export function AuditTrailList({
   return (
     <div className="space-y-2">
       {summary && views.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
             {summary.info} Information
           </span>
@@ -246,9 +246,9 @@ export function AuditTrailList({
       )}
 
       {loading && views.length === 0 ? (
-        <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">Lade Audit-Trail…</p>
+        <p className={`${PANEL} px-4 py-6 text-sm text-slate-400`}>Lade Audit-Trail…</p>
       ) : views.length === 0 ? (
-        <p className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">{emptyText}</p>
+        <p className={`${PANEL} px-4 py-6 text-sm text-slate-400`}>{emptyText}</p>
       ) : (
         <ul className="space-y-2">
           {views.map((view) => (

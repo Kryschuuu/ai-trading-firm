@@ -1,6 +1,5 @@
 "use client";
 
-
 /**
  * Zustands-Chip einer Control-Plane-Ebene (Task 08).
  *
@@ -49,7 +48,7 @@ export default function StateChip({
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${STATE_STYLES[state]}`}
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold ${STATE_STYLES[state]}`}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
       {LAYER_LABELS[layerId] ?? layerId}: {STATE_LABELS[state]}
