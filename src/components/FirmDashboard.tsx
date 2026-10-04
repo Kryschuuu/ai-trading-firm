@@ -14,13 +14,15 @@
  * `max-w-7xl`, eine Reiterleiste mit Rollen/Tastatursteuerung (`TabBar`),
  * Kennzahlen als `MetricTile` und alle Tabellen als `DataTable`
  * (Mobile: gestapelte Karten, Desktop: sticky Spaltenköpfe).
+ * Seit v0.16.1 zeigt ein Klick genau den gewählten Bereich — die übrigen
+ * `TabPanel`s sind ausgeblendet, nicht untereinander gestapelt.
  *
  * Abhängigkeiten: @/lib/apiClient, @/lib/browserSession, @/lib/firmSession,
  * @/lib/types, @/components/ui/*.
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/apiClient";
 import { clearLegacyFirmToken, csrfHeaderValue, logoutSession } from "@/lib/browserSession";
 import {
@@ -47,6 +49,7 @@ import DataTable from "./ui/DataTable";
 import MetricTile from "./ui/MetricTile";
 import Chip from "./ui/Chip";
 import Button from "./ui/Button";
+import { selectDashboardTab, type DashboardTab } from "./dashboardTabs";
 import TabBar, { TabPanel, type TabDef } from "./ui/Tabs";
 import { PageShell } from "./ui/PageShell";
 import { AUTO_FIT_CARDS, PANEL, PANEL_LARGE, PANEL_PADDED, SECTION_TITLE } from "./ui/layout";
@@ -155,12 +158,9 @@ const defaultData: FirmData = {
   timestamp: "",
 };
 
-type Tab = "overview" | "reports" | "protocol" | "agents" | "workshop" | "ops" | "brokers" | "risk" | "architecture";
-
-
 export default function FirmDashboard() {
   const [data, setData] = useState<FirmData>(defaultData);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<DashboardTab>("overview");
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -200,6 +200,15 @@ export default function FirmDashboard() {
    * - ein Fehler ersetzt nie den letzten gültigen Zustand (FIX v1.23.0) — die
    *   modulbasierten Tabs (Operations Center, Brokers) bleiben nutzbar.
    */
+  /**
+   * Reiterwechsel. Unbekannte IDs (z. B. ein veralteter „Tab öffnen“-Sprung)
+   * werden verworfen, statt einen Zustand zu setzen, für den kein Panel
+   * `active` ist — dann wäre die Fläche leer.
+   */
+  const selectTab = useCallback((next: string) => {
+    setTab((current) => selectDashboardTab(current, next));
+  }, []);
+
   const load = useCallback(async () => {
     const result = await fetchFirmSnapshot();
     if (result.ok) {
@@ -336,6 +345,21 @@ export default function FirmDashboard() {
     }, 0);
     return () => window.clearTimeout(id);
   }, [load, refreshSessionStatus]);
+
+  /**
+   * Nach einem Reiterwechsel den gewählten Bereich in den Sichtbereich holen.
+   * Vor v0.16.1 standen alle Panels untereinander; ein Klick weiter unten auf
+   * der Seite landete sonst im Leerraum, sobald die übrigen Bereiche aus dem
+   * Fluss genommen werden. Der erste Lauf (Mount) scrollt nicht.
+   */
+  const skipInitialTabScroll = useRef(true);
+  useEffect(() => {
+    if (skipInitialTabScroll.current) {
+      skipInitialTabScroll.current = false;
+      return;
+    }
+    document.getElementById(`tab-panel-${tab}`)?.scrollIntoView({ block: "nearest" });
+  }, [tab]);
 
   // v1.39.0: ein einziger Timer pro Zustand — der Server nennt die Restzeit,
   // der Client erneuert genau davor. Kein Dauerintervall: ein gedrosselter
@@ -550,7 +574,7 @@ export default function FirmDashboard() {
    * gerade etwas?“ ohne Klick (offene Positionen, Agenten, registrierte
    * Venues). Die Beschreibungen landen als `title` am Reiter.
    */
-  const tabDefs: TabDef<Tab>[] = TAB_DEFS.map((def) => ({
+  const tabDefs: TabDef<DashboardTab>[] = TAB_DEFS.map((def) => ({
     ...def,
     badge:
       def.id === "overview"
@@ -766,14 +790,14 @@ export default function FirmDashboard() {
 
       {/* Reiter — sticky, mit Pfeiltasten bedienbar, auf Mobile scrollbar. */}
       <div className="mt-5">
-        <TabBar tabs={tabDefs} active={tab} onChange={setTab} ariaLabel="Dashboard-Bereiche" />
+        <TabBar tabs={tabDefs} active={tab} onChange={selectTab} ariaLabel="Dashboard-Bereiche" />
       </div>
 
       {loading ? (
         // Der aktive Reiter existiert schon (sonst zeigte `aria-controls` ins
         // Leere) und trägt das Skelett; so bleibt die Reiterleiste während des
         // Ladens bedienbar statt auf einen leeren Bereich zu zeigen.
-        <TabPanel id={tab} idPrefix="tab">
+        <TabPanel id={tab} idPrefix="tab" active>
           <div className="grid gap-4 lg:grid-cols-2" aria-busy="true" role="status" aria-label="Firmenzustand wird geladen">
             <div className={`${PANEL_PADDED} h-40`}>
               <div className="h-3 w-32 rounded bg-slate-800" />
@@ -790,22 +814,22 @@ export default function FirmDashboard() {
         </TabPanel>
       ) : (
         <>
-          <TabPanel id="overview">
+          <TabPanel id="overview" active={tab === "overview"}>
             <OverviewTab data={data} />
           </TabPanel>
-          <TabPanel id="reports">
+          <TabPanel id="reports" active={tab === "reports"}>
             <ReportsTab onUnauthorized={handleUnauthorized} />
           </TabPanel>
-          <TabPanel id="protocol">
+          <TabPanel id="protocol" active={tab === "protocol"}>
             <ProtocolTab />
           </TabPanel>
-          <TabPanel id="agents">
+          <TabPanel id="agents" active={tab === "agents"}>
             <AgentsTab data={data} running={running} onRun={runAgent} />
           </TabPanel>
-          <TabPanel id="ops">
-            <OperationsCenterPanel onOpenTab={(target) => setTab(target as Tab)} />
+          <TabPanel id="ops" active={tab === "ops"}>
+            <OperationsCenterPanel onOpenTab={selectTab} />
           </TabPanel>
-          <TabPanel id="workshop">
+          <TabPanel id="workshop" active={tab === "workshop"}>
             <WorkshopTab
               agents={data.agents}
               missions={data.missions}
@@ -814,10 +838,10 @@ export default function FirmDashboard() {
                 setNeedToken(true);
                 setNotice("🔒 Diese Aktion braucht den API-Token (FIRM_API_TOKEN).");
               }}
-              onOpenProtocol={() => setTab("protocol")}
+              onOpenProtocol={() => selectTab("protocol")}
             />
           </TabPanel>
-          <TabPanel id="brokers">
+          <TabPanel id="brokers" active={tab === "brokers"}>
             <BrokersPanel
               onUnauthorized={() => {
                 setNeedToken(true);
@@ -825,10 +849,10 @@ export default function FirmDashboard() {
               }}
             />
           </TabPanel>
-          <TabPanel id="risk">
+          <TabPanel id="risk" active={tab === "risk"}>
             <RiskTab data={data} onChanged={load} />
           </TabPanel>
-          <TabPanel id="architecture">
+          <TabPanel id="architecture" active={tab === "architecture"}>
             <ArchitectureTab />
           </TabPanel>
         </>
@@ -842,7 +866,7 @@ export default function FirmDashboard() {
  * (Überblick → Auswertung → Protokoll → Agenten → Werkstatt → Betrieb →
  * Broker → Risiko → Design). `title` erklärt den Bereich beim Überfahren.
  */
-const TAB_DEFS: readonly TabDef<Tab>[] = [
+const TAB_DEFS: readonly TabDef<DashboardTab>[] = [
   { id: "overview", label: "Firm Overview", icon: "🏛", title: "Missionen, Positionen, Approval-Queue und Audit-Trail" },
   { id: "reports", label: "Reports", icon: "📊", title: "Kennzahlen je Zeitraum, Equity-Kurve, Empfehlungen" },
   { id: "protocol", label: "Protokoll", icon: "📋", title: "Agenten-Turns, Analysen und revisionssicheres Audit-Log" },

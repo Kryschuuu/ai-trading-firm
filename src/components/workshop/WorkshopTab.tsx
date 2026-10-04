@@ -67,7 +67,8 @@ export default function WorkshopTab({
 
       {/* Die Schritte sind eine zweite Ebene unter der Dashboard-Reiterleiste:
           gleiche Bedienung (Pfeiltasten, ARIA), aber nicht sticky — sonst
-          überlagerten sich die beiden Leisten. */}
+          überlagerten sich die beiden Leisten. `active` blendet die anderen
+          Schritte aus; ohne das stünden alle fünf untereinander. */}
       <TabBar
         tabs={steps}
         active={step}
@@ -78,10 +79,10 @@ export default function WorkshopTab({
       />
       <p className="-mt-2 text-xs text-slate-500">{active.title}</p>
 
-      <TabPanel id="missions" idPrefix="workshop">
+      <TabPanel id="missions" idPrefix="workshop" active={step === "missions"}>
         <MissionsPanel missions={missions} onChanged={onChanged} onUnauthorized={onUnauthorized} />
       </TabPanel>
-      <TabPanel id="run" idPrefix="workshop">
+      <TabPanel id="run" idPrefix="workshop" active={step === "run"}>
         <AgentRunPanel
           agents={agents}
           missions={missions}
@@ -92,7 +93,7 @@ export default function WorkshopTab({
           }}
         />
       </TabPanel>
-      <TabPanel id="prompt" idPrefix="workshop">
+      <TabPanel id="prompt" idPrefix="workshop" active={step === "prompt"}>
         <PromptPanel
           agents={agents}
           onChanged={onChanged}
@@ -100,7 +101,7 @@ export default function WorkshopTab({
           draftSeed={promptSeed}
         />
       </TabPanel>
-      <TabPanel id="hitrate" idPrefix="workshop">
+      <TabPanel id="hitrate" idPrefix="workshop" active={step === "hitrate"}>
         <HitRatePanel
           agents={agents}
           missions={missions}
@@ -108,7 +109,7 @@ export default function WorkshopTab({
           onOpenProtocol={onOpenProtocol}
         />
       </TabPanel>
-      <TabPanel id="rulebacktest" idPrefix="workshop">
+      <TabPanel id="rulebacktest" idPrefix="workshop" active={step === "rulebacktest"}>
         <RuleBacktestPanel onUnauthorized={onUnauthorized} />
       </TabPanel>
     </div>

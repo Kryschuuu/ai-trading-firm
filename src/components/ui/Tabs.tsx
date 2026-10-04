@@ -14,7 +14,11 @@
  *   - Pfeiltasten, Home/End wechseln den Reiter (WAI-ARIA-Muster),
  *   - horizontal scrollbare Leiste auf Mobile (`overflow-x-auto`) statt Umbruch,
  *   - optional sticky unterhalb des Fensterrands, randlos mit Backdrop-Blur —
- *     beim Scrollen durch lange Reports bleibt der Bereichswechsel erreichbar.
+ *     beim Scrollen durch lange Reports bleibt der Bereichswechsel erreichbar,
+ *   - genau ein Panel sichtbar: `TabPanel` blendet inaktive Bereiche aus
+ *     (`hidden` + `display: none`). Ohne das standen alle Bereiche
+ *     untereinander, und ein Klick änderte nur die Markierung der Leiste
+ *     (Fix v0.16.1).
  */
 
 import { useCallback, useRef } from "react";
@@ -132,25 +136,64 @@ export default function TabBar<T extends string>({
   );
 }
 
+/**
+ * Sichtbarkeit eines Reiter-Panels.
+ *
+ * Inaktiv heißt: aus dem Layout (`display: none`), aus dem Accessibility-Tree
+ * (`hidden`) und nicht fokussierbar (`inert`). Der Knoten bleibt im DOM, damit
+ * `aria-controls` auflöst und lokaler Zustand (Formulare, geladene Listen)
+ * einen Wechsel überlebt — er darf aber keinen Platz einnehmen. Sonst stehen
+ * alle Bereiche untereinander und der Klick auf die Leiste wirkt wirkungslos.
+ */
+export function tabPanelVisibility(active: boolean): {
+  hidden?: true;
+  inert?: true;
+  tabIndex: 0 | -1;
+  className: string;
+  style?: { display: "none" };
+} {
+  if (active) {
+    return { tabIndex: 0, className: "mt-5 focus:outline-none" };
+  }
+  return {
+    hidden: true,
+    inert: true,
+    tabIndex: -1,
+    className: "hidden",
+    style: { display: "none" },
+  };
+}
+
 /** Inhalt eines Reiters — verknüpft mit der zugehörigen Schaltfläche. */
 export function TabPanel({
   id,
   idPrefix = "tab",
+  active,
   children,
   className,
 }: {
   id: string;
   idPrefix?: string;
+  /**
+   * Ob dieser Bereich gewählt ist. Pflicht: ohne die Angabe wäre das Panel
+   * immer sichtbar und die Leiste würde die Bereiche nur markieren, nicht
+   * umschalten.
+   */
+  active: boolean;
   children: React.ReactNode;
   className?: string;
 }) {
+  const visibility = tabPanelVisibility(active);
   return (
     <div
       id={`${idPrefix}-panel-${id}`}
       role="tabpanel"
       aria-labelledby={`${idPrefix}-${id}`}
-      tabIndex={0}
-      className={cx("mt-5 focus:outline-none", className)}
+      hidden={visibility.hidden}
+      inert={visibility.inert}
+      tabIndex={visibility.tabIndex}
+      style={visibility.style}
+      className={cx(visibility.className, className)}
     >
       {children}
     </div>
