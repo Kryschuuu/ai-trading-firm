@@ -35,6 +35,7 @@ import {
   type SessionSnapshot,
 } from "@/lib/firmSession";
 import type { AgentRow, MissionRow } from "@/lib/types";
+import { isReportData, type ReportData } from "@/lib/reportResponse";
 import { describeAuditEntry, firstSentence } from "@/lib/auditView";
 import { missionScopeLabel } from "@/lib/missionTemplates";
 import WorkshopTab from "./workshop/WorkshopTab";
@@ -521,6 +522,17 @@ export default function FirmDashboard() {
   }
 
   /**
+   * Gemeinsamer Pfad fuer untergeordnete Lese-APIs: Auch wenn der Haupt-
+   * Snapshot noch gueltig war, kann die Session zwischen zwei Requests
+   * ablaufen. In diesem Fall soll der Login-Hinweis im Kopf erscheinen und
+   * nicht nur ein lokaler Panel-Fehler.
+   */
+  const handleUnauthorized = useCallback(() => {
+    setNeedToken(true);
+    setNotice("🔒 Die Sitzung ist abgelaufen — bitte oben erneut anmelden.");
+  }, []);
+
+  /**
    * v1.36.41: Ein `401`/`403` beim Laden blendet das Token-Feld sofort ein —
    * auch ohne vorherige Aktion. `needToken` bleibt der manuelle Pfad
    * (Aktion abgelehnt, Logout, Anmeldung abgelehnt).
@@ -782,7 +794,7 @@ export default function FirmDashboard() {
             <OverviewTab data={data} />
           </TabPanel>
           <TabPanel id="reports">
-            <ReportsTab />
+            <ReportsTab onUnauthorized={handleUnauthorized} />
           </TabPanel>
           <TabPanel id="protocol">
             <ProtocolTab />
@@ -969,60 +981,16 @@ const PERIOD_OPTIONS: { id: PeriodId; label: string; title: string }[] = [
   { id: "year", label: "Jahr", title: "Dieses Kalenderjahr ab 1. Januar" },
 ];
 
-type ReportData = {
-  ok: boolean;
-  period: string;
-  since: string;
-  kpis: {
-    trades: number;
-    realizedPnl: number;
-    winRate: number | null;
-    profitFactor: number | null;
-    bestTrade: { symbol: string; pnl: number } | null;
-    worstTrade: { symbol: string; pnl: number } | null;
-    /** Größter Rückgang vom Höchststand (Peak-to-Trough) aus der Equity-Kurve. */
-    maxDrawdownPct: number;
-    maxDrawdownAbs?: number;
-    currentDrawdownPct?: number;
-    maxDrawdownFrom?: string | null;
-    maxDrawdownTo?: string | null;
-    recoveredAt?: string | null;
-    grossProfit?: number;
-    grossLoss?: number;
-    avgWin?: number | null;
-    avgLoss?: number | null;
-    /** Erwartungswert je Trade (realisiertes P&L / Anzahl Trades). */
-    expectancy?: number | null;
-    payoffRatio?: number | null;
-    maxWinStreak?: number;
-    maxLossStreak?: number;
-    avgHoldHours?: number | null;
-    stopLossHits: number;
-    takeProfitHits: number;
-  };
-  symbols: { symbol: string; trades: number; wins: number; pnl: number }[];
-  turnsByRole: Record<string, number>;
-  decisionsByType: Record<string, number>;
-  blocks: { reason: string; count: number; explanation: string | null }[];
-  notableEvents: { at: string; event: string; level: string; detail: any }[];
-  recommendations: {
-    at: string; role: string; symbol: string; side: string;
-    horizon?: string; thesis?: string; confidence?: number;
-    entryZone?: string; stopLoss?: string; target?: string; riskFlags?: string[];
-    fresh?: boolean;
-  }[];
-  summary: string[];
-};
-
 /**
  * Reports-Tab (Führungssicht). Links die Kennzahlen des Zeitraums (aus
  * `GET /api/firm/report`), darunter das eigenständige Kurven-Panel
  * (`EquityPanel`) mit eigenem Zeitraum-Schalter, Drawdown-Verlauf,
  * Trade-Markern und Export.
  */
-function ReportsTab() {
+function ReportsTab({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const [period, setPeriod] = useState<PeriodId>("day");
   const [report, setReport] = useState<ReportData | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [loadingRep, setLoadingRep] = useState(true);
 
   useEffect(() => {
@@ -1031,11 +999,40 @@ function ReportsTab() {
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`/api/firm/report?period=${period}`, { cache: "no-store" });
-        const json = await res.json();
+        const json: unknown = await res.json().catch(() => null);
         if (!alive) return;
+
+        if (res.status === 401) {
+          onUnauthorized?.();
+        }
+        if (!res.ok) {
+          const body = json && typeof json === "object" ? (json as { error?: unknown }) : null;
+          const detail = typeof body?.error === "string" && body.error.trim().length > 0
+            ? body.error.trim()
+            : `HTTP ${res.status}`;
+          setReport(null);
+          setReportError(
+            res.status === 401
+              ? "Nicht angemeldet — bitte die Sitzung im Kopfbereich des Dashboards erneuern."
+              : `Report konnte nicht geladen werden (${detail}).`
+          );
+          return;
+        }
+        if (!isReportData(json)) {
+          // Fehlerantworten duerfen nie in den Report-State gelangen: Die
+          // Darstellung mappt mehrere Listen und wuerde sonst z. B. mit
+          // `undefined.length` abbrechen.
+          setReport(null);
+          setReportError("Unerwartete Antwort von GET /api/firm/report.");
+          return;
+        }
         setReport(json);
+        setReportError(null);
       } catch {
-        /* ignore — der Fehlerzustand bleibt sichtbar über den letzten Stand */
+        if (alive) {
+          setReport(null);
+          setReportError("Report konnte wegen eines Netzwerkfehlers nicht geladen werden.");
+        }
       } finally {
         if (alive) setLoadingRep(false);
       }
@@ -1044,7 +1041,7 @@ function ReportsTab() {
       alive = false;
       clearTimeout(t);
     };
-  }, [period, setLoadingRep]);
+  }, [onUnauthorized, period]);
 
   const k = report?.kpis;
   const pct = (v: number | null | undefined, digits = 2) =>
@@ -1077,6 +1074,12 @@ function ReportsTab() {
           </span>
         )}
       </div>
+
+      {reportError && (
+        <p role="alert" className="rounded-xl border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
+          {reportError}
+        </p>
+      )}
 
       {/* Boss-Zusammenfassung */}
       {report && report.summary.length > 0 && (

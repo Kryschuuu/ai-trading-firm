@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.15.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.15.1` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -49,7 +49,7 @@ Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar
 Das Layout-System der Oberfläche — Seitenhüllen und Ränder, Breakpoints bis
 Ultrawide (`3xl`/`4xl`), `DataTable` mit mobiler Kartenansicht, Reiterleisten und
 die UI-Bausteine in `src/components/ui/` — ist in
-[UI_LAYOUT.md](UI_LAYOUT.md) beschrieben (Stand v0.15.0: Dashboard und
+[UI_LAYOUT.md](UI_LAYOUT.md) beschrieben (Stand v0.15.1: Dashboard und
 Broker-Seite nutzen wie der Doku-Viewer die volle Bildschirmbreite).
 
 ---
@@ -87,7 +87,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[LIVE_TRADING.md](LIVE_TRADING.md)** | Live-Trading-Gate (Task 11): State-Machine, Enforcement, Kill-Switch, Audit-Kette, CI |
 | **[PAPER_TRADING.md](PAPER_TRADING.md)** | Paper-Market-Data: Modi A/B/C, deterministischer Fill-Simulator, Failover, Replay |
 | **[PORTFOLIO_ANALYTICS.md](PORTFOLIO_ANALYTICS.md)** | Portfolio-Analytics: Formelkatalog, Kovarianz/Korrelation, Optimizer, Risk-Guard-Kette |
-| **[EQUITY_CURVE.md](EQUITY_CURVE.md)** | Equity-Kurve & Drawdown: Datenquelle `equity_snapshots`, zweistufige Aufbewahrung (`EQUITY_RAW_RETENTION_DAYS`/`EQUITY_RETENTION_DAYS`), Zeiträume 1 T…Max, Auflösung, Drawdown-Definition (Peak-to-Trough, Referenz-Peak), Benchmark-Referenzlinie (`?compare=`, nur echte Kurshistorie), zeitgewichtete Rendite (TWR, ohne Cashflow-Spur gekennzeichnet), Top-5-Drawdown-Episoden mit Erholungszeiten, Monats-Heatmap, Vorperioden-Vergleich (`?from`/`?until`), Log-Achse, Druck/PDF, Equity-Alarme (`EQUITY_ALERT_*`), Report-Zeiträume, Hover/Tooltips, CSV-Export (v0.13.0) |
+| **[EQUITY_CURVE.md](EQUITY_CURVE.md)** | Equity-Kurve & Drawdown: Datenquelle `equity_snapshots`, zweistufige Aufbewahrung (`EQUITY_RAW_RETENTION_DAYS`/`EQUITY_RETENTION_DAYS`), Zeiträume 1 T…Max, Auflösung, Drawdown-Definition (Peak-to-Trough, Referenz-Peak), Benchmark-Referenzlinie (`?compare=`, nur echte Kurshistorie), zeitgewichtete Rendite (TWR, ohne Cashflow-Spur gekennzeichnet), Top-5-Drawdown-Episoden mit Erholungszeiten, Monats-Heatmap, Vorperioden-Vergleich (`?from`/`?until`), Log-Achse, Druck/PDF, Equity-Alarme (`EQUITY_ALERT_*`), Report-Zeiträume, Hover/Tooltips, CSV-Export (v0.13.0) sowie Auth-/Fehlervertrag für `401`/`403` (v0.15.1) |
 | **[BACKTEST_ENGINE.md](BACKTEST_ENGINE.md)** | Multi-Asset Backtest-Engine: synchronisierter Replay-Simulator, Slippage/Fee-Modelle, Portfolio-Kennzahlen (v1.41.0) |
 | **[INDICATORS.md](INDICATORS.md)** | **Indikatoren-Katalog**: alle Engine-Formeln (`src/lib/indicators.ts`) mit Defaults und Grenzen, die 25 Regelfelder, CTI-Kompendium, 15 Scanner-Faktoren, adaptives Risiko, Trusted Indicators, Prüfpfad (2026-10-04) |
 | **[research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md](research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md)** | Fremd-Ranking (AlgoTrade Pro) für Crypto-Daytrading inkl. Gebühren-Check und Einordnung des CTI („Claude Indicator“, Rang 3) — Recherche-Notiz, nicht nachgerechnet |
@@ -133,7 +133,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** | PostgreSQL-Soforthilfe |
 | **[HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md)** | How-to: LAN nach Update tot (`EADDRINUSE`/`127.0.0.1`) + „Sitzung abgelaufen" statt Datenbankfehler (v1.36.41) |
 | **[HOWTO_UPDATE.md](HOWTO_UPDATE.md)** | How-to: laufende Firma nach `git pull` aktualisieren — Stop-Reihenfolge, `npm ci`, Schema, Build, Verifikation, Rollback |
-| **[UI_LAYOUT.md](UI_LAYOUT.md)** | Layout- und Design-System der Oberfläche: Seitenhülle/`PageShell`, fluide Ränder, Breakpoints bis Ultrawide, `DataTable` (Sticky-Kopf, mobile Kartenansicht, Tastatur-Scroll), `TabBar`/`TabPanel`, Kennzahl-/Chip-/Button-Bausteine, Regeln für neue Seiten und die Testabsicherung (`tests/ui/Layout.test.tsx`) — seit v0.15.0 nutzen **alle** Seiten die volle Breite (2026-10-04) |
+| **[UI_LAYOUT.md](UI_LAYOUT.md)** | Layout- und Design-System der Oberfläche: Seitenhülle/`PageShell`, fluide Ränder, Breakpoints bis Ultrawide, `DataTable` (Sticky-Kopf, mobile Kartenansicht, Tastatur-Scroll), `TabBar`/`TabPanel`, Kennzahl-/Chip-/Button-Bausteine, Regeln für neue Seiten und die Testabsicherung (`tests/ui/Layout.test.tsx`) — seit v0.15.0 nutzen **alle** Seiten die volle Breite; v0.15.1 ergänzt die sichere Behandlung abgelaufener Sessions (2026-10-04) |
 | **[DOCS_VIEWER.md](DOCS_VIEWER.md)** | In-Browser-Doku (`/docs`): Katalog vs. Dateibaum, Komponenten, Tabellen-Überlauf, Pflegeanleitung (neues Dokument in 3 Schritten), Whitelist/Traversal-Schranke, Grenzen (2026-10-04) |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang, Merge-Status |
 | **[DOCS_SYNC_AUDIT.md](DOCS_SYNC_AUDIT.md)** | Docs-Code-Sync-Audit: jede Behauptung gegen Code geprüft |
@@ -270,7 +270,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.15.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.15.1, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)

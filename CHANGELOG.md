@@ -21,8 +21,24 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.15.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.15.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.15.1] — Reports-UI bleibt bei abgelaufener Session erreichbar (2026-10-04)
+
+### Fixed
+
+- **401-Regression nach dem UI-Update behoben:** `GET /api/firm/report` darf
+  einen Authentifizierungsfehler nicht mehr als Report-Daten in den React-State
+  schreiben. Der Fehlerbody enthielt keine `summary`-Liste; die anschließende
+  Darstellung griff auf `undefined.length` zu und ließ die gesamte Seite mit
+  „This page couldn’t load“ abbrechen.
+- **Expliziter Laufzeitvertrag für Reports:** Erfolgsantworten werden vor dem
+  Rendern validiert. 401/403-Antworten zeigen stattdessen einen verständlichen
+  Hinweis und öffnen den bestehenden Session-Loginpfad; fehlerhafte oder
+  unvollständige Antworten bleiben lokal unsichtbar.
+- **Regressionstest ergänzt:** `tests/reportResponse.test.ts` deckt gültige,
+  nicht autorisierte und unvollständige Report-Antworten ab.
 
 ## [0.15.0] — UI-Überarbeitung: volle Bildschirmbreite überall, ein Layout-System für alle Seiten, responsive Tabellen & Reiter (2026-10-04)
 

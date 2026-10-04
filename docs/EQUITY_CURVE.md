@@ -229,6 +229,22 @@ zu den bisherigen KPIs liefert der Report nun:
 - `drawdownEpisodes` (Top 5 ab 0,05 %) bzw. `kpis.drawdownEpisodes` (Anzahl) —
   siehe §5.1.
 
+### Authentifizierungs- und Fehlervertrag (seit v0.15.1)
+
+`GET /api/firm/report` ist wie die übrigen Firm-Lese-APIs durch
+`requirePermission(req, "firm.read")` geschützt. Ohne gültige Session bzw.
+Credential antwortet der Server mit HTTP `401` oder `403` und einem Fehlerbody
+(`ok: false`, `error`, `hint`) — nicht mit einem Report-Snapshot. Die
+Reports-UI prüft deshalb vor dem State-Update sowohl den HTTP-Status als auch
+`ok: true` und die erforderlichen Listen (`summary`, `recommendations`,
+`notableEvents`, `blocks`, `symbols`). Auth-Fehler öffnen den Session-Hinweis
+im Dashboard; sie dürfen niemals als Datenobjekt gerendert werden.
+
+Ein `401` nach einem Update ist damit ein Sitzungsproblem, kein Hinweis auf
+fehlende PostgreSQL-Tabellen: oben **Verlängern** versuchen oder den Token aus
+`.env` eintragen und **Anmelden** wählen. Der Firm-Status lädt nach erfolgreicher
+Anmeldung automatisch neu.
+
 ---
 
 ## 5. Was der Reports-Tab zeigt
