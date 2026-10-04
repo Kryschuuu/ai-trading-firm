@@ -1,7 +1,7 @@
-# UI-Layout & Design-System (v0.15.1)
+# UI-Layout & Design-System (v0.16.1)
 
 **Gilt für:** `src/app/**`, `src/components/**`, `src/components/ui/**`,
-`src/app/globals.css`. · **Stand:** v0.15.1 (Beta).
+`src/app/globals.css`. · **Stand:** v0.16.1 (Beta).
 
 Dieses Dokument beschreibt das Layout-System der Oberfläche: Seitenhüllen,
 Breakpoints, Tabellen, Reiterleisten und die Testabsicherung. Es ist die
@@ -129,6 +129,17 @@ Drawdown-Phasen, Kill-Switch-Historie).
   Positionen, Agenten, registrierte Venues).
 * Der Workshop nutzt dieselbe Leiste mit `sticky={false}` — zwei klebende
   Leisten würden sich überlagern.
+* **Genau ein Panel ist sichtbar** (v0.16.1). `TabPanel` verlangt `active`.
+  Ist der Wert `false`, trägt das Panel `hidden`, `inert` und
+  `display: none` — es bleibt im DOM (Zustand und `aria-controls` bleiben
+  gültig), nimmt aber keinen Platz ein. Ohne `active` standen Firm Overview,
+  Reports, Protokoll, Agents, Workshop, Operations Center, Brokers, Risk und
+  Design & Guide untereinander; ein Klick änderte nur die Markierung.
+  `src/app/globals.css` erzwingt dasselbe noch einmal
+  (`[role="tabpanel"][hidden] { display: none !important }`).
+  Die neun Dashboard-IDs stehen in `src/components/dashboardTabs.ts`;
+  unbekannte Sprünge (z. B. „Tab öffnen“ mit einer alten ID) lassen den
+  aktuellen Bereich stehen.
 
 ---
 
@@ -181,7 +192,8 @@ Checkliste:
 2. Datenlisten als `DataTable` mit `label` — nicht als handgeschriebenes
    `<table>`; Konfigurationsmatrizen mit `stack={false}`.
 3. Mehrere Bereiche einer Seite als `TabBar` + `TabPanel` (nicht als lose
-   Knopfreihe).
+   Knopfreihe). Jedes Panel bekommt `active={selected === id}` — sonst
+   stapeln sich die Bereiche.
 4. Kartenraster über `AUTO_FIT_*` oder explizite Stufen bis `3xl`.
 5. Themen: nur `slate-*`/Statusfarben verwenden — die Theme-Umschaltung
    (`data-theme`) faltet die `--color-*`-Variablen in `globals.css`.
@@ -197,6 +209,8 @@ Checkliste:
   siebenspaltig.
 * Quelltext-Scan: keine Seite setzt einen zentrierten `max-w-*`-Rahmen.
 * `TabBar`: Rollen, `aria-selected`/`aria-controls`, Roving Tabindex, Sticky.
+* `TabPanel`: inaktiv = `hidden` + `display: none`; Dashboard und Workshop
+  übergeben `active` an jedes Panel (`tests/ui/Tabs.test.tsx`).
 * `DataTable`: `role="region"` + `tabIndex`, `data-label` je Zelle,
   `stack={false}`-Variante, Leerzustand.
 * `MetricTile`/`Chip`/`Button`: Ton, Alarm, `aria-busy`, Fokusring.

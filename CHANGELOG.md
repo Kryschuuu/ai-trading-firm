@@ -21,8 +21,22 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.16.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.16.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.16.1] — Dashboard-Reiter schalten den sichtbaren Bereich um (2026-10-04)
+
+### Fixed
+
+- **Reiter im Dashboard hatten keine Funktion:** Firm Overview, Reports, Protokoll, Agents & Orchestrator, Workshop, Operations Center, Brokers & Venues, Risk & Guardrails und Design & Guide wurden nach dem Laden alle untereinander gerendert. Ein Klick setzte nur `aria-selected`; der Inhalt blieb stehen.
+- `TabPanel` verlangt jetzt `active`. Inaktive Panels tragen `hidden`, `inert` und `display: none` und nehmen keinen Platz ein. Zustand (Formulare, bereits geladene Listen) bleibt erhalten, `aria-controls` zeigt weiter auf ein vorhandenes Panel.
+- Dieselbe Lücke in den fünf Workshop-Schritten ist geschlossen: dort ist ebenfalls nur der gewählte Schritt sichtbar.
+- Unbekannte Sprungziele („Tab öffnen“ mit einer ID, die kein Reiter ist) lassen den aktuellen Bereich stehen, statt eine leere Fläche zu zeigen.
+- Nach einem Wechsel wird der gewählte Bereich in den Sichtbereich geholt, damit ein Klick weiter unten auf der zuvor langen Seite nicht im Leerraum landet.
+
+### Tests
+
+- `tests/ui/Tabs.test.tsx` prüft die Auswahlfunktion, das ausgeblendete Markup für alle neun IDs und die `active`-Bindung in Dashboard und Workshop.
 
 ## [0.16.0] — Historischer Marktdaten-Backfill und längere Reihen (2026-10-04)
 

@@ -145,12 +145,23 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 
 ### 2.3 Die Reiter
 
+Ein Klick auf einen Reiter — oder Pfeil links/rechts, `Home` und `End`, solange
+die Leiste den Fokus hat — zeigt **genau diesen Bereich**. Die übrigen bleiben
+ausgeblendet und nehmen keinen Platz ein. Vor v0.16.1 standen alle Bereiche
+untereinander auf einer Seite, und ein Klick änderte nur die Markierung der
+Leiste. Die Leiste bleibt beim Scrollen oben kleben. Zähler am Reiter (offene
+Positionen, Protokolleinträge, Agenten, Venues) beantworten „wo passiert
+etwas?“, ohne dass man wechseln muss.
+
 * **Firm Overview** — Missionen, Positionen, Freigabe-Warteschlange, Audit-Verlauf.
-* **Agents** — je Agent Rolle, Modell, Status, System-Prompt, Einzelstart.
+* **Reports** — Kennzahlen je Zeitraum, Equity-Kurve, Empfehlungen.
+* **Protokoll** — Agenten-Turns, Analysen und revisionssicheres Audit-Log.
+* **Agents & Orchestrator** — je Agent Rolle, Modell, Status, System-Prompt, Einzelstart.
 * **🛠 Workshop** — Missionen anlegen/bearbeiten, einen Agenten einzeln ausführen,
   Prompt iterieren, Trefferquote messen und eine Regel **nur als Entwurf**
   gegen den Paper-Store prüfen. Das UI-Pendant zu Kapitel 5, 6 und 15.4 —
-  fünf Schritte ohne Terminal. Jedes Feld hat ein **i**-Symbol mit Kurz-
+  fünf Schritte ohne Terminal, ebenfalls als Reiter (immer nur der gewählte
+  Schritt sichtbar; diese zweite Leiste klebt nicht). Jedes Feld hat ein **i**-Symbol mit Kurz-
   Erklärung (auch per Tastatur erreichbar). Der fünfte Schritt aktiviert
   nichts und legt keine zweite Backtest-Route an.
 * **🧭 Operations Center** — die Control Plane der Firma: Rolle
@@ -164,8 +175,9 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 * **🌐 Brokers & Venues** — Control Plane: Status, Credentials (maskiert),
   sechs Zustandsebenen. Secrets nie im Frontend.
 * **Risk & Guardrails** — die harten Limits, LLM-Status, Not-Halt-Historie.
-* **Design Decisions / Guide** — Ist-Architektur (Makro/Mikro, Paper, Broker,
-  Router, RBAC), nicht der ursprüngliche Entwurfs-Essay.
+* **Design & Guide** — Ist-Architektur (Makro/Mikro, Paper, Broker,
+  Router, RBAC), nicht der ursprüngliche Entwurfs-Essay. Die Reiterleiste
+  beschriftet den Bereich so; ältere Texte sagen noch „Design Decisions“.
 
 ### 2.4 Anmeldung und Sitzung
 
