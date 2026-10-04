@@ -169,11 +169,12 @@ test("TabBar und TabPanel teilen IDs und Rollen (WAI-ARIA-Muster)", () => {
   assert.match(html, /aria-selected="false"[^>]*>[\s\S]*?3/, "Badge fehlt am Reiter");
 
   const panel = renderToStaticMarkup(
-    <TabPanel id="a" idPrefix="x">
+    <TabPanel id="a" idPrefix="x" active>
       <p>Inhalt</p>
     </TabPanel>
   );
   assert.match(panel, /id="x-panel-a"[^>]*role="tabpanel"[^>]*aria-labelledby="x-a"[^>]*tabindex="0"/);
+  assert.doesNotMatch(panel, /\shidden=/);
 });
 
 // ── 3 · DataTable ───────────────────────────────────────────────────────────
@@ -265,6 +266,7 @@ test("Button kennt vier Rollen, Busy-Zustand und Fokusring", () => {
 
 test("Globals definieren Ultrawide-Breakpoints, Karten-Stack und Tabellen-Scroll", () => {
   const css = read("src/app/globals.css");
+  assert.match(css, /\[role="tabpanel"\]\[hidden\]/);
   assert.match(css, /--breakpoint-3xl: 120rem/);
   assert.match(css, /--breakpoint-4xl: 160rem/);
   assert.match(css, /\.fs-table-scroll/);

@@ -245,6 +245,15 @@
   --tw-prose-kbd: var(--color-slate-200);
 }
 
+/* ---- Reiter-Panels: inaktiv darf keinen Platz einnehmen ----------------
+   `TabPanel` setzt `hidden` und `display: none`. Diese Regel ist das
+   Sicherheitsnetz, falls eine Utility das Attribut überstimmt: ein
+   `[hidden]`-Panel bleibt aus dem Fluss, sonst stünden alle Dashboard-
+   Bereiche untereinander (v0.16.1). */
+[role="tabpanel"][hidden] {
+  display: none !important;
+}
+
 /* ---- Daten-Tabellen: nie überlaufen, auf Mobile lesbar -----------------
    Ein System für zwei Einsatzorte:
 

@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.16.0` |
+| **Version** | `v0.16.1` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-04 |
-| **Quellbasiert** | `package.json` (`version: "0.16.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.16.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -409,6 +409,15 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.16.1` (2026-10-04) repariert die Dashboard-Reiter. Nach dem Laden standen
+Firm Overview, Reports, Protokoll, Agents & Orchestrator, Workshop, Operations
+Center, Brokers & Venues, Risk & Guardrails und Design & Guide untereinander;
+ein Klick änderte nur die Markierung. `TabPanel` blendet inaktive Bereiche aus
+(`hidden`, `inert`, `display: none`). Dieselbe Lücke in den fünf
+Workshop-Schritten ist geschlossen. Unbekannte Sprungziele bleiben auf dem
+aktuellen Reiter. Details: [`CHANGELOG.md`](CHANGELOG.md),
+[`docs/UI_LAYOUT.md`](docs/UI_LAYOUT.md).
 
 `v0.16.0` (2026-10-04) ergänzt historischen Marktdaten-Backfill für längere
 Backtests und Indikator-Warmups:
