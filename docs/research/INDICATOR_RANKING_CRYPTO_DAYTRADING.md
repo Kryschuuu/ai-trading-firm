@@ -140,14 +140,49 @@ Auf mindestens einem Intraday-Timeframe negativ oder insgesamt schwach:
 Viele Klassiker wie RSI, SuperTrend, QQE und SSL schneiden intraday schlecht ab.
 Mehrere davon (QQE, SSL, SuperTrend) sind dafür auf **1-Day** stark (+31 % bis +42 %).
 
+## Der „Claude Indicator“ im Projekt — CTI (Stand 2026-10-04)
+
+Der **„Claude Indicator“** aus dieser Rangliste (Rang 3 der 30m+1h-Auswertung:
++569,6 % kumuliert, 51,93 % / 52,86 % Winrate, 0,11 % / 0,14 % Edge pro Trade)
+ist im Repository bereits portiert und lauffähig — als
+**Claude Trading Indicator (CTI)**, eine 1:1-Portierung des Pine-Script-v6-Skripts
+nach TypeScript.
+
+| Punkt | Stand im Repo |
+|---|---|
+| Formel | 8 Grundindikatoren → 4 Dimensionen (Trend/Momentum/Volatilität/Volumen) → einstimmiges Verdikt, Details [CLAUDE_TRADING_INDICATOR.md](../CLAUDE_TRADING_INDICATOR.md) |
+| Rechenkern | `src/signals/cti/runtime.ts` — ein Streaming-Automat für Backtest, Live-Engine und CLI (keine zweite Wahrheit) |
+| Parameter | Defaults wie im Chart: `atrLength 14`, `atrMultiplier 3.0`, `persistBars 2`, `minBarsBetween 10` |
+| Stops | `close ∓ 3,0 × ATR(14)`, beim Signal eingefroren |
+| CLI | `npm run cti` (liest Kerzen, rechnet, handelt nicht) — `npm run cti -- --help` zeigt die Optionen |
+| Tests | `tests/cti.indicator.test.ts`, `tests/cti.engine.test.ts`, `tests/cti.backtest.test.ts` |
+| Einordnung für Krypto | Im Katalog [`INDICATORS.md`](../INDICATORS.md) §4/§8 |
+
+**Was daraus folgt (und was nicht):**
+
+* Die **Mechanik** ist übernommen: Konsens über vier Dimensionen, Persistenz
+  (`persistBars` als Gleichheit — ein Signal je Strecke), Sperrfrist, ATR-Stops.
+  Damit ist der Indikator reproduzierbar und ohne Look-ahead backtestbar.
+* Die **Renditebehauptung der Tabelle ist nicht übernommen** — sie stammt von
+  einer Fremdseite, ist im Repo nicht nachgerechnet und enthält keine
+  dokumentierten Gebühren. Bei 0,11–0,14 % Edge pro Trade und ≈ 0,2 % Kosten
+  je Roundturn (siehe Gebühren-Check oben) ist das der entscheidende Vorbehalt.
+* Der nächste belastbare Schritt ist deshalb kein weiterer Vergleich mit dieser
+  Tabelle, sondern ein **Walk-Forward-Lauf auf eigenen Crypto-Daten mit realen
+  Bitunix-Gebühren** (`docs/BACKTESTING.md`) — inklusive Kosten-Stress
+  (`double`/`triple`) aus der Strategie-Validierung.
+
 ## Bezug zu diesem Repo
 
 Die vorhandenen Strategie-Templates (`docs/STRATEGY_TEMPLATES.md`) nutzen vor allem
 klassische Indikatoren: RSI, Donchian, Bollinger, MACD und EMA/ADX. Laut dieser
 Rangliste sind Donchian Channel (Σ 115 %) und RSI (30m negativ) intraday eher
 schwach. Kandidaten für neue Templates oder Features wären die Top-Indikatoren
-oben. Sie sollten vorher mit dem eigenen Backtest-Engine **nur auf Crypto-Daten
-und mit realen Bitunix-Gebühren** geprüft werden (siehe `docs/BACKTESTING.md`).
-Achtung: Viele davon sind proprietäre bzw. Community-Skripte aus TradingView
-(z. B. „Claude Indicator“, „Average Force“, „JFKP_Stochastic“). Die genaue Formel
-muss also erst beschafft werden.
+oben; der Katalog [`INDICATORS.md`](../INDICATORS.md) listet, was davon bereits
+im Code existiert. Alles Neue sollte vorher mit der eigenen Backtest-Engine
+**nur auf Crypto-Daten und mit realen Bitunix-Gebühren** geprüft werden (siehe
+`docs/BACKTESTING.md`).
+Achtung: Viele der übrigen Kandidaten sind proprietäre bzw. Community-Skripte aus
+TradingView (z. B. „Average Force“, „JFKP_Stochastic“). Die genaue Formel muss
+dafür erst beschafft werden — beim „Claude Indicator“ ist sie mit dem CTI
+vorhanden.

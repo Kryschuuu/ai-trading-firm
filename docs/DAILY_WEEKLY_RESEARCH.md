@@ -149,7 +149,7 @@ score        = round(Σ contribution, 10)        ∈ [0, 100]
 ```
 
 Die Gewichte stehen ausschließlich in der versionierten Datei
-`src/scanner/scanner.config.json` (`version: 1`); ein Test erzwingt die Summe 1.0
+`src/scanner/scanner.config.json` (`version: 2`); ein Test erzwingt die Summe 1.0
 und die exakten Einzelwerte. Overrides sind über `SCANNER_CONFIG_FILE` möglich —
 jede geladene Konfiguration wird validiert (Bereichs- und Summenprüfung) und mit
 ihrer `version` in Artefakte und API-Antworten geschrieben.

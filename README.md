@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.13.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.14.0 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.13.0** (Beta, 2026-10-04; Baseline war v0.1.0) |
+| Version | **v0.14.0** (Beta, 2026-10-04; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -57,7 +57,11 @@ Seit **v0.6.5** ist auch der Donchian-Ausbruch regelformulierbar (`donchianBreak
 Abstand zum Hoch der **vorigen** 20 Kerzen, ohne Signalkerze — kein Look-ahead;
 [BACKTESTING.md §1.3](docs/BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065)).
 `src/lib/indicators.ts` liefert dazu Bollinger-Bandlevel und den Donchian-Kanal
-(`v0.6.3`). Seit **v0.7.4** stehen alle sechs versionierten Strategie-Templates
+(`v0.6.3`). Der **Indikatoren-Katalog**
+([`docs/INDICATORS.md`](docs/INDICATORS.md)) listet seit `v0.14.0` alle
+Engine-Formeln mit Defaults und Grenzen, die Regelfelder, den
+**Claude Trading Indicator (CTI)** aus `src/signals/` und die 15
+Scanner-Faktoren. Seit **v0.7.4** stehen alle sechs versionierten Strategie-Templates
 im import-validierten Katalog (`src/strategies/templates/`): `ema-adx-trend`,
 `macd-momentum`, `rsi-mean-reversion`, `bollinger-squeeze`, `vwap-pullback` und
 `donchian-breakout` — je mit eigenem Test, ohne Engine-/Indikator-Änderung.
@@ -249,7 +253,8 @@ wichtigste Eigenschaften:
 - **Daurable Audit-Trail:** sicherheitsrelevante Schreibvorgänge mit Retry und
   persistenter Spool (at-least-once), fail-closed wo die Mutation vermeidbar
   ist; Metrik + API zeigen Audit-Lücken.
-- **Gepinnte Framework-Versionen:** Next.js 16.3.4, `ws` 8.21.3 exakt
+- **Gepinnte Framework-Versionen:** Next.js 16.3.8 (SEC-03-Mindeststand 16.3.3),
+  `ws` 8.21.3 exakt
   (Regressionstests `test:security:next` / `test:security:ws`, CI-Gate
   `security:live-gate`).
 
@@ -262,13 +267,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.13.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.14.0, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.13.0), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.14.0), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)
@@ -276,7 +281,8 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ├── drizzle/                  ← SQL-Migrations (append-only, idempotent)
 ├── deploy/                   ← systemd-Units (Firma, Market-Sync, Mikro-Executor)
 ├── data/                     ← versionierte Seed-Daten (Universe); Laufzeitdaten gitignored
-├── docs/                     ← vollständige Dokumentation (Index: docs/README.md)
+├── docs/                     ← vollständige Dokumentation (Index: docs/README.md; im Browser:
+│                                /docs als themensortierter Katalog mit Suche + Dateibaum)
 │   ├── audits/               ← Audit-Zyklen chronologisch (Peer-Review, Security, Feature-Gap, Roadmap)
 │   ├── peer-reviews/         ← Peer-Review-Reports & Patches
 │   ├── security/             ← Security-Übersicht & Audit-Report

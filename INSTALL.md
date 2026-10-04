@@ -61,7 +61,7 @@ Stände sind verwundbar. Ausschließlich mit `npm ci` aus dem Lockfile
 installieren, danach `npm ls ws --all` und `npm run test:security:ws` ausführen
 und alle Prozesse neu starten. [Upgrade-Runbook](docs/security/README.md#ws-upgrade-sec-04).
 
-**SEC-03:** Next.js 16.3.4 und die native Decoder-Kette müssen gemeinsam aus dem
+**SEC-03:** Next.js ≥ 16.3.4 (im Lockfile aktuell 16.3.8) und die native Decoder-Kette müssen gemeinsam aus dem
 Lockfile installiert werden. Vor Deployment `npm ci`,
 `npm run test:security:next` und einen frischen Build ausführen; alle Instanzen
 neu starten. [Vollständiges Upgrade-Runbook](docs/security/README.md#nextjs-upgrade-sec-03).

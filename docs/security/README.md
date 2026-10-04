@@ -175,11 +175,13 @@ und P&L-Daten sind aber genauso sensibel wie der Report.
 
 ## Next.js-Upgrade (SEC-03)
 
-**v1.36.28:** Next.js ist exakt auf **16.3.4** gepinnt. Der Mindestfix der
-Advisories ist 16.3.3; dieses Release nutzt bewusst den stabilen Folgepatch
-mit wieder aktivierter AVIF-Unterstützung und **sharp 0.35.4**, passenden
-libvips-Paketen **1.3.3** sowie **libheif 1.23.2**. Die gesamte Kette ist relevant,
-nicht allein die Versionsnummer von Next.js. v1.36.27 lieferte Next.js 16.3.1 aus.
+**v1.36.28:** Next.js ist exakt gepinnt; der Mindestfix der Advisories ist
+16.3.3, der damalige Fix-Stand war 16.3.4, **aktuell im Lockfile: 16.3.8**
+(`package.json`, Stand 2026-10-04). Das Release nutzte bewusst den stabilen
+Folgepatch mit wieder aktivierter AVIF-Unterstützung und **sharp 0.35.4**,
+passenden libvips-Paketen **1.3.3** sowie **libheif 1.23.2**. Die gesamte Kette
+ist relevant, nicht allein die Versionsnummer von Next.js. v1.36.27 lieferte
+Next.js 16.3.1 aus.
 
 ### Ausrollen
 

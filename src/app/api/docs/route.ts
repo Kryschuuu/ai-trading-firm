@@ -12,33 +12,13 @@
  * (`DocsMarkdown`) hat keinen Dateisystem-Zugriff und wendet die Map nur an —
  * dadurch zeigt der Viewer exakt das, was der Validator prüft (Befund B1/B2).
  */
-import { statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
-import { resolveRuntimePath } from "@/lib/appPaths";
 import { listDocs, resolveDocRequest } from "@/lib/docsCatalog";
-import { extractMarkdownLinks, resolveDocLink } from "@/lib/docsLinks";
+import { DOCS_QUICK_ACCESS, DOCS_SECTIONS, sectionForSlug } from "@/lib/docsNav";
+import { loadDocFile } from "@/lib/docsRenderServer";
+import { buildDocsTree } from "@/lib/docsTree";
 
 export const dynamic = "force-dynamic";
-
-/** Dateisystem-Blick für die Link-Auflösung (server-only). */
-const fsProbe = {
-  isFile: (file: string): boolean => {
-    try {
-      return statSync(resolveRuntimePath(file)).isFile();
-    } catch {
-      return false;
-    }
-  },
-  isDir: (dir: string): boolean => {
-    try {
-      return statSync(resolveRuntimePath(dir)).isDirectory();
-    } catch {
-      return false;
-    }
-  },
-};
 
 /**
  * Traversal-Schranke (Befund B4): `name` darf ein Slug, ein Pfad unter
@@ -54,10 +34,20 @@ function isPlausibleDocName(name: string): boolean {
 }
 
 export async function GET(req: Request) {
-  const name = (new URL(req.url).searchParams.get("name") ?? "").trim();
+  const url = new URL(req.url);
+  const name = (url.searchParams.get("name") ?? "").trim();
 
   if (!name) {
-    return NextResponse.json({ docs: listDocs() });
+    // Übersicht: Katalog (kuratiert, thematisch sortiert) + Abschnitts-Metadaten.
+    // Neu 2026-10-04: `sections` und `quickAccess` liefern die Struktur mit,
+    // damit der Client keine zweite Wahrheit über die Themen-Reihenfolge hält.
+    return NextResponse.json({
+      docs: listDocs(),
+      sections: DOCS_SECTIONS,
+      quickAccess: DOCS_QUICK_ACCESS,
+      /** Vollständige Dateisicht — nur auf Anforderung (Bundesgröße). */
+      ...(url.searchParams.get("tree") === "1" ? { tree: buildDocsTree() } : {}),
+    });
   }
 
   if (!isPlausibleDocName(name)) {
@@ -69,15 +59,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unbekanntes Dokument" }, { status: 404 });
   }
 
-  let content: string;
+  // Datei lesen + Link-Ziele serverseitig auflösen (relativ zum Verzeichnis
+  // dieses Dokuments, genau wie GitHub es tut) — dieselbe Implementierung
+  // nutzt die Dokuseite (`src/app/docs/[...path]/page.tsx`).
+  let loaded;
   try {
-    // turbopackIgnore: true — verhindert das Tracen des gesamten Projektverzeichnisses.
-    // Der Pfad stammt ausschließlich aus dem Katalog bzw. von einer Datei, die
-    // `resolveDoc` gegen `docs/` (oder die Root-`*.md`) eingegrenzt hat.
-    content = await readFile(
-      path.join(/* turbopackIgnore: true */ process.cwd(), resolved.file),
-      "utf8",
-    );
+    loaded = await loadDocFile(resolved.file);
   } catch {
     return NextResponse.json(
       { error: `Datei ${resolved.file} nicht gefunden. Liegt sie unter docs/?` },
@@ -85,20 +72,14 @@ export async function GET(req: Request) {
     );
   }
 
-  // Link-Ziele serverseitig auflösen: relativ zum Verzeichnis dieses
-  // Dokuments, genau wie GitHub es tut.
-  const links: Record<string, string | null> = {};
-  for (const target of extractMarkdownLinks(content)) {
-    const resolution = resolveDocLink(target, resolved.file, fsProbe);
-    links[target] = resolution.kind === "doc" ? resolution.href : null;
-  }
-
   return NextResponse.json({
     slug: resolved.slug,
     ...resolved.entry,
     file: resolved.file,
     canonicalPath: resolved.canonicalPath,
-    content,
-    links,
+    /** Themen-Abschnitt für Sidebar-Kontext und Breadcrumb. */
+    section: sectionForSlug(resolved.slug),
+    content: loaded.content,
+    links: loaded.links,
   });
 }

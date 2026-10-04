@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.13.0` |
+| **Version** | `v0.14.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-04 |
-| **Quellbasiert** | `package.json` (`version: "0.13.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.14.0"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -409,6 +409,25 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.14.0` (2026-10-04) baut den **Doku-Viewer** um und schließt die
+Indikator-Dokumentation. Der Viewer (`/docs`) nutzt jetzt die volle
+Bildschirmbreite, die 82 Katalog-Dokumente stehen in **9 Themenbereichen**
+(`src/lib/docsNav.ts`) mit Suche, Sprungleiste und Abschnitts-Raster, und ein
+aufklappbarer **Dateibaum** macht alle 342 Markdown-Dateien erreichbar — auch
+die 260 Detailseiten, die vorher über den Viewer nicht auffindbar waren
+(`?tree=1`, `src/lib/docsTree.ts`). Breite Tabellen ragen nicht mehr über:
+Jede Tabelle sitzt in einem Scroll-Container und scrollt horizontal, statt die
+Nachbarspalte zu überdecken. Katalog und Dokumentinhalt werden serverseitig
+gerendert (`src/lib/docsRenderServer.ts`; kein Ladezustand, druckbar ohne
+JavaScript). Dazu: **neuer Indikatoren-Katalog**
+[`docs/INDICATORS.md`](docs/INDICATORS.md) (alle Engine-Formeln mit Defaults und
+Grenzen, die 25 Regelfelder, das CTI-Kompendium, 15 Scanner-Faktoren), die
+Einordnung des „Claude Indicator" auf den portierten CTI in der
+[Research-Notiz](docs/research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md), die
+Pflegeanleitung [`docs/DOCS_VIEWER.md`](docs/DOCS_VIEWER.md) und Aktualitätsfixes
+(Next.js-Stand 16.3.8, Scanner-Config-Version 2). Details:
+[`CHANGELOG.md`](CHANGELOG.md).
 
 `v0.13.0` (2026-10-04) macht den Reports-Tab zur vollständigen
 Performance-Ansicht: **Benchmark-Referenzlinie** aus der echten Kurshistorie

@@ -21,8 +21,95 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.13.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.14.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.14.0] — Doku-Viewer: volle Breite, themensortierte Navigation, scrollbare Tabellen & Indikatoren-Katalog (2026-10-04)
+
+### Changed — Doku-Viewer: volle Breite, themensortierte Navigation, Tabellen scrollen (2026-10-04)
+
+Die Doku-Ansicht (`/docs`) war eine flache Liste von ~80 Einträgen in einer
+schmalen Spalte (`max-w-7xl`), jede Dokuseite auf `max-w-4xl` begrenzt. Breite
+Tabellen (bis 11 Spalten, z. B. `DAILY_WEEKLY_RESEARCH.md`) liefen aus dem
+Artikel heraus bis unter das Inhaltsverzeichnis bzw. hinter den Viewport-Rand.
+Das ist behoben — und die Navigation ist jetzt thematisch sortiert.
+
+1. **Volle Bildschirmbreite.** Beide Doku-Seiten nutzen die gesamte Breite
+   (nur responsives Rand-Padding); das Inhaltsverzeichnis bleibt rechts, die
+   Artikelspalte ist `minmax(0,1fr)` und kann nicht mehr überlaufen.
+2. **Themensortierte Navigation** (`src/lib/docsNav.ts`): 82 Katalogeinträge in
+   **9 Abschnitten** (Einstieg, Architektur & Datenfundament, Indikatoren &
+   Signale, Strategie/Backtest/Research, Risiko & Ausführung, Broker/Venues,
+   Missionen & Betrieb, Audits & Security, Archiv). Gruppe des offenen
+   Dokuments ist automatisch offen; ein Test erzwingt, dass **jeder** Slug
+   genau einen Abschnitt hat.
+3. **Übersicht als Katalog-Hub.** Suche (Titel, Untertitel, Pfad, Abschnitt),
+   Schnellzugriff-Chips, sticky Sprungleiste, Abschnitts-Raster
+   (1 → 2 → 3 → 4 Spalten je Breakpoint) und ein **aufklappbarer Dateibaum**
+   über alle 342 Markdown-Dateien — inklusive der 260 Dateien, die nicht im
+   Katalog stehen und vorher über den Viewer gar nicht erreichbar waren
+   (`GET /api/docs?tree=1`, `src/lib/docsTree.ts`).
+4. **Dokuseite.** Sticky-Kopf mit Breadcrumb (Thema › Dokument), Sidebar mit
+   derselben Navigation (sticky, ab `lg`; darunter als Drawer mit Esc/Overlay),
+   mobil aufklappbares Inhaltsverzeichnis, „Vorher/Weiter“ im Katalog,
+   `generateMetadata` je Dokument (Titel/Beschreibung im Tab).
+5. **Inhalt serverseitig gerendert.** Katalog **und** Markdown kommen jetzt mit
+   dem Server-HTML (`src/lib/docsRenderServer.ts`, `/api/docs` und Seite teilen
+   sich dieselbe Implementierung). Kein „Lade Dokument…“-Flackern mehr,
+   Anker-Deeplinks funktionieren nach der Hydration wie vorher, und die Seite
+   ist ohne JavaScript lesbar/druckbar.
+6. **Tabellen scrollen statt überzuragen.** Jede Tabelle sitzt im
+   Scroll-Container `.docs-table-scroll` (`overflow-x:auto`, per Tastatur
+   scrollbar, `role="region"`): volle Breite, wenn sie passt — sonst
+   horizontal scrollbar, nie über die Nachbarspalte hinaus. Zebra-Streifen,
+   Hover, umbruchfähiger Code in Zellen und eine Druckregel (Papier kennt kein
+   horizontales Scrollen) inklusive.
+7. **Barrierefreiheit & Icons.** Inline-SVG-Icons statt Unicode-Glyphen,
+   `aria-expanded`/`aria-controls`/`aria-current`, Fokusringe, `print:hidden`
+   für alle Bedienelemente.
+
+### Added — Indikatoren-Dokumentation (Engine, CTI, Scanner) (2026-10-04)
+
+- **Neu: [`docs/DOCS_VIEWER.md`](docs/DOCS_VIEWER.md)** — Aufbau und
+  Pflegeanleitung des Viewers: Katalog vs. Dateibaum, Komponenten-Tabelle,
+  Überlauf-Regeln für Tabellen, „neues Dokument in drei Schritten“ (Datei,
+  Katalog, Abschnitt), Whitelist/Traversal-Schranke und die bewussten Grenzen.
+- **Neu: [`docs/INDICATORS.md`](docs/INDICATORS.md)** — der zentrale
+  Indikatoren-Katalog: Landkarte aller Rechenkerne, alle 16 Funktionen aus
+  `src/lib/indicators.ts` mit Formel, Default, Rückgabe bei zu wenig Daten und
+  kanonischen Fenstern (`BOLLINGER_PERIOD`/`DONCHIAN_*`), die 25 Regelfelder
+  nach Gruppen, das **CTI-Kompendium** (8 Komponenten → 4 Dimensionen, alle
+  Parameter und Grenzen, Stops, Parität Backtest ↔ Live, CLI, Tests), die 15
+  Scanner-Faktoren mit Gewichten, das adaptive Risiko, die Trusted Indicators,
+  Konventionen (Prozent vs. Bruch, Aufwärmbedarf, `null` statt 0,
+  `changePct24h` ist nicht 24 h) und ein Prüfpfad.
+- **„Claude Indicator“ im Research-Ranking ergänzt:**
+  [`docs/research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md`](docs/research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md)
+  ordnet den auf Rang 3 der Fremd-Auswertung stehenden „Claude Indicator“ jetzt
+  konkret dem portierten **CTI** zu (Mechanik übernommen, Renditebehauptung
+  ausdrücklich nicht) und verlinkt Katalog, Fachdokument und Kostenvorbehalt.
+- **Katalognachtrag:** [`docs/EQUITY_CURVE.md`](docs/EQUITY_CURVE.md) stand in
+  `docs/README.md` und `CHANGELOG.md`, fehlte aber im Doku-Katalog — jetzt
+  samt Abschnitt registriert. `GET /api/docs` liefert zusätzlich `sections` und
+  `quickAccess` (keine zweite Wahrheit über die Reihenfolge im Client).
+
+### Fixed — Aktualität der Dokumentation (2026-10-04)
+
+- **`node="[object Object]"` aus dem Doku-Renderer entfernt:** react-markdown
+  reichte den mdast-Knoten als DOM-Prop durch — Links und Tabellen trugen ein
+  ungültiges Attribut (React-Warnung, verworfen). Regressionstest ergänzt.
+- **Next.js-Stand:** Die Doku nannte „16.3.4“ als gepinnten Stand, das Lockfile
+  führt `16.3.8` (SEC-03-Mindeststand bleibt 16.3.3) — `README.md`,
+  `INSTALL.md`, `docs/INSTALL.md`, `docs/INSTALL-WINDOWS.md`,
+  `docs/security/README.md` und `docs/README.md` nachgezogen.
+- **Scanner-Konfigurationsversion:** `DAILY_WEEKLY_RESEARCH.md` nannte
+  `version: 1`, `src/scanner/scanner.config.json` steht auf `version: 2`.
+- **`docs/README.md`:** veraltete `VERSION.md`-Zeile (v0.8.0) korrigiert,
+  Indikatoren-Absatz auf den neuen Katalog umgestellt, `research/` in die
+  Verzeichnisübersicht aufgenommen.
+- **Regressionstests:** `tests/docsNav.test.ts` (Abschnitte vollständig/
+  eindeutig, Schnellzugriff, Gruppen der Indikator-Dokumente, Suchfilter),
+  `tests/ui/DocsMarkdown.test.tsx` (Scroll-Container, kein `node`-Attribut).
 
 ## [0.13.0] — Reports-Tab: Benchmark, TWR, Drawdown-Episoden, Heatmap, Druck, Alarme, Log-Achse & Zeitraumvergleich (2026-10-04)
 

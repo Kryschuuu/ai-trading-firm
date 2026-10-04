@@ -231,6 +231,86 @@
   --tw-prose-kbd: var(--color-slate-200);
 }
 
+/* ---- Doku-Viewer: breite Tabellen & Code scrollen statt überzulaufen ---
+   Befund 2026-10-04: Die Doku enthält Tabellen mit bis zu 11 Spalten
+   (z. B. `DAILY_WEEKLY_RESEARCH.md` §Scanner-Faktoren, `MARKET_UNIVERSE.md`).
+   Die ragten aus dem Artikel heraus bis unter das Inhaltsverzeichnis bzw.
+   hinter den Viewport-Rand, weil `prose` Tabellen nur `width: 100%` gibt:
+   Sobald der min-content-Bedarf (lange Env-Namen, Pfade, Code-Spans) größer
+   als die Spalte ist, wächst die Tabelle über ihren Container hinaus.
+
+   Lösung: Jede Tabelle sitzt in `.docs-table-scroll` (siehe `DocsMarkdown.tsx`)
+   mit `overflow-x: auto`. Die Tabelle füllt die Breite, wenn sie passt, und
+   scrollt ansonsten horizontal — sie kann nie mehr über die rechte Spalte
+   (Inhaltsverzeichnis) oder aus dem Fenster laufen. `overflow-wrap: break-word`
+   verhindert zusätzlich, dass ein einzelnes langes Token die Spalte sprengt. */
+.docs-content .docs-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--color-slate-800);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--color-slate-950) 45%, transparent);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-slate-700) transparent;
+}
+
+.docs-content .docs-table-scroll:focus-visible {
+  outline: 2px solid var(--color-emerald-500);
+  outline-offset: 2px;
+}
+
+.docs-content .docs-table-scroll > table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.docs-content .docs-table-scroll th,
+.docs-content .docs-table-scroll td {
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.docs-content .docs-table-scroll thead th {
+  background: color-mix(in srgb, var(--color-slate-800) 60%, transparent);
+  color: var(--color-slate-200);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.docs-content .docs-table-scroll tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--color-slate-800) 22%, transparent);
+}
+
+.docs-content .docs-table-scroll tbody tr:hover {
+  background: color-mix(in srgb, var(--color-emerald-500) 9%, transparent);
+}
+
+/* Code in Tabellenzellen darf umbrechen (lange Env-Namen, Pfade). */
+.docs-content .docs-table-scroll code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 0.78em;
+}
+
+/* Sehr lange Tokens (URLs, Hashes) dürfen den Artikel nicht sprengen. */
+.docs-content {
+  overflow-wrap: break-word;
+}
+
+/* Bilder/Diagramme der Doku nie breiter als ihr Container. */
+.docs-content img,
+.docs-content svg,
+.docs-content video {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ---- Druck / PDF ------------------------------------------------------
    Der Report ist als PDF/ Ausdruck gedacht (Button „Druck / PDF“ im
    Reports-Tab). Zwei Dinge fehlen einem dunklen Dashboard auf Papier:
@@ -327,6 +407,16 @@
   svg,
   figure {
     break-inside: avoid;
+  }
+
+  /* Der Bildschirm-Scrollcontainer darf beim Druck nichts abschneiden:
+     Papier kennt kein horizontales Scrollen. */
+  .docs-content .docs-table-scroll {
+    overflow: visible !important;
+    max-width: none !important;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
 
   @page {
