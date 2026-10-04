@@ -123,6 +123,7 @@ export const SLUG_SECTION: Record<string, DocsSectionId> = {
   installWindows: "einstieg",
   handbuch: "einstieg",
   configuration: "einstieg",
+  docsViewer: "einstieg",
   changelog: "einstieg",
   howtoUpdate: "einstieg",
   howtoLanSession: "einstieg",

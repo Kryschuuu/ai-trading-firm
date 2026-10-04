@@ -21,10 +21,10 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.13.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.14.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased]
+## [0.14.0] — Doku-Viewer: volle Breite, themensortierte Navigation, scrollbare Tabellen & Indikatoren-Katalog (2026-10-04)
 
 ### Changed — Doku-Viewer: volle Breite, themensortierte Navigation, Tabellen scrollen (2026-10-04)
 
@@ -37,7 +37,7 @@ Das ist behoben — und die Navigation ist jetzt thematisch sortiert.
 1. **Volle Bildschirmbreite.** Beide Doku-Seiten nutzen die gesamte Breite
    (nur responsives Rand-Padding); das Inhaltsverzeichnis bleibt rechts, die
    Artikelspalte ist `minmax(0,1fr)` und kann nicht mehr überlaufen.
-2. **Themensortierte Navigation** (`src/lib/docsNav.ts`): 81 Katalogeinträge in
+2. **Themensortierte Navigation** (`src/lib/docsNav.ts`): 82 Katalogeinträge in
    **9 Abschnitten** (Einstieg, Architektur & Datenfundament, Indikatoren &
    Signale, Strategie/Backtest/Research, Risiko & Ausführung, Broker/Venues,
    Missionen & Betrieb, Audits & Security, Archiv). Gruppe des offenen
@@ -46,9 +46,9 @@ Das ist behoben — und die Navigation ist jetzt thematisch sortiert.
 3. **Übersicht als Katalog-Hub.** Suche (Titel, Untertitel, Pfad, Abschnitt),
    Schnellzugriff-Chips, sticky Sprungleiste, Abschnitts-Raster
    (1 → 2 → 3 → 4 Spalten je Breakpoint) und ein **aufklappbarer Dateibaum**
-   über alle ~340 Markdown-Dateien — inklusive der ~250 Audit-Detailseiten, die
-   vorher über den Viewer gar nicht erreichbar waren (`GET /api/docs?tree=1`,
-   `src/lib/docsTree.ts`).
+   über alle 342 Markdown-Dateien — inklusive der 260 Dateien, die nicht im
+   Katalog stehen und vorher über den Viewer gar nicht erreichbar waren
+   (`GET /api/docs?tree=1`, `src/lib/docsTree.ts`).
 4. **Dokuseite.** Sticky-Kopf mit Breadcrumb (Thema › Dokument), Sidebar mit
    derselben Navigation (sticky, ab `lg`; darunter als Drawer mit Esc/Overlay),
    mobil aufklappbares Inhaltsverzeichnis, „Vorher/Weiter“ im Katalog,
@@ -70,6 +70,10 @@ Das ist behoben — und die Navigation ist jetzt thematisch sortiert.
 
 ### Added — Indikatoren-Dokumentation (Engine, CTI, Scanner) (2026-10-04)
 
+- **Neu: [`docs/DOCS_VIEWER.md`](docs/DOCS_VIEWER.md)** — Aufbau und
+  Pflegeanleitung des Viewers: Katalog vs. Dateibaum, Komponenten-Tabelle,
+  Überlauf-Regeln für Tabellen, „neues Dokument in drei Schritten“ (Datei,
+  Katalog, Abschnitt), Whitelist/Traversal-Schranke und die bewussten Grenzen.
 - **Neu: [`docs/INDICATORS.md`](docs/INDICATORS.md)** — der zentrale
   Indikatoren-Katalog: Landkarte aller Rechenkerne, alle 16 Funktionen aus
   `src/lib/indicators.ts` mit Formel, Default, Rückgabe bei zu wenig Daten und

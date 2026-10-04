@@ -103,6 +103,12 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
     title: "Missionen, Markt-Scans & Vorlagen",
     subtitle: "Missions-Typen (Einzel-Symbol / Markt-Scan), Segmente, 18 Vorlagen, Mandatsprüfung (v1.35.0)",
   },
+  docsViewer: {
+    file: "docs/DOCS_VIEWER.md",
+    title: "Doku-Viewer (/docs) — Aufbau & Pflege",
+    subtitle:
+      "Katalog vs. Dateibaum, Komponenten, Tabellen-Überlauf, Anleitung zum Ergänzen eines Dokuments, Whitelist und Grenzen",
+  },
   changelog: {
     file: "CHANGELOG.md",
     title: "Changelog",

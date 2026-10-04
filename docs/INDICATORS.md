@@ -1,6 +1,6 @@
 # Indikatoren-Katalog — Engine, CTI und Scanner
 
-**Stand:** 2026-10-04 · **Version:** `v0.13.0` (Beta) · **Status:** beschreibt den Code, keine Wunschliste
+**Stand:** 2026-10-04 · **Version:** `v0.14.0` (Beta) · **Status:** beschreibt den Code, keine Wunschliste
 **Verwandt:** [CLAUDE_TRADING_INDICATOR.md](CLAUDE_TRADING_INDICATOR.md) · [BACKTESTING.md](BACKTESTING.md) · [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md) · [DAILY_WEEKLY_RESEARCH.md](DAILY_WEEKLY_RESEARCH.md) · [research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md](research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md)
 
 > **Beta-Hinweis:** Alle Indikatoren erzeugen Signale, keine Orders. Ausgeführt

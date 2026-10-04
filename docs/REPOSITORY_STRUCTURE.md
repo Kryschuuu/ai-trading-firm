@@ -46,7 +46,7 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
 ├── src/                       # ── Anwendung ────────────────────────────────────────────
 │   ├── app/                   # Next.js App Router: Seiten, Dashboard, /docs-Viewer, REST-API
 │   │   ├── api/               #   API-Routen (/api/firm/*, /api/marketdata/*, /api/auth/*, …)
-│   │   ├── docs/              #   In-Browser-Doku-Viewer (docsCatalog)
+│   │   ├── docs/              #   In-Browser-Doku-Viewer (Katalog + Dateibaum, siehe DOCS_VIEWER.md)
 │   │   └── *.tsx              #   Layout, Startseite
 │   ├── components/            # React-Komponenten (Dashboard, Control-Plane, Operations, Docs)
 │   ├── cycle/                 # Agenten-Zyklus: Steps (Technical/News/Macro/Research/Risk/…),
@@ -165,8 +165,12 @@ Unverändert (bewusst): `src/` (Next.js-Modullayout), `scripts/`, `drizzle/`,
    (aktuell: `src/marketdata/__tests__/`), dann im `test`-Skript von
    `package.json` aufführen.
 2. **Doku:** neues Fachmodul ⇒ Doku `docs/<MODUL>.md` + Eintrag in
-   `docs/README.md` + `docsCatalog` (in `src/app/docs/`); Status-Header
-   (Datum, Code-Version, Modul) oben.
+   `docs/README.md` **und** im `DOCS_CATALOG`
+   (`src/lib/docsCatalog.ts`); Status-Header (Datum, Code-Version, Modul) oben.
+   Für die Menü-Position zusätzlich den Abschnitt in
+   `SLUG_SECTION` (`src/lib/docsNav.ts`) setzen — sonst landet das Dokument im
+   Archiv und `tests/docsNav.test.ts` wird rot. Details und Prüfbefehle:
+   [`docs/DOCS_VIEWER.md`](DOCS_VIEWER.md) §4.
 3. **Migrations:** `drizzle/YYYY-MM-DD_<slug>.sql`, append-only + idempotent,
    Drizzle-Spiegel in `src/db/schema.ts`, Rollback-Hinweis in der Modul-Doku.
 4. **CI-Workflows:** Quelle ist `docs/ci/`, Spiegel `.github/workflows/` —

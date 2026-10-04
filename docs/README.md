@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.13.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.14.0` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -44,7 +44,7 @@ gepatchter Bibliothek und kappt Nachrichtengrößen hart. `npm ci`,
 `npm run test:security:ws`, Neustart aller Prozesse.
 [Upgrade-Runbook](security/README.md#ws-upgrade-sec-04).
 
-Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar (kanonische URLs `/docs/<Datei>.md`). Seit 2026-10-04 ist `/docs` ein themensortierter Katalog-Hub mit Suche, Sprungleiste und vollständigem Dateibaum; jede Dokuseite bringt dieselbe Navigation in der Sidebar mit.
+Alle Dokumente sind im laufenden System auch unter **`/docs`** im Browser lesbar (kanonische URLs `/docs/<Datei>.md`). Seit 2026-10-04 ist `/docs` ein themensortierter Katalog-Hub mit Suche, Sprungleiste und vollständigem Dateibaum; jede Dokuseite bringt dieselbe Navigation in der Sidebar mit ([Aufbau & Pflege](DOCS_VIEWER.md)).
 
 ---
 
@@ -127,6 +127,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** | PostgreSQL-Soforthilfe |
 | **[HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md)** | How-to: LAN nach Update tot (`EADDRINUSE`/`127.0.0.1`) + „Sitzung abgelaufen" statt Datenbankfehler (v1.36.41) |
 | **[HOWTO_UPDATE.md](HOWTO_UPDATE.md)** | How-to: laufende Firma nach `git pull` aktualisieren — Stop-Reihenfolge, `npm ci`, Schema, Build, Verifikation, Rollback |
+| **[DOCS_VIEWER.md](DOCS_VIEWER.md)** | In-Browser-Doku (`/docs`): Katalog vs. Dateibaum, Komponenten, Tabellen-Überlauf, Pflegeanleitung (neues Dokument in 3 Schritten), Whitelist/Traversal-Schranke, Grenzen (2026-10-04) |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang, Merge-Status |
 | **[DOCS_SYNC_AUDIT.md](DOCS_SYNC_AUDIT.md)** | Docs-Code-Sync-Audit: jede Behauptung gegen Code geprüft |
 
@@ -262,7 +263,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
 ```
 ├── README.md                 ← Projekt-README (GitHub-Einstieg, inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← Kanonischer Changelog (Keep a Changelog, v0.x.x, Root)
-├── VERSION.md                ← Versions-Metadaten (v0.13.0, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.14.0, Beta) + Komponenten-Übersicht
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── CONFIGURATION.md          ← Env-Flags mit Defaults (verbindliche Flag-Referenz)
