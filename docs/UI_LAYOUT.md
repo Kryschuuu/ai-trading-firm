@@ -1,7 +1,7 @@
-# UI-Layout & Design-System (v0.15.0)
+# UI-Layout & Design-System (v0.15.1)
 
 **Gilt für:** `src/app/**`, `src/components/**`, `src/components/ui/**`,
-`src/app/globals.css`. · **Stand:** v0.15.0 (Beta).
+`src/app/globals.css`. · **Stand:** v0.15.1 (Beta).
 
 Dieses Dokument beschreibt das Layout-System der Oberfläche: Seitenhüllen,
 Breakpoints, Tabellen, Reiterleisten und die Testabsicherung. Es ist die
