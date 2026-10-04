@@ -124,6 +124,7 @@ export const SLUG_SECTION: Record<string, DocsSectionId> = {
   handbuch: "einstieg",
   configuration: "einstieg",
   docsViewer: "einstieg",
+  uiLayout: "einstieg",
   changelog: "einstieg",
   howtoUpdate: "einstieg",
   howtoLanSession: "einstieg",

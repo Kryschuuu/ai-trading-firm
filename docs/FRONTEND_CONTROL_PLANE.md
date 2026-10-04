@@ -8,6 +8,12 @@
 Dieses Dokument beschreibt den verbindlichen Datenfluss, die API, das
 Zustandsmodell und das Sicherheitskonzept der Broker Control Plane.
 
+> **Layout seit v0.15.0:** `/brokers` und der Brokers-Tab laufen über
+> `PageShell` in voller Bildschirmbreite (vorher `max-w-7xl`); Venue-Karten und
+> Coverage-Dashboard nutzen inhaltsangepasste Raster (`AUTO_FIT_WIDE` bis
+> 30 rem Mindestbreite), die Coverage-Matrix ist ein `DataTable` mit
+> sticky Spaltenköpfen. Details: [UI_LAYOUT.md](UI_LAYOUT.md).
+
 ---
 
 ## 1. Datenfluss (verbindlich)
