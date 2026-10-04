@@ -74,9 +74,9 @@ Mikro-Executor und Workshop-UI lesen dieselbe Liste.
 * **Ergebnisreihenfolge:** `ts` aufsteigend (stabil nach `fetchedAt`).
   `limit` selektiert die **letzten N** Bars (jüngste) und gibt sie wieder
   aufsteigend zurück. `from`/`to` sind **inklusiv**.
-* **Größenkontrolle:** optionales `maxBarsPerSeries` (Default **5000**);
-  die Kompaktierung behält je Reihe (`instrumentId+timeframe`) die jüngsten
-  Bars.
+* **Größenkontrolle:** optionales `maxBarsPerSeries` (Default **100.000**,
+  geteilt mit `MAX_CANDLES_PER_SERIES`); die Kompaktierung behält je Reihe
+  (`instrumentId+timeframe`) die jüngsten Bars.
 
 ## 4. Lese-API
 
@@ -116,8 +116,8 @@ alle Timeframes und wählt je Instrument deterministisch eine Reihe
 **Empfohlener Pfad in Produktion ist der Neuaufbau**, nicht die
 Inline-Migration: `candles.ndjson` entfernen (Backup vorher!) und
 `npm run market-sync` die Historie mit korrektem Timeframe neu aufbauen
-lassen (150 Bars je Instrument und Timeframe, Timeframes `5m`, `15m`,
-`30m`, `1h`). Der Bitunix-Feed ist public REST und in Minuten nachgezogen —
+lassen (Default 201 Bars bzw. expliziter Datumsbereich je Instrument und
+Timeframe; Timeframes `5m`, `15m`, `30m`, `1h`). Der Bitunix-Feed ist public REST und in Minuten nachgezogen —
 damit ist die Etikettierung nachweislich korrekt statt angenommen. Der Pfad
 der Datei folgt `PAPER_HISTORY_DIR` (Default `data/history`). Details und
 Validierung: [MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md).
@@ -210,7 +210,8 @@ npm run history:import-csv -- --file=<pfad.csv> --instrument=BINANCE:BTCUSDT \
   Für eine lückenlose Messreihe beides prüfen (die Store-Reihe zählt Lücken nicht).
 * **`--max-bars`** (Default 25 000) setzt die Kompaktierungsgrenze dieser Reihe —
   sie muss größer als die längste benötigte Historie sein, sonst schneidet der
-  Store die ältesten Bars ab (Store-Default: 5 000).
+  Store die ältesten Bars ab (Store-Default: 100.000; der CSV-Importer-Default
+  bleibt unabhängig davon 25.000).
 * **`--strict`** bricht bei der ersten ungültigen Zeile ab (für kuratierte Dateien).
 
 Anwendung: Die Backtest-Performance-Baseline (STX-00-01) nutzt genau diesen Pfad,

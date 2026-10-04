@@ -1,7 +1,7 @@
 # Migrations-Runbook — `timeframe`-Feld im Historical Store (Schema v1 → v2)
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
-> Code-Version **v0.1.0 (Beta)** · Zielgruppe: Betrieb & Deployment
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-10-04** ·
+> Code-Version **v0.16.0 (Beta)** · Zielgruppe: Betrieb & Deployment
 >
 > Dieses Runbook ist die Schritt-für-Schritt-Anleitung für
 > **Produktionsumgebungen mit bestehender** `data/history/candles.ndjson`.
@@ -66,23 +66,26 @@ dafür, dass Altbestand überhaupt wieder gelesen wird.
 | Datenherkunft | `MarketDataSyncService` ruft alle Bars neu ab (Public REST) | Altbestand wird umetikettiert |
 | Risiko falscher Etiketten | **keines** — der Timeframe stammt aus dem Backfill-Kontext | **hoch**, wenn `--assume-timeframe` falsch gewählt wird |
 | Dauer | ein Sync-Lauf (Minuten bis wenige Stunden, je Universum) | ein Skriptlauf + Validierung |
-| Netzlast | 4 Requests je Instrument (`5m`, `15m`, `30m`, `1h`, je 150 Bars) | keine |
+| Netzlast | Je nach gewählten Timeframes, Backfill-Range und Venue-Paging mehrere Kline-Requests pro Instrument; Bitunix höchstens 200 Bars je HTTP-Seite, gemeinsamer Market-Sync-Bucket 4 req/s | keine |
 | Voraussetzung | Venue erreichbar, Rate-Limit-Budget vorhanden | Datei vorhanden |
 | Empfehlung | **Ja** — Standard für den Bitunix-Feed | nur wenn kein Re-Fetch möglich (Offline, gesperrtes Rate-Limit) |
 
-**Begründung der Empfehlung:** Der Backfill ist klein und billig — 150 Bars
-je Instrument und Timeframe, vier Timeframes (`5m`, `15m`, `30m`, `1h`).
-Ein kompletter Neuaufbau liefert **nachweislich korrekt etikettierte** Reihen,
-weil der Timeframe aus dem Aufrufkontext stammt. Die Inline-Migration muss
-dagegen für Altbestand *raten*, welche Periodizität vorliegt — und ein
-falsch angenommener Timeframe ist später nicht mehr erkennbar. Sie ist ein
-**Sicherheitsnetz**, kein vollwertiger Ersatz.
+**Begründung der Empfehlung:** Ein kompletter Neuaufbau liefert
+**nachweislich korrekt etikettierte** Reihen, weil der Timeframe aus dem
+Aufrufkontext stammt. Die Inline-Migration muss dagegen für Altbestand *raten*,
+welche Periodizität vorliegt — und ein falsch angenommener Timeframe ist später
+nicht mehr erkennbar. Sie ist ein **Sicherheitsnetz**, kein vollwertiger Ersatz.
+
+Die aktuelle CLI synchronisiert standardmäßig `1h` mit 201 Bars. Für den
+mehrreihigen Neuaufbau unten werden `5m`, `15m`, `30m` und `1h` explizit
+angefordert; längere Bereiche lassen sich mit `--from`/`--to` angeben, bleiben
+aber durch Venue-Historie, 100.000 Bars je Reihe und das Laufbudget begrenzt.
 
 ## 4. Schritt 0 — Voraussetzungen prüfen
 
 ```bash
-# 1. Code-Version (muss >= 1.26.0 sein, dieses Runbook: 1.26.2)
-node -p "require('./package.json').version"
+# 1. Code-Version (muss Historical-Store-Schema v2 unterstützen)
+node -p "require('./package.json').version" # aktuell v0.16.0; Details in VERSION.md
 
 # 2. Node-Version (>= 20)
 node -v
@@ -104,7 +107,7 @@ Folgende Prozesse schreiben in den Store:
 | Prozess | Was wird geschrieben | Stoppen |
 | --- | --- | --- |
 | Next.js-App / `ai-trading-firm.service` | Snapshot-Ticks als `1m` (`src/lib/marketdata/manager.ts`) | `sudo systemctl stop ai-trading-firm` |
-| `npm run market-sync` | Backfill `5m/15m/30m/1h` | laufende Cron-/Sync-Jobs beenden |
+| `npm run market-sync` | konfigurierter Candle-Backfill (Default `1h`; mehrere Timeframes per CLI) | laufende Cron-/Sync-Jobs beenden |
 | `npm run scan -- --sync-first` | Sync vor dem Scan | Job beenden |
 | `micro-executor.service` | **schreibt nicht** (eigene In-RAM-Serien) | muss nicht gestoppt werden |
 
@@ -143,21 +146,23 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 mv "$HIST/candles.ndjson" "$HIST/candles.ndjson.pre-v2-$STAMP"
 
 # 2. Historie neu aufbauen (Public REST, keine Credentials)
-npm run market-sync -- --venue=BITUNIX
+BITUNIX_ENABLED=true npm run market-sync -- --venue=BITUNIX \
+  --timeframes=5m,15m,30m,1h --candle-limit=201 --full
 
 # 3. Validierung: siehe Kap. 8
 ```
 
-`market-sync` schreibt je Instrument **vier** Reihen (`5m`, `15m`, `30m`,
-`1h`) mit je bis zu 150 Bars — jede Zeile mit korrektem `timeframe` und
-`"v": 2`. Fehlerhafte Instrumente landen im Manifest
-`data/market-data-errors.json` und werden als Readiness `ERROR` gemeldet
-(kein stilles `min-candles` mehr, siehe [OBSERVABILITY.md](OBSERVABILITY.md)).
+Der explizite Aufruf schreibt je Instrument bis zu **vier** Reihen (`5m`,
+`15m`, `30m`, `1h`) mit je 201 Bars und `"v": 2`. Bitunix liefert höchstens
+200 Bars je Kline-Response, daher kann jede Reihe mehrere paginierte Requests
+benötigen. Fehlerhafte oder unvollständige Reihen werden in den Sync-Zählern
+und ggf. im Manifest `data/market-data-errors.json` sichtbar; siehe auch
+[OBSERVABILITY.md](OBSERVABILITY.md).
 
-**Erwartung:** Nach dem Lauf ist die Zahl der Bars ein Vielfaches der
-Timeframes — pro Instrument bis zu 4 × 150. Weicht eine Reihe stark ab, ist
-das ein Rate-Limit-/Fehlersignal (Manifest prüfen), **kein** Grund, auf
-Pfad B zu wechseln.
+**Erwartung:** Bei vollständiger Venue-Historie sind bis zu 4 × 201 Bars je
+Instrument möglich. Weniger Bars können an der verfügbaren Venue-Historie oder
+an einzelnen Fehlern liegen; Manifest und `fetched bars`-Zähler prüfen. Das
+Laufbudget und der venue-geteilte Rate-Limiter begrenzen die Dauer und Last.
 
 ## 8. Pfad B — Inline-Migration (Sicherheitsnetz)
 

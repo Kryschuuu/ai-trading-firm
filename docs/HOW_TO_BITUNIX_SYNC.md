@@ -42,8 +42,28 @@ weil der konfigurierte Faktorsatz eine **EMA50** (50 Kerzen) und einen **Momentu
 von 60 Perioden** (→ 61 Kerzen) enthält (`src/scanner/warmup.ts`, `requiredWarmupCandles`).
 Ohne diese Historie bleiben die Funnel-Stellen datenbedingt auf null.
 
-Der Sync lädt pro Timeframe standardmäßig **150 Kerzen** (`SYNC_CANDLE_LIMIT`), also mehr
-als die benötigten 61 — ein einfacher Lauf ohne Optionen reicht.
+Der Sync lädt standardmäßig **201 Kerzen** (`SYNC_CANDLE_LIMIT`): Das deckt den
+CTI-EMA-200-Warmup ab. Der Scanner selbst benötigt getrennt davon derzeit 61
+Kerzen (EMA50 + Momentum-Lookback 60); ein einfacher Lauf ohne Optionen reicht.
+Für längere Reihen kann ein inklusiver Datumsbereich geladen werden:
+
+```bash
+BITUNIX_ENABLED=true npm run market:sync -- \
+  --venue=BITUNIX --symbols=BTCUSDT,ETHUSDT --timeframes=1h --from=2026-01-01
+```
+
+`--from` ohne `--to` läuft bis jetzt. `--from`/`--to` akzeptieren
+`YYYY-MM-DD` (UTC-Tagesgrenze; `--to` schließt 23:59:59.999 UTC ein) oder
+ISO-8601 mit expliziter Zeitzone. Ein Range-Backfill wird nicht vom inkrementellen
+„aktuelle Kerze vorhanden“-Skip übersprungen. Standardmäßig wird das Limit aus
+dem Bereich und dem feinsten angeforderten Timeframe abgeleitet; ein explizites
+`--candle-limit` muss den gesamten Zeitraum abdecken.
+
+Gesichert sind höchstens 100.000 Bars je Instrument/Timeframe und 1.000.000
+angeforderte Bars je Lauf. Bitunix liefert maximal 200 Klines pro HTTP-Request;
+der Sync paginiert automatisch. Nutze `--symbols`, `--timeframes` oder
+`--max-instruments`, wenn die Laufgrenze greift. Die Venue kann eine kürzere
+Historie haben als angefragt.
 
 ---
 
@@ -117,13 +137,13 @@ angefragt (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, Gateway-Limit >6 KB
 [market-sync] BITUNIX discovery: <N> instruments
 [market-sync] tickers enriched: <N>
 [market-sync] orderbooks enriched: <N>
-[market-sync] 1h candles: <N>/<N> (<bars>/<soll> bars)
+[market-sync] 1h candles: <geladene>/<angefragte Reihen> (<abgerufen>/<Ziel> fetched bars; <neu> new, <Duplikate> deduplicated)
 [market-sync] duration: ...
 ```
 
 Exit-Codes: `0` = sauber · `1` = degradiert (Details im Manifest
 `data/market-data-errors.json` — einfach **erneut ausführen**, es gibt z. B. Rate-Limits
-von 8 req/s/IP) · `2` = Bedienfehler/Gate (z. B. weiterhin `VENUE_DISABLED`).
+von 4 req/s/IP; 429/`Retry-After` kühlt den geteilten Bucket ab) · `2` = Bedienfehler/Gate (z. B. weiterhin `VENUE_DISABLED`).
 
 **Seit v1.39.1** nennt der Lauf bei Fehlern die Ursache direkt im Log
 (Ursachen-Buckets je Stage/Taxonomie + Wiederholbarkeits-Bilanz), und ALLE
@@ -238,8 +258,8 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 | `tickers enriched: 0`, `failures: 754`, `ticker/SCHEMA_MISMATCH: 754` | **Vor v1.40.0:** `enrichWithTickers()` schickte ~750 Symbole als **einen** `GET /tickers?symbols=…` (>6 KB URL) → Gateway lehnt ab → jeder als `SCHEMA_MISMATCH` endgültig markiert. **Seit v1.40.0 behoben:** Chunking in 50er-Blöcken (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB Query), Teilausfall toleriert. Falls nach Update noch auftritt: Version prüfen (`npm run market:sync -- --help` zeigt keine, aber `package.json` = 1.40.0), `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` nicht über 100 setzen, Gateway-Logs prüfen. |
 | `discovery: 0 instruments`, `failures: 1` | Netzwerk/API nicht erreichbar (Proxy/Firewall, Geo-Block) oder Ratenlimit. Seit v1.39.1 zeigt die Logzeile `failures nach Ursache:` die klassifizierte Ursache (`discovery/NETWORK` = API nicht erreichbar, `discovery/RATE_LIMITED` = Limit, `discovery/TLS` = Zertifikat/Proxy). Batch-Fehler stehen seit v1.39.1 auch im `batch`-Abschnitt von `data/market-data-errors.json`; erneut ausführen. |
 | „Komische Zeichen“ (z. B. `â€"`, `Ã¼`) in der Konsole | bis v1.39.0: UTF-8-Ausgabe auf Windows-Konsolen mit Legacy-Codepage. Seit v1.39.1 behoben — alle CLI-Ausgaben sind ASCII-sicher (`toConsoleAscii`). Falls weiterhin Mojibake erscheint: Konsole auf Windows-Terminal/`chcp 65001` stellen. |
-| `1h candles: 1/250 (150/37500 bars)` oder `1/250` → `0/250` im zweiten Lauf / `Scanner WARMING`, obwohl Sync „erfolgreich“ | **Vor v1.40.0 (Bug 250→WARMING, 2026-09-17):** leere Kline-Antworten (`data: []`, 0 verwertbare Bars) zählten still als 0-Bars-Erfolg ohne `SyncFailure` — 249 leere Antworten blieben unsichtbar, Log meldete „250 Instrumente, keine Fehler“, Ops-Center (Next.js) sah die 250 nicht (Cross-Prozess-Path-Drift + Registry-Singleton ohne mtime) und der Scanner-Cache (5 Min TTL) hielt das leere Ergebnis. **Seit v1.40.0 behoben:** leere Kerzen-Reihe → `failure { stage: "candles", reason: "DATA_UNAVAILABLE" }`, Log `failures nach Ursache: candles/DATA_UNAVAILABLE: 249`, `DEGRADED`, Manifest `data/market-data-errors.json`; Status/Manifest/Registry/History einheitlich via `resolveRuntimePath()`, Registry-Refresh via mtime je `getRegistry()`-Aufruf, Scanner invalidiert bei geänderter `instruments.ndjson`/`candles.ndjson`-mtime sofort. **Behebung:** auf v1.40.0 aktualisieren, erneut `BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX` ausführen — bei persistierendem `DATA_UNAVAILABLE` hat die Venue für diese Symbole/Zeitraum keine Bars (illiquides/neues Perpetual, `BEFORE_START`/`INVALID`-Zeitraum) — kein Bug, aber bewusst sichtbar. |
-| Immer noch „< 61 Kerzen“ nach dem Lauf | `--candle-limit` weglassen (Default 150 ≥ 61) bzw. auf ≥ 61 stellen; Status mit `npm run market:sync:status` prüfen. |
+| Historische Logzeile `1h candles: 1/250 (150/37500 bars)` oder `1/250` → `0/250` im zweiten Lauf / `Scanner WARMING`, obwohl Sync „erfolgreich“ | **Legacy-Logformat:** Der Text bezog sich auf den alten Ein-Bar-Request- und Store-Zähler; seit v0.16.0 unterscheidet das Log API-abgerufene, neu gespeicherte und deduplizierte Bars. Leere Kline-Antworten (`data: []`, 0 verwertbare Bars) werden bereits seit dem historischen internen Fix v1.40.0 als Fehler sichtbar: `failure { stage: "candles", reason: "DATA_UNAVAILABLE" }` — Log `failures nach Ursache: candles/DATA_UNAVAILABLE: 249`, `DEGRADED`, Manifest `data/market-data-errors.json`; Status/Manifest/Registry/History einheitlich via `resolveRuntimePath()`, Registry-Refresh via mtime je `getRegistry()`-Aufruf, Scanner invalidiert bei geänderter `instruments.ndjson`/`candles.ndjson`-mtime sofort. **Behebung:** auf die aktuelle Version aktualisieren und erneut `BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX` ausführen — bei persistierendem `DATA_UNAVAILABLE` hat die Venue für diese Symbole/Zeitraum keine Bars (illiquides/neues Perpetual, `BEFORE_START`/`INVALID`-Zeitraum) — kein Bug, aber bewusst sichtbar. |
+| Immer noch „< 61 Kerzen“ nach dem Lauf | `--candle-limit` weglassen (Default 201 ≥ Scanner-Warmup 61) bzw. auf ≥ 61 stellen; Status mit `npm run market:sync:status` prüfen. |
 | Warnung im Control Panel bleibt nach Sync | Seite hart neu laden (Cache). Die Anzeige liest die Daten zur Anfragezeit — ein App-Neustart ist nicht nötig. |
 | Web-App reagiert nicht auf `.env`-Änderung | Next.js liest `.env` nur beim Start → `npm run dev`/`npm run start` neu starten. |
 
@@ -257,6 +277,8 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 - `src/marketdata/registerAdapters.ts` — die vier Gates: Kill-Switch → Allowlist → Capability → Venue-Flag
 - `scripts/market-sync.ts`, `scripts/run-market-sync.ts`, `scripts/lib/market-sync.ts` — CLI (ohne dotenv-Bezug)
 - `src/scanner/warmup.ts` — `requiredWarmupCandles` = 61 (EMA50 + Momentum 60)
-- `src/marketdata/types.ts` — `SYNC_CANDLE_LIMIT = 150`
+- `src/marketdata/types.ts` — `SYNC_CANDLE_LIMIT = 201`; Scanner-Warmup bleibt separat 61
+- `src/lib/marketdata/limits.ts` — 100.000 Bars je Reihe, 1.000.000 je Sync-Lauf
+- `src/marketdata/adapters/candlePagination.ts` — gemeinsame venue-bounded Paging-Logik
 - `.env.example` (§ „Bitunix Futures“ / „Market-Data-Sync“), `README.md`, `INSTALL.md`
 - `docs/MARKET_DATA_PIPELINE.md`, `docs/BITUNIX.md`, `docs/LIVE_TRADING.md`

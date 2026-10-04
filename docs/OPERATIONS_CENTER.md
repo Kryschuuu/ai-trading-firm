@@ -105,12 +105,12 @@ plus den **vollständigen Datenzustand** zum Ablehnungszeitpunkt:
     "status": "rejected",
     "rule": "max-spread",
     "dataQuality": true,
-    "data": { "candles": 150, "volume24h": 2840000000, "spread": null }
+    "data": { "candles": 201, "volume24h": 2840000000, "spread": null }
   }
 }
 ```
 
-Lesart: 150 Kerzen (≥ 61 nötig), 2,84 Mrd. Volumen — aber `spread: null`.
+Lesart: 201 Kerzen (CTI-EMA-200-Warmup; Scanner-Warmup ≥ 61), 2,84 Mrd. Volumen — aber `spread: null`.
 Das ist **kein** „BTC ist ungeeignet“, sondern „Spread wurde nicht geladen“
 → depth-Enrichment nachfahren (`npm run market-sync`). Umgekehrt wäre
 `dataQuality: false` mit z. B. `rule: "min-volume"` die fachliche Aussage

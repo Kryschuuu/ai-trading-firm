@@ -69,7 +69,7 @@ Rückwärts-Abhängigkeit `src/brokers` → `src/marketdata`):
 registerAdapters()/registerMarketDataAdapters(env)   (src/marketdata/registerAdapters.ts)
    Gate: capabilities.BITUNIX.marketData === true  ∧  BITUNIX_ENABLED === "true"
    (∧ MARKET_SYNC_ENABLED ≠ "false" ∧ MARKET_SYNC_VENUES erlaubt BITUNIX)
-        │  instanziiert NUR BitunixPublicClient (+ je Lauf EINEN Token-Bucket, 8 req/s)
+        │  instanziiert NUR BitunixPublicClient (+ je Lauf EINEN Token-Bucket, 4 req/s)
         ▼
 createBitunixMarketDataAdapter({ publicClient, symbolNormalizer })   (Wrapper)
    DTO→Domain-Mapping · Instrument-ID über normalizeVenueSymbol (venue-native Form)
@@ -103,7 +103,7 @@ ausschließlich den credential-freien PublicClient.
 
 | Ebene | Pfade | Auth-Anforderung | Rate-Limit | Aktivierungs-Flag |
 | --- | --- | --- | --- | --- |
-| **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** — credential-freier PublicClient, keine Signatur, kein Nonce | Token-Bucket **8 req/s/IP** (Doku: 10); ein **geteilter** Bucket je Sync-Lauf, Parallelität ≤ 8 | `BITUNIX_ENABLED=true` + `capabilities.BITUNIX.marketData` + `MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES` (Sync) |
+| **Public market data** | `trading_pairs`, `tickers`, `depth`, `kline` (+ Public-WS) | **keine** — credential-freier PublicClient, keine Signatur, kein Nonce | Market-Sync-Token-Bucket **4 req/s/IP** (Doku: 10); 429/`Retry-After` kühlt den geteilten Bucket ab; Parallelität ≤ 8 ist davon unabhängig | `BITUNIX_ENABLED=true` + `capabilities.BITUNIX.marketData` + `MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES` (Sync) |
 | **Private trading API** | `account`, `position/get_pending_positions`, `trade/place_order`, `trade/get_order_detail`, `trade/get_history_trades` (H3-Reconciliation) | `BITUNIX_API_KEY` + `BITUNIX_API_SECRET`, signiert (SHA-256-Doppelhash, `nonce`/`timestamp`) | 8 req/s/uid (Doku: 10) | nie im Sync-Pfad; nur Ausführung nach Gate |
 | **Paper execution** | `PaperExecutionEngine` (lokales Ledger gegen echte Public-Kurse) | keine signierten Requests (liest nur Public-Ticker) | über Public-Bucket | `getBroker("BITUNIX", "paper")`, `BITUNIX_ENABLED=true` |
 | **Live execution** | `BrokerExecutionEngine` → `BitunixPrivateClient.placeSerializedOrder` | signiert (Private API) + komplette Live-Gate-State-Machine | Private-Bucket | `BITUNIX_LIVE_ENABLED` + `LIVE_TRADING_ENABLED` + `REQUIRE_HUMAN_APPROVAL=false` + Live-Gate `LIVE_ENABLED` (Default: `LiveTradingGateError`) |
@@ -163,7 +163,7 @@ export async function enrichWithOrderBooks(
 - `enrichWithOrderBooks()`: `depthLimit=5`, pro Symbol Timeout 5 s, max. 1 Retry,
   Fehler → `null` + `failures`, Sync läuft weiter. Plausibilität: `spread > 0.5` → `null` + Warnung.
 - Unbekannte Werte bleiben `null` (Data-Quality), nicht fachliche Ablehnung.
-- Rate-Limit-schonend: 1× Bulk-Tickers, N× Depth mit `limit=5`, Concurrency ≤8,
+- Rate-Limit-schonend: 1× Bulk-Tickers, N× Depth mit `limit=5`, geteilter Public-Bucket 4 req/s und Concurrency ≤8,
   `maxInstruments` ≤1000 (Schutz gegen self-DoS/IP-Ban).
 
 **Registry-Upsert (P1):**
@@ -180,7 +180,7 @@ registry.upsert({
 Folgen für den Sync- und Scanner-Pfad:
 
 * Kosten: N Instrumente ⇒ N zusätzliche `/depth`-Requests (z. B. 180
-  Instrumente ⇒ 180 Calls). Sie laufen durch den Token-Bucket (8 req/s, §2)
+  Instrumente ⇒ 180 Calls). Sie laufen durch den Market-Sync-Token-Bucket (4 req/s, §2)
   mit Concurrency-Begrenzung — kein Sekunden-Burst, kein unbegrenztes Fan-out.
 * Der `spread`-Faktor des Scanners hat (anders als `liquidity`, das auf
   `Kerze.volume × close` zurückfällt) **keinen** Fallback. Ohne
@@ -333,8 +333,10 @@ kaputte Zeilen übersprungen.
 **nicht verfügbar** und in der Map explizit `null` eingetragen; der Wrapper wirft
 dafür (wie für Werte außerhalb der Allowlist) `UnsupportedTimeframeError`, statt
 still einen Nachbar-Timeframe zu liefern (Reihen verschiedener Periodizität
-dürfen nie gemischt werden). `kline` liefert max. **200 Bars je Call**; ein
-höheres `candleLimit` erforderte Paging (out of scope, Sync-Default 150/100 ≤ 200).
+dürfen nie gemischt werden). `kline` liefert max. **200 Bars je HTTP-Call**;
+der Market-Data-Adapter paginiert rückwärts über `endTime` und sammelt mehrere
+Seiten bis zum aggregierten `candleLimit` (maximal 100.000 Bars je Reihe). Ein
+synchronisierter Datumsbereich wird lokal zusätzlich inklusiv gefiltert.
 
 ---
 
@@ -635,7 +637,7 @@ Produktion darf `getRegistry()` nutzen; Tests injizieren immer ein Temp-Verzeich
 | Secrets | Default: Control-Plane-Store (`createVenueBackedNamedStore`, AES-256-GCM, AAD=`BITUNIX`) — in Produktion **kein** Env-Fallback (SEC-07 v1.36.32). Env `BITUNIX_API_KEY` / `BITUNIX_API_SECRET` nur wenn `BROKER_ALLOW_ENV_FALLBACK=true` und `NODE_ENV!=production`. Ohne `SECRET_STORE_KEY` und ohne Flag → kein Credential (fail-closed). Fehlender Datensatz → null; Store-Fehler (AUTH_FAILED, STORAGE_UNAVAILABLE) → HARD FAIL (throw, im Control-Plane als 503). Nie Disk-Klartext, nie Frontend. `credentialStatus()` liefert `configured`/`connected`/`permissions`/`permissionsVerified`/`liveEnabled:false` — Rechte werden **nie angenommen**: ohne `verify` bleibt `permissions` leer; mit `verify` belegt ein read-only Konto-Abruf maximal `READ`. |
 | SSRF | Host-Allowlist (`fapi.bitunix.com` + optionale `BITUNIX_ALLOWED_HOSTS`). Kein Userinfo. `https` Pflicht; `http`/`ws` nur Loopback + Insecure-Flag. `redirect: "error"`. |
 | TLS | Node-Default-Zertifikatsprüfung (an). |
-| Rate-Limit | Token-Bucket, konservativ 8 req/s (Doku: 10/s). |
+| Rate-Limit | Public Market-Sync: geteilter Token-Bucket 4 req/s (Doku: 10/s); HTTP 429 respektiert `Retry-After` (max. 60 s Bucket-Cooldown). Private UID-Rate bleibt bei 8 req/s. |
 | Timeout / Retry | Default 8 s, max. 3 Versuche, nur 5xx/Netz — **nie** auth. **H4-Idempotenz:** Nicht-idempotente Requests (POST, insbesondere `place_order`) werden bei Timeout/Netzwerkfehler/5xx/**429** **nie automatisch** wiederholt — Doppel-Order-Gefahr. Der Transport reicht stattdessen einen `BitunixAmbiguousError` (kind `ambiguous`) nach oben; der Aufrufer (`placeSerializedOrder`) fragt VOR jedem erneuten Senden per `clientOrderId` den echten Status ab (`getOrderByClientId`) und wiederholt nur dann genau **einmal** mit demselben `clientOrderId`. Idempotente GETs bleiben weiterhin Retry-fähig. |
 | Redactor | Maskiert Header-Muster, Hex-Tokens ≥ 32, injizierte Klartext-Secrets. Logger-Prefix `[bitunix]`. |
 
@@ -700,7 +702,7 @@ der Live-Gate-Enforcer — siehe `docs/BROKER_ARCHITECTURE.md` und
 - `tests/sec04.wsDependency.test.ts` — SEC-04: exakter `ws`-Pin, Override, Lockfile-/Installations-Konsistenz, CI-Verdrahtung
 - `tests/bitunix.adapter.test.ts` — Paper-E2E (0 Private-Calls), Live-Gate, Disabled, Secret-Scan
 - `tests/bitunix.marketdata.test.ts` — strukturelle `MarketDataAdapter`-Kompatibilität des Broker-Adapters, AdapterRegistry (registriert den Public-only-Wrapper), `/depth`-Orderbook-Schema, leerer-Discovery-Edge-Case, Sync-Kontext-Sicherheit (0 Credentials **und 0 Credential-Header** auf Public-Calls), 429-Retry/Backoff-Regression, Rate-Limit-Eskalation bei N Depth-Calls (Token-Bucket, kein Burst)
-- `tests/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (8 req/s authoritativ), Voll-Sync gegen echte Fixture-Responses (`tests/fixtures/bitunix/`), **v1.40.0 Chunking-Regression**: Gateway-Simulation lehnt >6 KB URLs ab – Chunking (50, ~1 KB) liefert trotzdem alle Symbole, Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler (3 neue Tests)
+- `tests/marketdata/adapters/bitunix.test.ts` — P0-Verdrahtung: Discovery-Upsert, „never instantiates private client“ (statisch + Laufzeit gegen Endpoint-Allowlist), Env-/Capability-Gates der Registrierung (inkl. `UnsupportedVenueError`-Hilfetext), exhaustives Timeframe-Mapping + `UnsupportedTimeframeError` (3m/5d-Lücke), Symbol-Normalisierung je Instrument-ID, HALTED/DELISTED-Übernahme, `run-scan` ohne `--sync` = null Netzwerk (Guard-Server-Subprozess), 401/403/429/5xx-Regression mit endlichem Retry-Budget, Env-Proxy (kein Lesen von `BITUNIX_API_KEY`/`_SECRET`), Redaction, geteilter Token-Bucket (4 req/s authoritativ, `Retry-After`-Cooldown), Voll-Sync gegen echte Fixture-Responses (`tests/fixtures/bitunix/`), **v1.40.0 Chunking-Regression**: Gateway-Simulation lehnt >6 KB URLs ab – Chunking (50, ~1 KB) liefert trotzdem alle Symbole, Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler (3 neue Tests)
 - `src/marketdata/__tests__/spread.test.ts` — `calculateRelativeSpread` (Golden 100/100.02 ≈ 0.00019998, Edge Cases: fehlend/invertiert/`0`/`NaN`/`null` ⇒ `null`)
 - `src/marketdata/__tests__/sync.test.ts` — `volume24h`-Enrichment, Orderbook-Spread-Upsert, Batch-Tickers, `quoteVol`-Fehlend-Fallback, Rate-Limiter-Zählung bei 180 Instrumenten
 - Factory 28er-Matrix, Contract-Suite, `GET /api/brokers` count=7

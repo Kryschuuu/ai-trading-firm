@@ -1,7 +1,7 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
-> Code-Version **v0.1.0 (Beta)** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-10-04** ·
+> Code-Version **v0.16.0 (Beta)** · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize` ·
 > Qualitäts-Layer & Aggregation: §14)
@@ -14,10 +14,12 @@ Venue-Marktdaten, **bevor** der deterministische Scanner läuft. Der Scanner
 registerAdapters() (src/marketdata/registerAdapters.ts)  ← Feature-Gates
   │   MARKET_SYNC_ENABLED · MARKET_SYNC_VENUES · <VENUE>_ENABLED
   │   + Capability-Gate: capabilities.<VENUE>.marketData === true
-  └─ Venue→Adapter-Map (einzige Instanzierungsstelle, NUR PublicClient,
-     je Lauf EIN geteilter Token-Bucket 8 req/s)
-         │  BITUNIX → Wrapper createBitunixMarketDataAdapter()
-         │           (src/marketdata/adapters/bitunix.ts) um BitunixPublicClient
+  └─ Venue→Adapter-Map (einzige Instanzierungsstelle, nur Public-Clients,
+     ein geteilter Rate-Bucket je Zielhost; Bitunix-Market-Sync: 4 req/s)
+         │  BITUNIX → createBitunixMarketDataAdapter() / BitunixPublicClient
+         │  BINANCE → createBinanceMarketDataAdapter() / Binance REST
+         │  KRAKEN → createKrakenMarketDataAdapter() / Kraken OHLC
+         └─ ALPACA, IBKR, PAPER → Yahoo-/Seed-Adapter
 Discovery / Enrichment / Backfill
          ▼
 MarketDataSyncService (instruments, ticker, orderbook, candles)
@@ -37,7 +39,7 @@ Funnel
 ## 0. Code-Map (Anforderungsname → realer Pfad)
 
 Die Anforderung MDSYNC-001 nennt Module, die im Repository anders liegen bzw.
-heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.32.0):
+heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v0.16.0):
 
 | Anforderung nennt | Realer Pfad | Anmerkung |
 | --- | --- | --- |
@@ -48,7 +50,7 @@ heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v1.32.0):
 | Market-Data-Adapter des Syncs | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | dünner Wrapper Broker-PublicClient → `MarketDataAdapter` (P0-Verdrahtung, Domänentrennung) |
 | `BitunixPublicClient` (`fetchTradingPairs`, `fetchTickers`, `fetchKlines`, `fetchOrderBook`) | `src/brokers/bitunix/publicClient.ts` | RAW-Varianten `fetchTradingPairsRaw()` und `fetchDepth(symbol, limit=5)` ergänzt; `fetchTickers` nimmt Bulk-Arrays **chunked** (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0) |
 | Sync-CLI (`scripts/run-scan.ts`) | `scripts/market-sync.ts` (+ `scripts/lib/market-sync.ts`), `scripts/run-scan.ts --sync` | `run-market-sync.ts` ist ein Delegate auf ersteres |
-| Rate-Limit „8 req/s dokumentiert“ | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Bitunix-Doku nennt 10 req/s/IP, Code bleibt konservativ bei 8; **ein geteilter Bucket je Registrierungs-Lauf** |
+| Bitunix-Public-Rate (offizielle Grenze 10 req/s/IP) | `src/brokers/bitunix/http.ts` (`TokenBucket`), `BITUNIX_PUBLIC_RATE_PER_SEC` in `config.ts` | Market-Sync 4 req/s; Perp-Sync 3 req/s in getrennten Prozessen, zusammen 7 plus Reserve; **ein geteilter Bucket je Market-Sync-Lauf**, 429/`Retry-After` kühlt ihn ab |
 | Adapter-Registry | `src/marketdata/registerAdapters.ts` (Kern, inkl. `registerMarketDataAdapters(env)`) + `src/marketdata/adapterRegistry.ts` (Wrapper) | zwei Dateien statt einer — Begründung §13 |
 
 ---
@@ -267,14 +269,38 @@ Pro Instrument × Timeframe **N × M** Requests (`M` = Anzahl Timeframes). Das
 Limit je Timeframe ist nicht hartcodiert, sondern abgeleitet:
 
 ```
-candleLimit = max(SYNC_CANDLE_LIMIT /* 150 */, requiredWarmupCandles(config) /* 61 */)
+candleLimit = max(201 /* CTI EMA-200 warmup */, requiredWarmupCandles(config) /* Scanner, derzeit 61 */,
+                   Bars, die der explizite --from/--to-Bereich verlangt)
 ```
 
-`requiredWarmupCandles` ist die höchste Kerzenzahl, die ein Faktor braucht
-(EMA50 → 50, Momentum-Lookback 60 → 61, …). Ein `--candle-limit` darunter ist
-ein Bedienfehler (Exit 2) und geht vor dem ersten Request weg — sonst
-entsteht ein Store, der für immer `WARMING` meldet (§6). Hartes Maximum:
-`MAX_CANDLE_LIMIT = 2000` (Payload-Schutz), Parallelität `≤ 8`.
+Der unabhängige Scanner-Warmup (`requiredWarmupCandles`, derzeit 61) deckt
+EMA50 und Momentum-Lookback 60 ab; der 201-Bar-Default deckt zusätzlich den
+CTI-EMA-200-Warmup. Ein explizites `--candle-limit` unter Scanner-Warmup oder
+unter der angeforderten Datumsspanne wird vor dem ersten Request abgelehnt.
+Harte Grenzen: **100.000 Bars je Instrument × Timeframe**, **1.000.000
+angeforderte Bars je Lauf**, maximal 1.000 paginierte HTTP-Seiten je Reihe und
+Parallelität `≤ 8`. Die Seitengröße bleibt venue-spezifisch und ist NICHT das
+Gesamthistorien-Limit.
+
+`--from=YYYY-MM-DD` und `--to=YYYY-MM-DD` verwenden inklusive UTC-Tage; statt
+eines Datums ist auch ein ISO-8601-Zeitstempel mit Zeitzone zulässig. Nur
+`--from` reicht bis jetzt; ein Bereich erzwingt Backfill, selbst wenn neuere
+Bars bereits im Store liegen. Das Default-Limit wird aus dem feinsten gewählten
+Timeframe abgeleitet. Für einen Lauf, der das Gesamtbudget überschreitet,
+Symbole, Timeframes oder `--max-instruments` eingrenzen und in mehreren Läufen
+arbeiten (bei vielen Timeframes mit sehr unterschiedlichem Kerzenbedarf je
+Timeframe separat aufrufen, da das CLI ein gemeinsames `candleLimit` verwendet).
+
+**Venue-Abfrage / tatsächliche Historiengrenze:** Binance paginiert rückwärts
+(max. 1.000 Klines je HTTP-Response), Bitunix rückwärts (max. 200) und Kraken
+vorwärts über `since` (max. 720 je Response; die Kraken-OHLC-API stellt nur ihre
+jüngsten 720 Einträge bereit, unabhängig von älteren `since`-Werten). Yahoo
+verwendet `period1`/`period2` für einen Datumsbereich statt mehrerer HTTP-Seiten;
+seine Chart-Historie ist zusätzlich an Intervall-/Zeitfenster gebunden. Ein erfolgreiches Paging kann daher weniger Bars liefern als der
+angeforderte Zeitraum; tatsächlich aufgerufene Kline-Reihen sowie
+`fetchedBars` und Zielbars im Log machen die Abweichung sichtbar. Für
+Kraken-Historien jenseits der letzten 720 Kerzen ist ein anderer
+Datenanbieter nötig.
 
 Die geprüften Bars eines Laufs werden **gepuffert** und am Stück geschrieben
 (`appendSeries`, §5) — ein Append je Instrument × Timeframe würde die
@@ -331,11 +357,18 @@ Jede Zeile ist ein NDJSON-Datensatz mit Schema-Version `"v": 2`:
   unbemerkt verfälschen würde.
 * **Deduplizierung:** Bei Schlüsselkollision gewinnt der Eintrag mit dem
   **jüngsten `fetchedAt`**; bei Gleichstand der zuletzt gelesene.
-  `append()` liefert `{ written, deduplicated }`.
+  `append()` liefert `{ written, deduplicated }`. Der Sync-Report unterscheidet
+  `attemptedInstruments` (tatsächlich aufgerufene `getCandles`-Adapter je Reihe),
+  `fetchedBars` (valide, inklusive im Range liegende Adapter-Bars), `bars`
+  (neue eindeutige Store-Zeilen) und `deduplicatedBars` (bereits vorhandene
+  Schlüssel). Der Ziel-Bars-Nenner basiert auf tatsächlichen Adapter-Aufrufen,
+  nicht auf der gesamten Instrument-Auswahl; „abgerufen“ ist also nicht gleich
+  „neu gespeichert“.
 * **Ergebnisreihenfolge:** `ts` aufsteigend; `limit` liefert die letzten N
   Bars (jüngste), wieder aufsteigend sortiert. `from`/`to` sind inklusiv.
-* **Größenkontrolle:** optionales `maxBarsPerSeries` (Default **5000**),
-  Kompaktierung behält je Reihe die jüngsten Bars.
+* **Größenkontrolle:** optionales `maxBarsPerSeries` (Default **100.000**,
+  geteilt mit `MAX_CANDLES_PER_SERIES`); Kompaktierung behält je Reihe die
+  jüngsten Bars. Der Market-Sync nimmt höchstens 100.000 Bars je Reihe an.
 * **Robustheit:** Der Loader arbeitet puffer-/streambasiert (kein OOM bei
   großen Historien); kaputte Teilzeilen werden geloggt und übersprungen
   (kein Prozessabbruch). Schreibvorgänge laufen atomar über
@@ -384,10 +417,10 @@ npm run market-sync -- --venue=BITUNIX
 
 | Grund | Erläuterung |
 | --- | --- |
-| Datenvolumen gering | 150 Bars je Instrument und Timeframe; der **Standardlauf lädt seit v1.37.0 nur noch `1h`** (der einzige von Scanner/Analytics ausgewertete Zeitrahmen, Präferenz `1h → 4h → 30m → 15m → 5m`). Wer Replays auf kürzeren Zeitrahmen braucht, holt sie explizit: `--timeframes=5m,15m,30m,1h` — dann ein Lauf mit vier Timeframes |
-| Kein Rate-Limit-Problem | öffentliche REST-Schnittstelle, 1 Request je Instrument und Timeframe im Standardlauf |
-| Keine Rate-Fehler möglich | der Timeframe stammt aus dem Backfill-Kontext statt aus einer Annahme |
-| Prüfbar | Sync-Report nennt `written` je Instrument und Timeframe |
+| Datenvolumen gering | Sync-Default 201 Bars je Reihe (CTI-EMA-200); Scanner-Warmup separat 61. Der **Standardlauf lädt seit v1.37.0 nur noch `1h`** (einziger Zeitrahmen des Scanner-Defaults). Längere Replays/Backtests per `--from`/`--to` anfordern; kürzere Zeitrahmen explizit mit `--timeframes=5m,15m,30m,1h`. |
+| Rate-Limit-sicher | venue-geteilter Token-Bucket; Bitunix Market-Sync 4 req/s. Paging erzeugt mehrere HTTP-Requests, aber keine zusätzlichen Rate-Budget-Rechte |
+| Begrenzte API-Historie | jede Venue hält ihre eigenen Seiten-/Zeitfenstergrenzen ein; ein nicht erreichbarer Zeitraum wird über `fetchedBars`/Zielbars sichtbar |
+| Prüfbar | Sync-Report trennt `fetchedBars`, neu geschriebene `bars` und `deduplicatedBars` je Timeframe |
 
 Die Inline-Migration (`npm run history:migrate`) ist bewusst nur das
 **Sicherheitsnetz** für Umgebungen ohne Netz-/Rate-Limit-Spielraum. Sie
@@ -690,9 +723,13 @@ unabhängiger Limiter je Venue würde das IP-Budget mit jeder zusätzlichen Venu
 multiplizieren). Alle produktiven Bitunix-Calls laufen dadurch durch denselben
 Bucket:
 
-- Dokumentiertes Limit: **10 req/s/IP**
-- Code-Limit: **8 req/s** (`BITUNIX_PUBLIC_RATE_PER_SEC`) — konservativ, vor
-  jedem Rollout gegen die Live-API zu verifizieren
+- Dokumentiertes Public-Limit: **10 req/s/IP**
+- Market-Sync-Code-Limit: **4 req/s** (`BITUNIX_PUBLIC_RATE_PER_SEC`)
+- Perp-Daten-Sync: **3 req/s** (`BITUNIX_PERP_RATE_PER_SEC`); zusammen bleiben
+  beide öffentlichen Prozesse bei 7 req/s/IP und lassen Reserve für andere
+  Calls. Private UID-Raten bleiben separat.
+- Bei HTTP 429 wird `Retry-After` (Sekunden oder HTTP-Datum) gedeckelt
+  berücksichtigt und der geteilte Market-Sync-Bucket gekühlt.
 
 Bündelung pro Lauf und Venue (`N` = synchronisierte Instrumente, `M` = Timeframes):
 
@@ -718,10 +755,10 @@ Retry nur für 429/5xx (bestehender HTTP-Client). Eine Antwort über
 | Venue | Adapter | Discovery | Tickers (Batch) | Orderbuch | Kerzen 1h Default (5m/15m/30m per `--timeframes`) | Timeframe-Lücken | Private/Keys im Sync |
 | --- | :---: | :---: | :---: | :---: | :---: | :--- | :---: |
 | BITUNIX | `createBitunixMarketDataAdapter` um `BitunixPublicClient` (nur Public) | ja (public REST) | ja | ja | ja | **3m, 5d** (`UnsupportedTimeframeError`, kein Ersatztimeframe) | **nein** |
-| BINANCE | — (Feed in `src/lib/marketdata/feeds`, kein Sync-Adapter) | geplant | — | — | — | — | nein |
-| BITFINEX | — | geplant | — | — | — | — | nein |
-| KRAKEN | — | geplant | — | — | — | — | nein |
-| ALPACA / IBKR | — | geplant | — | — | — | — | nein |
+| BINANCE | `createBinanceMarketDataAdapter` (öffentliche Spot-REST-Klines) | ja | ja | ja | ja (venue interval map) | Binance-Symbol-/Intervallverfügbarkeit | **nein** |
+| KRAKEN | `createKrakenMarketDataAdapter` (öffentliche OHLC-API) | ja | ja | ja | ja (venue interval map) | höchstens die jüngsten 720 Bars; keine beliebig alte Paging-Historie | **nein** |
+| ALPACA | `createYahooMarketDataAdapter` (Yahoo Chart, Venue-Key ALPACA) | ja (Seed) | ja | ja (Yahoo-Quote) | ja | Yahoo-Intervall-/Historienfenster | **nein** |
+| IBKR | `createYahooMarketDataAdapter` (Yahoo Chart, Venue-Key IBKR) | ja (Seed) | ja | ja (Yahoo-Quote) | ja | Yahoo-Intervall-/Historienfenster | **nein** |
 | PAPER | Seed-Registry, kein REST | n/a | n/a | n/a | n/a | n/a | n/a |
 
 **Bitunix-Status (verdrahtet seit v1.25.1, seit v1.32.0 über den Wrapper):**
@@ -760,12 +797,11 @@ antwortet mit Behebungshinweis und Exit 2. Wird `syncVenue()` dennoch aufgerufen
 beide Ursachen (Capability / Env-Flag) und die Behebung (`BITUNIX_ENABLED=true`,
 Public Data braucht KEINE Credentials, Live-Gate unberührt) nennt.
 
-**Rate-Limit bei mehreren Venues:** `registerAdapters()` erstellt **einen**
-geteilter `TokenBucket(8, 8)` pro Lauf und reicht ihn an jeden erzeugten
-PublicClient durch — das dokumentierte IP-Budget (10 req/s/IP, Code 8) bleibt
-damit autoritativ, auch wenn später mehrere Venues derselben API-Infrastruktur
-in einem Lauf registriert sind (Verhaltens-Test in
-`tests/marketdata/adapters/bitunix.test.ts`).
+**Rate-Limit bei mehreren Venues:** `registerAdapters()` erstellt pro Zielhost
+einen geteilten Bucket; Bitunix-Market-Sync nutzt `TokenBucket(4, 4)` pro Lauf
+(Doku-Grenze 10 req/s/IP, Market-Sync-Code 4). Andere öffentliche Hosts haben
+eigene Buckets. HTTP 429/`Retry-After` kühlt den jeweiligen Bucket ab; der
+Verhaltens-Test für Bitunix liegt in `tests/marketdata/adapters/bitunix.test.ts`.
 
 ## 11. Symbol-Normalisierung und Instrument-IDs (SYM-007, v1.28.0)
 
@@ -851,12 +887,13 @@ npm run scan -- --sync-first                                             # Sync 
 | --- | --- | --- |
 | `--venue=NAME` | Venue-Key `[A-Z0-9][A-Z0-9_-]{0,31}`, Default `BITUNIX` | Format/unkannte Venue ⇒ Exit 2 |
 | `--timeframes=A,B` | nur `SUPPORTED_TIMEFRAMES`; keine Duplikate | ungültig/Duplikat ⇒ Exit 2 |
-| `--candle-limit=N` | `requiredWarmupCandles ≤ N ≤ 2000`, Default `max(150, Bedarf)` | zu klein ⇒ Exit 2, vor dem ersten Request |
+| `--from=DATUM` / `--to=DATUM` | Inklusive UTC-Grenzen (`YYYY-MM-DD` = ganzer UTC-Tag; alternativ ISO-8601 mit Zeitzone); Range erzwingt Backfill | ungültig, Zukunfts-Start oder `from > to` ⇒ Exit 2 |
+| `--candle-limit=N` | `requiredWarmupCandles ≤ N ≤ 100000`; Default `max(201, Scanner-Warmup, Range-Bedarf)` | zu klein ⇒ Exit 2, vor dem ersten Request; gesamter Lauf zusätzlich auf 1.000.000 Bars begrenzt |
 | `--max-instruments=N` | Cap je Venue, Default 250, hartes Maximum 1000 | > Maximum ⇒ Exit 2 |
 | `--symbols=A,B` | Allowlist venue-nativer Symbole (normalisiert) | Allowlist-Verstoß ⇒ Exit 2 |
 | `--concurrency=N` | Parallelität, Default 4, hart ≤ 8 | > 8 ⇒ Exit 2 |
 | `--strict` | Abbruch beim ersten Fehler statt degradiertem Lauf | — |
-| `--full` (v1.38.0) | vollen Kerzen-Abruf erzwingen; Default ist **inkrementell**: Reihen, deren Kerze des laufenden Zeitraums bereits im Store liegt, werden ohne Kline-Request übersprungen (Zähler `freshCandlesByTimeframe`, Logzeile „aktuell, keine Anfrage“) | — |
+| `--full` (v1.38.0) | vollen Kerzen-Abruf erzwingen; Default ist **inkrementell**: Reihen, deren Kerze des laufenden Zeitraums bereits im Store liegt, werden ohne Kline-Request übersprungen (Zähler `freshCandlesByTimeframe`, Logzeile „aktuell, keine Anfrage“). `--from`/`--to` erzwingen unabhängig davon einen Range-Backfill. | — |
 | `--dry-run` | echte Requests, Registry/Store in temporärem Verzeichnis | — |
 | `--json` | `SyncResult` auf stdout, Zählerzeilen entfallen | — |
 | `--no-manifest` | `data/market-data-errors.json` nicht schreiben | — |
@@ -901,7 +938,7 @@ Dedup idempotent sind.
 [market-sync] BITUNIX discovery: 4 instruments
 [market-sync] tickers enriched: 4
 [market-sync] orderbooks enriched: 4
-[market-sync] 1h candles: 4/4 (600/600 bars)
+[market-sync] 1h candles: 4/4 (600/804 fetched bars; 599 new, 1 deduplicated)
 [market-sync] duration: 107 ms
 ```
 
@@ -1046,9 +1083,10 @@ das leere Ergebnis 5 Minuten, selbst nach frischem Sync eines anderen Prozesses.
   `instruments.ndjson`- oder `candles.ndjson`-mtime sofort (vor TTL-Ablauf).
 
 **Nach dem Fix:** `npm test` 2115/2115 grün (7 skipped, vorher 3 Fehler);
-Mock-Repro (5 Symbole, 1 mit 150 Bars, 4 leer) → `1/5 (150/750)`,
-`failures: 4 × candles/DATA_UNAVAILABLE`, `degraded true`; 150 Bars/Symbol
-→ `10/10 (1500/1500)`, `warming 0`, `scannerReady true`.
+Historische Mock-Repro des Empty-Candles-Bugs (vor v0.16.0; 5 Symbole, 1 mit
+150 Bars, 4 leer) ergab `1/5 (150/750)` und vier
+`candles/DATA_UNAVAILABLE`-Fehler. Im aktuellen Log sind außerdem API-abgerufene,
+neue und deduplizierte Bars getrennte Zähler; der Default ist 201 Bars/Symbol.
 
 **Bedienhinweis:** `GET /api/ops` und `npm run market:sync:status` lesen
 jetzt konsistent über `resolveRuntimePath`; der Scanner-Cache zieht bei
