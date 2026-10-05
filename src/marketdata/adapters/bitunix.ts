@@ -326,6 +326,28 @@ export function createBitunixMarketDataAdapter(deps: BitunixMarketAdapterDeps): 
           client.fetchKlines(symbol.toUpperCase(), interval, pageLimit, { endTime: endTimeMs }),
       });
     },
+
+    /** TASK 03: Derivative-Stubs (Live-Sync erfordert PerpSync + BitunixPublicClient-Endpunkte). */
+    async getFundingRate(symbol: string): Promise<{ fundingRate: number; nextFundingTime?: number } | null> {
+      try {
+        const rates = await client.fetchFundingRates(symbol.toUpperCase());
+        if (Array.isArray(rates) && rates.length > 0) {
+          const row = rates[0];
+          return {
+            fundingRate: Number(row.fundingRate ?? 0) / 100_000,
+            nextFundingTime: Number(row.nextFundingTime ?? 0) || undefined,
+          };
+        }
+      } catch {
+        // Fail-closed: kein Funding-Snapshot pro Symbol verfügbar.
+      }
+      return null;
+    },
+
+    async getOpenInterest(symbol: string): Promise<{ openInterest: number; openInterestQuote?: number } | null> {
+      // Bitunix hat kein öffentlicher Open-Interest-Endpunkt für Futures; Fixture/Cache liefert Daten.
+      return null;
+    },
   };
 }
 

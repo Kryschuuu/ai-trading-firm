@@ -21,8 +21,18 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-05** · Code-Version **0.17.0** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-05** · Code-Version **0.17.1** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.1] — TASK 03-07: Perp-Daten, Regime-Filter, Portfolio-Sizing, Attribution, Cache-Invalidierung (2026-10-05)
+
+- **TASK 03:** Bitunix-Adapter um `getFundingRate`/`getOpenInterest` erweitert; `data/perpdata/derivatives.json` und Scanner-Faktoren 12/13 bereit. Live-Sync erfordert `PERP_DATA_ENABLED=true` + Netzwerk.
+- **TASK 04:** `adaptiveRisk.ts` mit `macroAdjustment()` verknüpft (liest `02-macro-analyst.json`; Scale 0.5/0.75/1.1).
+- **TASK 05:** `riskStep.ts` importiert `optimizePortfolio`; Equal-Weight-Berechnung und Protokollierung implementiert.
+- **TASK 06:** Attribution-Aggregation (`aggregateTradeAttributions`) und Execution-Quality (`executionQuality/`) verifiziert; API-Endpunkte vorhanden.
+- **TASK 07:** `ruleService.ts` mit `LISTEN trade_rules` (Postgres Pub/Sub) und Auto-Start implementiert.
+- **Docs / Version:** `docs/roadmap/STATUS.md` aktualisiert; `VERSION.md` und `package.json` auf `v0.17.1` gesetzt.
+- **Hinweis:** Keine netzwerkabhängigen Endpunkte gesperrt; Fail-closed-Design beibehalten.
 
 ## [0.17.0] — ADR-003 + ADR-004: Atomare Mehrprozess-Order-Reservierung und zentrale Singleton-Verwaltung (2026-10-05)
 

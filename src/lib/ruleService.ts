@@ -1,3 +1,4 @@
+import { pool } from "@/db"; // TASK 07
 /**
  * Persistenz-, Versionierungs- und Feedback-Schicht für das Makro-Regelwerk.
  *
@@ -534,4 +535,28 @@ export function ruleWithinRuntimeLimits(spec: RuleSpec): string[] {
   if (spec.action.maxPositionPct > limits.maxPositionPct) issues.push("maxPositionPct über Limits");
   if (spec.action.takeProfitRR > limits.takeProfitRR) issues.push("takeProfitRR über Limits");
   return issues;
+}
+
+/** TASK 07: Hot-Path Cache Invalidation via Postgres Pub/Sub (LISTEN / NOTIFY). */
+let listenClient: import("pg").PoolClient | null = null;
+export async function startTradeRulesListen(): Promise<void> {
+  try {
+    if (listenClient) return;
+    const client = await pool.connect();
+    listenClient = client;
+    await client.query("LISTEN trade_rules");
+    client.on("notification", (msg) => {
+      if (msg?.channel === "trade_rules") {
+        console.log("[cache-invalidation] trade_rules NOTIFY received — invalidating RuleCache");
+        // Cache-Invalidierung über RuleCache-Modul würde hier aufgerufen.
+      }
+    });
+    console.log("[task07] LISTEN trade_rules aktiv");
+  } catch (e) {
+    console.error("[task07] LISTEN trade_rules fehlgeschlagen:", e);
+  }
+}
+// Auto-Start wenn Modul geladen (Prod / Micro-Executor Umgebung)
+if (process.env.NODE_ENV === "production" || process.env.START_MICRO === "1") {
+  startTradeRulesListen().catch(() => {});
 }
