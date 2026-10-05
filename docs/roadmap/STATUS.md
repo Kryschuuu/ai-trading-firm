@@ -1,11 +1,15 @@
 # Roadmap & Entwicklungs-Status
 
-> **Stand:** 2026-09-18 · **Code-Version:** 1.41.0 (historischer TASK-01/02-Tracker)  
+> **Stand:** 2026-10-05 · **Code-Version:** v0.17.0 (öffentliches SemVer)  
 > **Verantwortlich:** `docs/roadmap/STATUS.md`  
-> **Aktueller Produktstand:** `v1.73.0`. Die 25 Roadmap-Komponenten (inkl. Perp-Daten,
+> **Aktueller Produktstand:** `v0.17.0`. Die 25 Roadmap-Komponenten (inkl. Perp-Daten,
 > Attribution, Execution-Quality) sind im [Roadmap-Audit 2026-09-20](../audits/2026-09-20-roadmap-audit/remediation/TRACKING.md)
-> als **4 VERIFIED + 21 FIXED** abgeschlossen. Die offenen TASK-03…07 unten sind
-> der damalige 1.41.0-Schnitt und nicht die aktuelle SSoT.
+> als **4 VERIFIED + 21 FIXED** abgeschlossen.
+> **ADR-003 + ADR-004** sind mit `v0.17.0` umgesetzt (atomare Mehrprozess-Order-
+> Reservierung via `submitAtomic`, zentrale Singleton-Verwaltung via
+> `stateRegistry.ts`) und werden durch `tests/adr003_adr004.test.ts` überwacht.
+> Die offenen TASK-03…07 unten sind der damalige 1.41.0-Schnitt und nicht die
+> aktuelle SSoT.
 
 ---
 

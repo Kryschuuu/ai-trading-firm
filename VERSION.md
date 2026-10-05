@@ -5,11 +5,11 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.16.1` |
+| **Version** | `v0.17.0` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-04 |
+| **Release-Datum** | 2026-10-05 |
 | **Quellbasiert** | `package.json` (`version: "0.16.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
@@ -409,6 +409,37 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.17.0` (2026-10-05) setzt **ADR-003** (Atomare Mehrprozess-Order-
+Reservierung via `PaperBroker.submitAtomic()` / `withAccountLock`) und
+**ADR-004** (Zentrale Singleton-Verwaltung via `src/lib/stateRegistry.ts`)
+verbindlich um (Befunde H2 Race Conditions und S2 Zustandsdrift):
+
+- **KRITISCH (H2):** Der PAPER-Broker-Adapter (`src/brokers/paper.ts`)
+  rief bisher den synchronen `submit()` auf und umging damit
+  Kontosperre, DB-Wahrheits-Check (`positions OPEN`) und
+  `order_intents`-Reservierung (partieller UNIQUE) — Race zwischen
+  Next.js-Workern und Mikro-Executor war wieder möglich. Aufruf läuft
+  jetzt durch `submitAtomic`, Positionen werden in derselben
+  Transaktion persistiert.
+- **KRITISCH (H2):** `createPaperRuleAdapter()` (Mikro-Executor)
+  erzeugte pro Aufruf ein isoliertes `new PaperBroker(…)` mit eigenem
+  session-scoped Advisory-Lock (Lock-Leck bei Crash, anderer Key als
+  `withAccountLock`). Nutzt jetzt den Factory-Singleton
+  (`paperBrokerLedger()`) und übergibt die gesamte Order an
+  `submitAtomic`; der manuelle Client-Pfad mit `pg_advisory_lock`
+  wurde entfernt.
+- Neues Modul `src/lib/brokerHydration.ts` mit
+  `ensurePaperBrokerHydrated()`: eine LLM-freie Hydration, die sowohl
+  die Web-App (Engine) als auch den eigenständigen Mikro-Executor-
+  Prozess nutzen — kein duplizierter Restore-Code mehr.
+- Zwei weitere Singletons (`firmSchedulerStarted`,
+  `microLimitsLoadedAt`) sind in die `stateRegistry` migriert;
+  `__resetAllSingletonsForTests()` deckt sie mit ab.
+- Konformitätstests `tests/adr003_adr004.test.ts` (12 Tests) nageln
+  die ADR-Invarianten gegen den Code fest.
+- Details: [`CHANGELOG.md`](CHANGELOG.md),
+  [`docs/roadmap/DECISIONS.md`](docs/roadmap/DECISIONS.md).
 
 `v0.16.1` (2026-10-04) repariert die Dashboard-Reiter. Nach dem Laden standen
 Firm Overview, Reports, Protokoll, Agents & Orchestrator, Workshop, Operations

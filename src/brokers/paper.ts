@@ -13,6 +13,15 @@
  * (`paperBrokerLedger()`); die Engine hydratiert ihn aus PostgreSQL.
  * Alle Execution-Modi (backtest/paper) teilen sich diesen EINEN Ledger —
  * es entsteht nie eine zweite, unhydratierte Buchhaltung.
+ *
+ * ADR-003 (v0.17.0): JEDE Order-Eröffnung läuft über
+ * `PaperBroker.submitAtomic()` mit `withAccountLock` (Kontoserialisierung
+ * via `pg_advisory_xact_lock`), DB-Wahrheits-Prüfung gegen `positions`
+ * (status='OPEN') und `order_intents`-Reservierung mit partiellem
+ * UNIQUE-Index. Ein reiner `submit()`-Aufruf ist auf dem Singleton-Ledger
+ * unzulässig — er würde den Mehrprozess-Schutz (Next.js-Worker + Mikro-
+ * Executor) umgehen (Befund H2). `submit()` bleibt zulässig auf lokal
+ * erzeugten `new PaperBroker(…)`-Instanzen (Unit-Tests, Backtest-Ports).
  */
 import { executionCapabilitiesFor } from "../execution/capabilities";
 import { captureOrder } from "../executionQuality/runtime";
@@ -150,8 +159,14 @@ export class PaperBrokerAdapter implements BrokerAdapter {
 
   /**
    * Simulierte Order — läuft wie jede andere Order durch die komplette
-   * Schutzkette (Input-Validierung → Kill-Switch → Guardrails → Cash-Check)
-   * innerhalb des `PaperBroker.submit()`.
+   * atomare Mehrprozess-Schleuse (`PaperBroker.submitAtomic()`):
+   *   Input-Validierung → Kill-Switch → Guardrails → Cash-Check →
+   *   `pg_advisory_xact_lock` (Konto) → DB-Wahrheit (`positions` OPEN) →
+   *   In-Memory-Fill → `order_intents`-Reservierung (partieller UNIQUE).
+   *
+   * ADR-003: Über den Adapter führt KEIN Weg mehr an der DB-Serialisierung
+   * vorbei — reiner `submit()` auf dem Singleton-Ledger würde Race H2
+   * (parallele Worker/Executor-Prozesse) wieder öffnen.
    */
   async placeOrder(req: BrokerOrderRequest): Promise<BrokerOrderResult> {
     return captureOrder({venue:this.id,mode:this.mode,request:req,execute:async request => this.executeOrder(request)});
@@ -168,7 +183,31 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     if (req.stopLoss !== undefined) order.stopLoss = req.stopLoss;
     if (req.takeProfit !== undefined) order.takeProfit = req.takeProfit;
 
-    const fill: Fill = this.paperBroker.submit(order);
+    // ADR-003: submitAtomic statt submit() — exklusive Kontosperre,
+    // DB-Wahrheits-Check und order_intents-Reservierung. Persistenz läuft
+    // für den manuellen API-Pfad analog zu engine/microExecutor: Position
+    // wird innerhalb der Transaktion geschrieben, damit Guard, Fill und
+    // Positions-Insert eine atomare Einheit bilden.
+    const fill: Fill = await this.paperBroker.submitAtomic(order, {
+      account: "PAPER",
+      persistPosition: async (tx, f) => {
+        // Dynamischer Import, um Zirkularität zu vermeiden (Adapter →
+        // Broker → DB-Schema — Schema importiert bereits Broker-Typen
+        // nur als Typ, Runtime-Import ist aber spät sicher).
+        const { positions: positionsTable } = await import("../db/schema");
+        await tx.insert(positionsTable).values({
+          symbol: f.symbol,
+          side: f.side,
+          qty: String(f.qty),
+          entryPrice: String(f.fillPrice),
+          currentPrice: String(f.fillPrice),
+          stopLoss: f.stopLoss === null ? null : String(f.stopLoss),
+          takeProfit: f.takeProfit === null ? null : String(f.takeProfit),
+          broker: this.paperBroker.name,
+          status: "OPEN",
+        });
+      },
+    });
     return {
       orderId: fill.orderId,
       feesQuote: fill.fees ?? null,

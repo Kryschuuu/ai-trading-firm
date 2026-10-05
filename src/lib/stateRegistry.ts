@@ -290,6 +290,14 @@ export const state = {
   revokedSessions: map<string, number>("revokedSessions"),
   /** Globaler Widerrufs-Zeitstempel in ms (alle Sessions mit iat <= Zeitstempel sind ungueltig). */
   sessionsRevokedBefore: ref<number>("sessionsRevokedBefore"),
+
+  // ── Instrumentation / Scheduler (src/instrumentation.ts) ───────────────────
+  /** Prozess-Scheduler genau einmal gestartet? (Guard gegen Doppelstart durch HMR). */
+  firmSchedulerStarted: flag("firmSchedulerStarted"),
+
+  // ── Mikro-Executor Runtime-Limits Cache (src/lib/microExecutor.ts) ─────────
+  /** Zeitpunkt des letzten Runtime-Limit-Loads im Mikro-Executor (epoch ms, RAM). */
+  microLimitsLoadedAt: ref<number>("microLimitsLoadedAt"),
 } as const;
 
 /**
@@ -333,4 +341,8 @@ export function __resetAllSingletonsForTests(): void {
   // Session-Revocation
   state.revokedSessions.reset();
   state.sessionsRevokedBefore.reset();
+  // Instrumentation / Scheduler
+  state.firmSchedulerStarted.reset();
+  // Mikro-Executor Runtime-Limits
+  state.microLimitsLoadedAt.reset();
 }
