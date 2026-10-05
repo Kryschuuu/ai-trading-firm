@@ -6,6 +6,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { SimulatedClock } from "../src/cycle/clock";
 import { createTestPorts } from "../src/cycle/ports";
 import { scannerStep } from "../src/cycle/steps/scannerStep";
@@ -228,16 +231,111 @@ test("Step 7 (Research): erzeugt Setups mit expliziter Proposal-Markierung (kein
     disclaimer: "PROPOSAL_ONLY_NO_ORDERS_PLACED",
   });
 
-  const ctx = mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports);
+  const ctx = mockContext(
+    { approvedCandidates: ["BINANCE:BTCUSDT"] },
+    ports,
+    { "06-risk-manager": { approvedCandidates: ["BINANCE:BTCUSDT"] } },
+  );
   const result = await researchStep.execute(ctx);
 
   assert.equal(result.totalSetups, 1);
   assert.equal(result.disclaimer, "PROPOSAL_ONLY_NO_ORDERS_PLACED");
   assert.equal(result.setups[0].isProposal, true);
+  assert.equal(result.setups[0].portfolioWeight, 1, "Research trägt das serverseitige Risk-Gewicht durch");
   assert.ok(result.setups[0].stopLoss < result.setups[0].entryPrice);
   } finally {
     if (prevHistoryDir === undefined) delete process.env.PAPER_HISTORY_DIR;
     else process.env.PAPER_HISTORY_DIR = prevHistoryDir;
+  }
+});
+
+test("Research: fail-closed bei fehlendem Risk-Manager-Output trotz Input-Shortlist", async () => {
+  const ports = createTestPorts();
+  ports.agent.setResponseForRole("RESEARCH", {
+    setups: [],
+    totalSetups: 0,
+    disclaimer: "PROPOSAL_ONLY_NO_ORDERS_PLACED",
+  });
+  const result = await researchStep.execute(
+    mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports),
+  );
+  assert.deepEqual(result.setups, []);
+  assert.equal(ports.agent.attemptsFor("RESEARCH"), 0, "ohne Risk-Freigabe darf Research nicht aufgerufen werden");
+});
+
+test("Research: context.input kann Risk-Freigaben nur weiter einschränken", async () => {
+  const ports = createTestPorts();
+  const result = await researchStep.execute(
+    mockContext(
+      { approvedCandidates: ["BINANCE:ETHUSDT"] },
+      ports,
+      { "06-risk-manager": { approvedCandidates: ["BINANCE:BTCUSDT"] } },
+    ),
+  );
+  assert.deepEqual(result.setups, []);
+  assert.equal(ports.agent.attemptsFor("RESEARCH"), 0);
+});
+
+test("Research: Risk-Gewichte werden serverseitig renormalisiert und fremde Setups verworfen", async () => {
+  const previousHistoryDir = process.env.PAPER_HISTORY_DIR;
+  const emptyHistoryDir = mkdtempSync(path.join(tmpdir(), "cycle-research-weights-"));
+  process.env.PAPER_HISTORY_DIR = emptyHistoryDir;
+  try {
+    const ports = createTestPorts();
+    ports.agent.setResponseForRole("RESEARCH", {
+      setups: [
+        {
+          instrumentId: "BINANCE:BTCUSDT",
+          side: "LONG",
+          entryPrice: 65000,
+          stopLoss: 63000,
+          takeProfit: 71000,
+          riskScore: 0.4,
+          timeframe: "4h",
+          thesis: "Approved setup",
+          isProposal: true,
+          portfolioWeight: 0.99,
+        },
+        {
+          instrumentId: "BINANCE:UNAPPROVEDUSDT",
+          side: "LONG",
+          entryPrice: 65000,
+          stopLoss: 63000,
+          takeProfit: 71000,
+          riskScore: 0.4,
+          timeframe: "4h",
+          thesis: "Not approved",
+          isProposal: true,
+        },
+      ],
+      totalSetups: 2,
+      disclaimer: "PROPOSAL_ONLY_NO_ORDERS_PLACED",
+    });
+    const result = await researchStep.execute(mockContext(
+      { approvedCandidates: ["BINANCE:BTCUSDT"] },
+      ports,
+      {
+        "06-risk-manager": {
+          approvedCandidates: ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT"],
+          portfolioAllocation: {
+            method: "RISK_PARITY",
+            weights: [
+              { instrumentId: "BINANCE:BTCUSDT", weight: 0.25 },
+              { instrumentId: "BINANCE:ETHUSDT", weight: 0.75 },
+            ],
+          },
+        },
+      },
+    ));
+
+    assert.equal(result.totalSetups, 1);
+    assert.equal(result.setups[0]?.instrumentId, "BINANCE:BTCUSDT");
+    assert.equal(result.setups[0]?.portfolioWeight, 1, "die weitere Shortlist renormalisiert das Risk-Gewicht");
+    assert.equal(ports.agent.attemptsFor("RESEARCH"), 1);
+  } finally {
+    if (previousHistoryDir === undefined) delete process.env.PAPER_HISTORY_DIR;
+    else process.env.PAPER_HISTORY_DIR = previousHistoryDir;
+    rmSync(emptyHistoryDir, { recursive: true, force: true });
   }
 });
 

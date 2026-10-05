@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.16.1 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.17.2 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -43,7 +43,7 @@ Risikogrenzen im Code**.
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.16.1** (Beta, 2026-10-04; Baseline war v0.1.0) |
+| Version | **v0.17.2** (Beta, 2026-10-05; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -215,6 +215,33 @@ der Sync-Log trennt abgeholte Bars von neuen und deduplizierten Store-Zeilen.
 Siehe [Market-Data-Pipeline](docs/MARKET_DATA_PIPELINE.md) und
 [Bitunix-Sync-How-to](docs/HOW_TO_BITUNIX_SYNC.md).
 
+### Bitunix-Perpetual-Funding (separat vom Kerzen-Sync)
+
+`market:sync` entdeckt Bitunix-Instrumente und lädt OHLCV-Kerzen; historische
+Derivatdaten laufen getrennt über `perp:sync`. Für echte Bitunix-Funding-Daten
+müssen `PERP_DATA_SYNC_ENABLED=true`, `BITUNIX_ENABLED=true` und die
+`PERP_DATA_VENUES`-Allowlist (leer = alle freigeschalteten Venues) passen. Das
+Konsumenten-Flag `PERP_DATA_ENABLED=true` schaltet Scanner/Replay/Analysten frei.
+Die CLI liest Flags aus der Shell-Umgebung, nicht allein aus `.env`:
+
+```bash
+# Discovery legt die Perpetual-Instrumente in der Universe-Registry an.
+BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --symbols=BTCUSDT --timeframes=1h
+
+# Danach: echter Funding-Backfill (öffentliche Endpunkte, keine API-Credentials).
+BITUNIX_ENABLED=true PERP_DATA_ENABLED=true PERP_DATA_SYNC_ENABLED=true \
+PERP_DATA_VENUES=BITUNIX npm run perp:sync -- \
+  --venue=BITUNIX --mode=backfill --days=30 --kinds=funding
+npm run perp:sync -- --status
+```
+
+Bitunix unterstützt in der Perp-Daten-Matrix **Funding**, nicht aber öffentliche
+Open-Interest- oder Liquidations-Reihen; diese bleiben typisiert
+`UNSUPPORTED` statt als Nullwert erfunden zu werden. `SIM` ist ausschließlich
+für deterministische Offline-Fixture-Tests geeignet und liefert keine Live-Daten.
+Details und Gate-Diagnose: [docs/PERPETUAL_DATA.md](docs/PERPETUAL_DATA.md) und
+[docs/HOW_TO_BITUNIX_SYNC.md](docs/HOW_TO_BITUNIX_SYNC.md).
+
 ## Architektur in Kürze
 
 Broker-unabhängige Infrastruktur mit dynamischem Instrument-Universe. Market
@@ -286,13 +313,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.16.1, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.17.2, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.16.1), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.17.2), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)

@@ -225,14 +225,14 @@ test("RESTORE-01: invalidateBrokerCache() hebt das Backoff-Fenster sofort auf", 
   );
 });
 
-test("RESTORE-01: Restore-Fehler loggt höchstens einmal pro Fenster (kein Log-Amplifier)", async () => {
+test("RESTORE-01: Restore-Fehler warnt höchstens einmal pro Fenster (kein Log-Amplifier)", async () => {
   const counters = freshCounters();
   installFakeDb(counters, { fail: true });
   const { getBroker } = await import("../src/lib/engine");
 
   const errors: unknown[][] = [];
-  const original = console.error;
-  console.error = (...args: unknown[]) => {
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
     errors.push(args);
   };
   try {
@@ -242,7 +242,7 @@ test("RESTORE-01: Restore-Fehler loggt höchstens einmal pro Fenster (kein Log-A
   }
 
   const restoreLogs = errors.filter((args) =>
-    String(args[0] ?? "").includes("[getBroker]")
+    String(args[0] ?? "").includes("[broker-hydration]")
   );
   assert.equal(
     restoreLogs.length,

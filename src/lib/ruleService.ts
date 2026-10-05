@@ -1,4 +1,6 @@
-import { pool } from "@/db"; // TASK 07
+import { pool } from "@/db";
+import { invalidateRuleCaches } from "./ruleCacheRegistry";
+import { TradeRulesNotificationListener } from "./tradeRulesNotificationListener";
 /**
  * Persistenz-, Versionierungs- und Feedback-Schicht für das Makro-Regelwerk.
  *
@@ -537,26 +539,26 @@ export function ruleWithinRuntimeLimits(spec: RuleSpec): string[] {
   return issues;
 }
 
-/** TASK 07: Hot-Path Cache Invalidation via Postgres Pub/Sub (LISTEN / NOTIFY). */
-let listenClient: import("pg").PoolClient | null = null;
+/** TASK 07: Hot-Path Cache Invalidation via PostgreSQL LISTEN / NOTIFY. */
+let tradeRulesListener: TradeRulesNotificationListener | null = null;
+
 export async function startTradeRulesListen(): Promise<void> {
-  try {
-    if (listenClient) return;
-    const client = await pool.connect();
-    listenClient = client;
-    await client.query("LISTEN trade_rules");
-    client.on("notification", (msg) => {
-      if (msg?.channel === "trade_rules") {
-        console.log("[cache-invalidation] trade_rules NOTIFY received — invalidating RuleCache");
-        // Cache-Invalidierung über RuleCache-Modul würde hier aufgerufen.
-      }
+  if (!tradeRulesListener) {
+    tradeRulesListener = new TradeRulesNotificationListener(pool, () => {
+      const caches = invalidateRuleCaches();
+      console.log(`[cache-invalidation] trade_rules NOTIFY received — invalidated ${caches} RuleCache instance(s)`);
     });
-    console.log("[task07] LISTEN trade_rules aktiv");
-  } catch (e) {
-    console.error("[task07] LISTEN trade_rules fehlgeschlagen:", e);
   }
+  await tradeRulesListener.start();
 }
-// Auto-Start wenn Modul geladen (Prod / Micro-Executor Umgebung)
+
+/** Expliziter, idempotenter Shutdown-Hook für Tests und kontrollierte Stops. */
+export async function stopTradeRulesListen(): Promise<void> {
+  await tradeRulesListener?.stop();
+  tradeRulesListener = null;
+}
+
+// Auto-Start im Web-Produktionsprozess bzw. eigenständigen Micro-Executor.
 if (process.env.NODE_ENV === "production" || process.env.START_MICRO === "1") {
-  startTradeRulesListen().catch(() => {});
+  void startTradeRulesListen();
 }

@@ -97,6 +97,7 @@ import { LIVE_SIGNAL_BAR_MS, persistClosedEntrySignal } from "./signalDecayRunti
 // ADR-004 (v0.17.0): zentrale Singleton-Registrierung (keine verstreuten
 // globalThis-Keys mehr im Mikro-Executor).
 import { state } from "./stateRegistry";
+import { registerRuleCacheInvalidator } from "./ruleCacheRegistry";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Basistypen
@@ -374,10 +375,38 @@ export type RuleCacheStatus = {
   executionsToday: Record<string, number>;
 };
 
+/** Ein konsistenter DB-Snapshot, der vor dem RAM-Swap vollständig aufgebaut wird. */
+export interface RuleCacheSnapshot {
+  rows: (typeof tradeRules.$inferSelect)[];
+  missionRows: Array<{ id: string; status: string; templateId: string | null }>;
+  countRows: Array<{ ruleId: string; c: number }>;
+}
+
+export type RuleCacheSnapshotLoader = () => Promise<RuleCacheSnapshot>;
+
+/** Lädt alle DB-Teile eines Caches; kein Teilzustand wird hier veröffentlicht. */
+export async function loadRuleCacheSnapshot(): Promise<RuleCacheSnapshot> {
+  const rows = await db.select().from(tradeRules).where(eq(tradeRules.status, "ACTIVE"));
+  const missionRows = await db
+    .select({ id: missionsTable.id, status: missionsTable.status, templateId: missionsTable.templateId })
+    .from(missionsTable);
+  const dayStart = startOfBerlinDay();
+  const countRows = await db
+    .select({
+      ruleId: ruleExecutions.ruleId,
+      c: sql<number>`count(*)::int`,
+    })
+    .from(ruleExecutions)
+    .where(and(eq(ruleExecutions.status, "TRIGGERED"), gte(ruleExecutions.createdAt, dayStart)))
+    .groupBy(ruleExecutions.ruleId);
+  return { rows, missionRows, countRows };
+}
+
 /**
- * Liest ACTIVE-Regeln aus der DB, kompiliert sie einmalig und matcht im
- * Hot-Path rein im RAM. Aktivierungen anderer Prozesse werden über den
- * Poll-Intervall übernommen (in derselben App: zusätzlich invalidate()).
+ * Liest ACTIVE-Regeln, kompiliert sie einmalig und matcht im Hot-Path rein im
+ * RAM. `LISTEN/NOTIFY` invalidiert sofort; der Poll bleibt als Fallback bei
+ * Verbindungs- oder Triggerproblemen bestehen. Ein ungültiger Cache matcht
+ * während des Reloads absichtlich keine Regeln (fail-closed).
  */
 export class RuleCache {
   private bySymbol = new Map<string, CachedRule[]>();
@@ -389,112 +418,162 @@ export class RuleCache {
   private dayKey = "";
   private ramCounts = new Map<string, number>();
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private started = false;
+  private invalidationVersion = 0;
+  private inFlightLoad: Promise<void> | null = null;
+  private inFlightVersion: number | null = null;
+  private unregisterInvalidator: (() => void) | null = null;
 
-  constructor(private readonly refreshMs = 30_000) {}
+  constructor(
+    private readonly refreshMs = 30_000,
+    private readonly loadSnapshot: RuleCacheSnapshotLoader = loadRuleCacheSnapshot,
+  ) {}
 
+  /** Markiert den Snapshot sofort als nicht verwendbar und startet den Reload. */
   invalidate(): void {
+    this.invalidationVersion += 1;
     this.dirty = true;
+    if (this.started) void this.load();
   }
 
   async start(): Promise<void> {
+    if (this.started) {
+      await this.load();
+      return;
+    }
+    this.started = true;
+    this.unregisterInvalidator = registerRuleCacheInvalidator(this, () => this.invalidate());
     this.refreshTimer = setInterval(() => void this.load(), this.refreshMs);
     this.refreshTimer.unref?.();
     await this.load();
   }
 
   async stop(): Promise<void> {
+    this.started = false;
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.refreshTimer = null;
+    this.unregisterInvalidator?.();
+    this.unregisterInvalidator = null;
   }
 
   async load(): Promise<void> {
-    // Frisch genug (oder per _seedForTest injiziert) → kein DB-Zugriff im
-    // Hot-Path und kein unnötiges Polling.
-    if (!this.dirty && this.loadedAt && Date.now() - this.loadedAt < this.refreshMs) return;
+    // Ein laufender Read wird geteilt. Falls eine NOTIFY währenddessen eintrifft,
+    // wird dessen Snapshot verworfen und nach Abschluss genau ein neuer gestartet.
+    if (this.inFlightLoad) {
+      const pending = this.inFlightLoad;
+      const versionAtStart = this.inFlightVersion;
+      await pending;
+      if (
+        this.dirty &&
+        this.started &&
+        versionAtStart !== null &&
+        this.invalidationVersion !== versionAtStart
+      ) {
+        await this.load();
+      }
+      return;
+    }
+    if (!this.dirty && this.loadedAt !== null && Date.now() - this.loadedAt < this.refreshMs) return;
+
+    const versionAtStart = this.invalidationVersion;
+    const work = (async () => {
+      try {
+        const snapshot = await this.loadSnapshot();
+        if (versionAtStart !== this.invalidationVersion) {
+          this.dirty = true;
+          return;
+        }
+        this.applySnapshot(snapshot);
+      } catch (error) {
+        // Fehlgeschlagene Poll-Refreshes dürfen einen noch gültigen Snapshot
+        // weiterverwenden. Nach einer NOTIFY bleibt `dirty=true`, also match()
+        // bis zu einem erfolgreichen Reload fail-closed. Ein fehlgeschlagener
+        // Load wird nicht sofort rekursiv wiederholt: der nächste Poll oder
+        // eine explizite Invalidation versucht es erneut.
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        console.warn("[micro] RuleCache-Load fehlgeschlagen; Cache bleibt ungültig bzw. beim letzten Stand:", errorName);
+      }
+    })();
+    this.inFlightLoad = work;
+    this.inFlightVersion = versionAtStart;
     try {
-      const rows = await db.select().from(tradeRules).where(eq(tradeRules.status, "ACTIVE"));
-      const missionRows = await db
-        .select({ id: missionsTable.id, status: missionsTable.status, templateId: missionsTable.templateId })
-        .from(missionsTable);
-      const dayStart = startOfBerlinDay();
-      const countRows = await db
-        .select({
-          ruleId: ruleExecutions.ruleId,
-          c: sql<number>`count(*)::int`,
-        })
-        .from(ruleExecutions)
-        .where(and(eq(ruleExecutions.status, "TRIGGERED"), gte(ruleExecutions.createdAt, dayStart)))
-        .groupBy(ruleExecutions.ruleId);
+      await work;
+    } finally {
+      if (this.inFlightLoad === work) {
+        this.inFlightLoad = null;
+        this.inFlightVersion = null;
+      }
+    }
+  }
 
-      const counts = new Map<string, number>();
-      for (const r of countRows) counts.set(r.ruleId, Number(r.c));
+  /** Baut alle Maps privat auf und veröffentlicht sie mit einem atomaren Swap. */
+  private applySnapshot(snapshot: RuleCacheSnapshot): void {
+    const counts = new Map<string, number>();
+    for (const row of snapshot.countRows) counts.set(row.ruleId, Number(row.c));
 
-      const active: CachedRule[] = [];
-      for (const row of rows) {
-        const spec: RuleSpec = {
-          name: row.name,
-          symbol: row.symbol,
-          missionId: row.missionId ?? null,
-          condition: row.condition as unknown as RuleSpec["condition"],
-          action: row.action as unknown as RuleSpec["action"],
-          window: row.window as unknown as RuleSpec["window"],
-          rationale: row.rationale ?? "",
-          sourceRole: (["CEO", "RESEARCH", "MANUAL"].includes(row.sourceRole)
-            ? row.sourceRole
-            : "MANUAL") as RuleSpec["sourceRole"],
-          riskScore: Number(row.riskScore ?? 0.5),
-        };
-        active.push({
-          rowId: row.id,
-          ruleKey: row.ruleKey,
-          version: row.version,
-          symbol: row.symbol,
-          missionId: row.missionId,
-          name: row.name,
-          spec,
-          compiled: compileRuleSpec(spec),
-          executionsToday: counts.get(row.id) ?? 0,
-          firedAt: 0,
-          cooldownMs: spec.window.cooldownMinutes * 60_000,
-        });
-      }
+    const nextMissions = new Map<string, string>();
+    const nextMissionTemplates = new Map<string, string | null>();
+    for (const mission of snapshot.missionRows) {
+      nextMissions.set(mission.id, mission.status);
+      nextMissionTemplates.set(mission.id, mission.templateId ?? null);
+    }
 
-      this.bySymbol.clear();
-      this.missions.clear();
-      this.missionTemplates.clear();
-      for (const m of missionRows) {
-        this.missions.set(m.id, m.status);
-        this.missionTemplates.set(m.id, m.templateId ?? null);
-      }
-      for (const r of active) {
-        const list = this.bySymbol.get(r.symbol) ?? [];
-        list.push(r);
-        this.bySymbol.set(r.symbol, list);
-      }
-      this.loadedAt = Date.now();
-      this.dirty = false;
-      const day = berlinDayKeyOf(Date.now());
-      if (this.dayKey !== day) {
-        this.dayKey = day;
-        this.ramCounts.clear();
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message.split("\n")[0] || e.message : String(e);
-      console.warn(
-        "[micro] RuleCache-Load fehlgeschlagen (alte Regeln bleiben im RAM):",
-        msg.slice(0, 160)
-      );
+    const nextBySymbol = new Map<string, CachedRule[]>();
+    for (const row of snapshot.rows) {
+      const spec: RuleSpec = {
+        name: row.name,
+        symbol: row.symbol,
+        missionId: row.missionId ?? null,
+        condition: row.condition as unknown as RuleSpec["condition"],
+        action: row.action as unknown as RuleSpec["action"],
+        window: row.window as unknown as RuleSpec["window"],
+        rationale: row.rationale ?? "",
+        sourceRole: (["CEO", "RESEARCH", "MANUAL"].includes(row.sourceRole)
+          ? row.sourceRole
+          : "MANUAL") as RuleSpec["sourceRole"],
+        riskScore: Number(row.riskScore ?? 0.5),
+      };
+      const cached: CachedRule = {
+        rowId: row.id,
+        ruleKey: row.ruleKey,
+        version: row.version,
+        symbol: row.symbol,
+        missionId: row.missionId,
+        name: row.name,
+        spec,
+        compiled: compileRuleSpec(spec),
+        executionsToday: counts.get(row.id) ?? 0,
+        firedAt: 0,
+        cooldownMs: spec.window.cooldownMinutes * 60_000,
+      };
+      const list = nextBySymbol.get(cached.symbol) ?? [];
+      list.push(cached);
+      nextBySymbol.set(cached.symbol, list);
+    }
+
+    // Der Build oben kann werfen, bevor irgendeine sichtbare Map ausgetauscht
+    // wird. So sieht der Hot-Path nie einen halb aktualisierten Snapshot.
+    this.bySymbol = nextBySymbol;
+    this.missions = nextMissions;
+    this.missionTemplates = nextMissionTemplates;
+    this.loadedAt = Date.now();
+    this.dirty = false;
+    const day = berlinDayKeyOf(Date.now());
+    if (this.dayKey !== day) {
+      this.dayKey = day;
+      this.ramCounts.clear();
     }
   }
 
   /** Kompilierte Regeln eines Symbols (ohne Auswertung). */
   candidatesBySymbol(symbol: string): CachedRule[] {
+    if (this.dirty || this.loadedAt === null) return [];
     return this.bySymbol.get(symbol.toUpperCase()) ?? [];
   }
 
   /** Alle kompilierten Regeln (für Series-Aufbau beim Start). */
   allRules(): CachedRule[] {
-    return [...this.bySymbol.values()].flat();
+    return this.dirty || this.loadedAt === null ? [] : [...this.bySymbol.values()].flat();
   }
 
   /**
@@ -541,6 +620,7 @@ export class RuleCache {
    * eine 5m-Regel auch gegen den 15m-Snapshot (und umgekehrt) geprüft.
    */
   match(snap: RuleSnapshot, now = Date.now(), timeframe?: string): CachedRule[] {
+    if (this.dirty || this.loadedAt === null) return [];
     const day = berlinDayKeyOf(now);
     if (this.dayKey !== day) {
       this.dayKey = day;

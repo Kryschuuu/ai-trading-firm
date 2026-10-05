@@ -50,11 +50,10 @@ import type { DailyUniverseArtifact } from "@/scanner/artifacts";
 import { buildDailyArtifact } from "@/scanner/artifacts";
 import { getScannerService, SCANNER_CANDLE_TIMEFRAME } from "@/scanner/service";
 import { HistoricalStore } from "@/lib/marketdata/historicalStore";
+import { historyDir } from "@/lib/marketdata/config";
 import {
   computeCorrelation,
   computeAllMetrics,
-  correlationClusters,
-  classifyVolatilityRegime,
 } from "@/portfolio";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,8 +205,13 @@ export class StubScannerPort implements ScannerPort {
 // 2. Analytics-Port
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Maximaler point-in-time-Kursverlauf pro Asset, auch für den Optimizer. */
+const MAX_CYCLE_ANALYTICS_CANDLES = 1_000;
+
 /**
  * Standard-Implementierung des Analytics-Ports auf Basis von Task 05 (src/portfolio/).
+ * Liest den Store genau einmal, begrenzt alle Reihen auf `asOf` und richtet
+ * Portfolio-Serien über exakt gemeinsame Candle-Zeitstempel aus.
  */
 export class DefaultAnalyticsPort implements AnalyticsPort {
   async computeCorrelationAndRisk(
@@ -218,6 +222,7 @@ export class DefaultAnalyticsPort implements AnalyticsPort {
     clusters: string[][];
     regimes: Record<string, string>;
     exposureWarnings: string[];
+    portfolioSeriesBySymbol: Record<string, { timestamps: number[]; prices: number[] }>;
   }> {
     if (symbols.length === 0) {
       return {
@@ -225,32 +230,55 @@ export class DefaultAnalyticsPort implements AnalyticsPort {
         clusters: [],
         regimes: {},
         exposureWarnings: [],
+        portfolioSeriesBySymbol: {},
       };
     }
+    const asOfMs = asOf.getTime();
+    if (!Number.isFinite(asOfMs)) throw new RangeError("AnalyticsPort benötigt ein gültiges asOf-Datum.");
 
-    const store = new HistoricalStore();
-    const seriesMap = new Map<string, number[]>();
+    const wanted = new Set(symbols);
+    const candlesBySymbol = new Map<string, Array<{ ts: number; close: number; fetchedAt: string }>>();
+    const store = new HistoricalStore(historyDir());
+    // HistoricalStore.query() lädt die gesamte NDJSON-Datei je Symbol neu.
+    // Ein einmaliges Lesen vermeidet N Vollscans und erlaubt eine saubere
+    // gemeinsame Zeitachse für Korrelations- und Kovarianzberechnungen.
+    for (const candle of store.readAll()) {
+      const fetchedAtMs = Date.parse(candle.fetchedAt);
+      if (
+        !wanted.has(candle.instrumentId) ||
+        candle.timeframe !== SCANNER_CANDLE_TIMEFRAME ||
+        candle.ts > asOfMs ||
+        !Number.isFinite(fetchedAtMs) ||
+        fetchedAtMs > asOfMs ||
+        !Number.isFinite(candle.close) ||
+        candle.close <= 0
+      ) {
+        continue;
+      }
+      const list = candlesBySymbol.get(candle.instrumentId) ?? [];
+      list.push({ ts: candle.ts, close: candle.close, fetchedAt: candle.fetchedAt });
+      candlesBySymbol.set(candle.instrumentId, list);
+    }
+
+    const seriesBySymbol: Record<string, { timestamps: number[]; prices: number[] }> = {};
     const regimes: Record<string, string> = {};
-
+    const validSymbols: string[] = [];
     for (const sym of symbols) {
-      // Korrelation/Regime laufen auf EINER Periodizität (Analyse-Timeframe
-      // 1h) — ein Timeframe-freier Query würde 5m/15m/1h mischen und die
-      // Kennzahlen unbemerkt verfälschen.
-      const candles = store.query({
-        instrumentId: sym,
-        timeframe: SCANNER_CANDLE_TIMEFRAME,
-      });
-      const closes = candles
-        .map((c: { close: number }) => c.close)
-        .filter((c: number): c is number => Number.isFinite(c) && c > 0);
-      if (closes.length >= 5) {
-        seriesMap.set(sym, closes);
+      const rows = candlesBySymbol.get(sym) ?? [];
+      rows.sort((a, b) => a.ts - b.ts || a.fetchedAt.localeCompare(b.fetchedAt));
+      // Dedupe defensively: a later fetched revision wins at a repeated ts.
+      const unique = new Map<number, { ts: number; close: number }>();
+      for (const row of rows) unique.set(row.ts, { ts: row.ts, close: row.close });
+      const recent = [...unique.values()].slice(-MAX_CYCLE_ANALYTICS_CANDLES);
+      const timestamps = recent.map((row) => row.ts);
+      const prices = recent.map((row) => row.close);
+      seriesBySymbol[sym] = { timestamps, prices };
+
+      if (prices.length >= 5) {
+        validSymbols.push(sym);
         try {
-          const m = computeAllMetrics([{ symbol: sym, prices: closes }]);
-          const metric = m.metrics[0];
-          if (metric) {
-            regimes[sym] = metric.regime;
-          }
+          const metric = computeAllMetrics([{ symbol: sym, prices }]).metrics[0];
+          regimes[sym] = metric?.regime ?? "NORMAL";
         } catch {
           regimes[sym] = "NORMAL";
         }
@@ -259,50 +287,67 @@ export class DefaultAnalyticsPort implements AnalyticsPort {
       }
     }
 
-    const validSymbols = Array.from(seriesMap.keys());
     const correlations: Record<string, Record<string, number>> = {};
-    for (const s of symbols) correlations[s] = {};
-
+    for (const symbol of symbols) correlations[symbol] = {};
     let clusters: string[][] = [];
     const exposureWarnings: string[] = [];
 
     if (validSymbols.length >= 2) {
       try {
-        const seriesInput = validSymbols.map((s) => ({
-          symbol: s,
-          prices: seriesMap.get(s)!,
-        }));
-        const corrResult = computeCorrelation(seriesInput, {
-          method: "pearson",
-          clusterThreshold: 0.75,
-        });
-        for (let i = 0; i < validSymbols.length; i++) {
-          const symA = validSymbols[i];
-          for (let j = 0; j < validSymbols.length; j++) {
-            const symB = validSymbols[j];
-            const val =
-              corrResult.correlation.matrix[i]?.[j] ?? (i === j ? 1 : 0);
-            correlations[symA][symB] = Number(val.toFixed(4));
+        let commonTimestamps: Set<number> | null = null;
+        for (const symbol of validSymbols) {
+          const times = new Set(seriesBySymbol[symbol].timestamps);
+          if (commonTimestamps === null) {
+            commonTimestamps = times;
+          } else {
+            const intersection = new Set<number>();
+            for (const timestamp of commonTimestamps) {
+              if (times.has(timestamp)) intersection.add(timestamp);
+            }
+            commonTimestamps = intersection;
           }
+          if (commonTimestamps.size < 5) break;
         }
-        if (corrResult.clusters) {
-          clusters = corrResult.clusters.clusters.map(
-            (c: { symbols: string[] }) => c.symbols,
-          );
-          for (const cl of clusters) {
-            if (cl.length >= 3) {
-              exposureWarnings.push(
-                `Hohe Korrelation (≥ 0.75) zwischen Cluster: ${cl.join(", ")}`,
-              );
+        const alignedTimestamps = [...(commonTimestamps ?? [])]
+          .sort((a, b) => a - b)
+          .slice(-MAX_CYCLE_ANALYTICS_CANDLES);
+        if (alignedTimestamps.length >= 5) {
+          const alignedSeries = validSymbols.map((symbol) => {
+            const pricesByTime = new Map(
+              seriesBySymbol[symbol].timestamps.map((timestamp, index) => [timestamp, seriesBySymbol[symbol].prices[index]]),
+            );
+            return {
+              symbol,
+              prices: alignedTimestamps.map((timestamp) => pricesByTime.get(timestamp)!),
+            };
+          });
+          const corrResult = computeCorrelation(alignedSeries, {
+            method: "pearson",
+            clusterThreshold: 0.75,
+          });
+          for (let i = 0; i < validSymbols.length; i++) {
+            const symA = validSymbols[i];
+            for (let j = 0; j < validSymbols.length; j++) {
+              const symB = validSymbols[j];
+              const val = corrResult.correlation.matrix[i]?.[j] ?? (i === j ? 1 : 0);
+              correlations[symA][symB] = Number(val.toFixed(4));
+            }
+          }
+          if (corrResult.clusters) {
+            clusters = corrResult.clusters.clusters.map((cluster: { symbols: string[] }) => cluster.symbols);
+            for (const cluster of clusters) {
+              if (cluster.length >= 3) {
+                exposureWarnings.push(`Hohe Korrelation (≥ 0.75) zwischen Cluster: ${cluster.join(", ")}`);
+              }
             }
           }
         }
       } catch {
-        // Fallback bei ungenügender Überschneidung
+        // Unzureichende gemeinsame Historie: Korrelation bleibt leer, nie geschätzt.
       }
     }
 
-    return { correlations, clusters, regimes, exposureWarnings };
+    return { correlations, clusters, regimes, exposureWarnings, portfolioSeriesBySymbol: seriesBySymbol };
   }
 }
 

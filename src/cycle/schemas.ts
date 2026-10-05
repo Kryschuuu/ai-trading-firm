@@ -580,6 +580,13 @@ function normalizeNewsPromptFit(raw: unknown): NewsPromptFitMeta | undefined {
 // 5. Risk Manager Schemata
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface RiskPortfolioAllocation {
+  /** Optimierte relative Gewichte sind Vorschläge, keine Orderfreigabe. */
+  method: "RISK_PARITY" | "EQUAL_WEIGHT_FALLBACK" | "NONE";
+  weights: Array<{ instrumentId: string; weight: number }>;
+  reason?: string;
+}
+
 export interface RiskStepOutput {
   approvedCandidates: string[];
   rejectedCandidates: Array<{
@@ -590,6 +597,8 @@ export interface RiskStepOutput {
   maxPositionPct: number;
   riskBudgetPerTrade: number;
   rationale: string;
+  /** Nur serverseitig angehängt; `validateRiskOutput` verwirft LLM-Eingaben. */
+  portfolioAllocation?: RiskPortfolioAllocation;
 }
 
 export function validateRiskOutput(input: unknown): { valid: boolean; data?: RiskStepOutput; error?: string } {
@@ -659,6 +668,11 @@ export interface TradeSetupProposal {
   thesis: string;
   /** Explizite Markierung: Rein unverbindlicher Vorschlag */
   isProposal: true;
+  /**
+   * Serverseitig angehängter relativer Portfolio-Anteil innerhalb der Risk-
+   * Freigabeliste. Kein LLM-Feld und keine direkte Ordergröße.
+   */
+  portfolioWeight?: number;
 }
 
 export interface ResearchStepOutput {

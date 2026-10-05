@@ -14,7 +14,9 @@
  * anzufassen.
  *
  * SICHERHEIT: Der Wrapper hält ausschließlich den credential-freien
- * `BitunixPublicClient` (trading_pairs / tickers / depth / kline). Ein
+ * `BitunixPublicClient` (trading_pairs / tickers / depth / kline / funding).
+ * Funding ist ein dezimaler Satz; Open Interest hat bei Bitunix keinen
+ * dokumentierten öffentlichen Futures-Endpunkt und bleibt daher `null`. Ein
  * `BitunixPrivateClient` wird im Market-Data-Pfad NIEMALS konstruiert —
  * nicht hier und nicht in `registerAdapters.ts` (statisch erzwungen in
  * `test/marketdata/security.test.ts`).
@@ -242,6 +244,16 @@ function asNumber(value: unknown, fallback: number): number {
   return fallback;
 }
 
+/** Finanzwerte akzeptieren keine leeren Strings/Nulls als stilles numerisches 0. */
+function finiteDecimal(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function stepFromPrecision(precision: unknown, fallback: number): number {
   const p = asNumber(precision, Number.NaN);
   if (!Number.isFinite(p) || p < 0 || p > 12) return fallback;
@@ -327,25 +339,32 @@ export function createBitunixMarketDataAdapter(deps: BitunixMarketAdapterDeps): 
       });
     },
 
-    /** TASK 03: Derivative-Stubs (Live-Sync erfordert PerpSync + BitunixPublicClient-Endpunkte). */
+    /**
+     * TASK 03: öffentlicher Funding-Snapshot. Bitunix liefert `fundingRate`
+     * bereits als Dezimalanteil (z. B. -0.00001191), nicht als skalierten
+     * Integer. Fehlende/ungültige Werte bleiben `null`, niemals ein Fake-Null.
+     */
     async getFundingRate(symbol: string): Promise<{ fundingRate: number; nextFundingTime?: number } | null> {
       try {
-        const rates = await client.fetchFundingRates(symbol.toUpperCase());
-        if (Array.isArray(rates) && rates.length > 0) {
-          const row = rates[0];
-          return {
-            fundingRate: Number(row.fundingRate ?? 0) / 100_000,
-            nextFundingTime: Number(row.nextFundingTime ?? 0) || undefined,
-          };
-        }
+        const requestedSymbol = symbol.toUpperCase();
+        const rates = await client.fetchFundingRates(requestedSymbol);
+        const row = rates.find((candidate) => String(candidate.symbol ?? "").toUpperCase() === requestedSymbol);
+        if (!row) return null;
+        const fundingRate = finiteDecimal(row.fundingRate);
+        if (fundingRate === null) return null;
+        const nextFundingTime = Number(row.nextFundingTime);
+        return {
+          fundingRate,
+          ...(Number.isSafeInteger(nextFundingTime) && nextFundingTime > 0 ? { nextFundingTime } : {}),
+        };
       } catch {
         // Fail-closed: kein Funding-Snapshot pro Symbol verfügbar.
       }
       return null;
     },
 
-    async getOpenInterest(symbol: string): Promise<{ openInterest: number; openInterestQuote?: number } | null> {
-      // Bitunix hat kein öffentlicher Open-Interest-Endpunkt für Futures; Fixture/Cache liefert Daten.
+    async getOpenInterest(_symbol: string): Promise<{ openInterest: number; openInterestQuote?: number } | null> {
+      // Bitunix hat keinen dokumentierten öffentlichen Open-Interest-Endpunkt für Futures.
       return null;
     },
   };

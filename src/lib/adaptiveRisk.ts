@@ -62,6 +62,7 @@ import {
   getLimits,
 } from "./riskGuard";
 import type { AdaptiveRegime } from "./riskGuard";
+import { readLatestMacroVolatilityFactor } from "./macroRegimeContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Konstanten
@@ -372,10 +373,6 @@ export function assessRegime(readingsRaw: IndicatorReadings, cfg: VolatilityConf
   return { regime, factor: regimeFactor(regime, cfg), indicators, triggered, reason };
 }
 
-/** TASK 04: Makro-Adjustierung */
-function macroAdjustment(): number {
-  try { const fs=require('fs'),p=require('path'); const f=p.resolve('data/cycle/02-macro-analyst.json'); if(!fs.existsSync(f))return 1; const d=JSON.parse(fs.readFileSync(f,'utf8')); const v=d?.volatilityRegime??null; if(v==='EXTREME')return 0.5; if(v==='HIGH')return 0.75; if(v==='LOW')return 1.1; }catch{return 1;} return 1;
-}
 const REGIME_SEVERITY: Record<VolatilityRegime, number> = { NORMAL: 0, ELEVATED: 1, EXTREME: 2 };
 
 /**
@@ -830,7 +827,7 @@ export async function updateAdaptiveRisk(opts: UpdateOptions = {}): Promise<Adap
 
     const prevRegime = s.machine.regime;
     const { regime } = s.machine.update(assessment.regime, cfg.deescalateAfter);
-    const factor = regimeFactor(regime, cfg) * macroAdjustment();
+    const factor = regimeFactor(regime, cfg) * readLatestMacroVolatilityFactor();
     // Wende den Faktor an und lies das wirksame (geklemmte) Limit zurück.
     const effective = applyAdaptiveRisk({
       regime,

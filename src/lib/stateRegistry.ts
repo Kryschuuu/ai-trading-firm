@@ -58,6 +58,7 @@
  *   - `rateLimiterHits`         Sliding-Window-Bucket der API-Auth (Single-Node).
  *   - `revokedSessions`         Widerrufene Session-IDs mit Ablaufzeitpunkt (RAM).
  *   - `sessionsRevokedBefore`   Globaler Widerrufs-Zeitstempel fuer Sessions (RAM).
+ *   - `ruleCacheInvalidators`   Prozesslokale Callbacks aktiver RuleCaches; PostgreSQL bleibt Wahrheit.
  *
  * DI-/Backend-Singletons der Control Plane (Repository `getControlStateRepository`,
  * Secret-Store `getControlPlaneSecretStore`) sind bewusst NICHT hier — sie sind
@@ -295,9 +296,11 @@ export const state = {
   /** Prozess-Scheduler genau einmal gestartet? (Guard gegen Doppelstart durch HMR). */
   firmSchedulerStarted: flag("firmSchedulerStarted"),
 
-  // ── Mikro-Executor Runtime-Limits Cache (src/lib/microExecutor.ts) ─────────
+  // ── Mikro-Executor (src/lib/microExecutor.ts) ───────────────────────────────
   /** Zeitpunkt des letzten Runtime-Limit-Loads im Mikro-Executor (epoch ms, RAM). */
   microLimitsLoadedAt: ref<number>("microLimitsLoadedAt"),
+  /** Aktive Prozess-RuleCaches, die PostgreSQL NOTIFY invalidieren soll. */
+  ruleCacheInvalidators: map<object, () => void>("ruleCacheInvalidators"),
 } as const;
 
 /**
@@ -343,6 +346,7 @@ export function __resetAllSingletonsForTests(): void {
   state.sessionsRevokedBefore.reset();
   // Instrumentation / Scheduler
   state.firmSchedulerStarted.reset();
-  // Mikro-Executor Runtime-Limits
+  // Mikro-Executor
   state.microLimitsLoadedAt.reset();
+  state.ruleCacheInvalidators.reset();
 }

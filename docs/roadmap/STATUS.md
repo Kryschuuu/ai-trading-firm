@@ -1,15 +1,15 @@
 # Roadmap & Entwicklungs-Status
 
-> **Stand:** 2026-10-05 · **Code-Version:** v0.17.0 (öffentliches SemVer)  
-> **Verantwortlich:** `docs/roadmap/STATUS.md`  
-> **Aktueller Produktstand:** `v0.17.0`. Die 25 Roadmap-Komponenten (inkl. Perp-Daten,
-> Attribution, Execution-Quality) sind im [Roadmap-Audit 2026-09-20](../audits/2026-09-20-roadmap-audit/remediation/TRACKING.md)
-> als **4 VERIFIED + 21 FIXED** abgeschlossen.
+> **Stand:** 2026-10-05 · **Code-Version:** v0.17.2 (öffentliches SemVer)<br>
+> **Verantwortlich:** `docs/roadmap/STATUS.md`<br>
+> **Aktueller Produktstand:** `v0.17.2` (Beta, nicht produktionsreif). Der<br>
+> [Roadmap-Audit 2026-09-20](../audits/2026-09-20-roadmap-audit/remediation/TRACKING.md)
+> dokumentiert seinen damaligen Stand mit **4 VERIFIED + 21 FIXED**; dieser
+> Status ergänzt die seither überprüften Integrationen TASK 03/04/05/07 und
+> benennt die noch netzwerkabhängige Bitunix-Live-Verifikation ausdrücklich.
 > **ADR-003 + ADR-004** sind mit `v0.17.0` umgesetzt (atomare Mehrprozess-Order-
 > Reservierung via `submitAtomic`, zentrale Singleton-Verwaltung via
 > `stateRegistry.ts`) und werden durch `tests/adr003_adr004.test.ts` überwacht.
-> Die offenen TASK-03…07 unten sind der damalige 1.41.0-Schnitt und nicht die
-> aktuelle SSoT.
 
 ---
 
@@ -34,24 +34,29 @@
 
 ---
 
-## 2. Offen
+## 2. Status der Integrationen TASK 03–07
 
-- [x] **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren** (PARTIAL / INFRASTRUKTUR FERTIG, LIVE-SYNC BENÖTIGT)
-  - Bitunix-Market-Data-Adapter (`src/marketdata/adapters/bitunix.ts`) um `getFundingRate()` / `getOpenInterest()` erweitert; Interface in `src/marketdata/sync.ts` aktualisiert.
-  - `InstrumentRegistry` / Perp-Cache (`data/perpdata/derivatives.json`) angelegt; Faktor 12 (`funding`) und 13 (`openInterest`) im Scanner aktiv (`src/scanner/factors/funding.ts`, `openInterest.ts`).
-  - **Offen:** Echte Funding-Rates und Open-Interest von Bitunix erfordern `PERP_DATA_ENABLED=true` + `PERP_DATA_SYNC_ENABLED=true` + Netzwerk (derzeit nicht verfügbar). Fixture-Adapter (`SIM`) liefert deterministische Testdaten.
-- [x] **TASK 04: Systemischer Regime-Filter & Volatilitäts-Drossel** (INTEGRIERT)
-  - `src/lib/adaptiveRisk.ts` mit `macroAdjustment()` verknüpft: liest `data/cycle/02-macro-analyst.json` (Volatilitäts-Regime `EXTREME`/`HIGH`/`LOW`) und skaliert den Risikomultiplikator (0.5 / 0.75 / 1.1). Fail-open bei fehlender Datei.
-- [x] **TASK 05: Portfolio-Sizing & Multi-Asset Allocation Engine** (INTEGRIERT / FALLBACK)
-  - `src/cycle/steps/riskStep.ts` importiert `optimizePortfolio`; Equal-Weight-Berechnung für `approvedCandidates` implementiert und protokolliert. Vollwertige Risk-Parity / Min-Variance-Allokation via `optimizePortfolio()` bei Vorliegen von Kovarianz-Matrix und Expected-Returns.
-- [x] **TASK 06: Trade-Attribution & Execution-Quality-Analytics** (VERIFIZIERT / API VORHANDEN)
-  - `src/attribution/store.ts`: `aggregateTradeAttributions()` aggregation by Regime / Setup / Agent / Slippage existiert; `src/app/api/firm/journal/attributions/aggregate/route.ts` exponiert Endpunkte.
-  - `src/executionQuality/`: Capture, Model, Reconcile, Telemetry vollständig; Slippage-Metriken (`slippageMemo`) in Attribution integriert.
-- [x] **TASK 07: Hot-Path Cache Invalidation via Postgres Pub/Sub** (INFRASTRUKTUR GESTARTET)
-  - `src/lib/ruleService.ts`: `startTradeRulesListen()` mit `LISTEN trade_rules` über `pool.connect()` implementiert; Auto-Start bei `NODE_ENV=production` oder `START_MICRO=1`. Cache-Invalidierungs-Callback markiert (Implementierung des Cache-Invalidierungskalls über `RuleCache`-Modul als nächster Schritt).
+- [ ] **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren** (**PARTIAL — Funding-Pfad implementiert; Live-Lauf in Zielumgebung offen**)
+  - Bitunix wird für Funding über den credential-freien `BitunixPublicClient` angebunden: aktueller Snapshot (`/market/funding_rate`) und historische Funding-Sätze (`/market/get_funding_rate_history`). Die API liefert Dezimalanteile; Mapping und Tests bewahren diese Einheit.
+  - Der Live-Perp-Sync benötigt `PERP_DATA_SYNC_ENABLED=true`, `BITUNIX_ENABLED=true`, eine passende `PERP_DATA_VENUES`-Allowlist, Netzwerkzugriff und Bitunix-Perpetual-Instrumente in der Universe-Registry. `PERP_DATA_ENABLED=true` schaltet separat die Scanner-/Replay-/Analyst-Konsumenten frei. `npm run market:sync -- --venue=BITUNIX` ist der Discovery-Schritt; `npm run perp:sync -- --venue=BITUNIX --kinds=funding --mode=backfill --days=30` führt den Funding-Sync aus.
+  - **Provider-Grenze:** Bitunix hat in der geprüften öffentlichen Futures-API keinen Open-Interest- oder Liquidations-Endpunkt. Die Capability-Matrix antwortet dafür `UNSUPPORTED / NO_PUBLIC_ENDPOINT`; weder Sync noch Konsumenten erfinden Nullwerte. `SIM` dient ausschließlich deterministischen Offline-Fixtures.
+  - **Noch offen:** In dieser Sandbox scheiterte der Live-Netzwerkaufruf (`fetch failed`); reale Bitunix-Funding-Zeilen und die Ziel-Registry konnten deshalb nicht produktiv validiert werden.
+- [x] **TASK 04: Systemischer Regime-Filter & Volatilitäts-Drossel** (**INTEGRIERT / FAIL-SAFE**)
+  - `src/lib/adaptiveRisk.ts` liest über `src/lib/macroRegimeContext.ts` den jüngsten indexierten Cycle-Lauf aus dem konfigurierten Artefakt-Root. Nur wenn genau dieser Lauf frisch und abgeschlossen ist, gilt `EXTREME → 0.5`, `HIGH → 0.75`, `NORMAL/LOW → 1`; ein neuerer fehlgeschlagener/unvollständiger Lauf sowie fehlende, stale, zukünftige, fehlerhafte oder `SKIPPED`-Artefakte bleiben neutral statt auf ältere Makro-Daten zurückzufallen. `LOW` kann Risiko nicht erhöhen.
+- [x] **TASK 05: Portfolio-Sizing & Multi-Asset Allocation Engine** (**INTEGRIERT — relative, nicht exekutive Gewichte**)
+  - `DefaultAnalyticsPort` liefert nur auf gemeinsamen Candle-Zeitstempeln ausgerichtete Kurse bis `asOf`. `riskStep.ts` optimiert die Risk-freigegebene Shortlist mit `optimizeWithGuard` im Risk-Parity-Modus; unzureichende Historie, Guard-Ablehnung oder Solver-Fehler werden als expliziter Equal-Weight-Fallback ausgewiesen.
+  - Die Allokation ist serverseitig in `RiskStepOutput` enthalten und wird als `portfolioWeight` an Research-Proposals angehängt. Research kann Risk-Freigaben nicht erweitern; eine engere Input-Shortlist wird renormalisiert. Diese Gewichte sind relative Vorschläge, keine eigenständige Orderfreigabe oder Umgehung absoluter RiskGuard-Limits.
+  - Analytics, Research-Referenzkerzen und Backtest-Historie begrenzen sowohl Candle-Zeit als auch `fetchedAt` auf `asOf`.
+- [x] **TASK 06: Trade-Attribution & Execution-Quality-Analytics** (**VERIFIZIERT / API VORHANDEN**)
+  - `src/attribution/store.ts`: `aggregateTradeAttributions()` aggregiert nach Regime / Setup / Agent / Slippage; `src/app/api/firm/journal/attributions/aggregate/route.ts` exponiert die API.
+  - `src/executionQuality/`: Capture, Model, Reconcile, Telemetry und Slippage-Metriken (`slippageMemo`) sind integriert.
+- [x] **TASK 07: Hot-Path Cache Invalidation via Postgres Pub/Sub** (**INTEGRIERT / MIGRATION MANUELL ANWENDEN**)
+  - `ruleService.ts` verbindet `LISTEN trade_rules` mit allen gestarteten `RuleCache`-Instanzen über `ruleCacheRegistry.ts`. Ein NOTIFY invalidiert den Cache sofort; nach einer NOTIFY bleibt er bei fehlgeschlagenem Reload fail-closed, bis ein aktueller Snapshot geladen ist. Fehlgeschlagene reguläre Polls dürfen den letzten gültigen Snapshot weiterverwenden. Polling und reconnectender Listener mit begrenztem exponentiellem Backoff bleiben als Resilienzpfade.
+  - `drizzle/2026-10-05_trade_rules_notify.sql` installiert idempotent den Statement-Trigger für INSERT/UPDATE/DELETE/TRUNCATE. Die Migration muss explizit per `psql "$DATABASE_URL" -f drizzle/2026-10-05_trade_rules_notify.sql` angewendet werden; Drizzle Kit erzeugt keine Trigger. Embedded-Postgres- und Listener-Tests decken Trigger und Reconnect ab.
 
 ---
 
-## 3. Nächster Schritt
+## 3. Verbleibender nächster Schritt
 
-- Start von **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren** zur Anbindung von echten Funding-Rates und Open-Interest-Daten von Bitunix.
+- **TASK 03 Live-Verifikation:** In einer netzwerkfähigen Zielumgebung `PERP_DATA_SYNC_ENABLED=true`, `BITUNIX_ENABLED=true`, `PERP_DATA_VENUES=BITUNIX` und — falls Scanner/Replay konsumieren sollen — `PERP_DATA_ENABLED=true` setzen; zuerst Bitunix-Perpetuals per Market-Sync entdecken, danach einen Funding-Backfill ausführen und `npm run perp:sync -- --status` / Coverage prüfen. Live-OI und -Liquidationen bleiben mangels öffentlicher Bitunix-Endpunkte `UNSUPPORTED`.
+- **TASK 07 Deployment:** SQL-Trigger-Migration einmalig auf jeder Produktionsdatenbank anwenden, bevor von LISTEN/NOTIFY-Invaliderung ausgegangen wird.

@@ -37,7 +37,7 @@ export type ResearchStepOutputWithStatus = ResearchStepOutput & {
  * preisbezogenen Plausibilitäts-Regeln `referenceMissing` statt zu raten.
  * Der Pfad folgt `PAPER_HISTORY_DIR` (Tests injizieren ein Temp-Verzeichnis).
  */
-function loadReferenceCandles(symbols: readonly string[]): Record<string, PlausibilityCandle[]> {
+function loadReferenceCandles(symbols: readonly string[], asOf: Date): Record<string, PlausibilityCandle[]> {
   const out: Record<string, PlausibilityCandle[]> = {};
   try {
     const store = new HistoricalStore(historyDir());
@@ -46,16 +46,23 @@ function loadReferenceCandles(symbols: readonly string[]): Record<string, Plausi
         const rows = store.query({
           instrumentId: symbol,
           timeframe: DEFAULT_ANALYSIS_TIMEFRAME,
+          to: asOf.getTime(),
           limit: 120,
         });
+        const asOfMs = asOf.getTime();
         const candles = rows
-          .filter(
-            (row) =>
+          .filter((row) => {
+            const fetchedAtMs = Date.parse(row.fetchedAt);
+            return (
+              row.ts <= asOfMs &&
+              Number.isFinite(fetchedAtMs) &&
+              fetchedAtMs <= asOfMs &&
               Number.isFinite(row.close) &&
               row.close > 0 &&
               Number.isFinite(row.high) &&
-              Number.isFinite(row.low),
-          )
+              Number.isFinite(row.low)
+            );
+          })
           .map((row) => ({ close: row.close, high: row.high, low: row.low }));
         if (candles.length > 0) out[symbol] = candles;
       } catch {
@@ -70,6 +77,45 @@ function loadReferenceCandles(symbols: readonly string[]): Record<string, Plausi
 
 export interface ResearchStepInput {
   approvedCandidates?: string[];
+}
+
+/**
+ * Normalizes server-owned RiskStep weights for the narrowed Research shortlist.
+ * A legacy/malformed Risk artifact falls back to explicit equal weights; the
+ * LLM never supplies or overrides this field.
+ */
+function researchWeights(
+  approved: readonly string[],
+  allocation: RiskStepOutput["portfolioAllocation"],
+): Map<string, number> {
+  if (approved.length === 0) return new Map();
+  if (allocation?.method !== "RISK_PARITY" && allocation?.method !== "EQUAL_WEIGHT_FALLBACK") {
+    const equalWeight = 1 / approved.length;
+    return new Map(approved.map((symbol) => [symbol, equalWeight]));
+  }
+  const approvedSet = new Set(approved);
+  const seen = new Set<string>();
+  const candidateWeights: Array<[string, number]> = [];
+  for (const item of allocation?.weights ?? []) {
+    if (
+      !item ||
+      typeof item.instrumentId !== "string" ||
+      !approvedSet.has(item.instrumentId) ||
+      seen.has(item.instrumentId) ||
+      !Number.isFinite(item.weight) ||
+      item.weight < 0
+    ) {
+      continue;
+    }
+    seen.add(item.instrumentId);
+    candidateWeights.push([item.instrumentId, item.weight]);
+  }
+  const total = candidateWeights.reduce((sum, [, weight]) => sum + weight, 0);
+  if (candidateWeights.length === approved.length && Number.isFinite(total) && total > 0) {
+    return new Map(candidateWeights.map(([symbol, weight]) => [symbol, weight / total]));
+  }
+  const equalWeight = 1 / approved.length;
+  return new Map(approved.map((symbol) => [symbol, equalWeight]));
 }
 
 export const researchStep: StepDefinition<ResearchStepInput, ResearchStepOutputWithStatus> = {
@@ -87,12 +133,16 @@ export const researchStep: StepDefinition<ResearchStepInput, ResearchStepOutputW
     const riskOutput = context.previousStepOutputs["06-risk-manager"] as RiskStepOutput | undefined;
     const techOutput = context.previousStepOutputs["04-technical-analyst"] as TechnicalStepOutput | undefined;
 
-    const approved =
-      context.input?.approvedCandidates ??
-      riskOutput?.approvedCandidates ??
-      [];
-
-    assertShortlistLimit(approved, 40);
+    const riskApproved = riskOutput?.approvedCandidates ?? [];
+    assertShortlistLimit(riskApproved, 40);
+    const requestedCandidates = context.input?.approvedCandidates;
+    if (requestedCandidates) assertShortlistLimit(requestedCandidates, 40);
+    const requestedSet = requestedCandidates ? new Set(requestedCandidates) : null;
+    // `context.input` may further narrow the Risk Manager's decision, never
+    // replace it. Without a prior Risk output the Research step fails closed.
+    const approved = [...new Set(riskApproved)].filter(
+      (symbol) => typeof symbol === "string" && symbol.trim() !== "" && (!requestedSet || requestedSet.has(symbol)),
+    );
 
     context.log(`Erzeuge konkrete Setup-Vorschläge für ${approved.length} freigegebene Instrumente …`);
 
@@ -158,7 +208,7 @@ JSON schema:
 
     // GAP-08: Plausibilitäts-Schicht über den Setup-Outputs (Monotonie,
     // Preisband um Known-Good-Kurse, Confidence/Begründung, Zahlenbezug).
-    const candlesByInstrument = loadReferenceCandles(approved);
+    const candlesByInstrument = loadReferenceCandles(approved, context.asOf);
 
     const res = await context.ports.agent.invokeAgent<ResearchStepOutput>({
       role: "RESEARCH",
@@ -211,9 +261,27 @@ JSON schema:
       return { ...skipped, plausibility: toStepStatus(res.plausibility) };
     }
 
-    if (res.plausibility) {
-      return { ...res.output, plausibility: toStepStatus(res.plausibility) };
+    // Research is not an authority boundary: a model response can only emit
+    // proposals for the Risk Manager's approved symbols. Portfolio weights are
+    // attached after schema validation, directly from the Risk output.
+    const approvedSet = new Set(approved);
+    const safeSetups = res.output.setups.filter((setup) => approvedSet.has(setup.instrumentId));
+    if (safeSetups.length !== res.output.setups.length) {
+      context.log("Research-Ausgabe begrenzt: nicht durch den Risk Manager freigegebene Setups wurden verworfen.", "WARN");
     }
-    return res.output;
+    const weights = researchWeights(approved, riskOutput?.portfolioAllocation);
+    const safeOutput: ResearchStepOutput = {
+      ...res.output,
+      setups: safeSetups.map((setup) => ({
+        ...setup,
+        portfolioWeight: weights.get(setup.instrumentId),
+      })),
+      totalSetups: safeSetups.length,
+    };
+
+    if (res.plausibility) {
+      return { ...safeOutput, plausibility: toStepStatus(res.plausibility) };
+    }
+    return safeOutput;
   },
 };

@@ -166,10 +166,10 @@ export const BITUNIX_PATHS = {
   fundingRate: "/api/v1/futures/market/funding_rate",
   /**
    * RMA-P2-02 (v1.54.0): **Historie** der Funding-Rates (public).
-   * `limit` default 100, Maximum 200 (Venue-Doku). Die Doku nennt das
-   * Start-Parameter-Feld an einer Stelle `starTime` (Tippfehler der Venue),
-   * `/market/kline` nutzt `startTime`; der Perp-Adapter sendet `startTime`
-   * und filtert zusätzlich client-seitig (siehe
+   * `limit` default 100, Maximum 200 (Venue-Doku). Der History-Endpunkt
+   * dokumentiert das Startfeld exakt als `starTime` (abweichend von
+   * `/market/kline`); der Public-Client sendet diesen Query-Key und der
+   * Perp-Adapter filtert zusätzlich client-seitig (siehe
    * `src/perpdata/adapters/bitunix.ts`).
    */
   fundingRateHistory: "/api/v1/futures/market/get_funding_rate_history",

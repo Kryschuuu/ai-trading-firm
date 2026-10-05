@@ -204,6 +204,12 @@ export interface AnalyticsPort {
     clusters: string[][];
     regimes: Record<string, string>;
     exposureWarnings: string[];
+    /**
+     * Close-Preise auf ihren Candle-Zeitstempeln, strikt bis `asOf`.
+     * RiskStep richtet ausschließlich die tatsächlich freigegebenen Symbole
+     * über gemeinsame Zeitstempel aus; Rohreihen werden nicht an das LLM gegeben.
+     */
+    portfolioSeriesBySymbol?: Record<string, { timestamps: number[]; prices: number[] }>;
   }>;
 }
 

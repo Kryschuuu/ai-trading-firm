@@ -189,6 +189,8 @@ interface FixtureFetchOptions {
   depthFailTimes?: number;
   /** Erzwungener HTTP-Status auf `/kline` für ALLE Calls. */
   klineStatus?: number;
+  /** Public-Funding-Snapshot (decimal wire values as documented by Bitunix). */
+  fundingRateRows?: readonly Record<string, unknown>[];
   /** Dynamische Kline-Serie zum Testen von Zeit-Cursor und mehrseitigem Backfill. */
   klineCandles?: readonly { time: number; open: number; high: number; low: number; close: number; volume: number }[];
   /**
@@ -228,6 +230,17 @@ function fixtureFetch(opts: FixtureFetchOptions = {}): { fetchImpl: typeof fetch
       }
       const data = symbols.length ? TICKERS.data.filter((t) => symbols.includes(t.symbol.toUpperCase())) : TICKERS.data;
       return respond(200, data);
+    }
+    if (url.pathname === BITUNIX_PATHS.fundingRate) {
+      const symbol = url.searchParams.get("symbol")?.toUpperCase();
+      const rows = opts.fundingRateRows ?? [
+        {
+          symbol: "BTCUSDT",
+          fundingRate: "-0.00001191",
+          nextFundingTime: "1772449200000",
+        },
+      ];
+      return respond(200, symbol ? rows.filter((row) => String(row.symbol ?? "").toUpperCase() === symbol) : rows);
     }
     if (url.pathname === BITUNIX_PATHS.depth) {
       const depthCalls = calls.filter((c) => c.path === BITUNIX_PATHS.depth).length;
@@ -324,6 +337,28 @@ function codeWithoutComments(rel: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/^\s*\/\/.*$/gm, " ");
 }
+
+test("Bitunix-Funding bleibt im dokumentierten Dezimalformat; fehlende Daten werden nicht zu 0", async () => {
+  const { adapter, calls } = wrapperFromFetch();
+  assert.deepEqual(await adapter.getFundingRate!("BTCUSDT"), {
+    fundingRate: -0.00001191,
+    nextFundingTime: 1_772_449_200_000,
+  });
+  assert.equal(await adapter.getOpenInterest!("BTCUSDT"), null, "Bitunix bietet keinen öffentlichen OI-Endpunkt");
+  assert.equal(calls.length, 1, "OI-UNSUPPORTED löst keinen zusätzlichen Request aus");
+  assert.equal(calls[0].path, BITUNIX_PATHS.fundingRate);
+
+  for (const badRate of [undefined, null, "", "   ", "not-a-number"]) {
+    const malformed = wrapperFromFetch({
+      fundingRateRows: [{ symbol: "BTCUSDT", fundingRate: badRate }],
+    });
+    assert.equal(await malformed.adapter.getFundingRate!("BTCUSDT"), null, `ungueltiger Wert ${String(badRate)} bleibt nicht als 0 sichtbar`);
+  }
+  const missingSymbol = wrapperFromFetch({
+    fundingRateRows: [{ symbol: "ETHUSDT", fundingRate: "0.0005" }],
+  });
+  assert.equal(await missingSymbol.adapter.getFundingRate!("BTCUSDT"), null, "fremdes Symbol wird nicht übernommen");
+});
 
 test("market data adapter never instantiates private client (statisch + Laufzeit)", async () => {
   // (a) Statisch: src/marketdata/** referenziert weder PrivateClient noch
