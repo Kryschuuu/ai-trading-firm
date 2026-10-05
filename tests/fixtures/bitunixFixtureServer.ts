@@ -20,9 +20,24 @@ export class BitunixFixtureServer {
    * (Discovery/Ticker/Depth/Kline) müssen hier **leer** sein — der Sync-Pfad
    * darf keine Credentials exponieren.
    */
-  requests: { method: string; path: string; signed: boolean; credentialHeaders: string[] }[] = [];
+  requests: { method: string; path: string; query: Record<string, string>; signed: boolean; credentialHeaders: string[] }[] = [];
   failPublic = false;
   httpStatus?: number;
+  fundingRateRows: Record<string, unknown>[] = [
+    {
+      symbol: "BTCUSDT",
+      fundingRate: "0.0005",
+      fundingInterval: 8,
+      nextFundingTime: 1_700_000_000_000,
+      maxFundingRate: "0.05",
+      minFundingRate: "-0.03",
+    },
+  ];
+  fundingHistoryRows: Record<string, unknown>[] = [
+    { fundingTime: 1_700_000_000_000, fundingRate: "0.0004", markPrice: "65000" },
+    { fundingTime: 1_700_000_060_000, fundingRate: "-0.0002", markPrice: "65100" },
+    { fundingTime: 1_699_999_000_000, fundingRate: "0.0001", markPrice: "64900" },
+  ];
   /** Optionaler HTTP-Status nur für `/api/v1/kline` (z. B. 429 Rate-Limit-Test). */
   klineStatus?: number;
   /**
@@ -66,7 +81,11 @@ export class BitunixFixtureServer {
     const credentialHeaders = ["sign", "api-key", "nonce", "timestamp", "authorization"].filter(
       (h) => req.headers[h] !== undefined,
     );
-    this.requests.push({ method: req.method ?? "GET", path, signed, credentialHeaders });
+    const query: Record<string, string> = {};
+    url.searchParams.forEach((value, key) => {
+      query[key] = value;
+    });
+    this.requests.push({ method: req.method ?? "GET", path, query, signed, credentialHeaders });
 
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c as Buffer));
@@ -255,6 +274,18 @@ export class BitunixFixtureServer {
           },
         ],
       });
+      return;
+    }
+    if (path === BITUNIX_PATHS.fundingRate) {
+      const symbol = url.searchParams.get("symbol");
+      const rows = symbol
+        ? this.fundingRateRows.filter((row) => String(row.symbol ?? "").toUpperCase() === symbol.toUpperCase())
+        : this.fundingRateRows;
+      json(res, 200, { code: 0, data: rows });
+      return;
+    }
+    if (path === BITUNIX_PATHS.fundingRateHistory) {
+      json(res, 200, { code: 0, data: this.fundingHistoryRows });
       return;
     }
     if (path === BITUNIX_PATHS.kline && this.klineStatus) {

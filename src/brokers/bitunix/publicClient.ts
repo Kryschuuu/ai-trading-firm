@@ -216,10 +216,12 @@ export class BitunixPublicClient {
    * klemmt `limit` hart auf {@link BITUNIX_FUNDING_HISTORY_MAX_LIMIT} und
    * verwirft nicht-endliche Zeitstempel (Validierung **vor** dem Request).
    *
-   * Zeitparameter: die Futures-Doku nennt das Startfeld an einer Stelle
-   * `starTime` (Tippfehler), `/market/kline` nutzt `startTime`. Gesendet wird
-   * `startTime`/`endTime`; der Perp-Adapter filtert zusätzlich client-seitig
-   * und meldet ein zu enges Fenster, statt blind zu blättern.
+   * Zeitparameter: die Futures-Doku schreibt das Startfeld `starTime`
+   * (abweichend vom `startTime` bei `/market/kline`). Gesendet wird deshalb
+   * die dokumentierte Schreibweise `starTime`/`endTime`; der Perp-Adapter
+   * filtert zusätzlich client-seitig und meldet ein zu enges Fenster, statt
+   * blind zu blättern. Eine Umbenennung ohne Live-Verifikation könnte die
+   * Zeitbegrenzung serverseitig wirkungslos machen.
    */
   async fetchFundingRateHistory(request: {
     symbol: string;
@@ -234,7 +236,7 @@ export class BitunixPublicClient {
     );
     const query: Record<string, string | number> = { symbol, limit };
     if (Number.isFinite(request.startTime ?? NaN) && (request.startTime as number) > 0) {
-      query.startTime = Math.trunc(request.startTime as number);
+      query.starTime = Math.trunc(request.startTime as number);
     }
     if (Number.isFinite(request.endTime ?? NaN) && (request.endTime as number) > 0) {
       query.endTime = Math.trunc(request.endTime as number);

@@ -27,10 +27,10 @@
  * `UNSUPPORTED / NO_PUBLIC_ENDPOINT`, und die Methoden hier fragen in diesem
  * Fall nicht einmal das Netz an.
  *
- * Zeitparameter: die Doku nennt das Startfeld der History an einer Stelle
- * `starTime` (Tippfehler der Venue), `/market/kline` nutzt `startTime`.
- * Gesendet wird `startTime`/`endTime`; **zusätzlich** filtert dieser Adapter
- * client-seitig auf das angefragte Fenster. Verlässt die Antwort das Fenster,
+ * Zeitparameter: die Doku nennt das Startfeld der History exakt `starTime`
+ * (abweichend von `/market/kline` mit `startTime`). Der Client sendet
+ * `starTime`/`endTime`; **zusätzlich** filtert dieser Adapter client-seitig
+ * auf das angefragte Fenster. Verlässt die Antwort das Fenster,
  * meldet er `WINDOW_LIMITED` statt blind zu blättern — ein falsch geblätterter
  * Backfill würde Lücken als „vollständig“ aussehen lassen.
  */
@@ -106,7 +106,9 @@ export function mapFundingIntervalInfo(
         const ms = toEpochMs(row.nextFundingTime ?? null, "ms", fetchedAt.getTime() + 86_400_000);
         return ms === null ? null : new Date(ms);
       })(),
-      maxAbsFundingRate: maxAbs.length > 0 ? Math.min(...maxAbs) : null,
+      // Die Venue-Bänder können asymmetrisch sein (z. B. max=+5 %, min=-3 %).
+      // Der maximal zulässige Betrag ist deshalb die größere Absolutgrenze.
+      maxAbsFundingRate: maxAbs.length > 0 ? Math.max(...maxAbs) : null,
       sourceId: BITUNIX_FUNDING_CURRENT_SOURCE,
       fetchedAt,
     },

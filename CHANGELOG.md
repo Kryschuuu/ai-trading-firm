@@ -21,18 +21,40 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-05** · Code-Version **0.17.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-05** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [0.17.1] — TASK 03-07: Perp-Daten, Regime-Filter, Portfolio-Sizing, Attribution, Cache-Invalidierung (2026-10-05)
+## [0.17.2] — TASK 03/04/05/07: Integrationspfade und PIT-Härtung (2026-10-05)
 
-- **TASK 03:** Bitunix-Adapter um `getFundingRate`/`getOpenInterest` erweitert; `data/perpdata/derivatives.json` und Scanner-Faktoren 12/13 bereit. Live-Sync erfordert `PERP_DATA_ENABLED=true` + Netzwerk.
-- **TASK 04:** `adaptiveRisk.ts` mit `macroAdjustment()` verknüpft (liest `02-macro-analyst.json`; Scale 0.5/0.75/1.1).
-- **TASK 05:** `riskStep.ts` importiert `optimizePortfolio`; Equal-Weight-Berechnung und Protokollierung implementiert.
-- **TASK 06:** Attribution-Aggregation (`aggregateTradeAttributions`) und Execution-Quality (`executionQuality/`) verifiziert; API-Endpunkte vorhanden.
-- **TASK 07:** `ruleService.ts` mit `LISTEN trade_rules` (Postgres Pub/Sub) und Auto-Start implementiert.
-- **Docs / Version:** `docs/roadmap/STATUS.md` aktualisiert; `VERSION.md` und `package.json` auf `v0.17.1` gesetzt.
-- **Hinweis:** Keine netzwerkabhängigen Endpunkte gesperrt; Fail-closed-Design beibehalten.
+### Added
+
+- **TASK 05:** `riskStep.ts` richtet die Risk-freigegebenen Kursreihen auf gemeinsamen Zeitstempeln aus und berechnet guarded Risk-Parity-Gewichte. Research hängt diese Gewichte erst nach der Modell-Validierung an die Proposal-Ausgabe an, filtert nicht freigegebene Setups und renormalisiert bei einer engeren Shortlist. Die Gewichte bleiben relative Vorschläge; absolute RiskGuard-/Order-Gates ändern sich nicht.
+- **TASK 07:** `trade_rules`-NOTIFY-Trigger-Migration und verbindender `RuleCache`-Registry-/Listener-Pfad mit exponentiellem Reconnect-Backoff.
+- **TASK 03:** Bitunix-Perp-Fixture-End-to-End-Test erfasst Funding-Historie, Snapshot-Queries und credential-freie Requests.
+
+### Fixed
+
+- **TASK 03:** Funding-Snapshot wird im dokumentierten Dezimalformat übernommen; fehlerhafte Division durch 100.000 entfernt. Asymmetrische Funding-Grenzen verwenden das Maximum der absoluten Limits. Bitunix Open Interest und Liquidationen werden als `UNSUPPORTED` behandelt, nicht als fehlende Implementierung oder Nullmessung verschleiert.
+- **TASK 04:** Makro-Risikofaktor liest nun das tatsächliche Cycle-Artefakt-Root/Index. Maßgeblich ist der jüngste indexierte Lauf, nicht ein älterer erfolgreicher Snapshot: ein neuerer fehlgeschlagener/unvollständiger Lauf sowie fehlende, stale, zukünftige, fehlerhafte oder übersprungene Ausgaben bleiben neutral. `LOW` erhöht das Risiko nicht.
+- **TASK 05:** Risk- und Research-Schritte können nicht mehr über Modell- oder `context.input`-Listen Deterministik-Freigaben umgehen. Analytics, Referenzkerzen und Backtest filtern sowohl Event-Zeit als auch `fetchedAt` gegen `asOf`.
+- **TASK 07:** RuleCache-Ladevorgänge sind single-flight und generation-safe. Nach einer NOTIFY bleibt der Cache bei fehlgeschlagenem Reload fail-closed, bis ein aktueller Snapshot geladen ist; fehlgeschlagene reguläre Polls können dagegen den letzten gültigen Snapshot weiterverwenden. Der Listener behandelt sowohl Socket-Fehler als auch unerwartetes Session-Ende mit begrenztem Backoff und sendet bei sauberem Shutdown `UNLISTEN`, bevor die Pool-Verbindung freigegeben wird. Es gibt keinen unbeschränkten sofortigen Retry-Sturm; Polling bleibt der Fallback.
+- **Roadmap/Version:** Veraltete Aussagen in `docs/roadmap/STATUS.md` und der Integrationsdokumentation korrigiert; Versionsdrift zwischen README, `VERSION.md`, Changelog und Package-Metadaten bereinigt. `eslint-config-next` an Next.js `16.3.8` angeglichen.
+
+### Verifikation und Betriebsgrenzen
+
+- **Grün:** `npm run typecheck`, `npm run lint`, `npm run docs:validate`; gezielte Offline-/Unit-Läufe: 190/190 Tests bestanden. Embedded-Postgres-Läufe: Perp-Store + `trade_rules`-Trigger 9/9; separate Trade-Attribution 7/7 und Broker-Contracts mit Schema-/Migrationstest 42/42.
+- **Vollsuite ohne externes PostgreSQL:** letzter `npm test`-Lauf: 4.722 bestanden, 2 fehlgeschlagen, 36 übersprungen (4.760 insgesamt). Beide Fehler sind die PAPER-Broker-Contract-Tests, die eine erreichbare Datenbank benötigen (`ECONNREFUSED 0.0.0.0:5432`); dieselbe Contract-Datei besteht 42/42 mit temporärem Embedded PostgreSQL und den erforderlichen Schema-/H2-Migrationen. Die gesamte Suite wurde daher nicht als vollständig grün verifiziert.
+- **Dependency-Audit:** Produktionsabhängigkeiten: 0 bekannte Schwachstellen. Vollständiger npm-Audit meldet 5 High-Befunde ausschließlich im Dev-Lint-Zweig `eslint-config-next → fast-glob → micromatch → braces@3.0.3`; zum Prüfzeitpunkt war kein kompatibles `braces`-Patchrelease verfügbar. `npm audit fix --force` schlägt einen Downgrade auf Next 14 vor und wurde nicht angewendet.
+- **Live-Bitunix:** Fetch war in der Sandbox netzwerkbedingt nicht verfügbar. Produktiver Funding-Sync erfordert `PERP_DATA_SYNC_ENABLED=true`, `BITUNIX_ENABLED=true`, `PERP_DATA_VENUES`-Freigabe, BITUNIX-Perpetual-Instrumente in der Universe-Registry und Netzwerkzugriff.
+- `SIM` bleibt ein deterministischer Fixture-Provider und liefert keine Live-Daten. PostgreSQL-Trigger-Migration ist manuell anzuwenden; `drizzle-kit push` erstellt keine Trigger.
+
+## [0.17.1] — Vorbereitende TASK-03-07-Infrastruktur (2026-10-05)
+
+- **TASK 03:** Perp-Datenmodell, Fixture-Adapter, Derivative-Cache und Scanner-Faktoren waren vorhanden. Bitunix unterstützte im Perp-Pfad nur Funding; der Market-Data-Open-Interest-Hook lieferte `null`. Live-Abdeckung war nicht validiert; Bitunix OI/Liquidationen hatten keine öffentliche Quelle.
+- **TASK 04:** Ein Makro-Faktor war zwar aufgerufen, las aber `data/cycle/02-macro-analyst.json`, das der Cycle-Artefakt-Writer nicht erzeugt — daher keine verlässliche Kopplung.
+- **TASK 05:** `riskStep.ts` berechnete nur Equal-Weight-Zahlen; der Optimizer war nicht integriert und das Gewicht wurde nicht an Research-Proposals weitergegeben. TASK 05 war damit nicht abgeschlossen.
+- **TASK 06:** Attribution-Aggregation (`aggregateTradeAttributions`) und Execution-Quality (`executionQuality/`) vorhanden; API-Endpunkte vorhanden.
+- **TASK 07:** LISTEN-Grundgerüst war gestartet, aber nicht mit dem RAM-RuleCache verbunden; Trigger-Migration, sicherer Reload und Reconnect-Verhalten fehlten.
 
 ## [0.17.0] — ADR-003 + ADR-004: Atomare Mehrprozess-Order-Reservierung und zentrale Singleton-Verwaltung (2026-10-05)
 

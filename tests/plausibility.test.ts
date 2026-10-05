@@ -56,7 +56,7 @@ const LONG_OK: PlausibleDecision = {
 };
 
 function mockContext<T>(input: T, ports = createTestPorts(), previousOutputs = {}): StepExecutionContext<T> {
-  const clock = new SimulatedClock();
+  const clock = new SimulatedClock("2026-09-19T12:00:00.000Z");
   return {
     cycleId: "test-cycle",
     date: "2026-09-19",
@@ -68,6 +68,14 @@ function mockContext<T>(input: T, ports = createTestPorts(), previousOutputs = {
     emitEscalation: () => {},
     log: () => {},
   };
+}
+
+function researchContext(symbols: string[], ports = createTestPorts()) {
+  return mockContext(
+    { approvedCandidates: symbols },
+    ports,
+    { "06-risk-manager": { approvedCandidates: symbols } },
+  );
 }
 
 /** Historie in ein Temp-Verzeichnis seeden; gibt das Verzeichnis zurück. */
@@ -480,7 +488,7 @@ test("Research-Step: unplausibler Output → Skip + Audit plausibility:CODE + Le
   await withHistoryDir(emptyHistoryDir(), async () => {
     const ports = createTestPorts();
     ports.agent.setResponseForRole("RESEARCH", researchResponse({ stopLoss: 66000 }));
-    const ctx = mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports);
+    const ctx = researchContext(["BINANCE:BTCUSDT"], ports);
     const result = await researchStep.execute(ctx);
 
     // Kein Setup-Export aus verworfenen Antworten.
@@ -511,12 +519,49 @@ test("Research-Step: Preisband-Verstoß gegen geseedete Kerzen → Skip mit PRIC
       "RESEARCH",
       researchResponse({ entryPrice: 150, stopLoss: 140, takeProfit: 165 }),
     );
-    const ctx = mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports);
+    const ctx = researchContext(["BINANCE:BTCUSDT"], ports);
     const result = await researchStep.execute(ctx);
     assert.deepEqual(result.setups, []);
     const skips = ports.audit.events.filter((e) => e.event === "CYCLE_STEP_SKIPPED");
     assert.equal(skips.length, 1);
     assert.equal(skips[0].detail.reason, "plausibility:PRICE_RANGE");
+  });
+});
+
+test("Research-Step: nach asOf gelernte historische Korrektur fließt nicht in das Preisband ein", async () => {
+  const dir = seedHistory({
+    "BINANCE:BTCUSDT": [
+      { close: 100, high: 104, low: 98 },
+      { close: 101, high: 105, low: 99 },
+      { close: 102, high: 106, low: 100 },
+    ],
+  });
+  const store = new HistoricalStore(dir);
+  store.append(
+    [{
+      time: Date.parse("2026-09-10T02:00:00.000Z"),
+      open: 150,
+      high: 156,
+      low: 140,
+      close: 150,
+      volume: 100,
+    }],
+    "BINANCE:BTCUSDT",
+    { venue: "TEST", feed: "late-correction" },
+    "1h",
+    new Date("2026-09-20T00:00:00.000Z"),
+  );
+
+  await withHistoryDir(dir, async () => {
+    const ports = createTestPorts();
+    ports.agent.setResponseForRole(
+      "RESEARCH",
+      researchResponse({ entryPrice: 150, stopLoss: 145, takeProfit: 155 }),
+    );
+    const result = await researchStep.execute(researchContext(["BINANCE:BTCUSDT"], ports));
+    assert.deepEqual(result.setups, [], "der nach asOf gelernte Kurs darf die Referenz nicht verschieben");
+    const skips = ports.audit.events.filter((event) => event.event === "CYCLE_STEP_SKIPPED");
+    assert.equal(skips[0]?.detail.reason, "plausibility:PRICE_RANGE");
   });
 });
 
@@ -531,7 +576,7 @@ test("Research-Step: plausibler Output mit Referenzkerzen → OK + Status sichtb
   await withHistoryDir(dir, async () => {
     const ports = createTestPorts();
     ports.agent.setResponseForRole("RESEARCH", researchResponse());
-    const ctx = mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports);
+    const ctx = researchContext(["BINANCE:BTCUSDT"], ports);
     const result = await researchStep.execute(ctx);
     assert.equal(result.setups.length, 1);
     const status = (
@@ -547,7 +592,7 @@ test("Research-Step: fehlende Referenzkerzen sind sichtbar, aber nicht blockiere
   await withHistoryDir(emptyHistoryDir(), async () => {
     const ports = createTestPorts();
     ports.agent.setResponseForRole("RESEARCH", researchResponse());
-    const ctx = mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports);
+    const ctx = researchContext(["BINANCE:BTCUSDT"], ports);
     const result = await researchStep.execute(ctx);
     assert.equal(result.setups.length, 1);
     const status = (
@@ -565,7 +610,7 @@ test("Research-Step: ungültiger Retry → Skip mit plausibility:invalid-retry",
       researchResponse({ stopLoss: 66000 }),
       { setups: "kein-array" },
     ]);
-    const ctx = mockContext({ approvedCandidates: ["BINANCE:BTCUSDT"] }, ports);
+    const ctx = researchContext(["BINANCE:BTCUSDT"], ports);
     const result = await researchStep.execute(ctx);
     assert.deepEqual(result.setups, []);
     const skips = ports.audit.events.filter((e) => e.event === "CYCLE_STEP_SKIPPED");

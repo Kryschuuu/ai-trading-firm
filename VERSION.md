@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.17.1` |
+| **Version** | `v0.17.2` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-05 |
-| **Quellbasiert** | `package.json` (`version: "0.16.1"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.17.2"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -409,6 +409,42 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 `DEFAULT_BASE_URLs`, `API_KEY_ENV`, die Provider-Liste in
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
+
+`v0.17.2` (2026-10-05) schließt Integrationslücken in TASK 03/04/05/07 und
+korrigiert die Versions-/Roadmap-Aussagen:
+
+- **TASK 03 — Bitunix Funding:** Der Public-Adapter erhält Funding-Snapshots
+  als Dezimalanteil (keine fehlerhafte Skalierung) und historische Funding-Sätze
+  über den credential-freien Perp-Client. Open Interest und Liquidationen bleiben
+  ausdrücklich `UNSUPPORTED` — Bitunix dokumentiert dafür keinen öffentlichen
+  Futures-Endpunkt. Live-Sync ist nur mit Sync-Gates, Perpetual-Instrumenten in
+  der Universe-Registry und Netzwerkzugriff möglich; die Laufzeit-Freigabe ist
+  von der Konsumenten-Freigabe getrennt.
+- **TASK 04 — Makro-Regime:** `adaptiveRisk.ts` liest jetzt das jüngste frische,
+  abgeschlossene Cycle-Artefakt über `macroRegimeContext.ts`; stale, zukünftige,
+  übersprungene oder fehlende Ausgaben bleiben neutral. `LOW` erhöht kein Risiko.
+- **TASK 05 — Portfolio-Allokation:** `riskStep.ts` richtet gemeinsame,
+  point-in-time Preisreihen aus und verwendet den guarded Risk-Parity-Optimizer.
+  Fehlende/ungültige Daten ergeben einen protokollierten Equal-Weight-Fallback.
+  Gewichte werden serverseitig an erlaubte Research-Proposals angehängt; sie sind
+  relative Vorschläge und ersetzen weder absolute `RiskGuard`-Limits noch die
+  separate Order-Autorität.
+- **TASK 07 — Cache-Invalidierung:** `trade_rules`-Trigger-Migration,
+  reconnectender PostgreSQL-Listener und prozesslokale RuleCache-Invalidierung
+  sind verbunden. Nach einer NOTIFY bleibt der Cache bei fehlgeschlagenem
+  Reload fail-closed, bis ein aktueller Snapshot geladen ist. Fehlgeschlagene
+  reguläre Polls dürfen den letzten gültigen Snapshot weiterverwenden; es gibt
+  keinen unbeschränkten sofortigen Retry-Sturm und der Poll bleibt Fallback.
+- **Point-in-time:** Analytics, Referenzkerzen und Backtest-Historie werden nach
+  Candle-Zeit und `fetchedAt` auf `asOf` beschränkt.
+- **Verifikation:** `npm run typecheck`, `npm run lint` und `npm run docs:validate` grün;
+  gezielte Offline-/Unit-Läufe 187/187. Embedded PostgreSQL: Perp-Store +
+  `trade_rules`-Trigger 9/9, Trade-Attribution 7/7, Broker-Contracts 42/42.
+  `npm test` ohne externes PostgreSQL: 4.719 bestanden, 2 fehlgeschlagen,
+  36 übersprungen — beide Fehler sind DB-abhängige PAPER-Contract-Tests
+  (`ECONNREFUSED 0.0.0.0:5432`), die mit Embedded PostgreSQL 42/42 bestehen.
+  Daher ist die Vollsuite insgesamt nicht als grün zu werten. Live-Bitunix
+  konnte in dieser Sandbox wegen Netzwerkfehler nicht validiert werden.
 
 `v0.17.1` (2026-10-05) setzt **ADR-003** (Atomare Mehrprozess-Order-
 Reservierung via `PaperBroker.submitAtomic()` / `withAccountLock`) und

@@ -47,15 +47,25 @@ export const backtestStep: StepDefinition<BacktestStepInput, BacktestStepOutput>
 
     for (const setup of setups) {
       // Kerzen für dieses Instrument aus dem Store laden
-      const history = store.query({ instrumentId: setup.instrumentId, timeframe: DEFAULT_ANALYSIS_TIMEFRAME });
-      const candles: CandleLike[] = history.map((h) => ({
-        time: h.ts,
-        open: h.open,
-        high: h.high,
-        low: h.low,
-        close: h.close,
-        volume: h.volume,
-      }));
+      const history = store.query({
+        instrumentId: setup.instrumentId,
+        timeframe: DEFAULT_ANALYSIS_TIMEFRAME,
+        to: context.asOf.getTime(),
+      });
+      const asOfMs = context.asOf.getTime();
+      const candles: CandleLike[] = history
+        .filter((h) => {
+          const fetchedAtMs = Date.parse(h.fetchedAt);
+          return h.ts <= asOfMs && Number.isFinite(fetchedAtMs) && fetchedAtMs <= asOfMs;
+        })
+        .map((h) => ({
+          time: h.ts,
+          open: h.open,
+          high: h.high,
+          low: h.low,
+          close: h.close,
+          volume: h.volume,
+        }));
 
       let maxDrawdownPct = 0;
       let profitFactorValue = 1.0;

@@ -29,6 +29,7 @@ import { HistoricalStore } from "../src/lib/marketdata/historicalStore";
 const INSTRUMENT = "NOSYNTH:BTC";
 const H = 3_600_000;
 const T0 = Date.UTC(2024, 5, 1);
+const TEST_AS_OF = T0 + 365 * 24 * H;
 
 function setup(instrumentId = INSTRUMENT): TradeSetupProposal {
   return {
@@ -64,12 +65,13 @@ function risingCandles(count: number, start = 90, step = 0.6) {
 function mockContext(
   setups: TradeSetupProposal[],
   ports = createTestPorts(),
-  logs: Array<{ message: string; level?: string }> = []
+  logs: Array<{ message: string; level?: string }> = [],
+  asOfMs = TEST_AS_OF,
 ): { ctx: StepExecutionContext<{ setups: TradeSetupProposal[] }>; ports: typeof ports; logs: typeof logs } {
-  const clock = new SimulatedClock(T0);
+  const clock = new SimulatedClock(asOfMs);
   const ctx: StepExecutionContext<{ setups: TradeSetupProposal[] }> = {
     cycleId: "test-cycle-nosynth",
-    date: "2024-05-01",
+    date: new Date(asOfMs).toISOString().slice(0, 10),
     asOf: clock.now(),
     clock,
     input: { setups },
@@ -84,7 +86,7 @@ function mockContext(
 }
 
 /** Isolierter HistoricalStore pro Test (PAPER_HISTORY_DIR → Temp-Verz). */
-async function withIsolatedStore<T>(candles: number, fn: () => Promise<T>): Promise<T> {
+async function withIsolatedStore<T>(candles: number, fn: (historyDir: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(path.join(os.tmpdir(), "nosynth-store-"));
   const prev = process.env.PAPER_HISTORY_DIR;
   process.env.PAPER_HISTORY_DIR = dir;
@@ -93,7 +95,7 @@ async function withIsolatedStore<T>(candles: number, fn: () => Promise<T>): Prom
       const store = new HistoricalStore(dir);
       store.append(risingCandles(candles), INSTRUMENT, { venue: "NOSYNTH", feed: "test" }, "1h", new Date(T0));
     }
-    return await fn();
+    return await fn(dir);
   } finally {
     if (prev === undefined) delete process.env.PAPER_HISTORY_DIR;
     else process.env.PAPER_HISTORY_DIR = prev;
@@ -134,6 +136,26 @@ test("Step 8: < 5 Kerzen ⇒ verified=false + DATA_UNAVAILABLE (statt erfundener
       assert.deepEqual(skipped[0].detail.reason, `data:insufficient-candles:${n}-of-5-minimum`);
     });
   }
+});
+
+test("Step 8: nach asOf gelernte historische Korrektur wird nicht als Backtest-Wissen verwendet", async () => {
+  await withIsolatedStore(5, async (dir) => {
+    const store = new HistoricalStore(dir);
+    const original = risingCandles(5)[2];
+    store.append(
+      [{ ...original, open: 1_000, high: 1_010, low: 990, close: 1_000 }],
+      INSTRUMENT,
+      { venue: "NOSYNTH", feed: "late-correction" },
+      "1h",
+      new Date(T0 + 5 * H),
+    );
+
+    const { ctx } = mockContext([setup()], createTestPorts(), [], T0 + 4 * H);
+    const result = await backtestStep.execute(ctx);
+    const verified = result.verifiedSetups[0];
+    assert.equal(verified.status, "DATA_UNAVAILABLE");
+    assert.deepEqual(verified.failureReasons, ["data:insufficient-candles:4-of-5-minimum"]);
+  });
 });
 
 test("Step 8: exakt 5 Kerzen ⇒ echte Messung (Status OK, kein DATA_UNAVAILABLE)", async () => {

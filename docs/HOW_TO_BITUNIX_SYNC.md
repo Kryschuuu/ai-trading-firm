@@ -8,6 +8,8 @@
 > ```
 >
 > Danach das Control Panel im Browser **neu laden**. Fertig. Kein API-Key nötig, Live-Trading bleibt gesperrt.
+>
+> **Geltungsbereich:** Diese Anleitung füllt Spot-/Perpetual-Kerzen für Market-Data-Warmup. Historische Derivat-Fundingraten laufen über den separaten Perp-Sync (siehe unten und [`PERPETUAL_DATA.md`](PERPETUAL_DATA.md)); erfolgreiche Live-Daten sind in einer netzwerkfähigen Zielumgebung zu verifizieren. Bitunix bietet öffentlich keine OI-/Liquidationsdaten.
 
 ---
 
@@ -265,7 +267,33 @@ BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX --dry-run
 
 ---
 
-## 8. Quellen im Repository
+## 8. Separater Perpetual-Funding-Sync (nicht der Kerzen-Warmup)
+
+Der obige Ablauf synchronisiert Marktdaten-Kerzen. Für Funding-Historie ist
+zusätzlich der Perp-Sync erforderlich; er benutzt ebenfalls öffentliche,
+credential-freie Bitunix-Endpunkte, aber eigene Gates und eine eigene Ablage.
+Die CLI-Skripte laden `.env` nicht automatisch. Setze die Flags daher inline
+oder exportiere sie in derselben Shell:
+
+```bash
+BITUNIX_ENABLED=true MARKET_SYNC_VENUES=BITUNIX \
+  npm run market:sync -- --venue=BITUNIX
+BITUNIX_ENABLED=true PERP_DATA_SYNC_ENABLED=true PERP_DATA_VENUES=BITUNIX \
+  npm run perp:sync -- --venue=BITUNIX --kinds=funding --mode=backfill --days=30
+npm run perp:sync -- --status
+```
+
+`PERP_DATA_ENABLED=true` ist unabhängig davon nur nötig, wenn Scanner,
+Backtest/Replay oder Analysten die gespeicherten Daten konsumieren sollen.
+Open Interest und Liquidationen bleiben für Bitunix `UNSUPPORTED` (kein
+öffentlicher Endpunkt). Der Funding-History-Client sendet den dokumentierten
+Query-Key `starTime`; der echte Vendor-Request konnte wegen fehlendem
+Netzwerkzugriff in der Sandbox nicht live geprüft werden. Vollständige
+Betriebs-/Migration-/Capability-Details: [`PERPETUAL_DATA.md`](PERPETUAL_DATA.md).
+
+---
+
+## 9. Quellen im Repository
 
 - `src/brokers/bitunix/config.ts` — `envFlagTrue` / `bitunixEnabled` (nur `"true"` schaltet an) + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50` (v1.40.0 Chunking, ~1 KB, Gateway >6 KB)
 - `src/brokers/bitunix/publicClient.ts` — `fetchTickers` chunked (50, Teilausfall toleriert, Totalausfall wirft ersten Fehler)

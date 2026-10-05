@@ -1,7 +1,7 @@
 # Perpetual-Daten — Funding, Open Interest, Liquidationen (historisch, point-in-time)
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
-> Code-Version **v0.1.0 (Beta)** · Modul `src/perpdata/` · CLI `npm run perp:sync`
+> **Status-Header:** **Funding-Sync implementiert; Bitunix OI/Liquidationen unsupported** · Dokumentationsstand **2026-10-05** ·
+> Code-Version **v0.17.2 (Beta)** · Modul `src/perpdata/` · CLI `npm run perp:sync`
 > (Status: `npm run perp:sync:status`, Offline-Validierung:
 > `npm run perp:sync:fixture`) · Befund RMA-P2-02 des
 > [Straßenbegradigungs-Audits](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md)
@@ -127,11 +127,15 @@ streng getrennt.
 | `SIM` (Fixture) | ✅ | ✅ | ✅ |
 
 Bitunix veröffentlicht public **keinen** Open-Interest- und keinen
-Force-Order/Liquidations-Endpunkt (Stand der API-Doku 2026-09); diese Reihen
+Force-Order/Liquidations-Endpunkt (Stand der API-Doku 2026-10-05); diese Reihen
 bleiben deshalb typisiert `UNSUPPORTED` — der Sync schreibt keine Nullzeilen,
 setzt den Cursor auf `UNSUPPORTED` mit Grund und zählt den Fall in den
 Laufstatistiken. Beide Reihen werden über den SIM-Adapter geprüft (Fixture mit
-negativem Open Interest, Lücken, Duplikaten, 429-Antworten).
+negativem Open Interest, Lücken, Duplikaten, 429-Antworten). Die offizielle
+Funding-History-Doku schreibt den Query-Key für die Startzeit als `starTime`;
+der Client sendet die veröffentlichte Schreibweise (nicht `startTime` wie beim
+Kline-Endpunkt). Das ist gegen den Vendor dokumentiert, konnte wegen des
+Netzwerk-Fehlers in dieser Sandbox aber nicht live bestätigt werden.
 
 Ein Reader, der `[]` als „keine Daten“ läse, verwechselte einen ruhigen Markt mit
 einem fehlenden Endpunkt. Deshalb trägt **jedes** Reihenergebnis
@@ -302,8 +306,39 @@ auffällt), `2` Aufruffehler (unbekanntes Flag, Wert außerhalb der Bounds).
 
 Vollständige Flag-Referenz mit Defaults:
 [`CONFIGURATION.md`](../CONFIGURATION.md#perpetual-daten-rma-p2-02-v1540) und
-`.env.example`. Kurz: `PERP_DATA_ENABLED` und `PERP_DATA_SYNC_ENABLED` stehen
-beide auf `false`; ohne sie ändert sich am System nichts.
+`.env.example`. `PERP_DATA_ENABLED` (Konsumenten) und
+`PERP_DATA_SYNC_ENABLED` (Netzwerk-Ingestion) sind getrennte Gates und stehen
+standardmäßig auf `false`; `BITUNIX_ENABLED` und die `PERP_DATA_VENUES`
+Allowlist müssen ebenfalls passen.
+
+### Bitunix-Funding-Live-Sync
+
+Für eine gezielte Funding-Erstbefüllung müssen alle Ingestion-Gates offen sein;
+API-Keys werden für öffentliche Marktdaten nicht benötigt:
+
+```dotenv
+BITUNIX_ENABLED=true
+PERP_DATA_SYNC_ENABLED=true
+PERP_DATA_VENUES=BITUNIX
+# nur setzen, wenn Scanner/Replay/Analysten die Daten anschließend lesen sollen:
+PERP_DATA_ENABLED=true
+# unabhängig davon benötigt die Market-Data-Discovery ihre Sync-Freigabe:
+MARKET_SYNC_ENABLED=true
+MARKET_SYNC_VENUES=BITUNIX
+```
+
+Dann erst Instrumente discovern/anreichern und anschließend die Funding-Reihe
+synchronisieren:
+
+```bash
+npm run market:sync -- --venue=BITUNIX
+npm run perp:sync -- --venue=BITUNIX --kinds=funding --mode=backfill --days=30
+npm run perp:sync -- --status
+```
+
+Open Interest und Liquidationen sind für Bitunix nicht freigeschaltet, da kein
+öffentlicher Endpunkt dokumentiert ist; `SIM` ist ausschließlich ein Offline-
+Fixture-Provider und kein Live-Datenersatz.
 
 ---
 
@@ -313,7 +348,7 @@ beide auf `false`; ohne sie ändert sich am System nichts.
 psql "$DATABASE_URL" -f drizzle/2026-09-20_perpetual_data.sql   # idempotent
 # oder: npx drizzle-kit push
 npm run perp:sync -- --fixture --dry-run --mode=backfill        # Offline-Check
-npm run perp:sync -- --venue=BITUNIX --mode=backfill --days=30
+npm run perp:sync -- --venue=BITUNIX --kinds=funding --mode=backfill --days=30
 ```
 
 Die Migration ist append-only (fünf Tabellen, keine Änderung an bestehenden),

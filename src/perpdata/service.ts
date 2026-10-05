@@ -434,7 +434,11 @@ export class PerpDataService {
           results: [],
           aggregate: null,
           skipped: null,
-          message: `${venue}: kein Perpetual-Instrument in der Universe-Registry — Perp-Datenpfad läuft ins Leere (Out-of-Scope: Spot).`,
+          message:
+            `${venue}: kein Perpetual-Instrument in der Universe-Registry — Perp-Datenpfad läuft ins Leere (Out-of-Scope: Spot).` +
+            (venue === "BITUNIX"
+              ? " Discovery zuerst ausführen: BITUNIX_ENABLED=true npm run market:sync -- --venue=BITUNIX; danach den Perp-Sync erneut starten."
+              : " Instrumente über den Venue-Market-Sync entdecken und in die Registry übernehmen."),
         });
         continue;
       }
