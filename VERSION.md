@@ -5,7 +5,7 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.17.0` |
+| **Version** | `v0.17.1` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
@@ -410,7 +410,7 @@ ausdrückliche Cloud-Opt-in; nur seine lokalen Fallbacks unterliegen der Prüfun
 [`src/lib/llmProvider.ts`](src/lib/llmProvider.ts) und
 [`src/routing/policy.ts`](src/routing/policy.ts) sind unverändert.
 
-`v0.17.0` (2026-10-05) setzt **ADR-003** (Atomare Mehrprozess-Order-
+`v0.17.1` (2026-10-05) setzt **ADR-003** (Atomare Mehrprozess-Order-
 Reservierung via `PaperBroker.submitAtomic()` / `withAccountLock`) und
 **ADR-004** (Zentrale Singleton-Verwaltung via `src/lib/stateRegistry.ts`)
 verbindlich um (Befunde H2 Race Conditions und S2 Zustandsdrift):

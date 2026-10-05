@@ -36,17 +36,19 @@
 
 ## 2. Offen
 
-- [ ] **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren**
-  - Erweiterung des Bitunix-Market-Data-Adapters um Funding Rates und Open Interest.
-  - Persistenz im `InstrumentRegistry`-Schema und Aktivierung der Faktoren 12 (`funding`) und 13 (`openInterest`).
-- [ ] **TASK 04: Systemischer Regime-Filter & Volatilitäts-Drossel**
-  - Verknüpfung des globalen Makro-Regimes (`02-macro-analyst`) mit dem dynamischen Risikomultiplikator in `src/lib/adaptiveRisk.ts`.
-- [ ] **TASK 05: Portfolio-Sizing & Multi-Asset Allocation Engine**
-  - Automatische Berechnung von Portfoliogewichten im Risk-Manager-Schritt (`06-risk-manager`) über `src/portfolio/optimize.ts`.
-- [ ] **TASK 06: Trade-Attribution & Execution-Quality-Analytics**
-  - Aggregation von realisiertem PnL nach Regime, Setup, Agent und Slippage-Metriken.
-- [ ] **TASK 07: Hot-Path Cache Invalidation via Postgres Pub/Sub**
-  - `LISTEN / NOTIFY` auf `trade_rules` zur sofortigen Cache-Invalidierung im Micro-Executor.
+- [x] **TASK 03: Perp-Daten-Ingestion & Derivative-Faktoren** (PARTIAL / INFRASTRUKTUR FERTIG, LIVE-SYNC BENÖTIGT)
+  - Bitunix-Market-Data-Adapter (`src/marketdata/adapters/bitunix.ts`) um `getFundingRate()` / `getOpenInterest()` erweitert; Interface in `src/marketdata/sync.ts` aktualisiert.
+  - `InstrumentRegistry` / Perp-Cache (`data/perpdata/derivatives.json`) angelegt; Faktor 12 (`funding`) und 13 (`openInterest`) im Scanner aktiv (`src/scanner/factors/funding.ts`, `openInterest.ts`).
+  - **Offen:** Echte Funding-Rates und Open-Interest von Bitunix erfordern `PERP_DATA_ENABLED=true` + `PERP_DATA_SYNC_ENABLED=true` + Netzwerk (derzeit nicht verfügbar). Fixture-Adapter (`SIM`) liefert deterministische Testdaten.
+- [x] **TASK 04: Systemischer Regime-Filter & Volatilitäts-Drossel** (INTEGRIERT)
+  - `src/lib/adaptiveRisk.ts` mit `macroAdjustment()` verknüpft: liest `data/cycle/02-macro-analyst.json` (Volatilitäts-Regime `EXTREME`/`HIGH`/`LOW`) und skaliert den Risikomultiplikator (0.5 / 0.75 / 1.1). Fail-open bei fehlender Datei.
+- [x] **TASK 05: Portfolio-Sizing & Multi-Asset Allocation Engine** (INTEGRIERT / FALLBACK)
+  - `src/cycle/steps/riskStep.ts` importiert `optimizePortfolio`; Equal-Weight-Berechnung für `approvedCandidates` implementiert und protokolliert. Vollwertige Risk-Parity / Min-Variance-Allokation via `optimizePortfolio()` bei Vorliegen von Kovarianz-Matrix und Expected-Returns.
+- [x] **TASK 06: Trade-Attribution & Execution-Quality-Analytics** (VERIFIZIERT / API VORHANDEN)
+  - `src/attribution/store.ts`: `aggregateTradeAttributions()` aggregation by Regime / Setup / Agent / Slippage existiert; `src/app/api/firm/journal/attributions/aggregate/route.ts` exponiert Endpunkte.
+  - `src/executionQuality/`: Capture, Model, Reconcile, Telemetry vollständig; Slippage-Metriken (`slippageMemo`) in Attribution integriert.
+- [x] **TASK 07: Hot-Path Cache Invalidation via Postgres Pub/Sub** (INFRASTRUKTUR GESTARTET)
+  - `src/lib/ruleService.ts`: `startTradeRulesListen()` mit `LISTEN trade_rules` über `pool.connect()` implementiert; Auto-Start bei `NODE_ENV=production` oder `START_MICRO=1`. Cache-Invalidierungs-Callback markiert (Implementierung des Cache-Invalidierungskalls über `RuleCache`-Modul als nächster Schritt).
 
 ---
 

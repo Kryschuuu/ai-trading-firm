@@ -134,6 +134,9 @@ export interface MarketDataAdapter {
     limit: number,
     range?: CandleRange,
   ): Promise<MarketCandle[]>;
+  /** Derivative-Faktoren (TASK 03): Funding-Rate und Open-Interest. Optional. */
+  getFundingRate?(symbol: string): Promise<{ fundingRate: number; nextFundingTime?: number } | null>;
+  getOpenInterest?(symbol: string): Promise<{ openInterest: number; openInterestQuote?: number } | null>;
 }
 
 /** Minimales Logger-Contract des Syncs: eine fertig formatierte, leak-freie Zeile. */

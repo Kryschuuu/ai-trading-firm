@@ -60,6 +60,10 @@ export const riskStep: StepDefinition<RiskStepInput, RiskStepOutput> = {
         approvedCandidates.push(sym);
       }
     }
+    // TASK 05: Portfolio-Weights (Equal-Weight-Fallback; vollwertig über optimizePortfolio bei Korrelationsmatrix).
+    const weights = approvedCandidates.length > 0 ? approvedCandidates.map(() => 1 / approvedCandidates.length) : [];
+    context.log(`Portfolio-Gewichte (Equal-Weight): ${JSON.stringify(weights.map(w => w.toFixed(4)))} für ${approvedCandidates.length} Assets`);
+    // TODO: Vollständige Mehr-Asset-Allokation über optimizePortfolio({ symbols, covariance, expectedReturns }) in Risk-Manager-Schritt.
 
     const fallback: RiskStepOutput = {
       approvedCandidates,
