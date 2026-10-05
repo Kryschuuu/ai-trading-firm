@@ -1,7 +1,13 @@
 # Architecture Decision Records (ADR)
 
-> **Stand:** 2026-10-01 · **Code-Version:** v0.8.0 (Beta) ·
+> **Stand:** 2026-10-05 · **Code-Version:** v0.17.0 (Beta) ·
 > **Verantwortlich:** `docs/roadmap/DECISIONS.md`
+>
+> **Umsetzung ADR-003 + ADR-004 (v0.17.0):** Die Architektur-Entscheidungen
+> zur atomaren Mehrprozess-Order-Reservierung (`submitAtomic` /
+> `withAccountLock`) und zur zentralen Singleton-Verwaltung
+> (`stateRegistry.ts`) sind mit `v0.17.0` verbindlich im Code umgesetzt.
+> `tests/adr003_adr004.test.ts` nagelt die zentralen Invarianten fest.
 
 Dieses Dokument dokumentiert die verbindlichen architektonischen Entscheidungen, Annahmen und Invarianten des Gesamtsystems.
 

@@ -18,6 +18,13 @@ import {
   RuleCache,
   createPaperRuleAdapter,
 } from "../src/lib/microExecutor";
+// ADR-003/ADR-004 (v0.17.0): Der Mikro-Executor ist ein eigener Prozess
+// und teilt den PAPER-Singleton-Ledger mit der Web-App. Vor der ersten
+// Order wird der Ledger über das abhängigkeitsfreie Hydrations-Modul aus
+// der DB wiederhergestellt — dieselbe Logik, die auch die Web-App nutzt,
+// aber ohne LLM-/Analysten-Import.
+import { paperBrokerLedger } from "../src/brokers/factory";
+import { ensurePaperBrokerHydrated } from "../src/lib/brokerHydration";
 
 function envInt(key: string, fallback: number, min: number, max: number): number {
   const n = Number(process.env[key]);
@@ -39,11 +46,26 @@ async function main(): Promise<void> {
   );
 
   const cache = new RuleCache(refreshMs);
+  // ADR-003 (v0.17.0): Singleton-Ledger aus der Factory (statt `new PaperBroker(…)`
+  // im Adapter, wie es bis v0.16.x war und H2-Race-Conditions erzeugte). Der
+  // Adapter selbst ruft `paperBrokerLedger()` auf — wir holen ihn hier vorab,
+  // damit die Hydration starten kann, bevor die erste Regel feuert.
+  const ledger = paperBrokerLedger();
   const executor = new MicroExecutor({
     cache,
-    adapter: createPaperRuleAdapter({ onFired: (id) => cache.noteFired(id) }),
+    adapter: createPaperRuleAdapter({
+      onFired: (id) => cache.noteFired(id),
+      // Hook: vor der ersten Order-Ausführung sicherstellen, dass Positionen,
+      // Cash und Kill-Switch aus der DB hydriert sind. Single-Flight über
+      // stateRegistry — jeder Tick nach dem ersten sieht den bereits
+      // wiederhergestellten Zustand.
+      ensureHydrated: () => ensurePaperBrokerHydrated(ledger),
+    }),
     options: { refreshMs, seedCandles: process.env.MICRO_SEED_CANDLES !== "false" },
   });
+  // Starte die Hydration bereits beim Start (nicht erst beim ersten Match),
+  // damit der erste Tick bereits auf aktuellen Werten rechnet. Lehnt nie ab.
+  void ensurePaperBrokerHydrated(ledger);
 
   const feed =
     feedName === "sim"

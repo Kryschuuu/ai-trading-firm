@@ -109,9 +109,11 @@ export async function register() {
 
   if (process.env.SCHEDULER_ENABLED === "false") return;
 
-  const G = globalThis as typeof globalThis & { __firmSchedulerStarted?: boolean };
-  if (G.__firmSchedulerStarted) return;
-  G.__firmSchedulerStarted = true;
+  // ADR-004 (v0.17.0): Scheduler-Guard über stateRegistry statt rohem
+  // globalThis. Der dynamische Import vermeidet Zirkularität.
+  const { state } = await import("@/lib/stateRegistry");
+  if (state.firmSchedulerStarted.get()) return;
+  state.firmSchedulerStarted.set(true);
 
   const { envInt } = await import("@/lib/env");
   const intervalMs = envInt("TICK_INTERVAL_MS", 60_000, 15_000, 600_000);

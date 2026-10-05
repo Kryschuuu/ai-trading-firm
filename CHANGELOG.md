@@ -21,8 +21,93 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-04** · Code-Version **0.16.1** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-05** · Code-Version **0.17.0** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.0] — ADR-003 + ADR-004: Atomare Mehrprozess-Order-Reservierung und zentrale Singleton-Verwaltung (2026-10-05)
+
+Dieses Release setzt **ADR-003** (Atomare Mehrprozess-Order-Reservierung via `submitAtomic`)
+und **ADR-004** (Zentrale Singleton-Verwaltung via `stateRegistry.ts`) aus
+[`docs/roadmap/DECISIONS.md`](docs/roadmap/DECISIONS.md) verbindlich um. Beide
+Entscheidungen schließen Race Conditions zwischen Next.js-Workern und dem
+eigenständigen Mikro-Executor-Prozess aus (Befund H2) und beseitigen die
+verstreuten `globalThis`-Definitionen, die Zustandsdrifts und unvorhersehbare
+Test-Resets verursachten (Befund S2).
+
+### Added
+
+- **`PaperBroker.submitAtomic()` + `withAccountLock()`** (Bestandteil des
+  Ledgers seit v1.36.19, jetzt der EINZIGE Order-Pfad für den Produktivbetrieb):
+  eine Transaktion, eine Kontosperre, eine DB-Wahrheit.
+- **Neues Modul `src/lib/brokerHydration.ts`:** die Broker-Wiederherstellung
+  (Positionen/Cash/Kill-Switch aus PostgreSQL) liegt jetzt in einem
+  LLM-freien Modul, das sowohl von der Web-App (`engine.ts`) als auch vom
+  Mikro-Executor (`scripts/micro-executor.ts`) genutzt wird — kein
+  doppeltes Hydrations-Code mehr.
+- **Zwei weitere Accessoren in `stateRegistry`** (`firmSchedulerStarted`,
+  `microLimitsLoadedAt`) — die vorher direkt auf `globalThis` saßen.
+- **Konformitätstest-Suite `tests/adr003_adr004.test.ts`** (12 Tests), die
+  die zentralen ADR-Invarianten gegen den Code festnagelt:
+  - Adapter nutzen `submitAtomic` (kein synchroner `submit()` auf dem
+    Singleton-Ledger).
+  - Keine konkurrierenden `new PaperBroker(…)`-Instanzen im
+    Mehrprozess-Pfad.
+  - Keine veralteten Session-Locks (`pg_advisory_lock`) mehr.
+  - `brokerHydration.ts` ist und bleibt LLM-frei.
+  - `__resetAllSingletonsForTests()` deckt die neu registrierten
+    Singletons mit ab.
+
+### Fixed — H2 (Race Conditions Mehrprozess-Betrieb)
+
+- **KRITISCH:** `PaperBrokerAdapter.placeOrder()` (der PAPER-Broker-Adapter
+  in `src/brokers/paper.ts`) rief bisher den **synchronen** `submit()`
+  auf und umging damit die gesamte `submitAtomic`-Schleuse
+  (Kontosperre, `order_intents`-Reservierung, DB-Wahrheits-Prüfung).
+  Ein API-Aufruf auf `/api/firm/...` und ein gleichzeitig feuernder
+  Mikro-Executor konnten damit dieselbe Position doppelt eröffnen
+  oder gemeinsam das Cash überziehen. Der Adapter geht jetzt durch
+  `submitAtomic` und persistiert die Position in derselben Transaktion.
+- **KRITISCH:** `createPaperRuleAdapter()` im Mikro-Executor erzeugte
+  bei JEDEM Aufruf ein **neues** `new PaperBroker(…)` statt den
+  Singleton-Ledger aus `paperBrokerLedger()` zu verwenden. Die lokale
+  Instanz war unhydriert (leeres Startkapital) und hatte ein eigenes,
+  handgerolltes `pg_advisory_lock('rule:'+symbol)` — ein Session-Lock
+  (Lock-Leck bei Crash), der auf einem anderen Key als
+  `withAccountLock` operierte und diesen **nicht** ersetzen konnte.
+  Der Adapter nutzt jetzt den Factory-Singleton; die gesamte Lock-
+  /Wahrheits-/Reservierungslogik liegt ausschließlich bei `submitAtomic`.
+- Doppelter Hydrations-Code entfernt: Engine und Mikro-Executor teilen
+  sich jetzt `ensurePaperBrokerHydrated()` (Single-Flight + Backoff).
+- Manuelle DB-Client-Verwaltung (`getPool().connect()`) im Regel-
+  Ausführungspfad entfernt — veraltete Positions- und Kill-Switch-
+  Abfragen waren redundant zu `submitAtomic`.
+
+### Changed
+
+- `scripts/micro-executor.ts` übergibt `ensureHydrated` an
+  `createPaperRuleAdapter()` und startet die Hydration bereits beim
+  Prozessstart (Single-Flight über `stateRegistry`).
+- `src/lib/engine.ts` importiert die Hydration aus dem neuen
+  `brokerHydration.ts`-Modul statt sie file-lokal zu halten.
+- `src/instrumentation.ts` und `src/lib/microExecutor.ts` nutzen für
+  ihre bisher rohen `globalThis`-Flags (`__firmSchedulerStarted`,
+  `__microLimitsLoadedAt`) jetzt die zentralen Accessors aus
+  `stateRegistry`.
+- `docs/roadmap/DECISIONS.md` (ADR-003/ADR-004) sind jetzt Code-geworden
+  — siehe Konformitätstests.
+
+### Migration
+
+- **Keine Schema-Migration notwendig:** `order_intents` mit partiellem
+  UNIQUE-Index auf `(symbol) WHERE status='RESERVED'` existieren seit
+  `drizzle/2026-09-04_h2_order_intents.sql` (v1.36.19).
+- **Keine Konfigurationsänderung.**
+
+### Tests
+
+- `tests/adr003_adr004.test.ts` (12 Tests, statisch, keine DB).
+- `npm run typecheck` und die nicht-DB-gebundenen Test-Suiten
+  (Broker-Factory, Risk-Guard, AdrVocabulary, ADR-003/004) laufen grün.
 
 ## [0.16.1] — Dashboard-Reiter schalten den sichtbaren Bereich um (2026-10-04)
 

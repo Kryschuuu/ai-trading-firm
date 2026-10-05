@@ -23,7 +23,7 @@
  * weist sie fail-closed ab — sichtbar (Counter, Log, `status().ruleGuard`), nie still.
  */
 import { digest as executionInputHash } from "../executionQuality/model";
-import { db, getPool } from "@/db";
+import { db } from "@/db";
 import {
   tradeRules,
   ruleExecutions,
@@ -94,6 +94,9 @@ import {
 import { loadRegimeFamilyInputs } from "./regimeFamilyInputs";
 import { telemetry } from "./telemetry";
 import { LIVE_SIGNAL_BAR_MS, persistClosedEntrySignal } from "./signalDecayRuntime";
+// ADR-004 (v0.17.0): zentrale Singleton-Registrierung (keine verstreuten
+// globalThis-Keys mehr im Mikro-Executor).
+import { state } from "./stateRegistry";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Basistypen
@@ -579,15 +582,23 @@ export class RuleCache {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Paper-Adapter — Ausführung mit DB-Wahrheit + Advisory-Lock
+// Paper-Adapter — ADR-003 (Atomare Mehrprozess-Order-Reservierung)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Führt einen Regel-Match über den PaperBroker aus. Der Broker wird vor JEDER
- * Ausführung aus der DB re-hydriert (Single Source of Truth), und der gesamte
- * Check-Fill-Block läuft unter einem Postgres-Advisory-Lock pro Symbol —
- * damit können mehrere Executor-Instanzen einen Trade für dasselbe Symbol
- * nie doppelt eröffnen (Multi-Instanz-Skalierung, siehe ARCHITECTURE.md).
+ * Führt einen Regel-Match über den PAPER-Singleton-Ledger aus (ADR-003,
+ * v0.17.0): Broker = `paperBrokerLedger()` (Factory-Singleton, geteilt mit
+ * der Web-App); vor Sizing/Guardrails erfolgt die Hydration via
+ * `ensureHydrated`-Hook; JEDE Order-Eröffnung läuft durch
+ * `PaperBroker.submitAtomic()` — dieser sichert innerhalb einer einzigen
+ * Postgres-Transaktion:
+ *   - `pg_advisory_xact_lock(hashtext('PAPER'))` Kontoserialisierung
+ *   - DB-Wahrheits-Prüfung `positions WHERE status='OPEN'`
+ *   - In-Memory-Guard + Fill (unter dem Lock)
+ *   - `order_intents`-Reservierung mit partiellem UNIQUE-Index
+ *   - Positions-Persistenz + Rollback bei Unique-Konflikt (fail-closed)
+ * Damit können mehrere Prozesse (Next.js-Worker, Mikro-Executor, CLI)
+ * niemals dieselbe Position doppelt eröffnen — siehe docs/roadmap/DECISIONS.md.
  */
 /**
  * Lädt die Laufzeit-Limits (risk_config) in den Prozess — lokal implementiert,
@@ -595,8 +606,10 @@ export class RuleCache {
  * LLM-Code). Fehlende DB → Code-Defaults bleiben (Fail-safe).
  */
 async function ensureRuntimeLimitsLoaded(): Promise<void> {
-  const G = globalThis as typeof globalThis & { __microLimitsLoadedAt?: number };
-  if (G.__microLimitsLoadedAt && Date.now() - G.__microLimitsLoadedAt < 60_000) return;
+  // ADR-004 (v0.17.0): Cache-Timestamp nicht mehr auf rohem globalThis,
+  // sondern über die zentrale stateRegistry (single reset für Tests).
+  const lastLoaded = state.microLimitsLoadedAt.get();
+  if (lastLoaded !== undefined && Date.now() - lastLoaded < 60_000) return;
   try {
     const rows = await db.select().from(riskConfig);
     const raw: Record<string, number> = {};
@@ -693,7 +706,7 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
         applyDrawdownScaling(null);
       }
     }
-    G.__microLimitsLoadedAt = Date.now();
+    state.microLimitsLoadedAt.set(Date.now());
   } catch {
     /* DB nicht bereit → Code-Defaults bleiben wirksam */
   }
@@ -715,8 +728,30 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
  */
 export function createPaperRuleAdapter(opts?: {
   onFired?: (ruleId: string) => void;
+  /**
+   * ADR-003 (v0.17.0): Optionaler Hydrations-Hook. Der Mikro-Executor läuft
+   * als eigenständiger Prozess; er teilt den PAPER-Singleton-Ledger
+   * (`paperBrokerLedger()`) mit der Web-App, muss ihn aber beim Start aus
+   * der DB hydrieren. Das macht der Aufrufer (z. B. `scripts/micro-executor.ts`
+   * via `getBroker()` aus `engine.ts`) und kann diesen Hook nutzen, um die
+   * Hydration nach Bedarf auszulösen. Wird kein Hook übergeben, läuft die
+   * Order durch `submitAtomic` — dieser greift IMMER auf die DB-Wahrheit
+   * zu (positions OPEN + order_intents-Reservierung), auch ohne vorherige
+   * Hydration, und rollt den In-Memory-Ledger bei Konflikt fail-closed
+   * zurück. Die Hydration bleibt aber Pflicht, damit `accountEquity`/
+   * `openPositions` nicht veraltete Werte liefern.
+   */
+  ensureHydrated?: () => Promise<void>;
 }): RuleExecutionAdapter {
-  const broker = new PaperBroker(Number(process.env.STARTING_EQUITY || 10_000));
+  // ADR-003 (v0.17.0): Singleton-Ledger aus der Broker-Factory statt eines
+  // isolierten `new PaperBroker(…)`. Der eigenständige Mikro-Executor-Prozess
+  // und die Next.js-Worker teilen sich damit DENSELBEN Ledger-Typ; die
+  // atomare DB-Serialisierung (`submitAtomic` + `withAccountLock`) ist der
+  // EINZIGE Mehrprozess-Schutz gegen H2. Ein eigenes `new PaperBroker(…)`
+  // pro Adapter-Aufruf hätte einen leeren, unhydrierten Ledger erzeugt und
+  // damit die H2-Wahrung (DB-Wahrheit + order_intents) vollständig umgangen.
+  const { paperBrokerLedger } = require("../brokers/factory") as typeof import("../brokers/factory");
+  const broker: PaperBroker = paperBrokerLedger();
   const startedProcess = Date.now();
 
   return {
@@ -746,80 +781,63 @@ export function createPaperRuleAdapter(opts?: {
       }
 
       await ensureRuntimeLimitsLoaded();
-      const client = await getPool().connect();
+      // ADR-003: Sicherstellen, dass der Singleton-Ledger aus der DB hydriert
+      // ist (Positionen/Cash/Kill-Switch), bevor wir Sizing/Guardrails auf
+      // seinen Werten rechnen. Ein veralteter Ledger würde sonst ein zu
+      // hohes `accountEquity` sehen und Limits falsch bemessen. Die
+      // eigentliche Mehrprozess-Serialisierung (Kontosperre, DB-Wahrheit,
+      // order_intents) liegt danach in `submitAtomic` und ist unabhängig
+      // vom Hydrationszustand immer wirksam.
+      if (opts?.ensureHydrated) {
+        try { await opts.ensureHydrated(); } catch { /* Hydration-Fehler → submitAtomic entscheidet fail-closed */ }
+      }
+
+      // H2-REMOVED (v0.17.0): Das manuelle `pg_advisory_lock(hashtext('rule:'+
+      // symbol))` wurde ENTFERNT. Es war (a) session-scoped statt transaktional
+      // (Lock-Leck bei Crash), (b) auf einem anderen Key als `withAccountLock`
+      // (hashtext('PAPER')) und konnte damit die Kontosperre NICHT ersetzen
+      // oder ergänzen, und (c) enthielt doppelte DB-Prüfungen (positions OPEN,
+      // missions-KILLED, kill_switches), die teilweise bereits in
+      // `submitAtomic` steckten. Die EINZIGE seriöse Kontosperre ist jetzt
+      // `withAccountLock` in `submitAtomic` (transaktional, automatischer
+      // Release bei Commit/Rollback, prozessübergreifend wirksam).
+      //
+      // ADR-003-konformer Ablauf ab hier:
+      //   1. In-Prozess-Guardrails (Regime, Sizing, Cluster) auf den
+      //      aktuellen Werten des (hydrierten) Singleton-Ledgers.
+      //   2. `broker.submitAtomic()`:
+      //        - pg_advisory_xact_lock(hashtext('PAPER')) — Kontoserialisierung
+      //        - SELECT aus positions WHERE status='OPEN' — DB-Wahrheit
+      //        - this.submit(order) — Guard + Fill (im exklusiven Lock)
+      //        - INSERT order_intents RESERVED — partieller UNIQUE als
+      //          Defense-in-Depth
+      //        - persistPosition-Callback (Positions-Insert + Mission-Update)
+      //        - bei Unique-Konflikt: rollbackInMemoryFill (fail-closed)
+      //
+      // Mission-KILLED-Prüfung bleibt hier (VOR der Order, schlankes READ
+      // außerhalb der Transaktion) — sie prüft einen Schreibschutz, nicht
+      // eine Positionsmehrfachöffnung; eine Race zwischen diesem READ und
+      // dem Mission-Kill ist akzeptabel (der Kill schlägt keine Position
+      // mehr auf, sobald Status=KILLED committed ist — Kills laufen in
+      // einem eigenen Modus und ändern den Status nur vorwärts).
+      if (ctx.missionId) {
+        const [mission] = await db
+          .select({ status: missionsTable.status })
+          .from(missionsTable)
+          .where(eq(missionsTable.id, ctx.missionId))
+          .limit(1);
+        if (mission?.status === "KILLED") {
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: "MISSION_KILLED",
+            at: new Date().toISOString(),
+          };
+        }
+      }
+
       try {
-        await client.query("SELECT pg_advisory_lock(hashtext($1))", ["rule:" + symbol]);
-
-        // Frische Wahrheit aus der DB (nicht aus dem RAM des Prozesses).
-        const ks = await client.query<{ armed: boolean }>(
-          "SELECT armed FROM kill_switches ORDER BY created_at DESC LIMIT 1"
-        );
-        if (ks.rows[0]?.armed) {
-          if (!killSwitch.isArmed()) killSwitch.pull("restored:rule-executor");
-          return {
-            status: "BLOCKED",
-            ruleId: ctx.ruleId,
-            symbol,
-            reason: "KILL_SWITCH_ARMED",
-            at: new Date().toISOString(),
-          };
-        }
-
-        const open = await client.query<{ id: string }>(
-          "SELECT id FROM positions WHERE symbol = $1 AND status = 'OPEN' LIMIT 1",
-          [symbol]
-        );
-        if (open.rows.length > 0) {
-          return {
-            status: "BLOCKED",
-            ruleId: ctx.ruleId,
-            symbol,
-            reason: `POSITION_ALREADY_OPEN:${symbol}`,
-            at: new Date().toISOString(),
-          };
-        }
-
-        if (ctx.missionId) {
-          const mission = await client.query<{ status: string }>(
-            "SELECT status FROM missions WHERE id = $1",
-            [ctx.missionId]
-          );
-          if (mission.rows[0]?.status === "KILLED") {
-            return {
-              status: "BLOCKED",
-              ruleId: ctx.ruleId,
-              symbol,
-              reason: "MISSION_KILLED",
-              at: new Date().toISOString(),
-            };
-          }
-        }
-
-        // Broker aus der DB re-hydrieren (Positionen + Cash-Hinweis).
-        const posRows = await client.query<{
-          symbol: string;
-          side: string;
-          qty: string;
-          entry_price: string;
-          stop_loss: string | null;
-          take_profit: string | null;
-        }>("SELECT symbol, side, qty, entry_price, stop_loss, take_profit FROM positions WHERE status = 'OPEN'");
-        const cashRows = await client.query<{ cash: string }>(
-          "SELECT cash FROM equity_snapshots ORDER BY ts DESC LIMIT 1"
-        );
-        const cashHint = Number(cashRows.rows[0]?.cash);
-        broker.hydrate(
-          posRows.rows.map((r) => ({
-            symbol: r.symbol,
-            side: r.side === "SHORT" ? ("SHORT" as const) : ("LONG" as const),
-            qty: Number(r.qty),
-            entryPrice: Number(r.entry_price),
-            stopLoss: r.stop_loss != null ? Number(r.stop_loss) : null,
-            takeProfit: r.take_profit != null ? Number(r.take_profit) : null,
-          })),
-          { cashHint: Number.isFinite(cashHint) && cashHint >= 0 ? cashHint : undefined }
-        );
-
         const equity = broker.accountEquity;
         const limits = getLimits();
         const stopPct = Math.min(ctx.spec.action.stopLossPct / 100, limits.defaultStopLossPct);
@@ -943,9 +961,11 @@ export function createPaperRuleAdapter(opts?: {
         // kein Hintergrund-Job). monitor (Default): nur Audit-Notiz + Log der
         // Würde-Prüfung, Entscheidung unverändert; enforce: Ablehnung
         // `cluster-exposure:max-per-cluster:N` bzw. `-correlation-stale`.
+        // Offene Symbole kommen aus dem (hydrierten) Singleton-Ledger — nicht
+        // mehr aus einem separaten SQL-Client (v0.17.0, ADR-003).
         const clusterCheck = await checkClusterExposure({
           symbol,
-          openSymbols: posRows.rows.map((r) => r.symbol).filter((s) => s !== symbol),
+          openSymbols: broker.listPositions().map((p) => p.symbol).filter((s) => s !== symbol),
           missionId: ctx.missionId,
         }).catch((e) => {
           // Guardrail-Selbstfehler: fail-closed im enforce-Modus; im
@@ -1183,14 +1203,13 @@ export function createPaperRuleAdapter(opts?: {
           reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
           at: new Date().toISOString(),
         };
-      } finally {
-        try {
-          await client.query("SELECT pg_advisory_unlock(hashtext($1))", ["rule:" + symbol]);
-        } catch {
-          /* Lock-Aufräumen ist best effort */
-        }
-        client.release();
       }
+      // ADR-003 (v0.17.0): Kein finally-Client-Release mehr — alle DB-
+      // Zugriffe laufen jetzt über Drizzle (`db`) oder die transaktionale
+      // Kontosperre in `submitAtomic` (automatischer Release bei Commit/
+      // Rollback). Es gibt keinen mehr manuell erworbenen `client` mehr,
+      // der freigegeben werden müsste. Die H2-REMOVED-Stelle dokumentiert
+      // den Wegfall des `pg_advisory_lock`-Session-Locks.
     },
   };
 }
