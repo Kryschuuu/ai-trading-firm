@@ -1,5 +1,5 @@
-/**
 import { pool } from "@/db"; // TASK 07
+/**
  * Persistenz-, Versionierungs- und Feedback-Schicht für das Makro-Regelwerk.
  *
  * Diese Datei ist bewusst LLM-frei (kein Import von ollama/llmProvider/engine),
@@ -542,9 +542,10 @@ let listenClient: import("pg").PoolClient | null = null;
 export async function startTradeRulesListen(): Promise<void> {
   try {
     if (listenClient) return;
-    listenClient = await pool.connect();
-    await listenClient.query("LISTEN trade_rules");
-    listenClient.on("notification", (msg) => {
+    const client = await pool.connect();
+    listenClient = client;
+    await client.query("LISTEN trade_rules");
+    client.on("notification", (msg) => {
       if (msg?.channel === "trade_rules") {
         console.log("[cache-invalidation] trade_rules NOTIFY received — invalidating RuleCache");
         // Cache-Invalidierung über RuleCache-Modul würde hier aufgerufen.
