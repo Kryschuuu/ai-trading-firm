@@ -152,7 +152,7 @@ flowchart TD
   - `SCANNER_CONFIG_FILE` (Override-Pfad)
   - `SCANNER_ARTIFACTS_DIR` (Default: `artifacts`)
 - **Feature-Flags:**
-  - `SCANNER_CONFIG_FILE` (Default: intern `version: 1`)
+  - `SCANNER_CONFIG_FILE` (Default: intern `version: 2`, `DEFAULT_SCANNER_CONFIG` in `src/scanner/config.ts`; auch die ausgelieferte `src/scanner/scanner.config.json` trägt `version: 2`)
 - **Hooks & Events:**
   - CLI: `npm run scan` (schreibt Artefakte) bzw. `npm run scan -- --dry`
   - HTTP: `GET /api/universe/daily`, `GET /api/universe/weekly`, `GET /api/universe/score/{instrumentId}`
@@ -342,7 +342,7 @@ flowchart TD
   - `PORTFOLIO_AUDIT_DIR` (Default: `data/portfolio`)
   - `PORTFOLIO_AUDIT` (Default: `0`)
 - **Feature-Flags:**
-  - `allowShortSelling` (Default: `false` = Long-Only)
+  - Bounds `minWeight`/`maxWeight` (+ `lower`/`upper` je Asset); **long-only ist erzwungen** (`longOnly = true` in `resolveBounds`, `src/portfolio/optimize.ts`) — ein `allowShortSelling`-Feld existiert nicht (Docs↔Code-Audit DC-03)
 - **Hooks & Events:**
   - HTTP-Routen: `POST /api/portfolio/metrics`, `POST /api/portfolio/correlation`, `POST /api/portfolio/optimize`.
   - `getAnalysisContext`: Schnittstelle für LLMs mit Leitplanken (`llmMay` / `llmMustNot`).

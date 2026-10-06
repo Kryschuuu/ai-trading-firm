@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { proposals } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { actorAuditId, requirePermission } from "@/auth";
+import { checkCsrfGuard } from "@/brokers/control-plane/guard";
 import { logAudit } from "@/lib/engine";
 import { flagMissedAudit, isAuditPersistenceError } from "@/lib/auditSink";
 
@@ -38,8 +40,24 @@ type RouteContext = { params: Promise<{ id: string }> };
  * schrieb dort den frei textuellen `approvedBy`-Namen hinein — der Insert konnte
  * auf einer echten PostgreSQL damit nie gelingen (22P02), d. h. dieses Audit
  * fehlte **immer**. Der Actor steht jetzt im `detail`, `agentId` bleibt leer.
+ *
+ * DC-01 (2026-10-06, Docs↔Code-Audit `docs/DOCS_CODE_AUDIT_2026-10-06.md`):
+ * Dieser Handler war die EINZIGE schreibende Firm-Route ohne Autorisierung —
+ * anonyme Requests konnten ein PENDING-Proposal auf APPROVED setzen und damit
+ * die H6-Approval-Chain aushebeln. Jetzt gilt das Muster der übrigen
+ * sicherheitskritischen Mutationen (`/api/firm/kill`, `/api/firm/lifecycle`):
+ *   1. `requirePermission(req, "firm.write")` — Operator/Admin, 401/403 sonst,
+ *      **vor** jedem DB-Zugriff (keine Existenz-Orakel für Anonyme).
+ *   2. `checkCsrfGuard(req)` — `x-csrf-token` (Session-Double-Submit bzw.
+ *      Legacy-Token), 403 `CSRF_INVALID` sonst.
+ * `approvedBy` bleibt Teil des Vertrags (Anzeigename im Audit-`detail`); die
+ * belastbare Identität liefert zusätzlich der aufgelöste Actor
+ * (`actorAuditId`), nie der Client-Text allein.
  */
 export async function POST(request: NextRequest, ctx: RouteContext) {
+  const denied = requirePermission(request, "firm.write") ?? checkCsrfGuard(request);
+  if (denied) return denied;
+  const actor = actorAuditId(request);
   try {
     const { id } = await ctx.params;
     const body = await request.json().catch(() => ({}));
@@ -65,14 +83,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       await logAudit(
         "PROPOSAL_APPROVED",
         "INFO",
-        { proposalId, approvedBy, previousStatus: "PENDING", stage: "PRECHECK" },
+        { proposalId, approvedBy, authenticatedActor: actor, previousStatus: "PENDING", stage: "PRECHECK" },
         proposal.missionId ?? undefined,
         undefined,
         { failClosed: true }
       );
     } catch (e) {
       if (isAuditPersistenceError(e)) {
-        flagMissedAudit("PROPOSAL_APPROVED", { proposalId, approvedBy, action: "approve-blocked" });
+        flagMissedAudit("PROPOSAL_APPROVED", { proposalId, approvedBy, authenticatedActor: actor, action: "approve-blocked" });
         return NextResponse.json(
           {
             error: "AUDIT_PERSISTENCE_FAILED",
@@ -98,13 +116,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     const audited = await logAudit(
       "PROPOSAL_APPROVED",
       "INFO",
-      { proposalId, approvedBy, previousStatus: "PENDING", stage: "APPLIED" },
+      { proposalId, approvedBy, authenticatedActor: actor, previousStatus: "PENDING", stage: "APPLIED" },
       proposal.missionId ?? undefined
     );
     if (!audited.durable) {
       flagMissedAudit("PROPOSAL_APPROVED", {
         proposalId,
         approvedBy,
+        authenticatedActor: actor,
         action: "approve-applied",
         reason: audited.error ?? "audit nicht durable",
       });
@@ -115,6 +134,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       proposalId,
       status: "APPROVED",
       approvedBy,
+      authenticatedActor: actor,
       audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
     });
   } catch (e: any) {

@@ -1,6 +1,8 @@
 # Daily & Weekly Research — deterministischer Markt-Scanner (Task 04)
 
-**Stand:** 2026-08-27 · **Modul:** `src/scanner/` · **API:** `/api/universe/*`
+> **Status-Header:** **Bestandsdokument** · Stand **2026-08-27**, Scanner-Kern am **2026-10-06** gegengeprüft · Code-Version **0.17.2** (Beta); Vollabgleich offen — `docs/audits/2026-10-06-docs-code-audit/` (DC-06).
+
+**Modul:** `src/scanner/` · **API:** `/api/universe/*`
 **Status:** Fundament-Umbau 4 von 12 — macht aus 10.000 Instrumenten eine begründete Tagesliste.
 
 ---

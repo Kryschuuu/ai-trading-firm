@@ -77,8 +77,12 @@ Alle Größen beziehen sich auf **logarithmische Renditen**
 l_i ≤ w_i ≤ u_i                              (Bounds, Default l=0, u=1 ⇒ long-only)
 ```
 
-`allowShortSelling = false` (Default) ⇒ `l_i = maxWeightPerInstrument`,
-`u_i = maxWeightPerInstrument`. Bounds sind **immer** aktiv — auch bei Risk Parity,
+Die API kennt **kein** `allowShortSelling`: Bounds sind `minWeight`/`maxWeight`
+(Default `l=0`, `u=1`) bzw. je Asset `lower`/`upper`; der Solver läuft
+serverseitig **long-only** (`longOnly = true` in `resolveBounds`,
+`src/portfolio/optimize.ts` — ein Fremdfeld im Body wird ignoriert).
+Ohne `maxWeightPerInstrument` gilt `l_i = minWeight`, `u_i = maxWeight`.
+Bounds sind **immer** aktiv — auch bei Risk Parity,
 dort per Projektion, weil das analytische Risk-Parity-Gewicht sonst die Limits bricht.
 
 | Modus | Zielfunktion | Nebenbedingung | Solver |
@@ -336,7 +340,7 @@ curl -sX POST http://localhost:3000/api/portfolio/optimize \
     "mode": "risk_parity",
     "covariance": { "method": "ewma", "decay": 0.94 },
     "solver": { "tolerance": 1e-9, "maxIterations": 2000, "singularMatrixPolicy": "error" },
-    "bounds": { "minWeight": 0, "maxWeight": 1, "allowShortSelling": false },
+    "bounds": { "minWeight": 0, "maxWeight": 1 },
     "expectedReturns": [0.0004, 0.0003, 0.00025, 0.0001, 0.0002],
     "riskFreeRate": 0,
     "guard": { "position": { "maxWeightPerInstrument": 0.2, "maxPositions": 12, "minWeight": 0.001 },

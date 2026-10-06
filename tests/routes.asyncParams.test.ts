@@ -16,6 +16,13 @@
  *   1. Projektweiter Scan aller dynamischen Segmente auf synchrone
  *      `params`/`searchParams`-Annotationen (der eigentliche CI-Blindfleck).
  *   2. Verhaltenstest des Approve-Handlers: `params` muss ausgepackt werden.
+ *
+ * DC-01 (2026-10-06): Der Handler verlangt seit dem Docs↔Code-Audit zuerst
+ * `firm.write` + `x-csrf-token` (vorher war er als einzige schreibende
+ * Firm-Route ungeschützt). Die Verhaltenstests hier bleiben auf ihr eigentliches
+ * Ziel gerichtet — die ID muss im Handler ankommen — und senden deshalb den
+ * lokalen CSRF-Wert (`local`, Offen-Betrieb) mit. Die Autorisierung selbst
+ * prüft `tests/proposalApprove.auth.test.ts`.
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -136,7 +143,7 @@ test("async-params: Approve-Handler löst die Route-ID aus dem Promise auf", asy
   const res = await POST(
     new NextRequest("http://localhost/api/firm/proposals/prop-async-check/approve", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-csrf-token": "local" },
       body: JSON.stringify({ approvedBy: "regression-test" }),
     }),
     { params: Promise.resolve({ id: "prop-async-check" }) },
@@ -158,7 +165,7 @@ test("async-params: Approve-Handler lehnt fehlenden Actor weiterhin mit 400 ab",
   const res = await POST(
     new NextRequest("http://localhost/api/firm/proposals/prop-async-check/approve", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-csrf-token": "local" },
       body: JSON.stringify({}),
     }),
     { params: Promise.resolve({ id: "prop-async-check" }) },

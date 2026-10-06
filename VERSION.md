@@ -440,7 +440,7 @@ korrigiert die Versions-/Roadmap-Aussagen:
 - **Verifikation:** `npm run typecheck`, `npm run lint` und `npm run docs:validate` grün;
   gezielte Offline-/Unit-Läufe 187/187. Embedded PostgreSQL: Perp-Store +
   `trade_rules`-Trigger 9/9, Trade-Attribution 7/7, Broker-Contracts 42/42.
-  `npm test` ohne externes PostgreSQL: 4.719 bestanden, 2 fehlgeschlagen,
+  `npm test` ohne externes PostgreSQL: 4.722 bestanden, 2 fehlgeschlagen,
   36 übersprungen — beide Fehler sind DB-abhängige PAPER-Contract-Tests
   (`ECONNREFUSED 0.0.0.0:5432`), die mit Embedded PostgreSQL 42/42 bestehen.
   Daher ist die Vollsuite insgesamt nicht als grün zu werten. Live-Bitunix

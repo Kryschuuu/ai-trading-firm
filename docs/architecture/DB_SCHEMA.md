@@ -4,7 +4,7 @@
 > **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
 > **Verbindliche Referenz:** `src/db/schema.ts`
 
-Dieses Dokument spezifiziert alle 15 Drizzle-Tabellen der PostgreSQL-Datenbank sowie sämtliche dateigestützten Persistenzstrukturen des Gesamtsystems.
+Dieses Dokument beschreibt die **ursprünglichen 15 Drizzle-Tabellen** (Stand 2026-09-18) im Detail sowie sämtliche dateigestützten Persistenzstrukturen. **SSoT ist `src/db/schema.ts`** — dort stehen inzwischen **67 `pgTable`-Definitionen** (v0.17.2); die später hinzugekommenen Tabellen (u. a. Feature Store, Forecasts, Perp-/Funding-Daten, Execution-Quality, Strategy-Catalog/-Lifecycle/-Screening, Copy-Subscriptions, Regime-Snapshots, Drawdown-/Vol-Targeting, Cross-Sectional, Sentiment, Prompt-Artefakte, Trade-Attachments) sind hier **noch nicht einzeln dokumentiert** — Nachführung siehe `docs/audits/2026-10-06-docs-code-audit/` (Befund DC-07, Prompt `PROMPT-DC-07`).
 
 ---
 
@@ -333,7 +333,7 @@ Sichert die Mehrprozess-Serialisierung und verhindert Doppel-Orders (H2 / v1.36.
 | Ablagepfad | Format | Zugriffsmodus | Schema / Struktur | Retention & Lifecycle |
 |---|---|---|---|---|
 | `data/universe/instruments.ndjson` | NDJSON | Append/Upsert atomar (`0600`) | `MarketInstrument` (ID, Symbol, Base, Quote, Fees, Spread, Vol24h, Status) | Unbegrenzt; aktualisiert durch `market:sync` |
-| `data/history/candles.ndjson` | NDJSON | Append/Kompaktierung atomar (`0600`) | Schema v2: `{ v: 2, instrumentId, venue, feed, timeframe, ts, o, h, l, c, v, fetchedAt }` | Max. 5.000 Kerzen je `(instrumentId, timeframe)` |
+| `data/history/candles.ndjson` | NDJSON | Append/Kompaktierung atomar (`0600`) | Schema v2: `{ v: 2, instrumentId, venue, feed, timeframe, ts, o, h, l, c, v, fetchedAt }` | Max. **100.000** Kerzen je `(instrumentId, timeframe)` (`MAX_CANDLES_PER_SERIES`/`DEFAULT_MAX_BARS_PER_SERIES`, `src/lib/marketdata/limits.ts`; identisch mit [HISTORY.md](../HISTORY.md) §Größenkontrolle) |
 | `artifacts/<YYYY-MM-DD>/daily/*` | JSON | Atomar (`.tmp` + rename) | `01-market-scanner.json` bis `08-backtest-verification.json` + `daily-summary.json` | 30 Tage (`CYCLE_RETENTION_DAYS`) |
 | `artifacts/<YYYY-Www>/weekly/*` | JSON | Atomar (`.tmp` + rename) | `weekly-review.json`, `universe-classification.json`, `weekly-summary.json` | 12 Wochen (`CYCLE_RETENTION_WEEKS`) |
 | `artifacts/index.json` | JSON | Atomar | Index-Manifest aller Daily- und Weekly-Läufe | Synchronisiert beim Pruning |

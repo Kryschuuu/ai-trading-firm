@@ -21,8 +21,64 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-05** · Code-Version **0.17.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-06** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01/DC-02/DC-03)
+
+### Fixed
+
+- **DC-01 (HIGH, Security):** `POST /api/firm/proposals/[id]/approve` war die
+  einzige **schreibende** Route unter `src/app/api/firm/**` ohne Autorisierung —
+  in `AUTH_MODE=token-required` konnte jeder anonyme Aufrufer ein
+  PENDING-Proposal auf APPROVED setzen und damit die H6-Approval-Chain
+  aushebeln. Jetzt: `requirePermission(req, "firm.write") ?? checkCsrfGuard(req)`
+  **vor** jedem DB-Zugriff; der aufgelöste Actor steht zusätzlich als
+  `authenticatedActor` in beiden Audit-Stufen (`PRECHECK`/`APPLIED`) und in der
+  Antwort. Regression: `tests/proposalApprove.auth.test.ts` (7 Tests);
+  `tests/routes.asyncParams.test.ts` sendet den lokalen CSRF-Wert.
+- **DC-02 (HIGH):** `REQUIRE_HUMAN_APPROVAL` wurde in der Firm-Anzeige als
+  `=== "true"` ausgewertet, in allen Gates (Live-Gate, ALPACA, BITUNIX) dagegen
+  fail-closed als `!== "false"` — das Dashboard meldete bei ungesetzter Variable
+  „Freigabe nicht erforderlich", obwohl die Gates sie verlangen. Die Anzeige
+  nutzt jetzt `humanApprovalRequired()` aus `src/live-gate/config.ts`.
+  Regression: `tests/firmHumanApproval.parity.test.ts` (Parität + Quell-Drift).
+- **DC-03 (MEDIUM, Doku):** zwölf Einzelkorrekturen — u. a. `STRATEGY_STACK.md`
+  (Feature-Store 6 statt 3 Features, zwei Slices), `PORTFOLIO_ANALYTICS.md`/
+  `PIPELINE_MAP.md` (dokumentiertes Feld `allowShortSelling` existiert nicht;
+  long-only ist in `resolveBounds` erzwungen), `PIPELINE_MAP.md`
+  (`SCANNER_CONFIG_FILE`-Default `version: 2`), `DB_SCHEMA.md` (Candle-Limit
+  100.000 statt 5.000; Scope der 15 Tabellen klargestellt, SSoT `src/db/schema.ts`
+  mit 67 `pgTable`), `VERSION.md` (Testzahl 4.722), `CONTRIBUTING.md`/`docs/ci/README.md`
+  (DB-Skip-Aussage präzisiert: zwei PAPER-Contract-Tests scheitern ohne DB),
+  `docs/README.md` (Versionszeile im Fuß, Stub-Hinweis, neuer Audit im Index und
+  im Baum), `audits/README.md` (Baum v1.2.5 statt v1.2.2), `BETA_STATUS.md`
+  („acht Phasen"), `HANDBUCH.md` (`GET /api/firm/execution-quality` ergänzt),
+  Status-Header für `DAILY_WEEKLY_RESEARCH.md`, `SYMBOLS.md`,
+  `SETUP_PG_TROUBLESHOOTING.md`, `security/README.md` (Approve-Pfad in der
+  Guard-Aufzählung).
+
+### Added
+
+- **Audit-Bericht:** [`docs/DOCS_CODE_AUDIT_2026-10-06.md`](docs/DOCS_CODE_AUDIT_2026-10-06.md)
+  — Ist/Soll aller Fachdokumente gegen Code/Commits (Prüfbasis `main` @ `104aaef`,
+  reproduzierbare Prüfungen: `tsc`, `eslint`, `docs:validate`, volle Testsuite).
+- **Audit-Zyklus:** [`docs/audits/2026-10-06-docs-code-audit/`](docs/audits/2026-10-06-docs-code-audit/README.md)
+  — 9 Befunde (DC-01…DC-09), 6 kopierfertige Folge-Prompts
+  (`prompts/PROMPT-DC-04…09`) und Remediation-Tracking.
+- **Regressionstests:** `tests/proposalApprove.auth.test.ts`,
+  `tests/firmHumanApproval.parity.test.ts`.
+
+### Notes
+
+- Offene Befunde mit Prompts: DC-04 (Versions-Header, 4/45 aktuell),
+  DC-05 (vier dokumentierte Env-Flags ohne Code-Read, `.env.example`-Lücken),
+  DC-06 (Symbole/Pfade ohne Code-Entsprechung), DC-07 (`DB_SCHEMA.md` 15/67
+  Tabellen), DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI),
+  DC-09 (generierte Inventare + Release-Bump-Schritt).
+- `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün; volle Suite
+  unverändert mit den zwei bekannten DB-abhängigen PAPER-Contract-Fehlern
+  (`ECONNREFUSED 0.0.0.0:5432`).
 
 ## [0.17.2] — TASK 03/04/05/07: Integrationspfade und PIT-Härtung (2026-10-05)
 

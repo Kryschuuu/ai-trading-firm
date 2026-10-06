@@ -74,6 +74,12 @@ hinterlässt insbesondere keinen neuen Draft.
 | Archivieren | `strategy.rules.archive` | nein | nein | ja |
 | Makro-Zyklus manuell starten | `strategy.rules.activate` | nein | nein | ja |
 
+**Schreibpfade mit Guard (Stand 2026-10-06):** `POST /api/firm/proposals/[id]/approve`
+verlangt `firm.write` **und** den CSRF-Header `x-csrf-token` — der Guard läuft
+vor jedem DB-Zugriff (DC-01, `tests/proposalApprove.auth.test.ts`). Der
+aufgelöste Actor steht zusätzlich als `authenticatedActor` in beiden
+Audit-Stufen und in der Antwort.
+
 Diese beiden Rule-Endpunkte verlangen zusätzlich zur jeweiligen Freigabe
 `strategy.rules.write`. Die Rollenmatrix gewährt dies jedem Admin. `reject`
 betrifft ausschließlich DRAFTs, `pause` ausschließlich ACTIVE-Regeln; bisherige

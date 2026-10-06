@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-10-02 · **Code-Version:** v0.10.2 (Beta)
+> **Status:** Ist-Zustand · **Stand:** 2026-10-06 · **Code-Version:** v0.17.2 (Beta)
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)
@@ -9,7 +9,7 @@
 
 Diese Karte fixiert den **Ist-Zustand** des Strategie-Stacks — welcher Baustein wofür
 zuständig ist und wo neue Arbeit hingehört. Sie korrigiert die Fehleinschätzung aus
-dem Ausbaudokument (Feature Store = 3 Features, kein „zentraler Layer"; Regime =
+dem Ausbaudokument (Feature Store = 6 Features in zwei Slices, kein „zentraler Layer"; Regime =
 bereits 5+1; Strategieklasse = bereits vorhanden; Alpaca-WS = nicht vorhanden).
 
 Bestandskarte, keine zweite Implementierung. Die **Entscheidungen** dahinter (Strategieklasse, Regime,
@@ -32,7 +32,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 | Cross-Sectional-Ranking | `src/crossSectional/*` | keine neue Spec (ADR-010) |
 | Portfolio-Gewichte / Exposure | `src/portfolio/*` (`optimize.ts`, `volatilityTargeting.ts`) | Universe-Gewichte nur als `PortfolioConstruction` (ADR-010, nicht gebaut) |
 | Scanner-Faktoren | `src/scanner/scanner.config.json` (**14 aktive**) | nicht die Dateiliste |
-| Feature Store | `src/features/*` (3 Features) | nicht „zentraler Layer" |
+| Feature Store | `src/features/*` (6 Features, zwei Slices: `scanner.*` + `rule.*`) | nicht „zentraler Layer" |
 | Backtest / WF / MC | `src/backtest/*` | keine zweite Engine |
 | Kostenmodell | `BacktestEngineConfig.feeModel` + `MonteCarloStressConfig` | kein drittes |
 | Strategie-Template-Vertrag | `src/strategies/types.ts` (`StrategyTemplate`) | — |
@@ -63,7 +63,7 @@ Erweiterungspunkte: `INTEGRATION_POINTS.md`.
 - **Universe-Mitgliedschaft:** drei Filterstufen mit je eigenem Zweck — Registry-Ausschluss-Policy (`src/universe/policy.ts`, `policy.default.json`), Scanner-Trichter (`checkEligibility` in `src/scanner/filters.ts`) und Snapshot-Membership für Cross-Sectional (`EligibilityConfig` in `src/crossSectional/types.ts`, angewendet in `universe.ts`). Für Universe-Strategien gilt die dritte; keine vierte Stufe, keine zweite Eligibility-Spec (ADR-010).
 - **Cross-Sectional-Ranking:** `src/crossSectional/*` = Momentum-Horizonte, Winsorize, z-Score, Composite, Rang/Perzentil, Provenance. Keine zusätzliche Spec-Datei.
 - **Scanner-Faktoren:** `src/scanner/scanner.config.json` (versioniert, `version: 2`) konfiguriert **14 aktive** Faktoren: `liquidity`, `spread`, `atr`, `volatility`, `momentum`, `trend`, `volumeRatio`, `rsi`, `drawdown`, `correlation`, `news`, `funding`, `openInterest`, `execution`. Implementierung: `src/scanner/factors/*` (17 Dateien: 15 Faktor-Module — 14 aktive plus `crossSectionalMomentum` als Diagnose — sowie `helpers.ts` und `index.ts`). SSoT ist die Config, nicht die Dateiliste.
-- **Feature Store:** `src/features/*` = Registry, Materialisierung, PIT-Query, Validierung. Aktueller Slice (RMA-P6-01): 3 Features `scanner.rsi`, `scanner.atr`, `scanner.atr_band` (`src/features/definitions.ts` `FEATURE_IDS`). Kein „zentraler Layer", der Scanner/Backtest ersetzt — zusätzlicher Lesepfad.
+- **Feature Store:** `src/features/*` = Registry, Materialisierung, PIT-Query, Validierung. **Zwei Slices, 6 Features** (`src/features/definitions.ts`): Scanner-Slice (RMA-P6-01) `scanner.rsi`, `scanner.atr`, `scanner.atr_band` (`FEATURE_IDS`) und Rule-Slice (STX-02-04, `v0.6.x`) `rule.bb_zscore`, `rule.price_vs_upper_bb_pct`, `rule.donchian_breakout_pct` (`RULE_FEATURE_IDS`, Owner `rule`); Paritätstest `tests/ruleFeatureStoreParity.test.ts`, Details `docs/FEATURE_STORE.md` §3.1/§3.2. Kein „zentraler Layer", der Scanner/Backtest ersetzt — zusätzlicher Lesepfad.
 - **Backtest / WF / MC:** `src/backtest/*` = `engine.ts`, `portfolio.ts`, `simulator.ts`, `walkforward.ts`, `montecarlo.ts`, `indicatorCache.ts`, `tradeLedger.ts`, `runStore.ts`, etc. Keine zweite Engine.
 - **Kostenmodell:** `BacktestEngineConfig.feeModel` (`src/backtest/types.ts` `{ makerFee, takerFee }`) + `MonteCarloStressConfig` (`src/backtest/montecarlo.ts` `{ feeMultiplier, slippageMultiplier }`). Kein drittes Modell.
 - **Lifecycle + Evidenz:** `src/strategyLifecycle/*` = 9 Zustände (`states.ts`), Drift-Gates (`drift.ts`), Evidenz (`evidence.ts`), Order-Gate, Policies, Service.

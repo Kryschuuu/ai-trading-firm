@@ -496,6 +496,7 @@ curl -s -X POST localhost:3369/api/firm/kill \
 | `POST` | `/api/auth/logout` | `{all?: boolean}` | Session serverseitig widerrufen und Cookies löschen (`all: true` administrativ) |
 | `GET` | `/api/auth/me` | – | aktueller Actor (Rolle, Permissions, `authMode`; 401 wenn Credential erwartet und fehlt) |
 | `GET` | `/api/ops` | – | Operations Center: Rolle, `liveEnabled`, zehn Sektionen mit Status/Kennzahlen/Quellen |
+| `GET` | `/api/firm/execution-quality` | `from`, `to`, optional `asOf` (UTC-Epoch-ms, bounded) | Venue-übergreifendes Execution-Benchmarking (`firm.read`, `private, no-store`) |
 
 > **Workshop-Endpunkte:** Die drei Missions-/Agenten-Routen sind die Grundlage
 > des Workshop-Tabs. `riskBudget`/`maxPositionPct` werden gegen die

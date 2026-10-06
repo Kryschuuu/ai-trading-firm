@@ -138,6 +138,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[DOCS_VIEWER.md](DOCS_VIEWER.md)** | In-Browser-Doku (`/docs`): Katalog vs. Dateibaum, Komponenten, Tabellen-Überlauf, Pflegeanleitung (neues Dokument in 3 Schritten), Whitelist/Traversal-Schranke, Grenzen (2026-10-04) |
 | **[ARENA_TASKS.md](ARENA_TASKS.md)** | Übersicht aller Arena-Tasks (01–11) mit Versionen, Umfang, Merge-Status |
 | **[DOCS_SYNC_AUDIT.md](DOCS_SYNC_AUDIT.md)** | Docs-Code-Sync-Audit: jede Behauptung gegen Code geprüft |
+| **[DOCS_CODE_AUDIT_2026-10-06.md](DOCS_CODE_AUDIT_2026-10-06.md)** | **Docs↔Code-Audit v0.17.2** — Ist/Soll der gesamten `docs/`-Landschaft gegen Code/Commits; Findings + Maßnahmen unter [audits/2026-10-06-docs-code-audit/](audits/2026-10-06-docs-code-audit/README.md) |
 
 ### Audit & Security — Neue skalierbare Struktur (2026-09-05)
 
@@ -152,11 +153,16 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | [audits/2026-09-20-roadmap-audit/](audits/2026-09-20-roadmap-audit/) | 25-Punkte-Roadmap-Audit für Backtest, Research, Agenten, Execution, Risiko und Datenfundament | **CLOSED (v1.73.0): 4 VERIFIED, 21 FIXED, 0 PARTIAL, 0 OPEN** — [vollständiger Bericht](audits/2026-09-20-roadmap-audit/report.md), [21 eigenständige Umsetzungs-Prompts](audits/2026-09-20-roadmap-audit/prompts/README.md), [Tracking](audits/2026-09-20-roadmap-audit/remediation/TRACKING.md) |
 | [audits/2026-09-23-verbesserungen-fahrplan/](audits/2026-09-23-verbesserungen-fahrplan/) | Abgleich des Big-Pickle-Audits „Verbesserungen“ (O1–O6, W1–W5, Datenquellen) — Kosten im Regel-Backtest, Workshop-Schritt 5, Trusted-Indikatoren | **CLOSED (v0.2.0):** [Tracking](audits/2026-09-23-verbesserungen-fahrplan/remediation/TRACKING.md), [Befunde](audits/2026-09-23-verbesserungen-fahrplan/findings/README.md), [Prompts](audits/2026-09-23-verbesserungen-fahrplan/prompts/README.md) |
 | [audits/2026-09-29-strategy-template-ausbau/](audits/2026-09-29-strategy-template-ausbau/) | Audit des Strategie-Template-Ausbaus — externes Ausbaudokument gegen Code verifiziert: 21 Findings (5 HIGH) + 37 Umsetzungs-Prompts in 9 Phasen | **OPEN** (Audit v1.2.5 — Vollabgleich vom 2026-10-03 gegen `main` @ `3d13161` plus STX-08-04/08-05: Phasen 0–7/alle 32 Ursprungs-Prompts abgeschlossen; 21 Findings: 19 FIXED, 1 PARTIAL (STX-14), 1 OPEN (STX-08); Phase 8: 08-01…08-05 erledigt — 08-04 schließt STX-12 in `v0.11.0` ([PR #221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)), 08-05 schließt STX-21 in `v0.11.1`; G6 Pilotlauf offen — [Bericht](audits/2026-09-29-strategy-template-ausbau/report.md), [Abgleich](audits/2026-09-29-strategy-template-ausbau/remediation/RECONCILE-2026-10-03.md), [ROADMAP](audits/2026-09-29-strategy-template-ausbau/ROADMAP.md), [Versionierung](audits/2026-09-29-strategy-template-ausbau/VERSIONING.md), [Prompts](audits/2026-09-29-strategy-template-ausbau/prompts/README.md), [Tracking](audits/2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [Bench-Baseline](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md), [ADR-008…010](roadmap/DECISIONS.md). **Bleibt Beta** — [BETA_STATUS.md](BETA_STATUS.md) |
+| [audits/2026-10-06-docs-code-audit/](audits/2026-10-06-docs-code-audit/) | **Docs↔Code-Audit v0.17.2** — 9 Befunde (DC-01…DC-09) aus dem Abgleich der Fachdokumente gegen Code/Commits, mit kopierfertigen Folge-Prompts | **OPEN** — DC-01 (Proposal-Freigabe ohne Autorisierung) und DC-02 (`REQUIRE_HUMAN_APPROVAL`-Semantik) am 2026-10-06 **FIXED**; DC-03 (Doku-Kleinfindings) gefixt; offen: DC-04…DC-09 — [Bericht](DOCS_CODE_AUDIT_2026-10-06.md), [Prompts](audits/2026-10-06-docs-code-audit/prompts/README.md), [Tracking](audits/2026-10-06-docs-code-audit/remediation/TRACKING.md). **Bleibt Beta** — [BETA_STATUS.md](BETA_STATUS.md) |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
 | [peer-reviews/2026-08-26-bitunix-execution/](peer-reviews/2026-08-26-bitunix-execution/) | Bitunix-Ausführungs-Refactor — ExecutionPort | [review](peer-reviews/2026-08-26-bitunix-execution/review.md) |
 | [peer-reviews/2026-08-26-routing-overrides/](peer-reviews/2026-08-26-routing-overrides/) | Provider/Modell-Overrides — Audit-Härtung | [review](peer-reviews/2026-08-26-routing-overrides/review.md) |
+
+> **Redirect-Stubs (Altlinks):** `PEER_REVIEW_LIVE_TRADING.md`, `PEER_REVIEW_BITUNIX_EXECUTION.md` und
+> `PEER_REVIEW_ROUTING_OVERRIDES.md` liegen unverändert im `docs/`-Wurzelverzeichnis und verweisen auf die
+> jeweiligen `peer-reviews/2026-08-26-*/review.md`; die kanonische Fassung steht dort.
 | **[security/](security/)** | Security-Übersicht & Härtung — aggregierte Critical/High Findings | [README](security/README.md) + [SECURITY_AUDIT.md](security/SECURITY_AUDIT.md) |
 
 ### Archiv — Historische Dokumente
@@ -299,7 +305,8 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
     │   ├── 2026-09-18-feature-gap/    ← Feature-Gap-Audit (GAP-01…GAP-10, abgeschlossen)
     │   ├── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Prompts (CLOSED)
     │   ├── 2026-09-23-verbesserungen-fahrplan/  ← Verbesserungen, CLOSED v0.2.0
-    │   └── 2026-09-29-strategy-template-ausbau/  ← Strategie-Template-Ausbau (21 Findings, 37 Prompts, OPEN v1.2.2)
+    │   ├── 2026-09-29-strategy-template-ausbau/  ← Strategie-Template-Ausbau (21 Findings, 37 Prompts, OPEN v1.2.5)
+    │   └── 2026-10-06-docs-code-audit/  ← Docs↔Code-Audit v0.17.2 (DC-01…DC-09; DC-01/DC-02 FIXED, 6 Prompts offen)
     ├── peer-reviews/         ← Peer-Review-Patches gesammelt
     │   ├── README.md
     │   ├── 2026-08-26-live-trading-readiness/
@@ -341,6 +348,6 @@ Siehe [audits/README.md](audits/README.md) und [peer-reviews/README.md](peer-rev
 
 ## Version
 
-`v0.2.0 (Beta)` (siehe `package.json`, [../VERSION.md](../VERSION.md) +
+`v0.17.2 (Beta)` (siehe `package.json`, [../VERSION.md](../VERSION.md) +
 [../CHANGELOG.md](../CHANGELOG.md)). Legacy-Historie (`v1.x.x`, intern):
 [archive/CHANGELOG-legacy-v1.md](archive/CHANGELOG-legacy-v1.md).
