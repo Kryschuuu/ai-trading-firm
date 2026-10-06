@@ -62,7 +62,7 @@ LLM- oder Broker-Endpunkte wurden nicht live geprüft.
 | `npx tsc --noEmit` | **exit 0** (keine Fehler) | `/home/user/audit/tsc.log` |
 | `npx eslint .` | **exit 0** (keine Warnungen/Fehler) | `/home/user/audit/eslint.log` |
 | `npm run docs:validate` | **exit 0** — „9 Checks, 10 Hilfe-Dateien. OK" | `/home/user/audit/docsvalidate.log` |
-| `npm test` (ohne externes PostgreSQL) | vor den Fixes: **4.760 / 4.722 pass / 2 fail / 36 skip** (237 s) · nach den Fixes: **4.769 / 4.731 pass / 2 fail / 36 skip** (229 s, Δ = 9 neue Regressionstests) | Zusammenfassung im Repo: [`audits/2026-10-06-docs-code-audit/remediation/evidence/test-after-summary.log`](audits/2026-10-06-docs-code-audit/remediation/evidence/test-after-summary.log) |
+| `npm test` (ohne externes PostgreSQL) | vor den Fixes: **4.760 / 4.722 pass / 2 fail / 36 skip** (237 s) · nach den Fixes: **4.769 / 4.731 pass / 2 fail / 36 skip** (229 s, Δ = 9 neue Regressionstests) | Zahlen im Repo dokumentiert: [`audits/2026-10-06-docs-code-audit/remediation/evidence/README.md`](audits/2026-10-06-docs-code-audit/remediation/evidence/README.md) (Logdateien selbst sind per `.gitignore` bewusst nicht versioniert) |
 | Link-Auflösung im Doku-Viewer | 1.427 korrekt / 126 Code-Text | docs-validate |
 | API-Routen im Code | 87 `route.ts`, 16 Namespaces | Zählung |
 | Drizzle-Tabellen | 67 `pgTable`, 0 `pgEnum` | `src/db/schema.ts` |

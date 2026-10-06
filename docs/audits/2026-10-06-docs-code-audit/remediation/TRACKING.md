@@ -43,7 +43,7 @@ DC-09  (Inventare + Bump-Skript)           ← kann 07/08 vorbereiten
 | `npm run typecheck` | grün |
 | `npm run lint` | grün |
 | `npm run docs:validate` | grün (9 Checks, 10 Hilfe-Dateien) |
-| `npm test` (ohne externes PostgreSQL, nach den Fixes) | 4.769 Tests · **4.731 pass** · 2 fail · 36 skip — beide Fehler sind die bekannten DB-abhängigen PAPER-Contract-Tests (`ECONNREFUSED 0.0.0.0:5432`). Zusammenfassung: `evidence/test-after-summary.log` |
+| `npm test` (ohne externes PostgreSQL, nach den Fixes) | 4.769 Tests · **4.731 pass** · 2 fail · 36 skip — beide Fehler sind die bekannten DB-abhängigen PAPER-Contract-Tests (`ECONNREFUSED 0.0.0.0:5432`). Zahlen vollständig in `evidence/README.md` (Logdateien sind per `.gitignore` nicht versioniert) |
 | Neue Tests | `tests/proposalApprove.auth.test.ts` (7), `tests/firmHumanApproval.parity.test.ts` (2) grün |
 
 ## Offene Beobachtungen ohne eigenen Finding-Status

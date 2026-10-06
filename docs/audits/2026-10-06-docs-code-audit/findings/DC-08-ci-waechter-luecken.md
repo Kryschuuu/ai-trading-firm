@@ -20,7 +20,7 @@ einer Lücke der Check-Matrix.
 | L2 | **Keine Gegenrichtung Code → Doku** | Flags/Routen/Tabellen im Code ohne Doku-Erwähnung | DC-05 Teil B, DC-07 (52 Tabellen), `GET /api/firm/execution-quality` (vor DC-03) |
 | L3 | **Versions-Check nur für 2 Dateien** | `Code-Version`-Header **aller** Dokumente gegen `package.json` | DC-04 (41 Header driften ungestört) |
 | L4 | **Symbol-Check fehlt vollständig** | Dokumentierte Backtick-Symbole/`src`-Pfade müssen existieren (mit Altpfad-Whitelist) | DC-06 (`matchRule`, `FunnelStageResult`, `workshop/InfoTip.tsx` …) |
-| L5 | **Test-Suite ist in keinem Workflow** | `npm test` läuft weder in `main.yml` noch in `security-live-gate.yml`; zwei PAPER-Contract-Tests scheitern ohne DB **statt zu skippen** — die Zusage „DB-gegatete Tests überspringen sich" gilt nur für die übrigen Dateien | Reproduzierter Lauf 2026-10-06: 4.760 Tests, 4.722 pass, **2 fail**, 36 skip (`ECONNREFUSED 0.0.0.0:5432`); nach den DC-01/02-Fixes 4.769/4.731/2/36 — dieselben zwei Fehler, `remediation/evidence/test-after-summary.log` |
+| L5 | **Test-Suite ist in keinem Workflow** | `npm test` läuft weder in `main.yml` noch in `security-live-gate.yml`; zwei PAPER-Contract-Tests scheitern ohne DB **statt zu skippen** — die Zusage „DB-gegatete Tests überspringen sich" gilt nur für die übrigen Dateien | Reproduzierter Lauf 2026-10-06: 4.760 Tests, 4.722 pass, **2 fail**, 36 skip (`ECONNREFUSED 0.0.0.0:5432`); nach den DC-01/02-Fixes 4.769/4.731/2/36 — dieselben zwei Fehler (Zahlen in `remediation/evidence/README.md`) |
 
 Zum Vergleich: Die Checks, die es gibt (Links, App-Links, Markdown-Lint,
 Secrets, Env-Flags Doku→Code, Routen Doku→Code, Live-Gate-States,

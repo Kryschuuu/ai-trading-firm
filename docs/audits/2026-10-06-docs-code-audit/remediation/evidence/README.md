@@ -12,7 +12,7 @@ Audit-Session (Typecheck/Lint/docs:validate/Testlauf, zusammen ca. 2 MB) liegen
 | Lint | `npm run lint` | exit 0, keine Ausgabe |
 | Docs-Wächter | `npm run docs:validate` | „OK — alle Docs-Checks gruen." (9 Checks, 10 Hilfe-Dateien) |
 | Volle Suite (vor den Fixes) | `npm test` | 4.760 Tests · 4.722 pass · **2 fail** · 36 skip · 237 s |
-| Volle Suite (nach DC-01/DC-02/DC-03) | `npm test` | 4.769 Tests · 4.731 pass · **2 fail** · 36 skip · 229 s — `remediation/evidence/test-after-summary.log` (Δ = 9 neue Regressionstests, dieselben 2 DB-bedingten Fehler) |
+| Volle Suite (nach DC-01/DC-02/DC-03) | `npm test` | 4.769 Tests · 4.731 pass · **2 fail** · 36 skip · 229 s — (Δ = 9 neue Regressionstests, dieselben 2 DB-bedingten Fehler; die Logdatei selbst ist per `.gitignore` nicht versioniert) |
 | Neue Regression DC-01 | `node --import tsx --test tests/proposalApprove.auth.test.ts` | 7/7 grün |
 | Neue Regression DC-02 | `node --import tsx --test tests/firmHumanApproval.parity.test.ts` | 2/2 grün |
 | Angepasst | `node --import tsx --test tests/routes.asyncParams.test.ts` | 6/6 grün |
