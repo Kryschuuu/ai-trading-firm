@@ -46,6 +46,19 @@ DC-09  (Inventare + Bump-Skript)           ← kann 07/08 vorbereiten
 | `npm test` (ohne externes PostgreSQL, nach den Fixes) | 4.769 Tests · **4.731 pass** · 2 fail · 36 skip — beide Fehler sind die bekannten DB-abhängigen PAPER-Contract-Tests (`ECONNREFUSED 0.0.0.0:5432`). Zahlen vollständig in `evidence/README.md` (Logdateien sind per `.gitignore` nicht versioniert) |
 | Neue Tests | `tests/proposalApprove.auth.test.ts` (7), `tests/firmHumanApproval.parity.test.ts` (2) grün |
 
+## CI-Stand des Fix-Commits (Nachtrag 2026-10-07)
+
+| Workflow | Ergebnis | Anmerkung |
+|----------|----------|-----------|
+| `docs-validate` | ✅ success | Typecheck + Docs-Validierung (inkl. Link-/App-Link-Check des neuen Audit-Ordners) |
+| `security-live-gate` | ❌ failure — **nicht durch diese Änderung** | Der Workflow bricht im **ersten** Schritt `npm audit --audit-level=high --omit=dev` ab (fail-closed) wegen **neuer** Advisories seit dem letzten grünen `main`-Lauf (2026-10-06): `sharp < 0.35.5` (CVE-2026-96889, via `next@16.3.8`, im Repo `sharp@0.35.4`) und `source-map-js ≤ 1.2.1` (GHSA-68fv-2mgg-jv7q). `package.json`/`package-lock.json` sind in diesem Audit unangetastet — ein Re-Run von `main` würde identisch rot laufen. Alle nachfolgenden Schritte (SEC-04-Pin, Typecheck, Lint, Build, Security-Suite) wurden dadurch übersprungen. |
+
+**Empfehlung (eigene Session, nicht Teil des Doku-Audits):** `sharp` per
+`overrides` auf `^0.35.5` anheben bzw. auf den Next-Bump warten und dann
+`npm ci && npm run build && npm run security:live-gate` vollständig durchlaufen
+lassen. Das Repo kuratiert npm-Abhängigkeiten bewusst manuell
+(`.github/dependabot.yml` deckt nur `github-actions` ab).
+
 ## Offene Beobachtungen ohne eigenen Finding-Status
 
 - **`pruneArtifacts()` wird produktiv nie aufgerufen** (`src/cycle/artifacts.ts`) — gehört fachlich zu DC-05 (Flag-Entscheidung), wird dort mitentschieden.
