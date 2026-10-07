@@ -299,6 +299,11 @@ fail-closed Schritt `npm audit --audit-level=high --omit=dev` rot werden ließen
   `sharp >= 0.35.5` **und** `source-map-js >= 1.2.2` angehoben — gleiches Prinzip
   wie SEC-04: Der Gate-Floor darf nie weicher sein als das Advisory. Die
   `@img/sharp-libvips-*`-Binaries liegen mit dem Sprung bei 1.3.4 (Floor 1.3.3).
+- **Konsistenz-Detail:** Parallel zum Override wurde der Install-Script-Eintrag in
+  `allowScripts` (`package.json`) von `sharp@0.35.4` auf `sharp@0.35.5` gehoben —
+  er zeigte sonst auf eine Version, die im Lockfile nicht mehr vorkommt. Kein
+  Skript bzw. Test wertet das Feld aus (Stand 2026-10-06), es ist damit aber
+  wieder deckungsgleich mit der installierten Version.
 - **Bekannt und bewusst offen (nicht blockierend, `--audit-level=high`):**
   `postcss-selector-parser < 7.1.6` (moderat; `@tailwindcss/typography@0.5.20`
   pinnt exakt `6.0.10`, der Fix wäre ein Major-Sprung und würde den CSS-Pfad
