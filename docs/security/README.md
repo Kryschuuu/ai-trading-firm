@@ -284,6 +284,30 @@ dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
 - Die Kappen schützen den eigenen Prozess vor einem böswilligen oder
   übernommenen Endpunkt; sie ersetzen kein Update der Bibliothek.
 
+## Dependency-Floors (Nachtrag 2026-10-06)
+
+**Anhebung ohne Finding-Nummer**, ausgelöst durch zwei Advisories, die nach dem
+letzten grünen `security-live-gate`-Lauf veröffentlicht wurden und den
+fail-closed Schritt `npm audit --audit-level=high --omit=dev` rot werden ließen:
+
+| Paket | Vorher | Jetzt | Advisory | Weg |
+|-------|--------|-------|----------|-----|
+| `sharp` (optionalDependency von `next`) | 0.35.4 | **0.35.5** | GHSA-wq5f-xc86-pv6w / CVE-2026-96889 (librsvg über den AVIF-Pfad) | `overrides` in `package.json` (Muster wie `ws`) |
+| `source-map-js` (transitiv über `postcss`/`next`) | 1.2.1 | **1.2.2** | GHSA-68fv-2mgg-jv7q (Event-Loop-DoS über indizierte Source-Map-Sektionen) | `overrides` in `package.json` |
+
+- Der SEC-03-Gate-Floor in `tests/sec03.nextDependencies.test.ts` wurde auf
+  `sharp >= 0.35.5` **und** `source-map-js >= 1.2.2` angehoben — gleiches Prinzip
+  wie SEC-04: Der Gate-Floor darf nie weicher sein als das Advisory. Die
+  `@img/sharp-libvips-*`-Binaries liegen mit dem Sprung bei 1.3.4 (Floor 1.3.3).
+- **Bekannt und bewusst offen (nicht blockierend, `--audit-level=high`):**
+  `postcss-selector-parser < 7.1.6` (moderat; `@tailwindcss/typography@0.5.20`
+  pinnt exakt `6.0.10`, der Fix wäre ein Major-Sprung und würde den CSS-Pfad
+  riskanter machen als das Advisory) und `braces` (hoch, **ohne verfügbare
+  Fix-Version**, nur im Dev-Lint-Pfad `eslint-config-next → @next/eslint-plugin-next
+  → fast-glob → micromatch`). Beide werden erneut geprüft, sobald der jeweilige
+  Upstream ein Update veröffentlicht; `npm audit fix --force` schlägt für beide
+  einen **Downgrade** vor und ist deshalb keine Option.
+
 ## Auth-Modus (v1.36.13+)
 
 - `NODE_ENV=production` ohne Token ⇒ Boot-Verweigerung `AUTH_NOT_CONFIGURED` (kein offener Zugang)

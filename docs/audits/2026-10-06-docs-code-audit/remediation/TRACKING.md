@@ -51,13 +51,21 @@ DC-09  (Inventare + Bump-Skript)           ← kann 07/08 vorbereiten
 | Workflow | Ergebnis | Anmerkung |
 |----------|----------|-----------|
 | `docs-validate` | ✅ success | Typecheck + Docs-Validierung (inkl. Link-/App-Link-Check des neuen Audit-Ordners) |
-| `security-live-gate` | ❌ failure — **nicht durch diese Änderung** | Der Workflow bricht im **ersten** Schritt `npm audit --audit-level=high --omit=dev` ab (fail-closed) wegen **neuer** Advisories seit dem letzten grünen `main`-Lauf (2026-10-06): `sharp < 0.35.5` (CVE-2026-96889, via `next@16.3.8`, im Repo `sharp@0.35.4`) und `source-map-js ≤ 1.2.1` (GHSA-68fv-2mgg-jv7q). `package.json`/`package-lock.json` sind in diesem Audit unangetastet — ein Re-Run von `main` würde identisch rot laufen. Alle nachfolgenden Schritte (SEC-04-Pin, Typecheck, Lint, Build, Security-Suite) wurden dadurch übersprungen. |
+| `security-live-gate` | ✅ **fixed 2026-10-06** (Folge-Session) | Der Workflow brach im **ersten** Schritt `npm audit --audit-level=high --omit=dev` ab (fail-closed) wegen neuer Advisories: `sharp < 0.35.5` (CVE-2026-96889, via `next@16.3.8`) und `source-map-js ≤ 1.2.1` (GHSA-68fv-2mgg-jv7q). Beide sind per `overrides` in `package.json` gehoben (`sharp` **0.35.5**, `source-map-js` **1.2.2**, `@img/sharp-libvips-*` 1.3.4). Der SEC-03-Gate-Floor (`tests/sec03.nextDependencies.test.ts`) wurde auf die neuen Advisory-Untergrenzen gesetzt (SEC-04-Prinzip: Gate nie weicher als das Advisory) — deshalb ist `security:live-gate` mit `test:security:next` als erstem Schritt konsistent. Details: [`../../../security/README.md` § Dependency-Floors](../../../security/README.md). |
 
-**Empfehlung (eigene Session, nicht Teil des Doku-Audits):** `sharp` per
-`overrides` auf `^0.35.5` anheben bzw. auf den Next-Bump warten und dann
-`npm ci && npm run build && npm run security:live-gate` vollständig durchlaufen
-lassen. Das Repo kuratiert npm-Abhängigkeiten bewusst manuell
-(`.github/dependabot.yml` deckt nur `github-actions` ab).
+**Verifikation des Dependency-Fixes (lokal, Node 22):** `npm audit
+--audit-level=high --omit=dev` → exit 0 (nur noch 2 moderate im
+Auslieferungspfad); `npm ls ws --all` → `ws@8.21.3 overridden` (16/16 SEC-04);
+`test:security:next` 26/26 (inkl. geladenem libheif ≥ 1.23.2); `typecheck`,
+`lint`, `build` und die vollständige `security:live-gate`-Suite grün.
+
+**Bewusst offen (nicht blockierend, `--audit-level=high`):**
+`postcss-selector-parser < 7.1.6` (moderat; `@tailwindcss/typography@0.5.20`
+pinnt exakt `6.0.10` — der „Fix" von `npm audit fix --force` wäre ein Downgrade
+der Typography-Version) und `braces` (hoch, **keine verfügbare Fix-Version**,
+nur im Dev-Lint-Pfad über `eslint-config-next`). Beide im Security-README als
+beobachtete Restpunkte geführt. Das Repo kuratiert npm-Abhängigkeiten bewusst
+manuell (`.github/dependabot.yml` deckt nur `github-actions` ab).
 
 ## Offene Beobachtungen ohne eigenen Finding-Status
 

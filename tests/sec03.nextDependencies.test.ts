@@ -6,6 +6,15 @@
  * Manifest, gesamtes Lockfile (auch Windows-Binaries) und geladener Decoder
  * muessen zusammen den Patch enthalten. Kein eigener SemVer-Range-Parser:
  * fuer Next erlauben wir bewusst nur exakt gepinnte stabile Releases.
+ *
+ * Floors nachgezogen am 2026-10-06 (Docs↔Code-Audit-Folge, CI-Fix):
+ *   - sharp < 0.35.5  (GHSA-wq5f-xc86-pv6w / CVE-2026-96889, librsvg ueber
+ *     den AVIF-Pfad) — Override in package.json pinnt 0.35.5;
+ *   - source-map-js <= 1.2.1 (GHSA-68fv-2mgg-jv7q, Event-Loop-DoS ueber
+ *     indizierte Source-Map-Sektionen; transitiv ueber postcss/next) —
+ *     Override pinnt 1.2.2.
+ * Gleiches Prinzip wie SEC-04: Der Gate-Floor darf nie weicher sein als das
+ * Advisory, auch wenn der Lockfile-Pin aktuell haelt.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -15,9 +24,10 @@ import { test } from "node:test";
 import { getSharp } from "next/dist/server/image-optimizer";
 
 const MIN_NEXT = "16.3.4";
-const MIN_SHARP = "0.35.4";
+const MIN_SHARP = "0.35.5";
 const MIN_SHARP_LIBVIPS = "1.3.3";
 const MIN_LIBHEIF = "1.23.2";
+const MIN_SOURCE_MAP_JS = "1.2.2";
 
 interface PackageEntry {
   name?: string;
@@ -116,12 +126,13 @@ test("SEC-03: keine alte Next-/Decoder-Kopie im Lockfile, auch nicht verschachte
     else if (name === "sharp") minimum = MIN_SHARP;
     else if (name.startsWith("@img/sharp-libvips-")) minimum = MIN_SHARP_LIBVIPS;
     else if (name.startsWith("@img/sharp-")) minimum = MIN_SHARP;
+    else if (name === "source-map-js") minimum = MIN_SOURCE_MAP_JS;
     if (!minimum) continue;
     found.add(name);
     assertPatchedVersion(entry.version, minimum, location);
     assertRegistryArtifact(entry, name, location);
   }
-  for (const name of ["next", "sharp", "@img/sharp-win32-x64", "@img/sharp-libvips-linux-x64"]) {
+  for (const name of ["next", "sharp", "@img/sharp-win32-x64", "@img/sharp-libvips-linux-x64", "source-map-js"]) {
     assert.ok(found.has(name), `${name}: plattformuebergreifender Lock-Eintrag fehlt`);
   }
 });

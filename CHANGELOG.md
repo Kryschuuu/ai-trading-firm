@@ -28,6 +28,17 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Fixed
 
+- **Dependency-Floors (Security, ohne Finding-Nummer):** `sharp` 0.35.4 → **0.35.5**
+  (GHSA-wq5f-xc86-pv6w / CVE-2026-96889, librsvg im AVIF-Pfad; optionalDependency von
+  `next`) und `source-map-js` 1.2.1 → **1.2.2** (GHSA-68fv-2mgg-jv7q; transitiv über
+  `postcss`) per `overrides` in `package.json`. Beide Advisories ließen den
+  fail-closed Schritt `npm audit --audit-level=high --omit=dev` im Workflow
+  `security-live-gate` rot werden. Der SEC-03-Gate-Floor
+  (`tests/sec03.nextDependencies.test.ts`) steht jetzt auf `sharp >= 0.35.5` und
+  `source-map-js >= 1.2.2`; `@img/sharp-libvips-*` 1.3.4 (Floor 1.3.3). Bekannt und
+  bewusst offen: `postcss-selector-parser` (moderat, Fix wäre Major-Sprung in
+  `@tailwindcss/typography`) und `braces` (nur Dev-Lint-Pfad, **keine** Fix-Version
+  verfügbar).
 - **DC-01 (HIGH, Security):** `POST /api/firm/proposals/[id]/approve` war die
   einzige **schreibende** Route unter `src/app/api/firm/**` ohne Autorisierung —
   in `AUTH_MODE=token-required` konnte jeder anonyme Aufrufer ein
