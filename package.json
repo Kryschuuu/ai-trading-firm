@@ -103,12 +103,14 @@
   },
   "allowScripts": {
     "unrs-resolver@1.12.2": true,
-    "sharp@0.35.4": true,
+    "sharp@0.35.5": true,
     "es5-ext@0.10.64": true,
     "esbuild@0.15.18": true
   },
   "overrides": {
     "ws": "8.21.3",
+    "sharp": "0.35.5",
+    "source-map-js": "1.2.2",
     "@esbuild-kit/core-utils": {
       "esbuild": "^0.25.0"
     },

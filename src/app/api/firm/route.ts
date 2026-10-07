@@ -28,6 +28,7 @@ import { getQuoteSync } from "@/lib/marketData";
 import type { RiskLimits } from "@/lib/riskGuard";
 import { APP_VERSION } from "@/lib/version";
 import { publicErrorMessage } from "@/lib/secrets";
+import { humanApprovalRequired } from "@/live-gate/config";
 
 export const dynamic = "force-dynamic";
 
@@ -121,7 +122,12 @@ export async function GET(req: Request) {
         fundingPaid: Number(Number(fundingRows[0]?.total ?? 0).toFixed(8)),
         fundingPaidOpen: Number(broker.totalFundingPaid.toFixed(8)),
       },
-      requireHumanApproval: process.env.REQUIRE_HUMAN_APPROVAL === "true",
+      // DC-02 (2026-10-06, Docs↔Code-Audit): EINE Semantik für das Flag. Der
+      // Enforcer (live-gate/config.ts) verlangt die Freigabe, solange die
+      // Variable nicht exakt "false" ist — die Anzeige darf nicht `=== "true"`
+      // prüfen und damit bei ungesetzter Variable "false" melden, obwohl das
+      // Gate die Freigabe verlangt.
+      requireHumanApproval: humanApprovalRequired(process.env),
       timestamp: new Date().toISOString(),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {

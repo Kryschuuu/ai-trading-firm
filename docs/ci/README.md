@@ -100,6 +100,10 @@ hat das auf dem Ausgangsstand v1.36.33 bestätigt. `npm test` daher zusätzlich
 lokal vor der Auslieferung ausführen. Einzelne bestehende DB-Integrationstests
 überspringen sich ohne PostgreSQL; die SEC-05-/SEC-06-Security-Regressionen
 benötigen keine externe Datenbank und laufen stets im Required Security-Gate.
+**Nicht** DB-gated sind zwei PAPER-Broker-Contract-Tests in
+`tests/brokerContracts.test.ts`: sie scheitern ohne erreichbare Datenbank
+(`ECONNREFUSED 0.0.0.0:5432`) statt zu skippen — mit temporärem Embedded-
+PostgreSQL besteht die Datei 42/42. Fix/CI-Anbindung: Prompt `DC-08`.
 
 ## Verwandte Dokumente
 

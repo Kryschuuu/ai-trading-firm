@@ -32,7 +32,9 @@ prüft das mindestens bei `docs-validate`:
 npm ci
 npm run typecheck        # tsc --noEmit (strict)
 npm run lint             # ESLint
-npm test                 # node:test-Suite (DB-gegatete Tests springen ohne Postgres)
+npm test                 # node:test-Suite (DB-gegatete Tests skippen ohne Postgres;
+                         #  Ausnahme: 2 PAPER-Contract-Tests in tests/brokerContracts.test.ts
+                         #  scheitern ohne erreichbare DB — siehe docs/audits/2026-10-06-docs-code-audit/)
 npm run docs:validate    # Doku-Link-/Schema-/Konsistenz-/Secret-Checks
 ```
 

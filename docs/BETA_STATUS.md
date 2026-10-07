@@ -126,7 +126,7 @@ Ein internes Dokument, ein Testlauf oder ein LLM-Urteil belegt es **nicht**.
 | 6 — Validator | Instrument für `B1`/`B2` | **nein** |
 | 7 — Copy-Trading (Paper) | Instrument für `B5` (Fragestellung sichtbar machen) | **nein** |
 
-**Alle sieben Phasen erfüllen kein einziges Kriterium.** Das ist die beabsichtigte
+**Alle acht Phasen (0–7) erfüllen kein einziges Kriterium.** Das ist die beabsichtigte
 Lesart des Ausbaudokuments: Es liefert die Infrastruktur, um die Frage
 „Ist das handelbar?" sauber zu stellen — die Antwort darauf ist eine andere
 Art von Arbeit.
