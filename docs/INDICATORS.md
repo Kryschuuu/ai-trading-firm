@@ -1,6 +1,6 @@
 # Indikatoren-Katalog — Engine, CTI und Scanner
 
-**Stand:** 2026-10-04 · **Version:** `v0.14.0` (Beta) · **Status:** beschreibt den Code, keine Wunschliste
+**Bestandsdokument** · **Stand:** 2026-10-04 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Status zum Stand:** beschreibt den Code, keine Wunschliste
 **Verwandt:** [CLAUDE_TRADING_INDICATOR.md](CLAUDE_TRADING_INDICATOR.md) · [BACKTESTING.md](BACKTESTING.md) · [architecture/STRATEGY_STACK.md](architecture/STRATEGY_STACK.md) · [DAILY_WEEKLY_RESEARCH.md](DAILY_WEEKLY_RESEARCH.md) · [research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md](research/INDICATOR_RANKING_CRYPTO_DAYTRADING.md)
 
 > **Beta-Hinweis:** Alle Indikatoren erzeugen Signale, keine Orders. Ausgeführt

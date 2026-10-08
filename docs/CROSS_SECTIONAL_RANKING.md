@@ -1,4 +1,6 @@
-# Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04, v1.63.0)
+# Point-in-Time Cross-Sectional Momentum Ranking (RMA-P2-04, v0.1.0 · Legacy-Zählung v1.63.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Das Cross-Sectional-Ranking beantwortet genau eine Frage: **Wo steht ein
 Instrument im Universum, gemessen an seiner universumsweiten Momentum-

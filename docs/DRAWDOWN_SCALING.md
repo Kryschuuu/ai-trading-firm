@@ -1,4 +1,6 @@
-# Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04, v1.68.0)
+# Hysteretisches Drawdown-Risk-Scaling (RMA-P5-04, v0.1.0 · Legacy-Zählung v1.68.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Autoritative Vertrauensskalierung: Die **reconcilte Equity** wird gegen den
 **persistierten High-Water-Mark (HWM)** bewertet; aus dem Drawdown folgt über

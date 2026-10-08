@@ -1,6 +1,6 @@
 # Docs↔Code-Audit — Ist/Soll-Abgleich der Dokumentation
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-06** · Code-Version **0.17.2** · Prüfbasis `main` @ `104aaef` (Merge PR #234, 2026-10-06)
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
 
 Dies ist ein **externer Audit-Bericht** (kein Modul-Status-Header im Sinne der
 Doku-Konvention). Er beschreibt den Abgleich zwischen `docs/` (338

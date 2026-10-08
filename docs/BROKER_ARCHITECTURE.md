@@ -1,6 +1,6 @@
 # Broker-Architektur: Ausführbares Capability-Modell (Task 02)
 
-**Stand:** v0.1.0 (Beta) · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
+**Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Scope:** `src/contracts/broker.ts`, `src/brokers/**`
 (inkl. `control-plane/` seit Task 08, `src/brokers/alpaca/` seit v1.36.0),
 `src/lib/broker.ts` (Registry-Projektion), `src/lib/engine.ts` (Factory-Nutzung),
 `GET /api/brokers`, `GET /api/brokers/coverage`,

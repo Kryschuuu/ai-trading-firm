@@ -1,4 +1,6 @@
-# Portfolio-Volatility-Targeting (RMA-P5-01, v1.67.0)
+# Portfolio-Volatility-Targeting (RMA-P5-01, v0.1.0 · Legacy-Zählung v1.67.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Kontinuierliches Portfolio-Volatilitäts-Targeting als **zweite, kontinuierliche
 Risikoschicht** neben der diskreten Regime-Maschine (`src/lib/adaptiveRisk.ts`).

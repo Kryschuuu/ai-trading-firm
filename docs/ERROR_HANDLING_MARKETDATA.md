@@ -1,7 +1,6 @@
 # Fehlerbehandlung Marktdaten — Entscheidungsbaum (MDERR-006)
 
-> **Status-Header:** Implementiert (MDERR-006, Nacharbeit + v1.40.0 Klassifizierung) · **2026-09-18** ·
-> Code-Version **v0.1.0 (Beta)** · Module `src/lib/marketDataErrors.ts`,
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Fehlerklassen (MDERR-006, Nacharbeit Legacy v1.40.0) · Module `src/lib/marketDataErrors.ts`,
 > `src/lib/marketData.ts`, `src/marketdata/sync.ts`,
 > `src/marketdata/dataErrors.ts`, `src/lib/telemetry.ts`
 

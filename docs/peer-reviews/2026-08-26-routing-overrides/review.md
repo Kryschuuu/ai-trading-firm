@@ -1,6 +1,6 @@
-# Peer-Review: Provider/Modell-Overrides und Audit-Härtung (v1.22.0)
+# Peer-Review: Provider/Modell-Overrides und Audit-Härtung (v0.1.0 · Legacy-Zählung v1.22.0 — Zuordnung: CHANGELOG.md)
 
-**Review-Version:** 1 (2026-08-29) · **Release:** 1.22.0
+**Review-Version:** 1 (2026-08-29) · **Release:** Legacy-Zählung 1.22.0 (vor der Beta-Baseline v0.1.0)
 **Review-Objekt:** Model-Router-Overrides, Audit-Identität, Test-Fixture-Isolation
 **Modul:** `src/routing/router.ts`, `src/app/api/routing/modes/route.ts`,
 `tests/routing.*.test.ts`, `tests/fixtures/routingTestUtil.ts`, `docs/LLM_ROUTING.md`

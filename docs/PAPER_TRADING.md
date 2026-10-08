@@ -1,5 +1,7 @@
 # Paper-Trading — Market Data & deterministische Execution-Simulation (Task 03)
 
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+
 Dieses Dokument beschreibt, wie die Plattform von **statischem Paper-Trading**
 (feste Watchlist + statisches Preisbuch) auf eine **broker-unabhängige
 Marktdaten-Infrastruktur** umgestellt wird: echte Kurse (Binance/Yahoo) mit

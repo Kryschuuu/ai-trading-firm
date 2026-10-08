@@ -4,7 +4,7 @@
 **Reviewer-Rolle:** Senior Backend Engineer — TypeScript, Broker-Integration,
 Systemarchitektur
 **Branch:** `arena/01a04a4f-ai-trading-firm`
-**Betroffene Version:** v1.20.0
+**Betroffene Version (Legacy-Zählung):** v1.20.0
 **Scope:** `src/brokers/bitunix/**`, `src/contracts/broker.ts`,
 `src/universe/**`, `src/brokers/capabilities.ts`, Doku, Tests
 

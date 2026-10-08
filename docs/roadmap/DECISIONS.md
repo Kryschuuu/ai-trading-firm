@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-> **Stand:** 2026-10-05 · **Code-Version:** v0.17.0 (Beta) ·
+> **Stand:** 2026-10-05 · **Bestandsdokument** · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
 > **Verantwortlich:** `docs/roadmap/DECISIONS.md`
 >
 > **Umsetzung ADR-003 + ADR-004 (v0.17.0):** Die Architektur-Entscheidungen

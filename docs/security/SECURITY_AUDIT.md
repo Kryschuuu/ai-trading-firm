@@ -1,6 +1,6 @@
 # Security-Audit & Peer-Review — Autonome KI-Trading-Firma
 
-**Audit-Stand:** 2026-08-25 · **Release:** v1.4.0 (enthält v1.1.0–v1.3.0)
+**Audit-Stand:** 2026-08-25 · **Release:** Legacy-Zählung v1.4.0 (enthält v1.1.0–v1.3.0; vor der Beta-Baseline v0.1.0)
 **Scope:** gesamter Quellcode (`src/`, `scripts/`, `deploy/`, Konfiguration),
 **Methode:** manuelle Code-Review + `npm audit` + statische Analyse (TS strict, ESLint)
 + Regressionstests.

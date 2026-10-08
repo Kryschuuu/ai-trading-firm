@@ -1,7 +1,6 @@
 # Migrations-Runbook — `timeframe`-Feld im Historical Store (Schema v1 → v2)
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-10-04** ·
-> Code-Version **v0.16.0 (Beta)** · Zielgruppe: Betrieb & Deployment
+> **Dokument-Version:** Schema v1 → v2 (Zeilenformat `"v": 2`, siehe [HISTORY.md](HISTORY.md)) · **Stand:** 2026-10-04 · **Status zum Stand:** Implementiert; Code-Stand nicht gegen v0.17.2 geprüft — Vollabgleich offen, [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Zielgruppe: Betrieb & Deployment
 >
 > Dieses Runbook ist die Schritt-für-Schritt-Anleitung für
 > **Produktionsumgebungen mit bestehender** `data/history/candles.ndjson`.
@@ -85,7 +84,7 @@ aber durch Venue-Historie, 100.000 Bars je Reihe und das Laufbudget begrenzt.
 
 ```bash
 # 1. Code-Version (muss Historical-Store-Schema v2 unterstützen)
-node -p "require('./package.json').version" # aktuell v0.16.0; Details in VERSION.md
+node -p "require('./package.json').version" # gibt die aktuelle Version aus (Quelle: package.json; Details in VERSION.md)
 
 # 2. Node-Version (>= 20)
 node -v

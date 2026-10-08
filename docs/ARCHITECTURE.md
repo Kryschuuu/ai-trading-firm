@@ -1,7 +1,6 @@
-# Architektur: Event-Driven Multi-Zyklen-Trading-System (v1.7)
+# Architektur: Event-Driven Multi-Zyklen-Trading-System (v0.1.0 · Legacy-Zählung v1.7 — Zuordnung: CHANGELOG.md)
 
-> **Status-Header (Task 12):** **Implementiert** (Tasks 1–11 gemerged) ·
-> Dokumentationsstand **2026-09-29** · Code-Version **v0.6.2** (Rule-Timeframes `1m…5d` aus `SUPPORTED_TIMEFRAMES`, Timeframe-Guard im Mikro-Executor; zuvor v0.6.1: Glossar um Markt-Regime, Strategieklasse und Universe-Snapshot ergänzt, ADR-008…010; zuvor v0.4.0: bookDepthUsd + Venue-Qualitätsgrenze, spreadPct, n≥100, Kostenmodell feine Takte)
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-29 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Tasks 1–11 gemerged; Versionsverlauf: CHANGELOG.md
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine

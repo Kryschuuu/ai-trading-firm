@@ -1,7 +1,6 @@
 # Operations Center — Market-Data-Readiness & Funnel-Diagnose
 
-> **Status-Header:** **Implementiert** (OPS-010) · **2026-08-30** ·
-> Code-Version **v0.1.0 (Beta)** · Module `src/ops/`, `src/scanner/eligibilityDiagnostics.ts`,
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-08-30 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Module `src/ops/`, `src/scanner/eligibilityDiagnostics.ts`,
 > `src/components/ops/OperationsCenterPanel.tsx` · Endpunkt `GET /api/ops`
 
 Das Operations Center ist die Control Plane der Firma: zehn Sektionen

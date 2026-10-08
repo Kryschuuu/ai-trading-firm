@@ -1,7 +1,7 @@
-# Datenbank-Schema & Persistenz-Verzeichnis (v1.41.0)
+# Datenbank-Schema & Persistenz-Verzeichnis (v0.1.0 · Legacy-Zählung v1.41.0 — Zuordnung: CHANGELOG.md)
 
 > **Dokumenten-Status:** Kanonisches Datenbank- und Persistenzverzeichnis  
-> **Stand:** 2026-09-18 · **Code-Version:** 1.41.0  
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-07](../audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md) und [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)  
 > **Verbindliche Referenz:** `src/db/schema.ts`
 
 Dieses Dokument beschreibt die **ursprünglichen 15 Drizzle-Tabellen** (Stand 2026-09-18) im Detail sowie sämtliche dateigestützten Persistenzstrukturen. **SSoT ist `src/db/schema.ts`** — dort stehen inzwischen **67 `pgTable`-Definitionen** (v0.17.2); die später hinzugekommenen Tabellen (u. a. Feature Store, Forecasts, Perp-/Funding-Daten, Execution-Quality, Strategy-Catalog/-Lifecycle/-Screening, Copy-Subscriptions, Regime-Snapshots, Drawdown-/Vol-Targeting, Cross-Sectional, Sentiment, Prompt-Artefakte, Trade-Attachments) sind hier **noch nicht einzeln dokumentiert** — Nachführung siehe `docs/audits/2026-10-06-docs-code-audit/` (Befund DC-07, Prompt `PROMPT-DC-07`).

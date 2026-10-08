@@ -1,4 +1,6 @@
-# Forecast-Ledger & Kalibrierung (RMA-P3-01, v1.55.0)
+# Forecast-Ledger & Kalibrierung (RMA-P3-01, v0.1.0 · Legacy-Zählung v1.55.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Agenten-Analysen werden als **unveränderliche Forecast-Verträge** erfasst,
 **Point-in-Time aufgelöst** und mit **Brier-Score, Brier Skill Score, Log Loss,

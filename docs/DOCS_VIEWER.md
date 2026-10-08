@@ -1,6 +1,6 @@
 # Doku-Viewer (`/docs`) — Aufbau, Pflege, Grenzen
 
-**Stand:** 2026-10-04 · **Version:** `v0.14.0` (Beta) · **Status:** Implementiert
+**Bestandsdokument** · **Stand:** 2026-10-04 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Status zum Stand:** Implementiert
 **Verwandt:** [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md) · [DOCS_SYNC_AUDIT.md](DOCS_SYNC_AUDIT.md) · [INDICATORS.md](INDICATORS.md)
 
 Der Viewer macht die Markdown-Doku **im laufenden System** lesbar — ohne

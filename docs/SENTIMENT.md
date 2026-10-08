@@ -1,5 +1,7 @@
 # Kalibrierbare strukturierte Sentiment-Outputs (RMA-P2-05)
 
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+
 ## 1. Übersicht und Motivation
 
 Finanznachrichten und Marktkommentare wurden im News-Analysten (`NEWS_ANALYST`, Hubble)

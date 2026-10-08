@@ -1,6 +1,6 @@
 # Equity-Kurve, Drawdown & Report-Zeiträume
 
-> **Status-Header:** **Implementiert** (UI/Report-Ausbau) · **2026-10-04** · Code-Version **0.13.0**
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-04 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Ausbaustand UI/Report
 > · Module: `src/lib/equity.ts`, `src/lib/equityAnalytics.ts`, `src/lib/equityRange.ts`,
 > `src/lib/equityBenchmark.ts`
 > · APIs: `GET /api/firm/equity`, `GET /api/firm/report`

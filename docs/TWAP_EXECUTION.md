@@ -1,4 +1,6 @@
-# TWAP- und Depth-aware Execution (RMA-P4-03, v1.71.0)
+# TWAP- und Depth-aware Execution (RMA-P4-03, v0.1.0 · Legacy-Zählung v1.71.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Der Scheduler zerlegt ein Eltern-Intent in zeitlich gestaffelte Maker-Kinder.
 Kinder laufen ausschließlich über den Execution-Policy-Controller (P4.2) mit

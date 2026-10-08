@@ -1,6 +1,6 @@
 # Broker Control Plane — Frontend & Credential-Manager (Task 08)
 
-**Stand:** v0.1.0 (Beta) · **Scope:** `src/brokers/control-plane/**`,
+**Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Scope:** `src/brokers/control-plane/**`,
 `src/app/api/brokers/{venue}/(credentials|status|test|discover)`,
 `src/components/control-plane/**`, `src/lib/controlPlane.ts`,
 `src/app/brokers/page.tsx`, Dashboard-Tab „Brokers & Venues".

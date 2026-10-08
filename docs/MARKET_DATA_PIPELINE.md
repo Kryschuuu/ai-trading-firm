@@ -1,7 +1,6 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-10-04** ·
-> Code-Version **v0.16.0 (Beta)** · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-04 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize` ·
 > Qualitäts-Layer & Aggregation: §14)

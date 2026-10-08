@@ -1,4 +1,6 @@
-# Signal-Decay-Exits (RMA-P5-05, v1.69.0)
+# Signal-Decay-Exits (RMA-P5-05, v0.1.0 · Legacy-Zählung v1.69.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Versionierte, deterministische Exits, wenn das **persistierte Entry-Signal**
 gegenüber einem **point-in-time aktuellen Signal derselben Semantik** bestätigt

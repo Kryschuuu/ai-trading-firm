@@ -1,6 +1,6 @@
 # Capability-SSoT und Instrument-Projektion
 
-**Stand:** v0.1.0 (Beta) · **Modul:** `src/universe/capabilityProjection.ts` · **SSoT:** `src/brokers/capabilities.ts`
+**Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/universe/capabilityProjection.ts` · **SSoT:** `src/brokers/capabilities.ts`
 
 Dieses Dokument definiert die einzige Laufzeit-Wahrheit für Venue-Fähigkeiten und
 die Instrument-Verfügbarkeit. Der Universe-Seed enthält **statische** Instrumentdaten
