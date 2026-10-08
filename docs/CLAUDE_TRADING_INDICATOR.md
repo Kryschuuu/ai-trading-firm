@@ -1,7 +1,7 @@
 # Claude Trading Indicator (CTI)
 
-**Stand:** 2026-10-03 · **Modul:** `src/signals/` · **CLI:** `npm run cti`
-**Version:** `0.12.0` · **Status:** Implementiert
+**Bestandsdokument** · **Stand:** 2026-10-03 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/signals/` · **CLI:** `npm run cti`
+**Status zum Stand:** Implementiert
 
 > **Beta-Hinweis:** Das System handelt ausschließlich im Paper-Modus. Der CTI
 > erzeugt Signale und Handlungsabsichten — ausgeführt wird nur, was der

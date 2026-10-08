@@ -1,4 +1,6 @@
-# Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates (RMA-P1-05, v1.73.0)
+# Strategy-Lifecycle mit Backtest↔Paper↔Live-Driftgates (RMA-P1-05, v0.1.0 · Legacy-Zählung v1.73.0 — Zuordnung: CHANGELOG.md)
+
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Evidenzbasierte Promotion und automatische Degradation zwischen **Backtest →
 Paper → Live**: eine zentrale 9-Zustands-State-Machine mit immutabler

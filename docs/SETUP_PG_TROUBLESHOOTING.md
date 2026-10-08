@@ -1,6 +1,6 @@
 # PostgreSQL-Setup: Sofort-Hilfe & Fehlersuche
 
-> **Status-Header:** **Bestandsdokument** · Code-Version **0.17.2** (Beta) · Header ergänzt **2026-10-06**; Vollabgleich offen — `docs/audits/2026-10-06-docs-code-audit/` (DC-06).
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Header ergänzt 2026-10-06.
 
 > Gilt für `./scripts/setup-cachyos.sh` (CachyOS/Arch, PostgreSQL 14–18+).
 > Kurzversion für den aktuellen Fall: **Abschnitt 1** — danach Punkt für Punkt.

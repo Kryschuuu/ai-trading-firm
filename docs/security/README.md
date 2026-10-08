@@ -1,5 +1,7 @@
 # Security — Übersicht & Härtung
 
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+
 > **Zweck:** Zentrale Anlaufstelle für Security-Themen — aggregiert offene Critical/High Findings aus allen Audits, beschreibt Security-Modell, Auth, RBAC, Rate-Limiting und Härtungsmaßnahmen.
 
 ## Security-Modell (Kurzfassung)

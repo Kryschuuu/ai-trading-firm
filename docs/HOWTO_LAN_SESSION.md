@@ -1,5 +1,7 @@
 # How-to: LAN weg nach Update (`trading.local` / `192.168.0.10:3369`) + „Firm-Status nicht verfügbar"
 
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+
 > **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
 > systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard eine
 > abgelaufene Sitzung — **nicht** die Datenbank. Seit v1.39.0 bleibt die

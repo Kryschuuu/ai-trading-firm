@@ -1,5 +1,7 @@
 # Copy-Trading — Domänenmodell, Policy, Order-Links & Copy-Loop
 
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+
 **Phase 7 · Pakete 07-01/07-02/07-03 · Findings STX-08, STX-09, STX-16**
 
 Copy Trading kopiert eine normalisierte **Handlungsabsicht**, keine Leader-Order

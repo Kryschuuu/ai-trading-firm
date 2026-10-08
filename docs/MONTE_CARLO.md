@@ -1,6 +1,6 @@
 # Monte-Carlo-/Trade-Resampling (RMA-P6-02)
 
-> **Version:** `v0.1.0 (Beta)` · **Status:** produktiv (CLI + Read-API) · **Finding:**
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Status zum Stand:** produktiv (CLI + Read-API) · **Finding:**
 > [RMA-P6-02](audits/2026-09-20-roadmap-audit/findings/RMA-P6-02-monte-carlo.md)
 
 Reproduzierbare Monte-Carlo-Analyse über die Trades eines Walk-Forward-Runs:

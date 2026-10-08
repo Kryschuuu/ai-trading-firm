@@ -1,7 +1,6 @@
 # Repository-Struktur — Übersicht & Pflegeanleitung
 
-> **Status-Header:** **Implementiert** · Dokumentationsstand **2026-09-23** ·
-> Code-Version **v0.1.0 (Beta)** · Vorherige Konsolidierung: 2026-09-05 (Legacy v1.36.26)
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-23 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Vorherige Konsolidierung: 2026-09-05 (Legacy v1.36.26)
 
 ## Ziele
 

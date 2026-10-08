@@ -1,6 +1,6 @@
 # How-to: Laufende Firma nach `git pull` aktualisieren
 
-**Stand:** v0.1.0 (Beta) · **Zielgruppe:** Betreiber einer laufenden Instanz (Paper oder Live)
+**Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Zielgruppe:** Betreiber einer laufenden Instanz (Paper oder Live)
 · **Dauer:** 3–10 Minuten (der Build ist der längste Teil)
 
 Dieses Runbook beantwortet eine einzige Frage: *Ich habe lokal `git pull` gemacht —

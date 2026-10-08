@@ -1,6 +1,6 @@
 # Zentrale, venue-aware Symbol-Normalisierung (SYM-007)
 
-> **Status-Header:** **Bestandsdokument** (Inhalt unverändert seit `v1.28.0`) · Code-Version **0.17.2** (Beta) · Header ergänzt **2026-10-06**; Vollabgleich offen — `docs/audits/2026-10-06-docs-code-audit/` (DC-06).
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert (Inhalt unverändert seit `v1.28.0`) · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md).
 
 **Status:** verbindlich seit **v1.28.0** · Single Source of Truth: `src/symbols/`
 · Migrationsskript: `scripts/normalize-instrument-ids.ts` (`npm run symbols:normalize`)

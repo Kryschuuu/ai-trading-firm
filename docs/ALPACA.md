@@ -1,7 +1,7 @@
 # Alpaca-Adapter (Task 12) — 8. Venue, US-Aktien/ETFs/Crypto
 
-**Stand:** v0.1.0 (Beta) · **Modul:** `src/brokers/alpaca/` · **Contract:** `BrokerAdapter`
-**Status:** Public REST (Market Data v2) + Private Trading API (Basic-Auth) +
+**Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/brokers/alpaca/` · **Contract:** `BrokerAdapter`
+**Status zum Stand:** Public REST (Market Data v2) + Private Trading API (Basic-Auth) +
 Paper (Modus B) ausführbar. Live-Ausführung über den zentralen Live-Gate-Enforcer
 (Task 11) und eine **getrennte Broker-Ausführungs-Engine** (s. §5) — ohne
 bestandene Gate-Prüfung weiterhin `LiveTradingGateError`. Alpacas offizielle

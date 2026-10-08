@@ -1,7 +1,7 @@
 # Portfolio-Analytics, Optimizer & Risk-Guard-Kette (Task 05)
 
 **Modul:** `src/portfolio/` · **API:** `/api/portfolio/{metrics,correlation,optimize}` ·
-**Version:** `PORTFOLIO_CONFIG_VERSION = 1`
+**Dokument-Version:** `PORTFOLIO_CONFIG_VERSION = 1` (Konfigurations-Version, keine Code-Version)
 
 Dieses Dokument beschreibt die deterministische Rechenschicht, die Portfoliogewichte
 erzeugt. Der Kernsatz der Architektur gilt hier ohne Ausnahme:

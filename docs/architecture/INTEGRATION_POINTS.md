@@ -1,7 +1,7 @@
-# Integrationspunkte & Erweiterungskarte (v0.17.2)
+# Integrationspunkte & Erweiterungskarte
 
 > **Dokumenten-Status:** Architekturübersicht; TASK 03/04/05/07 zuletzt fachlich abgeglichen<br>
-> **Stand:** 2026-10-05 · **Code-Version:** v0.17.2 (Beta)<br>
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-05 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)<br>
 > **Verbindliche Statusquellen:** [`docs/roadmap/STATUS.md`](../roadmap/STATUS.md), [`docs/PERPETUAL_DATA.md`](../PERPETUAL_DATA.md), [`docs/README.md`](../README.md)
 
 Dieses Dokument skizziert die wichtigsten Integrationspunkte. Frühere

@@ -1,6 +1,6 @@
 # Setup-Bug-Register — `scripts/setup-cachyos.sh`
 
-**Stand:** v0.1.0 (Beta) · **Datum:** 2026-09-08 · **Status:** alle Befunde behoben
+**Bestandsdokument** · **Stand:** 2026-09-08 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Status zum Stand:** alle Befunde behoben
 (B1–B7 plus Script-Härtung v1.36.38: DRY-01/02, UUID-01, LOG-01, SEC-PSQL,
 ERR-01, STOP-01/02/03, VAL-01/02, SMOKE-01, WIN-01/02/03/04, MDSYNC-002,
 LGSCAN-001, LGSTAMP-001, LGKILL-001, MICRO-001)

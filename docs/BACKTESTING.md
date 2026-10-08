@@ -1,6 +1,6 @@
 # Regelbasierte Backtesting-Engine mit Walk-Forward-Validierung (GAP-01)
 
-**Stand:** 2026-09-23 · **Modul:** `src/backtest/` · **Version:** `v0.2.0 (Beta)` · **Status:** Implementiert
+**Bestandsdokument** · **Stand:** 2026-09-23 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/backtest/` · **Status zum Stand:** Implementiert
 
 Diese Datei beschreibt die Walk-Forward-Erweiterung der Backtest-Engine:
 strikte Zeitmaske, Paper-Ausführung über den Paper-Fill-Simulator,

@@ -1,6 +1,6 @@
 # Strategie×Markt-Screening — Persistenz und Idempotenz
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-02** · Code-Version **0.9.0** · Modul **STX-05-03/05-04** · Migration **2026-10-01_strategy_screening.sql**
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-02 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Modul **STX-05-03/05-04** · Migration **2026-10-01_strategy_screening.sql**
 
 ## Zweck und Abgrenzung
 

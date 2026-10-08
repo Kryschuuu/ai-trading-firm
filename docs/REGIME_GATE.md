@@ -1,6 +1,6 @@
 # Regime-Gate — Markt-Regime-Klassifikator & Strategie-Dämpfung (GAP-06)
 
-> **Seit v1.46.0 · multidimensional seit v1.61.0** · Findings
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Feature-Stand Legacy-Zählung: v1.46.0, multidimensional v1.61.0 · Findings
 > [`GAP-06`](audits/2026-09-18-feature-gap/findings/GAP-06-regime-gate.md) ·
 > [`RMA-P2-01`](audits/2026-09-20-roadmap-audit/findings/RMA-P2-01-regime-detection.md)
 > · Prompts [`PROMPT-06`](audits/2026-09-18-feature-gap/prompts/PROMPT-06-regime-gate.md) /

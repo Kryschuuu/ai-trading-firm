@@ -1,7 +1,7 @@
-# UI-Layout & Design-System (v0.16.1)
+# UI-Layout & Design-System
 
 **Gilt für:** `src/app/**`, `src/components/**`, `src/components/ui/**`,
-`src/app/globals.css`. · **Stand:** v0.16.1 (Beta).
+`src/app/globals.css`. · **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md).
 
 Dieses Dokument beschreibt das Layout-System der Oberfläche: Seitenhüllen,
 Breakpoints, Tabellen, Reiterleisten und die Testabsicherung. Es ist die
