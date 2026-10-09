@@ -1,6 +1,6 @@
 # Docs↔Code-Audit — Ist/Soll-Abgleich der Dokumentation
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 (Umsetzungsstand § 0.0 nachgeführt 2026-10-09) · **Code-Version:** v0.17.2 (Beta) · Architektur-Doku gegen `src/` + `scripts/` abgeglichen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) **FIXED** 2026-10-09 · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
 
 Dies ist ein **externer Audit-Bericht** (kein Modul-Status-Header im Sinne der
 Doku-Konvention). Er beschreibt den Abgleich zwischen `docs/` (338
@@ -23,10 +23,14 @@ Prompts. Bereits **behoben** (Nachweis in Tracking und Findings):
 | **DC-02** (H2) | Anzeige `=== "true"` vs. Gates `!== "false"` | eine Semantik über `humanApprovalRequired()` (live-gate), `tests/firmHumanApproval.parity.test.ts` |
 | **DC-03** (M4/M5/M7/M8/N1–N5/N7/N8) | 12 Doku-Einzelfehler | behoben, siehe [DC-03](audits/2026-10-06-docs-code-audit/findings/DC-03-doku-kleinfindings.md) (Vorher/Nachher-Tabelle) |
 
-**Offen und als Prompts übergeben:** DC-04 (Versions-Header, M1),
-DC-05 (Env-Flags, M2/N6), DC-06 (Symbol-/Pfad-Drift, M6),
-DC-07 (`DB_SCHEMA.md` 15/67 Tabellen, M3), DC-08 (CI-Wächter-Lücken, M8b),
-DC-09 (Prozess: Inventare + Versions-Bump).
+| **DC-04** (M1) | 4 von 45 Dokumenten mit passendem Versions-/Status-Header | Header klassifiziert (3 × verifiziert `v0.17.2`, 3 × Dokument-/Review-Version, 63 × „Bestandsdokument · Vollabgleich offen"); PR #236 · [DC-04 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md) |
+| **DC-05** (M2/N6) | 4 dokumentierte Env-Flags ohne Code-Read; `.env.example` lückenhaft | zwei Flags implementiert (`CYCLE_RETENTION_DAYS`/`_WEEKS`), zwei gestrichen (Doku nennt die echten Quellen), `MICRO_FEED_TYPE` → `MICRO_FEED`; `.env.example` + `CONFIGURATION.md` auf den echten Lese-Bestand ergänzt · [DC-05 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-05-env-flags-ohne-implementierung.md) |
+| **DC-06** (M6) | 34 Symbole/Pfade in der Architektur-Doku ohne Code-Entsprechung | reale Exporte + korrekte Modulgrenzen in `PIPELINE_MAP.md`, `INTEGRATION_POINTS.md`, `MISSIONS.md`, `DOCS_SYNC_AUDIT.md`; neue Absätze „Zwei Risk-Guards, zwei Zwecke" und „8. Pflege dieser Karte"; `tests/docsArchitectureSymbols.test.ts` (9 Tests) · [DC-06 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) |
+
+**Offen und als Prompts übergeben:** DC-07 (`DB_SCHEMA.md` 15/67 Tabellen, M3),
+DC-08 (CI-Wächter-Lücken, M8b), DC-09 (Prozess: Inventare + Versions-Bump).
+DC-04…DC-06 sind erledigt (Zeilen oben); die Befundtexte unten bleiben als
+Audit-Historie unverändert.
 
 Die Befund-Nummern unten (H1/H2/M…/N…) bleiben als Audit-Historie unverändert;
 die Zuordnung zu DC-IDs steht in der Tabelle

@@ -136,7 +136,7 @@
 | F1 | Control-Plane-Datenfluss (masked form → backend → encrypted store → adapter) | `src/brokers/control-plane/secretStore.ts`, `http.ts` | ✅ |
 | F2 | Zustands-Ebenen (connected/permissions/liveEnabled) | `src/brokers/control-plane/states.ts` | ✅ |
 | F3 | Operations-Center-Module | `src/components/ops/OperationsCenterPanel.tsx` | ✅ |
-| F4 | Hilfe-System (InfoTip, 3-Ebenen) | `src/components/workshop/InfoTip.tsx` | ✅ |
+| F4 | Hilfe-System (InfoTip, 3-Ebenen) | `src/components/ui/InfoTip.tsx` | ✅ |
 | F5 | Credential-Routen `/api/brokers/{venue}/credentials|status|test|discover` | `src/app/api/brokers/[venue]/*` | ✅ |
 | F6 | **Fix:** Help-JSON `brokers.help.json` fehlte `risiko` in 8 Feldern → ergänzt | `docs/help/brokers.help.json` | ✅ Help-Fix |
 

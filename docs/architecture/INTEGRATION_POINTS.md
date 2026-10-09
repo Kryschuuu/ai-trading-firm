@@ -1,7 +1,7 @@
 # Integrationspunkte & Erweiterungskarte
 
 > **Dokumenten-Status:** Architekturübersicht; TASK 03/04/05/07 zuletzt fachlich abgeglichen<br>
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-05 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)<br>
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-09 · **Code-Version:** v0.17.2 (Beta) · Symbol-/Pfadabgleich gegen `src/` + `scripts/` erledigt — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) (2026-10-09)<br>
 > **Verbindliche Statusquellen:** [`docs/roadmap/STATUS.md`](../roadmap/STATUS.md), [`docs/PERPETUAL_DATA.md`](../PERPETUAL_DATA.md), [`docs/README.md`](../README.md)
 
 Dieses Dokument skizziert die wichtigsten Integrationspunkte. Frühere
@@ -18,12 +18,12 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 |---|---|---|---|
 | 1 | **Backtest-Engine (Multi-Asset)** | `src/backtest/engine.ts`, `src/backtest/portfolio.ts`, `src/backtest/simulator.ts`, `src/cycle/steps/backtestStep.ts` | **Implementiert (Task 02 / v1.41.0):** Vollständiger synchronisierter Event-Driven Backtest über historische Kerzen |
 | 2 | **Trade-Attribution & Analytics** | `src/lib/broker.ts`, `src/lib/microExecutor.ts`, `src/db/schema.ts` | PnL-Zuordnung je Regel, Setup, Agent und Markt-Regime |
-| 3 | **Regime-Filter (Markt & Asset)** | `src/scanner/regime.ts`, `src/cycle/steps/macroStep.ts`, `src/lib/adaptiveRisk.ts` | Makro-Risikodrossel mit as-of/Frischeprüfung und instrument-spezifisches Volatilitätsregime |
+| 3 | **Regime-Filter (Markt & Asset)** | `src/scanner/regime.ts`, `src/cycle/steps/macroStep.ts`, `src/lib/adaptiveRisk.ts`, `src/lib/macroRegimeContext.ts`, `src/lib/riskGuard.ts` | Makro-Risikodrossel mit as-of/Frischeprüfung und instrument-spezifisches Volatilitätsregime |
 | 4 | **Perp-Daten-Ingestion (Funding / OI / Liquidations)** | `src/perpdata/`, `src/brokers/bitunix/publicClient.ts`, `src/scanner/factors/funding.ts` | Funding-Sync implementiert; Bitunix OI/Liquidationen ohne öffentlichen Endpoint (`UNSUPPORTED`); Live-Sync noch in Zielumgebung zu verifizieren |
-| 5 | **Portfolio-Sizing & Allocation** | `src/portfolio/optimize.ts`, `src/portfolio/riskGuard.ts`, `src/cycle/steps/riskStep.ts`, `src/cycle/steps/researchStep.ts` | Risk-geprüfte relative Gewichte erreichen serverseitig validierte Research-Proposals; keine Orderfreigabe |
+| 5 | **Portfolio-Sizing & Allocation** | `src/portfolio/pipeline.ts`, `src/portfolio/optimize.ts`, `src/portfolio/riskGuard.ts`, `src/cycle/steps/riskStep.ts`, `src/cycle/steps/researchStep.ts` | Risk-geprüfte relative Gewichte erreichen serverseitig validierte Research-Proposals; keine Orderfreigabe |
 | 6 | **Execution-Tracking & Slippage** | `src/executionQuality/`, `src/attribution/`, `src/db/schema.ts` | Execution-quality capture/reconcile und Trade-Attribution/Aggregation vorhanden; siehe jeweilige API-/Betriebsdoku |
 | 7 | **Rule-Lifecycle & Cache-Sync** | `src/lib/ruleService.ts`, `src/lib/microExecutor.ts`, `src/lib/tradeRulesNotificationListener.ts`, `drizzle/2026-10-05_trade_rules_notify.sql` | LISTEN/NOTIFY invalidiert RuleCaches sofort; Polling/Backoff sind Fallbacks, SQL-Trigger-Migration manuell anzuwenden |
-| 8 | **State Registry & Hydration** | `src/lib/stateRegistry.ts`, `src/lib/broker.ts`, `src/lib/engine.ts` | Atomare Mehrprozess-Hydrierung von Ledgern und Risk-Zuständen |
+| 8 | **State Registry & Hydration** | `src/lib/stateRegistry.ts`, `src/lib/broker.ts`, `src/lib/brokerHydration.ts`, `src/lib/engine.ts` | Atomare Mehrprozess-Hydrierung von Ledgern und Risk-Zuständen |
 | 9 | **LLM-Routing & Escalation** | `src/routing/router.ts`, `src/cycle/engine.ts`, `src/lib/llmProvider.ts` | Dynamische Modellauswahl nach Task-Komplexität und Token-Budget-Eskalation |
 | 10 | **Live-Gate Enforcement Hooks** | `src/live-gate/enforcer.ts`, `src/brokers/bitunix/adapter.ts`, `src/brokers/factory.ts` | Schusssichere Torsicherung für zusätzliche Broker-Venues (z. B. Alpaca, Binance) |
 
@@ -33,12 +33,12 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 
 - **Beteiligte Dateien:**
   - `src/cycle/steps/backtestStep.ts`
-  - `src/lib/ruleEngine.ts` (`backtestRuleOnCandles`)
+  - `src/lib/ruleEngine.ts` (`backtestRule`, Typen `BacktestResult`/`BacktestTrade`)
   - `src/lib/marketdata/historicalStore.ts` (`HistoricalStore.query`)
   - `src/lib/marketdata/feeds/replay.ts` (`ReplayFeed`)
   - `src/db/schema.ts` (`rule_backtests`)
 - **Aktueller Stand & Limitationen:**
-  `backtestStep.ts` verifiziert aktuell Research-Setups auf Basis einzelner Kerzenschnittmengen mit vereinfachten Kennzahlen (`maxDrawdown`, `profitFactor`, `sharpeRatio`). `backtestRuleOnCandles` in `src/lib/ruleEngine.ts` testet einzelne `RuleSpec`-Objekte seriell. Es fehlt ein koordinierter Multi-Asset-Portfoliosimulator, der zeitgleiche Signale mit gemeinsamen Cash- und Positionsgrenzen testet.
+  `backtestStep.ts` verifiziert aktuell Research-Setups auf Basis einzelner Kerzenschnittmengen mit vereinfachten Kennzahlen (`maxDrawdown`, `profitFactor`, `sharpeRatio`). `backtestRule(spec, candles, opts?)` in `src/lib/ruleEngine.ts` testet einzelne `RuleSpec`-Objekte seriell. Es fehlt ein koordinierter Multi-Asset-Portfoliosimulator, der zeitgleiche Signale mit gemeinsamen Cash- und Positionsgrenzen testet.
 - **Erweiterungs-Schnittstelle:**
   ```ts
   export interface PortfolioBacktestOptions {
@@ -82,9 +82,9 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 ## 2. Trade-Attribution & Performance Analytics
 
 - **Beteiligte Dateien:**
-  - `src/lib/broker.ts` (`positions`, `order_intents`)
-  - `src/lib/microExecutor.ts` (`rule_executions`)
-  - `src/db/schema.ts` (`positions`, `rule_executions`, `agent_messages`, `equity_snapshots`)
+  - `src/lib/broker.ts` (schreibt die Tabellen `positions`, `order_intents`)
+  - `src/lib/microExecutor.ts` (schreibt die Tabelle `rule_executions`)
+  - `src/db/schema.ts` (SSoT der Tabellen `positions`, `rule_executions`, `agent_messages`, `equity_snapshots`)
   - `src/portfolio/metrics.ts`
 - **Aktueller Stand & Limitationen:**
   `positions` speichert `rule_id` und `realized_pnl`. `rule_executions` speichert Latenzen und Snapshots. Eine granulare Zerlegung, welcher Agent (Research vs. Selection vs. Technical), welche Marktphase (Regime) und welcher Faktor-Score den Gewinn/Verlust verursacht hat, ist noch nicht aggregiert abrufbar.
@@ -119,7 +119,11 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 - **Beteiligte Dateien:**
   - `src/scanner/regime.ts` (`classifyRegime`)
   - `src/cycle/steps/macroStep.ts` (Cassini Makro-Regime)
-  - `src/lib/adaptiveRisk.ts` (`getAdaptiveRiskFactor`, `evaluateMarketRegime`)
+  - `src/lib/adaptiveRisk.ts` (`updateAdaptiveRisk`, `getAdaptiveRiskStatus`,
+    `assessRegime`, `RegimeStateMachine`, `readMarketReadings`)
+  - `src/lib/riskGuard.ts` (`applyAdaptiveRisk` — hier wird der Regime-Faktor
+    wirksam auf `maxRiskPerTrade` gelegt, nicht in `adaptiveRisk.ts`)
+  - `src/lib/macroRegimeContext.ts` (as-of/Frischeprüfung des Makro-Laufs)
   - `src/scanner/config.ts` (`ScannerConfig.regime`)
 - **Aktueller Stand & Limitationen:**
   Es existieren zwei separate Regime-Begriffe:
@@ -135,7 +139,7 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
     effectiveAsOf: string;
   }
   ```
-- **Datenfluss & Persistenz:** `src/lib/macroRegimeContext.ts` prüft den jüngsten indexierten Cycle-Lauf im konfigurierten Artefakt-Root/Index; nur ein frischer, abgeschlossener Lauf darf `src/lib/adaptiveRisk.ts` drosseln. Ein neuerer fehlgeschlagener/unvollständiger Lauf und fehlende, veraltete, zukünftige, fehlerhafte oder übersprungene Ausgaben bleiben neutral, ohne Rückfall auf ältere Makro-Daten; `LOW` erhöht Risiko nicht. Details und Grenzen: [`docs/roadmap/STATUS.md`](../roadmap/STATUS.md).
+- **Datenfluss & Persistenz:** `src/lib/macroRegimeContext.ts` (`readLatestMacroVolatilityFactor`) prüft den jüngsten indexierten Cycle-Lauf im konfigurierten Artefakt-Root/Index; nur ein frischer, abgeschlossener Lauf darf den Volatilitätsfaktor in `src/lib/adaptiveRisk.ts` (`updateAdaptiveRisk`) zusätzlich drosseln. Wirksam wird der Faktor erst in `src/lib/riskGuard.ts` (`applyAdaptiveRisk`), das `maxRiskPerTrade` innerhalb der `LIMIT_CEILINGS` senkt. Ein neuerer fehlgeschlagener/unvollständiger Lauf und fehlende, veraltete, zukünftige, fehlerhafte oder übersprungene Ausgaben bleiben neutral (Faktor 1), ohne Rückfall auf ältere Makro-Daten; `LOW` erhöht Risiko nicht. Details und Grenzen: [`docs/roadmap/STATUS.md`](../roadmap/STATUS.md).
 - **Risiko & Non-Breaking Design:** Der Multiplikator senkt das Risiko **ausschließlich** (NUR multiplikativ ≤ 1.0, niemals hebelnd).
 
 ---
@@ -146,11 +150,13 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
   - `src/perpdata/adapters/bitunix.ts` und `src/perpdata/service.ts` (kanonischer Sync-Pfad)
   - `src/brokers/bitunix/publicClient.ts` (credential-freie Bitunix-Funding-API)
   - `src/perpdata/capabilities.ts`, `src/perpdata/store.ts` (Capability/append-only Ablage)
-  - `src/perpdata/consumer.ts`, `src/scanner/factors/funding.ts`, `src/scanner/factors/openInterest.ts`
+  - `src/perpdata/consumers.ts` (`buildPerpDerivativeSnapshots`,
+    `perpDerivativeProvider`, `createPerpFundingRateProvider`,
+    `perpAnalystSnapshotLines`), `src/scanner/factors/funding.ts`, `src/scanner/factors/openInterest.ts`
 - **Aktueller Stand & Limitationen:**
   Bitunix current funding snapshots und historische Funding-Sätze laufen über öffentliche Endpunkte; Funding-Raten werden als dokumentierte Dezimalwerte unverändert normalisiert. Die History-Doku nennt den Start-Query-Key `starTime`, daher sendet der Client diese Schreibweise; ein Live-Vendor-Request konnte hier nicht verifiziert werden. Bitunix bietet laut geprüfter öffentlicher Futures-Doku keine OI- oder Liquidations-Endpunkte. Diese Capabilities sind `UNSUPPORTED / NO_PUBLIC_ENDPOINT` und lösen keinen Request aus; sie werden nicht als Messwert `0` ausgegeben. `SIM` ist ein deterministischer Test-/Offline-Fixture-Provider, kein Live-Ersatz.
 - **Datenfluss:**
-  `BitunixPublicClient` → `BitunixPerpAdapter` → Normalisierung/Qualität/Append-only `perp_*`-Tabellen → as-of Consumer/Scanner. `PERP_DATA_SYNC_ENABLED=true`, `BITUNIX_ENABLED=true` und `PERP_DATA_VENUES`-Freigabe sind für Ingestion nötig; `PERP_DATA_ENABLED=true` schaltet separat Scanner/Replay/Analyst-Konsumenten frei. Discovery für fehlende Perpetual-Instrumente läuft separat über `MARKET_SYNC`.
+  `BitunixPublicClient` → `BitunixPerpAdapter` → Normalisierung/Qualität/Append-only `perp_*`-Tabellen → as-of Consumer/Scanner. `PERP_DATA_SYNC_ENABLED=true`, `BITUNIX_ENABLED=true` und `PERP_DATA_VENUES`-Freigabe sind für Ingestion nötig; `PERP_DATA_ENABLED=true` schaltet separat Scanner/Replay/Analyst-Konsumenten frei. Discovery für fehlende Perpetual-Instrumente läuft separat über den Market-Data-Sync (`MARKET_SYNC_ENABLED`/`MARKET_SYNC_VENUES`, `npm run market:sync`).
 - **Live-Betrieb:**
   ```bash
   BITUNIX_ENABLED=true MARKET_SYNC_VENUES=BITUNIX npm run market:sync -- --venue=BITUNIX
@@ -166,8 +172,13 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 ## 5. Portfolio-Sizing & Multi-Asset Allocation Optimizer
 
 - **Beteiligte Dateien:**
-  - `src/portfolio/optimize.ts` (`optimizeWithGuard`)
-  - `src/portfolio/riskGuard.ts` (Portfolio-Guards)
+  - `src/portfolio/pipeline.ts` (`optimizeWithGuard` — Ketten-Einstieg
+    Optimizer → Guard → Position Limits → Correlation Limits)
+  - `src/portfolio/optimize.ts` (`optimizePortfolio`, `resolveBounds`)
+  - `src/portfolio/riskGuard.ts` (`applyRiskGuard`, `resolveGuardConfig`,
+    `assertAuthorityChain`, `capFor` — die **Portfolio**-Guards auf Gewichtsebene;
+    die Firm-/Order-Limits liegen getrennt in `src/lib/riskGuard.ts`, siehe
+    [`PIPELINE_MAP.md` § „Zwei Risk-Guards, zwei Zwecke“](PIPELINE_MAP.md#zwei-risk-guards-zwei-zwecke))
   - `src/cycle/steps/riskStep.ts`, `src/cycle/steps/researchStep.ts`
   - `src/cycle/schemas.ts` (`portfolioAllocation`, `portfolioWeight`)
 - **Aktueller Stand:**
@@ -226,10 +237,16 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 
 - **Beteiligte Dateien:**
   - `src/lib/stateRegistry.ts` (`state`, `__resetAllSingletonsForTests`)
-  - `src/lib/broker.ts` (`withAccountLock`, `state.paperBrokerLedger`)
-  - `src/lib/engine.ts` (`restoreFirmState`)
+  - `src/lib/broker.ts` (`withAccountLock`, `PaperBroker`; der Ledger-Singleton
+    steht als `state.paperBrokerLedger` in der Registry und wird von
+    `paperBrokerLedger()` in `src/brokers/factory.ts` befüllt)
+  - `src/lib/brokerHydration.ts` (`restorePaperBrokerState`,
+    `ensurePaperBrokerHydrated`, `invalidatePaperBrokerHydration`,
+    `FIRM_HYDRATION_RETRY_MS`)
+  - `src/lib/engine.ts` (`getBroker` — delegiert an die Hydration,
+    `invalidateBrokerCache`)
 - **Aktueller Stand & Limitationen:**
-  Alle prozessweiten Singletons sind typisiert in `src/lib/stateRegistry.ts` registriert. `firmHydrated` schützt vor Mehrfach-Hydrierung aus der Datenbank.
+  Alle prozessweiten Singletons sind typisiert in `src/lib/stateRegistry.ts` registriert. `firmHydrated` schützt vor Mehrfach-Hydrierung aus der Datenbank; `firmHydration` dedupliziert den laufenden Restore (Single-Flight), `firmHydrateRetryAt` hält das Backoff-Fenster nach einem Fehlschlag.
 - **Erweiterungs-Schnittstelle:**
   ```ts
   // Bei neuen Singletons:

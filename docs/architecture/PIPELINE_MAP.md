@@ -1,6 +1,6 @@
 # Pipeline-Architektur & Ausführungskarte (v0.1.0 · Legacy-Zählung v1.41.0 — Zuordnung: CHANGELOG.md)
 
-> **Dokumenten-Status:** Master-Architekturkarte · **Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)  
+> **Dokumenten-Status:** Master-Architekturkarte · **Bestandsdokument** · **Stand:** 2026-10-09 · **Code-Version:** v0.17.2 (Beta) · Symbol-/Pfadabgleich gegen `src/` + `scripts/` erledigt — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) (2026-10-09) · Pflegeregeln: [§ 8](#8-pflege-dieser-karte)  
 > **Verbindliche Referenz:** `docs/architecture/PIPELINE_MAP.md`
 
 ---
@@ -116,8 +116,11 @@ flowchart TD
   - `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` (Default: `50`, Chunk-Größe für Bulk-Tickers)
   - `MARKET_SYNC_ENABLED` (Default: `true`)
   - `MARKET_SYNC_VENUES` (Default: `BITUNIX`)
-  - `HISTORICAL_DATA_DIR` (Default: `data/history`)
-  - `UNIVERSE_DATA_DIR` (Default: `data/universe`)
+  - `UNIVERSE_DATA_DIR` (Default: `data/universe`, Read in `src/universe/store.ts`)
+  - **Kein Env-Flag für den Kerzen-Speicher:** `HistoricalStore` erhält sein
+    Verzeichnis als Konstruktor-Argument (`new HistoricalStore(dir?)`, Default
+    `data/history`, Datei `candles.ndjson`) und läuft über `resolveRuntimePath()`
+    aus `src/lib/appPaths.ts` (Traversal-Schutz).
 - **Feature-Flags:**
   - `BITUNIX_ENABLED=false` (Default: deaktiviert)
   - `BROKER_ALLOW_ENV_FALLBACK=false` (Default: in Produktion keine Env-Credentials)
@@ -146,7 +149,7 @@ flowchart TD
   - `FactorValue` (`raw`, `normalized`, `available`, `detail`)
 - **Verwendete DB-Tabellen & Persistenzdateien:**
   - Keine DB-Tabellen (strikte Import- und I/O-Freiheit)
-  - Schreibt Tagesabzüge nach `artifacts/<YYYY-MM-DD>/universe.json` via `writeDailyUniverseArtifact`
+  - Schreibt Tagesabzüge nach `artifacts/<YYYY-MM-DD>/universe.json` via `writeDailyArtifact` (`src/scanner/artifacts.ts`, Dateikonstante `DAILY_FILE`; Wochenabzug `weekly.json` via `writeWeeklyArtifact`)
 - **Konfigurationsschlüssel & Env-Variablen:**
   - `src/scanner/scanner.config.json` (Gewichte, Regimeschwellen, Filtergrenzen)
   - `SCANNER_CONFIG_FILE` (Override-Pfad)
@@ -163,21 +166,24 @@ flowchart TD
 
 - **Dateien:**
   - `src/scanner/ranker.ts` (`scoreFromFactors`, `rankByScore`)
-  - `src/scanner/funnel.ts` (`buildFunnel`)
-  - `src/scanner/types.ts` (`FunnelResult`, `FunnelStageResult`, `InstrumentScore`)
+  - `src/scanner/funnel.ts` (`buildFunnel`, `selectDiversified`, Typ `FunnelResult`)
+  - `src/scanner/types.ts` (`InstrumentScore`, `FactorValue`, `ScoreComponent`, `FACTOR_IDS`)
+  - `src/scanner/config.ts` (`FunnelConfig`, `DEFAULT_SCANNER_CONFIG`)
 - **Eingabe-Typen:**
-  - `eligibleScores: InstrumentScore[]`, Gesamtzahl `universeSize: number`, `FunnelConfig`
+  - `buildFunnel(scanned: number, eligibleScores: readonly InstrumentScore[], config: FunnelConfig)`
 - **Ausgabe-Typen:**
-  - `FunnelResult` mit Stufen:
-    - `universe`: Rohuniversum (~10.000)
+  - `FunnelResult` (`src/scanner/funnel.ts:22`) — jede Stufe ist eine
+    `InstrumentScore[]`-Liste (ein eigener Stufen-Typ existiert nicht):
+    - `scanned`: Anzahl gescannter Instrumente (Rohuniversum ~10.000)
     - `eligible`: Nach Eignungsfiltern (max. 2.000)
     - `interesting`: Nach Mindest-Score (max. 500)
     - `daily`: Tagesfokus (max. 100)
-    - `deep`: Tiefenanalyse für Agenten (max. 20–40)
+    - `deep`: Tiefenanalyse für Agenten (max. 20–40, diversifiziert)
+    - Diagnose: `droppedByCap`, `diversificationRelaxed`, `deepPerAssetClass`
 - **Verwendete DB-Tabellen & Persistenzdateien:**
   - Keine DB-Tabellen; Output wandert in `artifacts/<YYYY-MM-DD>/daily/01-market-scanner.json`.
 - **Konfigurationsschlüssel & Env-Variablen:**
-  - Konfiguriert über `scanner.config.json` (`funnel.eligible.maxCount = 2000`, `funnel.interesting.maxCount = 500`, `funnel.daily.maxCount = 100`, `funnel.deep.maxCount = 40`).
+  - Konfiguriert über `scanner.config.json` (`funnel.eligibleMax = 2000`, `funnel.interestingMax = 500`, `funnel.interestingMinScore = 55`, `funnel.dailyMax = 100`, `funnel.deepMin = 20`, `funnel.deepMax = 40`, `funnel.maxPerAssetClass = 8`).
 - **Feature-Flags:**
   - Keine (deterministische Arithmetik).
 - **Hooks & Events:**
@@ -188,17 +194,26 @@ flowchart TD
 ### Stufe 4: Daily & Weekly Agent Cycles
 
 - **Dateien:**
-  - `src/cycle/engine.ts` (`executeCycle`, `createGuardedAgentPort`)
+  - `src/cycle/engine.ts` (`executeCycle`, Typ `CycleExecutionOptions`; das LLM-Gate
+    `createGuardedAgentPort` ist modulintern und nicht exportiert — es wirft,
+    sobald ein Schritt mit `llmAllowed: false` ein LLM aufrufen will)
   - `src/cycle/daily.ts` (`createDailySteps`, `DAILY_CYCLE_SCHEDULE`)
-  - `src/cycle/weekly.ts` (`executeWeeklyReview`, `classifyWeekly`)
+  - `src/cycle/weekly.ts` (`weeklyReviewStep`, `createWeeklySteps`, Typen
+    `WeeklyStepInput`/`WeeklyStepOutput`)
+  - `src/scanner/weekly.ts` (`classifyWeekly`, Typ `WeeklyReview`) — die
+    fachliche Wochen-Klassifikation (`CORE`/`ROTATION`/`DISCOVERY`/`EXCLUDED`),
+    die der Weekly-Schritt nur aufruft
   - `src/cycle/service.ts` (`CycleService`)
-  - `src/cycle/artifacts.ts` (`writeCycleArtifact`, `pruneArtifacts`)
+  - `src/cycle/artifacts.ts` (`saveDailyCycleArtifacts`, `saveWeeklyCycleArtifacts`,
+    `updateArtifactIndex`, `pruneArtifacts`, `getLatestDailyArtifact`,
+    `getLatestWeeklyArtifact`)
   - `src/cycle/types.ts` (`StepDefinition`, `CycleRunRecord`, `StepRunRecord`, `CyclePorts`)
 - **Eingabe-Typen:**
-  - `CycleExecutionOptions` (`cycleId`, `type: "daily" | "weekly"`, `date`, `steps`, `ports`, `clock`, `initialInput`)
+  - `CycleExecutionOptions` (`cycleId`, `type: "daily" | "weekly"`, `date`, `week?`, `steps`, `ports`, `clock`, `initialInput?`)
 - **Ausgabe-Typen:**
   - `CycleRunRecord` (`id`, `type`, `date`, `status: "RUNNING" | "COMPLETED" | "FAILED"`, `steps: StepRunRecord[]`, `escalations: ModelEscalationRequest[]`, `error?`)
-  - `DailyCycleArtifacts` & `WeeklyReview`
+  - `WeeklyReview` (`src/scanner/weekly.ts`); die Artefakt-Writer geben
+    `{ artifactsDir, filesWritten }` zurück
 - **Verwendete DB-Tabellen & Persistenzdateien:**
   - PostgreSQL: `audit_log` (Events: `CYCLE_STARTED`, `CYCLE_STEP_STARTED`, `CYCLE_STEP_COMPLETED`, `CYCLE_STEP_FAILED`, `CYCLE_FAILED`, `CYCLE_COMPLETED`, `MODEL_ESCALATION_REQUEST`)
   - Dateisystem: `artifacts/<YYYY-MM-DD>/daily/*`, `artifacts/<YYYY-Www>/weekly/*`, `artifacts/index.json`
@@ -291,29 +306,53 @@ flowchart TD
 ### Stufe 7: Risk Manager & Guardrails
 
 - **Dateien:**
-  - `src/cycle/steps/riskStep.ts` (Rigel / Kandidaten-Freigabe)
-  - `src/lib/riskGuard.ts` (`validateOrder`, `killSwitch`, `RISK_LIMITS`, `LIMIT_CEILINGS`)
-  - `src/lib/adaptiveRisk.ts` (`getAdaptiveRiskFactor`, `evaluateMarketRegime`)
-  - `src/lib/riskConfigService.ts` (Laden von `risk_config`)
+  - `src/cycle/steps/riskStep.ts` (Rigel / Kandidaten-Freigabe, `riskStep`)
+  - `src/lib/riskGuard.ts` (`validateOrder`, `killSwitch`, `RISK_LIMITS`, `DEFAULT_LIMITS`,
+    `LIMIT_CEILINGS`, `applyRuntimeLimits`, `riskAdjustedSize`, `missionSizedNotional`)
+  - `src/lib/adaptiveRisk.ts` (`updateAdaptiveRisk`, `getAdaptiveRiskStatus`,
+    `assessRegime`, `RegimeStateMachine`, `readMarketReadings`, `fetchVix`) —
+    liefert Regime und Faktor ∈ (0, 1]; **angewendet** wird der Faktor in
+    `src/lib/riskGuard.ts` (`applyAdaptiveRisk`)
+  - `src/lib/riskConfigService.ts` (`refreshRuntimeLimits`, `effectiveConfigView`,
+    `setConfigValue`, `CONFIG_KEYS` — Laden/Tunen von `risk_config`)
+  - `src/lib/circuitBreaker.ts` (Auto-Not-Halt im Monitor-Tick)
 - **Eingabe-Typen:**
   - `RiskStepInput` (TA-Analysen + News-Sentiment + Korrelationsdaten)
-  - `OrderValidationParams` (`notional`, `equity`, `openPositions`, `side`, `leverage`, `hasStopLoss`, `symbol`)
+  - `ValidateContext` (`notional`, `equity`, `openPositions`, `side`, `leverage`, `hasStopLoss`, `symbol`)
 - **Ausgabe-Typen:**
-  - `RiskStepOutput` (`approvedCandidates: string[]`, `rejectedCandidates: { symbol, reason }[]`, `clusterWarnings`)
-  - `ValidationResult` (`allowed: boolean`, `reason?: string`, `adjustedSize?: number`)
+  - `RiskStepOutput` (`src/cycle/schemas.ts`: `approvedCandidates: string[]`,
+    `rejectedCandidates: { instrumentId, reason }[]`, `correlationWarnings: string[]`,
+    `maxPositionPct`, `riskBudgetPerTrade`, `rationale`, `portfolioAllocation?`)
+  - `GuardrailResult` (`allowed: boolean`, `reason: string`, `blockedBy: string[]`);
+    die Größenanpassung läuft separat über `riskAdjustedSize()`
 - **Verwendete DB-Tabellen & Persistenzdateien:**
-  - PostgreSQL: `risk_config` (Informative Anzeige, wirksame Limits im Code)
-  - PostgreSQL: `kill_switches` (Persistenter Not-Halt)
-  - PostgreSQL: `audit_log` (Events: `RISK_REJECTED`, `KILL_SWITCH_ARMED`)
-  - Dateisystem: `data/live-gate/kill-switch.json` (Unabhängige Failsafe-Sperrdatei)
+  - PostgreSQL: `risk_config` (Laufzeit-Tuning der Limits — wirksam nur innerhalb
+    der kodierten `LIMIT_CEILINGS`; Basiswerte stehen in `DEFAULT_LIMITS`)
+  - PostgreSQL: `kill_switches` (Persistenter Not-Halt; geschrieben von
+    `/api/firm/kill`, `src/lib/circuitBreaker.ts` und `src/brokers/reconciliation.ts`,
+    gelesen bei der Hydration in `src/lib/brokerHydration.ts`)
+  - PostgreSQL: `audit_log` (Events: `ORDER_REJECTED` mit `reason` — z. B.
+    `KILL_SWITCH_ARMED`, `DAILY_LOSS_LIMIT`, `COOLDOWN_AFTER_LOSSES`; `KILL_SWITCH`
+    (CRITICAL) beim Scharfschalten — Auto-Kill, `/api/firm/kill`, Reconciliation;
+    `KILL_SWITCH_DISARMED` beim Entschärfen)
+  - Dateisystem: `data/live-gate/kill-switch.json` (Unabhängige Failsafe-Sperrdatei,
+    `KILL_FILE_NAME` in `src/live-gate/killFile.ts`)
 - **Konfigurationsschlüssel & Env-Variablen:**
   - `STARTING_EQUITY` (Default: `10000`)
-  - `FIRM_MAX_RISK_PER_TRADE` (Default: `0.02` = 2 %)
-  - `FIRM_MAX_OPEN_POSITIONS` (Default: `5`)
-  - `FIRM_MAX_DRAWDOWN_STOP` (Default: `0.10` = 10 %)
-  - `FIRM_DAILY_LOSS_LIMIT` (Default: `0.05` = 5 %)
+  - **Keine Env-Flags für die Firm-Limits** — sie sind Code-Felder von
+    `DEFAULT_LIMITS` bzw. `RISK_LIMITS` (`src/lib/riskGuard.ts`):
+    - `maxRiskPerTrade` (Default: `0.02` = 2 %)
+    - `maxConcurrentPositions` (Default: `5`)
+    - `maxEquityDrawdownPct` (Default: `0.15` = 15 %)
+    - `dailyLossLimitPct` (Default: `0.05` = 5 %)
+    Änderbar zur Laufzeit über `risk_config` (Dashboard/`POST /api/firm/config`),
+    hart begrenzt durch `LIMIT_CEILINGS`.
+  - `AUTO_CIRCUIT_BREAKER` (Default: `on`) und `RISK_MAX_CONSECUTIVE_LOSSES`
+    (Default: `5`, Bounds [2, 50]) — `src/lib/circuitBreaker.ts`
 - **Feature-Flags:**
-  - `killSwitch.isArmed()` (Prozessweiter In-Memory- und Disk-Circuit-Breaker)
+  - `killSwitch.isArmed()` (prozessweiter In-Memory-Circuit-Breaker über
+    `state.killSwitchArmed` in `src/lib/stateRegistry.ts`; die persistente
+    Failsafe-Sperrdatei liegt getrennt im Live-Gate, siehe oben)
 - **Hooks & Events:**
   - Auto-Kill bei Drawdown- oder Tagesverlust-Überschreitung.
   - Hysterese bei Volatilitätsregimewechseln (Eskalation sofort, De-Eskalation verzögert).
@@ -323,22 +362,41 @@ flowchart TD
 ### Stufe 8: Portfolio Engine & Optimizer
 
 - **Dateien:**
-  - `src/portfolio/optimize.ts` (`optimizeWithGuard`, `optimizeWeights`)
-  - `src/portfolio/riskGuard.ts` (`guardPortfolioAllocations`, `enforcePositionLimits`, `enforceCorrelationLimits`)
-  - `src/portfolio/metrics.ts` (`computeSeriesMetrics`, `sharpeRatio`, `sortinoRatio`, `maxDrawdown`)
-  - `src/portfolio/correlation.ts` (`computeCorrelationMatrix`, `clusterAssets`)
-  - `src/portfolio/context.ts` (`getAnalysisContext`)
-  - `src/portfolio/types.ts` (`OptimizationResult`, `PortfolioGuardReport`)
+  - `src/portfolio/pipeline.ts` (`optimizeWithGuard` — der Einstieg, der
+    Optimizer → Guard → Limits → Cluster chained; Typ `PortfolioOptimizationResult`)
+  - `src/portfolio/optimize.ts` (`optimizePortfolio`, `resolveBounds`,
+    `riskContributions`, `expectedPortfolioReturn`, `convergenceWarning`)
+  - `src/portfolio/riskGuard.ts` (`applyRiskGuard`, `resolveGuardConfig`,
+    `assertAuthorityChain`, `capFor`)
+  - `src/portfolio/metrics.ts` (`computeMetrics`, `sharpeRatio`, `sortinoRatio`,
+    `maxDrawdown`, `profitFactor`, `realizedVolatility`, `averageTrueRange`)
+  - `src/portfolio/correlation.ts` (`correlationMatrix`, `covarianceMatrix`,
+    `correlationClusters`, `clusterAnalysis`, `pearsonCorrelation`, `spearmanCorrelation`)
+  - `src/portfolio/context.ts` (`getAnalysisContext`, `summarizeAnalysisContext`)
+  - `src/portfolio/types.ts` (`RawOptimizationResult`, `RiskGuardResult`,
+    `GuardedPortfolio`, `AUTHORITY_CHAIN`, `OPTIMIZER_AUTHORITY`)
 - **Eingabe-Typen:**
-  - `OptimizationRequest` (`series`, `mode: "min_variance" | "max_sharpe" | "risk_parity"`, `covariance`, `bounds`, `guard`)
+  - `PortfolioRequest` (`src/portfolio/pipeline.ts`: `series`,
+    `mode: "min_variance" | "max_sharpe" | "risk_parity"`, `covariance`, `bounds`,
+    `guard`, `longOnly`, `correlationMethod`, `withMetrics`)
+  - `OptimizationRequest` (`src/portfolio/optimize.ts`: `symbols`, `covariance`,
+    `mode`, `expectedReturns?`, `bounds?`, `longOnly?`, `solver?`, `annualization?`)
+  - `RiskGuardInput` (`src/portfolio/riskGuard.ts`)
 - **Ausgabe-Typen:**
-  - `OptimizationResult` (`weights: number[]`, `diagnostics: OptimizationDiagnostics`)
-  - `PortfolioGuardReport` (`chain`, `rejected: boolean`, `adjusted: boolean`, `reasons: string[]`, `decisions`)
+  - `RawOptimizationResult` (`weights: number[]`, `diagnostics: OptimizationDiagnostics`,
+    `authority: "portfolio-optimizer"` — **ungeprüft**, nie direkt handeln)
+  - `RiskGuardResult` (`rejected: boolean`, `adjusted: boolean`, `weights`, `input`,
+    `reasons: string[]`, `decisions: GuardDecision[]`, `chain: AuthorityStage[]`,
+    `caps`, `clusterExposures`, `auditEvents`)
+  - `GuardedPortfolio` / `PortfolioOptimizationResult` (das einzige Ergebnis, das
+    die API ausliefert: `chain`, `symbols`, `weights`, `mode`, `rejected`,
+    `adjusted`, `reasons`, `guard`, `raw`, `diagnostics`, `auditEvents`)
 - **Verwendete DB-Tabellen & Persistenzdateien:**
   - Keine DB-Tabellen (reine Rechenbibliothek)
-  - Optionales Dateiaudit: `data/portfolio/audit-log.ndjson` (via `PORTFOLIO_AUDIT_DIR`)
+  - Optionales Dateiaudit: `data/portfolio/audit-log.ndjson` (`AUDIT_FILE` in
+    `src/portfolio/auditFile.ts`, via `PORTFOLIO_AUDIT_DIR`)
 - **Konfigurationsschlüssel & Env-Variablen:**
-  - `PORTFOLIO_CONFIG_VERSION = 1`
+  - `PORTFOLIO_CONFIG_VERSION = 1` (`src/portfolio/config.ts`)
   - `PORTFOLIO_AUDIT_DIR` (Default: `data/portfolio`)
   - `PORTFOLIO_AUDIT` (Default: `0`)
 - **Feature-Flags:**
@@ -346,6 +404,24 @@ flowchart TD
 - **Hooks & Events:**
   - HTTP-Routen: `POST /api/portfolio/metrics`, `POST /api/portfolio/correlation`, `POST /api/portfolio/optimize`.
   - `getAnalysisContext`: Schnittstelle für LLMs mit Leitplanken (`llmMay` / `llmMustNot`).
+
+---
+
+### Zwei Risk-Guards, zwei Zwecke
+
+Querschnitt zu Stufe 7 und Stufe 8: Zwei Module heißen `riskGuard.ts` und sind
+**nicht** austauschbar. Wer nur den Dateinamen kennt, landet im falschen Modul:
+
+| Modul | Zuständigkeit (ein Satz) | Reale Einstiegssymbole |
+|-------|--------------------------|------------------------|
+| `src/lib/riskGuard.ts` | **Firm-/Order-Guardrails**: die hartkodierte letzte Verteidigungslinie pro Order — Limits, Sizing, Kill-Switch; Laufzeit-Tuning aus `risk_config` nur innerhalb der Code-Deckel. | `validateOrder(ctx: ValidateContext): GuardrailResult`, `RISK_LIMITS`, `DEFAULT_LIMITS`, `LIMIT_CEILINGS`, `applyRuntimeLimits`, `killSwitch`, `riskAdjustedSize`; die vier nur-senkenden Überlagerungen `applyAdaptiveRisk`, `applyVolatilityTargeting`, `applyDrawdownScaling`, `applyStrategyLifecycleScale` |
+| `src/portfolio/riskGuard.ts` | **Portfolio-Guards**: die Autorität über jedes Optimizer-Ergebnis — Positions- und Korrelations-Cluster-Limits auf Gewichtsebene, fail-closed verworfen statt still gekürzt. | `applyRiskGuard(input: RiskGuardInput): RiskGuardResult`, `resolveGuardConfig`, `assertAuthorityChain`, `capFor`; Ketten-Einstieg `optimizeWithGuard` in `src/portfolio/pipeline.ts` |
+
+Merksatz: **`src/lib/riskGuard.ts` entscheidet, ob eine Order das Haus verlässt
+(Notional, Hebel, Stop, Kill-Switch); `src/portfolio/riskGuard.ts` entscheidet,
+welche Gewichte ein Portfolio überhaupt haben darf.** Beide sind unabhängig
+voneinander wirksam — ein guard-freigegebenes Portfolio ist noch keine
+Orderfreigabe (siehe auch [`INTEGRATION_POINTS.md` § 5](INTEGRATION_POINTS.md)).
 
 ---
 
@@ -360,15 +436,16 @@ flowchart TD
 - **Eingabe-Typen:**
   - Proposal-ID, Lifecycle-Action (`activate`, `pause`, `archive`, `rollback`, `reject`), Transition-Payload (`venue`, `to`, `reason`, `confirm`, `approvedBy`)
 - **Ausgabe-Typen:**
-  - Mutation-Status, erzeugte Orders/Fills, geänderte `trade_rules`-Zeile, `GateTransitionResult`
+  - Mutation-Status, erzeugte Orders/Fills, geänderte `trade_rules`-Zeile, `LiveGateTransitionResult` (`src/live-gate/service.ts`)
 - **Verwendete DB-Tabellen & Persistenzdateien:**
   - PostgreSQL: `proposals` (Statuswechsel `PENDING` → `APPROVED` / `REJECTED`)
   - PostgreSQL: `trade_rules` (Statuswechsel `DRAFT` → `ACTIVE` → `SUPERSEDED` / `PAUSED` / `ARCHIVED`)
   - PostgreSQL: `audit_log` (Events: `PROPOSAL_APPROVED`, `RULE_ACTIVATED`, `RULE_REJECTED`, etc.)
   - Dateisystem: `data/live-gate/venue-{VENUE}.json`, `data/live-gate/audit-log.ndjson`
 - **Konfigurationsschlüssel & Env-Variablen:**
-  - `FIRM_ADMIN_TOKEN` (Admin-Rolle)
-  - `FIRM_OPERATOR_TOKEN` (Operator-Rolle)
+  - `FIRM_ADMIN_TOKEN` (Admin-Rolle; `ADMIN_TOKEN_FLAG` in `src/auth/authMode.ts`)
+  - `FIRM_API_TOKEN` (Operator-Rolle; `OPERATOR_TOKEN_FLAG` in `src/auth/authMode.ts`)
+  - `FIRM_VIEWER_TOKEN` (Viewer-Rolle; `VIEWER_TOKEN_FLAG`)
   - `REQUIRE_HUMAN_APPROVAL` (Default: `true`)
   - `LIVE_GATE_COOLDOWN_MS` (Default: `86400000` = 24 h)
   - `LIVE_GATE_FOUR_EYES` (Default: `false`)
@@ -383,25 +460,62 @@ flowchart TD
 ### Stufe 10: Rule Engine & Micro-Executor (Hot-Path)
 
 - **Dateien:**
-  - `src/lib/ruleEngine.ts` (`compileRuleSpec`, `matchRule`, `evaluateRule`, `RuleSnapshot`)
-  - `src/lib/ruleService.ts` (`listActiveRules`, `recordRuleExecution`)
-  - `src/lib/microExecutor.ts` (`MicroExecutor`, `RuleCache`, `RollingTimeframeSeries`)
+  - `src/lib/ruleEngine.ts` (`compileRuleSpec`, `sanitizeRuleSpec`, `ruleSignature`,
+    `RULE_CEILINGS`, `buildSnapshotFromCandles`, `isWindowOpen`, `backtestRule`;
+    Typen `RuleSpec`, `RuleSnapshot`, `CompiledRule`)
+  - `src/lib/ruleService.ts` (`getActiveRules`, `listRules`, `rowToSpec`,
+    `upsertRuleSpec`, `activateRule`, `listRuleExecutions`, `ruleFeedback`,
+    `startTradeRulesListen`, `stopTradeRulesListen`)
+  - `src/lib/microExecutor.ts` (`MicroExecutor`, `RuleCache`, `RollingTimeframeSeries`,
+    `loadRuleCacheSnapshot`, `createPaperRuleAdapter`, `startMicroService`)
+  - `src/lib/ruleCacheRegistry.ts` (Prozessweite Cache-Registrierung für LISTEN/NOTIFY)
   - `scripts/micro-executor.ts` (Standalone Runner `npm run micro`, Health-Port 3380)
+- **Regel-Matching — der reale Einstieg:**
+  `src/lib/ruleEngine.ts` liefert die Kompilierung und die Snapshot-Bausteine,
+  das Matching selbst liegt im Executor. Der Hot-Path läuft so:
+  1. `compileRuleSpec(spec)` liefert einen `CompiledRule` mit der closure
+     `evaluate(snap: RuleSnapshot): boolean` — die eigentliche Bedingungsprüfung.
+  2. `RuleCache.match(snap, now?, timeframe?)` (`src/lib/microExecutor.ts:622`)
+     ist der Einstieg des Executors: rein im RAM, filtert die geladenen
+     ACTIVE-Regeln des Symbols auf Timeframe, Mission-Status (`KILLED`),
+     Tageslimit, Cooldown und offenes Fenster und ruft dann `compiled.evaluate(snap)`
+     auf. Rückgabe: `CachedRule[]` (alle ausgelösten Regeln), kein Einzel-Ergebnis.
+  3. `MicroExecutor.handleTick()` baut den Snapshot aus `RollingTimeframeSeries`,
+     misst `evalMicros` und übergibt jeden Match an den `RuleExecutionAdapter`
+     (`createPaperRuleAdapter`).
+  - **`maxExecutionsPerDay` erschöpft:** Der Kandidat wird **still übersprungen** —
+    `RuleCache.match` macht ein `continue` (`firedToday >= rule.spec.window.maxExecutionsPerDay`,
+    `src/lib/microExecutor.ts:634`). Es entsteht weder eine `rule_executions`-Zeile
+    noch ein Log oder Counter; gezählt wird `executionsToday` (DB-Stand beim Laden)
+    plus `ramCounts` seit dem letzten Reload, zurückgesetzt am Berliner Tageswechsel
+    (`berlinDayKeyOf`). Sichtbar ist die Erschöpfung ausschließlich über
+    `RuleCache.status()` (`executionsToday` je Regel) bzw. `listRuleExecutions`.
+    Ein **sichtbares** „Nein“ gibt es nur beim Timeframe-Guard
+    (`ruleTimeframeBlockReason` → Counter `micro_executor_rule_blocked_total`
+    + Log `micro_executor_rule_blocked`).
 - **Eingabe-Typen:**
-  - `PriceTick` (`symbol`, `price`, `volume`, `timestamp`) / `MarketCandle`
+  - `FeedTick` (Union `trade` | `candle` | `book`; `symbol`, `ts`, `price`/`candle`/Bids-Asks)
+    und `CandleLike` (`src/lib/ruleEngine.ts`) für Kerzen-Ticks
+  - `RuleSnapshot` (`src/lib/ruleEngine.ts`) — der ausgewertete Marktzustand
+  - `ExecuteContext` (`ruleId`, `spec`, `compiled`, `snapshot`, `executionsToday`, `evalMicros`)
   - `RuleCache` mit im RAM vorkompilierten `CompiledRule`-Evaluatoren
 - **Ausgabe-Typen:**
-  - `RuleMatchResult` (`matched: boolean`, `reason?: string`, `rule?: CompiledRule`)
-  - `RuleExecutionRecord` (Persistiertes Feedback)
+  - `CachedRule[]` (Rückgabe von `RuleCache.match` — alle ausgelösten Regeln,
+    kein Einzel-Ergebnis-Wrapper)
+  - `ExecutionOutcome` (`status: "TRIGGERED" | "BLOCKED" | "ERROR"`, `ruleId`,
+    `symbol`, `reason?`, `orderId?`, `fill?`, `totalMicros?`, `at`)
+  - Persistiertes Feedback: Zeile in `rule_executions` (`src/db/schema.ts`),
+    lesbar über `listRuleExecutions()`
 - **Verwendete DB-Tabellen & Persistenzdateien:**
   - PostgreSQL: `trade_rules` (Liest `WHERE status = 'ACTIVE'`)
-  - PostgreSQL: `rule_executions` (Schreibt `status: 'TRIGGERED' | 'BLOCKED' | 'ERROR'`, `latency_micros`, `snapshot`, `evaluated`, `fill`)
+  - PostgreSQL: `rule_executions` (Schreibt `status: 'TRIGGERED' | 'BLOCKED' | 'ERROR'`
+    — das Schema kennt zusätzlich `EXPIRED` —, `latency_micros`, `snapshot`, `evaluated`, `fill`)
   - PostgreSQL: `positions` (Verknüpfung via `rule_id`)
 - **Konfigurationsschlüssel & Env-Variablen:**
-  - `MICRO_RULE_REFRESH_MS` (Default: `30000` = 30 s Cache-Poll)
-  - `MICRO_FEED` (`binance` | `sim`; Klassen `simulator`/`sequence` siehe `src/lib/microExecutor.ts`)
-  - `MICRO_SYMBOLS` (Default: `BTCUSDT,ETHUSDT`)
-  - `MICRO_HEALTH_PORT` (Default: `3380`)
+  - `MICRO_RULE_REFRESH_MS` (Default: `30000` = 30 s Cache-Poll, Bounds [5000, 600000])
+  - `MICRO_FEED` (`binance` | `sim`; Klassen `SimulatedFeed`/`SequenceFeed` siehe `src/lib/microExecutor.ts`)
+  - `MICRO_SYMBOLS` (Default im Runner: `BTC`; Beispiel in `.env.example`: `BTC,ETH`)
+  - `MICRO_HEALTH_PORT` (Default: `3380`, Bounds [1024, 65535])
 - **Feature-Flags:**
   - Autonomer Micro-Executor-Prozess.
 - **Hooks & Events:**
@@ -431,7 +545,9 @@ flowchart TD
   - PostgreSQL: `order_intents` (Atomare Reservierung via `status = 'RESERVED'`)
   - PostgreSQL: `positions` (Persistierte Positionen mit `entry_price`, `sl`, `tp`, `rule_id`, `status: 'OPEN' | 'CLOSED'`)
   - PostgreSQL: `equity_snapshots` (Snapshots für Equity-Kurve & PnL-Tracking)
-  - PostgreSQL: `audit_log` (Event: `BROKER_FACTORY`, `ORDER_PLACED`, `ORDER_FILLED`, etc.)
+  - PostgreSQL: `audit_log` (Events: `BROKER_FACTORY` (`src/brokers/audit.ts`),
+    `ORDER_SENT` bzw. `ORDER_REJECTED` (`src/lib/engine.ts`),
+    `RECONCILIATION_DISCREPANCY`, `TRAILING_STOP_ARMED`, `FLATTEN_ALL`)
 - **Konfigurationsschlüssel & Env-Variablen:**
   - `BITUNIX_ENABLED` (Default: `false`)
   - `BITUNIX_LIVE_ENABLED` (Default: `false`)
@@ -463,15 +579,20 @@ flowchart TD
 
 ### 4.2 Kerzen-Persistenz (`HistoricalStore`)
 
-- **Speicherort:** `data/history/candles.ndjson` (oder konfiguriert über `HISTORICAL_DATA_DIR`).
+- **Speicherort:** `data/history/candles.ndjson` — gesetzt über das
+  Konstruktor-Argument `dir` (`new HistoricalStore(dir?)`, Default `data/history`,
+  aufgelöst mit `resolveRuntimePath()` aus `src/lib/appPaths.ts`; die
+  Dateikonstante steckt in `HistoricalStore.filePath`). Es gibt dafür **kein
+  Env-Flag** — der Pfad ist Code-/Aufrufer-Konfiguration.
 - **Schema-Version:** **v2** (jede Zeile enthält `v: 2` und ein verpflichtendes `timeframe`-Feld).
 - **Zulässige Timeframes (`SupportedTimeframe`):**
   `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `1d`, `5d`
   (SSoT: `src/lib/marketdata/timeframes.ts`, vom Store re-exportiert).
 - **Logischer Primärschlüssel:** `instrumentId + timeframe + ts`. Bei Kollision gewinnt der Datensatz mit dem jüngeren `fetchedAt`.
 - **Retention & Kompaktierung:**
-  - `maxBarsPerSeries`: Standard **5.000 Kerzen** pro `(instrumentId, timeframe)`-Paar.
-  - Beim Batch-Append (`appendSeries`) werden ältere Kerzen jenseits der 5.000er-Grenze automatisch abgeschnitten (`compact()`).
+  - `maxBarsPerSeries`: Standard **100.000 Kerzen** pro `(instrumentId, timeframe)`-Paar
+    (`DEFAULT_MAX_BARS_PER_SERIES` = `MAX_CANDLES_PER_SERIES`, `src/lib/marketdata/limits.ts`).
+  - Beim Batch-Append (`appendSeries`) werden ältere Kerzen jenseits dieser Grenze automatisch abgeschnitten (`compact()`).
 - **Schreib- und Lese-Garantien:**
   - Schreibvorgänge: Streambasiertes Laden, In-Memory-Indexierung, Kompaktierung und **ein** atomarer Schreibvorgang via `.tmp` + `renameSync`.
   - Lesevorgänge: Pufferbasiertes Streaming (`readLinesSync`, Chunk-Größe 1 MB) verhindert Node-OOM bei großen Dateien. `query()` erzwingt `instrumentId` und `timeframe`.
@@ -566,3 +687,37 @@ Der Bitunix-Adapter (`src/brokers/bitunix/orders.ts`) mappt standardisierte `Bro
 Diese Architekturkarte bildet das verifizierte Fundament des Systems ab. Alle nachfolgenden Funktionsblöcke (Backtest-Engine, Perp-Daten-Ingestion, Trade-Attribution, Portfolio-Sizing) klinken sich über die in `docs/architecture/INTEGRATION_POINTS.md` definierten Schnittstellen ein.
 
 Die **Entscheidungskarte** für Regel-Felder, Strategieklassen, Regime, Eligibility, Kostenmodelle und Evidenz liegt in [STRATEGY_STACK.md](STRATEGY_STACK.md) — SSoT je Thema, explizite Lücken und 5-zeilige Einordnungsregel. Die verbindlichen Vokabular-Entscheidungen (Strategieklasse, Regime, Universe) stehen als ADR-008 … ADR-010 in [../roadmap/DECISIONS.md](../roadmap/DECISIONS.md).
+
+---
+
+## 8. Pflege dieser Karte
+
+Diese Karte ist eine **Abschrift des Codes**, keine zweite Quelle der Wahrheit.
+Damit sie als Einstiegspunkt brauchbar bleibt (Docs↔Code-Audit
+[DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)),
+gelten beim Ändern drei Regeln:
+
+1. **Quelle ist der Code.** Jeder Dateipfad in Backticks (`src/…`, `scripts/…`)
+   muss existieren; jedes genannte Symbol muss ein realer Export (oder eine real
+   nachweisbare Methode/Tabelle) der daneben genannten Datei sein. Nachschlag:
+   `grep -n "^export" <datei>`. Modulinterne Helfer werden als „modulintern“
+   gekennzeichnet, nicht als Export ausgegeben.
+2. **Umschreiben statt erfinden.** Fällt ein Baustein weg oder heißt er anders,
+   wird die Aussage auf den realen Einstieg umgestellt (Beispiel Rule-Matching:
+   genannt wird `RuleCache.match()` aus `src/lib/microExecutor.ts`, weil die
+   Regel-Engine nur kompiliert und Snapshots baut), nicht auf einen plausibel
+   klingenden Namen. Existiert ein Baustein gar nicht mehr, wird die Zeile
+   „nicht vorhanden“ gesetzt und die Lücke im Audit-Finding gemeldet — kein
+   stiller Verlust der Absicht.
+3. **Altpfade nur als solche.** Historische Pfade in Audit- oder
+   Migrationstabellen — hier dokumentiert in
+   [`../security/SECURITY_AUDIT.md`](../security/SECURITY_AUDIT.md) (Befund S-11,
+   `scripts/drizzle.config.json`) und
+   [`../MARKET_DATA_PIPELINE.md`](../MARKET_DATA_PIPELINE.md) (Migrationstabelle,
+   `src/scanner/historicalStore.ts`) — bleiben unverändert und sind als Altpfad
+   erkennbar; sie sind die einzige Ausnahme von Regel 1.
+
+Ein automatischer Wächter (dokumentierte `src/…`-Pfade und Export-Symbole müssen
+existieren, mit Whitelist für Altpfade) folgt mit
+[DC-08](../audits/2026-10-06-docs-code-audit/findings/DC-08-ci-waechter-luecken.md)
+in `npm run docs:validate`.
