@@ -1,14 +1,44 @@
-# Datenbank-Schema & Persistenz-Verzeichnis (v0.1.0 · Legacy-Zählung v1.41.0 — Zuordnung: CHANGELOG.md)
+# Datenbank-Schema & Persistenz-Verzeichnis
 
 > **Dokumenten-Status:** Kanonisches Datenbank- und Persistenzverzeichnis  
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-07](../audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md) und [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)  
-> **Verbindliche Referenz:** `src/db/schema.ts`
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-09 (DC-07 abgeschlossen) · **Code-Version:** v0.17.2 (Beta)  
+> **Single Source of Truth (SSoT):** [`src/db/schema.ts`](../../src/db/schema.ts) (Typen + Constraints) und [`drizzle/*.sql`](../../drizzle/) (Migrations-Skripte)  
+> **Generiertes Inventar:** [docs/generated/schema-inventory.md](../generated/schema-inventory.md) — alle `pgTable`-Definitionen mit Quellzeile, Spaltenzahl, Migrationszuordnung und TSDoc-Kurzbeschreibung, erzeugt per `npm run docs:inventories`.
 
-Dieses Dokument beschreibt die **ursprünglichen 15 Drizzle-Tabellen** (Stand 2026-09-18) im Detail sowie sämtliche dateigestützten Persistenzstrukturen. **SSoT ist `src/db/schema.ts`** — dort stehen inzwischen **67 `pgTable`-Definitionen** (v0.17.2); die später hinzugekommenen Tabellen (u. a. Feature Store, Forecasts, Perp-/Funding-Daten, Execution-Quality, Strategy-Catalog/-Lifecycle/-Screening, Copy-Subscriptions, Regime-Snapshots, Drawdown-/Vol-Targeting, Cross-Sectional, Sentiment, Prompt-Artefakte, Trade-Attachments) sind hier **noch nicht einzeln dokumentiert** — Nachführung siehe `docs/audits/2026-10-06-docs-code-audit/` (Befund DC-07, Prompt `PROMPT-DC-07`).
+Dieses Dokument beschreibt das **Verhalten** der zentralen Domänen-Tabellen.
+Die ursprünglichen 15 Kerntabellen (Stand 2026-09-18, siehe unten §2) sind
+weiterhin als Prosa dokumentiert (Indizes, Constraints, Sicherheitsmodell,
+Anwendungssemantik). Die inzwischen **67 `pgTable`-Definitionen** in
+`src/db/schema.ts` (Feature Store, Forecasts, Perp-/Funding-Daten,
+Execution-Quality/TWAP/Workflows, Strategy-Catalog/-Lifecycle/-Screening,
+Copy-Subscriptions, Regime-Snapshots, Drawdown-/Vol-Targeting,
+Cross-Sectional, Sentiment, Prompt-Artefakte, Trade-Attributions etc.) sind
+in dem **generierten Inventar** [schema-inventory.md](../generated/schema-inventory.md)
+vollständig gelistet — inkl. Quellzeilen-Link und zugehöriger Migrationsdatei.
+Bei Schema-Änderungen: TSDoc auf der `pgTable`-Definition pflegen und
+`npm run docs:inventories` laufen lassen (Idempotenz-Check via
+`npm run docs:inventories:check`, siehe DC-08/DC-09 für CI-Anschluss).
 
 ---
 
 ## 1. Übersicht aller Drizzle-Tabellen
+
+Die vollständige, stets aktuelle Liste aller Drizzle-Tabellen mit Quellzeile,
+Spaltenzahl, Migrationsdatei(en) und TSDoc-Zweck liegt im generierten
+Inventar:
+
+→ **[../generated/schema-inventory.md](../generated/schema-inventory.md)**
+
+Die dortige Tabelle wird automatisch aus `src/db/schema.ts` und
+`drizzle/*.sql` erzeugt; sie ersetzt die frühere, auf 15 Tabellen
+beschränkte Übersicht. Die nachfolgenden Abschnitte §2 enthalten die
+ausführliche Verhaltensbeschreibung der **15 ursprünglichen Kerntabellen**;
+die übrigen 52 Tabellen sind durch ihre TSDoc-Blöcke, die zugehörigen
+Migrationsskripte und die Feature-Module (z. B. `src/features/`,
+`src/forecasts/`, `src/execution/`, `src/strategies/`, `src/copy/`)
+spezifiziert.
+
+### 1.1 Kurztableau der 15 Kerntabellen (bleibt als Navigationsstütze)
 
 | # | PostgreSQL-Tabelle | Drizzle-Export | Primärschlüssel | Fremdschlüssel-Beziehungen | Zweck |
 |---|---|---|---|---|---|

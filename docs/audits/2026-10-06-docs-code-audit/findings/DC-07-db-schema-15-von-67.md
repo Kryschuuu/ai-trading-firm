@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Datenmodell-Dokumentation
 - **Quelle:** Docs↔Code-Audit `v0.17.2`, Mengenabgleich `pgTable(` vs. Doku
-- **Status:** ☐ **OPEN** (Sofort-Klarstellung bereits in DC-03 erfolgt)
+- **Status:** ✅ **RESOLVED** (2026-10-09, DC-07) — siehe CHANGELOG.md, generiertes Inventar [docs/generated/schema-inventory.md](../../../generated/schema-inventory.md) (67 Tabellen).
 - **Prompt:** [`../prompts/PROMPT-DC-07-db-schema-nachfuehren.md`](../prompts/PROMPT-DC-07-db-schema-nachfuehren.md)
 - **Datei(en):** `docs/architecture/DB_SCHEMA.md`, `src/db/schema.ts`, `drizzle/*.sql` (34 Migrationen)
 

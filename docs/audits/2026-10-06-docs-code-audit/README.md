@@ -4,7 +4,7 @@
 - **Bericht (Volltext):** [`../../DOCS_CODE_AUDIT_2026-10-06.md`](../../DOCS_CODE_AUDIT_2026-10-06.md)
 - **Prüfbasis:** `main` @ `104aaef` (Merge PR #234, 2026-10-06) · Code-Version **0.17.2**
 - **Reviewer:** Arena-Agent-Session (externer Abgleich; Methodik im Bericht §0)
-- **Status:** **OPEN** — 9 Befunde: 6 FIXED (DC-01…DC-06), 3 offen (DC-07…DC-09)
+- **Status:** **IN ARBEIT** — 9 Befunde: 7 FIXED (DC-01…DC-07), 2 offen (DC-08…DC-09)
 - **Prompts:** [`prompts/README.md`](prompts/README.md) — kopierfertig für Folge-Sessions
 - **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
 
@@ -28,7 +28,7 @@
 | [DC-04](findings/DC-04-versions-header-drift.md) | MEDIUM | Versions-/Status-Header: nur 4 von 45 Dokumenten auf Code-Stand | Doku-Wahrheit | ☑ **FIXED** 2026-10-09 (PR #236) | [DC-04](prompts/PROMPT-DC-04-versions-header-bump.md) |
 | [DC-05](findings/DC-05-env-flags-ohne-implementierung.md) | MEDIUM | 4 dokumentierte Env-Flags ohne Code-Read; `.env.example` lückenhaft | Betrieb / Doku | ☑ **FIXED** 2026-10-09 | [DC-05](prompts/PROMPT-DC-05-env-flags-entscheiden.md) |
 | [DC-06](findings/DC-06-symbol-und-pfad-drift.md) | MEDIUM | Symbole/Pfade in Architektur-Doku ohne Code-Entsprechung | Architektur-Doku | ☑ **FIXED** 2026-10-09 | [DC-06](prompts/PROMPT-DC-06-symbol-pfad-abgleich.md) |
-| [DC-07](findings/DC-07-db-schema-15-von-67.md) | MEDIUM | `DB_SCHEMA.md` beschreibt 15 von 67 Tabellen | Datenmodell-Doku | ☐ OPEN | [DC-07](prompts/PROMPT-DC-07-db-schema-nachfuehren.md) |
+| [DC-07](findings/DC-07-db-schema-15-von-67.md) | MEDIUM | `DB_SCHEMA.md` beschreibt 15 von 67 Tabellen | Datenmodell-Doku | ☑ FIXED (2026-10-09) | [DC-07](prompts/PROMPT-DC-07-db-schema-nachfuehren.md) · [Invenar](../../generated/schema-inventory.md) |
 | [DC-08](findings/DC-08-ci-waechter-luecken.md) | MEDIUM | `docs:validate` sieht die Drift nicht (5 Check-Lücken); 2 Contract-Tests scheitern statt zu skippen | CI / Prozess | ☐ OPEN | [DC-08](prompts/PROMPT-DC-08-docs-validate-ausbau.md) |
 | [DC-09](findings/DC-09-prozess-inventare-und-bump.md) | LOW | Kein generiertes Inventar & kein automatisierter Versions-Bump-Schritt | Prozess | ☐ OPEN | [DC-09](prompts/PROMPT-DC-09-inventare-und-release-bump.md) |
 

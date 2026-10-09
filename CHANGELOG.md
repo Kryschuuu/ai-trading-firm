@@ -21,10 +21,10 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-06** · Code-Version **0.17.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-09** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-06)
+## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-07)
 
 ### Fixed
 
@@ -177,14 +177,35 @@ erlaubt, solange sie hier dokumentiert sind).
   (9 Tests, DC-06: Pfade und Einstiegssymbole der Architektur-Doku gegen
   `src/` + `scripts/`, mit verrottungsgeschützter Altpfad-Whitelist).
 
+### Added
+
+- **DC-07 (MEDIUM, Datenmodell-Doku):** Deterministischer Schema-Inventar-Generator
+  `scripts/gen-schema-inventory.ts`, der `docs/generated/schema-inventory.md`
+  aus `src/db/schema.ts` (67 `pgTable`-Definitionen) und `drizzle/*.sql`
+  (34 Migrationen) erzeugt. Spalten: Tabelle · Quellzeile in schema.ts ·
+  Spaltenzahl · Migrationsdatei(en) · TSDoc-Kurzzweck (erster Absatz,
+  gekappt auf 110 Zeichen; fehlt er → "—"). Sortierung stabil in
+  Dateireihenfolge, LF-Zeilenenden, kein Zeitstempel — das "Stand"-Datum
+  kommt ausschließlich über die Env `SCHEMA_INVENTORY_STAND`, sonst
+  byte-instabil. Idempotenz via `npm run docs:inventories:check`
+  (Exit != 0 bei Drift). `docs/architecture/DB_SCHEMA.md` verweist im Kopf
+  auf SSoT + generiertes Inventar und behält die 15 ursprünglichen
+  Kerntabellen als detaillierte Prosa (§2), das Kurztableau (§1.1) als
+  Navigationsstütze; die Behauptung einer vollständigen 15-Tabellen-Liste
+  ist entfernt. Neue npm-Scripts: `docs:inventories`,
+  `docs:inventories:check` (CI-Anschluss folgt in DC-08/DC-09).
+  Verifikation: `grep -c "pgTable(" src/db/schema.ts` = 67,
+  `grep -c "^| `" docs/generated/schema-inventory.md` = 67,
+  zweiter Lauf ohne Diff, `npm run docs:validate` grün.
+  Details: [`docs/audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md).
+
 ### Changed
 
 - **DC-04 (MEDIUM, Doku, Versions-/Status-Header):** Die Kopfzeilen der Fachdokumente sind klassifiziert statt pauschal auf `0.17.2` gesetzt (PR #236). Ergebnis: 3 Dokumente mit verifizierter Code-Version `v0.17.2`, 3 mit eigener Dokument-/Review-Version (Zahl bleibt, z. B. `PORTFOLIO_CONFIG_VERSION = 1`), 63 als „Bestandsdokument · Vollabgleich offen“ (DC-06/DC-07) markiert. Legacy-Zählungen in Dokumenttiteln stehen nur noch als Klammerhinweis mit Verweis auf die Zuordnung oben. Kein Code- und kein Versions-Bump; `package.json` bleibt `0.17.2`. Verifikation: Header-Scan meldet 0 falsche Code-Version-Header, `npm run docs:validate` grün. Details: [`docs/audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md).
 
 ### Notes
 
-- Offene Befunde mit Prompts: DC-07 (`DB_SCHEMA.md` 15/67 Tabellen),
-  DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI — dort folgt der
+- Offene Befunde mit Prompts: DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI — dort folgt der
   generische Wächter „dokumentierte `src/…`-Pfade und Export-Symbole müssen
   existieren"), DC-09 (generierte Inventare + Release-Bump-Schritt).
 - `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün; volle Suite
