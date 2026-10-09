@@ -14,6 +14,7 @@
   6 davon aus dem Nachaudit Task 10, v1.23.0).
 - **Diskrepanzen gefunden:** 14 → **alle behoben** (Fix in Code/Docs/Help bzw. Validator-Präzisierung).
 - **0 offene Diskrepanzen** zum Stand 2026-08-29.
+- *Nachtrag 2026-10-09 (DC-04, PR #236):* Die Versions-Header dieses Dokuments sind klassifiziert (Bestandsdokument, Vollabgleich offen). Die Aussage „0 offene Diskrepanzen“ bezieht sich auf die Code-Behauptungen zum Stand 2026-08-29 und wurde dadurch nicht geändert. Der Vollabgleich der Architektur-Doku läuft über DC-06/DC-07.
 - **Secret-Scan über Docs:** 0 Funde (echte Keys/Secrets).
 - **Verifikationsweg:** `npm run docs:validate` grün; referenzierte Code-Stellen manuell geprüft.
 

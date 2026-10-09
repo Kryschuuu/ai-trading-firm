@@ -80,10 +80,13 @@ erlaubt, solange sie hier dokumentiert sind).
 - **Regressionstests:** `tests/proposalApprove.auth.test.ts`,
   `tests/firmHumanApproval.parity.test.ts`.
 
+### Changed
+
+- **DC-04 (MEDIUM, Doku, Versions-/Status-Header):** Die Kopfzeilen der Fachdokumente sind klassifiziert statt pauschal auf `0.17.2` gesetzt (PR #236). Ergebnis: 3 Dokumente mit verifizierter Code-Version `v0.17.2`, 3 mit eigener Dokument-/Review-Version (Zahl bleibt, z. B. `PORTFOLIO_CONFIG_VERSION = 1`), 63 als „Bestandsdokument · Vollabgleich offen“ (DC-06/DC-07) markiert. Legacy-Zählungen in Dokumenttiteln stehen nur noch als Klammerhinweis mit Verweis auf die Zuordnung oben. Kein Code- und kein Versions-Bump; `package.json` bleibt `0.17.2`. Verifikation: Header-Scan meldet 0 falsche Code-Version-Header, `npm run docs:validate` grün. Details: [`docs/audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md).
+
 ### Notes
 
-- Offene Befunde mit Prompts: DC-04 (Versions-Header, 4/45 aktuell),
-  DC-05 (vier dokumentierte Env-Flags ohne Code-Read, `.env.example`-Lücken),
+- Offene Befunde mit Prompts: DC-05 (vier dokumentierte Env-Flags ohne Code-Read, `.env.example`-Lücken),
   DC-06 (Symbole/Pfade ohne Code-Entsprechung), DC-07 (`DB_SCHEMA.md` 15/67
   Tabellen), DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI),
   DC-09 (generierte Inventare + Release-Bump-Schritt).

@@ -4,7 +4,7 @@
 - **Severity:** MEDIUM
 - **Bereich:** Doku-Wahrheit / Release-Prozess
 - **Quelle:** Docs↔Code-Audit `v0.17.2`, Headerscan über alle Fachdokumente
-- **Status:** ☐ **OPEN**
+- **Status:** ☑ **FIXED** (2026-10-09, PR [#236](https://github.com/Kryschuuu/ai-trading-firm/pull/236))
 - **Prompt:** [`../prompts/PROMPT-DC-04-versions-header-bump.md`](../prompts/PROMPT-DC-04-versions-header-bump.md)
 - **Datei(en):** 41 Fachdokumente unter `docs/**` (ohne `audits/`, `archive/`, `help/`)
 
@@ -84,3 +84,36 @@ PY
 
 Erwartung: nur noch 0 Treffer bzw. ausschließlich Dokumente mit
 ausgewiesenem „Dokument-Version"-Header.
+
+## Umsetzung
+
+- **Status:** ☑ **FIXED** am 2026-10-09
+- **PR:** [#236](https://github.com/Kryschuuu/ai-trading-firm/pull/236) „docs(DC-04): Versions- und Status-Header klassifizieren (doc-only, kein Bump)“ — gemergt am 2026-10-08, Commit `977e0bc`, Merge `3123920` auf `main`
+- **Umfang:** nur Dokument-Kopfzeilen und Titelzeilen; kein Code, kein Versions-Bump (`package.json` bleibt `0.17.2`)
+- **Vorgehen:** Klassifikation (a/b/c) nach `PROMPT-DC-04`. Stand-Daten wurden nicht durch das heutige Datum ersetzt (z. B. `DB_SCHEMA.md` bleibt „Stand 2026-09-18“). Legacy-Zählung in Dokumenttiteln nur noch als Klammerhinweis mit Verweis auf die Zuordnung in `CHANGELOG.md`.
+
+### Klassenübersicht (Stand 2026-10-09)
+
+| Klasse | Anzahl | Kopfzeile | Beispiele |
+|--------|--------|-----------|-----------|
+| (a) CODE-VERSION, verifiziert | 3 | `Code-Version: v0.17.2` | `PERPETUAL_DATA.md`, `architecture/STRATEGY_STACK.md`, `roadmap/STATUS.md` |
+| (b) DOKUMENT-VERSION | 3 | „Dokument-Version“ bzw. „Review-Version“ (Zahl bleibt) | `MIGRATION_TIMEFRAME_FIELD.md`, `PORTFOLIO_ANALYTICS.md`, `peer-reviews/2026-08-26-routing-overrides/review.md` |
+| (c) BESTANDSDOKUMENT | 63 | „Bestandsdokument · Stand … · Code-Version v0.17.2 (Beta) · Vollabgleich offen“ mit Verweis auf DC-06/DC-07 | `LIVE_TRADING.md`, `CAPABILITIES.md`, `architecture/DB_SCHEMA.md`, `LLM_ROUTING.md` |
+
+Zusätzlich trägt `docs/README.md` die Versionszeile im Fuß mit `v0.17.2` (unverändert korrekt).
+
+Hinweis zur Einstufung: `architecture/INTEGRATION_POINTS.md` stand im Befund als korrekt auf `0.17.2`. Im Diff von PR #236 ist die Kopfzeile jetzt als (c) „Bestandsdokument“ markiert, weil kein erneuter Abgleich gegen den Code stattfand. Das entspricht Regel 3 („keine Schein-Aktualität“).
+
+### Verifikation
+
+| Prüfung | Ergebnis |
+|---------|----------|
+| Header-Scan (Abschnitt „Verifikation nach Umsetzung“) | 66 Treffer mit `Code-Version`, **0** mit falschem Code-Stand (≠ `0.17.2`) |
+| `npm run docs:validate` | grün (9 Checks, 10 Hilfe-Dateien, Exit 0) |
+| Dokumenttitel (H1) | Legacy-Zählung nur noch als Klammerhinweis, z. B. `PIPELINE_MAP.md`: „(v0.1.0 · Legacy-Zählung v1.41.0 — Zuordnung: CHANGELOG.md)“ |
+
+### Bewusst offen (nicht Teil von DC-04)
+
+- **Abschnittsüberschriften mit `v1.x`:** 82 Überschriften (`##` und tiefer) in 22 Dokumenten nennen weiterhin historische Task-Versionen (z. B. `ARCHITECTURE.md` §8–11, `ARENA_TASKS.md`). Sie sind Task-Bezeichnungen und keine Dokumenttitel. Ein Umbau würde Anker und Links ändern. Entscheidung offen, ggf. im Rahmen von DC-09.
+- **`DOCS_SYNC_AUDIT.md`:** Die Aussage „0 offene Diskrepanzen“ bezieht sich auf die Code-Behauptungen zum Stand 2026-08-29 und wurde durch DC-04 nicht geändert. Ein datierter Nachtrag steht im Dokument.
+- **CHANGELOG:** Eintrag unter `[Unreleased]` → „Changed“ (von `CONTRIBUTING.md` verlangt).
