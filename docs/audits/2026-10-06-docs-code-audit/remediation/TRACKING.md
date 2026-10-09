@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Bericht:** [`../../../DOCS_CODE_AUDIT_2026-10-06.md`](../../../DOCS_CODE_AUDIT_2026-10-06.md)
 - **Prüfbasis:** `main` @ `104aaef` (2026-10-06) · Code-Version **0.17.2**
-- **Stand:** 2026-10-06 · **9 Findings:** 3 FIXED (DC-01, DC-02, DC-03), 6 OPEN (DC-04…DC-09)
+- **Stand:** 2026-10-09 · **9 Findings:** 4 FIXED (DC-01, DC-02, DC-03, DC-04), 5 OPEN (DC-05…DC-09)
 - **Konvention:** ein Prompt = eine Coding-Session; nach Erledigung Status hier und in `../README.md` nachziehen (Nummern der Findings unverändert lassen).
 
 ## Statusübersicht
@@ -12,7 +12,7 @@
 | DC-01 | HIGH | Proposal-Freigabe ohne Autorisierung | ☑ **FIXED** (2026-10-06) | `src/app/api/firm/proposals/[id]/approve/route.ts` (Guard `firm.write` + CSRF vor DB), `tests/proposalApprove.auth.test.ts` (7 Tests), `tests/routes.asyncParams.test.ts` angepasst |
 | DC-02 | HIGH | `REQUIRE_HUMAN_APPROVAL` zwei Semantiken | ☑ **FIXED** (2026-10-06) | `src/app/api/firm/route.ts` nutzt `humanApprovalRequired()`, `tests/firmHumanApproval.parity.test.ts` (Parität + Quell-Drift) |
 | DC-03 | MEDIUM | Doku-Kleinfindings (12 Punkte) | ☑ **FIXED** (2026-10-06) | Änderungen in `STRATEGY_STACK.md`, `PORTFOLIO_ANALYTICS.md`, `PIPELINE_MAP.md`, `DB_SCHEMA.md`, `VERSION.md`, `CONTRIBUTING.md`, `docs/ci/README.md`, `docs/README.md`, `audits/README.md`, `BETA_STATUS.md`, `HANDBUCH.md`, `DAILY_WEEKLY_RESEARCH.md`, `SYMBOLS.md`, `SETUP_PG_TROUBLESHOOTING.md`, `security/README.md`; `docs:validate` grün |
-| DC-04 | MEDIUM | Versions-/Status-Header: 4/45 auf Code-Stand | ☐ OFFEN | [PROMPT-DC-04](../prompts/PROMPT-DC-04-versions-header-bump.md) |
+| DC-04 | MEDIUM | Versions-/Status-Header: 4/45 auf Code-Stand | ☑ **FIXED** (2026-10-09) | [`../findings/DC-04-versions-header-drift.md`](../findings/DC-04-versions-header-drift.md) § Umsetzung · PR [#236](https://github.com/Kryschuuu/ai-trading-firm/pull/236) · [PROMPT-DC-04](../prompts/PROMPT-DC-04-versions-header-bump.md) |
 | DC-05 | MEDIUM | Env-Flags ohne Read; `.env.example` lückenhaft | ☐ OFFEN | [PROMPT-DC-05](../prompts/PROMPT-DC-05-env-flags-entscheiden.md) |
 | DC-06 | MEDIUM | Symbol-/Pfad-Drift in der Architektur-Doku | ☐ OFFEN | [PROMPT-DC-06](../prompts/PROMPT-DC-06-symbol-pfad-abgleich.md) |
 | DC-07 | MEDIUM | `DB_SCHEMA.md` 15 von 67 Tabellen | ☐ OFFEN (Scope-Hinweis gefixt) | [PROMPT-DC-07](../prompts/PROMPT-DC-07-db-schema-nachfuehren.md) |
@@ -22,7 +22,7 @@
 ## Empfohlene Abarbeitungsreihenfolge
 
 ```text
-DC-04  (Sichtbarkeit/Kopfzeilen)          ─┐
+DC-04  (Sichtbarkeit/Kopfzeilen)  ✔ erledigt ─┐
 DC-05  (Env-Flags entscheiden)             │  inhaltliche Nachführung
 DC-06  (Symbole/Pfade)                     │
 DC-07  (Schema-Inventar)                  ─┘
@@ -35,6 +35,7 @@ DC-09  (Inventare + Bump-Skript)           ← kann 07/08 vorbereiten
 - **DC-01:** Route prüft `requirePermission(request, "firm.write") ?? checkCsrfGuard(request)` **vor** jedem DB-Zugriff; `authenticatedActor` (`actorAuditId`) zusätzlich in beiden Audit-Stufen (`PRECHECK`/`APPLIED`) und in der Response. Tests decken anonym (401), gefälschte Header, Viewer (403), fehlendes CSRF (403), Operator (Guard passiert), `local-open` (CSRF bleibt Pflicht) und den Quell-Drift ab.
 - **DC-02:** eine Semantik über `src/live-gate/config.ts`, `src/brokers/alpaca/config.ts`, `src/brokers/bitunix/config.ts` und die Firm-Anzeige; nur exakt `"false"` hebt die Human-Gate-Bedingung auf.
 - **DC-03:** jede der 12 Einzelstellen mit Vorher/Nachher in [`../findings/DC-03-doku-kleinfindings.md`](../findings/DC-03-doku-kleinfindings.md); `npm run docs:validate` grün, Typecheck/Lint grün.
+- **DC-04 (PR #236, gemergt 2026-10-08, Commit `977e0bc`):** Header klassifiziert (3 × a verifiziert `v0.17.2`, 3 × b Dokument-/Review-Version, 63 × c Bestandsdokument mit „Vollabgleich offen“). Header-Scan: 66 Treffer, 0 falsch. `npm run docs:validate` grün. Details: [`../findings/DC-04-versions-header-drift.md`](../findings/DC-04-versions-header-drift.md) § Umsetzung.
 
 ## Verifikationsstand dieser Session
 
