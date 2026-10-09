@@ -24,7 +24,7 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status-Header:** **Beta** · Dokumentationsstand **2026-10-06** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-05)
+## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-06)
 
 ### Fixed
 
@@ -95,6 +95,72 @@ erlaubt, solange sie hier dokumentiert sind).
     `MICRO_SEED_CANDLES`, `MICRO_SIM_INTERVAL_MS` mit je einem Satz in
     `CONFIGURATION.md`). Kein Versions-Bump — der Release-Bump ist DC-09;
     `package.json` bleibt `0.17.2`.
+- **DC-06 (MEDIUM, Architektur-Doku):** `docs/architecture/PIPELINE_MAP.md` und
+  `INTEGRATION_POINTS.md` nannten 34 Symbole/Pfade, die es im Code nicht (mehr)
+  gab — wer der „Master-Architekturkarte" folgte, landete im Leeren. Alle
+  Einträge sind auf reale Exporte umgestellt (Belege je Fundstelle im Finding),
+  ohne die Aussageabsicht zu verlieren:
+  - **Scanner/Funnel:** `FunnelResult` liegt in `src/scanner/funnel.ts` (nicht
+    `types.ts`), die Stufen sind `InstrumentScore[]`-Felder — ein eigener
+    Stufen-Typ existiert nicht; Trichter-Keys korrigiert auf `funnel.eligibleMax`
+    /`interestingMax`/`interestingMinScore`/`dailyMax`/`deepMin`/`deepMax`/
+    `maxPerAssetClass`; Tagesabzug schreibt `writeDailyArtifact`.
+  - **Zyklus:** `weeklyReviewStep`/`createWeeklySteps` (`src/cycle/weekly.ts`)
+    statt `executeWeeklyReview`, `classifyWeekly`/`WeeklyReview` gehören zu
+    `src/scanner/weekly.ts`; Artefakte schreiben `saveDailyCycleArtifacts`/
+    `saveWeeklyCycleArtifacts`; das LLM-Gate `createGuardedAgentPort` ist
+    modulintern.
+  - **Zwei Risk-Guards, zwei Zwecke (neuer Absatz):** `src/lib/riskGuard.ts`
+    = Firm-/Order-Guardrails (`validateOrder`, `RISK_LIMITS`, `DEFAULT_LIMITS`,
+    `LIMIT_CEILINGS`, `killSwitch`, `applyAdaptiveRisk`), `src/portfolio/riskGuard.ts`
+    = Portfolio-Guards auf Gewichtsebene (`applyRiskGuard`, `resolveGuardConfig`,
+    `assertAuthorityChain`, `capFor`); die Kette startet in
+    `src/portfolio/pipeline.ts` (`optimizeWithGuard`), nicht im Optimizer.
+    `INTEGRATION_POINTS.md` § 3/§ 5 verweisen darauf (Berechnung des
+    Regime-Faktors in `src/lib/adaptiveRisk.ts`, Drosselung in
+    `src/lib/riskGuard.ts`).
+  - **Adaptive Risk:** `updateAdaptiveRisk`, `getAdaptiveRiskStatus`,
+    `assessRegime`, `RegimeStateMachine` statt `getAdaptiveRiskFactor`/
+    `evaluateMarketRegime`.
+  - **Rule-Matching:** der reale Einstieg ist `RuleCache.match()`
+    (`src/lib/microExecutor.ts:622`, Rückgabe `CachedRule[]`) auf Basis von
+    `compileRuleSpec()`/`CompiledRule.evaluate`; die Regel-Engine kennt kein
+    freies Match-/Evaluate-Funktion. Neu dokumentiert: bei erschöpftem
+    `maxExecutionsPerDay` wird der Kandidat **still übersprungen** (`continue`,
+    Zeile 634) — keine `rule_executions`-Zeile, kein Log, kein Counter; sichtbar
+    nur über `RuleCache.status()`/`listRuleExecutions`. Ein sichtbares „Nein“
+    gibt es allein beim Timeframe-Guard (`micro_executor_rule_blocked`).
+    Service-Symbole: `getActiveRules`/`listRuleExecutions` statt
+    `listActiveRules`/`recordRuleExecution`; Typen `FeedTick`, `ExecuteContext`,
+    `ExecutionOutcome` statt `PriceTick`, `RuleMatchResult`,
+    `RuleExecutionRecord`; `backtestRule` statt `backtestRuleOnCandles`.
+  - **Konfiguration/Events:** der Kerzen-Speicher hat **kein** Env-Flag —
+    `HistoricalStore` bekommt `dir` (Default `data/history`) über
+    `resolveRuntimePath()` (`src/lib/appPaths.ts`), Retention
+    `DEFAULT_MAX_BARS_PER_SERIES` = **100.000** (nicht 5.000); die vier
+    `FIRM_MAX_*`-Flags hatten nie einen Code-Read und sind durch die reale
+    Quelle ersetzt (`DEFAULT_LIMITS` + `risk_config`-Tuning innerhalb
+    `LIMIT_CEILINGS`, Drawdown-Default **15 %** statt 10 %); Operator-Token ist
+    `FIRM_API_TOKEN`; reale Audit-Events `ORDER_SENT`/`ORDER_REJECTED`/
+    `KILL_SWITCH`/`KILL_SWITCH_DISARMED`/`RECONCILIATION_DISCREPANCY` statt
+    `ORDER_PLACED`/`ORDER_FILLED`/`RISK_REJECTED`; `MICRO_SYMBOLS`-Default `BTC`.
+  - **Pfade:** `src/perpdata/consumers.ts` (Plural), `src/components/ui/InfoTip.tsx`
+    (auch in `docs/MISSIONS.md` + `docs/DOCS_SYNC_AUDIT.md`),
+    `src/lib/brokerHydration.ts` (`restorePaperBrokerState`,
+    `ensurePaperBrokerHydrated`) statt `restoreFirmState`.
+  - **Neu:** Abschnitt „8. Pflege dieser Karte" (Quelle ist der Code; Symbole nur
+    mit realem Export nennen; Altpfade nur als solche; automatischer Wächter
+    folgt in DC-08). Status-Header beider Architekturdoks von „Vollabgleich
+    offen" auf „Symbol-/Pfadabgleich erledigt (2026-10-09)".
+  Bewusst unverändert: die Altpfade `scripts/drizzle.config.json`
+  (`SECURITY_AUDIT.md`, Befund S-11) und `src/scanner/historicalStore.ts`
+  (`MARKET_DATA_PIPELINE.md`, Migrationstabelle) sowie der DC-03-Hinweis zu
+  `allowShortSelling`. Kein Code- und kein Versions-Bump — der Release-Bump ist
+  DC-09; `package.json` bleibt `0.17.2`. Verifikation: Pfad-Skript des Findings
+  meldet nur die 2 whitelisted Altpfade, Symbol-/Attributions-Scan 0 Treffer,
+  `tests/docsArchitectureSymbols.test.ts` 9/9, `typecheck`/`lint`/
+  `docs:validate` grün. Details:
+  [`docs/audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md).
 
 ### Added
 
@@ -107,7 +173,9 @@ erlaubt, solange sie hier dokumentiert sind).
 - **Regressionstests:** `tests/proposalApprove.auth.test.ts`,
   `tests/firmHumanApproval.parity.test.ts`, `tests/cycle.artifacts.test.ts`
   (+3 Tests: Env-Retention `CYCLE_RETENTION_DAYS`/`_WEEKS`, Defaults ohne Env,
-  Clamp der Bounds [1, 3650]).
+  Clamp der Bounds [1, 3650]), `tests/docsArchitectureSymbols.test.ts`
+  (9 Tests, DC-06: Pfade und Einstiegssymbole der Architektur-Doku gegen
+  `src/` + `scripts/`, mit verrottungsgeschützter Altpfad-Whitelist).
 
 ### Changed
 
@@ -115,9 +183,10 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Notes
 
-- Offene Befunde mit Prompts: DC-06 (Symbole/Pfade ohne Code-Entsprechung),
-  DC-07 (`DB_SCHEMA.md` 15/67 Tabellen), DC-08 (`docs:validate`-Lücken;
-  `npm test` in keiner CI), DC-09 (generierte Inventare + Release-Bump-Schritt).
+- Offene Befunde mit Prompts: DC-07 (`DB_SCHEMA.md` 15/67 Tabellen),
+  DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI — dort folgt der
+  generische Wächter „dokumentierte `src/…`-Pfade und Export-Symbole müssen
+  existieren"), DC-09 (generierte Inventare + Release-Bump-Schritt).
 - `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün; volle Suite
   unverändert mit den zwei bekannten DB-abhängigen PAPER-Contract-Fehlern
   (`ECONNREFUSED 0.0.0.0:5432`).

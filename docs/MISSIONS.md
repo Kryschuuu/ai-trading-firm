@@ -239,7 +239,8 @@ Dashboard → **🛠 Workshop** → *1 · Mission anlegen*:
    [BACKTESTING.md §1.3](BACKTESTING.md#13-donchian-ausbruch-stx-02-03-v065).
 
 Jedes Feld trägt ein **i**-Symbol: Hover oder Tastatur-Focus zeigt die Erklärung
-(`src/components/workshop/InfoTip.tsx`), zusätzlich hängt der Text als
+(`src/components/ui/InfoTip.tsx`, seit v0.15.0 im UI-Kit statt unter `workshop/`),
+zusätzlich hängt der Text als
 `sr-only`-Element im DOM und im nativen `title` — Screen Reader lesen ihn
 unabhängig vom Hover-Zustand. Die ausführlichen Begriffserklärungen im
 Drei-Ebenen-Schema stehen in [`docs/help/workshop.help.json`](help/workshop.help.json)
