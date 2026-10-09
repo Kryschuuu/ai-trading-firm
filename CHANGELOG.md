@@ -24,7 +24,7 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status-Header:** **Beta** · Dokumentationsstand **2026-10-06** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01/DC-02/DC-03)
+## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-05)
 
 ### Fixed
 
@@ -68,6 +68,33 @@ erlaubt, solange sie hier dokumentiert sind).
   Status-Header für `DAILY_WEEKLY_RESEARCH.md`, `SYMBOLS.md`,
   `SETUP_PG_TROUBLESHOOTING.md`, `security/README.md` (Approve-Pfad in der
   Guard-Aufzählung).
+- **DC-05 (MEDIUM, Konfiguration/Doku):** Vier dokumentierte Env-Flags hatten
+  keinen Code-Read und `.env.example` fehlten 14 real gelesene Variablen.
+  Entscheidung pro Flag (eine Semantik pro Flag):
+  - `CYCLE_RETENTION_DAYS`/`CYCLE_RETENTION_WEEKS` **implementiert** —
+    `envInt` in `src/cycle/artifacts.ts` (Defaults 30/12, Bounds
+    [1, 3650]/[1, 520]); `pruneArtifacts()` läuft jetzt best-effort am
+    Abschluss jedes Daily- und Weekly-Laufs (`src/cycle/service.ts`) und
+    setzt die Retention damit produktiv durch.
+  - `ROUTING_POLICY_VERSION` **gestrichen** — die Version stammt aus
+    `DEFAULT_POLICY_VERSION` (`src/routing/policy.ts`) bzw. dem
+    `version`-Feld der Policy-Datei unter `ROUTING_POLICY_PATH`;
+    `LLM_ROUTING.md` nennt diese Quellen (kein Env-Override: die Version
+    beschreibt den Policy-Inhalt).
+  - `RISK_MAX_EQUITY_DRAWDOWN_PCT` **gestrichen** — `EQUITY_CURVE.md`
+    nennt den realen Mechanismus: `DEFAULT_LIMITS.maxEquityDrawdownPct`
+    (Default 0.15) mit dem harten Deckel `LIMIT_CEILINGS` [0.03, 0.5] und
+    Laufzeit-Tuning via `risk_config`/Dashboard (kein Env-Flag — `riskGuard`
+    hält alle Limits code-seitig, ein Einzelflag wäre ein redundanter Pfad).
+  - `MICRO_FEED_TYPE` → **`MICRO_FEED`** korrigiert (`PIPELINE_MAP.md`;
+    Werte `binance`|`sim`, Verweis auf die Feed-Klassen `simulator`/
+    `sequence` in `src/lib/microExecutor.ts`).
+  - `.env.example` + `CONFIGURATION.md` auf den echten Lese-Bestand
+    ergänzt (inkl. Defaults/Bounds; die fünf bisher undokumentierten
+    Variablen `WATCHDOG_TIMEOUT_MS`, `ALPACA_TIMEOUT_MS`, `START_MICRO`,
+    `MICRO_SEED_CANDLES`, `MICRO_SIM_INTERVAL_MS` mit je einem Satz in
+    `CONFIGURATION.md`). Kein Versions-Bump — der Release-Bump ist DC-09;
+    `package.json` bleibt `0.17.2`.
 
 ### Added
 
@@ -78,7 +105,9 @@ erlaubt, solange sie hier dokumentiert sind).
   — 9 Befunde (DC-01…DC-09), 6 kopierfertige Folge-Prompts
   (`prompts/PROMPT-DC-04…09`) und Remediation-Tracking.
 - **Regressionstests:** `tests/proposalApprove.auth.test.ts`,
-  `tests/firmHumanApproval.parity.test.ts`.
+  `tests/firmHumanApproval.parity.test.ts`, `tests/cycle.artifacts.test.ts`
+  (+3 Tests: Env-Retention `CYCLE_RETENTION_DAYS`/`_WEEKS`, Defaults ohne Env,
+  Clamp der Bounds [1, 3650]).
 
 ### Changed
 
@@ -86,10 +115,9 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Notes
 
-- Offene Befunde mit Prompts: DC-05 (vier dokumentierte Env-Flags ohne Code-Read, `.env.example`-Lücken),
-  DC-06 (Symbole/Pfade ohne Code-Entsprechung), DC-07 (`DB_SCHEMA.md` 15/67
-  Tabellen), DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI),
-  DC-09 (generierte Inventare + Release-Bump-Schritt).
+- Offene Befunde mit Prompts: DC-06 (Symbole/Pfade ohne Code-Entsprechung),
+  DC-07 (`DB_SCHEMA.md` 15/67 Tabellen), DC-08 (`docs:validate`-Lücken;
+  `npm test` in keiner CI), DC-09 (generierte Inventare + Release-Bump-Schritt).
 - `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün; volle Suite
   unverändert mit den zwei bekannten DB-abhängigen PAPER-Contract-Fehlern
   (`ECONNREFUSED 0.0.0.0:5432`).

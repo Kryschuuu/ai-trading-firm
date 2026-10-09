@@ -4,9 +4,9 @@
 - **Severity:** MEDIUM (Betriebsirreführung)
 - **Bereich:** Konfiguration / Betrieb
 - **Quelle:** Docs↔Code-Audit `v0.17.2`, Env-Mengenabgleich (`process.env`-Reads vs. Doku)
-- **Status:** ☐ **OPEN**
+- **Status:** ☑ **FIXED** (2026-10-09, diese Session)
 - **Prompt:** [`../prompts/PROMPT-DC-05-env-flags-entscheiden.md`](../prompts/PROMPT-DC-05-env-flags-entscheiden.md)
-- **Datei(en):** `docs/architecture/PIPELINE_MAP.md`, `architecture/DB_SCHEMA.md`, `LLM_ROUTING.md`, `EQUITY_CURVE.md`, `.env.example`, `CONFIGURATION.md`, `src/cycle/artifacts.ts`, `src/routing/policy.ts`, `src/lib/riskGuard.ts`
+- **Datei(en):** `src/cycle/artifacts.ts`, `src/cycle/service.ts`, `tests/cycle.artifacts.test.ts`, `tests/cycle.engine.test.ts`, `docs/architecture/PIPELINE_MAP.md`, `architecture/DB_SCHEMA.md`, `LLM_ROUTING.md`, `EQUITY_CURVE.md`, `.env.example`, `CONFIGURATION.md`
 
 ## Teil A — dokumentiert, aber im Code nie gelesen
 
@@ -83,3 +83,60 @@ do echo -n "$f: "; grep -rn "$f" src scripts --include='*.ts' | wc -l; done
 # B) Kein Flag in .env.example ohne Read und umgekehrt (Check aus DC-08):
 node --import tsx scripts/docs-validate.ts   # nach DC-08: zusätzlicher Check
 ```
+
+## Umsetzung (2026-10-09)
+
+Pro Flag genau eine Entscheidung — kein Flag wird doppelt interpretiert:
+
+| Flag | Entscheidung | Fundstelle | Verifikationskommando |
+|------|--------------|-----------|------------------------|
+| `CYCLE_RETENTION_DAYS` | **IMPLEMENTIEREN** | `envInt("CYCLE_RETENTION_DAYS", 30, 1, 3650)` in `src/cycle/artifacts.ts` (`pruneArtifacts`, Default `DEFAULT_RETENTION_DAYS = 30`); produktiver Aufruf am Abschluss jedes Daily-Laufs via `pruneCycleArtifacts()` in `src/cycle/service.ts` | `grep -rn "CYCLE_RETENTION_DAYS" src scripts` → Read in `artifacts.ts`; `node --import tsx --test tests/cycle.artifacts.test.ts` (Env-Override, Defaults, Clamp) grün |
+| `CYCLE_RETENTION_WEEKS` | **IMPLEMENTIEREN** | `envInt("CYCLE_RETENTION_WEEKS", 12, 1, 520)` in `src/cycle/artifacts.ts` (`pruneArtifacts`, Default `DEFAULT_RETENTION_WEEKS = 12`); Aufruf am Weekly-Abschluss in `src/cycle/service.ts` | `grep -rn "CYCLE_RETENTION_WEEKS" src scripts` → Read in `artifacts.ts`; Test s. o. |
+| `ROUTING_POLICY_VERSION` | **STREICHEN** | Flag aus `docs/LLM_ROUTING.md` §13 entfernt; Quelle genannt: `DEFAULT_POLICY_VERSION = "1.0.0"` (`src/routing/policy.ts`) bzw. Pflichtfeld `version` der Policy-Datei unter `ROUTING_POLICY_PATH` | `grep -rn "ROUTING_POLICY_VERSION" docs/LLM_ROUTING.md CONFIGURATION.md` → 0 Treffer (nur Audit-Historie in `docs/audits/` + Audit-Bericht) |
+| `RISK_MAX_EQUITY_DRAWDOWN_PCT` | **STREICHEN** | `docs/EQUITY_CURVE.md` §3 nennt den realen Mechanismus: `DEFAULT_LIMITS.maxEquityDrawdownPct` (Default 0.15) + `LIMIT_CEILINGS` [0.03, 0.5] (`src/lib/riskGuard.ts`), Laufzeit-Tuning via `risk_config`/Dashboard, Not-Halt via `killSwitch.pull` (`src/lib/engine.ts`) | `grep -rn "RISK_MAX_EQUITY_DRAWDOWN_PCT" docs/EQUITY_CURVE.md CONFIGURATION.md` → 0 Treffer (nur Audit-Historie) |
+| `MICRO_FEED_TYPE` | **KORRIGIEREN** → `MICRO_FEED` | `docs/architecture/PIPELINE_MAP.md` Stufe 10: Werte `binance` \| `sim` (Read in `scripts/micro-executor.ts:40`), Verweis auf die Feed-Klassen `simulator`/`sequence` (`src/lib/microExecutor.ts`) | `grep -rn "MICRO_FEED_TYPE" docs/architecture/` → 0 Treffer (nur Audit-Historie) |
+
+**Begründungen:**
+
+- `CYCLE_RETENTION_DAYS`/`_WEEKS` implementieren: fachlich gewollt (Doku verspricht
+  Retention), Defaults 30/12 bleiben, damit die bestehenden Tests weiter gelten.
+  `pruneArtifacts()` läuft am Abschluss jedes Daily- **und** Weekly-Laufs
+  (best-effort — ein Prune-Fehler darf den Zyklus nicht abbrechen): der Daily-Lauf
+  deckt den täglichen Wachstumspfad ab, der Weekly-Lauf stellt sicher, dass auch
+  reine Weekly-Betriebe die Retention durchsetzen. Stelle: `src/cycle/service.ts`
+  (`pruneCycleArtifacts()`), nach dem Schreiben der Artefakte.
+- `ROUTING_POLICY_VERSION` streichen: Die Version beschreibt den Inhalt der Policy
+  (SemVer, schema-validiert) und ist über `ROUTING_POLICY_PATH` (eigenes
+  `version`-Feld) bereits änderbar. Ein Env-Override wäre eine zweite Quelle für
+  dieselbe Angabe und würde die Audit-Version vom Policy-Inhalt entkoppeln.
+- `RISK_MAX_EQUITY_DRAWDOWN_PCT` streichen: `riskGuard` hält alle 12 Limits
+  code-seitig mit Laufzeit-Tuning aus `risk_config`/Dashboard innerhalb der
+  `LIMIT_CEILINGS` (Sandbox-Design, siehe Header-Kommentar). Ein Env-Override für
+  ein einzelnes Limit wäre ein redundanter zweiter Pfad und würde die einheitliche
+  Behandlung aller Limits aufbrechen.
+- `MICRO_FEED_TYPE` korrigieren: Der Code liest `MICRO_FEED` mit den Werten
+  `binance`/`sim`; `simulator`/`sequence` sind die Namen der Feed-Klassen
+  (`SimulatedFeed`/`SequenceFeed`) — drei Namensräume, nur einer ist das Flag.
+
+**Teil B (`.env.example` + `CONFIGURATION.md`):** die 13 real gelesenen Variablen
+ergänzt (`SCANNER_ARTIFACTS_DIR`, `CYCLE_ARTIFACTS_DIR`, `SCANNER_CONFIG_FILE`,
+`UNIVERSE_POLICY_FILE`, `UNIVERSE_AUDIT_DB`, `PORTFOLIO_AUDIT_DIR`,
+`PORTFOLIO_AUDIT_DB`, `WATCHDOG_HEALTH_URL`, `WATCHDOG_TIMEOUT_MS`,
+`ALPACA_TIMEOUT_MS`, `FORECAST_RESOLVER_INTERVAL_MIN`, `START_MICRO`,
+`MICRO_SEED_CANDLES`, `MICRO_SIM_INTERVAL_MS`) — in `.env.example` mit Kommentar
+(Default + Bounds), in `CONFIGURATION.md` als Tabellenzeilen; die fünf bisher
+komplett undokumentierten (`WATCHDOG_TIMEOUT_MS`, `ALPACA_TIMEOUT_MS`,
+`START_MICRO`, `MICRO_SEED_CANDLES`, `MICRO_SIM_INTERVAL_MS`) mit je einem Satz.
+Neu implementierte Flags (`CYCLE_RETENTION_DAYS`/`_WEEKS`) ebenfalls in beiden
+aufgenommen. `FORECAST_RESOLVER_INTERVAL_MIN` war in `CONFIGURATION.md` bereits
+vorhanden (nur `.env.example` fehlte).
+
+**Verifikation (2026-10-09):**
+
+- `grep -rn "CYCLE_RETENTION_DAYS\|CYCLE_RETENTION_WEEKS" src scripts` → Read in
+  `src/cycle/artifacts.ts`.
+- `grep -rn "ROUTING_POLICY_VERSION\|RISK_MAX_EQUITY_DRAWDOWN_PCT" docs/LLM_ROUTING.md docs/EQUITY_CURVE.md CONFIGURATION.md` → 0 Treffer.
+- `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün.
+- `node --import tsx --test tests/cycle.*.test.ts` → 85/85 grün (3 neue Tests in
+  `tests/cycle.artifacts.test.ts`; `tests/cycle.engine.test.ts` isoliert die
+  Artefakt-Ablage gegen echte Artefakte).

@@ -15,6 +15,7 @@ import {
   getArtifactIndex,
   saveDailyCycleArtifacts,
   saveWeeklyCycleArtifacts,
+  pruneArtifacts,
   type DailyRunIndexEntry,
   type WeeklyRunIndexEntry,
 } from "./artifacts";
@@ -122,6 +123,8 @@ export class CycleService {
       );
     }
 
+    pruneCycleArtifacts();
+
     return {
       record,
       artifactsDir: saved.artifactsDir,
@@ -162,6 +165,9 @@ export class CycleService {
     };
 
     const saved = saveWeeklyCycleArtifacts(record, { review: emptyReview });
+
+    pruneCycleArtifacts();
+
     return {
       record,
       artifactsDir: saved.artifactsDir,
@@ -237,6 +243,34 @@ export class CycleService {
       total,
       hasMore: start + items.length < total,
     };
+  }
+}
+
+/**
+ * Retention-Pruning am Abschluss eines Zykluslaufs (DC-05, 2026-10-09).
+ *
+ * `pruneArtifacts()` läuft nach dem Schreiben der Artefakte — die Ablage ist
+ * damit abgeschlossen, ein Prune-Fehler darf den Lauf nicht abbrechen
+ * (best-effort, wie die Journal-Auswertung). Daily UND Weekly rufen es auf:
+ * der Daily-Lauf deckt den täglichen Wachstumspfad ab, der Weekly-Lauf
+ * stellt sicher, dass auch reine Weekly-Betriebe die Retention durchsetzen.
+ * Fristen: `CYCLE_RETENTION_DAYS`/`CYCLE_RETENTION_WEEKS` (Defaults 30/12,
+ * siehe `src/cycle/artifacts.ts`).
+ */
+function pruneCycleArtifacts(): void {
+  try {
+    const pruned = pruneArtifacts();
+    if (pruned.prunedDays.length > 0 || pruned.prunedWeeks.length > 0) {
+      console.log(
+        `[cycle] Artefakt-Pruning: ${pruned.prunedDays.length} Tages-Ordner, ` +
+          `${pruned.prunedWeeks.length} Wochen-Ordner entfernt`
+      );
+    }
+  } catch (e) {
+    console.error(
+      "[cycle] Artefakt-Pruning fehlgeschlagen (Zyklus läuft weiter):",
+      e instanceof Error ? e.message : e
+    );
   }
 }
 

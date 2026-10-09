@@ -334,8 +334,8 @@ Sichert die Mehrprozess-Serialisierung und verhindert Doppel-Orders (H2 / v1.36.
 |---|---|---|---|---|
 | `data/universe/instruments.ndjson` | NDJSON | Append/Upsert atomar (`0600`) | `MarketInstrument` (ID, Symbol, Base, Quote, Fees, Spread, Vol24h, Status) | Unbegrenzt; aktualisiert durch `market:sync` |
 | `data/history/candles.ndjson` | NDJSON | Append/Kompaktierung atomar (`0600`) | Schema v2: `{ v: 2, instrumentId, venue, feed, timeframe, ts, o, h, l, c, v, fetchedAt }` | Max. **100.000** Kerzen je `(instrumentId, timeframe)` (`MAX_CANDLES_PER_SERIES`/`DEFAULT_MAX_BARS_PER_SERIES`, `src/lib/marketdata/limits.ts`; identisch mit [HISTORY.md](../HISTORY.md) §Größenkontrolle) |
-| `artifacts/<YYYY-MM-DD>/daily/*` | JSON | Atomar (`.tmp` + rename) | `01-market-scanner.json` bis `08-backtest-verification.json` + `daily-summary.json` | 30 Tage (`CYCLE_RETENTION_DAYS`) |
-| `artifacts/<YYYY-Www>/weekly/*` | JSON | Atomar (`.tmp` + rename) | `weekly-review.json`, `universe-classification.json`, `weekly-summary.json` | 12 Wochen (`CYCLE_RETENTION_WEEKS`) |
+| `artifacts/<YYYY-MM-DD>/daily/*` | JSON | Atomar (`.tmp` + rename) | `01-market-scanner.json` bis `08-backtest-verification.json` + `daily-summary.json` | 30 Tage (Default `CYCLE_RETENTION_DAYS`, Bounds [1, 3650]; Pruning am Daily-Abschluss, `src/cycle/service.ts`) |
+| `artifacts/<YYYY-Www>/weekly/*` | JSON | Atomar (`.tmp` + rename) | `weekly-review.json`, `universe-classification.json`, `weekly-summary.json` | 12 Wochen (Default `CYCLE_RETENTION_WEEKS`, Bounds [1, 520]; Pruning am Weekly-Abschluss, `src/cycle/service.ts`) |
 | `artifacts/index.json` | JSON | Atomar | Index-Manifest aller Daily- und Weekly-Läufe | Synchronisiert beim Pruning |
 | `data/live-gate/venue-{VENUE}.json` | JSON | Atomar (`0600`) | Live-Gate Machine-State, Cooldowns, 4-Augen, Kettenkopf | Unbegrenzt; Zustand übersteht Neustarts |
 | `data/live-gate/audit-log.ndjson` | NDJSON | Append-only (`0600`) | SHA-256 kryptografische Hash-Kette aller Gate-Übergänge | Unbegrenzt; manipulationssicher |

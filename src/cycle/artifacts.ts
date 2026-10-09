@@ -15,12 +15,26 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveRuntimePath, resolveStoredPath } from "@/lib/appPaths";
+import { envInt } from "@/lib/env";
 import { collectRegimeHistoryArtifact } from "@/lib/marketRegime";
 import { formatDateYYYYMMDD, getIsoWeekString } from "./clock";
 import type { CycleRunRecord } from "./types";
 import type { WeeklyReview } from "@/scanner/weekly";
 
 export const DEFAULT_CYCLE_ARTIFACTS_DIR = "artifacts";
+
+/**
+ * Default-Retention der Tages-Artefakte in Tagen. Per `CYCLE_RETENTION_DAYS`
+ * überschreibbar (Bounds [1, 3650], Clamp via `envInt` — siehe `pruneArtifacts`).
+ */
+export const DEFAULT_RETENTION_DAYS = 30;
+
+/**
+ * Default-Retention der Wochen-Artefakte in Wochen. Per `CYCLE_RETENTION_WEEKS`
+ * überschreibbar (Bounds [1, 520], Clamp via `envInt` — siehe `pruneArtifacts`).
+ */
+export const DEFAULT_RETENTION_WEEKS = 12;
+
 export const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const WEEK_FOLDER_RE = /^\d{4}-W\d{2}$/;
 
@@ -382,19 +396,30 @@ export function getLatestWeeklyArtifact(rootDir?: string): WeeklyReview | null {
 
 /**
  * Bereinigt alte Artefakte gemäß Aufbewahrungsrichtlinie (Retention).
+ *
+ * Die Fristen werden aus der Umgebung gelesen: `CYCLE_RETENTION_DAYS`
+ * (Default 30, Bounds [1, 3650]) und `CYCLE_RETENTION_WEEKS` (Default 12,
+ * Bounds [1, 520]) — Clamp via `envInt`, explizite Optionen gewinnen.
+ * Produktiv aufgerufen wird `pruneArtifacts()` am Abschluss jedes Daily-
+ * und Weekly-Laufs (`src/cycle/service.ts`), best-effort: ein Fehler darf
+ * den Zyklus nicht abbrechen.
  */
 export function pruneArtifacts(
   options: {
-    retentionDays?: number; // Standard: 30 Tage
-    retentionWeeks?: number; // Standard: 12 Wochen
+    /** Überschreibt `CYCLE_RETENTION_DAYS` (Default: 30 Tage). */
+    retentionDays?: number;
+    /** Überschreibt `CYCLE_RETENTION_WEEKS` (Default: 12 Wochen). */
+    retentionWeeks?: number;
     rootDir?: string;
   } = {}
 ): { prunedDays: string[]; prunedWeeks: string[] } {
   const root = resolveArtifactsRoot(options.rootDir);
   if (!existsSync(root)) return { prunedDays: [], prunedWeeks: [] };
 
-  const retentionDays = options.retentionDays ?? 30;
-  const retentionWeeks = options.retentionWeeks ?? 12;
+  const retentionDays =
+    options.retentionDays ?? envInt("CYCLE_RETENTION_DAYS", DEFAULT_RETENTION_DAYS, 1, 3650);
+  const retentionWeeks =
+    options.retentionWeeks ?? envInt("CYCLE_RETENTION_WEEKS", DEFAULT_RETENTION_WEEKS, 1, 520);
 
   const nowMs = Date.now();
   const maxDayAgeMs = retentionDays * 86_400_000;
