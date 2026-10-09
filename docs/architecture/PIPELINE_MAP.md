@@ -204,8 +204,8 @@ flowchart TD
   - Dateisystem: `artifacts/<YYYY-MM-DD>/daily/*`, `artifacts/<YYYY-Www>/weekly/*`, `artifacts/index.json`
 - **Konfigurationsschlüssel & Env-Variablen:**
   - `CYCLE_ARTIFACTS_DIR` (Default: `artifacts`)
-  - `CYCLE_RETENTION_DAYS` (Default: `30`)
-  - `CYCLE_RETENTION_WEEKS` (Default: `12`)
+  - `CYCLE_RETENTION_DAYS` (Default: `30`, Bounds [1, 3650]; Pruning am Abschluss jedes Daily-Laufs)
+  - `CYCLE_RETENTION_WEEKS` (Default: `12`, Bounds [1, 520]; Pruning am Abschluss jedes Weekly-Laufs)
 - **Feature-Flags:**
   - Kein Feature-Flag für die Engine; Schritte schalten LLMs über `llmAllowed: boolean` hart ab.
 - **Hooks & Events:**
@@ -399,7 +399,7 @@ flowchart TD
   - PostgreSQL: `positions` (Verknüpfung via `rule_id`)
 - **Konfigurationsschlüssel & Env-Variablen:**
   - `MICRO_RULE_REFRESH_MS` (Default: `30000` = 30 s Cache-Poll)
-  - `MICRO_FEED_TYPE` (`binance` | `simulator` | `sequence`)
+  - `MICRO_FEED` (`binance` | `sim`; Klassen `simulator`/`sequence` siehe `src/lib/microExecutor.ts`)
   - `MICRO_SYMBOLS` (Default: `BTCUSDT,ETHUSDT`)
   - `MICRO_HEALTH_PORT` (Default: `3380`)
 - **Feature-Flags:**

@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -16,6 +16,7 @@ import {
   getLatestWeeklyArtifact,
   pruneArtifacts,
 } from "../src/cycle/artifacts";
+import { getIsoWeekString } from "../src/cycle/clock";
 import type { CycleRunRecord } from "../src/cycle/types";
 import type { WeeklyReview } from "@/scanner/weekly";
 
@@ -176,6 +177,151 @@ test("Artifacts: pruneArtifacts bereinigt alte Ordner gemäß Retention", () => 
     const indexAfter = getArtifactIndex(tmpDir);
     assert.equal(indexAfter.dailyRuns.some((r) => r.date === "2026-01-01"), false);
     assert.equal(indexAfter.dailyRuns.some((r) => r.date === today), true);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// ─── DC-05 (2026-10-09): Retention per Env konfigurierbar ────────────────────
+
+function daysAgoISO(n: number): string {
+  return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+}
+
+function saveDailyForDate(id: string, date: string, rootDir: string): void {
+  const record: CycleRunRecord = {
+    id,
+    type: "daily",
+    date,
+    status: "COMPLETED",
+    startedAt: `${date}T00:00:00.000Z`,
+    steps: [],
+    escalations: [],
+    artifacts: [],
+  };
+  saveDailyCycleArtifacts(record, {}, rootDir);
+}
+
+/** Setzt CYCLE_RETENTION_DAYS/_WEEKS für die Dauer von `fn` (undefined = unset). */
+function withRetentionEnv(days: string | undefined, weeks: string | undefined, fn: () => void): void {
+  const prevDays = process.env.CYCLE_RETENTION_DAYS;
+  const prevWeeks = process.env.CYCLE_RETENTION_WEEKS;
+  if (days === undefined) delete process.env.CYCLE_RETENTION_DAYS;
+  else process.env.CYCLE_RETENTION_DAYS = days;
+  if (weeks === undefined) delete process.env.CYCLE_RETENTION_WEEKS;
+  else process.env.CYCLE_RETENTION_WEEKS = weeks;
+  try {
+    fn();
+  } finally {
+    if (prevDays === undefined) delete process.env.CYCLE_RETENTION_DAYS;
+    else process.env.CYCLE_RETENTION_DAYS = prevDays;
+    if (prevWeeks === undefined) delete process.env.CYCLE_RETENTION_WEEKS;
+    else process.env.CYCLE_RETENTION_WEEKS = prevWeeks;
+  }
+}
+
+test("Artifacts: pruneArtifacts liest die Retention aus CYCLE_RETENTION_DAYS/_WEEKS", () => {
+  const tmpDir = createTempArtifactsDir();
+  try {
+    const oldDay = daysAgoISO(40);
+    const youngDay = daysAgoISO(10);
+    saveDailyForDate("daily-old", oldDay, tmpDir);
+    saveDailyForDate("daily-young", youngDay, tmpDir);
+    saveDailyForDate("daily-today", daysAgoISO(0), tmpDir);
+
+    // Wochenordner: sehr alt + aktuelle ISO-Woche (prune wertet nur den Namen)
+    const oldWeek = "2020-W01";
+    const currentWeek = getIsoWeekString(new Date());
+    for (const w of [oldWeek, currentWeek]) {
+      const dir = path.join(tmpDir, w, "weekly");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "weekly-summary.json"), "{}\n");
+    }
+
+    withRetentionEnv("30", "12", () => {
+      const res = pruneArtifacts({ rootDir: tmpDir });
+      // Alter Tages-Ordner entfernt, junge bleiben
+      assert.ok(res.prunedDays.includes(oldDay));
+      assert.equal(res.prunedDays.includes(youngDay), false);
+      assert.equal(res.prunedDays.includes(daysAgoISO(0)), false);
+      // Alte Woche entfernt, aktuelle Woche bleibt
+      assert.ok(res.prunedWeeks.includes(oldWeek));
+      assert.equal(res.prunedWeeks.includes(currentWeek), false);
+      // Dateisystem und Index sind bereinigt
+      assert.equal(existsSync(path.join(tmpDir, oldDay)), false);
+      assert.ok(existsSync(path.join(tmpDir, youngDay)));
+      assert.equal(existsSync(path.join(tmpDir, oldWeek)), false);
+      assert.ok(existsSync(path.join(tmpDir, currentWeek)));
+      const index = getArtifactIndex(tmpDir);
+      assert.equal(index.dailyRuns.some((r) => r.date === oldDay), false);
+      assert.equal(index.dailyRuns.some((r) => r.date === youngDay), true);
+    });
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("Artifacts: CYCLE_RETENTION_DAYS überschreibt den Default (5 statt 30 Tage)", () => {
+  const tmpDir = createTempArtifactsDir();
+  try {
+    const tenDays = daysAgoISO(10);
+    const twentyDays = daysAgoISO(20);
+    saveDailyForDate("daily-10", tenDays, tmpDir);
+    saveDailyForDate("daily-20", twentyDays, tmpDir);
+
+    // Ohne Env: Default 30 Tage — beide Ordner bleiben
+    withRetentionEnv(undefined, undefined, () => {
+      const res = pruneArtifacts({ rootDir: tmpDir });
+      assert.equal(res.prunedDays.length, 0);
+      assert.ok(existsSync(path.join(tmpDir, tenDays)));
+      assert.ok(existsSync(path.join(tmpDir, twentyDays)));
+    });
+
+    // Env-Override 5: beide Ordner sind älter als 5 Tage → entfernt
+    withRetentionEnv("5", undefined, () => {
+      const res = pruneArtifacts({ rootDir: tmpDir });
+      assert.ok(res.prunedDays.includes(tenDays));
+      assert.ok(res.prunedDays.includes(twentyDays));
+      assert.equal(existsSync(path.join(tmpDir, tenDays)), false);
+      assert.equal(existsSync(path.join(tmpDir, twentyDays)), false);
+    });
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("Artifacts: Defaults 30/12 ohne Env; Bounds [1, 3650] klemmen Ausreißer", () => {
+  const tmpDir = createTempArtifactsDir();
+  try {
+    const fortyDays = daysAgoISO(40);
+    saveDailyForDate("daily-40", fortyDays, tmpDir);
+
+    // Ohne Env: Default 30 Tage → 40 Tage alter Ordner wird entfernt
+    withRetentionEnv(undefined, undefined, () => {
+      const res = pruneArtifacts({ rootDir: tmpDir });
+      assert.ok(res.prunedDays.includes(fortyDays));
+      assert.equal(existsSync(path.join(tmpDir, fortyDays)), false);
+    });
+
+    const tenDays = daysAgoISO(10);
+    saveDailyForDate("daily-10", tenDays, tmpDir);
+
+    // "0" wird auf das Minimum 1 geklemmt → 10 Tage alter Ordner wird entfernt
+    withRetentionEnv("0", undefined, () => {
+      const res = pruneArtifacts({ rootDir: tmpDir });
+      assert.ok(res.prunedDays.includes(tenDays));
+      assert.equal(existsSync(path.join(tmpDir, tenDays)), false);
+    });
+
+    const twentyDays = daysAgoISO(20);
+    saveDailyForDate("daily-20", twentyDays, tmpDir);
+
+    // "99999" wird auf das Maximum 3650 geklemmt → 20 Tage alter Ordner bleibt
+    withRetentionEnv("99999", undefined, () => {
+      const res = pruneArtifacts({ rootDir: tmpDir });
+      assert.equal(res.prunedDays.length, 0);
+      assert.ok(existsSync(path.join(tmpDir, twentyDays)));
+    });
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }

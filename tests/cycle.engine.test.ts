@@ -4,6 +4,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SimulatedClock } from "../src/cycle/clock";
 import { executeCycle } from "../src/cycle/engine";
 import { createTestPorts } from "../src/cycle/ports";
@@ -261,15 +264,26 @@ test("Service: runDaily und runWeekly über CycleService", async () => {
   const clock = new SimulatedClock("2026-08-27T00:00:00.000Z");
   const testPorts = createTestPorts();
 
-  const service = new CycleService({ ports: testPorts, clock });
-  assert.equal(service.getClock(), clock);
-  assert.equal(service.getPorts(), testPorts);
+  // DC-05: Artefakt-Ablage inkl. Retention-Pruning am Lauf-Ende in ein
+  // tmpDir isolieren — der Test darf keine echten Artefakte schreiben/löschen.
+  const prevArtifactsDir = process.env.CYCLE_ARTIFACTS_DIR;
+  const tmpArtifacts = mkdtempSync(path.join(os.tmpdir(), "cycle-service-test-"));
+  process.env.CYCLE_ARTIFACTS_DIR = tmpArtifacts;
+  try {
+    const service = new CycleService({ ports: testPorts, clock });
+    assert.equal(service.getClock(), clock);
+    assert.equal(service.getPorts(), testPorts);
 
-  const dailyResult = await service.runDaily();
-  assert.equal(dailyResult.record.status, "COMPLETED");
-  assert.ok(dailyResult.artifactsDir.length > 0);
+    const dailyResult = await service.runDaily();
+    assert.equal(dailyResult.record.status, "COMPLETED");
+    assert.ok(dailyResult.artifactsDir.length > 0);
 
-  clock.setTime("2026-08-30T00:00:00.000Z");
-  const weeklyResult = await service.runWeekly();
-  assert.equal(weeklyResult.record.status, "COMPLETED");
+    clock.setTime("2026-08-30T00:00:00.000Z");
+    const weeklyResult = await service.runWeekly();
+    assert.equal(weeklyResult.record.status, "COMPLETED");
+  } finally {
+    if (prevArtifactsDir === undefined) delete process.env.CYCLE_ARTIFACTS_DIR;
+    else process.env.CYCLE_ARTIFACTS_DIR = prevArtifactsDir;
+    rmSync(tmpArtifacts, { recursive: true, force: true });
+  }
 });

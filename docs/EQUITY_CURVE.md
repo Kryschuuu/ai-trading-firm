@@ -133,7 +133,14 @@ Drei Punkte, die dabei entscheidend sind:
    `max(equity)` für `ts < since` (Referenz-Peak).
 3. **Die „Startkapital“-Kennzahlen bleiben davon getrennt.** `STARTING_EQUITY`
    (Default 10 000) ist der Bezugspunkt für „seit Start“ und für die harten
-   Risiko-Limits (`RISK_MAX_EQUITY_DRAWDOWN_PCT`), nicht für die Kurve.
+   Risiko-Limits, nicht für die Kurve. Konkret greift die Drawdown-Kill-Schwelle
+   `maxEquityDrawdownPct` aus `DEFAULT_LIMITS` (`src/lib/riskGuard.ts`, Default
+   `0.15`): ab diesem Gesamt-Drawdown zieht der Not-Halt automatisch
+   (`killSwitch.pull`, `src/lib/engine.ts`; Label „Drawdown-Kill-Schwelle“ in
+   `riskConfigService.ts`). Der Wert ist hart gedeckelt auf [0.03, 0.5]
+   (`LIMIT_CEILINGS`) und zur Laufzeit über `risk_config`/Dashboard innerhalb
+   des Deckels änderbar — es gibt kein Env-Flag für diesen Wert (DC-05,
+   2026-10-09).
 
 ### Warum der Report vorher 0 % anzeigte
 

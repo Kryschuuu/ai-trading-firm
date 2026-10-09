@@ -1064,19 +1064,28 @@ Hinweise:
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
 | `UNIVERSE_DATA_DIR` | — | Ablage der Instrument-Registry (NDJSON) |
-| `UNIVERSE_POLICY_FILE` | — | Pfad zur Universe-Policy |
-| `SCANNER_CONFIG_FILE` | — | Pfad zur Scanner-Konfiguration |
-| `SCANNER_ARTIFACTS_DIR` | — | Scanner-Tagesartefakte |
-| `CYCLE_ARTIFACTS_DIR` | — | Zyklus-Artefakte |
-| `CYCLE_AUDIT_DB` / `UNIVERSE_AUDIT_DB` / `PORTFOLIO_AUDIT_DB` | — | Audit-DB-Pfade |
+| `UNIVERSE_POLICY_FILE` | — (eingebaute Policy) | Pfad zur Universe-Policy (JSON); leer = eingebaute Default-Policy (`src/universe/policy.ts`) |
+| `SCANNER_CONFIG_FILE` | — (eingebaute Config) | Pfad zur Scanner-Konfiguration (JSON); leer = eingebaute Default-Konfiguration (`src/scanner/config.ts`) |
+| `SCANNER_ARTIFACTS_DIR` | `artifacts` | Tagesartefakte des Scanners (`src/scanner/artifacts.ts`) |
+| `CYCLE_ARTIFACTS_DIR` | `artifacts` | Tages-/Wochenartefakte des Agenten-Zyklus; `SCANNER_ARTIFACTS_DIR` ist Fallback (`src/cycle/artifacts.ts`) |
+| `CYCLE_RETENTION_DAYS` | `30` | Aufbewahrung der Daily-Artefakte in Tagen (Bounds [1, 3650]); Pruning am Abschluss jedes Daily-Laufs (`pruneArtifacts`, `src/cycle/service.ts`) |
+| `CYCLE_RETENTION_WEEKS` | `12` | Aufbewahrung der Weekly-Artefakte in Wochen (Bounds [1, 520]); Pruning am Abschluss jedes Weekly-Laufs |
+| `CYCLE_AUDIT_DB` / `UNIVERSE_AUDIT_DB` / `PORTFOLIO_AUDIT_DB` | aus (`1` = ein) | Zusätzlicher Audit-Insert in die DB (Zyklus, Universe-Review, Portfolio-Audit) |
 | `PORTFOLIO_AUDIT` | — | Portfolio-Audit an/aus |
-| `PORTFOLIO_AUDIT_DIR` | — | Portfolio-Audit-Ablage |
+| `PORTFOLIO_AUDIT_DIR` | `data/portfolio` | Ablage des Portfolio-Audit-Logs (`src/portfolio/auditFile.ts`) |
 
 ### Betrieb
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
-| `MICRO_HEALTH_PORT` | — | Health-Port des Micro-Executors |
+| `MICRO_HEALTH_PORT` | `3380` | Health-Port des Micro-Executors (Bounds [1024, 65535], `scripts/micro-executor.ts`) |
+| `MICRO_FEED` | `binance` | Preis-Feed des Micro-Executors: `binance` (WebSocket) oder `sim` (deterministischer Simulator; Feed-Klassen `simulator`/`sequence` in `src/lib/microExecutor.ts`) |
+| `MICRO_SEED_CANDLES` | `true` | Lädt die REST-Historie beim Start des Micro-Executors, damit die Indikatoren warm sind; `false` schaltet das Seeding ab (`scripts/micro-executor.ts`) |
+| `MICRO_SIM_INTERVAL_MS` | `250` | Tick-Rate des Simulator-Feeds in ms (Bounds [50, 5000]) — nur wirksam mit `MICRO_FEED=sim` |
+| `START_MICRO` | aus (`1` = ein) | Startet den Trade-Rules-Listener (Mikro-Executor) im Web-Prozess; in `NODE_ENV=production` immer aktiv, sonst eigener Prozess via `npm run micro` (`src/lib/ruleService.ts`) |
+| `ALPACA_TIMEOUT_MS` | `8000` | HTTP-Timeout des Alpaca-Adapters in ms (Bounds [200, 30000], Clamp via `envInt`; `src/brokers/alpaca/config.ts`) |
+| `WATCHDOG_HEALTH_URL` | `http://127.0.0.1:${PORT:-3369}/api/health` | Health-URL, die der Watchdog prüft (`scripts/watchdog.ts`; `PORT` Default 3369) |
+| `WATCHDOG_TIMEOUT_MS` | `5000` | HTTP-Timeout des Watchdogs in ms; ungültige oder ≤ 0 Werte fallen auf 5000 zurück (`scripts/watchdog.ts`) |
 
 ### Execution-Policy mit Market-Fallback (RMA-P4-02, v1.70.0)
 

@@ -481,12 +481,19 @@ Siehe [STRATEGY_VALIDATION.md](STRATEGY_VALIDATION.md) §31.
 | `ROUTING_HEALTH_PROBE` | `local` | `off` · `local` · `all` |
 | `ROUTING_HEALTH_TIMEOUT_MS` | `1500` | Timeout je Health-Prüfung |
 | `ROUTING_BUDGET_<PROVIDER>_TOKENS` | Policy | Tages-Token-Deckel je Provider |
-| `ROUTING_POLICY_VERSION` | – | nur Audit-Kontext (Version stammt aus der Policy) |
 | `LLM_MAX_TOKENS_PER_TURN` | `20000` | Turn-Token-Deckel inkl. Retries (Bounds [1000, 200000]) — Details Abschnitt 17 |
 | `LLM_MAX_TURN_MS` | `120000` | Turn-Zeit-Deckel in ms (Bounds [10000, 900000]) — Details Abschnitt 17 |
 | `PLAUSIBILITY_PRICE_BAND_PCT` | `15` | Preisband um Known-Good-Kurs in % (Bounds [1, 90]) — Details Abschnitt 17 |
 | `PLAUSIBILITY_MIN_RATIONALE_CHARS` | `40` | Mindestbegründung bei Confidence ≥ 0.9 (Bounds [0, 1000], `0` = aus) |
 | `EVAL_OUTPUT_DIR` | `data/eval` | Report-Verzeichnis des Eval-Harness |
+
+**Policy-Version:** Die Version stammt aus der Policy selbst —
+`DEFAULT_POLICY_VERSION = "1.0.0"` (`src/routing/policy.ts`) für die eingebaute
+Default-Policy, bzw. das Pflichtfeld `version` der JSON-Datei unter
+`ROUTING_POLICY_PATH`. Sie erscheint in jedem Audit-Eintrag. Die Version
+beschreibt den Inhalt der Policy (SemVer, validiert) und wird deshalb nicht per
+Env überschrieben — es gibt kein Env-Flag für die Policy-Version; eine zweite
+Quelle würde die Audit-Version vom Policy-Inhalt entkoppeln (DC-05, 2026-10-09).
 
 ---
 
