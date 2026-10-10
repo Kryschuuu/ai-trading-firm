@@ -21,10 +21,10 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-09** · Code-Version **0.17.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-10** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
-## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-07)
+## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-08)
 
 ### Fixed
 
@@ -61,7 +61,7 @@ erlaubt, solange sie hier dokumentiert sind).
   (`SCANNER_CONFIG_FILE`-Default `version: 2`), `DB_SCHEMA.md` (Candle-Limit
   100.000 statt 5.000; Scope der 15 Tabellen klargestellt, SSoT `src/db/schema.ts`
   mit 67 `pgTable`), `VERSION.md` (Testzahl 4.722), `CONTRIBUTING.md`/`docs/ci/README.md`
-  (DB-Skip-Aussage präzisiert: zwei PAPER-Contract-Tests scheitern ohne DB),
+  (DB-Skip-Aussage präzisiert: damals zwei PAPER-Contract-Tests ohne DB-Start; der Zustand ist mit DC-08 behoben),
   `docs/README.md` (Versionszeile im Fuß, Stub-Hinweis, neuer Audit im Index und
   im Baum), `audits/README.md` (Baum v1.2.5 statt v1.2.2), `BETA_STATUS.md`
   („acht Phasen"), `HANDBUCH.md` (`GET /api/firm/execution-quality` ergänzt),
@@ -149,9 +149,9 @@ erlaubt, solange sie hier dokumentiert sind).
     `src/lib/brokerHydration.ts` (`restorePaperBrokerState`,
     `ensurePaperBrokerHydrated`) statt `restoreFirmState`.
   - **Neu:** Abschnitt „8. Pflege dieser Karte" (Quelle ist der Code; Symbole nur
-    mit realem Export nennen; Altpfade nur als solche; automatischer Wächter
-    folgt in DC-08). Status-Header beider Architekturdoks von „Vollabgleich
-    offen" auf „Symbol-/Pfadabgleich erledigt (2026-10-09)".
+    mit realem Export nennen; Altpfade nur als solche; der automatische Wächter
+    ist in DC-08 umgesetzt). Status-Header beider Architekturdoks von
+    „Vollabgleich offen" auf „Symbol-/Pfadabgleich erledigt (2026-10-09)".
   Bewusst unverändert: die Altpfade `scripts/drizzle.config.json`
   (`SECURITY_AUDIT.md`, Befund S-11) und `src/scanner/historicalStore.ts`
   (`MARKET_DATA_PIPELINE.md`, Migrationstabelle) sowie der DC-03-Hinweis zu
@@ -161,6 +161,7 @@ erlaubt, solange sie hier dokumentiert sind).
   `tests/docsArchitectureSymbols.test.ts` 9/9, `typecheck`/`lint`/
   `docs:validate` grün. Details:
   [`docs/audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md).
+- **DC-08 (MEDIUM, Docs-as-Code/CI):** `docs:validate` prueft jetzt L1 reale Env-Reads (AST, Helper-/Konstanten-/Barrel-Aufloesung inkl. dynamischem `env[name]`), L2 Code→Doku-Env-/Routen-Drift als nicht-blockierende Warnung, L3 aktive `Code-Version`-Header gegen `package.json` (ohne `Dokument-Version`) und L4 dokumentierte `src/`-/`scripts/`-Pfade plus benannte Exporte. Die vier Counterprobes in `tests/docsValidateChecks.test.ts` brechen jede Zusicherung absichtlich und stellen sie wieder her. Die fünf anfänglichen L2-Treffer wurden bewertet/dokumentiert: vier operatorrelevante Alpaca-/Capability-Flags sind referenziert; `SCREENING_PRIORITY_CONFIG_FILE` ist als Loader-API-only gekennzeichnet (das Screening-CLI nutzt die Default-Config). Die betroffenen Env-Semantiken sind gegen den Code abgeglichen: `CAPABILITY_STRICT=false` hebt den Production-Strict-Modus nicht auf; `ALPACA_RETRY_MAX` zählt Gesamtversuche (Default 3). Ergebnis: 12 Validator-Checks grün, L2 ohne Warnungen. Variante A fuer L5: `tests/brokerContracts.test.ts` startet temporaeres Embedded-PostgreSQL; lokal duerfen nur die zwei PAPER-DB-Probes bei Infrastruktur-Startup-Ausfall skippen, CI erzwingt DB-Start. Beim Aktivieren der Vollsuite wurden drei doppelt belegte Embedded-PostgreSQL-Testports bereinigt, damit parallel laufende DB-Suites nicht kollidieren. `npm test` laeuft im Required Job `docs-validate`; `brokerContracts` 42/42. Canonical/Mirror workflow parity bleibt byte-identisch; Required Branch-Protection-Name: `docs-validate`. Kein Release-Bump (`package.json` bleibt `0.17.2`; Versionierung ist DC-09).
 
 ### Added
 
@@ -193,7 +194,7 @@ erlaubt, solange sie hier dokumentiert sind).
   Kerntabellen als detaillierte Prosa (§2), das Kurztableau (§1.1) als
   Navigationsstütze; die Behauptung einer vollständigen 15-Tabellen-Liste
   ist entfernt. Neue npm-Scripts: `docs:inventories`,
-  `docs:inventories:check` (CI-Anschluss folgt in DC-08/DC-09).
+  `docs:inventories:check` (ein eigener CI-Anschluss bleibt DC-09 vorbehalten).
   Verifikation: `grep -c "pgTable(" src/db/schema.ts` = 67,
   `grep -c "^| `" docs/generated/schema-inventory.md` = 67,
   zweiter Lauf ohne Diff, `npm run docs:validate` grün.
@@ -205,12 +206,14 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Notes
 
-- Offene Befunde mit Prompts: DC-08 (`docs:validate`-Lücken; `npm test` in keiner CI — dort folgt der
-  generische Wächter „dokumentierte `src/…`-Pfade und Export-Symbole müssen
-  existieren"), DC-09 (generierte Inventare + Release-Bump-Schritt).
-- `npm run typecheck`, `npm run lint`, `npm run docs:validate` grün; volle Suite
-  unverändert mit den zwei bekannten DB-abhängigen PAPER-Contract-Fehlern
-  (`ECONNREFUSED 0.0.0.0:5432`).
+- Noch offen ist DC-09 (generierte Inventare + bewusster Release-Bump-Schritt).
+  DC-08 hat den CI-Wächter und die Testanbindung abgeschlossen.
+- Verifikation 2026-10-10: `npm run typecheck`, `npm run lint` und
+  `npm run docs:validate` grün (12 Checks, 10 Hilfe-Dateien, 0 L2-Warnungen);
+  `tests/docsValidateChecks.test.ts` 4/4; `tests/brokerContracts.test.ts` 42/42
+  mit Embedded-PostgreSQL; `npm test` 4.790 insgesamt, 4.754 bestanden,
+  0 fehlgeschlagen, 36 optionale DB-Tests übersprungen. Die Testsuite ist jetzt
+  Teil des Required CI-Checks `docs-validate`.
 
 ## [0.17.2] — TASK 03/04/05/07: Integrationspfade und PIT-Härtung (2026-10-05)
 

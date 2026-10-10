@@ -15,10 +15,12 @@
  *   D) Secret-Scan ueber Docs-Diffs: keine API-Keys, Tokens, privaten Schluessel,
  *      internen Hostnamen oder personenbezogenen Daten in docs/.
  *   E) Konsistenz-Checks gegen den Code:
- *      - Env-Flag-Namen in CONFIGURATION.md / INSTALL.md existieren im Code (src/**).
- *      - API-Routen in docs/ existieren als registrierte Routen (src/app/api).
- *      - Zustandsnamen in LIVE_TRADING.md == Live-Gate-Enum (src/live-gate/states.ts).
- *      - Alle docs/help/*.help.json erfuellen die 3-Ebenen-Pflicht (via A).
+ *      - L1: dokumentierte Env-Flags muessen statisch erkennbare Laufzeit-Reads haben.
+ *      - L2: Code→Doku-Drift bei Env-Flags und API-Routen wird nur gewarnt.
+ *      - L3: aktive Code-Version-Header muessen package.json entsprechen;
+ *        Dokument-Versionen bleiben unabhaengig.
+ *      - L4: konkrete src/**- und scripts/**-Pfade sowie benannte Exporte muessen existieren.
+ *      - Doku-Routen und Live-Gate-Zustaende bleiben gegen Code abgeglichen.
  *   F) Versions-Konsistenz: package.json == oberster Eintrag in CHANGELOG.md
  *      (kanonisch im Root, docs/CHANGELOG.md ist Stub) == Status-Header == docs/README.md.
  *
@@ -31,6 +33,18 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import GithubSlugger from "github-slugger";
 import { extractMarkdownLinks, resolveDocLink, splitAnchor } from "../src/lib/docsLinks";
+import {
+  codeVersionHeaderIssues,
+  documentedCodePathSymbolIssues,
+  documentedEnvReadIssues,
+  envReadsFromCode,
+  firstFindings,
+  textFilesFromPaths,
+  undocumentedProcessEnvReads,
+  undocumentedRoutes,
+  type Finding,
+  type TextFile,
+} from "./docs-validate-checks";
 
 const ROOT = process.cwd();
 const DOCS = path.join(ROOT, "docs");
@@ -50,6 +64,20 @@ let checksRun = 0;
 const report = (name: string, ok: boolean, detail: string) => {
   checksRun++;
   if (!ok) failures.push(`[${name}] ${detail}`);
+  else console.log(`[docs-validate] OK [${name}]`);
+};
+
+/** Non-blocking rollout check: print a bounded sample but never fail the job. */
+const reportWarning = (name: string, warnings: readonly string[]) => {
+  checksRun++;
+  if (warnings.length === 0) {
+    console.log(`[docs-validate] OK [${name}]`);
+    return;
+  }
+  console.warn(
+    `[docs-validate] WARN [${name}] ${warnings.length} nicht dokumentierte Eintraege; ` +
+      `erste ${Math.min(warnings.length, 25)}: ${warnings.slice(0, 25).join(" | ")}`,
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -371,42 +399,89 @@ function checkSecrets() {
 const CODE_EXT = [".ts", ".tsx"];
 function codeSource() {
   const fromSrc = walk(SRC).filter((f) => CODE_EXT.includes(path.extname(f)));
-  // GAP-08 (v1.49.0): CLI-Runner unter scripts/ sind ebenfalls Code — deren
-  // Env-Flags (z. B. EVAL_OUTPUT_DIR in scripts/eval-prompts.ts) zählen als
-  // „im Code gefunden“. Wird nur vom Env-Flags-Check genutzt (Richtung
-  // Doku→Code), kann also nur Fehlalarme entfernen, keine erzeugen.
+  // CLI-Runner and root-level runtime/build configuration are code too:
+  // e.g. scripts/eval-prompts.ts and next.config.ts read supported flags.
   const scriptsDir = path.join(ROOT, "scripts");
   const fromScripts = existsSync(scriptsDir)
     ? walk(scriptsDir).filter((f) => CODE_EXT.includes(path.extname(f)))
     : [];
-  return [...fromSrc, ...fromScripts];
+  const fromRoot = readdirSync(ROOT)
+    .map((entry) => path.join(ROOT, entry))
+    .filter((file) => CODE_EXT.includes(path.extname(file)) && statSync(file).isFile());
+  return [...fromSrc, ...fromScripts, ...fromRoot];
 }
 
-function envFlagsFromCode(): Set<string> {
-  const flags = new Set<string>();
-  for (const f of codeSource()) {
-    const src = readFileSync(f, "utf8");
-    // env.FLAG / env["FLAG"] / process.env.FLAG / env[FLAG_CONST]
-    const re = /(?:process\.)?env(?:\.([A-Z][A-Z0-9_]*)|\[\s*"([A-Z][A-Z0-9_]*)"\s*\])/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src)) !== null) flags.add(m[1] ?? m[2]);
-    // Konstante Flag-Strings, die als Env-Variable verwendet werden (z. B. *_FLAG)
-    const re2 = /(?:const\s+)?\w*_FLAG\s*=\s*"([A-Z][A-Z0-9_]*)"|venue\w*FlagName\(|"[A-Z]+_[A-Z_]+_ENABLED"|"(LIVE_GATE|PAPER|BITUNIX)_[A-Z_]+"/g;
-    let m2: RegExpExecArray | null;
-    while ((m2 = re2.exec(src)) !== null) if (m2[1]) flags.add(m2[1]);
+const ENV_DOC_TARGETS = [
+  path.join(ROOT, "CONFIGURATION.md"),
+  path.join(ROOT, "INSTALL.md"),
+  path.join(DOCS, "INSTALL.md"),
+  path.join(DOCS, "CONFIGURATION.md"),
+];
+
+function codeTextFiles(): TextFile[] {
+  return textFilesFromPaths(codeSource(), ROOT);
+}
+
+function activeDocTextFiles(): TextFile[] {
+  const paths = [...mdFiles(DOCS), ...ROOT_MD];
+  return textFilesFromPaths([...new Set(paths)].filter(existsSync), ROOT);
+}
+
+function describeFindings(findings: readonly Finding[]): string {
+  return firstFindings(findings)
+    .map((finding) => `${finding.filePath}: ${finding.detail}`)
+    .join(" | ");
+}
+
+function checkEnvReadCoverage() {
+  const docs = textFilesFromPaths(ENV_DOC_TARGETS.filter(existsSync), ROOT);
+  const envExamplePath = path.join(ROOT, ".env.example");
+  const envExample = existsSync(envExamplePath) ? readFileSync(envExamplePath, "utf8") : "";
+  const reads = envReadsFromCode(codeTextFiles());
+  const issues = documentedEnvReadIssues(docs, reads, envExample);
+  report("L1 Env-Reads==Doku", issues.length === 0, describeFindings(issues));
+}
+
+function checkCodeToDocsWarnings() {
+  const sourceFiles = codeTextFiles();
+  const configuration = [
+    path.join(ROOT, "CONFIGURATION.md"),
+    path.join(ROOT, ".env.example"),
+  ]
+    .filter(existsSync)
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  const docsText = mdFiles(DOCS)
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  const envDocumentation = `${configuration}\n${docsText}`;
+  const warnings = [
+    ...undocumentedProcessEnvReads(envReadsFromCode(sourceFiles), envDocumentation),
+    ...undocumentedRoutes(routesFromCode(), docsText),
+  ];
+  reportWarning("L2 Code→Doku Env/Routen", warnings);
+}
+
+function checkCodeVersionHeaders() {
+  let version = "";
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version?: unknown };
+    version = typeof pkg.version === "string" ? pkg.version.trim() : "";
+  } catch (error) {
+    const issue: Finding = {
+      filePath: "package.json",
+      detail: `Version nicht lesbar: ${String(error)}`,
+    };
+    report("L3 Code-Version-Header", false, describeFindings([issue]));
+    return;
   }
-  // Kandidaten aus envInt/env-Backticks (einzelne grosse Flags)
-  for (const f of codeSource()) {
-    const src = readFileSync(f, "utf8");
-    const re3 = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g;
-    let m3: RegExpExecArray | null;
-    while ((m3 = re3.exec(src)) !== null) {
-      const v = m3[0];
-      if (/(_ENABLED|_URL|_KEY|_TOKEN|_DIR|_MS|_CTX|_PORT|_BASE|_PATH|_DATA|_AUDIT|_MODEL|_PROVIDER|_BUDGET|_FLAG)$/.test(v))
-        flags.add(v);
-    }
-  }
-  return flags;
+  const issues = codeVersionHeaderIssues(activeDocTextFiles(), version);
+  report("L3 Code-Version-Header", issues.length === 0, describeFindings(issues));
+}
+
+function checkCodePathsAndExports() {
+  const issues = documentedCodePathSymbolIssues(activeDocTextFiles(), ROOT);
+  report("L4 Code-Pfade/Exports", issues.length === 0, describeFindings(issues));
 }
 
 function routesFromCode(): Set<string> {
@@ -429,31 +504,6 @@ function liveGateStatesFromCode(): string[] {
   if (!m) return [];
   const names = [...m[1].matchAll(/"([A-Z_]+)"/g)].map((x) => x[1]);
   return names;
-}
-
-function checkEnvFlags() {
-  const codeFlags = envFlagsFromCode();
-  // Neue Struktur 2026-09-05: Flag-Referenz ist CONFIGURATION.md (Root) + docs/INSTALL.md (CachyOS) + INSTALL.md (Wrapper)
-  const docTargets = [
-    path.join(ROOT, "CONFIGURATION.md"),
-    path.join(ROOT, "INSTALL.md"),
-    path.join(DOCS, "INSTALL.md"),
-    path.join(DOCS, "CONFIGURATION.md"),
-  ];
-  const issues: string[] = [];
-  for (const t of docTargets) {
-    if (!existsSync(t)) continue;
-    const src = readFileSync(t, "utf8");
-    // Stub-Dateien (Weiterleitung) überspringen
-    if (src.includes("Weiterleitung") && src.length < 1500) continue;
-    const flags = [...src.matchAll(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)].map((m) => m[0]);
-    for (const f of new Set(flags)) {
-      if (/(_URL|_KEY|_TOKEN|_ENABLED|_DIR|_MS|_CTX|_PORT|_BASE|_PATH|_DATA|_AUDIT|_MODEL|_PROVIDER|_BUDGET|_FLAG)$/.test(f) && !codeFlags.has(f)) {
-        issues.push(`${path.relative(ROOT, t)} dokumentiert Flag '${f}', nicht im Code gefunden`);
-      }
-    }
-  }
-  report("Env-Flags==Code", issues.length === 0, issues.length ? issues.slice(0, 25).join(" | ") : "");
 }
 
 function checkRoutes() {
@@ -598,7 +648,10 @@ function main() {
   checkAppLinks();
   checkMarkdown();
   checkSecrets();
-  checkEnvFlags();
+  checkEnvReadCoverage();
+  checkCodeToDocsWarnings();
+  checkCodeVersionHeaders();
+  checkCodePathsAndExports();
   checkRoutes();
   checkStates();
   checkVersionConsistency();

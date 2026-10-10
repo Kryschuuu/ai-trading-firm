@@ -36,7 +36,7 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
   - `src/lib/ruleEngine.ts` (`backtestRule`, Typen `BacktestResult`/`BacktestTrade`)
   - `src/lib/marketdata/historicalStore.ts` (`HistoricalStore.query`)
   - `src/lib/marketdata/feeds/replay.ts` (`ReplayFeed`)
-  - `src/db/schema.ts` (`rule_backtests`)
+  - `src/db/schema.ts` (`ruleBacktests`) — PostgreSQL-Tabellenname `rule_backtests`
 - **Aktueller Stand & Limitationen:**
   `backtestStep.ts` verifiziert aktuell Research-Setups auf Basis einzelner Kerzenschnittmengen mit vereinfachten Kennzahlen (`maxDrawdown`, `profitFactor`, `sharpeRatio`). `backtestRule(spec, candles, opts?)` in `src/lib/ruleEngine.ts` testet einzelne `RuleSpec`-Objekte seriell. Es fehlt ein koordinierter Multi-Asset-Portfoliosimulator, der zeitgleiche Signale mit gemeinsamen Cash- und Positionsgrenzen testet.
 - **Erweiterungs-Schnittstelle:**
@@ -84,7 +84,7 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 - **Beteiligte Dateien:**
   - `src/lib/broker.ts` (schreibt die Tabellen `positions`, `order_intents`)
   - `src/lib/microExecutor.ts` (schreibt die Tabelle `rule_executions`)
-  - `src/db/schema.ts` (SSoT der Tabellen `positions`, `rule_executions`, `agent_messages`, `equity_snapshots`)
+  - `src/db/schema.ts` (`positions`, `ruleExecutions`, `agentMessages`, `equitySnapshots`) — Drizzle-Exports für die gleichnamigen PostgreSQL-Tabellen
   - `src/portfolio/metrics.ts`
 - **Aktueller Stand & Limitationen:**
   `positions` speichert `rule_id` und `realized_pnl`. `rule_executions` speichert Latenzen und Snapshots. Eine granulare Zerlegung, welcher Agent (Research vs. Selection vs. Technical), welche Marktphase (Regime) und welcher Faktor-Score den Gewinn/Verlust verursacht hat, ist noch nicht aggregiert abrufbar.
@@ -180,7 +180,7 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
     die Firm-/Order-Limits liegen getrennt in `src/lib/riskGuard.ts`, siehe
     [`PIPELINE_MAP.md` § „Zwei Risk-Guards, zwei Zwecke“](PIPELINE_MAP.md#zwei-risk-guards-zwei-zwecke))
   - `src/cycle/steps/riskStep.ts`, `src/cycle/steps/researchStep.ts`
-  - `src/cycle/schemas.ts` (`portfolioAllocation`, `portfolioWeight`)
+  - `src/cycle/schemas.ts` (`RiskStepOutput`, `TradeSetupProposal`, `ResearchStepOutput`) — exportierte Typen mit den Properties `portfolioAllocation` und `portfolioWeight`
 - **Aktueller Stand:**
   `riskStep` bildet die deterministisch freigegebene Kandidatenmenge; die LLM-Antwort darf sie nur verengen. Auf ausschließlich gemeinsame, bis `asOf` gültige Preiszeitstempel werden Risk-Parity-Gewichte berechnet und guard-geprüft. Unzureichende Historie, Guard-/Solver-Ablehnung und Fehler erhalten einen explizit gekennzeichneten Equal-Weight-Fallback.
 - **Datenfluss:**
@@ -196,7 +196,7 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
   - `src/brokers/bitunix/execution.ts` (`BrokerExecutionEngine.reconcile`)
   - `src/lib/marketdata/simulator.ts` (`FillSimulator`)
   - `src/contracts/broker.ts` (`BrokerOrderResult`)
-  - `src/db/schema.ts` (`positions`, `rule_executions`)
+  - `src/db/schema.ts` (`positions`, `ruleExecutions`) — Drizzle-Exports der PostgreSQL-Tabellen
 - **Aktueller Stand & Limitationen:**
   `FillSimulator` modelliert Slippage, Spread und Gebühren synthetisch. `BrokerExecutionEngine` ruft über `reconcile()` die echten Trades ab und bildet mengengewichtete `avgPrice`-Werte. Eine strukturierte Speicherung der Abweichung (Expected Price vs. Executed Fill Price) fehlt in der Datenbank.
 - **Erweiterungs-Schnittstelle:**

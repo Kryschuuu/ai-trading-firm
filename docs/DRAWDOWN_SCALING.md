@@ -14,7 +14,7 @@ Multiplikator).
 - Finding: [`docs/audits/2026-09-20-roadmap-audit/findings/RMA-P5-04-drawdown-scaling.md`](audits/2026-09-20-roadmap-audit/findings/RMA-P5-04-drawdown-scaling.md)
 - Kern (pure, deterministisch, uhrfrei): `src/portfolio/drawdownScaling.ts`
 - Live-Orchestrator: `src/lib/drawdownScaling.ts`
-- Risk-Guard-Composition: `src/lib/riskGuard.ts` (`applyDrawdownScaling`, `drawdownPauseState`, `combinedMarketFactor`)
+- Risk-Guard-Composition: `src/lib/riskGuard.ts` (`applyDrawdownScaling`, `drawdownPauseState`) — `combinedMarketFactor` remains a private helper inside that module.
 - Persistenz: `drawdown_scaling_snapshots` (`drizzle/2026-09-22_drawdown_scaling.sql`)
 - API: `GET /api/firm/risk/drawdown-scaling` (Status), `POST` (Forced-Update), `GET /api/firm/risk/volatility` und `GET /api/firm/risk` (erweitert)
 
@@ -211,7 +211,7 @@ blockiert also nicht dauerhaft — sie senkt nur das Budget auf den Boden.
   WARN + `auditClass: "security"`) mit Equity-Snapshot, HWM, Drawdown,
   alter/neuer Stufe, Transition, Cashflow-Attribution, Policyversion und
   Grund — jede Faktoränderung ist ohne Rekonstruktion nachvollziehbar.
-  Renderer: `src/lib/auditView.ts` (`RISK_DRAWDOWN_SCALING`).
+  Renderer: `src/lib/auditView.ts` (`AUDIT_EVENT_CATALOG`), dessen Eintrag `RISK_DRAWDOWN_SCALING` rendert.
 - **Kaskaden-Status:** `GET /api/firm/risk` meldet je Faktor
   `volTargetFactor`, `drawdownFactor`, `drawdownStage`, `drawdownPaused` und
   `drawdownPolicyVersion` neben Basis- und wirksamem Limit — jede

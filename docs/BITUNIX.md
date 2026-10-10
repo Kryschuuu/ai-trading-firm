@@ -34,7 +34,7 @@ leben (Stand v1.32.0):
 | `MarketDataSyncService` (MDSYNC-001) | `src/marketdata/sync.ts` | Discovery → Ticker/Depth-Enrichment (v1.40.0: Chunking + `selectedSymbolSet` + `cause`-Klassifizierung) → Candle-Backfill (**v1.40.0:** leere Kerzen-Antwort `data: []` → `candles/DATA_UNAVAILABLE`-Failure, Cross-Prozess-Registry-Refresh, Status/Manifest via `resolveRuntimePath`) → Registry/HistoricalStore |
 | Sync-CLI | `scripts/market-sync.ts` + `scripts/lib/market-sync.ts` | `npm run market:sync -- --venue=BITUNIX` |
 | `run-scan.ts` | `scripts/run-scan.ts` | `--sync` (Default aus) = optionaler Warmstart VOR dem deterministischen Scan |
-| Env-Handling `BITUNIX_ENABLED` + `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `src/brokers/bitunix/config.ts` (`bitunixEnabled`, nur exakt `"true"`; `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50`, ~1 KB, v1.40.0) | geteilt zwischen Trading-Adapter und Market-Data-Sync; `.env.example` § Bitunix/Market-Data-Sync |
+| Env-Handling `BITUNIX_ENABLED` + Chunking-Konstante | `src/brokers/bitunix/config.ts` (`bitunixEnabled`, nur exakt `"true"`) und `src/brokers/bitunix/config.ts` (`BITUNIX_TICKER_SYMBOLS_PER_REQUEST = 50`) | geteilt zwischen Trading-Adapter und Market-Data-Sync; Chunk-Größe ist eine Code-Konstante, keine Env-Option |
 | Symbol-SSoT (SYM-007) | `src/symbols/normalize.ts` (`normalizeVenueSymbol`) | Instrument-ID in **venue-nativer Speicherform** `BITUNIX:BTCUSDT` (docs/SYMBOLS.md §4) |
 | Fixtures (echte API-Responses) | `tests/fixtures/bitunix/*.json` | Snapshot 2026-08-31; Provenanz siehe `tests/fixtures/bitunix/README.md` |
 

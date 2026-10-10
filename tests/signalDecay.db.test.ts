@@ -1,6 +1,6 @@
 /**
  * RMA-P5-05: Persistenz von Entry-Snapshot, Hysterese und Events.
- * embedded-postgres, Port 55447. Skip, wenn die Binary nicht startet.
+ * embedded-postgres, Port 55455. Skip, wenn die Binary nicht startet.
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -26,7 +26,7 @@ import {
   resetSignalDecayRuntimeForTests,
 } from "../src/lib/signalDecayRuntime";
 
-const PG_PORT = 55_447;
+const PG_PORT = 55_455;
 const DB_NAME = "signal_decay_test";
 const POSITION_ID = "11111111-1111-4111-8111-111111111111";
 

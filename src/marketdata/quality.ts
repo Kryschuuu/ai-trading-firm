@@ -175,6 +175,7 @@ export const CROSSCHECK_TOLERANCE_BOUNDS: readonly [number, number] = [0.1, 10];
 /** Env-Flags (Name → Doku in CONFIGURATION.md). */
 export const QUALITY_MODE_ENV = "MARKETDATA_QUALITY_MODE";
 export const CROSSCHECK_ENABLED_ENV = "MARKETDATA_CROSSCHECK";
+/** Legacy-compatible runtime toggle consumed by the market-sync CLI. */
 export const AGGREGATE_ENABLED_ENV = "MARKET_SYNC_AGGREGATE";
 
 /**

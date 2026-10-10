@@ -12,8 +12,13 @@
  *     capability=false deterministisch; PAPER liefert echte Fills
  *   - Leaking-Schutz: keine Meldung enthält Credential-/Infrastruktur-Pattern
  */
-import { test, beforeEach, after } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import EmbeddedPostgres from "embedded-postgres";
+import { Pool } from "pg";
 import { createAdapter } from "../src/brokers/factory";
 import { PaperBrokerAdapter } from "../src/brokers/paper";
 import { StubBrokerAdapter } from "../src/brokers/stubs";
@@ -29,6 +34,132 @@ import {
   type BrokerCapabilities,
 } from "../src/contracts/broker";
 import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
+
+const PG_PORT = 55_472;
+const DB_NAME = "broker_contracts_test";
+const originalDatabaseUrl = process.env.DATABASE_URL;
+let pg: EmbeddedPostgres | null = null;
+let pool: Pool | null = null;
+let databaseDir: string | null = null;
+let databaseStartupError: Error | null = null;
+const postgresLogs: string[] = [];
+
+before(async () => {
+  // PAPER's adapter uses submitAtomic(), so its two execution probes need the
+  // same real DB path as production. Start an isolated, temporary database;
+  // only a failure to initialise/start PostgreSQL is eligible for a local skip.
+  try {
+    databaseDir = mkdtempSync(path.join(tmpdir(), "broker-contracts-pg-"));
+    pg = new EmbeddedPostgres({
+      databaseDir,
+      user: "postgres",
+      password: "postgres",
+      port: PG_PORT,
+      persistent: false,
+      onLog: (message) => postgresLogs.push(String(message)),
+      onError: (message) => postgresLogs.push(String(message)),
+    });
+    await pg.initialise();
+    await pg.start();
+  } catch (error) {
+    databaseStartupError = new Error(
+      `${String(error)} :: ${postgresLogs.slice(-8).join(" | ")}`,
+    );
+    return;
+  }
+
+  await pg.createDatabase(DB_NAME);
+  process.env.DATABASE_URL = `postgresql://postgres:postgres@127.0.0.1:${PG_PORT}/${DB_NAME}`;
+
+  // PaperBroker's DB boundary is intentionally narrow: the adapter checks
+  // open positions, inserts positions, and records order intents. This
+  // minimal fixture schema exercises those production queries without
+  // running application-wide migrations in a test-only database.
+  const globals = globalThis as typeof globalThis & {
+    __arenaNextJsPostgresqlPool?: Pool;
+    __arenaNextJsPostgresqlDb?: unknown;
+  };
+  delete globals.__arenaNextJsPostgresqlPool;
+  delete globals.__arenaNextJsPostgresqlDb;
+
+  pool = new Pool({
+    host: "127.0.0.1",
+    port: PG_PORT,
+    user: "postgres",
+    password: "postgres",
+    database: DB_NAME,
+  });
+  await pool.query("SELECT 1");
+  await pool.query(`
+    CREATE TABLE positions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      symbol text NOT NULL,
+      side text NOT NULL,
+      qty numeric NOT NULL,
+      entry_price numeric NOT NULL,
+      current_price numeric,
+      stop_loss numeric,
+      take_profit numeric,
+      exit_price numeric,
+      realized_pnl numeric,
+      funding_paid numeric NOT NULL DEFAULT 0,
+      exit_reason text,
+      trailing_stop numeric,
+      trailing_armed boolean NOT NULL DEFAULT false,
+      entry_signal jsonb,
+      entry_signal_hash text,
+      signal_decay_streak integer NOT NULL DEFAULT 0,
+      signal_decay_last_key text,
+      signal_decay_policy_version text,
+      strategy_class text,
+      broker text NOT NULL,
+      status text NOT NULL DEFAULT 'OPEN',
+      mission_id uuid,
+      rule_id uuid,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX positions_open_idx ON positions (symbol) WHERE status = 'OPEN';
+    CREATE TABLE order_intents (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      account text NOT NULL DEFAULT 'PAPER',
+      symbol text NOT NULL,
+      side text NOT NULL,
+      qty numeric NOT NULL,
+      status text NOT NULL DEFAULT 'RESERVED',
+      reason text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX order_intents_reserved_symbol_unique
+      ON order_intents (symbol) WHERE status = 'RESERVED';
+  `);
+});
+
+after(async () => {
+  const globals = globalThis as typeof globalThis & {
+    __arenaNextJsPostgresqlPool?: Pool;
+    __arenaNextJsPostgresqlDb?: unknown;
+  };
+  const applicationPool = globals.__arenaNextJsPostgresqlPool;
+  delete globals.__arenaNextJsPostgresqlPool;
+  delete globals.__arenaNextJsPostgresqlDb;
+  await applicationPool?.end();
+  await pool?.end();
+  await pg?.stop().catch(() => undefined);
+  if (databaseDir) rmSync(databaseDir, { recursive: true, force: true });
+  if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = originalDatabaseUrl;
+});
+
+function skipDatabaseBackedPaperTest(t: { skip: (reason: string) => void }): boolean {
+  if (!databaseStartupError) return false;
+  const reason = `embedded PostgreSQL konnte nicht starten: ${databaseStartupError.message}`;
+  if (process.env.BROKER_CONTRACTS_REQUIRE_DB === "true") {
+    throw new Error(`BROKER_CONTRACTS_REQUIRE_DB=true: ${reason}`);
+  }
+  t.skip(reason);
+  return true;
+}
 
 beforeEach(() => {
   resetRuntimeLimits();
@@ -118,7 +249,8 @@ for (const venue of BROKER_VENUE_IDS) {
     assertNoLeak(JSON.stringify(h.details));
   });
 
-  test(`Contract ${venue}: Trading wirft sicher und informativ (capability=${adapter.capabilities.trading})`, async () => {
+  test(`Contract ${venue}: Trading wirft sicher und informativ (capability=${adapter.capabilities.trading})`, async (t) => {
+    if (venue === "PAPER" && skipDatabaseBackedPaperTest(t)) return;
     // H1 FIX: qty * Preis muss < 25% Equity (2500) sein — 0.1*67000=6700 würde mit H1 Guard REJECTED
     // Daher qty 0.015 => 1005 <2500, konsistent mit riskNotional
     const req = {
@@ -245,7 +377,8 @@ for (const venue of BROKER_VENUE_IDS) {
     }
   });
 
-  test(`Contract ${venue}: Fehlermeldungen sind konsistent informativ`, async () => {
+  test(`Contract ${venue}: Fehlermeldungen sind konsistent informativ`, async (t) => {
+    if (venue === "PAPER" && skipDatabaseBackedPaperTest(t)) return;
     // Unabhängig von der Capability-Menge: JEDE Methode, die wirft, wirft
     // mit Code + Venue + Capability — und ohne Leaks.
     const probes: [string, () => Promise<unknown>, string][] = [

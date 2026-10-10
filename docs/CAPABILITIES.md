@@ -61,6 +61,12 @@ Nutzer zu einem Live-Handelsversuch verleiten. Deshalb gilt:
   Projektor. Alte NDJSON-Werte werden ignoriert.
 - Startup: jedes Venue mit `capabilities.trading=true` braucht einen echten
   (Nicht-Stub-)Adapter (`assertTradingVenuesHaveRealAdapters`).
+  `NODE_ENV=production` erzwingt strict (Inkonsistenz wirft) unabhängig von
+  `CAPABILITY_STRICT`; ein explizites
+  `CAPABILITY_STRICT=false` ist kein Produktions-Override. Außerhalb der
+  Produktion ist der Fehlermodus standardmäßig Warnung; nur der exakte Wert
+  `CAPABILITY_STRICT=true` aktiviert dort den Throw. Die Flag-Referenz steht in
+  [`CONFIGURATION.md`](../CONFIGURATION.md).
 - Live-Trading-Gate und tatsächliche Order-Freigabe bleiben separat; dieser
   Projektor öffnet keine Orders.
 

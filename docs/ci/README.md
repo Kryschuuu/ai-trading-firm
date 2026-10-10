@@ -1,6 +1,6 @@
 # CI-Workflows — Quelle & Installation
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-10 · **Code-Version:** v0.17.2 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter nach DC-08 erweitert
 
 > **Zweck:** Diese Dateien spiegeln die GitHub-Actions-Workflows unter `.github/workflows/`. Beide Kopien werden zusammen gepflegt — der Spiegel-Sync-Schritt im Job `docs-validate` erzwingt, dass sie byte-identisch bleiben. Workflow-Änderungen benötigen entsprechende GitHub-Schreibrechte; fehlen diese der verwendeten Verbindung, muss der Repository-Owner die Quelle übernehmen.
 
@@ -8,7 +8,7 @@
 
 | Datei | Zweck | Ziel in `.github/workflows/` |
 |-------|-------|-------------------------------|
-| `docs-validate.workflow.yml` | Docs-as-Code-Wächter: Spiegel-Sync, Schema, Links, Lint, Secrets, Konsistenz (Task 12) | `main.yml` |
+| `docs-validate.workflow.yml` | Required Check `docs-validate`: Typecheck, Gesamttestsuite, Spiegel-Sync, Docs-as-Code inkl. L1–L4 (DC-08) | `main.yml` |
 | `security-live-gate.workflow.yml` | Next-Regressionen Linux/Windows, Build, Dependency-Audit, Auth und Live-Gate ≥95% Coverage | `security-live-gate.yml` |
 
 ## Installation (einmalig durch Owner)
@@ -25,6 +25,11 @@ Dazu `.github/dependabot.yml` (liegt bei, muss nicht kopiert werden): hält die
 auf immutable Commit-SHAs gepinnten Actions aktuell (Audit SEC-10). Bei jedem
 Actions-Update-PR vor dem Merge die `docs/ci/`-Kopien synchronisieren — der
 Spiegel-Sync-Schritt im Job `docs-validate` rotet sonst bewusst.
+
+**Branch-Protection:** Als erforderliche Status-Checks sind exakt
+`docs-validate` und `security-live-gate` einzutragen. Die komplette
+`npm test`-Suite ist ein Schritt **innerhalb** des Required Checks
+`docs-validate`, kein separater Check-Name.
 
 ## Trigger und Pre-PR-Prüfung
 
@@ -46,14 +51,31 @@ Spiegel-Sync-Schritt im Job `docs-validate` rotet sonst bewusst.
 
 ### docs-validate
 
-- Spiegel-Sync: `docs/ci/*.workflow.yml` == `.github/workflows/`-Kopien (byte-identisch)
-- Help-Schema (`docs/help/*.help.json` vs `help.schema.json`)
-- Link-Check (0 tote Links/Anker in `docs/`)
-- Markdown-Lint (Code-Fences, ATX-Header, Trailing-Whitespace)
-- Secret-Scan (keine Keys/Tokens)
-- Konsistenz: Env-Flags (`CONFIGURATION.md`, `INSTALL.md`) == Code, API-Routen == Code, Live-Gate-States == `LIVE_TRADING.md`
+- Typecheck: `npm run typecheck`.
+- Gesamttestsuite: `npm test`; `tests/brokerContracts.test.ts` startet ein eigenes
+  temporäres Embedded-PostgreSQL und verlangt in CI (über
+  `BROKER_CONTRACTS_REQUIRE_DB=true`) einen erfolgreichen DB-Start. Die beiden
+  PAPER-Tests skippen nur bei nicht startbarer optionaler Infrastruktur in
+  lokalen Offline-Läufen; Schema-/Query-Fehler sind immer echte Testfehler.
+- Spiegel-Sync: `docs/ci/*.workflow.yml` == `.github/workflows/`-Kopien (byte-identisch).
+- `npm run docs:validate` (alle Checks deterministisch/offline):
+  - Help-Schema, relative Links/Anker, Viewer-Auflösung, Markdown-Lint und Secret-Scan.
+  - **L1 (blocking):** Jedes dokumentierte Env-Flag muss einen statisch
+    auflösbaren Code-Read haben (AST inkl. Helpern, Konstanten, Barrels und
+    dynamischem `env[name]`; suffix-basierte Nicht-Runtime-Whitelist nur mit
+    begründeter Ausnahme).
+  - **L2 (non-blocking):** Code→Doku-Drift bei Env-Reads und API-Routen wird als
+    begrenzte Warnung ausgegeben, nie als Merge-Blockade.
+  - **L3 (blocking):** aktive `Code-Version`-Header gegen `package.json`;
+    `Dokument-Version` bleibt unabhängig. Archive/Audits/Peer-Reviews sind historisch.
+  - **L4 (blocking):** konkrete dokumentierte `src/**`-/`scripts/**`-Pfade und
+    benannte Exporte müssen existieren; begründete Altpfade sind whitelisted.
+  - Doku-Routen gegen registrierte API-Routen und Live-Gate-States gegen
+    `LIVE_TRADING.md`.
 
-Ausführen: `npm run docs:validate`
+Der Workflow-Job heißt `docs-validate`; genau dieser Name ist als Required
+Status Check in der Branch-Protection einzutragen. `npm test` ist Teil dieses
+Checks, kein separater Branch-Protection-Check.
 
 ### security-live-gate
 
@@ -94,18 +116,17 @@ Ausführen: `npm run docs:validate`
 
 Ausführen: `npm run security:live-gate`
 
-### Ergänzende Gesamtsuite (`npm test`)
+### Gesamttestsuite (`npm test`, Teil des Required Checks)
 
-Die reguläre Unit-Suite ist weiterhin kein eigener Required Check. Die früher
-hier genannten fünf Docs-Konsistenzfehler sind behoben; die SEC-06-Nachprüfung
-hat das auf dem Ausgangsstand v1.36.33 bestätigt. `npm test` daher zusätzlich
-lokal vor der Auslieferung ausführen. Einzelne bestehende DB-Integrationstests
-überspringen sich ohne PostgreSQL; die SEC-05-/SEC-06-Security-Regressionen
-benötigen keine externe Datenbank und laufen stets im Required Security-Gate.
-**Nicht** DB-gated sind zwei PAPER-Broker-Contract-Tests in
-`tests/brokerContracts.test.ts`: sie scheitern ohne erreichbare Datenbank
-(`ECONNREFUSED 0.0.0.0:5432`) statt zu skippen — mit temporärem Embedded-
-PostgreSQL besteht die Datei 42/42. Fix/CI-Anbindung: Prompt `DC-08`.
+`npm test` läuft als Schritt im Workflow-Job `docs-validate`; es ist kein
+separater Required-Check-Name. Andere Datenbank-Suites folgen ihrem
+`embedded-postgres`-Skip-Vertrag. `tests/brokerContracts.test.ts` startet selbst
+ein temporäres Embedded-PostgreSQL und baut ein isoliertes Minimal-Schema für
+den echten PAPER-Adapterpfad auf. Wenn Embedded-PostgreSQL lokal nicht
+startbar ist, werden ausschließlich die beiden DB-abhängigen PAPER-Probes
+übersprungen; Schema-/Query-Fehler skippen nie. CI setzt
+`BROKER_CONTRACTS_REQUIRE_DB=true`, daher wird ein fehlgeschlagener DB-Start
+blockierend. Bei verfügbarer DB müssen alle 42 Contract-Tests bestehen (42/42).
 
 ## Verwandte Dokumente
 

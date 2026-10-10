@@ -17,7 +17,7 @@ in dem **generierten Inventar** [schema-inventory.md](../generated/schema-invent
 vollständig gelistet — inkl. Quellzeilen-Link und zugehöriger Migrationsdatei.
 Bei Schema-Änderungen: TSDoc auf der `pgTable`-Definition pflegen und
 `npm run docs:inventories` laufen lassen (Idempotenz-Check via
-`npm run docs:inventories:check`, siehe DC-08/DC-09 für CI-Anschluss).
+`npm run docs:inventories:check`, CI-Anschluss bleibt DC-09 vorbehalten).
 
 ---
 

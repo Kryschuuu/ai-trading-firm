@@ -1,27 +1,24 @@
 # =============================================================================
-# CI-Workflow `docs-validate` (Task 12) — Docs-as-Code-Waechter.
+# CI-Workflow `docs-validate` (Task 12 / DC-08) — Docs-as-Code-Waechter.
 #
-# Verpflichtend fuer jeden PR (Basis-Level Security). Fuehrt `npm run
-# docs:validate` aus, das scripts/docs-validate.ts ruft:
-#   - Hilfe-Schema-Validierung aller docs/help/*.help.json gegen
-#     docs/help/help.schema.json (3-Ebenen-Systematik kurzinfo/technischeInfo/risiko),
-#   - relativer Link-Check innerhalb docs/ und der Root-Markdown-Dateien
-#     (0 tote relative Links/Anker),
-#   - App-Link-Check: dieselben Links aus Sicht des Doku-Viewers — jeder
-#     `.md`-Link muss unter `/docs/<Pfad>.md` beim richtigen Dokument landen
-#     (0 tote Links, 0 Verwechslungen durch gleichnamige Dateien),
-#   - Markdown-Lint (repo-konform: Code-Fences, ATX-Header, Trailing-Whitespace),
-#   - Secret-Scan ueber Docs (0 API-Keys/Tokens/private Schluessel/interne Hosts/PPI),
-#   - Konsistenz-Checks gegen den Code:
-#       Env-Flag-Namen in INSTALL.md == Flags im Code,
-#       API-Routen in docs/ == registrierte Routen (src/app/api),
-#       Zustandsnamen LIVE_TRADING.md == Live-Gate-Enum (src/live-gate/states.ts).
+# Verpflichtend fuer jeden PR (Basis-Level Security). Fuehrt Typecheck,
+# Gesamttestsuite und `npm run docs:validate` aus. Der Validator prueft u. a.:
+#   - Hilfe-Schema, relative Links, Viewer-Aufloesung, Markdown-Lint und Secrets,
+#   - L1: dokumentierte Env-Flags haben echte, statisch aufloesbare Runtime-Reads
+#     (inkl. Helper-/Konstanten-/Barrel- und dynamischer env[name]-Pfade),
+#   - L2: Code→Doku Env-/Routen-Drift wird als begrenzte, nicht-blockierende
+#     Warnung ausgegeben, damit neue Laufzeit-Oberflaechen sichtbar werden,
+#   - L3: aktive Code-Version-Header entsprechen package.json; Dokument-Version
+#     bleibt unabhaengig,
+#   - L4: dokumentierte konkrete src/**-/scripts/**-Pfade und benannte Exporte
+#     existieren; historische/Build-Referenzen haben begruendete Ausnahmen,
+#   - Doku-Routen und Live-Gate-Zustaende bleiben gegen Code abgeglichen.
 #
-# Hinzu kommt (vor der Docs-Validierung) ein TypeScript-Typecheck: Die
-# Konsistenz-Checks lesen den Code — ist der Code nicht statisch sauber,
-# waeren Aussagen darueber wertlos. Ein Spiegel-Sync-Schritt prueft, dass
-# die versionierte Quelle in docs/ci/ und die ausgefuehrten Kopien unter
-# .github/workflows/ identisch sind (siehe docs/ci/README.md).
+# Typecheck und Tests muessen vor den Doku-Aussagen sauber sein. Ein
+# Spiegel-Sync-Schritt prueft, dass docs/ci/ und .github/workflows/ identisch
+# bleiben. `npm test` startet fuer die DB-abhaengigen PAPER-Contract-Tests ein
+# temporaeres Embedded-PostgreSQL; in CI ist dessen Verfuegbarkeit verpflichtend.
+# Branch-Protection: Required Status Check ist exakt `docs-validate`.
 #
 # MERGE-BLOCKADE: In der Branch-Protection von `main` als Required Status
 # Check `docs-validate` eintragen. Docs und Code werden im selben PR geaendert
@@ -60,9 +57,10 @@ jobs:
   docs-validate:
     name: docs-validate
     runs-on: ubuntu-latest
-    # Hartes Zeitlimit: Ein haengender Job rotet die Pipeline, statt
-    # Runner-Minuten zu verbrennen (fail fast).
-    timeout-minutes: 10
+    # npm test umfasst die gesamte Suite inkl. mehrerer temporärer DB-Starts;
+    # das großzügigere Limit verhindert, dass langsame Runner den Gate-Check
+    # mitten in einer gültigen Suite abbrechen.
+    timeout-minutes: 30
     steps:
       # SEC-10 (Supply-Chain-Hardening): Alle Actions sind auf immutable
       # Commit-SHAs gepinnt; der Tag steht als Kommentar dahinter. Updates
@@ -97,5 +95,13 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
 
-      - name: Docs-Validierung (Schema, Links, Lint, Secrets, Konsistenz)
+      - name: Gesamttestsuite (npm test)
+        # Der Broker-Contract-Test startet selbst temporäres Embedded-PostgreSQL.
+        # In CI muss die DB starten; nur lokale Offline-Läufe duerfen die beiden
+        # PAPER-Tests ueberspringen, wenn die optionale Infrastruktur fehlt.
+        env:
+          BROKER_CONTRACTS_REQUIRE_DB: "true"
+        run: npm test
+
+      - name: Docs-Validierung (L1–L4, Links, Lint, Secrets, Konsistenz)
         run: npm run docs:validate

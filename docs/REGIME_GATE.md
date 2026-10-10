@@ -183,8 +183,8 @@ Ohne ableitbare Klasse gilt Faktor 1 — keine stillschweigende Zuordnung.
 `UNKNOWN`-Regime → Faktor 1 + explizite Kennzeichnung (nie still).
 
 **Coverage-Sicherheitsregel (seit v1.61.0):** Der Gate-Faktor ist über
-`applyRegimeGate` auf [0, 2] geklemmt (nie `< 1`), wenn die Coverage unter
-`REGIME_MIN_COVERAGE` (Default 0.5) liegt (`boostBlocked`): ein Degraded-
+`applyRegimeGate` begrenzt jeden risikoerhöhenden Faktor auf `1`, wenn die Coverage unter
+`REGIME_MIN_BOOST_COVERAGE` (Default `1.0`) liegt (`boostBlocked`): ein Degraded-
 Mode oder fehlende Familien kann das Risiko **nie erhöhen** — nur
 weiter dämpfen wie zuvor. `resolveRegimeGateForExecution` liefert
 zusätzlich `coverage`/`degraded` für Audit und Prompt.
@@ -249,7 +249,7 @@ Alle Schwellen: `CONFIGURATION.md` §„Regime-Gate“ und `.env.example`.
 | `REGIME_GATE_MODE` | `monitor` | `off` \| `monitor` \| `enforce` |
 | `REGIME_GATE_FACTORS` | s. Tabelle oben | Werte geklemmt [0, 2] |
 | `REGIME_FEATURE_MODE` | `multidim` | `multidim` \| `ohlcv` (unbekannt → `multidim`) |
-| `REGIME_MIN_COVERAGE` | `0.5` | [0, 1] — darunter `degraded`, Gate-Boosten blockiert |
+| `REGIME_MIN_BOOST_COVERAGE` | `1.0` | [0, 1] — darunter wird jeder Faktor > 1 auf 1 geklemmt |
 | `REGIME_LIQUIDITY_SPREAD_HIGH_PCT` | `0.5` | [0.01, 100] % — Spread-Vote → `HIGH_VOL` |
 | `REGIME_PERP_FUNDING_ABS` | `0.001` | [0.00001, 0.1] — Funding-Vote → `HIGH_VOL` |
 | `REGIME_MACRO_VIX_HIGH` | `30` | [10, 100] — Makro-Vote → `HIGH_VOL` |

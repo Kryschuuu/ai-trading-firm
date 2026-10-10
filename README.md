@@ -400,16 +400,17 @@ Weitere Module: `MARKET_UNIVERSE`, `SYMBOLS`, `BITUNIX`, `ALPACA`,
 ## Testen & Validieren
 
 ```bash
-npm test                  # Unit/Integration (node:test; DB-Suites skipfen ohne Postgres)
+npm test                  # Gesamtsuite (node:test; Broker-Contracts mit temporärem Embedded-PostgreSQL)
 npm run typecheck         # tsc --noEmit
 npm run lint              # ESLint
-npm run docs:validate     # Docs-as-Code-Wächter (Links, Schema, Flags, Routen, Secrets)
-npm run security:live-gate  # Next + ws + Auth + Live-Gate (CI-Pflicht)
+npm run docs:validate     # Docs-as-Code (L1–L4 Env/Version/Pfade, L2 Warnungen, Links, Schema, Routen, Secrets)
+npm run security:live-gate  # Next + ws + Auth + Live-Gate (eigener CI-Pflichtcheck)
 ./scripts/validate-setup.sh  # 18 Setup-Checks
 ```
 
-CI: [docs/ci/README.md](docs/ci/README.md) (Workflows `docs-validate` +
-`security-live-gate`, Actions auf Commit-SHA gepinnt).
+CI: [docs/ci/README.md](docs/ci/README.md) (Required Checks `docs-validate` —
+Typecheck + `npm test` + Docs-as-Code — und `security-live-gate`; Actions auf
+Commit-SHA gepinnt).
 
 ## Lizenz & Haftung
 

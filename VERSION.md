@@ -440,11 +440,19 @@ korrigiert die Versions-/Roadmap-Aussagen:
 - **Verifikation:** `npm run typecheck`, `npm run lint` und `npm run docs:validate` grün;
   gezielte Offline-/Unit-Läufe 187/187. Embedded PostgreSQL: Perp-Store +
   `trade_rules`-Trigger 9/9, Trade-Attribution 7/7, Broker-Contracts 42/42.
-  `npm test` ohne externes PostgreSQL: 4.722 bestanden, 2 fehlgeschlagen,
-  36 übersprungen — beide Fehler sind DB-abhängige PAPER-Contract-Tests
-  (`ECONNREFUSED 0.0.0.0:5432`), die mit Embedded PostgreSQL 42/42 bestehen.
-  Daher ist die Vollsuite insgesamt nicht als grün zu werten. Live-Bitunix
+  Historischer Vollsuite-Stand vor DC-08 (2026-10-05, ohne PostgreSQL):
+  `npm test` 4.722 bestanden, 2 fehlgeschlagen, 36 übersprungen — beide Fehler
+  waren DB-abhängige PAPER-Contract-Tests (`ECONNREFUSED 0.0.0.0:5432`); die
+  Contract-Datei bestand separat mit Embedded PostgreSQL 42/42. Live-Bitunix
   konnte in dieser Sandbox wegen Netzwerkfehler nicht validiert werden.
+
+**Unreleased-Nachtrag DC-08 (2026-10-10; kein Versions-Bump):** `docs:validate`
+prüft nun L1–L4 (12 Checks gesamt; L2 Code→Doku bleibt nicht-blockierend), und
+`npm test` ist Teil des Required CI-Jobs `docs-validate`. Die Broker-Contracts
+starten ein temporäres Embedded-PostgreSQL und bestehen 42/42. Die Vollsuite
+besteht 4.754 von 4.790 Tests, 0 fehlgeschlagen und 36 optionale DB-Skips.
+`package.json` bleibt absichtlich bei `0.17.2`; ein Release-/Versions-Bump ist
+DC-09 und wird nicht nebenbei vorgenommen.
 
 `v0.17.1` (2026-10-05) setzt **ADR-003** (Atomare Mehrprozess-Order-
 Reservierung via `PaperBroker.submitAtomic()` / `withAccountLock`) und
@@ -643,7 +651,7 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 | `src/brokers/` | Broker-Schicht: Paper-Broker (Fill-Simulation), Bitunix/Alpaca-Adapter, Reconciliation, Emergency-Broker-Schnittstelle |
 | `src/execution/` | Ausführungspolitik: Order-Gates, Post-Only-Fallback, TWAP-Engine, Policy-Controller |
 | `src/live-gate/` | Harte Freigabeschicht für jeden Live-Pfad (Flags, Security-Stamps, Kill-Switch-Kopplung) |
-| `src/risk` (in `src/lib/`) | `riskGuard`, `adaptiveRisk`, `positionSizing`, `clusterExposure`, `volatilityTargeting`, `drawdownScaling`, `signalDecay`, `circuitBreaker`, `exits` |
+| `src/lib/` | `riskGuard`, `adaptiveRisk`, `positionSizing`, `clusterExposure`, `volatilityTargeting`, `drawdownScaling`, `signalDecay`, `circuitBreaker`, `exits` |
 | `src/portfolio/` | Portfolio-Engine: Kennzahlen, Korrelations-Cluster, Volatility-Targeting-Policy, Drawdown-Policy |
 | `src/lib/indicators.ts` | Reine Indikatoren inkl. Bollinger-Bandlevel/`bollingerPosition` (v0.6.3/0.6.4) und Donchian-Kanal (v0.6.3); Bollinger-Lage seit v0.6.4 als Regelfeld (`bbZScore`, `priceVs*BbPct`), Donchian-Ausbruch seit v0.6.5 (`donchianBreakoutPct`, kanonische Fenster 20/10) |
 | `src/backtest/` | Backtest-Engines (legacy/paper/event_replay), Walk-Forward, Monte-Carlo, Trade-Ledger, Indikator-Cache (v0.3.0) |

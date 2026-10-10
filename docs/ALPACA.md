@@ -45,7 +45,24 @@ bleiben in diesem Ordner.
   `NotSupportedCapabilityError`, wenn `ALPACA_USE_LIVE_ENDPOINTS=true` gesetzt
   ist (Testnet-Mismatch-Schutz).
 * `ALPACA_ALLOW_INSECURE_HTTP` — nur für Loopback-Tests.
-* `ALPACA_RETRY_MAX` (Default 2) — nur für idempotente GET-Requests und 429.
+* `ALPACA_RETRY_MAX` (Default 3, Bounds [1, 5]) — maximale Gesamtzahl der Versuche
+  einschließlich Erstrequest. HTTP 429 darf für jede Methode wiederholt werden;
+  Timeouts, Netzwerkfehler und 5xx nur bei idempotenten Requests (standardmäßig
+  GET), damit ambivalente Order-POSTs keine Duplikate erzeugen.
+
+## 1.1 Endpunkt-Overrides und Host-Allowlist
+
+| Env-Flag | Default | Wirkung / Sicherheitsgrenze |
+| --- | --- | --- |
+| `ALPACA_TRADE_BASE_URL` | Paper: `https://paper-api.alpaca.markets`; Live-Hinweis: `https://api.alpaca.markets` | Überschreibt die Trade-API-Basis-URL. `ALPACA_USE_LIVE_ENDPOINTS` wählt nur den Endpunkt — es öffnet **nicht** das Live-Gate. |
+| `ALPACA_DATA_BASE_URL` | `https://data.sandbox.alpaca.markets` | Überschreibt die Public-Market-Data-API-Basis-URL. |
+| `ALPACA_ALLOWED_HOSTS` | vier offizielle Alpaca-Hosts | Kommagetrennte **zusätzliche** Hostnamen zur SSRF-Allowlist für konfigurierte Custom-Endpunkte. Nur Hostnamen ohne Scheme/Pfad eintragen; die Liste eng halten. |
+
+`AlpacaHttp` akzeptiert nur Hosts aus dieser Allowlist. TLS bleibt erzwungen;
+HTTP wird nur für Loopback mit `ALPACA_ALLOW_INSECURE_HTTP=true` akzeptiert.
+Benutzername/Passwort in der URL werden abgewiesen. Diese Overrides ändern
+keine Credential-Quelle oder Live-Freigabe; die Runtime-Referenz steht in
+[`CONFIGURATION.md`](../CONFIGURATION.md).
 
 ## 1a. Datenversorgung (Market-Data-Sync) — der häufigste „Alpaca ist nicht integriert"-Fall
 
@@ -229,12 +246,15 @@ Kein Schema-Bruch, keine neuen Pflicht-Env-Variablen. Opt-in in `.env`:
 
 ```bash
 ALPACA_ENABLED=true             # Default aus — ohne Flag kein Sync, kein Adapter
-ALPACA_KEY_ID=…                 # alternativ: Control-Plane-UI (Broker-Tab, empfohlen)
-ALPACA_SECRET_KEY=…
+# Credentials empfohlen im Control-Plane-UI (Broker-Tab); Env-Fallback nur explizit Dev/Test:
+ALPACA_API_KEY=…
+ALPACA_API_SECRET=…
 ALPACA_USE_LIVE_ENDPOINTS=false # Default: Paper-API
 ALPACA_ALLOW_INSECURE_HTTP=false # nur Loopback-Tests
-ALPACA_RETRY_MAX=2              # Default
+ALPACA_RETRY_MAX=3              # bis zu 3 Gesamtversuche inkl. Erstrequest; 429 für jede Methode, sonst nur idempotente Requests
 BROKER_ALLOW_ENV_FALLBACK=false # SEC-07: Env-Fallback nur explizit Dev/Test
+# Optional: ALPACA_TRADE_BASE_URL, ALPACA_DATA_BASE_URL,
+# ALPACA_ALLOWED_HOSTS (siehe Abschnitt 1.1)
 ```
 
 **Reihenfolge für eine bestehende Installation** (das war der beobachtete
