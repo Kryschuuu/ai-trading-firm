@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * DC-07 — erzeugt `docs/generated/schema-inventory.md` **deterministisch**
- * aus `src/db/schema.ts` und `drizzle/*.sql`.
+ * DC-07 / DC-09 — Renderer für `docs/generated/schema-inventory.md`
+ * aus `src/db/schema.ts` und `drizzle/*.sql`. Schreibt und prüft nicht selbst:
+ * Aufruf über `npm run docs:inventories` (scripts/gen-docs-inventories.ts).
  *
  * Warum generiert und nicht handgeschrieben: die Inventar-Tabelle muss
  * jede der inzwischen 67 `pgTable(...)`-Definitionen aufführen — sonst
@@ -9,17 +10,14 @@
  * DC-07: 15 von 67 Tabellen dokumentiert). Die Generierung ist
  * idempotent (byte-identisch bei zweitem Lauf), LF-Zeilenenden und
  * ohne Zeitstempel; das "Stand"-Datum kommt ausschließlich aus der
- * Umgebungsvariable `SCHEMA_INVENTORY_STAND` (optional).
- *
- *   npm run docs:inventories
- *   npm run docs:inventories:check   # Idempotenz-Check (Exit != 0 bei Drift)
+ * Stand-Datum kommt vom Aufrufer (`--stand` des Orchestrators).
  *
  * Die 15 "Ur-Tabellen" (risk_config … equity_snapshots) haben keine
  * eigene SQL-Migrations-Datei — sie wurden mit dem ersten Schema-Snapshot
  * ausgerollt und sind in der Inventar-Spalte mit "(initial)" markiert.
  */
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,8 +28,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(here, "..");
 const SCHEMA_FILE = path.join(REPO, "src", "db", "schema.ts");
 const MIGRATIONS_DIR = path.join(REPO, "drizzle");
-const OUT_DIR = path.join(REPO, "docs", "generated");
-const OUT_FILE = path.join(OUT_DIR, "schema-inventory.md");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parser für src/db/schema.ts: pgTable-Definitionen + TSDoc-Kopf
@@ -258,6 +254,9 @@ function cell(s: string): string {
   return s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
 }
 
+/** Einheitliche Kopfzeile aller generierten Inventare (DC-09). */
+const GENERATED_HEADER = "<!-- GENERIERT — nicht editieren (`npm run docs:inventories`). -->";
+
 function renderMarkdown(tables: TableEntry[], standDate: string): string {
   // Die Datei liegt in docs/generated/, also zwei Ebenen über dem Repo-Root.
   const SRC_REF = "../../src/db/schema.ts";
@@ -280,7 +279,7 @@ function renderMarkdown(tables: TableEntry[], standDate: string): string {
   return [
     "# Schema-Inventar (generiert)",
     "",
-    "<!-- GENERIERT — nicht editieren (`npm run docs:inventories`). -->",
+    GENERATED_HEADER,
     "",
     "> **GENERIERT — nicht editieren** (`npm run docs:inventories`)",
     `> — Quelle: [\`src/db/schema.ts\`](${SRC_REF}) + [\`drizzle/*.sql\`](${DRIZZLE_REF}/)`,
@@ -296,88 +295,39 @@ function renderMarkdown(tables: TableEntry[], standDate: string): string {
   ].join("\n");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CLI
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface GenerateResult {
-  file: string;
+/** Ergebnis-Zusammenfassung für den Aufrufer (Orchestrator-Log). */
+export interface SchemaInventoryResult {
+  markdown: string;
   count: number;
   initialCount: number;
   migratedCount: number;
   withoutPurpose: number;
 }
 
-export function generateInventory(): GenerateResult {
+/**
+ * Rendert das Schema-Inventar als Markdown. Liest nur `src/db/schema.ts` und
+ * `drizzle/` und schreibt nichts — Schreiben und Prüfen übernimmt
+ * ausschließlich `scripts/gen-docs-inventories.ts`.
+ *
+ * @param standDate optionales „Stand“-Datum (leer ⇒ keine Zeile, byte-stabil).
+ */
+export function renderSchemaInventory(standDate = ""): SchemaInventoryResult {
   const source = readFileSync(SCHEMA_FILE, "utf8");
   const parsed = parseSchema(source);
   const migrations = scanMigrations();
 
+  // Sortierung ist die Dateireihenfolge des Parsers — stabil, nichts sortieren.
   const tables: TableEntry[] = parsed.map((p) => ({
     ...p,
     migrations: migrations.get(p.pgName) ?? [],
   }));
 
-  // Sortierung ist bereits stabil (Dateireihenfolge des Parsers) — nichts sortieren.
-
-  const standDate = process.env.SCHEMA_INVENTORY_STAND?.trim() ?? "";
-  const md = renderMarkdown(tables, standDate);
-
-  mkdirSync(OUT_DIR, { recursive: true });
-  writeFileSync(OUT_FILE, md, { encoding: "utf8", flag: "w" });
-
   const initialCount = tables.filter((t) => t.migrations.length === 0).length;
-  const migratedCount = tables.length - initialCount;
-  const withoutPurpose = tables.filter((t) => !t.purpose).length;
   return {
-    file: OUT_FILE,
+    markdown: renderMarkdown(tables, standDate),
     count: tables.length,
     initialCount,
-    migratedCount,
-    withoutPurpose,
+    migratedCount: tables.length - initialCount,
+    withoutPurpose: tables.filter((t) => !t.purpose).length,
   };
-}
-
-/** Idempotenz-Check: Datei schreiben, dann vergleichen ob sie sich änderte. */
-export function checkInventory(): { ok: boolean; detail: string } {
-  const before = readFileSync(OUT_FILE, "utf8");
-  const r = generateInventory();
-  const after = readFileSync(OUT_FILE, "utf8");
-  // Beim Check soll der ggf. vorhandene Stand-Datum-Eintrag ignoriert werden,
-  // damit er im CI nie zu einem falschen Negativ führt — wir vergleichen
-  // ohne die "**Stand:** …"-Zeile.
-  const stripStand = (s: string) => s.replace(/^\*\*Stand:\*\*[^\n]*\n?/m, "");
-  const ok = stripStand(before) === stripStand(after);
-  return {
-    ok,
-    detail: ok
-      ? `${r.count} Tabellen, Inventar ist aktuell.`
-      : `schema-inventory.md ist nicht aktuell — bitte \`npm run docs:inventories\` ausführen.`,
-  };
-}
-
-// Direktstart.
-const invokedAsScript =
-  typeof process.argv[1] === "string" && process.argv[1].endsWith("gen-schema-inventory.ts");
-
-if (invokedAsScript) {
-  const mode = process.argv.includes("--check") ? "check" : "generate";
-  if (mode === "check") {
-    const res = checkInventory();
-    if (res.ok) {
-      console.log(`[docs:inventories:check] OK — ${res.detail}`);
-      process.exit(0);
-    } else {
-      console.error(`[docs:inventories:check] FAIL — ${res.detail}`);
-      process.exit(1);
-    }
-  } else {
-    const r = generateInventory();
-    const rel = path.relative(REPO, r.file);
-    console.log(
-      `[docs:inventories] ${rel} geschrieben (${r.count} Tabellen: ` +
-        `${r.migratedCount} aus Migrationen, ${r.initialCount} initial, ` +
-        `${r.withoutPurpose} ohne TSDoc-Zweck).`,
-    );
-  }
 }

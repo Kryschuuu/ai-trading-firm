@@ -1,88 +1,48 @@
 /**
- * DC-07 — Schema-Inventar-Vertragstest.
+ * DC-07 — Schema-Inventar-Vertragstest (Renderer-Ebene).
  *
- * Prüft, dass `docs/generated/schema-inventory.md` von
- * `scripts/gen-schema-inventory.ts` stammt (byteweise Abgleich), alle 67
- * pgTable-Definitionen aus `src/db/schema.ts` abdeckt, deterministisch
- * (zweiter Lauf identisch) und LF-zeilenendig ist.
+ * Prüft die Eigenschaften des Schema-Inventars, die unabhängig vom Stand-Datum
+ * gelten: vollständige Abdeckung aller `pgTable(`-Definitionen, deterministische
+ * Ausgabe, LF-Zeilenenden, keine Zeitstempel. Der Abgleich mit der committed
+ * Datei sowie die Drift-Prüfung laufen in `tests/docsInventories.test.ts` (DC-09).
  *
- * Keine DB, kein Netz.
+ * Schreibt nichts; keine DB, kein Netz.
  */
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { generateInventory } from "../scripts/gen-schema-inventory";
+import { renderSchemaInventory } from "../scripts/gen-schema-inventory";
 
-const REPO = process.cwd();
-const DOC_PATH = path.join(REPO, "docs", "generated", "schema-inventory.md");
-const SCHEMA_PATH = path.join(REPO, "src", "db", "schema.ts");
+const SCHEMA_PATH = path.join(process.cwd(), "src", "db", "schema.ts");
 
-describe("DC-07 · docs/generated/schema-inventory.md", () => {
-  const onDisk = readFileSync(DOC_PATH, "utf8");
-  const schema = readFileSync(SCHEMA_PATH, "utf8");
-  const pgTableCount = (schema.match(/pgTable\(/g) ?? []).length;
+describe("DC-07 · Schema-Inventar (Renderer)", () => {
+  const pgTableCount = (readFileSync(SCHEMA_PATH, "utf8").match(/pgTable\(/g) ?? []).length;
+  const first = renderSchemaInventory("");
 
-  test("Datei existiert und hat den GENERIERT-Hinweis", () => {
-    assert.ok(onDisk.includes("GENERIERT — nicht editieren"), "GENERIERT-Marker fehlt");
-    assert.ok(onDisk.includes("docs:inventories"), "npm-Script-Hinweis fehlt");
+  test("nennt jede pgTable()-Definition aus src/db/schema.ts", () => {
+    assert.equal(first.count, pgTableCount, `Renderer: ${first.count} Tabellen, schema.ts: ${pgTableCount} pgTable()`);
+    const rows = first.markdown.split("\n").filter((line) => /^\| `/.test(line)).length;
+    assert.equal(rows, pgTableCount, `Inventar listet ${rows} Tabellenzeilen`);
   });
 
-  test("zweiter Lauf ist byte-identisch (Idempotenz)", () => {
-    // Ohne SCHEMA_INVENTORY_STAND generieren → kein Datum, vollständig stabil.
-    const before = process.env.SCHEMA_INVENTORY_STAND;
-    delete process.env.SCHEMA_INVENTORY_STAND;
-    try {
-      const first = generateInventory();
-      const md1 = readFileSync(DOC_PATH, "utf8");
-      const second = generateInventory();
-      const md2 = readFileSync(DOC_PATH, "utf8");
-      assert.equal(md1, md2, "zweiter Lauf erzeugt andere Bytes");
-      assert.equal(first.count, second.count, "Tabellenzahl ändert sich");
-      assert.equal(first.count, pgTableCount, `Generator nennt ${first.count} Tabellen, schema.ts hat ${pgTableCount} pgTable()`);
-    } finally {
-      if (before !== undefined) process.env.SCHEMA_INVENTORY_STAND = before;
-    }
+  test("deterministisch: zweiter Rendervorgang ist byte-identisch", () => {
+    assert.equal(renderSchemaInventory("").markdown, first.markdown);
   });
 
-  test("Tabellenzeilenzahl ≥ pgTable()-Anzahl im Quellcode", () => {
-    // Wir schreiben ohne Datum, damit der Snapshot hier deterministisch ist.
-    const before = process.env.SCHEMA_INVENTORY_STAND;
-    delete process.env.SCHEMA_INVENTORY_STAND;
-    try {
-      generateInventory();
-      const md = readFileSync(DOC_PATH, "utf8");
-      const rows = md.split("\n").filter((l) => /^\| `/.test(l)).length;
-      assert.ok(
-        rows >= pgTableCount,
-        `Inventar listet ${rows} Tabellenzeilen, aber schema.ts hat ${pgTableCount} pgTable()`,
-      );
-    } finally {
-      if (before !== undefined) process.env.SCHEMA_INVENTORY_STAND = before;
-      // Stelle den Zustand vor dem Test wieder her (der PR-Commit hat
-      // SCHEMA_INVENTORY_STAND=2026-10-09 gesetzt).
-      generateInventory();
-    }
+  test("ohne Stand-Datum keine Stand-Zeile und keine Zeitstempel", () => {
+    assert.equal(first.markdown.includes("**Stand:**"), false);
+    assert.equal(/\d{4}-\d{2}-\d{2}T\d{2}/.test(first.markdown), false, "ISO-Zeitstempel gefunden");
+    assert.equal(/erzeugt am|generated at/i.test(first.markdown), false, "Zeitstempel-Phrase gefunden");
   });
 
   test("LF-Zeilenenden (kein CRLF)", () => {
-    assert.ok(!onDisk.includes("\r\n"), "Datei enthält CRLF");
+    assert.equal(first.markdown.includes("\r"), false, "Ausgabe enthält CR");
   });
 
-  test("keine Zeitstempel/Hashes, die den Output byte-instabil machen", () => {
-    // Ein Datum kommt ausschließlich über SCHEMA_INVENTORY_STAND — ohne
-    // diese Env-Variable darf "Stand:" nirgendwo in der Ausgabe vorkommen.
-    const before = process.env.SCHEMA_INVENTORY_STAND;
-    delete process.env.SCHEMA_INVENTORY_STAND;
-    try {
-      generateInventory();
-      const md = readFileSync(DOC_PATH, "utf8");
-      assert.ok(!/\d{4}-\d{2}-\d{2}T\d{2}/.test(md), "ISO-Zeitstempel gefunden");
-      assert.ok(!/erzeugt am|generated at/i.test(md), "Zeitstempel-Phrase gefunden");
-    } finally {
-      if (before !== undefined) process.env.SCHEMA_INVENTORY_STAND = before;
-      generateInventory();
-    }
+  test("trägt den GENERIERT-Hinweis mit dem Befehl des Gesamtgenerators", () => {
+    assert.ok(first.markdown.includes("GENERIERT — nicht editieren"), "GENERIERT-Marker fehlt");
+    assert.ok(first.markdown.includes("docs:inventories"), "npm-Script-Hinweis fehlt");
   });
 });

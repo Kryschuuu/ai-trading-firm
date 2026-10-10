@@ -58,6 +58,8 @@ Spiegel-Sync-Schritt im Job `docs-validate` rotet sonst bewusst.
   PAPER-Tests skippen nur bei nicht startbarer optionaler Infrastruktur in
   lokalen Offline-Läufen; Schema-/Query-Fehler sind immer echte Testfehler.
 - Spiegel-Sync: `docs/ci/*.workflow.yml` == `.github/workflows/`-Kopien (byte-identisch).
+- Generierte Inventare: `npm run docs:inventories:check` (DC-09) — Drift in
+  `docs/generated/` (Routen, Env-Flags, Schema) bricht den Job.
 - `npm run docs:validate` (alle Checks deterministisch/offline):
   - Help-Schema, relative Links/Anker, Viewer-Auflösung, Markdown-Lint und Secret-Scan.
   - **L1 (blocking):** Jedes dokumentierte Env-Flag muss einen statisch

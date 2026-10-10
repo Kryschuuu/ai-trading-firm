@@ -10,6 +10,7 @@
 #     Warnung ausgegeben, damit neue Laufzeit-Oberflaechen sichtbar werden,
 #   - L3: aktive Code-Version-Header entsprechen package.json; Dokument-Version
 #     bleibt unabhaengig,
+#   - Generierte Inventare (docs/generated/, DC-09) sind aktuell (Drift-Gate),
 #   - L4: dokumentierte konkrete src/**-/scripts/**-Pfade und benannte Exporte
 #     existieren; historische/Build-Referenzen haben begruendete Ausnahmen,
 #   - Doku-Routen und Live-Gate-Zustaende bleiben gegen Code abgeglichen.
@@ -105,3 +106,8 @@ jobs:
 
       - name: Docs-Validierung (L1–L4, Links, Lint, Secrets, Konsistenz)
         run: npm run docs:validate
+
+      - name: Generierte Inventare aktuell (docs/generated, DC-09)
+        # Drift-Gate: Routen-/Env-/Schema-Inventar müssen dem Code entsprechen.
+        # Bei Abweichung: `npm run docs:inventories` lokal ausführen und committen.
+        run: npm run docs:inventories:check

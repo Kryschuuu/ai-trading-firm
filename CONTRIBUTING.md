@@ -19,8 +19,9 @@ und müssen in jedem Beitrag eingehalten bleiben.
   Versions-Quelle ist `package.json` (zur Laufzeit via `src/lib/version.ts`).
   Legacy-Referenzen `v1.x.x` in alten Audits/Docs sind **nicht** öffentlich
   (Zuordnung: [`CHANGELOG.md`](CHANGELOG.md) § Versions-Zuordnung).
-- Status-Header jeder Doku-Datei (`> **Status-Header:** … Code-Version …`)
-  aktualisieren, wenn sich das Modul ändert.
+- Zwei Header-Arten mit getrennter Bedeutung — siehe Abschnitt
+  „Zwei Header-Arten“ unten. Die `Code-Version` wird über
+  `scripts/bump-docs-version.ts` synchron gehalten, nicht von Hand.
 
 ## Pflicht-Checks (vor jedem PR)
 
@@ -85,6 +86,61 @@ Für Sicherheits-Änderungen zusätzlich: `npm run security:live-gate`
   (`docs:validate` vergleicht `src/app/api` mit den Docs) konsistent bleiben.
 - Änderungen im [`CHANGELOG.md`](CHANGELOG.md) dokumentieren (Keep a
   Changelog; `[Unreleased]` zuerst, dann beim Release die Version).
+
+## Generierte Dokumente
+
+Mengenverzeichnisse werden **erzeugt, nicht gepflegt** — sonst driften sie (Befunde
+DC-04/DC-05/DC-07: 15 von 67 Tabellen dokumentiert, Flags ohne Read, falsche Header).
+
+- **Nie per Hand editieren.** Jede generierte Datei trägt die Kopfzeile
+  „GENERIERT — nicht editieren (`npm run docs:inventories`)“.
+- Änderungen laufen über Code bzw. Generator: Routen/Guards in `src/app/api/**`,
+  Env-Reads in `src/**`, Tabellen in `src/db/schema.ts`. Danach
+  `npm run docs:inventories` ausführen und das **Generat mitcommitten**.
+- Generierte Dateien:
+  - `docs/generated/route-inventory.md` — Routen, HTTP-Methoden, Guard-Klasse
+  - `docs/generated/env-inventory.md` — `process.env`-Reads vs. `.env.example` vs. `CONFIGURATION.md`
+  - `docs/generated/schema-inventory.md` — `pgTable`-Definitionen und Migrationen
+  - `docs/STRATEGY_TEMPLATES.md` — Strategie-Katalog (`npm run docs:templates`)
+- `npm run docs:inventories:check` (Pflicht-Schritt im CI-Job `docs-validate`) schlägt
+  fehl, sobald ein Generat vom Code abweicht. Schreibende Routen ohne Guard müssen
+  gesichtet sein (`REVIEWED_UNGUARDED_WRITES` in `scripts/gen-docs-inventories.ts`,
+  mit Begründung) — sonst bricht der Check ebenfalls.
+- Das Stand-Datum wird nur über `--stand YYYY-MM-DD` gesetzt; ohne Angabe bleibt die
+  Ausgabe byte-stabil.
+
+## Zwei Header-Arten
+
+Dokumente tragen zwei unterschiedliche Versionsangaben. Sie dürfen nicht vermischt werden.
+
+| Header | Bedeutung | Geprüft | Pflege |
+|--------|-----------|---------|--------|
+| `Code-Version` | Stand des Moduls, den das Dokument beschreibt | CI (`docs:validate`, L3) gegen `package.json` | `npm run docs:bump-version` (Release-Schritt) |
+| `Dokument-Version` | eigene Vokabular-/Format-/Schema-Version (z. B. `PORTFOLIO_CONFIG_VERSION = 1`, `Schema v2`) | **nicht** — unabhängig von `package.json` | von Hand, nur bei Format-Änderung |
+
+- Eine Zeile darf beide Angaben nennen (z. B. Bestandsdokumente mit Schema-Version);
+  das Bump-Skript ersetzt dann ausschließlich die `Code-Version`.
+- `archive/`, `audits/`, `peer-reviews/` und `generated/` sind vom Bump ausgenommen —
+  dort bleiben historische Stände erhalten.
+- Nur eine Version ist die Wahrheit für den Betrieb: `package.json` (siehe `VERSION.md`).
+
+## Release-Ablauf (Doku-Teil)
+
+Vor dem Release-Commit, in dieser Reihenfolge:
+
+```bash
+npm run docs:inventories && node --import tsx scripts/bump-docs-version.ts --write
+npm run docs:validate && npm run docs:inventories:check    # muss grün sein
+```
+
+Vorab optional `node --import tsx scripts/bump-docs-version.ts --dry-run`: es listet
+genau die `Code-Version`-Header, die sich ändern würden. Danach den Release-Commit mit
+`package.json`, `CHANGELOG.md` (Abschnitt `## [x.y.z]`) und den geänderten Dokumenten
+erstellen. Das Skript ruft kein `git` auf.
+
+Hinweis: Nach dem Bump trägt auch ein Bestandsdokument die neue Code-Version, dessen
+Inhalt noch nicht gegen den Code geprüft wurde. Der Vermerk „Vollabgleich offen“ im
+Header bleibt deshalb stehen — er ist der Hinweis auf ungeprüften Inhalt.
 
 ## Tests
 

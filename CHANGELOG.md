@@ -200,14 +200,40 @@ erlaubt, solange sie hier dokumentiert sind).
   zweiter Lauf ohne Diff, `npm run docs:validate` grün.
   Details: [`docs/audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md).
 
+### Added
+
+- **DC-09 (LOW, Release-/Doku-Prozess):** Generierte Mengen-Inventare und Header-Bump.
+  - `scripts/gen-docs-inventories.ts` (`npm run docs:inventories`, `docs:inventories:check`)
+    erzeugt `docs/generated/route-inventory.md` (87 Routen, 106 Handler, Guard-Klasse je
+    Methode), `env-inventory.md` (298 Env-Namen: gelesen / `.env.example` /
+    `CONFIGURATION.md`, Warnzeilen für nicht dokumentierte Reads und Flags ohne Read) und
+    `schema-inventory.md` (DC-07). Alle Dateien sind deterministisch (LF, kein Zeitstempel,
+    Stand nur über `--stand`).
+  - Schreibende Routen ohne sichtbaren Guard stehen als Warnzeile am Tabellenkopf; `--check`
+    scheitert zusätzlich an neuen, nicht in `REVIEWED_UNGUARDED_WRITES` begründeten Routen.
+  - `scripts/bump-docs-version.ts` (`--dry-run`/`--write`) setzt die `Code-Version`-Header in
+    `docs/**` (ohne archive/audits/peer-reviews/generated) auf `package.json`; `Dokument-Version`
+    bleibt unangetastet; kein `git`-Aufruf.
+  - CI-Job `docs-validate` führt `docs:inventories:check` aus; Spiegel `.github/workflows/main.yml`
+    byte-identisch.
+  - `CONTRIBUTING.md`: Abschnitte „Generierte Dokumente“, „Zwei Header-Arten“, „Release-Ablauf
+    (Doku-Teil)“.
+  - Analysator-Fix in `docs-validate-checks.ts`: Computed-Keys in Maps werden aufgelöst
+    (`BINANCE_ENABLED`, `KRAKEN_ENABLED`, `IBKR_ENABLED`, `PAPER_ENABLED` waren fälschlich
+    „ohne Read“). Wirkt auch in L1.
+  - Tests: `tests/docsInventories.test.ts` (13); `tests/docs.schemaInventory.test.ts` auf den
+    reinen Renderer umgestellt.
+  - Kein Versions-Bump (`package.json` bleibt `0.17.2`). Details:
+    [`docs/audits/2026-10-06-docs-code-audit/findings/DC-09-prozess-inventare-und-bump.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-09-prozess-inventare-und-bump.md).
+
 ### Changed
 
 - **DC-04 (MEDIUM, Doku, Versions-/Status-Header):** Die Kopfzeilen der Fachdokumente sind klassifiziert statt pauschal auf `0.17.2` gesetzt (PR #236). Ergebnis: 3 Dokumente mit verifizierter Code-Version `v0.17.2`, 3 mit eigener Dokument-/Review-Version (Zahl bleibt, z. B. `PORTFOLIO_CONFIG_VERSION = 1`), 63 als „Bestandsdokument · Vollabgleich offen“ (DC-06/DC-07) markiert. Legacy-Zählungen in Dokumenttiteln stehen nur noch als Klammerhinweis mit Verweis auf die Zuordnung oben. Kein Code- und kein Versions-Bump; `package.json` bleibt `0.17.2`. Verifikation: Header-Scan meldet 0 falsche Code-Version-Header, `npm run docs:validate` grün. Details: [`docs/audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md`](docs/audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md).
 
 ### Notes
 
-- Noch offen ist DC-09 (generierte Inventare + bewusster Release-Bump-Schritt).
-  DC-08 hat den CI-Wächter und die Testanbindung abgeschlossen.
+- DC-09 ist umgesetzt (generierte Inventare, Header-Bump, Konvention). Damit sind alle
+  neun Befunde des Docs↔Code-Audits erledigt. DC-08 hat den CI-Wächter und die Testanbindung abgeschlossen.
 - Verifikation 2026-10-10: `npm run typecheck`, `npm run lint` und
   `npm run docs:validate` grün (12 Checks, 10 Hilfe-Dateien, 0 L2-Warnungen);
   `tests/docsValidateChecks.test.ts` 4/4; `tests/brokerContracts.test.ts` 42/42
