@@ -27,8 +27,9 @@ Prompts. Bereits **behoben** (Nachweis in Tracking und Findings):
 | **DC-05** (M2/N6) | 4 dokumentierte Env-Flags ohne Code-Read; `.env.example` lückenhaft | zwei Flags implementiert (`CYCLE_RETENTION_DAYS`/`_WEEKS`), zwei gestrichen (Doku nennt die echten Quellen), `MICRO_FEED_TYPE` → `MICRO_FEED`; `.env.example` + `CONFIGURATION.md` auf den echten Lese-Bestand ergänzt · [DC-05 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-05-env-flags-ohne-implementierung.md) |
 | **DC-06** (M6) | 34 Symbole/Pfade in der Architektur-Doku ohne Code-Entsprechung | reale Exporte + korrekte Modulgrenzen in `PIPELINE_MAP.md`, `INTEGRATION_POINTS.md`, `MISSIONS.md`, `DOCS_SYNC_AUDIT.md`; neue Absätze „Zwei Risk-Guards, zwei Zwecke" und „8. Pflege dieser Karte"; `tests/docsArchitectureSymbols.test.ts` (9 Tests) · [DC-06 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) |
 
-**Offen und als Prompts übergeben:** DC-07 (`DB_SCHEMA.md` 15/67 Tabellen, M3),
-DC-08 (CI-Wächter-Lücken, M8b), DC-09 (Prozess: Inventare + Versions-Bump).
+**Offen und als Prompts übergeben:** DC-08 (CI-Wächter-Lücken, M8b),
+DC-09 (Prozess: Inventare + Versions-Bump). DC-07 (Schema-Inventar-Generator,
+67/67 Tabellen im generierten Inventar erfasst) ist am 2026-10-09 erledigt.
 DC-04…DC-06 sind erledigt (Zeilen oben); die Befundtexte unten bleiben als
 Audit-Historie unverändert.
 
