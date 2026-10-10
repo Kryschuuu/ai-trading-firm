@@ -84,9 +84,11 @@ Requests begrenzt (standardmäßig GET).
 
 **L5: Variante A gewählt und umgesetzt.** `tests/brokerContracts.test.ts`
 startet ein isoliertes temporäres Embedded-PostgreSQL und legt ein minimales
-Schema für den echten `PaperBrokerAdapter.submitAtomic()`-Pfad an. Bei lokal
-nicht startbarer optionaler DB-Infrastruktur skippen nur die zwei betroffenen
-PAPER-Probes; Schema-/Query-Fehler sind Testfehler. Der Workflow setzt
+Schema für den echten `PaperBrokerAdapter.submitAtomic()`-Pfad an. Drei zuvor
+zwischen parallelen Embedded-PostgreSQL-Suites geteilte Testports (55434,
+55445, 55447) wurden eindeutig vergeben. Bei lokal nicht startbarer optionaler
+DB-Infrastruktur skippen nur die zwei betroffenen PAPER-Probes; Schema-/Query-
+Fehler sind Testfehler. Der Workflow setzt
 `BROKER_CONTRACTS_REQUIRE_DB=true`, wodurch ein Startup-Ausfall in CI fehlschlägt.
 `npm test` ist ein Schritt im Workflow-Job `docs-validate`; Branch Protection
 muss exakt den Required Status Check **`docs-validate`** enthalten (zusätzlich
@@ -119,6 +121,7 @@ Ausgeführt: `node --import tsx --test tests/docsValidateChecks.test.ts` — **4
 | `npm run docs:validate` | grün: 12 Checks, 10 Hilfe-Dateien; L1–L4 sichtbar, L2 0 Warnungen |
 | `tests/docsValidateChecks.test.ts` | 4 bestanden, 0 fehlgeschlagen |
 | Normales `npm ci` (mit Install-Scripts) + PAPER-Contract-Lauf | Embedded-PostgreSQL-Linux-Binaries/Symlinks wurden regulär hydriert; **42 bestanden** |
+| Fokussierte Embedded-PostgreSQL-Suites (sechs Dateien mit zuvor kollidierenden Ports) | **41 bestanden, 0 fehlgeschlagen, 0 übersprungen** |
 | `tests/brokerContracts.test.ts` mit `BROKER_CONTRACTS_REQUIRE_DB=true` | **42 bestanden, 0 fehlgeschlagen, 0 übersprungen** |
 | `BROKER_CONTRACTS_REQUIRE_DB=true npm test` | **4.790 Tests: 4.754 bestanden, 0 fehlgeschlagen, 36 optionale DB-Skips** |
 | `diff -u docs/ci/docs-validate.workflow.yml .github/workflows/main.yml` | byte-identisch |

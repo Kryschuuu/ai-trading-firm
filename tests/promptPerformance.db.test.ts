@@ -11,7 +11,7 @@
  *  - Restart: nach Reconnect (simulierter Prozess-Neustart) sind Artefakte/Runs noch da und idempotent
  *  - Secrets/PII nie persistiert (Schema-Inspektion)
  *
- * Nutzt embedded-postgres auf 55445; fällt bei fehlender Binary per t.skip aus (kein harter Fail).
+ * Nutzt embedded-postgres auf 55450; fällt bei fehlender Binary per t.skip aus (kein harter Fail).
  * Injiziert den Pool über global.__arenaNextJsPostgresql* (Singleton-Override), damit src/promptPerformance/store getDb() die Embedded nutzt.
  */
 
@@ -25,7 +25,7 @@ import EmbeddedPostgres from "embedded-postgres";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-const PG_PORT = 55_445;
+const PG_PORT = 55_450;
 const DB_NAME = "prompt_perf_test";
 
 describe("prompt_artifacts / agent_prompt_runs (Postgres): Migration, Roundtrip, Idempotenz, Restart", () => {

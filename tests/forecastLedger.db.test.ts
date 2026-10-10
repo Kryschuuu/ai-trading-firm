@@ -94,7 +94,7 @@ describe("forecastLedger (Postgres): Migration, Constraints, Idempotenz", () => 
         databaseDir: dir,
         user: "postgres",
         password: "postgres",
-        port: 55_434,
+        port: 55_435,
         persistent: false,
         onLog: (message) => logs.push(message),
         onError: (message) => logs.push(message instanceof Error ? message.message : String(message)),
@@ -104,7 +104,7 @@ describe("forecastLedger (Postgres): Migration, Constraints, Idempotenz", () => 
       await instance.createDatabase("forecast_ledger_test");
       const localPool = new Pool({
         host: "127.0.0.1",
-        port: 55_434,
+        port: 55_435,
         user: "postgres",
         password: "postgres",
         database: "forecast_ledger_test",
