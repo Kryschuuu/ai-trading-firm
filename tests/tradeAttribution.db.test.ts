@@ -773,6 +773,11 @@ test("Attribution-Migration: idempotent + Append-only-Trigger (eigene Wegwerf-Po
       database: "attribution_test",
       max: 4,
     });
+    // Fehler inaktiver Pool-Verbindungen (z. B. FATAL beim Herunterfahren)
+    // ohne Listener würden als unbehandelte Exception dem Test zugeschrieben.
+    localPool.on("error", (err) => {
+      t.diagnostic(`Pool-Verbindungsfehler (inaktiv): ${err.message}`);
+    });
     // Minimaler trade_journal-Ständer (FK-Ziel; Produktions-Schema entsteht
     // per drizzle push — hier zählt nur der Migrationsvertrag selbst).
     await localPool.query(`
