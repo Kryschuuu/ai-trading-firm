@@ -29,7 +29,7 @@ Prompts. Bereits **behoben** (Nachweis in Tracking und Findings):
 | **DC-07** (M7) | `DB_SCHEMA.md` zeigt 15 statt 67 Tabellen | Generator `scripts/gen-schema-inventory.ts`, `docs/generated/schema-inventory.md` 67/67 · [DC-07](audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md) |
 | **DC-08** (M8b) | fünf Lücken im Docs-Wächter und PAPER-Contract-DB-Fehler | L1–L4 Checks + Counterprobes; L2 bleibt Warnung; L5 Variante A: `npm test` in `docs-validate`, Broker-Contracts starten Embedded-PostgreSQL und bestehen 42/42 · [DC-08](audits/2026-10-06-docs-code-audit/findings/DC-08-ci-waechter-luecken.md) |
 
-**Noch offen:** DC-09 (Prozess: generierte Inventare + bewusste Release-/Versions-Bump-Automatisierung). DC-01…DC-08 sind erledigt; die Befundtexte unten bleiben als Audit-Historie unverändert.
+**Stand:** Alle neun Befunde sind erledigt (DC-09 am 2026-10-10: generierte Inventare, Header-Bump, Konvention). DC-01…DC-08 waren vorher erledigt; die Befundtexte unten bleiben als Audit-Historie unverändert.
 
 Die Befund-Nummern unten (H1/H2/M…/N…) bleiben als Audit-Historie unverändert;
 die Zuordnung zu DC-IDs steht in der Tabelle

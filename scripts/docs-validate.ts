@@ -34,6 +34,8 @@ import path from "node:path";
 import GithubSlugger from "github-slugger";
 import { extractMarkdownLinks, resolveDocLink, splitAnchor } from "../src/lib/docsLinks";
 import {
+  apiRouteFiles,
+  codeSourceFiles,
   codeVersionHeaderIssues,
   documentedCodePathSymbolIssues,
   documentedEnvReadIssues,
@@ -42,6 +44,7 @@ import {
   textFilesFromPaths,
   undocumentedProcessEnvReads,
   undocumentedRoutes,
+  walkFiles,
   type Finding,
   type TextFile,
 } from "./docs-validate-checks";
@@ -83,18 +86,8 @@ const reportWarning = (name: string, warnings: readonly string[]) => {
 // ---------------------------------------------------------------------------
 // Hilfskonstruktionen
 // ---------------------------------------------------------------------------
-const walk = (dir: string): string[] => {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...walk(full));
-    else out.push(full);
-  }
-  return out;
-};
-
 const mdFiles = (base: string): string[] =>
-  walk(base).filter((f) => f.endsWith(".md"));
+  walkFiles(base).filter((f) => f.endsWith(".md"));
 
 // ---------------------------------------------------------------------------
 // A) Help-Schema-Validierung
@@ -396,20 +389,9 @@ function checkSecrets() {
 // ---------------------------------------------------------------------------
 // E) Konsistenz-Checks gegen Code
 // ---------------------------------------------------------------------------
-const CODE_EXT = [".ts", ".tsx"];
-function codeSource() {
-  const fromSrc = walk(SRC).filter((f) => CODE_EXT.includes(path.extname(f)));
-  // CLI-Runner and root-level runtime/build configuration are code too:
-  // e.g. scripts/eval-prompts.ts and next.config.ts read supported flags.
-  const scriptsDir = path.join(ROOT, "scripts");
-  const fromScripts = existsSync(scriptsDir)
-    ? walk(scriptsDir).filter((f) => CODE_EXT.includes(path.extname(f)))
-    : [];
-  const fromRoot = readdirSync(ROOT)
-    .map((entry) => path.join(ROOT, entry))
-    .filter((file) => CODE_EXT.includes(path.extname(file)) && statSync(file).isFile());
-  return [...fromSrc, ...fromScripts, ...fromRoot];
-}
+// CLI-Runner und Root-Konfigurationen (next.config.ts, instrumentation.ts) zählen
+// als Code, z. B. scripts/eval-prompts.ts liest unterstützte Flags.
+const codeSource = () => codeSourceFiles(ROOT);
 
 const ENV_DOC_TARGETS = [
   path.join(ROOT, "CONFIGURATION.md"),
@@ -485,16 +467,7 @@ function checkCodePathsAndExports() {
 }
 
 function routesFromCode(): Set<string> {
-  const routes = new Set<string>();
-  const apiDir = path.join(SRC, "app/api");
-  if (!existsSync(apiDir)) return routes;
-  const files = walk(apiDir).filter((f) => f.endsWith("route.ts"));
-  for (const f of files) {
-    let rel = path.relative(apiDir, f).replace(/route\.ts$/, "").replace(/\\/g, "/");
-    rel = rel.replace(/\/$/, "");
-    routes.add(`/api/${rel}`);
-  }
-  return routes;
+  return new Set(apiRouteFiles(path.join(SRC, "app/api")).map((r) => r.urlPath));
 }
 
 function liveGateStatesFromCode(): string[] {

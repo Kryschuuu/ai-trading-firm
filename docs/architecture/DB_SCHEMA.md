@@ -16,8 +16,8 @@ Cross-Sectional, Sentiment, Prompt-Artefakte, Trade-Attributions etc.) sind
 in dem **generierten Inventar** [schema-inventory.md](../generated/schema-inventory.md)
 vollständig gelistet — inkl. Quellzeilen-Link und zugehöriger Migrationsdatei.
 Bei Schema-Änderungen: TSDoc auf der `pgTable`-Definition pflegen und
-`npm run docs:inventories` laufen lassen (Idempotenz-Check via
-`npm run docs:inventories:check`, CI-Anschluss bleibt DC-09 vorbehalten).
+`npm run docs:inventories` laufen lassen. `npm run docs:inventories:check` ist Pflicht-Schritt
+im CI-Job `docs-validate` und schlägt bei veraltetem Inventar fehl.
 
 ---
 

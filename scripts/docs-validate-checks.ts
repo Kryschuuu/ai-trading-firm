@@ -121,7 +121,7 @@ const HISTORICAL_DOC_SEGMENTS = new Set(["archive", "audits", "peer-reviews"]);
 const ENV_HELPERS = new Set(["envInt", "envNumber", "env", "readEnv", "requireEnv"]);
 const ENV_VALUE_HELPERS = new Set(["num", "bool", "envFlagTrue"]);
 const ENV_SPEC_HELPERS = new Set(["resolveRuntimeFlag", "envFlagDefault", "runtimeFlagView"]);
-const ENV_READ_PATTERN_PREFIX = "\u0000env-pattern:";
+export const ENV_READ_PATTERN_PREFIX = "\u0000env-pattern:";
 
 function isStringLiteral(node: ts.Expression): node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral {
   return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
@@ -373,8 +373,11 @@ function staticValueResolver(parsed: ParsedSource): (node: ts.Expression | undef
       const entries = new Map<string, unknown>();
       for (const property of value.properties) {
         if (ts.isPropertyAssignment(property)) {
-          const key = propertyNameText(property.name);
-          if (key !== null) entries.set(key, resolve(property.initializer));
+          // Computed keys (`[BINANCE_VENUE]: …`) are resolved like identifiers.
+          const key = ts.isComputedPropertyName(property.name)
+            ? resolve(property.name.expression)
+            : propertyNameText(property.name);
+          if (typeof key === "string") entries.set(key, resolve(property.initializer));
         } else if (ts.isShorthandPropertyAssignment(property)) {
           entries.set(property.name.text, resolve(property.name));
         }
@@ -589,7 +592,7 @@ export function processEnvPropertyReads(sourceFiles: readonly TextFile[]): Set<s
   return reads;
 }
 
-function envExampleKeys(content: string): Set<string> {
+export function envExampleKeys(content: string): Set<string> {
   const keys = new Set<string>();
   for (const line of content.split("\n")) {
     const match = line.match(/^\s*(?:#\s*)?(?:export\s+)?([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\s*=/);
@@ -608,7 +611,7 @@ function extractBacktickIdentifiers(content: string): Set<string> {
   return identifiers;
 }
 
-function extractFlagTableNames(content: string): Set<string> {
+export function extractFlagTableNames(content: string): Set<string> {
   const flags = new Set<string>();
   let inFlagTable = false;
   for (const line of content.split("\n")) {
@@ -673,7 +676,7 @@ export function documentedEnvFlagsFromDocs(
   return flags;
 }
 
-function envReadCoversName(reads: ReadonlySet<string>, name: string): boolean {
+export function envReadCoversName(reads: ReadonlySet<string>, name: string): boolean {
   if (reads.has(name)) return true;
   for (const read of reads) {
     if (!read.startsWith(ENV_READ_PATTERN_PREFIX)) continue;
@@ -767,7 +770,7 @@ function isHistoricalDocument(filePath: string): boolean {
   return normalized.split("/").some((segment) => HISTORICAL_DOC_SEGMENTS.has(segment));
 }
 
-function firstCodeVersion(content: string): { line: number; version: string | null } | null {
+export function firstCodeVersion(content: string): { line: number; version: string | null } | null {
   const lines = content.split("\n").slice(0, CODE_VERSION_HEADER_WINDOW);
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
@@ -1010,4 +1013,51 @@ export function isFile(filePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Rekursive Dateiliste (absolute Pfade), sortiert — für deterministische Läufe. */
+export function walkFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) out.push(...walkFiles(full));
+    else out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Alle Quelldateien (TS/TSX), die als Laufzeit-Code gelten: `src/**`,
+ * `scripts/**` und Root-Dateien (z. B. `next.config.ts`, `instrumentation.ts`).
+ */
+export function codeSourceFiles(repositoryRoot: string): string[] {
+  const exts = [".ts", ".tsx"];
+  const isCode = (f: string) => exts.includes(path.extname(f));
+  const srcDir = path.join(repositoryRoot, "src");
+  const scriptsDir = path.join(repositoryRoot, "scripts");
+  const fromSrc = existsSync(srcDir) ? walkFiles(srcDir).filter(isCode) : [];
+  const fromScripts = existsSync(scriptsDir) ? walkFiles(scriptsDir).filter(isCode) : [];
+  const fromRoot = readdirSync(repositoryRoot)
+    .sort()
+    .map((entry) => path.join(repositoryRoot, entry))
+    .filter((file) => isCode(file) && statSync(file).isFile());
+  return [...fromSrc, ...fromScripts, ...fromRoot];
+}
+
+/** Eine App-Route: URL-Pfad (`/api/firm/kill`) und absolute Datei. */
+export interface ApiRouteFile {
+  urlPath: string;
+  file: string;
+}
+
+/** Alle `route.ts`-Dateien unter `apiDir`, als URL-Pfade, sortiert nach URL. */
+export function apiRouteFiles(apiDir: string): ApiRouteFile[] {
+  if (!existsSync(apiDir)) return [];
+  return walkFiles(apiDir)
+    .filter((f) => path.basename(f) === "route.ts")
+    .map((file) => {
+      const rel = path.relative(apiDir, path.dirname(file)).split(path.sep).join("/");
+      return { urlPath: rel ? `/api/${rel}` : "/api", file };
+    })
+    .sort((a, b) => (a.urlPath < b.urlPath ? -1 : a.urlPath > b.urlPath ? 1 : 0));
 }

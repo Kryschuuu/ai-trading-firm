@@ -454,6 +454,14 @@ besteht 4.754 von 4.790 Tests, 0 fehlgeschlagen und 36 optionale DB-Skips.
 `package.json` bleibt absichtlich bei `0.17.2`; ein Release-/Versions-Bump ist
 DC-09 und wird nicht nebenbei vorgenommen.
 
+**Unreleased-Nachtrag DC-09 (2026-10-10; kein Versions-Bump):** Mengenverzeichnisse
+(Routen mit Guard-Klasse, Env-Flags, DB-Schema) werden aus dem Code erzeugt
+(`docs/generated/`) und per `npm run docs:inventories:check` im Job `docs-validate`
+auf Drift geprüft. Der Versions-Bump der `Code-Version`-Header ist mit
+`scripts/bump-docs-version.ts` automatisiert; das Release-Vorgehen steht in
+`CONTRIBUTING.md`. Die Konvention „Zwei Header-Arten“ (Code- vs. Dokument-Version)
+ist dort festgeschrieben.
+
 `v0.17.1` (2026-10-05) setzt **ADR-003** (Atomare Mehrprozess-Order-
 Reservierung via `PaperBroker.submitAtomic()` / `withAccountLock`) und
 **ADR-004** (Zentrale Singleton-Verwaltung via `src/lib/stateRegistry.ts`)

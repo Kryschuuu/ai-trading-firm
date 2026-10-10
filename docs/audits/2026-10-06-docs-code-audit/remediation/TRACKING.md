@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Bericht:** [`../../../DOCS_CODE_AUDIT_2026-10-06.md`](../../../DOCS_CODE_AUDIT_2026-10-06.md)
 - **Prüfbasis:** `main` @ `104aaef` (2026-10-06) · Code-Version **0.17.2**
-- **Stand:** 2026-10-10 · **9 Findings:** 8 FIXED (DC-01…DC-08), 1 OPEN (DC-09)
+- **Stand:** 2026-10-10 · **9 Findings:** 9 FIXED (DC-01…DC-09)
 - **Konvention:** ein Prompt = eine Coding-Session; nach Erledigung Status hier und in `../README.md` nachziehen (Nummern der Findings unverändert lassen).
 
 ## Statusübersicht
@@ -17,7 +17,7 @@
 | DC-06 | MEDIUM | Symbol-/Pfad-Drift in der Architektur-Doku | ☑ **FIXED** (2026-10-09) | 34 Korrekturen in `PIPELINE_MAP.md`, `INTEGRATION_POINTS.md`, `MISSIONS.md`, `DOCS_SYNC_AUDIT.md`; neue Absätze „Zwei Risk-Guards, zwei Zwecke" + „8. Pflege dieser Karte"; Regression `tests/docsArchitectureSymbols.test.ts` (9 Tests); Details: [DC-06 § Umsetzung](../findings/DC-06-symbol-und-pfad-drift.md) · [PROMPT-DC-06](../prompts/PROMPT-DC-06-symbol-pfad-abgleich.md) |
 | DC-07 | MEDIUM | `DB_SCHEMA.md` 15 von 67 Tabellen | ☑ **FIXED** (2026-10-09) | [`scripts/gen-schema-inventory.ts`](../../../../scripts/gen-schema-inventory.ts) (deterministischer Generator), [`docs/generated/schema-inventory.md`](../../../generated/schema-inventory.md) (67 Tabellen), `npm run docs:inventories` + `:check`; Details: [DC-07 § Umsetzung](../findings/DC-07-db-schema-15-von-67.md) · [PROMPT-DC-07](../prompts/PROMPT-DC-07-db-schema-nachfuehren.md) |
 | DC-08 | MEDIUM | `docs:validate`: fünf Check-Lücken; Test-Suite in keiner CI | ☑ **FIXED** (2026-10-10) | [Finding/Counterprobes](../findings/DC-08-ci-waechter-luecken.md) · L5 Variante A; `docs-validate` Required Check, Workflow-Spiegel byte-identisch |
-| DC-09 | LOW | Kein generiertes Inventar, kein Release-Bump | ☐ OFFEN | [PROMPT-DC-09](../prompts/PROMPT-DC-09-inventare-und-release-bump.md) |
+| DC-09 | LOW | Kein generiertes Inventar, kein Release-Bump | ☑ **FIXED** (2026-10-10) | [`../findings/DC-09-prozess-inventare-und-bump.md`](../findings/DC-09-prozess-inventare-und-bump.md) § Umsetzung · `scripts/gen-docs-inventories.ts`, `scripts/bump-docs-version.ts`, `tests/docsInventories.test.ts` |
 
 ## Empfohlene Abarbeitungsreihenfolge
 
@@ -27,7 +27,7 @@ DC-05  (Env-Flags entscheiden)    ✔ erledigt │  inhaltliche Nachführung
 DC-06  (Symbole/Pfade)            ✔ erledigt │
 DC-07  (Schema-Inventar)            ✔ erledigt ─┘
 DC-08  (docs:validate verschärfen)         ✔ erledigt (2026-10-10)
-DC-09  (Inventare + Bump-Skript)           ← offen; Versions-Bump bleibt bewusste Release-Entscheidung
+DC-09  (Inventare + Bump-Skript)           ✔ erledigt (2026-10-10); Versions-Bump bleibt Release-Entscheidung
 ```
 
 ## Erledigt-Nachweise (Kurzform)

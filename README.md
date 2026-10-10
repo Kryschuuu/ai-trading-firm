@@ -404,6 +404,7 @@ npm test                  # Gesamtsuite (node:test; Broker-Contracts mit temporÃ
 npm run typecheck         # tsc --noEmit
 npm run lint              # ESLint
 npm run docs:validate     # Docs-as-Code (L1â€“L4 Env/Version/Pfade, L2 Warnungen, Links, Schema, Routen, Secrets)
+npm run docs:inventories:check  # generierte Inventare (Routen+Guards, Env-Flags, DB-Schema) aktuell
 npm run security:live-gate  # Next + ws + Auth + Live-Gate (eigener CI-Pflichtcheck)
 ./scripts/validate-setup.sh  # 18 Setup-Checks
 ```
