@@ -32,10 +32,8 @@ prüft das mindestens bei `docs-validate`:
 npm ci
 npm run typecheck        # tsc --noEmit (strict)
 npm run lint             # ESLint
-npm test                 # node:test-Suite (DB-gegatete Tests skippen ohne Postgres;
-                         #  Ausnahme: 2 PAPER-Contract-Tests in tests/brokerContracts.test.ts
-                         #  scheitern ohne erreichbare DB — siehe docs/audits/2026-10-06-docs-code-audit/)
-npm run docs:validate    # Doku-Link-/Schema-/Konsistenz-/Secret-Checks
+npm test                 # node:test-Gesamtsuite; brokerContracts startet temporäres Embedded-PostgreSQL
+npm run docs:validate    # Links/Schema/Secrets + L1–L4; L2 Code→Doku-Warnungen sind nicht blockierend
 ```
 
 Für Sicherheits-Änderungen zusätzlich: `npm run security:live-gate`
@@ -92,8 +90,11 @@ Für Sicherheits-Änderungen zusätzlich: `npm run security:live-gate`
 
 - Framework: **Node-eigener `node:test`** + `assert/strict` (kein
   Drittanbieter-Framework).
-- DB-gegatete Tests folgen der Repo-Konvention: **ping → skip**, wenn keine
-  PostgreSQL erreichbar ist (`embedded-postgres` für die DB-Suites).
+- DB-gegatete Tests folgen der Repo-Konvention: **ping → skip**, wenn optionale
+  PostgreSQL-Infrastruktur lokal nicht startbar ist (`embedded-postgres`).
+  `tests/brokerContracts.test.ts` startet für die zwei PAPER-Ausführungspfade
+  eine isolierte temporäre DB; der Required CI-Job setzt
+  `BROKER_CONTRACTS_REQUIRE_DB=true`, damit dort ein DB-Startup-Ausfall fehlschlägt.
 - Neue Logik ⇒ neue Tests (Unit, Golden-Fixture für deterministische
   Pfade, negative Pfade für Fail-closed-Zweige).
 - Testdateien gehören nach [`tests/`](tests/) (ein einziges

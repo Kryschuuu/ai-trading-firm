@@ -184,7 +184,7 @@ isolieren Fehler pro Symbol/Timeframe, und der Betreiber-Entscheidungsbaum
 `OBSERVABILITY.md`, Doku-Katalog, Changelogs.
 
 **Testbericht:** `tests/marketDataErrors.test.ts`,
-`tests/marketData.test.ts`, `src/marketdata/__tests__/sync*.test.ts`
+`tests/marketData.test.ts`, `src/marketdata/__tests__/sync.test.ts` and related integration tests
 (inkl. Integrationstest 429 im Mock-HTTP-Kline-Pfad),
 Scanner-/MicroExecutor-Erweiterungen;
 `npm run typecheck` und `npm run docs:validate` grün.

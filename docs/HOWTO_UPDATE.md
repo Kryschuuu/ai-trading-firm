@@ -307,8 +307,8 @@ Kein `drizzle-kit push`, kein `.env`-Eingriff. Dauer: Build-Zeit.
 `sync.ts` (Klassifizierung aus `cause`). Wer von 1.39.1 kommt, muss nach dem
 Build nur neu starten – danach `BITUNIX_ENABLED=true npm run market:sync`:
 `tickers enriched` geht von 0 auf N, `failures` von 754 auf 0. Neues optionales
-Flag `BITUNIX_TICKER_SYMBOLS_PER_REQUEST=50` – nur setzen, wenn Gateway noch
-restriktiver ist.
+Die Chunk-Größe `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` ist als Code-Konstante auf
+50 festgelegt (keine Env-Option); nur bei geänderten Gateway-Grenzen im Code anpassen.
 
 ### B) `git pull` meldet Konflikt in `data/universe/instruments.ndjson`
 

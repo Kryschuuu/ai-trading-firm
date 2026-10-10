@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.2.0** (Prompt-Budget
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.2** (Prompt-Budget
 > und Batch-Analyse nachgezogen, §5)
 >
 > **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema
@@ -282,7 +282,9 @@ maxExp  absolute Grenze der Anmeldung — wird durch Verlängerung nie verschobe
 | `FIRM_SESSION_IDLE_TTL_S` | `900` | 60 … 86 400 s | Frist ohne Lebenszeichen; der Client meldet sich in deren Hälfte und heilt sie über die Nachfrist. `0` oder Müll ⇒ Default, **nie** „unbegrenzt“ |
 | `FIRM_SESSION_MAX_LIFE_S` | `86400` | 600 s … 7 d, ≥ Idle | Harte Decke ab `iat`. Danach `401 SESSION_MAX_LIFE_REACHED` — der Token muss neu eingetragen werden |
 | `FIRM_SESSION_GRACE_S` | `900` | 0 … 86 400 s | Nachfrist, in der `POST /api/auth/refresh` eine abgelaufene Idle-Frist heilt (Notebook-Schlaf, gesperrter Screen, gedrosseltes Tab). `0` = aus; gilt **nur** für `refresh` |
-| `SESSION_RENEW_WINDOW_S` | `min(300, Idle/2)` | 10 s … Idle/2 | Unterhalb dieser Restzeit stellt `refresh` tatsächlich neue Cookies aus |
+
+`SESSION_RENEW_WINDOW_S` ist ein Code-Default (maximal 300 s), keine Env-Variable;
+`refresh` erneuert ab der kleineren Schwelle aus diesem Default und `Idle/2`.
 
 `SESSION_TTL_S` bleibt der Name der Default-Idle-Frist (900 s) und wird von
 `FIRM_SESSION_IDLE_TTL_S` übersteuert. Session-Schema v2 wird nicht mehr
@@ -406,8 +408,6 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `ANALYST_INTERVAL_MIN` | je nach Config | Analysten-Rhythmus |
 | `MACRO_CYCLE_INTERVAL_MIN` | je nach Config | Makro-Zyklus-Takt |
 | `SCHEDULER_ENABLED` | — | Scheduler an/aus |
-| `DAILY_LOSS_LIMIT` | je nach Config | Tages-Verlustlimit (harte Grenze) |
-| `CYCLE_STEP_RETRY` | je nach Config | Retry-Anzahl pro Zyklus-Schritt |
 
 ### LLM-Provider
 
@@ -447,7 +447,7 @@ Konvention: Werte werden bei ungültiger Eingabe auf sichere Defaults geklemmt
 | `LLM_COST_OPENCODE_INPUT_PER_MTOK` / `…_OUTPUT_PER_MTOK` | `0` | Kostenüberschreibung, falls bezahlte Zen-Modelle genutzt werden |
 | `ROUTING_DISABLED_PROVIDERS` | *(leer)* | Kommagetrennte Sperrliste (`gemini,opencode`); der UI-Schalter hat Vorrang |
 | `RUNTIME_FLAGS_FILE` | `data/runtime/flags.json` | Ablage der UI-Laufzeit-Schalter (nur Bool-Werte, chmod 600) |
-| `MODEL_CEO`, `MODEL_RESEARCH`, `MODEL_TECHNICAL`, `MODEL_NEWS`, `MODEL_MACRO`, `MODEL_RISK`, `MODEL_BACKTEST`, `MODEL_APPROVER`, `MODEL_DILIGENCE`, `MODEL_EXECUTOR`, `MODEL_SCOUT`, `MODEL_SWING` | je Agent | Modell je Agenten-Rolle |
+| `MODEL_CEO`, `MODEL_RESEARCH`, `MODEL_TECHNICAL`, `MODEL_NEWS`, `MODEL_MACRO`, `MODEL_RISK`, `MODEL_BACKTEST`, `MODEL_APPROVER`, `MODEL_DILIGENCE`, `MODEL_EXECUTOR`, `MODEL_SCOUT`, `MODEL_SWING`, `MODEL_DEVILS_ADVOCATE` | je Agent | Modell je Agenten-Rolle |
 | `MODEL_ROUTING_OLLAMA_DEFAULT` | — | Default-Modellklasse beim Router |
 
 ### Menschliche Freigabe
@@ -624,7 +624,7 @@ Risiko nie erhöhen. Doku: [`docs/REGIME_GATE.md`](docs/REGIME_GATE.md).
 | `REGIME_TREND_SLOPE_PCT` | `0.05` | Mindest-|Regressions-Slope| in % pro Kerze für `TREND_*` (darunter `RANGE`). Bounds [0.005, 1]. |
 | `REGIME_GATE_FACTORS` | s. u. | Dämpfungsfaktoren je Regime × Strategieklasse, Grammatik `REGIME:klasse=faktor,…` (z. B. `TREND_UP:mean-reversion=0.25`). Werte geklemmt auf [0, 2]; kaputte Einträge werden übersprungen. Defaults: mean-reversion × 0.5 in TREND_UP/TREND_DOWN, breakout × 0.5 in RANGE, sonst × 1. |
 | `REGIME_FEATURE_MODE` | `multidim` | Feature-Modus der Erkennung (v1.61.0): `multidim` (OHLCV-Kern + Preis/Volatilität/Liquidität/Perp/optional Makro, `regime-features@1`) oder `ohlcv` (nur die Basisklassifikation, alle Zusatzfamilien `DISABLED` — Legacy-Modus, ohne zusätzliche Votes). Unbekannter Wert → `multidim` (Default), nie still `ohlcv`. |
-| `REGIME_MIN_COVERAGE` | `0.5` | Mindest-Coverage der Pflichtfamilien (Gewichte: Preis 0.3 / Vol 0.3 / Liquidität 0.2 / Perp 0.2). Darunter: `degraded=true` und der Gate-Faktor darf nicht über 1 (Boosten blockiert). Bounds [0, 1]; Coverage = OK-Gewichte / 1.00. |
+| `REGIME_MIN_BOOST_COVERAGE` | `1.0` | Mindest-Coverage der Pflichtfamilien, um einen risikoerhöhenden Faktor > 1 zuzulassen. Darunter wird der Faktor auf 1 geklemmt (keine Risikoerhöhung). Bounds [0, 1]. |
 | `REGIME_LIQUIDITY_SPREAD_HIGH_PCT` | `0.5` | Spread-Vote: relativer Spread in % ab dem die Rohklasse zu `HIGH_VOL` eskaliert (nur wenn die Liquiditätsfamilie `OK` ist). Bounds [0.01, 100]. |
 | `REGIME_PERP_FUNDING_ABS` | `0.001` | Funding-Vote: absoluter Funding-Satz ab dem eskaliert wird (zusätzlich: OI-Einbruch ≤ −30 % ist fest verdrahtet). Bounds [0.00001, 0.1]. |
 | `REGIME_MACRO_VIX_HIGH` | `30` | Makro-Vote: adaptiver VIX-Zustand ab dem eskaliert wird (nur wenn die optionale Makro-Familie `OK` ist). Bounds [10, 100]. |
@@ -660,9 +660,12 @@ exakt wie vorher** (Modus `log`, Aggregation/Cross-Check aus). Details:
 | `MARKETDATA_STALE_1H_HOURS` | `26` | Stale-Guard: eine 1h-Reihe ist stale, wenn die jüngste Kerze älter als N Stunden ist. Bounds [2, 168], Clamp mit Log-Warnung. Ausweis als Zähler im Sync-Status (`staleSeries`/`staleByTimeframe`), keine Symbole. |
 | `MARKETDATA_STALE_4H_HOURS` | `104` | Stale-Schwelle für 4h-Reihen (Default 26 × 4). Bounds [8, 672]. |
 | `MARKETDATA_STALE_1D_HOURS` | `624` | Stale-Schwelle für 1d-Reihen (Default 26 × 24). Bounds [48, 4032]. |
-| `MARKET_SYNC_AGGREGATE` | `off` | Deterministische Multi-TF-Aggregation im Sync-CLI (auch `--aggregate`): persistierte 1h-Reihen → 4h/1d (UTC-Anker 00/04/… bzw. 00:00 UTC; **unvollständige Bucket werden nie aggregiert**; Zeitmaske nur abgeschlossene Perioden). Aggregat wird als **neue** Timeframe-Reihe (`feed: "agg:1h"`) appendet, 1h-Quelle bleibt unangetastet. Nur wirksam bei synchronisiertem `1h`. `on`/`true`/`1` schaltet an. |
+| `MARKET_SYNC_AGGREGATE` | `off` | 1h→4h/1d-Aggregation im Sync-CLI (`on`/`true`/`1`); CLI `--aggregate` schaltet sie ebenfalls ein. |
 | `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in — Rate-Limits!). Nur wirksam, wenn der Adapter die optionale Methode `getCrosscheckCandles()` implementiert (Adapter-Registry-Muster); ohne Implementierung no-op. Bei `on` ein zusätzlicher Request je Reihe (Rate-Limit-Bucket bleibt autoritativ). |
 | `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in Prozent (Abweichung der Schlusskurse auf gemeinsamen Zeitstempeln, relativ zum Primärkurs). **Streng** größer ⇒ `QUALITY_CROSSCHECK`-Befund + Log. Bounds [0.1, 10], Clamp mit Log-Warnung. 0 gemeinsame Zeitstempel = kein Befund (kein Vergleich ≠ Abweichung). |
+
+Die optionale 1h→4h/1d-Aggregation lässt sich mit `--aggregate` im Sync-CLI
+oder `MARKET_SYNC_AGGREGATE=on` aktivieren; der Default ist aus.
 
 ### MTF-Konfluenz (RMA-P2-03, v1.62.0)
 
@@ -997,8 +1000,25 @@ Hinweise:
 | `BITUNIX_BASE_URL` / `BITUNIX_WS_URL` | — | Venue-Endpunkte |
 | `BITUNIX_ALLOWED_HOSTS` | — | SSRF-Allowlist |
 | `BITUNIX_ALLOW_INSECURE_HTTP` | `false` | nur Testumgebung |
-| `BITUNIX_RATE_LIMIT` / `BITUNIX_RETRY_MAX` / `BITUNIX_TIMEOUT_MS` | — | HTTP-Schutz |
-| `BITUNIX_TICKER_SYMBOLS_PER_REQUEST` | `50` | Chunk-Größe für `GET /tickers?symbols=…` (~1 KB, Gateway-Limit >6 KB). Fix v1.40.0 gegen 754× `ticker/SCHEMA_MISMATCH` (vorher 1× >6 KB-URL). Teilausfall eines Chunks toleriert, Totalausfall wirft ersten Fehler. |
+| `BITUNIX_RETRY_MAX` | `3` | Maximale HTTP-Retries (1…5) |
+| `BITUNIX_TIMEOUT_MS` | `8000` | HTTP-Timeout in Millisekunden |
+
+`BITUNIX_RATE_LIMIT` ist ein interner Fehlercode, keine Env-Variable.
+`BITUNIX_TICKER_SYMBOLS_PER_REQUEST` ist eine Code-Konstante (`50`), keine
+Betreiber-Option; sie chunked `GET /tickers?symbols=…` auf ungefähr 1 KB und
+verhindert den früheren Gateway-Fehler bei >6 KB-URLs.
+
+### Alpaca-Adapter (Endpunkte und HTTP-Verhalten)
+
+| Flag | Default | Bedeutung |
+| --- | --- | --- |
+| `ALPACA_TRADE_BASE_URL` | Paper: `https://paper-api.alpaca.markets`; Live-Hinweis: `https://api.alpaca.markets` | Optionaler Trade-API-Override; `ALPACA_USE_LIVE_ENDPOINTS` wählt den Default. Die Host-Allowlist und TLS-Prüfung gelten weiterhin. |
+| `ALPACA_DATA_BASE_URL` | `https://data.sandbox.alpaca.markets` | Optionaler Market-Data-API-Override; benutzerdefinierte Hostnamen müssen zusätzlich erlaubt werden. |
+| `ALPACA_ALLOWED_HOSTS` | vier offizielle Alpaca-Hosts | Kommagetrennte zusätzliche Hostnamen für bewusst konfigurierte Endpunkte. Erweitert die ausgehende SSRF-Allowlist; nur kontrollierte HTTPS-Hosts eintragen. HTTP bleibt ausschließlich für Loopback-Tests mit `ALPACA_ALLOW_INSECURE_HTTP=true` zulässig. |
+| `ALPACA_RETRY_MAX` | `3` | Maximale Gesamtversuche einschließlich Erstrequest (Bounds [1, 5]). HTTP 429 darf für jede Methode wiederholt werden; Timeout, Netzwerkfehler und 5xx nur bei idempotenten Requests (standardmäßig GET), damit ambivalente Order-POSTs keine Duplikate erzeugen. |
+
+Diese Adapter-Flags ändern weder Credential-Speicherung noch Live-Gates.
+Details und sichere Endpoint-Auswahl: [`docs/ALPACA.md`](docs/ALPACA.md).
 
 ### Live-Trading-Gate (Task 11) — alle Defaults SICHER (fail-closed)
 
@@ -1042,7 +1062,6 @@ Hinweise:
 | `FIRM_SESSION_IDLE_TTL_S` | `900` | Idle-Frist der Browser-Sitzung in Sekunden (60 … 86 400), `0` ⇒ Default; wird über `POST /api/auth/refresh` verlängert (v1.39.0) |
 | `FIRM_SESSION_MAX_LIFE_S` | `86400` | Absolute Grenze ab Anmeldung in Sekunden (600 … 7 d, ≥ Idle); Verlängerungen verschieben sie nicht (v1.39.0) |
 | `FIRM_SESSION_GRACE_S` | `900` | Nachfrist, in der `POST /api/auth/refresh` eine abgelaufene Idle-Frist heilt; `0` schaltet sie ab, sonst nirgends wirksam (v1.39.0) |
-| `SESSION_RENEW_WINDOW_S` | `min(300, Idle/2)` | Restzeit, unterhalb derer `refresh` neue Cookies ausstellt (10 s … Idle/2) (v1.39.0) |
 | `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
 | `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |
 | `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste vertrauenswürdiger Reverse Proxys; erst damit zählen `x-verified-ip` (immer) bzw. `x-forwarded-for` (nur bei verifiziertem Socket-Peer). Leer ⇒ Header werden ignoriert, Bucket = Socket-Adresse bzw. `local` |
@@ -1063,6 +1082,7 @@ Hinweise:
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
+| `SCREENING_PRIORITY_CONFIG_FILE` | — (eingebaute Config) | Dateipfad-Default von `loadScreeningPriorityConfig()`; externe JSON-Overrides werden gegen bekannte Felder/Bounds geprüft. **Derzeit nicht vom CLI `scripts/run-screening.ts` verwendet**, das die eingebaute Default-Config injiziert; ein Setzen ändert den CLI-Lauf aktuell nicht. Details: `docs/STRATEGY_SCREENING.md`. |
 | `UNIVERSE_DATA_DIR` | — | Ablage der Instrument-Registry (NDJSON) |
 | `UNIVERSE_POLICY_FILE` | — (eingebaute Policy) | Pfad zur Universe-Policy (JSON); leer = eingebaute Default-Policy (`src/universe/policy.ts`) |
 | `SCANNER_CONFIG_FILE` | — (eingebaute Config) | Pfad zur Scanner-Konfiguration (JSON); leer = eingebaute Default-Konfiguration (`src/scanner/config.ts`) |
@@ -1079,6 +1099,7 @@ Hinweise:
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
 | `MICRO_HEALTH_PORT` | `3380` | Health-Port des Micro-Executors (Bounds [1024, 65535], `scripts/micro-executor.ts`) |
+| `CAPABILITY_STRICT` | Warnung außerhalb Produktion; strict bei `NODE_ENV=production` | Der exakte Wert `true` aktiviert den Throw-Modus außerhalb der Produktion. In Produktion ist strict unabhängig vom Flag-Wert; `CAPABILITY_STRICT=false` deaktiviert ihn nicht. Details: `docs/CAPABILITIES.md`. |
 | `MICRO_FEED` | `binance` | Preis-Feed des Micro-Executors: `binance` (WebSocket) oder `sim` (deterministischer Simulator; Feed-Klassen `simulator`/`sequence` in `src/lib/microExecutor.ts`) |
 | `MICRO_SEED_CANDLES` | `true` | Lädt die REST-Historie beim Start des Micro-Executors, damit die Indikatoren warm sind; `false` schaltet das Seeding ab (`scripts/micro-executor.ts`) |
 | `MICRO_SIM_INTERVAL_MS` | `250` | Tick-Rate des Simulator-Feeds in ms (Bounds [50, 5000]) — nur wirksam mit `MICRO_FEED=sim` |

@@ -530,7 +530,7 @@ Orderfreigabe (siehe auch [`INTEGRATION_POINTS.md` § 5](INTEGRATION_POINTS.md))
   - `src/contracts/broker.ts` (`BrokerAdapter`, `BrokerOrderRequest`, `BrokerOrderResult`, `BrokerAccount`)
   - `src/brokers/factory.ts` (`getBroker`, `createAdapter`)
   - `src/brokers/paper.ts` (`PaperBrokerAdapter`)
-  - `src/lib/broker.ts` (`PaperBroker`, `withAccountLock`, `submitAtomic`, `OrderIntentConflictError`)
+  - `src/lib/broker.ts` (`PaperBroker`, `withAccountLock`, `OrderIntentConflictError`) — `submitAtomic` ist eine Methode von `PaperBroker`, kein Modul-Export.
   - `src/brokers/bitunix/adapter.ts` (`BitunixBrokerAdapter`)
   - `src/brokers/bitunix/execution.ts` (`PaperExecutionEngine`, `BrokerExecutionEngine`, `ExecutionPort`)
   - `src/brokers/bitunix/orders.ts` (`serializePlaceOrder`, `clientOrderIdFor`)

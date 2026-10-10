@@ -1,6 +1,6 @@
 # Docs↔Code-Audit — Ist/Soll-Abgleich der Dokumentation
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 (Umsetzungsstand § 0.0 nachgeführt 2026-10-09) · **Code-Version:** v0.17.2 (Beta) · Architektur-Doku gegen `src/` + `scripts/` abgeglichen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) **FIXED** 2026-10-09 · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 (Umsetzungsstand § 0.0 nachgeführt 2026-10-10) · **Code-Version:** v0.17.2 (Beta) · Architektur-Doku gegen `src/` + `scripts/` abgeglichen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) **FIXED** 2026-10-09 · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
 
 Dies ist ein **externer Audit-Bericht** (kein Modul-Status-Header im Sinne der
 Doku-Konvention). Er beschreibt den Abgleich zwischen `docs/` (338
@@ -10,7 +10,7 @@ und dem tatsächlichen Code-/Commit-Stand von
 
 ---
 
-## 0.0 Umsetzungsstand (Nachtrag 2026-10-06)
+## 0.0 Umsetzungsstand (Nachtrag 2026-10-10)
 
 Dieser Bericht ist zugleich der Ausgangspunkt eines **Audit-Zyklus**:
 [`docs/audits/2026-10-06-docs-code-audit/`](audits/2026-10-06-docs-code-audit/README.md)
@@ -26,12 +26,10 @@ Prompts. Bereits **behoben** (Nachweis in Tracking und Findings):
 | **DC-04** (M1) | 4 von 45 Dokumenten mit passendem Versions-/Status-Header | Header klassifiziert (3 × verifiziert `v0.17.2`, 3 × Dokument-/Review-Version, 63 × „Bestandsdokument · Vollabgleich offen"); PR #236 · [DC-04 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-04-versions-header-drift.md) |
 | **DC-05** (M2/N6) | 4 dokumentierte Env-Flags ohne Code-Read; `.env.example` lückenhaft | zwei Flags implementiert (`CYCLE_RETENTION_DAYS`/`_WEEKS`), zwei gestrichen (Doku nennt die echten Quellen), `MICRO_FEED_TYPE` → `MICRO_FEED`; `.env.example` + `CONFIGURATION.md` auf den echten Lese-Bestand ergänzt · [DC-05 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-05-env-flags-ohne-implementierung.md) |
 | **DC-06** (M6) | 34 Symbole/Pfade in der Architektur-Doku ohne Code-Entsprechung | reale Exporte + korrekte Modulgrenzen in `PIPELINE_MAP.md`, `INTEGRATION_POINTS.md`, `MISSIONS.md`, `DOCS_SYNC_AUDIT.md`; neue Absätze „Zwei Risk-Guards, zwei Zwecke" und „8. Pflege dieser Karte"; `tests/docsArchitectureSymbols.test.ts` (9 Tests) · [DC-06 § Umsetzung](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) |
+| **DC-07** (M7) | `DB_SCHEMA.md` zeigt 15 statt 67 Tabellen | Generator `scripts/gen-schema-inventory.ts`, `docs/generated/schema-inventory.md` 67/67 · [DC-07](audits/2026-10-06-docs-code-audit/findings/DC-07-db-schema-15-von-67.md) |
+| **DC-08** (M8b) | fünf Lücken im Docs-Wächter und PAPER-Contract-DB-Fehler | L1–L4 Checks + Counterprobes; L2 bleibt Warnung; L5 Variante A: `npm test` in `docs-validate`, Broker-Contracts starten Embedded-PostgreSQL und bestehen 42/42 · [DC-08](audits/2026-10-06-docs-code-audit/findings/DC-08-ci-waechter-luecken.md) |
 
-**Offen und als Prompts übergeben:** DC-08 (CI-Wächter-Lücken, M8b),
-DC-09 (Prozess: Inventare + Versions-Bump). DC-07 (Schema-Inventar-Generator,
-67/67 Tabellen im generierten Inventar erfasst) ist am 2026-10-09 erledigt.
-DC-04…DC-06 sind erledigt (Zeilen oben); die Befundtexte unten bleiben als
-Audit-Historie unverändert.
+**Noch offen:** DC-09 (Prozess: generierte Inventare + bewusste Release-/Versions-Bump-Automatisierung). DC-01…DC-08 sind erledigt; die Befundtexte unten bleiben als Audit-Historie unverändert.
 
 Die Befund-Nummern unten (H1/H2/M…/N…) bleiben als Audit-Historie unverändert;
 die Zuordnung zu DC-IDs steht in der Tabelle
@@ -78,7 +76,21 @@ Die beiden Testfehler sind **keine Code-Fehler**: `tests/brokerContracts.test.ts
 (Zeilen 154 und 284) scheitern an `ECONNREFUSED 0.0.0.0:5432`, weil kein
 PostgreSQL läuft. Mit temporärem Embedded-PostgreSQL ist die Datei laut
 `CHANGELOG.md` 42/42 grün. Die Zahl ist im Changelog **exakt korrekt**
-dokumentiert (4.722/2/36/4.760) — dieser Punkt ist ein Positivbefund (§5.1).
+dokumentiert (4.722/2/36/4.760) — dieser Punkt ist ein Positivbefund (§5.1)
+für die historische Prüfbasis 2026-10-06; die Ursache wurde anschließend in DC-08 behoben.
+
+### 0.2 DC-08-Nachprüfung (2026-10-10)
+
+`npm run typecheck`, `npm run lint` und `npm run docs:validate` sind grün.
+`docs:validate` zeigt 12 Checks, 10 Hilfe-Dateien, vier neue L1–L4-Checks und
+0 L2-Warnungen. Die Break-and-reset-Counterprobes in
+`tests/docsValidateChecks.test.ts` bestehen 4/4. `tests/brokerContracts.test.ts`
+besteht mit `BROKER_CONTRACTS_REQUIRE_DB=true` und temporärem Embedded-
+PostgreSQL 42/42. `BROKER_CONTRACTS_REQUIRE_DB=true npm test` besteht mit
+4.790 Tests (4.754 pass, 0 fail, 36 optionale DB-Skips). Die versionierte Workflow-Quelle unter `docs/ci/` und der
+Workflow-Spiegel unter `.github/workflows/` sind byte-identisch; der
+Branch-Protection-Required-Check heißt `docs-validate`. Details und
+Gegenproben: [DC-08](audits/2026-10-06-docs-code-audit/findings/DC-08-ci-waechter-luecken.md).
 
 ---
 

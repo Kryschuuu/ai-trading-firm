@@ -1198,8 +1198,7 @@ damit Ops-Center/Scanner gut degradieren können — **keine Symbole** im Status
 - **Konsistenz-Check:** `checkAggregationConsistency()` (Envelope
   high/low ≥/≤ Sub-Kerzen, open/close/volume, fehlende vollständige Buckets).
 
-Im Sync-CLI per **`--aggregate`** bzw. **`MARKET_SYNC_AGGREGATE`**
-(**Default off**): nach dem Backfill werden die persistierten 1h-Reihen
+Im Sync-CLI per **`--aggregate`** oder **`MARKET_SYNC_AGGREGATE=on`** (Default off): nach dem Backfill werden die persistierten 1h-Reihen
 aggregiert und als **neue** Timeframe-Reihen appendet (`feed: "agg:1h"`) — die
 1h-Quelle bleibt unangetastet (Append-only + Dedup im Store). Wirkt nur, wenn
 `1h` Teil des Laufs war.
@@ -1215,7 +1214,7 @@ die Schlusskurse auf gemeinsamen Zeitstempeln; Abweichung **streng** >
 ohne implementierende Methode ist der Cross-Check ein no-op (Test belegt:
 Default off ⇒ kein Zweitquellen-Request).
 
-### 14.6 Flags (vollständig in `CONFIGURATION.md` + `.env.example`)
+### 14.6 Env-Flags (vollständig in `CONFIGURATION.md` + `.env.example`)
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
@@ -1224,7 +1223,7 @@ Default off ⇒ kein Zweitquellen-Request).
 | `MARKETDATA_STALE_1H_HOURS` | `26` | Stale-Schwelle 1h, Bounds [2, 168] |
 | `MARKETDATA_STALE_4H_HOURS` | `104` | Stale-Schwelle 4h, Bounds [8, 672] |
 | `MARKETDATA_STALE_1D_HOURS` | `624` | Stale-Schwelle 1d, Bounds [48, 4032] |
-| `MARKET_SYNC_AGGREGATE` | `off` | 1h→4h/1d-Aggregation im Sync-CLI (`on`/`true`/`1`) |
+| `MARKET_SYNC_AGGREGATE` | `off` | 1h→4h/1d-Aggregation (`on`/`true`/`1`) |
 | `MARKETDATA_CROSSCHECK` | `off` | Zweitquellen-Cross-Check (opt-in, Rate-Limits) |
 | `MARKETDATA_CROSSCHECK_TOLERANCE_PCT` | `1` | Cross-Check-Toleranz in %, Bounds [0.1, 10] |
 

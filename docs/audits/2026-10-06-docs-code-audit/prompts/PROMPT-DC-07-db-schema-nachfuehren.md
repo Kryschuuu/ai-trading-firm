@@ -33,7 +33,7 @@ DO:
 3. Idempotenz sicherstellen: zweimal generieren => byte-identisch.
 4. Optional, wenn trivial: `npm run docs:inventories` und
    `docs:inventories:check` in package.json registrieren (der eigentliche
-   CI-Anschluss kommt in DC-08/DC-09).
+   CI-Anschluss bleibt DC-09 vorbehalten).
 
 AKZEPTANZ:
 - `grep -c "pgTable(" src/db/schema.ts` = 67 und

@@ -14,7 +14,16 @@ Die reine Discovery aus `types.ts`/`matrix.ts` darf Kandidaten ohne
 Strategieversion liefern. Vor `upsertCells()` muss der Aufrufer die
 Strategieversion persistieren/auflösen. Der Store erfindet weder Versionen
 noch Universe-Pseudoinstrumente. Keine Lifecycle-Promotion oder Live-Freigabe,
-keine neuen Runtime-Dependencies oder Env-Flags.
+keine neuen Runtime-Dependencies.
+
+`SCREENING_PRIORITY_CONFIG_FILE` ist der optionale Env-Default von
+`loadScreeningPriorityConfig()` (`src/screening/config.ts`); die JSON-Overrides
+werden gegen bekannte Felder und Bounds validiert. **Derzeit nutzt das CLI
+`scripts/run-screening.ts` diese Loader-Funktion nicht**, sondern injiziert
+`DEFAULT_SCREENING_PRIORITY_CONFIG`. Das Setzen der Variable ändert daher
+aktuell keinen CLI-Lauf; sie wirkt nur für Aufrufer, die den Loader ohne
+expliziten Dateipfad verwenden. Die Einschränkung ist auch in
+[`CONFIGURATION.md`](../CONFIGURATION.md) festgehalten.
 
 Ab 05-04 (`v0.9.0`) kommen Runner, CLI und Backtest-Job-Adapter dazu; der
 **Store-Vertrag bleibt unverändert** — der Runner ist ein weiterer Aufrufer
