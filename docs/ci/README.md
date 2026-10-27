@@ -1,30 +1,49 @@
-# CI-Workflows — Quelle & Installation
+# CI-Workflows — Quelle, Synchronisation & Betrieb
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-10 · **Code-Version:** v0.17.2 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter nach DC-08 erweitert
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-27 · **Code-Version:** v0.17.2 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter, Spiegel-Sync & Dependabot gehärtet
 
-> **Zweck:** Diese Dateien spiegeln die GitHub-Actions-Workflows unter `.github/workflows/`. Beide Kopien werden zusammen gepflegt — der Spiegel-Sync-Schritt im Job `docs-validate` erzwingt, dass sie byte-identisch bleiben. Workflow-Änderungen benötigen entsprechende GitHub-Schreibrechte; fehlen diese der verwendeten Verbindung, muss der Repository-Owner die Quelle übernehmen.
+> **Zweck:** Diese Dateien spiegeln die GitHub-Actions-Workflows unter `.github/workflows/`. Beide Kopien werden zusammen gepflegt — sowohl lokal über `npm run docs:validate` / `npm run ci:sync:check` als auch in CI über den Vorab-Spiegel-Sync-Schritt und `scripts/sync-ci-workflows.ts` wird erzwungen, dass sie byte-identisch bleiben. Workflow-Änderungen benötigen entsprechende GitHub-Schreibrechte (`workflows`-Scope); fehlen diese einer Verbindung, pflegt der Repository-Owner den Spiegel über `npm run ci:sync`.
 
 ## Workflows
 
 | Datei | Zweck | Ziel in `.github/workflows/` |
 |-------|-------|-------------------------------|
-| `docs-validate.workflow.yml` | Required Check `docs-validate`: Typecheck, Gesamttestsuite, Spiegel-Sync, Docs-as-Code inkl. L1–L4 (DC-08) | `main.yml` |
-| `security-live-gate.workflow.yml` | Next-Regressionen Linux/Windows, Build, Dependency-Audit, Auth und Live-Gate ≥95% Coverage | `security-live-gate.yml` |
+| `docs-validate.workflow.yml` | Required Check `docs-validate`: Vorab-Spiegel-Sync, CI-/SEC-10-/Dependabot-Invarianten, Typecheck, Gesamttestsuite, Docs-as-Code inkl. L1–L4 (DC-08) und Inventar-Drift-Gate (DC-09) | `main.yml` |
+| `security-live-gate.workflow.yml` | Next-Regressionen Linux/Windows, Build, zweistufiges fail-closed Dependency-Audit, Auth, Secret-Scan und Live-Gate ≥95% Coverage | `security-live-gate.yml` |
 
-## Installation (einmalig durch Owner)
+## Synchronisation & Installation
 
 ```bash
-cp docs/ci/docs-validate.workflow.yml .github/workflows/main.yml
-cp docs/ci/security-live-gate.workflow.yml .github/workflows/security-live-gate.yml
-# Alt-Datei aus früherer Installation entfernen (Rename, siehe Changelog 1.36.29):
-git rm .github/workflows/main-security-live-gatte.yml 2>/dev/null || true
-# Danach Branch-Protection: Required Status Checks `docs-validate` + `security-live-gate`
+# Kanonische Richtung (docs/ci/*.workflow.yml -> .github/workflows/*.yml):
+npm run ci:sync
+
+# Gegenrichtung (.github/workflows/*.yml -> docs/ci/*.workflow.yml):
+npm run ci:sync -- --from=github
+
+# Reiner Prüfmodus (läuft auch automatisch in `npm run docs:validate` und CI):
+npm run ci:sync:check
+
+# Einmalige Ersteinrichtung der Branch-Protection durch den Repo-Owner:
+# Required Status Checks auf `main`: `docs-validate` + `security-live-gate`
 ```
 
-Dazu `.github/dependabot.yml` (liegt bei, muss nicht kopiert werden): hält die
-auf immutable Commit-SHAs gepinnten Actions aktuell (Audit SEC-10). Bei jedem
-Actions-Update-PR vor dem Merge die `docs/ci/`-Kopien synchronisieren — der
-Spiegel-Sync-Schritt im Job `docs-validate` rotet sonst bewusst.
+### Dauerhafte Dependabot-Synchronisation (`.github/dependabot.yml`)
+
+`.github/dependabot.yml` hält die auf immutable Commit-SHAs gepinnten Actions
+aktuell (Audit SEC-10). Damit Dependabot-PRs nicht am Spiegel-Sync scheitern
+(früherer Defekt bei `directory: /`, siehe PR #243), nutzt die Konfiguration:
+
+- **`directories: ["/", "/docs/ci"]`** — Dependabot scannt sowohl
+  `.github/workflows/*.yml` als auch `docs/ci/*.workflow.yml`.
+- **`groups.actions` (`applies-to: version-updates`) und `groups.actions-security`
+  (`applies-to: security-updates`)** — sowohl wöchentliche Versions-Updates als
+  auch kurzfristige Security-Updates werden über beide Verzeichnisse hinweg in
+  **einem gemeinsamen PR** gebündelt, sodass alle vier Dateien atomar denselben
+  SHA + Tag-Kommentar erhalten.
+- **`scripts/sync-ci-workflows.ts` (`checkCiWorkflows`, `syncCiWorkflows`)**
+  prüft diese Invarianten (Byte-Gleichheit, keine verwaisten Workflow-Dateien,
+  40-stellige SHA-Pins mit `# vX.Y.Z`-Kommentar, Multi-Directory-Dependabot)
+  bereits lokal in `npm run docs:validate`.
 
 **Branch-Protection:** Als erforderliche Status-Checks sind exakt
 `docs-validate` und `security-live-gate` einzutragen. Die komplette
@@ -41,27 +60,34 @@ Spiegel-Sync-Schritt im Job `docs-validate` rotet sonst bewusst.
   Check bezieht sich immer auf den aktuellen Head-SHA.
 - Vor PR-Erstellung müssen beide Läufe für den aktuellen Head-SHA `success` melden;
   frühere Runs auf `main` oder nur lokale Prüfungen ersetzen das nicht.
-- Die Quelle in `docs/ci/` ist versioniert und wird vom Spiegel-Sync-Schritt des
-  Jobs `docs-validate` geprüft (vorher nur dokumentiert, jetzt erzwungen).
-  Wenn eine GitHub-Verbindung Workflow-Dateien nicht schreiben darf, muss der
-  Owner die beiden Kopien synchronisieren. Ohne aktiven Branch-Trigger ist eine
-  GitHub-Prüfung vor PR-Erstellung nicht möglich.
+- Die Quelle in `docs/ci/` ist versioniert und wird direkt nach `Checkout` per
+  `diff -u` (mit expliziter `::error::`-Annotation) sowie nach `npm ci` über
+  `npm run ci:sync:check -- --gha` geprüft. Wenn eine GitHub-Verbindung
+  Workflow-Dateien nicht schreiben darf, synchronisiert der Owner per
+  `npm run ci:sync`.
 
 ## CI-Jobs
 
 ### docs-validate
 
-- Typecheck: `npm run typecheck`.
-- Gesamttestsuite: `npm test`; `tests/brokerContracts.test.ts` startet ein eigenes
+- **Vorab-Spiegel-Sync (vor Node/npm):** `diff -u` direkt nach `Checkout` bricht
+  bei Spiegel-Drift in <1 s mit klarer GitHub-Annotation ab, ohne erst
+  `npm ci` abzuwarten.
+- **CI-Workflow-Invarianten (`npm run ci:sync:check -- --gha`):** Byte-Parität,
+  Spiegel-Vollständigkeit (keine ungespiegelten `.yml`/`.yaml`-Dateien),
+  SEC-10-SHA-Pinning (40-Hex-SHA + `# vX.Y.Z`) und Dependabot-Abdeckung beider
+  Verzeichnisse.
+- **Typecheck:** `npm run typecheck`.
+- **Gesamttestsuite:** `npm test`; `tests/brokerContracts.test.ts` startet ein eigenes
   temporäres Embedded-PostgreSQL und verlangt in CI (über
   `BROKER_CONTRACTS_REQUIRE_DB=true`) einen erfolgreichen DB-Start. Die beiden
   PAPER-Tests skippen nur bei nicht startbarer optionaler Infrastruktur in
   lokalen Offline-Läufen; Schema-/Query-Fehler sind immer echte Testfehler.
-- Spiegel-Sync: `docs/ci/*.workflow.yml` == `.github/workflows/`-Kopien (byte-identisch).
-- Generierte Inventare: `npm run docs:inventories:check` (DC-09) — Drift in
+- **Generierte Inventare:** `npm run docs:inventories:check` (DC-09) — Drift in
   `docs/generated/` (Routen, Env-Flags, Schema) bricht den Job.
-- `npm run docs:validate` (alle Checks deterministisch/offline):
+- **`npm run docs:validate`** (alle Checks deterministisch/offline):
   - Help-Schema, relative Links/Anker, Viewer-Auflösung, Markdown-Lint und Secret-Scan.
+  - CI-Workflow-Spiegel, SEC-10-Pins und Dependabot-Konfiguration.
   - **L1 (blocking):** Jedes dokumentierte Env-Flag muss einen statisch
     auflösbaren Code-Read haben (AST inkl. Helpern, Konstanten, Barrels und
     dynamischem `env[name]`; suffix-basierte Nicht-Runtime-Whitelist nur mit
@@ -88,21 +114,16 @@ Checks, kein separater Branch-Protection-Check.
   Kein Suite-Stamp bei fehlgeschlagener Windows-Regression. Ein expliziter
   Fail-Closed-Schritt macht den Required Check bei fehlgeschlagenem/ausgelassenem
   Windows-Job rot; ein lediglich übersprungener abhängiger Job genügt nicht.
-- Dependency-Audit in zwei Stufen:
-  - **Auslieferungspfad (fail-closed ab high):** `npm audit --audit-level=high --omit=dev`.
-    Alles, was ausgeliefert wird, muss frei von hohen/kritischen Advisories sein.
-    Der ursprüngliche Grund für die Dev-Abdeckung — Build-Tools (esbuild, tailwind,
-    postcss) fließen in die Bundles ein — bleibt unberührt, denn all das sind
-    Produktions- bzw. Build-Transitiv-Abhängigkeiten, keine Lint-Werkzeuge.
-  - **Gesamtbaum inkl. Dev (protokolliert, nicht blockierend):** der vollständige
-    Audit läuft weiter und wird ausgegeben (`continue-on-error: true`). Nicht
-    blockierend ist genau eine Kette, und nur, weil kein Fix existiert:
-    `eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` →
-    `micromatch` → `braces@3.0.3` (GHSA-vfj7-8cjw-p6xm, `<= 3.0.3`; jeder Knoten
-    `dev: true`, `braces` fließt in kein Bundle). Der einzige npm-Vorschlag wäre
-    ein Major-Downgrade von `eslint-config-next`, der dessen Peer-Dep
-    `eslint >= 9` verletzt und `npm run lint` bricht. Sobald npm ein gepatchtes
-    `braces` veröffentlicht, gehört die Ausnahme entfernt, nicht verlängert.
+- **Dependency-Audit in zwei fail-closed-Stufen:**
+  - **Stufe 1 — Auslieferungspfad (`npm audit --audit-level=high --omit=dev`):**
+    Produktions-Abhängigkeiten müssen frei von hohen/kritischen Advisories sein
+    und werden separat zuerst geprüft, damit ein Laufzeit-Fund im CI-Log sofort
+    erkennbar ist.
+  - **Stufe 2 — Gesamtbaum inkl. Dev (`npm audit --audit-level=high`):**
+    Auch Dev- und Build-Abhängigkeiten (esbuild, tailwind, postcss, eslint) sind
+    ab `high`/`critical` strikt blockierend (ohne `continue-on-error`). Die
+    frühere temporäre Ausnahme für `braces@3.0.3` ist mit
+    `eslint-config-next@16.4.3` entfallen und entfernt.
 - SEC-04: `npm ls ws --all` + `npm run test:security:ws` vor Build und Suite —
   exakter `ws`-Pin, Override für transitive Kopien, jeder Lockfile-Eintrag, die
   installierte Auflösung sowie Laufzeit-Guard und Payload-Kappe des
@@ -113,8 +134,12 @@ Checks, kein separater Branch-Protection-Check.
   und 72 neue Rule-Governance-/Nachprüfungstests, inklusive Header/Bearer/Session,
   positiver Mutations-/Audit-Pfade, verweigerter Zugriffe vor Persistenz und
   administrativem Makro-Einstieg. Keine Datenbank-/LLM-Verbindung, kein Skip.
-- Live-Gate-Suite mit ≥95% Coverage
-- Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink
+- Secret-Scan (`scripts/scan-live-gate-secrets.ts`) über Live-Gate-Code, -Tests,
+  beide Workflow-Paare (`docs/ci/` und `.github/workflows/`) sowie
+  `.github/dependabot.yml`.
+- Live-Gate-Suite mit ≥95% Coverage (Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink)
+- Suite-Stamp-Erzeugung per Step-`env` (keine Inline-Template-Interpolation im
+  Shell-Skript) und Upload als Artefakt (`actions/upload-artifact` v7.0.2).
 
 Ausführen: `npm run security:live-gate`
 
