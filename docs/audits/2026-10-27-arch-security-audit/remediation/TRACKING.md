@@ -9,7 +9,7 @@
 
 | ID | Severity | Titel | Status | Session-Prompt | PR / Commit | Verifiziert |
 |----|----------|-------|--------|----------------|-------------|-------------|
-| [ASA-01](../findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md) | CRITICAL | Multi-Prozess-Split-Brain: `PaperBroker`, Kill-Switch und `realizedPnl = 0` | `FIXED` | [PROMPT-ASA-P0-01](../prompts/PROMPT-ASA-P0-01-multiprocess-ledger-killswitch-pnl.md) | `arena/421547bd-ai-trading-firm` | `tests/asa01.multiprocessKillAndPnl.test.ts` |
+| [ASA-01](../findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md) | CRITICAL | Multi-Prozess-Split-Brain: `PaperBroker`, Kill-Switch und `realizedPnl = 0` | `FIXED` | [PROMPT-ASA-P0-01](../prompts/PROMPT-ASA-P0-01-multiprocess-ledger-killswitch-pnl.md) | [PR #246](https://github.com/Kryschuuu/ai-trading-firm/pull/246) | `tests/asa01.multiprocessKillAndPnl.test.ts` |
 | [ASA-02](../findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md) | CRITICAL | `x-admin-token`-Rollen-Spoofing, Vier-Augen-Bypass & Live-Kill-AuthZ | `OPEN` | [PROMPT-ASA-P0-02](../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md) | — | — |
 | [ASA-03](../findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter Fail-Open (`safeGetPositions` / `verifyFlat` / 429) | `OPEN` | [PROMPT-ASA-P0-03](../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) | — | — |
 | [ASA-04](../findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` Cooldown-Reset (30 s), Tick-Burst-Race & fehlendes Feed-Hot-Subscribe | `OPEN` | [PROMPT-ASA-P1-04](../prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) | — | — |
