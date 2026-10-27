@@ -26,6 +26,7 @@ import {
   type ExecutionMode,
 } from "../contracts/broker";
 import { PaperBroker } from "../lib/broker";
+import { readAuthoritativeKillSwitch } from "../lib/killSwitchDb";
 import { recordBrokerFactoryCall } from "./audit";
 import { REQUIRED_CAPABILITY_BY_MODE, VENUE_CAPABILITIES } from "./capabilities";
 import { BitunixBrokerAdapter } from "./bitunix";
@@ -121,6 +122,7 @@ export async function getBroker(
   //    Durchlauf der Live-Gate-State-Machine inkl. Human-Gate + Suite + CI.
   if (mode === "live") {
     try {
+      await readAuthoritativeKillSwitch();
       assertLiveOrderAllowed(venue);
     } catch (err) {
       const gateErr =

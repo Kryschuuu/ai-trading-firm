@@ -25,6 +25,11 @@ import {
 // aber ohne LLM-/Analysten-Import.
 import { paperBrokerLedger } from "../src/brokers/factory";
 import { ensurePaperBrokerHydrated } from "../src/lib/brokerHydration";
+import {
+  readAuthoritativeKillSwitch,
+  startFirmControlListener,
+  stopFirmControlListener,
+} from "../src/lib/killSwitchDb";
 
 function envInt(key: string, fallback: number, min: number, max: number): number {
   const n = Number(process.env[key]);
@@ -66,6 +71,8 @@ async function main(): Promise<void> {
   // Starte die Hydration bereits beim Start (nicht erst beim ersten Match),
   // damit der erste Tick bereits auf aktuellen Werten rechnet. Lehnt nie ab.
   void ensurePaperBrokerHydrated(ledger);
+  // ASA-01: `LISTEN firm_control_changed` aktivieren + Kill-Switch vorwärmen.
+  void startFirmControlListener().then(() => readAuthoritativeKillSwitch({ forceRefresh: true }));
 
   const feed =
     feedName === "sim"
@@ -117,6 +124,7 @@ async function main(): Promise<void> {
   const shutdown = async (sig: string) => {
     console.log(`[micro] ${sig} empfangen — sauberer Shutdown …`);
     await executor.stop();
+    await stopFirmControlListener();
     server.close();
     process.exit(0);
   };

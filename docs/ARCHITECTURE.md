@@ -379,22 +379,25 @@ Rechner/Container neben der Datenquelle.
 | **Advisory-Lock `pg_advisory_lock('rule:'+symbol)`** | kritischer Abschnitt Check→Fill ist pro Symbol serialisiert — zwei Instanzen können denselben Trade nie doppelt eröffnen |
 | **`order_intents` (H2, v1.36.19)** | partieller UNIQUE-Index auf `symbol WHERE status='RESERVED'` + `pg_advisory_xact_lock(hashtext(account))` (`withAccountLock`, `src/lib/broker.ts`) — Guard, Fill, Reservierung und Positions-Insert laufen als EINE Postgres-Transaktion über `PaperBroker.submitAtomic()` |
 | **Positions-Sperre aus der DB** | `POSITION_ALREADY_OPEN` wird sowohl über `order_intents` als auch direkt gegen `positions` (status='OPEN') geprüft, nicht aus dem RAM |
+| **Autoritativer DB-Kill-Switch (ASA-01)** | `src/lib/killSwitchDb.ts` (`readAuthoritativeKillSwitch`, `evaluateAuthoritativeKillSwitchSync`, `FirmControlNotificationListener`) erzwingt `public.kill_switches` mit `<= 500 ms` TTL-Cache, sofortiger `LISTEN/NOTIFY`-Invalidierung (`firm_control_changed`) und Fail-Closed-Sperre bei DB-Ausfall |
+| **Cross-Prozess-Rehydration & Exit-P&L (ASA-01)** | `syncPaperBrokerWithDb()` (`src/lib/brokerHydration.ts`) synchronisiert offene/geschlossene `positions` vor `submitAtomic()` und `monitorPositions()`; `applyExit()` (`src/lib/monitor.ts`) bucht via `computePaperClosePnl()` (`src/lib/broker.ts`) deterministischen Netto-P&L unter `WHERE id = pos.id AND status = 'OPEN'` |
 | **Shard-Key** | `MICRO_SYMBOLS=BTC,ETH` je Instanz — empfohlene Verteilung ohne Lock-Contention |
 
-**Stand nach H2 (v1.36.19):** Der interne `PaperBroker` bleibt intern ein
-In-Memory-Cache (Positionen/Cash), aber jeder DB-gestützte Schreibpfad
-(`src/lib/engine.ts`, `src/lib/microExecutor.ts`) nutzt `submitAtomic()`
-statt `submit()` — Guard-Prüfung, `order_intents`-Reservierung und
-Positions-Persistenz sind dadurch über Prozessgrenzen hinweg atomar
-(`pg_advisory_xact_lock` je Konto + DB-Wahrheits-Check gegen `positions`
-VOR dem In-Memory-Guard, siehe `docs/audits/2026-09-03-peer-review/findings/H2-atomicity.md` §H2).
-Mehrere Mikro-Executor-/Next.js-Worker-Instanzen können damit nicht mehr
-denselben Symbol-Slot doppelt öffnen oder gemeinsames Cash überziehen —
-ein zweiter, gleichzeitiger Reservierungsversuch schlägt mit
-`POSITION_ALREADY_OPEN` fehl, unabhängig davon, welcher Prozess zuletzt
-hydratisiert hat. `submit()` selbst bleibt für Single-Process-Aufrufer
-(Backtests, reine Unit-Tests ohne DB) unverändert synchron und In-Memory.
-Details: `docs/audits/2026-09-03-peer-review/findings/H2-atomicity.md` (§H2).
+**Stand nach H2 (v1.36.19) & ASA-01:** Der interne `PaperBroker` hält zwar
+einen lokalen In-Memory-Cache (Positionen/Cash), aber jeder DB-gestützte
+Schreibpfad (`src/lib/engine.ts`, `src/lib/microExecutor.ts`) synchronisiert
+zuvor via `syncPaperBrokerWithDb()` und nutzt `submitAtomic()` statt `submit()`
+— Guard-Prüfung, `order_intents`-Reservierung und Positions-Persistenz sind
+dadurch über Prozessgrenzen hinweg atomar (`pg_advisory_xact_lock` je Konto +
+DB-Wahrheits-Check gegen `positions` VOR dem In-Memory-Guard, siehe
+`docs/audits/2026-09-03-peer-review/findings/H2-atomicity.md` §H2 sowie
+`docs/audits/2026-10-27-arch-security-audit/findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md`).
+Ebenso erzwingt `src/lib/killSwitchDb.ts` den Kill-Switch prozessübergreifend
+über PostgreSQL (`public.kill_switches` + `firm_control_changed`), und
+`src/lib/monitor.ts` verrechnet prozessübergreifende Exits exakt einmal mit
+deterministischem Richtungs-/Gebühren-P&L. `submit()` selbst bleibt für
+Single-Process-Aufrufer (Backtests, reine Unit-Tests ohne DB) unverändert
+synchron und In-Memory.
 
 ### 5.3 Sizing
 

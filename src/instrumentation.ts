@@ -81,6 +81,22 @@ export async function register() {
     } catch (e) {
       console.warn("[control-plane] Warm-up uebersprungen:", e instanceof Error ? e.message : e);
     }
+
+    // ASA-01: Autoritatives Kill-Switch-Gate beim Boot aus PostgreSQL vorwärmen
+    // und `LISTEN firm_control_changed` für sofortige prozessübergreifende
+    // Invalidierung starten (best-effort; Abfragen selbst sind fail-closed).
+    try {
+      const { readAuthoritativeKillSwitch, startFirmControlListener } = await import(
+        "@/lib/killSwitchDb"
+      );
+      await startFirmControlListener();
+      await readAuthoritativeKillSwitch({ forceRefresh: true });
+    } catch (e) {
+      console.warn(
+        "[kill-switch-db] Boot-Listener uebersprungen:",
+        e instanceof Error ? e.message : e
+      );
+    }
   }
 
   // S1 (v1.36.18): Offene Audit-Spool-Eintraege nachziehen. Ein Audit, der

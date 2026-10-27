@@ -9,11 +9,13 @@
  * Diese Route SCHALTET KEIN LIVE EIN — reine Projektion der Machine.
  */
 import { getLiveGateService } from "@/live-gate";
+import { readAuthoritativeKillSwitch } from "@/lib/killSwitchDb";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<Response> {
   try {
+    await readAuthoritativeKillSwitch();
     const service = getLiveGateService();
     return Response.json(service.overview(), { status: 200 });
   } catch (err) {

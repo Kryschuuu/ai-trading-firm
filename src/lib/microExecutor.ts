@@ -33,6 +33,8 @@ import {
 } from "@/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { PaperBroker } from "./broker";
+import { syncPaperBrokerWithDb } from "./brokerHydration";
+import { readAuthoritativeKillSwitch } from "./killSwitchDb";
 import {
   ADAPTIVE_STATE_MAX_AGE_MS,
   applyAdaptiveRisk,
@@ -849,28 +851,35 @@ export function createPaperRuleAdapter(opts?: {
         };
       }
 
-      // Schneller, in-process Vorab-Check (kein DB-Zugriff).
-      if (killSwitch.isArmed()) {
+      // ASA-01: Autoritatives prozessübergreifendes Kill-Switch-Gate (PostgreSQL
+      // `kill_switches` mit <= 500 ms TTL-Cache + LISTEN/NOTIFY; fail-closed bei
+      // DB-Ausfall, Offline-Fallback für reine Unit-Tests ohne DB).
+      const authKill = await readAuthoritativeKillSwitch();
+      if (authKill.armed || killSwitch.isArmed()) {
+        const blockReason =
+          authKill.source === "db-error"
+            ? authKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+            : authKill.reason && authKill.reason !== "KILL_SWITCH_ARMED"
+              ? `KILL_SWITCH_ARMED:${authKill.reason}`
+              : "KILL_SWITCH_ARMED";
         return {
           status: "BLOCKED",
           ruleId: ctx.ruleId,
           symbol,
-          reason: "KILL_SWITCH_ARMED",
+          reason: blockReason,
           at: new Date().toISOString(),
         };
       }
 
       await ensureRuntimeLimitsLoaded();
-      // ADR-003: Sicherstellen, dass der Singleton-Ledger aus der DB hydriert
-      // ist (Positionen/Cash/Kill-Switch), bevor wir Sizing/Guardrails auf
-      // seinen Werten rechnen. Ein veralteter Ledger würde sonst ein zu
-      // hohes `accountEquity` sehen und Limits falsch bemessen. Die
-      // eigentliche Mehrprozess-Serialisierung (Kontosperre, DB-Wahrheit,
-      // order_intents) liegt danach in `submitAtomic` und ist unabhängig
-      // vom Hydrationszustand immer wirksam.
+      // ADR-003 + ASA-01: Sicherstellen, dass der Singleton-Ledger aus der DB
+      // hydriert UND mit fremderöffneten/extern geschlossenen Positionen
+      // abgeglichen ist (`syncPaperBrokerWithDb`), bevor wir Sizing/Guardrails
+      // auf `accountEquity` und `openPositions` rechnen.
       if (opts?.ensureHydrated) {
-        try { await opts.ensureHydrated(); } catch { /* Hydration-Fehler → submitAtomic entscheidet fail-closed */ }
+        try { await opts.ensureHydrated(); } catch { /* Hydration-Fehler → sync/submitAtomic entscheidet fail-closed */ }
       }
+      await syncPaperBrokerWithDb(broker);
 
       // H2-REMOVED (v0.17.0): Das manuelle `pg_advisory_lock(hashtext('rule:'+
       // symbol))` wurde ENTFERNT. Es war (a) session-scoped statt transaktional
@@ -1098,6 +1107,27 @@ export function createPaperRuleAdapter(opts?: {
         // Symbol feuern. Die Positions-/Missions-Persistenz läuft im selben
         // `persistPosition`-Callback wie die Reservierung — entweder beides
         // oder nichts.
+        // ASA-01: Unmittelbar vor `submitAtomic` erneut autoritativen Kill-Switch
+        // prüfen und Ledger mit DB abgleichen (falls während Cluster-Check ein
+        // Kill oder eine Nachbar-Position committed wurde).
+        const preSubmitKill = await readAuthoritativeKillSwitch();
+        if (preSubmitKill.armed || killSwitch.isArmed()) {
+          const blockReason =
+            preSubmitKill.source === "db-error"
+              ? preSubmitKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+              : preSubmitKill.reason && preSubmitKill.reason !== "KILL_SWITCH_ARMED"
+                ? `KILL_SWITCH_ARMED:${preSubmitKill.reason}`
+                : "KILL_SWITCH_ARMED";
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: blockReason,
+            at: new Date().toISOString(),
+          };
+        }
+        await syncPaperBrokerWithDb(broker);
+
         // GAP-03: Positions-ID übernehmen (Journal-Verknüpfung, ohne
         // Schema-Änderung an `positions`).
         const journalPosRef: { value: { id: string; createdAt: Date } | null } = { value: null };
@@ -1618,8 +1648,24 @@ export class MicroExecutor {
 
       for (const rule of matched) {
         this.matchCount++;
-        void this.adapter
-          .execute({
+        void (async () => {
+          const authKill = await readAuthoritativeKillSwitch();
+          if (authKill.armed || killSwitch.isArmed()) {
+            const blockReason =
+              authKill.source === "db-error"
+                ? authKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+                : authKill.reason && authKill.reason !== "KILL_SWITCH_ARMED"
+                  ? `KILL_SWITCH_ARMED:${authKill.reason}`
+                  : "KILL_SWITCH_ARMED";
+            return {
+              status: "BLOCKED" as const,
+              ruleId: rule.rowId,
+              symbol: rule.symbol,
+              reason: blockReason,
+              at: new Date().toISOString(),
+            };
+          }
+          return this.adapter.execute({
             ruleId: rule.rowId,
             name: rule.name,
             spec: rule.spec,
@@ -1629,7 +1675,8 @@ export class MicroExecutor {
             executionsToday: rule.executionsToday,
             evalMicros,
             strategyClass: this.cache.strategyClassFor(rule.missionId),
-          })
+          });
+        })()
           .then((outcome) => {
             if (outcome.status === "TRIGGERED") this.execCount++;
             else if (outcome.status === "BLOCKED") this.blockedCount++;

@@ -19,7 +19,9 @@ import { db } from "@/db";
 import { agentMessages, positions } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getBroker, logAudit } from "./engine";
-import type { PaperBroker, Fill } from "./broker";
+import { computePaperClosePnl, type PaperBroker, type Fill } from "./broker";
+import { syncPaperBrokerWithDb } from "./brokerHydration";
+import { readAuthoritativeKillSwitch } from "./killSwitchDb";
 import { decideExit, loadExitConfig, type ExitReason } from "./exits";
 import { buildMarketSignal, classKey, type SignalDecayAudit, type SignalSnapshot } from "./signalDecay";
 import {
@@ -254,7 +256,17 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
   }
 
   const limits = getLimits();
+  await readAuthoritativeKillSwitch();
   const broker = await getBroker();
+  // ASA-01: Vor Positions-Auswertung/Close den lokalen `PaperBroker` mit den
+  // offenen DB-Positionen (`positions WHERE status = 'OPEN'`) synchronisieren,
+  // damit fremderöffnete Positionen (z. B. aus `micro-executor`) im RAM-Ledger
+  // bekannt sind und Cash/Equity/P&L prozessübergreifend konsistent bleiben.
+  try {
+    await syncPaperBrokerWithDb(broker);
+  } catch (e) {
+    errors.push(`Broker-DB-Sync fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
+  }
   const stopsTriggered: TickResult["stopsTriggered"] = [];
   const fundingAccruals: TickResult["fundingAccruals"] = [];
 
@@ -677,34 +689,89 @@ export async function applyExit(params: {
   createdAt: Date;
   now: Date;
   triggerPrice?: number;
+  /** Optionale explizite Exit-Gebühr in Kontowährung (ASA-01; sonst Broker-Adapter/0). */
+  exitFee?: number;
   /** RMA-P5-05: Scores/Version/Coverage nur für SIGNAL_DECAY. */
   signalAudit?: SignalDecayAudit | null;
   /** Fehler-Sammler (z. B. Monitor-`errors`) — bei direktem Testaufruf weglassbar. */
   onError?: (msg: string) => void;
 }): Promise<{ closed: boolean; fill?: Fill & { realizedPnl: number } }> {
-  // 1) Atomarer Claim: nur wer die Position noch als OPEN vorfindet, darf sie
-  //    schließen. RETURNING liefert genau eine Zeile bei Erfolg (andernfalls []).
+  // ASA-01: Deterministische Richtungs-/Gebührenformel identisch zu
+  // `PaperBroker.close()` — es gibt keinen stillen `0`-Fallback mehr, auch
+  // wenn eine fremderöffnete Position nicht im lokalen `PaperBroker`-RAM lag.
+  const resolvedExitPrice =
+    typeof params.triggerPrice === "number" &&
+    Number.isFinite(params.triggerPrice) &&
+    params.triggerPrice > 0
+      ? params.triggerPrice
+      : params.broker.quote(params.symbol) ?? params.entryPrice;
+  const resolvedExitFee = params.broker.resolveExitFee(
+    params.symbol,
+    params.side,
+    params.qty,
+    resolvedExitPrice,
+    params.exitFee
+  );
+  const accounting = computePaperClosePnl({
+    side: params.side,
+    qty: params.qty,
+    entryPrice: params.entryPrice,
+    exitPrice: resolvedExitPrice,
+    exitFee: resolvedExitFee,
+  });
+
+  // 1) Atomarer Claim (`WHERE id = pos.id AND status = 'OPEN'`): nur wer die
+  //    Position noch als OPEN vorfindet, darf sie schließen und ihren P&L
+  //    buchen. Exit-Preis und `realizedPnl` werden in derselben atomaren
+  //    Mutation gesetzt; ein zweiter Prozess erhält `claimed.length === 0` und
+  //    schreibt weder DB noch Cash doppelt.
   const claimed = await db
     .update(positions)
-    .set({ status: "CLOSED", exitReason: params.reason, updatedAt: params.now })
+    .set({
+      status: "CLOSED",
+      exitReason: params.reason,
+      exitPrice: String(accounting.fillPrice),
+      realizedPnl: String(accounting.realizedPnl),
+      updatedAt: params.now,
+    })
     .where(and(eq(positions.id, params.positionId), eq(positions.status, "OPEN")))
     .returning({ id: positions.id });
 
   if (claimed.length === 0) {
-    // Ein anderer Tick/Prozess war schneller → sauberer no-op (kein Doppel-Fill/Audit).
+    // Ein anderer Tick/Prozess war schneller → sauberer no-op (kein Doppel-Fill/Audit/Cash).
     return { closed: false };
   }
 
-  // 2) In-Memory-Ledger glattstellen (nur der Gewinner) — liefert Fill + PnL.
-  const fill = params.broker.close(params.symbol, params.reason);
-  const exitPrice = fill ? fill.fillPrice : params.triggerPrice ?? params.entryPrice;
-  const realizedPnl = fill ? fill.realizedPnl : 0;
-
-  // 3) Exit-Preis/PnL nachtragen (Position ist jetzt CLOSED; nur der Gewinner schreibt).
-  await db
-    .update(positions)
-    .set({ exitPrice: String(exitPrice), realizedPnl: String(realizedPnl) })
-    .where(eq(positions.id, params.positionId));
+  // 2) In-Memory-Ledger glattstellen (nur der Gewinner):
+  //    Liefert `broker.close(...)` trotz vorherigem Sync `null` (Position war
+  //    nicht im lokalen RAM, hatte also lokal kein `qty * entryPrice` gebunden),
+  //    wird exakt der Netto-P&L (`accounting.rawNetPnl`) auf `broker.cash`
+  //    nachgezogen und ein vollständiger Close-Fill erzeugt.
+  const ramFill = params.broker.close(params.symbol, params.reason, {
+    exitPrice: resolvedExitPrice,
+    exitFee: resolvedExitFee,
+  });
+  let fill: Fill & { realizedPnl: number };
+  if (ramFill) {
+    fill = ramFill;
+  } else {
+    params.broker.applyExternalCloseNetPnl(accounting.rawNetPnl, params.reason);
+    fill = {
+      orderId: `CLS-${Date.now().toString(36).toUpperCase()}`,
+      symbol: params.symbol.toUpperCase(),
+      side: params.side,
+      qty: params.qty,
+      fillPrice: accounting.fillPrice,
+      stopLoss: null,
+      takeProfit: null,
+      status: "FILLED",
+      fees: accounting.fees,
+      realizedPnl: accounting.realizedPnl,
+      reason: params.reason,
+    };
+  }
+  const exitPrice = fill.fillPrice;
+  const realizedPnl = fill.realizedPnl;
 
   // 4) Revisionssicheres Audit — maschinenlesbarer Grund für JEDEN Exit.
   //    Die Anordnung der Zweige ist kein Stilfehler: Der Katalog-Wächter

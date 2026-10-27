@@ -15,11 +15,11 @@
 
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
-| CRITICAL | 3 | 3 | 0 | 0 |
+| CRITICAL | 3 | 2 | 0 | 1 |
 | HIGH | 6 | 6 | 0 | 0 |
 | MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
-| **Summe** | **15** | **15** | **0** | **0** |
+| **Summe** | **15** | **14** | **0** | **1** |
 
 ## Executive Summary
 
@@ -27,7 +27,7 @@ Das System besitzt in mehreren Kernmodulen bereits eine reife Härtung — darun
 
 Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-Fehlergrenzen**:
 
-1. **Multi-Prozess-Split-Brain (`ASA-01`, CRITICAL):** `Next.js` und `micro-executor` halten getrennte RAM-Singletons für Paper-Ledger, Kill-Switch und Live-Gate. `submitAtomic` und `evaluateLiveOrder` prüfen `kill_switches` in PostgreSQL nicht; `applyExit` bucht bei Cross-Prozess-Trades `realizedPnl = 0` in die DB.
+1. **Multi-Prozess-Split-Brain (`ASA-01`, CRITICAL — `FIXED`):** `Next.js` und `micro-executor` hielten getrennte RAM-Singletons für Paper-Ledger, Kill-Switch und Live-Gate; behoben durch das autoritative Fail-Closed-Kill-Switch-Gate (`src/lib/killSwitchDb.ts`, `LISTEN/NOTIFY firm_control_changed`), Cross-Prozess-Reconcile (`syncPaperBrokerWithDb`) und deterministische Close-Abrechnung (`computePaperClosePnl`).
 2. **Governance- & Kill-Switch-AuthZ (`ASA-02`, CRITICAL):** `POST /api/firm/lifecycle` vergibt die Admin-Rolle allein anhand der bloßen Header-Existenz `Boolean(req.headers.get("x-admin-token"))`; Vier-Augen-Prüfungen vertrauen auf ungebundene Body-Strings (`approvedBy`); `POST /api/live/kill` nutzt `live.gate` statt `firm.kill` und ignoriert `consumeKillNonce` beim Entschärfen.
 3. **Fail-Open im Alpaca-Live-Adapter (`ASA-03`, CRITICAL):** `safeGetPositions()` schluckt API-/429-Fehler zu `[]`, wodurch `getAccount()` `openPositions: 0` meldet, `closeAllPositions()` den Notfall-Close überspringt und `verifyFlat()` fälschlich `true` bestätigt.
 
@@ -43,7 +43,7 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 
 | ID | Severity | Titel | Bereich | Status | Prompt |
 |----|----------|-------|---------|--------|--------|
-| [ASA-01](findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md) | CRITICAL | Multi-Prozess-Split-Brain: `PaperBroker`, Kill-Switch und `realizedPnl = 0` divergieren zwischen Web-Server und `micro-executor` | Architektur / Konsistenz | `OPEN` | [P0-01](prompts/PROMPT-ASA-P0-01-multiprocess-ledger-killswitch-pnl.md) |
+| [ASA-01](findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md) | CRITICAL | Multi-Prozess-Split-Brain: `PaperBroker`, Kill-Switch und `realizedPnl = 0` divergieren zwischen Web-Server und `micro-executor` | Architektur / Konsistenz | `FIXED` | [P0-01](prompts/PROMPT-ASA-P0-01-multiprocess-ledger-killswitch-pnl.md) |
 | [ASA-02](findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md) | CRITICAL | Rollen-Spoofing per `x-admin-token`, umgehbares Vier-Augen-Prinzip und gebrochene Kill-Switch-Autorisierung | Sicherheit (AuthZ) | `OPEN` | [P0-02](prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md) |
 | [ASA-03](findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter ist bei Positionsabfragen Fail-Open (`safeGetPositions` liefert `[]`, `verifyFlat()` meldet fälschlich `true`) | Sicherheit / Live-Execution | `OPEN` | [P0-03](prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) |
 | [ASA-04](findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` verliert alle 30 s Cooldowns, feuert doppelt bei Tick-Bursts und abonniert neue Symbole zur Laufzeit nicht | Architektur / Handelslogik | `OPEN` | [P1-04](prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) |
