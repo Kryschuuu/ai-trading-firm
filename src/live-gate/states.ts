@@ -117,6 +117,10 @@ export const LIVE_GATE_ERROR_CODES = [
   "COOLDOWN_ACTIVE",
   "FOUR_EYES_PENDING",
   "FOUR_EYES_SAME_APPROVER",
+  // ASA-02: principal-gebundenes 2-Schritt-Verfahren (keine Body-Strings).
+  "FOUR_EYES_PRINCIPALS_REQUIRED",
+  "FOUR_EYES_EXPIRED",
+  "FOUR_EYES_APPROVAL_MISMATCH",
   "KILL_SWITCH_ACTIVE",
   "STATE_NOT_LIVE_ENABLED",
   "VENUE_FLAG_MISSING",
@@ -134,15 +138,25 @@ export const LIVE_GATE_ERROR_CODES = [
 export type LiveGateErrorCode = (typeof LIVE_GATE_ERROR_CODES)[number];
 
 export class LiveGateError extends BrokerError {
-  constructor(code: LiveGateErrorCode, message: string) {
+  /**
+   * ASA-02: strukturierte, nicht-geheime Zusatzdaten (z. B. `approvalId`,
+   * `expiresAt` einer Vier-Augen-Erstfreigabe). Die API darf sie an den
+   * Client geben; Principals/Tokens stehen hier bewusst NICHT drin.
+   */
+  readonly details?: Record<string, unknown>;
+
+  constructor(code: LiveGateErrorCode, message: string, details?: Record<string, unknown>) {
     super(code, message);
     this.name = "LiveGateError";
+    this.details = details;
   }
 }
 
 /** HTTP-Status-Mapping der Gate-Fehler (API-Routen). */
 export function liveGateErrorStatus(code: string): number {
   switch (code) {
+    case "FOUR_EYES_PRINCIPALS_REQUIRED":
+      return 403;
     case "UNKNOWN_VENUE":
     case "UNKNOWN_STATE":
     case "REASON_REQUIRED":

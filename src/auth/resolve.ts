@@ -23,10 +23,17 @@ import {
   resolveAuthMode,
 } from "./authMode";
 import { buildActor } from "./permissions";
+import {
+  principalFromCredential,
+  principalFromLocalOpen,
+  principalFromSession,
+} from "./principal";
 import type {
   Actor,
   AuthResolution,
+  AuthSuccess,
   Permission,
+  Principal,
 } from "./types";
 
 export {
@@ -75,14 +82,23 @@ export function resolveAuth(
   const viewerTok = env[VIEWER_TOKEN_FLAG] ?? "";
   const presented = presentedTokens(req);
 
+  // ASA-02: `principal` ist immer dieselbe, serverseitig verifizierte Identität
+  // wie `actor` — niemals aus Body oder ungeprüften Headern abgeleitet. Der
+  // HMAC-Fingerprint bindet Vier-Augen-Freigaben an getrennte Credentials oder
+  // getrennte Sessions statt an frei wählbare Namen.
+  const success = (actor: Actor, principal: Principal): AuthSuccess => ({ ok: true, actor, principal });
+
   if (adminTok && matchesAny(adminTok, [presented.admin, presented.firm, presented.bearer])) {
-    return { ok: true, actor: buildActor("admin", "admin-token", env) };
+    const actor = buildActor("admin", "admin-token", env);
+    return success(actor, principalFromCredential({ actor, flag: ADMIN_TOKEN_FLAG, token: adminTok, env }));
   }
   if (operatorTok && matchesAny(operatorTok, [presented.firm, presented.bearer, presented.admin])) {
-    return { ok: true, actor: buildActor("operator", "api-token", env) };
+    const actor = buildActor("operator", "api-token", env);
+    return success(actor, principalFromCredential({ actor, flag: OPERATOR_TOKEN_FLAG, token: operatorTok, env }));
   }
   if (viewerTok && matchesAny(viewerTok, [presented.viewer, presented.firm, presented.bearer])) {
-    return { ok: true, actor: buildActor("viewer", "viewer-token", env) };
+    const actor = buildActor("viewer", "viewer-token", env);
+    return success(actor, principalFromCredential({ actor, flag: VIEWER_TOKEN_FLAG, token: viewerTok, env }));
   }
 
   // SEC-01: Die Session bindet ein aktuelles Credential, keine gespeicherten
@@ -90,15 +106,29 @@ export function resolveAuth(
   // Header schlagen weiterhin Session (curl/CLI bleibt identisch).
   const session = readSession(req, env);
   const actor = session ? sessionActor(session, env) : null;
-  if (actor) {
-    return { ok: true, actor };
+  if (actor && session) {
+    return success(
+      actor,
+      principalFromSession({
+        actor,
+        claims: {
+          credential: session.credential,
+          iat: session.iat,
+          csrf: session.csrf,
+          authEpoch: session.authEpoch,
+        },
+        env,
+      })
+    );
   }
 
   if (!adminTok && !operatorTok && !viewerTok) {
     // C1 (v1.36.13): Offen-Betrieb ist an den Modus gebunden, nicht an das
     // Fehlen von Tokens. Produktion ohne Token ⇒ zu (und Boot-Guard wirft).
     if (resolveAuthMode(env).mode === "local-open") {
-      return { ok: true, actor: buildActor("admin", "local-open", env) };
+      const actor = buildActor("admin", "local-open", env);
+      // Kein unterscheidbarer Principal ⇒ Vier-Augen-Freigaben fail-closed.
+      return success(actor, principalFromLocalOpen(actor));
     }
     return {
       ok: false,
@@ -165,7 +195,22 @@ export function requirePermission(
   return null;
 }
 
-/** Audit-ID nach erfolgreichem Guard (Fallback admin = local-open). */
-export function actorAuditId(req: Request): "admin" | "operator" | "viewer" {
-  return resolveActor(req)?.auditId ?? "admin";
+/**
+ * ASA-02: Audit-ID aus einer **bereits authentifizierten** Auflösung.
+ *
+ * Die `Request`-Variante bleibt aus Kompatibilitätsgründen erhalten (bestehende
+ * Routen/Audits), ist aber für Governance-Endpunkte NICHT mehr die
+ * Empfehlung: Dort muss `actorAuditId(auth.principal)` bzw.
+ * `actorAuditId(auth.actor)` verwendet werden, damit der Audit-Akteur und die
+ * Freigabe-Identität aus derselben verifizierten Auflösung stammen und kein
+ * Freitext aus dem Body die Zuordnung verschieben kann.
+ */
+export function actorAuditId(
+  source: Request | Actor | Principal | AuthSuccess
+): "admin" | "operator" | "viewer" {
+  if (typeof Request !== "undefined" && source instanceof Request) {
+    return resolveActor(source)?.auditId ?? "admin";
+  }
+  if ("ok" in source && source.ok === true) return source.actor.auditId;
+  return (source as Actor | Principal).auditId;
 }

@@ -289,13 +289,15 @@ test("Human-Gate: Begründung, confirm:true und Approver sind Pflicht", async ()
   );
 });
 
-test("4-Augen: erste Bestätigung → PENDING, gleicher Approver → deny, anderer → ok", async () => {
+test("ASA-02 4-Augen: Principal-Fingerprint (nicht Name) entscheidet — gleicher Principal deny, anderer ok", async () => {
   env = allowEnv({ LIVE_GATE_FOUR_EYES: "true" });
   const service = serviceFor(env, { port });
   for (const to of ["CONNECTED", "MARKET_DATA_OK", "ACCOUNT_READ_OK", "ORDER_TEST_OK", "PAPER_APPROVED", "LIVE_PENDING"] as LiveGateState[]) {
     await service.transition({ venue: "BITUNIX", to, actor: "admin", reason: "Setup 4-Augen-Test" });
   }
-  const attempt = (by: string) =>
+  // `approvedBy` ist nur noch ein Anzeigelabel. `principalId` ist der
+  // serverseitig verifizierte Fingerprint (kommt im HTTP-Pfad aus resolveAuth).
+  const attempt = (by: string, principalId: string, approvalId?: string) =>
     service.transition({
       venue: "BITUNIX",
       to: "HUMAN_APPROVED",
@@ -303,24 +305,38 @@ test("4-Augen: erste Bestätigung → PENDING, gleicher Approver → deny, ander
       reason: "4-Augen-Freigabe-Test",
       confirm: true,
       approvedBy: by,
+      principalId,
+      principalDistinct: true,
+      approvalId,
     });
   // 1) Erste Bestätigung: PENDING, kein Zustandswechsel, auditiert.
-  await assert.rejects(() => attempt("alice"), (e: unknown) =>
-    e instanceof LiveGateError && (e as LiveGateError).code === "FOUR_EYES_PENDING"
-  );
+  let approvalId = "";
+  await assert.rejects(() => attempt("alice", "principal-alice"), (e: unknown) => {
+    if (e instanceof LiveGateError && e.code === "FOUR_EYES_PENDING") {
+      approvalId = String(e.details?.approvalId ?? "");
+      return true;
+    }
+    return false;
+  });
+  assert.ok(approvalId, "Schritt 1 muss eine approvalId für Schritt 2 liefern");
   const rec1 = getLiveGateRuntime(env).store.read("BITUNIX");
   assert.equal(rec1.state, "LIVE_PENDING");
   assert.equal(rec1.pendingApproval?.approvedBy, "alice");
+  assert.equal(rec1.pendingApproval?.principalId, "principal-alice");
   assert.ok(
     getLiveGateRuntime(env).audit.recent(5).some((e) => e.action === "four-eyes-first" && /alice/.test(e.reason))
   );
-  // 2) Gleicher Approver: deny.
-  await assert.rejects(() => attempt("alice"), (e: unknown) =>
+  // 2) Gleicher Principal — selbst mit einem ANDEREN Freitextnamen: deny.
+  await assert.rejects(() => attempt("bob", "principal-alice", approvalId), (e: unknown) =>
     e instanceof LiveGateError && (e as LiveGateError).code === "FOUR_EYES_SAME_APPROVER"
   );
   assert.equal(getLiveGateRuntime(env).store.read("BITUNIX").state, "LIVE_PENDING");
-  // 3) Anderer Approver: Übergang vollzogen.
-  await attempt("bob");
+  // 2b) Falsche/missing approvalId: deny (Bindung an genau diesen Antrag).
+  await assert.rejects(() => attempt("bob", "principal-bob", "wrong-approval-id"), (e: unknown) =>
+    e instanceof LiveGateError && (e as LiveGateError).code === "FOUR_EYES_APPROVAL_MISMATCH"
+  );
+  // 3) Anderer Principal + korrekte approvalId: Übergang vollzogen.
+  await attempt("bob", "principal-bob", approvalId);
   const rec2 = getLiveGateRuntime(env).store.read("BITUNIX");
   assert.equal(rec2.state, "HUMAN_APPROVED");
   assert.equal(rec2.pendingApproval, null);

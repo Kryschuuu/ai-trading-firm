@@ -24,6 +24,7 @@ type GetHandler = () => Promise<Response>;
 let GET_STATE: GetHandler;
 let POST_TRANSITION: Handler;
 let POST_KILL: Handler;
+let GET_KILL: Handler;
 
 const GATE_DIR = mkdtempSync(path.join(tmpdir(), "live-gate-api-"));
 const ADMIN_TOKEN = "admin-secret-token-123456";
@@ -38,6 +39,8 @@ before(async () => {
   POST_TRANSITION = transitionRoute.POST as Handler;
   const killRoute = await import("../src/app/api/live/kill/route");
   POST_KILL = killRoute.POST as Handler;
+  // ASA-02: GET /api/live/kill stellt die Pflicht-Einmal-Nonce für `clear`.
+  GET_KILL = killRoute.GET as Handler;
 });
 
 beforeEach(() => {
@@ -169,16 +172,42 @@ test("POST /api/live/kill: Phrase falsch → 422; richtig → 200 + Wirkung", as
   assert.equal(blocked.status, 409);
   assert.equal(((await blocked.json()) as Record<string, unknown>).error, "KILL_SWITCH_ACTIVE");
 
-  // Clear über API:
-  const cleared = await POST_KILL(
+  // ASA-02: Clear erfordert eine gültige Einmal-Nonce aus GET /api/live/kill.
+  const withoutNonce = await POST_KILL(
     req(
       "POST",
       { action: "clear", scope: "BITUNIX", reason: "API-Clear-Test ausreichend", confirm: "CLEAR_KILL" },
       { "x-csrf-token": "local" }
     )
   );
+  assert.equal(withoutNonce.status, 400);
+  assert.equal(((await withoutNonce.json()) as Record<string, unknown>).error, "NONCE_REQUIRED");
+
+  const challenge = await GET_KILL(req("GET", undefined, { "x-csrf-token": "local" }));
+  assert.equal(challenge.status, 200);
+  const { nonce } = (await challenge.json()) as { nonce: string };
+  assert.ok(nonce);
+
+  const cleared = await POST_KILL(
+    req(
+      "POST",
+      { action: "clear", scope: "BITUNIX", reason: "API-Clear-Test ausreichend", confirm: "CLEAR_KILL", nonce },
+      { "x-csrf-token": "local" }
+    )
+  );
   assert.equal(cleared.status, 200);
   assert.equal(((await cleared.json()) as Record<string, unknown>).ok, true);
+
+  // Replay derselben Nonce ist gesperrt (single-use).
+  const replay = await POST_KILL(
+    req(
+      "POST",
+      { action: "clear", scope: "BITUNIX", reason: "API-Clear-Test ausreichend", confirm: "CLEAR_KILL", nonce },
+      { "x-csrf-token": "local" }
+    )
+  );
+  assert.equal(replay.status, 403);
+  assert.equal(((await replay.json()) as Record<string, unknown>).error, "NONCE_REPLAYED");
 });
 
 test("Rate-Limit: >5 Gate-Versuche/min/IP → 429", async () => {

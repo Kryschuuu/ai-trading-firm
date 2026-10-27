@@ -57,6 +57,37 @@ erlaubt, solange sie hier dokumentiert sind).
     exakt einmal abgerechnet werden und niemals still `realized_pnl = 0`
     schreiben (`tests/asa01.multiprocessKillAndPnl.test.ts`, 8 Integrationstests
     gegen `embedded-postgres`).
+- **ASA-02 (CRITICAL, Security/AuthZ) — Rollen-Spoofing, Vier-Augen-Bypass & Live-Kill-Autorisierung behoben (2026-10-27):**
+  - **Echte Principal-Bindung:** `resolveAuth()` liefert zusätzlich
+    `auth.principal` mit einem HMAC-Fingerprint der vorgelegten Identität
+    (`src/auth/principal.ts`; getrennte Credentials/Sessions ⇒ getrennte IDs,
+    `local-open` ⇒ `distinct: false`). `actorAuditId()` akzeptiert den
+    verifizierten Principal. `POST /api/firm/lifecycle` wertet den Header
+    `x-admin-token` **nicht mehr aus**: Rolle (`admin` nur bei
+    `auth.principal.role === "admin"`), Audit-Akteur und Vier-Augen-Fingerprint
+    stammen ausschließlich aus der Auth-Auflösung; `firm.write` + CSRF +
+    Rate-Limit sind Pflicht, Admin-Kanten (aus `LIFECYCLE_TRANSITIONS`
+    abgeleitet) liefern für Nicht-Admins `403`.
+  - **Kryptographisches 2-Schritt-Vier-Augen:** Neues
+    `src/lib/fourEyesApproval.ts` (15-Minuten-TTL, `approvalId`,
+    Single-Use, Intent-Bindung, `state.fourEyesApprovals`). Lifecycle:
+    `action: "propose"` → `action: "approve"`; Live-Gate:
+    `principalId`/`principalDistinct`/`approvalId` in
+    `LiveGateService.transition()`, persistenter Fingerprint im
+    Venue-State-File, Audit-Aktion `four-eyes-second`. Freitext `approvedBy`
+    autorisiert nichts mehr. `local-open`-Live-Freigaben sind fail-closed
+    (`403 FOUR_EYES_PRINCIPALS_REQUIRED`).
+  - **Live-Kill-Switch:** `GET /api/live/kill` gibt eine 60-s-Einmal-Nonce
+    (`src/lib/killSwitchNonce.ts`) aus. `POST` parst den JSON-Body begrenzt
+    (8 KiB, Typprüfung) und trennt `arm` (`firm.kill`, Operator + Admin, ohne
+    Nonce) von `clear` (`live.gate` + CSRF + Rate-Limit +
+    `consumeKillNonce`; `400 NONCE_REQUIRED`/`NONCE_EXPIRED`,
+    `403 NONCE_REPLAYED`). Audit-Akteur aus `actorAuditId(auth.principal)`.
+  - **Regression/Doku:** `tests/asa02.lifecycleAndLiveKillAuthz.test.ts`
+    (12 Tests, eingebettetes PostgreSQL), `tests/liveGate.api.test.ts` und
+    `tests/liveGate.states.test.ts` migriert; `docs/generated/route-inventory.md`,
+    `docs/LIVE_TRADING.md`, Finding/Tracking/README/`docs/security/README.md`
+    aktualisiert (`ASA-02` = `FIXED`).
 - **CI-Workflow-Spiegel, Dependabot-Synchronisation & Security-Audit-Härtung (2026-10-27):**
   - **Root Cause PR #243 behoben:** `.github/dependabot.yml` konfigurierte nur
     `directory: /` und aktualisierte bei Action-Updates ausschließlich

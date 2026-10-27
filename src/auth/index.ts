@@ -17,8 +17,10 @@ export {
   type AuthResolution,
   type AuthSuccess,
   type Permission,
+  type Principal,
   type PublicActor,
   type Role,
+  type SessionPrincipalClaims,
 } from "./types";
 export {
   AUTH_MODE_FLAG,
@@ -57,6 +59,11 @@ export {
   resolveActor,
   resolveAuth,
 } from "./resolve";
+export {
+  principalFromCredential,
+  principalFromLocalOpen,
+  principalFromSession,
+} from "./principal";
 export {
   OPS_SECTIONS,
   OPS_SECTION_BY_ID,

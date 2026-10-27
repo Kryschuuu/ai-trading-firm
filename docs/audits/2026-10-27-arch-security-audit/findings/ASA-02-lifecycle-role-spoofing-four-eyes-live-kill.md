@@ -3,49 +3,58 @@
 - **ID:** ASA-02
 - **Severity:** CRITICAL
 - **Bereich:** Sicherheit (Autorisierung & Governance)
-- **Status:** OPEN
-- **Datei(en):** `src/app/api/firm/lifecycle/route.ts:165-174`, `src/app/api/firm/lifecycle/route.ts:290-323`, `src/app/api/live/kill/route.ts:27-45`, `src/live-gate/service.ts:318-347`, `src/auth/permissions.ts:21-24`
+- **Status:** **FIXED** (2026-10-27, Remediation-Session `PROMPT-ASA-P0-02`)
+- **Datei(en) vor Fix:** `src/app/api/firm/lifecycle/route.ts`, `src/app/api/live/kill/route.ts`, `src/live-gate/service.ts`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md`](../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md)
+- **Regression:** `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` (12 Tests, u. a. gegen eingebettetes PostgreSQL), angepasste `tests/liveGate.api.test.ts` und `tests/liveGate.states.test.ts`
 
-## Beschreibung
+## Beschreibung (ursprünglicher Befund)
 
-Die Governance-Endpunkte für Strategie-Live-Promotions und den Live-Kill-Switch weisen drei kritische Autorisierungsfehler auf: unvalidiertes Admin-Rollen-Spoofing, ein rein stringbasiertes Ein-Request-Vier-Augen-Prinzip sowie vertauschte Permissions und fehlende Nonce-Prüfung beim Live-Kill-Switch.
+Die Governance-Endpunkte für Strategie-Live-Promotions und den Live-Kill-Switch wiesen drei kritische Autorisierungsfehler auf: unvalidiertes Admin-Rollen-Spoofing, ein rein stringbasiertes Ein-Request-Vier-Augen-Prinzip sowie vertauschte Permissions und fehlende Nonce-Prüfung beim Live-Kill-Switch.
 
-## Technischer Nachweis
+## Technischer Nachweis (historisch)
 
-1. **Rollen-Spoofing (`src/app/api/firm/lifecycle/route.ts:165-174`):** Nach `guardWrite(req)` (Operator-Level) prüft `actorRoleFromRequest(req)` lediglich `if (req.headers.get("x-admin-token")) return "admin";`, ohne den Tokenwert jemals gegen `ADMIN_API_TOKEN` zu validieren. Jeder Operator (und im `local-open`-Modus jeder Aufrufer) erhält mit beliebigem Headerwert volle Admin-Rechte für `LIVE_CONSTRAINED`, `LIVE_SCALED` und `OVERRIDE`.
-2. **Ein-Personen-Vier-Augen-Bypass (`lifecycle/route.ts:290-323`, `src/live-gate/service.ts:318-347`):** `actor`/`operator` und `approvedBy`/`secondApprover` stammen beide als ungeprüfte Strings aus demselben Request-Body (`approvedBy !== actor`). Eine einzelne Person signiert Antrag und Freigabe in einem Aufruf selbst.
-3. **Kill-Switch-Fehlverdrahtung (`src/app/api/live/kill/route.ts:27-45`):**
-   - `POST /api/live/kill` verlangt pauschal `live.gate` (nur `admin`) statt `firm.kill` (`operator` + `admin`), sodass Operatoren im Notfall den Live-Kill-Switch nicht auslösen dürfen (`403`).
-   - Beim `clear` wird `consumeKillNonce` (`src/lib/killSwitchNonce.ts`) überhaupt nicht aufgerufen, obwohl `GET /api/live/kill` extra eine Einmal-Nonce ausstellt.
+1. **Rollen-Spoofing:** Nach dem Operator-Guard prüfte `POST /api/firm/lifecycle` nur `Boolean(req.headers.get("x-admin-token"))`, ohne den Tokenwert jemals gegen `FIRM_ADMIN_TOKEN` zu validieren. Jeder Operator (und im `local-open`-Modus jeder Aufrufer) erhielt mit beliebigem Headerwert volle Admin-Rechte für `LIVE_LIMITED`/`LIVE`/Override.
+2. **Ein-Personen-Vier-Augen-Bypass:** `actor`/`operator` und `approvedBy`/`secondApprover` stammten beide als ungeprüfte Strings aus demselben Request-Body (`approvedBy !== actor`). Eine einzelne Person signierte Antrag und Freigabe in einem Aufruf selbst.
+3. **Kill-Switch-Fehlverdrahtung:** `POST /api/live/kill` verlangte pauschal `live.gate` (nur `admin`) statt `firm.kill` (`operator` + `admin`), sodass Operatoren im Notfall den Live-Kill-Switch nicht auslösen durften. Beim `clear` wurde keine Challenge-Nonce geprüft, obwohl `GET /api/live/kill` dafür gedacht war.
 
-## Konkreter Lösungsvorschlag
+## Umsetzung (FIXED)
 
-```diff
---- a/src/app/api/firm/lifecycle/route.ts
-+++ b/src/app/api/firm/lifecycle/route.ts
-@@ -162,15 +162,11 @@ function parseRole(raw: unknown): LifecycleActorRole | null {
-   return null;
- }
+### 1. Rollen- und Identitätsbindung — `src/app/api/firm/lifecycle/route.ts`
 
--function actorRoleFromRequest(req: Request, bodyRole: unknown): LifecycleActorRole {
--  const explicit = parseRole(bodyRole);
--  if (explicit === "system") return "operator";
--  if (req.headers.get("x-admin-token")) return "admin";
--  if (explicit === "operator") return "operator";
--  return "operator";
-+function actorRoleFromAuth(auth: AuthSuccess): LifecycleActorRole {
-+  return auth.principal.role === "admin" ? "admin" : "operator";
- }
-```
+- Der Header-Existenzcheck auf `x-admin-token` ist **restlos entfernt**. Er wird an keiner Stelle der Route mehr gelesen.
+- `POST` authentifiziert jetzt über `resolveAuth(req)` → `requirePermission(req, "firm.write")` → `checkCsrfGuard(req)` → `checkRateLimit(req)`. Viewer scheitern deterministisch mit `403` an `firm.write`.
+- `actorRoleFromAuth(auth)` leitet die Lifecycle-Rolle **ausschließlich** aus `auth.principal.role` ab (`"admin"` nur bei expliziter Admin-Rolle, sonst `"operator"`); `actorAuditId(auth.principal)` liefert den Audit-Akteur (`api:operator` / `api:admin`). Body-Felder wie `actor`, `approvedBy` oder `actionKind` haben keinen Einfluss auf Rolle oder Identität.
+- `ADMIN_ONLY_TARGETS` wird aus der kanonischen Tabelle `LIFECYCLE_TRANSITIONS` abgeleitet (alle Kanten mit `roles: ["admin"]`, z. B. `PAPER → LIVE_LIMITED`, `LIVE_LIMITED → LIVE`). Ein Nicht-Admin erhält dafür vor jedem Service-/DB-Zugriff `403 ADMIN_ROLE_REQUIRED` — auch mit gefälschtem `x-admin-token`.
 
-- `resolveAuth(req)` als einzige Quelle für Rolle und kryptographische Akteur-ID (`actorAuditId(auth.principal)`) verwenden; niemals Rollen aus Body oder ungeprüften Headern ableiten.
-- In `POST /api/live/kill`: für `action === "arm"` `requirePermission(req, "firm.kill")` verwenden; für `action === "clear"` `requirePermission(req, "live.gate")` **und** `consumeKillNonce(body.nonce)` erzwingen.
-- Vier-Augen-Freigaben über zwei getrennte Requests zweier unterschiedlicher authentifizierter Principals (`proposerPrincipalId !== approverPrincipalId`; im `local-open`-Modus explizit blockiert oder an getrennte Admin-/Operator-Tokens gebunden) abbilden.
+### 2. Kryptographisches 2-Schritt-/2-Principal-Vier-Augen-Prinzip
+
+- Neues gemeinsames Modul [`src/lib/fourEyesApproval.ts`](../../../../src/lib/fourEyesApproval.ts) (`FOUR_EYES_TTL_MS = 15 min`, Single-Use, Intent-Bindung, Lazy-Sweep, Reset-Hook). State liegt in der zentralen `state.fourEyesApprovals`-Registry.
+- Neues Auth-Modul [`src/auth/principal.ts`](../../../../src/auth/principal.ts): `AuthSuccess.principal` enthält einen HMAC-Fingerprint der tatsächlich vorgelegten Identität (`FIRM_SESSION_SECRET`-keyed, sonst prozesslokaler Zufallsschlüssel). Getrennte Credentials (Admin-/Operator-Token) und getrennte signierte Browser-Sessions liefern unterschiedliche IDs; Tokens/CSRF-Werte/Cookies werden **niemals im Klartext** gespeichert oder geloggt. `actorAuditId()` akzeptiert jetzt auch `Actor`/`Principal`/`AuthSuccess`.
+- **Lifecycle:** Live-Promotions und Overrides erfordern `action: "propose"` (Schritt 1, `202` mit `approvalId` + `expiresAt`) und `action: "approve"` (Schritt 2, `consumeFourEyes`). Der direkte Ein-Request-Pfad mit `approvedBy` antwortet `403 FOUR_EYES_REQUIRED`. `consumeFourEyes` verlangt zwingend `approverPrincipalId !== proposerPrincipalId`; gleiche Principals → `403 FOUR_EYES_SAME_PRINCIPAL`, abgelaufene/falsche Tokens → `403 FOUR_EYES_EXPIRED`/`..._WRONG_APPROVAL_ID`/`..._NO_PROPOSAL`. Der Audit-Reason trägt `proposer`, `approver` und `approvalId`.
+- **Live-Gate:** `src/app/api/live/transition/route.ts` reicht `principalId`, `principalDistinct` und `approvalId` an `LiveGateService.transition()` weiter. Dessen Vier-Augen-Block (`LIVE_GATE_FOUR_EYES=true`, Human-Gate **und** finaler `LIVE_ENABLED`-Schritt) speichert Principal-Fingerprint + `approvalId` + 15-Minuten-TTL crash-sicher im Venue-State-File und vergleicht **nicht mehr** `approvedBy`-Strings. Neue Fehlercodes: `FOUR_EYES_PRINCIPALS_REQUIRED` (403), `FOUR_EYES_EXPIRED`, `FOUR_EYES_APPROVAL_MISMATCH`; `FOUR_EYES_PENDING` liefert `approvalId`/`expiresAt` als strukturierte `details`. `four-eyes-second` ergänzt die Audit-Kette. `snapshot()` gibt nur noch `approvedBy`/`at`/`expiresAt` heraus — niemals Fingerprint oder `approvalId`.
+- **Fail-Closed in `local-open`:** Ohne Token ist `principal.distinct === false`; Vier-Augen-Freigaben scheitern mit `403 FOUR_EYES_PRINCIPALS_REQUIRED` und dem Hinweis, dass getrennte authentifizierte Principals (Tokens/Sessions) nötig sind. Der finale `LIVE_ENABLED`-Schritt ist im Offen-Betrieb generell gesperrt (nach der Legalitätsprüfung, damit illegale Sprünge weiterhin `409` melden).
+- Service-Signaturen bleiben abwärtskompatibel (alle neuen Felder optional). Betroffene Unit-Tests wurden sauber migriert (`tests/liveGate.states.test.ts` übergibt jetzt Principal-IDs und `approvalId`; `tests/liveGate.api.test.ts` holt die Clear-Nonce).
+
+### 3. `GET|POST /api/live/kill` repariert
+
+- Neues Modul [`src/lib/killSwitchNonce.ts`](../../../../src/lib/killSwitchNonce.ts) mit `issueKillNonce()` / `consumeKillNonce()` (60 s TTL, single-use, eigener Nonce-Pool getrennt von `/api/firm/kill`).
+- `POST` parst den Body **zuerst sicher** (`Content-Length` + tatsächliche UTF-8-Länge ≤ 8 KiB, `JSON.parse`, flaches Objekt, kein Array/`null`) und unterscheidet strikt `action`:
+  - `arm` (Default im Notfallpfad): `requirePermission(req, "firm.kill") ?? checkCsrfGuard(req)` — **Operator und Admin** dürfen sofort ziehen, ohne Nonce.
+  - `clear`: `requirePermission(req, "live.gate") ?? checkCsrfGuard(req) ?? checkCredentialRateLimit(req)` (nur Admin) **plus** Pflicht-`consumeKillNonce(body.nonce)` → `400 NONCE_REQUIRED`/`NONCE_EXPIRED`, `403 NONCE_REPLAYED`. Unbekannte `action` → `400 UNKNOWN_ACTION`.
+- `GET /api/live/kill` stellt die Einmal-Challenge aus (`live.gate` + CSRF, `Cache-Control: private, no-store`).
+- Der Audit-Akteur für `kill`/`clearKill` stammt aus `actorAuditId(auth.principal)` der verifizierten Auflösung (`operator` / `admin`) statt aus ungeprüftem Freitext.
+- Client-Contract in `src/lib/liveGate.ts` angepasst (`fetchLiveGateKillChallenge()`, `action`/`nonce`, `approvalId`).
+
+### 4. Inventare & Tracking
+
+- `npm run docs:inventories` aktualisiert `docs/generated/route-inventory.md`: `/api/firm/lifecycle` (`POST`) weist jetzt `requirePermission(firm.write) + … + CSRF` aus, `/api/live/kill` hat `GET` (`live.gate` + CSRF) und `POST` (`live.gate` + `firm.kill` + CSRF).
+- Status in dieser Datei, `README.md`, `remediation/TRACKING.md` und `docs/security/README.md` auf `FIXED` gesetzt; Änderungen zusätzlich in `CHANGELOG.md` und `docs/LIVE_TRADING.md` dokumentiert.
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Ein Operator mit gültigem `FIRM_API_TOKEN` und gefälschtem Header `x-admin-token: <invalid>` erhält bei Admin-Lifecycle-Übergängen (`LIVE_CONSTRAINED`, `LIVE_SCALED`, `OVERRIDE`) `401`/`403`.
-- [ ] Ein Operator kann `POST /api/live/kill` mit `action: "arm"` erfolgreich auslösen (`200`), erhält bei `action: "clear"` jedoch `403`; ein Admin erhält bei `action: "clear"` ohne oder mit wiederverwendeter Nonce `400`/`403`.
-- [ ] Eine Live-Promotion bzw. `LiveGate`-Transition nach `LIVE` mit identischem authentifiziertem Principal für Antrag und Gegenzeichnung wird abgewiesen.
-- [ ] Regressionstest `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` + `npm run docs:inventories:check` + `npm run docs:validate` grün.
+- [x] Ein Operator mit gültigem `FIRM_API_TOKEN` und gefälschtem Header `x-admin-token: <invalid>` erhält bei Admin-Lifecycle-Übergängen `403` und wird im Audit als `api:operator` geführt (nie `admin`).
+- [x] Ein Operator kann `POST /api/live/kill` mit `action: "arm"` auslösen (`200`), ein Viewer erhält `403`; `clear` ist für Operatoren `403`; ein Admin erhält ohne oder mit wiederverwendeter Nonce `400`/`403`, mit frischer Nonce aus `GET /api/live/kill` `200`.
+- [x] Eine Live-Promotion bzw. `LiveGate`-Transition nach `LIVE` mit identischem authentifiziertem Principal für Antrag und Gegenzeichnung wird abgewiesen — auch bei unterschiedlichen Body-Namen (`alice`/`bob`). Zwei getrennte authentifizierte Principals bestehen den 2-Schritt-Flow (`200`).
+- [x] `local-open` scheitert bei Vier-Augen-Live-Freigaben fail-closed mit klarer Fehlermeldung.
+- [x] Regressionstest `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` + `npm run typecheck` + `npm run lint` + `npm run docs:inventories:check` + `npm run docs:validate` + `npm test` grün.

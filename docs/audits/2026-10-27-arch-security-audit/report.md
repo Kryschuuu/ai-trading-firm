@@ -42,6 +42,11 @@ Die nachfolgenden **15 Befunde (`ASA-01` … `ASA-15`)** adressieren ausschließ
 
 ### Befund ASA-02 — Rollen-Spoofing per `x-admin-token`, umgehbares Vier-Augen-Prinzip und gebrochene Kill-Switch-Autorisierung
 
+> **Status 2026-10-27: `FIXED`.** Umsetzung und Verifikation (12 Regressionstests) im
+> [Finding](findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md) und im
+> [Tracking](remediation/TRACKING.md). Die folgende Problembeschreibung ist der
+> historische Audit-Befund.
+
 - **Kategorie:** Sicherheit (Autorisierung & Governance)
 - **Schweregrad:** Kritisch
 - **Betroffene Datei(en) & Zeilen:** `src/app/api/firm/lifecycle/route.ts:165-174`, `src/app/api/firm/lifecycle/route.ts:290-323`, `src/app/api/live/kill/route.ts:27-45`, `src/live-gate/service.ts:318-347`, `src/auth/permissions.ts:21-24`

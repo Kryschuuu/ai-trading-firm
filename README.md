@@ -293,9 +293,18 @@ wichtigste Eigenschaften:
   für Browser-Sessions; Idle-TTL + absolute Obergrenze + Refresh mit CSRF.
 - **Sensible Reads schützen:** Dashboard-APIs (`/api/firm*`, `/api/providers`,
   `/api/routing`) verlangen `firm.read`, Antworten `private, no-store`.
-- **Kill-Switch:** Arm ist Operator-tauglich, **Disarm** verlangt ADMIN-Permission
-  + CSRF + kurzlebiges Single-Use-Nonce; Flatten arbeitet auf echten
-  Venue-Positionen (EmergencyBroker-Schnittstelle, Paper- und Live-Engine).
+- **Kill-Switch:** Arm ist Operator-tauglich (`POST /api/firm/kill` wie
+  `POST /api/live/kill` mit `action: "arm"` → `firm.kill`), **Disarm/Clear**
+  verlangt ADMIN-Permission + CSRF + kurzlebiges Single-Use-Nonce
+  (`GET /api/live/kill`); Flatten arbeitet auf echten Venue-Positionen
+  (EmergencyBroker-Schnittstelle, Paper- und Live-Engine).
+- **ASA-02 FIXED (CRITICAL):** Kein Rollen-Spoofing per `x-admin-token` mehr —
+  `resolveAuth().principal` ist die einzige Quelle für Rolle, Audit-Akteur und
+  Vier-Augen-Fingerprint. Live-Promotions und Live-Gate-Freigaben verlangen zwei
+  getrennte Requests zweier unterschiedlicher authentifizierter Principals
+  (15-Minuten-TTL, `local-open` fail-closed). Details:
+  [Finding](docs/audits/2026-10-27-arch-security-audit/findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md),
+  Regression `tests/asa02.lifecycleAndLiveKillAuthz.test.ts`.
 - **Daurable Audit-Trail:** sicherheitsrelevante Schreibvorgänge mit Retry und
   persistenter Spool (at-least-once), fail-closed wo die Mutation vermeidbar
   ist; Metrik + API zeigen Audit-Lücken.
