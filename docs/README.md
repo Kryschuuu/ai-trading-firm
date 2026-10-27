@@ -307,7 +307,8 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
     │   ├── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Prompts (CLOSED)
     │   ├── 2026-09-23-verbesserungen-fahrplan/  ← Verbesserungen, CLOSED v0.2.0
     │   ├── 2026-09-29-strategy-template-ausbau/  ← Strategie-Template-Ausbau (21 Findings, 37 Prompts, OPEN v1.2.5)
-    │   └── 2026-10-06-docs-code-audit/  ← Docs↔Code-Audit v0.17.2 (DC-01…DC-09, alle FIXED)
+    │   ├── 2026-10-06-docs-code-audit/  ← Docs↔Code-Audit v0.17.2 (DC-01…DC-09, alle FIXED)
+    │   └── 2026-10-27-arch-security-audit/  ← Architektur- & Security-Audit v0.17.2 (ASA-01…ASA-15, OPEN, 10 Prompts)
     ├── peer-reviews/         ← Peer-Review-Patches gesammelt
     │   ├── README.md
     │   ├── 2026-08-26-live-trading-readiness/

@@ -206,6 +206,8 @@ export const SLUG_SECTION: Record<string, DocsSectionId> = {
   auditRoadmap20260920: "audits",
   auditVerbesserungen20260923: "audits",
   auditStrategyTemplate20260929: "audits",
+  auditDocsCode20261006: "audits",
+  auditArchSecurity20261027: "audits",
   peerReviews: "audits",
   peerReviewLive: "audits",
   peerReviewBitunix: "audits",

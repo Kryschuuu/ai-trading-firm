@@ -195,3 +195,36 @@ test("Marktdaten-Fehler-Entscheidungsbaum ist vorhanden, katalogisiert und verli
   assert.ok(read("docs/MARKET_DATA_PIPELINE.md").includes("ERROR_HANDLING_MARKETDATA.md"), "Pipeline-Doku muss verlinken");
   assert.ok(read("docs/OBSERVABILITY.md").includes("ERROR_HANDLING_MARKETDATA.md"), "Observability-Doku muss verlinken");
 });
+
+test("Architektur- & Security-Audit 2026-10-27 enthält 15 Findings, 10 Copy-Prompts und ist katalogisiert", () => {
+  const audit = "docs/audits/2026-10-27-arch-security-audit";
+  const findingsDir = path.join(ROOT, audit, "findings");
+  const promptsDir = path.join(ROOT, audit, "prompts");
+  const findings = readdirSync(findingsDir).filter((name) => /^ASA-\d{2}-.+\.md$/.test(name));
+  const prompts = readdirSync(promptsDir).filter((name) => /^PROMPT-ASA-P\d-\d{2}-.+\.md$/.test(name));
+
+  assert.equal(findings.length, 15, "alle 15 Befunde (ASA-01…ASA-15) brauchen eine eigene Finding-Datei");
+  assert.equal(prompts.length, 10, "alle 10 gebündelten Remediation-Sessions brauchen eine Prompt-Datei");
+
+  const tracking = read(`${audit}/remediation/TRACKING.md`);
+  for (const finding of findings) {
+    const id = finding.match(/^(ASA-\d{2})-/)?.[1];
+    assert.ok(id && tracking.includes(`[${id}]`), `${finding}: Finding-ID muss im Tracking verlinkt sein`);
+  }
+
+  for (const promptFile of prompts) {
+    const promptContent = read(`${audit}/prompts/${promptFile}`);
+    const fences = promptContent.match(/^```/gm) ?? [];
+    assert.equal(fences.length, 2, `${promptFile}: muss genau einen kopierfertigen Codeblock enthalten`);
+    assert.match(promptContent, /^```text$/m, `${promptFile}: Copy-Block muss mit \`\`\`text beginnen`);
+  }
+
+  assert.ok(read("docs/README.md").includes("2026-10-27-arch-security-audit/"), "Doku-Index muss Audit nennen");
+  assert.ok(read("docs/audits/README.md").includes("2026-10-27-arch-security-audit"), "Audits-Index muss Audit führen");
+  assert.match(
+    read("src/lib/docsCatalog.ts"),
+    /file:\s*"docs\/audits\/2026-10-27-arch-security-audit\/README\.md"/,
+    "Architektur- & Security-Audit muss im docsCatalog stehen",
+  );
+});
+

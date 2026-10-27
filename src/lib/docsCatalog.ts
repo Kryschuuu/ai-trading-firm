@@ -308,6 +308,17 @@ export const DOCS_CATALOG: Record<string, DocsEntry> = {
       "19 Findings + 32 Prompts in 8 Phasen, Release-Plan v0.6.0 bis v0.11.2 — " +
       "bleibt ausdruecklich Beta (BETA_STATUS.md)",
   },
+  auditDocsCode20261006: {
+    file: "docs/audits/2026-10-06-docs-code-audit/README.md",
+    title: "Audit: Docs↔Code-Abgleich 2026-10-06",
+    subtitle: "9 Findings (DC-01…DC-09) zur Doku-Code-Paritaet — ERLEDIGT (v0.17.2)",
+  },
+  auditArchSecurity20261027: {
+    file: "docs/audits/2026-10-27-arch-security-audit/README.md",
+    title: "Audit: Architektur & Security 2026-10-27",
+    subtitle:
+      "15 Findings (ASA-01…ASA-15: 3 Critical, 6 High, 4 Medium, 2 Low) + 10 Copy-&-Paste-Prompts — OPEN (v0.17.2)",
+  },
   betaStatus: {
     file: "docs/BETA_STATUS.md",
     title: "Beta-Status und Exit-Kriterien",

@@ -51,24 +51,26 @@ docs/audits/
     ├── prompts/
     └── remediation/TRACKING.md
 ├── 2026-09-29-strategy-template-ausbau/  # OPEN v1.2.5
-└── 2026-10-06-docs-code-audit/  # ERLEDIGT (DC-01…DC-09 FIXED)
+├── 2026-10-06-docs-code-audit/  # ERLEDIGT (DC-01…DC-09 FIXED)
+│   ├── README.md
+│   ├── findings/          # DC-01 … DC-09
+│   ├── prompts/           # PROMPT-DC-04 … PROMPT-DC-09
+│   └── remediation/TRACKING.md
+└── 2026-10-27-arch-security-audit/  # OPEN (ASA-01…ASA-15, 10 Copy-&-Paste-Prompts)
     ├── README.md
-    ├── report.md          # Haupt-Audit (7 Abschnitte + Beta-Positionierung)
-    ├── VERSIONING.md      # Audit-Version + Release-Plan v0.6.0 … v0.11.2
-    ├── ROADMAP.md         # 8 Phasen + Phase 8 (Folge-Prompts), Gates G0–G8
-    ├── findings/          # STX-01 … STX-21 (je eine Datei)
-    ├── prompts/           # 37 kopierfertige Prompts (00-01 … 07-03, 08-01 … 08-05)
+    ├── report.md          # Vollbericht (Architektur, Security, Performance, Code-Qualität)
+    ├── findings/          # ASA-01 … ASA-15 (je eine Datei)
+    ├── prompts/           # 10 kopierfertige Session-Prompts (P0-01 … P2-10)
     └── remediation/
-        ├── TRACKING.md            # Status-Wahrheit (Findings + Prompts + Gates)
-        ├── RECONCILE-2026-10-03.md # Vollabgleich Findings ↔ Code-Stand
-        ├── BENCH-BASELINE.md      # Messprotokoll 00-01
-        └── SCREENING-PILOT.md     # Pilot-Runbook Gate G6
+        └── TRACKING.md    # Status-Wahrheit (Findings + Prompts + Pflicht-Gates)
 ```
 
 ## Aktive und jüngste Auditzyklen
 
 | Zyklus | Scope | Status |
 |---|---|---|
+| [2026-10-27-arch-security-audit](2026-10-27-arch-security-audit/README.md) | Vollprüfung von Architektur & Modularität, Sicherheit, Performance & Code-Qualität gegen `main` @ `123a876` (`v0.17.2`) | **OPEN (2026-10-27):** **15 Findings** (3 CRITICAL, 6 HIGH, 4 MEDIUM, 2 LOW — alle `OPEN`), verpackt in **10 kopierfertige Session-Prompts** (`P0-01`…`P2-10`); [Vollbericht](2026-10-27-arch-security-audit/report.md), [Prompts](2026-10-27-arch-security-audit/prompts/README.md), [Tracking](2026-10-27-arch-security-audit/remediation/TRACKING.md) |
+| [2026-10-06-docs-code-audit](2026-10-06-docs-code-audit/README.md) | Docs↔Code-Ist/Soll der gesamten `docs/`-Landschaft gegen `main` @ `104aaef` (`v0.17.2`) | **ERLEDIGT:** **9 Findings** (2 HIGH, 6 MEDIUM, 1 LOW — `DC-01`…`DC-09` alle FIXED); [Tracking](2026-10-06-docs-code-audit/remediation/TRACKING.md) |
 | [2026-09-29-strategy-template-ausbau](2026-09-29-strategy-template-ausbau/README.md) | Strategie-Templates, Candidate Matrix, Validator-Agent, Copy-Trading — externes Ausbaudokument gegen `main` @ `e3509fd` verifiziert (23 geprüfte Behauptungen) | **OPEN (Audit v1.2.5 — Vollabgleich 2026-10-03 gegen `main` @ `3d13161`, [Abgleich-Bericht](2026-09-29-strategy-template-ausbau/remediation/RECONCILE-2026-10-03.md)): Phasen 0–7 abgeschlossen, alle 32 Ursprungs-Prompts umgesetzt, Gates G0…G5 und G7/G8 erfüllt (G6 Pilotlauf offen):** **21 Findings** (0 CRITICAL, 5 HIGH, 7 MEDIUM, 6 LOW, 3 INFO) — 19 FIXED, 1 PARTIAL (STX-14), 1 OPEN (STX-08); **Phase 8 (abgeschlossen):** 08-01 schließt STX-20 (Nachtrag jetzt `v0.11.0`), 08-02 behebt Altlast 3 (`v0.10.8`), 08-03 Altlast 1 (`v0.10.9`), 08-04 schließt STX-12 (`v0.11.0`, [PR #221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)), 08-05 schließt STX-21 (`v0.11.1`); [Bericht](2026-09-29-strategy-template-ausbau/report.md), [ROADMAP](2026-09-29-strategy-template-ausbau/ROADMAP.md), [VERSIONING](2026-09-29-strategy-template-ausbau/VERSIONING.md), [Tracking](2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [ADR-008…010](../roadmap/DECISIONS.md). **Bleibt Beta** — [BETA_STATUS.md](../BETA_STATUS.md) |
 | [2026-09-24-bookdepth-venue-quality](2026-09-24-bookdepth-venue-quality/README.md) | `bookDepthUsd` als Regelfeld + Orderbuch-Qualitätsgrenze je Venue (IAD-T-06, Fortsetzung von `spreadPct`) | **UMGESETZT v0.4.0:** [Tracking](2026-09-24-bookdepth-venue-quality/remediation/TRACKING.md) |
 | [2026-09-24-paper-n100-cost-spread](2026-09-24-paper-n100-cost-spread/README.md) | Paper n≥100, Kostenmodell feine Takte, 6 rote Tests, spreadPct | **UMGESETZT v0.3.0:** [Tracking](2026-09-24-paper-n100-cost-spread/remediation/TRACKING.md) |

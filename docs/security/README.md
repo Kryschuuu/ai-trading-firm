@@ -26,14 +26,13 @@
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
 | [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | [../audits/2026-09-08-arena-prompts/](../audits/2026-09-08-arena-prompts/) | Arena-Review-Serie (Prompts) — RESTORE-01: Restore des Firmenzustands pro Aufrufer (MEDIUM, Verfügbarkeit) | RESTORE-01 FIXED v1.36.37 (Closed) |
+| [../audits/2026-10-27-arch-security-audit/](../audits/2026-10-27-arch-security-audit/) | Architektur-, Security-, Performance- & Code-Qualitäts-Audit (`v0.17.2`) — 15 Findings (`ASA-01`…`ASA-15`: 3 CRITICAL, 6 HIGH, 4 MEDIUM, 2 LOW) + 10 Remediation-Prompts (`OPEN`) |
 
 ## Critical/High Findings (aggregierter Status)
 
 > Quelle: `docs/audits/*/remediation/TRACKING.md` — hier nur aggregierte Sicht, Details in jeweiligen Audit-Ordnern.
 
-Derzeit enthält die aggregierte Sicht **keine offenen Critical- oder High-Findings**.
-Offene Medium-/Low-Themen bleiben im jeweiligen Audit-Tracking erfasst und sind
-kein Freigabesignal für Live-Trading.
+Im [Architektur- & Security-Audit 2026-10-27](../audits/2026-10-27-arch-security-audit/README.md) sind derzeit **3 CRITICAL-Findings (`ASA-01`…`ASA-03`)** und **6 HIGH-Findings (`ASA-04`…`ASA-09`)** als `OPEN` erfasst und in [10 kopierfertigen Remediation-Prompts](../audits/2026-10-27-arch-security-audit/prompts/README.md) zur Abarbeitung vorbereitet ([Tracking](../audits/2026-10-27-arch-security-audit/remediation/TRACKING.md)). Alle früheren Critical/High-Findings aus September/Oktober 2026 (`SEC-01`…`SEC-10`, `DC-01`, `DC-02`) bleiben behoben.
 
 **SEC-02 ist seit v1.36.31 FIXED:** [sensible Dashboard-Reads](../audits/2026-09-05-security-review-gpt01/findings/SEC-02-unauthenticated-get-apis.md) verlangen `firm.read` und werden `private, no-store` ausgeliefert.
 
