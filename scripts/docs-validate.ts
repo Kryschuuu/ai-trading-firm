@@ -23,6 +23,8 @@
  *      - Doku-Routen und Live-Gate-Zustaende bleiben gegen Code abgeglichen.
  *   F) Versions-Konsistenz: package.json == oberster Eintrag in CHANGELOG.md
  *      (kanonisch im Root, docs/CHANGELOG.md ist Stub) == Status-Header == docs/README.md.
+ *   G) TS-Coverage: jedes Coverage-npm-Skript traegt `--enable-source-maps`
+ *      (sonst verfaelscht der tsx-Transform das 95-%-Security-Tor).
  *
  * Struktur-Update 2026-09-05:
  *   - docs/CHANGELOG.md ist jetzt Stub → nur Root wird version-geprüft
@@ -608,6 +610,32 @@ function checkVersionConsistency() {
   report("Version-Konsistenz", issues.length === 0, issues.join(" | "));
 }
 
+/**
+ * ASA-02-Folgefix (Security-Gate): V8-Coverage muss per Source-Map auf die
+ * TypeScript-Quellen zurueckgefuehrt werden. Ohne `--enable-source-maps`
+ * zaehlt Node die von `tsx` whitespace-minifizierten Transform-Zeilen gegen
+ * die Originaldatei. Es entstehen Phantom-Fehlzeilen — selbst in Kommentaren
+ * und Interfaces — und das 95-%-Tor des Required Checks `security-live-gate`
+ * wird rot, obwohl der Code getestet ist. Daher: jedes npm-Skript mit
+ * `--experimental-test-coverage` muss das Flag mitfuehren (dauerhaft geprueft).
+ */
+function checkCoverageSourceMaps() {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const offending = Object.entries(pkg.scripts ?? {})
+    .filter(([, command]) => command.includes("--experimental-test-coverage"))
+    .filter(([, command]) => !command.includes("--enable-source-maps"))
+    .map(([name]) => name);
+  report(
+    "TS-Coverage==Source-Maps",
+    offending.length === 0,
+    offending.length
+      ? `Ohne --enable-source-maps: ${offending.join(", ")} — der tsx-Transform verfaelscht die Zeilendeckung.`
+      : ""
+  );
+}
+
 function checkCiWorkflowSync() {
   const result = checkCiWorkflows(ROOT);
   report(
@@ -641,6 +669,7 @@ function main() {
   checkRoutes();
   checkStates();
   checkVersionConsistency();
+  checkCoverageSourceMaps();
   checkCiWorkflowSync();
 
   console.log(`[docs-validate] ${checksRun} Checks, ${helpFiles.length} Hilfe-Dateien.`);

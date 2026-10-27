@@ -137,7 +137,15 @@ Checks, kein separater Branch-Protection-Check.
 - Secret-Scan (`scripts/scan-live-gate-secrets.ts`) über Live-Gate-Code, -Tests,
   beide Workflow-Paare (`docs/ci/` und `.github/workflows/`) sowie
   `.github/dependabot.yml`.
-- Live-Gate-Suite mit ≥95% Coverage (Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink)
+- Live-Gate-Suite mit ≥95% Coverage (Enforcer, Kill-Switch, RBAC, Rate-Limit, Audit-Sink).
+  **Messbarkeit:** alle Coverage-Skripte in `package.json` nutzen
+  `--enable-source-maps`, sonst zählt V8 die `tsx`-Transform-Zeilen statt der
+  TypeScript-Quellen und erzeugt Phantom-Fehlzeilen (ASA-02-Folgefix, PR #247).
+  `npm run docs:validate` prüft diese Invariante (`TS-Coverage==Source-Maps`),
+  die Schwelle von 95% bleibt unangetastet. Neue Gate-Zweige gehören in eine
+  `tests/liveGate.*.test.ts` (siehe `tests/liveGate.fourEyes.test.ts`).
+- ASA-02-HTTP-Regressionen über `npm run test:security:asa02` (12 Tests,
+  `tests/asa02.lifecycleAndLiveKillAuthz.test.ts`) im selben Required Check.
 - Suite-Stamp-Erzeugung per Step-`env` (keine Inline-Template-Interpolation im
   Shell-Skript) und Upload als Artefakt (`actions/upload-artifact` v7.0.2).
 

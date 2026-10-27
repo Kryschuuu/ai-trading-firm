@@ -32,6 +32,16 @@
 - **Kill-Switch:** `GET /api/live/kill` gibt eine 60-s-Einmal-Nonce (`src/lib/killSwitchNonce.ts`) aus; `POST` trennt `arm` (`firm.kill`, Operator + Admin) und `clear` (`live.gate` + `consumeKillNonce`, nur Admin). Bounded JSON-Body (8 KiB), Audit-Akteur aus `auth.principal`.
 - **Verifikation:** `npx tsx --test tests/asa02.lifecycleAndLiveKillAuthz.test.ts` (12/12 grün), `npm run typecheck`, `npm run lint`, `npm run docs:inventories && npm run docs:inventories:check`, `npm run docs:validate`, `npm test`.
 - Betroffene Bestandstests migriert: `tests/liveGate.api.test.ts` (Nonce für `clear`), `tests/liveGate.states.test.ts` (Principal-IDs statt Freitextnamen).
+- **Required Check nachgezogen (2026-10-27):** Der merge-blockierende Job
+  `security-live-gate` maß Coverage ohne `--enable-source-maps` und meldete
+  nach dem neuen Vier-Augen-Code fälschlich 94,39 % (real 96,32 %). Alle
+  Coverage-Skripte tragen jetzt das Flag, `docs:validate` prüft die Invariante,
+  `test:security:asa02` hängt die 12 HTTP-Regressionen in den Job ein und
+  `tests/liveGate.fourEyes.test.ts` deckt die neuen Gate-Zweige ab. Real
+  97,91 % Zeilen — Schwelle 95 % unverändert. Details:
+  [`CHANGELOG.md`](../../../../CHANGELOG.md) (Eintrag „security-live-gate
+  dauerhaft stabilisiert") und [`docs/LIVE_TRADING.md`](../../../LIVE_TRADING.md)
+  §8.
 
 ## Empfohlene Abarbeitungsreihenfolge (konfliktfrei nach Dateigrenzen)
 

@@ -59,3 +59,11 @@ Die Governance-Endpunkte für Strategie-Live-Promotions und den Live-Kill-Switch
 - [x] Eine Live-Promotion bzw. `LiveGate`-Transition nach `LIVE` mit identischem authentifiziertem Principal für Antrag und Gegenzeichnung wird abgewiesen — auch bei unterschiedlichen Body-Namen (`alice`/`bob`). Zwei getrennte authentifizierte Principals bestehen den 2-Schritt-Flow (`200`).
 - [x] `local-open` scheitert bei Vier-Augen-Live-Freigaben fail-closed mit klarer Fehlermeldung.
 - [x] Regressionstest `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` + `npm run typecheck` + `npm run lint` + `npm run docs:inventories:check` + `npm run docs:validate` + `npm test` grün.
+- [x] Merge-blockierender Job `security-live-gate` grün: Coverage wird mit
+  `--enable-source-maps` auf die TypeScript-Quellen gemappt (real 97,91 %
+  Zeilen, Schwelle 95 % unverändert), neue Gate-Zweige sind durch
+  `tests/liveGate.fourEyes.test.ts` (14 Tests) abgedeckt,
+  `npm run test:security:asa02` läuft im selben Job, und `docs:validate`
+  schützt die Source-Map-Invariante (`TS-Coverage==Source-Maps`). Ohne das
+  Flag erzeugte der `tsx`-Transform Phantom-Fehlzeilen (94,39 % statt real
+  96,32 %) — die Schwelle wurde **nicht** gesenkt.

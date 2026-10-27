@@ -88,6 +88,35 @@ erlaubt, solange sie hier dokumentiert sind).
     `tests/liveGate.states.test.ts` migriert; `docs/generated/route-inventory.md`,
     `docs/LIVE_TRADING.md`, Finding/Tracking/README/`docs/security/README.md`
     aktualisiert (`ASA-02` = `FIXED`).
+- **`security-live-gate` (Required Check) dauerhaft stabilisiert — ASA-02-Folgefix (2026-10-27, [PR #247](https://github.com/Kryschuuu/ai-trading-firm/pull/247)):**
+  - **Root Cause:** `npm run security:live-gate` maß V8-Coverage über
+    `node --import tsx --test --experimental-test-coverage` **ohne**
+    `--enable-source-maps`. `tsx` transformiert TypeScript mit
+    `minifyWhitespace: true`; ohne Source-Maps zählt Node die generierten
+    Zeilen gegen die Originaldatei. Ergebnis: Phantom-Fehlzeilen in
+    Kommentaren/Interfaces, `config.ts` meldete 87,5 % statt real 100 %,
+    `service.ts` 93,90 % statt 95,82 %. Das 95-%-Tor wurde mit 94,39 % rot,
+    obwohl der Code getestet war (`npm test`: 0 Fehler). Kein Absenken der
+    Schwelle, kein `continue-on-error`.
+  - **Fix:** Alle 12 Coverage-Skripte in `package.json` tragen jetzt
+    `--enable-source-maps`; `npm run docs:validate` prüft dauerhaft
+    (`TS-Coverage==Source-Maps`), dass kein Coverage-Skript das Flag
+    verliert. Neues `npm run test:security:asa02` hängt die 12 ASA-02-HTTP-
+    Regressionen in denselben merge-blockierenden Job ein.
+  - **Echte Regressionstests statt Zahlenkosmetik:** Neues
+    `tests/liveGate.fourEyes.test.ts` (14 Tests) deckt die ASA-02-Zweige der
+    Live-Gate-State-Machine ab — Erstfreigabe (Fingerprint/`approvalId`/
+    Intent/TTL), `local-open`-Fail-Closed, falsche/fehlende `approvalId`,
+    gleicher Principal, Intent-Mismatch, Ablauf inkl. Aufräum-Schreibfehler,
+    Legacy-State ohne Principal, `four-eyes-second`-Audit, `LIVE_ENABLED`
+    mit zwei Principals, `STATE_WRITE_FAILED` bei Erstfreigabe/Intent/Commit/
+    Disable und die `snapshot()`-Whitelist gegen Secret-Leaks.
+  - **Verifikation:** `npm run security:live-gate` EXIT 0 (26 Next- + 16 WS- +
+    210 Auth- + 12 ASA-02- + 92 Live-Gate-Tests), reale Zeilendeckung
+    **97,91 %** auf `src/live-gate/**` (`service.ts` 99,55 %,
+    `states.ts`/`store.ts`/`config.ts` 100 %). `typecheck`, `lint`,
+    `docs:validate` (14 Checks), `docs:inventories:check`, `ci:sync:check`,
+    `test:coverage:marketsync` (94,33 % ≥ 90 %) und `npm test` grün.
 - **CI-Workflow-Spiegel, Dependabot-Synchronisation & Security-Audit-Härtung (2026-10-27):**
   - **Root Cause PR #243 behoben:** `.github/dependabot.yml` konfigurierte nur
     `directory: /` und aktualisierte bei Action-Updates ausschließlich

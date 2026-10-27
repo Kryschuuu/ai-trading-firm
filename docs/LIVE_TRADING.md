@@ -210,9 +210,30 @@ Jeder Übergang, jeder Deny, jeder Kill, jeder Enforce-Entscheid:
   Alter ≤ `LIVE_GATE_SUITE_MAX_AGE_MS`, Default 7 Tage). Der Stamp ist ein
   Deployment-Artefakt aus CI (`actions/upload-artifact`), kein Repo-File;
   manuelles Stempeln (`--source=manual`) ist im Stamp und Audit sichtbar.
-- Coverage-Metrik-Hinweis: Unter `tsx` zaehlen Phantom-Module (CJS/ESM-
-  Duplikate) in die Funktionendeckung — das CI-Tor ist daher Zeilendeckung
-  ≥ 95 % (Funktionen/Branches werden berichtet).
+- **Coverage-Messung (Root Cause des ASA-02-Folgefixes):** Alle
+  Coverage-Skripte in `package.json` starten Node mit
+  `--enable-source-maps --import tsx --test --experimental-test-coverage`.
+  Ohne das Flag zählt V8 die von `tsx` whitespace-minifizierten
+  Transform-Zeilen gegen die TypeScript-Originaldatei: Es erscheinen
+  Phantom-Fehlzeilen in Kommentaren/Interfaces, und `config.ts` meldet z. B.
+  87,5 % statt real 100 %. Nach dem ASA-02-PR fiel das 95-%-Tor dadurch auf
+  94,39 %, obwohl die echte Zeilendeckung 96,32 % betrug. Mit Source-Maps
+  ist die Metrik stabil und zeigt die tatsächlichen TS-Zeilen. Ein
+  `docs:validate`-Check (`TS-Coverage==Source-Maps`) verhindert dauerhaft,
+  dass ein neues Coverage-Skript das Flag vergisst; die Schwelle bleibt
+  unverändert **≥ 95 % Zeilen** (sie wurde nie gesenkt).
+- **Testvertrag für neue Gate-Verzweigungen:** Jeder neue Zweig in
+  `src/live-gate/**` braucht einen Test in einer `tests/liveGate.*.test.ts` —
+  genau dieses Glob misst der Required Check. Die ASA-02-Vier-Augen-Pfade
+  (Principal-Fingerprint, `approvalId`, TTL/Intent, `local-open`-Fail-Closed,
+  Audit `four-eyes-first/-second`, Store-Fehler) liegen in
+  `tests/liveGate.fourEyes.test.ts`; die HTTP-Regressionen in
+  `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` laufen über
+  `npm run test:security:asa02` im selben Gate. Tor rot ⇒ Test ergänzen,
+  **nicht** die Schwelle senken oder `continue-on-error` setzen.
+- Funktions-/Branchdeckung wird nur berichtet (unter `tsx` zählen
+  Phantom-Module bei CJS/ESM-Duplikaten in die Funktionendeckung); das Tor
+  bleibt bewusst Zeilendeckung.
 
 ## 9. API-/CLI-Referenz
 
