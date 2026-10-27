@@ -23,7 +23,7 @@ eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
 ein unabhängiges `FIRM_SESSION_SECRET`; alle Instanzen neu starten und erneut
 anmelden. [Konfiguration und Migration](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 
-**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js ≥ 16.3.4 (im Lockfile aktuell 16.3.8) und gepatchte
+**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js ≥ 16.4.1 (im Lockfile aktuell 16.4.3) und gepatchte
 native Bildverarbeitung. Für Linux und Windows: `npm ci`,
 `npm run test:security:next`, frischer Build und Neustart aller Instanzen.
 [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
@@ -307,7 +307,8 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
     │   ├── 2026-09-20-roadmap-audit/  ← 25 Roadmap-Befunde + 21 Prompts (CLOSED)
     │   ├── 2026-09-23-verbesserungen-fahrplan/  ← Verbesserungen, CLOSED v0.2.0
     │   ├── 2026-09-29-strategy-template-ausbau/  ← Strategie-Template-Ausbau (21 Findings, 37 Prompts, OPEN v1.2.5)
-    │   └── 2026-10-06-docs-code-audit/  ← Docs↔Code-Audit v0.17.2 (DC-01…DC-09, alle FIXED)
+    │   ├── 2026-10-06-docs-code-audit/  ← Docs↔Code-Audit v0.17.2 (DC-01…DC-09, alle FIXED)
+    │   └── 2026-10-27-arch-security-audit/  ← Architektur- & Security-Audit v0.17.2 (ASA-01…ASA-15, OPEN, 10 Prompts)
     ├── peer-reviews/         ← Peer-Review-Patches gesammelt
     │   ├── README.md
     │   ├── 2026-08-26-live-trading-readiness/

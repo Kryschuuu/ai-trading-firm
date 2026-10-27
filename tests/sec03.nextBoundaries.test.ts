@@ -12,12 +12,12 @@ import { test } from "node:test";
 import { PHASE_PRODUCTION_SERVER } from "next/constants";
 import loadConfig from "next/dist/server/config";
 import {
-  detectContentType,
-  getSharp,
   ImageError,
   ImageOptimizerCache,
   imageOptimizer,
 } from "next/dist/server/image-optimizer";
+import { detectContentType } from "next/dist/server/image-optimizer/detect-content-type";
+import { getSharp } from "next/dist/server/image-optimizer/transform";
 import FileSystemCache from "next/dist/server/lib/incremental-cache/file-system-cache";
 import type { CachedRouteKind, IncrementalCacheKind, IncrementalCacheValue } from "next/dist/server/response-cache";
 import escapePathDelimiters from "next/dist/shared/lib/router/utils/escape-path-delimiters";

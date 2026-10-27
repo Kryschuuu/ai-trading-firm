@@ -13,6 +13,9 @@
  *   - source-map-js <= 1.2.1 (GHSA-68fv-2mgg-jv7q, Event-Loop-DoS ueber
  *     indizierte Source-Map-Sektionen; transitiv ueber postcss/next) —
  *     Override pinnt 1.2.2.
+ * Floor nachgezogen am 2026-10-27 (CI-Fix):
+ *   - next <= 16.4.0 (GHSA-2464-fhr4-w9xw, GHSA-p3m5-59mp-jv5r,
+ *     GHSA-673q-mjm6-r5xr) — Floor auf 16.4.1 gehoben, Pin auf 16.4.3.
  * Gleiches Prinzip wie SEC-04: Der Gate-Floor darf nie weicher sein als das
  * Advisory, auch wenn der Lockfile-Pin aktuell haelt.
  */
@@ -21,9 +24,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
-import { getSharp } from "next/dist/server/image-optimizer";
+import { getSharp } from "next/dist/server/image-optimizer/transform";
 
-const MIN_NEXT = "16.3.4";
+const MIN_NEXT = "16.4.1";
 const MIN_SHARP = "0.35.5";
 const MIN_SHARP_LIBVIPS = "1.3.3";
 const MIN_LIBHEIF = "1.23.2";
@@ -85,15 +88,15 @@ function assertRegistryArtifact(entry: PackageEntry, name: string, label: string
 
 test("SEC-03: Versions-Gate lehnt Downgrades, Ranges, Aliase und Prereleases ab", () => {
   for (const unsafe of [
-    undefined, null, 16, "", "16.3.1", "16.3.2", "16.3.3", "15.5.24",
-    "^16.3.1", "^16.3.4", "~16.3.4", ">=16.3.4", "16.x", "*", "latest",
-    "16.3.4-canary.0", "16.3.4+local", "16.3.4 || 16.3.1", "16.03.4",
-    "npm:next@16.3.4", "file:../next", "git+https://example.invalid/next.git",
+    undefined, null, 16, "", "16.3.1", "16.3.4", "16.3.8", "16.4.0", "15.5.24",
+    "^16.3.1", "^16.4.1", "~16.4.1", ">=16.4.1", "16.x", "*", "latest",
+    "16.4.1-canary.0", "16.4.1+local", "16.4.1 || 16.3.1", "16.04.1",
+    "npm:next@16.4.1", "file:../next", "git+https://example.invalid/next.git",
     "9007199254740992.3.4",
   ]) {
     assert.throws(() => assertPatchedVersion(unsafe, MIN_NEXT, "next"), { code: "ERR_ASSERTION" });
   }
-  for (const safe of ["16.3.4", "16.3.10", "16.10.0", "17.0.0"]) {
+  for (const safe of ["16.4.1", "16.4.3", "16.10.0", "17.0.0"]) {
     assertPatchedVersion(safe, MIN_NEXT, "next");
   }
 });

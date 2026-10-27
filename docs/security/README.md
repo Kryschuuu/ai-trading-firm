@@ -26,14 +26,13 @@
 | [../audits/2026-09-03-peer-review/](../audits/2026-09-03-peer-review/) | Peer-Review-Audit Sep 2026 — H1-H10, C1-C4, B1-B2, S1-S2, W1-W2 (CLOSED) |
 | [../audits/2026-09-05-security-review-gpt01/](../audits/2026-09-05-security-review-gpt01/) | Security-Audit GPT_01 — SEC-01 FIXED v1.36.27; SEC-02 FIXED v1.36.31; SEC-03 FIXED v1.36.28; SEC-10 FIXED v1.36.29; SEC-04 FIXED v1.36.30; SEC-05 FIXED v1.36.33 (ergänzt v1.36.34); SEC-06 FIXED v1.36.34; SEC-07 FIXED v1.36.32; SEC-08 FIXED v1.36.35; SEC-09 FIXED v1.36.36 |
 | [../audits/2026-09-08-arena-prompts/](../audits/2026-09-08-arena-prompts/) | Arena-Review-Serie (Prompts) — RESTORE-01: Restore des Firmenzustands pro Aufrufer (MEDIUM, Verfügbarkeit) | RESTORE-01 FIXED v1.36.37 (Closed) |
+| [../audits/2026-10-27-arch-security-audit/](../audits/2026-10-27-arch-security-audit/) | Architektur-, Security-, Performance- & Code-Qualitäts-Audit (`v0.17.2`) — 15 Findings (`ASA-01`…`ASA-15`: 3 CRITICAL, 6 HIGH, 4 MEDIUM, 2 LOW) + 10 Remediation-Prompts (`OPEN`) |
 
 ## Critical/High Findings (aggregierter Status)
 
 > Quelle: `docs/audits/*/remediation/TRACKING.md` — hier nur aggregierte Sicht, Details in jeweiligen Audit-Ordnern.
 
-Derzeit enthält die aggregierte Sicht **keine offenen Critical- oder High-Findings**.
-Offene Medium-/Low-Themen bleiben im jeweiligen Audit-Tracking erfasst und sind
-kein Freigabesignal für Live-Trading.
+Im [Architektur- & Security-Audit 2026-10-27](../audits/2026-10-27-arch-security-audit/README.md) sind derzeit **3 CRITICAL-Findings (`ASA-01`…`ASA-03`)** und **6 HIGH-Findings (`ASA-04`…`ASA-09`)** als `OPEN` erfasst und in [10 kopierfertigen Remediation-Prompts](../audits/2026-10-27-arch-security-audit/prompts/README.md) zur Abarbeitung vorbereitet ([Tracking](../audits/2026-10-27-arch-security-audit/remediation/TRACKING.md)). Alle früheren Critical/High-Findings aus September/Oktober 2026 (`SEC-01`…`SEC-10`, `DC-01`, `DC-02`) bleiben behoben.
 
 **SEC-02 ist seit v1.36.31 FIXED:** [sensible Dashboard-Reads](../audits/2026-09-05-security-review-gpt01/findings/SEC-02-unauthenticated-get-apis.md) verlangen `firm.read` und werden `private, no-store` ausgeliefert.
 
@@ -183,11 +182,11 @@ und P&L-Daten sind aber genauso sensibel wie der Report.
 
 ## Next.js-Upgrade (SEC-03)
 
-**v1.36.28:** Next.js ist exakt gepinnt; der Mindestfix der Advisories ist
-16.3.3, der damalige Fix-Stand war 16.3.4, **aktuell im Lockfile: 16.3.8**
-(`package.json`, Stand 2026-10-04). Das Release nutzte bewusst den stabilen
-Folgepatch mit wieder aktivierter AVIF-Unterstützung und **sharp 0.35.4**,
-passenden libvips-Paketen **1.3.3** sowie **libheif 1.23.2**. Die gesamte Kette
+**v1.36.28:** Next.js ist exakt gepinnt; der damalige Mindestfix der Advisories war
+16.3.4, nach den Folge-Advisories vom 2026-10-27 liegt der Gate-Floor bei **16.4.1**
+und **aktuell im Lockfile: 16.4.3** (`package.json`, Stand 2026-10-27). Das Release
+nutzt die gepatchte AVIF-/SVG-Bildverarbeitung mit **sharp 0.35.5**, passenden
+libvips-Paketen **1.3.4** (Floor 1.3.3) sowie **libheif 1.23.2**. Die gesamte Kette
 ist relevant, nicht allein die Versionsnummer von Next.js. v1.36.27 lieferte
 Next.js 16.3.1 aus.
 
@@ -286,19 +285,20 @@ dauerhafte Verbindung zu einem externen Netzwerk-Peer hält (Bitunix-Public-WS).
 - Die Kappen schützen den eigenen Prozess vor einem böswilligen oder
   übernommenen Endpunkt; sie ersetzen kein Update der Bibliothek.
 
-## Dependency-Floors (Nachtrag 2026-10-06)
+## Dependency-Floors (Nachträge 2026-10-06 & 2026-10-27)
 
-**Anhebung ohne Finding-Nummer**, ausgelöst durch zwei Advisories, die nach dem
-letzten grünen `security-live-gate`-Lauf veröffentlicht wurden und den
-fail-closed Schritt `npm audit --audit-level=high --omit=dev` rot werden ließen:
+**Anhebung ohne eigene Finding-Nummer**, ausgelöst durch neue Upstream-Advisories,
+die den fail-closed Schritt `npm audit --audit-level=high --omit=dev` im Workflow
+`security-live-gate` rot werden ließen:
 
 | Paket | Vorher | Jetzt | Advisory | Weg |
 |-------|--------|-------|----------|-----|
-| `sharp` (optionalDependency von `next`) | 0.35.4 | **0.35.5** | GHSA-wq5f-xc86-pv6w / CVE-2026-96889 (librsvg über den AVIF-Pfad) | `overrides` in `package.json` (Muster wie `ws`) |
-| `source-map-js` (transitiv über `postcss`/`next`) | 1.2.1 | **1.2.2** | GHSA-68fv-2mgg-jv7q (Event-Loop-DoS über indizierte Source-Map-Sektionen) | `overrides` in `package.json` |
+| `sharp` (optionalDependency von `next`) | 0.35.4 | **0.35.5** | GHSA-wq5f-xc86-pv6w / CVE-2026-96889 (librsvg über den AVIF-Pfad) | `overrides` in `package.json` (2026-10-06) |
+| `source-map-js` (transitiv über `postcss`/`next`) | 1.2.1 | **1.2.2** | GHSA-68fv-2mgg-jv7q (Event-Loop-DoS über indizierte Source-Map-Sektionen) | `overrides` in `package.json` (2026-10-06) |
+| `next` & `eslint-config-next` | 16.3.8 | **16.4.3** (Floor **16.4.1**) | GHSA-2464-fhr4-w9xw (Image Optimization SVG RCE), GHSA-p3m5-59mp-jv5r (Server Actions DoS), GHSA-673q-mjm6-r5xr (`use cache` TypedArray RCE) | Exakter Pin in `package.json` + Lockfile-Update (2026-10-27) |
 
 - Der SEC-03-Gate-Floor in `tests/sec03.nextDependencies.test.ts` wurde auf
-  `sharp >= 0.35.5` **und** `source-map-js >= 1.2.2` angehoben — gleiches Prinzip
+  `next >= 16.4.1`, `sharp >= 0.35.5` **und** `source-map-js >= 1.2.2` angehoben — gleiches Prinzip
   wie SEC-04: Der Gate-Floor darf nie weicher sein als das Advisory. Die
   `@img/sharp-libvips-*`-Binaries liegen mit dem Sprung bei 1.3.4 (Floor 1.3.3).
 - **Konsistenz-Detail:** Parallel zum Override wurde der Install-Script-Eintrag in
