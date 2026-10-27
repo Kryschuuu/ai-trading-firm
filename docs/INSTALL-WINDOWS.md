@@ -3,8 +3,8 @@
 > **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 > **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf Next.js
-> den gepinnten Stand ≥ 16.3.4 einschließlich nativer Bildverarbeitung aktualisieren
-> (im Lockfile aktuell 16.3.8). `npm ci`,
+> den gepinnten Stand ≥ 16.4.1 einschließlich nativer Bildverarbeitung aktualisieren
+> (im Lockfile aktuell 16.4.3). `npm ci`,
 > `npm run test:security:next`, frischer Build und Neustart aller Instanzen sind
 > erforderlich; ein reines Manifest-Update reicht nicht. Das gilt auch ohne
 > Nutzung von Bildern im Dashboard. [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).

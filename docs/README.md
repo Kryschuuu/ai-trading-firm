@@ -23,7 +23,7 @@ eingetragen sind. [Anleitung und Sicherheitsabwägung](HOWTO_LAN_SESSION.md).
 ein unabhängiges `FIRM_SESSION_SECRET`; alle Instanzen neu starten und erneut
 anmelden. [Konfiguration und Migration](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 
-**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js ≥ 16.3.4 (im Lockfile aktuell 16.3.8) und gepatchte
+**Security-Upgrade v1.36.28:** SEC-03 ist behoben: Next.js ≥ 16.4.1 (im Lockfile aktuell 16.4.3) und gepatchte
 native Bildverarbeitung. Für Linux und Windows: `npm ci`,
 `npm run test:security:next`, frischer Build und Neustart aller Instanzen.
 [Upgrade-Runbook](security/README.md#nextjs-upgrade-sec-03).
