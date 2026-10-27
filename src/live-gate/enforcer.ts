@@ -36,8 +36,9 @@ import {
 import { getLiveGateRuntime } from "./runtime";
 import { readSuiteStamp, validateSuiteStamp } from "./suite";
 import { liveGateStateRank } from "./states";
-// riskGuard ist ein reines Leaf-Modul (keine Imports) — kein Zyklusrisiko.
+// riskGuard + killSwitchDb sind frei von Engine-/UI-/LLM-Abhängigkeiten.
 import { killSwitch } from "@/lib/riskGuard";
+import { evaluateAuthoritativeKillSwitchSync } from "@/lib/killSwitchDb";
 
 export type LiveOrderDenyCode =
   | "UNKNOWN_VENUE"
@@ -199,12 +200,20 @@ export function evaluateLiveOrder(
     return finish(false, "VENUE_NOT_LIVE_CAPABLE", `Adapter-Capability live=false für ${venue}.`, venue, null, { flags });
   }
 
-  // 3) Kill-Switch (Memory + persistente Failsafe-Datei).
-  //    3a — prozesslokaler Not-Halt (riskGuard.killSwitch, /api/firm/kill):
-  //    Der Firmen-Kill-Knopf MUSS auch eine Live-Order stoppen, nicht nur
-  //    die Paper-Ledger. Vorher konsultierte der Enforcer nur die Kill-Datei.
-  if (killSwitch.isArmed()) {
-    return finish(false, "KILL_SWITCH_ACTIVE", "Prozessweiter Not-Halt (riskGuard.killSwitch) ist aktiv — ausgelöst über /api/firm/kill oder Auto-Kill (Drawdown/Tagesverlust).", venue, null, { killed: true, flags });
+  // 3) Kill-Switch (autoritative DB + Memory + persistente Failsafe-Datei).
+  //    3a — autoritatives Firmen-Kill-Gate (ASA-01: PostgreSQL `kill_switches`
+  //    mit <= 500 ms TTL-Cache / LISTEN-NOTIFY, synchronisiert mit
+  //    riskGuard.killSwitch; im Offline-Test-Modus expliziter Memory-Fallback):
+  const authKill = evaluateAuthoritativeKillSwitchSync({
+    env,
+    triggerBackgroundRefresh: true,
+  });
+  if (authKill.armed || killSwitch.isArmed()) {
+    const detail =
+      authKill.source === "db-error" || authKill.source === "cache-stale-fail-closed"
+        ? authKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+        : `Prozessweiter Not-Halt (riskGuard.killSwitch / kill_switches) ist aktiv${authKill.reason ? ` (${authKill.reason})` : ""} — ausgelöst über /api/firm/kill oder Auto-Kill (Drawdown/Tagesverlust).`;
+    return finish(false, "KILL_SWITCH_ACTIVE", detail, venue, null, { killed: true, flags });
   }
   //    3b — persistente Failsafe-Datei (npm run live:kill / /api/live/kill):
   const kill = runtime.isKilled(venue);

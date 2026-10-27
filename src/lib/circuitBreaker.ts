@@ -49,6 +49,7 @@ import { killSwitches, positions } from "@/db/schema";
 import { writeAuditRecord } from "./auditSink";
 import { emitAlert, type Alert } from "./alerts";
 import { killSwitch } from "./riskGuard";
+import { notifyFirmControlChanged } from "./killSwitchDb";
 import { state } from "./stateRegistry";
 import { structuredLog } from "./logger";
 
@@ -370,8 +371,14 @@ export async function checkCircuitBreaker(
   try {
     const record =
       deps.recordKillSwitch ??
-      ((row: { reason: string; triggeredBy: string; armed: boolean }) =>
-        db.insert(killSwitches).values(row).then(() => undefined));
+      (async (row: { reason: string; triggeredBy: string; armed: boolean }) => {
+        await db.insert(killSwitches).values(row);
+        await notifyFirmControlChanged({
+          armed: row.armed,
+          reason: row.reason,
+          source: "auto-circuit-breaker",
+        });
+      });
     await record({ reason: trigger.reason, triggeredBy: "AUTO_CIRCUIT_BREAKER", armed: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "kill_switches-Insert fehlgeschlagen";

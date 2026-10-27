@@ -138,6 +138,59 @@ export interface ExecutedFill {
 export interface PaperExecutionAdapter {
   quoteProvider(symbol: string): LiveQuote | null;
   execute(order: Order, quote: LiveQuote): ExecutedFill;
+  /** Optionale Exit-Gebühr in Kontowährung beim Schließen einer Position (ASA-01). */
+  estimateCloseFee?(params: {
+    symbol: string;
+    side: OrderSide;
+    qty: number;
+    exitPrice: number;
+  }): number;
+}
+
+export type PaperCloseAccounting = {
+  fillPrice: number;
+  fees: number;
+  rawNetPnl: number;
+  realizedPnl: number;
+  cashDelta: number;
+};
+
+/**
+ * Deterministische Close-Abrechnung des Paper-Ledgers (ASA-01).
+ *
+ * Gemeinsame Richtungs- und Gebührenformel für `PaperBroker.close()` und den
+ * Fallback-Pfad in `src/lib/monitor.ts` (`applyExit`, falls eine fremderöffnete
+ * Position nicht im lokalen RAM lag): kein stiller `0`-Fallback, exakte
+ * Parität für `LONG`/`SHORT` sowie optionale Exit-Gebühren.
+ */
+export function computePaperClosePnl(params: {
+  side: OrderSide;
+  qty: number;
+  entryPrice: number;
+  exitPrice: number;
+  exitFee?: number;
+}): PaperCloseAccounting {
+  const exitFee =
+    typeof params.exitFee === "number" &&
+    Number.isFinite(params.exitFee) &&
+    params.exitFee > 0
+      ? params.exitFee
+      : 0;
+  const direction = params.side === "LONG" ? 1 : -1;
+  const rawGrossPnl = direction * params.qty * (params.exitPrice - params.entryPrice);
+  const rawNetPnl = rawGrossPnl - exitFee;
+  const realizedPnl = Number(rawNetPnl.toFixed(2));
+  // Beim Öffnen bindet `submit()` für LONG wie SHORT `qty * entryPrice` vom Cash;
+  // beim Schließen fließt dieses gebundene Kapital zuzüglich Netto-P&L zurück
+  // (bei LONG ohne Gebühr identisch zu `qty * exitPrice`, bei SHORT richtungsrichtig).
+  const cashDelta = params.qty * params.entryPrice + rawNetPnl;
+  return {
+    fillPrice: params.exitPrice,
+    fees: exitFee,
+    rawNetPnl,
+    realizedPnl,
+    cashDelta,
+  };
 }
 
 export type HydratePosition = {
@@ -212,11 +265,17 @@ export class PaperBroker {
     }
   >();
   private execution?: PaperExecutionAdapter;
+  private hydrated = false;
 
   constructor(startEquity = 10000, execution?: PaperExecutionAdapter) {
     this.cash = startEquity;
     this.startEquity = startEquity;
     this.execution = execution;
+  }
+
+  /** true, sobald `hydrate()` oder `reconcileOpenPositions()` mindestens einmal lief. */
+  get isHydrated(): boolean {
+    return this.hydrated;
   }
 
   /** Injiziert den Ausführungs-Adapter (Task 03) — idempotent. */
@@ -253,7 +312,11 @@ export class PaperBroker {
   get accountEquity(): number {
     let marketValue = 0;
     for (const [symbol, p] of this.positions) {
-      marketValue += p.qty * (paperQuote(symbol) ?? p.entryPrice);
+      const mark = paperQuote(symbol) ?? p.entryPrice;
+      marketValue +=
+        p.side === "LONG"
+          ? p.qty * mark
+          : p.qty * p.entryPrice - p.qty * (mark - p.entryPrice);
     }
     return this.cash + marketValue;
   }
@@ -392,6 +455,131 @@ export class PaperBroker {
         trailingArmed: r.trailingArmed === true,
       });
     }
+    this.hydrated = true;
+  }
+
+  /**
+   * ASA-01: Inkrementelle Synchronisation des lokalen `PaperBroker`-RAM mit den
+   * offenen Positionen in PostgreSQL (`positions` mit `status = 'OPEN'`).
+   *
+   * Im Gegensatz zu `hydrate()` überschreibt `reconcileOpenPositions()` den
+   * laufenden `this.cash`-Stand NICHT mit einem potenziell veralteten
+   * `equity_snapshots.cash`-Wert, sondern bucht exakt die Deltas zwischen
+   * lokalem RAM und DB:
+   *   - Neu in DB (durch Nachbarprozess geöffnet): übernimmt Position in
+   *     `this.positions`, bindet `qty * entryPrice` vom Cash und übernimmt
+   *     aufgelaufenes `fundingPaid`.
+   *   - Nur im RAM (durch Nachbarprozess geschlossen): entfernt Position aus
+   *     `this.positions` und gibt das gebundene Einstiegs-Notional zuzüglich
+   *     des in der DB gebuchten `realizedPnl` (falls übergeben) frei.
+   *   - In beiden vorhanden: aktualisiert SL/TP/Trailing/Funding-Deltas.
+   */
+  reconcileOpenPositions(
+    rows: HydratePosition[],
+    closedBySymbol?: ReadonlyMap<string, { realizedPnl: number; fundingPaid: number }>
+  ): { adopted: string[]; removed: string[]; updated: string[] } {
+    const dbMap = new Map<
+      string,
+      {
+        qty: number;
+        side: OrderSide;
+        entryPrice: number;
+        stopLoss: number | null;
+        takeProfit: number | null;
+        fundingPaid: number;
+        trailingStop: number | null;
+        trailingArmed: boolean;
+      }
+    >();
+
+    for (const r of rows) {
+      const symbol = sanitizeSymbol(r.symbol);
+      if (
+        !symbol ||
+        !Number.isFinite(r.qty) ||
+        r.qty <= 0 ||
+        !Number.isFinite(r.entryPrice) ||
+        r.entryPrice <= 0 ||
+        (r.side !== "LONG" && r.side !== "SHORT")
+      ) {
+        continue;
+      }
+      dbMap.set(symbol, {
+        qty: r.qty,
+        side: r.side,
+        entryPrice: r.entryPrice,
+        stopLoss: sanitizeLevel(r.stopLoss),
+        takeProfit: sanitizeLevel(r.takeProfit),
+        fundingPaid: sanitizeFunding(r.fundingPaid),
+        trailingStop: sanitizeLevel(r.trailingStop),
+        trailingArmed: r.trailingArmed === true,
+      });
+    }
+
+    const adopted: string[] = [];
+    const removed: string[] = [];
+    const updated: string[] = [];
+
+    for (const [symbol, ramPos] of [...this.positions.entries()]) {
+      if (dbMap.has(symbol)) continue;
+      this.positions.delete(symbol);
+      const closed = closedBySymbol?.get(symbol);
+      if (closed && Number.isFinite(closed.realizedPnl)) {
+        const fundingDelta = sanitizeFunding(closed.fundingPaid) - ramPos.fundingPaid;
+        this.cash += ramPos.qty * ramPos.entryPrice + closed.realizedPnl + fundingDelta;
+      } else {
+        this.cash += ramPos.qty * ramPos.entryPrice - ramPos.fundingPaid;
+      }
+      removed.push(symbol);
+    }
+
+    for (const [symbol, dbPos] of dbMap.entries()) {
+      const existing = this.positions.get(symbol);
+      if (!existing) {
+        this.positions.set(symbol, { ...dbPos });
+        this.cash -= dbPos.qty * dbPos.entryPrice;
+        this.cash += dbPos.fundingPaid;
+        adopted.push(symbol);
+        continue;
+      }
+
+      const coreChanged =
+        existing.side !== dbPos.side ||
+        Math.abs(existing.qty - dbPos.qty) > 1e-12 ||
+        Math.abs(existing.entryPrice - dbPos.entryPrice) > 1e-9;
+
+      if (coreChanged) {
+        this.cash += existing.qty * existing.entryPrice - existing.fundingPaid;
+        this.cash -= dbPos.qty * dbPos.entryPrice;
+        this.cash += dbPos.fundingPaid;
+        this.positions.set(symbol, { ...dbPos });
+        updated.push(symbol);
+        continue;
+      }
+
+      const fundingDelta = dbPos.fundingPaid - existing.fundingPaid;
+      if (Math.abs(fundingDelta) > 1e-12) {
+        this.cash += fundingDelta;
+      }
+      const metaChanged =
+        Math.abs(fundingDelta) > 1e-12 ||
+        existing.stopLoss !== dbPos.stopLoss ||
+        existing.takeProfit !== dbPos.takeProfit ||
+        existing.trailingStop !== dbPos.trailingStop ||
+        existing.trailingArmed !== dbPos.trailingArmed;
+
+      existing.stopLoss = dbPos.stopLoss;
+      existing.takeProfit = dbPos.takeProfit;
+      existing.fundingPaid = dbPos.fundingPaid;
+      existing.trailingStop = dbPos.trailingStop;
+      existing.trailingArmed = dbPos.trailingArmed;
+      if (metaChanged) {
+        updated.push(symbol);
+      }
+    }
+
+    this.hydrated = true;
+    return { adopted, removed, updated };
   }
 
   /**
@@ -839,18 +1027,77 @@ export class PaperBroker {
   }
 
   /**
+   * Ermittelt die Exit-Gebühr für das Schließen einer Position:
+   * explizite Vorgabe > optionales `execution.estimateCloseFee(...)` > `0`.
+   */
+  resolveExitFee(
+    symbol: string,
+    side: OrderSide,
+    qty: number,
+    exitPrice: number,
+    explicitExitFee?: number
+  ): number {
+    if (
+      typeof explicitExitFee === "number" &&
+      Number.isFinite(explicitExitFee) &&
+      explicitExitFee >= 0
+    ) {
+      return explicitExitFee;
+    }
+    if (this.execution?.estimateCloseFee) {
+      const estimated = this.execution.estimateCloseFee({
+        symbol: sanitizeSymbol(symbol) ?? symbol.toUpperCase(),
+        side,
+        qty,
+        exitPrice,
+      });
+      if (typeof estimated === "number" && Number.isFinite(estimated) && estimated >= 0) {
+        return estimated;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Bucht den Netto-P&L einer Position auf `this.cash`, die ausschließlich in
+   * PostgreSQL offen war (und daher lokal kein `qty * entryPrice` vom Cash
+   * gebunden hatte) und gerade atomar geschlossen wurde (ASA-01).
+   */
+  applyExternalCloseNetPnl(rawNetPnl: number, reason = "AGENT_CLOSE"): void {
+    if (Number.isFinite(rawNetPnl)) {
+      this.cash += rawNetPnl;
+    }
+    telemetry.firm.orderFills.inc({ kind: "CLOSE", reason: classifyCloseReason(reason) });
+  }
+
+  /**
    * Position glattstellen. `reason` dokumentiert WARUß geschlossen wurde
    * (STOP_LOSS, TAKE_PROFIT, MANUAL_FLATTEN, AGENT_CLOSE).
    */
-  close(symbol: string, reason = "AGENT_CLOSE"): (Fill & { realizedPnl: number }) | null {
-    const key = symbol.toUpperCase();
+  close(
+    symbol: string,
+    reason = "AGENT_CLOSE",
+    opts?: { exitPrice?: number; exitFee?: number }
+  ): (Fill & { realizedPnl: number }) | null {
+    const key = sanitizeSymbol(symbol) ?? symbol.toUpperCase();
     const pos = this.positions.get(key);
     if (!pos) return null;
-    const price = paperQuote(key) ?? pos.entryPrice;
-    this.cash += pos.qty * price;
+    const price =
+      typeof opts?.exitPrice === "number" &&
+      Number.isFinite(opts.exitPrice) &&
+      opts.exitPrice > 0
+        ? opts.exitPrice
+        : paperQuote(key) ?? pos.entryPrice;
+    const exitFee = this.resolveExitFee(key, pos.side, pos.qty, price, opts?.exitFee);
+    const accounting = computePaperClosePnl({
+      side: pos.side,
+      qty: pos.qty,
+      entryPrice: pos.entryPrice,
+      exitPrice: price,
+      exitFee,
+    });
+    this.cash += accounting.cashDelta;
     this.positions.delete(key);
-    const pnl =
-      (pos.side === "LONG" ? 1 : -1) * pos.qty * (price - pos.entryPrice);
     // GAP-10: Close-Fill-Metrik je Exit-Grund (STOP_LOSS/TAKE_PROFIT/…).
     telemetry.firm.orderFills.inc({ kind: "CLOSE", reason: classifyCloseReason(reason) });
     return {
@@ -858,11 +1105,12 @@ export class PaperBroker {
       symbol: key,
       side: pos.side,
       qty: pos.qty,
-      fillPrice: price,
+      fillPrice: accounting.fillPrice,
       stopLoss: pos.stopLoss,
       takeProfit: pos.takeProfit,
       status: "FILLED",
-      realizedPnl: Number(pnl.toFixed(2)),
+      fees: accounting.fees,
+      realizedPnl: accounting.realizedPnl,
       reason,
     };
   }

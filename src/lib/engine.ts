@@ -77,7 +77,13 @@ import { state } from "./stateRegistry";
 import {
   ensurePaperBrokerHydrated,
   invalidatePaperBrokerHydration,
+  syncPaperBrokerWithDb,
 } from "./brokerHydration";
+import {
+  invalidateAuthoritativeKillSwitchCache,
+  notifyFirmControlChanged,
+  readAuthoritativeKillSwitch,
+} from "./killSwitchDb";
 
 /**
  * Liefert den Paper-Broker und stellt beim ersten Zugriff nach einem Prozessstart
@@ -139,6 +145,7 @@ export async function getBroker(): Promise<PaperBroker> {
  */
 export function invalidateBrokerCache(): void {
   invalidatePaperBrokerHydration();
+  invalidateAuthoritativeKillSwitchCache();
 }
 
 export type AgentDecision = {
@@ -382,12 +389,14 @@ export async function runAgentTurn(
 
   // Automatischer Not-Halt bei Drawdown — vor jeder Modellabfrage geprüft.
   if (broker.drawdownPct > limits.maxEquityDrawdownPct && !killSwitch.isArmed()) {
+    const autoReason = `AUTO_DRAWDOWN_${(broker.drawdownPct * 100).toFixed(1)}%`;
     killSwitch.pull(`DRAWDOWN ${(broker.drawdownPct * 100).toFixed(1)}% > ${(limits.maxEquityDrawdownPct * 100).toFixed(1)}%`);
     await db.insert(killSwitches).values({
-      reason: `AUTO_DRAWDOWN_${(broker.drawdownPct * 100).toFixed(1)}%`,
+      reason: autoReason,
       triggeredBy: "RISK_ENGINE",
       armed: true,
     });
+    await notifyFirmControlChanged({ armed: true, reason: autoReason, source: "engine-drawdown" });
     // S1: Der Not-Halt ist bereits gesetzt (sichere Richtung) — die Auditzeile
     // darf den Lauf nicht abbrechen, aber eine Lücke wird gemeldet, nicht
     // verschluckt: CRITICAL-Zeile + Missed-Audit-Zähler + Eintrag im Protokoll.
@@ -725,12 +734,14 @@ export async function runAgentTurn(
 
   switch (decision.type) {
     case "KILL": {
+      const agentKillReason = decision.reason ?? "AGENT_REQUESTED";
       killSwitch.pull(decision.reason ?? "Agent hat Not-Halt angefordert");
       await db.insert(killSwitches).values({
-        reason: decision.reason ?? "AGENT_REQUESTED",
+        reason: agentKillReason,
         triggeredBy: agent.name,
         armed: true,
       });
+      await notifyFirmControlChanged({ armed: true, reason: agentKillReason, source: `agent:${agent.name}` });
       await db.update(missions).set({ status: "KILLED", updatedAt: new Date() }).where(eq(missions.id, missionId));
       // S1: Scharfschalten ist die SICHERE Richtung — ein Auditfehler darf den
       // Not-Halt niemals verhindern (das wäre fail-open im einzigen Moment, in
@@ -755,11 +766,25 @@ export async function runAgentTurn(
 
     case "TRADE": {
       // --- Engine-Validierung (Schicht 2), bevor überhaupt eine Order entsteht ---
-      if (killSwitch.isArmed()) {
-        await logAudit("ORDER_REJECTED", "WARN", { reason: "KILL_SWITCH_ARMED" }, missionId, agentId);
-        trace.push(step("KILL-SWITCH", false, "Not-Halt aktiv"));
-        return { ...base, status: "BLOCKED", guardrail: "KILL_SWITCH_ARMED", trace };
+      // ASA-01: Autoritatives Kill-Switch-Gate (PostgreSQL `kill_switches`,
+      // fail-closed bei DB-Fehler) + Positions-Reconcile vor Sizing/Guardrails.
+      const authKill = await readAuthoritativeKillSwitch();
+      if (authKill.armed || killSwitch.isArmed()) {
+        const guardrail =
+          authKill.source === "db-error"
+            ? authKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+            : "KILL_SWITCH_ARMED";
+        await logAudit(
+          "ORDER_REJECTED",
+          "WARN",
+          { reason: guardrail, killSwitchReason: authKill.reason },
+          missionId,
+          agentId
+        );
+        trace.push(step("KILL-SWITCH", false, authKill.reason ?? "Not-Halt aktiv"));
+        return { ...base, status: "BLOCKED", guardrail, trace };
       }
+      await syncPaperBrokerWithDb(broker);
       trace.push(step("KILL-SWITCH", true, "Nicht aktiv"));
 
       // H10 (v1.36.21): UNKNOWN/EXTREME blockt Neupositionen. Ein unbekannter
@@ -1072,6 +1097,30 @@ export async function runAgentTurn(
       // Mission/dasselbe Konto einreichen, können nie mehr beide dieselbe
       // Position eröffnen oder gemeinsam das Cash überziehen — die DB ist
       // die einzige Quelle der Wahrheit, nicht der Prozessspeicher.
+      // ASA-01: Unmittelbar vor `submitAtomic` autoritativen Kill-Switch
+      // verifizieren und `PaperBroker` mit DB-Positionen synchronisieren.
+      const preSubmitKill = await readAuthoritativeKillSwitch();
+      if (preSubmitKill.armed || killSwitch.isArmed()) {
+        const guardrail =
+          preSubmitKill.source === "db-error"
+            ? preSubmitKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+            : "KILL_SWITCH_ARMED";
+        await logAudit(
+          "ORDER_REJECTED",
+          "WARN",
+          { reason: guardrail, killSwitchReason: preSubmitKill.reason },
+          missionId,
+          agentId
+        );
+        trace.push(step("KILL-SWITCH", false, preSubmitKill.reason ?? "Not-Halt aktiv"));
+        await db
+          .update(proposals)
+          .set({ status: "AUTO_REJECTED", reason: guardrail })
+          .where(eq(proposals.id, proposal.id));
+        return { ...base, status: "BLOCKED", guardrail, trace };
+      }
+      await syncPaperBrokerWithDb(broker);
+
       // GAP-03: Positions-ID aus dem Eröffnungs-Insert übernehmen, damit die
       // Journal-Zeile (nach der Transaction, unten) exakt diese Position
       // verknüpfen kann — ohne Schema-Änderung an `positions`.
@@ -1317,6 +1366,17 @@ export async function flattenAll(
     ? { mode: opts.mode ?? ("paper" as const), venue: opts.venue ?? "PAPER", broker: opts.broker }
     : await resolveEmergencyBroker();
 
+  // ASA-01: Im Paper-Modus vor dem Close-All erst fremderöffnete Positionen
+  // (z. B. aus `micro-executor`) aus PostgreSQL in den lokalen `PaperBroker`
+  // übernehmen, damit ein Not-Halt mit `flatten: true` auch diese glattstellt.
+  if (resolved.mode === "paper" && !opts?.broker) {
+    try {
+      await syncPaperBrokerWithDb(resolved.broker as unknown as PaperBroker);
+    } catch {
+      /* Flatten läuft best-effort weiter (Notfallpfad wirft nie). */
+    }
+  }
+
   const seq = await runH7EmergencySequence(resolved.broker, reason);
 
   // Paper-Modus: lokales DB-Ledger aus den echten Paper-Fills nachziehen
@@ -1419,9 +1479,20 @@ export async function executeApprovedProposal(
     }, proposal?.missionId ?? undefined, executorAgentId);
     return { ...base, status: "BLOCKED", guardrail: proposal ? "PROPOSAL_NOT_APPROVED" : "PROPOSAL_NOT_FOUND" };
   }
-  if (killSwitch.isArmed()) {
-    await logAudit("ORDER_REJECTED", "WARN", { reason: "KILL_SWITCH_ARMED", proposalId }, proposal.missionId ?? undefined, executorAgentId);
-    return { ...base, status: "BLOCKED", guardrail: "KILL_SWITCH_ARMED" };
+  const authKill = await readAuthoritativeKillSwitch();
+  if (authKill.armed || killSwitch.isArmed()) {
+    const guardrail =
+      authKill.source === "db-error"
+        ? authKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+        : "KILL_SWITCH_ARMED";
+    await logAudit(
+      "ORDER_REJECTED",
+      "WARN",
+      { reason: guardrail, killSwitchReason: authKill.reason, proposalId },
+      proposal.missionId ?? undefined,
+      executorAgentId
+    );
+    return { ...base, status: "BLOCKED", guardrail };
   }
 
   // Runtime-Validierung: proposedDetail ist die einzige Quelle; keine Neubildung.
@@ -1437,7 +1508,24 @@ export async function executeApprovedProposal(
   }
 
   const broker = await getBroker();
+  await syncPaperBrokerWithDb(broker);
   try { await getProductionMarketDataManager().getSnapshot(detail.symbol as string); } catch { /* Broker lehnt fehlenden Kurs ab. */ }
+  const preSubmitKill = await readAuthoritativeKillSwitch();
+  if (preSubmitKill.armed || killSwitch.isArmed()) {
+    const guardrail =
+      preSubmitKill.source === "db-error"
+        ? preSubmitKill.reason ?? "KILL_SWITCH_DB_UNAVAILABLE"
+        : "KILL_SWITCH_ARMED";
+    await logAudit(
+      "ORDER_REJECTED",
+      "WARN",
+      { reason: guardrail, killSwitchReason: preSubmitKill.reason, proposalId },
+      proposal.missionId ?? undefined,
+      executorAgentId
+    );
+    return { ...base, status: "BLOCKED", guardrail };
+  }
+  await syncPaperBrokerWithDb(broker);
   // H2 FIX (CRITICAL, v1.36.19): submitAtomic({ ...detail — proposedDetail
   // bleibt die EINZIGE Orderquelle (H6 unverändert), aber Guard, Fill und
   // Positions-Insert laufen jetzt in einer exklusiv gesperrten Transaktion
@@ -1557,7 +1645,8 @@ export async function runPipeline(missionId: string) {
     // Analyse-/Kontrollphasen dürfen ausschließlich Proposals erzeugen.
     for (const role of phases) {
       for (const agent of team.filter((candidate) => candidate.role === role)) {
-        if (killSwitch.isArmed()) return results;
+        const phaseKill = await readAuthoritativeKillSwitch();
+        if (phaseKill.armed || killSwitch.isArmed()) return results;
         const result = await runAgentTurn(agent.id, missionId, { proposalOnly: true });
         results.push({ agent: agent.name, role: agent.role, result });
         if (result.status === "KILLED") return results;
@@ -1570,7 +1659,8 @@ export async function runPipeline(missionId: string) {
     const [approved] = await db.select().from(proposals)
       .where(and(eq(proposals.missionId, missionId), eq(proposals.status, "APPROVED")))
       .orderBy(desc(proposals.createdAt)).limit(1);
-    if (executor && approved && !killSwitch.isArmed()) {
+    const execKill = await readAuthoritativeKillSwitch();
+    if (executor && approved && !execKill.armed && !killSwitch.isArmed()) {
       const result = await executeApprovedProposal(approved.id, executor.id);
       results.push({ agent: executor.name, role: "EXECUTOR", result });
     }

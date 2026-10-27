@@ -23,7 +23,7 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 | 5 | **Portfolio-Sizing & Allocation** | `src/portfolio/pipeline.ts`, `src/portfolio/optimize.ts`, `src/portfolio/riskGuard.ts`, `src/cycle/steps/riskStep.ts`, `src/cycle/steps/researchStep.ts` | Risk-geprüfte relative Gewichte erreichen serverseitig validierte Research-Proposals; keine Orderfreigabe |
 | 6 | **Execution-Tracking & Slippage** | `src/executionQuality/`, `src/attribution/`, `src/db/schema.ts` | Execution-quality capture/reconcile und Trade-Attribution/Aggregation vorhanden; siehe jeweilige API-/Betriebsdoku |
 | 7 | **Rule-Lifecycle & Cache-Sync** | `src/lib/ruleService.ts`, `src/lib/microExecutor.ts`, `src/lib/tradeRulesNotificationListener.ts`, `drizzle/2026-10-05_trade_rules_notify.sql` | LISTEN/NOTIFY invalidiert RuleCaches sofort; Polling/Backoff sind Fallbacks, SQL-Trigger-Migration manuell anzuwenden |
-| 8 | **State Registry & Hydration** | `src/lib/stateRegistry.ts`, `src/lib/broker.ts`, `src/lib/brokerHydration.ts`, `src/lib/engine.ts` | Atomare Mehrprozess-Hydrierung von Ledgern und Risk-Zuständen |
+| 8 | **State Registry, Hydration & DB-Kill-Switch** | `src/lib/stateRegistry.ts`, `src/lib/broker.ts`, `src/lib/brokerHydration.ts`, `src/lib/killSwitchDb.ts`, `src/lib/engine.ts` | Atomare Mehrprozess-Hydrierung (`syncPaperBrokerWithDb`) und autoritatives DB-Kill-Switch-Gate (`firm_control_changed`) |
 | 9 | **LLM-Routing & Escalation** | `src/routing/router.ts`, `src/cycle/engine.ts`, `src/lib/llmProvider.ts` | Dynamische Modellauswahl nach Task-Komplexität und Token-Budget-Eskalation |
 | 10 | **Live-Gate Enforcement Hooks** | `src/live-gate/enforcer.ts`, `src/brokers/bitunix/adapter.ts`, `src/brokers/factory.ts` | Schusssichere Torsicherung für zusätzliche Broker-Venues (z. B. Alpaca, Binance) |
 
@@ -233,20 +233,23 @@ den geprüften Umfang und die verbleibenden Betriebsgrenzen.
 
 ---
 
-## 8. State Registry & Hydration
+## 8. State Registry, Hydration & DB-Kill-Switch
 
 - **Beteiligte Dateien:**
   - `src/lib/stateRegistry.ts` (`state`, `__resetAllSingletonsForTests`)
-  - `src/lib/broker.ts` (`withAccountLock`, `PaperBroker`; der Ledger-Singleton
-    steht als `state.paperBrokerLedger` in der Registry und wird von
-    `paperBrokerLedger()` in `src/brokers/factory.ts` befüllt)
+  - `src/lib/broker.ts` (`withAccountLock`, `PaperBroker`, `computePaperClosePnl`;
+    der Ledger-Singleton steht als `state.paperBrokerLedger` in der Registry und
+    wird von `paperBrokerLedger()` in `src/brokers/factory.ts` befüllt)
   - `src/lib/brokerHydration.ts` (`restorePaperBrokerState`,
-    `ensurePaperBrokerHydrated`, `invalidatePaperBrokerHydration`,
-    `FIRM_HYDRATION_RETRY_MS`)
+    `ensurePaperBrokerHydrated`, `syncPaperBrokerWithDb`,
+    `invalidatePaperBrokerHydration`, `FIRM_HYDRATION_RETRY_MS`)
+  - `src/lib/killSwitchDb.ts` (`readAuthoritativeKillSwitch`,
+    `evaluateAuthoritativeKillSwitchSync`, `notifyFirmControlChanged`,
+    `FirmControlNotificationListener`, `FIRM_CONTROL_CHANNEL`)
   - `src/lib/engine.ts` (`getBroker` — delegiert an die Hydration,
     `invalidateBrokerCache`)
 - **Aktueller Stand & Limitationen:**
-  Alle prozessweiten Singletons sind typisiert in `src/lib/stateRegistry.ts` registriert. `firmHydrated` schützt vor Mehrfach-Hydrierung aus der Datenbank; `firmHydration` dedupliziert den laufenden Restore (Single-Flight), `firmHydrateRetryAt` hält das Backoff-Fenster nach einem Fehlschlag.
+  Alle prozessweiten Singletons sind typisiert in `src/lib/stateRegistry.ts` registriert. `firmHydrated` schützt vor Mehrfach-Initialhydrierung; `firmHydration` dedupliziert den laufenden Restore (Single-Flight), `firmHydrateRetryAt` hält das Backoff-Fenster nach einem Fehlschlag. Für den Zwei-Prozess-Betrieb (`ai-trading-firm.service` + `micro-executor.service`, ASA-01) gleicht `syncPaperBrokerWithDb()` unter `withAccountLock("PAPER", ...)` offene und extern geschlossene `positions`-Zeilen laufend mit dem lokalen `PaperBroker`-Ledger ab, während `src/lib/killSwitchDb.ts` über `public.kill_switches` + `LISTEN/NOTIFY` (`firm_control_changed`, `<= 500 ms` TTL, Fail-Closed) den Kill-Switch prozessübergreifend erzwingt.
 - **Erweiterungs-Schnittstelle:**
   ```ts
   // Bei neuen Singletons:

@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { killSwitches, missions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { killSwitch } from "@/lib/riskGuard";
+import { notifyFirmControlChanged } from "@/lib/killSwitchDb";
 import { flattenAll, invalidateBrokerCache, logAudit, type FlattenOutcome } from "@/lib/engine";
 import { guardWrite } from "@/lib/apiAuth";
 import { actorAuditId, requirePermission } from "@/auth";
@@ -74,6 +75,7 @@ export async function POST(req: Request) {
 
     killSwitch.pull(reason);
     await db.insert(killSwitches).values({ reason, triggeredBy: "OPERATOR", armed: true });
+    await notifyFirmControlChanged({ armed: true, reason, source: "api/firm/kill" });
     // S1: Scharfschalten ist die SICHERE Richtung. Der Audit ist
     // Sicherheitsklasse (Retry + Spool + Alarm), aber ausdrücklich nicht
     // fail-closed — ein Not-Halt darf niemals an einem Schreibfehler scheitern.
@@ -161,6 +163,7 @@ export async function POST(req: Request) {
 
   killSwitch.disarm();
   await db.insert(killSwitches).values({ reason, triggeredBy: "OPERATOR", armed: false });
+  await notifyFirmControlChanged({ armed: false, reason, source: "api/firm/kill" });
   // Gestoppte Missionen wieder in den Wartezustand versetzen.
   await db
     .update(missions)

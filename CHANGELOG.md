@@ -21,13 +21,42 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-10** · Code-Version **0.17.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-27** · Code-Version **0.17.2** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
 ## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-08)
 
 ### Fixed
 
+- **ASA-01 — Autoritatives prozessübergreifendes Kill-Switch-Gate, Cross-Prozess-Rehydration & deterministischer Exit-P&L (2026-10-27):**
+  - **Autoritatives DB-Kill-Switch-Gate (`src/lib/killSwitchDb.ts`):** Neue
+    Single-Source-of-Truth auf Basis von `public.kill_switches` mit maximal
+    `500 ms` TTL-Cache, sofortiger Cache-Invalidierung via PostgreSQL
+    `LISTEN/NOTIFY` auf Kanal `firm_control_changed`
+    (`FirmControlNotificationListener`, verdrahtet in `src/instrumentation.ts`
+    und `scripts/micro-executor.ts`) sowie striktem **Fail-Closed**-Verhalten
+    (`armed = true` bei DB-Ausfall oder ungeprüftem Sync-Cache, sofern
+    `DATABASE_URL` gesetzt ist). `POST /api/firm/kill` und
+    `src/lib/circuitBreaker.ts` persistieren in `kill_switches` und senden
+    unmittelbar `pg_notify('firm_control_changed', ...)`. Durchgesetzt vor
+    jeder Order-Ausführung in `MicroExecutor.executeRule()`, `runFirmTurn()`,
+    `evaluateLiveOrder()`, `BrokerExecutionEngine` und `BitunixExecutionEngine`.
+  - **Wiederholbare Cross-Prozess-Rehydration (`syncPaperBrokerWithDb`):**
+    `src/lib/brokerHydration.ts` gleicht unter `withAccountLock("PAPER", ...)`
+    offene und extern geschlossene `positions`-Zeilen vor jedem
+    `submitAtomic()`-Aufruf (`engine.ts`, `microExecutor.ts`) sowie zu Beginn
+    von `monitorPositions()` (`src/lib/monitor.ts`) mit dem lokalen
+    `PaperBroker`-Ledger ab, ohne den Kontosaldo durch Mehrfachbuchungen zu
+    korrumpieren (`reconcileOpenPositions`, `applyExternalCloseNetPnl`).
+  - **Deterministischer, atomarer Exit-P&L (`computePaperClosePnl`, `applyExit`):**
+    Einheitliche Richtungs- und Gebührenformel (`LONG` + `SHORT`, inkl.
+    `exitFee` / `resolveExitFee`) in `src/lib/broker.ts`; Fix der invertierten
+    `SHORT`-Equity-Bewertung in `PaperBroker.accountEquity()`; atomarer
+    Close-Claim (`UPDATE positions ... WHERE id = pos.id AND status = 'OPEN' RETURNING id`)
+    in `src/lib/monitor.ts`, sodass prozessübergreifend eröffnete Positionen
+    exakt einmal abgerechnet werden und niemals still `realized_pnl = 0`
+    schreiben (`tests/asa01.multiprocessKillAndPnl.test.ts`, 8 Integrationstests
+    gegen `embedded-postgres`).
 - **CI-Workflow-Spiegel, Dependabot-Synchronisation & Security-Audit-Härtung (2026-10-27):**
   - **Root Cause PR #243 behoben:** `.github/dependabot.yml` konfigurierte nur
     `directory: /` und aktualisierte bei Action-Updates ausschließlich

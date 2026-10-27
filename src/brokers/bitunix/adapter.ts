@@ -44,6 +44,7 @@ import {
   loadBitunixConfig,
 } from "./config";
 import { assertBitunixEnabled, assertLiveOrderAllowed } from "./gates";
+import { readAuthoritativeKillSwitch } from "../../lib/killSwitchDb";
 import { BitunixPublicClient, mapTicker } from "./publicClient";
 import { BitunixPrivateClient } from "./privateClient";
 import { BitunixPaperLedger } from "./paper";
@@ -288,6 +289,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     // Live-Gate VOR jedem Broker-Zugriff — kein Paper-Ledger im Live-Pfad.
     // (Gate vor Engine-Aufbau: auch ohne Credentials bleibt der Deny dominant.)
     if (this.mode === "live") {
+      await readAuthoritativeKillSwitch({ env: this.env });
       assertLiveOrderAllowed(this.id, this.env);
     }
     const engine = await this.execution();
@@ -301,6 +303,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
       throw new NotSupportedCapabilityError(this.id, "testnet", "getPositions", "Kein Bitunix-Testnet dokumentiert.");
     }
     if (this.mode === "live") {
+      await readAuthoritativeKillSwitch({ env: this.env });
       assertLiveOrderAllowed(this.id, this.env);
     }
     const engine = await this.execution();
@@ -327,6 +330,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     assertBitunixEnabled(this.env);
     if (this.mode === "live") {
       // Gate zuerst — erst nach bestandener Gesamtprüfung wird gesendet.
+      await readAuthoritativeKillSwitch({ env: this.env });
       assertLiveOrderAllowed(this.id, this.env);
     }
     const engine = await this.execution();
@@ -360,6 +364,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     }
     assertBitunixEnabled(this.env);
     // Read-only-Abgleich: dasselbe Gate wie beim Senden (fail-closed).
+    await readAuthoritativeKillSwitch({ env: this.env });
     assertLiveOrderAllowed(this.id, this.env);
     const engine = await this.execution();
     if (!engine.reconcile) return null;
@@ -370,6 +375,7 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
     this.require("trading", "getExecutionEvidence");
     assertBitunixEnabled(this.env);
     if (this.mode !== "live") throw new NotSupportedCapabilityError(this.id,"trading","getExecutionEvidence","Only live has venue executions");
+    await readAuthoritativeKillSwitch({ env: this.env });
     assertLiveOrderAllowed(this.id,this.env);
     const client = await this.privateClient();
     const located = await client.getOrderByClientId(clientOrderId);
@@ -393,7 +399,10 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
       throw new NotSupportedCapabilityError(this.id, "testnet", "cancelAllOpenOrders", "Kein Bitunix-Testnet dokumentiert.");
     }
     assertBitunixEnabled(this.env);
-    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    if (this.mode === "live") {
+      await readAuthoritativeKillSwitch({ env: this.env });
+      assertLiveOrderAllowed(this.id, this.env);
+    }
     const engine = await this.execution();
     if (!engine.cancelAllOpenOrders) {
       throw new NotSupportedCapabilityError(this.id, "emergency", "cancelAllOpenOrders", "Engine ohne H7-Notfall-Pfad.");
@@ -406,7 +415,10 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
       throw new NotSupportedCapabilityError(this.id, "testnet", "closeAllPositions", "Kein Bitunix-Testnet dokumentiert.");
     }
     assertBitunixEnabled(this.env);
-    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    if (this.mode === "live") {
+      await readAuthoritativeKillSwitch({ env: this.env });
+      assertLiveOrderAllowed(this.id, this.env);
+    }
     const engine = await this.execution();
     if (!engine.closeAllPositions) {
       throw new NotSupportedCapabilityError(this.id, "emergency", "closeAllPositions", "Engine ohne H7-Notfall-Pfad.");
@@ -419,7 +431,10 @@ export class BitunixBrokerAdapter implements BrokerAdapter {
       throw new NotSupportedCapabilityError(this.id, "testnet", "verifyFlat", "Kein Bitunix-Testnet dokumentiert.");
     }
     assertBitunixEnabled(this.env);
-    if (this.mode === "live") assertLiveOrderAllowed(this.id, this.env);
+    if (this.mode === "live") {
+      await readAuthoritativeKillSwitch({ env: this.env });
+      assertLiveOrderAllowed(this.id, this.env);
+    }
     const engine = await this.execution();
     if (!engine.verifyFlat) {
       throw new NotSupportedCapabilityError(this.id, "emergency", "verifyFlat", "Engine ohne H7-Notfall-Pfad.");

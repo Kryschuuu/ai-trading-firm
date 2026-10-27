@@ -59,6 +59,10 @@
  *   - `revokedSessions`         Widerrufene Session-IDs mit Ablaufzeitpunkt (RAM).
  *   - `sessionsRevokedBefore`   Globaler Widerrufs-Zeitstempel fuer Sessions (RAM).
  *   - `ruleCacheInvalidators`   Prozesslokale Callbacks aktiver RuleCaches; PostgreSQL bleibt Wahrheit.
+ *   - `killSwitchDbCache` / `killSwitchDbEpoch` / `killSwitchDbInFlight` / `killSwitchSyncedFromDb`
+ *                               Kurzlebiger TTL-Cache (<= 500 ms) + `NOTIFY firm_control_changed`-Epoche
+ *                               des autoritativen Kill-Switch-Gates (`src/lib/killSwitchDb.ts`, ASA-01);
+ *                               persistente Wahrheit bleibt `kill_switches` in PostgreSQL.
  *
  * DI-/Backend-Singletons der Control Plane (Repository `getControlStateRepository`,
  * Secret-Store `getControlPlaneSecretStore`) sind bewusst NICHT hier — sie sind
@@ -83,6 +87,7 @@ import type { PaperBroker } from "./broker";
 import type { ControlPlaneService } from "../brokers/control-plane/service";
 import type { VenueControlState } from "../brokers/control-plane/states";
 import type { ReconciliationReport } from "../brokers/reconciliation";
+import type { AuthoritativeKillSwitchStatus } from "./killSwitchDb";
 
 /**
  * EIN globalThis-Namensraum fuer alle Cross-Cutting-Singletons. Das ueberlebt
@@ -301,6 +306,16 @@ export const state = {
   microLimitsLoadedAt: ref<number>("microLimitsLoadedAt"),
   /** Aktive Prozess-RuleCaches, die PostgreSQL NOTIFY invalidieren soll. */
   ruleCacheInvalidators: map<object, () => void>("ruleCacheInvalidators"),
+
+  // ── Autoritatives Kill-Switch-Gate (src/lib/killSwitchDb.ts, ASA-01) ───────
+  /** Kurzlebiger TTL-Snapshot (<= 500 ms) aus `kill_switches` (Wahrheit: DB). */
+  killSwitchDbCache: ref<{ status: AuthoritativeKillSwitchStatus; epoch: number }>("killSwitchDbCache"),
+  /** Invalidierungs-Epoche (inkrementiert durch `NOTIFY firm_control_changed`). */
+  killSwitchDbEpoch: ref<number>("killSwitchDbEpoch"),
+  /** Single-Flight-Dedup laufender DB-Kill-Switch-Abfragen (RAM). */
+  killSwitchDbInFlight: ref<{ promise: Promise<AuthoritativeKillSwitchStatus>; epoch: number }>("killSwitchDbInFlight"),
+  /** Wurde der lokale `killSwitch`-Latch zuletzt durch DB-Sync/Fail-Closed gezogen? */
+  killSwitchSyncedFromDb: flag("killSwitchSyncedFromDb"),
 } as const;
 
 /**
@@ -349,4 +364,9 @@ export function __resetAllSingletonsForTests(): void {
   // Mikro-Executor
   state.microLimitsLoadedAt.reset();
   state.ruleCacheInvalidators.reset();
+  // Autoritatives Kill-Switch-Gate (ASA-01)
+  state.killSwitchDbCache.reset();
+  state.killSwitchDbEpoch.reset();
+  state.killSwitchDbInFlight.reset();
+  state.killSwitchSyncedFromDb.reset();
 }
