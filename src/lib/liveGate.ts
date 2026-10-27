@@ -5,8 +5,10 @@
  * Gate-Zustand NUR lesen bzw. über die admin-guarded, CSRF-geschützten
  * Mutations-Endpunkte bedienen; es gibt keinen UI-Bypass für den Enforcer):
  *   GET  /api/live/state
- *   POST /api/live/transition   (Permission live.gate = Admin)
- *   POST /api/live/kill         (Permission live.gate = Admin + Phrase "KILL")
+ *   GET  /api/live/kill         (Admin + CSRF: Einmal-Nonce für `clear`, ASA-02)
+ *   POST /api/live/transition   (Permission live.gate = Admin; 2-Principal-Vier-Augen)
+ *   POST /api/live/kill         (arm: firm.kill = Operator/Admin + Phrase "KILL";
+ *                               clear: live.gate = Admin + CSRF + Pflicht-Nonce)
  *
  * Regeln wie in controlPlane.ts: Mutating-Requests senden den CSRF-Header
  * (Seit W1 v1.36.23 aus der Session-Cookie, kein Token im Client-Speicher);
@@ -36,7 +38,8 @@ export interface LiveGateVenueSnapshotDto {
   cooldownRemainingMs: number;
   cooldownElapsed: boolean;
   fourEyesRequired: boolean;
-  pendingApproval: { approvedBy: string; at: string } | null;
+  /** ASA-02: nur Anzeigefelder, niemals Principal-Fingerprint/approvalId. */
+  pendingApproval: { approvedBy: string; at: string; expiresAt: number | null } | null;
   killed: { scope: string; at: string; actor: string; reason: string } | null;
   killSwitchActive: boolean;
   flags: {
@@ -98,10 +101,11 @@ type ApiError = { ok?: boolean; error?: string; message?: string; hint?: string 
 async function request<T>(
   url: string,
   method: "GET" | "POST",
-  body?: unknown
+  body?: unknown,
+  opts: { csrf?: boolean } = {}
 ): Promise<LiveGateApiResult<T>> {
   const headers = new Headers();
-  if (method === "POST") {
+  if (method === "POST" || opts.csrf) {
     // W1 (v1.36.23): Kein Token mehr aus localStorage — Session-Cookie wird
     // automatisch mitgesendet; Double-Submit-CSRF aus firm_csrf.
     headers.set("x-csrf-token", csrfHeaderValue());
@@ -149,17 +153,34 @@ export function postLiveGateTransition(input: {
   to: string;
   reason?: string;
   confirm?: boolean;
+  /** ASA-02: nur Anzeigelabel; autorisiert nichts mehr. */
   approvedBy?: string;
+  /** Token aus Schritt 1 (`FOUR_EYES_PENDING`) für die Gegenzeichnung. */
+  approvalId?: string;
 }): Promise<LiveGateApiResult<{ ok: true; venue: string; from: string; to: string }>> {
   return request("/api/live/transition", "POST", input);
 }
 
-/** POST /api/live/kill — Kill-Switch (Admin, Phrase "KILL" serverseitig geprüft). */
+/**
+ * POST /api/live/kill — Kill-Switch (ASA-02).
+ * `arm` (Default): `firm.kill` (Operator + Admin) ohne Nonce.
+ * `clear`: nur Admin, mit `nonce` aus `fetchLiveGateKillChallenge()`.
+ * Die Phrasen "KILL"/"CLEAR_KILL" werden zusätzlich serverseitig geprüft.
+ */
 export function postLiveGateKill(input: {
+  action?: "arm" | "clear";
   venue?: string;
   scope?: string;
   reason: string;
   confirm: string;
+  nonce?: string;
 }): Promise<LiveGateApiResult<{ ok: true; scope: string }>> {
   return request("/api/live/kill", "POST", input);
+}
+
+/** GET /api/live/kill — kurzlebige, single-use Clear-Challenge (Admin + CSRF). */
+export function fetchLiveGateKillChallenge(): Promise<
+  LiveGateApiResult<{ ok: true; nonce: string; expiresAt: number }>
+> {
+  return request("/api/live/kill", "GET", undefined, { csrf: true });
 }

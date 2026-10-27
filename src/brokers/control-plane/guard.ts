@@ -31,7 +31,10 @@
  * Reihenfolge: Auth → CSRF → Backoff → Limit (Identitaet) → Limit (global).
  * Die Live-Gate-Routen (`/api/live/kill`, `/api/live/transition`) nutzen
  * weiterhin NUR (a): Der Kill-Switch darf weder durch einen globalen
- * Credential-Flood noch durch einen Backoff blockierbar sein.
+ * Credential-Flood noch durch einen Backoff blockierbar sein. ASA-02:
+ * `POST /api/live/kill` mit `action: "arm"` (Not-Aus, Operator + Admin)
+ * verzichtet bewusst ganz auf den Limiter; nur `clear` (Admin + Nonce)
+ * nutzt (a) gegen Nonce-Raten.
  */
 import { requirePermission } from "@/auth";
 import { tokenEquals } from "@/lib/apiAuth";

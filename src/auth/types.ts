@@ -59,6 +59,32 @@ export type Actor = {
   permissions: readonly Permission[];
 };
 
+/**
+ * ASA-02: Die der Rolle zugrundeliegende, kryptographisch gebundene Identität.
+ * `id` ist ein serverseitiger HMAC-Fingerabdruck (nie ein Token/Cookie im
+ * Klartext). Zwei getrennte Credentials oder zwei getrennte Browser-Sessions
+ * liefern unterschiedliche IDs. `distinct: false` bedeutet: kein
+ * unterscheidbarer Principal (local-open) — Vier-Augen-Freigaben sind dort
+ * fail-closed abzulehnen. Siehe `src/auth/principal.ts`.
+ */
+export type Principal = {
+  id: string;
+  /** false ⇒ local-open, keine echte Zwei-Personen-Freigabe möglich. */
+  distinct: boolean;
+  role: Role;
+  effectiveRole: Role;
+  auditId: "admin" | "operator" | "viewer";
+  source: ActorSource;
+};
+
+/** Refresh-stabile Claims einer signierten Session für den Fingerprint. */
+export type SessionPrincipalClaims = {
+  credential: string;
+  iat: number;
+  csrf: string;
+  authEpoch: string;
+};
+
 export type AuthFailure = {
   ok: false;
   status: 401 | 403;
@@ -69,6 +95,12 @@ export type AuthFailure = {
 export type AuthSuccess = {
   ok: true;
   actor: Actor;
+  /**
+   * ASA-02: Rollen- und identitätsgebundene Sicht auf denselben Auth-Erfolg.
+   * Wird von allen Governance-Routen als EINZIGE Quelle für Rolle, Audit-ID
+   * und Vier-Augen-Fingerprint verwendet (`auth.principal`).
+   */
+  principal: Principal;
 };
 
 export type AuthResolution = AuthSuccess | AuthFailure;

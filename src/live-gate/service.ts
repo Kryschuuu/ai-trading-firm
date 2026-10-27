@@ -38,6 +38,13 @@ import { appendKillEntry, clearKillEntries, readKillFile, type KillFileEntry } f
 import { verifyAuditChain, type LiveGateAuditEntry } from "./audit";
 import { readSuiteStamp, validateSuiteStamp } from "./suite";
 import { evaluateLiveOrder } from "./enforcer";
+import {
+  createFourEyesPending,
+  evaluateFourEyes,
+  fourEyesHint,
+  fourEyesIntent,
+  type FourEyesPending,
+} from "@/lib/fourEyesApproval";
 import type { LiveGateKillMarker, LiveGateVenueRecord } from "./store";
 
 export interface LiveGateTransitionInput {
@@ -46,8 +53,17 @@ export interface LiveGateTransitionInput {
   actor: string;
   reason?: string;
   confirm?: boolean;
-  /** Benannter Approver (Pflicht im Human-Gate; 4-Augen vergleicht Namen). */
+  /**
+   * ASA-02: NUR noch ein nicht-autorisierendes Anzeigelabel. Der frühere
+   * String-Vergleich `approvedBy !== actor` aus demselben Body ist ersetzt.
+   */
   approvedBy?: string;
+  /** HMAC-Fingerprint des authentifizierten Principals (aus `resolveAuth`). */
+  principalId?: string;
+  /** `false` = local-open ohne unterscheidbaren Principal ⇒ fail-closed. */
+  principalDistinct?: boolean;
+  /** `approvalId` aus Schritt 1 (FOUR_EYES_PENDING) für Schritt 2. */
+  approvalId?: string;
 }
 
 export interface LiveGateCheckReport {
@@ -85,7 +101,8 @@ export interface LiveGateVenueSnapshot {
   cooldownRemainingMs: number;
   cooldownElapsed: boolean;
   fourEyesRequired: boolean;
-  pendingApproval: { approvedBy: string; at: string } | null;
+  /** ASA-02: nur Anzeigefelder — nie Fingerprint oder approvalId (Geheimnis). */
+  pendingApproval: { approvedBy: string; at: string; expiresAt: number | null } | null;
   killed: LiveGateKillMarker | null;
   killSwitchActive: boolean;
   flags: {
@@ -189,6 +206,144 @@ export class LiveGateService {
     const v = raw.trim().toUpperCase();
     if ((BROKER_VENUE_IDS as readonly string[]).includes(v)) return v as BrokerVenueId;
     throw new LiveGateError("UNKNOWN_VENUE", `Unbekanntes Venue "${String(raw).slice(0, 40)}".`);
+  }
+
+  /**
+   * ASA-02 — echtes, zustandsbehaftetes Vier-Augen-Verfahren für den
+   * Live-Gate-Übergang. Schritt 1 (erster Request) speichert Principal-
+   * Fingerprint + `approvalId` + 15-Minuten-TTL im Venue-State-File und
+   * wirft `FOUR_EYES_PENDING`. Schritt 2 (zweiter Request) verlangt zwingend
+   * einen ANDEREN authentifizierten Principal und dieselbe `approvalId`.
+   * Freitextnamen (`approvedBy`) autorisieren nichts; local-open
+   * (`principalDistinct === false`) scheitert fail-closed.
+   */
+  private enforceFourEyes(input: {
+    rec: LiveGateVenueRecord;
+    venue: BrokerVenueId;
+    from: LiveGateState;
+    to: LiveGateState;
+    actor: string;
+    transition: LiveGateTransitionInput;
+  }): void {
+    const { rec, venue, from, to, actor, transition } = input;
+    const now = Date.now();
+    const principal = {
+      id: transition.principalId ?? "",
+      auditId: actor,
+      distinct: transition.principalDistinct !== false && Boolean(transition.principalId),
+    };
+    const deny = (code: "FOUR_EYES_PRINCIPALS_REQUIRED" | "FOUR_EYES_SAME_APPROVER" | "FOUR_EYES_EXPIRED" | "FOUR_EYES_APPROVAL_MISMATCH", reason: string): never => {
+      this.auditDeny({ actor, venue, from, to, code, detail: reason });
+      throw new LiveGateError(code, reason);
+    };
+
+    if (!principal.distinct) {
+      return deny("FOUR_EYES_PRINCIPALS_REQUIRED", fourEyesHint("PRINCIPALS_REQUIRED"));
+    }
+
+    const intent = fourEyesIntent([venue, from, to]);
+    const stored = rec.pendingApproval;
+    const pending: FourEyesPending | null =
+      stored?.principalId && stored.approvalId && stored.expiresAt
+        ? {
+            approvalId: stored.approvalId,
+            intent: stored.intent ?? "",
+            proposerPrincipalId: stored.principalId,
+            expiresAt: stored.expiresAt,
+            proposerAuditId: stored.approvedBy,
+            approvedBy: stored.approvedBy,
+            at: stored.at,
+            createdAt: stored.createdAt,
+          }
+        : null;
+
+    // Schritt 1 — Erstfreigabe (kein Zustandswechsel, aber persistiert).
+    if (!pending) {
+      const created = createFourEyesPending({
+        scope: `live-gate:${venue}:${from}:${to}`,
+        intent,
+        principal,
+        approvedBy: transition.approvedBy,
+        now,
+      });
+      if (!created) {
+        return deny("FOUR_EYES_PRINCIPALS_REQUIRED", fourEyesHint("PRINCIPALS_REQUIRED"));
+      }
+      rec.pendingApproval = {
+        approvedBy: created.approvedBy ?? actor,
+        at: created.at ?? this.nowIso(),
+        principalId: created.proposerPrincipalId,
+        approvalId: created.approvalId,
+        intent: created.intent,
+        createdAt: created.createdAt,
+        expiresAt: created.expiresAt,
+      };
+      try {
+        rec.auditHead = this.runtime.audit.chainHead();
+        this.runtime.store.write(venue, rec);
+      } catch {
+        throw new LiveGateError(
+          "STATE_WRITE_FAILED",
+          "Erste Vier-Augen-Freigabe konnte nicht persistiert werden — verweigert (fail-safe)."
+        );
+      }
+      this.runtime.audit.append({
+        actor,
+        venue,
+        from,
+        to,
+        action: "four-eyes-first",
+        result: "OK",
+        reason: `Erste Vier-Augen-Freigabe (${created.approvedBy ?? actor}, approvalId=${created.approvalId}) — Gegenzeichnung durch einen ANDEREN authentifizierten Principal erforderlich.`,
+      });
+      throw new LiveGateError(
+        "FOUR_EYES_PENDING",
+        `Vier-Augen-Modus: Erstfreigabe gespeichert (approvalId=${created.approvalId}). Schritt 2 benötigt dieselbe approvalId und einen anderen authentifizierten Principal.`,
+        { approvalId: created.approvalId, expiresAt: created.expiresAt }
+      );
+    }
+
+    // Schritt 2 — Gegenzeichnung. `evaluateFourEyes` prüft TTL, Token,
+    // Intent und `approverPrincipalId !== proposerPrincipalId`.
+    const decision = evaluateFourEyes(pending, {
+      intent,
+      approver: principal,
+      approvalId: transition.approvalId,
+      now,
+    });
+    if (!decision.ok) {
+      const reason = decision.reason;
+      if (reason === "EXPIRED") {
+        rec.pendingApproval = null;
+        try {
+          rec.auditHead = this.runtime.audit.chainHead();
+          this.runtime.store.write(venue, rec);
+        } catch {
+          /* Audit-Eintrag bleibt; nächster Antrag startet neu. */
+        }
+      }
+      if (reason === "PRINCIPALS_REQUIRED") {
+        return deny("FOUR_EYES_PRINCIPALS_REQUIRED", fourEyesHint(reason));
+      }
+      if (reason === "SAME_PRINCIPAL") {
+        return deny("FOUR_EYES_SAME_APPROVER", fourEyesHint(reason));
+      }
+      if (reason === "EXPIRED") {
+        return deny("FOUR_EYES_EXPIRED", fourEyesHint(reason));
+      }
+      return deny("FOUR_EYES_APPROVAL_MISMATCH", `${fourEyesHint(reason)} (${reason})`);
+    }
+
+    this.runtime.audit.append({
+      actor,
+      venue,
+      from,
+      to,
+      action: "four-eyes-second",
+      result: "OK",
+      reason: `Gegenzeichnung (approvalId=${pending.approvalId}) durch einen anderen authentifizierten Principal; Antrag: ${pending.approvedBy ?? "unbekannt"}.`,
+    });
+    // `pendingApproval` wird beim Commit (unten) atomar zurückgesetzt.
   }
 
   private auditDeny(input: {
@@ -310,45 +465,45 @@ export class LiveGateService {
           `Cooldown zwischen LIVE_PENDING und HUMAN_APPROVED noch nicht abgelaufen (retryAt ${retryAt}).`
         );
       }
-      // Optionaler 4-Augen-Modus: zwei unterschiedliche Approver.
+      // ASA-02: Optionaler 4-Augen-Modus — jetzt 2 Requests, 2 getrennte
+      // authentifizierte Principals, approvalId + 15-Minuten-TTL. Der alte
+      // String-Vergleich `pendingApproval.approvedBy === approvedBy` aus
+      // demselben Body ist ersatzlos entfernt.
       if (config.fourEyes) {
-        if (!rec.pendingApproval) {
-          rec.pendingApproval = { approvedBy, at: this.nowIso() };
-          try {
-            rec.auditHead = this.runtime.audit.chainHead();
-            this.runtime.store.write(venue, rec);
-          } catch {
-            /* Store-Fehler: erste Bestätigung nicht persistierbar → verweigern. */
-            throw new LiveGateError("STATE_WRITE_FAILED", "Erste 4-Augen-Bestätigung konnte nicht persistiert werden — verweigert (fail-safe).");
-          }
-          this.runtime.audit.append({
-            actor,
-            venue,
-            from,
-            to,
-            action: "four-eyes-first",
-            result: "OK",
-            reason: `Erste 4-Augen-Bestätigung durch ${approvedBy} — zweite, unterschiedliche Bestätigung erforderlich.`,
-          });
-          throw new LiveGateError(
-            "FOUR_EYES_PENDING",
-            `4-Augen-Modus: erste Bestätigung (${approvedBy}) recorded — zweite Bestätigung durch einen ANDEREN Approver erforderlich.`
-          );
-        }
-        if (rec.pendingApproval.approvedBy === approvedBy) {
-          this.auditDeny({ actor, venue, from, to, code: "FOUR_EYES_SAME_APPROVER", detail: `Gleicher Approver (${approvedBy}) wie die erste Bestätigung.` });
-          throw new LiveGateError("FOUR_EYES_SAME_APPROVER", `4-Augen-Modus verlangt zwei unterschiedliche Approver (${approvedBy} hat bereits bestätigt).`);
-        }
+        this.enforceFourEyes({ rec, venue, from, to, actor, transition: input });
       }
       void reason;
     }
 
     if (to === "LIVE_ENABLED") {
+      // ASA-02: lokaler Offen-Betrieb hat keinen unterscheidbaren zweiten
+      // Principal — Live-Freigaben sind dort fail-closed abzulehnen. Die
+      // Matrix/Legalität wurde oben bereits geprüft (illegale Sprünge
+      // behalten ihren 409 ILLEGAL_TRANSITION).
+      if (input.principalDistinct === false) {
+        this.auditDeny({
+          actor,
+          venue,
+          from,
+          to,
+          code: "FOUR_EYES_PRINCIPALS_REQUIRED",
+          detail: "local-open: keine getrennten authentifizierten Principals für die Live-Freigabe.",
+        });
+        throw new LiveGateError(
+          "FOUR_EYES_PRINCIPALS_REQUIRED",
+          fourEyesHint("PRINCIPALS_REQUIRED")
+        );
+      }
       if (input.confirm !== true) {
         this.auditDeny({ actor, venue, from, to, code: "CONFIRM_REQUIRED", detail: "LIVE_ENABLED verlangt explizite Bestätigung (confirm:true + Begründung)." });
         throw new LiveGateError("CONFIRM_REQUIRED", "LIVE_ENABLED: confirm:true ist Pflicht (Bestätigungsdialog).");
       }
       requireReason(input.reason);
+      // Mit explizitem 4-Augen-Modus gilt das 2-Principal-Verfahren auch für
+      // den finalen Live-Schritt (nicht nur für das Human-Gate).
+      if (config.fourEyes) {
+        this.enforceFourEyes({ rec, venue, from, to, actor, transition: input });
+      }
       // Enablement-Voraussetzungen (Flags, Capability, Suite, Control Plane)
       // — State-Check übersprungen (wir sind bei HUMAN_APPROVED).
       const prereq = evaluateLiveOrder(venue, {
@@ -635,7 +790,15 @@ export class LiveGateService {
         : 0,
       cooldownElapsed: !rec.livePendingAt || config.cooldownMs === 0 || pendingMs >= config.cooldownMs,
       fourEyesRequired: config.fourEyes,
-      pendingApproval: rec.pendingApproval,
+      // ASA-02: Whitelist — der Principal-Fingerprint und die approvalId
+      // dürfen nie über `GET /api/live/state` ausfließen.
+      pendingApproval: rec.pendingApproval
+        ? {
+            approvedBy: rec.pendingApproval.approvedBy,
+            at: rec.pendingApproval.at,
+            expiresAt: rec.pendingApproval.expiresAt ?? null,
+          }
+        : null,
       killed: rec.killed,
       killSwitchActive: kill !== null,
       flags: decision.flags,

@@ -39,7 +39,8 @@ export type LiveGateAuditAction =
   | "enforce"
   | "crash-recovery"
   | "suite-stamp"
-  | "four-eyes-first";
+  | "four-eyes-first"
+  | "four-eyes-second";
 
 export type LiveGateAuditResult = "OK" | "DENIED" | "KILLED" | "ABORTED";
 

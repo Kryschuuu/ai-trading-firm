@@ -6,7 +6,7 @@
 > — Quelle: [`src/app/api/**/route.ts`](../../src/app/api/)
 > — Guard-Klasse: `requirePermission(<Permission>)` · `guardWrite` · `checkApiToken` · `CSRF` (`checkCsrfGuard`) · `keiner`
 
-Insgesamt **87** Routen mit **106** HTTP-Handlern.
+Insgesamt **87** Routen mit **107** HTTP-Handlern.
 
 > ⚠️ **WARNUNG — schreibend ohne Guard (Rückfall zu DC-01):** `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/portfolio/correlation`, `POST /api/portfolio/metrics`, `POST /api/portfolio/optimize`. Guard prüfen (`requirePermission`/`guardWrite`/`checkCsrfGuard`) oder begründen.
 | Route | Methode | Guard-Klasse | Quelle |
@@ -57,7 +57,7 @@ Insgesamt **87** Routen mit **106** HTTP-Handlern.
 | `/api/firm/kill` | `POST` | requirePermission(live.gate) + CSRF + guardWrite | [`src/app/api/firm/kill/route.ts`](../../src/app/api/firm/kill/route.ts) |
 | `/api/firm/kill/challenge` | `GET` | requirePermission(live.gate) + CSRF | [`src/app/api/firm/kill/challenge/route.ts`](../../src/app/api/firm/kill/challenge/route.ts) |
 | `/api/firm/lifecycle` | `GET` | requirePermission(firm.read) | [`src/app/api/firm/lifecycle/route.ts`](../../src/app/api/firm/lifecycle/route.ts) |
-| `/api/firm/lifecycle` | `POST` | requirePermission(strategy.rules.write) + requirePermission(strategy.rules.activate) + requirePermission(live.gate) + CSRF | [`src/app/api/firm/lifecycle/route.ts`](../../src/app/api/firm/lifecycle/route.ts) |
+| `/api/firm/lifecycle` | `POST` | requirePermission(firm.write) + requirePermission(strategy.rules.write) + requirePermission(strategy.rules.activate) + requirePermission(live.gate) + CSRF | [`src/app/api/firm/lifecycle/route.ts`](../../src/app/api/firm/lifecycle/route.ts) |
 | `/api/firm/log` | `GET` | requirePermission(firm.read) | [`src/app/api/firm/log/route.ts`](../../src/app/api/firm/log/route.ts) |
 | `/api/firm/macro` | `GET` | keiner | [`src/app/api/firm/macro/route.ts`](../../src/app/api/firm/macro/route.ts) |
 | `/api/firm/macro` | `POST` | requirePermission(strategy.rules.activate) | [`src/app/api/firm/macro/route.ts`](../../src/app/api/firm/macro/route.ts) |
@@ -90,7 +90,8 @@ Insgesamt **87** Routen mit **106** HTTP-Handlern.
 | `/api/firm/tick` | `GET` | keiner | [`src/app/api/firm/tick/route.ts`](../../src/app/api/firm/tick/route.ts) |
 | `/api/firm/tick` | `POST` | guardWrite | [`src/app/api/firm/tick/route.ts`](../../src/app/api/firm/tick/route.ts) |
 | `/api/health` | `GET` | keiner | [`src/app/api/health/route.ts`](../../src/app/api/health/route.ts) |
-| `/api/live/kill` | `POST` | requirePermission(live.gate) + CSRF | [`src/app/api/live/kill/route.ts`](../../src/app/api/live/kill/route.ts) |
+| `/api/live/kill` | `GET` | requirePermission(live.gate) + CSRF | [`src/app/api/live/kill/route.ts`](../../src/app/api/live/kill/route.ts) |
+| `/api/live/kill` | `POST` | requirePermission(live.gate) + requirePermission(firm.kill) + CSRF | [`src/app/api/live/kill/route.ts`](../../src/app/api/live/kill/route.ts) |
 | `/api/live/state` | `GET` | keiner | [`src/app/api/live/state/route.ts`](../../src/app/api/live/state/route.ts) |
 | `/api/live/transition` | `POST` | requirePermission(live.gate) + CSRF | [`src/app/api/live/transition/route.ts`](../../src/app/api/live/transition/route.ts) |
 | `/api/marketdata/perpetual/series` | `GET` | keiner | [`src/app/api/marketdata/perpetual/series/route.ts`](../../src/app/api/marketdata/perpetual/series/route.ts) |

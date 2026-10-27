@@ -1,7 +1,7 @@
 # Live-Trading-Gate — auditierte State-Machine (Task 11)
 
 **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/live-gate/**` ·
-**API:** `GET /api/live/state`, `POST /api/live/transition`, `POST /api/live/kill` ·
+**API:** `GET /api/live/state`, `GET|POST /api/live/kill`, `POST /api/live/transition` ·
 **CLI:** `npm run live:kill` · **CI:** Job `security-live-gate`
 
 > ## ⚠️ Dieser Task aktiviert KEIN Live-Trading
@@ -121,7 +121,7 @@ die ausschließlich den signierten `BitunixPrivateClient` nutzt — Orders über
 ## 5. Kill-Switch
 
 - **Auslöser:** UI-Button (Confirm-Dialog mit getippter Phrase `KILL`),
-  `POST /api/live/kill` (Admin + Phrase) oder CLI
+  `POST /api/live/kill` (`action: "arm"`, Operator oder Admin + Phrase) oder CLI
   `npm run live:kill -- --venue=BITUNIX [--scope=all] [--reason=…]` (Notfall,
   ohne HTTP).
 - **Wirkung aus JEDEM Zustand, sofort** (Failsafe-Kaskade in dieser Reihenfolge):
@@ -210,17 +210,61 @@ Jeder Übergang, jeder Deny, jeder Kill, jeder Enforce-Entscheid:
   Alter ≤ `LIVE_GATE_SUITE_MAX_AGE_MS`, Default 7 Tage). Der Stamp ist ein
   Deployment-Artefakt aus CI (`actions/upload-artifact`), kein Repo-File;
   manuelles Stempeln (`--source=manual`) ist im Stamp und Audit sichtbar.
-- Coverage-Metrik-Hinweis: Unter `tsx` zaehlen Phantom-Module (CJS/ESM-
-  Duplikate) in die Funktionendeckung — das CI-Tor ist daher Zeilendeckung
-  ≥ 95 % (Funktionen/Branches werden berichtet).
+- **Coverage-Messung (Root Cause des ASA-02-Folgefixes):** Alle
+  Coverage-Skripte in `package.json` starten Node mit
+  `--enable-source-maps --import tsx --test --experimental-test-coverage`.
+  Ohne das Flag zählt V8 die von `tsx` whitespace-minifizierten
+  Transform-Zeilen gegen die TypeScript-Originaldatei: Es erscheinen
+  Phantom-Fehlzeilen in Kommentaren/Interfaces, und `config.ts` meldet z. B.
+  87,5 % statt real 100 %. Nach dem ASA-02-PR fiel das 95-%-Tor dadurch auf
+  94,39 %, obwohl die echte Zeilendeckung 96,32 % betrug. Mit Source-Maps
+  ist die Metrik stabil und zeigt die tatsächlichen TS-Zeilen. Ein
+  `docs:validate`-Check (`TS-Coverage==Source-Maps`) verhindert dauerhaft,
+  dass ein neues Coverage-Skript das Flag vergisst; die Schwelle bleibt
+  unverändert **≥ 95 % Zeilen** (sie wurde nie gesenkt).
+- **Testvertrag für neue Gate-Verzweigungen:** Jeder neue Zweig in
+  `src/live-gate/**` braucht einen Test in einer `tests/liveGate.*.test.ts` —
+  genau dieses Glob misst der Required Check. Die ASA-02-Vier-Augen-Pfade
+  (Principal-Fingerprint, `approvalId`, TTL/Intent, `local-open`-Fail-Closed,
+  Audit `four-eyes-first/-second`, Store-Fehler) liegen in
+  `tests/liveGate.fourEyes.test.ts`; die HTTP-Regressionen in
+  `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` laufen über
+  `npm run test:security:asa02` im selben Gate. Tor rot ⇒ Test ergänzen,
+  **nicht** die Schwelle senken oder `continue-on-error` setzen.
+- Funktions-/Branchdeckung wird nur berichtet (unter `tsx` zählen
+  Phantom-Module bei CJS/ESM-Duplikaten in die Funktionendeckung); das Tor
+  bleibt bewusst Zeilendeckung.
 
 ## 9. API-/CLI-Referenz
 
 | Endpoint | Guard | Beschreibung |
 | --- | --- | --- |
 | `GET /api/live/state` | — (read-only) | Zustand je Venue (9 States), Flags, Cooldown-Rest, Suite-Stamp, Kill-Status, Audit-Kettenkopf + Integrität |
-| `POST /api/live/transition` | Permission `live.gate` (Admin) + CSRF + 5/min pro Client-Identität (kein globales Limit, kein Backoff — die Sicherheitsaktion bleibt immer ausführbar, C2/v1.36.14) | Body `{venue, to, reason?, confirm?, approvedBy?}` → 200 bei legalem Übergang; 409 Matrix/Cooldown/Flags; 422 Validierung |
-| `POST /api/live/kill` | Permission `live.gate` + CSRF + Rate-Limit | Body `{venue?|scope?, reason, confirm:"KILL"}` oder `{action:"clear", scope?, reason, confirm:"CLEAR_KILL"}` |
+| `GET /api/live/kill` | Permission `live.gate` (Admin) + CSRF | `{ok, nonce, expiresAt}` — 60-s-Einmal-Challenge für `clear` (ASA-02) |
+| `POST /api/live/transition` | Permission `live.gate` (Admin) + CSRF + 5/min pro Client-Identität (kein globales Limit, kein Backoff — die Sicherheitsaktion bleibt immer ausführbar, C2/v1.36.14). Bei `LIVE_GATE_FOUR_EYES=true`: 2 Requests zweier getrennter authentifizierter Principals | Body `{venue, to, reason?, confirm?, approvedBy?, approvalId?}` → 200 bei legalem Übergang; 409 `FOUR_EYES_PENDING` liefert `approvalId` + `expiresAt` für Schritt 2; 403 `FOUR_EYES_PRINCIPALS_REQUIRED` in `local-open`; 409 Matrix/Cooldown/Flags; 422 Validierung |
+| `POST /api/live/kill` | `arm`: `firm.kill` (Operator + Admin) + CSRF, kein Rate-Limit (Notfallpfad). `clear`: `live.gate` (Admin) + CSRF + 5/min + Pflicht-Nonce | Body ≤ 8 KiB: `{action?:"arm", venue?|scope?, reason, confirm:"KILL"}` oder `{action:"clear", scope?, reason, confirm:"CLEAR_KILL", nonce}` → `400 NONCE_REQUIRED`/`NONCE_EXPIRED`, `403 NONCE_REPLAYED` |
+
+### 9.1 ASA-02 — Autorisierung & Vier-Augen (2026-10-27)
+
+- `arm` (**Default**, kein `action`-Feld nötig) ist die sichere Richtung:
+  `requirePermission("firm.kill")` erlaubt Operator **und** Admin. Der
+  Audit-Akteur ist `actorAuditId(auth.principal)` (`operator`/`admin`).
+- `clear` verlässt den sicheren Zustand: nur `live.gate` (Admin), CSRF und eine
+  gültige, unbenutzte Nonce aus `GET /api/live/kill`
+  (`src/lib/killSwitchNonce.ts`, 60 s, single-use). Ein Replay liefert
+  `403 NONCE_REPLAYED`. Der Nonce-Pool ist getrennt von `/api/firm/kill`.
+- `POST /api/firm/lifecycle`: Rolle und Audit-ID kommen ausschließlich aus
+  `resolveAuth();` ein `x-admin-token`-Header wird nicht mehr ausgewertet.
+  Live-Promotions (`LIVE_LIMITED`/`LIVE`) und Overrides verlangen
+  `action: "propose"` (Schritt 1, `202` + `approvalId`) und
+  `action: "approve"` (Schritt 2) zweier **unterschiedlicher** authentifizierter
+  Principals. `approvedBy` ist nur noch ein Anzeigelabel.
+- Vier-Augen-Freigaben haben eine TTL von 15 Minuten, sind an den Intent
+  (Strategie/Zielzustand bzw. Venue/Übergang) gebunden und single-use. Im
+  `local-open`-Modus (keine getrennten Principals) sind Live-Freigaben
+  **fail-closed** (`403 FOUR_EYES_PRINCIPALS_REQUIRED`).
+- Regression: `tests/asa02.lifecycleAndLiveKillAuthz.test.ts`,
+  `tests/liveGate.api.test.ts`, `tests/liveGate.states.test.ts`.
 
 ```bash
 # Kill (Notfall, ohne HTTP):

@@ -48,8 +48,23 @@ export interface LiveGateVenueRecord {
   pendingTransition: LiveGatePendingTransition | null;
   /** Zeitpunkt des Eintritts in LIVE_PENDING (Cooldown-Basis). */
   livePendingAt: string | null;
-  /** Erste 4-Augen-Bestätigung (nur gesetzt, bis die zweite folgt). */
-  pendingApproval: { approvedBy: string; at: string } | null;
+  /**
+   * Erste 4-Augen-Bestätigung (nur gesetzt, bis die zweite folgt).
+   * ASA-02: `principalId` ist der serverseitig verifizierte HMAC-Fingerprint
+   * des Antragstellers; `approvedBy` ist NUR noch ein Anzeigelabel und wird
+   * für die Autorisierung nicht mehr verwendet. `approvalId` bindet Schritt 2
+   * an genau diese Erstfreigabe, `expiresAt`/`intent` begrenzen sie zeitlich
+   * und inhaltlich (15 Minuten TTL).
+   */
+  pendingApproval: {
+    approvedBy: string;
+    at: string;
+    principalId?: string;
+    approvalId?: string;
+    intent?: string;
+    createdAt?: number;
+    expiresAt?: number;
+  } | null;
   /** Kill-Marker (bleibt nach Kill gesetzt bis zum nächsten Neudurchlauf). */
   killed: LiveGateKillMarker | null;
   history: {

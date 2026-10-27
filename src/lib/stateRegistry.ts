@@ -56,6 +56,8 @@
  *   - `paperBrokerLedger`       Papier-Ledger (RAM); offene Positionen/Kill-
  *                               Status werden aus der DB hydriert.
  *   - `rateLimiterHits`         Sliding-Window-Bucket der API-Auth (Single-Node).
+ *   - `fourEyesApprovals`       Offene Erstfreigaben des 2-Principal-Vier-Augen-
+ *                               Verfahrens (ASA-02, RAM, TTL, single-use).
  *   - `revokedSessions`         Widerrufene Session-IDs mit Ablaufzeitpunkt (RAM).
  *   - `sessionsRevokedBefore`   Globaler Widerrufs-Zeitstempel fuer Sessions (RAM).
  *   - `ruleCacheInvalidators`   Prozesslokale Callbacks aktiver RuleCaches; PostgreSQL bleibt Wahrheit.
@@ -88,6 +90,7 @@ import type { ControlPlaneService } from "../brokers/control-plane/service";
 import type { VenueControlState } from "../brokers/control-plane/states";
 import type { ReconciliationReport } from "../brokers/reconciliation";
 import type { AuthoritativeKillSwitchStatus } from "./killSwitchDb";
+import type { FourEyesPending } from "./fourEyesApproval";
 
 /**
  * EIN globalThis-Namensraum fuer alle Cross-Cutting-Singletons. Das ueberlebt
@@ -286,6 +289,13 @@ export const state = {
   // ── API-Auth (src/lib/apiAuth.ts) ──────────────────────────────────────────
   /** Sliding-Window-Rate-Limit-Bucket (RAM, Single-Node). */
   rateLimiterHits: map<string, number[]>("rateLimiterHits"),
+  /**
+   * ASA-02: offene Vier-Augen-Erstfreigaben je Scope (RAM, Single-Node,
+   * 15-Minuten-TTl, single-use). Schlüssel = `domain:zielobjekt`.
+   */
+  fourEyesApprovals: map<string, FourEyesPending>("fourEyesApprovals"),
+  /** ASA-02: Einmal-Nonces für `clear` des Live-Kill-Switches (RAM, 60 s). */
+  killNonces: map<string, { nonce: string; expiresAt: number; used: boolean }>("killNonces"),
 
   // ── Session-Revocation (src/lib/authSession.ts) ───────────────────────────
   /**
@@ -354,8 +364,10 @@ export function __resetAllSingletonsForTests(): void {
   // Broker-Factory
   state.brokerAdapters.reset();
   state.paperBrokerLedger.reset();
-  // API-Auth
+  // API-Auth + ASA-02 Vier-Augen-Freigaben
   state.rateLimiterHits.reset();
+  state.fourEyesApprovals.reset();
+  state.killNonces.reset();
   // Session-Revocation
   state.revokedSessions.reset();
   state.sessionsRevokedBefore.reset();
