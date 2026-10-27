@@ -31,14 +31,18 @@ prüft das mindestens bei `docs-validate`:
 
 ```bash
 npm ci
+npm run ci:sync:check    # Workflow-Spiegel (docs/ci == .github/workflows), SEC-10-SHA-Pins & Dependabot
 npm run typecheck        # tsc --noEmit (strict)
 npm run lint             # ESLint
 npm test                 # node:test-Gesamtsuite; brokerContracts startet temporäres Embedded-PostgreSQL
-npm run docs:validate    # Links/Schema/Secrets + L1–L4; L2 Code→Doku-Warnungen sind nicht blockierend
+npm run docs:validate    # Links/Schema/Secrets + CI-Spiegel + L1–L4; L2 Code→Doku-Warnungen sind nicht blockierend
 ```
 
-Für Sicherheits-Änderungen zusätzlich: `npm run security:live-gate`
-(CI-Pflicht im `security-live-gate`-Workflow).
+Bei Änderungen an CI-Workflows (`docs/ci/*.workflow.yml`) den Spiegel per
+`npm run ci:sync` nach `.github/workflows/` übertragen (bzw.
+`npm run ci:sync -- --from=github` in Gegenrichtung). Für Sicherheits-Änderungen
+zusätzlich: `npm run security:live-gate` (CI-Pflicht im
+`security-live-gate`-Workflow).
 
 ## Code-Konventionen (aus den Audits abgeleitet)
 

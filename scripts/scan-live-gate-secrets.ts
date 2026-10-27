@@ -31,8 +31,11 @@ const TARGET_DIRS = [
   "tests/fixtures/liveGateTestUtil.ts",
   "scripts/live-kill.ts",
   "scripts/live-security-stamp.ts",
+  "docs/ci/docs-validate.workflow.yml",
   "docs/ci/security-live-gate.workflow.yml",
+  ".github/workflows/main.yml",
   ".github/workflows/security-live-gate.yml", // nach Installation (Owner-Step)
+  ".github/dependabot.yml",
 ];
 
 function collectFiles(rel: string): string[] {

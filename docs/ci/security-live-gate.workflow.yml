@@ -24,8 +24,9 @@
 # der Enforcer verlangt einen gueltigen Stamp vor jeder Live-Order.
 #
 # QUELLE DER WAHRHEIT: Diese Datei ist die versionierte Quelle und wird 1:1
-# nach .github/workflows/security-live-gate.yml gespiegelt (Installation siehe
-# docs/ci/README.md). Der Secret-Scanner prueft genau diese Pfade mit.
+# nach .github/workflows/security-live-gate.yml gespiegelt (`npm run ci:sync`,
+# siehe docs/ci/README.md). Dependabot aktualisiert beide Verzeichnisse
+# gemeinsam; der Secret-Scanner prueft alle Workflow-Pfade mit.
 # =============================================================================
 name: security-live-gate
 
@@ -75,7 +76,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Node 22 + npm-Cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # Gleiche LTS-Linie wie der Linux-Job — nur so ist der
           # Plattform-Vergleich aussagekraeftig (eine Variable gleichzeitig).
@@ -125,7 +126,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Node 22 + npm-Cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -134,41 +135,18 @@ jobs:
         run: npm ci
 
       - name: Dependency-Audit — Auslieferungspfad (fail-closed ab high)
-        # Supply-Chain-Gate: schlaegt bei high/critical Advisories in den
-        # PRODUKTIONS-Abhaengigkeiten an. Dev-Abhaengigkeiten laufen in der
-        # naechsten Stufe mit — fuer den Gesamtbaum sind sie protokolliert,
-        # aber nicht blockierend (Begruendung dort).
-        # Baseline aktuell: 0 Funde (2026-09-06).
+        # Supply-Chain-Gate Stufe 1: schlaegt bei high/critical Advisories in
+        # den PRODUKTIONS-Abhaengigkeiten sofort an, damit ein Laufzeit-Fund im
+        # CI-Log klar von Dev-/Build-Werkzeugen getrennt sichtbar ist.
         run: npm audit --audit-level=high --omit=dev
 
-      - name: Dependency-Audit — Gesamtbaum inkl. Dev (protokolliert, nicht blockierend)
-        # Dev-Abhaengigkeiten gehoeren grundsaetzlich zum Gate, weil
-        # Build-Tools (esbuild, tailwind, postcss) direkt in die ausgelieferten
-        # Bundles einflieszen. Dieser Baum wird deshalb weiterhin vollstaendig
-        # geprueft und ausgegeben.
-        #
-        # Nicht blockierend ist genau EINE Kette (Stand 2026-10-03), und nur,
-        # weil kein Fix existiert:
-        #   eslint-config-next@16.2.6
-        #     -> @next/eslint-plugin-next@16.2.6
-        #       -> fast-glob@3.3.1
-        #         -> micromatch@4.0.8
-        #           -> braces@3.0.3  (GHSA-vfj7-8cjw-p6xm, <= 3.0.3)
-        # Jeder Knoten ist im Lockfile `dev: true`; `braces` wird ausschliesslich
-        # vom ESLint-Plugin zur Dateiauswahl genutzt und fliesst in kein
-        # Produktions-Bundle. Verifiziert ueber die Reverse-Closure im
-        # package-lock.json. Die Advisory deckt `<= 3.0.3` ab, und 3.0.3 ist die
-        # neueste veroeffentlichte Version — es gibt nichts, wohin ein Pin
-        # zeigen koennte. Der einzige npm-Vorschlag (`npm audit fix --force`)
-        # stuft eslint-config-next auf 14.2.35 zurueck; das verletzt dessen
-        # Peer-Dep `eslint >= 9` und bricht `npm run lint` (Flat Config,
-        # eslint.config.mjs). Ein kaputter Lint ist kein akzeptabler Tausch
-        # gegen einen gruenen Audit.
-        #
-        # Sobald npm ein gepatchtes `braces` veroeffentlicht, wird dieser Fund
-        # in der blockierenden Stufe oben wieder relevant — dann gehoert die
-        # Ausnahme entfernt, nicht verlaengert.
-        continue-on-error: true
+      - name: Dependency-Audit — Gesamtbaum inkl. Dev (fail-closed ab high)
+        # Supply-Chain-Gate Stufe 2: Auch Dev- und Build-Abhaengigkeiten
+        # (esbuild, tailwind, postcss, eslint) sind ab high/critical strikt
+        # blockierend. Die fruehere temporäre continue-on-error-Ausnahme fuer
+        # braces@3.0.3 ist mit eslint-config-next@16.4.3 entfallen und entfernt
+        # (sie hatte zwischenzeitlich zod GHSA-mrhx-c7xc-m3w5 verdeckt und bei
+        # jedem Run eine rote Exit-Code-1-Annotation erzeugt).
         run: npm audit --audit-level=high
 
       - name: SEC-04 ws-Supply-Chain-Gate (Pin, Lockfile, Laufzeit)
@@ -204,23 +182,29 @@ jobs:
         run: npm run security:live-gate
 
       - name: Secret-Scan (Quellcode-Muster)
-        # Scannt Live-Gate-Code, -Tests und genau diese Workflow-Dateien auf
+        # Scannt Live-Gate-Code, -Tests und alle CI-/Dependabot-Dateien auf
         # Secret-Muster — auch die CI selbst darf nie Credentials enthalten.
         run: node --import tsx scripts/scan-live-gate-secrets.ts
 
       - name: Security-Suite-Stamp schreiben (Deployment-Artefakt)
         # runId + SHA machen den Stamp eindeutig und revisionierbar; der
         # Enforcer prueft Alter (<= LIVE_GATE_SUITE_MAX_AGE_MS) und passed:true.
+        # GitHub-Kontextwerte per Step-env uebergeben (keine direkte
+        # Template-Interpolation im Shell-Skript).
+        env:
+          GHA_RUN_ID: ${{ github.run_id }}
+          GHA_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GHA_SHA: ${{ github.sha }}
         run: |
           node --import tsx scripts/live-security-stamp.ts \
-            --run-id="gha-${{ github.run_id }}-${{ github.run_attempt }}" \
-            --sha="${{ github.sha }}" \
+            --run-id="gha-${GHA_RUN_ID}-${GHA_RUN_ATTEMPT}" \
+            --sha="${GHA_SHA}" \
             --source=ci
 
       - name: Suite-Stamp als Artefakt hochladen
         # Deployment-Artefakt fuer die Auslieferung (90 Tage Rueckgriff fuer
         # Audits); fehlt die Datei, schlaegt der Schritt bewusst hart (error).
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: live-gate-security-suite
           path: data/live-gate/security-suite.json

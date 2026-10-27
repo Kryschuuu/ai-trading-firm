@@ -48,6 +48,7 @@ import {
   type Finding,
   type TextFile,
 } from "./docs-validate-checks";
+import { checkCiWorkflows } from "./sync-ci-workflows";
 
 const ROOT = process.cwd();
 const DOCS = path.join(ROOT, "docs");
@@ -607,6 +608,18 @@ function checkVersionConsistency() {
   report("Version-Konsistenz", issues.length === 0, issues.join(" | "));
 }
 
+function checkCiWorkflowSync() {
+  const result = checkCiWorkflows(ROOT);
+  report(
+    "CI-Workflows==Spiegel/Dependabot",
+    result.ok,
+    result.issues
+      .slice(0, 25)
+      .map((issue) => `${issue.filePath}: ${issue.detail}`)
+      .join(" | "),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Ausfuehrung
 // ---------------------------------------------------------------------------
@@ -628,6 +641,7 @@ function main() {
   checkRoutes();
   checkStates();
   checkVersionConsistency();
+  checkCiWorkflowSync();
 
   console.log(`[docs-validate] ${checksRun} Checks, ${helpFiles.length} Hilfe-Dateien.`);
   if (failures.length === 0) {

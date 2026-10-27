@@ -28,6 +28,30 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Fixed
 
+- **CI-Workflow-Spiegel, Dependabot-Synchronisation & Security-Audit-Härtung (2026-10-27):**
+  - **Root Cause PR #243 behoben:** `.github/dependabot.yml` konfigurierte nur
+    `directory: /` und aktualisierte bei Action-Updates ausschließlich
+    `.github/workflows/*`, sodass der Spiegel-Sync-Check in `docs-validate`
+    systematisch mit Exit-Code 1 abbrach. Umstellung auf
+    `directories: ["/", "/docs/ci"]` mit Gruppierung für `version-updates`
+    (`actions`) und `security-updates` (`actions-security`) hält alle vier
+    Workflow-Dateien bei Dependabot-PRs künftig atomar synchron.
+  - **Action-Pins aktualisiert (SEC-10):** `actions/setup-node` `v7.0.0` →
+    **`v7.1.0`** und `actions/upload-artifact` `v7.0.1` → **`v7.0.2`** in
+    `docs/ci/*.workflow.yml` und `.github/workflows/*.yml` (byte-identisch).
+  - **Lokaler & CI-Wächter (`scripts/sync-ci-workflows.ts`):** Neue Skripte
+    `npm run ci:sync` / `npm run ci:sync:check` sowie Integration in
+    `npm run docs:validate` prüfen Byte-Parität, verwaiste Workflow-Dateien,
+    40-stellige SEC-10-SHA-Pins mit `# vX.Y.Z`-Kommentar und die
+    Multi-Directory-Dependabot-Konfiguration; Vorab-`diff -u` in `docs-validate`
+    läuft jetzt direkt nach `Checkout` mit expliziter `::error::`-Annotation.
+  - **`security-live-gate` gehärtet:** `zod` im Lockfile `4.4.3` → **`4.6.7`**
+    (GHSA-mrhx-c7xc-m3w5, High) gehoben und das mit `eslint-config-next@16.4.3`
+    obsolet gewordene `continue-on-error: true` auf `npm audit --audit-level=high`
+    entfernt (Gesamtbaum inkl. Dev ist jetzt fail-closed ohne verdeckte
+    Advisories oder Fehl-Annotationen); GitHub-Kontextwerte im Suite-Stamp-Step
+    laufen über Step-`env`; `scripts/scan-live-gate-secrets.ts` scannt alle
+    Workflow- und Dependabot-Dateien. Regression: `tests/ciWorkflowSync.test.ts`.
 - **Dependency-Floors (Security, ohne Finding-Nummer):** `sharp` 0.35.4 → **0.35.5**
   (GHSA-wq5f-xc86-pv6w / CVE-2026-96889, librsvg im AVIF-Pfad; optionalDependency von
   `next`) und `source-map-js` 1.2.1 → **1.2.2** (GHSA-68fv-2mgg-jv7q; transitiv über

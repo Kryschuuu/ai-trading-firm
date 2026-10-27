@@ -6,31 +6,43 @@
 # Dependabot woechentlich gruppierte PRs fuer neue Action-Versionen und zieht
 # SHA + Versionskommentar gemeinsam hoch.
 #
-# WICHTIG bei jedem Actions-PR: Die Quellen unter docs/ci/ sind 1:1 nach
-# .github/workflows/ gespiegelt. Dependabot aktualisiert nur letztere —
-# vor dem Merge die docs/ci-Kopien synchronisieren, sonst rotet der
-# Spiegel-Sync-Schritt im Job `docs-validate` (siehe docs/ci/README.md).
+# DAUERHAFTE SPIEGEL-SYNCHRONISATION (`directories`):
+# Die Workflows liegen gespiegelt unter `.github/workflows/` (`directory: "/"`)
+# UND `docs/ci/` (`directory: "/docs/ci"`). Durch `directories` in Kombination
+# mit `groups` (sowohl fuer regulaere `version-updates` als auch fuer
+# `security-updates`) aktualisiert Dependabot alle vier Workflow-Dateien atomar
+# in EINEM gemeinsamen PR — der Spiegel-Sync-Check in `docs-validate` bleibt
+# damit auch bei automatischen Dependabot-PRs ohne manuellen Nachschritt gruen.
 #
 # Bewusst NUR Oekosystem `github-actions`: npm-Abhaengigkeiten werden kuratiert
 # und mit Runbook + Regressionssuite aktualisiert (siehe Next.js-Upgrade-Runbook
 # in docs/security/README.md) — automatische Dependency-PRs wuerden diesen
-# geprüften Release-Prozess umgehen. Advisories zusaetzlich faengt der
+# geprueften Release-Prozess umgehen. Advisories faengt zusaetzlich der
 # fail-closed-Schritt `npm audit --audit-level=high` im security-live-gate-Job.
 # =============================================================================
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - "/"
+      - "/docs/ci"
     schedule:
       interval: weekly
       day: monday
       time: "06:00"
       timezone: Europe/Berlin
-    # Alle Action-Updates in einem PR buendeln (weniger Review-Noise);
-    # Pinning-Updates sind atomar risikoarm, da jede Action einzeln getestet wird.
+    # Alle Action-Updates ueber beide Verzeichnisse hinweg in EINEM PR buendeln
+    # (sowohl regulaere Versions-Updates als auch Security-Updates), damit
+    # `.github/workflows/*` und `docs/ci/*.workflow.yml` nie auseinanderlaufen.
     groups:
       actions:
-        patterns: ["*"]
+        applies-to: version-updates
+        patterns:
+          - "*"
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     commit-message:
       prefix: "ci(actions): "
     open-pull-requests-limit: 5

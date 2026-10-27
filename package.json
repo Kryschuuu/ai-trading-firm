@@ -32,6 +32,8 @@
     "market:sync:status": "node --import tsx scripts/market-sync.ts --status",
     "market-sync:status": "node --import tsx scripts/market-sync.ts --status",
     "scan:secrets": "node --import tsx scripts/scan-secrets.ts",
+    "ci:sync": "node --import tsx scripts/sync-ci-workflows.ts",
+    "ci:sync:check": "node --import tsx scripts/sync-ci-workflows.ts --check",
     "docs:validate": "node --import tsx scripts/docs-validate.ts",
     "docs:templates": "node --import tsx scripts/gen-strategy-templates-doc.ts",
     "docs:inventories": "node --import tsx scripts/gen-docs-inventories.ts",
