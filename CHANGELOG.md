@@ -57,7 +57,7 @@ erlaubt, solange sie hier dokumentiert sind).
     exakt einmal abgerechnet werden und niemals still `realized_pnl = 0`
     schreiben (`tests/asa01.multiprocessKillAndPnl.test.ts`, 8 Integrationstests
     gegen `embedded-postgres`).
-- **ASA-02 (CRITICAL, Security/AuthZ) — Rollen-Spoofing, Vier-Augen-Bypass & Live-Kill-Autorisierung behoben (2026-10-27):**
+- **ASA-02 (CRITICAL, Security/AuthZ) — Rollen-Spoofing, Vier-Augen-Bypass & Live-Kill-Autorisierung behoben (2026-10-27, [PR #247](https://github.com/Kryschuuu/ai-trading-firm/pull/247)):**
   - **Echte Principal-Bindung:** `resolveAuth()` liefert zusätzlich
     `auth.principal` mit einem HMAC-Fingerprint der vorgelegten Identität
     (`src/auth/principal.ts`; getrennte Credentials/Sessions ⇒ getrennte IDs,

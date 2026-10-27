@@ -6,6 +6,7 @@
 - **Status:** **FIXED** (2026-10-27, Remediation-Session `PROMPT-ASA-P0-02`)
 - **Datei(en) vor Fix:** `src/app/api/firm/lifecycle/route.ts`, `src/app/api/live/kill/route.ts`, `src/live-gate/service.ts`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md`](../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md)
+- **Remediation-PR:** [PR #247](https://github.com/Kryschuuu/ai-trading-firm/pull/247)
 - **Regression:** `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` (12 Tests, u. a. gegen eingebettetes PostgreSQL), angepasste `tests/liveGate.api.test.ts` und `tests/liveGate.states.test.ts`
 
 ## Beschreibung (ursprünglicher Befund)
