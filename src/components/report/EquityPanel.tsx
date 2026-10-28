@@ -1,6 +1,6 @@
-import { apiFetch } from "@/lib/apiClient";
 "use client";
 
+import { apiFetch } from "@/lib/apiClient";
 /**
  * Reports → Equity-Kurve: Zeitraumwahl, Kennzahlen, Chart, Vergleich, Export.
  *

@@ -1,6 +1,6 @@
-import { apiFetch } from "@/lib/apiClient";
 "use client";
 
+import { apiFetch } from "@/lib/apiClient";
 /**
  * Protokoll-Bereich (agent_messages) mit demselben Paging-System wie der
  * Audit-Trail: 20/50/100/200 Einträge pro Seite, Default 20.

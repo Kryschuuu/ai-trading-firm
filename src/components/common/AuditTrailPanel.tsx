@@ -1,6 +1,6 @@
-import { apiFetch } from "@/lib/apiClient";
 "use client";
 
+import { apiFetch } from "@/lib/apiClient";
 /**
  * Audit-Trail mit Server-Paging (20/50/100/200 pro Seite), Level-/Event-Filter
  * und vollständiger, lesbarer Darstellung pro Eintrag.
