@@ -31,7 +31,7 @@ import {
   positions as positionsTable,
   riskConfig,
 } from "@/db/schema";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { PaperBroker } from "./broker";
 import { syncPaperBrokerWithDb } from "./brokerHydration";
 import { readAuthoritativeKillSwitch } from "./killSwitchDb";
@@ -148,6 +148,8 @@ export interface MarketFeed {
   start(onTick: (t: FeedTick) => void): Promise<void>;
   stop(): Promise<void>;
   status(): FeedStatus;
+  /** Additive subscription; reconnects must retain the requested symbols. */
+  updateSymbols?(symbols: string[]): Promise<void>;
 }
 
 export type ExecutionOutcome = {
@@ -163,6 +165,7 @@ export type ExecutionOutcome = {
 
 export type ExecuteContext = {
   ruleId: string;
+  version?: number;
   name: string;
   spec: RuleSpec;
   compiled: CompiledRule;
@@ -381,7 +384,8 @@ export type RuleCacheStatus = {
 export interface RuleCacheSnapshot {
   rows: (typeof tradeRules.$inferSelect)[];
   missionRows: Array<{ id: string; status: string; templateId: string | null }>;
-  countRows: Array<{ ruleId: string; c: number }>;
+  countRows: Array<{ ruleId: string; c: number; lastFiredAt?: Date | null }>;
+  countDayKey?: string;
 }
 
 export type RuleCacheSnapshotLoader = () => Promise<RuleCacheSnapshot>;
@@ -393,15 +397,16 @@ export async function loadRuleCacheSnapshot(): Promise<RuleCacheSnapshot> {
     .select({ id: missionsTable.id, status: missionsTable.status, templateId: missionsTable.templateId })
     .from(missionsTable);
   const dayStart = startOfBerlinDay();
-  const countRows = await db
+  const countRows = rows.length === 0 ? [] : await db
     .select({
       ruleId: ruleExecutions.ruleId,
-      c: sql<number>`count(*)::int`,
+      c: sql<number>`count(*) filter (where ${ruleExecutions.createdAt} >= ${dayStart})::int`,
+      lastFiredAt: sql<Date | null>`max(${ruleExecutions.createdAt})`.mapWith(ruleExecutions.createdAt),
     })
     .from(ruleExecutions)
-    .where(and(eq(ruleExecutions.status, "TRIGGERED"), gte(ruleExecutions.createdAt, dayStart)))
+    .where(and(eq(ruleExecutions.status, "TRIGGERED"), inArray(ruleExecutions.ruleId, rows.map((row) => row.id))))
     .groupBy(ruleExecutions.ruleId);
-  return { rows, missionRows, countRows };
+  return { rows, missionRows, countRows, countDayKey: berlinDayKeyOf(dayStart.getTime()) };
 }
 
 /**
@@ -424,12 +429,33 @@ export class RuleCache {
   private invalidationVersion = 0;
   private inFlightLoad: Promise<void> | null = null;
   private inFlightVersion: number | null = null;
+  private readonly snapshotListeners = new Set<() => void>();
+  private readonly executing = new Set<string>();
+  private executionWaiters: Array<() => void> = [];
+  private reading = false;
   private unregisterInvalidator: (() => void) | null = null;
 
   constructor(
     private readonly refreshMs = 30_000,
     private readonly loadSnapshot: RuleCacheSnapshotLoader = loadRuleCacheSnapshot,
   ) {}
+
+  onSnapshot(listener: () => void): () => void {
+    this.snapshotListeners.add(listener);
+    return () => this.snapshotListeners.delete(listener);
+  }
+
+  /** Prevent a DB read from overlapping an execution's insert and accounting. */
+  beginExecution(id: string): boolean {
+    if (this.reading || this.dirty || this.executing.has(id)) return false;
+    this.executing.add(id);
+    return true;
+  }
+
+  endExecution(id: string): void {
+    this.executing.delete(id);
+    if (!this.executing.size) this.executionWaiters.splice(0).forEach((resolve) => resolve());
+  }
 
   /** Markiert den Snapshot sofort als nicht verwendbar und startet den Reload. */
   invalidate(): void {
@@ -478,14 +504,17 @@ export class RuleCache {
     if (!this.dirty && this.loadedAt !== null && Date.now() - this.loadedAt < this.refreshMs) return;
 
     const versionAtStart = this.invalidationVersion;
+    this.reading = true;
     const work = (async () => {
       try {
+        if (this.executing.size) await new Promise<void>((resolve) => this.executionWaiters.push(resolve));
         const snapshot = await this.loadSnapshot();
         if (versionAtStart !== this.invalidationVersion) {
           this.dirty = true;
           return;
         }
         this.applySnapshot(snapshot);
+        for (const listener of this.snapshotListeners) listener();
       } catch (error) {
         // Fehlgeschlagene Poll-Refreshes dürfen einen noch gültigen Snapshot
         // weiterverwenden. Nach einer NOTIFY bleibt `dirty=true`, also match()
@@ -504,14 +533,15 @@ export class RuleCache {
       if (this.inFlightLoad === work) {
         this.inFlightLoad = null;
         this.inFlightVersion = null;
+        this.reading = false;
       }
     }
   }
 
   /** Baut alle Maps privat auf und veröffentlicht sie mit einem atomaren Swap. */
   private applySnapshot(snapshot: RuleCacheSnapshot): void {
-    const counts = new Map<string, number>();
-    for (const row of snapshot.countRows) counts.set(row.ruleId, Number(row.c));
+    const counts = new Map(snapshot.countRows.map((row) => [row.ruleId, row]));
+    const previous = new Map([...this.bySymbol.values()].flat().map((rule) => [rule.rowId, rule]));
 
     const nextMissions = new Map<string, string>();
     const nextMissionTemplates = new Map<string, string | null>();
@@ -544,8 +574,9 @@ export class RuleCache {
         name: row.name,
         spec,
         compiled: compileRuleSpec(spec),
-        executionsToday: counts.get(row.id) ?? 0,
-        firedAt: 0,
+        executionsToday: snapshot.countDayKey && snapshot.countDayKey !== berlinDayKeyOf(Date.now())
+          ? 0 : Number(counts.get(row.id)?.c ?? 0),
+        firedAt: Math.max(previous.get(row.id)?.firedAt ?? 0, counts.get(row.id)?.lastFiredAt?.getTime() ?? 0),
         cooldownMs: spec.window.cooldownMinutes * 60_000,
       };
       const list = nextBySymbol.get(cached.symbol) ?? [];
@@ -561,10 +592,9 @@ export class RuleCache {
     this.loadedAt = Date.now();
     this.dirty = false;
     const day = berlinDayKeyOf(Date.now());
-    if (this.dayKey !== day) {
-      this.dayKey = day;
-      this.ramCounts.clear();
-    }
+    this.dayKey = day;
+    // Executions cannot overlap the read: the DB now contains all committed local fills.
+    this.ramCounts.clear();
   }
 
   /** Kompilierte Regeln eines Symbols (ohne Auswertung). */
@@ -623,11 +653,7 @@ export class RuleCache {
    */
   match(snap: RuleSnapshot, now = Date.now(), timeframe?: string): CachedRule[] {
     if (this.dirty || this.loadedAt === null) return [];
-    const day = berlinDayKeyOf(now);
-    if (this.dayKey !== day) {
-      this.dayKey = day;
-      this.ramCounts.clear();
-    }
+    this.resetDayIfNeeded(now);
     const out: CachedRule[] = [];
     for (const rule of this.bySymbol.get(snap.symbol) ?? []) {
       if (timeframe && rule.spec.window.timeframe !== timeframe) continue;
@@ -641,7 +667,16 @@ export class RuleCache {
     return out;
   }
 
+  private resetDayIfNeeded(now: number): void {
+    const day = berlinDayKeyOf(now);
+    if (this.dayKey === day) return;
+    this.dayKey = day;
+    this.ramCounts.clear();
+    for (const rule of [...this.bySymbol.values()].flat()) rule.executionsToday = 0;
+  }
+
   noteFired(ruleId: string): void {
+    this.resetDayIfNeeded(Date.now());
     const rule = [...this.bySymbol.values()].flat().find((r) => r.rowId === ruleId);
     if (rule) rule.firedAt = Date.now();
     // RAM-Zähler separat vom DB-Stand (kein Doppelzählen): firedToday =
@@ -649,10 +684,15 @@ export class RuleCache {
     this.ramCounts.set(ruleId, (this.ramCounts.get(ruleId) ?? 0) + 1);
   }
 
+  executionsFor(rule: CachedRule): number {
+    return rule.executionsToday + (this.ramCounts.get(rule.rowId) ?? 0);
+  }
+
   status(): RuleCacheStatus {
+    this.resetDayIfNeeded(Date.now());
     const executionsToday: Record<string, number> = {};
     for (const list of this.bySymbol.values()) {
-      for (const r of list) executionsToday[r.rowId] = r.executionsToday;
+      for (const r of list) executionsToday[r.rowId] = r.executionsToday + (this.ramCounts.get(r.rowId) ?? 0);
     }
     return {
       loadedAt: this.loadedAt ? new Date(this.loadedAt).toISOString() : null,
@@ -792,6 +832,13 @@ async function ensureRuntimeLimitsLoaded(): Promise<void> {
   } catch {
     /* DB nicht bereit → Code-Defaults bleiben wirksam */
   }
+}
+
+/** Payload used for RULE_TRIGGERED; the version comes from the cached row. */
+export function triggeredRuleAuditPayload(
+  ctx: ExecuteContext, symbol: string, orderId: string, evalMicros: number, startedProcess: number,
+): Record<string, unknown> {
+  return { ruleId: ctx.ruleId, symbol, version: ctx.version ?? 1, price: ctx.snapshot.price, orderId, evalMicros, startedProcess };
 }
 
 /**
@@ -1261,15 +1308,7 @@ export function createPaperRuleAdapter(opts?: {
         await ruleAudit(
           "RULE_TRIGGERED",
           "INFO",
-          {
-            ruleId: ctx.ruleId,
-            symbol,
-            version: ctx.compiled ? 1 : 1,
-            price: ctx.snapshot.price,
-            orderId: fill.orderId,
-            evalMicros,
-            startedProcess,
-          },
+          triggeredRuleAuditPayload(ctx, symbol, fill.orderId, evalMicros, startedProcess),
           ctx.missionId
         );
         // GAP-06: Eine enforce-Dämpfung ist eine Mutation des Signalgewichts
@@ -1331,6 +1370,8 @@ export function createPaperRuleAdapter(opts?: {
 export type MicroExecutorOptions = {
   refreshMs?: number;
   seedCandles?: boolean;
+  /** Optional candle provider for controlled deployments/tests. */
+  candleLoader?: typeof getCandles;
   /**
    * Ausführungsintervall: der längste Regel-Timeframe, den dieser Executor
    * auswertet (Default {@link MICRO_EXECUTION_INTERVAL_DEFAULT} = `1h`). Regeln
@@ -1399,6 +1440,12 @@ export class MicroExecutor {
   private readonly cache: RuleCache;
   private readonly adapter: RuleExecutionAdapter;
   private feeds: MarketFeed[] = [];
+  private feedsStarted = false;
+  private readonly inFlightRuleIds = new Set<string>();
+  private unsubscribeSnapshot: (() => void) | null = null;
+  private reconcileWork: Promise<void> = Promise.resolve();
+  private readonly warming = new Map<string, { ticks: FeedTick[]; overflow: boolean }>();
+  private readonly announcedBlocked = new Set<string>();
   private series = new Map<string, RollingTimeframeSeries>();
   private spreads = new Map<string, number>();
   /** Buch-Tiefe je Symbol (v0.4.0, IAD-T-06) — `depthUsd`, null = nicht verifiziert. */
@@ -1426,7 +1473,7 @@ export class MicroExecutor {
   }) {
     this.cache = opts?.cache ?? new RuleCache();
     this.adapter =
-      opts?.adapter ?? createPaperRuleAdapter({ onFired: (id) => this.cache.noteFired(id) });
+      opts?.adapter ?? createPaperRuleAdapter();
     this.options = opts?.options ?? {};
     this.executionInterval = this.options.executionInterval ?? MICRO_EXECUTION_INTERVAL_DEFAULT;
     if (!isSupportedTimeframe(this.executionInterval)) {
@@ -1513,6 +1560,7 @@ export class MicroExecutor {
     if (this.running) return;
     this.running = true;
     this.startedAt = Date.now();
+    this.unsubscribeSnapshot = this.cache.onSnapshot(() => { if (this.feedsStarted) this.queueReconcile(); });
     await this.cache.load();
 
     // Für JEDE auswertbare aktive Regel eine Rolling-Serie ihres Timeframes
@@ -1521,7 +1569,7 @@ export class MicroExecutor {
     // Serie, also wird nie ein Snapshot gegen sie bewertet (STX-01).
     for (const rule of this.cache.allRules()) {
       const reason = this.blockReasonOf(rule);
-      if (reason) this.announceBlockedRule(rule, reason);
+      if (reason) this.announceBlockedOnce(rule, reason);
       else this.addSymbol(rule.symbol, rule.spec.window.timeframe);
     }
 
@@ -1533,7 +1581,7 @@ export class MicroExecutor {
         const [symbol, timeframe] = key.split(":");
         this.seedRequested++;
         try {
-          const candles = await getCandles(symbol, timeframe, 150);
+          const candles = await (this.options.candleLoader ?? getCandles)(symbol, timeframe, 150);
           // WICHTIG (MDERR-006): Ein leeres Array ist keine Fehlermeldung —
           // die Venue hat nachweislich keine Bars geliefert. Ein
           // MarketDataFetchError dagegen ist ein echter Infrastrukturfehler
@@ -1575,14 +1623,86 @@ export class MicroExecutor {
 
     await this.cache.start();
     for (const feed of this.feeds) {
+      await feed.updateSymbols?.([...new Set([...this.series.values()].map((s) => s.symbol))]);
       await feed.start((tick) => this.handleTick(tick));
     }
+    this.feedsStarted = true;
+    this.queueReconcile();
+    await this.reconcileWork;
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    this.feedsStarted = false;
+    this.unsubscribeSnapshot?.();
+    this.unsubscribeSnapshot = null;
     await this.cache.stop();
+    await this.reconcileWork;
     for (const feed of this.feeds) await feed.stop();
+  }
+
+  private queueReconcile(): void {
+    this.reconcileWork = this.reconcileWork.then(() => this.reconcileRules()).catch((error) => {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      console.error("[micro] Feed-Reconciliation fehlgeschlagen:", this.lastError);
+    });
+  }
+
+  private async reconcileRules(): Promise<void> {
+    if (!this.running) return;
+    for (const rule of this.cache.allRules()) {
+      const reason = this.blockReasonOf(rule);
+      if (reason) { this.announceBlockedOnce(rule, reason); continue; }
+      const symbol = sanitizeSymbol(rule.symbol);
+      if (!symbol) continue;
+      const timeframe = rule.spec.window.timeframe;
+      const key = `${symbol}:${timeframe}`;
+      if (this.series.has(key)) continue;
+      let candles: CandleLike[] = [];
+      const warmup = { ticks: [] as FeedTick[], overflow: false };
+      this.warming.set(key, warmup);
+      const warmupStarted = Date.now();
+      if (this.options.seedCandles !== false) {
+        this.seedRequested++;
+        try {
+          candles = await (this.options.candleLoader ?? getCandles)(symbol, timeframe, 150);
+          if (candles.length) {
+            try { evaluateInstrumentRegime(symbol, candles, { families: loadRegimeFamilyInputs(symbol) }); } catch { /* optional */ }
+          }
+        } catch (err) {
+          this.seedFailed++;
+          this.seedLastError = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+          structuredLog("error", "micro_executor_seed_fetch_failed", {
+            symbol, timeframe, reason: err instanceof MarketDataFetchError ? err.reason : "UNKNOWN",
+            retryable: err instanceof MarketDataFetchError ? err.retryable : false,
+            httpStatus: err instanceof MarketDataFetchError ? (err.httpStatus ?? null) : null,
+          });
+        }
+      }
+      this.warming.delete(key);
+      if (!this.running) return;
+      // Do not install a series for a rule removed while the warmup was pending.
+      if (!this.cache.allRules().some((r) => r.symbol === rule.symbol && r.spec.window.timeframe === timeframe)) continue;
+      // Discard the still-open REST bar; replay its live ticks instead. If the
+      // bounded buffer overflowed, start cold rather than trade on incomplete bars.
+      const bucket = Math.floor(warmupStarted / SUPPORTED_TIMEFRAME_MS[timeframe]) * SUPPORTED_TIMEFRAME_MS[timeframe];
+      this.addSymbol(symbol, timeframe, warmup.overflow ? [] : candles.filter((c) => c.time < bucket));
+      const series = this.series.get(key)!;
+      if (!warmup.overflow) for (const tick of warmup.ticks) {
+        if (tick.kind === "trade") series.touch(tick.price, tick.ts, tick.qty);
+        else if (tick.kind === "candle") series.applyCandle(tick.candle, tick.closed);
+      }
+    }
+    // Additive and idempotent; retry even when a prior update failed after warmup.
+    const symbols = [...new Set([...this.series.values()].map((series) => series.symbol))];
+    for (const feed of this.feeds) await feed.updateSymbols?.(symbols);
+  }
+
+  private announceBlockedOnce(rule: CachedRule, reason: RuleTimeframeBlockReason): void {
+    const key = `${rule.rowId}:${rule.version}:${reason}`;
+    if (this.announcedBlocked.has(key)) return;
+    this.announcedBlocked.add(key);
+    this.announceBlockedRule(rule, reason);
   }
 
   private blockReasonOf(rule: CachedRule): RuleTimeframeBlockReason | null {
@@ -1623,6 +1743,14 @@ export class MicroExecutor {
       this.updateBook(symbol, { venue: tick.venue, bids: tick.bids, asks: tick.asks });
     }
 
+    // Retain ticks for existing-symbol/new-timeframe warmups without replacing
+    // a live series with stale REST data.
+    if (tick.kind !== "book") for (const [key, pending] of this.warming) {
+      if (!key.startsWith(`${symbol}:`)) continue;
+      if (pending.ticks.length < 10_000) pending.ticks.push(tick);
+      else pending.overflow = true;
+    }
+
     // Keine Regel für dieses Symbol geladen → Zero-Cost-Tick.
     if (this.cache.candidatesBySymbol(symbol).length === 0) return;
     // Buch-Ticks tragen keine Preise — sie aktualisieren nur die Tiefe.
@@ -1647,6 +1775,8 @@ export class MicroExecutor {
       if (this.evalSamples.length > 1000) this.evalSamples = this.evalSamples.slice(-1000);
 
       for (const rule of matched) {
+        if (this.inFlightRuleIds.has(rule.rowId) || !this.cache.beginExecution(rule.rowId)) continue;
+        this.inFlightRuleIds.add(rule.rowId);
         this.matchCount++;
         void (async () => {
           const authKill = await readAuthoritativeKillSwitch();
@@ -1667,18 +1797,19 @@ export class MicroExecutor {
           }
           return this.adapter.execute({
             ruleId: rule.rowId,
+            version: rule.version,
             name: rule.name,
             spec: rule.spec,
             compiled: rule.compiled,
             snapshot: snap,
             missionId: rule.missionId,
-            executionsToday: rule.executionsToday,
+            executionsToday: this.cache.executionsFor(rule),
             evalMicros,
             strategyClass: this.cache.strategyClassFor(rule.missionId),
           });
         })()
           .then((outcome) => {
-            if (outcome.status === "TRIGGERED") this.execCount++;
+            if (outcome.status === "TRIGGERED") { this.cache.noteFired(rule.rowId); this.execCount++; }
             else if (outcome.status === "BLOCKED") this.blockedCount++;
             else this.errorCount++;
             if (outcome.status !== "TRIGGERED") {
@@ -1689,6 +1820,10 @@ export class MicroExecutor {
           .catch((e) => {
             this.errorCount++;
             this.lastError = e instanceof Error ? e.message : String(e);
+          })
+          .finally(() => {
+            this.inFlightRuleIds.delete(rule.rowId);
+            this.cache.endExecution(rule.rowId);
           });
       }
     }
@@ -1752,6 +1887,7 @@ type WsLike = {
   onerror: ((ev?: unknown) => void) | null;
   onclose: (() => void) | null;
   close(): void;
+  send(data: string): void;
 };
 
 async function openWebSocket(url: string): Promise<WsLike> {
@@ -1777,7 +1913,9 @@ const BINANCE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX
  */
 export class BinanceTradeFeed implements MarketFeed {
   readonly name = "binance";
-  readonly urlHint: string;
+  urlHint: string;
+  private readonly symbols = new Set<string>();
+  private socketSymbols = new Set<string>();
   private ws: WsLike | null = null;
   private connected = false;
   private lastTickAt: string | null = null;
@@ -1787,17 +1925,42 @@ export class BinanceTradeFeed implements MarketFeed {
   private lastDetail: string | null = null;
 
   constructor(symbols: string[]) {
-    const valid = symbols
-      .map((s) => s.toUpperCase())
-      .filter((s) => BINANCE_SYMBOLS.includes(s));
-    // v0.4.0 (IAD-T-06): zusätzlich `@depth5` — der Partial-Book-Snapshot
-    // liefert die 5 besten Levels je Seite (~1000 ms Push), genug für die
-    // Venue-Qualitätsgrenze (≥ 3 Levels) und die `min(bid,ask)`-Tiefe.
-    const streams = valid.map(
-      (s) =>
-        `${s.toLowerCase()}usdt@trade/${s.toLowerCase()}usdt@kline_1m/${s.toLowerCase()}usdt@depth5`
-    );
-    this.urlHint = `wss://stream.binance.com:9443/stream?streams=${streams.join("/")}`;
+    for (const symbol of symbols) {
+      const normalized = symbol.toUpperCase();
+      if (BINANCE_SYMBOLS.includes(normalized)) this.symbols.add(normalized);
+    }
+    this.urlHint = this.buildUrl();
+  }
+
+  private streams(symbol: string): string[] {
+    const prefix = `${symbol.toLowerCase()}usdt`;
+    return [`${prefix}@trade`, `${prefix}@kline_1m`, `${prefix}@depth5`];
+  }
+
+  private buildUrl(): string {
+    return `wss://stream.binance.com:9443/stream?streams=${[...this.symbols].flatMap((s) => this.streams(s)).join("/")}`;
+  }
+
+  async updateSymbols(symbols: string[]): Promise<void> {
+    for (const raw of symbols) {
+      const symbol = raw.toUpperCase();
+      if (!BINANCE_SYMBOLS.includes(symbol)) {
+        this.errorCount++;
+        this.lastDetail = `Binance-Symbol nicht unterstützt: ${symbol}`;
+        continue;
+      }
+      this.symbols.add(symbol);
+    }
+    this.urlHint = this.buildUrl();
+    this.subscribePending();
+  }
+
+  private subscribePending(): void {
+    if (!this.connected || !this.ws) return;
+    const pending = [...this.symbols].filter((symbol) => !this.socketSymbols.has(symbol));
+    if (!pending.length) return;
+    this.ws.send(JSON.stringify({ method: "SUBSCRIBE", params: pending.flatMap((s) => this.streams(s)), id: Date.now() }));
+    for (const symbol of pending) this.socketSymbols.add(symbol);
   }
 
   async start(onTick: (t: FeedTick) => void): Promise<void> {
@@ -1807,16 +1970,19 @@ export class BinanceTradeFeed implements MarketFeed {
 
   private connect(onTick: (t: FeedTick) => void, attempt: number): void {
     if (this.stopped) return;
-    openWebSocket(this.urlHint)
+    const initialSymbols = new Set(this.symbols);
+    openWebSocket(this.buildUrl())
       .then((ws) => {
         if (this.stopped) {
           ws.close();
           return;
         }
         this.ws = ws;
+        this.socketSymbols = initialSymbols;
         ws.onopen = () => {
           this.connected = true;
           this.lastDetail = null;
+          this.subscribePending();
           console.log("[micro] Binance-Feed verbunden:", this.urlHint.slice(0, 90));
         };
         ws.onmessage = (ev) => {
@@ -1828,6 +1994,8 @@ export class BinanceTradeFeed implements MarketFeed {
                   ? ev.data.toString()
                   : String(ev.data);
             const msg = JSON.parse(raw) as {
+              code?: number;
+              msg?: string;
               data?: {
                 e?: string;
                 s?: string;
@@ -1839,6 +2007,13 @@ export class BinanceTradeFeed implements MarketFeed {
                 k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
               };
             };
+            if (msg.code !== undefined) {
+              this.errorCount++;
+              this.lastDetail = `Binance-Abonnement abgelehnt: ${String(msg.msg ?? msg.code).slice(0, 160)}`;
+              // Reconnect with the full desired URL rather than silently losing the subscription.
+              ws.close();
+              return;
+            }
             const data = msg.data;
             if (!data) return;
             const symbol = (data.s ?? "").toUpperCase().replace(/USDT$/, "");
@@ -1913,6 +2088,7 @@ export class BinanceTradeFeed implements MarketFeed {
       .catch((e) => {
         this.errorCount++;
         this.lastDetail = e instanceof Error ? e.message : String(e);
+        if (!this.stopped) setTimeout(() => this.connect(onTick, attempt + 1), Math.min(30_000, 1000 * 2 ** attempt));
       });
   }
 
@@ -1975,7 +2151,6 @@ export class SimulatedFeed implements MarketFeed {
     this.connected = true;
     const rand = this.rand();
     let i = 0;
-    const sym = this.symbols[0];
     this.candleStart = Math.floor(Date.now() / 60_000) * 60_000;
     this.candleOpen = this.price;
     this.timer = setInterval(() => {
@@ -1988,7 +2163,7 @@ export class SimulatedFeed implements MarketFeed {
       const qty = 0.1 + rand() * 5;
       this.tickCount++;
       this.lastTickAt = new Date(ts).toISOString();
-      onTick({ kind: "trade", symbol: sym, ts, price: Number(this.price.toFixed(2)), qty });
+      for (const sym of this.symbols) onTick({ kind: "trade", symbol: sym, ts, price: Number(this.price.toFixed(2)), qty });
       if (i % this.candleTicks === 0) {
         const close = Number(this.price.toFixed(2));
         const open = this.candleOpen ?? close;
@@ -2000,11 +2175,18 @@ export class SimulatedFeed implements MarketFeed {
           close,
           volume: 100 + rand() * 400,
         };
-        onTick({ kind: "candle", symbol: sym, ts: this.candleStart, candle, closed: true });
+        for (const sym of this.symbols) onTick({ kind: "candle", symbol: sym, ts: this.candleStart, candle, closed: true });
         this.candleStart += 60_000;
         this.candleOpen = close;
       }
     }, this.intervalMs);
+  }
+
+  async updateSymbols(symbols: string[]): Promise<void> {
+    for (const raw of symbols) {
+      const symbol = raw.toUpperCase();
+      if (!this.symbols.includes(symbol)) this.symbols.push(symbol);
+    }
   }
 
   async stop(): Promise<void> {

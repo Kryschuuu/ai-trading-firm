@@ -59,7 +59,6 @@ async function main(): Promise<void> {
   const executor = new MicroExecutor({
     cache,
     adapter: createPaperRuleAdapter({
-      onFired: (id) => cache.noteFired(id),
       // Hook: vor der ersten Order-Ausführung sicherstellen, dass Positionen,
       // Cash und Kill-Switch aus der DB hydriert sind. Single-Flight über
       // stateRegistry — jeder Tick nach dem ersten sieht den bereits

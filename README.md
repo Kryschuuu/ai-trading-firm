@@ -305,6 +305,10 @@ wichtigste Eigenschaften:
   (15-Minuten-TTL, `local-open` fail-closed). Details:
   [Finding](docs/audits/2026-10-27-arch-security-audit/findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md),
   Regression `tests/asa02.lifecycleAndLiveKillAuthz.test.ts`.
+- **ASA-04 FIXED (HIGH):** Mikro-Executor-Cooldowns und Tageszähler
+  überleben Cache-Refreshes; ein prozesslokaler Lock verhindert Tick-Burst-Doppelorders,
+  neue Regeln werden zur Laufzeit gewärmt und abonniert. Einzelheiten und
+  Betriebsgrenzen: [Finding ASA-04](docs/audits/2026-10-27-arch-security-audit/findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md).
 - **Daurable Audit-Trail:** sicherheitsrelevante Schreibvorgänge mit Retry und
   persistenter Spool (at-least-once), fail-closed wo die Mutation vermeidbar
   ist; Metrik + API zeigen Audit-Lücken.
