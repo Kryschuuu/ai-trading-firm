@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Vollbericht:** [`../report.md`](../report.md) · **Prompts:** [`../prompts/README.md`](../prompts/README.md)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **0.17.2**
-- **Stand:** 2026-10-27 · **15 Findings:** 13 `OPEN`, 2 `FIXED` (`ASA-01` … `ASA-15`)
+- **Stand:** 2026-10-27 · **15 Findings:** 12 `OPEN`, 3 `FIXED` (`ASA-01` … `ASA-15`)
 - **Konvention:** 1 Prompt = 1 fokussierte Coding-Session + eigener PR; nach Merge Status hier, in `../findings/ASA-*.md`, in `../README.md` und bei `CRITICAL`/`HIGH` in `../../../security/README.md` nachziehen. Finding-IDs bleiben unverändert.
 
 ## Statusübersicht
@@ -11,7 +11,7 @@
 |----|----------|-------|--------|----------------|-------------|-------------|
 | [ASA-01](../findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md) | CRITICAL | Multi-Prozess-Split-Brain: `PaperBroker`, Kill-Switch und `realizedPnl = 0` | `FIXED` | [PROMPT-ASA-P0-01](../prompts/PROMPT-ASA-P0-01-multiprocess-ledger-killswitch-pnl.md) | [PR #246](https://github.com/Kryschuuu/ai-trading-firm/pull/246) | `tests/asa01.multiprocessKillAndPnl.test.ts` |
 | [ASA-02](../findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md) | CRITICAL | `x-admin-token`-Rollen-Spoofing, Vier-Augen-Bypass & Live-Kill-AuthZ | `FIXED` | [PROMPT-ASA-P0-02](../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md) | [PR #247](https://github.com/Kryschuuu/ai-trading-firm/pull/247) | `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` |
-| [ASA-03](../findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter Fail-Open (`safeGetPositions` / `verifyFlat` / 429) | `OPEN` | [PROMPT-ASA-P0-03](../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) | — | — |
+| [ASA-03](../findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter Fail-Open (`safeGetPositions` / `verifyFlat` / 429) | `FIXED` | [PROMPT-ASA-P0-03](../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) | PR pending | `tests/asa03.alpacaFailClosed.test.ts`, Alpaca + Broker contracts |
 | [ASA-04](../findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` Cooldown-Reset (30 s), Tick-Burst-Race & fehlendes Feed-Hot-Subscribe | `OPEN` | [PROMPT-ASA-P1-04](../prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) | — | — |
 | [ASA-05](../findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Offene sensitive GET-Routen, 7 tote RBAC-Permissions & `e.message`-Leaks | `OPEN` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | — | — |
 | [ASA-06](../findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` & `LiveGateAudit`-Kettenbruch | `OPEN` | [PROMPT-ASA-P1-06](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) | — | — |
@@ -24,6 +24,13 @@
 | [ASA-13](../findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 unregistrierte `globalThis`-Singletons & `FirmDashboard.tsx` Polling-Reset | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-14](../findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` ohne `systemd`-Sandboxing & mit Pfad-Drift | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-15](../findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` & fehlender SSRF-Schutz in `WebhookAlertSink` | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
+
+## Abgeschlossene Remediation ASA-03 (2026-10-27)
+
+- **Positionsdaten fail-closed:** `safeGetPositions()` ist entfernt. `fetchPositionsStrict()` prüft die Antwort und offene Positionsdatensätze; HTTP-/Validierungsfehler propagieren als `BrokerError` bis `getPositions()`, `getAccount()` und `verifyFlat()`.
+- **Notfall-Close:** Orders werden best-effort storniert und Fehler auditiert. Ein optionaler Vorab-Snapshot beeinflusst den Ablauf nicht: `DELETE /v2/positions?cancel_orders=true` wird immer gesendet. Anschließend folgt ein strikter Venue-Read, auch nach HTTP `207 Multi-Status`; ein fehlgeschlagener Nachher-Read wirft statt Flatheit vorzutäuschen.
+- **HTTP-Retry:** `Retry-After` (Sekunden, Dezimal-Sekunden und HTTP-Datum) wird mit konfigurierbarem 10-s-Standardlimit beachtet. Mehrdeutige Netzwerk-/Timeout-/5xx-Retries sind auf `GET`, `DELETE` und `POST` mit echtem `client_order_id` im JSON-Body begrenzt; die private Alpaca-Order-API setzt den Schlüssel im Body.
+- **Verifikation:** `npx tsx --test tests/asa03.alpacaFailClosed.test.ts`, `npx tsx --test tests/alpaca*.test.ts tests/brokerContracts.test.ts`, `npm run typecheck`, `npm run lint`, `npm run docs:validate` und `npm test`.
 
 ## Abgeschlossene Remediation ASA-02 (2026-10-27)
 

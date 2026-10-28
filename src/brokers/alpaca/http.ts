@@ -10,7 +10,7 @@
  *   - Basic-Auth aus Credentials beim Senden
  */
 import { AlpacaApiError, classifyAlpacaFailure, safeSnippet } from "./errors";
-import { ALPACA_MAX_RESPONSE_BYTES } from "./config";
+import { ALPACA_MAX_RESPONSE_BYTES, ALPACA_RETRY_BASE_MS } from "./config";
 import type { AlpacaRuntimeConfig } from "./config";
 import type { AlpacaLogger } from "./redactor";
 import { createAlpacaLogger, redactAlpaca } from "./redactor";
@@ -54,6 +54,12 @@ export interface AlpacaHttpOptions {
   secrets?: () => readonly string[];
   fetchImpl?: typeof fetch;
   bucket?: TokenBucket;
+  /** Obergrenze für Retry-After und exponentiellen Backoff (Default: 10 s). */
+  maxRetryDelayMs?: number;
+  /** Basis für den exponentiellen Backoff (Default: ALPACA_RETRY_BASE_MS). */
+  retryBaseDelayMs?: number;
+  /** In Tests injizierbare Wartefunktion; Produktion verwendet setTimeout. */
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 export interface AlpacaHttpRequest {
@@ -65,12 +71,10 @@ export interface AlpacaHttpRequest {
   body?: string;
   headers?: Record<string, string>;
   /**
-   * Retry-Semantik. Default: GET = idempotent (Retry erlaubt), POST = NICHT
-   * idempotent. Für nicht-idempotente Requests (z. B. POST /v2/orders) wird
-   * bei Timeout, Netzwerkfehler oder 5xx NICHT wiederholt — die Venue könnte
-   * die Order bereits verarbeitet haben (Doppel-Order-Gefahr). Einzige
-   * Ausnahme: HTTP 429 (Rate-Limit) — die Anfrage wurde definitiv NICHT
-   * verarbeitet.
+   * Kompatibilitäts-Hinweis für Call-Sites. Die Retry-Sicherheit wird
+   * unabhängig davon aus Methode und Body bestimmt: GET/DELETE sind sicher,
+   * POST nur mit nicht-leerem `client_order_id` im JSON-Body. Ein `true` kann
+   * unsichere POST-/PATCH-Retries nicht freischalten.
    */
   idempotent?: boolean;
 }
@@ -82,6 +86,53 @@ export interface AlpacaHttpResponse {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+const DEFAULT_MAX_RETRY_DELAY_MS = 10_000;
+
+/** Nur der Alpaca-Body-Key ist ein belastbarer POST-Idempotenzbeleg. */
+function hasClientOrderId(body: string | undefined): boolean {
+  if (!body) return false;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const id = (parsed as Record<string, unknown>).client_order_id;
+    return typeof id === "string" && id.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Retry-Policy auf den tatsächlichen Request begrenzen, nicht auf Caller-Hints. */
+function isSafeToRetryAmbiguousFailure(req: AlpacaHttpRequest): boolean {
+  if (req.method === "GET" || req.method === "DELETE") return true;
+  return req.method === "POST" && hasClientOrderId(req.body);
+}
+
+/**
+ * `Retry-After` als Delta-Sekunden (inkl. Dezimalwert) oder HTTP-Datum.
+ * Ungültige Werte liefern null; gültige Werte werden sofort begrenzt.
+ */
+function retryAfterDelayMs(value: string | null, nowMs: number, maxDelayMs: number): number | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+
+  let delayMs: number;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
+    const seconds = Number(raw);
+    delayMs = Number.isFinite(seconds) ? seconds * 1000 : maxDelayMs;
+  } else {
+    const dateMs = Date.parse(raw);
+    if (!Number.isFinite(dateMs)) return null;
+    delayMs = dateMs - nowMs;
+  }
+  if (!Number.isFinite(delayMs)) return maxDelayMs;
+  return Math.min(maxDelayMs, Math.max(0, delayMs));
+}
+
+function normalizeDelay(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return fallback;
+  return Math.floor(value);
 }
 
 /**
@@ -144,6 +195,9 @@ export class AlpacaHttp {
   private readonly secrets: () => readonly string[];
   private readonly fetchImpl: typeof fetch;
   private readonly bucket: TokenBucket;
+  private readonly maxRetryDelayMs: number;
+  private readonly retryBaseDelayMs: number;
+  private readonly sleepImpl: (ms: number) => Promise<void>;
 
   constructor(opts: AlpacaHttpOptions) {
     this.config = opts.config;
@@ -151,21 +205,28 @@ export class AlpacaHttp {
     this.logger = opts.logger ?? createAlpacaLogger(this.secrets);
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.bucket = opts.bucket ?? new TokenBucket(opts.config.publicRatePerSec, opts.config.publicRatePerSec);
+    this.maxRetryDelayMs = normalizeDelay(opts.maxRetryDelayMs, DEFAULT_MAX_RETRY_DELAY_MS);
+    this.retryBaseDelayMs = normalizeDelay(opts.retryBaseDelayMs, ALPACA_RETRY_BASE_MS);
+    this.sleepImpl = opts.sleepImpl ?? sleep;
+  }
+
+  private backoffDelayMs(attempt: number): number {
+    const exponent = Math.min(Math.max(0, attempt), 30);
+    return Math.min(this.maxRetryDelayMs, this.retryBaseDelayMs * 2 ** exponent);
   }
 
   async request(req: AlpacaHttpRequest): Promise<AlpacaHttpResponse> {
     const url = assertUrlAllowed(buildUrl(req.base, req.path, req.query), this.config);
-    // Nicht-idempotente Requests (Default für POST/PATCH/DELETE) dürfen bei
-    // ambivalenten Fehlern (Timeout/Netzwerk/5xx) NICHT wiederholt werden —
-    // Doppel-Order-Gefahr. Nur 429 (definitiv nicht verarbeitet) bleibt
-    // Retry-fähig.
-    const idempotent = req.idempotent ?? req.method === "GET";
-    const max = Math.max(1, this.config.retryMax);
+    const retrySafe = isSafeToRetryAmbiguousFailure(req);
+    const max = Math.max(1, Math.floor(this.config.retryMax));
     let last: AlpacaApiError | null = null;
+    let nextRetryDelayMs: number | null = null;
 
     for (let attempt = 0; attempt < max; attempt++) {
       if (attempt > 0) {
-        await sleep(this.config.timeoutMs > 0 ? Math.min(200 * 2 ** (attempt - 1), 2000) : 0);
+        const delay = nextRetryDelayMs ?? this.backoffDelayMs(attempt - 1);
+        nextRetryDelayMs = null;
+        if (delay > 0) await this.sleepImpl(delay);
       }
       await this.bucket.take();
       const ctrl = new AbortController();
@@ -212,10 +273,20 @@ export class AlpacaHttp {
             httpStatus: res.status,
             venueCode: readCode(json),
           });
-          // 429 = definitiv nicht verarbeitet → immer Retry-fähig.
-          // 5xx = ambivalent (Order kann serverseitig angekommen sein) →
-          // nur idempotente Requests dürfen wiederholen; sonst laut abbrechen.
-          if (res.status === 429 || idempotent) continue;
+
+          // 429 ist eine explizite Ablehnung und daher unabhängig von Methode
+          // und Idempotenz sicher wiederholbar. 5xx ist ambivalent: Nur GET,
+          // DELETE oder POST mit client_order_id im Body dürfen automatisch
+          // wiederholt werden.
+          const mayRetry = res.status === 429 || retrySafe;
+          if (mayRetry && attempt + 1 < max) {
+            const serverDelay =
+              res.status === 429 || res.status === 503
+                ? retryAfterDelayMs(res.headers.get("retry-after"), Date.now(), this.maxRetryDelayMs)
+                : null;
+            nextRetryDelayMs = serverDelay ?? this.backoffDelayMs(attempt);
+            continue;
+          }
           throw last;
         }
         if (!res.ok) {
@@ -234,22 +305,35 @@ export class AlpacaHttp {
         if (e instanceof AlpacaApiError) {
           if (e.kind === "auth" || e.kind === "permission" || e.kind === "ssrf" || e.kind === "validation") throw e;
           last = e;
-          // rate-limit: definitiv nicht verarbeitet → Retry auch für POST.
-          if (e.kind === "rate-limit") continue;
-          // maintenance/unknown sind ambivalent → nur idempotent wiederholen.
-          if ((e.kind === "maintenance" || e.kind === "unknown") && idempotent) continue;
+          if (e.kind === "rate-limit" && attempt + 1 < max) {
+            nextRetryDelayMs = this.backoffDelayMs(attempt);
+            continue;
+          }
+          if (
+            (e.kind === "maintenance" || e.kind === "unknown") &&
+            retrySafe &&
+            attempt + 1 < max
+          ) {
+            nextRetryDelayMs = this.backoffDelayMs(attempt);
+            continue;
+          }
           throw e;
         }
         if (e instanceof Error && e.name === "AbortError") {
           last = new AlpacaApiError("unknown", `Alpaca-Timeout nach ${this.config.timeoutMs} ms.`);
-          // Timeout ist ambivalent — nicht-idempotente Requests brechen laut ab.
-          if (idempotent) continue;
+          if (retrySafe && attempt + 1 < max) {
+            nextRetryDelayMs = this.backoffDelayMs(attempt);
+            continue;
+          }
           throw last;
         }
         const msg = redactAlpaca(e instanceof Error ? e.message : String(e), this.secrets());
         last = new AlpacaApiError("unknown", `Alpaca-Netzwerkfehler: ${msg.slice(0, 80)}`);
-        // Netzwerkabbruch ist ambivalent — dito.
-        if (!idempotent) throw last;
+        if (retrySafe && attempt + 1 < max) {
+          nextRetryDelayMs = this.backoffDelayMs(attempt);
+          continue;
+        }
+        throw last;
       } finally {
         clearTimeout(timer);
       }

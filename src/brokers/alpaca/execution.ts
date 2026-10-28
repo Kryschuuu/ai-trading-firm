@@ -11,6 +11,7 @@
  *    └── testnet / live   ─► BrokerExecutionEngine (echte Venue-API, Basic-Auth)
  *                             └── live: LiveGate vor jedem Call (adapter.ts)
  */
+import { BrokerError } from "../../contracts/broker";
 import type {
   BrokerAccount,
   BrokerOrderRequest,
@@ -27,7 +28,38 @@ import { buildClientOrderId } from "../reconciliation";
 import { mapAccount, mapOrderResult, mapPosition } from "./mapping";
 import { AlpacaPaperLedger } from "./paper";
 import type { AlpacaPrivateClient } from "./privateClient";
+import type { AlpacaPosition } from "./types";
+import { AlpacaApiError } from "./errors";
+import { ALPACA_TRADE_PATHS } from "./config";
 import { recordAlpacaPrivateCall } from "./audit";
+
+function parsePositionNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number.NaN;
+}
+
+/** Nur ein vollständiger, erkennbarer offener Datensatz darf als Position zählen. */
+function isValidAlpacaPosition(value: unknown): value is AlpacaPosition {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const position = value as Record<string, unknown>;
+  return (
+    typeof position.symbol === "string" &&
+    position.symbol.trim().length > 0 &&
+    (position.side === "long" || position.side === "short") &&
+    Math.abs(parsePositionNumber(position.qty)) > 0 &&
+    parsePositionNumber(position.avg_entry_price) > 0
+  );
+}
+
+function auditErrorCode(error: unknown): string {
+  if (error instanceof BrokerError) return error.code.slice(0, 40);
+  if (error instanceof Error) return error.name.slice(0, 40) || "ALPACA_ERROR";
+  return "ALPACA_ERROR";
+}
 
 /** Optionaler Mark-Preis-Lookup (Symbol → Preis) für das Paper-Ledger. */
 export type MarkPriceFn = (symbol: string) => number | null;
@@ -269,33 +301,58 @@ export class BrokerExecutionEngine implements ExecutionPort {
     try {
       const acc = await this.client.getAccount();
       await recordAlpacaPrivateCall({ method: "GET", path: "/v2/account", outcome: "OK", errorCode: null });
-      // openPositions wird aus den Positionen gezogen
-      const positions = await this.safeGetPositions();
+      // openPositions aus einer strikten Venue-Abfrage ableiten; API-Ausfälle
+      // dürfen keine scheinbar leere Exposure-/Risiko-Sicht erzeugen.
+      const positions = await this.fetchPositionsStrict();
       return { ...mapAccount(acc, this.ledgerStartEquity()), openPositions: positions.length };
     } catch (e) {
-      const code = e instanceof Error ? e.message.slice(0, 40) : "ALPACA_ERROR";
-      await recordAlpacaPrivateCall({ method: "GET", path: "/v2/account", outcome: "ERROR", errorCode: code });
+      await recordAlpacaPrivateCall({
+        method: "GET",
+        path: ALPACA_TRADE_PATHS.account,
+        outcome: "ERROR",
+        errorCode: auditErrorCode(e),
+      }).catch(() => undefined);
       throw e;
     }
   }
 
   async listPositions(mark?: MarkPriceFn): Promise<BrokerPosition[]> {
-    const positions = await this.safeGetPositions();
-    return positions
-      .map(mapPosition)
-      .filter((p): p is BrokerPosition => p !== null);
+    const positions = await this.fetchPositionsStrict();
+    const mapped = positions.map(mapPosition);
+    if (mapped.some((position) => position === null)) {
+      throw new AlpacaApiError("unknown", "Alpaca /v2/positions enthält einen ungültigen Positionsdatensatz.");
+    }
+    return mapped as BrokerPosition[];
   }
 
-  private async safeGetPositions(): Promise<import("./types").AlpacaPosition[]> {
+  /**
+   * Fail-closed Venue-Snapshot. HTTP- und Validierungsfehler werden nicht
+   * absorbiert; ein fehlerhafter Datensatz darf niemals als „flat“ gelten.
+   */
+  private async fetchPositionsStrict(): Promise<AlpacaPosition[]> {
+    let positions: AlpacaPosition[];
     try {
-      const pos = await this.client.getPositions();
-      await recordAlpacaPrivateCall({ method: "GET", path: "/v2/positions", outcome: "OK", errorCode: null });
-      return pos;
+      const raw: unknown = await this.client.getPositions();
+      if (!Array.isArray(raw) || !raw.every(isValidAlpacaPosition)) {
+        throw new AlpacaApiError("unknown", "Alpaca /v2/positions lieferte eine ungültige Positionsliste.");
+      }
+      positions = raw;
     } catch (e) {
-      const code = e instanceof Error ? e.message.slice(0, 40) : "ALPACA_ERROR";
-      await recordAlpacaPrivateCall({ method: "GET", path: "/v2/positions", outcome: "ERROR", errorCode: code });
-      return [];
+      await recordAlpacaPrivateCall({
+        method: "GET",
+        path: ALPACA_TRADE_PATHS.positions,
+        outcome: "ERROR",
+        errorCode: auditErrorCode(e),
+      }).catch(() => undefined);
+      throw e;
     }
+    await recordAlpacaPrivateCall({
+      method: "GET",
+      path: ALPACA_TRADE_PATHS.positions,
+      outcome: "OK",
+      errorCode: null,
+    });
+    return positions;
   }
 
   private ledgerStartEquity(): number {
@@ -316,23 +373,66 @@ export class BrokerExecutionEngine implements ExecutionPort {
 
   /** H7: Schließt alle offenen Alpaca-Positionen (`DELETE /v2/positions`). */
   async closeAllPositions(_reason: string): Promise<EmergencyCloseFill[]> {
-    const known = await this.safeGetPositions().then((pos) =>
-      pos.map(mapPosition).filter((p): p is BrokerPosition => p !== null)
+    // 1) Cancel ist best-effort: ein Audit-Eintrag darf den Close-Pfad nicht blockieren.
+    try {
+      await this.client.cancelAllOrders();
+    } catch (e) {
+      await recordAlpacaPrivateCall({
+        method: "DELETE",
+        path: ALPACA_TRADE_PATHS.orders,
+        outcome: "ERROR",
+        errorCode: auditErrorCode(e),
+      }).catch(() => undefined);
+    }
+
+    // 2) Nur Statistik/Fill-Kontext. Bei Ausfall trotzdem zwingend liquidieren.
+    const before = await this.fetchPositionsStrict().catch(() => null);
+
+    // 3) Unbedingt DELETE senden, auch bei leerer oder unbekannter Vorab-Liste.
+    // 4) Danach immer den Venue-Zustand nachlesen; HTTP 207 ist kein Flat-Beweis.
+    let closeFailed = false;
+    let closeError: unknown;
+    try {
+      await this.client.closeAllPositions();
+    } catch (e) {
+      closeFailed = true;
+      closeError = e;
+      await recordAlpacaPrivateCall({
+        method: "DELETE",
+        path: ALPACA_TRADE_PATHS.positions,
+        outcome: "ERROR",
+        errorCode: auditErrorCode(e),
+      }).catch(() => undefined);
+    }
+    const after = await this.fetchPositionsStrict();
+    if (closeFailed) throw closeError;
+
+    // Nur Positionen, die der strikte Nach-Snapshot nicht mehr enthält, werden
+    // als geschlossen gemeldet. Unbekannte/übrige Positionen bleiben offen.
+    const stillOpen = new Set(after.map((position) => `${position.symbol.toUpperCase()}:${position.side}`));
+    const confirmedClosed = (before ?? []).filter(
+      (position) => !stillOpen.has(`${position.symbol.toUpperCase()}:${position.side}`)
     );
-    if (known.length === 0) return [];
-    await this.client.closeAllPositions();
-    return known.map((p) => ({
-      symbol: p.symbol,
-      side: p.side,
-      qty: p.qty,
-      fillPrice: Number.isFinite(p.lastPrice) && p.lastPrice > 0 ? p.lastPrice : 0,
-      realizedPnl: p.unrealizedPnl,
-    }));
+    const fills: EmergencyCloseFill[] = [];
+    for (const raw of confirmedClosed) {
+      const position = mapPosition(raw);
+      if (!position) {
+        throw new AlpacaApiError("unknown", "Alpaca /v2/positions enthält einen ungültigen Positionsdatensatz.");
+      }
+      fills.push({
+        symbol: position.symbol,
+        side: position.side,
+        qty: position.qty,
+        fillPrice: Number.isFinite(position.lastPrice) && position.lastPrice > 0 ? position.lastPrice : 0,
+        realizedPnl: position.unrealizedPnl,
+      });
+    }
+    return fills;
   }
 
-  /** H7: 0 offene Alpaca-Positionen? */
+  /** H7: 0 offene Alpaca-Positionen? API-Fehler werden fail-closed geworfen. */
   async verifyFlat(): Promise<boolean> {
-    const positions = await this.safeGetPositions();
+    const positions = await this.fetchPositionsStrict();
     return positions.length === 0;
   }
 }

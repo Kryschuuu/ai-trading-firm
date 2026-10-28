@@ -6,7 +6,7 @@
 - **Quelle / Reviewer:** Principal Software Architect & Senior Security Engineer (Arena-Agent-Vollprüfung)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **v0.17.2 (Beta)**
 - **Umfang:** Vollständige Codebasis (`src/auth/*`, `src/lib/*`, `src/app/api/**`, `src/brokers/*`, `src/live-gate/*`, `src/db/*`, `src/execution/*`, `src/copy/*`, `src/portfolio/*`, `src/ops/*`, `src/components/*`, `deploy/*`, `scripts/*`)
-- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01` + `ASA-02` FIXED**, 13 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
+- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-03` FIXED**, 12 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
 - **Vollbericht:** [`report.md`](report.md)
 - **Copy-&-Paste-Prompts:** [`prompts/README.md`](prompts/README.md)
 - **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
@@ -15,11 +15,11 @@
 
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
-| CRITICAL | 3 | 2 | 0 | 1 |
+| CRITICAL | 3 | 1 | 0 | 2 |
 | HIGH | 6 | 6 | 0 | 0 |
 | MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
-| **Summe** | **15** | **14** | **0** | **1** |
+| **Summe** | **15** | **12** | **0** | **3** |
 
 ## Executive Summary
 
@@ -29,7 +29,7 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 
 1. **Multi-Prozess-Split-Brain (`ASA-01`, CRITICAL — `FIXED`):** `Next.js` und `micro-executor` hielten getrennte RAM-Singletons für Paper-Ledger, Kill-Switch und Live-Gate; behoben durch das autoritative Fail-Closed-Kill-Switch-Gate (`src/lib/killSwitchDb.ts`, `LISTEN/NOTIFY firm_control_changed`), Cross-Prozess-Reconcile (`syncPaperBrokerWithDb`) und deterministische Close-Abrechnung (`computePaperClosePnl`).
 2. **Governance- & Kill-Switch-AuthZ (`ASA-02`, CRITICAL — `FIXED`):** `POST /api/firm/lifecycle` vergab die Admin-Rolle allein anhand der bloßen Header-Existenz `Boolean(req.headers.get("x-admin-token"))`; Vier-Augen-Prüfungen vertrauten auf ungebundene Body-Strings (`approvedBy`); `POST /api/live/kill` nutzte `live.gate` statt `firm.kill` und ignorierte `consumeKillNonce` beim Entschärfen. Behoben durch `auth.principal`-Rollenbindung, 2-Request-/2-Principal-Vier-Augen-Freigaben (15 min TTL, `local-open` fail-closed) sowie Aktionssplit + Einmal-Nonce beim Live-Kill-Switch — Details im [Finding](findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md).
-3. **Fail-Open im Alpaca-Live-Adapter (`ASA-03`, CRITICAL):** `safeGetPositions()` schluckt API-/429-Fehler zu `[]`, wodurch `getAccount()` `openPositions: 0` meldet, `closeAllPositions()` den Notfall-Close überspringt und `verifyFlat()` fälschlich `true` bestätigt.
+3. **Fail-Open im Alpaca-Live-Adapter (`ASA-03`, CRITICAL — `FIXED`):** `safeGetPositions()` wurde durch `fetchPositionsStrict()` ersetzt. Positionsfehler propagieren, der Notfall-Close sendet `DELETE /v2/positions?cancel_orders=true` immer und `verifyFlat()` wirft bei unbekanntem Zustand. `Retry-After` und sichere POST-Retry-Idempotenz sind ebenfalls gehärtet; Details im [Finding](findings/ASA-03-alpaca-fail-open-positions-verify-flat.md).
 
 ## Verifizierte saubere Module (Positivbefunde)
 
@@ -45,7 +45,7 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 |----|----------|-------|---------|--------|--------|
 | [ASA-01](findings/ASA-01-multiprocess-split-brain-kill-switch-pnl.md) | CRITICAL | Multi-Prozess-Split-Brain: `PaperBroker`, Kill-Switch und `realizedPnl = 0` divergieren zwischen Web-Server und `micro-executor` | Architektur / Konsistenz | `FIXED` | [P0-01](prompts/PROMPT-ASA-P0-01-multiprocess-ledger-killswitch-pnl.md) |
 | [ASA-02](findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md) | CRITICAL | Rollen-Spoofing per `x-admin-token`, umgehbares Vier-Augen-Prinzip und gebrochene Kill-Switch-Autorisierung | Sicherheit (AuthZ) | `FIXED` | [P0-02](prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md) |
-| [ASA-03](findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter ist bei Positionsabfragen Fail-Open (`safeGetPositions` liefert `[]`, `verifyFlat()` meldet fälschlich `true`) | Sicherheit / Live-Execution | `OPEN` | [P0-03](prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) |
+| [ASA-03](findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter ist bei Positionsabfragen Fail-Open (`safeGetPositions` liefert `[]`, `verifyFlat()` meldet fälschlich `true`) | Sicherheit / Live-Execution | `FIXED` | [P0-03](prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) |
 | [ASA-04](findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` verliert alle 30 s Cooldowns, feuert doppelt bei Tick-Bursts und abonniert neue Symbole zur Laufzeit nicht | Architektur / Handelslogik | `OPEN` | [P1-04](prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) |
 | [ASA-05](findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Unauthentifizierte sensitive GET-Routen (SEC-02-Lücken), 7 tote RBAC-Permissions und ungefilterte `e.message`-Leaks | Sicherheit (AuthZ / Info-Leak) | `OPEN` | [P1-05](prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) |
 | [ASA-06](findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` und Prozess-Divergenz in der `LiveGateAudit`-Hash-Kette | Performance / Integrität | `OPEN` | [P1-06](prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) |
@@ -63,6 +63,6 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 
 Die 15 Befunde sind in **10 konfliktfreie, direkt kopierbare Coding-Prompts** unter [`prompts/`](prompts/README.md) aufgeteilt:
 
-- **Phase P0 (Sofort / Live- & Paper-Blocker):** `PROMPT-ASA-P0-01` (`ASA-01`), `PROMPT-ASA-P0-02` (`ASA-02`), `PROMPT-ASA-P0-03` (`ASA-03`)
+- **Phase P0 (Sofort / Live- & Paper-Blocker):** `PROMPT-ASA-P0-01` (`ASA-01`, FIXED), `PROMPT-ASA-P0-02` (`ASA-02`, FIXED), `PROMPT-ASA-P0-03` (`ASA-03`, FIXED)
 - **Phase P1 (Vor jedem Mehrbenutzer-/Netzwerkbetrieb):** `PROMPT-ASA-P1-04` (`ASA-04`), `PROMPT-ASA-P1-05` (`ASA-05` + `ASA-07`), `PROMPT-ASA-P1-06` (`ASA-06`), `PROMPT-ASA-P1-07` (`ASA-08`), `PROMPT-ASA-P1-08` (`ASA-09`)
 - **Phase P2 (Stabilität, Skalierung & Wartbarkeit):** `PROMPT-ASA-P2-09` (`ASA-10` + `ASA-11` + `ASA-12`), `PROMPT-ASA-P2-10` (`ASA-13` + `ASA-14` + `ASA-15`)

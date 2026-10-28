@@ -10,10 +10,9 @@
  *
  * Auth: Basic-Auth (apiKey:apiSecret als base64).
  *
- * Wichtig: POST /v2/orders ist NICHT idempotent. Der HTTP-Transport
- * (`AlpacaHttp.request`) verweigert Retry für POSTs — kein Doppel-Order-
- * Risiko bei Timeout/5xx (Alpaca nutzt `client_order_id` als Idempotenz-Key,
- * der Adapter setzt diesen aus dem BrokerOrderRequest-Symbol + timestamp).
+ * Wichtig: POST /v2/orders ist nur mit einem nicht-leeren `client_order_id`
+ * im JSON-Body retry-sicher. Ohne diesen Alpaca-Idempotenz-Key bricht der
+ * HTTP-Transport bei ambivalenten Fehlern (Timeout/Netzwerk/5xx) sofort ab.
  */
 import { ALPACA_TRADE_PATHS } from "./config";
 import type { AlpacaRuntimeConfig } from "./config";
@@ -80,8 +79,10 @@ export class AlpacaPrivateClient {
         path: ALPACA_TRADE_PATHS.positions,
         idempotent: true,
       });
+      if (!Array.isArray(res.json)) {
+        throw new AlpacaApiError("unknown", "Alpaca GET /v2/positions lieferte keine gültige Positionsliste.");
+      }
       await recordAlpacaPrivateCall({ method: "GET", path: ALPACA_TRADE_PATHS.positions, outcome: "OK", errorCode: null });
-      if (!Array.isArray(res.json)) return [];
       return res.json as AlpacaPosition[];
     } catch (e) {
       if (!(e instanceof AlpacaApiError)) {
@@ -138,6 +139,8 @@ export class AlpacaPrivateClient {
       type: req.type,
       time_in_force: req.time_in_force,
     };
+    const normalizedClientOrderId = clientOrderId?.trim();
+    if (normalizedClientOrderId) body.client_order_id = normalizedClientOrderId;
     if (req.qty != null) body.qty = String(req.qty);
     if (req.notional != null) body.notional = String(req.notional);
     if (req.limit_price != null) body.limit_price = String(req.limit_price);
@@ -155,7 +158,7 @@ export class AlpacaPrivateClient {
       method: "POST",
       path: ALPACA_TRADE_PATHS.orders,
       body: JSON.stringify(body),
-      headers: clientOrderId ? { "Idempotency-Key": clientOrderId } : undefined,
+      headers: normalizedClientOrderId ? { "Idempotency-Key": normalizedClientOrderId } : undefined,
     });
     if (!res.json || typeof res.json !== "object") {
       throw new AlpacaApiError("unknown", "Alpaca POST /v2/orders lieferte kein JSON.");
@@ -281,17 +284,19 @@ export class AlpacaPrivateClient {
 
   /**
    * H7 (v1.36.20): Schließt alle offenen Positionen (`DELETE /v2/positions`) —
-   * Notfall-Schritt 2 des Kill-Flatten. Die tatsächliche Glattheit wird über
-   * `verifyFlat()` (getPositions == 0) belegt, nicht über den Close-Report.
+   * Notfall-Schritt 2 des Kill-Flatten. `cancel_orders=true` ist zwingend,
+   * damit Alpaca vor dem Liquidieren offene Orders storniert. HTTP 207 ist ein
+   * Multi-Status-/Teilergebnis, kein Flat-Beweis; der Aufrufer muss danach
+   * `GET /v2/positions` strikt verifizieren.
    */
   async closeAllPositions(): Promise<void> {
-    const res = await this.authedRequest({
+    await this.authedRequest({
       method: "DELETE",
       path: ALPACA_TRADE_PATHS.positions,
+      query: { cancel_orders: "true" },
       idempotent: true,
     });
     await recordAlpacaPrivateCall({ method: "DELETE", path: ALPACA_TRADE_PATHS.positions, outcome: "OK", errorCode: null });
-    void res;
   }
 
   /** Zentrale Auth-Wrapper-Methode: setzt Basic-Auth + optionale Header. */
