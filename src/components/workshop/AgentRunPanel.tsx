@@ -83,7 +83,7 @@ export default function AgentRunPanel({
 
   const loadLastMessages = useCallback(async () => {
     try {
-      const res = await fetch("/api/firm/log?limit=3");
+      const res = await apiFetch("/api/firm/log?limit=3");
       const json = (await res.json()) as LogResponse;
       if (res.ok && json.ok) setLastMessages(json.turns.slice(0, 3));
     } catch {

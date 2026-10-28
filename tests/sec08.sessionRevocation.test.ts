@@ -156,7 +156,7 @@ test("SEC-08: Angreifer mit gestohlenem Cookie scheitert nach Logout an schreibe
 
   // Opfer fuehrt Logout durch
   const logoutRes = await postLogout(
-    sessionRequest("https://localhost/api/auth/logout", session.sessionToken, { method: "POST" })
+    sessionRequest("https://localhost/api/auth/logout", session.sessionToken, { method: "POST", csrf: session.csrf })
   );
   assert.equal(logoutRes.status, 200);
 
@@ -238,7 +238,7 @@ test("SEC-08: Nicht-Admin darf keine globale Session-Revocation ausloesen (403)"
 
 test("SEC-08: Unauthentifizierter / Idempotenter Logout liefert 200 und loescht Cookies", async () => {
   // Kein Cookie
-  const emptyReq = new Request("https://localhost/api/auth/logout", { method: "POST" });
+  const emptyReq = new Request("https://localhost/api/auth/logout", { method: "POST", headers: { "x-csrf-token": ADMIN } });
   const emptyRes = await postLogout(emptyReq);
   assert.equal(emptyRes.status, 200);
   const emptyBody = await emptyRes.json();
@@ -249,7 +249,7 @@ test("SEC-08: Unauthentifizierter / Idempotenter Logout liefert 200 und loescht 
   // Ungueltiger Cookie-Wert
   const bogusReq = new Request("https://localhost/api/auth/logout", {
     method: "POST",
-    headers: { cookie: `${SESSION_COOKIE}=invalid.signature.value` },
+    headers: { cookie: `${SESSION_COOKIE}=invalid.signature.value`, "x-csrf-token": ADMIN },
   });
   const bogusRes = await postLogout(bogusReq);
   assert.equal(bogusRes.status, 200);
@@ -294,7 +294,7 @@ test("SEC-08: clearSessionCookies liefert Standard-konforme Loesch-Header", () =
 });
 
 test("SEC-08: Rate-Limit auf POST /api/auth/logout bremst Flood-Angriffe", async () => {
-  const req = () => new Request("https://localhost/api/auth/logout", { method: "POST" });
+  const req = () => new Request("https://localhost/api/auth/logout", { method: "POST", headers: { "x-csrf-token": ADMIN } });
   let limited = false;
   for (let i = 0; i < 35; i++) {
     const res = await postLogout(req());

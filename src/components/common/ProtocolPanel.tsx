@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/apiClient";
 /**
  * Protokoll-Bereich (agent_messages) mit demselben Paging-System wie der
  * Audit-Trail: 20/50/100/200 Einträge pro Seite, Default 20.
@@ -42,7 +43,7 @@ export function ProtocolPanel({
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(pageSize), page: String(page) });
     try {
-      const res = await fetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
+      const res = await apiFetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
       const json = (await res.json()) as { entries?: ProtocolEntryDto[]; meta?: { entryTotal?: number } };
       if (!alive.current) return;
       const next = Array.isArray(json.entries) ? json.entries : [];

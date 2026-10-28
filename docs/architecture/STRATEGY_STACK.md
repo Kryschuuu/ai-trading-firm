@@ -1,6 +1,6 @@
 # Strategie-Stack — Single Source of Truth (SSoT)
 
-> **Status:** Ist-Zustand · **Stand:** 2026-10-06 · **Code-Version:** v0.17.2 (Beta)
+> **Status:** Ist-Zustand · **Stand:** 2026-10-06 · **Code-Version:** v0.17.3 (Beta)
 > **Verbindliche Referenz:** `docs/architecture/STRATEGY_STACK.md`  
 > **Roadmap:** `../audits/2026-09-29-strategy-template-ausbau/ROADMAP.md`  
 > **Vokabular-Entscheidungen:** [ADR-008 … ADR-010](../roadmap/DECISIONS.md) (Strategieklasse, Regime, Universe)

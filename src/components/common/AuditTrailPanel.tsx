@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/apiClient";
 /**
  * Audit-Trail mit Server-Paging (20/50/100/200 pro Seite), Level-/Event-Filter
  * und vollständiger, lesbarer Darstellung pro Eintrag.
@@ -50,7 +51,7 @@ export function AuditTrailPanel({
     if (level) params.set("level", level);
     if (event) params.set("event", event);
     try {
-      const res = await fetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
+      const res = await apiFetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
       const json = (await res.json()) as {
         audit?: AuditEntryDto[];
         meta?: { auditTotal?: number };

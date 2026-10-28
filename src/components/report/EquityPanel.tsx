@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/apiClient";
 /**
  * Reports → Equity-Kurve: Zeitraumwahl, Kennzahlen, Chart, Vergleich, Export.
  *
@@ -213,7 +214,7 @@ export default function EquityPanel() {
       try {
         const query = new URLSearchParams({ range: target, resolution: "auto" });
         if (wantedBenchmark !== "off") query.set("compare", wantedBenchmark);
-        const res = await fetch(`/api/firm/equity?${query.toString()}`, { cache: "no-store" });
+        const res = await apiFetch(`/api/firm/equity?${query.toString()}`, { cache: "no-store" });
         const json = (await res.json()) as EquityResponse & { error?: string };
         if (!aliveRef.current) return;
         if (!res.ok || json.ok === false) {
@@ -279,7 +280,7 @@ export default function EquityPanel() {
               from: new Date(w.since).toISOString(),
               until: new Date(w.until).toISOString(),
             });
-            const res = await fetch(`/api/firm/equity?${query.toString()}`, { cache: "no-store" });
+            const res = await apiFetch(`/api/firm/equity?${query.toString()}`, { cache: "no-store" });
             const json = (await res.json()) as EquityResponse;
             return { since: json.since ?? new Date(w.since).toISOString(), until: json.until ?? new Date(w.until).toISOString(), series: json.series ?? [] };
           })

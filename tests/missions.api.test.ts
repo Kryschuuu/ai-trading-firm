@@ -26,7 +26,7 @@ const BASE = "http://localhost:3369";
 function request(method: "POST" | "PUT", body: unknown, raw?: string): Request {
   return new Request(`${BASE}/api/firm/missions`, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-csrf-token": "local" },
     body: raw ?? JSON.stringify(body),
   });
 }

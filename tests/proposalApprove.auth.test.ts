@@ -11,8 +11,8 @@
  *
  * Dieser Test hält den Fix fest:
  *   1. Verhalten: anonym ⇒ 401 vor jedem DB-Zugriff, Viewer ⇒ 403,
- *      Operator ohne `x-csrf-token` ⇒ 403 `CSRF_INVALID`,
- *      Operator mit Permission + CSRF ⇒ Guard passiert (nur noch DB/Logik-Fehler).
+ *      verifizierte Token-Header-Clients sind CSRF-exempt, lokaler Offen-Betrieb
+ *      ohne gültigen CSRF-Wert bleibt blockiert.
  *   2. Quell-Drift-Schutz: Import und Guard-Reihenfolge dürfen nicht verwaisen.
  */
 import { after, before, beforeEach, test } from "node:test";
@@ -106,11 +106,14 @@ test("DC-01: Viewer (nur firm.read) darf keine Freigabe erteilen", async () => {
   assert.equal(body.error, "FORBIDDEN");
 });
 
-test("DC-01: Operator ohne CSRF-Header wird mit 403 CSRF_INVALID abgewiesen", async () => {
+test("DC-01: verifizierter Operator-Token-Header ist CSRF-exempt", async () => {
   const res = await call({ "x-firm-token": OPERATOR_TOKEN });
-  assert.equal(res.status, 403);
+  assert.ok(
+    res.status === 200 || res.status === 404 || res.status === 500,
+    `verifizierter Token-Header ist CSRF-exempt, bekam ${res.status}`,
+  );
   const body = (await res.json()) as { error?: unknown };
-  assert.equal(body.error, "CSRF_INVALID");
+  assert.notEqual(body.error, "CSRF_INVALID");
 });
 
 test("DC-01: Operator mit firm.write + CSRF passiert den Guard", async () => {
@@ -158,7 +161,7 @@ test("DC-01: CI-Drift-Schutz — Guard und Actor-Beleg bleiben in der Route", ()
   );
   assert.match(
     source,
-    /const denied = requirePermission\(request,\s*["']firm\.write["']\) \?\? checkCsrfGuard\(request\);/,
+    /const denied = requirePermission\(request,\s*["']firm\.write["']\) \?\? checkCsrfGuard\(request\) \?\? checkRateLimit\(request\);/,
     "firm.write MUSS vor CSRF und vor jeder Verarbeitung geprüft werden",
   );
   assert.match(source, /if \(denied\) return denied;/);

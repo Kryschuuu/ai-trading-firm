@@ -33,7 +33,7 @@ function isPlausibleDocName(name: string): boolean {
   return true;
 }
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
   const url = new URL(req.url);
   const name = (url.searchParams.get("name") ?? "").trim();
 

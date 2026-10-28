@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * TWAP-API (RMA-P4-03, v1.71.0).
  *
@@ -95,7 +97,8 @@ async function reader() {
   return new PostgresTwapStore(pool);
 }
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
   const params = new URL(req.url).searchParams;
@@ -127,10 +130,12 @@ export async function GET(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ ok: false, error: "TWAP_UNAVAILABLE" }, { status: 503, headers: NO_STORE });
   }
+
+  })());
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const denied = requirePermission(req, "firm.write");
+  const denied = guardMutation(req, "firm.write");
   if (denied) return denied;
   let flag = false;
   try {

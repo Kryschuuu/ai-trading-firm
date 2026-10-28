@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/universe/score/{instrumentId}` — vollständiger Score-Breakdown
  * eines Instruments (read-only).
@@ -48,7 +50,11 @@ export function parseInstrumentId(raw: string): string {
 }
 
 /** Handler für `GET /api/universe/score/{instrumentId}`. */
-export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
+export async function GET(req: Request, ctx: RouteContext): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   let instrumentId: string;
   try {
     instrumentId = parseInstrumentId((await ctx.params).instrumentId);
@@ -86,4 +92,6 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
   } catch (e) {
     return Response.json({ ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(e) }, { status: 500 });
   }
+
+  })());
 }

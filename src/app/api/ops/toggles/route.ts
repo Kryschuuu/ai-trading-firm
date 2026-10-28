@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * `GET|PUT /api/ops/toggles` — Laufzeit-Schalter des Betriebs (UI-Bedienung).
  *
@@ -24,7 +25,7 @@
  *   `{ ok: true, key, value, flags: RuntimeFlagView[], file, error }`
  */
 import { requirePermission, actorAuditId } from "@/auth";
-import { checkAdminGuard, checkCsrfGuard } from "@/brokers/control-plane/guard";
+import { guardMutation } from "@/lib/apiAuth";
 import { REMOTE_HEALTHCHECK_SPEC } from "@/brokers/health";
 import { publicErrorMessage } from "@/lib/secrets";
 import { writeAuditRecord } from "@/lib/auditSink";
@@ -58,8 +59,9 @@ function allViews(env: Record<string, string | undefined>): RuntimeFlagView[] {
   return toggleSpecs().map((spec) => runtimeFlagView(spec, env));
 }
 
-export async function GET(req: Request): Promise<Response> {
-  const denied = requirePermission(req, "firm.read");
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "ops.view");
   if (denied) return denied;
   try {
     const { flags, error, file } = readRuntimeFlags();
@@ -79,10 +81,12 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }
 
 export async function PUT(req: Request): Promise<Response> {
-  const denied = checkAdminGuard(req) ?? checkCsrfGuard(req);
+  const denied = guardMutation(req, "broker.credentials");
   if (denied) return denied;
 
   let body: { key?: unknown; value?: unknown };

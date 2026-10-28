@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/brokers` — Broker-Übersicht (Task 02).
  *
@@ -42,7 +44,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "broker.status");
+  if (denied) return denied;
+
   try {
     const brokers = await Promise.all(
       BROKER_VENUE_IDS.map(async (id: BrokerVenueId) => {
@@ -92,4 +98,6 @@ export async function GET(): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

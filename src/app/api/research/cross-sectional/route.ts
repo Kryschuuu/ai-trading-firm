@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/research/cross-sectional` — Point-in-Time Cross-Sectional
  * Momentum Ranking (RMA-P2-04, v1.63.0; read-only).
@@ -186,6 +188,10 @@ export function buildCrossSectionalResponse(
 
 /** GET-Handler: PIT-Load + Antwort (DB-Fehler ⇒ 503, Validierung ⇒ 400). */
 export async function GET(request: Request): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(request, "firm.read");
+  if (denied) return denied;
+
   let parsed;
   try {
     parsed = parseCrossSectionalQuery(new URL(request.url));
@@ -207,4 +213,6 @@ export async function GET(request: Request): Promise<Response> {
       { status: 503 },
     );
   }
+
+  })());
 }

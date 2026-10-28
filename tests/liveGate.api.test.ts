@@ -118,14 +118,14 @@ test("POST /api/live/transition: Admin-Token gesetzt → ohne/with falschem Toke
   delete process.env.FIRM_ADMIN_TOKEN;
 });
 
-test("POST /api/live/transition: CSRF fehlt → 403 CSRF_INVALID", async () => {
+test("POST /api/live/transition: verifizierter Admin-Header ist CSRF-exempt", async () => {
   process.env.FIRM_ADMIN_TOKEN = ADMIN_TOKEN;
   const res = await POST_TRANSITION(
     req("POST", { venue: "BITUNIX", to: "ACCOUNT_READ_OK" }, { "x-admin-token": ADMIN_TOKEN })
   );
-  assert.equal(res.status, 403);
+  assert.equal(res.status, 200);
   const body = (await res.json()) as Record<string, unknown>;
-  assert.equal(body.error, "CSRF_INVALID");
+  assert.notEqual(body.error, "CSRF_INVALID");
   delete process.env.FIRM_ADMIN_TOKEN;
 });
 

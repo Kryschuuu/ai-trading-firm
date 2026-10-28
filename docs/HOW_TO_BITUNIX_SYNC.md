@@ -1,6 +1,6 @@
 # How-to: BITUNIX freischalten (`BITUNIX_ENABLED=true`) und das Kerzen-Warmup bei laufender Firma nachziehen
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.3 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 > **Kurzfassung für Eilige:** In einem **zweiten Terminal** bei laufender Firma ausführen —
 >

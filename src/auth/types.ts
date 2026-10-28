@@ -32,7 +32,8 @@ export const PERMISSIONS = [
   "routing.modes.write",
   "live.gate",
 ] as const;
-export type Permission = (typeof PERMISSIONS)[number];
+export const ALL_PERMISSIONS = PERMISSIONS;
+export type Permission = (typeof ALL_PERMISSIONS)[number];
 
 export const ACTOR_SOURCES = [
   "local-open",

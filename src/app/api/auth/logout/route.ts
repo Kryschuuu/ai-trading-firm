@@ -22,6 +22,7 @@
  */
 import { requirePermission } from "@/auth";
 import { checkRateLimit } from "@/lib/apiAuth";
+import { checkCsrfGuard } from "@/lib/csrfGuard";
 import {
   clearSessionCookies,
   readSession,
@@ -32,6 +33,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
+  const csrfDenied = checkCsrfGuard(req);
+  if (csrfDenied) return csrfDenied;
   const denied = checkRateLimit(req, { max: 30 });
   if (denied) return denied;
 

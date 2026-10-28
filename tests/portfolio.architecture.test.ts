@@ -160,7 +160,8 @@ test("Architektur: die API nutzt ausschließlich die Risk-Guard-Kette", () => {
 test("Architektur: GET ist auf allen drei Routen verboten (read-only POST)", () => {
   for (const name of ["metrics", "correlation", "optimize"]) {
     const source = readFileSync(path.join(API_DIR, name, "route.ts"), "utf8");
-    assert.match(source, /export function GET\(\): Response \{\s*return methodNotAllowed\(\);/, `${name}: GET fehlt`);
+    assert.match(source, /export function GET\(req: Request[\s\S]*?methodNotAllowed\(\)/, `${name}: GET muss nach firm.read weiterhin 405 liefern`);
+    assert.match(source, /requirePermission\(req,\s*["']firm\.read["']\)/, `${name}: 405-Route muss vorab authentifiziert werden`);
     assert.match(source, /export async function POST/);
   }
 });

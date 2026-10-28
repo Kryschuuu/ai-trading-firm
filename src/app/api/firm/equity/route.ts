@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET /api/firm/equity` — Equity-Kurve mit Drawdown-Analyse (Lese-API).
  *
@@ -50,7 +51,8 @@ export const dynamic = "force-dynamic";
 const RESOLUTION_SECONDS = { raw: 60, hourly: 3_600, daily: 86_400 } as const;
 type Resolution = keyof typeof RESOLUTION_SECONDS | "auto";
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   // SEC-02: performance, drawdown and trade markers are sensitive portfolio
   // data — authorize before any DB access.
   const denied = requirePermission(req, "firm.read");
@@ -193,6 +195,8 @@ export async function GET(req: Request) {
     },
     { headers: { "Cache-Control": "private, no-store" } }
   );
+
+  })());
 }
 
 /**

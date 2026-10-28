@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * Execution-Policy-API (RMA-P4-02, v1.70.0).
  *
@@ -75,7 +77,8 @@ function sanitizeWorkflow(w: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
   const params = new URL(req.url).searchParams;
@@ -109,10 +112,12 @@ export async function GET(req: Request): Promise<Response> {
     const code = e instanceof ExecutionControllerError ? e.code : "EXECUTION_POLICY_UNAVAILABLE";
     return NextResponse.json({ ok: false, error: code }, { status: 503, headers: NO_STORE });
   }
+
+  })());
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const denied = requirePermission(req, "firm.write");
+  const denied = guardMutation(req, "firm.write");
   if (denied) return denied;
   let flag = false;
   try {

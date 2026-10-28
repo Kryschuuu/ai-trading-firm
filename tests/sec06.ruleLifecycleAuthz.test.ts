@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS, permissionsForRole, resolveAuth, type Role } from "../src/auth";
 import { tradeRules } from "../src/db/schema";
+import { CSRF_LOCAL_VALUE } from "../src/brokers/control-plane/config";
 import { resetRateLimiterForTests } from "../src/lib/apiAuth";
 import { resetAuditDurabilityForTests, setAuditTransportForTests, type AuditRow } from "../src/lib/auditSink";
 import { describeAuditEntry } from "../src/lib/auditView";
@@ -197,7 +198,10 @@ function credential(role: Role, transport: "header" | "bearer" | "session" = "he
   assert.ok(resolved.ok);
   const issued = issueSession(req, resolved.actor);
   assert.ok(issued.ok);
-  return { cookie: `${SESSION_COOKIE}=${issued.sessionToken}` };
+  return {
+    cookie: `${SESSION_COOKIE}=${issued.sessionToken}; firm_csrf=${issued.csrf}`,
+    "x-csrf-token": issued.csrf,
+  };
 }
 
 function actionRequest(body: unknown, headers = credential("operator"), id = row().id) {
@@ -533,7 +537,7 @@ test("SEC-06: bewusste Single-Admin-Elevation und local-open bleiben administrat
   delete process.env.FIRM_VIEWER_TOKEN;
   process.env.AUTH_MODE = "local-open";
   prepareAction("activate");
-  assert.equal((await actionRequest({ action: "activate" }, {})).status, 200);
+  assert.equal((await actionRequest({ action: "activate" }, { "x-csrf-token": CSRF_LOCAL_VALUE })).status, 200);
 });
 
 test("SEC-06: Einführung eines Admin-Tokens entzieht alten Single-Admin-Sessions die Freigabe", async () => {

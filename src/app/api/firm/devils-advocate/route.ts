@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * API-Route: GET /api/firm/devils-advocate
  *
@@ -12,7 +14,11 @@ import path from "node:path";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   const cfg = loadDevilsAdvocateConfig();
 
   // Jüngstes Cycle-Artefakt suchen (falls vorhanden)
@@ -45,4 +51,6 @@ export async function GET() {
     },
     latestAnalysis,
   });
+
+  })());
 }

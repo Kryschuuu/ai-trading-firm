@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/markets` — Instrument-Universum, nach Venue gruppiert und filterbar.
  *
@@ -151,7 +153,11 @@ export function parseMarketQuery(url: URL): InstrumentQuery {
 }
 
 /** Handler für `GET /api/markets`. */
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   let query: InstrumentQuery;
   try {
     query = parseMarketQuery(new URL(req.url));
@@ -189,4 +195,6 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 },
     );
   }
+
+  })());
 }

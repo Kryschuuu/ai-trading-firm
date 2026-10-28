@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/brokers/{venue}/status` — Control-Plane-Status (Task 08).
  *
@@ -17,7 +19,11 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ venue: string }> };
 
-export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
+export async function GET(req: Request, ctx: RouteContext): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "broker.status");
+  if (denied) return denied;
+
   try {
     const { venue } = await ctx.params;
     const service = await getControlPlaneService();
@@ -26,4 +32,6 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
   } catch (err) {
     return mapControlPlaneError(err);
   }
+
+  })());
 }

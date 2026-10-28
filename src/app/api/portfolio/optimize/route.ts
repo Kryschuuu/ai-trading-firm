@@ -1,3 +1,6 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { guardMutation } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `POST /api/portfolio/optimize` — Gewichte **inklusive** Risk-Guard-Report.
  *
@@ -62,12 +65,20 @@ export function buildAuditSinks(): { sink: AuditSink; fileEnabled: boolean } {
 }
 
 /** `GET` ist nicht erlaubt — dieser Endpunkt ist eine POST-Abfrage. */
-export function GET(): Response {
+export function GET(req: Request = new Request("http://localhost/api")): Response {
+  return privateNoStore((() => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   return methodNotAllowed();
+
+  })());
 }
 
 /** Handler für `POST /api/portfolio/optimize`. */
 export async function POST(req: Request): Promise<Response> {
+  const denied = guardMutation(req, "firm.write");
+  if (denied) return denied;
   const { sink, fileEnabled } = buildAuditSinks();
   try {
     const body = asObject(await readJsonBody(req));

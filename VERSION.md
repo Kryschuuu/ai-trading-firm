@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.17.2` |
+| **Version** | `v0.17.3` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-05 |
-| **Quellbasiert** | `package.json` (`version: "0.17.2"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-28 |
+| **Quellbasiert** | `package.json` (`version: "0.17.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -451,7 +451,7 @@ prüft nun L1–L4 (12 Checks gesamt; L2 Code→Doku bleibt nicht-blockierend), 
 `npm test` ist Teil des Required CI-Jobs `docs-validate`. Die Broker-Contracts
 starten ein temporäres Embedded-PostgreSQL und bestehen 42/42. Die Vollsuite
 besteht 4.754 von 4.790 Tests, 0 fehlgeschlagen und 36 optionale DB-Skips.
-`package.json` bleibt absichtlich bei `0.17.2`; ein Release-/Versions-Bump ist
+`package.json` blieb zu diesem Unreleased-Nachtrag absichtlich bei `0.17.2`; ein Release-/Versions-Bump ist
 DC-09 und wird nicht nebenbei vorgenommen.
 
 **Unreleased-Nachtrag DC-09 (2026-10-10; kein Versions-Bump):** Mengenverzeichnisse
@@ -714,3 +714,9 @@ Kriterium. Begründung: `report.md` §8 des Audits.
    Doku-Module aktualisieren.
 4. `npm run typecheck && npm run lint && npm test && npm run docs:validate`
    grün halten (Pflicht-Checks, siehe [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+
+
+`v0.17.3` (2026-10-28) schließt die HIGH-Sicherheitsbefunde ASA-05 und ASA-07:
+Route-weites API-RBAC mit fachlichen Permissions und `private, no-store`-Reads,
+CSRF- und Rate-Limit-Guards für mutierende Endpunkte, Redaction unerwarteter
+5xx-Fehler sowie neue dynamische Route-/Session-CSRF-Regressionsprüfungen.

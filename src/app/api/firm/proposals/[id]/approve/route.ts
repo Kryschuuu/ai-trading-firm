@@ -10,6 +10,8 @@ import { proposals } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { actorAuditId, requirePermission } from "@/auth";
 import { checkCsrfGuard } from "@/brokers/control-plane/guard";
+import { checkRateLimit } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 import { logAudit } from "@/lib/engine";
 import { flagMissedAudit, isAuditPersistenceError } from "@/lib/auditSink";
 
@@ -55,7 +57,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * (`actorAuditId`), nie der Client-Text allein.
  */
 export async function POST(request: NextRequest, ctx: RouteContext) {
-  const denied = requirePermission(request, "firm.write") ?? checkCsrfGuard(request);
+  const denied = requirePermission(request, "firm.write") ?? checkCsrfGuard(request) ?? checkRateLimit(request);
   if (denied) return denied;
   const actor = actorAuditId(request);
   try {
@@ -138,6 +140,6 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       audit: { durable: audited.durable, degraded: audited.degraded, target: audited.target },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: publicErrorMessage(e) }, { status: 500 });
   }
 }

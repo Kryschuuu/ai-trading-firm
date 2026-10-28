@@ -3,7 +3,7 @@
 - **ID:** ASA-05
 - **Severity:** HIGH
 - **Bereich:** Sicherheit (Zugriffskontrolle & Informationsabfluss)
-- **Status:** OPEN
+- **Status:** FIXED — 2026-10-28
 - **Datei(en):** `src/auth/permissions.ts:14-36`, `src/app/api/ops/route.ts:39-57`, `src/app/api/firm/config/route.ts:32-44,89`, `src/app/api/firm/missions/route.ts:17-50`, `src/app/api/firm/macro/route.ts:24-30`, `src/app/api/firm/micro/route.ts:26-35`, `src/app/api/firm/devils-advocate/route.ts:20-35`, `src/app/api/firm/risk/signal-decay/route.ts:35-55`, `src/app/api/live/state/route.ts:27-44`, `src/app/api/brokers/[venue]/test/route.ts:25`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md`](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md)
 
@@ -32,7 +32,13 @@ Mindestens 15 fachlich und sicherheitsrelevante GET-Routen sind ohne Authentifiz
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Keine der 14 Permissions in `src/auth/permissions.ts` ist unbenutzt (statischer Test prüft, dass jede Permission mindestens einen `requirePermission`-Aufrufer besitzt).
-- [ ] Statischer + Laufzeit-Test über alle `src/app/api/**/route.ts` bestätigt: Jede nicht explizit allowlistete GET/POST/PUT/PATCH/DELETE-Methode gibt ohne Credentials bei aktivem Auth-Modus `401` zurück.
-- [ ] Ein Operator erhält bei `PUT /api/firm/config` `403` und bei `POST /api/brokers/[venue]/test` Zugriff (`!= 403`).
-- [ ] Keine API-Route sendet bei unerwarteten Exceptions ungefilterte DB-/FS-Fehlermeldungen an den Client.
+- [x] Keine der aktuell 15 Permissions in `src/auth/permissions.ts` ist unbenutzt (statischer Test prüft, dass jede Permission mindestens eine Route oder einen delegierten Route-Guard erreicht).
+- [x] Statischer + Laufzeit-Test über alle `src/app/api/**/route.ts` bestätigt: Jede nicht explizit allowlistete GET/POST/PUT/PATCH/DELETE-Methode gibt ohne Credentials bei aktivem Auth-Modus `401` zurück.
+- [x] Ein Operator erhält bei `PUT /api/firm/config` `403` und bei `POST /api/brokers/[venue]/test` Zugriff (`!= 403`).
+- [x] Keine API-Route sendet bei unerwarteten Exceptions ungefilterte DB-/FS-Fehlermeldungen an den Client.
+
+## Umsetzung (2026-10-28)
+
+- Alle API-Routen außerhalb der dokumentierten Public-Allowlist prüfen Auth/RBAC; geschützte GETs liefern `Cache-Control: private, no-store`. Docs-Viewer, Health und Auth-Status bleiben absichtlich öffentlich. `/api/brokers/[venue]/test` nutzt `broker.test`, Broker-Lesewege `broker.status`; Routing, Ops, Firm-Konfiguration und Kill verwenden ihre jeweiligen Permissions. `firm.config` ist Admin-only.
+- `ALL_PERMISSIONS` wird im statischen Regressionstest gegen sämtliche Route-Handler geprüft. Unerwartete 5xx-Antworten verwenden `publicErrorMessage`; fachliche 4xx-Validierungsfehler bleiben erhalten.
+- Regression: `tests/asa05.apiGuardsAndCsrf.test.ts` und `tests/sec02.unauthenticatedGetApis.test.ts`.

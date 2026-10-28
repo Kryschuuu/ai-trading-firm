@@ -1,3 +1,5 @@
+import { requirePermission } from "@/auth";
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `POST /api/firm/risk/drawdown-scaling` — Drawdown-Risk-Scaling (Status/forcierte Neubewertung).
  *
@@ -43,7 +45,10 @@ export const dynamic = "force-dynamic";
  * Dauerhafte Historie: Tabelle `drawdown_scaling_snapshots` (append-only,
  * idempotent) + Audit-Log-Events `RISK_DRAWDOWN_SCALING`.
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
   const status = getDrawdownScalingStatus();
   return NextResponse.json({
     ok: true,
@@ -53,6 +58,8 @@ export async function GET() {
         ? "Noch keine Bewertung erfolgt — der Monitor-Tick (60 s) oder ein POST hier starten sie."
         : "POST mit {force:true} erzwingt eine sofortige Neubewertung.",
   });
+
+  })());
 }
 
 /**

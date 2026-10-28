@@ -25,7 +25,7 @@ const BASE = "http://localhost:3369";
 function post(url: string, body: unknown, raw?: string): Request {
   return new Request(`${BASE}${url}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-csrf-token": "local" },
     body: raw ?? JSON.stringify(body),
   });
 }
@@ -157,7 +157,7 @@ test("POST /api/portfolio/metrics: Größenlimits (DoS-Schutz) ⇒ 413", async (
   const big = JSON.stringify({ series: [{ symbol: "A", returns: [0.01, 0.02] }] });
   const req = new Request(`${BASE}/api/portfolio/metrics`, {
     method: "POST",
-    headers: { "content-type": "application/json", "content-length": String(99_999_999) },
+    headers: { "content-type": "application/json", "content-length": String(99_999_999), "x-csrf-token": "local" },
     body: big,
   });
   const res3 = await metricsPOST(req);

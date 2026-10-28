@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * `GET|PUT /api/routing/modes` — Routing-Modi je Agent (Task 09).
  *
@@ -21,14 +22,17 @@
  *   401/403 Admin-Guard · 422 `{ ok: false, error: "INVALID_MODES", errors }`
  */
 import { publicErrorMessage } from "@/lib/secrets";
-import { checkAdminGuard, checkCsrfGuard } from "@/brokers/control-plane/guard";
-import { actorAuditId } from "@/auth";
+import { actorAuditId, requirePermission } from "@/auth";
+import { guardMutation } from "@/lib/apiAuth";
 import { getModelRouter } from "@/routing";
 import { ROUTING_MODES } from "@/routing/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "routing.read");
+  if (denied) return denied;
   try {
     const router = getModelRouter();
     return Response.json({
@@ -47,10 +51,12 @@ export async function GET(): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }
 
 export async function PUT(req: Request): Promise<Response> {
-  const denied = checkAdminGuard(req) ?? checkCsrfGuard(req);
+  const denied = guardMutation(req, "routing.modes.write");
   if (denied) return denied;
 
   let body: unknown;

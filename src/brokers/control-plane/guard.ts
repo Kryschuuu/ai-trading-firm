@@ -7,10 +7,10 @@
  *      HTTP-Status bleibt kompatibel: Admin-Token gesetzt → 403,
  *      nur Operator-Token → 401, Offen-Betrieb → durch.
  *
- *   2. CSRF: Alle mutierenden Control-Plane-Endpoints verlangen den
- *      Custom-Header `x-csrf-token` mit dem Wert des Admin-/API-Tokens
- *      (Offen-Betrieb: Konstante "local"). Cross-Site-Formulare koennen
- *      Custom-Header nicht setzen. Fehlt der Header → 403 CSRF_INVALID.
+ *   2. CSRF: Cookie-Sessions verlangen den session-gebundenen
+ *      Double-Submit-Header `x-csrf-token`; local-open-Browser-Calls verlangen
+ *      `local`. Explizite Bearer-/API-Token-Clients sind CSRF-frei (kein ambient
+ *      Browser-Credential) und werden weiterhin separat authentifiziert.
  *
  *   3. Rate-Limit auf Credential-Versuche — seit C2 (v1.36.14) geschichtet:
  *      a) pro Client-Identitaet: Sliding-Window, Default 5/min
@@ -38,13 +38,12 @@
  */
 import { requirePermission } from "@/auth";
 import { tokenEquals } from "@/lib/apiAuth";
-import { readSession } from "@/lib/authSession";
 import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
+import { checkCsrfGuard } from "@/lib/csrfGuard";
+export { checkCsrfGuard, expectedCsrfValue } from "@/lib/csrfGuard";
 import {
   CREDENTIAL_BACKOFF_RESET_MS,
   CREDENTIAL_RATE_LIMIT_WINDOW_MS,
-  CSRF_HEADER,
-  CSRF_LOCAL_VALUE,
   GLOBAL_CREDENTIAL_BUCKET_KEY,
   credentialBackoffConfig,
   credentialBackoffMs,
@@ -69,43 +68,6 @@ function forbidden(code: string, hint: string): Response {
  */
 export function checkAdminGuard(req: Request): Response | null {
   return requirePermission(req, "broker.credentials");
-}
-
-/**
- * Erwarteter CSRF-Wert: Admin-Token → Operator-Token → Offen-Konstante.
- * (Legacy-Pfad fuer curl/CLI/Agenten ohne Session-Cookie.)
- */
-export function expectedCsrfValue(): string {
-  return (
-    process.env.FIRM_ADMIN_TOKEN ?? process.env.FIRM_API_TOKEN ?? CSRF_LOCAL_VALUE
-  );
-}
-
-/**
- * CSRF-Guard: mutierende Endpoints verlangen `x-csrf-token`.
- *
- * W1 (v1.36.23) — zwei Wege:
- *   1. **Session (Browser):** Double-Submit — der Header muss dem
- *      session-gebundenen CSRF-Wert aus `firm_session` entsprechen (Browser-JS
- *      echoet ihn aus dem non-HttpOnly `firm_csrf`-Cookie). Ohne den HttpOnly
- *      Session-Cookie authentifiziert der Wert allein nichts.
- *   2. **Legacy (curl/CLI/Agenten):** Header muss dem konfigurierten Token
- *      (bzw. `local` im Offen-Betrieb) entsprechen — unveraendert.
- * Quer-Site-Formulare koennen weder Cookie noch Custom-Header setzen.
- * Liefert `null` = ok, sonst 403 CSRF_INVALID.
- */
-export function checkCsrfGuard(req: Request): Response | null {
-  const got = req.headers.get(CSRF_HEADER) ?? "";
-  const session = readSession(req);
-  if (session) {
-    if (got.length > 0 && tokenEqualsSafe(got, session.csrf)) return null;
-  } else if (tokenEqualsSafe(got, expectedCsrfValue())) {
-    return null;
-  }
-  return forbidden(
-    "CSRF_INVALID",
-    `Fehlender/falscher ${CSRF_HEADER}-Header auf mutierendem Endpoint.`
-  );
 }
 
 // ── Rate-Limit (eigene Buckets, getrennt vom Firm-Schreib-Limit) ─────────────

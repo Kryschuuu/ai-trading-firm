@@ -21,7 +21,7 @@ WICHTIGE REPO-MECHANIK:
 - `scripts/gen-docs-inventories.ts` generiert `docs/generated/route-inventory.md` statisch aus `src/app/api/**/route.ts` und erkennt `requirePermission(...)`, `guardWrite(...)`, `checkApiToken(...)` und `checkCsrfGuard(...)`. Wenn `guardWrite` intern `checkCsrfGuard` aufruft, erkennt `collectGuards` in `scripts/gen-docs-inventories.ts` rekursiv `CSRF`!
 
 VERBINDLICHE UMSETZUNGSSCHRITTE:
-1. Alle 14 Permissions aus `src/auth/permissions.ts` fachgerecht verdrahten & offene GET-Routen schließen:
+1. Alle Permissions aus `src/auth/permissions.ts` fachgerecht verdrahten & offene GET-Routen schließen:
    - Einzige unauthentifizierte Public-Endpunkte bleiben explizit:
      - `GET /api/health`
      - `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout` (Logout mit CSRF + Rate-Limit schützen!)

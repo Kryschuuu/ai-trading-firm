@@ -3,7 +3,7 @@
 - **ID:** ASA-07
 - **Severity:** HIGH
 - **Bereich:** Sicherheit (CSRF & Brute-Force / DoS)
-- **Status:** OPEN
+- **Status:** FIXED — 2026-10-28
 - **Datei(en):** `src/lib/apiAuth.ts:174-182`, `src/app/api/firm/route.ts:95-115`, `src/app/api/firm/micro/route.ts:45-90`, `src/app/api/firm/missions/route.ts:55-95`, `src/app/api/firm/lifecycle/route.ts:206`, `src/app/api/ops/toggles/route.ts:28-55`, `src/app/api/routing/modes/route.ts:40-65`, `src/app/api/firm/execution/policy/route.ts:48-75`, `src/app/api/firm/execution/twap/route.ts:50-85`, `src/app/api/auth/logout/route.ts:22-35`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md`](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md)
 
@@ -36,6 +36,13 @@ Obwohl Browser-Sessions über Cookies (`atf_session`) authentifiziert werden und
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Jede mutierende Route (`POST`, `PUT`, `PATCH`, `DELETE`, exkl. `/api/auth/login`) weist Requests mit gültigem `atf_session`-Cookie, aber fehlendem oder falschem `x-csrf-token`-Header mit `403` ab.
-- [ ] Jede mutierende Route ist durch ein Rate-Limit geschützt (`429` bei Überschreitung).
-- [ ] `docs/generated/route-inventory.md` weist nach `npm run docs:inventories` für alle geschützten Schreibrouten den CSRF-Guard aus.
+- [x] Jede mutierende Route (`POST`, `PUT`, `PATCH`, `DELETE`, exkl. `/api/auth/login`) weist Requests mit gültigem `atf_session`-Cookie, aber fehlendem oder falschem `x-csrf-token`-Header mit `403` ab.
+- [x] Jede mutierende Route ist durch ein Rate-Limit geschützt (`429` bei Überschreitung).
+- [x] `docs/generated/route-inventory.md` weist nach `npm run docs:inventories` für alle geschützten Schreibrouten den CSRF-Guard aus.
+
+## Umsetzung (2026-10-28)
+
+- `guardWrite` erzwingt nun Auth → session/local-open CSRF → `checkRateLimit`; `guardMutation` stellt dieselbe Reihenfolge für fachliche Permissions bereit. Credential-/Live-Gate-Limits bleiben als dedizierte, stärkere Limits erhalten. Logout ist CSRF- und rate-limited; Refresh prüft sessiongebundenes CSRF in `renewSession` (local-open zusätzlich im Handler). Token-Header-Clients bleiben CSRF-frei, weil sie keine ambienten Browser-Credentials verwenden.
+- Die UI-Aufrufe auf `/api/**` verwenden durchgehend `apiFetch`.
+- `/api/firm/micro` ist in diesem Checkout ausschließlich GET (kein POST-Handler); die Laufzeitregression deckt `guardWrite` über `POST /api/firm/missions` und zusätzlich `PUT /api/routing/modes` ab.
+- Regression: `tests/asa05.apiGuardsAndCsrf.test.ts`, `tests/proposalApprove.auth.test.ts`, Session-/Logout-Tests.

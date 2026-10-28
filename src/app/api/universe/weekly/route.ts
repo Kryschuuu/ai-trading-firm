@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/universe/weekly` — deterministische Weekly-Klassifikation (read-only).
  *
@@ -68,7 +70,11 @@ export function parseWeeklyQuery(url: URL): { classes: UniverseClass[] | null; p
 }
 
 /** Handler für `GET /api/universe/weekly`. */
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   let query: ReturnType<typeof parseWeeklyQuery>;
   try {
     query = parseWeeklyQuery(new URL(req.url));
@@ -98,4 +104,6 @@ export async function GET(req: Request): Promise<Response> {
   } catch (e) {
     return Response.json({ ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(e) }, { status: 500 });
   }
+
+  })());
 }

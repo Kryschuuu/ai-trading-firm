@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/marketdata/perpetual/series` (RMA-P2-02, v1.54.0) — read-only.
  *
@@ -60,7 +62,11 @@ function parseTimeMs(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   const url = new URL(req.url);
   const instruments = csv(url.searchParams.get("instruments"));
   if (instruments.length === 0) {
@@ -141,4 +147,6 @@ export async function GET(req: Request): Promise<Response> {
       { status, headers: { "Cache-Control": "private, no-store" } }
     );
   }
+
+  })());
 }

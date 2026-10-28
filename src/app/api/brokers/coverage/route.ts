@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/brokers/coverage` — Broker-Coverage-Übersicht (Operations Center).
  *
@@ -34,7 +36,11 @@ import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "broker.status");
+  if (denied) return denied;
+
   try {
     const coverage = computeBrokerCoverage();
     return Response.json({ ok: true, ...coverage });
@@ -44,4 +50,6 @@ export async function GET(): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

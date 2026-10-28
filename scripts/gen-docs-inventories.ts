@@ -90,22 +90,6 @@ export const REVIEWED_UNGUARDED_WRITES: ReadonlyMap<string, string> = new Map([
     "POST /api/auth/login",
     "Anmeldung selbst: die Credential-Prüfung ist die Authentisierung; Rate-Limit im Handler.",
   ],
-  [
-    "POST /api/auth/refresh",
-    "Session-Erneuerung: Session-Cookie + Double-Submit-CSRF in `renewSession` (src/lib/authSession.ts), Rate-Limit im Handler.",
-  ],
-  [
-    "POST /api/portfolio/correlation",
-    "Reine Berechnung auf übergebenen Daten — keine Persistenz, keine Seiteneffekte.",
-  ],
-  [
-    "POST /api/portfolio/metrics",
-    "Reine Berechnung auf übergebenen Daten — keine Persistenz, keine Seiteneffekte.",
-  ],
-  [
-    "POST /api/portfolio/optimize",
-    "Reine Berechnung auf übergebenen Daten — keine Persistenz, keine Seiteneffekte.",
-  ],
 ]);
 
 interface MethodGuard {

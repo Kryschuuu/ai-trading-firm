@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/markets/{venue}/{symbol}` — ein einzelnes Instrument.
  *
@@ -27,7 +29,11 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ venue: string; symbol: string }> };
 
 /** Handler für `GET /api/markets/{venue}/{symbol}`. */
-export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
+export async function GET(req: Request, ctx: RouteContext): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const raw = await ctx.params;
     const venue = decodeURIComponent(raw.venue ?? "").trim().toUpperCase();
@@ -70,4 +76,6 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
       { status: 500 },
     );
   }
+
+  })());
 }

@@ -27,6 +27,7 @@ import { checkCredentialRateLimit, checkCsrfGuard } from "@/brokers/control-plan
 import { readJsonBody } from "@/brokers/control-plane/http";
 import { getLiveGateService } from "@/live-gate";
 import { LiveGateError, liveGateErrorStatus } from "@/live-gate";
+import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -56,22 +57,23 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json(result, { status: 200 });
   } catch (err) {
     if (err instanceof LiveGateError) {
+      const status = liveGateErrorStatus(err.code);
       return Response.json(
         {
           ok: false,
           error: err.code,
-          message: err.message,
+          message: status >= 500 ? publicErrorMessage(err) : err.message,
           // ASA-02: approvalId/expiresAt der Erstfreigabe für Schritt 2.
           ...(err.details ?? {}),
         },
-        { status: liveGateErrorStatus(err.code) }
+        { status, headers: { "Cache-Control": "private, no-store" } }
       );
     }
     return Response.json(
       {
         ok: false,
         error: "LIVE_GATE_TRANSITION_FAILED",
-        message: `Transition fehlgeschlagen: ${(err as Error).message}`,
+        message: publicErrorMessage(err, "Transition fehlgeschlagen"),
       },
       { status: 500 }
     );

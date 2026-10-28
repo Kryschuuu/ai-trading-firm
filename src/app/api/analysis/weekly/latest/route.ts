@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/analysis/weekly/latest` — Jüngster wöchentlicher Universe Review (read-only).
  */
@@ -7,7 +9,11 @@ import { getCycleService } from "@/cycle/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const service = getCycleService();
     const review = service.getWeeklyLatest();
@@ -24,4 +30,6 @@ export async function GET(): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

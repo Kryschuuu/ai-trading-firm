@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 /**
  * API-Route `GET /api/firm/journal` — Trade-Journal mit Agenten-Attribution (Lese-API).
  *
@@ -24,7 +26,8 @@ export const dynamic = "force-dynamic";
  * Reines Lesen — dieser Endpunkt verändert nichts (auch nicht die
  * journal_agent_weights-Tabelle; Schreibungen laufen nur im Daily-Cycle).
  */
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -39,10 +42,12 @@ export async function GET(req: Request) {
       {
         ok: false,
         error: "JOURNAL_UNAVAILABLE",
-        message: e instanceof Error ? e.message : String(e),
+        message: publicErrorMessage(e),
         hint: "PostgreSQL prüfen oder `npx drizzle-kit push` ausführen (trade_journal).",
       },
       { status: 503 }
     );
   }
+
+  })());
 }

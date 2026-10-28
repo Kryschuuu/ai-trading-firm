@@ -84,6 +84,7 @@ describe("API POST /api/firm/forecasts/resolve — Validierung", () => {
     const res = await resolvePost(
       new Request("http://localhost/api/firm/forecasts/resolve", {
         method: "POST",
+        headers: { "x-csrf-token": "local" },
         body: JSON.stringify({ limit: 0 }),
       })
     );
@@ -95,7 +96,7 @@ describe("API POST /api/firm/forecasts/resolve — Validierung", () => {
 describe("API POST /api/firm/forecasts/resolutions — Validierung", () => {
   it("ungültiges JSON ⇒ 400 INVALID_JSON", async () => {
     const res = await resolutionsPost(
-      new Request("http://localhost/api/firm/forecasts/resolutions", { method: "POST", body: "{kaputt" })
+      new Request("http://localhost/api/firm/forecasts/resolutions", { method: "POST", headers: { "x-csrf-token": "local" }, body: "{kaputt" })
     );
     assert.equal(res.status, 400);
     assert.equal((await json(res)).error, "INVALID_JSON");
@@ -105,6 +106,7 @@ describe("API POST /api/firm/forecasts/resolutions — Validierung", () => {
     const res = await resolutionsPost(
       new Request("http://localhost/api/firm/forecasts/resolutions", {
         method: "POST",
+        headers: { "x-csrf-token": "local" },
         body: JSON.stringify({ action: "VOID", reason: "CORPORATE_ACTION" }),
       })
     );
@@ -116,6 +118,7 @@ describe("API POST /api/firm/forecasts/resolutions — Validierung", () => {
     const res = await resolutionsPost(
       new Request("http://localhost/api/firm/forecasts/resolutions", {
         method: "POST",
+        headers: { "x-csrf-token": "local" },
         body: JSON.stringify({ forecastId: "abc", action: "LÖSCHEN", reason: "DATA_CORRECTION" }),
       })
     );
@@ -127,6 +130,7 @@ describe("API POST /api/firm/forecasts/resolutions — Validierung", () => {
     const res = await resolutionsPost(
       new Request("http://localhost/api/firm/forecasts/resolutions", {
         method: "POST",
+        headers: { "x-csrf-token": "local" },
         body: JSON.stringify({
           forecastId: "abc",
           action: "VOID",

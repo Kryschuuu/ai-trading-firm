@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * API-Route `GET`, `POST /api/firm/tick` — Monitor-Tick manuell ausführen (Debug/Betrieb).
  *
@@ -36,7 +38,11 @@ export async function POST(req: Request) {
  * Monitoring-Tools, Browser-Prefetches und Link-Checker senden GETs — die
  * dürfen niemals einen Trade/Zyklus auslösen.
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   return NextResponse.json(
     {
       ok: false,
@@ -45,4 +51,6 @@ export async function GET() {
     },
     { status: 405 }
   );
+
+  })());
 }

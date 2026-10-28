@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET /api/firm/features/values` — Point-in-Time Feature-Werte (Lese-API, as-of).
  *
@@ -12,6 +13,7 @@ import { pitQuery } from "@/features/service";
 import { validatePitQuery } from "@/features/pitQuery";
 import { getFeatureStore } from "@/features/store";
 import { FeatureStoreError } from "@/features/types";
+import { publicErrorMessage } from "@/lib/secrets";
 import { metricLabel, telemetry } from "@/lib/telemetry";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +40,8 @@ export const dynamic = "force-dynamic";
  * Quellgrenze, deren Erreichen als `FEATURE_PIT_SOURCE_TRUNCATED` (503)
  * gemeldet wird — niemals stillschweigend gekürzt.
  */
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -82,7 +85,7 @@ export async function GET(req: Request) {
       {
         ok: false,
         error: code,
-        message: e instanceof Error ? e.message : String(e),
+        message: status >= 500 ? publicErrorMessage(e) : e instanceof Error ? e.message : "Ungültige Feature-Abfrage",
         hint:
           status === 503
             ? "PostgreSQL/DATABASE_URL prüfen (`npx drizzle-kit push`) oder Zeitraum/Entitys eingrenzen."
@@ -91,4 +94,6 @@ export async function GET(req: Request) {
       { status, headers: { "Cache-Control": "private, no-store" } }
     );
   }
+
+  })());
 }

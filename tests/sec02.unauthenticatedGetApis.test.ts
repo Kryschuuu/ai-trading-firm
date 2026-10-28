@@ -137,7 +137,7 @@ test("SEC-02: CI-Drift-Schutz verlangt firm.read vor jedem sensitiven Handler-Pf
     const source = readFileSync(resolve(process.cwd(), route.source), "utf8");
     assert.match(source, /import\s*\{\s*requirePermission\s*\}\s*from\s*["']@\/auth["']/,
       `${route.source} muss den gemeinsamen RBAC-Guard importieren`);
-    assert.match(source, /export\s+async\s+function\s+GET\s*\(\s*req\s*:\s*Request\s*\)\s*(?::\s*Promise<Response>)?\s*\{[\s\S]{0,600}?const\s+denied\s*=\s*requirePermission\(req,\s*["']firm\.read["']\);\s*if\s*\(denied\)\s*return\s+denied;/,
+    assert.match(source, /export\s+async\s+function\s+GET[\s\S]{0,1800}?const\s+denied\s*=\s*requirePermission\(req,\s*["']firm\.read["']\);\s*if\s*\(denied\)\s*return\s+denied;/,
       `${route.source} muss firm.read vor jeder sensitiven Verarbeitung prüfen`);
     assert.match(source, /["']Cache-Control["']\s*:\s*["']private,\s*no-store["']/,
       `${route.source} muss erfolgreiche sensible Antworten gegen Shared Caches schützen`);

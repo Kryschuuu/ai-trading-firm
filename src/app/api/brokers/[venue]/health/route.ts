@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/brokers/{venue}/health` — Health-Check eines einzelnen Brokers
  * (Task 02).
@@ -35,7 +37,11 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ venue: string }> };
 
 /** Handler für `GET /api/brokers/{venue}/health`. */
-export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
+export async function GET(req: Request, ctx: RouteContext): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "broker.status");
+  if (denied) return denied;
+
   try {
     const raw = await ctx.params;
     const venue = normalizeVenue(decodeURIComponent(raw.venue ?? "").trim());
@@ -86,4 +92,6 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

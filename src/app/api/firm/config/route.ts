@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `PUT /api/firm/config` — Wirksame Risk-Konfiguration (Lesen + geschriebene Overrides mit Bounds).
  *
@@ -6,7 +7,8 @@
 
 import { NextResponse } from "next/server";
 import { effectiveConfigView, refreshRuntimeLimits, setConfigValue } from "@/lib/riskConfigService";
-import { guardWrite } from "@/lib/apiAuth";
+import { guardMutation } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,14 +18,19 @@ export const dynamic = "force-dynamic";
  *   config.limits     — klassische Risk-Limits (Ceilings: riskGuard.ts)
  *   config.volatility — adaptives Volatilitäts-System (Keys `adp.*`)
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
   await refreshRuntimeLimits(true);
   return NextResponse.json({
     ok: true,
     config: effectiveConfigView(),
     note:
       "Werte sind zur Laufzeit änderbar, werden aber vom Code (LIMIT_CEILINGS in riskGuard.ts bzw. VOLATILITY_CONFIG_BOUNDS in adaptiveRisk.ts) geklemmt. requireStopLoss ist absichtlich gesperrt. Prozent-Units: Eingabe als Prozentzahl (30 = 30 %).",
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
+
+  })());
 }
 
 /**
@@ -31,7 +38,7 @@ export async function GET() {
  * Jede Änderung wird validiert, geklemmt und ins Audit-Log geschrieben.
  */
 export async function PUT(req: Request) {
-  const denied = guardWrite(req);
+  const denied = guardMutation(req, "firm.config");
   if (denied) return denied;
   let body: { key?: string; value?: unknown };
   try {

@@ -1,3 +1,5 @@
+import { publicErrorMessage } from "@/lib/secrets";
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * Operator-Auflösungen — versionierte Re-Resolution und VOID
  * (RMA-P3-01, v1.55.0).
@@ -71,7 +73,7 @@ function validateBody(raw: unknown): { ok: true; value: ValidatedBody } | { ok: 
 }
 
 export async function POST(req: Request) {
-  const denied = requirePermission(req, "firm.write");
+  const denied = guardMutation(req, "firm.write");
   if (denied) return denied;
 
   let raw: unknown;
@@ -126,7 +128,7 @@ export async function POST(req: Request) {
       {
         ok: false,
         error: "RESOLUTION_FAILED",
-        message: e instanceof Error ? e.message : String(e),
+        message: publicErrorMessage(e),
         hint: "Datenbank/`DATABASE_URL` prüfen; die bestehende Resolution-Historie bleibt unverändert.",
       },
       { status: 503, headers: NO_STORE }

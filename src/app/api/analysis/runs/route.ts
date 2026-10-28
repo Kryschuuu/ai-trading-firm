@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/analysis/runs` — Liste der Zyklen-Durchläufe (Daily & Weekly) (read-only).
  *
@@ -13,7 +15,11 @@ import { getCycleService } from "@/cycle/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const url = new URL(req.url);
     const typeParam = (url.searchParams.get("type") ?? "all").toLowerCase();
@@ -48,4 +54,6 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET /api/firm` — Firmenstatus — Gesamtzustand (Agenten, Missionen, Positionen, Vorschläge, Audit, Risk-Limits, Broker) für das Dashboard.
  *
@@ -32,7 +33,8 @@ import { humanApprovalRequired } from "@/live-gate/config";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   // SEC-02: "read-only" does not make portfolio, audit and strategy data public.
   // Authorize before any DB, broker or runtime-state access.
   const denied = requirePermission(req, "firm.read");
@@ -141,6 +143,8 @@ export async function GET(req: Request) {
       { status: 503 }
     );
   }
+
+  })());
 }
 
 export type FirmLimitsSnapshot = Record<string, unknown> & { limits?: RiskLimits };
