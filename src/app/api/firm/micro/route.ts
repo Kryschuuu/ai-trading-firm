@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * API-Route `GET /api/firm/micro` — Mikro-Executor: Status/Steuerung.
  *
@@ -20,7 +22,11 @@ export const dynamic = "force-dynamic";
  *   - Aktive Regeln (aus der DB, das, was der Cache lädt)
  *   - Letzte Ausführungs-Ereignisse (Trigger/Blöcke/Fehler)
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const healthPort = Number(process.env.MICRO_HEALTH_PORT ?? 3380);
     let microProcess: unknown = { reachable: false, reason: "nicht erreichbar" };
@@ -59,4 +65,6 @@ export async function GET() {
   } catch (e) {
     return NextResponse.json({ ok: false, error: publicErrorMessage(e) }, { status: 500 });
   }
+
+  })());
 }

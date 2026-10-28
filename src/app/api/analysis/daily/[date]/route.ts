@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/analysis/daily/{date}` — Tageslauf für ein konkretes Datum YYYY-MM-DD (read-only).
  */
@@ -10,7 +12,11 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ date: string }> };
 
-export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
+export async function GET(req: Request, ctx: RouteContext): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const raw = await ctx.params;
     const date = decodeURIComponent(raw.date ?? "").trim();
@@ -36,4 +42,6 @@ export async function GET(_req: Request, ctx: RouteContext): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

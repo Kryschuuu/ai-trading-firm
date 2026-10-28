@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `POST /api/firm/rules` — Strategie-Regeln (Lese- + Schreib-API, RBAC je Aktion).
  *
@@ -38,7 +40,8 @@ export const maxDuration = 60;
  * SEC-06: Drafts verlangen strategy.rules.write, die optionale Aktivierung
  *        zusätzlich strategy.rules.activate — geprüft vor jeder Persistenz.
  */
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   // SEC-02: active rules, feedback and executions expose the trading strategy.
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
@@ -71,10 +74,12 @@ export async function GET(req: Request) {
   } catch (e) {
     return NextResponse.json({ ok: false, error: publicErrorMessage(e) }, { status: 500 });
   }
+
+  })());
 }
 
 export async function POST(req: Request) {
-  const denied = requirePermission(req, "strategy.rules.write") ?? checkRateLimit(req);
+  const denied = guardMutation(req, "strategy.rules.write");
   if (denied) return denied;
   try {
     const parsed: unknown = await req.json().catch(() => null);

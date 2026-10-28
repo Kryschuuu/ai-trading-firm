@@ -498,7 +498,7 @@ export default function FirmDashboard() {
     const authHeaders = new Headers({ "Content-Type": "application/json" });
     authHeaders.set("x-csrf-token", csrfHeaderValue());
     try {
-      const chRes = await fetch("/api/firm/kill/challenge", {
+      const chRes = await apiFetch("/api/firm/kill/challenge", {
         method: "GET",
         headers: authHeaders,
         credentials: "same-origin",
@@ -509,7 +509,7 @@ export default function FirmDashboard() {
         setNotice("🔒 Disarm braucht Admin-Zugriff (live.gate) + gültigen Token. Operator-Token allein reicht nicht.");
         return;
       }
-      const res = await fetch("/api/firm/kill", {
+      const res = await apiFetch("/api/firm/kill", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ arm: false, nonce: ch.nonce, reason: "OPERATOR_DASHBOARD" }),
@@ -1022,7 +1022,7 @@ function ReportsTab({ onUnauthorized }: { onUnauthorized?: () => void }) {
     // async booten (kein synchrones setState im Effect)
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/firm/report?period=${period}`, { cache: "no-store" });
+        const res = await apiFetch(`/api/firm/report?period=${period}`, { cache: "no-store" });
         const json: unknown = await res.json().catch(() => null);
         if (!alive) return;
 

@@ -36,14 +36,19 @@
  *   503 SESSION_SECRET_*                            — Signierung nicht konfiguriert
  */
 import { checkRateLimit } from "@/lib/apiAuth";
+import { checkCsrfGuard } from "@/lib/csrfGuard";
+import { resolveAuthMode } from "@/auth/authMode";
 import { renewSession, sessionRenewWindowS } from "@/lib/authSession";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
-  const denied = checkRateLimit(req, { max: 30 });
-  if (denied) return denied;
-
+  // renewSession prüft den session-gebundenen Double-Submit-Wert inkl. Grace-Window;
+  // im local-open-Browser-Modus gibt es keine Session, daher gilt der lokale CSRF-Wert.
+  if (resolveAuthMode().mode === "local-open") {
+    const csrfDenied = checkCsrfGuard(req);
+    if (csrfDenied) return csrfDenied;
+  }
   const result = renewSession(req, process.env, Date.now());
   if (!result.ok) {
     return Response.json(
@@ -51,6 +56,9 @@ export async function POST(req: Request): Promise<Response> {
       { status: result.status }
     );
   }
+
+  const denied = checkRateLimit(req, { max: 30 });
+  if (denied) return denied;
 
   const headers = new Headers({ "Cache-Control": "no-store" });
   for (const cookie of result.cookies) headers.append("Set-Cookie", cookie);

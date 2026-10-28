@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * `GET /api/ops` — Operations Center (Task 10).
  *
@@ -15,21 +16,27 @@
  * Venue-Sync-Status, worst offenders, Hinweistext). Die Route bleibt bewusst
  * **read-only**: es gibt keinen Endpoint, der einen Sync auslöst.
  */
-import { resolveActor } from "@/auth";
+import { requirePermission, resolveActor } from "@/auth";
 import { publicErrorMessage } from "@/lib/secrets";
 import { buildOperationsCenter } from "@/ops";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "ops.view");
+  if (denied) return denied;
+
   try {
     const actor = resolveActor(req);
     const payload = await buildOperationsCenter(actor);
-    return Response.json(payload);
+    return Response.json(payload, { headers: { "Cache-Control": "private, no-store" } });
   } catch (err) {
     return Response.json(
       { ok: false, error: "INTERNAL_ERROR", message: publicErrorMessage(err) },
       { status: 500 }
     );
   }
+
+  })());
 }

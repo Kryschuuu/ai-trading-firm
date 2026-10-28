@@ -49,7 +49,7 @@ export async function POST(req: Request) {
       const results = await runPipeline(body.missionId);
       return NextResponse.json({ ok: true, pipeline: results });
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = publicErrorMessage(e);
       // KORRIGIERT (v1.1.0): laufende Pipeline → 409 statt 500 (kein CRITICAL
       // Audit-Eintrag für einen erwartbaren Konflikt).
       if (message === "PIPELINE_ALREADY_RUNNING") {
@@ -88,7 +88,7 @@ export async function POST(req: Request) {
       .where(eq(agentTable.id, body.agentId));
     return NextResponse.json({ ok: true, result });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = publicErrorMessage(e);
     // S1: wie oben — `agentId` ist ein FK auf `agents.id`; der Client-Wert
     // bleibt im `detail` (nachvollziehbar), ein ungültiger Fremdschlüssel darf
     // nicht den CRITICAL-Beleg eines Laufabbruchs kosten.

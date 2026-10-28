@@ -1,3 +1,5 @@
+import { requirePermission } from "@/auth";
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `POST /api/firm/risk/volatility` — Adaptives Risk-System + Volatility-Status (Lese-API).
  *
@@ -37,7 +39,10 @@ export const dynamic = "force-dynamic";
  * Dauerhafte Historie: Audit-Log-Events `RISK_ADAPTIVE`
  * (siehe GET /api/firm? → auditLog, bzw. DB-Tabelle audit_log).
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
   const status = getAdaptiveRiskStatus();
   // RMA-P5-01 (v1.67.0): additiver Abschnitt für das kontinuierliche
   // Portfolio-Volatility-Targeting (dieselbe Kaskade, zweiter Faktor).
@@ -56,6 +61,8 @@ export async function GET() {
         ? "Noch keine Bewertung erfolgt — der Monitor-Tick (60 s) oder ein POST hier starten sie."
         : "POST mit {force:true} erzwingt eine sofortige Neubewertung.",
   });
+
+  })());
 }
 
 /**

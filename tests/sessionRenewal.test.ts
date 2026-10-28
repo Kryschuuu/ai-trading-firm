@@ -635,7 +635,10 @@ test("Login antwortet mit Browser-Session-Cookie und den Fristen, logout loescht
   const logout = await postLogout(
     new Request("https://localhost/api/auth/logout", {
       method: "POST",
-      headers: { cookie: `${SESSION_COOKIE}=${token}` },
+      headers: {
+        cookie: `${SESSION_COOKIE}=${token}; ${SESSION_CSRF_COOKIE}=${cookieValue(cookies, SESSION_CSRF_COOKIE)}`,
+        "x-csrf-token": cookieValue(cookies, SESSION_CSRF_COOKIE),
+      },
     })
   );
   assert.equal(logout.status, 200);

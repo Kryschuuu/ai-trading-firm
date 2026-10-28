@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 /**
  * GET /api/firm/prompts/artifacts — Prompt-Artefakte (RMA-P3-02, v1.65.0)
  *
@@ -25,7 +27,8 @@ function jsonWithCache(body: unknown, truncated: boolean) {
   return res;
 }
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -73,7 +76,7 @@ export async function GET(req: Request) {
       truncated
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = publicErrorMessage(e);
     if (msg.includes("DB") || msg.includes("does not exist") || msg.includes("relation")) {
       telemetry.prompt.queries.inc({ result: "unavailable" });
       return NextResponse.json({ ok: false as const, code: "PROMPT_LEDGER_UNAVAILABLE", error: msg.slice(0, 200), hint: "`npx drizzle-kit push` bzw. psql drizzle/2026-09-22_prompt_performance.sql ausführen." }, { status: 503 });
@@ -81,4 +84,6 @@ export async function GET(req: Request) {
     telemetry.prompt.queries.inc({ result: "error" });
     return NextResponse.json({ ok: false as const, error: msg.slice(0, 240) }, { status: 500 });
   }
+
+  })());
 }

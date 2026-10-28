@@ -1,8 +1,8 @@
 # Remediation-Tracking — Architektur- & Security-Audit 2026-10-27
 
 - **Audit:** [`../README.md`](../README.md) · **Vollbericht:** [`../report.md`](../report.md) · **Prompts:** [`../prompts/README.md`](../prompts/README.md)
-- **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **0.17.2**
-- **Stand:** 2026-10-27 · **15 Findings:** 11 `OPEN`, 4 `FIXED` (`ASA-01` … `ASA-15`)
+- **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **0.17.3**
+- **Stand:** 2026-10-28 · **15 Findings:** 9 `OPEN`, 6 `FIXED` (`ASA-01` … `ASA-15`)
 - **Konvention:** 1 Prompt = 1 fokussierte Coding-Session + eigener PR; nach Merge Status hier, in `../findings/ASA-*.md`, in `../README.md` und bei `CRITICAL`/`HIGH` in `../../../security/README.md` nachziehen. Finding-IDs bleiben unverändert.
 
 ## Statusübersicht
@@ -13,9 +13,9 @@
 | [ASA-02](../findings/ASA-02-lifecycle-role-spoofing-four-eyes-live-kill.md) | CRITICAL | `x-admin-token`-Rollen-Spoofing, Vier-Augen-Bypass & Live-Kill-AuthZ | `FIXED` | [PROMPT-ASA-P0-02](../prompts/PROMPT-ASA-P0-02-lifecycle-authz-foureyes-livekill.md) | [PR #247](https://github.com/Kryschuuu/ai-trading-firm/pull/247) | `tests/asa02.lifecycleAndLiveKillAuthz.test.ts` |
 | [ASA-03](../findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter Fail-Open (`safeGetPositions` / `verifyFlat` / 429) | `FIXED` | [PROMPT-ASA-P0-03](../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) | [PR #248](https://github.com/Kryschuuu/ai-trading-firm/pull/248) | `npx tsx --test tests/asa03.alpacaFailClosed.test.ts`; Alpaca + Broker-Contracts; `npm test` (`BROKER_CONTRACTS_REQUIRE_DB=true` in CI) |
 | [ASA-04](../findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` Cooldown-Reset (30 s), Tick-Burst-Race & fehlendes Feed-Hot-Subscribe | `FIXED` | [PROMPT-ASA-P1-04](../prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) | Dieser PR | `tests/asa04.microExecutorConcurrency.test.ts` |
-| [ASA-05](../findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Offene sensitive GET-Routen, 7 tote RBAC-Permissions & `e.message`-Leaks | `OPEN` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | — | — |
+| [ASA-05](../findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Offene sensitive GET-Routen, 7 tote RBAC-Permissions & `e.message`-Leaks | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; security suite |
 | [ASA-06](../findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` & `LiveGateAudit`-Kettenbruch | `OPEN` | [PROMPT-ASA-P1-06](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) | — | — |
-| [ASA-07](../findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender Session-CSRF-Guard in `guardWrite` & fehlende Write-Rate-Limits | `OPEN` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | — | — |
+| [ASA-07](../findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender Session-CSRF-Guard in `guardWrite` & fehlende Write-Rate-Limits | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; logout/session regression |
 | [ASA-08](../findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | `X-Verified-IP`-Spoofing bei `TRUSTED_PROXY_IPS` + `0.0.0.0`-Bind | `OPEN` | [PROMPT-ASA-P1-07](../prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) | — | — |
 | [ASA-09](../findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` Voll-Scan, UTF-8-Chunk-Split, V8-String-Crash & Lost Updates | `OPEN` | [PROMPT-ASA-P1-08](../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) | — | — |
 | [ASA-10](../findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback kauft `LONG`; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | `OPEN` | [PROMPT-ASA-P2-09](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) | — | — |
@@ -24,6 +24,13 @@
 | [ASA-13](../findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 unregistrierte `globalThis`-Singletons & `FirmDashboard.tsx` Polling-Reset | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-14](../findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` ohne `systemd`-Sandboxing & mit Pfad-Drift | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-15](../findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` & fehlender SSRF-Schutz in `WebhookAlertSink` | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
+
+## Abgeschlossene Remediation ASA-05 + ASA-07 (2026-10-28)
+
+- **API-RBAC:** Alle nicht-öffentlichen API-Handler sind Auth-geschützt. `ops.view`, `firm.config`, `broker.status`, `broker.test`, `routing.read`, `routing.modes.write` und `firm.kill` sind in den vorgesehenen Routen verdrahtet; `firm.config` ist Admin-only. Geschützte GET-Handler setzen `Cache-Control: private, no-store`. `/api/docs` bleibt ausdrücklich öffentlich (kuratierter Docs-Katalog); `/api/firm/micro` ist im aktuellen Checkout read-only.
+- **CSRF/Rate-Limit:** `guardWrite` und `guardMutation` prüfen Auth → CSRF → Rate-Limit. Token-Header-Clients bleiben CSRF-frei; Session-Cookies erfordern Double-Submit, local-open-Browser-Calls den festgelegten lokalen Double-Submit-Wert. Logout ist CSRF-/rate-limited; Refresh prüft die Sessionbindung intern. Alle UI-`/api/**`-Aufrufe verwenden `apiFetch`.
+- **Error-Redaction:** Unerwartete 5xx-Ausnahmen werden mit `publicErrorMessage` redigiert; validierungsbezogene 4xx bleiben fachlich aussagekräftig.
+- **Regressionen:** `npx tsx --test tests/asa05.apiGuardsAndCsrf.test.ts tests/sec02.unauthenticatedGetApis.test.ts`; zusätzlich vollständige Typecheck-, Lint-, Inventar-, Doku- und Test-Suite.
 
 ## Abgeschlossene Remediation ASA-04 (2026-10-28)
 

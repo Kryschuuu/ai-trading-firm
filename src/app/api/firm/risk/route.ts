@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * API-Route `GET /api/firm/risk` — Risk-Limits und -Status (Lese-API).
  *
@@ -63,7 +65,11 @@ export const dynamic = "force-dynamic";
  * `cluster-exposure:…`) und `POSITION_SIZING` / `POSITION_SIZING_UNKNOWN`
  * (Code `sizing:atr-unknown:…`).
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   const sizingCfg = loadSizingConfig();
   const clusterCfg = loadClusterLimitsConfig();
   const base = getBaseLimits();
@@ -169,4 +175,6 @@ export async function GET() {
         : "Keine UNKNOWN-Zustände.",
     },
   });
+
+  })());
 }

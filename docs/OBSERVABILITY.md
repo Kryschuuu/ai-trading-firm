@@ -1,6 +1,6 @@
 # Observability — Marktdaten-Fehler, Firmen-Metriken, Alerts und Heartbeat
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-19 · **Code-Version:** v0.17.2 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-19 · **Code-Version:** v0.17.3 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
 > Ausbaustand zum Stand: Implementiert (MDERR-006; GAP-10 v1.45.0 ergänzt
 > Firmen-Metriken, Auto-Circuit-Breaker, Alerting und Heartbeat; GAP-07
 > v1.47.0 ergänzt die Datenqualitäts-Klassen §2.1) · Module

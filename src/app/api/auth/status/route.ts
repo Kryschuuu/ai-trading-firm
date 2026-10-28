@@ -27,7 +27,7 @@ import { sessionStatus } from "@/lib/authSession";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
   const mode = resolveAuthMode();
   const status = sessionStatus(req);
   const env = process.env;

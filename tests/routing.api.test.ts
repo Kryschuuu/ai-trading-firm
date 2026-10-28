@@ -191,7 +191,7 @@ test("API: PUT /api/routing/modes ist ohne Admin-Token verboten (403)", async ()
   assert.equal(router.effectiveMode("RESEARCH"), "automatic", "keine Änderung ohne Admin");
 });
 
-test("API: PUT /api/routing/modes verlangt CSRF (403 CSRF_INVALID)", async () => {
+test("API: PUT /api/routing/modes mit verifiziertem Admin-Header ist CSRF-exempt", async () => {
   process.env.FIRM_ADMIN_TOKEN = VALID_ADMIN;
   const res = await PUT_MODES(
     new Request("http://localhost/api/routing/modes", {
@@ -200,8 +200,8 @@ test("API: PUT /api/routing/modes verlangt CSRF (403 CSRF_INVALID)", async () =>
       headers: { "content-type": "application/json", "x-admin-token": VALID_ADMIN },
     })
   );
-  assert.equal(res.status, 403);
-  assert.equal((await json(res)).error, "CSRF_INVALID");
+  assert.equal(res.status, 200);
+  assert.notEqual((await json(res)).error, "CSRF_INVALID");
 });
 
 test("API: PUT /api/routing/modes ändert mit Admin+CSRF und auditiert", async () => {

@@ -1,6 +1,6 @@
 # Pipeline-Architektur & Ausführungskarte (v0.1.0 · Legacy-Zählung v1.41.0 — Zuordnung: CHANGELOG.md)
 
-> **Dokumenten-Status:** Master-Architekturkarte · **Bestandsdokument** · **Stand:** 2026-10-09 · **Code-Version:** v0.17.2 (Beta) · Symbol-/Pfadabgleich gegen `src/` + `scripts/` erledigt — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) (2026-10-09) · Pflegeregeln: [§ 8](#8-pflege-dieser-karte)  
+> **Dokumenten-Status:** Master-Architekturkarte · **Bestandsdokument** · **Stand:** 2026-10-09 · **Code-Version:** v0.17.3 (Beta) · Symbol-/Pfadabgleich gegen `src/` + `scripts/` erledigt — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) (2026-10-09) · Pflegeregeln: [§ 8](#8-pflege-dieser-karte)
 > **Verbindliche Referenz:** `docs/architecture/PIPELINE_MAP.md`
 
 ---
@@ -9,15 +9,15 @@
 
 Die Handelsarchitektur folgt fünf nicht verhandelbaren Kernprinzipien:
 
-1. **LLM = Interpretation · Mathematik = Berechnung · Risk Engine = Autorität · Sicherheit im Code**  
+1. **LLM = Interpretation · Mathematik = Berechnung · Risk Engine = Autorität · Sicherheit im Code**
    Sprachmodelle berechnen niemals numerische Werte (Preise, Notional, Positionsgrößen, VaR, Gewichte). Sie liefern ausschließlich strukturierte Lageeinschätzungen, die deterministisch validiert und numerisch berechnet werden.
-2. **Kausale Entkopplung (Makro vs. Mikro)**  
+2. **Kausale Entkopplung (Makro vs. Mikro)**
    Strategische Intelligenz (LLM) und Ausführungsgeschwindigkeit (reines Skript) sind entkoppelt. Das LLM entscheidet langsam im Hintergrund (Makro-Zyklus: stündlich/täglich), der Micro-Executor handelt sofort pro Preis-Tick ohne LLM-Aufruf im Millisekundenbereich.
-3. **Fail-Closed-Invariante**  
+3. **Fail-Closed-Invariante**
    Fehlende, anomale oder unsichere Daten führen **immer** zu „kein Trade“ (`HOLD` / `REJECTED`), niemals zu Default-Trades oder weichen Annahmen.
-4. **Deterministischer Scanner ohne Netzwerk-I/O**  
+4. **Deterministischer Scanner ohne Netzwerk-I/O**
    `src/scanner/` führt keinerlei Netzwerk- oder Datenbank-I/O aus. Alle Marktdaten werden vorab über den `MarketDataSyncService` synchronisiert und als lokale Datensätze bereitgestellt.
-5. **Defense in Depth & Single State Registry**  
+5. **Defense in Depth & Single State Registry**
    Cross-Cutting-Singletons sind ausschließlich in `src/lib/stateRegistry.ts` typisiert registriert. Administrative Operationen und Order-Ausführungen sind durch RBAC (`requirePermission`), CSRF-Guards, Nonce-Challenges und den Live-Gate-Enforcer gesichert.
 
 ---

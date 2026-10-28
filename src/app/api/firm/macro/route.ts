@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `POST /api/firm/macro` — Makro-Zyklus: Status abrufen / starten.
  *
@@ -20,15 +22,20 @@ export const maxDuration = 300;
  *        MACRO_CYCLE_INTERVAL_MIN-Takt).
  * GET  → Status (busy, letzter Lauf, letztes Ergebnis).
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
   return NextResponse.json({ ok: true, ...macroCycleStatus() });
+
+  })());
 }
 
 export async function POST(req: Request) {
   // SEC-06: Der Zyklus kann Regeln aktivieren. Der manuelle Einstieg darf
   // die Rule-Governance nicht umgehen — unabhängig vom aktuellen Human-Flag.
   // Der interne Scheduler behält seine serverseitige Approval-Policy.
-  const denied = requirePermission(req, "strategy.rules.activate") ?? checkRateLimit(req);
+  const denied = guardMutation(req, "strategy.rules.activate");
   if (denied) return denied;
   try {
     const body = (await req.json().catch(() => ({}))) as { missionId?: string };

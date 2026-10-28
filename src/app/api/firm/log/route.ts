@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET /api/firm/log` — Agenten-Protokoll/Log (Lese-API).
  *
@@ -34,7 +35,8 @@ export const dynamic = "force-dynamic";
  *   ?limit=20&page=2&level=WARN&event=ORDER_REJECTED
  *   `offset` wird ebenfalls akzeptiert (hat Vorrang vor `page`).
  */
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   // SEC-02: raw agent messages and audit details are strategy-sensitive.
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
@@ -149,4 +151,6 @@ export async function GET(req: Request) {
     meta,
     agents: agentRows,
   }, { headers: { "Cache-Control": "private, no-store" } });
+
+  })());
 }

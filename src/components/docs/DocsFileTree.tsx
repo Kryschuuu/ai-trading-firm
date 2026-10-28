@@ -11,6 +11,7 @@
  */
 
 import Link from "next/link";
+import { apiFetch } from "@/lib/apiClient";
 import { useMemo, useState } from "react";
 
 import { ChevronIcon, FileIcon, SearchIcon } from "./DocsIcons";
@@ -134,7 +135,7 @@ export default function DocsFileTree() {
   const loadTree = () => {
     if (tree !== null || loading) return;
     setLoading(true);
-    fetch("/api/docs?tree=1")
+    apiFetch("/api/docs?tree=1")
       .then((r) => r.json())
       .then((d: { tree?: TreeNode[] }) => setTree(d.tree ?? []))
       .catch(() => setTree([]))

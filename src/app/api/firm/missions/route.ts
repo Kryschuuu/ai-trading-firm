@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * API-Route `GET`, `POST`, `PUT /api/firm/missions` — Missionen (Lese- + Schreib-API).
  *
@@ -48,7 +50,11 @@ export const dynamic = "force-dynamic";
  *   * `templates`  — wiederverwendbare Vorlagen (14 davon werden geseedet).
  * Damit zeigt die UI nie eine Auswahl, die der Server nicht kennt.
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const rows = await db.select().from(missions).orderBy(desc(missions.createdAt));
     // Kandidatenzahl je Segment — rein informativ, darf den GET nie reißen.
@@ -82,6 +88,8 @@ export async function GET() {
       { status: 503 }
     );
   }
+
+  })());
 }
 
 function parseBody(raw: unknown): { id?: string; payload?: Record<string, unknown> } {

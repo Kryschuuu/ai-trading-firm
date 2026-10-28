@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 /**
  * Forecast-Score-Bericht (RMA-P3-01, v1.55.0).
  *
@@ -38,7 +40,8 @@ function badRequest(error: string, message: string): Response {
   return NextResponse.json({ ok: false, error, message }, { status: 400, headers: NO_STORE });
 }
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -120,10 +123,12 @@ export async function GET(req: Request) {
       {
         ok: false,
         error: code,
-        message: e instanceof Error ? e.message : String(e),
+        message: publicErrorMessage(e),
         hint: "Datenbank/`DATABASE_URL` prüfen (`psql \"$DATABASE_URL\" -f drizzle/2026-09-20_forecast_ledger.sql`).",
       },
       { status: 503, headers: NO_STORE }
     );
   }
+
+  })());
 }

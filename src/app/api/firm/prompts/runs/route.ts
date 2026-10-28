@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 /**
  * GET /api/firm/prompts/runs — Agent-Prompt-Lauf-Provenanz (RMA-P3-02, v1.65.0)
  *
@@ -20,7 +22,8 @@ import { PROMPT_PERF_LIMITS } from "@/promptPerformance/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -107,7 +110,7 @@ export async function GET(req: Request) {
     if (res.truncated) out.headers.set("X-Truncated", "1");
     return out;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = publicErrorMessage(e);
     if (msg.includes("DB") || msg.includes("does not exist") || msg.includes("relation")) {
       telemetry.prompt.queries.inc({ result: "unavailable" });
       return NextResponse.json({ ok: false as const, code: "PROMPT_LEDGER_UNAVAILABLE", error: msg.slice(0, 200) }, { status: 503 });
@@ -115,4 +118,6 @@ export async function GET(req: Request) {
     telemetry.prompt.queries.inc({ result: "error" });
     return NextResponse.json({ ok: false as const, error: msg.slice(0, 240) }, { status: 500 });
   }
+
+  })());
 }

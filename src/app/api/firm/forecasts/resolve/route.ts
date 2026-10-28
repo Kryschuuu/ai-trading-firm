@@ -1,3 +1,5 @@
+import { publicErrorMessage } from "@/lib/secrets";
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * Forecast-Resolver — manueller Lauf (RMA-P3-01, v1.55.0).
  *
@@ -21,7 +23,7 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "private, no-store" } as const;
 
 export async function POST(req: Request) {
-  const denied = requirePermission(req, "firm.write");
+  const denied = guardMutation(req, "firm.write");
   if (denied) return denied;
 
   let body: unknown = {};
@@ -89,7 +91,7 @@ export async function POST(req: Request) {
       {
         ok: false,
         error: code,
-        message: e instanceof Error ? e.message : String(e),
+        message: publicErrorMessage(e),
         hint: "Datenbank/`DATABASE_URL` und Kerzen-Store prüfen; der Scheduler wiederholt den Lauf automatisch.",
       },
       { status: 503, headers: NO_STORE }

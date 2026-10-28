@@ -21,8 +21,21 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-27** · Code-Version **0.17.2** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-28** · Code-Version **0.17.3** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.3] — API-RBAC, Session-CSRF & Fehlerredaktion (2026-10-28)
+
+### Security
+
+- **ASA-05 — Route-weites API-RBAC:** Alle API-Handler außerhalb der ausdrücklich öffentlichen Auth-/Health-/Docs-Allowlist erfordern Authentisierung und geeignete RBAC-Permissions. Geschützte GETs erhalten `Cache-Control: private, no-store`; die sieben zuvor unbenutzten Fach-Permissions sind in ihren Routen verdrahtet. `firm.config` ist Admin-only; Operatoren dürfen `broker.test` zur Venue-Prüfung verwenden.
+- **ASA-07 — Mutation-Guards:** `guardWrite` und der neue `guardMutation` erzwingen Auth → session-/local-open-CSRF → Write-Rate-Limit. Auth-Header-Clients bleiben CSRF-frei. `POST /api/auth/logout` ist CSRF- und rate-limited; `POST /api/auth/refresh` behält die sessiongebundene Prüfung im Renewal-Service. Alle Browseraufrufe auf `/api/**` verwenden `apiFetch`.
+- **Error-Redaction:** Ungefilterte interne Fehlermeldungen in 5xx-Antworten wurden durch `publicErrorMessage` ersetzt; beabsichtigte 4xx-Validierungsfehler bleiben erhalten.
+- **Regressionen:** Route-weite Permission-/Guard-Prüfung, anonyme Read-Stichproben, Operator-403 für Firm-Konfiguration und Session-CSRF-403-Tests in `tests/asa05.apiGuardsAndCsrf.test.ts`; bestehende SEC-02-/Logout-/Portfolio-Tests an die strengeren Guards angepasst.
+
+### Changed
+
+- **Version:** Patch-Bump `0.17.2` → `0.17.3`; die Code-Version in aktiven Fach-Dokumentationsheadern ist mit `npm run docs:bump-version` synchronisiert.
 
 ## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-08)
 

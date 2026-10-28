@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET /api/firm/report` — Firmen-Report (Lese-API).
  *
@@ -33,7 +34,8 @@ type SymbolStat = {
  * Entscheidungs-/Blockstatistik, SL/TP-/Kill-/Config-Ereignisse, laufende
  * Empfehlungen des Hauses und eine regelbasierte Boss-Zusammenfassung.
  */
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   // SEC-02: performance, drawdown and recommendations require an authenticated reader.
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
@@ -296,4 +298,6 @@ export async function GET(req: Request) {
     recommendations,
     summary: bullets,
   }, { headers: { "Cache-Control": "private, no-store" } });
+
+  })());
 }

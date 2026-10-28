@@ -1,3 +1,5 @@
+import { requirePermission } from "@/auth";
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `POST /api/firm/risk/signal-decay` — Signal-Decay-Exits (Status/Policy).
  *
@@ -39,7 +41,10 @@ export const dynamic = "force-dynamic";
  * Rollback: `SIGNAL_DECAY_MODE=off` (keine Writes, keine Exits) oder die
  * Klassen-Flags auf false. Die Tabelle bleibt append-only.
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
   try {
     const config = await loadRuntimeSignalDecayConfig();
     const rollup = await readSignalDecayRollup().catch(() => null);
@@ -67,6 +72,8 @@ export async function GET() {
   } catch (e) {
     return NextResponse.json({ ok: false, error: publicErrorMessage(e) }, { status: 500 });
   }
+
+  })());
 }
 
 export async function POST(req: Request) {

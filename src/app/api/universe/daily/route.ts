@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/universe/daily` — Trichter-Ebenen des Tagesscans (read-only).
  *
@@ -105,7 +107,11 @@ function serialize(score: InstrumentScore, rank: number, breakdown: boolean) {
 }
 
 /** Handler für `GET /api/universe/daily`. */
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   let query: ReturnType<typeof parseDailyQuery>;
   try {
     query = parseDailyQuery(new URL(req.url));
@@ -156,4 +162,6 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 },
     );
   }
+
+  })());
 }

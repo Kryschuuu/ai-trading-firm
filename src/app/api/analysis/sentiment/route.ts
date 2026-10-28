@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/analysis/sentiment` — Strukturierte Sentiment-Forecasts (RMA-P2-05, v1.64.0).
  *
@@ -37,7 +39,11 @@ const NO_STORE_HEADERS = {
   Pragma: "no-cache",
 };
 
-export async function GET(request: Request): Promise<NextResponse> {
+export async function GET(request: Request): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(request, "firm.read");
+  if (denied) return denied;
+
   try {
     const url = new URL(request.url);
     const entityId = url.searchParams.get("entityId") ?? undefined;
@@ -136,4 +142,6 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 500, headers: NO_STORE_HEADERS }
     );
   }
+
+  })());
 }

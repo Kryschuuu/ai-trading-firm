@@ -1,3 +1,4 @@
+import { guardMutation } from "@/lib/apiAuth";
 /**
  * API-Route `POST /api/firm/rules/[id]` — Strategie-Regel (Lifecycle-Aktionen je RBAC-Rolle).
  *
@@ -38,7 +39,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const denied = requirePermission(req, "strategy.rules.write") ?? checkRateLimit(req);
+  const denied = guardMutation(req, "strategy.rules.write");
   if (denied) return denied;
   try {
     const parsed: unknown = await req.json().catch(() => null);

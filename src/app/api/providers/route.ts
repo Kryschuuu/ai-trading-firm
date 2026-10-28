@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * `GET /api/providers` — Provider-Karten für das Operations Center (Task 09/10).
  *
@@ -32,7 +33,8 @@ import { MODEL_CLASSES, PROVIDER_IDS, type ProviderId } from "@/routing/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
   // SEC-02: authorize before an optional refresh can contact a provider.
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
@@ -116,4 +118,6 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }

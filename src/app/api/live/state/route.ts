@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/live/state` — Zustand der Live-Trading-State-Machine (Task 11).
  *
@@ -10,22 +12,32 @@
  */
 import { getLiveGateService } from "@/live-gate";
 import { readAuthoritativeKillSwitch } from "@/lib/killSwitchDb";
+import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     await readAuthoritativeKillSwitch();
     const service = getLiveGateService();
-    return Response.json(service.overview(), { status: 200 });
+    return Response.json(service.overview(), {
+      status: 200,
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (err) {
     return Response.json(
       {
         ok: false,
         error: "LIVE_GATE_UNAVAILABLE",
-        message: `Live-Gate-Zustand nicht lesbar: ${(err as Error).message}`,
+        message: publicErrorMessage(err, "Live-Gate-Zustand nicht lesbar"),
       },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "private, no-store" } }
     );
   }
+
+  })());
 }

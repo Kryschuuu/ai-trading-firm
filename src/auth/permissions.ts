@@ -9,6 +9,8 @@
 import { adminTokenConfigured } from "./authMode";
 import type { Actor, Permission, Role } from "./types";
 
+export { ALL_PERMISSIONS } from "./types";
+
 const VIEWER_PERMISSIONS: readonly Permission[] = [
   "firm.read",
   "ops.view",
@@ -20,7 +22,6 @@ const OPERATOR_PERMISSIONS: readonly Permission[] = [
   ...VIEWER_PERMISSIONS,
   "firm.write",
   "firm.kill",
-  "firm.config",
   "broker.test",
   // SEC-06: Drafts anlegen/versionieren, pausieren und Drafts ablehnen.
   "strategy.rules.write",
@@ -32,6 +33,7 @@ const ADMIN_PERMISSIONS: readonly Permission[] = [
   "strategy.rules.activate",
   "strategy.rules.rollback",
   "strategy.rules.archive",
+  "firm.config",
   "broker.credentials",
   "routing.modes.write",
   // Task 11: Live-Gate-Bedienung NUR für Admin — Human-Gate bleibt

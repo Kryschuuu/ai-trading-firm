@@ -484,7 +484,7 @@ test("ASA-01 (1a): Prozess A armiert via POST /api/firm/kill → Prozess B (fris
   // Prozess A: Operator zieht den Not-Halt über den echten Route-Handler.
   const killReq = new Request("http://localhost:3369/api/firm/kill", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-csrf-token": "local" },
     body: JSON.stringify({
       arm: true,
       flatten: false,

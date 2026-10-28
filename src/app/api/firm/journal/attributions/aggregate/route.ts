@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 /**
  * Trade-PnL-Attribution — dimensionale Aggregation (RMA-P1-06, v1.57.0).
  *
@@ -43,7 +45,8 @@ function parseIso(value: string | null, field: string): { ok: true; date?: Date 
   return { ok: true, date: new Date(ms) };
 }
 
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -110,10 +113,12 @@ export async function GET(req: Request) {
       {
         ok: false,
         error: "ATTRIBUTION_UNAVAILABLE",
-        message: e instanceof Error ? e.message : String(e),
+        message: publicErrorMessage(e),
         hint: "PostgreSQL prüfen oder Migration drizzle/2026-09-21_trade_attribution.sql anwenden.",
       },
       { status: 503, headers: NO_STORE }
     );
   }
+
+  })());
 }

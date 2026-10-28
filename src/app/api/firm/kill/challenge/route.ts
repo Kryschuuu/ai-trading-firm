@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * `GET /api/firm/kill/challenge` — Disarm-Challenge (Befund C3, v1.36.15).
  *
@@ -18,10 +19,13 @@ import { issueDisarmNonce } from "@/lib/disarmChallenge";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "live.gate") ?? checkCsrfGuard(req);
   if (denied) return denied;
 
   const { nonce, expiresAt } = issueDisarmNonce();
   return Response.json({ ok: true, nonce, expiresAt });
+
+  })());
 }

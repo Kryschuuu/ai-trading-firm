@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 /**
  * API-Route `GET /api/firm/montecarlo/[id]` — Monte-Carlo-Analyse (Lese-API, Detail).
  *
@@ -32,6 +34,7 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
 
@@ -64,10 +67,12 @@ export async function GET(
       {
         ok: false,
         error: "MONTE_CARLO_UNAVAILABLE",
-        message: e instanceof Error ? e.message : String(e),
+        message: publicErrorMessage(e),
         hint: "PostgreSQL prüfen oder Migration drizzle/2026-09-23_monte_carlo.sql ausführen.",
       },
       { status: 503 }
     );
   }
+
+  })());
 }

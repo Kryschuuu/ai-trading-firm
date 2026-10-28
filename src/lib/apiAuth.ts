@@ -2,9 +2,9 @@
  * API-Token-Prüfung und Schreib-Rate-Limit für mutierende Endpunkte.
  *
  * Modell (C1, v1.36.13 — Offen-Betrieb ist explizit, nie implizit in Produktion):
- *   - FIRM_API_TOKEN gesetzt    → POST/PUT-Routen verlangen Header `x-firm-token`.
- *     Dieser Schreib-Guard autorisiert GET nicht: sensitive Dashboard-Reads
- *     verlangen separat `requirePermission(req, "firm.read")` (SEC-02).
+ *   - FIRM_API_TOKEN gesetzt    → Writes verlangen ein gültiges `x-firm-token`
+ *     oder eine verifizierte Session mit `firm.write`. GETs werden unabhängig
+ *     davon über `requirePermission(req, "firm.read")`/fachliche Reads geschützt.
  *   - kein FIRM_API_TOKEN, aber RBAC aktiv ⇒ RBAC entscheidet: ein Actor mit
  *     Permission `firm.write` (Admin-/Operator-Credential) darf schreiben,
  *     ein Viewer nicht. Vorher waren diese Routen offen (Befund C1).
@@ -34,7 +34,9 @@
  * konfigurierten UND per Socket-Adresse verifizierten Peer, sonst die
  * Socket-Remote-Adresse, sonst die Prozess-Konstante `local`.
  */
-import { anyTokenConfigured, resolveAuth } from "@/auth/resolve";
+import { anyTokenConfigured, requirePermission, resolveAuth } from "@/auth/resolve";
+import { checkCsrfGuard } from "@/lib/csrfGuard";
+import type { Permission } from "@/auth/types";
 import { resolveAuthMode } from "@/auth/authMode";
 import { tokenEquals } from "@/lib/tokenCompare";
 import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
@@ -170,7 +172,30 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
   return null;
 }
 
-/** Token-Check + Rate-Limit für POST/PUT. Reihenfolge: Auth zuerst, dann Quota. */
+/** Auth → CSRF → Rate-Limit für mutierende Handler mit firm.write. */
 export function guardWrite(req: Request): Response | null {
-  return checkApiToken(req) ?? checkRateLimit(req);
+  return checkApiToken(req) ?? checkCsrfGuard(req) ?? checkRateLimit(req);
+}
+
+/** Gemeinsamer Guard für mutierende Routen mit fachlicher RBAC-Permission. */
+export function privateNoStore(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "private, no-store");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+export function guardMutation(
+  req: Request,
+  permission: Permission,
+  options: RateLimitOptions = {},
+): Response | null {
+  return (
+    requirePermission(req, permission) ??
+    checkCsrfGuard(req) ??
+    checkRateLimit(req, options)
+  );
 }

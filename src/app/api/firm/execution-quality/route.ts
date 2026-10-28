@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET /api/firm/execution-quality` — Venueübergreifendes Execution-Benchmarking (bounded, Lese-API).
  *
@@ -11,7 +12,8 @@ import { ExecutionQualityStore, reportRange } from "@/executionQuality/store";
 export const dynamic = "force-dynamic";
 /** Authenticated, read-only, bounded [from,to) UTC epoch-ms report. No IDs or
  * provider payloads are returned. See src/executionQuality/README.md. */
-export async function GET(req: Request) {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "firm.read");
   if (denied) return denied;
   const headers = { "Cache-Control": "private, no-store" };
@@ -25,4 +27,6 @@ export async function GET(req: Request) {
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof QualityError ? error.code : "EXECUTION_QUALITY_UNAVAILABLE" }, { status: error instanceof QualityError ? 422 : 503, headers });
   }
+
+  })());
 }

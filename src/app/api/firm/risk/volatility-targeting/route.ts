@@ -1,3 +1,5 @@
+import { requirePermission } from "@/auth";
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * API-Route `GET`, `POST /api/firm/risk/volatility-targeting` — Portfolio-Volatility-Targeting (Status/forzierte Neubewertung).
  *
@@ -39,7 +41,10 @@ export const dynamic = "force-dynamic";
  * Dauerhafte Historie: Tabelle `volatility_targeting_snapshots`
  * (append-only, idempotent) + Audit-Log-Events `RISK_VOL_TARGETING`.
  */
-export async function GET() {
+export async function GET(req: Request = new Request("http://localhost/api")) {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
   const status = getVolatilityTargetingStatus();
   return NextResponse.json({
     ok: true,
@@ -49,6 +54,8 @@ export async function GET() {
         ? "Noch keine Bewertung erfolgt — der Monitor-Tick (5 min) oder ein POST hier starten sie."
         : "POST mit {force:true} erzwingt eine sofortige Neubewertung.",
   });
+
+  })());
 }
 
 /**

@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/marketdata/perpetual/status` (RMA-P2-02, v1.54.0) — read-only.
  *
@@ -34,7 +36,11 @@ import { getPerpDataService } from "@/perpdata/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   try {
     const status = await getPerpDataService().status();
     return Response.json({ ok: true, status }, { headers: { "Cache-Control": "private, no-store" } });
@@ -49,4 +55,6 @@ export async function GET(): Promise<Response> {
       { status: 500, headers: { "Cache-Control": "private, no-store" } }
     );
   }
+
+  })());
 }

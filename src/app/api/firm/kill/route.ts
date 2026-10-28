@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { killSwitch } from "@/lib/riskGuard";
 import { notifyFirmControlChanged } from "@/lib/killSwitchDb";
 import { flattenAll, invalidateBrokerCache, logAudit, type FlattenOutcome } from "@/lib/engine";
-import { guardWrite } from "@/lib/apiAuth";
+import { guardMutation, checkRateLimit } from "@/lib/apiAuth";
 import { actorAuditId, requirePermission } from "@/auth";
 import { checkCsrfGuard } from "@/brokers/control-plane/guard";
 import { consumeDisarmNonce } from "@/lib/disarmChallenge";
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
 
   if (arm) {
     // Arm: unverändert Operator-tauglich (guardWrite).
-    const denied = guardWrite(req);
+    const denied = guardMutation(req, "firm.kill");
     if (denied) return denied;
     const reason = body.reason ?? "MANUAL_OPERATOR";
 
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
   }
 
   // ── Disarm (C3): ADMIN + CSRF + Nonce ───────────────────────────────────
-  const denied = requirePermission(req, "live.gate") ?? checkCsrfGuard(req);
+  const denied = requirePermission(req, "live.gate") ?? checkCsrfGuard(req) ?? checkRateLimit(req);
   if (denied) return denied;
 
   const nonce = typeof body.nonce === "string" ? body.nonce.trim() : "";

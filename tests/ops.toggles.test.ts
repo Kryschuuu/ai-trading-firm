@@ -89,14 +89,14 @@ test("PUT ohne Admin ist verboten (403) — Schalter bleibt unverändert", async
   assert.equal(isProviderEnabled("opencode"), true);
 });
 
-test("PUT verlangt CSRF (403 CSRF_INVALID)", async () => {
+test("PUT mit verifiziertem Admin-Header ist CSRF-exempt", async () => {
   process.env.FIRM_ADMIN_TOKEN = VALID_ADMIN;
   const res = await put(
     { key: "provider.opencode.enabled", value: false },
     { "x-admin-token": VALID_ADMIN }
   );
-  assert.equal(res.status, 403);
-  assert.equal((await json(res)).error, "CSRF_INVALID");
+  assert.equal(res.status, 200);
+  assert.notEqual((await json(res)).error, "CSRF_INVALID");
 });
 
 test("PUT mit unbekanntem Schlüssel wird abgewiesen (422, Allowlist)", async () => {

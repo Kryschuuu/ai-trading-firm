@@ -105,7 +105,7 @@ export default function MissionsPanel({
     let alive = true;
     (async () => {
       try {
-        const res = await fetch("/api/firm/missions");
+        const res = await apiFetch("/api/firm/missions");
         const json = (await res.json()) as MissionsIndexResponse;
         if (!alive || !res.ok) return;
         if (Array.isArray(json.symbols) && json.symbols.length > 0) setSymbols(json.symbols);

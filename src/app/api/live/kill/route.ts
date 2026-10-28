@@ -1,3 +1,4 @@
+import { privateNoStore } from "@/lib/apiAuth";
 /**
  * `GET|POST /api/live/kill` — KILL-SWITCH der Live-Gate-Machine (Task 11, ASA-02).
  *
@@ -25,6 +26,8 @@ import { checkCredentialRateLimit, checkCsrfGuard } from "@/brokers/control-plan
 import { getLiveGateService } from "@/live-gate";
 import { LiveGateError, liveGateErrorStatus } from "@/live-gate";
 import { consumeKillNonce, issueKillNonce } from "@/lib/killSwitchNonce";
+import { checkRateLimit } from "@/lib/apiAuth";
+import { publicErrorMessage } from "@/lib/secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +85,8 @@ function auditActor(req: Request): string {
  * `GET /api/live/kill` — kurzlebige Clear-Challenge (ASA-02).
  * Nur ein Admin darf sie anfordern; Ausgabe enthält nie ein Credential.
  */
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
   const denied = requirePermission(req, "live.gate") ?? checkCsrfGuard(req);
   if (denied) return denied;
   const { nonce, expiresAt } = issueKillNonce();
@@ -95,6 +99,8 @@ export async function GET(req: Request): Promise<Response> {
     },
     { headers: NO_STORE }
   );
+
+  })());
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -119,7 +125,7 @@ export async function POST(req: Request): Promise<Response> {
   const denied =
     action === "clear"
       ? requirePermission(req, "live.gate") ?? checkCsrfGuard(req) ?? checkCredentialRateLimit(req)
-      : requirePermission(req, "firm.kill") ?? checkCsrfGuard(req);
+      : requirePermission(req, "firm.kill") ?? checkCsrfGuard(req) ?? checkRateLimit(req);
   if (denied) return denied;
 
   try {
@@ -158,16 +164,17 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json(result, { status: 200, headers: NO_STORE });
   } catch (err) {
     if (err instanceof LiveGateError) {
+      const status = liveGateErrorStatus(err.code);
       return Response.json(
-        { ok: false, error: err.code, message: err.message },
-        { status: liveGateErrorStatus(err.code), headers: NO_STORE }
+        { ok: false, error: err.code, message: status >= 500 ? publicErrorMessage(err) : err.message },
+        { status, headers: NO_STORE }
       );
     }
     return Response.json(
       {
         ok: false,
         error: "LIVE_GATE_KILL_FAILED",
-        message: `Kill-Switch-Aktion fehlgeschlagen: ${(err as Error).message}`,
+        message: publicErrorMessage(err, "Kill-Switch-Aktion fehlgeschlagen"),
       },
       { status: 500, headers: NO_STORE }
     );

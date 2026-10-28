@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/apiClient";
 "use client";
 
 /**
@@ -50,7 +51,7 @@ export function AuditTrailPanel({
     if (level) params.set("level", level);
     if (event) params.set("event", event);
     try {
-      const res = await fetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
+      const res = await apiFetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
       const json = (await res.json()) as {
         audit?: AuditEntryDto[];
         meta?: { auditTotal?: number };

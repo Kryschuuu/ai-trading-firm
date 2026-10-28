@@ -462,7 +462,7 @@ test("S1 Agents-Route: Prompt-Update trotz Audit-Totalverlust — gespeichert, a
   const res = await PUT(
     new Request("http://localhost:3369/api/firm/agents", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-csrf-token": "local" },
       // W2 (v1.36.24): Optimistic-Lock — expectedVersion ist Pflicht (Fake-Row startet bei 1).
       body: JSON.stringify({ agentId: AGENT_ID, systemPrompt: "neuer Prompt — handle nur nach Mandat", expectedVersion: 1 }),
     })
@@ -501,7 +501,7 @@ test("S1 Agents-Route: Spool-Reserve → Response meldet Nachzug (degraded, nich
   const res = await PUT(
     new Request("http://localhost:3369/api/firm/agents", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-csrf-token": "local" },
       body: JSON.stringify({
         agentId: AGENT_ID,
         systemPrompt: "neuer Prompt — nur Long bei Aufwärtstrend, Stop-Loss 5 %, sonst HOLD.",
@@ -568,7 +568,7 @@ test("S1 Kill-Route: Arm wird durch einen Auditfehler NICHT blockiert (sichere R
     const res = await POST(
       new Request("http://localhost:3369/api/firm/kill", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-csrf-token": "local" },
         body: JSON.stringify({ arm: true, reason: "S1-test-arm" }),
       })
     );

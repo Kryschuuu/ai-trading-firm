@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/apiClient";
 "use client";
 
 /**
@@ -42,7 +43,7 @@ export function ProtocolPanel({
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(pageSize), page: String(page) });
     try {
-      const res = await fetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
+      const res = await apiFetch(`/api/firm/log?${params.toString()}`, { cache: "no-store" });
       const json = (await res.json()) as { entries?: ProtocolEntryDto[]; meta?: { entryTotal?: number } };
       if (!alive.current) return;
       const next = Array.isArray(json.entries) ? json.entries : [];

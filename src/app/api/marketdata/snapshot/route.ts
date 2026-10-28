@@ -1,3 +1,5 @@
+import { privateNoStore } from "@/lib/apiAuth";
+import { requirePermission } from "@/auth";
 /**
  * `GET /api/marketdata/snapshot?instrument=…` (Task 03) — read-only.
  *
@@ -28,7 +30,11 @@ import { getProductionMarketDataManager } from "@/lib/marketdata/production";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request): Promise<Response> {
+export async function GET(req: Request = new Request("http://localhost/api")): Promise<Response> {
+  return privateNoStore(await (async () => {
+  const denied = requirePermission(req, "firm.read");
+  if (denied) return denied;
+
   const instrument = new URL(req.url).searchParams.get("instrument") ?? "";
   if (!instrument.trim()) {
     return Response.json(
@@ -49,8 +55,8 @@ export async function GET(req: Request): Promise<Response> {
     if (e instanceof MarketDataError) {
       const status = e.code === "UNKNOWN_INSTRUMENT" ? 400 : 502;
       return Response.json(
-        { ok: false, error: e.code, message: e.message },
-        { status }
+        { ok: false, error: e.code, message: status >= 500 ? publicErrorMessage(e) : e.message },
+        { status, headers: { "Cache-Control": "private, no-store" } }
       );
     }
     return Response.json(
@@ -58,4 +64,6 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 }
     );
   }
+
+  })());
 }
