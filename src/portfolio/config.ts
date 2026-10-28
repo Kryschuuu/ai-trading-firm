@@ -138,6 +138,31 @@ export const PORTFOLIO_LIMITS: Readonly<{
   maxSymbolsPerAuditEvent: 25,
 };
 
+/**
+ * Rechenbudget der HTTP-API (ASA-06) — **bewusst enger** als die
+ * Bibliotheks-Grenzen.
+ *
+ * Die Bibliothek erlaubt `maxIterations` bis 1.000.000, weil Aufrufer im
+ * eigenen Prozess (Skripte, Backtests) die Laufzeit selbst verantworten. Ein
+ * anonymer HTTP-Request darf den Event-Loop des Next.js-Servers aber nicht
+ * Sekunden bis Minuten blockieren: `optimize` ist `O(k · n²)` je Iteration und
+ * die Risk Guard wiederholt die Optimierung bis zu `maxAdjustmentRounds`-mal.
+ *
+ * - `defaultMaxIterations = 400` (statt 2.000 der Bibliothek) — deckt die
+ *   gemessene Konvergenz aller Modi mit Reserve ab.
+ * - `maxIterations = 2.000` — höhere Werte werden mit HTTP 400 abgewiesen.
+ * - `maxAdjustmentRounds = 10` — höhere Werte werden mit HTTP 400 abgewiesen.
+ */
+export const PORTFOLIO_API_LIMITS: Readonly<{
+  defaultMaxIterations: number;
+  maxIterations: number;
+  maxAdjustmentRounds: number;
+}> = {
+  defaultMaxIterations: 400,
+  maxIterations: 2_000,
+  maxAdjustmentRounds: 10,
+};
+
 /** Anzahl Nachkommastellen der API-/Artefakt-Ausgaben (Byte-Stabilität). */
 export const OUTPUT_DECIMALS = 12;
 

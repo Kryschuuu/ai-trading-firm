@@ -3,7 +3,7 @@
 - **ID:** ASA-06
 - **Severity:** HIGH
 - **Bereich:** Performance & Integrität
-- **Status:** OPEN
+- **Status:** FIXED (2026-10-28)
 - **Datei(en):** `src/app/api/portfolio/optimize/route.ts:68-193`, `parse.ts` unter `src/app/api/portfolio/` (`110-165`), `src/portfolio/optimize.ts:288-347`, `src/app/api/live/state/route.ts:27-35`, `src/live-gate/service.ts:214-230`, `src/live-gate/audit.ts:169-216`, `scripts/gen-docs-inventories.ts:88-100`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md`](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md)
 
@@ -26,6 +26,51 @@ Zwei unabhängige Verfügbarkeits- und Integritätsprobleme:
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] `POST /api/portfolio/{optimize,correlation,metrics}` verlangen Authentifizierung + Rate-Limit und weisen `maxIterations > 2_000` mit `400` ab.
-- [ ] Zwei getrennte `LiveGateAudit`-Instanzen auf derselben Datei können abwechselnd `append()` aufrufen, und `verifyAuditChain()` bleibt durchgehend `{ ok: true }`.
-- [ ] `npm run docs:inventories:check` und `tests/asa06.portfolioLimitsAndAuditSync.test.ts` grün.
+- [x] `POST /api/portfolio/{optimize,correlation,metrics}` verlangen Authentifizierung + Rate-Limit und weisen `maxIterations > 2_000` mit `400` ab.
+- [x] Zwei getrennte `LiveGateAudit`-Instanzen auf derselben Datei können abwechselnd `append()` aufrufen, und `verifyAuditChain()` bleibt durchgehend `{ ok: true }`.
+- [x] `npm run docs:inventories:check` und `tests/asa06.portfolioLimitsAndAuditSync.test.ts` grün.
+
+## Behoben (2026-10-28)
+
+### 1. Portfolio-API: Auth, Rate-Limit und Rechenbudget
+
+- **Guards:** `POST /api/portfolio/correlation` und `POST /api/portfolio/metrics` laufen durch
+  `requirePermission(req, "firm.read") ?? checkCsrfGuard(req) ?? checkRateLimit(req)`
+  (reine Berechnung, `POST` nur wegen der Payload-Größe). `POST /api/portfolio/optimize`
+  verlangt `firm.write` — die Route persistiert bei aktivem `PORTFOLIO_AUDIT`/`PORTFOLIO_AUDIT_DIR`
+  Audit-Ereignisse auf Disk — und hat ein eigenes, strengeres Limit (10 Requests / 60 s).
+  `REVIEWED_UNGUARDED_WRITES` in `scripts/gen-docs-inventories.ts` enthält keine
+  Portfolio-Route mehr; das generierte Routen-Inventar zeigt jetzt
+  `requirePermission(firm.read|firm.write) + CSRF`.
+- **Parameter-Obergrenzen (`PORTFOLIO_API_LIMITS` in `src/portfolio/config.ts`):**
+  `solver.maxIterations` ≤ `2_000` (Default im HTTP-Pfad `400`, Bibliotheks-Default bleibt
+  `2_000`), `guard.maxAdjustmentRounds` ≤ `10` (API-Default = Grenze). Werte darüber werden
+  mit `HTTP 400` / `INVALID_INPUT` abgewiesen; `maxSeriesLength` (2.000 Punkte je Serie),
+  `maxSeries` (1.000) und `maxCovarianceSamples` (400.000) bleiben unverändert hart.
+- **Asynchrone Disk-I/O:** `fileAuditSink().write()` nutzt `node:fs/promises` (`mkdir`,
+  `appendFile`) statt `mkdirSync`/`appendFileSync`, serialisiert die Zeilen über eine
+  Promise-Kette (Reihenfolge bleibt Ereignis-Reihenfolge) und blockiert den Event-Loop nicht
+  mehr. `writeAuditSnapshot()` schreibt asynchron atomar (`writeFile` → `rename`, Temp-File
+  wird bei Fehler aufgeräumt).
+
+### 2. `LiveGateAudit`: prozessübergreifende Hash-Kette und O(1)-Verifikation
+
+- **Dateisperre:** `append()` nimmt eine Lock-Datei `<audit>.lock` über
+  `openSync(…, "wx")`, mit Retry-Spin (`Atomics.wait`), Stale-Erkennung anhand Lock-Alter
+  (`AUDIT_LOCK_STALE_MS = 10 s`) und PID-Lebendigkeit (`process.kill(pid, 0)`) sowie
+  best-effort-Weiterschreiben nach `AUDIT_LOCK_TIMEOUT_MS` (Audit darf nie verloren gehen).
+- **Kopf-Synchronisation:** Innerhalb der Sperre prüft `statSync` die aktuelle Dateigröße.
+  Ist die Datei gewachsen, werden **nur die neuen Bytes** ab dem letzten bekannten Offset
+  gelesen, ihre Verkettung geprüft und `this.head` (`seq`, `prevHash`) auf den Dateischwanz
+  gesetzt — erst danach wird die neue Zeile berechnet und per `writeSync` + `fsync`
+  geschrieben. Schrumpft die Datei (Rotation/Truncation), wird sie vollständig neu
+  verifiziert; eine halb geschriebene letzte Zeile wird abgeschnitten.
+- **Cache:** `verifyAuditChain()` cached das Ergebnis über `(size, mtimeMs, ctimeMs, ino)`
+  und liefert Kopien. `GET /api/live/state` kostet bei unveränderter Datei einen `stat()`
+  statt eines vollständigen Parses inklusive SHA-256 über jede Zeile.
+
+### Verifikation
+
+`npx tsx --test tests/asa06.portfolioLimitsAndAuditSync.test.ts tests/portfolio*.test.ts tests/liveGate*.test.ts`,
+`npm run typecheck`, `npm run lint`, `npm run docs:inventories && npm run docs:inventories:check`,
+`npm run docs:validate`, `npm test` (siehe PR).

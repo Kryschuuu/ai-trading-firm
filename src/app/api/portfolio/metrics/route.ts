@@ -1,5 +1,5 @@
-import { privateNoStore } from "@/lib/apiAuth";
-import { guardMutation } from "@/lib/apiAuth";
+import { checkRateLimit, privateNoStore } from "@/lib/apiAuth";
+import { checkCsrfGuard } from "@/lib/csrfGuard";
 import { requirePermission } from "@/auth";
 /**
  * `POST /api/portfolio/metrics` — Kennzahlen aus Renditezeitreihen (read-only).
@@ -51,9 +51,15 @@ export function GET(req: Request = new Request("http://localhost/api")): Respons
   })());
 }
 
-/** Handler für `POST /api/portfolio/metrics`. */
+/**
+ * Handler für `POST /api/portfolio/metrics`.
+ *
+ * **Guard (ASA-06):** `firm.read` (reine Berechnung, keine Persistenz) + CSRF
+ * + Write-Rate-Limit. `POST` ist hier nur Transport (Payload-Größe), deshalb
+ * genügt Leserecht — aber die CPU-Last (`O(T · n²)`) bleibt gedrosselt.
+ */
 export async function POST(req: Request): Promise<Response> {
-  const denied = guardMutation(req, "firm.write");
+  const denied = requirePermission(req, "firm.read") ?? checkCsrfGuard(req) ?? checkRateLimit(req);
   if (denied) return denied;
   try {
     const body = asObject(await readJsonBody(req));

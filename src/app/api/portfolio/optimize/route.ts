@@ -1,5 +1,5 @@
-import { privateNoStore } from "@/lib/apiAuth";
-import { guardMutation } from "@/lib/apiAuth";
+import { checkRateLimit, privateNoStore } from "@/lib/apiAuth";
+import { checkCsrfGuard } from "@/lib/csrfGuard";
 import { requirePermission } from "@/auth";
 /**
  * `POST /api/portfolio/optimize` — Gewichte **inklusive** Risk-Guard-Report.
@@ -36,7 +36,7 @@ import { requirePermission } from "@/auth";
 
 import { createAuditLogger, memoryAuditSink, compositeAuditSink, type AuditSink } from "@/portfolio/audit";
 import { fileAuditSink } from "@/portfolio/auditFile";
-import { PORTFOLIO_CONFIG_VERSION, isSingularMatrixPolicy } from "@/portfolio/config";
+import { PORTFOLIO_API_LIMITS, PORTFOLIO_CONFIG_VERSION, isSingularMatrixPolicy } from "@/portfolio/config";
 import { PortfolioError, requireFinite } from "@/portfolio/errors";
 import { optimizeWithGuard } from "@/portfolio/pipeline";
 import type { RiskGuardConfig } from "@/portfolio/types";
@@ -75,9 +75,20 @@ export function GET(req: Request = new Request("http://localhost/api")): Respons
   })());
 }
 
-/** Handler für `POST /api/portfolio/optimize`. */
+/**
+ * Handler für `POST /api/portfolio/optimize`.
+ *
+ * **Guard (ASA-06):** `firm.write` + CSRF + Rate-Limit. Die Route ist nicht
+ * rein rechnend — sie kann Audit-Ereignisse auf Disk persistieren
+ * (`PORTFOLIO_AUDIT_DIR`/`PORTFOLIO_AUDIT=1`) und ist der teuerste Endpunkt
+ * des Moduls; deshalb strengeres Limit (10 Requests / 60 s je Client) und
+ * Schreibrecht statt Leserecht.
+ */
 export async function POST(req: Request): Promise<Response> {
-  const denied = guardMutation(req, "firm.write");
+  const denied =
+    requirePermission(req, "firm.write") ??
+    checkCsrfGuard(req) ??
+    checkRateLimit(req, { max: 10, windowMs: 60_000 });
   if (denied) return denied;
   const { sink, fileEnabled } = buildAuditSinks();
   try {
@@ -117,11 +128,17 @@ export async function POST(req: Request): Promise<Response> {
         }),
         method: parseCorrelationMethod(correlationRaw?.method, "guard.correlation.method"),
       },
-      maxAdjustmentRounds: parseOptionalNumber(guardRaw?.maxAdjustmentRounds, "guard.maxAdjustmentRounds", {
-        min: 1,
-        max: 1000,
-        integer: true,
-      }),
+      // ASA-06: HTTP-Aufrufe dürfen höchstens PORTFOLIO_API_LIMITS.maxAdjustmentRounds
+      // Korrekturrunden anfordern (jede Runde rechnet die Optimierung erneut).
+      // Der API-Default ist identisch mit der Obergrenze — sonst wäre das
+      // Weglassen des Feldes (Bibliotheks-Default 50) mächtiger als das
+      // explizite Setzen eines erlaubten Wertes.
+      maxAdjustmentRounds:
+        parseOptionalNumber(guardRaw?.maxAdjustmentRounds, "guard.maxAdjustmentRounds", {
+          min: 1,
+          max: PORTFOLIO_API_LIMITS.maxAdjustmentRounds,
+          integer: true,
+        }) ?? PORTFOLIO_API_LIMITS.maxAdjustmentRounds,
       epsilon: parseOptionalNumber(guardRaw?.epsilon, "guard.epsilon", { min: 0, max: 1 }),
       allowCashResidual: guardRaw?.allowCashResidual === true,
     };
@@ -151,11 +168,15 @@ export async function POST(req: Request): Promise<Response> {
         solver: solverRaw
           ? {
               tolerance: parseOptionalNumber(solverRaw.tolerance, "solver.tolerance", { min: 1e-15, max: 1 }),
-              maxIterations: parseOptionalNumber(solverRaw.maxIterations, "solver.maxIterations", {
-                min: 1,
-                max: 1_000_000,
-                integer: true,
-              }),
+              // ASA-06: harte Obergrenze statt 1.000.000 — ein einzelner
+              // Request darf den Event-Loop nicht für Sekunden blockieren.
+              // Default bewusst 400 (Bibliotheks-Default bleibt 2.000).
+              maxIterations:
+                parseOptionalNumber(solverRaw.maxIterations, "solver.maxIterations", {
+                  min: 1,
+                  max: PORTFOLIO_API_LIMITS.maxIterations,
+                  integer: true,
+                }) ?? PORTFOLIO_API_LIMITS.defaultMaxIterations,
               singularMatrixPolicy: parseSingularMatrixPolicy(solverRaw.singularMatrixPolicy),
               ridgeFactor: parseOptionalNumber(solverRaw.ridgeFactor, "solver.ridgeFactor", { min: 0, max: 1 }),
               rcond: parseOptionalNumber(solverRaw.rcond, "solver.rcond", { min: 0, max: 1 }),

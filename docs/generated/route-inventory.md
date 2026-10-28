@@ -105,11 +105,11 @@ Insgesamt **87** Routen mit **108** HTTP-Handlern.
 | `/api/ops/toggles` | `GET` | requirePermission(ops.view) | [`src/app/api/ops/toggles/route.ts`](../../src/app/api/ops/toggles/route.ts) |
 | `/api/ops/toggles` | `PUT` | requirePermission(dynamisch) + CSRF | [`src/app/api/ops/toggles/route.ts`](../../src/app/api/ops/toggles/route.ts) |
 | `/api/portfolio/correlation` | `GET` | requirePermission(firm.read) | [`src/app/api/portfolio/correlation/route.ts`](../../src/app/api/portfolio/correlation/route.ts) |
-| `/api/portfolio/correlation` | `POST` | requirePermission(dynamisch) + CSRF | [`src/app/api/portfolio/correlation/route.ts`](../../src/app/api/portfolio/correlation/route.ts) |
+| `/api/portfolio/correlation` | `POST` | requirePermission(firm.read) + CSRF | [`src/app/api/portfolio/correlation/route.ts`](../../src/app/api/portfolio/correlation/route.ts) |
 | `/api/portfolio/metrics` | `GET` | requirePermission(firm.read) | [`src/app/api/portfolio/metrics/route.ts`](../../src/app/api/portfolio/metrics/route.ts) |
-| `/api/portfolio/metrics` | `POST` | requirePermission(dynamisch) + CSRF | [`src/app/api/portfolio/metrics/route.ts`](../../src/app/api/portfolio/metrics/route.ts) |
+| `/api/portfolio/metrics` | `POST` | requirePermission(firm.read) + CSRF | [`src/app/api/portfolio/metrics/route.ts`](../../src/app/api/portfolio/metrics/route.ts) |
 | `/api/portfolio/optimize` | `GET` | requirePermission(firm.read) | [`src/app/api/portfolio/optimize/route.ts`](../../src/app/api/portfolio/optimize/route.ts) |
-| `/api/portfolio/optimize` | `POST` | requirePermission(dynamisch) + CSRF | [`src/app/api/portfolio/optimize/route.ts`](../../src/app/api/portfolio/optimize/route.ts) |
+| `/api/portfolio/optimize` | `POST` | requirePermission(firm.write) + CSRF | [`src/app/api/portfolio/optimize/route.ts`](../../src/app/api/portfolio/optimize/route.ts) |
 | `/api/providers` | `GET` | requirePermission(firm.read) | [`src/app/api/providers/route.ts`](../../src/app/api/providers/route.ts) |
 | `/api/research/cross-sectional` | `GET` | requirePermission(firm.read) | [`src/app/api/research/cross-sectional/route.ts`](../../src/app/api/research/cross-sectional/route.ts) |
 | `/api/routing` | `GET` | requirePermission(firm.read) | [`src/app/api/routing/route.ts`](../../src/app/api/routing/route.ts) |

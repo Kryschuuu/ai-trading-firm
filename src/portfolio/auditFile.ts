@@ -14,7 +14,7 @@
  * Gewichte, Grenzen, Gründe). Niemals Roh-Requests, Header oder Credentials.
  */
 
-import { appendFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { appendFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { joinRuntimePath, resolveRuntimePath } from "../lib/appPaths";
@@ -89,12 +89,17 @@ export interface FileAuditSinkOptions {
 }
 
 /**
- * Append-only NDJSON-Senke.
+ * Append-only NDJSON-Senke — **asynchron** (`node:fs/promises`).
  *
- * Schreiben ist atomar pro Zeile (`appendFileSync`), das Verzeichnis wird
- * angelegt, die Dateirechte sind 0644. Fehler werden **nicht** verschluckt:
- * Sie landen als Warnung auf der Konsole, weil ein fehlendes Audit-Log
- * sichtbar sein muss.
+ * ASA-06: Vorher schrieb `write()` synchron per `mkdirSync`/`appendFileSync`
+ * mitten im Request-Pfad von `POST /api/portfolio/optimize` und blockierte
+ * damit den Node.js-Event-Loop für die Dauer des Disk-I/O. Jetzt laufen
+ * Verzeichnisanlage und Append über die libuv-Threadpool-APIs; der
+ * Audit-Logger (`void sink.write(event)`) bleibt nicht blockierend.
+ *
+ * Schreiben ist zeilenweise atomar (O_APPEND), die Dateirechte sind 0644.
+ * Fehler werden **nicht** verschluckt: Sie landen als Warnung auf der Konsole,
+ * weil ein fehlendes Audit-Log sichtbar sein muss.
  */
 export function fileAuditSink(options: FileAuditSinkOptions = {}): AuditSink {
   const dir = resolveAuditDir(options.dir);
@@ -106,19 +111,34 @@ export function fileAuditSink(options: FileAuditSinkOptions = {}): AuditSink {
   // aber die Pfadherkunft endet an der Modulgrenze von `@/lib/appPaths` —
   // sonst meldet Turbopack hier weiterhin Projekt-Tracing.
   const target = joinRuntimePath(dir, file);
-  let prepared = false;
-  const prepare = () => {
-    if (prepared) return;
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o755 });
-    if (options.truncate) writeFileSync(target, "", { mode: 0o644 });
-    prepared = true;
+  // Serialisierung: NDJSON-Zeilen müssen in Ereignis-Reihenfolge auf Disk
+  // landen. Jeder Schreibvorgang wartet auf den vorherigen; `write()` ist
+  // damit zugleich die Barriere für Aufrufer, die auf Durability warten.
+  let tail: Promise<unknown> = Promise.resolve();
+  let prepared: Promise<void> | null = null;
+  const prepare = (): Promise<void> => {
+    if (!prepared) {
+      prepared = (async () => {
+        await mkdir(dir, { recursive: true, mode: 0o755 });
+        if (options.truncate) await writeFile(target, "", { mode: 0o644 });
+      })();
+      // Ein Fehler wird pro Schreibvorgang gewarnt, nicht als unbehandelte
+      // Rejection gemeldet.
+      prepared.catch(() => {});
+    }
+    return prepared;
   };
   return {
     name: `file:${path.relative(process.cwd(), target) || target}`,
-    write(event) {
+    async write(event) {
+      const line = `${serializeAuditEvent(event)}\n`;
+      const task = tail.then(async () => {
+        await prepare();
+        await appendFile(target, line, { mode: 0o644 });
+      });
+      tail = task.catch(() => {});
       try {
-        prepare();
-        appendFileSync(target, `${serializeAuditEvent(event)}\n`, { mode: 0o644 });
+        await task;
       } catch (e) {
         console.warn("[portfolio] Audit-Schreiben fehlgeschlagen:", redactPortfolioMessage(e instanceof Error ? e.message : String(e)));
       }
@@ -127,15 +147,31 @@ export function fileAuditSink(options: FileAuditSinkOptions = {}): AuditSink {
 }
 
 /**
- * Schreibt ein Ereignis synchron in eine konkrete Datei (Test-/Skript-Helfer).
- * Verwendet `tmp` + `rename`, damit keine halbe Datei zurückbleibt.
+ * Schreibt einen Audit-Snapshot **asynchron und atomar** in eine Datei
+ * (Test-/Skript-Helfer, ASA-06).
+ *
+ * Ablauf: `mkdir` ⇒ `writeFile(<ziel>.tmp)` ⇒ `rename(tmp, ziel)`. Ein
+ * `rename` innerhalb desselben Dateisystems ist atomar — Leser sehen entweder
+ * den alten oder den neuen Stand, nie eine halbe Datei. Bei einem Fehler wird
+ * das Temp-File aufgeräumt und der Fehler propagiert (kein stiller Verlust).
+ *
+ * @throws Fehler von `mkdir`/`writeFile`/`rename` (z. B. `EACCES`).
  */
-export function writeAuditSnapshot(targetPath: string, events: readonly PortfolioAuditEvent[]): void {
+export async function writeAuditSnapshot(
+  targetPath: string,
+  events: readonly PortfolioAuditEvent[]
+): Promise<void> {
   const dir = path.dirname(targetPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o755 });
+  await mkdir(dir, { recursive: true, mode: 0o755 });
   const tmp = `${targetPath}.tmp`;
-  writeFileSync(tmp, events.map(serializeAuditEvent).join("\n") + (events.length ? "\n" : ""), { mode: 0o644 });
-  renameSync(tmp, targetPath);
+  const body = events.map(serializeAuditEvent).join("\n") + (events.length ? "\n" : "");
+  try {
+    await writeFile(tmp, body, { mode: 0o644 });
+    await rename(tmp, targetPath);
+  } catch (e) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
 }
 
 /**
