@@ -1,61 +1,36 @@
-# ASA-03 — Alpaca-Live-Adapter ist bei Positionsabfragen Fail-Open (`safeGetPositions` liefert `[]`, `verifyFlat()` meldet fälschlich `true`)
+# ASA-03 — Alpaca-Live-Adapter war bei Positionsabfragen Fail-Open
 
 - **ID:** ASA-03
 - **Severity:** CRITICAL
 - **Bereich:** Sicherheit / Live-Execution-Zuverlässigkeit
-- **Status:** OPEN
-- **Datei(en):** `src/brokers/alpaca/execution.ts:154-175`, `src/brokers/alpaca/execution.ts:269-280`, `src/brokers/alpaca/execution.ts:296-316`, `src/brokers/alpaca/http.ts:201-225`
+- **Status:** FIXED
+- **Behoben am:** 2026-10-27
+- **Datei(en):** `src/brokers/alpaca/execution.ts`, `src/brokers/alpaca/privateClient.ts`, `src/brokers/alpaca/http.ts`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md`](../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md)
 
-## Beschreibung
+## Ursprünglicher Befund
 
-`AlpacaExecutionAdapter.safeGetPositions()` schluckt sämtliche Netzwerk-, Timeout-, Rate-Limit- (`429`) und API-Fehler zu einem leeren Array `[]`. Dadurch arbeiten Konto-Risikoprüfung, Notfall-Glattstellung (`closeAllPositions`) und Glattstellungs-Verifikation (`verifyFlat`) im Fehlerfall **Fail-Open**.
+`AlpacaExecutionAdapter.safeGetPositions()` schluckte Netzwerk-, Timeout-, Rate-Limit- (`429`) und API-Fehler und gab stattdessen `[]` zurück. Dadurch arbeiteten Konto-Risikoprüfung, Notfall-Glattstellung (`closeAllPositions`) und Glattstellungs-Verifikation (`verifyFlat`) im Fehlerfall **Fail-Open**.
 
-## Technischer Nachweis
+### Technischer Nachweis
 
-1. `safeGetPositions()` (`src/brokers/alpaca/execution.ts:269-280`) fängt jeden Fehler in `catch` ab und gibt `[]` zurück.
-2. `getAccount()` (Zeile 171) setzt `openPositions: positions.length` und meldet bei API-Störung `0` offene Positionen.
-3. `closeAllPositions()` (Zeile 296–305) ruft zuerst `const before = await this.getPositions()` auf und führt `DELETE /v2/positions` **nur** aus, wenn `before.length > 0` gilt. Schlägt der `GET` fehl, unterbleibt der Notfall-Close real offener Positionen komplett (`closedCount: 0, remainingOpen: 0`).
-4. `verifyFlat()` (Zeile 312–315) gibt `(await this.getPositions()).length === 0` zurück — also `true` bei jedem Ausfall von `GET /v2/positions`.
-5. `AlpacaHttp.request()` (`src/brokers/alpaca/http.ts:206-210`) ignoriert `Retry-After` bei `429` und wiederholt alle Methoden gleichermaßen ohne Idempotenzprüfung.
+1. `safeGetPositions()` fing alle Fehler ab und gab ein leeres Array zurück.
+2. `getAccount()` setzte `openPositions: 0` und meldete bei API-Störung keine offene Exposure.
+3. `closeAllPositions()` übersprang `DELETE /v2/positions`, wenn der Vorab-GET fehlschlug oder fälschlich `[]` lieferte.
+4. `verifyFlat()` wertete ein leeres Fallback-Array als `true` („glattgestellt“).
+5. `AlpacaHttp.request()` wertete `Retry-After` nicht aus und schützte mehrdeutige POST-Wiederholungen nicht zuverlässig anhand eines Alpaca-Idempotenzschlüssels im Request-Body.
 
-## Konkreter Lösungsvorschlag
+## Behobene Maßnahmen
 
-```diff
---- a/src/brokers/alpaca/execution.ts
-+++ b/src/brokers/alpaca/execution.ts
-@@ -295,18 +295,15 @@ export class AlpacaExecutionAdapter implements ExecutionPort {
-   async closeAllPositions(): Promise<CloseAllReport> {
-     await this.cancelAllOrders().catch(() => undefined);
--    const before = await this.getPositions();
--    if (before.length > 0) {
--      await this.http.request<unknown>("DELETE", "/v2/positions", {
--        query: { cancel_orders: "true" },
--      });
--    }
--    const after = await this.getPositions();
-+    const before = await this.fetchPositionsStrict().catch(() => null);
-+    await this.http.request<unknown>("DELETE", "/v2/positions", {
-+      query: { cancel_orders: "true" },
-+    });
-+    const after = await this.fetchPositionsStrict();
-     return {
-       venue: "alpaca",
--      closedCount: Math.max(0, before.length - after.length),
-+      closedCount: before ? Math.max(0, before.length - after.length) : 0,
-       remainingOpen: after.length,
-     };
-   }
-```
+- `safeGetPositions()` wurde vollständig entfernt. `fetchPositionsStrict()` propagiert Broker- und HTTP-Fehler unverändert und lehnt ungültige Positionslisten bzw. ungültige offene Positionsdatensätze als `BrokerError` ab. `getAccount()` und `listPositions()` verwenden ausschließlich diesen strikten Snapshot.
+- `closeAllPositions()` storniert Orders best-effort und auditiert Cancel-Fehler, liest einen optionalen Vorab-Snapshot nur für den Bericht und sendet **immer** `DELETE /v2/positions?cancel_orders=true`. Auch bei HTTP `207 Multi-Status` oder leerer Antwort entscheidet allein der anschließende strikte Positions-GET über den Zustand. Fehler der Nachkontrolle werden geworfen; gemeldet werden nur nachkontrolliert verschwundene Positionen.
+- `verifyFlat()` nutzt denselben strikten Positionsabruf und wirft bei Fehlern konsistent mit dem Bitunix-Adapter, statt `true` vorzutäuschen.
+- `AlpacaHttp` respektiert `Retry-After` bei `429` (und `503`) als Delta-Sekunden einschließlich Dezimalwerten oder als HTTP-Datum. Der Wert und der exponentielle Backoff sind über `maxRetryDelayMs` gedeckelt und per `AlpacaHttp`-Option konfigurierbar. Eine explizite `429`-Ablehnung bleibt retry-fähig; mehrdeutige Netzwerk-, Timeout- und `5xx`-Fehler werden nur für `GET`, `DELETE` oder `POST` mit nicht-leerem `client_order_id` im JSON-Body wiederholt. Der private Alpaca-Client sendet diesen Schlüssel daher im Body mit.
 
-- `safeGetPositions()` komplett durch `fetchPositionsStrict()` ersetzen, das `BrokerError` unverändert propagiert.
-- `verifyFlat()` nutzt `fetchPositionsStrict()` und wirft bei API-Fehler (oder gibt gemäß Port-Vertrag `false` zurück — niemals `true` bei unbekanntem Zustand; Vertrag mit `BitunixExecutionAdapter` vereinheitlichen).
-- `AlpacaHttp` parst `Retry-After` (Sekunden & HTTP-Date, gedeckelt auf max. Timeout) und wiederholt `POST` nur dann, wenn eine deterministische `client_order_id` gesetzt ist.
+## Verifikation
 
-## Akzeptanzkriterien / Verifikation
-
-- [ ] Wirft `GET /v2/positions` HTTP `503` oder `429`, schlagen `getAccount()` und `getPositions()` mit `BrokerError` fehl statt `0` / `[]` zu melden.
-- [ ] `closeAllPositions()` sendet `DELETE /v2/positions?cancel_orders=true` auch dann, wenn der optionale Vorab-`GET` mit `429`/`500` fehlschlägt.
-- [ ] `verifyFlat()` liefert bei fehlerhaftem `GET /v2/positions` niemals `true`.
-- [ ] `AlpacaHttp` respektiert `Retry-After` bei `429` und wiederholt kein `POST` ohne `client_order_id`.
-- [ ] Regressionstest `tests/asa03.alpacaFailClosed.test.ts` + `tests/brokerContracts.test.ts` grün.
+- [x] `GET /v2/positions` mit HTTP `503` oder `429`: `getPositions()`, `getAccount()` und `verifyFlat()` melden keinen falschen Flat-Zustand; die Fehler bleiben `BrokerError`.
+- [x] Fehlgeschlagener Vorab-GET blockiert `DELETE /v2/positions?cancel_orders=true` nicht; `207` und eine leere Antwort werden anschließend strikt verifiziert.
+- [x] Ein fehlgeschlagener Nachher-GET lässt `closeAllPositions()` mit `BrokerError` scheitern.
+- [x] `Retry-After: 1`, Dezimal-Sekunden und HTTP-Datum werden getestet; ein ungeschlüsselter POST wird bei Timeout nicht blind erneut gesendet, ein POST mit `client_order_id` darf kontrolliert wiederholt werden.
+- [x] Regression: `tests/asa03.alpacaFailClosed.test.ts`, bestehende Alpaca-Tests und `tests/brokerContracts.test.ts`.
