@@ -7,7 +7,7 @@
 > — Abgleich: [`.env.example`](../../.env.example), [`CONFIGURATION.md`](../../CONFIGURATION.md), Install-Guides
 > — Pflege: neues Flag mit `env*`-Helper lesen, in `.env.example` und `CONFIGURATION.md` eintragen, Skript neu laufen lassen.
 
-Insgesamt **298** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensräume (Muster `env[…]`): 1 — über die Musterprüfung abgedeckt, nicht einzeln gelistet.
+Insgesamt **299** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensräume (Muster `env[…]`): 1 — über die Musterprüfung abgedeckt, nicht einzeln gelistet.
 
 
 | Flag | gelesen | in `.env.example` | in `CONFIGURATION.md` |
@@ -299,6 +299,7 @@ Insgesamt **298** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensr�
 | `TRADE_ATTRIBUTION_ENABLED` | ✅ | ✅ | ✅ |
 | `TRADE_ATTRIBUTION_METHOD_VERSION` | ✅ | ✅ | ✅ |
 | `TRUSTED_PROXY_IPS` | ✅ | ✅ | ✅ |
+| `TRUSTED_PROXY_SECRET` | ✅ | ✅ | ✅ |
 | `TWAP_EXECUTION_ENABLED` | ✅ | — | ✅ |
 | `UNIVERSE_AUDIT_DB` | ✅ | ✅ | ✅ |
 | `UNIVERSE_DATA_DIR` | ✅ | ✅ | ✅ |

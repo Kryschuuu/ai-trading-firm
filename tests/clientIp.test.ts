@@ -22,6 +22,7 @@ import { test, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import {
   FORWARDED_FOR_HEADER,
   LOCAL_CLIENT_KEY,
@@ -63,6 +64,7 @@ const NO_ENV = {};
 beforeEach(() => {
   __resetAllSingletonsForTests();
   delete process.env[TRUSTED_PROXY_IPS_FLAG];
+  delete process.env.TRUSTED_PROXY_SECRET;
   delete process.env.FIRM_RATE_LIMIT;
   delete process.env.FIRM_ADMIN_TOKEN;
   delete process.env.FIRM_API_TOKEN;
@@ -294,15 +296,16 @@ describe("TRUSTED_PROXY_IPS: Vertrauen nur mit verifiziertem Peer", () => {
     assert.deepEqual(r.ignoredHeaders, [FORWARDED_FOR_HEADER]);
   });
 
-  test("Peer unbekannt (Next.js) ⇒ XFF ignoriert, x-verified-ip zählt", () => {
+  test("Peer unbekannt (Next.js) ohne Secret ⇒ beide Proxy-Header ignoriert", () => {
     const forwarded = resolveClientIp(req({ "x-forwarded-for": "1.2.3.4" }), { env: TRUST });
     assert.equal(forwarded.key, LOCAL_CLIENT_KEY);
     assert.equal(forwarded.source, "local-fallback");
     assert.deepEqual(forwarded.ignoredHeaders, [FORWARDED_FOR_HEADER]);
 
     const verified = resolveClientIp(req({ "x-verified-ip": "198.51.100.23" }), { env: TRUST });
-    assert.equal(verified.key, "198.51.100.23");
-    assert.equal(verified.source, "verified-header");
+    assert.equal(verified.key, LOCAL_CLIENT_KEY);
+    assert.equal(verified.source, "local-fallback");
+    assert.deepEqual(verified.ignoredHeaders, [VERIFIED_IP_HEADER]);
     assert.equal(verified.peerTrusted, null);
   });
 
@@ -506,20 +509,24 @@ test("GET /api/auth/me zeigt, dass spoofbare Header ignoriert wurden", async () 
   assert.deepEqual(scanTextForSecrets(text), []);
 });
 
-test("GET /api/auth/me: mit x-verified-ip und Loopback-Peer wird die IP sichtbar", async () => {
+test("GET /api/auth/me: authentisierter Fetch-Proxy zeigt die IP, nie das Secret", async () => {
   process.env[TRUSTED_PROXY_IPS_FLAG] = "127.0.0.1";
+  const secret = randomBytes(32).toString("hex");
+  process.env.TRUSTED_PROXY_SECRET = secret;
   const { GET } = await import("../src/app/api/auth/me/route");
   const res = await GET(
     new Request("http://localhost/api/auth/me", {
-      headers: { "x-verified-ip": "198.51.100.23" },
+      headers: { "x-verified-ip": "198.51.100.23", "x-proxy-secret": secret },
     })
   );
   assert.equal(res.status, 200);
   const body = (await res.json()) as {
     rateLimitIdentity: { key: string; source: string; trustedProxiesConfigured: boolean };
   };
+  assert.ok(!JSON.stringify(body).includes(secret));
   assert.equal(body.rateLimitIdentity.key, "198.51.100.23");
   assert.equal(body.rateLimitIdentity.source, "verified-header");
   assert.equal(body.rateLimitIdentity.trustedProxiesConfigured, true);
   delete process.env[TRUSTED_PROXY_IPS_FLAG];
+  delete process.env.TRUSTED_PROXY_SECRET;
 });

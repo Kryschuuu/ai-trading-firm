@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.17.3` |
+| **Version** | `v0.17.4` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
 | **Release-Datum** | 2026-10-28 |
-| **Quellbasiert** | `package.json` (`version: "0.17.3"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Quellbasiert** | `package.json` (`version: "0.17.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -720,3 +720,11 @@ Kriterium. Begründung: `report.md` §8 des Audits.
 Route-weites API-RBAC mit fachlichen Permissions und `private, no-store`-Reads,
 CSRF- und Rate-Limit-Guards für mutierende Endpunkte, Redaction unerwarteter
 5xx-Fehler sowie neue dynamische Route-/Session-CSRF-Regressionsprüfungen.
+
+
+`v0.17.4` (2026-10-28) schließt ASA-08: Loopback-Default für Produktion und
+systemd; kryptographischer Proxy-Nachweis für Fetch-Requests; Fail-Closed-Boot
+bei CIDRs ohne gültiges Secret. Authentisierte Proxy-IPs bleiben unterscheidbar,
+rotierte Spoofing-Header umgehen weder Login- noch API-Limits. ASA-08 ist Teil von
+`security:live-gate`. Aktive Code-Version-Header und Inventare sind synchronisiert.
+Upgrade: `TRUSTED_PROXY_SECRET` in App und Proxy setzen (siehe `CONFIGURATION.md`).

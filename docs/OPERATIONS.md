@@ -1,6 +1,6 @@
 # Operations — Runbooks: „Funnel ist leer“ & „Auto-Breaker hat ausgelöst“
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.3 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.4 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
 > Ausbaustand zum Stand: Implementiert (OPS-011; §4 ergänzt durch GAP-10) · Module
 > `src/ops/collectMarketData.ts`, `src/marketdata/syncStatus.ts`,
 > `src/components/ops/MarketDataPanel.tsx`, `src/lib/circuitBreaker.ts`,

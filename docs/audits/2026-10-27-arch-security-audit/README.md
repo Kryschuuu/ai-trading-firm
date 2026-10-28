@@ -6,7 +6,7 @@
 - **Quelle / Reviewer:** Principal Software Architect & Senior Security Engineer (Arena-Agent-Vollprüfung)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **v0.17.2 (Beta)**
 - **Umfang:** Vollständige Codebasis (`src/auth/*`, `src/lib/*`, `src/app/api/**`, `src/brokers/*`, `src/live-gate/*`, `src/db/*`, `src/execution/*`, `src/copy/*`, `src/portfolio/*`, `src/ops/*`, `src/components/*`, `deploy/*`, `scripts/*`)
-- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-07` FIXED**, 8 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
+- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-08` FIXED**, 7 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
 - **Vollbericht:** [`report.md`](report.md)
 - **Copy-&-Paste-Prompts:** [`prompts/README.md`](prompts/README.md)
 - **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
@@ -16,10 +16,10 @@
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 3 | 0 | 0 | 3 |
-| HIGH | 6 | 2 | 0 | 4 |
+| HIGH | 6 | 1 | 0 | 5 |
 | MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
-| **Summe** | **15** | **8** | **0** | **7** |
+| **Summe** | **15** | **7** | **0** | **8** |
 
 ## Executive Summary
 
@@ -50,7 +50,7 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 | [ASA-05](findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Unauthentifizierte sensitive GET-Routen (SEC-02-Lücken), 7 tote RBAC-Permissions und ungefilterte `e.message`-Leaks | Sicherheit (AuthZ / Info-Leak) | `FIXED` | [P1-05](prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) |
 | [ASA-06](findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` und Prozess-Divergenz in der `LiveGateAudit`-Hash-Kette | Performance / Integrität | `FIXED` | [P1-06](prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) |
 | [ASA-07](findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender CSRF-Schutz auf zentralen mutierenden Endpunkten (`guardWrite`) sowie fehlende Write-Rate-Limits | Sicherheit (CSRF / DoS) | `FIXED` | [P1-05](prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) |
-| [ASA-08](findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | IP-Spoofing über `X-Verified-IP`, sobald `TRUSTED_PROXY_IPS` gesetzt ist und Next.js auf `0.0.0.0:3369` lauscht | Sicherheit (Netzwerk / Rate-Limit) | `OPEN` | [P1-07](prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) |
+| [ASA-08](findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | IP-Spoofing über `X-Verified-IP`, sobald `TRUSTED_PROXY_IPS` gesetzt ist und Next.js auf `0.0.0.0:3369` lauscht | Sicherheit (Netzwerk / Rate-Limit) | `FIXED` | [P1-07](prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) |
 | [ASA-09](findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` parst gesamte NDJSON-Historie pro Query, korrumpiert UTF-8 an 1-MiB-Grenzen und verliert Cross-Prozess-Writes | Performance / Datenintegrität | `OPEN` | [P1-08](prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) |
 | [ASA-10](findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback eröffnet bei Modell-Ausfall blind `LONG`-Trades; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | Code-Qualität / Handelslogik | `OPEN` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
 | [ASA-11](findings/ASA-11-core-db-indexes-unbounded-scans-pool-timeout.md) | MEDIUM | Fehlende Sekundärindizes auf hochfrequenten Kerntabellen, unbegrenzte Full-Table-Loads und fehlendes `statement_timeout` | Performance / Datenbank | `OPEN` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
@@ -72,5 +72,14 @@ Alle nicht allowlisteten API-Handler sind geschützt, alle HTTP-Schreibmethoden 
 Die 15 Befunde sind in **10 konfliktfreie, direkt kopierbare Coding-Prompts** unter [`prompts/`](prompts/README.md) aufgeteilt:
 
 - **Phase P0 (Sofort / Live- & Paper-Blocker):** `PROMPT-ASA-P0-01` (`ASA-01`, FIXED), `PROMPT-ASA-P0-02` (`ASA-02`, FIXED), `PROMPT-ASA-P0-03` (`ASA-03`, FIXED)
-- **Phase P1 (Vor jedem Mehrbenutzer-/Netzwerkbetrieb):** `PROMPT-ASA-P1-04` (`ASA-04`, FIXED), `PROMPT-ASA-P1-05` (`ASA-05` + `ASA-07`, FIXED), `PROMPT-ASA-P1-06` (`ASA-06`, FIXED), `PROMPT-ASA-P1-07` (`ASA-08`), `PROMPT-ASA-P1-08` (`ASA-09`)
+- **Phase P1 (Vor jedem Mehrbenutzer-/Netzwerkbetrieb):** `PROMPT-ASA-P1-04` (`ASA-04`, FIXED), `PROMPT-ASA-P1-05` (`ASA-05` + `ASA-07`, FIXED), `PROMPT-ASA-P1-06` (`ASA-06`, FIXED), `PROMPT-ASA-P1-07` (`ASA-08`, FIXED), `PROMPT-ASA-P1-08` (`ASA-09`)
 - **Phase P2 (Stabilität, Skalierung & Wartbarkeit):** `PROMPT-ASA-P2-09` (`ASA-10` + `ASA-11` + `ASA-12`), `PROMPT-ASA-P2-10` (`ASA-13` + `ASA-14` + `ASA-15`)
+
+
+## Abgeschlossene Remediation ASA-08 (v0.17.4, 2026-10-28)
+
+Loopback-Default (npm/systemd), Secret-authentisierte Fetch-Proxy-Identität und
+Fail-Closed-Boot für CIDR-only-Konfigurationen; echte Socket-Peers bleiben strikt
+CIDR-geprüft. Regressionen testen direkten Login-/API-429 trotz Header-Rotation,
+richtige/falsche Secrets, Socket-Miss und secret-freie Diagnose. Neue Tests sind
+im Security-Live-Gate verankert; Upgrade und sichere Rotation in `CONFIGURATION.md`.

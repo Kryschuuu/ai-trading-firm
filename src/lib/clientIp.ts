@@ -2,12 +2,10 @@
  * Client-Identität für Rate-Limits — Vertrauen aus Konfiguration, nie aus dem
  * Request-Header (Befund C2, v1.36.14).
  *
- * Blatt-Modul: keine Imports aus `src/lib/apiAuth`, `src/auth/*`,
- * `src/brokers/*` und kein `node:*`. Damit teilen sich der Firm-Schreib-Limiter
- * (`src/lib/apiAuth.ts`) und der Credential-Limiter der Control Plane
- * (`src/brokers/control-plane/guard.ts`) **dieselbe** Auflösung
- * (`resolveClientIp`), ohne Import-Zyklus — vorher duplizierten beide dieselbe
- * spoofbare Dreizeiler-Logik.
+ * Server-Blatt-Modul: keine Imports aus `src/lib/apiAuth`, `src/auth/*`
+ * oder `src/brokers/*`. Der timing-sichere Vergleich aus `tokenCompare`
+ * nutzt node:crypto; dieses Modul gehört nicht ins Client-/Edge-Bundle.
+ * Firm-, Login- und Control-Plane-Limiter teilen dieselbe Auflösung.
  *
  * Ausgangslage (vor dem Fix, Befund C2):
  *
@@ -24,8 +22,8 @@
  * Modell jetzt:
  *
  *  1. **`TRUSTED_PROXY_IPS`** (CIDR-Liste, z. B. `203.0.113.7,10.0.0.0/8`,
- *     Aliase `loopback`/`private`/`link-local`) ist der einzige
- *     Vertrauensanker. `x-forwarded-for` wird **nur** ausgewertet, wenn der
+ *     Aliase `loopback`/`private`/`link-local`) prüft bekannte Socket-Peers.
+ *     `x-forwarded-for` wird **nur** ausgewertet, wenn der
  *     direkte Verbindungspeer (Socket-Remote-Adresse) bekannt ist und in dieser
  *     Liste liegt. Auswertung dann von **rechts nach links**: alle
  *     vertrauenswürdigen Proxys werden übersprungen, das erste nicht
@@ -50,13 +48,31 @@
  * keine Socket-Adresse, `peerIpFromRequest()` liefert dort `null`. Wer einen
  * eigenen Node-Server/Adapter fährt, übergibt die Socket-Adresse explizit über
  * `opts.peerIp` — dann greift Regel 1 mit echter Peer-Prüfung. Ohne Peer
- * entscheidet `x-verified-ip` (Regel 2).
+ * erfordert `x-verified-ip` zusätzlich `TRUSTED_PROXY_SECRET` und den passenden
+ * `x-proxy-secret`-Header (ASA-08). CIDRs oder HOSTNAME allein sind kein Beweis.
+ * `x-forwarded-for` bleibt ausschließlich dem echten Socket-Peer-Pfad vorbehalten.
  */
+
+import { tokenEquals } from "./tokenCompare";
 
 type EnvLike = Record<string, string | undefined>;
 
 /** Env-Flag: CIDR-Liste der Reverse Proxys, deren Header vertraut wird. */
 export const TRUSTED_PROXY_IPS_FLAG = "TRUSTED_PROXY_IPS";
+
+/** Optionaler Authentisierungsnachweis für den Fetch-Request-Pfad (ASA-08). */
+export const PROXY_SECRET_HEADER = "x-proxy-secret";
+
+/**
+ * Header-sicheres unabhängiges Secret: 32–256 sichtbare ASCII-Zeichen ohne
+ * Komma (doppelte Header werden als Kommaliste zusammengeführt). Keine
+ * Normalisierung: Proxy und App müssen denselben Wert verwenden.
+ * Empfohlen: openssl rand -hex 32. Länge allein beweist keine Entropie.
+ */
+export function trustedProxySecret(env: EnvLike = process.env): string | null {
+  const secret = env.TRUSTED_PROXY_SECRET ?? "";
+  return /^[\x21-\x2b\x2d-\x7e]{32,256}$/.test(secret) ? secret : null;
+}
 
 /** Header, den ausschliesslich der Reverse Proxy setzen darf. */
 export const VERIFIED_IP_HEADER = "x-verified-ip";
@@ -535,15 +551,19 @@ export function resolveClientIp(
   ];
   const verified = singleIpValue(req, VERIFIED_IP_HEADER);
 
-  // Regel 1/2: Proxy-Header zählen nur bei verifiziertem Vertrauen.
-  //  - Trusted-Proxy-Liste gesetzt: Peer unbekannt ⇒ die Konfiguration trägt
-  //    das Vertrauen (Next.js-Fall ⇒ `x-verified-ip`); Peer bekannt ⇒ er muss
-  //    in der Liste liegen, sonst zählt kein einziger Proxy-Header.
-  //  - Liste nicht gesetzt: nur ein Same-Host-Proxy (Loopback-Peer) darf eine
-  //    verifizierte IP behaupten.
+  // ASA-08: Eine CIDR-Liste authentisiert keinen unbekannten Fetch-Peer.
+  // Ein echter Peer hat immer Vorrang: das Secret darf ein CIDR-Miss NICHT
+  // überstimmen. Kein HOSTNAME-/Loopback-Env-Fallback (kein Bind-Nachweis).
+  const secret = peerIp === null ? trustedProxySecret(env) : null;
+  const suppliedSecret = req.headers.get(PROXY_SECRET_HEADER) ?? "";
+  const proxyAuthenticated =
+    secret !== null &&
+    suppliedSecret.length <= 256 &&
+    !suppliedSecret.includes(",") &&
+    tokenEquals(suppliedSecret, secret);
   const proxyHeadersTrusted = trustConfigured
-    ? peerTrusted !== false
-    : peerIp !== null && isLoopbackIp(peerIp);
+    ? (peerIp !== null ? peerTrusted === true : proxyAuthenticated)
+    : !trust.configured && peerIp !== null && isLoopbackIp(peerIp);
 
   let ip: string | null = peerIp;
   let source: ClientIpSource = peerIp ? "peer" : "local-fallback";
@@ -605,7 +625,7 @@ export function describeClientIpPolicy(env: EnvLike = process.env): string {
   }
   return (
     `client-ip=${VERIFIED_IP_HEADER}+${FORWARDED_FOR_HEADER} ` +
-    `trusted-proxies=${trust.networks.length}` +
+    `trusted-proxies=${trust.networks.length} fetch-peer=secret-required xff=socket-only` +
     (trust.aliases.length > 0 ? ` (alias: ${trust.aliases.join(",")})` : "") +
     (trust.invalid.length > 0 ? ` ungueltig=${trust.invalid.length}` : "")
   );

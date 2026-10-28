@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Vollbericht:** [`../report.md`](../report.md) · **Prompts:** [`../prompts/README.md`](../prompts/README.md)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **0.17.3**
-- **Stand:** 2026-10-28 · **15 Findings:** 8 `OPEN`, 7 `FIXED` (`ASA-01` … `ASA-15`)
+- **Stand:** 2026-10-28 · **15 Findings:** 7 `OPEN`, 8 `FIXED` (`ASA-01` … `ASA-15`)
 - **Konvention:** 1 Prompt = 1 fokussierte Coding-Session + eigener PR; nach Merge Status hier, in `../findings/ASA-*.md`, in `../README.md` und bei `CRITICAL`/`HIGH` in `../../../security/README.md` nachziehen. Finding-IDs bleiben unverändert.
 
 ## Statusübersicht
@@ -16,7 +16,7 @@
 | [ASA-05](../findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Offene sensitive GET-Routen, 7 tote RBAC-Permissions & `e.message`-Leaks | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; security suite |
 | [ASA-06](../findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` & `LiveGateAudit`-Kettenbruch | `FIXED` | [PROMPT-ASA-P1-06](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) | [PR #251](https://github.com/Kryschuuu/ai-trading-firm/pull/251) | `tests/asa06.portfolioLimitsAndAuditSync.test.ts`; `tests/portfolio*.test.ts`; `tests/liveGate*.test.ts` |
 | [ASA-07](../findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender Session-CSRF-Guard in `guardWrite` & fehlende Write-Rate-Limits | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; logout/session regression |
-| [ASA-08](../findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | `X-Verified-IP`-Spoofing bei `TRUSTED_PROXY_IPS` + `0.0.0.0`-Bind | `OPEN` | [PROMPT-ASA-P1-07](../prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) | — | — |
+| [ASA-08](../findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | `X-Verified-IP`-Spoofing bei `TRUSTED_PROXY_IPS` + `0.0.0.0`-Bind | `FIXED` | [PROMPT-ASA-P1-07](../prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) | Dieser PR (v0.17.4) | `tests/asa08.clientIpProxyTrust.test.ts`; `tests/authBootGuard.proxyTrust.test.ts` |
 | [ASA-09](../findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` Voll-Scan, UTF-8-Chunk-Split, V8-String-Crash & Lost Updates | `OPEN` | [PROMPT-ASA-P1-08](../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) | — | — |
 | [ASA-10](../findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback kauft `LONG`; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | `OPEN` | [PROMPT-ASA-P2-09](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) | — | — |
 | [ASA-11](../findings/ASA-11-core-db-indexes-unbounded-scans-pool-timeout.md) | MEDIUM | Fehlende Sekundärindizes auf Kerntabellen, unbegrenzte Loads & `statement_timeout` | `OPEN` | [PROMPT-ASA-P2-09](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) | — | — |
@@ -95,3 +95,14 @@ Phase P2 — Mittlere & Niedrige Risiken (nach P0/P1):
 3. `npm run docs:inventories && npm run docs:inventories:check` (sobald API-Routen, Env-Flags oder `src/db/schema.ts` geändert wurden)
 4. `npm run docs:validate`
 5. Gezielte neue Regressionstests der jeweiligen Session + `npm test`
+
+
+## Abgeschlossene Remediation ASA-08 (v0.17.4, 2026-10-28)
+
+Loopback-Default (npm/systemd), Secret-authentisierte Fetch-Proxy-Identität und
+Fail-Closed-Boot für CIDR-only-Konfigurationen; echte Socket-Peers bleiben strikt
+CIDR-geprüft. Regressionen testen direkten Login-/API-429 trotz Header-Rotation,
+richtige/falsche Secrets, Socket-Miss und secret-freie Diagnose. Neue Tests sind
+im Security-Live-Gate verankert; Upgrade und sichere Rotation in `CONFIGURATION.md`.
+
+Prüfergebnisse, Produktions-Smoke und Resthinweise: [ASA-08-Verifikation](ASA-08-VERIFICATION.md).

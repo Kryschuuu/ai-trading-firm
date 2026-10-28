@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.3** (Prompt-Budget
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.4** (Prompt-Budget
 > und Batch-Analyse nachgezogen, §5)
 >
 > **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema
@@ -75,12 +75,12 @@ npm run universe:seed:markets   # 354 Preset-Instrumente (v1.30.0)
 npm run universe:seed           # Basis-Universum (NDJSON)
 rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm run build
-npm run start                   # http://0.0.0.0:3369
+npm run start                   # http://127.0.0.1:3369
 ./scripts/validate-setup.sh     # 18 Checks, bestanden ab 15
 ```
 
 Die `.env`-Datei enthält Zugangsdaten → `chmod 600 .env`.
-**Achtung (C1, v1.36.13):** `npm run start` bindet `0.0.0.0` **und** setzt
+**Achtung (C1, v1.36.13):** `npm run start` bindet seit ASA-08 nur `127.0.0.1` **und** setzt
 `NODE_ENV=production`. Ohne konfiguriertes Token startet der Dienst dann gar
 nicht mehr (Boot-Guard, `ConfigurationError: AUTH_NOT_CONFIGURED`) — das Setup-
 Skript erzeugt deshalb immer ein `FIRM_API_TOKEN`. Details im Abschnitt
@@ -335,33 +335,68 @@ Anfrage einen frischen Bucket: Das Limit war nicht umgangen, es war abgeschaltet
 | --- | --- |
 | kein `TRUSTED_PROXY_IPS`, Socket-Adresse sichtbar | Socket-Remote-Adresse |
 | kein `TRUSTED_PROXY_IPS`, Socket-Adresse nicht sichtbar (Next.js-App-Router) | Konstante `local` — alle Clients teilen sich **ein** Limit |
-| kein `TRUSTED_PROXY_IPS`, Anfrage kommt von Loopback, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` (Same-Host-Proxy) |
-| `TRUSTED_PROXY_IPS` gesetzt, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` |
+| kein `TRUSTED_PROXY_IPS`, echte Socket-Adresse ist Loopback, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` (Same-Host-Proxy) |
+| `TRUSTED_PROXY_IPS` mit gültigen CIDRs, Socket-Peer unbekannt, gültiges `TRUSTED_PROXY_SECRET` und passendes `x-proxy-secret` | Wert aus eindeutigem `x-verified-ip`; XFF bleibt ignoriert |
+| `TRUSTED_PROXY_IPS` gesetzt, Socket-Peer unbekannt, Proxy-Secret fehlt/falsch/ungültig | Konstante `local`, sämtliche IP-Header ignoriert |
+| `TRUSTED_PROXY_IPS` gesetzt, Socket-Peer in der Liste, `x-verified-ip` gesetzt | Wert aus `x-verified-ip` (Vorrang vor XFF) |
 | `TRUSTED_PROXY_IPS` gesetzt **und** Socket-Peer liegt in der Liste | `x-forwarded-for`, rightmost-untrusted ausgewertet |
 | `TRUSTED_PROXY_IPS` gesetzt, Socket-Peer liegt **nicht** in der Liste | Socket-Peer — sämtliche Proxy-Header ignoriert |
 
 `x-real-ip` wird in keinem Fall als Identität benutzt.
 
 **Betrieb hinter nginx/Traefik/Caddy:** `TRUSTED_PROXY_IPS` auf die Adresse des
-Proxys setzen und im Proxy einen eigenen, überschreibenden Header konfigurieren:
+Proxys setzen und beide Header im Proxy **überschreiben**, nie Client-Werte durchreichen:
 
 ```bash
-printf 'TRUSTED_PROXY_IPS=%s\n' "127.0.0.1" >> .env    # Proxy auf demselben Host
+# Bei bestehenden Einträgen editieren statt doppelt anhängen.
+umask 077
+printf 'TRUSTED_PROXY_IPS=%s\n' "127.0.0.1" >> .env
+openssl rand -hex 32 # Wert als TRUSTED_PROXY_SECRET in .env eintragen
+chmod 600 .env
 ```
 
 ```nginx
 # nginx — den vom Client mitgebrachten Wert bewusst überschreiben
 proxy_set_header X-Verified-IP $remote_addr;
+proxy_set_header X-Proxy-Secret "<zufaelliges-32-byte-hex>"; # gleicher Wert wie in .env
 ```
 
-Ohne diese Konfiguration bleibt der Dienst **sicher, aber enger**: alle Clients
+**ASA-08, v0.17.4 — Upgrade erforderlich:** Fetch-Requests haben keine
+Socket-Adresse. Eine CIDR-Liste oder `HOSTNAME=127.0.0.1` beweist deshalb nichts.
+Der Next.js-Boot-Guard verweigert mit `TRUSTED_PROXY_SECRET_REQUIRED` bzw.
+`TRUSTED_PROXY_SECRET_INVALID` jeden CIDR-only-Start, **auch auf Loopback**;
+Builds sind ausgenommen. Der Requestpfad bleibt unabhängig davon fail-closed.
+Ein bekannter Socket-Peer außerhalb der Liste wird auch mit korrektem Secret
+nicht vertraut. Ungültige CIDRs erlauben keinen impliziten Loopback-Fallback.
+
+Das Secret muss unabhängig von Login-/Session-Credentials erzeugt werden:
+32–256 sichtbare ASCII-Zeichen ohne Leerzeichen/Komma, empfohlen 32 Zufallsbytes
+als Hex. Keine Normalisierung oder Default-Secrets. Konfiguration nur für
+Dienst-/Proxy-Administratoren lesbar; `X-Proxy-Secret` nie loggen, reflektieren
+oder im Browser speichern. Proxy→App nur über Loopback oder einen geschützten
+TLS-/Tunnel-Kanal; das Shared Secret ist ein wiederverwendbarer Bearer-Nachweis,
+keine Request-Signatur und kein Replay-Schutz nach Secret-Verlust.
+
+Produktionsstart und systemd binden explizit an `127.0.0.1:3369` (`PORT` bleibt
+überschreibbar); für LAN-Zugriff einen lokalen TLS-Reverse-Proxy verwenden und
+Port 3369 nicht freigeben. Bei getrenntem Proxy/App-Host benötigt ein bewusst
+geändertes Bind zusätzlich Netzwerk-ACLs und einen geschützten Upstream.
+
+Rollout/Rotation: Secret in App und Proxy gemeinsam ändern, Proxy-Konfiguration
+prüfen/reloaden, **alle** App-Instanzen neu starten, `npm run boot:guard` und
+`/api/auth/me` kontrollieren (keine Secret-Werte in der Diagnose). Während eines
+Mismatch fallen Requests auf den gemeinsamen `local`-Bucket zurück. Sicherer
+Rückfall ohne Proxy-Identitäten: `TRUSTED_PROXY_IPS` entfernen und Loopback-Bind
+beibehalten; **nicht** auf die verwundbare Version zurückrollen.
+
+Ohne Proxy-Trust-Konfiguration bleibt der Dienst **sicher, aber enger**: alle Clients
 teilen sich einen Bucket (`local`). Für den Single-User-Betrieb ist das der
 Normalfall; für mehrere Nutzer hinter einem Proxy ist `x-verified-ip` Pflicht.
 
 Sichtbar ist die wirksame Entscheidung jederzeit, ohne Secret-Werte:
 
 ```bash
-curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity
+curl -s localhost:3369/api/auth/me -H "x-firm-token: $FIRM_API_TOKEN" | jq .rateLimitIdentity
 # {"key":"local","ip":null,"source":"local-fallback",
 #  "ignoredHeaders":["x-forwarded-for","x-real-ip"], ...}
 ```
@@ -1064,7 +1099,8 @@ Details und sichere Endpoint-Auswahl: [`docs/ALPACA.md`](docs/ALPACA.md).
 | `FIRM_SESSION_GRACE_S` | `900` | Nachfrist, in der `POST /api/auth/refresh` eine abgelaufene Idle-Frist heilt; `0` schaltet sie ab, sonst nirgends wirksam (v1.39.0) |
 | `AUTH_MODE` | *(automatisch)* | `local-open` \| `token-required`; in Produktion ohne Token verweigert der Boot-Guard den Start (`AUTH_NOT_CONFIGURED`) |
 | `FIRM_RATE_LIMIT` | `60` | Rate-Limit auf Firm-API (Schreib-Requests / 60 s, 0 = aus) |
-| `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste vertrauenswürdiger Reverse Proxys; erst damit zählen `x-verified-ip` (immer) bzw. `x-forwarded-for` (nur bei verifiziertem Socket-Peer). Leer ⇒ Header werden ignoriert, Bucket = Socket-Adresse bzw. `local` |
+| `TRUSTED_PROXY_IPS` | *(leer)* | CIDR-Liste für echte Socket-Peers; ohne Peer zusätzlich gültiges Proxy-Secret für `x-verified-ip` erforderlich (ASA-08). XFF nur bei CIDR-verifiziertem Socket. Leer ⇒ Socket/`local`, Ausnahme echter Loopback-Peer für `x-verified-ip` |
+| `TRUSTED_PROXY_SECRET` | *(leer; kein Fallback)* | Unabhängiges Shared Secret für `x-proxy-secret` (konstanter Zeitvergleich). 32–256 sichtbare ASCII-Zeichen ohne Leerzeichen/Komma, empfohlen `openssl rand -hex 32`. Next.js-Boot verlangt es bei gesetzten `TRUSTED_PROXY_IPS`, auch auf Loopback; keine Client-/Log-Ausgabe |
 
 ### Modell-Routing (Task 09)
 
