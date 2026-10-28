@@ -3,7 +3,7 @@
 - **ID:** ASA-04
 - **Severity:** HIGH
 - **Bereich:** Architektur / Handelslogik & Concurrency
-- **Status:** OPEN
+- **Status:** FIXED
 - **Datei(en):** `src/lib/microExecutor.ts:537-566`, `src/lib/microExecutor.ts:818-920`, `src/lib/microExecutor.ts:1234-1240`, `src/lib/microExecutor.ts:1490-1509`, `src/lib/microExecutor.ts:1630-1660`, `src/lib/microExecutor.ts:1746-1755`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md`](../prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md)
 
@@ -27,8 +27,24 @@ Im Echtzeit-Daemon `MicroExecutor` führen vier Fehler in `RuleCache` und `handl
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Eine Regel mit `cooldownSeconds = 3600` feuert auch nach mehreren `refresh("poll")` / `applySnapshot()`-Zyklen innerhalb der Cooldown-Dauer kein zweites Mal.
-- [ ] `executionsToday` entspricht nach Order + nachfolgendem `applySnapshot()` exakt `1` (keine Verdopplung durch `ramCounts`).
-- [ ] Zwei gleichzeitig eintreffende Ticks für dieselbe Regel lösen während einer laufenden asynchronen Order-Ausführung exakt **eine** Order aus.
-- [ ] Eine nach `start()` aktivierte Regel auf einem neuen Symbol empfängt ohne Prozess-Neustart Ticks und feuert bei erfüllter Bedingung.
-- [ ] Regressionstest `tests/asa04.microExecutorConcurrency.test.ts` grün.
+- [x] Eine Regel mit `cooldownSeconds = 3600` feuert auch nach mehreren `refresh("poll")` / `applySnapshot()`-Zyklen innerhalb der Cooldown-Dauer kein zweites Mal.
+- [x] `executionsToday` entspricht nach Order + nachfolgendem `applySnapshot()` exakt `1` (keine Verdopplung durch `ramCounts`).
+- [x] Zwei gleichzeitig eintreffende Ticks für dieselbe Regel lösen während einer laufenden asynchronen Order-Ausführung exakt **eine** Order aus.
+- [x] Eine nach `start()` aktivierte Regel auf einem neuen Symbol empfängt ohne Prozess-Neustart Ticks und feuert bei erfüllter Bedingung.
+- [x] Regressionstest `tests/asa04.microExecutorConcurrency.test.ts` grün.
+
+
+## Remediation (2026-10-28)
+
+- Der Cache übernimmt den jeweils jüngsten lokalen bzw. in `rule_executions` persistierten Trigger-Zeitpunkt. Der Berliner Tageszähler stammt nach einem erfolgreichen DB-Read aus dem Snapshot; lokale Zähler werden erst dann zurückgesetzt. Bei Tageswechsel wird auch der alte DB-Zähler verworfen.
+- Vor jedem ersten `await` sichert ein prozesslokaler Regel-Lock die Ausführung; `finally` gibt ihn auch bei Fehlern frei. Ein Snapshot-Read wartet auf laufende Ausführungen und verhindert neue Starts während des Reads. So kann ein Insert nicht zwischen Snapshot und lokaler Buchung doppelt gezählt werden. Fehlgeschlagene Reads behalten die lokalen Zähler.
+- Nach jedem erfolgreichen Cache-Swap werden neue zulässige Symbol/Timeframe-Paare seriell vorbereitet. Während des Warmups gepufferte Ticks werden übernommen; bei Überlauf startet die Serie kalt. Binance erweitert den laufenden Stream additiv per `SUBSCRIBE`, ohne bestehende Streams zu unterbrechen, und übernimmt die Symbole beim Reconnect. Der Simulator unterstützt ebenfalls neue Symbole. Der Timeframe-Guard bleibt aktiv.
+- `RULE_TRIGGERED` protokolliert die Regelversion aus dem Execution-Context.
+
+### Betriebsgrenzen
+
+Der Lock ist **prozesslokal**, kein verteilter Lock für mehrere Executor-Prozesse; Multi-Prozess-Orders benötigen weiterhin die Broker-/DB-Sicherungen. Additive dynamische Abonnements sind bei eigenen Feeds über `MarketFeed.updateSymbols` zu implementieren; der Binance-Feed unterstützt weiterhin nur seine Symbol-Whitelist. Fehlgeschlagenes oder leeres REST-Warmup führt zu einer kalten Serie, die erst nach genügend Live-Kerzen auswertbar ist; Fehler erscheinen in `status().seed`. Bei gepuffertem Warmup-Überlauf wird ebenfalls kalt gestartet. Ein noch laufender/defekter Adapter verzögert den nächsten Cache-Read; währenddessen starten keine weiteren Ausführungen. Binance-Verbindungsabbrüche unterliegen weiterhin dem Reconnect-Backoff und garantieren keine lückenlose Marktdatenhistorie.
+
+### Regression
+
+`tests/asa04.microExecutorDb.test.ts` prüft den echten PostgreSQL-Snapshot. `tests/asa04.microExecutorConcurrency.test.ts`: Cooldown und DB-Synchronisierung inklusive Neustart, fünf konkurrierende Ticks und Snapshot-Barriere, Lock-Freigabe bei Fehlern, neues Symbol und neuer Timeframe bei parallelen Invalidierungen, Version im verwendeten Audit-Payload sowie Binance-Subscribe/Reconnect.
