@@ -190,6 +190,34 @@ Jeder Übergang, jeder Deny, jeder Kill, jeder Enforce-Entscheid:
   Einträge, Hashes gekürzt), DB `audit_log` (Event `LIVE_GATE`, best-effort),
   UI-Katalog `LIVE_GATE` (Task-08-Audit-View).
 
+### 7.1 Mehrere Prozesse auf derselben Kette (ASA-06)
+
+`next start`, die CLI (`npm run live:kill`) und der `micro-executor` schreiben
+dieselbe `audit-log.ndjson`. Der Kettenkopf ist deshalb **kein** Prozess-Cache:
+`LiveGateAudit.append()` nimmt unter einer kurzen Lock-Datei
+(`audit-log.ndjson.lock`, `openSync(…, "wx")`) die aktuelle Dateigröße, liest
+**nur die neuen Bytes** ab dem zuletzt bekannten Offset, prüft deren Verkettung
+und übernimmt den Dateischwanz als `head` — erst danach wird die neue Zeile
+berechnet und per `writeSync` + `fsync` geschrieben. Folgen:
+
+- `seq` bleibt über Prozessgrenzen hinweg lückenlos monoton; ein veralteter
+  `prevHash` (der klassische Kettenbruch) kann nicht mehr entstehen.
+- Verwaiste Locks (Crash, `SIGKILL`) werden erkannt und entfernt: Alter
+  `> 10 s` (`AUDIT_LOCK_STALE_MS`) oder PID lebt nicht mehr. Nach
+  `AUDIT_LOCK_TIMEOUT_MS` (2 s) wird **best-effort ohne Lock** geschrieben —
+  ein fehlender Kill-Eintrag wäre schlimmer als ein Restrisiko auf der Kette.
+- Eine halb geschriebene letzte Zeile (Torn Write) wird abgeschnitten, eine
+  geschrumpfte Datei (Rotation/Truncation) vollständig neu verifiziert.
+- `verifyAuditChain()` cached das Ergebnis über `(size, mtimeMs, ctimeMs, ino)`:
+  `GET /api/live/state` ist bei unveränderter Datei O(1) (ein `stat`) statt
+  eines Voll-Parses mit SHA-256 je Zeile. Jede Dateiänderung — auch eine
+  Manipulation gleicher Länge — invalidiert den Cache.
+- Betrieb: Liegt nach einem Absturz eine `<audit>.lock` herum, blockiert sie
+  höchstens 10 s (Stale-Recovery) und kann gefahrlos gelöscht werden, solange
+  kein Gate-Prozess läuft. Nach einem Kettenbruch bleibt
+  `audit.integrity.ok = false` sichtbar (Fail-Visible, kein Auto-Heal der
+  Vergangenheit).
+
 ## 8. Security-Suite & CI (merge-blockierend)
 
 - Job **`security-live-gate`** läuft auf jedem PR und Push: typecheck, lint,

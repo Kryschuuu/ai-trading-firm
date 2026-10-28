@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Vollbericht:** [`../report.md`](../report.md) · **Prompts:** [`../prompts/README.md`](../prompts/README.md)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **0.17.3**
-- **Stand:** 2026-10-28 · **15 Findings:** 9 `OPEN`, 6 `FIXED` (`ASA-01` … `ASA-15`)
+- **Stand:** 2026-10-28 · **15 Findings:** 8 `OPEN`, 7 `FIXED` (`ASA-01` … `ASA-15`)
 - **Konvention:** 1 Prompt = 1 fokussierte Coding-Session + eigener PR; nach Merge Status hier, in `../findings/ASA-*.md`, in `../README.md` und bei `CRITICAL`/`HIGH` in `../../../security/README.md` nachziehen. Finding-IDs bleiben unverändert.
 
 ## Statusübersicht
@@ -14,7 +14,7 @@
 | [ASA-03](../findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter Fail-Open (`safeGetPositions` / `verifyFlat` / 429) | `FIXED` | [PROMPT-ASA-P0-03](../prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) | [PR #248](https://github.com/Kryschuuu/ai-trading-firm/pull/248) | `npx tsx --test tests/asa03.alpacaFailClosed.test.ts`; Alpaca + Broker-Contracts; `npm test` (`BROKER_CONTRACTS_REQUIRE_DB=true` in CI) |
 | [ASA-04](../findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` Cooldown-Reset (30 s), Tick-Burst-Race & fehlendes Feed-Hot-Subscribe | `FIXED` | [PROMPT-ASA-P1-04](../prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) | Dieser PR | `tests/asa04.microExecutorConcurrency.test.ts` |
 | [ASA-05](../findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Offene sensitive GET-Routen, 7 tote RBAC-Permissions & `e.message`-Leaks | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; security suite |
-| [ASA-06](../findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` & `LiveGateAudit`-Kettenbruch | `OPEN` | [PROMPT-ASA-P1-06](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) | — | — |
+| [ASA-06](../findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` & `LiveGateAudit`-Kettenbruch | `FIXED` | [PROMPT-ASA-P1-06](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) | [PR #251](https://github.com/Kryschuuu/ai-trading-firm/pull/251) | `tests/asa06.portfolioLimitsAndAuditSync.test.ts`; `tests/portfolio*.test.ts`; `tests/liveGate*.test.ts` |
 | [ASA-07](../findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender Session-CSRF-Guard in `guardWrite` & fehlende Write-Rate-Limits | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; logout/session regression |
 | [ASA-08](../findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | `X-Verified-IP`-Spoofing bei `TRUSTED_PROXY_IPS` + `0.0.0.0`-Bind | `OPEN` | [PROMPT-ASA-P1-07](../prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) | — | — |
 | [ASA-09](../findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` Voll-Scan, UTF-8-Chunk-Split, V8-String-Crash & Lost Updates | `OPEN` | [PROMPT-ASA-P1-08](../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) | — | — |
@@ -24,6 +24,13 @@
 | [ASA-13](../findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 unregistrierte `globalThis`-Singletons & `FirmDashboard.tsx` Polling-Reset | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-14](../findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` ohne `systemd`-Sandboxing & mit Pfad-Drift | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-15](../findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` & fehlender SSRF-Schutz in `WebhookAlertSink` | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
+
+## Abgeschlossene Remediation ASA-06 (2026-10-28)
+
+- **Portfolio-AuthZ/DoSLimits:** `POST /api/portfolio/{correlation,metrics}` verlangen `firm.read`, `POST /api/portfolio/optimize` `firm.write` — jeweils mit CSRF-Guard und Write-Rate-Limit (`optimize`: 10/min). `PORTFOLIO_API_LIMITS` begrenzt `solver.maxIterations` auf 2.000 (HTTP-Default 400) und `guard.maxAdjustmentRounds` auf 10; Überschreitungen liefern `400 INVALID_INPUT`. Die generierte `docs/generated/route-inventory.md` weist die Routen jetzt als explizit geschützt aus (`REVIEWED_UNGUARDED_WRITES` enthält keine Portfolio-Einträge).
+- **Asynchrone Audit-I/O:** `fileAuditSink` schreibt über `node:fs/promises` (serialisierte Promise-Kette, kein `mkdirSync`/`appendFileSync` mehr im Request-Pfad); `writeAuditSnapshot` ist async und atomar (`writeFile` → `rename`).
+- **LiveGateAudit Cross-Prozess:** `append()` sperrt `<audit>.lock` (`openSync(…, "wx")`, Stale-Recovery nach 10 s bzw. toter PID), liest nur neue Bytes ab dem bekannten Offset, verifiziert die Verkettung, übernimmt den Dateischwanz als `head` und schreibt erst dann `writeSync` + `fsync`. `verifyAuditChain()` cached über `(size, mtimeMs, ctimeMs, ino)` — `GET /api/live/state` ist bei unveränderter Datei O(1).
+- **Regressionen:** `npx tsx --test tests/asa06.portfolioLimitsAndAuditSync.test.ts tests/portfolio*.test.ts tests/liveGate*.test.ts`; `tests/portfolio.api.test.ts` setzt den Rate-Limit-Bucket je Test zurück und wartet bounded auf die asynchrone Audit-Datei.
 
 ## Abgeschlossene Remediation ASA-05 + ASA-07 (2026-10-28)
 

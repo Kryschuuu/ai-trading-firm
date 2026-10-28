@@ -393,18 +393,23 @@ test("Audit: Datei-Senke schreibt NDJSON und validiert den Dateinamen", async ()
     const logger = createAuditLogger({ sink, now: () => new Date("2026-08-27T11:00:00.000Z") });
     logger.log({ event: "PORTFOLIO_OPTIMIZATION", level: "INFO", stage: "portfolio-optimizer", action: "optimize", mode: "min_variance" });
     logger.log({ event: "RISK_GUARD_SUMMARY", level: "INFO", stage: "risk-guard", action: "summary" });
+    // ASA-06: Die Datei-Senke schreibt asynchron (node:fs/promises) — der
+    // erste Schreibvorgang legt das Verzeichnis an, deshalb warten wir auf ihn.
+    await sink.write(
+      createAuditLogger().build({ event: "RISK_GUARD_SUMMARY", level: "INFO", stage: "risk-guard", action: "warmup" })
+    );
     const lines = readFileSync(path.join(dir, "audit-log.ndjson"), "utf8").trim().split("\n");
-    assert.equal(lines.length, 2);
+    assert.equal(lines.length, 3);
     const first = JSON.parse(lines[0]) as { event: string; mode: string; timestamp: string };
     assert.equal(first.event, "PORTFOLIO_OPTIMIZATION");
     assert.equal(first.mode, "min_variance");
     assert.equal(first.timestamp, "2026-08-27T11:00:00.000Z");
 
-    // Anhängen statt Überschreiben.
-    fileAuditSink({ dir, file: "audit-log.ndjson" }).write(
+    // Anhängen statt Überschreiben (asynchron ⇒ explizit awaiten).
+    await fileAuditSink({ dir, file: "audit-log.ndjson" }).write(
       createAuditLogger().build({ event: "RISK_GUARD_SUMMARY", level: "INFO", stage: "risk-guard", action: "pass" })
     );
-    assert.equal(readFileSync(path.join(dir, "audit-log.ndjson"), "utf8").trim().split("\n").length, 3);
+    assert.equal(readFileSync(path.join(dir, "audit-log.ndjson"), "utf8").trim().split("\n").length, 4);
 
     // Serialisierung enthält nur definierte Felder (keine Datenflut, kein undefined).
     const serialized = serializeAuditEvent(
@@ -414,11 +419,11 @@ test("Audit: Datei-Senke schreibt NDJSON und validiert den Dateinamen", async ()
     assert.equal(JSON.parse(serialized).event, "RISK_GUARD_SUMMARY");
 
     // Snapshot: atomar über tmp + rename, leere Liste ergibt eine leere Datei.
-    writeAuditSnapshot(path.join(dir, "snap.ndjson"), [
+    await writeAuditSnapshot(path.join(dir, "snap.ndjson"), [
       createAuditLogger().build({ event: "RISK_GUARD_SUMMARY", level: "INFO", stage: "risk-guard", action: "pass" }),
     ]);
     assert.equal(readFileSync(path.join(dir, "snap.ndjson"), "utf8").trim().split("\n").length, 1);
-    writeAuditSnapshot(path.join(dir, "sub/empty.ndjson"), []);
+    await writeAuditSnapshot(path.join(dir, "sub/empty.ndjson"), []);
     assert.equal(readFileSync(path.join(dir, "sub/empty.ndjson"), "utf8"), "");
 
     assert.equal(resolveAuditDir(dir), dir);
@@ -434,7 +439,7 @@ test("Audit: Datei-Senke schreibt NDJSON und validiert den Dateinamen", async ()
     const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => warnings.push(args);
     try {
-      fileAuditSink({ dir: blocked }).write(
+      await fileAuditSink({ dir: blocked }).write(
         createAuditLogger().build({ event: "RISK_GUARD_SUMMARY", level: "INFO", stage: "risk-guard", action: "summary" })
       );
       // DB-Senke ohne PORTFOLIO_AUDIT_DB=1: no-op; mit Flag: Fehler wird gewarnt,

@@ -37,7 +37,17 @@ erlaubt, solange sie hier dokumentiert sind).
 
 - **Version:** Patch-Bump `0.17.2` → `0.17.3`; die Code-Version in aktiven Fach-Dokumentationsheadern ist mit `npm run docs:bump-version` synchronisiert.
 
-## [Unreleased] — Docs↔Code-Audit 2026-10-06: Sicherheits- und Konsistenz-Fixes (DC-01…DC-08)
+## [Unreleased] — ASA-06 (Portfolio-DoS & LiveGate-Audit-Kette) + Docs↔Code-Audit 2026-10-06 (DC-01…DC-08)
+
+### Security
+
+- **ASA-06 — Portfolio-DoS & `LiveGateAudit`-Kettensplit (2026-10-28):**
+  - **AuthZ/Rate-Limit:** `POST /api/portfolio/correlation` und `POST /api/portfolio/metrics` verlangen `firm.read`, `POST /api/portfolio/optimize` `firm.write` — jeweils über `requirePermission(…) ?? checkCsrfGuard(…) ?? checkRateLimit(…)`. `optimize` hat ein eigenes Limit von 10 Requests / 60 s (es kann Audit-Ereignisse persistieren).
+  - **Rechenbudget (`PORTFOLIO_API_LIMITS`):** `solver.maxIterations` ≤ 2.000 (HTTP-Default 400 statt Bibliotheks-Default 2.000) und `guard.maxAdjustmentRounds` ≤ 10; höhere Werte liefern `400 INVALID_INPUT`. Ein einzelner Request kann den Node.js-Event-Loop damit nicht mehr für Sekunden blockieren.
+  - **Asynchrone Audit-I/O:** `fileAuditSink().write()` nutzt `node:fs/promises` (`mkdir`/`appendFile`) mit serialisierter Promise-Kette statt `mkdirSync`/`appendFileSync` im Request-Pfad; `writeAuditSnapshot()` schreibt asynchron atomar (`writeFile` → `rename`, Temp-Aufräumen bei Fehler).
+  - **`LiveGateAudit` prozessübergreifend:** `append()` nimmt unter einer Lock-Datei (`<audit>.lock`, `openSync(…, "wx")`, Stale-Recovery nach 10 s bzw. toter PID) die aktuelle Dateigröße, liest nur die neuen Bytes ab dem bekannten Offset, verifiziert deren Verkettung und übernimmt den Dateischwanz als `head` — erst danach folgt `writeSync` + `fsync`. Web-Server, CLI (`npm run live:kill`) und `micro-executor` erzeugen damit keine doppelten `seq`/veralteten `prevHash` mehr. Halb geschriebene letzte Zeilen werden abgeschnitten, Dateischrumpfung löst eine vollständige Neuverifikation aus.
+  - **`verifyAuditChain()`-Cache:** Ergebnis wird über `(size, mtimeMs, ctimeMs, ino)` gecacht und als Kopie ausgeliefert — `GET /api/live/state` antwortet bei unveränderter Datei in O(1) statt mit einem Voll-Parse inklusive SHA-256 je Zeile.
+  - **Doku/Inventar:** `docs/generated/route-inventory.md` weist die drei Routen als explizit geschützt aus; `docs/PORTFOLIO_ANALYTICS.md` dokumentiert Auth, Rate-Limit und das API-Rechenbudget. Regression: `tests/asa06.portfolioLimitsAndAuditSync.test.ts` (5 Tests) plus `tests/portfolio*.test.ts` und `tests/liveGate*.test.ts`.
 
 ### Fixed
 

@@ -17,6 +17,7 @@ import { POST as correlationPOST, GET as correlationGET } from "../src/app/api/p
 import { POST as optimizePOST, GET as optimizeGET, buildAuditSinks } from "../src/app/api/portfolio/optimize/route";
 import { parseSeries, parseSymbol, statusForCode, PORTFOLIO_SYMBOL_RE } from "../src/app/api/portfolio/parse";
 import { serializeAuditEvent, AUDIT_FILE_RE } from "../src/portfolio/auditFile";
+import { resetRateLimiterForTests } from "../src/lib/apiAuth";
 import { blockReturns, seriesFrom } from "./fixtures/portfolioFixtures";
 
 const BASE = "http://localhost:3369";
@@ -51,6 +52,9 @@ function payloadSeries(count = 6, periods = 60) {
 afterEach(() => {
   delete process.env.PORTFOLIO_AUDIT_DIR;
   delete process.env.PORTFOLIO_AUDIT;
+  // ASA-06: `/api/portfolio/*` laufen jetzt durch den Write-Rate-Limiter
+  // (`optimize` 10/min) — jeder Test beginnt mit leerem Bucket.
+  resetRateLimiterForTests();
 });
 
 // ── /api/portfolio/metrics ───────────────────────────────────────────────────
@@ -365,6 +369,15 @@ test("POST /api/portfolio/optimize: Audit-Datei-Senke (opt-in, NDJSON)", async (
     const body = (await res.json()) as { auditFileEnabled: boolean; audit: unknown[] };
     assert.equal(body.auditFileEnabled, true);
     const file = path.join(dir, "audit-log.ndjson");
+    // ASA-06: Die Datei-Senke schreibt asynchron (node:fs/promises) und der
+    // Handler antwortet, sobald die Berechnung fertig ist — die Zeilen können
+    // also kurz nach der Response eintreffen. Deshalb bounded warten.
+    const deadline = Date.now() + 5_000;
+    const count = (): number =>
+      existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter((l) => l.trim()).length : 0;
+    while (count() < body.audit.length && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     assert.ok(existsSync(file), "audit-log.ndjson fehlt");
     const lines = readFileSync(file, "utf8").trim().split("\n");
     assert.equal(lines.length, body.audit.length);

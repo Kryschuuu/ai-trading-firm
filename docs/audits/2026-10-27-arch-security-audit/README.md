@@ -6,7 +6,7 @@
 - **Quelle / Reviewer:** Principal Software Architect & Senior Security Engineer (Arena-Agent-Vollprüfung)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **v0.17.2 (Beta)**
 - **Umfang:** Vollständige Codebasis (`src/auth/*`, `src/lib/*`, `src/app/api/**`, `src/brokers/*`, `src/live-gate/*`, `src/db/*`, `src/execution/*`, `src/copy/*`, `src/portfolio/*`, `src/ops/*`, `src/components/*`, `deploy/*`, `scripts/*`)
-- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-05`, `ASA-07` FIXED**, 9 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
+- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-07` FIXED**, 8 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
 - **Vollbericht:** [`report.md`](report.md)
 - **Copy-&-Paste-Prompts:** [`prompts/README.md`](prompts/README.md)
 - **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
@@ -16,10 +16,10 @@
 | Severity | Anzahl | Offen | In Arbeit | Gefixt |
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 3 | 0 | 0 | 3 |
-| HIGH | 6 | 3 | 0 | 3 |
+| HIGH | 6 | 2 | 0 | 4 |
 | MEDIUM | 4 | 4 | 0 | 0 |
 | LOW | 2 | 2 | 0 | 0 |
-| **Summe** | **15** | **9** | **0** | **6** |
+| **Summe** | **15** | **8** | **0** | **7** |
 
 ## Executive Summary
 
@@ -48,7 +48,7 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 | [ASA-03](findings/ASA-03-alpaca-fail-open-positions-verify-flat.md) | CRITICAL | Alpaca-Live-Adapter ist bei Positionsabfragen Fail-Open (`safeGetPositions` liefert `[]`, `verifyFlat()` meldet fälschlich `true`) | Sicherheit / Live-Execution | `FIXED` | [P0-03](prompts/PROMPT-ASA-P0-03-alpaca-failclosed-and-429-backoff.md) |
 | [ASA-04](findings/ASA-04-micro-executor-cooldown-burst-runtime-rules.md) | HIGH | `MicroExecutor` verliert alle 30 s Cooldowns, feuert doppelt bei Tick-Bursts und abonniert neue Symbole zur Laufzeit nicht | Architektur / Handelslogik | `FIXED` | [P1-04](prompts/PROMPT-ASA-P1-04-micro-executor-cooldown-burst-hotreload.md) |
 | [ASA-05](findings/ASA-05-unauthenticated-get-routes-dead-rbac-error-leaks.md) | HIGH | Unauthentifizierte sensitive GET-Routen (SEC-02-Lücken), 7 tote RBAC-Permissions und ungefilterte `e.message`-Leaks | Sicherheit (AuthZ / Info-Leak) | `FIXED` | [P1-05](prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) |
-| [ASA-06](findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` und Prozess-Divergenz in der `LiveGateAudit`-Hash-Kette | Performance / Integrität | `OPEN` | [P1-06](prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) |
+| [ASA-06](findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` und Prozess-Divergenz in der `LiveGateAudit`-Hash-Kette | Performance / Integrität | `FIXED` | [P1-06](prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) |
 | [ASA-07](findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender CSRF-Schutz auf zentralen mutierenden Endpunkten (`guardWrite`) sowie fehlende Write-Rate-Limits | Sicherheit (CSRF / DoS) | `FIXED` | [P1-05](prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) |
 | [ASA-08](findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | IP-Spoofing über `X-Verified-IP`, sobald `TRUSTED_PROXY_IPS` gesetzt ist und Next.js auf `0.0.0.0:3369` lauscht | Sicherheit (Netzwerk / Rate-Limit) | `OPEN` | [P1-07](prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) |
 | [ASA-09](findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` parst gesamte NDJSON-Historie pro Query, korrumpiert UTF-8 an 1-MiB-Grenzen und verliert Cross-Prozess-Writes | Performance / Datenintegrität | `OPEN` | [P1-08](prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) |
@@ -59,6 +59,10 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 | [ASA-14](findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` fehlt jegliches `systemd`-Sandboxing und weicht bei Pfaden/User von der Haupt-Unit ab | Sicherheit / Betrieb | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
 | [ASA-15](findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` und unvalidierte Ziel-URLs (`http://`, Loopback, Link-Local) in `WebhookAlertSink` | Sicherheit / Performance | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
 
+## Abgeschlossene Remediation ASA-06 (2026-10-28)
+
+Portfolio-Endpunkte sind authentifiziert und gedrosselt; das Rechenbudget ist hart begrenzt (`maxIterations` ≤ 2.000, API-Default 400, `maxAdjustmentRounds` ≤ 10) und die Audit-Datei-Senke schreibt asynchron statt synchron im Request-Pfad. `LiveGateAudit` synchronisiert `seq`/`prevHash` jetzt unter einer Lock-Datei mit der Datei-Wahrheit und `verifyAuditChain()` cached über `(size, mtimeMs, ctimeMs, ino)` — kein Kettenbruch mehr, wenn Web-Server, CLI (`npm run live:kill`) und `micro-executor` dieselbe NDJSON beschreiben. Details: [ASA-06](findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md). Verifikation: `tests/asa06.portfolioLimitsAndAuditSync.test.ts`, `tests/portfolio*.test.ts`, `tests/liveGate*.test.ts`, Inventar-/Doku-Gates und `npm test`.
+
 ## Abgeschlossene Remediation ASA-05 + ASA-07 (2026-10-28)
 
 Alle nicht allowlisteten API-Handler sind geschützt, alle HTTP-Schreibmethoden laufen durch Auth/CSRF/Rate-Limit (Login mit eigenem Credential-Rate-Limit; Refresh mit sessiongebundener CSRF-Prüfung). Die 15 katalogisierten Permissions sind in Routen verdrahtet; geschützte GETs erhalten `private, no-store`; unerwartete 5xx-Ausnahmen werden über `publicErrorMessage` redigiert. Verifikation: `tests/asa05.apiGuardsAndCsrf.test.ts`, `tests/sec02.unauthenticatedGetApis.test.ts`, `npm run typecheck`, `npm run lint`, Inventar- und Doku-Gates sowie `npm test`. `/api/docs` bleibt als kuratierter Docs-Viewer explizit öffentlich; der aktuelle `/api/firm/micro`-Handler ist nur GET, CSRF-Runtime wird deshalb über `/api/firm/missions` getestet.
@@ -68,5 +72,5 @@ Alle nicht allowlisteten API-Handler sind geschützt, alle HTTP-Schreibmethoden 
 Die 15 Befunde sind in **10 konfliktfreie, direkt kopierbare Coding-Prompts** unter [`prompts/`](prompts/README.md) aufgeteilt:
 
 - **Phase P0 (Sofort / Live- & Paper-Blocker):** `PROMPT-ASA-P0-01` (`ASA-01`, FIXED), `PROMPT-ASA-P0-02` (`ASA-02`, FIXED), `PROMPT-ASA-P0-03` (`ASA-03`, FIXED)
-- **Phase P1 (Vor jedem Mehrbenutzer-/Netzwerkbetrieb):** `PROMPT-ASA-P1-04` (`ASA-04`, FIXED), `PROMPT-ASA-P1-05` (`ASA-05` + `ASA-07`, FIXED), `PROMPT-ASA-P1-06` (`ASA-06`), `PROMPT-ASA-P1-07` (`ASA-08`), `PROMPT-ASA-P1-08` (`ASA-09`)
+- **Phase P1 (Vor jedem Mehrbenutzer-/Netzwerkbetrieb):** `PROMPT-ASA-P1-04` (`ASA-04`, FIXED), `PROMPT-ASA-P1-05` (`ASA-05` + `ASA-07`, FIXED), `PROMPT-ASA-P1-06` (`ASA-06`, FIXED), `PROMPT-ASA-P1-07` (`ASA-08`), `PROMPT-ASA-P1-08` (`ASA-09`)
 - **Phase P2 (Stabilität, Skalierung & Wartbarkeit):** `PROMPT-ASA-P2-09` (`ASA-10` + `ASA-11` + `ASA-12`), `PROMPT-ASA-P2-10` (`ASA-13` + `ASA-14` + `ASA-15`)

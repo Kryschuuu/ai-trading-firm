@@ -86,6 +86,9 @@ const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(["POST", "PUT", "PATCH", 
  * geschützt). Damit ist die Warnzeile kein stiller Hinweis, sondern ein Gate.
  */
 export const REVIEWED_UNGUARDED_WRITES: ReadonlyMap<string, string> = new Map([
+  // Hinweis (ASA-06): `/api/portfolio/{optimize,correlation,metrics}` stehen
+  // hier bewusst NICHT mehr — sie verlangen `firm.write` bzw. `firm.read` plus
+  // CSRF und Write-Rate-Limit und erscheinen im Inventar als geschützt.
   [
     "POST /api/auth/login",
     "Anmeldung selbst: die Credential-Prüfung ist die Authentisierung; Rate-Limit im Handler.",

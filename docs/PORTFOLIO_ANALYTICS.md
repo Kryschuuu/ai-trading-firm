@@ -258,6 +258,23 @@ keine Dateipfade aus dem Request (Audit-Dateiname wird gegen `^[A-Za-z0-9._-]{1,
 geprüft), Symbole werden getrimmt, auf Großbuchstaben normalisiert und gegen eine
 strikte Zeichenklasse validiert (kein Zeilenumbruch ⇒ keine Log-Injection).
 
+**Auth & Rechenbudget der HTTP-API (ASA-06):** Alle drei `POST`-Handler laufen durch
+`requirePermission(…) ?? checkCsrfGuard(…) ?? checkRateLimit(…)`. `metrics` und
+`correlation` verlangen `firm.read` (reine Berechnung, `POST` nur wegen der
+Payload-Größe), `optimize` `firm.write` (die Route kann Audit-Ereignisse persistieren)
+mit einem eigenen Limit von 10 Requests / 60 s. Zusätzlich gilt ein **engeren**
+Budget als in der Bibliothek (`PORTFOLIO_API_LIMITS`):
+
+| Parameter | Bibliothek | HTTP-API | Verhalten bei Überschreitung |
+| --- | --- | --- | --- |
+| `solver.maxIterations` | ≤ 1.000.000 (Default 2.000) | ≤ **2.000** (Default **400**) | `400 INVALID_INPUT`, Feld `solver.maxIterations` |
+| `guard.maxAdjustmentRounds` | 1 … 10.000 (Default 50) | ≤ **10** (Default 10) | `400 INVALID_INPUT`, Feld `guard.maxAdjustmentRounds` |
+| `series[].prices/returns/logReturns/candles` | ≤ 2.000 Punkte | ≤ 2.000 Punkte | `413 LIMIT_EXCEEDED` |
+| `series` | ≤ 1.000 Serien, `Serien × Länge ≤ 400.000` | identisch | `413 LIMIT_EXCEEDED` |
+
+Die Datei-Senke des Audits schreibt **asynchron** (`node:fs/promises`, serialisierte
+Promise-Kette) — der Event-Loop wird durch Audit-I/O nicht mehr blockiert.
+
 ### 5.1 `POST /api/portfolio/metrics`
 
 ```bash
@@ -339,7 +356,7 @@ curl -sX POST http://localhost:3000/api/portfolio/optimize \
                 {"symbol":"SPY","prices":[…]}, {"symbol":"GLD","prices":[…]}, {"symbol":"TLT","prices":[…]} ],
     "mode": "risk_parity",
     "covariance": { "method": "ewma", "decay": 0.94 },
-    "solver": { "tolerance": 1e-9, "maxIterations": 2000, "singularMatrixPolicy": "error" },
+    "solver": { "tolerance": 1e-9, "maxIterations": 400, "singularMatrixPolicy": "error" },
     "bounds": { "minWeight": 0, "maxWeight": 1 },
     "expectedReturns": [0.0004, 0.0003, 0.00025, 0.0001, 0.0002],
     "riskFreeRate": 0,
