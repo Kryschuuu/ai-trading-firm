@@ -1,6 +1,6 @@
 # Multi-Asset Backtest-Engine & Replay-Simulator (Task 02)
 
-**Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/backtest/` · **API:** `/api/firm/backtest`
+**Bestandsdokument** · **Stand:** 2026-09-18 · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/backtest/` · **API:** `/api/firm/backtest`
 **Status zum Stand:** Implementiert
 
 > **Fortschreibung (GAP-01, v1.51.0):** Diese Datei beschreibt die

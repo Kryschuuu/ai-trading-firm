@@ -6,7 +6,7 @@
 - **Quelle / Reviewer:** Principal Software Architect & Senior Security Engineer (Arena-Agent-Vollprüfung)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **v0.17.2 (Beta)**
 - **Umfang:** Vollständige Codebasis (`src/auth/*`, `src/lib/*`, `src/app/api/**`, `src/brokers/*`, `src/live-gate/*`, `src/db/*`, `src/execution/*`, `src/copy/*`, `src/portfolio/*`, `src/ops/*`, `src/components/*`, `deploy/*`, `scripts/*`)
-- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-09` FIXED**, 6 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
+- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-12` FIXED**, 3 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
 - **Vollbericht:** [`report.md`](report.md)
 - **Copy-&-Paste-Prompts:** [`prompts/README.md`](prompts/README.md)
 - **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
@@ -17,9 +17,9 @@
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 3 | 0 | 0 | 3 |
 | HIGH | 6 | 0 | 0 | 6 |
-| MEDIUM | 4 | 4 | 0 | 0 |
+| MEDIUM | 4 | 1 | 0 | 3 |
 | LOW | 2 | 2 | 0 | 0 |
-| **Summe** | **15** | **6** | **0** | **9** |
+| **Summe** | **15** | **3** | **0** | **12** |
 
 ## Executive Summary
 
@@ -52,9 +52,9 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 | [ASA-07](findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender CSRF-Schutz auf zentralen mutierenden Endpunkten (`guardWrite`) sowie fehlende Write-Rate-Limits | Sicherheit (CSRF / DoS) | `FIXED` | [P1-05](prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) |
 | [ASA-08](findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | IP-Spoofing über `X-Verified-IP`, sobald `TRUSTED_PROXY_IPS` gesetzt ist und Next.js auf `0.0.0.0:3369` lauscht | Sicherheit (Netzwerk / Rate-Limit) | `FIXED` | [P1-07](prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) |
 | [ASA-09](findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` parst gesamte NDJSON-Historie pro Query, korrumpiert UTF-8 an 1-MiB-Grenzen und verliert Cross-Prozess-Writes | Performance / Datenintegrität | `FIXED` | [P1-08](prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) |
-| [ASA-10](findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback eröffnet bei Modell-Ausfall blind `LONG`-Trades; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | Code-Qualität / Handelslogik | `OPEN` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
-| [ASA-11](findings/ASA-11-core-db-indexes-unbounded-scans-pool-timeout.md) | MEDIUM | Fehlende Sekundärindizes auf hochfrequenten Kerntabellen, unbegrenzte Full-Table-Loads und fehlendes `statement_timeout` | Performance / Datenbank | `OPEN` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
-| [ASA-12](findings/ASA-12-unbounded-memory-maps-dead-session-prune.md) | MEDIUM | Unbegrenzte In-Memory-Maps, nie aufgerufenes `pruneRevokedSessions()` und nicht persistierte Session-Revocation | Performance / Zuverlässigkeit | `OPEN` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
+| [ASA-10](findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback eröffnet bei Modell-Ausfall blind `LONG`-Trades; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | Code-Qualität / Handelslogik | `FIXED` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
+| [ASA-11](findings/ASA-11-core-db-indexes-unbounded-scans-pool-timeout.md) | MEDIUM | Fehlende Sekundärindizes auf hochfrequenten Kerntabellen, unbegrenzte Full-Table-Loads und fehlendes `statement_timeout` | Performance / Datenbank | `FIXED` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
+| [ASA-12](findings/ASA-12-unbounded-memory-maps-dead-session-prune.md) | MEDIUM | Unbegrenzte In-Memory-Maps, nie aufgerufenes `pruneRevokedSessions()` und nicht persistierte Session-Revocation | Performance / Zuverlässigkeit | `FIXED` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
 | [ASA-13](findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 verstreute `globalThis`-Singletons umgehen `stateRegistry.ts`; `FirmDashboard.tsx` (1.934 Zeilen) triggert Polling-Resets | Architektur & Wartbarkeit | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
 | [ASA-14](findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` fehlt jegliches `systemd`-Sandboxing und weicht bei Pfaden/User von der Haupt-Unit ab | Sicherheit / Betrieb | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
 | [ASA-15](findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` und unvalidierte Ziel-URLs (`http://`, Loopback, Link-Local) in `WebhookAlertSink` | Sicherheit / Performance | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |

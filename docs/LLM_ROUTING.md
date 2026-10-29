@@ -1,6 +1,6 @@
 # LLM-Modell-Routing — der MODEL_ROUTER (Task 09)
 
-**Bestandsdokument** · **Stand:** 2026-09-25 · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Routing-Policy-Version `1.0.0` (Code: `DEFAULT_POLICY_VERSION`) · **Modul:** `src/routing/**` · **API:** `/api/providers`,
+**Bestandsdokument** · **Stand:** 2026-09-25 · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Routing-Policy-Version `1.0.0` (Code: `DEFAULT_POLICY_VERSION`) · **Modul:** `src/routing/**` · **API:** `/api/providers`,
 `/api/routing`, `/api/routing/modes`, `/api/ops/toggles`
 **Status zum Stand:** Governance-Baustein 9 von 12 — Modellwahl ist keine Agentenentscheidung mehr;
 Administratoren können ab 1.22.0 pro Agent einen expliziten Provider/Modell-Override

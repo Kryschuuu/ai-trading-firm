@@ -17,7 +17,7 @@ import {
   positions,
   proposals,
 } from "@/db/schema";
-import { desc, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getOllamaStatus } from "@/lib/ollama";
 import { getBroker } from "@/lib/engine";
 import { getLimits, LIMIT_CEILINGS, DEFAULT_LIMITS, killSwitch } from "@/lib/riskGuard";
@@ -44,11 +44,12 @@ export async function GET(req: Request = new Request("http://localhost/api")) {
     await refreshRuntimeLimits();
     const broker = await getBroker();
 
-    const [agentRows, missionRows, positionRows, proposalRows, auditRows, ksRows, msgRows, fundingRows] =
+    const [agentRows, missionRows, openPositionRows, closedPositionRows, proposalRows, auditRows, ksRows, msgRows, fundingRows] =
       await Promise.all([
         db.select().from(agents),
         db.select().from(missions).orderBy(desc(missions.createdAt)),
-        db.select().from(positions).orderBy(desc(positions.createdAt)).limit(50),
+        db.select().from(positions).where(eq(positions.status, "OPEN")).orderBy(desc(positions.createdAt)),
+        db.select().from(positions).where(eq(positions.status, "CLOSED")).orderBy(desc(positions.updatedAt)).limit(200),
         db.select().from(proposals).orderBy(desc(proposals.createdAt)).limit(20),
         db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(40),
         db.select().from(killSwitches).orderBy(desc(killSwitches.createdAt)).limit(8),
@@ -64,7 +65,7 @@ export async function GET(req: Request = new Request("http://localhost/api")) {
     const ollama = await getOllamaStatus();
 
     // Offene Positionen um Live-Kurs und unrealisiertes PnL anreichern.
-    const enrichedPositions = positionRows.map((p) => {
+    const enrichedPositions = [...openPositionRows, ...closedPositionRows].map((p) => {
       const live = p.status === "OPEN" ? getQuoteSync(p.symbol) : Number(p.exitPrice ?? p.currentPrice ?? p.entryPrice);
       const qty = Number(p.qty);
       const entry = Number(p.entryPrice);

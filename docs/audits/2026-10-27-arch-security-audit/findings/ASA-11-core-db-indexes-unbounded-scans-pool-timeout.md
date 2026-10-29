@@ -3,7 +3,7 @@
 - **ID:** ASA-11
 - **Severity:** MEDIUM
 - **Bereich:** Performance / Datenbank
-- **Status:** OPEN
+- **Status:** FIXED
 - **Datei(en):** `src/db/schema.ts:15-175`, `src/db/index.ts:35-60`, `src/lib/signalDecayRuntime.ts:251-273`, `src/app/api/firm/route.ts:45-60`, `src/lib/monitor.ts:318-323, 574-590`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md`](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md)
 
@@ -26,6 +26,10 @@ Den sechs meistgenutzten Kerntabellen der ersten Schema-Generation fehlen sämtl
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] `src/db/schema.ts` und `drizzle/*.sql` definieren Indizes für alle sechs Kerntabellen; `npm run docs:inventories:check` ist grün.
-- [ ] Weder `signalDecayRuntime.ts` noch `GET /api/firm` führen ein unbegrenztes `select().from(positions)` ohne `LIMIT` / Filter aus.
-- [ ] `pg.Pool` konfiguriert ein deterministisches `statement_timeout`.
+- [x] `src/db/schema.ts` und `drizzle/*.sql` definieren Indizes für alle sechs Kerntabellen; `npm run docs:inventories:check` ist grün.
+- [x] Weder `signalDecayRuntime.ts` noch `GET /api/firm` führen ein unbegrenztes `select().from(positions)` ohne `LIMIT` / Filter aus.
+- [x] `pg.Pool` konfiguriert ein deterministisches `statement_timeout`.
+
+## Umsetzung (v0.17.6)
+
+Siehe [Tracking](../remediation/TRACKING.md#remediation-asa-101112-2026-10-29) für Implementierung, tatsächliches Schema und Betriebsgrenzen. Regression: `tests/asa10_11_12.stabilityAndMemory.test.ts`.

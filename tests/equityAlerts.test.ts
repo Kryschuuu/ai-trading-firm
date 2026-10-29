@@ -65,26 +65,26 @@ test("Drawdown-Schwellen sind ratchet-artig und setzen sich am neuen Hoch zurüc
   const { sent, emit } = collector();
   const state: EquityAlertState = { peak: 10_000, threshold: 0 };
 
-  await checkEquityAlerts({ equity: 9_400, drawdownPct: 6, emit, state });
+  await checkEquityAlerts({ equity: 9_400, drawdownPct: 0.06, emit, state });
   assert.deepEqual(sent.map((s) => s.code), ["equity:drawdown-5"]);
   assert.equal(state.threshold, 5);
 
   // 7 % liegt über der bereits gemeldeten 5-%-Schwelle → kein neuer Alarm.
-  await checkEquityAlerts({ equity: 9_300, drawdownPct: 7, emit, state });
+  await checkEquityAlerts({ equity: 9_300, drawdownPct: 0.07, emit, state });
   assert.equal(sent.length, 1);
 
   // 11 % überspringt 10 und meldet diese (nicht 5 erneut).
-  await checkEquityAlerts({ equity: 8_900, drawdownPct: 11, emit, state });
+  await checkEquityAlerts({ equity: 8_900, drawdownPct: 0.11, emit, state });
   assert.equal(sent.length, 2);
   assert.equal(sent[1].code, "equity:drawdown-10");
   assert.equal(sent[1].severity, "warning");
   assert.equal(state.threshold, 10);
 
   // Erholung unter die Schwelle setzt sie zurück …
-  await checkEquityAlerts({ equity: 9_900, drawdownPct: 1, emit, state });
+  await checkEquityAlerts({ equity: 9_900, drawdownPct: 0.01, emit, state });
   assert.equal(state.threshold, 0);
   // … damit der nächste 5-%-Rückgang wieder meldet.
-  await checkEquityAlerts({ equity: 9_400, drawdownPct: 6, emit, state });
+  await checkEquityAlerts({ equity: 9_400, drawdownPct: 0.06, emit, state });
   assert.equal(sent.length, 3);
   assert.equal(sent[2].code, "equity:drawdown-5");
 
@@ -100,7 +100,7 @@ test("Alarm-Fehler brechen den Aufruf nicht, werden aber gemeldet", async () => 
     throw new Error("Webhook tot");
   }) as unknown as Parameters<typeof checkEquityAlerts>[0]["emit"];
 
-  const result = await checkEquityAlerts({ equity: 9_000, drawdownPct: 10, emit, state, errors });
+  const result = await checkEquityAlerts({ equity: 9_000, drawdownPct: 0.1, emit, state, errors });
   assert.equal(result.threshold, 10);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /Alert equity:drawdown-10: Webhook tot/);
@@ -112,9 +112,9 @@ test("Schwellen-Liste aus der Umgebung, ungültige Kurse werden ignoriert", asyn
   try {
     const { sent, emit } = collector();
     const state: EquityAlertState = { peak: 10_000, threshold: 0 };
-    await checkEquityAlerts({ equity: 9_500, drawdownPct: 5, emit, state });
+    await checkEquityAlerts({ equity: 9_500, drawdownPct: 0.05, emit, state });
     assert.equal(sent.length, 0, "5 % ist mit Schwelle 7 nicht relevant");
-    await checkEquityAlerts({ equity: 9_200, drawdownPct: 8, emit, state });
+    await checkEquityAlerts({ equity: 9_200, drawdownPct: 0.08, emit, state });
     assert.equal(sent.length, 1);
     assert.equal(sent[0].code, "equity:drawdown-7");
   } finally {
@@ -125,7 +125,7 @@ test("Schwellen-Liste aus der Umgebung, ungültige Kurse werden ignoriert", asyn
   // Ungültiger Kontostand (NaN/0) → kein Alarm, kein Zustandswechsel.
   const { sent, emit } = collector();
   const state: EquityAlertState = { peak: 10_000, threshold: 0 };
-  const result = await checkEquityAlerts({ equity: Number.NaN, drawdownPct: 50, emit, state });
+  const result = await checkEquityAlerts({ equity: Number.NaN, drawdownPct: 0.5, emit, state });
   assert.deepEqual(result, { peak: false, threshold: null });
   assert.equal(sent.length, 0);
 });

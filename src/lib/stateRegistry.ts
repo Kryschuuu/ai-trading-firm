@@ -58,7 +58,7 @@
  *   - `rateLimiterHits`         Sliding-Window-Bucket der API-Auth (Single-Node).
  *   - `fourEyesApprovals`       Offene Erstfreigaben des 2-Principal-Vier-Augen-
  *                               Verfahrens (ASA-02, RAM, TTL, single-use).
- *   - `revokedSessions`         Widerrufene Session-IDs mit Ablaufzeitpunkt (RAM).
+ *   - `revokedSessions`         Cache persistierter Session-Widerrufe mit Ablaufzeitpunkt.
  *   - `sessionsRevokedBefore`   Globaler Widerrufs-Zeitstempel fuer Sessions (RAM).
  *   - `ruleCacheInvalidators`   Prozesslokale Callbacks aktiver RuleCaches; PostgreSQL bleibt Wahrheit.
  *   - `killSwitchDbCache` / `killSwitchDbEpoch` / `killSwitchDbInFlight` / `killSwitchSyncedFromDb`
@@ -299,7 +299,7 @@ export const state = {
 
   // ── Session-Revocation (src/lib/authSession.ts) ───────────────────────────
   /**
-   * Widerrufene Session-IDs bis zu ihrer absoluten Grenze `maxExp` (RAM).
+   * Cache persistierter Session-IDs bis zur absoluten Grenze `maxExp`.
    * v1.39.0: nicht bis zur Idle-Frist der zuletzt gesehenen Generation —
    * Verlaengerungen ruecken an ihr, an `maxExp` nie.
    */

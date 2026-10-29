@@ -1,6 +1,6 @@
 # Handbuch — Autonome KI-Trading-Firma
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Bedienung, Beispiele und Notfallabläufe. Geschrieben für **Variante A** (alles auf dem
 N150) und **Variante B** (N150 + Desktop als Modellserver). Unterschiede sind mit

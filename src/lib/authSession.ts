@@ -42,17 +42,20 @@
  * dieser Konfiguration abgeleitet. Rotation/Entfernung/Neueinrichtung eines
  * Tokens invalidiert bestehende Sessions, auch bei konstantem Session-Key —
  * und damit auch jede spaetere Verlaengerung. Unveraenderte Konfiguration
- * erlaubt weiterhin stateless Prozess-Neustarts.
+ * erlaubt weiterhin Prozess-Neustarts mit persistierter Einzel-Revocation.
  * Alle Cookies aelterer Schemata (v1/v2) sind absichtlich ungueltig: Das
  * Upgrade auf die Browser-Session-Policy erfordert einmalig neuen Login.
  *
  * SEC-08 (v1.36.35): Zusaetzlich zur Credential-Bindung existiert eine
- * serverseitige Revocation-Registry (RAM, `state` in `lib/stateRegistry.ts`).
+ * serverseitige Revocation-Registry (Datei und `state`-Cache in `lib/stateRegistry.ts`).
  * `readSession`/`sessionActor` pruefen sie fail-closed vor jeder Rechtevergabe;
  * der globale Epochen-Cutoff ist millisekundengenau deterministisch (Sessions
  * NACH dem Schnitt bleiben gueltig, alle davor sind sofort ungueltig).
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
+import { resolveRuntimePath } from "@/lib/appPaths";
 import {
   ADMIN_TOKEN_FLAG,
   anyTokenConfigured,
@@ -389,6 +392,10 @@ export function verifySessionToken(
   now: number = Date.now(),
   opts: SessionValidityOptions = {}
 ): SessionPayload | null {
+  if (now - lastRevocationPrune >= 60_000 || now < lastRevocationPrune) {
+    pruneRevokedSessions(now);
+    lastRevocationPrune = now;
+  }
   const verified = inspectSessionToken(token, secret, now, opts);
   return verified.state === "valid" ? verified.payload : null;
 }
@@ -508,12 +515,72 @@ export function sessionActor(
   return buildActor(CREDENTIALS[payload.credential].role, "api-session", env);
 }
 
+// Single compact snapshot, atomically replaced under an inter-process lock.
+// Never evict live revocations: saturation or I/O errors fail the logout closed.
+const MAX_REVOCATIONS = 10_000;
+let lastRevocationPrune = 0;
+function revocationPath(): string {
+  return resolveRuntimePath(process.env.FIRM_SESSION_REVOCATION_FILE || "data/session-revocations.json");
+}
+function readRevocations(now: number): Map<string, number> {
+  let raw: string;
+  try { raw = readFileSync(revocationPath(), "utf8"); }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+    throw new Error("Session revocation store unavailable");
+  }
+  try {
+    const entries: unknown = JSON.parse(raw);
+    if (!Array.isArray(entries) || entries.length > MAX_REVOCATIONS) throw new Error();
+    const map = new Map<string, number>();
+    for (const entry of entries) {
+      if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" ||
+          !Number.isSafeInteger(entry[1])) throw new Error();
+      if (entry[1] > now) map.set(entry[0], entry[1]);
+    }
+    return map;
+  } catch { throw new Error("Session revocation store invalid"); }
+}
+function syncRevocations(now: number): void {
+  const map = state.revokedSessions.get();
+  map.clear();
+  for (const [key, exp] of readRevocations(now)) map.set(key, exp);
+}
+function persistRevocation(csrf: string, expiresAt: number, now: number): void {
+  const path = revocationPath();
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const lock = `${path}.lock`;
+  let fd: number | undefined;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    try { fd = openSync(lock, "wx", 0o600); break; }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw new Error("Session revocation store unavailable");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  if (fd === undefined) throw new Error("Session revocation store locked");
+  const temp = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+  try {
+    const entries = readRevocations(now);
+    if (!entries.has(csrf) && entries.size >= MAX_REVOCATIONS) throw new Error("Session revocation capacity reached");
+    entries.set(csrf, Math.max(expiresAt, entries.get(csrf) ?? 0));
+    writeFileSync(temp, JSON.stringify([...entries]), { mode: 0o600, flag: "wx" });
+    renameSync(temp, path);
+    syncRevocations(now);
+  } finally {
+    try { unlinkSync(temp); } catch { /* absent after rename */ }
+    closeSync(fd);
+    unlinkSync(lock);
+  }
+}
+
 /**
  * Prueft, ob eine Session serverseitig widerrufen wurde (SEC-08).
  * Beruecksichtigt sowohl individuelle Session-Revocations als auch globale Epochen-Schnitte.
  * Raeumt abgelaufene Eintraege automatisch auf (Memory-Hygiene).
  */
 export function isSessionRevoked(payload: SessionPayload, now: number = Date.now()): boolean {
+  syncRevocations(now);
   const cutoff = globalRevocationCutoff();
   if (cutoff !== null && payload.iat <= cutoff) {
     return true;
@@ -545,9 +612,10 @@ export function revokeSession(
   session: SessionPayload | string,
   now: number = Date.now()
 ): boolean {
+  pruneRevokedSessions(now);
   const record = (csrf: string, expiresAt: number): boolean => {
     if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return false;
-    state.revokedSessions.get().set(csrf, expiresAt);
+    persistRevocation(csrf, expiresAt, now);
     return true;
   };
   if (typeof session === "string") {
@@ -876,6 +944,7 @@ export function renewSession(
   env: EnvLike = process.env,
   now: number = Date.now()
 ): SessionRenewal {
+  pruneRevokedSessions(now);
   // Der Double-Submit-Wert kommt aus dem Request, nicht aus einem Parameter:
   // ein Aufrufer kann die Pruefung so nicht versehentlich abschalten.
   const csrfToken = req.headers.get("x-csrf-token") ?? "";

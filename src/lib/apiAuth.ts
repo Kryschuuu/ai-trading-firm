@@ -146,6 +146,8 @@ export function resetRateLimiterForTests(): void {
   state.rateLimiterHits.clear();
 }
 
+const MAX_BUCKETS = 10_000;
+
 /**
  * Sliding-Window-Limiter. `max <= 0` deaktiviert (FIRM_RATE_LIMIT=0).
  * Standard: 60 Schreib-Requests / 60 s — Dashboard-Klicks bleiben flüssig,
@@ -159,7 +161,17 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
   const windowMs = opts.windowMs ?? 60_000;
   const now = opts.now ?? Date.now();
   const key = clientKey(req, { peerIp: opts.peerIp });
-  const recent = (state.rateLimiterHits.get().get(key) ?? []).filter((t) => now - t < windowMs);
+  const buckets = state.rateLimiterHits.get();
+  if (!buckets.has(key) && buckets.size >= MAX_BUCKETS) {
+    for (const [id, hits] of buckets) {
+      if (hits.every((t) => now - t >= windowMs)) buckets.delete(id);
+    }
+    // Do not evict active buckets: that would reset an attacker's limit.
+    if (buckets.size >= MAX_BUCKETS) return Response.json(
+      { ok: false, error: "RATE_LIMITED" }, { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+  const recent = (buckets.get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) {
     const retryAfter = Math.max(1, Math.ceil((windowMs - (now - recent[0])) / 1000));
     return Response.json(
@@ -168,7 +180,7 @@ export function checkRateLimit(req: Request, opts: RateLimitOptions = {}): Respo
     );
   }
   recent.push(now);
-  state.rateLimiterHits.get().set(key, recent);
+  buckets.set(key, recent);
   return null;
 }
 

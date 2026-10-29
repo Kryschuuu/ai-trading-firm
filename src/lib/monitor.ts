@@ -939,7 +939,7 @@ export async function checkEquityAlerts(params: {
   const errors = params.errors ?? [];
   const enabled = (process.env[EQUITY_ALERT_ENV.ENABLED] ?? "true").trim().toLowerCase() !== "false";
   const equity = Number(params.equity);
-  const drawdownPct = Number(params.drawdownPct);
+  const drawdownPct = Number(params.drawdownPct) * 100;
   if (!enabled || !Number.isFinite(equity) || equity <= 0) return { peak: false, threshold: null };
 
   const minPeakPct = envNumber("EQUITY_ALERT_PEAK_MIN_PCT", 0.5, 0, 50);
@@ -947,6 +947,7 @@ export async function checkEquityAlerts(params: {
   const state = params.state ?? (GLOBAL.__equityAlertState ??= { peak: equity, threshold: 0 });
   const emit = params.emit ?? emitAlert;
 
+  const previousPeak = state.peak;
   let peakAlert = false;
   let thresholdAlert: number | null = null;
 
@@ -971,7 +972,7 @@ export async function checkEquityAlerts(params: {
     sends.push({
       code: "equity:new-high",
       severity: "info",
-      message: `Neues Equity-Hoch: ${equity.toFixed(2)} (vorher ${state.peak.toFixed(2)}) — Konto über dem bisherigen Höchststand.`,
+      message: `Neues Equity-Hoch: ${equity.toFixed(2)} (vorher ${previousPeak.toFixed(2)}) — Konto über dem bisherigen Höchststand.`,
       meta: { equity: Number(equity.toFixed(2)), thresholdPct: minPeakPct },
     });
   }

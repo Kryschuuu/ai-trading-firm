@@ -43,14 +43,15 @@ function createPool(): Pool {
     max: 10,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 30_000,
+    statement_timeout: 15_000,
   });
   // KORRIGIERT (v1.5.2): Ohne 'error'-Listener am Pool wird ein Fehler eines
   // IDLE Clients (z. B. PostgreSQL-Neustart/SIGTERM → 57P01) zum
   // uncaughtException-Kandidaten — inkl. riesigem Objekt-Dump im Journal und
   // potenziellem Prozess-Exit. Der Handler loggt kompakt; die App erholt sich,
   // sobald die Datenbank wieder da ist (Pool verbindet pro Query neu).
-  pool.on("error", (err) => {
-    console.warn("[db] Pool-Fehler (idle client):", err.message);
+  pool.on("error", () => {
+    console.warn("[db] Pool-Fehler (idle client)");
   });
   return pool;
 }

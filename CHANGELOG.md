@@ -21,8 +21,15 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-29** · Code-Version **0.17.5** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-29** · Code-Version **0.17.6** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.6] — Fail-closed Fallback, Datenbank und Sessions (2026-10-29)
+
+- Bei LLM-Ausfall HOLD/REJECT statt synthetischem Trade; Drawdown-Alerts nutzen Prozentwerte korrekt und erkennen neue Hochs.
+- Idempotente Indizes für die sechs Kerntabellen, begrenzte Dashboard-Positionen, 15 s PostgreSQL-Statement-Timeout.
+- Individuelle Session-Widerrufe bleiben über Neustarts erhalten; Rate-Limit- und Revocation-Speicher sind begrenzt und lehnen bei Sättigung sicher ab. Bitunix räumt terminale Orders auf.
+- Betriebsgrenzen und abweichende Audit-Schemaannahmen: siehe [ASA-10–12](docs/audits/2026-10-27-arch-security-audit/remediation/TRACKING.md).
 
 ## [0.17.5] — Historical Store: Partitionierung, Streaming & Write-Locks (2026-10-29)
 

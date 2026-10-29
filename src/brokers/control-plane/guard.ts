@@ -72,6 +72,8 @@ export function checkAdminGuard(req: Request): Response | null {
 
 // ── Rate-Limit (eigene Buckets, getrennt vom Firm-Schreib-Limit) ─────────────
 
+const MAX_BUCKETS = 10_000;
+
 /** Treffer pro Client-Identitaet (Schluessel aus `resolveClientIp`). */
 const credentialHits = new Map<string, number[]>();
 /** Treffer des globalen, IP-unabhaengigen Buckets (fester Schluessel). */
@@ -132,6 +134,12 @@ function windowHit(
 ): number | null {
   if (!Number.isFinite(max) || max <= 0) return null;
   if (!Number.isFinite(windowMs) || windowMs <= 0) return null;
+  if (!store.has(key) && store.size >= MAX_BUCKETS) {
+    for (const [id, hits] of store) {
+      if (hits.every((t) => now - t >= windowMs)) store.delete(id);
+    }
+    if (store.size >= MAX_BUCKETS) return Math.max(1, Math.ceil(windowMs / 1000));
+  }
   const recent = (store.get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) {
     store.set(key, recent);
@@ -213,6 +221,13 @@ export function recordCredentialFailure(
 ): { failures: number; backoffMs: number } {
   const key = credentialClientKey(req, { peerIp: opts.peerIp, env: opts.env });
   const now = opts.now ?? Date.now();
+  if (!credentialFailures.has(key) && credentialFailures.size >= MAX_BUCKETS) {
+    for (const [id, failure] of credentialFailures) {
+      if (now - failure.lastAt > CREDENTIAL_BACKOFF_RESET_MS && failure.blockedUntil <= now) credentialFailures.delete(id);
+    }
+    // A saturated backoff registry rejects new clients via checkCredentialBackoff.
+    if (credentialFailures.size >= MAX_BUCKETS) return { failures: 0, backoffMs: CREDENTIAL_BACKOFF_RESET_MS };
+  }
   const prev = credentialFailures.get(key);
   const fresh = prev === undefined || now - prev.lastAt > CREDENTIAL_BACKOFF_RESET_MS;
   const count = fresh ? 1 : (prev?.count ?? 0) + 1;
@@ -243,6 +258,14 @@ export function credentialBackoffState(
   const key = credentialClientKey(req, { peerIp: opts.peerIp, env: opts.env });
   const now = opts.now ?? Date.now();
   const state = credentialFailures.get(key);
+  if (!state && credentialFailures.size >= MAX_BUCKETS) {
+    for (const [id, failure] of credentialFailures) {
+      if (now - failure.lastAt > CREDENTIAL_BACKOFF_RESET_MS && failure.blockedUntil <= now) credentialFailures.delete(id);
+    }
+  }
+  if (!state && credentialFailures.size >= MAX_BUCKETS) {
+    return { key, failures: 0, blockedUntil: now + CREDENTIAL_BACKOFF_RESET_MS, retryAfterMs: CREDENTIAL_BACKOFF_RESET_MS };
+  }
   if (!state || state.blockedUntil <= now) {
     return { key, failures: state?.count ?? 0, blockedUntil: 0, retryAfterMs: 0 };
   }

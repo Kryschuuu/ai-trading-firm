@@ -77,6 +77,8 @@ export function mapBitunixOrderStatus(venueStatus: string): import("../../contra
       return "PARTIALLY_FILLED";
     case "FILLED":
       return "FILLED";
+    case "REJECTED":
+      return "REJECTED";
     case "CANCELED":
     case "CANCELLED":
     case "EXPIRED":
@@ -579,8 +581,7 @@ export class BitunixPrivateClient {
         .map((x) => String(x?.orderId ?? ""))
         .filter(Boolean),
       failureList: (data.failureList ?? [])
-        .map((x) => String(x?.orderId ?? ""))
-        .filter(Boolean),
+        .map((x) => String(x?.orderId || x?.clientId || "unidentified-failure")),
     };
   }
 

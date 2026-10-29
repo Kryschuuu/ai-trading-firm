@@ -214,7 +214,7 @@ function temperatureForRole(role: string): number {
 
 /**
  * Das „lokale Gehirn“ der Agenten. Nutzt die Provider-Kette (primär + Fallbacks)
- * mit Retry; scheitert alles, greift die deterministische Regel-Engine.
+ * mit Retry; scheitert alles, folgt ein sicherer HOLD/REJECT.
  *
  * Cost/Performance: LLM_MAX_TOKENS begrenzt jeden Aufruf (Standard 512),
  * LLM_MAX_ATTEMPTS steuert die Retry-Kosten, die Provider-Reihenfolge in
@@ -232,13 +232,13 @@ export async function localReason(
   const chain = resolveProviderChain(env);
 
   // Schneller Weg: nur ein Provider konfiguriert UND nicht erreichbar →
-  // sofort Regel-Engine, ohne einen zweiten (langen) Timeout zu riskieren.
+  // sofort sicherer HOLD, ohne einen zweiten (langen) Timeout zu riskieren.
   const status = await getOllamaStatus();
   if (!status.available && chain.length <= 1) {
     return {
       raw: fallbackReason(role, userPrompt),
       source: "fallback",
-      model: `${model} (nicht geladen → Regel-Engine)`,
+      model: `${model} (nicht geladen → HOLD)`,
       latencyMs: Date.now() - started,
     };
   }
@@ -268,11 +268,11 @@ export async function localReason(
       provider: result.provider,
     };
   } catch (e) {
-    console.warn("[localReason] LLM-Aufruf fehlgeschlagen, nutze Regel-Engine:", e);
+    console.warn("[localReason] LLM-Aufruf fehlgeschlagen, halte Position:", e);
     return {
       raw: fallbackReason(role, userPrompt),
       source: "fallback",
-      model: `${model} (Fehler → Regel-Engine)`,
+      model: `${model} (Fehler → HOLD)`,
       latencyMs: Date.now() - started,
     };
   }
@@ -281,7 +281,7 @@ export async function localReason(
 const KILL_MARKER = "[[REQUEST_KILL]]";
 
 /**
- * Deterministische Regel-Engine (Ersatzgehirn).
+ * Fail-closed Ersatzantwort bei Provider-Ausfall.
  *
  * Wichtig: sie reagiert NICHT auf beliebige Schlüsselwörter im Prompt — sonst würde
  * der Guardrail-Text („keine Shorts“) im Kontext fälschlich eine Ablehnung auslösen.
@@ -295,79 +295,12 @@ export function fallbackReason(role: string, prompt: string): string {
     });
   }
 
-  const symbol = (prompt.match(/SYMBOL=([A-Z0-9]{1,10})/) ?? [])[1] ?? "SPY";
-
-  switch (role.toUpperCase()) {
-    case "CEO":
-      return JSON.stringify({
-        type: "REPORT",
-        reason: `Strategie bestätigt: nur Long in ${symbol}, Positionsgröße über Risikobudget, Stop-Loss verpflichtend. Delegiere an Research.`,
-        riskScore: 0.2,
-      });
-
-    case "RESEARCH":
-      return JSON.stringify({
-        type: "TRADE",
-        symbol,
-        side: "LONG",
-        stopLossPct: 5,
-        reason: `Regel-Engine: ${symbol} über gleitendem Durchschnitt, Volumen bestätigt. Setup mit 5 % Stop.`,
-        riskScore: 0.45,
-      });
-
-    case "BACKTEST":
-      return JSON.stringify({
-        type: "REPORT",
-        reason:
-          "Backtesting ist in dieser Phase bewusst nicht blockierend (Paper-Trading-Fokus). Keine Einwände.",
-        riskScore: 0.3,
-      });
-
-    case "RISK_MANAGER":
-      return JSON.stringify({
-        type: "REPORT",
-        reason:
-          "Risikoprüfung: Positionsgröße innerhalb Budget, Stop-Loss vorhanden, kein Hebel. Freigabe empfohlen.",
-        riskScore: 0.35,
-      });
-
-    case "APPROVER":
-      return JSON.stringify({
-        type: "APPROVE",
-        reason: "Vorschlag entspricht Mandat und harten Limits. Freigegeben.",
-        riskScore: 0.3,
-      });
-
-    case "DEVILS_ADVOCATE":
-      return JSON.stringify({
-        analyses: [
-          {
-            instrumentId: symbol || "BTC",
-            side: "LONG",
-            abstain: false,
-            counterThesis: `Gegenhypothese für ${symbol || "BTC"}: Starker Widerstand und nachlassendes Volumen signalisieren Erschöpfung.`,
-            strongestOpposingEvidence: "Volumendivergenz auf höheren Zeitebenen und überhitztes Orderbuch.",
-            missingEvidence: "Bestätigter Ausbruch mit institutionellem Folgevolumen fehlt.",
-            falsifiers: ["Schlusskurs unter EMA21", "Volumeneinbruch an der Range-Kante"],
-            failureModes: ["Bullentrap", "Liquidations-Squeeze der Spätkäufer"],
-            citations: ["EMA21", "Orderbuch-Tiefe"],
-            confidence: 0.65,
-            severity: 0.60,
-          },
-        ],
-      });
-
-    case "EXECUTOR":
-      return JSON.stringify({
-        type: "TRADE",
-        symbol,
-        side: "LONG",
-        stopLossPct: 5,
-        reason: `Führe freigegebenen Long in ${symbol} mit 5 % Stop aus.`,
-        riskScore: 0.4,
-      });
-
-    default:
-      return JSON.stringify({ type: "HOLD", reason: "Keine Aktion für diese Rolle." });
-  }
+  // Infrastructure failure is never evidence for a trade or approval.
+  return JSON.stringify({
+    type: role.toUpperCase() === "APPROVER" ? "REJECT" : "HOLD",
+    signal: "NEUTRAL",
+    verdict: "REJECT",
+    action: "HOLD",
+    reason: "[FALLBACK: LLM unavailable — holding flat]",
+  });
 }

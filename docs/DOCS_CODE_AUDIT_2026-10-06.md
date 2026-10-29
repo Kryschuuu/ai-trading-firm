@@ -1,6 +1,6 @@
 # Docs↔Code-Audit — Ist/Soll-Abgleich der Dokumentation
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 (Umsetzungsstand § 0.0 nachgeführt 2026-10-10) · **Code-Version:** v0.17.5 (Beta) · Architektur-Doku gegen `src/` + `scripts/` abgeglichen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) **FIXED** 2026-10-09 · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-06 (Umsetzungsstand § 0.0 nachgeführt 2026-10-10) · **Code-Version:** v0.17.6 (Beta) · Architektur-Doku gegen `src/` + `scripts/` abgeglichen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) **FIXED** 2026-10-09 · Prüfbasis laut Bericht `main` @ `104aaef` (im Klon nicht auffindbar; Pfadverweise teils veraltet).
 
 Dies ist ein **externer Audit-Bericht** (kein Modul-Status-Header im Sinne der
 Doku-Konvention). Er beschreibt den Abgleich zwischen `docs/` (338

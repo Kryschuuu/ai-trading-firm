@@ -1,6 +1,6 @@
 # Signal-Decay-Exits (RMA-P5-05, v0.1.0 · Legacy-Zählung v1.69.0 — Zuordnung: CHANGELOG.md)
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Versionierte, deterministische Exits, wenn das **persistierte Entry-Signal**
 gegenüber einem **point-in-time aktuellen Signal derselben Semantik** bestätigt
@@ -133,6 +133,11 @@ Nach einem echten Close (beliebiger Grund):
 - `avoidedPnl = max(0, realized − mtm)` — das Nicht-Schließen hat diesen Betrag erhalten
 
 `triggerCoverage = compatible / evaluated`. `evaluated = 0` ⇒ Coverage `null`.
+
+Für den PnL-Abgleich lädt der PostgreSQL-Store alle geschlossenen Positionen
+mit PnL. Das ist ein gefilterter, aber nicht limitierter Lifetime-Rollup; eine
+Abschneidung würde alte geschlossene Positionen fälschlich als offen ausweisen.
+Bei großen Historien ist eine separate SQL-Aggregation/Paginierung notwendig.
 
 ## Persistenz und Idempotenz
 

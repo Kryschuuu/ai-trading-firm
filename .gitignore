@@ -118,3 +118,6 @@ next-env.d.ts
 # Regime-Snapshot-Evaluation (RMA-P2-01, Laufzeit-Artefakt)
 /data/regime-eval
 data/live-gate-test/
+
+# Session revocation runtime state; never commit tokens or lock files.
+/data/session-revocations.json*
