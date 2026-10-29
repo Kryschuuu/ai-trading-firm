@@ -4,7 +4,7 @@
 
 > **DISCLAIMER: Dieses Projekt befindet sich in der BETA-PHASE und ist für Bildungszwecke und private Nutzung auf eigene Gefahr konzipiert. Der Autor lehnt jegliche Haftung für finanzielle Verluste, technische Fehler, Datenverlust oder Schäden ab. Verwende diesen Code nicht in produktiven Handelsumgebungen. Trading und Investitionen beinhalten erhebliche Risiken — nutze diesen Code auf deine eigene Verantwortung hin und nur nach vollständiger rechtlicher Prüfung.**
 
-**Version: v0.17.4 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
+**Version: v0.17.5 (Beta)** · [Changelog](CHANGELOG.md) · [Versions-Metadaten](VERSION.md) · [Beitragen](CONTRIBUTING.md) · [Lizenz: GPL-3.0-only](LICENSE)
 
 </div>
 
@@ -44,11 +44,23 @@ Identitäten brauchen `TRUSTED_PROXY_SECRET` + `X-Proxy-Secret`; CIDRs allein
 reichen nicht mehr. Boot-Guard verweigert unsichere Proxy-Konfigurationen.
 Upgrade und Rotation: [Konfiguration](CONFIGURATION.md#rate-limit-identität-trusted_proxy_ips-c2-v13614).
 
+**ASA-09 FIXED (v0.17.5):** Der Historical Store partitioniert Kerzen pro
+`(instrumentId, timeframe)` unter `data/history/series/` — `query()` liest nur
+noch die eine Serie statt aller Symbole, liest UTF-8-verlustfrei über
+`StringDecoder` (keine `U+FFFD`-Spaltung an 1-MiB-Chunk-Grenzen) und schreibt
+gebündelt in 64-KiB-Puffern (kein `RangeError` durch Gesamtstrings). Mutierende
+Zugriffe (`append`/`appendSeries`/`clear`/Migration) stehen unter der
+Cross-Prozess-Dateisperre `.store.lock`; bestehende `candles.ndjson`-Bestände
+migrieren automatisch und verlustfrei (Backup: `candles.ndjson.migrated-*`).
+Regression: `tests/asa09.historicalStoreSafety.test.ts`. Details und
+Betriebs-Hinweise: [`docs/HISTORY.md`](docs/HISTORY.md) sowie
+[Finding ASA-09](docs/audits/2026-10-27-arch-security-audit/findings/ASA-09-historical-store-oom-utf8-lost-update.md).
+
 ## Versions-Status
 
 | Feld | Wert |
 | --- | --- |
-| Version | **v0.17.4** (Beta, 2026-10-28; Baseline war v0.1.0) |
+| Version | **v0.17.5** (Beta, 2026-10-29; Baseline war v0.1.0) |
 | Schema | SemVer `v0.x.x` — 0.x heißt: Beta, Breaking Changes erlaubt und dokumentiert |
 | Status | **BETA — nicht produktionsreif**, kein Support-Garantie, keine Live-Trading-Garantien |
 | Beta-Exit | **Bleibt `0.x`/Beta — auch nach vollständigem Ausbau.** Kriterien `B1…B8` in [docs/BETA_STATUS.md](docs/BETA_STATUS.md); die [Strategie-Roadmap](docs/audits/2026-09-29-strategy-template-ausbau/ROADMAP.md) erfüllt **keines** davon |
@@ -331,13 +343,13 @@ Vollständige Security-Architektur und Upgrade-Runbooks:
 ```
 ├── README.md                 ← diese Datei (inkl. Beta-Disclaimer)
 ├── CHANGELOG.md              ← kanonischer Changelog (Keep a Changelog, v0.x.x)
-├── VERSION.md                ← Versions-Metadaten (v0.17.4, Beta) + Komponenten-Übersicht
+├── VERSION.md                ← Versions-Metadaten (v0.17.5, Beta) + Komponenten-Übersicht
 ├── docs/BETA_STATUS.md       ← Beta-Zusage, Exit-Kriterien B1…B8 (kein Roadmap-Exit)
 ├── CONTRIBUTING.md           ← Beitrags-Leitfaden & Konventionen
 ├── LICENSE                   ← GPL-3.0-only
 ├── INSTALL.md                ← Installations-Übersicht (Wrapper → docs/INSTALL.md)
 ├── CONFIGURATION.md          ← verbindliche Env-Flag-Referenz
-├── package.json              ← Version-SSoT (v0.17.4), Scripts, Abhängigkeiten
+├── package.json              ← Version-SSoT (v0.17.5), Scripts, Abhängigkeiten
 ├── .env.example              ← alle Flags mit sicheren Defaults
 ├── src/                      ← Anwendung (Next.js App Router + Modul-Verzeichnis, s. docs/REPOSITORY_STRUCTURE.md)
 ├── tests/                    ← gesamte Test-Suite (node:test; einziger Test-Ort)

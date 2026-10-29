@@ -1,6 +1,6 @@
 # Roadmap & Entwicklungs-Status
 
-> **Stand:** 2026-10-05 · **Code-Version:** v0.17.4 (öffentliches SemVer)<br>
+> **Stand:** 2026-10-05 · **Code-Version:** v0.17.5 (öffentliches SemVer)<br>
 > **Verantwortlich:** `docs/roadmap/STATUS.md`<br>
 > **Aktueller Produktstand:** `v0.17.2` (Beta, nicht produktionsreif). Der<br>
 > [Roadmap-Audit 2026-09-20](../audits/2026-09-20-roadmap-audit/remediation/TRACKING.md)

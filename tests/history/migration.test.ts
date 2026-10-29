@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { migrateHistoryFile, formatMigrationReport } from "../../src/history/migration";
-import { HistoricalStore } from "../../src/lib/marketdata/historicalStore";
+import { HistoricalStore, HISTORY_SCHEMA_VERSION } from "../../src/lib/marketdata/historicalStore";
 
 let dir: string;
 let file: string;
@@ -145,32 +145,50 @@ test("migration deduplicates newest fetchedAt wins and sorts deterministically",
   writeFileSync(file, lines.join("\n") + "\n", "utf8");
 
   migrateHistoryFile({ file, assumeTimeframe: "1h" });
+
+  // Sortierung instrumentId, timeframe, ts in der geschriebenen Datei
+  // (gelesen, BEVOR der Store die Datei automatisch partitioniert — siehe
+  // ASA-09-Layoutmigration).
+  const raw = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.ok(raw[0].instrumentId <= raw[1].instrumentId, "sortiert nach instrumentId");
+
   const store = new HistoricalStore(dir);
   const btc = store.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "1h" });
   assert.equal(btc.length, 1);
   assert.equal(btc[0].close, 999, "jüngstes fetchedAt gewinnt");
-
-  // Sortierung instrumentId, timeframe, ts in der geschriebenen Datei.
-  const raw = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  assert.ok(raw[0].instrumentId <= raw[1].instrumentId, "sortiert nach instrumentId");
 });
 
 test("already-versioned rows pass through and mixed files migrate only legacy rows", () => {
-  const store = new HistoricalStore(dir);
-  store.append(
-    [{ time: 1_700_000_000_000, open: 50, high: 51, low: 49, close: 50.5, volume: 5 }],
-    "BITUNIX:BTCUSDT",
-    { venue: "BITUNIX", feed: "rest" },
-    "5m",
-    new Date("2026-08-21T00:00:00.000Z"),
+  // Gemischte Datei (v2 + v1) handschriftlich erzeugt: die v2-Zeile bleibt
+  // unverändert (alreadyVersioned), nur die Legacy-Zeile bekommt das
+  // angenommene Timeframe.
+  const v2 = JSON.stringify({
+    v: HISTORY_SCHEMA_VERSION,
+    instrumentId: "BITUNIX:BTCUSDT",
+    venue: "BITUNIX",
+    feed: "rest",
+    timeframe: "5m",
+    ts: 1_700_000_000_000,
+    open: 50,
+    high: 51,
+    low: 49,
+    close: 50.5,
+    volume: 5,
+    fetchedAt: "2026-08-21T00:00:00.000Z",
+  });
+  writeFileSync(
+    file,
+    v2 + "\n" + v1Line("BITUNIX:ETHUSDT", 1_700_003_600_000, "2026-08-01T00:00:00.000Z") + "\n",
+    "utf8",
   );
-  // Legacy-Zeile dazuschreiben.
-  appendFileSync(file, v1Line("BITUNIX:ETHUSDT", 1_700_003_600_000, "2026-08-01T00:00:00.000Z") + "\n", "utf8");
 
   const report = migrateHistoryFile({ file, assumeTimeframe: "15m" });
   assert.equal(report.alreadyVersioned, 1);
   assert.equal(report.migrated, 1);
 
+  // Der Store erkennt die (weiterhin monolithische) Datei beim ersten Zugriff
+  // automatisch, partitioniert sie verlustfrei in die Serien und liefert
+  // beide Reihen unter ihren Timeframes.
   const after = new HistoricalStore(dir);
   assert.equal(after.query({ instrumentId: "BITUNIX:BTCUSDT", timeframe: "5m" }).length, 1);
   assert.equal(after.query({ instrumentId: "BITUNIX:ETHUSDT", timeframe: "15m" }).length, 1);

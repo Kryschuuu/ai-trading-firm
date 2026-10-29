@@ -21,8 +21,47 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-28** · Code-Version **0.17.4** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-29** · Code-Version **0.17.5** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.5] — Historical Store: Partitionierung, Streaming & Write-Locks (2026-10-29)
+
+### Security / Performance
+
+- **ASA-09 FIXED:** `HistoricalStore` (`src/lib/marketdata/historicalStore.ts`) ist von der
+  monolithischen `candles.ndjson` auf **partitionierte Serien-Dateien**
+  `<dir>/series/<encodedKey>.ndjson` umgestellt — ein `query({ instrumentId, timeframe })`
+  öffnet und parst nur noch die eine Datei der angefragten Serie (`O(N_series)` statt
+  `O(N_all)`); `appendSeries` schreibt nur die berührten Serien neu.
+- **UTF-8-Chunk-Grenzen:** Der Zeilenleser dekodiert über `StringDecoder("utf8")` —
+  Multi-Byte-Zeichen, die exakt auf einer Chunk-Grenze liegen (Default 1 MiB,
+  für Tests parametrisierbar), werden exakt rekonstruiert statt zu `U+FFFD` zu verfälschen.
+- **Speicherkonstantes Schreiben:** Zeilen gehen in 64-KiB-Bündeln direkt über
+  `writeSync(fd)` + `fsyncSync` + `renameSync` auf die Platte — kein
+  `join("\n")`-Gesamtstring mehr, kein V8-`RangeError: Invalid string length` bei
+  großen Beständen. Temp-Namen sind kollisionsfrei
+  (`.tmp-<pid>-<uuid>`) und werden im Fehlerfall entfernt.
+- **Cross-Prozess-Write-Lock:** `append`/`appendSeries`/`clear` und die Layout-Migration
+  halten `<dir>/.store.lock` (`wx`-Open, Backoff-Retry, Stale-Bereinigung nach Halter-PID/
+  Alter) — parallele Sync-CLI und Web-Server erzeugen keine Lost Updates mehr.
+- **Verlustfreie Auto-Migration:** Bestehende `candles.ndjson`-Bestände werden beim ersten
+  Zugriff unter Lock in die Serien-Dateien überführt; das Original bleibt byte-exakt als
+  `candles.ndjson.migrated-<zeitstempel>` erhalten (Legacy-v1-Zeilen weiterhin über
+  `npm run history:migrate` nachrüstbar). Ohne möglicher Migration lesen alle Zugriffe
+  die Legacy-Datei transparent weiter.
+- **Pflicht-Regression:** `tests/asa09.historicalStoreSafety.test.ts` (UTF-8-Grenzen mit
+  17-Byte- und 1-MiB-Chunks, Partitionierungs-Nachweis mit 20 vergifteten Serien,
+  Legacy-Migration byte-exakt, Cross-Instanz-Ingests, Lock-Timeout/Stale-Recovery,
+  Temp-Hygiene); bestehende Store-Suiten unverändert grün.
+
+### Changed
+
+- Patch-Bump `0.17.4` → `0.17.5`; Versionsmetadaten, Status-Header und Doku
+  (`docs/HISTORY.md` §2a Layout, `docs/MARKET_DATA_PIPELINE.md`) synchronisiert.
+  Neue Store-Helfer: `seriesFilePath()`, `listSeries()`, `stats()`, `clear()`,
+  `readLinesSync(file, chunkSizeBytes)`. Für Betriebs-Backups gilt:
+  `<dir>/series/` **und** eventuelle `candles.ndjson.migrated-*`-Backups sichern
+  (siehe `docs/HISTORY.md`).
 
 ## [0.17.4] — Proxy-Authentisierung & Loopback-Bind (2026-10-28)
 

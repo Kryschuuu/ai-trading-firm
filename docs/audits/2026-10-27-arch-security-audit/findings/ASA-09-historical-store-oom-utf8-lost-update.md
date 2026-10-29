@@ -3,7 +3,7 @@
 - **ID:** ASA-09
 - **Severity:** HIGH
 - **Bereich:** Performance & Datenintegrität
-- **Status:** OPEN
+- **Status:** `FIXED` (v0.17.5, 2026-10-29)
 - **Datei(en):** `src/lib/marketdata/historicalStore.ts:375-425`, `src/lib/marketdata/historicalStore.ts:440-530`, `src/lib/marketdata/historicalStore.ts:555-603`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md`](../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md)
 
@@ -26,6 +26,63 @@
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Multi-Byte-UTF-8-Zeichen (z. B. in `source` oder Instrument-Metadaten), die exakt über eine Chunk-Grenze fallen, werden verlustfrei zurückgelesen.
-- [ ] `query({ instrumentId, timeframe })` liest nur noch die Datei der angefragten Serie statt aller anderen Symbole.
-- [ ] Kein `join("\n")` über das gesamte Bar-Array mehr in `writeAll`; eindeutige `.tmp`-Suffixe und Cross-Handle-Schreibschutz sind durch `tests/asa09.historicalStoreSafety.test.ts` abgedeckt.
+- [x] Multi-Byte-UTF-8-Zeichen (z. B. in `venue`/`feed`/Instrument-Metadaten), die exakt über eine Chunk-Grenze fallen, werden verlustfrei zurückgelesen.
+- [x] `query({ instrumentId, timeframe })` liest nur noch die Datei der angefragten Serie statt aller anderen Symbole.
+- [x] Kein `join("\n")` über das gesamte Bar-Array mehr in `writeAll`; eindeutige `.tmp`-Suffixe und Cross-Handle-Schreibschutz sind durch `tests/asa09.historicalStoreSafety.test.ts` abgedeckt.
+
+## Umsetzung (FIXED, v0.17.5 — 2026-10-29)
+
+Alle vier Defekte sind in `src/lib/marketdata/historicalStore.ts` behoben:
+
+1. **UTF-8-verlustfreies Streaming (`readLinesSync`):** Der zeilenweise Leser
+   dekodiert über `StringDecoder("utf8")` aus `node:string_decoder`
+   (`decoder.write(chunk)` je Block, `decoder.end()` am Dateiende). Ein
+   Multi-Byte-Zeichen, das exakt auf einer Chunk-Grenze liegt, wird exakt
+   rekonstruiert — nachgewiesen für 2-/3-/4-Byte-Zeichen mit 17-Byte-Puffern
+   und für ein 4-Byte-Zeichen exakt auf der echten 1-MiB-Grenze.
+   `chunkSizeBytes` ist als optionaler Parameter für Grenz-Unit-Tests
+   parametrisierbar (`READ_CHUNK_BYTES` = 1 MiB als Default).
+2. **Speicherkonstantes, atomares Schreiben:** Die Schreibroutine bündelt
+   Zeilen in 64-KiB-Puffern und schreibt direkt über `writeSync(fd, chunk)` +
+   `fsyncSync(fd)` + `closeSync(fd)` + `renameSync(tmp, target)` — der
+   zusätzliche String-Speicher bleibt konstant `O(64 KiB)`, ein
+   `RangeError: Invalid string length` ist ausgeschlossen (auch in
+   `writeStoreSnapshot`). Temp-Namen sind kollisionsfrei
+   (`${target}.tmp-${process.pid}-${randomUUID()}`) und werden im `catch`
+   via `rmSync(…, { force: true })` entfernt.
+3. **Cross-Prozess-Sperre:** `append`/`appendSeries`/`clear` und die
+   Layout-Migration halten `<dir>/.store.lock` (`openSync(…, "wx")`, Retry mit
+   Backoff, Stale-Bereinigung nach Halter-PID und Haltezeit ≥ 15 s,
+   `LOCK_TIMEOUT`-Fehler statt stillem Overwrite; Freigabe nur durch den
+   Halter-Prozess). Zwei Store-Instanzen — auch über Prozessgrenzen —
+   erzeugen keine Lost Updates mehr.
+4. **Partitionierung pro `(instrumentId, timeframe)`:** Serien liegen unter
+   `<dir>/series/<encodedKey>.ndjson`; der Dateiname ist bijektiv und
+   Path-Traversal-frei (Percent-Encoding aller Zeichen außer
+   `[A-Za-z0-9._-]`, `%` selbst wird mitkodiert; unbekannter Timeframe →
+   `INVALID_TIMEFRAME`, zu lange IDs → `INSTRUMENT_ID_TOO_LONG` fail-closed).
+   `query()` öffnet und parst ausschließlich die eine Partitionsdatei;
+   Partitionsdateien sind aufsteigend nach `ts` sortiert und werden
+   zeilenweise gestreamt (`from`/`to` filtern im Strom, `limit` nach dem
+   Sortieren). `appendSeries` liest/schreibt nur die berührten Serien.
+5. **Rückwärtskompatibilität:** Existiert noch eine Legacy-`candles.ndjson`,
+   wird sie beim ersten Lese-/Schreibzugriff **unter Lock** automatisch und
+   verlustfrei migriert: v2-Zeilen wandeln dedupliziert in die Serien-Dateien,
+   das Original bleibt byte-exakt als `candles.ndjson.migrated-<stamp>-<uuid>`
+   erhalten (Legacy-v1-Zeilen ausschließlich dort; `npm run history:migrate`
+   kann das Backup weiter verarbeiten). Schlägt die Migration fehl (read-only),
+   lesen alle Zugriffe die Legacy-Datei transparent weiter. Neue Helfer-API:
+   `seriesFilePath()`, `listSeries()`, `stats()`, `clear()`,
+   `readLinesSync(file, chunkSizeBytes?)`.
+
+### Verifikation
+
+- `npx tsx --test tests/asa09.historicalStoreSafety.test.ts
+  tests/history/historicalStore.test.ts tests/marketdata/historicalStore.test.ts`
+  — 34/34 grün (UTF-8-Grenzen 17 B/1 MiB, 20-Serien-Partitionierungsnachweis
+  mit vergifteten Fremdpartitionen, Legacy-Migration byte-exakt + idempotent,
+  Cross-Instanz-Ingests ohne Lost Updates, Lock-Timeout/Stale-Recovery,
+  Temp-Hygiene, 20.000-Bar-Schreiblauf).
+- `npm run typecheck`, `npm run lint`, `npm run docs:validate`, `npm test`
+  und `npm run security:live-gate` — grün (Stand v0.17.5).
+
