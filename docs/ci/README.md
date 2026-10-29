@@ -1,6 +1,6 @@
 # CI-Workflows — Quelle, Synchronisation & Betrieb
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-27 · **Code-Version:** v0.17.5 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter, Spiegel-Sync & Dependabot gehärtet
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-27 · **Code-Version:** v0.17.6 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter, Spiegel-Sync & Dependabot gehärtet
 
 > **Zweck:** Diese Dateien spiegeln die GitHub-Actions-Workflows unter `.github/workflows/`. Beide Kopien werden zusammen gepflegt — sowohl lokal über `npm run docs:validate` / `npm run ci:sync:check` als auch in CI über den Vorab-Spiegel-Sync-Schritt und `scripts/sync-ci-workflows.ts` wird erzwungen, dass sie byte-identisch bleiben. Workflow-Änderungen benötigen entsprechende GitHub-Schreibrechte (`workflows`-Scope); fehlen diese einer Verbindung, pflegt der Repository-Owner den Spiegel über `npm run ci:sync`.
 

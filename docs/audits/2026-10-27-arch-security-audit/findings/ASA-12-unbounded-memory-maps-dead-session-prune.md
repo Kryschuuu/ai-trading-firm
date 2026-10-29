@@ -3,7 +3,7 @@
 - **ID:** ASA-12
 - **Severity:** MEDIUM
 - **Bereich:** Performance / Zuverlässigkeit & Sicherheit
-- **Status:** OPEN
+- **Status:** FIXED
 - **Datei(en):** `src/lib/authSession.ts:520-630`, `src/lib/apiAuth.ts:152-170`, `src/brokers/control-plane/guard.ts:75-85`, `src/brokers/bitunix/execution.ts:106, 183, 217-296`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md`](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md)
 
@@ -25,6 +25,10 @@ Mehrere langlebige In-Memory-Maps wachsen im Dauerbetrieb ohne Obergrenze oder B
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Ein ausgeloggtes Session-Token bleibt auch nach Re-Initialisierung des In-Memory-Caches / Neustart ungültig.
-- [ ] Rate-Limit-Maps überschreiten unter simulierten 20.000 eindeutigen Schlüsseln niemals `MAX_BUCKETS`.
-- [ ] `BitunixExecutionAdapter.openOrders` leert abgeschlossene und stornierte Orders zuverlässig.
+- [x] Ein ausgeloggtes Session-Token bleibt auch nach Re-Initialisierung des In-Memory-Caches / Neustart ungültig.
+- [x] Rate-Limit-Maps überschreiten unter simulierten 20.000 eindeutigen Schlüsseln niemals `MAX_BUCKETS`.
+- [x] `BitunixExecutionAdapter.openOrders` leert abgeschlossene und stornierte Orders zuverlässig.
+
+## Umsetzung (v0.17.6)
+
+Siehe [Tracking](../remediation/TRACKING.md#remediation-asa-101112-2026-10-29) für Implementierung, tatsächliches Schema und Betriebsgrenzen. Regression: `tests/asa10_11_12.stabilityAndMemory.test.ts`.

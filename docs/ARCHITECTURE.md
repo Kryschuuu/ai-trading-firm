@@ -1,6 +1,6 @@
 # Architektur: Event-Driven Multi-Zyklen-Trading-System (v0.1.0 · Legacy-Zählung v1.7 — Zuordnung: CHANGELOG.md)
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-29 · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Tasks 1–11 gemerged; Versionsverlauf: CHANGELOG.md
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-29 · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Tasks 1–11 gemerged; Versionsverlauf: CHANGELOG.md
 > Verantwortlich: `docs/ARCHITECTURE.md` (Docs-as-Code, Pflege-Regeln: [§13](#13-wie-docs-hier-gepflegt-werden-docs-as-code))
 
 **Detailliertes Architektur- und Implementierungskonzept** für eine

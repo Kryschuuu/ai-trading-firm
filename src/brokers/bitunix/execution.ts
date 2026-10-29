@@ -272,6 +272,7 @@ export class BrokerExecutionEngine implements ExecutionPort {
             reason: "FILL_PRICE_UNKNOWN",
           };
         }
+        if (status === "FILLED") this.openOrders.delete(orderId);
         return {
           ...base,
           // filledQty bevorzugt aus den Trades, sonst die Venue-Angabe.
@@ -281,6 +282,7 @@ export class BrokerExecutionEngine implements ExecutionPort {
         };
       }
       case "CANCELED":
+        this.openOrders.delete(orderId);
         return {
           ...base,
           filledQty: filledQty > 0 ? filledQty : order.filledQty,
@@ -288,6 +290,9 @@ export class BrokerExecutionEngine implements ExecutionPort {
           status: "CANCELED",
           reason: "ORDER_CANCELED",
         };
+      case "REJECTED":
+        this.openOrders.delete(orderId);
+        return { ...base, status: "REJECTED", reason: "ORDER_REJECTED" };
       default:
         return { ...base, status: "UNKNOWN", reason: `VENUE_STATUS:${order.status}` };
     }
@@ -319,6 +324,9 @@ export class BrokerExecutionEngine implements ExecutionPort {
   /** H7: Storniert alle offenen Venue-Orders (cancel_all_orders). */
   async cancelAllOpenOrders(): Promise<EmergencyCancelResult> {
     const res = await this.privateClient.cancelAllOrders();
+    // A partial cancel must retain entries not confirmed canceled by the venue.
+    if (res.failureList.length === 0) this.openOrders.clear();
+    else for (const order of res.successList) this.openOrders.delete(order);
     return { canceled: res.successList.length };
   }
 

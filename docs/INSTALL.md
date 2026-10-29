@@ -1,6 +1,6 @@
 # Installation — Schritt für Schritt auf CachyOS
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 > **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf den
 > gepinnten Next.js-Stand ≥ 16.4.1 einschließlich nativer Bildverarbeitung
@@ -537,8 +537,9 @@ curl -s http://localhost:3369/api/firm | jq '{
 }'
 ```
 
-Wenn `verfuegbar: false` erscheint, arbeitet das System mit der Regel-Engine — die
-Pipeline funktioniert trotzdem, nur ohne echtes Modell. Prüfe dann `OLLAMA_BASE_URL`.
+Wenn `verfuegbar: false` erscheint und kein alternativer Provider erreichbar ist,
+antwortet die Agenten-Pipeline fail-closed mit HOLD/REJECT statt eines Demo-Trades.
+Prüfe dann `OLLAMA_BASE_URL`.
 
 Kompletter Durchlauf:
 
@@ -549,7 +550,7 @@ curl -s -X POST http://localhost:3369/api/firm/run \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" | jq '.pipeline[] | {rolle:.role, status:.result.status, quelle:.result.source, ms:.result.latencyMs}'
 ```
 
-Erwartete Ausgabe (Variante A, Regel-Engine oder kleines Modell):
+Beispielausgabe bei verfügbarem Modell (kein Offline-Fallback):
 
 ```json
 {"rolle":"CEO","status":"REPORT","quelle":"ollama","ms":4210}

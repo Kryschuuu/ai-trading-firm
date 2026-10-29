@@ -1,6 +1,6 @@
 # Missionen, Markt-Scans und Vorlagen
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Module:** `src/lib/missionTemplates.ts`,
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Module:** `src/lib/missionTemplates.ts`,
 > `src/lib/missionUniverse.ts`, `src/lib/workshop.ts`, `src/lib/seed.ts` ·
 > **UI:** Dashboard → Reiter **🛠 Workshop** → *1 · Mission anlegen*
 

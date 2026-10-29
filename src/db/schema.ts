@@ -107,7 +107,9 @@ export const missions = pgTable("missions", {
   status: text("status").notNull().default("PENDING"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index("missions_status_created_idx").on(t.status, t.createdAt),
+]);
 
 /**
  * Regelwerk des Makro-Zyklus (CEO/Research) — die einzige Brücke zur
@@ -174,6 +176,7 @@ export const tradeRules = pgTable("trade_rules", {
    *    squashen auf beiden Seiten identisch → stabiler Push.
    *    Semantik: pro (Symbol, Mandat) höchstens EINE ACTIVE-Regel.
    */
+  index("trade_rules_status_symbol_idx").on(t.status, t.symbol),
   uniqueIndex("trade_rules_active_unique").on(t.ruleKey).where(sql`${t.status} = 'ACTIVE'`),
   uniqueIndex("trade_rules_active_symbol_unique")
     .on(sql`"symbol"`, sql`COALESCE(${t.missionId}, '00000000-0000-0000-0000-000000000000'::uuid)`)
@@ -524,6 +527,8 @@ export const positions = pgTable("positions", {
   // normal) — bei jedem Kaltstart und, vor dem Fix, bei jedem einzelnen
   // Aufruf. Der partielle Index enthält nur die offenen Zeilen und bedient
   // zugleich die Symbol-Lookups (`WHERE status = 'OPEN' AND symbol = …`).
+  index("positions_status_created_idx").on(t.status, t.createdAt),
+  index("positions_updated_idx").on(t.updatedAt),
   index("positions_open_idx")
     .on(t.symbol)
     .where(sql`${t.status} = 'OPEN'`),
@@ -538,7 +543,10 @@ export const agentMessages = pgTable("agent_messages", {
   content: text("content").notNull(),
   meta: jsonb("meta"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index("agent_messages_mission_created_idx").on(t.missionId, t.createdAt),
+  index("agent_messages_created_idx").on(t.createdAt),
+]);
 
 /** Revisionssicheres Protokoll: jede Entscheidung, jedes Guardrail-Urteil. */
 export const auditLog = pgTable("audit_log", {
@@ -549,7 +557,10 @@ export const auditLog = pgTable("audit_log", {
   level: text("level").notNull().default("INFO"), // INFO | WARN | CRITICAL
   detail: jsonb("detail"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index("audit_log_created_idx").on(t.createdAt),
+  index("audit_log_event_created_idx").on(t.event, t.createdAt),
+]);
 
 /**
  * Broker-Credentials der Control Plane (Task 08) — IMMER verschluesselt.
@@ -683,7 +694,9 @@ export const equitySnapshots = pgTable("equity_snapshots", {
   realizedPnlToday: numeric("realized_pnl_today").notNull().default("0"),
   /** Auslöser des Snapshots: TICK | TRADE | CLOSE | FLATTEN | BOOT */
   trigger: text("trigger").notNull().default("TICK"),
-});
+}, (t) => [
+  index("equity_snapshots_ts_idx").on(t.ts),
+]);
 
 /**
  * Trade-Journal mit Agenten-Attribution (GAP-03, v1.43.0).

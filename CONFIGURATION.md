@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.5** (Prompt-Budget
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.6** (Prompt-Budget
 > und Batch-Analyse nachgezogen, §5)
 >
 > **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema
@@ -248,9 +248,18 @@ manuelle Freigaben muss dieses Flag `true` sein. Keine neue Variable erforderlic
   (`pruneRevokedSessions`). Der Cutoff ist streng monoton und neue Sessions werden
   strikt nach ihm datiert: Ein Login in derselben Millisekunde wie der Cut bleibt
   gültig, ein rückwärts springender Systemtakt hebt keinen Cut auf (kein Fail-Open).
-  Revocation-Status lebt im Prozess-RAM — nach einem Neustart sind Einzel-Widerrufe
-  und der Cutoff weg; für einen harten Schnitt zusätzlich Tokens/`FIRM_SESSION_SECRET`
-  rotieren (invalidiert alle Sessions über `authEpoch`).
+  Einzel-Widerrufe werden bis `maxExp` atomar in `data/session-revocations.json`
+  persistiert; `FIRM_SESSION_REVOCATION_FILE` kann den Pfad überschreiben.
+  Alle Web-Prozesse müssen denselben persistenten, vertrauenswürdigen lokalen
+  Dateisystempfad sehen. Datei und Verzeichnis vor fremden Zugriffen schützen;
+  weder Datei noch Backups löschen, solange Sessions gültig sind. Fehlerhafte
+  oder nicht lesbare Daten und eine volle Registry (10.000 aktive Einträge)
+  führen zu Fehlern statt stillem Entfernen aktiver Widerrufe. Eine nach einem
+  Crash verbliebene `.lock`-Datei erst nach Prüfung auf laufende Schreiber
+  entfernen. Dateiverlust kann alte Cookies wieder zulassen: dann unbedingt
+  `FIRM_SESSION_SECRET` und Credentials rotieren. Der globale Cutoff selbst
+  bleibt prozesslokal und flüchtig: für einen dauerhaften globalen Schnitt
+  ebenfalls das Session-Secret rotieren. Rate-Limits sind prozesslokal.
 
 **Upgrade:** Vor Deploy einen neuen unabhängigen Schlüssel in `.env` oder dem
 serverseitigen Secret-Management setzen. Beide Installer ergänzen nur fehlende
@@ -315,9 +324,9 @@ welche Rolle trägt die Sitzung, wie lange noch — secret-frei, `no-store`).
 4. **`iat` rutscht nicht.** Verlängern verschiebt nur `exp`. Der globale
    Revocation-Schnitt (SEC-08) bleibt wirksam: Ein Cut tötet alle vor ihm
    ausgestellten Sitzungen — auch verlängerte.
-5. **Revocation bleibt RAM** (unverändert seit SEC-08): Nach einem Neustart
-   sind Einzel-Widerrufe und der Cut weg. Harte Trennung erreicht die Rotation
-   von `FIRM_SESSION_SECRET`.
+5. **Einzel-Widerrufe sind persistent**, der globale Cut bleibt im RAM. Für
+   einen dauerhaften globalen Schnitt `FIRM_SESSION_SECRET` rotieren; bei
+   Dateiverlust ebenfalls rotieren (siehe Betriebsgrenzen oben).
 6. **Sitzungs-Wiederherstellung des Browsers** kann das Cookie rehydrieren.
    Die Rechte hängen am Payload: ist `exp` um und die Nachfrist vorbei, nützt
    das beste Cookie nichts.

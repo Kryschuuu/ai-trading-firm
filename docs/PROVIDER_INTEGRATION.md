@@ -1,6 +1,6 @@
 # LLM-Provider-Integration
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Die Agenten der Trading-Firma sprechen **nicht** direkt mit einem Modellserver,
 sondern mit einer abstrakten Schnittstelle (`src/lib/llmProvider.ts`). Darunter
@@ -25,7 +25,7 @@ Agent (engine.ts)                Standardisierter Call               Adapter
     latencyMs,                                  │ Backoff + Jitter
     costUsd}                                    ▼
                                     LLM_FALLBACK_PROVIDERS → nächster Adapter
-                                    sonst: deterministische Regel-Engine
+                                    sonst: Fail-closed HOLD / REJECT
 ```
 
 ## 1. Provider & Konfiguration
@@ -47,7 +47,7 @@ LLM_FALLBACK_PROVIDERS=gemini,anthropic   # optional (kommagetrennt)
 
 Scheitert der primäre Provider nach allen Retries (oder ist er nicht erreichbar),
 werden die Fallbacks in Reihenfolge probiert. Erst wenn **alle** scheitern, antwortet
-die deterministische Regel-Engine — es wird nie blind gehandelt.
+`localReason` mit HOLD/REJECT und der Begründung „LLM unavailable — holding flat“ — kein synthetischer Trade. Ein expliziter Not-Halt bleibt KILL. Davon getrennt ist die regelbasierte Mikro-/Makro-Engine.
 
 ## 2. Standardisierte API-Calls
 
@@ -95,7 +95,7 @@ LLM_TIMEOUT_MS=180000  # Abbruch pro Aufruf
 * **Kein Retry:** 4xx (Konfigurations-/Programmierfehler) und Parse-Fehler.
 * **Backoff:** `baseMs · 2^(attempt−1)` + Jitter, Kappung bei 8 s.
 * Fehlerdetails landen als `console.warn` im Journal; der letzte Fehler wird bei
-  Totalausfall geworfen und von `localReason` in einen Regel-Engine-Fallback
+  Totalausfall geworfen und von `localReason` in einen HOLD-/REJECT-Fallback
   übersetzt (auditierbar über `agent_messages.meta.source = "fallback"`).
 
 ## 4. Cost-/Performance-Trade-offs

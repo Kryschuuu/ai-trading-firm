@@ -3,7 +3,7 @@
 - **ID:** ASA-10
 - **Severity:** MEDIUM
 - **Bereich:** Code-Qualität / Handelslogik
-- **Status:** OPEN
+- **Status:** FIXED
 - **Datei(en):** `src/lib/ollama.ts:305-372`, `src/lib/monitor.ts:554`, `src/lib/monitor.ts:865-910`
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md`](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md)
 
@@ -26,5 +26,9 @@ Zwei fachlogische Fehler im Risiko- und Ausführungspfad:
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Schlägt der Ollama-Aufruf fehl, endet der Pipeline-Lauf deterministisch mit `ACTION: HOLD` und eröffnet keine neue Position.
-- [ ] Bei 6 %, 11 % und 21 % Drawdown (`broker.drawdownPct = 0.06 / 0.11 / 0.21`) werden die entsprechenden Drawdown-Alerts ausgelöst; bei neuem Equity-Hoch feuert der New-High-Alert genau einmal pro neuem Hoch.
+- [x] Schlägt der Ollama-Aufruf fehl, endet der Pipeline-Lauf deterministisch mit `ACTION: HOLD` und eröffnet keine neue Position.
+- [x] Bei 6 %, 11 % und 21 % Drawdown (`broker.drawdownPct = 0.06 / 0.11 / 0.21`) werden die entsprechenden Drawdown-Alerts ausgelöst; bei neuem Equity-Hoch feuert der New-High-Alert genau einmal pro neuem Hoch.
+
+## Umsetzung (v0.17.6)
+
+Siehe [Tracking](../remediation/TRACKING.md#remediation-asa-101112-2026-10-29) für Implementierung, tatsächliches Schema und Betriebsgrenzen. Regression: `tests/asa10_11_12.stabilityAndMemory.test.ts`.

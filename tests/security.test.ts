@@ -72,10 +72,9 @@ test("fallbackReason: REQUEST_KILL löst immer KILL aus, egal welche Rolle", () 
 
 test("fallbackReason: normale Rollen liefern deterministische Entscheidungen", () => {
   const research = JSON.parse(fallbackReason("RESEARCH", "SYMBOL=ETH"));
-  assert.equal(research.type, "TRADE");
-  assert.equal(research.symbol, "ETH");
+  assert.equal(research.type, "HOLD");
   const ceo = JSON.parse(fallbackReason("CEO", "SYMBOL=SPY"));
-  assert.equal(ceo.type, "REPORT");
+  assert.equal(ceo.type, "HOLD");
   const unknown = JSON.parse(fallbackReason("SCOUT", "SYMBOL=ZZZ"));
   assert.equal(unknown.type, "HOLD");
 });

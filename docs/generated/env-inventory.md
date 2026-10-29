@@ -7,7 +7,7 @@
 > — Abgleich: [`.env.example`](../../.env.example), [`CONFIGURATION.md`](../../CONFIGURATION.md), Install-Guides
 > — Pflege: neues Flag mit `env*`-Helper lesen, in `.env.example` und `CONFIGURATION.md` eintragen, Skript neu laufen lassen.
 
-Insgesamt **299** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensräume (Muster `env[…]`): 1 — über die Musterprüfung abgedeckt, nicht einzeln gelistet.
+Insgesamt **300** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensräume (Muster `env[…]`): 1 — über die Musterprüfung abgedeckt, nicht einzeln gelistet.
 
 
 | Flag | gelesen | in `.env.example` | in `CONFIGURATION.md` |
@@ -94,6 +94,7 @@ Insgesamt **299** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensr�
 | `FIRM_SESSION_GRACE_S` | ✅ | ✅ | ✅ |
 | `FIRM_SESSION_IDLE_TTL_S` | ✅ | ✅ | ✅ |
 | `FIRM_SESSION_MAX_LIFE_S` | ✅ | ✅ | ✅ |
+| `FIRM_SESSION_REVOCATION_FILE` | ✅ | — | ✅ |
 | `FIRM_SESSION_SECRET` | ✅ | ✅ | ✅ |
 | `FIRM_VIEWER_TOKEN` | ✅ | ✅ | ✅ |
 | `FORECAST_LEDGER_ENABLED` | ✅ | — | ✅ |
