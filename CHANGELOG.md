@@ -21,8 +21,22 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-28** · Code-Version **0.17.3** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-28** · Code-Version **0.17.4** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.4] — Proxy-Authentisierung & Loopback-Bind (2026-10-28)
+
+### Security
+
+- **ASA-08 FIXED:** Fetch-Requests ohne Socket-Peer akzeptieren `X-Verified-IP` nur mit gültigen Proxy-CIDRs und konstantzeitlich geprüftem `TRUSTED_PROXY_SECRET` / `X-Proxy-Secret`. Ein echter Socket-Peer außerhalb der Liste bleibt auch mit passendem Secret untrusted. XFF bleibt socket-only; ungültige CIDRs aktivieren keinen Loopback-Fallback.
+- **Binding:** Produktionsstart und systemd binden explizit `127.0.0.1`; Port-Default 3369 mit bestehendem `PORT`-Override. LAN-Zugriff über lokalen TLS-Reverse-Proxy statt direkten App-Port.
+- **Boot:** CLI und Instrumentation verweigern CIDR-only-Konfigurationen, auch auf Loopback. Requestpfad bleibt bei umgangenem Boot-Guard fail-closed. Builds benötigen keine Proxy-Secrets.
+- **Regressionen:** neue ASA-08-/Boot-Prozess-Tests, echter Login-429 trotz rotierter Header, API-Limiter, Secret-Fehlerfälle, Socket-CIDR-Vorrang und secret-freie Diagnose; integriert in `security:live-gate`.
+
+### Changed
+
+- **Upgrade erforderlich:** Bestehende Next.js-Proxy-Setups benötigen ein unabhängiges Secret (`openssl rand -hex 32`) in App und Proxy; beide IP-/Secret-Header müssen überschrieben werden. Rotation, Netzgrenzen und sicherer Rückfall sind in `CONFIGURATION.md` und `docs/INSTALL.md` dokumentiert.
+- Patch-Bump `0.17.3` → `0.17.4`; aktive Code-Version-Header, Lockfile, Versionsmetadaten und generierte Inventare synchronisiert. Historische Audit-Prüfstände bleiben erhalten.
 
 ## [0.17.3] — API-RBAC, Session-CSRF & Fehlerredaktion (2026-10-28)
 

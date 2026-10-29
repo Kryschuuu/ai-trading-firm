@@ -26,9 +26,12 @@ import "dotenv/config";
 import { assertAuthConfigured, authModeWarnings, describeAuthMode } from "../src/auth/authMode";
 import { clientIpPolicyWarnings, describeClientIpPolicy } from "../src/lib/clientIp";
 
+import { assertProxyTrustConfigured } from "../src/lib/proxyTrustBoot";
+
 function main(): void {
   try {
     const decision = assertAuthConfigured();
+    assertProxyTrustConfigured();
     for (const line of authModeWarnings(decision)) console.warn(line);
     console.log(`[auth] ${describeAuthMode(decision)} — Start erlaubt`);
     // C2/v1.36.14: sichtbar machen, woraus die Rate-Limit-Identität kommt.

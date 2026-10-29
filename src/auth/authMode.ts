@@ -53,6 +53,8 @@ export type AuthModeReason =
   | "invalid-auth-mode";
 
 export type ConfigurationErrorCode =
+  | "TRUSTED_PROXY_SECRET_REQUIRED"
+  | "TRUSTED_PROXY_SECRET_INVALID"
   | "AUTH_NOT_CONFIGURED"
   | "AUTH_MODE_INVALID"
   | "SESSION_SECRET_REQUIRED"

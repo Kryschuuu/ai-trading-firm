@@ -50,6 +50,8 @@ export async function register() {
   if (!isBuildPhase) {
     try {
       const decision = assertAuthConfigured();
+      const { assertProxyTrustConfigured } = await import("@/lib/proxyTrustBoot");
+      assertProxyTrustConfigured();
       for (const line of authModeWarnings(decision)) console.warn(line);
       console.log(`[auth] ${describeAuthMode(decision)}`);
       // C2/v1.36.14: Policy der Rate-Limit-Identität im Boot-Log (secret-frei).

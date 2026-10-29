@@ -1,6 +1,6 @@
 # Installation — Schritt für Schritt auf CachyOS
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.3 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.4 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 > **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf den
 > gepinnten Next.js-Stand ≥ 16.4.1 einschließlich nativer Bildverarbeitung
@@ -380,7 +380,7 @@ Alle Instanzen neu starten; alte Cookies erfordern neuen Login. Browser-Sessions
 benötigen in Produktion weiterhin HTTPS. Details:
 [Session-Sicherheit](../CONFIGURATION.md#session-sicherheit-sec-01-v13627).
 
-**Rate-Limit-Identität (C2, v1.36.14): `TRUSTED_PROXY_IPS`.**
+**Rate-Limit-Identität (ASA-08, v0.17.4): `TRUSTED_PROXY_IPS` + `TRUSTED_PROXY_SECRET`.**
 Rate-Limits (Schreib-API 60/min, Credential-Versuche 5/min) brauchen eine
 Client-Identität. `x-forwarded-for` und `x-real-ip` gehören **nicht** dazu —
 beide setzt der Client selbst, ein neuer Wert pro Anfrage hätte das Limit
@@ -389,7 +389,7 @@ wirkungslos gemacht. Ohne Konfiguration gilt deshalb:
 ```bash
 # Single-User auf demselben Rechner: nichts zu tun.
 # Bucket = Socket-Adresse, bzw. die Konstante "local" im Next.js-App-Router.
-curl -s localhost:3369/api/auth/me | jq .rateLimitIdentity
+curl -s localhost:3369/api/auth/me -H "x-firm-token: $FIRM_API_TOKEN" | jq .rateLimitIdentity
 ```
 
 Steht ein Reverse Proxy davor (nginx, Traefik, Caddy), muss er die echte
@@ -398,24 +398,41 @@ die App muss wissen, wem sie glaubt:
 
 ```bash
 # .env — Proxy läuft auf demselben Host (Standard-Setup)
+# Bestehende Einträge editieren, nicht duplizieren.
+umask 077
 printf 'TRUSTED_PROXY_IPS=%s\n' "127.0.0.1" >> .env
+openssl rand -hex 32 # Wert als TRUSTED_PROXY_SECRET in .env eintragen
+chmod 600 .env
 ```
 
 ```nginx
 # nginx: den vom Client mitgebrachten Wert bewusst überschreiben
 location / {
     proxy_pass http://127.0.0.1:3369;
-    proxy_set_header X-Verified-IP $remote_addr;   # <- von der App vertraut
+    proxy_set_header X-Verified-IP $remote_addr;
+    proxy_set_header X-Proxy-Secret "<zufaelliges-32-byte-hex>"; # gleicher Wert wie .env
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
 
-Danach zeigt `jq .rateLimitIdentity` `source: "verified-header"` und die echte
-Client-IP; `ignoredHeaders` nennt alles, was die App verworfen hat. Ohne
-`TRUSTED_PROXY_IPS` wird `x-verified-ip` nur akzeptiert, wenn die Anfrage von
-Loopback kommt (Same-Host-Proxy) — aus dem Netz kommend bleibt die Identität
-die Socket-Adresse. Steht in `TRUSTED_PROXY_IPS` Müll oder `0.0.0.0/0`, warnt
-das Boot-Log (`[client-ip] …`) laut: `0.0.0.0/0` wäre der Rückfall in Befund C2.
+Secret im Proxy durch den unabhängig erzeugten Wert aus `.env` ersetzen;
+Proxy-Konfiguration nur für Administratoren lesbar halten. Danach Proxy reloaden
+und alle App-Instanzen neu starten. `npm run boot:guard` muss erfolgreich sein.
+Bei gesetzten CIDRs und fehlendem/ungültigem Secret bricht der Start mit
+`TRUSTED_PROXY_SECRET_REQUIRED` / `TRUSTED_PROXY_SECRET_INVALID` ab — auch
+bei Loopback-Bind. Erlaubt: 32–256 sichtbare ASCII-Zeichen ohne Leerzeichen/Komma;
+empfohlen `openssl rand -hex 32`. Das Secret nie aus Client-Headern übernehmen,
+loggen oder reflektieren; Upstream nur Loopback bzw. geschütztes TLS/Tunnel.
+
+Danach zeigt `/api/auth/me` `source: "verified-header"` und die echte Client-IP.
+Ein direkter Fetch-Request mit fehlendem/falschem Secret bleibt bei `local`,
+auch wenn der Angreifer `X-Verified-IP`/XFF rotiert. XFF zählt weiterhin nur mit
+echtem CIDR-verifiziertem Socket-Peer. Ein fremder Socket-Peer wird selbst mit
+korrektem Secret nicht vertraut. Ohne CIDRs bleibt der gemeinsame `local`-Bucket;
+nur ein **echter** Loopback-Socket (nicht `HOSTNAME`) darf dann `x-verified-ip`
+liefern. Ungültige CIDRs werden verworfen, `0.0.0.0/0` wird laut gewarnt.
+Details, sichere Rotation und Rückfall ohne Proxy-Identitäten:
+[Konfiguration](../CONFIGURATION.md#rate-limit-identität-trusted_proxy_ips-c2-v13614).
 
 ### 5.2 Tabellen anlegen
 
@@ -629,24 +646,27 @@ curl -s http://localhost:3380/health | jq '.feed.connected, .cache.activeRules'
 
 ### 7.3 Im Heimnetz erreichbar machen (optional)
 
+Seit **v0.17.4 / ASA-08** lauschen `npm run start` und die systemd-Unit nur auf
+`127.0.0.1:3369`. Ein bloßes Öffnen der Firewall macht die App nicht erreichbar.
+Lokalen TLS-Reverse-Proxy nach Kapitel 5.1 vorschalten, dessen HTTPS-Port nur für
+das benötigte Netz freigeben; **Port 3369 nicht öffnen/weiterleiten**.
+Browser-Sessions brauchen HTTPS. Sensible Dashboard-Reads und Schreib-APIs
+verlangen Credentials; `AUTH_MODE=local-open` ist kein Mehrbenutzer-Modus.
+Für externen Zugriff bevorzugt VPN plus TLS-Proxy, kein direktes Portforwarding.
+
+Kontrolle auf dem App-Host:
+
 ```bash
-# Firewall öffnen — nur wenn du weißt, wer im Netz ist
-sudo firewall-cmd --add-port=3369/tcp --permanent && sudo firewall-cmd --reload
-# oder bei ufw:
-sudo ufw allow from 192.168.1.0/24 to any port 3369
+ss -ltnp 'sport = :3369'  # nur 127.0.0.1:3369, nicht 0.0.0.0 oder [::]
+curl -s http://127.0.0.1:3369/api/auth/me -H "x-firm-token: $FIRM_API_TOKEN" \
+  -H 'X-Verified-IP: 198.51.100.42' | jq .rateLimitIdentity
+# direkter Fetch-Request ohne Proxy-Secret: key "local", source "local-fallback"
 ```
 
-> **Nicht ins offene Internet stellen.** Die Schreib-API ist seit v1.36.13 an
-> `FIRM_API_TOKEN` (bzw. die RBAC-Tokens) gebunden und in Produktion ohne Token
-> startunfähig; das Dashboard liest aber weiterhin ohne Credential. Wenn du von
-> außen zugreifen willst: WireGuard oder Tailscale, kein Portforwarding.
->
-> **Mehrere Nutzer im LAN?** Dann braucht jedes Rate-Limit eine echte
-> Client-Identität: ohne `TRUSTED_PROXY_IPS`/`x-verified-ip` teilen sich alle
-> Clients seit v1.36.14 einen Bucket (`local`) — sicher, aber eng (60
-> Schreib-Requests bzw. 5 Credential-Versuche pro Minute **gesamt**). Mit einem
-> Reverse Proxy davor: `TRUSTED_PROXY_IPS` + `proxy_set_header X-Verified-IP`
-> setzen (Kapitel 5.1).
+Durch den Proxy muss dieselbe Diagnose die echte IP zeigen; ein mitgesendetes
+gefälschtes `X-Verified-IP` darf sie nicht ändern. Von einem zweiten LAN-Host muss
+der direkte TCP-Zugriff auf App-Port 3369 scheitern. Fehlendes/falsches Proxy-Secret
+bündelt alle Clients in `local`, es erlaubt niemals eine frei gewählte Identität.
 
 ---
 
@@ -866,11 +886,11 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | **`UNEXPECTED_BROKER_ADAPTER: PAPER-Adapter erwartet`** | die Broker-Factory liefert keinen Paper-Adapter — meist fehlendes `.env` oder `PAPER_MODE`-Fehlkonfiguration | `.env` und `PAPER_MODE` prüfen, Dienst neu starten; Check V12 verifiziert `/api/firm → account.broker`. Befund B3 in **[SETUP_BUGS.md](SETUP_BUGS.md)** |
 | **`initdb: error: locale "C.UTF-8" does not exist`** | Minimalinstallation ohne `C.UTF-8` | seit v1.30.0 behoben: `pg_pick_locale()` fällt auf `en_US.UTF-8` bzw. `C` zurück. Manuell: `initdb -D … --locale=en_US.UTF-8 --encoding=UTF8`. Befund B1 |
 | **Build meldet „Dynamic filesystem access“-Warnungen** | dynamische `path.join(process.cwd(), …)`-Stellen | seit v1.30.0 behoben über `src/lib/appPaths.ts`. Wiederkehrend? `npm run build` erneut prüfen — Setup-Schritt 09 meldet sie. Befund B4 |
-| **API im LAN offen beschreibbar** | `npm run start` bindet `0.0.0.0`; offen ist sie nur noch mit wirksamem `AUTH_MODE=local-open` | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befunde B5 und C1 |
+| **API im LAN offen beschreibbar** | Bind wurde manuell erweitert oder Proxy exponiert `AUTH_MODE=local-open`; Default seit ASA-08 ist Loopback | `FIRM_API_TOKEN` in `.env` setzen (Setup erzeugt eines), Dienst neu starten; Check V18 prüft `401`. Befunde B5 und C1 |
 | **Dienst startet nicht: `Refuse startup: authentication not configured` (`AUTH_NOT_CONFIGURED`)** | `NODE_ENV=production` (also `npm run start`/systemd) ohne jedes Token — seit v1.36.13 Boot-Verweigerung statt offener API | Token setzen (`openssl rand -hex 32` → `FIRM_API_TOKEN` in `.env`) oder bewusst `AUTH_MODE=local-open` eintragen; Befund C1 in **[C1-open-mode](audits/2026-09-03-peer-review/findings/C1-open-mode.md)** |
 | **Start/Login scheitert mit `SESSION_SECRET_REQUIRED` / `SESSION_SECRET_INVALID`** | unabhängiger Session-Key fehlt, ist zu kurz oder wird als Auth-Token wiederverwendet (SEC-01) | separat `openssl rand -hex 32` erzeugen, vorhandenen `FIRM_SESSION_SECRET`-Eintrag in `.env` korrigieren, alle Instanzen neu starten und neu anmelden; Kapitel 5.1 |
 | **`POST /api/firm/*` liefert `401` mit `code: AUTH_NOT_CONFIGURED`** | Auth-Modus ist `token-required`, aber es ist kein Token konfiguriert (Boot-Guard lief nicht oder wurde umgangen) | `.env`-Token setzen und Dienst neu starten; Dev-Modus mit `AUTH_MODE=local-open` |
-| **`429 RATE_LIMITED` obwohl nur eine Person nutzt** | Rate-Limit-Identität ist `local` (kein `TRUSTED_PROXY_IPS`, Socket-Adresse im Next.js-App-Router nicht sichtbar) ⇒ alle Clients teilen sich einen Bucket | hinter einem Proxy: `TRUSTED_PROXY_IPS=127.0.0.1` + `proxy_set_header X-Verified-IP $remote_addr;` (Kapitel 5.1). Diagnose: `curl -s localhost:3369/api/auth/me \| jq .rateLimitIdentity`. Befund C2 |
+| **`429 RATE_LIMITED` obwohl nur eine Person nutzt** | Rate-Limit-Identität ist `local` (kein `TRUSTED_PROXY_IPS`, Socket-Adresse im Next.js-App-Router nicht sichtbar) ⇒ alle Clients teilen sich einen Bucket | hinter einem Proxy: `TRUSTED_PROXY_IPS=127.0.0.1` + unabhängiges `TRUSTED_PROXY_SECRET` + beide überschreibenden Proxy-Header (Kapitel 5.1). Diagnose: `curl -s localhost:3369/api/auth/me \| jq .rateLimitIdentity`. Befund C2 |
 | **`429` mit `code: CREDENTIAL_BACKOFF`** | drei oder mehr fehlgeschlagene Credential-Versuche (Formatfehler oder von der Venue abgelehnte Probe) ⇒ exponentielle Sperre 2 s → 4 s → 8 s … max. 15 min | `Retry-After` abwarten; ein gültiges Credential setzt die Zählung zurück. 409-Zustandskonflikte und Store-Störungen (5xx) zählen bewusst nicht. Justierbar: `BROKER_CREDENTIAL_BACKOFF_BASE_MS` (0 = Ebene aus), `BROKER_CREDENTIAL_BACKOFF_MAX_MS` |
 | **`429` mit `code: CREDENTIAL_GLOBAL_RATE_LIMITED`** | globales, IP-unabhängiges Credential-Limit erreicht (Default 20/min) — greift bei verteilten Versuchen | warten; bei Bedarf `BROKER_CREDENTIAL_GLOBAL_RATE_LIMIT` anpassen (0 = aus). Der Kill-Switch (`POST /api/live/kill`) nutzt dieses Limit nie |
 | **Boot-Log warnt `[client-ip] TRUSTED_PROXY_IPS: … ungueltig`** | Eintrag ist keine CIDR/Adresse (Tippfehler, Hostname) | nur IPs/CIDR (`203.0.113.7`, `10.0.0.0/8`, `::1/128`) oder die Aliase `loopback`/`private`/`link-local`; der Eintrag wird sonst verworfen und Proxy-Header bleiben ignoriert (fail-closed) |
@@ -891,7 +911,7 @@ Sind alle Punkte erfüllt, geht es im **[Handbuch](HANDBUCH.md)** weiter.
 | Ollama nutzt die GPU nicht | gfx803 ist von ROCm nicht unterstützt | erwartetes Verhalten → Kapitel 8.3 (Vulkan) |
 | Modell antwortet mit Prosa statt JSON | zu kleines Modell / weicher Prompt | Handbuch Kapitel 6, oder eine Stufe größer wählen |
 | Position verschwindet nach Neustart | Positionen stehen auf `CLOSED` | `psql -c "SELECT status, count(*) FROM positions GROUP BY 1;"` |
-| Port 3369 belegt / **`EADDRINUSE 0.0.0.0:3369`** | ein anderer Prozess (z. B. ein manuell gestarteter Dienst) hält den Port | Besitzer ermitteln: `sudo ss -ltnp 'sport = :3369'`; den manuellen Prozess beenden (`sudo kill <PID>`) und `sudo systemctl restart ai-trading-firm` — oder bewusst einen anderen Port wählen: `PORT=3100 npm run start` |
+| Port 3369 belegt / **`EADDRINUSE 127.0.0.1:3369`** | ein anderer Prozess (z. B. ein manuell gestarteter Dienst) hält den Port | Besitzer ermitteln: `sudo ss -ltnp 'sport = :3369'`; den manuellen Prozess beenden (`sudo kill <PID>`) und `sudo systemctl restart ai-trading-firm` — oder bewusst einen anderen Port wählen: `PORT=3100 npm run start` |
 | **Validierung meldet `V16` fehlgeschlagen** | Short-Selling ist aus, `--expect-shorts` erwartet aber `true` | `--expect-shorts false` — oder aktivieren: `allowShort = 1` im Dashboard bzw. `INSERT … ON CONFLICT (key) DO UPDATE` auf `risk_config` |
 | **Validierung meldet `V08`–`V11` fehlgeschlagen** | Preset-Universum nicht geseedet | `npm run universe:seed:markets` |
 | **Validierung meldet `V18` fehlgeschlagen** | kein `FIRM_API_TOKEN` konfiguriert, aber `AUTH_MODE=local-open` wirksam (offener Lokalbetrieb) | Token in `.env` setzen und Dienst neu starten. Ohne Token und ohne `AUTH_MODE=local-open` startet der Dienst in Produktion gar nicht erst (Boot-Guard, Befund C1) |

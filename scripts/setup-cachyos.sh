@@ -264,7 +264,7 @@ Markt & Risiko (v1.30.0):
 Sicherheit:
   --api-token TOKEN     FIRM_API_TOKEN explizit setzen
   --no-api-token        KEIN Token erzeugen (NICHT empfohlen: die App bindet
-                        0.0.0.0 — ohne Token ist die API im LAN offen). Seit
+                        127.0.0.1 — ohne Token darf die API nicht exponiert werden). Seit
                         v1.36.13 verweigert NODE_ENV=production den Start ohne
                         Token; das Flag schreibt deshalb AUTH_MODE=local-open
                         in die .env (Befund C1)
@@ -886,7 +886,7 @@ step_05_env() {
   fi
 
   # ── API-Token (B5, gehärtet in C1/v1.36.13) ─────────────────────────────
-  # npm start bindet 0.0.0.0 (package.json) UND setzt NODE_ENV=production.
+  # npm start bindet 127.0.0.1 (package.json, ASA-08) UND setzt NODE_ENV=production.
   # Seit v1.36.13 ist der offene Local-Mode kein Default mehr: ohne irgendein
   # Token wirft der Boot-Guard (src/auth/authMode.ts) und der Dienst startet
   # nicht. Offen laufen kann nur, wer AUTH_MODE=local-open ausdrücklich setzt.
@@ -904,7 +904,7 @@ step_05_env() {
   else
     API_TOKEN=""
     OPEN_MODE_REQUESTED="true"
-    warn "KEIN FIRM_API_TOKEN (--no-api-token) — die App bindet 0.0.0.0, die Schreib-API ist im LAN offen."
+    warn "KEIN FIRM_API_TOKEN (--no-api-token) — die Schreib-API ist lokal offen und darf nicht ungeschuetzt exponiert werden."
     warn "Seit v1.36.13 (Befund C1) verweigert NODE_ENV=production den Start ohne jedes Token."
     warn "Deshalb wird AUTH_MODE=local-open in .env eingetragen — ein bewusster, dokumentierter Opt-in."
     warn "Nur in einer vertrauenswürdigen, isolierten Umgebung vertretbar. Empfohlen: Token erzeugen lassen."
