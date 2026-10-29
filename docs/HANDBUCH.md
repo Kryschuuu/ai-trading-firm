@@ -134,8 +134,8 @@ der Datenbank. Der Prozess ist zustandslos, die Firma nicht.
 | Lokales LLM | Modellserver | wenn nur die Regel-Engine läuft |
 
 > **„Regel-Engine" statt „Ollama"** heißt: Es antwortet gerade **kein Modell**. Das System
-> arbeitet mit festen, konservativen Regeln weiter. Nützlich zum Testen — aber du testest
-> dann die Pipeline, nicht die KI.
+> liefert bei `localReason` HOLD/REJECT statt eines synthetischen Trades. Die
+> getrennte Mikro-Regel-Engine ist davon nicht deaktiviert.
 
 ### 2.2 Die Knöpfe
 
@@ -1263,7 +1263,7 @@ psql "$DATABASE_URL" -c "UPDATE agents SET status='IDLE' WHERE name='Rhea (Resea
 ### 10.3 Modellserver ausgefallen `[B]`
 
 Erwartetes Verhalten: Statusleiste zeigt „Regel-Engine", Audit-Log meldet
-`"source":"fallback"`, die Firma handelt konservativ weiter.
+`"source":"fallback"`; der Agenten-Fallback hält mit HOLD/REJECT statt blind zu handeln.
 
 ```bash
 # Auf dem Server prüfen

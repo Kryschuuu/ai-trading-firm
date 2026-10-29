@@ -6,7 +6,7 @@
  *
  *   llmProvider.ts   → Client-Bau, Retries, Provider-Kette, Kosten (neu)
  *   ollama.ts        → Entscheidungs-Schema, Temperatur pro Rolle,
- *                      Regel-Engine-Fallback, Status-Cache (API stabil)
+ *                      Fail-closed-HOLD-Fallback, Status-Cache (API stabil)
  *
  * Unterstützte Provider (konfigurierbar via .env):
  *   ollama    → nativer Ollama-Server (Standard, Variante A und B-CPU)
@@ -17,9 +17,8 @@
  *   opencode  → OpenCode Zen, OpenAI-kompatibel, Free-Modelle (OPENCODE_API_KEY)
  *
  * Fallback-Kette primär + Fallbacks: LLM_PROVIDER + LLM_FALLBACK_PROVIDERS.
- * Ist kein Provider erreichbar, greift die deterministische Regel-Engine,
- * damit die komplette Orchestrierungs- und Guardrail-Pipeline auch ohne
- * GPU/Modell nachvollziehbar bleibt.
+ * Ist kein Provider erreichbar, folgt HOLD/REJECT statt einer Handelsempfehlung;
+ * der explizite Not-Halt bleibt KILL.
  */
 import {
   chatLlm,

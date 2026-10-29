@@ -537,8 +537,9 @@ curl -s http://localhost:3369/api/firm | jq '{
 }'
 ```
 
-Wenn `verfuegbar: false` erscheint, arbeitet das System mit der Regel-Engine — die
-Pipeline funktioniert trotzdem, nur ohne echtes Modell. Prüfe dann `OLLAMA_BASE_URL`.
+Wenn `verfuegbar: false` erscheint und kein alternativer Provider erreichbar ist,
+antwortet die Agenten-Pipeline fail-closed mit HOLD/REJECT statt eines Demo-Trades.
+Prüfe dann `OLLAMA_BASE_URL`.
 
 Kompletter Durchlauf:
 
@@ -549,7 +550,7 @@ curl -s -X POST http://localhost:3369/api/firm/run \
   -d "{\"missionId\":\"$MISSION\",\"pipeline\":true}" | jq '.pipeline[] | {rolle:.role, status:.result.status, quelle:.result.source, ms:.result.latencyMs}'
 ```
 
-Erwartete Ausgabe (Variante A, Regel-Engine oder kleines Modell):
+Beispielausgabe bei verfügbarem Modell (kein Offline-Fallback):
 
 ```json
 {"rolle":"CEO","status":"REPORT","quelle":"ollama","ms":4210}
