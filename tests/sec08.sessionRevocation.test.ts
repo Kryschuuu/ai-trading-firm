@@ -6,6 +6,9 @@
  */
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import {
   clearSessionCookies,
@@ -44,6 +47,7 @@ const ENV_KEYS = [
   "NODE_ENV",
   "AUTH_MODE",
   "FIRM_RATE_LIMIT",
+  "FIRM_SESSION_REVOCATION_FILE",
 ];
 
 const FULL_ENV: Env = {
@@ -55,6 +59,7 @@ const FULL_ENV: Env = {
 };
 
 const saved = new Map<string, string | undefined>();
+let revocationDir: string;
 
 function syncEnv(env: Env): void {
   for (const key of ENV_KEYS) {
@@ -66,11 +71,14 @@ function syncEnv(env: Env): void {
 beforeEach(() => {
   for (const key of ENV_KEYS) saved.set(key, process.env[key]);
   syncEnv(FULL_ENV);
+  revocationDir = mkdtempSync(join(tmpdir(), "sec08-revocation-"));
+  process.env.FIRM_SESSION_REVOCATION_FILE = join(revocationDir, "revocations.json");
   __resetAllSingletonsForTests();
   resetRateLimiterForTests();
 });
 
 afterEach(() => {
+  rmSync(revocationDir, { recursive: true, force: true });
   syncEnv(Object.fromEntries(saved));
   saved.clear();
   __resetAllSingletonsForTests();
