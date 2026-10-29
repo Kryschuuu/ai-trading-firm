@@ -279,8 +279,9 @@ test("append is idempotent: appending same bars twice leaves count unchanged", (
 test("written rows carry schema version v2 and timeframe", () => {
   const store = makeStore();
   store.append(bars(1_700_000_000_000, 1), ID, PROV, "15m", NOW);
-  // (readFileSync siehe Top-Level-Import)
-  const line = JSON.parse(readFileSync(store.filePath, "utf8").trim().split("\n")[0]);
+  // (readFileSync siehe Top-Level-Import) — seit ASA-09 liegt die Serie
+  // partitioniert unter <dir>/series/<encodedKey>.ndjson.
+  const line = JSON.parse(readFileSync(store.seriesFilePath(ID, "15m"), "utf8").trim().split("\n")[0]);
   assert.equal(line.v, HISTORY_SCHEMA_VERSION);
   assert.equal(line.timeframe, "15m");
   assert.equal(line.instrumentId, ID);
@@ -297,7 +298,7 @@ test("maxBarsPerSeries compacts: only the newest N bars per series remain", () =
 test("file is written with restrictive permissions (0600)", () => {
   const store = makeStore();
   store.append(bars(1_700_000_000_000, 1), ID, PROV, "1h", NOW);
-  const mode = statSync(store.filePath).mode & 0o777;
+  const mode = statSync(store.seriesFilePath(ID, "1h")).mode & 0o777;
   assert.equal(mode, 0o600);
 });
 
@@ -350,8 +351,8 @@ test("field values with newlines cannot inject lines (JSON.stringify)", () => {
   ];
   // feed mit eingebettetem Newline + JSON-Fragment.
   store.append(malicious, ID, { venue: "BITUNIX", feed: "rest\n{\"injected\":true}" }, "1h", NOW);
-  // (readFileSync siehe Top-Level-Import)
-  const raw = readFileSync(store.filePath, "utf8").trim();
+  // (readFileSync siehe Top-Level-Import) — Serien-Partition seit ASA-09.
+  const raw = readFileSync(store.seriesFilePath(ID, "1h"), "utf8").trim();
   const lines = raw.split("\n");
   assert.equal(lines.length, 1, "genau eine Zeile — kein Zeilen-Einbruch via Feldwert");
   const parsed = JSON.parse(lines[0]);

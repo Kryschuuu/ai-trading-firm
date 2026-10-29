@@ -5,12 +5,12 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.17.4` |
+| **Version** | `v0.17.5` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-28 |
-| **Quellbasiert** | `package.json` (`version: "0.17.4"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-29 |
+| **Quellbasiert** | `package.json` (`version: "0.17.5"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
@@ -728,3 +728,16 @@ bei CIDRs ohne gültiges Secret. Authentisierte Proxy-IPs bleiben unterscheidbar
 rotierte Spoofing-Header umgehen weder Login- noch API-Limits. ASA-08 ist Teil von
 `security:live-gate`. Aktive Code-Version-Header und Inventare sind synchronisiert.
 Upgrade: `TRUSTED_PROXY_SECRET` in App und Proxy setzen (siehe `CONFIGURATION.md`).
+
+
+`v0.17.5` (2026-10-29) schließt ASA-09: Der Historical Store partitioniert Kerzen
+pro `(instrumentId, timeframe)` unter `data/history/series/<encodedKey>.ndjson`
+(bijektive, traversal-freie Kodierung), `query()` liest nur noch die eine
+Serie-Datei. Lesen läuft UTF-8-verlustfrei über `StringDecoder` in Chunks
+(parametrisierbar), Schreiben gebündelt in 64-KiB-Puffern mit `fsync`+`rename`
+und kollisionsfreien Temp-Namen; `append`/`appendSeries`/`clear` und die
+automatische, verlustfreie Migration bestehender `candles.ndjson`-Bestände
+(Bakup als `candles.ndjson.migrated-*`) stehen unter einer Cross-Prozess-
+Dateisperre `.store.lock`. Regression: `tests/asa09.historicalStoreSafety.test.ts`.
+Betrieb: Backups sichern `<dir>/series/` und eventuelle `.migrated-*`-Dateien
+(siehe `docs/HISTORY.md` §2a).

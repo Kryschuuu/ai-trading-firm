@@ -2,7 +2,7 @@
 
 - **Audit:** [`../README.md`](../README.md) · **Vollbericht:** [`../report.md`](../report.md) · **Prompts:** [`../prompts/README.md`](../prompts/README.md)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **0.17.3**
-- **Stand:** 2026-10-28 · **15 Findings:** 7 `OPEN`, 8 `FIXED` (`ASA-01` … `ASA-15`)
+- **Stand:** 2026-10-29 · **15 Findings:** 6 `OPEN`, 9 `FIXED` (`ASA-01` … `ASA-15`)
 - **Konvention:** 1 Prompt = 1 fokussierte Coding-Session + eigener PR; nach Merge Status hier, in `../findings/ASA-*.md`, in `../README.md` und bei `CRITICAL`/`HIGH` in `../../../security/README.md` nachziehen. Finding-IDs bleiben unverändert.
 
 ## Statusübersicht
@@ -17,13 +17,23 @@
 | [ASA-06](../findings/ASA-06-portfolio-dos-live-gate-audit-chain-split.md) | HIGH | Event-Loop-DoS auf `/api/portfolio/optimize` & `LiveGateAudit`-Kettenbruch | `FIXED` | [PROMPT-ASA-P1-06](../prompts/PROMPT-ASA-P1-06-portfolio-dos-and-livegate-audit-sync.md) | [PR #251](https://github.com/Kryschuuu/ai-trading-firm/pull/251) | `tests/asa06.portfolioLimitsAndAuditSync.test.ts`; `tests/portfolio*.test.ts`; `tests/liveGate*.test.ts` |
 | [ASA-07](../findings/ASA-07-missing-session-csrf-and-write-rate-limits.md) | HIGH | Fehlender Session-CSRF-Guard in `guardWrite` & fehlende Write-Rate-Limits | `FIXED` | [PROMPT-ASA-P1-05](../prompts/PROMPT-ASA-P1-05-api-rbac-sec02-csrf-error-redaction.md) | Dieser PR | `tests/asa05.apiGuardsAndCsrf.test.ts`; logout/session regression |
 | [ASA-08](../findings/ASA-08-trusted-proxy-x-verified-ip-0000-bypass.md) | HIGH | `X-Verified-IP`-Spoofing bei `TRUSTED_PROXY_IPS` + `0.0.0.0`-Bind | `FIXED` | [PROMPT-ASA-P1-07](../prompts/PROMPT-ASA-P1-07-client-ip-proxy-trust-and-bind-hardening.md) | Dieser PR (v0.17.4) | `tests/asa08.clientIpProxyTrust.test.ts`; `tests/authBootGuard.proxyTrust.test.ts` |
-| [ASA-09](../findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` Voll-Scan, UTF-8-Chunk-Split, V8-String-Crash & Lost Updates | `OPEN` | [PROMPT-ASA-P1-08](../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) | — | — |
+| [ASA-09](../findings/ASA-09-historical-store-oom-utf8-lost-update.md) | HIGH | `HistoricalStore` Voll-Scan, UTF-8-Chunk-Split, V8-String-Crash & Lost Updates | `FIXED` | [PROMPT-ASA-P1-08](../prompts/PROMPT-ASA-P1-08-historical-store-partitioning-and-streaming.md) | Dieser PR (v0.17.5) | `tests/asa09.historicalStoreSafety.test.ts`; `tests/history/historicalStore.test.ts`; `tests/marketdata/historicalStore.test.ts` |
 | [ASA-10](../findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback kauft `LONG`; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | `OPEN` | [PROMPT-ASA-P2-09](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) | — | — |
 | [ASA-11](../findings/ASA-11-core-db-indexes-unbounded-scans-pool-timeout.md) | MEDIUM | Fehlende Sekundärindizes auf Kerntabellen, unbegrenzte Loads & `statement_timeout` | `OPEN` | [PROMPT-ASA-P2-09](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) | — | — |
 | [ASA-12](../findings/ASA-12-unbounded-memory-maps-dead-session-prune.md) | MEDIUM | Unbegrenzte Rate-Limit-/Order-Maps & nie aufgerufenes `pruneRevokedSessions()` | `OPEN` | [PROMPT-ASA-P2-09](../prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) | — | — |
 | [ASA-13](../findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 unregistrierte `globalThis`-Singletons & `FirmDashboard.tsx` Polling-Reset | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-14](../findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` ohne `systemd`-Sandboxing & mit Pfad-Drift | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
 | [ASA-15](../findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` & fehlender SSRF-Schutz in `WebhookAlertSink` | `OPEN` | [PROMPT-ASA-P2-10](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) | — | — |
+
+## Abgeschlossene Remediation ASA-09 (2026-10-29)
+
+- **Partitionierung:** Kerzen liegen pro `(instrumentId, timeframe)` unter `<dir>/series/<encodedKey>.ndjson` — der Schlüssel wird bijektiv und Path-Traversal-frei percent-kodiert (`:` → `%3A`, `/` → `%2F`; `%` selbst wird mitkodiert). `query()` öffnet und parst ausschließlich die eine Partitionsdatei (`O(N_series)` statt `O(N_all)`); `appendSeries` liest/schreibt nur die berührten Serien. Partitionsdateien sind `ts`-aufsteigend, `from`/`to`/`limit` filtern im Streaming.
+- **UTF-8-Streaming:** `readLinesSync(file, chunkSizeBytes?)` dekodiert über `StringDecoder("utf8")` (`decoder.write()` je Block, `decoder.end()` am Ende) — Multi-Byte-Zeichen an Chunk-Grenzen (Default 1 MiB, testbar ab 1 Byte) werden exakt rekonstruiert.
+- **Speicherkonstantes Schreiben:** 64-KiB-Bündel direkt über `writeSync(fd)` + `fsyncSync` + `renameSync`; kein Gesamt-`join("\n")` mehr (kein V8-`RangeError`), kollisionsfreie Temp-Namen `.tmp-<pid>-<uuid>` mit `rmSync`-Cleanup im Fehlerfall (auch in `writeStoreSnapshot`).
+- **Cross-Prozess-Lock:** `<dir>/.store.lock` (`wx`-Open, Backoff-Retry, Stale-Recovery nach Halter-PID/Alter ≥ 15 s, `LOCK_TIMEOUT` fail-closed, Freigabe nur durch den Halter) um `append`/`appendSeries`/`clear` und die Legacy-Migration.
+- **Verlustfreie Auto-Migration:** Bestehende `candles.ndjson` wird beim ersten Zugriff unter Lock in die Serien-Dateien überführt (Dedup `instrumentId+timeframe+ts`, jüngstes `fetchedAt` gewinnt); das Original bleibt byte-exakt als `candles.ndjson.migrated-<stamp>-<uuid>` erhalten (Legacy-v1-Zeilen inklusive, weiter migrierbar via `npm run history:migrate`). Ohne möglicher Migration (read-only) lesen alle Zugriffe die Legacy-Datei transparent weiter. Neue Helfer: `seriesFilePath()`, `listSeries()`, `stats()`, `clear()`.
+- **Regressionen:** `npx tsx --test tests/asa09.historicalStoreSafety.test.ts tests/history/historicalStore.test.ts tests/marketdata/historicalStore.test.ts` (34/34 grün); `npm run typecheck`, `npm run lint`, `npm run docs:validate`, `npm test`.
+- **Doku:** `docs/HISTORY.md` §2a (Layout/Migration/Backup), `docs/MARKET_DATA_PIPELINE.md`, `README.md`, `docs/security/README.md`, Finding ASA-09 auf `FIXED`.
 
 ## Abgeschlossene Remediation ASA-06 (2026-10-28)
 

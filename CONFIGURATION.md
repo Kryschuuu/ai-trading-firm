@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.4** (Prompt-Budget
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.5** (Prompt-Budget
 > und Batch-Analyse nachgezogen, §5)
 >
 > **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema

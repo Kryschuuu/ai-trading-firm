@@ -162,6 +162,16 @@ Die nachfolgenden **15 Befunde (`ASA-01` … `ASA-15`)** adressieren ausschließ
 
 ### Befund ASA-09 — `HistoricalStore` parst gesamte NDJSON-Historie pro Query, korrumpiert UTF-8 an 1-MiB-Grenzen und verliert Cross-Prozess-Writes
 
+> **Status 2026-10-29: `FIXED` (v0.17.5).** Partitionierte Serien-Dateien
+> (`<dir>/series/<encodedKey>.ndjson`, nur eine Datei je Query), UTF-8-verlustfreies
+> `StringDecoder`-Streaming, gebündeltes 64-KiB-Schreiben mit `fsync`+`rename` und
+> kollisionsfreien Temp-Namen sowie Cross-Prozess-Dateisperre `.store.lock` mit
+> verlustfreier Auto-Migration bestehender `candles.ndjson`-Bestände. Umsetzung und
+> Verifikation (`tests/asa09.historicalStoreSafety.test.ts`, 34/34 inkl. Store-Suiten)
+> im [Finding](findings/ASA-09-historical-store-oom-utf8-lost-update.md) und im
+> [Tracking](remediation/TRACKING.md). Die folgende Problembeschreibung ist der
+> historische Audit-Befund.
+
 - **Kategorie:** Performance & Datenintegrität
 - **Schweregrad:** Hoch
 - **Betroffene Datei(en) & Zeilen:** `src/lib/marketdata/historicalStore.ts:375-425`, `src/lib/marketdata/historicalStore.ts:440-530`, `src/lib/marketdata/historicalStore.ts:555-603`

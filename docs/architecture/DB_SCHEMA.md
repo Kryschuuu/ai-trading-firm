@@ -1,7 +1,7 @@
 # Datenbank-Schema & Persistenz-Verzeichnis
 
 > **Dokumenten-Status:** Kanonisches Datenbank- und Persistenzverzeichnis
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-09 (DC-07 abgeschlossen) · **Code-Version:** v0.17.4 (Beta)
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-09 (DC-07 abgeschlossen) · **Code-Version:** v0.17.5 (Beta)
 > **Single Source of Truth (SSoT):** [`src/db/schema.ts`](../../src/db/schema.ts) (Typen + Constraints) und [`drizzle/*.sql`](../../drizzle/) (Migrations-Skripte)
 > **Generiertes Inventar:** [docs/generated/schema-inventory.md](../generated/schema-inventory.md) — alle `pgTable`-Definitionen mit Quellzeile, Spaltenzahl, Migrationszuordnung und TSDoc-Kurzbeschreibung, erzeugt per `npm run docs:inventories`.
 

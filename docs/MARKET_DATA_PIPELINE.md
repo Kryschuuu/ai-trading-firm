@@ -1,6 +1,6 @@
 # Market-Data-Pipeline — Discovery, Enrichment, Backfill
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-04 · **Code-Version:** v0.17.4 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Modul `src/marketdata/` · CLI
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-04 · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Modul `src/marketdata/` · CLI
 > `npm run market:sync` (Alias: `npm run market-sync`; Historien-Migration:
 > `npm run history:migrate` · ID-Normalisierung: `npm run symbols:normalize` ·
 > Qualitäts-Layer & Aggregation: §14)
@@ -43,7 +43,7 @@ heissen. Diese Tabelle ist die verbindliche Abbildung (Stand v0.16.0):
 | Anforderung nennt | Realer Pfad | Anmerkung |
 | --- | --- | --- |
 | `ScannerService` (`src/scanner/service.ts`) | `src/scanner/service.ts` | unverändert; Export `scanUniverse()` aus `src/scanner/pipeline.ts` |
-| `HistoricalStore` (`src/history/` oder `src/scanner/historicalStore.ts`) | `src/lib/marketdata/historicalStore.ts` | Datei `data/history/candles.ndjson`, Schema v2 |
+| `HistoricalStore` (`src/history/` oder `src/scanner/historicalStore.ts`) | `src/lib/marketdata/historicalStore.ts` | partitionierte Serien `data/history/series/<encodedKey>.ndjson` (seit v0.17.5, ASA-09; Schema v2; Legacy-`candles.ndjson` wird automatisch verlustfrei migriert) |
 | `InstrumentRegistry` (`src/universe/registry.ts`) | `src/universe/registry.ts` | Ablage `data/universe/instruments.ndjson` |
 | `BitunixBrokerAdapter` (`src/brokers/bitunix/`) | `src/brokers/bitunix/adapter.ts` | erfüllt nur `BrokerAdapter`; Public-Methoden bleiben erhalten |
 | Market-Data-Adapter des Syncs | `src/marketdata/adapters/bitunix.ts` (`createBitunixMarketDataAdapter`) | dünner Wrapper Broker-PublicClient → `MarketDataAdapter` (P0-Verdrahtung, Domänentrennung) |
@@ -305,7 +305,7 @@ Die geprüften Bars eines Laufs werden **gepuffert** und am Stück geschrieben
 (`appendSeries`, §5) — ein Append je Instrument × Timeframe würde die
 NDJSON-Datei N × M mal komplett atomar umschreiben (quadratische I/O).
 
-Kerzen landen in `data/history/candles.ndjson` mit Provenienz
+Kerzen landen partitioniert je Serie in `data/history/series/<encodedKey>.ndjson` mit Provenienz
 `{ venue, feed: "<VENUE>:rest" }` und **verpflichtendem** Feld `timeframe`.
 Seit Schema-Version **v2** (1.26.0) ist `timeframe` Teil des logischen
 Primärschlüssels (`instrumentId + timeframe + ts`); der Store dedupliziert
@@ -317,7 +317,7 @@ bevorzugt `1h` (Präferenz `1h → 4h → 30m → 15m → 5m`, danach Legacy-Fal
 | Senke | Datei | Mutation |
 | --- | --- | --- |
 | Instrument-Registry | `data/universe/instruments.ndjson` | `registry.upsert(..., "sync:<VENUE>")` |
-| Historical Store | `data/history/candles.ndjson` | `history.appendSeries(groups, now)` je Lauf (identische Semantik zu `history.append(...)` je Reihe) |
+| Historical Store | `data/history/series/<encodedKey>.ndjson` je `(instrumentId, timeframe)` | `history.appendSeries(groups, now)` je Lauf (identische Semantik zu `history.append(...)` je Reihe); schreibt unter `.store.lock` nur die berührten Serien atomar neu |
 | Universe-Audit | `data/universe/audit-log.ndjson` | ein Eintrag je mutierendem Upsert |
 
 Keine PostgreSQL-Pflicht. Kein Private-Ledger. `/api/markets` bleibt **read-only**

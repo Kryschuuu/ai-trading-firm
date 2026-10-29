@@ -293,7 +293,7 @@ test("Array-Caps begrenzen Ticker-Batch, Orderbook-Levels und Discovery-Zeilen",
 
 // ── 6. Pfad-Traversierung im Store ───────────────────────────────────────────
 
-test("HistoricalStore schreibt ausschließlich candles.ndjson unter dir/", async () => {
+test("HistoricalStore schreibt ausschließlich partitionierte Serien unter dir/ (ASA-09)", async () => {
   const { adapter } = mockMarketDataAdapter({
     instruments: [{ ...instrumentOf("BTCUSDT"), id: "../../../../etc/cron.d/evil" }],
   });
@@ -303,7 +303,15 @@ test("HistoricalStore schreibt ausschließlich candles.ndjson unter dir/", async
 
   assert.equal(history.filePath, path.join(dir, "history", "candles.ndjson"));
   const written = readdirSync(path.join(dir, "history"));
-  assert.deepEqual(written, ["candles.ndjson"], "keine weitere Datei — instrumentId wird nie zum Pfad");
+  assert.deepEqual(written, ["series"], "nur das partitionierte Serien-Verzeichnis — instrumentId wird nie zum Pfad");
+  const seriesFiles = readdirSync(path.join(dir, "history", "series"));
+  // Bijektive, traversal-freie Kodierung: ":" → %3A, "/" → %2F; der Dateiname
+  // bleibt innerhalb von <dir>/series und trägt nur sichere Zeichen.
+  assert.deepEqual(
+    seriesFiles,
+    ["BITUNIX%3ABTCUSDT__1h.ndjson"],
+    "kanonisch kodierte Serie — keine rohe Instrument-ID im Pfad",
+  );
   assert.equal(existsSync(path.join(dir, "..", "cron.d")), false, "nichts außerhalb des Store-Verzeichnisses");
   // Die Bars liegen unter der kanonischen ID, nicht unter der Einschleusung.
   assert.equal(

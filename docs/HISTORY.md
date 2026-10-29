@@ -1,17 +1,20 @@
 # Historical Store — Schema, Schlüssel, Dedup & Migration
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-23 · **Code-Version:** v0.17.4 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Modul `src/lib/marketdata/historicalStore.ts` ·
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-29 · **Code-Version:** v0.17.5 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Modul `src/lib/marketdata/historicalStore.ts` ·
 > Migration `scripts/migrate-history-timeframe.ts` / `npm run history:migrate`
 >
 > **Für Betrieb/Deployment** (Backup, Dry-Run, Anwenden, Validierung,
 > Rollback): [MIGRATION_TIMEFRAME_FIELD.md](MIGRATION_TIMEFRAME_FIELD.md).
 
 Der Historical Store ist die append-only OHLCV-Senke des Systems
-(`data/history/candles.ndjson`). Scanner, Replay/Backtest und
-Analytics-Korrelation lesen **ausschließlich** aus dieser lokalen Datei —
-nie aus dem Netzwerk. Diese Seite beschreibt das persistente Zeilenformat
-(v2), den logischen Schlüssel, die Deduplizierungsregel und die Migration
-von Altbestand (v1).
+(`data/history/`, seit v0.17.5 partitioniert pro Serie unter
+`data/history/series/<encodedKey>.ndjson`, siehe §2a). Scanner,
+Replay/Backtest und Analytics-Korrelation lesen **ausschließlich** aus
+diesem lokalen Verzeichnis — nie aus dem Netzwerk. Diese Seite beschreibt
+das persistente Zeilenformat (v2), das partitionierte Datei-Layout, den
+logischen Schlüssel, die Deduplizierungsregel und die Migration von
+Altbestand (v1 sowie die Layout-Migration aus der monolithischen
+`candles.ndjson`).
 
 ---
 
@@ -61,6 +64,63 @@ trägt die Schema-Version `"v": 2`:
 Die Liste lebt seit `v0.6.2` in `src/lib/marketdata/timeframes.ts` (reine Daten,
 client-sicher) und wird vom Store unverändert re-exportiert; Regel-Engine,
 Mikro-Executor und Workshop-UI lesen dieselbe Liste.
+
+## 2a. Datei-Layout: partitionierte Serien (seit v0.17.5, ASA-09)
+
+Seit v0.17.5 liegen Kerzen **pro `(instrumentId, timeframe)`** in einer
+eigenen NDJSON-Datei unter `<dir>/series/`:
+
+```
+data/history/
+├── series/
+│   ├── BITUNIX%3ABTCUSDT__1h.ndjson        ← ":" → %3A, "/" → %2F
+│   ├── KRAKEN%3ABTC%2FUSD__15m.ndjson
+│   └── IBKR%3AEUR.USD__1h.ndjson
+├── candles.ndjson                          ← (nur noch) Legacy-Bestand
+└── candles.ndjson.migrated-<stamp>-<uuid>  ← byte-exaktes Migrations-Backup
+```
+
+* **Kodierung (bijektiv, Path-Traversal-frei):** Alle Zeichen außer
+  `[A-Za-z0-9._-]` werden percent-kodiert (`%XX` je UTF-8-Byte,
+  Großbuchstaben-Hex); `%` selbst wird mitkodiert (`%25`). `instrumentId`
+  wird **nie roh** in einen Pfad interpoliert; unbekannte Timeframes und
+  zu lange IDs werden fail-closed abgewiesen (`INVALID_TIMEFRAME`,
+  `INSTRUMENT_ID_TOO_LONG`). Die Trennung zum Timeframe erfolgt am
+  **letzten** `__` im Dateinamen — IDs mit Unterstrichen bleiben bijektiv.
+* **Query-Pfad:** `query({ instrumentId, timeframe })` öffnet und parst
+  **ausschließlich** die Partitionsdatei dieser Serie
+  (`O(N_series)` statt `O(N_all)`). Partitionsdateien sind aufsteigend nach
+  `ts` sortiert; `from`/`to` filtern zeilenweise im Strom, `limit`
+  selektiert die jüngsten Bars. `readAll()`/`count()`/`stats()`/
+  `listSeries()` streamen alle Partitionen (Wartungs-/Scanner-Pfad).
+* **Write-Pfad:** `append()`/`appendSeries()` schreiben **nur die
+  berührten Serien** neu — atomar (`.tmp-<pid>-<uuid>` + `fsync` +
+  `rename`, Modus 0600), gebündelt in 64-KiB-Puffern (kein Gesamtstring,
+  kein V8-`RangeError`), unter der Store-Sperre (siehe unten).
+* **Cross-Prozess-Sperre:** Alle mutierenden Operationen
+  (`append`, `appendSeries`, `clear`, Layout-Migration) halten
+  `<dir>/.store.lock` (`openSync(…, "wx")`, Retry mit Backoff,
+  Stale-Bereinigung nach Halter-PID/Alter ≥ 15 s; Belegung →
+  `HistoricalStoreError LOCK_TIMEOUT` statt stillem Overwrite). Damit
+  verlieren parallele Prozesse (Web-Server, `npm run market:sync`,
+  Mikro-Executor) keine Schreibvorgänge mehr. Lesezugriffe brauchen keine
+  Sperre — `rename` liefert ihnen immer eine vollständige Dateiversion.
+* **Automatische Layout-Migration (verlustfrei):** Existiert noch eine
+  monolithische `candles.ndjson`, wird sie beim ersten Lese-/Schreibzugriff
+  unter Lock in die Serien-Dateien überführt (v2-Zeilen dedupliziert nach
+  `instrumentId + timeframe + ts`, jüngstes `fetchedAt` gewinnt) und das
+  **Original byte-exakt** nach `candles.ndjson.migrated-<stamp>-<uuid>`
+  umbenannt. Legacy-v1-Zeilen (ohne `timeframe`) bleiben ausschließlich in
+  diesem Backup erhalten und können dort mit `npm run history:migrate
+  -- --file=<backup> --assume-timeframe=<tf> --apply` nachgerüstet werden.
+  Schlägt die Migration fehl (z. B. read-only eingehängtes Verzeichnis),
+  lesen alle Zugriffe die Legacy-Datei transparent weiter.
+* **Betrieb/Backup:** Ein vollständiger Store-Backup umfasst
+  `<dir>/series/` **plus** eventuelle `candles.ndjson.migrated-*`-Backups.
+  `clear()` entfernt Partitionen und Legacy-Reste unter Sperre
+  (Wartungs-API). Neue Diagnose-Helfer: `listSeries()`
+  (`{instrumentId, timeframe, file}` je Serie), `stats()`
+  (`{series, total, valid, legacy, corrupted}`).
 
 ## 3. Logischer Schlüssel & Deduplizierung
 

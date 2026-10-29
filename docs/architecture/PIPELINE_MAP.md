@@ -1,6 +1,6 @@
 # Pipeline-Architektur & Ausführungskarte (v0.1.0 · Legacy-Zählung v1.41.0 — Zuordnung: CHANGELOG.md)
 
-> **Dokumenten-Status:** Master-Architekturkarte · **Bestandsdokument** · **Stand:** 2026-10-09 · **Code-Version:** v0.17.4 (Beta) · Symbol-/Pfadabgleich gegen `src/` + `scripts/` erledigt — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) (2026-10-09) · Pflegeregeln: [§ 8](#8-pflege-dieser-karte)
+> **Dokumenten-Status:** Master-Architekturkarte · **Bestandsdokument** · **Stand:** 2026-10-09 · **Code-Version:** v0.17.5 (Beta) · Symbol-/Pfadabgleich gegen `src/` + `scripts/` erledigt — [DC-06](../audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) (2026-10-09) · Pflegeregeln: [§ 8](#8-pflege-dieser-karte)
 > **Verbindliche Referenz:** `docs/architecture/PIPELINE_MAP.md`
 
 ---
