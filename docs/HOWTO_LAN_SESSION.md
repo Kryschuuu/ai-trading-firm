@@ -2,35 +2,44 @@
 
 > **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
-> ## ⚠️ Überholt (2026-10-30): Loopback ist jetzt der Soll-Zustand
+> ## Stand 2026-10-30: Loopback-Bind, LAN über Host-Forwarder, Tailnet via serve
 >
 > Dieses Dokument beschreibt den Stand **vor v0.17.4**. Seit **ASA-08** bindet
 > `npm run start` hart auf `127.0.0.1:3369` (`package.json`); `APP_BIND_HOST`
-> wird nicht mehr ausgewertet. Der Caddy-VHost `trading.local` und der
-> `0.0.0.0`-Bind sind **entfernt** — „Bug 1" unten ist damit kein Bug mehr,
-> sondern gewollt. Die Anleitung bleibt nur als Zeitdokument stehen.
+> wird nicht mehr ausgewertet. „Bug 1" unten ist damit kein Bug mehr, sondern
+> gewollt. Zwei Zugangswege sind aktiv:
 >
-> **Aktueller Zugriff:**
+> **1. LAN — `https://trading.local`** (Caddy-Container → Host-Forwarder)
+>
+> - `ai-trading-firm-lan-bridge.service` (systemd **--user**, enabled) lauscht
+>   auf `172.20.0.1:3369` (Gateway des Docker-Netzes `nas-server_web`) und
+>   leitet per `socat` an `127.0.0.1:3369` weiter.
+> - Caddy: `trading.local { tls internal; reverse_proxy 172.20.0.1:3369 }` —
+>   **nicht** `host.docker.internal` (das zeigt auf `172.17.0.1`, `docker0` ist
+>   DOWN).
+> - nftables erlaubt nur `iifname { "docker0", "br-*" } tcp dport 3369`, also
+>   Container→Host. Kein LAN-Gerät erreicht 3369 direkt (nur der Admin-PC).
+> - Das Zertifikat kommt aus der Caddy-CA (`tls internal`). Auf Clients einmal
+>   `root.crt` importieren:
+>   `docker exec nas-server-proxy-1 cat /data/caddy/pki/authorities/local/root.crt`
+>
+> **2. Tailnet — `https://data.tail38413e.ts.net:8444/`**
 >
 > ```bash
-> # lokal auf dem Server
-> curl -s http://127.0.0.1:3369/api/health
-> ss -tlnp | grep 3369                  # SOLL: 127.0.0.1:3369
->
-> # von anderen Geräten (Tailnet, kein LAN-Listener, kein Funnel)
-> sudo tailscale serve --bg --https=8444 http://127.0.0.1:3369
-> # -> https://data.tail38413e.ts.net:8444/
+> sudo tailscale serve --bg --https=8444 http://127.0.0.1:3369   # tailnet only
 > tailscale serve status
 > ```
 >
-> Warum nicht mehr `0.0.0.0` + Caddy: `host.docker.internal` zeigt im
-> Caddy-Container auf `172.17.0.1`, `docker0` ist DOWN — der Container erreicht
-> den Host-Loopback nicht. Deshalb terminiert `tailscaled` auf dem Host.
-> **Nicht** zurück auf `0.0.0.0` binden: dann ist `X-Verified-IP` spoofbar
-> (Befund C2/ASA-08) und Port 3369 müsste per Firewall gesperrt werden.
+> **Lokal:** `http://127.0.0.1:3369`.
 >
-> Folge fürs Rate-Limit: ohne Proxy teilen sich alle Clients den
-> `local`-Bucket (`TRUSTED_PROXY_IPS` bleibt leer).
+> **Diagnose:** `ss -lntp | grep 3369` zeigt `127.0.0.1:3369` **und**
+> `172.20.0.1:3369`; `systemctl --user status ai-trading-firm-lan-bridge`.
+>
+> **Rate-Limit:** `TRUSTED_PROXY_IPS` bleibt leer → alle Clients teilen den
+> `local`-Bucket. `X-Verified-IP` wird ignoriert und ist damit nicht spoofbar.
+>
+> **Nicht** auf `0.0.0.0` binden (ASA-08/Befund C2), sonst ist der Dienst am
+> Proxy vorbei erreichbar und der Header spoofbar.
 
 > **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
 > systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard eine
@@ -54,9 +63,9 @@
 
 > **Historisch (vor v0.17.4).** Damals war der `0.0.0.0`-Bind das Ziel. Heute
 > ist der Loopback-Bind gewollt; LAN/Tailnet-Zugriff läuft über
-> `tailscale serve` (siehe Kasten oben). Wer die App trotzdem im LAN
-> veröffentlichen will, bindet **nicht** breiter, sondern setzt einen
-> TCP-Forwarder vor `127.0.0.1:3369` (siehe `trading.local`-Abschnitt unten).
+> `trading.local` (Caddy → Host-Forwarder) bzw. `tailscale serve` (siehe Kasten
+> oben). Wer die App trotzdem direkt im LAN veröffentlichen will, bindet
+> **nicht** breiter, sondern setzt einen TCP-Forwarder vor `127.0.0.1:3369`.
 
 ### Symptom
 
