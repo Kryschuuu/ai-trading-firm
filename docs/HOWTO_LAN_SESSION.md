@@ -2,6 +2,36 @@
 
 > **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
+> ## ⚠️ Überholt (2026-10-30): Loopback ist jetzt der Soll-Zustand
+>
+> Dieses Dokument beschreibt den Stand **vor v0.17.4**. Seit **ASA-08** bindet
+> `npm run start` hart auf `127.0.0.1:3369` (`package.json`); `APP_BIND_HOST`
+> wird nicht mehr ausgewertet. Der Caddy-VHost `trading.local` und der
+> `0.0.0.0`-Bind sind **entfernt** — „Bug 1" unten ist damit kein Bug mehr,
+> sondern gewollt. Die Anleitung bleibt nur als Zeitdokument stehen.
+>
+> **Aktueller Zugriff:**
+>
+> ```bash
+> # lokal auf dem Server
+> curl -s http://127.0.0.1:3369/api/health
+> ss -tlnp | grep 3369                  # SOLL: 127.0.0.1:3369
+>
+> # von anderen Geräten (Tailnet, kein LAN-Listener, kein Funnel)
+> sudo tailscale serve --bg --https=8444 http://127.0.0.1:3369
+> # -> https://data.tail38413e.ts.net:8444/
+> tailscale serve status
+> ```
+>
+> Warum nicht mehr `0.0.0.0` + Caddy: `host.docker.internal` zeigt im
+> Caddy-Container auf `172.17.0.1`, `docker0` ist DOWN — der Container erreicht
+> den Host-Loopback nicht. Deshalb terminiert `tailscaled` auf dem Host.
+> **Nicht** zurück auf `0.0.0.0` binden: dann ist `X-Verified-IP` spoofbar
+> (Befund C2/ASA-08) und Port 3369 müsste per Firewall gesperrt werden.
+>
+> Folge fürs Rate-Limit: ohne Proxy teilen sich alle Clients den
+> `local`-Bucket (`TRUSTED_PROXY_IPS` bleibt leer).
+
 > **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
 > systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard eine
 > abgelaufene Sitzung — **nicht** die Datenbank. Seit v1.39.0 bleibt die
@@ -12,7 +42,7 @@
 > ```bash
 > npm run stop                          # alten 127.0.0.1-Prozess beenden
 > sudo systemctl restart ai-trading-firm
-> ss -tlnp | grep 3369                  # muss 0.0.0.0:3369 zeigen
+> ss -tlnp | grep 3369                  # muss 127.0.0.1:3369 zeigen
 > ```
 >
 > Danach im Dashboard **einmal neu anmelden** (Token aus `.env`). Der Firm-Status
@@ -21,6 +51,12 @@
 ---
 
 ## Bug 1 — LAN nicht erreichbar nach Update
+
+> **Historisch (vor v0.17.4).** Damals war der `0.0.0.0`-Bind das Ziel. Heute
+> ist der Loopback-Bind gewollt; LAN/Tailnet-Zugriff läuft über
+> `tailscale serve` (siehe Kasten oben). Wer die App trotzdem im LAN
+> veröffentlichen will, bindet **nicht** breiter, sondern setzt einen
+> TCP-Forwarder vor `127.0.0.1:3369` (siehe `trading.local`-Abschnitt unten).
 
 ### Symptom
 
@@ -38,7 +74,7 @@ LISTEN 127.0.0.1:3369  (next start -H 127.0.0.1)
 
 Das ist typischerweise ein Rest aus `scripts/setup-cachyos.sh` Schritt 10
 (Validierung startet bewusst `npx next start -H 127.0.0.1`) oder ein manueller
-Start vor dem Update. Der systemd-Dienst (`npm run start` = `next start -H 0.0.0.0`)
+Start vor dem Update. Der systemd-Dienst (`npm run start` = `next start -H 127.0.0.1`)
 kann dann nicht starten und loopt:
 
 ```
@@ -57,7 +93,7 @@ cd ~/GITHUB/ai-trading-firm
 npm run stop                              # beendet den 127.0.0.1-Prozess (ohne sudo)
 sudo systemctl restart ai-trading-firm
 systemctl status ai-trading-firm --no-pager   # muss active (running) zeigen
-ss -tlnp | grep 3369                      # SOLL: 0.0.0.0:3369 — NICHT 127.0.0.1:3369
+ss -tlnp | grep 3369                      # SOLL: 127.0.0.1:3369 (Loopback-Bind seit v0.17.4)
 curl -s http://192.168.0.10:3369/api/health | head -c 300
 ```
 
