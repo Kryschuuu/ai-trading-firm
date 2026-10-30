@@ -17,6 +17,7 @@
  *
  * Dies ist die EINZIGE Schreibstelle für `liveAvailable`.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { adaptersFromCatalog, lookupAdapter, type ProjectionAdapterView } from "../brokers/adapterCatalog";
 import { capabilityMatrix, type CapabilityMatrix } from "../capabilities/matrix";
 import type { BrokerCapabilities } from "../contracts/broker";
@@ -82,8 +83,12 @@ export const LIVE_AVAILABLE_TOOLTIP =
 export const SEED_LIVE_AVAILABLE_FORBIDDEN_MESSAGE =
   'Das Feld "liveAvailable" ist im Instrument-Seed nicht zulaessig. Live-Verfuegbarkeit ist ein Laufzeitzustand und wird aus Capability-Matrix, Adapter-Registrierung, Feature-Flag und Live-Gate projiziert. Nutze stattdessen "liveTradable" fuer die fachliche Freigabe.';
 
-const lastLiveAvailable = new Map<string, boolean>();
-const gateDecisionCache = new Map<string, boolean>();
+const registeredState = getOrCreateRegisteredState("src/universe/capabilityProjection.ts", () => ({
+  lastLiveAvailable: new Map<string, boolean>(),
+  gateDecisionCache: new Map<string, boolean>(),
+  injectedContext: null as ProjectionContext | null,
+}));
+const { lastLiveAvailable, gateDecisionCache } = registeredState;
 
 function envFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureFlagView {
   return {
@@ -117,17 +122,17 @@ export function defaultProjectionContext(): ProjectionContext {
   };
 }
 
-let injectedContext: ProjectionContext | null = null;
+
 
 /** Nur Tests: Projektor-Kontext ersetzen (`null` = Default). */
 export function setProjectionContextForTests(next: ProjectionContext | null): void {
-  injectedContext = next;
+  registeredState.injectedContext = next;
   lastLiveAvailable.clear();
   gateDecisionCache.clear();
 }
 
 export function currentProjectionContext(): ProjectionContext {
-  return injectedContext ?? defaultProjectionContext();
+  return registeredState.injectedContext ?? defaultProjectionContext();
 }
 
 function instrumentKey(instrument: AvailabilityProjectionInput): string {

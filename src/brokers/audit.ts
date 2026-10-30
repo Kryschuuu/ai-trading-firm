@@ -16,6 +16,7 @@
  * Leaking-Schutz: Einträge enthalten ausschließlich venue/mode/outcome/
  * capability/errorCode — keine Order-Daten, keine Kurse, keine Credentials.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import type { ExecutionMode } from "../contracts/broker";
 import { writeAuditRecord, type AuditWriteOutcome } from "@/lib/auditSink";
 
@@ -35,14 +36,14 @@ export interface BrokerFactoryAuditEntry {
 
 const RING_MAX = 200;
 
-const G = globalThis as typeof globalThis & {
-  __brokerFactoryAudit?: BrokerFactoryAuditEntry[];
-  __brokerFactoryAuditDegraded?: number;
-};
+const registeredState = getOrCreateRegisteredState<{
+  brokerFactoryAudit?: BrokerFactoryAuditEntry[];
+  brokerFactoryAuditDegraded?: number;
+}>("src/brokers/audit.ts", () => ({}));
 
 /** Prozesslokales Audit-Log (Ring-Buffer). Exportiert für Tests + Health-View. */
 export const factoryAuditRing: BrokerFactoryAuditEntry[] = (
-  G.__brokerFactoryAudit ??= []
+  registeredState.brokerFactoryAudit ??= []
 ) as BrokerFactoryAuditEntry[];
 
 /**
@@ -74,7 +75,7 @@ export async function recordBrokerFactoryCall(
     auditClass: "security",
   });
   if (!outcome.durable || outcome.degraded) {
-    G.__brokerFactoryAuditDegraded = (G.__brokerFactoryAuditDegraded ?? 0) + 1;
+    registeredState.brokerFactoryAuditDegraded = (registeredState.brokerFactoryAuditDegraded ?? 0) + 1;
   }
   return outcome;
 }
@@ -85,7 +86,7 @@ export async function recordBrokerFactoryCall(
  * `auditDurabilitySnapshot()` aus `src/lib/auditSink.ts` lesbar.
  */
 export function readBrokerFactoryAuditDegradedCount(): number {
-  return G.__brokerFactoryAuditDegraded ?? 0;
+  return registeredState.brokerFactoryAuditDegraded ?? 0;
 }
 
 /** Letzten N Einträge (neueste zuerst) — für Health-/Debug-Views. */
@@ -98,5 +99,5 @@ export function readBrokerFactoryAudit(limit = 50): BrokerFactoryAuditEntry[] {
 /** Nur für Tests: Ring leeren. */
 export function clearBrokerFactoryAuditForTests(): void {
   factoryAuditRing.length = 0;
-  G.__brokerFactoryAuditDegraded = 0;
+  registeredState.brokerFactoryAuditDegraded = 0;
 }

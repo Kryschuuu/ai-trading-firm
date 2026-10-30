@@ -6,7 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=trader
+User=atf
+Group=atf
 WorkingDirectory=/opt/ai-trading-firm
 EnvironmentFile=/opt/ai-trading-firm/.env
 # Der Mikro-Zyklus ist bewusst ein eigener, schlanker Prozess: kein Next.js,
@@ -14,9 +15,17 @@ EnvironmentFile=/opt/ai-trading-firm/.env
 ExecStart=/usr/bin/node --import tsx scripts/micro-executor.ts
 Restart=on-failure
 RestartSec=5
-# Hartes Laufzeitfenster für den Executor-Prozess (Feed-Reconnect-Leaks).
-# Nach dem Neustart hydriert er den Broker-Zustand wieder aus der DB.
-RuntimeMaxSec=0
+# Wie die Haupt-Unit: nur die vorbereiteten Laufzeitverzeichnisse sind schreibbar.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ai-trading-firm/data /opt/ai-trading-firm/.runtime
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 # Ressourcen: niedrig halten — der Prozess ist auf Latenz, nicht auf CPU gebaut.
 MemoryMax=512M
 # Logs

@@ -19,6 +19,7 @@
  * durch `source` im Ergebnis sichtbar.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { WATCHLIST_DISPLAY_SYMBOLS } from "../universe/watchlist";
 import {
   MarketDataFetchError,
@@ -38,13 +39,13 @@ import {
   type ParsedSymbol,
 } from "../symbols/venueProfiles";
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __mktQuoteCache?: Map<string, { price: number; ts: number; source: string }>;
-  __mktCandleCache?: Map<string, { candles: Candle[]; ts: number }>;
-};
+const registeredState = getOrCreateRegisteredState<{
+  mktQuoteCache?: Map<string, { price: number; ts: number; source: string }>;
+  mktCandleCache?: Map<string, { candles: Candle[]; ts: number }>;
+}>("src/lib/marketData.ts", () => ({}));
 
-const quoteCache = (GLOBAL.__mktQuoteCache ??= new Map());
-const candleCache = (GLOBAL.__mktCandleCache ??= new Map());
+const quoteCache = (registeredState.mktQuoteCache ??= new Map());
+const candleCache = (registeredState.mktCandleCache ??= new Map());
 
 export type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number };
 
@@ -586,6 +587,13 @@ export async function getCandlesWithFallback(
   }
 }
 
+/** Nur für Tests: Kurs ohne Netzwerk in den registrierten Quote-Cache legen. */
+export function setQuoteCacheForTests(symbol: string, price: number): void {
+  const canonical = sanitizeSymbol(symbol);
+  if (!canonical) throw new Error("Ungültiges Test-Symbol");
+  quoteCache.set(canonical, { price, ts: Date.now(), source: "test" });
+}
+
 /** Nur für Tests: Cache-Schicht zurücksetzen (isolierte Testläufe). */
 export function resetMarketDataCachesForTests(): void {
   candleCache.clear();
@@ -602,10 +610,10 @@ export type ScreenerCandidate = {
   volume?: number;
 };
 
-const GLOBAL2 = globalThis as typeof globalThis & {
-  __screenerCache?: Map<string, { at: number; items: ScreenerCandidate[] }>;
-};
-const screenerCache = (GLOBAL2.__screenerCache ??= new Map());
+const registeredScreenerState = getOrCreateRegisteredState<{
+  screenerCache?: Map<string, { at: number; items: ScreenerCandidate[] }>;
+}>("src/lib/marketData.ts#screener", () => ({}));
+const screenerCache = (registeredScreenerState.screenerCache ??= new Map());
 const SCREENER_TTL_MS = 30 * 60_000; // 30 Min — Screener-Daten sind nicht eilig
 
 /**

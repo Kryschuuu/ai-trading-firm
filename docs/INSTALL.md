@@ -1,6 +1,6 @@
 # Installation — Schritt für Schritt auf CachyOS
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 > **Security-Upgrade v1.36.28 (SEC-03):** Vorhandene Installationen auf den
 > gepinnten Next.js-Stand ≥ 16.4.1 einschließlich nativer Bildverarbeitung
@@ -507,7 +507,9 @@ Admin-Token — den bestehenden Single-Admin-Operator. Für echte Rollentrennung
 verschiedene Credentials verwenden; den internen Scheduler steuert weiterhin
 `REQUIRE_HUMAN_APPROVAL`. [Details](security/README.md#rule-governance-sec-06).
 
-Dann als eigener Prozess bzw. Dienst (Kapitel 7.1):
+Dann als eigener Prozess bzw. Dienst (Kapitel 7.1). Vor dem systemd-Start
+müssen Dienstkonto, `.env` und schreibbare Verzeichnisse wie dort beschrieben
+vorbereitet sein:
 
 ```bash
 npm run micro                      # Vordergrund / Smoke
@@ -615,11 +617,33 @@ Flags, Gates und Limits: [`MARKET_DATA_PIPELINE.md`](MARKET_DATA_PIPELINE.md) §
 
 Damit die Firma nach jedem Reboot von selbst läuft.
 
+Die beiden mitgelieferten Units verwenden `atf:atf`, das Arbeitsverzeichnis
+`/opt/ai-trading-firm` und dieselbe `/opt/ai-trading-firm/.env`. Der Checkout,
+Build und `node_modules` müssen dort für `atf` lesbar sein. Vor dem Aktivieren
+beider Dienste das Systemkonto (falls noch nicht vorhanden), die restriktive
+Umgebungsdatei und die beiden durch `ProtectSystem=strict` freigegebenen
+Schreibverzeichnisse vorbereiten:
+
+```bash
+getent group atf >/dev/null || sudo groupadd --system atf
+id atf >/dev/null 2>&1 || sudo useradd --system --gid atf --home-dir /opt/ai-trading-firm --shell /usr/sbin/nologin atf
+sudo install -d -o atf -g atf -m 0750 /opt/ai-trading-firm/data /opt/ai-trading-firm/.runtime
+# .env muss bereits mit den benötigten Geheimnissen angelegt sein:
+sudo chown atf:atf /opt/ai-trading-firm/.env
+sudo chmod 0600 /opt/ai-trading-firm/.env
+```
+
+Bei einem anderen Installationspfad oder Dienstkonto beide Units einschließlich
+`WorkingDirectory`, `EnvironmentFile` und `ReadWritePaths` **gemeinsam** ändern;
+`data` und `.runtime` müssen bereits existieren und für den Dienstnutzer
+schreibbar sein. Bestehende Daten/Session- und Audit-Dateien auf passende Rechte
+prüfen, bevor ein Upgrade von einer älteren `trader`-Unit erfolgt.
+
 ### 7.1 Unit installieren
 
 ```bash
 sudo cp deploy/ai-trading-firm.service /etc/systemd/system/
-sudo nano /etc/systemd/system/ai-trading-firm.service   # User + Pfade anpassen
+sudo nano /etc/systemd/system/ai-trading-firm.service   # nur bei abweichender Installation beide Units anpassen
 sudo systemctl daemon-reload
 sudo systemctl enable --now ai-trading-firm
 ```
@@ -628,7 +652,7 @@ sudo systemctl enable --now ai-trading-firm
 
 ```bash
 sudo cp deploy/micro-executor.service /etc/systemd/system/
-sudo nano /etc/systemd/system/micro-executor.service   # User + Pfade anpassen
+sudo nano /etc/systemd/system/micro-executor.service   # nur bei abweichender Installation beide Units anpassen
 sudo systemctl daemon-reload
 sudo systemctl enable --now micro-executor
 ```

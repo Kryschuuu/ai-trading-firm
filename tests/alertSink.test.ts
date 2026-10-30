@@ -134,12 +134,12 @@ test("D3: LogAlertSink nutzt strukturierte Logs mit Redaktion", () => {
   assert.ok(!JSON.stringify(entries[0]).includes("SECRET-MARKER"));
 });
 
-test("D3: FileAlertSink schreibt NDJSON über resolveRuntimePath (0600, redigiert)", () => {
+test("D3: FileAlertSink schreibt NDJSON über resolveRuntimePath (0600, redigiert)", async () => {
   const dir = tmpDir();
   const file = path.join(dir, "alerts.ndjson");
   const sink = new FileAlertSink(file);
-  sink.send({ code: "heartbeat-stale", severity: "critical", message: "Tick tot", meta: { ageMs: 900_000 } });
-  sink.send({
+  await sink.send({ code: "heartbeat-stale", severity: "critical", message: "Tick tot", meta: { ageMs: 900_000 } });
+  await sink.send({
     code: "circuit-breaker:dailyLoss",
     severity: "critical",
     message: "Tagesverlust — Token sk-live-SECRET-MARKER",
@@ -174,6 +174,7 @@ test("D3: Webhook-Sink liest die URL aus dem Secret-Store (Mock) und postet sie"
 
   const sink = new WebhookAlertSink({
     resolveUrl: () => resolveAlertWebhookUrlFromSecretStore("ALERT_WEBHOOK_URL"),
+    lookupFn: async () => [{ address: "1.1.1.1", family: 4 }],
     fetchFn: (async (input: RequestInfo | URL, init?: RequestInit) => {
       seen.push({ url: String(input), body: JSON.parse(String(init?.body ?? "{}")) });
       return new Response("", { status: 200 });
@@ -195,6 +196,7 @@ test("D3: Webhook ohne Credential ist still, Fehler nennen die URL nie", async (
   });
   const silent = new WebhookAlertSink({
     resolveUrl: () => resolveAlertWebhookUrlFromSecretStore("ALERT_WEBHOOK_URL"),
+    lookupFn: async () => [{ address: "1.1.1.1", family: 4 }],
     fetchFn: (async () => {
       throw new Error("darf nicht aufgerufen werden");
     }) as typeof fetch,
@@ -209,6 +211,7 @@ test("D3: Webhook ohne Credential ist still, Fehler nennen die URL nie", async (
   });
   const failing = new WebhookAlertSink({
     resolveUrl: () => resolveAlertWebhookUrlFromSecretStore("ALERT_WEBHOOK_URL"),
+    lookupFn: async () => [{ address: "1.1.1.1", family: 4 }],
     fetchFn: (async () => new Response("nope", { status: 500 })) as typeof fetch,
   });
   await assert.rejects(

@@ -16,6 +16,7 @@
  * Payload enthält KEINE Secrets, keinen Body, keine volle Query.
  * Zusätzlich: verworfene Positionszeilen (B2) → Ring + Zähler (in-Prozess).
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   auditDurabilitySnapshot,
   writeAuditRecord,
@@ -32,15 +33,15 @@ export interface BitunixPrivateAuditEntry {
 
 const RING_MAX = 200;
 
-const G = globalThis as typeof globalThis & {
-  __bitunixPrivateAudit?: BitunixPrivateAuditEntry[];
-  __bitunixPositionAnomalies?: BitunixPositionAnomalyEntry[];
-  __bitunixPositionAnomalyCount?: number;
+const registeredState = getOrCreateRegisteredState<{
+  bitunixPrivateAudit?: BitunixPrivateAuditEntry[];
+  bitunixPositionAnomalies?: BitunixPositionAnomalyEntry[];
+  bitunixPositionAnomalyCount?: number;
   /** S1: wie viele Venue-Audits nicht direkt in `audit_log` landen konnten. */
-  __bitunixAuditDegraded?: number;
-};
+  bitunixAuditDegraded?: number;
+}>("src/brokers/bitunix/audit.ts", () => ({}));
 
-export const bitunixPrivateAuditRing: BitunixPrivateAuditEntry[] = (G.__bitunixPrivateAudit ??=
+export const bitunixPrivateAuditRing: BitunixPrivateAuditEntry[] = (registeredState.bitunixPrivateAudit ??=
   []) as BitunixPrivateAuditEntry[];
 
 export async function recordBitunixPrivateCall(
@@ -63,7 +64,7 @@ export async function recordBitunixPrivateCall(
     auditClass: "security",
   });
   if (!outcome.durable || outcome.degraded) {
-    G.__bitunixAuditDegraded = (G.__bitunixAuditDegraded ?? 0) + 1;
+    registeredState.bitunixAuditDegraded = (registeredState.bitunixAuditDegraded ?? 0) + 1;
   }
   return outcome;
 }
@@ -78,7 +79,7 @@ export function readBitunixPrivateAudit(limit = 50): BitunixPrivateAuditEntry[] 
  * Snapshot aus `auditDurabilitySnapshot()` lesbar.
  */
 export function readBitunixAuditDegradedCount(): number {
-  return G.__bitunixAuditDegraded ?? 0;
+  return registeredState.bitunixAuditDegraded ?? 0;
 }
 
 /** Diagnose für Health/Ops: eigene Zähler + gemeinsamer Senken-Snapshot. */
@@ -92,7 +93,7 @@ export function readBitunixAuditDurability() {
 
 export function clearBitunixPrivateAuditForTests(): void {
   bitunixPrivateAuditRing.length = 0;
-  G.__bitunixAuditDegraded = 0;
+  registeredState.bitunixAuditDegraded = 0;
 }
 
 /**
@@ -128,8 +129,8 @@ export function recordBitunixPositionAnomaly(
     reason: entry.reason,
     at: new Date().toISOString(),
   };
-  G.__bitunixPositionAnomalyCount = (G.__bitunixPositionAnomalyCount ?? 0) + 1;
-  const ring = (G.__bitunixPositionAnomalies ??= []) as BitunixPositionAnomalyEntry[];
+  registeredState.bitunixPositionAnomalyCount = (registeredState.bitunixPositionAnomalyCount ?? 0) + 1;
+  const ring = (registeredState.bitunixPositionAnomalies ??= []) as BitunixPositionAnomalyEntry[];
   ring.push(full);
   if (ring.length > POSITION_ANOMALY_RING_MAX) {
     ring.splice(0, ring.length - POSITION_ANOMALY_RING_MAX);
@@ -139,15 +140,15 @@ export function recordBitunixPositionAnomaly(
 
 /** kumulierte Anzahl verworfener Positionszeilen (seit Prozessstart / letztem Reset). */
 export function readBitunixPositionAnomalyCount(): number {
-  return G.__bitunixPositionAnomalyCount ?? 0;
+  return registeredState.bitunixPositionAnomalyCount ?? 0;
 }
 
 /** die letzten Anomalien, neueste zuerst. */
 export function readBitunixPositionAnomalies(limit = 20): BitunixPositionAnomalyEntry[] {
-  return [...(G.__bitunixPositionAnomalies ?? [])].slice(-limit).reverse();
+  return [...(registeredState.bitunixPositionAnomalies ?? [])].slice(-limit).reverse();
 }
 
 export function clearBitunixPositionAnomaliesForTests(): void {
-  G.__bitunixPositionAnomalies = [];
-  G.__bitunixPositionAnomalyCount = 0;
+  registeredState.bitunixPositionAnomalies = [];
+  registeredState.bitunixPositionAnomalyCount = 0;
 }

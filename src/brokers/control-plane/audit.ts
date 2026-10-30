@@ -17,6 +17,7 @@
  * local-open und Admin-Token → "admin", Operator → "operator",
  * Viewer → "viewer". Niemals Token-Werte.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { writeAuditRecord, type AuditWriteOutcome } from "@/lib/auditSink";
 
 export type ControlPlaneAction =
@@ -43,13 +44,13 @@ export interface ControlPlaneAuditEntry {
 
 const RING_MAX = 200;
 
-const G = globalThis as typeof globalThis & {
-  __controlPlaneAudit?: ControlPlaneAuditEntry[];
-  __controlPlaneAuditDegraded?: number;
-};
+const registeredState = getOrCreateRegisteredState<{
+  controlPlaneAudit?: ControlPlaneAuditEntry[];
+  controlPlaneAuditDegraded?: number;
+}>("src/brokers/control-plane/audit.ts", () => ({}));
 
 export const controlPlaneAuditRing: ControlPlaneAuditEntry[] = (
-  G.__controlPlaneAudit ??= []
+  registeredState.controlPlaneAudit ??= []
 ) as ControlPlaneAuditEntry[];
 
 /**
@@ -94,7 +95,7 @@ export async function recordControlPlaneEvent(
     failClosed: opts.failClosed,
   });
   if (!outcome.durable || outcome.degraded) {
-    G.__controlPlaneAuditDegraded = (G.__controlPlaneAuditDegraded ?? 0) + 1;
+    registeredState.controlPlaneAuditDegraded = (registeredState.controlPlaneAuditDegraded ?? 0) + 1;
   }
   return outcome;
 }
@@ -105,7 +106,7 @@ export async function recordControlPlaneEvent(
  * gemeldete Lücke — beides löst CRITICAL-Zeilen im Journal aus.
  */
 export function readControlPlaneAuditDegradedCount(): number {
-  return G.__controlPlaneAuditDegraded ?? 0;
+  return registeredState.controlPlaneAuditDegraded ?? 0;
 }
 
 /** Letzte N Eintraege (neueste zuerst) — fuer Tests/Health-Views. */
@@ -116,5 +117,5 @@ export function readControlPlaneAudit(limit = 50): ControlPlaneAuditEntry[] {
 /** Nur Tests: Ring und Zähler leeren. */
 export function clearControlPlaneAuditForTests(): void {
   controlPlaneAuditRing.length = 0;
-  G.__controlPlaneAuditDegraded = 0;
+  registeredState.controlPlaneAuditDegraded = 0;
 }

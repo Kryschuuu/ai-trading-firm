@@ -38,6 +38,7 @@
  * clearRuntimeFlag("broker.healthcheck.remote");      // zurück auf Env-Default
  * ```
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -113,11 +114,11 @@ interface FlagsCacheEntry extends FlagsFileState {
   exists: boolean;
 }
 
-const G = globalThis as typeof globalThis & {
-  __runtimeFlagsCache?: Map<string, FlagsCacheEntry>;
-};
+const registeredState = getOrCreateRegisteredState<{
+  runtimeFlagsCache?: Map<string, FlagsCacheEntry>;
+}>("src/lib/runtimeFlags.ts", () => ({}));
 
-const cache: Map<string, FlagsCacheEntry> = (G.__runtimeFlagsCache ??= new Map());
+const cache: Map<string, FlagsCacheEntry> = (registeredState.runtimeFlagsCache ??= new Map());
 
 /** Nur für Tests: Cache verwerfen (Datei bleibt unberührt). */
 export function resetRuntimeFlagsCacheForTests(): void {

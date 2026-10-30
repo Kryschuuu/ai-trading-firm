@@ -49,6 +49,7 @@
  *   - Aktiver Faktor wird persistiert (adp.activeFactor / adp.activeAt),
  *     damit der separate Mikro-Executor-Prozess die Reduktion ebenfalls sieht.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { db } from "@/db";
 import { riskConfig } from "@/db/schema";
 import { getCandles, type Candle } from "./marketData";
@@ -568,8 +569,8 @@ export type AdaptiveRiskStatus = {
   bounds: Record<keyof VolatilityConfig, [number, number]>;
 };
 
-const G = globalThis as typeof globalThis & {
-  __adaptiveRisk?: {
+const registeredState = getOrCreateRegisteredState<{
+  adaptiveRisk?: {
     config: VolatilityConfig;
     configLoadedAt: number;
     machine: RegimeStateMachine;
@@ -580,12 +581,12 @@ const G = globalThis as typeof globalThis & {
     events: AdaptiveRiskEvent[];
     updating: Promise<AdaptiveRiskStatus> | null;
   };
-};
+}>("src/lib/adaptiveRisk.ts", () => ({}), () => { vixCache = null; });
 
-type State = NonNullable<(typeof G)["__adaptiveRisk"]>;
+type State = NonNullable<(typeof registeredState)["adaptiveRisk"]>;
 
 function state(): State {
-  G.__adaptiveRisk ??= {
+  registeredState.adaptiveRisk ??= {
     config: { ...DEFAULT_VOLATILITY_CONFIG },
     configLoadedAt: 0,
     machine: new RegimeStateMachine(),
@@ -596,7 +597,7 @@ function state(): State {
     events: [],
     updating: null,
   };
-  return G.__adaptiveRisk;
+  return registeredState.adaptiveRisk;
 }
 
 function buildStatus(s: State): AdaptiveRiskStatus {
@@ -925,6 +926,6 @@ export function getAdaptiveRiskStatus(): AdaptiveRiskStatus | null {
 
 /** Leert den kompletten Laufzeit-Zustand (nur für Tests). */
 export function __resetAdaptiveRiskForTests(): void {
-  delete G.__adaptiveRisk;
+  delete registeredState.adaptiveRisk;
   vixCache = null;
 }

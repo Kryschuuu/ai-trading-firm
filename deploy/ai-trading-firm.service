@@ -3,7 +3,7 @@
 #
 # Installation:
 #   sudo cp deploy/ai-trading-firm.service /etc/systemd/system/
-#   sudo nano /etc/systemd/system/ai-trading-firm.service   # User + Pfade anpassen!
+#   # Bei abweichender Installation beide Units gemeinsam anpassen.
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now ai-trading-firm
 #
@@ -12,7 +12,7 @@
 #
 [Unit]
 Description=Autonome KI-Trading-Firma (Paper-Trading)
-Documentation=file:///home/DEIN_USER/ai-trading-firm/docs/HANDBUCH.md
+Documentation=file:///opt/ai-trading-firm/docs/HANDBUCH.md
 After=network-online.target postgresql.service
 Wants=network-online.target
 # Bei Variante A läuft Ollama lokal — dann diese Zeile aktivieren:
@@ -21,13 +21,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# ---- ANPASSEN ----
-User=DEIN_USER
-Group=DEIN_USER
-WorkingDirectory=/home/DEIN_USER/ai-trading-firm
-# ------------------
-
-EnvironmentFile=/home/DEIN_USER/ai-trading-firm/.env
+# Identische Betriebsidentität und Pfade wie micro-executor.service.
+User=atf
+Group=atf
+WorkingDirectory=/opt/ai-trading-firm
+EnvironmentFile=/opt/ai-trading-firm/.env
 # NODE_ENV=production ist bindend: der Auth-Boot-Guard (src/auth/authMode.ts,
 # Befund C1/v1.36.13) verlangt in Produktion mindestens ein Token. Ohne
 # FIRM_ADMIN_TOKEN/FIRM_API_TOKEN/FIRM_VIEWER_TOKEN in .env startet der Dienst
@@ -69,8 +67,9 @@ TimeoutStopSec=30
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/DEIN_USER/ai-trading-firm
+ProtectHome=true
+# Beide Verzeichnisse vor dem Start anlegen und dem Dienstnutzer zuweisen.
+ReadWritePaths=/opt/ai-trading-firm/data /opt/ai-trading-firm/.runtime
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

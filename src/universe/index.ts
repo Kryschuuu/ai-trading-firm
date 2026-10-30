@@ -22,10 +22,11 @@ export * from "./seed";
 export * from "./watchlist";
 export * from "./capabilityProjection";
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { InstrumentRegistry, type RegistryOptions } from "./registry";
 import { SEED_INSTRUMENTS } from "./seed";
 
-const GLOBAL = globalThis as typeof globalThis & { __universeRegistry?: InstrumentRegistry };
+const registeredState = getOrCreateRegisteredState<{ universeRegistry?: InstrumentRegistry }>("src/universe/index.ts", () => ({}));
 
 /**
  * Prozessweite Registry-Instanz (auch über Next.js-HMR stabil).
@@ -34,13 +35,13 @@ const GLOBAL = globalThis as typeof globalThis & { __universeRegistry?: Instrume
  * Watchlist-Seed importiert — die Anwendung startet damit nie ohne Universum.
  */
 export function getRegistry(options: RegistryOptions = {}): InstrumentRegistry {
-  if (!GLOBAL.__universeRegistry) {
+  if (!registeredState.universeRegistry) {
     const registry = new InstrumentRegistry(options);
     registry.load();
     if (registry.size === 0) {
       registry.upsertMany([...SEED_INSTRUMENTS], "seed:bootstrap", "SEED");
     }
-    GLOBAL.__universeRegistry = registry;
+    registeredState.universeRegistry = registry;
   } else {
     // Cross-Prozess-Sichtbarkeit (CLI `market:sync` ↔ Next.js-Server):
     // Der Singleton lebt im langlebigen Server-Prozess. Schreibt ein
@@ -51,16 +52,16 @@ export function getRegistry(options: RegistryOptions = {}): InstrumentRegistry {
     // sich geändert hat; hier reicht ein billiger `load()`-Aufruf (kein
     // Force, nur Stat-Check, kein File-Read wenn unverändert).
     try {
-      GLOBAL.__universeRegistry.load();
+      registeredState.universeRegistry.load();
     } catch {
       // best-effort: bei Stat/Read-Fehler bleibt der letzte bekannte Stand
       // sichtbar (fail-soft, nie crashen im Request-Pfad).
     }
   }
-  return GLOBAL.__universeRegistry;
+  return registeredState.universeRegistry;
 }
 
 /** Nur für Tests: Singleton verwerfen, damit ein neues Datenverzeichnis greift. */
 export function resetRegistryForTests(): void {
-  delete GLOBAL.__universeRegistry;
+  delete registeredState.universeRegistry;
 }

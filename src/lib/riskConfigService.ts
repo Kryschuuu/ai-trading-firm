@@ -10,6 +10,7 @@
  *   - DB/Dashboard darf innerhalb des Fensters frei einstellen.
  *   - Fehlt die DB oder ein Wert ist Unsinn → gilt der jeweilige Code-Default.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { db } from "@/db";
 import { riskConfig } from "@/db/schema";
 import { applyRuntimeLimits, getBaseLimits, getLimits, DEFAULT_LIMITS, LIMIT_CEILINGS, type RiskLimits } from "./riskGuard";
@@ -36,7 +37,7 @@ import {
   type VolatilityConfig,
 } from "./adaptiveRisk";
 
-const GLOBAL = globalThis as typeof globalThis & { __riskCfgLoadedAt?: number };
+const registeredState = getOrCreateRegisteredState<{ riskCfgLoadedAt?: number }>("src/lib/riskConfigService.ts", () => ({}), () => { loadPromise = null; });
 const RELOAD_TTL_MS = 10_000;
 
 /** Beschreibbare Schlüssel mit Metadaten für Dashboard + Validierung. */
@@ -81,7 +82,7 @@ const fromDbValue = (v: unknown): number | null => {
 
 /** Aus der DB laden und wirksam setzen (mit kurzem Cache gegen Hot-Looping). */
 export async function refreshRuntimeLimits(force = false): Promise<void> {
-  if (!force && GLOBAL.__riskCfgLoadedAt && Date.now() - GLOBAL.__riskCfgLoadedAt < RELOAD_TTL_MS) return;
+  if (!force && registeredState.riskCfgLoadedAt && Date.now() - registeredState.riskCfgLoadedAt < RELOAD_TTL_MS) return;
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
@@ -92,7 +93,7 @@ export async function refreshRuntimeLimits(force = false): Promise<void> {
       if (n !== null) raw[r.key] = n;
     }
     applyRuntimeLimits(raw as Partial<RiskLimits>);
-    GLOBAL.__riskCfgLoadedAt = Date.now();
+    registeredState.riskCfgLoadedAt = Date.now();
   })();
 
   try {
@@ -214,7 +215,7 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
         target: riskConfig.key,
         set: { value: toDbValue(baseAfter), updatedAt: new Date() },
       });
-    GLOBAL.__riskCfgLoadedAt = Date.now();
+    registeredState.riskCfgLoadedAt = Date.now();
 
     if (String(before) !== String(baseAfter)) {
       await logAudit("CONFIG_CHANGED", "WARN", {
@@ -247,7 +248,7 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
         target: riskConfig.key,
         set: { value: toDbValue(after), updatedAt: new Date() },
       });
-    GLOBAL.__riskCfgLoadedAt = Date.now();
+    registeredState.riskCfgLoadedAt = Date.now();
 
     if (String(before) !== String(after)) {
       await logAudit("CONFIG_CHANGED", "WARN", {
@@ -286,7 +287,7 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
         target: riskConfig.key,
         set: { value: toDbValue(after as number | boolean), updatedAt: new Date() },
       });
-    GLOBAL.__riskCfgLoadedAt = Date.now();
+    registeredState.riskCfgLoadedAt = Date.now();
 
     if (String(before) !== String(after)) {
       await logAudit("CONFIG_CHANGED", "WARN", {
@@ -316,7 +317,7 @@ export async function setConfigValue(key: string, value: number): Promise<{ ok: 
         target: riskConfig.key,
         set: { value: toDbValue(preview.stored), updatedAt: new Date() },
       });
-    GLOBAL.__riskCfgLoadedAt = Date.now();
+    registeredState.riskCfgLoadedAt = Date.now();
     resetSignalDecayRuntimeForTests();
     await logAudit("CONFIG_CHANGED", "WARN", {
       key,

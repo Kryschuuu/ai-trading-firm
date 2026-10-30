@@ -177,7 +177,7 @@ jobs:
           SCHEDULER_ENABLED: "false"
 
       - name: Next-/Auth-Regressionen und Live-Gate-Suite (Coverage >= 95 %)
-        # Reihenfolge: Next/ws -> Auth (SEC-01) -> ASA-02/ASA-08 ->
+        # Reihenfolge: Next/ws -> Auth (SEC-01) -> ASA-02/ASA-08/ASA-13..15 ->
         # Live-Gate-Suite mit Zeilen-Coverage-Tor >= 95 % auf src/live-gate/**.
         run: npm run security:live-gate
 

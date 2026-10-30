@@ -17,6 +17,7 @@
  *   - Netzwerkfehler, HTTP 429 und 5xx gelten als retryable; 4xx nicht.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { filterEnabledProviders } from "../routing/providerToggles";
 import { publicErrorMessage } from "./secrets";
 
@@ -568,20 +569,22 @@ async function listModels(cfg: LlmClientConfig, timeoutMs = 2500): Promise<strin
 }
 
 /** Kurzer Cache für installierte Modelle (Status + Ollama-Tag-Auflösung). */
-const MODEL_LIST_CACHE = new Map<string, { at: number; models: string[] }>();
+const { modelListCache } = getOrCreateRegisteredState("src/lib/llmProvider.ts", () => ({
+  modelListCache: new Map<string, { at: number; models: string[] }>(),
+}));
 const MODEL_LIST_TTL_MS = 15_000;
 
 /** Nur für Tests/Diagnose: Cache leeren. */
 export function clearModelListCache(): void {
-  MODEL_LIST_CACHE.clear();
+  modelListCache.clear();
 }
 
 async function listModelsCached(cfg: LlmClientConfig): Promise<string[] | null> {
-  const cached = MODEL_LIST_CACHE.get(cfg.provider);
+  const cached = modelListCache.get(cfg.provider);
   if (cached && Date.now() - cached.at < MODEL_LIST_TTL_MS) return cached.models;
   try {
     const models = await listModels(cfg);
-    MODEL_LIST_CACHE.set(cfg.provider, { at: Date.now(), models });
+    modelListCache.set(cfg.provider, { at: Date.now(), models });
     return models;
   } catch {
     return null;

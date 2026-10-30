@@ -21,6 +21,7 @@
  * Der Enforcer liest ausschließlich persistierte Quellen (State-Files, Env-
  * Flags, Suite-Stamp, Kill-Datei) — keine UI-Flags, keine Agenten-Aussagen.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { LiveTradingGateError, BROKER_VENUE_IDS, type BrokerVenueId } from "@/contracts/broker";
 import { VENUE_CAPABILITIES } from "@/brokers/capabilities";
 import {
@@ -93,7 +94,9 @@ export interface EvaluateLiveOrderOptions {
  */
 export type VenueReadinessProvider = (venue: string) => { active: boolean } | null;
 
-let venueReadinessProvider: VenueReadinessProvider | null = null;
+const registeredState = getOrCreateRegisteredState<{ venueReadinessProvider: VenueReadinessProvider | null }>(
+  "src/live-gate/enforcer.ts", () => ({ venueReadinessProvider: null }),
+);
 
 /**
  * Readiness-Provider registrieren (Dependency Inversion).
@@ -105,7 +108,7 @@ let venueReadinessProvider: VenueReadinessProvider | null = null;
  *   Control Plane nicht.
  */
 export function setVenueReadinessProvider(provider: VenueReadinessProvider | null): void {
-  venueReadinessProvider = provider;
+  registeredState.venueReadinessProvider = provider;
 }
 
 /**
@@ -116,7 +119,7 @@ export function setVenueReadinessProvider(provider: VenueReadinessProvider | nul
  *   jede Live-Order wird verweigert, bis die Bridge verbunden ist.
  */
 export function venueReadinessProviderRegistered(): boolean {
-  return venueReadinessProvider !== null;
+  return registeredState.venueReadinessProvider !== null;
 }
 
 function normalizeVenueId(raw: string): BrokerVenueId | null {
@@ -265,12 +268,12 @@ export function evaluateLiveOrder(
   }
 
   // 10) Control-Plane-Venue-State aktiv (Provider; unbekannt → deny)
-  if (!venueReadinessProvider) {
+  if (!registeredState.venueReadinessProvider) {
     return finish(false, "CONTROL_PLANE_UNKNOWN", "Kein Control-Plane-Readiness-Provider registriert (Integration fehlt) — im Zweifel deny.", venue, state, { flags, suite: suiteInfo });
   }
   let readiness: { active: boolean } | null = null;
   try {
-    readiness = venueReadinessProvider(venue);
+    readiness = registeredState.venueReadinessProvider(venue);
   } catch {
     readiness = null;
   }

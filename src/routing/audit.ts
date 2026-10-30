@@ -16,6 +16,7 @@
  * Der Audit-Pfad wirft NIE: Ein Audit-Ausfall darf keine Routing-Entscheidung
  * verhindern (aber jeder Wechsel wird trotzdem im Ring gehalten).
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { writeAuditRecord } from "@/lib/auditSink";
@@ -27,12 +28,12 @@ export const ROUTING_AUDIT_FILE = "audit.ndjson";
 
 const RING_MAX = 500;
 
-const G = globalThis as typeof globalThis & {
-  __routingAuditRing?: RoutingAuditEntry[];
-};
+const registeredState = getOrCreateRegisteredState<{
+  routingAuditRing?: RoutingAuditEntry[];
+}>("src/routing/audit.ts", () => ({}));
 
 /** In-Memory-Ring (neueste zuletzt) — Grundlage für Tests und API. */
-export const routingAuditRing: RoutingAuditEntry[] = (G.__routingAuditRing ??=
+export const routingAuditRing: RoutingAuditEntry[] = (registeredState.routingAuditRing ??=
   []) as RoutingAuditEntry[];
 
 /** Nur Tests: Ring leeren. */

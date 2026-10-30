@@ -21,8 +21,39 @@ Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/) ·
 Versionierung: [SemVer](https://semver.org/lang/de/) (0.x: Breaking Changes sind
 erlaubt, solange sie hier dokumentiert sind).
 
-> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-29** · Code-Version **0.17.6** ·
+> **Status-Header:** **Beta** · Dokumentationsstand **2026-10-30** · Code-Version **0.17.7** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
+
+## [0.17.7] — Zustands-Registry, systemd und sichere Alerts (2026-10-30)
+
+### Security / Betrieb
+
+- **ASA-13 FIXED:** Fachliche Singletons und modul-lokaler Zustand sind typisiert
+  registriert und bei ruhenden Tests deterministisch rücksetzbar. Ein
+  AST-Architekturwächter begrenzt globale Felder; der PostgreSQL-Pool bleibt
+  langlebige Infrastruktur und wird durch den Business-Reset nicht geschlossen.
+- **ASA-14 FIXED:** Web- und Micro-Unit verwenden `atf:atf`, gemeinsame Pfade
+  unter `/opt/ai-trading-firm` und eine strikte Sandbox. Vor Upgrade/Start
+  `data` und `.runtime` bereitstellen und Rechte bestehender Daten prüfen;
+  Anleitung: [INSTALL.md](docs/INSTALL.md#kapitel-7--als-dienst-einrichten-systemd-ab).
+- **ASA-15 FIXED:** Datei-Alerts werden asynchron und geordnet geschrieben;
+  Webhooks erfordern öffentliches HTTPS, validieren und pinnen alle DNS-Ziele,
+  prüfen weiterhin den TLS-Hostnamen und verbieten Redirects. Bereits
+  konfigurierte HTTP- oder private Webhooks müssen auf öffentliches HTTPS
+  umgestellt werden. Die lokale Ausnahme ist ausschließlich für Tests.
+- `postcss-selector-parser` ist transitiv auf `6.1.5` überschrieben (GHSA-rj75-hqrm-r3gf);
+  `undici` ist für sichere DNS-gepinnte Verbindungen explizit auf `6.29.1` gepinnt.
+- Der Architektur-/Security-Audit 2026-10-27 ist **CLOSED** (15/15 FIXED);
+  Regressionen für Registry, Polling, Units und Alert-Sinks sind im
+  `security:live-gate` integriert.
+
+### Wartbarkeit
+
+- Das Dashboard ist in wiederverwendbare Bereiche und einen Polling-Hook
+  aufgeteilt: stabile aktive Mission, Pause im unsichtbaren Tab und sofortige
+  Aktualisierung bei Rückkehr ohne Änderung des Bedienverhaltens.
+- Patch-Version, Lockfile, aktive Code-Version-Header und Betriebs-/Audit-Doku
+  synchronisiert.
 
 ## [0.17.6] — Fail-closed Fallback, Datenbank und Sessions (2026-10-29)
 

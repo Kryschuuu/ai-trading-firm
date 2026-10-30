@@ -1,6 +1,6 @@
 # Handbuch — Autonome KI-Trading-Firma
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
+> **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
 Bedienung, Beispiele und Notfallabläufe. Geschrieben für **Variante A** (alles auf dem
 N150) und **Variante B** (N150 + Desktop als Modellserver). Unterschiede sind mit
@@ -1634,6 +1634,12 @@ CEO + Research, 1×/h                    eigener Prozess: npm run micro
 auf jeden Preis-Tick (Mikrosekunden). Kein Agent blockiert mehr einen Trade.
 
 ### 15.1 Einmalige Aktivierung
+
+Für systemd vorab das gemeinsame Dienstkonto `atf:atf`, den Checkout und die
+`.env` unter `/opt/ai-trading-firm` sowie die schreibbaren Verzeichnisse
+`data` und `.runtime` einrichten. Beide Units setzen dieselbe strikte Sandbox;
+die vollständigen Befehle und Upgrade-Hinweise stehen in
+[INSTALL.md, Kapitel 7](INSTALL.md#kapitel-7--als-dienst-einrichten-systemd-ab).
 
 ```bash
 # 1. Neue Tabellen anlegen (idempotent)

@@ -17,6 +17,7 @@
  * einen sicherheitskritischen Entschärfungsvorgang.
  */
 import { randomUUID } from "node:crypto";
+import { getOrCreateRegisteredState } from "./stateRegistry";
 
 /** Gültigkeit einer Challenge (Hard-Limit, siehe Arena-Prompt C3: <= 60 s). */
 export const DISARM_NONCE_TTL_MS = 60_000;
@@ -24,7 +25,9 @@ export const DISARM_NONCE_TTL_MS = 60_000;
 type Entry = { nonce: string; expiresAt: number; used: boolean };
 
 /** Prozesslokaler Challenge-Speicher (Single-Node; wie die Rate-Limiter). */
-const store = new Map<string, Entry>();
+const { store } = getOrCreateRegisteredState("src/lib/disarmChallenge.ts", () => ({
+  store: new Map<string, Entry>(),
+}));
 
 /** Entfernt abgelaufene Challenges (lazy cleanup beim nächsten Zugriff). */
 function sweep(now: number): void {

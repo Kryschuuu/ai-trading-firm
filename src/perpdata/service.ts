@@ -20,6 +20,7 @@
  * Neues holen“, nicht „bekannte Historie verschleiern“). Risiko-, Order- und
  * Live-Pfade werden von diesem Modul nie berührt.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { getRegistry, type InstrumentRegistry } from "../universe";
 import type { MarketInstrument } from "../universe/types";
 import { loadPerpConfig, perpDataEnabled, type PerpConfig, type PerpEnvLike } from "./config";
@@ -602,17 +603,17 @@ function aggregateMessage(venue: string, aggregate: ReturnType<typeof aggregateP
 // Instanz (global; lazy — Import ohne DATABASE_URL/Env bleibt harmlos)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const globalForPerp = globalThis as typeof globalThis & { __perpDataService?: PerpDataService };
+const registeredState = getOrCreateRegisteredState<{ perpDataService?: PerpDataService }>("src/perpdata/service.ts", () => ({}));
 
 /** Geteilte Instanz (nur ohne Injektion; Tests bauen einen eigenen Service). */
 export function getPerpDataService(): PerpDataService {
-  globalForPerp.__perpDataService ??= new PerpDataService();
-  return globalForPerp.__perpDataService;
+  registeredState.perpDataService ??= new PerpDataService();
+  return registeredState.perpDataService;
 }
 
 /** Nur für Tests: geteilte Instanz verwerfen. */
 export function resetPerpDataServiceForTests(): void {
-  delete globalForPerp.__perpDataService;
+  delete registeredState.perpDataService;
 }
 
 /** Fehler der Service-Schicht (bewusst identisch zur Ablage-Klasse). */

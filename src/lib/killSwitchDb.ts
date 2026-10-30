@@ -33,7 +33,7 @@ import { desc, sql } from "drizzle-orm";
 import { db, pool as sharedPool } from "@/db";
 import { killSwitches } from "@/db/schema";
 import { killSwitch } from "./riskGuard";
-import { state } from "./stateRegistry";
+import { state, getOrCreateRegisteredState } from "./stateRegistry";
 
 /** PostgreSQL LISTEN/NOTIFY-Kanal für globale Firmen-Steuerungsereignisse. */
 export const FIRM_CONTROL_CHANNEL = "firm_control_changed";
@@ -71,8 +71,10 @@ export type KillSwitchDbRow = {
 
 export type KillSwitchDbReader = () => Promise<KillSwitchDbRow | null>;
 
-let testDbReader: KillSwitchDbReader | null = null;
-let testDbMode: "auto" | "db" | "memory" = "auto";
+const registeredTestState = getOrCreateRegisteredState<{
+  testDbReader: KillSwitchDbReader | null;
+  testDbMode: "auto" | "db" | "memory";
+}>("src/lib/killSwitchDb.ts#test-overrides", () => ({ testDbReader: null, testDbMode: "auto" }));
 let singletonListener: FirmControlNotificationListener | null = null;
 
 function currentEpoch(): number {
@@ -118,8 +120,8 @@ function safeDbErrorCode(err: unknown): string {
 export function isKillSwitchDbConfigured(
   env: KillSwitchEnvLike = process.env
 ): boolean {
-  if (testDbMode === "memory") return false;
-  if (testDbMode === "db" || testDbReader !== null) return true;
+  if (registeredTestState.testDbMode === "memory") return false;
+  if (registeredTestState.testDbMode === "db" || registeredTestState.testDbReader !== null) return true;
   const raw = env.DATABASE_URL?.trim();
   if (!raw) return false;
   if (raw === OFFLINE_TEST_DATABASE_URL) return false;
@@ -148,8 +150,8 @@ function syncLocalLatchFromDb(armed: boolean, reason: string | null): void {
 }
 
 async function queryLatestKillSwitchRow(): Promise<KillSwitchDbRow | null> {
-  if (testDbReader) {
-    return testDbReader();
+  if (registeredTestState.testDbReader) {
+    return registeredTestState.testDbReader();
   }
   const rows = await db
     .select({
@@ -617,20 +619,20 @@ export async function stopFirmControlListener(): Promise<void> {
 export function setKillSwitchDbReaderForTests(
   reader: KillSwitchDbReader | null
 ): void {
-  testDbReader = reader;
+  registeredTestState.testDbReader = reader;
   invalidateAuthoritativeKillSwitchCache();
 }
 
 export function setKillSwitchDbModeForTests(
   mode: "auto" | "db" | "memory"
 ): void {
-  testDbMode = mode;
+  registeredTestState.testDbMode = mode;
   invalidateAuthoritativeKillSwitchCache();
 }
 
 export function resetKillSwitchDbForTests(): void {
-  testDbReader = null;
-  testDbMode = "auto";
+  registeredTestState.testDbReader = null;
+  registeredTestState.testDbMode = "auto";
   invalidateAuthoritativeKillSwitchCache();
   state.killSwitchSyncedFromDb.reset();
 }

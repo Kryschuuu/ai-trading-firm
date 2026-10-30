@@ -6,6 +6,7 @@
  * Anweisungen, sondern sind reine Daten.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { sanitizeSymbol } from "./marketData";
 import { CRYPTO_BASES, parseCanonicalSymbol } from "../symbols/venueProfiles";
 
@@ -16,10 +17,10 @@ export type NewsItem = {
   publishedAt?: string;
 };
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __newsCache?: Map<string, { at: number; items: NewsItem[] }>;
-};
-const newsCache = (GLOBAL.__newsCache ??= new Map());
+const registeredState = getOrCreateRegisteredState<{
+  newsCache?: Map<string, { at: number; items: NewsItem[] }>;
+}>("src/lib/news.ts", () => ({}));
+const newsCache = (registeredState.newsCache ??= new Map());
 const NEWS_TTL_MS = 10 * 60_000;
 
 export const NEWS_FEEDS: { id: string; url: string; label: string }[] = [

@@ -49,20 +49,12 @@ import { applyExit, tick, type TickOptions } from "../src/lib/monitor";
 import { PaperBroker } from "../src/lib/broker";
 import { getBroker, invalidateBrokerCache } from "../src/lib/engine";
 import { killSwitch, resetRuntimeLimits } from "../src/lib/riskGuard";
-import { resetMarketDataCachesForTests } from "../src/lib/marketData";
+import { resetMarketDataCachesForTests, setQuoteCacheForTests } from "../src/lib/marketData";
 import { __resetAllSingletonsForTests } from "../src/lib/stateRegistry";
 
 // ── Determinismus: kein Netzwerk im Test (Fake-Clock + injizierte Quotes) ───
 
 const originalFetch = globalThis.fetch;
-
-/** Kurs ins globale Quote-Cache schreiben (PaperBroker `paperQuote` liest exakt diesen Cache). */
-function setQuoteCache(symbol: string, price: number): void {
-  const g = globalThis as typeof globalThis & {
-    __mktQuoteCache?: Map<string, { price: number; ts: number; source: string }>;
-  };
-  (g.__mktQuoteCache ??= new Map()).set(symbol, { price, ts: Date.now(), source: "test" });
-}
 
 /** Fixe Basiszeit: alle Ticks laufen mit nowMs = T0 + n — keine laufende Uhr. */
 const T0 = Date.UTC(2026, 8, 18, 12, 0, 0);
@@ -214,7 +206,7 @@ async function seedPosition(overrides: SeedOpts = {}): Promise<string> {
       updatedAt: new Date(overrides.createdAtMs ?? T0 - HOUR),
     })
     .returning({ id: positions.id });
-  setQuoteCache(SYM, price);
+  setQuoteCacheForTests(SYM, price);
   return row.id;
 }
 
@@ -239,7 +231,7 @@ async function countExitAudits(reason: string): Promise<number> {
  * refreshQuotes beide speist).
  */
 function tickAt(msOffset: number, price: number, extra: Partial<TickOptions> = {}): Promise<unknown> {
-  setQuoteCache(SYM, price);
+  setQuoteCacheForTests(SYM, price);
   return tick(false, { now: T0 + msOffset, quotes: { [SYM]: price }, skipScan: true, ...extra });
 }
 
@@ -423,7 +415,7 @@ test("GAP-05 D4: Flags aus → decideExit verhält sich exakt wie der bisherige 
 // ═════════════════════════════════════════════════════════════════════════
 
 test("GAP-05 D3: Broker.close ist einmalig — zweiter Close liefert null (kein Doppel-Fill im Ledger)", () => {
-  setQuoteCache(SYM, 100);
+  setQuoteCacheForTests(SYM, 100);
   const b = new PaperBroker(10_000);
   b.hydrate([{ symbol: SYM, side: "LONG", qty: 10, entryPrice: 100 }], { cashHint: 9_000 });
   const first = b.close(SYM, "STOP_LOSS");

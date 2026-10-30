@@ -28,6 +28,7 @@
  * Default: `db`; schlägt der DB-Ping fehl, fällt der Store auf `file` zurück
  * (lauter Audit-Hinweis, nie stilles Verlieren von Credentials).
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   createCipheriv,
   createDecipheriv,
@@ -641,10 +642,10 @@ export class AesGcmSecretStore implements VenueSecretStore {
 // Fabrik + Prozess-Singleton (HMR-sicher ueber globalThis)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const G = globalThis as typeof globalThis & {
-  __controlPlaneSecretStore?: VenueSecretStore;
-  __controlPlaneSecretStorePromise?: Promise<VenueSecretStore>;
-};
+const registeredState = getOrCreateRegisteredState<{
+  controlPlaneSecretStore?: VenueSecretStore;
+  controlPlaneSecretStorePromise?: Promise<VenueSecretStore>;
+}>("src/brokers/control-plane/secretStore.ts", () => ({}));
 
 /**
  * Der Prozess-Singleton-Store der Control Plane. Aufloesung ist async
@@ -652,9 +653,9 @@ const G = globalThis as typeof globalThis & {
  * `setControlPlaneSecretStoreForTests` bzw. direkt in den Service.
  */
 export function getControlPlaneSecretStore(): Promise<VenueSecretStore> {
-  if (!G.__controlPlaneSecretStorePromise) {
-    G.__controlPlaneSecretStorePromise = (async () => {
-      if (G.__controlPlaneSecretStore) return G.__controlPlaneSecretStore;
+  if (!registeredState.controlPlaneSecretStorePromise) {
+    registeredState.controlPlaneSecretStorePromise = (async () => {
+      if (registeredState.controlPlaneSecretStore) return registeredState.controlPlaneSecretStore;
       const storage = await resolveSecretStorage();
       const kms = process.env.SECRET_STORE_KMS_ENDPOINT
         ? new AwsKmsClient()
@@ -662,15 +663,15 @@ export function getControlPlaneSecretStore(): Promise<VenueSecretStore> {
       return new AesGcmSecretStore(storage, kms);
     })();
   }
-  return G.__controlPlaneSecretStorePromise;
+  return registeredState.controlPlaneSecretStorePromise;
 }
 
 /** Nur Tests: Singleton ersetzen/zuruecksetzen (isoliert Testprozesse). */
 export function setControlPlaneSecretStoreForTests(
   store: VenueSecretStore | null
 ): void {
-  G.__controlPlaneSecretStore = store ?? undefined;
-  G.__controlPlaneSecretStorePromise = undefined;
+  registeredState.controlPlaneSecretStore = store ?? undefined;
+  registeredState.controlPlaneSecretStorePromise = undefined;
 }
 
 /**

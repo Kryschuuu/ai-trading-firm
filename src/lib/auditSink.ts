@@ -41,6 +41,7 @@
  * bereits secret-frei; zusätzlich wird jede Zeile auf `AUDIT_SPOOL_LINE_MAX`
  * Zeichen begrenzt.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   appendFileSync,
   existsSync,
@@ -249,9 +250,9 @@ interface AuditDurabilityState {
   alerts: Map<string, { until: number; suppressed: number }>;
 }
 
-const G = globalThis as typeof globalThis & {
-  __auditDurability?: AuditDurabilityState;
-};
+const registeredState = getOrCreateRegisteredState<{
+  auditDurability?: AuditDurabilityState;
+}>("src/lib/auditSink.ts", () => ({}), () => { resetAuditDurabilityForTests(); drainInFlight = null; });
 
 function freshState(): AuditDurabilityState {
   return {
@@ -273,7 +274,7 @@ function freshState(): AuditDurabilityState {
 }
 
 function state(): AuditDurabilityState {
-  return (G.__auditDurability ??= freshState());
+  return (registeredState.auditDurability ??= freshState());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -934,7 +935,7 @@ export function readPendingAudits(limit = 20): Array<Partial<SpoolEntry> & { raw
 
 /** Nur für Tests: Zähler, Ringe, Cooldowns und Transport zurücksetzen. */
 export function resetAuditDurabilityForTests(): void {
-  G.__auditDurability = freshState();
+  registeredState.auditDurability = freshState();
   spoolSeq = 0;
   transportOverride = null;
   sleepFn = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());

@@ -61,7 +61,7 @@
  * (server-only) und wird hier über `setFirmMetricStateReader()` registriert.
  */
 import type { MarketDataErrorReason } from "./marketDataErrors";
-import { state } from "./stateRegistry";
+import { state, getOrCreateRegisteredState } from "./stateRegistry";
 
 /** Labels des Counters `market_data_fetch_failures_total` (bewusst ohne symbol). */
 export interface FetchFailureLabels {
@@ -757,7 +757,9 @@ export interface FirmMetricState {
  */
 export type FirmMetricStateReader = () => Promise<FirmMetricState>;
 
-let firmMetricStateReader: FirmMetricStateReader | null = null;
+const registeredState = getOrCreateRegisteredState<{ firmMetricStateReader: FirmMetricStateReader | null }>(
+  "src/lib/telemetry.ts", () => ({ firmMetricStateReader: null }), () => resetTelemetryForTests(),
+);
 
 /**
  * Registriert den Server-Leser für den Firmenzustand.
@@ -767,12 +769,12 @@ let firmMetricStateReader: FirmMetricStateReader | null = null;
  * die Registrierung.
  */
 export function setFirmMetricStateReader(reader: FirmMetricStateReader | null): void {
-  firmMetricStateReader = reader;
+  registeredState.firmMetricStateReader = reader;
 }
 
 /** Nur für Tests: Registrierung entfernen. */
 export function resetFirmMetricStateReaderForTests(): void {
-  firmMetricStateReader = null;
+  registeredState.firmMetricStateReader = null;
 }
 
 /**
@@ -912,8 +914,8 @@ export async function prometheusMetrics(opts: PrometheusMetricsOptions = {}): Pr
   try {
     if (opts.firmState !== undefined) {
       firm = opts.firmState;
-    } else if (firmMetricStateReader) {
-      firm = await firmMetricStateReader();
+    } else if (registeredState.firmMetricStateReader) {
+      firm = await registeredState.firmMetricStateReader();
     } else {
       // Kein Server-Modul geladen (z. B. Browser/CLI ohne Ledger) — der
       // RAM-Ledger bleibt als letzte DB-freie Quelle.

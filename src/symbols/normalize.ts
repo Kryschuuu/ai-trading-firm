@@ -34,6 +34,7 @@
  * ausschließlich die kanonische Symbolform.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { structuredLog } from "../lib/logger";
 import {
   SymbolNormalizationError,
@@ -91,12 +92,14 @@ export interface NormalizeOptions {
  */
 type UnknownVenueWarningSink = (warning: UnknownVenueProfileWarning) => void;
 
-let warningSink: UnknownVenueWarningSink | null = null;
+const registeredState = getOrCreateRegisteredState<{ warningSink: UnknownVenueWarningSink | null }>(
+  "src/symbols/normalize.ts", () => ({ warningSink: null }),
+);
 
 function emitUnknownVenueWarning(venue: string): void {
   const warning = new UnknownVenueProfileWarning(venue);
-  if (warningSink) {
-    warningSink(warning);
+  if (registeredState.warningSink) {
+    registeredState.warningSink(warning);
     return;
   }
   structuredLog("warn", "unknown_venue_symbol_profile", {
@@ -107,7 +110,7 @@ function emitUnknownVenueWarning(venue: string): void {
 
 /** Nur für Tests: Warn-Senke ersetzen (`null` = zurück aufs strukturierte Log). */
 export function setUnknownVenueWarningSinkForTests(sink: UnknownVenueWarningSink | null): void {
-  warningSink = sink;
+  registeredState.warningSink = sink;
 }
 
 /**

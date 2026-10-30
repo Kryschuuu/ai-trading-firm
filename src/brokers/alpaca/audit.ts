@@ -12,6 +12,7 @@
  *
  * Payload enthält KEINE Secrets, keinen Body, keine volle Query.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { writeAuditRecord, type AuditWriteOutcome } from "@/lib/auditSink";
 
 export interface AlpacaPrivateAuditEntry {
@@ -24,13 +25,13 @@ export interface AlpacaPrivateAuditEntry {
 
 const RING_MAX = 200;
 
-const G = globalThis as typeof globalThis & {
-  __alpacaPrivateAudit?: AlpacaPrivateAuditEntry[];
+const registeredState = getOrCreateRegisteredState<{
+  alpacaPrivateAudit?: AlpacaPrivateAuditEntry[];
   /** S1: Venue-Audits, die nicht sofort durable waren (Spool oder Verlust). */
-  __alpacaAuditDegraded?: number;
-};
+  alpacaAuditDegraded?: number;
+}>("src/brokers/alpaca/audit.ts", () => ({}));
 
-export const alpacaPrivateAuditRing: AlpacaPrivateAuditEntry[] = (G.__alpacaPrivateAudit ??=
+export const alpacaPrivateAuditRing: AlpacaPrivateAuditEntry[] = (registeredState.alpacaPrivateAudit ??=
   []) as AlpacaPrivateAuditEntry[];
 
 export async function recordAlpacaPrivateCall(
@@ -53,14 +54,14 @@ export async function recordAlpacaPrivateCall(
     auditClass: "security",
   });
   if (!outcome.durable || outcome.degraded) {
-    G.__alpacaAuditDegraded = (G.__alpacaAuditDegraded ?? 0) + 1;
+    registeredState.alpacaAuditDegraded = (registeredState.alpacaAuditDegraded ?? 0) + 1;
   }
   return outcome;
 }
 
 /** S1: Anzahl nicht sofort durabler Venue-Audits (Prozess-Metrik). */
 export function readAlpacaAuditDegradedCount(): number {
-  return G.__alpacaAuditDegraded ?? 0;
+  return registeredState.alpacaAuditDegraded ?? 0;
 }
 
 export function readAlpacaAuditDurability(): { degraded: number; ringSize: number } {
@@ -73,5 +74,5 @@ export function readAlpacaPrivateAudit(limit = 50): AlpacaPrivateAuditEntry[] {
 
 export function clearAlpacaPrivateAuditForTests(): void {
   alpacaPrivateAuditRing.length = 0;
-  G.__alpacaAuditDegraded = 0;
+  registeredState.alpacaAuditDegraded = 0;
 }

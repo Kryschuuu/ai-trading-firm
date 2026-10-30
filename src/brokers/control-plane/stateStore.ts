@@ -26,6 +26,7 @@
  * Ein Fallback wird genau einmal pro Prozess im Server-Log gemeldet und
  * verhaelt sich exakt wie vor C4 (Map-only) — additiv, kein Bruch.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   createInitialControlState,
   readGateState,
@@ -340,11 +341,11 @@ export class DbControlStateRepository implements ControlStateRepository {
 // Prozess-Singleton (HMR-sicher) + Fail-Safe-Fallback
 // ─────────────────────────────────────────────────────────────────────────────
 
-const G = globalThis as typeof globalThis & {
-  __controlStateRepo?: ControlStateRepository;
-  __controlStateRepoPromise?: Promise<ControlStateRepository>;
-  __controlStateFallbackWarned?: boolean;
-};
+const registeredState = getOrCreateRegisteredState<{
+  controlStateRepo?: ControlStateRepository;
+  controlStateRepoPromise?: Promise<ControlStateRepository>;
+  controlStateFallbackWarned?: boolean;
+}>("src/brokers/control-plane/stateStore.ts", () => ({}));
 
 /**
  * Backend-Auswahl: `CONTROL_STATE_BACKEND=memory` explizit, sonst DB mit
@@ -358,8 +359,8 @@ export async function resolveControlStateRepository(
   if (configured === "memory") return new MemoryControlStateRepository();
   const dbRepo = new DbControlStateRepository();
   if (configured === "db" || (await dbRepo.ping())) return dbRepo;
-  if (!G.__controlStateFallbackWarned) {
-    G.__controlStateFallbackWarned = true;
+  if (!registeredState.controlStateFallbackWarned) {
+    registeredState.controlStateFallbackWarned = true;
     console.warn(
       "[control-plane] venue_control_state nicht erreichbar (DB down oder Tabelle fehlt — `npx drizzle-kit push`). " +
         "Control-Plane-Zustand bleibt bis dahin prozesslokal (Verhalten wie vor v1.36.16)."
@@ -370,17 +371,17 @@ export async function resolveControlStateRepository(
 
 /** Prozess-Singleton des Repositories (Tests injizieren per setControlStateRepositoryForTests). */
 export function getControlStateRepository(): Promise<ControlStateRepository> {
-  if (!G.__controlStateRepoPromise) {
-    G.__controlStateRepoPromise = (async () => {
-      if (G.__controlStateRepo) return G.__controlStateRepo;
+  if (!registeredState.controlStateRepoPromise) {
+    registeredState.controlStateRepoPromise = (async () => {
+      if (registeredState.controlStateRepo) return registeredState.controlStateRepo;
       return resolveControlStateRepository();
     })();
   }
-  return G.__controlStateRepoPromise;
+  return registeredState.controlStateRepoPromise;
 }
 
 /** Nur Tests: Repository ersetzen (null = Default-Aufloesung beim naechsten Zugriff). */
 export function setControlStateRepositoryForTests(repo: ControlStateRepository | null): void {
-  G.__controlStateRepo = repo ?? undefined;
-  G.__controlStateRepoPromise = undefined;
+  registeredState.controlStateRepo = repo ?? undefined;
+  registeredState.controlStateRepoPromise = undefined;
 }

@@ -1,6 +1,6 @@
 # CI-Workflows — Quelle, Synchronisation & Betrieb
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-27 · **Code-Version:** v0.17.6 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter, Spiegel-Sync & Dependabot gehärtet
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-10-27 · **Code-Version:** v0.17.7 (Beta) · Symbol-/Pfadabgleich erledigt (DC-06) · CI-Wächter, Spiegel-Sync & Dependabot gehärtet
 
 > **Zweck:** Diese Dateien spiegeln die GitHub-Actions-Workflows unter `.github/workflows/`. Beide Kopien werden zusammen gepflegt — sowohl lokal über `npm run docs:validate` / `npm run ci:sync:check` als auch in CI über den Vorab-Spiegel-Sync-Schritt und `scripts/sync-ci-workflows.ts` wird erzwungen, dass sie byte-identisch bleiben. Workflow-Änderungen benötigen entsprechende GitHub-Schreibrechte (`workflows`-Scope); fehlen diese einer Verbindung, pflegt der Repository-Owner den Spiegel über `npm run ci:sync`.
 
@@ -9,7 +9,7 @@
 | Datei | Zweck | Ziel in `.github/workflows/` |
 |-------|-------|-------------------------------|
 | `docs-validate.workflow.yml` | Required Check `docs-validate`: Vorab-Spiegel-Sync, CI-/SEC-10-/Dependabot-Invarianten, Typecheck, Gesamttestsuite, Docs-as-Code inkl. L1–L4 (DC-08) und Inventar-Drift-Gate (DC-09) | `main.yml` |
-| `security-live-gate.workflow.yml` | Next-Regressionen Linux/Windows, Build, zweistufiges fail-closed Dependency-Audit, Auth, Secret-Scan und Live-Gate ≥95% Coverage | `security-live-gate.yml` |
+| `security-live-gate.workflow.yml` | Next-Regressionen Linux/Windows, Build, zweistufiges fail-closed Dependency-Audit, Auth, ASA-13–15, Secret-Scan und Live-Gate ≥95% Coverage | `security-live-gate.yml` |
 
 ## Synchronisation & Installation
 
@@ -106,6 +106,9 @@ Status Check in der Branch-Protection einzutragen. `npm test` ist Teil dieses
 Checks, kein separater Branch-Protection-Check.
 
 ### security-live-gate
+
+- ASA-13–15: `npm run test:security:asa13` schützt Registry-Grenzen,
+  systemd-Units, Datei-Alerts und HTTPS/DNS/Redirect-Abwehr.
 
 - SEC-03: Job `security-next-windows` prüft die installierte Next-/Decoder-Kette
   und die Framework-Grenzen nativ unter Windows (`npm run test:security:next`).

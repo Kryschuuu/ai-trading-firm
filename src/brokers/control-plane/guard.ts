@@ -40,6 +40,7 @@ import { requirePermission } from "@/auth";
 import { tokenEquals } from "@/lib/apiAuth";
 import { clientRateLimitKey, type ClientIpOptions } from "@/lib/clientIp";
 import { checkCsrfGuard } from "@/lib/csrfGuard";
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 export { checkCsrfGuard, expectedCsrfValue } from "@/lib/csrfGuard";
 import {
   CREDENTIAL_BACKOFF_RESET_MS,
@@ -74,15 +75,15 @@ export function checkAdminGuard(req: Request): Response | null {
 
 const MAX_BUCKETS = 10_000;
 
-/** Treffer pro Client-Identitaet (Schluessel aus `resolveClientIp`). */
-const credentialHits = new Map<string, number[]>();
-/** Treffer des globalen, IP-unabhaengigen Buckets (fester Schluessel). */
-const globalHits = new Map<string, number[]>();
-/** Fehlversuche + aktive Backoff-Sperre pro Client-Identitaet. */
-const credentialFailures = new Map<
-  string,
-  { count: number; lastAt: number; blockedUntil: number }
->();
+/** Identitäts-/Global-Buckets und Backoff bleiben über HMR stabil und sind rücksetzbar. */
+const { credentialHits, globalHits, credentialFailures } = getOrCreateRegisteredState(
+  "src/brokers/control-plane/guard.ts",
+  () => ({
+    credentialHits: new Map<string, number[]>(),
+    globalHits: new Map<string, number[]>(),
+    credentialFailures: new Map<string, { count: number; lastAt: number; blockedUntil: number }>(),
+  }),
+);
 
 /**
  * Bucket-Schluessel = **dieselbe** Aufloesung wie im Firm-Schreib-Limit

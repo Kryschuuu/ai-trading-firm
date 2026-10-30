@@ -20,6 +20,7 @@
  * Diagnose-Walkthrough in `docs/OPERATIONS_CENTER.md`.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { HistoricalStore } from "@/lib/marketdata/historicalStore";
 import type { ScannerConfig } from "@/scanner/config";
 import { historicalStoreProvider } from "@/scanner/service";
@@ -212,11 +213,13 @@ export function scannerCandleCounts(
 // Store-Zugriff des Kollektors (mit Test-Hook, Muster wie setScannerServiceForTests)
 // ─────────────────────────────────────────────────────────────────────────────
 
-let storeOverride: HistoricalStore | null = null;
+const registeredState = getOrCreateRegisteredState<{ storeOverride: HistoricalStore | null }>(
+  "src/ops/marketDataReadiness.ts", () => ({ storeOverride: null }),
+);
 
 /** Historical Store am Standard-Pfad — oder der per Test-Hook injizierte. */
 export function marketDataReadinessStore(): HistoricalStore {
-  return storeOverride ?? new HistoricalStore();
+  return registeredState.storeOverride ?? new HistoricalStore();
 }
 
 /**
@@ -225,5 +228,5 @@ export function marketDataReadinessStore(): HistoricalStore {
  * `data/history` (Spiegelbild zu `setScannerServiceForTests`).
  */
 export function setMarketDataReadinessStoreForTests(store: HistoricalStore | null): void {
-  storeOverride = store;
+  registeredState.storeOverride = store;
 }

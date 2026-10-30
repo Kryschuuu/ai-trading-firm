@@ -5,6 +5,7 @@
  * und liefert Daten für die read-only API-Routen.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { CycleScheduler } from "./scheduler";
 import { createDailySteps } from "./daily";
 import { createWeeklySteps } from "./weekly";
@@ -275,15 +276,17 @@ function pruneCycleArtifacts(): void {
 }
 
 // Singleton-Instanz
-let instance: CycleService | null = null;
+const registeredState = getOrCreateRegisteredState<{ instance: CycleService | null }>(
+  "src/cycle/service.ts", () => ({ instance: null }),
+);
 
 export function getCycleService(): CycleService {
-  if (!instance) {
-    instance = new CycleService();
+  if (!registeredState.instance) {
+    registeredState.instance = new CycleService();
   }
-  return instance;
+  return registeredState.instance;
 }
 
 export function resetCycleServiceForTests(service?: CycleService): void {
-  instance = service ?? null;
+  registeredState.instance = service ?? null;
 }

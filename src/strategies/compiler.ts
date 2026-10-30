@@ -87,6 +87,7 @@ import type { SupportedTimeframe } from "@/lib/marketdata/historicalStore";
 import type { StrategyClassKey } from "@/lib/signalDecay";
 import { ruleWithinRuntimeLimits } from "@/lib/ruleService";
 import { APP_VERSION } from "@/lib/version";
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 
 import { getTemplate, isStrategyTemplateId, listTemplates } from "./catalog";
 import type { StrategyTemplate } from "./types";
@@ -297,10 +298,13 @@ function resolveParams(
  * hartcodiert: Sobald ein Template `atrPct` tatsächlich filtert, fällt die
  * Ausnahme weg und die Prüfung wird strenger.
  */
-let documentaryFieldsCache: ReadonlySet<string> | null = null;
+const compilerState = getOrCreateRegisteredState<{ documentaryFieldsCache: ReadonlySet<string> | null }>(
+  "src/strategies/compiler.ts",
+  () => ({ documentaryFieldsCache: null }),
+);
 
 function catalogDocumentaryFields(): ReadonlySet<string> {
-  if (documentaryFieldsCache) return documentaryFieldsCache;
+  if (compilerState.documentaryFieldsCache) return compilerState.documentaryFieldsCache;
   const declared = new Set<string>();
   const filtered = new Set<string>();
   for (const template of listTemplates()) {
@@ -315,8 +319,8 @@ function catalogDocumentaryFields(): ReadonlySet<string> {
       if (typeof item.field === "string") filtered.add(item.field);
     }
   }
-  documentaryFieldsCache = new Set([...declared].filter((field) => !filtered.has(field)));
-  return documentaryFieldsCache;
+  compilerState.documentaryFieldsCache = new Set([...declared].filter((field) => !filtered.has(field)));
+  return compilerState.documentaryFieldsCache;
 }
 
 function conditionItemsOf(rule: unknown): Array<Record<string, unknown>> {

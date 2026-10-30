@@ -18,6 +18,7 @@
  *  5. Decoupling: Der Router kennt keine Marktdaten; Provider-Details liegen
  *     ausschliesslich in der Provider-Registry.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveRuntimePath } from "@/lib/appPaths";
@@ -1281,32 +1282,32 @@ function floorTrigger(input: {
 // Singleton (Produktivbetrieb) + Test-Haken
 // ─────────────────────────────────────────────────────────────────────────────
 
-const G = globalThis as typeof globalThis & {
-  __modelRouter?: ModelRouter;
-};
+const registeredState = getOrCreateRegisteredState<{
+  modelRouter?: ModelRouter;
+}>("src/routing/router.ts", () => ({}), (value) => { value.modelRouter?.stopHealthPoller(); });
 
 /** Singleton des Routers (Next.js-Runtime, mehrere Module). */
 export function getModelRouter(opts?: ModelRouterOptions): ModelRouter {
   if (opts) {
-    G.__modelRouter = new ModelRouter(opts);
-    return G.__modelRouter;
+    registeredState.modelRouter = new ModelRouter(opts);
+    return registeredState.modelRouter;
   }
-  if (!G.__modelRouter) {
-    G.__modelRouter = new ModelRouter();
+  if (!registeredState.modelRouter) {
+    registeredState.modelRouter = new ModelRouter();
   }
-  return G.__modelRouter;
+  return registeredState.modelRouter;
 }
 
 /** Nur Tests: Router ersetzen (z. B. mit Fake-Registry). */
 export function setModelRouterForTests(router: ModelRouter): ModelRouter {
-  G.__modelRouter = router;
+  registeredState.modelRouter = router;
   return router;
 }
 
 /** Nur Tests: Singleton verwerfen. */
 export function resetModelRouterForTests(): void {
-  G.__modelRouter?.stopHealthPoller();
-  G.__modelRouter = undefined;
+  registeredState.modelRouter?.stopHealthPoller();
+  registeredState.modelRouter = undefined;
 }
 
 /** Unveränderliche Kopie der Default-Policy (Doku/Tests). */

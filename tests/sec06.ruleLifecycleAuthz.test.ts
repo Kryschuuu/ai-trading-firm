@@ -19,6 +19,7 @@ import { resetAuditDurabilityForTests, setAuditTransportForTests, type AuditRow 
 import { describeAuditEntry } from "../src/lib/auditView";
 import { issueSession, SESSION_COOKIE } from "../src/lib/authSession";
 import { ruleActor } from "../src/lib/ruleActor";
+import { setMacroBusyForTests } from "../src/lib/macroCycle";
 import { ruleSignature, sanitizeRuleSpec } from "../src/lib/ruleEngine";
 import type { RuleRow } from "../src/lib/ruleService";
 
@@ -34,7 +35,6 @@ const AUTH_KEYS = [
 const savedEnv = new Map<string, string | undefined>();
 const G = globalThis as typeof globalThis & {
   __arenaNextJsPostgresqlDb?: unknown;
-  __macroBusy?: boolean;
 };
 let previousDb: unknown;
 let previousMacroBusy: boolean | undefined;
@@ -140,7 +140,7 @@ before(async () => {
   ({ POST: macro } = await import("../src/app/api/firm/macro/route"));
   for (const key of AUTH_KEYS) savedEnv.set(key, process.env[key]);
   previousDb = G.__arenaNextJsPostgresqlDb;
-  previousMacroBusy = G.__macroBusy;
+  previousMacroBusy = setMacroBusyForTests(undefined);
   spoolDir = mkdtempSync(join(tmpdir(), "sec06-audit-"));
 });
 
@@ -157,7 +157,7 @@ beforeEach(() => {
   G.__arenaNextJsPostgresqlDb = db;
   // Der echte Makro-Einstieg liefert ALREADY_RUNNING: deterministischer
   // positiver Guard-Pfad ohne LLM-/Marktdaten-Netzwerkzugriffe.
-  G.__macroBusy = true;
+  setMacroBusyForTests(true);
   audits = [];
   resetRateLimiterForTests();
   resetAuditDurabilityForTests();
@@ -172,8 +172,7 @@ afterEach(() => {
 after(() => {
   if (previousDb === undefined) delete G.__arenaNextJsPostgresqlDb;
   else G.__arenaNextJsPostgresqlDb = previousDb;
-  if (previousMacroBusy === undefined) delete G.__macroBusy;
-  else G.__macroBusy = previousMacroBusy;
+  setMacroBusyForTests(previousMacroBusy);
   for (const [key, value] of savedEnv) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;

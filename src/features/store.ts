@@ -31,6 +31,7 @@
  * werden klassifiziert geworfen — nie in leere Ergebnismengen übersetzt
  * (fail-closed: fehlende Zeilen sind sichtbar, nicht „0“).
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { and, desc, eq, gte, inArray, lte, notInArray, or, sql } from "drizzle-orm";
 
 import { db } from "../db";
@@ -1042,14 +1043,16 @@ export class DrizzleFeatureStore implements FeatureStorePort {
 }
 
 /** Prozessweiter Store des Produktionspfads (lazy, injizierbar für Tests). */
-let defaultStore: DrizzleFeatureStore | null = null;
+const registeredState = getOrCreateRegisteredState<{ defaultStore: DrizzleFeatureStore | null }>(
+  "src/features/store.ts", () => ({ defaultStore: null }),
+);
 
 export function getFeatureStore(): DrizzleFeatureStore {
-  defaultStore ??= new DrizzleFeatureStore();
-  return defaultStore;
+  registeredState.defaultStore ??= new DrizzleFeatureStore();
+  return registeredState.defaultStore;
 }
 
 /** Setzt den Prozess-Store zurück (nur Tests/Debug). */
 export function resetFeatureStoreForTests(): void {
-  defaultStore = null;
+  registeredState.defaultStore = null;
 }

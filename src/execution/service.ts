@@ -15,6 +15,7 @@
  * Pfade (start/poll/recover) frei; Default false. Lesen (Status) ist immer
  * möglich. Unbekannte Flag-Werte werfen (kein stilles Default-Raten).
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import type { BrokerVenueId, ExecutionMode } from "../contracts/broker";
 import { pool } from "../db";
 import { getQuote } from "../lib/marketData";
@@ -210,15 +211,17 @@ export function createExecutionController(deps: ExecutionServiceDeps = {}): Exec
 }
 
 /** Prozessweiter PAPER-Controller für Jobs (Store: Postgres, außer Tests). */
-let sharedPaperController: ExecutionPolicyController | null = null;
+const registeredState = getOrCreateRegisteredState<{ sharedPaperController: ExecutionPolicyController | null }>(
+  "src/execution/service.ts", () => ({ sharedPaperController: null }),
+);
 
 export function getExecutionController(): ExecutionPolicyController {
-  sharedPaperController ??= createExecutionController();
-  return sharedPaperController;
+  registeredState.sharedPaperController ??= createExecutionController();
+  return registeredState.sharedPaperController;
 }
 
 export function resetExecutionControllerForTests(): void {
-  sharedPaperController = null;
+  registeredState.sharedPaperController = null;
 }
 
 export function createMemoryExecutionController(

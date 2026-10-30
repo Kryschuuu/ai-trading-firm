@@ -1,7 +1,7 @@
 # Installation & Konfiguration
 
 > **Status-Header (Task 12):** **Implementiert** (Tasks 1–13) ·
-> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.6** (Prompt-Budget
+> Dokumentationsstand **2026-09-24** · Code-Version **v0.17.7** (Prompt-Budget
 > und Batch-Analyse nachgezogen, §5)
 >
 > **Hinweis Versionierung:** Ab 2026-09-23 gilt das öffentliche v0.x.x-Schema
@@ -632,7 +632,7 @@ Disarm-Pfad (Admin + CSRF + single-use Nonce, siehe `docs/OPERATIONS.md` §4).
 | `RISK_MAX_CONSECUTIVE_LOSSES` | `5` | Anzahl verlustreicher Position-Closes **in Folge** (CLOSED, `realizedPnl < 0`, jüngste zuerst), ab der der Brecher auslöst. Bounds [2, 50], Clamp mit Warnung. Prompt-Cooldowns (`COOLDOWN_AFTER_N_LOSSES`) bleiben davon unberührt. |
 | `ALERT_DEBOUNCE_MINUTES` | `30` | Mindestabstand je **identischem** Alarm-Code (`circuit-breaker:…`, `heartbeat-stale`, …). Unterdrückte Alarme werden gezählt und beim nächsten Versand als `meta.suppressedSinceLast` gemeldet. Bounds [1, 1440]. |
 | `ALERT_FILE` | `data/alerts.ndjson` | Append-only NDJSON-Senke des Alert-Adapters über `resolveRuntimePath()` (Datei-Modus 0600) — CLI und Server schreiben dieselbe Datei. |
-| `ALERT_WEBHOOK_URL_SECRET_NAME` | *(leer)* | **Optionaler** Webhook: Name des Secret-Store-Eintrags, dessen `apiKey`-Feld die Webhook-URL enthält. Leer = Webhook aus (Default). Die URL selbst ist ein Credential und steht **nie** in Env/Logs/Fehlermeldungen. |
+| `ALERT_WEBHOOK_URL_SECRET_NAME` | *(leer)* | **Optionaler** Webhook: Name des Secret-Store-Eintrags, dessen `apiKey`-Feld die Webhook-URL enthält. Leer = aus. Nur öffentliches HTTPS, DNS-Antworten werden geprüft und gepinnt; private/reservierte Ziele und Redirects werden verweigert. Die URL ist ein Credential und steht **nie** in Env/Logs/Fehlermeldungen. |
 | `HEALTH_STALE_AFTER_MS` | `300000` (5 min) | Alter des letzten Monitor-Ticks in ms, ab dem `GET /api/health` `stale: true` meldet (`monitorLastTickAt`/`monitorAgeMs`/`staleAfterMs`). Nie gelaufen = stale. Bounds [30000, 3600000]. |
 
 Zusätzlich: `npm run watchdog` prüft `/api/health` einmalig und alarmiert über

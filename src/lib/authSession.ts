@@ -68,7 +68,7 @@ import {
 import { buildActor } from "@/auth/permissions";
 import type { Actor } from "@/auth/types";
 import { tokenEquals } from "@/lib/tokenCompare";
-import { state } from "@/lib/stateRegistry";
+import { state, getOrCreateRegisteredState } from "@/lib/stateRegistry";
 
 export const SESSION_COOKIE = "firm_session";
 export const SESSION_CSRF_COOKIE = "firm_csrf";
@@ -392,9 +392,9 @@ export function verifySessionToken(
   now: number = Date.now(),
   opts: SessionValidityOptions = {}
 ): SessionPayload | null {
-  if (now - lastRevocationPrune >= 60_000 || now < lastRevocationPrune) {
+  if (now - registeredState.lastRevocationPrune >= 60_000 || now < registeredState.lastRevocationPrune) {
     pruneRevokedSessions(now);
-    lastRevocationPrune = now;
+    registeredState.lastRevocationPrune = now;
   }
   const verified = inspectSessionToken(token, secret, now, opts);
   return verified.state === "valid" ? verified.payload : null;
@@ -518,7 +518,9 @@ export function sessionActor(
 // Single compact snapshot, atomically replaced under an inter-process lock.
 // Never evict live revocations: saturation or I/O errors fail the logout closed.
 const MAX_REVOCATIONS = 10_000;
-let lastRevocationPrune = 0;
+const registeredState = getOrCreateRegisteredState<{ lastRevocationPrune: number }>(
+  "src/lib/authSession.ts", () => ({ lastRevocationPrune: 0 }),
+);
 function revocationPath(): string {
   return resolveRuntimePath(process.env.FIRM_SESSION_REVOCATION_FILE || "data/session-revocations.json");
 }

@@ -5,18 +5,18 @@ in Code und Doku leiten sich von diesem Stand ab.
 
 | Feld | Wert |
 | --- | --- |
-| **Version** | `v0.17.6` |
+| **Version** | `v0.17.7` |
 | **Schema** | SemVer, öffentliches `v0.x.x` (0.x = Beta-Phase) |
 | **Status** | **BETA — nicht produktionsreif** (Paper-Trading, keine Live-Broker-Garantien) |
 | **Beta-Zusage** | Bleibt `0.x`/Beta **unabhängig** vom Funktions- und Ausbau-Stand — Kriterien `B1…B8`: [`docs/BETA_STATUS.md`](docs/BETA_STATUS.md) |
-| **Release-Datum** | 2026-10-29 |
-| **Quellbasiert** | `package.json` (`version: "0.17.6"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
+| **Release-Datum** | 2026-10-30 |
+| **Quellbasiert** | `package.json` (`version: "0.17.7"`), `src/lib/version.ts` liest die SSoT zur Laufzeit |
 | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
 | **Legacy-Historie** | [`docs/archive/CHANGELOG-legacy-v1.md`](docs/archive/CHANGELOG-legacy-v1.md) (interne Zählung `v1.x.x`, `v1.73.1` ≙ `v0.1.0`) |
 
 ## Bedeutung der Version
 
-`v0.17.6` härtet LLM-Fallback, Equity-Alerts, Kernindizes und Session-/Rate-Limit-Speicher; Details und Betriebsgrenzen stehen im [Changelog](CHANGELOG.md) und [Audit-Tracking](docs/audits/2026-10-27-arch-security-audit/remediation/TRACKING.md).
+`v0.17.7` konsolidiert Prozesszustand und Dashboard-Polling und härtet systemd-Units und Alert-Webhooks; Details und Betriebsgrenzen stehen im [Changelog](CHANGELOG.md) und [Audit-Tracking](docs/audits/2026-10-27-arch-security-audit/remediation/TRACKING.md).
 
 `v0.1.0` ist die **Beta-Baseline**: Sie bündelt den gesamten bis dahin
 erreichten Funktionsstand der Beta-Entwicklung (interne Zählung bis `v1.73.1`)
