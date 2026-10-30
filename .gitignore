@@ -10,6 +10,10 @@ next-env.d.ts
 .env
 .env.local
 .env.*.local
+# Backup-/Arbeitskopien der .env (enthalten dieselben Secrets)
+.env.bak
+.env.bak*
+.env-last
 
 # Broker Control Plane (Task 08): verschluesselte Credential-Envelopes
 # (Datei-Fallback des Secret-Stores; niemals Klartext, niemals committen)
