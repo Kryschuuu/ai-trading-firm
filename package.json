@@ -1,6 +1,6 @@
 {
   "name": "ai-trading-firm",
-  "version": "0.17.6",
+  "version": "0.17.7",
   "description": "Autonome KI-Trading-Firma (Paper-Trading) — BETA (v0.x), nicht produktionsreif. Local-first, Next.js + Drizzle + PostgreSQL + Ollama/OpenAI/Gemini/Claude. Educational purposes only, use at your own risk.",
   "license": "GPL-3.0-only",
   "private": true,
@@ -61,7 +61,7 @@
     "test:security:ws": "node --import tsx --test \"tests/sec04.*.test.ts\"",
     "test:security:auth": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/sec01.*.test.ts' 'tests/sec02.*.test.ts' 'tests/sec05.*.test.ts' 'tests/sec06.*.test.ts' 'tests/sec08.*.test.ts' 'tests/w1.sessionCookie.test.ts' 'tests/authMode.test.ts' 'tests/rbac.test.ts'",
     "test:security:asa02": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 node --import tsx --test 'tests/asa02.lifecycleAndLiveKillAuthz.test.ts'",
-    "security:live-gate": "npm run test:security:next && npm run test:security:ws && npm run test:security:auth && npm run test:security:asa02 && npm run test:security:asa08 && DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --enable-source-maps --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
+    "security:live-gate": "npm run test:security:next && npm run test:security:ws && npm run test:security:auth && npm run test:security:asa02 && npm run test:security:asa08 && npm run test:security:asa13 && DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --enable-source-maps --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-lines=95 'tests/liveGate.*.test.ts'",
     "test:coverage:livegate": "DATABASE_URL=postgresql://test:test@0.0.0.0:5432/test STARTING_EQUITY=10000 LIVE_GATE_DATA_DIR=data/live-gate-test node --enable-source-maps --import tsx --test --experimental-test-coverage --test-coverage-include='src/live-gate/**' --test-coverage-exclude='src/live-gate/index.ts' --test-coverage-include='src/app/api/live/**' 'tests/liveGate.*.test.ts'",
     "history:migrate": "node --import tsx scripts/migrate-history-timeframe.ts",
     "history:import-csv": "node --import tsx scripts/import-history-csv.ts",
@@ -77,7 +77,8 @@
     "execution:reconcile": "node --import tsx scripts/execution-quality-reconcile.ts",
     "attribution:backfill": "node --import tsx scripts/attribution-backfill.ts",
     "copy:paper": "node --import tsx scripts/run-copy-paper.ts",
-    "test:security:asa08": "node --import tsx --test tests/asa08.clientIpProxyTrust.test.ts tests/clientIp*.test.ts tests/authBootGuard*.test.ts"
+    "test:security:asa08": "node --import tsx --test tests/asa08.clientIpProxyTrust.test.ts tests/clientIp*.test.ts tests/authBootGuard*.test.ts",
+    "test:security:asa13": "node --import tsx --test tests/asa13_14_15.architectureOpsAlerts.test.ts tests/alerts.fileRecovery.test.ts"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",
@@ -90,6 +91,7 @@
     "react-markdown": "^10.1.0",
     "rehype-slug": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "undici": "6.29.1",
     "ws": "8.21.3"
   },
   "devDependencies": {
@@ -122,6 +124,7 @@
     "@esbuild-kit/core-utils": {
       "esbuild": "^0.25.0"
     },
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "postcss-selector-parser": "6.1.5"
   }
 }

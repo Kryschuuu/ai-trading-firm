@@ -282,7 +282,7 @@ test("Kartenraster nutzen die Ultrawide-Stufen 3xl/4xl statt Zwischenwerte", () 
   // Theme (`@theme` in globals.css), damit alle Seiten dieselben Stufen nutzen.
   const dashboard = read("src/components/FirmDashboard.tsx");
   assert.match(dashboard, /3xl:grid-cols-7/, "Statusleiste muss bis 3xl wachsen");
-  assert.match(dashboard, /3xl:columns-2/, "Guide muss ab 3xl zweispaltig sein");
+  assert.match(read("src/components/firm/ArchitectureTab.tsx"), /3xl:columns-2/, "Guide muss ab 3xl zweispaltig sein");
   const docsIndex = read("src/components/docs/DocsIndex.tsx");
   assert.match(docsIndex, /3xl:grid-cols-4/, "Doku-Katalog muss 3xl nutzen");
   assert.match(docsIndex, /4xl:grid-cols-5/, "Doku-Katalog muss 4xl nutzen");

@@ -45,6 +45,7 @@
  * wirkt innerhalb der bestehenden Sandbox, nie darüber.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { positions, riskConfig, volatilityTargetingSnapshots } from "@/db/schema";
@@ -278,10 +279,10 @@ type VtpState = {
   lastTargetError: number | null;
 };
 
-const G = globalThis as typeof globalThis & { __volatilityTargeting?: VtpState };
+const registeredState = getOrCreateRegisteredState<{ volatilityTargeting?: VtpState }>("src/lib/volatilityTargeting.ts", () => ({}));
 
 function state(): VtpState {
-  G.__volatilityTargeting ??= {
+  registeredState.volatilityTargeting ??= {
     config: { ...DEFAULT_VOLATILITY_TARGETING_CONFIG },
     configLoadedAt: 0,
     lastResult: null,
@@ -292,7 +293,7 @@ function state(): VtpState {
     lastRealized: null,
     lastTargetError: null,
   };
-  return G.__volatilityTargeting;
+  return registeredState.volatilityTargeting;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -852,7 +853,7 @@ async function logVtpEvent(
 
 /** Leert den kompletten Laufzeit-Zustand (nur für Tests). */
 export function __resetVolatilityTargetingForTests(): void {
-  delete G.__volatilityTargeting;
+  delete registeredState.volatilityTargeting;
 }
 
 function buildStatus(s: VtpState): VolatilityTargetingStatus {

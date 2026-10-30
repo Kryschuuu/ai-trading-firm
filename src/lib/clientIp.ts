@@ -53,6 +53,7 @@
  * `x-forwarded-for` bleibt ausschließlich dem echten Socket-Peer-Pfad vorbehalten.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { tokenEquals } from "./tokenCompare";
 
 type EnvLike = Record<string, string | undefined>;
@@ -339,7 +340,9 @@ const EMPTY_TRUST: TrustedProxyConfig = {
 };
 
 /** Kleine Memo, damit der Requestpfad nicht pro Anfrage CIDRs parst. */
-const trustCache = new Map<string, TrustedProxyConfig>();
+const { trustCache } = getOrCreateRegisteredState("src/lib/clientIp.ts", () => ({
+  trustCache: new Map<string, TrustedProxyConfig>(),
+}));
 
 /** Parst `TRUSTED_PROXY_IPS` (Komma/Semikolon/Whitespace-getrennt). */
 export function parseTrustedProxies(

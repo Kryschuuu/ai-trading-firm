@@ -16,6 +16,7 @@
  * auf Order- oder Approval-Pfade.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { getAdaptiveRiskStatus } from "../lib/adaptiveRisk";
 import { auditWrite } from "../lib/auditSink";
 import { envInt } from "../lib/env";
@@ -59,27 +60,27 @@ export function forecastMinSample(env: Record<string, string | undefined> = proc
 // Singletons (injizierbar für Tests)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __forecastLedger?: DrizzleForecastLedger;
-  __forecastOutcomeSource?: HistoricalStoreOutcomeSource;
-  __forecastResolverBusy?: boolean;
-};
+const registeredState = getOrCreateRegisteredState<{
+  forecastLedger?: DrizzleForecastLedger;
+  forecastOutcomeSource?: HistoricalStoreOutcomeSource;
+  forecastResolverBusy?: boolean;
+}>("src/forecasts/service.ts", () => ({}));
 
 export function getForecastLedger(): DrizzleForecastLedger {
-  GLOBAL.__forecastLedger ??= new DrizzleForecastLedger();
-  return GLOBAL.__forecastLedger;
+  registeredState.forecastLedger ??= new DrizzleForecastLedger();
+  return registeredState.forecastLedger;
 }
 
 export function getForecastOutcomeSource(): HistoricalStoreOutcomeSource {
-  GLOBAL.__forecastOutcomeSource ??= new HistoricalStoreOutcomeSource();
-  return GLOBAL.__forecastOutcomeSource;
+  registeredState.forecastOutcomeSource ??= new HistoricalStoreOutcomeSource();
+  return registeredState.forecastOutcomeSource;
 }
 
 /** Test-Reset der Singletons. */
 export function resetForecastServiceForTests(): void {
-  delete GLOBAL.__forecastLedger;
-  delete GLOBAL.__forecastOutcomeSource;
-  GLOBAL.__forecastResolverBusy = false;
+  delete registeredState.forecastLedger;
+  delete registeredState.forecastOutcomeSource;
+  registeredState.forecastResolverBusy = false;
 }
 
 export function forecastResolverDeps(): ForecastResolverDeps {
@@ -290,12 +291,12 @@ export async function captureAnalystForecast(
  */
 export async function runForecastResolverJob(options: { limit?: number } = {}): Promise<ResolverRunResult | null> {
   if (!forecastLedgerEnabled()) return null;
-  if (GLOBAL.__forecastResolverBusy) return null;
-  GLOBAL.__forecastResolverBusy = true;
+  if (registeredState.forecastResolverBusy) return null;
+  registeredState.forecastResolverBusy = true;
   try {
     return await runForecastResolution(forecastResolverDeps(), options);
   } finally {
-    GLOBAL.__forecastResolverBusy = false;
+    registeredState.forecastResolverBusy = false;
   }
 }
 

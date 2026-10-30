@@ -14,6 +14,7 @@
  * ein Ergebnis über {@link setScannerResultForTests}.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   DEFAULT_ANALYSIS_TIMEFRAME,
   HistoricalStore,
@@ -517,20 +518,20 @@ export class ScannerService {
   }
 }
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __scannerService?: ScannerService;
-};
+const registeredState = getOrCreateRegisteredState<{
+  scannerService?: ScannerService;
+}>("src/scanner/service.ts", () => ({}));
 
 /** Prozessweite Service-Instanz (HMR-stabil). */
 export function getScannerService(): ScannerService {
-  if (!GLOBAL.__scannerService) GLOBAL.__scannerService = new ScannerService();
-  return GLOBAL.__scannerService;
+  if (!registeredState.scannerService) registeredState.scannerService = new ScannerService();
+  return registeredState.scannerService;
 }
 
 /** Nur für Tests: Service ersetzen oder verwerfen. */
 export function setScannerServiceForTests(
   service: ScannerService | null,
 ): void {
-  if (service) GLOBAL.__scannerService = service;
-  else delete GLOBAL.__scannerService;
+  if (service) registeredState.scannerService = service;
+  else delete registeredState.scannerService;
 }

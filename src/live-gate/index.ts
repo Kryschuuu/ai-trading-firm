@@ -146,25 +146,26 @@ export {
 
 // ── Betrieb-Singleton + Bridge-Registrierung ─────────────────────────────────
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { LiveGateService } from "./service";
 import { getLiveGateRuntime, resetLiveGateRuntimesForTests } from "./runtime";
 import { registerControlPlaneBridge } from "./controlPlaneBridge";
 
-const G = globalThis as typeof globalThis & {
-  __liveGateService?: LiveGateService;
-};
+const registeredState = getOrCreateRegisteredState<{
+  liveGateService?: LiveGateService;
+}>("src/live-gate/index.ts", () => ({}));
 
 /** Der Live-Gate-Service des Prozesses (Default-Dir aus der Env). */
 export function getLiveGateService(): LiveGateService {
-  if (!G.__liveGateService) {
-    G.__liveGateService = new LiveGateService(getLiveGateRuntime(), process.env);
+  if (!registeredState.liveGateService) {
+    registeredState.liveGateService = new LiveGateService(getLiveGateRuntime(), process.env);
     registerControlPlaneBridge();
   }
-  return G.__liveGateService;
+  return registeredState.liveGateService;
 }
 
 /** Nur Tests: Service-Singleton + Runtimes + Gate-Ports zurücksetzen. */
 export function resetLiveGateForTests(): void {
-  G.__liveGateService = undefined;
+  registeredState.liveGateService = undefined;
   resetLiveGateRuntimesForTests();
 }

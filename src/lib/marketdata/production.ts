@@ -8,6 +8,7 @@
  * Diese Datei ist der EINZIGE Ort, der Factory + Manager verbindet — sie hält
  * Import-Zyklen aus dem Rest der Market-Data-Schicht heraus.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { createAdapter } from "../../brokers/factory";
 import { PaperBroker, type ExecutedFill, type LiveQuote, type Order, type PaperExecutionAdapter } from "../broker";
 import { FillSimulator } from "./simulator";
@@ -15,27 +16,27 @@ import { MarketDataManager, type MarketDataManagerOptions } from "./manager";
 import { calibrateSimulatorConfig } from "./config";
 import type { MarketSnapshot } from "./types";
 
-const G = globalThis as typeof globalThis & {
-  __prodMarketDataManager?: MarketDataManager;
-};
+const registeredState = getOrCreateRegisteredState<{
+  prodMarketDataManager?: MarketDataManager;
+}>("src/lib/marketdata/production.ts", () => ({}));
 
 /** Baut den Produktions-Manager (Modus B, PAPER-Adapter als Broker-Feed). */
 export function getProductionMarketDataManager(
   opts?: MarketDataManagerOptions
 ): MarketDataManager {
-  if (!G.__prodMarketDataManager || opts) {
+  if (!registeredState.prodMarketDataManager || opts) {
     const manager = new MarketDataManager({
       ...opts,
       brokerAdapter: opts?.brokerAdapter ?? createAdapter("PAPER", "paper"),
     });
-    G.__prodMarketDataManager = manager;
+    registeredState.prodMarketDataManager = manager;
   }
-  return G.__prodMarketDataManager;
+  return registeredState.prodMarketDataManager;
 }
 
 /** Setzt den Produktions-Manager (nur Tests). */
 export function setProductionMarketDataManagerForTests(manager: MarketDataManager): void {
-  G.__prodMarketDataManager = manager;
+  registeredState.prodMarketDataManager = manager;
 }
 
 /**

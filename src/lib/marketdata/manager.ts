@@ -12,6 +12,7 @@
  *
  * Rein deterministisch (kein LLM), read-only, Failover wird auditiert.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import type { MarketInstrument } from "../../universe/types";
 import type { BrokerAdapter } from "../../contracts/broker";
 import { VENUE_CAPABILITIES } from "../../brokers/capabilities";
@@ -29,7 +30,7 @@ import { failoverGetTicker, readFailoverAudit, type FailoverAuditEntry } from ".
 import { HistoricalStore } from "./historicalStore";
 import { normalizeSnapshot, type RawSnapshotInput } from "./normalization";
 
-const G = globalThis as typeof globalThis & { __marketDataManager?: MarketDataManager };
+const registeredState = getOrCreateRegisteredState<{ marketDataManager?: MarketDataManager }>("src/lib/marketdata/manager.ts", () => ({}));
 
 export interface MarketDataManagerOptions {
   config?: MarketDataConfig;
@@ -231,13 +232,13 @@ export class MarketDataManager {
 
 /** Prozessweiter Singleton (Produktion). */
 export function getMarketDataManager(opts?: MarketDataManagerOptions): MarketDataManager {
-  if (!G.__marketDataManager || opts) {
-    G.__marketDataManager = new MarketDataManager(opts ?? {});
+  if (!registeredState.marketDataManager || opts) {
+    registeredState.marketDataManager = new MarketDataManager(opts ?? {});
   }
-  return G.__marketDataManager;
+  return registeredState.marketDataManager;
 }
 
 /** Nur für Tests: Singleton verwerfen. */
 export function resetMarketDataManagerForTests(): void {
-  delete G.__marketDataManager;
+  delete registeredState.marketDataManager;
 }

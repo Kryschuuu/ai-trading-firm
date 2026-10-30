@@ -27,8 +27,13 @@
  * Debounce-Zähler wird deterministisch über eine injizierbare Uhr geführt
  * (Tests, keine `Date.now()`-Streuung im Kern).
  */
-import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
+import { lookup as dnsLookup } from "node:dns/promises";
+import type { LookupAddress } from "node:dns";
+import { appendFile, chmod, mkdir } from "node:fs/promises";
+import { BlockList, isIP, type LookupFunction } from "node:net";
 import path from "node:path";
+import { Agent } from "undici";
 
 import { joinRuntimePath, resolveRuntimePath } from "./appPaths";
 import { envNumber } from "./env";
@@ -213,6 +218,9 @@ export class LogAlertSink implements AlertSink {
  * Dispatcher gesammelt — die Datei-Senke ist Beobachtbarkeit, kein Handelspfad.
  */
 export class FileAlertSink implements AlertSink {
+  private directoryReady: Promise<void> | undefined;
+  private pending: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly file: string = alertFilePath(),
     private readonly maxBytes: number = ALERT_LINE_MAX,
@@ -222,54 +230,201 @@ export class FileAlertSink implements AlertSink {
     return this.file;
   }
 
-  send(alert: Alert): void {
-    const target = resolveRuntimePath(this.file);
-    mkdirSync(path.dirname(target), { recursive: true });
-    const line = JSON.stringify({
+  send(alert: Alert): Promise<void> {
+    // Snapshot vor dem Einreihen: Aufrufer dürfen `alert` danach verändern.
+    let line = JSON.stringify({
       ts: alert.at ?? new Date().toISOString(),
       code: alert.code,
       severity: alert.severity,
       message: sanitizeLogField(alert.message),
       ...sanitizeMeta(alert.meta),
     });
-    const bounded = line.length > this.maxBytes ? `${line.slice(0, this.maxBytes - 2)}"}` : line;
-    appendFileSync(target, `${bounded}\n`, { encoding: "utf8", mode: 0o600 });
-    try {
-      chmodSync(target, 0o600);
-    } catch {
-      /* Best-effort (Dateisysteme ohne POSIX-Modes). */
+    if (Buffer.byteLength(line, "utf8") > this.maxBytes) {
+      // Ein abgeschnittenes JSON-Fragment ist kein NDJSON. Im Grenzfall lieber
+      // einen kleinen, gültigen Datensatz ohne überlange Metadaten schreiben.
+      line = JSON.stringify({ code: sanitizeLogField(alert.code, 64), severity: alert.severity, truncated: true });
+      if (Buffer.byteLength(line, "utf8") > this.maxBytes) line = "{}";
     }
+
+    const write = this.pending.then(async () => {
+      const target = resolveRuntimePath(this.file);
+      this.directoryReady ??= mkdir(path.dirname(target), { recursive: true })
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          // Ein temporärer Fehler darf zukünftige Alerts nicht vergiften.
+          this.directoryReady = undefined;
+          throw error;
+        });
+      await this.directoryReady;
+      await appendFile(target, `${line}\n`, { encoding: "utf8", mode: 0o600 });
+      await chmod(target, 0o600).catch(() => {
+        /* Best-effort (Dateisysteme ohne POSIX-Modes). */
+      });
+    });
+    // Reihenfolge bleibt auch bei parallelen Aufrufern erhalten; ein Fehler
+    // wird an seinen Aufrufer gemeldet, blockiert aber nicht spätere Writes.
+    this.pending = write.catch(() => {});
+    return write;
   }
 }
 
+/** Adressen, die nicht als öffentliches Webhook-Ziel dienen dürfen. */
+const blockedV4 = new BlockList();
+for (const [address, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8],
+  ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24],
+  ["192.0.2.0", 24], ["192.88.99.0", 24], ["192.168.0.0", 16],
+  ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24],
+  ["224.0.0.0", 4], ["240.0.0.0", 4],
+] as const) blockedV4.addSubnet(address, prefix, "ipv4");
+
+const globalV6 = new BlockList();
+globalV6.addSubnet("2000::", 3, "ipv6");
+const blockedV6 = new BlockList();
+// Neben privaten/Link-Local-Adressen sind auch Übergangsnetze (6to4,
+// Teredo), Dokumentationsnetze und IPv4-mapped Adressen ausgeschlossen.
+for (const [address, prefix] of [
+  ["::ffff:0:0", 96], ["2001::", 23], ["2001:db8::", 32], ["2002::", 16],
+  ["fc00::", 7], ["fe80::", 10],
+] as const) blockedV6.addSubnet(address, prefix, "ipv6");
+const loopbackV4 = new BlockList();
+loopbackV4.addSubnet("127.0.0.0", 8, "ipv4");
+const loopbackV6 = new BlockList();
+loopbackV6.addAddress("::1", "ipv6");
+
+function isLoopback(address: string): boolean {
+  const family = isIP(address);
+  return family === 4
+    ? loopbackV4.check(address, "ipv4")
+    : family === 6 && (loopbackV6.check(address, "ipv6") || loopbackV4.check(address, "ipv6"));
+}
+
+function isPublicAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return !blockedV4.check(address, "ipv4");
+  if (family === 6) return globalV6.check(address, "ipv6") && !blockedV6.check(address, "ipv6");
+  return false;
+}
+
+/** DNS-Injektion ist nur für deterministische Tests vorgesehen. */
+type WebhookLookup = (hostname: string, options: { all: true }) => Promise<LookupAddress[]>;
+
+class WebhookSafetyError extends Error {}
+
+function normalizedHost(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "").replace(/\.+$/, "").toLowerCase();
+}
+
+async function lookupWithTimeout(hostname: string, lookup: WebhookLookup, signal: AbortSignal): Promise<LookupAddress[]> {
+  if (signal.aborted) throw new WebhookSafetyError("webhook: Zeitlimit überschritten");
+  let abort: (() => void) | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(new WebhookSafetyError("webhook: Zeitlimit überschritten"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([lookup(hostname, { all: true }), timedOut]);
+  } finally {
+    if (abort) signal.removeEventListener("abort", abort);
+  }
+}
+
+async function verifiedWebhookTarget(
+  rawUrl: string,
+  allowInsecureLocal: boolean,
+  lookup: WebhookLookup,
+  signal: AbortSignal,
+): Promise<{ url: URL; hostname: string; addresses: LookupAddress[] }> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new WebhookSafetyError("webhook: ungültige URL");
+  }
+  const hostname = normalizedHost(url.hostname);
+  const isLocalName = hostname === "localhost" || hostname.endsWith(".localhost");
+  const localTest = allowInsecureLocal && (isLocalName || isLoopback(hostname));
+  if (
+    !hostname || url.username || url.password ||
+    (url.protocol !== "https:" && !(url.protocol === "http:" && localTest)) ||
+    hostname === "local" || hostname.endsWith(".local") ||
+    (isLocalName && !localTest)
+  ) throw new WebhookSafetyError("webhook: Ziel oder Protokoll nicht erlaubt");
+
+  const literalFamily = isIP(hostname);
+  let addresses: LookupAddress[];
+  if (literalFamily) {
+    addresses = [{ address: hostname, family: literalFamily }];
+  } else {
+    try {
+      addresses = await lookupWithTimeout(hostname, lookup, signal);
+    } catch (error) {
+      if (error instanceof WebhookSafetyError) throw error;
+      throw new WebhookSafetyError("webhook: DNS-Auflösung fehlgeschlagen");
+    }
+  }
+  if (
+    addresses.length === 0 ||
+    addresses.some(({ address, family }) =>
+      isIP(address) !== family || !(localTest ? isLoopback(address) : isPublicAddress(address)),
+    )
+  ) throw new WebhookSafetyError("webhook: Zieladresse nicht erlaubt");
+  return { url, hostname, addresses };
+}
+
 /**
- * Optionaler Webhook-Sink — NUR mit URL aus dem Secret-Store.
- *
- * Die URL wird **nie** geloggt oder in Fehlermeldungen durchgereicht (sie ist
- * selbst ein Credential, z. B. ein Slack-Incoming-Webhook). Fehler nennen
- * ausschließlich Klasse/Status.
+ * Optionaler Webhook-Sink — URL ausschließlich aus dem Secret-Store.
+ * HTTPS + öffentliche Zieladressen, vollständige DNS-Prüfung und ein an die
+ * geprüften Adressen gebundener Connector verhindern SSRF und DNS-Rebinding.
+ * Redirects sind verboten. Nur Unit-Tests dürfen explizit Loopback erlauben.
+ * URL, DNS-Antworten und fremde Fehlermeldungen werden niemals ausgegeben.
  */
 export class WebhookAlertSink implements AlertSink {
   constructor(
     private readonly opts: {
-      /** Auflöser der URL (Default: verschlüsselter Secret-Store). */
       resolveUrl: () => Promise<string | null>;
       fetchFn?: typeof fetch;
+      lookupFn?: WebhookLookup;
       timeoutMs?: number;
+      /** Nur für lokale Loopback-Tests, niemals aus einer Env-Variable setzen. */
+      allowInsecureLocal?: boolean;
     },
   ) {}
 
   async send(alert: Alert): Promise<void> {
-    const url = await this.opts.resolveUrl();
-    if (!url) return; // kein Credential hinterlegt → Senke still (Default aus).
-    if (!/^https?:\/\//i.test(url)) {
-      throw new Error("webhook: ungültige URL (nur http/https)");
-    }
+    const rawUrl = await this.opts.resolveUrl();
+    if (!rawUrl) return; // kein Credential hinterlegt → Senke still (Default aus).
     const fetchFn = this.opts.fetchFn ?? fetch;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 5_000);
+    let dispatcher: Agent | undefined;
     try {
-      const res = await fetchFn(url, {
+      const target = await verifiedWebhookTarget(
+        rawUrl,
+        this.opts.allowInsecureLocal === true,
+        this.opts.lookupFn ?? ((hostname, options) => dnsLookup(hostname, options)),
+        controller.signal,
+      );
+      // Der Connector darf nicht ein zweites Mal DNS fragen: Ein Angreifer
+      // könnte zwischen Validierung und Verbindungsaufbau anders antworten.
+      // URL/Host bleiben unverändert, sodass TLS SNI + Zertifikatsprüfung und
+      // Host-Header weiter auf dem ursprünglichen Namen erfolgen.
+      const pinnedLookup: LookupFunction = (hostname, options, callback) => {
+        if (normalizedHost(hostname) !== target.hostname) {
+          callback(new Error("unverified webhook host"), "", 0);
+          return;
+        }
+        const candidates = target.addresses.filter((item) => !options.family || options.family === item.family);
+        if (candidates.length === 0) {
+          callback(new Error("no verified webhook address"), "", 0);
+        } else if (options.all) {
+          callback(null, candidates);
+        } else {
+          callback(null, candidates[0].address, candidates[0].family);
+        }
+      };
+      dispatcher = new Agent({ connect: { lookup: pinnedLookup } });
+      const init: RequestInit & { dispatcher: Agent } = {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -280,20 +435,22 @@ export class WebhookAlertSink implements AlertSink {
           meta: sanitizeMeta(alert.meta),
         }),
         signal: controller.signal,
-      });
-      if (!res.ok) {
-        // Status als strukturiertes Feld — die Message bleibt frei von der URL.
-        throw Object.assign(new Error("webhook response not ok"), { httpStatus: res.status });
-      }
-    } catch (e) {
-      // Bewusst ohne Fremd-Message, ohne URL: nur Status/Klasse nennen — die
-      // Webhook-URL ist selbst ein Credential (z. B. Slack-Incoming-Webhook).
-      const httpStatus = (e as { httpStatus?: unknown }).httpStatus;
+        redirect: "error",
+        dispatcher,
+      };
+      const res = await fetchFn(target.url, init);
+      await res.body?.cancel().catch(() => {});
+      if (!res.ok) throw Object.assign(new Error("webhook response not ok"), { httpStatus: res.status });
+    } catch (error) {
+      if (error instanceof WebhookSafetyError) throw error;
+      const httpStatus = (error as { httpStatus?: unknown } | null)?.httpStatus;
       if (typeof httpStatus === "number") throw new Error(`webhook: HTTP ${httpStatus}`);
-      const name = e instanceof Error ? e.name : "Error";
-      throw new Error(`webhook: Versand fehlgeschlagen (${sanitizeLogField(name, 40)})`);
+      const name = error instanceof Error && ["AbortError", "TimeoutError", "TypeError"].includes(error.name)
+        ? error.name : "Error";
+      throw new Error(`webhook: Versand fehlgeschlagen (${name})`);
     } finally {
       clearTimeout(timer);
+      if (dispatcher) await dispatcher.destroy().catch(() => {});
     }
   }
 }
@@ -403,9 +560,9 @@ export class AlertDispatcher {
   }
 }
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __alertDispatcher?: AlertDispatcher;
-};
+const registeredState = getOrCreateRegisteredState<{
+  alertDispatcher?: AlertDispatcher;
+}>("src/lib/alerts.ts", () => ({}));
 
 /** Baut den Prozess-Dispatcher aus der Env-Konfiguration. */
 function buildDefaultDispatcher(): AlertDispatcher {
@@ -423,18 +580,18 @@ function buildDefaultDispatcher(): AlertDispatcher {
 
 /** Prozess-Singleton des Alert-Dispatchers (HMR-sicher über globalThis). */
 export function getAlertDispatcher(): AlertDispatcher {
-  if (!GLOBAL.__alertDispatcher) GLOBAL.__alertDispatcher = buildDefaultDispatcher();
-  return GLOBAL.__alertDispatcher;
+  if (!registeredState.alertDispatcher) registeredState.alertDispatcher = buildDefaultDispatcher();
+  return registeredState.alertDispatcher;
 }
 
 /** Nur für Tests: Dispatcher ersetzen (`null` = Default neu bauen). */
 export function setAlertDispatcherForTests(next: AlertDispatcher | null): void {
-  GLOBAL.__alertDispatcher = next ?? undefined;
+  registeredState.alertDispatcher = next ?? undefined;
 }
 
 /** Nur für Tests: Debounce-Zustand + Sink-Auswahl zurücksetzen. */
 export function resetAlertStateForTests(): void {
-  GLOBAL.__alertDispatcher = undefined;
+  registeredState.alertDispatcher = undefined;
 }
 
 /** Bequemer Einstiegspunkt: Alert über den Prozess-Dispatcher melden. */

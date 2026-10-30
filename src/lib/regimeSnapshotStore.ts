@@ -19,6 +19,7 @@
  * `scheduleRegimeSnapshotPersist` mit dem kanonischen Snapshot auf —
  * derselbe Snapshot, den Gate, Ops-Center und Artefakte konsumieren.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { createHash } from "node:crypto";
 import { and, gte, inArray, lte } from "drizzle-orm";
 
@@ -151,11 +152,11 @@ type PersistState = {
   lastPersistedRegime: Map<string, string>;
 };
 
-const G = globalThis as typeof globalThis & { __regimeSnapshotPersist?: PersistState };
+const registeredState = getOrCreateRegisteredState<{ regimeSnapshotPersist?: PersistState }>("src/lib/regimeSnapshotStore.ts", () => ({}));
 
 function persistState(): PersistState {
-  G.__regimeSnapshotPersist ??= { lastPersistedAt: new Map(), lastPersistedRegime: new Map() };
-  return G.__regimeSnapshotPersist;
+  registeredState.regimeSnapshotPersist ??= { lastPersistedAt: new Map(), lastPersistedRegime: new Map() };
+  return registeredState.regimeSnapshotPersist;
 }
 
 export type SchedulePersistOptions = {
@@ -283,5 +284,5 @@ export async function pruneRegimeSnapshots(
 
 /** Nur für Tests: Throttle-Zustand leeren. */
 export function __resetRegimeSnapshotPersistForTests(): void {
-  delete G.__regimeSnapshotPersist;
+  delete registeredState.regimeSnapshotPersist;
 }

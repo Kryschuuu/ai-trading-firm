@@ -29,6 +29,7 @@
  * ist der einzige I/O-Teil (DB + In-Memory-Cache, TTL 5 Min).
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { and, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { tradeJournal } from "@/db/schema";
@@ -119,9 +120,9 @@ export interface KellyEdge {
 /** Cache-TTL für die Kelly-Statistik (Order-Pfad, kein Hintergrund-Job). */
 export const KELLY_STATS_TTL_MS = 5 * 60_000;
 
-const G = globalThis as typeof globalThis & {
-  __kellyEdgeCache?: { at: number; value: KellyEdge | null };
-};
+const registeredState = getOrCreateRegisteredState<{
+  kellyEdgeCache?: { at: number; value: KellyEdge | null };
+}>("src/lib/positionSizing.ts", () => ({}));
 
 /**
  * Ermittelt die Kelly-Edge aus dem Trade-Journal — mit In-Memory-Cache
@@ -143,7 +144,7 @@ export async function resolveKellyEdge(
 ): Promise<KellyEdge | null> {
   if (!(cfg.kellyFraction > 0)) return null;
 
-  const cached = G.__kellyEdgeCache;
+  const cached = registeredState.kellyEdgeCache;
   if (cached && now - cached.at < KELLY_STATS_TTL_MS) return cached.value;
 
   let value: KellyEdge | null = null;
@@ -194,7 +195,7 @@ export async function resolveKellyEdge(
   } catch {
     value = null; // DB nicht erreichbar / Tabelle fehlt → Deckel wirkungslos.
   }
-  G.__kellyEdgeCache = { at: now, value };
+  registeredState.kellyEdgeCache = { at: now, value };
   return value;
 }
 

@@ -1,6 +1,6 @@
 # Observability — Marktdaten-Fehler, Firmen-Metriken, Alerts und Heartbeat
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-19 · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-19 · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) ·
 > Ausbaustand zum Stand: Implementiert (MDERR-006; GAP-10 v1.45.0 ergänzt
 > Firmen-Metriken, Auto-Circuit-Breaker, Alerting und Heartbeat; GAP-07
 > v1.47.0 ergänzt die Datenqualitäts-Klassen §2.1) · Module
@@ -326,8 +326,19 @@ Implementierungen:
 | Senke | Verhalten |
 | --- | --- |
 | `LogAlertSink` | strukturiertes JSON-Log (`event: "alert"`, Muster `logger.ts`): redigiert, einzeilig, ≤ 512 Zeichen je Feld |
-| `FileAlertSink` | append-only NDJSON, Default `data/alerts.ndjson` über `resolveRuntimePath()` (Modus 0600) — CLI und Server sehen dieselbe Datei |
-| `WebhookAlertSink` | **optional, Default aus**: URL ausschließlich aus dem verschlüsselten Secret-Store (`ALERT_WEBHOOK_URL_SECRET_NAME`), Timeout 5 s; die URL ist selbst ein Credential und erscheint nie in Logs oder Fehlermeldungen |
+| `FileAlertSink` | Asynchron und je Instanz in Reihenfolge angehängtes NDJSON, Default `data/alerts.ndjson` über `resolveRuntimePath()` (neue Datei Modus 0600); das Verzeichnis wird einmalig vorbereitet und nach Fehlern erneut versucht |
+| `WebhookAlertSink` | **optional, Default aus**: URL aus Secret-Store (`ALERT_WEBHOOK_URL_SECRET_NAME`), Timeout 5 s; nur öffentlich erreichbare HTTPS-Ziele, keine Redirects; die URL ist ein Credential und erscheint nie in Logs oder Fehlermeldungen |
+
+**Webhook-Sicherheit (ASA-15):** DNS wird bei jedem Versand vollständig
+aufgelöst; alle Antworten müssen öffentlich sein. Private/Loopback-/Link-Local-,
+Metadaten- und andere reservierte Adressen (auch IPv6 und IPv4-mapped) werden
+abgelehnt. Die Verbindung wird auf eine geprüfte Adresse gepinnt; TLS-Zertifikat
+und Hostname bleiben geprüft, Redirects sind deaktiviert. Ein explizites
+`allowInsecureLocal` ist ausschließlich für Loopback-Tests vorgesehen und wird
+vom konfigurierten Produktions-Sink nicht aktiviert. Bestehende HTTP- oder
+interne Webhooks müssen vor dem Upgrade auf ein öffentliches HTTPS-Ziel mit
+gültigem Zertifikat umgestellt werden; ein Ausfall wird redigiert gemeldet und
+blockiert keine Handelsfunktion.
 
 **Debounce (Alert-Fatigue-Schutz):** Ein identischer `alert.code` wird
 höchstens einmal pro `ALERT_DEBOUNCE_MINUTES` (Default 30, Bounds [1, 1440])

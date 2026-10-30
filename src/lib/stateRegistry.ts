@@ -66,10 +66,14 @@
  *                               des autoritativen Kill-Switch-Gates (`src/lib/killSwitchDb.ts`, ASA-01);
  *                               persistente Wahrheit bleibt `kill_switches` in PostgreSQL.
  *
- * DI-/Backend-Singletons der Control Plane (Repository `getControlStateRepository`,
- * Secret-Store `getControlPlaneSecretStore`) sind bewusst NICHT hier — sie sind
- * injizierbare Backends und werden ueber ihre dedizierten `...ForTests`-Hooks
- * (`resetControlPlaneForTests`, `setControlPlaneSecretStoreForTests`) gesetzt.
+ * ASA-13: Auch die bisher verstreuten Modul-Singletons (inkl. injizierbarer
+ * Control-Plane-Backends, Audit-Ringe, Alert-/Live-Gate- und Market-Data-Caches)
+ * registrieren sich typisiert im selben Namensraum. `resetAllRegisteredState()`
+ * leert sie beim Test-Reset; langlebige Infrastruktur wie der PostgreSQL-Pool
+ * ist in `src/db/index.ts` als einzige Infrastruktur-Ausnahme dokumentiert und
+ * bleibt dabei erhalten. `infra` ist auch als Scope für neue langlebige
+ * Ressourcen verfügbar. Die Registry ist pro Prozess, kein Ersatz fuer
+ * DB-Wahrheit oder prozessuebergreifende Synchronisierung.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -102,6 +106,77 @@ const G = globalThis as typeof globalThis & {
   __AITF_STATE_REGISTRY__?: Record<string, unknown>;
 };
 const NS: Record<string, unknown> = (G.__AITF_STATE_REGISTRY__ ??= {});
+
+export type StateScope = "app" | "infra";
+
+interface RegisteredState {
+  value: object;
+  reset: () => void;
+  scope: StateScope;
+}
+
+// Metadaten UND Werte ueberleben HMR im selben Namensraum wie die Accessoren.
+const registrations = (NS.__registrations ??= new Map<string, RegisteredState>()) as Map<string, RegisteredState>;
+
+/**
+ * Leert Records in place: exportierte Audit-Ringe und bei Modulinitialisierung
+ * erfasste Maps muessen dieselbe Identitaet behalten. Andere Werte werden auf
+ * den Factory-Default gesetzt bzw. entfernt; persistente Dateien bleiben unberuehrt.
+ */
+function resetRecordInPlace(value: object, initial: object): void {
+  const target = value as Record<string, unknown>;
+  const defaults = initial as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(target), ...Object.keys(defaults)])) {
+    const current = target[key];
+    const next = defaults[key];
+    if (Array.isArray(current) && (next === undefined || Array.isArray(next))) {
+      current.splice(0, current.length, ...(next ?? []));
+    } else if (current instanceof Map && (next === undefined || next instanceof Map)) {
+      current.clear();
+      if (next instanceof Map) for (const [k, v] of next) current.set(k, v);
+    } else if (current instanceof Set && (next === undefined || next instanceof Set)) {
+      current.clear();
+      if (next instanceof Set) for (const item of next) current.add(item);
+    } else if (Object.hasOwn(defaults, key)) {
+      target[key] = next;
+    } else {
+      delete target[key];
+    }
+  }
+}
+
+/**
+ * Typisierter HMR-stabiler Modulzustand. Der vollstaendige Modulpfad dient als
+ * eindeutiger Name. `onReset` stoppt Ressourcen oder raeumt zugehoerige lokale
+ * Test-Injektionen auf; der Record selbst wird anschliessend immer geleert.
+ * `infra` ist ausschliesslich fuer langlebige Ressourcen wie den PG-Pool.
+ * Reset nur bei ruhenden Tests ausfuehren: laufende asynchrone Arbeit wird
+ * dadurch nicht abgebrochen und kann sonst spaeter erneut Zustand schreiben.
+ */
+export function getOrCreateRegisteredState<T extends object>(
+  name: string,
+  factory: () => T,
+  onReset?: (value: T) => void,
+  scope: StateScope = "app",
+): T {
+  if (!name.trim()) throw new Error("state registry: empty name");
+  let entry = registrations.get(name);
+  if (entry && entry.scope !== scope) throw new Error(`state registry: scope mismatch for ${name}`);
+  if (!entry) {
+    entry = { value: factory(), scope, reset: () => {} };
+    registrations.set(name, entry);
+  }
+  const value = entry.value as T;
+  // Beim HMR wird der Callback aktualisiert, der Wert bleibt identisch.
+  entry.reset = () => {
+    try {
+      onReset?.(value);
+    } finally {
+      resetRecordInPlace(value, factory());
+    }
+  };
+  return value;
+}
 
 /** Boolesches Flag (Default false). */
 export interface FlagAccessor {
@@ -329,56 +404,31 @@ export const state = {
 } as const;
 
 /**
- * DER eine Test-Reset: setzt ALLE registrierten Cross-Cutting-Singletons auf
- * ihren sauberen Ausgangszustand — auch jene, die frueher ueber verstreute
- * Funktionen (`resetControlPlaneForTests`, `resetRateLimiterForTests`,
- * `G.__firmHydrated`) zurueckgesetzt wurden. Ein Reset, der keinen Singleton
- * vergisst. Produktionspfad ruft diese Funktion nie auf.
+ * Setzt alle fachlichen Accessoren und registrierten Modulzustände zurück.
+ * Infrastruktur bleibt unangetastet; auch bei einem Cleanup-Fehler werden die
+ * übrigen Zustände bereinigt und der Fehler anschließend sichtbar gemacht.
  */
+export function resetAllRegisteredState(): void {
+  const errors: unknown[] = [];
+  for (const accessor of Object.values(state)) {
+    try {
+      accessor.reset();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  for (const entry of registrations.values()) {
+    if (entry.scope === "infra") continue;
+    try {
+      entry.reset();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw new AggregateError(errors, "state registry reset failed");
+}
+
+/** Rückwärtskompatibler Name des zentralen Test-Resets. */
 export function __resetAllSingletonsForTests(): void {
-  // Engine
-  state.firmHydrated.reset();
-  state.firmHydration.reset();
-  state.firmHydrateRetryAt.reset();
-  state.firmHydrateWarned.reset();
-  state.pipelineBusy.reset();
-  // Control Plane
-  state.controlPlaneStates.reset();
-  state.controlPlaneHydrating.reset();
-  state.controlPlaneWarmupPromise.reset();
-  state.controlPlaneServicePromise.reset();
-  state.controlPlanePersistWarned.reset();
-  // Risk-Guard
-  state.killSwitchArmed.reset();
-  state.baseLimits.reset();
-  state.currentLimits.reset();
-  state.adaptiveState.reset();
-  state.volTargetState.reset();
-  state.drawdownState.reset();
-  state.strategyLifecycleState.reset();
-  state.circuitBreakerLatch.reset();
-  // Monitor
-  state.monitorLastTickAt.reset();
-  // Reconciliation (GAP-09)
-  state.reconciliationLastReport.reset();
-  // Broker-Factory
-  state.brokerAdapters.reset();
-  state.paperBrokerLedger.reset();
-  // API-Auth + ASA-02 Vier-Augen-Freigaben
-  state.rateLimiterHits.reset();
-  state.fourEyesApprovals.reset();
-  state.killNonces.reset();
-  // Session-Revocation
-  state.revokedSessions.reset();
-  state.sessionsRevokedBefore.reset();
-  // Instrumentation / Scheduler
-  state.firmSchedulerStarted.reset();
-  // Mikro-Executor
-  state.microLimitsLoadedAt.reset();
-  state.ruleCacheInvalidators.reset();
-  // Autoritatives Kill-Switch-Gate (ASA-01)
-  state.killSwitchDbCache.reset();
-  state.killSwitchDbEpoch.reset();
-  state.killSwitchDbInFlight.reset();
-  state.killSwitchSyncedFromDb.reset();
+  resetAllRegisteredState();
 }

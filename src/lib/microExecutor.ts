@@ -1891,8 +1891,8 @@ type WsLike = {
 };
 
 async function openWebSocket(url: string): Promise<WsLike> {
-  const g = globalThis as unknown as { WebSocket?: new (u: string) => WsLike };
-  if (typeof g.WebSocket === "function") return new g.WebSocket(url);
+  const NativeWebSocket = globalThis.WebSocket as unknown as (new (u: string) => WsLike) | undefined;
+  if (typeof NativeWebSocket === "function") return new NativeWebSocket(url);
   try {
     const mod = (await import("ws")) as unknown as { default?: new (u: string) => WsLike };
     const Ws = mod.default ?? (mod as unknown as new (u: string) => WsLike);

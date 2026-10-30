@@ -20,6 +20,7 @@
  * Ist kein Provider erreichbar, folgt HOLD/REJECT statt einer Handelsempfehlung;
  * der explizite Not-Halt bleibt KILL.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   chatLlm,
   createLlmClient,
@@ -79,16 +80,16 @@ export type OllamaStatus = {
   chain: LlmProviderName[];
 };
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __ollamaCache?: OllamaStatus;
-};
+const registeredState = getOrCreateRegisteredState<{
+  ollamaCache?: OllamaStatus;
+}>("src/lib/ollama.ts", () => ({}));
 
 /** Statuscache, damit das Dashboard nicht bei jedem Poll blockiert. */
 const CACHE_TTL_MS = 15_000;
 
 /** Prüft den aktiven Provider (Modelle auflisten) und cachet das Ergebnis. */
 export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
-  const cached = GLOBAL.__ollamaCache;
+  const cached = registeredState.ollamaCache;
   if (
     !force &&
     cached &&
@@ -115,7 +116,7 @@ export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
       checkedAt: new Date().toISOString(),
       chain,
     };
-    GLOBAL.__ollamaCache = status;
+    registeredState.ollamaCache = status;
     return status;
   } catch (e) {
     const status: OllamaStatus = {
@@ -127,7 +128,7 @@ export async function getOllamaStatus(force = false): Promise<OllamaStatus> {
       checkedAt: new Date().toISOString(),
       chain,
     };
-    GLOBAL.__ollamaCache = status;
+    registeredState.ollamaCache = status;
     return status;
   }
 }

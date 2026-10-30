@@ -25,6 +25,7 @@
  * Rohe Venue-Nutzdaten werden **nie** persistiert — nur normalisierte Zeilen,
  * ihr inhaltsbezogener Fingerprint und klassifizierte Fehler.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
@@ -1004,15 +1005,17 @@ function toRunRecord(row: typeof perpSyncRuns.$inferSelect): PerpRunRecord {
 // Instanz (global, lazy — kein Import-Wurf ohne DATABASE_URL)
 // ─────────────────────────────────────────────────────────────────────────────
 
-let storeInstance: PerpStore | null = null;
+const registeredState = getOrCreateRegisteredState<{ storeInstance: PerpStore | null }>(
+  "src/perpdata/store.ts", () => ({ storeInstance: null }),
+);
 
 export function getPerpStore(deps: PerpStoreDeps = {}): PerpStore {
   if (deps.db) return new PerpStore(deps);
-  if (storeInstance === null) storeInstance = new PerpStore(deps);
-  return storeInstance;
+  if (registeredState.storeInstance === null) registeredState.storeInstance = new PerpStore(deps);
+  return registeredState.storeInstance;
 }
 
 /** Nur für Tests: die geteilte Instanz verwerfen. */
 export function resetPerpStoreForTests(): void {
-  storeInstance = null;
+  registeredState.storeInstance = null;
 }

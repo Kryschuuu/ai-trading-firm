@@ -8,6 +8,7 @@
  * (`FEED_FAILOVER` / `ANOMALOUS_SNAPSHOT`), zusätzlich ein In-Memory-Ring
  * (deterministisch testbar, DB-frei). Ein Failover ist IMMER laut — nie still.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { writeAuditRecord } from "@/lib/auditSink";
 import type { MarketInstrument } from "../../universe/types";
 import type { MarketFeed, MarketSnapshot } from "./types";
@@ -24,13 +25,13 @@ export interface FailoverAuditEntry {
   at: string;
 }
 
-const G = globalThis as typeof globalThis & {
-  __marketFailoverAudit?: FailoverAuditEntry[];
-};
+const registeredState = getOrCreateRegisteredState<{
+  marketFailoverAudit?: FailoverAuditEntry[];
+}>("src/lib/marketdata/failover.ts", () => ({}));
 const RING_MAX = 200;
 
 /** In-Memory-Ring des Failover-Audits (prozesslokal, DB-frei). */
-export const failoverAuditRing: FailoverAuditEntry[] = (G.__marketFailoverAudit ??= []) as FailoverAuditEntry[];
+export const failoverAuditRing: FailoverAuditEntry[] = (registeredState.marketFailoverAudit ??= []) as FailoverAuditEntry[];
 
 /** Nur für Tests: Ring leeren. */
 export function clearFailoverAuditForTests(): void {

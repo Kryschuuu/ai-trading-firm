@@ -19,6 +19,7 @@
  * Kein LLM erreichbar → deterministischer Fallback (Mean-Reversion-Muster),
  * damit der Zyklus auch ohne Modell demonstrierbar bleibt.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { db } from "@/db";
 import { agentMessages, agents as agentTable, missions } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -44,11 +45,11 @@ import {
 import { startOfBerlinDay } from "./time";
 import { missionFocusSymbol } from "./missionUniverse";
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __macroBusy?: boolean;
-  __macroLastRun?: string;
-  __macroLastResult?: unknown;
-};
+const registeredState = getOrCreateRegisteredState<{
+  macroBusy?: boolean;
+  macroLastRun?: string;
+  macroLastResult?: unknown;
+}>("src/lib/macroCycle.ts", () => ({}));
 
 export type MacroCycleResult = {
   ok: boolean;
@@ -134,10 +135,10 @@ export function riskGateRule(spec: RuleSpec): { pass: boolean; reasons: string[]
 }
 
 export async function runMacroCycle(opts?: { missionId?: string }): Promise<MacroCycleResult> {
-  if (GLOBAL.__macroBusy) {
+  if (registeredState.macroBusy) {
     return { ok: false, missionId: null, symbol: "", warnings: [], error: "MACRO_ALREADY_RUNNING", at: new Date().toISOString() };
   }
-  GLOBAL.__macroBusy = true;
+  registeredState.macroBusy = true;
   const warnings: string[] = [];
   try {
     // ── Mission + Symbol bestimmen ──────────────────────────────────────────
@@ -411,8 +412,8 @@ export async function runMacroCycle(opts?: { missionId?: string }): Promise<Macr
       warnings,
       at: new Date().toISOString(),
     };
-    GLOBAL.__macroLastResult = result;
-    GLOBAL.__macroLastRun = new Date().toISOString();
+    registeredState.macroLastResult = result;
+    registeredState.macroLastRun = new Date().toISOString();
     return result;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -423,14 +424,21 @@ export async function runMacroCycle(opts?: { missionId?: string }): Promise<Macr
       at: new Date().toISOString(),
     };
   } finally {
-    GLOBAL.__macroBusy = false;
+    registeredState.macroBusy = false;
   }
+}
+
+/** Nur für Tests: bereits laufenden Makrozyklus simulieren, ohne Netzwerkzugriff. */
+export function setMacroBusyForTests(busy: boolean | undefined): boolean | undefined {
+  const previous = registeredState.macroBusy;
+  registeredState.macroBusy = busy;
+  return previous;
 }
 
 export function macroCycleStatus(): { busy: boolean; lastRun: string | null; lastResult: unknown } {
   return {
-    busy: GLOBAL.__macroBusy ?? false,
-    lastRun: GLOBAL.__macroLastRun ?? null,
-    lastResult: GLOBAL.__macroLastResult ?? null,
+    busy: registeredState.macroBusy ?? false,
+    lastRun: registeredState.macroLastRun ?? null,
+    lastResult: registeredState.macroLastResult ?? null,
   };
 }

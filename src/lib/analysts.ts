@@ -16,6 +16,7 @@
  * Anweisungen und JSON-Schemata spürbar treuer. Anti-Injection-Zeile in jeder
  * Rolle, die Fremdinhalte (News/Kurse) verarbeitet.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { db } from "@/db";
 import { agentMessages, agents as agentTable } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -46,12 +47,12 @@ import { deduplicateNewsSources } from "@/sentiment/deduplication";
 import { evaluateSentimentForEntities } from "@/sentiment/service";
 import type { StructuredSentimentForecast } from "@/sentiment/types";
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __analystBusy?: boolean;
-  __pennyBusy?: boolean;
-  __lastAnalystRun?: string;
-  __lastPennyRun?: string;
-};
+const registeredState = getOrCreateRegisteredState<{
+  analystBusy?: boolean;
+  pennyBusy?: boolean;
+  lastAnalystRun?: string;
+  lastPennyRun?: string;
+}>("src/lib/analysts.ts", () => ({}), () => { secTickerMap = null; });
 
 type AgentRowLite = { id: string; name: string; role: string; model: string; version: number };
 
@@ -694,14 +695,14 @@ async function secLookup(symbol: string): Promise<{ cik: number; title: string }
 }
 
 export async function runPennyTeam(): Promise<void> {
-  if (GLOBAL.__pennyBusy) return;
-  GLOBAL.__pennyBusy = true;
+  if (registeredState.pennyBusy) return;
+  registeredState.pennyBusy = true;
   try {
     await runPennyScout();
     await runPennyDiligence();
   } finally {
-    GLOBAL.__pennyBusy = false;
-    GLOBAL.__lastPennyRun = new Date().toISOString();
+    registeredState.pennyBusy = false;
+    registeredState.lastPennyRun = new Date().toISOString();
   }
 }
 

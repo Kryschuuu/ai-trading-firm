@@ -64,6 +64,7 @@
  * audit_log, Determinismus (reine Arithmetik, injizierbare Zeit in Tests).
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { adx } from "./indicators";
 import { auditWrite } from "./auditSink";
 import { getCandles, type Candle } from "./marketData";
@@ -1221,13 +1222,13 @@ type InstrumentState = {
   changeCount: number;
 };
 
-const G = globalThis as typeof globalThis & {
-  __marketRegime?: { instruments: Map<string, InstrumentState> };
-};
+const registeredState = getOrCreateRegisteredState<{
+  marketRegime?: { instruments: Map<string, InstrumentState> };
+}>("src/lib/marketRegime.ts", () => ({}));
 
-function state(): NonNullable<(typeof G)["__marketRegime"]> {
-  G.__marketRegime ??= { instruments: new Map() };
-  return G.__marketRegime;
+function state(): NonNullable<(typeof registeredState)["marketRegime"]> {
+  registeredState.marketRegime ??= { instruments: new Map() };
+  return registeredState.marketRegime;
 }
 
 function snapshotOf(symbol: string, st: InstrumentState): InstrumentRegimeSnapshot {
@@ -1561,5 +1562,5 @@ export function formatRegimeGateContext(
 
 /** Leert den kompletten Laufzeit-Zustand (nur für Tests). */
 export function __resetMarketRegimeForTests(): void {
-  delete G.__marketRegime;
+  delete registeredState.marketRegime;
 }

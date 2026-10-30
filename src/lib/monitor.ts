@@ -33,7 +33,7 @@ import {
 } from "./signalDecayRuntime";
 import { getLimits, killSwitch } from "./riskGuard";
 import { checkCircuitBreaker, type CircuitBreakerOutcome } from "./circuitBreaker";
-import { state } from "./stateRegistry";
+import { state, getOrCreateRegisteredState } from "./stateRegistry";
 import type { AdaptiveRegime } from "./riskGuard";
 import { DEFAULT_WATCHLIST, getQuote, refreshQuotes, getCandles } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
@@ -52,17 +52,17 @@ import { getProductionMarketDataManager } from "./marketdata/production";
 import { emitAlert } from "./alerts";
 import { envNumber } from "./env";
 
-const GLOBAL = globalThis as typeof globalThis & {
-  __lastTickAt?: number;
-  __tickCount?: number;
-  __scanCount?: number;
+const registeredState = getOrCreateRegisteredState<{
+  lastTickAt?: number;
+  tickCount?: number;
+  scanCount?: number;
   /** Single-Flight-Schutz: verhindert überlappende Monitor-Zyklen. */
-  __tickLock?: Promise<TickResult> | null;
+  tickLock?: Promise<TickResult> | null;
   /** GAP-02: Accrual-Engine (Periodenwechsel-Zustand) — pro Prozess einmal. */
-  __fundingEngine?: FundingAccrualEngine;
-  __equityAlertState?: { peak: number; threshold: number };
-  __equityAlertStats?: { peaks: number; thresholds: number };
-};
+  fundingEngine?: FundingAccrualEngine;
+  equityAlertState?: { peak: number; threshold: number };
+  equityAlertStats?: { peaks: number; thresholds: number };
+}>("src/lib/monitor.ts", () => ({}));
 
 const SCAN_EVERY_TICKS = 15; // alle 15 Minuten ein Marktbericht
 const PRUNE_EVERY_TICKS = 240; // Retention ~alle 4 Stunden prüfen
@@ -182,11 +182,11 @@ export type TickOptions = {
  * und gilt damit auch über Prozessgrenzen hinweg.
  */
 export function tick(forceScan = false, opts: TickOptions = {}): Promise<TickResult> {
-  if (GLOBAL.__tickLock) return GLOBAL.__tickLock;
+  if (registeredState.tickLock) return registeredState.tickLock;
   const run = doTick(forceScan, opts).finally(() => {
-    GLOBAL.__tickLock = null;
+    registeredState.tickLock = null;
   });
-  GLOBAL.__tickLock = run;
+  registeredState.tickLock = run;
   return run;
 }
 
@@ -584,8 +584,8 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
   }
 
   // --- 4) Multi-Market-Scan ins institutionelle Gedächtnis ---
-  GLOBAL.__tickCount = (GLOBAL.__tickCount ?? 0) + 1;
-  if (GLOBAL.__tickCount % PRUNE_EVERY_TICKS === 0) {
+  registeredState.tickCount = (registeredState.tickCount ?? 0) + 1;
+  if (registeredState.tickCount % PRUNE_EVERY_TICKS === 0) {
     try {
       // Zweistufig (v0.13.0): Rohdaten altern lassen, ältere Tagesstände
       // verdichten (Tief + Tagesschluss), erst danach hart löschen.
@@ -601,7 +601,7 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
       errors.push(`Retention fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
     }
   }
-  const doScan = (!opts.skipScan) && (forceScan || GLOBAL.__tickCount % SCAN_EVERY_TICKS === 1);
+  const doScan = (!opts.skipScan) && (forceScan || registeredState.tickCount % SCAN_EVERY_TICKS === 1);
   let marketScan = false;
   if (doScan) {
     try {
@@ -634,15 +634,15 @@ async function doTick(forceScan: boolean, opts: TickOptions = {}): Promise<TickR
         },
       });
       marketScan = true;
-      GLOBAL.__scanCount = (GLOBAL.__scanCount ?? 0) + 1;
+      registeredState.scanCount = (registeredState.scanCount ?? 0) + 1;
     } catch (e) {
       errors.push(`Marktscan fehlgeschlagen: ${e instanceof Error ? e.message : e}`);
     }
   }
 
   // GAP-10 (D4): Heartbeat-Quelle fuer /api/health + Watchdog.
-  GLOBAL.__lastTickAt = Date.now();
-  state.monitorLastTickAt.set(GLOBAL.__lastTickAt);
+  registeredState.lastTickAt = Date.now();
+  state.monitorLastTickAt.set(registeredState.lastTickAt);
   return {
     at: new Date().toISOString(),
     quotesRefreshed: priceOf.size,
@@ -842,10 +842,10 @@ export async function applyExit(params: {
  * src/lib/funding.ts); `loadFundingConfig` klemmt mit Warnung.
  */
 function getFundingEngine(): FundingAccrualEngine {
-  if (!GLOBAL.__fundingEngine) {
-    GLOBAL.__fundingEngine = new FundingAccrualEngine(loadFundingConfig());
+  if (!registeredState.fundingEngine) {
+    registeredState.fundingEngine = new FundingAccrualEngine(loadFundingConfig());
   }
-  return GLOBAL.__fundingEngine;
+  return registeredState.fundingEngine;
 }
 
 /**
@@ -871,7 +871,7 @@ function isCryptoLike(symbol: string): boolean {
 
 /** Letzter Tick-Zeitpunkt fürs Dashboard/Healthcheck. */
 export function lastTickAt(): string | null {
-  return GLOBAL.__lastTickAt ? new Date(GLOBAL.__lastTickAt).toISOString() : null;
+  return registeredState.lastTickAt ? new Date(registeredState.lastTickAt).toISOString() : null;
 }
 
 /** Einmaliger Kursabgleich für ein Symbol (z. B. vor Orderberechnung). */
@@ -914,7 +914,7 @@ export function parseEquityAlertThresholds(raw: string | undefined): number[] {
  * Meldet (a) ein neues Allzeithoch und (b) den Überschritt einer
  * Drawdown-Schwelle.
  *
- * Der Zustand liegt im Prozess (`GLOBAL.__equityAlertState`): der höchste
+ * Der Zustand liegt im Prozess (`registeredState.equityAlertState`): der höchste
  * gesehene Kontostand und die zuletzt gemeldete Schwelle. Damit gilt:
  *
  *   - Ein neues Hoch wird **je Hoch** einmal gemeldet; das nächste Hoch ist
@@ -944,7 +944,7 @@ export async function checkEquityAlerts(params: {
 
   const minPeakPct = envNumber("EQUITY_ALERT_PEAK_MIN_PCT", 0.5, 0, 50);
   const thresholds = parseEquityAlertThresholds(process.env[EQUITY_ALERT_ENV.THRESHOLDS_PCT]);
-  const state = params.state ?? (GLOBAL.__equityAlertState ??= { peak: equity, threshold: 0 });
+  const state = params.state ?? (registeredState.equityAlertState ??= { peak: equity, threshold: 0 });
   const emit = params.emit ?? emitAlert;
 
   const previousPeak = state.peak;
@@ -993,7 +993,7 @@ export async function checkEquityAlerts(params: {
     }
   }
   if (sends.length > 0) {
-    const stats = (GLOBAL.__equityAlertStats ??= { peaks: 0, thresholds: 0 });
+    const stats = (registeredState.equityAlertStats ??= { peaks: 0, thresholds: 0 });
     if (peakAlert) stats.peaks += 1;
     if (thresholdAlert !== null) stats.thresholds += 1;
   }

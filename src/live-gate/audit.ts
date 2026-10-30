@@ -34,6 +34,7 @@
  * damit wiederholte `GET /api/live/state`-Aufrufe bei unveränderter Datei in
  * O(1) antworten.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -152,7 +153,9 @@ function copyVerification(result: AuditChainVerification): AuditChainVerificatio
 }
 
 /** Cache: absoluter Dateipfad → (Signatur, Ergebnis). */
-const chainCache = new Map<string, { signature: AuditFileSignature; result: AuditChainVerification }>();
+const { chainCache } = getOrCreateRegisteredState("src/live-gate/audit.ts", () => ({
+  chainCache: new Map<string, { signature: AuditFileSignature; result: AuditChainVerification }>(),
+}));
 
 /** Signatur der Datei oder `null`, wenn sie (noch) nicht existiert. */
 function signatureOf(file: string): AuditFileSignature | null {

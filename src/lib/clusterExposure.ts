@@ -43,6 +43,7 @@
  *   - OK → kein Eintrag (kein Lärm pro Order).
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import {
   correlationClusters,
   correlationMatrix,
@@ -171,12 +172,12 @@ export interface ClusterCorrelationData {
  */
 export type CorrelationSource = (symbols: string[], windowCandles: number) => Promise<ClusterCorrelationData | null>;
 
-const G = globalThis as typeof globalThis & {
-  __clusterCorrCache?: Map<string, ClusterCorrelationData>;
-  __clusterCorrSource?: CorrelationSource;
-};
+const registeredState = getOrCreateRegisteredState<{
+  clusterCorrCache?: Map<string, ClusterCorrelationData>;
+  clusterCorrSource?: CorrelationSource;
+}>("src/lib/clusterExposure.ts", () => ({}), () => { defaultSourceInstance = null; });
 
-const corrCache = (G.__clusterCorrCache ??= new Map());
+const corrCache = (registeredState.clusterCorrCache ??= new Map());
 
 function cacheKey(symbols: string[], windowCandles: number, threshold: number): string {
   return [...symbols].sort().join("|") + `|w${windowCandles}|t${threshold}`;
@@ -269,13 +270,13 @@ let defaultSourceInstance: CorrelationSource | null = null;
 
 /** Default-Quelle (Prozess-Singleton; Tests injizieren eigene Quellen). */
 export function getDefaultCorrelationSource(): CorrelationSource {
-  defaultSourceInstance ??= G.__clusterCorrSource ?? createHistoricalStoreSource();
+  defaultSourceInstance ??= registeredState.clusterCorrSource ?? createHistoricalStoreSource();
   return defaultSourceInstance;
 }
 
 /** Test-Hook: Default-Quelle ersetzen (z. B. inquirer-freie Integrationstests). */
 export function setDefaultCorrelationSourceForTests(source: CorrelationSource | null): void {
-  G.__clusterCorrSource = source ?? undefined;
+  registeredState.clusterCorrSource = source ?? undefined;
   defaultSourceInstance = null;
 }
 
@@ -300,7 +301,7 @@ export function getClusterCacheStatus(now: number = Date.now()): {
 /** Test-Reset: Cache + injizierte Default-Quelle zurücksetzen. */
 export function __resetClusterExposureForTests(): void {
   corrCache.clear();
-  G.__clusterCorrSource = undefined;
+  registeredState.clusterCorrSource = undefined;
   defaultSourceInstance = null;
 }
 

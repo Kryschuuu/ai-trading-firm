@@ -24,6 +24,7 @@
  * `configHash` und damit eine andere Definitionsversion — nicht eine
  * Umschreibung bestehender Werte.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { DEFAULT_ANALYSIS_TIMEFRAME, type SupportedTimeframe } from "../lib/marketdata/historicalStore";
 import { DEFAULT_SCANNER_CONFIG } from "../scanner/config";
 import { BOLLINGER_PERIOD, BOLLINGER_MULT, DONCHIAN_ENTRY_PERIOD, DONCHIAN_EXIT_PERIOD } from "../lib/indicators";
@@ -159,11 +160,13 @@ export function createSliceRegistry(config: FeatureSliceConfig = FEATURE_SLICE_D
 }
 
 /** Prozessweite Registry des Produktions-Slices (lazy, stabil über HMR). */
-let sliceRegistry: FeatureRegistry | null = null;
+const registeredState = getOrCreateRegisteredState<{ sliceRegistry: FeatureRegistry | null }>(
+  "src/features/definitions.ts", () => ({ sliceRegistry: null }),
+);
 
 export function getSliceRegistry(): FeatureRegistry {
-  sliceRegistry ??= createSliceRegistry();
-  return sliceRegistry;
+  registeredState.sliceRegistry ??= createSliceRegistry();
+  return registeredState.sliceRegistry;
 }
 
 /**

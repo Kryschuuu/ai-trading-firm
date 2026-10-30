@@ -75,6 +75,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
 import { resolveRuntimePath } from "../../lib/appPaths";
+import { getOrCreateRegisteredState } from "../../lib/stateRegistry";
 import type { MarketCandle } from "./types";
 import { SUPPORTED_TIMEFRAMES, isSupportedTimeframe, type SupportedTimeframe } from "./timeframes";
 import { DEFAULT_MAX_BARS_PER_SERIES } from "./limits";
@@ -510,11 +511,12 @@ export function serializeEntryLine(entry: HistoricalCandleEntry): string {
   return JSON.stringify({ v: HISTORY_SCHEMA_VERSION, ...entry });
 }
 
-/** Bereits gewarnte Dateipfade (Warnung zur Legacy-Migration genau einmal). */
-const warnedLegacyFiles = new Set<string>();
-
-/** Bereits gewarnte Sperren-/Migrations-Konflikte (einmalige Warnung je Verzeichnis). */
-const warnedReadFallbacks = new Set<string>();
+// Warnungs-Deduplizierung ist Prozesszustand; der Test-Reset leert die Sets
+// in-place, damit vorhandene Referenzen nach dem Reset gültig bleiben.
+const { warnedLegacyFiles, warnedReadFallbacks } = getOrCreateRegisteredState(
+  "src/lib/marketdata/historicalStore.ts",
+  () => ({ warnedLegacyFiles: new Set<string>(), warnedReadFallbacks: new Set<string>() }),
+);
 
 function warnCorruptedLine(file: string, line: string): void {
   console.warn(`[historical-store] kaputte Zeile in ${file} wird übersprungen: ${line.slice(0, 120)}`);

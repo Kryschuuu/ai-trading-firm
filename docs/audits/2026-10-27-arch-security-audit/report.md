@@ -4,6 +4,7 @@
 - **Datum:** 2026-10-27
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` (`v0.17.2`)
 - **Rolle:** Principal Software Architect & Senior Security Engineer
+- **Aktueller Status:** `CLOSED` (v0.17.7); alle 15 Findings sind `FIXED`. Der nachfolgende Bericht bewahrt den historischen Prüfstand; aktuelle Details und Grenzen stehen im Tracking.
 - **Remediation-Prompts:** [`prompts/README.md`](prompts/README.md) · **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
 
 ---

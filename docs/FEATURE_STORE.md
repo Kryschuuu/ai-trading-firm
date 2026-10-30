@@ -1,6 +1,6 @@
 # Point-in-Time Feature Store
 
-**Bestandsdokument** · **Stand:** 2026-09-20 · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/features/` · RMA-P6-01 · **Status zum Stand:** Implementiert (kleiner Slice)
+**Bestandsdokument** · **Stand:** 2026-09-20 · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · **Modul:** `src/features/` · RMA-P6-01 · **Status zum Stand:** Implementiert (kleiner Slice)
 
 Der Feature Store berechnet Scanner-Features **stabil reproduzierbar**, speichert
 sie mit vollständiger Provenienz und beantwortet Point-in-Time-Fragen: *„Welchen

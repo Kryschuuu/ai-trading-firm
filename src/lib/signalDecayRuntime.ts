@@ -10,6 +10,7 @@
  * des Monitors läuft weiter.
  */
 
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import type { Pool } from "pg";
 import { getPool } from "../db";
 import { telemetry } from "./telemetry";
@@ -274,7 +275,9 @@ export function createPgSignalDecayStore(pool: Queryable = getPool()): SignalDec
   };
 }
 
-let cachedConfig: { at: number; config: SignalDecayConfig } | null = null;
+const registeredState = getOrCreateRegisteredState<{ cachedConfig: { at: number; config: SignalDecayConfig } | null }>(
+  "src/lib/signalDecayRuntime.ts", () => ({ cachedConfig: null }),
+);
 
 /** Env-Policy, optional mit numerischen `sdc.*`-Zeilen aus risk_config. Gecacht für 30 s. */
 export async function loadRuntimeSignalDecayConfig(
@@ -282,7 +285,7 @@ export async function loadRuntimeSignalDecayConfig(
   pool: Queryable | null = null,
   nowMs = Date.now(),
 ): Promise<SignalDecayConfig> {
-  if (cachedConfig && nowMs - cachedConfig.at < 30_000 && pool == null) return cachedConfig.config;
+  if (registeredState.cachedConfig && nowMs - registeredState.cachedConfig.at < 30_000 && pool == null) return registeredState.cachedConfig.config;
   let config = loadSignalDecayConfig(env);
   const reader = pool ?? safePool();
   if (reader) {
@@ -296,7 +299,7 @@ export async function loadRuntimeSignalDecayConfig(
       // Tabelle/Spalte fehlt oder DB weg: Env-Policy bleibt (Klassen default-off).
     }
   }
-  if (pool == null) cachedConfig = { at: nowMs, config };
+  if (pool == null) registeredState.cachedConfig = { at: nowMs, config };
   return config;
 }
 
@@ -309,7 +312,7 @@ function safePool(): Queryable | null {
 }
 
 export function resetSignalDecayRuntimeForTests(): void {
-  cachedConfig = null;
+  registeredState.cachedConfig = null;
 }
 
 export async function persistEntrySignal(args: {

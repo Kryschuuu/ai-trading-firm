@@ -15,6 +15,7 @@
  *   - PAPER_APPROVED: erfordert eine Paper-Statistikquelle; ohne registrierte
  *     Quelle gilt 0 Orders -> Check schlägt fehl.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import type { BrokerVenueId } from "@/contracts/broker";
 import type { LiveGateConfig, LiveGateEnv } from "./config";
 import type { LiveGateCheckId } from "./states";
@@ -163,7 +164,9 @@ export const TRANSITION_CHECKS: Record<LiveGateCheckId, TransitionCheck> = {
 
 // ── Port-Registry ────────────────────────────────────────────────────────────
 
-const registeredPorts = new Map<string, BrokerGatePort>();
+const { registeredPorts } = getOrCreateRegisteredState("src/live-gate/checks.ts", () => ({
+  registeredPorts: new Map<string, BrokerGatePort>(),
+}));
 
 /** Registriert einen Gate-Port für ein Venue (Integration/Tests/Deploy). */
 export function registerGatePort(venue: string, port: BrokerGatePort): void {

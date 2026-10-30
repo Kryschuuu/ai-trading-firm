@@ -1,6 +1,6 @@
 # Docs-Code-Sync-Audit (Task 12)
 
-> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-23 · **Code-Version:** v0.17.6 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Task-12-Audit (Stand 2026-09-23)
+> **Status-Header:** **Bestandsdokument** · **Stand:** 2026-09-23 · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md) · Task-12-Audit (Stand 2026-09-23)
 >
 > Systematisches Audit: **jede dokumentierte Behauptung gegen den Code geprüft**.
 > Diskrepanz → Fix (Priorität: Code anpassen, wenn Doku das Zielbild korrekt

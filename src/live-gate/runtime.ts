@@ -10,6 +10,7 @@
  * Der Enforcer liest AUSSCHLIESSLICH diese persistierte Machine (plus Env-Flags,
  * Suite-Stamp und Kill-Failsafe-Datei) — niemals UI-Flags oder Agent-Aussagen.
  */
+import { getOrCreateRegisteredState } from "@/lib/stateRegistry";
 import { LiveGateAudit } from "./audit";
 import { LiveGateStore } from "./store";
 import { liveGateConfig, liveGateDataDir, type LiveGateConfig, type LiveGateEnv } from "./config";
@@ -46,12 +47,12 @@ export class LiveGateRuntime {
   }
 }
 
-const G = globalThis as typeof globalThis & {
-  __liveGateRuntimes?: Map<string, LiveGateRuntime>;
-};
+const registeredState = getOrCreateRegisteredState<{
+  liveGateRuntimes?: Map<string, LiveGateRuntime>;
+}>("src/live-gate/runtime.ts", () => ({}));
 
 function runtimeRegistry(): Map<string, LiveGateRuntime> {
-  return (G.__liveGateRuntimes ??= new Map());
+  return (registeredState.liveGateRuntimes ??= new Map());
 }
 
 /** Runtime je Data-Dir (Singleton; Env wird beim ersten Zugriff eingeefroren). */

@@ -8,7 +8,7 @@ Ein lauffähiges Referenz-Setup für ein Team spezialisierter KI-Agenten (CEO, R
 > es dient Bildungszwecken und privater Nutzung auf eigene Gefahr
 > (Disclaimer: [../README.md](../README.md)).
 
-**Version:** `v0.17.6` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
+**Version:** `v0.17.7` (Beta) (siehe `package.json`, [../VERSION.md](../VERSION.md) + [../CHANGELOG.md](../CHANGELOG.md)).
 
 **Versionierung:** Öffentliches v0.x.x-Schema (SemVer 0.x = Beta) seit
 2026-09-23. Ältere Abschnitte und Audit-Reports nennen teils die interne
@@ -154,6 +154,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | [audits/2026-09-23-verbesserungen-fahrplan/](audits/2026-09-23-verbesserungen-fahrplan/) | Abgleich des Big-Pickle-Audits „Verbesserungen“ (O1–O6, W1–W5, Datenquellen) — Kosten im Regel-Backtest, Workshop-Schritt 5, Trusted-Indikatoren | **CLOSED (v0.2.0):** [Tracking](audits/2026-09-23-verbesserungen-fahrplan/remediation/TRACKING.md), [Befunde](audits/2026-09-23-verbesserungen-fahrplan/findings/README.md), [Prompts](audits/2026-09-23-verbesserungen-fahrplan/prompts/README.md) |
 | [audits/2026-09-29-strategy-template-ausbau/](audits/2026-09-29-strategy-template-ausbau/) | Audit des Strategie-Template-Ausbaus — externes Ausbaudokument gegen Code verifiziert: 21 Findings (5 HIGH) + 37 Umsetzungs-Prompts in 9 Phasen | **OPEN** (Audit v1.2.5 — Vollabgleich vom 2026-10-03 gegen `main` @ `3d13161` plus STX-08-04/08-05: Phasen 0–7/alle 32 Ursprungs-Prompts abgeschlossen; 21 Findings: 19 FIXED, 1 PARTIAL (STX-14), 1 OPEN (STX-08); Phase 8: 08-01…08-05 erledigt — 08-04 schließt STX-12 in `v0.11.0` ([PR #221](https://github.com/Kryschuuu/ai-trading-firm/pull/221)), 08-05 schließt STX-21 in `v0.11.1`; G6 Pilotlauf offen — [Bericht](audits/2026-09-29-strategy-template-ausbau/report.md), [Abgleich](audits/2026-09-29-strategy-template-ausbau/remediation/RECONCILE-2026-10-03.md), [ROADMAP](audits/2026-09-29-strategy-template-ausbau/ROADMAP.md), [Versionierung](audits/2026-09-29-strategy-template-ausbau/VERSIONING.md), [Prompts](audits/2026-09-29-strategy-template-ausbau/prompts/README.md), [Tracking](audits/2026-09-29-strategy-template-ausbau/remediation/TRACKING.md), [Bench-Baseline](audits/2026-09-29-strategy-template-ausbau/remediation/BENCH-BASELINE.md), [ADR-008…010](roadmap/DECISIONS.md). **Bleibt Beta** — [BETA_STATUS.md](BETA_STATUS.md) |
 | [audits/2026-10-06-docs-code-audit/](audits/2026-10-06-docs-code-audit/) | **Docs↔Code-Audit v0.17.2** — 9 Befunde (DC-01…DC-09) aus dem Abgleich der Fachdokumente gegen Code/Commits, mit kopierfertigen Folge-Prompts | **OPEN** — DC-01 (Proposal-Freigabe ohne Autorisierung) und DC-02 (`REQUIRE_HUMAN_APPROVAL`-Semantik) am 2026-10-06 **FIXED**; DC-03 (Doku-Kleinfindings), DC-04 (Versions-/Status-Header), DC-05 (Env-Flags), DC-06 (Symbol-/Pfad-Drift), DC-07 (Schema-Inventar-Generator, 67/67 Tabellen) und DC-08 (L1–L4 Docs-Validator + L5 Test-/CI-Anbindung) **FIXED** (DC-08 am 2026-10-10); **DC-09** (generierte Inventare, Header-Bump, Konvention) **FIXED** (2026-10-10) — damit alle neun Befunde erledigt; [Bericht](DOCS_CODE_AUDIT_2026-10-06.md), [Prompts](audits/2026-10-06-docs-code-audit/prompts/README.md), [Tracking](audits/2026-10-06-docs-code-audit/remediation/TRACKING.md). **Bleibt Beta** — [BETA_STATUS.md](BETA_STATUS.md) |
+| [audits/2026-10-27-arch-security-audit/](audits/2026-10-27-arch-security-audit/) | Architektur- & Security-Audit (Prüfbasis v0.17.2) | **CLOSED (v0.17.7):** alle 15 Findings FIXED; [Tracking](audits/2026-10-27-arch-security-audit/remediation/TRACKING.md) |
 | [audits/TEMPLATE/](audits/TEMPLATE/) | Vorlage für neuen Audit-Zyklus | Kopieren: `cp -r TEMPLATE YYYY-MM-DD-<quelle>-<name>` |
 | **[peer-reviews/](peer-reviews/)** | Peer-Review-Patches — Patch-Vorschläge gesammelt & verknüpft | [README](peer-reviews/README.md) |
 | [peer-reviews/2026-08-26-live-trading-readiness/](peer-reviews/2026-08-26-live-trading-readiness/) | Live-/Paper-Trading-Readiness — Bottlenecks, Makro/Mikro, DB-Locks | [review](peer-reviews/2026-08-26-live-trading-readiness/review.md) + [patches](peer-reviews/2026-08-26-live-trading-readiness/patches/) |
@@ -308,7 +309,7 @@ Dann `http://localhost:3369` öffnen → **„Seed / Reset“** klicken → **�
     │   ├── 2026-09-23-verbesserungen-fahrplan/  ← Verbesserungen, CLOSED v0.2.0
     │   ├── 2026-09-29-strategy-template-ausbau/  ← Strategie-Template-Ausbau (21 Findings, 37 Prompts, OPEN v1.2.5)
     │   ├── 2026-10-06-docs-code-audit/  ← Docs↔Code-Audit v0.17.2 (DC-01…DC-09, alle FIXED)
-    │   └── 2026-10-27-arch-security-audit/  ← Architektur- & Security-Audit v0.17.2 (ASA-01…ASA-15, OPEN, 10 Prompts)
+    │   └── 2026-10-27-arch-security-audit/  ← Architektur- & Security-Audit v0.17.2 (ASA-01…ASA-15 FIXED, CLOSED, 10 Prompts)
     ├── peer-reviews/         ← Peer-Review-Patches gesammelt
     │   ├── README.md
     │   ├── 2026-08-26-live-trading-readiness/

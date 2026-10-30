@@ -3,9 +3,24 @@
 - **ID:** ASA-13
 - **Severity:** MEDIUM
 - **Bereich:** Architektur & Wartbarkeit
-- **Status:** OPEN
+- **Status:** FIXED (v0.17.7, 2026-10-30)
 - **Datei(en):** `src/lib/stateRegistry.ts:1-95`, `src/components/FirmDashboard.tsx:1-1934` (insb. Zeilen `386-395`)
 - **Session-Prompt:** [`../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md`](../prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md)
+
+## Umsetzung (2026-10-30)
+
+Benannte, typisierte Registrierungen umfassen fachliche Singletons, Caches und
+modul-lokale Zustände; Maps/Sets/Arrays werden beim Test-Reset in-place geleert.
+Der etablierte PostgreSQL-Pool/DB-Handle verbleibt als langlebige Infrastruktur
+in einer minimal begründeten AST-Allowlist und wird nicht geschlossen. Reset ist
+für ruhende Tests gedacht, nicht als Abbruch laufender Async-Operationen.
+Dashboard-Abschnitte und Polling-Hook sind unter `src/components/firm/`
+ausgelagert; das sichtbarkeitsabhängige Polling hängt nur an `load` und dem
+stabilen Active-Bool. Regression: `tests/asa13_14_15.architectureOpsAlerts.test.ts`
+und `tests/stateRegistry*.test.ts`.
+
+Die folgende Beschreibung und der technische Nachweis dokumentieren den
+**historischen Prüfstand 2026-10-27**, nicht den aktuellen Code.
 
 ## Beschreibung
 
@@ -27,5 +42,5 @@
 
 ## Akzeptanzkriterien / Verifikation
 
-- [ ] Statischer Test stellt sicher, dass keine neuen unregistrierten `globalThis.__*`-Singletons außerhalb von `stateRegistry.ts` (bzw. expliziter Infrastruktur-Allowlist) entstehen.
-- [ ] Der Polling-Timer in `FirmDashboard` wird bei unverändertem `hasActiveMission`-Bool nicht mehr bei jedem Response-Objekt neu registriert und pausiert bei verstecktem Tab.
+- [x] Statischer Test stellt sicher, dass keine neuen unregistrierten `globalThis.__*`-Singletons außerhalb von `stateRegistry.ts` (bzw. expliziter Infrastruktur-Allowlist) entstehen.
+- [x] Der Polling-Timer in `FirmDashboard` wird bei unverändertem `hasActiveMission`-Bool nicht mehr bei jedem Response-Objekt neu registriert und pausiert bei verstecktem Tab.

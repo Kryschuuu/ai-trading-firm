@@ -6,7 +6,7 @@
 - **Quelle / Reviewer:** Principal Software Architect & Senior Security Engineer (Arena-Agent-Vollprüfung)
 - **Prüfbasis:** `main` @ `123a876c8d2bb74d8741907b34523fb789e16bcf` · Code-Version **v0.17.2 (Beta)**
 - **Umfang:** Vollständige Codebasis (`src/auth/*`, `src/lib/*`, `src/app/api/**`, `src/brokers/*`, `src/live-gate/*`, `src/db/*`, `src/execution/*`, `src/copy/*`, `src/portfolio/*`, `src/ops/*`, `src/components/*`, `deploy/*`, `scripts/*`)
-- **Status:** **IN ARBEIT** — 15 Befunde (`ASA-01` … `ASA-15`), davon **`ASA-01`–`ASA-12` FIXED**, 3 `OPEN`; gebündelt in 10 kopierfertigen Remediation-Prompts
+- **Status:** **CLOSED** — alle 15 Befunde (`ASA-01` … `ASA-15`) `FIXED` (Stand v0.17.7, 2026-10-30); 10 Remediation-Prompts bleiben als Historie erhalten
 - **Vollbericht:** [`report.md`](report.md)
 - **Copy-&-Paste-Prompts:** [`prompts/README.md`](prompts/README.md)
 - **Tracking:** [`remediation/TRACKING.md`](remediation/TRACKING.md)
@@ -17,9 +17,16 @@
 |----------|--------|-------|-----------|--------|
 | CRITICAL | 3 | 0 | 0 | 3 |
 | HIGH | 6 | 0 | 0 | 6 |
-| MEDIUM | 4 | 1 | 0 | 3 |
-| LOW | 2 | 2 | 0 | 0 |
-| **Summe** | **15** | **3** | **0** | **12** |
+| MEDIUM | 4 | 0 | 0 | 4 |
+| LOW | 2 | 0 | 0 | 2 |
+| **Summe** | **15** | **0** | **0** | **15** |
+
+## Abschluss ASA-13–15 (v0.17.7, 2026-10-30)
+
+Registry-Reset, stabiles sichtbarkeitsabhängiges Dashboard-Polling, gehärtete
+systemd-Units und DNS-gepinnte HTTPS-Alerts sind implementiert. Die
+Originalbefunde bleiben als historische Momentaufnahme erhalten; Details,
+Ausnahmen und Regressionen stehen im [Tracking](remediation/TRACKING.md).
 
 ## Executive Summary
 
@@ -55,9 +62,9 @@ Die kritischsten Risiken entstehen an den **Prozess-, Autorisierungs- und Venue-
 | [ASA-10](findings/ASA-10-llm-fallback-blind-long-and-drawdown-alert-units.md) | MEDIUM | Deterministischer LLM-Fallback eröffnet bei Modell-Ausfall blind `LONG`-Trades; Drawdown-Alerts vergleichen `0..1` mit `5/10/20` | Code-Qualität / Handelslogik | `FIXED` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
 | [ASA-11](findings/ASA-11-core-db-indexes-unbounded-scans-pool-timeout.md) | MEDIUM | Fehlende Sekundärindizes auf hochfrequenten Kerntabellen, unbegrenzte Full-Table-Loads und fehlendes `statement_timeout` | Performance / Datenbank | `FIXED` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
 | [ASA-12](findings/ASA-12-unbounded-memory-maps-dead-session-prune.md) | MEDIUM | Unbegrenzte In-Memory-Maps, nie aufgerufenes `pruneRevokedSessions()` und nicht persistierte Session-Revocation | Performance / Zuverlässigkeit | `FIXED` | [P2-09](prompts/PROMPT-ASA-P2-09-fallback-hold-equity-alerts-db-indexes-memory.md) |
-| [ASA-13](findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 verstreute `globalThis`-Singletons umgehen `stateRegistry.ts`; `FirmDashboard.tsx` (1.934 Zeilen) triggert Polling-Resets | Architektur & Wartbarkeit | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
-| [ASA-14](findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` fehlt jegliches `systemd`-Sandboxing und weicht bei Pfaden/User von der Haupt-Unit ab | Sicherheit / Betrieb | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
-| [ASA-15](findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` und unvalidierte Ziel-URLs (`http://`, Loopback, Link-Local) in `WebhookAlertSink` | Sicherheit / Performance | `OPEN` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
+| [ASA-13](findings/ASA-13-state-registry-drift-dashboard-god-component.md) | MEDIUM | 34 verstreute `globalThis`-Singletons umgehen `stateRegistry.ts`; `FirmDashboard.tsx` (1.934 Zeilen) triggert Polling-Resets | Architektur & Wartbarkeit | `FIXED` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
+| [ASA-14](findings/ASA-14-systemd-micro-executor-hardening.md) | LOW | `deploy/micro-executor.service` fehlt jegliches `systemd`-Sandboxing und weicht bei Pfaden/User von der Haupt-Unit ab | Sicherheit / Betrieb | `FIXED` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
+| [ASA-15](findings/ASA-15-alert-sinks-sync-io-webhook-ssrf.md) | LOW | Synchrone Datei-I/O in `FileAlertSink` und unvalidierte Ziel-URLs (`http://`, Loopback, Link-Local) in `WebhookAlertSink` | Sicherheit / Performance | `FIXED` | [P2-10](prompts/PROMPT-ASA-P2-10-state-registry-dashboard-split-systemd-alerts.md) |
 
 ## Abgeschlossene Remediation ASA-06 (2026-10-28)
 
@@ -73,7 +80,7 @@ Die 15 Befunde sind in **10 konfliktfreie, direkt kopierbare Coding-Prompts** un
 
 - **Phase P0 (Sofort / Live- & Paper-Blocker):** `PROMPT-ASA-P0-01` (`ASA-01`, FIXED), `PROMPT-ASA-P0-02` (`ASA-02`, FIXED), `PROMPT-ASA-P0-03` (`ASA-03`, FIXED)
 - **Phase P1 (Vor jedem Mehrbenutzer-/Netzwerkbetrieb):** `PROMPT-ASA-P1-04` (`ASA-04`, FIXED), `PROMPT-ASA-P1-05` (`ASA-05` + `ASA-07`, FIXED), `PROMPT-ASA-P1-06` (`ASA-06`, FIXED), `PROMPT-ASA-P1-07` (`ASA-08`, FIXED), `PROMPT-ASA-P1-08` (`ASA-09`, FIXED)
-- **Phase P2 (Stabilität, Skalierung & Wartbarkeit):** `PROMPT-ASA-P2-09` (`ASA-10` + `ASA-11` + `ASA-12`), `PROMPT-ASA-P2-10` (`ASA-13` + `ASA-14` + `ASA-15`)
+- **Phase P2 (Stabilität, Skalierung & Wartbarkeit):** `PROMPT-ASA-P2-09` (`ASA-10` + `ASA-11` + `ASA-12`, FIXED), `PROMPT-ASA-P2-10` (`ASA-13` + `ASA-14` + `ASA-15`, FIXED)
 
 
 ## Abgeschlossene Remediation ASA-08 (v0.17.4, 2026-10-28)

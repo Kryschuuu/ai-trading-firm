@@ -91,7 +91,7 @@ import { resolveRuntimePath } from "./appPaths";
 import { auditWrite } from "./auditSink";
 import { structuredLog } from "./logger";
 import { applyDrawdownScaling, getBaseLimits, getLimits } from "./riskGuard";
-import { state } from "./stateRegistry";
+import { state, getOrCreateRegisteredState } from "./stateRegistry";
 // Startkapital zentral (v0.13.0): eine Definition statt dreier Kopien.
 import { readStartingEquity } from "./startingEquity";
 import { telemetry } from "./telemetry";
@@ -430,10 +430,10 @@ type DdsState = {
   lastReconciliation: DrawdownReconciliationGate | null;
 };
 
-const G = globalThis as typeof globalThis & { __drawdownScaling?: DdsState };
+const registeredState = getOrCreateRegisteredState<{ drawdownScaling?: DdsState }>("src/lib/drawdownScaling.ts", () => ({}));
 
 function ramState(): DdsState {
-  G.__drawdownScaling ??= {
+  registeredState.drawdownScaling ??= {
     config: { ...DEFAULT_DRAWDOWN_SCALING_CONFIG },
     configLoadedAt: 0,
     policyState: null,
@@ -444,7 +444,7 @@ function ramState(): DdsState {
     updating: null,
     lastReconciliation: null,
   };
-  return G.__drawdownScaling;
+  return registeredState.drawdownScaling;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -950,5 +950,5 @@ function buildStatus(s: DdsState): DrawdownScalingStatus {
 
 /** Leert den kompletten Laufzeit-Zustand (nur für Tests). */
 export function __resetDrawdownScalingForTests(): void {
-  delete G.__drawdownScaling;
+  delete registeredState.drawdownScaling;
 }
