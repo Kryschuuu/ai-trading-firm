@@ -229,8 +229,8 @@ Journal (`journalctl --user -u <unit> -f`).
 | --- | --- | --- | --- |
 | `ai-trading-firm.service` | Dienst | dauerhaft | Next.js-App inkl. Scheduler (Tick, Analysten, Makro, Recon) |
 | `ai-trading-firm-micro.service` | Dienst | dauerhaft | LLM-freier Micro-Executor: WebSocket-Ticks → `trade_rules` (ACTIVE) → Paper-Broker |
-| `ai-trading-firm-market-sync.timer` | Timer | stündlich | `npm run market:sync -- --venue=BITUNIX` (öffentliche Endpunkte, keine Keys) |
-| `ai-trading-firm-pipeline.timer` | Timer | stündlich | `scripts/auto-pipeline.sh`: LLM-Pipeline für je 3 ACTIVE-Missionen, rotierend |
+| `ai-trading-firm-market-sync.timer` | Timer | stündlich | `npm run market:sync -- --venue=BITUNIX --max-instruments=800` (öffentliche Endpunkte, keine Keys) |
+| `ai-trading-firm-pipeline.timer` | Timer | alle 4 h | `scripts/auto-pipeline.sh`: LLM-Pipeline für je `MAX_MISSIONS` ACTIVE-Missionen, rotierend (`Nice=10`, idle-I/O) |
 
 ### Missions-Pipeline (`scripts/auto-pipeline.sh`)
 

@@ -28,6 +28,14 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Fixed
 
+- **Cluster-Guardrail war blind:** Der Instrument-Resolver löste Basis-Ticker
+  (`SUI`) nicht auf, weil die Universums-Registry Krypto venue-qualifiziert
+  führt (`BITUNIX:SUIUSDT`). Dadurch lieferte die Korrelationsquelle für jedes
+  Krypto-Symbol `null` und der Guardrail meldete dauerhaft
+  `correlation-stale` (19 Einträge in `audit_log`). Der Resolver probiert jetzt
+  `BITUNIX:`/`BINANCE:`-IDs, Quote-Varianten (`USDT`/`USD`/`USDC`) und als
+  letzte Instanz die vorhandene HistoricalStore-Serie. Ergebnis: 90 gemeinsame
+  1h-Renditen, echte Korrelationen (0,44–0,85) statt „keine Aussage“.
 - **Micro-Executor handelte nie:** Vier Ursachen behoben, die zusammen jeden
   Regel-Match verhinderten — (1) Buch-Ticks des Binance-`@depth5`-Streams
   (kein `e`/`s`, nur `bids`/`asks`) wurden verworfen, daher blieb `spreadPct`
@@ -54,6 +62,15 @@ erlaubt, solange sie hier dokumentiert sind).
   `Nice=10`/`IOSchedulingClass=idle`, damit ein LLM-Lauf den Handel nicht
   verdrängt; `LLM_TIMEOUT_MS=60000` begrenzt fehlschlagende Modellaufrufe.
   `RISK_TIME_STOP_HOURS=48` gibt hängenden Positionen ihren Slot zurück.
+- Der stündliche Marktdaten-Sync deckt mit `--max-instruments=800` alle
+  BITUNIX-Instrumente ab (vorher Top-250 nach 24h-Volumen). Damit liegen auch
+  für weniger liquide Symbole frische 1h-Kerzen als Basis von Korrelation,
+  Regime und Scanner vor.
+- `ROUTING_DISABLED_PROVIDERS=ollama`: Auf dieser CPU-Box liefert das lokale
+  3b-Modell nicht einmal 8 Tokens in 90 s und blockiert danach einen Kern.
+  Der Provider ist gesperrt, bis ein tragbares Modell bereitsteht; der
+  Makro-Zyklus nutzt in dieser Zeit den deterministischen Fallback. Zum
+  Reaktivieren genügt das Entfernen des Eintrags (oder der UI-Schalter).
 
 ### Tests
 

@@ -195,9 +195,12 @@ export function createHistoricalStoreSource(opts: {
   resolveInstrumentId?: (symbol: string) => string | null;
 } = {}): CorrelationSource {
   const timeframe = opts.timeframe ?? CLUSTER_TIMEFRAME;
-  const resolveId = opts.resolveInstrumentId ?? defaultResolveInstrumentId;
   let store: HistoricalStore | null = null;
   const getStore = (): HistoricalStore => (store ??= opts.store ?? new HistoricalStore());
+  // Ohne Injektion darf der Resolver die vorhandene Serie als letzte Instanz
+  // prüfen (Registry-Lücken bei Krypto-Tickern, siehe unten).
+  const resolveId =
+    opts.resolveInstrumentId ?? ((symbol: string) => defaultResolveInstrumentId(symbol, getStore(), timeframe));
 
   return async (symbols, windowCandles): Promise<ClusterCorrelationData | null> => {
     if (symbols.length < 2) return null;
@@ -253,14 +256,63 @@ export function createHistoricalStoreSource(opts: {
  * `EUR/USD`) → Instrument-ID des Universums (z. B. `PAPER:BTC`), unter der
  * die HistoricalStore-Kerzen liegen. Registry nicht erreichbar → `null`
  * (fail-closed: Guardrail wertet das als STALE, nie als „unkorrelliert“).
+ *
+ * Venue-Fallback: Der Mikro-Executor arbeitet mit Basis-Tickern (`SUI`), die
+ * Registry kennt Instrumente aber venue-qualifiziert (`BITUNIX:SUIUSDT`).
+ * Ohne den Fallback liefert die Auflösung für JEDES Krypto-Symbol `null` —
+ * der Cluster-Guardrail meldete dann dauerhaft `correlation-stale` (belegt in
+ * `audit_log`), obwohl die 1h-Historie vorhanden und frisch ist.
  */
-function defaultResolveInstrumentId(symbol: string): string | null {
+/**
+ * Kandidaten-IDs für ein Positions-Symbol, in Prioritätsreihenfolge.
+ *
+ * Die Registry des Universums führt Krypto venue-qualifiziert
+ * (`BITUNIX:SUIUSDT`), der Mikro-Executor arbeitet mit Basis-Tickern (`SUI`).
+ * Die Reihenfolge bevorzugt die Venue, unter der die frische 1h-Historie
+ * liegt (BITUNIX vor BINANCE vor PAPER).
+ *
+ * Reine Funktion — direkt getestet in `tests/riskGuard.cluster.test.ts`.
+ */
+export function instrumentIdCandidates(symbol: string): string[] {
+  const cleaned = String(symbol ?? "").trim().toUpperCase();
+  const bare = (cleaned.includes(":") ? cleaned.slice(cleaned.lastIndexOf(":") + 1) : cleaned)
+    .replace(/[^A-Z0-9]/g, "");
+  if (!bare) return [];
+  const pairs = /(USDT|USDC|USD)$/.test(bare) ? [bare] : [`${bare}USDT`, `${bare}USD`, `${bare}USDC`];
+  return pairs.flatMap((pair) => [`BITUNIX:${pair}`, `BINANCE:${pair}`, pair, `PAPER:${pair}`]);
+}
+
+function defaultResolveInstrumentId(
+  symbol: string,
+  store?: Pick<HistoricalStore, "query">,
+  timeframe: SupportedTimeframe = CLUSTER_TIMEFRAME,
+): string | null {
   try {
     const manager = getProductionMarketDataManager();
     const bySymbol = manager.resolveInstrument(symbol);
     if (bySymbol) return bySymbol.id;
     const byId = manager.resolveInstrument(`PAPER:${symbol}`);
-    return byId?.id ?? null;
+    if (byId) return byId.id;
+
+    const candidates = instrumentIdCandidates(symbol);
+    for (const candidate of candidates) {
+      const hit = manager.resolveInstrument(candidate);
+      if (hit) return hit.id;
+    }
+
+    // Letzte Instanz: die Serie existiert im HistoricalStore, das Instrument
+    // fehlt aber in der Registry (z. B. `BITUNIX:MANAUSDT`). Für die
+    // Korrelation zählt allein, ob unter der ID Kerzen liegen.
+    if (store) {
+      for (const id of candidates) {
+        try {
+          if (store.query({ instrumentId: id, timeframe, limit: 1 }).length > 0) return id;
+        } catch {
+          /* Serie nicht lesbar → nächster Kandidat */
+        }
+      }
+    }
+    return null;
   } catch {
     return null;
   }
