@@ -1148,6 +1148,7 @@ Details und sichere Endpoint-Auswahl: [`docs/ALPACA.md`](docs/ALPACA.md).
 | `MICRO_FEED` | `binance` | Preis-Feed des Micro-Executors: `binance` (WebSocket) oder `sim` (deterministischer Simulator; Feed-Klassen `simulator`/`sequence` in `src/lib/microExecutor.ts`) |
 | `MICRO_SEED_CANDLES` | `true` | Lädt die REST-Historie beim Start des Micro-Executors, damit die Indikatoren warm sind; `false` schaltet das Seeding ab (`scripts/micro-executor.ts`) |
 | `MICRO_SIM_INTERVAL_MS` | `250` | Tick-Rate des Simulator-Feeds in ms (Bounds [50, 5000]) — nur wirksam mit `MICRO_FEED=sim` |
+| `MICRO_BLOCKED_BACKOFF_MS` | `60000` | Mindestabstand zwischen zwei Fehlversuchen derselben Regel (Bounds [0, 3600000]; `0` = aus). Ein `BLOCKED`-Versuch verbraucht weder Cooldown noch Tageslimit — ohne diese Pause gewinnt die match-stärkste Regel jeden freien Slot und flutet das Journal (`src/lib/microExecutor.ts`) |
 | `START_MICRO` | aus (`1` = ein) | Startet den Trade-Rules-Listener (Mikro-Executor) im Web-Prozess; in `NODE_ENV=production` immer aktiv, sonst eigener Prozess via `npm run micro` (`src/lib/ruleService.ts`) |
 | `ALPACA_TIMEOUT_MS` | `8000` | HTTP-Timeout des Alpaca-Adapters in ms (Bounds [200, 30000], Clamp via `envInt`; `src/brokers/alpaca/config.ts`) |
 | `WATCHDOG_HEALTH_URL` | `http://127.0.0.1:${PORT:-3369}/api/health` | Health-URL, die der Watchdog prüft (`scripts/watchdog.ts`; `PORT` Default 3369) |

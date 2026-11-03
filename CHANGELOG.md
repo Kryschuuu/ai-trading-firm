@@ -28,6 +28,14 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Fixed
 
+- **Slot-Vergabe war nicht fair:** Ein `BLOCKED`-Versuch verbrauchte weder
+  Cooldown noch Tageslimit, also matchte eine dauerhaft abgelehnte Regel bei
+  jedem Tick erneut. In 25 Minuten entfielen 6767 von 10979 Treffern auf eine
+  einzige Regel (`ZEC Trend Long`) — sobald ein Slot frei wurde, gewann fast
+  immer dieselbe Gelegenheit, und das Journal lief voll. Neu:
+  `MICRO_BLOCKED_BACKOFF_MS` (Default 60 s) pausiert eine Regel nach einem
+  Fehlversuch. Fehlversuche zählen weiterhin weder als Ausführung noch gegen
+  das Tageslimit.
 - **Cluster-Guardrail war blind:** Der Instrument-Resolver löste Basis-Ticker
   (`SUI`) nicht auf, weil die Universums-Registry Krypto venue-qualifiziert
   führt (`BITUNIX:SUIUSDT`). Dadurch lieferte die Korrelationsquelle für jedes

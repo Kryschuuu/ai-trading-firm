@@ -424,6 +424,22 @@ export class RuleCache {
   private dirty = true;
   private dayKey = "";
   private ramCounts = new Map<string, number>();
+  /**
+   * Zeitpunkt des letzten BLOCKED-Versuchs je Regel (`rowId`).
+   *
+   * Warum das nötig ist: Cooldown und Tageslimit greifen erst nach einer
+   * *ausgeführten* Regel. Eine Regel, die dauerhaft von einem Guardrail
+   * abgelehnt wird (z. B. `concurrency:max-8-positions`), matcht deshalb bei
+   * jedem Tick erneut. In der Praxis dominierte eine einzige Regel mit
+   * 6767 von 10979 Treffern in 25 Minuten die Warteschlange: sobald ein Slot
+   * frei wurde, gewann fast immer dieselbe Regel — unabhängig davon, ob sie
+   * die beste Gelegenheit war. Zusätzlich erzeugte jeder Fehlversuch eine
+   * Logzeile. Ein Mindestabstand zwischen Fehlversuchen verteilt die
+   * Gelegenheiten gleichmäßig über alle Regeln und entlastet das Journal.
+   */
+  private blockedAt = new Map<string, number>();
+  /** Mindestabstand zwischen zwei Fehlversuchen derselben Regel (ms). */
+  blockedBackoffMs = 60_000;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private invalidationVersion = 0;
@@ -595,6 +611,11 @@ export class RuleCache {
     this.dayKey = day;
     // Executions cannot overlap the read: the DB now contains all committed local fills.
     this.ramCounts.clear();
+    // Fehlversuchs-Pausen verfallen lassen (gelöschte Regeln leaken sonst).
+    const backoffHorizon = Math.max(this.blockedBackoffMs, 60_000) * 10;
+    for (const [id, at] of this.blockedAt) {
+      if (this.loadedAt - at > backoffHorizon) this.blockedAt.delete(id);
+    }
   }
 
   /** Kompilierte Regeln eines Symbols (ohne Auswertung). */
@@ -661,6 +682,8 @@ export class RuleCache {
       const firedToday = rule.executionsToday + (this.ramCounts.get(rule.rowId) ?? 0);
       if (firedToday >= rule.spec.window.maxExecutionsPerDay) continue;
       if (rule.firedAt > 0 && now - rule.firedAt < rule.cooldownMs) continue;
+      const blockedAt = this.blockedAt.get(rule.rowId) ?? 0;
+      if (blockedAt > 0 && now - blockedAt < this.blockedBackoffMs) continue;
       if (!isWindowOpen(rule.spec, now)) continue;
       if (rule.compiled.evaluate(snap)) out.push(rule);
     }
@@ -682,6 +705,15 @@ export class RuleCache {
     // RAM-Zähler separat vom DB-Stand (kein Doppelzählen): firedToday =
     // executionsToday (DB, beim Load) + ramCounts (seit Load, reset pro Tag).
     this.ramCounts.set(ruleId, (this.ramCounts.get(ruleId) ?? 0) + 1);
+  }
+
+  /**
+   * Merkt einen abgelehnten Ausführungsversuch. Die Regel pausiert danach
+   * `blockedBackoffMs`, damit nicht eine einzige Dauer-Match-Regel jeden
+   * freien Slot gewinnt (Fairness) und das Journal nicht zugemüllt wird.
+   */
+  noteBlocked(ruleId: string, now = Date.now()): void {
+    this.blockedAt.set(ruleId, now);
   }
 
   executionsFor(rule: CachedRule): number {
@@ -1382,6 +1414,12 @@ export type MicroExecutorOptions = {
    * (`getCandles`) kennt `5d` nicht.
    */
   executionInterval?: SupportedTimeframe;
+  /**
+   * Mindestabstand (ms) zwischen zwei Fehlversuchen derselben Regel.
+   * Verhindert, dass eine dauerhaft geblockte Regel jeden freien Slot gewinnt
+   * und das Journal flutet. Bounds [0, 3600000]; `0` schaltet die Pause ab.
+   */
+  blockedBackoffMs?: number;
 };
 
 export type MicroStatus = {
@@ -1476,6 +1514,10 @@ export class MicroExecutor {
       opts?.adapter ?? createPaperRuleAdapter();
     this.options = opts?.options ?? {};
     this.executionInterval = this.options.executionInterval ?? MICRO_EXECUTION_INTERVAL_DEFAULT;
+    if (this.options.blockedBackoffMs !== undefined) {
+      const raw = Number(this.options.blockedBackoffMs);
+      this.cache.blockedBackoffMs = Number.isFinite(raw) ? Math.min(3_600_000, Math.max(0, Math.round(raw))) : 60_000;
+    }
     if (!isSupportedTimeframe(this.executionInterval)) {
       // Ein unbekanntes Intervall würde den Guard unbemerkt aushebeln — lieber beim Start scheitern.
       throw new RangeError(
@@ -1821,7 +1863,10 @@ export class MicroExecutor {
         })()
           .then((outcome) => {
             if (outcome.status === "TRIGGERED") { this.cache.noteFired(rule.rowId); this.execCount++; }
-            else if (outcome.status === "BLOCKED") this.blockedCount++;
+            else if (outcome.status === "BLOCKED") {
+              this.blockedCount++;
+              this.cache.noteBlocked(rule.rowId);
+            }
             else this.errorCount++;
             if (outcome.status !== "TRIGGERED") {
               this.lastError = outcome.reason ?? null;

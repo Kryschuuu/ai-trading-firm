@@ -45,9 +45,13 @@ async function main(): Promise<void> {
   const feedName = (process.env.MICRO_FEED || "binance").toLowerCase();
   const refreshMs = envInt("MICRO_RULE_REFRESH_MS", 30_000, 5_000, 600_000);
   const healthPort = envInt("MICRO_HEALTH_PORT", 3380, 1024, 65535);
+  // Fairness-Drossel: eine dauerhaft geblockte Regel pausiert nach jedem
+  // Fehlversuch. Ohne sie gewann die match-stärkste Regel jeden freien Slot
+  // und flutete das Journal.
+  const blockedBackoffMs = envInt("MICRO_BLOCKED_BACKOFF_MS", 60_000, 0, 3_600_000);
 
   console.log(
-    `[micro] Start — Symbole=${symbols.join(",")} Feed=${feedName} Rule-Refresh=${refreshMs / 1000}s`
+    `[micro] Start — Symbole=${symbols.join(",")} Feed=${feedName} Rule-Refresh=${refreshMs / 1000}s Fehlversuchs-Pause=${blockedBackoffMs / 1000}s`
   );
 
   const cache = new RuleCache(refreshMs);
@@ -65,7 +69,11 @@ async function main(): Promise<void> {
       // wiederhergestellten Zustand.
       ensureHydrated: () => ensurePaperBrokerHydrated(ledger),
     }),
-    options: { refreshMs, seedCandles: process.env.MICRO_SEED_CANDLES !== "false" },
+    options: {
+      refreshMs,
+      seedCandles: process.env.MICRO_SEED_CANDLES !== "false",
+      blockedBackoffMs,
+    },
   });
   // Starte die Hydration bereits beim Start (nicht erst beim ersten Match),
   // damit der erste Tick bereits auf aktuellen Werten rechnet. Lehnt nie ab.

@@ -191,6 +191,37 @@ test("RuleCache.match: findet passende Regel, respektiert Cooldown und Tageslimi
   assert.equal(cache.match({ ...matchingSnap }, Date.now() + 31 * 60_000).length, 0);
 });
 
+test("RuleCache: Fehlversuchs-Pause verteilt Gelegenheiten (keine Dauer-Match-Dominanz)", () => {
+  // Regression: ZEC Trend Long matchte 6767 von 10979 Treffern in 25 min, weil
+  // ein BLOCKED-Versuch Cooldown und Tageslimit nicht verbraucht. Sobald ein
+  // Slot frei wurde, gewann fast immer dieselbe Regel.
+  const cache = new RuleCache();
+  const rule = cachedRule(makeSpec(), "rule-blocked");
+  cache._seedForTest([rule]);
+  const t0 = 1_700_000_000_000;
+
+  assert.equal(cache.match({ ...matchingSnap }, t0).length, 1, "vor dem Fehlversuch matcht sie");
+
+  cache.noteBlocked(rule.rowId, t0);
+  assert.equal(cache.match({ ...matchingSnap }, t0 + 1_000).length, 0, "innerhalb der Pause gesperrt");
+  assert.equal(
+    cache.match({ ...matchingSnap }, t0 + cache.blockedBackoffMs + 1).length,
+    1,
+    "nach der Pause wieder matchbar",
+  );
+
+  // Die Pause ist KEIN Cooldown: sie zählt weder Tageslimit noch Feuern.
+  assert.equal(cache.executionsFor(rule), 0, "Fehlversuch ist keine Ausführung");
+
+  // `0` schaltet die Drossel ab (Opt-out für Backtests/Simulation).
+  const off = new RuleCache();
+  off.blockedBackoffMs = 0;
+  const r2 = cachedRule(makeSpec(), "rule-nobackoff");
+  off._seedForTest([r2]);
+  off.noteBlocked(r2.rowId, t0);
+  assert.equal(off.match({ ...matchingSnap }, t0 + 1).length, 1);
+});
+
 test("RuleCache.match: Mission im KILLED-Zustand blockt; Fenster validUntil blockt", () => {
   const killed = { ...makeSpec(), missionId: "mission-1" };
   const cache = new RuleCache();
