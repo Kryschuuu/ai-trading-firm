@@ -378,6 +378,16 @@ test("Instrument-Resolver: Basis-Ticker werden venue-qualifiziert aufgelöst", (
   // Aktien/FX bleiben unverändert (Quote-Suffix wird nur angehängt, wenn keins da ist).
   assert.ok(instrumentIdCandidates("SPY").includes("BITUNIX:SPYUSDT"));
 
+  // 1:1000-Kontrakte: PEPE/SHIB/BONK existieren nur als `1000<BASE>USDT`.
+  for (const symbol of ["PEPE", "SHIB", "BONK"]) {
+    assert.ok(
+      instrumentIdCandidates(symbol).includes(`BITUNIX:1000${symbol}USDT`),
+      `${symbol} braucht den 1000er-Alias`,
+    );
+  }
+  // Bereits 1000er-Schreibweise erzeugt kein `10001000…`.
+  assert.ok(!instrumentIdCandidates("1000PEPE").some((id) => id.includes("10001000")));
+
   // Leere/kaputte Eingaben liefern keine Kandidaten (fail-closed).
   assert.deepEqual(instrumentIdCandidates(""), []);
   assert.deepEqual(instrumentIdCandidates("  :  "), []);

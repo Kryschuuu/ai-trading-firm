@@ -279,7 +279,18 @@ export function instrumentIdCandidates(symbol: string): string[] {
     .replace(/[^A-Z0-9]/g, "");
   if (!bare) return [];
   const pairs = /(USDT|USDC|USD)$/.test(bare) ? [bare] : [`${bare}USDT`, `${bare}USD`, `${bare}USDC`];
-  return pairs.flatMap((pair) => [`BITUNIX:${pair}`, `BINANCE:${pair}`, pair, `PAPER:${pair}`]);
+  // Manche Venues quoten sehr kleine Preise als 1:1000-Kontrakt
+  // (`1000PEPEUSDT`, `1000SHIBUSDT`, `1000BONKUSDT`). Ohne diesen Alias
+  // bleiben PEPE/SHIB/BONK dauerhaft ohne Korrelationsdaten.
+  const kilo = pairs
+    .filter((pair) => !pair.startsWith("1000"))
+    .map((pair) => `1000${pair}`);
+  return [...pairs, ...kilo].flatMap((pair) => [
+    `BITUNIX:${pair}`,
+    `BINANCE:${pair}`,
+    pair,
+    `PAPER:${pair}`,
+  ]);
 }
 
 function defaultResolveInstrumentId(
@@ -295,22 +306,33 @@ function defaultResolveInstrumentId(
     if (byId) return byId.id;
 
     const candidates = instrumentIdCandidates(symbol);
+
+    // Mit Store entscheidet die FRISCHE der Serie, nicht die Registry: die
+    // Registry ist lückenhaft (z. B. fehlt `BITUNIX:SOLUSDT`, obwohl die
+    // 1h-Historie dort liegt, während `BINANCE:SOLUSDT` registriert ist, aber
+    // keine Kerzen hat). Eine reine Registry-Auflösung lieferte deshalb für
+    // SOL/XRP/UNI `null` → `correlation-stale`, obwohl die Daten da sind.
+    if (store) {
+      let best: { id: string; ts: number } | null = null;
+      for (const id of candidates) {
+        let rows: Array<{ ts: number }>;
+        try {
+          rows = store.query({ instrumentId: id, timeframe, limit: 1 });
+        } catch {
+          continue; // Serie nicht lesbar → nächster Kandidat
+        }
+        const ts = rows.length ? Number(rows[rows.length - 1].ts) : 0;
+        if (!ts) continue;
+        if (!best || ts > best.ts) best = { id, ts };
+      }
+      if (best) return best.id;
+    }
+
+    // Ohne Store (oder ohne jede Kerze) zählt die Registry — das Ergebnis ist
+    // dann ehrlich STALE, nie „unkorreliert“.
     for (const candidate of candidates) {
       const hit = manager.resolveInstrument(candidate);
       if (hit) return hit.id;
-    }
-
-    // Letzte Instanz: die Serie existiert im HistoricalStore, das Instrument
-    // fehlt aber in der Registry (z. B. `BITUNIX:MANAUSDT`). Für die
-    // Korrelation zählt allein, ob unter der ID Kerzen liegen.
-    if (store) {
-      for (const id of candidates) {
-        try {
-          if (store.query({ instrumentId: id, timeframe, limit: 1 }).length > 0) return id;
-        } catch {
-          /* Serie nicht lesbar → nächster Kandidat */
-        }
-      }
     }
     return null;
   } catch {

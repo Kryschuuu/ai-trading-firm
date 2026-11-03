@@ -36,6 +36,12 @@ erlaubt, solange sie hier dokumentiert sind).
   `MICRO_BLOCKED_BACKOFF_MS` (Default 60 s) pausiert eine Regel nach einem
   Fehlversuch. Fehlversuche zählen weiterhin weder als Ausführung noch gegen
   das Tageslimit.
+- **Cluster-Resolver nahm die falsche Venue:** Er bevorzugte den ersten
+  Registry-Treffer, obwohl die 1h-Kerzen unter einer anderen ID liegen
+  (`BINANCE:SOLUSDT` registriert, Historie unter `BITUNIX:SOLUSDT`). Bei
+  aktivem Store entscheidet jetzt die **frischste vorhandene Serie**, die
+  Registry bleibt Rückfallebene. Abdeckung: 48 → 60 von 60 Symbolen.
+  1:1000-Kontrakte (`1000PEPE`/`1000SHIB`/`1000BONK`) sind als Alias enthalten.
 - **Cluster-Guardrail war blind:** Der Instrument-Resolver löste Basis-Ticker
   (`SUI`) nicht auf, weil die Universums-Registry Krypto venue-qualifiziert
   führt (`BITUNIX:SUIUSDT`). Dadurch lieferte die Korrelationsquelle für jedes
