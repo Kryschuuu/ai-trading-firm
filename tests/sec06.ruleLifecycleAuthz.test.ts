@@ -20,7 +20,7 @@ import { describeAuditEntry } from "../src/lib/auditView";
 import { issueSession, SESSION_COOKIE } from "../src/lib/authSession";
 import { ruleActor } from "../src/lib/ruleActor";
 import { setMacroBusyForTests } from "../src/lib/macroCycle";
-import { ruleSignature, sanitizeRuleSpec } from "../src/lib/ruleEngine";
+import { ruleSignature, sanitizeRuleSpec, type RuleSpec } from "../src/lib/ruleEngine";
 import type { RuleRow } from "../src/lib/ruleService";
 
 const TOKENS = {
@@ -372,6 +372,28 @@ test("SEC-06: idempotentes Upsert ohne Freigabe ist keine Mutation", async () =>
   assert.equal(body.rule.id, active.id);
   assert.deepEqual(db.writes, []);
   assert.deepEqual(audits, []);
+});
+
+test("SEC-06: MANUAL-Autorität schützt handgepflegte Regeln vor automatischen Entwürfen", async () => {
+  const { upsertRuleSpec } = await import("../src/lib/ruleService");
+  const active = row("ACTIVE", { signature: "manual-signature" });
+
+  // Automatischer Entwurf (Makro-Fallback/Research) darf MANUAL nicht ersetzen.
+  db.reads = [[active]];
+  const blocked = await upsertRuleSpec({ ...SPEC, sourceRole: "RESEARCH" } as unknown as RuleSpec, "MACRO_CYCLE", null, "FALLBACK");
+  assert.equal(blocked.ok, true);
+  assert.equal(blocked.reason, "MANUAL_AUTHORITY");
+  assert.equal(blocked.created, false);
+  assert.equal(blocked.rule?.id, active.id);
+  assert.deepEqual(db.writes, []);
+  assert.deepEqual(audits, []);
+
+  // MANUAL darf MANUAL weiterhin versionieren.
+  db.reads = [[active]];
+  const allowed = await upsertRuleSpec({ ...SPEC, name: "Manual revision", sourceRole: "MANUAL" } as unknown as RuleSpec, "operator", null, "MANUAL");
+  assert.equal(allowed.reason, "NEW_VERSION");
+  assert.equal(allowed.created, true);
+  assert.equal(db.writes.length, 1);
 });
 
 test("SEC-06: auch ungültige Specs und idempotente Aktivierung umgehen den Freigabe-Guard nicht", async () => {

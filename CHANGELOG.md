@@ -28,6 +28,14 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Fixed
 
+- **Makro-Zyklus konnte kalibrierte Regeln überschreiben:** Der deterministische
+  Fallback erzeugt eine eigene Regel (RSI < 30, Stop 6 %, 15m) und aktiviert
+  sie sofort. Da `upsertRuleSpec()` bislang jede abweichende Signatur als neue
+  Version anlegte, hätte ein einziger Makro-Lauf das gesamte handgepflegte
+  Regelwerk (87 MANUAL) ersetzt. Neu: Ist die aktive Regel für `symbol+mission`
+  `sourceRole=MANUAL`, liefert ein automatischer Entwurf (`SIGMA`/`FALLBACK`)
+  `MANUAL_AUTHORITY` und schreibt nichts. MANUAL darf MANUAL weiterhin
+  versionieren; Regressionstest in `tests/sec06.ruleLifecycleAuthz.test.ts`.
 - **Slot-Vergabe war nicht fair:** Ein `BLOCKED`-Versuch verbrauchte weder
   Cooldown noch Tageslimit, also matchte eine dauerhaft abgelehnte Regel bei
   jedem Tick erneut. In 25 Minuten entfielen 6767 von 10979 Treffern auf eine

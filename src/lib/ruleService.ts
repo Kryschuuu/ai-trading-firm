@@ -160,6 +160,17 @@ export async function upsertRuleSpec(
     return { ok: true, rule: active[0], created: false, changed: false, reason: "IDEMPOTENT" };
   }
 
+  // MANUAL-Autorität: ein automatisch erzeugter Entwurf (Makro-Zyklus,
+  // Research-Fallback) darf eine handgepflegte ACTIVE-Regel desselben
+  // symbol+mission NICHT ersetzen. Ohne diesen Guard überschreibt der
+  // deterministische Fallback (RSI<30, SL 6 %, 15m) bei jedem Makro-Lauf das
+  // kalibrierte Regelwerk — der Zyklus aktiviert seine Version sofort
+  // (`activateRule`), die gute Regel wäre also nach einem Lauf weg.
+  // MANUAL darf MANUAL ersetzen; RESEARCH darf RESEARCH ersetzen.
+  if (active[0] && active[0].sourceRole === "MANUAL" && spec.sourceRole !== "MANUAL") {
+    return { ok: true, rule: active[0], created: false, changed: false, reason: "MANUAL_AUTHORITY" };
+  }
+
   const newVersion = active[0]?.version != null ? active[0].version + 1 : 1;
   const ruleKey = active[0]?.ruleKey ?? crypto.randomUUID();
 
