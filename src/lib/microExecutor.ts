@@ -1960,6 +1960,94 @@ function spreadFromLevels(
   return mid > 0 ? (ask - bid) / mid : null;
 }
 
+/** Ergebnis des Binance-Nachrichtenparsers (pure, ohne Seiteneffekte). */
+export type BinanceStreamParse =
+  | { kind: "tick"; tick: FeedTick }
+  | { kind: "subscriptionError"; detail: string }
+  | null;
+
+/**
+ * Zerlegt eine Combined-Stream-Nachricht von Binance in einen {@link FeedTick}.
+ *
+ * Warum als eigene, reine Funktion? Der `@depth5`-Partial-Book-Stream liefert
+ * `{lastUpdateId, bids, asks}` **ohne** `e` und **ohne** `s` (das Symbol steht
+ * nur im Stream-Namen). Ein Parser, der auf `e === "depthUpdate"` besteht,
+ * verwirft jeden Buch-Tick still — dann bleibt `spreadPct` dauerhaft `null`
+ * und jede Regel mit Spread-Filter matcht nie. Diese Funktion ist die
+ * getestete Stelle dafür (Regressionstest: `tests/microExecutor.test.ts`).
+ *
+ * Gibt `null` zurück, wenn die Nachricht keinen verwertbaren Tick enthält
+ * (z. B. `@bookTicker`-Frames oder unbekannte Event-Typen).
+ */
+export function parseBinanceStreamMessage(raw: string): BinanceStreamParse {
+  const msg = JSON.parse(raw) as {
+    code?: number;
+    msg?: string;
+    /** Combined-Stream-Name, z. B. `btcusdt@depth5` (Partial-Book). */
+    stream?: string;
+    data?: {
+      e?: string;
+      s?: string;
+      p?: string;
+      q?: string;
+      T?: number;
+      b?: unknown[][] | null;
+      a?: unknown[][] | null;
+      /** Partial-Book-Depth (`@depth5`): Top-Level `bids`/`asks`, kein `e`/`s`. */
+      bids?: unknown[][] | null;
+      asks?: unknown[][] | null;
+      k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
+    };
+  };
+  if (msg.code !== undefined) {
+    return { kind: "subscriptionError", detail: `Binance-Abonnement abgelehnt: ${String(msg.msg ?? msg.code).slice(0, 160)}` };
+  }
+  const data = msg.data;
+  if (!data) return null;
+  const streamBase = (msg.stream ?? "").split("@")[0]?.toUpperCase() ?? "";
+  const symbol =
+    (data.s ?? "").toUpperCase().replace(/USDT$/, "") ||
+    streamBase.replace(/USDT$/, "");
+
+  // v0.4.0: Partial-Book-Depth-Push → Tiefen-Snapshot (nur falls beide Seiten
+  // vorliegen; der Executor prüft die Qualitätsgrenze).
+  const bids = data.b ?? data.bids;
+  const asks = data.a ?? data.asks;
+  if ((data.e === "depthUpdate" || data.e === undefined) && Array.isArray(bids) && Array.isArray(asks)) {
+    return {
+      kind: "tick",
+      tick: {
+        kind: "book",
+        symbol,
+        venue: "BINANCE",
+        ts: Number(data.T ?? Date.now()),
+        bids: bids as unknown as readonly (readonly [unknown, unknown])[],
+        asks: asks as unknown as readonly (readonly [unknown, unknown])[],
+      },
+    };
+  }
+  if (data.e === "trade" && data.p) {
+    return {
+      kind: "tick",
+      tick: { kind: "trade", symbol, ts: Number(data.T ?? Date.now()), price: Number(data.p), qty: Number(data.q ?? 0) },
+    };
+  }
+  if (data.e === "kline" && data.k) {
+    const k = data.k;
+    return {
+      kind: "tick",
+      tick: {
+        kind: "candle",
+        symbol,
+        ts: k.t,
+        candle: { time: k.t, open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c), volume: Number(k.v) },
+        closed: k.x,
+      },
+    };
+  }
+  return null;
+}
+
 /**
  * Binance-Combined-Stream: @trade (ms-genaue Preis-Ticks) + @kline_1m
  * (autoritative Volumen- und Kerzendaten). Kein API-Key, keine LLM.
@@ -2046,95 +2134,19 @@ export class BinanceTradeFeed implements MarketFeed {
                 : Buffer.isBuffer(ev.data)
                   ? ev.data.toString()
                   : String(ev.data);
-            const msg = JSON.parse(raw) as {
-              code?: number;
-              msg?: string;
-              /** Combined-Stream-Name, z. B. `btcusdt@depth5` (Partial-Book). */
-              stream?: string;
-              data?: {
-                e?: string;
-                s?: string;
-                p?: string;
-                q?: string;
-                T?: number;
-                b?: unknown[][] | null;
-                a?: unknown[][] | null;
-                /** Partial-Book-Depth (`@depth5`): Top-Level `bids`/`asks`, kein `e`/`s`. */
-                bids?: unknown[][] | null;
-                asks?: unknown[][] | null;
-                k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
-              };
-            };
-            if (msg.code !== undefined) {
+            const parsed = parseBinanceStreamMessage(raw);
+            if (!parsed) return;
+            if (parsed.kind === "subscriptionError") {
               this.errorCount++;
-              this.lastDetail = `Binance-Abonnement abgelehnt: ${String(msg.msg ?? msg.code).slice(0, 160)}`;
+              this.lastDetail = parsed.detail;
               // Reconnect with the full desired URL rather than silently losing the subscription.
               ws.close();
               return;
             }
-            const data = msg.data;
-            if (!data) return;
-            const streamBase = (msg.stream ?? "").split("@")[0]?.toUpperCase() ?? "";
-            const symbol =
-              (data.s ?? "").toUpperCase().replace(/USDT$/, "") ||
-              streamBase.replace(/USDT$/, "");
-            // v0.4.0: Partial-Book-Depth-Push → Tiefen-Snapshot (nur falls
-            // beide Seiten vorliegen; der Executor prüft die Qualitätsgrenze).
-            // `@depth5` liefert `{lastUpdateId,bids,asks}` OHNE `e`/`s`; ohne
-            // diesen Zweig fielen alle Buch-Ticks still weg (Spread = null).
-            if (
-              (data.e === "depthUpdate" || data.e === undefined) &&
-              (Array.isArray(data.b ?? data.bids) && Array.isArray(data.a ?? data.asks))
-            ) {
-              const bids = (data.b ?? data.bids) as unknown as readonly (readonly [unknown, unknown])[];
-              const asks = (data.a ?? data.asks) as unknown as readonly (readonly [unknown, unknown])[];
-              const ts = Number(data.T ?? Date.now());
-              const tick: FeedTick = {
-                kind: "book",
-                symbol,
-                venue: "BINANCE",
-                ts,
-                bids,
-                asks,
-              };
-              this.tickCount++;
-              this.lastTickAt = new Date(ts).toISOString();
-              onTick(tick);
-              return;
-            }
-            if (data.e === "trade" && data.p) {
-              const ts = Number(data.T ?? Date.now());
-              const tick: FeedTick = {
-                kind: "trade",
-                symbol,
-                ts,
-                price: Number(data.p),
-                qty: Number(data.q ?? 0),
-              };
-              this.tickCount++;
-              this.lastTickAt = new Date(ts).toISOString();
-              onTick(tick);
-            } else if (data.e === "kline" && data.k) {
-              const k = data.k;
-              const candle: CandleLike = {
-                time: k.t,
-                open: Number(k.o),
-                high: Number(k.h),
-                low: Number(k.l),
-                close: Number(k.c),
-                volume: Number(k.v),
-              };
-              const tick: FeedTick = {
-                kind: "candle",
-                symbol,
-                ts: k.t,
-                candle,
-                closed: k.x,
-              };
-              this.tickCount++;
-              this.lastTickAt = new Date(k.t).toISOString();
-              onTick(tick);
-            }
+            const tick = parsed.tick;
+            this.tickCount++;
+            this.lastTickAt = new Date(tick.ts).toISOString();
+            onTick(tick);
           } catch (e) {
             this.errorCount++;
             this.lastDetail = e instanceof Error ? e.message : String(e);

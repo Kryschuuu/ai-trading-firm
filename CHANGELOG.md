@@ -47,6 +47,20 @@ erlaubt, solange sie hier dokumentiert sind).
   Parrondo-Regelwerk (Trend-Long mit `adx14 ≥ 20`, Mean-Reversion-Long mit
   `adx14 ≤ 20`) über die Missionen `crypto-momentum-247`, `swing-multi-asset`
   und Krypto-Reversion.
+- Der Binance-Nachrichtenparser ist als reine Funktion
+  `parseBinanceStreamMessage()` herausgezogen; damit sind Partial-Book,
+  Trade- und Kline-Frames ohne WebSocket testbar.
+- Betrieb: Missions-Pipeline läuft alle 4 h statt alle 90 min und mit
+  `Nice=10`/`IOSchedulingClass=idle`, damit ein LLM-Lauf den Handel nicht
+  verdrängt; `LLM_TIMEOUT_MS=60000` begrenzt fehlschlagende Modellaufrufe.
+  `RISK_TIME_STOP_HOURS=48` gibt hängenden Positionen ihren Slot zurück.
+
+### Tests
+
+- Regressionstests für den Ausführungspfad: `@depth5`-Partial-Book ohne
+  `e`/`s`, Spread-Ableitung aus Top-of-Book bis in den Regel-Snapshot,
+  `setLiveQuote()` → `getQuoteSync()` und Krypto-Routing der erweiterten
+  Basen (`STX`/`ARB`/`MANA`/`SNX` dürfen nicht bei Yahoo landen).
 
 ## [0.17.7] — Zustands-Registry, systemd und sichere Alerts (2026-10-30)
 

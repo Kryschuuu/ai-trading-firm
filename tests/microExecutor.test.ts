@@ -18,6 +18,7 @@ import {
   MicroExecutor,
   SequenceFeed,
   SimulatedFeed,
+  parseBinanceStreamMessage,
   type CachedRule,
   type ExecuteContext,
   type ExecutionOutcome,
@@ -25,6 +26,7 @@ import {
   type RuleExecutionAdapter,
 } from "../src/lib/microExecutor";
 import { sanitizeRuleSpec, compileRuleSpec, type CandleLike } from "../src/lib/ruleEngine";
+import { getQuoteSync, resetMarketDataCachesForTests, routeForCanonicalSymbol } from "../src/lib/marketData";
 
 // ── 1) Import-Graph-Guard: kein LLM-Code im Ausführungspfad ──────────────────
 
@@ -607,4 +609,122 @@ test("status().ruleGuard zeigt auch nach dem Start aktivierte Regeln — sie bek
     assert.deepEqual(status.series.map((s) => s.timeframe), ["1m"]);
     await executor.stop();
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regressionen (2026-11-03): Der Ausführungspfad matchte nie. Vier Ursachen
+// sind hier einzeln festgenagelt — sie dürfen nicht still zurückkehren.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("Binance-Parser: @depth5-Partial-Book OHNE e/s wird als Buch-Tick erkannt", () => {
+  // Genau dieses Frames hat Binance für `btcusdt@depth5` geliefert — kein `e`,
+  // kein `s`, nur Stream-Name + bids/asks. Vor dem Fix fiel es still weg.
+  const parsed = parseBinanceStreamMessage(
+    JSON.stringify({
+      stream: "btcusdt@depth5",
+      data: {
+        lastUpdateId: 123,
+        bids: [["99.9", "1.5"], ["99.8", "2"]],
+        asks: [["100.1", "1.2"], ["100.2", "3"]],
+      },
+    }),
+  );
+  assert.equal(parsed?.kind, "tick");
+  if (parsed?.kind !== "tick") throw new Error("kein Tick");
+  assert.equal(parsed.tick.kind, "book");
+  assert.equal(parsed.tick.symbol, "BTC");
+  assert.equal(parsed.tick.venue, "BINANCE");
+  assert.deepEqual(parsed.tick.bids?.[0], ["99.9", "1.5"]);
+  assert.deepEqual(parsed.tick.asks?.[0], ["100.1", "1.2"]);
+});
+
+test("Binance-Parser: trade/kline/Abo-Fehler und unbekannte Frames", () => {
+  const trade = parseBinanceStreamMessage(
+    JSON.stringify({ stream: "ethusdt@trade", data: { e: "trade", s: "ETHUSDT", p: "2000.5", q: "2", T: 1700000000000 } }),
+  );
+  assert.equal(trade?.kind, "tick");
+  if (trade?.kind !== "tick") throw new Error("kein Tick");
+  assert.equal(trade.tick.kind, "trade");
+  assert.equal(trade.tick.symbol, "ETH");
+  assert.equal(trade.tick.price, 2000.5);
+
+  const kline = parseBinanceStreamMessage(
+    JSON.stringify({
+      stream: "solusdt@kline_1m",
+      data: { e: "kline", s: "SOLUSDT", k: { t: 1700000000000, o: "1", h: "2", l: "0.5", c: "1.5", v: "10", x: true } },
+    }),
+  );
+  assert.equal(kline?.kind, "tick");
+  if (kline?.kind !== "tick") throw new Error("kein Tick");
+  assert.equal(kline.tick.kind, "candle");
+  assert.equal(kline.tick.symbol, "SOL");
+  assert.equal(kline.tick.closed, true);
+
+  const err = parseBinanceStreamMessage(JSON.stringify({ code: 2, msg: "Invalid request" }));
+  assert.equal(err?.kind, "subscriptionError");
+
+  assert.equal(parseBinanceStreamMessage(JSON.stringify({ stream: "btcusdt@bookTicker", data: {} })), null);
+});
+
+test("MicroExecutor: Buch-Tick setzt spreadPct — Spread-Regel feuert nur mit Buch (fail-closed)", async () => {
+  const spec = makeSpec("BTC", {
+    condition: {
+      logic: "all",
+      conditions: [
+        { field: "price", op: "gte", value: 0 },
+        { field: "spreadPct", op: "lte", value: 0.5 },
+      ],
+    },
+  });
+  const cache = new RuleCache();
+  cache._seedForTest([cachedRule(spec, "rule-spread")]);
+  const adapter = new RecordingAdapter();
+  const executor = new MicroExecutor({ cache, adapter, options: { seedCandles: false } });
+  executor.addSymbol("BTC", "15m", candles(120));
+
+  const start = 1_700_000_000_000 + 120 * 60_000;
+  executor.registerFeed(
+    new SequenceFeed([
+      // 1) Nur Trade-Ticks: kein Buch → spreadPct bleibt null → Regel blockt.
+      { kind: "trade", symbol: "BTC", ts: start, price: 100, qty: 5 },
+      { kind: "trade", symbol: "BTC", ts: start + 1, price: 100, qty: 5 },
+      // 2) Buch mit 0,2 % Spread (Bid 99,9 / Ask 100,1) → Regel darf feuern.
+      { kind: "book", symbol: "BTC", venue: "BINANCE", ts: start + 2, bids: [[99.9, 5], [99.8, 5], [99.7, 5]], asks: [[100.1, 5], [100.2, 5], [100.3, 5]] },
+      { kind: "trade", symbol: "BTC", ts: start + 3, price: 100, qty: 5 },
+    ]),
+  );
+  await executor.start();
+
+  assert.ok(adapter.calls.length >= 1, "Regel muss nach dem Buch-Tick feuern (Spread vorhanden)");
+  const spread = adapter.calls[0].snapshot.spreadPct;
+  assert.ok(spread != null && spread > 0, `spreadPct muss gesetzt sein, war: ${String(spread)}`);
+  // `updateSpread` nimmt den relativen Spread (0,002), der Snapshot weist ihn
+  // als Prozent aus (0,2) — genau die Einheit, die Regel-Filter verwenden.
+  assert.ok(Math.abs(spread - 0.2) < 1e-6, `Spread 0,2 % erwartet, war ${spread}`);
+  await executor.stop();
+});
+
+test("MicroExecutor: Live-Tick schreibt den Broker-Kurs-Cache (kein NO_QUOTE für Nicht-Majors)", async () => {
+  const spec = makeSpec("SNX", {
+    condition: { logic: "all", conditions: [{ field: "price", op: "gte", value: 0 }] },
+  });
+  const cache = new RuleCache();
+  cache._seedForTest([cachedRule(spec, "rule-quote")]);
+  const executor = new MicroExecutor({ cache, adapter: new RecordingAdapter(), options: { seedCandles: false } });
+  executor.addSymbol("SNX", "15m", candles(120));
+  const start = 1_700_000_000_000 + 120 * 60_000;
+  executor.registerFeed(new SequenceFeed([{ kind: "trade", symbol: "SNX", ts: start, price: 2.42, qty: 100 }]));
+  await executor.start();
+  assert.equal(getQuoteSync("SNX"), 2.42, "Paper-Broker muss den Live-Kurs synchron sehen");
+  await executor.stop();
+  resetMarketDataCachesForTests();
+});
+
+test("Routing: erweiterte Krypto-Basen gehen an Binance, nicht an Yahoo-Aktien", () => {
+  // STX/ARB/MANA/SNX sind gleichnamige US-Aktien — ohne CRYPTO_BASES-Eintrag
+  // routete der Datenpfad sie zu Yahoo und bewertete Krypto als Aktie.
+  for (const symbol of ["STX", "ARB", "MANA", "SNX", "LDO", "WIF", "RUNE", "SUI"]) {
+    assert.equal(routeForCanonicalSymbol(symbol).feed, "binance", `${symbol} muss an Binance geroutet werden`);
+  }
+  assert.equal(routeForCanonicalSymbol("SPY").feed, "yahoo", "ETFs bleiben bei Yahoo");
 });
