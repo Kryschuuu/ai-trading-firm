@@ -263,6 +263,23 @@ Ist bereits eine Pipeline im Prozess aktiv, antwortet die API mit `409`
 * **Kill-Switch bleibt autoritativ:** Ein engagierter Brecher stoppt beide
   Prozesse sofort; die Timer laufen weiter, handeln aber nicht.
 
+### Aktive Risiko-Konfiguration (Paper)
+
+| Einstellung | Wert | Begründung |
+| --- | --- | --- |
+| `maxConcurrentPositions` (DB `risk_config`) | `8` | 8 × 0,5 % Risiko = 4 % maximaler Gleichzeitverlust, unter dem Tageslimit von 5 % |
+| `RISK_CLUSTER_LIMITS_MODE` | `enforce` | Mit 60/60 Symbolen frischer 1h-Historie ist der Guardrail belastbar; er verhindert, dass alle Slots in denselben hochkorrelierten Block gehen |
+| `RISK_CORR_THRESHOLD` | `0.8` | Bei `0.7` verkettet Single-Linkage 37 von 60 Symbolen zu **einem** Cluster — der Guardrail hätte dann nur noch 4 Positionen insgesamt erlaubt. Bei `0.8` bleibt ein 14er-Block |
+| `RISK_MAX_PER_CLUSTER` | `4` | Lässt die vollen 8 Slots zu, erzwingt aber Streuung über die weniger korrelierten Namen |
+| `RISK_TIME_STOP_HOURS` | `48` | Hängende Positionen geben ihren Slot zurück, ohne auf SL/TP zu warten |
+| `MICRO_BLOCKED_BACKOFF_MS` | `60000` | Eine dauerhaft geblockte Regel pausiert nach jedem Fehlversuch — sonst gewinnt sie jeden freien Slot und flutet das Journal |
+| `ROUTING_DISABLED_PROVIDERS` | `ollama` | Auf dieser CPU-Box liefert das lokale 3b-Modell nicht einmal 8 Tokens in 90 s; der Makro-Zyklus nutzt den deterministischen Fallback |
+
+Der Cluster-Guardrail wertet den **append-only HistoricalStore** aus (1h, 90
+Kerzen ≈ 3,75 Tage). Sind die Daten älter als 24 h oder fehlt eine Serie,
+lehnt `enforce` konservativ ab (`cluster-exposure:correlation-stale`) — das
+ist gewollt, aber ein Signal für einen hängenden `market-sync`-Timer.
+
 ## Verwandte Dokumente
 
 * [`OPERATIONS_CENTER.md`](OPERATIONS_CENTER.md) — Diagnose-Walkthrough und API-Vertrag des Operations Centers
