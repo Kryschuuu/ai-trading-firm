@@ -73,6 +73,10 @@ next-env.d.ts
 # Laufzeit-Schalter (UI): data/runtime/flags.json — nur Bool-Werte.
 /data/runtime
 
+# CTI-Snapshots (`npm run cti`): je Symbol/Timeframe ein JSON je Lauf —
+# reproduzierbar aus der Historie, nicht versioniert.
+/data/cti
+
 # Prompt-Eval-Reports (GAP-08, v1.49.0): `npm run eval:prompts` schreibt
 # JSON- + MD-Report je Lauf — reproduzierbar, nicht versioniert.
 /data/eval
