@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const result = await ensureSeeded();
+  const result = await ensureSeeded({ seedMissingMissions: true });
   return NextResponse.json({
     ok: result.ok,
     seeded: result.ok,

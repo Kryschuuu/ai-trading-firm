@@ -191,7 +191,15 @@ export const defaultMissions = () =>
     status: "PENDING",
   }));
 
-export async function ensureSeeded(): Promise<{
+export async function ensureSeeded(opts: {
+  /**
+   * Fehlende Standard-Mandate anhand des Titels nachrüsten. Nur der explizite
+   * Seed/Reset (`POST /api/seed`) setzt das: Das Dashboard ruft
+   * `ensureSeeded()` bei jedem Seitenaufruf auf und würde sonst bewusst
+   * gelöschte bzw. kuratierte Mandate wieder anlegen.
+   */
+  seedMissingMissions?: boolean;
+} = {}): Promise<{
   ok: boolean;
   reason?: string;
   /** Anzahl Alt-Mandate, deren Missions-Typ nachgetragen wurde (v1.35.0). */
@@ -223,9 +231,10 @@ export async function ensureSeeded(): Promise<{
   const missionCount = (await db.select({ c: count() }).from(missions))[0].c;
   if (missionCount === 0) {
     await db.insert(missions).values(defaultMissions());
-  } else {
+  } else if (opts.seedMissingMissions === true) {
     // Nachrüsten: fehlende Standard-Mandate anhand des Titels ergänzen
     // (idempotent — bestehende Missionen samt eigener Änderungen bleiben).
+    // Nur auf ausdrücklichen Seed/Reset, nicht beim Dashboard-Aufruf.
     for (const m of defaultMissions()) {
       const existing = await db.select().from(missions).where(eq(missions.title, m.title)).limit(1);
       if (existing.length === 0) await db.insert(missions).values(m);

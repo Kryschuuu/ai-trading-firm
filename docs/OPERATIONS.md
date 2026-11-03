@@ -219,6 +219,50 @@ Brecher-Latch und darf bei einem erneuten Bruch wieder auslösen.
 * **Keine Secrets im Alert:** Alerts enthalten Code, Severity, Meldung und
   klassifizierte Metadaten — keine Tokens, URLs oder Kontodaten.
 
+## 5. Vollautomatischer Betrieb (systemd-User-Units)
+
+Drei Units halten die Firma ohne manuellen Eingriff am Laufen. Alle lesen
+`EnvironmentFile=.env`, arbeiten im Projektverzeichnis und schreiben ins
+Journal (`journalctl --user -u <unit> -f`).
+
+| Unit | Typ | Takt | Aufgabe |
+| --- | --- | --- | --- |
+| `ai-trading-firm.service` | Dienst | dauerhaft | Next.js-App inkl. Scheduler (Tick, Analysten, Makro, Recon) |
+| `ai-trading-firm-micro.service` | Dienst | dauerhaft | LLM-freier Micro-Executor: WebSocket-Ticks → `trade_rules` (ACTIVE) → Paper-Broker |
+| `ai-trading-firm-market-sync.timer` | Timer | stündlich | `npm run market:sync -- --venue=BITUNIX` (öffentliche Endpunkte, keine Keys) |
+| `ai-trading-firm-pipeline.timer` | Timer | stündlich | `scripts/auto-pipeline.sh`: LLM-Pipeline für je 3 ACTIVE-Missionen, rotierend |
+
+### Missions-Pipeline (`scripts/auto-pipeline.sh`)
+
+Der Scheduler startet **keine** Missions-Pipeline — Proposals entstehen nur
+über `POST /api/firm/run {missionId, pipeline:true}`. Das Skript übernimmt
+diesen Teil: Es liest die ACTIVE-Missionen, filtert auf handelbare Symbole
+(`BTC, ETH, SOL, XRP, BNB, ADA, DOGE, AVAX, LINK, DOT`) bzw. Segmente
+(`CRYPTO`, `ALL`, `LIQUID`) und startet pro Aufruf `MAX_MISSIONS` Läufe
+(Default 3). Der Cursor in `data/auto-pipeline-cursor.json` rotiert weiter,
+damit die lokale LLM-Instanz nicht dauerhaft ausgelastet wird.
+
+```bash
+MAX_MISSIONS=1 PIPELINE_TIMEOUT_S=1500 bash scripts/auto-pipeline.sh   # Einzellauf
+systemctl --user list-timers 'ai-trading-firm-*'                        # nächste Läufe
+```
+
+Ist bereits eine Pipeline im Prozess aktiv, antwortet die API mit `409`
+(`PIPELINE_ALREADY_RUNNING`); das Skript protokolliert das und fährt fort.
+
+### Grenzen
+
+* **Paper-only:** Die Pipeline handelt ausschließlich im Paper-Modus. Der
+  Live-Gate bleibt unabhängig davon geschlossen (`LIVE_TRADING.md`).
+* **Regeln brauchen `ACTIVE`:** Der Micro-Executor lädt nur
+  `trade_rules.status = 'ACTIVE'`; DRAFT-Regeln werden ignoriert. Regeln
+  entstehen über den Makro-Zyklus oder `POST /api/firm/rules` (mit
+  `activate: true`).
+* **Timeframe ≤ 1h:** Der Micro-Executor führt nur Regeln aus, deren
+  Timeframe nicht länger als das Ausführungsintervall ist (Default `1h`).
+* **Kill-Switch bleibt autoritativ:** Ein engagierter Brecher stoppt beide
+  Prozesse sofort; die Timer laufen weiter, handeln aber nicht.
+
 ## Verwandte Dokumente
 
 * [`OPERATIONS_CENTER.md`](OPERATIONS_CENTER.md) — Diagnose-Walkthrough und API-Vertrag des Operations Centers

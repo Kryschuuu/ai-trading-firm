@@ -44,6 +44,7 @@ import {
 } from "./ruleService";
 import { startOfBerlinDay } from "./time";
 import { missionFocusSymbol } from "./missionUniverse";
+import { readStartingEquity } from "./startingEquity";
 
 const registeredState = getOrCreateRegisteredState<{
   macroBusy?: boolean;
@@ -255,7 +256,7 @@ export async function runMacroCycle(opts?: { missionId?: string }): Promise<Macr
       ``,
       JSON.stringify({ ...spec, missionId: undefined }, null, 2),
       ``,
-      `Risk context: starting equity 10000 (paper), hard code limits: max position 25%, ` +
+      `Risk context: starting equity ${readStartingEquity()} (paper), hard code limits: max position 25%, ` +
         `max risk/trade 2%, stop-loss mandatory, no leverage, no shorts.`,
       `Rule risk score: ${spec.riskScore.toFixed(2)}.`,
       ``,
