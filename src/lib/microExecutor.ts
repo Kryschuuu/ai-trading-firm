@@ -59,7 +59,7 @@ import { computePositionSize, loadSizingConfig, resolveKellyEdge } from "./posit
 import { checkClusterExposure, loadClusterLimitsConfig } from "./clusterExposure";
 import { computeBookDepth, type BookLevelInput } from "./bookDepth";
 import { bookDepthVerdict } from "./bookDepthProvenance";
-import { getCandles, sanitizeSymbol } from "./marketData";
+import { getCandles, sanitizeSymbol, setLiveQuote } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
 import {
   SUPPORTED_TIMEFRAME_MS,
@@ -1738,9 +1738,20 @@ export class MicroExecutor {
     const symbol = sanitizeSymbol(tick.symbol);
     if (!symbol) return;
 
+    // Der Paper-Broker liest Kurse synchron aus dem Marktdaten-Cache. Im
+    // Micro-Prozess gibt es keinen HTTP-Pfad, der ihn füllt — der Feed-Tick
+    // ist hier die autoritative Quelle. Ohne diesen Eintrag endet jede Order
+    // außerhalb der statischen Majors mit `NO_QUOTE`.
+    if (tick.kind === "trade") setLiveQuote(symbol, tick.price, tick.ts);
+    else if (tick.kind === "candle") setLiveQuote(symbol, tick.candle.close, tick.ts);
+
     // v0.4.0: Buch-Tick → Tiefen-Cache im RAM aktualisieren (kein Kostenpfad).
+    // Der Spread wird aus demselben Top-of-Book abgeleitet; ohne diesen Aufruf
+    // bliebe `spreadPct` in jedem Snapshot `null` und jede Regel mit
+    // Spread-Filter würde fail-closed nie matchen.
     if (tick.kind === "book") {
       this.updateBook(symbol, { venue: tick.venue, bids: tick.bids, asks: tick.asks });
+      this.updateSpread(symbol, spreadFromLevels(tick.bids, tick.asks));
     }
 
     // Retain ticks for existing-symbol/new-timeframe warmups without replacing
@@ -1904,8 +1915,50 @@ async function openWebSocket(url: string): Promise<WsLike> {
   }
 }
 
-/** Börsen-Whitelist für den Binance-Feed (Krypto, 24/7, ohne API-Key). */
-const BINANCE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "LINK", "DOT"];
+/**
+ * Börsen-Whitelist für den Binance-Feed (Krypto, 24/7, ohne API-Key).
+ * Statisch statt exchangeInfo-Abfrage: kein Netzwerk im Startpfad, keine
+ * stille Abhängigkeit von der API. Alle Einträge sind verifizierte
+ * `*USDT`-Spot-Paare mit `status=TRADING`.
+ */
+const BINANCE_SYMBOLS = [
+  "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "LINK", "DOT",
+  "AAVE", "CRV", "SNX", "UNI", "LDO", "COMP", "ATOM", "NEAR", "APT", "ARB",
+  "OP", "INJ", "SUI", "TIA", "SEI", "FIL", "ICP", "HBAR", "ALGO", "VET",
+  "ETC", "BCH", "TRX", "RENDER", "TAO", "FET", "ONDO", "ENA", "JUP", "WIF",
+  "PEPE", "SHIB", "BONK", "LTC", "XLM", "SAND", "MANA", "AXS", "GALA", "THETA",
+  "NEO", "IOTA", "QNT", "GRT", "IMX", "STX", "RUNE", "KAVA", "ZEC", "DASH",
+];
+
+/** Bester Preis einer Buchseite (`bids` = Maximum, `asks` = Minimum). */
+function bestLevelPrice(
+  levels: readonly (readonly [unknown, unknown])[],
+  side: "bid" | "ask",
+): number | null {
+  let best: number | null = null;
+  for (const level of levels) {
+    const price = Number(level?.[0]);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (best === null || (side === "bid" ? price > best : price < best)) best = price;
+  }
+  return best;
+}
+
+/**
+ * Relativer Top-of-Book-Spread als Bruchteil (z. B. 0.0001 = 1 bp), passend
+ * zur Erwartung von {@link MicroExecutor.updateSpread}. `null`, wenn eine
+ * Seite fehlt oder das Buch gekreuzt ist — nie eine erfundene 0.
+ */
+function spreadFromLevels(
+  bids: readonly (readonly [unknown, unknown])[],
+  asks: readonly (readonly [unknown, unknown])[],
+): number | null {
+  const bid = bestLevelPrice(bids, "bid");
+  const ask = bestLevelPrice(asks, "ask");
+  if (bid === null || ask === null || ask <= bid) return null;
+  const mid = (bid + ask) / 2;
+  return mid > 0 ? (ask - bid) / mid : null;
+}
 
 /**
  * Binance-Combined-Stream: @trade (ms-genaue Preis-Ticks) + @kline_1m
@@ -1996,6 +2049,8 @@ export class BinanceTradeFeed implements MarketFeed {
             const msg = JSON.parse(raw) as {
               code?: number;
               msg?: string;
+              /** Combined-Stream-Name, z. B. `btcusdt@depth5` (Partial-Book). */
+              stream?: string;
               data?: {
                 e?: string;
                 s?: string;
@@ -2004,6 +2059,9 @@ export class BinanceTradeFeed implements MarketFeed {
                 T?: number;
                 b?: unknown[][] | null;
                 a?: unknown[][] | null;
+                /** Partial-Book-Depth (`@depth5`): Top-Level `bids`/`asks`, kein `e`/`s`. */
+                bids?: unknown[][] | null;
+                asks?: unknown[][] | null;
                 k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
               };
             };
@@ -2016,18 +2074,28 @@ export class BinanceTradeFeed implements MarketFeed {
             }
             const data = msg.data;
             if (!data) return;
-            const symbol = (data.s ?? "").toUpperCase().replace(/USDT$/, "");
+            const streamBase = (msg.stream ?? "").split("@")[0]?.toUpperCase() ?? "";
+            const symbol =
+              (data.s ?? "").toUpperCase().replace(/USDT$/, "") ||
+              streamBase.replace(/USDT$/, "");
             // v0.4.0: Partial-Book-Depth-Push → Tiefen-Snapshot (nur falls
             // beide Seiten vorliegen; der Executor prüft die Qualitätsgrenze).
-            if (data.e === "depthUpdate" && Array.isArray(data.b) && Array.isArray(data.a)) {
+            // `@depth5` liefert `{lastUpdateId,bids,asks}` OHNE `e`/`s`; ohne
+            // diesen Zweig fielen alle Buch-Ticks still weg (Spread = null).
+            if (
+              (data.e === "depthUpdate" || data.e === undefined) &&
+              (Array.isArray(data.b ?? data.bids) && Array.isArray(data.a ?? data.asks))
+            ) {
+              const bids = (data.b ?? data.bids) as unknown as readonly (readonly [unknown, unknown])[];
+              const asks = (data.a ?? data.asks) as unknown as readonly (readonly [unknown, unknown])[];
               const ts = Number(data.T ?? Date.now());
               const tick: FeedTick = {
                 kind: "book",
                 symbol,
                 venue: "BINANCE",
                 ts,
-                bids: data.b as unknown as readonly (readonly [unknown, unknown])[],
-                asks: data.a as unknown as readonly (readonly [unknown, unknown])[],
+                bids,
+                asks,
               };
               this.tickCount++;
               this.lastTickAt = new Date(ts).toISOString();

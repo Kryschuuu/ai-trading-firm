@@ -24,6 +24,30 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status-Header:** **Beta** · Dokumentationsstand **2026-10-30** · Code-Version **0.17.7** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
+## [Unreleased]
+
+### Fixed
+
+- **Micro-Executor handelte nie:** Vier Ursachen behoben, die zusammen jeden
+  Regel-Match verhinderten — (1) Buch-Ticks des Binance-`@depth5`-Streams
+  (kein `e`/`s`, nur `bids`/`asks`) wurden verworfen, daher blieb `spreadPct`
+  dauerhaft `null`; (2) `updateSpread` wurde nirgends aufgerufen; (3) der
+  Feed akzeptierte nur 10 Symbole; (4) der Paper-Broker fand für Nicht-Majors
+  keinen Kurs (`NO_QUOTE`), weil der Micro-Prozess den synchronen Kurs-Cache
+  nie füllte. Live-Ticks schreiben den Kurs jetzt über `setLiveQuote()` in den
+  Cache.
+- **Krypto-Routing:** `CRYPTO_BASES` kannte nur 10 Ticker. Symbole wie `STX`,
+  `ARB`, `MANA` wurden dadurch über Yahoo auf gleichnamige Aktien geroutet
+  (STX ≈ 594 USD statt ≈ 0,33 USD) und erzeugten absurde Bewertungen. Das
+  Routing umfasst jetzt 60 verifizierte Binance-Spot-Paare.
+
+### Changed
+
+- Marktbeobachtung von 9 auf 60 Symbole erweitert; konsistentes
+  Parrondo-Regelwerk (Trend-Long mit `adx14 ≥ 20`, Mean-Reversion-Long mit
+  `adx14 ≤ 20`) über die Missionen `crypto-momentum-247`, `swing-multi-asset`
+  und Krypto-Reversion.
+
 ## [0.17.7] — Zustands-Registry, systemd und sichere Alerts (2026-10-30)
 
 ### Security / Betrieb

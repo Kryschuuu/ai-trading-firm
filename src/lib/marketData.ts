@@ -373,6 +373,21 @@ export async function getQuote(symbolRaw: string): Promise<Quote> {
   }
 }
 
+/**
+ * Live-Kurs eines Feeds in den synchronen Broker-Cache schreiben.
+ *
+ * Für Prozesse ohne HTTP-Pfad (Micro-Executor): der WebSocket-Tick ist dort
+ * die autoritative Kursquelle. Ohne diesen Eintrag liefert
+ * {@link getQuoteSync} nur die statischen Majors und der Paper-Broker weist
+ * jedes andere Symbol mit `NO_QUOTE` ab.
+ */
+export function setLiveQuote(symbolRaw: string, price: number, ts = Date.now()): void {
+  const symbol = sanitizeSymbol(symbolRaw);
+  if (!symbol) return;
+  if (!Number.isFinite(price) || price <= 0) return;
+  quoteCache.set(symbol, { price, ts, source: "live" });
+}
+
 /** Synchroner Lesezugriff auf den Cache (für Broker-Hot-Path). */
 export function getQuoteSync(symbolRaw: string): number | null {
   const symbol = sanitizeSymbol(symbolRaw);
