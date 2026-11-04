@@ -87,6 +87,12 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Changed
 
+- Trend-Sizing/ATR: Der Stop-Level wird pro Trade ATR-skalisiert
+  (`ATR × RISK_ATR_STOP_MULT`, Default 2, über die Code-Ceiling
+  `defaultStopLossPct` geklemmt) statt aus der festen Regelfolge — die
+  Positionsgröße bleibt dabei über das Risikobudget (`maxRiskPerTrade`)
+  riskiert konstant, skaliert aber mit der Marktstandahl. Ohne ATR gilt
+  weiterhin der Regel-Stop (Fail-Safe).
 - Marktbeobachtung von 9 auf 60 Symbole erweitert; konsistentes
   Parrondo-Regelwerk (Trend-Long mit `adx14 ≥ 20`, Mean-Reversion-Long mit
   `adx14 ≤ 20`) über die Missionen `crypto-momentum-247`, `swing-multi-asset`

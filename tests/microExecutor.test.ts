@@ -20,6 +20,7 @@ import {
   SimulatedFeed,
   parseBinanceStreamMessage,
   btcRegimeVetoEnabled,
+  resolveEffectiveStopPct,
   type CachedRule,
   type ExecuteContext,
   type ExecutionOutcome,
@@ -751,6 +752,13 @@ test("MicroExecutor: Live-Tick schreibt den Broker-Kurs-Cache (kein NO_QUOTE fü
   assert.equal(getQuoteSync("SNX"), 2.42, "Paper-Broker muss den Live-Kurs synchron sehen");
   await executor.stop();
   resetMarketDataCachesForTests();
+});
+
+test("Trend-Sizing/ATR: effektive Stop-Schwelle = ATR × atrStopMult, Regel-Stop als Fallback", () => {
+  assert.equal(resolveEffectiveStopPct({ ruleStopPct: 0.03, atrPct: null, atrStopMult: 2, maxStopLossPct: 0.05 }), 0.03);
+  assert.equal(resolveEffectiveStopPct({ ruleStopPct: 0.03, atrPct: 0.02, atrStopMult: 2, maxStopLossPct: 0.05 }), 0.04);
+  assert.equal(resolveEffectiveStopPct({ ruleStopPct: 0.03, atrPct: 8, atrStopMult: 2, maxStopLossPct: 0.05 }), 0.05);
+  assert.equal(resolveEffectiveStopPct({ ruleStopPct: 0.03, atrPct: Number.NaN, atrStopMult: 2, maxStopLossPct: 0.05 }), 0.03);
 });
 
 test("BTC-Regime-Veto: Abwärtstrend/Crash blockieren Longs, UNKNOWN nicht", () => {

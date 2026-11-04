@@ -1011,6 +1011,18 @@ export function createPaperRuleAdapter(opts?: {
         const equity = broker.accountEquity;
         const limits = getLimits();
         const stopPct = Math.min(ctx.spec.action.stopLossPct / 100, limits.defaultStopLossPct);
+        // Trend-Sizing/ATR (v0.17.8): Vol-basiertes Stop-Level — Risk bleibt pro
+        // Trade über das Risikobudget + maxRiskPerTrade im Sizing geklemmt. Ist
+        // der ATR verfügbar, wird der Stop als ATR×Multiplikator gesetzt
+        // (Sizing/Stop skaliert mit Volatilität statt fixer Prozent); ohne ATR
+        // bleibt der Regel-Stop (Fail-Safe). Entscheidungs-/Exit-Logik nutzt
+        // dieselbe effektive Schwelle (effStopPct).
+        const effStopPct = resolveEffectiveStopPct({
+          ruleStopPct: stopPct,
+          atrPct: ctx.snapshot.atrPct,
+          atrStopMult: loadSizingConfig().atrStopMult,
+          maxStopLossPct: limits.defaultStopLossPct,
+        });
 
         // GAP-06 (v1.46.0): Regime-Gate (nur enforce) dämpft das Signal-
         // Risikobudget der Regel mit dem Faktor je Regime × Strategieklasse —
@@ -1058,8 +1070,8 @@ export function createPaperRuleAdapter(opts?: {
           };
         }
 
-        // GAP-04 (v1.48.0): Vol-basiertes Sizing — qty = Risikobudget/Stop-
-        // Abstand. Stop: explizit aus der Regel (stopPct); fehlender/0-Stop →
+        // GAP-04 (v1.48.0) + Trend-Sizing/ATR (v0.17.8): Vol-basiertes Sizing —
+        // qty = Risikobudget/Stop-Abstand; Stop = ATR-skalisiert (effStopPct) mit
         // ATR-Fallback (k·ATR, k = RISK_ATR_STOP_MULT). Fractional-Kelly-Deckel
         // wirkt nur mit verfügbaren Journal-Statistiken (sonst wirkungslos).
         // IMMER an die Code-Ceilings geklemmt (Sizing verschärft, lockert nie).
@@ -1072,7 +1084,7 @@ export function createPaperRuleAdapter(opts?: {
           riskPerTradePct: Math.min(gatedRiskBudgetPct, limits.maxRiskPerTrade),
           entryPrice: price,
           atr: ctx.snapshot.atrPct != null ? (ctx.snapshot.atrPct / 100) * price : null,
-          stopLoss: stopPct > 0 ? price * (1 - stopPct) : null,
+          stopLoss: effStopPct > 0 ? price * (1 - effStopPct) : null,
           side: "LONG",
           missionMaxPositionPct: ctx.spec.action.maxPositionPct,
           kelly: kellyEdge,
@@ -1105,11 +1117,11 @@ export function createPaperRuleAdapter(opts?: {
         }
         const qty = sized.qty;
         const stopLoss =
-          stopPct > 0
-            ? Number((price * (1 - stopPct)).toFixed(price > 100 ? 2 : 6))
+          effStopPct > 0
+            ? Number((price * (1 - effStopPct)).toFixed(price > 100 ? 2 : 6))
             : Number(sized.stopPrice.toFixed(price > 100 ? 2 : 6));
         const tpDist =
-          (stopPct > 0 ? stopPct : Math.max(sized.stopDistancePct, 0.001)) *
+          (effStopPct > 0 ? effStopPct : Math.max(sized.stopDistancePct, 0.001)) *
           Math.min(ctx.spec.action.takeProfitRR, limits.takeProfitRR);
         const takeProfit = Number((price * (1 + tpDist)).toFixed(price > 100 ? 2 : 6));
 
@@ -1504,6 +1516,28 @@ export type MicroStatus = {
 export function btcRegimeVetoEnabled(raw = process.env.MICRO_BTC_REGIME_VETO): boolean {
   const v = String(raw ?? "true").trim().toLowerCase();
   return v !== "false" && v !== "0" && v !== "off";
+}
+
+/**
+ * Trend-Sizing/ATR: effektive Stop-Schwelle pro Trade.
+ *
+ * Vol-basiertes Stop-Level (Trend-Sizing/ATR, v0.17.8): Ist der ATR der
+ * Snapshot verfügbar, wird der Stop als ATR × `atrStopMult` (RISK_ATR_STOP_MULT,
+ * Default 2, Bounds [0.5, 6]) über die Code-Ceiling (`defaultStopLossPct`)
+ * gesetzt; ohne ATR bzw. nicht-endliche Werte bleibt der Regel-Stop (Fail-Safe,
+ * nie stiller Wechsel ohne Datenlage). Deterministisch, ohne I/O — voll
+ * unit-testbar.
+ */
+export function resolveEffectiveStopPct(input: {
+  ruleStopPct: number;
+  atrPct: number | null;
+  atrStopMult: number;
+  maxStopLossPct: number;
+}): number {
+  const atrPct = input.atrPct;
+  const atrOk = atrPct != null && Number.isFinite(atrPct) && atrPct > 0;
+  if (!atrOk) return input.ruleStopPct;
+  return Math.min(atrPct * input.atrStopMult, input.maxStopLossPct);
 }
 
 export class MicroExecutor {
