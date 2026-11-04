@@ -28,6 +28,20 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Fixed
 
+- **BTC-Regime-Veto für Long-Einstiege im Mikro-Executor eingebaut:**
+  Neue `MICRO_BTC_REGIME_VETO` (Default `true`) blockiert beim Match einen
+  neuen Long-Einstieg, solange der Marktführer (BTC) im bestätigten
+  `TREND_DOWN`/`CRASH` steht (Veto via `btcRegimeVetoesLong()`,
+  `src/lib/marketRegime.ts`; Schalter via `btcRegimeVetoEnabled()`,
+  `src/lib/microExecutor.ts`). Hintergrund: Der Vektor-Backtest (52
+  Symbole, 2026-09-10…2026-11-03, 1h, −0,2 % Round-Trip) zeigte, dass der
+  bestehende Regime-Gate (Budget-Dämpfung, `REGIME_GATE_MODE=monitor`) noch
+  nichts gegen Abwärts-Szenarien schützt — Long-Einstiege liefen trotz
+  −16 % Ø-Markt (3/52 Symbole positiv) weiter. Evidenz des Veto: mit BTC-
+  Regime-Filter sank der Erwartungswert je Trend-Trade von −0,55 % auf
+  −0,44 % und der Profit-Faktor von 0,73 auf 0,79, ohne die Rendite
+  schlechter zu machen (0,26 % der Trades fielen unter den Markt).
+- **Slot-Vergabe war nicht fair:**
 - **Makro-Zyklus konnte kalibrierte Regeln überschreiben:** Der deterministische
   Fallback erzeugt eine eigene Regel (RSI < 30, Stop 6 %, 15m) und aktiviert
   sie sofort. Da `upsertRuleSpec()` bislang jede abweichende Signatur als neue

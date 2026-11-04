@@ -19,6 +19,7 @@ import {
   SequenceFeed,
   SimulatedFeed,
   parseBinanceStreamMessage,
+  btcRegimeVetoEnabled,
   type CachedRule,
   type ExecuteContext,
   type ExecutionOutcome,
@@ -26,6 +27,7 @@ import {
   type RuleExecutionAdapter,
 } from "../src/lib/microExecutor";
 import { sanitizeRuleSpec, compileRuleSpec, type CandleLike } from "../src/lib/ruleEngine";
+import { btcRegimeVetoesLong } from "../src/lib/marketRegime";
 import { getQuoteSync, resetMarketDataCachesForTests, routeForCanonicalSymbol } from "../src/lib/marketData";
 
 // ── 1) Import-Graph-Guard: kein LLM-Code im Ausführungspfad ──────────────────
@@ -749,6 +751,22 @@ test("MicroExecutor: Live-Tick schreibt den Broker-Kurs-Cache (kein NO_QUOTE fü
   assert.equal(getQuoteSync("SNX"), 2.42, "Paper-Broker muss den Live-Kurs synchron sehen");
   await executor.stop();
   resetMarketDataCachesForTests();
+});
+
+test("BTC-Regime-Veto: Abwärtstrend/Crash blockieren Longs, UNKNOWN nicht", () => {
+  assert.equal(btcRegimeVetoesLong("TREND_DOWN"), true);
+  assert.equal(btcRegimeVetoesLong("CRASH"), true);
+  assert.equal(btcRegimeVetoesLong("TREND_UP"), false);
+  assert.equal(btcRegimeVetoesLong("RANGE"), false);
+  assert.equal(btcRegimeVetoesLong("HIGH_VOL"), false);
+  assert.equal(btcRegimeVetoesLong("UNKNOWN"), false);
+  assert.equal(btcRegimeVetoesLong(null), false);
+  process.env.MICRO_BTC_REGIME_VETO = "off";
+  try {
+    assert.equal(btcRegimeVetoEnabled(), false, "Explizites Off muss das Veto schalten");
+  } finally {
+    delete process.env.MICRO_BTC_REGIME_VETO;
+  }
 });
 
 test("Routing: erweiterte Krypto-Basen gehen an Binance, nicht an Yahoo-Aktien", () => {

@@ -88,7 +88,9 @@ import { startOfBerlinDay } from "./time";
 // Ausführungspfad (`resolveRegimeGateForExecution`), kein LLM, keine IO.
 // RMA-P2-01 (v1.61.0): dieselben Feature-Familien wie Engine/Monitor.
 import {
+  btcRegimeVetoesLong,
   evaluateInstrumentRegime,
+  getInstrumentRegime,
   resolveRegimeGateForExecution,
   strategyClassOfTemplate,
   type StrategyClass,
@@ -1016,6 +1018,26 @@ export function createPaperRuleAdapter(opts?: {
         // Budget läuft gedämpft in die Mission-Sizing-Formel (und bleibt dort
         // gegen limits.maxRiskPerTrade geklemmt → nie über den Code-Ceilings).
         // monitor/off/UNKNOWN/ohne Klasse → Faktor 1 (fail-safe, nie Raten).
+        // BTC-Regime-Veto (long-only): Im bestätigten Abwärtstrend/Crash des
+        // Marktführers pausieren neue Longs. Das ist ein VETO, keine
+        // Budget-Dämpfung — der Guardrail-Grund landet sichtbar im Journal
+        // (mit Fairness-Backoff). UNKNOWN blockiert nie; `MICRO_BTC_REGIME_VETO=false`
+        // schaltet das Veto ab.
+        const btcRegime = getInstrumentRegime("BTC")?.regime ?? "UNKNOWN";
+        if (
+          ctx.spec.action.side === "LONG" &&
+          btcRegimeVetoEnabled() &&
+          btcRegimeVetoesLong(btcRegime)
+        ) {
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: `BTC_REGIME:${btcRegime}`,
+            at: new Date().toISOString(),
+          };
+        }
+
         const regimeGate = resolveRegimeGateForExecution(symbol, ctx.strategyClass ?? null);
         const gatedRiskBudgetPct = regimeGate.applied
           ? ctx.spec.action.riskBudgetPct * regimeGate.factor
@@ -1474,6 +1496,16 @@ export type MicroStatus = {
  * `stop()` trennt sauber. `status()` liefert Diagnose (Ticks, Matches,
  * Execution-Counts, p95-Eval-Latenz, Serien-Füllung, Seed-Fehler).
  */
+/**
+ * `MICRO_BTC_REGIME_VETO` (Default `true`): blockiert neue Long-Einstiege,
+ * solange der Marktführer BTC im bestätigten `TREND_DOWN`/`CRASH` ist.
+ * Nur `false`/`0`/`off` schalten ab — jeder andere Wert bleibt aktiv.
+ */
+export function btcRegimeVetoEnabled(raw = process.env.MICRO_BTC_REGIME_VETO): boolean {
+  const v = String(raw ?? "true").trim().toLowerCase();
+  return v !== "false" && v !== "0" && v !== "off";
+}
+
 export class MicroExecutor {
   private readonly cache: RuleCache;
   private readonly adapter: RuleExecutionAdapter;
