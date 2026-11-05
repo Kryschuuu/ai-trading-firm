@@ -323,9 +323,9 @@ als reine, clock-unabhängige Funktion in `src/lib/exits.ts` gekapselt
 
 | Flag | Default | Bounds | Bedeutung |
 | --- | --- | --- | --- |
-| `RISK_TRAILING_ENABLED` | `false` | — | Trailing-Stop an/aus (aus = heutiges Verhalten) |
+| `RISK_TRAILING_ENABLED` | `true` | — | Trailing-Stop an/aus (aus = heutiges Verhalten) |
 | `RISK_TRAILING_ACTIVATION_PCT` | `1.0` | [0.1, 20] | Bewaffnungsschwelle in % Gewinn |
-| `RISK_TRAILING_RETURN_PCT` | `0.5` | [0.1, 10] | Rückgabeweg in % (Stop-Abstand zum Kurs) |
+| `RISK_TRAILING_RETURN_PCT` | `2.0` | [0.1, 10] | Rückgabeweg in % (Stop-Abstand zum Kurs) |
 | `RISK_TIME_STOP_HOURS` | `0` | [0, 720] | max. Haltedauer in h; 0 = aus |
 
 Migration: `drizzle/2026-09-18_exit_management.sql` (append-only, zwei neue

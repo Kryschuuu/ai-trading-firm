@@ -87,6 +87,14 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Changed
 
+- Trailing-Stop für Paper-Positionen aktiviert (`RISK_TRAILING_ENABLED=true`,
+  `RISK_TRAILING_ACTIVATION_PCT=1.0`, `RISK_TRAILING_RETURN_PCT=2.0`): Ab 1 %
+  Gewinn bewaffnet der Monitor einen Ratchet-Stop (LONG: nach oben, SHORT:
+  nach unten, nie verengend); Trigger → Close mit `exitReason = TRAILING_STOP`.
+  Hintergrund: Vektor-Backtest (Trend: EV −0,49 vs −0,55 %/Trade bei fixer TP)
+  und Literatur (ATR/Chandelier-Trailing) sehen im fixen TP-Zug ein leichtes
+  Minus; die vorhandene Trailing-Infrastruktur (Exit-Management GAP-05) wird
+  damit aktiviert — ohne Verhaltensänderung für SL/TP.
 - Trend-Sizing/ATR: Der Stop-Level wird pro Trade ATR-skalisiert
   (`ATR × RISK_ATR_STOP_MULT`, Default 2, über die Code-Ceiling
   `defaultStopLossPct` geklemmt) statt aus der festen Regelfolge — die
