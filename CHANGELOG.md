@@ -87,8 +87,10 @@ erlaubt, solange sie hier dokumentiert sind).
 
 ### Changed
 
-- Trailing-Stop für Paper-Positionen aktiviert (`RISK_TRAILING_ENABLED=true`,
-  `RISK_TRAILING_ACTIVATION_PCT=1.0`, `RISK_TRAILING_RETURN_PCT=2.0`): Ab 1 %
+- Trailing-Stop in der laufenden Paper-Instanz aktiviert
+  (`.env`: `RISK_TRAILING_ENABLED=true`, `RISK_TRAILING_ACTIVATION_PCT=1.0`,
+  `RISK_TRAILING_RETURN_PCT=2.0`; Code-Defaults bleiben bewusst `false`/`0.5`):
+  Ab 1 %
   Gewinn bewaffnet der Monitor einen Ratchet-Stop (LONG: nach oben, SHORT:
   nach unten, nie verengend); Trigger → Close mit `exitReason = TRAILING_STOP`.
   Hintergrund: Vektor-Backtest (Trend: EV −0,49 vs −0,55 %/Trade bei fixer TP)

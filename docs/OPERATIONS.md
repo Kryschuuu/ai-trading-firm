@@ -272,6 +272,9 @@ Ist bereits eine Pipeline im Prozess aktiv, antwortet die API mit `409`
 | `RISK_CORR_THRESHOLD` | `0.8` | Bei `0.7` verkettet Single-Linkage 37 von 60 Symbolen zu **einem** Cluster — der Guardrail hätte dann nur noch 4 Positionen insgesamt erlaubt. Bei `0.8` bleibt ein 14er-Block |
 | `RISK_MAX_PER_CLUSTER` | `4` | Lässt die vollen 8 Slots zu, erzwingt aber Streuung über die weniger korrelierten Namen |
 | `RISK_TIME_STOP_HOURS` | `48` | Hängende Positionen geben ihren Slot zurück, ohne auf SL/TP zu warten |
+| `RISK_TRAILING_ENABLED` | `true` | Ab 1 % Gewinn bewaffnet der Monitor einen Ratchet-Stop; Vektor-Backtest (Trend: EV −0,49 vs −0,55 %/Trade bei fixer TP) und Literatur (ATR/Chandelier-Trailing) sprechen gegen den rein fixen TP-Ausstieg |
+| `RISK_TRAILING_ACTIVATION_PCT` | `1.0` | Bewaffnung erst ab 1 % Gewinn — vorher bleibt der fixe SL/TP unangetastet |
+| `RISK_TRAILING_RETURN_PCT` | `2.0` | 2 % Rückgabeweg statt Code-Default 0,5 %: bei 0,5 % riss der Ratchet im normalen Rauschen zu früh, der Backtest-Vorteil verschwand |
 | `MICRO_BLOCKED_BACKOFF_MS` | `60000` | Eine dauerhaft geblockte Regel pausiert nach jedem Fehlversuch — sonst gewinnt sie jeden freien Slot und flutet das Journal |
 | `ROUTING_DISABLED_PROVIDERS` | `ollama` | Auf dieser CPU-Box liefert das lokale 3b-Modell nicht einmal 8 Tokens in 90 s; der Makro-Zyklus nutzt den deterministischen Fallback |
 

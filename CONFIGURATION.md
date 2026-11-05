@@ -589,10 +589,15 @@ Prozess-Neustart verliert keinen erreichten Stop. Doku:
 
 | Flag | Default | Bedeutung |
 | --- | --- | --- |
-| `RISK_TRAILING_ENABLED` | `true` | Trailing-Stop insgesamt. Bewaffnet ab `RISK_TRAILING_ACTIVATION_PCT` Gewinn: der Monitor hebt den Stop mit dem Kurs (LONG: nur nach oben, SHORT: nur nach unten — ein Ratchet, der **nie** automatisch verengt). Trigger → Close mit `exitReason = TRAILING_STOP`. | Bewaffnet ab `RISK_TRAILING_ACTIVATION_PCT` Gewinn: der Monitor hebt den Stop mit dem Kurs (LONG: nur nach oben, SHORT: nur nach unten — ein Ratchet, der **nie** automatisch verengt). Trigger → Close mit `exitReason = TRAILING_STOP`. |
+| `RISK_TRAILING_ENABLED` | `false` | Trailing-Stop insgesamt. Bewaffnet ab `RISK_TRAILING_ACTIVATION_PCT` Gewinn: der Monitor hebt den Stop mit dem Kurs (LONG: nur nach oben, SHORT: nur nach unten — ein Ratchet, der **nie** automatisch verengt). Trigger → Close mit `exitReason = TRAILING_STOP`. |
 | `RISK_TRAILING_ACTIVATION_PCT` | `1.0` | Gewinn in Prozent (vom Einstiegskurs, seitenrichtig für LONG/SHORT), ab dem der Trailing-Stop bewaffnet wird. Bounds [0.1, 20], Clamp mit sicherem Default. |
-| `RISK_TRAILING_RETURN_PCT` | `2.0` | Erlaubter Rückgabeweg in Prozent: Stop = Kurs − Rückgabeweg (LONG; SHORT gespiegelt). Bounds [0.1, 10]. |
+| `RISK_TRAILING_RETURN_PCT` | `0.5` | Erlaubter Rückgabeweg in Prozent: Stop = Kurs − Rückgabeweg (LONG; SHORT gespiegelt). Bounds [0.1, 10]. |
 | `RISK_TIME_STOP_HOURS` | `0` | Maximale Haltedauer einer Position in Stunden → Close mit `exitReason = TIME_STOP`. `0` = aus (Default). Bounds [0, 720] (= 24 · 30). |
+
+Die Tabelle nennt die Code-Defaults. Die laufende Paper-Instanz überschreibt
+sie bewusst per `.env` (Trailing an, `RISK_TRAILING_RETURN_PCT=2.0`); die
+aktiven Werte samt Begründung stehen in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#aktive-risiko-konfiguration-paper).
 
 Zusätzlich hart verdrahtet (kein Flag, keine Konfiguration nötig):
 
