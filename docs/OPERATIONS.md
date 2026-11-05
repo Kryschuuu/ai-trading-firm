@@ -219,6 +219,70 @@ Brecher-Latch und darf bei einem erneuten Bruch wieder auslösen.
 * **Keine Secrets im Alert:** Alerts enthalten Code, Severity, Meldung und
   klassifizierte Metadaten — keine Tokens, URLs oder Kontodaten.
 
+## 5. Vollautomatischer Betrieb (systemd-User-Units)
+
+Drei Units halten die Firma ohne manuellen Eingriff am Laufen. Alle lesen
+`EnvironmentFile=.env`, arbeiten im Projektverzeichnis und schreiben ins
+Journal (`journalctl --user -u <unit> -f`).
+
+| Unit | Typ | Takt | Aufgabe |
+| --- | --- | --- | --- |
+| `ai-trading-firm.service` | Dienst | dauerhaft | Next.js-App inkl. Scheduler (Tick, Analysten, Makro, Recon) |
+| `ai-trading-firm-micro.service` | Dienst | dauerhaft | LLM-freier Micro-Executor: WebSocket-Ticks → `trade_rules` (ACTIVE) → Paper-Broker |
+| `ai-trading-firm-market-sync.timer` | Timer | stündlich | `npm run market:sync -- --venue=BITUNIX --max-instruments=800` (öffentliche Endpunkte, keine Keys) |
+| `ai-trading-firm-pipeline.timer` | Timer | alle 4 h | `scripts/auto-pipeline.sh`: LLM-Pipeline für je `MAX_MISSIONS` ACTIVE-Missionen, rotierend (`Nice=10`, idle-I/O) |
+
+### Missions-Pipeline (`scripts/auto-pipeline.sh`)
+
+Der Scheduler startet **keine** Missions-Pipeline — Proposals entstehen nur
+über `POST /api/firm/run {missionId, pipeline:true}`. Das Skript übernimmt
+diesen Teil: Es liest die ACTIVE-Missionen, filtert auf handelbare Symbole
+(`BTC, ETH, SOL, XRP, BNB, ADA, DOGE, AVAX, LINK, DOT`) bzw. Segmente
+(`CRYPTO`, `ALL`, `LIQUID`) und startet pro Aufruf `MAX_MISSIONS` Läufe
+(Default 3). Der Cursor in `data/auto-pipeline-cursor.json` rotiert weiter,
+damit die lokale LLM-Instanz nicht dauerhaft ausgelastet wird.
+
+```bash
+MAX_MISSIONS=1 PIPELINE_TIMEOUT_S=1500 bash scripts/auto-pipeline.sh   # Einzellauf
+systemctl --user list-timers 'ai-trading-firm-*'                        # nächste Läufe
+```
+
+Ist bereits eine Pipeline im Prozess aktiv, antwortet die API mit `409`
+(`PIPELINE_ALREADY_RUNNING`); das Skript protokolliert das und fährt fort.
+
+### Grenzen
+
+* **Paper-only:** Die Pipeline handelt ausschließlich im Paper-Modus. Der
+  Live-Gate bleibt unabhängig davon geschlossen (`LIVE_TRADING.md`).
+* **Regeln brauchen `ACTIVE`:** Der Micro-Executor lädt nur
+  `trade_rules.status = 'ACTIVE'`; DRAFT-Regeln werden ignoriert. Regeln
+  entstehen über den Makro-Zyklus oder `POST /api/firm/rules` (mit
+  `activate: true`).
+* **Timeframe ≤ 1h:** Der Micro-Executor führt nur Regeln aus, deren
+  Timeframe nicht länger als das Ausführungsintervall ist (Default `1h`).
+* **Kill-Switch bleibt autoritativ:** Ein engagierter Brecher stoppt beide
+  Prozesse sofort; die Timer laufen weiter, handeln aber nicht.
+
+### Aktive Risiko-Konfiguration (Paper)
+
+| Einstellung | Wert | Begründung |
+| --- | --- | --- |
+| `maxConcurrentPositions` (DB `risk_config`) | `8` | 8 × 0,5 % Risiko = 4 % maximaler Gleichzeitverlust, unter dem Tageslimit von 5 % |
+| `RISK_CLUSTER_LIMITS_MODE` | `enforce` | Mit 60/60 Symbolen frischer 1h-Historie ist der Guardrail belastbar; er verhindert, dass alle Slots in denselben hochkorrelierten Block gehen |
+| `RISK_CORR_THRESHOLD` | `0.8` | Bei `0.7` verkettet Single-Linkage 37 von 60 Symbolen zu **einem** Cluster — der Guardrail hätte dann nur noch 4 Positionen insgesamt erlaubt. Bei `0.8` bleibt ein 14er-Block |
+| `RISK_MAX_PER_CLUSTER` | `4` | Lässt die vollen 8 Slots zu, erzwingt aber Streuung über die weniger korrelierten Namen |
+| `RISK_TIME_STOP_HOURS` | `48` | Hängende Positionen geben ihren Slot zurück, ohne auf SL/TP zu warten |
+| `RISK_TRAILING_ENABLED` | `true` | Ab 1 % Gewinn bewaffnet der Monitor einen Ratchet-Stop; Vektor-Backtest (Trend: EV −0,49 vs −0,55 %/Trade bei fixer TP) und Literatur (ATR/Chandelier-Trailing) sprechen gegen den rein fixen TP-Ausstieg |
+| `RISK_TRAILING_ACTIVATION_PCT` | `1.0` | Bewaffnung erst ab 1 % Gewinn — vorher bleibt der fixe SL/TP unangetastet |
+| `RISK_TRAILING_RETURN_PCT` | `2.0` | 2 % Rückgabeweg statt Code-Default 0,5 %: bei 0,5 % riss der Ratchet im normalen Rauschen zu früh, der Backtest-Vorteil verschwand |
+| `MICRO_BLOCKED_BACKOFF_MS` | `60000` | Eine dauerhaft geblockte Regel pausiert nach jedem Fehlversuch — sonst gewinnt sie jeden freien Slot und flutet das Journal |
+| `ROUTING_DISABLED_PROVIDERS` | `ollama` | Auf dieser CPU-Box liefert das lokale 3b-Modell nicht einmal 8 Tokens in 90 s; der Makro-Zyklus nutzt den deterministischen Fallback |
+
+Der Cluster-Guardrail wertet den **append-only HistoricalStore** aus (1h, 90
+Kerzen ≈ 3,75 Tage). Sind die Daten älter als 24 h oder fehlt eine Serie,
+lehnt `enforce` konservativ ab (`cluster-exposure:correlation-stale`) — das
+ist gewollt, aber ein Signal für einen hängenden `market-sync`-Timer.
+
 ## Verwandte Dokumente
 
 * [`OPERATIONS_CENTER.md`](OPERATIONS_CENTER.md) — Diagnose-Walkthrough und API-Vertrag des Operations Centers

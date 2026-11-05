@@ -195,9 +195,12 @@ export function createHistoricalStoreSource(opts: {
   resolveInstrumentId?: (symbol: string) => string | null;
 } = {}): CorrelationSource {
   const timeframe = opts.timeframe ?? CLUSTER_TIMEFRAME;
-  const resolveId = opts.resolveInstrumentId ?? defaultResolveInstrumentId;
   let store: HistoricalStore | null = null;
   const getStore = (): HistoricalStore => (store ??= opts.store ?? new HistoricalStore());
+  // Ohne Injektion darf der Resolver die vorhandene Serie als letzte Instanz
+  // prüfen (Registry-Lücken bei Krypto-Tickern, siehe unten).
+  const resolveId =
+    opts.resolveInstrumentId ?? ((symbol: string) => defaultResolveInstrumentId(symbol, getStore(), timeframe));
 
   return async (symbols, windowCandles): Promise<ClusterCorrelationData | null> => {
     if (symbols.length < 2) return null;
@@ -253,14 +256,85 @@ export function createHistoricalStoreSource(opts: {
  * `EUR/USD`) → Instrument-ID des Universums (z. B. `PAPER:BTC`), unter der
  * die HistoricalStore-Kerzen liegen. Registry nicht erreichbar → `null`
  * (fail-closed: Guardrail wertet das als STALE, nie als „unkorrelliert“).
+ *
+ * Venue-Fallback: Der Mikro-Executor arbeitet mit Basis-Tickern (`SUI`), die
+ * Registry kennt Instrumente aber venue-qualifiziert (`BITUNIX:SUIUSDT`).
+ * Ohne den Fallback liefert die Auflösung für JEDES Krypto-Symbol `null` —
+ * der Cluster-Guardrail meldete dann dauerhaft `correlation-stale` (belegt in
+ * `audit_log`), obwohl die 1h-Historie vorhanden und frisch ist.
  */
-function defaultResolveInstrumentId(symbol: string): string | null {
+/**
+ * Kandidaten-IDs für ein Positions-Symbol, in Prioritätsreihenfolge.
+ *
+ * Die Registry des Universums führt Krypto venue-qualifiziert
+ * (`BITUNIX:SUIUSDT`), der Mikro-Executor arbeitet mit Basis-Tickern (`SUI`).
+ * Die Reihenfolge bevorzugt die Venue, unter der die frische 1h-Historie
+ * liegt (BITUNIX vor BINANCE vor PAPER).
+ *
+ * Reine Funktion — direkt getestet in `tests/riskGuard.cluster.test.ts`.
+ */
+export function instrumentIdCandidates(symbol: string): string[] {
+  const cleaned = String(symbol ?? "").trim().toUpperCase();
+  const bare = (cleaned.includes(":") ? cleaned.slice(cleaned.lastIndexOf(":") + 1) : cleaned)
+    .replace(/[^A-Z0-9]/g, "");
+  if (!bare) return [];
+  const pairs = /(USDT|USDC|USD)$/.test(bare) ? [bare] : [`${bare}USDT`, `${bare}USD`, `${bare}USDC`];
+  // Manche Venues quoten sehr kleine Preise als 1:1000-Kontrakt
+  // (`1000PEPEUSDT`, `1000SHIBUSDT`, `1000BONKUSDT`). Ohne diesen Alias
+  // bleiben PEPE/SHIB/BONK dauerhaft ohne Korrelationsdaten.
+  const kilo = pairs
+    .filter((pair) => !pair.startsWith("1000"))
+    .map((pair) => `1000${pair}`);
+  return [...pairs, ...kilo].flatMap((pair) => [
+    `BITUNIX:${pair}`,
+    `BINANCE:${pair}`,
+    pair,
+    `PAPER:${pair}`,
+  ]);
+}
+
+function defaultResolveInstrumentId(
+  symbol: string,
+  store?: Pick<HistoricalStore, "query">,
+  timeframe: SupportedTimeframe = CLUSTER_TIMEFRAME,
+): string | null {
   try {
     const manager = getProductionMarketDataManager();
     const bySymbol = manager.resolveInstrument(symbol);
     if (bySymbol) return bySymbol.id;
     const byId = manager.resolveInstrument(`PAPER:${symbol}`);
-    return byId?.id ?? null;
+    if (byId) return byId.id;
+
+    const candidates = instrumentIdCandidates(symbol);
+
+    // Mit Store entscheidet die FRISCHE der Serie, nicht die Registry: die
+    // Registry ist lückenhaft (z. B. fehlt `BITUNIX:SOLUSDT`, obwohl die
+    // 1h-Historie dort liegt, während `BINANCE:SOLUSDT` registriert ist, aber
+    // keine Kerzen hat). Eine reine Registry-Auflösung lieferte deshalb für
+    // SOL/XRP/UNI `null` → `correlation-stale`, obwohl die Daten da sind.
+    if (store) {
+      let best: { id: string; ts: number } | null = null;
+      for (const id of candidates) {
+        let rows: Array<{ ts: number }>;
+        try {
+          rows = store.query({ instrumentId: id, timeframe, limit: 1 });
+        } catch {
+          continue; // Serie nicht lesbar → nächster Kandidat
+        }
+        const ts = rows.length ? Number(rows[rows.length - 1].ts) : 0;
+        if (!ts) continue;
+        if (!best || ts > best.ts) best = { id, ts };
+      }
+      if (best) return best.id;
+    }
+
+    // Ohne Store (oder ohne jede Kerze) zählt die Registry — das Ergebnis ist
+    // dann ehrlich STALE, nie „unkorreliert“.
+    for (const candidate of candidates) {
+      const hit = manager.resolveInstrument(candidate);
+      if (hit) return hit.id;
+    }
+    return null;
   } catch {
     return null;
   }

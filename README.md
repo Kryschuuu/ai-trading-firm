@@ -195,7 +195,7 @@ npm run market:sync -- --dry-run --venue=BINANCE # einzelnes Venue-Warmup prüfe
 npm run scan -- --sync-first       # deterministischer Scan auf dem Warmup
 rm -rf .next node_modules/.cache   # Build-Cache löschen (verhindert instanceof-Drift)
 npm run build
-npm run start               # http://0.0.0.0:3369
+npm run start               # http://127.0.0.1:3369 (Loopback; remote via tailscale serve)
 ./scripts/validate-setup.sh        # 18 Checks, bestanden ab 15
 ```
 

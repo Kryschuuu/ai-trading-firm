@@ -24,6 +24,113 @@ erlaubt, solange sie hier dokumentiert sind).
 > **Status-Header:** **Beta** · Dokumentationsstand **2026-10-30** · Code-Version **0.17.7** ·
 > Kanonische Quelle der Version: `package.json` (siehe [`VERSION.md`](VERSION.md)).
 
+## [Unreleased]
+
+### Fixed
+
+- **BTC-Regime-Veto für Long-Einstiege im Mikro-Executor eingebaut:**
+  Neue `MICRO_BTC_REGIME_VETO` (Default `true`) blockiert beim Match einen
+  neuen Long-Einstieg, solange der Marktführer (BTC) im bestätigten
+  `TREND_DOWN`/`CRASH` steht (Veto via `btcRegimeVetoesLong()`,
+  `src/lib/marketRegime.ts`; Schalter via `btcRegimeVetoEnabled()`,
+  `src/lib/microExecutor.ts`). Hintergrund: Der Vektor-Backtest (52
+  Symbole, 2026-09-10…2026-11-03, 1h, −0,2 % Round-Trip) zeigte, dass der
+  bestehende Regime-Gate (Budget-Dämpfung, `REGIME_GATE_MODE=monitor`) noch
+  nichts gegen Abwärts-Szenarien schützt — Long-Einstiege liefen trotz
+  −16 % Ø-Markt (3/52 Symbole positiv) weiter. Evidenz des Veto: mit BTC-
+  Regime-Filter sank der Erwartungswert je Trend-Trade von −0,55 % auf
+  −0,44 % und der Profit-Faktor von 0,73 auf 0,79, ohne die Rendite
+  schlechter zu machen (0,26 % der Trades fielen unter den Markt).
+- **Slot-Vergabe war nicht fair:**
+- **Makro-Zyklus konnte kalibrierte Regeln überschreiben:** Der deterministische
+  Fallback erzeugt eine eigene Regel (RSI < 30, Stop 6 %, 15m) und aktiviert
+  sie sofort. Da `upsertRuleSpec()` bislang jede abweichende Signatur als neue
+  Version anlegte, hätte ein einziger Makro-Lauf das gesamte handgepflegte
+  Regelwerk (87 MANUAL) ersetzt. Neu: Ist die aktive Regel für `symbol+mission`
+  `sourceRole=MANUAL`, liefert ein automatischer Entwurf (`SIGMA`/`FALLBACK`)
+  `MANUAL_AUTHORITY` und schreibt nichts. MANUAL darf MANUAL weiterhin
+  versionieren; Regressionstest in `tests/sec06.ruleLifecycleAuthz.test.ts`.
+- **Slot-Vergabe war nicht fair:** Ein `BLOCKED`-Versuch verbrauchte weder
+  Cooldown noch Tageslimit, also matchte eine dauerhaft abgelehnte Regel bei
+  jedem Tick erneut. In 25 Minuten entfielen 6767 von 10979 Treffern auf eine
+  einzige Regel (`ZEC Trend Long`) — sobald ein Slot frei wurde, gewann fast
+  immer dieselbe Gelegenheit, und das Journal lief voll. Neu:
+  `MICRO_BLOCKED_BACKOFF_MS` (Default 60 s) pausiert eine Regel nach einem
+  Fehlversuch. Fehlversuche zählen weiterhin weder als Ausführung noch gegen
+  das Tageslimit.
+- **Cluster-Resolver nahm die falsche Venue:** Er bevorzugte den ersten
+  Registry-Treffer, obwohl die 1h-Kerzen unter einer anderen ID liegen
+  (`BINANCE:SOLUSDT` registriert, Historie unter `BITUNIX:SOLUSDT`). Bei
+  aktivem Store entscheidet jetzt die **frischste vorhandene Serie**, die
+  Registry bleibt Rückfallebene. Abdeckung: 48 → 60 von 60 Symbolen.
+  1:1000-Kontrakte (`1000PEPE`/`1000SHIB`/`1000BONK`) sind als Alias enthalten.
+- **Cluster-Guardrail war blind:** Der Instrument-Resolver löste Basis-Ticker
+  (`SUI`) nicht auf, weil die Universums-Registry Krypto venue-qualifiziert
+  führt (`BITUNIX:SUIUSDT`). Dadurch lieferte die Korrelationsquelle für jedes
+  Krypto-Symbol `null` und der Guardrail meldete dauerhaft
+  `correlation-stale` (19 Einträge in `audit_log`). Der Resolver probiert jetzt
+  `BITUNIX:`/`BINANCE:`-IDs, Quote-Varianten (`USDT`/`USD`/`USDC`) und als
+  letzte Instanz die vorhandene HistoricalStore-Serie. Ergebnis: 90 gemeinsame
+  1h-Renditen, echte Korrelationen (0,44–0,85) statt „keine Aussage“.
+- **Micro-Executor handelte nie:** Vier Ursachen behoben, die zusammen jeden
+  Regel-Match verhinderten — (1) Buch-Ticks des Binance-`@depth5`-Streams
+  (kein `e`/`s`, nur `bids`/`asks`) wurden verworfen, daher blieb `spreadPct`
+  dauerhaft `null`; (2) `updateSpread` wurde nirgends aufgerufen; (3) der
+  Feed akzeptierte nur 10 Symbole; (4) der Paper-Broker fand für Nicht-Majors
+  keinen Kurs (`NO_QUOTE`), weil der Micro-Prozess den synchronen Kurs-Cache
+  nie füllte. Live-Ticks schreiben den Kurs jetzt über `setLiveQuote()` in den
+  Cache.
+- **Krypto-Routing:** `CRYPTO_BASES` kannte nur 10 Ticker. Symbole wie `STX`,
+  `ARB`, `MANA` wurden dadurch über Yahoo auf gleichnamige Aktien geroutet
+  (STX ≈ 594 USD statt ≈ 0,33 USD) und erzeugten absurde Bewertungen. Das
+  Routing umfasst jetzt 60 verifizierte Binance-Spot-Paare.
+
+### Changed
+
+- Trailing-Stop in der laufenden Paper-Instanz aktiviert
+  (`.env`: `RISK_TRAILING_ENABLED=true`, `RISK_TRAILING_ACTIVATION_PCT=1.0`,
+  `RISK_TRAILING_RETURN_PCT=2.0`; Code-Defaults bleiben bewusst `false`/`0.5`):
+  Ab 1 %
+  Gewinn bewaffnet der Monitor einen Ratchet-Stop (LONG: nach oben, SHORT:
+  nach unten, nie verengend); Trigger → Close mit `exitReason = TRAILING_STOP`.
+  Hintergrund: Vektor-Backtest (Trend: EV −0,49 vs −0,55 %/Trade bei fixer TP)
+  und Literatur (ATR/Chandelier-Trailing) sehen im fixen TP-Zug ein leichtes
+  Minus; die vorhandene Trailing-Infrastruktur (Exit-Management GAP-05) wird
+  damit aktiviert — ohne Verhaltensänderung für SL/TP.
+- Trend-Sizing/ATR: Der Stop-Level wird pro Trade ATR-skalisiert
+  (`ATR × RISK_ATR_STOP_MULT`, Default 2, über die Code-Ceiling
+  `defaultStopLossPct` geklemmt) statt aus der festen Regelfolge — die
+  Positionsgröße bleibt dabei über das Risikobudget (`maxRiskPerTrade`)
+  riskiert konstant, skaliert aber mit der Marktstandahl. Ohne ATR gilt
+  weiterhin der Regel-Stop (Fail-Safe).
+- Marktbeobachtung von 9 auf 60 Symbole erweitert; konsistentes
+  Parrondo-Regelwerk (Trend-Long mit `adx14 ≥ 20`, Mean-Reversion-Long mit
+  `adx14 ≤ 20`) über die Missionen `crypto-momentum-247`, `swing-multi-asset`
+  und Krypto-Reversion.
+- Der Binance-Nachrichtenparser ist als reine Funktion
+  `parseBinanceStreamMessage()` herausgezogen; damit sind Partial-Book,
+  Trade- und Kline-Frames ohne WebSocket testbar.
+- Betrieb: Missions-Pipeline läuft alle 4 h statt alle 90 min und mit
+  `Nice=10`/`IOSchedulingClass=idle`, damit ein LLM-Lauf den Handel nicht
+  verdrängt; `LLM_TIMEOUT_MS=60000` begrenzt fehlschlagende Modellaufrufe.
+  `RISK_TIME_STOP_HOURS=48` gibt hängenden Positionen ihren Slot zurück.
+- Der stündliche Marktdaten-Sync deckt mit `--max-instruments=800` alle
+  BITUNIX-Instrumente ab (vorher Top-250 nach 24h-Volumen). Damit liegen auch
+  für weniger liquide Symbole frische 1h-Kerzen als Basis von Korrelation,
+  Regime und Scanner vor.
+- `ROUTING_DISABLED_PROVIDERS=ollama`: Auf dieser CPU-Box liefert das lokale
+  3b-Modell nicht einmal 8 Tokens in 90 s und blockiert danach einen Kern.
+  Der Provider ist gesperrt, bis ein tragbares Modell bereitsteht; der
+  Makro-Zyklus nutzt in dieser Zeit den deterministischen Fallback. Zum
+  Reaktivieren genügt das Entfernen des Eintrags (oder der UI-Schalter).
+
+### Tests
+
+- Regressionstests für den Ausführungspfad: `@depth5`-Partial-Book ohne
+  `e`/`s`, Spread-Ableitung aus Top-of-Book bis in den Regel-Snapshot,
+  `setLiveQuote()` → `getQuoteSync()` und Krypto-Routing der erweiterten
+  Basen (`STX`/`ARB`/`MANA`/`SNX` dürfen nicht bei Yahoo landen).
+
 ## [0.17.7] — Zustands-Registry, systemd und sichere Alerts (2026-10-30)
 
 ### Security / Betrieb

@@ -255,6 +255,7 @@ Alle Schwellen: `CONFIGURATION.md` §„Regime-Gate“ und `.env.example`.
 | `REGIME_MACRO_VIX_HIGH` | `30` | [10, 100] — Makro-Vote → `HIGH_VOL` |
 | `REGIME_SNAPSHOT_RETENTION_DAYS` | `90` | [7, 365] — `pruneRegimeSnapshots` |
 | `PERP_DATA_ENABLED` | `false` | Perp-Familie nur bei `true`; sonst `MISSING` (niemals 0) |
+| `MICRO_BTC_REGIME_VETO` | `true` | BTC-Marktführers (`TREND_DOWN`/`CRASH`) blockiert neue Long-Einstiege im Mikro-Executor; `false` schaltet ab. In dieser Komponente als `false`/`0`/`off` lesbar (Fail-Closed gegen stilles Aus). |
 
 ## 6. Abweichungen / Offene Punkte
 

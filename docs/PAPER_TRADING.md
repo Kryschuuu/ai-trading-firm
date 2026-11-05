@@ -328,6 +328,11 @@ als reine, clock-unabhängige Funktion in `src/lib/exits.ts` gekapselt
 | `RISK_TRAILING_RETURN_PCT` | `0.5` | [0.1, 10] | Rückgabeweg in % (Stop-Abstand zum Kurs) |
 | `RISK_TIME_STOP_HOURS` | `0` | [0, 720] | max. Haltedauer in h; 0 = aus |
 
+Die Tabelle nennt die Code-Defaults (alle Exits aus). Die laufende
+Paper-Instanz aktiviert den Trailing-Stop per `.env`; die aktiven Werte
+stehen in
+[`OPERATIONS.md`](OPERATIONS.md#aktive-risiko-konfiguration-paper).
+
 Migration: `drizzle/2026-09-18_exit_management.sql` (append-only, zwei neue
 Spalten auf `positions`) oder `npx drizzle-kit push`. Bewusst **Paper-only**:
 Die Auslösung ist Ledger-/DB-Logik; ein Order-Mapping (Conditional/Reduce-Only)

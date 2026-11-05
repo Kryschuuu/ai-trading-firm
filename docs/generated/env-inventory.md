@@ -7,7 +7,7 @@
 > — Abgleich: [`.env.example`](../../.env.example), [`CONFIGURATION.md`](../../CONFIGURATION.md), Install-Guides
 > — Pflege: neues Flag mit `env*`-Helper lesen, in `.env.example` und `CONFIGURATION.md` eintragen, Skript neu laufen lassen.
 
-Insgesamt **300** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensräume (Muster `env[…]`): 1 — über die Musterprüfung abgedeckt, nicht einzeln gelistet.
+Insgesamt **302** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensräume (Muster `env[…]`): 1 — über die Musterprüfung abgedeckt, nicht einzeln gelistet.
 
 
 | Flag | gelesen | in `.env.example` | in `CONFIGURATION.md` |
@@ -150,6 +150,8 @@ Insgesamt **300** Env-Namen (gelesen und/oder dokumentiert). Dynamische Namensr�
 | `MARKET_SYNC_AGGREGATE` | ✅ | ✅ | ✅ |
 | `MARKET_SYNC_ENABLED` | ✅ | ✅ | — |
 | `MARKET_SYNC_VENUES` | ✅ | ✅ | — |
+| `MICRO_BLOCKED_BACKOFF_MS` | ✅ | — | ✅ |
+| `MICRO_BTC_REGIME_VETO` | ✅ | — | ✅ |
 | `MICRO_FEED` | ✅ | ✅ | ✅ |
 | `MICRO_HEALTH_PORT` | ✅ | ✅ | ✅ |
 | `MICRO_RULE_REFRESH_MS` | ✅ | ✅ | — |

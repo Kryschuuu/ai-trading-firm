@@ -2,6 +2,45 @@
 
 > **Status-Header:** **Bestandsdokument** · **Stand:** nicht datiert · **Code-Version:** v0.17.7 (Beta) · Vollabgleich offen — [DC-06](audits/2026-10-06-docs-code-audit/findings/DC-06-symbol-und-pfad-drift.md)
 
+> ## Stand 2026-10-30: Loopback-Bind, LAN über Host-Forwarder, Tailnet via serve
+>
+> Dieses Dokument beschreibt den Stand **vor v0.17.4**. Seit **ASA-08** bindet
+> `npm run start` hart auf `127.0.0.1:3369` (`package.json`); `APP_BIND_HOST`
+> wird nicht mehr ausgewertet. „Bug 1" unten ist damit kein Bug mehr, sondern
+> gewollt. Zwei Zugangswege sind aktiv:
+>
+> **1. LAN — `https://trading.local`** (Caddy-Container → Host-Forwarder)
+>
+> - `ai-trading-firm-lan-bridge.service` (systemd **--user**, enabled) lauscht
+>   auf `172.20.0.1:3369` (Gateway des Docker-Netzes `nas-server_web`) und
+>   leitet per `socat` an `127.0.0.1:3369` weiter.
+> - Caddy: `trading.local { tls internal; reverse_proxy 172.20.0.1:3369 }` —
+>   **nicht** `host.docker.internal` (das zeigt auf `172.17.0.1`, `docker0` ist
+>   DOWN).
+> - nftables erlaubt nur `iifname { "docker0", "br-*" } tcp dport 3369`, also
+>   Container→Host. Kein LAN-Gerät erreicht 3369 direkt (nur der Admin-PC).
+> - Das Zertifikat kommt aus der Caddy-CA (`tls internal`). Auf Clients einmal
+>   `root.crt` importieren:
+>   `docker exec nas-server-proxy-1 cat /data/caddy/pki/authorities/local/root.crt`
+>
+> **2. Tailnet — `https://data.tail38413e.ts.net:8444/`**
+>
+> ```bash
+> sudo tailscale serve --bg --https=8444 http://127.0.0.1:3369   # tailnet only
+> tailscale serve status
+> ```
+>
+> **Lokal:** `http://127.0.0.1:3369`.
+>
+> **Diagnose:** `ss -lntp | grep 3369` zeigt `127.0.0.1:3369` **und**
+> `172.20.0.1:3369`; `systemctl --user status ai-trading-firm-lan-bridge`.
+>
+> **Rate-Limit:** `TRUSTED_PROXY_IPS` bleibt leer → alle Clients teilen den
+> `local`-Bucket. `X-Verified-IP` wird ignoriert und ist damit nicht spoofbar.
+>
+> **Nicht** auf `0.0.0.0` binden (ASA-08/Befund C2), sonst ist der Dienst am
+> Proxy vorbei erreichbar und der Header spoofbar.
+
 > **Kurzfassung:** Nach Update/Setup ist die App nur auf `127.0.0.1` erreichbar und der
 > systemd-Dienst crasht mit `EADDRINUSE`. Danach meldet das Dashboard eine
 > abgelaufene Sitzung — **nicht** die Datenbank. Seit v1.39.0 bleibt die
@@ -12,7 +51,7 @@
 > ```bash
 > npm run stop                          # alten 127.0.0.1-Prozess beenden
 > sudo systemctl restart ai-trading-firm
-> ss -tlnp | grep 3369                  # muss 0.0.0.0:3369 zeigen
+> ss -tlnp | grep 3369                  # muss 127.0.0.1:3369 zeigen
 > ```
 >
 > Danach im Dashboard **einmal neu anmelden** (Token aus `.env`). Der Firm-Status
@@ -21,6 +60,12 @@
 ---
 
 ## Bug 1 — LAN nicht erreichbar nach Update
+
+> **Historisch (vor v0.17.4).** Damals war der `0.0.0.0`-Bind das Ziel. Heute
+> ist der Loopback-Bind gewollt; LAN/Tailnet-Zugriff läuft über
+> `trading.local` (Caddy → Host-Forwarder) bzw. `tailscale serve` (siehe Kasten
+> oben). Wer die App trotzdem direkt im LAN veröffentlichen will, bindet
+> **nicht** breiter, sondern setzt einen TCP-Forwarder vor `127.0.0.1:3369`.
 
 ### Symptom
 
@@ -38,7 +83,7 @@ LISTEN 127.0.0.1:3369  (next start -H 127.0.0.1)
 
 Das ist typischerweise ein Rest aus `scripts/setup-cachyos.sh` Schritt 10
 (Validierung startet bewusst `npx next start -H 127.0.0.1`) oder ein manueller
-Start vor dem Update. Der systemd-Dienst (`npm run start` = `next start -H 0.0.0.0`)
+Start vor dem Update. Der systemd-Dienst (`npm run start` = `next start -H 127.0.0.1`)
 kann dann nicht starten und loopt:
 
 ```
@@ -57,7 +102,7 @@ cd ~/GITHUB/ai-trading-firm
 npm run stop                              # beendet den 127.0.0.1-Prozess (ohne sudo)
 sudo systemctl restart ai-trading-firm
 systemctl status ai-trading-firm --no-pager   # muss active (running) zeigen
-ss -tlnp | grep 3369                      # SOLL: 0.0.0.0:3369 — NICHT 127.0.0.1:3369
+ss -tlnp | grep 3369                      # SOLL: 127.0.0.1:3369 (Loopback-Bind seit v0.17.4)
 curl -s http://192.168.0.10:3369/api/health | head -c 300
 ```
 

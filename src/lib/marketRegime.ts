@@ -1423,6 +1423,22 @@ export async function refreshInstrumentRegimes(
 }
 
 /** Synchroner RAM-Snapshot eines Instruments (null = noch nie bewertet). */
+/**
+ * BTC-Regime-Veto für den Mikro-Executor (long-only Paper-Firma).
+ *
+ * Nur der bestätigte Abwärtstrend und der Crash blockieren neue Longs —
+ * UNKNOWN, RANGE, HIGH_VOL und TREND_UP nie (fail-open, kein Raten).
+ * Evidenz (Vektor-Backtest 2026-09-10…2026-11-03, 52 Symbole, 1h):
+ * BTC-Gate (Close > EMA200) hob den Erwartungswert je Trend-Trade von
+ * −0,553 % auf −0,437 % und den Profit-Faktor von 0,73 auf 0,79 bei 26 %
+ * weniger Trades; in einem Fenster mit 49/52 fallenden Symbolen blieb die
+ * Familie dennoch negativ — genau deshalb ist das Veto Risikoschutz, keine
+ * Renditequelle.
+ */
+export function btcRegimeVetoesLong(regime: MarketRegimeLabel | null | undefined): boolean {
+  return regime === "TREND_DOWN" || regime === "CRASH";
+}
+
 export function getInstrumentRegime(symbolRaw: string): InstrumentRegimeSnapshot | null {
   const symbol = String(symbolRaw ?? "").toUpperCase();
   const st = state().instruments.get(symbol);

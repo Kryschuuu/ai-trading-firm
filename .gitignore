@@ -10,6 +10,10 @@ next-env.d.ts
 .env
 .env.local
 .env.*.local
+# Backup-/Arbeitskopien der .env (enthalten dieselben Secrets)
+.env.bak
+.env.bak*
+.env-last
 
 # Broker Control Plane (Task 08): verschluesselte Credential-Envelopes
 # (Datei-Fallback des Secret-Stores; niemals Klartext, niemals committen)
@@ -60,12 +64,18 @@ next-env.d.ts
 # Sync-Status je Venue (OPS-011): Laufzeit-Artefakt des Sync-Jobs,
 # vom Operations Center gelesen — nicht versioniert
 /data/market-sync-status.json
+# Cursor des vollautomatischen Missions-Laufs (scripts/auto-pipeline.sh).
+/data/auto-pipeline-cursor.json
 /data/market-sync-status.json.tmp
 
 # Model Router (Task 09): Routing-Audit und Modi-Persistenz (Laufzeitdaten)
 /data/routing
 # Laufzeit-Schalter (UI): data/runtime/flags.json — nur Bool-Werte.
 /data/runtime
+
+# CTI-Snapshots (`npm run cti`): je Symbol/Timeframe ein JSON je Lauf —
+# reproduzierbar aus der Historie, nicht versioniert.
+/data/cti
 
 # Prompt-Eval-Reports (GAP-08, v1.49.0): `npm run eval:prompts` schreibt
 # JSON- + MD-Report je Lauf — reproduzierbar, nicht versioniert.

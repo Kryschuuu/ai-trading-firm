@@ -133,6 +133,7 @@ das externe Krypto-Indikator-Ranking (mit Einordnung des CTI) in
 | **[SETUP_BUGS.md](SETUP_BUGS.md)** | Setup-Bug-Register: PostgreSQL-Init, Seed/UUID, Broker-Adapter, Build-Warnungen |
 | **[SETUP_PG_TROUBLESHOOTING.md](SETUP_PG_TROUBLESHOOTING.md)** | PostgreSQL-Soforthilfe |
 | **[HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md)** | How-to: LAN nach Update tot (`EADDRINUSE`/`127.0.0.1`) + „Sitzung abgelaufen" statt Datenbankfehler (v1.36.41) |
+| **[TAILSCALE_AI_FIRMA_CADDY_DOCKER.md](TAILSCALE_AI_FIRMA_CADDY_DOCKER.md)** | How-to (historisch, Stand 2026-09-20): App im Tailnet über Caddy-Docker — heute gilt Loopback-Bind + `tailscale serve --https=8444`, siehe HOWTO_LAN_SESSION |
 | **[HOWTO_UPDATE.md](HOWTO_UPDATE.md)** | How-to: laufende Firma nach `git pull` aktualisieren — Stop-Reihenfolge, `npm ci`, Schema, Build, Verifikation, Rollback |
 | **[UI_LAYOUT.md](UI_LAYOUT.md)** | Layout- und Design-System der Oberfläche: Seitenhülle/`PageShell`, fluide Ränder, Breakpoints bis Ultrawide, `DataTable` (Sticky-Kopf, mobile Kartenansicht, Tastatur-Scroll), `TabBar`/`TabPanel`, Kennzahl-/Chip-/Button-Bausteine, Regeln für neue Seiten und die Testabsicherung (`tests/ui/Layout.test.tsx`) — seit v0.15.0 nutzen **alle** Seiten die volle Breite; v0.15.1 ergänzt die sichere Behandlung abgelaufener Sessions (2026-10-04) |
 | **[DOCS_VIEWER.md](DOCS_VIEWER.md)** | In-Browser-Doku (`/docs`): Katalog vs. Dateibaum, Komponenten, Tabellen-Überlauf, Pflegeanleitung (neues Dokument in 3 Schritten), Whitelist/Traversal-Schranke, Grenzen (2026-10-04) |

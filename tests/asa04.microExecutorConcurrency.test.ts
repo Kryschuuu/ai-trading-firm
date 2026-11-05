@@ -141,7 +141,11 @@ test("lock is released after error; a DB read blocks new orders until it complet
   const executor = new MicroExecutor({ cache, adapter: { name: "error", async execute(ctx) {
     calls++; if (calls === 1) throw new Error("expected");
     return { status: "BLOCKED", ruleId: ctx.ruleId, symbol: ctx.spec.symbol, at: new Date().toISOString() };
-  } }, options: { seedCandles: false } });
+  } }, options: { seedCandles: false, blockedBackoffMs: 0 } });
+  // Dieser Test prueft Lock-Freigabe und DB-Lese-Blockade, nicht die
+  // Fairness-Pause. Seit `MICRO_BLOCKED_BACKOFF_MS` (Default 60 s) pausiert ein
+  // BLOCKED-Result die Regel; ohne `blockedBackoffMs: 0` kaeme der dritte Tick
+  // nie zum Adapter und der Test liefe in sein Zeitlimit.
   executor.addSymbol("BTC", "15m", candles()); executor.registerFeed(feed); await executor.start();
   try {
     feed.emit(tick()); await until(() => executor.status().errors === 1); await sleep(0);

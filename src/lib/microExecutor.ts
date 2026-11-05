@@ -59,7 +59,7 @@ import { computePositionSize, loadSizingConfig, resolveKellyEdge } from "./posit
 import { checkClusterExposure, loadClusterLimitsConfig } from "./clusterExposure";
 import { computeBookDepth, type BookLevelInput } from "./bookDepth";
 import { bookDepthVerdict } from "./bookDepthProvenance";
-import { getCandles, sanitizeSymbol } from "./marketData";
+import { getCandles, sanitizeSymbol, setLiveQuote } from "./marketData";
 import { MarketDataFetchError } from "./marketDataErrors";
 import {
   SUPPORTED_TIMEFRAME_MS,
@@ -88,7 +88,9 @@ import { startOfBerlinDay } from "./time";
 // Ausführungspfad (`resolveRegimeGateForExecution`), kein LLM, keine IO.
 // RMA-P2-01 (v1.61.0): dieselben Feature-Familien wie Engine/Monitor.
 import {
+  btcRegimeVetoesLong,
   evaluateInstrumentRegime,
+  getInstrumentRegime,
   resolveRegimeGateForExecution,
   strategyClassOfTemplate,
   type StrategyClass,
@@ -424,6 +426,22 @@ export class RuleCache {
   private dirty = true;
   private dayKey = "";
   private ramCounts = new Map<string, number>();
+  /**
+   * Zeitpunkt des letzten BLOCKED-Versuchs je Regel (`rowId`).
+   *
+   * Warum das nötig ist: Cooldown und Tageslimit greifen erst nach einer
+   * *ausgeführten* Regel. Eine Regel, die dauerhaft von einem Guardrail
+   * abgelehnt wird (z. B. `concurrency:max-8-positions`), matcht deshalb bei
+   * jedem Tick erneut. In der Praxis dominierte eine einzige Regel mit
+   * 6767 von 10979 Treffern in 25 Minuten die Warteschlange: sobald ein Slot
+   * frei wurde, gewann fast immer dieselbe Regel — unabhängig davon, ob sie
+   * die beste Gelegenheit war. Zusätzlich erzeugte jeder Fehlversuch eine
+   * Logzeile. Ein Mindestabstand zwischen Fehlversuchen verteilt die
+   * Gelegenheiten gleichmäßig über alle Regeln und entlastet das Journal.
+   */
+  private blockedAt = new Map<string, number>();
+  /** Mindestabstand zwischen zwei Fehlversuchen derselben Regel (ms). */
+  blockedBackoffMs = 60_000;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private invalidationVersion = 0;
@@ -595,6 +613,11 @@ export class RuleCache {
     this.dayKey = day;
     // Executions cannot overlap the read: the DB now contains all committed local fills.
     this.ramCounts.clear();
+    // Fehlversuchs-Pausen verfallen lassen (gelöschte Regeln leaken sonst).
+    const backoffHorizon = Math.max(this.blockedBackoffMs, 60_000) * 10;
+    for (const [id, at] of this.blockedAt) {
+      if (this.loadedAt - at > backoffHorizon) this.blockedAt.delete(id);
+    }
   }
 
   /** Kompilierte Regeln eines Symbols (ohne Auswertung). */
@@ -661,6 +684,8 @@ export class RuleCache {
       const firedToday = rule.executionsToday + (this.ramCounts.get(rule.rowId) ?? 0);
       if (firedToday >= rule.spec.window.maxExecutionsPerDay) continue;
       if (rule.firedAt > 0 && now - rule.firedAt < rule.cooldownMs) continue;
+      const blockedAt = this.blockedAt.get(rule.rowId) ?? 0;
+      if (blockedAt > 0 && now - blockedAt < this.blockedBackoffMs) continue;
       if (!isWindowOpen(rule.spec, now)) continue;
       if (rule.compiled.evaluate(snap)) out.push(rule);
     }
@@ -682,6 +707,15 @@ export class RuleCache {
     // RAM-Zähler separat vom DB-Stand (kein Doppelzählen): firedToday =
     // executionsToday (DB, beim Load) + ramCounts (seit Load, reset pro Tag).
     this.ramCounts.set(ruleId, (this.ramCounts.get(ruleId) ?? 0) + 1);
+  }
+
+  /**
+   * Merkt einen abgelehnten Ausführungsversuch. Die Regel pausiert danach
+   * `blockedBackoffMs`, damit nicht eine einzige Dauer-Match-Regel jeden
+   * freien Slot gewinnt (Fairness) und das Journal nicht zugemüllt wird.
+   */
+  noteBlocked(ruleId: string, now = Date.now()): void {
+    this.blockedAt.set(ruleId, now);
   }
 
   executionsFor(rule: CachedRule): number {
@@ -977,6 +1011,18 @@ export function createPaperRuleAdapter(opts?: {
         const equity = broker.accountEquity;
         const limits = getLimits();
         const stopPct = Math.min(ctx.spec.action.stopLossPct / 100, limits.defaultStopLossPct);
+        // Trend-Sizing/ATR (v0.17.8): Vol-basiertes Stop-Level — Risk bleibt pro
+        // Trade über das Risikobudget + maxRiskPerTrade im Sizing geklemmt. Ist
+        // der ATR verfügbar, wird der Stop als ATR×Multiplikator gesetzt
+        // (Sizing/Stop skaliert mit Volatilität statt fixer Prozent); ohne ATR
+        // bleibt der Regel-Stop (Fail-Safe). Entscheidungs-/Exit-Logik nutzt
+        // dieselbe effektive Schwelle (effStopPct).
+        const effStopPct = resolveEffectiveStopPct({
+          ruleStopPct: stopPct,
+          atrPct: ctx.snapshot.atrPct,
+          atrStopMult: loadSizingConfig().atrStopMult,
+          maxStopLossPct: limits.defaultStopLossPct,
+        });
 
         // GAP-06 (v1.46.0): Regime-Gate (nur enforce) dämpft das Signal-
         // Risikobudget der Regel mit dem Faktor je Regime × Strategieklasse —
@@ -984,6 +1030,26 @@ export function createPaperRuleAdapter(opts?: {
         // Budget läuft gedämpft in die Mission-Sizing-Formel (und bleibt dort
         // gegen limits.maxRiskPerTrade geklemmt → nie über den Code-Ceilings).
         // monitor/off/UNKNOWN/ohne Klasse → Faktor 1 (fail-safe, nie Raten).
+        // BTC-Regime-Veto (long-only): Im bestätigten Abwärtstrend/Crash des
+        // Marktführers pausieren neue Longs. Das ist ein VETO, keine
+        // Budget-Dämpfung — der Guardrail-Grund landet sichtbar im Journal
+        // (mit Fairness-Backoff). UNKNOWN blockiert nie; `MICRO_BTC_REGIME_VETO=false`
+        // schaltet das Veto ab.
+        const btcRegime = getInstrumentRegime("BTC")?.regime ?? "UNKNOWN";
+        if (
+          ctx.spec.action.side === "LONG" &&
+          btcRegimeVetoEnabled() &&
+          btcRegimeVetoesLong(btcRegime)
+        ) {
+          return {
+            status: "BLOCKED",
+            ruleId: ctx.ruleId,
+            symbol,
+            reason: `BTC_REGIME:${btcRegime}`,
+            at: new Date().toISOString(),
+          };
+        }
+
         const regimeGate = resolveRegimeGateForExecution(symbol, ctx.strategyClass ?? null);
         const gatedRiskBudgetPct = regimeGate.applied
           ? ctx.spec.action.riskBudgetPct * regimeGate.factor
@@ -1004,8 +1070,8 @@ export function createPaperRuleAdapter(opts?: {
           };
         }
 
-        // GAP-04 (v1.48.0): Vol-basiertes Sizing — qty = Risikobudget/Stop-
-        // Abstand. Stop: explizit aus der Regel (stopPct); fehlender/0-Stop →
+        // GAP-04 (v1.48.0) + Trend-Sizing/ATR (v0.17.8): Vol-basiertes Sizing —
+        // qty = Risikobudget/Stop-Abstand; Stop = ATR-skalisiert (effStopPct) mit
         // ATR-Fallback (k·ATR, k = RISK_ATR_STOP_MULT). Fractional-Kelly-Deckel
         // wirkt nur mit verfügbaren Journal-Statistiken (sonst wirkungslos).
         // IMMER an die Code-Ceilings geklemmt (Sizing verschärft, lockert nie).
@@ -1018,7 +1084,7 @@ export function createPaperRuleAdapter(opts?: {
           riskPerTradePct: Math.min(gatedRiskBudgetPct, limits.maxRiskPerTrade),
           entryPrice: price,
           atr: ctx.snapshot.atrPct != null ? (ctx.snapshot.atrPct / 100) * price : null,
-          stopLoss: stopPct > 0 ? price * (1 - stopPct) : null,
+          stopLoss: effStopPct > 0 ? price * (1 - effStopPct) : null,
           side: "LONG",
           missionMaxPositionPct: ctx.spec.action.maxPositionPct,
           kelly: kellyEdge,
@@ -1051,11 +1117,11 @@ export function createPaperRuleAdapter(opts?: {
         }
         const qty = sized.qty;
         const stopLoss =
-          stopPct > 0
-            ? Number((price * (1 - stopPct)).toFixed(price > 100 ? 2 : 6))
+          effStopPct > 0
+            ? Number((price * (1 - effStopPct)).toFixed(price > 100 ? 2 : 6))
             : Number(sized.stopPrice.toFixed(price > 100 ? 2 : 6));
         const tpDist =
-          (stopPct > 0 ? stopPct : Math.max(sized.stopDistancePct, 0.001)) *
+          (effStopPct > 0 ? effStopPct : Math.max(sized.stopDistancePct, 0.001)) *
           Math.min(ctx.spec.action.takeProfitRR, limits.takeProfitRR);
         const takeProfit = Number((price * (1 + tpDist)).toFixed(price > 100 ? 2 : 6));
 
@@ -1382,6 +1448,12 @@ export type MicroExecutorOptions = {
    * (`getCandles`) kennt `5d` nicht.
    */
   executionInterval?: SupportedTimeframe;
+  /**
+   * Mindestabstand (ms) zwischen zwei Fehlversuchen derselben Regel.
+   * Verhindert, dass eine dauerhaft geblockte Regel jeden freien Slot gewinnt
+   * und das Journal flutet. Bounds [0, 3600000]; `0` schaltet die Pause ab.
+   */
+  blockedBackoffMs?: number;
 };
 
 export type MicroStatus = {
@@ -1436,6 +1508,38 @@ export type MicroStatus = {
  * `stop()` trennt sauber. `status()` liefert Diagnose (Ticks, Matches,
  * Execution-Counts, p95-Eval-Latenz, Serien-Füllung, Seed-Fehler).
  */
+/**
+ * `MICRO_BTC_REGIME_VETO` (Default `true`): blockiert neue Long-Einstiege,
+ * solange der Marktführer BTC im bestätigten `TREND_DOWN`/`CRASH` ist.
+ * Nur `false`/`0`/`off` schalten ab — jeder andere Wert bleibt aktiv.
+ */
+export function btcRegimeVetoEnabled(raw = process.env.MICRO_BTC_REGIME_VETO): boolean {
+  const v = String(raw ?? "true").trim().toLowerCase();
+  return v !== "false" && v !== "0" && v !== "off";
+}
+
+/**
+ * Trend-Sizing/ATR: effektive Stop-Schwelle pro Trade.
+ *
+ * Vol-basiertes Stop-Level (Trend-Sizing/ATR, v0.17.8): Ist der ATR der
+ * Snapshot verfügbar, wird der Stop als ATR × `atrStopMult` (RISK_ATR_STOP_MULT,
+ * Default 2, Bounds [0.5, 6]) über die Code-Ceiling (`defaultStopLossPct`)
+ * gesetzt; ohne ATR bzw. nicht-endliche Werte bleibt der Regel-Stop (Fail-Safe,
+ * nie stiller Wechsel ohne Datenlage). Deterministisch, ohne I/O — voll
+ * unit-testbar.
+ */
+export function resolveEffectiveStopPct(input: {
+  ruleStopPct: number;
+  atrPct: number | null;
+  atrStopMult: number;
+  maxStopLossPct: number;
+}): number {
+  const atrPct = input.atrPct;
+  const atrOk = atrPct != null && Number.isFinite(atrPct) && atrPct > 0;
+  if (!atrOk) return input.ruleStopPct;
+  return Math.min(atrPct * input.atrStopMult, input.maxStopLossPct);
+}
+
 export class MicroExecutor {
   private readonly cache: RuleCache;
   private readonly adapter: RuleExecutionAdapter;
@@ -1476,6 +1580,10 @@ export class MicroExecutor {
       opts?.adapter ?? createPaperRuleAdapter();
     this.options = opts?.options ?? {};
     this.executionInterval = this.options.executionInterval ?? MICRO_EXECUTION_INTERVAL_DEFAULT;
+    if (this.options.blockedBackoffMs !== undefined) {
+      const raw = Number(this.options.blockedBackoffMs);
+      this.cache.blockedBackoffMs = Number.isFinite(raw) ? Math.min(3_600_000, Math.max(0, Math.round(raw))) : 60_000;
+    }
     if (!isSupportedTimeframe(this.executionInterval)) {
       // Ein unbekanntes Intervall würde den Guard unbemerkt aushebeln — lieber beim Start scheitern.
       throw new RangeError(
@@ -1738,9 +1846,20 @@ export class MicroExecutor {
     const symbol = sanitizeSymbol(tick.symbol);
     if (!symbol) return;
 
+    // Der Paper-Broker liest Kurse synchron aus dem Marktdaten-Cache. Im
+    // Micro-Prozess gibt es keinen HTTP-Pfad, der ihn füllt — der Feed-Tick
+    // ist hier die autoritative Quelle. Ohne diesen Eintrag endet jede Order
+    // außerhalb der statischen Majors mit `NO_QUOTE`.
+    if (tick.kind === "trade") setLiveQuote(symbol, tick.price, tick.ts);
+    else if (tick.kind === "candle") setLiveQuote(symbol, tick.candle.close, tick.ts);
+
     // v0.4.0: Buch-Tick → Tiefen-Cache im RAM aktualisieren (kein Kostenpfad).
+    // Der Spread wird aus demselben Top-of-Book abgeleitet; ohne diesen Aufruf
+    // bliebe `spreadPct` in jedem Snapshot `null` und jede Regel mit
+    // Spread-Filter würde fail-closed nie matchen.
     if (tick.kind === "book") {
       this.updateBook(symbol, { venue: tick.venue, bids: tick.bids, asks: tick.asks });
+      this.updateSpread(symbol, spreadFromLevels(tick.bids, tick.asks));
     }
 
     // Retain ticks for existing-symbol/new-timeframe warmups without replacing
@@ -1810,7 +1929,10 @@ export class MicroExecutor {
         })()
           .then((outcome) => {
             if (outcome.status === "TRIGGERED") { this.cache.noteFired(rule.rowId); this.execCount++; }
-            else if (outcome.status === "BLOCKED") this.blockedCount++;
+            else if (outcome.status === "BLOCKED") {
+              this.blockedCount++;
+              this.cache.noteBlocked(rule.rowId);
+            }
             else this.errorCount++;
             if (outcome.status !== "TRIGGERED") {
               this.lastError = outcome.reason ?? null;
@@ -1904,8 +2026,138 @@ async function openWebSocket(url: string): Promise<WsLike> {
   }
 }
 
-/** Börsen-Whitelist für den Binance-Feed (Krypto, 24/7, ohne API-Key). */
-const BINANCE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "LINK", "DOT"];
+/**
+ * Börsen-Whitelist für den Binance-Feed (Krypto, 24/7, ohne API-Key).
+ * Statisch statt exchangeInfo-Abfrage: kein Netzwerk im Startpfad, keine
+ * stille Abhängigkeit von der API. Alle Einträge sind verifizierte
+ * `*USDT`-Spot-Paare mit `status=TRADING`.
+ */
+const BINANCE_SYMBOLS = [
+  "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "LINK", "DOT",
+  "AAVE", "CRV", "SNX", "UNI", "LDO", "COMP", "ATOM", "NEAR", "APT", "ARB",
+  "OP", "INJ", "SUI", "TIA", "SEI", "FIL", "ICP", "HBAR", "ALGO", "VET",
+  "ETC", "BCH", "TRX", "RENDER", "TAO", "FET", "ONDO", "ENA", "JUP", "WIF",
+  "PEPE", "SHIB", "BONK", "LTC", "XLM", "SAND", "MANA", "AXS", "GALA", "THETA",
+  "NEO", "IOTA", "QNT", "GRT", "IMX", "STX", "RUNE", "KAVA", "ZEC", "DASH",
+];
+
+/** Bester Preis einer Buchseite (`bids` = Maximum, `asks` = Minimum). */
+function bestLevelPrice(
+  levels: readonly (readonly [unknown, unknown])[],
+  side: "bid" | "ask",
+): number | null {
+  let best: number | null = null;
+  for (const level of levels) {
+    const price = Number(level?.[0]);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (best === null || (side === "bid" ? price > best : price < best)) best = price;
+  }
+  return best;
+}
+
+/**
+ * Relativer Top-of-Book-Spread als Bruchteil (z. B. 0.0001 = 1 bp), passend
+ * zur Erwartung von {@link MicroExecutor.updateSpread}. `null`, wenn eine
+ * Seite fehlt oder das Buch gekreuzt ist — nie eine erfundene 0.
+ */
+function spreadFromLevels(
+  bids: readonly (readonly [unknown, unknown])[],
+  asks: readonly (readonly [unknown, unknown])[],
+): number | null {
+  const bid = bestLevelPrice(bids, "bid");
+  const ask = bestLevelPrice(asks, "ask");
+  if (bid === null || ask === null || ask <= bid) return null;
+  const mid = (bid + ask) / 2;
+  return mid > 0 ? (ask - bid) / mid : null;
+}
+
+/** Ergebnis des Binance-Nachrichtenparsers (pure, ohne Seiteneffekte). */
+export type BinanceStreamParse =
+  | { kind: "tick"; tick: FeedTick }
+  | { kind: "subscriptionError"; detail: string }
+  | null;
+
+/**
+ * Zerlegt eine Combined-Stream-Nachricht von Binance in einen {@link FeedTick}.
+ *
+ * Warum als eigene, reine Funktion? Der `@depth5`-Partial-Book-Stream liefert
+ * `{lastUpdateId, bids, asks}` **ohne** `e` und **ohne** `s` (das Symbol steht
+ * nur im Stream-Namen). Ein Parser, der auf `e === "depthUpdate"` besteht,
+ * verwirft jeden Buch-Tick still — dann bleibt `spreadPct` dauerhaft `null`
+ * und jede Regel mit Spread-Filter matcht nie. Diese Funktion ist die
+ * getestete Stelle dafür (Regressionstest: `tests/microExecutor.test.ts`).
+ *
+ * Gibt `null` zurück, wenn die Nachricht keinen verwertbaren Tick enthält
+ * (z. B. `@bookTicker`-Frames oder unbekannte Event-Typen).
+ */
+export function parseBinanceStreamMessage(raw: string): BinanceStreamParse {
+  const msg = JSON.parse(raw) as {
+    code?: number;
+    msg?: string;
+    /** Combined-Stream-Name, z. B. `btcusdt@depth5` (Partial-Book). */
+    stream?: string;
+    data?: {
+      e?: string;
+      s?: string;
+      p?: string;
+      q?: string;
+      T?: number;
+      b?: unknown[][] | null;
+      a?: unknown[][] | null;
+      /** Partial-Book-Depth (`@depth5`): Top-Level `bids`/`asks`, kein `e`/`s`. */
+      bids?: unknown[][] | null;
+      asks?: unknown[][] | null;
+      k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
+    };
+  };
+  if (msg.code !== undefined) {
+    return { kind: "subscriptionError", detail: `Binance-Abonnement abgelehnt: ${String(msg.msg ?? msg.code).slice(0, 160)}` };
+  }
+  const data = msg.data;
+  if (!data) return null;
+  const streamBase = (msg.stream ?? "").split("@")[0]?.toUpperCase() ?? "";
+  const symbol =
+    (data.s ?? "").toUpperCase().replace(/USDT$/, "") ||
+    streamBase.replace(/USDT$/, "");
+
+  // v0.4.0: Partial-Book-Depth-Push → Tiefen-Snapshot (nur falls beide Seiten
+  // vorliegen; der Executor prüft die Qualitätsgrenze).
+  const bids = data.b ?? data.bids;
+  const asks = data.a ?? data.asks;
+  if ((data.e === "depthUpdate" || data.e === undefined) && Array.isArray(bids) && Array.isArray(asks)) {
+    return {
+      kind: "tick",
+      tick: {
+        kind: "book",
+        symbol,
+        venue: "BINANCE",
+        ts: Number(data.T ?? Date.now()),
+        bids: bids as unknown as readonly (readonly [unknown, unknown])[],
+        asks: asks as unknown as readonly (readonly [unknown, unknown])[],
+      },
+    };
+  }
+  if (data.e === "trade" && data.p) {
+    return {
+      kind: "tick",
+      tick: { kind: "trade", symbol, ts: Number(data.T ?? Date.now()), price: Number(data.p), qty: Number(data.q ?? 0) },
+    };
+  }
+  if (data.e === "kline" && data.k) {
+    const k = data.k;
+    return {
+      kind: "tick",
+      tick: {
+        kind: "candle",
+        symbol,
+        ts: k.t,
+        candle: { time: k.t, open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c), volume: Number(k.v) },
+        closed: k.x,
+      },
+    };
+  }
+  return null;
+}
 
 /**
  * Binance-Combined-Stream: @trade (ms-genaue Preis-Ticks) + @kline_1m
@@ -1993,80 +2245,19 @@ export class BinanceTradeFeed implements MarketFeed {
                 : Buffer.isBuffer(ev.data)
                   ? ev.data.toString()
                   : String(ev.data);
-            const msg = JSON.parse(raw) as {
-              code?: number;
-              msg?: string;
-              data?: {
-                e?: string;
-                s?: string;
-                p?: string;
-                q?: string;
-                T?: number;
-                b?: unknown[][] | null;
-                a?: unknown[][] | null;
-                k?: { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean };
-              };
-            };
-            if (msg.code !== undefined) {
+            const parsed = parseBinanceStreamMessage(raw);
+            if (!parsed) return;
+            if (parsed.kind === "subscriptionError") {
               this.errorCount++;
-              this.lastDetail = `Binance-Abonnement abgelehnt: ${String(msg.msg ?? msg.code).slice(0, 160)}`;
+              this.lastDetail = parsed.detail;
               // Reconnect with the full desired URL rather than silently losing the subscription.
               ws.close();
               return;
             }
-            const data = msg.data;
-            if (!data) return;
-            const symbol = (data.s ?? "").toUpperCase().replace(/USDT$/, "");
-            // v0.4.0: Partial-Book-Depth-Push → Tiefen-Snapshot (nur falls
-            // beide Seiten vorliegen; der Executor prüft die Qualitätsgrenze).
-            if (data.e === "depthUpdate" && Array.isArray(data.b) && Array.isArray(data.a)) {
-              const ts = Number(data.T ?? Date.now());
-              const tick: FeedTick = {
-                kind: "book",
-                symbol,
-                venue: "BINANCE",
-                ts,
-                bids: data.b as unknown as readonly (readonly [unknown, unknown])[],
-                asks: data.a as unknown as readonly (readonly [unknown, unknown])[],
-              };
-              this.tickCount++;
-              this.lastTickAt = new Date(ts).toISOString();
-              onTick(tick);
-              return;
-            }
-            if (data.e === "trade" && data.p) {
-              const ts = Number(data.T ?? Date.now());
-              const tick: FeedTick = {
-                kind: "trade",
-                symbol,
-                ts,
-                price: Number(data.p),
-                qty: Number(data.q ?? 0),
-              };
-              this.tickCount++;
-              this.lastTickAt = new Date(ts).toISOString();
-              onTick(tick);
-            } else if (data.e === "kline" && data.k) {
-              const k = data.k;
-              const candle: CandleLike = {
-                time: k.t,
-                open: Number(k.o),
-                high: Number(k.h),
-                low: Number(k.l),
-                close: Number(k.c),
-                volume: Number(k.v),
-              };
-              const tick: FeedTick = {
-                kind: "candle",
-                symbol,
-                ts: k.t,
-                candle,
-                closed: k.x,
-              };
-              this.tickCount++;
-              this.lastTickAt = new Date(k.t).toISOString();
-              onTick(tick);
-            }
+            const tick = parsed.tick;
+            this.tickCount++;
+            this.lastTickAt = new Date(tick.ts).toISOString();
+            onTick(tick);
           } catch (e) {
             this.errorCount++;
             this.lastDetail = e instanceof Error ? e.message : String(e);

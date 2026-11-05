@@ -18,6 +18,7 @@ import {
   __resetClusterExposureForTests,
   CLUSTER_LIMITS_BOUNDS,
   loadClusterLimitsConfig,
+  instrumentIdCandidates,
   type CorrelationSource,
   type ClusterCorrelationData,
 } from "../src/lib/clusterExposure";
@@ -355,4 +356,39 @@ test("Config: Bounds-Clamp + Modus-Parsing (unbekannt → monitor)", () => {
   assert.equal(loadClusterLimitsConfig({ RISK_CLUSTER_LIMITS_MODE: "monitor" }).mode, "monitor");
   assert.equal(loadClusterLimitsConfig({}).mode, "monitor", "Default = monitor (Rollout-first)");
   assert.equal(loadClusterLimitsConfig({ RISK_CLUSTER_LIMITS_MODE: "blubb" }).mode, "monitor", "unbekannt → monitor");
+});
+
+test("Instrument-Resolver: Basis-Ticker werden venue-qualifiziert aufgelöst", () => {
+  // Regression: der Mikro-Executor übergibt "SUI"; die Registry kennt nur
+  // "BITUNIX:SUIUSDT". Ohne diesen Fallback war die Korrelationsquelle für
+  // jedes Krypto-Symbol `null` → dauerhaft `correlation-stale` im Audit.
+  const sui = instrumentIdCandidates("SUI");
+  assert.equal(sui[0], "BITUNIX:SUIUSDT");
+  assert.ok(sui.includes("BINANCE:SUIUSDT"));
+  assert.ok(sui.includes("SUIUSDT"));
+  assert.ok(sui.includes("PAPER:SUIUSDT"));
+
+  // Bereits qualifizierte/gepairte Schreibweisen erzeugen kein doppeltes Quote.
+  for (const symbol of ["SUIUSDT", "BITUNIX:SUIUSDT", "SUI/USDT", "sui-usdt"]) {
+    const list = instrumentIdCandidates(symbol);
+    assert.equal(list[0], "BITUNIX:SUIUSDT", `${symbol} → ${list[0]}`);
+    assert.ok(!list.some((id) => id.includes("USDTUSDT")), `${symbol} darf kein doppeltes Quote bilden`);
+  }
+
+  // Aktien/FX bleiben unverändert (Quote-Suffix wird nur angehängt, wenn keins da ist).
+  assert.ok(instrumentIdCandidates("SPY").includes("BITUNIX:SPYUSDT"));
+
+  // 1:1000-Kontrakte: PEPE/SHIB/BONK existieren nur als `1000<BASE>USDT`.
+  for (const symbol of ["PEPE", "SHIB", "BONK"]) {
+    assert.ok(
+      instrumentIdCandidates(symbol).includes(`BITUNIX:1000${symbol}USDT`),
+      `${symbol} braucht den 1000er-Alias`,
+    );
+  }
+  // Bereits 1000er-Schreibweise erzeugt kein `10001000…`.
+  assert.ok(!instrumentIdCandidates("1000PEPE").some((id) => id.includes("10001000")));
+
+  // Leere/kaputte Eingaben liefern keine Kandidaten (fail-closed).
+  assert.deepEqual(instrumentIdCandidates(""), []);
+  assert.deepEqual(instrumentIdCandidates("  :  "), []);
 });

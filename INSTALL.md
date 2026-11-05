@@ -41,7 +41,7 @@ npx drizzle-kit push        # Schema einspielen
 npm run universe:seed:markets
 npm run universe:seed
 npm run build
-npm run start               # http://0.0.0.0:3369
+npm run start               # http://127.0.0.1:3369 (Loopback; remote via tailscale serve)
 ./scripts/validate-setup.sh
 ```
 
