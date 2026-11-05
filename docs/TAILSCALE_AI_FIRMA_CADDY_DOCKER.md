@@ -1,6 +1,16 @@
 # Tailscale + AI-Trading-Firm + Caddy (Docker)
 
-> **Status:** auf dieser Maschine umgesetzt und verifiziert (Host `data`, 2026-09-20).
+> **Status:** historischer Umsetzungsstand dieser Maschine (Host `data`, 2026-09-20).
+> Das Dokument beschreibt den damaligen Weg über Caddy-Docker auf Port `8444`.
+>
+> **Aktueller Stand (v0.17.4/ASA-08, gilt vorrangig):** Die App bindet **nur noch
+> `127.0.0.1:3369`** (`npm run start`, hartes `-H 127.0.0.1`). LAN-Zugriff läuft über
+> den `socat`-Forwarder `ai-trading-firm-lan-bridge.service` (`172.20.0.1:3369` →
+> `127.0.0.1:3369`, Caddy `trading.local`), Tailnet-Zugriff über
+> `tailscale serve --bg --https=8444 http://127.0.0.1:3369`. Ein direkter Zugriff auf
+> Port `3369` über die Tailnet-IP ist damit **nicht mehr möglich und nicht vorgesehen**;
+> die `0.0.0.0:3369`-Stellen unten sind historisch und dürfen nicht nachgebaut werden.
+> Verbindlich: [HOWTO_LAN_SESSION.md](HOWTO_LAN_SESSION.md).
 >
 > **Ziel:** Browser-Dashboard **und** API der ai-trading-firm sicher über das Tailnet
 > erreichen — ausschließlich Tailnet-intern, kein `tailscale funnel`, nichts Öffentliches.
@@ -18,7 +28,7 @@
 | Tailnet-IPv6 | `fd7a:115c:a1e0::1001:e1ce` |
 | TLS-Zertifikat | `data.tail38413e.ts.net` (Let's Encrypt, automatisch erneuert) |
 | Reverse-Proxy | Caddy-Docker `nas-server-proxy-1` (Projekt `nas-server`, Service `proxy`) |
-| App | systemd `ai-trading-firm`, `0.0.0.0:3369`, `NODE_ENV=production` |
+| App | systemd `ai-trading-firm`, `127.0.0.1:3369` (Loopback seit v0.17.4), `NODE_ENV=production` |
 | Tailnet-Listener | nur `100.122.225.88:8444` → Caddy → `host.docker.internal:3369` |
 | Tailscale-Version (Host) | 1.102.3 |
 
@@ -33,7 +43,8 @@ Tailnet-IP 100.122.225.88:8444   (docker publish, nur Tailnet-Interface)
 Caddy-Container (nas-server-proxy-1)
    │  TLS-Terminierung, X-Verified-IP + X-Forwarded-For, host.docker.internal:3369
    ▼
-ai-trading-firm auf dem Host (0.0.0.0:3369, systemd)
+ai-trading-firm auf dem Host (127.0.0.1:3369, systemd;
+  172.20.0.1:3369 liefert der socat-Forwarder ai-trading-firm-lan-bridge.service)
 ```
 
 ## Warum ist HTTPS Pflicht?
@@ -50,9 +61,10 @@ HTTPS. Ohne TLS funktioniert der Dashboard-Login nicht; nur die API mit
   Tailnet-IP die Ports `443` und `8443` (beide → `http://127.0.0.1:8369`).
 - Caddy-Docker (`nas-server-proxy-1`) frontet die NAS-Dienste auf
   `192.168.0.10:80/443` (u. a. `trading.local` → `host.docker.internal:3369`).
-- Die ai-trading-firm läuft auf `0.0.0.0:3369` (systemd) und ist damit **direkt**
-  auch unter `http://100.122.225.88:3369` im Tailnet erreichbar — ohne TLS (nur API).
-  Per Grants-Policy ist dieser Port für Clients blockiert (Befund C2, siehe Schritt 2).
+- Die ai-trading-firm lauscht seit v0.17.4 (ASA-08) nur auf `127.0.0.1:3369`
+  (systemd, hartes `-H 127.0.0.1`). Zum Aufnahmezeitpunkt (2026-09-20) band sie
+  noch `0.0.0.0:3369` und war über `http://100.122.225.88:3369` direkt erreichbar
+  — das ist bewusst abgeschaltet; die Grants-Policy blockiert Port `3369` zusätzlich.
 - Firewall: lokale Stacks inaktiv (`firewalld`, `nftables`, `ufw`).
 - MagicDNS ist **tailnet-weit aktiv** (Prüfung: `tailscale dns status` auf `data`).
 - `.env`: `FIRM_API_TOKEN`, `FIRM_SESSION_SECRET`, `PORT`, `BITUNIX_ENABLED` gesetzt;
@@ -162,9 +174,10 @@ Wichtig:
 - Der Docker-Daemon läuft als root und kann `/var/lib/tailscale/certs`
   (root, `0600`) lesbar mounten — der Benutzer muss das Verzeichnis nicht lesen können.
 - `host.docker.internal` löst über `host-gateway` auf die Gateway-IP der
-  Docker-Bridge auf (nicht `127.0.0.1`!). Wer die App später nur an Loopback
-  bindet, bricht diesen Pfad — deshalb Lösen per Firewall (Schritt 4.2), nicht per
-  Rebind.
+  Docker-Bridge auf (nicht `127.0.0.1`!). Da die App seit v0.17.4 nur auf Loopback
+  lauscht, braucht dieser Pfad zwingend den Forwarder
+  `ai-trading-firm-lan-bridge.service` (`172.20.0.1:3369` → `127.0.0.1:3369`);
+  ohne ihn ist der Proxy-Pfad tot. Nicht per Rebind auf `0.0.0.0` „lösen" (ASA-08).
 - Freie Ports vorab prüfen: `ss -tln | grep NNNN` (8444 ist frei; `443`/`8443`
   sind durch `tailscale serve`/t-bot belegt).
 
@@ -516,14 +529,15 @@ Ja, nach dem Speichern in der Console. Eine CLI/App-Neuverbindung auf den Gerät
 |----------|---------|---------------------|---------|
 | **A. Caddy-Docker auf Tailnet-Port (umgesetzt)** | `https://data.tail38413e.ts.net:8444/` | ja / ja | einmalig konfigurieren |
 | B. tailscale serve (ohne Caddy) | `https://data.tail38413e.ts.net:8445/` | ja / ja | 1 Befehl, sudo |
-| C. Direkter Zugriff (nur API) | `http://data.tail38413e.ts.net:3369/` | nein / nein | 0 |
+| C. Direkter Zugriff (nur API) — **entfallen seit v0.17.4** | `http://data.tail38413e.ts.net:3369/` | nein / nein | — |
 
 - **B (tailscale serve):** `sudo tailscale serve --bg --https=8445 http://127.0.0.1:3369`
   (Port 8445 frei wählen; `443`/`8443` sind durch t-bot belegt). Liefert kein
   `X-Verified-IP` → Bucket bleibt `local`. Konfiguration anzeigen:
   `tailscale serve status`. Details: https://tailscale.com/kb/1311/tailscale-serve.
-- **C (nur API):** funktioniert heute schon, weil die App auf `0.0.0.0:3369`
-  lauscht. Secure-Cookies werden über HTTP nicht gesetzt → Dashboard-Login unmöglich.
+- **C (nur API):** entfällt seit v0.17.4 — die App lauscht nur auf `127.0.0.1:3369`
+  (ASA-08); ein direkter Port-Zugriff ist weder erreichbar noch gewollt.
+  Secure-Cookies werden über HTTP ohnehin nicht gesetzt → Dashboard-Login unmöglich.
 - **Warum kein Pfad-Präfix?** Next.js referenziert Assets absolut (`/_next/...`);
   ein Unterpfad würde Assets und API-Routen brechen (ein `basePath` müsste bereits
   im Build gesetzt sein).
